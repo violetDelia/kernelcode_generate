@@ -1,0 +1,4 @@
+interface:
+  display_name: "Kernelcode 开发指导"
+  short_description: "面向 DSL/IR/代码生成的开发与测试规则"
+  default_prompt: "使用 $kernelcode-generate-dev 开发和演进 kernelcode_generate，按 DSL->IR->Pass->Target 流程实现改动，并补齐必要测试与文档。"
