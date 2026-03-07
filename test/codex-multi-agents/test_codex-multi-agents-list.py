@@ -1,0 +1,424 @@
+"""codex-multi-agents-list.sh tests.
+
+功能说明:
+- 覆盖名单脚本的读取、添加、修改、删除和错误返回码路径。
+
+关联文件:
+- 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+- Spec 文档: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+- 测试文件: test/codex-multi-agents/test_codex-multi-agents-list.py
+"""
+
+from __future__ import annotations
+
+import fcntl
+import re
+import subprocess
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SCRIPT_PATH = REPO_ROOT / "skills/codex-multi-agents/scripts/codex-multi-agents-list.sh"
+
+HEADER = "| 姓名 | 状态 | 会话 | 启动类型 | agent session | worktree | 介绍 | 提示词 | 归档文件 | 职责 |"
+SEP = "|---|---|---|---|---|---|---|---|---|---|"
+
+
+def make_row(
+    name: str,
+    status: str = "free",
+    session: str = "",
+    startup_type: str = "",
+    agent_session: str = "",
+    worktree: str = "",
+    intro: str = "",
+    prompt: str = "",
+    archive: str = "",
+    duty: str = "",
+) -> str:
+    """生成标准 agents Markdown 行，确保列数与表头一致。"""
+    return (
+        f"| {name} | {status} | {session} | {startup_type} | {agent_session} | {worktree} | {intro} | {prompt} | {archive} | {duty} |"
+    )
+
+
+def write_agents_file(path: Path, rows: list[str] | None = None, header: str = HEADER) -> None:
+    """写入测试专用名单文件，默认带两名人员。"""
+    if rows is None:
+        rows = [
+            make_row("小明", "free", "xiaoming", "codex", "agent-xiaoming", "worktrees/xiaoming", "擅长分发任务", "./prompt.md", "./log/", "任务分发"),
+            make_row("李白", "doing", "libai", "claude", "agent-libai"),
+        ]
+
+    text = "\n".join(
+        [
+            "# Agents 名单",
+            "",
+            header,
+            SEP,
+            *rows,
+            "",
+        ]
+    )
+    path.write_text(text, encoding="utf-8")
+
+
+def run_script(*args: str) -> subprocess.CompletedProcess[str]:
+    """调用待测 shell 脚本并返回执行结果。"""
+    return subprocess.run(
+        ["bash", str(SCRIPT_PATH), *args],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+# TC-001
+# Last Run: 2026-03-07 09:57:07 +0800
+# Last Success: 2026-03-07 09:57:07 +0800
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+def test_status_outputs_table_and_returns_0(tmp_path: Path) -> None:
+    agents_file = tmp_path / "agents-lists.md"
+    write_agents_file(agents_file)
+
+    result = run_script(f"-file={agents_file}", "-status")
+
+    assert result.returncode == 0
+    assert "姓名" in result.stdout
+    assert "小明" in result.stdout
+    assert "李白" in result.stdout
+    assert result.stderr == ""
+
+
+# TC-017
+# Last Run: 2026-03-08 09:20:00 +0800
+# Last Success: 2026-03-08 09:20:00 +0800
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+def test_find_field_success(tmp_path: Path) -> None:
+    agents_file = tmp_path / "agents-lists.md"
+    write_agents_file(agents_file)
+
+    result = run_script(f"-file={agents_file}", "-find", "-name=小明", "-key=归档文件")
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == "./log/"
+    assert result.stderr == ""
+
+
+# TC-018
+# Last Run: 2026-03-08 09:20:00 +0800
+# Last Success: 2026-03-08 09:20:00 +0800
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+def test_find_missing_agent_returns_rc3(tmp_path: Path) -> None:
+    agents_file = tmp_path / "agents-lists.md"
+    write_agents_file(agents_file)
+
+    result = run_script(f"-file={agents_file}", "-find", "-name=不存在", "-key=归档文件")
+
+    assert result.returncode == 3
+    assert "agent not found: 不存在" in result.stderr
+
+
+# TC-002
+# Last Run: 2026-03-07 09:57:07 +0800
+# Last Success: 2026-03-07 09:57:07 +0800
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+def test_add_agent_success(tmp_path: Path) -> None:
+    agents_file = tmp_path / "agents-lists.md"
+    write_agents_file(agents_file)
+
+    result = run_script(f"-file={agents_file}", "-add", "-name=王五", "-type=codex")
+    updated = agents_file.read_text(encoding="utf-8")
+
+    assert result.returncode == 0
+    assert "OK: add 王五" in result.stdout
+    assert "| 王五 |" in updated
+
+    added_line = next(line for line in updated.splitlines() if line.startswith("| 王五 |"))
+    cells = [cell.strip() for cell in added_line.strip().strip("|").split("|")]
+    session = cells[2]
+    startup_type = cells[3]
+    agent_session = cells[4]
+    worktree = cells[5]
+    assert session != ""
+    assert all(ord(ch) < 128 for ch in session)
+    assert re.search(r"[\u4e00-\u9fff]", session) is None
+    assert session not in {"xiaoming", "libai"}
+    assert startup_type == "codex"
+    assert agent_session != ""
+    assert all(ord(ch) < 128 for ch in agent_session)
+    assert re.search(r"[\u4e00-\u9fff]", agent_session) is None
+    assert agent_session not in {"agent-xiaoming", "agent-libai"}
+    assert worktree != ""
+    assert all(ord(ch) < 128 for ch in worktree)
+    assert re.search(r"[\u4e00-\u9fff]", worktree) is None
+    assert worktree not in {"worktrees/xiaoming"}
+
+
+# TC-003
+# Last Run: 2026-03-07 09:57:07 +0800
+# Last Success: 2026-03-07 09:57:07 +0800
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+def test_add_duplicate_agent_returns_rc3(tmp_path: Path) -> None:
+    agents_file = tmp_path / "agents-lists.md"
+    write_agents_file(agents_file)
+
+    result = run_script("-file", str(agents_file), "-add", "-name", "小明", "-type", "codex")
+
+    assert result.returncode == 3
+    assert "agent already exists: 小明" in result.stderr
+
+
+# TC-004
+# Last Run: 2026-03-07 09:57:07 +0800
+# Last Success: 2026-03-07 09:57:07 +0800
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+def test_replace_field_success(tmp_path: Path) -> None:
+    agents_file = tmp_path / "agents-lists.md"
+    write_agents_file(agents_file)
+
+    result = run_script(
+        f"-file={agents_file}",
+        "-replace",
+        "-name=小明",
+        "-key=状态",
+        "-value=ready",
+    )
+    updated = agents_file.read_text(encoding="utf-8")
+
+    assert result.returncode == 0
+    assert "OK: replace 小明 状态" in result.stdout
+    assert "| 小明 | ready |" in updated
+
+
+# TC-005
+# Last Run: 2026-03-07 09:57:07 +0800
+# Last Success: 2026-03-07 09:57:07 +0800
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+def test_replace_name_field_is_immutable(tmp_path: Path) -> None:
+    agents_file = tmp_path / "agents-lists.md"
+    write_agents_file(agents_file)
+
+    result = run_script(
+        "-file",
+        str(agents_file),
+        "-replace",
+        "-name",
+        "小明",
+        "-key",
+        "姓名",
+        "-value",
+        "新名字",
+    )
+
+    assert result.returncode == 3
+    assert "field '姓名' is immutable and cannot be modified" in result.stderr
+
+
+# TC-006
+# Last Run: 2026-03-07 09:57:07 +0800
+# Last Success: 2026-03-07 09:57:07 +0800
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+def test_replace_unknown_field_returns_rc3(tmp_path: Path) -> None:
+    agents_file = tmp_path / "agents-lists.md"
+    write_agents_file(agents_file)
+
+    result = run_script(
+        "-file",
+        str(agents_file),
+        "-replace",
+        "-name",
+        "小明",
+        "-key",
+        "不存在字段",
+        "-value",
+        "x",
+    )
+
+    assert result.returncode == 3
+    assert "invalid field name: 不存在字段" in result.stderr
+
+
+# TC-007
+# Last Run: 2026-03-07 09:57:07 +0800
+# Last Success: 2026-03-07 09:57:07 +0800
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+def test_delete_agent_success(tmp_path: Path) -> None:
+    agents_file = tmp_path / "agents-lists.md"
+    write_agents_file(agents_file)
+
+    result = run_script(f"-file={agents_file}", "-delete", "-name=李白")
+    updated = agents_file.read_text(encoding="utf-8")
+
+    assert result.returncode == 0
+    assert "OK: delete 李白" in result.stdout
+    assert "| 李白 |" not in updated
+
+
+# TC-008
+# Last Run: 2026-03-07 09:57:07 +0800
+# Last Success: 2026-03-07 09:57:07 +0800
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+def test_delete_missing_agent_returns_rc3(tmp_path: Path) -> None:
+    agents_file = tmp_path / "agents-lists.md"
+    write_agents_file(agents_file)
+
+    result = run_script("-file", str(agents_file), "-delete", "-name", "不存在")
+
+    assert result.returncode == 3
+    assert "agent not found: 不存在" in result.stderr
+
+
+# TC-009
+# Last Run: 2026-03-07 09:57:07 +0800
+# Last Success: 2026-03-07 09:57:07 +0800
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+def test_argument_error_returns_rc1(tmp_path: Path) -> None:
+    agents_file = tmp_path / "agents-lists.md"
+    write_agents_file(agents_file)
+
+    result = run_script("-file", str(agents_file), "-replace", "-name", "小明", "-key", "状态")
+
+    assert result.returncode == 1
+    assert "-replace requires -value" in result.stderr
+
+
+# TC-010
+# Last Run: 2026-03-07 09:57:07 +0800
+# Last Success: 2026-03-07 09:57:07 +0800
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+def test_file_not_found_returns_rc2(tmp_path: Path) -> None:
+    missing = tmp_path / "missing.md"
+
+    result = run_script("-file", str(missing), "-status")
+
+    assert result.returncode == 2
+    assert "file not found" in result.stderr
+
+
+# TC-011
+# Last Run: 2026-03-07 09:57:07 +0800
+# Last Success: 2026-03-07 09:57:07 +0800
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+def test_invalid_table_missing_name_column_returns_rc2(tmp_path: Path) -> None:
+    agents_file = tmp_path / "agents-lists.md"
+    bad_header = "| 状态 | 会话 | 启动类型 | agent session | worktree | 介绍 | 提示词 | 归档文件 | 职责 |"
+    rows = ["| free | s1 | codex | a-s1 | wt/a | intro | prompt | archive | 实施 |"]
+    write_agents_file(agents_file, rows=rows, header=bad_header)
+
+    result = run_script("-file", str(agents_file), "-status")
+
+    assert result.returncode == 2
+    assert "missing required column '姓名'" in result.stderr
+
+
+# TC-012
+# Last Run: 2026-03-07 09:57:07 +0800
+# Last Success: 2026-03-07 09:57:07 +0800
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+def test_duplicate_name_in_file_returns_rc3(tmp_path: Path) -> None:
+    agents_file = tmp_path / "agents-lists.md"
+    rows = [
+        make_row("小明", "free"),
+        make_row("小明", "doing"),
+    ]
+    write_agents_file(agents_file, rows=rows)
+
+    result = run_script("-file", str(agents_file), "-status")
+
+    assert result.returncode == 3
+    assert "duplicate 姓名 found: 小明" in result.stderr
+
+
+# TC-013
+# Last Run: 2026-03-07 09:57:07 +0800
+# Last Success: 2026-03-07 09:57:07 +0800
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+def test_lock_conflict_returns_rc4(tmp_path: Path) -> None:
+    agents_file = tmp_path / "agents-lists.md"
+    write_agents_file(agents_file)
+    lock_path = Path(f"{agents_file}.lock")
+    lock_path.touch()
+
+    with lock_path.open("w", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = run_script("-file", str(agents_file), "-add", "-name", "并发测试", "-type", "codex")
+
+    assert result.returncode == 4
+    assert "cannot acquire lock" in result.stderr
+
+
+# TC-014
+# Last Run: 2026-03-07 09:57:07 +0800
+# Last Success: 2026-03-07 09:57:07 +0800
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+def test_replace_supports_empty_value(tmp_path: Path) -> None:
+    agents_file = tmp_path / "agents-lists.md"
+    write_agents_file(agents_file)
+
+    result = run_script(
+        f"-file={agents_file}",
+        "-replace",
+        "-name=小明",
+        "-key=状态",
+        "-value=",
+    )
+    updated = agents_file.read_text(encoding="utf-8")
+
+    assert result.returncode == 0
+    assert "OK: replace 小明 状态" in result.stdout
+    assert "| 小明 |  | xiaoming |" in updated
+
+
+# TC-015
+# Last Run: 2026-03-07 12:08:00 +0800
+# Last Success: 2026-03-07 12:08:00 +0800
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+def test_status_ignores_lock_and_returns_rc0(tmp_path: Path) -> None:
+    agents_file = tmp_path / "agents-lists.md"
+    write_agents_file(agents_file)
+    lock_path = Path(f"{agents_file}.lock")
+    lock_path.touch()
+
+    with lock_path.open("w", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = run_script(f"-file={agents_file}", "-status")
+
+    assert result.returncode == 0
+    assert "姓名" in result.stdout
+    assert "小明" in result.stdout
+    assert result.stderr == ""
+
+
+# TC-016
+# Last Run: 2026-03-07 13:24:00 +0800
+# Last Success: 2026-03-07 13:24:00 +0800
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+def test_status_accepts_rows_missing_new_tail_column(tmp_path: Path) -> None:
+    agents_file = tmp_path / "agents-lists.md"
+    # 历史数据行缺少新增“职责”列，脚本应补空并正常读取。
+    legacy_row_without_duty = "| 老王 | free | oldsess | codex | agent-old | wt-old | intro | prompt | archive |"
+    write_agents_file(agents_file, rows=[legacy_row_without_duty])
+
+    result = run_script(f"-file={agents_file}", "-status")
+
+    assert result.returncode == 0
+    assert "老王" in result.stdout
+    assert "职责" in result.stdout
