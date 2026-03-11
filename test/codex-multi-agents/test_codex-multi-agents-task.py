@@ -1,0 +1,448 @@
+"""codex-multi-agents-task.sh tests.
+
+创建者: 榕
+最后一次更改: 榕
+
+功能说明:
+- 覆盖 task 脚本的任务分发、完成、暂停、新建与错误返回码路径。
+
+关联文件:
+- 功能实现: /home/lfr/kernelcode_generate/skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+- Spec 文档: /home/lfr/kernelcode_generate/spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+- 测试文件: /home/lfr/kernelcode_generate/test/codex-multi-agents/test_codex-multi-agents-task.py
+"""
+
+from __future__ import annotations
+
+import fcntl
+import re
+import subprocess
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SCRIPT_PATH = REPO_ROOT / "skills/codex-multi-agents/scripts/codex-multi-agents-task.sh"
+
+
+def run_script(*args: str) -> subprocess.CompletedProcess[str]:
+    """调用待测 shell 脚本并返回执行结果。"""
+    return subprocess.run(
+        ["bash", str(SCRIPT_PATH), *args],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def row_running(
+    task_id: str,
+    owner: str,
+    created_at: str,
+    worktree: str,
+    desc: str,
+    assignee: str,
+    status: str,
+    guide: str = "",
+    record: str = "",
+) -> str:
+    return f"| {task_id} | {owner} | {created_at} | {worktree} | {desc} | {assignee} | {status} | {guide} | {record} |"
+
+
+def row_list(
+    task_id: str,
+    owner: str,
+    created_at: str,
+    worktree: str,
+    desc: str,
+    assignee: str = "",
+    record: str = "",
+) -> str:
+    return f"| {task_id} | {owner} | {created_at} | {worktree} | {desc} | {assignee} | {record} |"
+
+
+def write_todo_file(path: Path, running_rows: list[str] | None = None, list_rows: list[str] | None = None) -> None:
+    """写入标准 TODO.md 测试文件。"""
+    if running_rows is None:
+        running_rows = [
+            row_running("EX-1", "李白", "2026-03-08 16:10:00 +0800", ".", "创建 src", "worker-a", "进行中", "xxx", "./log/ex1.md"),
+            row_running("EX-2", "杜甫", "2026-03-08 16:20:00 +0800", ".", "创建 test", "worker-b", "进行中", "xxx", "./log/ex2.md"),
+        ]
+    if list_rows is None:
+        list_rows = [
+            row_list("EX-3", "苏轼", "2026-03-08 16:30:00 +0800", "", "删除 tmp/demo.txt", "", "./log/ex3.md"),
+        ]
+
+    text = "\n".join(
+        [
+            "## 正在执行的任务",
+            "",
+            "| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 指派 | 状态 | 用户指导 | 记录文件 |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+            *running_rows,
+            "",
+            "## 需要用户确认的事项",
+            "",
+            "| 任务 ID | 创建时间 | worktree | 描述 | 用户确认状态 | 记录文件 |",
+            "| --- | --- | --- | --- | --- | --- |",
+            "| U-1 | 2026-03-08 16:00:00 +0800 | . | 描述 | 未确认 | ./log/u1.md |",
+            "",
+            "## 任务列表",
+            "",
+            "| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 指派 | 记录文件 |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+            *list_rows,
+            "",
+        ]
+    )
+    path.write_text(text, encoding="utf-8")
+
+
+def parse_section_rows(text: str, heading: str) -> list[list[str]]:
+    """解析指定标题下的首个 markdown 表格数据行。"""
+    lines = text.splitlines()
+    section_idx = -1
+    for i, line in enumerate(lines):
+        if line.strip() == heading:
+            section_idx = i
+            break
+    if section_idx < 0:
+        return []
+
+    section_end = len(lines)
+    for i in range(section_idx + 1, len(lines)):
+        if lines[i].startswith("## "):
+            section_end = i
+            break
+
+    header_idx = -1
+    for i in range(section_idx + 1, max(section_end - 1, section_idx + 1)):
+        s1 = lines[i].strip()
+        s2 = lines[i + 1].strip() if i + 1 < len(lines) else ""
+        if s1.startswith("|") and s1.endswith("|") and s2.startswith("|") and "---" in s2:
+            header_idx = i
+            break
+    if header_idx < 0:
+        return []
+
+    rows: list[list[str]] = []
+    idx = header_idx + 2
+    while idx < section_end:
+        s = lines[idx].strip()
+        if not (s.startswith("|") and s.endswith("|")):
+            break
+        rows.append([c.strip() for c in s[1:-1].split("|")])
+        idx += 1
+
+    return rows
+
+
+# TC-001
+# 创建者: 榕
+# 最后一次更改: 榕
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_dispatch_task_success(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file(todo)
+
+    result = run_script("-file", str(todo), "-dispatch", "-task_id", "EX-3", "-to", "worker-a")
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+    list_rows = parse_section_rows(content, "## 任务列表")
+
+    assert result.returncode == 0
+    assert "OK: dispatch EX-3 -> worker-a" in result.stdout
+    assert any(
+        r[0] == "EX-3"
+        and r[1] == "苏轼"
+        and r[5] == "worker-a"
+        and r[6] == "进行中"
+        and r[8] == "./log/ex3.md"
+        and r[3] == ""
+        and r[2] != ""
+        for r in running_rows
+    )
+    assert not any(r[0] == "EX-3" for r in list_rows)
+
+
+# TC-002
+# 创建者: 榕
+# 最后一次更改: 榕
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_dispatch_missing_task_returns_rc3(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file(todo)
+
+    result = run_script("-file", str(todo), "-dispatch", "-task_id", "BAD", "-to", "worker-a")
+
+    assert result.returncode == 3
+    assert "task not found in task list: BAD" in result.stderr
+
+
+# TC-003
+# 创建者: 榕
+# 最后一次更改: 榕
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_done_task_moves_to_done_file_success(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file(todo)
+    log_path = "./agents/codex-multi-agents/log/task-EX-1.log"
+
+    result = run_script("-file", str(todo), "-done", "-task_id", "EX-1", "-log", log_path)
+    todo_text = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(todo_text, "## 正在执行的任务")
+
+    done_file = tmp_path / "DONE.md"
+    done_text = done_file.read_text(encoding="utf-8")
+
+    assert result.returncode == 0
+    assert "OK: done EX-1" in result.stdout
+    assert not any(r[0] == "EX-1" for r in running_rows)
+
+    assert done_file.exists()
+    assert "| EX-1 |" in done_text
+    assert "| 已完成 |" in done_text
+    assert log_path in done_text
+    assert re.search(r"\| EX-1 \|.*\| 已完成 \| \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{4} \|", done_text)
+
+
+# TC-004
+# 创建者: 榕
+# 最后一次更改: 榕
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_done_missing_task_returns_rc3(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file(todo)
+
+    result = run_script("-file", str(todo), "-done", "-task_id", "BAD", "-log", "./log/bad.log")
+
+    assert result.returncode == 3
+    assert "task not found in running list: BAD" in result.stderr
+
+
+# TC-005
+# 创建者: 榕
+# 最后一次更改: 榕
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_pause_task_success(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file(todo)
+
+    result = run_script("-file", str(todo), "-pause", "-task_id", "EX-2")
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+
+    assert result.returncode == 0
+    assert "OK: pause EX-2" in result.stdout
+    assert any(r[0] == "EX-2" and r[6] == "暂停" for r in running_rows)
+
+
+# TC-006
+# 创建者: 榕
+# 最后一次更改: 榕
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_pause_missing_task_returns_rc3(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file(todo)
+
+    result = run_script("-file", str(todo), "-pause", "-task_id", "BAD")
+
+    assert result.returncode == 3
+    assert "task not found in running list: BAD" in result.stderr
+
+
+# TC-007
+# 创建者: 榕
+# 最后一次更改: 榕
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_new_task_with_assignee_success(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file(todo)
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-new",
+        "-info",
+        "实现任务调度器告警",
+        "-to",
+        "worker-b",
+        "-from",
+        "李白",
+        "-worktree",
+        "repo-x",
+        "-log",
+        "./log/record-1.log",
+    )
+    content = todo.read_text(encoding="utf-8")
+    list_rows = parse_section_rows(content, "## 任务列表")
+
+    assert result.returncode == 0
+    assert re.search(r"OK: new T-\d{8}-[0-9a-f]{8}", result.stdout)
+    assert any(
+        r[4] == "实现任务调度器告警"
+        and r[5] == "worker-b"
+        and r[1] == "李白"
+        and r[3] == "repo-x"
+        and r[6] == "./log/record-1.log"
+        and re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{4}", r[2] or "")
+        for r in list_rows
+    )
+
+
+# TC-008
+# 创建者: 榕
+# 最后一次更改: 榕
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_new_task_without_assignee_success(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file(todo)
+
+    result = run_script("-file", str(todo), "-new", "-info", "补充单元测试")
+    content = todo.read_text(encoding="utf-8")
+    list_rows = parse_section_rows(content, "## 任务列表")
+
+    assert result.returncode == 0
+    assert re.search(r"OK: new T-\d{8}-[0-9a-f]{8}", result.stdout)
+    assert any(
+        r[4] == "补充单元测试"
+        and r[5] == ""
+        and r[1] == ""
+        and r[3] == ""
+        and r[6] == ""
+        and re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{4}", r[2] or "")
+        for r in list_rows
+    )
+
+
+# TC-009
+# 创建者: 榕
+# 最后一次更改: 榕
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_argument_error_returns_rc1(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file(todo)
+
+    result = run_script("-file", str(todo), "-done", "-task_id", "EX-1")
+
+    assert result.returncode == 1
+    assert "-done requires -log" in result.stderr
+
+
+# TC-010
+# 创建者: 榕
+# 最后一次更改: 榕
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_file_not_found_returns_rc2(tmp_path: Path) -> None:
+    missing = tmp_path / "missing.md"
+
+    result = run_script("-file", str(missing), "-new", "-info", "desc")
+
+    assert result.returncode == 2
+    assert "file not found" in result.stderr
+
+
+# TC-011
+# 创建者: 榕
+# 最后一次更改: 榕
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_invalid_todo_structure_returns_rc2(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    todo.write_text(
+        "\n".join(
+            [
+                "## 非法任务段落",
+                "",
+                "| A | B |",
+                "| --- | --- |",
+                "| 1 | 2 |",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_script("-file", str(todo), "-new", "-info", "desc")
+
+    assert result.returncode == 2
+    assert "invalid table format" in result.stderr
+
+
+# TC-012
+# 创建者: 榕
+# 最后一次更改: 榕
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_lock_conflict_returns_rc4(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file(todo)
+
+    with todo.open("r", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = run_script("-file", str(todo), "-dispatch", "-task_id", "EX-3", "-to", "worker-a")
+
+    assert result.returncode == 4
+    assert "cannot acquire lock" in result.stderr
+
+
+# TC-013
+# 创建者: 榕
+# 最后一次更改: 榕
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_status_doing_outputs_running_table(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file(todo)
+
+    result = run_script(str(todo), "-file", "-status", "-doing")
+
+    assert result.returncode == 0
+    assert "正在执行的任务" not in result.stdout
+    assert "任务列表" not in result.stdout
+    assert "EX-1" in result.stdout
+    assert "EX-3" not in result.stdout
+
+
+# TC-014
+# 创建者: 榕
+# 最后一次更改: 榕
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_status_task_list_outputs_list_table(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file(todo)
+
+    result = run_script(str(todo), "-file", "-status", "-task-list")
+
+    assert result.returncode == 0
+    assert "正在执行的任务" not in result.stdout
+    assert "任务列表" not in result.stdout
+    assert "EX-3" in result.stdout
+    assert "EX-1" not in result.stdout
+
+
+# TC-015
+# 创建者: 榕
+# 最后一次更改: 榕
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_status_requires_exactly_one_mode(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file(todo)
+
+    result = run_script(str(todo), "-file", "-status")
+    assert result.returncode == 1
+    assert "-status requires exactly one of -doing/-task-list" in result.stderr
+
+    result = run_script(str(todo), "-file", "-status", "-doing", "-task-list")
+    assert result.returncode == 1
+    assert "-status requires exactly one of -doing/-task-list" in result.stderr

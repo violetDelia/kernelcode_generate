@@ -23,18 +23,23 @@ readonly RC_INTERNAL=5
 FILE=""
 OP_ATTACH=0
 OP_TALK=0
+OP_INIT_ENV=0
 SESSION=""
 SESSION_ID=""
 FROM=""
 TO=""
 MESSAGE=""
 LOG_FILE=""
+AGENTS_FILE=""
+AGENT_NAME=""
 HAS_SESSION=0
 HAS_SESSION_ID=0
 HAS_FROM=0
 HAS_TO=0
 HAS_MESSAGE=0
 HAS_LOG=0
+HAS_FILE=0
+HAS_NAME=0
 
 trim() {
   local s="${1-}"
@@ -55,10 +60,12 @@ usage() {
 Usage:
   codex-multi-agents-tmux.sh -attach -s <session>
   codex-multi-agents-tmux.sh -talk -from <sender> -to <target_name> -session-id <target_session_id> -message <message> -log <log_path>
+  codex-multi-agents-tmux.sh -init-env -file <agents_list_path> -name <agent_name>
 
 Examples:
   codex-multi-agents-tmux.sh -attach -s worker-a
   codex-multi-agents-tmux.sh -talk -from scheduler -to worker-a -session-id worker-a -message "请处理任务 T1" -log ./agents/codex-multi-agents/log/talk.log
+  codex-multi-agents-tmux.sh -init-env -file ./agents/codex-multi-agents/agents-lists.md -name 小明
 
 Return codes:
   0 success
@@ -84,6 +91,10 @@ parse_args() {
         ;;
       -talk)
         OP_TALK=1
+        shift
+        ;;
+      -init-env)
+        OP_INIT_ENV=1
         shift
         ;;
       -s=*)
@@ -152,6 +163,28 @@ parse_args() {
         HAS_LOG=1
         shift 2
         ;;
+      -file=*)
+        AGENTS_FILE="${1#*=}"
+        HAS_FILE=1
+        shift
+        ;;
+      -file)
+        [[ $# -ge 2 ]] || err "$RC_ARG" "missing value for -file"
+        AGENTS_FILE="$2"
+        HAS_FILE=1
+        shift 2
+        ;;
+      -name=*)
+        AGENT_NAME="${1#*=}"
+        HAS_NAME=1
+        shift
+        ;;
+      -name)
+        [[ $# -ge 2 ]] || err "$RC_ARG" "missing value for -name"
+        AGENT_NAME="$2"
+        HAS_NAME=1
+        shift 2
+        ;;
       -h|--help)
         usage
         exit "$RC_OK"
@@ -162,13 +195,13 @@ parse_args() {
     esac
   done
 
-  local op_count=$((OP_ATTACH + OP_TALK))
-  [[ "$op_count" -eq 1 ]] || err "$RC_ARG" "exactly one operation is required: -attach|-talk"
+  local op_count=$((OP_ATTACH + OP_TALK + OP_INIT_ENV))
+  [[ "$op_count" -eq 1 ]] || err "$RC_ARG" "exactly one operation is required: -attach|-talk|-init-env"
 
   if [[ "$OP_ATTACH" -eq 1 ]]; then
     [[ "$HAS_SESSION" -eq 1 ]] || err "$RC_ARG" "-attach requires -s"
     [[ -n "$(trim "$SESSION")" ]] || err "$RC_ARG" "empty value for -s"
-    [[ "$HAS_FROM" -eq 0 && "$HAS_TO" -eq 0 && "$HAS_SESSION_ID" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_LOG" -eq 0 ]] || err "$RC_ARG" "-attach does not accept -from/-to/-session-id/-message/-log"
+    [[ "$HAS_FROM" -eq 0 && "$HAS_TO" -eq 0 && "$HAS_SESSION_ID" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FILE" -eq 0 && "$HAS_NAME" -eq 0 ]] || err "$RC_ARG" "-attach does not accept -from/-to/-session-id/-message/-log/-file/-name"
   fi
 
   if [[ "$OP_TALK" -eq 1 ]]; then
@@ -182,7 +215,15 @@ parse_args() {
     [[ -n "$(trim "$SESSION_ID")" ]] || err "$RC_ARG" "empty value for -session-id"
     [[ -n "$(trim "$MESSAGE")" ]] || err "$RC_ARG" "empty value for -message"
     [[ -n "$(trim "$LOG_FILE")" ]] || err "$RC_ARG" "empty value for -log"
-    [[ "$HAS_SESSION" -eq 0 ]] || err "$RC_ARG" "-talk does not accept -s"
+    [[ "$HAS_SESSION" -eq 0 && "$HAS_FILE" -eq 0 && "$HAS_NAME" -eq 0 ]] || err "$RC_ARG" "-talk does not accept -s/-file/-name"
+  fi
+
+  if [[ "$OP_INIT_ENV" -eq 1 ]]; then
+    [[ "$HAS_FILE" -eq 1 ]] || err "$RC_ARG" "-init-env requires -file"
+    [[ "$HAS_NAME" -eq 1 ]] || err "$RC_ARG" "-init-env requires -name"
+    [[ -n "$(trim "$AGENTS_FILE")" ]] || err "$RC_ARG" "empty value for -file"
+    [[ -n "$(trim "$AGENT_NAME")" ]] || err "$RC_ARG" "empty value for -name"
+    [[ "$HAS_SESSION" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_TO" -eq 0 && "$HAS_SESSION_ID" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_LOG" -eq 0 ]] || err "$RC_ARG" "-init-env does not accept -s/-from/-to/-session-id/-message/-log"
   fi
 }
 
@@ -231,9 +272,91 @@ do_talk() {
 
   local line
   line="$(format_talk_message)"
-  tmux send-keys -t "$SESSION_ID" "$line" C-m || err "$RC_INTERNAL" "tmux send-keys failed: $SESSION_ID"
+  send_tmux_command_twice "$SESSION_ID" "$line"
   append_log_line "$line"
   printf "OK: talk %s -> %s (%s)\n" "$FROM" "$TO" "$SESSION_ID"
+}
+
+send_tmux_command_once() {
+  local session="$1"
+  local command_text="$2"
+  tmux send-keys -t "$session" "$command_text" || err "$RC_INTERNAL" "tmux send-keys failed: $session"
+  sleep 1 || err "$RC_INTERNAL" "sleep failed during command confirm: $command_text"
+  tmux send-keys -t "$session" ENTER || err "$RC_INTERNAL" "tmux send-keys failed: $session"
+}
+
+send_tmux_command_twice() {
+  local session="$1"
+  local command_text="$2"
+  send_tmux_command_once "$session" "$command_text"
+  sleep 3 || err "$RC_INTERNAL" "sleep failed during command retry: $command_text"
+  send_tmux_command_once "$session" "$command_text"
+}
+
+resolve_list_script_path() {
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  printf "%s/codex-multi-agents-list.sh" "$script_dir"
+}
+
+find_agent_field() {
+  local field="$1"
+  local list_script
+  local value
+  list_script="$(resolve_list_script_path)"
+  [[ -x "$list_script" ]] || err "$RC_FILE" "list script not executable: $list_script"
+
+  if ! value="$(bash "$list_script" -file "$AGENTS_FILE" -find -name "$AGENT_NAME" -key "$field" 2>/dev/null)"; then
+    err "$RC_DATA" "failed to read field '$field' for agent: $AGENT_NAME"
+  fi
+  printf "%s" "$value"
+}
+
+find_startup_type() {
+  local list_script
+  local value
+  list_script="$(resolve_list_script_path)"
+  [[ -x "$list_script" ]] || err "$RC_FILE" "list script not executable: $list_script"
+
+  if value="$(bash "$list_script" -file "$AGENTS_FILE" -find -name "$AGENT_NAME" -key "启动设置" 2>/dev/null)"; then
+    printf "%s" "$value"
+    return 0
+  fi
+  if value="$(bash "$list_script" -file "$AGENTS_FILE" -find -name "$AGENT_NAME" -key "启动类型" 2>/dev/null)"; then
+    printf "%s" "$value"
+    return 0
+  fi
+  err "$RC_DATA" "failed to read startup type for agent: $AGENT_NAME"
+}
+
+do_init_env() {
+  [[ -e "$AGENTS_FILE" ]] || err "$RC_FILE" "file not found: $AGENTS_FILE"
+  [[ -f "$AGENTS_FILE" ]] || err "$RC_FILE" "not a regular file: $AGENTS_FILE"
+  [[ -r "$AGENTS_FILE" ]] || err "$RC_FILE" "file is not readable: $AGENTS_FILE"
+
+  local session
+  local startup_type
+  local agent_session
+  session="$(find_agent_field "会话")"
+  startup_type="$(find_startup_type)"
+  agent_session="$(find_agent_field "agent session")"
+
+  [[ -n "$(trim "$session")" ]] || err "$RC_DATA" "empty session for agent: $AGENT_NAME"
+
+  if ! tmux_has_session "$session"; then
+    tmux new-session -d -s "$session" || err "$RC_INTERNAL" "tmux new-session failed: $session"
+  fi
+
+  if [[ "$startup_type" == "codex" ]]; then
+    [[ -n "$(trim "$agent_session")" ]] || err "$RC_DATA" "empty agent session for codex agent: $AGENT_NAME"
+    send_tmux_command_twice "$session" "codex"
+    sleep 3 || err "$RC_INTERNAL" "sleep failed during init step: codex->rename"
+    send_tmux_command_twice "$session" "/rename $agent_session"
+    sleep 3 || err "$RC_INTERNAL" "sleep failed during init step: rename->enter"
+    tmux send-keys -t "$session" ENTER || err "$RC_INTERNAL" "tmux send-keys failed: $session"
+  fi
+
+  printf "OK: init-env %s (%s)\n" "$AGENT_NAME" "$session"
 }
 
 main() {
@@ -244,6 +367,8 @@ main() {
     do_attach
   elif [[ "$OP_TALK" -eq 1 ]]; then
     do_talk
+  elif [[ "$OP_INIT_ENV" -eq 1 ]]; then
+    do_init_env
   else
     err "$RC_INTERNAL" "unexpected operation state"
   fi

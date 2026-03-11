@@ -1,21 +1,26 @@
 #!/usr/bin/env bash
 # codex-multi-agents-list.sh
 #
+# 创建者: 榕
+# 最后一次更改: 榕
+#
 # 功能:
 # - 读取/维护 agents 名单（Markdown 表格）。
-# - 支持 status、find、replace、add、delete 五类操作。
+# - 支持 status、find、replace、add、delete、init 六类操作。
 # - 约束姓名唯一、姓名字段不可修改、写操作加锁。
 #
 # 对应文件:
-# - spec: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
-# - test: test/codex-multi-agents/test_codex-multi-agents-list.py
-# - impl: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# - spec: /home/lfr/kernelcode_generate/spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# - test: /home/lfr/kernelcode_generate/test/codex-multi-agents/test_codex-multi-agents-list.py
+# - impl: /home/lfr/kernelcode_generate/skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
 #
 # 使用示例:
 # - 读取:  codex-multi-agents-list.sh -file ./agents-lists.md -status
+# - 查询:  codex-multi-agents-list.sh -file ./agents-lists.md -find -name 小明 -key 归档文件
 # - 新增:  codex-multi-agents-list.sh -file ./agents-lists.md -add -name 小明 -type codex
 # - 修改:  codex-multi-agents-list.sh -file ./agents-lists.md -replace -name 小明 -key 状态 -value ready
 # - 删除:  codex-multi-agents-list.sh -file ./agents-lists.md -delete -name 小明
+# - 初始化: codex-multi-agents-list.sh -file ./agents-lists.md -init -name 小明
 # - 等价写法: codex-multi-agents-list.sh -file=./agents-lists.md -add -name=小明 -type=codex
 
 set -u
@@ -28,7 +33,7 @@ readonly RC_FILE=2
 readonly RC_DATA=3
 readonly RC_LOCK=4
 readonly RC_INTERNAL=5
-readonly REQUIRED_COLUMNS=("姓名" "状态" "会话" "agent session" "worktree" "介绍" "提示词" "归档文件")
+readonly REQUIRED_COLUMNS=("姓名" "状态" "会话" "agent session" "介绍" "提示词" "归档文件")
 readonly STARTUP_COLUMNS=("启动设置" "启动类型")
 
 FILE=""
@@ -37,6 +42,7 @@ OP_FIND=0
 OP_REPLACE=0
 OP_ADD=0
 OP_DELETE=0
+OP_INIT=0
 NAME=""
 KEY=""
 VALUE=""
@@ -57,6 +63,8 @@ session_col_idx=-1
 agent_session_col_idx=-1
 worktree_col_idx=-1
 startup_col_idx=-1
+prompt_col_idx=-1
+archive_col_idx=-1
 key_col_idx=-1
 duty_col_idx=-1
 declare -a file_lines=()
@@ -134,6 +142,7 @@ Usage:
   codex-multi-agents-list.sh -file <path> -replace -name <name> -key <field> -value <value>
   codex-multi-agents-list.sh -file <path> -add -name <name> -type <startup_type>
   codex-multi-agents-list.sh -file <path> -delete -name <name>
+  codex-multi-agents-list.sh -file <path> -init -name <name>
 
 Examples:
   codex-multi-agents-list.sh -file ./agents-lists.md -status
@@ -141,6 +150,7 @@ Examples:
   codex-multi-agents-list.sh -file=./agents-lists.md -add -name=小明 -type=codex
   codex-multi-agents-list.sh -file ./agents-lists.md -replace -name 小明 -key 状态 -value ready
   codex-multi-agents-list.sh -file ./agents-lists.md -delete -name 小明
+  codex-multi-agents-list.sh -file ./agents-lists.md -init -name 小明
 
 Return codes:
   0 success
@@ -190,6 +200,10 @@ parse_args() {
         ;;
       -delete)
         OP_DELETE=1
+        shift
+        ;;
+      -init)
+        OP_INIT=1
         shift
         ;;
       -name=*)
@@ -249,8 +263,8 @@ parse_args() {
   [[ "$HAS_FILE" -eq 1 ]] || err "$RC_ARG" "missing required argument: -file"
   [[ -n "$FILE" ]] || err "$RC_ARG" "empty value for -file"
 
-  local op_count=$((OP_STATUS + OP_FIND + OP_REPLACE + OP_ADD + OP_DELETE))
-  [[ "$op_count" -eq 1 ]] || err "$RC_ARG" "exactly one operation is required: -status|-find|-replace|-add|-delete"
+  local op_count=$((OP_STATUS + OP_FIND + OP_REPLACE + OP_ADD + OP_DELETE + OP_INIT))
+  [[ "$op_count" -eq 1 ]] || err "$RC_ARG" "exactly one operation is required: -status|-find|-replace|-add|-delete|-init"
 
   if [[ "$OP_STATUS" -eq 1 ]]; then
     [[ "$HAS_NAME" -eq 0 && "$HAS_KEY" -eq 0 && "$HAS_VALUE" -eq 0 && "$HAS_TYPE" -eq 0 ]] || err "$RC_ARG" "-status does not accept -name/-key/-value/-type"
@@ -285,6 +299,12 @@ parse_args() {
     [[ "$HAS_NAME" -eq 1 ]] || err "$RC_ARG" "operation requires -name"
     [[ -n "$NAME" ]] || err "$RC_ARG" "empty value for -name"
     [[ "$HAS_KEY" -eq 0 && "$HAS_VALUE" -eq 0 && "$HAS_TYPE" -eq 0 ]] || err "$RC_ARG" "-delete does not accept -key/-value/-type"
+  fi
+
+  if [[ "$OP_INIT" -eq 1 ]]; then
+    [[ "$HAS_NAME" -eq 1 ]] || err "$RC_ARG" "-init requires -name"
+    [[ -n "$NAME" ]] || err "$RC_ARG" "empty value for -name"
+    [[ "$HAS_KEY" -eq 0 && "$HAS_VALUE" -eq 0 && "$HAS_TYPE" -eq 0 ]] || err "$RC_ARG" "-init does not accept -key/-value/-type"
   fi
 }
 
@@ -341,6 +361,8 @@ parse_table() {
   agent_session_col_idx=-1
   worktree_col_idx=-1
   startup_col_idx=-1
+  prompt_col_idx=-1
+  archive_col_idx=-1
   key_col_idx=-1
   duty_col_idx=-1
   local startup_name
@@ -373,6 +395,12 @@ parse_table() {
     fi
     if [[ "${header_cells[$i]}" == "worktree" ]]; then
       worktree_col_idx="$i"
+    fi
+    if [[ "${header_cells[$i]}" == "提示词" ]]; then
+      prompt_col_idx="$i"
+    fi
+    if [[ "${header_cells[$i]}" == "归档文件" ]]; then
+      archive_col_idx="$i"
     fi
     if [[ "${header_cells[$i]}" == "职责" ]]; then
       duty_col_idx="$i"
@@ -711,44 +739,7 @@ sys.exit(1)
 PY
 }
 
-# codex 类型初始化：尝试启动并重命名会话；若运行环境缺少命令则跳过。
-bootstrap_codex_agent_if_needed() {
-  local session="$1"
-  [[ "$TYPE" == "codex" ]] || return 0
-
-  local script_dir
-  local tmux_helper
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  tmux_helper="$script_dir/codex-multi-agents-tmux.sh"
-
-  if [[ ! -x "$tmux_helper" ]]; then
-    printf "WARN: skip codex bootstrap, helper not executable: %s\n" "$tmux_helper" >&2
-    return 0
-  fi
-  if ! command -v tmux >/dev/null 2>&1; then
-    printf "WARN: skip codex bootstrap, tmux not found in PATH\n" >&2
-    return 0
-  fi
-  if ! command -v codex >/dev/null 2>&1; then
-    printf "WARN: skip codex bootstrap, codex not found in PATH\n" >&2
-    return 0
-  fi
-
-  if ! bash "$tmux_helper" -attach -s "$session" >/dev/null 2>&1; then
-    printf "WARN: skip codex bootstrap, attach failed for session: %s\n" "$session" >&2
-    return 0
-  fi
-  if ! tmux send-keys -t "$session" "codex" C-m; then
-    printf "WARN: skip codex bootstrap, cannot run codex in session: %s\n" "$session" >&2
-    return 0
-  fi
-  if ! tmux send-keys -t "$session" "/rename $NAME" C-m; then
-    printf "WARN: skip codex bootstrap, cannot rename agent in session: %s\n" "$session" >&2
-    return 0
-  fi
-}
-
-# add 操作：新增一行，写入姓名列并自动生成唯一会话/worktree 值。
+# add 操作：新增一行，写入姓名和启动类型并自动生成唯一会话字段。
 do_add() {
   local -a row=()
   local -a cells=()
@@ -785,15 +776,15 @@ do_add() {
 
   (( session_col_idx >= 0 )) || err "$RC_DATA" "missing required column for add: 会话"
   (( agent_session_col_idx >= 0 )) || err "$RC_DATA" "missing required column for add: agent session"
-  (( worktree_col_idx >= 0 )) || err "$RC_DATA" "missing required column for add: worktree"
   (( startup_col_idx >= 0 )) || err "$RC_DATA" "missing required column for add: 启动设置/启动类型"
   session="$(generate_unique_ascii_value "sess-" "${existing_sessions[@]}")" || err "$RC_INTERNAL" "failed to generate unique session"
   agent_session="$(generate_unique_ascii_value "agent-" "${existing_agent_sessions[@]}")" || err "$RC_INTERNAL" "failed to generate unique agent session"
-  worktree="$(generate_unique_ascii_value "wt-" "${existing_worktrees[@]}")" || err "$RC_INTERNAL" "failed to generate unique worktree"
   [[ -n "$session" ]] || err "$RC_INTERNAL" "failed to generate unique session"
   [[ -n "$agent_session" ]] || err "$RC_INTERNAL" "failed to generate unique agent session"
-  [[ -n "$worktree" ]] || err "$RC_INTERNAL" "failed to generate unique worktree"
-  bootstrap_codex_agent_if_needed "$session"
+  if (( worktree_col_idx >= 0 )); then
+    worktree="$(generate_unique_ascii_value "wt-" "${existing_worktrees[@]}")" || err "$RC_INTERNAL" "failed to generate unique worktree"
+    [[ -n "$worktree" ]] || err "$RC_INTERNAL" "failed to generate unique worktree"
+  fi
 
   for ((idx=0; idx<col_count; idx++)); do
     row+=("")
@@ -802,11 +793,52 @@ do_add() {
   row[$session_col_idx]="$session"
   row[$startup_col_idx]="$TYPE"
   row[$agent_session_col_idx]="$agent_session"
-  row[$worktree_col_idx]="$worktree"
+  if (( worktree_col_idx >= 0 )); then
+    row[$worktree_col_idx]="$worktree"
+  fi
   data_rows+=("$(render_row row)")
 
   write_updated_file data_rows
   printf "OK: add %s\n" "$NAME"
+}
+
+# init 操作：读取角色关键信息并向其会话发送初始化消息。
+do_init() {
+  find_row_by_name "$NAME"
+  local target_idx="$found_row_idx"
+
+  local -a cells=()
+  split_row "${data_rows[$target_idx]}" cells
+
+  local session prompt_file worktree archive duty has_worktree_col
+  session="${cells[$session_col_idx]}"
+  prompt_file="${cells[$prompt_col_idx]}"
+  worktree=""
+  has_worktree_col=0
+  if (( worktree_col_idx >= 0 )); then
+    worktree="${cells[$worktree_col_idx]}"
+    has_worktree_col=1
+  fi
+  archive="${cells[$archive_col_idx]}"
+  duty=""
+  if (( duty_col_idx >= 0 )); then
+    duty="${cells[$duty_col_idx]}"
+  fi
+
+  [[ -n "$session" ]] || err "$RC_DATA" "empty session for agent: $NAME"
+  command -v tmux >/dev/null 2>&1 || err "$RC_FILE" "tmux not found in PATH"
+  tmux has-session -t "$session" >/dev/null 2>&1 || err "$RC_DATA" "target session not found: $session"
+
+  local message
+  message="你的名字叫做${NAME}，需要严格按照${prompt_file}进行工作以及\"AGENTS.md\"进行工作，之前${prompt_file}的约定作废,"
+  if (( has_worktree_col == 1 )); then
+    message+="你的工作树为${worktree},不可修改工作树以外的文件。"
+  fi
+  message+="你的专属文件夹在${archive}，你的职责是${duty}"
+  tmux send-keys -t "$session" "$message" || err "$RC_INTERNAL" "failed to send init message to session: $session"
+  sleep 1 || err "$RC_INTERNAL" "sleep failed after init message: $session"
+  tmux send-keys -t "$session" ENTER || err "$RC_INTERNAL" "failed to confirm init message: $session"
+  printf "OK: init %s\n" "$NAME"
 }
 
 # delete 操作：按姓名删除目标行。
@@ -828,12 +860,16 @@ do_delete() {
 
 # 获取排他锁（用于写操作）。
 acquire_exclusive_lock() {
-  local lock_file="${FILE}.lock"
-  exec {lock_fd}> "$lock_file" || err "$RC_LOCK" "cannot open lock file: $lock_file"
-  flock -x -w 5 "$lock_fd" || err "$RC_LOCK" "cannot acquire lock: $lock_file"
+  [[ -e "$FILE" ]] || err "$RC_FILE" "file not found: $FILE"
+  [[ -f "$FILE" ]] || err "$RC_FILE" "not a regular file: $FILE"
+  [[ -r "$FILE" ]] || err "$RC_FILE" "file is not readable: $FILE"
+
+  # 锁定目标名单文件本身，不创建额外锁文件。
+  exec {lock_fd}< "$FILE" || err "$RC_LOCK" "cannot open file for lock: $FILE"
+  flock -x -w 5 "$lock_fd" || err "$RC_LOCK" "cannot acquire lock on file: $FILE"
 }
 
-# 主流程：参数校验 -> 加锁 -> 读表/校验 -> 执行操作。
+# 主流程：参数校验 -> (读操作直接执行) -> 写操作加锁后执行。
 main() {
   parse_args "$@"
 
@@ -850,6 +886,14 @@ main() {
     parse_table
     validate_data_rows
     do_find
+    exit "$RC_OK"
+  fi
+
+  if [[ "$OP_INIT" -eq 1 ]]; then
+    load_file
+    parse_table
+    validate_data_rows
+    do_init
     exit "$RC_OK"
   fi
 
