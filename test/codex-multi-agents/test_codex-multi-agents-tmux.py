@@ -198,8 +198,8 @@ def test_talk_send_and_append_log_success(tmp_path: Path) -> None:
 
     assert result.returncode == 0
     assert "OK: talk scheduler -> worker-a (worker-a)" in result.stdout
-    assert calls.count("send:worker-a:@scheduler向@worker-a发起会话: 请处理任务 T1:") == 2
-    assert calls.count("send:worker-a:ENTER:") == 2
+    assert calls.count("send:worker-a:@scheduler向@worker-a发起会话: 请处理任务 T1:") == 1
+    assert calls.count("send:worker-a:ENTER:") == 1
     assert "@scheduler向@worker-a发起会话: 请处理任务 T1" in log_text
 
 
@@ -354,9 +354,9 @@ def test_init_env_codex_creates_session_and_bootstraps(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert "OK: init-env 小明 (xiaoming)" in result.stdout
     assert "new-session:xiaoming" in calls
-    assert calls.count("send:xiaoming:codex:") == 2
-    assert calls.count("send:xiaoming:/rename agent-xiaoming:") == 2
-    assert calls.count("send:xiaoming:ENTER:") == 5
+    assert calls.count("send:xiaoming:codex:") == 1
+    assert calls.count("send:xiaoming:/rename agent-xiaoming:") == 1
+    assert calls.count("send:xiaoming:ENTER:") == 2
 
 
 # TC-009

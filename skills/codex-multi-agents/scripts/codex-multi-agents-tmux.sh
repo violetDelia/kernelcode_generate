@@ -272,7 +272,7 @@ do_talk() {
 
   local line
   line="$(format_talk_message)"
-  send_tmux_command_twice "$SESSION_ID" "$line"
+  send_tmux_command_once "$SESSION_ID" "$line"
   append_log_line "$line"
   printf "OK: talk %s -> %s (%s)\n" "$FROM" "$TO" "$SESSION_ID"
 }
@@ -283,14 +283,6 @@ send_tmux_command_once() {
   tmux send-keys -t "$session" "$command_text" || err "$RC_INTERNAL" "tmux send-keys failed: $session"
   sleep 1 || err "$RC_INTERNAL" "sleep failed during command confirm: $command_text"
   tmux send-keys -t "$session" ENTER || err "$RC_INTERNAL" "tmux send-keys failed: $session"
-}
-
-send_tmux_command_twice() {
-  local session="$1"
-  local command_text="$2"
-  send_tmux_command_once "$session" "$command_text"
-  sleep 3 || err "$RC_INTERNAL" "sleep failed during command retry: $command_text"
-  send_tmux_command_once "$session" "$command_text"
 }
 
 resolve_list_script_path() {
@@ -349,11 +341,9 @@ do_init_env() {
 
   if [[ "$startup_type" == "codex" ]]; then
     [[ -n "$(trim "$agent_session")" ]] || err "$RC_DATA" "empty agent session for codex agent: $AGENT_NAME"
-    send_tmux_command_twice "$session" "codex"
+    send_tmux_command_once "$session" "codex"
     sleep 3 || err "$RC_INTERNAL" "sleep failed during init step: codex->rename"
-    send_tmux_command_twice "$session" "/rename $agent_session"
-    sleep 3 || err "$RC_INTERNAL" "sleep failed during init step: rename->enter"
-    tmux send-keys -t "$session" ENTER || err "$RC_INTERNAL" "tmux send-keys failed: $session"
+    send_tmux_command_once "$session" "/rename $agent_session"
   fi
 
   printf "OK: init-env %s (%s)\n" "$AGENT_NAME" "$session"

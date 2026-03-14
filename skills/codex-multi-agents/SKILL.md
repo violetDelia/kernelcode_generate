@@ -21,6 +21,11 @@ description: 基于 tmux 的多会话协作框架。
 - [角色交互](#角色交互)
 - [目录](#目录)
 - [流程](#流程)
+- [初始化](#初始化)
+- [启动](#启动)
+- [新增角色](#新增角色)
+- [更新角色](#更新角色)
+- [终止](#终止)
 - [默认提示词](#默认提示词)
 - [输出与审计](#输出与审计)
 - [参考](#参考)
@@ -39,7 +44,9 @@ description: 基于 tmux 的多会话协作框架。
 - 除明确说明外，不要跳过初始化和配置校验步骤。
 - 同一个角色同时只能进行一项任务。
 - 只有管理员可以分配任务。其他人员不可以进行任务分配。
-
+- 任务完成后必须用脚本向管理员回报。
+- 涉及工作树的任务必须使用 `git worktree` 新建工作树进行，不要在 `main` 分支直接创建文件夹或改动。
+- 实现任务需包含测试验证，默认不拆分独立 test 任务。
 
 ## 执行入口
 - 名单维护脚本：[`./scripts/codex-multi-agents-list.sh`](./scripts/codex-multi-agents-list.sh)
@@ -52,6 +59,7 @@ description: 基于 tmux 的多会话协作框架。
 - 角色间沟通统一通过 `codex-multi-agents-tmux.sh -talk` 执行。
 - 发送消息时必须明确接收对象、目标会话和日志路径（`-log`）。
 - 普通角色完成任务后，需向管理员会话回报完成情况、后续计划和任务日志路径。
+- 任务分发应明确输入与输出：输入为任务清单与名单，输出为已分发任务与对话日志。
 
 ## 目录
 - 日志目录：`agents/codex-multi-agents/log`
@@ -62,22 +70,22 @@ description: 基于 tmux 的多会话协作框架。
 - 示例目录：`./examples/`
 
 ## 流程
-<a id="step-init"></a>
-1. 初始化
+### 初始化
 - 若配置文件不存在，则创建 `agents/codex-multi-agents/config/config.txt`。
 - 配置内容至少包含：`ROOT_NAME`、`TODO_FILE`、`AGENTS_FILE`、`LOG_DIR`、`TMP_DIR`。
 - 向用户确认管理员名称，写入 `ROOT_NAME`。
 - 向用户确认 `TODO_FILE` 路径并写入配置；若文件不存在则创建。
-- 新增管理员 agent；新增角色步骤参考：[新增角色](#step-add-role)。
+- 新增管理员 agent；新增角色步骤参考：[新增角色](#新增角色)。
 
-<a id="step-start"></a>
-2. 启动
+### 启动
 - 读取配置文件和 agents 名单。
-- 若配置不存在，回到 [初始化](#step-init)。
+- 若配置不存在，回到 [初始化](#初始化)。
 - 使用 `codex-multi-agents-tmux.sh -talk` 向管理员下达开始任务信息。
+- 实现任务完成后需同步测试结果与日志路径。
+- 审查不通过则回到实现任务（含测试）再次迭代，直到审查通过。
+- 测试未达标时必须补齐测试结果后再进入审查。
 
-<a id="step-add-role"></a>
-3. 新增角色
+### 新增角色
 - 与用户确认角色名称 `<name>`。
 - 与用户确认角色类型 `<type>`（如 `codex`、`claude`）。
 - 与用户确认角色工作树；如未指定，默认使用项目路径。
@@ -93,7 +101,7 @@ description: 基于 tmux 的多会话协作框架。
 
 - 创建归档目录：`agents/codex-multi-agents/agents/<name>/`。
 - 创建提示词文件：`agents/codex-multi-agents/agents/<name>/<name>.prompt.md`。
-- 从名单中读取并确认字段：`会话`、`agent session`、`提示词`、`职责`、`worktree`、`归档文件`。
+- 从名单中读取并确认字段：`会话`、`agent session`、`提示词`、`职责`、`归档文件`。
 - 初始化会话环境：
 
 ```bash
@@ -106,16 +114,14 @@ description: 基于 tmux 的多会话协作框架。
 ./scripts/codex-multi-agents-list.sh -init -file <AGENTS_LIST_ABS_PATH> -name <name>
 ```
 
-<a id="step-update-role"></a>
-4. 更新角色信息
+### 更新角色
 - 当用户修改角色提示词后，使用 `-init` 重新向该角色同步基础信息。
 
 ```bash
 ./scripts/codex-multi-agents-list.sh -init -file <AGENTS_LIST_ABS_PATH> -name <name>
 ```
 
-<a id="step-stop"></a>
-5. 终止
+### 终止
 - 使用 `codex-multi-agents-tmux.sh -talk` 向管理员下达终止信息。
 
 ## 默认提示词

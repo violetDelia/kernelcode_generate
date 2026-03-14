@@ -810,15 +810,9 @@ do_init() {
   local -a cells=()
   split_row "${data_rows[$target_idx]}" cells
 
-  local session prompt_file worktree archive duty has_worktree_col
+  local session prompt_file archive duty
   session="${cells[$session_col_idx]}"
   prompt_file="${cells[$prompt_col_idx]}"
-  worktree=""
-  has_worktree_col=0
-  if (( worktree_col_idx >= 0 )); then
-    worktree="${cells[$worktree_col_idx]}"
-    has_worktree_col=1
-  fi
   archive="${cells[$archive_col_idx]}"
   duty=""
   if (( duty_col_idx >= 0 )); then
@@ -830,11 +824,7 @@ do_init() {
   tmux has-session -t "$session" >/dev/null 2>&1 || err "$RC_DATA" "target session not found: $session"
 
   local message
-  message="你的名字叫做${NAME}，需要严格按照${prompt_file}进行工作以及\"AGENTS.md\"进行工作，之前${prompt_file}的约定作废,"
-  if (( has_worktree_col == 1 )); then
-    message+="你的工作树为${worktree},不可修改工作树以外的文件。"
-  fi
-  message+="你的专属文件夹在${archive}，你的职责是${duty}"
+  message="你的名字叫做${NAME}，从现在起只需要严格按照${prompt_file}进行工作以及\"AGENTS.md\"进行工作,你的专属文件夹在${archive}，你的职责是${duty}"
   tmux send-keys -t "$session" "$message" || err "$RC_INTERNAL" "failed to send init message to session: $session"
   sleep 1 || err "$RC_INTERNAL" "sleep failed after init message: $session"
   tmux send-keys -t "$session" ENTER || err "$RC_INTERNAL" "failed to confirm init message: $session"
