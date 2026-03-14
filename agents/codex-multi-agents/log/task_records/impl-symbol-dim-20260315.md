@@ -130,3 +130,8 @@
   - 测试: test/symbol_variable/test_symbol_dim.py
   - 规范: spec/symbol_variable/symbol_dim.md
 - 测试记录: pytest -q test/symbol_variable/test_symbol_dim.py（10 passed）
+
+## 追加记录：合并小队重建 spec
+
+- 时间: 2026-03-15 06:06:50 +0800
+- 说明: 合并小队反馈在临时授权下重建并更新 spec/symbol_variable/symbol_dim.md（因工作树版本不可直接恢复，基于实现与测试重建），并已在其 memory 记录。
