@@ -34,6 +34,7 @@
 - `Memory` 保持与张量基类一致的 `shape/dtype/stride/format` 接口与语义。
 - 默认空间为 `MemorySpace.GM`，以保证与现有默认逻辑兼容。
 - `stride` 允许为 `None`，语义与基础张量一致。
+- 逐元素算术/比较遵循 [`spec/operation/nn.md`](../../spec/operation/nn.md) 规范；本文件仅补充 Memory 侧的边界与约束。
 
 ## 功能
 
@@ -90,6 +91,36 @@
 
 - 由类 Tensor 对象构造 `Memory`，保持 `shape/dtype/stride/format`，空间默认 `GM`。
 
+## 逐元素算术与比较运算规范
+
+本节用于将 `Memory` 的逐元素算术/比较约束与 `spec/operation/nn.md` 对齐，并补充 Memory 侧边界。
+
+### 适用范围
+
+- 至少一侧操作数为 `Memory`。
+- 支持 `Memory` 与 `Memory`、`Memory` 与数值标量（阶段一至少支持 `int`）。
+- 不支持广播；`shape` 必须严格一致。
+
+### 输入约束
+
+- `Memory` 与 `Memory`：`shape` 完全一致，否则抛 `ValueError`。
+- `dtype` 需可兼容；未定义类型提升规则时要求一致，不兼容抛 `TypeError`。
+- 标量需与 `Memory.dtype` 兼容，否则抛 `TypeError`。
+- 不支持 `str/list/dict` 等无数值语义类型，抛 `TypeError`。
+
+### 输出语义
+
+- 算术运算输出张量语义结果，`shape` 与输入一致，动态维度不丢失。
+- 比较运算输出张量语义结果，`shape` 与输入一致，`dtype` 为 `bool` 或等价 predicate。
+- `space/format/stride` 不参与合法性校验；输出继承 `lhs` 的对应属性或按实现约定处理，但不得破坏 `shape`/`dtype` 语义。
+
+### 错误规则
+
+- 输入类型不支持：`TypeError`。
+- `shape` 不一致：`ValueError`。
+- `dtype` 不兼容：`TypeError`。
+- 链式表达式任一步非法：立即抛错并终止。
+
 ## 返回与错误
 
 ### 成功返回
@@ -105,6 +136,7 @@
 ## 测试
 
 - 测试文件：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)
+- 运算测试：[`test/operation/test_memory_operation.py`](../../test/operation/test_memory_operation.py)
 - 执行命令：`pytest -q test/symbol_variable/test_memory.py`
 
 ### 测试目标
@@ -117,6 +149,7 @@
 - `format` 语义明确为 `Farmat.Norm -> NCHW`、`Farmat.CLast -> NHWC`。
 - 枚举别名满足：`Farmat.Norm is Farmat.NCHW`，`Farmat.CLast is Farmat.NHWC`。
 - 枚举名称/表示：`Farmat.Norm.name == "NCHW"`，`repr(Farmat.Norm)` 包含 `Farmat.NCHW`。
+- 逐元素算术/比较符合 `spec/operation/nn.md`：shape 严格一致、dtype 兼容、错误类型稳定。
 
 ### 测试标准
 
@@ -134,3 +167,6 @@
 | ME-005 | 格式 | layout | N/A | `format` 语义检查 | `Farmat.Norm -> NCHW`、`Farmat.CLast -> NHWC` |
 | ME-006 | 别名 | Farmat | N/A | `Farmat.Norm`/`Farmat.CLast` | 与 `NCHW/NHWC` 同一枚举值 |
 | ME-007 | 元信息 | LocalSpaceMeta | N/A | 读取 `MemorySpace.GM.value` | 字段可访问，align=1024 |
+| ME-008 | 运算 | Memory + Memory | `shape` 相同 | `add(lhs, rhs)` | shape 保持一致 |
+| ME-009 | 运算 | Memory + scalar | `dtype` 兼容 | `add(lhs, 1)` | shape 保持一致 |
+| ME-010 | 运算 | 比较 | `shape` 相同 | `eq(lhs, rhs)` | dtype 为 bool/predicate |
