@@ -60,10 +60,14 @@ class _SymbolList:
         """
         self.shape: List[SymbolDim] = []
         for value in shapes:
-            if isinstance(value, SymbolDim):
-                self.shape.append(value)
-            else:
-                self.shape.append(SymbolDim(value))
+            self.shape.append(self._normalize_value(value))
+
+    @staticmethod
+    def _normalize_value(value: SymbolDim | int) -> SymbolDim:
+        """将输入值规范化为 SymbolDim。"""
+        if isinstance(value, SymbolDim):
+            return value
+        return SymbolDim(value)
 
     def __repr__(self) -> str:
         """返回列表字符串表示。
@@ -166,7 +170,7 @@ class _SymbolList:
             return self.shape[key]
         if isinstance(key, slice):
             return self.shape[key]
-        return self.shape[key]
+        raise TypeError("索引类型错误")
 
     def __setitem__(self, key, value) -> None:
         """索引赋值。
@@ -190,9 +194,20 @@ class _SymbolList:
         if isinstance(key, int):
             if key < -len(self.shape) or key >= len(self.shape):
                 raise IndexError("下标超出范围")
-            self.shape[key] = SymbolDim(value)
+            self.shape[key] = self._normalize_value(value)
             return
-        self.shape[key] = value
+        if isinstance(key, slice):
+            if isinstance(value, (str, bytes)) or not isinstance(value, Iterable):
+                raise TypeError("切片赋值必须为可迭代对象")
+            normalized: List[SymbolDim] = []
+            for item in value:
+                try:
+                    normalized.append(self._normalize_value(item))
+                except (TypeError, ValueError) as exc:
+                    raise TypeError("切片赋值元素无法转换为 SymbolDim") from exc
+            self.shape[key] = normalized
+            return
+        raise TypeError("索引类型错误")
 
     def get_shape(self) -> List[SymbolDim]:
         """返回内部形状列表。
@@ -211,7 +226,7 @@ class _SymbolList:
         - test: test/symbol_variable/test_symbol_shape.py
         - 功能实现: symbol_variable/symbol_shape.py
         """
-        return self.shape
+        return list(self.shape)
 
     def get_values(self) -> List[int | str]:
         """序列化为 int/str 列表。
