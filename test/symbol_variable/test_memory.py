@@ -28,14 +28,15 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from symbol_variable.memory import LocalSpaceMeta, Memory, MemorySpace
+from symbol_variable.symbol_shape import SymbolShape
 from symbol_variable.type import Farmat, NumericType
 
 
 # ME-001
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-15 17:54:07 +0800
-# 最近一次运行成功时间: 2026-03-15 17:54:07 +0800
+# 最近一次运行测试时间: 2026-03-15 20:35:02 +0800
+# 最近一次运行成功时间: 2026-03-15 20:35:02 +0800
 # 功能说明: 验证默认空间为 GM。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_default_space
 # 对应功能实现文件路径: symbol_variable/memory.py
@@ -49,8 +50,8 @@ def test_default_space() -> None:
 # ME-002
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-15 17:54:07 +0800
-# 最近一次运行成功时间: 2026-03-15 17:54:07 +0800
+# 最近一次运行测试时间: 2026-03-15 20:35:02 +0800
+# 最近一次运行成功时间: 2026-03-15 20:35:02 +0800
 # 功能说明: 验证指定空间写入。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_custom_space
 # 对应功能实现文件路径: symbol_variable/memory.py
@@ -64,8 +65,8 @@ def test_custom_space() -> None:
 # ME-003
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-15 17:54:07 +0800
-# 最近一次运行成功时间: 2026-03-15 17:54:07 +0800
+# 最近一次运行测试时间: 2026-03-15 20:35:02 +0800
+# 最近一次运行成功时间: 2026-03-15 20:35:02 +0800
 # 功能说明: 验证 __repr__ 包含空间名与张量字段表达。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_repr
 # 对应功能实现文件路径: symbol_variable/memory.py
@@ -83,14 +84,14 @@ def test_repr() -> None:
 # ME-004
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-15 17:54:07 +0800
-# 最近一次运行成功时间: 2026-03-15 17:54:07 +0800
-# 功能说明: 验证类 Tensor 对象转换保持 shape/dtype/stride/format。
-# 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_convert_from_tensor
+# 最近一次运行测试时间: 2026-03-15 20:35:02 +0800
+# 最近一次运行成功时间: 2026-03-15 20:35:02 +0800
+# 功能说明: 验证 tensor-like 字段直入构造保持 shape/dtype/stride/format。
+# 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_construct_from_tensor_fields
 # 对应功能实现文件路径: symbol_variable/memory.py
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
 # 对应测试文件路径: test/symbol_variable/test_memory.py
-def test_convert_from_tensor() -> None:
+def test_construct_from_tensor_fields() -> None:
     class DummyTensor:
         def __init__(self, shape, dtype, stride, format):
             self.shape = shape
@@ -99,7 +100,12 @@ def test_convert_from_tensor() -> None:
             self.format = format
 
     tensor = DummyTensor(["N", 4], NumericType.Float32, stride=[4, 1], format=Farmat.Norm)
-    mem = Memory.convert_from_tensor(tensor)
+    mem = Memory(
+        tensor.shape,
+        tensor.dtype,
+        stride=tensor.stride,
+        format=tensor.format,
+    )
     assert isinstance(mem, Memory)
     assert mem.space is MemorySpace.GM
     assert mem.shape.get_values() == ["N", 4]
@@ -108,11 +114,29 @@ def test_convert_from_tensor() -> None:
     assert mem.format is tensor.format
 
 
+# ME-009
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-15 20:35:02 +0800
+# 最近一次运行成功时间: 2026-03-15 20:35:02 +0800
+# 功能说明: 验证 shape/stride 可直接接收 SymbolShape。
+# 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_shape_stride_accept_symbol_shape
+# 对应功能实现文件路径: symbol_variable/memory.py
+# 对应 spec 文件路径: spec/symbol_variable/memory.md
+# 对应测试文件路径: test/symbol_variable/test_memory.py
+def test_shape_stride_accept_symbol_shape() -> None:
+    shape = SymbolShape([1, "N"])
+    stride = SymbolShape([2, 1])
+    mem = Memory(shape, NumericType.Float32, stride=stride)
+    assert mem.shape is shape
+    assert mem.stride is stride
+
+
 # ME-006
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-15 17:54:07 +0800
-# 最近一次运行成功时间: 2026-03-15 17:54:07 +0800
+# 最近一次运行测试时间: 2026-03-15 20:35:02 +0800
+# 最近一次运行成功时间: 2026-03-15 20:35:02 +0800
 # 功能说明: 验证 format 语义映射（c last=NHWC，c not last=NCHW）。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_format_mapping
 # 对应功能实现文件路径: symbol_variable/memory.py
@@ -130,8 +154,8 @@ def test_format_mapping() -> None:
 # ME-005
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-15 17:54:07 +0800
-# 最近一次运行成功时间: 2026-03-15 17:54:07 +0800
+# 最近一次运行测试时间: 2026-03-15 20:35:02 +0800
+# 最近一次运行成功时间: 2026-03-15 20:35:02 +0800
 # 功能说明: 验证 LocalSpaceMeta 冻结与 MemorySpace 元信息字段。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_space_meta
 # 对应功能实现文件路径: symbol_variable/memory.py

@@ -21,7 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from symbol_variable.symbol_shape import SymbolList
+from symbol_variable.symbol_shape import SymbolShape
 from symbol_variable.type import Farmat, NumericType
 
 
@@ -116,11 +116,18 @@ class Memory:
         - test: test/symbol_variable/test_memory.py
         - 功能实现: symbol_variable/memory.py
         """
-        self.shape = SymbolList.convert_from_list(shape)
+        self.shape = self._normalize_shape(shape)
         self.dtype = dtype
-        self.stride = None if stride is None else SymbolList.convert_from_list(stride)
+        self.stride = None if stride is None else self._normalize_shape(stride)
         self.format = format
         self.space = space
+
+    @staticmethod
+    def _normalize_shape(value):
+        """规范化 shape/stride 输入为 SymbolShape。"""
+        if isinstance(value, SymbolShape):
+            return value
+        return SymbolShape(value)
 
     def __repr__(self) -> str:
         """返回 Memory 的字符串表示。
@@ -148,28 +155,3 @@ class Memory:
             ")"
         )
         return f"Memory({self.space.name},{tensor_repr})"
-
-    @staticmethod
-    def convert_from_tensor(tensor) -> "Memory":
-        """由类 Tensor 对象构造 Memory。
-
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
-
-        功能说明:
-        - 复制 shape/dtype/stride/format，空间默认 GM。
-
-        使用示例:
-        - Memory.convert_from_tensor(obj)
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/symbol_variable/test_memory.py
-        - 功能实现: symbol_variable/memory.py
-        """
-        return Memory(
-            tensor.shape,
-            tensor.dtype,
-            stride=tensor.stride,
-            format=tensor.format,
-        )

@@ -5,7 +5,7 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`规格小队`
 - `spec`：[`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)
 - `test`：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)
 - `功能实现`：[`symbol_variable/memory.py`](../../symbol_variable/memory.py)
@@ -28,12 +28,35 @@
 - 仅定义空间枚举与内存对象的结构化描述，不负责真实分配或回收。
 - 不校验容量、对齐或空间有效性，仅提供元信息。
 - 不实现跨空间迁移或拷贝策略。
+- 本次仅完成 `convert_from_*` 输入清理的接口收敛，不新增额外工厂类或转换层。
 
 ## 兼容性
 
 - `Memory` 保持与张量基类一致的 `shape/dtype/stride/format` 接口与语义。
 - 默认空间为 `MemorySpace.GM`，以保证与现有默认逻辑兼容。
 - `stride` 允许为 `None`，语义与基础张量一致。
+- `Memory(...)` 作为唯一公开构造入口；不再保留 `Memory.convert_from_tensor` 这类公开转换方法。
+- `shape` 与 `stride` 的输入规整通过构造器内部完成，不再要求调用方先执行 `convert_from_list`。
+
+## convert_from_* 清理
+
+### 统一接口
+
+- 创建 `Memory` 统一使用 `Memory(shape, dtype, space=..., stride=..., format=...)`。
+- 调用方若原先使用 `Memory.convert_from_tensor(tensor)`，迁移后应显式传入：
+  - `shape=tensor.shape`
+  - `dtype=tensor.dtype`
+  - `stride=tensor.stride`
+  - `format=tensor.format`
+- `shape` 与 `stride` 应接受：
+  - 已构造的 `SymbolShape`
+  - 或任何可被 `SymbolShape(...)` 正常接收的可迭代输入
+
+### 统一命名
+
+- 公开 API 使用类型名 `Memory(...)` 作为唯一输入入口。
+- 不再新增 `convert_from_tensor`、`convert_from_memory` 等公开转换工厂。
+- 若实现仍需要规整逻辑，应使用私有 `_normalize_shape`、`_normalize_stride` 一类 `_normalize_*` 命名。
 
 ## 功能
 
@@ -73,7 +96,9 @@
 功能说明：
 
 - 初始化 `shape/dtype/stride/format` 与张量对象一致。
+- `shape` 统一规范化为 `SymbolShape` 语义。
 - 记录 `space`。
+- `stride=None` 时保持 `None`；否则按与 `shape` 一致的规则规范化。
 - `format` 约定：`Farmat.Norm -> NCHW`，`Farmat.CLast -> NHWC`。
 
 #### 字符串表现
@@ -82,25 +107,25 @@
 
 功能说明：返回 `Memory(<space name>,<tensor repr>)`。
 
-#### 转换
+#### 统一构造入口
 
-接口：`convert_from_tensor(tensor)`
+接口：`Memory(shape, dtype, space=MemorySpace.GM, stride=None, format=Farmat.Norm)`
 
 功能说明：
 
-- 由类 Tensor 对象构造 `Memory`，保持 `shape/dtype/stride/format`，空间默认 `GM`。
+- 由原始 `shape/stride` 数据或现成 `SymbolShape` 直接构造 `Memory`。
+- 对类 Tensor 对象的适配由调用方解包字段后直接调用构造器完成，不再提供单独 `convert_from_tensor`。
 
 ## 返回与错误
 
 ### 成功返回
 
 - `Memory` 构造返回内存对象。
-- `convert_from_tensor` 返回 `Memory`。
 
 ### 失败返回
 
 - 由 `SymbolShape`/`SymbolDim`/`NumericType` 的构造或校验抛出对应异常。
-- 非类 Tensor 入参传入 `convert_from_tensor` 的行为由实现决定（通常触发属性访问错误）。
+- `shape` 或 `stride` 输入不满足 `SymbolShape` 规范时，向上抛出对应异常。
 
 ## 测试
 
@@ -113,7 +138,8 @@
 - `MemorySpace` 枚举项与元信息字段可访问。
 - `Memory` 初始化保持张量字段并设置 `space`。
 - `__repr__` 输出包含空间名与张量字段表达。
-- `convert_from_tensor` 正确转换并保持 shape/dtype/stride/format。
+- 验证统一构造入口可直接接收 tensor-like 对象解包后的字段，无需 `convert_from_tensor`。
+- 验证 `shape`/`stride` 可直接接收 `SymbolShape` 或普通可迭代输入。
 - `format` 语义明确为 `Farmat.Norm -> NCHW`、`Farmat.CLast -> NHWC`。
 - 枚举别名满足：`Farmat.Norm is Farmat.NCHW`，`Farmat.CLast is Farmat.NHWC`。
 - 枚举名称/表示：`Farmat.Norm.name == "NCHW"`，`repr(Farmat.Norm)` 包含 `Farmat.NCHW`。
@@ -130,7 +156,9 @@
 | ME-001 | 构造 | 默认空间 | N/A | `Memory(shape, dtype)` | `space` 为 `GM` |
 | ME-002 | 构造 | 指定空间 | N/A | `Memory(shape, dtype, space=MemorySpace.LM)` | `space` 为 `LM` |
 | ME-003 | 表现 | repr | N/A | `repr(memory)` | 含 `Memory(GM,` 前缀 |
-| ME-004 | 转换 | Tensor -> Memory | N/A | `convert_from_tensor(t)` | 形状/类型/步幅/格式一致 |
+| ME-004 | 构造 | tensor-like 字段直入 | N/A | `Memory(t.shape, t.dtype, stride=t.stride, format=t.format)` | 形状/类型/步幅/格式一致 |
 | ME-005 | 格式 | layout | N/A | `format` 语义检查 | `Farmat.Norm -> NCHW`、`Farmat.CLast -> NHWC` |
 | ME-006 | 别名 | Farmat | N/A | `Farmat.Norm`/`Farmat.CLast` | 与 `NCHW/NHWC` 同一枚举值 |
 | ME-007 | 元信息 | LocalSpaceMeta | N/A | 读取 `MemorySpace.GM.value` | 字段可访问，align=1024 |
+| ME-008 | 清理 | convert_from_tensor 移除 | N/A | 以构造器替代 `Memory.convert_from_tensor` | 统一使用 `Memory(...)` 入口 |
+| ME-009 | 规范化 | shape/stride 直入 | N/A | `Memory(SymbolShape([1, 2]), dtype, stride=SymbolShape([2, 1]))` | 可直接接受已归一化输入 |

@@ -5,13 +5,14 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`规格小队`
 - `spec`：[`spec/symbol_variable/symbol_dim.md`](../../spec/symbol_variable/symbol_dim.md)
 - `test`：[`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py)
 - `功能实现`：[`symbol_variable/symbol_dim.py`](../../symbol_variable/symbol_dim.py)
 
 ## 重构目标
 
+- 完成 `convert_from_*` 清理，移除 `SymbolDim.convert_from_int` 这类公开转换入口。
 - 抽取并复用操作数规范化逻辑，减少算术/比较路径的重复代码。
 - 明确并统一 `str` 与 `sympy.Symbol` 的符号假设策略，保证构造与运算结果一致。
 - 明确纯数字字符串在构造、算术与比较入口中的统一拒绝规则，保证非法输入可预测。
@@ -27,9 +28,11 @@
 ## 兼容性
 
 - `SymbolDim` 的构造、算术、比较与动态性判断接口保持不变。
+- `convert_from_int` 不再作为公开接口保留；统一使用 `SymbolDim(value)` 作为唯一公开构造入口。
 - 纯数字字符串继续拒绝，异常类型明确为 `ValueError`，且该规则同时适用于构造、算术与比较入口。
 - `sympy.Symbol` 的假设保留规则需与实现与测试一致：仅在无显式假设时规范化。
 - 非空且不属于“纯数字字符串”的 `str` 输入不新增额外语义校验，继续按 `sympy.symbols(..., integer=True, real=True)` 处理，以兼容既有调用。
+- 若实现仍需要类型规整辅助函数，应使用私有命名（如 `_normalize_*`），不得再暴露新的公开 `convert_from_*` 系列名称。
 
 ## 依赖约定
 
@@ -62,6 +65,20 @@
 - 前后空白不改变“是否为纯数字字符串”的判定结果：`" 12 "` 视为非法，`" N "` 仍可按符号 `N` 处理。
 - Unicode 数字遵循 Python `str.isdigit()` 语义，仍视为纯数字字符串并拒绝。
 - 异常消息文本不是兼容承诺；兼容性仅要求异常类型稳定为 `ValueError` 或 `TypeError`。
+
+## convert_from_* 清理
+
+### 统一接口
+
+- `SymbolDim(value)` 是唯一公开的输入归一化与构造入口。
+- 允许的 `value` 类型与 `_SymbolDim.__init__` 约定一致：`int`、合法 `str`、`sympy.Basic`。
+- 调用方若原先使用 `SymbolDim.convert_from_int(value)`，迁移后应直接改为 `SymbolDim(value)`。
+
+### 统一命名
+
+- 删除公开命名 `convert_from_int`，避免同一语义同时存在“构造器”和“convert_from_*”两套入口。
+- 公开 API 命名遵循“类型名即入口”原则：创建 `SymbolDim` 直接调用 `SymbolDim(...)`。
+- 仅允许私有辅助逻辑使用 `_normalize_str`、`_normalize_operand`、`_normalize_symbol` 等 `_normalize_*` 命名。
 
 ## 行为规范
 
@@ -131,18 +148,13 @@
 功能说明：
 
 - 对外公开的符号维度类型，继承 `_SymbolDim`。
+- 公开创建方式统一为 `SymbolDim(value)`，不再额外提供 `convert_from_*` 包装入口。
 
 #### 动态性判断
 
 接口：`is_dynamic() -> bool`
 
 功能说明：当 `get_symbol().free_symbols` 非空时返回 `True`。
-
-#### 数值转换
-
-接口：`convert_from_int(value: int)`
-
-功能说明：将 `int` 转为 `SymbolDim`。
 
 ## 返回与错误
 
@@ -167,6 +179,7 @@
 ### 测试目标
 
 - 覆盖构造、算术、比较、动态性判断与错误分支。
+- 验证公开创建入口统一为 `SymbolDim(value)`，不再依赖 `convert_from_int`。
 - 验证 `str` 操作数与构造共享同一字符串校验与符号假设。
 - 验证 `sympy.Symbol` 在“无显式假设”与“有显式假设”两种场景下的策略差异。
 - 验证纯数字字符串在构造、算术、反向算术、比较路径中均触发 `ValueError`。
@@ -186,7 +199,7 @@
 | SD-002 | 构造 | 数字字符串 | N/A | `SymbolDim("12")` | 抛 `ValueError` |
 | SD-003 | 运算 | add/sub/mul/div | N/A | `SymbolDim("N") + 2` 等 | 返回 `SymbolDim`，表达式正确 |
 | SD-004 | 反向运算 | radd/rsub/rmul/rtruediv | N/A | `1 + SymbolDim("N")` | 返回 `SymbolDim` |
-| SD-005 | 动态性/转换 | is_dynamic/convert | N/A | `SymbolDim(8).is_dynamic()` | 正确返回 |
+| SD-005 | 动态性/构造 | is_dynamic/direct-init | N/A | `SymbolDim(8).is_dynamic()`、`SymbolDim(32)` | 动态性与直接构造行为正确 |
 | SD-006 | 相等 | int/str/SymbolDim | N/A | `SymbolDim("N") == "N"` | True |
 | SD-007 | 异常 | 非法类型 | N/A | `SymbolDim(3) + 1.0` | 抛 `TypeError` |
 | SD-008 | 表现 | get_symbol/repr | N/A | `repr(SymbolDim("N"))` | 与 `str(get_symbol())` 一致 |
@@ -198,3 +211,4 @@
 | SD-014 | 边界 | 空白数字字符串 | N/A | `SymbolDim(" 12 ")`、`SymbolDim("N") + " 12 "` | 均抛 `ValueError` |
 | SD-015 | 兼容 | 非纯数字字符串 | N/A | `SymbolDim("+1")`、`SymbolDim("N") + "3.14"` | 继续按符号名处理 |
 | SD-016 | 边界 | Unicode 数字字符串 | N/A | `SymbolDim("１２")`、`SymbolDim("N") == "٠١٢"` | 均抛 `ValueError` |
+| SD-017 | 清理 | convert_from_int 移除 | N/A | 使用 `SymbolDim(32)` 替代 `SymbolDim.convert_from_int(32)` | 统一使用构造器入口 |

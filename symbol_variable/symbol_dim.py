@@ -390,7 +390,7 @@ class SymbolDim(_SymbolDim):
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 提供动态性判断与 int 转换入口。
+    - 提供动态性判断能力。
 
     使用示例:
     - SymbolDim("N").is_dynamic()
@@ -420,23 +420,3 @@ class SymbolDim(_SymbolDim):
         - 功能实现: symbol_variable/symbol_dim.py
         """
         return bool(self.get_symbol().free_symbols)
-
-    @staticmethod
-    def convert_from_int(value: int) -> "SymbolDim":
-        """将 int 转换为 SymbolDim。
-
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
-
-        功能说明:
-        - 将 int 包装为 SymbolDim 并返回。
-
-        使用示例:
-        - SymbolDim.convert_from_int(32)
-
-        关联文件:
-        - spec: spec/symbol_variable/symbol_dim.md
-        - test: test/symbol_variable/test_symbol_dim.py
-        - 功能实现: symbol_variable/symbol_dim.py
-        """
-        return SymbolDim(value)

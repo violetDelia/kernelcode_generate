@@ -261,7 +261,7 @@ class SymbolList(_SymbolList):
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 提供列表转换与序列化能力。
+    - 提供序列化能力。
 
     使用示例:
     - SymbolList([1, 2]).to_symbols()
@@ -271,29 +271,6 @@ class SymbolList(_SymbolList):
     - test: test/symbol_variable/test_symbol_shape.py
     - 功能实现: symbol_variable/symbol_shape.py
     """
-
-    @staticmethod
-    def convert_from_list(shapes: Iterable[SymbolDim | int] | "SymbolShape") -> "SymbolShape":
-        """将列表或 SymbolShape 转换为 SymbolShape。
-
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
-
-        功能说明:
-        - 输入为 SymbolShape 时直接返回。
-        - 其他输入构造新的 SymbolShape。
-
-        使用示例:
-        - SymbolList.convert_from_list([1, 2])
-
-        关联文件:
-        - spec: spec/symbol_variable/symbol_shape.md
-        - test: test/symbol_variable/test_symbol_shape.py
-        - 功能实现: symbol_variable/symbol_shape.py
-        """
-        if isinstance(shapes, SymbolShape):
-            return shapes
-        return SymbolShape(list(shapes))
 
     def to_symbols(self) -> List[int | str]:
         """序列化为 int/str 列表。
