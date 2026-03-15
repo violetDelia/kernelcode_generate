@@ -27,8 +27,8 @@
   - 新增测试：`sympy.Symbol` 无显式假设时规范化为 integer/real。
 - 测试：
   - `pytest -q test/symbol_variable/test_symbol_dim.py`（11 passed）
-@小李飞刀向@神秘人发起会话: 已完成任务 T-20260315-e928e097：按 refactor spec 重构 symbol_variable/symbol_dim.py，统一操作数规范化逻辑，并补充测试（新增 sympy.Symbol 无显式假设规范化）；worktree=/home/lfr/kernelcode_generate/wt-20260315-symbol-dim-refactor；测试 pytest -q test/symbol_variable/test_symbol_dim.py（11 passed）；记录：agents/codex-multi-agents/log/task_records/refactor-symbol-dim-20260315.md。
-@小李飞刀向@神秘人发起会话: 申请创建审查任务：实现文件在 symbol_variable/symbol_dim.py，测试在 test/symbol_variable/test_symbol_dim.py，请审查并记录到 agents/codex-multi-agents/log/task_records/refactor-symbol-dim-20260315.md。
+@小李飞刀向@神秘人发起会话: 已完成任务 T-20260315-e928e097：按 refactor spec 重构 symbol_variable/symbol_dim.py，统一操作数规范化逻辑，并补充测试（新增 sympy.Symbol 无显式假设规范化）；worktree=/home/lfr/kernelcode_generate/wt-20260315-symbol-dim-refactor；测试 pytest -q test/symbol_variable/test_symbol_dim.py（11 passed）；记录：agents/codex-multi-agents/log/task_records/2026/11/20260315-refactor-symbol-dim.md。
+@小李飞刀向@神秘人发起会话: 申请创建审查任务：实现文件在 symbol_variable/symbol_dim.py，测试在 test/symbol_variable/test_symbol_dim.py，请审查并记录到 agents/codex-multi-agents/log/task_records/2026/11/20260315-refactor-symbol-dim.md。
 
 ## 审查记录 T-20260315-5fcac5f5
 

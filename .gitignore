@@ -1,4 +1,5 @@
 tmp
 .pytest_cache
 agents/codex-multi-agents/config
+*__pycache__
 

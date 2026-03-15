@@ -79,7 +79,7 @@
 ### 测试记录
 - 命令：`pytest -q test/symbol_variable/test_symbol_dim.py`
 - 结果：通过（10 passed）
-@小李飞刀向@神秘人发起会话: 已完成改进任务 T-20260315-d77ada82：新增测试覆盖 sympy.Symbol 带显式假设（integer=False）时保持原样；worktree=/home/lfr/kernelcode_generate/wt-20260315-symbol-dim-spec；测试 pytest -q test/symbol_variable/test_symbol_dim.py（10 passed）；记录：agents/codex-multi-agents/log/task_records/impl-symbol-dim-20260315.md。
+@小李飞刀向@神秘人发起会话: 已完成改进任务 T-20260315-d77ada82：新增测试覆盖 sympy.Symbol 带显式假设（integer=False）时保持原样；worktree=/home/lfr/kernelcode_generate/wt-20260315-symbol-dim-spec；测试 pytest -q test/symbol_variable/test_symbol_dim.py（10 passed）；记录：agents/codex-multi-agents/log/task_records/2026/11/20260315-impl-symbol-dim.md。
 
 ## 审查记录 T-20260315-37d0a349
 
