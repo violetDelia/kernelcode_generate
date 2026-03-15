@@ -1,25 +1,21 @@
-"""Python 层模块入口。
+"""Dialect package entry.
 
-创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+创建者: 小李飞刀
+最后一次更改: 小李飞刀
 
 功能说明:
-- 提供 operation 与 dialect 子模块的统一入口。
+- 暴露 nn dialect 的 type、attr 与 op 定义。
 
 使用示例:
-- from python.operation import add
-- from python.dialect import Nn, NnAddOp
+- from python.dialect import Nn, NnAddOp, NnMemoryType
 
 关联文件:
-- spec: spec/operation/nn.md
 - spec: spec/dialect/nn.md
-- test: test/operation/test_operation_nn.py
 - test: test/dialect/test_nn_dialect.py
-- 功能实现: python/operation/nn.py
 - 功能实现: python/dialect/nn.py
 """
 
-from .dialect import (
+from .nn import (
     Nn,
     NnAddOp,
     NnEqOp,
@@ -34,7 +30,6 @@ from .dialect import (
     NnSubOp,
     NnTrueDivOp,
 )
-from .operation import add, eq, ge, gt, le, lt, mul, ne, sub, truediv
 
 __all__ = [
     "Nn",
@@ -50,14 +45,4 @@ __all__ = [
     "NnGeOp",
     "NnMemorySpaceAttr",
     "NnMemoryType",
-    "add",
-    "sub",
-    "mul",
-    "truediv",
-    "eq",
-    "ne",
-    "lt",
-    "le",
-    "gt",
-    "ge",
 ]
