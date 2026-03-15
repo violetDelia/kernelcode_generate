@@ -7,13 +7,13 @@
 - 定义内存空间枚举与 Memory 对象，独立描述形状与类型信息。
 
 使用示例:
-- from symbol_variable.memory import Memory, MemorySpace
+- from python.symbol_variable.memory import Memory, MemorySpace
 - Memory([1, 2], NumericType.Float32, space=MemorySpace.GM)
 
 关联文件:
 - spec: spec/symbol_variable/memory.md
 - test: test/symbol_variable/test_memory.py
-- 功能实现: symbol_variable/memory.py
+- 功能实现: python/symbol_variable/memory.py
 """
 
 from __future__ import annotations
@@ -21,8 +21,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from symbol_variable.symbol_shape import SymbolShape
-from symbol_variable.type import Farmat, NumericType
+from .symbol_shape import SymbolShape
+from .type import Farmat, NumericType
 
 
 @dataclass(frozen=True)
@@ -41,7 +41,7 @@ class LocalSpaceMeta:
     关联文件:
     - spec: spec/symbol_variable/memory.md
     - test: test/symbol_variable/test_memory.py
-    - 功能实现: symbol_variable/memory.py
+    - 功能实现: python/symbol_variable/memory.py
     """
 
     name: str
@@ -64,7 +64,7 @@ class MemorySpace(Enum):
     关联文件:
     - spec: spec/symbol_variable/memory.md
     - test: test/symbol_variable/test_memory.py
-    - 功能实现: symbol_variable/memory.py
+    - 功能实现: python/symbol_variable/memory.py
     """
 
     GM = LocalSpaceMeta(name="GM", max_size=None, align=1024)
@@ -89,7 +89,7 @@ class Memory:
     关联文件:
     - spec: spec/symbol_variable/memory.md
     - test: test/symbol_variable/test_memory.py
-    - 功能实现: symbol_variable/memory.py
+    - 功能实现: python/symbol_variable/memory.py
     """
 
     def __init__(
@@ -114,7 +114,7 @@ class Memory:
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/symbol_variable/test_memory.py
-        - 功能实现: symbol_variable/memory.py
+        - 功能实现: python/symbol_variable/memory.py
         """
         self.shape = self._normalize_shape(shape)
         self.dtype = dtype
@@ -144,7 +144,7 @@ class Memory:
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/symbol_variable/test_memory.py
-        - 功能实现: symbol_variable/memory.py
+        - 功能实现: python/symbol_variable/memory.py
         """
         tensor_repr = (
             "Tensor("
@@ -171,7 +171,7 @@ class Memory:
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/operation/test_memory_operation.py
-        - 功能实现: symbol_variable/memory.py
+        - 功能实现: python/symbol_variable/memory.py
         """
         if self.shape.get_values() != other.shape.get_values():
             raise ValueError("Memory shape mismatch")
@@ -191,7 +191,7 @@ class Memory:
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/operation/test_memory_operation.py
-        - 功能实现: symbol_variable/memory.py
+        - 功能实现: python/symbol_variable/memory.py
         """
         if self.dtype is not other.dtype:
             raise TypeError("Memory dtype mismatch")
@@ -211,7 +211,7 @@ class Memory:
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/operation/test_memory_operation.py
-        - 功能实现: symbol_variable/memory.py
+        - 功能实现: python/symbol_variable/memory.py
         """
         if isinstance(value, bool):
             value = int(value)
@@ -235,11 +235,11 @@ class Memory:
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/operation/test_memory_operation.py
-        - 功能实现: symbol_variable/memory.py
+        - 功能实现: python/symbol_variable/memory.py
         """
         if value is None:
             return None
-        return SymbolList.convert_from_list(list(value.get_shape()))
+        return SymbolShape(value.get_values())
 
     def _clone_with_dtype(self, dtype: NumericType) -> "Memory":
         """按指定 dtype 克隆 Memory。
@@ -256,7 +256,7 @@ class Memory:
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/operation/test_memory_operation.py
-        - 功能实现: symbol_variable/memory.py
+        - 功能实现: python/symbol_variable/memory.py
         """
         shape = self._clone_symbol_list(self.shape)
         stride = self._clone_symbol_list(self.stride)
@@ -277,7 +277,7 @@ class Memory:
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/operation/test_memory_operation.py
-        - 功能实现: symbol_variable/memory.py
+        - 功能实现: python/symbol_variable/memory.py
         """
         if isinstance(other, Memory):
             self._ensure_same_shape(other)
@@ -301,7 +301,7 @@ class Memory:
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/operation/test_memory_operation.py
-        - 功能实现: symbol_variable/memory.py
+        - 功能实现: python/symbol_variable/memory.py
         """
         if isinstance(other, Memory):
             self._ensure_same_shape(other)
@@ -325,7 +325,7 @@ class Memory:
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/operation/test_memory_operation.py
-        - 功能实现: symbol_variable/memory.py
+        - 功能实现: python/symbol_variable/memory.py
         """
         return self._binary_arithmetic(other)
 
@@ -344,7 +344,7 @@ class Memory:
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/operation/test_memory_operation.py
-        - 功能实现: symbol_variable/memory.py
+        - 功能实现: python/symbol_variable/memory.py
         """
         return self._binary_arithmetic(other)
 
@@ -363,7 +363,7 @@ class Memory:
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/operation/test_memory_operation.py
-        - 功能实现: symbol_variable/memory.py
+        - 功能实现: python/symbol_variable/memory.py
         """
         return self._binary_arithmetic(other)
 
@@ -382,7 +382,7 @@ class Memory:
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/operation/test_memory_operation.py
-        - 功能实现: symbol_variable/memory.py
+        - 功能实现: python/symbol_variable/memory.py
         """
         return self._binary_arithmetic(other)
 
@@ -401,7 +401,7 @@ class Memory:
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/operation/test_memory_operation.py
-        - 功能实现: symbol_variable/memory.py
+        - 功能实现: python/symbol_variable/memory.py
         """
         return self._binary_arithmetic(other)
 
@@ -420,7 +420,7 @@ class Memory:
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/operation/test_memory_operation.py
-        - 功能实现: symbol_variable/memory.py
+        - 功能实现: python/symbol_variable/memory.py
         """
         return self._binary_arithmetic(other)
 
@@ -439,7 +439,7 @@ class Memory:
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/operation/test_memory_operation.py
-        - 功能实现: symbol_variable/memory.py
+        - 功能实现: python/symbol_variable/memory.py
         """
         return self._binary_arithmetic(other)
 
@@ -458,7 +458,7 @@ class Memory:
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/operation/test_memory_operation.py
-        - 功能实现: symbol_variable/memory.py
+        - 功能实现: python/symbol_variable/memory.py
         """
         return self._binary_arithmetic(other)
 
@@ -477,7 +477,7 @@ class Memory:
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/operation/test_memory_operation.py
-        - 功能实现: symbol_variable/memory.py
+        - 功能实现: python/symbol_variable/memory.py
         """
         return self._binary_compare(other)
 
@@ -496,7 +496,7 @@ class Memory:
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/operation/test_memory_operation.py
-        - 功能实现: symbol_variable/memory.py
+        - 功能实现: python/symbol_variable/memory.py
         """
         return self._binary_compare(other)
 
@@ -515,7 +515,7 @@ class Memory:
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/operation/test_memory_operation.py
-        - 功能实现: symbol_variable/memory.py
+        - 功能实现: python/symbol_variable/memory.py
         """
         return self._binary_compare(other)
 
@@ -534,7 +534,7 @@ class Memory:
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/operation/test_memory_operation.py
-        - 功能实现: symbol_variable/memory.py
+        - 功能实现: python/symbol_variable/memory.py
         """
         return self._binary_compare(other)
 
@@ -553,7 +553,7 @@ class Memory:
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/operation/test_memory_operation.py
-        - 功能实现: symbol_variable/memory.py
+        - 功能实现: python/symbol_variable/memory.py
         """
         return self._binary_compare(other)
 
@@ -572,6 +572,6 @@ class Memory:
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/operation/test_memory_operation.py
-        - 功能实现: symbol_variable/memory.py
+        - 功能实现: python/symbol_variable/memory.py
         """
         return self._binary_compare(other)

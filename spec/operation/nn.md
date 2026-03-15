@@ -6,10 +6,10 @@
 
 - 创建者：`榕`
 - 最后一次更改：`榕`
-- `spec`：[`spec/operation/nn.md`](../../spec/operation/memory.md)
+- `spec`：[`spec/operation/nn.md`](../../spec/operation/nn.md)
 - `关联类型`：[`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)
-- `test`：[`test/operation/test_operation_nn.py`](../../test/operation/test_memory_operation.py)
-- `功能实现`：[`python/operation/nn.py`](../../python/operation/memory.py)
+- `test`：[`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py)
+- `功能实现`：[`python/operation/nn.py`](../../python/operation/nn.py)
 
 ## 设计目标
 
@@ -39,7 +39,7 @@
 - 所有计算在执行前都必须先通过类型合法性检查。
 - 运算结果必须保留输入的动态维度信息，不得在前端阶段退化为静态常量。
 - 比较操作返回逐元素比较结果，其结果仍是张量语义对象，而不是单个 Python `bool`。
-- 必须提供独立的 nn API 实现层 `python/operation/nn.py`，并提供对应测试 `test/operation/test_operation_nn.py`，不可仅在 `symbol_variable/memory.py` 内承载语义。
+- 必须提供独立的 nn API 实现层 `python/operation/nn.py`，并提供对应测试 `test/operation/test_operation_nn.py`，不可仅在 `python/symbol_variable/memory.py` 内承载语义。
 
 ## 支持的操作
 
@@ -332,8 +332,8 @@ C = add(add(A, 3), B)
 ## 独立使用示例
 
 ```python
-from operation.memory import add, eq
-from symbol_variable.memory import Memory
+from python.operation.nn import add, eq
+from python.symbol_variable.memory import Memory
 
 X = Memory(shape=["A", "B"], dtype="float32")
 Y = Memory(shape=["A", "B"], dtype="float32")

@@ -1,16 +1,16 @@
 """package api tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 小李飞刀
 
 功能说明:
-- 覆盖 symbol_variable 包级导出策略。
+- 覆盖 python.symbol_variable 包入口导出边界与对象一致性。
 
 使用示例:
 - pytest -q test/symbol_variable/test_package_api.py
 
 关联文件:
-- 功能实现: symbol_variable/__init__.py
+- 功能实现: python/symbol_variable/__init__.py
 - Spec 文档: spec/symbol_variable/package_api.md
 - 测试文件: test/symbol_variable/test_package_api.py
 """
@@ -27,102 +27,127 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 
-# PA-001
+# PM-001
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-15 23:49:01 +0800
-# 最近一次运行成功时间: 2026-03-15 23:49:01 +0800
-# 功能说明: 验证现有公共类型包级导出可用。
-# 使用示例: pytest -q test/symbol_variable/test_package_api.py -k test_package_exports_base
-# 对应功能实现文件路径: symbol_variable/__init__.py
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-16 03:35:38 +0800
+# 最近一次运行成功时间: 2026-03-16 03:35:38 +0800
+# 功能说明: 验证 python.symbol_variable 顶层导入可用。
+# 使用示例: pytest -q test/symbol_variable/test_package_api.py -k test_python_symbol_variable_imports
+# 对应功能实现文件路径: python/symbol_variable/__init__.py
 # 对应 spec 文件路径: spec/symbol_variable/package_api.md
 # 对应测试文件路径: test/symbol_variable/test_package_api.py
-def test_package_exports_base() -> None:
-    from symbol_variable import (  # noqa: WPS433 - import for API validation
-        LocalSpaceMeta,
-        Memory,
-        MemorySpace,
-        SymbolDim,
-        SymbolList,
-        SymbolShape,
-    )
+def test_python_symbol_variable_imports() -> None:
+    from python.symbol_variable import Memory, MemorySpace, SymbolDim, SymbolShape
 
-    assert LocalSpaceMeta is not None
     assert Memory is not None
     assert MemorySpace is not None
     assert SymbolDim is not None
-    assert SymbolList is not None
     assert SymbolShape is not None
 
 
-# PA-002
+# PM-002
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-15 23:49:01 +0800
-# 最近一次运行成功时间: 2026-03-15 23:49:01 +0800
-# 功能说明: 验证新增 NumericType/Farmat 顶层导出。
-# 使用示例: pytest -q test/symbol_variable/test_package_api.py -k test_package_exports_types
-# 对应功能实现文件路径: symbol_variable/__init__.py
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-16 03:35:38 +0800
+# 最近一次运行成功时间: 2026-03-16 03:35:38 +0800
+# 功能说明: 验证旧路径不再可用。
+# 使用示例: pytest -q test/symbol_variable/test_package_api.py -k test_legacy_import_disabled
+# 对应功能实现文件路径: python/symbol_variable/__init__.py
 # 对应 spec 文件路径: spec/symbol_variable/package_api.md
 # 对应测试文件路径: test/symbol_variable/test_package_api.py
-def test_package_exports_types() -> None:
-    from symbol_variable import Farmat, NumericType  # noqa: WPS433
+def test_legacy_import_disabled() -> None:
+    import importlib
 
-    assert NumericType is not None
-    assert Farmat is not None
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("symbol_variable")
 
 
-# PA-003
+# PM-003
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-15 23:49:01 +0800
-# 最近一次运行成功时间: 2026-03-15 23:49:01 +0800
-# 功能说明: 验证顶层导出的枚举对象与定义模块一致。
-# 使用示例: pytest -q test/symbol_variable/test_package_api.py -k test_package_exports_identity
-# 对应功能实现文件路径: symbol_variable/__init__.py
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-16 03:35:38 +0800
+# 最近一次运行成功时间: 2026-03-16 03:35:38 +0800
+# 功能说明: 验证 python.symbol_variable 顶层重新导出的类型对象与子模块一致。
+# 使用示例: pytest -q test/symbol_variable/test_package_api.py -k test_python_package_type_exports
+# 对应功能实现文件路径: python/symbol_variable/__init__.py
 # 对应 spec 文件路径: spec/symbol_variable/package_api.md
 # 对应测试文件路径: test/symbol_variable/test_package_api.py
-def test_package_exports_identity() -> None:
-    from symbol_variable import Farmat as TopFarmat
-    from symbol_variable import NumericType as TopNumericType
-    from symbol_variable.type import Farmat as ModuleFarmat
-    from symbol_variable.type import NumericType as ModuleNumericType
+def test_python_package_type_exports() -> None:
+    from python.symbol_variable import Farmat as PackageFarmat
+    from python.symbol_variable import NumericType as PackageNumericType
+    from python.symbol_variable.type import Farmat as ModuleFarmat
+    from python.symbol_variable.type import NumericType as ModuleNumericType
 
-    assert TopNumericType is ModuleNumericType
-    assert TopFarmat is ModuleFarmat
+    assert PackageNumericType is ModuleNumericType
+    assert PackageFarmat is ModuleFarmat
 
 
-# PA-004
+# PM-004
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-15 23:49:01 +0800
-# 最近一次运行成功时间: 2026-03-15 23:49:01 +0800
-# 功能说明: 验证旧路径导入继续可用。
-# 使用示例: pytest -q test/symbol_variable/test_package_api.py -k test_package_old_path
-# 对应功能实现文件路径: symbol_variable/__init__.py
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-16 03:35:38 +0800
+# 最近一次运行成功时间: 2026-03-16 03:35:38 +0800
+# 功能说明: 验证顶层导出的类型可直接参与 Memory 构造。
+# 使用示例: pytest -q test/symbol_variable/test_package_api.py -k test_package_type_construct_memory
+# 对应功能实现文件路径: python/symbol_variable/__init__.py
 # 对应 spec 文件路径: spec/symbol_variable/package_api.md
 # 对应测试文件路径: test/symbol_variable/test_package_api.py
-def test_package_old_path() -> None:
-    from symbol_variable.type import Farmat, NumericType
-
-    assert NumericType.Float32.value == "float32"
-    assert Farmat.Norm.value == "NCHW"
-
-
-# PA-005
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-15 23:49:01 +0800
-# 最近一次运行成功时间: 2026-03-15 23:49:01 +0800
-# 功能说明: 验证顶层导入后构造 Memory。
-# 使用示例: pytest -q test/symbol_variable/test_package_api.py -k test_package_memory_construct
-# 对应功能实现文件路径: symbol_variable/__init__.py
-# 对应 spec 文件路径: spec/symbol_variable/package_api.md
-# 对应测试文件路径: test/symbol_variable/test_package_api.py
-def test_package_memory_construct() -> None:
-    from symbol_variable import Farmat, Memory, MemorySpace, NumericType
+def test_package_type_construct_memory() -> None:
+    from python.symbol_variable import Farmat, Memory, MemorySpace, NumericType
 
     mem = Memory([1, 2], NumericType.Float32, space=MemorySpace.GM, format=Farmat.Norm)
-    assert mem.space is MemorySpace.GM
+
     assert mem.dtype is NumericType.Float32
-    assert mem.format is Farmat.Norm
+
+
+# PM-005
+# 创建者: 金铲铲大作战
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-16 03:35:38 +0800
+# 最近一次运行成功时间: 2026-03-16 03:35:38 +0800
+# 功能说明: 验证 python.symbol_variable.__all__ 与公开导出集合一致。
+# 使用示例: pytest -q test/symbol_variable/test_package_api.py -k test_python_package_all_boundary
+# 对应功能实现文件路径: python/symbol_variable/__init__.py
+# 对应 spec 文件路径: spec/symbol_variable/package_api.md
+# 对应测试文件路径: test/symbol_variable/test_package_api.py
+def test_python_package_all_boundary() -> None:
+    import python.symbol_variable as package_module
+
+    assert package_module.__all__ == [
+        "Farmat",
+        "LocalSpaceMeta",
+        "Memory",
+        "MemorySpace",
+        "NumericType",
+        "SymbolDim",
+        "SymbolList",
+        "SymbolShape",
+    ]
+
+
+# PM-006
+# 创建者: 金铲铲大作战
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-16 03:35:38 +0800
+# 最近一次运行成功时间: 2026-03-16 03:35:38 +0800
+# 功能说明: 验证 import * 仅暴露包入口约定的公开符号。
+# 使用示例: pytest -q test/symbol_variable/test_package_api.py -k test_python_package_import_star_exports_only_public_names
+# 对应功能实现文件路径: python/symbol_variable/__init__.py
+# 对应 spec 文件路径: spec/symbol_variable/package_api.md
+# 对应测试文件路径: test/symbol_variable/test_package_api.py
+def test_python_package_import_star_exports_only_public_names() -> None:
+    namespace: dict[str, object] = {}
+
+    exec("from python.symbol_variable import *", {}, namespace)
+
+    assert sorted(namespace) == [
+        "Farmat",
+        "LocalSpaceMeta",
+        "Memory",
+        "MemorySpace",
+        "NumericType",
+        "SymbolDim",
+        "SymbolList",
+        "SymbolShape",
+    ]

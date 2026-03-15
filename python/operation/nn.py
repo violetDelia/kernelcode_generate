@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from symbol_variable.memory import Memory
+from python.symbol_variable.memory import Memory
 
 
 def _ensure_memory_operand(lhs: object, rhs: object) -> None:
