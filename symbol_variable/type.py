@@ -4,7 +4,7 @@
 最后一次更改: 小李飞刀
 
 功能说明:
-- 提供数值类型与格式枚举，供 Memory 使用。
+- 提供数值类型与格式枚举，并显式限定导出范围。
 
 使用示例:
 - from symbol_variable.type import NumericType, Farmat
@@ -12,14 +12,16 @@
 - Farmat.Norm
 
 关联文件:
-- spec: spec/symbol_variable/memory.md
-- test: test/symbol_variable/test_memory.py
+- spec: spec/symbol_variable/type.md
+- test: test/symbol_variable/test_type.py
 - 功能实现: symbol_variable/type.py
 """
 
 from __future__ import annotations
 
 from enum import Enum
+
+__all__ = ["NumericType", "Farmat"]
 
 
 class NumericType(Enum):
@@ -35,8 +37,8 @@ class NumericType(Enum):
     - NumericType.Float32
 
     关联文件:
-    - spec: spec/symbol_variable/memory.md
-    - test: test/symbol_variable/test_memory.py
+    - spec: spec/symbol_variable/type.md
+    - test: test/symbol_variable/test_type.py
     - 功能实现: symbol_variable/type.py
     """
 
@@ -58,8 +60,8 @@ class Farmat(Enum):
     - Farmat.CLast
 
     关联文件:
-    - spec: spec/symbol_variable/memory.md
-    - test: test/symbol_variable/test_memory.py
+    - spec: spec/symbol_variable/type.md
+    - test: test/symbol_variable/test_type.py
     - 功能实现: symbol_variable/type.py
     """
 
