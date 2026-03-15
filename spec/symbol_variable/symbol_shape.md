@@ -26,11 +26,18 @@
 - 不负责广播、约束求解、形状推导或算子语义。
 - 不改变 `SymbolDim` 的内部符号表达式，仅进行包装与传递。
 
+## 重构目标
+
+- 保持容器不变量：`shape` 内所有元素必须为 `SymbolDim`。
+- 明确切片赋值的输入约束，避免写入非 `SymbolDim` 导致的运行期错误。
+- 明确 `get_shape()` 的返回约束，避免外部直接破坏内部状态。
+- 修复因容器不变量被破坏导致的 `AttributeError` 风险（例如 `get_values()` 调用 `is_dynamic()` 时遇到非 `SymbolDim`）。
+
 ## 兼容性
 
 - 对外接口保持列表式使用体验（`len`、迭代、索引）。
 - 输入元素通过 `SymbolDim` 统一包装，支持 `SymbolDim` 与 `int`，并沿用 `SymbolDim` 对其他输入类型的支持与错误规则。
-- `__getitem__` 支持 int 与 slice；`__setitem__` 仅保证 int 索引可用，其他情况遵循 Python 列表语义（可能抛 TypeError）。
+- `__getitem__` 支持 int 与 slice；`__setitem__` 对 slice 赋值需遵守本 spec 的规范化规则。
 - 索引越界（int）统一抛 `IndexError("下标超出范围")`。
 
 ## 功能
@@ -74,13 +81,16 @@ shape = SymbolShape([SymbolDim("N"), 32, 64])
 - `__setitem__(key, value)`：
   - `int` 索引越界抛 `IndexError("下标超出范围")`。
   - `int` 索引赋值会执行 `SymbolDim(value)`。
-  - 其他 key 类型遵循 Python 列表赋值语义（可能抛 `TypeError`）。
+  - `slice` 赋值接受可迭代对象，逐项按 `SymbolDim` 可接受类型执行 `SymbolDim(v)` 规范化并写入。
+  - `slice` 赋值若 value 不可迭代，抛 `TypeError`（不可迭代对象）。
+  - `slice` 赋值若存在元素无法转换为 `SymbolDim`，抛 `TypeError`（元素类型不合法）。
+  - 非 `int`/`slice` 的 key 抛 `TypeError`。
 
 #### 形状访问
 
 接口：`get_shape()`
 
-功能说明：返回内部 `List[SymbolDim]`。
+功能说明：返回 `List[SymbolDim]` 的浅拷贝（不暴露内部可变列表）。
 
 #### 形状序列化
 
@@ -145,7 +155,9 @@ shape = SymbolShape([SymbolDim("N"), 32, 64])
 
 - `SymbolDim` 构造失败时向上抛出对应异常（如 `ValueError`、`TypeError`）。
 - `__getitem__` / `__setitem__` int 索引越界抛 `IndexError("下标超出范围")`。
-- `__setitem__` 非 int key 或 slice 赋值可能抛 `TypeError`（沿用 Python 列表语义）。
+- `__setitem__` 非 `int`/`slice` key 抛 `TypeError`。
+- `slice` 赋值若 value 不可迭代，抛 `TypeError`（不可迭代对象）。
+- `slice` 赋值若存在元素无法转换为 `SymbolDim`，抛 `TypeError`（元素类型不合法）。
 
 ## 测试
 
@@ -157,9 +169,13 @@ shape = SymbolShape([SymbolDim("N"), 32, 64])
 - 构造：支持 `SymbolDim`、`int` 及 `SymbolDim` 可接受的输入。
 - 列表行为：`len`、迭代、反向迭代、`repr`。
 - 索引访问：int 索引越界错误信息一致。
-- 赋值：int 索引赋值会转换为 `SymbolDim`。
+- 赋值：int 索引赋值会转换为 `SymbolDim`；slice 赋值会逐项转换为 `SymbolDim`。
+- slice 赋值不可迭代对象触发 `TypeError`（不可迭代对象）。
+- slice 赋值存在元素无法转换触发 `TypeError`（元素类型不合法）。
+- `get_shape()` 返回拷贝，外部修改不应影响内部。
 - 序列化：动态维度输出 `str`，静态维度输出 `int`。
 - `convert_from_list` 对 `SymbolShape` 返回自身。
+- 容器不变量保持，`get_values()` 不因非 `SymbolDim` 触发 `AttributeError`。
 
 ### 测试标准
 
@@ -174,5 +190,9 @@ shape = SymbolShape([SymbolDim("N"), 32, 64])
 | SS-002 | 序列化 | 动态/静态 | N/A | `get_values()` | 动态为 str，静态为 int |
 | SS-003 | 访问 | 越界 | N/A | `shape[99]` | 抛 `IndexError("下标超出范围")` |
 | SS-004 | 赋值 | int 索引 | N/A | `shape[0] = 64` | 转为 `SymbolDim` |
-| SS-005 | 转换 | convert_from_list | N/A | `SymbolList.convert_from_list(shape)` | 返回自身 |
-| SS-006 | 表现 | repr | N/A | `repr(SymbolShape([1,2]))` | 返回 `Shape(1, 2)` |
+| SS-005 | 赋值 | slice 索引 | N/A | `shape[0:2] = [1, "N"]` | 逐项转为 `SymbolDim` |
+| SS-006 | 异常 | slice 不可迭代 | N/A | `shape[0:1] = 1` | 抛 `TypeError`（不可迭代对象） |
+| SS-007 | 异常 | slice 元素非法 | N/A | `shape[0:1] = [object()]` | 抛 `TypeError`（元素类型不合法） |
+| SS-008 | 访问 | get_shape 拷贝 | N/A | `get_shape()` | 修改返回值不影响内部 |
+| SS-009 | 转换 | convert_from_list | N/A | `SymbolList.convert_from_list(shape)` | 返回自身 |
+| SS-010 | 表现 | repr | N/A | `repr(SymbolShape([1,2]))` | 返回 `Shape(1, 2)` |
