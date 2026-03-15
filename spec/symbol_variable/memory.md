@@ -35,6 +35,7 @@
 - `Memory` 保持与张量基类一致的 `shape/dtype/stride/format` 接口与语义。
 - 默认空间为 `MemorySpace.GM`，以保证与现有默认逻辑兼容。
 - `stride` 允许为 `None`，语义与基础张量一致。
+- `NumericType` 与 `Farmat` 的定义模块仍为 `symbol_variable.type`；若 `symbol_variable` 顶层包补充导出，这属于便捷入口扩展，不改变 `Memory` 的类型契约。
 - `Memory(...)` 作为唯一公开构造入口；不再保留 `Memory.convert_from_tensor` 这类公开转换方法。
 - `shape` 与 `stride` 的输入规整通过构造器内部完成，不再要求调用方先执行 `convert_from_list`。
 
@@ -138,6 +139,7 @@
 - `MemorySpace` 枚举项与元信息字段可访问。
 - `Memory` 初始化保持张量字段并设置 `space`。
 - `__repr__` 输出包含空间名与张量字段表达。
+- 验证 `Memory` 在包级导出补充 `NumericType` / `Farmat` 后仍保持相同构造语义。
 - 验证统一构造入口可直接接收 tensor-like 对象解包后的字段，无需 `convert_from_tensor`。
 - 验证 `shape`/`stride` 可直接接收 `SymbolShape` 或普通可迭代输入。
 - `format` 语义明确为 `Farmat.Norm -> NCHW`、`Farmat.CLast -> NHWC`。
