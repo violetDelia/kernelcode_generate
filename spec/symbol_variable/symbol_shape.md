@@ -5,15 +5,19 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`规格小队`
+- 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/symbol_variable/symbol_shape.md`](../../spec/symbol_variable/symbol_shape.md)
 - `test`：[`test/symbol_variable/test_symbol_shape.py`](../../test/symbol_variable/test_symbol_shape.py)
-- `功能实现`：[`symbol_variable/symbol_shape.py`](../../symbol_variable/symbol_shape.py)
+- `功能实现`：[`python/symbol_variable/symbol_shape.py`](../../python/symbol_variable/symbol_shape.py)
 
 ## 依赖约定
 
-- `symbol_variable.symbol_dim.SymbolDim`：维度元素类型。
+- `python.symbol_variable.symbol_dim.SymbolDim`：维度元素类型。
 - `typing`：仅用于类型标注。
+
+## Compat 说明
+
+- 迁移后不再兼容旧路径 `symbol_variable.symbol_shape`，不提供 compat 转发模块。
 
 ## 术语
 
@@ -23,41 +27,32 @@
 ## 功能边界
 
 - 仅负责形状容器的保存、访问与基本序列化。
+- 对外提供 `SymbolShape(shapes)` 作为形状对象创建入口。
 - 不负责广播、约束求解、形状推导或算子语义。
 - 不改变 `SymbolDim` 的内部符号表达式，仅进行包装与传递。
-
-## 重构目标
-
-- 完成 `convert_from_*` 清理，移除公开 `SymbolList.convert_from_list` 转换入口。
 - 保持容器不变量：`shape` 内所有元素必须为 `SymbolDim`。
-- 明确切片赋值的输入约束，避免写入非 `SymbolDim` 导致的运行期错误。
-- 明确 `get_shape()` 的返回约束，避免外部直接破坏内部状态。
-- 修复因容器不变量被破坏导致的 `AttributeError` 风险（例如 `get_values()` 调用 `is_dynamic()` 时遇到非 `SymbolDim`）。
 
 ## 兼容性
 
 - 对外接口保持列表式使用体验（`len`、迭代、索引）。
 - 输入元素通过 `SymbolDim` 统一包装，支持 `SymbolDim` 与 `int`，并沿用 `SymbolDim` 对其他输入类型的支持与错误规则。
-- `SymbolShape(shapes)` 作为唯一公开的形状输入归一化入口；不再保留 `convert_from_list` 这类公开包装方法。
+- `SymbolShape(shapes)` 作为公开的形状输入归一化入口。
 - `__getitem__` 支持 int 与 slice；`__setitem__` 对 slice 赋值需遵守本 spec 的规范化规则。
 - 索引越界（int）统一抛 `IndexError("下标超出范围")`。
-- 若实现需要复用输入规整逻辑，应使用私有 `_normalize_*` 命名，不再暴露新的公开 `convert_from_*` 系列方法。
+- 若实现需要复用输入规整逻辑，应使用私有 `_normalize_*` 命名。
 
-## convert_from_* 清理
+## 公开接口约束
 
-### 统一接口
+### 形状输入
 
 - 创建新的形状对象时，统一使用 `SymbolShape(shapes)`。
 - `shapes` 应为可迭代对象，元素为 `SymbolDim` 或任何可被 `SymbolDim(...)` 接受的值。
-- 调用方若原先使用 `SymbolList.convert_from_list(shapes)`，迁移后应改为：
-  - 直接继续传递已有 `SymbolShape` 实例给消费者。
-  - 或在需要新对象时直接调用 `SymbolShape(shapes)`。
 
-### 统一命名
+### 命名约束
 
 - `SymbolShape` 是公开的形状构造类型名。
-- `SymbolList` 仅表示列表行为类型，不再承担公开“转换工厂”职责。
-- 公开 API 不再新增 `convert_from_list`、`convert_from_shape` 一类入口；内部辅助逻辑统一使用 `_normalize_value` 等私有命名。
+- `SymbolList` 仅表示列表行为类型。
+- 内部辅助逻辑统一使用 `_normalize_value` 等私有命名。
 
 ## 功能
 
@@ -80,8 +75,8 @@
 使用示例：
 
 ```python
-from symbol_variable.symbol_shape import SymbolShape
-from symbol_variable.symbol_dim import SymbolDim
+from python.symbol_variable.symbol_shape import SymbolShape
+from python.symbol_variable.symbol_dim import SymbolDim
 
 shape = SymbolShape([SymbolDim("N"), 32, 64])
 ```
@@ -140,7 +135,7 @@ shape = SymbolShape([SymbolDim("N"), 32, 64])
 功能说明：
 
 - 具体形状类型，继承 `SymbolList`。
-- 公开创建方式统一为 `SymbolShape(shapes)`，不再额外提供 `convert_from_*` 包装入口。
+- 公开创建方式为 `SymbolShape(shapes)`。
 
 #### 初始化
 
@@ -178,7 +173,7 @@ shape = SymbolShape([SymbolDim("N"), 32, 64])
 ### 测试目标
 
 - 构造：支持 `SymbolDim`、`int` 及 `SymbolDim` 可接受的输入。
-- 验证公开输入归一化入口统一为 `SymbolShape(shapes)`，不再依赖 `convert_from_list`。
+- 验证公开输入归一化入口为 `SymbolShape(shapes)`。
 - 列表行为：`len`、迭代、反向迭代、`repr`。
 - 索引访问：int 索引越界错误信息一致。
 - 赋值：int 索引赋值会转换为 `SymbolDim`；slice 赋值会逐项转换为 `SymbolDim`。
@@ -186,7 +181,7 @@ shape = SymbolShape([SymbolDim("N"), 32, 64])
 - slice 赋值存在元素无法转换触发 `TypeError`（元素类型不合法）。
 - `get_shape()` 返回拷贝，外部修改不应影响内部。
 - 序列化：动态维度输出 `str`，静态维度输出 `int`。
-- `SymbolShape(existing_shape)` 可构造等价的新形状对象，无需额外转换工厂。
+- `SymbolShape(existing_shape)` 可构造等价的新形状对象。
 - 容器不变量保持，`get_values()` 不因非 `SymbolDim` 触发 `AttributeError`。
 
 ### 测试标准
@@ -206,6 +201,6 @@ shape = SymbolShape([SymbolDim("N"), 32, 64])
 | SS-006 | 异常 | slice 不可迭代 | N/A | `shape[0:1] = 1` | 抛 `TypeError`（不可迭代对象） |
 | SS-007 | 异常 | slice 元素非法 | N/A | `shape[0:1] = [object()]` | 抛 `TypeError`（元素类型不合法） |
 | SS-008 | 访问 | get_shape 拷贝 | N/A | `get_shape()` | 修改返回值不影响内部 |
-| SS-009 | 清理 | convert_from_list 移除 | N/A | 使用 `SymbolShape(shape)` 或直接传递 `shape` | 不再依赖公开转换工厂 |
+| SS-009 | 公开接口 | 形状输入 | N/A | `SymbolShape(shape)` | 通过公开构造入口创建形状对象 |
 | SS-010 | 表现 | repr | N/A | `repr(SymbolShape([1,2]))` | 返回 `Shape(1, 2)` |
 | SS-011 | 构造 | 由已有 SymbolShape 创建 | N/A | `SymbolShape(SymbolShape([1, 2]))` | 构造等价的新对象 |

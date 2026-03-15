@@ -7,13 +7,13 @@
 - 提供符号维度表达、基础算术运算与动态性判断。
 
 使用示例:
-- from symbol_variable.symbol_dim import SymbolDim
+- from python.symbol_variable.symbol_dim import SymbolDim
 - SymbolDim("N") + 1
 
 关联文件:
 - spec: spec/symbol_variable/symbol_dim.md
 - test: test/symbol_variable/test_symbol_dim.py
-- 功能实现: symbol_variable/symbol_dim.py
+- 功能实现: python/symbol_variable/symbol_dim.py
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ class _SymbolDim:
     关联文件:
     - spec: spec/symbol_variable/symbol_dim.md
     - test: test/symbol_variable/test_symbol_dim.py
-    - 功能实现: symbol_variable/symbol_dim.py
+    - 功能实现: python/symbol_variable/symbol_dim.py
     """
 
     @staticmethod
@@ -58,7 +58,7 @@ class _SymbolDim:
         关联文件:
         - spec: spec/symbol_variable/symbol_dim.md
         - test: test/symbol_variable/test_symbol_dim.py
-        - 功能实现: symbol_variable/symbol_dim.py
+        - 功能实现: python/symbol_variable/symbol_dim.py
         """
         normalized = value.strip()
         if not normalized:
@@ -83,7 +83,7 @@ class _SymbolDim:
         关联文件:
         - spec: spec/symbol_variable/symbol_dim.md
         - test: test/symbol_variable/test_symbol_dim.py
-        - 功能实现: symbol_variable/symbol_dim.py
+        - 功能实现: python/symbol_variable/symbol_dim.py
         """
         return sp.symbols(_SymbolDim._normalize_str(value), integer=True, real=True)
 
@@ -104,7 +104,7 @@ class _SymbolDim:
         关联文件:
         - spec: spec/symbol_variable/symbol_dim.md
         - test: test/symbol_variable/test_symbol_dim.py
-        - 功能实现: symbol_variable/symbol_dim.py
+        - 功能实现: python/symbol_variable/symbol_dim.py
         """
         if isinstance(sym, sp.Symbol) and sym.is_integer is None and sym.is_real is None:
             return _SymbolDim._symbol_from_str(sym.name)
@@ -131,7 +131,7 @@ class _SymbolDim:
         关联文件:
         - spec: spec/symbol_variable/symbol_dim.md
         - test: test/symbol_variable/test_symbol_dim.py
-        - 功能实现: symbol_variable/symbol_dim.py
+        - 功能实现: python/symbol_variable/symbol_dim.py
         """
         if isinstance(sym, int):
             self.sym = sp.Integer(sym)
@@ -160,7 +160,7 @@ class _SymbolDim:
         关联文件:
         - spec: spec/symbol_variable/symbol_dim.md
         - test: test/symbol_variable/test_symbol_dim.py
-        - 功能实现: symbol_variable/symbol_dim.py
+        - 功能实现: python/symbol_variable/symbol_dim.py
         """
         if isinstance(value, _SymbolDim):
             return value.get_symbol()
@@ -185,7 +185,7 @@ class _SymbolDim:
         关联文件:
         - spec: spec/symbol_variable/symbol_dim.md
         - test: test/symbol_variable/test_symbol_dim.py
-        - 功能实现: symbol_variable/symbol_dim.py
+        - 功能实现: python/symbol_variable/symbol_dim.py
         """
         return self.sym
 
@@ -204,7 +204,7 @@ class _SymbolDim:
         关联文件:
         - spec: spec/symbol_variable/symbol_dim.md
         - test: test/symbol_variable/test_symbol_dim.py
-        - 功能实现: symbol_variable/symbol_dim.py
+        - 功能实现: python/symbol_variable/symbol_dim.py
         """
         return str(self.get_symbol())
 
@@ -223,7 +223,7 @@ class _SymbolDim:
         关联文件:
         - spec: spec/symbol_variable/symbol_dim.md
         - test: test/symbol_variable/test_symbol_dim.py
-        - 功能实现: symbol_variable/symbol_dim.py
+        - 功能实现: python/symbol_variable/symbol_dim.py
         """
         return SymbolDim(self.get_symbol() + self._normalize_operand(other))
 
@@ -242,7 +242,7 @@ class _SymbolDim:
         关联文件:
         - spec: spec/symbol_variable/symbol_dim.md
         - test: test/symbol_variable/test_symbol_dim.py
-        - 功能实现: symbol_variable/symbol_dim.py
+        - 功能实现: python/symbol_variable/symbol_dim.py
         """
         return SymbolDim(self._normalize_operand(other) + self.get_symbol())
 
@@ -261,7 +261,7 @@ class _SymbolDim:
         关联文件:
         - spec: spec/symbol_variable/symbol_dim.md
         - test: test/symbol_variable/test_symbol_dim.py
-        - 功能实现: symbol_variable/symbol_dim.py
+        - 功能实现: python/symbol_variable/symbol_dim.py
         """
         return SymbolDim(self.get_symbol() - self._normalize_operand(other))
 
@@ -280,7 +280,7 @@ class _SymbolDim:
         关联文件:
         - spec: spec/symbol_variable/symbol_dim.md
         - test: test/symbol_variable/test_symbol_dim.py
-        - 功能实现: symbol_variable/symbol_dim.py
+        - 功能实现: python/symbol_variable/symbol_dim.py
         """
         return SymbolDim(self._normalize_operand(other) - self.get_symbol())
 
@@ -299,7 +299,7 @@ class _SymbolDim:
         关联文件:
         - spec: spec/symbol_variable/symbol_dim.md
         - test: test/symbol_variable/test_symbol_dim.py
-        - 功能实现: symbol_variable/symbol_dim.py
+        - 功能实现: python/symbol_variable/symbol_dim.py
         """
         return SymbolDim(self.get_symbol() * self._normalize_operand(other))
 
@@ -318,7 +318,7 @@ class _SymbolDim:
         关联文件:
         - spec: spec/symbol_variable/symbol_dim.md
         - test: test/symbol_variable/test_symbol_dim.py
-        - 功能实现: symbol_variable/symbol_dim.py
+        - 功能实现: python/symbol_variable/symbol_dim.py
         """
         return SymbolDim(self._normalize_operand(other) * self.get_symbol())
 
@@ -337,7 +337,7 @@ class _SymbolDim:
         关联文件:
         - spec: spec/symbol_variable/symbol_dim.md
         - test: test/symbol_variable/test_symbol_dim.py
-        - 功能实现: symbol_variable/symbol_dim.py
+        - 功能实现: python/symbol_variable/symbol_dim.py
         """
         return SymbolDim(self.get_symbol() / self._normalize_operand(other))
 
@@ -356,7 +356,7 @@ class _SymbolDim:
         关联文件:
         - spec: spec/symbol_variable/symbol_dim.md
         - test: test/symbol_variable/test_symbol_dim.py
-        - 功能实现: symbol_variable/symbol_dim.py
+        - 功能实现: python/symbol_variable/symbol_dim.py
         """
         return SymbolDim(self._normalize_operand(other) / self.get_symbol())
 
@@ -376,7 +376,7 @@ class _SymbolDim:
         关联文件:
         - spec: spec/symbol_variable/symbol_dim.md
         - test: test/symbol_variable/test_symbol_dim.py
-        - 功能实现: symbol_variable/symbol_dim.py
+        - 功能实现: python/symbol_variable/symbol_dim.py
         """
         if not isinstance(other, (_SymbolDim, int, str)):
             raise TypeError(f"Unsupported comparison type: {type(other)!r}")
@@ -398,7 +398,7 @@ class SymbolDim(_SymbolDim):
     关联文件:
     - spec: spec/symbol_variable/symbol_dim.md
     - test: test/symbol_variable/test_symbol_dim.py
-    - 功能实现: symbol_variable/symbol_dim.py
+    - 功能实现: python/symbol_variable/symbol_dim.py
     """
 
     def is_dynamic(self) -> bool:
@@ -417,6 +417,6 @@ class SymbolDim(_SymbolDim):
         关联文件:
         - spec: spec/symbol_variable/symbol_dim.md
         - test: test/symbol_variable/test_symbol_dim.py
-        - 功能实现: symbol_variable/symbol_dim.py
+        - 功能实现: python/symbol_variable/symbol_dim.py
         """
         return bool(self.get_symbol().free_symbols)

@@ -10,7 +10,7 @@
 - pytest -q test/operation/test_memory_operation.py
 
 关联文件:
-- 功能实现: symbol_variable/memory.py
+- 功能实现: python/symbol_variable/memory.py
 - Spec 文档: spec/symbol_variable/memory.md
 - 测试文件: test/operation/test_memory_operation.py
 """
@@ -26,18 +26,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from symbol_variable.memory import Memory, MemorySpace
-from symbol_variable.type import NumericType
+from python.symbol_variable.memory import Memory, MemorySpace
+from python.symbol_variable.type import NumericType
 
 
 # ME-008
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-15 21:58:50 +0800
-# 最近一次运行成功时间: 2026-03-15 21:58:50 +0800
+# 最近一次运行测试时间: 2026-03-16 01:43:13 +0800
+# 最近一次运行成功时间: 2026-03-16 01:43:13 +0800
 # 功能说明: 验证 Memory + Memory 的逐元素运算。
 # 使用示例: pytest -q test/operation/test_memory_operation.py -k test_memory_add_memory
-# 对应功能实现文件路径: symbol_variable/memory.py
+# 对应功能实现文件路径: python/symbol_variable/memory.py
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
 # 对应测试文件路径: test/operation/test_memory_operation.py
 def test_memory_add_memory() -> None:
@@ -53,11 +53,11 @@ def test_memory_add_memory() -> None:
 # ME-009
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-15 21:58:50 +0800
-# 最近一次运行成功时间: 2026-03-15 21:58:50 +0800
+# 最近一次运行测试时间: 2026-03-16 01:43:13 +0800
+# 最近一次运行成功时间: 2026-03-16 01:43:13 +0800
 # 功能说明: 验证 Memory 与标量的逐元素运算。
 # 使用示例: pytest -q test/operation/test_memory_operation.py -k test_memory_add_scalar
-# 对应功能实现文件路径: symbol_variable/memory.py
+# 对应功能实现文件路径: python/symbol_variable/memory.py
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
 # 对应测试文件路径: test/operation/test_memory_operation.py
 def test_memory_add_scalar() -> None:
@@ -73,11 +73,11 @@ def test_memory_add_scalar() -> None:
 # ME-009
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-15 21:58:50 +0800
-# 最近一次运行成功时间: 2026-03-15 21:58:50 +0800
+# 最近一次运行测试时间: 2026-03-16 01:43:13 +0800
+# 最近一次运行成功时间: 2026-03-16 01:43:13 +0800
 # 功能说明: 验证运算结果元数据独立性，不复用 lhs shape/stride。
 # 使用示例: pytest -q test/operation/test_memory_operation.py -k test_memory_metadata_independent
-# 对应功能实现文件路径: symbol_variable/memory.py
+# 对应功能实现文件路径: python/symbol_variable/memory.py
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
 # 对应测试文件路径: test/operation/test_memory_operation.py
 def test_memory_metadata_independent() -> None:
@@ -96,11 +96,11 @@ def test_memory_metadata_independent() -> None:
 # ME-010
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-15 21:58:50 +0800
-# 最近一次运行成功时间: 2026-03-15 21:58:50 +0800
+# 最近一次运行测试时间: 2026-03-16 01:43:13 +0800
+# 最近一次运行成功时间: 2026-03-16 01:43:13 +0800
 # 功能说明: 验证比较运算返回 predicate dtype。
 # 使用示例: pytest -q test/operation/test_memory_operation.py -k test_memory_compare_predicate
-# 对应功能实现文件路径: symbol_variable/memory.py
+# 对应功能实现文件路径: python/symbol_variable/memory.py
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
 # 对应测试文件路径: test/operation/test_memory_operation.py
 def test_memory_compare_predicate() -> None:
@@ -117,11 +117,11 @@ def test_memory_compare_predicate() -> None:
 # ME-008
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-15 21:58:50 +0800
-# 最近一次运行成功时间: 2026-03-15 21:58:50 +0800
+# 最近一次运行测试时间: 2026-03-16 01:43:13 +0800
+# 最近一次运行成功时间: 2026-03-16 01:43:13 +0800
 # 功能说明: 验证形状不一致时抛 ValueError。
 # 使用示例: pytest -q test/operation/test_memory_operation.py -k test_memory_shape_mismatch
-# 对应功能实现文件路径: symbol_variable/memory.py
+# 对应功能实现文件路径: python/symbol_variable/memory.py
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
 # 对应测试文件路径: test/operation/test_memory_operation.py
 def test_memory_shape_mismatch() -> None:
@@ -134,11 +134,11 @@ def test_memory_shape_mismatch() -> None:
 # ME-008
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-15 21:58:50 +0800
-# 最近一次运行成功时间: 2026-03-15 21:58:50 +0800
+# 最近一次运行测试时间: 2026-03-16 01:43:13 +0800
+# 最近一次运行成功时间: 2026-03-16 01:43:13 +0800
 # 功能说明: 验证 dtype 不兼容时抛 TypeError。
 # 使用示例: pytest -q test/operation/test_memory_operation.py -k test_memory_dtype_mismatch
-# 对应功能实现文件路径: symbol_variable/memory.py
+# 对应功能实现文件路径: python/symbol_variable/memory.py
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
 # 对应测试文件路径: test/operation/test_memory_operation.py
 def test_memory_dtype_mismatch() -> None:
@@ -151,11 +151,11 @@ def test_memory_dtype_mismatch() -> None:
 # ME-009
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-15 21:58:50 +0800
-# 最近一次运行成功时间: 2026-03-15 21:58:50 +0800
+# 最近一次运行测试时间: 2026-03-16 01:43:13 +0800
+# 最近一次运行成功时间: 2026-03-16 01:43:13 +0800
 # 功能说明: 验证不支持的标量类型抛 TypeError。
 # 使用示例: pytest -q test/operation/test_memory_operation.py -k test_memory_scalar_type_error
-# 对应功能实现文件路径: symbol_variable/memory.py
+# 对应功能实现文件路径: python/symbol_variable/memory.py
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
 # 对应测试文件路径: test/operation/test_memory_operation.py
 def test_memory_scalar_type_error() -> None:
