@@ -41,6 +41,33 @@ class _SymbolDim:
     """
 
     @staticmethod
+    def _normalize_str(value: str) -> str:
+        """统一规范化字符串输入并校验。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 使用 strip() 去除首尾空白。
+        - 空字符串或仅空白字符串抛 ValueError。
+        - 纯数字字符串抛 ValueError。
+
+        使用示例:
+        - _SymbolDim._normalize_str(" N ")
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: symbol_variable/symbol_dim.py
+        """
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("SymbolDim string must not be blank")
+        if normalized.isdigit():
+            raise ValueError("SymbolDim string must not be numeric")
+        return normalized
+
+    @staticmethod
     def _symbol_from_str(value: str) -> sp.Symbol:
         """基于字符串创建带假设的符号。
 
@@ -58,7 +85,7 @@ class _SymbolDim:
         - test: test/symbol_variable/test_symbol_dim.py
         - 功能实现: symbol_variable/symbol_dim.py
         """
-        return sp.symbols(value, integer=True, real=True)
+        return sp.symbols(_SymbolDim._normalize_str(value), integer=True, real=True)
 
     @staticmethod
     def _normalize_symbol(sym: sp.Basic) -> sp.Basic:
@@ -91,9 +118,9 @@ class _SymbolDim:
 
         功能说明:
         - int 转为 sympy.Integer。
-        - str 必须为非纯数字字符串，转为 sympy.symbols(..., integer=True, real=True)。
+        - str 必须为非纯数字且非空白字符串，转为 sympy.symbols(..., integer=True, real=True)。
         - sympy.Basic 默认直接保存；若为未设定假设的 Symbol，则统一为 integer=True, real=True。
-        - 纯数字字符串抛 ValueError。
+        - 纯数字字符串或空白字符串抛 ValueError。
         - 其他类型抛 TypeError。
 
         使用示例:
@@ -109,8 +136,6 @@ class _SymbolDim:
         if isinstance(sym, int):
             self.sym = sp.Integer(sym)
         elif isinstance(sym, str):
-            if sym.isdigit():
-                raise ValueError("SymbolDim string must not be numeric")
             self.sym = self._symbol_from_str(sym)
         elif isinstance(sym, sp.Basic):
             self.sym = self._normalize_symbol(sym)
@@ -126,7 +151,7 @@ class _SymbolDim:
 
         功能说明:
         - 支持 int/str/_SymbolDim，其他类型抛 TypeError。
-        - str 使用 integer=True, real=True 的假设构造符号。
+        - str 与构造路径一致，空白/纯数字字符串抛 ValueError。
 
         使用示例:
         - _SymbolDim._normalize_operand(4)

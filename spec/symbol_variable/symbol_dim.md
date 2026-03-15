@@ -14,7 +14,8 @@
 
 - 抽取并复用操作数规范化逻辑，减少算术/比较路径的重复代码。
 - 明确并统一 `str` 与 `sympy.Symbol` 的符号假设策略，保证构造与运算结果一致。
-- 明确异常类型与提示规则，保证非法输入可预测。
+- 明确纯数字字符串在构造、算术与比较入口中的统一拒绝规则，保证非法输入可预测。
+- 明确异常类型边界，只约束异常类别，不将异常提示文案设为兼容承诺。
 - 保持对外接口与行为稳定，便于现有调用方与测试无缝迁移。
 
 ## 重构边界
@@ -26,8 +27,9 @@
 ## 兼容性
 
 - `SymbolDim` 的构造、算术、比较与动态性判断接口保持不变。
-- 数字字符串继续拒绝，异常类型明确为 `ValueError`。
+- 纯数字字符串继续拒绝，异常类型明确为 `ValueError`，且该规则同时适用于构造、算术与比较入口。
 - `sympy.Symbol` 的假设保留规则需与实现与测试一致：仅在无显式假设时规范化。
+- 非空且不属于“纯数字字符串”的 `str` 输入不新增额外语义校验，继续按 `sympy.symbols(..., integer=True, real=True)` 处理，以兼容既有调用。
 
 ## 依赖约定
 
@@ -37,6 +39,29 @@
 
 - 符号维度：由 `int` 或 `sympy` 表达式表示的维度值。
 - 动态维度：表达式包含自由符号（`free_symbols`）的维度。
+- 纯数字字符串：对输入字符串执行 `strip()` 后，结果非空且 `isdigit()` 为 `True` 的字符串，例如 `"12"`、`" 12 "`、`"001"`、`"１２"`、`"٠١٢"`。
+
+## 输入规则总览
+
+### 合法输入
+
+- `int`：视为静态维度，转为 `sympy.Integer`。
+- `sympy.Basic`：直接接收；若为未显式指定 `is_integer/is_real` 的 `sympy.Symbol`，按名称规范化为 `integer=True, real=True`。
+- `str`：当且仅当字符串不是空白串，且不属于“纯数字字符串”时视为合法输入；后续按 `sympy.symbols(..., integer=True, real=True)` 构造符号。
+
+### 非法输入
+
+- 构造、算术、反向算术、比较中的纯数字字符串：抛 `ValueError`。
+- 构造、算术、反向算术、比较中的空字符串或仅空白字符串：抛 `ValueError`。
+- 不受支持的非 `int` / 非 `str` / 非 `SymbolDim` / 非 `sympy.Basic` 类型：抛 `TypeError`。
+
+### 兼容性边界
+
+- 本次规则统一仅针对“纯数字字符串”与空白字符串，不额外收紧其他字符串命名规则。
+- `"+1"`、`"-1"`、`"3.14"`、`"1_0"`、`"1N"`、`"N1"` 等虽然外观接近数字，但因不属于“纯数字字符串”，继续按符号名处理。
+- 前后空白不改变“是否为纯数字字符串”的判定结果：`" 12 "` 视为非法，`" N "` 仍可按符号 `N` 处理。
+- Unicode 数字遵循 Python `str.isdigit()` 语义，仍视为纯数字字符串并拒绝。
+- 异常消息文本不是兼容承诺；兼容性仅要求异常类型稳定为 `ValueError` 或 `TypeError`。
 
 ## 行为规范
 
@@ -53,7 +78,10 @@
 功能说明：
 
 - `int`：转为 `sympy.Integer`。
-- `str`：必须为非纯数字字符串，转为 `sympy.symbols(sym, integer=True, real=True)`；纯数字字符串抛 `ValueError`。
+- `str`：必须先经过统一字符串校验。
+- 纯数字字符串（按 `strip().isdigit()` 判定）抛 `ValueError`。
+- 空字符串或仅空白字符串抛 `ValueError`。
+- 其余字符串转为 `sympy.symbols(sym, integer=True, real=True)`。
 - `sympy.Basic`：若为 `sympy.Symbol` 且 `is_integer/is_real` 均为 `None`（无显式假设），按名称重新构造为 `sympy.symbols(name, integer=True, real=True)`；否则保留原有假设并直接保存。
 - 其他类型抛 `TypeError`。
 
@@ -63,7 +91,10 @@
 
 - 内部应抽取统一的操作数规范化逻辑，用于算术与比较路径复用。
 - `int` 转为 `sympy.Integer`。
-- `str` 转为 `sympy.symbols(str, integer=True, real=True)`，与构造保持同一假设策略。
+- `str` 与构造路径复用同一字符串校验规则，而不是单独放宽。
+- 纯数字字符串（如 `"12"`、`" 12 "`、`"１２"`）必须抛 `ValueError`，不得在运算或比较路径中被当作符号名接受。
+- 空字符串或仅空白字符串抛 `ValueError`。
+- 其他字符串转为 `sympy.symbols(str, integer=True, real=True)`，与构造保持同一假设策略。
 - `SymbolDim` 操作数使用其 `get_symbol()`。
 - 其他类型抛 `TypeError`。
 
@@ -79,7 +110,9 @@
 功能说明：
 
 - 支持 `int`、`str`、`SymbolDim`。
-- `str` 操作数统一按 `integer=True, real=True` 规范化。
+- `str` 操作数必须先通过与构造一致的统一字符串校验。
+- 纯数字字符串与空白字符串在所有算术入口中均抛 `ValueError`。
+- 其他 `str` 操作数统一按 `integer=True, real=True` 规范化。
 - 返回新的 `SymbolDim`。
 
 #### 比较运算
@@ -89,7 +122,8 @@
 功能说明：
 
 - 支持 `int`、`str`、`SymbolDim`。
-- `str` 操作数与算术运算保持相同符号假设。
+- `str` 操作数与算术运算保持相同校验与符号假设。
+- 纯数字字符串与空白字符串在比较入口中抛 `ValueError`。
 - 比较底层 `sympy` 表达式的等价性。
 
 ### SymbolDim
@@ -121,8 +155,9 @@
 ### 失败返回
 
 - `__init__` 传入不支持类型时抛 `TypeError`。
-- `__init__` 传入纯数字字符串时抛 `ValueError`。
+- `__init__` 传入纯数字字符串或空白字符串时抛 `ValueError`。
 - 算术与比较运算遇到不支持类型时抛 `TypeError`。
+- 算术与比较运算遇到纯数字字符串或空白字符串时抛 `ValueError`。
 
 ## 测试
 
@@ -132,8 +167,11 @@
 ### 测试目标
 
 - 覆盖构造、算术、比较、动态性判断与错误分支。
-- 验证 `str` 操作数与构造的符号假设一致。
+- 验证 `str` 操作数与构造共享同一字符串校验与符号假设。
 - 验证 `sympy.Symbol` 在“无显式假设”与“有显式假设”两种场景下的策略差异。
+- 验证纯数字字符串在构造、算术、反向算术、比较路径中均触发 `ValueError`。
+- 验证空白数字字符串（如 `" 12 "`）与 Unicode 数字字符串（如 `"１２"`）按纯数字字符串处理。
+- 验证 `"+1"`、`"-1"`、`"3.14"` 等非纯数字字符串继续作为符号名处理，确保兼容边界清晰。
 
 ### 测试标准
 
@@ -155,3 +193,8 @@
 | SD-009 | 规范化 | str 操作数 | N/A | `SymbolDim("N") + "N"` | 符号假设一致 |
 | SD-010 | 规范化 | sympy.Symbol 无假设 | N/A | `SymbolDim(sp.Symbol("N"))` | 规范化为 integer/real |
 | SD-011 | 兼容 | sympy.Symbol 有假设 | N/A | `SymbolDim(sp.Symbol("Q", integer=False))` | 保持原假设 |
+| SD-012 | 统一校验 | 运算中的纯数字字符串 | N/A | `SymbolDim("N") + "12"`、`"12" / SymbolDim("N")` | 均抛 `ValueError` |
+| SD-013 | 统一校验 | 比较中的纯数字字符串 | N/A | `SymbolDim("N") == "12"` | 抛 `ValueError` |
+| SD-014 | 边界 | 空白数字字符串 | N/A | `SymbolDim(" 12 ")`、`SymbolDim("N") + " 12 "` | 均抛 `ValueError` |
+| SD-015 | 兼容 | 非纯数字字符串 | N/A | `SymbolDim("+1")`、`SymbolDim("N") + "3.14"` | 继续按符号名处理 |
+| SD-016 | 边界 | Unicode 数字字符串 | N/A | `SymbolDim("１２")`、`SymbolDim("N") == "٠١٢"` | 均抛 `ValueError` |

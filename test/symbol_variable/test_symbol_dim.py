@@ -33,8 +33,8 @@ from symbol_variable.symbol_dim import SymbolDim
 # SD-001
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-15 06:15:20 +0800
-# 最近一次运行成功时间: 2026-03-15 06:15:20 +0800
+# 最近一次运行测试时间: 2026-03-15 19:40:06 +0800
+# 最近一次运行成功时间: 2026-03-15 19:40:06 +0800
 # 功能说明: 验证 SymbolDim 构造支持 int/str/sympy.Basic。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_init_accepts_int_str_sympy
 # 对应功能实现文件路径: symbol_variable/symbol_dim.py
@@ -53,23 +53,40 @@ def test_init_accepts_int_str_sympy() -> None:
 # SD-002
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-15 06:15:20 +0800
-# 最近一次运行成功时间: 2026-03-15 06:15:20 +0800
+# 最近一次运行测试时间: 2026-03-15 19:40:06 +0800
+# 最近一次运行成功时间: 2026-03-15 19:40:06 +0800
 # 功能说明: 验证纯数字字符串构造触发 ValueError。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_init_rejects_numeric_string
 # 对应功能实现文件路径: symbol_variable/symbol_dim.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_dim.py
 def test_init_rejects_numeric_string() -> None:
-    with pytest.raises(ValueError):
-        SymbolDim("12")
+    for value in ["12", " 12 ", "１２", "٠١٢"]:
+        with pytest.raises(ValueError):
+            SymbolDim(value)
+
+
+# SD-017
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-15 19:40:06 +0800
+# 最近一次运行成功时间: 2026-03-15 19:40:06 +0800
+# 功能说明: 验证空白字符串构造触发 ValueError。
+# 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_init_rejects_blank_string
+# 对应功能实现文件路径: symbol_variable/symbol_dim.py
+# 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
+# 对应测试文件路径: test/symbol_variable/test_symbol_dim.py
+def test_init_rejects_blank_string() -> None:
+    for value in ["", "   ", "\t"]:
+        with pytest.raises(ValueError):
+            SymbolDim(value)
 
 
 # SD-003
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-15 06:15:20 +0800
-# 最近一次运行成功时间: 2026-03-15 06:15:20 +0800
+# 最近一次运行测试时间: 2026-03-15 19:40:06 +0800
+# 最近一次运行成功时间: 2026-03-15 19:40:06 +0800
 # 功能说明: 验证算术运算返回 SymbolDim 且表达式正确。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_arithmetic_ops
 # 对应功能实现文件路径: symbol_variable/symbol_dim.py
@@ -96,11 +113,30 @@ def test_arithmetic_ops() -> None:
     assert div_res.get_symbol() == sp.symbols("N", integer=True, real=True) / sp.Integer(4)
 
 
+# SD-012
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-15 19:40:06 +0800
+# 最近一次运行成功时间: 2026-03-15 19:40:06 +0800
+# 功能说明: 验证运算入口拒绝纯数字/空白字符串。
+# 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_arithmetic_rejects_numeric_string
+# 对应功能实现文件路径: symbol_variable/symbol_dim.py
+# 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
+# 对应测试文件路径: test/symbol_variable/test_symbol_dim.py
+def test_arithmetic_rejects_numeric_string() -> None:
+    dim = SymbolDim("N")
+    for value in ["12", " 12 ", "１２", " ", "\t"]:
+        with pytest.raises(ValueError):
+            _ = dim + value
+    with pytest.raises(ValueError):
+        _ = "12" / dim
+
+
 # SD-004
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-15 06:15:20 +0800
-# 最近一次运行成功时间: 2026-03-15 06:15:20 +0800
+# 最近一次运行测试时间: 2026-03-15 19:40:06 +0800
+# 最近一次运行成功时间: 2026-03-15 19:40:06 +0800
 # 功能说明: 验证反向算术运算返回 SymbolDim 且表达式正确。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_reverse_arithmetic_ops
 # 对应功能实现文件路径: symbol_variable/symbol_dim.py
@@ -125,8 +161,8 @@ def test_reverse_arithmetic_ops() -> None:
 # SD-005
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-15 06:15:20 +0800
-# 最近一次运行成功时间: 2026-03-15 06:15:20 +0800
+# 最近一次运行测试时间: 2026-03-15 19:40:06 +0800
+# 最近一次运行成功时间: 2026-03-15 19:40:06 +0800
 # 功能说明: 验证动态性判断与数值转换行为。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_dynamic_and_convert
 # 对应功能实现文件路径: symbol_variable/symbol_dim.py
@@ -144,8 +180,8 @@ def test_dynamic_and_convert() -> None:
 # SD-006
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-15 06:15:20 +0800
-# 最近一次运行成功时间: 2026-03-15 06:15:20 +0800
+# 最近一次运行测试时间: 2026-03-15 19:40:06 +0800
+# 最近一次运行成功时间: 2026-03-15 19:40:06 +0800
 # 功能说明: 验证相等比较支持 int/str/SymbolDim。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_equality
 # 对应功能实现文件路径: symbol_variable/symbol_dim.py
@@ -158,11 +194,28 @@ def test_equality() -> None:
     assert SymbolDim(sp.symbols("M")) == "M"
 
 
+# SD-013
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-15 19:40:06 +0800
+# 最近一次运行成功时间: 2026-03-15 19:40:06 +0800
+# 功能说明: 验证比较入口拒绝纯数字/空白字符串。
+# 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_compare_rejects_numeric_string
+# 对应功能实现文件路径: symbol_variable/symbol_dim.py
+# 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
+# 对应测试文件路径: test/symbol_variable/test_symbol_dim.py
+def test_compare_rejects_numeric_string() -> None:
+    dim = SymbolDim("N")
+    for value in ["12", " 12 ", "۱۲", " "]:
+        with pytest.raises(ValueError):
+            _ = dim == value
+
+
 # SD-009
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-15 06:15:20 +0800
-# 最近一次运行成功时间: 2026-03-15 06:15:20 +0800
+# 最近一次运行测试时间: 2026-03-15 19:40:06 +0800
+# 最近一次运行成功时间: 2026-03-15 19:40:06 +0800
 # 功能说明: 验证 str 操作数符号假设统一后的运算结果。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_string_operand_unification
 # 对应功能实现文件路径: symbol_variable/symbol_dim.py
@@ -175,11 +228,29 @@ def test_string_operand_unification() -> None:
     assert result.get_symbol() == expected
 
 
+# SD-015
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-15 19:40:06 +0800
+# 最近一次运行成功时间: 2026-03-15 19:40:06 +0800
+# 功能说明: 验证非纯数字字符串继续按符号名处理。
+# 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_non_numeric_string_allowed
+# 对应功能实现文件路径: symbol_variable/symbol_dim.py
+# 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
+# 对应测试文件路径: test/symbol_variable/test_symbol_dim.py
+def test_non_numeric_string_allowed() -> None:
+    plus_dim = SymbolDim("+1")
+    assert plus_dim.get_symbol() == sp.symbols("+1", integer=True, real=True)
+    expr = SymbolDim("N") + "3.14"
+    expected = sp.symbols("N", integer=True, real=True) + sp.symbols("3.14", integer=True, real=True)
+    assert expr.get_symbol() == expected
+
+
 # SD-010
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-15 06:15:20 +0800
-# 最近一次运行成功时间: 2026-03-15 06:15:20 +0800
+# 最近一次运行测试时间: 2026-03-15 19:40:06 +0800
+# 最近一次运行成功时间: 2026-03-15 19:40:06 +0800
 # 功能说明: 验证 sympy.Symbol 无显式假设时被规范化。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_symbol_without_assumption_normalized
 # 对应功能实现文件路径: symbol_variable/symbol_dim.py
@@ -194,8 +265,8 @@ def test_symbol_without_assumption_normalized() -> None:
 # SD-011
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-15 06:15:20 +0800
-# 最近一次运行成功时间: 2026-03-15 06:15:20 +0800
+# 最近一次运行测试时间: 2026-03-15 19:40:06 +0800
+# 最近一次运行成功时间: 2026-03-15 19:40:06 +0800
 # 功能说明: 验证 sympy.Symbol 带显式假设时保持原样。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_symbol_with_assumption_kept
 # 对应功能实现文件路径: symbol_variable/symbol_dim.py
@@ -211,8 +282,8 @@ def test_symbol_with_assumption_kept() -> None:
 # SD-007
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-15 06:15:20 +0800
-# 最近一次运行成功时间: 2026-03-15 06:15:20 +0800
+# 最近一次运行测试时间: 2026-03-15 19:40:06 +0800
+# 最近一次运行成功时间: 2026-03-15 19:40:06 +0800
 # 功能说明: 验证算术与比较的非法类型触发 TypeError。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_invalid_types_raise
 # 对应功能实现文件路径: symbol_variable/symbol_dim.py
@@ -231,8 +302,8 @@ def test_invalid_types_raise() -> None:
 # SD-008
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-15 06:15:20 +0800
-# 最近一次运行成功时间: 2026-03-15 06:15:20 +0800
+# 最近一次运行测试时间: 2026-03-15 19:40:06 +0800
+# 最近一次运行成功时间: 2026-03-15 19:40:06 +0800
 # 功能说明: 验证 get_symbol 与 repr 的一致性。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_get_symbol_and_repr
 # 对应功能实现文件路径: symbol_variable/symbol_dim.py
