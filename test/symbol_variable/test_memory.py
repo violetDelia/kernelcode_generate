@@ -1,7 +1,7 @@
 """memory tests.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 Memory/MemorySpace/LocalSpaceMeta 构造、表示与转换行为。
@@ -34,9 +34,9 @@ from python.symbol_variable.type import Farmat, NumericType
 
 # ME-001
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
-# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-18 01:27:43 +0800
+# 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
 # 功能说明: 验证默认空间为 GM。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_default_space
 # 对应功能实现文件路径: python/symbol_variable/memory.py
@@ -49,9 +49,9 @@ def test_default_space() -> None:
 
 # ME-002
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
-# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-18 01:27:43 +0800
+# 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
 # 功能说明: 验证指定空间写入。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_custom_space
 # 对应功能实现文件路径: python/symbol_variable/memory.py
@@ -64,9 +64,9 @@ def test_custom_space() -> None:
 
 # ME-003
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
-# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-18 01:27:43 +0800
+# 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
 # 功能说明: 验证 __repr__ 包含空间名与张量字段表达。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_repr
 # 对应功能实现文件路径: python/symbol_variable/memory.py
@@ -79,13 +79,15 @@ def test_repr() -> None:
     assert "Tensor(" in rep
     assert "shape=" in rep
     assert "dtype=" in rep
+    assert "stride=" in rep
+    assert "format=" in rep
 
 
 # ME-004
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
-# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-18 01:27:43 +0800
+# 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
 # 功能说明: 验证 tensor-like 字段直入构造保持 shape/dtype/stride/format。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_construct_from_tensor_fields
 # 对应功能实现文件路径: python/symbol_variable/memory.py
@@ -116,9 +118,9 @@ def test_construct_from_tensor_fields() -> None:
 
 # ME-005
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
-# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-18 01:27:43 +0800
+# 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
 # 功能说明: 验证显式 stride 列表输入可被规整为 SymbolShape。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_explicit_stride_list
 # 对应功能实现文件路径: python/symbol_variable/memory.py
@@ -132,9 +134,9 @@ def test_explicit_stride_list() -> None:
 
 # ME-006
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
-# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-18 01:27:43 +0800
+# 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
 # 功能说明: 验证动态 shape/stride 输入保持动态维度语义。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_dynamic_shape_stride
 # 对应功能实现文件路径: python/symbol_variable/memory.py
@@ -148,9 +150,9 @@ def test_dynamic_shape_stride() -> None:
 
 # ME-007
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
-# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-18 01:27:43 +0800
+# 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
 # 功能说明: 验证 shape/stride 可直接接收 SymbolShape。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_shape_stride_accept_symbol_shape
 # 对应功能实现文件路径: python/symbol_variable/memory.py
@@ -166,28 +168,26 @@ def test_shape_stride_accept_symbol_shape() -> None:
 
 # ME-008
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
-# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
-# 功能说明: 验证 format 语义映射（c last=NHWC，c not last=NCHW）。
-# 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_format_mapping
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-18 01:27:43 +0800
+# 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
+# 功能说明: 验证默认 format 与显式 format 保持可见。
+# 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_default_format
 # 对应功能实现文件路径: python/symbol_variable/memory.py
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
 # 对应测试文件路径: test/symbol_variable/test_memory.py
-def test_format_mapping() -> None:
-    assert Farmat.Norm.value == "NCHW"
-    assert Farmat.CLast.value == "NHWC"
-    assert Farmat.Norm is Farmat.NCHW
-    assert Farmat.CLast is Farmat.NHWC
-    assert Farmat.Norm.name == "NCHW"
-    assert "Farmat.NCHW" in repr(Farmat.Norm)
+def test_default_format() -> None:
+    default_mem = Memory([1, 2], NumericType.Float32)
+    explicit_mem = Memory([1, 2], NumericType.Float32, format=Farmat.CLast)
+    assert default_mem.format is Farmat.Norm
+    assert explicit_mem.format is Farmat.CLast
 
 
 # ME-009
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
-# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-18 01:27:43 +0800
+# 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
 # 功能说明: 验证 LocalSpaceMeta 冻结与 MemorySpace 元信息字段。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_space_meta
 # 对应功能实现文件路径: python/symbol_variable/memory.py

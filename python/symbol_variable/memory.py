@@ -1,10 +1,10 @@
 """Memory implementation.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: 小李飞刀
 
 功能说明:
-- 定义内存空间枚举与 Memory 对象，独立描述形状与类型信息。
+- 定义内存空间枚举与 Memory 对象，描述 shape/dtype/stride/format/space 元信息。
 
 使用示例:
 - from python.symbol_variable.memory import Memory, MemorySpace
@@ -78,10 +78,10 @@ class Memory:
     """内存对象，独立描述形状与空间信息。
 
     创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
-    - 记录所在空间，并保存 shape/dtype/stride/format。
+    - 记录所在空间，并保存 shape/dtype/stride/format 元信息。
 
     使用示例:
     - Memory([1, 2], NumericType.Float32)
@@ -103,7 +103,7 @@ class Memory:
         """初始化 Memory。
 
         创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
+        最后一次更改: 小李飞刀
 
         功能说明:
         - 规范化 shape/stride，并记录 space。
@@ -127,7 +127,7 @@ class Memory:
         """规范化 shape/stride 输入为 SymbolShape。
 
         创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
+        最后一次更改: 小李飞刀
 
         功能说明:
         - 若已为 SymbolShape，直接返回。
@@ -152,7 +152,7 @@ class Memory:
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 返回 Memory(<space name>,shape=...,dtype=...,stride=...,format=...)。
+        - 返回 Memory(<space name>,Tensor(shape=..., dtype=..., stride=..., format=...))。
 
         使用示例:
         - repr(Memory([1, 2], NumericType.Float32))
@@ -243,7 +243,7 @@ class Memory:
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 复制 SymbolShape/SymbolList 的容器，避免别名共享。
+        - 复制 SymbolShape 容器，避免别名共享。
 
         使用示例:
         - mem._clone_symbol_list(mem.shape)

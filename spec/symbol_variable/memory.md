@@ -136,6 +136,7 @@ assert meta.align == 1024
 预期结果：
 
 - `LocalSpaceMeta` 可作为不可变元信息对象使用。
+- 允许 `max_size=None` 表示未指定容量。
 
 ### MemorySpace
 
@@ -150,6 +151,11 @@ assert meta.align == 1024
 - `LM`：局部内存，执行单元私有内存。
 - `TSM`：面向矩阵核心或专用计算单元的共享内存。
 - `TLM`：面向矩阵核心或专用计算单元的局部内存。
+
+默认元信息约束：
+
+- `GM`/`SM`/`LM`/`TSM`/`TLM` 的默认元信息一致：`align=1024`、`max_size=None`。
+- 上述默认值用于描述空间对齐与容量上限的静态属性，不执行运行期校验。
 
 使用示例：
 
@@ -388,7 +394,7 @@ assert cmp_result.dtype is NumericType.Int32
 ### 测试目标
 
 - 验证 `LocalSpaceMeta` 的冻结语义与字段可访问性。
-- 验证 `MemorySpace` 枚举项与空间元信息稳定。
+- 验证 `MemorySpace` 枚举项与空间元信息稳定，至少覆盖 `GM` 默认 `align=1024`、`max_size=None`。
 - 验证 `Memory` 默认空间、显式空间、显式步幅和动态形状构造行为。
 - 验证 `shape` 与 `stride` 可直接接收 `SymbolShape` 或普通可迭代输入。
 - 验证 `tensor-like` 字段直入能够通过公开构造入口完成。
