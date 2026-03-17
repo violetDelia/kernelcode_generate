@@ -63,7 +63,22 @@ def _build_context() -> Context:
 
 
 def _print_ir(value: object) -> str:
-    """打印 attribute 或 operation/module 为文本。"""
+    """打印 attribute 或 operation/module 为文本。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 统一 parser/printer round-trip 文本输出。
+
+    使用示例:
+    - _print_ir(attribute)
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: python/dialect/nn.py
+    """
 
     stream = StringIO()
     printer = Printer(stream=stream)
@@ -77,13 +92,43 @@ def _print_ir(value: object) -> str:
 
 
 def _make_space(name: str) -> NnMemorySpaceAttr:
-    """构造 space attribute。"""
+    """构造 space attribute。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 统一测试中的 space 构造入口。
+
+    使用示例:
+    - _make_space("global")
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: python/dialect/nn.py
+    """
 
     return NnMemorySpaceAttr(StringAttr(name))
 
 
 def _make_memory_type(space: str = "global", element_type: IntegerType = i32) -> NnMemoryType:
-    """构造合法的 nn memory type。"""
+    """构造合法的 nn memory type。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 提供默认可通过 verifier 的 memory type。
+
+    使用示例:
+    - _make_memory_type()
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: python/dialect/nn.py
+    """
 
     return NnMemoryType(
         ArrayAttr([StringAttr("M"), StringAttr("?"), IntAttr(4)]),
@@ -96,8 +141,8 @@ def _make_memory_type(space: str = "global", element_type: IntegerType = i32) ->
 # TY-001
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-16 02:18:40 +0800
-# 最近一次运行成功时间: 2026-03-16 02:18:40 +0800
+# 最近一次运行测试时间: 2026-03-18 01:46:19 +0800
+# 最近一次运行成功时间: 2026-03-18 01:46:19 +0800
 # 功能说明: 验证 memory type parse/print 可稳定 round-trip。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_memory_type_round_trip
 # 对应功能实现文件路径: python/dialect/nn.py
@@ -115,8 +160,8 @@ def test_memory_type_round_trip() -> None:
 # TY-002
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-16 02:18:40 +0800
-# 最近一次运行成功时间: 2026-03-16 02:18:40 +0800
+# 最近一次运行测试时间: 2026-03-18 01:46:19 +0800
+# 最近一次运行成功时间: 2026-03-18 01:46:19 +0800
 # 功能说明: 验证三种合法 space text form 均可 parse/print round-trip。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_space_attr_round_trip
 # 对应功能实现文件路径: python/dialect/nn.py
@@ -134,8 +179,8 @@ def test_space_attr_round_trip() -> None:
 # TY-002A
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-16 02:18:40 +0800
-# 最近一次运行成功时间: 2026-03-16 02:18:40 +0800
+# 最近一次运行测试时间: 2026-03-18 01:46:19 +0800
+# 最近一次运行成功时间: 2026-03-18 01:46:19 +0800
 # 功能说明: 验证非法 space attribute 会触发 verifier。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_invalid_space_attr_rejected
 # 对应功能实现文件路径: python/dialect/nn.py
@@ -149,8 +194,8 @@ def test_invalid_space_attr_rejected() -> None:
 # TY-003
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-16 02:18:40 +0800
-# 最近一次运行成功时间: 2026-03-16 02:18:40 +0800
+# 最近一次运行测试时间: 2026-03-18 01:46:19 +0800
+# 最近一次运行成功时间: 2026-03-18 01:46:19 +0800
 # 功能说明: 验证 memory type 的 shape/stride rank mismatch 会触发 verifier。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_memory_type_rank_mismatch_rejected
 # 对应功能实现文件路径: python/dialect/nn.py
@@ -166,11 +211,51 @@ def test_memory_type_rank_mismatch_rejected() -> None:
         )
 
 
+# TY-003A
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-18 01:46:19 +0800
+# 最近一次运行成功时间: 2026-03-18 01:46:19 +0800
+# 功能说明: 验证 stride 中的 '?' 不能与 shape 中的 '?' 同位。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_memory_type_stride_question_requires_shape_symbol_or_int
+# 对应功能实现文件路径: python/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_memory_type_stride_question_requires_shape_symbol_or_int() -> None:
+    with pytest.raises(VerifyException, match="stride '\\?' requires"):
+        NnMemoryType(
+            ArrayAttr([StringAttr("?")]),
+            ArrayAttr([StringAttr("?")]),
+            i32,
+            _make_space("global"),
+        ).verify()
+
+
+# TY-003B
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-18 01:46:19 +0800
+# 最近一次运行成功时间: 2026-03-18 01:46:19 +0800
+# 功能说明: 验证 element_type 必须为类型属性。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_memory_type_element_type_requires_type_attribute
+# 对应功能实现文件路径: python/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_memory_type_element_type_requires_type_attribute() -> None:
+    with pytest.raises(VerifyException, match="element_type must be a type attribute"):
+        NnMemoryType(
+            ArrayAttr([IntAttr(4)]),
+            ArrayAttr([IntAttr(1)]),
+            StringAttr("i32"),
+            _make_space("global"),
+        ).verify()
+
+
 # TY-004
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-16 02:18:40 +0800
-# 最近一次运行成功时间: 2026-03-16 02:18:40 +0800
+# 最近一次运行测试时间: 2026-03-18 01:46:19 +0800
+# 最近一次运行成功时间: 2026-03-18 01:46:19 +0800
 # 功能说明: 验证 nn.add 在 operand/result/space 一致时可通过 verifier。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_add_op_verify_success
 # 对应功能实现文件路径: python/dialect/nn.py
@@ -187,8 +272,8 @@ def test_add_op_verify_success() -> None:
 # TY-005
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-16 02:18:40 +0800
-# 最近一次运行成功时间: 2026-03-16 02:18:40 +0800
+# 最近一次运行测试时间: 2026-03-18 01:46:19 +0800
+# 最近一次运行成功时间: 2026-03-18 01:46:19 +0800
 # 功能说明: 验证 nn.add operand space mismatch 会触发 verifier。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_add_op_rejects_operand_space_mismatch
 # 对应功能实现文件路径: python/dialect/nn.py
@@ -207,8 +292,8 @@ def test_add_op_rejects_operand_space_mismatch() -> None:
 # TY-006
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-16 02:18:40 +0800
-# 最近一次运行成功时间: 2026-03-16 02:18:40 +0800
+# 最近一次运行测试时间: 2026-03-18 01:46:19 +0800
+# 最近一次运行成功时间: 2026-03-18 01:46:19 +0800
 # 功能说明: 验证 op attribute space 与 type space 不一致时会触发 verifier。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_add_op_rejects_attr_space_mismatch
 # 对应功能实现文件路径: python/dialect/nn.py
@@ -226,8 +311,8 @@ def test_add_op_rejects_attr_space_mismatch() -> None:
 # TY-007
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-16 02:18:40 +0800
-# 最近一次运行成功时间: 2026-03-16 02:18:40 +0800
+# 最近一次运行测试时间: 2026-03-18 01:46:19 +0800
+# 最近一次运行成功时间: 2026-03-18 01:46:19 +0800
 # 功能说明: 验证比较 op 结果 element_type 必须固定为 i1。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_compare_op_requires_i1_result
 # 对应功能实现文件路径: python/dialect/nn.py
@@ -246,8 +331,8 @@ def test_compare_op_requires_i1_result() -> None:
 # TY-008
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-16 02:18:40 +0800
-# 最近一次运行成功时间: 2026-03-16 02:18:40 +0800
+# 最近一次运行测试时间: 2026-03-18 01:46:19 +0800
+# 最近一次运行成功时间: 2026-03-18 01:46:19 +0800
 # 功能说明: 验证模块 parse/print 可在 nn op 上保持 round-trip。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_module_round_trip
 # 对应功能实现文件路径: python/dialect/nn.py
@@ -269,8 +354,8 @@ def test_module_round_trip() -> None:
 # TY-009
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-16 02:18:40 +0800
-# 最近一次运行成功时间: 2026-03-16 02:18:40 +0800
+# 最近一次运行测试时间: 2026-03-18 01:46:19 +0800
+# 最近一次运行成功时间: 2026-03-18 01:46:19 +0800
 # 功能说明: 验证 parse 后的 nn.add 在 space mismatch 场景下会被 verifier 捕获。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_space_mismatch_from_text_rejected
 # 对应功能实现文件路径: python/dialect/nn.py
@@ -292,8 +377,8 @@ def test_space_mismatch_from_text_rejected() -> None:
 # TY-010
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-16 02:18:40 +0800
-# 最近一次运行成功时间: 2026-03-16 02:18:40 +0800
+# 最近一次运行测试时间: 2026-03-18 01:46:19 +0800
+# 最近一次运行成功时间: 2026-03-18 01:46:19 +0800
 # 功能说明: 验证文本 assembly 中 op attribute space 与 type space 不一致时会在 verify 阶段失败。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_attr_space_mismatch_from_text_rejected
 # 对应功能实现文件路径: python/dialect/nn.py
@@ -315,8 +400,8 @@ def test_attr_space_mismatch_from_text_rejected() -> None:
 # TY-011
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-16 02:18:40 +0800
-# 最近一次运行成功时间: 2026-03-16 02:18:40 +0800
+# 最近一次运行测试时间: 2026-03-18 01:46:19 +0800
+# 最近一次运行成功时间: 2026-03-18 01:46:19 +0800
 # 功能说明: 验证缺失字段的 nn.memory 文本会在 parse 阶段失败。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_memory_type_parse_requires_all_fields
 # 对应功能实现文件路径: python/dialect/nn.py
