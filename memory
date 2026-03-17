@@ -1,0 +1,18 @@
+2026-03-17 工作记忆
+
+1. 工作记忆统一写入本文件: /home/lfr/kernelcode_generate/memory
+2. 当前协作方式以调度为主:
+   - 优先通过管理员和角色协作推进任务
+   - 除非用户明确要求，否则不直接继续改代码
+3. 当前多角色系统的重要约定:
+   - spec 中的所有 API 都应提供示例
+   - spec 里的测试清单必须和实际测试实现一一对应
+   - 审查提出改进建议时，必须完整回报管理员
+4. 最近直接完成的文档调整:
+   - 润色了 spec/symbol_variable/memory.md
+   - 润色了 spec/symbol_variable/type.md
+5. NumericType 相关状态:
+   - 用户要求类型扩展工作交给管理员协调，不再由我直接继续推进代码实现
+6. symbol_dim 相关状态:
+   - 用户要求 symbol_dim.md 重构方向改为“面向开发者的设计文档”
+   - 上一轮已删除旧版 symbol_dim.md，尚未写回新版内容，后续如继续需先重建该 spec

@@ -36,6 +36,100 @@
   5. `NnMemorySpaceAttr` 与 `NnMemoryType.space` 之间的语义一致，若 op attribute `space` 为 `local`，对应 operand/result type 也必须标记 `space=local`。
 - 所有这些检查应在 `python/dialect/nn.py` 中通过 `verify_` 方法入链，而不是在后续 lowering/solver 中延迟。
 
+## API 示例
+
+### `NnMemorySpaceAttr`
+
+示例：
+
+```python
+space = NnMemorySpaceAttr.from_name("global")
+```
+
+预期行为：
+
+- `space` 仅允许 `global/shared/local`
+- 其他值触发 verifier 报错
+
+### `NnMemoryType`
+
+示例：
+
+```python
+shape = ArrayAttr([IntAttr(4), IntAttr(8)])
+stride = ArrayAttr([IntAttr(8), IntAttr(1)])
+element_type = IntegerType(32)
+space = NnMemorySpaceAttr.from_name("global")
+mem_ty = NnMemoryType(shape, stride, element_type, space)
+```
+
+预期行为：
+
+- `shape` 与 `stride` rank 必须一致
+- `space` 必须为 `global/shared/local`
+- 违反约束时 verifier 报错
+
+### `nn.add`
+
+示例：
+
+```python
+lhs_type = NnMemoryType(
+    ArrayAttr([IntAttr(4), IntAttr(8)]),
+    ArrayAttr([IntAttr(8), IntAttr(1)]),
+    IntegerType(32),
+    NnMemorySpaceAttr.from_name("global"),
+)
+rhs_type = NnMemoryType(
+    ArrayAttr([IntAttr(4), IntAttr(8)]),
+    ArrayAttr([IntAttr(8), IntAttr(1)]),
+    IntegerType(32),
+    NnMemorySpaceAttr.from_name("global"),
+)
+result_type = lhs_type
+# lhs/rhs 为具备 NnMemoryType 的 SSAValue（例如由上游 op 产生）
+op = NnAddOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
+```
+
+预期行为：
+
+- `lhs`/`rhs`/`result` 类型必须是 `NnMemoryType`
+- `lhs.space` 与 `rhs.space` 必须一致，且与 `op.space` 一致
+- `shape`/`stride` 必须一致
+- 不满足时 verifier 抛出 `VerifyException`
+
+### `nn.eq`
+
+示例：
+
+```python
+lhs_type = NnMemoryType(
+    ArrayAttr([IntAttr(4), IntAttr(8)]),
+    ArrayAttr([IntAttr(8), IntAttr(1)]),
+    IntegerType(32),
+    NnMemorySpaceAttr.from_name("global"),
+)
+rhs_type = NnMemoryType(
+    ArrayAttr([IntAttr(4), IntAttr(8)]),
+    ArrayAttr([IntAttr(8), IntAttr(1)]),
+    IntegerType(32),
+    NnMemorySpaceAttr.from_name("global"),
+)
+result_type = NnMemoryType(
+    ArrayAttr([IntAttr(4), IntAttr(8)]),
+    ArrayAttr([IntAttr(8), IntAttr(1)]),
+    i1,
+    NnMemorySpaceAttr.from_name("global"),
+)
+# lhs/rhs 为具备 NnMemoryType 的 SSAValue（例如由上游 op 产生）
+op = NnEqOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
+```
+
+预期行为：
+
+- 结果 `element_type` 固定为 `i1`
+- 其余 verifier 约束与 `nn.add` 相同
+
 ## Parse/Print 及 Space Mismatch 测试
 
 - 设计文档必须指导测试团队确保 `python/dialect/nn.py` 的 parser 与 printer 支持 round-trip：任何合法 `!nn.memory` assembly 经过 parse 后再 print 回原始文本。

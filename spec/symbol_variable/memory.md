@@ -1,66 +1,112 @@
 # memory.md
 
-用于定义符号内存对象 `Memory` 及其内存空间枚举，描述带空间属性的张量形态。
+用于定义符号内存对象 `Memory`、空间枚举 `MemorySpace` 。该模块用于描述带 `shape`、`stride`、`dtype`、`format` 和 `space` 的张量式内存对象，不负责真实内存分配。
 
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`榕`
 - `spec`：[`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)
 - `test`：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)
 - `功能实现`：[`python/symbol_variable/memory.py`](../../python/symbol_variable/memory.py)
 
 ## 依赖约定
 
-- `python.symbol_variable.symbol_shape.SymbolShape`：形状与步幅类型。
-- `python.symbol_variable.symbol_dim.SymbolDim`：维度元素类型（由 `SymbolShape` 间接依赖）。
-- `python.symbol_variable.type.NumericType`：数据类型。
-- `python.symbol_variable.type.Farmat`：格式枚举（按实现命名）。
-- `enum.Enum`、`dataclasses.dataclass`：用于空间元信息与枚举定义。
-
-## Compat 说明
-
-- 迁移后不再兼容旧路径 `symbol_variable.memory`，不提供 compat 转发模块。
+- `python.symbol_variable.symbol_shape.SymbolShape`：用于表达 `shape` 与 `stride`。
+- `python.symbol_variable.symbol_dim.SymbolDim`：`SymbolShape` 的元素类型。
+- `python.symbol_variable.type.NumericType`：用于表达元素数据类型。
+- `python.symbol_variable.type.Farmat`：用于表达张量布局格式。
+- `enum.Enum`、`dataclasses.dataclass`：用于定义空间元信息与空间枚举。
 
 ## 术语
 
-- 内存空间：硬件或逻辑存储区域的抽象分类（如 GM/SM/LM）。
-- 空间元信息：空间名称、对齐要求与最大容量描述。
-- `bool`：逐元素比较的概念性真值语义。
-- `predicate`：spec 层对比较结果的语义描述，强调其表示逐元素真假而非普通算术值。
-- `NumericType.Int32`：当前 `python/symbol_variable/memory.py` 实现与 `test/operation/test_memory_operation.py` 测试中用于承载比较结果的具体 `dtype`；在本模块中它承担 predicate 载体角色，而不是独立 `bool` 类型。
+- 内存对象：带元信息的张量描述对象，不对应真实分配的物理缓冲区。
+- 内存空间：硬件或逻辑存储区域的抽象分类，例如全局内存、共享内存、局部内存。
+- 空间元信息：空间名称、对齐要求、最大容量等静态描述。
+- 动态张量：`shape` 或 `stride` 中包含动态 `SymbolDim` 的 `Memory`。
 
 ## 功能边界
 
-- 仅定义空间枚举与内存对象的结构化描述，不负责真实分配或回收。
-- 不校验容量、对齐或空间有效性，仅提供元信息。
-- 不实现跨空间迁移或拷贝策略。
-- 对外提供 `Memory(...)` 作为内存对象构造入口。
+- 仅负责描述 `Memory` 的结构化元信息，不负责真实分配、释放或生命周期管理。
+- 不负责容量校验、对齐校验或空间可用性判断，只暴露空间元信息。
+- 不负责跨空间迁移、拷贝、同步与调度策略。
+- 不负责广播、自动类型提升、约束求解或推导真实存储偏移。
+- 对外公开的创建入口为 `Memory(shape, dtype, space=..., stride=..., format=...)`。
 
 ## 兼容性
 
-- `Memory` 保持与张量基类一致的 `shape/dtype/stride/format` 接口与语义。
-- 默认空间为 `MemorySpace.GM`，以保证与现有默认逻辑兼容。
-- `stride` 允许为 `None`，语义与基础张量一致。
-- `Memory(...)` 作为公开构造入口。
-- `shape` 与 `stride` 的输入规整通过构造器内部完成，不再要求调用方先执行 `convert_from_list`。
-- 当前 Python 层没有独立的 `bool/predicate` `NumericType`；因此比较结果在 `Memory` API 中统一落为 `NumericType.Int32`。
-- 本文件中的 `bool` / `predicate` 表述用于说明比较语义；落实到当前 `Memory` 实现与测试时，具体契约以 `NumericType.Int32` 为准。
+- `Memory` 保持 `shape`、`dtype`、`stride`、`format`、`space` 五个核心属性的公开语义稳定。
+- 默认空间为 `MemorySpace.GM`。
+- `stride` 允许为 `None`，表示调用方未显式提供步幅信息。
+- `shape` 与 `stride` 支持直接接收 `SymbolShape`，也支持接收可被 `SymbolShape(...)` 规范化的可迭代输入。
+- `Memory` 的逐元素算术与比较语义与 [`spec/operation/nn.md`](../../spec/operation/nn.md) 保持一致；本文件只描述 `Memory` 侧的结构、入口和边界。
 
 ## 公开接口约束
 
 ### 构造入口
 
 - 创建 `Memory` 统一使用 `Memory(shape, dtype, space=..., stride=..., format=...)`。
-- `shape` 与 `stride` 应接受：
-  - 已构造的 `SymbolShape`
-  - 或任何可被 `SymbolShape(...)` 正常接收的可迭代输入
+- `shape` 必须为 `SymbolShape` 或可被 `SymbolShape(...)` 正常接收的可迭代对象。
+- `stride` 为 `None` 或可被 `SymbolShape(...)` 正常接收的可迭代对象。
+- `dtype` 应为 `NumericType`。
+- `space` 应为 `MemorySpace`。
+- `format` 应为 `Farmat`。
 
-### 命名约束
+使用示例：
 
-- 公开 API 使用类型名 `Memory(...)` 作为唯一输入入口。
-- 若实现仍需要规整逻辑，应使用私有 `_normalize_shape`、`_normalize_stride` 一类 `_normalize_*` 命名。
-- 逐元素算术/比较遵循 [`spec/operation/nn.md`](../../spec/operation/nn.md) 规范；本文件仅补充 Memory 侧的边界与约束。
+```python
+from python.symbol_variable.memory import Memory
+from python.symbol_variable.type import NumericType
+
+mem = Memory([1, 64, 56, 56], NumericType.Float32)
+```
+
+### 属性语义
+
+- `shape`：张量形状，类型为 `SymbolShape`。
+- `dtype`：张量元素类型，类型为 `NumericType`。
+- `stride`：张量步幅，类型为 `SymbolShape | None`。
+- `format`：张量布局格式，类型为 `Farmat`。
+- `space`：张量所在空间，类型为 `MemorySpace`。
+
+使用示例：
+
+```python
+from python.symbol_variable.memory import Memory, MemorySpace
+from python.symbol_variable.type import Farmat, NumericType
+
+mem = Memory(
+    shape=[1, 64, 56, 56],
+    dtype=NumericType.Float32,
+    stride=[200704, 3136, 56, 1],
+    format=Farmat.Norm,
+    space=MemorySpace.GM,
+)
+
+assert mem.space is MemorySpace.GM
+assert mem.format is Farmat.Norm
+assert mem.shape.get_values() == [1, 64, 56, 56]
+```
+
+### 运算入口
+
+- `Memory` 支持通过运算符重载参与逐元素算术与比较。
+- 支持的算术糖接口包括：`+`、`-`、`*`、`/` 及其反向运算。
+- 支持的比较糖接口包括：`==`、`!=`、`<`、`<=`、`>`、`>=`。
+- 这些接口的合法性、输出语义和错误规则以 [`spec/operation/nn.md`](../../spec/operation/nn.md) 为准。
+
+使用示例：
+
+```python
+from python.symbol_variable.memory import Memory
+from python.symbol_variable.type import NumericType
+
+lhs = Memory(["M", "N"], NumericType.Float32)
+rhs = Memory(["M", "N"], NumericType.Float32)
+
+sum_mem = lhs + rhs
+cmp_mem = lhs < 0
+```
 
 ## 功能
 
@@ -68,13 +114,28 @@
 
 功能说明：
 
-- 冻结数据类，描述单个空间的元信息。
+- 冻结数据类，用于描述单个空间的静态元信息。
 
 字段：
 
 - `name: str`：空间名称。
-- `max_size: int | None`：最大容量，允许为 `None` 表示未指定。
-- `align: int`：对齐要求（以字节为单位）。
+- `max_size: int | None`：最大容量，`None` 表示未指定。
+- `align: int`：对齐要求，单位为字节。
+
+使用示例：
+
+```python
+from python.symbol_variable.memory import LocalSpaceMeta
+
+meta = LocalSpaceMeta(name="GM", max_size=None, align=1024)
+
+assert meta.name == "GM"
+assert meta.align == 1024
+```
+
+预期结果：
+
+- `LocalSpaceMeta` 可作为不可变元信息对象使用。
 
 ### MemorySpace
 
@@ -82,16 +143,36 @@
 
 - 内存空间枚举，枚举值为 `LocalSpaceMeta`。
 
-枚举项（示例实现）：
+枚举项：
 
-- `GM` / `SM` / `LM` / `TSM` / `TLM`
-- `align` 默认为 `1024`，`max_size` 默认为 `None`。
+- `GM`：全局内存，通常容量最大，默认创建空间。
+- `SM`：共享内存，同一计算核中的执行单元可共享访问。
+- `LM`：局部内存，执行单元私有内存。
+- `TSM`：面向矩阵核心或专用计算单元的共享内存。
+- `TLM`：面向矩阵核心或专用计算单元的局部内存。
+
+使用示例：
+
+```python
+from python.symbol_variable.memory import MemorySpace
+
+gm_meta = MemorySpace.GM.value
+sm_meta = MemorySpace.SM.value
+
+assert gm_meta.name == "GM"
+assert sm_meta.align == 1024
+```
+
+预期结果：
+
+- 可通过 `MemorySpace.<SPACE>.value` 读取空间元信息。
 
 ### Memory
 
 功能说明：
 
-- 增加 `space` 属性以描述所在空间，其余字段与张量对象保持一致。
+- 表示带 `shape`、`dtype`、`stride`、`format` 和 `space` 的内存对象。
+- `shape` 和 `stride` 都保留符号维度信息，因此可表达动态张量。
 
 #### 初始化
 
@@ -99,43 +180,163 @@
 
 功能说明：
 
-- 初始化 `shape/dtype/stride/format` 与张量对象一致。
-- `shape` 统一规范化为 `SymbolShape` 语义。
-- 记录 `space`。
-- `stride=None` 时保持 `None`；否则按与 `shape` 一致的规则规范化。
-- `format` 约定：`Farmat.Norm -> NCHW`，`Farmat.CLast -> NHWC`。
+- 规范化 `shape` 与 `stride`。
+- 保存 `dtype`、`format` 与 `space`。
+- 当 `stride is None` 时，仅表示“未显式提供步幅”；调用方可按行主序或其他规则解释。
+
+使用示例：
+
+```python
+from python.symbol_variable.memory import Memory, MemorySpace
+from python.symbol_variable.type import NumericType
+
+mem = Memory(
+    shape=["B", 128],
+    dtype=NumericType.Float32,
+    space=MemorySpace.SM,
+)
+```
+
+预期结果：
+
+- `shape` 被规范化为 `SymbolShape(["B", 128])`。
+- `space` 为 `MemorySpace.SM`。
+- `stride` 为 `None`。
+
+#### 显式步幅构造
+
+功能说明：
+
+- 支持显式传入 `stride`，用于描述线性布局或任意自定义布局。
+
+使用示例：
+
+```python
+from python.symbol_variable.memory import Memory
+from python.symbol_variable.type import Farmat, NumericType
+
+mem = Memory(
+    shape=[1, 64, 56, 56],
+    dtype=NumericType.Float32,
+    stride=[200704, 3136, 56, 1],
+    format=Farmat.Norm,
+)
+```
+
+预期结果：
+
+- `shape` 与 `stride` 都被规范化为 `SymbolShape`。
+- `format` 为 `Farmat.Norm`。
+
+#### 动态张量构造
+
+功能说明：
+
+- 支持动态 `shape` 与动态 `stride`。
+
+使用示例：
+
+```python
+from python.symbol_variable.memory import Memory
+from python.symbol_variable.type import NumericType
+
+mem = Memory(
+    shape=["B", "C", "H", "W"],
+    dtype=NumericType.Float32,
+    stride=["C*H*W", "H*W", "W", 1],
+)
+```
+
+预期结果：
+
+- `Memory` 保留动态维度，不在前端阶段将其退化为静态值。
+
+#### tensor-like 字段直入
+
+功能说明：
+
+- 若上游对象已拆出 `shape/dtype/stride/format` 字段，可直接使用公开构造入口创建 `Memory`。
+
+使用示例：
+
+```python
+from python.symbol_variable.memory import Memory
+
+class TensorLike:
+    def __init__(self):
+        self.shape = ["N", 64]
+        self.dtype = NumericType.Float32
+        self.stride = [64, 1]
+        self.format = Farmat.Norm
+
+t = TensorLike()
+mem = Memory(t.shape, t.dtype, stride=t.stride, format=t.format)
+```
+
+预期结果：
+
+- 调用方无需额外私有转换函数，即可通过公开构造入口完成适配。
 
 #### 字符串表现
 
 接口：`__repr__()`
 
-功能说明：返回 `Memory(<space name>,<tensor repr>)`。
+功能说明：
 
-#### 统一构造入口
+- 返回包含 `space` 与张量元信息的稳定字符串表示。
 
-接口：`Memory(shape, dtype, space=MemorySpace.GM, stride=None, format=Farmat.Norm)`
+使用示例：
+
+```python
+from python.symbol_variable.memory import Memory
+from python.symbol_variable.type import NumericType
+
+mem = Memory([1, 2], NumericType.Float32)
+text = repr(mem)
+```
+
+预期结果：
+
+- 返回形如 `Memory(GM,Tensor(shape=..., dtype=..., stride=..., format=...))` 的字符串。
+
+#### 运算符重载
 
 功能说明：
 
-- 由原始 `shape/stride` 数据或现成 `SymbolShape` 直接构造 `Memory`。
-- 对类 Tensor 对象的适配由调用方解包字段后直接调用构造器完成。
+- 允许 `Memory` 直接通过 Python 运算符表达逐元素算术与比较。
+- 输出仍为张量语义对象，不返回单个 Python 标量。
 
-## 逐元素算术与比较运算规范
+使用示例：
 
-本节用于将 `Memory` 的逐元素算术/比较约束与 `spec/operation/nn.md` 对齐，并补充 Memory 侧边界。
+```python
+from python.symbol_variable.memory import Memory
+from python.symbol_variable.type import NumericType
 
-### 适用范围
+A = Memory(["M", "N"], NumericType.Float32)
+B = Memory(["M", "N"], NumericType.Float32)
 
-- 至少一侧操作数为 `Memory`。
-- 支持 `Memory` 与 `Memory`、`Memory` 与数值标量（阶段一至少支持 `int`）。
-- 不支持广播；`shape` 必须严格一致。
+C = A + B
+D = A + 3
+E = A == B
+F = A < 0
+```
+
+预期结果：
+
+- `C.shape == A.shape`
+- `D.shape == A.shape`
+- `E` 与 `F` 仍为张量语义对象
+
+## 逐元素算术与比较约束
+
+本节仅补充 `Memory` 侧边界；完整规则以 [`spec/operation/nn.md`](../../spec/operation/nn.md) 为准。
 
 ### 输入约束
 
-- `Memory` 与 `Memory`：`shape` 完全一致，否则抛 `ValueError`。
-- `dtype` 需可兼容；未定义类型提升规则时要求一致，不兼容抛 `TypeError`。
-- 标量需与 `Memory.dtype` 兼容，否则抛 `TypeError`。
-- 不支持 `str/list/dict` 等无数值语义类型，抛 `TypeError`。
+- `Memory` 与 `Memory` 运算时，`shape` 必须完全一致，不支持广播。
+- 当前阶段若未定义类型提升规则，则 `dtype` 需完全一致。
+- `Memory` 与标量运算时，标量需与 `Memory.dtype` 兼容。
+- `space`、`format` 与 `stride` 不参与逐元素合法性判断。
 
 ### 输出语义
 
@@ -158,70 +359,43 @@ assert cmp_result.dtype is NumericType.Int32
 
 ### 错误规则
 
-- 输入类型不支持：`TypeError`。
-- `shape` 不一致：`ValueError`。
-- `dtype` 不兼容：`TypeError`。
-- 链式表达式任一步非法：立即抛错并终止。
+- `shape` 不一致：抛 `ValueError`。
+- `dtype` 不兼容：抛 `TypeError`。
+- 标量类型不支持：抛 `TypeError`。
+- 非法链式表达式在首次非法处立即抛错。
 
 ## 返回与错误
 
 ### 成功返回
 
-- `Memory` 构造返回内存对象。
+- `LocalSpaceMeta(...)` 返回不可变空间元信息对象。
+- `MemorySpace.<SPACE>` 返回空间枚举项。
+- `Memory(...)` 返回内存对象。
+- 合法的逐元素算术与比较返回张量语义结果对象。
 
 ### 失败返回
 
-- 由 `SymbolShape`/`SymbolDim`/`NumericType` 的构造或校验抛出对应异常。
-- `shape` 或 `stride` 输入不满足 `SymbolShape` 规范时，向上抛出对应异常。
+- `shape` 或 `stride` 不满足 `SymbolShape` 规范时，向上抛出对应异常。
+- `dtype`、`format` 或 `space` 类型不符合调用约定时，行为由实现决定，但不得 silently 修正为不相关类型。
+- 运算输入不满足 [`spec/operation/nn.md`](../../spec/operation/nn.md) 的约束时，抛出对应 `TypeError` 或 `ValueError`。
 
 ## 测试
 
-- 测试文件：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)
-- 运算测试：[`test/operation/test_memory_operation.py`](../../test/operation/test_memory_operation.py)
-- 执行命令：`pytest -q test/symbol_variable/test_memory.py test/operation/test_memory_operation.py`
+- 结构测试：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)
+- 相关运算规范测试：[`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py)
+- 结构测试命令：`pytest -q test/symbol_variable/test_memory.py`
 
 ### 测试目标
 
-- `LocalSpaceMeta` 为冻结数据类（不可修改字段）。
-- `MemorySpace` 枚举项与元信息字段可访问。
-- `Memory` 初始化保持张量字段并设置 `space`。
-- `stride` 为显式列表或 `SymbolShape` 时可直接接受并规整。
-- 动态 `shape/stride` 输入保持动态维度语义不丢失。
-- `__repr__` 输出包含空间名与张量字段表达。
-- 验证统一构造入口可直接接收 tensor-like 对象解包后的字段。
-- 验证 `shape`/`stride` 可直接接收 `SymbolShape` 或普通可迭代输入。
-- `format` 语义明确为 `Farmat.Norm -> NCHW`、`Farmat.CLast -> NHWC`。
-- 枚举别名满足：`Farmat.Norm is Farmat.NCHW`，`Farmat.CLast is Farmat.NHWC`。
-- 枚举名称/表示：`Farmat.Norm.name == "NCHW"`，`repr(Farmat.Norm)` 包含 `Farmat.NCHW`。
-- 逐元素算术/比较符合 `spec/operation/nn.md`：shape 严格一致、dtype 兼容、错误类型稳定。
-- 比较结果 `dtype` 契约与当前实现/测试一致：语义上是 predicate，具体返回 `NumericType.Int32`。
-- 运算结果元数据与 `lhs` 不别名共享。
-- 逐元素错误分支覆盖：shape 不一致、dtype 不兼容、标量类型不支持。
+- 验证 `LocalSpaceMeta` 的冻结语义与字段可访问性。
+- 验证 `MemorySpace` 枚举项与空间元信息稳定。
+- 验证 `Memory` 默认空间、显式空间、显式步幅和动态形状构造行为。
+- 验证 `shape` 与 `stride` 可直接接收 `SymbolShape` 或普通可迭代输入。
+- 验证 `tensor-like` 字段直入能够通过公开构造入口完成。
+- 验证 `__repr__` 包含空间与张量元信息。
+- 逐元素算术与比较的行为、错误类型和链式约束由 [`spec/operation/nn.md`](../../spec/operation/nn.md) 的对应测试覆盖。
 
 ### 测试标准
 
-- 全部测试用例通过，`pytest` 返回码为 0。
-- 覆盖构造、表示、转换与错误分支。
-
-### 功能与用例清单
-
-以测试函数为准建立一一对应关系；`ME-*` 编号在本 spec 中唯一，不复用。
-
-| 用例 ID | 对应测试函数 | 功能 | 场景 | 前置条件 | 操作 | 预期结果 |
-|---|---|---|---|---|---|---|
-| ME-001 | `test_default_space` | 构造 | 默认空间 | N/A | `Memory(shape, dtype)` | `space` 为 `GM` |
-| ME-002 | `test_custom_space` | 构造 | 指定空间 | N/A | `Memory(shape, dtype, space=MemorySpace.LM)` | `space` 为 `LM` |
-| ME-003 | `test_repr` | 表现 | repr | N/A | `repr(memory)` | 含 `Memory(GM,` 前缀及张量字段表达 |
-| ME-004 | `test_construct_from_tensor_fields` | 构造 | tensor-like 字段直入 | N/A | `Memory(t.shape, t.dtype, stride=t.stride, format=t.format)` | 形状/类型/步幅/格式一致 |
-| ME-005 | `test_explicit_stride_list` | 构造 | 显式 stride 列表 | N/A | `Memory([2, 3], dtype, stride=[3, 1])` | `stride` 规整为 `SymbolShape` |
-| ME-006 | `test_dynamic_shape_stride` | 构造 | 动态 shape/stride | N/A | `Memory(["N", 32], dtype, stride=["C", 1])` | 动态维度保持为字符串符号 |
-| ME-007 | `test_shape_stride_accept_symbol_shape` | 规范化 | shape/stride 直入 | N/A | `Memory(SymbolShape([1, "N"]), dtype, stride=SymbolShape([2, 1]))` | 直接接受已归一化输入 |
-| ME-008 | `test_format_mapping` | 格式 | layout 与别名 | N/A | 检查 `Farmat.Norm` / `Farmat.CLast` | `Norm -> NCHW`、`CLast -> NHWC`，且与 `NCHW/NHWC` 为同一枚举值 |
-| ME-009 | `test_space_meta` | 元信息 | `LocalSpaceMeta` / `MemorySpace` | N/A | 读取 `MemorySpace.GM.value` | 字段可访问，`align=1024`，且 `LocalSpaceMeta` 冻结 |
-| ME-010 | `test_memory_add_memory` | 运算 | Memory + Memory | `shape` 相同 | `lhs + rhs` | 返回 `Memory`，`shape` 保持一致，`dtype` 继承 `lhs` |
-| ME-011 | `test_memory_add_scalar` | 运算 | Memory + scalar | `dtype` 兼容 | `mem + 1` / `1 + mem` | `shape` 保持一致，`dtype` 继承原值 |
-| ME-012 | `test_memory_metadata_independent` | 运算 | 元数据独立性 | `stride` 非空 | `result = mem + 1` 后修改 `result.shape/stride` | 结果元数据不复用原对象 |
-| ME-013 | `test_memory_compare_predicate` | 运算 | 比较结果 | `shape` 相同 | `lhs == rhs`、`lhs < 1` | 结果 `shape` 保持一致，语义上为 predicate，具体 `dtype` 为 `NumericType.Int32` |
-| ME-014 | `test_memory_shape_mismatch` | 错误 | shape 不一致 | `shape` 不同 | `lhs + rhs` | 抛 `ValueError` |
-| ME-015 | `test_memory_dtype_mismatch` | 错误 | dtype 不兼容 | `dtype` 不同 | `lhs + rhs` | 抛 `TypeError` |
-| ME-016 | `test_memory_scalar_type_error` | 错误 | 标量类型不支持 | N/A | `mem + "1"` | 抛 `TypeError` |
+- 对应测试全部通过，`pytest` 返回码为 `0`。
+- `Memory` 的结构语义、空间语义和公开构造入口保持稳定。

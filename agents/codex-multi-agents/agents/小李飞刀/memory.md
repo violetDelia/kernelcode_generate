@@ -179,3 +179,67 @@
 - 时间：2026-03-16 03:44:53 +0800
   事项：完成旧路径兼容层移除并回报管理员
   详情：在 `wt-20260315-symbol-variable-python-migration` 删除 `symbol_variable` 旧路径兼容层与 compat 测试，更新 `test_package_api.py`/`test_type.py` 与 `package_api.md`；测试：`pytest -q test/symbol_variable/test_package_api.py test/symbol_variable/test_type.py`（10 passed）；记录：agents/codex-multi-agents/log/task_records/2026/11/20260315-symbol-variable-python-migration.md；已使用脚本向管理员同步任务完成。
+
+- 时间：2026-03-16 04:04:05 +0800
+  事项：同步 spec 示例规则更新
+  详情：spec 中定义的所有 API 必须提供示例，示例需包含典型输入、调用方式与预期结果或行为约束；后续编写/补充/审查 spec 按此标准执行，缺示例视为需补充问题。
+
+- 时间：2026-03-16 04:16:42 +0800
+  事项：完成 type 旧路径守护任务
+  详情：在 `wt-20260316-type-old-path-guard` 补齐 `python/symbol_variable/__init__.py` 文件头元数据并清理 `spec/symbol_variable/type.md` 重复结构，完善公开 API 示例；记录：agents/codex-multi-agents/log/task_records/2026/12/20260316-type-old-path-guard.md。
+
+- 时间：2026-03-16 21:23:08 +0800
+  事项：完成 AST 前端与 nn IR 入口实现
+  详情：在 `wt-20260316-ast-visitor` 新增 `python/dsl` AST 数据结构、AST 访问器、nn dialect IR/MLIR 输出入口与测试；测试：`pytest -q test/dsl/test_ast_visitor.py`（4 passed）；记录：agents/codex-multi-agents/log/task_records/2026/12/20260316-ast-visitor.md。
+
+- 时间：2026-03-16 22:26:01 +0800
+  事项：收敛 AST 前端/lowering/诊断边界
+  详情：在 `wt-20260316-ast-visitor` 消费 globals/builtins 注解入口，补齐 ScalarArgAST 标量参数 lowering 与诊断定位；新增 globals/builtins、标量签名、未知名称与 lowering 失败回归测试；测试：`pytest -q test/dsl/test_ast_visitor.py`（8 passed）；记录：agents/codex-multi-agents/log/task_records/2026/12/20260316-ast-visitor.md。
+
+- 时间：2026-03-16 22:53:23 +0800
+  事项：同步 spec 与测试清单一致性规则
+  详情：spec 中测试清单必须与实际测试一一对应；测试新增对外承诺行为需回写 spec，禁止清单与实现不一致的情况。
+
+- 时间：2026-03-17 00:43:12 +0800
+  事项：更新角色 prompt 行为准则
+  详情：补充任务边界、worktree 规则、日志归档位置、管理员回报要求、spec/test 对齐、测试约束与问题处理；完成后复读 prompt，待命并准备回报管理员。
+
+- 时间：2026-03-17 00:49:28 +0800
+  事项：完成返回注解错误处理收敛
+  详情：在 wt-20260316-ast-visitor 将 Tensor 字符串注解解析失败改为抛 AstVisitorError 并携带定位诊断，新增非法 Tensor 返回注解回归测试并同步 spec 用例清单；测试：pytest -q test/dsl/test_ast_visitor.py（10 passed）；记录：agents/codex-multi-agents/log/task_records/2026/12/20260316-ast-visitor.md。
+
+- 时间：2026-03-17 01:12:18 +0800
+  事项：复读提示词并更新自我介绍
+  详情：重新阅读 agents/codex-multi-agents/agents/小李飞刀/小李飞刀.prompt.md，未发现与当前任务执行方式冲突；使用 skills/codex-multi-agents/scripts/codex-multi-agents-list.sh 更新 agents-lists 介绍字段。
+
+- 时间：2026-03-17 01:20:01 +0800
+  事项：补充任务流程规则到提示词
+  详情：在 prompt 中加入“spec→实现→审查→改进→再审查→合并”的默认流程，并明确自身只承担实现/测试阶段；准备向管理员回报更新。
+
+- 时间：2026-03-17 01:22:26 +0800
+  事项：补充审查规则到提示词
+  详情：新增“审查需对齐实现与 spec、发现改进点必须不通过并推动改进迭代”的同步要求；准备向管理员回报更新。
+
+- 时间：2026-03-17 01:25:58 +0800
+  事项：确认最新人员名单来源
+  详情：已以 agents/codex-multi-agents/agents-lists.md 为准核对角色与提示词路径，当前未发现不一致，后续查询将以该文件为准。
+
+- 时间：2026-03-17 01:52:57 +0800
+  事项：补充回报必须申请后续任务规则
+  详情：在 prompt 中新增回报时必须申请下一阶段任务直到合并完成的要求；准备向管理员回报更新。
+
+- 时间：2026-03-17 02:22:10 +0800
+  事项：回报任务完成并申请审查
+  详情：通过 tmux 脚本向神秘人回报 T-20260316-0e19a4de 完成情况并申请创建审查任务；日志：agents/codex-multi-agents/log/talk.log。
+
+- 时间：2026-03-17 13:39:27 +0800
+  事项：更新提示词记录文件规则
+  详情：在 prompt 中补充“agents/ 下日志与记录文件一律在主分支更新，worktree 仅用于实现/spec/测试改动”的要求；准备向管理员回报更新。
+
+- 时间：2026-03-17 21:05:37 +0800
+  事项：重构提示词为日常任务执行版
+  详情：按“失忆可执行”目标重写 prompt 结构，合并职责、规则、任务链路、回报脚本与合并注意事项；准备回报管理员。
+
+- 时间：2026-03-17 21:12:53 +0800
+  事项：撤销 <> 占位符内容调整
+  详情：按要求恢复回报脚本中的 <> 占位符，避免修改占位符内容。

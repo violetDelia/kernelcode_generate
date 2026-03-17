@@ -6,7 +6,7 @@
 #
 # 功能:
 # - 读取/维护 agents 名单（Markdown 表格）。
-# - 支持 status、find、replace、add、delete、init 六类操作。
+# - 支持 status、find、replace、add、delete、init、compact 七类操作。
 # - 约束姓名唯一、姓名字段不可修改、写操作加锁。
 #
 # 对应文件:
@@ -21,6 +21,7 @@
 # - 修改:  codex-multi-agents-list.sh -file ./agents-lists.md -replace -name 小明 -key 状态 -value ready
 # - 删除:  codex-multi-agents-list.sh -file ./agents-lists.md -delete -name 小明
 # - 初始化: codex-multi-agents-list.sh -file ./agents-lists.md -init -name 小明
+# - 压缩:  codex-multi-agents-list.sh -file ./agents-lists.md -compact -name 小明
 # - 等价写法: codex-multi-agents-list.sh -file=./agents-lists.md -add -name=小明 -type=codex
 
 set -u
@@ -43,6 +44,7 @@ OP_REPLACE=0
 OP_ADD=0
 OP_DELETE=0
 OP_INIT=0
+OP_COMPACT=0
 NAME=""
 KEY=""
 VALUE=""
@@ -143,6 +145,7 @@ Usage:
   codex-multi-agents-list.sh -file <path> -add -name <name> -type <startup_type>
   codex-multi-agents-list.sh -file <path> -delete -name <name>
   codex-multi-agents-list.sh -file <path> -init -name <name>
+  codex-multi-agents-list.sh -file <path> -compact -name <name>
 
 Examples:
   codex-multi-agents-list.sh -file ./agents-lists.md -status
@@ -151,6 +154,7 @@ Examples:
   codex-multi-agents-list.sh -file ./agents-lists.md -replace -name 小明 -key 状态 -value ready
   codex-multi-agents-list.sh -file ./agents-lists.md -delete -name 小明
   codex-multi-agents-list.sh -file ./agents-lists.md -init -name 小明
+  codex-multi-agents-list.sh -file ./agents-lists.md -compact -name 小明
 
 Return codes:
   0 success
@@ -204,6 +208,10 @@ parse_args() {
         ;;
       -init)
         OP_INIT=1
+        shift
+        ;;
+      -compact)
+        OP_COMPACT=1
         shift
         ;;
       -name=*)
@@ -263,8 +271,8 @@ parse_args() {
   [[ "$HAS_FILE" -eq 1 ]] || err "$RC_ARG" "missing required argument: -file"
   [[ -n "$FILE" ]] || err "$RC_ARG" "empty value for -file"
 
-  local op_count=$((OP_STATUS + OP_FIND + OP_REPLACE + OP_ADD + OP_DELETE + OP_INIT))
-  [[ "$op_count" -eq 1 ]] || err "$RC_ARG" "exactly one operation is required: -status|-find|-replace|-add|-delete|-init"
+  local op_count=$((OP_STATUS + OP_FIND + OP_REPLACE + OP_ADD + OP_DELETE + OP_INIT + OP_COMPACT))
+  [[ "$op_count" -eq 1 ]] || err "$RC_ARG" "exactly one operation is required: -status|-find|-replace|-add|-delete|-init|-compact"
 
   if [[ "$OP_STATUS" -eq 1 ]]; then
     [[ "$HAS_NAME" -eq 0 && "$HAS_KEY" -eq 0 && "$HAS_VALUE" -eq 0 && "$HAS_TYPE" -eq 0 ]] || err "$RC_ARG" "-status does not accept -name/-key/-value/-type"
@@ -305,6 +313,12 @@ parse_args() {
     [[ "$HAS_NAME" -eq 1 ]] || err "$RC_ARG" "-init requires -name"
     [[ -n "$NAME" ]] || err "$RC_ARG" "empty value for -name"
     [[ "$HAS_KEY" -eq 0 && "$HAS_VALUE" -eq 0 && "$HAS_TYPE" -eq 0 ]] || err "$RC_ARG" "-init does not accept -key/-value/-type"
+  fi
+
+  if [[ "$OP_COMPACT" -eq 1 ]]; then
+    [[ "$HAS_NAME" -eq 1 ]] || err "$RC_ARG" "-compact requires -name"
+    [[ -n "$NAME" ]] || err "$RC_ARG" "empty value for -name"
+    [[ "$HAS_KEY" -eq 0 && "$HAS_VALUE" -eq 0 && "$HAS_TYPE" -eq 0 ]] || err "$RC_ARG" "-compact does not accept -key/-value/-type"
   fi
 }
 
@@ -810,7 +824,7 @@ do_init() {
   local -a cells=()
   split_row "${data_rows[$target_idx]}" cells
 
-  local session prompt_file archive duty
+  local session prompt_file archive duty worktree
   session="${cells[$session_col_idx]}"
   prompt_file="${cells[$prompt_col_idx]}"
   archive="${cells[$archive_col_idx]}"
@@ -818,17 +832,59 @@ do_init() {
   if (( duty_col_idx >= 0 )); then
     duty="${cells[$duty_col_idx]}"
   fi
+  worktree=""
+  if (( worktree_col_idx >= 0 )); then
+    worktree="${cells[$worktree_col_idx]}"
+  fi
 
   [[ -n "$session" ]] || err "$RC_DATA" "empty session for agent: $NAME"
   command -v tmux >/dev/null 2>&1 || err "$RC_FILE" "tmux not found in PATH"
   tmux has-session -t "$session" >/dev/null 2>&1 || err "$RC_DATA" "target session not found: $session"
 
   local message
-  message="你的名字叫做${NAME}，从现在起只需要严格按照${prompt_file}进行工作以及\"AGENTS.md\"进行工作,你的专属文件夹在${archive}，你的职责是${duty}"
+  message="你的名字叫做${NAME}，从现在起只需要严格按照${prompt_file}进行工作以及\"AGENTS.md\"进行工作,你的专属文件夹在${archive}，你的职责是${duty}。请仔细阅读${prompt_file}，确保更新信息同步"
   tmux send-keys -t "$session" "$message" || err "$RC_INTERNAL" "failed to send init message to session: $session"
   sleep 1 || err "$RC_INTERNAL" "sleep failed after init message: $session"
   tmux send-keys -t "$session" ENTER || err "$RC_INTERNAL" "failed to confirm init message: $session"
   printf "OK: init %s\n" "$NAME"
+}
+
+# compact 操作：压缩上下文并提示回报管理员。
+do_compact() {
+  find_row_by_name "$NAME"
+  local target_idx="$found_row_idx"
+
+  local -a cells=()
+  split_row "${data_rows[$target_idx]}" cells
+
+  local session prompt_file archive duty worktree
+  session="${cells[$session_col_idx]}"
+  prompt_file="${cells[$prompt_col_idx]}"
+  archive="${cells[$archive_col_idx]}"
+  duty=""
+  if (( duty_col_idx >= 0 )); then
+    duty="${cells[$duty_col_idx]}"
+  fi
+  worktree=""
+  if (( worktree_col_idx >= 0 )); then
+    worktree="${cells[$worktree_col_idx]}"
+  fi
+
+  [[ -n "$session" ]] || err "$RC_DATA" "empty session for agent: $NAME"
+  command -v tmux >/dev/null 2>&1 || err "$RC_FILE" "tmux not found in PATH"
+  tmux has-session -t "$session" >/dev/null 2>&1 || err "$RC_DATA" "target session not found: $session"
+
+  tmux send-keys -t "$session" /compact || err "$RC_INTERNAL" "failed to send compact command to session: $session"
+  sleep 1 || err "$RC_INTERNAL" "sleep failed after compact command: $session"
+  tmux send-keys -t "$session" ENTER || err "$RC_INTERNAL" "failed to confirm compact command: $session"
+  sleep 3 || err "$RC_INTERNAL" "sleep failed before compact report message: $session"
+
+  local message
+  message="你的名字叫做${NAME}，从现在起只需要严格按照${prompt_file}进行工作以及\"AGENTS.md\"进行工作，当你压缩完成后，回报管理员。"
+  tmux send-keys -t "$session" "$message" || err "$RC_INTERNAL" "failed to send compact report message to session: $session"
+  sleep 1 || err "$RC_INTERNAL" "sleep failed after compact report message: $session"
+  tmux send-keys -t "$session" ENTER || err "$RC_INTERNAL" "failed to confirm compact report message: $session"
+  printf "OK: compact %s\n" "$NAME"
 }
 
 # delete 操作：按姓名删除目标行。
@@ -884,6 +940,14 @@ main() {
     parse_table
     validate_data_rows
     do_init
+    exit "$RC_OK"
+  fi
+
+  if [[ "$OP_COMPACT" -eq 1 ]]; then
+    load_file
+    parse_table
+    validate_data_rows
+    do_compact
     exit "$RC_OK"
   fi
 

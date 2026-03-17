@@ -161,6 +161,25 @@ codex-multi-agents-list.sh -init -file "agents-lists.md" -name "xiaoming"
 - 若运行环境缺少 `tmux`，返回 `RC=2`。
 - `职责` 列为可选列；若不存在或为空，消息中的职责部分按空值处理。
 
+
+
+### 压缩人员上下文
+
+命令：
+
+```bash
+codex-multi-agents-list.sh -compact -file "agents-lists.md" -name "xiaoming"
+```
+
+功能说明：
+- 根据 `-name` 定位目标行，读取 `会话`、`提示词`、`归档文件`、`职责` 字段；若存在 `worktree` 列则读取其值。
+- [immutable]使用 `tmux send-keys -t <会话> "/compact"` 下发压缩命令消息。等待一秒后，使用 `tmux send-keys -t <session-id> ENTER` 确保消息被收到。等待三秒后使用 `tmux send-keys -t <会话> "你的名字叫做<name>，从现在起只需要严格按照<提示词>进行工作以及"AGENTS.md"进行工作，当你压缩完成后，回报管理员。"` 下发回报消息。等待一秒后，使用 `tmux send-keys -t <session-id> ENTER` 确保消息被收到。
+
+注意事项：
+- 目标 `会话` 不能为空；若会话不存在，返回 `RC=3`。
+- 若运行环境缺少 `tmux`，返回 `RC=2`。
+- `职责` 列为可选列；若不存在或为空，消息中的职责部分按空值处理。
+
 ## 返回与错误
 
 ### 成功返回说明

@@ -281,7 +281,7 @@ send_tmux_command_once() {
   local session="$1"
   local command_text="$2"
   tmux send-keys -t "$session" "$command_text" || err "$RC_INTERNAL" "tmux send-keys failed: $session"
-  sleep 1 || err "$RC_INTERNAL" "sleep failed during command confirm: $command_text"
+  sleep 3 || err "$RC_INTERNAL" "sleep failed during command confirm: $command_text"
   tmux send-keys -t "$session" ENTER || err "$RC_INTERNAL" "tmux send-keys failed: $session"
 }
 

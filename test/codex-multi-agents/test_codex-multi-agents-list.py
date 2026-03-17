@@ -553,3 +553,55 @@ def test_init_agent_missing_session_returns_rc3(tmp_path: Path) -> None:
 
     assert result.returncode == 3
     assert "target session not found: xiaoming" in result.stderr
+
+
+# TC-021
+# 创建者: 榕
+# 最后一次更改: 榕
+# Last Run: 2026-03-17 21:40:00 +0800
+# Last Success: 2026-03-17 21:40:00 +0800
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+def test_compact_agent_sends_compact_and_report(tmp_path: Path) -> None:
+    agents_file = tmp_path / "agents-lists.md"
+    write_agents_file(agents_file)
+
+    bin_dir = tmp_path / "bin"
+    state_dir = tmp_path / "state"
+    calls_file = write_fake_tmux(bin_dir, state_dir, sessions=["xiaoming"])
+    env = os.environ.copy()
+    env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+
+    result = run_script(f"-file={agents_file}", "-compact", "-name=小明", env=env)
+    calls = calls_file.read_text(encoding="utf-8")
+
+    assert result.returncode == 0
+    assert "OK: compact 小明" in result.stdout
+    assert "send:xiaoming:/compact:" in calls
+    assert "你的名字叫做小明" in calls
+    assert "回报管理员" in calls
+
+
+# TC-022
+# 创建者: 榕
+# 最后一次更改: 榕
+# Last Run: 2026-03-17 21:40:00 +0800
+# Last Success: 2026-03-17 21:40:00 +0800
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+def test_compact_agent_missing_session_returns_rc3(tmp_path: Path) -> None:
+    agents_file = tmp_path / "agents-lists.md"
+    write_agents_file(agents_file)
+
+    bin_dir = tmp_path / "bin"
+    state_dir = tmp_path / "state"
+    write_fake_tmux(bin_dir, state_dir, sessions=[])
+    env = os.environ.copy()
+    env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+
+    result = run_script(f"-file={agents_file}", "-compact", "-name=小明", env=env)
+
+    assert result.returncode == 3
+    assert "target session not found: xiaoming" in result.stderr

@@ -1,5 +1,33 @@
 # 记录
 
+## 2026-03-17 20:16:55 +0800
+
+- 任务类型：`prompt 重构`
+- worktree：`wt-20260316-numeric-type-expansion`
+- 日志路径：`agents/codex-multi-agents/log/task_records/2026/12/20260316-numeric-type-expansion.md`
+- 摘要：已重构规格小队 prompt，整合任务链路、审查规则、主分支记录规则与回报流程，便于交接执行。
+
+## 2026-03-17 13:40:59 +0800
+
+- 任务类型：`规则同步`
+- worktree：`wt-20260316-numeric-type-expansion`
+- 日志路径：`agents/codex-multi-agents/log/task_records/2026/12/20260316-numeric-type-expansion.md`
+- 摘要：已将记录性内容需在主分支更新的规则补充到规格小队 prompt。
+
+## 2026-03-17 00:44:44 +0800
+
+- 任务类型：`指令确认`
+- worktree：`N/A`
+- 日志路径：`N/A`
+- 摘要：已读取规格小队提示与 AGENTS.md，确认仅负责 spec 文档编写；待用户提供具体 spec 任务目标与边界。
+
+## 2026-03-17 00:45:13 +0800
+
+- 任务类型：`指令同步`
+- worktree：`N/A`
+- 日志路径：`N/A`
+- 摘要：收到管理员要求继续当前任务并保持既有 worktree 与日志路径；因当前任务未指定 worktree/日志路径且无具体 spec 目标，已准备回报阻塞并请求补充授权信息。
+
 ## 2026-03-15 19:30:36 +0800
 
 - 任务 ID：`T-20260315-827ebb0d`
@@ -113,9 +141,47 @@
   - `spec/symbol_variable/memory.md`
 - 摘要：移除 compat 转发与旧路径约束，明确迁移后仅保留 python/symbol_variable 为有效路径，并同步更新相关 spec 边界与测试口径。
 
+## 2026-03-16 04:03:07 +0800
+
+- 任务 ID：`T-20260316-07bae850`
+- worktree：`wt-20260316-ast-visitor`
+- 日志路径：`agents/codex-multi-agents/log/task_records/2026/12/20260316-ast-visitor.md`
+- 产出文件：`spec/dsl/ast_visitor.md`
+- 摘要：收敛 ast_visitor spec 为单文件设计文档，明确 AST 前端、nn dialect IR、MLIR 文本与依赖边界，删除过程性与联网搜索内容。
+
+## 2026-03-16 04:04:20 +0800
+
+- 任务类型：`规则同步`
+- worktree：`N/A`
+- 日志路径：`agents/codex-multi-agents/log/task_records/2026/12/spec-squad-spec-examples-rule-20260316.md`
+- 摘要：spec 中定义的所有 API 必须提供示例，示例需体现典型输入/调用方式/预期结果或约束；缺少示例视为需补充的问题。
+
 ## 2026-03-16 03:16:09 +0800
 
 - 任务类型：`规则同步`
 - worktree：`N/A`
 - 日志路径：`agents/codex-multi-agents/log/task_records/2026/11/spec-squad-review-test-rule-20260316.md`
 - 摘要：审查任务需运行必要测试但避免重复已通过测试；申请审查需列明已通过测试（命令/覆盖范围/结果）；审查仅补充未覆盖或与风险相关测试；不涉及测试也需说明。
+
+## 2026-03-16 04:08:01 +0800
+
+- 任务 ID：`T-20260316-801aecdc`
+- worktree：`wt-20260316-ast-visitor`
+- 日志路径：`agents/codex-multi-agents/log/task_records/2026/12/20260316-ast-visitor.md`
+- 产出文件：`spec/dsl/ast_visitor.md`
+- 摘要：补齐 ast_visitor 公开 API 示例，覆盖输入接口与 `visit_function`/`visit_to_nn_ir`/`emit_mlir` 的典型调用与预期结果说明。
+
+## 2026-03-16 22:28:54 +0800
+
+- 任务 ID：`T-20260316-58ea8d3f`
+- worktree：`wt-20260316-dsl-ast-spec`
+- 日志路径：`agents/codex-multi-agents/log/task_records/2026/12/20260316-dsl-ast-spec.md`
+- 产出文件：`spec/dsl/ast.md`
+- 摘要：补齐 AST 节点结构、字段与位置元信息，提供全部节点类型示例，并明确与 IR/Lowering 的关系与 DSL 映射示例。
+
+## 2026-03-16 22:30:40 +0800
+
+- 任务类型：`规则同步`
+- worktree：`N/A`
+- 日志路径：`agents/codex-multi-agents/log/task_records/2026/12/spec-squad-test-spec-sync-rule-20260316.md`
+- 摘要：spec 中测试清单需与实际测试实现一一对应，新增测试承诺需回写 spec，spec 中列出的测试项必须在测试文件中找到对应实现。

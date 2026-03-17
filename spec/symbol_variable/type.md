@@ -1,11 +1,11 @@
 # type.md
 
-用于定义 `python.symbol_variable.type` 模块中的类型枚举、公开导出边界与唯一入口约束。
+用于定义基础数据类型枚举 `NumericType` 和张量布局格式枚举 `Farmat`，并约束 `python.symbol_variable.type` 的公开导入边界。
 
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`小李飞刀`
+- 最后一次更改：`榕`
 - `spec`：[`spec/symbol_variable/type.md`](../../spec/symbol_variable/type.md)
 - `test`：[`test/symbol_variable/test_type.py`](../../test/symbol_variable/test_type.py)
 - `功能实现`：[`python/symbol_variable/type.py`](../../python/symbol_variable/type.py)
@@ -14,28 +14,31 @@
 
 - 仅定义 `NumericType` 与 `Farmat` 两个枚举类型。
 - 仅约束 `python.symbol_variable.type` 的公开导入、`__all__` 与 `import *` 边界。
-- 不负责内存对象、包入口导出或其他模块的运行时语义。
-- 不提供工厂函数、转换函数或其他运行时辅助工具。
+- 不负责内存对象、张量对象或其他模块的运行时语义。
+- 不提供工厂函数、转换函数或其他辅助 API。
 
 ## 依赖约定
 
-- `enum.Enum`：用于枚举定义。
+- `enum.Enum`：用于定义枚举。
 
 ## 唯一入口约束
 
 - `python.symbol_variable.type` 是该模块 API 的唯一有效入口。
-- 旧路径 `symbol_variable.type` 不得作为导入入口存在。
+- 旧路径 `symbol_variable.type` 不再兼容。
 
 使用示例：
 
 ```python
 from python.symbol_variable.type import NumericType, Farmat
+
+dtype = NumericType.Float32
+layout = Farmat.Norm
 ```
 
 预期结果：
 
 - 导入成功。
-- `NumericType` 与 `Farmat` 可直接用于下游构造与比较。
+- `NumericType` 与 `Farmat` 可直接用于构造和比较。
 
 反例示例：
 
@@ -51,11 +54,9 @@ importlib.import_module("symbol_variable.type")
 
 ## 公开导出
 
-- 模块对外仅暴露：
-  - `NumericType`
-  - `Farmat`
+- 模块对外仅暴露 `NumericType` 与 `Farmat`。
 - 模块必须显式定义 `__all__ = ["NumericType", "Farmat"]`。
-- `Enum`、`annotations` 或其他实现细节不属于公开导出。
+- `Enum`、`annotations` 等实现细节不属于公开导出。
 
 使用示例：
 
@@ -76,7 +77,7 @@ assert sorted(namespace) == ["Farmat", "NumericType"]
 
 行为约束：
 
-- 当模块公开符号发生变更时，必须同步更新 `__all__`。
+- 当公开符号发生变化时，必须同步更新 `__all__`。
 - `from python.symbol_variable.type import *` 的暴露范围必须严格等于 `__all__`。
 
 ## API
@@ -86,39 +87,64 @@ assert sorted(namespace) == ["Farmat", "NumericType"]
 功能说明：
 
 - 表示数值类型枚举。
-
-枚举项：
-
-- `Int32 = "int32"`
-- `Float32 = "float32"`
+- 当前公开成员仅包括：
+  - `Int8 = "int8"`
+  - `Int16 = "int16"`
+  - `Int32 = "int32"`
+  - `Int64 = "int64"`
+  - `Uint8 = "uint8"`
+  - `Uint16 = "uint16"`
+  - `Uint32 = "uint32"`
+  - `Uint64 = "uint64"`
+  - `Float16 = "float16"`
+  - `BFloat16 = "bf16"`
+  - `Float32 = "float32"`
+  - `Float64 = "float64"`
 
 使用示例：
 
 ```python
 from python.symbol_variable.type import NumericType
 
+assert NumericType.Int8.value == "int8"
+assert NumericType.Int16.value == "int16"
 assert NumericType.Int32.value == "int32"
+assert NumericType.Int64.value == "int64"
+assert NumericType.Uint8.value == "uint8"
+assert NumericType.Uint16.value == "uint16"
+assert NumericType.Uint32.value == "uint32"
+assert NumericType.Uint64.value == "uint64"
+assert NumericType.Float16.value == "float16"
+assert NumericType.BFloat16.value == "bf16"
 assert NumericType.Float32.value == "float32"
+assert NumericType.Float64.value == "float64"
+assert NumericType.Int32 is not NumericType.Float32
+```
+
+成员访问示例：
+
+```python
+from python.symbol_variable.type import NumericType
+
+dtype = NumericType.Float16
+
+assert dtype.name == "Float16"
+assert dtype.value == "float16"
 ```
 
 预期结果：
 
-- 调用方可通过 `NumericType` 访问稳定的数值类型枚举值。
+- 调用方可通过 `NumericType` 访问稳定的数值类型标识。
 
 ### Farmat
 
 功能说明：
 
-- 表示布局格式枚举。
-- `NCHW` 与 `NHWC` 为基础枚举值。
-- `Norm` 与 `CLast` 为别名入口。
-
-枚举项与语义：
-
-- `NCHW = "NCHW"`
-- `NHWC = "NHWC"`
-- `Norm is NCHW`
-- `CLast is NHWC`
+- 表示张量布局格式枚举。
+- `NCHW` 与 `NHWC` 是底层布局值。
+- `Norm` 与 `CLast` 是公开兼容别名：
+  - `Farmat.Norm is Farmat.NCHW`
+  - `Farmat.CLast is Farmat.NHWC`
 
 使用示例：
 
@@ -127,19 +153,37 @@ from python.symbol_variable.type import Farmat
 
 assert Farmat.Norm is Farmat.NCHW
 assert Farmat.CLast is Farmat.NHWC
-assert Farmat.Norm.name == "NCHW"
+```
+
+布局判断示例：
+
+```python
+from python.symbol_variable.type import Farmat
+
+layout = Farmat.CLast
+
+assert layout.value == "NHWC"
+assert layout.name == "NHWC"
+```
+
+别名表现示例：
+
+```python
+from python.symbol_variable.type import Farmat
+
+assert repr(Farmat.Norm) == "<Farmat.NCHW: 'NCHW'>"
+assert repr(Farmat.CLast) == "<Farmat.NHWC: 'NHWC'>"
 ```
 
 预期结果：
 
-- `Norm` 与 `CLast` 按别名行为工作。
-- `name` 与 `repr` 遵循 Python `Enum` 别名规则。
+- `Farmat` 的别名关系、`name` 和 `repr` 行为遵循 Python `Enum` 的别名规则。
 
 ## 兼容性
 
-- `NumericType.Int32` 与 `NumericType.Float32` 的名称和值保持稳定。
-- `Farmat.Norm` 与 `Farmat.CLast` 继续作为 `NCHW` 与 `NHWC` 的别名使用。
-- `Farmat` 的 `name` 与 `repr` 行为遵循 Python `Enum` 别名规则。
+- `NumericType` 的有符号整型、无符号整型和浮点成员名称和值保持稳定。
+- `Farmat.Norm` 与 `Farmat.CLast` 保持对 `NCHW` 与 `NHWC` 的别名语义。
+- `Farmat` 的 `name` 与 `repr` 行为保持与 Python `Enum` 别名规则一致。
 
 ## 返回与错误
 
@@ -160,25 +204,13 @@ assert Farmat.Norm.name == "NCHW"
 
 ### 测试目标
 
-- 验证 `NumericType` 枚举项可访问且值稳定。
-- 验证 `Farmat.Norm -> NCHW`、`Farmat.CLast -> NHWC`。
-- 验证 `Farmat` 别名对象、`name` 与 `repr` 行为稳定。
+- 验证 `NumericType` 的公开成员、名称和值稳定。
+- 验证 `Farmat` 的别名关系以及 `name`、`repr` 等公开行为稳定。
 - 验证模块显式 `__all__` 仅包含 `NumericType` 与 `Farmat`。
-- 验证 `import *` 仅暴露 `NumericType` 与 `Farmat`，不泄露实现细节。
+- 验证 `import *` 仅暴露约定公开符号，不泄露实现细节。
 - 验证旧路径 `symbol_variable.type` 不可导入，并抛出 `ModuleNotFoundError`。
 
 ### 测试标准
 
-- 全部测试用例通过，`pytest` 返回码为 0。
-- 枚举值、别名关系、导出边界与唯一入口约束稳定。
-
-### 功能与用例清单
-
-| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 |
-|---|---|---|---|---|---|
-| TY-001 | 枚举 | NumericType | N/A | 访问 `NumericType.Float32` | 值为 `"float32"` |
-| TY-002 | 枚举 | Farmat 映射 | N/A | 访问 `Farmat.Norm`、`Farmat.CLast` | 分别映射到 `NCHW`、`NHWC` |
-| TY-003 | 别名 | Farmat | N/A | 检查 `Farmat.Norm is Farmat.NCHW` | 为 `True` |
-| TY-004 | 导出 | `__all__` 边界 | N/A | 读取 `python.symbol_variable.type.__all__` | 严格等于 `["NumericType", "Farmat"]` |
-| TY-005 | 导出 | `import *` 边界 | N/A | 执行 `from python.symbol_variable.type import *` | 仅暴露 `NumericType` 与 `Farmat` |
-| TY-006 | 错误 | 旧路径导入 | N/A | `importlib.import_module("symbol_variable.type")` | 抛 `ModuleNotFoundError` |
+- 对应测试全部通过，`pytest` 返回码为 `0`。
+- 枚举值、别名关系、导出边界与唯一入口约束保持一致。

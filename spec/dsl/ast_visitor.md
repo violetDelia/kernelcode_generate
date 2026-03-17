@@ -61,12 +61,233 @@
 #### 输入示例
 
 ```python
+<<<<<<< Updated upstream
 def add(x: "Tensor[f32, 2, 2]", y: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
     return x + y
 
 globals_table = {"Tensor": Tensor}
 builtins_registry = {"relu": relu}
 config = {"keep_source": True}
+=======
+def kernel(A: SymbolMemory, B: int):
+    return load(A, B, A.get_stride())
+```
+
+返回结果至少应包含：
+
+- `source="def kernel(...): ..."`
+- `signature=(A: SymbolMemory, B: int)`
+- `file_path`
+- `start_lineno`
+
+### `parse_function_ast(source)`
+
+功能说明：
+
+- 把函数源码解析为 Python `ast.Module` / `ast.FunctionDef`。
+
+建议行为：
+
+- 若源码中包含多个顶层定义，只接受目标函数对应的 `FunctionDef`。
+- 若源码无法解析，抛 `SyntaxError` 或包装后的 `ValueError`。
+
+示例：
+
+```python
+source = "def kernel(A: SymbolMemory, B: int):\n    return add(A, B)\n"
+module_ast, function_ast = parse_function_ast(source)
+```
+
+预期行为：
+
+- 返回的 `module_ast` 为 `ast.Module`
+- 返回的 `function_ast` 为 `ast.FunctionDef`
+- `function_ast.name == "kernel"`
+
+### `visit_function(fn)`
+
+功能说明：
+
+- 主入口：函数对象 -> `FunctionAST`。
+
+建议流程：
+
+- `load_function_source`
+- `parse_function_ast`
+- `visit_Module`
+- `visit_FunctionDef`
+
+示例：
+
+```python
+def kernel(A: SymbolMemory, B: int):
+    return add(A, B)
+
+func_ast = visitor.visit_function(kernel)
+```
+
+预期行为：
+
+- 返回 `FunctionAST`
+- 参数表包含 `A`/`B` 的类型标注
+- `FunctionAST` 具备可用于后续 `lowering` 的节点结构
+
+### `visit_to_nn_ir(fn)`
+
+功能说明：
+
+- 组合入口：函数对象 -> `nn dialect` IR。
+
+建议流程：
+
+- `function -> FunctionAST`
+- `validate_ast`
+- `build_nn_dialect`
+
+建议返回：
+
+- `builtin.module`
+- 内含 `func.func`
+- 函数体中使用 `nn.add` / `nn.sub` / `nn.mul` / `nn.truediv` / `nn.eq` / `nn.ne` / `nn.lt` / `nn.le` / `nn.gt` / `nn.ge`
+
+示例：
+
+```python
+def kernel(A: SymbolMemory, B: int):
+    return add(A, B)
+
+module = visitor.visit_to_nn_ir(kernel)
+```
+
+预期行为：
+
+- 返回 `builtin.module`，内部包含 `func.func`
+- `func.func` 体内包含 `nn.add` 对应的 IR 节点
+
+### `visit_to_ir(fn)`
+
+功能说明：
+
+- 兼容入口，语义等同于 `visit_to_nn_ir(fn)`。
+
+示例：
+
+```python
+def kernel(A: SymbolMemory, B: int):
+    return add(A, B)
+
+module = visitor.visit_to_ir(kernel)
+```
+
+预期行为：
+
+- 返回的 IR 结构与 `visit_to_nn_ir(fn)` 一致
+
+### `emit_mlir(fn)` / `emit_mlir(module)`
+
+功能说明：
+
+- 把 `nn dialect` IR 打印为 MLIR 风格文本。
+
+建议流程：
+
+- `function -> nn dialect module`
+- `module -> printer`
+- 返回 MLIR 风格字符串
+
+示例：
+
+```python
+def kernel(A: SymbolMemory, B: int):
+    return add(A, B)
+
+mlir_text = visitor.emit_mlir(kernel)
+```
+
+预期行为：
+
+- 返回非空字符串
+- 文本中包含 `func.func` 与 `nn.add` 的 MLIR 风格表示
+
+## Visitor 上下文设计
+
+### `VisitorContext`
+
+建议至少包含以下字段：
+
+- `source`
+- `file_path`
+- `start_lineno`
+- `globals`
+- `locals`
+- `arguments`
+- `symbol_table`
+- `type_env`
+- `diagnostics`
+- `current_function`
+- `loop_stack`
+
+### 设计原则
+
+- visitor 过程中不使用隐式全局状态。
+- 函数参数、局部变量、循环变量必须进入显式符号表。
+- 源码位置信息必须跟随节点流转，便于报错。
+
+## 支持的 Python AST 节点
+
+第一阶段建议支持以下节点。
+
+| Python AST 节点 | 作用 | ASTVisitor 产物 |
+| --- | --- | --- |
+| `Module` | 模块入口 | `ModuleAST` 或单函数入口 |
+| `FunctionDef` | 顶层函数 | `FunctionAST` |
+| `arguments` / `arg` | 参数 | `TensorAST` / `ScalarArgAST` |
+| `Assign` | 局部绑定 | 局部符号表写入 |
+| `Return` | 返回语句 | 输出表达式 / return 节点 |
+| `Expr` | 独立表达式语句 | statement 节点 |
+| `For` | 循环 | `ForAST` |
+| `Call` | DSL 内建调用 | `LoadAST` / `StoreAST` / 内建表达式 |
+| `Name` | 变量引用 | `VarAST` / 参数引用 |
+| `Constant` | 常量 | `ConstAST` |
+| `BinOp` | 算术表达式 | `BinaryExprAST` |
+| `Compare` | 比较表达式 | `CompareExprAST` |
+| `Attribute` | 受控属性 / 方法调用 | 例如 `A.get_stride()` |
+
+## 节点访问规则
+
+### `visit_Module`
+
+功能说明：
+
+- 校验模块中是否存在且只存在一个目标 `FunctionDef`。
+
+约束：
+
+- 不支持一个入口里同时传入多个可编译函数。
+- 其他非目标顶层节点默认拒绝，除非是文档字符串。
+
+### `visit_FunctionDef`
+
+功能说明：
+
+- 解析函数名、参数、返回值、函数体。
+
+约束：
+
+- 函数名不能为空。
+- 参数类型必须可映射到 DSL 输入类型。
+- 当前阶段优先支持：
+  - `SymbolMemory`
+  - `int`
+  - 后续扩展的受支持标量类型
+
+示例：
+
+```python
+def kernel(A: SymbolMemory, B: int):
+    x = load(A, B, A.get_stride())
+    return x
+>>>>>>> Stashed changes
 ```
 
 示例约束：输入函数必须带类型标注；`globals_table`/`builtins_registry`/`config` 可选提供，用于解析注解、内建符号与源码保留策略。

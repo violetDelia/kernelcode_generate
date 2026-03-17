@@ -1,7 +1,7 @@
 """type module tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 榕
 
 功能说明:
 - 覆盖 python.symbol_variable.type 的枚举语义、导出边界与旧路径禁用约束。
@@ -29,9 +29,9 @@ if str(REPO_ROOT) not in sys.path:
 
 # TY-001
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-16 20:40:27 +0800
-# 最近一次运行成功时间: 2026-03-16 20:40:27 +0800
+# 最后一次更改: 榕
+# 最近一次运行测试时间: 2026-03-16 22:43:36 +0800
+# 最近一次运行成功时间: 2026-03-16 22:43:36 +0800
 # 功能说明: 验证 NumericType 枚举名称和值保持稳定。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_numeric_type_values
 # 对应功能实现文件路径: python/symbol_variable/type.py
@@ -40,8 +40,43 @@ if str(REPO_ROOT) not in sys.path:
 def test_numeric_type_values() -> None:
     from python.symbol_variable.type import NumericType
 
+    assert NumericType.Int8.value == "int8"
+    assert NumericType.Int16.value == "int16"
+    assert NumericType.Uint8.value == "uint8"
+    assert NumericType.Uint16.value == "uint16"
+    assert NumericType.Uint32.value == "uint32"
+    assert NumericType.Uint64.value == "uint64"
+    assert NumericType.Float16.value == "float16"
+    assert NumericType.BFloat16.value == "bf16"
     assert NumericType.Int32.value == "int32"
+    assert NumericType.Int64.value == "int64"
     assert NumericType.Float32.value == "float32"
+    assert NumericType.Float64.value == "float64"
+
+
+# TY-005
+# 创建者: 金铲铲大作战
+# 最后一次更改: 榕
+# 最近一次运行测试时间: 2026-03-16 22:43:36 +0800
+# 最近一次运行成功时间: 2026-03-16 22:43:36 +0800
+# 功能说明: 验证新增基础类型成员可直接访问。
+# 使用示例: pytest -q test/symbol_variable/test_type.py -k test_numeric_type_member_access
+# 对应功能实现文件路径: python/symbol_variable/type.py
+# 对应 spec 文件路径: spec/symbol_variable/type.md
+# 对应测试文件路径: test/symbol_variable/test_type.py
+def test_numeric_type_member_access() -> None:
+    from python.symbol_variable.type import NumericType
+
+    assert NumericType.Int8.name == "Int8"
+    assert NumericType.Int16.name == "Int16"
+    assert NumericType.Uint8.name == "Uint8"
+    assert NumericType.Uint16.name == "Uint16"
+    assert NumericType.Uint32.name == "Uint32"
+    assert NumericType.Uint64.name == "Uint64"
+    assert NumericType.Float16.name == "Float16"
+    assert NumericType.BFloat16.name == "BFloat16"
+    assert NumericType.Int64.name == "Int64"
+    assert NumericType.Float64.name == "Float64"
 
 
 # TY-002
