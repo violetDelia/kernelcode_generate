@@ -5,7 +5,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`榕`
+- 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/operation/nn.md`](../../spec/operation/nn.md)
 - `关联类型`：[`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)
 - `test`：[`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py)
@@ -30,6 +30,9 @@
 - `Memory`：带 `shape`、`stride`、`dtype`、`memory_level` 等元信息的张量描述对象。
 - 张量语义结果：可继续参与后续运算、并至少暴露 `shape`、`stride`、`dtype` 的结果对象。
 - 标量：与 `dtype` 体系兼容的单值输入，例如 `int`，后续可扩展到更多数值类型。
+- `bool`：逐元素比较的概念性真值语义。
+- `predicate`：本 spec 对比较结果语义的描述，强调其表示真假而不是普通算术值。
+- `NumericType.Int32`：当前 `Memory`/`python.operation.nn` 实现与测试中用于承载比较结果的具体 `dtype`；在本层它承担 predicate 载体角色。
 
 ## 设计原则
 
@@ -39,6 +42,7 @@
 - 所有计算在执行前都必须先通过类型合法性检查。
 - 运算结果必须保留输入的动态维度信息，不得在前端阶段退化为静态常量。
 - 比较操作返回逐元素比较结果，其结果仍是张量语义对象，而不是单个 Python `bool`。
+- 当前 Python 运算层没有独立的 `bool/predicate` `NumericType`；因此比较结果在 API、实现与测试中的具体 `dtype` 契约统一为 `NumericType.Int32`。
 - 必须提供独立的 nn API 实现层 `python/operation/nn.py`，并提供对应测试 `test/operation/test_operation_nn.py`，不可仅在 `python/symbol_variable/memory.py` 内承载语义。
 
 ## 支持的操作
@@ -149,7 +153,8 @@ CMP = eq(A, B)
 语义：
 
 - `CMP.shape == ["M", "N"]`
-- `CMP.dtype == "bool"` 或等价 predicate 类型
+- `CMP.dtype is NumericType.Int32`
+- `CMP.dtype` 的语义是 predicate，而不是普通算术 `Int32`
 
 #### `ne(lhs, rhs)`
 
@@ -299,7 +304,8 @@ C = add(add(A, 3), B)
 ## Dtype 规则
 
 - 算术操作输出 `dtype` 默认继承输入 `dtype`，或由受控的显式类型规则决定。
-- 比较操作输出 `dtype` 为 `bool` 或等价 predicate 类型。
+- 比较操作在语义上输出 `bool/predicate`。
+- 在当前 `python.operation.nn` 与 `Memory` 实现中，比较结果没有独立的 `bool` 类型载体，因此具体 `dtype` 固定为 `NumericType.Int32`。
 - 若两个输入 `dtype` 不兼容，应抛出 `TypeError`。
 - 若 `Memory + scalar` 中 scalar 类型与 `Memory.dtype` 不兼容，应抛出 `TypeError`。
 - 链式表达式中的中间结果也必须满足后续运算的 `dtype` 合法性。
@@ -323,20 +329,22 @@ C = add(add(A, 3), B)
 
 - 输出为逐元素比较后的张量语义结果，不是单个标量 `bool`。
 - 输出 `shape` 与输入 `shape` 相同。
-- 输出 `dtype` 建议为 `bool` 或后端可接受的 predicate 类型。
+- 输出 `dtype` 的语义为 predicate。
+- 当前实现/测试的具体契约为 `NumericType.Int32`。
 
 示例：
 
-- `eq(tensor([A, B]), tensor([A, B])) -> tensor([A, B], dtype=bool)`
+- `eq(tensor([A, B]), tensor([A, B])) -> tensor([A, B], dtype=NumericType.Int32)`
 
 ## 独立使用示例
 
 ```python
 from python.operation.nn import add, eq
 from python.symbol_variable.memory import Memory
+from python.symbol_variable.type import NumericType
 
-X = Memory(shape=["A", "B"], dtype="float32")
-Y = Memory(shape=["A", "B"], dtype="float32")
+X = Memory(shape=["A", "B"], dtype=NumericType.Float32)
+Y = Memory(shape=["A", "B"], dtype=NumericType.Float32)
 
 Z = add(add(X, 3), Y)
 CMP = eq(X, Y)
@@ -346,7 +354,8 @@ CMP = eq(X, Y)
 
 - `Z.shape == ["A", "B"]`
 - `CMP.shape == ["A", "B"]`
-- `CMP.dtype == "bool"` 或等价 predicate 类型
+- `CMP.dtype is NumericType.Int32`
+- `CMP.dtype` 在语义上表示 predicate，而不是普通算术 `Int32`
 - 若 `Y.shape != ["A", "B"]`，则运算失败
 - 若 `X.dtype` 与 `Y.dtype` 不兼容，或标量类型不兼容，则运算失败
 
@@ -361,7 +370,7 @@ CMP = eq(X, Y)
 ### 成功返回
 
 - 算术操作返回张量语义结果，`shape` 与输入一致。
-- 比较操作返回张量语义结果，`shape` 与输入一致，`dtype` 为 `bool` / predicate。
+- 比较操作返回张量语义结果，`shape` 与输入一致；语义上为 predicate，当前具体 `dtype` 为 `NumericType.Int32`。
 
 ### 失败返回
 
@@ -381,7 +390,11 @@ CMP = eq(X, Y)
 - 验证 `Memory + Memory` 的 shape 严格匹配规则。
 - 验证 `Memory + scalar` 保持原 `shape`。
 - 验证链式表达式如 `A + 3 + B` 在每一步都执行 shape 与类型合法性检查。
-- 验证比较操作输出保持相同 `shape`，且结果类型为布尔语义。
+- 验证比较操作输出保持相同 `shape`，且语义上为 predicate、当前具体 `dtype` 为 `NumericType.Int32`。
+- 验证 `eq/lt/gt/ne/le/ge` 等比较 API 的比较结果口径一致。
+- 验证纯标量输入（两侧均非 `Memory`）抛 `TypeError`。
+- 验证比较别名 API（`ne/le/ge`）返回 `NumericType.Int32` 且 shape 保持一致。
+- 验证运算链路不依赖 `SymbolList/ SymbolShape` 已移除的 `convert_from_list` 入口，且 stride 可正常保持。
 - 验证 shape 不一致与类型不兼容时稳定报错。
 
 ### 测试标准
@@ -402,5 +415,8 @@ CMP = eq(X, Y)
 | OP-006 | 算术 | 链式表达式 | `lhs.shape=[A,B]`, `rhs.shape=[A,B]` | `add(add(lhs, 3), rhs)` | 返回 shape=`[A,B]` 的动态结果 |
 | OP-007 | 类型 | 标量类型不合法 | `lhs.dtype=float32` | `add(lhs, "3")` | 抛 `TypeError` |
 | OP-008 | 类型 | Memory dtype 不兼容 | `lhs.dtype=float32`, `rhs.dtype=int32` | `add(lhs, rhs)` | 抛 `TypeError` |
-| OP-009 | 比较 | 同 shape 比较 | `lhs.shape=[A,B]`, `rhs.shape=[A,B]` | `eq(lhs, rhs)` | 返回 shape=`[A,B]` 且 dtype=`bool` 的结果 |
+| OP-009 | 比较 | 同 shape 比较 | `lhs.shape=[A,B]`, `rhs.shape=[A,B]` | `eq(lhs, rhs)` | 返回 shape=`[A,B]` 且 dtype=`NumericType.Int32` 的结果；其语义为 predicate |
 | OP-010 | 比较 | shape 顺序不同 | `lhs.shape=[A,B]`, `rhs.shape=[B,A]` | `eq(lhs, rhs)` | 抛 `ValueError` |
+| OP-011 | 类型 | 纯标量输入 | `lhs=1`, `rhs=2` | `add(lhs, rhs)` | 抛 `TypeError` |
+| OP-012 | 比较 | 别名 API | `lhs.shape=[A]`, `rhs.shape=[A]` | `ne/le/ge(lhs, rhs)` | 返回 `NumericType.Int32` 且 shape 保持一致 |
+| OP-013 | 兼容 | 去除 convert_from_list | `lhs.shape=[N,32]`, `lhs.stride=[C,1]` | `add(lhs, rhs)` | 不依赖 `convert_from_list`，且结果 stride 不为空并保持为 `["C", 1]` |

@@ -35,8 +35,8 @@ from python.symbol_variable.type import NumericType
 # OP-001
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-16 02:24:54 +0800
-# 最近一次运行成功时间: 2026-03-16 02:24:54 +0800
+# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
+# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证 add API 可独立调用并保持形状。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_add_memory
 # 对应功能实现文件路径: python/operation/nn.py
@@ -54,8 +54,8 @@ def test_nn_add_memory() -> None:
 # OP-005
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-16 02:24:54 +0800
-# 最近一次运行成功时间: 2026-03-16 02:24:54 +0800
+# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
+# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证 Memory 与标量加法支持左右两侧。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_add_scalar
 # 对应功能实现文件路径: python/operation/nn.py
@@ -74,8 +74,8 @@ def test_nn_add_scalar() -> None:
 # OP-006
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-16 02:24:54 +0800
-# 最近一次运行成功时间: 2026-03-16 02:24:54 +0800
+# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
+# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证链式表达式逐步检查形状与类型。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_chain_expression
 # 对应功能实现文件路径: python/operation/nn.py
@@ -92,8 +92,8 @@ def test_nn_chain_expression() -> None:
 # OP-003
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-16 02:24:54 +0800
-# 最近一次运行成功时间: 2026-03-16 02:24:54 +0800
+# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
+# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证 shape 不一致抛 ValueError。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_shape_mismatch
 # 对应功能实现文件路径: python/operation/nn.py
@@ -109,8 +109,8 @@ def test_nn_shape_mismatch() -> None:
 # OP-004
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-16 02:24:54 +0800
-# 最近一次运行成功时间: 2026-03-16 02:24:54 +0800
+# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
+# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证 rank 不一致抛 ValueError。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_rank_mismatch
 # 对应功能实现文件路径: python/operation/nn.py
@@ -126,8 +126,8 @@ def test_nn_rank_mismatch() -> None:
 # OP-008
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-16 02:24:54 +0800
-# 最近一次运行成功时间: 2026-03-16 02:24:54 +0800
+# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
+# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证 dtype 不兼容抛 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_dtype_mismatch
 # 对应功能实现文件路径: python/operation/nn.py
@@ -143,8 +143,8 @@ def test_nn_dtype_mismatch() -> None:
 # OP-007
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-16 02:24:54 +0800
-# 最近一次运行成功时间: 2026-03-16 02:24:54 +0800
+# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
+# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证标量类型不合法抛 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_scalar_type_error
 # 对应功能实现文件路径: python/operation/nn.py
@@ -159,8 +159,8 @@ def test_nn_scalar_type_error() -> None:
 # OP-009
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-16 02:24:54 +0800
-# 最近一次运行成功时间: 2026-03-16 02:24:54 +0800
+# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
+# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证比较 API 返回 predicate dtype。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_compare_predicate
 # 对应功能实现文件路径: python/operation/nn.py
@@ -181,8 +181,8 @@ def test_nn_compare_predicate() -> None:
 # OP-010
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-16 02:24:54 +0800
-# 最近一次运行成功时间: 2026-03-16 02:24:54 +0800
+# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
+# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证比较时 shape 顺序不同抛 ValueError。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_compare_shape_order
 # 对应功能实现文件路径: python/operation/nn.py
@@ -198,8 +198,8 @@ def test_nn_compare_shape_order() -> None:
 # OP-002
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-16 02:24:54 +0800
-# 最近一次运行成功时间: 2026-03-16 02:24:54 +0800
+# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
+# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证其他算术 API 保持形状。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_other_arithmetic
 # 对应功能实现文件路径: python/operation/nn.py
@@ -213,11 +213,11 @@ def test_nn_other_arithmetic() -> None:
     assert truediv(lhs, 1).shape.get_values() == [2, 2]
 
 
-# OP-001
+# OP-011
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-16 02:24:54 +0800
-# 最近一次运行成功时间: 2026-03-16 02:24:54 +0800
+# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
+# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证纯标量输入抛 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_scalar_only_error
 # 对应功能实现文件路径: python/operation/nn.py
@@ -228,11 +228,11 @@ def test_nn_scalar_only_error() -> None:
         _ = add(1, 2)
 
 
-# OP-009
+# OP-012
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-16 02:24:54 +0800
-# 最近一次运行成功时间: 2026-03-16 02:24:54 +0800
+# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
+# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证比较操作对称 API 可用。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_compare_alias
 # 对应功能实现文件路径: python/operation/nn.py
@@ -246,11 +246,11 @@ def test_nn_compare_alias() -> None:
     assert ge(lhs, rhs).dtype is NumericType.Int32
 
 
-# OP-011
+# OP-013
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-16 02:24:54 +0800
-# 最近一次运行成功时间: 2026-03-16 02:24:54 +0800
+# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
+# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证 nn 链路在迁移后不依赖已移除的 convert_from_* 入口。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_operation_does_not_require_convert_from_list
 # 对应功能实现文件路径: python/symbol_variable/memory.py
