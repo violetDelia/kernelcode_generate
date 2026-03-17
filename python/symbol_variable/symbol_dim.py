@@ -143,15 +143,16 @@ class _SymbolDim:
             raise TypeError(f"Unsupported SymbolDim type: {type(sym)!r}")
 
     @staticmethod
-    def _normalize_operand(value: int | str | "_SymbolDim") -> sp.Basic:
+    def _normalize_operand(value: int | str | sp.Basic | "_SymbolDim") -> sp.Basic:
         """统一规范化操作数为 sympy 表达式。
 
         创建者: 小李飞刀
         最后一次更改: 小李飞刀
 
         功能说明:
-        - 支持 int/str/_SymbolDim，其他类型抛 TypeError。
+        - 支持 int/str/sympy.Basic/_SymbolDim，其他类型抛 TypeError。
         - str 与构造路径一致，空白/纯数字字符串抛 ValueError。
+        - sympy.Symbol 若无显式假设，统一规范化为 integer=True, real=True。
 
         使用示例:
         - _SymbolDim._normalize_operand(4)
@@ -168,6 +169,8 @@ class _SymbolDim:
             return sp.Integer(value)
         if isinstance(value, str):
             return _SymbolDim._symbol_from_str(value)
+        if isinstance(value, sp.Basic):
+            return _SymbolDim._normalize_symbol(value)
         raise TypeError(f"Unsupported operand type: {type(value)!r}")
 
     def get_symbol(self) -> sp.Basic:
@@ -208,7 +211,7 @@ class _SymbolDim:
         """
         return str(self.get_symbol())
 
-    def __add__(self, other: int | str | "_SymbolDim") -> "SymbolDim":
+    def __add__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度加法。
 
         创建者: 小李飞刀
@@ -227,7 +230,7 @@ class _SymbolDim:
         """
         return SymbolDim(self.get_symbol() + self._normalize_operand(other))
 
-    def __radd__(self, other: int | str | "_SymbolDim") -> "SymbolDim":
+    def __radd__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度反向加法。
 
         创建者: 小李飞刀
@@ -246,7 +249,7 @@ class _SymbolDim:
         """
         return SymbolDim(self._normalize_operand(other) + self.get_symbol())
 
-    def __sub__(self, other: int | str | "_SymbolDim") -> "SymbolDim":
+    def __sub__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度减法。
 
         创建者: 小李飞刀
@@ -265,7 +268,7 @@ class _SymbolDim:
         """
         return SymbolDim(self.get_symbol() - self._normalize_operand(other))
 
-    def __rsub__(self, other: int | str | "_SymbolDim") -> "SymbolDim":
+    def __rsub__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度反向减法。
 
         创建者: 小李飞刀
@@ -284,7 +287,7 @@ class _SymbolDim:
         """
         return SymbolDim(self._normalize_operand(other) - self.get_symbol())
 
-    def __mul__(self, other: int | str | "_SymbolDim") -> "SymbolDim":
+    def __mul__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度乘法。
 
         创建者: 小李飞刀
@@ -303,7 +306,7 @@ class _SymbolDim:
         """
         return SymbolDim(self.get_symbol() * self._normalize_operand(other))
 
-    def __rmul__(self, other: int | str | "_SymbolDim") -> "SymbolDim":
+    def __rmul__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度反向乘法。
 
         创建者: 小李飞刀
@@ -322,7 +325,7 @@ class _SymbolDim:
         """
         return SymbolDim(self._normalize_operand(other) * self.get_symbol())
 
-    def __truediv__(self, other: int | str | "_SymbolDim") -> "SymbolDim":
+    def __truediv__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度除法。
 
         创建者: 小李飞刀
@@ -341,7 +344,7 @@ class _SymbolDim:
         """
         return SymbolDim(self.get_symbol() / self._normalize_operand(other))
 
-    def __rtruediv__(self, other: int | str | "_SymbolDim") -> "SymbolDim":
+    def __rtruediv__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度反向除法。
 
         创建者: 小李飞刀
@@ -367,7 +370,7 @@ class _SymbolDim:
         最后一次更改: 小李飞刀
 
         功能说明:
-        - 支持 int/str/SymbolDim，比较底层 sympy 表达式。
+        - 支持 int/str/sympy.Basic/SymbolDim，比较底层 sympy 表达式。
         - 其他类型抛 TypeError。
 
         使用示例:
@@ -378,7 +381,7 @@ class _SymbolDim:
         - test: test/symbol_variable/test_symbol_dim.py
         - 功能实现: python/symbol_variable/symbol_dim.py
         """
-        if not isinstance(other, (_SymbolDim, int, str)):
+        if not isinstance(other, (_SymbolDim, int, str, sp.Basic)):
             raise TypeError(f"Unsupported comparison type: {type(other)!r}")
         return self.get_symbol() == self._normalize_operand(other)
 

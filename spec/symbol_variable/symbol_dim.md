@@ -1,11 +1,11 @@
 # symbol_dim.md
 
-用于定义 `SymbolDim` 的开发者设计规范。`SymbolDim` 是维度表达的统一入口，既支持静态整数维度，也支持基于符号的动态维度。
+ [immutable]用于定义 `SymbolDim` 的开发者设计规范。`SymbolDim` 是维度表达的统一入口，既支持静态整数维度，也支持基于符号的动态维度。
 
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`榕`
+- 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/symbol_variable/symbol_dim.md`](../../spec/symbol_variable/symbol_dim.md)
 - `test`：[`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py)
 - `功能实现`：[`python/symbol_variable/symbol_dim.py`](../../python/symbol_variable/symbol_dim.py)
@@ -33,7 +33,6 @@
 - 纯数字字符串与空白字符串继续拒绝，异常类型为 `ValueError`。
 - 非纯数字字符串继续作为符号名处理（例如 `"+1"`、`"-1"`、`"3.14"`）。
 - `sympy.Symbol` 若未显式设置 `is_integer/is_real`，需统一规范化为 `integer=True, real=True`。
-- 不提供旧路径 `symbol_variable.symbol_dim` 的 compat 转发模块。
 
 ## 输入规整规则
 
@@ -162,6 +161,7 @@ SymbolDim("N") / 2
 功能说明：
 
 - 比较底层 `sympy` 表达式等价性，返回 `bool`。
+- 操作数规整规则与构造、算术入口一致；非法类型继续抛 `TypeError`，纯数字字符串或空白字符串继续抛 `ValueError`。
 
 示例：
 
@@ -244,8 +244,8 @@ _SymbolDim._normalize_operand("M")
 
 ## 错误与异常
 
-- 构造或运算遇到非法类型：`TypeError`。
-- 构造或运算遇到纯数字字符串或空白字符串：`ValueError`。
+- 构造、运算或比较遇到非法类型：`TypeError`。
+- 构造、运算或比较遇到纯数字字符串或空白字符串：`ValueError`。
 - 异常消息文本不是兼容承诺，兼容性只要求异常类型稳定。
 
 ## 测试
@@ -257,24 +257,29 @@ _SymbolDim._normalize_operand("M")
 
 - 覆盖构造、运算、比较、动态性判断与错误分支。
 - 验证字符串规整规则在构造与运算入口一致。
+- 验证比较入口沿用与构造/运算一致的操作数规整与异常策略。
 - 验证 `sympy.Symbol` 的假设规范化策略。
+- 覆盖 `sympy.Basic` 的 `Symbol` 与表达式两类入口路径。
 
 ### 测试清单
 
 | 用例 ID | 约束点 | 对应测试 |
 | --- | --- | --- |
-| SD-001 | 构造支持 `int/str/sympy.Basic` | `test_init_accepts_int_str_sympy` |
+| SD-001 | 构造支持 `int/str/sympy.Basic`，覆盖 `sympy.Symbol` 输入路径 | `test_init_accepts_int_str_sympy` |
 | SD-002 | 构造拒绝纯数字字符串 | `test_init_rejects_numeric_string` |
 | SD-017 | 构造拒绝空白字符串 | `test_init_rejects_blank_string` |
-| SD-003 | 基础算术运算 | `test_arithmetic_ops` |
+| SD-003 | 基础算术运算，覆盖 `sympy.Symbol` 操作数路径 | `test_arithmetic_ops` |
 | SD-012 | 运算拒绝纯数字/空白字符串 | `test_arithmetic_rejects_numeric_string` |
-| SD-004 | 反向算术运算 | `test_reverse_arithmetic_ops` |
+| SD-004 | 反向算术运算，覆盖 `sympy.Symbol` 操作数路径 | `test_reverse_arithmetic_ops` |
 | SD-005 | 动态性判断与构造入口 | `test_dynamic_and_construct` |
-| SD-006 | 相等比较 | `test_equality` |
-| SD-013 | 比较拒绝纯数字/空白字符串 | `test_compare_rejects_numeric_string` |
+| SD-006 | 相等比较，覆盖 `sympy.Symbol` 比较路径 | `test_equality` |
+| SD-018 | `sympy.Basic` 表达式作为算术与比较操作数 | `test_sympy_basic_expression_operands` |
+| SD-013 | 比较拒绝纯数字/空白字符串，异常策略与构造/运算一致 | `test_compare_rejects_numeric_string` |
 | SD-009 | 字符串操作数规整 | `test_string_operand_unification` |
 | SD-015 | 非纯数字字符串兼容 | `test_non_numeric_string_allowed` |
 | SD-010 | 无显式假设的 `sympy.Symbol` 规范化 | `test_symbol_without_assumption_normalized` |
 | SD-011 | 有显式假设的 `sympy.Symbol` 保持原样 | `test_symbol_with_assumption_kept` |
-| SD-007 | 非法类型错误 | `test_invalid_types_raise` |
+| SD-007 | 运算与比较入口的非法类型错误 | `test_invalid_types_raise` |
 | SD-008 | `get_symbol` 与 `repr` 一致性 | `test_get_symbol_and_repr` |
+
+- 当前测试矩阵覆盖 `sympy.Basic` 的两条路径：`sympy.Symbol` 与 `sympy` 表达式（如 `Symbol("K") + 1`）；不再以 `sympy.Symbol` 单独代表全部 `Basic` 输入。

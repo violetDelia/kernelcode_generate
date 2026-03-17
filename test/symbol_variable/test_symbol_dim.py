@@ -33,8 +33,8 @@ from python.symbol_variable.symbol_dim import SymbolDim
 # SD-001
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-16 01:43:13 +0800
-# 最近一次运行成功时间: 2026-03-16 01:43:13 +0800
+# 最近一次运行测试时间: 2026-03-18 02:22:19 +0800
+# 最近一次运行成功时间: 2026-03-18 02:22:19 +0800
 # 功能说明: 验证 SymbolDim 构造支持 int/str/sympy.Basic。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_init_accepts_int_str_sympy
 # 对应功能实现文件路径: python/symbol_variable/symbol_dim.py
@@ -44,10 +44,12 @@ def test_init_accepts_int_str_sympy() -> None:
     int_dim = SymbolDim(8)
     str_dim = SymbolDim("N")
     sym_dim = SymbolDim(sp.symbols("M"))
+    expr_dim = SymbolDim(sp.Symbol("K") + 1)
 
     assert int_dim.get_symbol() == sp.Integer(8)
     assert str_dim.get_symbol() == sp.symbols("N", integer=True, real=True)
     assert sym_dim.get_symbol() == sp.symbols("M", integer=True, real=True)
+    assert expr_dim.get_symbol() == sp.Symbol("K") + 1
 
 
 # SD-002
@@ -94,11 +96,13 @@ def test_init_rejects_blank_string() -> None:
 # 对应测试文件路径: test/symbol_variable/test_symbol_dim.py
 def test_arithmetic_ops() -> None:
     dim = SymbolDim("N")
+    sym_operand = sp.Symbol("K")
 
     add_res = dim + 2
     sub_res = dim - "M"
     mul_res = dim * 3
     div_res = dim / 4
+    sym_res = dim + sym_operand
 
     assert isinstance(add_res, SymbolDim)
     assert isinstance(sub_res, SymbolDim)
@@ -111,11 +115,14 @@ def test_arithmetic_ops() -> None:
     )
     assert mul_res.get_symbol() == sp.symbols("N", integer=True, real=True) * sp.Integer(3)
     assert div_res.get_symbol() == sp.symbols("N", integer=True, real=True) / sp.Integer(4)
+    assert sym_res.get_symbol() == sp.symbols("N", integer=True, real=True) + sp.symbols(
+        "K", integer=True, real=True
+    )
 
 
 # SD-012
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 摸鱼小分队
 # 最近一次运行测试时间: 2026-03-16 01:43:13 +0800
 # 最近一次运行成功时间: 2026-03-16 01:43:13 +0800
 # 功能说明: 验证运算入口拒绝纯数字/空白字符串。
@@ -144,11 +151,13 @@ def test_arithmetic_rejects_numeric_string() -> None:
 # 对应测试文件路径: test/symbol_variable/test_symbol_dim.py
 def test_reverse_arithmetic_ops() -> None:
     dim = SymbolDim("N")
+    sym_left = sp.Symbol("P")
 
     add_res = 1 + dim
     sub_res = 10 - dim
     mul_res = 2 * dim
     div_res = "K" / dim
+    sym_div = sym_left / dim
 
     assert add_res.get_symbol() == sp.Integer(1) + sp.symbols("N", integer=True, real=True)
     assert sub_res.get_symbol() == sp.Integer(10) - sp.symbols("N", integer=True, real=True)
@@ -156,11 +165,14 @@ def test_reverse_arithmetic_ops() -> None:
     assert div_res.get_symbol() == sp.symbols("K", integer=True, real=True) / sp.symbols(
         "N", integer=True, real=True
     )
+    assert sym_div.get_symbol() == sp.symbols("P", integer=True, real=True) / sp.symbols(
+        "N", integer=True, real=True
+    )
 
 
 # SD-005
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 摸鱼小分队
 # 最近一次运行测试时间: 2026-03-16 01:43:13 +0800
 # 最近一次运行成功时间: 2026-03-16 01:43:13 +0800
 # 功能说明: 验证动态性判断与构造入口行为。
@@ -192,13 +204,14 @@ def test_equality() -> None:
     assert SymbolDim("N") == "N"
     assert SymbolDim("N") == SymbolDim("N")
     assert SymbolDim(sp.symbols("M")) == "M"
+    assert SymbolDim("N") == sp.Symbol("N")
 
 
 # SD-013
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-16 01:43:13 +0800
-# 最近一次运行成功时间: 2026-03-16 01:43:13 +0800
+# 最近一次运行测试时间: 2026-03-18 02:22:19 +0800
+# 最近一次运行成功时间: 2026-03-18 02:22:19 +0800
 # 功能说明: 验证比较入口拒绝纯数字/空白字符串。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_compare_rejects_numeric_string
 # 对应功能实现文件路径: python/symbol_variable/symbol_dim.py
@@ -206,9 +219,28 @@ def test_equality() -> None:
 # 对应测试文件路径: test/symbol_variable/test_symbol_dim.py
 def test_compare_rejects_numeric_string() -> None:
     dim = SymbolDim("N")
-    for value in ["12", " 12 ", "۱۲", " "]:
+    for value in ["12", " 12 ", "１２", "٠١٢", " ", "\t"]:
         with pytest.raises(ValueError):
             _ = dim == value
+
+
+# SD-018
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-18 02:22:19 +0800
+# 最近一次运行成功时间: 2026-03-18 02:22:19 +0800
+# 功能说明: 验证 sympy.Basic 表达式可用于算术与比较入口。
+# 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_sympy_basic_expression_operands
+# 对应功能实现文件路径: python/symbol_variable/symbol_dim.py
+# 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
+# 对应测试文件路径: test/symbol_variable/test_symbol_dim.py
+def test_sympy_basic_expression_operands() -> None:
+    expr = sp.Symbol("K") + 1
+    dim = SymbolDim("N")
+    result = dim + expr
+    assert result.get_symbol() == sp.symbols("N", integer=True, real=True) + expr
+    compare = dim == expr
+    assert isinstance(compare, bool)
 
 
 # SD-009
