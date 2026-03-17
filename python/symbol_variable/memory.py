@@ -124,7 +124,23 @@ class Memory:
 
     @staticmethod
     def _normalize_shape(value):
-        """规范化 shape/stride 输入为 SymbolShape。"""
+        """规范化 shape/stride 输入为 SymbolShape。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 若已为 SymbolShape，直接返回。
+        - 否则通过 SymbolShape 构造规整输入。
+
+        使用示例:
+        - Memory._normalize_shape([1, 2])
+
+        关联文件:
+        - spec: spec/symbol_variable/memory.md
+        - test: test/symbol_variable/test_memory.py
+        - 功能实现: python/symbol_variable/memory.py
+        """
         if isinstance(value, SymbolShape):
             return value
         return SymbolShape(value)

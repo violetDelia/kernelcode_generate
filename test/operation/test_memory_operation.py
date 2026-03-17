@@ -30,11 +30,11 @@ from python.symbol_variable.memory import Memory, MemorySpace
 from python.symbol_variable.type import NumericType
 
 
-# ME-008
+# ME-010
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-16 01:43:13 +0800
-# 最近一次运行成功时间: 2026-03-16 01:43:13 +0800
+# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
+# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证 Memory + Memory 的逐元素运算。
 # 使用示例: pytest -q test/operation/test_memory_operation.py -k test_memory_add_memory
 # 对应功能实现文件路径: python/symbol_variable/memory.py
@@ -50,11 +50,11 @@ def test_memory_add_memory() -> None:
     assert result.space is MemorySpace.SM
 
 
-# ME-009
+# ME-011
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-16 01:43:13 +0800
-# 最近一次运行成功时间: 2026-03-16 01:43:13 +0800
+# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
+# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证 Memory 与标量的逐元素运算。
 # 使用示例: pytest -q test/operation/test_memory_operation.py -k test_memory_add_scalar
 # 对应功能实现文件路径: python/symbol_variable/memory.py
@@ -70,11 +70,11 @@ def test_memory_add_scalar() -> None:
     assert right.dtype is NumericType.Int32
 
 
-# ME-009
+# ME-012
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-16 01:43:13 +0800
-# 最近一次运行成功时间: 2026-03-16 01:43:13 +0800
+# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
+# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证运算结果元数据独立性，不复用 lhs shape/stride。
 # 使用示例: pytest -q test/operation/test_memory_operation.py -k test_memory_metadata_independent
 # 对应功能实现文件路径: python/symbol_variable/memory.py
@@ -93,11 +93,11 @@ def test_memory_metadata_independent() -> None:
     assert mem.stride.get_values() == [3, 1]
 
 
-# ME-010
+# ME-013
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-16 01:43:13 +0800
-# 最近一次运行成功时间: 2026-03-16 01:43:13 +0800
+# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
+# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证比较运算返回 predicate dtype。
 # 使用示例: pytest -q test/operation/test_memory_operation.py -k test_memory_compare_predicate
 # 对应功能实现文件路径: python/symbol_variable/memory.py
@@ -114,11 +114,11 @@ def test_memory_compare_predicate() -> None:
     assert lt_result.dtype is NumericType.Int32
 
 
-# ME-008
+# ME-014
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-16 01:43:13 +0800
-# 最近一次运行成功时间: 2026-03-16 01:43:13 +0800
+# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
+# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证形状不一致时抛 ValueError。
 # 使用示例: pytest -q test/operation/test_memory_operation.py -k test_memory_shape_mismatch
 # 对应功能实现文件路径: python/symbol_variable/memory.py
@@ -131,11 +131,11 @@ def test_memory_shape_mismatch() -> None:
         _ = lhs + rhs
 
 
-# ME-008
+# ME-015
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-16 01:43:13 +0800
-# 最近一次运行成功时间: 2026-03-16 01:43:13 +0800
+# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
+# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证 dtype 不兼容时抛 TypeError。
 # 使用示例: pytest -q test/operation/test_memory_operation.py -k test_memory_dtype_mismatch
 # 对应功能实现文件路径: python/symbol_variable/memory.py
@@ -148,11 +148,11 @@ def test_memory_dtype_mismatch() -> None:
         _ = lhs + rhs
 
 
-# ME-009
+# ME-016
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-16 01:43:13 +0800
-# 最近一次运行成功时间: 2026-03-16 01:43:13 +0800
+# 最近一次运行测试时间: 2026-03-17 09:11:30 +0800
+# 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证不支持的标量类型抛 TypeError。
 # 使用示例: pytest -q test/operation/test_memory_operation.py -k test_memory_scalar_type_error
 # 对应功能实现文件路径: python/symbol_variable/memory.py
