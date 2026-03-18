@@ -1,0 +1,291 @@
+"""DMA operation API.
+
+创建者: 金铲铲大作战
+最后一次更改: 金铲铲大作战
+
+功能说明:
+- 提供 Memory 的数据搬运 API，包括 copy/load/store/slice/deslice。
+
+使用示例:
+- from python.operation.dma import copy, load
+- copy(src, dst)
+
+关联文件:
+- spec: spec/operation/dma.md
+- test: test/operation/test_operation_dma.py
+- 功能实现: python/operation/dma.py
+"""
+
+from __future__ import annotations
+
+from python.symbol_variable.memory import Memory, MemorySpace
+from python.symbol_variable.symbol_shape import SymbolShape
+
+
+def _ensure_memory(value: object, name: str) -> Memory:
+    """确保输入为 Memory。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 非 Memory 输入抛 TypeError。
+
+    使用示例:
+    - _ensure_memory(mem, "source")
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: python/operation/dma.py
+    """
+    if not isinstance(value, Memory):
+        raise TypeError(f"{name} must be Memory")
+    return value
+
+
+def _normalize_index_list(value: object, name: str) -> SymbolShape:
+    """规范化索引列表。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 接收 SymbolShape 或可迭代对象，并规范化为 SymbolShape。
+
+    使用示例:
+    - _normalize_index_list([0, 1], "offsets")
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: python/operation/dma.py
+    """
+    if isinstance(value, SymbolShape):
+        return value
+    return SymbolShape(value)
+
+
+def _ensure_index_rank(memory: Memory, offsets: SymbolShape, sizes: SymbolShape, strides: SymbolShape | None) -> None:
+    """校验索引列表长度与 rank 一致。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - offsets/sizes/strides 长度必须与 memory.rank 一致。
+
+    使用示例:
+    - _ensure_index_rank(mem, offsets, sizes, strides)
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: python/operation/dma.py
+    """
+    rank = len(memory.shape)
+    if len(offsets) != rank or len(sizes) != rank:
+        raise ValueError("Index rank mismatch")
+    if strides is not None and len(strides) != rank:
+        raise ValueError("Index rank mismatch")
+
+
+def _ensure_sizes_positive(sizes: SymbolShape) -> None:
+    """校验 sizes 正长度约束。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 静态长度必须大于 0，动态长度保持不变。
+
+    使用示例:
+    - _ensure_sizes_positive(SymbolShape([1, 2]))
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: python/operation/dma.py
+    """
+    for dim in sizes.get_values():
+        if isinstance(dim, int) and dim <= 0:
+            raise ValueError("Invalid size")
+
+
+def _ensure_unit_strides(strides: SymbolShape | None) -> None:
+    """校验 stride 是否为全 1。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 当前阶段仅支持全 1 stride，其他情况显式报错。
+
+    使用示例:
+    - _ensure_unit_strides(SymbolShape([1, 1]))
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: python/operation/dma.py
+    """
+    if strides is None:
+        return
+    for dim in strides.get_values():
+        if dim != 1:
+            raise NotImplementedError("Non-unit stride is not supported")
+
+
+def copy(source: object, target: object) -> None:
+    """整块拷贝。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - source/target 需 shape/stride/dtype 一致。
+
+    使用示例:
+    - copy(src, dst)
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: python/operation/dma.py
+    """
+    src = _ensure_memory(source, "source")
+    dst = _ensure_memory(target, "target")
+    if src.dtype is not dst.dtype:
+        raise TypeError("Memory dtype mismatch")
+    if src.shape.get_values() != dst.shape.get_values():
+        raise ValueError("Memory shape mismatch")
+    if (src.stride is None) != (dst.stride is None):
+        raise ValueError("Memory stride mismatch")
+    if src.stride is not None and dst.stride is not None:
+        if src.stride.get_values() != dst.stride.get_values():
+            raise ValueError("Memory stride mismatch")
+    return None
+
+
+def load(
+    source: object,
+    offsets,
+    sizes,
+    strides=None,
+    space: MemorySpace | None = None,
+) -> Memory:
+    """从 source 读取切片块。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 返回新的 Memory 块。
+
+    使用示例:
+    - tile = load(src, offsets=[0, 0], sizes=[32, 32], strides=[1, 1], space=MemorySpace.SM)
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: python/operation/dma.py
+    """
+    src = _ensure_memory(source, "source")
+    offsets_shape = _normalize_index_list(offsets, "offsets")
+    sizes_shape = _normalize_index_list(sizes, "sizes")
+    strides_shape = None if strides is None else _normalize_index_list(strides, "strides")
+    _ensure_index_rank(src, offsets_shape, sizes_shape, strides_shape)
+    _ensure_sizes_positive(sizes_shape)
+    _ensure_unit_strides(strides_shape)
+    target_space = src.space if space is None else space
+    return Memory(sizes_shape, src.dtype, space=target_space, stride=None)
+
+
+def store(
+    source: object,
+    target: object,
+    offsets,
+    sizes,
+    strides=None,
+) -> None:
+    """把 source 块写回 target 区域。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - source.shape 必须与 sizes 一致。
+
+    使用示例:
+    - store(tile, dst, offsets=[0, 0], sizes=[32, 32])
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: python/operation/dma.py
+    """
+    src = _ensure_memory(source, "source")
+    dst = _ensure_memory(target, "target")
+    if src.dtype is not dst.dtype:
+        raise TypeError("Memory dtype mismatch")
+    offsets_shape = _normalize_index_list(offsets, "offsets")
+    sizes_shape = _normalize_index_list(sizes, "sizes")
+    strides_shape = None if strides is None else _normalize_index_list(strides, "strides")
+    _ensure_index_rank(dst, offsets_shape, sizes_shape, strides_shape)
+    _ensure_sizes_positive(sizes_shape)
+    _ensure_unit_strides(strides_shape)
+    if src.shape.get_values() != sizes_shape.get_values():
+        raise ValueError("Store size mismatch")
+    return None
+
+
+def slice(
+    source: object,
+    offsets,
+    sizes,
+    strides=None,
+    space: MemorySpace | None = None,
+) -> Memory:
+    """从 source 抽取切片块。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 返回新的 Memory 块，强调切片语义。
+
+    使用示例:
+    - sub = slice(src, offsets=[0, 0], sizes=[8, 8], space=MemorySpace.LM)
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: python/operation/dma.py
+    """
+    return load(source, offsets, sizes, strides=strides, space=space)
+
+
+def deslice(
+    source: object,
+    target: object,
+    offsets,
+    sizes,
+    strides=None,
+) -> None:
+    """把切片块写回 target 区域。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - source.shape 必须与 sizes 一致。
+
+    使用示例:
+    - deslice(sub, dst, offsets=[0, 0], sizes=[8, 8])
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: python/operation/dma.py
+    """
+    return store(source, target, offsets, sizes, strides=strides)
