@@ -34,7 +34,7 @@ from xdsl.parser import AttrParser
 from xdsl.printer import Printer
 from xdsl.utils.exceptions import VerifyException
 
-_VALID_SPACES = {"global", "shared", "local"}
+_VALID_SPACES = {"global", "shared", "local", "tsm", "tlm"}
 
 
 def _parse_dim_list(parser: AttrParser) -> ArrayAttr[Attribute]:
@@ -145,7 +145,7 @@ class NnMemorySpaceAttr(ParametrizedAttribute):
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 显式建模 `global`、`shared`、`local` 三种 memory space。
+    - 显式建模 `global`、`shared`、`local`、`tsm`、`tlm` 五种 memory space。
 
     使用示例:
     - NnMemorySpaceAttr(StringAttr(\"global\"))
@@ -180,7 +180,7 @@ class NnMemorySpaceAttr(ParametrizedAttribute):
         """校验 space attribute。"""
 
         if self.space.data not in _VALID_SPACES:
-            raise VerifyException("nn space must be one of global/shared/local")
+            raise VerifyException("nn space must be one of global/shared/local/tsm/tlm")
 
     @classmethod
     def from_name(cls, space: str) -> "NnMemorySpaceAttr":
@@ -190,7 +190,7 @@ class NnMemorySpaceAttr(ParametrizedAttribute):
         最后一次更改: 小李飞刀
 
         功能说明:
-        - 简化 `global/shared/local` 的构造。
+        - 简化 `global/shared/local/tsm/tlm` 的构造。
 
         使用示例:
         - NnMemorySpaceAttr.from_name(\"global\")

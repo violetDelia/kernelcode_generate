@@ -4,7 +4,7 @@
 最后一次更改: 小李飞刀
 
 功能说明:
-- 暴露 nn dialect 的 type、attr 与 op 定义。
+- 暴露 nn dialect 的 type、attr 与 op 定义，并覆盖 TSM/TLM 空间语义。
 
 使用示例:
 - from python.dialect import Nn, NnAddOp, NnMemoryType
