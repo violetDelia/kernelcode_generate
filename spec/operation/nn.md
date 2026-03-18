@@ -616,7 +616,7 @@ CMP = eq(X, Y)
 - 验证比较别名 API（`ne/le/ge`）返回 `NumericType.Int32` 且 shape 保持一致。
 - 验证运算链路不依赖 `SymbolList/ SymbolShape` 已移除的 `convert_from_list` 入口，且 stride 可正常保持。
 - 验证 shape 不一致与类型不兼容时稳定报错。
-- 当前根上测试尚未覆盖双张量逐元素隐式 broadcast 的正向路径；后续实现/测试任务需补齐相关用例。
+- 当前根上已通过 `OP-IB-001..004` 覆盖双张量逐元素隐式 broadcast 的正向与关键反向路径。
 - 当前根上测试尚未覆盖 `matmul`；后续实现/测试任务需补齐 `matmul` 的正向与反向用例。
 
 ### 测试标准
@@ -649,11 +649,9 @@ CMP = eq(X, Y)
 | OP-BC-005 | `broadcast` | 非 Memory 输入非法 | `value=1` | `broadcast(value, [M,N])` | 抛 `TypeError` | `test_nn_broadcast_non_memory_error` |
 | OP-BC-006 | `broadcast` | 非法目标 shape 描述 | `value.shape=[1,N]` | `broadcast(value, "MN")` | 抛 `TypeError` 或 `ValueError` | `test_nn_broadcast_invalid_shape_error` |
 
-### 逐元素隐式 `broadcast` 待补测试清单
+### 逐元素隐式 `broadcast` 测试清单
 
-当前 [`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py) 尚无“双张量逐元素隐式 broadcast”对应用例；以下为后续实现/测试任务必须补齐的建议清单。
-
-| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
+| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 当前测试映射 |
 |---|---|---|---|---|---|---|
 | OP-IB-001 | 隐式 `broadcast` | singleton dim 扩张 | `lhs.shape=[1,B]`, `rhs.shape=[A,B]` | `add(lhs, rhs)` | 返回 `shape=[A,B]` 的结果 | `test_nn_add_implicit_broadcast_singleton` |
 | OP-IB-002 | 隐式 `broadcast` | 前置维插入 | `lhs.shape=[B]`, `rhs.shape=[A,B]` | `add(lhs, rhs)` | 返回 `shape=[A,B]` 的结果 | `test_nn_add_implicit_broadcast_prepend_dimension` |

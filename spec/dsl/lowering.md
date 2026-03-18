@@ -15,6 +15,7 @@
 ## 范围与目标
 
 - 描述 AST lowering 到 `nn dialect` IR 的规则与约束。
+- 描述高层逐元素隐式 broadcast 在 lowering 阶段如何展开为显式 `nn.broadcast`。
 - 不定义 AST 的解析；AST 结构见 `spec/dsl/ast.md`。
 - 不覆盖 MLIR 文本输出（见 `spec/dsl/mlir_gen.md`）。
 
@@ -26,6 +27,7 @@
 
 - 将 `FunctionAST` 转换为 `xdsl.dialects.builtin.ModuleOp`。
 - 函数体生成 `func.func`，并在函数体中生成 `nn.*` op。
+- 当高层逐元素表达式依赖隐式 broadcast 时，lowering 必须先生成显式 `nn.broadcast`，再生成对应 `nn.*` 二元 op。
 
 使用示例：
 
@@ -82,11 +84,15 @@ module = lower_to_nn_ir(func_ast)
 - 二元算术：
   - 仅支持 `add/sub/mul/div`。
   - 操作数必须同为 `nn.memory` 且类型一致。
+  - 若两个张量操作数 `shape` 完全一致，则直接 lowering 为对应 `nn.add/sub/mul/truediv`。
+  - 若两个张量操作数 `shape` 不完全一致，但满足 [`spec/operation/nn.md`](../../spec/operation/nn.md) 中逐元素隐式 broadcast 规则，则必须先把一侧或两侧显式 lowering 为 `nn.broadcast`，再生成原始二元 op。
 - 比较表达式：
   - 仅支持 `eq/ne/lt/le/gt/ge`。
   - 操作数必须同为 `nn.memory` 且类型一致。
+  - 若两个张量操作数需要隐式 broadcast，则也必须先显式生成 `nn.broadcast`，再 lowering 为 `nn.eq/ne/lt/le/gt/ge`。
 - 未知输入引用、未知表达式类型必须抛 `LoweringError`。
 - 遇到 `LoadAST`/`StoreAST` 必须抛 `LoweringError`，且不得生成任何 IR。
+- 若逐元素表达式无法按 [`spec/operation/nn.md`](../../spec/operation/nn.md) 推导共同 broadcast 目标 `shape`，必须抛 `LoweringError`，不得依赖 `nn dialect` 去做隐式 broadcast。
 
 ## 返回类型约束
 
@@ -102,6 +108,31 @@ module = lower_to_nn_ir(func_ast)
 - 使用表达式对象的 `id` 作为缓存键复用 SSA value。
 - 对同一表达式的多次引用必须复用已生成的 SSA value。
 - 对于 `a = x + y; b = a * y; return b + a` 这类多语句函数，lowering 生成的 op 顺序必须与源码依赖顺序一致：先生成 `a` 对应 op，再生成 `b` 对应 op，最后生成返回表达式对应 op；其中 `a` 的重复引用必须直接复用首次生成的 SSA value。
+
+## 隐式 `broadcast` lowering 规则
+
+- 本节只约束“高层逐元素隐式 broadcast”进入 `nn dialect` 的展开方式；不改变 [`spec/operation/nn.md`](../../spec/operation/nn.md) 中的高层兼容性判断。
+- 若逐元素表达式的两个张量操作数 `shape` 完全一致，lowering 可直接生成对应 `nn.*` 二元 op。
+- 若逐元素表达式的两个张量操作数 `shape` 不完全一致，但满足高层隐式 broadcast 规则，lowering 必须：
+  - 先推导共同目标 `shape`；
+  - 为需要扩张的一侧或两侧生成 `nn.broadcast`；
+  - 再以 broadcast 后的结果生成原始 `nn.add/sub/mul/truediv/eq/ne/lt/le/gt/ge`。
+- lowering 不得把“shape 广播兼容但不完全相等”的两个 operand 直接送入 `nn.add/eq/...`，因为 [`spec/dialect/nn.md`](../../spec/dialect/nn.md) 明确禁止二元 op 隐式 broadcast。
+- 若需要隐式 broadcast 的表达式无法推导共同目标 `shape`，必须抛 `LoweringError` 并保留源位置信息。
+
+示例（目标 lowering 形态，当前 `main` 尚未实现）：
+
+```python
+def add_bias(x: "Tensor[f32, M, N]", b: "Tensor[f32, 1, N]") -> "Tensor[f32, M, N]":
+    return x + b
+```
+
+目标 IR 语义：
+
+```text
+%b1 = "nn.broadcast"(%b) ... -> !nn.memory<[M, N], ...>
+%r = "nn.add"(%x, %b1) ...
+```
 
 ## 错误包装
 
@@ -123,6 +154,10 @@ module = lower_to_nn_ir(func_ast)
 | AV-003K | 多语句 SSA 顺序与 value 复用 | `test_multi_statement_ssa_order_and_reuse` |
 | AV-003L | `LoadAST` 进入 lowering 必须抛 `LoweringError`，且不得生成任何 IR | `test_load_ast_lowering_rejected`; `test_load_ast_lowering_raises_lowering_error` |
 | AV-003M | `StoreAST` 进入 lowering 必须抛 `LoweringError`，且不得生成任何 IR | `test_store_ast_lowering_rejected`; `test_store_ast_lowering_raises_lowering_error` |
+| AV-003N | 双张量逐元素 singleton dim 隐式 broadcast 必须 lowering 为 `nn.broadcast + nn.add` | `test_tensor_binary_implicit_broadcast_lowering` |
+| AV-003O | 前置维隐式 broadcast 必须 lowering 为 `nn.broadcast + nn.add` | `test_tensor_binary_prepend_broadcast_lowering` |
+| AV-003P | 比较表达式隐式 broadcast 必须 lowering 为 `nn.broadcast + nn.eq` | `test_compare_implicit_broadcast_lowering` |
+| AV-003Q | 不可广播的逐元素表达式必须抛 `LoweringError` 并保留位置 | `test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics` |
 
 ### Load/Store 用例分层
 

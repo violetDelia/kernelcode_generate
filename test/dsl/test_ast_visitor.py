@@ -28,8 +28,17 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from python.dialect.nn import NnAddOp, NnMemoryType
-from python.dsl.ast import BlockAST, BinaryExprAST, ConstAST, FunctionAST, LoadAST, StoreAST, TensorAST
+from python.dialect.nn import NnAddOp, NnBroadcastOp, NnEqOp, NnMemoryType
+from python.dsl.ast import (
+    BlockAST,
+    BinaryExprAST,
+    CompareExprAST,
+    ConstAST,
+    FunctionAST,
+    LoadAST,
+    StoreAST,
+    TensorAST,
+)
 from python.dsl.ast_visitor import AstVisitorError, emit_mlir, visit_function, visit_to_nn_ir
 from python.dsl.lowering import LoweringError, lower_to_nn_ir
 from python.symbol_variable.memory import Memory
@@ -453,6 +462,103 @@ def test_store_ast_lowering_raises_lowering_error() -> None:
     with pytest.raises(LoweringError, match="StoreAST lowering is not supported"):
         lower_to_nn_ir(func_ast)
 
+
+# AV-003N
+# 创建者: 金铲铲大作战
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-19 03:24:32 +0800
+# 最近一次运行成功时间: 2026-03-19 03:24:32 +0800
+# 功能说明: 验证 singleton dim 隐式 broadcast lowering 为 nn.broadcast + nn.add。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_tensor_binary_implicit_broadcast_lowering
+# 对应功能实现文件路径: python/dsl/lowering.py
+# 对应 spec 文件路径: spec/dsl/lowering.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_tensor_binary_implicit_broadcast_lowering() -> None:
+    def add(
+        x: "Tensor[f32, 1, N]",
+        y: "Tensor[f32, M, N]",
+    ) -> "Tensor[f32, M, N]":
+        return x + y
+
+    module = visit_to_nn_ir(add)
+    func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
+    broadcast_ops = [op for op in func_op.body.block.ops if isinstance(op, NnBroadcastOp)]
+    assert len(broadcast_ops) == 1
+    add_op = next(op for op in func_op.body.block.ops if isinstance(op, NnAddOp))
+    assert add_op.lhs is broadcast_ops[0].result or add_op.rhs is broadcast_ops[0].result
+
+
+# AV-003O
+# 创建者: 金铲铲大作战
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-19 03:24:32 +0800
+# 最近一次运行成功时间: 2026-03-19 03:24:32 +0800
+# 功能说明: 验证前置维隐式 broadcast lowering 为 nn.broadcast + nn.add。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_tensor_binary_prepend_broadcast_lowering
+# 对应功能实现文件路径: python/dsl/lowering.py
+# 对应 spec 文件路径: spec/dsl/lowering.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_tensor_binary_prepend_broadcast_lowering() -> None:
+    def add(
+        x: "Tensor[f32, N]",
+        y: "Tensor[f32, M, N]",
+    ) -> "Tensor[f32, M, N]":
+        return x + y
+
+    module = visit_to_nn_ir(add)
+    func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
+    broadcast_ops = [op for op in func_op.body.block.ops if isinstance(op, NnBroadcastOp)]
+    assert len(broadcast_ops) == 1
+    add_op = next(op for op in func_op.body.block.ops if isinstance(op, NnAddOp))
+    assert add_op.lhs is broadcast_ops[0].result or add_op.rhs is broadcast_ops[0].result
+
+
+# AV-003P
+# 创建者: 金铲铲大作战
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-19 03:24:32 +0800
+# 最近一次运行成功时间: 2026-03-19 03:24:32 +0800
+# 功能说明: 验证比较表达式隐式 broadcast lowering 为 nn.broadcast + nn.eq。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_compare_implicit_broadcast_lowering
+# 对应功能实现文件路径: python/dsl/lowering.py
+# 对应 spec 文件路径: spec/dsl/lowering.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_compare_implicit_broadcast_lowering() -> None:
+    lhs_memory = Memory([1, "N"], NumericType.Float32)
+    rhs_memory = Memory(["M", "N"], NumericType.Float32)
+    lhs = TensorAST(name="x", memory=lhs_memory, location=None)
+    rhs = TensorAST(name="y", memory=rhs_memory, location=None)
+    expr = CompareExprAST(op="eq", lhs=lhs, rhs=rhs, location=None)
+    func_ast = FunctionAST(name="eq", inputs=[lhs, rhs], outputs=[], body=BlockAST([expr]))
+    module = lower_to_nn_ir(func_ast)
+    func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
+    broadcast_ops = [op for op in func_op.body.block.ops if isinstance(op, NnBroadcastOp)]
+    assert len(broadcast_ops) == 1
+    eq_op = next(op for op in func_op.body.block.ops if isinstance(op, NnEqOp))
+    assert eq_op.lhs is broadcast_ops[0].result or eq_op.rhs is broadcast_ops[0].result
+
+
+# AV-003Q
+# 创建者: 金铲铲大作战
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-19 03:24:32 +0800
+# 最近一次运行成功时间: 2026-03-19 03:24:32 +0800
+# 功能说明: 验证不可广播的逐元素表达式抛 LoweringError 且保留位置。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics
+# 对应功能实现文件路径: python/dsl/lowering.py
+# 对应 spec 文件路径: spec/dsl/lowering.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics() -> None:
+    def add(
+        x: "Tensor[f32, A, B]",
+        y: "Tensor[f32, A, C]",
+    ) -> "Tensor[f32, A, B]":
+        return x + y
+
+    func_ast = visit_function(add, config={"keep_source": True})
+    with pytest.raises(LoweringError, match="Implicit broadcast dimension mismatch") as exc_info:
+        lower_to_nn_ir(func_ast)
+    assert exc_info.value.location is not None
 
 # AV-004
 # 创建者: 小李飞刀

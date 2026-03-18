@@ -20,10 +20,11 @@ from __future__ import annotations
 
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, StringAttr, i1, i32, f32
-from xdsl.ir import Block, Region
+from xdsl.ir import Attribute, Block, Region
 
 from python.dialect.nn import (
     NnAddOp,
+    NnBroadcastOp,
     NnEqOp,
     NnGeOp,
     NnGtOp,
@@ -159,6 +160,150 @@ def _dim_to_attr(value: int | str) -> object:
     if isinstance(value, int):
         return IntAttr(value)
     return StringAttr(value)
+
+
+def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
+    """比较两个维度 attribute 是否一致。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅在同类型且内容一致时判定相等。
+
+    使用示例:
+    - _dims_equal(IntAttr(1), IntAttr(1))
+
+    关联文件:
+    - spec: spec/dsl/lowering.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: python/dsl/lowering.py
+    """
+    if isinstance(lhs, IntAttr) and isinstance(rhs, IntAttr):
+        return lhs.data == rhs.data
+    if isinstance(lhs, StringAttr) and isinstance(rhs, StringAttr):
+        return lhs.data == rhs.data
+    return False
+
+
+def _infer_broadcast_shape(
+    lhs_shape: Sequence[Attribute],
+    rhs_shape: Sequence[Attribute],
+    location: SourceLocation | None,
+) -> list[Attribute]:
+    """推导隐式 broadcast 的目标 shape。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 按尾维对齐与 singleton dim 扩张规则推导目标 shape。
+
+    使用示例:
+    - _infer_broadcast_shape(lhs.shape.data, rhs.shape.data, location)
+
+    关联文件:
+    - spec: spec/dsl/lowering.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: python/dsl/lowering.py
+    """
+    max_rank = max(len(lhs_shape), len(rhs_shape))
+    result: list[Attribute] = []
+    for index in range(1, max_rank + 1):
+        lhs_dim = lhs_shape[-index] if index <= len(lhs_shape) else None
+        rhs_dim = rhs_shape[-index] if index <= len(rhs_shape) else None
+        if lhs_dim is None:
+            result.insert(0, rhs_dim)
+            continue
+        if rhs_dim is None:
+            result.insert(0, lhs_dim)
+            continue
+        if isinstance(lhs_dim, StringAttr) and lhs_dim.data == "?":
+            if _dims_equal(lhs_dim, rhs_dim):
+                result.insert(0, lhs_dim)
+                continue
+            raise LoweringError("Implicit broadcast dimension mismatch", location=location)
+        if isinstance(rhs_dim, StringAttr) and rhs_dim.data == "?":
+            if _dims_equal(lhs_dim, rhs_dim):
+                result.insert(0, rhs_dim)
+                continue
+            raise LoweringError("Implicit broadcast dimension mismatch", location=location)
+        if _dims_equal(lhs_dim, rhs_dim):
+            result.insert(0, lhs_dim)
+            continue
+        if isinstance(lhs_dim, IntAttr) and lhs_dim.data == 1:
+            result.insert(0, rhs_dim)
+            continue
+        if isinstance(rhs_dim, IntAttr) and rhs_dim.data == 1:
+            result.insert(0, lhs_dim)
+            continue
+        raise LoweringError("Implicit broadcast dimension mismatch", location=location)
+    return result
+
+
+def _build_broadcast_stride(shape: Sequence[Attribute]) -> list[Attribute]:
+    """为 broadcast 目标 shape 生成 stride 维度。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 生成与目标 shape rank 一致的 stride 列表。
+    - 避免在 shape 为 '?' 时生成同位置 '?' stride。
+
+    使用示例:
+    - _build_broadcast_stride(target_shape)
+
+    关联文件:
+    - spec: spec/dsl/lowering.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: python/dsl/lowering.py
+    """
+    stride: list[Attribute] = []
+    for dim in shape:
+        if isinstance(dim, IntAttr):
+            stride.append(IntAttr(1))
+        elif isinstance(dim, StringAttr) and dim.data == "?":
+            stride.append(IntAttr(1))
+        else:
+            stride.append(StringAttr("?"))
+    return stride
+
+
+def _infer_broadcast_memory_type(
+    lhs_type: NnMemoryType,
+    rhs_type: NnMemoryType,
+    location: SourceLocation | None,
+) -> NnMemoryType:
+    """推导隐式 broadcast 的目标 nn.memory type。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 检查 element_type 与 space 一致性。
+    - 生成目标 shape 与 stride。
+
+    使用示例:
+    - target_type = _infer_broadcast_memory_type(lhs_type, rhs_type, location)
+
+    关联文件:
+    - spec: spec/dsl/lowering.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: python/dsl/lowering.py
+    """
+    if lhs_type.element_type != rhs_type.element_type:
+        raise LoweringError("Binary op operands must have the same element_type", location=location)
+    if lhs_type.space != rhs_type.space:
+        raise LoweringError("Binary op operands must have the same space", location=location)
+    target_shape = _infer_broadcast_shape(lhs_type.shape.data, rhs_type.shape.data, location)
+    target_stride = _build_broadcast_stride(target_shape)
+    return NnMemoryType(
+        ArrayAttr(list(target_shape)),
+        ArrayAttr(list(target_stride)),
+        lhs_type.element_type,
+        lhs_type.space,
+    )
 
 
 def _memory_to_nn_type(memory: Memory) -> NnMemoryType:
@@ -309,17 +454,26 @@ def _infer_expr_type(
     if isinstance(expr, BinaryExprAST):
         lhs_type = _infer_expr_type(expr.lhs, type_map)
         rhs_type = _infer_expr_type(expr.rhs, type_map)
-        if not isinstance(lhs_type, NnMemoryType) or lhs_type != rhs_type:
-            raise LoweringError("Binary op operands must have the same nn.memory type", location=expr.location)
-        type_map[expr_key] = lhs_type
-        return lhs_type
+        if not isinstance(lhs_type, NnMemoryType) or not isinstance(rhs_type, NnMemoryType):
+            raise LoweringError("Binary op operands must have nn.memory type", location=expr.location)
+        if lhs_type == rhs_type:
+            type_map[expr_key] = lhs_type
+            return lhs_type
+        target_type = _infer_broadcast_memory_type(lhs_type, rhs_type, expr.location)
+        type_map[expr_key] = target_type
+        return target_type
 
     if isinstance(expr, CompareExprAST):
         lhs_type = _infer_expr_type(expr.lhs, type_map)
         rhs_type = _infer_expr_type(expr.rhs, type_map)
-        if not isinstance(lhs_type, NnMemoryType) or lhs_type != rhs_type:
-            raise LoweringError("Compare op operands must have the same nn.memory type", location=expr.location)
-        result_type = NnMemoryType(lhs_type.shape, lhs_type.stride, i1, lhs_type.space)
+        if not isinstance(lhs_type, NnMemoryType) or not isinstance(rhs_type, NnMemoryType):
+            raise LoweringError("Compare op operands must have nn.memory type", location=expr.location)
+        if lhs_type == rhs_type:
+            result_type = NnMemoryType(lhs_type.shape, lhs_type.stride, i1, lhs_type.space)
+            type_map[expr_key] = result_type
+            return result_type
+        target_type = _infer_broadcast_memory_type(lhs_type, rhs_type, expr.location)
+        result_type = NnMemoryType(target_type.shape, target_type.stride, i1, target_type.space)
         type_map[expr_key] = result_type
         return result_type
 
@@ -378,7 +532,16 @@ def _lower_expr(
         lhs_type = _expect_memory_value(lhs, expr.location)
         rhs_type = _expect_memory_value(rhs, expr.location)
         if lhs_type != rhs_type:
-            raise LoweringError("Binary op operands must have the same nn.memory type", location=expr.location)
+            target_type = _infer_broadcast_memory_type(lhs_type, rhs_type, expr.location)
+            if lhs_type != target_type:
+                broadcast_op = NnBroadcastOp(lhs, target_type, target_type.space)
+                block.add_op(broadcast_op)
+                lhs = broadcast_op.result
+            if rhs_type != target_type:
+                broadcast_op = NnBroadcastOp(rhs, target_type, target_type.space)
+                block.add_op(broadcast_op)
+                rhs = broadcast_op.result
+            lhs_type = target_type
         op_map = {
             "add": NnAddOp,
             "sub": NnSubOp,
@@ -398,7 +561,16 @@ def _lower_expr(
         lhs_type = _expect_memory_value(lhs, expr.location)
         rhs_type = _expect_memory_value(rhs, expr.location)
         if lhs_type != rhs_type:
-            raise LoweringError("Compare op operands must have the same nn.memory type", location=expr.location)
+            target_type = _infer_broadcast_memory_type(lhs_type, rhs_type, expr.location)
+            if lhs_type != target_type:
+                broadcast_op = NnBroadcastOp(lhs, target_type, target_type.space)
+                block.add_op(broadcast_op)
+                lhs = broadcast_op.result
+            if rhs_type != target_type:
+                broadcast_op = NnBroadcastOp(rhs, target_type, target_type.space)
+                block.add_op(broadcast_op)
+                rhs = broadcast_op.result
+            lhs_type = target_type
         result_type = NnMemoryType(lhs_type.shape, lhs_type.stride, i1, lhs_type.space)
         op_map = {
             "eq": NnEqOp,
