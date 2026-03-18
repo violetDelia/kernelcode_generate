@@ -59,12 +59,6 @@ bash ./scripts/codex-multi-agents-list.sh \
 
 脚本路径：`./scripts/codex-multi-agents-tmux.sh`
 
-### 连接会话（不存在则创建）
-```bash
-bash ./scripts/codex-multi-agents-tmux.sh \
-  -attach -s worker-a
-```
-
 ### 发送对话并写日志
 ```bash
 bash ./scripts/codex-multi-agents-tmux.sh \

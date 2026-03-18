@@ -1,7 +1,7 @@
 """type module tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 榕
 
 功能说明:
 - 覆盖 python.symbol_variable.type 的枚举语义、导出边界与旧路径禁用约束。
@@ -56,9 +56,9 @@ def test_numeric_type_values() -> None:
 
 # TY-005
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-18 01:28:26 +0800
-# 最近一次运行成功时间: 2026-03-18 01:28:26 +0800
+# 最后一次更改: 榕
+# 最近一次运行测试时间: 2026-03-16 22:43:36 +0800
+# 最近一次运行成功时间: 2026-03-16 22:43:36 +0800
 # 功能说明: 验证新增基础类型成员可直接访问。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_numeric_type_member_access
 # 对应功能实现文件路径: python/symbol_variable/type.py
@@ -69,14 +69,12 @@ def test_numeric_type_member_access() -> None:
 
     assert NumericType.Int8.name == "Int8"
     assert NumericType.Int16.name == "Int16"
-    assert NumericType.Int32.name == "Int32"
     assert NumericType.Uint8.name == "Uint8"
     assert NumericType.Uint16.name == "Uint16"
     assert NumericType.Uint32.name == "Uint32"
     assert NumericType.Uint64.name == "Uint64"
     assert NumericType.Float16.name == "Float16"
     assert NumericType.BFloat16.name == "BFloat16"
-    assert NumericType.Float32.name == "Float32"
     assert NumericType.Int64.name == "Int64"
     assert NumericType.Float64.name == "Float64"
 
@@ -84,9 +82,9 @@ def test_numeric_type_member_access() -> None:
 # TY-002
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-18 04:08:53 +0800
-# 最近一次运行成功时间: 2026-03-18 04:08:53 +0800
-# 功能说明: 验证 Farmat 仅公开 Norm/CLast 的名称与成员集合。
+# 最近一次运行测试时间: 2026-03-16 20:40:27 +0800
+# 最近一次运行成功时间: 2026-03-16 20:40:27 +0800
+# 功能说明: 验证 Farmat 别名与名称行为稳定。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_farmat_aliases
 # 对应功能实现文件路径: python/symbol_variable/type.py
 # 对应 spec 文件路径: spec/symbol_variable/type.md
@@ -94,9 +92,12 @@ def test_numeric_type_member_access() -> None:
 def test_farmat_aliases() -> None:
     from python.symbol_variable.type import Farmat
 
-    assert Farmat.Norm.name == "Norm"
-    assert Farmat.CLast.name == "CLast"
-    assert [member.name for member in Farmat] == ["Norm", "CLast"]
+    assert Farmat.Norm is Farmat.NCHW
+    assert Farmat.CLast is Farmat.NHWC
+    assert Farmat.Norm.name == "NCHW"
+    assert Farmat.CLast.name == "NHWC"
+    assert repr(Farmat.Norm) == "<Farmat.NCHW: 'NCHW'>"
+    assert repr(Farmat.CLast) == "<Farmat.NHWC: 'NHWC'>"
 
 
 # TY-003

@@ -1,7 +1,7 @@
 """Type definitions for symbol variable.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: 榕
 
 功能说明:
 - 提供数值类型与格式枚举及其公开导出边界。
@@ -31,7 +31,7 @@ class NumericType(Enum):
     """数值类型枚举。
 
     创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 榕
 
     功能说明:
     - 提供常用数值类型标识。
@@ -64,12 +64,10 @@ class Farmat(Enum):
     """格式枚举（按实现命名）。
 
     创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 榕
 
     功能说明:
-    - 仅公开 Norm 与 CLast 两个布局成员。
-    - Norm 表示通道维不在最后一维的常见布局别名。
-    - CLast 表示通道维位于最后一维的常见布局别名。
+    - 约定 c last=NHWC、c not last=NCHW。
 
     使用示例:
     - Farmat.Norm
@@ -81,5 +79,7 @@ class Farmat(Enum):
     - 功能实现: python/symbol_variable/type.py
     """
 
-    Norm = "Norm"
-    CLast = "CLast"
+    NHWC = "NHWC"
+    NCHW = "NCHW"
+    Norm = NCHW
+    CLast = NHWC

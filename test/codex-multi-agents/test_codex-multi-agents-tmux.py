@@ -1,7 +1,7 @@
 """codex-multi-agents-tmux.sh tests.
 
 功能说明:
-- 覆盖 tmux 脚本的 attach / talk 主流程与错误返回码路径。
+- 覆盖 tmux 脚本的 talk / init-env 主流程与错误返回码路径。
 
 关联文件:
 - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
@@ -124,51 +124,6 @@ def run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.Comp
 # Last Success: 2026-03-07 13:42:00 +0800
 # 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
 # Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
-def test_attach_existing_session(tmp_path: Path) -> None:
-    bin_dir = tmp_path / "bin"
-    state_dir = tmp_path / "state"
-    calls_file = write_fake_tmux(bin_dir, state_dir, sessions=["worker-a"])
-
-    env = os.environ.copy()
-    env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
-    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
-
-    result = run_script("-attach", "-s", "worker-a", env=env)
-    calls = calls_file.read_text(encoding="utf-8")
-
-    assert result.returncode == 0
-    assert "OK: attach worker-a" in result.stdout
-    assert "attach:worker-a" in calls
-    assert "new:worker-a" not in calls
-
-
-# TC-002
-# Last Run: 2026-03-07 13:42:00 +0800
-# Last Success: 2026-03-07 13:42:00 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
-def test_attach_create_session_when_missing(tmp_path: Path) -> None:
-    bin_dir = tmp_path / "bin"
-    state_dir = tmp_path / "state"
-    calls_file = write_fake_tmux(bin_dir, state_dir, sessions=["worker-a"])
-
-    env = os.environ.copy()
-    env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
-    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
-
-    result = run_script("-attach", "-s", "worker-b", env=env)
-    calls = calls_file.read_text(encoding="utf-8")
-
-    assert result.returncode == 0
-    assert "OK: new worker-b" in result.stdout
-    assert "new:worker-b" in calls
-
-
-# TC-003
-# Last Run: 2026-03-07 13:42:00 +0800
-# Last Success: 2026-03-07 13:42:00 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
 def test_talk_send_and_append_log_success(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     state_dir = tmp_path / "state"
@@ -203,7 +158,7 @@ def test_talk_send_and_append_log_success(tmp_path: Path) -> None:
     assert "@scheduler向@worker-a发起会话: 请处理任务 T1" in log_text
 
 
-# TC-004
+# TC-002
 # Last Run: 2026-03-07 13:42:00 +0800
 # Last Success: 2026-03-07 13:42:00 +0800
 # 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
@@ -237,7 +192,7 @@ def test_talk_target_session_not_found_returns_rc3(tmp_path: Path) -> None:
     assert "target session not found: missing" in result.stderr
 
 
-# TC-005
+# TC-003
 # Last Run: 2026-03-07 13:42:00 +0800
 # Last Success: 2026-03-07 13:42:00 +0800
 # 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
@@ -269,7 +224,7 @@ def test_talk_missing_message_returns_rc1(tmp_path: Path) -> None:
     assert "-talk requires -message" in result.stderr
 
 
-# TC-006
+# TC-004
 # Last Run: 2026-03-07 13:42:00 +0800
 # Last Success: 2026-03-07 13:42:00 +0800
 # 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
@@ -281,13 +236,26 @@ def test_tmux_not_found_returns_rc2(tmp_path: Path) -> None:
     env = os.environ.copy()
     env["PATH"] = str(empty_bin)
 
-    result = run_script("-attach", "-s", "worker-a", env=env)
+    result = run_script(
+        "-talk",
+        "-from",
+        "scheduler",
+        "-to",
+        "worker-a",
+        "-session-id",
+        "worker-a",
+        "-message",
+        "hello",
+        "-log",
+        str(tmp_path / "talk.log"),
+        env=env,
+    )
 
     assert result.returncode == 2
     assert "tmux not found in PATH" in result.stderr
 
 
-# TC-007
+# TC-005
 # Last Run: 2026-03-07 13:42:00 +0800
 # Last Success: 2026-03-07 13:42:00 +0800
 # 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
@@ -325,7 +293,7 @@ def test_talk_lock_conflict_returns_rc4(tmp_path: Path) -> None:
     assert "cannot acquire lock" in result.stderr
 
 
-# TC-008
+# TC-006
 # Last Run: 2026-03-08 12:40:00 +0800
 # Last Success: 2026-03-08 12:40:00 +0800
 # 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
@@ -359,7 +327,7 @@ def test_init_env_codex_creates_session_and_bootstraps(tmp_path: Path) -> None:
     assert calls.count("send:xiaoming:ENTER:") == 2
 
 
-# TC-009
+# TC-007
 # Last Run: 2026-03-08 12:40:00 +0800
 # Last Success: 2026-03-08 12:40:00 +0800
 # 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh

@@ -1,5 +1,62 @@
 # memory
 
+- 时间: 2026-03-18 01:38:49 +0800
+  事件: 角色职责名单调整生效
+  结果: 后续调度以最新 `agents/codex-multi-agents/agents-lists.md` 为准，已接受新的兼职职责划分：小李飞刀可兼任 spec 实现，金铲铲大作战可兼职审查，我不是牛马可兼职实现，摸鱼小分队与朽木露琪亚可兼职审查，李白可兼职审查，不要啊教练可兼职合并与清理。
+
+- 时间: 2026-03-18 01:10:40 +0800
+  事件: 统一 memory 记录收敛规则
+  结果: 已通知全部 8 名角色：只有关键规则、长期约束、重大决策、异常阻塞、重要上下文才写入 `memory.md`；单纯“完成任务/已回报/已同步”这类日常执行结果，除非影响后续判断，否则不再写入 memory。
+
+- 时间: 2026-03-18 01:06:54 +0800
+  事件: 收敛 wt-branch 残留分支清理任务
+  结果: 已完成 `T-20260318-8bb6ad49` 并将李白状态恢复为 ready；根据李白回报，`branch` 分支不存在，`/home/lfr/kernelcode_generate/wt-branch` 路径不存在，且无 worktree 关联与 `.lock` 残留。
+
+- 时间: 2026-03-18 01:05:31 +0800
+  事件: 补发金铲铲大作战的 dialect/nn 重构任务通知
+  结果: 核对发现 `T-20260318-bb8f27de` 已进入 TODO 进行中，但此前未写入 talk 通知且名单状态未切到 doing；现已补发给金铲铲大作战，并将其状态同步为 doing。
+
+- 时间: 2026-03-18 00:57:32 +0800
+  事件: 创建并派发 wt-branch 残留分支清理任务
+  结果: 已发现历史残留本地分支名为 `branch`，对应用户所述 `wt-branch`；已创建并派发任务 `T-20260318-8bb6ad49` 给李白，要求确认无 worktree 关联后删除该残留分支，并将结果记录到 `agents/codex-multi-agents/log/task_records/2026/12/20260318-clean-wt-branch-branch.md`。
+
+- 时间: 2026-03-18 00:50:59 +0800
+  事件: 摸鱼小分队确认 main 分支规则并申请后续任务
+  结果: 已确认其提示词完成同步：不存在 branch 分支，记录/日志/memory/调度与主线操作统一按 config.BRANCH=main 执行；其申请下一阶段任务，当前 worktree=main，记录文件=agents/codex-multi-agents/agents/摸鱼小分队/memory.md。
+
+- 时间: 2026-03-18 00:49:00 +0800
+  事件: 广播 main 分支为默认工作分支并记录 worktree 回报
+  结果: 已通知全部 8 名角色当前不存在 branch 分支，统一按 config 中 BRANCH=main 工作；同时收到小李飞刀回报，已创建 worktree `/home/lfr/kernelcode_generate/wt-20260318-memory-refactor`，对应分支 `wt-20260318-memory-refactor`。
+
+- 时间: 2026-03-18 00:45:37 +0800
+  事件: 补发小李飞刀的 memory 重构任务通知
+  结果: 核对发现 T-20260318-1adb1e18 已进入 TODO 进行中，但此前未写入 talk 通知；现已补发给小李飞刀，并将 agents-lists 中其状态同步为 doing。
+
+- 时间: 2026-03-17 23:40:26 +0800
+  事件: 清理残留 worktree
+  结果: 已删除 /home/lfr/kernelcode_generate/wt-20260316-numeric-type-expansion 与 /home/lfr/kernelcode_generate/wt-20260317-nn-compare-dtype-align；当前仅保留 main worktree。
+
+
+- 时间: 2026-03-17 23:28:10 +0800
+  事件: 摸鱼小分队确认更新提示词并申请新任务
+  结果: 已按新规则更新提示词并刷新名单介绍；申请下一阶段任务，当前 worktree=main，记录文件=agents/codex-multi-agents/agents/摸鱼小分队/memory.md。
+
+
+- 时间: 2026-03-17 23:26:20 +0800
+  事件: 小李飞刀确认更新提示词规则
+  结果: 已按新增规则写入提示词并记录到其 memory.md，后续遵循。
+
+
+- 时间: 2026-03-17 23:24:11 +0800
+  事件: 通知全员更新 memory 规则
+  结果: 已通过 tmux 广播通知除神秘人外全部 8 名角色，将“memory.md 如无必要不要阅读、记录时最新在最前”写入提示词并遵守。
+
+
+- 时间: 2026-03-17 23:19:30 +0800
+  事件: 小李飞刀回报提示词复读与名单更新
+  结果: 已确认其完成复读提示词与 AGENTS.md，并已更新 agents-lists 介绍；记录见 agents/codex-multi-agents/agents/小李飞刀/memory.md。
+
+
 - 时间: 2026-03-15 02:52:54 +0800
   事件: 启动调度检查
   结果: agents-lists 中仅神秘人可见；TODO 中存在暂停任务 T-20260313-623c4de5（review spec/codex-multi-agents/scripts/codex-multi-agents-list.md，指派小明），无待分发任务。
@@ -627,3 +684,7 @@
 - 时间: 2026-03-16 03:50:01 +0800
   事件: 收敛迁移链最终审查并进入合并流程
   结果: 已将 T-20260316-ef6f7ae0 标记完成并将我不是牛马状态恢复为 ready；审查结论为通过，确认仅保留 python/symbol_variable 为有效入口。为避免同一 worktree 删除前被旧暂停任务阻塞，已将不再适用的 T-20260316-fbb678a6 一并关闭。随后已派发合并任务 T-20260315-eaa37910 给合并小队，继续使用 wt-20260315-symbol-variable-python-migration 与统一日志 agents/codex-multi-agents/log/task_records/2026/11/20260315-symbol-variable-python-migration.md。已在任务消息中要求删除 worktree 前再次检查是否仍有关联进行中任务，并在任务结束前自行清理本任务产生的 .lock 文件。
+
+- 时间: 2026-03-17 23:14:42 +0800
+  事件: 接收“神秘人”职责指令并同步提示词
+  结果: 已阅读 agents/codex-multi-agents/agents/神秘人/神秘人.prompt.md 与 AGENTS.md，确认仅按两者执行；已记录不访问 .skills/.agents/TODO.md 的限制，并保持仅做调度与协调。

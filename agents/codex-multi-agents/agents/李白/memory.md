@@ -1,5 +1,15 @@
 # memory
 
+- 时间：2026-03-18 01:03:00 +0800
+- 任务：T-20260318-8bb6ad49
+- 操作：确认 wt-branch/branch 不存在且无 worktree 关联，记录清理日志
+- 记录：agents/codex-multi-agents/log/task_records/2026/12/20260318-clean-wt-branch-branch.md
+
+- 时间：2026-03-18 00:17:39 +0800
+- 任务：T-20260318-d32c22e8
+- 操作：确认 /home/lfr/kernelcode_generate/wt-20260316-numeric-type-expansion 不存在且 .git/worktrees 无残留，记录清理日志
+- 记录：agents/codex-multi-agents/log/task_records/2026/12/20260317-clean-worktree-numeric-type-expansion.md
+
 - 时间：2026-03-15 05:49:37 +0800
 - 任务：T-20260315-30409141
 - 操作：将 wt-20260315-symbol-dim-spec 快进合并到 main，删除 worktree

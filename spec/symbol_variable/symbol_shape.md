@@ -1,6 +1,6 @@
 # symbol_shape.md
 
-用于定义符号形状（SymbolShape/列表容器）的表达、访问与序列化规则。
+用于描述一个静态/动态的shape信息。
 
 ## 文档信息
 
@@ -15,9 +15,6 @@
 - `python.symbol_variable.symbol_dim.SymbolDim`：维度元素类型。
 - `typing`：仅用于类型标注。
 
-## Compat 说明
-
-- 迁移后不再兼容旧路径 `symbol_variable.symbol_shape`，不提供 compat 转发模块。
 
 ## 术语
 

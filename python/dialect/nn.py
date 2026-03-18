@@ -162,22 +162,7 @@ class NnMemorySpaceAttr(ParametrizedAttribute):
 
     @classmethod
     def parse_parameters(cls, parser: AttrParser) -> Sequence[Attribute]:
-        """解析 space attribute 参数。
-
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 解析 `#nn.space<...>` 中的 space 标识符。
-
-        使用示例:
-        - NnMemorySpaceAttr.parse_parameters(parser)
-
-        关联文件:
-        - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
-        - 功能实现: python/dialect/nn.py
-        """
+        """解析 space attribute 参数。"""
 
         parser.parse_punctuation("<", "Expected '<' for nn space attribute.")
         space = StringAttr(parser.parse_identifier("Expected nn memory space identifier."))
@@ -185,44 +170,14 @@ class NnMemorySpaceAttr(ParametrizedAttribute):
         return (space,)
 
     def print_parameters(self, printer: Printer) -> None:
-        """打印 space attribute 参数。
-
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 以 `#nn.space<...>` 形式输出 space 标识。
-
-        使用示例:
-        - space_attr.print_parameters(printer)
-
-        关联文件:
-        - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
-        - 功能实现: python/dialect/nn.py
-        """
+        """打印 space attribute 参数。"""
 
         printer.print_string("<")
         printer.print_string(self.space.data)
         printer.print_string(">")
 
     def verify(self) -> None:
-        """校验 space attribute。
-
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 仅允许 `global/shared/local` 三种值。
-
-        使用示例:
-        - NnMemorySpaceAttr.from_name("global").verify()
-
-        关联文件:
-        - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
-        - 功能实现: python/dialect/nn.py
-        """
+        """校验 space attribute。"""
 
         if self.space.data not in _VALID_SPACES:
             raise VerifyException("nn space must be one of global/shared/local")
@@ -277,22 +232,7 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
 
     @classmethod
     def parse_parameters(cls, parser: AttrParser) -> Sequence[Attribute]:
-        """解析 memory type 参数。
-
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 解析 `!nn.memory<shape, stride, element_type, space>` 文本。
-
-        使用示例:
-        - NnMemoryType.parse_parameters(parser)
-
-        关联文件:
-        - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
-        - 功能实现: python/dialect/nn.py
-        """
+        """解析 memory type 参数。"""
 
         parser.parse_punctuation("<", "Expected '<' for nn memory type.")
         shape = _parse_dim_list(parser)
@@ -308,22 +248,7 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
         return (shape, stride, element_type, space)
 
     def print_parameters(self, printer: Printer) -> None:
-        """打印 memory type 参数。
-
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 按 `!nn.memory<...>` 格式输出四字段信息。
-
-        使用示例:
-        - memory_type.print_parameters(printer)
-
-        关联文件:
-        - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
-        - 功能实现: python/dialect/nn.py
-        """
+        """打印 memory type 参数。"""
 
         printer.print_string("<")
         _print_dim_list(printer, self.shape)
@@ -336,26 +261,9 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
         printer.print_string(">")
 
     def verify(self) -> None:
-        """校验 memory type。
-
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
-
-        功能说明:
-        - 校验 shape/stride rank、维度合法性与 space 取值。
-
-        使用示例:
-        - NnMemoryType(...).verify()
-
-        关联文件:
-        - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
-        - 功能实现: python/dialect/nn.py
-        """
+        """校验 memory type。"""
 
         self.space.verify()
-        if not isinstance(self.element_type, TypeAttribute):
-            raise VerifyException("nn memory element_type must be a type attribute")
         if len(self.shape.data) != len(self.stride.data):
             raise VerifyException("nn memory shape and stride rank must match")
 
@@ -375,22 +283,7 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
 
 
 def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
-    """校验并返回 memory type。
-
-    创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 确认类型为 `nn.memory` 并触发类型校验。
-
-    使用示例:
-    - _verify_memory_type(op.lhs.type, "lhs")
-
-    关联文件:
-    - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
-    - 功能实现: python/dialect/nn.py
-    """
+    """校验并返回 memory type。"""
 
     if not isinstance(value, NnMemoryType):
         raise VerifyException(f"{field_name} must be nn.memory")
@@ -443,22 +336,7 @@ def _verify_binary_memory_op(op: "_BaseNnBinaryOp", compare_result: bool) -> Non
 
 
 class _BaseNnBinaryOp(IRDLOperation):
-    """NN 二元 op 基类。
-
-    创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 统一定义 lhs/rhs/result 与 space attribute。
-
-    使用示例:
-    - class NnAddOp(_BaseNnBinaryOp): ...
-
-    关联文件:
-    - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
-    - 功能实现: python/dialect/nn.py
-    """
+    """NN 二元 op 基类。"""
 
     lhs = operand_def(NnMemoryType)
     rhs = operand_def(NnMemoryType)
@@ -472,22 +350,7 @@ class _BaseNnBinaryOp(IRDLOperation):
         result_type: NnMemoryType,
         space: NnMemorySpaceAttr,
     ) -> None:
-        """初始化二元 op。
-
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 设置 operand、result 与 space attribute。
-
-        使用示例:
-        - NnAddOp(lhs, rhs, result_type, space)
-
-        关联文件:
-        - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
-        - 功能实现: python/dialect/nn.py
-        """
+        """初始化二元 op。"""
 
         super().__init__(
             operands=[lhs, rhs],
@@ -503,22 +366,6 @@ class NnAddOp(_BaseNnBinaryOp):
     name = "nn.add"
 
     def verify_(self) -> None:
-        """校验 nn.add。
-
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 复用 nn 二元 op 校验逻辑。
-
-        使用示例:
-        - NnAddOp(...).verify_()
-
-        关联文件:
-        - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
-        - 功能实现: python/dialect/nn.py
-        """
         _verify_binary_memory_op(self, compare_result=False)
 
 
@@ -529,22 +376,6 @@ class NnSubOp(_BaseNnBinaryOp):
     name = "nn.sub"
 
     def verify_(self) -> None:
-        """校验 nn.sub。
-
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 复用 nn 二元 op 校验逻辑。
-
-        使用示例:
-        - NnSubOp(...).verify_()
-
-        关联文件:
-        - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
-        - 功能实现: python/dialect/nn.py
-        """
         _verify_binary_memory_op(self, compare_result=False)
 
 
@@ -555,22 +386,6 @@ class NnMulOp(_BaseNnBinaryOp):
     name = "nn.mul"
 
     def verify_(self) -> None:
-        """校验 nn.mul。
-
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 复用 nn 二元 op 校验逻辑。
-
-        使用示例:
-        - NnMulOp(...).verify_()
-
-        关联文件:
-        - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
-        - 功能实现: python/dialect/nn.py
-        """
         _verify_binary_memory_op(self, compare_result=False)
 
 
@@ -581,22 +396,6 @@ class NnTrueDivOp(_BaseNnBinaryOp):
     name = "nn.truediv"
 
     def verify_(self) -> None:
-        """校验 nn.truediv。
-
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 复用 nn 二元 op 校验逻辑。
-
-        使用示例:
-        - NnTrueDivOp(...).verify_()
-
-        关联文件:
-        - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
-        - 功能实现: python/dialect/nn.py
-        """
         _verify_binary_memory_op(self, compare_result=False)
 
 
@@ -607,22 +406,6 @@ class NnEqOp(_BaseNnBinaryOp):
     name = "nn.eq"
 
     def verify_(self) -> None:
-        """校验 nn.eq。
-
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 复用 nn 二元 op 校验逻辑（compare）。
-
-        使用示例:
-        - NnEqOp(...).verify_()
-
-        关联文件:
-        - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
-        - 功能实现: python/dialect/nn.py
-        """
         _verify_binary_memory_op(self, compare_result=True)
 
 
@@ -633,22 +416,6 @@ class NnNeOp(_BaseNnBinaryOp):
     name = "nn.ne"
 
     def verify_(self) -> None:
-        """校验 nn.ne。
-
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 复用 nn 二元 op 校验逻辑（compare）。
-
-        使用示例:
-        - NnNeOp(...).verify_()
-
-        关联文件:
-        - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
-        - 功能实现: python/dialect/nn.py
-        """
         _verify_binary_memory_op(self, compare_result=True)
 
 
@@ -659,22 +426,6 @@ class NnLtOp(_BaseNnBinaryOp):
     name = "nn.lt"
 
     def verify_(self) -> None:
-        """校验 nn.lt。
-
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 复用 nn 二元 op 校验逻辑（compare）。
-
-        使用示例:
-        - NnLtOp(...).verify_()
-
-        关联文件:
-        - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
-        - 功能实现: python/dialect/nn.py
-        """
         _verify_binary_memory_op(self, compare_result=True)
 
 
@@ -685,22 +436,6 @@ class NnLeOp(_BaseNnBinaryOp):
     name = "nn.le"
 
     def verify_(self) -> None:
-        """校验 nn.le。
-
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 复用 nn 二元 op 校验逻辑（compare）。
-
-        使用示例:
-        - NnLeOp(...).verify_()
-
-        关联文件:
-        - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
-        - 功能实现: python/dialect/nn.py
-        """
         _verify_binary_memory_op(self, compare_result=True)
 
 
@@ -711,22 +446,6 @@ class NnGtOp(_BaseNnBinaryOp):
     name = "nn.gt"
 
     def verify_(self) -> None:
-        """校验 nn.gt。
-
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 复用 nn 二元 op 校验逻辑（compare）。
-
-        使用示例:
-        - NnGtOp(...).verify_()
-
-        关联文件:
-        - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
-        - 功能实现: python/dialect/nn.py
-        """
         _verify_binary_memory_op(self, compare_result=True)
 
 
@@ -737,22 +456,6 @@ class NnGeOp(_BaseNnBinaryOp):
     name = "nn.ge"
 
     def verify_(self) -> None:
-        """校验 nn.ge。
-
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 复用 nn 二元 op 校验逻辑（compare）。
-
-        使用示例:
-        - NnGeOp(...).verify_()
-
-        关联文件:
-        - spec: spec/dialect/nn.md
-        - test: test/dialect/test_nn_dialect.py
-        - 功能实现: python/dialect/nn.py
-        """
         _verify_binary_memory_op(self, compare_result=True)
 
 

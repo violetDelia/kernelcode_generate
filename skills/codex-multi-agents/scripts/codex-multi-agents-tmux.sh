@@ -2,8 +2,8 @@
 # codex-multi-agents-tmux.sh
 #
 # 功能:
-# - 基于 tmux 连接/创建会话。
 # - 发送标准格式对话到目标会话并写入日志。
+# - 按名单初始化角色 tmux 运行环境。
 #
 # 对应文件:
 # - spec: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
@@ -21,10 +21,8 @@ readonly RC_LOCK=4
 readonly RC_INTERNAL=5
 
 FILE=""
-OP_ATTACH=0
 OP_TALK=0
 OP_INIT_ENV=0
-SESSION=""
 SESSION_ID=""
 FROM=""
 TO=""
@@ -32,7 +30,6 @@ MESSAGE=""
 LOG_FILE=""
 AGENTS_FILE=""
 AGENT_NAME=""
-HAS_SESSION=0
 HAS_SESSION_ID=0
 HAS_FROM=0
 HAS_TO=0
@@ -58,12 +55,10 @@ err() {
 usage() {
   cat <<'EOF'
 Usage:
-  codex-multi-agents-tmux.sh -attach -s <session>
   codex-multi-agents-tmux.sh -talk -from <sender> -to <target_name> -session-id <target_session_id> -message <message> -log <log_path>
   codex-multi-agents-tmux.sh -init-env -file <agents_list_path> -name <agent_name>
 
 Examples:
-  codex-multi-agents-tmux.sh -attach -s worker-a
   codex-multi-agents-tmux.sh -talk -from scheduler -to worker-a -session-id worker-a -message "请处理任务 T1" -log ./agents/codex-multi-agents/log/talk.log
   codex-multi-agents-tmux.sh -init-env -file ./agents/codex-multi-agents/agents-lists.md -name 小明
 
@@ -85,10 +80,6 @@ parse_args() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      -attach)
-        OP_ATTACH=1
-        shift
-        ;;
       -talk)
         OP_TALK=1
         shift
@@ -96,17 +87,6 @@ parse_args() {
       -init-env)
         OP_INIT_ENV=1
         shift
-        ;;
-      -s=*)
-        SESSION="${1#*=}"
-        HAS_SESSION=1
-        shift
-        ;;
-      -s)
-        [[ $# -ge 2 ]] || err "$RC_ARG" "missing value for -s"
-        SESSION="$2"
-        HAS_SESSION=1
-        shift 2
         ;;
       -from=*)
         FROM="${1#*=}"
@@ -195,14 +175,8 @@ parse_args() {
     esac
   done
 
-  local op_count=$((OP_ATTACH + OP_TALK + OP_INIT_ENV))
-  [[ "$op_count" -eq 1 ]] || err "$RC_ARG" "exactly one operation is required: -attach|-talk|-init-env"
-
-  if [[ "$OP_ATTACH" -eq 1 ]]; then
-    [[ "$HAS_SESSION" -eq 1 ]] || err "$RC_ARG" "-attach requires -s"
-    [[ -n "$(trim "$SESSION")" ]] || err "$RC_ARG" "empty value for -s"
-    [[ "$HAS_FROM" -eq 0 && "$HAS_TO" -eq 0 && "$HAS_SESSION_ID" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FILE" -eq 0 && "$HAS_NAME" -eq 0 ]] || err "$RC_ARG" "-attach does not accept -from/-to/-session-id/-message/-log/-file/-name"
-  fi
+  local op_count=$((OP_TALK + OP_INIT_ENV))
+  [[ "$op_count" -eq 1 ]] || err "$RC_ARG" "exactly one operation is required: -talk|-init-env"
 
   if [[ "$OP_TALK" -eq 1 ]]; then
     [[ "$HAS_FROM" -eq 1 ]] || err "$RC_ARG" "-talk requires -from"
@@ -215,7 +189,7 @@ parse_args() {
     [[ -n "$(trim "$SESSION_ID")" ]] || err "$RC_ARG" "empty value for -session-id"
     [[ -n "$(trim "$MESSAGE")" ]] || err "$RC_ARG" "empty value for -message"
     [[ -n "$(trim "$LOG_FILE")" ]] || err "$RC_ARG" "empty value for -log"
-    [[ "$HAS_SESSION" -eq 0 && "$HAS_FILE" -eq 0 && "$HAS_NAME" -eq 0 ]] || err "$RC_ARG" "-talk does not accept -s/-file/-name"
+    [[ "$HAS_FILE" -eq 0 && "$HAS_NAME" -eq 0 ]] || err "$RC_ARG" "-talk does not accept -file/-name"
   fi
 
   if [[ "$OP_INIT_ENV" -eq 1 ]]; then
@@ -223,7 +197,7 @@ parse_args() {
     [[ "$HAS_NAME" -eq 1 ]] || err "$RC_ARG" "-init-env requires -name"
     [[ -n "$(trim "$AGENTS_FILE")" ]] || err "$RC_ARG" "empty value for -file"
     [[ -n "$(trim "$AGENT_NAME")" ]] || err "$RC_ARG" "empty value for -name"
-    [[ "$HAS_SESSION" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_TO" -eq 0 && "$HAS_SESSION_ID" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_LOG" -eq 0 ]] || err "$RC_ARG" "-init-env does not accept -s/-from/-to/-session-id/-message/-log"
+    [[ "$HAS_FROM" -eq 0 && "$HAS_TO" -eq 0 && "$HAS_SESSION_ID" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_LOG" -eq 0 ]] || err "$RC_ARG" "-init-env does not accept -from/-to/-session-id/-message/-log"
   fi
 }
 
@@ -234,17 +208,6 @@ ensure_tmux_available() {
 tmux_has_session() {
   local target="$1"
   tmux has-session -t "$target" >/dev/null 2>&1
-}
-
-do_attach() {
-  if tmux_has_session "$SESSION"; then
-    tmux attach -t "$SESSION" || err "$RC_INTERNAL" "tmux attach failed: $SESSION"
-    printf "OK: attach %s\n" "$SESSION"
-    return
-  fi
-
-  tmux new -s "$SESSION" || err "$RC_INTERNAL" "tmux new failed: $SESSION"
-  printf "OK: new %s\n" "$SESSION"
 }
 
 format_talk_message() {
@@ -353,9 +316,7 @@ main() {
   parse_args "$@"
   ensure_tmux_available
 
-  if [[ "$OP_ATTACH" -eq 1 ]]; then
-    do_attach
-  elif [[ "$OP_TALK" -eq 1 ]]; then
+  if [[ "$OP_TALK" -eq 1 ]]; then
     do_talk
   elif [[ "$OP_INIT_ENV" -eq 1 ]]; then
     do_init_env
