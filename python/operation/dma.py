@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from python.symbol_variable.memory import Memory, MemorySpace
 from python.symbol_variable.symbol_shape import SymbolShape
+from python.symbol_variable.type import NumericType
 
 
 def _ensure_memory(value: object, name: str) -> Memory:
@@ -42,6 +43,88 @@ def _ensure_memory(value: object, name: str) -> Memory:
     if not isinstance(value, Memory):
         raise TypeError(f"{name} must be Memory")
     return value
+
+
+def _ensure_shape_value(value: object, name: str) -> SymbolShape:
+    """校验并规范化 alloc 的 shape/stride。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 字符串或字节串视为非法输入并报错。
+    - 返回规范化后的 SymbolShape。
+
+    使用示例:
+    - _ensure_shape_value([1, 2], "shape")
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: python/operation/dma.py
+    """
+    if isinstance(value, (str, bytes)):
+        raise ValueError(f"{name} must be a dimension sequence")
+    try:
+        return SymbolShape(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a valid dimension sequence") from exc
+
+
+def alloc(
+    shape,
+    dtype: NumericType,
+    space: MemorySpace = MemorySpace.GM,
+    stride=None,
+) -> Memory:
+    """分配新的 Memory 描述对象。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 返回包含 shape/dtype/space/stride 的 Memory 对象。
+
+    使用示例:
+    - buf = alloc([32, 32], NumericType.Float32, space=MemorySpace.SM, stride=[1, 1])
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: python/operation/dma.py
+    """
+    if not isinstance(dtype, NumericType):
+        raise TypeError("alloc dtype must be NumericType")
+    if not isinstance(space, MemorySpace):
+        raise TypeError("alloc space must be MemorySpace")
+    shape_value = _ensure_shape_value(shape, "shape")
+    stride_value = None
+    if stride is not None:
+        stride_value = _ensure_shape_value(stride, "stride")
+        if len(stride_value) != len(shape_value):
+            raise ValueError("stride rank mismatch")
+    return Memory(shape_value, dtype, space=space, stride=stride_value)
+
+
+def free(value: object) -> None:
+    """释放 Memory 生命周期。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅接受 Memory 输入并返回 None。
+
+    使用示例:
+    - free(buf)
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: python/operation/dma.py
+    """
+    _ensure_memory(value, "value")
+    return None
 
 
 def _normalize_index_list(value: object, name: str) -> SymbolShape:

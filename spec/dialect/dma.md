@@ -5,7 +5,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`榕`
+- 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/dialect/dma.md`](../../spec/dialect/dma.md)
 - `关联 Dialect`：[`spec/dialect/nn.md`](../../spec/dialect/nn.md)
 - `关联类型`：[`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)
@@ -47,6 +47,11 @@
   - `dma.slice`
   - `dma.deslice`
 
+当前不纳入 `dma dialect` 范围的高层 API：
+
+- `operation/dma.alloc`
+- `operation/dma.free`
+
 ## 类型复用约束
 
 - `dma dialect` 不单独维护一套 memory type 与 memory space。
@@ -57,6 +62,13 @@
   - `space` 的合法取值、parse/print 与 verifier 规则以 `nn dialect` 为准。
   - `shape/stride/element_type/space` 四元组的结构语义以 `nn dialect` 为准。
 - `dma dialect` 只在此基础上增加“搬运”这一类操作语义，不重复定义类型系统。
+- 因此高层 `operation/dma.alloc` 产出的 `Memory`，若后续进入 IR，也必须继续复用 `NnMemoryType` / `NnMemorySpaceAttr`，而不是要求 `dma dialect` 重新定义一套分配专用类型。
+
+## 与 `operation/dma` 的分层关系
+
+- `spec/operation/dma.md` 负责高层 `alloc/free/copy/load/store/slice/deslice` API 语义。
+- `dma dialect` 当前只承载“搬运”相关 IR 语义，即 `copy/load/store/slice/deslice`。
+- `alloc/free` 当前作为高层生命周期语义存在，不要求已有同名 `dma` op；若未来需要进入 IR，仍必须遵守本文件的类型复用约束，并与 `nn dialect` 的 memory type / memory space 口径保持一致。
 
 ## 搬运语义原则
 

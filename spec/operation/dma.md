@@ -1,6 +1,6 @@
 # dma.md
 
-用于定义 `Memory` 的数据搬运操作规范。该层独立于具体前端语法，可被普通 Python 代码、语义构造层或其他上层接口直接复用；其职责对应高层搬运 API，而 [`spec/dialect/dma.md`](../../spec/dialect/dma.md) 负责描述这些语义在方言层如何表达。
+用于定义 `Memory` 的数据搬运与生命周期操作规范。该层独立于具体前端语法，可被普通 Python 代码、语义构造层或其他上层接口直接复用；其职责对应高层 `dma` API，而 [`spec/dialect/dma.md`](../../spec/dialect/dma.md) 负责描述其中可进入方言层的搬运语义如何表达。
 
 ## 文档信息
 
@@ -15,9 +15,10 @@
 
 ## 设计目标
 
-- 为 `Memory` 提供统一、稳定的数据搬运语义入口。
-- 明确搬运类操作的输入约束、输出语义、空间规则与错误规则。
+- 为 `Memory` 提供统一、稳定的数据搬运与生命周期语义入口。
+- 明确 `alloc/free/copy/load/store/slice/deslice` 的输入约束、输出语义、空间规则与错误规则。
 - 保留动态 `shape` 与搬运参数 `offsets/sizes/strides` 信息，使搬运结果及其下游映射仍可表达动态张量。
+- 明确高层 `alloc/free` 与现有搬运 API、`dma dialect`、`nn dialect` memory type/space 复用之间的分层关系。
 - 让搬运层可被 AST、DSL、方言 lowering 或普通 Python 代码直接复用，而不把搬运规则散落在多个模块中。
 
 ## 非目标
@@ -26,10 +27,13 @@
 - 不负责 event、barrier、token、stream 等同步模型。
 - 不负责逐元素算术、比较、广播、归约等计算语义。
 - 不负责自动选择最优搬运空间、最优 tile 大小或最优 stride。
+- 不负责定义底层 runtime allocator、显存池或物理地址分配策略。
 
 ## 术语
 
 - `Memory`：带 `shape`、`stride`、`dtype`、`space` 等元信息的张量式内存描述对象。
+- 分配：创建一个可参与后续 `dma/nn` 操作的 `Memory` 描述对象，定义其逻辑 `shape/dtype/space/stride`，但不定义底层物理分配实现。
+- 释放：结束某个 `Memory` 描述对象在高层 API 语义中的可用期；释放本身不搬运数据。
 - 整块搬运：源对象与目标对象在整体范围内的完整拷贝。
 - 切片搬运：带 `offsets/sizes/strides` 的局部区域读取或回写。
 - 结果块：由读取或切片操作返回的新 `Memory` 描述对象。
@@ -38,22 +42,68 @@
 ## 设计原则
 
 - 搬运层只定义“什么可以搬、怎么搬、何时报错”，不绑定具体前端语法。
+- `alloc/free` 只定义高层生命周期语义：`alloc` 产出可复用的 `Memory` 描述对象，`free` 结束该对象的高层可用期；二者不承担搬运语义。
 - 搬运操作不改变元素值语义，只改变数据的逻辑位置、覆盖范围或所在空间。
 - 对搬运操作而言，至少一侧操作数必须具有 `Memory` 语义；本文不定义纯标量与纯标量之间的搬运接口。
 - 动态维度、动态步幅和动态索引必须在前端语义层保留，不得提前折叠为静态常量。
 - 高层 `operation/dma` 和低层 `dialect/dma` 必须语义一一对应：高层定义“搬运意图”，方言层定义“IR 表示与 verifier”。
+- `alloc/free` 与 `copy/load/store/slice/deslice` 必须共享同一套 `Memory` / `MemorySpace` 语义，以保证后续可无损映射到 `nn dialect` 的 `NnMemoryType` / `NnMemorySpaceAttr`。
 - 该层必须提供独立的 API 实现文件 `python/operation/dma.py` 与对应测试 `test/operation/test_operation_dma.py`。
 
 ## 与 `dialect/dma` 的关系
 
-- `spec/operation/dma.md` 定义高层 API 语义，例如 `copy`、`load`、`store`、`slice`、`deslice`。
-- `spec/dialect/dma.md` 定义这些语义在 IR 中的 op 表示、类型约束和 verifier 规则。
+- `spec/operation/dma.md` 定义高层 API 语义，例如 `alloc`、`free`、`copy`、`load`、`store`、`slice`、`deslice`。
+- `spec/dialect/dma.md` 定义其中搬运语义在 IR 中的 op 表示、类型约束和 verifier 规则。
 - 两层的关系应与 [`spec/operation/nn.md`](../../spec/operation/nn.md) 和 [`spec/dialect/nn.md`](../../spec/dialect/nn.md) 保持一致：
   - `operation` 层面向用户与 DSL 语义
   - `dialect` 层面向 IR 表示与 verifier
 - `operation/dma` 使用 `Memory` 作为输入输出语义对象；`dialect/dma` 在 IR 中复用 `nn dialect` 的 `NnMemoryType` / `NnMemorySpaceAttr`。
+- 当前 `alloc/free` 先定义为高层生命周期 API，不要求已存在同名 `dma dialect` op；若后续需要进入 IR，仍必须复用 `nn dialect` 的 memory type / space 体系，而不是在 `dma dialect` 中另起一套类型系统。
 
 ## 支持的操作
+
+### `alloc(shape, dtype, space=..., stride=None)`
+
+功能说明：
+
+- 表示分配一个新的 `Memory` 描述对象，供后续 `copy/load/store/slice/deslice` 或 `nn` 运算复用。
+- 该 API 只定义逻辑 `shape/dtype/space/stride` 语义，不定义底层 allocator、物理地址或初始化策略。
+
+示例：
+
+```python
+buf = alloc(shape=["M", "N"], dtype=NumericType.Float32, space=MemorySpace.SM, stride=[1, 1])
+```
+
+语义：
+
+- 返回新的 `Memory` 结果对象。
+- `buf.shape == ["M", "N"]`
+- `buf.dtype == NumericType.Float32`
+- `buf.space == MemorySpace.SM`
+- `buf.stride == [1, 1]`；若 `stride is None`，则返回对象的 `Memory.stride` 由 `Memory` 默认规则决定
+- `alloc` 不隐含数据搬运、初始化填充或跨空间拷贝
+
+### `free(value)`
+
+功能说明：
+
+- 表示结束某个 `Memory` 描述对象的高层生命周期。
+- 该 API 只定义“释放意图”，不要求立即绑定具体 runtime deallocation 行为。
+
+示例：
+
+```python
+buf = alloc(shape=[32, 32], dtype=NumericType.Float32, space=MemorySpace.LM)
+free(buf)
+```
+
+语义：
+
+- `value` 必须为 `Memory`
+- 成功释放建议返回 `None`
+- `free` 本身不返回新的 `Memory`，也不表达任何搬运、写回或内容变换
+- 已释放对象不应继续作为后续 `copy/load/store/slice/deslice/nn` API 的合法输入；若实现支持 use-after-free 检查，必须稳定报错
 
 ### `copy(source, target)`
 
@@ -74,7 +124,7 @@ copy(src, dst)
 
 - `source.shape == target.shape`
 - `source.dtype == target.dtype`
-- `source.stride == target.stride`
+- `source.stride == target.stride`；当前 `copy` 只定义同布局整块搬运，不定义布局转换 copy
 - `source.space` 与 `target.space` 可以相同，也可以不同
 
 ### `load(source, offsets, sizes, strides=None, space=...)`
@@ -169,12 +219,20 @@ deslice(sub, dst, offsets=[0, 16], sizes=[32, 32], strides=[1, 1])
 
 ## 输入约束
 
+### 生命周期 API
+
+- `alloc` 的 `shape` 必须是可被 `Memory` / `SymbolShape` 语义接受的维度序列。
+- `alloc` 的 `dtype` 必须是合法的元素类型。
+- `alloc` 的 `space` 必须是合法的 `MemorySpace`；若未显式传入，则沿用 `Memory` 默认空间口径。
+- `alloc` 的 `stride` 若显式传入，必须与 `shape` rank 一致，并满足 `Memory` 对布局步幅的基础约束。
+- `free` 只接受 `Memory` 对象。
+
 ### Memory 与 Memory
 
 - `copy`、`store`、`deslice` 至少需要 `source` 与 `target` 两个 `Memory` 对象。
 - `source.dtype` 与 `target.dtype` 必须一致。
 - `copy` 要求 `source.shape == target.shape`。
-- `copy` 建议要求 `source.stride == target.stride`；若后续允许布局转换，必须在 spec 中额外说明。
+- `copy` 要求 `source.stride == target.stride`；当前版本不允许通过 `copy` 隐式完成布局转换。
 
 ### Memory 与索引列表
 
@@ -191,6 +249,18 @@ deslice(sub, dst, offsets=[0, 16], sizes=[32, 32], strides=[1, 1])
 - 若传入非 1 stride，必须抛出明确错误，而不是 silently 接受。
 
 ## 输出语义
+
+### `alloc`
+
+- 返回新的 `Memory` 结果对象。
+- 返回对象必须可直接作为 `copy/load/store/slice/deslice` 的源或目标，也必须可无损映射到 `nn dialect` 的 `NnMemoryType`。
+- `shape/dtype/space/stride` 由输入参数或 `Memory` 默认规则确定。
+- `alloc` 不返回额外 token、event、handle 或 runtime pointer 语义对象。
+
+### `free`
+
+- 建议返回 `None`，表示 side-effect 风格的生命周期结束操作。
+- 若未来实现需要返回显式释放状态，也必须先补充 spec 与测试，不得在无文档说明时改变返回类型。
 
 ### `copy`
 
@@ -213,6 +283,11 @@ deslice(sub, dst, offsets=[0, 16], sizes=[32, 32], strides=[1, 1])
 
 ## 错误规则
 
+- `alloc` 的 `shape` 非法或 rank/stride 不一致：抛 `ValueError`。
+- `alloc` 的 `dtype` 非法：抛 `TypeError`。
+- `alloc` 的 `space` 非法：抛 `ValueError` 或 `TypeError`，但实现中必须统一。
+- `free` 传入非 `Memory`：抛 `TypeError`。
+- 若实现显式跟踪生命周期，则对已释放对象重复 `free` 或 use-after-free 必须稳定报错；错误类型需在实现与测试中统一。
 - 传入非 `Memory` 的源或目标对象：抛 `TypeError`。
 - `dtype` 不一致：抛 `TypeError`。
 - `copy` 的 `shape` 不一致：抛 `ValueError`。
@@ -223,6 +298,8 @@ deslice(sub, dst, offsets=[0, 16], sizes=[32, 32], strides=[1, 1])
 
 ## 与 `dialect/dma` 的映射
 
+- `alloc(shape, dtype, space, stride)` -> 当前不要求存在直接 `dma dialect` op；lowering 可映射到运行时分配、外部 buffer 绑定或其他非 `dma` 方言载体，但结果 `Memory` 必须可无损映射为 `NnMemoryType`
+- `free(value)` -> 当前不要求存在直接 `dma dialect` op；lowering 可映射到运行时释放或函数边界资源管理，但不得改变 `Memory` 的逻辑类型语义
 - `copy(source, target)` -> `dma.copy`
 - `load(source, offsets, sizes, strides, space)` -> `dma.load`
 - `store(source, target, offsets, sizes, strides)` -> `dma.store`
@@ -231,6 +308,7 @@ deslice(sub, dst, offsets=[0, 16], sizes=[32, 32], strides=[1, 1])
 
 补充约束：
 
+- `alloc/free` 与搬运 API 共享同一套 `MemorySpace` 口径；例如 `alloc(..., space=MemorySpace.SM)` 产出的对象，进入 IR 时必须复用 `nn dialect` 的对应 `NnMemorySpaceAttr`。
 - `operation/dma` 侧的 `Memory` 输入输出必须可无损映射到 `dialect/dma` 所需的 `NnMemoryType`。
 - `space` 语义必须与 `dialect/dma` 和 `nn dialect` 中的 `NnMemorySpaceAttr` 对齐。
 - `operation/dma` 中的切片 `offsets/sizes/strides` 属于操作参数；下游映射到 `dialect/dma` 时，必须由调用方显式保留并传给 `dma.load/store/slice/deslice`，不能从返回 `Memory.stride` 反推。
@@ -242,6 +320,8 @@ deslice(sub, dst, offsets=[0, 16], sizes=[32, 32], strides=[1, 1])
 
 ### 测试目标
 
+- 验证 `alloc` 返回的 `Memory` 结果可复用现有 `Memory` / `space` 语义。
+- 验证 `free` 只接受 `Memory`，且返回口径稳定。
 - 验证 `copy` 的整块搬运约束。
 - 验证 `load/slice` 的结果 `shape/dtype/space` 语义。
 - 验证 `store/deslice` 的源块与目标区域大小约束。
@@ -252,6 +332,11 @@ deslice(sub, dst, offsets=[0, 16], sizes=[32, 32], strides=[1, 1])
 
 | 用例 ID | 测试点 | 说明 | 建议测试 |
 | --- | --- | --- | --- |
+| TC-OP-DMA-AF-001 | `alloc` 基础分配 | 返回带指定 `shape/dtype/space` 的 `Memory` | `test_alloc_returns_memory` |
+| TC-OP-DMA-AF-002 | `alloc` 显式 stride | 显式 `stride` 被正确保留到返回 `Memory` | `test_alloc_preserves_explicit_stride` |
+| TC-OP-DMA-AF-003 | `alloc` 非法 shape/stride | 非法 `shape` 或 rank/stride 不一致时报错 | `test_alloc_invalid_shape_or_stride` |
+| TC-OP-DMA-AF-004 | `free` 基础释放 | `free` 接受 `Memory` 并返回 `None` | `test_free_returns_none` |
+| TC-OP-DMA-AF-005 | `free` 类型错误 | 非 `Memory` 输入触发 `TypeError` | `test_free_type_error` |
 | TC-OP-DMA-001 | `copy` 合法通过 | `source/target` 完全匹配时搬运语义成立 | `test_copy_success` |
 | TC-OP-DMA-002 | `copy` 形状不匹配 | 整块搬运 `shape` mismatch 报错 | `test_copy_shape_mismatch` |
 | TC-OP-DMA-003 | `load` 结果空间 | `load` 返回结果块并切换到目标空间 | `test_load_result_space` |
@@ -271,6 +356,7 @@ deslice(sub, dst, offsets=[0, 16], sizes=[32, 32], strides=[1, 1])
 ## 兼容性细节
 
 - 当前文档优先覆盖“高层搬运 API”这一稳定语义，而不是绑定某个硬件 DMA 引擎。
+- 当前版本新增 `alloc/free` 作为高层生命周期语义；它们与搬运 API 共用同一套 `Memory` / `MemorySpace` 口径，但不自动扩张为新的 `dma` 方言 op。
 - 当前版本要求其下游 `dialect/dma` 复用 `nn dialect` 的 `NnMemoryType` / `NnMemorySpaceAttr`。
 - 当前版本中，`Memory.stride` 与切片 `strides` 明确分离：前者是布局步幅，后者是搬运/切片步进。
 - 若未来 `load/store` 最终只是 `slice/deslice` 的别名，也应在实现中保持接口、报错与映射口径一致，并在本 spec 中明确别名关系。
