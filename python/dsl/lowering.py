@@ -18,8 +18,6 @@
 
 from __future__ import annotations
 
-from typing import Iterable
-
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, StringAttr, i1, i32, f32
 from xdsl.ir import Block, Region
@@ -46,8 +44,10 @@ from .ast import (
     CompareExprAST,
     ConstAST,
     FunctionAST,
+    LoadAST,
     ScalarArgAST,
     SourceLocation,
+    StoreAST,
     TensorAST,
 )
 
@@ -190,17 +190,17 @@ def _memory_to_nn_type(memory: Memory) -> NnMemoryType:
     return NnMemoryType(shape_attr, stride_attr, element_type, space)
 
 
-def _ensure_supported_ast(function_ast: FunctionAST) -> BinaryExprAST | CompareExprAST | ConstAST | TensorAST:
-    """校验并获取函数体的单一表达式。
+def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
+    """校验并获取函数体语句列表。
 
     创建者: 小李飞刀
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 仅支持单个表达式节点作为函数体。
+    - 允许多个表达式节点，返回列表供 lowering 顺序处理。
 
     使用示例:
-    - _ensure_supported_ast(func_ast)
+    - statements = _ensure_supported_statements(func_ast)
 
     关联文件:
     - spec: spec/dsl/lowering.md
@@ -209,18 +209,213 @@ def _ensure_supported_ast(function_ast: FunctionAST) -> BinaryExprAST | CompareE
     """
 
     statements = function_ast.body.statements
-    if len(statements) != 1:
+    if not statements:
         raise LoweringError(
-            "Only single-expression function bodies are supported",
+            "Function body is empty",
             location=function_ast.location,
         )
-    expr = statements[0]
-    if not isinstance(expr, (BinaryExprAST, CompareExprAST, ConstAST, TensorAST)):
-        raise LoweringError(
-            "Unsupported AST expression for lowering",
-            location=getattr(expr, "location", None),
-        )
-    return expr
+    for expr in statements:
+        if isinstance(expr, LoadAST):
+            raise LoweringError("LoadAST lowering is not supported", location=expr.location)
+        if isinstance(expr, StoreAST):
+            raise LoweringError("StoreAST lowering is not supported", location=expr.location)
+        if not isinstance(expr, (BinaryExprAST, CompareExprAST, ConstAST, TensorAST, ScalarArgAST)):
+            raise LoweringError(
+                "Unsupported AST expression for lowering",
+                location=getattr(expr, "location", None),
+            )
+    return statements
+
+
+def _expect_memory_value(value: object, location: SourceLocation | None) -> NnMemoryType:
+    """校验并获取 nn memory 类型。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 确保值类型为 NnMemoryType。
+
+    使用示例:
+    - mem_type = _expect_memory_value(value, location)
+
+    关联文件:
+    - spec: spec/dsl/lowering.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: python/dsl/lowering.py
+    """
+
+    if not isinstance(value.type, NnMemoryType):
+        raise LoweringError("Operand must be nn.memory", location=location)
+    return value.type
+
+
+def _expr_key(expr: object) -> int:
+    """生成表达式映射键。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 以对象 id 作为键，避免不可 hash 的字段影响映射。
+
+    使用示例:
+    - key = _expr_key(expr)
+
+    关联文件:
+    - spec: spec/dsl/lowering.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: python/dsl/lowering.py
+    """
+
+    return id(expr)
+
+
+def _infer_expr_type(
+    expr: object,
+    type_map: dict[int, object],
+) -> object:
+    """推断表达式对应的结果类型。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 复用 type_map 缓存避免重复推断。
+    - 二元算术返回 operand 类型，比较返回 i1 memory。
+
+    使用示例:
+    - result_type = _infer_expr_type(expr, type_map)
+
+    关联文件:
+    - spec: spec/dsl/lowering.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: python/dsl/lowering.py
+    """
+
+    expr_key = _expr_key(expr)
+    if expr_key in type_map:
+        return type_map[expr_key]
+
+    if isinstance(expr, ConstAST):
+        raise LoweringError("Constant expressions are not supported", location=expr.location)
+
+    if isinstance(expr, LoadAST):
+        raise LoweringError("LoadAST lowering is not supported", location=expr.location)
+
+    if isinstance(expr, StoreAST):
+        raise LoweringError("StoreAST lowering is not supported", location=expr.location)
+
+    if isinstance(expr, BinaryExprAST):
+        lhs_type = _infer_expr_type(expr.lhs, type_map)
+        rhs_type = _infer_expr_type(expr.rhs, type_map)
+        if not isinstance(lhs_type, NnMemoryType) or lhs_type != rhs_type:
+            raise LoweringError("Binary op operands must have the same nn.memory type", location=expr.location)
+        type_map[expr_key] = lhs_type
+        return lhs_type
+
+    if isinstance(expr, CompareExprAST):
+        lhs_type = _infer_expr_type(expr.lhs, type_map)
+        rhs_type = _infer_expr_type(expr.rhs, type_map)
+        if not isinstance(lhs_type, NnMemoryType) or lhs_type != rhs_type:
+            raise LoweringError("Compare op operands must have the same nn.memory type", location=expr.location)
+        result_type = NnMemoryType(lhs_type.shape, lhs_type.stride, i1, lhs_type.space)
+        type_map[expr_key] = result_type
+        return result_type
+
+    if isinstance(expr, (TensorAST, ScalarArgAST)):
+        if expr_key not in type_map:
+            raise LoweringError("Unknown input reference", location=getattr(expr, "location", None))
+        return type_map[expr_key]
+
+    raise LoweringError("Unsupported expression for lowering", location=getattr(expr, "location", None))
+
+
+def _lower_expr(
+    expr: object,
+    value_map: dict[int, object],
+    block: Block,
+) -> object:
+    """递归 lowering 表达式为 SSA value。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 支持二元算术与比较表达式。
+    - 复用 value_map 缓存避免重复生成 op。
+
+    使用示例:
+    - value = _lower_expr(expr, value_map, block)
+
+    关联文件:
+    - spec: spec/dsl/lowering.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: python/dsl/lowering.py
+    """
+
+    expr_key = _expr_key(expr)
+    if expr_key in value_map:
+        return value_map[expr_key]
+
+    if isinstance(expr, (TensorAST, ScalarArgAST)):
+        if expr_key not in value_map:
+            raise LoweringError("Unknown input reference", location=getattr(expr, "location", None))
+        return value_map[expr_key]
+
+    if isinstance(expr, ConstAST):
+        raise LoweringError("Constant expressions are not supported", location=expr.location)
+
+    if isinstance(expr, LoadAST):
+        raise LoweringError("LoadAST lowering is not supported", location=expr.location)
+
+    if isinstance(expr, StoreAST):
+        raise LoweringError("StoreAST lowering is not supported", location=expr.location)
+
+    if isinstance(expr, BinaryExprAST):
+        lhs = _lower_expr(expr.lhs, value_map, block)
+        rhs = _lower_expr(expr.rhs, value_map, block)
+        lhs_type = _expect_memory_value(lhs, expr.location)
+        rhs_type = _expect_memory_value(rhs, expr.location)
+        if lhs_type != rhs_type:
+            raise LoweringError("Binary op operands must have the same nn.memory type", location=expr.location)
+        op_map = {
+            "add": NnAddOp,
+            "sub": NnSubOp,
+            "mul": NnMulOp,
+            "div": NnTrueDivOp,
+        }
+        if expr.op not in op_map:
+            raise LoweringError(f"Unsupported binary op: {expr.op}", location=expr.location)
+        op = op_map[expr.op](lhs, rhs, lhs_type, lhs_type.space)
+        block.add_op(op)
+        value_map[expr_key] = op.result
+        return op.result
+
+    if isinstance(expr, CompareExprAST):
+        lhs = _lower_expr(expr.lhs, value_map, block)
+        rhs = _lower_expr(expr.rhs, value_map, block)
+        lhs_type = _expect_memory_value(lhs, expr.location)
+        rhs_type = _expect_memory_value(rhs, expr.location)
+        if lhs_type != rhs_type:
+            raise LoweringError("Compare op operands must have the same nn.memory type", location=expr.location)
+        result_type = NnMemoryType(lhs_type.shape, lhs_type.stride, i1, lhs_type.space)
+        op_map = {
+            "eq": NnEqOp,
+            "ne": NnNeOp,
+            "lt": NnLtOp,
+            "le": NnLeOp,
+            "gt": NnGtOp,
+            "ge": NnGeOp,
+        }
+        if expr.op not in op_map:
+            raise LoweringError(f"Unsupported compare op: {expr.op}", location=expr.location)
+        op = op_map[expr.op](lhs, rhs, result_type, lhs_type.space)
+        block.add_op(op)
+        value_map[expr_key] = op.result
+        return op.result
+
+    raise LoweringError("Unsupported expression for lowering", location=getattr(expr, "location", None))
 
 
 def lower_to_nn_ir(function_ast: FunctionAST) -> ModuleOp:
@@ -261,96 +456,45 @@ def lower_to_nn_ir(function_ast: FunctionAST) -> ModuleOp:
                 )
         else:
             raise LoweringError("Unsupported input type", location=getattr(item, "location", None))
-    expr = _ensure_supported_ast(function_ast)
+    statements = _ensure_supported_statements(function_ast)
     if not tensor_args:
         raise LoweringError("At least one tensor input is required", location=function_ast.location)
 
-    result_type = arg_types[tensor_args[0]]
+    return_expr = statements[-1]
+    type_map: dict[int, object] = {}
+    for idx, item in enumerate(function_ast.inputs):
+        type_map[_expr_key(item)] = arg_types[idx]
 
-    if isinstance(expr, CompareExprAST):
-        result_type = NnMemoryType(
-            result_type.shape,
-            result_type.stride,
-            i1,
-            result_type.space,
-        )
+    result_type = _infer_expr_type(return_expr, type_map)
+    if function_ast.outputs:
+        if len(function_ast.outputs) != 1:
+            raise LoweringError("Only single return value is supported", location=function_ast.location)
+        output = function_ast.outputs[0]
+        if isinstance(output, TensorAST):
+            expected_type = _memory_to_nn_type(output.memory)
+        elif isinstance(output, ScalarArgAST):
+            if output.value_type is int:
+                expected_type = i32
+            else:
+                raise LoweringError("Unsupported scalar return type", location=output.location)
+        else:
+            raise LoweringError("Unsupported return annotation type", location=getattr(output, "location", None))
+        if result_type != expected_type:
+            raise LoweringError("Return type does not match annotation", location=function_ast.location)
 
     func_type = FunctionType.from_lists(arg_types, [result_type])
     block = Block(arg_types=arg_types)
     region = Region(block)
     func_op = func.FuncOp(function_ast.name, func_type, region)
 
-    tensor_values = [block.args[index] for index in tensor_args]
-    op = _lower_expr_to_nn_op(expr, tensor_values, result_type)
-    block.add_op(op)
-    block.add_op(func.ReturnOp(op.result))
+    value_map: dict[int, object] = {}
+    for idx, item in enumerate(function_ast.inputs):
+        value_map[_expr_key(item)] = block.args[idx]
+
+    for expr in statements:
+        _lower_expr(expr, value_map, block)
+
+    return_value = _lower_expr(return_expr, value_map, block)
+    block.add_op(func.ReturnOp(return_value))
 
     return ModuleOp([func_op])
-
-
-def _lower_expr_to_nn_op(
-    expr: BinaryExprAST | CompareExprAST | ConstAST | TensorAST,
-    args: Iterable[object],
-    result_type: NnMemoryType,
-):
-    """将表达式 lowering 为 nn dialect 二元 op。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 支持二元算术与比较表达式。
-
-    使用示例:
-    - _lower_expr_to_nn_op(expr, args, result_type)
-
-    关联文件:
-    - spec: spec/dsl/lowering.md
-    - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/lowering.py
-    """
-
-    values = list(args)
-    if isinstance(expr, TensorAST):
-        if not values:
-            raise LoweringError("No tensor operands provided", location=expr.location)
-        lhs = values[0]
-        return NnAddOp(lhs, lhs, result_type, result_type.space)
-
-    if isinstance(expr, ConstAST):
-        if not values:
-            raise LoweringError("No tensor operands provided", location=expr.location)
-        lhs = values[0]
-        return NnAddOp(lhs, lhs, result_type, result_type.space)
-
-    if isinstance(expr, BinaryExprAST):
-        if len(values) < 2:
-            raise LoweringError("Binary op requires two tensor operands", location=expr.location)
-        lhs, rhs = values[:2]
-        op_map = {
-            "add": NnAddOp,
-            "sub": NnSubOp,
-            "mul": NnMulOp,
-            "div": NnTrueDivOp,
-        }
-        if expr.op not in op_map:
-            raise LoweringError(f"Unsupported binary op: {expr.op}", location=expr.location)
-        return op_map[expr.op](lhs, rhs, result_type, result_type.space)
-
-    if isinstance(expr, CompareExprAST):
-        if len(values) < 2:
-            raise LoweringError("Compare op requires two tensor operands", location=expr.location)
-        lhs, rhs = values[:2]
-        op_map = {
-            "eq": NnEqOp,
-            "ne": NnNeOp,
-            "lt": NnLtOp,
-            "le": NnLeOp,
-            "gt": NnGtOp,
-            "ge": NnGeOp,
-        }
-        if expr.op not in op_map:
-            raise LoweringError(f"Unsupported compare op: {expr.op}", location=expr.location)
-        return op_map[expr.op](lhs, rhs, result_type, result_type.space)
-
-    raise LoweringError("Unsupported expression for lowering", location=getattr(expr, "location", None))

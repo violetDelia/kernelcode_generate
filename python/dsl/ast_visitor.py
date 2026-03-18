@@ -260,6 +260,11 @@ def _parse_annotation(
             )
 
         tokens = [_token_from_ast(item) for item in elements]
+        if len(tokens) < 2:
+            raise AstVisitorError(
+                "Tensor annotation requires dtype and shape",
+                diagnostics=[_make_diagnostic("Tensor annotation requires dtype and shape", node)],
+            )
         dtype_token = str(tokens[0])
         dims: list[int | str] = []
         for token in tokens[1:]:
@@ -450,17 +455,60 @@ def visit_function(
         elif kind == "scalar":
             outputs.append(ScalarArgAST(name="return", value_type=value, location=_get_location(function_def.returns)))
 
-    if len(function_def.body) != 1 or not isinstance(function_def.body[0], py_ast.Return):
+    statements: list[object] = []
+    has_return = False
+    for stmt in function_def.body:
+        if isinstance(stmt, py_ast.Assign):
+            if has_return:
+                raise AstVisitorError(
+                    "Statements after return are not supported",
+                    diagnostics=[_make_diagnostic("Unsupported statement order", stmt)],
+                )
+            if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], py_ast.Name):
+                raise AstVisitorError(
+                    "Unsupported assignment target",
+                    diagnostics=[_make_diagnostic("Unsupported assignment target", stmt)],
+                )
+            try:
+                assign_expr = _build_expr(stmt.value, symbol_table)
+            except AstVisitorError as exc:
+                raise AstVisitorError(exc.message, diagnostics=exc.diagnostics) from exc
+            target_name = stmt.targets[0].id
+            symbol_table[target_name] = assign_expr
+            statements.append(assign_expr)
+            continue
+
+        if isinstance(stmt, py_ast.Return):
+            if has_return:
+                raise AstVisitorError(
+                    "Multiple return statements are not supported",
+                    diagnostics=[_make_diagnostic("Unsupported return statement", stmt)],
+                )
+            if stmt.value is None:
+                raise AstVisitorError(
+                    "Return value is required",
+                    diagnostics=[_make_diagnostic("Missing return value", stmt)],
+                )
+            try:
+                return_expr = _build_expr(stmt.value, symbol_table)
+            except AstVisitorError as exc:
+                raise AstVisitorError(exc.message, diagnostics=exc.diagnostics) from exc
+            statements.append(return_expr)
+            has_return = True
+            continue
+
         raise AstVisitorError(
-            "Only single return statements are supported",
-            diagnostics=[_make_diagnostic("Unsupported function body", function_def)],
+            "Unsupported statement",
+            diagnostics=[_make_diagnostic("Unsupported statement", stmt)],
         )
 
-    try:
-        return_expr = _build_expr(function_def.body[0].value, symbol_table)
-    except AstVisitorError as exc:
-        raise AstVisitorError(exc.message, diagnostics=exc.diagnostics) from exc
-    body = BlockAST(statements=[return_expr], location=_get_location(function_def))
+    if not has_return:
+        raise AstVisitorError(
+            "Missing return statement",
+            diagnostics=[_make_diagnostic("Missing return statement", function_def)],
+        )
+
+    body = BlockAST(statements=statements, location=_get_location(function_def))
 
     diagnostics: list[Diagnostic] = []
     if isinstance(return_expr, (BinaryExprAST, CompareExprAST)):
