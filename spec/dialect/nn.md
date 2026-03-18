@@ -16,7 +16,7 @@
 
 - 聚焦 `python/dialect/nn.py` 中 `nn` dialect 的稳定公开接口。
 - 明确 `space` attribute、`memory` type 以及二元 op 的 verifier 语义。
-- 约束 parse/print round-trip、space mismatch、compare result type 等当前方言层行为，并记录 `nn.matmul` 的待补方言约束与 `nn.broadcast` 的现行方言约束。
+- 约束 parse/print round-trip、space mismatch、compare result type 等方言层行为，并记录 `nn.matmul` 与 `nn.broadcast` 的方言约束。
 - 明确 `nn dialect` 不承载逐元素隐式 broadcast；所有广播都必须通过显式 `nn.broadcast` 表达。
 - 不重复定义 `Memory` 上游逐元素语义；上游运算语义以 [`spec/operation/nn.md`](../../spec/operation/nn.md) 为准。
 
@@ -24,7 +24,7 @@
 
 - 上游 `spec/operation/nn.md` 负责高层算子语义与 API 约束，`nn dialect` 只定义 IR 层字段与 verifier。
 - 上游 `operation/nn` 允许逐元素算术与比较在高层语义中使用隐式 broadcast；但进入 `nn dialect` 前，所有此类隐式 broadcast 都必须已被展开为显式 `nn.broadcast`。
-- 当前 `main` 上的 [`python/dialect/nn.py`](../../python/dialect/nn.py) 尚未实现 `nn.matmul`；`nn.broadcast` 已作为上游 `operation/nn` 对应算子的方言层落地载体，并与 [`spec/operation/nn.md`](../../spec/operation/nn.md) 保持一致。
+- 当前 `main` 上的 [`python/dialect/nn.py`](../../python/dialect/nn.py) 已实现 `nn.broadcast` 与 `nn.matmul`，作为上游 `operation/nn` 对应算子的方言层落地载体，并与 [`spec/operation/nn.md`](../../spec/operation/nn.md) 保持一致。
 
 ## 核心组成
 
@@ -46,9 +46,6 @@
   - `nn.ge`
 - 广播 op：
   - `nn.broadcast`
-
-待补构件（当前 `main` 未实现、未测试）：
-
 - 矩阵乘 op：
   - `nn.matmul`
 
@@ -366,39 +363,23 @@ parse/print 约束：
 op = NnBroadcastOp(inp, result_type, NnMemorySpaceAttr.from_name("global"))
 ```
 
-## Parse/Print 约束
-
-- 任意合法 `!nn.memory<...>` 文本都必须支持 parse 后再 print 回稳定文本。
-- 任意合法 `#nn.space<...>` 文本都必须支持 parse 后再 print 回稳定文本。
-- 包含当前已实现 `nn.add/sub/mul/truediv/eq/ne/lt/le/gt/ge/broadcast` 的合法模块文本必须支持 parse 后再 print 回稳定文本。
-- `nn.memory` 缺少字段时必须在 parse 阶段失败。
-- 文本 IR 中若逐元素链路需要广播，必须显式出现 `nn.broadcast`；parse/print 不负责为二元 op 自动补写隐式 broadcast。
-- 当前 `main` 尚未提供 `nn.matmul` 的 parse/print round-trip；对应文本约束需在该 op 落地时与实现/测试一并补齐。
-
-## 文本装配与 Verifier 约束
-
-- 文本 assembly 中，如果两个 operand 的 `space` 不一致，必须在 verify 阶段失败。
-- 文本 assembly 中，如果 op attribute `space` 与 operand/result type `space` 不一致，必须在 verify 阶段失败。
-- 比较 op 的结果 type 若不是 `i1`，必须在 verify 阶段失败。
-
-## `nn.matmul` 待补方言规范
+### `nn.matmul`
 
 功能说明：
 
 - `nn.matmul` 是上游 [`spec/operation/nn.md`](../../spec/operation/nn.md) 中 `operation/nn.matmul` 的目标方言层承载 op。
-- 当前 `main` 上的 [`python/dialect/nn.py`](../../python/dialect/nn.py) 与 [`test/dialect/test_nn_dialect.py`](../../test/dialect/test_nn_dialect.py) 尚未提供 `NnMatmulOp` 与对应测试；本节定义后续补齐实现/测试时必须满足的契约。
 
-目标输入：
+输入：
 
 - `lhs: !nn.memory<...>`
 - `rhs: !nn.memory<...>`
 - `space: #nn.space<...>`
 
-目标输出：
+输出：
 
 - `result: !nn.memory<...>`
 
-目标 verifier 约束：
+verifier 约束：
 
 - `lhs`、`rhs`、`result` 必须为 `NnMemoryType`。
 - `lhs.shape`、`rhs.shape`、`result.shape` 必须为 rank=2。
@@ -406,18 +387,32 @@ op = NnBroadcastOp(inp, result_type, NnMemorySpaceAttr.from_name("global"))
 - `result.shape[0] == lhs.shape[0]`，`result.shape[1] == rhs.shape[1]`。
 - `lhs.element_type == rhs.element_type == result.element_type`。
 - `lhs.space == rhs.space == result.space == op.space`。
-- `stride` 的 verifier 规则不得复用逐元素 op 的“三侧完全相等”约束；结果 `stride` 应按 `matmul` 结果类型单独校验，不得要求简单等同 `lhs/rhs` 任一输入。
+- 不做跨 operand/result 的 `stride` 等价校验，仅沿用 `NnMemoryType` 自身的 `shape/stride` 合法性规则。
 
-目标 parse/print 约束：
+parse/print 约束：
 
 - 合法 `nn.matmul` 模块文本必须支持 parse 后再 print 回稳定文本。
 - 非法 shape/rank/space 组合必须在 verifier 阶段报错，而不是静默接受。
 
-目标示例（目标 op 形态，当前 `main` 尚未实现）：
+使用示例：
 
 ```python
 op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 ```
+
+## Parse/Print 约束
+
+- 任意合法 `!nn.memory<...>` 文本都必须支持 parse 后再 print 回稳定文本。
+- 任意合法 `#nn.space<...>` 文本都必须支持 parse 后再 print 回稳定文本。
+- 包含当前已实现 `nn.add/sub/mul/truediv/eq/ne/lt/le/gt/ge/broadcast/matmul` 的合法模块文本必须支持 parse 后再 print 回稳定文本。
+- `nn.memory` 缺少字段时必须在 parse 阶段失败。
+- 文本 IR 中若逐元素链路需要广播，必须显式出现 `nn.broadcast`；parse/print 不负责为二元 op 自动补写隐式 broadcast。
+
+## 文本装配与 Verifier 约束
+
+- 文本 assembly 中，如果两个 operand 的 `space` 不一致，必须在 verify 阶段失败。
+- 文本 assembly 中，如果 op attribute `space` 与 operand/result type `space` 不一致，必须在 verify 阶段失败。
+- 比较 op 的结果 type 若不是 `i1`，必须在 verify 阶段失败。
 
 ## 测试
 
@@ -435,8 +430,8 @@ op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 - 验证比较 op 结果类型必须为 `i1`。
 - 验证模块级 parse/print round-trip。
 - 验证 `nn.broadcast` 的空间、元素类型与尾维对齐规则。
-- 当前 `main` 尚未独立覆盖“二元逐元素 op 不支持隐式 broadcast、必须先显式 `nn.broadcast`”的拒绝路径；后续实现/测试任务需补齐该边界。
-- 当前 `main` 尚未覆盖 `nn.matmul`；后续实现/测试任务需补齐其 verifier 与 round-trip 测试。
+- 验证 `nn.matmul` 的 rank、contracting/result shape、`space` 与 `element_type` 约束。
+- 验证二元逐元素 op 拒绝隐式 broadcast，要求先显式插入 `nn.broadcast`。
 
 ### 测试清单
 
@@ -458,27 +453,17 @@ op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 | TC-NN-BC-002 | `nn.broadcast` 空间不匹配 | input/result `space` 不一致时报错 | `test_broadcast_op_space_mismatch` |
 | TC-NN-BC-003 | `nn.broadcast` 元素类型不匹配 | input/result `element_type` 不一致时报错 | `test_broadcast_op_element_type_mismatch` |
 | TC-NN-BC-004 | `nn.broadcast` 模块 round-trip | 含 `nn.broadcast` 的模块文本 parse/print 稳定 | `test_broadcast_module_round_trip` |
-
-### 逐元素隐式 `broadcast` 边界待补测试清单
-
-当前 [`test/dialect/test_nn_dialect.py`](../../test/dialect/test_nn_dialect.py) 尚无“二元逐元素 op 拒绝隐式 broadcast”对应用例；以下为后续实现/测试任务必须补齐的建议清单。
-
-| 用例 ID | 测试点 | 说明 | 建议测试 |
-| --- | --- | --- | --- |
 | TC-NN-IB-001 | `nn.add` 拒绝隐式 broadcast | operand `shape` 广播兼容但不完全相等时，`nn.add` 仍必须报错 | `test_add_op_rejects_implicit_broadcast_shape_mismatch` |
 | TC-NN-IB-002 | `nn.eq` 拒绝隐式 broadcast | 比较 op 不允许用 rank/shape 差异触发隐式 broadcast | `test_compare_op_rejects_implicit_broadcast_shape_mismatch` |
 | TC-NN-IB-003 | 显式 `nn.broadcast` 后再逐元素 op 合法 | 先 `nn.broadcast` 再 `nn.add` 的链路可通过 verifier | `test_explicit_broadcast_then_add_verify_success` |
-
-### `nn.matmul` 待补测试清单
-
-当前 [`test/dialect/test_nn_dialect.py`](../../test/dialect/test_nn_dialect.py) 尚无 `nn.matmul` 对应用例；以下为后续实现/测试任务必须补齐的建议清单。
-
-| 用例 ID | 测试点 | 说明 | 建议测试 |
-| --- | --- | --- | --- |
 | TC-NN-MM-001 | `nn.matmul` 合法通过 | 合法矩阵乘输入通过 verifier | `test_matmul_op_verify_success` |
 | TC-NN-MM-002 | `nn.matmul` 形状不匹配 | `lhs.shape[1] != rhs.shape[0]` 时 verifier 报错 | `test_matmul_op_shape_mismatch` |
 | TC-NN-MM-003 | `nn.matmul` 结果 shape 不匹配 | 结果 shape 与 `lhs/rhs` 不一致时报错 | `test_matmul_op_result_shape_mismatch` |
 | TC-NN-MM-004 | `nn.matmul` 模块 round-trip | 含 `nn.matmul` 的模块文本 parse/print 稳定 | `test_matmul_module_round_trip` |
+| TC-NN-MM-005 | `nn.matmul` operand space 不匹配 | `lhs.space != rhs.space` 时 verifier 报错 | `test_matmul_op_space_mismatch` |
+| TC-NN-MM-006 | `nn.matmul` attribute space 不匹配 | `op.space` 与 operand/result `space` 不一致时报错 | `test_matmul_op_attr_space_mismatch` |
+| TC-NN-MM-007 | `nn.matmul` operand rank 不匹配 | operand 不是 rank=2 时 verifier 报错 | `test_matmul_op_rank_mismatch` |
+| TC-NN-MM-008 | `nn.matmul` element_type 不匹配 | operand/result `element_type` 不一致时报错 | `test_matmul_op_element_type_mismatch` |
 
 ### 用例与 Op 覆盖关系
 
@@ -486,9 +471,10 @@ op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 - `nn.sub`、`nn.mul`、`nn.truediv`：当前实现复用相同二元算术 verifier，行为与 `nn.add` 同构；后续若出现独立 verifier 分支，必须补独立方言测试。
 - `nn.eq`：已有比较结果类型约束覆盖。
 - `nn.ne`、`nn.lt`、`nn.le`、`nn.gt`、`nn.ge`：当前实现复用相同比较 verifier，行为与 `nn.eq` 同构；后续若出现独立 verifier 分支，必须补独立方言测试。
-- `nn.matmul`：当前 `main` 尚未实现；实现落地后必须新增独立 verifier/round-trip 测试，覆盖 rank、contracting dim、result shape 与 `space` 约束。
+- `nn.matmul`：已有独立 verifier/round-trip 测试覆盖 contracting dim、result shape、operand/op `space`、rank、`element_type` 与模块 round-trip。
+- `nn.matmul` 的 `stride` 口径当前仍是规格约束：不做跨 operand/result `stride` 等价校验；该点尚无独立正向回归测试，后续若需要防回归，应补单独测试用例。
 - `nn.broadcast`：已有独立 verifier/round-trip 测试覆盖类型、空间一致性与广播规则对齐。
-- “二元逐元素 op 不支持隐式 broadcast”的边界当前只有 spec 约束，尚无独立测试；后续需补拒绝路径与“显式 `nn.broadcast` + 二元 op”组合路径。
+- “二元逐元素 op 不支持隐式 broadcast”的边界已有拒绝路径与“显式 `nn.broadcast` + 二元 op”组合路径测试覆盖。
 
 ## 测试标准
 

@@ -24,6 +24,7 @@ from .nn import (
     NnGtOp,
     NnLeOp,
     NnLtOp,
+    NnMatmulOp,
     NnMemorySpaceAttr,
     NnMemoryType,
     NnMulOp,
@@ -45,6 +46,7 @@ __all__ = [
     "NnLeOp",
     "NnGtOp",
     "NnGeOp",
+    "NnMatmulOp",
     "NnMemorySpaceAttr",
     "NnMemoryType",
 ]

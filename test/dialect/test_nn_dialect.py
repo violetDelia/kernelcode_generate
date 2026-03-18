@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from io import StringIO
 import sys
 from pathlib import Path
@@ -34,7 +35,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from python.dialect import Nn, NnAddOp, NnBroadcastOp, NnEqOp, NnMemorySpaceAttr, NnMemoryType
+from python.dialect import Nn, NnAddOp, NnBroadcastOp, NnEqOp, NnMatmulOp, NnMemorySpaceAttr, NnMemoryType
 
 
 def _build_context() -> Context:
@@ -118,6 +119,37 @@ def _make_simple_memory_type(
     return NnMemoryType(
         ArrayAttr(shape),
         ArrayAttr(stride),
+        element_type,
+        _make_space(space),
+    )
+
+
+def _make_matrix_type(
+    shape: Sequence[Attribute],
+    stride: Sequence[Attribute],
+    space: str = "global",
+    element_type: IntegerType = i32,
+) -> NnMemoryType:
+    """构造 rank=2 的 nn memory type。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 便于构造 matmul 用的 rank=2 memory type。
+
+    使用示例:
+    - _make_matrix_type([StringAttr(\"M\"), StringAttr(\"N\")], [IntAttr(8), IntAttr(1)])
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: python/dialect/nn.py
+    """
+
+    return NnMemoryType(
+        ArrayAttr(list(shape)),
+        ArrayAttr(list(stride)),
         element_type,
         _make_space(space),
     )
@@ -450,6 +482,175 @@ def test_broadcast_module_round_trip() -> None:
     module = Parser(ctx, text).parse_module()
     module.verify()
     assert _print_ir(module) == text.rstrip()
+
+
+# TC-NN-MM-001
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-19 01:53:30 +0800
+# 最近一次运行成功时间: 2026-03-19 01:53:30 +0800
+# 功能说明: 验证 nn.matmul 在合法输入下通过 verifier。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_matmul_op_verify_success
+# 对应功能实现文件路径: python/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_matmul_op_verify_success() -> None:
+    lhs_type = _make_matrix_type([StringAttr("M"), StringAttr("K")], [IntAttr(8), IntAttr(1)])
+    rhs_type = _make_matrix_type([StringAttr("K"), StringAttr("N")], [IntAttr(8), IntAttr(1)])
+    result_type = _make_matrix_type([StringAttr("M"), StringAttr("N")], [IntAttr(8), IntAttr(1)])
+    lhs = _TestOp(result_types=[lhs_type]).results[0]
+    rhs = _TestOp(result_types=[rhs_type]).results[0]
+    op = NnMatmulOp(lhs, rhs, result_type, _make_space("global"))
+    op.verify()
+
+
+# TC-NN-MM-002
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-19 01:53:30 +0800
+# 最近一次运行成功时间: 2026-03-19 01:53:30 +0800
+# 功能说明: 验证 contracting 维度不匹配时 nn.matmul 抛错。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_matmul_op_shape_mismatch
+# 对应功能实现文件路径: python/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_matmul_op_shape_mismatch() -> None:
+    lhs_type = _make_matrix_type([StringAttr("M"), StringAttr("K")], [IntAttr(8), IntAttr(1)])
+    rhs_type = _make_matrix_type([StringAttr("Q"), StringAttr("N")], [IntAttr(8), IntAttr(1)])
+    result_type = _make_matrix_type([StringAttr("M"), StringAttr("N")], [IntAttr(8), IntAttr(1)])
+    lhs = _TestOp(result_types=[lhs_type]).results[0]
+    rhs = _TestOp(result_types=[rhs_type]).results[0]
+    op = NnMatmulOp(lhs, rhs, result_type, _make_space("global"))
+    with pytest.raises(VerifyException, match="contracting"):
+        op.verify()
+
+
+# TC-NN-MM-003
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-19 01:53:30 +0800
+# 最近一次运行成功时间: 2026-03-19 01:53:30 +0800
+# 功能说明: 验证结果 shape 不匹配时 nn.matmul 抛错。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_matmul_op_result_shape_mismatch
+# 对应功能实现文件路径: python/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_matmul_op_result_shape_mismatch() -> None:
+    lhs_type = _make_matrix_type([StringAttr("M"), StringAttr("K")], [IntAttr(8), IntAttr(1)])
+    rhs_type = _make_matrix_type([StringAttr("K"), StringAttr("N")], [IntAttr(8), IntAttr(1)])
+    result_type = _make_matrix_type([StringAttr("M"), StringAttr("K")], [IntAttr(8), IntAttr(1)])
+    lhs = _TestOp(result_types=[lhs_type]).results[0]
+    rhs = _TestOp(result_types=[rhs_type]).results[0]
+    op = NnMatmulOp(lhs, rhs, result_type, _make_space("global"))
+    with pytest.raises(VerifyException, match="result shape"):
+        op.verify()
+
+
+# TC-NN-MM-004
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-19 01:53:30 +0800
+# 最近一次运行成功时间: 2026-03-19 01:53:30 +0800
+# 功能说明: 验证含 nn.matmul 的模块 parse/print round-trip。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_matmul_module_round_trip
+# 对应功能实现文件路径: python/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_matmul_module_round_trip() -> None:
+    ctx = _build_context()
+    text = """builtin.module {
+  %0 = "test.op"() : () -> !nn.memory<[M, K], [8, 1], i32, #nn.space<global>>
+  %1 = "test.op"() : () -> !nn.memory<[K, N], [8, 1], i32, #nn.space<global>>
+  %2 = "nn.matmul"(%0, %1) {space = #nn.space<global>} : (!nn.memory<[M, K], [8, 1], i32, #nn.space<global>>, !nn.memory<[K, N], [8, 1], i32, #nn.space<global>>) -> !nn.memory<[M, N], [8, 1], i32, #nn.space<global>>
+}
+"""
+    module = Parser(ctx, text).parse_module()
+    module.verify()
+    assert _print_ir(module) == text.rstrip()
+
+
+# TC-NN-MM-005
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-19 02:24:51 +0800
+# 最近一次运行成功时间: 2026-03-19 02:24:51 +0800
+# 功能说明: 验证 matmul operand space mismatch 会触发 verifier。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_matmul_op_space_mismatch
+# 对应功能实现文件路径: python/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_matmul_op_space_mismatch() -> None:
+    lhs_type = _make_matrix_type([StringAttr("M"), StringAttr("K")], [IntAttr(8), IntAttr(1)], space="global")
+    rhs_type = _make_matrix_type([StringAttr("K"), StringAttr("N")], [IntAttr(8), IntAttr(1)], space="shared")
+    result_type = _make_matrix_type([StringAttr("M"), StringAttr("N")], [IntAttr(8), IntAttr(1)], space="global")
+    lhs = _TestOp(result_types=[lhs_type]).results[0]
+    rhs = _TestOp(result_types=[rhs_type]).results[0]
+    op = NnMatmulOp(lhs, rhs, result_type, _make_space("global"))
+    with pytest.raises(VerifyException, match="same space"):
+        op.verify()
+
+
+# TC-NN-MM-006
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-19 02:24:51 +0800
+# 最近一次运行成功时间: 2026-03-19 02:24:51 +0800
+# 功能说明: 验证 matmul attribute space mismatch 会触发 verifier。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_matmul_op_attr_space_mismatch
+# 对应功能实现文件路径: python/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_matmul_op_attr_space_mismatch() -> None:
+    lhs_type = _make_matrix_type([StringAttr("M"), StringAttr("K")], [IntAttr(8), IntAttr(1)], space="local")
+    rhs_type = _make_matrix_type([StringAttr("K"), StringAttr("N")], [IntAttr(8), IntAttr(1)], space="local")
+    result_type = _make_matrix_type([StringAttr("M"), StringAttr("N")], [IntAttr(8), IntAttr(1)], space="local")
+    lhs = _TestOp(result_types=[lhs_type]).results[0]
+    rhs = _TestOp(result_types=[rhs_type]).results[0]
+    op = NnMatmulOp(lhs, rhs, result_type, _make_space("global"))
+    with pytest.raises(VerifyException, match="attribute space"):
+        op.verify()
+
+
+# TC-NN-MM-007
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-19 02:24:51 +0800
+# 最近一次运行成功时间: 2026-03-19 02:24:51 +0800
+# 功能说明: 验证 matmul rank!=2 会触发 verifier。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_matmul_op_rank_mismatch
+# 对应功能实现文件路径: python/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_matmul_op_rank_mismatch() -> None:
+    lhs_type = _make_memory_type("global")
+    rhs_type = _make_matrix_type([StringAttr("K"), StringAttr("N")], [IntAttr(8), IntAttr(1)], space="global")
+    result_type = _make_matrix_type([StringAttr("M"), StringAttr("N")], [IntAttr(8), IntAttr(1)], space="global")
+    lhs = _TestOp(result_types=[lhs_type]).results[0]
+    rhs = _TestOp(result_types=[rhs_type]).results[0]
+    op = NnMatmulOp(lhs, rhs, result_type, _make_space("global"))
+    with pytest.raises(VerifyException, match="rank-2"):
+        op.verify()
+
+
+# TC-NN-MM-008
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-19 02:24:51 +0800
+# 最近一次运行成功时间: 2026-03-19 02:24:51 +0800
+# 功能说明: 验证 matmul element_type 不一致会触发 verifier。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_matmul_op_element_type_mismatch
+# 对应功能实现文件路径: python/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_matmul_op_element_type_mismatch() -> None:
+    lhs_type = _make_matrix_type([StringAttr("M"), StringAttr("K")], [IntAttr(8), IntAttr(1)], element_type=i32)
+    rhs_type = _make_matrix_type([StringAttr("K"), StringAttr("N")], [IntAttr(8), IntAttr(1)], element_type=i32)
+    result_type = _make_matrix_type([StringAttr("M"), StringAttr("N")], [IntAttr(8), IntAttr(1)], element_type=IntegerType(16))
+    lhs = _TestOp(result_types=[lhs_type]).results[0]
+    rhs = _TestOp(result_types=[rhs_type]).results[0]
+    op = NnMatmulOp(lhs, rhs, result_type, _make_space("global"))
+    with pytest.raises(VerifyException, match="element_type"):
+        op.verify()
 
 
 # TC-NN-IB-001

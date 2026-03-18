@@ -514,6 +514,38 @@ class NnGeOp(_BaseNnBinaryOp):
         _verify_binary_memory_op(self, compare_result=True)
 
 
+def _verify_matmul_shape(
+    lhs_shape: Sequence[Attribute],
+    rhs_shape: Sequence[Attribute],
+    result_shape: Sequence[Attribute],
+) -> None:
+    """校验 matmul 的形状约束。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 校验 matmul 的 rank=2 以及 contracting/result 维度约束。
+
+    使用示例:
+    - _verify_matmul_shape(lhs.shape.data, rhs.shape.data, result.shape.data)
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: python/dialect/nn.py
+    """
+
+    if len(lhs_shape) != 2 or len(rhs_shape) != 2 or len(result_shape) != 2:
+        raise VerifyException("nn.matmul requires rank-2 memory types")
+
+    if lhs_shape[1] != rhs_shape[0]:
+        raise VerifyException("nn.matmul contracting dimensions must match")
+
+    if result_shape[0] != lhs_shape[0] or result_shape[1] != rhs_shape[1]:
+        raise VerifyException("nn.matmul result shape must match lhs/rhs")
+
+
 @irdl_op_definition
 class NnBroadcastOp(IRDLOperation):
     """nn.broadcast。
@@ -583,6 +615,81 @@ class NnBroadcastOp(IRDLOperation):
         _verify_broadcast_compat(input_type, result_type)
 
 
+@irdl_op_definition
+class NnMatmulOp(IRDLOperation):
+    """nn.matmul。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 定义 nn.matmul 方言 op 与 verifier 约束。
+
+    使用示例:
+    - NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: python/dialect/nn.py
+    """
+
+    name = "nn.matmul"
+
+    lhs = operand_def(NnMemoryType)
+    rhs = operand_def(NnMemoryType)
+    result = result_def(NnMemoryType)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        lhs: SSAValue | Operation,
+        rhs: SSAValue | Operation,
+        result_type: NnMemoryType,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        """初始化 matmul op。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 构造 nn.matmul op 并绑定 operands/attributes。
+
+        使用示例:
+        - NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/test_nn_dialect.py
+        - 功能实现: python/dialect/nn.py
+        """
+
+        super().__init__(
+            operands=[lhs, rhs],
+            result_types=[result_type],
+            attributes={"space": space},
+        )
+
+    def verify_(self) -> None:
+        lhs_type = _verify_memory_type(self.lhs.type, "lhs")
+        rhs_type = _verify_memory_type(self.rhs.type, "rhs")
+        result_type = _verify_memory_type(self.result.type, "result")
+
+        self.space.verify()
+        if lhs_type.space.space.data != rhs_type.space.space.data:
+            raise VerifyException("nn.matmul operands must use the same space")
+        if lhs_type.space.space.data != self.space.space.data:
+            raise VerifyException("nn.matmul attribute space must match operand space")
+        if result_type.space.space.data != self.space.space.data:
+            raise VerifyException("nn.matmul attribute space must match result space")
+
+        _verify_matmul_shape(lhs_type.shape.data, rhs_type.shape.data, result_type.shape.data)
+
+        if lhs_type.element_type != rhs_type.element_type or lhs_type.element_type != result_type.element_type:
+            raise VerifyException("nn.matmul operand/result element_type must match")
+
+
 Nn = Dialect(
     "nn",
     [
@@ -597,6 +704,7 @@ Nn = Dialect(
         NnGtOp,
         NnGeOp,
         NnBroadcastOp,
+        NnMatmulOp,
     ],
     [
         NnMemorySpaceAttr,
@@ -617,6 +725,7 @@ __all__ = [
     "NnGtOp",
     "NnGeOp",
     "NnBroadcastOp",
+    "NnMatmulOp",
     "NnMemorySpaceAttr",
     "NnMemoryType",
 ]
