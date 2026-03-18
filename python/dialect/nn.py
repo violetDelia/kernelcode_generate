@@ -4,10 +4,10 @@
 最后一次更改: 小李飞刀
 
 功能说明:
-- 定义 nn dialect 的 memory type、space attribute 与逐元素二元 op。
+- 定义 nn dialect 的 memory type、space attribute 与逐元素/广播 op。
 
 使用示例:
-- from python.dialect.nn import Nn, NnAddOp, NnMemorySpaceAttr, NnMemoryType
+- from python.dialect.nn import Nn, NnAddOp, NnBroadcastOp, NnMemorySpaceAttr, NnMemoryType
 
 关联文件:
 - spec: spec/dialect/nn.md
@@ -335,6 +335,61 @@ def _verify_binary_memory_op(op: "_BaseNnBinaryOp", compare_result: bool) -> Non
         raise VerifyException("nn arithmetic result element_type must match operand element_type")
 
 
+def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
+    """判断两个维度是否语义一致。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅在同类型且内容相等时认为一致。
+
+    使用示例:
+    - _dims_equal(IntAttr(1), IntAttr(1))
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: python/dialect/nn.py
+    """
+    if isinstance(lhs, IntAttr) and isinstance(rhs, IntAttr):
+        return lhs.data == rhs.data
+    if isinstance(lhs, StringAttr) and isinstance(rhs, StringAttr):
+        return lhs.data == rhs.data
+    return False
+
+
+def _verify_broadcast_compat(input_type: NnMemoryType, result_type: NnMemoryType) -> None:
+    """校验 nn.broadcast 的 shape 兼容性。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 按尾维对齐规则检查输入与输出 shape。
+    - 仅允许 input 维为 1 时向任意目标维扩张。
+
+    使用示例:
+    - _verify_broadcast_compat(input_type, result_type)
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: python/dialect/nn.py
+    """
+    input_dims = input_type.shape.data
+    result_dims = result_type.shape.data
+    if len(result_dims) < len(input_dims):
+        raise VerifyException("nn.broadcast result rank must be >= input rank")
+
+    for input_dim, result_dim in zip(reversed(input_dims), reversed(result_dims), strict=False):
+        if _dims_equal(input_dim, result_dim):
+            continue
+        if isinstance(input_dim, IntAttr) and input_dim.data == 1:
+            continue
+        raise VerifyException("nn.broadcast shape mismatch")
+
+
 class _BaseNnBinaryOp(IRDLOperation):
     """NN 二元 op 基类。"""
 
@@ -459,6 +514,75 @@ class NnGeOp(_BaseNnBinaryOp):
         _verify_binary_memory_op(self, compare_result=True)
 
 
+@irdl_op_definition
+class NnBroadcastOp(IRDLOperation):
+    """nn.broadcast。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 表达 nn dialect 的显式 broadcast。
+    - 按尾维对齐规则校验 shape 与 space/element_type 一致性。
+
+    使用示例:
+    - NnBroadcastOp(inp, result_type, NnMemorySpaceAttr.from_name("global"))
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: python/dialect/nn.py
+    """
+
+    name = "nn.broadcast"
+
+    input = operand_def(NnMemoryType)
+    result = result_def(NnMemoryType)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        input_value: SSAValue | Operation,
+        result_type: NnMemoryType,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        """初始化 broadcast op。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 绑定输入 operand、结果类型与 space 属性。
+
+        使用示例:
+        - NnBroadcastOp(inp, result_type, NnMemorySpaceAttr.from_name("global"))
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/test_nn_dialect.py
+        - 功能实现: python/dialect/nn.py
+        """
+        super().__init__(
+            operands=[input_value],
+            result_types=[result_type],
+            attributes={"space": space},
+        )
+
+    def verify_(self) -> None:
+        input_type = _verify_memory_type(self.input.type, "input")
+        result_type = _verify_memory_type(self.result.type, "result")
+
+        self.space.verify()
+        if input_type.space.space.data != result_type.space.space.data:
+            raise VerifyException("nn.broadcast input/result must use the same space")
+        if input_type.space.space.data != self.space.space.data:
+            raise VerifyException("nn.broadcast attribute space must match type space")
+        if input_type.element_type != result_type.element_type:
+            raise VerifyException("nn.broadcast element_type must match")
+
+        _verify_broadcast_compat(input_type, result_type)
+
+
 Nn = Dialect(
     "nn",
     [
@@ -472,6 +596,7 @@ Nn = Dialect(
         NnLeOp,
         NnGtOp,
         NnGeOp,
+        NnBroadcastOp,
     ],
     [
         NnMemorySpaceAttr,
@@ -491,6 +616,7 @@ __all__ = [
     "NnLeOp",
     "NnGtOp",
     "NnGeOp",
+    "NnBroadcastOp",
     "NnMemorySpaceAttr",
     "NnMemoryType",
 ]

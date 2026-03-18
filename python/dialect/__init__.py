@@ -7,7 +7,7 @@
 - 暴露 nn dialect 的 type、attr 与 op 定义，并覆盖 TSM/TLM 空间语义。
 
 使用示例:
-- from python.dialect import Nn, NnAddOp, NnMemoryType
+- from python.dialect import Nn, NnAddOp, NnBroadcastOp, NnMemoryType
 
 关联文件:
 - spec: spec/dialect/nn.md
@@ -18,6 +18,7 @@
 from .nn import (
     Nn,
     NnAddOp,
+    NnBroadcastOp,
     NnEqOp,
     NnGeOp,
     NnGtOp,
@@ -34,6 +35,7 @@ from .nn import (
 __all__ = [
     "Nn",
     "NnAddOp",
+    "NnBroadcastOp",
     "NnSubOp",
     "NnMulOp",
     "NnTrueDivOp",

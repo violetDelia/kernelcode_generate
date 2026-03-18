@@ -4,11 +4,12 @@
 最后一次更改: 金铲铲大作战
 
 功能说明:
-- 提供 Memory 的逐元素算术与比较运算 API。
+- 提供 Memory 的逐元素算术、比较与显式 broadcast 运算 API。
 
 使用示例:
-- from python.operation.nn import add, eq
+- from python.operation.nn import add, broadcast, eq
 - result = add(mem, 1)
+- expanded = broadcast(mem, ["M", "N"])
 
 关联文件:
 - spec: spec/operation/nn.md
@@ -18,7 +19,162 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from python.symbol_variable.memory import Memory
+from python.symbol_variable.symbol_shape import SymbolShape
+from python.symbol_variable.type import NumericType
+
+
+def _normalize_broadcast_shape(shape: object) -> SymbolShape:
+    """规范化 broadcast 目标 shape。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅接受 SymbolShape 或非字符串序列。
+    - 统一转换为 SymbolShape。
+
+    使用示例:
+    - _normalize_broadcast_shape(["M", "N"])
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: python/operation/nn.py
+    """
+    if isinstance(shape, SymbolShape):
+        return shape
+    if isinstance(shape, (str, bytes)):
+        raise TypeError("broadcast shape must be a dimension sequence")
+    if isinstance(shape, Sequence):
+        try:
+            return SymbolShape(list(shape))
+        except (TypeError, ValueError) as exc:
+            raise TypeError("broadcast shape must be a valid dimension sequence") from exc
+    raise TypeError("broadcast shape must be a dimension sequence")
+
+
+def _merge_broadcast_dim(lhs_dim: int | str, rhs_dim: int | str) -> int | str:
+    """合并两个维度为隐式 broadcast 目标维度。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 维度相等时返回该维度。
+    - 任一侧为静态 1 时返回另一侧。
+    - 其他情况视为不兼容。
+
+    使用示例:
+    - _merge_broadcast_dim(1, "N")
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: python/operation/nn.py
+    """
+    if lhs_dim == "?" or rhs_dim == "?":
+        if lhs_dim == rhs_dim:
+            return lhs_dim
+        raise ValueError("Implicit broadcast dimension mismatch")
+    if lhs_dim == rhs_dim:
+        return lhs_dim
+    if lhs_dim == 1:
+        return rhs_dim
+    if rhs_dim == 1:
+        return lhs_dim
+    raise ValueError("Implicit broadcast dimension mismatch")
+
+
+def _infer_implicit_broadcast_shape(lhs: Memory, rhs: Memory) -> SymbolShape:
+    """推导逐元素隐式 broadcast 的共同目标 shape。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 按尾维对齐规则合并维度。
+    - 对较小 rank 的一侧视为前置维补 1。
+
+    使用示例:
+    - _infer_implicit_broadcast_shape(lhs, rhs)
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: python/operation/nn.py
+    """
+    lhs_values = lhs.shape.get_values()
+    rhs_values = rhs.shape.get_values()
+    lhs_rank = len(lhs_values)
+    rhs_rank = len(rhs_values)
+    max_rank = lhs_rank if lhs_rank >= rhs_rank else rhs_rank
+    result_reversed: list[int | str] = []
+
+    for idx in range(1, max_rank + 1):
+        lhs_dim = lhs_values[-idx] if idx <= lhs_rank else 1
+        rhs_dim = rhs_values[-idx] if idx <= rhs_rank else 1
+        result_reversed.append(_merge_broadcast_dim(lhs_dim, rhs_dim))
+
+    return SymbolShape(list(reversed(result_reversed)))
+
+
+def _binary_memory_result(lhs: Memory, rhs: Memory) -> Memory:
+    """逐元素算术 Memory/Memory 结果推导。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 支持隐式 broadcast 推导目标 shape。
+    - 保持 dtype/space，stride 允许为空。
+
+    使用示例:
+    - _binary_memory_result(lhs, rhs)
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: python/operation/nn.py
+    """
+    if lhs.dtype is not rhs.dtype:
+        raise TypeError("Memory dtype mismatch")
+    lhs_values = lhs.shape.get_values()
+    rhs_values = rhs.shape.get_values()
+    if lhs_values == rhs_values:
+        return lhs + rhs
+    target_shape = _infer_implicit_broadcast_shape(lhs, rhs)
+    return Memory(target_shape, lhs.dtype, space=lhs.space, stride=None, format=lhs.format)
+
+
+def _compare_memory_result(lhs: Memory, rhs: Memory) -> Memory:
+    """逐元素比较 Memory/Memory 结果推导。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 支持隐式 broadcast 推导目标 shape。
+    - 结果 dtype 固定为 Int32。
+
+    使用示例:
+    - _compare_memory_result(lhs, rhs)
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: python/operation/nn.py
+    """
+    if lhs.dtype is not rhs.dtype:
+        raise TypeError("Memory dtype mismatch")
+    lhs_values = lhs.shape.get_values()
+    rhs_values = rhs.shape.get_values()
+    if lhs_values == rhs_values:
+        return lhs == rhs
+    target_shape = _infer_implicit_broadcast_shape(lhs, rhs)
+    return Memory(target_shape, NumericType.Int32, space=lhs.space, stride=None, format=lhs.format)
 
 
 def _ensure_memory_operand(lhs: object, rhs: object) -> None:
@@ -42,11 +198,83 @@ def _ensure_memory_operand(lhs: object, rhs: object) -> None:
         raise TypeError("At least one operand must be Memory")
 
 
+def _infer_broadcast_shape(lhs: SymbolShape, rhs: SymbolShape) -> SymbolShape:
+    """推导逐元素隐式 broadcast 的目标 shape。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 按尾维对齐规则推导共同目标 shape。
+    - 仅允许 singleton dim 扩张。
+
+    使用示例:
+    - _infer_broadcast_shape(SymbolShape([1, "B"]), SymbolShape(["A", "B"]))
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: python/operation/nn.py
+    """
+    lhs_dims = lhs.get_values()
+    rhs_dims = rhs.get_values()
+    max_rank = max(len(lhs_dims), len(rhs_dims))
+    result: list[object] = []
+    for index in range(1, max_rank + 1):
+        lhs_dim = lhs_dims[-index] if index <= len(lhs_dims) else None
+        rhs_dim = rhs_dims[-index] if index <= len(rhs_dims) else None
+        if lhs_dim is None:
+            result.insert(0, rhs_dim)
+            continue
+        if rhs_dim is None:
+            result.insert(0, lhs_dim)
+            continue
+        if lhs_dim == rhs_dim:
+            result.insert(0, lhs_dim)
+            continue
+        if lhs_dim == 1:
+            result.insert(0, rhs_dim)
+            continue
+        if rhs_dim == 1:
+            result.insert(0, lhs_dim)
+            continue
+        raise ValueError("broadcast dimension mismatch")
+    return SymbolShape(result)
+
+
+def _broadcast_memory_pair(lhs: Memory, rhs: Memory) -> tuple[Memory, Memory]:
+    """为逐元素运算执行隐式 broadcast。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 若 shape 不一致但可广播，则显式扩张到共同目标 shape。
+
+    使用示例:
+    - lhs_b, rhs_b = _broadcast_memory_pair(lhs, rhs)
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: python/operation/nn.py
+    """
+    lhs_values = lhs.shape.get_values()
+    rhs_values = rhs.shape.get_values()
+    if lhs_values == rhs_values:
+        return lhs, rhs
+    target_shape = _infer_broadcast_shape(lhs.shape, rhs.shape)
+    target_values = target_shape.get_values()
+    lhs_b = lhs if lhs_values == target_values else broadcast(lhs, target_shape)
+    rhs_b = rhs if rhs_values == target_values else broadcast(rhs, target_shape)
+    return lhs_b, rhs_b
+
+
 def _dispatch_binary(lhs: object, rhs: object, op: str, rop: str) -> Memory:
     """二元算术调度。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 根据 Memory 所在侧选择正向或反向运算。
@@ -60,6 +288,8 @@ def _dispatch_binary(lhs: object, rhs: object, op: str, rop: str) -> Memory:
     - 功能实现: python/operation/nn.py
     """
     _ensure_memory_operand(lhs, rhs)
+    if isinstance(lhs, Memory) and isinstance(rhs, Memory):
+        return _binary_memory_result(lhs, rhs)
     if isinstance(lhs, Memory):
         return getattr(lhs, op)(rhs)
     return getattr(rhs, rop)(lhs)
@@ -69,7 +299,7 @@ def _dispatch_compare(lhs: object, rhs: object, op: str, rop: str) -> Memory:
     """二元比较调度。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 保持比较方向的调度规则。
@@ -83,6 +313,8 @@ def _dispatch_compare(lhs: object, rhs: object, op: str, rop: str) -> Memory:
     - 功能实现: python/operation/nn.py
     """
     _ensure_memory_operand(lhs, rhs)
+    if isinstance(lhs, Memory) and isinstance(rhs, Memory):
+        return _compare_memory_result(lhs, rhs)
     if isinstance(lhs, Memory):
         return getattr(lhs, op)(rhs)
     return getattr(rhs, rop)(lhs)
@@ -288,6 +520,49 @@ def ge(lhs: object, rhs: object) -> Memory:
     return _dispatch_compare(lhs, rhs, "__ge__", "__le__")
 
 
+def broadcast(value: object, shape: object) -> Memory:
+    """显式广播 Memory 到目标 shape。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 按尾维对齐规则扩张 singleton dim。
+    - 保持 dtype/space 不变，并返回新的 Memory。
+
+    使用示例:
+    - broadcast(Memory([1, "N"], NumericType.Float32), ["M", "N"])
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: python/operation/nn.py
+    """
+    if not isinstance(value, Memory):
+        raise TypeError("broadcast value must be Memory")
+    target_shape = _normalize_broadcast_shape(shape)
+    input_values = value.shape.get_values()
+    target_values = target_shape.get_values()
+
+    if len(target_values) < len(input_values):
+        raise ValueError("broadcast target rank must be >= input rank")
+
+    for input_dim, target_dim in zip(reversed(input_values), reversed(target_values), strict=False):
+        if input_dim == target_dim:
+            continue
+        if input_dim == 1:
+            continue
+        raise ValueError("broadcast dimension mismatch")
+
+    return Memory(
+        target_shape,
+        value.dtype,
+        space=value.space,
+        stride=None,
+        format=value.format,
+    )
+
+
 __all__ = [
     "add",
     "sub",
@@ -299,4 +574,5 @@ __all__ = [
     "le",
     "gt",
     "ge",
+    "broadcast",
 ]

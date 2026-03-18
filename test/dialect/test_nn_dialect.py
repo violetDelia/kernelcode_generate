@@ -34,7 +34,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from python.dialect import Nn, NnAddOp, NnEqOp, NnMemorySpaceAttr, NnMemoryType
+from python.dialect import Nn, NnAddOp, NnBroadcastOp, NnEqOp, NnMemorySpaceAttr, NnMemoryType
 
 
 def _build_context() -> Context:
@@ -88,6 +88,36 @@ def _make_memory_type(space: str = "global", element_type: IntegerType = i32) ->
     return NnMemoryType(
         ArrayAttr([StringAttr("M"), StringAttr("?"), IntAttr(4)]),
         ArrayAttr([IntAttr(4), IntAttr(1), StringAttr("?")]),
+        element_type,
+        _make_space(space),
+    )
+
+
+def _make_simple_memory_type(
+    shape: list[Attribute],
+    stride: list[Attribute],
+    space: str = "global",
+    element_type: IntegerType = i32,
+) -> NnMemoryType:
+    """构造指定 shape/stride 的 nn memory type。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 便于构造 broadcast 与隐式广播拒绝测试所需类型。
+
+    使用示例:
+    - _make_simple_memory_type([IntAttr(1), StringAttr(\"N\")], [IntAttr(1), IntAttr(1)])
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: python/dialect/nn.py
+    """
+    return NnMemoryType(
+        ArrayAttr(shape),
+        ArrayAttr(stride),
         element_type,
         _make_space(space),
     )
@@ -332,3 +362,155 @@ def test_memory_type_parse_requires_all_fields() -> None:
     ctx = _build_context()
     with pytest.raises(ParseError):
         Parser(ctx, "!nn.memory<[1], i32, #nn.space<global>>").parse_attribute()
+
+
+# TC-NN-BC-001
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-19 02:14:10 +0800
+# 最近一次运行成功时间: 2026-03-19 02:14:10 +0800
+# 功能说明: 验证 nn.broadcast 合法输入可通过 verifier。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_broadcast_op_verify_success
+# 对应功能实现文件路径: python/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_broadcast_op_verify_success() -> None:
+    input_type = NnMemoryType(
+        ArrayAttr([IntAttr(1), StringAttr("N")]),
+        ArrayAttr([IntAttr(1), IntAttr(1)]),
+        i32,
+        _make_space("global"),
+    )
+    result_type = NnMemoryType(
+        ArrayAttr([StringAttr("M"), StringAttr("N")]),
+        ArrayAttr([IntAttr(1), IntAttr(1)]),
+        i32,
+        _make_space("global"),
+    )
+    inp = _TestOp(result_types=[input_type]).results[0]
+    op = NnBroadcastOp(inp, result_type, _make_space("global"))
+    op.verify()
+
+
+# TC-NN-BC-002
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-19 02:14:10 +0800
+# 最近一次运行成功时间: 2026-03-19 02:14:10 +0800
+# 功能说明: 验证 nn.broadcast 在 space 不一致时报错。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_broadcast_op_space_mismatch
+# 对应功能实现文件路径: python/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_broadcast_op_space_mismatch() -> None:
+    input_type = _make_memory_type("global", i32)
+    result_type = _make_memory_type("shared", i32)
+    inp = _TestOp(result_types=[input_type]).results[0]
+    op = NnBroadcastOp(inp, result_type, _make_space("global"))
+    with pytest.raises(VerifyException, match="space"):
+        op.verify()
+
+
+# TC-NN-BC-003
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-19 02:14:10 +0800
+# 最近一次运行成功时间: 2026-03-19 02:14:10 +0800
+# 功能说明: 验证 nn.broadcast 在 element_type 不一致时报错。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_broadcast_op_element_type_mismatch
+# 对应功能实现文件路径: python/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_broadcast_op_element_type_mismatch() -> None:
+    input_type = _make_memory_type("global", i32)
+    result_type = _make_memory_type("global", IntegerType(1))
+    inp = _TestOp(result_types=[input_type]).results[0]
+    op = NnBroadcastOp(inp, result_type, _make_space("global"))
+    with pytest.raises(VerifyException, match="element_type"):
+        op.verify()
+
+
+# TC-NN-BC-004
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-19 02:14:10 +0800
+# 最近一次运行成功时间: 2026-03-19 02:14:10 +0800
+# 功能说明: 验证含 nn.broadcast 的模块可 round-trip。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_broadcast_module_round_trip
+# 对应功能实现文件路径: python/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_broadcast_module_round_trip() -> None:
+    ctx = _build_context()
+    text = """builtin.module {
+  %0 = "test.op"() : () -> !nn.memory<[1, N], [1, 1], i32, #nn.space<global>>
+  %1 = "nn.broadcast"(%0) {space = #nn.space<global>} : (!nn.memory<[1, N], [1, 1], i32, #nn.space<global>>) -> !nn.memory<[M, N], [1, 1], i32, #nn.space<global>>
+}
+"""
+    module = Parser(ctx, text).parse_module()
+    module.verify()
+    assert _print_ir(module) == text.rstrip()
+
+
+# TC-NN-IB-001
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-19 02:40:00 +0800
+# 最近一次运行成功时间: 2026-03-19 02:40:00 +0800
+# 功能说明: 验证 nn.add 拒绝隐式 broadcast 形状。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_add_op_rejects_implicit_broadcast_shape_mismatch
+# 对应功能实现文件路径: python/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_add_op_rejects_implicit_broadcast_shape_mismatch() -> None:
+    lhs_type = _make_simple_memory_type([IntAttr(1), StringAttr("N")], [IntAttr(1), IntAttr(1)])
+    rhs_type = _make_simple_memory_type([StringAttr("M"), StringAttr("N")], [IntAttr(1), IntAttr(1)])
+    result_type = _make_simple_memory_type([StringAttr("M"), StringAttr("N")], [IntAttr(1), IntAttr(1)])
+    lhs = _TestOp(result_types=[lhs_type]).results[0]
+    rhs = _TestOp(result_types=[rhs_type]).results[0]
+    op = NnAddOp(lhs, rhs, result_type, _make_space("global"))
+    with pytest.raises(VerifyException, match="shape"):
+        op.verify()
+
+
+# TC-NN-IB-002
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-19 02:40:00 +0800
+# 最近一次运行成功时间: 2026-03-19 02:40:00 +0800
+# 功能说明: 验证 nn.eq 拒绝隐式 broadcast 形状。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_compare_op_rejects_implicit_broadcast_shape_mismatch
+# 对应功能实现文件路径: python/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_compare_op_rejects_implicit_broadcast_shape_mismatch() -> None:
+    lhs_type = _make_simple_memory_type([IntAttr(1), StringAttr("N")], [IntAttr(1), IntAttr(1)])
+    rhs_type = _make_simple_memory_type([StringAttr("M"), StringAttr("N")], [IntAttr(1), IntAttr(1)])
+    result_type = _make_simple_memory_type([StringAttr("M"), StringAttr("N")], [IntAttr(1), IntAttr(1)])
+    lhs = _TestOp(result_types=[lhs_type]).results[0]
+    rhs = _TestOp(result_types=[rhs_type]).results[0]
+    op = NnEqOp(lhs, rhs, result_type, _make_space("global"))
+    with pytest.raises(VerifyException, match="shape"):
+        op.verify()
+
+
+# TC-NN-IB-003
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-19 02:40:00 +0800
+# 最近一次运行成功时间: 2026-03-19 02:40:00 +0800
+# 功能说明: 验证显式 broadcast 后再执行 nn.add 可通过 verifier。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_explicit_broadcast_then_add_verify_success
+# 对应功能实现文件路径: python/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_explicit_broadcast_then_add_verify_success() -> None:
+    input_type = _make_simple_memory_type([IntAttr(1), StringAttr("N")], [IntAttr(1), IntAttr(1)])
+    target_type = _make_simple_memory_type([StringAttr("M"), StringAttr("N")], [IntAttr(1), IntAttr(1)])
+    other_type = _make_simple_memory_type([StringAttr("M"), StringAttr("N")], [IntAttr(1), IntAttr(1)])
+    inp = _TestOp(result_types=[input_type]).results[0]
+    other = _TestOp(result_types=[other_type]).results[0]
+    broadcast_op = NnBroadcastOp(inp, target_type, _make_space("global"))
+    broadcast_op.verify()
+    add_op = NnAddOp(broadcast_op.result, other, target_type, _make_space("global"))
+    add_op.verify()
