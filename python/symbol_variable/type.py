@@ -67,7 +67,7 @@ class Farmat(Enum):
     最后一次更改: 榕
 
     功能说明:
-    - 约定 c last=NHWC、c not last=NCHW。
+    - 仅公开 Norm 与 CLast 两种布局语义。
 
     使用示例:
     - Farmat.Norm
@@ -79,7 +79,5 @@ class Farmat(Enum):
     - 功能实现: python/symbol_variable/type.py
     """
 
-    NHWC = "NHWC"
-    NCHW = "NCHW"
-    Norm = NCHW
-    CLast = NHWC
+    Norm = "NCHW"
+    CLast = "NHWC"

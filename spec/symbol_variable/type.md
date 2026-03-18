@@ -1,5 +1,7 @@
 # type.md
 
+## 功能简介
+
  [immutable]用于定义基础数据类型枚举 `NumericType` 和张量布局格式枚举 `Farmat`。
 
 ## [immutable]文档信息
@@ -10,13 +12,13 @@
 - `test`：[`test/symbol_variable/test_type.py`](../../test/symbol_variable/test_type.py)
 - `功能实现`：[`python/symbol_variable/type.py`](../../python/symbol_variable/type.py)
 
-## 功能边界
+## 限制与边界
 
 - [immutable]仅定义 `NumericType` 与 `Farmat` 两个枚举类型。
 - [immutable]不负责内存对象、张量对象或其他模块的运行时语义。
 - [immutable]不提供工厂函数、转换函数或其他辅助 API。
 
-## 依赖约定
+## 依赖
 
 - `enum.Enum`：用于定义枚举。
 - `python.symbol_variable.type`：作为 `NumericType` 与 `Farmat` 的唯一有效导入入口。
@@ -27,7 +29,7 @@
 
 - 为数值类型和张量布局格式提供稳定、可枚举、可比较的公开常量集合。
 - 明确模块级公开导出边界，包括 `__all__` 与 `import *` 的可见符号。
-- 约束 `Farmat` 的别名语义，确保调用方可稳定使用语义化名称 `Norm` 与 `CLast`。
+- 约束 `Farmat` 的公开成员与访问边界，确保调用方可稳定使用 `Norm` 与 `CLast`。
 
 ### 非目标
 
@@ -35,7 +37,7 @@
 - 不为旧路径 `symbol_variable.type` 提供兼容层、转发模块或弃用包装。
 - 不扩展到量化类型、复数类型、稀疏布局或其他未在当前实现中公开的枚举成员。
 
-## API
+## 公开接口
 
 ### NumericType
 
@@ -112,6 +114,15 @@ assert dtype.value == "float16"
 - [immutable]`Norm` 表示通道维不在最后一维的常见布局别名。
 - [immutable]`CLast` 表示通道维位于最后一维的常见布局别名。
 
+使用示例：
+
+```python
+from python.symbol_variable.type import Farmat
+
+assert Farmat.Norm.name == "Norm"
+assert Farmat.CLast.name == "CLast"
+```
+
 ## 导出边界
 
 - 模块显式公开导出仅包括 `NumericType` 与 `Farmat`。
@@ -165,7 +176,8 @@ importlib.import_module("symbol_variable.type")
 ### 成功返回
 
 - 成功导入模块后，调用方可访问 `NumericType` 与 `Farmat` 两个公开枚举。
-- 成功访问枚举成员后，可读取 `.name`、`.value`，并参与身份比较。
+- 成功访问 `NumericType` 成员后，可读取 `.name`、`.value`，并参与身份比较。
+- 成功访问 `Farmat` 成员后，可读取 `.name` 并参与身份比较；当前 spec 不通过 `.value`、字符串或别名关系定义布局等价。
 
 ### 失败返回
 
@@ -175,7 +187,7 @@ importlib.import_module("symbol_variable.type")
 ## 兼容性
 
 - `NumericType` 的有符号整型、无符号整型和浮点成员名称和值保持稳定。
-- `Farmat` 的 `name` 与 `repr` 行为保持与 Python `Enum` 别名规则一致。
+- `Farmat` 仅公开 `Norm` 与 `CLast` 两个成员；兼容性约束以成员可见性、成员名称与导出边界为准。
 - 模块公开导出边界保持稳定，避免调用方因 `__all__` 漂移而获得额外符号。
 
 
@@ -187,7 +199,7 @@ importlib.import_module("symbol_variable.type")
 ### 测试目标
 
 - 验证 `NumericType` 的公开成员、名称和值稳定。
-- 验证 `Farmat` 的别名关系以及 `name`、`repr` 等公开行为稳定。
+- 验证 `Farmat` 仅公开 `Norm` 与 `CLast` 两个成员，且不暴露额外布局名。
 - 验证模块显式 `__all__` 仅包含 `NumericType` 与 `Farmat`。
 - 验证 `import *` 仅暴露约定公开符号，不泄露实现细节。
 - 验证旧路径 `symbol_variable.type` 不可导入，并抛出 `ModuleNotFoundError`。
@@ -195,13 +207,14 @@ importlib.import_module("symbol_variable.type")
 ### 测试标准
 
 - 对应测试全部通过，`pytest` 返回码为 `0`。
-- 枚举值、别名关系、导出边界与唯一入口约束保持一致。
+- 枚举成员、导出边界与唯一入口约束保持一致。
 
 ### 测试用例清单
 
 | 用例 ID | 对应测试 | 功能 | 场景 | 前置条件 | 操作 | 预期结果 |
 |---|---|---|---|---|---|---|
 | TY-001 | `test_numeric_type_values` | `NumericType` 成员值 | 校验公开 dtype 值稳定 | 已成功导入 `python.symbol_variable.type` | 读取各 `NumericType` 成员的 `.value` | 与约定字符串完全一致 |
+| TY-002 | `test_farmat_public_members` | `Farmat` 公开成员 | 校验 `Farmat` 仅公开 `Norm/CLast` | 已成功导入 `Farmat` | 枚举成员并检查 `Norm`、`CLast` 可访问，且不存在额外布局名 | 仅公开 `Norm` 与 `CLast` |
 | TY-003 | `test_python_type_module_all_boundary` | 模块导出边界 | 校验 `__all__` 内容 | 已成功导入模块对象 | 读取 `python.symbol_variable.type.__all__` | 严格等于 `["NumericType", "Farmat"]` |
 | TY-004 | `test_python_type_import_star_exports_only_public_names` | `import *` 暴露范围 | 校验 `import *` 不泄露实现细节 | 已成功导入模块 | 执行 `from python.symbol_variable.type import *` | 仅暴露 `Farmat` 与 `NumericType` |
 | TY-005 | `test_numeric_type_member_access` | `NumericType` 成员访问 | 校验成员名称可稳定访问 | 已成功导入 `NumericType` | 读取多个成员的 `.name` | 与约定成员名一致 |
