@@ -2,90 +2,81 @@
 
 ## 功能简介
 
-- 定义 DSL 入口的 MLIR 文本生成规范（mlir_gen 概念层）。
-- 公开入口为 `emit_mlir`：输入 Python 函数或 `nn dialect` 的模块对象，输出 MLIR 风格文本。
-- 本文只约束文本生成的输入/输出与结构性要求，不替代 AST 构建与 IR 生成规则。
+- 定义 DSL 到结构化 MLIR IR 的生成约束。
+- 约束 `FunctionAST -> builtin.module -> func.func -> nn.*` 这条链路的结构、顺序与结果类型。
+- 不定义 `emit_mlir` 文本输出接口；文本输出入口由 `spec/dsl/emit_mlir.md` 单独约束。
 
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
 - `关联 AST`：[`spec/dsl/ast.md`](../../spec/dsl/ast.md)
 - `关联 ast_visitor`：[`spec/dsl/ast_visitor.md`](../../spec/dsl/ast_visitor.md)
-- `关联 IR 生成`：[`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)
+- `关联文本输出`：[`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)
 - `关联 Dialect`：[`spec/dialect/nn.md`](../../spec/dialect/nn.md)
 - `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
-- `功能实现（当前入口）`：[`python/dsl/ast_visitor.py`](../../python/dsl/ast_visitor.py)
+- `功能实现`：[`python/dsl/ast_visitor.py`](../../python/dsl/ast_visitor.py)
 - [immutable]`功能实现`：[`python/dsl/ast_visitor.py`](../../python/dsl/mlir_gen.py)
 
 ## 依赖
 
-- AST 结构：[`spec/dsl/ast.md`](../../spec/dsl/ast.md)
+- AST 数据结构：[`spec/dsl/ast.md`](../../spec/dsl/ast.md)
 - AST 入口与诊断：[`spec/dsl/ast_visitor.md`](../../spec/dsl/ast_visitor.md)
-- IR 生成规则：[`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)
 - 目标方言：[`spec/dialect/nn.md`](../../spec/dialect/nn.md)
+- 文本序列化入口见 [`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)，但该文件是本层的下游消费者，不反向定义本层规则。
 
 ## 目标
 
-- 为 DSL 入口提供稳定的 MLIR 文本输出能力。
-- 明确 `emit_mlir` 的输入范围、输出结构与错误语义。
-- 保证输出文本与当前 `nn dialect` IR 结构一致，保持表达式顺序与 SSA 依赖关系。
+- 提供稳定的结构化 IR 生成约束。
+- 明确 `visit_to_nn_ir(...)` 产物必须满足的 module、`func.func`、block argument、SSA 与 `func.return` 规则。
+- 为下游 `emit_mlir` 文本输出提供唯一的结构化 IR 基线。
 
 ## 限制与边界
 
 - 不负责 Python AST 解析与 AST 构建，入口规则由 `ast_visitor` 约束。
-- 不定义 AST 到 IR 的 lowering 规则，行为以 `spec/dsl/emit_mlir.md` 为准。
+- 不重复定义 AST 前端注解解析、名称绑定和诊断细节；相关规则由 `ast_visitor` 约束。
+- 不定义 `emit_mlir` 的输入输出、参数和文本错误传播；相关规则由 `spec/dsl/emit_mlir.md` 约束。
 - 不做优化、融合、bufferization 或后端生成。
-- 不替代 `nn dialect` 的 verifier 规则；不负责自动修正非法 IR。
+- 不替代 `nn dialect` 的 verifier 规则；不自动修正非法 IR。
 
-## 公开接口
+## 入口归属
 
-### `emit_mlir(value, globals=None, builtins=None, config=None) -> str`
-
-功能说明：
-
-- 当 `value` 为可调用对象时：先走 `visit_to_nn_ir` 生成 `nn dialect` 模块，再打印为 MLIR 文本。
-- 当 `value` 为模块对象时：直接打印文本。
-
-参数说明：
-
-- `value`：Python 函数或 `nn dialect` 模块对象。
-- `globals/builtins`：传递给 `visit_function` 的注解解析上下文。
-- `config`：传递给 `visit_function/visit_to_nn_ir` 的配置参数。
-
-返回与限制：
-
-- 返回非空字符串，包含 `func.func` 与对应 `nn.*` op 的文本。
-- 输出格式由 `xdsl.printer.Printer` 决定，文本换行/空格不作为稳定语义。
+- 当前项目没有单独暴露名为 `mlir_gen(...)` 的公共 Python API。
+- 结构化 IR 的外部入口是 [`spec/dsl/ast_visitor.md`](../../spec/dsl/ast_visitor.md) 中定义的 `visit_to_nn_ir(...)`。
+- `emit_mlir(...)` 的接口定义、参数语义和文本输出规则只在 [`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md) 中维护，本文件不再重复定义。
 
 使用示例：
 
 ```python
-text = emit_mlir(add)
+module = visit_to_nn_ir(add)
 ```
 
-错误与约束：
+## 结构化 IR 生成约束
 
-- 当 `value` 为函数且 AST/IR 生成失败时，抛 `AstVisitorError` 并携带诊断信息。
-- 当 `value` 不是函数也不是模块对象时，由实现抛出类型相关错误。
+### module 与 `func.func`
 
-## 输出结构约束
+- `visit_to_nn_ir(...)` 产物必须为 `builtin.module`。
+- module 中必须包含与输入函数同名的 `func.func`。
+- `func.func` 的参数顺序必须与 Python 函数签名顺序一致。
+- `func.func` 的返回类型必须与上游 AST/lowering 推断结果一致。
 
-- 输出必须包含 `func.func` 与 `func.return`，且函数名与输入函数名一致。
+### block argument 与结果类型
+
+- 张量参数必须 lowering 为 `!nn.memory<...>`。
+- 标量参数必须 lowering 为对应的基础标量类型；当前 `int` 参数为 `i32`。
+- 返回值若为张量，必须保持 `!nn.memory<...>` 类型；若为标量，则保持对应标量类型。
+
+### SSA 与语句顺序
+
 - 表达式对应的 `nn.*` op 必须按源码依赖顺序出现在函数体中。
-- 标量参数应在 `func.func` 签名中体现为基础标量类型（当前为 `i32`）。
+- 同一表达式对象被多次引用时，必须复用已生成的 SSA value，而不是重新生成等价 op。
+- `func.return` 必须消费当前返回表达式对应的 SSA value，且作为函数体终结语句。
 
-## 测试
+### 文本输出关系
 
-- 测试文件：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
-- 执行命令：`pytest -q test/dsl/test_ast_visitor.py`
-
-### 测试映射
-
-| 用例 ID | 测试点 | 对应测试 |
-| --- | --- | --- |
-| MLIR-001 | `emit_mlir` 输出包含 `func.func` 与 `nn` op 文本 | `test_emit_mlir_output` |
+- 本层只负责保证结构化 IR 满足上述约束。
+- 结构化 IR 进入 `Printer.print_op(...)` 后的文本输出行为，由 [`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md) 约束。
 
 ## [immutable]示例
 
@@ -122,53 +113,48 @@ builtin.module {
 
 ## 错误规则
 
-- AST 生成失败：向上抛出 `AstVisitorError`。
-- visitor 无法识别某个节点：必须给出可定位的诊断，而不是 silently 跳过。
-- Lowering 失败：由 `visit_to_nn_ir` 转换为 `AstVisitorError` 并保留诊断信息。
-- 输入不是可调用对象也不是可打印 module：由实现抛出对应类型错误。
-- 打印阶段若 IR 本身非法，错误应由前序 verifier 或 printer 触发，不允许 silently 修正。
+- AST 生成失败：由上游 `ast_visitor` 抛出 `AstVisitorError`。
+- Lowering 或结构化 IR 生成失败：`visit_to_nn_ir(...)` 必须抛出带定位信息的 `AstVisitorError`。
+- 本层不定义“输入不是可打印 module”的错误，因为那属于 `emit_mlir(...)` 的文本输出职责。
+- 本层不得 silently 跳过无法生成 IR 的节点；任何生成失败都必须通过上游入口暴露错误。
 
 ## 测试
 
 - 主要测试文件：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
-- 关联方言测试：[`test/dialect/test_nn_dialect.py`](../../test/dialect/test_nn_dialect.py)
 - 执行命令：`pytest -q test/dsl/test_ast_visitor.py`
 
 ### 测试目标
 
-- 验证函数能够被转换为对应的 `func.func`。
-- 验证函数体中的表达式会生成语义对应的目标 op 与 SSA value 链路。
-- 验证 `visit_to_nn_ir` 能生成 `builtin.module`。
-- 验证生成的 module 中包含 `func.func` 和对应表达式语义的目标 op。
-- 验证 `emit_mlir` 输出中包含 `func.func` 与对应目标 op 文本。
+- 验证 `visit_to_nn_ir(...)` 能生成包含 `func.func` 与目标 `nn.*` op 的 `builtin.module`。
 - 验证标量参数会进入 `func.func` 签名并降低为基础标量类型。
-- 验证 AST / lowering 失败时可通过诊断信息回报。
+- 验证多语句 lowering 保持源码依赖顺序，并对重复表达式复用 SSA value。
 
-### 测试清单
+### 测试映射
 
-| 用例 ID | 测试点 | 说明 | 对应测试 |
-| --- | --- | --- | --- |
-| TC-MLIR-001 | AST 到 `func.func` 入口 | `visit_to_nn_ir` 返回 `builtin.module`，且内部包含 `func.func` 与当前表达式对应的 op | `test_visit_to_nn_ir_builds_module` |
-| TC-MLIR-002 | MLIR 文本输出 | `emit_mlir` 输出包含 `func.func` 与当前表达式对应的 op 文本 | `test_emit_mlir_output` |
-| TC-MLIR-003 | 标量参数签名 lowering | 标量参数进入 `func.func` 签名并降低为 `i32` | `test_scalar_arg_lowering_in_signature` |
-| TC-MLIR-004 | 注解入口兼容 | `globals/builtins` 可参与 AST 与 IR 入口构造 | `test_globals_and_builtins_annotation_entry` |
-| TC-MLIR-005 | AST 诊断传播 | 未知名称等错误能够通过 visitor 诊断回报 | `test_unknown_name_reports_diagnostics` |
+| 用例 ID | 约束点 | 对应测试 |
+| --- | --- | --- |
+| MGEN-001 | `visit_to_nn_ir(...)` 必须生成包含 `func.func` 与当前表达式对应 `nn.*` op 的 `builtin.module` | `test_visit_to_nn_ir_builds_module` |
+| MGEN-002 | 标量参数必须进入 `func.func` 签名并 lowering 为 `i32` | `test_scalar_arg_lowering_in_signature` |
+| MGEN-003 | 多语句 lowering 必须保持 SSA 顺序并复用已生成 value | `test_multi_statement_ssa_order_and_reuse` |
 
-### 与方言测试的关系
+### 测试归属边界
 
-- 本文件关注“生成出来的文本是否符合 MLIR 风格结构，以及函数内容是否被正确生成成 op/value”。
-- `!nn.memory` 的 parse/print、`space` mismatch、compare result type 等方言级约束，由 [`test/dialect/test_nn_dialect.py`](../../test/dialect/test_nn_dialect.py) 覆盖。
-- 因此，本文件不重复定义 `nn dialect` verifier 细节，而是要求 `emit_mlir` 生成的文本必须能满足当前目标 dialect 的 verifier 规则。
+- `test_emit_mlir_output`
+  - 归 [`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)，用于验证文本输出，不再复用到本文件编号。
+- `test_globals_and_builtins_annotation_entry` 与 `test_unknown_name_reports_diagnostics`
+  - 归 [`spec/dsl/ast_visitor.md`](../../spec/dsl/ast_visitor.md)，用于验证 AST 前端入口与诊断。
+- `test_constant_lowering_reports_diagnostics`、`test_return_type_mismatch_reports_diagnostics`、`test_tensor_binary_implicit_broadcast_lowering`
+  - 归 lowering 相关 spec，用于验证 lowering 规则本身，而不是本文件的结构化 IR 基线编号。
 
 ## 测试标准
 
 - `pytest -q test/dsl/test_ast_visitor.py` 返回码必须为 `0`。
-- 输出文本必须至少能稳定包含 `func.func`、`func.return` 和与源码表达式对应的目标 op。
-- 新增 DSL 表达式类型、参数类型或返回形式时，必须同步更新本文件示例与测试清单。
+- 生成的 module 必须至少稳定包含 `func.func`、`func.return` 和与源码表达式对应的目标 op。
+- 新增会影响 module 结构、参数签名或 SSA 生成顺序的能力时，必须同步更新本文件测试清单。
 
 ## 兼容性
 
-- 本 spec 绑定当前项目的 `emit_mlir` 入口，而不是抽象的外部生成器。
-- 若未来把文本生成逻辑迁移到独立模块，例如 `python/dsl/mlir_gen.py`，需保持本文件中定义的输入输出契约不变。
-- 若 `nn.memory` 的文本表示发生变化，需同步更新 [`spec/dialect/nn.md`](../../spec/dialect/nn.md) 与本文件中的示例和测试清单。
-- 若后续引入新的目标 dialect，本文件应补充“表达式 -> 目标 op”的映射规则，而不是把所有生成语义都写死到 `nn` 上。
+- 本 spec 绑定当前项目的结构化 IR 生成层，而不是文本输出入口。
+- 若未来把结构化 IR 生成逻辑迁移到独立模块，例如 `python/dsl/mlir_gen.py`，需保持本文件定义的 module / `func.func` / SSA 约束不变。
+- 若 `nn.memory` 的结构或 verifier 规则发生变化，需同步更新 [`spec/dialect/nn.md`](../../spec/dialect/nn.md) 与本文件中的结构约束。
+- 若后续引入新的目标 dialect，本文件应补充“AST/表达式 -> 结构化 op/value”的生成规则；文本输出接口仍应由 `emit_mlir.md` 单独维护。
