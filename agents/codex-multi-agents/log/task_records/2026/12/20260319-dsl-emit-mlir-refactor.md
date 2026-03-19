@@ -24,3 +24,23 @@
   - `test/dsl/test_ast_visitor.py` 仍建议补一条 `emit_mlir(callable)` 错误传播回归测试，确认其对 `AstVisitorError` 的透传行为。
 - 下一阶段申请：
   - 建议管理员安排复审，重点核对 `spec/dsl/emit_mlir.md` 与 `spec/dsl/mlir_gen.md` 的命名、分层和测试映射是否已完全一致；若复审通过，再决定是否单独补 `emit_mlir` 两条缺失测试。
+
+---
+
+## T-20260319-86c01684
+
+- 时间：2026-03-19 21:30:16 +0800
+- 角色：`李白`
+- 任务描述：合入 DSL `emit_mlir`/`mlir_gen` spec 收敛改动，仅更新 spec 文件。
+- worktree：`/home/lfr/kernelcode_generate/wt-20260319-dsl-emit-mlir-mlir-gen-merge`
+- 变更文件：
+  - `spec/dsl/emit_mlir.md`
+  - `spec/dsl/mlir_gen.md`
+- 变更摘要：
+  - 同步 `emit_mlir` 文本输出入口规范的分层职责、依赖描述与测试归属边界。
+  - `mlir_gen` 口径收敛为结构化 IR 生成约束，移除与 `emit_mlir` 重复的接口定义与测试映射。
+- 合入提交：
+  - 合并提交：`ca2cfd3`
+  - main 提交：`c28214b`
+- 测试说明：
+  - 按任务要求未执行测试。

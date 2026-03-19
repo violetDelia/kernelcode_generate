@@ -77,3 +77,22 @@
 
 ### 说明
 - 两份 spec 的分层职责、公开接口归属与测试映射已闭合且无重复编号冲突。
+
+---
+
+## T-20260319-86c01684
+
+- 时间：2026-03-19 21:30:16 +0800
+- 角色：`李白`
+- worktree：`/home/lfr/kernelcode_generate/wt-20260319-dsl-emit-mlir-mlir-gen-merge`
+- 合入范围：
+  - `spec/dsl/emit_mlir.md`
+  - `spec/dsl/mlir_gen.md`
+- 变更摘要：
+  - `emit_mlir` 与 `mlir_gen` 分层职责/测试映射已按复审结论收敛。
+  - `mlir_gen` 明确为结构化 IR 生成基线，`emit_mlir` 聚焦文本输出入口规范。
+- 合入提交：
+  - 合并提交：`ca2cfd3`
+  - main 提交：`c28214b`
+- 测试：
+  - 未执行（按任务要求）。

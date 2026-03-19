@@ -1,3 +1,31 @@
+## T-20260319-cccd0218
+
+- 执行人: 朽木露琪亚
+- 角色: `spec`
+- worktree: /home/lfr/kernelcode_generate/wt-20260319-operation-nn-broadcast-spec-fix
+- 时间: 2026-03-19 21:21:20 +0800
+
+## 本次改动
+- 在 `spec/operation/nn.md` 中清理 `broadcast` 段落残留的“当前 main 尚未实现”过期状态描述，改回稳定示例口径。
+- 保持 `OP-BC-001..006` 继续作为正式 operation-level 测试映射，不复写实现/测试现状。
+
+## 变更文件
+- /home/lfr/kernelcode_generate/wt-20260319-operation-nn-broadcast-spec-fix/spec/operation/nn.md
+
+## 测试映射
+- `OP-BC-001 -> test_nn_broadcast_success`
+- `OP-BC-002 -> test_nn_broadcast_prepend_dimension`
+- `OP-BC-003 -> test_nn_broadcast_dimension_mismatch`
+- `OP-BC-004 -> test_nn_broadcast_rank_error`
+- `OP-BC-005 -> test_nn_broadcast_non_memory_error`
+- `OP-BC-006 -> test_nn_broadcast_invalid_shape_error`
+
+## 测试
+- 未运行；按任务要求仅修改 spec，不改实现/测试。
+
+## 下一步建议
+- 建议进入一次最小复审，确认 `spec/operation/nn.md` 的 `broadcast` 段不再残留状态化表述，且 `OP-BC-001..006` 仍与 operation 层测试一一对应。
+
 # 20260319-nn-broadcast-impl
 
 - 任务: T-20260319-0217f5c4
@@ -60,3 +88,20 @@
   - `test/dialect/test_nn_dialect.py`
 - 测试说明：按任务要求未复测。
 - 清理说明：当前任务使用主工作区，无独立 worktree 需清理。
+
+---
+
+## T-20260319-3360b0e6
+
+- 时间：2026-03-19 21:46:51 +0800
+- 角色：`不要啊教练`
+- worktree：`/home/lfr/kernelcode_generate/wt-20260319-operation-nn-broadcast-merge`
+- 基线：`/home/lfr/kernelcode_generate/wt-20260319-operation-nn-broadcast-spec-fix`
+- 结论：已合入 main
+- 提交：`36e731a`
+- 变更文件：
+  - `spec/operation/nn.md`
+- 变更摘要：
+  - 调整 `broadcast` 示例标题口径，移除“main 尚未实现”的表述。
+- 测试：未执行（按要求不复测）。
+- 清理：未生成新的 .lock 文件。

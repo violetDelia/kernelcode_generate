@@ -8,6 +8,8 @@
 - `test`：[`test/codex-multi-agents/test_codex-multi-agents-list.py`](test/codex-multi-agents/test_codex-multi-agents-list.py)
 - `功能实现`：[`skills/codex-multi-agents/scripts/codex-multi-agents-list.sh`](skills/codex-multi-agents/scripts/codex-multi-agents-list.sh)
 
+## 目录结构
+  
 ## 项目说明
 - 项目目标：`<待填写>`
 - 生效范围：`<待填写>`
