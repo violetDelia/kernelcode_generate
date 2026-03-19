@@ -20,7 +20,7 @@
 """
 
 from .dma import alloc, copy, deslice, free, load, slice, store
-from .nn import add, eq, ge, gt, le, lt, mul, ne, sub, truediv
+from .nn import add, eq, ge, gt, le, lt, matmul, mul, ne, sub, truediv
 
 __all__ = [
     "add",
@@ -33,6 +33,7 @@ __all__ = [
     "le",
     "gt",
     "ge",
+    "matmul",
     "alloc",
     "free",
     "copy",

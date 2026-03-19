@@ -281,3 +281,19 @@
 - 时间：2026-03-17 21:32:42 +0800
   事项：同步管理员进展
   详情：通过 tmux 向神秘人回报已复读提示词、AGENTS.md 并更新介绍；记录：agents/codex-multi-agents/log/talk.log。
+2026-03-19 03:26:40 +0800
+- 执行脚本 skills/codex-multi-agents/scripts/codex-multi-agents-list.sh 获取会话状态；后续回报使用会话ID=小李飞刀。
+2026-03-19 03:29:12 +0800
+- T-20260319-ef505462 已通过脚本回报并申请审查；回报渠道为 codex-multi-agents-tmux.sh -talk (需 -log 参数)。
+2026-03-19 03:31:10 +0800
+- 审查只要有任何建议必须不通过，直至改好。
+2026-03-19 04:08:22 +0800
+- T-20260319-5fba0fd9: include/cpu/Nn.h 移除标量重载，补齐 INC-NN-001..005 测试并通过 pytest。
+2026-03-19 04:10:50 +0800
+- T-20260319-65160ba3: 已查看 spec/symbol_variable/type.md、python/symbol_variable/type.py、test/symbol_variable/test_type.py 与 test/symbol_variable/test_memory.py。
+2026-03-19 06:34:10 +0800
+- T-20260319-65160ba3: Farmat 收敛为仅 Norm/CLast，测试已更新并通过。
+2026-03-19 06:36:22 +0800
+- T-20260319-d6d89211: 在 wt-20260319-readme-collab/README.md 补充实现/测试入口与使用示例。
+2026-03-19 06:40:12 +0800
+- T-20260319-bddc5c63: 更新 python/operation/__init__.py 文档说明，补充 matmul 口径。

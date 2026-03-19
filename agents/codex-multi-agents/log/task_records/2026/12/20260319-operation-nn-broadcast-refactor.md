@@ -1,0 +1,25 @@
+## T-20260319-0bd7fcc6
+
+- 时间：2026-03-19 01:45:44 +0800
+- 角色：`朽木露琪亚`
+- 任务描述：改进 `spec/operation/nn.md`，补充 `broadcast` 的高层 API 语义、输入输出约束、错误规则、返回语义、与 `nn dialect broadcast` 的分层关系及测试清单。
+- worktree：`/home/lfr/kernelcode_generate`
+- 变更文件：
+  - `spec/operation/nn.md`
+- 变更摘要：
+  - 将 `spec/operation/nn.md` 的能力范围从“逐元素算术、比较与 `matmul`”进一步收敛为“逐元素算术、比较、`broadcast` 与 `matmul` 高层运算规范”，补齐 `broadcast` 所需的功能简介、术语、设计原则、边界与依赖说明。
+  - 新增 `broadcast(value, shape)` 的高层 API 契约，明确其为显式广播接口，不恢复逐元素算术/比较的隐式广播；并收敛尾维对齐、singleton dim 扩张、前置维插入、`dtype/space` 保持、`stride` 不承诺具体底层策略等规则。
+  - 补充 `broadcast` 的错误口径，覆盖非 `Memory` 输入、非法目标 `shape`、目标 rank 更小、非 singleton 维不兼容等失败路径，并明确返回结果仍为 `Memory` 语义对象。
+  - 新增 `operation/nn.broadcast` 与 `nn dialect broadcast` 的分层说明，明确当前 `main` 上仅完成高层 API 契约；`spec/dialect/nn.md`、`python/operation/nn.py` 与 `test/operation/test_operation_nn.py` 尚未形成 `broadcast` 闭环。
+  - 按 `AGENTS.md` 补齐测试映射：保留 OP-001..013 与当前真实测试函数的一一对应，并新增 `broadcast` 待补测试清单 `OP-BC-001..006`，覆盖成功路径、前置维插入、维度不兼容、rank 错误、非 `Memory` 输入和非法目标 `shape`。
+- 影响范围：
+  - 仅 spec 文档更新；实现与测试未改动。
+- 测试说明：
+  - 按任务要求未执行测试。
+- 后续待跟进项：
+  - `spec/dialect/nn.md` 需补充 `nn.broadcast` 的方言层规范，至少覆盖 op 语义、operand/result type、verifier 与 parse/print round-trip 约束，完成高层 `operation/nn.broadcast` 到方言层的 spec 闭环。
+  - `python/operation/nn.py` 需新增 `broadcast` 实现，并与现有 `Memory`/`NumericType` 语义保持一致，尤其要区分“显式 broadcast”与“逐元素 op 不做隐式广播”。
+  - `test/operation/test_operation_nn.py` 需补齐 `OP-BC-001..006` 对应测试。
+- 下一阶段申请：
+  - 申请先创建“改进 spec 任务”，范围为 `spec/dialect/nn.md`，补齐 `nn.broadcast` 的方言层规范并沿用记录文件 `agents/codex-multi-agents/log/task_records/2026/12/20260319-operation-nn-broadcast-refactor.md`。
+  - 在 dialect spec 收敛后，再创建“实现/测试任务”，范围为 `python/operation/nn.py` 与 `test/operation/test_operation_nn.py`，补齐 `broadcast` 的实现与 `OP-BC-001..006` 测试闭环。

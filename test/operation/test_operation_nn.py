@@ -26,8 +26,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from python.operation.nn import add, broadcast, eq, ge, gt, le, lt, mul, ne, sub, truediv
-from python.symbol_variable.memory import Memory
+from python.operation.nn import add, broadcast, eq, ge, gt, le, lt, matmul, mul, ne, sub, truediv
+from python.symbol_variable.memory import Memory, MemorySpace
 from python.symbol_variable.symbol_shape import SymbolList, SymbolShape
 from python.symbol_variable.type import NumericType
 
@@ -435,3 +435,107 @@ def test_nn_add_implicit_broadcast_mismatch() -> None:
     rhs = Memory(["A", "C"], NumericType.Float32)
     with pytest.raises(ValueError):
         _ = add(lhs, rhs)
+
+
+# OP-MM-001
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-19 08:45:56 +0800
+# 最近一次运行成功时间: 2026-03-19 08:45:56 +0800
+# 功能说明: 验证 matmul 基础二维矩阵乘输出 shape/dtype/space。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_matmul_success
+# 对应功能实现文件路径: python/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_matmul_success() -> None:
+    lhs = Memory(["M", "K"], NumericType.Float32)
+    rhs = Memory(["K", "N"], NumericType.Float32)
+    result = matmul(lhs, rhs)
+    assert isinstance(result, Memory)
+    assert result.shape.get_values() == ["M", "N"]
+    assert result.dtype is NumericType.Float32
+    assert result.space is lhs.space
+
+
+# OP-MM-002
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-19 08:45:56 +0800
+# 最近一次运行成功时间: 2026-03-19 08:45:56 +0800
+# 功能说明: 验证 matmul contracting dim 不一致报错。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_matmul_contracting_dim_mismatch
+# 对应功能实现文件路径: python/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_matmul_contracting_dim_mismatch() -> None:
+    lhs = Memory(["M", "K"], NumericType.Float32)
+    rhs = Memory(["Q", "N"], NumericType.Float32)
+    with pytest.raises(ValueError):
+        _ = matmul(lhs, rhs)
+
+
+# OP-MM-003
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-19 08:45:56 +0800
+# 最近一次运行成功时间: 2026-03-19 08:45:56 +0800
+# 功能说明: 验证 matmul 非二维输入报错。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_matmul_rank_error
+# 对应功能实现文件路径: python/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_matmul_rank_error() -> None:
+    lhs = Memory(["B", "M", "K"], NumericType.Float32)
+    rhs = Memory(["K", "N"], NumericType.Float32)
+    with pytest.raises(ValueError):
+        _ = matmul(lhs, rhs)
+
+
+# OP-MM-004
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-19 08:45:56 +0800
+# 最近一次运行成功时间: 2026-03-19 08:45:56 +0800
+# 功能说明: 验证 matmul 标量输入非法。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_matmul_scalar_operand_error
+# 对应功能实现文件路径: python/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_matmul_scalar_operand_error() -> None:
+    lhs = Memory(["M", "K"], NumericType.Float32)
+    with pytest.raises(TypeError):
+        _ = matmul(lhs, 1)
+
+
+# OP-MM-005
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-19 08:45:56 +0800
+# 最近一次运行成功时间: 2026-03-19 08:45:56 +0800
+# 功能说明: 验证 matmul dtype 不兼容报错。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_matmul_dtype_mismatch
+# 对应功能实现文件路径: python/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_matmul_dtype_mismatch() -> None:
+    lhs = Memory(["M", "K"], NumericType.Float32)
+    rhs = Memory(["K", "N"], NumericType.Int32)
+    with pytest.raises(TypeError):
+        _ = matmul(lhs, rhs)
+
+
+# OP-MM-006
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-19 08:45:56 +0800
+# 最近一次运行成功时间: 2026-03-19 08:45:56 +0800
+# 功能说明: 验证 matmul space 不一致报错。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_matmul_space_mismatch
+# 对应功能实现文件路径: python/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_matmul_space_mismatch() -> None:
+    lhs = Memory(["M", "K"], NumericType.Float32, space=MemorySpace.GM)
+    rhs = Memory(["K", "N"], NumericType.Float32, space=MemorySpace.SM)
+    with pytest.raises(ValueError):
+        _ = matmul(lhs, rhs)

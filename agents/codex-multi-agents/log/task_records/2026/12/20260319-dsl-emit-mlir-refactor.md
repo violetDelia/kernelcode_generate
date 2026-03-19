@@ -1,0 +1,26 @@
+## T-20260319-54a8811a
+
+- 时间：2026-03-19 09:09:24 +0800
+- 角色：`朽木露琪亚`
+- 任务描述：重构 `spec/dsl/emit_mlir.md`，按最新 `AGENTS.md` 与当前 DSL 分层口径收敛结构、职责、边界、公开接口与测试映射；仅改 spec，不改实现/测试。
+- worktree：`/home/lfr/kernelcode_generate`
+- 变更文件：
+  - `spec/dsl/emit_mlir.md`
+- 变更摘要：
+  - 将旧版误写为 `lowering.md` 的内容整体改写为 `emit_mlir` 文本输出入口规范，清理迁移/重构过程式表述。
+  - 修正文档信息中的错误标题、错误链接与错误实现/测试指向，统一为 `python/dsl/ast_visitor.py::emit_mlir`、`spec/dsl/ast_visitor.md`、`spec/dsl/mlir_gen.md` 与 `test/dsl/test_ast_visitor.py`。
+  - 按最新 spec 结构补齐功能简介、依赖、目标、限制与边界、公开接口、分层关系、测试目标与测试映射。
+  - 明确 `emit_mlir` 只负责“可调用对象或已构造 IR -> MLIR 文本”的入口语义，不再重复定义 AST 构建、lowering 或 `nn dialect` 语义。
+  - 将测试映射收敛为当前真实直接覆盖 `EMIT-001 -> test_emit_mlir_output`，并显式记录 `emit_mlir(module)` 与直接错误传播用例仍缺独立测试。
+- 影响范围：
+  - 仅 `spec/dsl/emit_mlir.md` 收敛；实现与测试未改动。
+- 测试说明：
+  - 按任务要求未执行测试。
+- 边界冲突说明：
+  - 本次已按主线现状与 `spec/dsl/mlir_gen.md` 的“结构化 IR 生成、`emit_mlir` 负责文本输出”口径保持一致。
+  - 当前 main 不存在可链接的 `spec/dsl/lowering.md`，因此 `emit_mlir.md` 未再保留该坏链，改为通过 `ast_visitor/mlir_gen` 描述上游生成链路。
+- 后续实现/测试缺口：
+  - `test/dsl/test_ast_visitor.py` 仍建议补一条 `emit_mlir(module)` 直入打印路径回归测试。
+  - `test/dsl/test_ast_visitor.py` 仍建议补一条 `emit_mlir(callable)` 错误传播回归测试，确认其对 `AstVisitorError` 的透传行为。
+- 下一阶段申请：
+  - 建议管理员安排复审，重点核对 `spec/dsl/emit_mlir.md` 与 `spec/dsl/mlir_gen.md` 的命名、分层和测试映射是否已完全一致；若复审通过，再决定是否单独补 `emit_mlir` 两条缺失测试。

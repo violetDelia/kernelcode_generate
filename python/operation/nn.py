@@ -520,6 +520,45 @@ def ge(lhs: object, rhs: object) -> Memory:
     return _dispatch_compare(lhs, rhs, "__ge__", "__le__")
 
 
+def matmul(lhs: object, rhs: object) -> Memory:
+    """二维矩阵乘。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅接受二维 Memory x Memory。
+    - 校验 contracting dim、dtype 与 space 一致性。
+
+    使用示例:
+    - matmul(Memory(["M", "K"], NumericType.Float32), Memory(["K", "N"], NumericType.Float32))
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: python/operation/nn.py
+    """
+    if not isinstance(lhs, Memory) or not isinstance(rhs, Memory):
+        raise TypeError("matmul operands must be Memory")
+    lhs_values = lhs.shape.get_values()
+    rhs_values = rhs.shape.get_values()
+    if len(lhs_values) != 2 or len(rhs_values) != 2:
+        raise ValueError("matmul operands must be rank-2 Memory")
+    if lhs_values[1] != rhs_values[0]:
+        raise ValueError("matmul contracting dimension mismatch")
+    if lhs.dtype is not rhs.dtype:
+        raise TypeError("matmul dtype mismatch")
+    if lhs.space is not rhs.space:
+        raise ValueError("matmul space mismatch")
+    return Memory(
+        [lhs_values[0], rhs_values[1]],
+        lhs.dtype,
+        space=lhs.space,
+        stride=None,
+        format=lhs.format,
+    )
+
+
 def broadcast(value: object, shape: object) -> Memory:
     """显式广播 Memory 到目标 shape。
 
@@ -574,5 +613,6 @@ __all__ = [
     "le",
     "gt",
     "ge",
+    "matmul",
     "broadcast",
 ]

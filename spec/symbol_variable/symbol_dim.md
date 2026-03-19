@@ -1,5 +1,7 @@
 # symbol_dim.md
 
+## 功能简介
+
  [immutable]用于定义 `SymbolDim` 的开发者设计规范。`SymbolDim` 是维度表达的统一入口，既支持静态整数维度，也支持基于符号的动态维度。
 
 ## 文档信息
@@ -10,14 +12,14 @@
 - `test`：[`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py)
 - `功能实现`：[`python/symbol_variable/symbol_dim.py`](../../python/symbol_variable/symbol_dim.py)
 
-## 范围与目标
+## 目标
 
 - 统一输入规整：`int`、合法 `str`、`sympy.Basic`。
 - 统一表达与运算：支持基础算术、相等比较、动态性判断。
 - 保持 `sympy` 语义，不引入额外化简或求解。
 - 不负责广播、约束求解、形状推导或高阶语义。
 
-## 依赖约定
+## 依赖
 
 - `sympy`：符号与表达式构造。
 
@@ -27,7 +29,7 @@
 - 动态维度：表达式包含自由符号的维度。
 - 纯数字字符串：对输入字符串执行 `strip()` 后结果非空且 `isdigit()` 为 `True` 的字符串，例如 `"12"`、`" 12 "`、`"001"`、`"１２"`、`"٠١٢"`。
 
-## 兼容性与边界
+## 限制与边界
 
 - 公共构造入口仅为 `SymbolDim(value)`。
 - 纯数字字符串与空白字符串继续拒绝，异常类型为 `ValueError`。
@@ -48,7 +50,7 @@
 - 空白字符串：抛 `ValueError`。
 - 不支持的其他类型：抛 `TypeError`。
 
-## 公开 API
+## 公开接口
 
 ### `SymbolDim(value)`
 

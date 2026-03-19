@@ -1,6 +1,8 @@
 # memory.md
 
-用于定义符号内存对象 `Memory`、空间枚举 `MemorySpace` 。该模块用于描述带 `shape`、`stride`、`dtype`、`format` 和 `space` 的张量式内存对象，不负责真实内存分配。
+## 功能简介
+
+用于定义符号内存对象 `Memory`、空间枚举 `MemorySpace`。该模块用于描述带 `shape`、`stride`、`dtype`、`format` 和 `space` 的张量式内存对象，不负责真实内存分配。
 
 ## 文档信息
 
@@ -10,7 +12,7 @@
 - `test`：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)
 - `功能实现`：[`python/symbol_variable/memory.py`](../../python/symbol_variable/memory.py)
 
-## 依赖约定
+## 依赖
 
 - `python.symbol_variable.symbol_shape.SymbolShape`：用于表达 `shape` 与 `stride`。
 - `python.symbol_variable.symbol_dim.SymbolDim`：`SymbolShape` 的元素类型。
@@ -25,7 +27,7 @@
 - 空间元信息：空间名称、对齐要求、最大容量等静态描述。
 - 动态张量：`shape` 或 `stride` 中包含动态 `SymbolDim` 的 `Memory`。
 
-## 功能边界
+## 限制与边界
 
 - 仅负责描述 `Memory` 的结构化元信息，不负责真实分配、释放或生命周期管理。
 - 不负责容量校验、对齐校验或空间可用性判断，只暴露空间元信息。
@@ -41,7 +43,7 @@
 - `shape` 与 `stride` 支持直接接收 `SymbolShape`，也支持接收可被 `SymbolShape(...)` 规范化的可迭代输入。
 - `Memory` 的逐元素算术与比较语义与 [`spec/operation/nn.md`](../../spec/operation/nn.md) 保持一致；本文件只描述 `Memory` 侧的结构、入口和边界。
 
-## 公开接口约束
+## 公开接口
 
 ### 构造入口
 
@@ -108,7 +110,7 @@ sum_mem = lhs + rhs
 cmp_mem = lhs < 0
 ```
 
-## 功能
+## 公开接口（类型与构造）
 
 ### LocalSpaceMeta
 
@@ -267,6 +269,7 @@ mem = Memory(
 
 ```python
 from python.symbol_variable.memory import Memory
+from python.symbol_variable.type import Farmat, NumericType
 
 class TensorLike:
     def __init__(self):

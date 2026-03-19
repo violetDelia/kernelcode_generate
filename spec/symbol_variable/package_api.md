@@ -1,5 +1,7 @@
 # package_api.md
 
+## 功能简介
+
 用于描述 `python.symbol_variable.__init__.py` 的包入口导出策略，以单文件 spec 方式约束公开导入 API、`__all__` 与 `import *` 语义。
 
 ## 文档信息
@@ -10,21 +12,23 @@
 - `test`：[`test/symbol_variable/test_package_api.py`](../../test/symbol_variable/test_package_api.py)
 - `功能实现`：[`python/symbol_variable/__init__.py`](../../python/symbol_variable/__init__.py)
 
-## 功能边界
+## 限制与边界
 
 - 仅定义 `python.symbol_variable` 包入口的公开导入与导出边界。
 - 仅约束包入口直接暴露哪些对象、`__all__` 包含哪些符号，以及 `import *` 应暴露什么。
 - 不定义 `SymbolDim`、`SymbolShape`、`Memory`、`NumericType`、`Farmat` 的内部行为；这些语义由各自模块 spec 单独描述。
 - 不为旧路径 `symbol_variable` 或其旧子模块提供兼容入口。
 
-## 依赖约定
+## 依赖
 
 - `python.symbol_variable.symbol_dim`：导出 `SymbolDim`。
 - `python.symbol_variable.symbol_shape`：导出 `SymbolList`、`SymbolShape`。
 - `python.symbol_variable.memory`：导出 `LocalSpaceMeta`、`Memory`、`MemorySpace`。
 - `python.symbol_variable.type`：导出 `NumericType`、`Farmat`。
 
-## 公开导出
+## 公开接口
+
+### 公开导出
 
 - 包入口必须直接导出以下符号：
   - `LocalSpaceMeta`
@@ -53,9 +57,9 @@ mem = Memory([dim, 32], NumericType.Float32)
 - `Memory`、`NumericType`、`SymbolDim` 可直接从 `python.symbol_variable` 导入。
 - 这些对象与各自子模块中的公开对象保持同一身份。
 
-## 导入 API
+### 导入 API
 
-### 包入口导入
+#### 包入口导入
 
 - 调用方应通过 `python.symbol_variable` 访问包级公开对象。
 
@@ -79,7 +83,7 @@ from python.symbol_variable import (
 - 上述导入全部成功。
 - 导入对象可直接用于下游构造、比较与类型判断。
 
-### 子模块对象同一性
+#### 子模块对象同一性
 
 - 包入口重新导出的对象必须与子模块中的对象保持身份一致，即 `is` 比较结果为 `True`。
 
@@ -97,7 +101,7 @@ assert PackageMemory is ModuleMemory
 - 包入口不得重新包装对象。
 - 包入口不得导出与子模块不同名但语义重复的新对象。
 
-### `__all__`
+#### `__all__`
 
 - `python.symbol_variable.__all__` 必须列出全部且仅有的公开导出符号。
 
@@ -122,7 +126,7 @@ assert package_module.__all__ == [
 
 - 当包入口导出集合发生变更时，必须同步更新 `__all__`。
 
-### `import *`
+#### `import *`
 
 - `from python.symbol_variable import *` 仅暴露 `__all__` 中约定的公开符号。
 
@@ -148,7 +152,7 @@ assert sorted(namespace) == [
 
 - `Enum`、`typing`、`xdsl` 或其他实现依赖不属于 `import *` 暴露范围。
 
-## 唯一入口约束
+### 唯一入口约束
 
 - `python.symbol_variable` 是 `symbol_variable` 包级 API 的唯一有效入口。
 - 旧路径 `symbol_variable` 不得作为导入入口存在。
@@ -183,14 +187,14 @@ importlib.import_module("symbol_variable.symbol_dim")
 
 - 以上旧路径导入均失败，并抛出 `ModuleNotFoundError`。
 
-## 返回与错误
+### 返回与错误
 
-### 成功返回
+#### 成功返回
 
 - `import python.symbol_variable` 成功后，可访问约定的全部公开导出。
 - 通过包入口导入的对象与子模块公开对象身份一致。
 
-### 失败返回
+#### 失败返回
 
 - 若包入口漏导出约定符号，导入或属性访问阶段抛出 `ImportError` 或 `AttributeError`。
 - 若调用方尝试导入旧路径 `symbol_variable` 或旧子模块路径，抛出 `ModuleNotFoundError`。

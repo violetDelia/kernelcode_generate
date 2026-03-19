@@ -1,6 +1,8 @@
 # symbol_shape.md
 
-用于描述一个静态/动态的shape信息。
+## 功能简介
+
+用于描述一个静态/动态的 shape 信息。
 
 ## 文档信息
 
@@ -10,7 +12,7 @@
 - `test`：[`test/symbol_variable/test_symbol_shape.py`](../../test/symbol_variable/test_symbol_shape.py)
 - `功能实现`：[`python/symbol_variable/symbol_shape.py`](../../python/symbol_variable/symbol_shape.py)
 
-## 依赖约定
+## 依赖
 
 - `python.symbol_variable.symbol_dim.SymbolDim`：维度元素类型。
 - `typing`：仅用于类型标注。
@@ -21,7 +23,7 @@
 - 形状列表：由多个 `SymbolDim` 组成的有序列表。
 - 动态维度：`SymbolDim.is_dynamic()` 为 `True` 的维度。
 
-## 功能边界
+## 限制与边界
 
 - 仅负责形状容器的保存、访问与基本序列化。
 - 对外提供 `SymbolShape(shapes)` 作为形状对象创建入口。
@@ -38,7 +40,7 @@
 - 索引越界（int）统一抛 `IndexError("下标超出范围")`。
 - 若实现需要复用输入规整逻辑，应使用私有 `_normalize_*` 命名。
 
-## 公开接口约束
+## 公开接口
 
 ### 形状输入
 
@@ -51,7 +53,7 @@
 - `SymbolList` 仅表示列表行为类型。
 - 内部辅助逻辑统一使用 `_normalize_value` 等私有命名。
 
-## 功能
+## 公开接口（类型与方法）
 
 ### _SymbolList
 
@@ -97,11 +99,34 @@ shape = SymbolShape([SymbolDim("N"), 32, 64])
   - `slice` 赋值若存在元素无法转换为 `SymbolDim`，抛 `TypeError`（元素类型不合法）。
   - 非 `int`/`slice` 的 key 抛 `TypeError`。
 
+使用示例：
+
+```python
+from python.symbol_variable.symbol_shape import SymbolShape
+
+shape = SymbolShape([1, "N", 32])
+assert len(shape) == 3
+assert repr(shape).startswith("Shape(")
+assert shape[1].is_dynamic() is True
+shape[0] = 64
+shape[1:3] = ["M", 128]
+```
+
 #### 形状访问
 
 接口：`get_shape()`
 
 功能说明：返回 `List[SymbolDim]` 的浅拷贝（不暴露内部可变列表）。
+
+使用示例：
+
+```python
+from python.symbol_variable.symbol_shape import SymbolShape
+
+shape = SymbolShape([1, 2])
+copied = shape.get_shape()
+copied[0] = shape[0]
+```
 
 #### 形状序列化
 
@@ -111,7 +136,16 @@ shape = SymbolShape([SymbolDim("N"), 32, 64])
 
 - 对每个维度：
   - 动态维度返回 `str(dim.get_symbol())`。
-  - 静态维度返回 `int(dim.get_symbol())`。
+- 静态维度返回 `int(dim.get_symbol())`。
+
+使用示例：
+
+```python
+from python.symbol_variable.symbol_shape import SymbolShape
+
+values = SymbolShape(["N", 32]).get_values()
+assert values == ["N", 32]
+```
 
 ### SymbolList
 
@@ -126,6 +160,15 @@ shape = SymbolShape([SymbolDim("N"), 32, 64])
 功能说明：
 
 - 与 `get_values()` 相同的序列化规则。
+
+使用示例：
+
+```python
+from python.symbol_variable.symbol_shape import SymbolShape
+
+symbols = SymbolShape(["N", 32]).to_symbols()
+assert symbols == ["N", 32]
+```
 
 ### SymbolShape
 
@@ -145,6 +188,14 @@ shape = SymbolShape([SymbolDim("N"), 32, 64])
 接口：`__repr__()`
 
 功能说明：返回 `Shape(d0, d1, ...)`。
+
+使用示例：
+
+```python
+from python.symbol_variable.symbol_shape import SymbolShape
+
+assert repr(SymbolShape([1, 2])) == "Shape(1, 2)"
+```
 
 ## 返回与错误
 
