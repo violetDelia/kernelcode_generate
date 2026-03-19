@@ -4,11 +4,11 @@
 最后一次更改: 金铲铲大作战
 
 功能说明:
-- 暴露 nn 逐元素算术与比较运算 API。
+- 暴露 nn 逐元素算术、比较与 matmul API。
 - 暴露 dma 搬运 API。
 
 使用示例:
-- from python.operation import add, copy
+- from python.operation import add, matmul, copy
 
 关联文件:
 - spec: spec/operation/nn.md

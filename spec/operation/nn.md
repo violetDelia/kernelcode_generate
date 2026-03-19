@@ -66,7 +66,7 @@
 - 当前 Python 运算层没有独立的 `bool/predicate` `NumericType`；因此比较结果在 API、实现与测试中的具体 `dtype` 契约统一为 `NumericType.Int32`。
 - `broadcast` 在高层 API 只定义用户侧张量扩张语义；若后续 lower 到 `nn dialect`，方言侧 `nn.broadcast` 的 IR 结构、verifier 与 parse/print 约束必须由 [`spec/dialect/nn.md`](../../spec/dialect/nn.md) 单独定义。
 - 若逐元素高层语义触发隐式 broadcast，lowering 到 `nn dialect` 时必须先显式物化为一个或多个 `nn.broadcast`，再生成原始 `nn.add/sub/mul/truediv/eq/ne/lt/le/gt/ge`；不得把隐式 broadcast 直接塞进方言层二元 op。
-- `matmul` 在高层 API 只定义用户侧语义；若后续 lower 到 `nn dialect`，方言侧 `nn.matmul` 的 IR 结构、verifier 与 parse/print 约束必须由 [`spec/dialect/nn.md`](../../spec/dialect/nn.md) 单独定义。
+- `matmul` 在高层 API 只定义用户侧语义；对应的方言层 `nn.matmul` 的 IR 结构、verifier 与 parse/print 约束由 [`spec/dialect/nn.md`](../../spec/dialect/nn.md) 单独定义。
 - 必须提供独立的 nn API 实现层 `python/operation/nn.py`，并提供对应测试 `test/operation/test_operation_nn.py`，不可仅在 `python/symbol_variable/memory.py` 内承载语义。
 
 ## 支持的操作
@@ -210,7 +210,7 @@ D = truediv(A, 2)
 - `lhs`：左操作数，必须为二维 `Memory`。
 - `rhs`：右操作数，必须为二维 `Memory`。
 
-使用示例（目标 API 形态，当前 `main` 尚未实现）：
+使用示例：
 
 ```python
 from python.operation.nn import matmul
@@ -227,7 +227,7 @@ out = matmul(lhs, rhs)
 
 - 当前 `matmul` 只定义二维 `Memory x Memory` 语义。
 - 不支持标量参与、batch 维、广播、隐式转置或空间转换。
-- 当前根上的 [`python/operation/nn.py`](../../python/operation/nn.py) 与 [`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py) 尚未提供 `matmul`；本节先定义后续实现与测试必须满足的契约。
+- 当前高层语义需与下游 [`spec/dialect/nn.md`](../../spec/dialect/nn.md) 中 `nn.matmul` 的 verifier 与 parse/print 约束保持一致；本节不重复定义方言层细节。
 
 返回与限制：
 
@@ -569,9 +569,9 @@ CMP = eq(X, Y)
 ## 与 `nn dialect matmul` 的分层关系
 
 - `operation/nn.matmul` 负责定义用户侧高层 API 语义，包括输入 rank、contracting dim、返回 `Memory` 语义和错误规则。
-- 未来若引入 `nn dialect matmul`，其 op 名称、operand/result type、verifier、parse/print round-trip 约束必须在 [`spec/dialect/nn.md`](../../spec/dialect/nn.md) 中单独定义。
+- `nn dialect matmul` 的 op 名称、operand/result type、verifier 与 parse/print round-trip 约束由 [`spec/dialect/nn.md`](../../spec/dialect/nn.md) 单独定义，并作为当前 `matmul` 约束的下游承载。
 - `operation/nn` 不得在本层直接引入 xDSL op、attribute 或 verifier 细节；它只提供高层语义，不承担方言表示。
-- 当前 `main` 上的 [`spec/dialect/nn.md`](../../spec/dialect/nn.md) 尚未定义 `nn.matmul`；因此 `matmul` 链路目前仅完成高层 API 契约，尚未形成与方言层、实现层、测试层的一一闭环。
+- `operation/nn.matmul` 的测试映射只在本文件中绑定 [`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py)；`nn.matmul` 的 dialect 级 verifier 与 round-trip 覆盖由 [`spec/dialect/nn.md`](../../spec/dialect/nn.md) 中 `TC-NN-MM-*` 单独维护，不与 `OP-MM-*` 复用。
 
 ## 返回与错误
 
@@ -600,7 +600,7 @@ CMP = eq(X, Y)
 ## 测试
 
 - 测试文件：[`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py)
-- 执行命令：`pytest -q test/operation/test_operation_nn.py`
+- 执行命令：`pytest -q test/operation/test_operation_nn.py -k matmul`
 
 ### 测试目标
 
@@ -617,7 +617,7 @@ CMP = eq(X, Y)
 - 验证运算链路不依赖 `SymbolList/ SymbolShape` 已移除的 `convert_from_list` 入口，且 stride 可正常保持。
 - 验证 shape 不一致与类型不兼容时稳定报错。
 - 当前根上已通过 `OP-IB-001..004` 覆盖双张量逐元素隐式 broadcast 的正向与关键反向路径。
-- 当前根上测试尚未覆盖 `matmul`；后续实现/测试任务需补齐 `matmul` 的正向与反向用例。
+- 验证 `matmul` 的高层契约由 operation 层 `test_nn_matmul_*` 用例直接覆盖，并与下游 [`spec/dialect/nn.md`](../../spec/dialect/nn.md) 约束保持一致。
 
 ### 测试标准
 
@@ -658,15 +658,15 @@ CMP = eq(X, Y)
 | OP-IB-003 | 隐式 `broadcast` | 比较运算复用广播规则 | `lhs.shape=[1,B]`, `rhs.shape=[A,B]` | `eq(lhs, rhs)` | 返回 `shape=[A,B]` 且 `dtype=NumericType.Int32` 的结果 | `test_nn_compare_implicit_broadcast` |
 | OP-IB-004 | 隐式 `broadcast` | 非兼容维仍报错 | `lhs.shape=[A,B]`, `rhs.shape=[A,C]`, `B != C` | `add(lhs, rhs)` | 抛 `ValueError` | `test_nn_add_implicit_broadcast_mismatch` |
 
-### `matmul` 待补测试清单
+### `matmul` 当前测试映射
 
-当前 [`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py) 尚无 `matmul` 对应用例；以下为后续实现/测试任务必须补齐的建议清单。
+当前 `operation/nn.matmul` 的高层契约由 [`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py) 中 `test_nn_matmul_*` 用例直接承接；dialect 级 `nn.matmul` 覆盖仍由 [`spec/dialect/nn.md`](../../spec/dialect/nn.md) 的 `TC-NN-MM-*` 单独维护。
 
-| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
+| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 当前测试映射 |
 |---|---|---|---|---|---|---|
-| OP-MM-001 | `matmul` | 基础二维矩阵乘 | `lhs.shape=[M,K]`, `rhs.shape=[K,N]`, `lhs.dtype==rhs.dtype` | `matmul(lhs, rhs)` | 返回 `shape=[M,N]`、`dtype` 继承输入、`space` 保持一致的结果 | `test_nn_matmul_success` |
+| OP-MM-001 | `matmul` | 基础二维矩阵乘 | `lhs.shape=[M,K]`, `rhs.shape=[K,N]`, `lhs.dtype == rhs.dtype`, `lhs.space == rhs.space` | `matmul(lhs, rhs)` | 返回 `shape=[M,N]`、`dtype` 继承输入、`space` 保持一致的结果 | `test_nn_matmul_success` |
 | OP-MM-002 | `matmul` | contracting dim 不一致 | `lhs.shape=[M,K]`, `rhs.shape=[Q,N]`, `K != Q` | `matmul(lhs, rhs)` | 抛 `ValueError` | `test_nn_matmul_contracting_dim_mismatch` |
-| OP-MM-003 | `matmul` | 非二维输入 | `lhs.shape=[B,M,K]`, `rhs.shape=[K,N]` | `matmul(lhs, rhs)` | 抛 `ValueError` | `test_nn_matmul_rank_error` |
-| OP-MM-004 | `matmul` | 标量输入非法 | `lhs=Memory([M,K], ...)`, `rhs=1` | `matmul(lhs, rhs)` | 抛 `TypeError` | `test_nn_matmul_scalar_operand_error` |
-| OP-MM-005 | `matmul` | dtype 不兼容 | `lhs.dtype=float32`, `rhs.dtype=int32` | `matmul(lhs, rhs)` | 抛 `TypeError` | `test_nn_matmul_dtype_mismatch` |
-| OP-MM-006 | `matmul` | space 不一致 | `lhs.space=GM`, `rhs.space=SM` | `matmul(lhs, rhs)` | 抛 `ValueError` | `test_nn_matmul_space_mismatch` |
+| OP-MM-003 | `matmul` | 非二维输入 | 至少一个输入 `rank != 2` | `matmul(lhs, rhs)` | 抛 `ValueError` | `test_nn_matmul_rank_error` |
+| OP-MM-004 | `matmul` | 标量输入非法 | `lhs` 或 `rhs` 不是 `Memory` | `matmul(lhs, rhs)` | 抛 `TypeError` | `test_nn_matmul_scalar_operand_error` |
+| OP-MM-005 | `matmul` | dtype 不兼容 | `lhs.dtype != rhs.dtype` | `matmul(lhs, rhs)` | 抛 `TypeError` | `test_nn_matmul_dtype_mismatch` |
+| OP-MM-006 | `matmul` | space 不一致 | `lhs.space != rhs.space` | `matmul(lhs, rhs)` | 抛 `ValueError` | `test_nn_matmul_space_mismatch` |
