@@ -147,6 +147,23 @@ def test_copy_shape_mismatch() -> None:
         copy(src, dst)
 
 
+# TC-OP-DMA-010
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-19 08:37:32 +0800
+# 最近一次运行成功时间: 2026-03-19 08:37:32 +0800
+# 功能说明: 验证 copy stride mismatch 抛 ValueError。
+# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_copy_stride_mismatch
+# 对应功能实现文件路径: python/operation/dma.py
+# 对应 spec 文件路径: spec/operation/dma.md
+# 对应测试文件路径: test/operation/test_operation_dma.py
+def test_copy_stride_mismatch() -> None:
+    src = Memory(["M", "N"], NumericType.Float32, stride=[1, 1])
+    dst = Memory(["M", "N"], NumericType.Float32, stride=[1, 2])
+    with pytest.raises(ValueError):
+        copy(src, dst)
+
+
 # TC-OP-DMA-003
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战

@@ -323,6 +323,7 @@ deslice(sub, dst, offsets=[0, 16], sizes=[32, 32], strides=[1, 1])
 - 验证 `alloc` 返回的 `Memory` 结果可复用现有 `Memory` / `space` 语义。
 - 验证 `free` 只接受 `Memory`，且返回口径稳定。
 - 验证 `copy` 的整块搬运约束。
+- 验证 `copy` 在 `shape` 或 `stride` 不匹配时稳定报错。
 - 验证 `load/slice` 的结果 `shape/dtype/space` 语义。
 - 验证 `store/deslice` 的源块与目标区域大小约束。
 - 验证索引长度、stride 限制与类型错误分支。
@@ -339,6 +340,7 @@ deslice(sub, dst, offsets=[0, 16], sizes=[32, 32], strides=[1, 1])
 | TC-OP-DMA-AF-005 | `free` 类型错误 | 非 `Memory` 输入触发 `TypeError` | `test_free_type_error` |
 | TC-OP-DMA-001 | `copy` 合法通过 | `source/target` 完全匹配时搬运语义成立 | `test_copy_success` |
 | TC-OP-DMA-002 | `copy` 形状不匹配 | 整块搬运 `shape` mismatch 报错 | `test_copy_shape_mismatch` |
+| TC-OP-DMA-010 | `copy` stride 不匹配 | 整块搬运 `stride` mismatch 报 `ValueError` | `test_copy_stride_mismatch` |
 | TC-OP-DMA-003 | `load` 结果空间 | `load` 返回结果块并切换到目标空间 | `test_load_result_space` |
 | TC-OP-DMA-004 | `slice` 结果形状 | `slice` 返回块的 `shape` 等于 `sizes` | `test_slice_result_shape` |
 | TC-OP-DMA-005 | `store` 大小校验 | `source.shape` 与写回大小不一致时报错 | `test_store_size_mismatch` |
