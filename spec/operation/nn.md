@@ -413,7 +413,7 @@ out = matmul(lhs, rhs)
 - `broadcast` 不改变 `dtype` 与 `space`；当前高层 API 不负责隐式类型转换或跨空间搬运。
 - `?` 仅在与同为 `?` 的维度比较时视为直接一致；它不是“可匹配任意非 1 维”的通配符。
 
-示例（目标 API 形态，当前 `main` 尚未实现）：
+示例：
 
 ```python
 value = Memory(shape=[1, "N"], dtype=NumericType.Float32)
