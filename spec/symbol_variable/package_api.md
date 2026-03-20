@@ -12,23 +12,29 @@
 - `test`：[`test/symbol_variable/test_package_api.py`](../../test/symbol_variable/test_package_api.py)
 - `功能实现`：[`python/symbol_variable/__init__.py`](../../python/symbol_variable/__init__.py)
 
+## 依赖
+
+- [`python/symbol_variable/symbol_dim.py`](../../python/symbol_variable/symbol_dim.py)：`SymbolDim` 定义。
+- [`python/symbol_variable/symbol_shape.py`](../../python/symbol_variable/symbol_shape.py)：`SymbolList`/`SymbolShape` 定义。
+- [`python/symbol_variable/memory.py`](../../python/symbol_variable/memory.py)：`Memory`/`MemorySpace`/`LocalSpaceMeta` 定义。
+- [`python/symbol_variable/type.py`](../../python/symbol_variable/type.py)：`NumericType`/`Farmat` 定义。
+- [`spec/symbol_variable/symbol_dim.md`](../../spec/symbol_variable/symbol_dim.md)：`SymbolDim` 语义。
+- [`spec/symbol_variable/symbol_shape.md`](../../spec/symbol_variable/symbol_shape.md)：`SymbolShape` 语义。
+- [`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)：`Memory` 语义。
+- [`spec/symbol_variable/type.md`](../../spec/symbol_variable/type.md)：`NumericType`/`Farmat` 语义。
+
 ## 限制与边界
 
 - 仅定义 `python.symbol_variable` 包入口的公开导入与导出边界。
 - 仅约束包入口直接暴露哪些对象、`__all__` 包含哪些符号，以及 `import *` 应暴露什么。
-- 不定义 `SymbolDim`、`SymbolShape`、`Memory`、`NumericType`、`Farmat` 的内部行为；这些语义由各自模块 spec 单独描述。
+- 不定义 `SymbolDim`、`SymbolShape`、`Memory`、`NumericType`、`Farmat` 的内部行为；这些语义由各自模块 spec 描述。
 - 不为旧路径 `symbol_variable` 或其旧子模块提供兼容入口。
-
-## 依赖
-
-- `python.symbol_variable.symbol_dim`：导出 `SymbolDim`。
-- `python.symbol_variable.symbol_shape`：导出 `SymbolList`、`SymbolShape`。
-- `python.symbol_variable.memory`：导出 `LocalSpaceMeta`、`Memory`、`MemorySpace`。
-- `python.symbol_variable.type`：导出 `NumericType`、`Farmat`。
 
 ## 公开接口
 
-### 公开导出
+### 包入口导出
+
+功能说明：
 
 - 包入口必须直接导出以下符号：
   - `LocalSpaceMeta`
@@ -39,9 +45,10 @@
   - `SymbolDim`
   - `SymbolList`
   - `SymbolShape`
-- `__all__` 必须严格等于上述集合。
-- `from python.symbol_variable import *` 的暴露结果必须严格等于 `__all__`。
-- 包入口不得额外暴露实现细节、辅助函数或未约定名称。
+
+参数说明：
+
+- 无参数。
 
 使用示例：
 
@@ -52,16 +59,25 @@ dim = SymbolDim("N")
 mem = Memory([dim, 32], NumericType.Float32)
 ```
 
-预期结果：
+注意事项：
 
-- `Memory`、`NumericType`、`SymbolDim` 可直接从 `python.symbol_variable` 导入。
-- 这些对象与各自子模块中的公开对象保持同一身份。
+- `__all__` 必须严格等于上述集合。
+- `from python.symbol_variable import *` 的暴露结果必须严格等于 `__all__`。
+- 包入口不得额外暴露实现细节或未约定名称。
 
-### 导入 API
+返回与限制：
 
-#### 包入口导入
+- 对外仅暴露约定符号集合。
+
+### 包入口导入
+
+功能说明：
 
 - 调用方应通过 `python.symbol_variable` 访问包级公开对象。
+
+参数说明：
+
+- 无参数。
 
 使用示例：
 
@@ -78,14 +94,23 @@ from python.symbol_variable import (
 )
 ```
 
-预期结果：
+注意事项：
 
-- 上述导入全部成功。
 - 导入对象可直接用于下游构造、比较与类型判断。
 
-#### 子模块对象同一性
+返回与限制：
 
-- 包入口重新导出的对象必须与子模块中的对象保持身份一致，即 `is` 比较结果为 `True`。
+- 导入成功后可访问全部公开导出对象。
+
+### 子模块对象同一性
+
+功能说明：
+
+- 包入口重新导出的对象必须与子模块中的对象保持身份一致。
+
+参数说明：
+
+- 无参数。
 
 使用示例：
 
@@ -96,14 +121,24 @@ from python.symbol_variable.memory import Memory as ModuleMemory
 assert PackageMemory is ModuleMemory
 ```
 
-行为约束：
+注意事项：
 
 - 包入口不得重新包装对象。
 - 包入口不得导出与子模块不同名但语义重复的新对象。
 
-#### `__all__`
+返回与限制：
+
+- `is` 比较结果为 `True`。
+
+### __all__
+
+功能说明：
 
 - `python.symbol_variable.__all__` 必须列出全部且仅有的公开导出符号。
+
+参数说明：
+
+- 无参数。
 
 使用示例：
 
@@ -122,45 +157,48 @@ assert package_module.__all__ == [
 ]
 ```
 
-行为约束：
+注意事项：
 
 - 当包入口导出集合发生变更时，必须同步更新 `__all__`。
 
-#### `import *`
+返回与限制：
+
+- `__all__` 必须与公开导出集合完全一致。
+
+### import *
+
+功能说明：
 
 - `from python.symbol_variable import *` 仅暴露 `__all__` 中约定的公开符号。
+
+参数说明：
+
+- 无参数。
 
 使用示例：
 
 ```python
 namespace = {}
 exec("from python.symbol_variable import *", {}, namespace)
-
-assert sorted(namespace) == [
-    "Farmat",
-    "LocalSpaceMeta",
-    "Memory",
-    "MemorySpace",
-    "NumericType",
-    "SymbolDim",
-    "SymbolList",
-    "SymbolShape",
-]
 ```
 
-行为约束：
+注意事项：
 
 - `Enum`、`typing`、`xdsl` 或其他实现依赖不属于 `import *` 暴露范围。
 
+返回与限制：
+
+- 暴露结果必须严格等于 `__all__`。
+
 ### 唯一入口约束
 
+功能说明：
+
 - `python.symbol_variable` 是 `symbol_variable` 包级 API 的唯一有效入口。
-- 旧路径 `symbol_variable` 不得作为导入入口存在。
-- 旧子模块路径不得作为导入入口存在，包括但不限于：
-  - `symbol_variable.symbol_dim`
-  - `symbol_variable.symbol_shape`
-  - `symbol_variable.memory`
-  - `symbol_variable.type`
+
+参数说明：
+
+- 无参数。
 
 使用示例：
 
@@ -170,34 +208,13 @@ import importlib
 importlib.import_module("python.symbol_variable")
 ```
 
-预期结果：
+注意事项：
 
-- 导入成功。
+- 旧路径 `symbol_variable` 及其旧子模块路径不得作为导入入口存在。
 
-反例示例：
+返回与限制：
 
-```python
-import importlib
-
-importlib.import_module("symbol_variable")
-importlib.import_module("symbol_variable.symbol_dim")
-```
-
-预期结果：
-
-- 以上旧路径导入均失败，并抛出 `ModuleNotFoundError`。
-
-### 返回与错误
-
-#### 成功返回
-
-- `import python.symbol_variable` 成功后，可访问约定的全部公开导出。
-- 通过包入口导入的对象与子模块公开对象身份一致。
-
-#### 失败返回
-
-- 若包入口漏导出约定符号，导入或属性访问阶段抛出 `ImportError` 或 `AttributeError`。
-- 若调用方尝试导入旧路径 `symbol_variable` 或旧子模块路径，抛出 `ModuleNotFoundError`。
+- 旧路径导入必须抛出 `ModuleNotFoundError`。
 
 ## 测试
 
@@ -214,19 +231,14 @@ importlib.import_module("symbol_variable.symbol_dim")
 - 验证旧路径 `symbol_variable` 不可导入。
 - 验证旧子模块路径 `symbol_variable.symbol_dim`、`symbol_variable.symbol_shape`、`symbol_variable.memory`、`symbol_variable.type` 不可导入。
 
-### 测试标准
-
-- 所有测试通过，`pytest` 返回码为 0。
-- 包入口导出集合、对象一致性、唯一入口约束与错误类型稳定。
-
 ### 功能与用例清单
 
-| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 |
-|---|---|---|---|---|---|
-| PM-001 | 导入 | 包入口导入 | N/A | `from python.symbol_variable import Memory, SymbolDim` | 导入成功 |
-| PM-002 | 导出 | 对象同一性 | N/A | 比较包入口与子模块中的 `Memory`/`SymbolDim` | `is` 为 `True` |
-| PM-003 | 构造 | 顶层导出参与构造 | N/A | `Memory([1, 2], NumericType.Float32, format=Farmat.Norm)` | 构造成功 |
-| PM-004 | 导出 | `__all__` 边界 | N/A | 读取 `python.symbol_variable.__all__` | 严格等于公开导出集合 |
-| PM-005 | 导出 | `import *` 边界 | N/A | 执行 `from python.symbol_variable import *` | 仅暴露公开导出集合 |
-| PM-006 | 错误 | 旧包路径导入 | N/A | `importlib.import_module("symbol_variable")` | 抛 `ModuleNotFoundError` |
-| PM-007 | 错误 | 旧子模块路径导入 | N/A | `importlib.import_module("symbol_variable.symbol_dim")` 等 | 抛 `ModuleNotFoundError` |
+| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 对应测试 |
+|---|---|---|---|---|---|---|
+| PM-001 | 导入 | 包入口导入 | N/A | `from python.symbol_variable import Memory, SymbolDim` | 导入成功 | `test_python_symbol_variable_imports` |
+| PM-002 | 错误 | 旧包路径导入 | N/A | `importlib.import_module("symbol_variable")` | 抛 `ModuleNotFoundError` | `test_legacy_import_disabled` |
+| PM-003 | 错误 | 旧子模块路径导入 | N/A | `importlib.import_module("symbol_variable.symbol_dim")` 等 | 抛 `ModuleNotFoundError` | `test_legacy_submodule_import_disabled` |
+| PM-004 | 导出 | 对象同一性 | N/A | 比较包入口与子模块中的 `Memory`/`SymbolDim` | `is` 为 `True` | `test_python_package_type_exports` |
+| PM-005 | 构造 | 顶层导出参与构造 | N/A | `Memory([1, 2], NumericType.Float32, format=Farmat.Norm)` | 构造成功 | `test_package_type_construct_memory` |
+| PM-006 | 导出 | `__all__` 边界 | N/A | 读取 `python.symbol_variable.__all__` | 严格等于公开导出集合 | `test_python_package_all_boundary` |
+| PM-007 | 导出 | `import *` 边界 | N/A | 执行 `from python.symbol_variable import *` | 仅暴露公开导出集合 | `test_python_package_import_star_exports_only_public_names` |
