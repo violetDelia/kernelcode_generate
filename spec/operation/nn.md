@@ -399,6 +399,7 @@ out = matmul(lhs, rhs)
 
 - 验证逐元素算术/比较的输入合法性、隐式广播与错误规则。
 - 验证显式 `broadcast` 的尾维对齐与 singleton 扩张规则。
+- 验证 `transpose` 的 shape/stride 重排与 `perm` 校验规则。
 - 验证 `matmul` 的二维输入约束与错误规则。
 - 验证比较结果使用 `NumericType.Int32` 作为 predicate 载体。
 
@@ -410,5 +411,9 @@ out = matmul(lhs, rhs)
 | OP-005 | `Memory + scalar` | `test_nn_add_scalar` |
 | OP-003 | shape 不一致报错 | `test_nn_shape_mismatch` |
 | OP-BC-001 | `broadcast` singleton 扩张 | `test_nn_broadcast_success` |
+| OP-TR-001 | `transpose` 重排成功 | `test_nn_transpose_success` |
+| OP-TR-002 | `transpose` 非 Memory 输入 | `test_nn_transpose_non_memory_error` |
+| OP-TR-003 | `transpose` 非法 perm 类型 | `test_nn_transpose_perm_type_error` |
+| OP-TR-004 | `transpose` 非法 perm 排列 | `test_nn_transpose_perm_invalid` |
 | OP-MM-001 | `matmul` 成功路径 | `test_nn_matmul_success` |
 | OP-009 | 比较结果 predicate 载体 | `test_nn_compare_predicate` |

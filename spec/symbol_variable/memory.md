@@ -9,7 +9,7 @@
 - 创建者：`摸鱼小分队`
 - 最后一次更改：`小李飞刀`
 - `spec`：[`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)
-- `test`：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)、[`test/operation/test_memory_operation.py`](../../test/operation/test_memory_operation.py)
+- `test`：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)
 - `功能实现`：[`python/symbol_variable/memory.py`](../../python/symbol_variable/memory.py)
 
 ## 依赖
@@ -321,12 +321,8 @@ cmp_mem = lhs < 0
 
 ## 测试
 
-- 测试文件：
-  - [`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)
-  - [`test/operation/test_memory_operation.py`](../../test/operation/test_memory_operation.py)
-- 执行命令：
-  - `pytest -q test/symbol_variable/test_memory.py`
-  - `pytest -q test/operation/test_memory_operation.py`
+- 测试文件：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)
+- 执行命令：`pytest -q test/symbol_variable/test_memory.py`
 
 ### 测试目标
 
@@ -350,10 +346,3 @@ cmp_mem = lhs < 0
 | ME-007 | 构造 | shape/stride 接收 SymbolShape | N/A | `Memory(SymbolShape(...), NumericType.Float32, stride=SymbolShape(...))` | 接收成功 | `test_shape_stride_accept_symbol_shape` |
 | ME-008 | 默认格式 | 省略 format | N/A | `Memory([1, 2], NumericType.Float32)` | `format` 为 `Farmat.Norm` | `test_default_format` |
 | ME-009 | 空间元信息 | 枚举元信息 | N/A | `MemorySpace.GM.value` | `align=1024`、`max_size=None` | `test_space_meta` |
-| ME-010 | 运算符 | `Memory + Memory` | N/A | `lhs + rhs` | shape/dtype/space 继承约束成立 | `test_memory_add_memory` |
-| ME-011 | 运算符 | `Memory + scalar` | N/A | `mem + 1` / `1 + mem` | 返回 `Memory` 且 shape/dtype 一致 | `test_memory_add_scalar` |
-| ME-012 | 运算符 | 结果元信息独立 | N/A | `mem + 1` | 结果 `shape/stride` 独立，不复用原引用 | `test_memory_metadata_independent` |
-| ME-013 | 运算符 | 比较 predicate | N/A | `lhs == rhs` / `lhs < 1` | `dtype` 为 `NumericType.Int32` | `test_memory_compare_predicate` |
-| ME-014 | 运算符 | 形状不一致 | N/A | `lhs + rhs` | 抛 `ValueError` | `test_memory_shape_mismatch` |
-| ME-015 | 运算符 | dtype 不兼容 | N/A | `lhs + rhs` | 抛 `TypeError` | `test_memory_dtype_mismatch` |
-| ME-016 | 运算符 | 标量类型非法 | N/A | `mem + \"1\"` | 抛 `TypeError` | `test_memory_scalar_type_error` |
