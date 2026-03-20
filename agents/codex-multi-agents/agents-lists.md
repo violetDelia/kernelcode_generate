@@ -7,7 +7,7 @@
 | 金铲铲大作战 | ready | 金铲铲大作战 | codex | 金铲铲大作战 | 擅长operation/nn matmul实现与测试 | agents/codex-multi-agents/agents/金铲铲大作战/金铲铲大作战.prompt.md | agents/codex-multi-agents/agents/金铲铲大作战 | 负责实现，兼职审查 |
 | 我不是牛马 | ready | 我不是牛马 | codex | 我不是牛马 | 专注spec/实现/测试闭环审查，输出可派发改进建议 | agents/codex-multi-agents/agents/我不是牛马/我不是牛马.prompt.md | agents/codex-multi-agents/agents/我不是牛马 | 负责审查与建议，兼职实现 |
 | 摸鱼小分队 | ready | 摸鱼小分队 | codex | 摸鱼小分队 | 专注 include/cpu nn 测试闭环 | agents/codex-multi-agents/agents/摸鱼小分队/摸鱼小分队.prompt.md | agents/codex-multi-agents/agents/摸鱼小分队 | 负责 spec 文档编写，兼职审查 |
-| 李白 | ready | 李白 | codex | 李白 | 合入DSL emit_mlir/mlir_gen spec | agents/codex-multi-agents/agents/李白/李白.prompt.md | agents/codex-multi-agents/agents/李白 | 负责合并与清理，兼职审查 |
+| 李白 | ready | 李白 | codex | 李白 | 合入 cpu Memory spec | agents/codex-multi-agents/agents/李白/李白.prompt.md | agents/codex-multi-agents/agents/李白 | 负责合并与清理，兼职审查 |
 | 不要啊教练 | ready | 不要啊教练 | codex | 不要啊教练 | nn broadcast spec合入 | agents/codex-multi-agents/agents/不要啊教练/不要啊教练.prompt.md | agents/codex-multi-agents/agents/不要啊教练 | 审查与重构建议、合并与清理 |
 | 朽木露琪亚 | ready | 朽木露琪亚 | codex | 朽木露琪亚 | 专注 spec 收敛、测试映射与分层边界澄清 | agents/codex-multi-agents/agents/朽木露琪亚/朽木露琪亚.prompt.md | agents/codex-multi-agents/agents/朽木露琪亚 | 负责 spec 文档编写，兼职审查 |
 | 咯咯咯 | ready | 咯咯咯 | codex | 咯咯咯 | 负责 spec 编写与审查 | agents/codex-multi-agents/agents/咯咯咯/咯咯咯.prompt.md | agents/codex-multi-agents/agents/咯咯咯 | 负责 spec 编写与审查 |
