@@ -1,7 +1,7 @@
 """type module tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 榕
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 python.symbol_variable.type 的枚举语义、导出边界与旧路径禁用约束。
@@ -29,9 +29,9 @@ if str(REPO_ROOT) not in sys.path:
 
 # TY-001
 # 创建者: 金铲铲大作战
-# 最后一次更改: 榕
-# 最近一次运行测试时间: 2026-03-19 06:33:41 +0800
-# 最近一次运行成功时间: 2026-03-19 06:33:41 +0800
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-20 19:46:56 +0800
+# 最近一次运行成功时间: 2026-03-20 19:46:56 +0800
 # 功能说明: 验证 NumericType 枚举名称和值保持稳定。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_numeric_type_values
 # 对应功能实现文件路径: python/symbol_variable/type.py
@@ -56,9 +56,9 @@ def test_numeric_type_values() -> None:
 
 # TY-005
 # 创建者: 金铲铲大作战
-# 最后一次更改: 榕
-# 最近一次运行测试时间: 2026-03-19 06:33:41 +0800
-# 最近一次运行成功时间: 2026-03-19 06:33:41 +0800
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-20 19:46:56 +0800
+# 最近一次运行成功时间: 2026-03-20 19:46:56 +0800
 # 功能说明: 验证新增基础类型成员可直接访问。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_numeric_type_member_access
 # 对应功能实现文件路径: python/symbol_variable/type.py
@@ -75,15 +75,17 @@ def test_numeric_type_member_access() -> None:
     assert NumericType.Uint64.name == "Uint64"
     assert NumericType.Float16.name == "Float16"
     assert NumericType.BFloat16.name == "BFloat16"
+    assert NumericType.Int32.name == "Int32"
     assert NumericType.Int64.name == "Int64"
+    assert NumericType.Float32.name == "Float32"
     assert NumericType.Float64.name == "Float64"
 
 
 # TY-002
 # 创建者: 金铲铲大作战
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-19 04:11:32 +0800
-# 最近一次运行成功时间: 2026-03-19 04:11:32 +0800
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-20 19:46:56 +0800
+# 最近一次运行成功时间: 2026-03-20 19:46:56 +0800
 # 功能说明: 验证 Farmat 仅公开 Norm/CLast 成员。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_farmat_public_members
 # 对应功能实现文件路径: python/symbol_variable/type.py
@@ -102,8 +104,8 @@ def test_farmat_public_members() -> None:
 # TY-003
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-19 06:33:41 +0800
-# 最近一次运行成功时间: 2026-03-19 06:33:41 +0800
+# 最近一次运行测试时间: 2026-03-20 19:46:56 +0800
+# 最近一次运行成功时间: 2026-03-20 19:46:56 +0800
 # 功能说明: 验证 python.symbol_variable.type 仅公开 NumericType 与 Farmat。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_python_type_module_all_boundary
 # 对应功能实现文件路径: python/symbol_variable/type.py
@@ -118,8 +120,8 @@ def test_python_type_module_all_boundary() -> None:
 # TY-004
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-19 06:33:41 +0800
-# 最近一次运行成功时间: 2026-03-19 06:33:41 +0800
+# 最近一次运行测试时间: 2026-03-20 19:46:56 +0800
+# 最近一次运行成功时间: 2026-03-20 19:46:56 +0800
 # 功能说明: 验证 import * 仅暴露 type 模块约定的公开符号。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_python_type_import_star_exports_only_public_names
 # 对应功能实现文件路径: python/symbol_variable/type.py
@@ -136,8 +138,8 @@ def test_python_type_import_star_exports_only_public_names() -> None:
 # TY-006
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-19 06:33:41 +0800
-# 最近一次运行成功时间: 2026-03-19 06:33:41 +0800
+# 最近一次运行测试时间: 2026-03-20 19:46:56 +0800
+# 最近一次运行成功时间: 2026-03-20 19:46:56 +0800
 # 功能说明: 验证旧路径 symbol_variable.type 不可导入。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_legacy_type_import_disabled
 # 对应功能实现文件路径: python/symbol_variable/type.py

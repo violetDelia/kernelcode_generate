@@ -79,5 +79,5 @@ class Farmat(Enum):
     - 功能实现: python/symbol_variable/type.py
     """
 
-    Norm = "NCHW"
-    CLast = "NHWC"
+    Norm = "Norm"
+    CLast = "CLast"
