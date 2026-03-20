@@ -14,7 +14,7 @@
 
 ## 依赖
 
-- `python/dsl/ast_visitor.py::visit_to_nn_ir` 在可调用输入路径上生成结构化 IR。
+- [`python/dsl/ast_visitor.py`](../../python/dsl/ast_visitor.py) 中 `visit_to_nn_ir` 在可调用输入路径上生成结构化 IR。
 - `xdsl.printer.Printer` 负责 MLIR 风格文本输出。
 - [`spec/dsl/ast_visitor.md`](../../spec/dsl/ast_visitor.md) 约束受限 Python 函数入口、源码解析与诊断包装行为。
 - [`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md) 约束结构化 IR 的生成链路、`func.func` 组织方式与 SSA/value 语义。
@@ -47,10 +47,18 @@
 参数说明：
 
 - `value`
-  - 受 [`spec/dsl/ast_visitor.md`](../../spec/dsl/ast_visitor.md) 支持范围约束的 Python 函数，或已由上游链路生成、可被 `Printer.print_op(...)` 直接打印的 IR/module 对象。
-- `globals`/`builtins`/`config`
-  - 仅在 `value` 为可调用对象时参与 `visit_to_nn_ir(...)`。
-  - 若 `value` 不是可调用对象，不解释其语义。
+  - 输入类型：受 [`spec/dsl/ast_visitor.md`](../../spec/dsl/ast_visitor.md) 支持范围约束的 Python 可调用对象，或可被 `Printer.print_op(...)` 直接打印的 IR/module 对象。
+  - 含义：若为可调用对象，则作为 DSL 入口进行 IR 生成；若为 IR/module，则直接打印。
+- `globals`
+  - 输入类型：`dict|None`。
+  - 含义：当 `value` 为可调用对象时，作为 `visit_to_nn_ir(...)` 的全局符号表。
+- `builtins`
+  - 输入类型：`dict|None`。
+  - 含义：当 `value` 为可调用对象时，作为 `visit_to_nn_ir(...)` 的内建符号表。
+- `config`
+  - 输入类型：`dict|None`。
+  - 含义：当 `value` 为可调用对象时，传递给 `visit_to_nn_ir(...)` 的行为配置。
+  - 约束：若 `value` 不是可调用对象，则 `globals`/`builtins`/`config` 均不解释其语义。
 
 使用示例：
 
