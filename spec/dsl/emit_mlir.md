@@ -15,7 +15,7 @@
 ## 依赖
 
 - [`python/dsl/ast_visitor.py`](../../python/dsl/ast_visitor.py) 中 `visit_to_nn_ir` 在可调用输入路径上生成结构化 IR。
-- `xdsl.printer.Printer` 负责 MLIR 风格文本输出。
+- `xdsl.printer.Printer` 负责 MLIR 风格文本输出（外部依赖，来自 `xdsl` 包）。
 - [`spec/dsl/ast_visitor.md`](../../spec/dsl/ast_visitor.md) 约束受限 Python 函数入口、源码解析与诊断包装行为。
 - [`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md) 约束结构化 IR 的生成链路、`func.func` 组织方式与 SSA/value 语义。
 - [`spec/dialect/nn.md`](../../spec/dialect/nn.md) 约束当前目标 dialect 的 op/type/attribute 文本语义与 verifier 边界。
