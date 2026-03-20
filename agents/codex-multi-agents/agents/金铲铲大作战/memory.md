@@ -1,3 +1,7 @@
+- 2026-03-20 19:49:10 +0800 完成 T-20260320-type-impl-align：补齐 type 测试成员访问断言并更新注释，pytest -q test/symbol_variable/test_type.py（6 passed）。
+- 2026-03-20 19:44:10 +0800 完成 T-20260320-f9a4f4d2：补齐 package_api 导出同一性测试，pytest -q test/symbol_variable/test_package_api.py（7 passed）。
+- 2026-03-20 10:24:10 +0800 完成 T-20260320-f36973a4：重排 symbol_dim 测试映射并更新注释，pytest -q test/symbol_variable/test_symbol_dim.py（9 passed）。
+- 2026-03-20 10:20:10 +0800 完成 T-20260320-4bd55c2a：调整 test_package_api 映射顺序并更新注释，pytest -q test/symbol_variable/test_package_api.py（7 passed）。
 - 2026-03-19 08:47:30 +0800 完成 T-20260319-e1a15724：实现 operation/nn matmul 并补齐 OP-MM-001..006 测试，pytest -q test/operation/test_operation_nn.py（29 passed）。
 - 2026-03-18 02:15:52 +0800 规则：审查不通过需说明改动点、原因与建议方案，便于派发改进任务。
 - 2026-03-18 02:03:32 +0800 规则：合并worktree需合入主分支保留改动，冲突以最新改动时间为主，无法判断先回报管理员。

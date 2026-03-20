@@ -1,7 +1,7 @@
 """codex-multi-agents-tmux.sh tests.
 
 功能说明:
-- 覆盖 tmux 脚本的 talk / init-env 主流程与错误返回码路径。
+- 覆盖 tmux 脚本的 talk / init-env / wake 主流程与错误返回码路径。
 
 关联文件:
 - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
@@ -21,7 +21,7 @@ SCRIPT_PATH = REPO_ROOT / "skills/codex-multi-agents/scripts/codex-multi-agents-
 
 
 def write_agents_file(path: Path, rows: list[str] | None = None) -> None:
-    """写入供 -init-env 测试使用的名单文件。"""
+    """写入供 -init-env / -wake 测试使用的名单文件。"""
     header = "| 姓名 | 状态 | 会话 | 启动类型 | agent session | worktree | 介绍 | 提示词 | 归档文件 | 职责 |"
     sep = "|---|---|---|---|---|---|---|---|---|---|"
     if rows is None:
@@ -322,9 +322,10 @@ def test_init_env_codex_creates_session_and_bootstraps(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert "OK: init-env 小明 (xiaoming)" in result.stdout
     assert "new-session:xiaoming" in calls
-    assert calls.count("send:xiaoming:codex:") == 1
-    assert calls.count("send:xiaoming:/rename agent-xiaoming:") == 1
-    assert calls.count("send:xiaoming:ENTER:") == 2
+    assert calls.count("send:xiaoming:codex /resume agent-xiaoming:") == 1
+    assert calls.count("send:xiaoming:codex:") == 0
+    assert calls.count("send:xiaoming:/rename agent-xiaoming:") == 0
+    assert calls.count("send:xiaoming:ENTER:") == 1
 
 
 # TC-007
@@ -354,3 +355,62 @@ def test_init_env_missing_agent_returns_rc3(tmp_path: Path) -> None:
 
     assert result.returncode == 3
     assert "failed to read field" in result.stderr
+
+
+# TC-008
+# Last Run: 2026-03-20 00:00:00 +0800
+# Last Success: 2026-03-20 00:00:00 +0800
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
+def test_wake_codex_creates_session_and_resumes(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    state_dir = tmp_path / "state"
+    calls_file = write_fake_tmux(bin_dir, state_dir, sessions=[])
+    agents_file = tmp_path / "agents-lists.md"
+    write_agents_file(agents_file)
+
+    env = os.environ.copy()
+    env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+
+    result = run_script(
+        "-wake",
+        "-file",
+        str(agents_file),
+        "-name",
+        "小明",
+        env=env,
+    )
+    calls = calls_file.read_text(encoding="utf-8")
+
+    assert result.returncode == 0
+    assert "OK: wake 小明 (xiaoming)" in result.stdout
+    assert "new-session:xiaoming" in calls
+    assert calls.count("send:xiaoming:codex:") == 1
+    assert calls.count("send:xiaoming:/rename agent-xiaoming:") == 1
+    assert calls.count("send:xiaoming:codex /resume agent-xiaoming:") == 0
+    assert calls.count("send:xiaoming:/resume agent-xiaoming:") == 0
+    assert calls.count("send:xiaoming:ENTER:") == 2
+
+
+# TC-009
+# Last Run: 2026-03-20 00:00:00 +0800
+# Last Success: 2026-03-20 00:00:00 +0800
+# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
+# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
+def test_wake_does_not_accept_talk_arguments(tmp_path: Path) -> None:
+    agents_file = tmp_path / "agents-lists.md"
+    write_agents_file(agents_file)
+
+    result = run_script(
+        "-wake",
+        "-file",
+        str(agents_file),
+        "-name",
+        "小明",
+        "-message",
+        "hello",
+    )
+
+    assert result.returncode == 1
+    assert "-wake does not accept -from/-to/-session-id/-message/-log" in result.stderr

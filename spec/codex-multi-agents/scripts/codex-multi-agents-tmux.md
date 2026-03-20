@@ -18,13 +18,14 @@
 
 - `-talk`：向目标会话发送消息并写入日志。
 - `-init-env`：按名单信息初始化目标角色运行环境。
+- `-wake`：按名单信息唤醒目标角色运行环境。
 - `-from`：消息发送方标识。
 - `-to`：消息接收方标识，仅用于消息格式化展示。
 - `-session-id`：tmux 目标会话名（用于 `-talk` 发送消息）。
 - `-message`：消息正文。
 - `-log`：对话日志文件路径。
-- `-file`：agents 名单文件路径（用于 `-init-env`）。
-- `-name`：待初始化角色名（用于 `-init-env`）。
+- `-file`：agents 名单文件路径（用于 `-init-env/-wake`）。
+- `-name`：待初始化或唤醒的角色名（用于 `-init-env/-wake`）。
 
 ## 并发约束
 
@@ -59,7 +60,7 @@ codex-multi-agents-tmux.sh -talk -from "scheduler" -to "worker-a" -session-id "w
 命令：
 
 ```bash
-codex-multi-agents-tmux.sh -init-env -file "agents-lists.md" -name xiaoming
+codex-multi-agents-tmux.sh -wake -file "agents-lists.md" -name xiaoming
 ```
 
 功能说明：
@@ -69,6 +70,25 @@ codex-multi-agents-tmux.sh -init-env -file "agents-lists.md" -name xiaoming
   - [immutable]若启动类型为 `codex`，依次执行以下初始化命令,中间间隔"3"秒：
     - `tmux send-keys -t <会话> "codex"`
     - `tmux send-keys -t <会话> "/rename <agent session>"`
+    - `tmux send-keys -t <会话> ENTER`
+注意事项：
+
+- `-file`、`-name` 为必填参数。
+- `-wake` 不接受 `-from/-to/-session-id/-message/-log` 参数。
+- 若名单文件缺失、不可读或格式不合法，返回文件错误。
+- 若角色不存在或关键字段读取失败，返回数据错误。
+
+## 唤醒角色
+```bash
+codex-multi-agents-tmux.sh -init-env -file "agents-lists.md" -name xiaoming
+```
+
+功能说明：
+
+- 通过名单文件读取目标角色 `会话`、`启动设置/启动类型`、`agent session` 字段。
+- 执行 `tmux new-session -d -s <会话>` 创建会话。
+  - [immutable]若启动类型为 `codex`，依次执行以下初始化命令,中间间隔"3"秒：
+    - `tmux send-keys -t <会话> "codex /resume <agent session>"`
     - `tmux send-keys -t <会话> ENTER`
 注意事项：
 
@@ -116,6 +136,7 @@ codex-multi-agents-tmux.sh -init-env -file "agents-lists.md" -name xiaoming
 
 - 验证 `-talk` 的消息格式、单次发送、日志目录自动创建与日志追加行为。
 - 验证 `-init-env` 的名单读取、会话创建与 codex 初始化流程（含 3 秒间隔）。
+- 验证 `-wake` 的名单读取、会话创建与 codex 唤醒流程（含 3 秒间隔）。
 - 验证返回码约定：`0/1/2/3/4/5`。
 - 验证并发锁冲突下的错误返回。
 
@@ -124,7 +145,7 @@ codex-multi-agents-tmux.sh -init-env -file "agents-lists.md" -name xiaoming
 - 命令行参数解析与参数组合校验。
 - `send-keys` 发送内容格式与目标会话路由。
 - 日志追加、目录创建与文件锁控制。
-- 基于 agents 名单的字段读取与初始化链路。
+- 基于 agents 名单的字段读取、初始化链路与唤醒链路。
 
 ### 功能与用例清单
 
@@ -137,6 +158,8 @@ codex-multi-agents-tmux.sh -init-env -file "agents-lists.md" -name xiaoming
 | TC-005 | 并发锁 | 日志锁冲突 | 另一个进程持有 `<log>.lock` | `-talk -from A -to B -session-id B -message M -log L` | 返回码 `4`；报错无法加锁 |
 | TC-006 | `-init-env` | codex 角色初始化成功 | 名单存在目标角色；会话不存在 | `-init-env -file F -name 小明` | 返回码 `0`；创建会话；`codex` 与 `/rename` 命令各发送一次（间隔 3 秒）并发送 `ENTER` |
 | TC-007 | `-init-env` | 角色不存在 | 名单中不存在目标角色 | `-init-env -file F -name 不存在` | 返回码 `3`；报错读取字段失败 |
+| TC-008 | `-wake` | codex 角色唤醒成功 | 名单存在目标角色；会话不存在 | `-wake -file F -name 小明` | 返回码 `0`；创建会话；`codex` 与 `/resume` 命令各发送一次（间隔 3 秒）并发送 `ENTER` |
+| TC-009 | 参数校验 | `-wake` 混入对话参数 | 名单文件存在 | `-wake -file F -name 小明 -message M` | 返回码 `1`；报错 `-wake` 不接受对话参数 |
 
 ### 用例与自动化映射
 
@@ -147,3 +170,5 @@ codex-multi-agents-tmux.sh -init-env -file "agents-lists.md" -name xiaoming
 - TC-005 -> `test_talk_lock_conflict_returns_rc4`
 - TC-006 -> `test_init_env_codex_creates_session_and_bootstraps`
 - TC-007 -> `test_init_env_missing_agent_returns_rc3`
+- TC-008 -> `test_wake_codex_creates_session_and_resumes`
+- TC-009 -> `test_wake_does_not_accept_talk_arguments`

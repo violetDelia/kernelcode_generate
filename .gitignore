@@ -3,3 +3,6 @@ tmp
 agents/codex-multi-agents/config
 *__pycache__
 
+
+run_periodically
+

@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-用于定义 `python/operation/nn.py` 的高层运算规范，覆盖 `Memory` 的逐元素算术、比较、显式 `broadcast`、`transpose` 与二维 `matmul`。本层只描述可调用语义与错误规则，不引入 IR 细节。
+用于定义 操作树是Memory 的高层运算规范，覆盖 `Memory` 的逐元素算术、比较、显式 `broadcast` 与二维 `matmul`。本层只描述可调用语义与错误规则。
 
 ## 文档信息
 
@@ -15,14 +15,17 @@
 ## 依赖
 
 - [`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)：定义 `Memory` 的 `shape`/`stride`/`dtype`/`space` 基础语义。
-- [`spec/dialect/nn.md`](../../spec/dialect/nn.md)：定义 `nn dialect` 的 op/type/verifier 约束，作为下游方言承载。
-- [`python/operation/nn.py`](../../python/operation/nn.py)：当前高层 API 实现文件。
 
 ## 目标
 
 - 提供 `Memory` 的逐元素算术与比较高层语义。
+<<<<<<< Updated upstream
 - 提供显式 `broadcast`、`transpose` 与二维 `matmul` 的输入输出约束与错误规则。
 - 保持与下游 `nn dialect` 的分层：本层只定义 API 语义，不承载 IR 细节。
+=======
+- 提供显式 `broadcast` 与二维 `matmul` 的输入输出约束与错误规则。
+- 保持与下游 `nn dialect` 的分层：本层作为用户直接使用的接口，不受限于IR的表达。
+>>>>>>> Stashed changes
 
 ## 限制与边界
 
