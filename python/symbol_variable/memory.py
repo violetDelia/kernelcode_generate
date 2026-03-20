@@ -13,6 +13,7 @@
 关联文件:
 - spec: spec/symbol_variable/memory.md
 - test: test/symbol_variable/test_memory.py
+- test: test/operation/test_memory_operation.py
 - 功能实现: python/symbol_variable/memory.py
 """
 
@@ -41,6 +42,7 @@ class LocalSpaceMeta:
     关联文件:
     - spec: spec/symbol_variable/memory.md
     - test: test/symbol_variable/test_memory.py
+    - test: test/operation/test_memory_operation.py
     - 功能实现: python/symbol_variable/memory.py
     """
 
@@ -64,6 +66,7 @@ class MemorySpace(Enum):
     关联文件:
     - spec: spec/symbol_variable/memory.md
     - test: test/symbol_variable/test_memory.py
+    - test: test/operation/test_memory_operation.py
     - 功能实现: python/symbol_variable/memory.py
     """
 
@@ -89,6 +92,7 @@ class Memory:
     关联文件:
     - spec: spec/symbol_variable/memory.md
     - test: test/symbol_variable/test_memory.py
+    - test: test/operation/test_memory_operation.py
     - 功能实现: python/symbol_variable/memory.py
     """
 
@@ -114,6 +118,7 @@ class Memory:
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/symbol_variable/test_memory.py
+        - test: test/operation/test_memory_operation.py
         - 功能实现: python/symbol_variable/memory.py
         """
         self.shape = self._normalize_shape(shape)
