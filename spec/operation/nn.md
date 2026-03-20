@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-用于定义 `python/operation/nn.py` 的高层运算规范，覆盖 `Memory` 的逐元素算术、比较、显式 `broadcast` 与二维 `matmul`。本层只描述可调用语义与错误规则，不引入 IR 细节。
+用于定义 `python/operation/nn.py` 的高层运算规范，覆盖 `Memory` 的逐元素算术、比较、显式 `broadcast`、`transpose` 与二维 `matmul`。本层只描述可调用语义与错误规则，不引入 IR 细节。
 
 ## 文档信息
 
@@ -21,12 +21,13 @@
 ## 目标
 
 - 提供 `Memory` 的逐元素算术与比较高层语义。
-- 提供显式 `broadcast` 与二维 `matmul` 的输入输出约束与错误规则。
+- 提供显式 `broadcast`、`transpose` 与二维 `matmul` 的输入输出约束与错误规则。
 - 保持与下游 `nn dialect` 的分层：本层只定义 API 语义，不承载 IR 细节。
 
 ## 限制与边界
 
 - 逐元素算术/比较支持隐式广播，仅允许尾维对齐与 singleton dim 扩张。
+- `transpose` 仅支持 `Memory` 输入与显式轴置换，不支持标量或隐式转置。
 - `matmul` 仅定义二维矩阵乘，不支持 batch、广播或隐式转置。
 - 不定义归约、卷积等其他算子。
 - 不引入复杂自动类型提升规则；`dtype` 兼容性需显式检查。
@@ -323,6 +324,36 @@ out = broadcast(value, ["M", "N"])
 - `out.shape == shape`。
 - `out.dtype == value.dtype`。
 - `out.space == value.space`。
+
+### `transpose(value, perm)`
+
+功能说明：
+
+- 按 `perm` 置换维度顺序，返回新的 `Memory` 结果。
+
+参数说明：
+
+- `value` (`Memory`)：待转置输入。
+- `perm` (`Sequence[int]`)：轴置换顺序，长度必须与 `value.rank` 一致。
+
+使用示例：
+
+```python
+value = Memory(shape=["M", "N", "K"], dtype=NumericType.Float32)
+out = transpose(value, perm=[1, 0, 2])
+```
+
+注意事项：
+
+- `perm` 必须是 `0..rank-1` 的排列，且不允许重复索引。
+- `value` 必须为 `Memory`，`perm` 必须为整数序列。
+
+返回与限制：
+
+- 返回 `Memory` 语义结果。
+- `out.shape` 按 `perm` 重排。
+- 若 `value.stride` 存在，`out.stride` 按相同 `perm` 重排。
+- `out.dtype` 与 `out.space` 继承自 `value`。
 
 ### `matmul(lhs, rhs)`
 
