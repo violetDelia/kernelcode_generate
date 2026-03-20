@@ -41,7 +41,7 @@ class _SymbolList:
     - 功能实现: python/symbol_variable/symbol_shape.py
     """
 
-    def __init__(self, shapes: List[SymbolDim | int]) -> None:
+    def __init__(self, shapes: Iterable[object]) -> None:
         """初始化符号形状列表。
 
         创建者: 小李飞刀
@@ -63,10 +63,14 @@ class _SymbolList:
             self.shape.append(self._normalize_value(value))
 
     @staticmethod
-    def _normalize_value(value: SymbolDim | int) -> SymbolDim:
+    def _normalize_value(value: object) -> SymbolDim:
         """将输入值规范化为 SymbolDim。"""
         if isinstance(value, SymbolDim):
             return value
+        if isinstance(value, str):
+            normalized = value.strip()
+            if normalized.isdigit():
+                return SymbolDim(int(normalized))
         return SymbolDim(value)
 
     def __repr__(self) -> str:
@@ -145,7 +149,7 @@ class _SymbolList:
         """
         return reversed(self.shape)
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: int | slice) -> SymbolDim | List[SymbolDim]:
         """索引访问维度元素。
 
         创建者: 小李飞刀
@@ -172,7 +176,7 @@ class _SymbolList:
             return self.shape[key]
         raise TypeError("索引类型错误")
 
-    def __setitem__(self, key, value) -> None:
+    def __setitem__(self, key: int | slice, value: object) -> None:
         """索引赋值。
 
         创建者: 小李飞刀
@@ -181,7 +185,8 @@ class _SymbolList:
         功能说明:
         - int 索引赋值时转换为 SymbolDim。
         - int 索引越界抛 IndexError(\"下标超出范围\")。
-        - 其他索引遵循 Python 列表语义。
+        - slice 赋值需传入可迭代对象，并逐项转换为 SymbolDim。
+        - 非 int/slice 索引抛 TypeError。
 
         使用示例:
         - shape[0] = 64
