@@ -13,6 +13,19 @@
 - 测试：
   - 未执行（按任务要求）。
 
+## T-20260321-5eb5cceb
+
+- 时间：2026-03-21 01:14:52 +0800
+- 角色：`李白`
+- worktree：`/home/lfr/kernelcode_generate/wt-20260321-merge-spec-dialect-nn`
+- 任务描述：合入 `spec/dialect/nn.md` 变更（仅该文件）。
+- 变更文件：
+  - `spec/dialect/nn.md`
+- 合入提交：
+  - `39fa3f0`
+- 测试：
+  - 未执行（按任务要求）。
+
 ## T-20260320-c4f4f752
 
 - 时间：`2026-03-20 09:18:24 CST`
