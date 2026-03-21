@@ -120,3 +120,17 @@
   - `TC-DMA-017/018` 在 spec 用例清单与测试函数 `test_dma_reshape_allows_symbolic_shape` / `test_dma_reshape_symbolic_stride_mismatch` 映射完整，测试断言与实现一致。
 - 测试：
   - 未执行（审查任务默认不复测）。
+
+## T-20260321-7e48017a
+
+- 时间：2026-03-21 19:22:28 +0800
+- 角色：`金铲铲大作战`
+- worktree：`/home/lfr/kernelcode_generate/wt-20260321-dialect-dma-alloc-reshape-view`
+- 任务描述：合入 dma alloc/view/reshape/cast 与 reshape-symbolic 链路变更。
+- 合并提交：`10dc3b5`
+- 变更文件：
+  - `spec/dialect/dma.md`
+  - `kernel_gen/dialect/dma.py`
+  - `test/dialect/test_dma_dialect.py`
+- 测试：
+  - 未运行（合并任务）。
