@@ -1,16 +1,11 @@
-# 20260321-operation-scf-spec
+# 2026-03-21 T-20260321-cdd9800f 复审结论
 
-## T-20260321-6fb6c202
-
-- 时间：2026-03-21 20:42:42 +0800
-- 角色：`李白`
-- worktree：`/home/lfr/kernelcode_generate/wt-20260321-operation-scf-spec`
-- 任务描述：重构 `spec/operation/scf.md` 并补齐可执行测试设计。
-- 变更文件：
-  - `spec/operation/scf.md`
-- 核心变更：
-  - 补齐 `loop` 的测试目标与用例映射，覆盖整数循环、符号维度、`step==0` 与非法类型报错、半开区间语义。
-  - 更新测试文件路径与执行命令，明确后续实现链路可直接接入。
-  - 补充返回对象需暴露 `start/end/step` 的约束以支持 DSL 与测试校验。
-- 测试：
-  - 未执行（按任务要求仅改 spec）。
+- 结论：通过。
+- worktree：`/home/lfr/kernelcode_generate/wt-20260321-operation-scf-spec`。
+- 审查范围：`kernel_gen/operation/scf.py`、`kernel_gen/operation/__init__.py`、`test/operation/test_operation_scf.py` 对照 `spec/operation/scf.md`。
+- 核对结果：
+  - 纯整数 `loop(start, end, step)` 返回 `range`，满足半开区间语义（TC-OP-SCF-001/002）。
+  - `SymbolDim` 输入返回 `LoopRange`，保留 `start/end/step` 属性（TC-OP-SCF-003）。
+  - `step == 0` 抛 `ValueError`，非法类型抛 `TypeError`（TC-OP-SCF-004/005）。
+  - 导出仅包含 `loop` 与 `LoopRange`，未扩张超出 spec 的公开入口。
+- 测试：未执行（复审任务不要求执行）。
