@@ -156,6 +156,7 @@ op = DmaLoadOp(
 
 注意事项：
 
+- `result.shape` 由 `sizes` 决定。
 - `result.space` 必须与 op `space` 一致。
 - `result.element_type` 必须与 `source.element_type` 一致。
 
@@ -209,7 +210,7 @@ op = DmaStoreOp(source, target, offsets, sizes, strides)
 - `offsets`：切片起始索引列表，类型为 `ArrayAttr[IntAttr|StringAttr]`；每一维表示对应维度的起始索引，长度必须与 `source.rank` 一致。
 - `sizes`：切片大小列表，类型为 `ArrayAttr[IntAttr|StringAttr]`；每一维表示对应维度的切片大小，长度必须与 `source.rank` 一致。
 - `strides`：切片步长列表，类型为 `ArrayAttr[IntAttr]`；每一维表示对应维度的切片步长，长度必须与 `source.rank` 一致，当前每一维必须为 `IntAttr(1)`。
-- `space`：切片 op 的空间属性，使用 `NnMemorySpaceAttr` 表示。
+- `space`：切片结果所在空间，使用 `NnMemorySpaceAttr` 表示。
 - `result_type`：结果类型，必须为 `!nn.memory<...>`。
 
 使用示例：
@@ -227,6 +228,7 @@ op = DmaSliceOp(
 
 注意事项：
 
+- `result.shape` 由 `sizes` 决定。
 - `result.element_type` 必须与 `source.element_type` 一致。
 - 当前阶段必须限制 `strides` 为全 1；出现其他值时 verifier 必须报错。
 
@@ -309,7 +311,7 @@ op = DmaCastOp(source, result_type)
 
 - 验证 `dma` op 复用 `NnMemorySpaceAttr` / `NnMemoryType` 时，与 `nn dialect` 的类型规则保持一致。
 - 验证 `dma.copy` 的整块搬运约束。
-- 验证 `dma.load` 的目标空间一致性与 `dma.slice` 的索引长度/stride 约束。
+- 验证 `dma.load/slice` 的结果形状、目标空间与索引长度约束。
 - 验证 `dma.store/deslice` 的源块与目标切片大小匹配约束。
 - 验证 `dma.cast` 只允许改变元素类型，且保持 `shape/stride/space` 不变。
 - 验证当前阶段对 stride 的限制会在 verifier 阶段明确报错。
