@@ -4,7 +4,7 @@
 最后一次更改: 小李飞刀
 
 功能说明:
-- 定义 dma dialect 的 copy/load/store/slice/deslice op 与 verifier 规则。
+- 定义 dma dialect 的 alloc/copy/load/store/slice/deslice/view/reshape/cast op 与 verifier 规则。
 - 复用 nn dialect 的 NnMemoryType 与 NnMemorySpaceAttr。
 
 使用示例:
@@ -147,6 +147,151 @@ def _verify_unit_stride(strides: ArrayAttr[Attribute]) -> None:
     for entry in strides.data:
         if not isinstance(entry, IntAttr) or entry.data != 1:
             raise VerifyException("dma stride must be 1 in current implementation")
+
+
+def _maybe_numel(shape: ArrayAttr[Attribute]) -> int | None:
+    """尝试计算 shape 的元素总数。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅在全部维度为 IntAttr 时返回乘积。
+
+    使用示例:
+    - _maybe_numel(ArrayAttr([IntAttr(2), IntAttr(4)]))
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma_dialect.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    numel = 1
+    for dim in shape.data:
+        if not isinstance(dim, IntAttr):
+            return None
+        numel *= dim.data
+    return numel
+
+
+def _contiguous_stride(shape: ArrayAttr[Attribute]) -> list[Attribute]:
+    """生成行主序连续 stride。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 当维度为符号时，以 `?` 标记无法确定的 stride。
+    - 若后续维度全为 IntAttr，则返回确定的 IntAttr stride。
+
+    使用示例:
+    - _contiguous_stride(ArrayAttr([IntAttr(2), IntAttr(4)]))
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma_dialect.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    stride: list[Attribute] = []
+    running: int | None = 1
+    for dim in reversed(shape.data):
+        if running is None:
+            stride.append(StringAttr("?"))
+        else:
+            stride.append(IntAttr(running))
+        if isinstance(dim, IntAttr) and running is not None:
+            running *= dim.data
+        else:
+            running = None
+    stride.reverse()
+    return stride
+
+
+def _is_contiguous(memory_type: NnMemoryType) -> bool:
+    """检查 memory type 是否连续行主序。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅在 stride 为 IntAttr 且匹配连续行主序时返回 True。
+
+    使用示例:
+    - _is_contiguous(memory_type)
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma_dialect.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    expected = _contiguous_stride(memory_type.shape)
+    if len(expected) != len(memory_type.stride.data):
+        return False
+    for expected_dim, stride_dim in zip(expected, memory_type.stride.data, strict=True):
+        if isinstance(expected_dim, IntAttr):
+            if not isinstance(stride_dim, IntAttr) or stride_dim.data != expected_dim.data:
+                return False
+            continue
+        if isinstance(expected_dim, StringAttr):
+            if isinstance(stride_dim, IntAttr):
+                continue
+            if isinstance(stride_dim, StringAttr) and stride_dim.data:
+                continue
+            return False
+        return False
+    return True
+
+
+@irdl_op_definition
+class DmaAllocOp(IRDLOperation):
+    """dma.alloc。"""
+
+    name = "dma.alloc"
+
+    result = result_def(NnMemoryType)
+
+    def __init__(self, result_type: NnMemoryType) -> None:
+        """初始化 dma.alloc。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 设置结果类型。
+
+        使用示例:
+        - DmaAllocOp(result_type)
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma_dialect.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        super().__init__(result_types=[result_type])
+
+    def verify_(self) -> None:
+        """校验 dma.alloc。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 结果类型必须为 nn.memory。
+
+        使用示例:
+        - DmaAllocOp(...).verify_()
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma_dialect.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        _verify_memory_type(self.result.type, "result")
 
 
 @irdl_op_definition
@@ -552,6 +697,203 @@ class DmaDesliceOp(IRDLOperation):
             raise VerifyException("dma.deslice result must match target type")
 
 
+@irdl_op_definition
+class DmaViewOp(IRDLOperation):
+    """dma.view。"""
+
+    name = "dma.view"
+
+    source = operand_def(NnMemoryType)
+    result = result_def(NnMemoryType)
+
+    def __init__(self, source: SSAValue | Operation, result_type: NnMemoryType) -> None:
+        """初始化 dma.view。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 设置 source 与结果类型。
+
+        使用示例:
+        - DmaViewOp(source, result_type)
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma_dialect.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        super().__init__(operands=[source], result_types=[result_type])
+
+    def verify_(self) -> None:
+        """校验 dma.view。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - element_type/space 必须一致。
+        - 可判定 numel 不一致必须报错。
+
+        使用示例:
+        - DmaViewOp(...).verify_()
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma_dialect.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        source_type = _verify_memory_type(self.source.type, "source")
+        result_type = _verify_memory_type(self.result.type, "result")
+        if source_type.element_type != result_type.element_type:
+            raise VerifyException("dma.view element_type mismatch")
+        if source_type.space.space.data != result_type.space.space.data:
+            raise VerifyException("dma.view space mismatch")
+
+        source_numel = _maybe_numel(source_type.shape)
+        result_numel = _maybe_numel(result_type.shape)
+        if source_numel is not None and result_numel is not None and source_numel != result_numel:
+            raise VerifyException("dma.view numel mismatch")
+
+
+@irdl_op_definition
+class DmaReshapeOp(IRDLOperation):
+    """dma.reshape。"""
+
+    name = "dma.reshape"
+
+    source = operand_def(NnMemoryType)
+    result = result_def(NnMemoryType)
+
+    def __init__(self, source: SSAValue | Operation, result_type: NnMemoryType) -> None:
+        """初始化 dma.reshape。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 设置 source 与结果类型。
+
+        使用示例:
+        - DmaReshapeOp(source, result_type)
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma_dialect.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        super().__init__(operands=[source], result_types=[result_type])
+
+    def verify_(self) -> None:
+        """校验 dma.reshape。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - element_type/space 必须一致。
+        - source 必须连续，result.stride 必须为连续行主序。
+        - 可判定 numel 不一致必须报错。
+
+        使用示例:
+        - DmaReshapeOp(...).verify_()
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma_dialect.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        source_type = _verify_memory_type(self.source.type, "source")
+        result_type = _verify_memory_type(self.result.type, "result")
+        if source_type.element_type != result_type.element_type:
+            raise VerifyException("dma.reshape element_type mismatch")
+        if source_type.space.space.data != result_type.space.space.data:
+            raise VerifyException("dma.reshape space mismatch")
+
+        source_numel = _maybe_numel(source_type.shape)
+        result_numel = _maybe_numel(result_type.shape)
+        if source_numel is not None and result_numel is not None and source_numel != result_numel:
+            raise VerifyException("dma.reshape numel mismatch")
+
+        if not _is_contiguous(source_type):
+            raise VerifyException("dma.reshape requires contiguous source")
+
+        expected = _contiguous_stride(result_type.shape)
+        for expected_dim, stride_dim in zip(expected, result_type.stride.data, strict=True):
+            if isinstance(expected_dim, IntAttr):
+                if not isinstance(stride_dim, IntAttr) or stride_dim.data != expected_dim.data:
+                    raise VerifyException("dma.reshape requires contiguous result stride")
+                continue
+            if isinstance(expected_dim, StringAttr):
+                if isinstance(stride_dim, IntAttr):
+                    continue
+                if isinstance(stride_dim, StringAttr) and stride_dim.data:
+                    continue
+                raise VerifyException("dma.reshape requires contiguous result stride")
+            raise VerifyException("dma.reshape requires contiguous result stride")
+
+
+@irdl_op_definition
+class DmaCastOp(IRDLOperation):
+    """dma.cast。"""
+
+    name = "dma.cast"
+
+    source = operand_def(NnMemoryType)
+    result = result_def(NnMemoryType)
+
+    def __init__(self, source: SSAValue | Operation, result_type: NnMemoryType) -> None:
+        """初始化 dma.cast。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 设置 source 与结果类型。
+
+        使用示例:
+        - DmaCastOp(source, result_type)
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma_dialect.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        super().__init__(operands=[source], result_types=[result_type])
+
+    def verify_(self) -> None:
+        """校验 dma.cast。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - shape/stride/space 必须一致，仅 element_type 可变化。
+
+        使用示例:
+        - DmaCastOp(...).verify_()
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma_dialect.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        source_type = _verify_memory_type(self.source.type, "source")
+        result_type = _verify_memory_type(self.result.type, "result")
+        if source_type.shape != result_type.shape:
+            raise VerifyException("dma.cast shape mismatch")
+        if source_type.stride != result_type.stride:
+            raise VerifyException("dma.cast stride mismatch")
+        if source_type.space.space.data != result_type.space.space.data:
+            raise VerifyException("dma.cast space mismatch")
+
+
 class Dma(Dialect):
     """DMA dialect 入口。
 
@@ -571,15 +913,29 @@ class Dma(Dialect):
     """
 
     name = "dma"
-    operations = [DmaCopyOp, DmaLoadOp, DmaStoreOp, DmaSliceOp, DmaDesliceOp]
+    operations = [
+        DmaAllocOp,
+        DmaCopyOp,
+        DmaLoadOp,
+        DmaStoreOp,
+        DmaSliceOp,
+        DmaDesliceOp,
+        DmaViewOp,
+        DmaReshapeOp,
+        DmaCastOp,
+    ]
     attributes = []
 
 
 __all__ = [
     "Dma",
+    "DmaAllocOp",
     "DmaCopyOp",
     "DmaLoadOp",
     "DmaStoreOp",
     "DmaSliceOp",
     "DmaDesliceOp",
+    "DmaViewOp",
+    "DmaReshapeOp",
+    "DmaCastOp",
 ]

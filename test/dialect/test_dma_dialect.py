@@ -17,13 +17,17 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import sys
+from io import StringIO
+from pathlib import Path
 
 import pytest
 from xdsl.context import Context
-from xdsl.dialects.builtin import ArrayAttr, Builtin, IntAttr, StringAttr, i32
+from xdsl.dialects.builtin import ArrayAttr, Builtin, IntAttr, StringAttr, i1, i32
 from xdsl.dialects.test import Test, TestOp as _TestOp
+from xdsl.ir import Attribute, Operation
+from xdsl.parser import Parser
+from xdsl.printer import Printer
 from xdsl.utils.exceptions import VerifyException
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -32,11 +36,15 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.dma import (
     Dma,
+    DmaAllocOp,
+    DmaCastOp,
     DmaCopyOp,
     DmaDesliceOp,
     DmaLoadOp,
+    DmaReshapeOp,
     DmaSliceOp,
     DmaStoreOp,
+    DmaViewOp,
 )
 from kernel_gen.dialect.nn import Nn, NnMemorySpaceAttr, NnMemoryType
 
@@ -65,6 +73,20 @@ def _build_context() -> Context:
     ctx.load_dialect(Nn)
     ctx.load_dialect(Dma)
     return ctx
+
+
+def _print_ir(value: object) -> str:
+    """打印 attribute 或 operation/module 为文本。"""
+
+    stream = StringIO()
+    printer = Printer(stream=stream)
+    if isinstance(value, Attribute):
+        printer.print_attribute(value)
+    elif isinstance(value, Operation):
+        printer.print_op(value)
+    else:
+        printer.print(value)
+    return stream.getvalue()
 
 
 def _make_space(name: str) -> NnMemorySpaceAttr:
@@ -205,7 +227,7 @@ def test_dma_copy_shape_mismatch() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-18 21:00:16 +0800
 # 最近一次运行成功时间: 2026-03-18 21:00:16 +0800
-# 功能说明: 验证 dma.load 的 result.space 必须与 op.space 一致。
+# 功能说明: 验证 dma.load 的 result.space 必须与 op.space 一致，且结果 shape 必须匹配 sizes。
 # 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_load_result_space_mismatch
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
@@ -221,13 +243,18 @@ def test_dma_load_result_space_mismatch() -> None:
     with pytest.raises(VerifyException, match="space attribute must match result space"):
         op.verify()
 
+    result_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(3)]), space="global")
+    op = DmaLoadOp(source, offsets, sizes, strides, result_type, _make_space("global"))
+    with pytest.raises(VerifyException, match="shape must match sizes"):
+        op.verify()
+
 
 # TC-DMA-005
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-18 21:00:16 +0800
 # 最近一次运行成功时间: 2026-03-18 21:00:16 +0800
-# 功能说明: 验证 dma.slice 索引长度与 rank 不一致时会报错。
+# 功能说明: 验证 dma.slice 索引长度与 rank 不一致、结果 shape 不匹配时会报错。
 # 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_slice_rank_mismatch
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
@@ -241,6 +268,14 @@ def test_dma_slice_rank_mismatch() -> None:
     strides = _make_index_list([1])
     op = DmaSliceOp(source, offsets, sizes, strides, result_type, _make_space("global"))
     with pytest.raises(VerifyException, match="length must match rank"):
+        op.verify()
+
+    offsets = _make_index_list([0, 0])
+    sizes = _make_index_list([2, 4])
+    strides = _make_index_list([1, 1])
+    result_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(3)]))
+    op = DmaSliceOp(source, offsets, sizes, strides, result_type, _make_space("global"))
+    with pytest.raises(VerifyException, match="shape must match sizes"):
         op.verify()
 
 
@@ -354,3 +389,195 @@ def test_dma_index_string_attr_valid() -> None:
     strides = _make_index_list([1, 1])
     op = DmaLoadOp(source, offsets, sizes, strides, result_type, _make_space("shared"))
     op.verify()
+
+
+# TC-DMA-011
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-21 18:26:48 +0800
+# 最近一次运行成功时间: 2026-03-21 18:26:48 +0800
+# 功能说明: 验证 dma.cast 在 shape/stride/space 一致时允许 element_type 不同。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_cast_verify_success
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_cast_verify_success() -> None:
+    source_type = _make_memory_type()
+    source = _TestOp(result_types=[source_type]).results[0]
+    result_type = NnMemoryType(source_type.shape, source_type.stride, i1, source_type.space)
+    op = DmaCastOp(source, result_type)
+    op.verify()
+
+
+# TC-DMA-012
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-21 18:26:48 +0800
+# 最近一次运行成功时间: 2026-03-21 18:26:48 +0800
+# 功能说明: 验证 dma.cast 在 shape/stride/space 不一致时会报错。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_cast_layout_or_space_mismatch
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_cast_layout_or_space_mismatch() -> None:
+    source_type = _make_memory_type()
+    source = _TestOp(result_types=[source_type]).results[0]
+
+    result_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(5)]))
+    op = DmaCastOp(source, result_type)
+    with pytest.raises(VerifyException, match="dma.cast shape mismatch"):
+        op.verify()
+
+    result_type = _make_memory_type(stride=ArrayAttr([IntAttr(5), IntAttr(1)]))
+    op = DmaCastOp(source, result_type)
+    with pytest.raises(VerifyException, match="dma.cast stride mismatch"):
+        op.verify()
+
+    result_type = _make_memory_type(space="shared")
+    op = DmaCastOp(source, result_type)
+    with pytest.raises(VerifyException, match="dma.cast space mismatch"):
+        op.verify()
+
+
+# TC-DMA-013
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-21 21:58:00 +0800
+# 最近一次运行成功时间: 2026-03-21 21:58:00 +0800
+# 功能说明: 验证 dma.alloc 合法路径，并覆盖 alloc/view/reshape 的 parse/print round-trip。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_alloc_verify_success
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_alloc_verify_success() -> None:
+    ctx = _build_context()
+    text = """builtin.module {
+  %0 = "dma.alloc"() : () -> !nn.memory<[2, 4], [4, 1], i32, #nn.space<global>>
+  %1 = "dma.view"(%0) : (!nn.memory<[2, 4], [4, 1], i32, #nn.space<global>>) -> !nn.memory<[4, 2], [2, 1], i32, #nn.space<global>>
+  %2 = "dma.reshape"(%0) : (!nn.memory<[2, 4], [4, 1], i32, #nn.space<global>>) -> !nn.memory<[4, 2], [2, 1], i32, #nn.space<global>>
+}
+"""
+    module = Parser(ctx, text).parse_module()
+    module.verify()
+    assert _print_ir(module) == text.rstrip()
+
+
+# TC-DMA-014
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-21 21:58:00 +0800
+# 最近一次运行成功时间: 2026-03-21 21:58:00 +0800
+# 功能说明: 验证 dma.view 在 element_type 或 space 不一致时会报错。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_view_type_or_space_mismatch
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_view_type_or_space_mismatch() -> None:
+    source_type = _make_memory_type()
+    source = _TestOp(result_types=[source_type]).results[0]
+
+    result_type = NnMemoryType(source_type.shape, source_type.stride, i1, source_type.space)
+    op = DmaViewOp(source, result_type)
+    with pytest.raises(VerifyException, match="element_type mismatch"):
+        op.verify()
+
+    result_type = _make_memory_type(space="shared")
+    op = DmaViewOp(source, result_type)
+    with pytest.raises(VerifyException, match="space mismatch"):
+        op.verify()
+
+
+# TC-DMA-015
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-21 21:58:00 +0800
+# 最近一次运行成功时间: 2026-03-21 21:58:00 +0800
+# 功能说明: 验证 dma.view 在可判定元素总数不一致时会报错。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_view_numel_mismatch
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_view_numel_mismatch() -> None:
+    source_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(4)]))
+    source = _TestOp(result_types=[source_type]).results[0]
+    result_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(5)]),
+        stride=ArrayAttr([IntAttr(5), IntAttr(1)]),
+    )
+    op = DmaViewOp(source, result_type)
+    with pytest.raises(VerifyException, match="numel mismatch"):
+        op.verify()
+
+
+# TC-DMA-016
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-21 21:58:00 +0800
+# 最近一次运行成功时间: 2026-03-21 21:58:00 +0800
+# 功能说明: 验证 dma.reshape 在非连续布局时会报错。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_reshape_requires_contiguous
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_reshape_requires_contiguous() -> None:
+    source_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
+        stride=ArrayAttr([IntAttr(5), IntAttr(1)]),
+    )
+    result_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(4), IntAttr(2)]),
+        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+    )
+    source = _TestOp(result_types=[source_type]).results[0]
+    op = DmaReshapeOp(source, result_type)
+    with pytest.raises(VerifyException, match="contiguous source"):
+        op.verify()
+
+
+# TC-DMA-017
+# 创建者: 摸鱼小分队
+# 最后一次更改: 摸鱼小分队
+# 最近一次运行测试时间: 2026-03-21 23:40:00 +0800
+# 最近一次运行成功时间: 2026-03-21 23:40:00 +0800
+# 功能说明: 验证 dma.reshape 支持符号维度并遵循连续 stride 规则。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_reshape_allows_symbolic_shape
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_reshape_allows_symbolic_shape() -> None:
+    source_type = _make_memory_type(
+        shape=ArrayAttr([StringAttr("N"), IntAttr(8)]),
+        stride=ArrayAttr([IntAttr(8), IntAttr(1)]),
+    )
+    result_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(4), StringAttr("M")]),
+        stride=ArrayAttr([StringAttr("M"), IntAttr(1)]),
+    )
+    source = _TestOp(result_types=[source_type]).results[0]
+    op = DmaReshapeOp(source, result_type)
+    op.verify()
+
+
+# TC-DMA-018
+# 创建者: 摸鱼小分队
+# 最后一次更改: 摸鱼小分队
+# 最近一次运行测试时间: 2026-03-21 23:40:00 +0800
+# 最近一次运行成功时间: 2026-03-21 23:40:00 +0800
+# 功能说明: 验证 dma.reshape 在符号维度下 stride 非连续时会报错。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_reshape_symbolic_stride_mismatch
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_reshape_symbolic_stride_mismatch() -> None:
+    source_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
+        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+    )
+    result_type = _make_memory_type(
+        shape=ArrayAttr([StringAttr("N"), IntAttr(8)]),
+        stride=ArrayAttr([IntAttr(9), IntAttr(1)]),
+    )
+    source = _TestOp(result_types=[source_type]).results[0]
+    op = DmaReshapeOp(source, result_type)
+    with pytest.raises(VerifyException, match="contiguous result stride"):
+        op.verify()

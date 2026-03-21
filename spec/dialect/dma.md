@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-用于定义 `dma dialect` 的稳定方言语义，描述 `dma.copy`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.cast` 如何表示内存对象之间的数据搬运与布局转换，包括整块搬运、切片读取、切片回写、跨空间迁移与显式数据转换。该方言不单独定义 memory type / memory space，而是统一复用 `nn dialect` 中的 `NnMemoryType` 与 `NnMemorySpaceAttr`。
+用于定义 `dma dialect` 的稳定方言语义，描述 `dma.alloc`、`dma.copy`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.view`、`dma.reshape`、`dma.cast` 如何表示内存对象之间的数据搬运与布局转换，包括整块搬运、切片读取、切片回写、跨空间迁移、视图变换与显式数据转换。该方言不单独定义 memory type / memory space，而是统一复用 `nn dialect` 中的 `NnMemoryType` 与 `NnMemorySpaceAttr`。
 
 ## 文档信息
 
@@ -32,7 +32,7 @@
 - `dma dialect` 不单独维护 memory type / memory space，所有相关 operand / result 类型统一复用 `NnMemoryType` 与 `NnMemorySpaceAttr`。
 - 本文件只定义方言层的数据搬运、布局转换与显式数据转换语义，不负责真实 DMA 硬件调度、流水线编排、带宽建模、同步原语、事件、barrier 或 async token 设计。
 - 本文件不负责广播、逐元素算术、比较等张量计算语义，也不负责自动求解 `offsets/sizes/strides` 或自动推导最优搬运策略。
-- 当前方言范围仅包含 `dma.copy`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.cast`；`operation/dma.alloc` 与 `operation/dma.free` 不属于本方言公开 op。
+- 当前方言范围包含 `dma.alloc`、`dma.copy`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.view`、`dma.reshape`、`dma.cast`；`operation/dma.free` 不属于本方言公开 op。
 - 除 `dma.cast` 外，其他搬运 op 不改变元素值语义，只改变数据所在的逻辑位置、切片范围、布局表达或空间；同一个 op 不应同时承担计算和搬运语义。
 - 本文件中的“转换”包含两类：布局、切片视图或空间层面的转换，以及通过 `dma.cast` 表达的显式元素类型转换；不包括广播、归约或通用数值计算。
 
@@ -40,10 +40,13 @@
 
 - `spec/operation/dma.md` 负责高层 API 语义；`dma dialect` 负责对应 IR 语义。
 - 若高层 `Memory` 进入 IR，仍必须落到 `NnMemoryType` / `NnMemorySpaceAttr`，不得在 `dma dialect` 内再定义一套分配专用类型。
+- `dma.view`、`dma.reshape` 属于方言层视图/布局变换 op，不属于 `operation/dma` 的高层 API。
 
 ### 通用约束
 
 - 所有参与搬运或转换的 `source`、`target`、`result` 必须是 `!nn.memory<...>`。
+- `dma.alloc` 仅产生结果内存，结果类型必须为 `!nn.memory<...>`。
+- `dma.view/reshape` 必须保证 `result.element_type` 与 `source.element_type` 一致，`result.space` 与 `source.space` 一致。
 - 对 `dma.copy/load/store/slice/deslice`，相关 `element_type` 必须一致，不允许隐式类型转换。
 - 对 `dma.cast`，只允许 `element_type` 发生显式变化；`shape/stride/space` 必须保持一致。
 - `shape/stride` 的 rank 必须与相关 `offsets/sizes/strides` 列表长度一致。
@@ -60,8 +63,11 @@
 - assembly 缺失必要字段时，必须在 parse 阶段失败。
 - `NnMemorySpaceAttr` 非法值、`NnMemoryType.shape` 与 `stride` rank 不一致等类型错误，必须按 `nn dialect` 规则报错。
 - `dma.copy` 中 `source/target` 的 `shape/stride/element_type` 不一致必须报错。
+- `dma.alloc` 不接受 operand；结果类型非法必须报错。
 - `dma.load/slice` 中 `offsets/sizes/strides` 长度与输入 rank 不一致必须报错。
 - `dma.store/deslice` 中 `source.shape` 与切片目标大小不一致必须报错。
+- `dma.view/reshape` 中 `source/result` 的 `element_type/space` 不一致必须报错；可判定的 `numel` 不一致必须报错。
+- `dma.view` 的 `result.stride` rank 与 `result.shape` 不一致必须报错；`dma.reshape` 的 `result.stride` 非连续行主序必须报错。
 - `dma.cast` 中 `source/result` 的 `shape/stride/space` 不一致必须报错。
 - `strides` 仅允许 `IntAttr(1)`；若当前实现限制 stride 为 1，则 `stride != 1` 的切片搬运必须显式报错，不得 silently 接受。
 
@@ -73,7 +79,7 @@
 
 - `dma dialect` 的公开构件由两部分组成：
   - 复用 `nn dialect` 的 `NnMemoryType` 与 `NnMemorySpaceAttr`
-  - 提供 `dma.copy`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.cast` 六个公开 op
+  - 提供 `dma.alloc`、`dma.copy`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.view`、`dma.reshape`、`dma.cast` 九个公开 op
 
 参数说明：
 
@@ -82,18 +88,118 @@
 使用示例：
 
 ```python
-from kernel_gen.dialect.dma import DmaCastOp, DmaCopyOp, DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp
+from kernel_gen.dialect.dma import (
+    DmaAllocOp,
+    DmaCastOp,
+    DmaCopyOp,
+    DmaDesliceOp,
+    DmaLoadOp,
+    DmaReshapeOp,
+    DmaSliceOp,
+    DmaStoreOp,
+    DmaViewOp,
+)
 from kernel_gen.dialect.nn import NnMemorySpaceAttr
 ```
 
 注意事项：
 
-- `dma dialect` 不提供 `alloc/free` 生命周期 op。
+- `dma dialect` 不提供 `free` 生命周期 op。
 - memory type / memory space 必须始终沿用 `nn dialect` 口径。
 
 返回与限制：
 
-- 对外暴露五个搬运 op、一个显式数据转换 op，以及对 `nn dialect` memory 类型体系的复用约束。
+- 对外暴露 `dma` 相关 op（含 alloc/view/reshape）以及对 `nn dialect` memory 类型体系的复用约束。
+
+### `dma.alloc`
+
+功能说明：
+
+- 表示显式的内存对象创建，仅生成结果 `!nn.memory<...>`。
+- 不承担数据搬运或初始化语义。
+
+参数说明：
+
+- `result_type`：结果类型，必须为 `!nn.memory<...>`。
+
+使用示例：
+
+```python
+op = DmaAllocOp(result_type)
+```
+
+注意事项：
+
+- `result_type` 中的 `shape/stride/element_type/space` 必须完整且合法。
+- `dma.alloc` 不携带 `offsets/sizes/strides` 等切片属性。
+
+返回与限制：
+
+- 返回新的 `!nn.memory<...>`；当前 op result 数量固定为 `1`。
+- 仅表达“存在一个内存对象”的语义，不负责初始化或填充值。
+
+### `dma.reshape`
+
+功能说明：
+
+- 表示对 `source` 进行形状重排的视图变换，要求连续布局语义成立。
+- 与 `dma.view` 的区别在于：`dma.reshape` 需要由 `result.shape` 重新推导连续行主序 stride。
+
+参数说明：
+
+- `source`：源内存，类型为 `!nn.memory<...>`。
+- `result_type`：结果类型，必须为 `!nn.memory<...>`。
+
+使用示例：
+
+```python
+op = DmaReshapeOp(source, result_type)
+```
+
+注意事项：
+
+- `result.element_type` 必须与 `source.element_type` 一致。
+- `result.space` 必须与 `source.space` 一致。
+- `source` 必须可视为连续布局；`result.stride` 必须满足 `result.shape` 的连续行主序校验规则。
+- 若 `result.shape` 含符号维度（`StringAttr`），则 `result.shape` 的每一维仅允许 `IntAttr` 或非空 `StringAttr`。
+- 当 `result.shape` 含符号维度时，`result.stride` 的每一维仅允许 `IntAttr` 或非空 `StringAttr`。连续性校验策略为：先根据 `result.shape` 推导连续行主序期望 stride；若期望维度为 `IntAttr`，则 `result.stride` 必须是相同的 `IntAttr`；若期望维度为符号（不可判定 stride，通常为 `StringAttr("?")`），则 `result.stride` 允许为任意 `IntAttr` 或任意非空 `StringAttr`。
+- 当 `source.shape` 含符号维度时，`source.stride` 的连续性判定遵循同样的行主序策略：期望为 `IntAttr` 的维度必须一致，期望为符号的维度允许 `IntAttr` 或非空 `StringAttr`。
+- 若 `source.shape` 与 `result.shape` 的元素总数可判定不一致，必须报错。
+
+返回与限制：
+
+- 返回新的 `!nn.memory<...>` 结果块；当前 op result 数量固定为 `1`。
+- 仅表示视图变换，不改变数据内容。
+
+### `dma.view`
+
+功能说明：
+
+- 表示对 `source` 的视图变换，仅调整 `shape/stride` 元信息。
+- 用于表达不发生搬运的数据视图重解释。
+
+参数说明：
+
+- `source`：源内存，类型为 `!nn.memory<...>`。
+- `result_type`：结果类型，必须为 `!nn.memory<...>`。
+
+使用示例：
+
+```python
+op = DmaViewOp(source, result_type)
+```
+
+注意事项：
+
+- `result.element_type` 必须与 `source.element_type` 一致。
+- `result.space` 必须与 `source.space` 一致。
+- 若 `source.shape` 与 `result.shape` 的元素总数可判定不一致，必须报错。
+- `dma.view` 不要求 `source` 为连续布局，但 `result.stride` 必须与 `result.shape` rank 一致。
+
+返回与限制：
+
+- 返回新的 `!nn.memory<...>` 结果块；当前 op result 数量固定为 `1`。
+- 仅表示视图变换，不改变数据内容。
 
 ### `dma.copy`
 
@@ -313,6 +419,8 @@ op = DmaCastOp(source, result_type)
 - 验证 `dma.copy` 的整块搬运约束。
 - 验证 `dma.load/slice` 的结果形状、目标空间与索引长度约束。
 - 验证 `dma.store/deslice` 的源块与目标切片大小匹配约束。
+- 验证 `dma.alloc` 结果类型约束与结果数量。
+- 验证 `dma.view/reshape` 的元素类型/空间一致性与形状约束。
 - 验证 `dma.cast` 只允许改变元素类型，且保持 `shape/stride/space` 不变。
 - 验证当前阶段对 stride 的限制会在 verifier 阶段明确报错。
 
@@ -332,3 +440,9 @@ op = DmaCastOp(source, result_type)
 | TC-DMA-010 | 索引表达 | `StringAttr` 合法路径 | `offsets/sizes` 使用 `StringAttr`，`strides` 为 `IntAttr(1)` | 构造并校验切片类 op | verifier 通过 | `test_dma_index_string_attr_valid` |
 | TC-DMA-011 | 数据转换 | `dma.cast` 合法路径 | `source/result` 的 `shape/stride/space` 一致，仅元素类型不同 | 构造并校验 `dma.cast` | verifier 通过 | `test_dma_cast_verify_success` |
 | TC-DMA-012 | 数据转换 | `dma.cast` 结果约束 | `source/result` 的 `shape` 或 `stride` 或 `space` 不一致 | 构造并校验 `dma.cast` | verifier 报错 | `test_dma_cast_layout_or_space_mismatch` |
+| TC-DMA-013 | 分配 | `dma.alloc` 合法路径 | `result_type` 为合法 `!nn.memory<...>` | 构造并校验 `dma.alloc` | verifier 通过 | `test_dma_alloc_verify_success` |
+| TC-DMA-014 | 视图 | `dma.view` 约束 | `result.element_type` 或 `result.space` 与 `source` 不一致 | 构造并校验 `dma.view` | verifier 报错 | `test_dma_view_type_or_space_mismatch` |
+| TC-DMA-015 | 视图 | `dma.view` 形状一致性 | `source/result` 可判定的元素总数不一致 | 构造并校验 `dma.view` | verifier 报错 | `test_dma_view_numel_mismatch` |
+| TC-DMA-016 | 变形 | `dma.reshape` 连续约束 | `result.stride` 非连续行主序或 `source` 非连续布局 | 构造并校验 `dma.reshape` | verifier 报错 | `test_dma_reshape_requires_contiguous` |
+| TC-DMA-017 | 变形 | `dma.reshape` 符号维度连续 | `result.shape` 含 `StringAttr` 且 `result.stride` 满足连续规则 | 构造并校验 `dma.reshape` | verifier 通过 | `test_dma_reshape_allows_symbolic_shape` |
+| TC-DMA-018 | 变形 | `dma.reshape` 符号维度非连续 | `result.shape` 含 `StringAttr` 且 `result.stride` 非连续 | 构造并校验 `dma.reshape` | verifier 报错 | `test_dma_reshape_symbolic_stride_mismatch` |
