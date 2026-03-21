@@ -36,6 +36,8 @@
 - 只支持受限语法子集，具体范围以测试清单为准。
 - 不做优化、融合或后端相关行为。
 - [immutable]只提供ast节点定义以及将函数翻译为ast树的能力。
+- `for` 循环仅支持 `range(...)`、`LoopRange(...)` 或 `loop(...)` 的 1~3 参数形式，并解析为 `ForAST` 的 `start/end/step` 字段。
+- `for` 循环体内不允许出现 `return`；出现即视为语法不支持并报错。
 
 ## 公开接口
 
@@ -64,6 +66,7 @@ func_ast = parse_function(add)
 
 - 必须能获取函数源码；否则应抛出解析错误。
 - 注解解析规则以本文件与测试清单为准。
+- 若参数未写注解，但在 `globals`/`builtins` 中存在同名 `SymbolDim` 或 `Memory` 对象，可按标量参数或张量参数推断。
 
 返回与限制：
 
@@ -236,16 +239,26 @@ VarAST(name="i")
 - `var` (`VarAST`)：迭代变量。
 - `start` (`object`)：起始表达式。
 - `end` (`object`)：结束表达式。
+- `step` (`object`)：步长表达式。
 - `body` (`BlockAST`)：循环体。
 - `location` (`SourceLocation|None`)：可选源码位置。
 
 使用示例：
 
 ```python
-ForAST(var=VarAST("i"), start=ConstAST(0), end=ConstAST(10), body=BlockAST([]))
+ForAST(
+    var=VarAST("i"),
+    start=ConstAST(0),
+    end=ConstAST(10),
+    step=ConstAST(1),
+    body=BlockAST([])
+)
 ```
 
-注意事项：循环语义由下游生成阶段解释。
+注意事项：
+
+- 解析 `range/LoopRange/loop` 的 1~3 参数时，`start`/`step` 省略值分别默认 `0/1`。
+- 循环语义由下游生成阶段解释。
 
 返回与限制：返回不可变的数据结构实例。
 
@@ -389,4 +402,5 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
   - AST-006：非法返回注解返回诊断。（`test_invalid_return_annotation_reports_diagnostics`）
   - AST-007：缺失 return 返回诊断。（`test_missing_return_reports_diagnostics`）
   - AST-008：缺少 Tensor 维度返回诊断。（`test_missing_tensor_dimensions_reports_diagnostics`）
-  - AST-009：不支持语法返回诊断。（`test_unsupported_syntax_reports_diagnostics`）
+  - AST-009：未注解 SymbolDim 参数可按标量参数解析。（`test_parse_function_infers_symboldim_arguments_without_annotations`）
+  - AST-010：不支持语法返回诊断。（`test_unsupported_syntax_reports_diagnostics`）

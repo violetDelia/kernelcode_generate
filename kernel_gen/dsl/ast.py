@@ -25,7 +25,8 @@ import textwrap
 from dataclasses import dataclass, field
 from typing import Iterable
 
-from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.memory import Memory, MemorySpace
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
 
@@ -214,6 +215,7 @@ class ForAST:
     start: object
     end: object
     body: BlockAST
+    step: object | None = None
     location: SourceLocation | None = None
 
 
@@ -240,6 +242,8 @@ class StoreAST:
     offset: object
     stride: object | None
     value: object
+    sizes: object | None = None
+    space: MemorySpace | None = None
     location: SourceLocation | None = None
 
 
@@ -265,6 +269,8 @@ class LoadAST:
     tensor: TensorAST
     offset: object
     stride: object | None
+    sizes: object | None = None
+    space: MemorySpace | None = None
     location: SourceLocation | None = None
 
 
@@ -515,9 +521,13 @@ def _parse_annotation_node(
         if arg_name in globals_table and isinstance(globals_table[arg_name], Memory):
             memory = globals_table[arg_name]
             return TensorAST(name=arg_name, memory=memory, location=None)
+        if arg_name in globals_table and isinstance(globals_table[arg_name], SymbolDim):
+            return ScalarArgAST(name=arg_name, value_type=int, location=None)
         if arg_name in builtins_table and isinstance(builtins_table[arg_name], Memory):
             memory = builtins_table[arg_name]
             return TensorAST(name=arg_name, memory=memory, location=None)
+        if arg_name in builtins_table and isinstance(builtins_table[arg_name], SymbolDim):
+            return ScalarArgAST(name=arg_name, value_type=int, location=None)
         _raise_parse_error("Missing annotation", node)
 
     if isinstance(node, py_ast.Constant) and isinstance(node.value, str):
@@ -559,16 +569,178 @@ def _parse_annotation_node(
     return None
 
 
-def _parse_expr(expr: object, env: dict[str, object]) -> object:
+def _lookup_python_name(name: str, globals_table: dict[str, object], builtins_table: dict[str, object]) -> object | None:
+    """从解析上下文查找 Python 名称。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 依次在 globals 与 builtins 中查找给定名称。
+
+    使用示例:
+    - _lookup_python_name("MemorySpace", globals(), __builtins__)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    if name in globals_table:
+        return globals_table[name]
+    if name in builtins_table:
+        return builtins_table[name]
+    return None
+
+
+def _parse_attribute_object(
+    expr: py_ast.Attribute,
+    globals_table: dict[str, object],
+    builtins_table: dict[str, object],
+) -> object:
+    """解析属性形式的静态对象引用。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 支持 `MemorySpace.LM` 这类属性访问。
+
+    使用示例:
+    - _parse_attribute_object(py_ast.parse("MemorySpace.LM").body[0].value, globals(), __builtins__)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    if isinstance(expr.value, py_ast.Name):
+        base = _lookup_python_name(expr.value.id, globals_table, builtins_table)
+        if base is None:
+            _raise_parse_error("Unknown name", expr.value)
+    elif isinstance(expr.value, py_ast.Attribute):
+        base = _parse_attribute_object(expr.value, globals_table, builtins_table)
+    else:
+        _raise_parse_error("Unsupported attribute expression", expr)
+    if not hasattr(base, expr.attr):
+        _raise_parse_error("Unknown attribute", expr)
+    return getattr(base, expr.attr)
+
+
+def _parse_dma_call(
+    expr: py_ast.Call,
+    env: dict[str, object],
+    globals_table: dict[str, object],
+    builtins_table: dict[str, object],
+) -> object:
+    """解析 DSL 中的 `slice/deslice` 调用。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 将 `slice(...)` 解析为 `LoadAST`。
+    - 将 `deslice(...)` 解析为 `StoreAST`。
+
+    使用示例:
+    - _parse_dma_call(py_ast.parse("slice(A, [i], [n])").body[0].value, env, globals(), __builtins__)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    if not isinstance(expr.func, py_ast.Name):
+        _raise_parse_error("Unsupported call expression", expr)
+
+    call_name = expr.func.id
+    if call_name == "slice":
+        if len(expr.args) < 3 or len(expr.args) > 5:
+            _raise_parse_error("Unsupported slice arity", expr)
+        tensor = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+        if not isinstance(tensor, TensorAST):
+            _raise_parse_error("slice source must be TensorAST", expr.args[0])
+        offsets = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+        sizes = _parse_expr(expr.args[2], env, globals_table, builtins_table)
+        stride = _parse_expr(expr.args[3], env, globals_table, builtins_table) if len(expr.args) >= 4 else None
+        space = _parse_expr(expr.args[4], env, globals_table, builtins_table) if len(expr.args) >= 5 else None
+        if space is not None and not isinstance(space, MemorySpace):
+            _raise_parse_error("slice space must be MemorySpace", expr.args[4])
+        return LoadAST(
+            tensor=tensor,
+            offset=offsets,
+            sizes=sizes,
+            stride=stride,
+            space=space,
+            location=_location_from_node(expr),
+        )
+
+    if call_name == "deslice":
+        if len(expr.args) < 4 or len(expr.args) > 6:
+            _raise_parse_error("Unsupported deslice arity", expr)
+        value = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+        tensor = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+        if not isinstance(tensor, TensorAST):
+            _raise_parse_error("deslice target must be TensorAST", expr.args[1])
+        offsets = _parse_expr(expr.args[2], env, globals_table, builtins_table)
+        sizes = _parse_expr(expr.args[3], env, globals_table, builtins_table)
+        stride = _parse_expr(expr.args[4], env, globals_table, builtins_table) if len(expr.args) >= 5 else None
+        if len(expr.args) == 6:
+            extra_space = _parse_expr(expr.args[5], env, globals_table, builtins_table)
+            if not isinstance(extra_space, MemorySpace):
+                _raise_parse_error("deslice space must be MemorySpace", expr.args[5])
+        return StoreAST(
+            tensor=tensor,
+            offset=offsets,
+            sizes=sizes,
+            stride=stride,
+            value=value,
+            location=_location_from_node(expr),
+        )
+
+    _raise_parse_error("Unsupported call expression", expr)
+    return expr
+
+
+def _parse_expr(
+    expr: object,
+    env: dict[str, object],
+    globals_table: dict[str, object],
+    builtins_table: dict[str, object],
+) -> object:
     if isinstance(expr, py_ast.Name):
         if expr.id in env:
             return env[expr.id]
+        value = _lookup_python_name(expr.id, globals_table, builtins_table)
+        if isinstance(value, Memory):
+            return TensorAST(name=expr.id, memory=value, location=_location_from_node(expr))
+        if isinstance(value, SymbolDim):
+            return ScalarArgAST(name=expr.id, value_type=int, location=_location_from_node(expr))
+        if isinstance(value, (int, float, str)):
+            return ConstAST(value=value, location=_location_from_node(expr))
+        if value is not None:
+            return value
         _raise_parse_error("Unknown name", expr)
 
     if isinstance(expr, py_ast.Constant):
         if isinstance(expr.value, (int, float, str)):
             return ConstAST(value=expr.value, location=_location_from_node(expr))
         _raise_parse_error("Unsupported constant type", expr)
+
+    if isinstance(expr, py_ast.List):
+        return [_parse_expr(item, env, globals_table, builtins_table) for item in expr.elts]
+
+    if isinstance(expr, py_ast.Tuple):
+        return tuple(_parse_expr(item, env, globals_table, builtins_table) for item in expr.elts)
+
+    if isinstance(expr, py_ast.Attribute):
+        return _parse_attribute_object(expr, globals_table, builtins_table)
+
+    if isinstance(expr, py_ast.Call):
+        return _parse_dma_call(expr, env, globals_table, builtins_table)
 
     if isinstance(expr, py_ast.UnaryOp) and isinstance(expr.op, py_ast.USub):
         if isinstance(expr.operand, py_ast.Constant) and isinstance(expr.operand.value, (int, float)):
@@ -579,8 +751,8 @@ def _parse_expr(expr: object, env: dict[str, object]) -> object:
         op_type = type(expr.op)
         if op_type not in _BIN_OP_MAP:
             _raise_parse_error("Unsupported binary op", expr)
-        lhs = _parse_expr(expr.left, env)
-        rhs = _parse_expr(expr.right, env)
+        lhs = _parse_expr(expr.left, env, globals_table, builtins_table)
+        rhs = _parse_expr(expr.right, env, globals_table, builtins_table)
         return BinaryExprAST(op=_BIN_OP_MAP[op_type], lhs=lhs, rhs=rhs, location=_location_from_node(expr))
 
     if isinstance(expr, py_ast.Compare):
@@ -589,28 +761,39 @@ def _parse_expr(expr: object, env: dict[str, object]) -> object:
         op_type = type(expr.ops[0])
         if op_type not in _CMP_OP_MAP:
             _raise_parse_error("Unsupported compare op", expr)
-        lhs = _parse_expr(expr.left, env)
-        rhs = _parse_expr(expr.comparators[0], env)
+        lhs = _parse_expr(expr.left, env, globals_table, builtins_table)
+        rhs = _parse_expr(expr.comparators[0], env, globals_table, builtins_table)
         return CompareExprAST(op=_CMP_OP_MAP[op_type], lhs=lhs, rhs=rhs, location=_location_from_node(expr))
 
     _raise_parse_error("Unsupported expression", expr)
     return expr
 
 
-def _parse_for(stmt: py_ast.For, env: dict[str, object]) -> ForAST:
+def _parse_for(
+    stmt: py_ast.For,
+    env: dict[str, object],
+    globals_table: dict[str, object],
+    builtins_table: dict[str, object],
+) -> ForAST:
     if not isinstance(stmt.target, py_ast.Name):
         _raise_parse_error("Unsupported for target", stmt.target)
     if not isinstance(stmt.iter, py_ast.Call) or not isinstance(stmt.iter.func, py_ast.Name):
         _raise_parse_error("Unsupported for iterator", stmt.iter)
-    if stmt.iter.func.id != "range":
+    if stmt.iter.func.id not in {"range", "LoopRange", "loop"}:
         _raise_parse_error("Unsupported for iterator", stmt.iter)
     args = stmt.iter.args
     if len(args) == 1:
         start_expr = ConstAST(value=0, location=_location_from_node(stmt))
-        end_expr = _parse_expr(args[0], env)
+        end_expr = _parse_expr(args[0], env, globals_table, builtins_table)
+        step_expr = ConstAST(value=1, location=_location_from_node(stmt))
     elif len(args) == 2:
-        start_expr = _parse_expr(args[0], env)
-        end_expr = _parse_expr(args[1], env)
+        start_expr = _parse_expr(args[0], env, globals_table, builtins_table)
+        end_expr = _parse_expr(args[1], env, globals_table, builtins_table)
+        step_expr = ConstAST(value=1, location=_location_from_node(stmt))
+    elif len(args) == 3:
+        start_expr = _parse_expr(args[0], env, globals_table, builtins_table)
+        end_expr = _parse_expr(args[1], env, globals_table, builtins_table)
+        step_expr = _parse_expr(args[2], env, globals_table, builtins_table)
     else:
         _raise_parse_error("Unsupported range arity", stmt.iter)
 
@@ -621,31 +804,36 @@ def _parse_for(stmt: py_ast.For, env: dict[str, object]) -> ForAST:
     for body_stmt in stmt.body:
         if isinstance(body_stmt, py_ast.Return):
             _raise_parse_error("Return inside for-loop is unsupported", body_stmt)
-        body_statements.append(_parse_stmt(body_stmt, env))
+        body_statements.append(_parse_stmt(body_stmt, env, globals_table, builtins_table))
     if previous is None:
         env.pop(var.name, None)
     else:
         env[var.name] = previous
     body_location = _location_from_node(stmt.body[0]) if stmt.body else _location_from_node(stmt)
     body = BlockAST(statements=body_statements, location=body_location)
-    return ForAST(var=var, start=start_expr, end=end_expr, body=body, location=_location_from_node(stmt))
+    return ForAST(var=var, start=start_expr, end=end_expr, step=step_expr, body=body, location=_location_from_node(stmt))
 
 
-def _parse_stmt(stmt: py_ast.stmt, env: dict[str, object]) -> object:
+def _parse_stmt(
+    stmt: py_ast.stmt,
+    env: dict[str, object],
+    globals_table: dict[str, object],
+    builtins_table: dict[str, object],
+) -> object:
     if isinstance(stmt, py_ast.Assign):
         if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], py_ast.Name):
             _raise_parse_error("Unsupported assignment target", stmt)
-        value = _parse_expr(stmt.value, env)
+        value = _parse_expr(stmt.value, env, globals_table, builtins_table)
         env[stmt.targets[0].id] = value
         return value
     if isinstance(stmt, py_ast.Return):
         if stmt.value is None:
             _raise_parse_error("Return value is required", stmt)
-        return _parse_expr(stmt.value, env)
+        return _parse_expr(stmt.value, env, globals_table, builtins_table)
     if isinstance(stmt, py_ast.For):
-        return _parse_for(stmt, env)
+        return _parse_for(stmt, env, globals_table, builtins_table)
     if isinstance(stmt, py_ast.Expr):
-        return _parse_expr(stmt.value, env)
+        return _parse_expr(stmt.value, env, globals_table, builtins_table)
     _raise_parse_error("Unsupported syntax", stmt)
     return stmt
 
@@ -706,14 +894,14 @@ def _parse_function_impl(
     statements: list[object] = []
     has_return = False
     for stmt in func_def.body:
-        parsed_stmt = _parse_stmt(stmt, env)
+        parsed_stmt = _parse_stmt(stmt, env, globals_table, builtins_table)
         statements.append(parsed_stmt)
         if isinstance(stmt, py_ast.Return):
             has_return = True
 
-    if not has_return:
+    if func_def.returns is not None and not has_return:
         raise AstParseError("Missing return statement", [Diagnostic("Missing return statement", _location_from_node(func_def))])
-    if not isinstance(func_def.body[-1], py_ast.Return):
+    if has_return and not isinstance(func_def.body[-1], py_ast.Return):
         raise AstParseError("Return statement must be last", [Diagnostic("Return statement must be last", _location_from_node(func_def.body[-1]))])
 
     body_location = _location_from_node(func_def.body[0]) if func_def.body else _location_from_node(func_def)

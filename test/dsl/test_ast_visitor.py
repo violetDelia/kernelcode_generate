@@ -52,7 +52,8 @@ from kernel_gen.dsl.ast import (
 from kernel_gen.dsl.ast_visitor import AstVisitor, AstVisitorError
 from kernel_gen.dsl.emit_mlir import EmitContext, _LoweringError, _memory_to_nn_type, emit_mlir as emit_node_mlir
 from kernel_gen.dsl.mlir_gen import build_func_op, build_func_op_from_ast
-from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.memory import Memory, MemorySpace
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
 
@@ -838,6 +839,79 @@ def test_for_ast_lowering_emits_loads() -> None:
     func_op = build_func_op_from_ast(func_ast)
     ops = [op for op in func_op.body.block.ops if isinstance(op, DmaLoadOp)]
     assert len(ops) == 2
+
+
+# AST-009
+# 创建者: OpenAI
+# 最后一次更改: OpenAI
+# 最近一次运行测试时间: 2026-03-21 23:59:00 +0800
+# 最近一次运行成功时间: 2026-03-21 23:59:00 +0800
+# 功能说明: 验证未注解 SymbolDim 参数可按标量参数解析。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_infers_symboldim_arguments_without_annotations
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_parse_function_infers_symboldim_arguments_without_annotations(monkeypatch: pytest.MonkeyPatch) -> None:
+    def loop_fn(start, end, step, x: "Tensor[f32, N]"):
+        return x
+
+    monkeypatch.setitem(loop_fn.__globals__, "start", SymbolDim("start"))
+    monkeypatch.setitem(loop_fn.__globals__, "end", SymbolDim("end"))
+    monkeypatch.setitem(loop_fn.__globals__, "step", SymbolDim("step"))
+    func_ast = parse_function(loop_fn)
+    assert [item.name for item in func_ast.inputs[:3]] == ["start", "end", "step"]
+    assert all(isinstance(item, ScalarArgAST) for item in func_ast.inputs[:3])
+
+
+# MGEN-015
+# 创建者: OpenAI
+# 最后一次更改: OpenAI
+# 最近一次运行测试时间: 2026-03-21 23:59:00 +0800
+# 最近一次运行成功时间: 2026-03-21 23:59:00 +0800
+# 功能说明: 验证 LoopRange + slice/deslice + 无 return 场景可生成 DMA IR。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_supports_symbolic_for_loop_dma_without_return
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_supports_symbolic_for_loop_dma_without_return(monkeypatch: pytest.MonkeyPatch) -> None:
+    from kernel_gen.operation.dma import deslice, slice
+    from kernel_gen.operation.scf import LoopRange
+
+    A = Memory(["L"], NumericType.Float32)
+    B = Memory(["L"], NumericType.Float32)
+    C = Memory(["L"], NumericType.Float32)
+    start = SymbolDim("start")
+    end = SymbolDim("end")
+    step = SymbolDim("step")
+
+    def add(A, B, C, end, start, step):
+        for index in LoopRange(start, end, step):
+            SA = slice(A, [index], [step], [1], MemorySpace.LM)
+            SB = slice(B, [index], [step], [1], MemorySpace.LM)
+            SC = SA + SB
+            deslice(SC, C, [index], [step], [1], MemorySpace.LM)
+
+    monkeypatch.setitem(add.__globals__, "A", A)
+    monkeypatch.setitem(add.__globals__, "B", B)
+    monkeypatch.setitem(add.__globals__, "C", C)
+    monkeypatch.setitem(add.__globals__, "start", start)
+    monkeypatch.setitem(add.__globals__, "end", end)
+    monkeypatch.setitem(add.__globals__, "step", step)
+    monkeypatch.setitem(add.__globals__, "MemorySpace", MemorySpace)
+    monkeypatch.setitem(add.__globals__, "slice", slice)
+    monkeypatch.setitem(add.__globals__, "deslice", deslice)
+    monkeypatch.setitem(add.__globals__, "LoopRange", LoopRange)
+
+    func_op = build_func_op(add)
+    assert isinstance(func_op, func.FuncOp)
+    assert len(list(func_op.function_type.outputs)) == 0
+    load_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaLoadOp)]
+    store_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaStoreOp)]
+    assert len(load_ops) == 2
+    assert len(store_ops) == 1
+    assert load_ops[0].space.space.data == "local"
+    assert load_ops[0].offsets.data[0].data == "index"
+    assert load_ops[0].sizes.data[0].data == "step"
 
 
 # MGEN-011

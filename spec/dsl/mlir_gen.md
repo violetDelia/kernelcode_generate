@@ -33,6 +33,7 @@
 - 不负责 MLIR 文本打印或后端代码生成。
 - 不定义节点级发射细节，节点发射规则由 `emit_mlir` 约束。
 - 不做优化或自动修复非法 IR。
+- 当函数体仅包含 `for` 循环且没有 `return` 时，输出 `func.func` 允许零返回值。
 
 ## 公开接口
 
@@ -59,6 +60,7 @@ func_op = build_func_op(add)
 注意事项：
 
 - 解析失败或发射失败必须抛出可定位的错误。
+- 允许 `for` 循环内包含 `dma.slice`/`dma.deslice` 相关语义（由 `emit_mlir` 负责具体发射）。
 
 返回与限制：
 
@@ -139,6 +141,7 @@ builtin.module {
   - 验证 `build_func_op(...)` 生成 `func.func`。
   - 验证函数签名与返回值类型与 AST 一致。
   - 通过测试辅助封装验证 `func.func` 的结构输出（不改变本模块的边界）。
+  - 覆盖无返回 `for` 循环与 `slice/deslice` 的生成能力。
 - 功能与用例清单：
   - MGEN-001：`build_func_op(...)` 返回 `func.func`。（`test_build_func_op_returns_func_op`）
   - MGEN-002：参数顺序与 AST 一致。（`test_build_func_op_from_ast_preserves_arg_order`）
@@ -154,3 +157,4 @@ builtin.module {
   - MGEN-012：前置维度隐式 broadcast。（`test_tensor_binary_prepend_broadcast_lowering`）
   - MGEN-013：比较表达式隐式 broadcast。（`test_compare_implicit_broadcast_lowering`）
   - MGEN-014：不可 broadcast 报错与定位。（`test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics`）
+  - MGEN-015：LoopRange + slice/deslice + 无 return 场景生成 DMA IR。（`test_build_func_op_supports_symbolic_for_loop_dma_without_return`）

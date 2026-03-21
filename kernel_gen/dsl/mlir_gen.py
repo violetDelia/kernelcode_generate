@@ -127,20 +127,26 @@ def _build_func_op_from_ast_impl(
     config = config or {}
     arg_types, type_map = _build_signature_types(func_ast)
     statements = _ensure_supported_statements(func_ast)
-    return_expr = statements[-1]
-    result_type = _infer_expr_type(return_expr, dict(type_map))
-    _validate_return_type(func_ast, result_type)
+    result_types: list[object] = []
+    if func_ast.outputs:
+        return_expr = statements[-1]
+        result_type = _infer_expr_type(return_expr, dict(type_map))
+        _validate_return_type(func_ast, result_type)
+        result_types = [result_type]
 
-    func_type = FunctionType.from_lists(arg_types, [result_type])
+    func_type = FunctionType.from_lists(arg_types, result_types)
     block = Block(arg_types=arg_types)
     func_op = func.FuncOp(func_ast.name, func_type, Region(block))
 
     ctx = EmitContext(builder=block, symbols={}, types=dict(type_map), config=config)
     visitor = AstVisitor(config=config)
     return_value = visitor.visit_function(func_ast, ctx)
-    if return_value is None:
-        raise _LoweringError("Function body is empty", location=func_ast.location)
-    block.add_op(func.ReturnOp(return_value))
+    if func_ast.outputs:
+        if return_value is None:
+            raise _LoweringError("Function body is empty", location=func_ast.location)
+        block.add_op(func.ReturnOp(return_value))
+    else:
+        block.add_op(func.ReturnOp())
     return func_op
 
 

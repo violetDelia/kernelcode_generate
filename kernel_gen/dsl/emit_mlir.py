@@ -177,6 +177,8 @@ def _resolve_index_expr(expr: object, ctx: EmitContext) -> int | str:
         if isinstance(expr.value, (int, str)):
             return expr.value
         raise _LoweringError("Index must be int or str", location=expr.location)
+    if isinstance(expr, ScalarArgAST):
+        return expr.name
     if isinstance(expr, VarAST):
         loop_vars = _get_loop_vars(ctx)
         if expr.name in loop_vars:
@@ -219,6 +221,96 @@ def _build_stride_attrs(
         if not isinstance(entry, IntAttr) or entry.data != 1:
             raise _LoweringError("Only unit stride is supported", location=location)
     return stride
+
+
+def _resolve_static_index_expr(expr: object, location: SourceLocation | None = None) -> int | str:
+    """解析类型推导阶段使用的索引表达式。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 支持 `ConstAST`、`ScalarArgAST`、`VarAST` 以及直接的 `int|str`。
+
+    使用示例:
+    - _resolve_static_index_expr(ScalarArgAST(name="n", value_type=int))
+
+    关联文件:
+    - spec: spec/dsl/emit_mlir.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/emit_mlir.py
+    """
+
+    if isinstance(expr, ConstAST):
+        if isinstance(expr.value, (int, str)):
+            return expr.value
+        raise _LoweringError("Index must be int or str", location=expr.location)
+    if isinstance(expr, (ScalarArgAST, VarAST)):
+        return expr.name
+    if isinstance(expr, (int, str)):
+        return expr
+    raise _LoweringError("Unsupported index expression", location=location or getattr(expr, "location", None))
+
+
+def _build_static_index_list(
+    value: object | None,
+    rank: int,
+    *,
+    default_value: int,
+    location: SourceLocation | None = None,
+) -> list[Attribute]:
+    """构造类型推导阶段使用的索引属性列表。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 将静态或符号索引表达式转成 `IntAttr/StringAttr`。
+
+    使用示例:
+    - _build_static_index_list([ScalarArgAST(name="n", value_type=int)], 1, default_value=1)
+
+    关联文件:
+    - spec: spec/dsl/emit_mlir.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/emit_mlir.py
+    """
+
+    if value is None:
+        values = [default_value for _ in range(rank)]
+    elif isinstance(value, (list, tuple)):
+        if len(value) != rank:
+            raise _LoweringError("Index rank mismatch", location=location)
+        values = [_resolve_static_index_expr(entry, location) for entry in value]
+    else:
+        scalar = _resolve_static_index_expr(value, location)
+        values = [scalar for _ in range(rank)]
+    return [_dim_to_attr(item) for item in values]
+
+
+def _memory_space_from_ast(space: MemorySpace | None, fallback: NnMemorySpaceAttr) -> NnMemorySpaceAttr:
+    """将 AST 中的 `MemorySpace` 映射为 nn dialect space attribute。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 未显式指定时返回 fallback。
+    - 显式指定时转换到 `NnMemorySpaceAttr`。
+
+    使用示例:
+    - _memory_space_from_ast(MemorySpace.LM, source_type.space)
+
+    关联文件:
+    - spec: spec/dsl/emit_mlir.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/emit_mlir.py
+    """
+
+    if space is None:
+        return fallback
+    space_name = _MEMORY_SPACE_MAP.get(space, "global")
+    return NnMemorySpaceAttr.from_name(space_name)
 
 
 def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
@@ -342,8 +434,17 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
         tensor_key = _expr_key(expr.tensor)
         if tensor_key not in type_map or not isinstance(type_map[tensor_key], NnMemoryType):
             raise _LoweringError("Unknown input reference", location=getattr(expr.tensor, "location", None))
-        type_map[expr_key] = type_map[tensor_key]
-        return type_map[tensor_key]
+        source_type = type_map[tensor_key]
+        rank = len(source_type.shape.data)
+        if expr.sizes is None:
+            shape_attr = source_type.shape
+        else:
+            shape_attr = ArrayAttr(_build_static_index_list(expr.sizes, rank, default_value=1, location=expr.location))
+        stride_attr = ArrayAttr(_build_default_stride_attrs(shape_attr.data))
+        space_attr = _memory_space_from_ast(expr.space, source_type.space)
+        result_type = NnMemoryType(shape_attr, stride_attr, source_type.element_type, space_attr)
+        type_map[expr_key] = result_type
+        return result_type
     if isinstance(expr, StoreAST):
         raise _LoweringError("StoreAST does not produce a value", location=expr.location)
     if isinstance(expr, ForAST):
@@ -409,9 +510,23 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         source_type = _expect_memory_value(source, expr.location)
         rank = len(source_type.shape.data)
         offsets = _build_index_attrs(expr.offset, rank, ctx, location=expr.location)
-        sizes = source_type.shape
+        sizes = (
+            ArrayAttr(_build_static_index_list(expr.sizes, rank, default_value=1, location=expr.location))
+            if expr.sizes is not None
+            else source_type.shape
+        )
         strides = _build_stride_attrs(expr.stride, rank, ctx, location=expr.location)
-        load_op = DmaLoadOp(source, offsets, sizes, strides, source_type, source_type.space)
+        result_type = _infer_expr_type(expr, ctx.types)
+        if not isinstance(result_type, NnMemoryType):
+            raise _LoweringError("LoadAST result must be nn.memory", location=expr.location)
+        load_op = DmaLoadOp(
+            source,
+            offsets,
+            sizes,
+            strides,
+            result_type,
+            _memory_space_from_ast(expr.space, source_type.space),
+        )
         ctx.builder.add_op(load_op)
         ctx._set_cache(expr_key, load_op.result)
         return load_op.result
@@ -500,7 +615,11 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
         if len(value_type.shape.data) != rank:
             raise _LoweringError("Store source rank mismatch", location=node.location)
         offsets = _build_index_attrs(node.offset, rank, ctx, location=node.location)
-        sizes = value_type.shape
+        sizes = (
+            ArrayAttr(_build_static_index_list(node.sizes, rank, default_value=1, location=node.location))
+            if node.sizes is not None
+            else value_type.shape
+        )
         strides = _build_stride_attrs(node.stride, rank, ctx, location=node.location)
         store_op = DmaStoreOp(value, target, offsets, sizes, strides)
         ctx.builder.add_op(store_op)
@@ -509,13 +628,19 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
         loop_vars = _get_loop_vars(ctx)
         start_value = _resolve_index_expr(node.start, ctx)
         end_value = _resolve_index_expr(node.end, ctx)
-        if not isinstance(start_value, int) or not isinstance(end_value, int):
-            raise _LoweringError("ForAST bounds must be int", location=node.location)
+        step_expr = node.step if node.step is not None else ConstAST(1, location=node.location)
+        step_value = _resolve_index_expr(step_expr, ctx)
         previous = loop_vars.get(node.var.name)
         base_values = ctx._snapshot_cache()
         last_value = None
-        for index in range(start_value, end_value):
-            loop_vars[node.var.name] = index
+        if isinstance(start_value, int) and isinstance(end_value, int) and isinstance(step_value, int):
+            for index in range(start_value, end_value, step_value):
+                loop_vars[node.var.name] = index
+                ctx._restore_cache(base_values)
+                for stmt in node.body.statements:
+                    last_value = emit_mlir(stmt, ctx)
+        else:
+            loop_vars[node.var.name] = node.var.name
             ctx._restore_cache(base_values)
             for stmt in node.body.statements:
                 last_value = emit_mlir(stmt, ctx)
