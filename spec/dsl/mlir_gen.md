@@ -11,9 +11,8 @@
 - 创建者：`榕`
 - 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
-- `功能实现`：[`kernel_gen/dsl/mlir_gen.py`](../../kernel_gen/dsl/mlir_gen.py)
+- `功能实现`：[`kernel_gen/dsl/mlir_gen.py`](../../kernel_gen/dsl/mlir_gen.py)、[`python/dsl/mlir_gen.py`](../../python/dsl/mlir_gen.py)（统一规范覆盖两条实现入口）
 - `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
-- [immutable]`功能实现`：[`python/dsl/ast_visitor.py`](../../python/dsl/mlir_gen.py)
 
 ## 依赖
 
@@ -34,6 +33,7 @@
 - 不定义节点级发射细节，节点发射规则由 `emit_mlir` 约束。
 - 不做优化或自动修复非法 IR。
 - 当函数体仅包含 `for` 循环且没有 `return` 时，输出 `func.func` 允许零返回值。
+- 如需 `builtin.module` 封装，由调用方完成。
 
 ## 公开接口
 
@@ -93,45 +93,6 @@ func_op = build_func_op_from_ast(func_ast)
 返回与限制：
 
 - 返回 `func.func` op。
-
-## 额外补充
-
-- 若需要 module 封装，由上层调用方完成。
-- 该文件约束的输出为 `func.func`；示例中的 module 结构仅作语义示意。
-
-
-## [immutable]示例
-
-DSL 输入示例：
-
-```python
-from python.symbol_variable.memory import Memory
-from python.symbol_variable.type import NumericType
-
-A = Memory(["N", 32], NumericType.Float32, stride=["C", 1])
-B = Memory(["N", 32], NumericType.Float32, stride=["C", 1])
-
-def func_B(A, B):
-    C = A + B
-    return C
-```
-
-期望的结构化文本语义示例：
-
-```mlir
-builtin.module {
-  func.func @func_B(%arg0: !nn.memory<[N, 32], [C, 1], f32, #nn.space<global>>, %arg1: !nn.memory<[N, 32], [C, 1], f32, #nn.space<global>>) -> !nn.memory<[N, 32], [C, 1], f32, #nn.space<global>> {
-    %0 = "nn.add"(%arg0, %arg1) {space = #nn.space<global>} : (!nn.memory<[N, 32], [C, 1], f32, #nn.space<global>>, !nn.memory<[N, 32], [C, 1], f32, #nn.space<global>>) -> !nn.memory<[N, 32], [C, 1], f32, #nn.space<global>>
-    func.return %0 : !nn.memory<[N, 32], [C, 1], f32, #nn.space<global>>
-  }
-}
-```
-
-说明：
-
-- 这里强调的是“函数 -> `func.func` -> op / value”的结构与约束，不要求文本细节必须和当前 printer 的空格、换行完全一致。
-- 示例中使用 `nn.add` 只是因为这是当前已有实现，不表示 `mlir_gen` 只能输出 `nn` dialect。
-- 具体文本细节以当前 printer 输出为准，但结构必须满足本 spec。
 
 ## 测试
 
