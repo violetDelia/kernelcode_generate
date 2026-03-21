@@ -9,5 +9,7 @@
 - 变更文件：
   - `spec/include/api/Nn.md`
   - `spec/include/cpu/Nn.md`
+- 合入提交：
+  - `34282ee`
 - 测试：
   - 未执行（合并任务按要求不测试）。
