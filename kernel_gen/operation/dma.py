@@ -4,10 +4,10 @@
 最后一次更改: 小李飞刀
 
 功能说明:
-- 提供 Memory 的数据搬运与显式转换 API，包括 alloc/free/copy/load/store/slice/deslice/cast。
+- 提供 Memory 的数据搬运、视图变换与显式转换 API，包括 alloc/free/copy/load/store/slice/deslice/view/flatten/cast。
 
 使用示例:
-- from kernel_gen.operation.dma import copy, cast
+- from kernel_gen.operation.dma import copy, cast, view, flatten
 - copy(src, dst)
 - cast(src, NumericType.Float16)
 
@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 from kernel_gen.symbol_variable.type import NumericType
 
@@ -259,6 +260,82 @@ def _clone_symbol_list(value: SymbolShape | None) -> SymbolShape | None:
     return SymbolShape(value.get_values())
 
 
+def _is_contiguous(memory: Memory) -> bool:
+    """判断 Memory 是否为连续行主序布局。
+
+    创建者: ChatGPT
+    最后一次更改: ChatGPT
+
+    功能说明:
+    - 将当前 stride 与默认连续 stride 比较。
+
+    使用示例:
+    - _is_contiguous(Memory([2, 3], NumericType.Float32))
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: kernel_gen/operation/dma.py
+    """
+    if memory.stride is None:
+        return False
+    default_stride = Memory._default_stride(memory.shape)
+    current = memory.stride.get_shape()
+    expected = default_stride.get_shape()
+    return len(current) == len(expected) and all(lhs == rhs for lhs, rhs in zip(current, expected))
+
+
+def _shape_numel(shape: SymbolShape) -> SymbolDim:
+    """计算 shape 的元素总数表达式。
+
+    创建者: ChatGPT
+    最后一次更改: ChatGPT
+
+    功能说明:
+    - 静态维度返回静态乘积。
+    - 动态维度返回无空格 `*` 的符号乘法表达式。
+
+    使用示例:
+    - _shape_numel(SymbolShape([2, 3, 4]))
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: kernel_gen/operation/dma.py
+    """
+    total = SymbolDim(1)
+    for dim in shape.get_shape():
+        total = total * dim
+    return total
+
+
+def _ensure_view_numel_compatible(source: Memory, shape: SymbolShape) -> None:
+    """在可判定时校验 view 前后元素总数一致。
+
+    创建者: ChatGPT
+    最后一次更改: ChatGPT
+
+    功能说明:
+    - 若乘积表达式可化简为确定不相等，则抛 ValueError。
+    - 动态情况下无法判定时，保持由调用方保证。
+
+    使用示例:
+    - _ensure_view_numel_compatible(src, SymbolShape([6, 4]))
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: kernel_gen/operation/dma.py
+    """
+    source_numel = _shape_numel(source.shape).get_symbol()
+    target_numel = _shape_numel(shape).get_symbol()
+    diff = source_numel - target_numel
+    if diff == 0:
+        return
+    if not diff.free_symbols:
+        raise ValueError("View shape numel mismatch")
+
+
 def _is_supported_cast(source: NumericType, target: NumericType) -> bool:
     """判断是否支持 dtype 转换。
 
@@ -446,6 +523,75 @@ def deslice(
     - 功能实现: kernel_gen/operation/dma.py
     """
     return store(source, target, offsets, sizes, strides=strides)
+
+
+def view(source: object, shape, stride=None) -> Memory:
+    """返回 source 的视图变换结果。
+
+    创建者: ChatGPT
+    最后一次更改: ChatGPT
+
+    功能说明:
+    - 仅调整 `shape/stride` 元信息，不做数据搬运。
+    - 未显式提供 stride 时，要求 source 为连续布局。
+
+    使用示例:
+    - view(Memory([2, 3, 4], NumericType.Float32), shape=[6, 4])
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: kernel_gen/operation/dma.py
+    """
+    src = _ensure_memory(source, "source")
+    shape_value = _ensure_shape_value(shape, "shape")
+    _ensure_view_numel_compatible(src, shape_value)
+    if stride is None:
+        if not _is_contiguous(src):
+            raise ValueError("View requires contiguous source when stride is omitted")
+        stride_value = None
+    else:
+        stride_value = _ensure_shape_value(stride, "stride")
+        if len(stride_value) != len(shape_value):
+            raise ValueError("stride rank mismatch")
+    return Memory(
+        _clone_symbol_list(shape_value),
+        src.dtype,
+        space=src.space,
+        stride=_clone_symbol_list(stride_value),
+        format=src.format,
+    )
+
+
+def flatten(source: object) -> Memory:
+    """将 source 展平成一维视图。
+
+    创建者: ChatGPT
+    最后一次更改: ChatGPT
+
+    功能说明:
+    - 要求 source 为连续布局。
+    - 返回 `shape=[prod(shape)]`、`stride=[1]` 的新 Memory。
+
+    使用示例:
+    - flatten(Memory([2, 3, 4], NumericType.Float32))
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: kernel_gen/operation/dma.py
+    """
+    src = _ensure_memory(source, "source")
+    if not _is_contiguous(src):
+        raise ValueError("Flatten requires contiguous source")
+    flattened = _shape_numel(src.shape)
+    return Memory(
+        [flattened],
+        src.dtype,
+        space=src.space,
+        stride=[1],
+        format=src.format,
+    )
 
 
 def cast(source: object, dtype: NumericType) -> Memory:

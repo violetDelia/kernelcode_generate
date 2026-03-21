@@ -26,7 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.operation.dma import alloc, cast, copy, deslice, free, load, slice, store
+from kernel_gen.operation.dma import alloc, cast, copy, deslice, flatten, free, load, slice, store, view
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.type import NumericType
 
@@ -180,7 +180,8 @@ def test_load_result_space() -> None:
     assert tile.shape.get_values() == [32, 32]
     assert tile.dtype is NumericType.Float32
     assert tile.space is MemorySpace.SM
-    assert tile.stride is None
+    assert tile.stride is not None
+    assert tile.stride.get_values() == [32, 1]
 
 
 # TC-OP-DMA-004
@@ -197,7 +198,8 @@ def test_slice_result_shape() -> None:
     src = Memory(["M", "N"], NumericType.Float32)
     sub = slice(src, offsets=[0, 16], sizes=[8, 8], strides=[1, 1], space=MemorySpace.LM)
     assert sub.shape.get_values() == [8, 8]
-    assert sub.stride is None
+    assert sub.stride is not None
+    assert sub.stride.get_values() == [8, 1]
 
 
 # TC-OP-DMA-005
@@ -332,3 +334,101 @@ def test_cast_unsupported_conversion() -> None:
     src = Memory([1, 2], NumericType.Float32)
     with pytest.raises(NotImplementedError):
         cast(src, NumericType.Int32)
+
+
+# TC-OP-DMA-014
+# 创建者: ChatGPT
+# 最后一次更改: ChatGPT
+# 最近一次运行测试时间: 2026-03-21 00:00:00 +0800
+# 最近一次运行成功时间: 2026-03-21 00:00:00 +0800
+# 功能说明: 验证 view 返回新 Memory 并继承 dtype/space/format。
+# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_view_returns_memory
+# 对应功能实现文件路径: kernel_gen/operation/dma.py
+# 对应 spec 文件路径: spec/operation/dma.md
+# 对应测试文件路径: test/operation/test_operation_dma.py
+def test_view_returns_memory() -> None:
+    src = Memory([2, 3, 4], NumericType.Float32, space=MemorySpace.SM)
+    dst = view(src, shape=[6, 4], stride=[4, 1])
+    assert isinstance(dst, Memory)
+    assert dst.shape.get_values() == [6, 4]
+    assert dst.stride is not None
+    assert dst.stride.get_values() == [4, 1]
+    assert dst.dtype is NumericType.Float32
+    assert dst.space is MemorySpace.SM
+    assert dst.format is src.format
+
+
+# TC-OP-DMA-015
+# 创建者: ChatGPT
+# 最后一次更改: ChatGPT
+# 最近一次运行测试时间: 2026-03-21 00:00:00 +0800
+# 最近一次运行成功时间: 2026-03-21 00:00:00 +0800
+# 功能说明: 验证 view 在连续布局下按默认规则生成行主序 stride。
+# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_view_default_stride_contiguous
+# 对应功能实现文件路径: kernel_gen/operation/dma.py
+# 对应 spec 文件路径: spec/operation/dma.md
+# 对应测试文件路径: test/operation/test_operation_dma.py
+def test_view_default_stride_contiguous() -> None:
+    src = Memory([2, 3, 4], NumericType.Float32)
+    dst = view(src, shape=[6, 4])
+    assert dst.shape.get_values() == [6, 4]
+    assert dst.stride is not None
+    assert dst.stride.get_values() == [4, 1]
+
+
+# TC-OP-DMA-016
+# 创建者: ChatGPT
+# 最后一次更改: ChatGPT
+# 最近一次运行测试时间: 2026-03-21 00:00:00 +0800
+# 最近一次运行成功时间: 2026-03-21 00:00:00 +0800
+# 功能说明: 验证 view 非法 shape/stride 或显式省略 stride 且源非连续时报错。
+# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_view_invalid_shape_or_stride
+# 对应功能实现文件路径: kernel_gen/operation/dma.py
+# 对应 spec 文件路径: spec/operation/dma.md
+# 对应测试文件路径: test/operation/test_operation_dma.py
+def test_view_invalid_shape_or_stride() -> None:
+    src = Memory([2, 3, 4], NumericType.Float32)
+    with pytest.raises(ValueError):
+        view(src, shape="24")
+    with pytest.raises(ValueError):
+        view(src, shape=[6, 4], stride=[4])
+    non_contiguous = Memory([2, 3, 4], NumericType.Float32, stride=[100, 4, 1])
+    with pytest.raises(ValueError):
+        view(non_contiguous, shape=[6, 4])
+
+
+# TC-OP-DMA-017
+# 创建者: ChatGPT
+# 最后一次更改: ChatGPT
+# 最近一次运行测试时间: 2026-03-21 00:00:00 +0800
+# 最近一次运行成功时间: 2026-03-21 00:00:00 +0800
+# 功能说明: 验证 flatten 在连续布局下返回一维 shape 与 stride=[1]。
+# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_flatten_contiguous
+# 对应功能实现文件路径: kernel_gen/operation/dma.py
+# 对应 spec 文件路径: spec/operation/dma.md
+# 对应测试文件路径: test/operation/test_operation_dma.py
+def test_flatten_contiguous() -> None:
+    src = Memory(["M", "K", "N"], NumericType.Float32, space=MemorySpace.LM)
+    dst = flatten(src)
+    assert dst.shape.get_values() == ["K*M*N"]
+    assert dst.stride is not None
+    assert dst.stride.get_values() == [1]
+    assert dst.dtype is NumericType.Float32
+    assert dst.space is MemorySpace.LM
+    assert dst.format is src.format
+
+
+# TC-OP-DMA-018
+# 创建者: ChatGPT
+# 最后一次更改: ChatGPT
+# 最近一次运行测试时间: 2026-03-21 00:00:00 +0800
+# 最近一次运行成功时间: 2026-03-21 00:00:00 +0800
+# 功能说明: 验证 flatten 对非连续布局显式报错。
+# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_flatten_non_contiguous_rejected
+# 对应功能实现文件路径: kernel_gen/operation/dma.py
+# 对应 spec 文件路径: spec/operation/dma.md
+# 对应测试文件路径: test/operation/test_operation_dma.py
+def test_flatten_non_contiguous_rejected() -> None:
+    src = Memory([2, 3, 4], NumericType.Float32, stride=[100, 4, 1])
+    with pytest.raises(ValueError):
+        flatten(src)
