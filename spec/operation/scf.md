@@ -11,8 +11,8 @@
 - 创建者：`摸鱼小分队`
 - 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/operation/scf.md`](../../spec/operation/scf.md)
-- `功能实现`：无（当前未实现）
-- `test`：无（当前未提供测试）
+- `功能实现`：[`kernel_gen/operation/scf.py`](../../kernel_gen/operation/scf.py)
+- `test`：[`test/operation/test_operation_scf.py`](../../test/operation/test_operation_scf.py)
 
 ## 依赖
 
@@ -79,10 +79,21 @@ for j in loop(K, M, SymbolDim("S")):
 - 返回可迭代对象 `LoopRange`（实现名可自定义，但语义需一致）。
 - 对纯整数输入，迭代行为与 `range(start, end, step)` 等价。
 - 对含 `SymbolDim` 输入，迭代变量的符号表达遵循 `start + k * step` 的语义约束，其中 `k` 为非负整数索引。
+- 返回对象需公开只读的 `start/end/step` 属性（或等价访问接口），以便上层 DSL 保留范围表达并用于测试校验。
 
 ## 测试
 
-- 测试文件：无（当前未提供测试实现）
-- 执行命令：无（当前未提供测试实现）
-- 测试目标：无（当前未提供测试实现）
-- 功能与用例清单：无（当前未提供测试实现）
+- 测试文件：[`test/operation/test_operation_scf.py`](../../test/operation/test_operation_scf.py)
+- 执行命令：`pytest -q test/operation/test_operation_scf.py`
+- 测试目标：
+  - 纯整数 `loop` 与 `range(start, end, step)` 的半开区间语义一致。
+  - `SymbolDim` 输入可构建 `LoopRange` 并保留 `start/end/step` 语义。
+  - `step == 0` 触发 `ValueError`。
+  - 非法类型输入触发 `TypeError`。
+  - 边界/半开区间语义与正负步长的停止条件一致。
+- 功能与用例清单：
+  - TC-OP-SCF-001：纯整数 `loop(0, 4, 1)` 产生 `[0, 1, 2, 3]`。
+  - TC-OP-SCF-002：纯整数 `loop(4, 0, -1)` 产生 `[4, 3, 2, 1]`。
+  - TC-OP-SCF-003：`SymbolDim` 输入可返回 `LoopRange`，且 `start/end/step` 保留原值。
+  - TC-OP-SCF-004：`step == 0` 抛出 `ValueError`。
+  - TC-OP-SCF-005：`start/end/step` 存在非法类型时抛出 `TypeError`。
