@@ -2,9 +2,9 @@
 
 ## 功能简介
 
-定义 `api::Memory<T, Rank>` 的 API 标准与配套 `api::MemoryFormat`、`api::MemorySpace` 枚举，用于描述多维内存视图的元信息与访问接口。该规范不绑定具体后端实现，也不负责内存分配、释放、拷贝或运行时边界检查。
+定义 `Memory<T, Rank>` 的 API 标准与配套 `MemoryFormat`、`MemorySpace` 枚举，用于描述多维内存视图的元信息与访问接口。该规范不绑定具体后端实现，也不负责内存分配、释放、拷贝或运行时边界检查。
 
-- `api::Memory<T, Rank>` 是视图类型，仅保存 `data`、`shape`、`stride`、`format`、`space` 元信息，不拥有底层存储。
+- `Memory<T, Rank>` 是视图类型，仅保存 `data`、`shape`、`stride`、`format`、`space` 元信息，不拥有底层存储。
 - 连续布局指 `stride` 等于按 `shape` 自后向前推导出的行主序步幅；未显式传入 `stride` 时，由 `Memory` 自动生成该连续步幅。
 
 ## 文档信息
@@ -27,7 +27,7 @@
 
 ## 限制与边界
 
-- `api::Memory<T, Rank>` 是视图类型，不分配、释放或拥有底层数据。
+- `Memory<T, Rank>` 是视图类型，不分配、释放或拥有底层数据。
 - 本规范不承诺运行时边界检查，不对空指针、越界索引、非法 `shape/stride` 提供保护。
 - 调用方需要保证 `Rank > 0`、`shape[i] > 0`、`stride[i] > 0`，并确保 `indices[i]` 位于合法范围内。
 - 本规范不引入标准库容器、异常或动态分配依赖；实现需避免这些能力。
@@ -37,11 +37,11 @@
 
 ## 公开接口
 
-### `api::MemoryFormat`
+### `MemoryFormat`
 
 功能说明：
 
-- 表示 `api::Memory<T, Rank>` 记录的布局格式枚举。
+- 表示 `Memory<T, Rank>` 记录的布局格式枚举。
 
 参数说明：
 
@@ -52,7 +52,7 @@
 ```cpp
 #include "include/api/Memory.h"
 
-api::MemoryFormat format = api::MemoryFormat::CLast;
+MemoryFormat format = MemoryFormat::CLast;
 ```
 
 注意事项：
@@ -62,15 +62,15 @@ api::MemoryFormat format = api::MemoryFormat::CLast;
 
 返回与限制：
 
-- 返回类型：`api::MemoryFormat` 枚举值。
-- 返回语义：供 `api::Memory<T, Rank>` 构造与查询时记录布局格式。
+- 返回类型：`MemoryFormat` 枚举值。
+- 返回语义：供 `Memory<T, Rank>` 构造与查询时记录布局格式。
 - 限制条件：本文档不定义除 `Norm`、`CLast` 之外的其他公开成员。
 
-### `api::MemorySpace`
+### `MemorySpace`
 
 功能说明：
 
-- 表示 `api::Memory<T, Rank>` 所在的逻辑内存空间。
+- 表示 `Memory<T, Rank>` 所在的逻辑内存空间。
 
 参数说明：
 
@@ -81,7 +81,7 @@ api::MemoryFormat format = api::MemoryFormat::CLast;
 ```cpp
 #include "include/api/Memory.h"
 
-api::MemorySpace space = api::MemorySpace::SM;
+MemorySpace space = MemorySpace::SM;
 ```
 
 注意事项：
@@ -91,11 +91,11 @@ api::MemorySpace space = api::MemorySpace::SM;
 
 返回与限制：
 
-- 返回类型：`api::MemorySpace` 枚举值。
-- 返回语义：供 `api::Memory<T, Rank>` 构造与查询时记录内存空间。
+- 返回类型：`MemorySpace` 枚举值。
+- 返回语义：供 `Memory<T, Rank>` 构造与查询时记录内存空间。
 - 限制条件：本文档不定义额外空间成员，也不把空间语义扩展为分配器或 runtime 句柄。
 
-### `api::Memory<T, Rank>`
+### `Memory<T, Rank>`
 
 功能说明：
 
@@ -109,8 +109,8 @@ api::MemorySpace space = api::MemorySpace::SM;
 - `data(T*)`：底层数据指针。
 - `shape(const long long (&)[Rank])`：每一维长度数组。
 - `stride(const long long (&)[Rank])`：每一维布局步幅数组。
-- `format(api::MemoryFormat)`：布局格式，默认 `api::MemoryFormat::Norm`。
-- `space(api::MemorySpace)`：内存空间，默认 `api::MemorySpace::GM`。
+- `format(MemoryFormat)`：布局格式，默认 `MemoryFormat::Norm`。
+- `space(MemorySpace)`：内存空间，默认 `MemorySpace::GM`。
 
 使用示例：
 
@@ -122,14 +122,14 @@ long long shape[2] = {2, 3};
 long long stride[2] = {3, 1};
 long long index[2] = {1, 2};
 
-api::Memory<int, 2> explicit_mem(
+Memory<int, 2> explicit_mem(
     data,
     shape,
     stride,
-    api::MemoryFormat::CLast,
-    api::MemorySpace::SM);
+    MemoryFormat::CLast,
+    MemorySpace::SM);
 
-api::Memory<int, 2> auto_mem(data, shape);
+Memory<int, 2> auto_mem(data, shape);
 long long offset = explicit_mem.linear_offset(index);
 int value = explicit_mem.at(index);
 ```
@@ -144,7 +144,7 @@ int value = explicit_mem.at(index);
 
 返回与限制：
 
-- 返回类型：`api::Memory<T, Rank>` 对象，以及其公开方法返回的裸指针、枚举值、整型偏移或元素引用。
+- 返回类型：`Memory<T, Rank>` 对象，以及其公开方法返回的裸指针、枚举值、整型偏移或元素引用。
 - 返回语义：
   - 显式步幅构造返回保存传入 `shape/stride/format/space` 的视图对象。
   - 自动步幅构造返回按连续行主序推导 `stride` 的视图对象。
