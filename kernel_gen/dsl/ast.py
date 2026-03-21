@@ -7,13 +7,13 @@
 - 定义 DSL 前端使用的 AST 节点数据结构。
 
 使用示例:
-- from python.dsl.ast import FunctionAST, BlockAST
+- from kernel_gen.dsl.ast import FunctionAST, BlockAST
 - FunctionAST(name="kernel", inputs=[], outputs=[], body=BlockAST([]))
 
 关联文件:
 - spec: spec/dsl/ast.md
 - test: test/dsl/test_ast_visitor.py
-- 功能实现: python/dsl/ast.py
+- 功能实现: kernel_gen/dsl/ast.py
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ class SourceLocation:
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
     """
 
     line: int
@@ -61,7 +61,7 @@ class Diagnostic:
     关联文件:
     - spec: spec/dsl/ast_visitor.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
     """
 
     message: str
@@ -84,7 +84,7 @@ class ModuleAST:
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
     """
 
     functions: list[FunctionAST]
@@ -106,7 +106,7 @@ class TensorAST:
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
     """
 
     name: str
@@ -130,7 +130,7 @@ class ScalarArgAST:
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
     """
 
     name: str
@@ -154,7 +154,7 @@ class VarAST:
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
     """
 
     name: str
@@ -177,7 +177,7 @@ class BlockAST:
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
     """
 
     statements: list[object]
@@ -200,7 +200,7 @@ class ForAST:
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
     """
 
     var: VarAST
@@ -226,7 +226,7 @@ class StoreAST:
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
     """
 
     tensor: TensorAST
@@ -252,7 +252,7 @@ class LoadAST:
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
     """
 
     tensor: TensorAST
@@ -277,7 +277,7 @@ class BinaryExprAST:
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
     """
 
     op: str
@@ -302,7 +302,7 @@ class CompareExprAST:
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
     """
 
     op: str
@@ -327,7 +327,7 @@ class ConstAST:
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
     """
 
     value: object
@@ -350,7 +350,7 @@ class FunctionAST:
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
     """
 
     name: str
@@ -377,7 +377,7 @@ class FunctionAST:
         关联文件:
         - spec: spec/dsl/ast.md
         - test: test/dsl/test_ast_visitor.py
-        - 功能实现: python/dsl/ast.py
+        - 功能实现: kernel_gen/dsl/ast.py
         """
 
         return iter(self.inputs)

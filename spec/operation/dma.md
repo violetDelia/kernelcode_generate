@@ -9,7 +9,7 @@
 - 创建者：`榕`
 - 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/operation/dma.md`](../../spec/operation/dma.md)
-- `功能实现`：[`python/operation/dma.py`](../../python/operation/dma.py)
+- `功能实现`：[`kernel_gen/operation/dma.py`](../../kernel_gen/operation/dma.py)
 - `test`：[`test/operation/test_operation_dma.py`](../../test/operation/test_operation_dma.py)
 
 ## 依赖
@@ -19,8 +19,8 @@
 - [`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)：`Memory` 结构与 `shape/stride/dtype/space` 语义。
 - [`spec/symbol_variable/symbol_shape.md`](../../spec/symbol_variable/symbol_shape.md)：`SymbolShape` / 索引列表语义。
 - [`spec/symbol_variable/type.md`](../../spec/symbol_variable/type.md)：`NumericType` 定义。
-- [`python/operation/dma.py`](../../python/operation/dma.py)：高层 API 实现。
-- [`python/symbol_variable/memory.py`](../../python/symbol_variable/memory.py)：`Memory` 与 `MemorySpace` 实现。
+- [`kernel_gen/operation/dma.py`](../../kernel_gen/operation/dma.py)：高层 API 实现。
+- [`kernel_gen/symbol_variable/memory.py`](../../kernel_gen/symbol_variable/memory.py)：`Memory` 与 `MemorySpace` 实现。
 
 ## 目标
 

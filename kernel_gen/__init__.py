@@ -7,16 +7,16 @@
 - 提供 operation 与 dialect 子模块的统一入口。
 
 使用示例:
-- from python.operation import add
-- from python.dialect import Nn, NnAddOp
+- from kernel_gen.operation import add
+- from kernel_gen.dialect import Nn, NnAddOp
 
 关联文件:
 - spec: spec/operation/nn.md
 - spec: spec/dialect/nn.md
 - test: test/operation/test_operation_nn.py
 - test: test/dialect/test_nn_dialect.py
-- 功能实现: python/operation/nn.py
-- 功能实现: python/dialect/nn.py
+- 功能实现: kernel_gen/operation/nn.py
+- 功能实现: kernel_gen/dialect/nn.py
 """
 
 from .dialect import (

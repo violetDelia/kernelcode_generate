@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-用于描述 `python.symbol_variable.__init__.py` 的包入口导出策略，以单文件 spec 方式约束公开导入 API、`__all__` 与 `import *` 语义。
+用于描述 `kernel_gen.symbol_variable.__init__.py` 的包入口导出策略，以单文件 spec 方式约束公开导入 API、`__all__` 与 `import *` 语义。
 
 ## 文档信息
 
@@ -10,14 +10,14 @@
 - 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/symbol_variable/package_api.md`](../../spec/symbol_variable/package_api.md)
 - `test`：[`test/symbol_variable/test_package_api.py`](../../test/symbol_variable/test_package_api.py)
-- `功能实现`：[`python/symbol_variable/__init__.py`](../../python/symbol_variable/__init__.py)
+- `功能实现`：[`kernel_gen/symbol_variable/__init__.py`](../../kernel_gen/symbol_variable/__init__.py)
 
 ## 依赖
 
-- [`python/symbol_variable/symbol_dim.py`](../../python/symbol_variable/symbol_dim.py)：`SymbolDim` 定义。
-- [`python/symbol_variable/symbol_shape.py`](../../python/symbol_variable/symbol_shape.py)：`SymbolList`/`SymbolShape` 定义。
-- [`python/symbol_variable/memory.py`](../../python/symbol_variable/memory.py)：`Memory`/`MemorySpace`/`LocalSpaceMeta` 定义。
-- [`python/symbol_variable/type.py`](../../python/symbol_variable/type.py)：`NumericType`/`Farmat` 定义。
+- [`kernel_gen/symbol_variable/symbol_dim.py`](../../kernel_gen/symbol_variable/symbol_dim.py)：`SymbolDim` 定义。
+- [`kernel_gen/symbol_variable/symbol_shape.py`](../../kernel_gen/symbol_variable/symbol_shape.py)：`SymbolList`/`SymbolShape` 定义。
+- [`kernel_gen/symbol_variable/memory.py`](../../kernel_gen/symbol_variable/memory.py)：`Memory`/`MemorySpace`/`LocalSpaceMeta` 定义。
+- [`kernel_gen/symbol_variable/type.py`](../../kernel_gen/symbol_variable/type.py)：`NumericType`/`Farmat` 定义。
 - [`spec/symbol_variable/symbol_dim.md`](../../spec/symbol_variable/symbol_dim.md)：`SymbolDim` 语义。
 - [`spec/symbol_variable/symbol_shape.md`](../../spec/symbol_variable/symbol_shape.md)：`SymbolShape` 语义。
 - [`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)：`Memory` 语义。
@@ -25,7 +25,7 @@
 
 ## 限制与边界
 
-- 仅定义 `python.symbol_variable` 包入口的公开导入与导出边界。
+- 仅定义 `kernel_gen.symbol_variable` 包入口的公开导入与导出边界。
 - 仅约束包入口直接暴露哪些对象、`__all__` 包含哪些符号，以及 `import *` 应暴露什么。
 - 不定义 `SymbolDim`、`SymbolShape`、`Memory`、`NumericType`、`Farmat` 的内部行为；这些语义由各自模块 spec 描述。
 - 不为旧路径 `symbol_variable` 或其旧子模块提供兼容入口。
@@ -53,7 +53,7 @@
 使用示例：
 
 ```python
-from python.symbol_variable import Memory, NumericType, SymbolDim
+from kernel_gen.symbol_variable import Memory, NumericType, SymbolDim
 
 dim = SymbolDim("N")
 mem = Memory([dim, 32], NumericType.Float32)
@@ -62,7 +62,7 @@ mem = Memory([dim, 32], NumericType.Float32)
 注意事项：
 
 - `__all__` 必须严格等于上述集合。
-- `from python.symbol_variable import *` 的暴露结果必须严格等于 `__all__`。
+- `from kernel_gen.symbol_variable import *` 的暴露结果必须严格等于 `__all__`。
 - 包入口不得额外暴露实现细节或未约定名称。
 
 返回与限制：
@@ -73,7 +73,7 @@ mem = Memory([dim, 32], NumericType.Float32)
 
 功能说明：
 
-- 调用方应通过 `python.symbol_variable` 访问包级公开对象。
+- 调用方应通过 `kernel_gen.symbol_variable` 访问包级公开对象。
 
 参数说明：
 
@@ -82,7 +82,7 @@ mem = Memory([dim, 32], NumericType.Float32)
 使用示例：
 
 ```python
-from python.symbol_variable import (
+from kernel_gen.symbol_variable import (
     Farmat,
     LocalSpaceMeta,
     Memory,
@@ -115,8 +115,8 @@ from python.symbol_variable import (
 使用示例：
 
 ```python
-from python.symbol_variable import Memory as PackageMemory
-from python.symbol_variable.memory import Memory as ModuleMemory
+from kernel_gen.symbol_variable import Memory as PackageMemory
+from kernel_gen.symbol_variable.memory import Memory as ModuleMemory
 
 assert PackageMemory is ModuleMemory
 ```
@@ -134,7 +134,7 @@ assert PackageMemory is ModuleMemory
 
 功能说明：
 
-- `python.symbol_variable.__all__` 必须列出全部且仅有的公开导出符号。
+- `kernel_gen.symbol_variable.__all__` 必须列出全部且仅有的公开导出符号。
 
 参数说明：
 
@@ -143,7 +143,7 @@ assert PackageMemory is ModuleMemory
 使用示例：
 
 ```python
-import python.symbol_variable as package_module
+import kernel_gen.symbol_variable as package_module
 
 assert package_module.__all__ == [
     "Farmat",
@@ -169,7 +169,7 @@ assert package_module.__all__ == [
 
 功能说明：
 
-- `from python.symbol_variable import *` 仅暴露 `__all__` 中约定的公开符号。
+- `from kernel_gen.symbol_variable import *` 仅暴露 `__all__` 中约定的公开符号。
 
 参数说明：
 
@@ -179,7 +179,7 @@ assert package_module.__all__ == [
 
 ```python
 namespace = {}
-exec("from python.symbol_variable import *", {}, namespace)
+exec("from kernel_gen.symbol_variable import *", {}, namespace)
 ```
 
 注意事项：
@@ -194,7 +194,7 @@ exec("from python.symbol_variable import *", {}, namespace)
 
 功能说明：
 
-- `python.symbol_variable` 是 `symbol_variable` 包级 API 的唯一有效入口。
+- `kernel_gen.symbol_variable` 是 `symbol_variable` 包级 API 的唯一有效入口。
 
 参数说明：
 
@@ -205,7 +205,7 @@ exec("from python.symbol_variable import *", {}, namespace)
 ```python
 import importlib
 
-importlib.import_module("python.symbol_variable")
+importlib.import_module("kernel_gen.symbol_variable")
 ```
 
 注意事项：
@@ -223,11 +223,11 @@ importlib.import_module("python.symbol_variable")
 
 ### 测试目标
 
-- 验证 `python.symbol_variable` 顶层导入可用。
+- 验证 `kernel_gen.symbol_variable` 顶层导入可用。
 - 验证包入口导出的对象与子模块对象身份一致。
 - 验证顶层导出的类型可直接参与 `Memory` 构造。
-- 验证 `python.symbol_variable.__all__` 与公开导出集合一致。
-- 验证 `from python.symbol_variable import *` 仅暴露约定公开符号。
+- 验证 `kernel_gen.symbol_variable.__all__` 与公开导出集合一致。
+- 验证 `from kernel_gen.symbol_variable import *` 仅暴露约定公开符号。
 - 验证旧路径 `symbol_variable` 不可导入。
 - 验证旧子模块路径 `symbol_variable.symbol_dim`、`symbol_variable.symbol_shape`、`symbol_variable.memory`、`symbol_variable.type` 不可导入。
 
@@ -235,10 +235,10 @@ importlib.import_module("python.symbol_variable")
 
 | 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 对应测试 |
 |---|---|---|---|---|---|---|
-| PM-001 | 导入 | 包入口导入 | N/A | `from python.symbol_variable import Memory, SymbolDim` | 导入成功 | `test_python_symbol_variable_imports` |
+| PM-001 | 导入 | 包入口导入 | N/A | `from kernel_gen.symbol_variable import Memory, SymbolDim` | 导入成功 | `test_python_symbol_variable_imports` |
 | PM-002 | 错误 | 旧包路径导入 | N/A | `importlib.import_module("symbol_variable")` | 抛 `ModuleNotFoundError` | `test_legacy_import_disabled` |
 | PM-003 | 错误 | 旧子模块路径导入 | N/A | `importlib.import_module("symbol_variable.symbol_dim")` 等 | 抛 `ModuleNotFoundError` | `test_legacy_submodule_import_disabled` |
 | PM-004 | 导出 | 对象同一性 | N/A | 比较包入口与子模块中的 `Memory`/`SymbolDim` | `is` 为 `True` | `test_python_package_type_exports` |
 | PM-005 | 构造 | 顶层导出参与构造 | N/A | `Memory([1, 2], NumericType.Float32, format=Farmat.Norm)` | 构造成功 | `test_package_type_construct_memory` |
-| PM-006 | 导出 | `__all__` 边界 | N/A | 读取 `python.symbol_variable.__all__` | 严格等于公开导出集合 | `test_python_package_all_boundary` |
-| PM-007 | 导出 | `import *` 边界 | N/A | 执行 `from python.symbol_variable import *` | 仅暴露公开导出集合 | `test_python_package_import_star_exports_only_public_names` |
+| PM-006 | 导出 | `__all__` 边界 | N/A | 读取 `kernel_gen.symbol_variable.__all__` | 严格等于公开导出集合 | `test_python_package_all_boundary` |
+| PM-007 | 导出 | `import *` 边界 | N/A | 执行 `from kernel_gen.symbol_variable import *` | 仅暴露公开导出集合 | `test_python_package_import_star_exports_only_public_names` |

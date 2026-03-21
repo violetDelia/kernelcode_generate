@@ -9,7 +9,7 @@
 - 创建者：`摸鱼小分队`
 - 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/symbol_variable/symbol_dim.md`](../../spec/symbol_variable/symbol_dim.md)
-- `功能实现`：[`python/symbol_variable/symbol_dim.py`](../../python/symbol_variable/symbol_dim.py)
+- `功能实现`：[`kernel_gen/symbol_variable/symbol_dim.py`](../../kernel_gen/symbol_variable/symbol_dim.py)
 - `test`：[`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py)
 
 ## 依赖
@@ -51,7 +51,7 @@
 使用示例：
 
 ```python
-from python.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 import sympy as sp
 
 SymbolDim(32)
@@ -81,7 +81,7 @@ SymbolDim(sp.Symbol("M"))
 使用示例：
 
 ```python
-from python.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 dim = SymbolDim("N")
 sym = dim.get_symbol()
@@ -108,7 +108,7 @@ sym = dim.get_symbol()
 使用示例：
 
 ```python
-from python.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 assert repr(SymbolDim("N")) == "N"
 ```
@@ -134,7 +134,7 @@ assert repr(SymbolDim("N")) == "N"
 使用示例：
 
 ```python
-from python.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 SymbolDim("N") + 2
 2 + SymbolDim("N")
@@ -161,7 +161,7 @@ SymbolDim("N") + 2
 使用示例：
 
 ```python
-from python.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 SymbolDim("N") - "M"
 10 - SymbolDim("N")
@@ -188,7 +188,7 @@ SymbolDim("N") - "M"
 使用示例：
 
 ```python
-from python.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 SymbolDim("N") * 4
 4 * SymbolDim("N")
@@ -215,7 +215,7 @@ SymbolDim("N") * 4
 使用示例：
 
 ```python
-from python.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 SymbolDim("N") / 2
 "K" / SymbolDim("N")
@@ -242,7 +242,7 @@ SymbolDim("N") / 2
 使用示例：
 
 ```python
-from python.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 assert SymbolDim(4) == 4
 assert SymbolDim("N") == "N"
@@ -270,7 +270,7 @@ assert SymbolDim("N") == SymbolDim("N")
 使用示例：
 
 ```python
-from python.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 assert SymbolDim(8).is_dynamic() is False
 assert SymbolDim("N").is_dynamic() is True

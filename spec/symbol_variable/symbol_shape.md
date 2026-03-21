@@ -10,11 +10,11 @@
 - 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/symbol_variable/symbol_shape.md`](../../spec/symbol_variable/symbol_shape.md)
 - `test`：[`test/symbol_variable/test_symbol_shape.py`](../../test/symbol_variable/test_symbol_shape.py)
-- `功能实现`：[`python/symbol_variable/symbol_shape.py`](../../python/symbol_variable/symbol_shape.py)
+- `功能实现`：[`kernel_gen/symbol_variable/symbol_shape.py`](../../kernel_gen/symbol_variable/symbol_shape.py)
 
 ## 依赖
 
-- `python/symbol_variable/symbol_dim.py`：[`SymbolDim`](../../python/symbol_variable/symbol_dim.py) 的定义与校验规则来源。
+- `kernel_gen/symbol_variable/symbol_dim.py`：[`SymbolDim`](../../kernel_gen/symbol_variable/symbol_dim.py) 的定义与校验规则来源。
 - `spec/symbol_variable/symbol_dim.md`：[`SymbolDim`](../../spec/symbol_variable/symbol_dim.md) 语义约束。
 
 ## 限制与边界
@@ -46,7 +46,7 @@
 使用示例：
 
 ```python
-from python.symbol_variable.symbol_shape import SymbolShape
+from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 
 shape = SymbolShape(["N", 32, 64])
 ```
@@ -70,7 +70,7 @@ shape = SymbolShape(["N", 32, 64])
 使用示例：
 
 ```python
-from python.symbol_variable.symbol_shape import SymbolShape
+from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 
 assert repr(SymbolShape([1, 2])) == "Shape(1, 2)"
 ```
@@ -92,7 +92,7 @@ assert repr(SymbolShape([1, 2])) == "Shape(1, 2)"
 使用示例：
 
 ```python
-from python.symbol_variable.symbol_shape import SymbolShape
+from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 
 shape = SymbolShape([1, 2])
 copy_list = shape.get_shape()
@@ -115,7 +115,7 @@ copy_list = shape.get_shape()
 使用示例：
 
 ```python
-from python.symbol_variable.symbol_shape import SymbolShape
+from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 
 values = SymbolShape(["N", 32]).get_values()
 ```
@@ -137,7 +137,7 @@ values = SymbolShape(["N", 32]).get_values()
 使用示例：
 
 ```python
-from python.symbol_variable.symbol_shape import SymbolShape
+from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 
 assert len(SymbolShape([1, 2, 3])) == 3
 ```
@@ -159,7 +159,7 @@ assert len(SymbolShape([1, 2, 3])) == 3
 使用示例：
 
 ```python
-from python.symbol_variable.symbol_shape import SymbolShape
+from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 
 for dim in SymbolShape([1, 2]):
     _ = dim
@@ -182,7 +182,7 @@ for dim in SymbolShape([1, 2]):
 使用示例：
 
 ```python
-from python.symbol_variable.symbol_shape import SymbolShape
+from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 
 for dim in reversed(SymbolShape([1, 2])):
     _ = dim
@@ -205,7 +205,7 @@ for dim in reversed(SymbolShape([1, 2])):
 使用示例：
 
 ```python
-from python.symbol_variable.symbol_shape import SymbolShape
+from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 
 shape = SymbolShape([1, "N", 3])
 _ = shape[0]
@@ -232,7 +232,7 @@ _ = shape[0:2]
 使用示例：
 
 ```python
-from python.symbol_variable.symbol_shape import SymbolShape
+from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 
 shape = SymbolShape([1, "N", 32])
 shape[0] = 64
@@ -264,7 +264,7 @@ shape[1:3] = ["M", 128]
 使用示例：
 
 ```python
-from python.symbol_variable.symbol_shape import SymbolList
+from kernel_gen.symbol_variable.symbol_shape import SymbolList
 
 symbols = SymbolList(["N", 32])
 ```
@@ -290,7 +290,7 @@ symbols = SymbolList(["N", 32])
 使用示例：
 
 ```python
-from python.symbol_variable.symbol_shape import SymbolShape
+from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 
 symbols = SymbolShape(["N", 32]).to_symbols()
 ```

@@ -10,7 +10,7 @@
 - pytest -q test/analysis/test_analysis.py
 
 关联文件:
-- 功能实现: python/analysis/analysis.py
+- 功能实现: kernel_gen/analysis/analysis.py
 - Spec 文档: spec/analysis/分析.md
 - 测试文件: test/analysis/test_analysis.py
 """
@@ -27,7 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from python.analysis.analysis import (
+from kernel_gen.analysis.analysis import (
     AnalysisError,
     AnalysisSummary,
     MemoryRef,
@@ -39,8 +39,8 @@ from python.analysis.analysis import (
     analyze_function,
     analyze_matmul_op,
 )
-from python.symbol_variable.memory import Memory
-from python.symbol_variable.type import NumericType
+from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.type import NumericType
 
 
 # AN-001
@@ -50,7 +50,7 @@ from python.symbol_variable.type import NumericType
 # 最近一次运行成功时间: 2026-03-19 03:42:29 +0800
 # 功能说明: 验证 add 的计算量与搬运量统计。
 # 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_add_counts
-# 对应功能实现文件路径: python/analysis/analysis.py
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
 # 对应 spec 文件路径: spec/analysis/分析.md
 # 对应测试文件路径: test/analysis/test_analysis.py
 def test_analysis_add_counts() -> None:
@@ -71,7 +71,7 @@ def test_analysis_add_counts() -> None:
 # 最近一次运行成功时间: 2026-03-19 03:42:29 +0800
 # 功能说明: 验证 eq 的计算量与搬运量统计。
 # 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_eq_counts
-# 对应功能实现文件路径: python/analysis/analysis.py
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
 # 对应 spec 文件路径: spec/analysis/分析.md
 # 对应测试文件路径: test/analysis/test_analysis.py
 def test_analysis_eq_counts() -> None:
@@ -92,7 +92,7 @@ def test_analysis_eq_counts() -> None:
 # 最近一次运行成功时间: 2026-03-19 03:42:29 +0800
 # 功能说明: 验证 broadcast 的读写量统计。
 # 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_broadcast_counts
-# 对应功能实现文件路径: python/analysis/analysis.py
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
 # 对应 spec 文件路径: spec/analysis/分析.md
 # 对应测试文件路径: test/analysis/test_analysis.py
 def test_analysis_broadcast_counts() -> None:
@@ -112,7 +112,7 @@ def test_analysis_broadcast_counts() -> None:
 # 最近一次运行成功时间: 2026-03-19 03:42:29 +0800
 # 功能说明: 验证 matmul 的计算量与读写量统计。
 # 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_matmul_counts
-# 对应功能实现文件路径: python/analysis/analysis.py
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
 # 对应 spec 文件路径: spec/analysis/分析.md
 # 对应测试文件路径: test/analysis/test_analysis.py
 def test_analysis_matmul_counts() -> None:
@@ -134,7 +134,7 @@ def test_analysis_matmul_counts() -> None:
 # 最近一次运行成功时间: 2026-03-19 03:42:29 +0800
 # 功能说明: 验证函数级聚合统计会计入中间物化。
 # 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_materialized_intermediate
-# 对应功能实现文件路径: python/analysis/analysis.py
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
 # 对应 spec 文件路径: spec/analysis/分析.md
 # 对应测试文件路径: test/analysis/test_analysis.py
 def test_analysis_materialized_intermediate() -> None:
@@ -164,7 +164,7 @@ def test_analysis_materialized_intermediate() -> None:
 # 最近一次运行成功时间: 2026-03-19 03:42:29 +0800
 # 功能说明: 验证函数级聚合在融合场景不计入中间物化。
 # 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_fused_intermediate
-# 对应功能实现文件路径: python/analysis/analysis.py
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
 # 对应 spec 文件路径: spec/analysis/分析.md
 # 对应测试文件路径: test/analysis/test_analysis.py
 def test_analysis_fused_intermediate() -> None:
@@ -198,7 +198,7 @@ def test_analysis_fused_intermediate() -> None:
 # 最近一次运行成功时间: 2026-03-19 06:34:36 +0800
 # 功能说明: 验证 read_mask 长度不匹配时报 AnalysisError。
 # 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_read_mask_length_mismatch
-# 对应功能实现文件路径: python/analysis/analysis.py
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
 # 对应 spec 文件路径: spec/analysis/分析.md
 # 对应测试文件路径: test/analysis/test_analysis.py
 def test_analysis_read_mask_length_mismatch() -> None:
@@ -216,7 +216,7 @@ def test_analysis_read_mask_length_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-19 06:34:36 +0800
 # 功能说明: 验证 analyze_function 输入数量不匹配时报 AnalysisError。
 # 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_function_inputs_mismatch
-# 对应功能实现文件路径: python/analysis/analysis.py
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
 # 对应 spec 文件路径: spec/analysis/分析.md
 # 对应测试文件路径: test/analysis/test_analysis.py
 def test_analysis_function_inputs_mismatch() -> None:

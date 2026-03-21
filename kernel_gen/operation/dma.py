@@ -7,21 +7,21 @@
 - 提供 Memory 的数据搬运与显式转换 API，包括 alloc/free/copy/load/store/slice/deslice/cast。
 
 使用示例:
-- from python.operation.dma import copy, cast
+- from kernel_gen.operation.dma import copy, cast
 - copy(src, dst)
 - cast(src, NumericType.Float16)
 
 关联文件:
 - spec: spec/operation/dma.md
 - test: test/operation/test_operation_dma.py
-- 功能实现: python/operation/dma.py
+- 功能实现: kernel_gen/operation/dma.py
 """
 
 from __future__ import annotations
 
-from python.symbol_variable.memory import Memory, MemorySpace
-from python.symbol_variable.symbol_shape import SymbolShape
-from python.symbol_variable.type import NumericType
+from kernel_gen.symbol_variable.memory import Memory, MemorySpace
+from kernel_gen.symbol_variable.symbol_shape import SymbolShape
+from kernel_gen.symbol_variable.type import NumericType
 
 _FLOAT_DTYPES = {
     NumericType.Float16,
@@ -56,7 +56,7 @@ def _ensure_memory(value: object, name: str) -> Memory:
     关联文件:
     - spec: spec/operation/dma.md
     - test: test/operation/test_operation_dma.py
-    - 功能实现: python/operation/dma.py
+    - 功能实现: kernel_gen/operation/dma.py
     """
     if not isinstance(value, Memory):
         raise TypeError(f"{name} must be Memory")
@@ -79,7 +79,7 @@ def _ensure_shape_value(value: object, name: str) -> SymbolShape:
     关联文件:
     - spec: spec/operation/dma.md
     - test: test/operation/test_operation_dma.py
-    - 功能实现: python/operation/dma.py
+    - 功能实现: kernel_gen/operation/dma.py
     """
     if isinstance(value, (str, bytes)):
         raise ValueError(f"{name} must be a dimension sequence")
@@ -109,7 +109,7 @@ def alloc(
     关联文件:
     - spec: spec/operation/dma.md
     - test: test/operation/test_operation_dma.py
-    - 功能实现: python/operation/dma.py
+    - 功能实现: kernel_gen/operation/dma.py
     """
     if not isinstance(dtype, NumericType):
         raise TypeError("alloc dtype must be NumericType")
@@ -139,7 +139,7 @@ def free(value: object) -> None:
     关联文件:
     - spec: spec/operation/dma.md
     - test: test/operation/test_operation_dma.py
-    - 功能实现: python/operation/dma.py
+    - 功能实现: kernel_gen/operation/dma.py
     """
     _ensure_memory(value, "value")
     return None
@@ -160,7 +160,7 @@ def _normalize_index_list(value: object, name: str) -> SymbolShape:
     关联文件:
     - spec: spec/operation/dma.md
     - test: test/operation/test_operation_dma.py
-    - 功能实现: python/operation/dma.py
+    - 功能实现: kernel_gen/operation/dma.py
     """
     if isinstance(value, SymbolShape):
         return value
@@ -182,7 +182,7 @@ def _ensure_index_rank(memory: Memory, offsets: SymbolShape, sizes: SymbolShape,
     关联文件:
     - spec: spec/operation/dma.md
     - test: test/operation/test_operation_dma.py
-    - 功能实现: python/operation/dma.py
+    - 功能实现: kernel_gen/operation/dma.py
     """
     rank = len(memory.shape)
     if len(offsets) != rank or len(sizes) != rank:
@@ -206,7 +206,7 @@ def _ensure_sizes_positive(sizes: SymbolShape) -> None:
     关联文件:
     - spec: spec/operation/dma.md
     - test: test/operation/test_operation_dma.py
-    - 功能实现: python/operation/dma.py
+    - 功能实现: kernel_gen/operation/dma.py
     """
     for dim in sizes.get_values():
         if isinstance(dim, int) and dim <= 0:
@@ -228,7 +228,7 @@ def _ensure_unit_strides(strides: SymbolShape | None) -> None:
     关联文件:
     - spec: spec/operation/dma.md
     - test: test/operation/test_operation_dma.py
-    - 功能实现: python/operation/dma.py
+    - 功能实现: kernel_gen/operation/dma.py
     """
     if strides is None:
         return
@@ -252,7 +252,7 @@ def _clone_symbol_list(value: SymbolShape | None) -> SymbolShape | None:
     关联文件:
     - spec: spec/operation/dma.md
     - test: test/operation/test_operation_dma.py
-    - 功能实现: python/operation/dma.py
+    - 功能实现: kernel_gen/operation/dma.py
     """
     if value is None:
         return None
@@ -274,7 +274,7 @@ def _is_supported_cast(source: NumericType, target: NumericType) -> bool:
     关联文件:
     - spec: spec/operation/dma.md
     - test: test/operation/test_operation_dma.py
-    - 功能实现: python/operation/dma.py
+    - 功能实现: kernel_gen/operation/dma.py
     """
     if source is target:
         return True
@@ -300,7 +300,7 @@ def copy(source: object, target: object) -> None:
     关联文件:
     - spec: spec/operation/dma.md
     - test: test/operation/test_operation_dma.py
-    - 功能实现: python/operation/dma.py
+    - 功能实现: kernel_gen/operation/dma.py
     """
     src = _ensure_memory(source, "source")
     dst = _ensure_memory(target, "target")
@@ -337,7 +337,7 @@ def load(
     关联文件:
     - spec: spec/operation/dma.md
     - test: test/operation/test_operation_dma.py
-    - 功能实现: python/operation/dma.py
+    - 功能实现: kernel_gen/operation/dma.py
     """
     src = _ensure_memory(source, "source")
     if space is not None and not isinstance(space, MemorySpace):
@@ -379,7 +379,7 @@ def store(
     关联文件:
     - spec: spec/operation/dma.md
     - test: test/operation/test_operation_dma.py
-    - 功能实现: python/operation/dma.py
+    - 功能实现: kernel_gen/operation/dma.py
     """
     src = _ensure_memory(source, "source")
     dst = _ensure_memory(target, "target")
@@ -417,7 +417,7 @@ def slice(
     关联文件:
     - spec: spec/operation/dma.md
     - test: test/operation/test_operation_dma.py
-    - 功能实现: python/operation/dma.py
+    - 功能实现: kernel_gen/operation/dma.py
     """
     return load(source, offsets, sizes, strides=strides, space=space)
 
@@ -443,7 +443,7 @@ def deslice(
     关联文件:
     - spec: spec/operation/dma.md
     - test: test/operation/test_operation_dma.py
-    - 功能实现: python/operation/dma.py
+    - 功能实现: kernel_gen/operation/dma.py
     """
     return store(source, target, offsets, sizes, strides=strides)
 
@@ -463,7 +463,7 @@ def cast(source: object, dtype: NumericType) -> Memory:
     关联文件:
     - spec: spec/operation/dma.md
     - test: test/operation/test_operation_dma.py
-    - 功能实现: python/operation/dma.py
+    - 功能实现: kernel_gen/operation/dma.py
     """
     src = _ensure_memory(source, "source")
     if not isinstance(dtype, NumericType):

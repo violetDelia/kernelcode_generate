@@ -8,15 +8,15 @@
 - 暴露 dma 搬运 API。
 
 使用示例:
-- from python.operation import add, matmul, copy
+- from kernel_gen.operation import add, matmul, copy
 
 关联文件:
 - spec: spec/operation/nn.md
 - spec: spec/operation/dma.md
 - test: test/operation/test_operation_nn.py
 - test: test/operation/test_operation_dma.py
-- 功能实现: python/operation/nn.py
-- 功能实现: python/operation/dma.py
+- 功能实现: kernel_gen/operation/nn.py
+- 功能实现: kernel_gen/operation/dma.py
 """
 
 from .dma import alloc, cast, copy, deslice, free, load, slice, store

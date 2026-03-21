@@ -4,13 +4,13 @@
 最后一次更改: 金铲铲大作战
 
 功能说明:
-- 覆盖 python.symbol_variable.type 的枚举语义、导出边界与旧路径禁用约束。
+- 覆盖 kernel_gen.symbol_variable.type 的枚举语义、导出边界与旧路径禁用约束。
 
 使用示例:
 - pytest -q test/symbol_variable/test_type.py
 
 关联文件:
-- 功能实现: python/symbol_variable/type.py
+- 功能实现: kernel_gen/symbol_variable/type.py
 - Spec 文档: spec/symbol_variable/type.md
 - 测试文件: test/symbol_variable/test_type.py
 """
@@ -34,11 +34,11 @@ if str(REPO_ROOT) not in sys.path:
 # 最近一次运行成功时间: 2026-03-20 19:46:56 +0800
 # 功能说明: 验证 NumericType 枚举名称和值保持稳定。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_numeric_type_values
-# 对应功能实现文件路径: python/symbol_variable/type.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
 # 对应 spec 文件路径: spec/symbol_variable/type.md
 # 对应测试文件路径: test/symbol_variable/test_type.py
 def test_numeric_type_values() -> None:
-    from python.symbol_variable.type import NumericType
+    from kernel_gen.symbol_variable.type import NumericType
 
     assert NumericType.Int8.value == "int8"
     assert NumericType.Int16.value == "int16"
@@ -61,11 +61,11 @@ def test_numeric_type_values() -> None:
 # 最近一次运行成功时间: 2026-03-20 19:46:56 +0800
 # 功能说明: 验证新增基础类型成员可直接访问。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_numeric_type_member_access
-# 对应功能实现文件路径: python/symbol_variable/type.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
 # 对应 spec 文件路径: spec/symbol_variable/type.md
 # 对应测试文件路径: test/symbol_variable/test_type.py
 def test_numeric_type_member_access() -> None:
-    from python.symbol_variable.type import NumericType
+    from kernel_gen.symbol_variable.type import NumericType
 
     assert NumericType.Int8.name == "Int8"
     assert NumericType.Int16.name == "Int16"
@@ -88,11 +88,11 @@ def test_numeric_type_member_access() -> None:
 # 最近一次运行成功时间: 2026-03-20 19:46:56 +0800
 # 功能说明: 验证 Farmat 仅公开 Norm/CLast 成员。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_farmat_public_members
-# 对应功能实现文件路径: python/symbol_variable/type.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
 # 对应 spec 文件路径: spec/symbol_variable/type.md
 # 对应测试文件路径: test/symbol_variable/test_type.py
 def test_farmat_public_members() -> None:
-    from python.symbol_variable.type import Farmat
+    from kernel_gen.symbol_variable.type import Farmat
 
     assert [member.name for member in Farmat] == ["Norm", "CLast"]
     assert Farmat.Norm.name == "Norm"
@@ -106,13 +106,13 @@ def test_farmat_public_members() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-20 19:46:56 +0800
 # 最近一次运行成功时间: 2026-03-20 19:46:56 +0800
-# 功能说明: 验证 python.symbol_variable.type 仅公开 NumericType 与 Farmat。
+# 功能说明: 验证 kernel_gen.symbol_variable.type 仅公开 NumericType 与 Farmat。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_python_type_module_all_boundary
-# 对应功能实现文件路径: python/symbol_variable/type.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
 # 对应 spec 文件路径: spec/symbol_variable/type.md
 # 对应测试文件路径: test/symbol_variable/test_type.py
 def test_python_type_module_all_boundary() -> None:
-    import python.symbol_variable.type as type_module
+    import kernel_gen.symbol_variable.type as type_module
 
     assert type_module.__all__ == ["NumericType", "Farmat"]
 
@@ -124,13 +124,13 @@ def test_python_type_module_all_boundary() -> None:
 # 最近一次运行成功时间: 2026-03-20 19:46:56 +0800
 # 功能说明: 验证 import * 仅暴露 type 模块约定的公开符号。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_python_type_import_star_exports_only_public_names
-# 对应功能实现文件路径: python/symbol_variable/type.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
 # 对应 spec 文件路径: spec/symbol_variable/type.md
 # 对应测试文件路径: test/symbol_variable/test_type.py
 def test_python_type_import_star_exports_only_public_names() -> None:
     namespace: dict[str, object] = {}
 
-    exec("from python.symbol_variable.type import *", {}, namespace)
+    exec("from kernel_gen.symbol_variable.type import *", {}, namespace)
 
     assert sorted(namespace) == ["Farmat", "NumericType"]
 
@@ -142,7 +142,7 @@ def test_python_type_import_star_exports_only_public_names() -> None:
 # 最近一次运行成功时间: 2026-03-20 19:46:56 +0800
 # 功能说明: 验证旧路径 symbol_variable.type 不可导入。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_legacy_type_import_disabled
-# 对应功能实现文件路径: python/symbol_variable/type.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
 # 对应 spec 文件路径: spec/symbol_variable/type.md
 # 对应测试文件路径: test/symbol_variable/test_type.py
 def test_legacy_type_import_disabled() -> None:

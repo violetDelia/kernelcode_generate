@@ -10,13 +10,13 @@
 - 最后一次更改：`小李飞刀`
 - `spec`：[`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)
 - `test`：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)、[`test/operation/test_memory_operation.py`](../../test/operation/test_memory_operation.py)
-- `功能实现`：[`python/symbol_variable/memory.py`](../../python/symbol_variable/memory.py)
+- `功能实现`：[`kernel_gen/symbol_variable/memory.py`](../../kernel_gen/symbol_variable/memory.py)
 
 ## 依赖
 
-- [`python/symbol_variable/symbol_shape.py`](../../python/symbol_variable/symbol_shape.py)：`SymbolShape` 定义与构造。
-- [`python/symbol_variable/symbol_dim.py`](../../python/symbol_variable/symbol_dim.py)：`SymbolDim` 维度元素类型。
-- [`python/symbol_variable/type.py`](../../python/symbol_variable/type.py)：`NumericType`/`Farmat` 类型与格式枚举。
+- [`kernel_gen/symbol_variable/symbol_shape.py`](../../kernel_gen/symbol_variable/symbol_shape.py)：`SymbolShape` 定义与构造。
+- [`kernel_gen/symbol_variable/symbol_dim.py`](../../kernel_gen/symbol_variable/symbol_dim.py)：`SymbolDim` 维度元素类型。
+- [`kernel_gen/symbol_variable/type.py`](../../kernel_gen/symbol_variable/type.py)：`NumericType`/`Farmat` 类型与格式枚举。
 - [`spec/symbol_variable/symbol_shape.md`](../../spec/symbol_variable/symbol_shape.md)：`SymbolShape` 语义。
 - [`spec/symbol_variable/type.md`](../../spec/symbol_variable/type.md)：`NumericType`/`Farmat` 语义。
 - [`spec/operation/nn.md`](../../spec/operation/nn.md)：逐元素算术与比较规则来源（`Memory` 仅复用语义）。
@@ -46,7 +46,7 @@
 使用示例：
 
 ```python
-from python.symbol_variable.memory import LocalSpaceMeta
+from kernel_gen.symbol_variable.memory import LocalSpaceMeta
 
 meta = LocalSpaceMeta(name="GM", max_size=None, align=1024)
 ```
@@ -72,7 +72,7 @@ meta = LocalSpaceMeta(name="GM", max_size=None, align=1024)
 使用示例：
 
 ```python
-from python.symbol_variable.memory import MemorySpace
+from kernel_gen.symbol_variable.memory import MemorySpace
 
 gm_meta = MemorySpace.GM.value
 ```
@@ -101,8 +101,8 @@ gm_meta = MemorySpace.GM.value
 使用示例：
 
 ```python
-from python.symbol_variable.memory import Memory
-from python.symbol_variable.type import NumericType
+from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.type import NumericType
 
 mem = Memory([1, 2], NumericType.Float32)
 ```
@@ -135,8 +135,8 @@ mem = Memory([1, 2], NumericType.Float32)
 使用示例：
 
 ```python
-from python.symbol_variable.memory import Memory, MemorySpace
-from python.symbol_variable.type import NumericType
+from kernel_gen.symbol_variable.memory import Memory, MemorySpace
+from kernel_gen.symbol_variable.type import NumericType
 
 mem = Memory(
     shape=["B", 128],
@@ -168,8 +168,8 @@ mem = Memory(
 使用示例：
 
 ```python
-from python.symbol_variable.memory import Memory
-from python.symbol_variable.type import Farmat, NumericType
+from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.type import Farmat, NumericType
 
 mem = Memory(
     shape=[1, 64, 56, 56],
@@ -200,8 +200,8 @@ mem = Memory(
 使用示例：
 
 ```python
-from python.symbol_variable.memory import Memory
-from python.symbol_variable.type import NumericType
+from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.type import NumericType
 
 mem = Memory(
     shape=["B", "C", "H", "W"],
@@ -231,8 +231,8 @@ mem = Memory(
 使用示例：
 
 ```python
-from python.symbol_variable.memory import Memory
-from python.symbol_variable.type import Farmat, NumericType
+from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.type import Farmat, NumericType
 
 class TensorLike:
     def __init__(self):
@@ -266,8 +266,8 @@ mem = Memory(t.shape, t.dtype, stride=t.stride, format=t.format)
 使用示例：
 
 ```python
-from python.symbol_variable.memory import Memory
-from python.symbol_variable.type import NumericType
+from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.type import NumericType
 
 mem = Memory([1, 2], NumericType.Float32)
 text = repr(mem)
@@ -297,8 +297,8 @@ text = repr(mem)
 使用示例：
 
 ```python
-from python.symbol_variable.memory import Memory
-from python.symbol_variable.type import NumericType
+from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.type import NumericType
 
 lhs = Memory(["M", "N"], NumericType.Float32)
 rhs = Memory(["M", "N"], NumericType.Float32)

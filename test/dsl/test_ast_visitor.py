@@ -10,7 +10,7 @@
 - pytest -q test/dsl/test_ast_visitor.py
 
 关联文件:
-- 功能实现: python/dsl/ast_visitor.py
+- 功能实现: kernel_gen/dsl/ast_visitor.py
 - Spec 文档: spec/dsl/ast_visitor.md
 - 测试文件: test/dsl/test_ast_visitor.py
 """
@@ -28,8 +28,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from python.dialect.nn import NnAddOp, NnBroadcastOp, NnEqOp, NnMemoryType
-from python.dsl.ast import (
+from kernel_gen.dialect.nn import NnAddOp, NnBroadcastOp, NnEqOp, NnMemoryType
+from kernel_gen.dsl.ast import (
     BlockAST,
     BinaryExprAST,
     CompareExprAST,
@@ -39,10 +39,10 @@ from python.dsl.ast import (
     StoreAST,
     TensorAST,
 )
-from python.dsl.ast_visitor import AstVisitorError, emit_mlir, visit_function, visit_to_nn_ir
-from python.dsl.lowering import LoweringError, lower_to_nn_ir
-from python.symbol_variable.memory import Memory
-from python.symbol_variable.type import NumericType
+from kernel_gen.dsl.ast_visitor import AstVisitorError, emit_mlir, visit_function, visit_to_nn_ir
+from kernel_gen.dsl.lowering import LoweringError, lower_to_nn_ir
+from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.type import NumericType
 
 
 # AV-001
@@ -52,7 +52,7 @@ from python.symbol_variable.type import NumericType
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证函数解析生成 AST 与位置信息。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_visit_function_builds_ast
-# 对应功能实现文件路径: python/dsl/ast_visitor.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast_visitor.py
 # 对应 spec 文件路径: spec/dsl/ast_visitor.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_visit_function_builds_ast() -> None:
@@ -80,7 +80,7 @@ def test_visit_function_builds_ast() -> None:
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证 visit_to_nn_ir 生成 nn dialect IR。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_visit_to_nn_ir_builds_module
-# 对应功能实现文件路径: python/dsl/ast_visitor.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast_visitor.py
 # 对应 spec 文件路径: spec/dsl/ast_visitor.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_visit_to_nn_ir_builds_module() -> None:
@@ -104,7 +104,7 @@ def test_visit_to_nn_ir_builds_module() -> None:
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证 emit_mlir 输出包含 nn dialect 文本。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_output
-# 对应功能实现文件路径: python/dsl/ast_visitor.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast_visitor.py
 # 对应 spec 文件路径: spec/dsl/ast_visitor.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_emit_mlir_output() -> None:
@@ -127,7 +127,7 @@ def test_emit_mlir_output() -> None:
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证 globals/builtins 入口可解析 Tensor 注解。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_globals_and_builtins_annotation_entry
-# 对应功能实现文件路径: python/dsl/ast_visitor.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast_visitor.py
 # 对应 spec 文件路径: spec/dsl/ast_visitor.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_globals_and_builtins_annotation_entry() -> None:
@@ -154,7 +154,7 @@ def test_globals_and_builtins_annotation_entry() -> None:
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证 ScalarArgAST 会 lowering 为 func.func 标量参数。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_scalar_arg_lowering_in_signature
-# 对应功能实现文件路径: python/dsl/lowering.py
+# 对应功能实现文件路径: kernel_gen/dsl/lowering.py
 # 对应 spec 文件路径: spec/dsl/ast_visitor.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_scalar_arg_lowering_in_signature() -> None:
@@ -181,7 +181,7 @@ def test_scalar_arg_lowering_in_signature() -> None:
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证未知名称在 AST 阶段产生诊断信息。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_unknown_name_reports_diagnostics
-# 对应功能实现文件路径: python/dsl/ast_visitor.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast_visitor.py
 # 对应 spec 文件路径: spec/dsl/ast_visitor.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_unknown_name_reports_diagnostics() -> None:
@@ -202,7 +202,7 @@ def test_unknown_name_reports_diagnostics() -> None:
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证 lowering 失败时诊断信息包含位置信息。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_lowering_failure_reports_diagnostics
-# 对应功能实现文件路径: python/dsl/lowering.py
+# 对应功能实现文件路径: kernel_gen/dsl/lowering.py
 # 对应 spec 文件路径: spec/dsl/ast_visitor.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_lowering_failure_reports_diagnostics() -> None:
@@ -223,7 +223,7 @@ def test_lowering_failure_reports_diagnostics() -> None:
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证非法返回注解会保留可定位诊断并向上抛出。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_invalid_return_annotation_reports_diagnostics
-# 对应功能实现文件路径: python/dsl/ast_visitor.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast_visitor.py
 # 对应 spec 文件路径: spec/dsl/ast_visitor.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_invalid_return_annotation_reports_diagnostics() -> None:
@@ -244,7 +244,7 @@ def test_invalid_return_annotation_reports_diagnostics() -> None:
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证非法 Tensor 返回注解会抛出带诊断的错误。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_invalid_tensor_return_annotation_reports_diagnostics
-# 对应功能实现文件路径: python/dsl/ast_visitor.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast_visitor.py
 # 对应 spec 文件路径: spec/dsl/ast_visitor.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_invalid_tensor_return_annotation_reports_diagnostics() -> None:
@@ -265,7 +265,7 @@ def test_invalid_tensor_return_annotation_reports_diagnostics() -> None:
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证常量 lowering 失败会抛出带诊断的错误。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_constant_lowering_reports_diagnostics
-# 对应功能实现文件路径: python/dsl/lowering.py
+# 对应功能实现文件路径: kernel_gen/dsl/lowering.py
 # 对应 spec 文件路径: spec/dsl/lowering.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_constant_lowering_reports_diagnostics() -> None:
@@ -286,7 +286,7 @@ def test_constant_lowering_reports_diagnostics() -> None:
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证缺失 return 会抛出带诊断的错误。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_missing_return_reports_diagnostics
-# 对应功能实现文件路径: python/dsl/ast_visitor.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast_visitor.py
 # 对应 spec 文件路径: spec/dsl/ast_visitor.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_missing_return_reports_diagnostics() -> None:
@@ -307,7 +307,7 @@ def test_missing_return_reports_diagnostics() -> None:
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证返回类型不匹配会抛出带诊断的错误。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_return_type_mismatch_reports_diagnostics
-# 对应功能实现文件路径: python/dsl/lowering.py
+# 对应功能实现文件路径: kernel_gen/dsl/lowering.py
 # 对应 spec 文件路径: spec/dsl/lowering.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_return_type_mismatch_reports_diagnostics() -> None:
@@ -328,7 +328,7 @@ def test_return_type_mismatch_reports_diagnostics() -> None:
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证缺少维度的 Tensor 注解会抛出带诊断的错误。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_missing_tensor_dimensions_reports_diagnostics
-# 对应功能实现文件路径: python/dsl/ast_visitor.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast_visitor.py
 # 对应 spec 文件路径: spec/dsl/ast_visitor.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_missing_tensor_dimensions_reports_diagnostics() -> None:
@@ -366,7 +366,7 @@ def test_missing_tensor_dimensions_reports_diagnostics() -> None:
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证多语句 SSA 顺序与 value 复用。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_multi_statement_ssa_order_and_reuse
-# 对应功能实现文件路径: python/dsl/lowering.py
+# 对应功能实现文件路径: kernel_gen/dsl/lowering.py
 # 对应 spec 文件路径: spec/dsl/lowering.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_multi_statement_ssa_order_and_reuse() -> None:
@@ -394,7 +394,7 @@ def test_multi_statement_ssa_order_and_reuse() -> None:
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证 LoadAST 在 lowering 阶段显式报错。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_load_ast_lowering_rejected
-# 对应功能实现文件路径: python/dsl/lowering.py
+# 对应功能实现文件路径: kernel_gen/dsl/lowering.py
 # 对应 spec 文件路径: spec/dsl/lowering.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_load_ast_lowering_rejected() -> None:
@@ -413,7 +413,7 @@ def test_load_ast_lowering_rejected() -> None:
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证 StoreAST 在 lowering 阶段显式报错。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_store_ast_lowering_rejected
-# 对应功能实现文件路径: python/dsl/lowering.py
+# 对应功能实现文件路径: kernel_gen/dsl/lowering.py
 # 对应 spec 文件路径: spec/dsl/lowering.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_store_ast_lowering_rejected() -> None:
@@ -432,7 +432,7 @@ def test_store_ast_lowering_rejected() -> None:
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证 lower_to_nn_ir 在 LoadAST 时抛 LoweringError 且不生成 IR。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_load_ast_lowering_raises_lowering_error
-# 对应功能实现文件路径: python/dsl/lowering.py
+# 对应功能实现文件路径: kernel_gen/dsl/lowering.py
 # 对应 spec 文件路径: spec/dsl/lowering.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_load_ast_lowering_raises_lowering_error() -> None:
@@ -451,7 +451,7 @@ def test_load_ast_lowering_raises_lowering_error() -> None:
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证 lower_to_nn_ir 在 StoreAST 时抛 LoweringError 且不生成 IR。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_store_ast_lowering_raises_lowering_error
-# 对应功能实现文件路径: python/dsl/lowering.py
+# 对应功能实现文件路径: kernel_gen/dsl/lowering.py
 # 对应 spec 文件路径: spec/dsl/lowering.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_store_ast_lowering_raises_lowering_error() -> None:
@@ -470,7 +470,7 @@ def test_store_ast_lowering_raises_lowering_error() -> None:
 # 最近一次运行成功时间: 2026-03-19 03:24:32 +0800
 # 功能说明: 验证 singleton dim 隐式 broadcast lowering 为 nn.broadcast + nn.add。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_tensor_binary_implicit_broadcast_lowering
-# 对应功能实现文件路径: python/dsl/lowering.py
+# 对应功能实现文件路径: kernel_gen/dsl/lowering.py
 # 对应 spec 文件路径: spec/dsl/lowering.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_tensor_binary_implicit_broadcast_lowering() -> None:
@@ -495,7 +495,7 @@ def test_tensor_binary_implicit_broadcast_lowering() -> None:
 # 最近一次运行成功时间: 2026-03-19 03:24:32 +0800
 # 功能说明: 验证前置维隐式 broadcast lowering 为 nn.broadcast + nn.add。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_tensor_binary_prepend_broadcast_lowering
-# 对应功能实现文件路径: python/dsl/lowering.py
+# 对应功能实现文件路径: kernel_gen/dsl/lowering.py
 # 对应 spec 文件路径: spec/dsl/lowering.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_tensor_binary_prepend_broadcast_lowering() -> None:
@@ -520,7 +520,7 @@ def test_tensor_binary_prepend_broadcast_lowering() -> None:
 # 最近一次运行成功时间: 2026-03-19 03:24:32 +0800
 # 功能说明: 验证比较表达式隐式 broadcast lowering 为 nn.broadcast + nn.eq。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_compare_implicit_broadcast_lowering
-# 对应功能实现文件路径: python/dsl/lowering.py
+# 对应功能实现文件路径: kernel_gen/dsl/lowering.py
 # 对应 spec 文件路径: spec/dsl/lowering.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_compare_implicit_broadcast_lowering() -> None:
@@ -545,7 +545,7 @@ def test_compare_implicit_broadcast_lowering() -> None:
 # 最近一次运行成功时间: 2026-03-19 03:24:32 +0800
 # 功能说明: 验证不可广播的逐元素表达式抛 LoweringError 且保留位置。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics
-# 对应功能实现文件路径: python/dsl/lowering.py
+# 对应功能实现文件路径: kernel_gen/dsl/lowering.py
 # 对应 spec 文件路径: spec/dsl/lowering.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics() -> None:
@@ -567,7 +567,7 @@ def test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics() -> None
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证不支持语法会抛出带诊断的错误。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_unsupported_syntax_reports_diagnostics
-# 对应功能实现文件路径: python/dsl/ast_visitor.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast_visitor.py
 # 对应 spec 文件路径: spec/dsl/ast_visitor.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_unsupported_syntax_reports_diagnostics() -> None:

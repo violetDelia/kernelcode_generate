@@ -11,7 +11,7 @@
 - 创建者：`规格小队`
 - 最后一次更改：`小李飞刀`
 - `spec`：[`spec/dsl/ast.md`](../../spec/dsl/ast.md)
-- `功能实现`：[`python/dsl/ast.py`](../../python/dsl/ast.py)
+- `功能实现`：[`kernel_gen/dsl/ast.py`](../../kernel_gen/dsl/ast.py)
 - `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
 
 ## 依赖

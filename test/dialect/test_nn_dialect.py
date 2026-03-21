@@ -10,7 +10,7 @@
 - pytest -q test/dialect/test_nn_dialect.py
 
 关联文件:
-- 功能实现: python/dialect/nn.py
+- 功能实现: kernel_gen/dialect/nn.py
 - Spec 文档: spec/dialect/nn.md
 - 测试文件: test/dialect/test_nn_dialect.py
 """
@@ -35,7 +35,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from python.dialect import Nn, NnAddOp, NnBroadcastOp, NnEqOp, NnMatmulOp, NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect import Nn, NnAddOp, NnBroadcastOp, NnEqOp, NnMatmulOp, NnMemorySpaceAttr, NnMemoryType
 
 
 def _build_context() -> Context:
@@ -53,7 +53,7 @@ def _build_context() -> Context:
     关联文件:
     - spec: spec/dialect/nn.md
     - test: test/dialect/test_nn_dialect.py
-    - 功能实现: python/dialect/nn.py
+    - 功能实现: kernel_gen/dialect/nn.py
     """
 
     ctx = Context()
@@ -114,7 +114,7 @@ def _make_simple_memory_type(
     关联文件:
     - spec: spec/dialect/nn.md
     - test: test/dialect/test_nn_dialect.py
-    - 功能实现: python/dialect/nn.py
+    - 功能实现: kernel_gen/dialect/nn.py
     """
     return NnMemoryType(
         ArrayAttr(shape),
@@ -144,7 +144,7 @@ def _make_matrix_type(
     关联文件:
     - spec: spec/dialect/nn.md
     - test: test/dialect/test_nn_dialect.py
-    - 功能实现: python/dialect/nn.py
+    - 功能实现: kernel_gen/dialect/nn.py
     """
 
     return NnMemoryType(
@@ -162,7 +162,7 @@ def _make_matrix_type(
 # 最近一次运行成功时间: 2026-03-19 01:01:56 +0800
 # 功能说明: 验证 memory type parse/print 可稳定 round-trip。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_memory_type_round_trip
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_memory_type_round_trip() -> None:
@@ -181,7 +181,7 @@ def test_memory_type_round_trip() -> None:
 # 最近一次运行成功时间: 2026-03-19 01:01:56 +0800
 # 功能说明: 验证五种合法 space text form 均可 parse/print round-trip。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_space_attr_round_trip
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_space_attr_round_trip() -> None:
@@ -206,7 +206,7 @@ def test_space_attr_round_trip() -> None:
 # 最近一次运行成功时间: 2026-03-19 01:01:56 +0800
 # 功能说明: 验证非法 space attribute 会触发 verifier。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_invalid_space_attr_rejected
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_invalid_space_attr_rejected() -> None:
@@ -221,7 +221,7 @@ def test_invalid_space_attr_rejected() -> None:
 # 最近一次运行成功时间: 2026-03-19 01:01:56 +0800
 # 功能说明: 验证 memory type 的 shape/stride rank mismatch 会触发 verifier。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_memory_type_rank_mismatch_rejected
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_memory_type_rank_mismatch_rejected() -> None:
@@ -241,7 +241,7 @@ def test_memory_type_rank_mismatch_rejected() -> None:
 # 最近一次运行成功时间: 2026-03-19 01:01:56 +0800
 # 功能说明: 验证 nn.add 在 operand/result/space 一致时可通过 verifier。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_add_op_verify_success
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_add_op_verify_success() -> None:
@@ -259,7 +259,7 @@ def test_add_op_verify_success() -> None:
 # 最近一次运行成功时间: 2026-03-19 01:01:56 +0800
 # 功能说明: 验证 nn.add operand space mismatch 会触发 verifier。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_add_op_rejects_operand_space_mismatch
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_add_op_rejects_operand_space_mismatch() -> None:
@@ -279,7 +279,7 @@ def test_add_op_rejects_operand_space_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-19 01:01:56 +0800
 # 功能说明: 验证 op attribute space 与 type space 不一致时会触发 verifier。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_add_op_rejects_attr_space_mismatch
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_add_op_rejects_attr_space_mismatch() -> None:
@@ -298,7 +298,7 @@ def test_add_op_rejects_attr_space_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-19 01:01:56 +0800
 # 功能说明: 验证比较 op 结果 element_type 必须固定为 i1。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_compare_op_requires_i1_result
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_compare_op_requires_i1_result() -> None:
@@ -318,7 +318,7 @@ def test_compare_op_requires_i1_result() -> None:
 # 最近一次运行成功时间: 2026-03-19 01:01:56 +0800
 # 功能说明: 验证模块 parse/print 可在 nn op 上保持 round-trip。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_module_round_trip
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_module_round_trip() -> None:
@@ -341,7 +341,7 @@ def test_module_round_trip() -> None:
 # 最近一次运行成功时间: 2026-03-19 01:01:56 +0800
 # 功能说明: 验证 parse 后的 nn.add 在 space mismatch 场景下会被 verifier 捕获。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_space_mismatch_from_text_rejected
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_space_mismatch_from_text_rejected() -> None:
@@ -364,7 +364,7 @@ def test_space_mismatch_from_text_rejected() -> None:
 # 最近一次运行成功时间: 2026-03-19 01:01:56 +0800
 # 功能说明: 验证文本 assembly 中 op attribute space 与 type space 不一致时会在 verify 阶段失败。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_attr_space_mismatch_from_text_rejected
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_attr_space_mismatch_from_text_rejected() -> None:
@@ -387,7 +387,7 @@ def test_attr_space_mismatch_from_text_rejected() -> None:
 # 最近一次运行成功时间: 2026-03-19 01:01:56 +0800
 # 功能说明: 验证缺失字段的 nn.memory 文本会在 parse 阶段失败。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_memory_type_parse_requires_all_fields
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_memory_type_parse_requires_all_fields() -> None:
@@ -403,7 +403,7 @@ def test_memory_type_parse_requires_all_fields() -> None:
 # 最近一次运行成功时间: 2026-03-19 02:14:10 +0800
 # 功能说明: 验证 nn.broadcast 合法输入可通过 verifier。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_broadcast_op_verify_success
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_broadcast_op_verify_success() -> None:
@@ -431,7 +431,7 @@ def test_broadcast_op_verify_success() -> None:
 # 最近一次运行成功时间: 2026-03-19 02:14:10 +0800
 # 功能说明: 验证 nn.broadcast 在 space 不一致时报错。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_broadcast_op_space_mismatch
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_broadcast_op_space_mismatch() -> None:
@@ -450,7 +450,7 @@ def test_broadcast_op_space_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-19 02:14:10 +0800
 # 功能说明: 验证 nn.broadcast 在 element_type 不一致时报错。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_broadcast_op_element_type_mismatch
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_broadcast_op_element_type_mismatch() -> None:
@@ -469,7 +469,7 @@ def test_broadcast_op_element_type_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-19 02:14:10 +0800
 # 功能说明: 验证含 nn.broadcast 的模块可 round-trip。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_broadcast_module_round_trip
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_broadcast_module_round_trip() -> None:
@@ -491,7 +491,7 @@ def test_broadcast_module_round_trip() -> None:
 # 最近一次运行成功时间: 2026-03-19 01:53:30 +0800
 # 功能说明: 验证 nn.matmul 在合法输入下通过 verifier。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_matmul_op_verify_success
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_matmul_op_verify_success() -> None:
@@ -511,7 +511,7 @@ def test_matmul_op_verify_success() -> None:
 # 最近一次运行成功时间: 2026-03-19 01:53:30 +0800
 # 功能说明: 验证 contracting 维度不匹配时 nn.matmul 抛错。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_matmul_op_shape_mismatch
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_matmul_op_shape_mismatch() -> None:
@@ -532,7 +532,7 @@ def test_matmul_op_shape_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-19 01:53:30 +0800
 # 功能说明: 验证结果 shape 不匹配时 nn.matmul 抛错。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_matmul_op_result_shape_mismatch
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_matmul_op_result_shape_mismatch() -> None:
@@ -553,7 +553,7 @@ def test_matmul_op_result_shape_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-19 01:53:30 +0800
 # 功能说明: 验证含 nn.matmul 的模块 parse/print round-trip。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_matmul_module_round_trip
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_matmul_module_round_trip() -> None:
@@ -576,7 +576,7 @@ def test_matmul_module_round_trip() -> None:
 # 最近一次运行成功时间: 2026-03-19 02:24:51 +0800
 # 功能说明: 验证 matmul operand space mismatch 会触发 verifier。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_matmul_op_space_mismatch
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_matmul_op_space_mismatch() -> None:
@@ -597,7 +597,7 @@ def test_matmul_op_space_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-19 02:24:51 +0800
 # 功能说明: 验证 matmul attribute space mismatch 会触发 verifier。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_matmul_op_attr_space_mismatch
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_matmul_op_attr_space_mismatch() -> None:
@@ -618,7 +618,7 @@ def test_matmul_op_attr_space_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-19 02:24:51 +0800
 # 功能说明: 验证 matmul rank!=2 会触发 verifier。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_matmul_op_rank_mismatch
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_matmul_op_rank_mismatch() -> None:
@@ -639,7 +639,7 @@ def test_matmul_op_rank_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-19 02:24:51 +0800
 # 功能说明: 验证 matmul element_type 不一致会触发 verifier。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_matmul_op_element_type_mismatch
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_matmul_op_element_type_mismatch() -> None:
@@ -660,7 +660,7 @@ def test_matmul_op_element_type_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-19 02:40:00 +0800
 # 功能说明: 验证 nn.add 拒绝隐式 broadcast 形状。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_add_op_rejects_implicit_broadcast_shape_mismatch
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_add_op_rejects_implicit_broadcast_shape_mismatch() -> None:
@@ -681,7 +681,7 @@ def test_add_op_rejects_implicit_broadcast_shape_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-19 02:40:00 +0800
 # 功能说明: 验证 nn.eq 拒绝隐式 broadcast 形状。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_compare_op_rejects_implicit_broadcast_shape_mismatch
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_compare_op_rejects_implicit_broadcast_shape_mismatch() -> None:
@@ -702,7 +702,7 @@ def test_compare_op_rejects_implicit_broadcast_shape_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-19 02:40:00 +0800
 # 功能说明: 验证显式 broadcast 后再执行 nn.add 可通过 verifier。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_explicit_broadcast_then_add_verify_success
-# 对应功能实现文件路径: python/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_explicit_broadcast_then_add_verify_success() -> None:

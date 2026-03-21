@@ -15,7 +15,7 @@
 ## 依赖
 
 - `enum.Enum`：用于定义枚举。
-- `python.symbol_variable.type`：作为 `NumericType` 与 `Farmat` 的唯一有效导入入口。
+- `kernel_gen.symbol_variable.type`：作为 `NumericType` 与 `Farmat` 的唯一有效导入入口。
 
 ## 目标
 
@@ -47,7 +47,7 @@
 使用示例：
 
 ```python
-from python.symbol_variable.type import NumericType
+from kernel_gen.symbol_variable.type import NumericType
 
 assert NumericType.Int8.value == "int8"
 assert NumericType.Int16.value == "int16"
@@ -92,7 +92,7 @@ assert NumericType.Int32 is not NumericType.Float32
 使用示例：
 
 ```python
-from python.symbol_variable.type import Farmat
+from kernel_gen.symbol_variable.type import Farmat
 
 assert Farmat.Norm.name == "Norm"
 assert Farmat.CLast.name == "CLast"
@@ -128,9 +128,9 @@ assert Farmat.CLast.name == "CLast"
 
 | 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 |
 |---|---|---|---|---|---|
-| TY-001 | 成员值 | `NumericType` 成员值稳定 | 已导入 `python.symbol_variable.type` | 读取成员 `.value` | 与约定字符串一致 |
+| TY-001 | 成员值 | `NumericType` 成员值稳定 | 已导入 `kernel_gen.symbol_variable.type` | 读取成员 `.value` | 与约定字符串一致 |
 | TY-002 | 成员边界 | `Farmat` 公开成员 | 已导入 `Farmat` | 仅可访问 `Norm`/`CLast` | 不存在额外布局名 |
 | TY-003 | 导出边界 | `__all__` 内容 | 已导入模块 | 读取 `__all__` | 严格等于 `["NumericType", "Farmat"]` |
-| TY-004 | 导出边界 | `import *` 暴露范围 | 已导入模块 | 执行 `from python.symbol_variable.type import *` | 仅暴露 `Farmat`/`NumericType` |
+| TY-004 | 导出边界 | `import *` 暴露范围 | 已导入模块 | 执行 `from kernel_gen.symbol_variable.type import *` | 仅暴露 `Farmat`/`NumericType` |
 | TY-005 | 成员访问 | `NumericType` 成员访问 | 已导入 `NumericType` | 读取 `.name` | 与约定成员名一致 |
 | TY-006 | 导入边界 | 旧路径导入 | 已安装包 | `importlib.import_module("symbol_variable.type")` | 抛 `ModuleNotFoundError` |

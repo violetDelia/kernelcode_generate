@@ -10,7 +10,7 @@
 - pytest -q test/symbol_variable/test_symbol_shape.py
 
 关联文件:
-- 功能实现: python/symbol_variable/symbol_shape.py
+- 功能实现: kernel_gen/symbol_variable/symbol_shape.py
 - Spec 文档: spec/symbol_variable/symbol_shape.md
 - 测试文件: test/symbol_variable/test_symbol_shape.py
 """
@@ -26,8 +26,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from python.symbol_variable.symbol_dim import SymbolDim
-from python.symbol_variable.symbol_shape import SymbolList, SymbolShape
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.symbol_variable.symbol_shape import SymbolList, SymbolShape
 
 
 # SS-001
@@ -37,7 +37,7 @@ from python.symbol_variable.symbol_shape import SymbolList, SymbolShape
 # 最近一次运行成功时间: 2026-03-16 01:43:13 +0800
 # 功能说明: 验证构造支持 SymbolDim 与 int 输入。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_shape.py -k test_init_accepts_symbol_dim_and_int
-# 对应功能实现文件路径: python/symbol_variable/symbol_shape.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_shape.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_shape.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_shape.py
 def test_init_accepts_symbol_dim_and_int() -> None:
@@ -54,7 +54,7 @@ def test_init_accepts_symbol_dim_and_int() -> None:
 # 最近一次运行成功时间: 2026-03-16 01:43:13 +0800
 # 功能说明: 验证序列化输出动态为 str、静态为 int。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_shape.py -k test_get_values
-# 对应功能实现文件路径: python/symbol_variable/symbol_shape.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_shape.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_shape.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_shape.py
 def test_get_values() -> None:
@@ -70,7 +70,7 @@ def test_get_values() -> None:
 # 最近一次运行成功时间: 2026-03-16 01:43:13 +0800
 # 功能说明: 验证索引越界抛 IndexError 且信息一致。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_shape.py -k test_getitem_out_of_range
-# 对应功能实现文件路径: python/symbol_variable/symbol_shape.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_shape.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_shape.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_shape.py
 def test_getitem_out_of_range() -> None:
@@ -86,7 +86,7 @@ def test_getitem_out_of_range() -> None:
 # 最近一次运行成功时间: 2026-03-20 21:18:21 +0800
 # 功能说明: 验证 slice 返回 List[SymbolDim]。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_shape.py -k test_getitem_slice
-# 对应功能实现文件路径: python/symbol_variable/symbol_shape.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_shape.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_shape.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_shape.py
 def test_getitem_slice() -> None:
@@ -104,7 +104,7 @@ def test_getitem_slice() -> None:
 # 最近一次运行成功时间: 2026-03-16 01:43:13 +0800
 # 功能说明: 验证 slice 赋值会逐项转换为 SymbolDim。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_shape.py -k test_setitem_slice_converts
-# 对应功能实现文件路径: python/symbol_variable/symbol_shape.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_shape.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_shape.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_shape.py
 def test_setitem_slice_converts() -> None:
@@ -121,7 +121,7 @@ def test_setitem_slice_converts() -> None:
 # 最近一次运行成功时间: 2026-03-16 01:43:13 +0800
 # 功能说明: 验证 get_shape 返回拷贝，外部修改不影响内部。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_shape.py -k test_get_shape_copy
-# 对应功能实现文件路径: python/symbol_variable/symbol_shape.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_shape.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_shape.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_shape.py
 def test_get_shape_copy() -> None:
@@ -138,7 +138,7 @@ def test_get_shape_copy() -> None:
 # 最近一次运行成功时间: 2026-03-20 21:18:21 +0800
 # 功能说明: 验证非 int/slice 索引抛 TypeError。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_shape.py -k test_invalid_index_type
-# 对应功能实现文件路径: python/symbol_variable/symbol_shape.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_shape.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_shape.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_shape.py
 def test_invalid_index_type() -> None:
@@ -156,7 +156,7 @@ def test_invalid_index_type() -> None:
 # 最近一次运行成功时间: 2026-03-20 21:18:21 +0800
 # 功能说明: 验证 slice 赋值非可迭代对象触发明确异常。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_shape.py -k test_slice_assign_non_iterable
-# 对应功能实现文件路径: python/symbol_variable/symbol_shape.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_shape.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_shape.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_shape.py
 def test_slice_assign_non_iterable() -> None:
@@ -172,7 +172,7 @@ def test_slice_assign_non_iterable() -> None:
 # 最近一次运行成功时间: 2026-03-20 21:18:21 +0800
 # 功能说明: 验证 slice 赋值元素不可转换触发明确异常。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_shape.py -k test_slice_assign_invalid_item
-# 对应功能实现文件路径: python/symbol_variable/symbol_shape.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_shape.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_shape.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_shape.py
 def test_slice_assign_invalid_item() -> None:
@@ -188,7 +188,7 @@ def test_slice_assign_invalid_item() -> None:
 # 最近一次运行成功时间: 2026-03-20 21:18:21 +0800
 # 功能说明: 验证切片赋值时纯数字字符串可转换为静态维度。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_shape.py -k test_slice_assign_digit_string
-# 对应功能实现文件路径: python/symbol_variable/symbol_shape.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_shape.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_shape.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_shape.py
 def test_slice_assign_digit_string() -> None:
@@ -204,7 +204,7 @@ def test_slice_assign_digit_string() -> None:
 # 最近一次运行成功时间: 2026-03-20 21:18:21 +0800
 # 功能说明: 验证 int 索引赋值会转换为 SymbolDim。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_shape.py -k test_setitem_converts
-# 对应功能实现文件路径: python/symbol_variable/symbol_shape.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_shape.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_shape.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_shape.py
 def test_setitem_converts() -> None:
@@ -221,7 +221,7 @@ def test_setitem_converts() -> None:
 # 最近一次运行成功时间: 2026-03-20 21:18:21 +0800
 # 功能说明: 验证 repr 输出格式。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_shape.py -k test_repr
-# 对应功能实现文件路径: python/symbol_variable/symbol_shape.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_shape.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_shape.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_shape.py
 def test_repr() -> None:
@@ -236,7 +236,7 @@ def test_repr() -> None:
 # 最近一次运行成功时间: 2026-03-20 21:18:21 +0800
 # 功能说明: 验证 List 形式 repr 输出格式。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_shape.py -k test_list_repr
-# 对应功能实现文件路径: python/symbol_variable/symbol_shape.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_shape.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_shape.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_shape.py
 def test_list_repr() -> None:
@@ -251,7 +251,7 @@ def test_list_repr() -> None:
 # 最近一次运行成功时间: 2026-03-20 21:18:21 +0800
 # 功能说明: 验证可由已有 SymbolShape 构造等价新对象。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_shape.py -k test_construct_from_existing_shape
-# 对应功能实现文件路径: python/symbol_variable/symbol_shape.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_shape.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_shape.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_shape.py
 def test_construct_from_existing_shape() -> None:
@@ -269,7 +269,7 @@ def test_construct_from_existing_shape() -> None:
 # 最近一次运行成功时间: 2026-03-20 21:18:21 +0800
 # 功能说明: 验证 len/iter/reversed 行为。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_shape.py -k test_iteration
-# 对应功能实现文件路径: python/symbol_variable/symbol_shape.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_shape.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_shape.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_shape.py
 def test_iteration() -> None:

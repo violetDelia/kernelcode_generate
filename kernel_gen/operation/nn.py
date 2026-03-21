@@ -7,23 +7,23 @@
 - 提供 Memory 的逐元素算术、比较与显式 broadcast 运算 API。
 
 使用示例:
-- from python.operation.nn import add, broadcast, eq
+- from kernel_gen.operation.nn import add, broadcast, eq
 - result = add(mem, 1)
 - expanded = broadcast(mem, ["M", "N"])
 
 关联文件:
 - spec: spec/operation/nn.md
 - test: test/operation/test_operation_nn.py
-- 功能实现: python/operation/nn.py
+- 功能实现: kernel_gen/operation/nn.py
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 
-from python.symbol_variable.memory import Memory
-from python.symbol_variable.symbol_shape import SymbolShape
-from python.symbol_variable.type import NumericType
+from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.symbol_shape import SymbolShape
+from kernel_gen.symbol_variable.type import NumericType
 
 
 def _normalize_broadcast_shape(shape: object) -> SymbolShape:
@@ -42,7 +42,7 @@ def _normalize_broadcast_shape(shape: object) -> SymbolShape:
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
-    - 功能实现: python/operation/nn.py
+    - 功能实现: kernel_gen/operation/nn.py
     """
     if isinstance(shape, SymbolShape):
         return shape
@@ -73,7 +73,7 @@ def _merge_broadcast_dim(lhs_dim: int | str, rhs_dim: int | str) -> int | str:
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
-    - 功能实现: python/operation/nn.py
+    - 功能实现: kernel_gen/operation/nn.py
     """
     if lhs_dim == "?" or rhs_dim == "?":
         if lhs_dim == rhs_dim:
@@ -104,7 +104,7 @@ def _infer_implicit_broadcast_shape(lhs: Memory, rhs: Memory) -> SymbolShape:
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
-    - 功能实现: python/operation/nn.py
+    - 功能实现: kernel_gen/operation/nn.py
     """
     lhs_values = lhs.shape.get_values()
     rhs_values = rhs.shape.get_values()
@@ -137,7 +137,7 @@ def _binary_memory_result(lhs: Memory, rhs: Memory) -> Memory:
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
-    - 功能实现: python/operation/nn.py
+    - 功能实现: kernel_gen/operation/nn.py
     """
     if lhs.dtype is not rhs.dtype:
         raise TypeError("Memory dtype mismatch")
@@ -165,7 +165,7 @@ def _compare_memory_result(lhs: Memory, rhs: Memory) -> Memory:
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
-    - 功能实现: python/operation/nn.py
+    - 功能实现: kernel_gen/operation/nn.py
     """
     if lhs.dtype is not rhs.dtype:
         raise TypeError("Memory dtype mismatch")
@@ -192,7 +192,7 @@ def _ensure_memory_operand(lhs: object, rhs: object) -> None:
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
-    - 功能实现: python/operation/nn.py
+    - 功能实现: kernel_gen/operation/nn.py
     """
     if not isinstance(lhs, Memory) and not isinstance(rhs, Memory):
         raise TypeError("At least one operand must be Memory")
@@ -214,7 +214,7 @@ def _infer_broadcast_shape(lhs: SymbolShape, rhs: SymbolShape) -> SymbolShape:
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
-    - 功能实现: python/operation/nn.py
+    - 功能实现: kernel_gen/operation/nn.py
     """
     lhs_dims = lhs.get_values()
     rhs_dims = rhs.get_values()
@@ -257,7 +257,7 @@ def _broadcast_memory_pair(lhs: Memory, rhs: Memory) -> tuple[Memory, Memory]:
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
-    - 功能实现: python/operation/nn.py
+    - 功能实现: kernel_gen/operation/nn.py
     """
     lhs_values = lhs.shape.get_values()
     rhs_values = rhs.shape.get_values()
@@ -285,7 +285,7 @@ def _dispatch_binary(lhs: object, rhs: object, op: str, rop: str) -> Memory:
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
-    - 功能实现: python/operation/nn.py
+    - 功能实现: kernel_gen/operation/nn.py
     """
     _ensure_memory_operand(lhs, rhs)
     if isinstance(lhs, Memory) and isinstance(rhs, Memory):
@@ -310,7 +310,7 @@ def _dispatch_compare(lhs: object, rhs: object, op: str, rop: str) -> Memory:
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
-    - 功能实现: python/operation/nn.py
+    - 功能实现: kernel_gen/operation/nn.py
     """
     _ensure_memory_operand(lhs, rhs)
     if isinstance(lhs, Memory) and isinstance(rhs, Memory):
@@ -335,7 +335,7 @@ def add(lhs: object, rhs: object) -> Memory:
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
-    - 功能实现: python/operation/nn.py
+    - 功能实现: kernel_gen/operation/nn.py
     """
     return _dispatch_binary(lhs, rhs, "__add__", "__radd__")
 
@@ -355,7 +355,7 @@ def sub(lhs: object, rhs: object) -> Memory:
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
-    - 功能实现: python/operation/nn.py
+    - 功能实现: kernel_gen/operation/nn.py
     """
     return _dispatch_binary(lhs, rhs, "__sub__", "__rsub__")
 
@@ -375,7 +375,7 @@ def mul(lhs: object, rhs: object) -> Memory:
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
-    - 功能实现: python/operation/nn.py
+    - 功能实现: kernel_gen/operation/nn.py
     """
     return _dispatch_binary(lhs, rhs, "__mul__", "__rmul__")
 
@@ -395,7 +395,7 @@ def truediv(lhs: object, rhs: object) -> Memory:
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
-    - 功能实现: python/operation/nn.py
+    - 功能实现: kernel_gen/operation/nn.py
     """
     return _dispatch_binary(lhs, rhs, "__truediv__", "__rtruediv__")
 
@@ -415,7 +415,7 @@ def eq(lhs: object, rhs: object) -> Memory:
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
-    - 功能实现: python/operation/nn.py
+    - 功能实现: kernel_gen/operation/nn.py
     """
     return _dispatch_compare(lhs, rhs, "__eq__", "__eq__")
 
@@ -435,7 +435,7 @@ def ne(lhs: object, rhs: object) -> Memory:
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
-    - 功能实现: python/operation/nn.py
+    - 功能实现: kernel_gen/operation/nn.py
     """
     return _dispatch_compare(lhs, rhs, "__ne__", "__ne__")
 
@@ -455,7 +455,7 @@ def lt(lhs: object, rhs: object) -> Memory:
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
-    - 功能实现: python/operation/nn.py
+    - 功能实现: kernel_gen/operation/nn.py
     """
     return _dispatch_compare(lhs, rhs, "__lt__", "__gt__")
 
@@ -475,7 +475,7 @@ def le(lhs: object, rhs: object) -> Memory:
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
-    - 功能实现: python/operation/nn.py
+    - 功能实现: kernel_gen/operation/nn.py
     """
     return _dispatch_compare(lhs, rhs, "__le__", "__ge__")
 
@@ -495,7 +495,7 @@ def gt(lhs: object, rhs: object) -> Memory:
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
-    - 功能实现: python/operation/nn.py
+    - 功能实现: kernel_gen/operation/nn.py
     """
     return _dispatch_compare(lhs, rhs, "__gt__", "__lt__")
 
@@ -515,7 +515,7 @@ def ge(lhs: object, rhs: object) -> Memory:
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
-    - 功能实现: python/operation/nn.py
+    - 功能实现: kernel_gen/operation/nn.py
     """
     return _dispatch_compare(lhs, rhs, "__ge__", "__le__")
 
@@ -536,7 +536,7 @@ def matmul(lhs: object, rhs: object) -> Memory:
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
-    - 功能实现: python/operation/nn.py
+    - 功能实现: kernel_gen/operation/nn.py
     """
     if not isinstance(lhs, Memory) or not isinstance(rhs, Memory):
         raise TypeError("matmul operands must be Memory")
@@ -575,7 +575,7 @@ def broadcast(value: object, shape: object) -> Memory:
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
-    - 功能实现: python/operation/nn.py
+    - 功能实现: kernel_gen/operation/nn.py
     """
     if not isinstance(value, Memory):
         raise TypeError("broadcast value must be Memory")

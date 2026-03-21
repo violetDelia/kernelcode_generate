@@ -1,6 +1,6 @@
-from python.symbol_variable.memory import LocalSpaceMeta, Memory, MemorySpace
-from python.symbol_variable.type import Farmat, NumericType
-from python.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.symbol_variable.memory import LocalSpaceMeta, Memory, MemorySpace
+from kernel_gen.symbol_variable.type import Farmat, NumericType
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 
 m = SymbolDim("M")

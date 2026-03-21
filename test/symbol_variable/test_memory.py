@@ -10,7 +10,7 @@
 - pytest -q test/symbol_variable/test_memory.py
 
 关联文件:
-- 功能实现: python/symbol_variable/memory.py
+- 功能实现: kernel_gen/symbol_variable/memory.py
 - Spec 文档: spec/symbol_variable/memory.md
 - 测试文件: test/symbol_variable/test_memory.py
 """
@@ -27,9 +27,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from python.symbol_variable.memory import LocalSpaceMeta, Memory, MemorySpace
-from python.symbol_variable.symbol_shape import SymbolShape
-from python.symbol_variable.type import Farmat, NumericType
+from kernel_gen.symbol_variable.memory import LocalSpaceMeta, Memory, MemorySpace
+from kernel_gen.symbol_variable.symbol_shape import SymbolShape
+from kernel_gen.symbol_variable.type import Farmat, NumericType
 
 
 # ME-001
@@ -39,7 +39,7 @@ from python.symbol_variable.type import Farmat, NumericType
 # 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
 # 功能说明: 验证默认空间为 GM。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_default_space
-# 对应功能实现文件路径: python/symbol_variable/memory.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
 # 对应测试文件路径: test/symbol_variable/test_memory.py
 def test_default_space() -> None:
@@ -54,7 +54,7 @@ def test_default_space() -> None:
 # 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
 # 功能说明: 验证指定空间写入。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_custom_space
-# 对应功能实现文件路径: python/symbol_variable/memory.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
 # 对应测试文件路径: test/symbol_variable/test_memory.py
 def test_custom_space() -> None:
@@ -69,7 +69,7 @@ def test_custom_space() -> None:
 # 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
 # 功能说明: 验证 __repr__ 包含空间名与张量字段表达。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_repr
-# 对应功能实现文件路径: python/symbol_variable/memory.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
 # 对应测试文件路径: test/symbol_variable/test_memory.py
 def test_repr() -> None:
@@ -90,7 +90,7 @@ def test_repr() -> None:
 # 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
 # 功能说明: 验证 tensor-like 字段直入构造保持 shape/dtype/stride/format。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_construct_from_tensor_fields
-# 对应功能实现文件路径: python/symbol_variable/memory.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
 # 对应测试文件路径: test/symbol_variable/test_memory.py
 def test_construct_from_tensor_fields() -> None:
@@ -123,7 +123,7 @@ def test_construct_from_tensor_fields() -> None:
 # 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
 # 功能说明: 验证显式 stride 列表输入可被规整为 SymbolShape。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_explicit_stride_list
-# 对应功能实现文件路径: python/symbol_variable/memory.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
 # 对应测试文件路径: test/symbol_variable/test_memory.py
 def test_explicit_stride_list() -> None:
@@ -139,7 +139,7 @@ def test_explicit_stride_list() -> None:
 # 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
 # 功能说明: 验证动态 shape/stride 输入保持动态维度语义。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_dynamic_shape_stride
-# 对应功能实现文件路径: python/symbol_variable/memory.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
 # 对应测试文件路径: test/symbol_variable/test_memory.py
 def test_dynamic_shape_stride() -> None:
@@ -155,7 +155,7 @@ def test_dynamic_shape_stride() -> None:
 # 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
 # 功能说明: 验证 shape/stride 可直接接收 SymbolShape。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_shape_stride_accept_symbol_shape
-# 对应功能实现文件路径: python/symbol_variable/memory.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
 # 对应测试文件路径: test/symbol_variable/test_memory.py
 def test_shape_stride_accept_symbol_shape() -> None:
@@ -173,7 +173,7 @@ def test_shape_stride_accept_symbol_shape() -> None:
 # 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
 # 功能说明: 验证默认 format 与显式 format 保持可见。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_default_format
-# 对应功能实现文件路径: python/symbol_variable/memory.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
 # 对应测试文件路径: test/symbol_variable/test_memory.py
 def test_default_format() -> None:
@@ -190,7 +190,7 @@ def test_default_format() -> None:
 # 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
 # 功能说明: 验证 LocalSpaceMeta 冻结与 MemorySpace 元信息字段。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_space_meta
-# 对应功能实现文件路径: python/symbol_variable/memory.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
 # 对应测试文件路径: test/symbol_variable/test_memory.py
 def test_space_meta() -> None:

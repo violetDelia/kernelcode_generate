@@ -9,14 +9,14 @@
 - 创建者：`规格小队`
 - 最后一次更改：`小李飞刀`
 - `spec`：[`spec/dialect/nn.md`](../../spec/dialect/nn.md)
-- `功能实现`：[`python/dialect/nn.py`](../../python/dialect/nn.py)
+- `功能实现`：[`kernel_gen/dialect/nn.py`](../../kernel_gen/dialect/nn.py)
 - `test`：[`test/dialect/test_nn_dialect.py`](../../test/dialect/test_nn_dialect.py)
 
 ## 依赖
 
 - [`spec/operation/nn.md`](../../spec/operation/nn.md)：上游算子语义。
 - [`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)：`Memory` 的 `shape/stride/dtype/space` 基础语义。
-- [`python/dialect/nn.py`](../../python/dialect/nn.py)：方言实现。
+- [`kernel_gen/dialect/nn.py`](../../kernel_gen/dialect/nn.py)：方言实现。
 - [`test/dialect/test_nn_dialect.py`](../../test/dialect/test_nn_dialect.py)：方言测试。
 
 ## 目标
@@ -29,7 +29,7 @@
 
 ## 限制与边界
 
-- 本文件只定义 `python/dialect/nn.py` 的方言层接口，不重复上游 `operation/nn` 的高层 API 语义。
+- 本文件只定义 `kernel_gen/dialect/nn.py` 的方言层接口，不重复上游 `operation/nn` 的高层 API 语义。
 - 上游若允许逐元素隐式 broadcast，进入 `nn dialect` 前必须显式展开为 `nn.broadcast`。
 - `NnMemorySpaceAttr` 仅允许 `global/shared/local/tsm/tlm` 五种取值。
 - `NnMemoryType.space` 与各 op 的 `space` attribute 必须使用同一语义口径。

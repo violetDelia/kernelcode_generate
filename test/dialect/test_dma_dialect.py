@@ -10,7 +10,7 @@
 - pytest -q test/dialect/test_dma_dialect.py
 
 关联文件:
-- 功能实现: python/dialect/dma.py
+- 功能实现: kernel_gen/dialect/dma.py
 - Spec 文档: spec/dialect/dma.md
 - 测试文件: test/dialect/test_dma_dialect.py
 """
@@ -30,7 +30,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from python.dialect.dma import (
+from kernel_gen.dialect.dma import (
     Dma,
     DmaCopyOp,
     DmaDesliceOp,
@@ -38,7 +38,7 @@ from python.dialect.dma import (
     DmaSliceOp,
     DmaStoreOp,
 )
-from python.dialect.nn import Nn, NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.nn import Nn, NnMemorySpaceAttr, NnMemoryType
 
 
 def _build_context() -> Context:
@@ -56,7 +56,7 @@ def _build_context() -> Context:
     关联文件:
     - spec: spec/dialect/dma.md
     - test: test/dialect/test_dma_dialect.py
-    - 功能实现: python/dialect/dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
     """
 
     ctx = Context()
@@ -82,7 +82,7 @@ def _make_space(name: str) -> NnMemorySpaceAttr:
     关联文件:
     - spec: spec/dialect/dma.md
     - test: test/dialect/test_dma_dialect.py
-    - 功能实现: python/dialect/dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
     """
 
     return NnMemorySpaceAttr(StringAttr(name))
@@ -107,7 +107,7 @@ def _make_memory_type(
     关联文件:
     - spec: spec/dialect/dma.md
     - test: test/dialect/test_dma_dialect.py
-    - 功能实现: python/dialect/dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
     """
 
     if shape is None:
@@ -132,7 +132,7 @@ def _make_index_list(values: list[int | str]) -> ArrayAttr:
     关联文件:
     - spec: spec/dialect/dma.md
     - test: test/dialect/test_dma_dialect.py
-    - 功能实现: python/dialect/dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
     """
 
     attrs = []
@@ -151,7 +151,7 @@ def _make_index_list(values: list[int | str]) -> ArrayAttr:
 # 最近一次运行成功时间: 2026-03-18 21:00:16 +0800
 # 功能说明: 验证 dma op 仅接受 nn.memory 作为 memory 类型。
 # 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_requires_nn_memory_type
-# 对应功能实现文件路径: python/dialect/dma.py
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma_dialect.py
 def test_dma_requires_nn_memory_type() -> None:
@@ -169,7 +169,7 @@ def test_dma_requires_nn_memory_type() -> None:
 # 最近一次运行成功时间: 2026-03-18 21:00:16 +0800
 # 功能说明: 验证 dma.copy 在合法输入下可通过 verifier。
 # 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_copy_verify_success
-# 对应功能实现文件路径: python/dialect/dma.py
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma_dialect.py
 def test_dma_copy_verify_success() -> None:
@@ -187,7 +187,7 @@ def test_dma_copy_verify_success() -> None:
 # 最近一次运行成功时间: 2026-03-18 21:00:16 +0800
 # 功能说明: 验证 dma.copy 的 shape mismatch 会触发 verifier。
 # 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_copy_shape_mismatch
-# 对应功能实现文件路径: python/dialect/dma.py
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma_dialect.py
 def test_dma_copy_shape_mismatch() -> None:
@@ -207,7 +207,7 @@ def test_dma_copy_shape_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-18 21:00:16 +0800
 # 功能说明: 验证 dma.load 的 result.space 必须与 op.space 一致。
 # 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_load_result_space_mismatch
-# 对应功能实现文件路径: python/dialect/dma.py
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma_dialect.py
 def test_dma_load_result_space_mismatch() -> None:
@@ -229,7 +229,7 @@ def test_dma_load_result_space_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-18 21:00:16 +0800
 # 功能说明: 验证 dma.slice 索引长度与 rank 不一致时会报错。
 # 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_slice_rank_mismatch
-# 对应功能实现文件路径: python/dialect/dma.py
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma_dialect.py
 def test_dma_slice_rank_mismatch() -> None:
@@ -251,7 +251,7 @@ def test_dma_slice_rank_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-18 21:00:16 +0800
 # 功能说明: 验证 dma.slice 在非 1 stride 下明确报错。
 # 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_slice_non_unit_stride_rejected
-# 对应功能实现文件路径: python/dialect/dma.py
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma_dialect.py
 def test_dma_slice_non_unit_stride_rejected() -> None:
@@ -273,7 +273,7 @@ def test_dma_slice_non_unit_stride_rejected() -> None:
 # 最近一次运行成功时间: 2026-03-18 21:00:16 +0800
 # 功能说明: 验证 dma.store 的 source.shape 与 sizes 不一致会报错。
 # 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_store_size_mismatch
-# 对应功能实现文件路径: python/dialect/dma.py
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma_dialect.py
 def test_dma_store_size_mismatch() -> None:
@@ -296,7 +296,7 @@ def test_dma_store_size_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-18 21:00:16 +0800
 # 功能说明: 验证 dma.deslice 在合法输入下通过 verifier。
 # 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_deslice_verify_success
-# 对应功能实现文件路径: python/dialect/dma.py
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma_dialect.py
 def test_dma_deslice_verify_success() -> None:
@@ -318,7 +318,7 @@ def test_dma_deslice_verify_success() -> None:
 # 最近一次运行成功时间: 2026-03-18 21:00:16 +0800
 # 功能说明: 验证 dma op 透传 nn.memory 的类型 verifier 错误。
 # 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_nn_memory_type_verifier_passthrough
-# 对应功能实现文件路径: python/dialect/dma.py
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma_dialect.py
 def test_dma_nn_memory_type_verifier_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -342,7 +342,7 @@ def test_dma_nn_memory_type_verifier_passthrough(monkeypatch: pytest.MonkeyPatch
 # 最近一次运行成功时间: 2026-03-18 21:00:16 +0800
 # 功能说明: 验证 offsets/sizes 使用 StringAttr 时可通过 verifier，stride 仍需为 1。
 # 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_index_string_attr_valid
-# 对应功能实现文件路径: python/dialect/dma.py
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma_dialect.py
 def test_dma_index_string_attr_valid() -> None:

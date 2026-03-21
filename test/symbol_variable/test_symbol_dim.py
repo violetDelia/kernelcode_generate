@@ -10,7 +10,7 @@
 - pytest -q test/symbol_variable/test_symbol_dim.py
 
 关联文件:
-- 功能实现: python/symbol_variable/symbol_dim.py
+- 功能实现: kernel_gen/symbol_variable/symbol_dim.py
 - Spec 文档: spec/symbol_variable/symbol_dim.md
 - 测试文件: test/symbol_variable/test_symbol_dim.py
 """
@@ -27,7 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from python.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 
 # SD-001
@@ -37,7 +37,7 @@ from python.symbol_variable.symbol_dim import SymbolDim
 # 最近一次运行成功时间: 2026-03-20 10:21:10 +0800
 # 功能说明: 验证 int 输入可构造 SymbolDim。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_init_accepts_int
-# 对应功能实现文件路径: python/symbol_variable/symbol_dim.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_dim.py
 def test_init_accepts_int() -> None:
@@ -52,7 +52,7 @@ def test_init_accepts_int() -> None:
 # 最近一次运行成功时间: 2026-03-20 10:21:10 +0800
 # 功能说明: 验证 str 符号输入可构造 SymbolDim，非纯数字字符串按符号名处理。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_init_accepts_symbol_string
-# 对应功能实现文件路径: python/symbol_variable/symbol_dim.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_dim.py
 def test_init_accepts_symbol_string() -> None:
@@ -71,7 +71,7 @@ def test_init_accepts_symbol_string() -> None:
 # 最近一次运行成功时间: 2026-03-20 10:21:10 +0800
 # 功能说明: 验证 sympy.Basic 输入可构造 SymbolDim。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_init_accepts_sympy_basic
-# 对应功能实现文件路径: python/symbol_variable/symbol_dim.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_dim.py
 def test_init_accepts_sympy_basic() -> None:
@@ -90,7 +90,7 @@ def test_init_accepts_sympy_basic() -> None:
 # 最近一次运行成功时间: 2026-03-20 10:21:10 +0800
 # 功能说明: 验证加减乘除运算返回 SymbolDim。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_arithmetic_ops
-# 对应功能实现文件路径: python/symbol_variable/symbol_dim.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_dim.py
 def test_arithmetic_ops() -> None:
@@ -141,7 +141,7 @@ def test_arithmetic_ops() -> None:
 # 最近一次运行成功时间: 2026-03-20 10:21:10 +0800
 # 功能说明: 验证比较等价性返回 bool。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_equality
-# 对应功能实现文件路径: python/symbol_variable/symbol_dim.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_dim.py
 def test_equality() -> None:
@@ -159,7 +159,7 @@ def test_equality() -> None:
 # 最近一次运行成功时间: 2026-03-20 10:21:10 +0800
 # 功能说明: 验证动态性判断。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_is_dynamic
-# 对应功能实现文件路径: python/symbol_variable/symbol_dim.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_dim.py
 def test_is_dynamic() -> None:
@@ -174,7 +174,7 @@ def test_is_dynamic() -> None:
 # 最近一次运行成功时间: 2026-03-20 10:21:10 +0800
 # 功能说明: 验证纯数字字符串输入抛 ValueError。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_numeric_string_rejected
-# 对应功能实现文件路径: python/symbol_variable/symbol_dim.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_dim.py
 def test_numeric_string_rejected() -> None:
@@ -198,7 +198,7 @@ def test_numeric_string_rejected() -> None:
 # 最近一次运行成功时间: 2026-03-20 10:21:10 +0800
 # 功能说明: 验证空白字符串输入抛 ValueError。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_blank_string_rejected
-# 对应功能实现文件路径: python/symbol_variable/symbol_dim.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_dim.py
 def test_blank_string_rejected() -> None:
@@ -220,7 +220,7 @@ def test_blank_string_rejected() -> None:
 # 最近一次运行成功时间: 2026-03-20 10:21:10 +0800
 # 功能说明: 验证非法类型输入抛 TypeError。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_invalid_type_rejected
-# 对应功能实现文件路径: python/symbol_variable/symbol_dim.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_dim.py
 def test_invalid_type_rejected() -> None:

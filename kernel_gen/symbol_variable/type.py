@@ -7,7 +7,7 @@
 - 提供数值类型与格式枚举及其公开导出边界。
 
 使用示例:
-- from python.symbol_variable.type import NumericType, Farmat
+- from kernel_gen.symbol_variable.type import NumericType, Farmat
 - NumericType.Float32
 - NumericType.Int8
 - NumericType.Uint8
@@ -17,7 +17,7 @@
 关联文件:
 - spec: spec/symbol_variable/type.md
 - test: test/symbol_variable/test_type.py
-- 功能实现: python/symbol_variable/type.py
+- 功能实现: kernel_gen/symbol_variable/type.py
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ class NumericType(Enum):
     关联文件:
     - spec: spec/symbol_variable/type.md
     - test: test/symbol_variable/test_type.py
-    - 功能实现: python/symbol_variable/type.py
+    - 功能实现: kernel_gen/symbol_variable/type.py
     """
 
     Int8 = "int8"
@@ -76,7 +76,7 @@ class Farmat(Enum):
     关联文件:
     - spec: spec/symbol_variable/type.md
     - test: test/symbol_variable/test_type.py
-    - 功能实现: python/symbol_variable/type.py
+    - 功能实现: kernel_gen/symbol_variable/type.py
     """
 
     Norm = "Norm"

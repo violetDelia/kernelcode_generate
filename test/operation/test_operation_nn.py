@@ -4,13 +4,13 @@
 最后一次更改: 金铲铲大作战
 
 功能说明:
-- 覆盖 python/operation/nn.py 的逐元素算术与比较 API。
+- 覆盖 kernel_gen/operation/nn.py 的逐元素算术与比较 API。
 
 使用示例:
 - pytest -q test/operation/test_operation_nn.py
 
 关联文件:
-- 功能实现: python/operation/nn.py
+- 功能实现: kernel_gen/operation/nn.py
 - Spec 文档: spec/operation/nn.md
 - 测试文件: test/operation/test_operation_nn.py
 """
@@ -26,10 +26,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from python.operation.nn import add, broadcast, eq, ge, gt, le, lt, matmul, mul, ne, sub, truediv
-from python.symbol_variable.memory import Memory, MemorySpace
-from python.symbol_variable.symbol_shape import SymbolList, SymbolShape
-from python.symbol_variable.type import NumericType
+from kernel_gen.operation.nn import add, broadcast, eq, ge, gt, le, lt, matmul, mul, ne, sub, truediv
+from kernel_gen.symbol_variable.memory import Memory, MemorySpace
+from kernel_gen.symbol_variable.symbol_shape import SymbolList, SymbolShape
+from kernel_gen.symbol_variable.type import NumericType
 
 
 # OP-001
@@ -39,7 +39,7 @@ from python.symbol_variable.type import NumericType
 # 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证 add API 可独立调用并保持形状。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_add_memory
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_add_memory() -> None:
@@ -58,7 +58,7 @@ def test_nn_add_memory() -> None:
 # 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证 Memory 与标量加法支持左右两侧。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_add_scalar
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_add_scalar() -> None:
@@ -78,7 +78,7 @@ def test_nn_add_scalar() -> None:
 # 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证链式表达式逐步检查形状与类型。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_chain_expression
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_chain_expression() -> None:
@@ -96,7 +96,7 @@ def test_nn_chain_expression() -> None:
 # 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证 shape 不一致抛 ValueError。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_shape_mismatch
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_shape_mismatch() -> None:
@@ -113,7 +113,7 @@ def test_nn_shape_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证 rank 不一致抛 ValueError。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_rank_mismatch
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_rank_mismatch() -> None:
@@ -130,7 +130,7 @@ def test_nn_rank_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证 dtype 不兼容抛 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_dtype_mismatch
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_dtype_mismatch() -> None:
@@ -147,7 +147,7 @@ def test_nn_dtype_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证标量类型不合法抛 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_scalar_type_error
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_scalar_type_error() -> None:
@@ -163,7 +163,7 @@ def test_nn_scalar_type_error() -> None:
 # 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证比较 API 返回 predicate dtype。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_compare_predicate
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_compare_predicate() -> None:
@@ -185,7 +185,7 @@ def test_nn_compare_predicate() -> None:
 # 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证比较时 shape 顺序不同抛 ValueError。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_compare_shape_order
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_compare_shape_order() -> None:
@@ -202,7 +202,7 @@ def test_nn_compare_shape_order() -> None:
 # 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证其他算术 API 保持形状。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_other_arithmetic
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_other_arithmetic() -> None:
@@ -220,7 +220,7 @@ def test_nn_other_arithmetic() -> None:
 # 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证纯标量输入抛 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_scalar_only_error
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_scalar_only_error() -> None:
@@ -235,7 +235,7 @@ def test_nn_scalar_only_error() -> None:
 # 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证比较操作对称 API 可用。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_compare_alias
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_compare_alias() -> None:
@@ -253,7 +253,7 @@ def test_nn_compare_alias() -> None:
 # 最近一次运行成功时间: 2026-03-17 09:11:30 +0800
 # 功能说明: 验证 nn 链路在迁移后不依赖已移除的 convert_from_* 入口。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_operation_does_not_require_convert_from_list
-# 对应功能实现文件路径: python/symbol_variable/memory.py
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_operation_does_not_require_convert_from_list() -> None:
@@ -277,7 +277,7 @@ def test_nn_operation_does_not_require_convert_from_list() -> None:
 # 最近一次运行成功时间: 2026-03-19 02:14:10 +0800
 # 功能说明: 验证 broadcast 可扩张 singleton dim。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_broadcast_success
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_broadcast_success() -> None:
@@ -295,7 +295,7 @@ def test_nn_broadcast_success() -> None:
 # 最近一次运行成功时间: 2026-03-19 02:14:10 +0800
 # 功能说明: 验证 broadcast 可插入前置维。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_broadcast_prepend_dimension
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_broadcast_prepend_dimension() -> None:
@@ -312,7 +312,7 @@ def test_nn_broadcast_prepend_dimension() -> None:
 # 最近一次运行成功时间: 2026-03-19 02:14:10 +0800
 # 功能说明: 验证非 singleton 维度不兼容时报错。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_broadcast_dimension_mismatch
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_broadcast_dimension_mismatch() -> None:
@@ -328,7 +328,7 @@ def test_nn_broadcast_dimension_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-19 02:14:10 +0800
 # 功能说明: 验证目标 rank 更小时报错。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_broadcast_rank_error
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_broadcast_rank_error() -> None:
@@ -344,7 +344,7 @@ def test_nn_broadcast_rank_error() -> None:
 # 最近一次运行成功时间: 2026-03-19 02:14:10 +0800
 # 功能说明: 验证非 Memory 输入触发 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_broadcast_non_memory_error
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_broadcast_non_memory_error() -> None:
@@ -359,7 +359,7 @@ def test_nn_broadcast_non_memory_error() -> None:
 # 最近一次运行成功时间: 2026-03-19 02:14:10 +0800
 # 功能说明: 验证非法 shape 描述触发错误。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_broadcast_invalid_shape_error
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_broadcast_invalid_shape_error() -> None:
@@ -375,7 +375,7 @@ def test_nn_broadcast_invalid_shape_error() -> None:
 # 最近一次运行成功时间: 2026-03-19 02:40:00 +0800
 # 功能说明: 验证逐元素算术支持 singleton dim 隐式 broadcast。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_add_implicit_broadcast_singleton
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_add_implicit_broadcast_singleton() -> None:
@@ -392,7 +392,7 @@ def test_nn_add_implicit_broadcast_singleton() -> None:
 # 最近一次运行成功时间: 2026-03-19 02:40:00 +0800
 # 功能说明: 验证逐元素算术支持前置维隐式 broadcast。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_add_implicit_broadcast_prepend_dimension
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_add_implicit_broadcast_prepend_dimension() -> None:
@@ -409,7 +409,7 @@ def test_nn_add_implicit_broadcast_prepend_dimension() -> None:
 # 最近一次运行成功时间: 2026-03-19 02:40:00 +0800
 # 功能说明: 验证比较运算复用隐式 broadcast 规则。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_compare_implicit_broadcast
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_compare_implicit_broadcast() -> None:
@@ -427,7 +427,7 @@ def test_nn_compare_implicit_broadcast() -> None:
 # 最近一次运行成功时间: 2026-03-19 02:40:00 +0800
 # 功能说明: 验证不兼容维度仍报错。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_add_implicit_broadcast_mismatch
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_add_implicit_broadcast_mismatch() -> None:
@@ -444,7 +444,7 @@ def test_nn_add_implicit_broadcast_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-19 08:45:56 +0800
 # 功能说明: 验证 matmul 基础二维矩阵乘输出 shape/dtype/space。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_matmul_success
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_matmul_success() -> None:
@@ -464,7 +464,7 @@ def test_nn_matmul_success() -> None:
 # 最近一次运行成功时间: 2026-03-19 08:45:56 +0800
 # 功能说明: 验证 matmul contracting dim 不一致报错。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_matmul_contracting_dim_mismatch
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_matmul_contracting_dim_mismatch() -> None:
@@ -481,7 +481,7 @@ def test_nn_matmul_contracting_dim_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-19 08:45:56 +0800
 # 功能说明: 验证 matmul 非二维输入报错。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_matmul_rank_error
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_matmul_rank_error() -> None:
@@ -498,7 +498,7 @@ def test_nn_matmul_rank_error() -> None:
 # 最近一次运行成功时间: 2026-03-19 08:45:56 +0800
 # 功能说明: 验证 matmul 标量输入非法。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_matmul_scalar_operand_error
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_matmul_scalar_operand_error() -> None:
@@ -514,7 +514,7 @@ def test_nn_matmul_scalar_operand_error() -> None:
 # 最近一次运行成功时间: 2026-03-19 08:45:56 +0800
 # 功能说明: 验证 matmul dtype 不兼容报错。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_matmul_dtype_mismatch
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_matmul_dtype_mismatch() -> None:
@@ -531,7 +531,7 @@ def test_nn_matmul_dtype_mismatch() -> None:
 # 最近一次运行成功时间: 2026-03-19 08:45:56 +0800
 # 功能说明: 验证 matmul space 不一致报错。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_matmul_space_mismatch
-# 对应功能实现文件路径: python/operation/nn.py
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_matmul_space_mismatch() -> None:

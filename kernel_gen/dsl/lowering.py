@@ -7,13 +7,13 @@
 - 提供从 DSL AST 到 nn dialect IR 的最小 lowering 入口。
 
 使用示例:
-- from python.dsl.lowering import lower_to_nn_ir
+- from kernel_gen.dsl.lowering import lower_to_nn_ir
 - module = lower_to_nn_ir(func_ast)
 
 关联文件:
 - spec: spec/dsl/lowering.md
 - test: test/dsl/test_ast_visitor.py
-- 功能实现: python/dsl/lowering.py
+- 功能实现: kernel_gen/dsl/lowering.py
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from xdsl.dialects import func
 from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, StringAttr, i1, i32, f32
 from xdsl.ir import Attribute, Block, Region
 
-from python.dialect.nn import (
+from kernel_gen.dialect.nn import (
     NnAddOp,
     NnBroadcastOp,
     NnEqOp,
@@ -37,8 +37,8 @@ from python.dialect.nn import (
     NnSubOp,
     NnTrueDivOp,
 )
-from python.symbol_variable.memory import Memory, MemorySpace
-from python.symbol_variable.type import NumericType
+from kernel_gen.symbol_variable.memory import Memory, MemorySpace
+from kernel_gen.symbol_variable.type import NumericType
 
 from .ast import (
     BinaryExprAST,
@@ -77,7 +77,7 @@ class LoweringError(ValueError):
     关联文件:
     - spec: spec/dsl/lowering.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/lowering.py
+    - 功能实现: kernel_gen/dsl/lowering.py
     """
 
     def __init__(self, message: str, location: SourceLocation | None = None) -> None:
@@ -100,7 +100,7 @@ def _dtype_to_xdsl(dtype: NumericType) -> object:
     关联文件:
     - spec: spec/dsl/lowering.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/lowering.py
+    - 功能实现: kernel_gen/dsl/lowering.py
     """
 
     if dtype is NumericType.Float32:
@@ -125,7 +125,7 @@ def _build_stride(shape: list[int | str]) -> list[int | str]:
     关联文件:
     - spec: spec/dsl/lowering.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/lowering.py
+    - 功能实现: kernel_gen/dsl/lowering.py
     """
 
     stride: list[int | str] = []
@@ -154,7 +154,7 @@ def _dim_to_attr(value: int | str) -> object:
     关联文件:
     - spec: spec/dsl/lowering.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/lowering.py
+    - 功能实现: kernel_gen/dsl/lowering.py
     """
 
     if isinstance(value, int):
@@ -177,7 +177,7 @@ def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
     关联文件:
     - spec: spec/dsl/lowering.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/lowering.py
+    - 功能实现: kernel_gen/dsl/lowering.py
     """
     if isinstance(lhs, IntAttr) and isinstance(rhs, IntAttr):
         return lhs.data == rhs.data
@@ -205,7 +205,7 @@ def _infer_broadcast_shape(
     关联文件:
     - spec: spec/dsl/lowering.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/lowering.py
+    - 功能实现: kernel_gen/dsl/lowering.py
     """
     max_rank = max(len(lhs_shape), len(rhs_shape))
     result: list[Attribute] = []
@@ -257,7 +257,7 @@ def _build_broadcast_stride(shape: Sequence[Attribute]) -> list[Attribute]:
     关联文件:
     - spec: spec/dsl/lowering.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/lowering.py
+    - 功能实现: kernel_gen/dsl/lowering.py
     """
     stride: list[Attribute] = []
     for dim in shape:
@@ -290,7 +290,7 @@ def _infer_broadcast_memory_type(
     关联文件:
     - spec: spec/dsl/lowering.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/lowering.py
+    - 功能实现: kernel_gen/dsl/lowering.py
     """
     if lhs_type.element_type != rhs_type.element_type:
         raise LoweringError("Binary op operands must have the same element_type", location=location)
@@ -322,7 +322,7 @@ def _memory_to_nn_type(memory: Memory) -> NnMemoryType:
     关联文件:
     - spec: spec/dsl/lowering.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/lowering.py
+    - 功能实现: kernel_gen/dsl/lowering.py
     """
 
     shape = memory.shape.get_values()
@@ -350,7 +350,7 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
     关联文件:
     - spec: spec/dsl/lowering.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/lowering.py
+    - 功能实现: kernel_gen/dsl/lowering.py
     """
 
     statements = function_ast.body.statements
@@ -387,7 +387,7 @@ def _expect_memory_value(value: object, location: SourceLocation | None) -> NnMe
     关联文件:
     - spec: spec/dsl/lowering.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/lowering.py
+    - 功能实现: kernel_gen/dsl/lowering.py
     """
 
     if not isinstance(value.type, NnMemoryType):
@@ -410,7 +410,7 @@ def _expr_key(expr: object) -> int:
     关联文件:
     - spec: spec/dsl/lowering.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/lowering.py
+    - 功能实现: kernel_gen/dsl/lowering.py
     """
 
     return id(expr)
@@ -435,7 +435,7 @@ def _infer_expr_type(
     关联文件:
     - spec: spec/dsl/lowering.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/lowering.py
+    - 功能实现: kernel_gen/dsl/lowering.py
     """
 
     expr_key = _expr_key(expr)
@@ -505,7 +505,7 @@ def _lower_expr(
     关联文件:
     - spec: spec/dsl/lowering.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/lowering.py
+    - 功能实现: kernel_gen/dsl/lowering.py
     """
 
     expr_key = _expr_key(expr)
@@ -606,7 +606,7 @@ def lower_to_nn_ir(function_ast: FunctionAST) -> ModuleOp:
     关联文件:
     - spec: spec/dsl/lowering.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/lowering.py
+    - 功能实现: kernel_gen/dsl/lowering.py
     """
 
     if not function_ast.inputs:

@@ -8,12 +8,12 @@
 - 复用 nn dialect 的 NnMemoryType 与 NnMemorySpaceAttr。
 
 使用示例:
-- from python.dialect.dma import Dma, DmaCopyOp
+- from kernel_gen.dialect.dma import Dma, DmaCopyOp
 
 关联文件:
 - spec: spec/dialect/dma.md
 - test: test/dialect/test_dma_dialect.py
-- 功能实现: python/dialect/dma.py
+- 功能实现: kernel_gen/dialect/dma.py
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from xdsl.ir import Attribute, Dialect, Operation, SSAValue
 from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def, result_def
 from xdsl.utils.exceptions import VerifyException
 
-from python.dialect.nn import NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 
 
 def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
@@ -41,7 +41,7 @@ def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
     关联文件:
     - spec: spec/dialect/dma.md
     - test: test/dialect/test_dma_dialect.py
-    - 功能实现: python/dialect/dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
     """
 
     if not isinstance(value, NnMemoryType):
@@ -66,7 +66,7 @@ def _verify_index_list(value: Attribute, field_name: str, *, min_value: int) -> 
     关联文件:
     - spec: spec/dialect/dma.md
     - test: test/dialect/test_dma_dialect.py
-    - 功能实现: python/dialect/dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
     """
 
     if not isinstance(value, ArrayAttr):
@@ -97,7 +97,7 @@ def _verify_rank_match(list_attr: ArrayAttr[Attribute], rank: int, field_name: s
     关联文件:
     - spec: spec/dialect/dma.md
     - test: test/dialect/test_dma_dialect.py
-    - 功能实现: python/dialect/dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
     """
 
     if len(list_attr.data) != rank:
@@ -119,7 +119,7 @@ def _verify_sizes_match_shape(sizes: ArrayAttr[Attribute], shape: ArrayAttr[Attr
     关联文件:
     - spec: spec/dialect/dma.md
     - test: test/dialect/test_dma_dialect.py
-    - 功能实现: python/dialect/dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
     """
 
     if sizes != shape:
@@ -141,7 +141,7 @@ def _verify_unit_stride(strides: ArrayAttr[Attribute]) -> None:
     关联文件:
     - spec: spec/dialect/dma.md
     - test: test/dialect/test_dma_dialect.py
-    - 功能实现: python/dialect/dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
     """
 
     for entry in strides.data:
@@ -173,7 +173,7 @@ class DmaCopyOp(IRDLOperation):
         关联文件:
         - spec: spec/dialect/dma.md
         - test: test/dialect/test_dma_dialect.py
-        - 功能实现: python/dialect/dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
         """
 
         super().__init__(operands=[source, target])
@@ -193,7 +193,7 @@ class DmaCopyOp(IRDLOperation):
         关联文件:
         - spec: spec/dialect/dma.md
         - test: test/dialect/test_dma_dialect.py
-        - 功能实现: python/dialect/dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
         """
 
         source_type = _verify_memory_type(self.source.type, "source")
@@ -243,7 +243,7 @@ class DmaLoadOp(IRDLOperation):
         关联文件:
         - spec: spec/dialect/dma.md
         - test: test/dialect/test_dma_dialect.py
-        - 功能实现: python/dialect/dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
         """
 
         super().__init__(
@@ -273,7 +273,7 @@ class DmaLoadOp(IRDLOperation):
         关联文件:
         - spec: spec/dialect/dma.md
         - test: test/dialect/test_dma_dialect.py
-        - 功能实现: python/dialect/dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
         """
 
         source_type = _verify_memory_type(self.source.type, "source")
@@ -329,7 +329,7 @@ class DmaStoreOp(IRDLOperation):
         关联文件:
         - spec: spec/dialect/dma.md
         - test: test/dialect/test_dma_dialect.py
-        - 功能实现: python/dialect/dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
         """
 
         super().__init__(
@@ -357,7 +357,7 @@ class DmaStoreOp(IRDLOperation):
         关联文件:
         - spec: spec/dialect/dma.md
         - test: test/dialect/test_dma_dialect.py
-        - 功能实现: python/dialect/dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
         """
 
         source_type = _verify_memory_type(self.source.type, "source")
@@ -412,7 +412,7 @@ class DmaSliceOp(IRDLOperation):
         关联文件:
         - spec: spec/dialect/dma.md
         - test: test/dialect/test_dma_dialect.py
-        - 功能实现: python/dialect/dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
         """
 
         super().__init__(
@@ -443,7 +443,7 @@ class DmaSliceOp(IRDLOperation):
         关联文件:
         - spec: spec/dialect/dma.md
         - test: test/dialect/test_dma_dialect.py
-        - 功能实现: python/dialect/dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
         """
 
         source_type = _verify_memory_type(self.source.type, "source")
@@ -501,7 +501,7 @@ class DmaDesliceOp(IRDLOperation):
         关联文件:
         - spec: spec/dialect/dma.md
         - test: test/dialect/test_dma_dialect.py
-        - 功能实现: python/dialect/dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
         """
 
         super().__init__(
@@ -531,7 +531,7 @@ class DmaDesliceOp(IRDLOperation):
         关联文件:
         - spec: spec/dialect/dma.md
         - test: test/dialect/test_dma_dialect.py
-        - 功能实现: python/dialect/dma.py
+        - 功能实现: kernel_gen/dialect/dma.py
         """
 
         source_type = _verify_memory_type(self.source.type, "source")
@@ -567,7 +567,7 @@ class Dma(Dialect):
     关联文件:
     - spec: spec/dialect/dma.md
     - test: test/dialect/test_dma_dialect.py
-    - 功能实现: python/dialect/dma.py
+    - 功能实现: kernel_gen/dialect/dma.py
     """
 
     name = "dma"

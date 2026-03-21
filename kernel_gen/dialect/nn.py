@@ -7,12 +7,12 @@
 - 定义 nn dialect 的 memory type、space attribute 与逐元素/广播 op。
 
 使用示例:
-- from python.dialect.nn import Nn, NnAddOp, NnBroadcastOp, NnMemorySpaceAttr, NnMemoryType
+- from kernel_gen.dialect.nn import Nn, NnAddOp, NnBroadcastOp, NnMemorySpaceAttr, NnMemoryType
 
 关联文件:
 - spec: spec/dialect/nn.md
 - test: test/dialect/test_nn_dialect.py
-- 功能实现: python/dialect/nn.py
+- 功能实现: kernel_gen/dialect/nn.py
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ def _parse_dim_list(parser: AttrParser) -> ArrayAttr[Attribute]:
     关联文件:
     - spec: spec/dialect/nn.md
     - test: test/dialect/test_nn_dialect.py
-    - 功能实现: python/dialect/nn.py
+    - 功能实现: kernel_gen/dialect/nn.py
     """
 
     dims: list[Attribute] = []
@@ -92,7 +92,7 @@ def _print_dim_list(printer: Printer, dims: ArrayAttr[Attribute]) -> None:
     关联文件:
     - spec: spec/dialect/nn.md
     - test: test/dialect/test_nn_dialect.py
-    - 功能实现: python/dialect/nn.py
+    - 功能实现: kernel_gen/dialect/nn.py
     """
 
     printer.print_string("[")
@@ -123,7 +123,7 @@ def _verify_dim_entry(dim: Attribute, field_name: str) -> None:
     关联文件:
     - spec: spec/dialect/nn.md
     - test: test/dialect/test_nn_dialect.py
-    - 功能实现: python/dialect/nn.py
+    - 功能实现: kernel_gen/dialect/nn.py
     """
 
     if isinstance(dim, IntAttr):
@@ -153,7 +153,7 @@ class NnMemorySpaceAttr(ParametrizedAttribute):
     关联文件:
     - spec: spec/dialect/nn.md
     - test: test/dialect/test_nn_dialect.py
-    - 功能实现: python/dialect/nn.py
+    - 功能实现: kernel_gen/dialect/nn.py
     """
 
     name = "nn.space"
@@ -198,7 +198,7 @@ class NnMemorySpaceAttr(ParametrizedAttribute):
         关联文件:
         - spec: spec/dialect/nn.md
         - test: test/dialect/test_nn_dialect.py
-        - 功能实现: python/dialect/nn.py
+        - 功能实现: kernel_gen/dialect/nn.py
         """
 
         return cls(StringAttr(space))
@@ -220,7 +220,7 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
     关联文件:
     - spec: spec/dialect/nn.md
     - test: test/dialect/test_nn_dialect.py
-    - 功能实现: python/dialect/nn.py
+    - 功能实现: kernel_gen/dialect/nn.py
     """
 
     name = "nn.memory"
@@ -306,7 +306,7 @@ def _verify_binary_memory_op(op: "_BaseNnBinaryOp", compare_result: bool) -> Non
     关联文件:
     - spec: spec/dialect/nn.md
     - test: test/dialect/test_nn_dialect.py
-    - 功能实现: python/dialect/nn.py
+    - 功能实现: kernel_gen/dialect/nn.py
     """
 
     lhs_type = _verify_memory_type(op.lhs.type, "lhs")
@@ -350,7 +350,7 @@ def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
     关联文件:
     - spec: spec/dialect/nn.md
     - test: test/dialect/test_nn_dialect.py
-    - 功能实现: python/dialect/nn.py
+    - 功能实现: kernel_gen/dialect/nn.py
     """
     if isinstance(lhs, IntAttr) and isinstance(rhs, IntAttr):
         return lhs.data == rhs.data
@@ -375,7 +375,7 @@ def _verify_broadcast_compat(input_type: NnMemoryType, result_type: NnMemoryType
     关联文件:
     - spec: spec/dialect/nn.md
     - test: test/dialect/test_nn_dialect.py
-    - 功能实现: python/dialect/nn.py
+    - 功能实现: kernel_gen/dialect/nn.py
     """
     input_dims = input_type.shape.data
     result_dims = result_type.shape.data
@@ -533,7 +533,7 @@ def _verify_matmul_shape(
     关联文件:
     - spec: spec/dialect/nn.md
     - test: test/dialect/test_nn_dialect.py
-    - 功能实现: python/dialect/nn.py
+    - 功能实现: kernel_gen/dialect/nn.py
     """
 
     if len(lhs_shape) != 2 or len(rhs_shape) != 2 or len(result_shape) != 2:
@@ -563,7 +563,7 @@ class NnBroadcastOp(IRDLOperation):
     关联文件:
     - spec: spec/dialect/nn.md
     - test: test/dialect/test_nn_dialect.py
-    - 功能实现: python/dialect/nn.py
+    - 功能实现: kernel_gen/dialect/nn.py
     """
 
     name = "nn.broadcast"
@@ -592,7 +592,7 @@ class NnBroadcastOp(IRDLOperation):
         关联文件:
         - spec: spec/dialect/nn.md
         - test: test/dialect/test_nn_dialect.py
-        - 功能实现: python/dialect/nn.py
+        - 功能实现: kernel_gen/dialect/nn.py
         """
         super().__init__(
             operands=[input_value],
@@ -631,7 +631,7 @@ class NnMatmulOp(IRDLOperation):
     关联文件:
     - spec: spec/dialect/nn.md
     - test: test/dialect/test_nn_dialect.py
-    - 功能实现: python/dialect/nn.py
+    - 功能实现: kernel_gen/dialect/nn.py
     """
 
     name = "nn.matmul"
@@ -662,7 +662,7 @@ class NnMatmulOp(IRDLOperation):
         关联文件:
         - spec: spec/dialect/nn.md
         - test: test/dialect/test_nn_dialect.py
-        - 功能实现: python/dialect/nn.py
+        - 功能实现: kernel_gen/dialect/nn.py
         """
 
         super().__init__(

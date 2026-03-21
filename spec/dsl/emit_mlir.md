@@ -11,7 +11,7 @@
 - 创建者：`规格小队`
 - 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)
-- `功能实现`：[`python/dsl/lowering.py`](../../python/dsl/lowering.py)
+- `功能实现`：[`kernel_gen/dsl/lowering.py`](../../kernel_gen/dsl/lowering.py)
 - `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
 
 ## 依赖

@@ -7,7 +7,7 @@
 - 从受限 Python 函数构建 DSL AST，并提供 nn dialect IR 与 MLIR 文本入口。
 
 使用示例:
-- from python.dsl.ast_visitor import visit_function, visit_to_nn_ir, emit_mlir
+- from kernel_gen.dsl.ast_visitor import visit_function, visit_to_nn_ir, emit_mlir
 - func_ast = visit_function(fn)
 - module = visit_to_nn_ir(fn)
 - text = emit_mlir(fn)
@@ -15,7 +15,7 @@
 关联文件:
 - spec: spec/dsl/ast_visitor.md
 - test: test/dsl/test_ast_visitor.py
-- 功能实现: python/dsl/ast_visitor.py
+- 功能实现: kernel_gen/dsl/ast_visitor.py
 """
 
 from __future__ import annotations
@@ -29,8 +29,8 @@ from typing import Callable
 from io import StringIO
 from xdsl.printer import Printer
 
-from python.symbol_variable.memory import Memory
-from python.symbol_variable.type import NumericType
+from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.type import NumericType
 
 from .ast import (
     BinaryExprAST,
@@ -63,7 +63,7 @@ class AstVisitorError(Exception):
     关联文件:
     - spec: spec/dsl/ast_visitor.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast_visitor.py
     """
 
     message: str
@@ -88,7 +88,7 @@ def _get_location(node: py_ast.AST | None) -> SourceLocation | None:
     关联文件:
     - spec: spec/dsl/ast_visitor.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast_visitor.py
     """
 
     if node is None:
@@ -113,7 +113,7 @@ def _make_diagnostic(message: str, node: py_ast.AST | None) -> Diagnostic:
     关联文件:
     - spec: spec/dsl/ast_visitor.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast_visitor.py
     """
 
     return Diagnostic(message=message, location=_get_location(node))
@@ -134,7 +134,7 @@ def _parse_tensor_annotation(text: str) -> Memory:
     关联文件:
     - spec: spec/dsl/ast_visitor.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast_visitor.py
     """
 
     if not text.startswith("Tensor[") or not text.endswith("]"):
@@ -183,7 +183,7 @@ def _parse_annotation(
     关联文件:
     - spec: spec/dsl/ast_visitor.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast_visitor.py
     """
 
     if annotation is None:
@@ -306,7 +306,7 @@ def _build_expr(node: py_ast.AST, symbols: dict[str, object]) -> object:
     关联文件:
     - spec: spec/dsl/ast_visitor.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast_visitor.py
     """
 
     location = _get_location(node)
@@ -397,7 +397,7 @@ def visit_function(
     关联文件:
     - spec: spec/dsl/ast_visitor.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast_visitor.py
     """
 
     globals_table = globals or {}
@@ -546,7 +546,7 @@ def visit_to_nn_ir(
     关联文件:
     - spec: spec/dsl/ast_visitor.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast_visitor.py
     """
 
     func_ast = visit_function(fn, globals=globals, builtins=builtins, config=config)
@@ -578,7 +578,7 @@ def emit_mlir(
     关联文件:
     - spec: spec/dsl/ast_visitor.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: python/dsl/ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast_visitor.py
     """
 
     if callable(value):

@@ -7,13 +7,13 @@
 - 提供符号形状列表的保存、访问与序列化能力。
 
 使用示例:
-- from python.symbol_variable.symbol_shape import SymbolShape
+- from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 - SymbolShape(["N", 32])
 
 关联文件:
 - spec: spec/symbol_variable/symbol_shape.md
 - test: test/symbol_variable/test_symbol_shape.py
-- 功能实现: python/symbol_variable/symbol_shape.py
+- 功能实现: kernel_gen/symbol_variable/symbol_shape.py
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ class _SymbolList:
     关联文件:
     - spec: spec/symbol_variable/symbol_shape.md
     - test: test/symbol_variable/test_symbol_shape.py
-    - 功能实现: python/symbol_variable/symbol_shape.py
+    - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
     """
 
     def __init__(self, shapes: Iterable[object]) -> None:
@@ -56,7 +56,7 @@ class _SymbolList:
         关联文件:
         - spec: spec/symbol_variable/symbol_shape.md
         - test: test/symbol_variable/test_symbol_shape.py
-        - 功能实现: python/symbol_variable/symbol_shape.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
         """
         self.shape: List[SymbolDim] = []
         for value in shapes:
@@ -88,7 +88,7 @@ class _SymbolList:
         关联文件:
         - spec: spec/symbol_variable/symbol_shape.md
         - test: test/symbol_variable/test_symbol_shape.py
-        - 功能实现: python/symbol_variable/symbol_shape.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
         """
         return f"List({', '.join(str(item.get_symbol()) for item in self.shape)})"
 
@@ -107,7 +107,7 @@ class _SymbolList:
         关联文件:
         - spec: spec/symbol_variable/symbol_shape.md
         - test: test/symbol_variable/test_symbol_shape.py
-        - 功能实现: python/symbol_variable/symbol_shape.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
         """
         return len(self.shape)
 
@@ -126,7 +126,7 @@ class _SymbolList:
         关联文件:
         - spec: spec/symbol_variable/symbol_shape.md
         - test: test/symbol_variable/test_symbol_shape.py
-        - 功能实现: python/symbol_variable/symbol_shape.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
         """
         return iter(self.shape)
 
@@ -145,7 +145,7 @@ class _SymbolList:
         关联文件:
         - spec: spec/symbol_variable/symbol_shape.md
         - test: test/symbol_variable/test_symbol_shape.py
-        - 功能实现: python/symbol_variable/symbol_shape.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
         """
         return reversed(self.shape)
 
@@ -166,7 +166,7 @@ class _SymbolList:
         关联文件:
         - spec: spec/symbol_variable/symbol_shape.md
         - test: test/symbol_variable/test_symbol_shape.py
-        - 功能实现: python/symbol_variable/symbol_shape.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
         """
         if isinstance(key, int):
             if key < -len(self.shape) or key >= len(self.shape):
@@ -194,7 +194,7 @@ class _SymbolList:
         关联文件:
         - spec: spec/symbol_variable/symbol_shape.md
         - test: test/symbol_variable/test_symbol_shape.py
-        - 功能实现: python/symbol_variable/symbol_shape.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
         """
         if isinstance(key, int):
             if key < -len(self.shape) or key >= len(self.shape):
@@ -229,7 +229,7 @@ class _SymbolList:
         关联文件:
         - spec: spec/symbol_variable/symbol_shape.md
         - test: test/symbol_variable/test_symbol_shape.py
-        - 功能实现: python/symbol_variable/symbol_shape.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
         """
         return list(self.shape)
 
@@ -248,7 +248,7 @@ class _SymbolList:
         关联文件:
         - spec: spec/symbol_variable/symbol_shape.md
         - test: test/symbol_variable/test_symbol_shape.py
-        - 功能实现: python/symbol_variable/symbol_shape.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
         """
         values: List[int | str] = []
         for dim in self.shape:
@@ -274,7 +274,7 @@ class SymbolList(_SymbolList):
     关联文件:
     - spec: spec/symbol_variable/symbol_shape.md
     - test: test/symbol_variable/test_symbol_shape.py
-    - 功能实现: python/symbol_variable/symbol_shape.py
+    - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
     """
 
     def to_symbols(self) -> List[int | str]:
@@ -292,7 +292,7 @@ class SymbolList(_SymbolList):
         关联文件:
         - spec: spec/symbol_variable/symbol_shape.md
         - test: test/symbol_variable/test_symbol_shape.py
-        - 功能实现: python/symbol_variable/symbol_shape.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
         """
         return self.get_values()
 
@@ -312,7 +312,7 @@ class SymbolShape(SymbolList):
     关联文件:
     - spec: spec/symbol_variable/symbol_shape.md
     - test: test/symbol_variable/test_symbol_shape.py
-    - 功能实现: python/symbol_variable/symbol_shape.py
+    - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
     """
 
     def __repr__(self) -> str:
@@ -330,6 +330,6 @@ class SymbolShape(SymbolList):
         关联文件:
         - spec: spec/symbol_variable/symbol_shape.md
         - test: test/symbol_variable/test_symbol_shape.py
-        - 功能实现: python/symbol_variable/symbol_shape.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
         """
         return f"Shape({', '.join(str(item.get_symbol()) for item in self.shape)})"

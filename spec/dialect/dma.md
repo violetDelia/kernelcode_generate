@@ -10,12 +10,12 @@
 - 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/dialect/dma.md`](../../spec/dialect/dma.md)
 - `test`：[`test/dialect/test_dma_dialect.py`](../../test/dialect/test_dma_dialect.py)
-- `功能实现`：[`python/dialect/dma.py`](../../python/dialect/dma.py)
+- `功能实现`：[`kernel_gen/dialect/dma.py`](../../kernel_gen/dialect/dma.py)
 
 ## 依赖
 
-- [`python/dialect/dma.py`](../../python/dialect/dma.py)：`dma dialect` 的方言实现入口。
-- [`python/dialect/nn.py`](../../python/dialect/nn.py)：提供 `NnMemoryType` 与 `NnMemorySpaceAttr`。
+- [`kernel_gen/dialect/dma.py`](../../kernel_gen/dialect/dma.py)：`dma dialect` 的方言实现入口。
+- [`kernel_gen/dialect/nn.py`](../../kernel_gen/dialect/nn.py)：提供 `NnMemoryType` 与 `NnMemorySpaceAttr`。
 - [`spec/dialect/nn.md`](../../spec/dialect/nn.md)：定义被 `dma dialect` 复用的 memory type / memory space 语义。
 - [`spec/operation/dma.md`](../../spec/operation/dma.md)：定义高层 `alloc/free/copy/load/store/slice/deslice/cast` API 的分层语义。
 - [`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)：说明高层 `Memory` 概念与 `shape/stride/dtype/space` 元信息来源。
@@ -82,8 +82,8 @@
 使用示例：
 
 ```python
-from python.dialect.dma import DmaCastOp, DmaCopyOp, DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp
-from python.dialect.nn import NnMemorySpaceAttr
+from kernel_gen.dialect.dma import DmaCastOp, DmaCopyOp, DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp
+from kernel_gen.dialect.nn import NnMemorySpaceAttr
 ```
 
 注意事项：

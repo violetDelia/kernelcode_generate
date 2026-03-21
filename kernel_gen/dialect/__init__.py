@@ -7,12 +7,12 @@
 - 暴露 nn dialect 的 type、attr 与 op 定义，并覆盖 TSM/TLM 空间语义。
 
 使用示例:
-- from python.dialect import Nn, NnAddOp, NnBroadcastOp, NnMemoryType
+- from kernel_gen.dialect import Nn, NnAddOp, NnBroadcastOp, NnMemoryType
 
 关联文件:
 - spec: spec/dialect/nn.md
 - test: test/dialect/test_nn_dialect.py
-- 功能实现: python/dialect/nn.py
+- 功能实现: kernel_gen/dialect/nn.py
 """
 
 from .nn import (

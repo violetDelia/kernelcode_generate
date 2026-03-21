@@ -9,14 +9,14 @@
 - 创建者：`摸鱼小分队`
 - 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/analysis/analysis_kernel.md`](../../spec/analysis/analysis_kernel.md)
-- `功能实现`：[`python/analysis/analysis.py`](../../python/analysis/analysis.py)
+- `功能实现`：[`kernel_gen/analysis/analysis.py`](../../kernel_gen/analysis/analysis.py)
 - `test`：[`test/analysis/test_analysis.py`](../../test/analysis/test_analysis.py)
 
 ## 依赖
 
 - [`spec/operation/nn.md`](../../spec/operation/nn.md)：算子语义与 shape 规则。
 - [`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)：`Memory` 结构与 shape 表达。
-- [`python/symbol_variable/memory.py`](../../python/symbol_variable/memory.py)：`Memory` 类型实现。
+- [`kernel_gen/symbol_variable/memory.py`](../../kernel_gen/symbol_variable/memory.py)：`Memory` 类型实现。
 - `sympy`（外部模块）：符号表达式与统计公式构造。
 
 ## 目标

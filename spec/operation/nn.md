@@ -9,7 +9,7 @@
 - 创建者：`榕`
 - 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/operation/nn.md`](../../spec/operation/nn.md)
-- `功能实现`：[`python/operation/nn.py`](../../python/operation/nn.py)
+- `功能实现`：[`kernel_gen/operation/nn.py`](../../kernel_gen/operation/nn.py)
 - `test`：[`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py)
 
 ## 依赖
@@ -19,13 +19,8 @@
 ## 目标
 
 - 提供 `Memory` 的逐元素算术与比较高层语义。
-<<<<<<< Updated upstream
-- 提供显式 `broadcast`、`transpose` 与二维 `matmul` 的输入输出约束与错误规则。
-- 保持与下游 `nn dialect` 的分层：本层只定义 API 语义，不承载 IR 细节。
-=======
 - 提供显式 `broadcast` 与二维 `matmul` 的输入输出约束与错误规则。
 - 保持与下游 `nn dialect` 的分层：本层作为用户直接使用的接口，不受限于IR的表达。
->>>>>>> Stashed changes
 
 ## 限制与边界
 
