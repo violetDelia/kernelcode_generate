@@ -25,7 +25,16 @@ from xdsl.dialects import func
 from xdsl.dialects.builtin import FunctionType, i32
 from xdsl.ir import Block, Region
 
-from .ast import AstParseError, FunctionAST, ScalarArgAST, TensorAST, _parse_function_impl
+from .ast import (
+    AstParseError,
+    Diagnostic,
+    FunctionAST,
+    ScalarArgAST,
+    TensorAST,
+    _ParseFailure,
+    _parse_function_impl,
+    parse_function,
+)
 from .emit_mlir import EmitContext, _LoweringError, _ensure_supported_statements, _expr_key, _infer_expr_type, _memory_to_nn_type
 
 
@@ -38,7 +47,7 @@ def _build_signature_types(func_ast: FunctionAST) -> tuple[list[object], dict[in
     tensor_input_count = 0
     for item in func_ast.inputs:
         if isinstance(item, TensorAST):
-            arg_type = _memory_to_nn_type(item.memory)
+            arg_type = _memory_to_nn_type(item.memory, location=item.location)
             tensor_input_count += 1
         elif isinstance(item, ScalarArgAST):
             if item.value_type is not int:
@@ -54,6 +63,24 @@ def _build_signature_types(func_ast: FunctionAST) -> tuple[list[object], dict[in
     return arg_types, type_map
 
 
+def _parse_function_with_env(
+    fn: Callable[..., object],
+    globals_table: dict[str, object] | None,
+    builtins_table: dict[str, object] | None,
+    config: dict[str, object] | None,
+) -> FunctionAST:
+    try:
+        return _parse_function_impl(
+            fn,
+            globals_table=globals_table,
+            builtins_table=builtins_table,
+            config=config,
+        )
+    except _ParseFailure as exc:
+        diagnostics = [Diagnostic(exc.message, location=exc.location)]
+        raise AstParseError(exc.message, diagnostics) from exc
+
+
 def _validate_return_type(func_ast: FunctionAST, result_type: object) -> None:
     if not func_ast.outputs:
         return
@@ -61,7 +88,7 @@ def _validate_return_type(func_ast: FunctionAST, result_type: object) -> None:
         raise _LoweringError("Only single return value is supported", location=func_ast.location)
     output = func_ast.outputs[0]
     if isinstance(output, TensorAST):
-        expected_type = _memory_to_nn_type(output.memory)
+        expected_type = _memory_to_nn_type(output.memory, location=output.location)
     elif isinstance(output, ScalarArgAST):
         if output.value_type is not int:
             raise _LoweringError("Unsupported scalar return type", location=output.location)
@@ -81,12 +108,10 @@ def build_func_op(
     from .ast_visitor import AstVisitorError
 
     try:
-        func_ast = _parse_function_impl(
-            fn,
-            globals_table=globals,
-            builtins_table=builtins,
-            config=config,
-        )
+        if globals is None and builtins is None:
+            func_ast = parse_function(fn)
+        else:
+            func_ast = _parse_function_with_env(fn, globals, builtins, config)
     except AstParseError as exc:
         location = exc.diagnostics[0].location if exc.diagnostics else None
         raise AstVisitorError(exc.message, location=location) from exc

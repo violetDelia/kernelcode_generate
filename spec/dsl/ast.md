@@ -379,6 +379,14 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
   - 覆盖 `parse_function(...)` 的源码解析与 AST 构建。
   - 覆盖 AST 节点字段与诊断信息的构造。
 - 功能与用例清单：
-  - AST-001：解析函数生成 `FunctionAST`。
-  - AST-002：解析参数与返回注解，生成 `TensorAST`/`ScalarArgAST`。
-  - AST-003：不支持语法时返回诊断或抛出错误。
+  - AST-001：解析函数生成 `FunctionAST`。（`test_visit_function_builds_ast`）
+  - AST-001A：提供独立解析入口。（`test_parse_function_entry`）
+  - AST-001B：解析不依赖 `AstVisitor` 入口。（`test_parse_function_does_not_depend_on_ast_visitor_entry`）
+  - AST-002：解析参数与返回注解，生成 `TensorAST`/`ScalarArgAST`。（`test_ast_parse_function_parses_annotations`）
+  - AST-003：缺失注解时返回诊断或抛出错误。（`test_ast_parse_function_missing_annotation_reports_diagnostics`）
+  - AST-004：解析全局/内建注解入口。（`test_globals_and_builtins_annotation_entry`）
+  - AST-005：未知名称返回诊断。（`test_unknown_name_reports_diagnostics`）
+  - AST-006：非法返回注解返回诊断。（`test_invalid_return_annotation_reports_diagnostics`）
+  - AST-007：缺失 return 返回诊断。（`test_missing_return_reports_diagnostics`）
+  - AST-008：缺少 Tensor 维度返回诊断。（`test_missing_tensor_dimensions_reports_diagnostics`）
+  - AST-009：不支持语法返回诊断。（`test_unsupported_syntax_reports_diagnostics`）

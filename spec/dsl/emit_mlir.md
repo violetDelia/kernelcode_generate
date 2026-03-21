@@ -116,6 +116,13 @@ value = emit_mlir(expr_ast, ctx)
   - 覆盖常见表达式与语句节点的发射结果。
   - 覆盖不支持节点的错误路径。
 - 功能与用例清单：
-  - EMIT-001：二元表达式节点生成对应 op/value。
-  - EMIT-002：比较表达式节点生成对应 op/value。
-  - EMIT-003：不支持节点抛出错误并携带位置信息。
+  - EMIT-001：二元表达式节点生成对应 op/value。（`test_emit_context_reuses_cached_value`）
+  - EMIT-002：比较表达式节点生成对应 op/value。（`test_emit_mlir_compare_expr_emits_eq`）
+  - EMIT-003：不支持节点抛出错误并携带位置信息。（`test_emit_mlir_unsupported_node_reports_location`）
+  - EMIT-004：`TensorAST` 可通过符号表直接解析。（`test_emit_mlir_tensor_uses_symbol_table`）
+  - EMIT-005：`LoadAST` 生成 `dma.load`。（`test_load_ast_lowering_rejected`）
+  - EMIT-006：`StoreAST` 生成 `dma.store`。（`test_store_ast_lowering_rejected`）
+  - EMIT-007：非 unit stride 抛出可定位错误。（`test_load_ast_lowering_raises_lowering_error`）
+  - EMIT-008：索引 rank mismatch 抛出可定位错误。（`test_load_ast_index_rank_mismatch_reports_location`）
+  - EMIT-009：`StoreAST` 输入非 memory 抛出错误。（`test_store_ast_lowering_raises_lowering_error`）
+  - EMIT-010：`ForAST` lowering 驱动 `dma.load`。（`test_for_ast_lowering_emits_loads`）

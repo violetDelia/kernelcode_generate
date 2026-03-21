@@ -196,6 +196,6 @@ raise AstVisitorError("Unsupported node", location)
   - 覆盖遍历顺序与节点分发。
   - 覆盖变量绑定复用与错误传播。
 - 功能与用例清单：
-  - AV-001：遍历函数体并生成稳定顺序。
-  - AV-002：同一表达式复用同一 value。
-  - AV-003：不支持语句/表达式时抛出 `AstVisitorError`。
+  - AV-001：遍历函数体并生成稳定顺序。（`test_ast_visitor_visit_block_preserves_order`）
+  - AV-002：同一表达式复用同一 value。（`test_ast_visitor_reuses_expression_value`）
+  - AV-003：不支持语句/表达式时抛出 `AstVisitorError`。（`test_lowering_failure_reports_diagnostics`）

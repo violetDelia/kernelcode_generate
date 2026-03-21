@@ -112,12 +112,12 @@ class EmitContext:
         self._cache = dict(snapshot)
 
 
-def _dtype_to_xdsl(dtype: NumericType) -> object:
+def _dtype_to_xdsl(dtype: NumericType, location: SourceLocation | None = None) -> object:
     if dtype is NumericType.Float32:
         return f32
     if dtype is NumericType.Int32:
         return i32
-    raise _LoweringError(f"Unsupported dtype: {dtype}")
+    raise _LoweringError(f"Unsupported dtype: {dtype}", location=location)
 
 
 def _build_stride(shape: list[int | str]) -> list[int | str]:
@@ -130,6 +130,31 @@ def _build_stride(shape: list[int | str]) -> list[int | str]:
         else:
             stride.insert(0, "?")
     return stride
+
+
+def _mul_symbol(dim: int | str, running: int | str) -> int | str:
+    if isinstance(dim, int) and isinstance(running, int):
+        return dim * running
+    if isinstance(dim, int) and dim == 1:
+        return running
+    if isinstance(running, int) and running == 1:
+        return dim
+    return f"{dim}*{running}"
+
+
+def _build_default_stride_attrs(shape: Sequence[Attribute]) -> list[Attribute]:
+    stride_values: list[int | str] = []
+    running: int | str = 1
+    for dim in reversed(shape):
+        stride_values.append(running)
+        if isinstance(dim, IntAttr):
+            running = _mul_symbol(dim.data, running)
+        elif isinstance(dim, StringAttr):
+            running = _mul_symbol(dim.data, running)
+        else:
+            running = "?"
+    stride_values.reverse()
+    return [_dim_to_attr(value) for value in stride_values]
 
 
 def _dim_to_attr(value: int | str) -> object:
@@ -162,12 +187,19 @@ def _resolve_index_expr(expr: object, ctx: EmitContext) -> int | str:
     raise _LoweringError("Unsupported index expression", location=getattr(expr, "location", None))
 
 
-def _build_index_attrs(value: object | None, rank: int, ctx: EmitContext, *, default_value: int = 0) -> ArrayAttr:
+def _build_index_attrs(
+    value: object | None,
+    rank: int,
+    ctx: EmitContext,
+    *,
+    default_value: int = 0,
+    location: SourceLocation | None = None,
+) -> ArrayAttr:
     if value is None:
         values = [default_value for _ in range(rank)]
     elif isinstance(value, (list, tuple)):
         if len(value) != rank:
-            raise _LoweringError("Index rank mismatch", location=getattr(value, "location", None))
+            raise _LoweringError("Index rank mismatch", location=location or getattr(value, "location", None))
         values = [_resolve_index_expr(entry, ctx) for entry in value]
     else:
         scalar = _resolve_index_expr(value, ctx)
@@ -175,11 +207,17 @@ def _build_index_attrs(value: object | None, rank: int, ctx: EmitContext, *, def
     return ArrayAttr([_dim_to_attr(item) for item in values])
 
 
-def _build_stride_attrs(value: object | None, rank: int, ctx: EmitContext) -> ArrayAttr:
-    stride = _build_index_attrs(value, rank, ctx, default_value=1)
+def _build_stride_attrs(
+    value: object | None,
+    rank: int,
+    ctx: EmitContext,
+    *,
+    location: SourceLocation | None = None,
+) -> ArrayAttr:
+    stride = _build_index_attrs(value, rank, ctx, default_value=1, location=location)
     for entry in stride.data:
         if not isinstance(entry, IntAttr) or entry.data != 1:
-            raise _LoweringError("Only unit stride is supported", location=None)
+            raise _LoweringError("Only unit stride is supported", location=location)
     return stride
 
 
@@ -231,15 +269,7 @@ def _infer_broadcast_shape(
 
 
 def _build_broadcast_stride(shape: Sequence[Attribute]) -> list[Attribute]:
-    stride: list[Attribute] = []
-    for dim in shape:
-        if isinstance(dim, IntAttr):
-            stride.append(IntAttr(1))
-        elif isinstance(dim, StringAttr) and dim.data == "?":
-            stride.append(IntAttr(1))
-        else:
-            stride.append(StringAttr("?"))
-    return stride
+    return _build_default_stride_attrs(shape)
 
 
 def _infer_broadcast_memory_type(
@@ -261,12 +291,12 @@ def _infer_broadcast_memory_type(
     )
 
 
-def _memory_to_nn_type(memory: Memory) -> NnMemoryType:
+def _memory_to_nn_type(memory: Memory, location: SourceLocation | None = None) -> NnMemoryType:
     shape = memory.shape.get_values()
     stride_values = memory.stride.get_values() if memory.stride is not None else _build_stride(shape)
     shape_attr = ArrayAttr([_dim_to_attr(dim) for dim in shape])
     stride_attr = ArrayAttr([_dim_to_attr(dim) for dim in stride_values])
-    element_type = _dtype_to_xdsl(memory.dtype)
+    element_type = _dtype_to_xdsl(memory.dtype, location=location)
     space_name = _MEMORY_SPACE_MAP.get(memory.space, "global")
     space = NnMemorySpaceAttr.from_name(space_name)
     return NnMemoryType(shape_attr, stride_attr, element_type, space)
@@ -378,9 +408,9 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         source = _lower_expr(expr.tensor, ctx)
         source_type = _expect_memory_value(source, expr.location)
         rank = len(source_type.shape.data)
-        offsets = _build_index_attrs(expr.offset, rank, ctx)
+        offsets = _build_index_attrs(expr.offset, rank, ctx, location=expr.location)
         sizes = source_type.shape
-        strides = _build_stride_attrs(expr.stride, rank, ctx)
+        strides = _build_stride_attrs(expr.stride, rank, ctx, location=expr.location)
         load_op = DmaLoadOp(source, offsets, sizes, strides, source_type, source_type.space)
         ctx.builder.add_op(load_op)
         ctx._set_cache(expr_key, load_op.result)
@@ -469,9 +499,9 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
         rank = len(target_type.shape.data)
         if len(value_type.shape.data) != rank:
             raise _LoweringError("Store source rank mismatch", location=node.location)
-        offsets = _build_index_attrs(node.offset, rank, ctx)
+        offsets = _build_index_attrs(node.offset, rank, ctx, location=node.location)
         sizes = value_type.shape
-        strides = _build_stride_attrs(node.stride, rank, ctx)
+        strides = _build_stride_attrs(node.stride, rank, ctx, location=node.location)
         store_op = DmaStoreOp(value, target, offsets, sizes, strides)
         ctx.builder.add_op(store_op)
         return store_op
