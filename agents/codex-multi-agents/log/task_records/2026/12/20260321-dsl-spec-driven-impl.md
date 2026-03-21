@@ -254,3 +254,21 @@
   - `spec/dsl/mlir_gen.md`
 - 测试结果：
   - `pytest -q test/dsl/test_ast_visitor.py`（31 passed）
+
+# 2026-03-21 T-20260321-ea6d4795
+
+- 时间：2026-03-21 19:40:56 +0800
+- worktree：`/home/lfr/kernelcode_generate/wt-20260321-dsl-spec-driven-impl`
+- 任务描述：合入 DSL spec-driven 链路实现与测试。
+- 合并提交：`f2223d4`
+- 变更文件：
+  - `kernel_gen/dsl/emit_mlir.py`
+  - `kernel_gen/dsl/ast_visitor.py`
+  - `kernel_gen/dsl/mlir_gen.py`
+  - `kernel_gen/dsl/lowering.py`
+  - `python/dsl/mlir_gen.py`
+  - `spec/dsl/emit_mlir.md`
+  - `spec/dsl/mlir_gen.md`
+  - `test/dsl/test_ast_visitor.py`
+- 测试：
+  - 未运行（合并任务）。
