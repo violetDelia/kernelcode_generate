@@ -41,56 +41,300 @@
 
 ## 公开接口
 
-以下示例以统一对外接口名表示，命名空间由实现侧确定；统一头文件为 `include/api/Nn.h` 并依赖 `include/api/Memory.h`。
+以下示例以统一对外接口名表示，统一头文件为 `include/api/Nn.h` 并依赖 `include/api/Memory.h`。对外公开接口仅使用无命名空间签名；如实现侧需要命名空间或封装层，仅允许在内部适配/包装，不得改变公开 API 签名。`Status` 为状态码类型（实现可用 `int` 或等价枚举），`0` 表示成功，非 `0` 表示失败。
 
-### 逐元素算术（add/sub/mul/truediv）
+### `add(lhs, rhs, out)`
 
-- 功能说明：对两个内存视图执行逐元素算术，结果写入输出视图。
-- 参数说明：
-  - `lhs (Memory<T>)`：左操作数视图。
-  - `rhs (Memory<T>)`：右操作数视图。
-  - `out (Memory<T>)`：输出视图。
-- 使用示例：
-  - `Status status = add(lhs, rhs, out)`
-- 注意事项：
-  - `lhs.shape`、`rhs.shape`、`out.shape` 必须一致。
-  - `lhs.stride`、`rhs.stride`、`out.stride` 需能用于同一 `rank` 的逐元素访问。
-  - 不定义标量重载与隐式广播。
-- 返回与限制：
-  - 返回状态值；`0` 表示成功，非 `0` 表示失败。
-  - 当形状、步幅或类型不满足约束时必须返回失败状态值。
+功能说明：对两个内存视图执行逐元素加法，结果写入输出视图。
 
-### 逐元素比较（eq/ne/lt/le/gt/ge）
+参数说明：
 
-- 功能说明：对两个内存视图执行逐元素比较，输出 predicate 结果。
-- 参数说明：
-  - `lhs (Memory<T>)`：左操作数视图。
-  - `rhs (Memory<T>)`：右操作数视图。
-  - `out (Memory<PredT>)`：输出视图，元素类型用于表示 predicate 结果。
-- 使用示例：
-  - `Status status = eq(lhs, rhs, out)`
-- 注意事项：
-  - `lhs.shape`、`rhs.shape`、`out.shape` 必须一致。
-  - `out` 的元素类型需能表示 predicate 结果（例如 `0/1`）。
-- 返回与限制：
-  - 返回状态值；`0` 表示成功，非 `0` 表示失败。
-  - 当形状或类型不满足约束时必须返回失败状态值。
+- `lhs (Memory<T>)`：左操作数视图。
+- `rhs (Memory<T>)`：右操作数视图。
+- `out (Memory<T>)`：输出视图。
 
-### 显式 broadcast
+使用示例：
 
-- 功能说明：将输入视图显式广播到目标形状（由输出视图指定）。
-- 参数说明：
-  - `input (Memory<T>)`：输入视图。
-  - `out (Memory<T>)`：输出视图。
-- 使用示例：
-  - `Status status = broadcast(input, out)`
-- 注意事项：
-  - `OutRank >= InRank`。
-  - 广播按尾维对齐，逐维满足 `input_dim == output_dim` 或 `input_dim == 1`。
-  - 输出视图的元素类型与输入一致。
-- 返回与限制：
-  - 返回状态值；`0` 表示成功，非 `0` 表示失败。
-  - 当广播条件不满足时必须返回失败状态值。
+```cpp
+Status status = add(lhs, rhs, out);
+```
+
+注意事项：
+
+- `lhs/rhs/out` 的 `rank` 必须一致，且 `shape` 完全一致。
+- `lhs/rhs/out` 的 `stride` 必须可用于同一 `rank` 的逐元素访问。
+- 不定义标量重载，不支持隐式广播。
+
+返回与限制：
+
+- 返回状态值；`0` 表示成功，非 `0` 表示失败。
+- 当形状、步幅或类型不满足约束时必须返回失败状态值。
+
+### `sub(lhs, rhs, out)`
+
+功能说明：对两个内存视图执行逐元素减法，结果写入输出视图。
+
+参数说明：
+
+- `lhs (Memory<T>)`：左操作数视图。
+- `rhs (Memory<T>)`：右操作数视图。
+- `out (Memory<T>)`：输出视图。
+
+使用示例：
+
+```cpp
+Status status = sub(lhs, rhs, out);
+```
+
+注意事项：
+
+- `lhs/rhs/out` 的 `rank` 与 `shape` 必须一致。
+- 不定义标量重载，不支持隐式广播。
+
+返回与限制：
+
+- 返回状态值；`0` 表示成功，非 `0` 表示失败。
+- 形状、步幅或类型不满足约束时必须返回失败状态值。
+
+### `mul(lhs, rhs, out)`
+
+功能说明：对两个内存视图执行逐元素乘法，结果写入输出视图。
+
+参数说明：
+
+- `lhs (Memory<T>)`：左操作数视图。
+- `rhs (Memory<T>)`：右操作数视图。
+- `out (Memory<T>)`：输出视图。
+
+使用示例：
+
+```cpp
+Status status = mul(lhs, rhs, out);
+```
+
+注意事项：
+
+- `lhs/rhs/out` 的 `rank` 与 `shape` 必须一致。
+- 不定义标量重载，不支持隐式广播。
+
+返回与限制：
+
+- 返回状态值；`0` 表示成功，非 `0` 表示失败。
+- 形状、步幅或类型不满足约束时必须返回失败状态值。
+
+### `truediv(lhs, rhs, out)`
+
+功能说明：对两个内存视图执行逐元素真除法，结果写入输出视图。
+
+参数说明：
+
+- `lhs (Memory<T>)`：左操作数视图。
+- `rhs (Memory<T>)`：右操作数视图。
+- `out (Memory<T>)`：输出视图。
+
+使用示例：
+
+```cpp
+Status status = truediv(lhs, rhs, out);
+```
+
+注意事项：
+
+- `lhs/rhs/out` 的 `rank` 与 `shape` 必须一致。
+- 不定义标量重载，不支持隐式广播。
+
+返回与限制：
+
+- 返回状态值；`0` 表示成功，非 `0` 表示失败。
+- 形状、步幅或类型不满足约束时必须返回失败状态值。
+
+### `eq(lhs, rhs, out)`
+
+功能说明：对两个内存视图执行逐元素相等比较，输出 predicate 结果。
+
+参数说明：
+
+- `lhs (Memory<T>)`：左操作数视图。
+- `rhs (Memory<T>)`：右操作数视图。
+- `out (Memory<PredT>)`：输出视图，元素类型用于表示 predicate 结果。
+
+使用示例：
+
+```cpp
+Status status = eq(lhs, rhs, out);
+```
+
+注意事项：
+
+- `lhs/rhs/out` 的 `rank` 与 `shape` 必须一致。
+- `out` 的元素类型需能表示 predicate 结果（例如 `0/1`）。
+- 不支持隐式广播。
+
+返回与限制：
+
+- 返回状态值；`0` 表示成功，非 `0` 表示失败。
+- 形状或类型不满足约束时必须返回失败状态值。
+
+### `ne(lhs, rhs, out)`
+
+功能说明：对两个内存视图执行逐元素不等比较，输出 predicate 结果。
+
+参数说明：
+
+- `lhs (Memory<T>)`：左操作数视图。
+- `rhs (Memory<T>)`：右操作数视图。
+- `out (Memory<PredT>)`：输出视图，元素类型用于表示 predicate 结果。
+
+使用示例：
+
+```cpp
+Status status = ne(lhs, rhs, out);
+```
+
+注意事项：
+
+- `lhs/rhs/out` 的 `rank` 与 `shape` 必须一致。
+- `out` 的元素类型需能表示 predicate 结果。
+- 不支持隐式广播。
+
+返回与限制：
+
+- 返回状态值；`0` 表示成功，非 `0` 表示失败。
+- 形状或类型不满足约束时必须返回失败状态值。
+
+### `lt(lhs, rhs, out)`
+
+功能说明：对两个内存视图执行逐元素小于比较，输出 predicate 结果。
+
+参数说明：
+
+- `lhs (Memory<T>)`：左操作数视图。
+- `rhs (Memory<T>)`：右操作数视图。
+- `out (Memory<PredT>)`：输出视图，元素类型用于表示 predicate 结果。
+
+使用示例：
+
+```cpp
+Status status = lt(lhs, rhs, out);
+```
+
+注意事项：
+
+- `lhs/rhs/out` 的 `rank` 与 `shape` 必须一致。
+- `out` 的元素类型需能表示 predicate 结果。
+- 不支持隐式广播。
+
+返回与限制：
+
+- 返回状态值；`0` 表示成功，非 `0` 表示失败。
+- 形状或类型不满足约束时必须返回失败状态值。
+
+### `le(lhs, rhs, out)`
+
+功能说明：对两个内存视图执行逐元素小于等于比较，输出 predicate 结果。
+
+参数说明：
+
+- `lhs (Memory<T>)`：左操作数视图。
+- `rhs (Memory<T>)`：右操作数视图。
+- `out (Memory<PredT>)`：输出视图，元素类型用于表示 predicate 结果。
+
+使用示例：
+
+```cpp
+Status status = le(lhs, rhs, out);
+```
+
+注意事项：
+
+- `lhs/rhs/out` 的 `rank` 与 `shape` 必须一致。
+- `out` 的元素类型需能表示 predicate 结果。
+- 不支持隐式广播。
+
+返回与限制：
+
+- 返回状态值；`0` 表示成功，非 `0` 表示失败。
+- 形状或类型不满足约束时必须返回失败状态值。
+
+### `gt(lhs, rhs, out)`
+
+功能说明：对两个内存视图执行逐元素大于比较，输出 predicate 结果。
+
+参数说明：
+
+- `lhs (Memory<T>)`：左操作数视图。
+- `rhs (Memory<T>)`：右操作数视图。
+- `out (Memory<PredT>)`：输出视图，元素类型用于表示 predicate 结果。
+
+使用示例：
+
+```cpp
+Status status = gt(lhs, rhs, out);
+```
+
+注意事项：
+
+- `lhs/rhs/out` 的 `rank` 与 `shape` 必须一致。
+- `out` 的元素类型需能表示 predicate 结果。
+- 不支持隐式广播。
+
+返回与限制：
+
+- 返回状态值；`0` 表示成功，非 `0` 表示失败。
+- 形状或类型不满足约束时必须返回失败状态值。
+
+### `ge(lhs, rhs, out)`
+
+功能说明：对两个内存视图执行逐元素大于等于比较，输出 predicate 结果。
+
+参数说明：
+
+- `lhs (Memory<T>)`：左操作数视图。
+- `rhs (Memory<T>)`：右操作数视图。
+- `out (Memory<PredT>)`：输出视图，元素类型用于表示 predicate 结果。
+
+使用示例：
+
+```cpp
+Status status = ge(lhs, rhs, out);
+```
+
+注意事项：
+
+- `lhs/rhs/out` 的 `rank` 与 `shape` 必须一致。
+- `out` 的元素类型需能表示 predicate 结果。
+- 不支持隐式广播。
+
+返回与限制：
+
+- 返回状态值；`0` 表示成功，非 `0` 表示失败。
+- 形状或类型不满足约束时必须返回失败状态值。
+
+### `broadcast(input, out)`
+
+功能说明：将输入视图显式广播到目标形状（由输出视图指定）。
+
+参数说明：
+
+- `input (Memory<T>)`：输入视图。
+- `out (Memory<T>)`：输出视图。
+
+使用示例：
+
+```cpp
+Status status = broadcast(input, out);
+```
+
+注意事项：
+
+- `out.rank >= input.rank`。
+- 广播按尾维对齐，逐维满足 `input_dim == output_dim` 或 `input_dim == 1`。
+- 输出视图的元素类型与输入一致。
+
+返回与限制：
+
+- 返回状态值；`0` 表示成功，非 `0` 表示失败。
+- 当广播条件不满足时必须返回失败状态值。
 
 ## 测试
 
