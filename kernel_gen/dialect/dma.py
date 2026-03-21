@@ -149,6 +149,33 @@ def _verify_unit_stride(strides: ArrayAttr[Attribute]) -> None:
             raise VerifyException("dma stride must be 1 in current implementation")
 
 
+def _verify_stride_list(value: Attribute, field_name: str) -> ArrayAttr[Attribute]:
+    """校验 stride 列表 attribute。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 仅允许 `IntAttr(1)`，不接受 `StringAttr` 或其他 attribute。
+    - 与 spec 中 `strides` 仅支持 `IntAttr(1)` 的约束保持一致。
+
+    使用示例:
+    - _verify_stride_list(op.strides, "strides")
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma_dialect.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    if not isinstance(value, ArrayAttr):
+        raise VerifyException(f"{field_name} must be an array")
+    for entry in value.data:
+        if not isinstance(entry, IntAttr) or entry.data != 1:
+            raise VerifyException(f"{field_name} entries must be IntAttr(1)")
+    return value
+
+
 def _maybe_numel(shape: ArrayAttr[Attribute]) -> int | None:
     """尝试计算 shape 的元素总数。
 
@@ -425,7 +452,7 @@ class DmaLoadOp(IRDLOperation):
         result_type = _verify_memory_type(self.result.type, "result")
         offsets = _verify_index_list(self.offsets, "offsets", min_value=0)
         sizes = _verify_index_list(self.sizes, "sizes", min_value=1)
-        strides = _verify_index_list(self.strides, "strides", min_value=1)
+        strides = _verify_stride_list(self.strides, "strides")
         rank = len(source_type.shape.data)
         _verify_rank_match(offsets, rank, "offsets")
         _verify_rank_match(sizes, rank, "sizes")
@@ -509,7 +536,7 @@ class DmaStoreOp(IRDLOperation):
         target_type = _verify_memory_type(self.target.type, "target")
         offsets = _verify_index_list(self.offsets, "offsets", min_value=0)
         sizes = _verify_index_list(self.sizes, "sizes", min_value=1)
-        strides = _verify_index_list(self.strides, "strides", min_value=1)
+        strides = _verify_stride_list(self.strides, "strides")
         rank = len(target_type.shape.data)
         _verify_rank_match(offsets, rank, "offsets")
         _verify_rank_match(sizes, rank, "sizes")
@@ -595,7 +622,7 @@ class DmaSliceOp(IRDLOperation):
         result_type = _verify_memory_type(self.result.type, "result")
         offsets = _verify_index_list(self.offsets, "offsets", min_value=0)
         sizes = _verify_index_list(self.sizes, "sizes", min_value=1)
-        strides = _verify_index_list(self.strides, "strides", min_value=1)
+        strides = _verify_stride_list(self.strides, "strides")
         rank = len(source_type.shape.data)
         _verify_rank_match(offsets, rank, "offsets")
         _verify_rank_match(sizes, rank, "sizes")
@@ -684,7 +711,7 @@ class DmaDesliceOp(IRDLOperation):
         result_type = _verify_memory_type(self.result.type, "result")
         offsets = _verify_index_list(self.offsets, "offsets", min_value=0)
         sizes = _verify_index_list(self.sizes, "sizes", min_value=1)
-        strides = _verify_index_list(self.strides, "strides", min_value=1)
+        strides = _verify_stride_list(self.strides, "strides")
         rank = len(target_type.shape.data)
         _verify_rank_match(offsets, rank, "offsets")
         _verify_rank_match(sizes, rank, "sizes")

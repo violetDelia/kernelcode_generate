@@ -297,7 +297,7 @@ def test_dma_slice_non_unit_stride_rejected() -> None:
     sizes = _make_index_list([2, 4])
     strides = _make_index_list([1, 2])
     op = DmaSliceOp(source, offsets, sizes, strides, result_type, _make_space("global"))
-    with pytest.raises(VerifyException, match="stride must be 1"):
+    with pytest.raises(VerifyException, match="IntAttr\\(1\\)"):
         op.verify()
 
 
@@ -389,6 +389,65 @@ def test_dma_index_string_attr_valid() -> None:
     strides = _make_index_list([1, 1])
     op = DmaLoadOp(source, offsets, sizes, strides, result_type, _make_space("shared"))
     op.verify()
+
+
+# TC-DMA-010
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 00:00:00 +0800
+# 最近一次运行成功时间: 2026-03-22 00:00:00 +0800
+# 功能说明: 验证动态 offsets/sizes 支持 store/deslice，且 strides 仍必须为 IntAttr(1)。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_store_and_deslice_allow_dynamic_offsets_sizes
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_store_and_deslice_allow_dynamic_offsets_sizes() -> None:
+    source_type = _make_memory_type(
+        shape=ArrayAttr([StringAttr("TM"), StringAttr("?")]),
+        stride=ArrayAttr([StringAttr("TN"), IntAttr(1)]),
+        space="shared",
+    )
+    target_type = _make_memory_type(
+        shape=ArrayAttr([StringAttr("M"), StringAttr("N")]),
+        stride=ArrayAttr([StringAttr("N"), IntAttr(1)]),
+    )
+    source = _TestOp(result_types=[source_type]).results[0]
+    target = _TestOp(result_types=[target_type]).results[0]
+    offsets = _make_index_list(["m0", "?"])
+    sizes = _make_index_list(["TM", "?"])
+    strides = _make_index_list([1, 1])
+
+    DmaStoreOp(source, target, offsets, sizes, strides).verify()
+    DmaDesliceOp(source, target, offsets, sizes, strides, target_type).verify()
+
+
+# TC-DMA-010
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 00:00:00 +0800
+# 最近一次运行成功时间: 2026-03-22 00:00:00 +0800
+# 功能说明: 验证动态 offsets/sizes 下，strides 不接受 StringAttr。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_dynamic_offsets_sizes_reject_string_stride
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_dynamic_offsets_sizes_reject_string_stride() -> None:
+    source_type = _make_memory_type(
+        shape=ArrayAttr([StringAttr("M"), StringAttr("N")]),
+        stride=ArrayAttr([StringAttr("N"), IntAttr(1)]),
+    )
+    result_type = _make_memory_type(
+        shape=ArrayAttr([StringAttr("TM"), StringAttr("?")]),
+        stride=ArrayAttr([StringAttr("TN"), IntAttr(1)]),
+        space="shared",
+    )
+    source = _TestOp(result_types=[source_type]).results[0]
+    offsets = _make_index_list(["m0", "?"])
+    sizes = _make_index_list(["TM", "?"])
+    strides = _make_index_list([1, "?"])
+    op = DmaLoadOp(source, offsets, sizes, strides, result_type, _make_space("shared"))
+    with pytest.raises(VerifyException, match="IntAttr\\(1\\)"):
+        op.verify()
 
 
 # TC-DMA-011
@@ -581,3 +640,31 @@ def test_dma_reshape_symbolic_stride_mismatch() -> None:
     op = DmaReshapeOp(source, result_type)
     with pytest.raises(VerifyException, match="contiguous result stride"):
         op.verify()
+
+
+# TC-DMA-013
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 00:00:00 +0800
+# 最近一次运行成功时间: 2026-03-22 00:00:00 +0800
+# 功能说明: 验证 dma dynamic shape/index 的 parse/print round-trip 覆盖 alloc/view/load/store/slice/deslice/reshape/cast。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_dynamic_shape_parse_print_round_trip
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_dynamic_shape_parse_print_round_trip() -> None:
+    ctx = _build_context()
+    text = """builtin.module {
+  %0 = "dma.alloc"() : () -> !nn.memory<[M, N], [N, 1], i32, #nn.space<global>>
+  %1 = "dma.view"(%0) : (!nn.memory<[M, N], [N, 1], i32, #nn.space<global>>) -> !nn.memory<[?, N], [VIEW_STRIDE, 1], i32, #nn.space<global>>
+  %2 = "dma.load"(%0) {offsets = ["m0", "?"], sizes = ["TM", "?"], strides = [#builtin.int<1>, #builtin.int<1>], space = #nn.space<shared>} : (!nn.memory<[M, N], [N, 1], i32, #nn.space<global>>) -> !nn.memory<[TM, ?], [TN, 1], i32, #nn.space<shared>>
+  "dma.store"(%2, %0) {offsets = ["m0", "?"], sizes = ["TM", "?"], strides = [#builtin.int<1>, #builtin.int<1>]} : (!nn.memory<[TM, ?], [TN, 1], i32, #nn.space<shared>>, !nn.memory<[M, N], [N, 1], i32, #nn.space<global>>) -> ()
+  %3 = "dma.slice"(%0) {offsets = ["m0", "?"], sizes = ["TM", "?"], strides = [#builtin.int<1>, #builtin.int<1>], space = #nn.space<local>} : (!nn.memory<[M, N], [N, 1], i32, #nn.space<global>>) -> !nn.memory<[TM, ?], [TN, 1], i32, #nn.space<local>>
+  %4 = "dma.deslice"(%3, %0) {offsets = ["m0", "?"], sizes = ["TM", "?"], strides = [#builtin.int<1>, #builtin.int<1>]} : (!nn.memory<[TM, ?], [TN, 1], i32, #nn.space<local>>, !nn.memory<[M, N], [N, 1], i32, #nn.space<global>>) -> !nn.memory<[M, N], [N, 1], i32, #nn.space<global>>
+  %5 = "dma.reshape"(%0) : (!nn.memory<[M, N], [N, 1], i32, #nn.space<global>>) -> !nn.memory<[4, ?], [RESHAPE_STRIDE, 1], i32, #nn.space<global>>
+  %6 = "dma.cast"(%0) : (!nn.memory<[M, N], [N, 1], i32, #nn.space<global>>) -> !nn.memory<[M, N], [N, 1], i1, #nn.space<global>>
+}
+"""
+    module = Parser(ctx, text).parse_module()
+    module.verify()
+    assert _print_ir(module) == text.rstrip()
