@@ -149,6 +149,8 @@ mem = Memory(
 
 - `stride is None` 表示未显式提供步幅。
 - `shape` 与 `stride` 接收 `SymbolShape` 或可迭代输入。
+- 未显式提供 `stride` 时，默认生成连续行主序步幅：最后一维为 `1`，其余维度为后续维度长度的乘积。
+- 若 `shape` 包含 `SymbolDim`，默认步幅按乘法表达式生成并以无空格的 `*` 连接（例如 `shape=[M, K, N]` 时默认 `stride=[K*N, N, 1]`）。
 
 返回与限制：
 

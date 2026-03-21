@@ -28,6 +28,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.symbol_variable.memory import LocalSpaceMeta, Memory, MemorySpace
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 from kernel_gen.symbol_variable.type import Farmat, NumericType
 
@@ -45,6 +46,8 @@ from kernel_gen.symbol_variable.type import Farmat, NumericType
 def test_default_space() -> None:
     mem = Memory([1, 2], NumericType.Float32)
     assert mem.space is MemorySpace.GM
+    assert mem.stride is not None
+    assert mem.stride.get_values() == [2, 1]
 
 
 # ME-002
@@ -81,6 +84,7 @@ def test_repr() -> None:
     assert "dtype=" in rep
     assert "stride=" in rep
     assert "format=" in rep
+    assert "stride=Shape(2, 1)" in rep
 
 
 # ME-004
@@ -201,3 +205,42 @@ def test_space_meta() -> None:
     assert meta.align == 1024
     with pytest.raises(FrozenInstanceError):
         meta.align = 256
+
+
+# ME-017
+# 创建者: OpenAI
+# 最后一次更改: OpenAI
+# 最近一次运行测试时间: 2026-03-21 00:00:00 +0800
+# 最近一次运行成功时间: 2026-03-21 00:00:00 +0800
+# 功能说明: 验证未显式提供 stride 时默认生成连续行主序步幅。
+# 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_default_stride_generated_row_major
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
+# 对应 spec 文件路径: spec/symbol_variable/memory.md
+# 对应测试文件路径: test/symbol_variable/test_memory.py
+def test_default_stride_generated_row_major() -> None:
+    mem = Memory([2, 3, 4], NumericType.Float32)
+    assert mem.stride is not None
+    assert mem.stride.get_values() == [12, 4, 1]
+
+
+# ME-018
+# 创建者: OpenAI
+# 最后一次更改: OpenAI
+# 最近一次运行测试时间: 2026-03-21 00:00:00 +0800
+# 最近一次运行成功时间: 2026-03-21 00:00:00 +0800
+# 功能说明: 验证符号维度默认 stride 使用无空格乘法表达式并保持字符串表示一致。
+# 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_default_stride_symbolic_expression_repr
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
+# 对应 spec 文件路径: spec/symbol_variable/memory.md
+# 对应测试文件路径: test/symbol_variable/test_memory.py
+def test_default_stride_symbolic_expression_repr() -> None:
+    m = SymbolDim("M")
+    k = SymbolDim("K")
+    n = SymbolDim("N")
+    mem = Memory([m, k, n], NumericType.Float32)
+    assert mem.stride is not None
+    assert mem.stride.get_values() == ["K*N", "N", 1]
+    assert str(mem) == (
+        "Memory(GM,Tensor(shape=Shape(M, K, N), dtype=NumericType.Float32, "
+        "stride=Shape(K*N, N, 1), format=Farmat.Norm))"
+    )

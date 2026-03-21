@@ -22,6 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from .symbol_dim import SymbolDim
 from .symbol_shape import SymbolShape
 from .type import Farmat, NumericType
 
@@ -123,7 +124,7 @@ class Memory:
         """
         self.shape = self._normalize_shape(shape)
         self.dtype = dtype
-        self.stride = None if stride is None else self._normalize_shape(stride)
+        self.stride = self._default_stride(self.shape) if stride is None else self._normalize_shape(stride)
         self.format = format
         self.space = space
 
@@ -149,6 +150,34 @@ class Memory:
         if isinstance(value, SymbolShape):
             return value
         return SymbolShape(value)
+
+    @staticmethod
+    def _default_stride(shape: SymbolShape) -> SymbolShape:
+        """按连续行主序生成默认 stride。
+
+        创建者: OpenAI
+        最后一次更改: OpenAI
+
+        功能说明:
+        - 最后一维默认 stride 为 1。
+        - 其余维度为后续维度长度的乘积。
+        - 动态维度使用无空格 `*` 的 SymbolDim 乘法表达式。
+
+        使用示例:
+        - Memory._default_stride(SymbolShape(["M", "K", "N"]))
+
+        关联文件:
+        - spec: spec/symbol_variable/memory.md
+        - test: test/symbol_variable/test_memory.py
+        - 功能实现: kernel_gen/symbol_variable/memory.py
+        """
+        stride_values: list[SymbolDim] = []
+        running = SymbolDim(1)
+        for dim in reversed(shape.get_shape()):
+            stride_values.append(running)
+            running = dim * running
+        stride_values.reverse()
+        return SymbolShape(stride_values)
 
     def __repr__(self) -> str:
         """返回 Memory 的字符串表示。
