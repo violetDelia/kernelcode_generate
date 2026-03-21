@@ -25,7 +25,9 @@
 ## 限制与边界
 
 - 不支持隐式广播，不包含 `matmul` 等非逐元素算子。
-- API 仅定义合法输入语义，非法形状或不满足约束的调用行为由实现侧决定（可选择检查并报错或视为未定义行为）。
+- API 仅定义合法输入语义；非法形状或不满足约束的调用必须通过返回失败状态值表达。
+- 所有 NN API 必须由调用方显式提供输出视图，接口返回状态值，不通过函数返回输出对象。
+- 状态值语义建议遵循：`0` 表示成功，非 `0` 表示失败；具体状态码枚举由实现侧定义。
 - 内存视图抽象需满足以下最小要求：
   - `data` 指向有效连续内存区（实现可扩展为其他存储形式，但需保持语义一致）。
   - `shape`/`stride` 为长度 `Rank` 的维度与步长描述，维度为正数。
@@ -43,12 +45,14 @@
   - `rhs (MemoryView<T, Rank>)`：右操作数视图。
   - `out (MemoryView<T, Rank>)`：输出视图。
 - 使用示例：
-  - `api::add(lhs, rhs, out)`
+  - `Status status = api::add(lhs, rhs, out)`
 - 注意事项：
   - `lhs.shape`、`rhs.shape`、`out.shape` 必须一致。
   - `lhs.stride`、`rhs.stride`、`out.stride` 需能用于同一 `Rank` 的逐元素访问。
   - 不定义标量重载与隐式广播。
-- 返回与限制：无返回值，输出写入 `out`。
+- 返回与限制：
+  - 返回状态值；`0` 表示成功，非 `0` 表示失败。
+  - 当形状、步幅或类型不满足约束时必须返回失败状态值。
 
 ### 逐元素比较（eq/ne/lt/le/gt/ge）
 
@@ -58,11 +62,13 @@
   - `rhs (MemoryView<T, Rank>)`：右操作数视图。
   - `out (MemoryView<PredT, Rank>)`：输出视图，元素类型用于表示 predicate 结果。
 - 使用示例：
-  - `api::eq(lhs, rhs, out)`
+  - `Status status = api::eq(lhs, rhs, out)`
 - 注意事项：
   - `lhs.shape`、`rhs.shape`、`out.shape` 必须一致。
   - `out` 的元素类型需能表示 predicate 结果（例如 `0/1`）。
-- 返回与限制：无返回值，输出写入 `out`。
+- 返回与限制：
+  - 返回状态值；`0` 表示成功，非 `0` 表示失败。
+  - 当形状或类型不满足约束时必须返回失败状态值。
 
 ### 显式 broadcast
 
@@ -71,12 +77,14 @@
   - `input (MemoryView<T, InRank>)`：输入视图。
   - `out (MemoryView<T, OutRank>)`：输出视图。
 - 使用示例：
-  - `api::broadcast(input, out)`
+  - `Status status = api::broadcast(input, out)`
 - 注意事项：
   - `OutRank >= InRank`。
   - 广播按尾维对齐，逐维满足 `input_dim == output_dim` 或 `input_dim == 1`。
   - 输出视图的元素类型与输入一致。
-- 返回与限制：无返回值，输出写入 `out`。
+- 返回与限制：
+  - 返回状态值；`0` 表示成功，非 `0` 表示失败。
+  - 当广播条件不满足时必须返回失败状态值。
 
 ## 测试
 
