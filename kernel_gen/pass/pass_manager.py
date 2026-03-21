@@ -1,0 +1,169 @@
+"""Pass manager API.
+
+创建者: 李白
+最后一次更改: 李白
+
+功能说明:
+- 定义 Pass 与 PassManager 的基础行为。
+
+使用示例:
+- import importlib
+- pass_module = importlib.import_module("kernel_gen.pass.pass_manager")
+- Pass, PassManager = pass_module.Pass, pass_module.PassManager
+- pm = PassManager(name="opt")
+- pm.add_pass(MyPass())
+- result = pm.run(ir)
+
+关联文件:
+- spec: spec/pass/pass_manager.md
+- test: test/pass/test_pass_manager.py
+- 功能实现: kernel_gen/pass/pass_manager.py
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+
+class Pass:
+    """Pass 抽象基类。
+
+    创建者: 李白
+    最后一次更改: 李白
+
+    功能说明:
+    - 提供最小的 Pass 接口规范。
+
+    使用示例:
+    - class MyPass(Pass):
+          name = "my-pass"
+          def run(self, target):
+              return target
+
+    关联文件:
+    - spec: spec/pass/pass_manager.md
+    - test: test/pass/test_pass_manager.py
+    - 功能实现: kernel_gen/pass/pass_manager.py
+    """
+
+    name = "pass"
+
+    def run(self, target):  # pragma: no cover - abstract hook
+        """执行 Pass。
+
+        创建者: 李白
+        最后一次更改: 李白
+
+        功能说明:
+        - 处理输入并返回输出。
+
+        使用示例:
+        - return target
+
+        关联文件:
+        - spec: spec/pass/pass_manager.md
+        - test: test/pass/test_pass_manager.py
+        - 功能实现: kernel_gen/pass/pass_manager.py
+        """
+        raise NotImplementedError("Pass.run must be implemented")
+
+
+def _is_pass_like(obj: object) -> bool:
+    if not hasattr(obj, "run") or not callable(getattr(obj, "run")):
+        return False
+    if not hasattr(obj, "name"):
+        return False
+    return isinstance(getattr(obj, "name"), str)
+
+
+class PassManager:
+    """Pass 管理器。
+
+    创建者: 李白
+    最后一次更改: 李白
+
+    功能说明:
+    - 按顺序执行 Pass 列表。
+
+    使用示例:
+    - pm = PassManager(name="opt")
+    - pm.add_pass(MyPass())
+    - result = pm.run(ir)
+
+    关联文件:
+    - spec: spec/pass/pass_manager.md
+    - test: test/pass/test_pass_manager.py
+    - 功能实现: kernel_gen/pass/pass_manager.py
+    """
+
+    def __init__(self, name: str | None = None) -> None:
+        self.name = name
+        self._passes: list[Pass] = []
+
+    def add_pass(self, pass_obj: Pass) -> None:
+        """注册单个 Pass。
+
+        创建者: 李白
+        最后一次更改: 李白
+
+        功能说明:
+        - 追加到 Pass 列表。
+
+        使用示例:
+        - pm.add_pass(MyPass())
+
+        关联文件:
+        - spec: spec/pass/pass_manager.md
+        - test: test/pass/test_pass_manager.py
+        - 功能实现: kernel_gen/pass/pass_manager.py
+        """
+        if not _is_pass_like(pass_obj):
+            raise TypeError("pass_obj must provide name(str) and run(target)")
+        self._passes.append(pass_obj)
+
+    def extend(self, passes: Sequence[Pass]) -> None:
+        """批量注册 Pass。
+
+        创建者: 李白
+        最后一次更改: 李白
+
+        功能说明:
+        - 依序追加到 Pass 列表。
+
+        使用示例:
+        - pm.extend([PassA(), PassB()])
+
+        关联文件:
+        - spec: spec/pass/pass_manager.md
+        - test: test/pass/test_pass_manager.py
+        - 功能实现: kernel_gen/pass/pass_manager.py
+        """
+        for item in passes:
+            if not _is_pass_like(item):
+                raise TypeError("passes must contain Pass items")
+            self._passes.append(item)
+
+    def run(self, target):
+        """依序执行 Pass。
+
+        创建者: 李白
+        最后一次更改: 李白
+
+        功能说明:
+        - 逐个调用 Pass.run。
+
+        使用示例:
+        - result = pm.run(ir)
+
+        关联文件:
+        - spec: spec/pass/pass_manager.md
+        - test: test/pass/test_pass_manager.py
+        - 功能实现: kernel_gen/pass/pass_manager.py
+        """
+        result = target
+        for item in self._passes:
+            result = item.run(result)
+        return result
+
+
+__all__ = ["Pass", "PassManager"]
