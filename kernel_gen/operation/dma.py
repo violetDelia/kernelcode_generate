@@ -4,7 +4,7 @@
 最后一次更改: 小李飞刀
 
 功能说明:
-- 提供 Memory 的数据搬运、视图变换与显式转换 API，包括 alloc/free/copy/load/store/slice/deslice/view/flatten/cast。
+- 提供 Memory 的数据搬运、视图变换与显式转换 API，包括 alloc/free/copy/load/store/slice/deslice/view/reshape/flatten/cast。
 
 使用示例:
 - from kernel_gen.operation.dma import copy, cast, view, flatten
@@ -559,6 +559,38 @@ def view(source: object, shape, stride=None) -> Memory:
         src.dtype,
         space=src.space,
         stride=_clone_symbol_list(stride_value),
+        format=src.format,
+    )
+
+
+def reshape(source: object, shape) -> Memory:
+    """返回 source 的形状重塑结果。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅调整 `shape/stride` 元信息，不做数据搬运。
+    - 仅允许连续布局的 source。
+
+    使用示例:
+    - reshape(Memory([2, 3, 4], NumericType.Float32), shape=[6, 4])
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: kernel_gen/operation/dma.py
+    """
+    src = _ensure_memory(source, "source")
+    shape_value = _ensure_shape_value(shape, "shape")
+    _ensure_view_numel_compatible(src, shape_value)
+    if not _is_contiguous(src):
+        raise ValueError("Reshape requires contiguous source")
+    return Memory(
+        _clone_symbol_list(shape_value),
+        src.dtype,
+        space=src.space,
+        stride=None,
         format=src.format,
     )
 

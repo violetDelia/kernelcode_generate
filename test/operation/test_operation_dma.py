@@ -26,7 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.operation.dma import alloc, cast, copy, deslice, flatten, free, load, slice, store, view
+from kernel_gen.operation.dma import alloc, cast, copy, deslice, flatten, free, load, reshape, slice, store, view
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.type import NumericType
 
@@ -395,6 +395,62 @@ def test_view_invalid_shape_or_stride() -> None:
     non_contiguous = Memory([2, 3, 4], NumericType.Float32, stride=[100, 4, 1])
     with pytest.raises(ValueError):
         view(non_contiguous, shape=[6, 4])
+
+
+# TC-OP-DMA-019
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-21 19:10:00 +0800
+# 最近一次运行成功时间: 2026-03-21 19:10:00 +0800
+# 功能说明: 验证 reshape 返回新 Memory 且继承 dtype/space/format。
+# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_reshape_returns_memory
+# 对应功能实现文件路径: kernel_gen/operation/dma.py
+# 对应 spec 文件路径: spec/operation/dma.md
+# 对应测试文件路径: test/operation/test_operation_dma.py
+def test_reshape_returns_memory() -> None:
+    src = Memory([2, 3, 4], NumericType.Float32, space=MemorySpace.SM)
+    dst = reshape(src, shape=[6, 4])
+    assert isinstance(dst, Memory)
+    assert dst.shape.get_values() == [6, 4]
+    assert dst.dtype is NumericType.Float32
+    assert dst.space is MemorySpace.SM
+    assert dst.format is src.format
+
+
+# TC-OP-DMA-020
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-21 19:10:00 +0800
+# 最近一次运行成功时间: 2026-03-21 19:10:00 +0800
+# 功能说明: 验证 reshape 在连续布局下生成默认 stride。
+# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_reshape_default_stride_contiguous
+# 对应功能实现文件路径: kernel_gen/operation/dma.py
+# 对应 spec 文件路径: spec/operation/dma.md
+# 对应测试文件路径: test/operation/test_operation_dma.py
+def test_reshape_default_stride_contiguous() -> None:
+    src = Memory([2, 3, 4], NumericType.Float32)
+    dst = reshape(src, shape=[6, 4])
+    assert dst.stride is not None
+    assert dst.stride.get_values() == [4, 1]
+
+
+# TC-OP-DMA-021
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-21 19:10:00 +0800
+# 最近一次运行成功时间: 2026-03-21 19:10:00 +0800
+# 功能说明: 验证 reshape 非法 shape 或非连续布局触发错误。
+# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_reshape_invalid_shape_or_stride
+# 对应功能实现文件路径: kernel_gen/operation/dma.py
+# 对应 spec 文件路径: spec/operation/dma.md
+# 对应测试文件路径: test/operation/test_operation_dma.py
+def test_reshape_invalid_shape_or_stride() -> None:
+    src = Memory([2, 3, 4], NumericType.Float32)
+    with pytest.raises(ValueError):
+        reshape(src, shape="24")
+    non_contiguous = Memory([2, 3, 4], NumericType.Float32, stride=[100, 4, 1])
+    with pytest.raises(ValueError):
+        reshape(non_contiguous, shape=[6, 4])
 
 
 # TC-OP-DMA-017

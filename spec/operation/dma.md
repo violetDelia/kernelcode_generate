@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-定义 `Memory` 的数据搬运、视图变换、切片写回、显式数据转换与生命周期操作规范，提供 `alloc/free/copy/load/store/slice/deslice/view/flatten/cast` 的输入约束、输出语义与错误边界。该层面向高层 API，负责搬运意图表达；方言层语义由 [`spec/dialect/dma.md`](../../spec/dialect/dma.md) 定义。
+定义 `Memory` 的数据搬运、视图变换、切片写回、显式数据转换与生命周期操作规范，提供 `alloc/free/copy/load/store/slice/deslice/view/reshape/flatten/cast` 的输入约束、输出语义与错误边界。该层面向高层 API，负责搬运意图表达；方言层语义由 [`spec/dialect/dma.md`](../../spec/dialect/dma.md) 定义。
 
 ## 文档信息
 
@@ -25,7 +25,7 @@
 ## 目标
 
 - 为 `Memory` 提供统一、稳定的数据搬运与显式 dtype 转换语义入口。
-- 明确 `alloc/free/copy/load/store/slice/deslice/view/flatten/cast` 的输入约束、输出语义、空间规则与错误边界。
+- 明确 `alloc/free/copy/load/store/slice/deslice/view/reshape/flatten/cast` 的输入约束、输出语义、空间规则与错误边界。
 - 保留动态 `shape` 与 `offsets/sizes/strides` 的表达能力，支持后续 lowering 保留切片信息。
 - 明确高层 `operation/dma` 与 `dialect/dma` 的分层关系与映射口径。
 
@@ -37,14 +37,14 @@
 - 不负责自动选择最优搬运空间、tile 大小或 stride。
 - `alloc/free` 仅定义高层生命周期语义，不承担搬运语义。
 - 搬运操作不改变元素值语义，只改变数据的逻辑位置、覆盖范围或所在空间。
-- `view/flatten` 不做数据搬运，仅调整张量视图的 `shape/stride` 描述。
+- `view/reshape/flatten` 不做数据搬运，仅调整张量视图的 `shape/stride` 描述。
 - 至少一侧操作数必须是 `Memory`；不定义纯标量间搬运接口。
 - `offsets/sizes/strides` 长度必须与相关 `Memory.rank` 一致，`sizes` 中静态长度必须为正。
 - 当前阶段 `strides` 仅支持全 1；非 1 stride 必须显式报错。
 - 形状、类型、空间或索引规则不满足时必须报错，不允许 silently 降级。
 - `alloc/free` 不要求存在 `dma dialect` op，但结果必须可无损映射为 `NnMemoryType` / `NnMemorySpaceAttr`。
 - `copy/load/store/slice/deslice/cast` 映射到 `dma.copy/load/store/slice/deslice/cast`。
-- `view/flatten` 为高层视图语义，不映射为 `dma dialect` op。
+- `view/reshape/flatten` 为高层视图语义，不映射为 `dma dialect` op。
 - `offsets/sizes/strides` 属于操作参数，不内嵌在返回 `Memory` 中。
 
 ## 公开接口
@@ -279,6 +279,36 @@ dst = view(src, shape=[6, 4])
 - 返回新的 `Memory`，其 `dtype/space/format` 继承 `source`。
 - 返回的 `shape/stride` 由 `shape/stride` 或默认规则决定。
 
+### reshape(source, shape)
+
+功能说明：
+
+- 返回 `source` 的形状重塑结果，仅调整 `shape/stride` 元信息。
+- 等价于对连续布局的 `source` 进行视图重塑。
+
+参数说明：
+
+- `source: Memory`：源内存。
+- `shape: Sequence | SymbolShape`：目标形状。
+
+使用示例：
+
+```python
+src = Memory([2, 3, 4], NumericType.Float32)
+dst = reshape(src, shape=[6, 4])
+```
+
+注意事项：
+
+- `shape` 必须可被 `SymbolShape` 规范化。
+- `source` 必须是连续布局；非连续布局必须显式报错。
+- 若可判定，`shape` 的元素总数必须与 `source.shape` 一致；无法判定时由调用方保证。
+
+返回与限制：
+
+- 返回新的 `Memory`，其 `dtype/space/format` 继承 `source`。
+- 返回的 `stride` 按连续行主序生成。
+
 ### flatten(source)
 
 功能说明：
@@ -348,6 +378,7 @@ dst = cast(src, NumericType.Float16)
 - 验证 `load/slice` 的返回 `shape/dtype/space` 语义与索引校验。
 - 验证 `store/deslice` 的源块大小约束与索引校验。
 - 验证 `view` 的形状/步幅约束与连续布局要求。
+- 验证 `reshape` 的形状约束与连续布局要求。
 - 验证 `flatten` 的连续布局要求与结果形状。
 - 验证 `cast` 的 `dtype` 变更与错误分支。
 - 验证 stride 限制与类型错误分支。
@@ -379,3 +410,6 @@ dst = cast(src, NumericType.Float16)
 | TC-OP-DMA-016 | `view` 非法参数 | 非法 `shape/stride` 或 rank 不一致报错 | `test_view_invalid_shape_or_stride` |
 | TC-OP-DMA-017 | `flatten` 连续布局 | 连续布局下 `flatten` 返回一维 `shape` 与 `stride=[1]` | `test_flatten_contiguous` |
 | TC-OP-DMA-018 | `flatten` 非连续布局 | 非连续布局触发错误 | `test_flatten_non_contiguous_rejected` |
+| TC-OP-DMA-019 | `reshape` 基础变换 | `reshape` 返回新 `Memory` 且 `dtype/space/format` 继承 | `test_reshape_returns_memory` |
+| TC-OP-DMA-020 | `reshape` 连续布局 | 连续布局下 `reshape` 生成默认步幅 | `test_reshape_default_stride_contiguous` |
+| TC-OP-DMA-021 | `reshape` 非法参数 | 非法 `shape` 或非连续布局触发错误 | `test_reshape_invalid_shape_or_stride` |

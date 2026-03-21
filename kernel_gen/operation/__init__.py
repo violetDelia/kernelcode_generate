@@ -19,7 +19,7 @@
 - 功能实现: kernel_gen/operation/dma.py
 """
 
-from .dma import alloc, cast, copy, deslice, flatten, free, load, slice, store, view
+from .dma import alloc, cast, copy, deslice, flatten, free, load, reshape, slice, store, view
 from .nn import add, eq, ge, gt, le, lt, matmul, mul, ne, sub, truediv
 
 __all__ = [
@@ -42,6 +42,7 @@ __all__ = [
     "slice",
     "deslice",
     "view",
+    "reshape",
     "flatten",
     "cast",
 ]
