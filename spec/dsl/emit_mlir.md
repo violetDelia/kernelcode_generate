@@ -11,7 +11,7 @@
 - 创建者：`规格小队`
 - 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)
-- `功能实现`：[`kernel_gen/dsl/lowering.py`](../../kernel_gen/dsl/lowering.py)
+- `功能实现`：[`kernel_gen/dsl/emit_mlir.py`](../../kernel_gen/dsl/emit_mlir.py)
 - `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
 
 ## 依赖
@@ -21,7 +21,7 @@
 
 ## 术语
 
-- `EmitContext`：发射上下文，包含 builder、类型映射、符号表与诊断容器。
+- `EmitContext`：发射上下文，包含 builder、类型映射与符号表。
 - `MLIR Value`：MLIR SSA value 的抽象表示。
 
 ## 目标
@@ -38,7 +38,7 @@
 
 ## 公开接口
 
-### `EmitContext(builder, symbols, types, diagnostics=None, config=None)`
+### `EmitContext(builder, symbols, types, config=None)`
 
 功能说明：
 
@@ -49,7 +49,6 @@
 - `builder` (`object`)：MLIR 构建器或等价接口。
 - `symbols` (`dict`)：变量名到 MLIR value 的映射。
 - `types` (`object`)：类型映射或类型系统入口。
-- `diagnostics` (`list|None`)：诊断容器（可选）。
 - `config` (`dict|None`)：可选配置。
 
 使用示例：

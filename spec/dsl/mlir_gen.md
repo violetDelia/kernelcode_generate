@@ -11,7 +11,7 @@
 - 创建者：`榕`
 - 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
-- `功能实现`：[`kernel_gen/dsl/ast_visitor.py`](../../kernel_gen/dsl/ast_visitor.py)
+- `功能实现`：[`kernel_gen/dsl/mlir_gen.py`](../../kernel_gen/dsl/mlir_gen.py)
 - `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
 - [immutable]`功能实现`：[`python/dsl/ast_visitor.py`](../../python/dsl/mlir_gen.py)
 
