@@ -2,103 +2,121 @@
 
 ## 功能简介
 
-用于定义 `python/dsl/ast_visitor.py::emit_mlir` 的文本输出入口规范。该接口位于 DSL 链路最外层，负责把上游已生成的结构化 IR 序列化为 MLIR 风格文本，不重复定义 AST 构建、结构化 IR 生成或 `nn dialect` 本身的语义。
+- 定义 AST 节点到 MLIR op/value 的转换规则。
+- 为 `ast_visitor` 提供可调用的节点发射接口。
+- 不负责 AST 解析与遍历，不负责 MLIR 文本输出。
 
 ## 文档信息
 
 - 创建者：`规格小队`
 - 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)
-- `功能实现`：[`python/dsl/ast_visitor.py`](../../python/dsl/ast_visitor.py)
+- `功能实现`：[`python/dsl/lowering.py`](../../python/dsl/lowering.py)
 - `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
 
 ## 依赖
 
-- [`python/dsl/ast_visitor.py`](../../python/dsl/ast_visitor.py) 中 `visit_to_nn_ir` 在可调用输入路径上生成结构化 IR。
-- `xdsl.printer.Printer` 负责 MLIR 风格文本输出（外部依赖，来自 `xdsl` 包）。
-- [`spec/dsl/ast_visitor.md`](../../spec/dsl/ast_visitor.md) 约束受限 Python 函数入口、源码解析与诊断包装行为。
-- [`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md) 约束结构化 IR 的生成链路、`func.func` 组织方式与 SSA/value 语义。
-- [`spec/dialect/nn.md`](../../spec/dialect/nn.md) 约束当前目标 dialect 的 op/type/attribute 文本语义与 verifier 边界。
+- AST 节点定义：[`spec/dsl/ast.md`](../../spec/dsl/ast.md)
+- AST 访问器：[`spec/dsl/ast_visitor.md`](../../spec/dsl/ast_visitor.md)
+
+## 术语
+
+- `EmitContext`：发射上下文，包含 builder、类型映射、符号表与诊断容器。
+- `MLIR Value`：MLIR SSA value 的抽象表示。
 
 ## 目标
 
-- 为 DSL 对外提供统一的 MLIR 文本输出入口。
-- 明确“可调用对象 -> 结构化 IR -> 文本输出”和“已有 module/op -> 直接打印”两条路径。
-- 与 `mlir_gen` 保持一致分层：`mlir_gen` 负责结构化 IR 生成约束，`emit_mlir` 负责文本序列化。
+- 将 AST 表达式节点转换为 MLIR value。
+- 将 AST 语句节点转换为 MLIR op 或控制流结构。
+- 保证同一节点生成的 value 可被上游复用。
 
 ## 限制与边界
 
-- 不定义受限 Python 语法子集；相关规则由 [`spec/dsl/ast_visitor.md`](../../spec/dsl/ast_visitor.md) 约束。
-- 不定义表达式到 `nn.*` op 的 lowering 或结构化 IR 生成细节；相关规则由 [`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md) 约束。
-- 不定义 `nn dialect` 的 verifier、parse/print 或类型系统细节；相关规则由 [`spec/dialect/nn.md`](../../spec/dialect/nn.md) 约束。
-- 不做 canonicalization、优化、自动补全缺失属性或修复非法 IR。
-- 文本格式以 `xdsl.printer.Printer` 当前输出为准；本文件只约束必须保留的结构语义，不约束空格、换行或 SSA 编号细节。
+- 不解析 Python 函数，不遍历 AST。
+- 不做优化、常量折叠或后端特化。
+- 不生成 MLIR 文本；文本输出由上游调用方负责。
 
 ## 公开接口
 
-### `emit_mlir(value, globals=None, builtins=None, config=None)`
+### `EmitContext(builder, symbols, types, diagnostics=None, config=None)`
 
 功能说明：
 
-- 对外输出 MLIR 风格文本。
-- 当 `value` 为可调用对象时，必须先走 `visit_to_nn_ir(...)` 生成结构化 IR，再打印文本。
-- 当 `value` 已是可打印的 IR/module 对象时，必须直接打印，不再重新解析 Python 函数或重做结构化 IR 生成。
+- 封装发射所需的构建器、符号表与类型映射。
 
 参数说明：
 
-- `value`
-  - 输入类型：受 [`spec/dsl/ast_visitor.md`](../../spec/dsl/ast_visitor.md) 支持范围约束的 Python 可调用对象，或可被 `Printer.print_op(...)` 直接打印的 IR/module 对象。
-  - 含义：若为可调用对象，则作为 DSL 入口进行 IR 生成；若为 IR/module，则直接打印。
-- `globals`
-  - 输入类型：`dict|None`。
-  - 含义：当 `value` 为可调用对象时，作为 `visit_to_nn_ir(...)` 的全局符号表。
-- `builtins`
-  - 输入类型：`dict|None`。
-  - 含义：当 `value` 为可调用对象时，作为 `visit_to_nn_ir(...)` 的内建符号表。
-- `config`
-  - 输入类型：`dict|None`。
-  - 含义：当 `value` 为可调用对象时，传递给 `visit_to_nn_ir(...)` 的行为配置。
-  - 约束：若 `value` 不是可调用对象，则 `globals`/`builtins`/`config` 均不解释其语义。
+- `builder` (`object`)：MLIR 构建器或等价接口。
+- `symbols` (`dict`)：变量名到 MLIR value 的映射。
+- `types` (`object`)：类型映射或类型系统入口。
+- `diagnostics` (`list|None`)：诊断容器（可选）。
+- `config` (`dict|None`)：可选配置。
 
 使用示例：
 
 ```python
-def add(
-    x: "Tensor[f32, 2, 2]",
-    y: "Tensor[f32, 2, 2]",
-) -> "Tensor[f32, 2, 2]":
-    return x + y
-
-text = emit_mlir(add)
-```
-
-```python
-module = visit_to_nn_ir(add)
-text = emit_mlir(module)
+ctx = EmitContext(builder=builder, symbols={}, types=types, config={"keep_location": True})
 ```
 
 注意事项：
 
-- 若 `value` 为可调用对象，则错误传播必须沿用 `visit_to_nn_ir(...)` 的规则，包括源码不可获取的 `OSError`/`TypeError` 与 AST/lowering 失败时的 `AstVisitorError`。
-- 若 `value` 不是可调用对象但也不是 `Printer.print_op(...)` 可接受的对象，则直接暴露底层类型错误或打印错误，不做包装。
-- 输入 IR 自身不满足上游语义约束时不负责修复，错误由上游 verifier、构造链路或 printer 暴露。
+- `symbols` 必须在遍历过程中保持一致性。
 
 返回与限制：
 
-- 返回值必须为 `str`。
-- 返回文本必须反映当前结构化 IR 中的 `func.func`、`func.return` 与已生成的 `nn.*` op/type 信息。
-- 对同一个结构化 IR，不要求固定 SSA 名称或固定换行格式，但必须保持语义等价的结构化文本。
+- 返回上下文实例，用于发射函数调用。
+
+### `emit_mlir(node, ctx)`
+
+功能说明：
+
+- 将单个 AST 节点转换为 MLIR op/value。
+- 该函数按节点类型分发到对应的发射规则。
+
+参数说明：
+
+- `node` (`object`)：AST 节点。
+- `ctx` (`EmitContext`)：发射上下文。
+
+使用示例：
+
+```python
+value = emit_mlir(expr_ast, ctx)
+```
+
+注意事项：
+
+- 表达式节点应返回 MLIR value。
+- 语句节点可返回 `None` 或返回生成的 op（以实现为准）。
+- 不支持的节点必须抛出可定位的错误。
+
+返回与限制：
+
+- 表达式节点返回 MLIR value。
+- 语句节点返回 `None` 或 op 对象（以实现为准）。
+
+## 额外补充
+
+- `emit_mlir` 必须覆盖 AST 中每一种节点类型。
+- 默认使用当前项目的目标 dialect（例如 `nn`），但节点到 op 的映射必须清晰可追踪。
+
+节点映射示例：
+
+- `ConstAST`：生成常量或等价字面量 op/value。
+- `BinaryExprAST(add/sub/mul/div)`：生成对应的二元算术 op。
+- `CompareExprAST(eq/ne/lt/le/gt/ge)`：生成对应的比较 op。
+- `LoadAST`：生成张量读取相关 op/value。
+- `StoreAST`：生成张量写入相关 op。
+- `ForAST`：生成循环控制流结构。
 
 ## 测试
 
 - 测试文件：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
 - 执行命令：`pytest -q test/dsl/test_ast_visitor.py`
 - 测试目标：
-  - 覆盖 `emit_mlir(callable)` 的文本输出入口。
-  - 确认输出文本包含 `func.func` 与当前表达式对应的 `nn.*` op 文本。
-  - 与 [`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md) 保持一致分层：结构化 IR 的生成正确性由上游链路负责，本文件只认领文本输出入口的直接覆盖。
+  - 覆盖常见表达式与语句节点的发射结果。
+  - 覆盖不支持节点的错误路径。
 - 功能与用例清单：
-
-| 用例 ID | 约束点 | 对应测试 |
-| --- | --- | --- |
-| EMIT-001 | `emit_mlir(callable)` 输出必须包含 `func.func` 与当前表达式对应的 `nn.*` op 文本 | `test_emit_mlir_output` |
+  - EMIT-001：二元表达式节点生成对应 op/value。
+  - EMIT-002：比较表达式节点生成对应 op/value。
+  - EMIT-003：不支持节点抛出错误并携带位置信息。
