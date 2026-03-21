@@ -19,7 +19,7 @@
 - 功能实现: python/operation/dma.py
 """
 
-from .dma import alloc, copy, deslice, free, load, slice, store
+from .dma import alloc, cast, copy, deslice, free, load, slice, store
 from .nn import add, eq, ge, gt, le, lt, matmul, mul, ne, sub, truediv
 
 __all__ = [
@@ -41,4 +41,5 @@ __all__ = [
     "store",
     "slice",
     "deslice",
+    "cast",
 ]

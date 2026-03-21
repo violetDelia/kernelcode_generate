@@ -1,14 +1,15 @@
 """DMA operation API.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 小李飞刀
 
 功能说明:
-- 提供 Memory 的数据搬运 API，包括 copy/load/store/slice/deslice。
+- 提供 Memory 的数据搬运与显式转换 API，包括 alloc/free/copy/load/store/slice/deslice/cast。
 
 使用示例:
-- from python.operation.dma import copy, load
+- from python.operation.dma import copy, cast
 - copy(src, dst)
+- cast(src, NumericType.Float16)
 
 关联文件:
 - spec: spec/operation/dma.md
@@ -21,6 +22,23 @@ from __future__ import annotations
 from python.symbol_variable.memory import Memory, MemorySpace
 from python.symbol_variable.symbol_shape import SymbolShape
 from python.symbol_variable.type import NumericType
+
+_FLOAT_DTYPES = {
+    NumericType.Float16,
+    NumericType.BFloat16,
+    NumericType.Float32,
+    NumericType.Float64,
+}
+_INT_DTYPES = {
+    NumericType.Int8,
+    NumericType.Int16,
+    NumericType.Int32,
+    NumericType.Int64,
+    NumericType.Uint8,
+    NumericType.Uint16,
+    NumericType.Uint32,
+    NumericType.Uint64,
+}
 
 
 def _ensure_memory(value: object, name: str) -> Memory:
@@ -219,6 +237,54 @@ def _ensure_unit_strides(strides: SymbolShape | None) -> None:
             raise NotImplementedError("Non-unit stride is not supported")
 
 
+def _clone_symbol_list(value: SymbolShape | None) -> SymbolShape | None:
+    """克隆符号列表对象。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 复制 SymbolShape 容器，避免别名共享。
+
+    使用示例:
+    - _clone_symbol_list(SymbolShape([1, 2]))
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: python/operation/dma.py
+    """
+    if value is None:
+        return None
+    return SymbolShape(value.get_values())
+
+
+def _is_supported_cast(source: NumericType, target: NumericType) -> bool:
+    """判断是否支持 dtype 转换。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 当前仅支持同类数值类型间的显式转换。
+
+    使用示例:
+    - _is_supported_cast(NumericType.Float32, NumericType.Float16)
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: python/operation/dma.py
+    """
+    if source is target:
+        return True
+    if source in _FLOAT_DTYPES and target in _FLOAT_DTYPES:
+        return True
+    if source in _INT_DTYPES and target in _INT_DTYPES:
+        return True
+    return False
+
+
 def copy(source: object, target: object) -> None:
     """整块拷贝。
 
@@ -260,7 +326,7 @@ def load(
     """从 source 读取切片块。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 返回新的 Memory 块。
@@ -274,6 +340,8 @@ def load(
     - 功能实现: python/operation/dma.py
     """
     src = _ensure_memory(source, "source")
+    if space is not None and not isinstance(space, MemorySpace):
+        raise TypeError("space must be MemorySpace")
     offsets_shape = _normalize_index_list(offsets, "offsets")
     sizes_shape = _normalize_index_list(sizes, "sizes")
     strides_shape = None if strides is None else _normalize_index_list(strides, "strides")
@@ -281,7 +349,13 @@ def load(
     _ensure_sizes_positive(sizes_shape)
     _ensure_unit_strides(strides_shape)
     target_space = src.space if space is None else space
-    return Memory(sizes_shape, src.dtype, space=target_space, stride=None)
+    return Memory(
+        _clone_symbol_list(sizes_shape),
+        src.dtype,
+        space=target_space,
+        stride=None,
+        format=src.format,
+    )
 
 
 def store(
@@ -372,3 +446,34 @@ def deslice(
     - 功能实现: python/operation/dma.py
     """
     return store(source, target, offsets, sizes, strides=strides)
+
+
+def cast(source: object, dtype: NumericType) -> Memory:
+    """显式转换 Memory dtype。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 返回 shape/stride/space 保持一致的新 Memory。
+
+    使用示例:
+    - cast(Memory([1, 2], NumericType.Float32), NumericType.Float16)
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: python/operation/dma.py
+    """
+    src = _ensure_memory(source, "source")
+    if not isinstance(dtype, NumericType):
+        raise TypeError("cast dtype must be NumericType")
+    if not _is_supported_cast(src.dtype, dtype):
+        raise NotImplementedError("Unsupported cast conversion")
+    return Memory(
+        _clone_symbol_list(src.shape),
+        dtype,
+        space=src.space,
+        stride=_clone_symbol_list(src.stride),
+        format=src.format,
+    )

@@ -26,7 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from python.operation.dma import alloc, copy, deslice, free, load, slice, store
+from python.operation.dma import alloc, cast, copy, deslice, free, load, slice, store
 from python.symbol_variable.memory import Memory, MemorySpace
 from python.symbol_variable.type import NumericType
 
@@ -280,3 +280,55 @@ def test_dma_type_error() -> None:
     dst = Memory(["M", "N"], NumericType.Float32)
     with pytest.raises(TypeError):
         copy("source", dst)
+
+
+# TC-OP-DMA-011
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-21 10:00:00 +0800
+# 最近一次运行成功时间: 2026-03-21 10:00:00 +0800
+# 功能说明: 验证 cast 返回相同 shape/stride/space 的新 Memory 且 dtype 发生变化。
+# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_cast_changes_dtype
+# 对应功能实现文件路径: python/operation/dma.py
+# 对应 spec 文件路径: spec/operation/dma.md
+# 对应测试文件路径: test/operation/test_operation_dma.py
+def test_cast_changes_dtype() -> None:
+    src = Memory(["M", "N"], NumericType.Float32, space=MemorySpace.SM, stride=[1, 1])
+    dst = cast(src, NumericType.Float16)
+    assert dst.shape.get_values() == ["M", "N"]
+    assert dst.stride is not None
+    assert dst.stride.get_values() == [1, 1]
+    assert dst.space is MemorySpace.SM
+    assert dst.dtype is NumericType.Float16
+
+
+# TC-OP-DMA-012
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-21 10:00:00 +0800
+# 最近一次运行成功时间: 2026-03-21 10:00:00 +0800
+# 功能说明: 验证 cast 非法 dtype 触发 TypeError。
+# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_cast_invalid_dtype
+# 对应功能实现文件路径: python/operation/dma.py
+# 对应 spec 文件路径: spec/operation/dma.md
+# 对应测试文件路径: test/operation/test_operation_dma.py
+def test_cast_invalid_dtype() -> None:
+    src = Memory([1, 2], NumericType.Float32)
+    with pytest.raises(TypeError):
+        cast(src, "float32")
+
+
+# TC-OP-DMA-013
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-21 10:00:00 +0800
+# 最近一次运行成功时间: 2026-03-21 10:00:00 +0800
+# 功能说明: 验证 cast 不支持的转换路径显式报错。
+# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_cast_unsupported_conversion
+# 对应功能实现文件路径: python/operation/dma.py
+# 对应 spec 文件路径: spec/operation/dma.md
+# 对应测试文件路径: test/operation/test_operation_dma.py
+def test_cast_unsupported_conversion() -> None:
+    src = Memory([1, 2], NumericType.Float32)
+    with pytest.raises(NotImplementedError):
+        cast(src, NumericType.Int32)

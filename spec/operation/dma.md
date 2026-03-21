@@ -259,12 +259,14 @@ deslice(sub, dst, offsets=[0, 16], sizes=[32, 32])
 使用示例：
 
 ```python
-dst = cast(src, NumericType.Int32)
+src = Memory(["M", "N"], NumericType.Float32, space=MemorySpace.SM, stride=[1, 1])
+dst = cast(src, NumericType.Float16)
 ```
 
 注意事项：
 
 - `dtype` 必须为合法的元素类型。
+- 当前仅支持同类数值类型间的显式转换。
 - 不支持的转换路径必须显式报错。
 
 返回与限制：
