@@ -1,7 +1,7 @@
 """Memory implementation.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 定义内存空间枚举与 Memory 对象，描述 shape/dtype/stride/format/space 元信息。
@@ -82,7 +82,7 @@ class Memory:
     """内存对象，独立描述形状与空间信息。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 记录所在空间，并保存 shape/dtype/stride/format 元信息。
@@ -205,6 +205,25 @@ class Memory:
             ")"
         )
         return f"Memory({self.space.name},{tensor_repr})"
+
+    def __str__(self) -> str:
+        """返回 Memory 的字符串表示。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 直接复用 __repr__ 的输出格式。
+
+        使用示例:
+        - str(Memory([1, 2], NumericType.Float32))
+
+        关联文件:
+        - spec: spec/symbol_variable/memory.md
+        - test: test/symbol_variable/test_memory.py
+        - 功能实现: kernel_gen/symbol_variable/memory.py
+        """
+        return self.__repr__()
  
     def _ensure_same_shape(self, other: "Memory") -> None:
         """校验 Memory 形状一致。

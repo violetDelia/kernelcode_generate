@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`小李飞刀`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)
 - `test`：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)、[`test/operation/test_memory_operation.py`](../../test/operation/test_memory_operation.py)
 - `功能实现`：[`kernel_gen/symbol_variable/memory.py`](../../kernel_gen/symbol_variable/memory.py)
@@ -335,6 +335,7 @@ cmp_mem = lhs < 0
 - 验证 `LocalSpaceMeta` 的冻结语义与字段可访问性。
 - 验证 `MemorySpace` 枚举项与空间元信息稳定。
 - 验证 `Memory` 默认空间、显式空间、显式步幅和动态形状构造行为。
+- 验证未显式提供 `stride` 时默认步幅生成（包含符号维度与字符串输入）。
 - 验证 `shape` 与 `stride` 可直接接收 `SymbolShape` 或普通可迭代输入。
 - 验证 `tensor-like` 字段直入能够通过公开构造入口完成。
 - 验证 `__repr__` 包含空间与张量元信息。
@@ -362,3 +363,6 @@ cmp_mem = lhs < 0
 | ME-014 | 运算符 | 形状不一致 | N/A | `lhs + rhs` | 抛 `ValueError` | `test_memory_shape_mismatch` |
 | ME-015 | 运算符 | dtype 不兼容 | N/A | `lhs + rhs` | 抛 `TypeError` | `test_memory_dtype_mismatch` |
 | ME-016 | 运算符 | 标量类型非法 | N/A | `mem + \"1\"` | 抛 `TypeError` | `test_memory_scalar_type_error` |
+| ME-017 | 构造 | 默认 stride 行主序 | N/A | `Memory([2, 3, 4], NumericType.Float32)` | 生成 `[12, 4, 1]` | `test_default_stride_generated_row_major` |
+| ME-018 | 构造 | 符号维度默认 stride | N/A | `Memory([SymbolDim(\"M\"), SymbolDim(\"K\"), SymbolDim(\"N\")], NumericType.Float32)` | 生成 `Shape(K*N, N, 1)` | `test_default_stride_symbolic_expression_repr` |
+| ME-019 | 构造 | 字符串形状默认 stride | N/A | `Memory([\"M\", \"K\", \"N\"], NumericType.Float32)` | 生成 `Shape(K*N, N, 1)` | `test_default_stride_symbolic_expression_from_strings` |
