@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`榕`
+- 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/dialect/symbol.md`](../../spec/dialect/symbol.md)
 - `test`：[`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)
 - `功能实现`：[`kernel_gen/dialect/symbol.py`](../../kernel_gen/dialect/symbol.py)
@@ -334,6 +334,7 @@ SymbolValueType.from_expr("N")
 - 定义 `symbol dialect` 中面向整数符号值的循环 op。
 - 用于在 IR 层显式表达“以符号整数边界驱动的半开区间循环”，其中 `start`、`end`、`step` 与迭代变量 `it` 都统一采用 `!symbol.int<"expr">` 语义。
 - 该 op 只负责循环边界与迭代变量的符号整数约束，不扩展为通用控制流方言；循环体内部承载的具体计算或访存语义仍由其他 dialect 负责。
+- `it` 的类型基线必须是 `SymbolValueType`；用户口径中的“symbol scf”迭代变量，本质上就是 `symbol.for` 暴露的 `!symbol.int<"expr">` block argument。
 
 参数说明：
 
@@ -356,6 +357,7 @@ symbol.for %i = %start to %end step %step
 
 - 语义采用半开区间：从 `start` 开始，每轮累加 `step`，当下一轮将不再满足区间进入条件时终止；不包含 `end` 本身。
 - `start`、`end`、`step`、`it` 必须全部是 `!symbol.int<"expr">`，不接受普通整数类型、浮点类型或其他 dialect 的标量类型。
+- verifier 必须逐项校验 `it` 为 `SymbolValueType`；即使 `start/end/step` 合法，只要 `it` 为 `f32`、`f64`、`index`、普通 `i32` 或其他非 `SymbolValueType`，都必须报错。
 - `it` 是循环体内部可见的迭代变量，其值语义应与当前迭代点一致；打印与解析时必须保持 `it` 的类型稳定。
 - 当前 verifier 只约束类型、region 结构、文本语法与可静态判定的错误路径；不要求在 `symbol dialect` 内完成一般符号大小关系证明。
 - 若 `step` 的表达式可静态判定为 `0`，必须报错；若 `step` 为纯符号表达且当前无法静态证明为非零，本 spec 不额外引入证明规则，由后续实现按最小可实现口径处理。
@@ -386,6 +388,7 @@ symbol.for %i = %start to %end step %step
 - 验证 `symbol.get_dim` / `symbol.get_stride` 能从 memory type 读取真实 dim/stride，并返回对应的 symbol value。
 - 验证 `symbol.get_dim` / `symbol.get_stride` 的错误路径，包括非 memory type、轴号越界、匿名动态条目 `?` 与非法轴号。
 - 验证 `symbol.for` 的半开区间循环语义、`!symbol.int<"...">` 类型约束、parse/print 稳定性与 verifier 错误路径。
+- 验证 `symbol.for` 的迭代变量 `it` 必须为 `SymbolValueType`，不能是浮点、builtin 整数或其他非 `!symbol.int<"...">` 类型。
 
 ### 功能与用例清单
 
@@ -416,9 +419,9 @@ symbol.for %i = %start to %end step %step
 | TC-SYM-023 | `symbol.get_stride` | 符号步幅读取 | `source.type.stride[axis]` 为符号表达 | 读取指定轴 stride | 返回对应符号表达 value | `test_symbol_get_stride_reads_symbolic_stride_from_memory_type` |
 | TC-SYM-024 | `symbol.get_dim/get_stride` | 轴号非法 | `axis` 越界、负数或非静态整数 | 构造并校验 op | verifier 报错 | `test_symbol_get_dim_rejects_invalid_axis`、`test_symbol_get_stride_rejects_invalid_axis` |
 | TC-SYM-025 | `symbol.get_dim/get_stride` | memory type 非法或匿名动态条目非法 | `source` 非 `NnMemoryType`，或目标条目为 `?` | 构造并校验 op | verifier 报错 | `test_symbol_get_dim_rejects_non_memory_type`、`test_symbol_get_stride_rejects_unknown_entry` |
-| TC-SYM-026 | `symbol.for` | 基础半开区间循环 | `start/end/step` 与块参数均为 `!symbol.int<"...">` | 构造 `symbol.for %i = %start to %end step %step` | verifier 通过；`it` 作为块参数暴露；循环采用半开区间语义 | `test_symbol_for_accepts_symbol_int_bounds_and_iter_arg` |
+| TC-SYM-026 | `symbol.for` | 基础半开区间循环 | `start/end/step` 与块参数 `it` 均为 `!symbol.int<"...">` | 构造 `symbol.for %i = %start to %end step %step` | verifier 通过；`it` 作为 `SymbolValueType` 块参数暴露；循环采用半开区间语义 | `test_symbol_for_accepts_symbol_int_bounds_and_iter_arg` |
 | TC-SYM-027 | `symbol.for` | parse/print 稳定 | 已实现 `symbol.for` 文本语法 | parse 后再 print | 文本与 region 结构稳定 round-trip | `test_symbol_for_round_trip` |
-| TC-SYM-028 | `symbol.for` | 非 symbol.int 类型非法 | `start/end/step` 或 `it` 含非 `!symbol.int<"...">` 类型 | 构造并校验 op | verifier 报错 | `test_symbol_for_rejects_non_symbol_int_operands` |
+| TC-SYM-028 | `symbol.for` | 非 symbol.int 类型非法 | `start/end/step` 或 `it` 含非 `!symbol.int<"...">` 类型，如 `f32`、`f64`、`index`、`i32` | 构造并校验 op | verifier 报错；`it` 不得为任何非 `SymbolValueType` | `test_symbol_for_rejects_non_symbol_int_operands` |
 | TC-SYM-029 | `symbol.for` | `step = 0` 非法 | `step` 可静态判定为 `!symbol.int<"0">` | 构造并校验 op | verifier 报错 | `test_symbol_for_rejects_zero_step` |
 | TC-SYM-030 | `symbol.for` | region 结构非法 | 缺少 region、块参数缺失或块参数类型不匹配 | 构造并校验 op | verifier 报错 | `test_symbol_for_rejects_invalid_region_shape` |
 | TC-SYM-031 | `symbol.for` | 文本语法非法 | 缺少 `to/step` 片段，或类型段数量不匹配 | parse `symbol.for` 文本 | parse 报错 | `test_symbol_for_parse_rejects_malformed_text` |

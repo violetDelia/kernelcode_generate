@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 from xdsl.context import Context
-from xdsl.dialects.builtin import ArrayAttr, Builtin, IntAttr, StringAttr, i32
+from xdsl.dialects.builtin import ArrayAttr, Builtin, IndexType, IntAttr, StringAttr, f32, f64, i32
 from xdsl.dialects.test import Test, TestOp as _TestOp
 from xdsl.ir import Block, Region
 from xdsl.parser import Parser
@@ -647,19 +647,26 @@ builtin.module {
 # TC-SYM-028
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 21:30:49 +0800
-# 最近一次运行成功时间: 2026-03-22 21:30:49 +0800
-# 测试目的: 验证 symbol.for 会拒绝非 symbol.int 的 start/end/step 或块参数类型。
+# 最近一次运行测试时间: 2026-03-23 01:25:04 +0800
+# 最近一次运行成功时间: 2026-03-23 01:25:04 +0800
+# 测试目的: 验证 symbol.for 会拒绝非 symbol.int 的 start/end/step 或块参数类型，尤其 it 不能是 f32/f64/index/i32 等非 SymbolValueType。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_for_rejects_non_symbol_int_operands() -> None:
     symbol_value = _make_symbol_value("N")
     non_symbol_value = _TestOp(result_types=[i32]).results[0]
+    non_symbol_it_values = [
+        _TestOp(result_types=[i32]).results[0],
+        _TestOp(result_types=[f32]).results[0],
+        _TestOp(result_types=[f64]).results[0],
+        _TestOp(result_types=[IndexType()]).results[0],
+    ]
 
     with pytest.raises(VerifyException, match='symbol.for start must have type !symbol.int<"expr">'):
         SymbolForOp(non_symbol_value, symbol_value, symbol_value, Block(arg_types=[SymbolValueType.from_expr("N")])).verify()
-    with pytest.raises(VerifyException, match='symbol.for iter_arg must have type !symbol.int<"expr">'):
-        SymbolForOp(symbol_value, symbol_value, symbol_value, Block(arg_types=[i32])).verify()
+    for non_symbol_it in non_symbol_it_values:
+        with pytest.raises(VerifyException, match='symbol.for it must have type !symbol.int<"expr">'):
+            SymbolForOp(symbol_value, symbol_value, symbol_value, Block(arg_types=[non_symbol_it.type])).verify()
 
 
 # TC-SYM-029

@@ -553,7 +553,7 @@ class SymbolForOp(IRDLOperation):
             raise VerifyException(f"{self.name} body must have exactly one block argument")
         iter_arg = block.args[0]
         if not _is_symbol_int_type(iter_arg.type):
-            raise VerifyException(f"{self.name} iter_arg must have type !symbol.int<\"expr\">")
+            raise VerifyException(f"{self.name} it must have type !symbol.int<\"expr\">")
 
     def print(self, printer: Printer) -> None:
         """打印 symbol.for 自定义文本语法。"""
