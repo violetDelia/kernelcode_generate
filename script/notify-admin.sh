@@ -6,16 +6,16 @@
 #
 # 功能说明:
 # - 按脚本顶部配置定时向管理员发送会话消息。
-# - 定时频率、管理员信息、日志路径和消息内容都直接维护在本文件顶部。
+# - 定时频率、管理员信息、日志路径和消息内容都可直接在本文件顶部修改。
 # - 修改本文件后，重新启动脚本即可生效。
 #
 # 使用示例:
 # - 使用当前配置运行: script/notify-admin.sh
 #
 # 对应文件:
-# - spec: spec/script/notify-admin.md
-# - test: test/script/test_notify_admin.py
-# - 功能实现: script/notify-admin.sh
+# - spec: /home/lfr/kernelcode_generate/spec/script/notify-admin.md
+# - test: /home/lfr/kernelcode_generate/test/script/test_notify_admin.py
+# - 功能实现: /home/lfr/kernelcode_generate/script/notify-admin.sh
 
 set -u
 set -o pipefail
@@ -27,26 +27,20 @@ readonly RC_DATA=3
 readonly RC_INTERNAL=5
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-TMUX_SCRIPT="$REPO_ROOT/skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh"
+TMUX_SCRIPT="$SCRIPT_DIR/../skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh"
 
 # -----------------------------
 # 可直接修改的配置区
 # -----------------------------
-# 每隔多久发送一次，单位秒。
 INTERVAL_SECONDS=1800
-
-# 会话发送信息。
 FROM_NAME="榕"
 TO_NAME="神秘人"
-AGENTS_LIST_FILE="agents/codex-multi-agents/agents-lists.md"
-
-# 支持相对路径；相对路径基于仓库根目录。
-LOG_FILE="agents/codex-multi-agents/log/talk.log"
+SESSION_ID="神秘人"
+LOG_FILE="./agents/codex-multi-agents/log/talk.log"
 
 # 多行消息直接写在 MESSAGE 变量里。
 read -r -d '' MESSAGE <<'EOF' || true
-推进任务，直到任务全部完成，要求用脚本回报信息，回报后继续任务。
+推进任务，直到任务全部完成。
 EOF
 
 err() {
@@ -61,15 +55,6 @@ usage() {
 Usage:
   notify-admin.sh
 EOF
-}
-
-log_path() {
-  local input_path="$1"
-  if [[ "$input_path" = /* ]]; then
-    printf '%s\n' "$input_path"
-    return
-  fi
-  printf '%s/%s\n' "$REPO_ROOT" "$input_path"
 }
 
 parse_args() {
@@ -92,18 +77,11 @@ validate_config() {
   [[ "$INTERVAL_SECONDS" -gt 0 ]] || err "$RC_DATA" "INTERVAL_SECONDS must be greater than 0"
   [[ -n "$FROM_NAME" ]] || err "$RC_DATA" "FROM_NAME is required"
   [[ -n "$TO_NAME" ]] || err "$RC_DATA" "TO_NAME is required"
-  [[ -n "$AGENTS_LIST_FILE" ]] || err "$RC_DATA" "AGENTS_LIST_FILE is required"
+  [[ -n "$SESSION_ID" ]] || err "$RC_DATA" "SESSION_ID is required"
   [[ -n "$LOG_FILE" ]] || err "$RC_DATA" "LOG_FILE is required"
   [[ -n "$MESSAGE" ]] || err "$RC_DATA" "MESSAGE is required"
 
   [[ -x "$TMUX_SCRIPT" ]] || err "$RC_FILE" "tmux script is not executable: $TMUX_SCRIPT"
-  [[ -f "$(log_path "$AGENTS_LIST_FILE")" ]] || err "$RC_FILE" "agents list not found: $(log_path "$AGENTS_LIST_FILE")"
-
-  mkdir -p "$(dirname "$(log_path "$LOG_FILE")")" || err "$RC_FILE" "failed to create log directory"
-}
-
-cleanup() {
-  exit "$RC_OK"
 }
 
 send_once() {
@@ -111,9 +89,9 @@ send_once() {
     -talk \
     -from "$FROM_NAME" \
     -to "$TO_NAME" \
-    -agents-list "$(log_path "$AGENTS_LIST_FILE")" \
+    -session-id "$SESSION_ID" \
     -message "$MESSAGE" \
-    -log "$(log_path "$LOG_FILE")"
+    -log "$LOG_FILE"
 }
 
 main_loop() {
@@ -126,7 +104,6 @@ main_loop() {
 
 main() {
   parse_args "$@"
-  trap cleanup INT TERM
   main_loop
 }
 

@@ -22,9 +22,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.memory import LocalSpaceMeta, Memory, MemorySpace
+from kernel_gen.symbol_variable.type import Farmat, NumericType
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
-from kernel_gen.symbol_variable.type import NumericType
 
 
 m = SymbolDim("M")
@@ -32,8 +32,8 @@ k = SymbolDim("K")
 n = SymbolDim("N")
 
 
-tensor_a = Memory([m, k, n], NumericType.Float32)
+Tenosr_A = Memory([m, k, n], NumericType.Float32)
 assert (
-    str(tensor_a)
+    Tenosr_A.__str__()
     == "Memory(GM,Tensor(shape=Shape(M, K, N), dtype=NumericType.Float32, stride=Shape(K*N, N, 1), format=Farmat.Norm))"
 )

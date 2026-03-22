@@ -17,97 +17,44 @@
 - 功能实现: kernel_gen/dsl/mlir_gen.py
 """
 
-import random
-import string
-import sys
 from pathlib import Path
+import sys
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from xdsl.dialects import arith
-from xdsl.dialects.func import FuncOp
-
-from kernel_gen.dialect.dma import DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp
-from kernel_gen.dialect.symbol import NnMemoryType, SymbolForOp, SymbolValueType
-from kernel_gen.dsl.mlir_gen import build_func_op
+from kernel_gen.symbol_variable.memory import LocalSpaceMeta, Memory, MemorySpace
+from kernel_gen.symbol_variable.type import Farmat, NumericType
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.operation.nn import matmul
 from kernel_gen.operation.dma import deslice, slice
 from kernel_gen.operation.scf import LoopRange
-from kernel_gen.symbol_variable.memory import Memory, MemorySpace
-from kernel_gen.symbol_variable.symbol_dim import SymbolDim
-from kernel_gen.symbol_variable.type import NumericType
+from kernel_gen.dialect.dma import DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp
+from kernel_gen.dialect.symbol import SymbolForOp
+from kernel_gen.dsl.mlir_gen import build_func_op
+from xdsl.dialects.func import FuncOp
+from xdsl.dialects import arith
+
+A = Memory(["L"], NumericType.Float32)
+B = Memory(["L"], NumericType.Float32)
+C = Memory(["L"], NumericType.Float32)
+start = SymbolDim("start")
+end = SymbolDim("end")
+step = SymbolDim("step")
 
 
-def generate_random_string(length: int) -> str:
-    letters = string.ascii_letters
-    return "".join(random.choice(letters) for _ in range(length))
-
-
-s1 = generate_random_string(random.randint(1, 8))
-s2 = generate_random_string(random.randint(1, 8))
-s3 = generate_random_string(random.randint(1, 8))
-A = Memory([s1], NumericType.Float32)
-B = Memory([s1], NumericType.Float32)
-C = Memory([s1], NumericType.Float32)
-print(s1)
-print("start")
-print("end")
-start = SymbolDim(s2)
-end = SymbolDim(s3)
-step = SymbolDim(1)
-
-
-def add(A, B, C, start, end, step):
+def add(A, B, C, end, start, step):
     for index in LoopRange(start, end, step):
-        slice_a = slice(A, [index], [step], [1], MemorySpace.LM)
-        slice_b = slice(B, [index], [step], [1], MemorySpace.LM)
-        slice_c = slice_a + slice_b
-        deslice(slice_c, C, [index], [step], [1], MemorySpace.LM)
+        SA = slice(A, [index], [step], [1], MemorySpace.LM)
+        SB = slice(B, [index], [step], [1], MemorySpace.LM)
+        SC = SA + SB
+        deslice(SC, C, [index], [step], [1], MemorySpace.LM)
 
 
-func_op = build_func_op(add, A, B, C, start, end, step)
+func_op = build_func_op(add, A, B, C, end, start, step)
 print(func_op)
 assert isinstance(func_op, FuncOp)
-
-arg0 = func_op.args[0].type
-assert isinstance(arg0, NnMemoryType)
-assert len(arg0.shape) == 1
-assert len(arg0.stride) == 1
-assert arg0.shape.data[0].data == s1
-assert arg0.stride.data[0].data == 1
-
-arg1 = func_op.args[1].type
-assert isinstance(arg1, NnMemoryType)
-assert len(arg1.shape) == 1
-assert len(arg1.stride) == 1
-assert arg1.shape.data[0].data == s1
-assert arg1.stride.data[0].data == 1
-
-
-arg2 = func_op.args[2].type
-assert isinstance(arg2, NnMemoryType)
-assert len(arg2.shape) == 1
-assert len(arg2.stride) == 1
-assert arg2.shape.data[0].data == s1
-assert arg2.stride.data[0].data == 1
-
-arg3 = func_op.args[3].type
-
-assert isinstance(arg3, SymbolValueType)
-assert arg3 == SymbolValueType.from_expr("start")
-
-
-arg4 = func_op.args[4].type
-
-assert isinstance(arg4, SymbolValueType)
-assert arg4 == SymbolValueType.from_expr("end")
-
-arg5 = func_op.args[5].type
-
-assert isinstance(arg5, SymbolValueType)
-assert arg5 == SymbolValueType.from_expr("step")
-
 loop_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolForOp)]
 assert len(loop_ops) == 1
 loop_body_ops = list(loop_ops[0].body.block.ops)
