@@ -45,7 +45,7 @@ from kernel_gen.symbol_variable.type import NumericType
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 alloc 返回指定 shape/dtype/space 的 Memory。
+# 测试目的: 验证 alloc 返回指定 shape/dtype/space 的 Memory。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_alloc_returns_memory
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -63,7 +63,7 @@ def test_alloc_returns_memory() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 alloc 显式 stride 被保留。
+# 测试目的: 验证 alloc 显式 stride 被保留。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_alloc_preserves_explicit_stride
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -79,7 +79,7 @@ def test_alloc_preserves_explicit_stride() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 alloc 非法 shape/stride 抛 ValueError。
+# 测试目的: 验证 alloc 非法 shape/stride 抛 ValueError。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_alloc_invalid_shape_or_stride
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -98,7 +98,7 @@ def test_alloc_invalid_shape_or_stride() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 alloc 的 dtype/space 类型错误。
+# 测试目的: 验证 alloc 的 dtype/space 类型错误。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_alloc_invalid_dtype_or_space
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -115,7 +115,7 @@ def test_alloc_invalid_dtype_or_space() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 free 接受 Memory 并返回 None。
+# 测试目的: 验证 free 接受 Memory 并返回 None。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_free_returns_none
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -131,7 +131,7 @@ def test_free_returns_none() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 free 非 Memory 输入抛 TypeError。
+# 测试目的: 验证 free 非 Memory 输入抛 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_free_type_error
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -146,7 +146,7 @@ def test_free_type_error() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 copy 在完全匹配时通过。
+# 测试目的: 验证 copy 在完全匹配时通过。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_copy_success
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -163,7 +163,7 @@ def test_copy_success() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 copy shape mismatch 抛 ValueError。
+# 测试目的: 验证 copy shape mismatch 抛 ValueError。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_copy_shape_mismatch
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -180,7 +180,7 @@ def test_copy_shape_mismatch() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 copy stride mismatch 抛 ValueError。
+# 测试目的: 验证 copy stride mismatch 抛 ValueError。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_copy_stride_mismatch
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -202,7 +202,7 @@ def test_copy_stride_mismatch() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 copy dtype mismatch 抛 TypeError。
+# 测试目的: 验证 copy dtype mismatch 抛 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_copy_dtype_mismatch
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -219,7 +219,7 @@ def test_copy_dtype_mismatch() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 load 返回结果块并切换到目标空间。
+# 测试目的: 验证 load 返回结果块并切换到目标空间。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_load_result_space
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -239,7 +239,7 @@ def test_load_result_space() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 load 的 space 类型错误触发 TypeError。
+# 测试目的: 验证 load 的 space 类型错误触发 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_load_invalid_space_type
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -255,7 +255,7 @@ def test_load_invalid_space_type() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 slice 返回块的 shape 等于 sizes。
+# 测试目的: 验证 slice 返回块的 shape 等于 sizes。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_slice_result_shape
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -273,7 +273,7 @@ def test_slice_result_shape() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 store 的 source.shape 与 sizes 不一致时报错。
+# 测试目的: 验证 store 的 source.shape 与 sizes 不一致时报错。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_store_size_mismatch
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -290,7 +290,7 @@ def test_store_size_mismatch() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 store dtype mismatch 触发 TypeError。
+# 测试目的: 验证 store dtype mismatch 触发 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_store_dtype_mismatch
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -307,7 +307,7 @@ def test_store_dtype_mismatch() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 store 在匹配时返回 None。
+# 测试目的: 验证 store 在匹配时返回 None。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_store_success
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -324,7 +324,7 @@ def test_store_success() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 deslice 的 source.shape 与 sizes 不一致时报错。
+# 测试目的: 验证 deslice 的 source.shape 与 sizes 不一致时报错。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_deslice_size_mismatch
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -341,7 +341,7 @@ def test_deslice_size_mismatch() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 offsets/sizes/strides 长度与 rank 不一致时报错。
+# 测试目的: 验证 offsets/sizes/strides 长度与 rank 不一致时报错。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_dma_index_rank_mismatch
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -359,7 +359,7 @@ def test_dma_index_rank_mismatch() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 sizes 中非正长度触发 ValueError。
+# 测试目的: 验证 sizes 中非正长度触发 ValueError。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_dma_invalid_sizes
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -375,7 +375,7 @@ def test_dma_invalid_sizes() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证非 1 stride 明确报错。
+# 测试目的: 验证非 1 stride 明确报错。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_dma_non_unit_stride_rejected
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -391,7 +391,7 @@ def test_dma_non_unit_stride_rejected() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证非 Memory 输入触发 TypeError。
+# 测试目的: 验证非 Memory 输入触发 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_dma_type_error
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -407,7 +407,7 @@ def test_dma_type_error() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 cast 返回相同 shape/stride/space 的新 Memory 且 dtype 发生变化。
+# 测试目的: 验证 cast 返回相同 shape/stride/space 的新 Memory 且 dtype 发生变化。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_cast_changes_dtype
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -427,7 +427,7 @@ def test_cast_changes_dtype() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 cast 非法 dtype 触发 TypeError。
+# 测试目的: 验证 cast 非法 dtype 触发 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_cast_invalid_dtype
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -443,7 +443,7 @@ def test_cast_invalid_dtype() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 cast 不支持的转换路径显式报错。
+# 测试目的: 验证 cast 不支持的转换路径显式报错。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_cast_unsupported_conversion
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -459,7 +459,7 @@ def test_cast_unsupported_conversion() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 cast 支持同 dtype 与整数类型之间的转换。
+# 测试目的: 验证 cast 支持同 dtype 与整数类型之间的转换。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_cast_supported_conversions
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -480,7 +480,7 @@ def test_cast_supported_conversions() -> None:
 # 最后一次更改: ChatGPT
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 view 返回新 Memory 并继承 dtype/space/format。
+# 测试目的: 验证 view 返回新 Memory 并继承 dtype/space/format。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_view_returns_memory
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -502,7 +502,7 @@ def test_view_returns_memory() -> None:
 # 最后一次更改: ChatGPT
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 view 在连续布局下按默认规则生成行主序 stride。
+# 测试目的: 验证 view 在连续布局下按默认规则生成行主序 stride。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_view_default_stride_contiguous
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -520,7 +520,7 @@ def test_view_default_stride_contiguous() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 view 非法 shape/stride 或显式省略 stride 且源非连续时报错。
+# 测试目的: 验证 view 非法 shape/stride 或显式省略 stride 且源非连续时报错。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_view_invalid_shape_or_stride
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -546,7 +546,7 @@ def test_view_invalid_shape_or_stride() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 reshape 返回新 Memory 且继承 dtype/space/format。
+# 测试目的: 验证 reshape 返回新 Memory 且继承 dtype/space/format。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_reshape_returns_memory
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -566,7 +566,7 @@ def test_reshape_returns_memory() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 reshape 在连续布局下生成默认 stride。
+# 测试目的: 验证 reshape 在连续布局下生成默认 stride。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_reshape_default_stride_contiguous
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -583,7 +583,7 @@ def test_reshape_default_stride_contiguous() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 reshape 非法 shape 或非连续布局触发错误。
+# 测试目的: 验证 reshape 非法 shape 或非连续布局触发错误。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_reshape_invalid_shape_or_stride
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -602,7 +602,7 @@ def test_reshape_invalid_shape_or_stride() -> None:
 # 最后一次更改: ChatGPT
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 flatten 在连续布局下返回一维 shape 与 stride=[1]。
+# 测试目的: 验证 flatten 在连续布局下返回一维 shape 与 stride=[1]。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_flatten_contiguous
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -623,7 +623,7 @@ def test_flatten_contiguous() -> None:
 # 最后一次更改: ChatGPT
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 功能说明: 验证 flatten 对非连续布局显式报错。
+# 测试目的: 验证 flatten 对非连续布局显式报错。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_flatten_non_contiguous_rejected
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
