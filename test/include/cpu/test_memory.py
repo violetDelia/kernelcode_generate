@@ -1,17 +1,25 @@
 """CPU Memory compile tests.
 
 创建者: 神秘人
-最后一次更改: 神秘人
+最后一次更改: 我不是牛马
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 include/cpu/Memory.h 的公开接口与核心语义。
+
+覆盖率信息:
+- 当前覆盖率: `N/A`。该链路的功能实现为 C++ 头文件，当前任务不使用 `pytest-cov` 直接统计覆盖率。
+- 达标判定: C++ 实现按规则豁免 `95%` 覆盖率达标线。
+- 当前以 `CPU-MEM-001..005` 对应测试作为覆盖基线。
+
+覆盖率命令:
+- N/A（C++ 头文件实现，当前任务不使用 `pytest-cov` 统计覆盖率）
 
 使用示例:
 - pytest -q test/include/cpu/test_memory.py
 
 关联文件:
 - 功能实现: include/cpu/Memory.h
-- Spec 文档: spec/include/cpu/Memory.md
+- Spec 文档: spec/include/cpu/cpu.md
 - 测试文件: test/include/cpu/test_memory.py
 """
 
@@ -39,7 +47,7 @@ def _compile_and_run(source: str) -> None:
     - _compile_and_run("int main() { return 0; }")
 
     关联文件:
-    - spec: spec/include/cpu/Memory.md
+    - spec: spec/include/cpu/cpu.md
     - test: test/include/cpu/test_memory.py
     - 功能实现: test/include/cpu/test_memory.py
     """
@@ -85,13 +93,13 @@ def _compile_and_run(source: str) -> None:
 
 # CPU-MEM-001 / CPU-MEM-002 / CPU-MEM-003 / CPU-MEM-004 / CPU-MEM-005
 # 创建者: 神秘人
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-19 00:00:00 +0800
-# 最近一次运行成功时间: 2026-03-19 00:00:00 +0800
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 12:40:20 +0800
+# 最近一次运行成功时间: 2026-03-22 12:40:20 +0800
 # 功能说明: 验证显式 stride、自动连续 stride、element_count、linear_offset、at 与 is_contiguous 语义。
 # 使用示例: pytest -q test/include/cpu/test_memory.py -k test_cpu_memory_header_compiles_and_runs
 # 对应功能实现文件路径: include/cpu/Memory.h
-# 对应 spec 文件路径: spec/include/cpu/Memory.md
+# 对应 spec 文件路径: spec/include/cpu/cpu.md
 # 对应测试文件路径: test/include/cpu/test_memory.py
 def test_cpu_memory_header_compiles_and_runs() -> None:
     source = r"""
@@ -173,13 +181,13 @@ int main() {
 
 # CPU-MEM-005
 # 创建者: 神秘人
-# 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-19 00:00:00 +0800
-# 最近一次运行成功时间: 2026-03-19 00:00:00 +0800
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 12:40:20 +0800
+# 最近一次运行成功时间: 2026-03-22 12:40:20 +0800
 # 功能说明: 验证头文件自身不依赖标准库头文件即可被最小程序编译。
 # 使用示例: pytest -q test/include/cpu/test_memory.py -k test_cpu_memory_header_without_std_headers
 # 对应功能实现文件路径: include/cpu/Memory.h
-# 对应 spec 文件路径: spec/include/cpu/Memory.md
+# 对应 spec 文件路径: spec/include/cpu/cpu.md
 # 对应测试文件路径: test/include/cpu/test_memory.py
 def test_cpu_memory_header_without_std_headers() -> None:
     source = r"""
