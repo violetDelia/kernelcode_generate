@@ -1,7 +1,7 @@
 """codex-multi-agents-tmux.sh tests.
 
 创建者: 榕
-最后一次更改: 朽木露琪亚
+最后一次更改: 神秘人
 
 功能说明:
 - 覆盖 tmux 脚本的 talk / init-env / wake 主流程与错误返回码路径。
@@ -139,13 +139,20 @@ def run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.Comp
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-22 13:11:42 +0800
 # 最近一次运行成功时间: 2026-03-22 13:11:42 +0800
-# 测试目的: 验证 `-talk` 能发送格式化消息并向日志追加一行记录。
+# 测试目的: 验证 `-talk` 能通过 agents list 解析目标会话并发送格式化消息，同时向日志追加一行记录。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
 def test_talk_send_and_append_log_success(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     state_dir = tmp_path / "state"
     calls_file = write_fake_tmux(bin_dir, state_dir, sessions=["worker-a"])
+    agents_file = tmp_path / "agents-lists.md"
+    write_agents_file(
+        agents_file,
+        rows=[
+            "| worker-a | free | worker-a | codex | agent-worker-a | worktrees/worker-a | intro | prompt.md | archive/ | duty |",
+        ],
+    )
     log_file = tmp_path / "talk.log"
 
     env = os.environ.copy()
@@ -158,8 +165,8 @@ def test_talk_send_and_append_log_success(tmp_path: Path) -> None:
         "scheduler",
         "-to",
         "worker-a",
-        "-session-id",
-        "worker-a",
+        "-agents-list",
+        str(agents_file),
         "-message",
         "请处理任务 T1",
         "-log",
@@ -181,13 +188,20 @@ def test_talk_send_and_append_log_success(tmp_path: Path) -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-22 13:11:42 +0800
 # 最近一次运行成功时间: 2026-03-22 13:11:42 +0800
-# 测试目的: 验证 `-talk` 在目标会话不存在时返回 `RC=3`。
+# 测试目的: 验证 `-talk` 在 agents list 解析出的目标会话不存在时返回 `RC=3`。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
 def test_talk_target_session_not_found_returns_rc3(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     state_dir = tmp_path / "state"
     write_fake_tmux(bin_dir, state_dir, sessions=["worker-a"])
+    agents_file = tmp_path / "agents-lists.md"
+    write_agents_file(
+        agents_file,
+        rows=[
+            "| worker-a | free | missing | codex | agent-worker-a | worktrees/worker-a | intro | prompt.md | archive/ | duty |",
+        ],
+    )
     log_file = tmp_path / "talk.log"
 
     env = os.environ.copy()
@@ -200,8 +214,8 @@ def test_talk_target_session_not_found_returns_rc3(tmp_path: Path) -> None:
         "scheduler",
         "-to",
         "worker-a",
-        "-session-id",
-        "missing",
+        "-agents-list",
+        str(agents_file),
         "-message",
         "hello",
         "-log",
@@ -225,6 +239,13 @@ def test_talk_missing_message_returns_rc1(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     state_dir = tmp_path / "state"
     write_fake_tmux(bin_dir, state_dir, sessions=["worker-a"])
+    agents_file = tmp_path / "agents-lists.md"
+    write_agents_file(
+        agents_file,
+        rows=[
+            "| worker-a | free | worker-a | codex | agent-worker-a | worktrees/worker-a | intro | prompt.md | archive/ | duty |",
+        ],
+    )
     log_file = tmp_path / "talk.log"
 
     env = os.environ.copy()
@@ -237,8 +258,8 @@ def test_talk_missing_message_returns_rc1(tmp_path: Path) -> None:
         "scheduler",
         "-to",
         "worker-a",
-        "-session-id",
-        "worker-a",
+        "-agents-list",
+        str(agents_file),
         "-log",
         str(log_file),
         env=env,
@@ -259,6 +280,13 @@ def test_talk_missing_message_returns_rc1(tmp_path: Path) -> None:
 def test_tmux_not_found_returns_rc2(tmp_path: Path) -> None:
     empty_bin = tmp_path / "empty_bin"
     empty_bin.mkdir(parents=True, exist_ok=True)
+    agents_file = tmp_path / "agents-lists.md"
+    write_agents_file(
+        agents_file,
+        rows=[
+            "| worker-a | free | worker-a | codex | agent-worker-a | worktrees/worker-a | intro | prompt.md | archive/ | duty |",
+        ],
+    )
 
     env = os.environ.copy()
     env["PATH"] = str(empty_bin)
@@ -269,8 +297,8 @@ def test_tmux_not_found_returns_rc2(tmp_path: Path) -> None:
         "scheduler",
         "-to",
         "worker-a",
-        "-session-id",
-        "worker-a",
+        "-agents-list",
+        str(agents_file),
         "-message",
         "hello",
         "-log",
@@ -294,6 +322,13 @@ def test_talk_lock_conflict_returns_rc4(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     state_dir = tmp_path / "state"
     write_fake_tmux(bin_dir, state_dir, sessions=["worker-a"])
+    agents_file = tmp_path / "agents-lists.md"
+    write_agents_file(
+        agents_file,
+        rows=[
+            "| worker-a | free | worker-a | codex | agent-worker-a | worktrees/worker-a | intro | prompt.md | archive/ | duty |",
+        ],
+    )
     log_file = tmp_path / "talk.log"
     lock_path = Path(f"{log_file}.lock")
     lock_path.touch()
@@ -310,8 +345,8 @@ def test_talk_lock_conflict_returns_rc4(tmp_path: Path) -> None:
             "scheduler",
             "-to",
             "worker-a",
-            "-session-id",
-            "worker-a",
+            "-agents-list",
+            str(agents_file),
             "-message",
             "hello",
             "-log",
@@ -455,4 +490,48 @@ def test_wake_does_not_accept_talk_arguments(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 1
-    assert "-wake does not accept -from/-to/-session-id/-message/-log" in result.stderr
+    assert "-wake does not accept -from/-to/-message/-log" in result.stderr
+
+
+# TC-010
+# 创建者: 榕
+# 最后一次更改: 神秘人
+# 最近一次运行测试时间: 2026-03-22 18:25:00 +0800
+# 最近一次运行成功时间: 2026-03-22 18:25:00 +0800
+# 测试目的: 验证 `-talk` 在 agents list 不存在目标角色时返回 `RC=3`。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
+def test_talk_missing_target_agent_in_agents_list_returns_rc3(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    state_dir = tmp_path / "state"
+    write_fake_tmux(bin_dir, state_dir, sessions=["worker-a"])
+    agents_file = tmp_path / "agents-lists.md"
+    write_agents_file(
+        agents_file,
+        rows=[
+            "| other-worker | free | worker-a | codex | agent-other-worker | worktrees/other-worker | intro | prompt.md | archive/ | duty |",
+        ],
+    )
+    log_file = tmp_path / "talk.log"
+
+    env = os.environ.copy()
+    env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+
+    result = run_script(
+        "-talk",
+        "-from",
+        "scheduler",
+        "-to",
+        "worker-a",
+        "-agents-list",
+        str(agents_file),
+        "-message",
+        "hello",
+        "-log",
+        str(log_file),
+        env=env,
+    )
+
+    assert result.returncode == 3
+    assert "failed to read field '会话' for agent: worker-a" in result.stderr

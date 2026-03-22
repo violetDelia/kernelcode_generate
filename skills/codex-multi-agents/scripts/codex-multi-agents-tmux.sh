@@ -25,14 +25,12 @@ FILE=""
 OP_TALK=0
 OP_INIT_ENV=0
 OP_WAKE=0
-SESSION_ID=""
 FROM=""
 TO=""
 MESSAGE=""
 LOG_FILE=""
 AGENTS_FILE=""
 AGENT_NAME=""
-HAS_SESSION_ID=0
 HAS_FROM=0
 HAS_TO=0
 HAS_MESSAGE=0
@@ -57,12 +55,12 @@ err() {
 usage() {
   cat <<'EOF'
 Usage:
-  codex-multi-agents-tmux.sh -talk -from <sender> -to <target_name> -session-id <target_session_id> -message <message> -log <log_path>
+  codex-multi-agents-tmux.sh -talk -from <sender> -to <target_name> -agents-list <agents_list_path> -message <message> -log <log_path>
   codex-multi-agents-tmux.sh -init-env -file <agents_list_path> -name <agent_name>
   codex-multi-agents-tmux.sh -wake -file <agents_list_path> -name <agent_name>
 
 Examples:
-  codex-multi-agents-tmux.sh -talk -from scheduler -to worker-a -session-id worker-a -message "请处理任务 T1" -log ./agents/codex-multi-agents/log/talk.log
+  codex-multi-agents-tmux.sh -talk -from scheduler -to worker-a -agents-list ./agents/codex-multi-agents/agents-lists.md -message "请处理任务 T1" -log ./agents/codex-multi-agents/log/talk.log
   codex-multi-agents-tmux.sh -init-env -file ./agents/codex-multi-agents/agents-lists.md -name 小明
   codex-multi-agents-tmux.sh -wake -file ./agents/codex-multi-agents/agents-lists.md -name 小明
 
@@ -100,17 +98,6 @@ parse_args() {
         FROM="${1#*=}"
         HAS_FROM=1
         shift
-        ;;
-      -session-id=*)
-        SESSION_ID="${1#*=}"
-        HAS_SESSION_ID=1
-        shift
-        ;;
-      -session-id)
-        [[ $# -ge 2 ]] || err "$RC_ARG" "missing value for -session-id"
-        SESSION_ID="$2"
-        HAS_SESSION_ID=1
-        shift 2
         ;;
       -from)
         [[ $# -ge 2 ]] || err "$RC_ARG" "missing value for -from"
@@ -162,6 +149,17 @@ parse_args() {
         HAS_FILE=1
         shift 2
         ;;
+      -agents-list=*)
+        AGENTS_FILE="${1#*=}"
+        HAS_FILE=1
+        shift
+        ;;
+      -agents-list)
+        [[ $# -ge 2 ]] || err "$RC_ARG" "missing value for -agents-list"
+        AGENTS_FILE="$2"
+        HAS_FILE=1
+        shift 2
+        ;;
       -name=*)
         AGENT_NAME="${1#*=}"
         HAS_NAME=1
@@ -189,15 +187,15 @@ parse_args() {
   if [[ "$OP_TALK" -eq 1 ]]; then
     [[ "$HAS_FROM" -eq 1 ]] || err "$RC_ARG" "-talk requires -from"
     [[ "$HAS_TO" -eq 1 ]] || err "$RC_ARG" "-talk requires -to"
-    [[ "$HAS_SESSION_ID" -eq 1 ]] || err "$RC_ARG" "-talk requires -session-id"
+    [[ "$HAS_FILE" -eq 1 ]] || err "$RC_ARG" "-talk requires -agents-list"
     [[ "$HAS_MESSAGE" -eq 1 ]] || err "$RC_ARG" "-talk requires -message"
     [[ "$HAS_LOG" -eq 1 ]] || err "$RC_ARG" "-talk requires -log"
     [[ -n "$(trim "$FROM")" ]] || err "$RC_ARG" "empty value for -from"
     [[ -n "$(trim "$TO")" ]] || err "$RC_ARG" "empty value for -to"
-    [[ -n "$(trim "$SESSION_ID")" ]] || err "$RC_ARG" "empty value for -session-id"
+    [[ -n "$(trim "$AGENTS_FILE")" ]] || err "$RC_ARG" "empty value for -agents-list"
     [[ -n "$(trim "$MESSAGE")" ]] || err "$RC_ARG" "empty value for -message"
     [[ -n "$(trim "$LOG_FILE")" ]] || err "$RC_ARG" "empty value for -log"
-    [[ "$HAS_FILE" -eq 0 && "$HAS_NAME" -eq 0 ]] || err "$RC_ARG" "-talk does not accept -file/-name"
+    [[ "$HAS_NAME" -eq 0 ]] || err "$RC_ARG" "-talk does not accept -name"
   fi
 
   if [[ "$OP_INIT_ENV" -eq 1 ]]; then
@@ -205,7 +203,7 @@ parse_args() {
     [[ "$HAS_NAME" -eq 1 ]] || err "$RC_ARG" "-init-env requires -name"
     [[ -n "$(trim "$AGENTS_FILE")" ]] || err "$RC_ARG" "empty value for -file"
     [[ -n "$(trim "$AGENT_NAME")" ]] || err "$RC_ARG" "empty value for -name"
-    [[ "$HAS_FROM" -eq 0 && "$HAS_TO" -eq 0 && "$HAS_SESSION_ID" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_LOG" -eq 0 ]] || err "$RC_ARG" "-init-env does not accept -from/-to/-session-id/-message/-log"
+    [[ "$HAS_FROM" -eq 0 && "$HAS_TO" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_LOG" -eq 0 ]] || err "$RC_ARG" "-init-env does not accept -from/-to/-message/-log"
   fi
 
   if [[ "$OP_WAKE" -eq 1 ]]; then
@@ -213,7 +211,7 @@ parse_args() {
     [[ "$HAS_NAME" -eq 1 ]] || err "$RC_ARG" "-wake requires -name"
     [[ -n "$(trim "$AGENTS_FILE")" ]] || err "$RC_ARG" "empty value for -file"
     [[ -n "$(trim "$AGENT_NAME")" ]] || err "$RC_ARG" "empty value for -name"
-    [[ "$HAS_FROM" -eq 0 && "$HAS_TO" -eq 0 && "$HAS_SESSION_ID" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_LOG" -eq 0 ]] || err "$RC_ARG" "-wake does not accept -from/-to/-session-id/-message/-log"
+    [[ "$HAS_FROM" -eq 0 && "$HAS_TO" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_LOG" -eq 0 ]] || err "$RC_ARG" "-wake does not accept -from/-to/-message/-log"
   fi
 }
 
@@ -247,13 +245,18 @@ append_log_line() {
 }
 
 do_talk() {
-  tmux_has_session "$SESSION_ID" || err "$RC_DATA" "target session not found: $SESSION_ID"
+  ensure_agent_file_readable
+  AGENT_NAME="$TO"
+  local session_id=""
+  session_id="$(find_agent_field "会话")"
+  [[ -n "$(trim "$session_id")" ]] || err "$RC_DATA" "empty session for agent: $TO"
+  tmux_has_session "$session_id" || err "$RC_DATA" "target session not found: $session_id"
 
   local line
   line="$(format_talk_message)"
-  send_tmux_command_once "$SESSION_ID" "$line"
+  send_tmux_command_once "$session_id" "$line"
   append_log_line "$line"
-  printf "OK: talk %s -> %s (%s)\n" "$FROM" "$TO" "$SESSION_ID"
+  printf "OK: talk %s -> %s (%s)\n" "$FROM" "$TO" "$session_id"
 }
 
 send_tmux_command_once() {

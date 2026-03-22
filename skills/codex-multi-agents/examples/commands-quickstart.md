@@ -62,10 +62,15 @@ bash ./scripts/codex-multi-agents-list.sh \
 ### 发送对话并写日志
 ```bash
 bash ./scripts/codex-multi-agents-tmux.sh \
-  -talk -from scheduler -to worker-a -session-id worker-a \
+  -talk -from scheduler -to worker-a \
+  -agents-list agents/codex-multi-agents/agents-lists.md \
   -message "请处理任务 T1" \
   -log agents/codex-multi-agents/log/talk.log
 ```
+
+说明：
+- `-talk` 不再接受手工传入 `-session-id`。
+- 目标 tmux 会话会按 `agents-lists.md` 中目标角色的 `会话` 字段自动解析。
 
 ### 按名单初始化角色环境
 ```bash
@@ -75,7 +80,7 @@ bash ./scripts/codex-multi-agents-tmux.sh \
 
 参数速记：
 - `-s` 会话名（仅 `-attach`）
-- `-from/-to/-session-id/-message/-log` 对话参数（仅 `-talk`）
+- `-from/-to/-agents-list/-message/-log` 对话参数（仅 `-talk`）
 - `-file/-name` 名单参数（仅 `-init-env`）
 
 ## 3. 任务调度（codex-multi-agents-task.sh）
@@ -148,4 +153,3 @@ bash ./scripts/codex-multi-agents-task.sh \
 ## 4. 任务流转速记
 - 实现任务默认包含测试验证。
 - 审查不通过则回到实现任务（含测试）再次迭代，直到审查通过。
-
