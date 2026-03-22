@@ -9,4 +9,5 @@ log.txt
 .coverage
 command.txt
 .vscode
+*.lock
 
