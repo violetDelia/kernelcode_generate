@@ -978,11 +978,11 @@ def test_store_ast_lowering_raises_lowering_error() -> None:
         build_func_op_from_ast(func_ast)
 
 
-# EMIT-010
+# EMIT-014
 # 创建者: 摸鱼小分队
 # 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 15:38:56 +0800
-# 最近一次运行成功时间: 2026-03-22 15:38:56 +0800
+# 最近一次运行测试时间: 2026-03-23 02:43:15 +0800
+# 最近一次运行成功时间: 2026-03-23 02:43:15 +0800
 # 功能说明: 验证 ForAST lowering 会保留循环结构并在循环体内生成 dma.load。
 # 测试目的: 验证 ForAST lowering 会保留循环结构并在循环体内生成 dma.load。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_for_ast_lowering_emits_loads
@@ -1013,6 +1013,52 @@ def test_for_ast_lowering_emits_loads() -> None:
     offsets = list(ops[0].offsets)
     assert len(offsets) == 2
     assert _unwrap_index_cast(offsets[0]) is loop_ops[0].body.block.args[0]
+
+
+# EMIT-010
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-23 02:43:15 +0800
+# 最近一次运行成功时间: 2026-03-23 02:43:15 +0800
+# 功能说明: 验证符号边界 ForAST lowering 为 symbol.for 并直接复用 symbol.int 作为 DMA operand。
+# 测试目的: 验证符号边界 ForAST lowering 为 symbol.for 并直接复用 symbol.int 作为 DMA operand。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_symbolic_for_loop_avoids_index_cast
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_symbolic_for_loop_avoids_index_cast() -> None:
+    memory = Memory([2, 2], NumericType.Float32)
+    tensor = TensorAST(name="x", memory=memory, location=None)
+    start = ScalarArgAST(name="start", value_type=int, is_symbolic=True, location=None)
+    end = ScalarArgAST(name="end", value_type=int, is_symbolic=True, location=None)
+    step = ScalarArgAST(name="step", value_type=int, is_symbolic=True, location=None)
+    loop_var = VarAST(name="i", location=None)
+    body = BlockAST(
+        [
+            LoadAST(
+                tensor=tensor,
+                offset=[loop_var, ConstAST(0)],
+                stride=None,
+                location=None,
+            )
+        ]
+    )
+    loop = ForAST(var=loop_var, start=start, end=end, step=step, body=body, location=None)
+    func_ast = FunctionAST(
+        name="symbol_loop",
+        inputs=[tensor, start, end, step],
+        outputs=[],
+        body=BlockAST([loop, tensor]),
+    )
+    func_op = build_func_op_from_ast(func_ast)
+    loop_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolForOp)]
+    assert len(loop_ops) == 1
+    loop_body_ops = list(loop_ops[0].body.block.ops)
+    assert not any(isinstance(op, arith.IndexCastOp) for op in loop_body_ops)
+    load_ops = [op for op in loop_body_ops if isinstance(op, DmaLoadOp)]
+    assert len(load_ops) == 1
+    offsets = list(load_ops[0].offsets)
+    assert offsets[0] is loop_ops[0].body.block.args[0]
 
 
 # AST-009
