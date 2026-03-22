@@ -5,10 +5,10 @@
 
 功能说明:
 - 定义仅表示整数符号值语义的 symbol dialect。
-- 提供 `SymbolExprAttr`、`SymbolValueType` 与 `symbol.get_dim/get_stride` 查询 op，不区分 `int8/int64` 等整型宽度。
+- 提供 `SymbolExprAttr`、`SymbolValueType`、`symbol.add/sub/mul` 与 `symbol.get_dim/get_stride` 查询 op，不区分 `int8/int64` 等整型宽度。
 
 使用示例:
-- from kernel_gen.dialect.symbol import Symbol, SymbolExprAttr, SymbolGetDimOp, SymbolGetStrideOp, SymbolValueType
+- from kernel_gen.dialect.symbol import Symbol, SymbolAddOp, SymbolSubOp, SymbolMulOp, SymbolExprAttr, SymbolGetDimOp, SymbolGetStrideOp, SymbolValueType
 
 关联文件:
 - spec: spec/dialect/symbol.md
@@ -282,6 +282,117 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
         return cls(SymbolExprAttr.from_expr(expr))
 
 
+class _BaseSymbolBinaryArithOp(IRDLOperation):
+    """symbol 二元整数算术 op 基类。"""
+
+    lhs = operand_def(Attribute)
+    rhs = operand_def(Attribute)
+    result = result_def(Attribute)
+
+    def __init__(
+        self,
+        lhs: SSAValue | Operation,
+        rhs: SSAValue | Operation,
+        result_type: Attribute,
+    ) -> None:
+        """初始化 symbol 二元整数算术 op。
+
+        创建者: 我不是牛马
+        最后一次更改: 我不是牛马
+
+        功能说明:
+        - 设置两个 `!symbol.int<"expr">` 操作数与单个 `!symbol.int<"expr">` 结果类型。
+
+        使用示例:
+        - SymbolAddOp(lhs, rhs, SymbolValueType.from_expr("M + 1"))
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        super().__init__(operands=[lhs, rhs], result_types=[result_type])
+
+    def verify_(self) -> None:
+        """校验 symbol 二元整数算术 op 的类型约束。
+
+        创建者: 我不是牛马
+        最后一次更改: 我不是牛马
+
+        功能说明:
+        - 校验 `lhs`、`rhs` 与 `result` 均为 `!symbol.int<"expr">`。
+
+        使用示例:
+        - SymbolMulOp(lhs, rhs, SymbolValueType.from_expr("M*N")).verify_()
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        for field_name in ("lhs", "rhs"):
+            operand = SSAValue.get(getattr(self, field_name))
+            if not _is_symbol_int_type(operand.type):
+                raise VerifyException(f"{self.name} {field_name} must have type !symbol.int<\"expr\">")
+        if not _is_symbol_int_type(self.result.type):
+            raise VerifyException(f"{self.name} result type must be !symbol.int<\"expr\">")
+
+    def print(self, printer: Printer) -> None:
+        """打印 symbol 二元整数算术 op 自定义文本语法。"""
+
+        printer.print_string(" ")
+        printer.print_ssa_value(self.lhs)
+        printer.print_string(", ")
+        printer.print_ssa_value(self.rhs)
+        printer.print_string(" : ")
+        printer.print_attribute(SSAValue.get(self.lhs).type)
+        printer.print_string(", ")
+        printer.print_attribute(SSAValue.get(self.rhs).type)
+        printer.print_string(" -> ")
+        printer.print_attribute(self.result.type)
+
+    @classmethod
+    def parse(cls, parser: AttrParser):
+        """解析 symbol 二元整数算术 op 自定义文本语法。"""
+
+        unresolved_lhs = parser.parse_unresolved_operand()
+        parser.parse_characters(",", f" in {cls.name}")
+        unresolved_rhs = parser.parse_unresolved_operand()
+        parser.parse_characters(":", f" in {cls.name}")
+        lhs_type = parser.parse_type()
+        parser.parse_characters(",", f" in {cls.name} type list")
+        rhs_type = parser.parse_type()
+        parser.parse_characters("->", f" in {cls.name}")
+        result_type = parser.parse_type()
+
+        lhs = parser.resolve_operand(unresolved_lhs, lhs_type)
+        rhs = parser.resolve_operand(unresolved_rhs, rhs_type)
+        return cls(lhs, rhs, result_type)
+
+
+@irdl_op_definition
+class SymbolAddOp(_BaseSymbolBinaryArithOp):
+    """两个 symbol.int 值的整数加法。"""
+
+    name = "symbol.add"
+
+
+@irdl_op_definition
+class SymbolSubOp(_BaseSymbolBinaryArithOp):
+    """两个 symbol.int 值的整数减法。"""
+
+    name = "symbol.sub"
+
+
+@irdl_op_definition
+class SymbolMulOp(_BaseSymbolBinaryArithOp):
+    """两个 symbol.int 值的整数乘法。"""
+
+    name = "symbol.mul"
+
+
 class _BaseSymbolMemoryQueryOp(IRDLOperation):
     """memory 元信息查询 op 基类。"""
 
@@ -507,6 +618,9 @@ class SymbolForOp(IRDLOperation):
 Symbol = Dialect(
     "symbol",
     [
+        SymbolAddOp,
+        SymbolSubOp,
+        SymbolMulOp,
         SymbolGetDimOp,
         SymbolGetStrideOp,
         SymbolForOp,
@@ -519,9 +633,12 @@ Symbol = Dialect(
 
 __all__ = [
     "Symbol",
+    "SymbolAddOp",
     "SymbolExprAttr",
     "SymbolGetDimOp",
+    "SymbolMulOp",
     "SymbolForOp",
     "SymbolGetStrideOp",
+    "SymbolSubOp",
     "SymbolValueType",
 ]

@@ -11,7 +11,7 @@
 
 覆盖率:
 - 覆盖率命令: pytest -q --cov=kernel_gen.dialect.symbol --cov-report=term-missing test/dialect/test_symbol_dialect.py
-- 覆盖率结果: 95%（2026-03-22 21:30:49 +0800）
+- 覆盖率结果: 96%（2026-03-22 22:26:51 +0800）
 
 关联文件:
 - 功能实现: kernel_gen/dialect/symbol.py
@@ -41,10 +41,13 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.dialect.nn import Nn, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import (
     Symbol,
+    SymbolAddOp,
     SymbolExprAttr,
     SymbolGetDimOp,
     SymbolGetStrideOp,
     SymbolForOp,
+    SymbolMulOp,
+    SymbolSubOp,
     SymbolValueType,
 )
 from kernel_gen.symbol_variable.memory import Memory
@@ -303,6 +306,142 @@ def test_symbol_verifier_rejects_illegal_expression_characters() -> None:
 # TC-SYM-015
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 22:26:51 +0800
+# 最近一次运行成功时间: 2026-03-22 22:26:51 +0800
+# 测试目的: 验证 symbol.add/sub/mul 在 symbol.int 输入与输出下可通过 verifier。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_arith_ops_verify_success() -> None:
+    add_op = SymbolAddOp(_make_symbol_value("M"), _make_symbol_value("1"), SymbolValueType.from_expr("M + 1"))
+    sub_op = SymbolSubOp(_make_symbol_value("N"), _make_symbol_value("1"), SymbolValueType.from_expr("N - 1"))
+    mul_op = SymbolMulOp(_make_symbol_value("M"), _make_symbol_value("N"), SymbolValueType.from_expr("M*N"))
+
+    add_op.verify()
+    sub_op.verify()
+    mul_op.verify()
+
+    assert _print_attr(add_op.result.type) == '!symbol.int<"M + 1">'
+    assert _print_attr(sub_op.result.type) == '!symbol.int<"N - 1">'
+    assert _print_attr(mul_op.result.type) == '!symbol.int<"M*N">'
+
+
+# TC-SYM-016
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 22:26:51 +0800
+# 最近一次运行成功时间: 2026-03-22 22:26:51 +0800
+# 测试目的: 验证 symbol.add/sub/mul 的 parse/print round-trip 稳定。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_arith_ops_round_trip() -> None:
+    ctx = _build_context()
+    module = Parser(
+        ctx,
+        """
+builtin.module {
+  %m = "test.op"() : () -> !symbol.int<"M">
+  %n = "test.op"() : () -> !symbol.int<"N">
+  %one = "test.op"() : () -> !symbol.int<"1">
+  %sum = symbol.add %m, %one : !symbol.int<"M">, !symbol.int<"1"> -> !symbol.int<"M + 1">
+  %diff = symbol.sub %n, %one : !symbol.int<"N">, !symbol.int<"1"> -> !symbol.int<"N - 1">
+  %prod = symbol.mul %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> !symbol.int<"M*N">
+}
+""",
+    ).parse_module()
+
+    module.verify()
+    printed = _print_op(module)
+    assert "symbol.add %m, %one : !symbol.int<\"M\">, !symbol.int<\"1\"> -> !symbol.int<\"M + 1\">" in printed
+    assert "symbol.sub %n, %one : !symbol.int<\"N\">, !symbol.int<\"1\"> -> !symbol.int<\"N - 1\">" in printed
+    assert "symbol.mul %m, %n : !symbol.int<\"M\">, !symbol.int<\"N\"> -> !symbol.int<\"M*N\">" in printed
+
+
+# TC-SYM-017
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 22:26:51 +0800
+# 最近一次运行成功时间: 2026-03-22 22:26:51 +0800
+# 测试目的: 验证 symbol.add/sub/mul 会拒绝非 symbol.int 的操作数或结果类型。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_arith_ops_reject_non_symbol_int_types() -> None:
+    non_symbol_value = _TestOp(result_types=[i32]).results[0]
+    symbol_value = _make_symbol_value("N")
+
+    with pytest.raises(VerifyException, match='symbol.add lhs must have type !symbol.int<"expr">'):
+        SymbolAddOp(non_symbol_value, symbol_value, SymbolValueType.from_expr("N")).verify()
+    with pytest.raises(VerifyException, match='symbol.sub rhs must have type !symbol.int<"expr">'):
+        SymbolSubOp(symbol_value, non_symbol_value, SymbolValueType.from_expr("N")).verify()
+    with pytest.raises(VerifyException, match='symbol.mul result type must be !symbol.int<"expr">'):
+        SymbolMulOp(symbol_value, symbol_value, i32).verify()
+
+
+# TC-SYM-018
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 22:26:51 +0800
+# 最近一次运行成功时间: 2026-03-22 22:26:51 +0800
+# 测试目的: 验证 symbol.add/sub/mul 对不完整文本签名会报 parse 错误。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_arith_ops_reject_malformed_signatures() -> None:
+    ctx = _build_context()
+
+    with pytest.raises(ParseError, match="symbol.add"):
+        Parser(
+            ctx,
+            """
+builtin.module {
+  %m = "test.op"() : () -> !symbol.int<"M">
+  %one = "test.op"() : () -> !symbol.int<"1">
+  %sum = symbol.add %m, %one : !symbol.int<"M">, !symbol.int<"1">
+}
+""",
+        ).parse_module()
+    with pytest.raises(ParseError, match="symbol.mul"):
+        Parser(
+            ctx,
+            """
+builtin.module {
+  %m = "test.op"() : () -> !symbol.int<"M">
+  %n = "test.op"() : () -> !symbol.int<"N">
+  %prod = symbol.mul %m : !symbol.int<"M"> -> !symbol.int<"M*N">
+}
+""",
+        ).parse_module()
+
+
+# TC-SYM-019
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 22:26:51 +0800
+# 最近一次运行成功时间: 2026-03-22 22:26:51 +0800
+# 测试目的: 验证 symbol.add/sub/mul 的错误信息包含具体 op 名称与失败原因。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_arith_ops_error_messages_include_context() -> None:
+    symbol_value = _make_symbol_value("N")
+    non_symbol_value = _TestOp(result_types=[i32]).results[0]
+    ctx = _build_context()
+
+    with pytest.raises(VerifyException, match='symbol.add lhs must have type !symbol.int<"expr">'):
+        SymbolAddOp(non_symbol_value, symbol_value, SymbolValueType.from_expr("N + 1")).verify()
+    with pytest.raises(ParseError, match="symbol.sub"):
+        Parser(
+            ctx,
+            """
+builtin.module {
+  %n = "test.op"() : () -> !symbol.int<"N">
+  %one = "test.op"() : () -> !symbol.int<"1">
+  %diff = symbol.sub %n %one : !symbol.int<"N">, !symbol.int<"1"> -> !symbol.int<"N - 1">
+}
+""",
+        ).parse_module()
+
+
+# TC-SYM-020
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-22 20:14:51 +0800
 # 最近一次运行成功时间: 2026-03-22 20:14:51 +0800
 # 测试目的: 验证 symbol.get_dim 可从 nn.memory 读取静态整数维度并返回对应 symbol value type。
@@ -319,7 +458,7 @@ def test_symbol_get_dim_reads_static_dim_from_memory_type() -> None:
     assert _print_attr(op.result.type) == '!symbol.int<"4">'
 
 
-# TC-SYM-016
+# TC-SYM-021
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-22 20:14:51 +0800
@@ -338,7 +477,7 @@ def test_symbol_get_dim_reads_symbolic_dim_from_memory_type() -> None:
     assert _print_attr(op.result.type) == '!symbol.int<"N">'
 
 
-# TC-SYM-017
+# TC-SYM-022
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-22 20:14:51 +0800
@@ -357,7 +496,7 @@ def test_symbol_get_stride_reads_static_stride_from_memory_type() -> None:
     assert _print_attr(op.result.type) == '!symbol.int<"8">'
 
 
-# TC-SYM-018
+# TC-SYM-023
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-22 20:14:51 +0800
@@ -376,7 +515,7 @@ def test_symbol_get_stride_reads_symbolic_stride_from_memory_type() -> None:
     assert _print_attr(op.result.type) == '!symbol.int<"N">'
 
 
-# TC-SYM-019
+# TC-SYM-024
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-22 20:14:51 +0800
@@ -397,7 +536,7 @@ def test_symbol_get_dim_rejects_invalid_axis() -> None:
         SymbolGetDimOp(source, StringAttr("axis")).verify()
 
 
-# TC-SYM-019
+# TC-SYM-024
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-22 20:14:51 +0800
@@ -418,7 +557,7 @@ def test_symbol_get_stride_rejects_invalid_axis() -> None:
         SymbolGetStrideOp(source, StringAttr("axis")).verify()
 
 
-# TC-SYM-020
+# TC-SYM-025
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-22 20:14:51 +0800
@@ -438,7 +577,7 @@ def test_symbol_get_dim_rejects_non_memory_type() -> None:
         SymbolGetDimOp(unknown_dim_source, 0).verify()
 
 
-# TC-SYM-020
+# TC-SYM-025
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-22 20:14:51 +0800
@@ -455,7 +594,7 @@ def test_symbol_get_stride_rejects_unknown_entry() -> None:
         SymbolGetStrideOp(source, 0).verify()
 
 
-# TC-SYM-021
+# TC-SYM-026
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-22 21:30:49 +0800
@@ -477,7 +616,7 @@ def test_symbol_for_accepts_symbol_int_bounds_and_iter_arg() -> None:
     assert _print_attr(op.body.block.args[0].type) == '!symbol.int<"M">'
 
 
-# TC-SYM-022
+# TC-SYM-027
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-22 21:30:49 +0800
@@ -505,7 +644,7 @@ builtin.module {
     assert _print_op(op) == 'symbol.for %i = %start to %end step %step : !symbol.int<"M">, !symbol.int<"N">, !symbol.int<"1"> {\n}'
 
 
-# TC-SYM-023
+# TC-SYM-028
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-22 21:30:49 +0800
@@ -523,7 +662,7 @@ def test_symbol_for_rejects_non_symbol_int_operands() -> None:
         SymbolForOp(symbol_value, symbol_value, symbol_value, Block(arg_types=[i32])).verify()
 
 
-# TC-SYM-024
+# TC-SYM-029
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-22 21:30:49 +0800
@@ -540,7 +679,7 @@ def test_symbol_for_rejects_zero_step() -> None:
         SymbolForOp(start, end, step, Block(arg_types=[SymbolValueType.from_expr("M")])).verify()
 
 
-# TC-SYM-025
+# TC-SYM-030
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-22 21:30:49 +0800
@@ -566,7 +705,7 @@ def test_symbol_for_rejects_invalid_region_shape() -> None:
         ).verify()
 
 
-# TC-SYM-026
+# TC-SYM-031
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-22 21:30:49 +0800
@@ -605,7 +744,7 @@ builtin.module {
         ).parse_module()
 
 
-# TC-SYM-027
+# TC-SYM-032
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-22 21:30:49 +0800
