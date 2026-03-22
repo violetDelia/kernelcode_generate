@@ -16,14 +16,14 @@
 
 - [`spec/symbol_variable/symbol_dim.md`](../../spec/symbol_variable/symbol_dim.md)：提供符号维度与符号表达的基础语义。
 - [`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)：高层 `Memory` 容器复用本方言的 memory 相关符号标量语义。
-- [`spec/dialect/nn.md`](../../spec/dialect/nn.md)：提供当前 IR 层唯一合法的 memory type `NnMemoryType`。
+- [`spec/dialect/nn.md`](../../spec/dialect/nn.md)：提供当前 IR 层唯一合法的 `MemoryType`（当前文本载体仍为 `!nn.memory<...>`）。
 - [`kernel_gen/dialect/symbol.py`](../../kernel_gen/dialect/symbol.py)：`symbol dialect` 的实现入口。
 
 ## 目标
 
 - 为项目提供统一的“符号值类型”表达，使 IR 能直接表示某个整型标量值对应的符号语义。
 - 让 `shape`、`offset`、`stride`、循环边界、算子属性等场景中的整型符号值可以在类型层面保持稳定表达。
-- 收敛 memory 相关符号标量的方言归属：`Memory`、`NnMemoryType`、`dma` 相关 op 若需要表达单个维度、步幅、偏移或切片大小的整数符号语义，应统一复用 `SymbolExprAttr` / `SymbolValueType`，而不是在各自 spec 中再定义一套标量 symbol type。
+- 收敛 memory 相关符号标量的方言归属：`Memory`、`MemoryType`、`dma` 相关 op 若需要表达单个维度、步幅、偏移或切片大小的整数符号语义，应统一复用 `SymbolExprAttr` / `SymbolValueType`，而不是在各自 spec 中再定义一套标量 symbol type。
 - 提供从 memory type 读取单个维度或步幅并返回 symbol value 的查询接口，避免其他方言重复定义 `dim/stride -> value` 读取语义。
 - 为后续 `nn`、`dma`、`kernel`、`dsl` 等方言提供统一的符号值口径，避免每个方言各自维护一套符号标量表达。
 - 提供最小整数符号算术接口，使 `!symbol.int<"expr">` 标量可在方言内完成基础加、减、乘组合，而无需回退到其他算术方言。
@@ -42,7 +42,7 @@
 - 类型中的符号表达应面向单个标量值；shape 列表、stride 列表等多值结构不直接放入本方言标量类型中。
 - `Memory`、`MemorySpace`、`LocalSpaceMeta` 这类高层内存容器或空间枚举不属于本方言；本方言只负责它们内部可能出现的单个整型符号值语义。
 - `symbol.get_dim` / `symbol.get_stride` 只读取 memory type 中已存在的单个维度或步幅分量，不引入新的 shape/stride 推导规则。
-- `symbol.get_dim` / `symbol.get_stride` 当前只接受 IR 层 memory SSA value；按当前方言体系，该 memory type 统一指向 `NnMemoryType`。
+- `symbol.get_dim` / `symbol.get_stride` 当前只接受 IR 层 memory SSA value；按当前方言体系，该 memory type 统一指向 `MemoryType`，其当前文本载体仍为 `!nn.memory<...>`。
 - 若目标维度或步幅条目为匿名动态值 `?`，由于无法稳定映射为 `!symbol.int<"...">`，必须报错；本接口只接受可表示为整数常量或符号表达的条目。
 - `symbol.get_dim` / `symbol.get_stride` 的轴号当前必须是静态整数索引；越界、负数或非整数轴号必须报错。
 - 本方言暂不定义“未知但无名字”的匿名符号值；若需要动态未知值，应优先使用具名符号或由其他方言以 SSA value 传递。
@@ -274,7 +274,7 @@ SymbolValueType.from_expr("N")
 
 参数说明：
 
-- `source(SSA value)`：待读取的 memory 值；当前必须具有 `NnMemoryType`。
+- `source(SSA value)`：待读取的 memory 值；当前必须具有 `MemoryType`。
 - `axis(int)`：要读取的维度下标，按 `source.type.shape` 的顺序从 `0` 开始计数。
 
 使用示例：
@@ -286,7 +286,7 @@ SymbolValueType.from_expr("N")
 
 注意事项：
 
-- `source` 必须是 memory SSA value，且其类型当前必须为 `NnMemoryType`。
+- `source` 必须是 memory SSA value，且其类型当前必须为 `MemoryType`。
 - 返回值语义直接来自 `source.type.shape[axis]`：静态整数分量返回对应常量整数 value，符号分量返回对应符号表达 value。
 - 当目标分量为 `?`、轴号越界、轴号为负数或轴号不是静态整数时，必须报错。
 - 本接口只读取真实 dim，不读取 stride、offset、size 或 element type。
@@ -305,7 +305,7 @@ SymbolValueType.from_expr("N")
 
 参数说明：
 
-- `source(SSA value)`：待读取的 memory 值；当前必须具有 `NnMemoryType`。
+- `source(SSA value)`：待读取的 memory 值；当前必须具有 `MemoryType`。
 - `axis(int)`：要读取的步幅下标，按 `source.type.stride` 的顺序从 `0` 开始计数。
 
 使用示例：
@@ -317,7 +317,7 @@ SymbolValueType.from_expr("N")
 
 注意事项：
 
-- `source` 必须是 memory SSA value，且其类型当前必须为 `NnMemoryType`。
+- `source` 必须是 memory SSA value，且其类型当前必须为 `MemoryType`。
 - 返回值语义直接来自 `source.type.stride[axis]`：静态整数分量返回对应常量整数 value，符号分量返回对应符号表达 value。
 - 当目标分量为 `?`、轴号越界、轴号为负数或轴号不是静态整数时，必须报错。
 - 本接口只读取真实 stride，不读取 shape、offset、size 或 element type。
@@ -418,7 +418,7 @@ symbol.for %i = %start to %end step %step
 | TC-SYM-022 | `symbol.get_stride` | 静态步幅读取 | `source.type.stride[axis]` 为静态整数 | 读取指定轴 stride | 返回对应 `!symbol.int<"...">` value | `test_symbol_get_stride_reads_static_stride_from_memory_type` |
 | TC-SYM-023 | `symbol.get_stride` | 符号步幅读取 | `source.type.stride[axis]` 为符号表达 | 读取指定轴 stride | 返回对应符号表达 value | `test_symbol_get_stride_reads_symbolic_stride_from_memory_type` |
 | TC-SYM-024 | `symbol.get_dim/get_stride` | 轴号非法 | `axis` 越界、负数或非静态整数 | 构造并校验 op | verifier 报错 | `test_symbol_get_dim_rejects_invalid_axis`、`test_symbol_get_stride_rejects_invalid_axis` |
-| TC-SYM-025 | `symbol.get_dim/get_stride` | memory type 非法或匿名动态条目非法 | `source` 非 `NnMemoryType`，或目标条目为 `?` | 构造并校验 op | verifier 报错 | `test_symbol_get_dim_rejects_non_memory_type`、`test_symbol_get_stride_rejects_unknown_entry` |
+| TC-SYM-025 | `symbol.get_dim/get_stride` | memory type 非法或匿名动态条目非法 | `source` 非 `MemoryType`，或目标条目为 `?` | 构造并校验 op | verifier 报错 | `test_symbol_get_dim_rejects_non_memory_type`、`test_symbol_get_stride_rejects_unknown_entry` |
 | TC-SYM-026 | `symbol.for` | 基础半开区间循环 | `start/end/step` 与块参数 `it` 均为 `!symbol.int<"...">` | 构造 `symbol.for %i = %start to %end step %step` | verifier 通过；`it` 作为 `SymbolValueType` 块参数暴露；循环采用半开区间语义 | `test_symbol_for_accepts_symbol_int_bounds_and_iter_arg` |
 | TC-SYM-027 | `symbol.for` | parse/print 稳定 | 已实现 `symbol.for` 文本语法 | parse 后再 print | 文本与 region 结构稳定 round-trip | `test_symbol_for_round_trip` |
 | TC-SYM-028 | `symbol.for` | 非 symbol.int 类型非法 | `start/end/step` 或 `it` 含非 `!symbol.int<"...">` 类型，如 `f32`、`f64`、`index`、`i32` | 构造并校验 op | verifier 报错；`it` 不得为任何非 `SymbolValueType` | `test_symbol_for_rejects_non_symbol_int_operands` |
