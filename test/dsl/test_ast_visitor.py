@@ -38,7 +38,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.dma import DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp
 from kernel_gen.dialect.nn import NnAddOp, NnBroadcastOp, NnEqOp, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolAddOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolAddOp, SymbolForOp, SymbolValueType
 from kernel_gen.dsl.ast import (
     AstParseError,
     BlockAST,
@@ -973,10 +973,10 @@ def test_parse_function_infers_symboldim_arguments_without_annotations(monkeypat
 # MGEN-015
 # 创建者: OpenAI
 # 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 15:38:56 +0800
-# 最近一次运行成功时间: 2026-03-22 15:38:56 +0800
-# 功能说明: 验证 LoopRange + slice/deslice + 无 return 场景可生成 scf.for + dma.slice/dma.deslice。
-# 测试目的: 验证 LoopRange + slice/deslice + 无 return 场景可生成 scf.for + dma.slice/dma.deslice。
+# 最近一次运行测试时间: 2026-03-23 00:12:24 +0800
+# 最近一次运行成功时间: 2026-03-23 00:12:24 +0800
+# 功能说明: 验证 LoopRange + slice/deslice + 无 return 场景可生成 symbol.for + dma.slice/dma.deslice。
+# 测试目的: 验证 LoopRange + slice/deslice + 无 return 场景会直接传递 symbol.int 循环变量，不生成 arith.index_cast。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_supports_symbolic_for_loop_dma_without_return
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -1013,7 +1013,7 @@ def test_build_func_op_supports_symbolic_for_loop_dma_without_return(monkeypatch
     func_op = build_func_op(add)
     assert isinstance(func_op, func.FuncOp)
     assert len(list(func_op.function_type.outputs)) == 0
-    loop_ops = [op for op in func_op.body.block.ops if isinstance(op, scf.ForOp)]
+    loop_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolForOp)]
     assert len(loop_ops) == 1
     loop_body_ops = list(loop_ops[0].body.block.ops)
     slice_ops = [op for op in loop_body_ops if isinstance(op, DmaSliceOp)]
@@ -1022,13 +1022,14 @@ def test_build_func_op_supports_symbolic_for_loop_dma_without_return(monkeypatch
     assert len(deslice_ops) == 1
     assert not any(isinstance(op, DmaLoadOp) for op in loop_body_ops)
     assert not any(isinstance(op, DmaStoreOp) for op in loop_body_ops)
+    assert not any(isinstance(op, arith.IndexCastOp) for op in loop_body_ops)
     assert slice_ops[0].space.space.data == "local"
     loop_body = loop_ops[0].body.block
     offsets = list(slice_ops[0].offsets)
     sizes = list(slice_ops[0].sizes)
-    assert _unwrap_index_cast(offsets[0]) is loop_body.args[0]
-    assert _unwrap_index_cast(sizes[0]) is func_op.body.block.args[5]
-    assert _unwrap_index_cast(list(deslice_ops[0].offsets)[0]) is loop_body.args[0]
+    assert offsets[0] is loop_body.args[0]
+    assert sizes[0] is func_op.body.block.args[5]
+    assert list(deslice_ops[0].offsets)[0] is loop_body.args[0]
 
 
 # MGEN-011

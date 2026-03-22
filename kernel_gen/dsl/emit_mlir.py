@@ -52,7 +52,7 @@ from kernel_gen.dialect.nn import (
     NnSubOp,
     NnTrueDivOp,
 )
-from kernel_gen.dialect.symbol import SymbolAddOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolAddOp, SymbolForOp, SymbolValueType
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.type import NumericType
 
@@ -183,6 +183,8 @@ def _const_index(value: int, ctx: EmitContext) -> SSAValue:
 
 
 def _ensure_index_value(value: SSAValue, ctx: EmitContext, location: SourceLocation | None) -> SSAValue:
+    if isinstance(value.type, SymbolValueType):
+        return value
     if isinstance(value.type, IndexType):
         return value
     if isinstance(value.type, IntegerType):
@@ -742,8 +744,15 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
         end_value = _lower_loop_bound(node.end, ctx)
         step_expr = node.step if node.step is not None else ConstAST(1, location=node.location)
         step_value = _lower_loop_bound(step_expr, ctx)
+        use_symbol_for = all(
+            isinstance(value.type, SymbolValueType) for value in (start_value, end_value, step_value)
+        )
         body_block = Block(arg_types=[start_value.type])
-        loop_op = scf.ForOp(start_value, end_value, step_value, [], body_block)
+        loop_op = (
+            SymbolForOp(start_value, end_value, step_value, body_block)
+            if use_symbol_for
+            else scf.ForOp(start_value, end_value, step_value, [], body_block)
+        )
         ctx.builder.add_op(loop_op)
 
         nested_symbols = dict(ctx.symbols)
@@ -760,7 +769,8 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
         last_value = None
         for stmt in node.body.statements:
             last_value = emit_mlir(stmt, nested_ctx)
-        body_block.add_op(scf.YieldOp())
+        if not use_symbol_for:
+            body_block.add_op(scf.YieldOp())
         if previous is None:
             loop_vars.pop(node.var.name, None)
         else:

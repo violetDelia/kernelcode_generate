@@ -143,6 +143,7 @@ class ScalarArgAST:
 
     name: str
     value_type: type
+    is_symbolic: bool = False
     location: SourceLocation | None = None
 
 
@@ -522,12 +523,12 @@ def _parse_annotation_node(
             memory = globals_table[arg_name]
             return TensorAST(name=arg_name, memory=memory, location=None)
         if arg_name in globals_table and isinstance(globals_table[arg_name], SymbolDim):
-            return ScalarArgAST(name=arg_name, value_type=int, location=None)
+            return ScalarArgAST(name=arg_name, value_type=int, is_symbolic=True, location=None)
         if arg_name in builtins_table and isinstance(builtins_table[arg_name], Memory):
             memory = builtins_table[arg_name]
             return TensorAST(name=arg_name, memory=memory, location=None)
         if arg_name in builtins_table and isinstance(builtins_table[arg_name], SymbolDim):
-            return ScalarArgAST(name=arg_name, value_type=int, location=None)
+            return ScalarArgAST(name=arg_name, value_type=int, is_symbolic=True, location=None)
         _raise_parse_error("Missing annotation", node)
 
     if isinstance(node, py_ast.Constant) and isinstance(node.value, str):
@@ -718,7 +719,7 @@ def _parse_expr(
         if isinstance(value, Memory):
             return TensorAST(name=expr.id, memory=value, location=_location_from_node(expr))
         if isinstance(value, SymbolDim):
-            return ScalarArgAST(name=expr.id, value_type=int, location=_location_from_node(expr))
+            return ScalarArgAST(name=expr.id, value_type=int, is_symbolic=True, location=_location_from_node(expr))
         if isinstance(value, (int, float, str)):
             return ConstAST(value=value, location=_location_from_node(expr))
         if value is not None:

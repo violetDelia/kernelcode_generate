@@ -48,6 +48,10 @@ def _is_symbol_scalar_function(func_ast: FunctionAST) -> bool:
     )
 
 
+def _is_symbol_scalar_arg(item: ScalarArgAST, *, is_symbol_scalar_function: bool) -> bool:
+    return is_symbol_scalar_function or item.is_symbolic
+
+
 def _build_signature_types(func_ast: FunctionAST) -> tuple[list[object], dict[int, object]]:
     if not func_ast.inputs:
         raise _LoweringError("Function has no inputs", location=func_ast.location)
@@ -63,7 +67,9 @@ def _build_signature_types(func_ast: FunctionAST) -> tuple[list[object], dict[in
         elif isinstance(item, ScalarArgAST):
             if item.value_type is not int:
                 raise _LoweringError("Unsupported scalar argument type", location=item.location)
-            arg_type = SymbolValueType.from_expr(item.name) if is_symbol_scalar_function else i32
+            arg_type = SymbolValueType.from_expr(item.name) if _is_symbol_scalar_arg(
+                item, is_symbol_scalar_function=is_symbol_scalar_function
+            ) else i32
         else:
             raise _LoweringError("Unsupported input type", location=getattr(item, "location", None))
         arg_types.append(arg_type)

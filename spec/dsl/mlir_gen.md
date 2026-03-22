@@ -21,6 +21,7 @@
 - 节点发射规则：[`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)
 - 符号值类型语义：[`spec/dialect/symbol.md`](../../spec/dialect/symbol.md)
 - 纯 symbol 函数场景基线：[`expectation/dsl/symbol.py`](../../expectation/dsl/symbol.py)
+- `LoopRange` + DMA 切片场景基线：[`expectation/dsl/for_loop.py`](../../expectation/dsl/for_loop.py)
 
 ## 目标
 
@@ -35,6 +36,8 @@
 - 不定义节点级发射细节，节点发射规则由 `emit_mlir` 约束。
 - 不做优化或自动修复非法 IR。
 - 当函数体仅包含 `for` 循环且没有 `return` 时，输出 `func.func` 允许零返回值。
+- 当 `ForAST` 来源于 `LoopRange(start, end, step)` 且循环边界保持 symbol 整数语义时，lowering 后必须生成 `symbol.for`，不得退回 `scf.for`。
+- `LoopRange` 场景中的循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand，必须直接保持 `!symbol.int<"expr">` 语义传递，不得额外生成 `arith.index_cast`。
 - 对于纯 symbol 标量函数（仅符号标量入参/返回），函数签名中的输入与输出必须统一使用 `!symbol.int<"expr">`，不得降级为 `i32`、`index` 或其他 builtin 标量类型。
 - `expectation/dsl/symbol.py` 对应的函数场景属于纯 symbol 标量函数：其生成结果中的 `func.func` 输入与输出都必须落在 `symbol dialect` 的 `!symbol.int<"expr">` 上。
 - 如需 `builtin.module` 封装，由调用方完成。
@@ -68,9 +71,10 @@ func_op = build_func_op(only_symbol)
 注意事项：
 
 - 解析失败或发射失败必须抛出可定位的错误。
-- 允许 `for` 循环内包含 `dma.slice`/`dma.deslice` 相关语义，并保留 `scf.for` 循环结构（由 `emit_mlir` 负责具体发射）。
+- 允许 `for` 循环内包含 `dma.slice`/`dma.deslice` 相关语义；当循环来自 `LoopRange` 且边界为 symbol 整数时，必须保留 `symbol.for` 结构。
 - 当 `fn` 对应 `expectation/dsl/symbol.py` 这类纯 symbol 标量函数时，输入参数与返回值都必须 lowering 为 `!symbol.int<"expr">`。
 - 纯 symbol 标量函数的参数/返回类型必须复用 `spec/dialect/symbol.md` 中定义的 `SymbolValueType`，不能退回 builtin 整数类型。
+- `LoopRange` 场景中传给 `dma.slice` / `dma.deslice` 的标量 operand 必须直接复用 `!symbol.int<"expr">` value，不允许通过 `arith.index_cast` 做中间桥接。
 
 返回与限制：
 
@@ -113,9 +117,10 @@ func_op = build_func_op_from_ast(func_ast)
   - 验证 `build_func_op(...)` 生成 `func.func`。
   - 验证函数签名与返回值类型与 AST 一致。
   - 通过测试辅助封装验证 `func.func` 的结构输出（不改变本模块的边界）。
-  - 覆盖无返回 `for` 循环与 `slice/deslice` 的生成能力。
+  - 覆盖无返回 `for` 循环与 `slice/deslice` 的生成能力，并要求 `LoopRange` lowering 为 `symbol.for`。
   - 验证 `expectation/dsl/symbol.py` 对应的纯 symbol 函数场景会生成 `!symbol.int<"...">` 输入与 `!symbol.int<"...">` 返回。
   - 验证纯 symbol 标量加法在 lowering 后生成 `symbol.add`，不退回 builtin 算术或其他 dialect op。
+  - 验证 `expectation/dsl/for_loop.py` 对应场景生成 `symbol.for + dma.slice/dma.deslice`，且循环相关 lowering 不生成 `arith.index_cast`。
 - 功能与用例清单：
   - MGEN-001：`build_func_op(...)` 返回 `func.func`。（`test_build_func_op_returns_func_op`）
   - MGEN-002：参数顺序与 AST 一致。（`test_build_func_op_from_ast_preserves_arg_order`）
@@ -131,7 +136,7 @@ func_op = build_func_op_from_ast(func_ast)
   - MGEN-012：前置维度隐式 broadcast。（`test_tensor_binary_prepend_broadcast_lowering`）
   - MGEN-013：比较表达式隐式 broadcast。（`test_compare_implicit_broadcast_lowering`）
   - MGEN-014：不可 broadcast 报错与定位。（`test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics`）
-  - MGEN-015：LoopRange + slice/deslice + 无 return 场景生成 `scf.for + dma.slice/dma.deslice`。（`test_build_func_op_supports_symbolic_for_loop_dma_without_return`）
+  - MGEN-015：`expectation/dsl/for_loop.py` 对应的 `LoopRange + slice/deslice + 无 return` 场景生成 `symbol.for + dma.slice/dma.deslice`，且循环 index / DMA operand 直接保持 `!symbol.int<"...">`，不生成 `arith.index_cast`。（`test_build_func_op_supports_symbolic_for_loop_dma_without_return`、`expectation/dsl/for_loop.py`）
   - MGEN-016：`expectation/dsl/symbol.py` 的纯 symbol 函数参数 lowering 为 `func.func` 的 `!symbol.int<"...">` 输入。（`test_symbol_scalar_function_uses_symbol_value_type_signature`、`expectation/dsl/symbol.py`）
   - MGEN-017：`expectation/dsl/symbol.py` 的纯 symbol 函数返回 lowering 为 `func.func` 的 `!symbol.int<"...">` 输出。（`test_symbol_scalar_function_uses_symbol_value_type_signature`、`expectation/dsl/symbol.py`）
   - MGEN-018：纯 symbol 标量加法 lowering 为 `symbol.add`。（`test_symbol_scalar_function_lowers_add_to_symbol_add`、`expectation/dsl/symbol.py`）

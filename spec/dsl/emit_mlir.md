@@ -35,6 +35,8 @@
 - 不解析 Python 函数，不遍历 AST。
 - 不做优化、常量折叠或后端特化。
 - 不生成 MLIR 文本；文本输出由上游调用方负责。
+- 当 `ForAST` 来自 `LoopRange(start, end, step)` 且边界与循环变量保持 symbol 整数语义时，必须 lowering 为 `symbol.for`，不得回退为 `scf.for`。
+- 在上述 `LoopRange` 场景中，循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand 必须直接复用 `!symbol.int<"expr">` value，不得插入 `arith.index_cast`。
 
 ## 公开接口
 
@@ -98,6 +100,7 @@ value = emit_mlir(expr_ast, ctx)
 
 - `emit_mlir` 必须覆盖 AST 中每一种节点类型。
 - 默认使用当前项目的目标 dialect（例如 `nn`），但节点到 op 的映射必须清晰可追踪。
+- `LoopRange` 触发的 `ForAST` 必须走 `symbol.for` 分支，并保持 symbol 整数值直接作为 DMA operand 传递。
 
 节点映射示例：
 
@@ -106,7 +109,7 @@ value = emit_mlir(expr_ast, ctx)
 - `CompareExprAST(eq/ne/lt/le/gt/ge)`：生成对应的比较 op。
 - `LoadAST`：生成张量读取相关 op/value；当携带 `sizes` 时发射 `dma.slice`。
 - `StoreAST`：生成张量写入相关 op；当携带 `sizes` 时发射 `dma.deslice`。
-- `ForAST`：生成 `scf.for` 循环控制流结构。
+- `ForAST`：当来源于 `LoopRange(start, end, step)` 且边界为 symbol 整数时，生成 `symbol.for`；循环体内若包含 `dma.slice` / `dma.deslice`，其 DMA 标量 operand 直接使用 `!symbol.int<"expr">` value，不生成 `arith.index_cast`。
 
 ## 测试
 
@@ -114,6 +117,7 @@ value = emit_mlir(expr_ast, ctx)
 - 执行命令：`pytest -q test/dsl/test_ast_visitor.py`
 - 测试目标：
   - 覆盖常见表达式与语句节点的发射结果。
+  - 覆盖 `LoopRange` -> `symbol.for` 与 symbol.int 直接作为 DMA operand 的发射规则。
   - 覆盖不支持节点的错误路径。
 - 功能与用例清单：
   - EMIT-001：二元表达式节点生成对应 op/value。（`test_emit_context_reuses_cached_value`）
@@ -125,4 +129,4 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-007：非 unit stride 抛出可定位错误。（`test_load_ast_lowering_raises_lowering_error`）
   - EMIT-008：索引 rank mismatch 抛出可定位错误。（`test_load_ast_index_rank_mismatch_reports_location`）
   - EMIT-009：`StoreAST` 输入非 memory 抛出错误。（`test_store_ast_lowering_raises_lowering_error`）
-  - EMIT-010：`ForAST` lowering 保留 `scf.for` 并在循环体内发射 `dma.load`。（`test_for_ast_lowering_emits_loads`）
+  - EMIT-010：`ForAST` 在 `LoopRange` 场景下 lowering 为 `symbol.for`，循环体内相关 DMA operand 直接复用 `!symbol.int<"...">`，不生成 `arith.index_cast`。（`test_for_ast_lowering_emits_loads`）
