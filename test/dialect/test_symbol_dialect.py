@@ -11,7 +11,7 @@
 
 覆盖率:
 - 覆盖率命令: pytest -q --cov=kernel_gen.dialect.symbol --cov-report=term-missing test/dialect/test_symbol_dialect.py
-- 覆盖率结果: 99%（2026-03-22 20:14:51 +0800）
+- 覆盖率结果: 99%（2026-03-22 21:48:16 +0800）
 
 关联文件:
 - 功能实现: kernel_gen/dialect/symbol.py
@@ -27,8 +27,9 @@ from pathlib import Path
 
 import pytest
 from xdsl.context import Context
-from xdsl.dialects.builtin import ArrayAttr, Builtin, IntAttr, StringAttr, i32
+from xdsl.dialects.builtin import ArrayAttr, Builtin, IndexType, IntAttr, StringAttr, f32, i32, i64
 from xdsl.dialects.test import Test, TestOp as _TestOp
+from xdsl.ir import Operation
 from xdsl.parser import Parser
 from xdsl.printer import Printer
 from xdsl.utils.exceptions import ParseError, VerifyException
@@ -40,6 +41,7 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.dialect.nn import Nn, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import (
     Symbol,
+    SymbolCastOp,
     SymbolExprAttr,
     SymbolGetDimOp,
     SymbolGetStrideOp,
@@ -81,6 +83,15 @@ def _print_attr(value: object) -> str:
     stream = StringIO()
     printer = Printer(stream=stream)
     printer.print_attribute(value)
+    return stream.getvalue()
+
+
+def _print_op(value: Operation) -> str:
+    """打印 operation 为文本。"""
+
+    stream = StringIO()
+    printer = Printer(stream=stream)
+    printer.print_op(value)
     return stream.getvalue()
 
 
@@ -145,6 +156,27 @@ def _make_memory_value(memory_type: NnMemoryType):
     """
 
     return _TestOp(result_types=[memory_type]).results[0]
+
+
+def _make_symbol_value(expr: str):
+    """构造携带 symbol.int type 的测试 SSA value。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 为 symbol.cast 测试复用统一的 symbol.int 操作数构造。
+
+    使用示例:
+    - _make_symbol_value("N")
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/dialect/test_symbol_dialect.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    return _TestOp(result_types=[SymbolValueType.from_expr(expr)]).results[0]
 
 
 # TC-SYM-001 / TC-SYM-002 / TC-SYM-009
@@ -421,3 +453,111 @@ def test_symbol_get_stride_rejects_unknown_entry() -> None:
 
     with pytest.raises(VerifyException, match="does not support unknown stride entry"):
         SymbolGetStrideOp(source, 0).verify()
+
+
+# TC-SYM-021
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 21:48:16 +0800
+# 最近一次运行成功时间: 2026-03-22 21:48:16 +0800
+# 测试目的: 验证 symbol.cast 可将 symbol.int 显式转换为 builtin 整数类型。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_cast_lowers_symbol_int_to_builtin_int() -> None:
+    op = SymbolCastOp(_make_symbol_value("N"), i32)
+
+    op.verify()
+    printed = _print_op(op)
+    assert _print_attr(op.result.type) == "i32"
+    assert "symbol.cast" in printed
+    assert ' : !symbol.int<"N"> -> i32' in printed
+
+
+# TC-SYM-022
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 21:48:16 +0800
+# 最近一次运行成功时间: 2026-03-22 21:48:16 +0800
+# 测试目的: 验证 symbol.cast 支持常量语义的 symbol.int 到更宽整数类型转换。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_cast_supports_constant_symbol_values() -> None:
+    op = SymbolCastOp(_make_symbol_value("3"), i64)
+
+    op.verify()
+    assert _print_attr(op.result.type) == "i64"
+
+
+# TC-SYM-023
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 21:48:16 +0800
+# 最近一次运行成功时间: 2026-03-22 21:48:16 +0800
+# 测试目的: 验证 symbol.cast 的 parse/print round-trip 稳定。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_cast_round_trip() -> None:
+    ctx = _build_context()
+    text = """builtin.module {
+  %0 = "test.op"() : () -> !symbol.int<"N">
+  %1 = symbol.cast %0 : !symbol.int<"N"> -> i32
+}
+"""
+
+    module = Parser(ctx, text).parse_module()
+    module.verify()
+    assert _print_op(module) == text.rstrip()
+
+
+# TC-SYM-024
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 21:48:16 +0800
+# 最近一次运行成功时间: 2026-03-22 21:48:16 +0800
+# 测试目的: 验证 symbol.cast 会拒绝非 symbol.int 源类型。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_cast_rejects_non_symbol_source() -> None:
+    source = _TestOp(result_types=[i32]).results[0]
+
+    with pytest.raises(VerifyException, match='symbol.cast source must have type !symbol.int<"expr">'):
+        SymbolCastOp(source, i32).verify()
+
+
+# TC-SYM-025
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 21:48:16 +0800
+# 最近一次运行成功时间: 2026-03-22 21:48:16 +0800
+# 测试目的: 验证 symbol.cast 会拒绝非 builtin 整数的目标类型。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_cast_rejects_unsupported_target_type() -> None:
+    source = _make_symbol_value("N")
+
+    with pytest.raises(VerifyException, match="symbol.cast result type must be builtin integer"):
+        SymbolCastOp(source, IndexType()).verify()
+    with pytest.raises(VerifyException, match="symbol.cast result type must be builtin integer"):
+        SymbolCastOp(source, f32).verify()
+
+
+# TC-SYM-026
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 21:48:16 +0800
+# 最近一次运行成功时间: 2026-03-22 21:48:16 +0800
+# 测试目的: 验证 symbol.cast 对不完整文本或非法目标类型会报 parse/verifier 错误。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_cast_rejects_malformed_or_inconsistent_type_signature() -> None:
+    ctx = _build_context()
+    malformed = """builtin.module {
+  %0 = "test.op"() : () -> !symbol.int<"N">
+  %1 = symbol.cast %0 : !symbol.int<"N">
+}
+"""
+
+    with pytest.raises(ParseError, match="symbol.cast"):
+        Parser(ctx, malformed).parse_module()
+    with pytest.raises(VerifyException, match="symbol.cast result type must be builtin integer"):
+        SymbolCastOp(_make_symbol_value("N"), IndexType()).verify()

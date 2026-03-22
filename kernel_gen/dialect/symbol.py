@@ -5,10 +5,10 @@
 
 功能说明:
 - 定义仅表示整数符号值语义的 symbol dialect。
-- 提供 `SymbolExprAttr`、`SymbolValueType` 与 `symbol.get_dim/get_stride` 查询 op，不区分 `int8/int64` 等整型宽度。
+- 提供 `SymbolExprAttr`、`SymbolValueType`、`symbol.cast` 与 `symbol.get_dim/get_stride` 查询 op，不区分 `int8/int64` 等整型宽度。
 
 使用示例:
-- from kernel_gen.dialect.symbol import Symbol, SymbolExprAttr, SymbolGetDimOp, SymbolGetStrideOp, SymbolValueType
+- from kernel_gen.dialect.symbol import Symbol, SymbolCastOp, SymbolExprAttr, SymbolGetDimOp, SymbolGetStrideOp, SymbolValueType
 
 关联文件:
 - spec: spec/dialect/symbol.md
@@ -22,7 +22,7 @@ import re
 from collections.abc import Sequence
 from typing import ClassVar
 
-from xdsl.dialects.builtin import IntAttr, StringAttr
+from xdsl.dialects.builtin import IntAttr, IntegerType, StringAttr
 from xdsl.ir import Attribute, Dialect, Operation, ParametrizedAttribute, SSAValue, TypeAttribute
 from xdsl.irdl import IRDLOperation, attr_def, irdl_attr_definition, irdl_op_definition, operand_def, param_def, result_def
 from xdsl.parser import AttrParser
@@ -144,6 +144,48 @@ def _infer_result_type(
         return fallback
 
 
+def _is_symbol_int_type(attr: Attribute) -> bool:
+    """判断 attribute 是否为 symbol.int 类型。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 为 `symbol.cast` 与 `symbol.get_*` verifier 复用统一的 symbol 类型判断。
+
+    使用示例:
+    - _is_symbol_int_type(SymbolValueType.from_expr("N"))
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/dialect/test_symbol_dialect.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    return isinstance(attr, SymbolValueType)
+
+
+def _is_builtin_integer_type(attr: Attribute) -> bool:
+    """判断 attribute 是否为 builtin 普通整数类型。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 为 `symbol.cast` verifier 统一限制目标类型必须是 builtin 整数类型。
+
+    使用示例:
+    - _is_builtin_integer_type(IntegerType(32))
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/dialect/test_symbol_dialect.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    return isinstance(attr, IntegerType)
+
+
 @irdl_attr_definition
 class SymbolExprAttr(ParametrizedAttribute):
     """承载单个整数符号表达。"""
@@ -250,6 +292,82 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
         return cls(SymbolExprAttr.from_expr(expr))
 
 
+@irdl_op_definition
+class SymbolCastOp(IRDLOperation):
+    """将 symbol.int 显式桥接到 builtin 整数类型。"""
+
+    name = "symbol.cast"
+
+    source = operand_def(Attribute)
+    result = result_def(Attribute)
+
+    def __init__(self, source: SSAValue | Operation, target_type: Attribute) -> None:
+        """初始化 symbol.cast。
+
+        创建者: 我不是牛马
+        最后一次更改: 我不是牛马
+
+        功能说明:
+        - 设置 `!symbol.int<"expr">` 源操作数与目标 builtin 整数结果类型。
+
+        使用示例:
+        - SymbolCastOp(source, IntegerType(32))
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        super().__init__(operands=[source], result_types=[target_type])
+
+    def verify_(self) -> None:
+        """校验 symbol.cast 约束。
+
+        创建者: 我不是牛马
+        最后一次更改: 我不是牛马
+
+        功能说明:
+        - 校验源值必须为 `!symbol.int<"expr">`，目标类型必须为 builtin 整数类型。
+
+        使用示例:
+        - SymbolCastOp(source, IntegerType(32)).verify_()
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        source_type = SSAValue.get(self.source).type
+        if not _is_symbol_int_type(source_type):
+            raise VerifyException(f"{self.name} source must have type !symbol.int<\"expr\">")
+        if not _is_builtin_integer_type(self.result.type):
+            raise VerifyException(f"{self.name} result type must be builtin integer")
+
+    def print(self, printer: Printer) -> None:
+        """打印 symbol.cast 自定义文本语法。"""
+
+        printer.print_string(" ")
+        printer.print_ssa_value(self.source)
+        printer.print_string(" : ")
+        printer.print_attribute(SSAValue.get(self.source).type)
+        printer.print_string(" -> ")
+        printer.print_attribute(self.result.type)
+
+    @classmethod
+    def parse(cls, parser: AttrParser) -> "SymbolCastOp":
+        """解析 symbol.cast 自定义文本语法。"""
+
+        unresolved_source = parser.parse_unresolved_operand()
+        parser.parse_characters(":", " in symbol.cast")
+        source_type = parser.parse_type()
+        parser.parse_characters("->", " in symbol.cast")
+        target_type = parser.parse_type()
+        source = parser.resolve_operand(unresolved_source, source_type)
+        return cls(source, target_type)
+
+
 class _BaseSymbolMemoryQueryOp(IRDLOperation):
     """memory 元信息查询 op 基类。"""
 
@@ -332,6 +450,7 @@ class SymbolGetStrideOp(_BaseSymbolMemoryQueryOp):
 Symbol = Dialect(
     "symbol",
     [
+        SymbolCastOp,
         SymbolGetDimOp,
         SymbolGetStrideOp,
     ],
@@ -343,6 +462,7 @@ Symbol = Dialect(
 
 __all__ = [
     "Symbol",
+    "SymbolCastOp",
     "SymbolExprAttr",
     "SymbolGetDimOp",
     "SymbolGetStrideOp",

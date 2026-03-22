@@ -40,6 +40,7 @@
 - `!symbol.int<"N">` 中字符串里的表达式表示“值语义”，不是附加注释，也不是 shape 维度列表。
 - 类型中的符号表达应面向单个标量值；shape 列表、stride 列表等多值结构不直接放入本方言标量类型中。
 - `Memory`、`MemorySpace`、`LocalSpaceMeta` 这类高层内存容器或空间枚举不属于本方言；本方言只负责它们内部可能出现的单个整型符号值语义。
+- `symbol.cast` 只定义从 `!symbol.int<"expr">` 到普通整数类型的单向桥接，不定义从普通整数类型回到符号值类型的反向转换。
 - `symbol.get_dim` / `symbol.get_stride` 只读取 memory type 中已存在的单个维度或步幅分量，不引入新的 shape/stride 推导规则。
 - `symbol.get_dim` / `symbol.get_stride` 当前只接受 IR 层 memory SSA value；按当前方言体系，该 memory type 统一指向 `NnMemoryType`。
 - 若目标维度或步幅条目为匿名动态值 `?`，由于无法稳定映射为 `!symbol.int<"...">`，必须报错；本接口只接受可表示为整数常量或符号表达的条目。
@@ -287,6 +288,41 @@ SymbolValueType.from_expr("N")
 - 返回类型：`!symbol.int<"expr">`
 - 限制：`expr` 必须可稳定表示为整数常量或符号表达；不支持匿名动态条目 `?`。
 
+### `symbol.cast`
+
+功能说明：
+
+- 将 `!symbol.int<"expr">` 类型的 symbol value 显式转换为普通整数类型。
+- 用于把已经在 `symbol dialect` 中表达清楚值语义的整数标量，桥接给只接受普通整数类型的方言或接口。
+
+参数说明：
+
+- `source(value)`：待转换的源值，类型必须为 `!symbol.int<"expr">`。
+- `target_type(type)`：目标普通整数类型；当前仅允许 builtin 整数类型。
+
+使用示例：
+
+```text
+%i32 = symbol.cast %sym : !symbol.int<"N"> -> i32
+%i64 = symbol.cast %cst : !symbol.int<"3"> -> i64
+```
+
+注意事项：
+
+- `symbol.cast` 是单向桥接：只允许从 `!symbol.int<"expr">` 转到普通整数类型，不定义普通整数到 `!symbol.int<"expr">` 的反向 cast。
+- 目标类型必须是普通整数类型；当前不接受 `index`、浮点、tensor、memory 或其他 dialect 类型。
+- 该 op 主要用于循环外或跨 dialect 边界场景：当后续消费者不再保留 symbol 值语义、只接受普通整数值时，才允许显式使用 `symbol.cast`。
+- 若当前值仍需参与 `symbol dialect` 自身约束、作为 `symbol.for` 边界或继续保留 `!symbol.int<"...">` 语义，则不应提前 cast 成普通整数类型。
+- parse/print 必须稳定遵循 `symbol.cast %src : !symbol.int<"expr"> -> i32` 这类文本形式。
+- verifier 至少需要检查：源类型为 `!symbol.int<"expr">`、目标类型为普通整数类型、结果类型与箭头后的目标类型一致。
+- 错误信息至少应包含 `symbol.cast`、失败原因以及源值或目标类型信息。
+
+返回与限制：
+
+- 返回类型：普通整数类型。
+- 返回语义：返回与 `source` 具有相同整数值、但不再保留 symbol 值语义的普通整数 SSA value。
+- 限制：当前只定义单结果 cast，不定义截断/扩展规则细节，不定义跨浮点、`index` 或复合类型的转换。
+
 ## 测试
 
 - 测试文件：[`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)
@@ -302,6 +338,7 @@ SymbolValueType.from_expr("N")
 - 验证 memory 相关标量语义复用同一套整数-only symbol 规则，包括具名维度表达、乘法步幅表达与常量步幅表达。
 - 验证 `symbol.get_dim` / `symbol.get_stride` 能从 memory type 读取真实 dim/stride，并返回对应的 symbol value。
 - 验证 `symbol.get_dim` / `symbol.get_stride` 的错误路径，包括非 memory type、轴号越界、匿名动态条目 `?` 与非法轴号。
+- 验证 `symbol.cast` 能将 `!symbol.int<"...">` 显式转换为普通整数类型，并覆盖 verifier、parse/print 与错误路径。
 
 ### 功能与用例清单
 
@@ -327,3 +364,9 @@ SymbolValueType.from_expr("N")
 | TC-SYM-018 | `symbol.get_stride` | 符号步幅读取 | `source.type.stride[axis]` 为符号表达 | 读取指定轴 stride | 返回对应符号表达 value | `test_symbol_get_stride_reads_symbolic_stride_from_memory_type` |
 | TC-SYM-019 | `symbol.get_dim/get_stride` | 轴号非法 | `axis` 越界、负数或非静态整数 | 构造并校验 op | verifier 报错 | `test_symbol_get_dim_rejects_invalid_axis`、`test_symbol_get_stride_rejects_invalid_axis` |
 | TC-SYM-020 | `symbol.get_dim/get_stride` | memory type 非法或匿名动态条目非法 | `source` 非 `NnMemoryType`，或目标条目为 `?` | 构造并校验 op | verifier 报错 | `test_symbol_get_dim_rejects_non_memory_type`、`test_symbol_get_stride_rejects_unknown_entry` |
+| TC-SYM-021 | `symbol.cast` | 基础 symbol 到整数转换 | `source` 为 `!symbol.int<"N">` | 构造 `symbol.cast %sym : !symbol.int<"N"> -> i32` | verifier 通过；结果类型为 `i32` | `test_symbol_cast_lowers_symbol_int_to_builtin_int` |
+| TC-SYM-022 | `symbol.cast` | 常量 symbol 到整数转换 | `source` 为 `!symbol.int<"3">` | 构造 `symbol.cast %cst : !symbol.int<"3"> -> i64` | verifier 通过；结果类型为 `i64` | `test_symbol_cast_supports_constant_symbol_values` |
+| TC-SYM-023 | `symbol.cast` | parse/print 稳定 | 已实现 `symbol.cast` 文本语法 | parse 后再 print | 文本与结果类型保持稳定 | `test_symbol_cast_round_trip` |
+| TC-SYM-024 | `symbol.cast` | 源类型非法 | `source` 非 `!symbol.int<"...">` | 构造并校验 op | verifier 报错 | `test_symbol_cast_rejects_non_symbol_source` |
+| TC-SYM-025 | `symbol.cast` | 目标类型非法 | 目标为 `index`、浮点或复合类型 | 构造并校验 op | verifier 报错 | `test_symbol_cast_rejects_unsupported_target_type` |
+| TC-SYM-026 | `symbol.cast` | 文本或结果类型不一致 | 箭头后类型与结果类型不匹配，或文本不完整 | parse / 构造并校验 op | parse/verifier 报错；错误信息包含 `symbol.cast` 与失败原因 | `test_symbol_cast_rejects_malformed_or_inconsistent_type_signature` |
