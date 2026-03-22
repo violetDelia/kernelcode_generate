@@ -72,8 +72,12 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
 
-def _module_from_func(fn: object) -> ModuleOp:
-    return ModuleOp([build_func_op(fn)])
+def _tensor_arg(shape: list[object]) -> Memory:
+    return Memory(shape, NumericType.Float32)
+
+
+def _module_from_func(fn: object, *runtime_args: object) -> ModuleOp:
+    return ModuleOp([build_func_op(fn, *runtime_args)])
 
 
 def _module_from_ast(func_ast: FunctionAST) -> ModuleOp:
@@ -187,7 +191,7 @@ def test_visit_to_nn_ir_builds_module() -> None:
         z = x + y
         return z
 
-    module = _module_from_func(add)
+    module = _module_from_func(add, _tensor_arg([2, 2]), _tensor_arg([2, 2]))
     assert isinstance(module, ModuleOp)
     assert any(isinstance(op, func.FuncOp) for op in module.ops)
     assert any(isinstance(op, NnAddOp) for op in module.walk())
@@ -212,7 +216,7 @@ def test_emit_mlir_output() -> None:
         z = x + y
         return z
 
-    module = _module_from_func(add)
+    module = _module_from_func(add, _tensor_arg([2, 2]), _tensor_arg([2, 2]))
     text = _print_module(module)
     assert "nn.add" in text
     assert "func.func" in text
@@ -289,7 +293,7 @@ def test_build_func_op_returns_func_op() -> None:
     ) -> "Tensor[f32, 2, 2]":
         return x + y
 
-    func_op = build_func_op(add)
+    func_op = build_func_op(add, _tensor_arg([2, 2]), _tensor_arg([2, 2]), 4)
     assert isinstance(func_op, func.FuncOp)
     inputs = list(func_op.function_type.inputs)
     assert len(inputs) == 3
@@ -339,7 +343,7 @@ def test_build_func_op_return_type_matches_annotation() -> None:
         return x
 
     func_ast = parse_function(add)
-    func_op = build_func_op(add)
+    func_op = build_func_op(add, _tensor_arg([2, 2]))
     outputs = list(func_op.function_type.outputs)
     assert outputs
     expected = _memory_to_nn_type(func_ast.outputs[0].memory)
@@ -547,7 +551,7 @@ def test_scalar_arg_lowering_in_signature() -> None:
     ) -> "Tensor[f32, 2, 2]":
         return x + y
 
-    func_op = build_func_op(add)
+    func_op = build_func_op(add, _tensor_arg([2, 2]), _tensor_arg([2, 2]), 4)
     inputs = list(func_op.function_type.inputs)
     assert len(inputs) == 3
     assert isinstance(inputs[0], NnMemoryType)
@@ -572,7 +576,7 @@ def test_symbol_scalar_function_uses_symbol_value_type_signature() -> None:
     def only_symbol(expr) -> int:
         return expr
 
-    func_op = build_func_op(only_symbol, globals={"expr": expr, "__builtins__": __builtins__})
+    func_op = build_func_op(only_symbol, expr, globals={"expr": expr, "__builtins__": __builtins__})
     inputs = list(func_op.function_type.inputs)
     outputs = list(func_op.function_type.outputs)
     assert inputs == [SymbolValueType.from_expr("expr")]
@@ -594,11 +598,75 @@ def test_symbol_scalar_function_lowers_add_to_symbol_add() -> None:
     def only_symbol(s: int) -> int:
         return s + s
 
-    func_op = build_func_op(only_symbol)
+    func_op = build_func_op(only_symbol, SymbolDim("s"))
     ops = list(func_op.body.blocks[0].ops)
     symbol_add_ops = [op for op in ops if isinstance(op, SymbolAddOp)]
     assert len(symbol_add_ops) == 1
     assert "symbol.add" in _print_module(ModuleOp([func_op]))
+
+
+# MGEN-019
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-23 00:20:00 +0800
+# 最近一次运行成功时间: 2026-03-23 00:20:00 +0800
+# 功能说明: 验证 build_func_op 省略运行时实参会直接报错。
+# 测试目的: 验证 build_func_op(fn) 不再允许省略函数实际输入参数。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_requires_explicit_runtime_args
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_requires_explicit_runtime_args() -> None:
+    def add(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return x
+
+    with pytest.raises(AstVisitorError, match="requires explicit runtime args") as exc_info:
+        build_func_op(add)
+
+    assert exc_info.value.location is None
+    assert "expected 1, got 0" in str(exc_info.value)
+
+
+# MGEN-019
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-23 00:20:00 +0800
+# 最近一次运行成功时间: 2026-03-23 00:20:00 +0800
+# 功能说明: 验证 build_func_op 的运行时实参数量必须与形参数量匹配。
+# 测试目的: 验证多传或少传实参都属于调用错误。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_runtime_arg_count_mismatch
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_rejects_runtime_arg_count_mismatch() -> None:
+    def add(x: "Tensor[f32, 2, 2]", y: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return x + y
+
+    with pytest.raises(AstVisitorError, match="expected 2, got 1"):
+        build_func_op(add, _tensor_arg([2, 2]))
+
+
+# MGEN-019
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-23 00:20:00 +0800
+# 最近一次运行成功时间: 2026-03-23 00:20:00 +0800
+# 功能说明: 验证 globals/builtins 只参与解析，不能代替 runtime_args。
+# 测试目的: 验证即使 globals/builtins 完整，也必须显式传入函数实际输入参数。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_globals_and_builtins_cannot_replace_runtime_args
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_globals_and_builtins_cannot_replace_runtime_args() -> None:
+    expr = SymbolDim("expr")
+
+    def only_symbol(expr: int) -> int:
+        return expr
+
+    with pytest.raises(AstVisitorError, match="globals/builtins cannot replace function runtime args") as exc_info:
+        build_func_op(only_symbol, globals={"expr": expr}, builtins=__builtins__)
+
+    assert exc_info.value.location is None
 
 
 # AST-005
@@ -639,7 +707,7 @@ def test_lowering_failure_reports_diagnostics() -> None:
         return x + 1
 
     with pytest.raises(AstVisitorError) as exc_info:
-        build_func_op(bad)
+        build_func_op(bad, _tensor_arg([2, 2]))
     assert exc_info.value.location is not None
 
 
@@ -681,7 +749,7 @@ def test_invalid_tensor_return_annotation_reports_diagnostics() -> None:
         return x
 
     with pytest.raises(AstVisitorError) as exc_info:
-        build_func_op(bad_return)
+        build_func_op(bad_return, _tensor_arg([2, 2]))
     assert exc_info.value.location is not None
 
 
@@ -701,7 +769,7 @@ def test_constant_lowering_reports_diagnostics() -> None:
         return 1
 
     with pytest.raises(AstVisitorError) as exc_info:
-        build_func_op(bad)
+        build_func_op(bad, _tensor_arg([2, 2]))
     assert exc_info.value.location is not None
 
 
@@ -743,7 +811,7 @@ def test_return_type_mismatch_reports_diagnostics() -> None:
         return x == y
 
     with pytest.raises(AstVisitorError) as exc_info:
-        build_func_op(bad)
+        build_func_op(bad, _tensor_arg([2, 2]), _tensor_arg([2, 2]))
     assert exc_info.value.location is not None
 
 
@@ -788,7 +856,7 @@ def test_multi_statement_ssa_order_and_reuse() -> None:
         w = z + z
         return w
 
-    func_op = build_func_op(add)
+    func_op = build_func_op(add, _tensor_arg([2, 2]), _tensor_arg([2, 2]))
     ops = [op for op in func_op.body.block.ops if isinstance(op, NnAddOp)]
     assert len(ops) == 2
     first, second = ops
@@ -1010,7 +1078,7 @@ def test_build_func_op_supports_symbolic_for_loop_dma_without_return(monkeypatch
     monkeypatch.setitem(add.__globals__, "deslice", deslice)
     monkeypatch.setitem(add.__globals__, "LoopRange", LoopRange)
 
-    func_op = build_func_op(add)
+    func_op = build_func_op(add, A, B, C, end, start, step)
     assert isinstance(func_op, func.FuncOp)
     assert len(list(func_op.function_type.outputs)) == 0
     loop_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolForOp)]
@@ -1050,7 +1118,7 @@ def test_tensor_binary_implicit_broadcast_lowering() -> None:
     ) -> "Tensor[f32, M, N]":
         return x + y
 
-    func_op = build_func_op(add)
+    func_op = build_func_op(add, _tensor_arg([1, "N"]), _tensor_arg(["M", "N"]))
     broadcast_ops = [op for op in func_op.body.block.ops if isinstance(op, NnBroadcastOp)]
     assert len(broadcast_ops) == 1
     add_op = next(op for op in func_op.body.block.ops if isinstance(op, NnAddOp))
@@ -1075,7 +1143,7 @@ def test_tensor_binary_prepend_broadcast_lowering() -> None:
     ) -> "Tensor[f32, M, N]":
         return x + y
 
-    func_op = build_func_op(add)
+    func_op = build_func_op(add, _tensor_arg(["N"]), _tensor_arg(["M", "N"]))
     broadcast_ops = [op for op in func_op.body.block.ops if isinstance(op, NnBroadcastOp)]
     assert len(broadcast_ops) == 1
     add_op = next(op for op in func_op.body.block.ops if isinstance(op, NnAddOp))
@@ -1126,7 +1194,7 @@ def test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics() -> None
         return x + y
 
     with pytest.raises(AstVisitorError, match="Implicit broadcast dimension mismatch") as exc_info:
-        build_func_op(add)
+        build_func_op(add, _tensor_arg(["A", "B"]), _tensor_arg(["A", "C"]))
     assert exc_info.value.location is not None
 
 # AST-009

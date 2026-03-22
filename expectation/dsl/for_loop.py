@@ -52,7 +52,7 @@ def add(A, B, C, end, start, step):
         deslice(SC, C, [index], [step], [1], MemorySpace.LM)
 
 
-func_op = build_func_op(add)
+func_op = build_func_op(add, A, B, C, end, start, step)
 print(func_op)
 assert isinstance(func_op, FuncOp)
 loop_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolForOp)]

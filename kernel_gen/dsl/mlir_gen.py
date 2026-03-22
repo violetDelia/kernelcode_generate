@@ -9,7 +9,7 @@
 
 使用示例:
 - from kernel_gen.dsl.mlir_gen import build_func_op
-- func_op = build_func_op(fn)
+- func_op = build_func_op(fn, *runtime_args)
 
 关联文件:
 - spec: spec/dsl/mlir_gen.md
@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import inspect
 from typing import Callable
 
 from xdsl.dialects import func
@@ -123,11 +124,27 @@ def _validate_return_type(func_ast: FunctionAST, result_type: object) -> None:
 
 def build_func_op(
     fn: Callable[..., object],
+    *runtime_args: object,
     globals: dict[str, object] | None = None,
     builtins: dict[str, object] | None = None,
     config: dict[str, object] | None = None,
 ) -> func.FuncOp:
     from .ast_visitor import AstVisitorError
+
+    signature = inspect.signature(fn)
+    positional_params = [
+        param
+        for param in signature.parameters.values()
+        if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    if len(runtime_args) != len(positional_params):
+        reason = (
+            f"build_func_op requires explicit runtime args for {fn.__name__}: "
+            f"expected {len(positional_params)}, got {len(runtime_args)}"
+        )
+        if len(runtime_args) == 0 and (globals is not None or builtins is not None):
+            reason += "; globals/builtins cannot replace function runtime args"
+        raise AstVisitorError(reason, location=None)
 
     try:
         if globals is None and builtins is None:
