@@ -1,5 +1,8 @@
 """codex-multi-agents-tmux.sh tests.
 
+创建者: 榕
+最后一次更改: 朽木露琪亚
+
 功能说明:
 - 覆盖 tmux 脚本的 talk / init-env / wake 主流程与错误返回码路径。
 
@@ -7,6 +10,18 @@
 - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
 - Spec 文档: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
 - 测试文件: test/codex-multi-agents/test_codex-multi-agents-tmux.py
+
+使用示例:
+- pytest -q test/codex-multi-agents/test_codex-multi-agents-tmux.py
+
+覆盖率信息:
+- `skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh` 为 `sh` 实现，按 `AGENTS.md` 可豁免 `95%` 覆盖率达标线。
+- 2026-03-22 执行 `pytest -q test/codex-multi-agents/test_codex-multi-agents-tmux.py` 前，先补齐文件级覆盖率说明与测试注释字段。
+- 2026-03-22 尝试使用 `pytest-cov` 采集 shell 脚本覆盖率时，预期仅记录豁免结论，不以 Python 百分比覆盖率作为达标依据。
+
+覆盖率命令:
+- 豁免：`skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh` 为 `sh` 实现，不适用 Python 模块覆盖率统计。
+- 功能校验命令：`pytest -q test/codex-multi-agents/test_codex-multi-agents-tmux.py`
 """
 
 from __future__ import annotations
@@ -120,10 +135,13 @@ def run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.Comp
 
 
 # TC-001
-# Last Run: 2026-03-07 13:42:00 +0800
-# Last Success: 2026-03-07 13:42:00 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
+# 创建者: 榕
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-22 13:11:42 +0800
+# 最近一次运行成功时间: 2026-03-22 13:11:42 +0800
+# 测试目的: 验证 `-talk` 能发送格式化消息并向日志追加一行记录。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
 def test_talk_send_and_append_log_success(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     state_dir = tmp_path / "state"
@@ -159,10 +177,13 @@ def test_talk_send_and_append_log_success(tmp_path: Path) -> None:
 
 
 # TC-002
-# Last Run: 2026-03-07 13:42:00 +0800
-# Last Success: 2026-03-07 13:42:00 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
+# 创建者: 榕
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-22 13:11:42 +0800
+# 最近一次运行成功时间: 2026-03-22 13:11:42 +0800
+# 测试目的: 验证 `-talk` 在目标会话不存在时返回 `RC=3`。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
 def test_talk_target_session_not_found_returns_rc3(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     state_dir = tmp_path / "state"
@@ -193,10 +214,13 @@ def test_talk_target_session_not_found_returns_rc3(tmp_path: Path) -> None:
 
 
 # TC-003
-# Last Run: 2026-03-07 13:42:00 +0800
-# Last Success: 2026-03-07 13:42:00 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
+# 创建者: 榕
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-22 13:11:42 +0800
+# 最近一次运行成功时间: 2026-03-22 13:11:42 +0800
+# 测试目的: 验证 `-talk` 缺少 `-message` 时返回 `RC=1`。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
 def test_talk_missing_message_returns_rc1(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     state_dir = tmp_path / "state"
@@ -225,10 +249,13 @@ def test_talk_missing_message_returns_rc1(tmp_path: Path) -> None:
 
 
 # TC-004
-# Last Run: 2026-03-07 13:42:00 +0800
-# Last Success: 2026-03-07 13:42:00 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
+# 创建者: 榕
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-22 13:11:42 +0800
+# 最近一次运行成功时间: 2026-03-22 13:11:42 +0800
+# 测试目的: 验证运行环境缺少 `tmux` 时返回 `RC=2`。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
 def test_tmux_not_found_returns_rc2(tmp_path: Path) -> None:
     empty_bin = tmp_path / "empty_bin"
     empty_bin.mkdir(parents=True, exist_ok=True)
@@ -256,10 +283,13 @@ def test_tmux_not_found_returns_rc2(tmp_path: Path) -> None:
 
 
 # TC-005
-# Last Run: 2026-03-07 13:42:00 +0800
-# Last Success: 2026-03-07 13:42:00 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
+# 创建者: 榕
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-22 13:11:42 +0800
+# 最近一次运行成功时间: 2026-03-22 13:11:42 +0800
+# 测试目的: 验证 `-talk` 日志锁冲突时返回 `RC=4`。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
 def test_talk_lock_conflict_returns_rc4(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     state_dir = tmp_path / "state"
@@ -294,10 +324,13 @@ def test_talk_lock_conflict_returns_rc4(tmp_path: Path) -> None:
 
 
 # TC-006
-# Last Run: 2026-03-08 12:40:00 +0800
-# Last Success: 2026-03-08 12:40:00 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
+# 创建者: 榕
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-22 13:11:42 +0800
+# 最近一次运行成功时间: 2026-03-22 13:11:42 +0800
+# 测试目的: 验证 `-init-env` 能创建 codex 会话并发送 `/resume` 初始化命令。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
 def test_init_env_codex_creates_session_and_bootstraps(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     state_dir = tmp_path / "state"
@@ -329,10 +362,13 @@ def test_init_env_codex_creates_session_and_bootstraps(tmp_path: Path) -> None:
 
 
 # TC-007
-# Last Run: 2026-03-08 12:40:00 +0800
-# Last Success: 2026-03-08 12:40:00 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
+# 创建者: 榕
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-22 13:11:42 +0800
+# 最近一次运行成功时间: 2026-03-22 13:11:42 +0800
+# 测试目的: 验证 `-init-env` 在名单缺少目标角色时返回 `RC=3`。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
 def test_init_env_missing_agent_returns_rc3(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     state_dir = tmp_path / "state"
@@ -358,10 +394,13 @@ def test_init_env_missing_agent_returns_rc3(tmp_path: Path) -> None:
 
 
 # TC-008
-# Last Run: 2026-03-20 00:00:00 +0800
-# Last Success: 2026-03-20 00:00:00 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
+# 创建者: 榕
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-22 13:11:42 +0800
+# 最近一次运行成功时间: 2026-03-22 13:11:42 +0800
+# 测试目的: 验证 `-wake` 能创建 codex 会话并发送 `codex` 与 `/rename` 命令。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
 def test_wake_codex_creates_session_and_resumes(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     state_dir = tmp_path / "state"
@@ -394,10 +433,13 @@ def test_wake_codex_creates_session_and_resumes(tmp_path: Path) -> None:
 
 
 # TC-009
-# Last Run: 2026-03-20 00:00:00 +0800
-# Last Success: 2026-03-20 00:00:00 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
+# 创建者: 榕
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-22 13:11:42 +0800
+# 最近一次运行成功时间: 2026-03-22 13:11:42 +0800
+# 测试目的: 验证 `-wake` 不接受对话参数并返回 `RC=1`。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
 def test_wake_does_not_accept_talk_arguments(tmp_path: Path) -> None:
     agents_file = tmp_path / "agents-lists.md"
     write_agents_file(agents_file)

@@ -1,265 +1,234 @@
 # codex-multi-agents-task.md
 
-用于对 `TODO.md` 任务进行调度管理（分发、完成、暂停、新建）。
+## 功能简介
+
+定义 `skills/codex-multi-agents/scripts/codex-multi-agents-task.sh` 的任务调度行为，覆盖任务分发、完成、暂停、新建与状态查询，并约束 `TODO.md`/`DONE.md` 的读写规则。
 
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`榕`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/codex-multi-agents/scripts/codex-multi-agents-task.md`](../../../spec/codex-multi-agents/scripts/codex-multi-agents-task.md)
 - `test`：[`test/codex-multi-agents/test_codex-multi-agents-task.py`](../../../test/codex-multi-agents/test_codex-multi-agents-task.py)
 - `功能实现`：[`skills/codex-multi-agents/scripts/codex-multi-agents-task.sh`](../../../skills/codex-multi-agents/scripts/codex-multi-agents-task.sh)
 
-## 背景
+## 依赖
 
-- 用于多线程任务调度。
-- 通过统一维护 `TODO.md` 与 `DONE.md`，实现任务生命周期流转。
+- `TODO.md`：任务数据源。
+- `DONE.md`：完成任务归档文件（与 `TODO.md` 同级目录）。
+- `flock`：用于写操作锁定。
 
-## 文件与表结构约定
+## 目标
 
-### TODO 文件
+- 提供统一的任务分发、完成、暂停、新建与状态查询命令。
+- 维护 `TODO.md` 与 `DONE.md` 的一致性与可追踪性。
+- 在缺参、缺文件、坏数据或锁冲突时给出明确返回码。
 
-- `-file` 指向 `TODO.md`。
-- 必须包含以下两个任务段落（标题名需一致）：
+## 限制与边界
+
+- 只读/写 `TODO.md` 与 `DONE.md`，不得修改其他段落内容。
+- 一次命令只能执行一个主操作：`-dispatch/-done/-pause/-new` 四选一。
+- `TODO.md` 必须包含段落：
   - `## 正在执行的任务`
   - `## 任务列表`
-- 可选包含用户确认段落（标题名需一致）：`## 需要用户确认的事项`
-
-`正在执行的任务` 表头要求：
-
-| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 指派 | 状态 | 用户指导 | 记录文件 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-
-`任务列表` 表头要求：
-
-| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 指派 | 记录文件 |
-| --- | --- | --- | --- | --- | --- | --- |
-
-`需要用户确认的事项` 表头要求：
-
-| 任务 ID | 创建时间 | worktree | 描述 | 用户确认状态 | 记录文件 |
-| --- | --- | --- | --- | --- | --- |
-
-说明：
-- 允许 `TODO.md` 内存在其他段落（例如“需要用户确认的事项”），脚本不得破坏无关段落。
-- `任务 ID` 在 `正在执行的任务` 和 `任务列表` 两张表的并集内必须唯一。
-- `创建时间` 推荐格式：`YYYY-MM-DD HH:MM:SS ±HHMM`。
-
-### DONE 文件
-
-- 路径固定为与 `TODO.md` 同级目录下的 `DONE.md`。
-- 若 `DONE.md` 不存在，脚本需自动创建。
-- `DONE.md` 记录已完成任务，默认表头如下：
-
-| 任务 ID | 描述 | 指派 | 完成状态 | 完成时间 | 日志文件 | 备注 |
-| --- | --- | --- | --- | --- | --- | --- |
-
-说明：
+  - 可选 `## 需要用户确认的事项`
+- `正在执行的任务` 表头：
+  - `| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 指派 | 状态 | 用户指导 | 记录文件 |`
+- `任务列表` 表头：
+  - `| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 指派 | 记录文件 |`
+- `需要用户确认的事项` 表头：
+  - `| 任务 ID | 创建时间 | worktree | 描述 | 用户确认状态 | 记录文件 |`
+- `任务 ID` 在 `正在执行的任务` 与 `任务列表` 中必须唯一。
+- `DONE.md` 位于 `TODO.md` 同级目录；若不存在需自动创建，默认表头：
+  - `| 任务 ID | 描述 | 指派 | 完成状态 | 完成时间 | 日志文件 | 备注 |`
 - `完成状态` 固定写入 `已完成`。
-- `完成时间` 为执行完成操作时的本地时间，格式要求：`YYYY-MM-DD HH:MM:SS ±HHMM`。
+- `创建时间`/`完成时间` 推荐格式：`YYYY-MM-DD HH:MM:SS ±HHMM`。
+- 并发约束：
+  - `-dispatch/-done/-pause/-new` 必须使用 `flock` 锁定目标文件。
+  - `-done` 同时写 `TODO.md` 与 `DONE.md` 时，锁顺序固定为先 `TODO.md` 后 `DONE.md`。
+  - `-status` 只读，不加锁。
+- 返回码约定：
+  - `0` 成功。
+  - `1` 参数错误。
+  - `2` 文件错误。
+  - `3` 数据错误（任务不存在、ID 冲突、表头非法）。
+  - `4` 锁冲突或并发错误。
+  - `5` 内部错误。
 
-## 参数约定
+## 公开接口
 
-- `-file`：`TODO.md` 文件路径。
-- `-dispatch`：分发任务（从任务列表移入正在执行）。
-- `-done`：完成任务（从正在执行移除并写入 `DONE.md`）。
-- `-pause`：暂停任务（正在执行中目标任务状态改为 `暂停`）。
-- `-new`：新建任务（写入任务列表）。
-- `-status`：查看任务列表或正在执行任务。
-- `-task_id`：目标任务 ID（用于 `-dispatch/-done/-pause`）。
-- `-to`：指派对象（worker 名称）。
-- `-from`：发起人（仅 `-new` 使用，可选）。
-- `-info`：任务描述（用于 `-new`）。
-- `-worktree`：任务对应的工作树（仅 `-new` 使用，可选）。
-- `-log`：任务日志文件路径（用于 `-done`）。
-- `-log` 在 `-new` 场景下写入 `记录文件` 列（可选）。
-- `-doing`：`-status` 下查看正在执行任务。
-- `-task-list`：`-status` 下查看任务列表。
-
-## 并发约束
-
-- 所有会写文件的操作（`-dispatch/-done/-pause/-new`）必须使用 `flock`。
-- 锁对象为目标文件本体，不创建额外 `.lock` 文件。
-- `-done` 涉及 `TODO.md` 与 `DONE.md` 双文件写入时：
-  - 必须保证两个文件修改原子可追踪（至少同一次命令内完成）。
-  - 锁顺序固定：先锁 `TODO.md`，再锁 `DONE.md`，避免死锁。
-- `-status` 为只读操作，不加锁。
-
-## 功能
-
-### 查看状态
-
-命令：
-
-```bash
-codex-multi-agents-task.sh "./skills/codex-multi-agents/examples/TODO.md" -file -status -doing
-codex-multi-agents-task.sh "./skills/codex-multi-agents/examples/TODO.md" -file -status -task-list
-```
+### `codex-multi-agents-task.sh`
 
 功能说明：
 
-- `-doing`：输出 `正在执行的任务` 表头与数据行。
-- `-task-list`：输出 `任务列表` 表头与数据行。
-- 仅读取 `TODO.md`，不修改文件内容。
+- 统一处理任务调度与查询命令。
 
-### 分发任务
+参数说明：
 
-命令：
+- `-file <path>`：`TODO.md` 文件路径（必填）。
+
+使用示例：
+
+```bash
+codex-multi-agents-task.sh -file "./skills/codex-multi-agents/examples/TODO.md" -status -doing
+```
+
+注意事项：
+
+- `-file` 必须存在且结构合法。
+
+返回与限制：
+
+- 返回码遵循“限制与边界”约定。
+
+#### `-status`
+
+功能说明：
+
+- 输出任务状态表（正在执行或任务列表）。
+
+参数说明：
+
+- `-status`：查看任务状态。
+- `-doing`：输出正在执行任务表。
+- `-task-list`：输出任务列表表。
+
+使用示例：
+
+```bash
+codex-multi-agents-task.sh -file "./skills/codex-multi-agents/examples/TODO.md" -status -doing
+```
+
+注意事项：
+
+- `-doing` 与 `-task-list` 必须且只能二选一。
+
+返回与限制：
+
+- 成功返回 `0`，参数组合错误返回 `1`。
+
+#### `-dispatch`
+
+功能说明：
+
+- 从任务列表分发任务至正在执行区。
+
+参数说明：
+
+- `-dispatch`：执行分发操作。
+- `-task_id <id>`：目标任务 ID（必填）。
+- `-to <name>`：指派对象（必填）。
+
+使用示例：
 
 ```bash
 codex-multi-agents-task.sh -file "./skills/codex-multi-agents/examples/TODO.md" -dispatch -task_id "EX-3" -to "worker-a"
 ```
 
-功能说明：
-
-- 从 `任务列表` 按 `任务 ID` 找到目标任务。
-- 将该任务从 `任务列表` 删除，并追加到 `正在执行的任务`。
-- 若 `worktree` 字段为空，保持空值（不自动写入 `.`）。
-- 迁移后字段写入规则：
-  - `任务 ID`：沿用原值。
-  - `发起人`：沿用原值。
-  - `创建时间`：沿用原值。
-  - `worktree`：沿用原值（允许为空）。
-  - `描述`：沿用原值。
-  - `指派`：写入 `-to`。
-  - `状态`：写入 `进行中`。
-  - `用户指导`：默认空值（保留空列）。
-  - `记录文件`：沿用原值。
-
 注意事项：
 
-- `-dispatch` 必须携带 `-task_id`、`-to`。
-- 若任务不在 `任务列表` 中，返回 `RC=3`。
-- 若同 ID 已存在于 `正在执行的任务`，返回 `RC=3`。
+- 若任务不在任务列表中，返回 `3`。
+- 若 `worktree` 为空，保持空值。
+- 迁移后写入 `状态=进行中`，`用户指导` 保持空列。
 
-### 完成任务
+返回与限制：
 
-命令：
+- 成功返回 `0`；任务不存在或冲突返回 `3`。
+
+#### `-done`
+
+功能说明：
+
+- 完成任务并写入 `DONE.md`。
+
+参数说明：
+
+- `-done`：执行完成操作。
+- `-task_id <id>`：目标任务 ID（必填）。
+- `-log <path>`：日志文件路径（必填，写入记录）。
+
+使用示例：
 
 ```bash
-codex-multi-agents-task.sh -file "./skills/codex-multi-agents/examples/TODO.md" -done -task_id "EX-1" -log "./agents/codex-multi-agents/log/task-EX-1.log"
+codex-multi-agents-task.sh -file "./skills/codex-multi-agents/examples/TODO.md" -done -task_id "EX-1" -log "./log/record.md"
 ```
-
-功能说明：
-
-- 从 `正在执行的任务` 按 `任务 ID` 找到目标任务。
-- 从 `正在执行的任务` 中移除该任务。
-- 在同级 `DONE.md` 追加一条完成记录，至少包含：
-  - `任务 ID`
-  - `描述`
-  - `指派`
-  - `完成状态`（固定 `已完成`）
-  - `完成时间`
-  - `日志文件`（写入 `-log`）
-- 若 `DONE.md` 不存在，自动创建并写入表头。
 
 注意事项：
 
-- `-done` 必须携带 `-task_id`、`-log`。
-- 若任务不在 `正在执行的任务` 中，返回 `RC=3`。
-- `-log` 仅作为记录字段写入，不强制校验日志文件是否存在。
+- 任务不存在返回 `3`。
+- `-log` 仅写入记录字段，不校验文件存在性。
 
-### 暂停任务
+返回与限制：
 
-命令：
+- 成功返回 `0`；失败返回对应错误码。
+
+#### `-pause`
+
+功能说明：
+
+- 暂停正在执行的任务。
+
+参数说明：
+
+- `-pause`：执行暂停操作。
+- `-task_id <id>`：目标任务 ID（必填）。
+
+使用示例：
 
 ```bash
 codex-multi-agents-task.sh -file "./skills/codex-multi-agents/examples/TODO.md" -pause -task_id "EX-2"
 ```
 
+注意事项：
+
+- 任务不存在返回 `3`。
+
+返回与限制：
+
+- 成功返回 `0`；失败返回对应错误码。
+
+#### `-new`
+
 功能说明：
 
-- 在 `正在执行的任务` 中定位目标 `任务 ID`。
-- 将目标任务 `状态` 更新为 `暂停`。
-- 其余字段保持不变。
+- 新建任务并写入任务列表。
+
+参数说明：
+
+- `-new`：执行新建操作。
+- `-info <desc>`：任务描述（必填）。
+- `-to <name>`：指派对象（可选）。
+- `-from <name>`：发起人（可选）。
+- `-worktree <path>`：工作树（可选）。
+- `-log <path>`：记录文件（可选，写入“记录文件”列）。
+
+使用示例：
+
+```bash
+codex-multi-agents-task.sh -file "./skills/codex-multi-agents/examples/TODO.md" -new -info "补充单元测试" -to "worker-b"
+```
 
 注意事项：
 
-- `-pause` 必须携带 `-task_id`。
-- 若任务不在 `正在执行的任务` 中，返回 `RC=3`。
+- 任务 ID 按“日期-hash”规则生成，推荐格式 `T-YYYYMMDD-<8位hash>`。
 
-### 新建任务
+返回与限制：
 
-命令：
-
-```bash
-codex-multi-agents-task.sh -file "./skills/codex-multi-agents/examples/TODO.md" -new -info "实现任务调度器告警" -to "worker-b" -from "李白" -worktree "repo-x" -log "./log/record-1.log"
-```
-
-```bash
-codex-multi-agents-task.sh -file "./skills/codex-multi-agents/examples/TODO.md" -new -info "补充单元测试"
-```
-
-`-to/-from/-worktree/-log` 为可选参数，其中 `-log` 对应 `记录文件`。
-功能说明：
-- 按“日期-hash”规则生成新任务 ID。
-- 任务 ID 推荐格式：`T-YYYYMMDD-<8位hash>`。
-- 将新任务追加到 `任务列表`。
-- 字段写入规则：
-  - `任务 ID`：自动生成。
-  - `发起人`：写入 `-from`；未提供则写空值。
-  - `描述`：写入 `-info`。
-  - `指派`：若传入 `-to` 则写入其值，否则写空值。
-  - `创建时间`：写入创建当下本地时间。
-  - `worktree`：写入 `-worktree`；未提供则写空值。
-  - `记录文件`：写入 `-log`；未提供则写空值。
-
-注意事项：
-
-- `-new` 必须携带 `-info`。
-- 生成 ID 若发生冲突，需自动重试直到唯一。
-
-## 参数组合约束
-
-- 一次命令只能执行一个主操作：`-dispatch/-done/-pause/-new` 四选一。
-- `-dispatch` 仅接受：`-file -task_id -to`。
-- `-done` 仅接受：`-file -task_id -log`。
-- `-pause` 仅接受：`-file -task_id`。
-- `-new` 仅接受：`-file -info [-to] [-from] [-worktree] [-log]`。
-- `-status` 仅接受：`-file -status -doing` 或 `-file -status -task-list`。
-- 出现未知参数或参数组合非法，返回 `RC=1`。
-
-## 返回与错误
-
-### 成功返回说明
-
-- 返回码：`0`
-- 含义：命令执行成功，目标操作已完成。
-- 输出：在标准输出（stdout）打印结果信息。
-
-### 失败返回说明
-
-- 返回码：`1`
-- 含义：参数错误（参数缺失、参数组合非法、未知参数）。
-- 输出：在标准错误（stderr）中打印参数错误原因。
-
-- 返回码：`2`
-- 含义：文件错误（`-file` 不存在、不可读、格式不合法）。
-- 输出：在标准错误（stderr）中打印文件路径和失败原因。
-
-- 返回码：`3`
-- 含义：数据错误（任务不存在、任务 ID 冲突、表头字段非法）。
-- 输出：在标准错误（stderr）中打印具体数据校验失败原因。
-
-- 返回码：`4`
-- 含义：并发或锁错误（文件加锁失败、锁超时、锁冲突）。
-- 输出：在标准错误（stderr）中打印锁状态与处理建议。
-
-- 返回码：`5`
-- 含义：未分类内部错误（脚本执行异常）。
-- 输出：在标准错误（stderr）中打印错误摘要。
+- 成功返回 `0`；失败返回对应错误码。
 
 ## 测试
 
-- 测试文件位置：[`test/codex-multi-agents/test_codex-multi-agents-task.py`](../../../test/codex-multi-agents/test_codex-multi-agents-task.py)
+- 测试文件：[`test/codex-multi-agents/test_codex-multi-agents-task.py`](../../../test/codex-multi-agents/test_codex-multi-agents-task.py)
 - 执行命令：`pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py`
+- 覆盖率命令：`pytest -q --cov=skills/codex-multi-agents/scripts/codex-multi-agents-task.sh --cov-branch --cov-report=term-missing test/codex-multi-agents/test_codex-multi-agents-task.py`
+- 当前覆盖率信息：`N/A`（shell 脚本由子进程执行，`pytest-cov` 会报告 `no-data-collected`；按规则豁免 `95%` 覆盖率达标线，以 `TC-001..015` 用例覆盖为当前基线）
 
 ### 测试目标
 
-- 验证任务四个核心操作：分发、完成、暂停、新建。
-- 验证跨文件流转：`TODO.md -> DONE.md`。
-- 验证返回码约定：`0/1/2/3/4/5`。
-- 验证并发写入锁冲突返回 `RC=4`。
+- 验证任务分发、完成、暂停、新建与状态查询。
+- 验证 `TODO.md` 与 `DONE.md` 的跨文件流转。
+- 验证返回码约定 `0/1/2/3/4/5`。
+- 验证并发锁冲突返回 `RC=4`。
 
 ### 功能与用例清单
 

@@ -392,6 +392,7 @@ dst = cast(src, NumericType.Float16)
 | TC-OP-DMA-AF-003 | `alloc` 非法 shape/stride | 非法 `shape` 或 rank/stride 不一致时报错 | `test_alloc_invalid_shape_or_stride` |
 | TC-OP-DMA-AF-004 | `free` 基础释放 | `free` 接受 `Memory` 并返回 `None` | `test_free_returns_none` |
 | TC-OP-DMA-AF-005 | `free` 类型错误 | 非 `Memory` 输入触发 `TypeError` | `test_free_type_error` |
+| TC-OP-DMA-AF-006 | `alloc` 类型错误 | `dtype/space` 类型不合法触发错误 | `test_alloc_invalid_dtype_or_space` |
 | TC-OP-DMA-001 | `copy` 合法通过 | `source/target` 完全匹配时搬运语义成立 | `test_copy_success` |
 | TC-OP-DMA-002 | `copy` 形状不匹配 | 整块搬运 `shape` mismatch 报错 | `test_copy_shape_mismatch` |
 | TC-OP-DMA-010 | `copy` stride 不匹配 | 整块搬运 `stride` mismatch 报错 | `test_copy_stride_mismatch` |
@@ -413,3 +414,9 @@ dst = cast(src, NumericType.Float16)
 | TC-OP-DMA-019 | `reshape` 基础变换 | `reshape` 返回新 `Memory` 且 `dtype/space/format` 继承 | `test_reshape_returns_memory` |
 | TC-OP-DMA-020 | `reshape` 连续布局 | 连续布局下 `reshape` 生成默认步幅 | `test_reshape_default_stride_contiguous` |
 | TC-OP-DMA-021 | `reshape` 非法参数 | 非法 `shape` 或非连续布局触发错误 | `test_reshape_invalid_shape_or_stride` |
+| TC-OP-DMA-022 | `copy` dtype mismatch | `source/target` dtype 不一致触发错误 | `test_copy_dtype_mismatch` |
+| TC-OP-DMA-023 | `load` 空间类型错误 | `space` 类型不合法触发 `TypeError` | `test_load_invalid_space_type` |
+| TC-OP-DMA-024 | `load` sizes 正长度 | `sizes` 包含非正维度触发错误 | `test_dma_invalid_sizes` |
+| TC-OP-DMA-025 | `store` dtype mismatch | `source/target` dtype 不一致触发错误 | `test_store_dtype_mismatch` |
+| TC-OP-DMA-026 | `store` 基础写回 | 合法写回返回 `None` | `test_store_success` |
+| TC-OP-DMA-027 | `cast` 支持转换 | 支持同 dtype 与整数类型间转换 | `test_cast_supported_conversions` |

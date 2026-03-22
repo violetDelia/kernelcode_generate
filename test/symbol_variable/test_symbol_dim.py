@@ -1,7 +1,7 @@
 """symbol_dim tests.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: 咯咯咯
 
 功能说明:
 - 覆盖 SymbolDim 构造、运算、比较、动态性判断与错误分支。
@@ -13,6 +13,9 @@
 - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
 - Spec 文档: spec/symbol_variable/symbol_dim.md
 - 测试文件: test/symbol_variable/test_symbol_dim.py
+
+当前覆盖率信息: 100%（2026-03-22 13:32:35 +0800）
+覆盖率命令: pytest -q --cov=kernel_gen.symbol_variable.symbol_dim --cov-report=term-missing test/symbol_variable/test_symbol_dim.py
 """
 
 from __future__ import annotations
@@ -32,10 +35,10 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 # SD-001
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-20 10:21:10 +0800
-# 最近一次运行成功时间: 2026-03-20 10:21:10 +0800
-# 功能说明: 验证 int 输入可构造 SymbolDim。
+# 最后一次更改: 咯咯咯
+# 最近一次运行测试时间: 2026-03-22 13:32:35 +0800
+# 最近一次运行成功时间: 2026-03-22 13:32:35 +0800
+# 测试目的: 验证 int 输入可构造 SymbolDim。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_init_accepts_int
 # 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
@@ -43,14 +46,15 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 def test_init_accepts_int() -> None:
     dim = SymbolDim(8)
     assert dim.get_symbol() == sp.Integer(8)
+    assert repr(dim) == "8"
 
 
 # SD-002
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-20 10:21:10 +0800
-# 最近一次运行成功时间: 2026-03-20 10:21:10 +0800
-# 功能说明: 验证 str 符号输入可构造 SymbolDim，非纯数字字符串按符号名处理。
+# 最后一次更改: 咯咯咯
+# 最近一次运行测试时间: 2026-03-22 13:32:35 +0800
+# 最近一次运行成功时间: 2026-03-22 13:32:35 +0800
+# 测试目的: 验证 str 符号输入可构造 SymbolDim，非纯数字字符串按符号名处理。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_init_accepts_symbol_string
 # 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
@@ -66,10 +70,10 @@ def test_init_accepts_symbol_string() -> None:
 
 # SD-003
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-20 10:21:10 +0800
-# 最近一次运行成功时间: 2026-03-20 10:21:10 +0800
-# 功能说明: 验证 sympy.Basic 输入可构造 SymbolDim。
+# 最后一次更改: 咯咯咯
+# 最近一次运行测试时间: 2026-03-22 13:32:35 +0800
+# 最近一次运行成功时间: 2026-03-22 13:32:35 +0800
+# 测试目的: 验证 sympy.Basic 输入可构造 SymbolDim。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_init_accepts_sympy_basic
 # 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
@@ -85,10 +89,10 @@ def test_init_accepts_sympy_basic() -> None:
 
 # SD-004
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-20 10:21:10 +0800
-# 最近一次运行成功时间: 2026-03-20 10:21:10 +0800
-# 功能说明: 验证加减乘除运算返回 SymbolDim。
+# 最后一次更改: 咯咯咯
+# 最近一次运行测试时间: 2026-03-22 13:32:35 +0800
+# 最近一次运行成功时间: 2026-03-22 13:32:35 +0800
+# 测试目的: 验证加减乘除运算返回 SymbolDim。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_arithmetic_ops
 # 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
@@ -136,10 +140,10 @@ def test_arithmetic_ops() -> None:
 
 # SD-005
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-20 10:21:10 +0800
-# 最近一次运行成功时间: 2026-03-20 10:21:10 +0800
-# 功能说明: 验证比较等价性返回 bool。
+# 最后一次更改: 咯咯咯
+# 最近一次运行测试时间: 2026-03-22 13:32:35 +0800
+# 最近一次运行成功时间: 2026-03-22 13:32:35 +0800
+# 测试目的: 验证比较等价性返回 bool。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_equality
 # 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
@@ -154,10 +158,10 @@ def test_equality() -> None:
 
 # SD-006
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-20 10:21:10 +0800
-# 最近一次运行成功时间: 2026-03-20 10:21:10 +0800
-# 功能说明: 验证动态性判断。
+# 最后一次更改: 咯咯咯
+# 最近一次运行测试时间: 2026-03-22 13:32:35 +0800
+# 最近一次运行成功时间: 2026-03-22 13:32:35 +0800
+# 测试目的: 验证动态性判断。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_is_dynamic
 # 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
@@ -169,10 +173,10 @@ def test_is_dynamic() -> None:
 
 # SD-007
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-20 10:21:10 +0800
-# 最近一次运行成功时间: 2026-03-20 10:21:10 +0800
-# 功能说明: 验证纯数字字符串输入抛 ValueError。
+# 最后一次更改: 咯咯咯
+# 最近一次运行测试时间: 2026-03-22 13:32:35 +0800
+# 最近一次运行成功时间: 2026-03-22 13:32:35 +0800
+# 测试目的: 验证纯数字字符串输入抛 ValueError。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_numeric_string_rejected
 # 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
@@ -193,10 +197,10 @@ def test_numeric_string_rejected() -> None:
 
 # SD-008
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-20 10:21:10 +0800
-# 最近一次运行成功时间: 2026-03-20 10:21:10 +0800
-# 功能说明: 验证空白字符串输入抛 ValueError。
+# 最后一次更改: 咯咯咯
+# 最近一次运行测试时间: 2026-03-22 13:32:35 +0800
+# 最近一次运行成功时间: 2026-03-22 13:32:35 +0800
+# 测试目的: 验证空白字符串输入抛 ValueError。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_blank_string_rejected
 # 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
@@ -215,10 +219,10 @@ def test_blank_string_rejected() -> None:
 
 # SD-009
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-20 10:21:10 +0800
-# 最近一次运行成功时间: 2026-03-20 10:21:10 +0800
-# 功能说明: 验证非法类型输入抛 TypeError。
+# 最后一次更改: 咯咯咯
+# 最近一次运行测试时间: 2026-03-22 13:32:35 +0800
+# 最近一次运行成功时间: 2026-03-22 13:32:35 +0800
+# 测试目的: 验证非法类型输入抛 TypeError。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_invalid_type_rejected
 # 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md

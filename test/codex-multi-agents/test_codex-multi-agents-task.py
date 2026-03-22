@@ -1,15 +1,27 @@
 """codex-multi-agents-task.sh tests.
 
 创建者: 榕
-最后一次更改: 榕
+最后一次更改: 小李飞刀
 
 功能说明:
-- 覆盖 task 脚本的任务分发、完成、暂停、新建与错误返回码路径。
+- 覆盖 task 脚本的任务分发、完成、暂停、新建、状态查询与错误返回码路径。
+
+覆盖率信息:
+- 当前覆盖率: `N/A`。该链路的功能实现为 shell 脚本 `skills/codex-multi-agents/scripts/codex-multi-agents-task.sh`，`pytest-cov` 无法直接采集脚本覆盖率，执行覆盖率命令会得到 `no-data-collected`。
+- 达标判定: shell 实现按规则豁免 `95%` 覆盖率达标线。
+- 当前以 `TC-001..015` 共 15 条测试用例作为覆盖基线，覆盖分发、完成、暂停、新建、状态查询、文件错误、结构错误与锁冲突路径。
+
+覆盖率命令:
+- `pytest -q --cov=skills/codex-multi-agents/scripts/codex-multi-agents-task.sh --cov-branch --cov-report=term-missing test/codex-multi-agents/test_codex-multi-agents-task.py`
+- 功能校验命令: `pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py`
 
 关联文件:
-- 功能实现: /home/lfr/kernelcode_generate/skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
-- Spec 文档: /home/lfr/kernelcode_generate/spec/codex-multi-agents/scripts/codex-multi-agents-task.md
-- 测试文件: /home/lfr/kernelcode_generate/test/codex-multi-agents/test_codex-multi-agents-task.py
+- 功能实现: `skills/codex-multi-agents/scripts/codex-multi-agents-task.sh`
+- Spec 文档: `spec/codex-multi-agents/scripts/codex-multi-agents-task.md`
+- 测试文件: `test/codex-multi-agents/test_codex-multi-agents-task.py`
+
+使用示例:
+- `pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py`
 """
 
 from __future__ import annotations
@@ -137,9 +149,12 @@ def parse_section_rows(text: str, heading: str) -> list[list[str]]:
 
 # TC-001
 # 创建者: 榕
-# 最后一次更改: 榕
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-22 14:43:29 +0800
+# 最近一次运行成功时间: 2026-03-22 14:43:29 +0800
+# 测试目的: 验证 -dispatch 成功将任务从任务列表移入正在执行并写入指派/状态。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
 def test_dispatch_task_success(tmp_path: Path) -> None:
     todo = tmp_path / "TODO.md"
     write_todo_file(todo)
@@ -166,9 +181,12 @@ def test_dispatch_task_success(tmp_path: Path) -> None:
 
 # TC-002
 # 创建者: 榕
-# 最后一次更改: 榕
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-22 14:43:29 +0800
+# 最近一次运行成功时间: 2026-03-22 14:43:29 +0800
+# 测试目的: 验证 -dispatch 任务不存在返回 RC=3。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
 def test_dispatch_missing_task_returns_rc3(tmp_path: Path) -> None:
     todo = tmp_path / "TODO.md"
     write_todo_file(todo)
@@ -181,9 +199,12 @@ def test_dispatch_missing_task_returns_rc3(tmp_path: Path) -> None:
 
 # TC-003
 # 创建者: 榕
-# 最后一次更改: 榕
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-22 14:43:29 +0800
+# 最近一次运行成功时间: 2026-03-22 14:43:29 +0800
+# 测试目的: 验证 -done 成功移除任务并写入 DONE.md。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
 def test_done_task_moves_to_done_file_success(tmp_path: Path) -> None:
     todo = tmp_path / "TODO.md"
     write_todo_file(todo)
@@ -209,9 +230,12 @@ def test_done_task_moves_to_done_file_success(tmp_path: Path) -> None:
 
 # TC-004
 # 创建者: 榕
-# 最后一次更改: 榕
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-22 14:43:29 +0800
+# 最近一次运行成功时间: 2026-03-22 14:43:29 +0800
+# 测试目的: 验证 -done 任务不存在返回 RC=3。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
 def test_done_missing_task_returns_rc3(tmp_path: Path) -> None:
     todo = tmp_path / "TODO.md"
     write_todo_file(todo)
@@ -224,9 +248,12 @@ def test_done_missing_task_returns_rc3(tmp_path: Path) -> None:
 
 # TC-005
 # 创建者: 榕
-# 最后一次更改: 榕
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-22 14:43:29 +0800
+# 最近一次运行成功时间: 2026-03-22 14:43:29 +0800
+# 测试目的: 验证 -pause 成功将任务状态更新为 暂停。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
 def test_pause_task_success(tmp_path: Path) -> None:
     todo = tmp_path / "TODO.md"
     write_todo_file(todo)
@@ -242,9 +269,12 @@ def test_pause_task_success(tmp_path: Path) -> None:
 
 # TC-006
 # 创建者: 榕
-# 最后一次更改: 榕
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-22 14:43:29 +0800
+# 最近一次运行成功时间: 2026-03-22 14:43:29 +0800
+# 测试目的: 验证 -pause 任务不存在返回 RC=3。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
 def test_pause_missing_task_returns_rc3(tmp_path: Path) -> None:
     todo = tmp_path / "TODO.md"
     write_todo_file(todo)
@@ -257,9 +287,12 @@ def test_pause_missing_task_returns_rc3(tmp_path: Path) -> None:
 
 # TC-007
 # 创建者: 榕
-# 最后一次更改: 榕
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-22 14:43:29 +0800
+# 最近一次运行成功时间: 2026-03-22 14:43:29 +0800
+# 测试目的: 验证 -new 带指派创建任务并写入任务列表。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
 def test_new_task_with_assignee_success(tmp_path: Path) -> None:
     todo = tmp_path / "TODO.md"
     write_todo_file(todo)
@@ -297,9 +330,12 @@ def test_new_task_with_assignee_success(tmp_path: Path) -> None:
 
 # TC-008
 # 创建者: 榕
-# 最后一次更改: 榕
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-22 14:43:29 +0800
+# 最近一次运行成功时间: 2026-03-22 14:43:29 +0800
+# 测试目的: 验证 -new 不带指派创建任务并写入任务列表。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
 def test_new_task_without_assignee_success(tmp_path: Path) -> None:
     todo = tmp_path / "TODO.md"
     write_todo_file(todo)
@@ -323,9 +359,12 @@ def test_new_task_without_assignee_success(tmp_path: Path) -> None:
 
 # TC-009
 # 创建者: 榕
-# 最后一次更改: 榕
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-22 14:43:29 +0800
+# 最近一次运行成功时间: 2026-03-22 14:43:29 +0800
+# 测试目的: 验证缺少必填参数返回 RC=1。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
 def test_argument_error_returns_rc1(tmp_path: Path) -> None:
     todo = tmp_path / "TODO.md"
     write_todo_file(todo)
@@ -338,9 +377,12 @@ def test_argument_error_returns_rc1(tmp_path: Path) -> None:
 
 # TC-010
 # 创建者: 榕
-# 最后一次更改: 榕
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-22 14:43:29 +0800
+# 最近一次运行成功时间: 2026-03-22 14:43:29 +0800
+# 测试目的: 验证 TODO 文件不存在返回 RC=2。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
 def test_file_not_found_returns_rc2(tmp_path: Path) -> None:
     missing = tmp_path / "missing.md"
 
@@ -352,9 +394,12 @@ def test_file_not_found_returns_rc2(tmp_path: Path) -> None:
 
 # TC-011
 # 创建者: 榕
-# 最后一次更改: 榕
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-22 14:43:29 +0800
+# 最近一次运行成功时间: 2026-03-22 14:43:29 +0800
+# 测试目的: 验证表结构不合法返回 RC=2。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
 def test_invalid_todo_structure_returns_rc2(tmp_path: Path) -> None:
     todo = tmp_path / "TODO.md"
     todo.write_text(
@@ -379,9 +424,12 @@ def test_invalid_todo_structure_returns_rc2(tmp_path: Path) -> None:
 
 # TC-012
 # 创建者: 榕
-# 最后一次更改: 榕
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-22 14:43:29 +0800
+# 最近一次运行成功时间: 2026-03-22 14:43:29 +0800
+# 测试目的: 验证锁冲突时返回 RC=4。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
 def test_lock_conflict_returns_rc4(tmp_path: Path) -> None:
     todo = tmp_path / "TODO.md"
     write_todo_file(todo)
@@ -396,9 +444,12 @@ def test_lock_conflict_returns_rc4(tmp_path: Path) -> None:
 
 # TC-013
 # 创建者: 榕
-# 最后一次更改: 榕
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-22 14:43:29 +0800
+# 最近一次运行成功时间: 2026-03-22 14:43:29 +0800
+# 测试目的: 验证 -status -doing 输出正在执行任务表。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
 def test_status_doing_outputs_running_table(tmp_path: Path) -> None:
     todo = tmp_path / "TODO.md"
     write_todo_file(todo)
@@ -414,9 +465,12 @@ def test_status_doing_outputs_running_table(tmp_path: Path) -> None:
 
 # TC-014
 # 创建者: 榕
-# 最后一次更改: 榕
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-22 14:43:29 +0800
+# 最近一次运行成功时间: 2026-03-22 14:43:29 +0800
+# 测试目的: 验证 -status -task-list 输出任务列表表。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
 def test_status_task_list_outputs_list_table(tmp_path: Path) -> None:
     todo = tmp_path / "TODO.md"
     write_todo_file(todo)
@@ -432,9 +486,12 @@ def test_status_task_list_outputs_list_table(tmp_path: Path) -> None:
 
 # TC-015
 # 创建者: 榕
-# 最后一次更改: 榕
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-22 14:43:29 +0800
+# 最近一次运行成功时间: 2026-03-22 14:43:29 +0800
+# 测试目的: 验证 -status 参数组合错误返回 RC=1。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
 def test_status_requires_exactly_one_mode(tmp_path: Path) -> None:
     todo = tmp_path / "TODO.md"
     write_todo_file(todo)

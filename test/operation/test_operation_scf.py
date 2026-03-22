@@ -1,10 +1,18 @@
 """scf operation API tests.
 
 创建者: 摸鱼小分队
-最后一次更改: 摸鱼小分队
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 kernel_gen/operation/scf.py 的 loop 语义。
+
+当前覆盖率信息:
+- 统计时间: 2026-03-22 14:12:16 +0800
+- 覆盖率结果: 97% (34 statements, 1 missed line)
+- 达标结论: 已达到 95% 达标线
+
+覆盖率命令:
+- pytest --cov=kernel_gen.operation.scf --cov-report=term-missing test/operation/test_operation_scf.py
 
 使用示例:
 - pytest -q test/operation/test_operation_scf.py
@@ -32,10 +40,10 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 # TC-OP-SCF-001
 # 创建者: 摸鱼小分队
-# 最后一次更改: 摸鱼小分队
-# 最近一次运行测试时间: 2026-03-21 21:05:56 +0800
-# 最近一次运行成功时间: 2026-03-21 21:05:56 +0800
-# 功能说明: 验证 loop 纯整数输入等价于 range 半开区间。
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-22 13:15:14 +0800
+# 最近一次运行成功时间: 2026-03-22 13:15:14 +0800
+# 测试目的: 验证 loop 纯整数输入等价于 range 半开区间。
 # 使用示例: pytest -q test/operation/test_operation_scf.py -k test_loop_integer_range
 # 对应功能实现文件路径: kernel_gen/operation/scf.py
 # 对应 spec 文件路径: spec/operation/scf.md
@@ -46,10 +54,10 @@ def test_loop_integer_range() -> None:
 
 # TC-OP-SCF-002
 # 创建者: 摸鱼小分队
-# 最后一次更改: 摸鱼小分队
-# 最近一次运行测试时间: 2026-03-21 21:05:56 +0800
-# 最近一次运行成功时间: 2026-03-21 21:05:56 +0800
-# 功能说明: 验证负步长半开区间语义。
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-22 13:15:14 +0800
+# 最近一次运行成功时间: 2026-03-22 13:15:14 +0800
+# 测试目的: 验证负步长半开区间语义。
 # 使用示例: pytest -q test/operation/test_operation_scf.py -k test_loop_negative_step
 # 对应功能实现文件路径: kernel_gen/operation/scf.py
 # 对应 spec 文件路径: spec/operation/scf.md
@@ -60,10 +68,10 @@ def test_loop_negative_step() -> None:
 
 # TC-OP-SCF-003
 # 创建者: 摸鱼小分队
-# 最后一次更改: 摸鱼小分队
-# 最近一次运行测试时间: 2026-03-21 21:05:56 +0800
-# 最近一次运行成功时间: 2026-03-21 21:05:56 +0800
-# 功能说明: 验证 SymbolDim 输入返回 LoopRange 并保留属性。
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-22 13:15:14 +0800
+# 最近一次运行成功时间: 2026-03-22 13:15:14 +0800
+# 测试目的: 验证 SymbolDim 输入返回 LoopRange 并保留属性。
 # 使用示例: pytest -q test/operation/test_operation_scf.py -k test_loop_symbol_dim_range
 # 对应功能实现文件路径: kernel_gen/operation/scf.py
 # 对应 spec 文件路径: spec/operation/scf.md
@@ -81,10 +89,10 @@ def test_loop_symbol_dim_range() -> None:
 
 # TC-OP-SCF-004
 # 创建者: 摸鱼小分队
-# 最后一次更改: 摸鱼小分队
-# 最近一次运行测试时间: 2026-03-21 21:05:56 +0800
-# 最近一次运行成功时间: 2026-03-21 21:05:56 +0800
-# 功能说明: 验证 step 为 0 时抛出 ValueError。
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-22 13:15:14 +0800
+# 最近一次运行成功时间: 2026-03-22 13:15:14 +0800
+# 测试目的: 验证 step 为 0 时抛出 ValueError。
 # 使用示例: pytest -q test/operation/test_operation_scf.py -k test_loop_step_zero
 # 对应功能实现文件路径: kernel_gen/operation/scf.py
 # 对应 spec 文件路径: spec/operation/scf.md
@@ -96,10 +104,10 @@ def test_loop_step_zero() -> None:
 
 # TC-OP-SCF-005
 # 创建者: 摸鱼小分队
-# 最后一次更改: 摸鱼小分队
-# 最近一次运行测试时间: 2026-03-21 21:05:56 +0800
-# 最近一次运行成功时间: 2026-03-21 21:05:56 +0800
-# 功能说明: 验证非法类型输入抛出 TypeError。
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-22 13:15:14 +0800
+# 最近一次运行成功时间: 2026-03-22 13:15:14 +0800
+# 测试目的: 验证非法类型输入抛出 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_scf.py -k test_loop_invalid_type
 # 对应功能实现文件路径: kernel_gen/operation/scf.py
 # 对应 spec 文件路径: spec/operation/scf.md

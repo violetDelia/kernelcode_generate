@@ -392,23 +392,43 @@ out = matmul(lhs, rhs)
 
 ### 测试目标
 
-- 验证逐元素算术/比较的输入合法性、隐式广播与错误规则。
-- 验证显式 `broadcast` 的尾维对齐与 singleton 扩张规则。
-- 验证 `transpose` 的 shape/stride 重排与 `perm` 校验规则。
-- 验证 `matmul` 的二维输入约束与错误规则。
+- 验证逐元素算术/比较的成功路径、链式表达式、标量参与规则与错误规则。
+- 验证显式 `broadcast` 的尾维对齐、前置维扩张与错误规则。
+- 验证逐元素隐式 broadcast 的 singleton dim / 前置维扩张与错误规则。
+- 验证 `matmul` 的二维输入约束、dtype/space 兼容性与错误规则。
 - 验证比较结果使用 `NumericType.Int32` 作为 predicate 载体。
+- 验证 nn 操作在 `SymbolList` / `SymbolShape` 迁移后不依赖已移除的 `convert_from_list` 旧入口。
 
 ### 功能与用例清单
 
 | 用例 ID | 约束点 | 对应测试 |
 | --- | --- | --- |
 | OP-001 | `add` 基础逐元素运算 | `test_nn_add_memory` |
-| OP-005 | `Memory + scalar` | `test_nn_add_scalar` |
+| OP-002 | `sub`/`mul`/`truediv` 逐元素算术可调用 | `test_nn_other_arithmetic` |
 | OP-003 | shape 不一致报错 | `test_nn_shape_mismatch` |
-| OP-BC-001 | `broadcast` singleton 扩张 | `test_nn_broadcast_success` |
-| OP-TR-001 | `transpose` 重排成功 | `test_nn_transpose_success` |
-| OP-TR-002 | `transpose` 非 Memory 输入 | `test_nn_transpose_non_memory_error` |
-| OP-TR-003 | `transpose` 非法 perm 类型 | `test_nn_transpose_perm_type_error` |
-| OP-TR-004 | `transpose` 非法 perm 排列 | `test_nn_transpose_perm_invalid` |
-| OP-MM-001 | `matmul` 成功路径 | `test_nn_matmul_success` |
+| OP-004 | rank 不一致报错 | `test_nn_rank_mismatch` |
+| OP-005 | `Memory + scalar` | `test_nn_add_scalar` |
+| OP-006 | 链式表达式保持形状与 dtype | `test_nn_chain_expression` |
+| OP-007 | 非法标量类型报 `TypeError` | `test_nn_scalar_type_error` |
+| OP-008 | dtype 不兼容报 `TypeError` | `test_nn_dtype_mismatch` |
 | OP-009 | 比较结果 predicate 载体 | `test_nn_compare_predicate` |
+| OP-010 | 比较时 shape 顺序不同报错 | `test_nn_compare_shape_order` |
+| OP-011 | 纯标量输入报 `TypeError` | `test_nn_scalar_only_error` |
+| OP-012 | `ne`/`le`/`ge` 比较别名可调用 | `test_nn_compare_alias` |
+| OP-013 | 不依赖已移除的 `convert_from_list` 入口 | `test_nn_operation_does_not_require_convert_from_list` |
+| OP-BC-001 | `broadcast` singleton 扩张 | `test_nn_broadcast_success` |
+| OP-BC-002 | `broadcast` 支持前置维扩张 | `test_nn_broadcast_prepend_dimension` |
+| OP-BC-003 | `broadcast` 维度不兼容报错 | `test_nn_broadcast_dimension_mismatch` |
+| OP-BC-004 | `broadcast` 目标 rank 更小时报错 | `test_nn_broadcast_rank_error` |
+| OP-BC-005 | `broadcast` 非 `Memory` 输入报错 | `test_nn_broadcast_non_memory_error` |
+| OP-BC-006 | `broadcast` 非法 shape 描述报错 | `test_nn_broadcast_invalid_shape_error` |
+| OP-IB-001 | 算术支持 singleton dim 隐式 broadcast | `test_nn_add_implicit_broadcast_singleton` |
+| OP-IB-002 | 算术支持前置维隐式 broadcast | `test_nn_add_implicit_broadcast_prepend_dimension` |
+| OP-IB-003 | 比较运算复用隐式 broadcast | `test_nn_compare_implicit_broadcast` |
+| OP-IB-004 | 隐式 broadcast 维度不兼容报错 | `test_nn_add_implicit_broadcast_mismatch` |
+| OP-MM-001 | `matmul` 成功路径 | `test_nn_matmul_success` |
+| OP-MM-002 | `matmul` contracting dim 不一致报错 | `test_nn_matmul_contracting_dim_mismatch` |
+| OP-MM-003 | `matmul` 非二维输入报错 | `test_nn_matmul_rank_error` |
+| OP-MM-004 | `matmul` 标量输入非法 | `test_nn_matmul_scalar_operand_error` |
+| OP-MM-005 | `matmul` dtype 不兼容报错 | `test_nn_matmul_dtype_mismatch` |
+| OP-MM-006 | `matmul` space 不一致报错 | `test_nn_matmul_space_mismatch` |

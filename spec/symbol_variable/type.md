@@ -10,7 +10,7 @@
 - 最后一次更改：`榕`
 - `spec`：[`spec/symbol_variable/type.md`](../../spec/symbol_variable/type.md)
 - `test`：[`test/symbol_variable/test_type.py`](../../test/symbol_variable/test_type.py)
-- `功能实现`：[`python/symbol_variable/type.py`](../../python/symbol_variable/type.py)
+- `功能实现`：[`kernel_gen/symbol_variable/type.py`](../../kernel_gen/symbol_variable/type.py)
 
 ## 依赖
 

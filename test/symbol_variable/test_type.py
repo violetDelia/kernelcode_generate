@@ -1,13 +1,16 @@
 """type module tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 kernel_gen.symbol_variable.type 的枚举语义、导出边界与旧路径禁用约束。
 
 使用示例:
 - pytest -q test/symbol_variable/test_type.py
+
+当前覆盖率信息: 100%（kernel_gen/symbol_variable/type.py，2026-03-22 14:28:43 +0800）
+覆盖率命令: pytest -q --cov=kernel_gen.symbol_variable.type --cov-report=term-missing test/symbol_variable/test_type.py
 
 关联文件:
 - 功能实现: kernel_gen/symbol_variable/type.py
@@ -29,10 +32,10 @@ if str(REPO_ROOT) not in sys.path:
 
 # TY-001
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-20 19:46:56 +0800
-# 最近一次运行成功时间: 2026-03-20 19:46:56 +0800
-# 功能说明: 验证 NumericType 枚举名称和值保持稳定。
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-22 14:28:43 +0800
+# 最近一次运行成功时间: 2026-03-22 14:28:43 +0800
+# 测试目的: 验证 NumericType 枚举名称和值保持稳定。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_numeric_type_values
 # 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
 # 对应 spec 文件路径: spec/symbol_variable/type.md
@@ -56,10 +59,10 @@ def test_numeric_type_values() -> None:
 
 # TY-005
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-20 19:46:56 +0800
-# 最近一次运行成功时间: 2026-03-20 19:46:56 +0800
-# 功能说明: 验证新增基础类型成员可直接访问。
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-22 14:28:43 +0800
+# 最近一次运行成功时间: 2026-03-22 14:28:43 +0800
+# 测试目的: 验证新增基础类型成员可直接访问。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_numeric_type_member_access
 # 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
 # 对应 spec 文件路径: spec/symbol_variable/type.md
@@ -83,10 +86,10 @@ def test_numeric_type_member_access() -> None:
 
 # TY-002
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-20 19:46:56 +0800
-# 最近一次运行成功时间: 2026-03-20 19:46:56 +0800
-# 功能说明: 验证 Farmat 仅公开 Norm/CLast 成员。
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-22 14:28:43 +0800
+# 最近一次运行成功时间: 2026-03-22 14:28:43 +0800
+# 测试目的: 验证 Farmat 仅公开 Norm/CLast 成员。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_farmat_public_members
 # 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
 # 对应 spec 文件路径: spec/symbol_variable/type.md
@@ -103,10 +106,10 @@ def test_farmat_public_members() -> None:
 
 # TY-003
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-20 19:46:56 +0800
-# 最近一次运行成功时间: 2026-03-20 19:46:56 +0800
-# 功能说明: 验证 kernel_gen.symbol_variable.type 仅公开 NumericType 与 Farmat。
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-22 14:28:43 +0800
+# 最近一次运行成功时间: 2026-03-22 14:28:43 +0800
+# 测试目的: 验证 kernel_gen.symbol_variable.type 仅公开 NumericType 与 Farmat。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_python_type_module_all_boundary
 # 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
 # 对应 spec 文件路径: spec/symbol_variable/type.md
@@ -119,10 +122,10 @@ def test_python_type_module_all_boundary() -> None:
 
 # TY-004
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-20 19:46:56 +0800
-# 最近一次运行成功时间: 2026-03-20 19:46:56 +0800
-# 功能说明: 验证 import * 仅暴露 type 模块约定的公开符号。
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-22 14:28:43 +0800
+# 最近一次运行成功时间: 2026-03-22 14:28:43 +0800
+# 测试目的: 验证 import * 仅暴露 type 模块约定的公开符号。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_python_type_import_star_exports_only_public_names
 # 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
 # 对应 spec 文件路径: spec/symbol_variable/type.md
@@ -137,10 +140,10 @@ def test_python_type_import_star_exports_only_public_names() -> None:
 
 # TY-006
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-20 19:46:56 +0800
-# 最近一次运行成功时间: 2026-03-20 19:46:56 +0800
-# 功能说明: 验证旧路径 symbol_variable.type 不可导入。
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-22 14:28:43 +0800
+# 最近一次运行成功时间: 2026-03-22 14:28:43 +0800
+# 测试目的: 验证旧路径 symbol_variable.type 不可导入。
 # 使用示例: pytest -q test/symbol_variable/test_type.py -k test_legacy_type_import_disabled
 # 对应功能实现文件路径: kernel_gen/symbol_variable/type.py
 # 对应 spec 文件路径: spec/symbol_variable/type.md

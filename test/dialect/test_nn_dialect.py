@@ -1,13 +1,17 @@
 """nn dialect tests.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 nn dialect 的 attr/type/op verifier、parse/print 与 round-trip 行为。
 
 使用示例:
 - pytest -q test/dialect/test_nn_dialect.py
+
+覆盖率:
+- 覆盖率命令: pytest -q --cov=kernel_gen.dialect.nn --cov-report=term-missing test/dialect/test_nn_dialect.py
+- 覆盖率结果: 99%（2026-03-22 13:09:11 +0800）
 
 关联文件:
 - 功能实现: kernel_gen/dialect/nn.py
@@ -35,7 +39,23 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dialect import Nn, NnAddOp, NnBroadcastOp, NnEqOp, NnMatmulOp, NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect import (
+    Nn,
+    NnAddOp,
+    NnBroadcastOp,
+    NnEqOp,
+    NnGeOp,
+    NnGtOp,
+    NnLeOp,
+    NnLtOp,
+    NnMatmulOp,
+    NnMemorySpaceAttr,
+    NnMemoryType,
+    NnMulOp,
+    NnNeOp,
+    NnSubOp,
+    NnTrueDivOp,
+)
 
 
 def _build_context() -> Context:
@@ -157,9 +177,9 @@ def _make_matrix_type(
 
 # TY-001
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-19 01:01:56 +0800
-# 最近一次运行成功时间: 2026-03-19 01:01:56 +0800
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:09:11 +0800
+# 最近一次运行成功时间: 2026-03-22 13:09:11 +0800
 # 功能说明: 验证 memory type parse/print 可稳定 round-trip。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_memory_type_round_trip
 # 对应功能实现文件路径: kernel_gen/dialect/nn.py
@@ -167,18 +187,21 @@ def _make_matrix_type(
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_memory_type_round_trip() -> None:
     ctx = _build_context()
-    text = "!nn.memory<[M, ?, 4], [4, 1, ?], i32, #nn.space<global>>"
-    memory_type = Parser(ctx, text).parse_attribute()
-    assert isinstance(memory_type, NnMemoryType)
-    memory_type.verify()
-    assert _print_ir(memory_type) == text
+    for text in [
+        "!nn.memory<[M, ?, 4], [4, 1, ?], i32, #nn.space<global>>",
+        "!nn.memory<[], [], i32, #nn.space<global>>",
+    ]:
+        memory_type = Parser(ctx, text).parse_attribute()
+        assert isinstance(memory_type, NnMemoryType)
+        memory_type.verify()
+        assert _print_ir(memory_type) == text
 
 
 # TY-002
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-19 01:01:56 +0800
-# 最近一次运行成功时间: 2026-03-19 01:01:56 +0800
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:09:11 +0800
+# 最近一次运行成功时间: 2026-03-22 13:09:11 +0800
 # 功能说明: 验证五种合法 space text form 均可 parse/print round-trip。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_space_attr_round_trip
 # 对应功能实现文件路径: kernel_gen/dialect/nn.py
@@ -197,6 +220,10 @@ def test_space_attr_round_trip() -> None:
         assert isinstance(space_attr, NnMemorySpaceAttr)
         space_attr.verify()
         assert _print_ir(space_attr) == text
+
+    from_name = NnMemorySpaceAttr.from_name("global")
+    from_name.verify()
+    assert _print_ir(from_name) == "#nn.space<global>"
 
 
 # TY-002A
@@ -396,11 +423,188 @@ def test_memory_type_parse_requires_all_fields() -> None:
         Parser(ctx, "!nn.memory<[1], i32, #nn.space<global>>").parse_attribute()
 
 
+# TY-012
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:09:11 +0800
+# 最近一次运行成功时间: 2026-03-22 13:09:11 +0800
+# 功能说明: 验证 memory type space 不是 nn.space 时 parse 会失败。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_memory_type_parse_rejects_non_space_attr
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_memory_type_parse_rejects_non_space_attr() -> None:
+    ctx = _build_context()
+    with pytest.raises(VerifyException, match="nn memory type space"):
+        Parser(ctx, "!nn.memory<[1], [1], i32, i32>").parse_attribute()
+
+
+# TY-013
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:09:11 +0800
+# 最近一次运行成功时间: 2026-03-22 13:09:11 +0800
+# 功能说明: 验证 memory type 非法维度条目会触发 verifier。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_memory_type_rejects_invalid_dim_entry
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+@pytest.mark.parametrize(
+    ("shape", "stride", "message"),
+    [
+        ([IntAttr(-1)], [IntAttr(1)], "non-negative"),
+        ([StringAttr("")], [IntAttr(1)], "IntAttr or StringAttr"),
+    ],
+)
+def test_memory_type_rejects_invalid_dim_entry(
+    shape: list[Attribute],
+    stride: list[Attribute],
+    message: str,
+) -> None:
+    with pytest.raises(VerifyException, match=message):
+        NnMemoryType(
+            ArrayAttr(shape),
+            ArrayAttr(stride),
+            i32,
+            _make_space("global"),
+        )
+
+
+# TY-014
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:09:11 +0800
+# 最近一次运行成功时间: 2026-03-22 13:09:11 +0800
+# 功能说明: 验证 stride '?' 与 shape '?' 同位时会被拒绝。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_memory_type_rejects_stride_question_dim_pair
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_memory_type_rejects_stride_question_dim_pair() -> None:
+    with pytest.raises(VerifyException, match=r"stride '\?'"):
+        NnMemoryType(
+            ArrayAttr([StringAttr("?")]),
+            ArrayAttr([StringAttr("?")]),
+            i32,
+            _make_space("global"),
+        )
+
+
+# TY-015
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:09:11 +0800
+# 最近一次运行成功时间: 2026-03-22 13:09:11 +0800
+# 功能说明: 验证逐元素算术 op(sub/mul/truediv) 合法输入可通过 verifier。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_arithmetic_ops_verify_success
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+@pytest.mark.parametrize("op_cls", [NnSubOp, NnMulOp, NnTrueDivOp])
+def test_arithmetic_ops_verify_success(op_cls: type[Operation]) -> None:
+    memory_type = _make_memory_type()
+    lhs = _TestOp(result_types=[memory_type]).results[0]
+    rhs = _TestOp(result_types=[memory_type]).results[0]
+    op = op_cls(lhs, rhs, memory_type, _make_space("global"))
+    op.verify()
+
+
+# TY-016
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:09:11 +0800
+# 最近一次运行成功时间: 2026-03-22 13:09:11 +0800
+# 功能说明: 验证比较 op(ne/lt/le/gt/ge) 合法输入可通过 verifier。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_compare_ops_verify_success
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+@pytest.mark.parametrize("op_cls", [NnNeOp, NnLtOp, NnLeOp, NnGtOp, NnGeOp])
+def test_compare_ops_verify_success(op_cls: type[Operation]) -> None:
+    operand_type = _make_memory_type("global", i32)
+    result_type = _make_memory_type("global", IntegerType(1))
+    lhs = _TestOp(result_types=[operand_type]).results[0]
+    rhs = _TestOp(result_types=[operand_type]).results[0]
+    op = op_cls(lhs, rhs, result_type, _make_space("global"))
+    op.verify()
+
+
+# TY-017
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:09:11 +0800
+# 最近一次运行成功时间: 2026-03-22 13:09:11 +0800
+# 功能说明: 验证 nn.add 在非 nn.memory operand 下会触发 verifier。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_add_op_rejects_non_memory_operand
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_add_op_rejects_non_memory_operand() -> None:
+    memory_type = _make_memory_type()
+    lhs = _TestOp(result_types=[i32]).results[0]
+    rhs = _TestOp(result_types=[memory_type]).results[0]
+    op = NnAddOp(lhs, rhs, memory_type, _make_space("global"))
+    with pytest.raises(VerifyException, match="base attribute nn.memory"):
+        op.verify()
+
+
+# TY-018
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:09:11 +0800
+# 最近一次运行成功时间: 2026-03-22 13:09:11 +0800
+# 功能说明: 验证 nn.add 在 space/stride/element_type 不一致时会拒绝。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_add_op_rejects_type_mismatch
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+@pytest.mark.parametrize(
+    ("lhs_type", "rhs_type", "result_type", "message"),
+    [
+        (
+            _make_simple_memory_type([StringAttr("M")], [IntAttr(1)], space="global"),
+            _make_simple_memory_type([StringAttr("M")], [IntAttr(1)], space="global"),
+            _make_simple_memory_type([StringAttr("M")], [IntAttr(1)], space="shared"),
+            "result space",
+        ),
+        (
+            _make_simple_memory_type([StringAttr("M")], [IntAttr(2)], space="global"),
+            _make_simple_memory_type([StringAttr("M")], [IntAttr(1)], space="global"),
+            _make_simple_memory_type([StringAttr("M")], [IntAttr(2)], space="global"),
+            "stride must match",
+        ),
+        (
+            _make_simple_memory_type([StringAttr("M")], [IntAttr(1)], space="global", element_type=i32),
+            _make_simple_memory_type([StringAttr("M")], [IntAttr(1)], space="global", element_type=IntegerType(16)),
+            _make_simple_memory_type([StringAttr("M")], [IntAttr(1)], space="global", element_type=i32),
+            "operand element_type",
+        ),
+        (
+            _make_simple_memory_type([StringAttr("M")], [IntAttr(1)], space="global", element_type=i32),
+            _make_simple_memory_type([StringAttr("M")], [IntAttr(1)], space="global", element_type=i32),
+            _make_simple_memory_type([StringAttr("M")], [IntAttr(1)], space="global", element_type=IntegerType(16)),
+            "arithmetic result element_type",
+        ),
+    ],
+)
+def test_add_op_rejects_type_mismatch(
+    lhs_type: NnMemoryType,
+    rhs_type: NnMemoryType,
+    result_type: NnMemoryType,
+    message: str,
+) -> None:
+    lhs = _TestOp(result_types=[lhs_type]).results[0]
+    rhs = _TestOp(result_types=[rhs_type]).results[0]
+    op = NnAddOp(lhs, rhs, result_type, _make_space("global"))
+    with pytest.raises(VerifyException, match=message):
+        op.verify()
+
+
 # TC-NN-BC-001
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-19 02:14:10 +0800
-# 最近一次运行成功时间: 2026-03-19 02:14:10 +0800
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:09:11 +0800
+# 最近一次运行成功时间: 2026-03-22 13:09:11 +0800
 # 功能说明: 验证 nn.broadcast 合法输入可通过 verifier。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_broadcast_op_verify_success
 # 对应功能实现文件路径: kernel_gen/dialect/nn.py
@@ -422,6 +626,12 @@ def test_broadcast_op_verify_success() -> None:
     inp = _TestOp(result_types=[input_type]).results[0]
     op = NnBroadcastOp(inp, result_type, _make_space("global"))
     op.verify()
+
+    int_input = _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], space="global")
+    int_result = _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], space="global")
+    int_value = _TestOp(result_types=[int_input]).results[0]
+    int_op = NnBroadcastOp(int_value, int_result, _make_space("global"))
+    int_op.verify()
 
 
 # TC-NN-BC-002
@@ -459,6 +669,51 @@ def test_broadcast_op_element_type_mismatch() -> None:
     inp = _TestOp(result_types=[input_type]).results[0]
     op = NnBroadcastOp(inp, result_type, _make_space("global"))
     with pytest.raises(VerifyException, match="element_type"):
+        op.verify()
+
+
+# TC-NN-BC-005
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:09:11 +0800
+# 最近一次运行成功时间: 2026-03-22 13:09:11 +0800
+# 功能说明: 验证 nn.broadcast 在 space/rank/shape 不满足时会拒绝。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_broadcast_op_rejects_invalid_inputs
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+@pytest.mark.parametrize(
+    ("input_type", "result_type", "space", "message"),
+    [
+        (
+            _make_simple_memory_type([IntAttr(1)], [IntAttr(1)], space="global"),
+            _make_simple_memory_type([IntAttr(1)], [IntAttr(1)], space="global"),
+            "shared",
+            "attribute space",
+        ),
+        (
+            _make_simple_memory_type([IntAttr(1), StringAttr("N")], [IntAttr(1), IntAttr(1)], space="global"),
+            _make_simple_memory_type([StringAttr("N")], [IntAttr(1)], space="global"),
+            "global",
+            "result rank",
+        ),
+        (
+            _make_simple_memory_type([IntAttr(2), StringAttr("N")], [IntAttr(1), IntAttr(1)], space="global"),
+            _make_simple_memory_type([StringAttr("M"), StringAttr("N")], [IntAttr(1), IntAttr(1)], space="global"),
+            "global",
+            "shape mismatch",
+        ),
+    ],
+)
+def test_broadcast_op_rejects_invalid_inputs(
+    input_type: NnMemoryType,
+    result_type: NnMemoryType,
+    space: str,
+    message: str,
+) -> None:
+    inp = _TestOp(result_types=[input_type]).results[0]
+    op = NnBroadcastOp(inp, result_type, _make_space(space))
+    with pytest.raises(VerifyException, match=message):
         op.verify()
 
 
@@ -608,6 +863,27 @@ def test_matmul_op_attr_space_mismatch() -> None:
     rhs = _TestOp(result_types=[rhs_type]).results[0]
     op = NnMatmulOp(lhs, rhs, result_type, _make_space("global"))
     with pytest.raises(VerifyException, match="attribute space"):
+        op.verify()
+
+
+# TC-NN-MM-009
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:09:11 +0800
+# 最近一次运行成功时间: 2026-03-22 13:09:11 +0800
+# 功能说明: 验证 matmul result space 不一致时会触发 verifier。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_matmul_op_result_space_mismatch
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_matmul_op_result_space_mismatch() -> None:
+    lhs_type = _make_matrix_type([StringAttr("M"), StringAttr("K")], [IntAttr(8), IntAttr(1)], space="global")
+    rhs_type = _make_matrix_type([StringAttr("K"), StringAttr("N")], [IntAttr(8), IntAttr(1)], space="global")
+    result_type = _make_matrix_type([StringAttr("M"), StringAttr("N")], [IntAttr(8), IntAttr(1)], space="shared")
+    lhs = _TestOp(result_types=[lhs_type]).results[0]
+    rhs = _TestOp(result_types=[rhs_type]).results[0]
+    op = NnMatmulOp(lhs, rhs, result_type, _make_space("global"))
+    with pytest.raises(VerifyException, match="result space"):
         op.verify()
 
 

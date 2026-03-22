@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`小李飞刀`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/dialect/nn.md`](../../spec/dialect/nn.md)
 - `功能实现`：[`kernel_gen/dialect/nn.py`](../../kernel_gen/dialect/nn.py)
 - `test`：[`test/dialect/test_nn_dialect.py`](../../test/dialect/test_nn_dialect.py)
@@ -450,3 +450,12 @@ op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 | NN-DIA-024 | `nn.matmul` element type 不一致 | `test_matmul_op_element_type_mismatch` |
 | NN-DIA-025 | `nn.add` 拒绝隐式 broadcast | `test_add_op_rejects_implicit_broadcast_shape_mismatch` |
 | NN-DIA-026 | `nn.eq` 拒绝隐式 broadcast | `test_compare_op_rejects_implicit_broadcast_shape_mismatch` |
+| NN-DIA-027 | memory type space 不是 `nn.space` | `test_memory_type_parse_rejects_non_space_attr` |
+| NN-DIA-028 | memory type 非法维度条目 | `test_memory_type_rejects_invalid_dim_entry` |
+| NN-DIA-029 | stride `?` 与 shape `?` 同位拒绝 | `test_memory_type_rejects_stride_question_dim_pair` |
+| NN-DIA-030 | `nn.add` 非 memory operand 拒绝 | `test_add_op_rejects_non_memory_operand` |
+| NN-DIA-031 | `nn.add` space/stride/element type 不一致 | `test_add_op_rejects_type_mismatch` |
+| NN-DIA-032 | 算术 op(sub/mul/truediv) 合法路径 | `test_arithmetic_ops_verify_success` |
+| NN-DIA-033 | 比较 op(ne/lt/le/gt/ge) 合法路径 | `test_compare_ops_verify_success` |
+| NN-DIA-034 | `nn.broadcast` space/rank/shape 不一致 | `test_broadcast_op_rejects_invalid_inputs` |
+| NN-DIA-035 | `nn.matmul` result space 不一致 | `test_matmul_op_result_space_mismatch` |

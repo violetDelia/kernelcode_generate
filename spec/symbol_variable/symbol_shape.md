@@ -25,6 +25,7 @@
 - 输入元素通过 `SymbolDim(...)` 统一包装，支持 `SymbolDim`、`int` 及 `SymbolDim` 可接受的输入类型。
 - `__getitem__` 支持 `int` 与 `slice`；`__setitem__` 对 `slice` 赋值需逐项规范化。
 - `int` 索引越界统一抛 `IndexError("下标超出范围")`。
+- `int` 索引赋值越界统一抛 `IndexError("下标超出范围")`。
 - `slice` 赋值若传入不可迭代对象或包含无法转换的元素，抛 `TypeError`。
 - 若实现需要复用输入规整逻辑，应使用 `_normalize_*` 私有命名。
 
@@ -290,9 +291,9 @@ symbols = SymbolList(["N", 32])
 使用示例：
 
 ```python
-from kernel_gen.symbol_variable.symbol_shape import SymbolShape
+from kernel_gen.symbol_variable.symbol_shape import SymbolList
 
-symbols = SymbolShape(["N", 32]).to_symbols()
+symbols = SymbolList(["N", 32]).to_symbols()
 ```
 
 注意事项：
@@ -314,11 +315,12 @@ symbols = SymbolShape(["N", 32]).to_symbols()
 - 验证公开输入归一化入口为 `SymbolShape(shapes)`。
 - 列表行为：`len`、迭代、反向迭代、`repr`。
 - 索引访问：`int` 索引越界错误信息一致。
-- 赋值：`int` 索引赋值会转换为 `SymbolDim`；`slice` 赋值会逐项转换为 `SymbolDim`。
+- 赋值：`int` 索引赋值会转换为 `SymbolDim`，越界时错误信息一致；`slice` 赋值会逐项转换为 `SymbolDim`。
 - `slice` 赋值不可迭代对象触发 `TypeError`。
 - `slice` 赋值存在元素无法转换触发 `TypeError`。
 - `get_shape()` 返回拷贝，外部修改不影响内部。
 - 序列化：动态维度输出 `str`，静态维度输出 `int`。
+- `SymbolList.to_symbols()` 复用 `get_values()` 的序列化规则。
 - `SymbolShape(existing_shape)` 可构造等价的新形状对象。
 
 ### 功能与用例清单
@@ -335,8 +337,10 @@ symbols = SymbolShape(["N", 32]).to_symbols()
 | SS-008 | 异常 | slice 不可迭代 | N/A | `shape[0:1] = 1` | 抛 `TypeError`（不可迭代对象） | `test_slice_assign_non_iterable` |
 | SS-009 | 异常 | slice 元素非法 | N/A | `shape[0:1] = [object()]` | 抛 `TypeError`（元素类型不合法） | `test_slice_assign_invalid_item` |
 | SS-010 | 赋值 | slice 元素为数字字符串 | N/A | `shape[0:1] = ["1"]` | 维度解析为静态数字 | `test_slice_assign_digit_string` |
+| SS-011 | 序列化 | SymbolList.to_symbols | N/A | `SymbolList(["N", 32]).to_symbols()` | 返回 `["N", 32]` | `test_to_symbols` |
 | SS-012 | 赋值 | int 索引 | N/A | `shape[0] = 64` | 转为 `SymbolDim` | `test_setitem_converts` |
 | SS-013 | 表现 | Shape repr | N/A | `repr(SymbolShape([1, 2]))` | 返回 `Shape(1, 2)` | `test_repr` |
 | SS-014 | 表现 | List repr | N/A | `repr(SymbolList([1, 2]))` | 返回 `List(1, 2)` | `test_list_repr` |
 | SS-015 | 构造 | 由已有 SymbolShape 创建 | N/A | `SymbolShape(SymbolShape([1, 2]))` | 构造等价的新对象 | `test_construct_from_existing_shape` |
 | SS-016 | 迭代 | for-in 迭代 | N/A | `for dim in shape:` | 可遍历 `SymbolDim` | `test_iteration` |
+| SS-017 | 异常 | int 索引赋值越界 | N/A | `shape[99] = 1` | 抛 `IndexError("下标超出范围")` | `test_setitem_out_of_range` |
