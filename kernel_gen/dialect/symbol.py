@@ -5,10 +5,10 @@
 
 功能说明:
 - 定义仅表示整数符号值语义的 symbol dialect。
-- 提供 `SymbolExprAttr`、`SymbolValueType`、`symbol.add/sub/mul` 与 `symbol.get_dim/get_stride` 查询 op，不区分 `int8/int64` 等整型宽度。
+- 提供 `SymbolExprAttr`、`SymbolValueType`、`symbol.add/sub/mul`、`symbol.eq/ne/lt/le/gt/ge` 与 `symbol.get_dim/get_stride` 查询 op，不区分 `int8/int64` 等整型宽度。
 
 使用示例:
-- from kernel_gen.dialect.symbol import Symbol, SymbolAddOp, SymbolSubOp, SymbolMulOp, SymbolExprAttr, SymbolGetDimOp, SymbolGetStrideOp, SymbolValueType
+- from kernel_gen.dialect.symbol import Symbol, SymbolAddOp, SymbolEqOp, SymbolSubOp, SymbolMulOp, SymbolExprAttr, SymbolGetDimOp, SymbolGetStrideOp, SymbolValueType
 
 关联文件:
 - spec: spec/dialect/symbol.md
@@ -22,7 +22,7 @@ import re
 from collections.abc import Sequence
 from typing import ClassVar
 
-from xdsl.dialects.builtin import IntAttr, StringAttr
+from xdsl.dialects.builtin import IntAttr, StringAttr, i1
 from xdsl.ir import Attribute, Block, Dialect, Operation, ParametrizedAttribute, Region, SSAValue, TypeAttribute
 from xdsl.irdl import (
     IRDLOperation,
@@ -415,6 +415,97 @@ class _BaseSymbolBinaryArithOp(IRDLOperation):
         return cls(lhs, rhs, result_type)
 
 
+class _BaseSymbolCompareOp(IRDLOperation):
+    """symbol 二元整数比较 op 基类。"""
+
+    lhs = operand_def(Attribute)
+    rhs = operand_def(Attribute)
+    result = result_def(Attribute)
+
+    def __init__(
+        self,
+        lhs: SSAValue | Operation,
+        rhs: SSAValue | Operation,
+        result_type: Attribute = i1,
+    ) -> None:
+        """初始化 symbol 二元整数比较 op。
+
+        创建者: 我不是牛马
+        最后一次更改: 我不是牛马
+
+        功能说明:
+        - 设置两个 `!symbol.int<"expr">` 操作数与单个 `i1` 结果类型。
+
+        使用示例:
+        - SymbolEqOp(lhs, rhs, i1)
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        super().__init__(operands=[lhs, rhs], result_types=[result_type])
+
+    def verify_(self) -> None:
+        """校验 symbol 二元整数比较 op 的类型约束。
+
+        创建者: 我不是牛马
+        最后一次更改: 我不是牛马
+
+        功能说明:
+        - 校验 `lhs` 与 `rhs` 均为 `!symbol.int<"expr">`。
+        - 校验 `result` 固定为 `i1`。
+
+        使用示例:
+        - SymbolLtOp(lhs, rhs, i1).verify_()
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        for field_name in ("lhs", "rhs"):
+            operand = SSAValue.get(getattr(self, field_name))
+            if not _is_symbol_int_type(operand.type):
+                raise VerifyException(f"{self.name} {field_name} must have type !symbol.int<\"expr\">")
+        if self.result.type != i1:
+            raise VerifyException(f"{self.name} result type must be i1")
+
+    def print(self, printer: Printer) -> None:
+        """打印 symbol 二元整数比较 op 自定义文本语法。"""
+
+        printer.print_string(" ")
+        printer.print_ssa_value(self.lhs)
+        printer.print_string(", ")
+        printer.print_ssa_value(self.rhs)
+        printer.print_string(" : ")
+        printer.print_attribute(SSAValue.get(self.lhs).type)
+        printer.print_string(", ")
+        printer.print_attribute(SSAValue.get(self.rhs).type)
+        printer.print_string(" -> ")
+        printer.print_attribute(self.result.type)
+
+    @classmethod
+    def parse(cls, parser: AttrParser):
+        """解析 symbol 二元整数比较 op 自定义文本语法。"""
+
+        unresolved_lhs = parser.parse_unresolved_operand()
+        parser.parse_characters(",", f" in {cls.name}")
+        unresolved_rhs = parser.parse_unresolved_operand()
+        parser.parse_characters(":", f" in {cls.name}")
+        lhs_type = parser.parse_type()
+        parser.parse_characters(",", f" in {cls.name} type list")
+        rhs_type = parser.parse_type()
+        parser.parse_characters("->", f" in {cls.name}")
+        result_type = parser.parse_type()
+
+        lhs = parser.resolve_operand(unresolved_lhs, lhs_type)
+        rhs = parser.resolve_operand(unresolved_rhs, rhs_type)
+        return cls(lhs, rhs, result_type)
+
+
 @irdl_op_definition
 class SymbolAddOp(_BaseSymbolBinaryArithOp):
     """两个 symbol.int 值的整数加法。"""
@@ -434,6 +525,48 @@ class SymbolMulOp(_BaseSymbolBinaryArithOp):
     """两个 symbol.int 值的整数乘法。"""
 
     name = "symbol.mul"
+
+
+@irdl_op_definition
+class SymbolEqOp(_BaseSymbolCompareOp):
+    """两个 symbol.int 值的相等比较。"""
+
+    name = "symbol.eq"
+
+
+@irdl_op_definition
+class SymbolNeOp(_BaseSymbolCompareOp):
+    """两个 symbol.int 值的不等比较。"""
+
+    name = "symbol.ne"
+
+
+@irdl_op_definition
+class SymbolLtOp(_BaseSymbolCompareOp):
+    """两个 symbol.int 值的小于比较。"""
+
+    name = "symbol.lt"
+
+
+@irdl_op_definition
+class SymbolLeOp(_BaseSymbolCompareOp):
+    """两个 symbol.int 值的小于等于比较。"""
+
+    name = "symbol.le"
+
+
+@irdl_op_definition
+class SymbolGtOp(_BaseSymbolCompareOp):
+    """两个 symbol.int 值的大于比较。"""
+
+    name = "symbol.gt"
+
+
+@irdl_op_definition
+class SymbolGeOp(_BaseSymbolCompareOp):
+    """两个 symbol.int 值的大于等于比较。"""
+
+    name = "symbol.ge"
 
 
 class _BaseSymbolMemoryQueryOp(IRDLOperation):
@@ -664,6 +797,12 @@ Symbol = Dialect(
         SymbolAddOp,
         SymbolSubOp,
         SymbolMulOp,
+        SymbolEqOp,
+        SymbolNeOp,
+        SymbolLtOp,
+        SymbolLeOp,
+        SymbolGtOp,
+        SymbolGeOp,
         SymbolGetDimOp,
         SymbolGetStrideOp,
         SymbolForOp,
@@ -677,9 +816,15 @@ Symbol = Dialect(
 __all__ = [
     "Symbol",
     "SymbolAddOp",
+    "SymbolEqOp",
     "SymbolExprAttr",
+    "SymbolGeOp",
     "SymbolGetDimOp",
     "SymbolMulOp",
+    "SymbolGtOp",
+    "SymbolLeOp",
+    "SymbolLtOp",
+    "SymbolNeOp",
     "SymbolForOp",
     "SymbolGetStrideOp",
     "SymbolSubOp",

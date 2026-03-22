@@ -3,6 +3,7 @@
 ## 约定
 
 - 未经特别授权，不得访问或修改 `.skills`、`.agents` 目录中的任何文件。
+- 未经特别授权，不可修改`expectation`中的任何文件。
 - 所有函数和文件都需补充完整的功能说明、使用示例，并提供对应的 `创建者` `最后修改人` `spec`、`test`、`功能实现` 文件链接。
 - 示例链接：
   - `spec`：[`spec/codex-multi-agents/scripts/codex-multi-agents-list.md`](spec/codex-multi-agents/scripts/codex-multi-agents-list.md)

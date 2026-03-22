@@ -5,6 +5,6 @@ agents/codex-multi-agents/config
 run_periodically
 main
 temp
-log.txt
+command.txt
 .coverage
 
