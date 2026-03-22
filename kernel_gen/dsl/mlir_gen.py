@@ -25,6 +25,8 @@ from xdsl.dialects import func
 from xdsl.dialects.builtin import FunctionType, i32
 from xdsl.ir import Block, Region
 
+from kernel_gen.dialect.symbol import SymbolValueType
+
 from .ast import (
     AstParseError,
     Diagnostic,
@@ -38,10 +40,19 @@ from .ast import (
 from .emit_mlir import EmitContext, _LoweringError, _ensure_supported_statements, _expr_key, _infer_expr_type, _memory_to_nn_type
 
 
+def _is_symbol_scalar_function(func_ast: FunctionAST) -> bool:
+    if not func_ast.inputs or not func_ast.outputs:
+        return False
+    return all(isinstance(item, ScalarArgAST) and item.value_type is int for item in func_ast.inputs) and all(
+        isinstance(item, ScalarArgAST) and item.value_type is int for item in func_ast.outputs
+    )
+
+
 def _build_signature_types(func_ast: FunctionAST) -> tuple[list[object], dict[int, object]]:
     if not func_ast.inputs:
         raise _LoweringError("Function has no inputs", location=func_ast.location)
 
+    is_symbol_scalar_function = _is_symbol_scalar_function(func_ast)
     arg_types: list[object] = []
     type_map: dict[int, object] = {}
     tensor_input_count = 0
@@ -52,13 +63,13 @@ def _build_signature_types(func_ast: FunctionAST) -> tuple[list[object], dict[in
         elif isinstance(item, ScalarArgAST):
             if item.value_type is not int:
                 raise _LoweringError("Unsupported scalar argument type", location=item.location)
-            arg_type = i32
+            arg_type = SymbolValueType.from_expr(item.name) if is_symbol_scalar_function else i32
         else:
             raise _LoweringError("Unsupported input type", location=getattr(item, "location", None))
         arg_types.append(arg_type)
         type_map[_expr_key(item)] = arg_type
 
-    if tensor_input_count == 0:
+    if tensor_input_count == 0 and not is_symbol_scalar_function:
         raise _LoweringError("At least one tensor input is required", location=func_ast.location)
     return arg_types, type_map
 
@@ -92,7 +103,12 @@ def _validate_return_type(func_ast: FunctionAST, result_type: object) -> None:
     elif isinstance(output, ScalarArgAST):
         if output.value_type is not int:
             raise _LoweringError("Unsupported scalar return type", location=output.location)
-        expected_type = i32
+        if _is_symbol_scalar_function(func_ast):
+            if isinstance(result_type, SymbolValueType):
+                return
+            expected_type = SymbolValueType.from_expr(output.name)
+        else:
+            expected_type = i32
     else:
         raise _LoweringError("Unsupported return annotation type", location=getattr(output, "location", None))
     if result_type != expected_type:

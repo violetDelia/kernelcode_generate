@@ -38,6 +38,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.dma import DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp
 from kernel_gen.dialect.nn import NnAddOp, NnBroadcastOp, NnEqOp, NnMemoryType
+from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.dsl.ast import (
     AstParseError,
     BlockAST,
@@ -552,6 +553,30 @@ def test_scalar_arg_lowering_in_signature() -> None:
     assert isinstance(inputs[0], NnMemoryType)
     assert isinstance(inputs[1], NnMemoryType)
     assert inputs[2] == i32
+
+
+# MGEN-016 / MGEN-017
+# 创建者: OpenAI
+# 最后一次更改: OpenAI
+# 最近一次运行测试时间: 2026-03-22 21:35:06 +0800
+# 最近一次运行成功时间: 2026-03-22 21:35:06 +0800
+# 功能说明: 验证纯 symbol 标量函数的 func.func 输入与返回保持为 !symbol.int<"expr">。
+# 测试目的: 验证 expectation/dsl/symbol.py 对应场景不会退回 builtin 整数类型。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_symbol_scalar_function_uses_symbol_value_type_signature
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_symbol_scalar_function_uses_symbol_value_type_signature() -> None:
+    expr = SymbolDim("expr")
+
+    def only_symbol(expr) -> int:
+        return expr
+
+    func_op = build_func_op(only_symbol, globals={"expr": expr, "__builtins__": __builtins__})
+    inputs = list(func_op.function_type.inputs)
+    outputs = list(func_op.function_type.outputs)
+    assert inputs == [SymbolValueType.from_expr("expr")]
+    assert outputs == [SymbolValueType.from_expr("expr")]
 
 
 # AST-005

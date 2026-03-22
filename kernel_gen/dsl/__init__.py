@@ -34,9 +34,7 @@ from .ast import (
     parse_function,
 )
 from .ast_visitor import AstVisitor, AstVisitorError
-from .emit_c import EmitCContext, EmitCError, emit_c_op, emit_c_value
 from .emit_mlir import EmitContext, emit_mlir
-from .gen_kernel import GenKernelError, gen_body, gen_kernel, gen_signature
 from .mlir_gen import build_func_op, build_func_op_from_ast
 
 __all__ = [
@@ -47,11 +45,8 @@ __all__ = [
     "CompareExprAST",
     "ConstAST",
     "Diagnostic",
-    "EmitCContext",
-    "EmitCError",
     "EmitContext",
     "FunctionAST",
-    "GenKernelError",
     "ModuleAST",
     "ScalarArgAST",
     "SourceLocation",
@@ -59,11 +54,6 @@ __all__ = [
     "VarAST",
     "build_func_op",
     "build_func_op_from_ast",
-    "emit_c_op",
-    "emit_c_value",
     "emit_mlir",
-    "gen_body",
-    "gen_kernel",
-    "gen_signature",
     "parse_function",
 ]
