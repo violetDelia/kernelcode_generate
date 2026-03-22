@@ -11,7 +11,7 @@
 
 覆盖率:
 - 覆盖率命令: pytest -q --cov=kernel_gen.dialect.symbol --cov-report=term-missing test/dialect/test_symbol_dialect.py
-- 覆盖率结果: 99%（2026-03-22 21:48:16 +0800）
+- 覆盖率结果: 95%（2026-03-22 21:30:49 +0800）
 
 关联文件:
 - 功能实现: kernel_gen/dialect/symbol.py
@@ -27,9 +27,9 @@ from pathlib import Path
 
 import pytest
 from xdsl.context import Context
-from xdsl.dialects.builtin import ArrayAttr, Builtin, IndexType, IntAttr, StringAttr, f32, i32, i64
+from xdsl.dialects.builtin import ArrayAttr, Builtin, IntAttr, StringAttr, i32
 from xdsl.dialects.test import Test, TestOp as _TestOp
-from xdsl.ir import Operation
+from xdsl.ir import Block, Region
 from xdsl.parser import Parser
 from xdsl.printer import Printer
 from xdsl.utils.exceptions import ParseError, VerifyException
@@ -41,10 +41,10 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.dialect.nn import Nn, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import (
     Symbol,
-    SymbolCastOp,
     SymbolExprAttr,
     SymbolGetDimOp,
     SymbolGetStrideOp,
+    SymbolForOp,
     SymbolValueType,
 )
 from kernel_gen.symbol_variable.memory import Memory
@@ -86,12 +86,12 @@ def _print_attr(value: object) -> str:
     return stream.getvalue()
 
 
-def _print_op(value: Operation) -> str:
+def _print_op(op: object) -> str:
     """打印 operation 为文本。"""
 
     stream = StringIO()
     printer = Printer(stream=stream)
-    printer.print_op(value)
+    printer.print_op(op)
     return stream.getvalue()
 
 
@@ -165,7 +165,7 @@ def _make_symbol_value(expr: str):
     最后一次更改: 我不是牛马
 
     功能说明:
-    - 为 symbol.cast 测试复用统一的 symbol.int 操作数构造。
+    - 为 symbol.for 测试复用统一的 symbol.int 操作数构造。
 
     使用示例:
     - _make_symbol_value("N")
@@ -458,106 +458,180 @@ def test_symbol_get_stride_rejects_unknown_entry() -> None:
 # TC-SYM-021
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 21:48:16 +0800
-# 最近一次运行成功时间: 2026-03-22 21:48:16 +0800
-# 测试目的: 验证 symbol.cast 可将 symbol.int 显式转换为 builtin 整数类型。
+# 最近一次运行测试时间: 2026-03-22 21:30:49 +0800
+# 最近一次运行成功时间: 2026-03-22 21:30:49 +0800
+# 测试目的: 验证 symbol.for 接受 symbol.int 类型的 start/end/step，并暴露单个 symbol.int 块参数。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
-def test_symbol_cast_lowers_symbol_int_to_builtin_int() -> None:
-    op = SymbolCastOp(_make_symbol_value("N"), i32)
+def test_symbol_for_accepts_symbol_int_bounds_and_iter_arg() -> None:
+    start = _make_symbol_value("M")
+    end = _make_symbol_value("N")
+    step = _make_symbol_value("1")
+    body = Block(arg_types=[SymbolValueType.from_expr("M")])
+
+    op = SymbolForOp(start, end, step, body)
 
     op.verify()
-    printed = _print_op(op)
-    assert _print_attr(op.result.type) == "i32"
-    assert "symbol.cast" in printed
-    assert ' : !symbol.int<"N"> -> i32' in printed
+    assert len(op.body.block.args) == 1
+    assert isinstance(op.body.block.args[0].type, SymbolValueType)
+    assert _print_attr(op.body.block.args[0].type) == '!symbol.int<"M">'
 
 
 # TC-SYM-022
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 21:48:16 +0800
-# 最近一次运行成功时间: 2026-03-22 21:48:16 +0800
-# 测试目的: 验证 symbol.cast 支持常量语义的 symbol.int 到更宽整数类型转换。
+# 最近一次运行测试时间: 2026-03-22 21:30:49 +0800
+# 最近一次运行成功时间: 2026-03-22 21:30:49 +0800
+# 测试目的: 验证 symbol.for 的 parse/print round-trip 稳定。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
-def test_symbol_cast_supports_constant_symbol_values() -> None:
-    op = SymbolCastOp(_make_symbol_value("3"), i64)
+def test_symbol_for_round_trip() -> None:
+    ctx = _build_context()
+    module = Parser(
+        ctx,
+        """
+builtin.module {
+  %start = "test.op"() : () -> !symbol.int<"M">
+  %end = "test.op"() : () -> !symbol.int<"N">
+  %step = "test.op"() : () -> !symbol.int<"1">
+  symbol.for %i = %start to %end step %step : !symbol.int<"M">, !symbol.int<"N">, !symbol.int<"1"> {
+  }
+}
+""",
+    ).parse_module()
 
-    op.verify()
-    assert _print_attr(op.result.type) == "i64"
+    op = module.body.block.ops.last
+    assert isinstance(op, SymbolForOp)
+    assert _print_op(op) == 'symbol.for %i = %start to %end step %step : !symbol.int<"M">, !symbol.int<"N">, !symbol.int<"1"> {\n}'
 
 
 # TC-SYM-023
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 21:48:16 +0800
-# 最近一次运行成功时间: 2026-03-22 21:48:16 +0800
-# 测试目的: 验证 symbol.cast 的 parse/print round-trip 稳定。
+# 最近一次运行测试时间: 2026-03-22 21:30:49 +0800
+# 最近一次运行成功时间: 2026-03-22 21:30:49 +0800
+# 测试目的: 验证 symbol.for 会拒绝非 symbol.int 的 start/end/step 或块参数类型。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
-def test_symbol_cast_round_trip() -> None:
-    ctx = _build_context()
-    text = """builtin.module {
-  %0 = "test.op"() : () -> !symbol.int<"N">
-  %1 = symbol.cast %0 : !symbol.int<"N"> -> i32
-}
-"""
+def test_symbol_for_rejects_non_symbol_int_operands() -> None:
+    symbol_value = _make_symbol_value("N")
+    non_symbol_value = _TestOp(result_types=[i32]).results[0]
 
-    module = Parser(ctx, text).parse_module()
-    module.verify()
-    assert _print_op(module) == text.rstrip()
+    with pytest.raises(VerifyException, match='symbol.for start must have type !symbol.int<"expr">'):
+        SymbolForOp(non_symbol_value, symbol_value, symbol_value, Block(arg_types=[SymbolValueType.from_expr("N")])).verify()
+    with pytest.raises(VerifyException, match='symbol.for iter_arg must have type !symbol.int<"expr">'):
+        SymbolForOp(symbol_value, symbol_value, symbol_value, Block(arg_types=[i32])).verify()
 
 
 # TC-SYM-024
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 21:48:16 +0800
-# 最近一次运行成功时间: 2026-03-22 21:48:16 +0800
-# 测试目的: 验证 symbol.cast 会拒绝非 symbol.int 源类型。
+# 最近一次运行测试时间: 2026-03-22 21:30:49 +0800
+# 最近一次运行成功时间: 2026-03-22 21:30:49 +0800
+# 测试目的: 验证 symbol.for 在 step 可静态判定为 0 时会报错。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
-def test_symbol_cast_rejects_non_symbol_source() -> None:
-    source = _TestOp(result_types=[i32]).results[0]
+def test_symbol_for_rejects_zero_step() -> None:
+    start = _make_symbol_value("M")
+    end = _make_symbol_value("N")
+    step = _make_symbol_value("0")
 
-    with pytest.raises(VerifyException, match='symbol.cast source must have type !symbol.int<"expr">'):
-        SymbolCastOp(source, i32).verify()
+    with pytest.raises(VerifyException, match="symbol.for step must not be zero"):
+        SymbolForOp(start, end, step, Block(arg_types=[SymbolValueType.from_expr("M")])).verify()
 
 
 # TC-SYM-025
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 21:48:16 +0800
-# 最近一次运行成功时间: 2026-03-22 21:48:16 +0800
-# 测试目的: 验证 symbol.cast 会拒绝非 builtin 整数的目标类型。
+# 最近一次运行测试时间: 2026-03-22 21:30:49 +0800
+# 最近一次运行成功时间: 2026-03-22 21:30:49 +0800
+# 测试目的: 验证 symbol.for 会拒绝空 region、多块 region 或错误块参数结构。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
-def test_symbol_cast_rejects_unsupported_target_type() -> None:
-    source = _make_symbol_value("N")
+def test_symbol_for_rejects_invalid_region_shape() -> None:
+    start = _make_symbol_value("M")
+    end = _make_symbol_value("N")
+    step = _make_symbol_value("1")
 
-    with pytest.raises(VerifyException, match="symbol.cast result type must be builtin integer"):
-        SymbolCastOp(source, IndexType()).verify()
-    with pytest.raises(VerifyException, match="symbol.cast result type must be builtin integer"):
-        SymbolCastOp(source, f32).verify()
+    with pytest.raises(VerifyException, match="symbol.for.*single-block regions"):
+        SymbolForOp(start, end, step, Region()).verify()
+    with pytest.raises(VerifyException, match="symbol.for body must have exactly one block argument"):
+        SymbolForOp(start, end, step, Block()).verify()
+    with pytest.raises(VerifyException, match="symbol.for.*single-block regions"):
+        SymbolForOp(
+            start,
+            end,
+            step,
+            Region([Block(arg_types=[SymbolValueType.from_expr("M")]), Block(arg_types=[SymbolValueType.from_expr("M")])]),
+        ).verify()
 
 
 # TC-SYM-026
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 21:48:16 +0800
-# 最近一次运行成功时间: 2026-03-22 21:48:16 +0800
-# 测试目的: 验证 symbol.cast 对不完整文本或非法目标类型会报 parse/verifier 错误。
+# 最近一次运行测试时间: 2026-03-22 21:30:49 +0800
+# 最近一次运行成功时间: 2026-03-22 21:30:49 +0800
+# 测试目的: 验证 symbol.for 文本缺少关键片段或类型段不完整时 parse 会报错。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
-def test_symbol_cast_rejects_malformed_or_inconsistent_type_signature() -> None:
+def test_symbol_for_parse_rejects_malformed_text() -> None:
     ctx = _build_context()
-    malformed = """builtin.module {
-  %0 = "test.op"() : () -> !symbol.int<"N">
-  %1 = symbol.cast %0 : !symbol.int<"N">
-}
-"""
 
-    with pytest.raises(ParseError, match="symbol.cast"):
-        Parser(ctx, malformed).parse_module()
-    with pytest.raises(VerifyException, match="symbol.cast result type must be builtin integer"):
-        SymbolCastOp(_make_symbol_value("N"), IndexType()).verify()
+    with pytest.raises(ParseError, match="symbol.for"):
+        Parser(
+            ctx,
+            """
+builtin.module {
+  %start = "test.op"() : () -> !symbol.int<"M">
+  %end = "test.op"() : () -> !symbol.int<"N">
+  %step = "test.op"() : () -> !symbol.int<"1">
+  symbol.for %i = %start %end step %step : !symbol.int<"M">, !symbol.int<"N">, !symbol.int<"1"> {
+  }
+}
+""",
+        ).parse_module()
+    with pytest.raises(ParseError, match="symbol.for"):
+        Parser(
+            ctx,
+            """
+builtin.module {
+  %start = "test.op"() : () -> !symbol.int<"M">
+  %end = "test.op"() : () -> !symbol.int<"N">
+  %step = "test.op"() : () -> !symbol.int<"1">
+  symbol.for %i = %start to %end step %step : !symbol.int<"M">, !symbol.int<"N"> {
+  }
+}
+""",
+        ).parse_module()
+
+
+# TC-SYM-027
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 21:30:49 +0800
+# 最近一次运行成功时间: 2026-03-22 21:30:49 +0800
+# 测试目的: 验证 symbol.for 的 verifier 与 parse 错误信息包含 op 名称与失败原因。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_for_error_messages_include_context() -> None:
+    start = _make_symbol_value("M")
+    end = _make_symbol_value("N")
+    step = _make_symbol_value("0")
+
+    with pytest.raises(VerifyException, match="symbol.for step must not be zero"):
+        SymbolForOp(start, end, step, Block(arg_types=[SymbolValueType.from_expr("M")])).verify()
+
+    ctx = _build_context()
+    with pytest.raises(ParseError, match="symbol.for"):
+        Parser(
+            ctx,
+            """
+builtin.module {
+  %start = "test.op"() : () -> !symbol.int<"M">
+  %end = "test.op"() : () -> !symbol.int<"N">
+  %step = "test.op"() : () -> !symbol.int<"1">
+  symbol.for %i = %start to %end %step : !symbol.int<"M">, !symbol.int<"N">, !symbol.int<"1"> {
+  }
+}
+""",
+        ).parse_module()

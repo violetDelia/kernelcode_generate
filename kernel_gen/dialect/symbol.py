@@ -5,10 +5,10 @@
 
 功能说明:
 - 定义仅表示整数符号值语义的 symbol dialect。
-- 提供 `SymbolExprAttr`、`SymbolValueType`、`symbol.cast` 与 `symbol.get_dim/get_stride` 查询 op，不区分 `int8/int64` 等整型宽度。
+- 提供 `SymbolExprAttr`、`SymbolValueType` 与 `symbol.get_dim/get_stride` 查询 op，不区分 `int8/int64` 等整型宽度。
 
 使用示例:
-- from kernel_gen.dialect.symbol import Symbol, SymbolCastOp, SymbolExprAttr, SymbolGetDimOp, SymbolGetStrideOp, SymbolValueType
+- from kernel_gen.dialect.symbol import Symbol, SymbolExprAttr, SymbolGetDimOp, SymbolGetStrideOp, SymbolValueType
 
 关联文件:
 - spec: spec/dialect/symbol.md
@@ -22,11 +22,22 @@ import re
 from collections.abc import Sequence
 from typing import ClassVar
 
-from xdsl.dialects.builtin import IntAttr, IntegerType, StringAttr
-from xdsl.ir import Attribute, Dialect, Operation, ParametrizedAttribute, SSAValue, TypeAttribute
-from xdsl.irdl import IRDLOperation, attr_def, irdl_attr_definition, irdl_op_definition, operand_def, param_def, result_def
+from xdsl.dialects.builtin import IntAttr, StringAttr
+from xdsl.ir import Attribute, Block, Dialect, Operation, ParametrizedAttribute, Region, SSAValue, TypeAttribute
+from xdsl.irdl import (
+    IRDLOperation,
+    attr_def,
+    irdl_attr_definition,
+    irdl_op_definition,
+    operand_def,
+    param_def,
+    region_def,
+    result_def,
+    traits_def,
+)
 from xdsl.parser import AttrParser
 from xdsl.printer import Printer
+from xdsl.traits import NoTerminator
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import NnMemoryType
@@ -151,7 +162,7 @@ def _is_symbol_int_type(attr: Attribute) -> bool:
     最后一次更改: 我不是牛马
 
     功能说明:
-    - 为 `symbol.cast` 与 `symbol.get_*` verifier 复用统一的 symbol 类型判断。
+    - 为 `symbol.for` 与 `symbol.get_*` verifier 复用统一的 symbol 类型判断。
 
     使用示例:
     - _is_symbol_int_type(SymbolValueType.from_expr("N"))
@@ -163,27 +174,6 @@ def _is_symbol_int_type(attr: Attribute) -> bool:
     """
 
     return isinstance(attr, SymbolValueType)
-
-
-def _is_builtin_integer_type(attr: Attribute) -> bool:
-    """判断 attribute 是否为 builtin 普通整数类型。
-
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
-
-    功能说明:
-    - 为 `symbol.cast` verifier 统一限制目标类型必须是 builtin 整数类型。
-
-    使用示例:
-    - _is_builtin_integer_type(IntegerType(32))
-
-    关联文件:
-    - spec: spec/dialect/symbol.md
-    - test: test/dialect/test_symbol_dialect.py
-    - 功能实现: kernel_gen/dialect/symbol.py
-    """
-
-    return isinstance(attr, IntegerType)
 
 
 @irdl_attr_definition
@@ -292,82 +282,6 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
         return cls(SymbolExprAttr.from_expr(expr))
 
 
-@irdl_op_definition
-class SymbolCastOp(IRDLOperation):
-    """将 symbol.int 显式桥接到 builtin 整数类型。"""
-
-    name = "symbol.cast"
-
-    source = operand_def(Attribute)
-    result = result_def(Attribute)
-
-    def __init__(self, source: SSAValue | Operation, target_type: Attribute) -> None:
-        """初始化 symbol.cast。
-
-        创建者: 我不是牛马
-        最后一次更改: 我不是牛马
-
-        功能说明:
-        - 设置 `!symbol.int<"expr">` 源操作数与目标 builtin 整数结果类型。
-
-        使用示例:
-        - SymbolCastOp(source, IntegerType(32))
-
-        关联文件:
-        - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
-        - 功能实现: kernel_gen/dialect/symbol.py
-        """
-
-        super().__init__(operands=[source], result_types=[target_type])
-
-    def verify_(self) -> None:
-        """校验 symbol.cast 约束。
-
-        创建者: 我不是牛马
-        最后一次更改: 我不是牛马
-
-        功能说明:
-        - 校验源值必须为 `!symbol.int<"expr">`，目标类型必须为 builtin 整数类型。
-
-        使用示例:
-        - SymbolCastOp(source, IntegerType(32)).verify_()
-
-        关联文件:
-        - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
-        - 功能实现: kernel_gen/dialect/symbol.py
-        """
-
-        source_type = SSAValue.get(self.source).type
-        if not _is_symbol_int_type(source_type):
-            raise VerifyException(f"{self.name} source must have type !symbol.int<\"expr\">")
-        if not _is_builtin_integer_type(self.result.type):
-            raise VerifyException(f"{self.name} result type must be builtin integer")
-
-    def print(self, printer: Printer) -> None:
-        """打印 symbol.cast 自定义文本语法。"""
-
-        printer.print_string(" ")
-        printer.print_ssa_value(self.source)
-        printer.print_string(" : ")
-        printer.print_attribute(SSAValue.get(self.source).type)
-        printer.print_string(" -> ")
-        printer.print_attribute(self.result.type)
-
-    @classmethod
-    def parse(cls, parser: AttrParser) -> "SymbolCastOp":
-        """解析 symbol.cast 自定义文本语法。"""
-
-        unresolved_source = parser.parse_unresolved_operand()
-        parser.parse_characters(":", " in symbol.cast")
-        source_type = parser.parse_type()
-        parser.parse_characters("->", " in symbol.cast")
-        target_type = parser.parse_type()
-        source = parser.resolve_operand(unresolved_source, source_type)
-        return cls(source, target_type)
-
-
 class _BaseSymbolMemoryQueryOp(IRDLOperation):
     """memory 元信息查询 op 基类。"""
 
@@ -447,12 +361,155 @@ class SymbolGetStrideOp(_BaseSymbolMemoryQueryOp):
     FIELD_NAME: ClassVar[str] = "stride"
 
 
+@irdl_op_definition
+class SymbolForOp(IRDLOperation):
+    """以 symbol.int 边界驱动的半开区间循环。"""
+
+    name = "symbol.for"
+
+    start = operand_def(Attribute)
+    end = operand_def(Attribute)
+    step = operand_def(Attribute)
+    body = region_def()
+    traits = traits_def(NoTerminator())
+
+    def __init__(
+        self,
+        start: SSAValue | Operation,
+        end: SSAValue | Operation,
+        step: SSAValue | Operation,
+        body: Region | Block | Sequence[Operation] | Sequence[Block],
+    ) -> None:
+        """初始化 symbol.for。
+
+        创建者: 我不是牛马
+        最后一次更改: 我不是牛马
+
+        功能说明:
+        - 设置 start/end/step 三个 symbol.int 操作数与单块循环体。
+        - 循环体块参数表示当前迭代变量 `it`。
+
+        使用示例:
+        - SymbolForOp(start, end, step, Block(arg_types=[SymbolValueType.from_expr("M")]))
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        if isinstance(body, Block):
+            body = Region(body)
+        elif not isinstance(body, Region):
+            body = Region(list(body))
+        super().__init__(operands=[start, end, step], regions=[body])
+
+    def verify_(self) -> None:
+        """校验 symbol.for 约束。
+
+        创建者: 我不是牛马
+        最后一次更改: 我不是牛马
+
+        功能说明:
+        - 校验 start/end/step/it 均为 `!symbol.int<\"expr\">`。
+        - 校验 region 为单块且仅包含一个块参数。
+        - 当 step 可静态判定为 `0` 时直接报错。
+
+        使用示例:
+        - SymbolForOp(start, end, step, body).verify_()
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        for operand_name in ("start", "end", "step"):
+            operand = SSAValue.get(getattr(self, operand_name))
+            if not _is_symbol_int_type(operand.type):
+                raise VerifyException(f"{self.name} {operand_name} must have type !symbol.int<\"expr\">")
+
+        step_type = SSAValue.get(self.step).type
+        assert isinstance(step_type, SymbolValueType)
+        if _normalize_expr(step_type.expr.expr.data) == "0":
+            raise VerifyException(f"{self.name} step must not be zero")
+
+        blocks = list(self.body.blocks)
+        if len(blocks) != 1:
+            raise VerifyException(f"{self.name} only supports single-block regions")
+        block = blocks[0]
+        if len(block.args) != 1:
+            raise VerifyException(f"{self.name} body must have exactly one block argument")
+        iter_arg = block.args[0]
+        if not _is_symbol_int_type(iter_arg.type):
+            raise VerifyException(f"{self.name} iter_arg must have type !symbol.int<\"expr\">")
+
+    def print(self, printer: Printer) -> None:
+        """打印 symbol.for 自定义文本语法。"""
+
+        blocks = list(self.body.blocks)
+        if len(blocks) != 1 or len(blocks[0].args) != 1:
+            printer.print_op_with_default_format(self)
+            return
+        block = blocks[0]
+        iter_arg = block.args[0]
+        printer.print_string(" ")
+        printer.print_ssa_value(iter_arg)
+        printer.print_string(" = ")
+        printer.print_ssa_value(self.start)
+        printer.print_string(" to ")
+        printer.print_ssa_value(self.end)
+        printer.print_string(" step ")
+        printer.print_ssa_value(self.step)
+        printer.print_string(" : ")
+        printer.print_attribute(SSAValue.get(self.start).type)
+        printer.print_string(", ")
+        printer.print_attribute(SSAValue.get(self.end).type)
+        printer.print_string(", ")
+        printer.print_attribute(SSAValue.get(self.step).type)
+        printer.print_string(" {")
+        if block.ops:
+            with printer.indented():
+                for op in block.ops:
+                    printer._print_new_line()
+                    printer.print_op(op)
+            printer._print_new_line(indent=0)
+        else:
+            printer._print_new_line(indent=0)
+        printer.print_string("}")
+
+    @classmethod
+    def parse(cls, parser: AttrParser) -> "SymbolForOp":
+        """解析 symbol.for 自定义文本语法。"""
+
+        unresolved_iter = parser.parse_argument(expect_type=False)
+        parser.parse_characters("=", " in symbol.for")
+        start = parser.parse_unresolved_operand()
+        parser.parse_characters("to", " in symbol.for")
+        end = parser.parse_unresolved_operand()
+        parser.parse_characters("step", " in symbol.for")
+        step = parser.parse_unresolved_operand()
+        parser.parse_characters(":", " in symbol.for")
+        start_type = parser.parse_type()
+        parser.parse_characters(",", " in symbol.for type list")
+        end_type = parser.parse_type()
+        parser.parse_characters(",", " in symbol.for type list")
+        step_type = parser.parse_type()
+
+        iter_arg = unresolved_iter.resolve(start_type)
+        body = parser.parse_region((iter_arg,))
+        start_value = parser.resolve_operand(start, start_type)
+        end_value = parser.resolve_operand(end, end_type)
+        step_value = parser.resolve_operand(step, step_type)
+        return cls(start_value, end_value, step_value, body)
+
+
 Symbol = Dialect(
     "symbol",
     [
-        SymbolCastOp,
         SymbolGetDimOp,
         SymbolGetStrideOp,
+        SymbolForOp,
     ],
     [
         SymbolExprAttr,
@@ -462,9 +519,9 @@ Symbol = Dialect(
 
 __all__ = [
     "Symbol",
-    "SymbolCastOp",
     "SymbolExprAttr",
     "SymbolGetDimOp",
+    "SymbolForOp",
     "SymbolGetStrideOp",
     "SymbolValueType",
 ]
