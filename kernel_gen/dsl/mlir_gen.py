@@ -1,7 +1,7 @@
 """MLIR function assembly entrypoints for DSL.
 
 创建者: 小李飞刀
-最后一次更改: 朽木露琪亚
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 负责将 `FunctionAST` 组装为 `func.func`。
@@ -59,6 +59,8 @@ def _symbol_expr_from_runtime_arg(runtime_arg: object) -> str | None:
     if isinstance(runtime_arg, SymbolDim):
         return str(runtime_arg.get_symbol())
     if isinstance(runtime_arg, int):
+        if runtime_arg < 0:
+            return f"0 - {abs(runtime_arg)}"
         return str(runtime_arg)
     return None
 
@@ -147,6 +149,8 @@ def _validate_return_type(func_ast: FunctionAST, result_type: object) -> None:
 def build_func_op(
     fn: Callable[..., object],
     *runtime_args: object,
+    globals: dict[str, object] | None = None,
+    builtins: dict[str, object] | object | None = None,
 ) -> func.FuncOp:
     from .ast_visitor import AstVisitorError
 
@@ -157,6 +161,12 @@ def build_func_op(
         if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
     ]
     if len(runtime_args) != len(positional_params):
+        if not runtime_args and (globals is not None or builtins is not None):
+            reason = (
+                "globals/builtins cannot replace function runtime args: "
+                f"expected {len(positional_params)}, got 0"
+            )
+            raise AstVisitorError(reason, location=None)
         reason = (
             f"build_func_op requires explicit runtime args for {fn.__name__}: "
             f"expected {len(positional_params)}, got {len(runtime_args)}"
@@ -165,12 +175,14 @@ def build_func_op(
 
     runtime_table = {param.name: runtime_args[index] for index, param in enumerate(positional_params)}
     globals_table = dict(getattr(fn, "__globals__", {}) or {})
+    if globals is not None:
+        globals_table.update(globals)
     globals_table.update(runtime_table)
-    builtins = globals_table.get("__builtins__", {})
-    if isinstance(builtins, dict):
-        builtins_table = builtins
+    builtins_obj = builtins if builtins is not None else globals_table.get("__builtins__", {})
+    if isinstance(builtins_obj, dict):
+        builtins_table = builtins_obj
     else:
-        builtins_table = getattr(builtins, "__dict__", {})
+        builtins_table = getattr(builtins_obj, "__dict__", {})
 
     try:
         func_ast = _parse_function_with_env(fn, globals_table, builtins_table, runtime_table, config=None)

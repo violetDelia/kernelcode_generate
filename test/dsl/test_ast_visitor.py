@@ -1,7 +1,7 @@
 """AST visitor tests.
 
 创建者: 小李飞刀
-最后一次更改: 不要啊教练
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 AST 前端、nn dialect IR 与 MLIR 文本入口的回归测试。
@@ -602,6 +602,38 @@ def test_symbol_scalar_function_lowers_add_to_symbol_add() -> None:
     ops = list(func_op.body.blocks[0].ops)
     symbol_add_ops = [op for op in ops if isinstance(op, SymbolAddOp)]
     assert len(symbol_add_ops) == 1
+    assert "symbol.add" in _print_module(ModuleOp([func_op]))
+
+
+# MGEN-020
+# 创建者: 朽木露琪亚
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-23 04:16:19 +0800
+# 最近一次运行成功时间: 2026-03-23 04:16:19 +0800
+# 功能说明: 验证 Python int 运行时实参会 lowering 为携带具体整数值的 SymbolValueType，并满足 add-scalar expectation 基线。
+# 测试目的: 验证 build_func_op(add, lhs, rhs) 在整型标量链路中生成 symbol.add，且赋值后 return 场景保持 expectation 断言成立。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type() -> None:
+    def add(a, b):
+        result = a + b
+        return result
+
+    func_op = build_func_op(add, -3, 5)
+    arg_types = [arg.type for arg in func_op.args]
+    assert arg_types == [SymbolValueType.from_expr("0 - 3"), SymbolValueType.from_expr("5")]
+    assert not arg_types[0].is_symbol()
+    assert not arg_types[1].is_symbol()
+    assert arg_types[0].get_value() == -3
+    assert arg_types[1].get_value() == 5
+
+    add_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolAddOp)]
+    assert len(add_ops) == 2
+    assert add_ops[0].result.type == SymbolValueType.from_expr("0 - 3 + 5")
+    assert not add_ops[0].result.type.is_symbol()
+    assert add_ops[0].result.type.get_value() == 2
     assert "symbol.add" in _print_module(ModuleOp([func_op]))
 
 

@@ -646,7 +646,6 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
                 raise _LoweringError("Symbol binary op result must be !symbol.int", location=expr.location)
             op = SymbolAddOp(lhs, rhs, result_type)
             ctx.builder.add_op(op)
-            ctx._set_cache(expr_key, op.result)
             return op.result
         lhs_type = _expect_memory_value(lhs, expr.location)
         rhs_type = _expect_memory_value(rhs, expr.location)

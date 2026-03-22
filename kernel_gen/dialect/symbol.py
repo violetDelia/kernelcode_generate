@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import ast as py_ast
 import re
 from collections.abc import Sequence
 from typing import ClassVar
@@ -43,7 +44,7 @@ from xdsl.utils.exceptions import VerifyException
 from kernel_gen.dialect.nn import NnMemoryType
 
 _SYMBOL_EXPR_PATTERN = re.compile(
-    r"^(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+)(?:\s*[+\-*]\s*(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+))*$"
+    r"^(?:[A-Za-z_][A-Za-z0-9_]*|[+-]?[0-9]+)(?:\s*[+\-*]\s*(?:[A-Za-z_][A-Za-z0-9_]*|[+-]?[0-9]+))*$"
 )
 
 
@@ -66,6 +67,55 @@ def _normalize_expr(expr: str) -> str:
     """
 
     return expr.strip()
+
+
+def _evaluate_concrete_expr(expr: str) -> int | None:
+    """尝试计算不含符号名的整数表达式。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 对仅由整数常量与 `+/-/*` 组成的表达式返回具体整数值。
+    - 当表达式包含符号名或不满足受支持语法时返回 `None`。
+
+    使用示例:
+    - _evaluate_concrete_expr("3 + -4")
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/dialect/test_symbol_dialect.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    normalized = _normalize_expr(expr)
+    try:
+        parsed = py_ast.parse(normalized, mode="eval")
+    except SyntaxError:
+        return None
+
+    def _eval(node: py_ast.AST) -> int:
+        if isinstance(node, py_ast.Expression):
+            return _eval(node.body)
+        if isinstance(node, py_ast.Constant) and isinstance(node.value, int):
+            return int(node.value)
+        if isinstance(node, py_ast.UnaryOp) and isinstance(node.op, (py_ast.UAdd, py_ast.USub)):
+            operand = _eval(node.operand)
+            return operand if isinstance(node.op, py_ast.UAdd) else -operand
+        if isinstance(node, py_ast.BinOp) and isinstance(node.op, (py_ast.Add, py_ast.Sub, py_ast.Mult)):
+            lhs = _eval(node.left)
+            rhs = _eval(node.right)
+            if isinstance(node.op, py_ast.Add):
+                return lhs + rhs
+            if isinstance(node.op, py_ast.Sub):
+                return lhs - rhs
+            return lhs * rhs
+        raise ValueError("expression is not a concrete integer expression")
+
+    try:
+        return _eval(parsed)
+    except ValueError:
+        return None
 
 
 def _verify_axis(axis: Attribute, rank: int, op_name: str) -> int:
@@ -280,7 +330,8 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
         """
 
         expr = _normalize_expr(self.expr.expr.data)
-        return int(expr) if expr.isdigit() else expr
+        concrete_value = _evaluate_concrete_expr(expr)
+        return concrete_value if concrete_value is not None else expr
 
     def is_symbol(self) -> bool:
         """判断当前值是否为非字面量符号表达。
@@ -301,7 +352,7 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
-        return not _normalize_expr(self.expr.expr.data).isdigit()
+        return _evaluate_concrete_expr(self.expr.expr.data) is None
 
     @classmethod
     def from_expr(cls, expr: str) -> "SymbolValueType":
