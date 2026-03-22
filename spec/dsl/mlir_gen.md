@@ -12,7 +12,7 @@
 - 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
 - `功能实现`：[`kernel_gen/dsl/mlir_gen.py`](../../kernel_gen/dsl/mlir_gen.py)、[`python/dsl/mlir_gen.py`](../../python/dsl/mlir_gen.py)（统一规范覆盖两条实现入口）
-- `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
+- `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)（当前仓内 `mlir_gen` 链路测试承载文件，尚未独立拆分为 `test_mlir_gen.py`）
 
 ## 依赖
 
@@ -27,6 +27,7 @@
 
 - 以统一入口生成 `func.func` op。
 - 保证函数签名、参数顺序与返回类型与 AST 一致。
+- 使用函数实际接收的运行时参数推导 `func.func` 输入签名。
 - 为上层打印或封装提供稳定的 func op 结果。
 
 ## 限制与边界
@@ -35,6 +36,10 @@
 - 不负责 MLIR 文本打印或后端代码生成。
 - 不定义节点级发射细节，节点发射规则由 `emit_mlir` 约束。
 - 不做优化或自动修复非法 IR。
+- `build_func_op` 只接收目标函数与运行时参数，不再接收 `globals`、`builtins`、`config` 一类额外解析参数。
+- 运行时参数必须按目标函数形参顺序传入；数量不一致、顺序不一致或类型无法映射时必须报错。
+- 运行时参数的类型 lowering 必须基于“实际传入的参数对象”决定，而不是基于额外配置推断。
+- 当运行时参数为 `SymbolDim("s")` 这类 symbol 标量时，对应的 `func.func` 输入必须 lowering 为 `!symbol.int<"s">`；若为常量 symbol，例如 `SymbolDim(1)`，则必须 lowering 为 `!symbol.int<"1">`。
 - 当函数体仅包含 `for` 循环且没有 `return` 时，输出 `func.func` 允许零返回值。
 - 当 `ForAST` 来源于 `LoopRange(start, end, step)` 且循环边界保持 symbol 整数语义时，lowering 后必须生成 `symbol.for`，不得退回 `scf.for`；其循环块参数 `it` 必须为 `!symbol.int<"expr">`。
 - `LoopRange` 场景中的循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand，必须直接保持 `!symbol.int<"expr">` 语义传递，不得额外生成 `arith.index_cast`。
@@ -44,33 +49,37 @@
 
 ## 公开接口
 
-### `build_func_op(fn, globals=None, builtins=None, config=None)`
+### `build_func_op(fn, *runtime_args)`
 
 功能说明：
 
 - 解析 Python 函数并生成 `func.func` op。
 - 内部依次调用 `parse_function(...)`、`AstVisitor` 与 `emit_mlir`。
+- `func.func` 的输入签名由 `runtime_args` 的实际值语义决定。
 
 参数说明：
 
 - `fn` (`callable`)：受限 Python 函数。
-- `globals` (`dict|None`)：注解解析上下文（可选）。
-- `builtins` (`dict|None`)：注解解析上下文（可选）。
-- `config` (`dict|None`)：行为配置（可选）。
+- `runtime_args` (`tuple[object, ...]`)：目标函数实际传入的运行时参数，顺序必须与 `fn` 的形参顺序一致。
 
 使用示例：
 
 ```python
-func_op = build_func_op(add)
+func_op = build_func_op(add, A, B)
 ```
 
 ```python
-func_op = build_func_op(only_symbol)
+s = SymbolDim("s")
+func_op = build_func_op(only_symbol, s)
 ```
 
 注意事项：
 
 - 解析失败或发射失败必须抛出可定位的错误。
+- 不允许通过 `globals`、`builtins`、`config` 或其他额外参数改变函数签名推导行为。
+- `runtime_args` 的个数必须与函数形参数量一致。
+- 张量类运行时参数应按其对应 spec lowering 为项目内的 memory type。
+- `SymbolDim("s")` 这类运行时参数必须 lowering 为 `!symbol.int<"s">`；`SymbolDim(1)` 这类常量 symbol 必须 lowering 为 `!symbol.int<"1">`。
 - 允许 `for` 循环内包含 `dma.slice`/`dma.deslice` 相关语义；当循环来自 `LoopRange` 且边界为 symbol 整数时，必须保留 `symbol.for` 结构，且迭代变量 `it` 不能退化为 `index`、`i32`、浮点或其他非 `SymbolValueType`。
 - 当 `fn` 对应 `expectation/dsl/symbol.py` 这类纯 symbol 标量函数时，输入参数与返回值都必须 lowering 为 `!symbol.int<"expr">`。
 - 纯 symbol 标量函数的参数/返回类型必须复用 `spec/dialect/symbol.md` 中定义的 `SymbolValueType`，不能退回 builtin 整数类型。
@@ -81,28 +90,31 @@ func_op = build_func_op(only_symbol)
 - 返回 `func.func` op。
 - 不返回 module。
 
-### `build_func_op_from_ast(func_ast, config=None)`
+### `build_func_op_from_ast(func_ast, runtime_args)`
 
 功能说明：
 
 - 基于已构建的 `FunctionAST` 生成 `func.func` op。
 - 不重复解析 Python 源码。
+- `func.func` 的输入签名由 `runtime_args` 的实际值语义决定。
 
 参数说明：
 
 - `func_ast` (`FunctionAST`)：函数 AST。
-- `config` (`dict|None`)：行为配置（可选）。
+- `runtime_args` (`tuple[object, ...] | list[object]`)：目标函数实际传入的运行时参数，顺序必须与 `func_ast.inputs` 一致。
 
 使用示例：
 
 ```python
 func_ast = parse_function(add)
-func_op = build_func_op_from_ast(func_ast)
+func_op = build_func_op_from_ast(func_ast, [A, B])
 ```
 
 注意事项：
 
 - 输入 AST 必须满足 `ast.md` 的结构约束。
+- `runtime_args` 必须与 `func_ast.inputs` 一一对应。
+- 若 `runtime_args` 中存在 `SymbolDim("s")` 这类 symbol 标量，对应输入必须 lowering 为 `!symbol.int<"s">`。
 - 若 AST 仅包含符号标量输入/输出，则生成的 `func.func` 签名必须保持 `!symbol.int<"expr">` 输入与返回，不得改写为 builtin 标量类型。
 
 返回与限制：
@@ -111,10 +123,13 @@ func_op = build_func_op_from_ast(func_ast)
 
 ## 测试
 
-- 测试文件：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
-- 执行命令：`pytest -q test/dsl/test_ast_visitor.py`
+- 测试文件：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)（当前仓内 `mlir_gen` 链路实际承载文件；`test_mlir_gen` 尚未独立拆分）
+- 执行命令：`pytest -q test/dsl/test_ast_visitor.py -k 'test_build_func_op or test_visit_to_nn_ir_builds_module or test_emit_mlir_output or test_scalar_arg_lowering_in_signature or test_symbol_scalar_function_uses_symbol_value_type_signature or test_symbol_scalar_function_lowers_add_to_symbol_add or test_invalid_tensor_return_annotation_reports_diagnostics or test_constant_lowering_reports_diagnostics or test_return_type_mismatch_reports_diagnostics or test_multi_statement_ssa_order_and_reuse or test_build_func_op_supports_symbolic_for_loop_dma_without_return or test_tensor_binary_implicit_broadcast_lowering or test_tensor_binary_prepend_broadcast_lowering or test_compare_implicit_broadcast_lowering or test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics'`
 - 测试目标：
+  - 明确当前仓内未独立存在 `test/dsl/test_mlir_gen.py`；`mlir_gen` 链路测试由 [`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py) 中的 `MGEN-*` 用例实际承载。
   - 验证 `build_func_op(...)` 生成 `func.func`。
+  - 验证 `build_func_op(fn, *runtime_args)` 仅通过运行时参数推导输入签名。
+  - 验证 `build_func_op(...)` 缺少运行时参数、运行时实参数量不匹配，以及额外 `globals/builtins` 调用方式的错误路径。
   - 验证函数签名与返回值类型与 AST 一致。
   - 通过测试辅助封装验证 `func.func` 的结构输出（不改变本模块的边界）。
   - 覆盖无返回 `for` 循环与 `slice/deslice` 的生成能力，并要求 `LoopRange` lowering 为 `symbol.for`，且循环迭代变量 `it` 保持 `!symbol.int<"...">`。
@@ -123,6 +138,7 @@ func_op = build_func_op_from_ast(func_ast)
   - 验证 `expectation/dsl/for_loop.py` 对应场景生成 `symbol.for + dma.slice/dma.deslice`，且循环相关 lowering 不生成 `arith.index_cast`。
 - 功能与用例清单：
   - MGEN-001：`build_func_op(...)` 返回 `func.func`。（`test_build_func_op_returns_func_op`）
+  - MGEN-001A：`build_func_op(...)` 只接收 `fn + runtime_args`，不依赖额外上下文参数推导签名。（`test_build_func_op_uses_runtime_args_only`）
   - MGEN-002：参数顺序与 AST 一致。（`test_build_func_op_from_ast_preserves_arg_order`）
   - MGEN-003：返回值类型与 AST 对齐。（`test_build_func_op_return_type_matches_annotation`）
   - MGEN-004：经测试辅助封装后 module 含 `func.func`/`nn` op。（`test_visit_to_nn_ir_builds_module`）
@@ -140,3 +156,4 @@ func_op = build_func_op_from_ast(func_ast)
   - MGEN-016：`expectation/dsl/symbol.py` 的纯 symbol 函数参数 lowering 为 `func.func` 的 `!symbol.int<"...">` 输入。（`test_symbol_scalar_function_uses_symbol_value_type_signature`、`expectation/dsl/symbol.py`）
   - MGEN-017：`expectation/dsl/symbol.py` 的纯 symbol 函数返回 lowering 为 `func.func` 的 `!symbol.int<"...">` 输出。（`test_symbol_scalar_function_uses_symbol_value_type_signature`、`expectation/dsl/symbol.py`）
   - MGEN-018：纯 symbol 标量加法 lowering 为 `symbol.add`。（`test_symbol_scalar_function_lowers_add_to_symbol_add`、`expectation/dsl/symbol.py`）
+  - MGEN-019：`build_func_op` 的运行时参数为必填且只接受 `fn + runtime_args`；省略实参、实参数量不匹配或试图以 `globals/builtins` 替代时必须报错。（`test_build_func_op_requires_explicit_runtime_args`、`test_build_func_op_rejects_runtime_arg_count_mismatch`、`test_build_func_op_globals_and_builtins_cannot_replace_runtime_args`）
