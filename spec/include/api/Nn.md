@@ -9,13 +9,14 @@
 - 创建者：`摸鱼小分队`
 - 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/include/api/Nn.md`](../../../spec/include/api/Nn.md)
-- `统一头文件`：`include/api/Nn.h` / `include/api/Memory.h`
+- `统一头文件`：`include/api/Nn.h` / `include/api/Memory.h` / `include/api/Core.h`
 - `功能实现`：无（API 规范暂不绑定实现）
 - `test`：无（API 规范暂不提供测试）
 
 ## 依赖
 
 - [`spec/include/api/Memory.md`](../../../spec/include/api/Memory.md)：API 统一内存视图抽象。
+- [`spec/include/api/Core.md`](../../../spec/include/api/Core.md)：统一返回状态与状态码语义。
 - [`spec/operation/nn.md`](../../../spec/operation/nn.md)：逐元素算术、逐元素比较与显式广播的语义约束。
 
 ## 目标
@@ -33,7 +34,7 @@
 - 统一对外头文件仅暴露接口签名与最小类型要求，不包含任何后端特有结构体或实现细节。
 - API 仅定义合法输入语义；非法形状或不满足约束的调用必须通过返回失败状态值表达。
 - 所有 NN API 必须由调用方显式提供输出视图，接口返回状态值，不通过函数返回输出对象。
-- 状态值语义建议遵循：`0` 表示成功，非 `0` 表示失败；具体状态码枚举由实现侧定义。
+- 返回状态遵循 `spec/include/api/Core.md` 中的 `Status` 与 `StatusCode` 语义。
 - 内存视图抽象需满足以下最小要求：
   - `data` 指向有效连续内存区（实现可扩展为其他存储形式，但需保持语义一致）。
   - `shape`/`stride` 为长度 `rank` 的维度与步长描述，维度为正数；`Memory<T>` 的 `rank` 为运行期属性，不固定为编译期模板参数。
@@ -41,7 +42,7 @@
 
 ## 公开接口
 
-以下示例以统一对外接口名表示，统一头文件为 `include/api/Nn.h` 并依赖 `include/api/Memory.h`。对外公开接口仅使用无命名空间签名；如实现侧需要命名空间或封装层，仅允许在内部适配/包装，不得改变公开 API 签名。`Status` 为状态码类型（实现可用 `int` 或等价枚举），`0` 表示成功，非 `0` 表示失败。
+以下示例以统一对外接口名表示，统一头文件为 `include/api/Nn.h` 并依赖 `include/api/Memory.h` 与 `include/api/Core.h`。对外公开接口仅使用无命名空间签名；如实现侧需要命名空间或封装层，仅允许在内部适配/包装，不得改变公开 API 签名。`Status` 与 `StatusCode` 语义以 `spec/include/api/Core.md` 为准。
 
 ### `add(lhs, rhs, out)`
 
