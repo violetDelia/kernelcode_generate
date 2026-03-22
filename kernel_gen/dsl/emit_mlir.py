@@ -21,11 +21,11 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from xdsl.dialects import arith, func
+from xdsl.dialects import arith, func, scf
 from xdsl.dialects.builtin import ArrayAttr, FloatAttr, IntAttr, IntegerAttr, StringAttr, i1, i32, f32
 from xdsl.ir import Attribute, Block
 
-from kernel_gen.dialect.dma import DmaLoadOp, DmaStoreOp
+from kernel_gen.dialect.dma import DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp
 from kernel_gen.dialect.nn import (
     NnAddOp,
     NnBroadcastOp,
@@ -207,6 +207,14 @@ def _build_index_attrs(
         scalar = _resolve_index_expr(value, ctx)
         values = [scalar for _ in range(rank)]
     return ArrayAttr([_dim_to_attr(item) for item in values])
+
+
+def _lower_loop_bound(expr: object, ctx: EmitContext) -> object:
+    if isinstance(expr, ConstAST):
+        return _lower_expr(expr, ctx)
+    if isinstance(expr, (ScalarArgAST, VarAST)):
+        return _lookup_symbol(expr, ctx)
+    raise _LoweringError("Unsupported loop bound expression", location=getattr(expr, "location", None))
 
 
 def _build_stride_attrs(
@@ -519,14 +527,24 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         result_type = _infer_expr_type(expr, ctx.types)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("LoadAST result must be nn.memory", location=expr.location)
-        load_op = DmaLoadOp(
-            source,
-            offsets,
-            sizes,
-            strides,
-            result_type,
-            _memory_space_from_ast(expr.space, source_type.space),
-        )
+        if expr.sizes is not None:
+            load_op = DmaSliceOp(
+                source,
+                offsets,
+                sizes,
+                strides,
+                result_type,
+                _memory_space_from_ast(expr.space, source_type.space),
+            )
+        else:
+            load_op = DmaLoadOp(
+                source,
+                offsets,
+                sizes,
+                strides,
+                result_type,
+                _memory_space_from_ast(expr.space, source_type.space),
+            )
         ctx.builder.add_op(load_op)
         ctx._set_cache(expr_key, load_op.result)
         return load_op.result
@@ -621,35 +639,41 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
             else value_type.shape
         )
         strides = _build_stride_attrs(node.stride, rank, ctx, location=node.location)
-        store_op = DmaStoreOp(value, target, offsets, sizes, strides)
+        if node.sizes is not None:
+            store_op = DmaDesliceOp(value, target, offsets, sizes, strides, target_type)
+        else:
+            store_op = DmaStoreOp(value, target, offsets, sizes, strides)
         ctx.builder.add_op(store_op)
         return store_op
     if isinstance(node, ForAST):
-        loop_vars = _get_loop_vars(ctx)
-        start_value = _resolve_index_expr(node.start, ctx)
-        end_value = _resolve_index_expr(node.end, ctx)
+        start_value = _lower_loop_bound(node.start, ctx)
+        end_value = _lower_loop_bound(node.end, ctx)
         step_expr = node.step if node.step is not None else ConstAST(1, location=node.location)
-        step_value = _resolve_index_expr(step_expr, ctx)
+        step_value = _lower_loop_bound(step_expr, ctx)
+        body_block = Block(arg_types=[start_value.type])
+        loop_op = scf.ForOp(start_value, end_value, step_value, [], body_block)
+        ctx.builder.add_op(loop_op)
+
+        nested_symbols = dict(ctx.symbols)
+        induction_arg = body_block.args[0]
+        nested_symbols[node.var.name] = induction_arg
+        nested_ctx = EmitContext(builder=body_block, symbols=nested_symbols, types=ctx.types, config=ctx.config)
+        nested_ctx._cache = ctx._snapshot_cache()
+        nested_ctx._set_cache(_expr_key(node.var), induction_arg)
+        nested_ctx.types[_expr_key(node.var)] = induction_arg.type
+
+        loop_vars = _get_loop_vars(nested_ctx)
         previous = loop_vars.get(node.var.name)
-        base_values = ctx._snapshot_cache()
+        loop_vars[node.var.name] = node.var.name
         last_value = None
-        if isinstance(start_value, int) and isinstance(end_value, int) and isinstance(step_value, int):
-            for index in range(start_value, end_value, step_value):
-                loop_vars[node.var.name] = index
-                ctx._restore_cache(base_values)
-                for stmt in node.body.statements:
-                    last_value = emit_mlir(stmt, ctx)
-        else:
-            loop_vars[node.var.name] = node.var.name
-            ctx._restore_cache(base_values)
-            for stmt in node.body.statements:
-                last_value = emit_mlir(stmt, ctx)
-        ctx._restore_cache(base_values)
+        for stmt in node.body.statements:
+            last_value = emit_mlir(stmt, nested_ctx)
+        body_block.add_op(scf.YieldOp())
         if previous is None:
             loop_vars.pop(node.var.name, None)
         else:
             loop_vars[node.var.name] = previous
-        return last_value
+        return loop_op if last_value is None else last_value
     if isinstance(node, BlockAST):
         raise _LoweringError("BlockAST must be lowered via AstVisitor", location=node.location)
     if isinstance(node, FunctionAST):

@@ -1,3 +1,29 @@
+# 2026-03-22 T-20260322-30d8b325
+
+- 时间：2026-03-22 11:27:00 +0800
+- 角色：`我不是牛马`
+- worktree：`/home/lfr/kernelcode_generate/wt-20260322-dsl-for-loop-dma-slice`
+- 任务描述：重构 DSL for-loop expectation，使 `expectation/dsl/for_loop.py` 生成正确的 `scf.for + dma.slice/dma.deslice` 链路。
+- 变更文件：
+  - `expectation/dsl/for_loop.py`
+  - `kernel_gen/dsl/emit_mlir.py`
+  - `spec/dsl/emit_mlir.md`
+  - `spec/dsl/mlir_gen.md`
+  - `test/dsl/test_ast_visitor.py`
+- 核心变更：
+  - `kernel_gen/dsl/emit_mlir.py`：为 `ForAST` 生成 `scf.for`，不再展开/跳过循环结构；`LoadAST/StoreAST` 在携带 `sizes` 时分别 lowering 为 `dma.slice/dma.deslice`。
+  - `test/dsl/test_ast_visitor.py`：将 for-loop 回归更新为校验 `scf.for`、`dma.slice`、`dma.deslice`，并保持普通 `LoadAST` 仍在循环体内 lowering 为 `dma.load`。
+  - `expectation/dsl/for_loop.py`：补充结构断言，确保 expectation 直接验收 `scf.for + dma.slice/dma.deslice`，且循环体内不回退为 `dma.load/dma.store`。
+  - `spec/dsl/emit_mlir.md`、`spec/dsl/mlir_gen.md`：同步更新 for-loop 与 slice/deslice lowering 口径。
+- 测试：
+  - `python expectation/dsl/for_loop.py`
+  - `pytest -q test/dsl/test_ast_visitor.py`
+- 测试结果：
+  - expectation：通过
+  - DSL AST visitor：`40 passed`
+- 阻塞：无
+- 下一步建议：申请复审任务，核对 `spec/dsl/emit_mlir.md`、`spec/dsl/mlir_gen.md`、`kernel_gen/dsl/emit_mlir.py`、`expectation/dsl/for_loop.py`、`test/dsl/test_ast_visitor.py` 的闭环一致性。
+
 # 2026-03-21 合并任务（DMA/DSL for-loop expectation）
 
 - 时间：2026-03-21 23:59:59 +0800

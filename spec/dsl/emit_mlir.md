@@ -104,9 +104,9 @@ value = emit_mlir(expr_ast, ctx)
 - `ConstAST`：生成常量或等价字面量 op/value。
 - `BinaryExprAST(add/sub/mul/div)`：生成对应的二元算术 op。
 - `CompareExprAST(eq/ne/lt/le/gt/ge)`：生成对应的比较 op。
-- `LoadAST`：生成张量读取相关 op/value。
-- `StoreAST`：生成张量写入相关 op。
-- `ForAST`：生成循环控制流结构。
+- `LoadAST`：生成张量读取相关 op/value；当携带 `sizes` 时发射 `dma.slice`。
+- `StoreAST`：生成张量写入相关 op；当携带 `sizes` 时发射 `dma.deslice`。
+- `ForAST`：生成 `scf.for` 循环控制流结构。
 
 ## 测试
 
@@ -125,4 +125,4 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-007：非 unit stride 抛出可定位错误。（`test_load_ast_lowering_raises_lowering_error`）
   - EMIT-008：索引 rank mismatch 抛出可定位错误。（`test_load_ast_index_rank_mismatch_reports_location`）
   - EMIT-009：`StoreAST` 输入非 memory 抛出错误。（`test_store_ast_lowering_raises_lowering_error`）
-  - EMIT-010：`ForAST` lowering 驱动 `dma.load`。（`test_for_ast_lowering_emits_loads`）
+  - EMIT-010：`ForAST` lowering 保留 `scf.for` 并在循环体内发射 `dma.load`。（`test_for_ast_lowering_emits_loads`）

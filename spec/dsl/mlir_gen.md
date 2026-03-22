@@ -60,7 +60,7 @@ func_op = build_func_op(add)
 注意事项：
 
 - 解析失败或发射失败必须抛出可定位的错误。
-- 允许 `for` 循环内包含 `dma.slice`/`dma.deslice` 相关语义（由 `emit_mlir` 负责具体发射）。
+- 允许 `for` 循环内包含 `dma.slice`/`dma.deslice` 相关语义，并保留 `scf.for` 循环结构（由 `emit_mlir` 负责具体发射）。
 
 返回与限制：
 
@@ -118,4 +118,4 @@ func_op = build_func_op_from_ast(func_ast)
   - MGEN-012：前置维度隐式 broadcast。（`test_tensor_binary_prepend_broadcast_lowering`）
   - MGEN-013：比较表达式隐式 broadcast。（`test_compare_implicit_broadcast_lowering`）
   - MGEN-014：不可 broadcast 报错与定位。（`test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics`）
-  - MGEN-015：LoopRange + slice/deslice + 无 return 场景生成 DMA IR。（`test_build_func_op_supports_symbolic_for_loop_dma_without_return`）
+  - MGEN-015：LoopRange + slice/deslice + 无 return 场景生成 `scf.for + dma.slice/dma.deslice`。（`test_build_func_op_supports_symbolic_for_loop_dma_without_return`）

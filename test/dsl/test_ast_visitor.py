@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from xdsl.dialects import func
+from xdsl.dialects import func, scf
 from xdsl.dialects.builtin import ModuleOp, i32
 from xdsl.ir import Block
 from xdsl.printer import Printer
@@ -31,7 +31,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dialect.dma import DmaLoadOp, DmaStoreOp
+from kernel_gen.dialect.dma import DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp
 from kernel_gen.dialect.nn import NnAddOp, NnBroadcastOp, NnEqOp, NnMemoryType
 from kernel_gen.dsl.ast import (
     AstParseError,
@@ -812,10 +812,10 @@ def test_store_ast_lowering_raises_lowering_error() -> None:
 
 # EMIT-010
 # 创建者: 摸鱼小分队
-# 最后一次更改: 摸鱼小分队
-# 最近一次运行测试时间: 2026-03-21 00:00:00 +0800
-# 最近一次运行成功时间: 2026-03-21 00:00:00 +0800
-# 功能说明: 验证 ForAST lowering 会解析 loop var 并生成 dma.load。
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 11:27:00 +0800
+# 最近一次运行成功时间: 2026-03-22 11:27:00 +0800
+# 功能说明: 验证 ForAST lowering 会保留循环结构并在循环体内生成 dma.load。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_for_ast_lowering_emits_loads
 # 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
@@ -837,8 +837,11 @@ def test_for_ast_lowering_emits_loads() -> None:
     loop = ForAST(var=loop_var, start=ConstAST(0), end=ConstAST(2), body=body, location=None)
     func_ast = FunctionAST(name="loop", inputs=[tensor], outputs=[], body=BlockAST([loop, tensor]))
     func_op = build_func_op_from_ast(func_ast)
-    ops = [op for op in func_op.body.block.ops if isinstance(op, DmaLoadOp)]
-    assert len(ops) == 2
+    loop_ops = [op for op in func_op.body.block.ops if isinstance(op, scf.ForOp)]
+    assert len(loop_ops) == 1
+    ops = [op for op in loop_ops[0].body.block.ops if isinstance(op, DmaLoadOp)]
+    assert len(ops) == 1
+    assert ops[0].offsets.data[0].data == "i"
 
 
 # AST-009
@@ -865,10 +868,10 @@ def test_parse_function_infers_symboldim_arguments_without_annotations(monkeypat
 
 # MGEN-015
 # 创建者: OpenAI
-# 最后一次更改: OpenAI
-# 最近一次运行测试时间: 2026-03-21 23:59:00 +0800
-# 最近一次运行成功时间: 2026-03-21 23:59:00 +0800
-# 功能说明: 验证 LoopRange + slice/deslice + 无 return 场景可生成 DMA IR。
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 11:27:00 +0800
+# 最近一次运行成功时间: 2026-03-22 11:27:00 +0800
+# 功能说明: 验证 LoopRange + slice/deslice + 无 return 场景可生成 scf.for + dma.slice/dma.deslice。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_supports_symbolic_for_loop_dma_without_return
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -905,13 +908,19 @@ def test_build_func_op_supports_symbolic_for_loop_dma_without_return(monkeypatch
     func_op = build_func_op(add)
     assert isinstance(func_op, func.FuncOp)
     assert len(list(func_op.function_type.outputs)) == 0
-    load_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaLoadOp)]
-    store_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaStoreOp)]
-    assert len(load_ops) == 2
-    assert len(store_ops) == 1
-    assert load_ops[0].space.space.data == "local"
-    assert load_ops[0].offsets.data[0].data == "index"
-    assert load_ops[0].sizes.data[0].data == "step"
+    loop_ops = [op for op in func_op.body.block.ops if isinstance(op, scf.ForOp)]
+    assert len(loop_ops) == 1
+    loop_body_ops = list(loop_ops[0].body.block.ops)
+    slice_ops = [op for op in loop_body_ops if isinstance(op, DmaSliceOp)]
+    deslice_ops = [op for op in loop_body_ops if isinstance(op, DmaDesliceOp)]
+    assert len(slice_ops) == 2
+    assert len(deslice_ops) == 1
+    assert not any(isinstance(op, DmaLoadOp) for op in loop_body_ops)
+    assert not any(isinstance(op, DmaStoreOp) for op in loop_body_ops)
+    assert slice_ops[0].space.space.data == "local"
+    assert slice_ops[0].offsets.data[0].data == "index"
+    assert slice_ops[0].sizes.data[0].data == "step"
+    assert deslice_ops[0].offsets.data[0].data == "index"
 
 
 # MGEN-011
