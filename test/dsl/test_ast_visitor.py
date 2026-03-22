@@ -1,7 +1,7 @@
 """AST visitor tests.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: 不要啊教练
 
 功能说明:
 - 覆盖 AST 前端、nn dialect IR 与 MLIR 文本入口的回归测试。
@@ -10,8 +10,8 @@
 - pytest -q test/dsl/test_ast_visitor.py
 
 覆盖率信息:
-- 覆盖率命令: coverage run -m pytest -q test/dsl/test_ast_visitor.py && coverage report --include=kernel_gen/dsl/ast_visitor.py,kernel_gen/dsl/emit_mlir.py -m
-- 覆盖率结果: ast_visitor 98%, emit_mlir 79%（2026-03-22 15:38:56 +0800）
+- 覆盖率命令: coverage run -m pytest -q test/dsl/test_ast_visitor.py && coverage report --include=kernel_gen/dsl/ast_visitor.py,kernel_gen/dsl/emit_mlir.py,kernel_gen/dsl/mlir_gen.py -m
+- 覆盖率结果: ast_visitor 98%, emit_mlir 98%, mlir_gen 99%（2026-03-23 05:10:36 +0800）
 - 达标线: 95%
 
 关联文件:
@@ -28,7 +28,18 @@ from pathlib import Path
 
 import pytest
 from xdsl.dialects import arith, func, scf
-from xdsl.dialects.builtin import ArrayAttr, ModuleOp, i32
+from xdsl.dialects.builtin import (
+    ArrayAttr,
+    FloatAttr,
+    IndexType,
+    IntAttr,
+    IntegerType,
+    ModuleOp,
+    StringAttr,
+    f32,
+    i1,
+    i32,
+)
 from xdsl.ir import Block
 from xdsl.printer import Printer
 
@@ -37,7 +48,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.dialect.dma import DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp
-from kernel_gen.dialect.nn import NnAddOp, NnBroadcastOp, NnEqOp, NnMemoryType
+from kernel_gen.dialect.nn import NnAddOp, NnBroadcastOp, NnEqOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolForOp, SymbolValueType
 from kernel_gen.dsl.ast import (
     AstParseError,
@@ -53,6 +64,7 @@ from kernel_gen.dsl.ast import (
     TensorAST,
     VarAST,
     ScalarArgAST,
+    _ParseFailure,
     parse_function,
 )
 from kernel_gen.dsl.ast_visitor import AstVisitor, AstVisitorError
@@ -60,13 +72,41 @@ from kernel_gen.dsl.emit_mlir import (
     EmitContext,
     _LoweringError,
     _build_default_stride_attrs,
+    _build_index_operands_from_layout,
+    _build_static_index_list,
+    _build_stride,
+    _build_stride_attrs,
     _build_index_attrs,
+    _dtype_to_xdsl,
+    _ensure_index_value,
+    _ensure_supported_statements,
+    _expr_key,
     _get_loop_vars,
+    _infer_broadcast_memory_type,
+    _infer_broadcast_shape,
+    _infer_expr_type,
+    _lower_loop_bound,
+    _lower_expr,
+    _lookup_symbol,
+    _memory_space_from_ast,
     _memory_to_nn_type,
+    _mul_symbol,
+    _resolve_index_operand,
+    _resolve_index_symbol,
+    _resolve_static_index_expr,
     _resolve_index_expr,
     emit_mlir as emit_node_mlir,
 )
-from kernel_gen.dsl.mlir_gen import build_func_op, build_func_op_from_ast
+from kernel_gen.dsl.mlir_gen import (
+    _build_signature_types,
+    _is_symbol_scalar_function,
+    _parse_function_with_env,
+    _symbol_expr_from_runtime_arg,
+    _validate_return_type,
+    build_func_op,
+    build_func_op_from_ast,
+)
+from kernel_gen.dsl import mlir_gen as mlir_gen_module
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
@@ -348,6 +388,137 @@ def test_build_func_op_return_type_matches_annotation() -> None:
     assert outputs
     expected = _memory_to_nn_type(func_ast.outputs[0].memory)
     assert outputs[0] == expected
+
+
+# MGEN-003
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
+# 最近一次运行成功时间: 2026-03-23 10:30:00 +0800
+# 功能说明: 覆盖 mlir_gen 的符号标量函数与签名构造分支。
+# 测试目的: 验证符号标量函数识别与 runtime arg 到 symbol expr 的映射。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_mlir_gen_symbol_scalar_helpers
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_mlir_gen_symbol_scalar_helpers() -> None:
+    func_ast = FunctionAST(
+        name="only_symbol",
+        inputs=[ScalarArgAST("n", int)],
+        outputs=[ScalarArgAST("n", int)],
+        body=BlockAST([]),
+    )
+    assert _is_symbol_scalar_function(func_ast)
+    assert not _is_symbol_scalar_function(FunctionAST("no_inputs", [], [], BlockAST([])))
+
+    assert _symbol_expr_from_runtime_arg(SymbolDim("S")) == "S"
+    assert _symbol_expr_from_runtime_arg(4) == "4"
+    assert _symbol_expr_from_runtime_arg("bad") is None
+
+    arg_types, type_map = _build_signature_types(func_ast, runtime_args=[SymbolDim("S")])
+    assert len(arg_types) == 1
+    assert isinstance(arg_types[0], SymbolValueType)
+    assert type_map[_expr_key(func_ast.inputs[0])] == arg_types[0]
+
+
+# MGEN-007
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
+# 最近一次运行成功时间: 2026-03-23 10:30:00 +0800
+# 功能说明: 覆盖 mlir_gen 签名构造与输入校验错误分支。
+# 测试目的: 验证输入缺失、类型不支持与 runtime_args 长度不匹配时报错。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_mlir_gen_signature_validation_errors
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_mlir_gen_signature_validation_errors() -> None:
+    with pytest.raises(_LoweringError, match="Function has no inputs"):
+        _build_signature_types(FunctionAST("empty", [], [], BlockAST([])))
+
+    single_tensor = FunctionAST(
+        "one",
+        [TensorAST("x", Memory([2, 2], NumericType.Float32))],
+        [],
+        BlockAST([]),
+    )
+    with pytest.raises(_LoweringError, match="runtime_args must align"):
+        _build_signature_types(single_tensor, runtime_args=[])
+
+    with pytest.raises(_LoweringError, match="Unsupported scalar argument type"):
+        _build_signature_types(FunctionAST("bad", [ScalarArgAST("n", float)], [], BlockAST([])))
+
+    with pytest.raises(_LoweringError, match="Unsupported input type"):
+        _build_signature_types(FunctionAST("bad", [VarAST("x")], [], BlockAST([])))
+
+    outputs_tensor = FunctionAST(
+        "no_tensor",
+        [ScalarArgAST("n", int)],
+        [TensorAST("out", Memory([2], NumericType.Float32))],
+        BlockAST([]),
+    )
+    with pytest.raises(_LoweringError, match="At least one tensor input is required"):
+        _build_signature_types(outputs_tensor)
+
+
+# MGEN-007
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
+# 最近一次运行成功时间: 2026-03-23 10:30:00 +0800
+# 功能说明: 覆盖解析失败时的错误包装路径。
+# 测试目的: 验证 _parse_function_with_env 将 _ParseFailure 转换为 AstParseError。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_mlir_gen_parse_failure_wrapped
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_mlir_gen_parse_failure_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fn(x):
+        return x
+
+    def _broken_parse(*args, **kwargs):
+        raise _ParseFailure("broken", location=SourceLocation(1, 2))
+
+    monkeypatch.setattr(mlir_gen_module, "_parse_function_impl", _broken_parse)
+    with pytest.raises(AstParseError, match="broken"):
+        _parse_function_with_env(fn, globals_table={}, builtins_table={}, runtime_table={}, config=None)
+
+
+# MGEN-007
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
+# 最近一次运行成功时间: 2026-03-23 10:30:00 +0800
+# 功能说明: 覆盖返回类型校验的错误分支。
+# 测试目的: 验证多返回、非法返回注解与不匹配类型时报错。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_mlir_gen_validate_return_type_errors
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_mlir_gen_validate_return_type_errors() -> None:
+    memory = Memory([2, 2], NumericType.Float32)
+    tensor_out = TensorAST("out", memory)
+    scalar_out = ScalarArgAST("n", int)
+
+    func_multi = FunctionAST("multi", [tensor_out], [tensor_out, tensor_out], BlockAST([]))
+    with pytest.raises(_LoweringError, match="Only single return value is supported"):
+        _validate_return_type(func_multi, _memory_to_nn_type(memory))
+
+    func_scalar_bad = FunctionAST("bad", [scalar_out], [ScalarArgAST("f", float)], BlockAST([]))
+    with pytest.raises(_LoweringError, match="Unsupported scalar return type"):
+        _validate_return_type(func_scalar_bad, i32)
+
+    func_unknown = FunctionAST("bad", [scalar_out], [VarAST("x")], BlockAST([]))
+    with pytest.raises(_LoweringError, match="Unsupported return annotation type"):
+        _validate_return_type(func_unknown, i32)
+
+    func_mismatch = FunctionAST("bad", [tensor_out], [tensor_out], BlockAST([]))
+    with pytest.raises(_LoweringError, match="Return type does not match annotation"):
+        _validate_return_type(func_mismatch, i32)
+
+    func_symbol = FunctionAST("sym", [scalar_out], [scalar_out], BlockAST([]))
+    with pytest.raises(_LoweringError, match="Return type does not match annotation"):
+        _validate_return_type(func_symbol, i32)
 
 
 # EMIT-001
@@ -1429,3 +1600,608 @@ def test_emit_mlir_index_expr_rejections() -> None:
 def test_emit_mlir_default_stride_handles_unknown_attr() -> None:
     attrs = _build_default_stride_attrs([ArrayAttr([])])
     assert len(attrs) == 1
+
+
+# EMIT-012
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
+# 最近一次运行成功时间: 2026-03-23 10:30:00 +0800
+# 功能说明: 覆盖 emit_mlir stride/index/layout 等辅助函数分支。
+# 测试目的: 覆盖 stride 构造、layout 解析与静态索引处理的错误分支。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_stride_and_layout_helpers
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_stride_and_layout_helpers() -> None:
+    assert _build_stride([2, "N"]) == [1, "?"]
+    assert _mul_symbol(1, "N") == "N"
+    assert _mul_symbol("M", 1) == "M"
+    assert _mul_symbol("M", "N") == "M*N"
+
+    stride_attrs = _build_default_stride_attrs([StringAttr("N"), IntAttr(2)])
+    assert all(isinstance(item, (IntAttr, StringAttr)) for item in stride_attrs)
+
+    ctx = EmitContext(builder=Block(arg_types=[]), symbols={}, types={})
+    attrs = _build_index_attrs(ConstAST(1), rank=2, ctx=ctx, location=None)
+    assert len(attrs) == 2
+
+    with pytest.raises(_LoweringError, match="Unsupported layout attribute"):
+        _build_index_operands_from_layout(ArrayAttr([ArrayAttr([])]), ctx, location=None)
+
+    with pytest.raises(_LoweringError, match="Only unit stride is supported"):
+        _build_stride_attrs([ConstAST(2)], rank=1, ctx=ctx, location=None)
+
+    with pytest.raises(_LoweringError, match="Index must be int or str"):
+        _resolve_static_index_expr(ConstAST(1.5))
+
+    with pytest.raises(_LoweringError, match="Index rank mismatch"):
+        _build_static_index_list([ConstAST(1)], rank=2, default_value=0, location=None)
+
+    fallback = NnMemorySpaceAttr.from_name("global")
+    assert _memory_space_from_ast(MemorySpace.LM, fallback).space.data == "local"
+
+
+# EMIT-012
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
+# 最近一次运行成功时间: 2026-03-23 10:30:00 +0800
+# 功能说明: 覆盖索引解析与 loop_vars 的分支。
+# 测试目的: 覆盖 index cast、符号索引解析、loop_vars 查表路径。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_index_resolution_helpers
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_index_resolution_helpers() -> None:
+    block = Block(arg_types=[i32, SymbolValueType.from_expr("N")])
+    ctx = EmitContext(builder=block, symbols={"n": block.args[1]}, types={}, config={})
+
+    cast_value = _ensure_index_value(block.args[0], ctx, location=None)
+    assert isinstance(cast_value.owner, arith.IndexCastOp)
+
+    with pytest.raises(_LoweringError, match="Unknown index symbol"):
+        _resolve_index_symbol("missing", ctx, location=None)
+
+    const_value = _resolve_index_operand(ConstAST(3), ctx, location=None)
+    assert isinstance(const_value.owner, arith.ConstantOp)
+
+    symbol_value = _resolve_index_operand(ConstAST("n"), ctx, location=None)
+    assert symbol_value is block.args[1]
+
+    assert _resolve_index_expr(ScalarArgAST(name="k", value_type=int), ctx) == "k"
+    ctx.config["loop_vars"] = {"i": "i"}
+    assert _resolve_index_expr(VarAST(name="i", location=None), ctx) == "i"
+    with pytest.raises(_LoweringError, match="Unknown loop variable"):
+        _resolve_index_expr(VarAST(name="j", location=None), ctx)
+
+
+# EMIT-012
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
+# 最近一次运行成功时间: 2026-03-23 10:30:00 +0800
+# 功能说明: 覆盖 emit_mlir 类型推导与 broadcast 错误分支。
+# 测试目的: 覆盖常量类型、symbol binary op、broadcast mismatch 等路径。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_infer_expr_type_branches
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_infer_expr_type_branches() -> None:
+    memory = Memory([2, 2], NumericType.Float32)
+    tensor = TensorAST(name="x", memory=memory, location=None)
+    type_map = {_expr_key(tensor): _memory_to_nn_type(memory)}
+
+    assert _infer_expr_type(ConstAST(1.5), type_map) == f32
+    with pytest.raises(_LoweringError, match="Unsupported constant type"):
+        _infer_expr_type(ConstAST("bad"), type_map)
+
+    load = LoadAST(
+        tensor=tensor,
+        offset=[ConstAST(0), ConstAST(0)],
+        stride=None,
+        sizes=[ConstAST(1), ConstAST(1)],
+        location=None,
+    )
+    load_type = _infer_expr_type(load, type_map)
+    assert isinstance(load_type, NnMemoryType)
+    assert [dim.data for dim in load_type.shape.data] == [1, 1]
+
+    with pytest.raises(_LoweringError, match="StoreAST does not produce a value"):
+        _infer_expr_type(StoreAST(tensor=tensor, offset=ConstAST(0), stride=None, value=tensor), type_map)
+
+    with pytest.raises(_LoweringError, match="ForAST does not produce a value"):
+        loop = ForAST(var=VarAST("i"), start=ConstAST(0), end=ConstAST(1), body=BlockAST([]))
+        _infer_expr_type(loop, type_map)
+
+    sym_lhs = ScalarArgAST("a", int, is_symbolic=True)
+    sym_rhs = ScalarArgAST("b", int, is_symbolic=True)
+    type_map[_expr_key(sym_lhs)] = SymbolValueType.from_expr("A")
+    type_map[_expr_key(sym_rhs)] = SymbolValueType.from_expr("B")
+    symbol_add = BinaryExprAST(op="add", lhs=sym_lhs, rhs=sym_rhs)
+    assert isinstance(_infer_expr_type(symbol_add, type_map), SymbolValueType)
+
+    with pytest.raises(_LoweringError, match="Unsupported symbol binary op"):
+        _infer_expr_type(BinaryExprAST(op="mul", lhs=sym_lhs, rhs=sym_rhs), type_map)
+
+    type_map[_expr_key(sym_lhs)] = i32
+    type_map[_expr_key(sym_rhs)] = i32
+    with pytest.raises(_LoweringError, match="Binary op operands must have nn.memory type"):
+        _infer_expr_type(BinaryExprAST(op="add", lhs=sym_lhs, rhs=sym_rhs), type_map)
+
+    with pytest.raises(_LoweringError, match="Compare op operands must have nn.memory type"):
+        _infer_expr_type(CompareExprAST(op="eq", lhs=sym_lhs, rhs=sym_rhs), type_map)
+
+    lhs_type = _memory_to_nn_type(Memory([2, 1], NumericType.Float32))
+    with pytest.raises(_LoweringError, match="Implicit broadcast dimension mismatch"):
+        _infer_broadcast_shape([StringAttr("?")], [IntAttr(2)], location=None)
+
+    rhs_type_mismatch = _memory_to_nn_type(Memory([2, 1], NumericType.Int32))
+    with pytest.raises(_LoweringError, match="Binary op operands must have the same element_type"):
+        _infer_broadcast_memory_type(lhs_type, rhs_type_mismatch, location=None)
+
+    rhs_space = _memory_to_nn_type(Memory([2, 1], NumericType.Float32, space=MemorySpace.LM))
+    with pytest.raises(_LoweringError, match="Binary op operands must have the same space"):
+        _infer_broadcast_memory_type(lhs_type, rhs_space, location=None)
+
+    with pytest.raises(_LoweringError, match="Unsupported expression for lowering"):
+        _infer_expr_type(object(), type_map)
+
+
+# EMIT-012
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
+# 最近一次运行成功时间: 2026-03-23 10:30:00 +0800
+# 功能说明: 覆盖 emit_mlir lowering 的错误与支路。
+# 测试目的: 覆盖常量、load/store、symbol binary op 与 compare 错误分支。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_lower_expr_branches
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_lower_expr_branches() -> None:
+    memory = Memory([2, 2], NumericType.Float32)
+    tensor = TensorAST(name="x", memory=memory, location=None)
+    tensor_type = _memory_to_nn_type(memory)
+    block = Block(arg_types=[tensor_type, SymbolValueType.from_expr("N")])
+    ctx = EmitContext(builder=block, symbols={"x": block.args[0]}, types={})
+    ctx._set_cache(_expr_key(tensor), block.args[0])
+    ctx.types[_expr_key(tensor)] = tensor_type
+
+    float_value = _lower_expr(ConstAST(1.5), ctx)
+    assert isinstance(float_value.owner, arith.ConstantOp)
+
+    with pytest.raises(_LoweringError, match="Unsupported constant type"):
+        _lower_expr(ConstAST("bad"), ctx)
+
+    load = LoadAST(
+        tensor=tensor,
+        offset=[ConstAST(0), ConstAST(0)],
+        stride=None,
+        sizes=[ConstAST(1), ConstAST(1)],
+        location=None,
+    )
+    load_value = _lower_expr(load, ctx)
+    assert isinstance(load_value.owner, DmaSliceOp)
+
+    bad_load = LoadAST(tensor=tensor, offset=ConstAST(0), stride=None, location=None)
+    ctx.types[_expr_key(bad_load)] = i32
+    with pytest.raises(_LoweringError, match="LoadAST result must be nn.memory"):
+        _lower_expr(bad_load, ctx)
+
+    sym_lhs = ScalarArgAST("a", int, is_symbolic=True)
+    sym_rhs = ScalarArgAST("b", int, is_symbolic=True)
+    ctx._set_cache(_expr_key(sym_lhs), block.args[1])
+    ctx._set_cache(_expr_key(sym_rhs), block.args[1])
+    ctx.types[_expr_key(sym_lhs)] = block.args[1].type
+    ctx.types[_expr_key(sym_rhs)] = block.args[1].type
+    bad_symbol = BinaryExprAST(op="add", lhs=sym_lhs, rhs=sym_rhs)
+    ctx.types[_expr_key(bad_symbol)] = i32
+    with pytest.raises(_LoweringError, match="Symbol binary op result must be !symbol.int"):
+        _lower_expr(bad_symbol, ctx)
+
+    bad_binary = BinaryExprAST(op="mod", lhs=tensor, rhs=tensor)
+    with pytest.raises(_LoweringError, match="Unsupported binary op"):
+        _lower_expr(bad_binary, ctx)
+
+    bad_compare = CompareExprAST(op="foo", lhs=tensor, rhs=tensor)
+    with pytest.raises(_LoweringError, match="Unsupported compare op"):
+        _lower_expr(bad_compare, ctx)
+
+    with pytest.raises(_LoweringError, match="StoreAST does not produce a value"):
+        _lower_expr(StoreAST(tensor=tensor, offset=ConstAST(0), stride=None, value=tensor), ctx)
+
+    with pytest.raises(_LoweringError, match="Unknown input reference"):
+        _lookup_symbol(VarAST("missing"), EmitContext(builder=block, symbols={}, types={}))
+
+
+# EMIT-012
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
+# 最近一次运行成功时间: 2026-03-23 10:30:00 +0800
+# 功能说明: 覆盖 StoreAST rank mismatch 与 deslice 分支。
+# 测试目的: 验证 StoreAST rank mismatch 抛错，sizes 路径生成 dma.deslice。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_store_rank_mismatch_and_deslice
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_store_rank_mismatch_and_deslice() -> None:
+    target_memory = Memory([2, 2], NumericType.Float32)
+    value_memory = Memory([2], NumericType.Float32)
+    target = TensorAST(name="t", memory=target_memory, location=None)
+    value = TensorAST(name="v", memory=value_memory, location=None)
+    block = Block(arg_types=[_memory_to_nn_type(target_memory), _memory_to_nn_type(value_memory)])
+    ctx = EmitContext(builder=block, symbols={"t": block.args[0], "v": block.args[1]}, types={})
+    ctx._set_cache(_expr_key(target), block.args[0])
+    ctx._set_cache(_expr_key(value), block.args[1])
+    ctx.types[_expr_key(target)] = block.args[0].type
+    ctx.types[_expr_key(value)] = block.args[1].type
+
+    with pytest.raises(_LoweringError, match="Store source rank mismatch"):
+        emit_node_mlir(
+            StoreAST(tensor=target, offset=[ConstAST(0), ConstAST(0)], stride=None, value=value),
+            ctx,
+        )
+
+    same_value = TensorAST(name="sv", memory=target_memory, location=None)
+    ctx.symbols["sv"] = block.args[0]
+    ctx._set_cache(_expr_key(same_value), block.args[0])
+    ctx.types[_expr_key(same_value)] = block.args[0].type
+    deslice = emit_node_mlir(
+        StoreAST(
+            tensor=target,
+            offset=[ConstAST(0), ConstAST(0)],
+            stride=None,
+            sizes=[ConstAST(1), ConstAST(1)],
+            value=same_value,
+        ),
+        ctx,
+    )
+    assert isinstance(deslice, DmaDesliceOp)
+
+
+# EMIT-012
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
+# 最近一次运行成功时间: 2026-03-23 10:30:00 +0800
+# 功能说明: 覆盖 _ensure_supported_statements 的错误分支。
+# 测试目的: 验证空函数体与不支持语句会抛出明确错误。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_ensure_supported_statements_errors
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_ensure_supported_statements_errors() -> None:
+    memory = Memory([2, 2], NumericType.Float32)
+    tensor = TensorAST(name="x", memory=memory, location=None)
+    empty_func = FunctionAST(name="empty", inputs=[tensor], outputs=[], body=BlockAST([]))
+    with pytest.raises(_LoweringError, match="Function body is empty"):
+        _ensure_supported_statements(empty_func)
+
+    bad_func = FunctionAST(name="bad", inputs=[tensor], outputs=[], body=BlockAST([object()]))
+    with pytest.raises(_LoweringError, match="Unsupported AST expression for lowering"):
+        _ensure_supported_statements(bad_func)
+
+
+# EMIT-013
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
+# 最近一次运行成功时间: 2026-03-23 05:10:36 +0800
+# 功能说明: 覆盖缓存恢复与索引类型分支。
+# 测试目的: 验证缓存快照/恢复与 IndexType 输入的处理路径。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_cache_restore_and_index_value_variants
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_cache_restore_and_index_value_variants() -> None:
+    block = Block(arg_types=[IndexType()])
+    ctx = EmitContext(builder=block, symbols={}, types={})
+    ctx._set_cache(1, "value")
+    snapshot = ctx._snapshot_cache()
+    ctx._set_cache(2, "new")
+    ctx._restore_cache(snapshot)
+    assert ctx._get_cache(1) == "value"
+    assert ctx._get_cache(2) is None
+
+    index_value = _ensure_index_value(block.args[0], ctx, location=None)
+    assert index_value is block.args[0]
+
+    float_op = arith.ConstantOp(FloatAttr(1.0, f32))
+    with pytest.raises(_LoweringError, match="Index operand must be integer or index"):
+        _ensure_index_value(float_op.result, ctx, location=None)
+
+
+# EMIT-014
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
+# 最近一次运行成功时间: 2026-03-23 05:10:36 +0800
+# 功能说明: 覆盖索引解析与 loop bound 的分支。
+# 测试目的: 验证索引解析错误路径、直接值与 loop bound 解析。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_index_operand_variants_and_loop_bound
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_index_operand_variants_and_loop_bound() -> None:
+    block = Block(arg_types=[IndexType()])
+    ctx = EmitContext(builder=block, symbols={"n": block.args[0]}, types={}, config={})
+
+    with pytest.raises(_LoweringError, match="Index must be int or str"):
+        _resolve_index_operand(ConstAST(1.5), ctx, location=None)
+
+    const_value = _resolve_index_operand(2, ctx, location=None)
+    assert isinstance(const_value.owner, arith.ConstantOp)
+
+    symbol_value = _resolve_index_operand("n", ctx, location=None)
+    assert symbol_value is block.args[0]
+
+    assert _resolve_index_expr(ConstAST("k"), ctx) == "k"
+    assert _resolve_index_expr(ConstAST(3), ctx) == 3
+
+    scalar_arg = ScalarArgAST(name="n", value_type=int)
+    bound_value = _lower_loop_bound(scalar_arg, ctx)
+    assert bound_value is block.args[0]
+
+
+# EMIT-015
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
+# 最近一次运行成功时间: 2026-03-23 05:10:36 +0800
+# 功能说明: 覆盖 layout 解析与 stride 校验分支。
+# 测试目的: 验证 layout 支持 StringAttr 并拒绝非 unit stride。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_layout_and_stride_helpers
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_layout_and_stride_helpers() -> None:
+    block = Block(arg_types=[IndexType()])
+    ctx = EmitContext(builder=block, symbols={"n": block.args[0]}, types={}, config={})
+    layout = ArrayAttr([IntAttr(0), StringAttr("n")])
+    operands = _build_index_operands_from_layout(layout, ctx, location=None)
+    assert len(operands) == 2
+    assert isinstance(operands[0].owner, arith.ConstantOp)
+    assert operands[1] is block.args[0]
+
+    with pytest.raises(_LoweringError, match="Only unit stride is supported"):
+        _build_stride_attrs([ConstAST(2)], rank=1, ctx=ctx, location=None)
+
+
+# EMIT-016
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
+# 最近一次运行成功时间: 2026-03-23 05:10:36 +0800
+# 功能说明: 覆盖静态索引与广播形状推导分支。
+# 测试目的: 验证静态索引列表构造与广播维度分支。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_static_index_list_and_broadcast_shape
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_static_index_list_and_broadcast_shape() -> None:
+    assert _resolve_static_index_expr(4) == 4
+    assert _resolve_static_index_expr("n") == "n"
+
+    default_attrs = _build_static_index_list(None, rank=2, default_value=1, location=None)
+    assert [attr.data for attr in default_attrs] == [1, 1]
+
+    scalar_attrs = _build_static_index_list(ConstAST(2), rank=3, default_value=1, location=None)
+    assert [attr.data for attr in scalar_attrs] == [2, 2, 2]
+
+    lhs_shape = [IntAttr(2), IntAttr(3)]
+    rhs_shape = [IntAttr(3)]
+    assert _infer_broadcast_shape(lhs_shape, rhs_shape, None)[0].data == 2
+
+    wildcard_shape = [StringAttr("?")]
+    assert _infer_broadcast_shape(wildcard_shape, wildcard_shape, None)[0].data == "?"
+
+    with pytest.raises(_LoweringError, match="Implicit broadcast dimension mismatch"):
+        _infer_broadcast_shape([IntAttr(2)], [StringAttr("?")], None)
+
+    broadcast = _infer_broadcast_shape([IntAttr(2)], [IntAttr(1)], None)
+    assert broadcast[0].data == 2
+
+
+# EMIT-017
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
+# 最近一次运行成功时间: 2026-03-23 05:10:36 +0800
+# 功能说明: 覆盖类型推导中的未知输入路径。
+# 测试目的: 验证 LoadAST 与 TensorAST 未登记时的报错。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_infer_expr_type_unknown_inputs
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_infer_expr_type_unknown_inputs() -> None:
+    memory = Memory([2], NumericType.Float32)
+    tensor = TensorAST(name="x", memory=memory, location=None)
+    load = LoadAST(tensor=tensor, offset=[ConstAST(0)], stride=None, location=None)
+    with pytest.raises(_LoweringError, match="Unknown input reference"):
+        _infer_expr_type(load, {})
+    with pytest.raises(_LoweringError, match="Unknown input reference"):
+        _infer_expr_type(tensor, {})
+
+
+# EMIT-018
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
+# 最近一次运行成功时间: 2026-03-23 05:10:36 +0800
+# 功能说明: 覆盖 lowering 的错误路径与符号运算分支。
+# 测试目的: 验证未知输入、符号运算非法 op 与不支持表达式报错。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_lower_expr_unknown_and_symbol_errors
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_lower_expr_unknown_and_symbol_errors() -> None:
+    ctx = EmitContext(builder=Block(), symbols={}, types={})
+    tensor = TensorAST(name="x", memory=Memory([2], NumericType.Float32), location=None)
+    with pytest.raises(_LoweringError, match="Unknown input reference"):
+        _lower_expr(tensor, ctx)
+
+    block = Block(arg_types=[SymbolValueType.from_expr("N"), SymbolValueType.from_expr("M")])
+    symbol_ctx = EmitContext(builder=block, symbols={"a": block.args[0], "b": block.args[1]}, types={})
+    lhs = ScalarArgAST(name="a", value_type=int)
+    rhs = ScalarArgAST(name="b", value_type=int)
+    symbol_ctx._set_cache(_expr_key(lhs), block.args[0])
+    symbol_ctx._set_cache(_expr_key(rhs), block.args[1])
+    symbol_ctx.types[_expr_key(lhs)] = block.args[0].type
+    symbol_ctx.types[_expr_key(rhs)] = block.args[1].type
+    with pytest.raises(_LoweringError, match="Unsupported symbol binary op"):
+        _lower_expr(BinaryExprAST(lhs=lhs, rhs=rhs, op="sub", location=None), symbol_ctx)
+
+    with pytest.raises(_LoweringError, match="Unsupported expression for lowering"):
+        _lower_expr(object(), symbol_ctx)
+
+
+# EMIT-019
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
+# 最近一次运行成功时间: 2026-03-23 05:10:36 +0800
+# 功能说明: 覆盖广播路径中 rhs 需要扩展的分支。
+# 测试目的: 验证 binary/compare 的 rhs 广播与 dtype 产物。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_binary_compare_broadcast_rhs
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_binary_compare_broadcast_rhs() -> None:
+    lhs_memory = Memory([2, 2], NumericType.Float32)
+    rhs_memory = Memory([1, 2], NumericType.Float32)
+    lhs = TensorAST(name="lhs", memory=lhs_memory, location=None)
+    rhs = TensorAST(name="rhs", memory=rhs_memory, location=None)
+    block = Block(arg_types=[_memory_to_nn_type(lhs_memory), _memory_to_nn_type(rhs_memory)])
+    ctx = EmitContext(builder=block, symbols={"lhs": block.args[0], "rhs": block.args[1]}, types={})
+    ctx._set_cache(_expr_key(lhs), block.args[0])
+    ctx._set_cache(_expr_key(rhs), block.args[1])
+    ctx.types[_expr_key(lhs)] = block.args[0].type
+    ctx.types[_expr_key(rhs)] = block.args[1].type
+
+    add_expr = BinaryExprAST(lhs=lhs, rhs=rhs, op="add", location=None)
+    add_value = _lower_expr(add_expr, ctx)
+    assert add_value.owner is not None
+    assert any(isinstance(op, NnBroadcastOp) for op in block.ops)
+
+    compare_expr = CompareExprAST(lhs=lhs, rhs=rhs, op="eq", location=None)
+    compare_value = _lower_expr(compare_expr, ctx)
+    assert compare_value.type.element_type == i1
+
+
+# EMIT-020
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
+# 最近一次运行成功时间: 2026-03-23 05:10:36 +0800
+# 功能说明: 覆盖 for 循环的 loop_vars 恢复逻辑与错误分支。
+# 测试目的: 验证 for 循环恢复已有 loop_vars 并拒绝不支持的节点。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_for_loop_restores_loop_vars_and_errors
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_for_loop_restores_loop_vars_and_errors() -> None:
+    ctx = EmitContext(builder=Block(), symbols={}, types={}, config={"loop_vars": {"i": "outer"}})
+    for_ast = ForAST(
+        var=VarAST(name="i", location=None),
+        start=ConstAST(0),
+        end=ConstAST(2),
+        body=BlockAST([ConstAST(1)]),
+    )
+    loop_op = emit_node_mlir(for_ast, ctx)
+    assert loop_op is not None
+    assert ctx.config["loop_vars"]["i"] == "outer"
+
+    with pytest.raises(_LoweringError, match="BlockAST must be lowered via AstVisitor"):
+        emit_node_mlir(BlockAST([]), ctx)
+
+    func_ast = FunctionAST(
+        name="fn",
+        inputs=[TensorAST(name="x", memory=Memory([1], NumericType.Float32), location=None)],
+        outputs=[],
+        body=BlockAST([ConstAST(1)]),
+    )
+    with pytest.raises(_LoweringError, match="FunctionAST must be lowered via AstVisitor"):
+        emit_node_mlir(func_ast, ctx)
+
+    return_op = func.ReturnOp()
+    assert emit_node_mlir(return_op, ctx) is return_op
+
+    with pytest.raises(_LoweringError, match="Unsupported expression for lowering"):
+        emit_node_mlir(object(), ctx)
+
+
+# MLIR-015
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
+# 最近一次运行成功时间: 2026-03-23 05:10:36 +0800
+# 功能说明: 覆盖符号标量函数的输出判断。
+# 测试目的: 验证无输出时仍被视为符号标量函数。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_mlir_gen_symbol_scalar_function_no_outputs
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_mlir_gen_symbol_scalar_function_no_outputs() -> None:
+    func_ast = FunctionAST(
+        name="sym",
+        inputs=[ScalarArgAST(name="n", value_type=int)],
+        outputs=[],
+        body=BlockAST([ConstAST(1)]),
+    )
+    assert _is_symbol_scalar_function(func_ast) is True
+
+
+# MLIR-016
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
+# 最近一次运行成功时间: 2026-03-23 05:10:36 +0800
+# 功能说明: 覆盖返回类型校验的空输出与标量分支。
+# 测试目的: 验证无输出直接返回、标量返回的 i32 约束。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_mlir_gen_validate_return_type_variants
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_mlir_gen_validate_return_type_variants() -> None:
+    no_output_ast = FunctionAST(
+        name="noop",
+        inputs=[TensorAST(name="x", memory=Memory([1], NumericType.Float32), location=None)],
+        outputs=[],
+        body=BlockAST([ConstAST(1)]),
+    )
+    _validate_return_type(no_output_ast, i32)
+
+    scalar_output_ast = FunctionAST(
+        name="scalar_out",
+        inputs=[TensorAST(name="x", memory=Memory([1], NumericType.Float32), location=None)],
+        outputs=[ScalarArgAST(name="r", value_type=int)],
+        body=BlockAST([ConstAST(1)]),
+    )
+    _validate_return_type(scalar_output_ast, i32)
+
+
+# MLIR-017
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
+# 最近一次运行成功时间: 2026-03-23 05:10:36 +0800
+# 功能说明: 覆盖 build_func_op 对 builtins 与解析失败的处理。
+# 测试目的: 验证非 dict builtins 处理与解析失败转为 AstVisitorError。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_mlir_gen_build_func_op_builtins_and_parse_error
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_mlir_gen_build_func_op_builtins_and_parse_error() -> None:
+    def add(x: "Tensor[f32, 2, 2]", y: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return x + y
+
+    func_op = build_func_op(add, _tensor_arg([2, 2]), _tensor_arg([2, 2]), builtins=object())
+    assert isinstance(func_op, func.FuncOp)
+
+    def bad(x: "Tensor[f32]") -> "Tensor[f32]":
+        return x
+
+    with pytest.raises(AstVisitorError, match="Tensor annotation missing dimensions"):
+        build_func_op(bad, _tensor_arg([2]))
