@@ -31,6 +31,7 @@
 - 不定义 dialect 层的整数 symbol type/attr；`shape`、`stride`、`offset`、`size` 中单个整型分量的 symbol 语义统一以 [`spec/dialect/symbol.md`](../../spec/dialect/symbol.md) 为准。
 - 不负责 `NnMemoryType`、`dma` memory result type 等 IR type；本文件只描述 Python 侧 `Memory` 容器。
 - 本文件中的 `Memory` 指 Python 侧高层复合元信息容器，聚合 `shape`、`stride`、`dtype`、`format`、`space`；其中 `shape`、`stride`、`offset`、`size` 的单个整型分量若需进入 IR，则统一复用 `symbol dialect` 的整数-only 语义。
+- 若 IR 侧需要从 memory type 读取单个真实 dim/stride 并返回 value，统一使用 [`spec/dialect/symbol.md`](../../spec/dialect/symbol.md) 中定义的 `symbol.get_dim` / `symbol.get_stride`，本文件不重复定义查询接口。
 - 对外公开的创建入口为 `Memory(shape, dtype, space=..., stride=..., format=...)`。
 
 ## 公开接口

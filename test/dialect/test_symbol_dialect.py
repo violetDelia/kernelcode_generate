@@ -1,7 +1,7 @@
 """symbol dialect tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 我不是牛马
 
 功能说明:
 - 覆盖 symbol dialect 的整数符号 attribute/type、verifier、parse/print 与错误路径。
@@ -11,7 +11,7 @@
 
 覆盖率:
 - 覆盖率命令: pytest -q --cov=kernel_gen.dialect.symbol --cov-report=term-missing test/dialect/test_symbol_dialect.py
-- 覆盖率结果: 100%（2026-03-22 19:39:28 +0800）
+- 覆盖率结果: 99%（2026-03-22 20:14:51 +0800）
 
 关联文件:
 - 功能实现: kernel_gen/dialect/symbol.py
@@ -27,7 +27,8 @@ from pathlib import Path
 
 import pytest
 from xdsl.context import Context
-from xdsl.dialects.builtin import Builtin
+from xdsl.dialects.builtin import ArrayAttr, Builtin, IntAttr, StringAttr, i32
+from xdsl.dialects.test import Test, TestOp as _TestOp
 from xdsl.parser import Parser
 from xdsl.printer import Printer
 from xdsl.utils.exceptions import ParseError, VerifyException
@@ -36,7 +37,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dialect.symbol import Symbol, SymbolExprAttr, SymbolValueType
+from kernel_gen.dialect.nn import Nn, NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.symbol import (
+    Symbol,
+    SymbolExprAttr,
+    SymbolGetDimOp,
+    SymbolGetStrideOp,
+    SymbolValueType,
+)
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.type import NumericType
 
@@ -61,6 +69,8 @@ def _build_context() -> Context:
 
     ctx = Context()
     ctx.load_dialect(Builtin)
+    ctx.load_dialect(Test)
+    ctx.load_dialect(Nn)
     ctx.load_dialect(Symbol)
     return ctx
 
@@ -72,6 +82,69 @@ def _print_attr(value: object) -> str:
     printer = Printer(stream=stream)
     printer.print_attribute(value)
     return stream.getvalue()
+
+
+def _make_space(name: str = "global") -> NnMemorySpaceAttr:
+    """构造 nn space attribute。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 为 symbol.get_dim/get_stride 测试提供统一的 `nn.space` 构造。
+
+    使用示例:
+    - _make_space()
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/dialect/test_symbol_dialect.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    return NnMemorySpaceAttr(StringAttr(name))
+
+
+def _make_memory_type(shape: list[IntAttr | StringAttr], stride: list[IntAttr | StringAttr]) -> NnMemoryType:
+    """构造 nn.memory type。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 为 symbol.get_dim/get_stride 测试构造最小合法 memory type。
+
+    使用示例:
+    - _make_memory_type([IntAttr(4)], [IntAttr(1)])
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/dialect/test_symbol_dialect.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    return NnMemoryType(ArrayAttr(shape), ArrayAttr(stride), i32, _make_space())
+
+
+def _make_memory_value(memory_type: NnMemoryType):
+    """构造携带 nn.memory type 的测试 SSA value。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 复用 `test.TestOp` 产出 `symbol.get_dim/get_stride` 所需 operand。
+
+    使用示例:
+    - _make_memory_value(memory_type)
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/dialect/test_symbol_dialect.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    return _TestOp(result_types=[memory_type]).results[0]
 
 
 # TC-SYM-001 / TC-SYM-002 / TC-SYM-009
@@ -193,3 +266,158 @@ def test_symbol_verifier_rejects_illegal_expression_characters() -> None:
         SymbolExprAttr.from_expr("N/2").verify()
     with pytest.raises(VerifyException, match="must contain identifiers"):
         SymbolValueType.from_expr("N@1").verify()
+
+
+# TC-SYM-015
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 20:14:51 +0800
+# 最近一次运行成功时间: 2026-03-22 20:14:51 +0800
+# 测试目的: 验证 symbol.get_dim 可从 nn.memory 读取静态整数维度并返回对应 symbol value type。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_get_dim_reads_static_dim_from_memory_type() -> None:
+    source = _make_memory_value(
+        _make_memory_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)])
+    )
+
+    op = SymbolGetDimOp(source, 0)
+
+    op.verify()
+    assert _print_attr(op.result.type) == '!symbol.int<"4">'
+
+
+# TC-SYM-016
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 20:14:51 +0800
+# 最近一次运行成功时间: 2026-03-22 20:14:51 +0800
+# 测试目的: 验证 symbol.get_dim 可从 nn.memory 读取符号维度并返回对应 symbol value type。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_get_dim_reads_symbolic_dim_from_memory_type() -> None:
+    source = _make_memory_value(
+        _make_memory_type([StringAttr("M"), StringAttr("N")], [StringAttr("N"), IntAttr(1)])
+    )
+
+    op = SymbolGetDimOp(source, 1)
+
+    op.verify()
+    assert _print_attr(op.result.type) == '!symbol.int<"N">'
+
+
+# TC-SYM-017
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 20:14:51 +0800
+# 最近一次运行成功时间: 2026-03-22 20:14:51 +0800
+# 测试目的: 验证 symbol.get_stride 可从 nn.memory 读取静态整数步幅并返回对应 symbol value type。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_get_stride_reads_static_stride_from_memory_type() -> None:
+    source = _make_memory_value(
+        _make_memory_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)])
+    )
+
+    op = SymbolGetStrideOp(source, 0)
+
+    op.verify()
+    assert _print_attr(op.result.type) == '!symbol.int<"8">'
+
+
+# TC-SYM-018
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 20:14:51 +0800
+# 最近一次运行成功时间: 2026-03-22 20:14:51 +0800
+# 测试目的: 验证 symbol.get_stride 可从 nn.memory 读取符号步幅并返回对应 symbol value type。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_get_stride_reads_symbolic_stride_from_memory_type() -> None:
+    source = _make_memory_value(
+        _make_memory_type([StringAttr("M"), StringAttr("N")], [StringAttr("K*N"), StringAttr("N")])
+    )
+
+    op = SymbolGetStrideOp(source, 1)
+
+    op.verify()
+    assert _print_attr(op.result.type) == '!symbol.int<"N">'
+
+
+# TC-SYM-019
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 20:14:51 +0800
+# 最近一次运行成功时间: 2026-03-22 20:14:51 +0800
+# 测试目的: 验证 symbol.get_dim 在轴号越界、负数或非静态整数时会报 verifier 错误。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_get_dim_rejects_invalid_axis() -> None:
+    source = _make_memory_value(
+        _make_memory_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)])
+    )
+
+    with pytest.raises(VerifyException, match="axis out of range"):
+        SymbolGetDimOp(source, -1).verify()
+    with pytest.raises(VerifyException, match="axis out of range"):
+        SymbolGetDimOp(source, 2).verify()
+    with pytest.raises(VerifyException, match="axis must be a static integer"):
+        SymbolGetDimOp(source, StringAttr("axis")).verify()
+
+
+# TC-SYM-019
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 20:14:51 +0800
+# 最近一次运行成功时间: 2026-03-22 20:14:51 +0800
+# 测试目的: 验证 symbol.get_stride 在轴号越界、负数或非静态整数时会报 verifier 错误。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_get_stride_rejects_invalid_axis() -> None:
+    source = _make_memory_value(
+        _make_memory_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)])
+    )
+
+    with pytest.raises(VerifyException, match="axis out of range"):
+        SymbolGetStrideOp(source, -1).verify()
+    with pytest.raises(VerifyException, match="axis out of range"):
+        SymbolGetStrideOp(source, 2).verify()
+    with pytest.raises(VerifyException, match="axis must be a static integer"):
+        SymbolGetStrideOp(source, StringAttr("axis")).verify()
+
+
+# TC-SYM-020
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 20:14:51 +0800
+# 最近一次运行成功时间: 2026-03-22 20:14:51 +0800
+# 测试目的: 验证 symbol.get_dim 在 source 不是 nn.memory 或目标 dim 为匿名动态值时会报 verifier 错误。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_get_dim_rejects_non_memory_type() -> None:
+    non_memory_source = _TestOp(result_types=[i32]).results[0]
+    unknown_dim_source = _make_memory_value(
+        _make_memory_type([StringAttr("?"), IntAttr(8)], [IntAttr(8), IntAttr(1)])
+    )
+
+    with pytest.raises(VerifyException, match="source must be nn.memory"):
+        SymbolGetDimOp(non_memory_source, 0).verify()
+    with pytest.raises(VerifyException, match="does not support unknown shape entry"):
+        SymbolGetDimOp(unknown_dim_source, 0).verify()
+
+
+# TC-SYM-020
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 20:14:51 +0800
+# 最近一次运行成功时间: 2026-03-22 20:14:51 +0800
+# 测试目的: 验证 symbol.get_stride 在目标 stride 为匿名动态值时会报 verifier 错误。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_get_stride_rejects_unknown_entry() -> None:
+    source = _make_memory_value(
+        _make_memory_type([StringAttr("N"), IntAttr(8)], [StringAttr("?"), IntAttr(1)])
+    )
+
+    with pytest.raises(VerifyException, match="does not support unknown stride entry"):
+        SymbolGetStrideOp(source, 0).verify()
