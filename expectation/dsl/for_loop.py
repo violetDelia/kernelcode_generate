@@ -51,7 +51,7 @@ def add(A, B, C, end, start, step):
 
 
 func_op = build_func_op(add)
-
+print(func_op)
 assert isinstance(func_op, FuncOp)
 loop_ops = [op for op in func_op.body.block.ops if isinstance(op, ForOp)]
 assert len(loop_ops) == 1

@@ -20,5 +20,8 @@ def add(A, B):
     return C
 
 func_op = build_func_op(add)
-
-assert isinstance(func_op,FuncOp)
+print(func_op)
+assert func_op.__str__() == '''func.func @add(%0 : !nn.memory<[N, 32], [C, 1], f32, #nn.space<global>>, %1 : !nn.memory<[N, 32], [C, 1], f32, #nn.space<global>>) -> !nn.memory<[N, 32], [C, 1], f32, #nn.space<global>> {
+  %2 = "nn.add"(%0, %1) {space = #nn.space<global>} : (!nn.memory<[N, 32], [C, 1], f32, #nn.space<global>>, !nn.memory<[N, 32], [C, 1], f32, #nn.space<global>>) -> !nn.memory<[N, 32], [C, 1], f32, #nn.space<global>>
+  func.return %2 : !nn.memory<[N, 32], [C, 1], f32, #nn.space<global>>
+}'''

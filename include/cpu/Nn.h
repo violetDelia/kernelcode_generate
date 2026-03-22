@@ -7,10 +7,10 @@
 - cpu::add(A, B, C);
 
 创建者: 神秘人
-最后修改人: 小李飞刀
+最后修改人: 朽木露琪亚
 
 关联文件:
-- spec: spec/include/cpu/Nn.md
+- spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
@@ -76,10 +76,10 @@ void apply_compare(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memor
 - cpu::add(lhs, rhs, out);
 
 创建者: 神秘人
-最后修改人: 小李飞刀
+最后修改人: 朽木露琪亚
 
 关联文件:
-- spec: spec/include/cpu/Nn.md
+- spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
@@ -96,10 +96,10 @@ void add(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<T, Rank>
 - cpu::sub(lhs, rhs, out);
 
 创建者: 神秘人
-最后修改人: 小李飞刀
+最后修改人: 朽木露琪亚
 
 关联文件:
-- spec: spec/include/cpu/Nn.md
+- spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
@@ -116,10 +116,10 @@ void sub(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<T, Rank>
 - cpu::mul(lhs, rhs, out);
 
 创建者: 神秘人
-最后修改人: 小李飞刀
+最后修改人: 朽木露琪亚
 
 关联文件:
-- spec: spec/include/cpu/Nn.md
+- spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
@@ -136,10 +136,10 @@ void mul(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<T, Rank>
 - cpu::truediv(lhs, rhs, out);
 
 创建者: 神秘人
-最后修改人: 小李飞刀
+最后修改人: 朽木露琪亚
 
 关联文件:
-- spec: spec/include/cpu/Nn.md
+- spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
@@ -156,10 +156,10 @@ void truediv(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<T, R
 - cpu::eq(lhs, rhs, out);
 
 创建者: 神秘人
-最后修改人: 小李飞刀
+最后修改人: 朽木露琪亚
 
 关联文件:
-- spec: spec/include/cpu/Nn.md
+- spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
@@ -176,10 +176,10 @@ void eq(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<PredT, Ra
 - cpu::ne(lhs, rhs, out);
 
 创建者: 神秘人
-最后修改人: 小李飞刀
+最后修改人: 朽木露琪亚
 
 关联文件:
-- spec: spec/include/cpu/Nn.md
+- spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
@@ -196,10 +196,10 @@ void ne(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<PredT, Ra
 - cpu::lt(lhs, rhs, out);
 
 创建者: 神秘人
-最后修改人: 小李飞刀
+最后修改人: 朽木露琪亚
 
 关联文件:
-- spec: spec/include/cpu/Nn.md
+- spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
@@ -216,10 +216,10 @@ void lt(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<PredT, Ra
 - cpu::le(lhs, rhs, out);
 
 创建者: 神秘人
-最后修改人: 小李飞刀
+最后修改人: 朽木露琪亚
 
 关联文件:
-- spec: spec/include/cpu/Nn.md
+- spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
@@ -236,10 +236,10 @@ void le(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<PredT, Ra
 - cpu::gt(lhs, rhs, out);
 
 创建者: 神秘人
-最后修改人: 小李飞刀
+最后修改人: 朽木露琪亚
 
 关联文件:
-- spec: spec/include/cpu/Nn.md
+- spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
@@ -256,10 +256,10 @@ void gt(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<PredT, Ra
 - cpu::ge(lhs, rhs, out);
 
 创建者: 神秘人
-最后修改人: 小李飞刀
+最后修改人: 朽木露琪亚
 
 关联文件:
-- spec: spec/include/cpu/Nn.md
+- spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
@@ -276,10 +276,10 @@ void ge(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<PredT, Ra
 - cpu::broadcast(input, out);
 
 创建者: 神秘人
-最后修改人: 小李飞刀
+最后修改人: 朽木露琪亚
 
 关联文件:
-- spec: spec/include/cpu/Nn.md
+- spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */

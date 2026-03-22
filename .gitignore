@@ -6,4 +6,5 @@ run_periodically
 main
 temp
 log.txt
+.coverage
 

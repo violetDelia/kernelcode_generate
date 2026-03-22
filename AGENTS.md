@@ -1,43 +1,52 @@
 # AGENTS.md
 
 ## 约定
+
 - 未经特别授权，不得访问或修改 `.skills`、`.agents` 目录中的任何文件。
 - 所有函数和文件都需补充完整的功能说明、使用示例，并提供对应的 `创建者` `最后修改人` `spec`、`test`、`功能实现` 文件链接。
 - 示例链接：
-- `spec`：[`spec/codex-multi-agents/scripts/codex-multi-agents-list.md`](spec/codex-multi-agents/scripts/codex-multi-agents-list.md)
-- `test`：[`test/codex-multi-agents/test_codex-multi-agents-list.py`](test/codex-multi-agents/test_codex-multi-agents-list.py)
-- `功能实现`：[`skills/codex-multi-agents/scripts/codex-multi-agents-list.sh`](skills/codex-multi-agents/scripts/codex-multi-agents-list.sh)
+  - `spec`：[`spec/codex-multi-agents/scripts/codex-multi-agents-list.md`](spec/codex-multi-agents/scripts/codex-multi-agents-list.md)
+  - `test`：[`test/codex-multi-agents/test_codex-multi-agents-list.py`](test/codex-multi-agents/test_codex-multi-agents-list.py)
+  - `功能实现`：[`skills/codex-multi-agents/scripts/codex-multi-agents-list.sh`](skills/codex-multi-agents/scripts/codex-multi-agents-list.sh)
 
 ## 目录结构
-  
+
 ## 项目说明
+
 - 项目目标：`<待填写>`
 - 生效范围：`<待填写>`
 
 ## 测试约定
+
 - `test` 为测试目录。
 - 测试统一使用 `pytest` 框架。
-- 每个测试函数都需添加注释，至少包含以下信息：
+- 在每份测试文件说明写上当前覆盖率信息和覆盖率命令；这里的覆盖率，指对应功能实现文件的覆盖率。
+- 覆盖率命令应明确指定对应功能实现文件或对应实现模块，而不是测试文件本身。
+- 覆盖率命令应直接给出可执行示例，例如：`pytest --cov=package.module --cov-report=term-missing test/xxx/test_xxx.py`；其中 `--cov` 指向功能实现，测试文件仅作为执行入口。
+- 若覆盖率未达标，需要申请补充测试；必要时先补充对应 `spec` 中的测试清单，再补测试实现。
+- 每个测试函数都需添加注释，至少包含以下信息，不添加覆盖率信息：
   - 创建者
   - 最后一次更改
   - 最近一次运行测试时间。
   - 最近一次运行成功时间。
+  - 测试目的。
   - 对应功能实现文件路径。
   - 对应 `spec` 文件路径。
   - example：[`test/codex-multi-agents/test_codex-multi-agents-list.py`](test/codex-multi-agents/test_codex-multi-agents-list.py)
 
 ## [immutable]
+
 - 不可更改带有[immutable]的代码段/文本段/注释等。也不能生成带有[immutable]的注释/代码。
 - md 文件中带有 [immutable] 标题的段不可更改。
 
-
-
 ## 编码约定
+
 - 目录约定：`<待填写>`
 - 风格约定：`<待填写>`
 - 测试约定：`<待填写>`
 
-### spec文件规范
+### spec 文件规范
+
 - 结构目录：
   - `spec.md`
     - `功能简介`
@@ -69,17 +78,17 @@
       - 执行命令
       - 测试目标
       - 功能与用例清单
-
 - 编写要求
   - 每个 spec 原则上只对应一个源文件；若存在例外，需要在文档中明确说明原因。
   - spec 文件应面向开发实现，不写历史迁移过程、重构过程或任务过程记录。
   - spec 中的接口说明、测试目标和示例，应与实际实现和测试保持一致。
   - 若 spec 中定义了测试清单，应与实际测试用例一一对应。
-  - spec 文件不得出现除了<结构目录>以外的章节内容。
-  - spec文件的实现，不得绑定当前的实现/测试。
-
+  - spec 文件不得出现除 `<结构目录>` 以外的章节内容。
+  - spec 文件的实现，不得绑定当前的实现或测试。
+  - `README.md` 不属于 spec 文件，不需要遵守本节结构要求。
 
 ### 审查规范
+
 - 审查结论必须明确给出：`通过`、`需修改`、`阻塞` 三类结果之一。
 - 若审查结论不是 `通过`，必须明确指出：
   - 具体文件与接口。
@@ -87,7 +96,6 @@
   - 不满足规范的原因。
   - 期望修改方向。
 - 审查意见必须可执行，不能只写“有问题”“不通过”“建议优化”等笼统结论。
-
 - `spec` 文件审查：
   - 文件结构必须符合 `spec文件规范`。
   - 章节内容必须完整，且不得出现规范之外的章节。
@@ -96,21 +104,20 @@
   - 参数说明必须包含输入类型与含义；返回说明必须包含返回类型、返回语义和限制条件。
   - 文档中的接口说明、示例、测试目标、测试清单必须与预期实现保持一致，不能互相矛盾。
   - 测试清单若已定义，必须能映射到实际测试用例，不能写无法验证的空泛条目。
-
 - 实现文件审查：
   - 实现必须与对应 `spec` 一致，不得擅自增加、删除或改变公开接口语义。
   - 参数、返回值、异常或错误处理行为必须符合 `spec` 描述。
   - 实现边界必须清晰，不能把不属于当前文件职责的逻辑混入本模块。
   - 关键逻辑必须可读、可维护，命名、分层、控制流应便于后续修改。
   - 若实现与 `spec` 不一致，默认判为 `需修改`；若 `spec` 本身不清楚，应先指出 `spec` 问题，再决定是否阻塞。
-
 - 测试文件审查：
   - 测试必须覆盖 `spec` 中约定的测试目标与测试清单。
   - 测试用例设计必须能验证功能正确性、边界条件和关键错误路径。
   - 测试名称、测试输入、断言结果应清晰对应具体功能，不得写成无法判断失败原因的混合测试。
   - 测试文件内容必须与实现文件、`spec` 文件保持一致，不能测试未定义行为。
   - 若 `spec` 中存在测试清单，测试实现应与清单一一对应；缺失项必须在审查结论中明确指出。
-
+  - 如果测试不够全面，需要申请添加测试。
+  - 覆盖率达到 `95%` 视为达标。(C++\sh实现可以跳过)
 - 审查输出要求：
   - 审查结果应优先列出问题，再给结论。
   - 问题应按严重程度排序：功能错误、接口不一致、测试缺失、可维护性问题。
@@ -118,6 +125,7 @@
   - 若只是可选优化，需明确标注为“可选建议”，不能与必须修改项混写。
 
 ### 合并规范
+
 - 禁止在合并流程中使用 `git stash`。
 - 合并前必须确认目标 `worktree` 内不存在其他进行中任务；若仍有未完成任务，禁止合并。
 - 合并内容不得包含 `agents/` 目录中的文件。
