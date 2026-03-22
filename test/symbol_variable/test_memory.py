@@ -13,6 +13,10 @@
 - 功能实现: kernel_gen/symbol_variable/memory.py
 - Spec 文档: spec/symbol_variable/memory.md
 - 测试文件: test/symbol_variable/test_memory.py
+
+覆盖率:
+- 覆盖率: 100% (kernel_gen/symbol_variable/memory.py)
+- 覆盖率命令: pytest --cov=kernel_gen.symbol_variable.memory --cov-report=term-missing test/symbol_variable/test_memory.py
 """
 
 from __future__ import annotations
@@ -238,6 +242,26 @@ def test_default_stride_symbolic_expression_repr() -> None:
     k = SymbolDim("K")
     n = SymbolDim("N")
     mem = Memory([m, k, n], NumericType.Float32)
+    assert mem.stride is not None
+    assert mem.stride.get_values() == ["K*N", "N", 1]
+    assert str(mem) == (
+        "Memory(GM,Tensor(shape=Shape(M, K, N), dtype=NumericType.Float32, "
+        "stride=Shape(K*N, N, 1), format=Farmat.Norm))"
+    )
+
+
+# ME-019
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 11:36:35 +0800
+# 最近一次运行成功时间: 2026-03-22 11:36:35 +0800
+# 功能说明: 验证字符串形状输入时默认 stride 生成与字符串表示一致。
+# 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_default_stride_symbolic_expression_from_strings
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
+# 对应 spec 文件路径: spec/symbol_variable/memory.md
+# 对应测试文件路径: test/symbol_variable/test_memory.py
+def test_default_stride_symbolic_expression_from_strings() -> None:
+    mem = Memory(["M", "K", "N"], NumericType.Float32)
     assert mem.stride is not None
     assert mem.stride.get_values() == ["K*N", "N", 1]
     assert str(mem) == (

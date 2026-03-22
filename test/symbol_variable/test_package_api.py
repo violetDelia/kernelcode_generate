@@ -13,6 +13,10 @@
 - 功能实现: kernel_gen/symbol_variable/__init__.py
 - Spec 文档: spec/symbol_variable/package_api.md
 - 测试文件: test/symbol_variable/test_package_api.py
+
+覆盖率:
+- 覆盖率: 100% (kernel_gen/symbol_variable/__init__.py)
+- 覆盖率命令: pytest --cov=kernel_gen.symbol_variable --cov-report=term-missing test/symbol_variable/test_package_api.py
 """
 
 from __future__ import annotations
@@ -30,8 +34,8 @@ if str(REPO_ROOT) not in sys.path:
 # PM-001
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-20 19:42:24 +0800
-# 最近一次运行成功时间: 2026-03-20 19:42:24 +0800
+# 最近一次运行测试时间: 2026-03-22 12:18:40 +0800
+# 最近一次运行成功时间: 2026-03-22 12:18:40 +0800
 # 功能说明: 验证 kernel_gen.symbol_variable 顶层导入可用。
 # 使用示例: pytest -q test/symbol_variable/test_package_api.py -k test_python_symbol_variable_imports
 # 对应功能实现文件路径: kernel_gen/symbol_variable/__init__.py
@@ -49,8 +53,8 @@ def test_python_symbol_variable_imports() -> None:
 # PM-002
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-20 19:42:24 +0800
-# 最近一次运行成功时间: 2026-03-20 19:42:24 +0800
+# 最近一次运行测试时间: 2026-03-22 12:18:40 +0800
+# 最近一次运行成功时间: 2026-03-22 12:18:40 +0800
 # 功能说明: 验证旧路径不再可用。
 # 使用示例: pytest -q test/symbol_variable/test_package_api.py -k test_legacy_import_disabled
 # 对应功能实现文件路径: kernel_gen/symbol_variable/__init__.py
@@ -66,8 +70,8 @@ def test_legacy_import_disabled() -> None:
 # PM-003
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-20 19:42:24 +0800
-# 最近一次运行成功时间: 2026-03-20 19:42:24 +0800
+# 最近一次运行测试时间: 2026-03-22 12:18:40 +0800
+# 最近一次运行成功时间: 2026-03-22 12:18:40 +0800
 # 功能说明: 验证旧子模块路径不可导入。
 # 使用示例: pytest -q test/symbol_variable/test_package_api.py -k test_legacy_submodule_import_disabled
 # 对应功能实现文件路径: kernel_gen/symbol_variable/__init__.py
@@ -90,8 +94,8 @@ def test_legacy_submodule_import_disabled() -> None:
 # PM-004
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-20 19:42:24 +0800
-# 最近一次运行成功时间: 2026-03-20 19:42:24 +0800
+# 最近一次运行测试时间: 2026-03-22 12:18:40 +0800
+# 最近一次运行成功时间: 2026-03-22 12:18:40 +0800
 # 功能说明: 验证 kernel_gen.symbol_variable 顶层重新导出的对象与子模块一致。
 # 使用示例: pytest -q test/symbol_variable/test_package_api.py -k test_python_package_type_exports
 # 对应功能实现文件路径: kernel_gen/symbol_variable/__init__.py
@@ -128,8 +132,8 @@ def test_python_package_type_exports() -> None:
 # PM-005
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-20 19:42:24 +0800
-# 最近一次运行成功时间: 2026-03-20 19:42:24 +0800
+# 最近一次运行测试时间: 2026-03-22 12:18:40 +0800
+# 最近一次运行成功时间: 2026-03-22 12:18:40 +0800
 # 功能说明: 验证顶层导出的类型可直接参与 Memory 构造。
 # 使用示例: pytest -q test/symbol_variable/test_package_api.py -k test_package_type_construct_memory
 # 对应功能实现文件路径: kernel_gen/symbol_variable/__init__.py
@@ -146,8 +150,8 @@ def test_package_type_construct_memory() -> None:
 # PM-006
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-20 19:42:24 +0800
-# 最近一次运行成功时间: 2026-03-20 19:42:24 +0800
+# 最近一次运行测试时间: 2026-03-22 12:18:40 +0800
+# 最近一次运行成功时间: 2026-03-22 12:18:40 +0800
 # 功能说明: 验证 kernel_gen.symbol_variable.__all__ 与公开导出集合一致。
 # 使用示例: pytest -q test/symbol_variable/test_package_api.py -k test_python_package_all_boundary
 # 对应功能实现文件路径: kernel_gen/symbol_variable/__init__.py
@@ -171,8 +175,8 @@ def test_python_package_all_boundary() -> None:
 # PM-007
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-20 19:42:24 +0800
-# 最近一次运行成功时间: 2026-03-20 19:42:24 +0800
+# 最近一次运行测试时间: 2026-03-22 12:18:40 +0800
+# 最近一次运行成功时间: 2026-03-22 12:18:40 +0800
 # 功能说明: 验证 import * 仅暴露包入口约定的公开符号。
 # 使用示例: pytest -q test/symbol_variable/test_package_api.py -k test_python_package_import_star_exports_only_public_names
 # 对应功能实现文件路径: kernel_gen/symbol_variable/__init__.py
