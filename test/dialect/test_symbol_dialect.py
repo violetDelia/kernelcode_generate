@@ -11,7 +11,7 @@
 
 覆盖率:
 - 覆盖率命令: pytest -q --cov=kernel_gen.dialect.symbol --cov-report=term-missing test/dialect/test_symbol_dialect.py
-- 覆盖率结果: 100%（2026-03-22 18:50:40 +0800）
+- 覆盖率结果: 100%（2026-03-22 19:39:28 +0800）
 
 关联文件:
 - 功能实现: kernel_gen/dialect/symbol.py
@@ -37,6 +37,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.dialect.symbol import Symbol, SymbolExprAttr, SymbolValueType
+from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.type import NumericType
 
 
 def _build_context() -> Context:
@@ -75,8 +77,8 @@ def _print_attr(value: object) -> str:
 # TC-SYM-001 / TC-SYM-002 / TC-SYM-009
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 18:50:40 +0800
-# 最近一次运行成功时间: 2026-03-22 18:50:40 +0800
+# 最近一次运行测试时间: 2026-03-22 19:39:28 +0800
+# 最近一次运行成功时间: 2026-03-22 19:39:28 +0800
 # 测试目的: 验证 SymbolExprAttr 的基础表达、复合表达与 parse/print round-trip 稳定。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
@@ -92,8 +94,8 @@ def test_symbol_expr_attr_round_trip() -> None:
 # TC-SYM-003
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 18:50:40 +0800
-# 最近一次运行成功时间: 2026-03-22 18:50:40 +0800
+# 最近一次运行测试时间: 2026-03-22 19:39:28 +0800
+# 最近一次运行成功时间: 2026-03-22 19:39:28 +0800
 # 测试目的: 验证空表达式会被 verifier 拒绝。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
@@ -105,8 +107,8 @@ def test_symbol_expr_attr_rejects_empty_expr() -> None:
 # TC-SYM-004 / TC-SYM-005 / TC-SYM-006 / TC-SYM-009
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 18:50:40 +0800
-# 最近一次运行成功时间: 2026-03-22 18:50:40 +0800
+# 最近一次运行测试时间: 2026-03-22 19:39:28 +0800
+# 最近一次运行成功时间: 2026-03-22 19:39:28 +0800
 # 测试目的: 验证整数 symbol type 支持具名表达与常量表达，并可稳定 parse/print。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
@@ -119,11 +121,36 @@ def test_symbol_value_type_round_trip_for_integer_only_semantics() -> None:
         assert _print_attr(ty) == text
 
 
+# TC-SYM-013 / TC-SYM-014
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 19:39:28 +0800
+# 最近一次运行成功时间: 2026-03-22 19:39:28 +0800
+# 测试目的: 验证 Memory 中的单值 shape/stride 分量进入 IR 时统一复用 symbol dialect 的整数-only 语义。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_memory_scalar_components_round_trip_through_symbol_dialect() -> None:
+    mem = Memory(["M", "K", "N"], NumericType.Float32)
+    stride_values = mem.stride.get_values()
+
+    stride_expr = SymbolExprAttr.from_expr(str(stride_values[0]))
+    dim_type = SymbolValueType.from_expr(str(mem.shape.get_values()[2]))
+    unit_type = SymbolValueType.from_expr(str(stride_values[2]))
+
+    stride_expr.verify()
+    dim_type.verify()
+    unit_type.verify()
+
+    assert _print_attr(stride_expr) == '#symbol.expr<"K*N">'
+    assert _print_attr(dim_type) == '!symbol.int<"N">'
+    assert _print_attr(unit_type) == '!symbol.int<"1">'
+
+
 # TC-SYM-007 / TC-SYM-008
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 18:50:40 +0800
-# 最近一次运行成功时间: 2026-03-22 18:50:40 +0800
+# 最近一次运行测试时间: 2026-03-22 19:39:28 +0800
+# 最近一次运行成功时间: 2026-03-22 19:39:28 +0800
 # 测试目的: 验证 legacy 宽度整型或缺少表达式的文本不会被当前整数-only symbol type 接受。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
@@ -138,8 +165,8 @@ def test_symbol_value_type_rejects_unsupported_legacy_text_forms() -> None:
 # TC-SYM-010 / TC-SYM-011 / TC-SYM-012
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 18:50:40 +0800
-# 最近一次运行成功时间: 2026-03-22 18:50:40 +0800
+# 最近一次运行测试时间: 2026-03-22 19:39:28 +0800
+# 最近一次运行成功时间: 2026-03-22 19:39:28 +0800
 # 测试目的: 验证 symbol type 相等性仅比较整数语义下的表达式内容，不再区分整型宽度。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
@@ -156,8 +183,8 @@ def test_symbol_value_type_equality_depends_on_expr_only() -> None:
 # TC-SYM-003 / TC-SYM-007
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 18:50:40 +0800
-# 最近一次运行成功时间: 2026-03-22 18:50:40 +0800
+# 最近一次运行测试时间: 2026-03-22 19:39:28 +0800
+# 最近一次运行成功时间: 2026-03-22 19:39:28 +0800
 # 测试目的: 验证非法字符表达式在 attr/type 两条路径都会报 verifier 错误。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md

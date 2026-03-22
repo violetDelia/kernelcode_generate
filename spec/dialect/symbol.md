@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-定义 `symbol dialect` 的类型与基础构件，用于在 IR 中显式表示“带符号值语义的整型标量”。该方言的核心目标是让类型本身携带一个符号表达，例如 `!symbol.int<"N">` 表示“这是一个整数值，其值语义为符号 `N`”。该方言只负责符号值的类型表达与基础约束，不负责张量、内存、控制流或数值计算方言语义。
+定义 `symbol dialect` 的类型与基础构件，用于在 IR 中显式表示“带符号值语义的整型标量”。该方言的核心目标是让类型本身携带一个符号表达，例如 `!symbol.int<"N">` 表示“这是一个整数值，其值语义为符号 `N`”。本方言同时作为 memory 相关符号标量语义的唯一归属：`shape`、`stride`、`offset`、`size`、循环边界等位置只要进入 IR 并需要表达单个整数符号值，就统一落到 `symbol dialect`。该方言不负责张量、内存容器、控制流或数值计算方言语义。
 
 ## 文档信息
 
@@ -15,21 +15,17 @@
 ## 依赖
 
 - [`spec/symbol_variable/symbol_dim.md`](../../spec/symbol_variable/symbol_dim.md)：提供符号维度与符号表达的基础语义。
+- [`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)：高层 `Memory` 容器复用本方言的 memory 相关符号标量语义。
 - [`kernel_gen/dialect/symbol.py`](../../kernel_gen/dialect/symbol.py)：`symbol dialect` 的实现入口。
-
-## 术语
-
-- `符号值`：与 SSA value 绑定的整数值语义表达，可以是具名符号、整型表达式或整型常量，如 `N`、`M + 1`、`B * K`、`1`、`2`、`3`。
-- `带符号值类型`：在整数语义上附带符号表达的类型，如 `!symbol.int<"N">`、`!symbol.int<"M + 1">`。
-- `具名符号`：以稳定名字出现的符号，如 `N`、`M`、`K`。
-- `符号表达式`：由符号、整数常量和有限基础运算组成的表达式。
 
 ## 目标
 
 - 为项目提供统一的“符号值类型”表达，使 IR 能直接表示某个整型标量值对应的符号语义。
 - 让 `shape`、`offset`、`stride`、循环边界、算子属性等场景中的整型符号值可以在类型层面保持稳定表达。
+- 收敛 memory 相关符号标量的方言归属：`Memory`、`NnMemoryType`、`dma` 相关 op 若需要表达单个维度、步幅、偏移或切片大小的整数符号语义，应统一复用 `SymbolExprAttr` / `SymbolValueType`，而不是在各自 spec 中再定义一套标量 symbol type。
 - 为后续 `nn`、`dma`、`kernel`、`dsl` 等方言提供统一的符号值口径，避免每个方言各自维护一套符号标量表达。
 - 保持类型表达尽量简单，优先服务开发者理解和方言间协同，而不是追求复杂的符号推导系统。
+- 本文件中的“符号值”指与 SSA value 绑定的单个整数值语义表达，可以是具名符号、整型表达式或整型常量，如 `N`、`M + 1`、`B * K`、`1`、`2`、`3`。
 
 ## 限制与边界
 
@@ -41,6 +37,7 @@
 - `!symbol.int<"1">`、`!symbol.int<"2">`、`!symbol.int<"3">` 这类常量整数值类型是合法的，表示“值语义已知为该整数常量”。
 - `!symbol.int<"N">` 中字符串里的表达式表示“值语义”，不是附加注释，也不是 shape 维度列表。
 - 类型中的符号表达应面向单个标量值；shape 列表、stride 列表等多值结构不直接放入本方言标量类型中。
+- `Memory`、`MemorySpace`、`LocalSpaceMeta` 这类高层内存容器或空间枚举不属于本方言；本方言只负责它们内部可能出现的单个整型符号值语义。
 - 本方言暂不定义“未知但无名字”的匿名符号值；若需要动态未知值，应优先使用具名符号或由其他方言以 SSA value 传递。
 - 当前只定义整数语义，不区分 `int/int8/int16/int32/int64` 等具体整型宽度，也不定义 `index`、浮点或其他非整型 symbol 类型。
 
@@ -185,18 +182,42 @@ SymbolValueType.from_expr("N")
 - `expr` 允许纯整数字面量，`!symbol.int<"1">`、`!symbol.int<"2">`、`!symbol.int<"3">` 都必须视为合法类型表达。
 - 同一个 `SymbolValueType` 的相等性比较只比较整数语义下的 `expr`。
 - 打印后再解析必须能得到等价类型对象。
+- `!symbol.int<"N">` 表示“该 SSA value 的整数值由符号 `N` 表示”，不是变量声明；`!symbol.int<"1">`、`!symbol.int<"2">`、`!symbol.int<"3">` 表示该值已知为对应常量整数。
 
 返回与限制：
 
 - 返回类型：校验规则定义。
 - 限制：仅校验整数符号类型表达合法性，不负责判断两个不同表达式是否数学等价。
 
-## 额外补充
+### Memory 相关符号标量归属
 
-- `!symbol.int<"N">` 的语义是“该 SSA value 的整数值由符号 `N` 表示”，而不是“这是一个名字叫 `N` 的变量声明”。
-- `!symbol.int<"1">`、`!symbol.int<"2">`、`!symbol.int<"3">` 的语义是“该 SSA value 的整数值分别已知为常量 `1/2/3`”，不只是具名符号的占位形式。
-- 当前 `symbol dialect` 只提供整数-only 基线，不接受按位宽区分的 legacy 整型变体。
-- 后续若需要引入符号常量、符号比较、符号运算 op，应单独新增 spec，不直接塞入本文件。
+功能说明：
+
+- 规定 memory 相关符号值在 IR 层的归属边界。
+- 当 `shape`、`stride`、`offset`、`size` 等 memory 元信息被单独建模为整数标量 attribute/type 时，统一由 `symbol dialect` 负责其整数符号语义表达。
+
+参数说明：
+
+- `expr(string)`：单个 memory 元信息标量对应的整数语义表达，例如 `N`、`K*N`、`3`。
+
+使用示例：
+
+```text
+#symbol.expr<"K*N">
+!symbol.int<"3">
+!symbol.int<"N">
+```
+
+注意事项：
+
+- 本归属规则只覆盖“单个整数标量”的 symbol 语义，不直接承载 `shape=[M, N]` 这类多值结构。
+- `spec/symbol_variable/memory.md` 负责高层 `Memory` 对象、空间枚举与默认 stride 规则；`symbol dialect` 负责其中单个维度或步幅分量的整数 symbol 语义。
+- 常量整数分量与具名符号分量同样适用本规则；`!symbol.int<"1">`、`!symbol.int<"2">`、`!symbol.int<"3">` 都是合法 memory 元信息标量表达。
+
+返回与限制：
+
+- 返回类型：归属规则定义。
+- 限制：只定义 memory 元信息中的单值整型 symbol 语义，不定义 memory 容器、memory type 或 memory space。
 
 ## 测试
 
@@ -210,6 +231,7 @@ SymbolValueType.from_expr("N")
 - 验证 `#symbol.expr<"expr">` 与 `!symbol.int<"expr">` 的 parse/print 稳定性。
 - 验证 legacy 宽度整型文本、空表达式、非法表达式的错误路径。
 - 验证 parse/print 循环稳定。
+- 验证 memory 相关标量语义复用同一套整数-only symbol 规则，包括具名维度表达、乘法步幅表达与常量步幅表达。
 
 ### 功能与用例清单
 
@@ -227,3 +249,5 @@ SymbolValueType.from_expr("N")
 | TC-SYM-010 | 相等性 | 相同表达式 | 无 | 比较两个 `!symbol.int<"N">` | 相等 | `test_symbol_value_type_equality_depends_on_expr_only` |
 | TC-SYM-011 | 相等性 | 不再区分整型宽度 | 无 | 在整数-only 语义下比较相同表达式类型 | 不因宽度差异产生额外类型分支 | `test_symbol_value_type_equality_depends_on_expr_only` |
 | TC-SYM-012 | 相等性 | 表达式不同 | 无 | 比较 `!symbol.int<"N">` 与 `!symbol.int<"M">` | 不相等 | `test_symbol_value_type_equality_depends_on_expr_only` |
+| TC-SYM-013 | memory 元信息标量 | 符号维度或步幅分量 | 无 | 解析 `#symbol.expr<"K*N">` 或 `!symbol.int<"N">` | 作为 memory 相关单值整数语义合法并稳定 round-trip | `test_symbol_expr_attr_round_trip`、`test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect` |
+| TC-SYM-014 | memory 元信息标量 | 常量步幅或常量维度分量 | 无 | 解析 `!symbol.int<"1">`、`!symbol.int<"2">`、`!symbol.int<"3">` | 作为常量整数值语义合法 | `test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect` |

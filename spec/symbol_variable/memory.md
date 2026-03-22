@@ -2,14 +2,14 @@
 
 ## 功能简介
 
-用于定义符号内存对象 `Memory`、空间枚举 `MemorySpace` 与元信息 `LocalSpaceMeta`。该模块用于描述带 `shape`、`stride`、`dtype`、`format` 和 `space` 的张量式内存对象，不负责真实内存分配。
+用于定义符号内存对象 `Memory`、空间枚举 `MemorySpace` 与元信息 `LocalSpaceMeta`。该模块用于描述带 `shape`、`stride`、`dtype`、`format` 和 `space` 的张量式内存对象，不负责真实内存分配。`Memory` 只负责组织高层复合元信息；其中单个维度、步幅、偏移或大小分量若进入 IR 并需要整数 symbol type/attr 表达，统一归 `symbol dialect` 负责。
 
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`金铲铲大作战`
+- 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)
-- `test`：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)、[`test/operation/test_memory_operation.py`](../../test/operation/test_memory_operation.py)
+- `test`：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)、[`test/operation/test_memory_operation.py`](../../test/operation/test_memory_operation.py)、[`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)
 - `功能实现`：[`kernel_gen/symbol_variable/memory.py`](../../kernel_gen/symbol_variable/memory.py)
 
 ## 依赖
@@ -17,6 +17,7 @@
 - [`kernel_gen/symbol_variable/symbol_shape.py`](../../kernel_gen/symbol_variable/symbol_shape.py)：`SymbolShape` 定义与构造。
 - [`kernel_gen/symbol_variable/symbol_dim.py`](../../kernel_gen/symbol_variable/symbol_dim.py)：`SymbolDim` 维度元素类型。
 - [`kernel_gen/symbol_variable/type.py`](../../kernel_gen/symbol_variable/type.py)：`NumericType`/`Farmat` 类型与格式枚举。
+- [`spec/dialect/symbol.md`](../../spec/dialect/symbol.md)：memory 相关单值整数 symbol 语义归属。
 - [`spec/symbol_variable/symbol_shape.md`](../../spec/symbol_variable/symbol_shape.md)：`SymbolShape` 语义。
 - [`spec/symbol_variable/type.md`](../../spec/symbol_variable/type.md)：`NumericType`/`Farmat` 语义。
 - [`spec/operation/nn.md`](../../spec/operation/nn.md)：逐元素算术与比较规则来源（`Memory` 仅复用语义）。
@@ -27,6 +28,9 @@
 - 不负责容量校验、对齐校验或空间可用性判断，只暴露空间元信息。
 - 不负责跨空间迁移、拷贝、同步与调度策略。
 - 不负责广播、自动类型提升、约束求解或推导真实存储偏移。
+- 不定义 dialect 层的整数 symbol type/attr；`shape`、`stride`、`offset`、`size` 中单个整型分量的 symbol 语义统一以 [`spec/dialect/symbol.md`](../../spec/dialect/symbol.md) 为准。
+- 不负责 `NnMemoryType`、`dma` memory result type 等 IR type；本文件只描述 Python 侧 `Memory` 容器。
+- 本文件中的 `Memory` 指 Python 侧高层复合元信息容器，聚合 `shape`、`stride`、`dtype`、`format`、`space`；其中 `shape`、`stride`、`offset`、`size` 的单个整型分量若需进入 IR，则统一复用 `symbol dialect` 的整数-only 语义。
 - 对外公开的创建入口为 `Memory(shape, dtype, space=..., stride=..., format=...)`。
 
 ## 公开接口
@@ -112,6 +116,7 @@ mem = Memory([1, 2], NumericType.Float32)
 - `Memory` 的公开构造入口是 `Memory(...)`，行为由 `__init__` 约束。
 - 逐元素算术与比较的规则在 `运算符重载` 小节中说明。
 - `__init__` 是统一构造入口；显式步幅、动态维度、tensor-like 直入等内容仅用于说明常见使用场景，不引入额外公开构造 API。
+- 若 `Memory` 后续 lowering 到 IR，其中单个维度、步幅或偏移分量的 symbol type/attr 归属 `symbol dialect`，不在本文件重复定义。
 
 返回与限制：
 
@@ -151,6 +156,7 @@ mem = Memory(
 - `shape` 与 `stride` 接收 `SymbolShape` 或可迭代输入。
 - 未显式提供 `stride` 时，默认生成连续行主序步幅：最后一维为 `1`，其余维度为后续维度长度的乘积。
 - 若 `shape` 包含 `SymbolDim`，默认步幅按乘法表达式生成并以无空格的 `*` 连接（例如 `shape=[M, K, N]` 时默认 `stride=[K*N, N, 1]`）。
+- 上述 `K*N`、`N`、`1` 等单个分量若进入 IR，需要按 [`spec/dialect/symbol.md`](../../spec/dialect/symbol.md) 的整数-only symbol 语义建模。
 
 返回与限制：
 
@@ -215,6 +221,7 @@ mem = Memory(
 注意事项：
 
 - 动态维度不在前端阶段退化为静态值。
+- 动态 `shape/stride` 的单个分量仍是整数语义；若需要 IR 类型表达，应复用 `!symbol.int<"...">`。
 
 返回与限制：
 
@@ -315,6 +322,7 @@ cmp_mem = lhs < 0
 - 类型不兼容或标量类型不支持时抛 `TypeError`。
 - 比较结果的 `dtype` 统一为 `NumericType.Int32`。
 - 输出继承 `lhs` 的 `space`、`format` 与 `stride` 语义。
+- 本小节只定义 Python 侧 `Memory` 运算结果的高层元数据继承规则，不新增 dialect 层 memory type 或 symbol type。
 
 返回与限制：
 
@@ -326,9 +334,11 @@ cmp_mem = lhs < 0
 - 测试文件：
   - [`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)
   - [`test/operation/test_memory_operation.py`](../../test/operation/test_memory_operation.py)
+  - [`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)
 - 执行命令：
   - `pytest -q test/symbol_variable/test_memory.py`
   - `pytest -q test/operation/test_memory_operation.py`
+  - `pytest -q test/dialect/test_symbol_dialect.py`
 
 ### 测试目标
 
@@ -342,6 +352,7 @@ cmp_mem = lhs < 0
 - 验证运算符重载覆盖算术、比较与错误路径（形状不一致、dtype 不兼容、标量类型非法）。
 - 验证运算符重载结果元数据独立（对应 `ME-012`）。
 - 验证比较结果 `dtype` 为 `NumericType.Int32`（对应 `ME-013`）。
+- 验证 memory 相关单值整数语义的 dialect 归属由 [`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py) 覆盖，本文件测试仅覆盖 `Memory` 容器行为本身。
 
 ### 功能与用例清单
 
@@ -366,3 +377,4 @@ cmp_mem = lhs < 0
 | ME-017 | 构造 | 默认 stride 行主序 | N/A | `Memory([2, 3, 4], NumericType.Float32)` | 生成 `[12, 4, 1]` | `test_default_stride_generated_row_major` |
 | ME-018 | 构造 | 符号维度默认 stride | N/A | `Memory([SymbolDim(\"M\"), SymbolDim(\"K\"), SymbolDim(\"N\")], NumericType.Float32)` | 生成 `Shape(K*N, N, 1)` | `test_default_stride_symbolic_expression_repr` |
 | ME-019 | 构造 | 字符串形状默认 stride | N/A | `Memory([\"M\", \"K\", \"N\"], NumericType.Float32)` | 生成 `Shape(K*N, N, 1)` | `test_default_stride_symbolic_expression_from_strings` |
+| ME-020 | 职责边界 | memory 相关单值整数 symbol 归属 | 已存在单个维度或步幅分量 | 在 `Memory` 场景中使用 `N`、`K*N`、`1` 这类分量 | 本文件仅要求 `SymbolShape/SymbolDim` 保持分量语义；dialect 层类型表达由 `spec/dialect/symbol.md` 负责 | `test_dynamic_shape_stride`、`test_default_stride_symbolic_expression_repr`、`test_default_stride_symbolic_expression_from_strings`、`test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect` |
