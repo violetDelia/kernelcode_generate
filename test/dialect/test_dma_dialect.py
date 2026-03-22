@@ -1,13 +1,20 @@
 """dma dialect tests.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: OpenAI
 
 功能说明:
 - 覆盖 dma dialect 的 op verifier 与类型复用约束。
+- 覆盖 SSA index operand 动态布局、parse/print round-trip 与默认连续 stride 约束。
 
 使用示例:
 - pytest -q test/dialect/test_dma_dialect.py
+
+当前覆盖率信息:
+- `kernel_gen.dialect.dma`：`96%`（2026-03-22，`24 passed`）。
+
+覆盖率命令:
+- `pytest --cov=kernel_gen.dialect.dma --cov-report=term-missing test/dialect/test_dma_dialect.py`
 
 关联文件:
 - 功能实现: kernel_gen/dialect/dma.py
@@ -79,7 +86,22 @@ def _build_context() -> Context:
 
 
 def _print_ir(value: object) -> str:
-    """打印 attribute 或 operation/module 为文本。"""
+    """打印 attribute 或 operation/module 为文本。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 为 parse/print round-trip 测试生成稳定文本。
+
+    使用示例:
+    - _print_ir(module)
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma_dialect.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
 
     stream = StringIO()
     printer = Printer(stream=stream)
@@ -548,10 +570,10 @@ def test_dma_reshape_requires_contiguous() -> None:
 
 # TC-DMA-017
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-22 15:01:08 +0800
-# 最近一次运行成功时间: 2026-03-22 15:01:08 +0800
-# 功能说明: 验证 dma.reshape 支持通过 SSA shape operand 表达动态结果形状。
+# 最后一次更改: OpenAI
+# 最近一次运行测试时间: 2026-03-22 23:58:00 +0800
+# 最近一次运行成功时间: 2026-03-22 23:58:00 +0800
+# 功能说明: 验证 dma.reshape 支持通过 SSA shape operand 表达动态结果形状，且结果 stride 必须满足默认连续布局。
 # 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_reshape_allows_dynamic_shape_operands
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
@@ -568,6 +590,14 @@ def test_dma_reshape_allows_dynamic_shape_operands() -> None:
     source = _TestOp(result_types=[source_type]).results[0]
     op = DmaReshapeOp(source, _make_index_operands([None, None]), result_type)
     op.verify()
+
+    bad_result_type = _make_memory_type(
+        shape=ArrayAttr([StringAttr("M"), StringAttr("N")]),
+        stride=ArrayAttr([StringAttr("M"), IntAttr(1)]),
+    )
+    op = DmaReshapeOp(source, _make_index_operands([None, None]), bad_result_type)
+    with pytest.raises(VerifyException, match="dma.reshape requires contiguous result stride"):
+        op.verify()
 
 
 # TC-DMA-018
@@ -621,10 +651,10 @@ def test_dma_view_dynamic_layout_operands_valid() -> None:
 
 # TC-DMA-020
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-22 15:01:08 +0800
-# 最近一次运行成功时间: 2026-03-22 15:01:08 +0800
-# 功能说明: 验证 dma.alloc 支持通过 SSA dynamic_shape operand 表达动态形状。
+# 最后一次更改: OpenAI
+# 最近一次运行测试时间: 2026-03-22 23:58:00 +0800
+# 最近一次运行成功时间: 2026-03-22 23:58:00 +0800
+# 功能说明: 验证 dma.alloc 支持通过 SSA dynamic_shape operand 表达动态形状，且结果 stride 必须满足默认连续布局。
 # 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_alloc_dynamic_shape_operands_valid
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
@@ -636,6 +666,14 @@ def test_dma_alloc_dynamic_shape_operands_valid() -> None:
     )
     op = DmaAllocOp(_make_index_operands([None, None]), result_type)
     op.verify()
+
+    bad_result_type = _make_memory_type(
+        shape=ArrayAttr([StringAttr("M"), StringAttr("N")]),
+        stride=ArrayAttr([StringAttr("M"), IntAttr(1)]),
+    )
+    op = DmaAllocOp(_make_index_operands([None, None]), bad_result_type)
+    with pytest.raises(VerifyException, match="dma.alloc requires contiguous result stride"):
+        op.verify()
 
 
 # TC-DMA-021
@@ -676,3 +714,119 @@ def test_dma_dynamic_shape_parse_print_round_trip() -> None:
     reparsed = Parser(ctx, printed).parse_module()
     reparsed.verify()
     assert _print_ir(reparsed).rstrip() == printed
+
+
+# 创建者: OpenAI
+# 最后一次更改: OpenAI
+# 最近一次运行测试时间: 2026-03-22 23:58:00 +0800
+# 最近一次运行成功时间: 2026-03-22 23:58:00 +0800
+# 测试目的: 补充覆盖 dma.copy 的 stride / element_type mismatch verifier 语义。
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_copy_rejects_stride_or_element_type_mismatch() -> None:
+    source_type = _make_memory_type()
+    source = _TestOp(result_types=[source_type]).results[0]
+
+    stride_mismatch = _make_memory_type(stride=ArrayAttr([IntAttr(8), IntAttr(1)]))
+    op = DmaCopyOp(source, _TestOp(result_types=[stride_mismatch]).results[0])
+    with pytest.raises(VerifyException, match="dma.copy source/target stride mismatch"):
+        op.verify()
+
+    element_type_mismatch = NnMemoryType(source_type.shape, source_type.stride, i1, source_type.space)
+    op = DmaCopyOp(source, _TestOp(result_types=[element_type_mismatch]).results[0])
+    with pytest.raises(VerifyException, match="dma.copy source/target element_type mismatch"):
+        op.verify()
+
+
+# 创建者: OpenAI
+# 最后一次更改: OpenAI
+# 最近一次运行测试时间: 2026-03-22 23:58:00 +0800
+# 最近一次运行成功时间: 2026-03-22 23:58:00 +0800
+# 测试目的: 补充覆盖 dma.load/store/slice/deslice 的 element_type / space / result 约束。
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_transfer_ops_reject_element_space_or_result_mismatch() -> None:
+    source_type = _make_memory_type()
+    target_type = _make_memory_type(shape=ArrayAttr([IntAttr(8), IntAttr(4)]))
+    source = _TestOp(result_types=[source_type]).results[0]
+    target = _TestOp(result_types=[target_type]).results[0]
+    offsets = _make_index_operands([0, 0])
+    sizes = _make_index_operands([2, 4])
+    strides = _make_index_operands([1, 1])
+
+    bad_load_type = NnMemoryType(source_type.shape, source_type.stride, i1, source_type.space)
+    op = DmaLoadOp(source, offsets, sizes, strides, bad_load_type, _make_space("global"))
+    with pytest.raises(VerifyException, match="dma.load element_type mismatch"):
+        op.verify()
+
+    store_source_type = NnMemoryType(source_type.shape, source_type.stride, i1, source_type.space)
+    store_source = _TestOp(result_types=[store_source_type]).results[0]
+    op = DmaStoreOp(store_source, target, offsets, sizes, strides)
+    with pytest.raises(VerifyException, match="dma.store element_type mismatch"):
+        op.verify()
+
+    bad_slice_type = NnMemoryType(source_type.shape, source_type.stride, i1, source_type.space)
+    op = DmaSliceOp(source, offsets, sizes, strides, bad_slice_type, _make_space("global"))
+    with pytest.raises(VerifyException, match="dma.slice element_type mismatch"):
+        op.verify()
+
+    bad_slice_space_type = _make_memory_type(space="shared")
+    op = DmaSliceOp(source, offsets, sizes, strides, bad_slice_space_type, _make_space("global"))
+    with pytest.raises(VerifyException, match="dma.slice space attribute must match result space"):
+        op.verify()
+
+    deslice_source = _TestOp(result_types=[source_type]).results[0]
+    deslice_target_type = _make_memory_type(shape=ArrayAttr([IntAttr(8), IntAttr(4)]))
+    deslice_target = _TestOp(result_types=[deslice_target_type]).results[0]
+    bad_deslice_source_type = NnMemoryType(source_type.shape, source_type.stride, i1, source_type.space)
+    bad_deslice_source = _TestOp(result_types=[bad_deslice_source_type]).results[0]
+    op = DmaDesliceOp(
+        bad_deslice_source,
+        deslice_target,
+        offsets,
+        sizes,
+        strides,
+        deslice_target_type,
+    )
+    with pytest.raises(VerifyException, match="dma.deslice element_type mismatch"):
+        op.verify()
+
+    bad_result_type = _make_memory_type(shape=ArrayAttr([IntAttr(8), IntAttr(4)]), space="shared")
+    op = DmaDesliceOp(deslice_source, deslice_target, offsets, sizes, strides, bad_result_type)
+    with pytest.raises(VerifyException, match="dma.deslice result must match target type"):
+        op.verify()
+
+
+# 创建者: OpenAI
+# 最后一次更改: OpenAI
+# 最近一次运行测试时间: 2026-03-22 23:58:00 +0800
+# 最近一次运行成功时间: 2026-03-22 23:58:00 +0800
+# 测试目的: 补充覆盖 dma.reshape 的 element_type / space mismatch verifier 语义。
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_reshape_rejects_element_or_space_mismatch() -> None:
+    source_type = _make_memory_type()
+    source = _TestOp(result_types=[source_type]).results[0]
+    shape = _make_index_operands([4, 2])
+
+    bad_element_type = NnMemoryType(
+        ArrayAttr([IntAttr(4), IntAttr(2)]),
+        ArrayAttr([IntAttr(2), IntAttr(1)]),
+        i1,
+        source_type.space,
+    )
+    op = DmaReshapeOp(source, shape, bad_element_type)
+    with pytest.raises(VerifyException, match="dma.reshape element_type mismatch"):
+        op.verify()
+
+    bad_space_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(4), IntAttr(2)]),
+        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+        space="shared",
+    )
+    op = DmaReshapeOp(source, shape, bad_space_type)
+    with pytest.raises(VerifyException, match="dma.reshape space mismatch"):
+        op.verify()

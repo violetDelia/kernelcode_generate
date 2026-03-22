@@ -218,18 +218,19 @@ def _maybe_numel(shape: ArrayAttr[Attribute]) -> int | None:
     return numel
 
 
-def _contiguous_stride(shape: ArrayAttr[Attribute]) -> list[Attribute]:
-    """生成行主序连续 stride。
+def _default_contiguous_stride(shape: ArrayAttr[Attribute]) -> list[Attribute]:
+    """按默认连续布局生成行主序 stride。
 
     创建者: 金铲铲大作战
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 当维度为符号时，以 `?` 标记无法确定的 stride。
-    - 若后续维度全为 IntAttr，则返回确定的 IntAttr stride。
+    - 静态维度返回 `IntAttr` 乘积。
+    - 符号维度返回无空格 `*` 连接的乘法表达式。
+    - `?` 维度会把更高维 stride 退化为 `?`。
 
     使用示例:
-    - _contiguous_stride(ArrayAttr([IntAttr(2), IntAttr(4)]))
+    - _default_contiguous_stride(ArrayAttr([IntAttr(2), IntAttr(4)]))
 
     关联文件:
     - spec: spec/dialect/dma.md
@@ -238,15 +239,33 @@ def _contiguous_stride(shape: ArrayAttr[Attribute]) -> list[Attribute]:
     """
 
     stride: list[Attribute] = []
-    running: int | None = 1
+    running: int | str | None = 1
     for dim in reversed(shape.data):
         if running is None:
             stride.append(StringAttr("?"))
-        else:
+        elif isinstance(running, int):
             stride.append(IntAttr(running))
-        if isinstance(dim, IntAttr) and running is not None:
-            running *= dim.data
         else:
+            stride.append(StringAttr(running))
+        if running is None:
+            continue
+        if isinstance(dim, IntAttr):
+            if dim.data == 1:
+                continue
+            if isinstance(running, int):
+                running *= dim.data
+            else:
+                running = f"{dim.data}*{running}"
+            continue
+        if isinstance(dim, StringAttr):
+            if dim.data == "?":
+                running = None
+            elif running == 1:
+                running = dim.data
+            else:
+                running = f"{dim.data}*{running}"
+            continue
+        if running is not None:
             running = None
     stride.reverse()
     return stride
@@ -270,7 +289,7 @@ def _is_contiguous(memory_type: NnMemoryType) -> bool:
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
-    expected = _contiguous_stride(memory_type.shape)
+    expected = _default_contiguous_stride(memory_type.shape)
     if len(expected) != len(memory_type.stride.data):
         return False
     for expected_dim, stride_dim in zip(expected, memory_type.stride.data, strict=True):
@@ -279,13 +298,34 @@ def _is_contiguous(memory_type: NnMemoryType) -> bool:
                 return False
             continue
         if isinstance(expected_dim, StringAttr):
-            if isinstance(stride_dim, IntAttr):
-                continue
-            if isinstance(stride_dim, StringAttr) and stride_dim.data:
-                continue
-            return False
+            if not isinstance(stride_dim, StringAttr) or stride_dim.data != expected_dim.data:
+                return False
+            continue
         return False
     return True
+
+
+def _verify_default_contiguous_stride(memory_type: NnMemoryType, message: str) -> None:
+    """校验 memory type 的 stride 是否匹配默认连续布局。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 根据 `shape` 生成默认连续布局。
+    - 要求 `stride` 与默认布局完全一致。
+
+    使用示例:
+    - _verify_default_contiguous_stride(result_type, "dma.alloc requires contiguous result stride")
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma_dialect.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    if not _is_contiguous(memory_type):
+        raise VerifyException(message)
 
 
 @irdl_op_definition
@@ -345,6 +385,7 @@ class DmaAllocOp(IRDLOperation):
         dynamic_shape = _verify_index_operands(self.dynamic_shape, "dynamic_shape", min_value=1)
         _verify_rank_match(dynamic_shape, len(result_type.shape.data), "dynamic_shape")
         _verify_operands_match_layout(dynamic_shape, result_type.shape, "dynamic_shape must match result shape")
+        _verify_default_contiguous_stride(result_type, "dma.alloc requires contiguous result stride")
 
 
 @irdl_op_definition
@@ -884,19 +925,7 @@ class DmaReshapeOp(IRDLOperation):
         if not _is_contiguous(source_type):
             raise VerifyException("dma.reshape requires contiguous source")
 
-        expected = _contiguous_stride(result_type.shape)
-        for expected_dim, stride_dim in zip(expected, result_type.stride.data, strict=True):
-            if isinstance(expected_dim, IntAttr):
-                if not isinstance(stride_dim, IntAttr) or stride_dim.data != expected_dim.data:
-                    raise VerifyException("dma.reshape requires contiguous result stride")
-                continue
-            if isinstance(expected_dim, StringAttr):
-                if isinstance(stride_dim, IntAttr):
-                    continue
-                if isinstance(stride_dim, StringAttr) and stride_dim.data:
-                    continue
-                raise VerifyException("dma.reshape requires contiguous result stride")
-            raise VerifyException("dma.reshape requires contiguous result stride")
+        _verify_default_contiguous_stride(result_type, "dma.reshape requires contiguous result stride")
 
 
 @irdl_op_definition

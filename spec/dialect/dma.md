@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`我不是牛马`
+- 最后一次更改：`不要啊教练`
 - `spec`：[`spec/dialect/dma.md`](../../spec/dialect/dma.md)
 - `test`：[`test/dialect/test_dma_dialect.py`](../../test/dialect/test_dma_dialect.py)
 - `功能实现`：[`kernel_gen/dialect/dma.py`](../../kernel_gen/dialect/dma.py)
@@ -61,6 +61,12 @@
 - `strides` 当前每一维仍限制为单位步长语义，但该约束应体现在 operand 校验阶段，而不是要求使用 `IntAttr(1)` attribute。
 - `sizes` 中每一维必须具有正整数语义，不允许负值。
 - 若 op 带有目标空间 attribute，则其值必须与结果 type 或目标 type 的 `space` 一致。
+
+#### 默认连续 stride 推导（符号维度）
+
+- 当 `shape` 中包含 `StringAttr` 时，默认连续 stride 仍按从右到左的累计乘积推导；单个符号如 `N` 直接参与乘积，多维组合可形成 `M*N` 等字符串表达。
+- 若维度为 `StringAttr("?")` 或包含 `?` 的表达式，视为未知：该维度及其左侧更高维的默认 stride 统一退化为 `StringAttr("?")`，右侧维度仍按既有规则生成（末维为 `1`）。
+- 该规则仅用于 `dma.alloc` / `dma.reshape` 的默认连续 stride 推导与 verifier 校验，不替代显式 `index` operand 建模；`offsets/sizes/strides` 仍必须通过 SSA `index` operand 传入。
 
 ### Parse/Print 与 Verifier 约束
 
@@ -441,6 +447,7 @@ op = DmaCastOp(source, result_type)
 - 验证 `dma.store/deslice` 的源块与目标切片大小匹配约束。
 - 验证 `dma.alloc` 结果类型约束与结果数量。
 - 验证 `dma.view/reshape` 的元素类型/空间一致性与形状约束，其中 `dma.view` 覆盖动态 `shape/stride` operand，`dma.reshape` 覆盖动态 `shape` operand。
+- 验证默认连续 stride 在符号维度（如 `N` / `M*N` / `?`）下的推导与退化规则已覆盖。
 - 验证 `dma.cast` 只允许改变元素类型，且保持 `shape/stride/space` 不变。
 - 验证当前阶段对 stride 的限制会在 verifier 阶段明确报错。
 
@@ -464,8 +471,8 @@ op = DmaCastOp(source, result_type)
 | TC-DMA-014 | 视图 | `dma.view` 约束 | `result.element_type` 或 `result.space` 与 `source` 不一致 | 构造并校验 `dma.view` | verifier 报错 | `test_dma_view_type_or_space_mismatch` |
 | TC-DMA-015 | 视图 | `dma.view` 形状一致性 | `source/result` 可判定的元素总数不一致 | 构造并校验 `dma.view` | verifier 报错 | `test_dma_view_numel_mismatch` |
 | TC-DMA-016 | 变形 | `dma.reshape` 连续约束 | `source` 非连续布局，无法合法 reshape 为连续结果 | 构造并校验 `dma.reshape` | verifier 报错 | `test_dma_reshape_requires_contiguous` |
-| TC-DMA-017 | 变形 | `dma.reshape` 动态形状连续 | `shape` 由 SSA operand 提供，结果 stride 按默认连续布局生成 | 构造并校验 `dma.reshape` | verifier 通过 | `test_dma_reshape_allows_dynamic_shape_operands` |
+| TC-DMA-017 | 变形 | `dma.reshape` 动态形状连续 | `shape` 由 SSA operand 提供，符号维度默认 stride 规则（如 `N`/`M*N`/`?`）生效 | 构造并校验 `dma.reshape` | verifier 通过 | `test_dma_reshape_allows_dynamic_shape_operands` |
 | TC-DMA-018 | 变形 | `dma.reshape` 元素总数不一致 | `shape` 由 SSA operand 提供，且与 `source` 可判定的元素总数不一致 | 构造并校验 `dma.reshape` | verifier 报错 | `test_dma_reshape_numel_mismatch` |
 | TC-DMA-019 | 视图 | `dma.view` 动态布局输入 | `shape/stride` 由 SSA operand 提供，结果 rank 匹配 | 构造并校验 `dma.view` | verifier 通过 | `test_dma_view_dynamic_layout_operands_valid` |
-| TC-DMA-020 | 分配 | `dma.alloc` 动态形状输入 | `dynamic_shape` 由 SSA operand 提供，长度与 rank 一致，结果 stride 走默认连续布局 | 构造并校验 `dma.alloc` | verifier 通过 | `test_dma_alloc_dynamic_shape_operands_valid` |
+| TC-DMA-020 | 分配 | `dma.alloc` 动态形状输入 | `dynamic_shape` 由 SSA operand 提供，长度与 rank 一致，符号维度默认 stride 规则（如 `N`/`M*N`/`?`）生效 | 构造并校验 `dma.alloc` | verifier 通过 | `test_dma_alloc_dynamic_shape_operands_valid` |
 | TC-DMA-021 | 解析/打印 | 动态 shape round-trip | 包含 `dma.alloc/view/load/store/slice/deslice/reshape/cast` 的 SSA index operand 文本 | parse/print | 与输入文本一致 | `test_dma_dynamic_shape_parse_print_round_trip` |
