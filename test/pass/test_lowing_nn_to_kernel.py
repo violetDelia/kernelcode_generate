@@ -282,7 +282,6 @@ def test_lower_eq_to_kernel() -> None:
         lambda block: [NnEqOp(block.args[0], block.args[1], result_type, space)],
     )
     LowerNnToKernelPass().run(module)
-
     ops = _collect_ops(block)
     assert any(isinstance(op, KernelEqOp) for op in ops)
 
