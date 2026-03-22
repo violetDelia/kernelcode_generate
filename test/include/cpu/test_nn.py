@@ -10,6 +10,7 @@
 - 当前覆盖率: `N/A`。该链路的功能实现为 C++ 头文件，当前任务不使用 `pytest-cov` 直接统计覆盖率。
 - 达标判定: C++ 实现按规则豁免 `95%` 覆盖率达标线。
 - 当前以 `INC-NN-001..012` 对应测试作为覆盖基线。
+- 最近一次测试核对: `2026-03-22 19:31:12 +0800`，本次执行 `pytest -q test/include/cpu/test_memory.py test/include/cpu/test_nn.py`，结果为 `16 passed`。
 
 覆盖率命令:
 - N/A（C++ 头文件实现，当前任务不使用 `pytest-cov` 统计覆盖率）
@@ -93,9 +94,9 @@ def _compile_and_run(source: str) -> None:
 # INC-NN-001
 # 创建者: 小李飞刀
 # 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 12:40:20 +0800
-# 最近一次运行成功时间: 2026-03-22 12:40:20 +0800
-# 功能说明: 验证逐元素加法输出正确。
+# 最近一次运行测试时间: 2026-03-22 19:31:12 +0800
+# 最近一次运行成功时间: 2026-03-22 19:31:12 +0800
+# 测试目的: 验证逐元素加法输出正确。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_add_success
 # 对应功能实现文件路径: include/cpu/Nn.h
 # 对应 spec 文件路径: spec/include/cpu/cpu.md
@@ -114,9 +115,9 @@ int main() {
     long long shape[2] = {2, 3};
     long long stride[2] = {3, 1};
 
-    cpu::Memory<float, 2> lhs(lhs_data, shape, stride);
-    cpu::Memory<float, 2> rhs(rhs_data, shape, stride);
-    cpu::Memory<float, 2> out(out_data, shape, stride);
+    cpu::Memory<float> lhs(lhs_data, 2, shape, stride);
+    cpu::Memory<float> rhs(rhs_data, 2, shape, stride);
+    cpu::Memory<float> out(out_data, 2, shape, stride);
 
     cpu::add(lhs, rhs, out);
 
@@ -132,9 +133,9 @@ int main() {
 # INC-NN-002
 # 创建者: 小李飞刀
 # 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 12:40:20 +0800
-# 最近一次运行成功时间: 2026-03-22 12:40:20 +0800
-# 功能说明: 验证逐元素比较输出 predicate 语义结果。
+# 最近一次运行测试时间: 2026-03-22 19:31:12 +0800
+# 最近一次运行成功时间: 2026-03-22 19:31:12 +0800
+# 测试目的: 验证逐元素比较输出 predicate 语义结果。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_compare_eq
 # 对应功能实现文件路径: include/cpu/Nn.h
 # 对应 spec 文件路径: spec/include/cpu/cpu.md
@@ -153,9 +154,9 @@ int main() {
     long long shape[2] = {2, 3};
     long long stride[2] = {3, 1};
 
-    cpu::Memory<float, 2> lhs(lhs_data, shape, stride);
-    cpu::Memory<float, 2> rhs(rhs_data, shape, stride);
-    cpu::Memory<int, 2> out(out_data, shape, stride);
+    cpu::Memory<float> lhs(lhs_data, 2, shape, stride);
+    cpu::Memory<float> rhs(rhs_data, 2, shape, stride);
+    cpu::Memory<int> out(out_data, 2, shape, stride);
 
     cpu::eq(lhs, rhs, out);
 
@@ -174,9 +175,9 @@ int main() {
 # INC-NN-003
 # 创建者: 小李飞刀
 # 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 12:40:20 +0800
-# 最近一次运行成功时间: 2026-03-22 12:40:20 +0800
-# 功能说明: 验证 broadcast 支持 singleton 扩张。
+# 最近一次运行测试时间: 2026-03-22 19:31:12 +0800
+# 最近一次运行成功时间: 2026-03-22 19:31:12 +0800
+# 测试目的: 验证 broadcast 支持 singleton 扩张。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_broadcast_success
 # 对应功能实现文件路径: include/cpu/Nn.h
 # 对应 spec 文件路径: spec/include/cpu/cpu.md
@@ -196,8 +197,8 @@ int main() {
     long long in_stride[2] = {4, 1};
     long long out_stride[2] = {4, 1};
 
-    cpu::Memory<float, 2> input(in_data, in_shape, in_stride);
-    cpu::Memory<float, 2> out(out_data, out_shape, out_stride);
+    cpu::Memory<float> input(in_data, 2, in_shape, in_stride);
+    cpu::Memory<float> out(out_data, 2, out_shape, out_stride);
 
     cpu::broadcast(input, out);
 
@@ -217,9 +218,9 @@ int main() {
 # INC-NN-004
 # 创建者: 小李飞刀
 # 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 12:40:20 +0800
-# 最近一次运行成功时间: 2026-03-22 12:40:20 +0800
-# 功能说明: 验证 broadcast 支持前置维插入。
+# 最近一次运行测试时间: 2026-03-22 19:31:12 +0800
+# 最近一次运行成功时间: 2026-03-22 19:31:12 +0800
+# 测试目的: 验证 broadcast 支持前置维插入。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_broadcast_prepend_dim
 # 对应功能实现文件路径: include/cpu/Nn.h
 # 对应 spec 文件路径: spec/include/cpu/cpu.md
@@ -239,8 +240,8 @@ int main() {
     long long in_stride[1] = {1};
     long long out_stride[2] = {4, 1};
 
-    cpu::Memory<float, 1> input(in_data, in_shape, in_stride);
-    cpu::Memory<float, 2> out(out_data, out_shape, out_stride);
+    cpu::Memory<float> input(in_data, 1, in_shape, in_stride);
+    cpu::Memory<float> out(out_data, 2, out_shape, out_stride);
 
     cpu::broadcast(input, out);
 
@@ -260,9 +261,9 @@ int main() {
 # INC-NN-005
 # 创建者: 小李飞刀
 # 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 12:40:20 +0800
-# 最近一次运行成功时间: 2026-03-22 12:40:20 +0800
-# 功能说明: 验证逐元素乘法输出正确。
+# 最近一次运行测试时间: 2026-03-22 19:31:12 +0800
+# 最近一次运行成功时间: 2026-03-22 19:31:12 +0800
+# 测试目的: 验证逐元素乘法输出正确。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_mul_success
 # 对应功能实现文件路径: include/cpu/Nn.h
 # 对应 spec 文件路径: spec/include/cpu/cpu.md
@@ -281,9 +282,9 @@ int main() {
     long long shape[2] = {2, 3};
     long long stride[2] = {3, 1};
 
-    cpu::Memory<int, 2> lhs(lhs_data, shape, stride);
-    cpu::Memory<int, 2> rhs(rhs_data, shape, stride);
-    cpu::Memory<int, 2> out(out_data, shape, stride);
+    cpu::Memory<int> lhs(lhs_data, 2, shape, stride);
+    cpu::Memory<int> rhs(rhs_data, 2, shape, stride);
+    cpu::Memory<int> out(out_data, 2, shape, stride);
 
     cpu::mul(lhs, rhs, out);
 
@@ -299,9 +300,9 @@ int main() {
 # INC-NN-006
 # 创建者: 金铲铲大作战
 # 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 12:40:20 +0800
-# 最近一次运行成功时间: 2026-03-22 12:40:20 +0800
-# 功能说明: 验证逐元素减法输出正确。
+# 最近一次运行测试时间: 2026-03-22 19:31:12 +0800
+# 最近一次运行成功时间: 2026-03-22 19:31:12 +0800
+# 测试目的: 验证逐元素减法输出正确。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_sub_success
 # 对应功能实现文件路径: include/cpu/Nn.h
 # 对应 spec 文件路径: spec/include/cpu/cpu.md
@@ -320,9 +321,9 @@ int main() {
     long long shape[1] = {4};
     long long stride[1] = {1};
 
-    cpu::Memory<int, 1> lhs(lhs_data, shape, stride);
-    cpu::Memory<int, 1> rhs(rhs_data, shape, stride);
-    cpu::Memory<int, 1> out(out_data, shape, stride);
+    cpu::Memory<int> lhs(lhs_data, 1, shape, stride);
+    cpu::Memory<int> rhs(rhs_data, 1, shape, stride);
+    cpu::Memory<int> out(out_data, 1, shape, stride);
 
     cpu::sub(lhs, rhs, out);
 
@@ -338,9 +339,9 @@ int main() {
 # INC-NN-007
 # 创建者: 金铲铲大作战
 # 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 12:40:20 +0800
-# 最近一次运行成功时间: 2026-03-22 12:40:20 +0800
-# 功能说明: 验证逐元素除法输出正确。
+# 最近一次运行测试时间: 2026-03-22 19:31:12 +0800
+# 最近一次运行成功时间: 2026-03-22 19:31:12 +0800
+# 测试目的: 验证逐元素除法输出正确。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_truediv_success
 # 对应功能实现文件路径: include/cpu/Nn.h
 # 对应 spec 文件路径: spec/include/cpu/cpu.md
@@ -359,9 +360,9 @@ int main() {
     long long shape[1] = {4};
     long long stride[1] = {1};
 
-    cpu::Memory<float, 1> lhs(lhs_data, shape, stride);
-    cpu::Memory<float, 1> rhs(rhs_data, shape, stride);
-    cpu::Memory<float, 1> out(out_data, shape, stride);
+    cpu::Memory<float> lhs(lhs_data, 1, shape, stride);
+    cpu::Memory<float> rhs(rhs_data, 1, shape, stride);
+    cpu::Memory<float> out(out_data, 1, shape, stride);
 
     cpu::truediv(lhs, rhs, out);
 
@@ -377,9 +378,9 @@ int main() {
 # INC-NN-008
 # 创建者: 金铲铲大作战
 # 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 12:40:20 +0800
-# 最近一次运行成功时间: 2026-03-22 12:40:20 +0800
-# 功能说明: 验证逐元素不等比较输出 predicate 语义结果。
+# 最近一次运行测试时间: 2026-03-22 19:31:12 +0800
+# 最近一次运行成功时间: 2026-03-22 19:31:12 +0800
+# 测试目的: 验证逐元素不等比较输出 predicate 语义结果。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_compare_ne
 # 对应功能实现文件路径: include/cpu/Nn.h
 # 对应 spec 文件路径: spec/include/cpu/cpu.md
@@ -398,9 +399,9 @@ int main() {
     long long shape[1] = {4};
     long long stride[1] = {1};
 
-    cpu::Memory<float, 1> lhs(lhs_data, shape, stride);
-    cpu::Memory<float, 1> rhs(rhs_data, shape, stride);
-    cpu::Memory<int, 1> out(out_data, shape, stride);
+    cpu::Memory<float> lhs(lhs_data, 1, shape, stride);
+    cpu::Memory<float> rhs(rhs_data, 1, shape, stride);
+    cpu::Memory<int> out(out_data, 1, shape, stride);
 
     cpu::ne(lhs, rhs, out);
 
@@ -416,9 +417,9 @@ int main() {
 # INC-NN-009
 # 创建者: 金铲铲大作战
 # 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 12:40:20 +0800
-# 最近一次运行成功时间: 2026-03-22 12:40:20 +0800
-# 功能说明: 验证逐元素小于比较输出 predicate 语义结果。
+# 最近一次运行测试时间: 2026-03-22 19:31:12 +0800
+# 最近一次运行成功时间: 2026-03-22 19:31:12 +0800
+# 测试目的: 验证逐元素小于比较输出 predicate 语义结果。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_compare_lt
 # 对应功能实现文件路径: include/cpu/Nn.h
 # 对应 spec 文件路径: spec/include/cpu/cpu.md
@@ -437,9 +438,9 @@ int main() {
     long long shape[1] = {3};
     long long stride[1] = {1};
 
-    cpu::Memory<float, 1> lhs(lhs_data, shape, stride);
-    cpu::Memory<float, 1> rhs(rhs_data, shape, stride);
-    cpu::Memory<int, 1> out(out_data, shape, stride);
+    cpu::Memory<float> lhs(lhs_data, 1, shape, stride);
+    cpu::Memory<float> rhs(rhs_data, 1, shape, stride);
+    cpu::Memory<int> out(out_data, 1, shape, stride);
 
     cpu::lt(lhs, rhs, out);
 
@@ -455,9 +456,9 @@ int main() {
 # INC-NN-010
 # 创建者: 金铲铲大作战
 # 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 12:40:20 +0800
-# 最近一次运行成功时间: 2026-03-22 12:40:20 +0800
-# 功能说明: 验证逐元素小于等于比较输出 predicate 语义结果。
+# 最近一次运行测试时间: 2026-03-22 19:31:12 +0800
+# 最近一次运行成功时间: 2026-03-22 19:31:12 +0800
+# 测试目的: 验证逐元素小于等于比较输出 predicate 语义结果。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_compare_le
 # 对应功能实现文件路径: include/cpu/Nn.h
 # 对应 spec 文件路径: spec/include/cpu/cpu.md
@@ -476,9 +477,9 @@ int main() {
     long long shape[1] = {3};
     long long stride[1] = {1};
 
-    cpu::Memory<float, 1> lhs(lhs_data, shape, stride);
-    cpu::Memory<float, 1> rhs(rhs_data, shape, stride);
-    cpu::Memory<int, 1> out(out_data, shape, stride);
+    cpu::Memory<float> lhs(lhs_data, 1, shape, stride);
+    cpu::Memory<float> rhs(rhs_data, 1, shape, stride);
+    cpu::Memory<int> out(out_data, 1, shape, stride);
 
     cpu::le(lhs, rhs, out);
 
@@ -494,9 +495,9 @@ int main() {
 # INC-NN-011
 # 创建者: 金铲铲大作战
 # 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 12:40:20 +0800
-# 最近一次运行成功时间: 2026-03-22 12:40:20 +0800
-# 功能说明: 验证逐元素大于比较输出 predicate 语义结果。
+# 最近一次运行测试时间: 2026-03-22 19:31:12 +0800
+# 最近一次运行成功时间: 2026-03-22 19:31:12 +0800
+# 测试目的: 验证逐元素大于比较输出 predicate 语义结果。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_compare_gt
 # 对应功能实现文件路径: include/cpu/Nn.h
 # 对应 spec 文件路径: spec/include/cpu/cpu.md
@@ -515,9 +516,9 @@ int main() {
     long long shape[1] = {3};
     long long stride[1] = {1};
 
-    cpu::Memory<float, 1> lhs(lhs_data, shape, stride);
-    cpu::Memory<float, 1> rhs(rhs_data, shape, stride);
-    cpu::Memory<int, 1> out(out_data, shape, stride);
+    cpu::Memory<float> lhs(lhs_data, 1, shape, stride);
+    cpu::Memory<float> rhs(rhs_data, 1, shape, stride);
+    cpu::Memory<int> out(out_data, 1, shape, stride);
 
     cpu::gt(lhs, rhs, out);
 
@@ -533,9 +534,9 @@ int main() {
 # INC-NN-012
 # 创建者: 金铲铲大作战
 # 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 12:40:20 +0800
-# 最近一次运行成功时间: 2026-03-22 12:40:20 +0800
-# 功能说明: 验证逐元素大于等于比较输出 predicate 语义结果。
+# 最近一次运行测试时间: 2026-03-22 19:31:12 +0800
+# 最近一次运行成功时间: 2026-03-22 19:31:12 +0800
+# 测试目的: 验证逐元素大于等于比较输出 predicate 语义结果。
 # 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_compare_ge
 # 对应功能实现文件路径: include/cpu/Nn.h
 # 对应 spec 文件路径: spec/include/cpu/cpu.md
@@ -554,9 +555,9 @@ int main() {
     long long shape[1] = {3};
     long long stride[1] = {1};
 
-    cpu::Memory<float, 1> lhs(lhs_data, shape, stride);
-    cpu::Memory<float, 1> rhs(rhs_data, shape, stride);
-    cpu::Memory<int, 1> out(out_data, shape, stride);
+    cpu::Memory<float> lhs(lhs_data, 1, shape, stride);
+    cpu::Memory<float> rhs(rhs_data, 1, shape, stride);
+    cpu::Memory<int> out(out_data, 1, shape, stride);
 
     cpu::ge(lhs, rhs, out);
 

@@ -778,19 +778,37 @@ cpu::broadcast(input, out);
   - CPU-MEM-003：`element_count/linear_offset` 语义。
   - CPU-MEM-004：`at/is_contiguous` 语义。
   - CPU-MEM-005：头文件不依赖标准库即可编译。
+  - CPU-MEM-006：`MAX_DIM=8` 下运行期 `rank` 构造与索引访问。
+  - CPU-MEM-007：`rank > MAX_DIM` 违反前置条件时显式失败。
   - INC-NN-001：逐元素加法输出。
   - INC-NN-002：逐元素比较输出 predicate。
   - INC-NN-003：broadcast 单例扩张。
   - INC-NN-004：broadcast 前置维插入。
   - INC-NN-005：逐元素乘法输出。
+  - INC-NN-006：逐元素减法输出。
+  - INC-NN-007：逐元素除法输出。
+  - INC-NN-008：逐元素不等比较输出。
+  - INC-NN-009：逐元素小于比较输出。
+  - INC-NN-010：逐元素小于等于比较输出。
+  - INC-NN-011：逐元素大于比较输出。
+  - INC-NN-012：逐元素大于等于比较输出。
 - 功能与用例清单：
   - CPU-MEM-001 -> `test/include/cpu/test_memory.py::test_cpu_memory_header_compiles_and_runs`
   - CPU-MEM-002 -> `test/include/cpu/test_memory.py::test_cpu_memory_header_compiles_and_runs`
   - CPU-MEM-003 -> `test/include/cpu/test_memory.py::test_cpu_memory_header_compiles_and_runs`
   - CPU-MEM-004 -> `test/include/cpu/test_memory.py::test_cpu_memory_header_compiles_and_runs`
   - CPU-MEM-005 -> `test/include/cpu/test_memory.py::test_cpu_memory_header_without_std_headers`
+  - CPU-MEM-006 -> `test/include/cpu/test_memory.py::test_cpu_memory_runtime_rank_max_dim`
+  - CPU-MEM-007 -> `test/include/cpu/test_memory.py::test_cpu_memory_runtime_rank_over_max_dim_fails`
   - INC-NN-001 -> `test/include/cpu/test_nn.py::test_cpu_nn_add_success`
   - INC-NN-002 -> `test/include/cpu/test_nn.py::test_cpu_nn_compare_eq`
   - INC-NN-003 -> `test/include/cpu/test_nn.py::test_cpu_nn_broadcast_success`
   - INC-NN-004 -> `test/include/cpu/test_nn.py::test_cpu_nn_broadcast_prepend_dim`
   - INC-NN-005 -> `test/include/cpu/test_nn.py::test_cpu_nn_mul_success`
+  - INC-NN-006 -> `test/include/cpu/test_nn.py::test_cpu_nn_sub_success`
+  - INC-NN-007 -> `test/include/cpu/test_nn.py::test_cpu_nn_truediv_success`
+  - INC-NN-008 -> `test/include/cpu/test_nn.py::test_cpu_nn_compare_ne`
+  - INC-NN-009 -> `test/include/cpu/test_nn.py::test_cpu_nn_compare_lt`
+  - INC-NN-010 -> `test/include/cpu/test_nn.py::test_cpu_nn_compare_le`
+  - INC-NN-011 -> `test/include/cpu/test_nn.py::test_cpu_nn_compare_gt`
+  - INC-NN-012 -> `test/include/cpu/test_nn.py::test_cpu_nn_compare_ge`

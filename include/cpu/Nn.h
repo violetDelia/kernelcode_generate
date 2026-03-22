@@ -24,17 +24,15 @@ namespace cpu {
 
 namespace detail {
 
-template <unsigned long long Rank>
-void init_indices(long long (&indices)[Rank]) {
-    for (unsigned long long i = 0; i < Rank; ++i) {
+inline void init_indices(unsigned long long rank, long long* indices) {
+    for (unsigned long long i = 0; i < rank; ++i) {
         indices[i] = 0;
     }
 }
 
-template <unsigned long long Rank>
-void advance_indices(const long long* shape, long long (&indices)[Rank]) {
-    for (unsigned long long reverse_index = 0; reverse_index < Rank; ++reverse_index) {
-        const unsigned long long i = Rank - 1 - reverse_index;
+inline void advance_indices(unsigned long long rank, const long long* shape, long long* indices) {
+    for (unsigned long long reverse_index = 0; reverse_index < rank; ++reverse_index) {
+        const unsigned long long i = rank - 1 - reverse_index;
         indices[i] += 1;
         if (indices[i] < shape[i]) {
             return;
@@ -43,26 +41,26 @@ void advance_indices(const long long* shape, long long (&indices)[Rank]) {
     }
 }
 
-template <typename T, unsigned long long Rank, typename Op>
-void apply_binary(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<T, Rank>& out, Op op) {
-    long long indices[Rank];
-    init_indices(indices);
+template <typename T, typename Op>
+void apply_binary(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out, Op op) {
+    long long indices[MAX_DIM];
+    init_indices(out.rank(), indices);
     const long long total = out.element_count();
     for (long long linear = 0; linear < total; ++linear) {
         out.at(indices) = op(lhs.at(indices), rhs.at(indices));
-        advance_indices(out.shape(), indices);
+        advance_indices(out.rank(), out.shape(), indices);
     }
 }
 
-template <typename T, typename PredT, unsigned long long Rank, typename Op>
-void apply_compare(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<PredT, Rank>& out, Op op) {
-    long long indices[Rank];
-    init_indices(indices);
+template <typename T, typename PredT, typename Op>
+void apply_compare(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out, Op op) {
+    long long indices[MAX_DIM];
+    init_indices(out.rank(), indices);
     const long long total = out.element_count();
     for (long long linear = 0; linear < total; ++linear) {
         out.at(indices) = op(lhs.at(indices), rhs.at(indices)) ? static_cast<PredT>(1)
                                                                : static_cast<PredT>(0);
-        advance_indices(out.shape(), indices);
+        advance_indices(out.rank(), out.shape(), indices);
     }
 }
 
@@ -83,8 +81,8 @@ void apply_compare(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memor
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T, unsigned long long Rank>
-void add(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<T, Rank>& out) {
+template <typename T>
+void add(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out) {
     detail::apply_binary(lhs, rhs, out, [](T a, T b) { return a + b; });
 }
 
@@ -103,8 +101,8 @@ void add(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<T, Rank>
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T, unsigned long long Rank>
-void sub(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<T, Rank>& out) {
+template <typename T>
+void sub(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out) {
     detail::apply_binary(lhs, rhs, out, [](T a, T b) { return a - b; });
 }
 
@@ -123,8 +121,8 @@ void sub(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<T, Rank>
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T, unsigned long long Rank>
-void mul(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<T, Rank>& out) {
+template <typename T>
+void mul(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out) {
     detail::apply_binary(lhs, rhs, out, [](T a, T b) { return a * b; });
 }
 
@@ -143,8 +141,8 @@ void mul(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<T, Rank>
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T, unsigned long long Rank>
-void truediv(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<T, Rank>& out) {
+template <typename T>
+void truediv(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out) {
     detail::apply_binary(lhs, rhs, out, [](T a, T b) { return a / b; });
 }
 
@@ -163,8 +161,8 @@ void truediv(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<T, R
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T, typename PredT, unsigned long long Rank>
-void eq(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<PredT, Rank>& out) {
+template <typename T, typename PredT>
+void eq(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out) {
     detail::apply_compare(lhs, rhs, out, [](T a, T b) { return a == b; });
 }
 
@@ -183,8 +181,8 @@ void eq(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<PredT, Ra
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T, typename PredT, unsigned long long Rank>
-void ne(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<PredT, Rank>& out) {
+template <typename T, typename PredT>
+void ne(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out) {
     detail::apply_compare(lhs, rhs, out, [](T a, T b) { return a != b; });
 }
 
@@ -203,8 +201,8 @@ void ne(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<PredT, Ra
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T, typename PredT, unsigned long long Rank>
-void lt(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<PredT, Rank>& out) {
+template <typename T, typename PredT>
+void lt(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out) {
     detail::apply_compare(lhs, rhs, out, [](T a, T b) { return a < b; });
 }
 
@@ -223,8 +221,8 @@ void lt(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<PredT, Ra
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T, typename PredT, unsigned long long Rank>
-void le(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<PredT, Rank>& out) {
+template <typename T, typename PredT>
+void le(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out) {
     detail::apply_compare(lhs, rhs, out, [](T a, T b) { return a <= b; });
 }
 
@@ -243,8 +241,8 @@ void le(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<PredT, Ra
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T, typename PredT, unsigned long long Rank>
-void gt(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<PredT, Rank>& out) {
+template <typename T, typename PredT>
+void gt(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out) {
     detail::apply_compare(lhs, rhs, out, [](T a, T b) { return a > b; });
 }
 
@@ -263,8 +261,8 @@ void gt(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<PredT, Ra
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T, typename PredT, unsigned long long Rank>
-void ge(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<PredT, Rank>& out) {
+template <typename T, typename PredT>
+void ge(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out) {
     detail::apply_compare(lhs, rhs, out, [](T a, T b) { return a >= b; });
 }
 
@@ -283,17 +281,17 @@ void ge(const Memory<T, Rank>& lhs, const Memory<T, Rank>& rhs, Memory<PredT, Ra
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T, unsigned long long InRank, unsigned long long OutRank>
-void broadcast(const Memory<T, InRank>& input, Memory<T, OutRank>& out) {
-    long long out_indices[OutRank];
-    detail::init_indices(out_indices);
+template <typename T>
+void broadcast(const Memory<T>& input, Memory<T>& out) {
+    long long out_indices[MAX_DIM];
+    detail::init_indices(out.rank(), out_indices);
     const long long total = out.element_count();
-    const unsigned long long leading = OutRank - InRank;
-    long long in_indices[InRank];
-    detail::init_indices(in_indices);
+    const unsigned long long leading = out.rank() - input.rank();
+    long long in_indices[MAX_DIM];
+    detail::init_indices(input.rank(), in_indices);
 
     for (long long linear = 0; linear < total; ++linear) {
-        for (unsigned long long i = 0; i < InRank; ++i) {
+        for (unsigned long long i = 0; i < input.rank(); ++i) {
             const unsigned long long out_dim = leading + i;
             if (input.shape()[i] == 1) {
                 in_indices[i] = 0;
@@ -302,7 +300,7 @@ void broadcast(const Memory<T, InRank>& input, Memory<T, OutRank>& out) {
             }
         }
         out.at(out_indices) = input.at(in_indices);
-        detail::advance_indices(out.shape(), out_indices);
+        detail::advance_indices(out.rank(), out.shape(), out_indices);
     }
 }
 
