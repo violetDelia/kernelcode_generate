@@ -38,7 +38,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.dma import DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp
 from kernel_gen.dialect.nn import NnAddOp, NnBroadcastOp, NnEqOp, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolValueType
+from kernel_gen.dialect.symbol import SymbolAddOp, SymbolValueType
 from kernel_gen.dsl.ast import (
     AstParseError,
     BlockAST,
@@ -577,6 +577,28 @@ def test_symbol_scalar_function_uses_symbol_value_type_signature() -> None:
     outputs = list(func_op.function_type.outputs)
     assert inputs == [SymbolValueType.from_expr("expr")]
     assert outputs == [SymbolValueType.from_expr("expr")]
+
+
+# MGEN-018
+# 创建者: OpenAI
+# 最后一次更改: OpenAI
+# 最近一次运行测试时间: 2026-03-22 23:37:00 +0800
+# 最近一次运行成功时间: 2026-03-22 23:37:00 +0800
+# 功能说明: 验证纯 symbol 标量加法 lowering 为 symbol.add。
+# 测试目的: 验证 expectation/dsl/symbol.py 对应场景不会退回 nn.add 或 builtin 整数算术。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_symbol_scalar_function_lowers_add_to_symbol_add
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_symbol_scalar_function_lowers_add_to_symbol_add() -> None:
+    def only_symbol(s: int) -> int:
+        return s + s
+
+    func_op = build_func_op(only_symbol)
+    ops = list(func_op.body.blocks[0].ops)
+    symbol_add_ops = [op for op in ops if isinstance(op, SymbolAddOp)]
+    assert len(symbol_add_ops) == 1
+    assert "symbol.add" in _print_module(ModuleOp([func_op]))
 
 
 # AST-005

@@ -52,6 +52,7 @@ from kernel_gen.dialect.nn import (
     NnSubOp,
     NnTrueDivOp,
 )
+from kernel_gen.dialect.symbol import SymbolAddOp, SymbolValueType
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.type import NumericType
 
@@ -532,6 +533,14 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
     if isinstance(expr, BinaryExprAST):
         lhs_type = _infer_expr_type(expr.lhs, type_map)
         rhs_type = _infer_expr_type(expr.rhs, type_map)
+        if isinstance(lhs_type, SymbolValueType) and isinstance(rhs_type, SymbolValueType):
+            if expr.op != "add":
+                raise _LoweringError("Unsupported symbol binary op", location=expr.location)
+            lhs_expr = lhs_type.expr.expr.data
+            rhs_expr = rhs_type.expr.expr.data
+            result_type = SymbolValueType.from_expr(f"{lhs_expr} + {rhs_expr}")
+            type_map[expr_key] = result_type
+            return result_type
         if not isinstance(lhs_type, NnMemoryType) or not isinstance(rhs_type, NnMemoryType):
             raise _LoweringError("Binary op operands must have nn.memory type", location=expr.location)
         if lhs_type == rhs_type:
@@ -625,6 +634,18 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     if isinstance(expr, BinaryExprAST):
         lhs = _lower_expr(expr.lhs, ctx)
         rhs = _lower_expr(expr.rhs, ctx)
+        lhs_attr = getattr(lhs, "type", None)
+        rhs_attr = getattr(rhs, "type", None)
+        if isinstance(lhs_attr, SymbolValueType) and isinstance(rhs_attr, SymbolValueType):
+            if expr.op != "add":
+                raise _LoweringError("Unsupported symbol binary op", location=expr.location)
+            result_type = _infer_expr_type(expr, ctx.types)
+            if not isinstance(result_type, SymbolValueType):
+                raise _LoweringError("Symbol binary op result must be !symbol.int", location=expr.location)
+            op = SymbolAddOp(lhs, rhs, result_type)
+            ctx.builder.add_op(op)
+            ctx._set_cache(expr_key, op.result)
+            return op.result
         lhs_type = _expect_memory_value(lhs, expr.location)
         rhs_type = _expect_memory_value(rhs, expr.location)
         if lhs_type != rhs_type:

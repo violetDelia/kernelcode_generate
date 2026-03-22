@@ -115,6 +115,7 @@ func_op = build_func_op_from_ast(func_ast)
   - 通过测试辅助封装验证 `func.func` 的结构输出（不改变本模块的边界）。
   - 覆盖无返回 `for` 循环与 `slice/deslice` 的生成能力。
   - 验证 `expectation/dsl/symbol.py` 对应的纯 symbol 函数场景会生成 `!symbol.int<"...">` 输入与 `!symbol.int<"...">` 返回。
+  - 验证纯 symbol 标量加法在 lowering 后生成 `symbol.add`，不退回 builtin 算术或其他 dialect op。
 - 功能与用例清单：
   - MGEN-001：`build_func_op(...)` 返回 `func.func`。（`test_build_func_op_returns_func_op`）
   - MGEN-002：参数顺序与 AST 一致。（`test_build_func_op_from_ast_preserves_arg_order`）
@@ -133,3 +134,4 @@ func_op = build_func_op_from_ast(func_ast)
   - MGEN-015：LoopRange + slice/deslice + 无 return 场景生成 `scf.for + dma.slice/dma.deslice`。（`test_build_func_op_supports_symbolic_for_loop_dma_without_return`）
   - MGEN-016：`expectation/dsl/symbol.py` 的纯 symbol 函数参数 lowering 为 `func.func` 的 `!symbol.int<"...">` 输入。（`test_symbol_scalar_function_uses_symbol_value_type_signature`、`expectation/dsl/symbol.py`）
   - MGEN-017：`expectation/dsl/symbol.py` 的纯 symbol 函数返回 lowering 为 `func.func` 的 `!symbol.int<"...">` 输出。（`test_symbol_scalar_function_uses_symbol_value_type_signature`、`expectation/dsl/symbol.py`）
+  - MGEN-018：纯 symbol 标量加法 lowering 为 `symbol.add`。（`test_symbol_scalar_function_lowers_add_to_symbol_add`、`expectation/dsl/symbol.py`）
