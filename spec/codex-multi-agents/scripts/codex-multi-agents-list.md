@@ -217,10 +217,11 @@ codex-multi-agents-list.sh -compact -file "agents-lists.md" -name "xiaoming"
 
 ### 测试目标
 
-- 验证脚本 6 个核心功能：读取、查询、添加、修改、删除、初始化。
+- 验证脚本 7 个核心功能：读取、查询、添加、修改、删除、初始化、压缩上下文。
 - 验证返回码约定：`0/1/2/3/4/5` 行为与文档一致。
 - 验证字段约束：`姓名` 不可改、`姓名` 唯一、字段名合法。
 - 验证并发行为：写锁冲突时返回 `RC=4`。
+- 验证 `-compact` 场景下的 tmux 压缩命令发送、回报消息发送与缺失会话错误处理。
 
 ### 测试范围
 
@@ -230,6 +231,7 @@ codex-multi-agents-list.sh -compact -file "agents-lists.md" -name "xiaoming"
 - 并发锁（`flock`）处理。
 - 写操作对目标名单文件本体的加锁行为。
 - `-init` 场景下的 tmux 会话校验与消息发送行为。
+- `-compact` 场景下的 tmux 会话校验、压缩命令发送与后续回报消息发送行为。
 
 ### 功能与用例清单
 
@@ -255,6 +257,8 @@ codex-multi-agents-list.sh -compact -file "agents-lists.md" -name "xiaoming"
 | TC-018 | 兼容性 | 历史行缺少新增尾列 | 行列数少于表头 | `-file <path> -status` | 返回码 `0`；自动补空并可读取 |
 | TC-019 | `-init` | 初始化消息发送成功 | 名单存在目标人员；`tmux` 会话存在 | `-file <path> -init -name 小明` | 返回码 `0`；执行 `tmux send-keys`；stdout 包含 `OK: init 小明` |
 | TC-020 | `-init` | 初始化时目标会话不存在 | 名单存在目标人员；会话不存在 | `-file <path> -init -name 小明` | 返回码 `3`；stderr 包含 `target session not found` |
+| TC-021 | `-compact` | 压缩命令与回报消息发送成功 | 名单存在目标人员；`tmux` 会话存在 | `-file <path> -compact -name 小明` | 返回码 `0`；先发送 `/compact`，再发送回报管理员消息，stdout 包含 `OK: compact 小明` |
+| TC-022 | `-compact` | 压缩时目标会话不存在 | 名单存在目标人员；会话不存在 | `-file <path> -compact -name 小明` | 返回码 `3`；stderr 包含 `target session not found` |
 
 ### 通过准则
 
@@ -284,3 +288,5 @@ codex-multi-agents-list.sh -compact -file "agents-lists.md" -name "xiaoming"
 - TC-018 -> `test_status_accepts_rows_missing_new_tail_column`
 - TC-019 -> `test_init_agent_sends_message_success`
 - TC-020 -> `test_init_agent_missing_session_returns_rc3`
+- TC-021 -> `test_compact_agent_sends_compact_and_report`
+- TC-022 -> `test_compact_agent_missing_session_returns_rc3`

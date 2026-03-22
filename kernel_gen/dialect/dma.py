@@ -18,9 +18,20 @@
 
 from __future__ import annotations
 
-from xdsl.dialects.builtin import ArrayAttr, IntAttr, StringAttr
+from collections.abc import Sequence
+
+from xdsl.dialects.arith import ConstantOp
+from xdsl.dialects.builtin import ArrayAttr, IndexType, IntAttr, IntegerAttr, StringAttr
 from xdsl.ir import Attribute, Dialect, Operation, SSAValue
-from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def, result_def
+from xdsl.irdl import (
+    AttrSizedOperandSegments,
+    IRDLOperation,
+    attr_def,
+    irdl_op_definition,
+    operand_def,
+    result_def,
+    var_operand_def,
+)
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
@@ -50,18 +61,18 @@ def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
     return value
 
 
-def _verify_index_list(value: Attribute, field_name: str, *, min_value: int) -> ArrayAttr[Attribute]:
-    """校验索引列表 attribute。
+def _operand_int_value(value: SSAValue) -> int | None:
+    """尝试从 index SSA operand 恢复整型常量值。
 
     创建者: 小李飞刀
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 允许 IntAttr 或非空 StringAttr。
-    - 对 IntAttr 施加最小值约束。
+    - 仅识别由 `arith.constant` 产生的 `IntegerAttr`。
+    - 其他 SSA operand 统一视为运行期值。
 
     使用示例:
-    - _verify_index_list(op.sizes, "sizes", min_value=1)
+    - _operand_int_value(op.sizes[0])
 
     关联文件:
     - spec: spec/dialect/dma.md
@@ -69,27 +80,50 @@ def _verify_index_list(value: Attribute, field_name: str, *, min_value: int) -> 
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
-    if not isinstance(value, ArrayAttr):
-        raise VerifyException(f"{field_name} must be an array")
-    for entry in value.data:
-        if isinstance(entry, IntAttr):
-            if entry.data < min_value:
-                raise VerifyException(f"{field_name} entries must be >= {min_value}")
-        elif isinstance(entry, StringAttr) and entry.data:
-            continue
-        else:
-            raise VerifyException(f"{field_name} entries must be IntAttr or StringAttr")
-    return value
+    owner = value.owner
+    if isinstance(owner, ConstantOp) and isinstance(owner.value, IntegerAttr):
+        return owner.value.value.data
+    return None
 
 
-def _verify_rank_match(list_attr: ArrayAttr[Attribute], rank: int, field_name: str) -> None:
-    """校验索引列表长度与 rank 一致。
+def _verify_index_operands(
+    values: Sequence[SSAValue], field_name: str, *, min_value: int
+) -> Sequence[SSAValue]:
+    """校验 index operand 列表。
 
     创建者: 小李飞刀
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 长度不匹配时抛出 verifier 错误。
+    - 确保所有 operand 类型为 `index`。
+    - 若 operand 可静态恢复为整型常量，则施加最小值约束。
+
+    使用示例:
+    - _verify_index_operands(op.sizes, "sizes", min_value=1)
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma_dialect.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    for value in values:
+        if not isinstance(value.type, IndexType):
+            raise VerifyException(f"{field_name} entries must be index")
+        static_value = _operand_int_value(value)
+        if static_value is not None and static_value < min_value:
+            raise VerifyException(f"{field_name} entries must be >= {min_value}")
+    return values
+
+
+def _verify_rank_match(values: Sequence[SSAValue], rank: int, field_name: str) -> None:
+    """校验 index operand 列表长度与 rank 一致。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 用于验证切片大小与 shape 的对应关系。
 
     使用示例:
     - _verify_rank_match(offsets, rank, "offsets")
@@ -100,21 +134,26 @@ def _verify_rank_match(list_attr: ArrayAttr[Attribute], rank: int, field_name: s
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
-    if len(list_attr.data) != rank:
+    if len(values) != rank:
         raise VerifyException(f"{field_name} length must match rank")
 
 
-def _verify_sizes_match_shape(sizes: ArrayAttr[Attribute], shape: ArrayAttr[Attribute], field_name: str) -> None:
-    """校验 sizes 与 shape 一致。
+def _verify_operands_match_layout(
+    values: Sequence[SSAValue],
+    layout: ArrayAttr[Attribute],
+    mismatch_message: str,
+) -> None:
+    """校验 operand 列表与类型中可静态判定的布局一致。
 
     创建者: 小李飞刀
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 用于验证切片大小与 shape 的对应关系。
+    - 若布局维度为 `IntAttr`，对应 operand 必须是相同值的 `arith.constant index`。
+    - 若布局维度为符号属性，则只要求存在 `index` SSA operand。
 
     使用示例:
-    - _verify_sizes_match_shape(sizes, source.shape, "source")
+    - _verify_operands_match_layout(op.sizes, result_type.shape, "shape must match sizes")
 
     关联文件:
     - spec: spec/dialect/dma.md
@@ -122,45 +161,25 @@ def _verify_sizes_match_shape(sizes: ArrayAttr[Attribute], shape: ArrayAttr[Attr
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
-    if sizes != shape:
-        raise VerifyException(f"{field_name} shape must match sizes")
+    for value, expected in zip(values, layout.data, strict=True):
+        if isinstance(expected, IntAttr):
+            static_value = _operand_int_value(value)
+            if static_value != expected.data:
+                raise VerifyException(mismatch_message)
 
 
-def _verify_unit_stride(strides: ArrayAttr[Attribute]) -> None:
-    """校验 stride 是否为全 1。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 当前阶段仅支持 stride 为 1 的切片语义。
-
-    使用示例:
-    - _verify_unit_stride(strides)
-
-    关联文件:
-    - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
-    - 功能实现: kernel_gen/dialect/dma.py
-    """
-
-    for entry in strides.data:
-        if not isinstance(entry, IntAttr) or entry.data != 1:
-            raise VerifyException("dma stride must be 1 in current implementation")
-
-
-def _verify_stride_list(value: Attribute, field_name: str) -> ArrayAttr[Attribute]:
-    """校验 stride 列表 attribute。
+def _verify_unit_stride_operands(strides: Sequence[SSAValue]) -> None:
+    """校验 stride operand 是否全为常量 1。
 
     创建者: OpenAI
     最后一次更改: OpenAI
 
     功能说明:
-    - 仅允许 `IntAttr(1)`，不接受 `StringAttr` 或其他 attribute。
-    - 与 spec 中 `strides` 仅支持 `IntAttr(1)` 的约束保持一致。
+    - 当前阶段仅支持单位步长语义。
+    - 每个 operand 都必须是值为 `1` 的 `arith.constant index`。
 
     使用示例:
-    - _verify_stride_list(op.strides, "strides")
+    - _verify_unit_stride_operands(op.strides)
 
     关联文件:
     - spec: spec/dialect/dma.md
@@ -168,12 +187,9 @@ def _verify_stride_list(value: Attribute, field_name: str) -> ArrayAttr[Attribut
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
-    if not isinstance(value, ArrayAttr):
-        raise VerifyException(f"{field_name} must be an array")
-    for entry in value.data:
-        if not isinstance(entry, IntAttr) or entry.data != 1:
-            raise VerifyException(f"{field_name} entries must be IntAttr(1)")
-    return value
+    for value in strides:
+        if _operand_int_value(value) != 1:
+            raise VerifyException("dma stride must be 1 in current implementation")
 
 
 def _maybe_numel(shape: ArrayAttr[Attribute]) -> int | None:
@@ -278,19 +294,26 @@ class DmaAllocOp(IRDLOperation):
 
     name = "dma.alloc"
 
+    dynamic_shape = var_operand_def(IndexType)
     result = result_def(NnMemoryType)
 
-    def __init__(self, result_type: NnMemoryType) -> None:
+    irdl_options = [AttrSizedOperandSegments(as_property=True)]
+
+    def __init__(
+        self,
+        dynamic_shape: Sequence[SSAValue],
+        result_type: NnMemoryType,
+    ) -> None:
         """初始化 dma.alloc。
 
         创建者: 金铲铲大作战
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 设置结果类型。
+        - 设置动态 shape operand 与结果类型。
 
         使用示例:
-        - DmaAllocOp(result_type)
+        - DmaAllocOp(dynamic_shape, result_type)
 
         关联文件:
         - spec: spec/dialect/dma.md
@@ -298,7 +321,7 @@ class DmaAllocOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
-        super().__init__(result_types=[result_type])
+        super().__init__(operands=[dynamic_shape], result_types=[result_type])
 
     def verify_(self) -> None:
         """校验 dma.alloc。
@@ -318,7 +341,10 @@ class DmaAllocOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
-        _verify_memory_type(self.result.type, "result")
+        result_type = _verify_memory_type(self.result.type, "result")
+        dynamic_shape = _verify_index_operands(self.dynamic_shape, "dynamic_shape", min_value=1)
+        _verify_rank_match(dynamic_shape, len(result_type.shape.data), "dynamic_shape")
+        _verify_operands_match_layout(dynamic_shape, result_type.shape, "dynamic_shape must match result shape")
 
 
 @irdl_op_definition
@@ -385,19 +411,20 @@ class DmaLoadOp(IRDLOperation):
     name = "dma.load"
 
     source = operand_def(NnMemoryType)
+    offsets = var_operand_def(IndexType)
+    sizes = var_operand_def(IndexType)
+    strides = var_operand_def(IndexType)
     result = result_def(NnMemoryType)
-
-    offsets = attr_def(ArrayAttr)
-    sizes = attr_def(ArrayAttr)
-    strides = attr_def(ArrayAttr)
     space = attr_def(NnMemorySpaceAttr)
+
+    irdl_options = [AttrSizedOperandSegments(as_property=True)]
 
     def __init__(
         self,
         source: SSAValue | Operation,
-        offsets: ArrayAttr[Attribute],
-        sizes: ArrayAttr[Attribute],
-        strides: ArrayAttr[Attribute],
+        offsets: Sequence[SSAValue],
+        sizes: Sequence[SSAValue],
+        strides: Sequence[SSAValue],
         result_type: NnMemoryType,
         space: NnMemorySpaceAttr,
     ) -> None:
@@ -419,14 +446,9 @@ class DmaLoadOp(IRDLOperation):
         """
 
         super().__init__(
-            operands=[source],
+            operands=[source, offsets, sizes, strides],
             result_types=[result_type],
-            attributes={
-                "offsets": offsets,
-                "sizes": sizes,
-                "strides": strides,
-                "space": space,
-            },
+            attributes={"space": space},
         )
 
     def verify_(self) -> None:
@@ -450,15 +472,15 @@ class DmaLoadOp(IRDLOperation):
 
         source_type = _verify_memory_type(self.source.type, "source")
         result_type = _verify_memory_type(self.result.type, "result")
-        offsets = _verify_index_list(self.offsets, "offsets", min_value=0)
-        sizes = _verify_index_list(self.sizes, "sizes", min_value=1)
-        strides = _verify_stride_list(self.strides, "strides")
+        offsets = _verify_index_operands(self.offsets, "offsets", min_value=0)
+        sizes = _verify_index_operands(self.sizes, "sizes", min_value=1)
+        strides = _verify_index_operands(self.strides, "strides", min_value=1)
         rank = len(source_type.shape.data)
         _verify_rank_match(offsets, rank, "offsets")
         _verify_rank_match(sizes, rank, "sizes")
         _verify_rank_match(strides, rank, "strides")
-        _verify_unit_stride(strides)
-        _verify_sizes_match_shape(sizes, result_type.shape, "result")
+        _verify_unit_stride_operands(strides)
+        _verify_operands_match_layout(sizes, result_type.shape, "shape must match sizes")
         if source_type.element_type != result_type.element_type:
             raise VerifyException("dma.load element_type mismatch")
         self.space.verify()
@@ -474,18 +496,19 @@ class DmaStoreOp(IRDLOperation):
 
     source = operand_def(NnMemoryType)
     target = operand_def(NnMemoryType)
+    offsets = var_operand_def(IndexType)
+    sizes = var_operand_def(IndexType)
+    strides = var_operand_def(IndexType)
 
-    offsets = attr_def(ArrayAttr)
-    sizes = attr_def(ArrayAttr)
-    strides = attr_def(ArrayAttr)
+    irdl_options = [AttrSizedOperandSegments(as_property=True)]
 
     def __init__(
         self,
         source: SSAValue | Operation,
         target: SSAValue | Operation,
-        offsets: ArrayAttr[Attribute],
-        sizes: ArrayAttr[Attribute],
-        strides: ArrayAttr[Attribute],
+        offsets: Sequence[SSAValue],
+        sizes: Sequence[SSAValue],
+        strides: Sequence[SSAValue],
     ) -> None:
         """初始化 dma.store。
 
@@ -504,14 +527,7 @@ class DmaStoreOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
-        super().__init__(
-            operands=[source, target],
-            attributes={
-                "offsets": offsets,
-                "sizes": sizes,
-                "strides": strides,
-            },
-        )
+        super().__init__(operands=[source, target, offsets, sizes, strides])
 
     def verify_(self) -> None:
         """校验 dma.store。
@@ -534,15 +550,15 @@ class DmaStoreOp(IRDLOperation):
 
         source_type = _verify_memory_type(self.source.type, "source")
         target_type = _verify_memory_type(self.target.type, "target")
-        offsets = _verify_index_list(self.offsets, "offsets", min_value=0)
-        sizes = _verify_index_list(self.sizes, "sizes", min_value=1)
-        strides = _verify_stride_list(self.strides, "strides")
+        offsets = _verify_index_operands(self.offsets, "offsets", min_value=0)
+        sizes = _verify_index_operands(self.sizes, "sizes", min_value=1)
+        strides = _verify_index_operands(self.strides, "strides", min_value=1)
         rank = len(target_type.shape.data)
         _verify_rank_match(offsets, rank, "offsets")
         _verify_rank_match(sizes, rank, "sizes")
         _verify_rank_match(strides, rank, "strides")
-        _verify_unit_stride(strides)
-        _verify_sizes_match_shape(sizes, source_type.shape, "source")
+        _verify_unit_stride_operands(strides)
+        _verify_operands_match_layout(sizes, source_type.shape, "source shape must match sizes")
         if source_type.element_type != target_type.element_type:
             raise VerifyException("dma.store element_type mismatch")
 
@@ -554,19 +570,20 @@ class DmaSliceOp(IRDLOperation):
     name = "dma.slice"
 
     source = operand_def(NnMemoryType)
+    offsets = var_operand_def(IndexType)
+    sizes = var_operand_def(IndexType)
+    strides = var_operand_def(IndexType)
     result = result_def(NnMemoryType)
-
-    offsets = attr_def(ArrayAttr)
-    sizes = attr_def(ArrayAttr)
-    strides = attr_def(ArrayAttr)
     space = attr_def(NnMemorySpaceAttr)
+
+    irdl_options = [AttrSizedOperandSegments(as_property=True)]
 
     def __init__(
         self,
         source: SSAValue | Operation,
-        offsets: ArrayAttr[Attribute],
-        sizes: ArrayAttr[Attribute],
-        strides: ArrayAttr[Attribute],
+        offsets: Sequence[SSAValue],
+        sizes: Sequence[SSAValue],
+        strides: Sequence[SSAValue],
         result_type: NnMemoryType,
         space: NnMemorySpaceAttr,
     ) -> None:
@@ -588,14 +605,9 @@ class DmaSliceOp(IRDLOperation):
         """
 
         super().__init__(
-            operands=[source],
+            operands=[source, offsets, sizes, strides],
             result_types=[result_type],
-            attributes={
-                "offsets": offsets,
-                "sizes": sizes,
-                "strides": strides,
-                "space": space,
-            },
+            attributes={"space": space},
         )
 
     def verify_(self) -> None:
@@ -620,15 +632,15 @@ class DmaSliceOp(IRDLOperation):
 
         source_type = _verify_memory_type(self.source.type, "source")
         result_type = _verify_memory_type(self.result.type, "result")
-        offsets = _verify_index_list(self.offsets, "offsets", min_value=0)
-        sizes = _verify_index_list(self.sizes, "sizes", min_value=1)
-        strides = _verify_stride_list(self.strides, "strides")
+        offsets = _verify_index_operands(self.offsets, "offsets", min_value=0)
+        sizes = _verify_index_operands(self.sizes, "sizes", min_value=1)
+        strides = _verify_index_operands(self.strides, "strides", min_value=1)
         rank = len(source_type.shape.data)
         _verify_rank_match(offsets, rank, "offsets")
         _verify_rank_match(sizes, rank, "sizes")
         _verify_rank_match(strides, rank, "strides")
-        _verify_unit_stride(strides)
-        _verify_sizes_match_shape(sizes, result_type.shape, "result")
+        _verify_unit_stride_operands(strides)
+        _verify_operands_match_layout(sizes, result_type.shape, "shape must match sizes")
         if source_type.element_type != result_type.element_type:
             raise VerifyException("dma.slice element_type mismatch")
         self.space.verify()
@@ -644,19 +656,20 @@ class DmaDesliceOp(IRDLOperation):
 
     source = operand_def(NnMemoryType)
     target = operand_def(NnMemoryType)
+    offsets = var_operand_def(IndexType)
+    sizes = var_operand_def(IndexType)
+    strides = var_operand_def(IndexType)
     result = result_def(NnMemoryType)
 
-    offsets = attr_def(ArrayAttr)
-    sizes = attr_def(ArrayAttr)
-    strides = attr_def(ArrayAttr)
+    irdl_options = [AttrSizedOperandSegments(as_property=True)]
 
     def __init__(
         self,
         source: SSAValue | Operation,
         target: SSAValue | Operation,
-        offsets: ArrayAttr[Attribute],
-        sizes: ArrayAttr[Attribute],
-        strides: ArrayAttr[Attribute],
+        offsets: Sequence[SSAValue],
+        sizes: Sequence[SSAValue],
+        strides: Sequence[SSAValue],
         result_type: NnMemoryType,
     ) -> None:
         """初始化 dma.deslice。
@@ -677,13 +690,8 @@ class DmaDesliceOp(IRDLOperation):
         """
 
         super().__init__(
-            operands=[source, target],
+            operands=[source, target, offsets, sizes, strides],
             result_types=[result_type],
-            attributes={
-                "offsets": offsets,
-                "sizes": sizes,
-                "strides": strides,
-            },
         )
 
     def verify_(self) -> None:
@@ -709,15 +717,15 @@ class DmaDesliceOp(IRDLOperation):
         source_type = _verify_memory_type(self.source.type, "source")
         target_type = _verify_memory_type(self.target.type, "target")
         result_type = _verify_memory_type(self.result.type, "result")
-        offsets = _verify_index_list(self.offsets, "offsets", min_value=0)
-        sizes = _verify_index_list(self.sizes, "sizes", min_value=1)
-        strides = _verify_stride_list(self.strides, "strides")
+        offsets = _verify_index_operands(self.offsets, "offsets", min_value=0)
+        sizes = _verify_index_operands(self.sizes, "sizes", min_value=1)
+        strides = _verify_index_operands(self.strides, "strides", min_value=1)
         rank = len(target_type.shape.data)
         _verify_rank_match(offsets, rank, "offsets")
         _verify_rank_match(sizes, rank, "sizes")
         _verify_rank_match(strides, rank, "strides")
-        _verify_unit_stride(strides)
-        _verify_sizes_match_shape(sizes, source_type.shape, "source")
+        _verify_unit_stride_operands(strides)
+        _verify_operands_match_layout(sizes, source_type.shape, "source shape must match sizes")
         if source_type.element_type != target_type.element_type:
             raise VerifyException("dma.deslice element_type mismatch")
         if result_type != target_type:
@@ -731,19 +739,29 @@ class DmaViewOp(IRDLOperation):
     name = "dma.view"
 
     source = operand_def(NnMemoryType)
+    shape = var_operand_def(IndexType)
+    stride = var_operand_def(IndexType)
     result = result_def(NnMemoryType)
 
-    def __init__(self, source: SSAValue | Operation, result_type: NnMemoryType) -> None:
+    irdl_options = [AttrSizedOperandSegments(as_property=True)]
+
+    def __init__(
+        self,
+        source: SSAValue | Operation,
+        shape: Sequence[SSAValue],
+        stride: Sequence[SSAValue],
+        result_type: NnMemoryType,
+    ) -> None:
         """初始化 dma.view。
 
         创建者: 金铲铲大作战
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 设置 source 与结果类型。
+        - 设置 source、动态 shape/stride operand 与结果类型。
 
         使用示例:
-        - DmaViewOp(source, result_type)
+        - DmaViewOp(source, shape, stride, result_type)
 
         关联文件:
         - spec: spec/dialect/dma.md
@@ -751,7 +769,7 @@ class DmaViewOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
-        super().__init__(operands=[source], result_types=[result_type])
+        super().__init__(operands=[source, shape, stride], result_types=[result_type])
 
     def verify_(self) -> None:
         """校验 dma.view。
@@ -774,6 +792,12 @@ class DmaViewOp(IRDLOperation):
 
         source_type = _verify_memory_type(self.source.type, "source")
         result_type = _verify_memory_type(self.result.type, "result")
+        shape = _verify_index_operands(self.shape, "shape", min_value=1)
+        stride = _verify_index_operands(self.stride, "stride", min_value=1)
+        _verify_rank_match(shape, len(result_type.shape.data), "shape")
+        _verify_rank_match(stride, len(result_type.shape.data), "stride")
+        _verify_operands_match_layout(shape, result_type.shape, "shape must match result shape")
+        _verify_operands_match_layout(stride, result_type.stride, "stride must match result stride")
         if source_type.element_type != result_type.element_type:
             raise VerifyException("dma.view element_type mismatch")
         if source_type.space.space.data != result_type.space.space.data:
@@ -792,19 +816,27 @@ class DmaReshapeOp(IRDLOperation):
     name = "dma.reshape"
 
     source = operand_def(NnMemoryType)
+    shape = var_operand_def(IndexType)
     result = result_def(NnMemoryType)
 
-    def __init__(self, source: SSAValue | Operation, result_type: NnMemoryType) -> None:
+    irdl_options = [AttrSizedOperandSegments(as_property=True)]
+
+    def __init__(
+        self,
+        source: SSAValue | Operation,
+        shape: Sequence[SSAValue],
+        result_type: NnMemoryType,
+    ) -> None:
         """初始化 dma.reshape。
 
         创建者: 金铲铲大作战
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 设置 source 与结果类型。
+        - 设置 source、动态 shape operand 与结果类型。
 
         使用示例:
-        - DmaReshapeOp(source, result_type)
+        - DmaReshapeOp(source, shape, result_type)
 
         关联文件:
         - spec: spec/dialect/dma.md
@@ -812,7 +844,7 @@ class DmaReshapeOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
-        super().__init__(operands=[source], result_types=[result_type])
+        super().__init__(operands=[source, shape], result_types=[result_type])
 
     def verify_(self) -> None:
         """校验 dma.reshape。
@@ -836,6 +868,9 @@ class DmaReshapeOp(IRDLOperation):
 
         source_type = _verify_memory_type(self.source.type, "source")
         result_type = _verify_memory_type(self.result.type, "result")
+        shape = _verify_index_operands(self.shape, "shape", min_value=1)
+        _verify_rank_match(shape, len(result_type.shape.data), "shape")
+        _verify_operands_match_layout(shape, result_type.shape, "shape must match result shape")
         if source_type.element_type != result_type.element_type:
             raise VerifyException("dma.reshape element_type mismatch")
         if source_type.space.space.data != result_type.space.space.data:

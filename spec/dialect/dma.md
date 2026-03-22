@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`我不是牛马`
 - `spec`：[`spec/dialect/dma.md`](../../spec/dialect/dma.md)
 - `test`：[`test/dialect/test_dma_dialect.py`](../../test/dialect/test_dma_dialect.py)
 - `功能实现`：[`kernel_gen/dialect/dma.py`](../../kernel_gen/dialect/dma.py)
@@ -26,7 +26,7 @@
 - 让整块拷贝、切片读取、切片回写、跨空间搬运与显式数据转换在 IR 中有明确 op 语义。
 - 保留 `shape/stride/offsets/sizes/strides` 等搬运元信息，覆盖静态与动态场景。
 - 为后续 lowering 到 `tensor.extract_slice`、`tensor.insert_slice`、`memref.copy`、后端 DMA 指令或 runtime API 提供稳定中间层。
-- 参考 memref 的动态维度表达习惯，明确动态 shape 的表示方式与可用范围。
+- 参考 `memref.subview` / `memref.reinterpret_cast` 的设计习惯，将动态布局信息建模为显式 `index` 操作数，而不是仅放在 attribute 中。
 
 ## 限制与边界
 
@@ -51,11 +51,14 @@
 - 对 `dma.copy/load/store/slice/deslice`，相关 `element_type` 必须一致，不允许隐式类型转换。
 - 对 `dma.cast`，只允许 `element_type` 发生显式变化；`shape/stride/space` 必须保持一致。
 - `shape/stride` 的 rank 必须与相关 `offsets/sizes/strides` 列表长度一致。
-- `offsets`、`sizes`、`strides` 应表示为长度与 rank 一致的索引列表。
-- `shape` 与 `stride` 中的每一维允许使用 `IntAttr`（静态维度）或 `StringAttr`（符号/动态维度）。其中 `StringAttr("?")` 表示运行期动态维度，其他字符串表示具名符号维度。
-- 动态维度目前仅允许以 attribute 形式表达；不支持 SSA 动态 shape/stride 值输入。
-- `offsets/sizes` 当前仅支持 attribute 索引表达，即 `IntAttr` 或 `StringAttr`；`StringAttr("?")` 可用于动态索引或动态大小；暂不支持 SSA 动态 index。
-- `strides` 当前每一维必须是 `IntAttr(1)`，暂不支持 `StringAttr` 或 SSA 动态 index。
+- `offsets`、`sizes`、`strides`、动态 `shape`、动态 `stride` 必须建模为显式 `index` SSA 操作数列表；不得只靠 `StringAttr("?")`、`ArrayAttr` 或其他 attribute 独立表达运行期值。
+- `!nn.memory<...>` 类型仍负责承载 rank、元素类型、内存空间以及可静态判定的布局信息；凡是运行期才确定的布局值，必须由 op operand 传入。
+- 若实现保留静态维度或静态 stride 在类型中，assembly 中的静态值也应允许通过 `arith.constant` 等 index 常量显式传入 operand，保证“布局参数来源统一为 operand”。
+- `dma.load/store/slice/deslice` 的 `offsets/sizes/strides` 必须为 variadic `index` operand。
+- `dma.view` 中与动态布局相关的 `shape/stride` 元信息必须通过 `index` operand 显式传入；不得仅依赖结果类型里的符号维度推断。
+- `dma.reshape` 仅接受动态 `shape` operand；结果 `stride` 按 `shape` 的默认连续布局语义生成。
+- `dma.alloc` 仅接受动态 `shape` operand；`stride` 不作为输入，而是按默认连续布局语义生成。
+- `strides` 当前每一维仍限制为单位步长语义，但该约束应体现在 operand 校验阶段，而不是要求使用 `IntAttr(1)` attribute。
 - `sizes` 中每一维必须具有正整数语义，不允许负值。
 - 若 op 带有目标空间 attribute，则其值必须与结果 type 或目标 type 的 `space` 一致。
 
@@ -66,13 +69,14 @@
 - assembly 缺失必要字段时，必须在 parse 阶段失败。
 - `NnMemorySpaceAttr` 非法值、`NnMemoryType.shape` 与 `stride` rank 不一致等类型错误，必须按 `nn dialect` 规则报错。
 - `dma.copy` 中 `source/target` 的 `shape/stride/element_type` 不一致必须报错。
-- `dma.alloc` 不接受 operand；结果类型非法必须报错。
+- `dma.alloc` 的动态 `shape` operand 与结果 rank 不匹配时必须报错；结果类型非法必须报错。
 - `dma.load/slice` 中 `offsets/sizes/strides` 长度与输入 rank 不一致必须报错。
 - `dma.store/deslice` 中 `source.shape` 与切片目标大小不一致必须报错。
 - `dma.view/reshape` 中 `source/result` 的 `element_type/space` 不一致必须报错；可判定的 `numel` 不一致必须报错。
+- `dma.view` 的动态 `shape/stride` operand 数量与 rank 不一致必须报错；`dma.reshape` 的动态 `shape` operand 数量与 rank 不一致必须报错。
 - `dma.view` 的 `result.stride` rank 与 `result.shape` 不一致必须报错；`dma.reshape` 的 `result.stride` 非连续行主序必须报错。
 - `dma.cast` 中 `source/result` 的 `shape/stride/space` 不一致必须报错。
-- `strides` 仅允许 `IntAttr(1)`；若当前实现限制 stride 为 1，则 `stride != 1` 的切片搬运必须显式报错，不得 silently 接受。
+- `strides` 当前仅允许单位步长语义；若当前实现限制 stride 为 1，则 `stride != 1` 的切片搬运必须显式报错，不得 silently 接受。
 
 ## 公开接口
 
@@ -109,6 +113,7 @@ from kernel_gen.dialect.nn import NnMemorySpaceAttr
 
 - `dma dialect` 不提供 `free` 生命周期 op。
 - memory type / memory space 必须始终沿用 `nn dialect` 口径。
+- 动态布局相关信息统一走 operand，不再把运行期 `offset/size/stride/shape` 只放在 attribute 中；但 `dma.alloc` 和 `dma.reshape` 的 `stride` 都由默认连续布局规则生成，不单独接收 operand。
 
 返回与限制：
 
@@ -123,19 +128,22 @@ from kernel_gen.dialect.nn import NnMemorySpaceAttr
 
 参数说明：
 
+- `dynamic_shape`：variadic `index` operand，按 rank 顺序提供运行期 shape。
 - `result_type`：结果类型，必须为 `!nn.memory<...>`。
 
 使用示例：
 
 ```python
-op = DmaAllocOp(result_type)
+op = DmaAllocOp(dynamic_shape, result_type)
 ```
 
 注意事项：
 
 - `result_type` 中的 `shape/stride/element_type/space` 必须完整且合法。
-- 允许 `result_type.shape` 使用 `StringAttr` 表达动态维度；动态维度不要求在 alloc 时提供 SSA 值。
-- `dma.alloc` 不携带 `offsets/sizes/strides` 等切片属性。
+- 若结果布局含运行期 shape 信息，则对应值必须由 `dynamic_shape` operand 提供。
+- `dynamic_shape` 的长度必须与结果 rank 一致。
+- 结果 `stride` 不作为输入，由 `result_type.shape` 与默认连续布局规则共同确定。
+- 当前版本不额外定义 base offset；`dma.alloc` 只负责产生新的 memory 对象。
 
 返回与限制：
 
@@ -152,12 +160,13 @@ op = DmaAllocOp(result_type)
 参数说明：
 
 - `source`：源内存，类型为 `!nn.memory<...>`。
+- `shape`：variadic `index` operand，按 rank 顺序提供结果视图的 shape。
 - `result_type`：结果类型，必须为 `!nn.memory<...>`。
 
 使用示例：
 
 ```python
-op = DmaReshapeOp(source, result_type)
+op = DmaReshapeOp(source, shape, result_type)
 ```
 
 注意事项：
@@ -165,9 +174,8 @@ op = DmaReshapeOp(source, result_type)
 - `result.element_type` 必须与 `source.element_type` 一致。
 - `result.space` 必须与 `source.space` 一致。
 - `source` 必须可视为连续布局；`result.stride` 必须满足 `result.shape` 的连续行主序校验规则。
-- 若 `result.shape` 含符号维度（`StringAttr`），则 `result.shape` 的每一维仅允许 `IntAttr` 或非空 `StringAttr`。
-- 当 `result.shape` 含符号维度时，`result.stride` 的每一维仅允许 `IntAttr` 或非空 `StringAttr`。连续性校验策略为：先根据 `result.shape` 推导连续行主序期望 stride；若期望维度为 `IntAttr`，则 `result.stride` 必须是相同的 `IntAttr`；若期望维度为符号（不可判定 stride，通常为 `StringAttr("?")`），则 `result.stride` 允许为任意 `IntAttr` 或任意非空 `StringAttr`。
-- 当 `source.shape` 含符号维度时，`source.stride` 的连续性判定遵循同样的行主序策略：期望为 `IntAttr` 的维度必须一致，期望为符号的维度允许 `IntAttr` 或非空 `StringAttr`。
+- `shape` operand 数量必须与结果 rank 一致。
+- `result.stride` 不作为输入，而是由 `shape` 和默认连续布局规则推导。
 - 若 `source.shape` 与 `result.shape` 的元素总数可判定不一致，必须报错。
 
 返回与限制：
@@ -185,12 +193,14 @@ op = DmaReshapeOp(source, result_type)
 参数说明：
 
 - `source`：源内存，类型为 `!nn.memory<...>`。
+- `shape`：variadic `index` operand，按 rank 顺序提供结果视图的 shape。
+- `stride`：variadic `index` operand，按 rank 顺序提供结果视图的 stride。
 - `result_type`：结果类型，必须为 `!nn.memory<...>`。
 
 使用示例：
 
 ```python
-op = DmaViewOp(source, result_type)
+op = DmaViewOp(source, shape, stride, result_type)
 ```
 
 注意事项：
@@ -199,7 +209,8 @@ op = DmaViewOp(source, result_type)
 - `result.space` 必须与 `source.space` 一致。
 - 若 `source.shape` 与 `result.shape` 的元素总数可判定不一致，必须报错。
 - `dma.view` 不要求 `source` 为连续布局，但 `result.stride` 必须与 `result.shape` rank 一致。
-- `result.shape` 允许使用 `StringAttr` 表示动态维度；动态维度下仅检查 rank 一致性，不强制可判定的 stride 值。
+- `shape` 与 `stride` operand 数量必须与结果 rank 一致。
+- 动态视图信息通过 operand 传入；结果类型中的动态维度只用于描述结果布局的动态性，不替代运行期值来源。
 
 返回与限制：
 
@@ -246,9 +257,9 @@ op = DmaCopyOp(source, target)
 参数说明：
 
 - `source`：源内存，类型为 `!nn.memory<...>`。
-- `offsets`：切片起始索引列表，类型为 `ArrayAttr[IntAttr|StringAttr]`，长度必须与 `source.rank` 一致；每一维表示对应维度的起始索引。
-- `sizes`：切片大小列表，类型为 `ArrayAttr[IntAttr|StringAttr]`，长度必须与 `source.rank` 一致；每一维表示对应维度的切片大小。
-- `strides`：切片步长列表，类型为 `ArrayAttr[IntAttr]`，长度必须与 `source.rank` 一致；每一维表示对应维度的切片步长，当前每一维必须为 `IntAttr(1)`。
+- `offsets`：variadic `index` operand，长度必须与 `source.rank` 一致；每一维表示对应维度的起始索引。
+- `sizes`：variadic `index` operand，长度必须与 `source.rank` 一致；每一维表示对应维度的切片大小。
+- `strides`：variadic `index` operand，长度必须与 `source.rank` 一致；每一维表示对应维度的切片步长，当前每一维必须具有单位步长语义。
 - `space`：结果空间，使用 `NnMemorySpaceAttr` 表示。
 - `result_type`：结果类型，必须为 `!nn.memory<...>`。
 
@@ -270,12 +281,12 @@ op = DmaLoadOp(
 - `result.shape` 由 `sizes` 决定。
 - `result.space` 必须与 op `space` 一致。
 - `result.element_type` 必须与 `source.element_type` 一致。
-- `offsets/sizes` 允许 `StringAttr("?")` 表示动态索引或动态大小，仍不接受 SSA index。
+- `offsets/sizes/strides` 必须全部通过 operand 提供；若是静态常量，也应先 materialize 为 `index` 常量后传入。
 
 返回与限制：
 
 - 返回新的 `!nn.memory<...>` 结果块。
-- 当前不支持 SSA 动态 index，也不支持非 1 stride。
+- 当前支持 SSA 动态 index；但仍不支持非单位 stride 语义。
 
 ### `dma.store`
 
@@ -288,9 +299,9 @@ op = DmaLoadOp(
 
 - `source`：待写回的源块，类型为 `!nn.memory<...>`。
 - `target`：被更新的目标内存，类型为 `!nn.memory<...>`。
-- `offsets`：目标切片起始索引列表，类型为 `ArrayAttr[IntAttr|StringAttr]`；每一维表示 `target` 对应维度的写回起始索引，长度必须与 `target.rank` 一致。
-- `sizes`：目标切片大小列表，类型为 `ArrayAttr[IntAttr|StringAttr]`；每一维表示写回区域在 `target` 对应维度的大小，长度必须与 `target.rank` 一致。
-- `strides`：目标切片步长列表，类型为 `ArrayAttr[IntAttr]`；每一维表示 `target` 对应维度的写回步长，长度必须与 `target.rank` 一致，当前每一维必须为 `IntAttr(1)`。
+- `offsets`：variadic `index` operand；每一维表示 `target` 对应维度的写回起始索引，长度必须与 `target.rank` 一致。
+- `sizes`：variadic `index` operand；每一维表示写回区域在 `target` 对应维度的大小，长度必须与 `target.rank` 一致。
+- `strides`：variadic `index` operand；每一维表示 `target` 对应维度的写回步长，长度必须与 `target.rank` 一致，当前每一维必须具有单位步长语义。
 
 使用示例：
 
@@ -303,7 +314,7 @@ op = DmaStoreOp(source, target, offsets, sizes, strides)
 - `source.shape` 必须与 `sizes` 对应的切片形状一致。
 - `source.element_type` 必须与 `target.element_type` 一致。
 - `offsets/sizes/strides` 长度必须与 `target.rank` 一致。
-- `offsets/sizes` 允许 `StringAttr("?")` 表示动态索引或动态大小，仍不接受 SSA index。
+- `offsets/sizes/strides` 必须全部通过 operand 提供。
 
 返回与限制：
 
@@ -320,9 +331,9 @@ op = DmaStoreOp(source, target, offsets, sizes, strides)
 参数说明：
 
 - `source`：源内存，类型为 `!nn.memory<...>`。
-- `offsets`：切片起始索引列表，类型为 `ArrayAttr[IntAttr|StringAttr]`；每一维表示对应维度的起始索引，长度必须与 `source.rank` 一致。
-- `sizes`：切片大小列表，类型为 `ArrayAttr[IntAttr|StringAttr]`；每一维表示对应维度的切片大小，长度必须与 `source.rank` 一致。
-- `strides`：切片步长列表，类型为 `ArrayAttr[IntAttr]`；每一维表示对应维度的切片步长，长度必须与 `source.rank` 一致，当前每一维必须为 `IntAttr(1)`。
+- `offsets`：variadic `index` operand；每一维表示对应维度的起始索引，长度必须与 `source.rank` 一致。
+- `sizes`：variadic `index` operand；每一维表示对应维度的切片大小，长度必须与 `source.rank` 一致。
+- `strides`：variadic `index` operand；每一维表示对应维度的切片步长，长度必须与 `source.rank` 一致，当前每一维必须具有单位步长语义。
 - `space`：切片结果所在空间，使用 `NnMemorySpaceAttr` 表示。
 - `result_type`：结果类型，必须为 `!nn.memory<...>`。
 
@@ -344,7 +355,7 @@ op = DmaSliceOp(
 - `result.shape` 由 `sizes` 决定。
 - `result.element_type` 必须与 `source.element_type` 一致。
 - 当前阶段必须限制 `strides` 为全 1；出现其他值时 verifier 必须报错。
-- `offsets/sizes` 允许 `StringAttr("?")` 表示动态索引或动态大小，仍不接受 SSA index。
+- `offsets/sizes/strides` 必须全部通过 operand 提供。
 
 返回与限制：
 
@@ -362,9 +373,9 @@ op = DmaSliceOp(
 
 - `source`：待回写的切片块，类型为 `!nn.memory<...>`。
 - `target`：被更新的较大目标内存，类型为 `!nn.memory<...>`。
-- `offsets`：目标区域起始索引列表，类型为 `ArrayAttr[IntAttr|StringAttr]`；每一维表示 `target` 对应维度的回写起始索引，长度必须与 `target.rank` 一致。
-- `sizes`：目标区域大小列表，类型为 `ArrayAttr[IntAttr|StringAttr]`；每一维表示回写区域在 `target` 对应维度的大小，长度必须与 `target.rank` 一致。
-- `strides`：目标区域步长列表，类型为 `ArrayAttr[IntAttr]`；每一维表示 `target` 对应维度的回写步长，长度必须与 `target.rank` 一致，当前每一维必须为 `IntAttr(1)`。
+- `offsets`：variadic `index` operand；每一维表示 `target` 对应维度的回写起始索引，长度必须与 `target.rank` 一致。
+- `sizes`：variadic `index` operand；每一维表示回写区域在 `target` 对应维度的大小，长度必须与 `target.rank` 一致。
+- `strides`：variadic `index` operand；每一维表示 `target` 对应维度的回写步长，长度必须与 `target.rank` 一致，当前每一维必须具有单位步长语义。
 - `result_type`：结果类型，必须为 `!nn.memory<...>`，且必须与 `target` 类型一致。
 
 使用示例：
@@ -378,7 +389,7 @@ op = DmaDesliceOp(source, target, offsets, sizes, strides, result_type)
 - `source.shape` 必须与 `sizes` 对应的切片形状一致。
 - `source.element_type` 必须与 `target.element_type` 一致。
 - 当前阶段必须限制 `strides` 为全 1；出现其他值时 verifier 必须报错。
-- `offsets/sizes` 允许 `StringAttr("?")` 表示动态索引或动态大小，仍不接受 SSA index。
+- `offsets/sizes/strides` 必须全部通过 operand 提供。
 
 返回与限制：
 
@@ -426,10 +437,10 @@ op = DmaCastOp(source, result_type)
 
 - 验证 `dma` op 复用 `NnMemorySpaceAttr` / `NnMemoryType` 时，与 `nn dialect` 的类型规则保持一致。
 - 验证 `dma.copy` 的整块搬运约束。
-- 验证 `dma.load/slice` 的结果形状、目标空间与索引长度约束，并覆盖动态索引/大小表达。
+- 验证 `dma.load/slice` 的结果形状、目标空间与索引长度约束，并覆盖动态索引/大小 operand 表达。
 - 验证 `dma.store/deslice` 的源块与目标切片大小匹配约束。
 - 验证 `dma.alloc` 结果类型约束与结果数量。
-- 验证 `dma.view/reshape` 的元素类型/空间一致性与形状约束，并覆盖动态 shape 表达。
+- 验证 `dma.view/reshape` 的元素类型/空间一致性与形状约束，其中 `dma.view` 覆盖动态 `shape/stride` operand，`dma.reshape` 覆盖动态 `shape` operand。
 - 验证 `dma.cast` 只允许改变元素类型，且保持 `shape/stride/space` 不变。
 - 验证当前阶段对 stride 的限制会在 verifier 阶段明确报错。
 
@@ -442,16 +453,19 @@ op = DmaCastOp(source, result_type)
 | TC-DMA-003 | 整块拷贝 | `dma.copy` 形状不匹配 | `source.shape != target.shape` | 构造并校验 `dma.copy` | verifier 报错 | `test_dma_copy_shape_mismatch` |
 | TC-DMA-004 | 切片读取 | `dma.load` 结果空间约束 | `result.space` 与 op `space` 不一致 | 构造并校验 `dma.load` | verifier 报错 | `test_dma_load_result_space_mismatch` |
 | TC-DMA-005 | 切片读取 | `dma.slice` 索引长度约束 | `offsets/sizes/strides` 长度与 rank 不一致 | 构造并校验 `dma.slice` | verifier 报错 | `test_dma_slice_rank_mismatch` |
-| TC-DMA-006 | 切片读取 | `dma.slice` stride 限制 | `strides` 包含非 `IntAttr(1)` | 构造并校验 `dma.slice` | verifier 报错 | `test_dma_slice_non_unit_stride_rejected` |
+| TC-DMA-006 | 切片读取 | `dma.slice` stride 限制 | `strides` operand 中包含非单位步长值 | 构造并校验 `dma.slice` | verifier 报错 | `test_dma_slice_non_unit_stride_rejected` |
 | TC-DMA-007 | 切片回写 | `dma.store` 块大小约束 | `source.shape` 与目标切片大小不一致 | 构造并校验 `dma.store` | verifier 报错 | `test_dma_store_size_mismatch` |
 | TC-DMA-008 | 切片回写 | `dma.deslice` 合法路径 | `source.shape` 与目标切片大小一致 | 构造并校验 `dma.deslice` | verifier 通过 | `test_dma_deslice_verify_success` |
 | TC-DMA-009 | 类型校验 | `nn dialect` verifier 透传 | `space` 非法或 `shape/stride` rank 不一致 | 构造引用非法 `!nn.memory<...>` 的 `dma` op | 按 `nn dialect` 规则报错 | `test_dma_nn_memory_type_verifier_passthrough` |
-| TC-DMA-010 | 索引表达 | 动态索引/大小 | `offsets/sizes` 使用 `StringAttr`（含 `?`），`strides` 为 `IntAttr(1)` | 构造并校验切片类 op | verifier 通过 | `test_dma_index_string_attr_valid` |
+| TC-DMA-010 | 索引表达 | 动态索引/大小 | `offsets/sizes/strides` 由 SSA `index` operand 提供 | 构造并校验切片类 op | verifier 通过 | `test_dma_dynamic_index_operands_valid` |
 | TC-DMA-011 | 数据转换 | `dma.cast` 合法路径 | `source/result` 的 `shape/stride/space` 一致，仅元素类型不同 | 构造并校验 `dma.cast` | verifier 通过 | `test_dma_cast_verify_success` |
 | TC-DMA-012 | 数据转换 | `dma.cast` 结果约束 | `source/result` 的 `shape` 或 `stride` 或 `space` 不一致 | 构造并校验 `dma.cast` | verifier 报错 | `test_dma_cast_layout_or_space_mismatch` |
 | TC-DMA-013 | 分配 | `dma.alloc` 合法路径 | `result_type` 为合法 `!nn.memory<...>` | 构造并校验 `dma.alloc` | verifier 通过 | `test_dma_alloc_verify_success` |
 | TC-DMA-014 | 视图 | `dma.view` 约束 | `result.element_type` 或 `result.space` 与 `source` 不一致 | 构造并校验 `dma.view` | verifier 报错 | `test_dma_view_type_or_space_mismatch` |
 | TC-DMA-015 | 视图 | `dma.view` 形状一致性 | `source/result` 可判定的元素总数不一致 | 构造并校验 `dma.view` | verifier 报错 | `test_dma_view_numel_mismatch` |
-| TC-DMA-016 | 变形 | `dma.reshape` 连续约束 | `result.stride` 非连续行主序或 `source` 非连续布局 | 构造并校验 `dma.reshape` | verifier 报错 | `test_dma_reshape_requires_contiguous` |
-| TC-DMA-017 | 变形 | `dma.reshape` 动态维度连续 | `result.shape` 含 `StringAttr` 且 `result.stride` 满足连续规则 | 构造并校验 `dma.reshape` | verifier 通过 | `test_dma_reshape_allows_symbolic_shape` |
-| TC-DMA-018 | 变形 | `dma.reshape` 动态维度非连续 | `result.shape` 含 `StringAttr` 且 `result.stride` 非连续 | 构造并校验 `dma.reshape` | verifier 报错 | `test_dma_reshape_symbolic_stride_mismatch` |
+| TC-DMA-016 | 变形 | `dma.reshape` 连续约束 | `source` 非连续布局，无法合法 reshape 为连续结果 | 构造并校验 `dma.reshape` | verifier 报错 | `test_dma_reshape_requires_contiguous` |
+| TC-DMA-017 | 变形 | `dma.reshape` 动态形状连续 | `shape` 由 SSA operand 提供，结果 stride 按默认连续布局生成 | 构造并校验 `dma.reshape` | verifier 通过 | `test_dma_reshape_allows_dynamic_shape_operands` |
+| TC-DMA-018 | 变形 | `dma.reshape` 元素总数不一致 | `shape` 由 SSA operand 提供，且与 `source` 可判定的元素总数不一致 | 构造并校验 `dma.reshape` | verifier 报错 | `test_dma_reshape_numel_mismatch` |
+| TC-DMA-019 | 视图 | `dma.view` 动态布局输入 | `shape/stride` 由 SSA operand 提供，结果 rank 匹配 | 构造并校验 `dma.view` | verifier 通过 | `test_dma_view_dynamic_layout_operands_valid` |
+| TC-DMA-020 | 分配 | `dma.alloc` 动态形状输入 | `dynamic_shape` 由 SSA operand 提供，长度与 rank 一致，结果 stride 走默认连续布局 | 构造并校验 `dma.alloc` | verifier 通过 | `test_dma_alloc_dynamic_shape_operands_valid` |
+| TC-DMA-021 | 解析/打印 | 动态 shape round-trip | 包含 `dma.alloc/view/load/store/slice/deslice/reshape/cast` 的 SSA index operand 文本 | parse/print | 与输入文本一致 | `test_dma_dynamic_shape_parse_print_round_trip` |

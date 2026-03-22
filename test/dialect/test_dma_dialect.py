@@ -23,9 +23,11 @@ from pathlib import Path
 
 import pytest
 from xdsl.context import Context
-from xdsl.dialects.builtin import ArrayAttr, Builtin, IntAttr, StringAttr, i1, i32
+from xdsl.dialects.arith import Arith, ConstantOp
+from xdsl.dialects.builtin import ArrayAttr, Builtin, IndexType, IntAttr, IntegerAttr, StringAttr, i1, i32
 from xdsl.dialects.test import Test, TestOp as _TestOp
-from xdsl.ir import Attribute, Operation
+from xdsl.dialects.builtin import ModuleOp
+from xdsl.ir import Attribute, Operation, SSAValue
 from xdsl.parser import Parser
 from xdsl.printer import Printer
 from xdsl.utils.exceptions import VerifyException
@@ -69,6 +71,7 @@ def _build_context() -> Context:
 
     ctx = Context()
     ctx.load_dialect(Builtin)
+    ctx.load_dialect(Arith)
     ctx.load_dialect(Test)
     ctx.load_dialect(Nn)
     ctx.load_dialect(Dma)
@@ -139,17 +142,18 @@ def _make_memory_type(
     return NnMemoryType(shape, stride, i32, _make_space(space))
 
 
-def _make_index_list(values: list[int | str]) -> ArrayAttr:
-    """构造索引列表 attribute。
+def _make_index_operands(values: list[int | None]) -> list[SSAValue]:
+    """构造索引 operand 列表。
 
     创建者: 小李飞刀
     最后一次更改: 小李飞刀
 
     功能说明:
-    - int 映射为 IntAttr，str 映射为 StringAttr。
+    - int 映射为 `arith.constant index`。
+    - `None` 映射为运行期 `index` SSA 值。
 
     使用示例:
-    - _make_index_list([0, 0])
+    - _make_index_operands([0, None])
 
     关联文件:
     - spec: spec/dialect/dma.md
@@ -157,13 +161,14 @@ def _make_index_list(values: list[int | str]) -> ArrayAttr:
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
-    attrs = []
+    operands: list[SSAValue] = []
     for value in values:
-        if isinstance(value, int):
-            attrs.append(IntAttr(value))
+        if value is None:
+            operands.append(_TestOp(result_types=[IndexType()]).results[0])
         else:
-            attrs.append(StringAttr(value))
-    return ArrayAttr(attrs)
+            const = ConstantOp(IntegerAttr.from_index_int_value(value), IndexType())
+            operands.append(const.result)
+    return operands
 
 
 # TC-DMA-001
@@ -236,9 +241,9 @@ def test_dma_load_result_space_mismatch() -> None:
     source_type = _make_memory_type(space="global")
     result_type = _make_memory_type(space="global")
     source = _TestOp(result_types=[source_type]).results[0]
-    offsets = _make_index_list([0, 0])
-    sizes = _make_index_list([2, 4])
-    strides = _make_index_list([1, 1])
+    offsets = _make_index_operands([0, 0])
+    sizes = _make_index_operands([2, 4])
+    strides = _make_index_operands([1, 1])
     op = DmaLoadOp(source, offsets, sizes, strides, result_type, _make_space("shared"))
     with pytest.raises(VerifyException, match="space attribute must match result space"):
         op.verify()
@@ -263,16 +268,16 @@ def test_dma_slice_rank_mismatch() -> None:
     source_type = _make_memory_type()
     result_type = _make_memory_type()
     source = _TestOp(result_types=[source_type]).results[0]
-    offsets = _make_index_list([0])
-    sizes = _make_index_list([2])
-    strides = _make_index_list([1])
+    offsets = _make_index_operands([0])
+    sizes = _make_index_operands([2])
+    strides = _make_index_operands([1])
     op = DmaSliceOp(source, offsets, sizes, strides, result_type, _make_space("global"))
     with pytest.raises(VerifyException, match="length must match rank"):
         op.verify()
 
-    offsets = _make_index_list([0, 0])
-    sizes = _make_index_list([2, 4])
-    strides = _make_index_list([1, 1])
+    offsets = _make_index_operands([0, 0])
+    sizes = _make_index_operands([2, 4])
+    strides = _make_index_operands([1, 1])
     result_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(3)]))
     op = DmaSliceOp(source, offsets, sizes, strides, result_type, _make_space("global"))
     with pytest.raises(VerifyException, match="shape must match sizes"):
@@ -293,11 +298,11 @@ def test_dma_slice_non_unit_stride_rejected() -> None:
     source_type = _make_memory_type()
     result_type = _make_memory_type()
     source = _TestOp(result_types=[source_type]).results[0]
-    offsets = _make_index_list([0, 0])
-    sizes = _make_index_list([2, 4])
-    strides = _make_index_list([1, 2])
+    offsets = _make_index_operands([0, 0])
+    sizes = _make_index_operands([2, 4])
+    strides = _make_index_operands([1, 2])
     op = DmaSliceOp(source, offsets, sizes, strides, result_type, _make_space("global"))
-    with pytest.raises(VerifyException, match="IntAttr\\(1\\)"):
+    with pytest.raises(VerifyException, match="dma stride must be 1 in current implementation"):
         op.verify()
 
 
@@ -316,9 +321,9 @@ def test_dma_store_size_mismatch() -> None:
     target_type = _make_memory_type(shape=ArrayAttr([IntAttr(8), IntAttr(4)]))
     source = _TestOp(result_types=[source_type]).results[0]
     target = _TestOp(result_types=[target_type]).results[0]
-    offsets = _make_index_list([0, 0])
-    sizes = _make_index_list([2, 2])
-    strides = _make_index_list([1, 1])
+    offsets = _make_index_operands([0, 0])
+    sizes = _make_index_operands([2, 2])
+    strides = _make_index_operands([1, 1])
     op = DmaStoreOp(source, target, offsets, sizes, strides)
     with pytest.raises(VerifyException, match="source shape must match sizes"):
         op.verify()
@@ -339,9 +344,9 @@ def test_dma_deslice_verify_success() -> None:
     target_type = _make_memory_type(shape=ArrayAttr([IntAttr(8), IntAttr(4)]))
     source = _TestOp(result_types=[source_type]).results[0]
     target = _TestOp(result_types=[target_type]).results[0]
-    offsets = _make_index_list([0, 0])
-    sizes = _make_index_list([2, 4])
-    strides = _make_index_list([1, 1])
+    offsets = _make_index_operands([0, 0])
+    sizes = _make_index_operands([2, 4])
+    strides = _make_index_operands([1, 1])
     op = DmaDesliceOp(source, target, offsets, sizes, strides, target_type)
     op.verify()
 
@@ -371,83 +376,36 @@ def test_dma_nn_memory_type_verifier_passthrough(monkeypatch: pytest.MonkeyPatch
 
 
 # TC-DMA-010
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-18 21:00:16 +0800
-# 最近一次运行成功时间: 2026-03-18 21:00:16 +0800
-# 功能说明: 验证 offsets/sizes 使用 StringAttr 时可通过 verifier，stride 仍需为 1。
-# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_index_string_attr_valid
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-22 15:01:08 +0800
+# 最近一次运行成功时间: 2026-03-22 15:01:08 +0800
+# 功能说明: 验证动态 offsets/sizes 通过 SSA index operand 传入时，load/store/slice/deslice 均可通过 verifier。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_dynamic_index_operands_valid
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma_dialect.py
-def test_dma_index_string_attr_valid() -> None:
-    source_type = _make_memory_type(shape=ArrayAttr([StringAttr("M"), StringAttr("N")]))
-    result_type = _make_memory_type(shape=ArrayAttr([StringAttr("M"), StringAttr("N")]), space="shared")
-    source = _TestOp(result_types=[source_type]).results[0]
-    offsets = _make_index_list(["m0", "n0"])
-    sizes = _make_index_list(["M", "N"])
-    strides = _make_index_list([1, 1])
-    op = DmaLoadOp(source, offsets, sizes, strides, result_type, _make_space("shared"))
-    op.verify()
-
-
-# TC-DMA-010
-# 创建者: 我不是牛马
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 00:00:00 +0800
-# 最近一次运行成功时间: 2026-03-22 00:00:00 +0800
-# 功能说明: 验证动态 offsets/sizes 支持 store/deslice，且 strides 仍必须为 IntAttr(1)。
-# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_store_and_deslice_allow_dynamic_offsets_sizes
-# 对应功能实现文件路径: kernel_gen/dialect/dma.py
-# 对应 spec 文件路径: spec/dialect/dma.md
-# 对应测试文件路径: test/dialect/test_dma_dialect.py
-def test_dma_store_and_deslice_allow_dynamic_offsets_sizes() -> None:
+def test_dma_dynamic_index_operands_valid() -> None:
     source_type = _make_memory_type(
-        shape=ArrayAttr([StringAttr("TM"), StringAttr("?")]),
+        shape=ArrayAttr([StringAttr("TM"), StringAttr("TN")]),
         stride=ArrayAttr([StringAttr("TN"), IntAttr(1)]),
-        space="shared",
-    )
-    target_type = _make_memory_type(
-        shape=ArrayAttr([StringAttr("M"), StringAttr("N")]),
-        stride=ArrayAttr([StringAttr("N"), IntAttr(1)]),
-    )
-    source = _TestOp(result_types=[source_type]).results[0]
-    target = _TestOp(result_types=[target_type]).results[0]
-    offsets = _make_index_list(["m0", "?"])
-    sizes = _make_index_list(["TM", "?"])
-    strides = _make_index_list([1, 1])
-
-    DmaStoreOp(source, target, offsets, sizes, strides).verify()
-    DmaDesliceOp(source, target, offsets, sizes, strides, target_type).verify()
-
-
-# TC-DMA-010
-# 创建者: 我不是牛马
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 00:00:00 +0800
-# 最近一次运行成功时间: 2026-03-22 00:00:00 +0800
-# 功能说明: 验证动态 offsets/sizes 下，strides 不接受 StringAttr。
-# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_dynamic_offsets_sizes_reject_string_stride
-# 对应功能实现文件路径: kernel_gen/dialect/dma.py
-# 对应 spec 文件路径: spec/dialect/dma.md
-# 对应测试文件路径: test/dialect/test_dma_dialect.py
-def test_dma_dynamic_offsets_sizes_reject_string_stride() -> None:
-    source_type = _make_memory_type(
-        shape=ArrayAttr([StringAttr("M"), StringAttr("N")]),
-        stride=ArrayAttr([StringAttr("N"), IntAttr(1)]),
     )
     result_type = _make_memory_type(
-        shape=ArrayAttr([StringAttr("TM"), StringAttr("?")]),
+        shape=ArrayAttr([StringAttr("TM"), StringAttr("TN")]),
         stride=ArrayAttr([StringAttr("TN"), IntAttr(1)]),
         space="shared",
     )
     source = _TestOp(result_types=[source_type]).results[0]
-    offsets = _make_index_list(["m0", "?"])
-    sizes = _make_index_list(["TM", "?"])
-    strides = _make_index_list([1, "?"])
-    op = DmaLoadOp(source, offsets, sizes, strides, result_type, _make_space("shared"))
-    with pytest.raises(VerifyException, match="IntAttr\\(1\\)"):
-        op.verify()
+    target = _TestOp(result_types=[source_type]).results[0]
+    tile = _TestOp(result_types=[result_type]).results[0]
+    offsets = _make_index_operands([None, None])
+    sizes = _make_index_operands([None, None])
+    strides = _make_index_operands([1, 1])
+
+    DmaLoadOp(source, offsets, sizes, strides, result_type, _make_space("shared")).verify()
+    DmaSliceOp(source, offsets, sizes, strides, result_type, _make_space("shared")).verify()
+    DmaStoreOp(tile, target, offsets, sizes, strides).verify()
+    DmaDesliceOp(tile, target, offsets, sizes, strides, source_type).verify()
 
 
 # TC-DMA-011
@@ -499,26 +457,19 @@ def test_dma_cast_layout_or_space_mismatch() -> None:
 
 
 # TC-DMA-013
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 21:58:00 +0800
-# 最近一次运行成功时间: 2026-03-21 21:58:00 +0800
-# 功能说明: 验证 dma.alloc 合法路径，并覆盖 alloc/view/reshape 的 parse/print round-trip。
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-22 15:01:08 +0800
+# 最近一次运行成功时间: 2026-03-22 15:01:08 +0800
+# 功能说明: 验证 dma.alloc 在 dynamic_shape operand 与结果 rank/shape 一致时可通过 verifier。
 # 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_alloc_verify_success
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma_dialect.py
 def test_dma_alloc_verify_success() -> None:
-    ctx = _build_context()
-    text = """builtin.module {
-  %0 = "dma.alloc"() : () -> !nn.memory<[2, 4], [4, 1], i32, #nn.space<global>>
-  %1 = "dma.view"(%0) : (!nn.memory<[2, 4], [4, 1], i32, #nn.space<global>>) -> !nn.memory<[4, 2], [2, 1], i32, #nn.space<global>>
-  %2 = "dma.reshape"(%0) : (!nn.memory<[2, 4], [4, 1], i32, #nn.space<global>>) -> !nn.memory<[4, 2], [2, 1], i32, #nn.space<global>>
-}
-"""
-    module = Parser(ctx, text).parse_module()
-    module.verify()
-    assert _print_ir(module) == text.rstrip()
+    result_type = _make_memory_type()
+    op = DmaAllocOp(_make_index_operands([2, 4]), result_type)
+    op.verify()
 
 
 # TC-DMA-014
@@ -534,14 +485,16 @@ def test_dma_alloc_verify_success() -> None:
 def test_dma_view_type_or_space_mismatch() -> None:
     source_type = _make_memory_type()
     source = _TestOp(result_types=[source_type]).results[0]
+    shape = _make_index_operands([2, 4])
+    stride = _make_index_operands([4, 1])
 
     result_type = NnMemoryType(source_type.shape, source_type.stride, i1, source_type.space)
-    op = DmaViewOp(source, result_type)
+    op = DmaViewOp(source, shape, stride, result_type)
     with pytest.raises(VerifyException, match="element_type mismatch"):
         op.verify()
 
     result_type = _make_memory_type(space="shared")
-    op = DmaViewOp(source, result_type)
+    op = DmaViewOp(source, shape, stride, result_type)
     with pytest.raises(VerifyException, match="space mismatch"):
         op.verify()
 
@@ -563,7 +516,7 @@ def test_dma_view_numel_mismatch() -> None:
         shape=ArrayAttr([IntAttr(2), IntAttr(5)]),
         stride=ArrayAttr([IntAttr(5), IntAttr(1)]),
     )
-    op = DmaViewOp(source, result_type)
+    op = DmaViewOp(source, _make_index_operands([2, 5]), _make_index_operands([5, 1]), result_type)
     with pytest.raises(VerifyException, match="numel mismatch"):
         op.verify()
 
@@ -588,83 +541,138 @@ def test_dma_reshape_requires_contiguous() -> None:
         stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
     )
     source = _TestOp(result_types=[source_type]).results[0]
-    op = DmaReshapeOp(source, result_type)
+    op = DmaReshapeOp(source, _make_index_operands([4, 2]), result_type)
     with pytest.raises(VerifyException, match="contiguous source"):
         op.verify()
 
 
 # TC-DMA-017
-# 创建者: 摸鱼小分队
-# 最后一次更改: 摸鱼小分队
-# 最近一次运行测试时间: 2026-03-21 23:40:00 +0800
-# 最近一次运行成功时间: 2026-03-21 23:40:00 +0800
-# 功能说明: 验证 dma.reshape 支持符号维度并遵循连续 stride 规则。
-# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_reshape_allows_symbolic_shape
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-22 15:01:08 +0800
+# 最近一次运行成功时间: 2026-03-22 15:01:08 +0800
+# 功能说明: 验证 dma.reshape 支持通过 SSA shape operand 表达动态结果形状。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_reshape_allows_dynamic_shape_operands
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma_dialect.py
-def test_dma_reshape_allows_symbolic_shape() -> None:
-    source_type = _make_memory_type(
-        shape=ArrayAttr([StringAttr("N"), IntAttr(8)]),
-        stride=ArrayAttr([IntAttr(8), IntAttr(1)]),
-    )
-    result_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(4), StringAttr("M")]),
-        stride=ArrayAttr([StringAttr("M"), IntAttr(1)]),
-    )
-    source = _TestOp(result_types=[source_type]).results[0]
-    op = DmaReshapeOp(source, result_type)
-    op.verify()
-
-
-# TC-DMA-018
-# 创建者: 摸鱼小分队
-# 最后一次更改: 摸鱼小分队
-# 最近一次运行测试时间: 2026-03-21 23:40:00 +0800
-# 最近一次运行成功时间: 2026-03-21 23:40:00 +0800
-# 功能说明: 验证 dma.reshape 在符号维度下 stride 非连续时会报错。
-# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_reshape_symbolic_stride_mismatch
-# 对应功能实现文件路径: kernel_gen/dialect/dma.py
-# 对应 spec 文件路径: spec/dialect/dma.md
-# 对应测试文件路径: test/dialect/test_dma_dialect.py
-def test_dma_reshape_symbolic_stride_mismatch() -> None:
+def test_dma_reshape_allows_dynamic_shape_operands() -> None:
     source_type = _make_memory_type(
         shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
         stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
     )
     result_type = _make_memory_type(
-        shape=ArrayAttr([StringAttr("N"), IntAttr(8)]),
-        stride=ArrayAttr([IntAttr(9), IntAttr(1)]),
+        shape=ArrayAttr([StringAttr("M"), StringAttr("N")]),
+        stride=ArrayAttr([StringAttr("N"), IntAttr(1)]),
     )
     source = _TestOp(result_types=[source_type]).results[0]
-    op = DmaReshapeOp(source, result_type)
-    with pytest.raises(VerifyException, match="contiguous result stride"):
+    op = DmaReshapeOp(source, _make_index_operands([None, None]), result_type)
+    op.verify()
+
+
+# TC-DMA-018
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-22 15:01:08 +0800
+# 最近一次运行成功时间: 2026-03-22 15:01:08 +0800
+# 功能说明: 验证 dma.reshape 在 SSA shape operand 与 source 元素总数不一致时会报错。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_reshape_numel_mismatch
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_reshape_numel_mismatch() -> None:
+    source_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
+        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+    )
+    result_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(3), IntAttr(3)]),
+        stride=ArrayAttr([IntAttr(3), IntAttr(1)]),
+    )
+    source = _TestOp(result_types=[source_type]).results[0]
+    op = DmaReshapeOp(source, _make_index_operands([3, 3]), result_type)
+    with pytest.raises(VerifyException, match="numel mismatch"):
         op.verify()
 
 
-# TC-DMA-013
-# 创建者: 我不是牛马
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 00:00:00 +0800
-# 最近一次运行成功时间: 2026-03-22 00:00:00 +0800
-# 功能说明: 验证 dma dynamic shape/index 的 parse/print round-trip 覆盖 alloc/view/load/store/slice/deslice/reshape/cast。
+# TC-DMA-019
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-22 15:01:08 +0800
+# 最近一次运行成功时间: 2026-03-22 15:01:08 +0800
+# 功能说明: 验证 dma.view 支持通过 SSA shape/stride operand 表达动态布局。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_view_dynamic_layout_operands_valid
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_view_dynamic_layout_operands_valid() -> None:
+    source_type = _make_memory_type(
+        shape=ArrayAttr([StringAttr("M"), StringAttr("N")]),
+        stride=ArrayAttr([StringAttr("N"), IntAttr(1)]),
+    )
+    result_type = _make_memory_type(
+        shape=ArrayAttr([StringAttr("TM"), StringAttr("TN")]),
+        stride=ArrayAttr([StringAttr("TN"), IntAttr(1)]),
+    )
+    source = _TestOp(result_types=[source_type]).results[0]
+    op = DmaViewOp(source, _make_index_operands([None, None]), _make_index_operands([None, 1]), result_type)
+    op.verify()
+
+
+# TC-DMA-020
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-22 15:01:08 +0800
+# 最近一次运行成功时间: 2026-03-22 15:01:08 +0800
+# 功能说明: 验证 dma.alloc 支持通过 SSA dynamic_shape operand 表达动态形状。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_alloc_dynamic_shape_operands_valid
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_alloc_dynamic_shape_operands_valid() -> None:
+    result_type = _make_memory_type(
+        shape=ArrayAttr([StringAttr("M"), StringAttr("N")]),
+        stride=ArrayAttr([StringAttr("N"), IntAttr(1)]),
+    )
+    op = DmaAllocOp(_make_index_operands([None, None]), result_type)
+    op.verify()
+
+
+# TC-DMA-021
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-22 15:01:08 +0800
+# 最近一次运行成功时间: 2026-03-22 15:01:08 +0800
+# 功能说明: 验证 SSA index operand 版本的 dma op 支持 generic parse/print round-trip。
 # 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_dynamic_shape_parse_print_round_trip
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma_dialect.py
 def test_dma_dynamic_shape_parse_print_round_trip() -> None:
     ctx = _build_context()
-    text = """builtin.module {
-  %0 = "dma.alloc"() : () -> !nn.memory<[M, N], [N, 1], i32, #nn.space<global>>
-  %1 = "dma.view"(%0) : (!nn.memory<[M, N], [N, 1], i32, #nn.space<global>>) -> !nn.memory<[?, N], [VIEW_STRIDE, 1], i32, #nn.space<global>>
-  %2 = "dma.load"(%0) {offsets = ["m0", "?"], sizes = ["TM", "?"], strides = [#builtin.int<1>, #builtin.int<1>], space = #nn.space<shared>} : (!nn.memory<[M, N], [N, 1], i32, #nn.space<global>>) -> !nn.memory<[TM, ?], [TN, 1], i32, #nn.space<shared>>
-  "dma.store"(%2, %0) {offsets = ["m0", "?"], sizes = ["TM", "?"], strides = [#builtin.int<1>, #builtin.int<1>]} : (!nn.memory<[TM, ?], [TN, 1], i32, #nn.space<shared>>, !nn.memory<[M, N], [N, 1], i32, #nn.space<global>>) -> ()
-  %3 = "dma.slice"(%0) {offsets = ["m0", "?"], sizes = ["TM", "?"], strides = [#builtin.int<1>, #builtin.int<1>], space = #nn.space<local>} : (!nn.memory<[M, N], [N, 1], i32, #nn.space<global>>) -> !nn.memory<[TM, ?], [TN, 1], i32, #nn.space<local>>
-  %4 = "dma.deslice"(%3, %0) {offsets = ["m0", "?"], sizes = ["TM", "?"], strides = [#builtin.int<1>, #builtin.int<1>]} : (!nn.memory<[TM, ?], [TN, 1], i32, #nn.space<local>>, !nn.memory<[M, N], [N, 1], i32, #nn.space<global>>) -> !nn.memory<[M, N], [N, 1], i32, #nn.space<global>>
-  %5 = "dma.reshape"(%0) : (!nn.memory<[M, N], [N, 1], i32, #nn.space<global>>) -> !nn.memory<[4, ?], [RESHAPE_STRIDE, 1], i32, #nn.space<global>>
-  %6 = "dma.cast"(%0) : (!nn.memory<[M, N], [N, 1], i32, #nn.space<global>>) -> !nn.memory<[M, N], [N, 1], i1, #nn.space<global>>
-}
-"""
-    module = Parser(ctx, text).parse_module()
-    module.verify()
-    assert _print_ir(module) == text.rstrip()
+    c0 = ConstantOp(IntegerAttr.from_index_int_value(2), IndexType())
+    c1 = ConstantOp(IntegerAttr.from_index_int_value(4), IndexType())
+    c2 = ConstantOp(IntegerAttr.from_index_int_value(0), IndexType())
+    c3 = ConstantOp(IntegerAttr.from_index_int_value(1), IndexType())
+
+    alloc_type = _make_memory_type()
+    view_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(4), IntAttr(2)]),
+        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+    )
+    load_type = _make_memory_type(space="shared")
+
+    alloc = DmaAllocOp([c0.result, c1.result], alloc_type)
+    view = DmaViewOp(alloc.result, [c1.result, c0.result], [c0.result, c3.result], view_type)
+    load = DmaLoadOp(alloc.result, [c2.result, c2.result], [c0.result, c1.result], [c3.result, c3.result], load_type, _make_space("shared"))
+    store = DmaStoreOp(load.result, alloc.result, [c2.result, c2.result], [c0.result, c1.result], [c3.result, c3.result])
+    slice_op = DmaSliceOp(alloc.result, [c2.result, c2.result], [c0.result, c1.result], [c3.result, c3.result], load_type, _make_space("shared"))
+    deslice = DmaDesliceOp(load.result, alloc.result, [c2.result, c2.result], [c0.result, c1.result], [c3.result, c3.result], alloc_type)
+    reshape = DmaReshapeOp(alloc.result, [c1.result, c0.result], view_type)
+    cast = DmaCastOp(alloc.result, NnMemoryType(alloc_type.shape, alloc_type.stride, i1, alloc_type.space))
+
+    module = ModuleOp([c0, c1, c2, c3, alloc, view, load, store, slice_op, deslice, reshape, cast])
+    printed = _print_ir(module).rstrip()
+    reparsed = Parser(ctx, printed).parse_module()
+    reparsed.verify()
+    assert _print_ir(reparsed).rstrip() == printed

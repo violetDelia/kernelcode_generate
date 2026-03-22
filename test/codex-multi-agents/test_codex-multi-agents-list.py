@@ -1,18 +1,26 @@
 """codex-multi-agents-list.sh tests.
 
 创建者: 榕
-最后一次更改: 榕
+最后一次更改: 金铲铲大作战
 
 功能说明:
-- 覆盖名单脚本的读取、查询、添加、修改、删除、初始化与错误返回码路径。
+- 覆盖名单脚本的读取、查询、添加、修改、删除、初始化、压缩上下文与错误返回码路径。
 
-关联文件:
-- 功能实现: /home/lfr/kernelcode_generate/skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
-- Spec 文档: /home/lfr/kernelcode_generate/spec/codex-multi-agents/scripts/codex-multi-agents-list.md
-- 测试文件: /home/lfr/kernelcode_generate/test/codex-multi-agents/test_codex-multi-agents-list.py
+覆盖率信息:
+- 当前覆盖率: `N/A`。该链路功能实现为 shell 脚本，当前任务不使用 pytest-cov 统计覆盖率。
+- 达标判定: shell 实现按规则豁免 `95%` 覆盖率达标线。
+- 当前以 `TC-001..022` 对应测试作为覆盖基线。
+
+覆盖率命令:
+- N/A（shell 脚本实现，当前任务不使用 pytest-cov 统计覆盖率）
 
 使用示例:
 - pytest -q test/codex-multi-agents/test_codex-multi-agents-list.py
+
+关联文件:
+- 功能实现: [skills/codex-multi-agents/scripts/codex-multi-agents-list.sh](skills/codex-multi-agents/scripts/codex-multi-agents-list.sh)
+- Spec 文档: [spec/codex-multi-agents/scripts/codex-multi-agents-list.md](spec/codex-multi-agents/scripts/codex-multi-agents-list.md)
+- 测试文件: [test/codex-multi-agents/test_codex-multi-agents-list.py](test/codex-multi-agents/test_codex-multi-agents-list.py)
 """
 
 from __future__ import annotations
@@ -41,12 +49,42 @@ def make_row(
     archive: str = "",
     duty: str = "",
 ) -> str:
-    """生成标准 agents Markdown 行，确保列数与表头一致。"""
+    """生成标准 agents Markdown 行，确保列数与表头一致。
+
+    创建者: 榕
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 按固定列顺序拼接一行 agents Markdown 数据。
+
+    使用示例:
+    - make_row("小明")
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-list.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+    """
     return f"| {name} | {status} | {session} | {startup_type} | {agent_session} | {intro} | {prompt} | {archive} | {duty} |"
 
 
 def write_agents_file(path: Path, rows: list[str] | None = None, header: str = HEADER) -> None:
-    """写入测试专用名单文件，默认带两名人员。"""
+    """写入测试专用名单文件，默认带两名人员。
+
+    创建者: 榕
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 生成包含表头与数据行的测试名单文件。
+
+    使用示例:
+    - write_agents_file(Path("agents-lists.md"))
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-list.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+    """
     if rows is None:
         rows = [
             make_row("小明", "free", "xiaoming", "codex", "agent-xiaoming", "擅长分发任务", "./prompt.md", "./log/", "任务分发"),
@@ -67,7 +105,22 @@ def write_agents_file(path: Path, rows: list[str] | None = None, header: str = H
 
 
 def run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    """调用待测 shell 脚本并返回执行结果。"""
+    """调用待测 shell 脚本并返回执行结果。
+
+    创建者: 榕
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 以 subprocess 方式执行脚本并返回结果对象。
+
+    使用示例:
+    - run_script("-file=agents-lists.md", "-status")
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-list.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+    """
     return subprocess.run(
         ["bash", str(SCRIPT_PATH), *args],
         text=True,
@@ -78,7 +131,22 @@ def run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.Comp
 
 
 def write_fake_tmux(bin_dir: Path, state_dir: Path, sessions: list[str] | None = None) -> Path:
-    """写入 fake tmux，用于验证 -init 的会话检查与 send-keys 调用。"""
+    """写入 fake tmux，用于验证 -init/-compact 的会话检查与 send-keys 调用。
+
+    创建者: 榕
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 构造临时 tmux 脚本，记录 send-keys 调用并模拟会话存在性。
+
+    使用示例:
+    - write_fake_tmux(Path("bin"), Path("state"), sessions=["xiaoming"])
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-list.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+    """
     sessions = sessions or []
     bin_dir.mkdir(parents=True, exist_ok=True)
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -126,11 +194,14 @@ esac
 
 # TC-001
 # 创建者: 榕
-# 最后一次更改: 榕
-# Last Run: 2026-03-07 09:57:07 +0800
-# Last Success: 2026-03-07 09:57:07 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:46:50 +0800
+# 最近一次运行成功时间: 2026-03-22 13:46:50 +0800
+# 测试目的: 验证 -status 正常读取名单并输出表头与数据，返回码为 0。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-list.py -k test_status_outputs_table_and_returns_0
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 对应测试文件路径: test/codex-multi-agents/test_codex-multi-agents-list.py
 def test_status_outputs_table_and_returns_0(tmp_path: Path) -> None:
     agents_file = tmp_path / "agents-lists.md"
     write_agents_file(agents_file)
@@ -146,11 +217,14 @@ def test_status_outputs_table_and_returns_0(tmp_path: Path) -> None:
 
 # TC-002
 # 创建者: 榕
-# 最后一次更改: 榕
-# Last Run: 2026-03-08 09:20:00 +0800
-# Last Success: 2026-03-08 09:20:00 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:46:50 +0800
+# 最近一次运行成功时间: 2026-03-22 13:46:50 +0800
+# 测试目的: 验证 -find 查询字段成功时返回字段值与 RC=0。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-list.py -k test_find_field_success
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 对应测试文件路径: test/codex-multi-agents/test_codex-multi-agents-list.py
 def test_find_field_success(tmp_path: Path) -> None:
     agents_file = tmp_path / "agents-lists.md"
     write_agents_file(agents_file)
@@ -164,11 +238,14 @@ def test_find_field_success(tmp_path: Path) -> None:
 
 # TC-003
 # 创建者: 榕
-# 最后一次更改: 榕
-# Last Run: 2026-03-08 09:20:00 +0800
-# Last Success: 2026-03-08 09:20:00 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:46:50 +0800
+# 最近一次运行成功时间: 2026-03-22 13:46:50 +0800
+# 测试目的: 验证 -find 查询不存在人员时返回 RC=3 并输出错误信息。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-list.py -k test_find_missing_agent_returns_rc3
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 对应测试文件路径: test/codex-multi-agents/test_codex-multi-agents-list.py
 def test_find_missing_agent_returns_rc3(tmp_path: Path) -> None:
     agents_file = tmp_path / "agents-lists.md"
     write_agents_file(agents_file)
@@ -181,11 +258,14 @@ def test_find_missing_agent_returns_rc3(tmp_path: Path) -> None:
 
 # TC-004
 # 创建者: 榕
-# 最后一次更改: 榕
-# Last Run: 2026-03-07 09:57:07 +0800
-# Last Success: 2026-03-07 09:57:07 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:46:50 +0800
+# 最近一次运行成功时间: 2026-03-22 13:46:50 +0800
+# 测试目的: 验证 -add 成功新增人员并生成会话字段。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-list.py -k test_add_agent_success
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 对应测试文件路径: test/codex-multi-agents/test_codex-multi-agents-list.py
 def test_add_agent_success(tmp_path: Path) -> None:
     agents_file = tmp_path / "agents-lists.md"
     write_agents_file(agents_file)
@@ -215,11 +295,14 @@ def test_add_agent_success(tmp_path: Path) -> None:
 
 # TC-005
 # 创建者: 榕
-# 最后一次更改: 榕
-# Last Run: 2026-03-07 09:57:07 +0800
-# Last Success: 2026-03-07 09:57:07 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:46:50 +0800
+# 最近一次运行成功时间: 2026-03-22 13:46:50 +0800
+# 测试目的: 验证 -add 添加同名人员时返回 RC=3。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-list.py -k test_add_duplicate_agent_returns_rc3
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 对应测试文件路径: test/codex-multi-agents/test_codex-multi-agents-list.py
 def test_add_duplicate_agent_returns_rc3(tmp_path: Path) -> None:
     agents_file = tmp_path / "agents-lists.md"
     write_agents_file(agents_file)
@@ -232,11 +315,14 @@ def test_add_duplicate_agent_returns_rc3(tmp_path: Path) -> None:
 
 # TC-006
 # 创建者: 榕
-# 最后一次更改: 榕
-# Last Run: 2026-03-07 09:57:07 +0800
-# Last Success: 2026-03-07 09:57:07 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:46:50 +0800
+# 最近一次运行成功时间: 2026-03-22 13:46:50 +0800
+# 测试目的: 验证 -replace 修改字段成功并写回文件。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-list.py -k test_replace_field_success
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 对应测试文件路径: test/codex-multi-agents/test_codex-multi-agents-list.py
 def test_replace_field_success(tmp_path: Path) -> None:
     agents_file = tmp_path / "agents-lists.md"
     write_agents_file(agents_file)
@@ -257,11 +343,14 @@ def test_replace_field_success(tmp_path: Path) -> None:
 
 # TC-007
 # 创建者: 榕
-# 最后一次更改: 榕
-# Last Run: 2026-03-07 09:57:07 +0800
-# Last Success: 2026-03-07 09:57:07 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:46:50 +0800
+# 最近一次运行成功时间: 2026-03-22 13:46:50 +0800
+# 测试目的: 验证 -replace 试图修改姓名字段时返回 RC=3。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-list.py -k test_replace_name_field_is_immutable
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 对应测试文件路径: test/codex-multi-agents/test_codex-multi-agents-list.py
 def test_replace_name_field_is_immutable(tmp_path: Path) -> None:
     agents_file = tmp_path / "agents-lists.md"
     write_agents_file(agents_file)
@@ -284,11 +373,14 @@ def test_replace_name_field_is_immutable(tmp_path: Path) -> None:
 
 # TC-008
 # 创建者: 榕
-# 最后一次更改: 榕
-# Last Run: 2026-03-07 09:57:07 +0800
-# Last Success: 2026-03-07 09:57:07 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:46:50 +0800
+# 最近一次运行成功时间: 2026-03-22 13:46:50 +0800
+# 测试目的: 验证 -replace 修改非法字段时返回 RC=3。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-list.py -k test_replace_unknown_field_returns_rc3
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 对应测试文件路径: test/codex-multi-agents/test_codex-multi-agents-list.py
 def test_replace_unknown_field_returns_rc3(tmp_path: Path) -> None:
     agents_file = tmp_path / "agents-lists.md"
     write_agents_file(agents_file)
@@ -311,11 +403,14 @@ def test_replace_unknown_field_returns_rc3(tmp_path: Path) -> None:
 
 # TC-009
 # 创建者: 榕
-# 最后一次更改: 榕
-# Last Run: 2026-03-07 09:57:07 +0800
-# Last Success: 2026-03-07 09:57:07 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:46:50 +0800
+# 最近一次运行成功时间: 2026-03-22 13:46:50 +0800
+# 测试目的: 验证 -delete 删除人员成功并写回文件。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-list.py -k test_delete_agent_success
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 对应测试文件路径: test/codex-multi-agents/test_codex-multi-agents-list.py
 def test_delete_agent_success(tmp_path: Path) -> None:
     agents_file = tmp_path / "agents-lists.md"
     write_agents_file(agents_file)
@@ -330,11 +425,14 @@ def test_delete_agent_success(tmp_path: Path) -> None:
 
 # TC-010
 # 创建者: 榕
-# 最后一次更改: 榕
-# Last Run: 2026-03-07 09:57:07 +0800
-# Last Success: 2026-03-07 09:57:07 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:46:50 +0800
+# 最近一次运行成功时间: 2026-03-22 13:46:50 +0800
+# 测试目的: 验证 -delete 删除不存在人员时返回 RC=3。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-list.py -k test_delete_missing_agent_returns_rc3
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 对应测试文件路径: test/codex-multi-agents/test_codex-multi-agents-list.py
 def test_delete_missing_agent_returns_rc3(tmp_path: Path) -> None:
     agents_file = tmp_path / "agents-lists.md"
     write_agents_file(agents_file)
@@ -347,11 +445,14 @@ def test_delete_missing_agent_returns_rc3(tmp_path: Path) -> None:
 
 # TC-011
 # 创建者: 榕
-# 最后一次更改: 榕
-# Last Run: 2026-03-07 09:57:07 +0800
-# Last Success: 2026-03-07 09:57:07 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:46:50 +0800
+# 最近一次运行成功时间: 2026-03-22 13:46:50 +0800
+# 测试目的: 验证参数缺失时返回 RC=1 并提示错误。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-list.py -k test_argument_error_returns_rc1
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 对应测试文件路径: test/codex-multi-agents/test_codex-multi-agents-list.py
 def test_argument_error_returns_rc1(tmp_path: Path) -> None:
     agents_file = tmp_path / "agents-lists.md"
     write_agents_file(agents_file)
@@ -364,11 +465,14 @@ def test_argument_error_returns_rc1(tmp_path: Path) -> None:
 
 # TC-012
 # 创建者: 榕
-# 最后一次更改: 榕
-# Last Run: 2026-03-07 09:57:07 +0800
-# Last Success: 2026-03-07 09:57:07 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:46:50 +0800
+# 最近一次运行成功时间: 2026-03-22 13:46:50 +0800
+# 测试目的: 验证文件不存在时返回 RC=2。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-list.py -k test_file_not_found_returns_rc2
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 对应测试文件路径: test/codex-multi-agents/test_codex-multi-agents-list.py
 def test_file_not_found_returns_rc2(tmp_path: Path) -> None:
     missing = tmp_path / "missing.md"
 
@@ -380,11 +484,14 @@ def test_file_not_found_returns_rc2(tmp_path: Path) -> None:
 
 # TC-013
 # 创建者: 榕
-# 最后一次更改: 榕
-# Last Run: 2026-03-07 09:57:07 +0800
-# Last Success: 2026-03-07 09:57:07 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:46:50 +0800
+# 最近一次运行成功时间: 2026-03-22 13:46:50 +0800
+# 测试目的: 验证表头缺少姓名列时返回 RC=2。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-list.py -k test_invalid_table_missing_name_column_returns_rc2
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 对应测试文件路径: test/codex-multi-agents/test_codex-multi-agents-list.py
 def test_invalid_table_missing_name_column_returns_rc2(tmp_path: Path) -> None:
     agents_file = tmp_path / "agents-lists.md"
     bad_header = "| 状态 | 会话 | 启动类型 | agent session | 介绍 | 提示词 | 归档文件 | 职责 |"
@@ -399,11 +506,14 @@ def test_invalid_table_missing_name_column_returns_rc2(tmp_path: Path) -> None:
 
 # TC-014
 # 创建者: 榕
-# 最后一次更改: 榕
-# Last Run: 2026-03-07 09:57:07 +0800
-# Last Success: 2026-03-07 09:57:07 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:46:50 +0800
+# 最近一次运行成功时间: 2026-03-22 13:46:50 +0800
+# 测试目的: 验证名单姓名重复时返回 RC=3。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-list.py -k test_duplicate_name_in_file_returns_rc3
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 对应测试文件路径: test/codex-multi-agents/test_codex-multi-agents-list.py
 def test_duplicate_name_in_file_returns_rc3(tmp_path: Path) -> None:
     agents_file = tmp_path / "agents-lists.md"
     rows = [
@@ -420,11 +530,14 @@ def test_duplicate_name_in_file_returns_rc3(tmp_path: Path) -> None:
 
 # TC-015
 # 创建者: 榕
-# 最后一次更改: 榕
-# Last Run: 2026-03-07 09:57:07 +0800
-# Last Success: 2026-03-07 09:57:07 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:46:50 +0800
+# 最近一次运行成功时间: 2026-03-22 13:46:50 +0800
+# 测试目的: 验证写锁冲突时返回 RC=4。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-list.py -k test_lock_conflict_returns_rc4
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 对应测试文件路径: test/codex-multi-agents/test_codex-multi-agents-list.py
 def test_lock_conflict_returns_rc4(tmp_path: Path) -> None:
     agents_file = tmp_path / "agents-lists.md"
     write_agents_file(agents_file)
@@ -438,11 +551,14 @@ def test_lock_conflict_returns_rc4(tmp_path: Path) -> None:
 
 # TC-016
 # 创建者: 榕
-# 最后一次更改: 榕
-# Last Run: 2026-03-07 09:57:07 +0800
-# Last Success: 2026-03-07 09:57:07 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:46:50 +0800
+# 最近一次运行成功时间: 2026-03-22 13:46:50 +0800
+# 测试目的: 验证 -replace 支持写入空值。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-list.py -k test_replace_supports_empty_value
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 对应测试文件路径: test/codex-multi-agents/test_codex-multi-agents-list.py
 def test_replace_supports_empty_value(tmp_path: Path) -> None:
     agents_file = tmp_path / "agents-lists.md"
     write_agents_file(agents_file)
@@ -463,11 +579,14 @@ def test_replace_supports_empty_value(tmp_path: Path) -> None:
 
 # TC-017
 # 创建者: 榕
-# 最后一次更改: 榕
-# Last Run: 2026-03-07 12:08:00 +0800
-# Last Success: 2026-03-07 12:08:00 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:46:50 +0800
+# 最近一次运行成功时间: 2026-03-22 13:46:50 +0800
+# 测试目的: 验证 -status 在写锁占用时仍可读取并返回 RC=0。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-list.py -k test_status_ignores_lock_and_returns_rc0
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 对应测试文件路径: test/codex-multi-agents/test_codex-multi-agents-list.py
 def test_status_ignores_lock_and_returns_rc0(tmp_path: Path) -> None:
     agents_file = tmp_path / "agents-lists.md"
     write_agents_file(agents_file)
@@ -483,11 +602,14 @@ def test_status_ignores_lock_and_returns_rc0(tmp_path: Path) -> None:
 
 # TC-018
 # 创建者: 榕
-# 最后一次更改: 榕
-# Last Run: 2026-03-07 13:24:00 +0800
-# Last Success: 2026-03-07 13:24:00 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:46:50 +0800
+# 最近一次运行成功时间: 2026-03-22 13:46:50 +0800
+# 测试目的: 验证 -status 能读取缺少新增尾列的历史行。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-list.py -k test_status_accepts_rows_missing_new_tail_column
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 对应测试文件路径: test/codex-multi-agents/test_codex-multi-agents-list.py
 def test_status_accepts_rows_missing_new_tail_column(tmp_path: Path) -> None:
     agents_file = tmp_path / "agents-lists.md"
     # 历史数据行缺少新增“职责”列，脚本应补空并正常读取。
@@ -503,11 +625,14 @@ def test_status_accepts_rows_missing_new_tail_column(tmp_path: Path) -> None:
 
 # TC-019
 # 创建者: 榕
-# 最后一次更改: 榕
-# Last Run: 2026-03-08 10:12:00 +0800
-# Last Success: 2026-03-08 10:12:00 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:46:50 +0800
+# 最近一次运行成功时间: 2026-03-22 13:46:50 +0800
+# 测试目的: 验证 -init 会话存在时发送初始化消息并返回 RC=0。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-list.py -k test_init_agent_sends_message_success
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 对应测试文件路径: test/codex-multi-agents/test_codex-multi-agents-list.py
 def test_init_agent_sends_message_success(tmp_path: Path) -> None:
     agents_file = tmp_path / "agents-lists.md"
     write_agents_file(agents_file)
@@ -533,11 +658,14 @@ def test_init_agent_sends_message_success(tmp_path: Path) -> None:
 
 # TC-020
 # 创建者: 榕
-# 最后一次更改: 榕
-# Last Run: 2026-03-08 10:12:00 +0800
-# Last Success: 2026-03-08 10:12:00 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:46:50 +0800
+# 最近一次运行成功时间: 2026-03-22 13:46:50 +0800
+# 测试目的: 验证 -init 目标会话不存在时返回 RC=3。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-list.py -k test_init_agent_missing_session_returns_rc3
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 对应测试文件路径: test/codex-multi-agents/test_codex-multi-agents-list.py
 def test_init_agent_missing_session_returns_rc3(tmp_path: Path) -> None:
     agents_file = tmp_path / "agents-lists.md"
     write_agents_file(agents_file)
@@ -557,11 +685,14 @@ def test_init_agent_missing_session_returns_rc3(tmp_path: Path) -> None:
 
 # TC-021
 # 创建者: 榕
-# 最后一次更改: 榕
-# Last Run: 2026-03-17 21:40:00 +0800
-# Last Success: 2026-03-17 21:40:00 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:46:50 +0800
+# 最近一次运行成功时间: 2026-03-22 13:46:50 +0800
+# 测试目的: 验证 -compact 会话存在时发送压缩与回报指令并返回 RC=0。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-list.py -k test_compact_agent_sends_compact_and_report
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 对应测试文件路径: test/codex-multi-agents/test_codex-multi-agents-list.py
 def test_compact_agent_sends_compact_and_report(tmp_path: Path) -> None:
     agents_file = tmp_path / "agents-lists.md"
     write_agents_file(agents_file)
@@ -585,11 +716,14 @@ def test_compact_agent_sends_compact_and_report(tmp_path: Path) -> None:
 
 # TC-022
 # 创建者: 榕
-# 最后一次更改: 榕
-# Last Run: 2026-03-17 21:40:00 +0800
-# Last Success: 2026-03-17 21:40:00 +0800
-# 功能文件: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
-# Spec 文件: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 13:46:50 +0800
+# 最近一次运行成功时间: 2026-03-22 13:46:50 +0800
+# 测试目的: 验证 -compact 目标会话不存在时返回 RC=3。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-list.py -k test_compact_agent_missing_session_returns_rc3
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-list.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-list.md
+# 对应测试文件路径: test/codex-multi-agents/test_codex-multi-agents-list.py
 def test_compact_agent_missing_session_returns_rc3(tmp_path: Path) -> None:
     agents_file = tmp_path / "agents-lists.md"
     write_agents_file(agents_file)

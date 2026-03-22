@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-定义 CPU 后端 include/cpu 头文件规范，覆盖 `include/cpu/Memory.h` 与 `include/cpu/Nn.h` 的公开接口、行为与约束。该 spec 以 CPU 后端现有模板接口为准，描述 `cpu::Memory<T, Rank>` 的视图语义与逐元素/显式 broadcast 运算。
+定义 CPU 后端 include/cpu 头文件规范，覆盖 `include/cpu/Memory.h` 与 `include/cpu/Nn.h` 的公开接口、行为与约束。当前基线要求 `cpu::Memory<T>` 使用运行期 `rank`，并以 `MAX_DIM=8` 作为内部固定上限；逐元素/显式 broadcast 语义仍由 CPU include 层实现负责承接。
 
 ## 文档信息
 
@@ -22,11 +22,11 @@
 
 - 规范 CPU 后端 `Memory` 视图与 `Nn` 运算接口，便于与 `spec/operation/nn.md` 的语义对齐。
 - 保持纯头文件、无标准库依赖、无异常机制的实现约束。
-- 明确 CPU 后端使用编译期 `Rank` 模板参数的接口边界。
+- 明确 CPU 后端 `Memory` 视图使用运行期 `rank` 的接口边界，并以 `MAX_DIM=8` 作为固定容量基线。
 
 ## 限制与边界
 
-- `cpu::Memory<T, Rank>` 使用编译期固定 `Rank`，不等同于 include/api 的运行期 `rank` 规范。
+- `cpu::Memory<T>` 以运行期 `rank` 描述维度，并在内部以 `MAX_DIM=8` 保存 `shape/stride`；调用方必须满足前置条件 `0 < rank <= 8`，实现不得对 `rank > 8` 做静默截断。
 - 公开接口均为纯头文件模板与内联实现，不提供动态分配、异常或运行时边界检查。
 - 逐元素与比较算子要求输入与输出形状一致，广播仅支持显式 `broadcast`，不提供隐式广播或标量重载。
 - 运行时错误由调用方规避；接口返回 `void`，不提供状态码。
@@ -92,16 +92,16 @@ cpu::MemorySpace space = cpu::MemorySpace::SM;
 - 返回语义：供 `cpu::Memory` 构造与查询时记录内存空间。
 - 限制条件：不定义其他空间成员。
 
-### `cpu::Memory<T, Rank>`
+### `cpu::Memory<T>`
 
 功能说明：
 
-- 表示编译期固定 `Rank` 的多维内存视图，记录 `data/shape/stride/format/space` 元信息。
+- 表示运行期 `rank` 的多维内存视图，记录 `data/shape/stride/rank/format/space` 元信息。
 
 参数说明：
 
 - `T`：元素类型。
-- `Rank`：编译期维度数，必须大于 `0`。
+- `rank`：运行期维度数，必须大于 `0` 且不超过 `MAX_DIM=8`。
 
 使用示例：
 
@@ -112,21 +112,23 @@ int data[6] = {0, 1, 2, 3, 4, 5};
 long long shape[2] = {2, 3};
 long long stride[2] = {3, 1};
 
-cpu::Memory<int, 2> mem(data, shape, stride, cpu::MemoryFormat::Norm, cpu::MemorySpace::GM);
+cpu::Memory<int> mem(data, 2, shape, stride, cpu::MemoryFormat::Norm, cpu::MemorySpace::GM);
 ```
 
 注意事项：
 
-- `shape`/`stride` 由调用方提供，类内部拷贝数组值。
+- `shape`/`stride` 由调用方提供，类内部按 `rank` 拷贝数组值。
 - `data` 必须指向有效连续内存，接口不检查空指针或越界访问。
+- 内部固定容量基线为 `MAX_DIM=8`，调用方需保证 `rank` 不超过该上限；超界属于契约违背，允许实现触发显式失败。
+- 公开构造口径仅接受显式 `rank` 参数，不再以定长数组模板参数作为主接口。
 
 返回与限制：
 
-- 返回类型：`cpu::Memory<T, Rank>`。
+- 返回类型：`cpu::Memory<T>`。
 - 返回语义：构造并记录内存视图元信息。
-- 限制条件：`Rank == 0` 不允许；非法指针或维度值属于未定义行为。
+- 限制条件：`rank == 0` 或 `rank > MAX_DIM` 不在支持范围内；实现可通过显式断言/契约式检查终止，不能静默截断；非法指针或维度值属于未定义行为。
 
-#### `Memory(data, shape, stride, format, space)`
+#### `Memory(data, rank, shape, stride, format, space)`
 
 功能说明：
 
@@ -135,28 +137,30 @@ cpu::Memory<int, 2> mem(data, shape, stride, cpu::MemoryFormat::Norm, cpu::Memor
 参数说明：
 
 - `data (T*)`：底层数据指针。
-- `shape (const long long (&)[Rank])`：维度数组。
-- `stride (const long long (&)[Rank])`：步幅数组。
+- `rank (unsigned long long)`：运行期维度数。
+- `shape (const long long*)`：长度至少为 `rank` 的维度数组。
+- `stride (const long long*)`：长度至少为 `rank` 的步幅数组。
 - `format (cpu::MemoryFormat)`：布局格式，默认 `Norm`。
 - `space (cpu::MemorySpace)`：内存空间，默认 `GM`。
 
 使用示例：
 
 ```cpp
-cpu::Memory<int, 2> mem(data, shape, stride, cpu::MemoryFormat::CLast, cpu::MemorySpace::SM);
+cpu::Memory<int> mem(data, 2, shape, stride, cpu::MemoryFormat::CLast, cpu::MemorySpace::SM);
 ```
 
 注意事项：
 
 - 不进行 `shape/stride` 的合法性检查。
+- `rank` 必须满足 `0 < rank <= MAX_DIM`；超界时允许实现直接触发契约失败。
 
 返回与限制：
 
-- 返回类型：`cpu::Memory<T, Rank>`。
+- 返回类型：`cpu::Memory<T>`。
 - 返回语义：构造并保存显式步幅。
-- 限制条件：调用方需保证 `shape/stride` 合法。
+- 限制条件：调用方需保证 `rank/shape/stride` 合法。
 
-#### `Memory(data, shape, format, space)`
+#### `Memory(data, rank, shape, format, space)`
 
 功能说明：
 
@@ -165,25 +169,27 @@ cpu::Memory<int, 2> mem(data, shape, stride, cpu::MemoryFormat::CLast, cpu::Memo
 参数说明：
 
 - `data (T*)`：底层数据指针。
-- `shape (const long long (&)[Rank])`：维度数组。
+- `rank (unsigned long long)`：运行期维度数。
+- `shape (const long long*)`：长度至少为 `rank` 的维度数组。
 - `format (cpu::MemoryFormat)`：布局格式，默认 `Norm`。
 - `space (cpu::MemorySpace)`：内存空间，默认 `GM`。
 
 使用示例：
 
 ```cpp
-cpu::Memory<float, 2> mem(data, shape);
+cpu::Memory<float> mem(data, 2, shape);
 ```
 
 注意事项：
 
 - `stride` 按连续行主序推导，未提供覆盖入口。
+- `rank` 必须满足 `0 < rank <= MAX_DIM`；超界时允许实现直接触发契约失败。
 
 返回与限制：
 
-- 返回类型：`cpu::Memory<T, Rank>`。
+- 返回类型：`cpu::Memory<T>`。
 - 返回语义：构造并填充连续步幅。
-- 限制条件：调用方需保证 `shape` 合法。
+- 限制条件：调用方需保证 `rank/shape` 合法。
 
 #### `data()`
 
@@ -267,7 +273,7 @@ const long long* stride = mem.stride();
 
 功能说明：
 
-- 返回编译期固定维度数。
+- 返回运行期维度数。
 
 参数说明：
 
@@ -281,13 +287,13 @@ unsigned long long rank = mem.rank();
 
 注意事项：
 
-- `rank()` 为 `static constexpr`，与模板参数一致。
+- `rank()` 返回构造时保存的运行期维度数。
 
 返回与限制：
 
 - 返回类型：`unsigned long long`。
-- 返回语义：返回编译期 `Rank`。
-- 限制条件：无运行期修改能力。
+- 返回语义：返回运行期 `rank`。
+- 限制条件：构造后不提供修改入口。
 
 #### `format()`
 
@@ -401,7 +407,7 @@ bool contiguous = mem.is_contiguous();
 
 参数说明：
 
-- `indices (const long long (&)[Rank])`：长度为 `Rank` 的索引数组。
+- `indices (const long long*)`：长度至少为 `rank()` 的索引数组。
 
 使用示例：
 
@@ -428,7 +434,7 @@ long long offset = mem.linear_offset(index);
 
 参数说明：
 
-- `indices (const long long (&)[Rank])`：长度为 `Rank` 的索引数组。
+- `indices (const long long*)`：长度至少为 `rank()` 的索引数组。
 
 使用示例：
 
@@ -452,13 +458,13 @@ int& value = mem.at(index);
 
 功能说明：
 
-- 对两个 `cpu::Memory` 视图执行逐元素加法。
+- 对两个 `cpu::Memory<T>` 视图执行逐元素加法。
 
 参数说明：
 
-- `lhs (const cpu::Memory<T, Rank>&)`：左操作数视图。
-- `rhs (const cpu::Memory<T, Rank>&)`：右操作数视图。
-- `out (cpu::Memory<T, Rank>&)`：输出视图。
+- `lhs (const cpu::Memory<T>&)`：左操作数视图。
+- `rhs (const cpu::Memory<T>&)`：右操作数视图。
+- `out (cpu::Memory<T>&)`：输出视图。
 
 使用示例：
 
@@ -468,7 +474,7 @@ cpu::add(lhs, rhs, out);
 
 注意事项：
 
-- `lhs/rhs/out` 的 `Rank`、`shape` 与 `stride` 需保持一致。
+- `lhs/rhs/out` 的运行期 `rank`、`shape` 与 `stride` 需保持一致。
 - 接口不检查形状合法性。
 
 返回与限制：
@@ -485,9 +491,9 @@ cpu::add(lhs, rhs, out);
 
 参数说明：
 
-- `lhs (const cpu::Memory<T, Rank>&)`：左操作数视图。
-- `rhs (const cpu::Memory<T, Rank>&)`：右操作数视图。
-- `out (cpu::Memory<T, Rank>&)`：输出视图。
+- `lhs (const cpu::Memory<T>&)`：左操作数视图。
+- `rhs (const cpu::Memory<T>&)`：右操作数视图。
+- `out (cpu::Memory<T>&)`：输出视图。
 
 使用示例：
 
@@ -497,7 +503,7 @@ cpu::sub(lhs, rhs, out);
 
 注意事项：
 
-- `lhs/rhs/out` 的 `Rank` 与 `shape` 必须一致。
+- `lhs/rhs/out` 的运行期 `rank` 与 `shape` 必须一致。
 
 返回与限制：
 
@@ -513,9 +519,9 @@ cpu::sub(lhs, rhs, out);
 
 参数说明：
 
-- `lhs (const cpu::Memory<T, Rank>&)`：左操作数视图。
-- `rhs (const cpu::Memory<T, Rank>&)`：右操作数视图。
-- `out (cpu::Memory<T, Rank>&)`：输出视图。
+- `lhs (const cpu::Memory<T>&)`：左操作数视图。
+- `rhs (const cpu::Memory<T>&)`：右操作数视图。
+- `out (cpu::Memory<T>&)`：输出视图。
 
 使用示例：
 
@@ -525,7 +531,7 @@ cpu::mul(lhs, rhs, out);
 
 注意事项：
 
-- `lhs/rhs/out` 的 `Rank` 与 `shape` 必须一致。
+- `lhs/rhs/out` 的运行期 `rank` 与 `shape` 必须一致。
 
 返回与限制：
 
@@ -541,9 +547,9 @@ cpu::mul(lhs, rhs, out);
 
 参数说明：
 
-- `lhs (const cpu::Memory<T, Rank>&)`：左操作数视图。
-- `rhs (const cpu::Memory<T, Rank>&)`：右操作数视图。
-- `out (cpu::Memory<T, Rank>&)`：输出视图。
+- `lhs (const cpu::Memory<T>&)`：左操作数视图。
+- `rhs (const cpu::Memory<T>&)`：右操作数视图。
+- `out (cpu::Memory<T>&)`：输出视图。
 
 使用示例：
 
@@ -553,7 +559,7 @@ cpu::truediv(lhs, rhs, out);
 
 注意事项：
 
-- `lhs/rhs/out` 的 `Rank` 与 `shape` 必须一致。
+- `lhs/rhs/out` 的运行期 `rank` 与 `shape` 必须一致。
 
 返回与限制：
 
@@ -569,9 +575,9 @@ cpu::truediv(lhs, rhs, out);
 
 参数说明：
 
-- `lhs (const cpu::Memory<T, Rank>&)`：左操作数视图。
-- `rhs (const cpu::Memory<T, Rank>&)`：右操作数视图。
-- `out (cpu::Memory<PredT, Rank>&)`：输出视图，元素类型用于表示 predicate。
+- `lhs (const cpu::Memory<T>&)`：左操作数视图。
+- `rhs (const cpu::Memory<T>&)`：右操作数视图。
+- `out (cpu::Memory<PredT>&)`：输出视图，元素类型用于表示 predicate。
 
 使用示例：
 
@@ -581,7 +587,7 @@ cpu::eq(lhs, rhs, out);
 
 注意事项：
 
-- `lhs/rhs/out` 的 `Rank` 与 `shape` 必须一致。
+- `lhs/rhs/out` 的运行期 `rank` 与 `shape` 必须一致。
 - `out` 元素类型需能表示比较结果。
 
 返回与限制：
@@ -598,9 +604,9 @@ cpu::eq(lhs, rhs, out);
 
 参数说明：
 
-- `lhs (const cpu::Memory<T, Rank>&)`：左操作数视图。
-- `rhs (const cpu::Memory<T, Rank>&)`：右操作数视图。
-- `out (cpu::Memory<PredT, Rank>&)`：输出视图。
+- `lhs (const cpu::Memory<T>&)`：左操作数视图。
+- `rhs (const cpu::Memory<T>&)`：右操作数视图。
+- `out (cpu::Memory<PredT>&)`：输出视图。
 
 使用示例：
 
@@ -610,7 +616,7 @@ cpu::ne(lhs, rhs, out);
 
 注意事项：
 
-- `lhs/rhs/out` 的 `Rank` 与 `shape` 必须一致。
+- `lhs/rhs/out` 的运行期 `rank` 与 `shape` 必须一致。
 
 返回与限制：
 
@@ -626,9 +632,9 @@ cpu::ne(lhs, rhs, out);
 
 参数说明：
 
-- `lhs (const cpu::Memory<T, Rank>&)`：左操作数视图。
-- `rhs (const cpu::Memory<T, Rank>&)`：右操作数视图。
-- `out (cpu::Memory<PredT, Rank>&)`：输出视图。
+- `lhs (const cpu::Memory<T>&)`：左操作数视图。
+- `rhs (const cpu::Memory<T>&)`：右操作数视图。
+- `out (cpu::Memory<PredT>&)`：输出视图。
 
 使用示例：
 
@@ -638,7 +644,7 @@ cpu::lt(lhs, rhs, out);
 
 注意事项：
 
-- `lhs/rhs/out` 的 `Rank` 与 `shape` 必须一致。
+- `lhs/rhs/out` 的运行期 `rank` 与 `shape` 必须一致。
 
 返回与限制：
 
@@ -654,9 +660,9 @@ cpu::lt(lhs, rhs, out);
 
 参数说明：
 
-- `lhs (const cpu::Memory<T, Rank>&)`：左操作数视图。
-- `rhs (const cpu::Memory<T, Rank>&)`：右操作数视图。
-- `out (cpu::Memory<PredT, Rank>&)`：输出视图。
+- `lhs (const cpu::Memory<T>&)`：左操作数视图。
+- `rhs (const cpu::Memory<T>&)`：右操作数视图。
+- `out (cpu::Memory<PredT>&)`：输出视图。
 
 使用示例：
 
@@ -666,7 +672,7 @@ cpu::le(lhs, rhs, out);
 
 注意事项：
 
-- `lhs/rhs/out` 的 `Rank` 与 `shape` 必须一致。
+- `lhs/rhs/out` 的运行期 `rank` 与 `shape` 必须一致。
 
 返回与限制：
 
@@ -682,9 +688,9 @@ cpu::le(lhs, rhs, out);
 
 参数说明：
 
-- `lhs (const cpu::Memory<T, Rank>&)`：左操作数视图。
-- `rhs (const cpu::Memory<T, Rank>&)`：右操作数视图。
-- `out (cpu::Memory<PredT, Rank>&)`：输出视图。
+- `lhs (const cpu::Memory<T>&)`：左操作数视图。
+- `rhs (const cpu::Memory<T>&)`：右操作数视图。
+- `out (cpu::Memory<PredT>&)`：输出视图。
 
 使用示例：
 
@@ -694,7 +700,7 @@ cpu::gt(lhs, rhs, out);
 
 注意事项：
 
-- `lhs/rhs/out` 的 `Rank` 与 `shape` 必须一致。
+- `lhs/rhs/out` 的运行期 `rank` 与 `shape` 必须一致。
 
 返回与限制：
 
@@ -710,9 +716,9 @@ cpu::gt(lhs, rhs, out);
 
 参数说明：
 
-- `lhs (const cpu::Memory<T, Rank>&)`：左操作数视图。
-- `rhs (const cpu::Memory<T, Rank>&)`：右操作数视图。
-- `out (cpu::Memory<PredT, Rank>&)`：输出视图。
+- `lhs (const cpu::Memory<T>&)`：左操作数视图。
+- `rhs (const cpu::Memory<T>&)`：右操作数视图。
+- `out (cpu::Memory<PredT>&)`：输出视图。
 
 使用示例：
 
@@ -722,7 +728,7 @@ cpu::ge(lhs, rhs, out);
 
 注意事项：
 
-- `lhs/rhs/out` 的 `Rank` 与 `shape` 必须一致。
+- `lhs/rhs/out` 的运行期 `rank` 与 `shape` 必须一致。
 
 返回与限制：
 
@@ -738,8 +744,8 @@ cpu::ge(lhs, rhs, out);
 
 参数说明：
 
-- `input (const cpu::Memory<T, InRank>&)`：输入视图。
-- `out (cpu::Memory<T, OutRank>&)`：输出视图。
+- `input (const cpu::Memory<T>&)`：输入视图。
+- `out (cpu::Memory<T>&)`：输出视图。
 
 使用示例：
 
@@ -749,7 +755,7 @@ cpu::broadcast(input, out);
 
 注意事项：
 
-- `OutRank >= InRank`。
+- `out.rank() >= input.rank()`，并以运行期 `rank` 对齐尾部维度。
 - 广播按尾维对齐，逐维满足 `input_dim == output_dim` 或 `input_dim == 1`。
 - 接口不检查广播条件，调用方需保证合法。
 

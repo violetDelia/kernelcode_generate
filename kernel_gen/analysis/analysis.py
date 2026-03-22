@@ -7,13 +7,17 @@
 - 基于 Memory 形状统计逐元素/比较/broadcast/matmul 的计算量与搬运量。
 - 支持函数级聚合，区分中间结果是否物化。
 
+覆盖率信息:
+- 当前覆盖率: `100%` (`kernel_gen/analysis/analysis.py`，2026-03-22 15:24:43 +0800)。
+- 对应覆盖率命令: coverage run -m pytest -q test/analysis/test_analysis.py && coverage report --include=kernel_gen/analysis/analysis.py -m
+
 使用示例:
 - from kernel_gen.analysis.analysis import analyze_add, analyze_function, MemoryRef, Operation
 - result = analyze_add(lhs, rhs, out)
 - summary = analyze_function([Operation("add", [MemoryRef("A", lhs), MemoryRef("B", rhs)], MemoryRef("C", out))])
 
 关联文件:
-- spec: spec/analysis/分析.md
+- spec: spec/analysis/analysis_kernel.md
 - test: test/analysis/test_analysis.py
 - 功能实现: kernel_gen/analysis/analysis.py
 """
@@ -41,7 +45,7 @@ class AnalysisError(ValueError):
     - raise AnalysisError("Shape mismatch")
 
     关联文件:
-    - spec: spec/analysis/分析.md
+    - spec: spec/analysis/analysis_kernel.md
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """
@@ -61,7 +65,7 @@ class OpStats:
     - stats = OpStats(sp.Integer(1), sp.Integer(4), sp.Integer(2))
 
     关联文件:
-    - spec: spec/analysis/分析.md
+    - spec: spec/analysis/analysis_kernel.md
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """
@@ -83,7 +87,7 @@ class OpStats:
         - total = stats1 + stats2
 
         关联文件:
-        - spec: spec/analysis/分析.md
+        - spec: spec/analysis/analysis_kernel.md
         - test: test/analysis/test_analysis.py
         - 功能实现: kernel_gen/analysis/analysis.py
         """
@@ -110,7 +114,7 @@ class MemoryRef:
     - MemoryRef("A", Memory(["A", "B"], NumericType.Float32))
 
     关联文件:
-    - spec: spec/analysis/分析.md
+    - spec: spec/analysis/analysis_kernel.md
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """
@@ -133,7 +137,7 @@ class Operation:
     - Operation("add", [MemoryRef("A", lhs)], MemoryRef("C", out))
 
     关联文件:
-    - spec: spec/analysis/分析.md
+    - spec: spec/analysis/analysis_kernel.md
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """
@@ -158,7 +162,7 @@ class AnalysisSummary:
     - summary = AnalysisSummary([stats], stats)
 
     关联文件:
-    - spec: spec/analysis/分析.md
+    - spec: spec/analysis/analysis_kernel.md
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """
@@ -180,7 +184,7 @@ def _to_symbol(value: int | str) -> sp.Basic:
     - _to_symbol("N")
 
     关联文件:
-    - spec: spec/analysis/分析.md
+    - spec: spec/analysis/analysis_kernel.md
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """
@@ -204,7 +208,7 @@ def _product(values: Iterable[int | str]) -> sp.Basic:
     - _product([\"A\", \"B\"])
 
     关联文件:
-    - spec: spec/analysis/分析.md
+    - spec: spec/analysis/analysis_kernel.md
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """
@@ -227,7 +231,7 @@ def _size_symbol(value: int | None, fallback: str) -> sp.Basic:
     - _size_symbol(None, \"S\")
 
     关联文件:
-    - spec: spec/analysis/分析.md
+    - spec: spec/analysis/analysis_kernel.md
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """
@@ -249,7 +253,7 @@ def _ensure_same_shape(lhs: Memory, rhs: Memory, message: str) -> None:
     - _ensure_same_shape(lhs, rhs, \"Shape mismatch\")
 
     关联文件:
-    - spec: spec/analysis/分析.md
+    - spec: spec/analysis/analysis_kernel.md
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """
@@ -270,7 +274,7 @@ def _element_count(memory: Memory) -> sp.Basic:
     - _element_count(Memory([\"A\", \"B\"], dtype))
 
     关联文件:
-    - spec: spec/analysis/分析.md
+    - spec: spec/analysis/analysis_kernel.md
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """
@@ -291,7 +295,7 @@ def _ensure_broadcastable(input_mem: Memory, output_mem: Memory) -> None:
     - _ensure_broadcastable(inp, out)
 
     关联文件:
-    - spec: spec/analysis/分析.md
+    - spec: spec/analysis/analysis_kernel.md
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """
@@ -323,7 +327,7 @@ def _ensure_matmul_shape(lhs: Memory, rhs: Memory, out: Memory) -> None:
     - _ensure_matmul_shape(lhs, rhs, out)
 
     关联文件:
-    - spec: spec/analysis/分析.md
+    - spec: spec/analysis/analysis_kernel.md
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """
@@ -362,7 +366,7 @@ def analyze_elementwise(
     - analyze_elementwise(lhs, rhs, out, op_kind="arith")
 
     关联文件:
-    - spec: spec/analysis/分析.md
+    - spec: spec/analysis/analysis_kernel.md
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """
@@ -416,7 +420,7 @@ def analyze_broadcast(
     - analyze_broadcast(inp, out)
 
     关联文件:
-    - spec: spec/analysis/分析.md
+    - spec: spec/analysis/analysis_kernel.md
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """
@@ -455,7 +459,7 @@ def analyze_matmul(
     - analyze_matmul(lhs, rhs, out)
 
     关联文件:
-    - spec: spec/analysis/分析.md
+    - spec: spec/analysis/analysis_kernel.md
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """
@@ -498,7 +502,7 @@ def analyze_function(
     - summary = analyze_function([op1, op2])
 
     关联文件:
-    - spec: spec/analysis/分析.md
+    - spec: spec/analysis/analysis_kernel.md
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """
@@ -587,7 +591,7 @@ def analyze_add(lhs: Memory, rhs: Memory, out: Memory, *, dtype_size: int | None
     - analyze_add(lhs, rhs, out)
 
     关联文件:
-    - spec: spec/analysis/分析.md
+    - spec: spec/analysis/analysis_kernel.md
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """
@@ -614,7 +618,7 @@ def analyze_eq(
     - analyze_eq(lhs, rhs, out)
 
     关联文件:
-    - spec: spec/analysis/分析.md
+    - spec: spec/analysis/analysis_kernel.md
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """
@@ -646,7 +650,7 @@ def analyze_broadcast_op(
     - analyze_broadcast_op(inp, out)
 
     关联文件:
-    - spec: spec/analysis/分析.md
+    - spec: spec/analysis/analysis_kernel.md
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """
@@ -672,7 +676,7 @@ def analyze_matmul_op(
     - analyze_matmul_op(lhs, rhs, out)
 
     关联文件:
-    - spec: spec/analysis/分析.md
+    - spec: spec/analysis/analysis_kernel.md
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """

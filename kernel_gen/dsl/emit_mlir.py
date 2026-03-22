@@ -1,7 +1,7 @@
 """AST emit utilities for DSL nodes.
 
 创建者: 小李飞刀
-最后一次更改: 朽木露琪亚
+最后一次更改: 不要啊教练
 
 功能说明:
 - 提供 AST 节点到 MLIR SSA value/op 的发射入口。
@@ -22,8 +22,19 @@ from __future__ import annotations
 from typing import Sequence
 
 from xdsl.dialects import arith, func, scf
-from xdsl.dialects.builtin import ArrayAttr, FloatAttr, IntAttr, IntegerAttr, StringAttr, i1, i32, f32
-from xdsl.ir import Attribute, Block
+from xdsl.dialects.builtin import (
+    ArrayAttr,
+    FloatAttr,
+    IndexType,
+    IntAttr,
+    IntegerAttr,
+    IntegerType,
+    StringAttr,
+    f32,
+    i1,
+    i32,
+)
+from xdsl.ir import Attribute, Block, SSAValue
 
 from kernel_gen.dialect.dma import DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp
 from kernel_gen.dialect.nn import (
@@ -163,6 +174,47 @@ def _dim_to_attr(value: int | str) -> object:
     return StringAttr(value)
 
 
+def _const_index(value: int, ctx: EmitContext) -> SSAValue:
+    attr = IntegerAttr(value, IndexType())
+    op = arith.ConstantOp(attr)
+    ctx.builder.add_op(op)
+    return op.result
+
+
+def _ensure_index_value(value: SSAValue, ctx: EmitContext, location: SourceLocation | None) -> SSAValue:
+    if isinstance(value.type, IndexType):
+        return value
+    if isinstance(value.type, IntegerType):
+        op = arith.IndexCastOp(value, IndexType())
+        ctx.builder.add_op(op)
+        return op.result
+    raise _LoweringError("Index operand must be integer or index", location=location)
+
+
+def _resolve_index_symbol(name: str, ctx: EmitContext, location: SourceLocation | None) -> SSAValue:
+    if name not in ctx.symbols:
+        raise _LoweringError("Unknown index symbol", location=location)
+    value = ctx.symbols[name]
+    return _ensure_index_value(value, ctx, location)
+
+
+def _resolve_index_operand(expr: object, ctx: EmitContext, location: SourceLocation | None) -> SSAValue:
+    if isinstance(expr, ConstAST):
+        if isinstance(expr.value, int):
+            return _const_index(expr.value, ctx)
+        if isinstance(expr.value, str):
+            return _resolve_index_symbol(expr.value, ctx, expr.location)
+        raise _LoweringError("Index must be int or str", location=expr.location)
+    if isinstance(expr, (ScalarArgAST, VarAST)):
+        value = _lookup_symbol(expr, ctx)
+        return _ensure_index_value(value, ctx, expr.location)
+    if isinstance(expr, int):
+        return _const_index(expr, ctx)
+    if isinstance(expr, str):
+        return _resolve_index_symbol(expr, ctx, location)
+    raise _LoweringError("Unsupported index expression", location=location or getattr(expr, "location", None))
+
+
 def _get_loop_vars(ctx: EmitContext) -> dict[str, int]:
     if ctx.config is None:
         ctx.config = {}
@@ -196,17 +248,33 @@ def _build_index_attrs(
     *,
     default_value: int = 0,
     location: SourceLocation | None = None,
-) -> ArrayAttr:
+) -> list[SSAValue]:
     if value is None:
         values = [default_value for _ in range(rank)]
     elif isinstance(value, (list, tuple)):
         if len(value) != rank:
             raise _LoweringError("Index rank mismatch", location=location or getattr(value, "location", None))
-        values = [_resolve_index_expr(entry, ctx) for entry in value]
+        values = list(value)
     else:
-        scalar = _resolve_index_expr(value, ctx)
-        values = [scalar for _ in range(rank)]
-    return ArrayAttr([_dim_to_attr(item) for item in values])
+        values = [value for _ in range(rank)]
+    return [_resolve_index_operand(item, ctx, getattr(item, "location", None) or location) for item in values]
+
+
+def _build_index_operands_from_layout(
+    layout: ArrayAttr[Attribute],
+    ctx: EmitContext,
+    *,
+    location: SourceLocation | None = None,
+) -> list[SSAValue]:
+    values: list[object] = []
+    for dim in layout.data:
+        if isinstance(dim, IntAttr):
+            values.append(dim.data)
+        elif isinstance(dim, StringAttr):
+            values.append(dim.data)
+        else:
+            raise _LoweringError("Unsupported layout attribute", location=location)
+    return [_resolve_index_operand(item, ctx, location) for item in values]
 
 
 def _lower_loop_bound(expr: object, ctx: EmitContext) -> object:
@@ -223,10 +291,13 @@ def _build_stride_attrs(
     ctx: EmitContext,
     *,
     location: SourceLocation | None = None,
-) -> ArrayAttr:
+) -> list[SSAValue]:
     stride = _build_index_attrs(value, rank, ctx, default_value=1, location=location)
-    for entry in stride.data:
-        if not isinstance(entry, IntAttr) or entry.data != 1:
+    for entry in stride:
+        owner = entry.owner
+        if not isinstance(owner, arith.ConstantOp) or not isinstance(owner.value, IntegerAttr):
+            raise _LoweringError("Only unit stride is supported", location=location)
+        if owner.value.value.data != 1:
             raise _LoweringError("Only unit stride is supported", location=location)
     return stride
 
@@ -519,9 +590,9 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         rank = len(source_type.shape.data)
         offsets = _build_index_attrs(expr.offset, rank, ctx, location=expr.location)
         sizes = (
-            ArrayAttr(_build_static_index_list(expr.sizes, rank, default_value=1, location=expr.location))
+            _build_index_attrs(expr.sizes, rank, ctx, default_value=1, location=expr.location)
             if expr.sizes is not None
-            else source_type.shape
+            else _build_index_operands_from_layout(source_type.shape, ctx, location=expr.location)
         )
         strides = _build_stride_attrs(expr.stride, rank, ctx, location=expr.location)
         result_type = _infer_expr_type(expr, ctx.types)
@@ -634,9 +705,9 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
             raise _LoweringError("Store source rank mismatch", location=node.location)
         offsets = _build_index_attrs(node.offset, rank, ctx, location=node.location)
         sizes = (
-            ArrayAttr(_build_static_index_list(node.sizes, rank, default_value=1, location=node.location))
+            _build_index_attrs(node.sizes, rank, ctx, default_value=1, location=node.location)
             if node.sizes is not None
-            else value_type.shape
+            else _build_index_operands_from_layout(value_type.shape, ctx, location=node.location)
         )
         strides = _build_stride_attrs(node.stride, rank, ctx, location=node.location)
         if node.sizes is not None:

@@ -1,7 +1,7 @@
 """AST visitor tests.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 不要啊教练
 
 功能说明:
 - 覆盖 AST 前端、nn dialect IR 与 MLIR 文本入口的回归测试。
@@ -9,9 +9,14 @@
 使用示例:
 - pytest -q test/dsl/test_ast_visitor.py
 
+覆盖率信息:
+- 覆盖率命令: coverage run -m pytest -q test/dsl/test_ast_visitor.py && coverage report --include=kernel_gen/dsl/ast_visitor.py,kernel_gen/dsl/emit_mlir.py -m
+- 覆盖率结果: ast_visitor 98%, emit_mlir 79%（2026-03-22 15:38:56 +0800）
+- 达标线: 95%
+
 关联文件:
-- 功能实现: kernel_gen/dsl/ast_visitor.py
-- Spec 文档: spec/dsl/ast_visitor.md
+- 功能实现: kernel_gen/dsl/ast_visitor.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+- Spec 文档: spec/dsl/ast_visitor.md, spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
 - 测试文件: test/dsl/test_ast_visitor.py
 """
 
@@ -22,8 +27,8 @@ import sys
 from pathlib import Path
 
 import pytest
-from xdsl.dialects import func, scf
-from xdsl.dialects.builtin import ModuleOp, i32
+from xdsl.dialects import arith, func, scf
+from xdsl.dialects.builtin import ArrayAttr, ModuleOp, i32
 from xdsl.ir import Block
 from xdsl.printer import Printer
 
@@ -50,7 +55,16 @@ from kernel_gen.dsl.ast import (
     parse_function,
 )
 from kernel_gen.dsl.ast_visitor import AstVisitor, AstVisitorError
-from kernel_gen.dsl.emit_mlir import EmitContext, _LoweringError, _memory_to_nn_type, emit_mlir as emit_node_mlir
+from kernel_gen.dsl.emit_mlir import (
+    EmitContext,
+    _LoweringError,
+    _build_default_stride_attrs,
+    _build_index_attrs,
+    _get_loop_vars,
+    _memory_to_nn_type,
+    _resolve_index_expr,
+    emit_mlir as emit_node_mlir,
+)
 from kernel_gen.dsl.mlir_gen import build_func_op, build_func_op_from_ast
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -72,12 +86,20 @@ def _print_module(module: ModuleOp) -> str:
     return stream.getvalue()
 
 
+def _unwrap_index_cast(value) -> object:
+    owner = getattr(value, "owner", None)
+    if isinstance(owner, arith.IndexCastOp):
+        return owner.input
+    return value
+
+
 # AST-001
 # 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 21:49:50 +0800
-# 最近一次运行成功时间: 2026-03-21 21:49:50 +0800
+# 最近一次运行测试时间: 2026-03-22 15:38:56 +0800
+# 最近一次运行成功时间: 2026-03-22 15:38:56 +0800
 # 功能说明: 验证 parse_function 生成 FunctionAST 并保留位置信息。
+# 测试目的: 验证 parse_function 生成 FunctionAST 并保留位置信息。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_visit_function_builds_ast
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
@@ -105,6 +127,7 @@ def test_visit_function_builds_ast() -> None:
 # 最近一次运行测试时间: 2026-03-21 21:28:00 +0800
 # 最近一次运行成功时间: 2026-03-21 21:28:00 +0800
 # 功能说明: 验证 parse_function 解析 Tensor/Scalar 参数注解。
+# 测试目的: 验证 parse_function 解析 Tensor/Scalar 参数注解。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_ast_parse_function_parses_annotations
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
@@ -125,9 +148,10 @@ def test_ast_parse_function_parses_annotations() -> None:
 # AST-003
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 21:49:50 +0800
-# 最近一次运行成功时间: 2026-03-21 21:49:50 +0800
+# 最近一次运行测试时间: 2026-03-22 15:38:56 +0800
+# 最近一次运行成功时间: 2026-03-22 15:38:56 +0800
 # 功能说明: 验证 parse_function 对非法注解抛出带诊断信息的错误。
+# 测试目的: 验证 parse_function 对非法注解抛出带诊断信息的错误。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_ast_parse_function_missing_annotation_reports_diagnostics
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
@@ -146,9 +170,10 @@ def test_ast_parse_function_missing_annotation_reports_diagnostics() -> None:
 # MGEN-004
 # 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 21:49:50 +0800
-# 最近一次运行成功时间: 2026-03-21 21:49:50 +0800
+# 最近一次运行测试时间: 2026-03-22 15:38:56 +0800
+# 最近一次运行成功时间: 2026-03-22 15:38:56 +0800
 # 功能说明: 验证 build_func_op 生成 func.func 并包含 nn dialect IR。
+# 测试目的: 验证 build_func_op 生成 func.func 并包含 nn dialect IR。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_visit_to_nn_ir_builds_module
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -170,9 +195,10 @@ def test_visit_to_nn_ir_builds_module() -> None:
 # MGEN-005
 # 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 21:49:50 +0800
-# 最近一次运行成功时间: 2026-03-21 21:49:50 +0800
+# 最近一次运行测试时间: 2026-03-22 15:38:56 +0800
+# 最近一次运行成功时间: 2026-03-22 15:38:56 +0800
 # 功能说明: 验证 func.func 打印输出包含 nn dialect 文本。
+# 测试目的: 验证 func.func 打印输出包含 nn dialect 文本。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_output
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -194,9 +220,10 @@ def test_emit_mlir_output() -> None:
 # AST-001A
 # 创建者: 朽木露琪亚
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 21:49:50 +0800
-# 最近一次运行成功时间: 2026-03-21 21:49:50 +0800
+# 最近一次运行测试时间: 2026-03-22 15:38:56 +0800
+# 最近一次运行成功时间: 2026-03-22 15:38:56 +0800
 # 功能说明: 验证 parse_function 提供独立 AST 解析入口。
+# 测试目的: 验证 parse_function 提供独立 AST 解析入口。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_entry
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
@@ -216,9 +243,10 @@ def test_parse_function_entry() -> None:
 # AST-001B
 # 创建者: ChatGPT
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 21:49:50 +0800
-# 最近一次运行成功时间: 2026-03-21 21:49:50 +0800
+# 最近一次运行测试时间: 2026-03-22 15:38:56 +0800
+# 最近一次运行成功时间: 2026-03-22 15:38:56 +0800
 # 功能说明: 验证 parse_function 不依赖 ast_visitor.visit_function 的反向导入。
+# 测试目的: 验证 parse_function 不依赖 ast_visitor.visit_function 的反向导入。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_does_not_depend_on_ast_visitor_entry
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
@@ -244,9 +272,10 @@ def test_parse_function_does_not_depend_on_ast_visitor_entry(monkeypatch: pytest
 # MGEN-001
 # 创建者: 朽木露琪亚
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 21:49:50 +0800
-# 最近一次运行成功时间: 2026-03-21 21:49:50 +0800
+# 最近一次运行测试时间: 2026-03-22 15:38:56 +0800
+# 最近一次运行成功时间: 2026-03-22 15:38:56 +0800
 # 功能说明: 验证 build_func_op 返回 func.func 并生成正确参数类型。
+# 测试目的: 验证 build_func_op 返回 func.func 并生成正确参数类型。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_returns_func_op
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -269,9 +298,10 @@ def test_build_func_op_returns_func_op() -> None:
 # MGEN-002
 # 创建者: 朽木露琪亚
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 21:49:50 +0800
-# 最近一次运行成功时间: 2026-03-21 21:49:50 +0800
+# 最近一次运行测试时间: 2026-03-22 15:38:56 +0800
+# 最近一次运行成功时间: 2026-03-22 15:38:56 +0800
 # 功能说明: 验证 build_func_op_from_ast 保留 AST 参数顺序。
+# 测试目的: 验证 build_func_op_from_ast 保留 AST 参数顺序。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_from_ast_preserves_arg_order
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -295,9 +325,10 @@ def test_build_func_op_from_ast_preserves_arg_order() -> None:
 # MGEN-003
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 21:49:50 +0800
-# 最近一次运行成功时间: 2026-03-21 21:49:50 +0800
+# 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
+# 最近一次运行成功时间: 2026-03-22 14:59:58 +0800
 # 功能说明: 验证 build_func_op 返回类型与 AST 返回注解一致。
+# 测试目的: 验证 build_func_op 返回类型与 AST 返回注解一致。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_return_type_matches_annotation
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -317,9 +348,10 @@ def test_build_func_op_return_type_matches_annotation() -> None:
 # EMIT-001
 # 创建者: 朽木露琪亚
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 21:49:50 +0800
-# 最近一次运行成功时间: 2026-03-21 21:49:50 +0800
+# 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
+# 最近一次运行成功时间: 2026-03-22 14:59:58 +0800
 # 功能说明: 验证二元表达式节点生成对应 op/value 并复用缓存。
+# 测试目的: 验证二元表达式节点生成对应 op/value 并复用缓存。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_context_reuses_cached_value
 # 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
@@ -346,9 +378,10 @@ def test_emit_context_reuses_cached_value() -> None:
 # EMIT-004
 # 创建者: ChatGPT
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 21:49:50 +0800
-# 最近一次运行成功时间: 2026-03-21 21:49:50 +0800
+# 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
+# 最近一次运行成功时间: 2026-03-22 14:59:58 +0800
 # 功能说明: 验证 emit_mlir 可通过符号表直接解析 TensorAST 输入。
+# 测试目的: 验证 emit_mlir 可通过符号表直接解析 TensorAST 输入。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_tensor_uses_symbol_table
 # 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
@@ -369,9 +402,10 @@ def test_emit_mlir_tensor_uses_symbol_table() -> None:
 # EMIT-002
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 21:49:50 +0800
-# 最近一次运行成功时间: 2026-03-21 21:49:50 +0800
+# 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
+# 最近一次运行成功时间: 2026-03-22 14:59:58 +0800
 # 功能说明: 验证比较表达式节点生成对应 op/value。
+# 测试目的: 验证比较表达式节点生成对应 op/value。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_compare_expr_emits_eq
 # 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
@@ -396,9 +430,10 @@ def test_emit_mlir_compare_expr_emits_eq() -> None:
 # EMIT-003
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 21:49:50 +0800
-# 最近一次运行成功时间: 2026-03-21 21:49:50 +0800
+# 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
+# 最近一次运行成功时间: 2026-03-22 14:59:58 +0800
 # 功能说明: 验证不支持节点抛出错误并携带位置信息。
+# 测试目的: 验证不支持节点抛出错误并携带位置信息。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_unsupported_node_reports_location
 # 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
@@ -416,9 +451,10 @@ def test_emit_mlir_unsupported_node_reports_location() -> None:
 # AV-001
 # 创建者: 朽木露琪亚
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 21:49:50 +0800
-# 最近一次运行成功时间: 2026-03-21 21:49:50 +0800
+# 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
+# 最近一次运行成功时间: 2026-03-22 14:59:58 +0800
 # 功能说明: 验证 AstVisitor 顺序访问 block 并生成多语句 SSA。
+# 测试目的: 验证 AstVisitor 顺序访问 block 并生成多语句 SSA。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_ast_visitor_visit_block_preserves_order
 # 对应功能实现文件路径: kernel_gen/dsl/ast_visitor.py
 # 对应 spec 文件路径: spec/dsl/ast_visitor.md
@@ -452,9 +488,10 @@ def test_ast_visitor_visit_block_preserves_order() -> None:
 # AV-002
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 21:49:50 +0800
-# 最近一次运行成功时间: 2026-03-21 21:49:50 +0800
+# 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
+# 最近一次运行成功时间: 2026-03-22 14:59:58 +0800
 # 功能说明: 验证同一表达式节点复用同一 value。
+# 测试目的: 验证同一表达式节点复用同一 value。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_ast_visitor_reuses_expression_value
 # 对应功能实现文件路径: kernel_gen/dsl/ast_visitor.py
 # 对应 spec 文件路径: spec/dsl/ast_visitor.md
@@ -477,6 +514,7 @@ def test_ast_visitor_reuses_expression_value() -> None:
 # 最近一次运行测试时间: 2026-03-18 10:56:41 +0800
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证 parse_function 可解析标准 Tensor 注解。
+# 测试目的: 验证 parse_function 可解析标准 Tensor 注解。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_globals_and_builtins_annotation_entry
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
@@ -495,6 +533,7 @@ def test_globals_and_builtins_annotation_entry() -> None:
 # 最近一次运行测试时间: 2026-03-18 10:56:41 +0800
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证 ScalarArgAST 会 lowering 为 func.func 标量参数。
+# 测试目的: 验证 ScalarArgAST 会 lowering 为 func.func 标量参数。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_scalar_arg_lowering_in_signature
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -521,6 +560,7 @@ def test_scalar_arg_lowering_in_signature() -> None:
 # 最近一次运行测试时间: 2026-03-18 10:56:41 +0800
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证未知名称在 AST 阶段产生诊断信息。
+# 测试目的: 验证未知名称在 AST 阶段产生诊断信息。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_unknown_name_reports_diagnostics
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
@@ -539,9 +579,10 @@ def test_unknown_name_reports_diagnostics() -> None:
 # AV-003
 # 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 21:49:50 +0800
-# 最近一次运行成功时间: 2026-03-21 21:49:50 +0800
+# 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
+# 最近一次运行成功时间: 2026-03-22 14:59:58 +0800
 # 功能说明: 验证不支持语句/表达式时抛 AstVisitorError 并携带位置信息。
+# 测试目的: 验证不支持语句/表达式时抛 AstVisitorError 并携带位置信息。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_lowering_failure_reports_diagnostics
 # 对应功能实现文件路径: kernel_gen/dsl/ast_visitor.py
 # 对应 spec 文件路径: spec/dsl/ast_visitor.md
@@ -561,6 +602,7 @@ def test_lowering_failure_reports_diagnostics() -> None:
 # 最近一次运行测试时间: 2026-03-18 10:56:41 +0800
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证非法返回注解会保留可定位诊断并向上抛出。
+# 测试目的: 验证非法返回注解会保留可定位诊断并向上抛出。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_invalid_return_annotation_reports_diagnostics
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
@@ -582,6 +624,7 @@ def test_invalid_return_annotation_reports_diagnostics() -> None:
 # 最近一次运行测试时间: 2026-03-18 10:56:41 +0800
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证非法 Tensor 返回注解会抛出带诊断的错误。
+# 测试目的: 验证非法 Tensor 返回注解会抛出带诊断的错误。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_invalid_tensor_return_annotation_reports_diagnostics
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -601,6 +644,7 @@ def test_invalid_tensor_return_annotation_reports_diagnostics() -> None:
 # 最近一次运行测试时间: 2026-03-18 10:56:41 +0800
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证常量 lowering 失败会抛出带诊断的错误。
+# 测试目的: 验证常量 lowering 失败会抛出带诊断的错误。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_constant_lowering_reports_diagnostics
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -620,6 +664,7 @@ def test_constant_lowering_reports_diagnostics() -> None:
 # 最近一次运行测试时间: 2026-03-18 10:56:41 +0800
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证缺失 return 会抛出带诊断的错误。
+# 测试目的: 验证缺失 return 会抛出带诊断的错误。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_missing_return_reports_diagnostics
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
@@ -641,6 +686,7 @@ def test_missing_return_reports_diagnostics() -> None:
 # 最近一次运行测试时间: 2026-03-18 10:56:41 +0800
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证返回类型不匹配会抛出带诊断的错误。
+# 测试目的: 验证返回类型不匹配会抛出带诊断的错误。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_return_type_mismatch_reports_diagnostics
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -660,6 +706,7 @@ def test_return_type_mismatch_reports_diagnostics() -> None:
 # 最近一次运行测试时间: 2026-03-18 10:56:41 +0800
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证缺少维度的 Tensor 注解会抛出带诊断的错误。
+# 测试目的: 验证缺少维度的 Tensor 注解会抛出带诊断的错误。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_missing_tensor_dimensions_reports_diagnostics
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
@@ -680,6 +727,7 @@ def test_missing_tensor_dimensions_reports_diagnostics() -> None:
 # 最近一次运行测试时间: 2026-03-18 10:56:41 +0800
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证多语句 SSA 顺序与 value 复用。
+# 测试目的: 验证多语句 SSA 顺序与 value 复用。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_multi_statement_ssa_order_and_reuse
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -707,6 +755,7 @@ def test_multi_statement_ssa_order_and_reuse() -> None:
 # 最近一次运行测试时间: 2026-03-18 10:56:41 +0800
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证 LoadAST lowering 生成 dma.load。
+# 测试目的: 验证 LoadAST lowering 生成 dma.load。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_load_ast_lowering_rejected
 # 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
@@ -727,6 +776,7 @@ def test_load_ast_lowering_rejected() -> None:
 # 最近一次运行测试时间: 2026-03-18 10:56:41 +0800
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证 StoreAST lowering 生成 dma.store。
+# 测试目的: 验证 StoreAST lowering 生成 dma.store。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_store_ast_lowering_rejected
 # 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
@@ -747,6 +797,7 @@ def test_store_ast_lowering_rejected() -> None:
 # 最近一次运行测试时间: 2026-03-21 21:12:00 +0800
 # 最近一次运行成功时间: 2026-03-21 21:12:00 +0800
 # 功能说明: 验证 LoadAST 非 unit stride 抛出带诊断的错误。
+# 测试目的: 验证 LoadAST 非 unit stride 抛出带诊断的错误。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_load_ast_lowering_raises_lowering_error
 # 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
@@ -772,6 +823,7 @@ def test_load_ast_lowering_raises_lowering_error() -> None:
 # 最近一次运行测试时间: 2026-03-21 21:12:00 +0800
 # 最近一次运行成功时间: 2026-03-21 21:12:00 +0800
 # 功能说明: 验证 index rank mismatch 抛错并保留位置信息。
+# 测试目的: 验证 index rank mismatch 抛错并保留位置信息。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_load_ast_index_rank_mismatch_reports_location
 # 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
@@ -797,6 +849,7 @@ def test_load_ast_index_rank_mismatch_reports_location() -> None:
 # 最近一次运行测试时间: 2026-03-18 10:56:41 +0800
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证 StoreAST 非 memory value 抛出带诊断的错误。
+# 测试目的: 验证 StoreAST 非 memory value 抛出带诊断的错误。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_store_ast_lowering_raises_lowering_error
 # 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
@@ -813,9 +866,10 @@ def test_store_ast_lowering_raises_lowering_error() -> None:
 # EMIT-010
 # 创建者: 摸鱼小分队
 # 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 11:27:00 +0800
-# 最近一次运行成功时间: 2026-03-22 11:27:00 +0800
+# 最近一次运行测试时间: 2026-03-22 15:38:56 +0800
+# 最近一次运行成功时间: 2026-03-22 15:38:56 +0800
 # 功能说明: 验证 ForAST lowering 会保留循环结构并在循环体内生成 dma.load。
+# 测试目的: 验证 ForAST lowering 会保留循环结构并在循环体内生成 dma.load。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_for_ast_lowering_emits_loads
 # 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
@@ -841,7 +895,9 @@ def test_for_ast_lowering_emits_loads() -> None:
     assert len(loop_ops) == 1
     ops = [op for op in loop_ops[0].body.block.ops if isinstance(op, DmaLoadOp)]
     assert len(ops) == 1
-    assert ops[0].offsets.data[0].data == "i"
+    offsets = list(ops[0].offsets)
+    assert len(offsets) == 2
+    assert _unwrap_index_cast(offsets[0]) is loop_ops[0].body.block.args[0]
 
 
 # AST-009
@@ -850,6 +906,7 @@ def test_for_ast_lowering_emits_loads() -> None:
 # 最近一次运行测试时间: 2026-03-21 23:59:00 +0800
 # 最近一次运行成功时间: 2026-03-21 23:59:00 +0800
 # 功能说明: 验证未注解 SymbolDim 参数可按标量参数解析。
+# 测试目的: 验证未注解 SymbolDim 参数可按标量参数解析。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_infers_symboldim_arguments_without_annotations
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
@@ -869,9 +926,10 @@ def test_parse_function_infers_symboldim_arguments_without_annotations(monkeypat
 # MGEN-015
 # 创建者: OpenAI
 # 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 11:27:00 +0800
-# 最近一次运行成功时间: 2026-03-22 11:27:00 +0800
+# 最近一次运行测试时间: 2026-03-22 15:38:56 +0800
+# 最近一次运行成功时间: 2026-03-22 15:38:56 +0800
 # 功能说明: 验证 LoopRange + slice/deslice + 无 return 场景可生成 scf.for + dma.slice/dma.deslice。
+# 测试目的: 验证 LoopRange + slice/deslice + 无 return 场景可生成 scf.for + dma.slice/dma.deslice。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_supports_symbolic_for_loop_dma_without_return
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -918,9 +976,12 @@ def test_build_func_op_supports_symbolic_for_loop_dma_without_return(monkeypatch
     assert not any(isinstance(op, DmaLoadOp) for op in loop_body_ops)
     assert not any(isinstance(op, DmaStoreOp) for op in loop_body_ops)
     assert slice_ops[0].space.space.data == "local"
-    assert slice_ops[0].offsets.data[0].data == "index"
-    assert slice_ops[0].sizes.data[0].data == "step"
-    assert deslice_ops[0].offsets.data[0].data == "index"
+    loop_body = loop_ops[0].body.block
+    offsets = list(slice_ops[0].offsets)
+    sizes = list(slice_ops[0].sizes)
+    assert _unwrap_index_cast(offsets[0]) is loop_body.args[0]
+    assert _unwrap_index_cast(sizes[0]) is func_op.body.block.args[5]
+    assert _unwrap_index_cast(list(deslice_ops[0].offsets)[0]) is loop_body.args[0]
 
 
 # MGEN-011
@@ -929,6 +990,7 @@ def test_build_func_op_supports_symbolic_for_loop_dma_without_return(monkeypatch
 # 最近一次运行测试时间: 2026-03-19 03:24:32 +0800
 # 最近一次运行成功时间: 2026-03-19 03:24:32 +0800
 # 功能说明: 验证 singleton dim 隐式 broadcast lowering 为 nn.broadcast + nn.add。
+# 测试目的: 验证 singleton dim 隐式 broadcast lowering 为 nn.broadcast + nn.add。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_tensor_binary_implicit_broadcast_lowering
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -953,6 +1015,7 @@ def test_tensor_binary_implicit_broadcast_lowering() -> None:
 # 最近一次运行测试时间: 2026-03-19 03:24:32 +0800
 # 最近一次运行成功时间: 2026-03-19 03:24:32 +0800
 # 功能说明: 验证前置维隐式 broadcast lowering 为 nn.broadcast + nn.add。
+# 测试目的: 验证前置维隐式 broadcast lowering 为 nn.broadcast + nn.add。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_tensor_binary_prepend_broadcast_lowering
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -977,6 +1040,7 @@ def test_tensor_binary_prepend_broadcast_lowering() -> None:
 # 最近一次运行测试时间: 2026-03-19 03:24:32 +0800
 # 最近一次运行成功时间: 2026-03-19 03:24:32 +0800
 # 功能说明: 验证比较表达式隐式 broadcast lowering 为 nn.broadcast + nn.eq。
+# 测试目的: 验证比较表达式隐式 broadcast lowering 为 nn.broadcast + nn.eq。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_compare_implicit_broadcast_lowering
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -1001,6 +1065,7 @@ def test_compare_implicit_broadcast_lowering() -> None:
 # 最近一次运行测试时间: 2026-03-19 03:24:32 +0800
 # 最近一次运行成功时间: 2026-03-19 03:24:32 +0800
 # 功能说明: 验证不可广播的逐元素表达式抛 LoweringError 且保留位置。
+# 测试目的: 验证不可广播的逐元素表达式抛 LoweringError 且保留位置。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -1022,6 +1087,7 @@ def test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics() -> None
 # 最近一次运行测试时间: 2026-03-18 10:56:41 +0800
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证不支持语法会抛出带诊断的错误。
+# 测试目的: 验证不支持语法会抛出带诊断的错误。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_unsupported_syntax_reports_diagnostics
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
@@ -1037,3 +1103,135 @@ def test_unsupported_syntax_reports_diagnostics() -> None:
     diagnostics = exc_info.value.diagnostics
     assert diagnostics
     assert diagnostics[0].location is not None
+
+
+# AV-004
+# 创建者: 不要啊教练
+# 最后一次更改: 不要啊教练
+# 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
+# 最近一次运行成功时间: 2026-03-22 14:59:58 +0800
+# 功能说明: 覆盖 AstVisitor.visit_function 的符号表命中与跳过分支。
+# 测试目的: 覆盖 AstVisitor.visit_function 的符号表命中与跳过分支。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_ast_visitor_visit_function_skips_unbound_input
+# 对应功能实现文件路径: kernel_gen/dsl/ast_visitor.py
+# 对应 spec 文件路径: spec/dsl/ast_visitor.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_ast_visitor_visit_function_skips_unbound_input() -> None:
+    memory = Memory([2, 2], NumericType.Float32)
+    lhs = TensorAST(name="x", memory=memory, location=None)
+    rhs = TensorAST(name="y", memory=memory, location=None)
+    func_ast = FunctionAST("tmp", [lhs, rhs], [], BlockAST([]))
+    block = Block(arg_types=[i32])
+    ctx = EmitContext(builder=block, symbols={"x": block.args[0]}, types={})
+    visitor = AstVisitor()
+
+    result = visitor.visit_function(func_ast, ctx)
+    assert result is None
+    assert ctx.symbols["x"] is block.args[0]
+    assert "y" not in ctx.symbols
+
+
+# AV-005
+# 创建者: 不要啊教练
+# 最后一次更改: 不要啊教练
+# 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
+# 最近一次运行成功时间: 2026-03-22 14:59:58 +0800
+# 功能说明: 验证 visit_block 遇到未知 block 节点会抛出 AstVisitorError。
+# 测试目的: 验证 visit_block 遇到未知 block 节点会抛出 AstVisitorError。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_ast_visitor_rejects_block_without_statements
+# 对应功能实现文件路径: kernel_gen/dsl/ast_visitor.py
+# 对应 spec 文件路径: spec/dsl/ast_visitor.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_ast_visitor_rejects_block_without_statements() -> None:
+    class DummyBlock:
+        def __init__(self) -> None:
+            self.location = SourceLocation(1, 1)
+
+    visitor = AstVisitor()
+    ctx = EmitContext(builder=Block(arg_types=[]), symbols={}, types={})
+
+    with pytest.raises(AstVisitorError) as exc_info:
+        visitor.visit_block(DummyBlock(), ctx)
+    assert "Unsupported block node" in str(exc_info.value)
+
+
+# AV-006
+# 创建者: 不要啊教练
+# 最后一次更改: 不要啊教练
+# 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
+# 最近一次运行成功时间: 2026-03-22 14:59:58 +0800
+# 功能说明: 验证 visit_stmt 捕获 _LoweringError 并转为 AstVisitorError。
+# 测试目的: 验证 visit_stmt 捕获 _LoweringError 并转为 AstVisitorError。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_ast_visitor_visit_stmt_wraps_lowering_error
+# 对应功能实现文件路径: kernel_gen/dsl/ast_visitor.py
+# 对应 spec 文件路径: spec/dsl/ast_visitor.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_ast_visitor_visit_stmt_wraps_lowering_error() -> None:
+    visitor = AstVisitor()
+    ctx = EmitContext(builder=Block(arg_types=[]), symbols={}, types={})
+    node = BlockAST(statements=[], location=SourceLocation(3, 2))
+
+    with pytest.raises(AstVisitorError) as exc_info:
+        visitor.visit_stmt(node, ctx)
+    assert exc_info.value.location == node.location
+
+
+# EMIT-011
+# 创建者: 不要啊教练
+# 最后一次更改: 不要啊教练
+# 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
+# 最近一次运行成功时间: 2026-03-22 14:59:58 +0800
+# 功能说明: 验证 loop_vars 初始化与非法配置报错路径。
+# 测试目的: 验证 loop_vars 初始化与非法配置报错路径。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_loop_vars_validation
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_loop_vars_validation() -> None:
+    ctx = EmitContext(builder=Block(arg_types=[]), symbols={}, types={}, config=None)
+    loop_vars = _get_loop_vars(ctx)
+    assert isinstance(loop_vars, dict)
+
+    bad_ctx = EmitContext(builder=Block(arg_types=[]), symbols={}, types={}, config={"loop_vars": []})
+    with pytest.raises(_LoweringError):
+        _get_loop_vars(bad_ctx)
+
+
+# EMIT-012
+# 创建者: 不要啊教练
+# 最后一次更改: 不要啊教练
+# 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
+# 最近一次运行成功时间: 2026-03-22 14:59:58 +0800
+# 功能说明: 覆盖索引解析与 rank mismatch 的错误路径。
+# 测试目的: 覆盖索引解析与 rank mismatch 的错误路径。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_index_expr_rejections
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_index_expr_rejections() -> None:
+    ctx = EmitContext(builder=Block(arg_types=[]), symbols={}, types={}, config={})
+
+    with pytest.raises(_LoweringError):
+        _resolve_index_expr(ConstAST(1.5, location=SourceLocation(1, 1)), ctx)
+
+    with pytest.raises(_LoweringError):
+        _resolve_index_expr(VarAST(name="i", location=SourceLocation(2, 1)), ctx)
+
+    with pytest.raises(_LoweringError):
+        _build_index_attrs([ConstAST(1, location=None)], rank=2, ctx=ctx, location=SourceLocation(3, 1))
+
+
+# EMIT-013
+# 创建者: 不要啊教练
+# 最后一次更改: 不要啊教练
+# 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
+# 最近一次运行成功时间: 2026-03-22 14:59:58 +0800
+# 功能说明: 覆盖默认 stride 推导遇到非 IntAttr/StringAttr 的分支。
+# 测试目的: 覆盖默认 stride 推导遇到非 IntAttr/StringAttr 的分支。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_default_stride_handles_unknown_attr
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_default_stride_handles_unknown_attr() -> None:
+    attrs = _build_default_stride_attrs([ArrayAttr([])])
+    assert len(attrs) == 1

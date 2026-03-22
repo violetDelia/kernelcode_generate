@@ -1,18 +1,18 @@
 /*
 功能说明:
-- 定义 cpu::Memory 纯头文件张量视图模板，记录 data/shape/stride/format/space 元信息。
+- 定义 cpu::Memory 纯头文件张量视图模板，记录 data/shape/stride/rank/format/space 元信息。
 
 使用示例:
 - #include "include/cpu/Memory.h"
 - int data[6] = {0, 1, 2, 3, 4, 5};
 - long long shape[2] = {2, 3};
-- cpu::Memory<int, 2> mem(data, shape);
+- cpu::Memory<int> mem(data, 2, shape);
 
 创建者: 神秘人
-最后修改人: 神秘人
+最后修改人: 金铲铲大作战
 
 关联文件:
-- spec: spec/include/cpu/Memory.md
+- spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_memory.py
 - 功能实现: include/cpu/Memory.h
 */
@@ -35,63 +35,63 @@ enum class MemorySpace {
     TLM,
 };
 
-template <typename T, unsigned long long Rank>
+static constexpr unsigned long long MAX_DIM = 8;
+
+template <typename T>
 class Memory {
 public:
-    static_assert(Rank > 0, "cpu::Memory Rank must be greater than zero");
-
     /*
     功能说明:
-    - 使用显式 shape/stride 构造张量视图。
+    - 使用显式 rank/shape/stride 构造张量视图。
 
     使用示例:
     - long long shape[2] = {2, 3};
     - long long stride[2] = {3, 1};
-    - cpu::Memory<int, 2> mem(data, shape, stride);
+    - cpu::Memory<int> mem(data, 2, shape, stride);
 
     创建者: 神秘人
-    最后修改人: 神秘人
+    最后修改人: 金铲铲大作战
 
     关联文件:
-    - spec: spec/include/cpu/Memory.md
+    - spec: spec/include/cpu/cpu.md
     - test: test/include/cpu/test_memory.py
     - 功能实现: include/cpu/Memory.h
     */
     Memory(
         T* data,
-        const long long (&shape)[Rank],
-        const long long (&stride)[Rank],
+        unsigned long long rank,
+        const long long* shape,
+        const long long* stride,
         MemoryFormat format = MemoryFormat::Norm,
         MemorySpace space = MemorySpace::GM)
-        : data_(data), format_(format), space_(space) {
-        copy_array(shape, shape_);
-        copy_array(stride, stride_);
+        : data_(data), rank_(0), format_(format), space_(space) {
+        init_shape_and_stride(rank, shape, stride);
     }
 
     /*
     功能说明:
-    - 使用 shape 构造连续行主序张量视图，并自动推导 stride。
+    - 使用显式 rank/shape 构造连续行主序张量视图，并自动推导 stride。
 
     使用示例:
     - long long shape[2] = {2, 3};
-    - cpu::Memory<int, 2> mem(data, shape);
+    - cpu::Memory<int> mem(data, 2, shape);
 
     创建者: 神秘人
-    最后修改人: 神秘人
+    最后修改人: 金铲铲大作战
 
     关联文件:
-    - spec: spec/include/cpu/Memory.md
+    - spec: spec/include/cpu/cpu.md
     - test: test/include/cpu/test_memory.py
     - 功能实现: include/cpu/Memory.h
     */
     Memory(
         T* data,
-        const long long (&shape)[Rank],
+        unsigned long long rank,
+        const long long* shape,
         MemoryFormat format = MemoryFormat::Norm,
         MemorySpace space = MemorySpace::GM)
-        : data_(data), format_(format), space_(space) {
-        copy_array(shape, shape_);
-        fill_contiguous_stride();
+        : data_(data), rank_(0), format_(format), space_(space) {
+        init_shape_and_stride(rank, shape, 0);
     }
 
     /*
@@ -102,10 +102,10 @@ public:
     - int* ptr = mem.data();
 
     创建者: 神秘人
-    最后修改人: 神秘人
+    最后修改人: 金铲铲大作战
 
     关联文件:
-    - spec: spec/include/cpu/Memory.md
+    - spec: spec/include/cpu/cpu.md
     - test: test/include/cpu/test_memory.py
     - 功能实现: include/cpu/Memory.h
     */
@@ -121,10 +121,10 @@ public:
     - const int* ptr = const_mem.data();
 
     创建者: 神秘人
-    最后修改人: 神秘人
+    最后修改人: 金铲铲大作战
 
     关联文件:
-    - spec: spec/include/cpu/Memory.md
+    - spec: spec/include/cpu/cpu.md
     - test: test/include/cpu/test_memory.py
     - 功能实现: include/cpu/Memory.h
     */
@@ -140,10 +140,10 @@ public:
     - const long long* shape = mem.shape();
 
     创建者: 神秘人
-    最后修改人: 神秘人
+    最后修改人: 金铲铲大作战
 
     关联文件:
-    - spec: spec/include/cpu/Memory.md
+    - spec: spec/include/cpu/cpu.md
     - test: test/include/cpu/test_memory.py
     - 功能实现: include/cpu/Memory.h
     */
@@ -159,10 +159,10 @@ public:
     - const long long* stride = mem.stride();
 
     创建者: 神秘人
-    最后修改人: 神秘人
+    最后修改人: 金铲铲大作战
 
     关联文件:
-    - spec: spec/include/cpu/Memory.md
+    - spec: spec/include/cpu/cpu.md
     - test: test/include/cpu/test_memory.py
     - 功能实现: include/cpu/Memory.h
     */
@@ -172,21 +172,21 @@ public:
 
     /*
     功能说明:
-    - 返回编译期固定维度数。
+    - 返回运行期维度数。
 
     使用示例:
     - unsigned long long rank = mem.rank();
 
     创建者: 神秘人
-    最后修改人: 神秘人
+    最后修改人: 金铲铲大作战
 
     关联文件:
-    - spec: spec/include/cpu/Memory.md
+    - spec: spec/include/cpu/cpu.md
     - test: test/include/cpu/test_memory.py
     - 功能实现: include/cpu/Memory.h
     */
-    static constexpr unsigned long long rank() {
-        return Rank;
+    unsigned long long rank() const {
+        return rank_;
     }
 
     /*
@@ -197,10 +197,10 @@ public:
     - cpu::MemoryFormat format = mem.format();
 
     创建者: 神秘人
-    最后修改人: 神秘人
+    最后修改人: 金铲铲大作战
 
     关联文件:
-    - spec: spec/include/cpu/Memory.md
+    - spec: spec/include/cpu/cpu.md
     - test: test/include/cpu/test_memory.py
     - 功能实现: include/cpu/Memory.h
     */
@@ -216,10 +216,10 @@ public:
     - cpu::MemorySpace space = mem.space();
 
     创建者: 神秘人
-    最后修改人: 神秘人
+    最后修改人: 金铲铲大作战
 
     关联文件:
-    - spec: spec/include/cpu/Memory.md
+    - spec: spec/include/cpu/cpu.md
     - test: test/include/cpu/test_memory.py
     - 功能实现: include/cpu/Memory.h
     */
@@ -235,16 +235,16 @@ public:
     - long long count = mem.element_count();
 
     创建者: 神秘人
-    最后修改人: 神秘人
+    最后修改人: 金铲铲大作战
 
     关联文件:
-    - spec: spec/include/cpu/Memory.md
+    - spec: spec/include/cpu/cpu.md
     - test: test/include/cpu/test_memory.py
     - 功能实现: include/cpu/Memory.h
     */
     long long element_count() const {
         long long count = 1;
-        for (unsigned long long i = 0; i < Rank; ++i) {
+        for (unsigned long long i = 0; i < rank_; ++i) {
             count *= shape_[i];
         }
         return count;
@@ -258,17 +258,17 @@ public:
     - bool contiguous = mem.is_contiguous();
 
     创建者: 神秘人
-    最后修改人: 神秘人
+    最后修改人: 金铲铲大作战
 
     关联文件:
-    - spec: spec/include/cpu/Memory.md
+    - spec: spec/include/cpu/cpu.md
     - test: test/include/cpu/test_memory.py
     - 功能实现: include/cpu/Memory.h
     */
     bool is_contiguous() const {
         long long expected = 1;
-        for (unsigned long long reverse_index = 0; reverse_index < Rank; ++reverse_index) {
-            const unsigned long long i = Rank - 1 - reverse_index;
+        for (unsigned long long reverse_index = 0; reverse_index < rank_; ++reverse_index) {
+            const unsigned long long i = rank_ - 1 - reverse_index;
             if (stride_[i] != expected) {
                 return false;
             }
@@ -279,26 +279,31 @@ public:
 
     /*
     功能说明:
-    - 根据多维索引计算线性偏移。
+    - 根据运行期 rank 的多维索引计算线性偏移。
 
     使用示例:
     - long long index[2] = {1, 2};
     - long long offset = mem.linear_offset(index);
 
     创建者: 神秘人
-    最后修改人: 神秘人
+    最后修改人: 金铲铲大作战
 
     关联文件:
-    - spec: spec/include/cpu/Memory.md
+    - spec: spec/include/cpu/cpu.md
     - test: test/include/cpu/test_memory.py
     - 功能实现: include/cpu/Memory.h
     */
-    long long linear_offset(const long long (&indices)[Rank]) const {
+    long long linear_offset(const long long* indices) const {
         long long offset = 0;
-        for (unsigned long long i = 0; i < Rank; ++i) {
+        for (unsigned long long i = 0; i < rank_; ++i) {
             offset += indices[i] * stride_[i];
         }
         return offset;
+    }
+
+    template <unsigned long long Rank>
+    long long linear_offset(const long long (&indices)[Rank]) const {
+        return linear_offset(static_cast<const long long*>(indices));
     }
 
     /*
@@ -310,15 +315,20 @@ public:
     - int& value = mem.at(index);
 
     创建者: 神秘人
-    最后修改人: 神秘人
+    最后修改人: 金铲铲大作战
 
     关联文件:
-    - spec: spec/include/cpu/Memory.md
+    - spec: spec/include/cpu/cpu.md
     - test: test/include/cpu/test_memory.py
     - 功能实现: include/cpu/Memory.h
     */
-    T& at(const long long (&indices)[Rank]) {
+    T& at(const long long* indices) {
         return data_[linear_offset(indices)];
+    }
+
+    template <unsigned long long Rank>
+    T& at(const long long (&indices)[Rank]) {
+        return at(static_cast<const long long*>(indices));
     }
 
     /*
@@ -330,36 +340,65 @@ public:
     - const int& value = const_mem.at(index);
 
     创建者: 神秘人
-    最后修改人: 神秘人
+    最后修改人: 金铲铲大作战
 
     关联文件:
-    - spec: spec/include/cpu/Memory.md
+    - spec: spec/include/cpu/cpu.md
     - test: test/include/cpu/test_memory.py
     - 功能实现: include/cpu/Memory.h
     */
-    const T& at(const long long (&indices)[Rank]) const {
+    const T& at(const long long* indices) const {
         return data_[linear_offset(indices)];
     }
 
+    template <unsigned long long Rank>
+    const T& at(const long long (&indices)[Rank]) const {
+        return at(static_cast<const long long*>(indices));
+    }
+
 private:
-    static void copy_array(const long long (&src)[Rank], long long (&dst)[Rank]) {
-        for (unsigned long long i = 0; i < Rank; ++i) {
-            dst[i] = src[i];
+    static void contract_or_trap(bool condition) {
+        if (!condition) {
+#if defined(__clang__) || defined(__GNUC__)
+            __builtin_trap();
+#else
+            *(volatile int*)0 = 0;
+#endif
         }
+    }
+
+    void init_shape_and_stride(
+        unsigned long long rank,
+        const long long* shape,
+        const long long* stride) {
+        contract_or_trap(rank > 0);
+        contract_or_trap(rank <= MAX_DIM);
+        rank_ = rank;
+        for (unsigned long long i = 0; i < rank_; ++i) {
+            shape_[i] = shape[i];
+        }
+        if (stride != 0) {
+            for (unsigned long long i = 0; i < rank_; ++i) {
+                stride_[i] = stride[i];
+            }
+            return;
+        }
+        fill_contiguous_stride();
     }
 
     void fill_contiguous_stride() {
         long long current = 1;
-        for (unsigned long long reverse_index = 0; reverse_index < Rank; ++reverse_index) {
-            const unsigned long long i = Rank - 1 - reverse_index;
+        for (unsigned long long reverse_index = 0; reverse_index < rank_; ++reverse_index) {
+            const unsigned long long i = rank_ - 1 - reverse_index;
             stride_[i] = current;
             current *= shape_[i];
         }
     }
 
     T* data_;
-    long long shape_[Rank];
-    long long stride_[Rank];
+    unsigned long long rank_;
+    long long shape_[MAX_DIM];
+    long long stride_[MAX_DIM];
     MemoryFormat format_;
     MemorySpace space_;
 };
