@@ -9,6 +9,12 @@
 使用示例:
 - pytest -q test/pass/test_lowing_nn_to_kernel.py
 
+当前覆盖率信息:
+- `kernel_gen.pass.lowing.nn_to_kernel`：`100%`（2026-03-23 04:07:56 +0800，`15 passed`）。
+
+覆盖率命令:
+- `pytest --cov=kernel_gen.pass.lowing.nn_to_kernel --cov-report=term-missing -q test/pass/test_lowing_nn_to_kernel.py`
+
 关联文件:
 - 功能实现: kernel_gen/pass/lowing/nn_to_kernel.py
 - Spec 文档: spec/pass/lowing/nn_to_kernel.md
@@ -25,8 +31,16 @@ from collections.abc import Callable
 import pytest
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, StringAttr, f32, i1, i32
-from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def, result_def
+from xdsl.irdl import (
+    IRDLOperation,
+    attr_def,
+    irdl_op_definition,
+    operand_def,
+    region_def,
+    result_def,
+)
 from xdsl.ir import Block, Operation, Region, SSAValue
+from xdsl.utils.exceptions import VerifyException
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -124,6 +138,175 @@ class NnCastOp(IRDLOperation):
             result_types=[result_type],
             attributes={"space": space},
         )
+
+
+@irdl_op_definition
+class NnNoSpaceOp(IRDLOperation):
+    """测试用缺少 space 的 nn.add op。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 构造缺失 nn.space 的 nn.add，用于错误路径测试。
+
+    使用示例:
+    - NnNoSpaceOp(lhs, rhs, result_type)
+
+    关联文件:
+    - spec: spec/pass/lowing/nn_to_kernel.md
+    - test: test/pass/test_lowing_nn_to_kernel.py
+    - 功能实现: kernel_gen/pass/lowing/nn_to_kernel.py
+    """
+
+    name = "nn.add"
+
+    lhs = operand_def(NnMemoryType)
+    rhs = operand_def(NnMemoryType)
+    result = result_def(NnMemoryType)
+
+    def __init__(self, lhs: SSAValue | Operation, rhs: SSAValue | Operation, result_type: NnMemoryType) -> None:
+        super().__init__(operands=[lhs, rhs], result_types=[result_type], attributes={})
+
+
+@irdl_op_definition
+class NnBadResultTypeOp(IRDLOperation):
+    """测试用返回类型非 nn.memory 的 nn.add op。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 构造结果类型非 nn.memory 的 nn.add。
+
+    使用示例:
+    - NnBadResultTypeOp(lhs, rhs, space)
+
+    关联文件:
+    - spec: spec/pass/lowing/nn_to_kernel.md
+    - test: test/pass/test_lowing_nn_to_kernel.py
+    - 功能实现: kernel_gen/pass/lowing/nn_to_kernel.py
+    """
+
+    name = "nn.add"
+
+    lhs = operand_def(NnMemoryType)
+    rhs = operand_def(NnMemoryType)
+    result = result_def(i32)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        lhs: SSAValue | Operation,
+        rhs: SSAValue | Operation,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        super().__init__(
+            operands=[lhs, rhs],
+            result_types=[i32],
+            attributes={"space": space},
+        )
+
+
+@irdl_op_definition
+class NnMultiResultOp(IRDLOperation):
+    """测试用多结果的 nn.add op。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 构造包含两个结果的 nn.add。
+
+    使用示例:
+    - NnMultiResultOp(lhs, rhs, result_type, space)
+
+    关联文件:
+    - spec: spec/pass/lowing/nn_to_kernel.md
+    - test: test/pass/test_lowing_nn_to_kernel.py
+    - 功能实现: kernel_gen/pass/lowing/nn_to_kernel.py
+    """
+
+    name = "nn.add"
+
+    lhs = operand_def(NnMemoryType)
+    rhs = operand_def(NnMemoryType)
+    result0 = result_def(NnMemoryType)
+    result1 = result_def(NnMemoryType)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        lhs: SSAValue | Operation,
+        rhs: SSAValue | Operation,
+        result_type: NnMemoryType,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        super().__init__(
+            operands=[lhs, rhs],
+            result_types=[result_type, result_type],
+            attributes={"space": space},
+        )
+
+
+@irdl_op_definition
+class NnBadOperandOp(IRDLOperation):
+    """测试用缺少 rhs 的 nn.add op。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 构造缺少 operand 的 nn.add。
+
+    使用示例:
+    - NnBadOperandOp(lhs, result_type, space)
+
+    关联文件:
+    - spec: spec/pass/lowing/nn_to_kernel.md
+    - test: test/pass/test_lowing_nn_to_kernel.py
+    - 功能实现: kernel_gen/pass/lowing/nn_to_kernel.py
+    """
+
+    name = "nn.add"
+
+    lhs = operand_def(NnMemoryType)
+    result = result_def(NnMemoryType)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(self, lhs: SSAValue | Operation, result_type: NnMemoryType, space: NnMemorySpaceAttr) -> None:
+        super().__init__(
+            operands=[lhs],
+            result_types=[result_type],
+            attributes={"space": space},
+        )
+
+
+@irdl_op_definition
+class RegionWrapperOp(IRDLOperation):
+    """测试用包含 region 的封装 op。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 构造包含 region 的 wrapper op，用于覆盖递归 lowering。
+
+    使用示例:
+    - RegionWrapperOp(region)
+
+    关联文件:
+    - spec: spec/pass/lowing/nn_to_kernel.md
+    - test: test/pass/test_lowing_nn_to_kernel.py
+    - 功能实现: kernel_gen/pass/lowing/nn_to_kernel.py
+    """
+
+    name = "test.wrapper"
+
+    body = region_def()
+
+    def __init__(self, region: Region) -> None:
+        super().__init__(regions=[region])
 
 
 def _make_space(name: str) -> NnMemorySpaceAttr:
@@ -236,9 +419,9 @@ def _collect_ops(block: Block) -> list[Operation]:
 # TC-PASS-N2K-001
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 23:20:39 +0800
-# 最近一次运行成功时间: 2026-03-21 23:20:39 +0800
-# 功能说明: 验证 nn.add lower 为 kernel.add。
+# 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
+# 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
+# 测试目的: 验证 nn.add lower 为 kernel.add。
 # 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_add_to_kernel
 # 对应功能实现文件路径: kernel_gen/pass/lowing/nn_to_kernel.py
 # 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
@@ -263,9 +446,9 @@ def test_lower_add_to_kernel() -> None:
 # TC-PASS-N2K-002
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 23:20:39 +0800
-# 最近一次运行成功时间: 2026-03-21 23:20:39 +0800
-# 功能说明: 验证 nn.eq lower 为 kernel.eq。
+# 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
+# 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
+# 测试目的: 验证 nn.eq lower 为 kernel.eq。
 # 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_eq_to_kernel
 # 对应功能实现文件路径: kernel_gen/pass/lowing/nn_to_kernel.py
 # 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
@@ -289,9 +472,9 @@ def test_lower_eq_to_kernel() -> None:
 # TC-PASS-N2K-003
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 23:20:39 +0800
-# 最近一次运行成功时间: 2026-03-21 23:20:39 +0800
-# 功能说明: 验证 nn.select lower 为 kernel.select。
+# 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
+# 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
+# 测试目的: 验证 nn.select lower 为 kernel.select。
 # 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_select_to_kernel
 # 对应功能实现文件路径: kernel_gen/pass/lowing/nn_to_kernel.py
 # 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
@@ -325,9 +508,9 @@ def test_lower_select_to_kernel() -> None:
 # TC-PASS-N2K-004
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 23:20:39 +0800
-# 最近一次运行成功时间: 2026-03-21 23:20:39 +0800
-# 功能说明: 验证 nn.cast lower 为 kernel.cast。
+# 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
+# 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
+# 测试目的: 验证 nn.cast lower 为 kernel.cast。
 # 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_cast_to_kernel
 # 对应功能实现文件路径: kernel_gen/pass/lowing/nn_to_kernel.py
 # 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
@@ -351,9 +534,9 @@ def test_lower_cast_to_kernel() -> None:
 # TC-PASS-N2K-005
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 23:20:39 +0800
-# 最近一次运行成功时间: 2026-03-21 23:20:39 +0800
-# 功能说明: 验证输出分配使用 dma.alloc。
+# 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
+# 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
+# 测试目的: 验证输出分配使用 dma.alloc。
 # 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_inserts_dma_alloc_for_output
 # 对应功能实现文件路径: kernel_gen/pass/lowing/nn_to_kernel.py
 # 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
@@ -378,9 +561,9 @@ def test_lower_inserts_dma_alloc_for_output() -> None:
 # TC-PASS-N2K-006
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 23:20:39 +0800
-# 最近一次运行成功时间: 2026-03-21 23:20:39 +0800
-# 功能说明: 验证输出 memory 类型/空间保持一致。
+# 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
+# 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
+# 测试目的: 验证输出 memory 类型/空间保持一致。
 # 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_preserves_memory_type_and_space
 # 对应功能实现文件路径: kernel_gen/pass/lowing/nn_to_kernel.py
 # 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
@@ -406,9 +589,9 @@ def test_lower_preserves_memory_type_and_space() -> None:
 # TC-PASS-N2K-007
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 23:20:39 +0800
-# 最近一次运行成功时间: 2026-03-21 23:20:39 +0800
-# 功能说明: 验证不支持的 nn op 抛错。
+# 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
+# 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
+# 测试目的: 验证不支持的 nn op 抛错。
 # 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_unsupported_nn_op_raises
 # 对应功能实现文件路径: kernel_gen/pass/lowing/nn_to_kernel.py
 # 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
@@ -431,9 +614,9 @@ def test_lower_unsupported_nn_op_raises() -> None:
 # TC-PASS-N2K-008
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 23:20:39 +0800
-# 最近一次运行成功时间: 2026-03-21 23:20:39 +0800
-# 功能说明: 验证 lowering 后不再残留 nn op。
+# 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
+# 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
+# 测试目的: 验证 lowering 后不再残留 nn op。
 # 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_removes_all_nn_ops
 # 对应功能实现文件路径: kernel_gen/pass/lowing/nn_to_kernel.py
 # 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
@@ -459,3 +642,187 @@ def test_lower_removes_all_nn_ops() -> None:
 
     for op in _collect_ops(block):
         assert not op.name.startswith("nn.")
+
+
+# COV-N2K-001
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
+# 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
+# 测试目的: 验证缺失 nn.space attribute 会触发错误。
+# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_missing_space_attribute_raises
+# 对应功能实现文件路径: kernel_gen/pass/lowing/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+def test_lower_missing_space_attribute_raises() -> None:
+    lhs_type = _make_memory_type()
+    rhs_type = _make_memory_type()
+    result_type = _make_memory_type()
+
+    module, _ = _build_module(
+        [lhs_type, rhs_type],
+        result_type,
+        lambda block: [NnNoSpaceOp(block.args[0], block.args[1], result_type)],
+    )
+    with pytest.raises(LowerNnToKernelError, match="nn op must provide nn.space attribute"):
+        LowerNnToKernelPass().run(module)
+
+
+# COV-N2K-002
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
+# 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
+# 测试目的: 验证 nn op 多结果时抛错。
+# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_rejects_multi_result_op
+# 对应功能实现文件路径: kernel_gen/pass/lowing/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+def test_lower_rejects_multi_result_op() -> None:
+    lhs_type = _make_memory_type()
+    rhs_type = _make_memory_type()
+    result_type = _make_memory_type()
+    space = _make_space("global")
+
+    module, _ = _build_module(
+        [lhs_type, rhs_type],
+        result_type,
+        lambda block: [NnMultiResultOp(block.args[0], block.args[1], result_type, space)],
+    )
+    with pytest.raises(LowerNnToKernelError, match="exactly one result"):
+        LowerNnToKernelPass().run(module)
+
+
+# COV-N2K-003
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
+# 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
+# 测试目的: 验证 nn op 结果类型非 nn.memory 时抛错。
+# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_rejects_non_memory_result_type
+# 对应功能实现文件路径: kernel_gen/pass/lowing/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+def test_lower_rejects_non_memory_result_type() -> None:
+    lhs_type = _make_memory_type()
+    rhs_type = _make_memory_type()
+    result_type = _make_memory_type()
+    space = _make_space("global")
+
+    module, _ = _build_module(
+        [lhs_type, rhs_type],
+        result_type,
+        lambda block: [NnBadResultTypeOp(block.args[0], block.args[1], space)],
+    )
+    with pytest.raises(LowerNnToKernelError, match="nn op result must be nn.memory"):
+        LowerNnToKernelPass().run(module)
+
+
+# COV-N2K-004
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
+# 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
+# 测试目的: 验证 nn op operand 数量不匹配时抛错。
+# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_rejects_operand_count_mismatch
+# 对应功能实现文件路径: kernel_gen/pass/lowing/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+def test_lower_rejects_operand_count_mismatch() -> None:
+    lhs_type = _make_memory_type()
+    result_type = _make_memory_type()
+    space = _make_space("global")
+
+    module, _ = _build_module(
+        [lhs_type],
+        result_type,
+        lambda block: [NnBadOperandOp(block.args[0], result_type, space)],
+    )
+    with pytest.raises(LowerNnToKernelError, match="expects 2 operands, got 1"):
+        LowerNnToKernelPass().run(module)
+
+
+# COV-N2K-005
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
+# 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
+# 测试目的: 验证 kernel op 校验失败时抛 LowerNnToKernelError。
+# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_wraps_kernel_verify_exception
+# 对应功能实现文件路径: kernel_gen/pass/lowing/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+def test_lower_wraps_kernel_verify_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    lhs_type = _make_memory_type()
+    rhs_type = _make_memory_type()
+    result_type = _make_memory_type()
+    space = _make_space("global")
+
+    module, _ = _build_module(
+        [lhs_type, rhs_type],
+        result_type,
+        lambda block: [NnAddOp(block.args[0], block.args[1], result_type, space)],
+    )
+
+    def _raise_verify(self) -> None:
+        raise VerifyException("kernel verify failed")
+
+    monkeypatch.setattr(KernelAddOp, "verify", _raise_verify)
+    with pytest.raises(LowerNnToKernelError, match="kernel verify failed"):
+        LowerNnToKernelPass().run(module)
+
+
+# COV-N2K-006
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
+# 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
+# 测试目的: 验证包含 region 的 op 会触发递归 lowering。
+# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_recurses_into_regions
+# 对应功能实现文件路径: kernel_gen/pass/lowing/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+def test_lower_recurses_into_regions() -> None:
+    lhs_type = _make_memory_type()
+    rhs_type = _make_memory_type()
+    result_type = _make_memory_type()
+    space = _make_space("global")
+
+    inner_block = Block(arg_types=[lhs_type, rhs_type])
+    inner_block.add_op(NnAddOp(inner_block.args[0], inner_block.args[1], result_type, space))
+    inner_region = Region(inner_block)
+    wrapper = RegionWrapperOp(inner_region)
+
+    outer_block = Block()
+    outer_block.add_op(wrapper)
+
+    pass_module._lower_block(outer_block)
+    nested_ops = list(inner_block.ops)
+    assert any(isinstance(op, KernelAddOp) for op in nested_ops)
+    assert any(isinstance(op, DmaAllocOp) for op in nested_ops)
+    assert not any(op.name.startswith("nn.") for op in nested_ops)
+
+
+# COV-N2K-007
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
+# 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
+# 测试目的: 验证 module 内残留 nn op 时直接抛错。
+# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_ensure_no_nn_ops_raises
+# 对应功能实现文件路径: kernel_gen/pass/lowing/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+def test_ensure_no_nn_ops_raises() -> None:
+    lhs_type = _make_memory_type()
+    rhs_type = _make_memory_type()
+    result_type = _make_memory_type()
+    space = _make_space("global")
+
+    module, _ = _build_module(
+        [lhs_type, rhs_type],
+        result_type,
+        lambda block: [NnAddOp(block.args[0], block.args[1], result_type, space)],
+    )
+    with pytest.raises(LowerNnToKernelError, match="nn op remains after lowering"):
+        pass_module._ensure_no_nn_ops(module)

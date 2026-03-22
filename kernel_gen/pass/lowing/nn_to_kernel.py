@@ -207,7 +207,7 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
     result_type = _ensure_single_result(op)
     space = _ensure_space_attr(op)
 
-    alloc = DmaAllocOp(result_type)
+    alloc = DmaAllocOp([], result_type)
     kernel_op = _build_kernel_op(op, alloc.result, space)
 
     try:

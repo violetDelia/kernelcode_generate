@@ -109,11 +109,10 @@ module = pass_obj.run(module)
 
 | 用例 ID | 约束点 | 对应测试 |
 | --- | --- | --- |
-| TC-PASS-N2K-001 | `nn.add` lower 为 `kernel.add` | `test_lower_add_to_kernel` |
-| TC-PASS-N2K-002 | `nn.eq` lower 为 `kernel.eq` | `test_lower_eq_to_kernel` |
-| TC-PASS-N2K-003 | `nn.select` lower 为 `kernel.select` | `test_lower_select_to_kernel` |
-| TC-PASS-N2K-004 | `nn.cast` lower 为 `kernel.cast` | `test_lower_cast_to_kernel` |
-| TC-PASS-N2K-005 | 输出分配使用 `dma.alloc` | `test_lower_inserts_dma_alloc_for_output` |
-| TC-PASS-N2K-006 | 输出 Memory 类型/空间保持一致 | `test_lower_preserves_memory_type_and_space` |
-| TC-PASS-N2K-007 | 不支持的 `nn` op 抛错 | `test_lower_unsupported_nn_op_raises` |
-| TC-PASS-N2K-008 | lowering 后不再残留 `nn` op | `test_lower_removes_all_nn_ops` |
+| COV-N2K-001 | 缺失 `nn.space` attribute 抛错 | `test_lower_missing_space_attribute_raises` |
+| COV-N2K-002 | `nn` op 多结果抛错 | `test_lower_rejects_multi_result_op` |
+| COV-N2K-003 | `nn` op 结果类型非 `nn.memory` 抛错 | `test_lower_rejects_non_memory_result_type` |
+| COV-N2K-004 | `nn` op operand 数量不匹配抛错 | `test_lower_rejects_operand_count_mismatch` |
+| COV-N2K-005 | kernel op 校验失败转为 `LowerNnToKernelError` | `test_lower_wraps_kernel_verify_exception` |
+| COV-N2K-006 | 包含 region 的 op 触发递归 lowering | `test_lower_recurses_into_regions` |
+| COV-N2K-007 | module 内残留 `nn` op 抛错 | `test_ensure_no_nn_ops_raises` |
