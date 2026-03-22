@@ -515,8 +515,17 @@ def _parse_annotation_node(
     arg_name: str | None,
     globals_table: dict[str, object],
     builtins_table: dict[str, object],
+    runtime_table: dict[str, object] | None = None,
 ) -> TensorAST | ScalarArgAST | None:
     if node is None:
+        if runtime_table is not None and arg_name is not None and arg_name in runtime_table:
+            runtime_value = runtime_table[arg_name]
+            if isinstance(runtime_value, Memory):
+                return TensorAST(name=arg_name, memory=runtime_value, location=None)
+            if isinstance(runtime_value, SymbolDim):
+                return ScalarArgAST(name=arg_name, value_type=int, is_symbolic=True, location=None)
+            if isinstance(runtime_value, int):
+                return ScalarArgAST(name=arg_name, value_type=int, location=None)
         if arg_name is None:
             return None
         if arg_name in globals_table and isinstance(globals_table[arg_name], Memory):
@@ -843,6 +852,7 @@ def _parse_function_impl(
     fn: object,
     globals_table: dict[str, object] | None = None,
     builtins_table: dict[str, object] | None = None,
+    runtime_table: dict[str, object] | None = None,
     config: dict[str, object] | None = None,
 ) -> FunctionAST:
     del config
@@ -873,7 +883,7 @@ def _parse_function_impl(
     env: dict[str, object] = {}
     inputs: list[TensorAST | ScalarArgAST] = []
     for arg in func_def.args.args:
-        parsed = _parse_annotation_node(arg.annotation, arg.arg, globals_table, builtins_table)
+        parsed = _parse_annotation_node(arg.annotation, arg.arg, globals_table, builtins_table, runtime_table)
         if parsed is None:
             _raise_parse_error("Missing annotation", arg)
         if isinstance(parsed, (TensorAST, ScalarArgAST)):
@@ -884,7 +894,7 @@ def _parse_function_impl(
 
     outputs: list[TensorAST | ScalarArgAST] = []
     if func_def.returns is not None:
-        parsed = _parse_annotation_node(func_def.returns, None, globals_table, builtins_table)
+        parsed = _parse_annotation_node(func_def.returns, None, globals_table, builtins_table, runtime_table)
         if parsed is None:
             _raise_parse_error("Unsupported return annotation", func_def.returns)
         if isinstance(parsed, (TensorAST, ScalarArgAST)):

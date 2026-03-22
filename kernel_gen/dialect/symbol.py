@@ -260,6 +260,49 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
 
         self.expr.verify()
 
+    def get_value(self) -> int | str:
+        """返回 symbol.int 的公开值。
+
+        创建者: 我不是牛马
+        最后一次更改: 我不是牛马
+
+        功能说明:
+        - 对常量表达返回 `int`。
+        - 对符号表达返回标准化后的字符串。
+
+        使用示例:
+        - SymbolValueType.from_expr("N").get_value()
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        expr = _normalize_expr(self.expr.expr.data)
+        return int(expr) if expr.isdigit() else expr
+
+    def is_symbol(self) -> bool:
+        """判断当前值是否为非字面量符号表达。
+
+        创建者: 我不是牛马
+        最后一次更改: 我不是牛马
+
+        功能说明:
+        - 纯数字常量返回 `False`。
+        - 其他 symbol 表达返回 `True`。
+
+        使用示例:
+        - SymbolValueType.from_expr("1").is_symbol()
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        return not _normalize_expr(self.expr.expr.data).isdigit()
+
     @classmethod
     def from_expr(cls, expr: str) -> "SymbolValueType":
         """从字符串构造整数符号值类型。

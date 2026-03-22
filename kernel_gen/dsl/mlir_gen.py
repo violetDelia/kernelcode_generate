@@ -27,6 +27,7 @@ from xdsl.dialects.builtin import FunctionType, i32
 from xdsl.ir import Block, Region
 
 from kernel_gen.dialect.symbol import SymbolValueType
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 from .ast import (
     AstParseError,
@@ -36,41 +37,60 @@ from .ast import (
     TensorAST,
     _ParseFailure,
     _parse_function_impl,
-    parse_function,
 )
 from .emit_mlir import EmitContext, _LoweringError, _ensure_supported_statements, _expr_key, _infer_expr_type, _memory_to_nn_type
 
 
 def _is_symbol_scalar_function(func_ast: FunctionAST) -> bool:
-    if not func_ast.inputs or not func_ast.outputs:
+    if not func_ast.inputs:
         return False
-    return all(isinstance(item, ScalarArgAST) and item.value_type is int for item in func_ast.inputs) and all(
-        isinstance(item, ScalarArgAST) and item.value_type is int for item in func_ast.outputs
-    )
+    if not all(isinstance(item, ScalarArgAST) and item.value_type is int for item in func_ast.inputs):
+        return False
+    if not func_ast.outputs:
+        return True
+    return all(isinstance(item, ScalarArgAST) and item.value_type is int for item in func_ast.outputs)
 
 
 def _is_symbol_scalar_arg(item: ScalarArgAST, *, is_symbol_scalar_function: bool) -> bool:
     return is_symbol_scalar_function or item.is_symbolic
 
 
-def _build_signature_types(func_ast: FunctionAST) -> tuple[list[object], dict[int, object]]:
+def _symbol_expr_from_runtime_arg(runtime_arg: object) -> str | None:
+    if isinstance(runtime_arg, SymbolDim):
+        return str(runtime_arg.get_symbol())
+    if isinstance(runtime_arg, int):
+        return str(runtime_arg)
+    return None
+
+
+def _build_signature_types(
+    func_ast: FunctionAST,
+    runtime_args: tuple[object, ...] | list[object] | None = None,
+) -> tuple[list[object], dict[int, object]]:
     if not func_ast.inputs:
         raise _LoweringError("Function has no inputs", location=func_ast.location)
+    if runtime_args is not None and len(runtime_args) != len(func_ast.inputs):
+        raise _LoweringError("runtime_args must align with func_ast inputs", location=func_ast.location)
 
     is_symbol_scalar_function = _is_symbol_scalar_function(func_ast)
     arg_types: list[object] = []
     type_map: dict[int, object] = {}
     tensor_input_count = 0
-    for item in func_ast.inputs:
+    for index, item in enumerate(func_ast.inputs):
+        runtime_arg = None if runtime_args is None else runtime_args[index]
         if isinstance(item, TensorAST):
             arg_type = _memory_to_nn_type(item.memory, location=item.location)
             tensor_input_count += 1
         elif isinstance(item, ScalarArgAST):
             if item.value_type is not int:
                 raise _LoweringError("Unsupported scalar argument type", location=item.location)
-            arg_type = SymbolValueType.from_expr(item.name) if _is_symbol_scalar_arg(
-                item, is_symbol_scalar_function=is_symbol_scalar_function
-            ) else i32
+            runtime_expr = _symbol_expr_from_runtime_arg(runtime_arg)
+            if runtime_expr is not None and (is_symbol_scalar_function or isinstance(runtime_arg, SymbolDim)):
+                arg_type = SymbolValueType.from_expr(runtime_expr)
+            elif _is_symbol_scalar_arg(item, is_symbol_scalar_function=is_symbol_scalar_function):
+                arg_type = SymbolValueType.from_expr(item.name)
+            else:
+                arg_type = i32
         else:
             raise _LoweringError("Unsupported input type", location=getattr(item, "location", None))
         arg_types.append(arg_type)
@@ -85,6 +105,7 @@ def _parse_function_with_env(
     fn: Callable[..., object],
     globals_table: dict[str, object] | None,
     builtins_table: dict[str, object] | None,
+    runtime_table: dict[str, object] | None,
     config: dict[str, object] | None,
 ) -> FunctionAST:
     try:
@@ -92,6 +113,7 @@ def _parse_function_with_env(
             fn,
             globals_table=globals_table,
             builtins_table=builtins_table,
+            runtime_table=runtime_table,
             config=config,
         )
     except _ParseFailure as exc:
@@ -125,9 +147,6 @@ def _validate_return_type(func_ast: FunctionAST, result_type: object) -> None:
 def build_func_op(
     fn: Callable[..., object],
     *runtime_args: object,
-    globals: dict[str, object] | None = None,
-    builtins: dict[str, object] | None = None,
-    config: dict[str, object] | None = None,
 ) -> func.FuncOp:
     from .ast_visitor import AstVisitorError
 
@@ -142,29 +161,34 @@ def build_func_op(
             f"build_func_op requires explicit runtime args for {fn.__name__}: "
             f"expected {len(positional_params)}, got {len(runtime_args)}"
         )
-        if len(runtime_args) == 0 and (globals is not None or builtins is not None):
-            reason += "; globals/builtins cannot replace function runtime args"
         raise AstVisitorError(reason, location=None)
 
+    runtime_table = {param.name: runtime_args[index] for index, param in enumerate(positional_params)}
+    globals_table = dict(getattr(fn, "__globals__", {}) or {})
+    globals_table.update(runtime_table)
+    builtins = globals_table.get("__builtins__", {})
+    if isinstance(builtins, dict):
+        builtins_table = builtins
+    else:
+        builtins_table = getattr(builtins, "__dict__", {})
+
     try:
-        if globals is None and builtins is None:
-            func_ast = parse_function(fn)
-        else:
-            func_ast = _parse_function_with_env(fn, globals, builtins, config)
+        func_ast = _parse_function_with_env(fn, globals_table, builtins_table, runtime_table, config=None)
     except AstParseError as exc:
         location = exc.diagnostics[0].location if exc.diagnostics else None
         raise AstVisitorError(exc.message, location=location) from exc
-    return build_func_op_from_ast(func_ast, config=config)
+    return build_func_op_from_ast(func_ast, runtime_args=runtime_args)
 
 
 def _build_func_op_from_ast_impl(
     func_ast: FunctionAST,
+    runtime_args: tuple[object, ...] | list[object] | None = None,
     config: dict[str, object] | None = None,
 ) -> func.FuncOp:
     from .ast_visitor import AstVisitor
 
     config = config or {}
-    arg_types, type_map = _build_signature_types(func_ast)
+    arg_types, type_map = _build_signature_types(func_ast, runtime_args=runtime_args)
     statements = _ensure_supported_statements(func_ast)
     result_types: list[object] = []
     if func_ast.outputs:
@@ -191,11 +215,12 @@ def _build_func_op_from_ast_impl(
 
 def build_func_op_from_ast(
     func_ast: FunctionAST,
+    runtime_args: tuple[object, ...] | list[object] | None = None,
     config: dict[str, object] | None = None,
 ) -> func.FuncOp:
     from .ast_visitor import AstVisitorError
 
     try:
-        return _build_func_op_from_ast_impl(func_ast, config=config)
+        return _build_func_op_from_ast_impl(func_ast, runtime_args=runtime_args, config=config)
     except _LoweringError as exc:
         raise AstVisitorError(str(exc), location=exc.location) from exc
