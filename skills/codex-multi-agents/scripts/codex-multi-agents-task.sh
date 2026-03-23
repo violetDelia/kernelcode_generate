@@ -391,7 +391,7 @@ should_send_dispatch_init_reminder() {
       ;;
   esac
 
-  (( RANDOM % 1 == 0 ))
+  (( RANDOM % 20==0))
 }
 
 send_dispatch_init_reminder() {

@@ -35,6 +35,6 @@ k_tile = SymbolDim("K_t")
 stride = SymbolDim("stride")
 
 src = Memory([m, k], NumericType.Float32)
-sub = view(src, [m_tile, k_tile], [0, 0], [stride, 1])
+sub = view(src, [m_tile, k_tile], [2, 2], [stride, 1])
 
-assert sub is not None
+assert sub == Memory([2, 2], NumericType.Float32)

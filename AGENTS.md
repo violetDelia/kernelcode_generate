@@ -22,7 +22,7 @@
 
 - `test` 为测试目录。
 - 测试统一使用 `pytest` 框架。
-- 每份测试文件说明都要写明当前覆盖率信息和覆盖率命令；这里的覆盖率指对应功能实现文件或实现模块的覆盖率。
+- 每份测试文件说明中都要写明当前覆盖率信息和覆盖率命令；这里的覆盖率指对应功能实现文件或实现模块的覆盖率。
 - 覆盖率命令应明确指定对应功能实现文件或对应实现模块，而不是测试文件本身。
 - 覆盖率命令应直接给出可执行示例，例如：`pytest --cov=package.module --cov-report=term-missing test/xxx/test_xxx.py`；其中 `--cov` 指向功能实现，测试文件仅作为执行入口。
 - 若覆盖率未达标，需要申请补充测试；必要时先补充对应 `spec` 中的测试清单，再补测试实现。
@@ -36,11 +36,17 @@
   - 对应 `spec` 文件路径。
   - 示例：[`test/codex-multi-agents/test_codex-multi-agents-list.py`](test/codex-multi-agents/test_codex-multi-agents-list.py)
 
+## 任务记录约定
+
+- 所有任务记录都必须写入对应的记录文件。
+- 每条任务记录都必须按以下顺序记录：`时间`、`任务`、`任务目标`、`改动`、`结论`。
+- 同一记录文件中的内容按实际执行顺序追加，不得打乱先后关系。
+
 ## [immutable]
 
 - 带有 `[immutable]` 或 `[immutable-file]` 标记的内容，默认视为高敏感内容。
-- 不可以修改带有 `[immutable]` 或 `[immutable-file]` 标记的内容。
-- [immutable-file] 代表整个文件不可修改！
+- 不得修改带有 `[immutable]` 或 `[immutable-file]` 标记的内容。
+- 带有 `[immutable-file]` 标记的文件整体不可修改。
 
 ## 编码约定
 
@@ -87,7 +93,7 @@
   - spec 中的接口说明、测试目标和示例，应与实际实现和测试保持一致。
   - 若 spec 中定义了测试清单，应与实际测试用例一一对应。
   - spec 文件不得出现除 `<结构目录>` 以外的其他章节。
-  - spec 文件不应绑定当前某一版实现或测试细节。
+  - spec 文件不应绑定某一版实现或测试细节。
   - `README.md` 不属于 spec 文件，不需要遵守本节结构要求。
 
 ### 审查规范
@@ -133,7 +139,7 @@
 
 - 禁止在合并流程中使用 `git stash`。
 - 合并前必须确认目标 `worktree` 内不存在其他进行中任务；若仍有未完成任务，禁止合并。
-- `agents/` 目录内除 `task_records` 外的文件仅在主分支更新，如 `talk.log`、`agents-lists.md`；除了agents/codex-multi-agents/log/task_records/ 下的任务日志。 如果路径没有文件则自己创建，合并时带上任务日志。
+- `agents/` 目录内除 `task_records` 外的文件仅在主分支更新，例如 `talk.log`、`agents-lists.md`；`agents/codex-multi-agents/log/task_records/` 下的任务日志在对应 `worktree` 更新。若路径不存在则自行创建；合并时带上任务日志。
 - 合并内容不得包含 `TODO.md`、`DONE.md`、`AGENTS.md`，以及 `skills/` 目录中的文件或子目录。
 - 冲突处理以最新有效改动为准；若冲突文件属于 `spec`，必须先以主分支内容为基线完成收敛，再执行合并。
 - 合并提交信息必须使用格式 `T-<task_id>-<desc>`。
