@@ -48,11 +48,13 @@ arg0 = func_op.args[0].type
 assert isinstance(arg0, SymbolValueType)
 assert not arg0.is_symbol()
 assert arg0.get_value() == lhs
+assert arg0.__str__() == "symbol.int<{}>".format(str(lhs))
 
 arg1 = func_op.args[1].type
 assert isinstance(arg1, SymbolValueType)
 assert not arg1.is_symbol()
 assert arg1.get_value() == rhs
+assert arg1.__str__() == "symbol.int<{}>".format(str(rhs))
 
 add_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolAddOp)]
 assert len(add_ops) == 2
@@ -62,3 +64,5 @@ out_type = add_ops[0].result.type
 assert isinstance(out_type, SymbolValueType)
 assert not out_type.is_symbol()
 assert out_type.get_value() == expected
+assert out_type.__str__() == "symbol.int<{}>".format(str(expected))
+
