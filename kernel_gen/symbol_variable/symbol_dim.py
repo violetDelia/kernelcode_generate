@@ -1,7 +1,7 @@
 """SymbolDim implementation.
 
 创建者: 小李飞刀
-最后一次更改: 我不是牛马
+最后一次更改: 小李飞刀
 
 功能说明:
 - 提供符号维度表达、基础算术运算与动态性判断。
@@ -206,7 +206,7 @@ class _SymbolDim:
 
         功能说明:
         - 静态整数/表达式返回 Python 数值。
-        - 含符号表达式返回 sympy 表达式。
+        - 含符号表达式返回规整后的字符串表达。
 
         使用示例:
         - SymbolDim(8).get_value()
@@ -219,7 +219,7 @@ class _SymbolDim:
         """
         expr = self.get_symbol()
         if expr.free_symbols:
-            return expr
+            return str(expr)
 
         simplified = sp.simplify(expr)
         if simplified.is_number:

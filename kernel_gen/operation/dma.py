@@ -214,17 +214,39 @@ def _ensure_sizes_positive(sizes: SymbolShape) -> None:
             raise ValueError("Invalid size")
 
 
-def _ensure_unit_strides(strides: SymbolShape | None) -> None:
-    """校验 stride 是否为全 1。
+def _ensure_offsets_non_negative(offsets: SymbolShape) -> None:
+    """校验 offsets 静态值非负。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
 
     功能说明:
-    - 当前阶段仅支持全 1 stride，其他情况显式报错。
+    - 静态 offset 必须为非负整数。
 
     使用示例:
-    - _ensure_unit_strides(SymbolShape([1, 1]))
+    - _ensure_offsets_non_negative(SymbolShape([0, 4]))
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: kernel_gen/operation/dma.py
+    """
+    for dim in offsets.get_values():
+        if isinstance(dim, int) and dim < 0:
+            raise ValueError("Invalid offset")
+
+
+def _ensure_strides_positive(strides: SymbolShape | None) -> None:
+    """校验 strides 静态值为正。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 静态 stride 必须为正整数。
+
+    使用示例:
+    - _ensure_strides_positive(SymbolShape([1, 2]))
 
     关联文件:
     - spec: spec/operation/dma.md
@@ -234,8 +256,8 @@ def _ensure_unit_strides(strides: SymbolShape | None) -> None:
     if strides is None:
         return
     for dim in strides.get_values():
-        if dim != 1:
-            raise NotImplementedError("Non-unit stride is not supported")
+        if isinstance(dim, int) and dim <= 0:
+            raise ValueError("Invalid stride")
 
 
 def _clone_symbol_list(value: SymbolShape | None) -> SymbolShape | None:
@@ -257,37 +279,51 @@ def _clone_symbol_list(value: SymbolShape | None) -> SymbolShape | None:
     """
     if value is None:
         return None
-    return SymbolShape(value.get_values())
+    return SymbolShape(value.get_shape())
 
 
-def _ensure_view_memoryspec(source: Memory, size: SymbolShape, memoryspec: object | None) -> Memory | None:
-    """校验并规范化 view 的 memoryspec。
+def _ensure_bounds(
+    memory: Memory,
+    offsets: SymbolShape,
+    sizes: SymbolShape,
+    strides: SymbolShape | None,
+) -> None:
+    """在可静态判定时校验切片边界。
 
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
 
     功能说明:
-    - `memoryspec` 为空时返回 None。
-    - `memoryspec` 必须为 Memory，且需与 `size/source.dtype` 兼容。
+    - offsets/sizes/strides 与 memory.shape 全为静态时检查越界。
+    - 动态维度无法判定时跳过该维度校验。
 
     使用示例:
-    - _ensure_view_memoryspec(src, SymbolShape([2, 2]), Memory([4, 4], NumericType.Float32))
+    - _ensure_bounds(mem, SymbolShape([0, 0]), SymbolShape([2, 2]), SymbolShape([1, 1]))
 
     关联文件:
     - spec: spec/operation/dma.md
     - test: test/operation/test_operation_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
-    if memoryspec is None:
-        return None
-    spec = _ensure_memory(memoryspec, "memoryspec")
-    if spec.dtype is not source.dtype:
-        raise TypeError("memoryspec dtype mismatch")
-    if len(spec.shape) != len(size):
-        raise ValueError("memoryspec rank mismatch")
-    if spec.stride is not None and len(spec.stride) != len(size):
-        raise ValueError("memoryspec rank mismatch")
-    return spec
+    shape_values = memory.shape.get_values()
+    offset_values = offsets.get_values()
+    size_values = sizes.get_values()
+    if strides is None:
+        stride_values = [1 for _ in offset_values]
+    else:
+        stride_values = strides.get_values()
+    for dim, offset, size, stride in zip(shape_values, offset_values, size_values, stride_values):
+        if isinstance(offset, int) and offset < 0:
+            raise ValueError("Invalid offset")
+        if isinstance(size, int) and size <= 0:
+            raise ValueError("Invalid size")
+        if isinstance(stride, int) and stride <= 0:
+            raise ValueError("Invalid stride")
+        if not all(isinstance(value, int) for value in (dim, offset, size, stride)):
+            continue
+        last_index = offset + (size - 1) * stride
+        if last_index >= dim:
+            raise ValueError("Index out of bounds")
 
 
 def _is_contiguous(memory: Memory) -> bool:
@@ -392,17 +428,17 @@ def _is_supported_cast(source: NumericType, target: NumericType) -> bool:
     return False
 
 
-def copy(source: object, target: object) -> None:
+def copy(source: object, space: object) -> Memory:
     """整块拷贝。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
-    - source/target 需 shape/stride/dtype 一致。
+    - 返回新的 Memory 描述，仅覆盖目标 space。
 
     使用示例:
-    - copy(src, dst)
+    - copy(src, MemorySpace.SM)
 
     关联文件:
     - spec: spec/operation/dma.md
@@ -410,17 +446,15 @@ def copy(source: object, target: object) -> None:
     - 功能实现: kernel_gen/operation/dma.py
     """
     src = _ensure_memory(source, "source")
-    dst = _ensure_memory(target, "target")
-    if src.dtype is not dst.dtype:
-        raise TypeError("Memory dtype mismatch")
-    if src.shape.get_values() != dst.shape.get_values():
-        raise ValueError("Memory shape mismatch")
-    if (src.stride is None) != (dst.stride is None):
-        raise ValueError("Memory stride mismatch")
-    if src.stride is not None and dst.stride is not None:
-        if src.stride.get_values() != dst.stride.get_values():
-            raise ValueError("Memory stride mismatch")
-    return None
+    if not isinstance(space, MemorySpace):
+        raise TypeError("space must be MemorySpace")
+    return Memory(
+        _clone_symbol_list(src.shape),
+        src.dtype,
+        space=space,
+        stride=_clone_symbol_list(src.stride),
+        format=src.format,
+    )
 
 
 def load(
@@ -454,7 +488,9 @@ def load(
     strides_shape = None if strides is None else _normalize_index_list(strides, "strides")
     _ensure_index_rank(src, offsets_shape, sizes_shape, strides_shape)
     _ensure_sizes_positive(sizes_shape)
-    _ensure_unit_strides(strides_shape)
+    _ensure_offsets_non_negative(offsets_shape)
+    _ensure_strides_positive(strides_shape)
+    _ensure_bounds(src, offsets_shape, sizes_shape, strides_shape)
     target_space = src.space if space is None else space
     return Memory(
         _clone_symbol_list(sizes_shape),
@@ -475,7 +511,7 @@ def store(
     """把 source 块写回 target 区域。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
     - source.shape 必须与 sizes 一致。
@@ -497,7 +533,9 @@ def store(
     strides_shape = None if strides is None else _normalize_index_list(strides, "strides")
     _ensure_index_rank(dst, offsets_shape, sizes_shape, strides_shape)
     _ensure_sizes_positive(sizes_shape)
-    _ensure_unit_strides(strides_shape)
+    _ensure_offsets_non_negative(offsets_shape)
+    _ensure_strides_positive(strides_shape)
+    _ensure_bounds(dst, offsets_shape, sizes_shape, strides_shape)
     if src.shape.get_values() != sizes_shape.get_values():
         raise ValueError("Store size mismatch")
     return None
@@ -555,16 +593,16 @@ def deslice(
     return store(source, target, offsets, sizes, strides=strides)
 
 
-def view(source: object, offset, size, stride, memoryspec: object | None = None) -> Memory:
+def view(source: object, offset, size, stride) -> Memory:
     """返回 source 的子视图结果。
 
     创建者: ChatGPT
-    最后一次更改: 我不是牛马
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 仅保留 `offset/size/stride` 子视图参数，不做数据搬运。
     - 返回结果的 `shape` 固定等于 `size`，默认继承 `source` 的 `dtype/space/format`。
-    - 显式传入 `memoryspec` 时，以其内存规格覆盖输出。
+    - 返回结果继承 `source` 的规格，仅替换 `shape`。
 
     使用示例:
     - view(Memory(["M", "K"], NumericType.Float32), offset=["M_t", "K_t"], size=[2, 2], stride=["stride", 1])
@@ -580,16 +618,15 @@ def view(source: object, offset, size, stride, memoryspec: object | None = None)
     stride_value = _ensure_shape_value(stride, "stride")
     _ensure_index_rank(src, offset_value, size_value, stride_value)
     _ensure_sizes_positive(size_value)
-    memoryspec_value = _ensure_view_memoryspec(src, size_value, memoryspec)
-    target_space = src.space if memoryspec_value is None else memoryspec_value.space
-    target_stride = _clone_symbol_list(src.stride) if memoryspec_value is None else _clone_symbol_list(memoryspec_value.stride)
-    target_format = src.format if memoryspec_value is None else memoryspec_value.format
+    _ensure_offsets_non_negative(offset_value)
+    _ensure_strides_positive(stride_value)
+    _ensure_bounds(src, offset_value, size_value, stride_value)
     return Memory(
         _clone_symbol_list(size_value),
         src.dtype,
-        space=target_space,
-        stride=target_stride,
-        format=target_format,
+        space=src.space,
+        stride=_clone_symbol_list(src.stride),
+        format=src.format,
     )
 
 
@@ -656,17 +693,17 @@ def flatten(source: object) -> Memory:
     )
 
 
-def cast(source: object, dtype: NumericType) -> Memory:
+def cast(source: object, dtype: NumericType, memoryspace: MemorySpace | None = None) -> Memory:
     """显式转换 Memory dtype。
 
     创建者: 小李飞刀
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 返回 shape/stride/space 保持一致的新 Memory。
+    - 返回 shape/stride/format 保持一致的新 Memory，space 可选覆盖。
 
     使用示例:
-    - cast(Memory([1, 2], NumericType.Float32), NumericType.Float16)
+    - cast(Memory([1, 2], NumericType.Float32), NumericType.Float16, memoryspace=MemorySpace.GM)
 
     关联文件:
     - spec: spec/operation/dma.md
@@ -676,12 +713,15 @@ def cast(source: object, dtype: NumericType) -> Memory:
     src = _ensure_memory(source, "source")
     if not isinstance(dtype, NumericType):
         raise TypeError("cast dtype must be NumericType")
+    if memoryspace is not None and not isinstance(memoryspace, MemorySpace):
+        raise TypeError("cast memoryspace must be MemorySpace")
     if not _is_supported_cast(src.dtype, dtype):
         raise NotImplementedError("Unsupported cast conversion")
+    target_space = src.space if memoryspace is None else memoryspace
     return Memory(
         _clone_symbol_list(src.shape),
         dtype,
-        space=src.space,
+        space=target_space,
         stride=_clone_symbol_list(src.stride),
         format=src.format,
     )

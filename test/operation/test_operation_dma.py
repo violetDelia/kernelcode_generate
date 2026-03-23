@@ -1,7 +1,7 @@
 """dma operation API tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 我不是牛马
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 kernel_gen/operation/dma.py 的搬运 API。
@@ -144,75 +144,61 @@ def test_free_type_error() -> None:
 
 # TC-OP-DMA-001
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 测试目的: 验证 copy 在完全匹配时通过。
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-24 02:59:00 +0800
+# 最近一次运行成功时间: 2026-03-24 02:59:00 +0800
+# 测试目的: 验证 copy 返回新 Memory，仅覆盖目标 space。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_copy_success
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
 # 对应测试文件路径: test/operation/test_operation_dma.py
 def test_copy_success() -> None:
-    src = Memory(["M", "N"], NumericType.Float32, space=MemorySpace.GM, stride=[1, 1])
-    dst = Memory(["M", "N"], NumericType.Float32, space=MemorySpace.SM, stride=[1, 1])
-    result = copy(src, dst)
-    assert result is None
+    src = Memory(["M", "N"], NumericType.Float32, space=MemorySpace.GM, stride=[1, 1], format=Farmat.CLast)
+    result = copy(src, MemorySpace.SM)
+    assert isinstance(result, Memory)
+    assert result.shape.get_values() == ["M", "N"]
+    assert result.stride is not None
+    assert result.stride.get_values() == [1, 1]
+    assert result.dtype is NumericType.Float32
+    assert result.space is MemorySpace.SM
+    assert result.format is Farmat.CLast
 
 
 # TC-OP-DMA-002
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 测试目的: 验证 copy shape mismatch 抛 ValueError。
-# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_copy_shape_mismatch
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-24 02:59:00 +0800
+# 最近一次运行成功时间: 2026-03-24 02:59:00 +0800
+# 测试目的: 验证 copy 输入类型错误触发 TypeError。
+# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_copy_type_error
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
 # 对应测试文件路径: test/operation/test_operation_dma.py
-def test_copy_shape_mismatch() -> None:
+def test_copy_type_error() -> None:
     src = Memory(["M", "N"], NumericType.Float32)
-    dst = Memory(["M", "K"], NumericType.Float32)
-    with pytest.raises(ValueError):
-        copy(src, dst)
+    with pytest.raises(TypeError):
+        copy("source", MemorySpace.SM)
+    with pytest.raises(TypeError):
+        copy(src, "SM")
 
 
 # TC-OP-DMA-010
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 测试目的: 验证 copy stride mismatch 抛 ValueError。
-# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_copy_stride_mismatch
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-24 02:59:00 +0800
+# 最近一次运行成功时间: 2026-03-24 02:59:00 +0800
+# 测试目的: 验证 copy 继承 source 的 shape/stride/format 规格。
+# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_copy_preserves_spec
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
 # 对应测试文件路径: test/operation/test_operation_dma.py
-def test_copy_stride_mismatch() -> None:
-    src = Memory(["M", "N"], NumericType.Float32, stride=[1, 1])
-    dst = Memory(["M", "N"], NumericType.Float32, stride=[1, 2])
-    with pytest.raises(ValueError):
-        copy(src, dst)
-    src = Memory(["M", "N"], NumericType.Float32, stride=[1, 1])
-    dst = Memory(["M", "N"], NumericType.Float32, stride=[1, 1])
-    dst.stride = None
-    with pytest.raises(ValueError):
-        copy(src, dst)
-
-
-# TC-OP-DMA-022
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 测试目的: 验证 copy dtype mismatch 抛 TypeError。
-# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_copy_dtype_mismatch
-# 对应功能实现文件路径: kernel_gen/operation/dma.py
-# 对应 spec 文件路径: spec/operation/dma.md
-# 对应测试文件路径: test/operation/test_operation_dma.py
-def test_copy_dtype_mismatch() -> None:
-    src = Memory(["M", "N"], NumericType.Float32)
-    dst = Memory(["M", "N"], NumericType.Int32)
-    with pytest.raises(TypeError):
-        copy(src, dst)
+def test_copy_preserves_spec() -> None:
+    src = Memory(["M", "N"], NumericType.Float32, space=MemorySpace.GM, stride=[SymbolDim("S") * SymbolDim("N"), 1])
+    result = copy(src, MemorySpace.GM)
+    assert result.shape.get_values() == src.shape.get_values()
+    assert result.stride is not None
+    assert result.stride.get_values() == src.stride.get_values()
+    assert result.format is src.format
 
 
 # TC-OP-DMA-003
@@ -373,25 +359,27 @@ def test_dma_invalid_sizes() -> None:
 
 # TC-OP-DMA-008
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 测试目的: 验证非 1 stride 明确报错。
-# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_dma_non_unit_stride_rejected
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-24 02:59:00 +0800
+# 最近一次运行成功时间: 2026-03-24 02:59:00 +0800
+# 测试目的: 验证非单位 stride 允许使用且执行边界校验。
+# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_dma_non_unit_stride_checked
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
 # 对应测试文件路径: test/operation/test_operation_dma.py
-def test_dma_non_unit_stride_rejected() -> None:
-    src = Memory(["M", "N"], NumericType.Float32)
-    with pytest.raises(NotImplementedError):
-        load(src, offsets=[0, 0], sizes=[1, 1], strides=[1, 2])
+def test_dma_non_unit_stride_checked() -> None:
+    src = Memory([8, 16], NumericType.Float32)
+    tile = load(src, offsets=[0, 0], sizes=[2, 4], strides=[1, 2])
+    assert tile.shape.get_values() == [2, 4]
+    with pytest.raises(ValueError):
+        load(src, offsets=[0, 12], sizes=[2, 4], strides=[1, 2])
 
 
 # TC-OP-DMA-009
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-24 02:59:00 +0800
+# 最近一次运行成功时间: 2026-03-24 02:59:00 +0800
 # 测试目的: 验证非 Memory 输入触发 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_dma_type_error
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -400,14 +388,16 @@ def test_dma_non_unit_stride_rejected() -> None:
 def test_dma_type_error() -> None:
     dst = Memory(["M", "N"], NumericType.Float32)
     with pytest.raises(TypeError):
-        copy("source", dst)
+        load("source", offsets=[0, 0], sizes=[1, 1], strides=[1, 1])
+    with pytest.raises(TypeError):
+        store(dst, "target", offsets=[0, 0], sizes=[1, 1], strides=[1, 1])
 
 
 # TC-OP-DMA-011
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行测试时间: 2026-03-24 03:34:55 +0800
+# 最近一次运行成功时间: 2026-03-24 03:34:55 +0800
 # 测试目的: 验证 cast 返回相同 shape/stride/space 的新 Memory 且 dtype 发生变化。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_cast_changes_dtype
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -423,12 +413,33 @@ def test_cast_changes_dtype() -> None:
     assert dst.dtype is NumericType.Float16
 
 
+# TC-OP-DMA-022
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-24 03:34:55 +0800
+# 最近一次运行成功时间: 2026-03-24 03:34:55 +0800
+# 测试目的: 验证 cast 显式覆盖 memoryspace。
+# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_cast_overrides_space
+# 对应功能实现文件路径: kernel_gen/operation/dma.py
+# 对应 spec 文件路径: spec/operation/dma.md
+# 对应测试文件路径: test/operation/test_operation_dma.py
+def test_cast_overrides_space() -> None:
+    src = Memory(["M", "N"], NumericType.Int32, space=MemorySpace.SM, stride=[1, 1], format=Farmat.CLast)
+    dst = cast(src, NumericType.Int64, memoryspace=MemorySpace.GM)
+    assert dst.shape.get_values() == ["M", "N"]
+    assert dst.stride is not None
+    assert dst.stride.get_values() == [1, 1]
+    assert dst.space is MemorySpace.GM
+    assert dst.format is Farmat.CLast
+    assert dst.dtype is NumericType.Int64
+
+
 # TC-OP-DMA-012
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 测试目的: 验证 cast 非法 dtype 触发 TypeError。
+# 测试目的: 验证 cast 非法 dtype 或 memoryspace 触发 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_cast_invalid_dtype
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -437,6 +448,8 @@ def test_cast_invalid_dtype() -> None:
     src = Memory([1, 2], NumericType.Float32)
     with pytest.raises(TypeError):
         cast(src, "float32")
+    with pytest.raises(TypeError):
+        cast(src, NumericType.Float32, memoryspace="GM")
 
 
 # TC-OP-DMA-013
@@ -457,9 +470,9 @@ def test_cast_unsupported_conversion() -> None:
 
 # TC-OP-DMA-027
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-24 03:34:55 +0800
+# 最近一次运行成功时间: 2026-03-24 03:34:55 +0800
 # 测试目的: 验证 cast 支持同 dtype 与整数类型之间的转换。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_cast_supported_conversions
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -481,7 +494,7 @@ def test_cast_supported_conversions() -> None:
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 测试目的: 验证 view(source, offset, size, stride, memoryspec=None) 返回 shape == size 的子视图 Memory。
+# 测试目的: 验证 view(source, offset, size, stride) 返回 shape == size 的子视图 Memory。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_view_subview_returns_memory
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -503,7 +516,7 @@ def test_view_subview_returns_memory() -> None:
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 测试目的: 验证未传 memoryspec 时沿用 source 规格。
+# 测试目的: 验证 view 沿用 source 规格。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_view_inherits_source_memoryspec
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -519,39 +532,35 @@ def test_view_inherits_source_memoryspec() -> None:
     assert dst.format is Farmat.CLast
 
 
-# TC-OP-DMA-015
+# TC-OP-DMA-016
 # 创建者: 我不是牛马
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 测试目的: 验证传入 memoryspec 时，view 以 memoryspec 覆盖输出内存规格。
-# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_view_overrides_memoryspec
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-24 02:59:00 +0800
+# 最近一次运行成功时间: 2026-03-24 02:59:00 +0800
+# 测试目的: 验证 view 在静态场景下执行边界检查。
+# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_view_bounds_check
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
 # 对应测试文件路径: test/operation/test_operation_dma.py
-def test_view_overrides_memoryspec() -> None:
-    src = Memory([8, 8], NumericType.Float32, space=MemorySpace.GM, format=Farmat.Norm)
-    memoryspec = Memory([99, 99], NumericType.Float32, space=MemorySpace.SM, stride=[16, 2], format=Farmat.CLast)
-    dst = view(src, offset=[0, 0], size=[2, 2], stride=[SymbolDim("stride"), 1], memoryspec=memoryspec)
-    assert dst.shape.get_values() == [2, 2]
-    assert dst.dtype is NumericType.Float32
-    assert dst.space is MemorySpace.SM
-    assert dst.format is Farmat.CLast
-    assert dst.stride is not None
-    assert dst.stride.get_values() == [16, 2]
+def test_view_bounds_check() -> None:
+    src = Memory([8, 16], NumericType.Float32, space=MemorySpace.GM, format=Farmat.Norm)
+    with pytest.raises(ValueError):
+        view(src, offset=[0, 15], size=[2, 2], stride=[1, 1])
+    with pytest.raises(ValueError):
+        view(src, offset=[0, 14], size=[2, 2], stride=[1, 2])
 
 
 # TC-OP-DMA-016
 # 创建者: ChatGPT
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 测试目的: 验证 view 的 offset/size/stride rank、size 正长度与 memoryspec 兼容性错误路径。
-# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_view_invalid_offset_size_stride_or_memoryspec
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-24 02:59:00 +0800
+# 最近一次运行成功时间: 2026-03-24 02:59:00 +0800
+# 测试目的: 验证 view 的 offset/size/stride rank 与 size 正长度约束。
+# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_view_invalid_offset_size_stride
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
 # 对应测试文件路径: test/operation/test_operation_dma.py
-def test_view_invalid_offset_size_stride_or_memoryspec() -> None:
+def test_view_invalid_offset_size_stride() -> None:
     src = Memory([2, 3], NumericType.Float32)
     with pytest.raises(ValueError):
         view(src, offset="MN", size=[2, 2], stride=[1, 1])
@@ -561,24 +570,10 @@ def test_view_invalid_offset_size_stride_or_memoryspec() -> None:
         view(src, offset=[0, 0], size=[0, 2], stride=[1, 1])
     with pytest.raises(ValueError):
         view(src, offset=[0, 0], size=[2, 2], stride=[1])
-    with pytest.raises(TypeError):
-        view(src, offset=[0, 0], size=[2, 2], stride=[1, 1], memoryspec="SM")
-    with pytest.raises(TypeError):
-        view(
-            src,
-            offset=[0, 0],
-            size=[2, 2],
-            stride=[1, 1],
-            memoryspec=Memory([2, 2], NumericType.Float16),
-        )
     with pytest.raises(ValueError):
-        view(
-            src,
-            offset=[0, 0],
-            size=[2, 2],
-            stride=[1, 1],
-            memoryspec=Memory([2, 2, 2], NumericType.Float32),
-        )
+        view(src, offset=[-1, 0], size=[2, 2], stride=[1, 1])
+    with pytest.raises(ValueError):
+        view(src, offset=[0, 0], size=[2, 2], stride=[0, 1])
 
 
 # TC-OP-DMA-019
@@ -632,6 +627,8 @@ def test_reshape_invalid_shape_or_stride() -> None:
     src = Memory([2, 3, 4], NumericType.Float32)
     with pytest.raises(ValueError):
         reshape(src, shape="24")
+    with pytest.raises(ValueError):
+        reshape(src, shape=[5, 5])
     non_contiguous = Memory([2, 3, 4], NumericType.Float32, stride=[100, 4, 1])
     with pytest.raises(ValueError):
         reshape(non_contiguous, shape=[6, 4])
