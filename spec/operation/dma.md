@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`朽木露琪亚`
+- 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/operation/dma.md`](../../spec/operation/dma.md)
 - `功能实现`：[`kernel_gen/operation/dma.py`](../../kernel_gen/operation/dma.py)
 - `test`：[`test/operation/test_operation_dma.py`](../../test/operation/test_operation_dma.py)
@@ -16,6 +16,7 @@
 
 - [`spec/dialect/dma.md`](../../spec/dialect/dma.md)：方言层搬运语义映射。
 - [`spec/dialect/nn.md`](../../spec/dialect/nn.md)：`NnMemoryType` / `NnMemorySpaceAttr` 口径来源。
+- [`expectation/operation/subview.py`](../../expectation/operation/subview.py)：`view` 子视图场景的 expectation 基线。
 - [`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)：`Memory` 结构与 `shape/stride/dtype/space` 语义。
 - [`spec/symbol_variable/symbol_shape.md`](../../spec/symbol_variable/symbol_shape.md)：`SymbolShape` / 索引列表语义。
 - [`spec/symbol_variable/type.md`](../../spec/symbol_variable/type.md)：`NumericType` 定义。
@@ -28,6 +29,7 @@
 - 明确 `alloc/free/copy/load/store/slice/deslice/view/reshape/flatten/cast` 的输入约束、输出语义、空间规则与错误边界。
 - 保留动态 `shape` 与 `offsets/sizes/strides` 的表达能力，支持后续 lowering 保留切片信息。
 - 明确高层 `operation/dma` 与 `dialect/dma` 的分层关系与映射口径。
+- 为 `expectation/operation/subview.py` 对应的子视图场景定义稳定的 `view(source, offset, size, stride, memoryspec=None)` 接口。
 
 ## 限制与边界
 
@@ -40,7 +42,11 @@
 - `view/reshape/flatten` 不做数据搬运，仅调整张量视图的 `shape/stride` 描述。
 - 至少一侧操作数必须是 `Memory`；不定义纯标量间搬运接口。
 - `offsets/sizes/strides` 长度必须与相关 `Memory.rank` 一致，`sizes` 中静态长度必须为正。
-- 当前阶段 `strides` 仅支持全 1；非 1 stride 必须显式报错。
+- 除 `view` 外，当前阶段其余携带 `strides` 的 DMA 搬运接口仅支持全 1；非 1 stride 必须显式报错。
+- `view` 的公开接口固定为 `view(source, offset, size, stride, memoryspec=None)`；其中 `offset/size/stride` 用于描述子视图范围，不再使用 `shape` 作为 `view` 的公开参数名。
+- `view` 的 `offset/size/stride` 长度必须与 `source.rank` 一致；`size` 中静态维度必须为正。
+- `view` 允许 `stride` 包含整型常量或符号整型表达，用于描述子视图步进；该步进属于操作参数，不要求直接编码进返回 `Memory.stride`。
+- `view` 返回值的逻辑 `shape` 固定等于 `size`，`dtype` 默认继承 `source.dtype`；未显式传入 `memoryspec` 时，其余内存规格默认沿用 `source`，显式传入时以 `memoryspec` 为准。
 - 形状、类型、空间或索引规则不满足时必须报错，不允许 silently 降级。
 - `alloc/free` 不要求存在 `dma dialect` op，但结果必须可无损映射为 `NnMemoryType` / `NnMemorySpaceAttr`。
 - `copy/load/store/slice/deslice/cast` 映射到 `dma.copy/load/store/slice/deslice/cast`。
@@ -247,37 +253,42 @@ deslice(sub, dst, offsets=[0, 16], sizes=[32, 32])
 
 - 返回 `None`；内部复用 `store` 的实现路径。
 
-### view(source, shape, stride=None)
+### view(source, offset, size, stride, memoryspec=None)
 
 功能说明：
 
-- 返回 `source` 的视图变换结果，仅调整 `shape/stride` 元信息。
-- 不做数据搬运，不改变 `dtype/space/format`。
+- 返回 `source` 的子视图结果，仅描述从 `source` 上切出的逻辑窗口。
+- `offset/size/stride` 用于保留 subview lowering 所需的范围信息；该操作本身不做数据搬运。
+- 当未显式提供 `memoryspec` 时，返回结果默认沿用 `source` 的内存规格；返回 `Memory.shape` 固定等于 `size`。
 
 参数说明：
 
 - `source: Memory`：源内存。
-- `shape: Sequence | SymbolShape`：目标视图形状。
-- `stride: Sequence | SymbolShape | None`：目标视图步幅；`None` 表示按连续行主序生成。
+- `offset: Sequence | SymbolShape`：子视图起始偏移，长度必须与 `source.rank` 一致。
+- `size: Sequence | SymbolShape`：子视图逻辑大小，返回结果的 `shape` 固定等于该参数。
+- `stride: Sequence | SymbolShape`：子视图步进，长度必须与 `source.rank` 一致；可包含整型常量或符号整型表达。
+- `memoryspec: Memory | None`：可选的结果内存规格模板；未传入时沿用 `source` 的内存规格，传入时以其 `space/format/stride` 等规格为准，`shape` 仍以 `size` 为准。
 
 使用示例：
 
 ```python
-src = Memory([2, 3, 4], NumericType.Float32)
-dst = view(src, shape=[6, 4])
+src = Memory(["M", "K"], NumericType.Float32)
+sub = view(src, offset=["M_t", "K_t"], size=[2, 2], stride=["stride", 1])
 ```
 
 注意事项：
 
-- `shape` 必须可被 `SymbolShape` 规范化。
-- 若 `stride is None`，要求 `source` 为连续布局；默认 `stride` 按连续行主序生成。
-- 若显式提供 `stride`，其长度必须与 `shape` 的 rank 一致。
-- 若可判定，`shape` 的元素总数必须与 `source.shape` 一致；无法判定时由调用方保证。
+- `offset/size/stride` 都必须可被 `SymbolShape` 规范化，且长度必须与 `source.rank` 一致。
+- `size` 中静态维度必须为正。
+- `view` 的 `stride` 用于描述子视图访问步进，不等同于返回 `Memory` 的默认连续布局步幅；例如 `view(src, ..., size=[2, 2], stride=[S, 1])` 仍允许返回 `Memory([2, 2], dtype)`。
+- `memoryspec` 若显式传入，必须是合法的 `Memory` 规格模板，并与 `size/source.dtype` 兼容；不兼容时必须报错。
+- `expectation/operation/subview.py` 对应场景要求 `view(src, [m_tile, k_tile], [2, 2], [stride, 1]) == Memory([2, 2], NumericType.Float32)`。
 
 返回与限制：
 
-- 返回新的 `Memory`，其 `dtype/space/format` 继承 `source`。
-- 返回的 `shape/stride` 由 `shape/stride` 或默认规则决定。
+- 返回新的 `Memory`，其 `shape == size`，`dtype` 默认继承 `source.dtype`。
+- 未显式传入 `memoryspec` 时，返回结果默认沿用 `source` 的内存规格；显式传入时以 `memoryspec` 覆盖输出内存规格。
+- `offset/stride` 作为操作参数参与 lowering，不要求直接体现在返回 `Memory` 的默认连续布局表示中。
 
 ### reshape(source, shape)
 
@@ -369,7 +380,7 @@ dst = cast(src, NumericType.Float16)
 ## 测试
 
 - 测试文件：[`test/operation/test_operation_dma.py`](../../test/operation/test_operation_dma.py)
-- 执行命令：`pytest -q test/operation/test_operation_dma.py`
+- 执行命令：`pytest -q test/operation/test_operation_dma.py`；`python expectation/operation/subview.py`
 
 ### 测试目标
 
@@ -377,11 +388,12 @@ dst = cast(src, NumericType.Float16)
 - 验证 `copy` 的形状/stride/dtype 约束。
 - 验证 `load/slice` 的返回 `shape/dtype/space` 语义与索引校验。
 - 验证 `store/deslice` 的源块大小约束与索引校验。
-- 验证 `view` 的形状/步幅约束与连续布局要求。
+- 验证 `view` 的 `offset/size/stride/memoryspec` 子视图语义、返回 `Memory` 规则与错误路径。
 - 验证 `reshape` 的形状约束与连续布局要求。
 - 验证 `flatten` 的连续布局要求与结果形状。
 - 验证 `cast` 的 `dtype` 变更与错误分支。
 - 验证 stride 限制与类型错误分支。
+- 验证 `expectation/operation/subview.py` 可作为 `view` 子视图场景的 acceptance gate 直接运行成功。
 
 ### 功能与用例清单
 
@@ -406,9 +418,9 @@ dst = cast(src, NumericType.Float16)
 | TC-OP-DMA-011 | `cast` 基础转换 | `cast` 返回相同 `shape/stride/space`、新 `dtype` 的 `Memory` | `test_cast_changes_dtype` |
 | TC-OP-DMA-012 | `cast` 非法 dtype | 非法目标 `dtype` 触发稳定报错 | `test_cast_invalid_dtype` |
 | TC-OP-DMA-013 | `cast` 不支持的转换 | 当前实现不支持的转换路径显式报错 | `test_cast_unsupported_conversion` |
-| TC-OP-DMA-014 | `view` 基础视图 | `view` 返回新 `Memory` 且 `dtype/space/format` 继承 | `test_view_returns_memory` |
-| TC-OP-DMA-015 | `view` 默认步幅 | 未显式步幅且源为连续布局时生成默认步幅 | `test_view_default_stride_contiguous` |
-| TC-OP-DMA-016 | `view` 非法参数 | 非法 `shape/stride` 或 rank 不一致报错 | `test_view_invalid_shape_or_stride` |
+| TC-OP-DMA-014 | `view` 子视图基础语义 | `view(source, offset, size, stride, memoryspec=None)` 返回 `shape == size` 的 `Memory`，并满足 `expectation/operation/subview.py` 的断言 | `test_view_subview_returns_memory`；`python expectation/operation/subview.py` |
+| TC-OP-DMA-015 | `view` 内存规格继承/覆盖 | 未传 `memoryspec` 时沿用 `source` 规格，传入后以 `memoryspec` 覆盖输出规格 | `test_view_inherits_source_memoryspec`；`test_view_overrides_memoryspec` |
+| TC-OP-DMA-016 | `view` 非法参数 | `offset/size/stride` rank 不一致、`size` 非正或 `memoryspec` 不兼容时报错 | `test_view_invalid_offset_size_stride_or_memoryspec` |
 | TC-OP-DMA-017 | `flatten` 连续布局 | 连续布局下 `flatten` 返回一维 `shape` 与 `stride=[1]` | `test_flatten_contiguous` |
 | TC-OP-DMA-018 | `flatten` 非连续布局 | 非连续布局触发错误 | `test_flatten_non_contiguous_rejected` |
 | TC-OP-DMA-019 | `reshape` 基础变换 | `reshape` 返回新 `Memory` 且 `dtype/space/format` 继承 | `test_reshape_returns_memory` |

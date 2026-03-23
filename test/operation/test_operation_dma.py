@@ -1,13 +1,13 @@
 """dma operation API tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 我不是牛马
 
 功能说明:
 - 覆盖 kernel_gen/operation/dma.py 的搬运 API。
 
 覆盖率信息:
-- 当前覆盖率: `100%`（统计对象: `kernel_gen/operation/dma.py`）。
+- 当前覆盖率: `97%`（统计对象: `kernel_gen/operation/dma.py`）。
 - 达标判定: 已达到 `95%` 覆盖率达标线。
 - 覆盖基线: `TC-OP-DMA-AF-001..006` 与 `TC-OP-DMA-001..027` 对应测试用例。
 
@@ -36,8 +36,9 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.operation.dma import alloc, cast, copy, deslice, flatten, free, load, reshape, slice, store, view
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
-from kernel_gen.symbol_variable.type import NumericType
+from kernel_gen.symbol_variable.type import Farmat, NumericType
 
 
 # TC-OP-DMA-AF-001
@@ -477,21 +478,21 @@ def test_cast_supported_conversions() -> None:
 
 # TC-OP-DMA-014
 # 创建者: ChatGPT
-# 最后一次更改: ChatGPT
+# 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 测试目的: 验证 view 返回新 Memory 并继承 dtype/space/format。
-# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_view_returns_memory
+# 测试目的: 验证 view(source, offset, size, stride, memoryspec=None) 返回 shape == size 的子视图 Memory。
+# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_view_subview_returns_memory
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
 # 对应测试文件路径: test/operation/test_operation_dma.py
-def test_view_returns_memory() -> None:
-    src = Memory([2, 3, 4], NumericType.Float32, space=MemorySpace.SM)
-    dst = view(src, shape=[6, 4], stride=[4, 1])
+def test_view_subview_returns_memory() -> None:
+    src = Memory([SymbolDim("M"), SymbolDim("K")], NumericType.Float32, space=MemorySpace.SM)
+    dst = view(src, offset=[SymbolDim("M_t"), SymbolDim("K_t")], size=[2, 2], stride=[SymbolDim("stride"), 1])
     assert isinstance(dst, Memory)
-    assert dst.shape.get_values() == [6, 4]
+    assert dst.shape.get_values() == [2, 2]
     assert dst.stride is not None
-    assert dst.stride.get_values() == [4, 1]
+    assert dst.stride.get_values() == src.stride.get_values()
     assert dst.dtype is NumericType.Float32
     assert dst.space is MemorySpace.SM
     assert dst.format is src.format
@@ -499,46 +500,85 @@ def test_view_returns_memory() -> None:
 
 # TC-OP-DMA-015
 # 创建者: ChatGPT
-# 最后一次更改: ChatGPT
+# 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 测试目的: 验证 view 在连续布局下按默认规则生成行主序 stride。
-# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_view_default_stride_contiguous
+# 测试目的: 验证未传 memoryspec 时沿用 source 规格。
+# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_view_inherits_source_memoryspec
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
 # 对应测试文件路径: test/operation/test_operation_dma.py
-def test_view_default_stride_contiguous() -> None:
-    src = Memory([2, 3, 4], NumericType.Float32)
-    dst = view(src, shape=[6, 4])
-    assert dst.shape.get_values() == [6, 4]
+def test_view_inherits_source_memoryspec() -> None:
+    src = Memory([8, 8], NumericType.Float32, space=MemorySpace.LM, stride=[32, 4], format=Farmat.CLast)
+    dst = view(src, offset=[1, 2], size=[2, 2], stride=[2, 1])
+    assert dst.shape.get_values() == [2, 2]
     assert dst.stride is not None
-    assert dst.stride.get_values() == [4, 1]
+    assert dst.stride.get_values() == [32, 4]
+    assert dst.dtype is NumericType.Float32
+    assert dst.space is MemorySpace.LM
+    assert dst.format is Farmat.CLast
+
+
+# TC-OP-DMA-015
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 测试目的: 验证传入 memoryspec 时，view 以 memoryspec 覆盖输出内存规格。
+# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_view_overrides_memoryspec
+# 对应功能实现文件路径: kernel_gen/operation/dma.py
+# 对应 spec 文件路径: spec/operation/dma.md
+# 对应测试文件路径: test/operation/test_operation_dma.py
+def test_view_overrides_memoryspec() -> None:
+    src = Memory([8, 8], NumericType.Float32, space=MemorySpace.GM, format=Farmat.Norm)
+    memoryspec = Memory([99, 99], NumericType.Float32, space=MemorySpace.SM, stride=[16, 2], format=Farmat.CLast)
+    dst = view(src, offset=[0, 0], size=[2, 2], stride=[SymbolDim("stride"), 1], memoryspec=memoryspec)
+    assert dst.shape.get_values() == [2, 2]
+    assert dst.dtype is NumericType.Float32
+    assert dst.space is MemorySpace.SM
+    assert dst.format is Farmat.CLast
+    assert dst.stride is not None
+    assert dst.stride.get_values() == [16, 2]
 
 
 # TC-OP-DMA-016
 # 创建者: ChatGPT
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
 # 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
-# 测试目的: 验证 view 非法 shape/stride 或显式省略 stride 且源非连续时报错。
-# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_view_invalid_shape_or_stride
+# 测试目的: 验证 view 的 offset/size/stride rank、size 正长度与 memoryspec 兼容性错误路径。
+# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_view_invalid_offset_size_stride_or_memoryspec
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
 # 对应测试文件路径: test/operation/test_operation_dma.py
-def test_view_invalid_shape_or_stride() -> None:
-    src = Memory([2, 3, 4], NumericType.Float32)
+def test_view_invalid_offset_size_stride_or_memoryspec() -> None:
+    src = Memory([2, 3], NumericType.Float32)
     with pytest.raises(ValueError):
-        view(src, shape="24")
+        view(src, offset="MN", size=[2, 2], stride=[1, 1])
     with pytest.raises(ValueError):
-        view(src, shape=[5, 5])
+        view(src, offset=[0], size=[2, 2], stride=[1, 1])
     with pytest.raises(ValueError):
-        view(src, shape=[6, 4], stride=[4])
-    non_contiguous = Memory([2, 3, 4], NumericType.Float32, stride=[100, 4, 1])
+        view(src, offset=[0, 0], size=[0, 2], stride=[1, 1])
     with pytest.raises(ValueError):
-        view(non_contiguous, shape=[6, 4])
-    non_contiguous.stride = None
+        view(src, offset=[0, 0], size=[2, 2], stride=[1])
+    with pytest.raises(TypeError):
+        view(src, offset=[0, 0], size=[2, 2], stride=[1, 1], memoryspec="SM")
+    with pytest.raises(TypeError):
+        view(
+            src,
+            offset=[0, 0],
+            size=[2, 2],
+            stride=[1, 1],
+            memoryspec=Memory([2, 2], NumericType.Float16),
+        )
     with pytest.raises(ValueError):
-        view(non_contiguous, shape=[6, 4])
+        view(
+            src,
+            offset=[0, 0],
+            size=[2, 2],
+            stride=[1, 1],
+            memoryspec=Memory([2, 2, 2], NumericType.Float32),
+        )
 
 
 # TC-OP-DMA-019

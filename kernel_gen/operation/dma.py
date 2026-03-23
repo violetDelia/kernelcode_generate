@@ -260,6 +260,36 @@ def _clone_symbol_list(value: SymbolShape | None) -> SymbolShape | None:
     return SymbolShape(value.get_values())
 
 
+def _ensure_view_memoryspec(source: Memory, size: SymbolShape, memoryspec: object | None) -> Memory | None:
+    """校验并规范化 view 的 memoryspec。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - `memoryspec` 为空时返回 None。
+    - `memoryspec` 必须为 Memory，且需与 `size/source.dtype` 兼容。
+
+    使用示例:
+    - _ensure_view_memoryspec(src, SymbolShape([2, 2]), Memory([4, 4], NumericType.Float32))
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: kernel_gen/operation/dma.py
+    """
+    if memoryspec is None:
+        return None
+    spec = _ensure_memory(memoryspec, "memoryspec")
+    if spec.dtype is not source.dtype:
+        raise TypeError("memoryspec dtype mismatch")
+    if len(spec.shape) != len(size):
+        raise ValueError("memoryspec rank mismatch")
+    if spec.stride is not None and len(spec.stride) != len(size):
+        raise ValueError("memoryspec rank mismatch")
+    return spec
+
+
 def _is_contiguous(memory: Memory) -> bool:
     """判断 Memory 是否为连续行主序布局。
 
@@ -525,18 +555,19 @@ def deslice(
     return store(source, target, offsets, sizes, strides=strides)
 
 
-def view(source: object, shape, stride=None) -> Memory:
-    """返回 source 的视图变换结果。
+def view(source: object, offset, size, stride, memoryspec: object | None = None) -> Memory:
+    """返回 source 的子视图结果。
 
     创建者: ChatGPT
-    最后一次更改: ChatGPT
+    最后一次更改: 我不是牛马
 
     功能说明:
-    - 仅调整 `shape/stride` 元信息，不做数据搬运。
-    - 未显式提供 stride 时，要求 source 为连续布局。
+    - 仅保留 `offset/size/stride` 子视图参数，不做数据搬运。
+    - 返回结果的 `shape` 固定等于 `size`，默认继承 `source` 的 `dtype/space/format`。
+    - 显式传入 `memoryspec` 时，以其内存规格覆盖输出。
 
     使用示例:
-    - view(Memory([2, 3, 4], NumericType.Float32), shape=[6, 4])
+    - view(Memory(["M", "K"], NumericType.Float32), offset=["M_t", "K_t"], size=[2, 2], stride=["stride", 1])
 
     关联文件:
     - spec: spec/operation/dma.md
@@ -544,22 +575,21 @@ def view(source: object, shape, stride=None) -> Memory:
     - 功能实现: kernel_gen/operation/dma.py
     """
     src = _ensure_memory(source, "source")
-    shape_value = _ensure_shape_value(shape, "shape")
-    _ensure_view_numel_compatible(src, shape_value)
-    if stride is None:
-        if not _is_contiguous(src):
-            raise ValueError("View requires contiguous source when stride is omitted")
-        stride_value = None
-    else:
-        stride_value = _ensure_shape_value(stride, "stride")
-        if len(stride_value) != len(shape_value):
-            raise ValueError("stride rank mismatch")
+    offset_value = _ensure_shape_value(offset, "offset")
+    size_value = _ensure_shape_value(size, "size")
+    stride_value = _ensure_shape_value(stride, "stride")
+    _ensure_index_rank(src, offset_value, size_value, stride_value)
+    _ensure_sizes_positive(size_value)
+    memoryspec_value = _ensure_view_memoryspec(src, size_value, memoryspec)
+    target_space = src.space if memoryspec_value is None else memoryspec_value.space
+    target_stride = _clone_symbol_list(src.stride) if memoryspec_value is None else _clone_symbol_list(memoryspec_value.stride)
+    target_format = src.format if memoryspec_value is None else memoryspec_value.format
     return Memory(
-        _clone_symbol_list(shape_value),
+        _clone_symbol_list(size_value),
         src.dtype,
-        space=src.space,
-        stride=_clone_symbol_list(stride_value),
-        format=src.format,
+        space=target_space,
+        stride=target_stride,
+        format=target_format,
     )
 
 
