@@ -127,3 +127,12 @@
   - 以 main 上只读 [`expectation/operation/nn/add.py`](../../../../../../expectation/operation/nn/add.py) 作为功能定义来源核对链路；当前 worktree 中未携带 expectation 文件，未对 expectation 做任何修改。
   - 按最新规则补充本任务记录，并在合并提交中带上该记录文件。
 - 结论：已完成合并准备，expectation 保持只读。本轮默认不额外复测，沿用同链路最近一次通过结果：`python expectation/operation/nn/add.py` 通过，`pytest -q test/operation/test_operation_nn.py` 为 `31 passed`，覆盖率命令 `pytest --cov=kernel_gen.operation.nn --cov-report=term-missing -q test/operation/test_operation_nn.py` 为 `95%`。下一步执行最小提交并合入 main，随后申请独立清理任务。
+
+- 时间：`2026-03-24 02:37:39 +0800`
+- 任务：`T-20260324-38f8ab0b`
+- 任务目标：确认 `nn.add` expectation 链路相对 `main` 已无待合入业务改动，确认 `expectation/operation/nn/add.py` 保持只读未改，并按最小范围清理 `/home/lfr/kernelcode_generate/wt-20260324-expectation-operation-nn-add` 与同名分支残留。
+- 改动：
+  - 核对 `spec/operation/nn.md`、`kernel_gen/operation/nn.py`、`test/operation/test_operation_nn.py` 相对 `main` 无内容差异，确认本链路业务改动已在 `main`。
+  - 核对 `expectation/operation/nn/add.py` 相对 `main` 无差异，expectation 文件保持只读未修改。
+  - 核对 worktree 当前无未提交本地业务改动；同名分支 `wt-20260324-expectation-operation-nn-add` 不存在，分支清理为 no-op，仅需移除 worktree。
+- 结论：该链路已完成合入且无残留业务差异；expectation 保持只读；本轮默认不复测，可按最小范围清理 worktree，分支清理为 no-op。
