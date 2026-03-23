@@ -15,8 +15,8 @@
 - 测试文件: test/symbol_variable/test_memory.py
 
 覆盖率:
-- 覆盖率: 100% (kernel_gen/symbol_variable/memory.py)
-- 覆盖率命令: pytest --cov=kernel_gen.symbol_variable.memory --cov-report=term-missing test/symbol_variable/test_memory.py
+- 覆盖率: 99% (kernel_gen/symbol_variable/memory.py)
+- 覆盖率命令: pytest --cov=kernel_gen.symbol_variable.memory --cov-report=term-missing test/symbol_variable/test_memory.py test/operation/test_memory_operation.py
 """
 
 from __future__ import annotations
@@ -40,9 +40,9 @@ from kernel_gen.symbol_variable.type import Farmat, NumericType
 # ME-001
 # 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-18 01:27:43 +0800
-# 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
-# 测试目的: 验证默认空间为 GM。
+# 最近一次运行测试时间: 2026-03-23 22:25:38 +0800
+# 最近一次运行成功时间: 2026-03-23 22:25:38 +0800
+# 测试目的: 验证默认空间为 GM，且默认 dtype/shape/stride/format 可通过公开接口获取。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_default_space
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
@@ -52,6 +52,13 @@ def test_default_space() -> None:
     assert mem.space is MemorySpace.GM
     assert mem.stride is not None
     assert mem.stride.get_values() == [2, 1]
+
+    default_mem = Memory([1, 2])
+    assert default_mem.get_type() is NumericType.Float32
+    assert default_mem.get_shape() == [1, 2]
+    assert default_mem.get_stride() == [2, 1]
+    assert default_mem.get_space() is MemorySpace.GM
+    assert default_mem.get_format() is Farmat.Norm
 
 
 # ME-002
@@ -127,9 +134,9 @@ def test_construct_from_tensor_fields() -> None:
 # ME-005
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-18 01:27:43 +0800
-# 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
-# 测试目的: 验证显式 stride 列表输入可被规整为 SymbolShape。
+# 最近一次运行测试时间: 2026-03-23 22:25:38 +0800
+# 最近一次运行成功时间: 2026-03-23 22:25:38 +0800
+# 测试目的: 验证显式 stride 列表输入可被规整为 SymbolShape，且 rank 不匹配时抛错。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_explicit_stride_list
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
@@ -138,14 +145,16 @@ def test_explicit_stride_list() -> None:
     mem = Memory([2, 3], NumericType.Int32, stride=[3, 1])
     assert isinstance(mem.stride, SymbolShape)
     assert mem.stride.get_values() == [3, 1]
+    with pytest.raises(ValueError):
+        Memory([2, 3], NumericType.Int32, stride=[3])
 
 
 # ME-006
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-18 01:27:43 +0800
-# 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
-# 测试目的: 验证动态 shape/stride 输入保持动态维度语义。
+# 最近一次运行测试时间: 2026-03-23 22:25:38 +0800
+# 最近一次运行成功时间: 2026-03-23 22:25:38 +0800
+# 测试目的: 验证动态 shape/stride 输入保持动态维度语义，并通过公开接口序列化。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_dynamic_shape_stride
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
@@ -154,6 +163,8 @@ def test_dynamic_shape_stride() -> None:
     mem = Memory(["N", 32], NumericType.Float32, stride=["C", 1])
     assert mem.shape.get_values() == ["N", 32]
     assert mem.stride.get_values() == ["C", 1]
+    assert mem.get_shape() == ["N", 32]
+    assert mem.get_stride() == [SymbolDim("C"), 1]
 
 
 # ME-007

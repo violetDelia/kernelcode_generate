@@ -100,7 +100,7 @@ class Memory:
     def __init__(
         self,
         shape,
-        dtype: NumericType,
+        dtype: NumericType | None = None,
         space: MemorySpace = MemorySpace.GM,
         stride=None,
         format: Farmat = Farmat.Norm,
@@ -108,10 +108,11 @@ class Memory:
         """初始化 Memory。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 规范化 shape/stride，并记录 space。
+        - 规范化 shape/stride，并记录 space/format/dtype。
+        - dtype 省略时默认使用 NumericType.Float32。
 
         使用示例:
         - Memory([1, 2], NumericType.Float32, space=MemorySpace.LM)
@@ -123,8 +124,8 @@ class Memory:
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         self.shape = self._normalize_shape(shape)
-        self.dtype = dtype
-        self.stride = self._default_stride(self.shape) if stride is None else self._normalize_shape(stride)
+        self.dtype = dtype or NumericType.Float32
+        self.stride = self._default_stride(self.shape) if stride is None else self._normalize_stride(stride)
         self.format = format
         self.space = space
 
@@ -150,6 +151,29 @@ class Memory:
         if isinstance(value, SymbolShape):
             return value
         return SymbolShape(value)
+
+    def _normalize_stride(self, value) -> SymbolShape:
+        """规范化 stride 并校验 rank 一致性。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 将 stride 规整为 SymbolShape。
+        - 校验 stride 与 shape 的 rank 一致。
+
+        使用示例:
+        - Memory([1, 2], NumericType.Float32, stride=[2, 1])
+
+        关联文件:
+        - spec: spec/symbol_variable/memory.md
+        - test: test/symbol_variable/test_memory.py
+        - 功能实现: kernel_gen/symbol_variable/memory.py
+        """
+        normalized = self._normalize_shape(value)
+        if len(normalized) != len(self.shape):
+            raise ValueError("Stride rank mismatch with shape")
+        return normalized
 
     @staticmethod
     def _default_stride(shape: SymbolShape) -> SymbolShape:
@@ -178,6 +202,105 @@ class Memory:
             running = dim * running
         stride_values.reverse()
         return SymbolShape(stride_values)
+
+    def get_shape(self) -> list[int | str]:
+        """返回序列化后的 shape 列表。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 动态维度以字符串返回，静态维度以整数返回。
+
+        使用示例:
+        - Memory(["N", 32]).get_shape()
+
+        关联文件:
+        - spec: spec/symbol_variable/memory.md
+        - test: test/symbol_variable/test_memory.py
+        - 功能实现: kernel_gen/symbol_variable/memory.py
+        """
+        return self.shape.get_values()
+
+    def get_stride(self) -> list[int | SymbolDim]:
+        """返回 stride 列表，动态分量保留 SymbolDim。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 静态分量返回整数。
+        - 动态分量返回 SymbolDim 表达式。
+
+        使用示例:
+        - Memory(["M", "N"], NumericType.Float32).get_stride()
+
+        关联文件:
+        - spec: spec/symbol_variable/memory.md
+        - test: test/symbol_variable/test_memory.py
+        - 功能实现: kernel_gen/symbol_variable/memory.py
+        """
+        values: list[int | SymbolDim] = []
+        for dim in self.stride.get_shape():
+            values.append(dim if dim.is_dynamic() else int(dim.get_symbol()))
+        return values
+
+    def get_type(self) -> NumericType:
+        """返回 Memory 的 dtype。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 对外暴露 dtype 元信息。
+
+        使用示例:
+        - Memory([1], NumericType.Float32).get_type()
+
+        关联文件:
+        - spec: spec/symbol_variable/memory.md
+        - test: test/symbol_variable/test_memory.py
+        - 功能实现: kernel_gen/symbol_variable/memory.py
+        """
+        return self.dtype
+
+    def get_space(self) -> MemorySpace:
+        """返回 Memory 的空间枚举。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 对外暴露 space 元信息。
+
+        使用示例:
+        - Memory([1], NumericType.Float32).get_space()
+
+        关联文件:
+        - spec: spec/symbol_variable/memory.md
+        - test: test/symbol_variable/test_memory.py
+        - 功能实现: kernel_gen/symbol_variable/memory.py
+        """
+        return self.space
+
+    def get_format(self) -> Farmat:
+        """返回 Memory 的格式枚举。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 对外暴露 format 元信息。
+
+        使用示例:
+        - Memory([1], NumericType.Float32).get_format()
+
+        关联文件:
+        - spec: spec/symbol_variable/memory.md
+        - test: test/symbol_variable/test_memory.py
+        - 功能实现: kernel_gen/symbol_variable/memory.py
+        """
+        return self.format
 
     def __repr__(self) -> str:
         """返回 Memory 的字符串表示。

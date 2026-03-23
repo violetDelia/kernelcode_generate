@@ -123,7 +123,7 @@ mem = Memory([1, 2], NumericType.Float32)
 
 - `Memory(...)` 返回 `Memory` 实例。
 
-#### __init__(shape, dtype, space=MemorySpace.GM, stride=None, format=Farmat.Norm)
+#### __init__(shape, dtype=NumericType.Float32, space=MemorySpace.GM, stride=None, format=Farmat.Norm)
 
 功能说明：
 
@@ -133,7 +133,7 @@ mem = Memory([1, 2], NumericType.Float32)
 参数说明：
 
 - `shape`：`SymbolShape` 或可被 `SymbolShape(...)` 规范化的可迭代对象。
-- `dtype`：`NumericType`。
+- `dtype`：`NumericType | None`。省略或传入 `None` 时默认 `NumericType.Float32`。
 - `space`：`MemorySpace`。
 - `stride`：`None` 或可被 `SymbolShape(...)` 规范化的可迭代对象。
 - `format`：`Farmat`。
@@ -149,20 +149,28 @@ mem = Memory(
     dtype=NumericType.Float32,
     space=MemorySpace.SM,
 )
+
+default_dtype = Memory([2, 4])
 ```
 
 注意事项：
 
 - `stride is None` 表示未显式提供步幅。
+- 省略 `dtype` 或传入 `None` 时默认使用 `NumericType.Float32`。
+- `space`/`format` 记录为 `Memory` 元信息，后续查询或字符串化时需保持传入值。
 - `shape` 与 `stride` 接收 `SymbolShape` 或可迭代输入。
 - 未显式提供 `stride` 时，默认生成连续行主序步幅：最后一维为 `1`，其余维度为后续维度长度的乘积。
+- rank-1 纯整数 `shape=[D]` 的默认 `stride=[1]`；rank-2 纯整数 `shape=[D0, D1]` 的默认 `stride=[D1, 1]`。
 - 若 `shape` 包含 `SymbolDim`，默认步幅按乘法表达式生成并以无空格的 `*` 连接（例如 `shape=[M, K, N]` 时默认 `stride=[K*N, N, 1]`）。
+- 对整数与符号混合维度，默认步幅保持动态表达式，例如 `shape=[D0, M, D1, D2]` 的默认 `stride=[M*D1*D2, D1*D2, D2, 1]`。
+- 显式传入 `stride` 时要求其 rank 与 `shape` 一致，不一致应抛出 `ValueError`。
 - 上述 `K*N`、`N`、`1` 等单个分量若进入 IR，需要按 [`spec/dialect/symbol.md`](../../spec/dialect/symbol.md) 的整数-only symbol 语义建模。
 
 返回与限制：
 
 - 返回 `Memory` 实例（`Memory`）。
 - 规范化失败时向上抛出 `SymbolShape` 或 `SymbolDim` 相关异常。
+- `stride` rank 与 `shape` 不一致时抛出 `ValueError`。
 
 #### 显式步幅构造
 
@@ -286,10 +294,183 @@ text = repr(mem)
 注意事项：
 
 - 返回形如 `Memory(GM,Tensor(shape=..., dtype=..., stride=..., format=...))` 的字符串。
+- `shape/stride` 使用 `SymbolShape` 的序列化表示，动态维度保持符号表达。
 
 返回与限制：
 
 - 返回 `str`。
+
+#### __str__()
+
+功能说明：
+
+- 返回与 `__repr__` 一致的稳定字符串表示。
+
+参数说明：
+
+- 无参数。
+
+使用示例：
+
+```python
+from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.type import NumericType
+
+mem = Memory(["M", "N"], NumericType.Float32)
+text = str(mem)
+```
+
+注意事项：
+
+- 输出格式与 `__repr__` 保持一致。
+
+返回与限制：
+
+- 返回 `str`。
+
+#### get_shape()
+
+功能说明：
+
+- 序列化返回 `shape` 的维度列表。
+
+参数说明：
+
+- 无参数。
+
+使用示例：
+
+```python
+from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.type import NumericType
+
+mem = Memory(["M", 4], NumericType.Float32)
+values = mem.get_shape()
+```
+
+注意事项：
+
+- 动态维度返回字符串（例如 `"M"`），静态维度返回整数。
+- 符号表达式维度返回字符串（例如 `"K*N"`）。
+
+返回与限制：
+
+- 返回 `list[int | str]`。
+
+#### get_stride()
+
+功能说明：
+
+- 返回 `stride` 的公开分量列表；静态分量返回整数，动态分量返回 `SymbolDim`。
+
+参数说明：
+
+- 无参数。
+
+使用示例：
+
+```python
+from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.symbol_variable.type import NumericType
+
+mem = Memory(["M", "N"], NumericType.Float32)
+values = mem.get_stride()
+assert values == [SymbolDim("N"), 1]
+```
+
+注意事项：
+
+- 未显式传入 `stride` 时，默认连续布局生成的动态步幅分量仍通过 `SymbolDim` 返回。
+- `__repr__` / `__str__` 中的 `Shape(K*N, N, 1)` 属于字符串序列化口径，不改变 `get_stride()` 的公开返回类型。
+
+返回与限制：
+
+- 返回 `list[int | SymbolDim]`。
+
+#### get_type()
+
+功能说明：
+
+- 返回 `Memory` 的数据类型枚举。
+
+参数说明：
+
+- 无参数。
+
+使用示例：
+
+```python
+from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.type import NumericType
+
+mem = Memory([1, 2], NumericType.Int32)
+dtype = mem.get_type()
+```
+
+注意事项：
+
+- 省略 `dtype` 时应返回默认 `NumericType.Float32`。
+
+返回与限制：
+
+- 返回 `NumericType`。
+
+#### get_space()
+
+功能说明：
+
+- 返回 `Memory` 的空间枚举。
+
+参数说明：
+
+- 无参数。
+
+使用示例：
+
+```python
+from kernel_gen.symbol_variable.memory import Memory, MemorySpace
+from kernel_gen.symbol_variable.type import NumericType
+
+mem = Memory([1, 2], NumericType.Float32, space=MemorySpace.SM)
+space = mem.get_space()
+```
+
+注意事项：
+
+- 未显式传入时返回 `MemorySpace.GM`。
+
+返回与限制：
+
+- 返回 `MemorySpace`。
+
+#### get_format()
+
+功能说明：
+
+- 返回 `Memory` 的格式枚举。
+
+参数说明：
+
+- 无参数。
+
+使用示例：
+
+```python
+from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.type import Farmat, NumericType
+
+mem = Memory([1, 2], NumericType.Float32, format=Farmat.CLast)
+format_value = mem.get_format()
+```
+
+注意事项：
+
+- 未显式传入时返回 `Farmat.Norm`。
+
+返回与限制：
+
+- 返回 `Farmat`。
 
 #### 运算符重载
 
@@ -347,6 +528,7 @@ cmp_mem = lhs < 0
 - 验证 `MemorySpace` 枚举项与空间元信息稳定。
 - 验证 `Memory` 默认空间、显式空间、显式步幅和动态形状构造行为。
 - 验证未显式提供 `stride` 时默认步幅生成（包含符号维度与字符串输入）。
+- 验证 `get_stride()` 对动态步幅分量返回 `SymbolDim`，`__repr__` / `__str__` 继续使用 `Shape(...)` 文本序列化。
 - 验证 `shape` 与 `stride` 可直接接收 `SymbolShape` 或普通可迭代输入。
 - 验证 `tensor-like` 字段直入能够通过公开构造入口完成。
 - 验证 `__repr__` 包含空间与张量元信息。
@@ -364,7 +546,7 @@ cmp_mem = lhs < 0
 | ME-003 | 表现 | repr | N/A | `repr(Memory([1, 2], NumericType.Float32))` | 包含 `Memory(GM,Tensor(...))` 信息 | `test_repr` |
 | ME-004 | 构造 | tensor-like 字段直入 | N/A | `Memory(t.shape, t.dtype, stride=t.stride, format=t.format)` | 构造成功 | `test_construct_from_tensor_fields` |
 | ME-005 | 构造 | 显式步幅列表 | N/A | `stride=[200704, 3136, 56, 1]` | `shape`/`stride` 规范化 | `test_explicit_stride_list` |
-| ME-006 | 构造 | 动态 shape/stride | N/A | `shape=["B", "C"]`/`stride=["C", 1]` | 动态维度保留 | `test_dynamic_shape_stride` |
+| ME-006 | 构造 | 动态 shape/stride | N/A | `shape=["B", "C"]`/`stride=["C", 1]` | 动态维度保留，`get_stride()` 返回 `[SymbolDim("C"), 1]` | `test_dynamic_shape_stride` |
 | ME-007 | 构造 | shape/stride 接收 SymbolShape | N/A | `Memory(SymbolShape(...), NumericType.Float32, stride=SymbolShape(...))` | 接收成功 | `test_shape_stride_accept_symbol_shape` |
 | ME-008 | 默认格式 | 省略 format | N/A | `Memory([1, 2], NumericType.Float32)` | `format` 为 `Farmat.Norm` | `test_default_format` |
 | ME-009 | 空间元信息 | 枚举元信息 | N/A | `MemorySpace.GM.value` | `align=1024`、`max_size=None` | `test_space_meta` |
@@ -376,6 +558,6 @@ cmp_mem = lhs < 0
 | ME-015 | 运算符 | dtype 不兼容 | N/A | `lhs + rhs` | 抛 `TypeError` | `test_memory_dtype_mismatch` |
 | ME-016 | 运算符 | 标量类型非法 | N/A | `mem + \"1\"` | 抛 `TypeError` | `test_memory_scalar_type_error` |
 | ME-017 | 构造 | 默认 stride 行主序 | N/A | `Memory([2, 3, 4], NumericType.Float32)` | 生成 `[12, 4, 1]` | `test_default_stride_generated_row_major` |
-| ME-018 | 构造 | 符号维度默认 stride | N/A | `Memory([SymbolDim(\"M\"), SymbolDim(\"K\"), SymbolDim(\"N\")], NumericType.Float32)` | 生成 `Shape(K*N, N, 1)` | `test_default_stride_symbolic_expression_repr` |
-| ME-019 | 构造 | 字符串形状默认 stride | N/A | `Memory([\"M\", \"K\", \"N\"], NumericType.Float32)` | 生成 `Shape(K*N, N, 1)` | `test_default_stride_symbolic_expression_from_strings` |
+| ME-018 | 构造 | 符号维度默认 stride | N/A | `Memory([SymbolDim(\"M\"), SymbolDim(\"K\"), SymbolDim(\"N\")], NumericType.Float32)` | `get_stride()` 返回 `[SymbolDim(\"K\") * SymbolDim(\"N\"), SymbolDim(\"N\"), 1]`，`str/repr` 序列化为 `Shape(K*N, N, 1)` | `test_default_stride_symbolic_expression_repr` |
+| ME-019 | 构造 | 字符串形状默认 stride | N/A | `Memory([\"M\", \"K\", \"N\"], NumericType.Float32)` | `get_stride()` 返回动态 `SymbolDim` 分量，`str/repr` 序列化为 `Shape(K*N, N, 1)` | `test_default_stride_symbolic_expression_from_strings` |
 | ME-020 | 职责边界 | memory 相关单值整数 symbol 归属 | 已存在单个维度或步幅分量 | 在 `Memory` 场景中使用 `N`、`K*N`、`1` 这类分量 | 本文件仅要求 `SymbolShape/SymbolDim` 保持分量语义；dialect 层类型表达由 `spec/dialect/symbol.md` 负责 | `test_dynamic_shape_stride`、`test_default_stride_symbolic_expression_repr`、`test_default_stride_symbolic_expression_from_strings`、`test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect` |
