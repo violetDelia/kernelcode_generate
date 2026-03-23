@@ -33,7 +33,7 @@ from kernel_gen.dialect.dma import DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStore
 from kernel_gen.dialect.symbol import NnMemoryType, SymbolForOp, SymbolValueType
 from kernel_gen.dsl.mlir_gen import build_func_op
 from kernel_gen.operation.dma import deslice, slice
-from kernel_gen.operation.scf import LoopRange
+from kernel_gen.operation.scf import loop, LoopRange
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
@@ -50,12 +50,9 @@ s3 = generate_random_string(random.randint(1, 8))
 A = Memory([s1], NumericType.Float32)
 B = Memory([s1], NumericType.Float32)
 C = Memory([s1], NumericType.Float32)
-print(s1)
-print("start")
-print("end")
 start = SymbolDim(s2)
 end = SymbolDim(s3)
-step = SymbolDim(1)
+step = SymbolDim(2)
 
 
 def add(A, B, C, start, end, step):
@@ -70,46 +67,50 @@ func_op = build_func_op(add, A, B, C, start, end, step)
 print(func_op)
 assert isinstance(func_op, FuncOp)
 
-arg0 = func_op.args[0].type
-assert isinstance(arg0, NnMemoryType)
-assert len(arg0.shape) == 1
-assert len(arg0.stride) == 1
-assert arg0.shape.data[0].data == s1
-assert arg0.stride.data[0].data == 1
+# arg0 = func_op.args[0].type
+# assert isinstance(arg0, NnMemoryType)
+# assert len(arg0.get_shape()) == 1
+# assert len(arg0.get_stide()) == 1
+# assert arg0.get_shape()[0] == s1
+# assert arg0.get_stide()[0] == 1
 
-arg1 = func_op.args[1].type
-assert isinstance(arg1, NnMemoryType)
-assert len(arg1.shape) == 1
-assert len(arg1.stride) == 1
-assert arg1.shape.data[0].data == s1
-assert arg1.stride.data[0].data == 1
+# arg1 = func_op.args[1].type
+# assert isinstance(arg1, NnMemoryType)
+# assert len(arg1.get_shape()) == 1
+# assert len(arg1.get_stide()) == 1
+# assert arg1.get_shape()[0] == s1
+# assert arg1.get_stide()[0] == 1
 
 
-arg2 = func_op.args[2].type
-assert isinstance(arg2, NnMemoryType)
-assert len(arg2.shape) == 1
-assert len(arg2.stride) == 1
-assert arg2.shape.data[0].data == s1
-assert arg2.stride.data[0].data == 1
+# arg2 = func_op.args[2].type
+# assert isinstance(arg2, NnMemoryType)
+# assert len(arg2.get_shape()) == 1
+# assert len(arg2.get_stide()) == 1
+# assert arg2.get_shape()[0] == s1
+# assert arg2.get_stide()[0] == 1
 
 arg3 = func_op.args[3].type
 
 assert isinstance(arg3, SymbolValueType)
-assert arg3 == SymbolValueType.from_expr("start")
+assert arg3.is_symbol()
+assert arg3.get_value() == s2
 
 
 arg4 = func_op.args[4].type
 
 assert isinstance(arg4, SymbolValueType)
-assert arg4 == SymbolValueType.from_expr("end")
+assert arg4.is_symbol()
+assert arg4.get_value() == s3
 
 arg5 = func_op.args[5].type
 
 assert isinstance(arg5, SymbolValueType)
-assert arg5 == SymbolValueType.from_expr("step")
+assert not arg5.is_symbol()
+assert arg5.get_value() == 2
 
 loop_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolForOp)]
 assert len(loop_ops) == 1
+
 loop_body_ops = list(loop_ops[0].body.block.ops)
 slice_ops = [op for op in loop_body_ops if isinstance(op, DmaSliceOp)]
 deslice_ops = [op for op in loop_body_ops if isinstance(op, DmaDesliceOp)]

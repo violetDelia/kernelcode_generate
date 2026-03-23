@@ -133,7 +133,7 @@
 
 - 禁止在合并流程中使用 `git stash`。
 - 合并前必须确认目标 `worktree` 内不存在其他进行中任务；若仍有未完成任务，禁止合并。
-- 合并内容不得包含 `agents/` 目录中的文件。
+- `agents/` 目录内除 `task_records` 外的文件仅在主分支更新，如 `talk.log`、`agents-lists.md`；除了agents/codex-multi-agents/log/task_records/ 下的任务日志。 如果路径没有文件则自己创建，合并时带上任务日志。
 - 合并内容不得包含 `TODO.md`、`DONE.md`、`AGENTS.md`，以及 `skills/` 目录中的文件或子目录。
 - 冲突处理以最新有效改动为准；若冲突文件属于 `spec`，必须先以主分支内容为基线完成收敛，再执行合并。
 - 合并提交信息必须使用格式 `T-<task_id>-<desc>`。
