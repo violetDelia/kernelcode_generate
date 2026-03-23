@@ -9,8 +9,8 @@
 使用示例:
 - pytest -q test/operation/test_operation_nn.py
 
-当前覆盖率信息: 100%（kernel_gen/operation/nn.py，2026-03-22 14:33:34 +0800）
-覆盖率命令: pytest -q --cov=kernel_gen.operation.nn --cov-report=term-missing test/operation/test_operation_nn.py
+当前覆盖率信息: 95%（kernel_gen/operation/nn.py，2026-03-24 01:43:10 +0800）
+覆盖率命令: pytest --cov=kernel_gen.operation.nn --cov-report=term-missing -q test/operation/test_operation_nn.py
 
 关联文件:
 - 功能实现: kernel_gen/operation/nn.py
@@ -50,7 +50,7 @@ from kernel_gen.operation.nn import (
 )
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_shape import SymbolList, SymbolShape
-from kernel_gen.symbol_variable.type import NumericType
+from kernel_gen.symbol_variable.type import Farmat, NumericType
 
 
 # OP-001
@@ -147,18 +147,20 @@ def test_nn_rank_mismatch() -> None:
 # OP-008
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-22 14:33:34 +0800
-# 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
-# 测试目的: 验证 dtype 不兼容抛 TypeError。
+# 最近一次运行测试时间: 2026-03-24 01:43:10 +0800
+# 最近一次运行成功时间: 2026-03-24 01:43:10 +0800
+# 测试目的: 验证 nn.add 的 dtype 按固定优先级决议。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_dtype_mismatch
 # 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
+
 def test_nn_dtype_mismatch() -> None:
-    lhs = Memory(["A", "B"], NumericType.Float32)
-    rhs = Memory(["A", "B"], NumericType.Int32)
-    with pytest.raises(TypeError):
-        _ = add(lhs, rhs)
+    lhs = Memory(["A", "B"], NumericType.Int32)
+    rhs = Memory(["A", "B"], NumericType.Float32)
+    result = add(lhs, rhs)
+    assert result.shape.get_values() == ["A", "B"]
+    assert result.dtype is NumericType.Int32
 
 
 # OP-007
@@ -272,8 +274,8 @@ def test_nn_compare_alias() -> None:
 # OP-013
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-22 14:33:34 +0800
-# 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
+# 最近一次运行测试时间: 2026-03-24 00:32:00 +0800
+# 最近一次运行成功时间: 2026-03-24 00:32:00 +0800
 # 测试目的: 验证 nn 链路在迁移后不依赖已移除的 convert_from_* 入口。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_operation_does_not_require_convert_from_list
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -291,6 +293,44 @@ def test_nn_operation_does_not_require_convert_from_list() -> None:
     assert result.shape.get_values() == ["N", 32]
     assert result.stride is not None
     assert result.stride.get_values() == ["C", 1]
+
+
+# OP-015
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-24 01:43:10 +0800
+# 最近一次运行成功时间: 2026-03-24 01:43:10 +0800
+# 测试目的: 验证 format 不一致时回落默认布局。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_add_format_fallback
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+
+def test_nn_add_format_fallback() -> None:
+    lhs = Memory(["M", "N"], NumericType.Int32, stride=["N", 1], format=Farmat.CLast)
+    rhs = Memory(["M", "N"], NumericType.Int32, stride=["N", 1], format=Farmat.Norm)
+    result = add(lhs, rhs)
+    assert result.get_format() is Farmat.Norm
+    assert result.get_stride()[1] == 1
+
+
+# OP-016
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-24 01:43:10 +0800
+# 最近一次运行成功时间: 2026-03-24 01:43:10 +0800
+# 测试目的: 验证 stride 不一致时回落默认布局。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_add_stride_fallback
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+
+def test_nn_add_stride_fallback() -> None:
+    lhs = Memory(["M", "N"], NumericType.Int32, stride=["N", 1])
+    rhs = Memory(["M", "N"], NumericType.Int32, stride=["N", 2])
+    result = add(lhs, rhs)
+    assert result.get_format() is Farmat.Norm
+    assert result.get_stride()[1] == 1
 
 
 # OP-BC-001

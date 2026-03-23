@@ -23,7 +23,102 @@ from collections.abc import Sequence
 
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
-from kernel_gen.symbol_variable.type import NumericType
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.symbol_variable.type import Farmat, NumericType
+
+_NN_ADD_PROMOTION_ORDER = (
+    NumericType.Int8,
+    NumericType.Uint8,
+    NumericType.Int16,
+    NumericType.Uint16,
+    NumericType.Int32,
+    NumericType.Uint32,
+    NumericType.Int64,
+    NumericType.Uint64,
+    NumericType.Float16,
+    NumericType.BFloat16,
+    NumericType.Float32,
+    NumericType.Float64,
+)
+_NN_ADD_PROMOTION_RANK = {dtype: index for index, dtype in enumerate(_NN_ADD_PROMOTION_ORDER)}
+
+
+class _AddStrideDim(SymbolDim):
+    """nn.add 默认 stride 的符号维度包装。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 对含符号表达式的维度返回字符串形式，避免对外泄露 sympy 表达式。
+
+    使用示例:
+    - _AddStrideDim("N").get_value()
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+
+    def get_value(self):
+        expr = self.get_symbol()
+        if expr.free_symbols:
+            return str(expr)
+        return super().get_value()
+
+
+def _build_add_stride(shape: SymbolShape) -> SymbolShape:
+    """构建 nn.add 默认 stride。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 按连续行主序生成 stride。
+    - 动态维度返回可序列化为字符串的符号维度。
+
+    使用示例:
+    - _build_add_stride(SymbolShape(["M", "N"]))
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    stride_values: list[SymbolDim] = []
+    running = SymbolDim(1)
+    for dim in reversed(shape.get_shape()):
+        stride_values.append(_AddStrideDim(running.get_symbol()))
+        running = dim * running
+    stride_values.reverse()
+    return SymbolShape(stride_values)
+
+
+def _resolve_add_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
+    """解析 nn.add 的 dtype 决议。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 按固定优先级选择更靠前的类型。
+    - 不支持的 dtype 触发 TypeError。
+
+    使用示例:
+    - _resolve_add_dtype(NumericType.Int32, NumericType.Float32)
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    try:
+        lhs_rank = _NN_ADD_PROMOTION_RANK[lhs]
+        rhs_rank = _NN_ADD_PROMOTION_RANK[rhs]
+    except KeyError as exc:
+        raise TypeError("Unsupported dtype for nn.add") from exc
+    return lhs if lhs_rank <= rhs_rank else rhs
 
 
 def _normalize_broadcast_shape(shape: object) -> SymbolShape:
@@ -147,6 +242,50 @@ def _binary_memory_result(lhs: Memory, rhs: Memory) -> Memory:
         return lhs + rhs
     target_shape = _infer_implicit_broadcast_shape(lhs, rhs)
     return Memory(target_shape, lhs.dtype, space=lhs.space, stride=None, format=lhs.format)
+
+
+def _binary_add_result(lhs: Memory, rhs: Memory) -> Memory:
+    """逐元素加法 Memory/Memory 结果推导。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 支持隐式 broadcast 推导目标 shape。
+    - dtype 使用 nn.add 固定优先级决议。
+    - 当 format/stride 不一致时回落默认布局。
+
+    使用示例:
+    - _binary_add_result(lhs, rhs)
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    result_dtype = _resolve_add_dtype(lhs.dtype, rhs.dtype)
+    lhs_values = lhs.shape.get_values()
+    rhs_values = rhs.shape.get_values()
+    if lhs_values == rhs_values:
+        if lhs.format is rhs.format and lhs.stride.get_values() == rhs.stride.get_values():
+            if lhs.dtype is rhs.dtype:
+                return lhs + rhs
+            return lhs._clone_with_dtype(result_dtype)
+        return Memory(
+            lhs.shape,
+            result_dtype,
+            space=lhs.space,
+            stride=_build_add_stride(lhs.shape),
+            format=Farmat.Norm,
+        )
+    target_shape = _infer_implicit_broadcast_shape(lhs, rhs)
+    return Memory(
+        target_shape,
+        result_dtype,
+        space=lhs.space,
+        stride=_build_add_stride(target_shape),
+        format=Farmat.Norm,
+    )
 
 
 def _compare_memory_result(lhs: Memory, rhs: Memory) -> Memory:
@@ -337,7 +476,12 @@ def add(lhs: object, rhs: object) -> Memory:
     - test: test/operation/test_operation_nn.py
     - 功能实现: kernel_gen/operation/nn.py
     """
-    return _dispatch_binary(lhs, rhs, "__add__", "__radd__")
+    _ensure_memory_operand(lhs, rhs)
+    if isinstance(lhs, Memory) and isinstance(rhs, Memory):
+        return _binary_add_result(lhs, rhs)
+    if isinstance(lhs, Memory):
+        return getattr(lhs, "__add__")(rhs)
+    return getattr(rhs, "__radd__")(lhs)
 
 
 def sub(lhs: object, rhs: object) -> Memory:
