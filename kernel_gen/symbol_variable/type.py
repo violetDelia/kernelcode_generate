@@ -58,6 +58,7 @@ class NumericType(Enum):
     BFloat16 = "bf16"
     Float32 = "float32"
     Float64 = "float64"
+    Bool = "bool"
 
 
 class Farmat(Enum):

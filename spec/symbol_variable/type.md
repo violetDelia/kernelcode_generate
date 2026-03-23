@@ -22,6 +22,7 @@
 - 提供稳定、可枚举、可比较的数值类型与布局格式常量集合。
 - 明确模块级公开导出边界（`__all__` 与 `import *`）。
 - 约束 `Farmat` 的公开成员与访问边界，仅允许 `Norm` 与 `CLast`。
+- 为上游比较类公开接口提供稳定的布尔 dtype 标识 `NumericType.Bool`。
 
 ## 限制与边界
 
@@ -61,6 +62,7 @@ assert NumericType.Float16.value == "float16"
 assert NumericType.BFloat16.value == "bf16"
 assert NumericType.Float32.value == "float32"
 assert NumericType.Float64.value == "float64"
+assert NumericType.Bool.value == "bool"
 assert NumericType.Int32 is not NumericType.Float32
 ```
 
@@ -72,6 +74,8 @@ assert NumericType.Int32 is not NumericType.Float32
   - 有符号整型：`Int8`、`Int16`、`Int32`、`Int64`
   - 无符号整型：`Uint8`、`Uint16`、`Uint32`、`Uint64`
   - 浮点类型：`Float16`、`BFloat16`、`Float32`、`Float64`
+  - 布尔类型：`Bool`
+- `NumericType.Bool` 的 `.value` 固定为 `"bool"`，用于承载 `nn.eq` / `nn.ne` / `nn.lt` / `nn.le` / `nn.gt` / `nn.ge` 等公开比较接口的 predicate 结果。
 - 未列出的 dtype 不属于当前 spec 范围。
 
 返回与限制：
@@ -115,11 +119,12 @@ assert Farmat.CLast.name == "CLast"
 ## 测试
 
 - 测试文件：[`test/symbol_variable/test_type.py`](../../test/symbol_variable/test_type.py)
-- 执行命令：`pytest -q test/symbol_variable/test_type.py`
+- 执行命令：`pytest -q test/symbol_variable/test_type.py`；`pytest -q test/operation/test_operation_nn.py -k 'test_nn_compare_predicate or test_nn_compare_alias or test_nn_compare_implicit_broadcast'`
 
 ### 测试目标
 
-- 验证 `NumericType` 公开成员、名称和值稳定。
+- 验证 `NumericType` 既有公开成员、名称和值稳定；`Bool` 由交叉链路单独验证。
+- 验证 `NumericType.Bool` 作为公开枚举成员可用于比较类接口返回值。
 - 验证 `Farmat` 仅公开 `Norm` 与 `CLast`。
 - 验证 `__all__` 与 `import *` 的公开边界。
 - 验证旧路径 `symbol_variable.type` 不可导入。
@@ -128,9 +133,10 @@ assert Farmat.CLast.name == "CLast"
 
 | 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 |
 |---|---|---|---|---|---|
-| TY-001 | 成员值 | `NumericType` 成员值稳定 | 已导入 `kernel_gen.symbol_variable.type` | 读取成员 `.value` | 与约定字符串一致 |
+| TY-001 | 成员值 | `NumericType` 既有成员值稳定 | 已导入 `kernel_gen.symbol_variable.type` | 读取既有成员 `.value` | 与约定字符串一致 |
 | TY-002 | 成员边界 | `Farmat` 公开成员 | 已导入 `Farmat` | 仅可访问 `Norm`/`CLast` | 不存在额外布局名 |
 | TY-003 | 导出边界 | `__all__` 内容 | 已导入模块 | 读取 `__all__` | 严格等于 `["NumericType", "Farmat"]` |
 | TY-004 | 导出边界 | `import *` 暴露范围 | 已导入模块 | 执行 `from kernel_gen.symbol_variable.type import *` | 仅暴露 `Farmat`/`NumericType` |
-| TY-005 | 成员访问 | `NumericType` 成员访问 | 已导入 `NumericType` | 读取 `.name` | 与约定成员名一致 |
+| TY-005 | 成员访问 | `NumericType` 既有成员访问 | 已导入 `NumericType` | 读取既有成员 `.name` | 与约定成员名一致 |
 | TY-006 | 导入边界 | 旧路径导入 | 已安装包 | `importlib.import_module("symbol_variable.type")` | 抛 `ModuleNotFoundError` |
+| TY-007 | 布尔类型 | `NumericType.Bool` 作为比较结果 dtype 的公开成员 | 已导入 `NumericType` 与 nn 比较接口 | 执行 `eq`/`ne`/`lt`/`le`/`gt`/`ge` 并读取结果 `dtype` | 返回值 `dtype` 为 `NumericType.Bool`，与公开成员语义一致 |

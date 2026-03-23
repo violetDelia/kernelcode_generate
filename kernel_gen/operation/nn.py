@@ -9,7 +9,7 @@
 使用示例:
 - from kernel_gen.operation.nn import add, broadcast, eq
 - result = add(mem, 1)
-- expanded = broadcast(mem, ["M", "N"])
+- expanded = broadcast(mem, Memory(["M", "N"], NumericType.Float32))
 
 关联文件:
 - spec: spec/operation/nn.md
@@ -19,9 +19,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-
-from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import Farmat, NumericType
@@ -96,7 +94,7 @@ def _build_add_stride(shape: SymbolShape) -> SymbolShape:
 
 
 def _resolve_add_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
-    """解析 nn.add 的 dtype 决议。
+    """解析 nn 算术的 dtype 决议。
 
     创建者: 小李飞刀
     最后一次更改: 小李飞刀
@@ -119,36 +117,6 @@ def _resolve_add_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
     except KeyError as exc:
         raise TypeError("Unsupported dtype for nn.add") from exc
     return lhs if lhs_rank <= rhs_rank else rhs
-
-
-def _normalize_broadcast_shape(shape: object) -> SymbolShape:
-    """规范化 broadcast 目标 shape。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 仅接受 SymbolShape 或非字符串序列。
-    - 统一转换为 SymbolShape。
-
-    使用示例:
-    - _normalize_broadcast_shape(["M", "N"])
-
-    关联文件:
-    - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
-    - 功能实现: kernel_gen/operation/nn.py
-    """
-    if isinstance(shape, SymbolShape):
-        return shape
-    if isinstance(shape, (str, bytes)):
-        raise TypeError("broadcast shape must be a dimension sequence")
-    if isinstance(shape, Sequence):
-        try:
-            return SymbolShape(list(shape))
-        except (TypeError, ValueError) as exc:
-            raise TypeError("broadcast shape must be a valid dimension sequence") from exc
-    raise TypeError("broadcast shape must be a dimension sequence")
 
 
 def _merge_broadcast_dim(lhs_dim: int | str, rhs_dim: int | str) -> int | str:
@@ -224,7 +192,8 @@ def _binary_memory_result(lhs: Memory, rhs: Memory) -> Memory:
 
     功能说明:
     - 支持隐式 broadcast 推导目标 shape。
-    - 保持 dtype/space，stride 允许为空。
+    - dtype 使用 nn 算术固定优先级决议。
+    - 当 format/stride 不一致时回落默认布局。
 
     使用示例:
     - _binary_memory_result(lhs, rhs)
@@ -234,14 +203,29 @@ def _binary_memory_result(lhs: Memory, rhs: Memory) -> Memory:
     - test: test/operation/test_operation_nn.py
     - 功能实现: kernel_gen/operation/nn.py
     """
-    if lhs.dtype is not rhs.dtype:
-        raise TypeError("Memory dtype mismatch")
+    result_dtype = _resolve_add_dtype(lhs.dtype, rhs.dtype)
     lhs_values = lhs.shape.get_values()
     rhs_values = rhs.shape.get_values()
     if lhs_values == rhs_values:
-        return lhs + rhs
+        if lhs.format is rhs.format and lhs.stride.get_values() == rhs.stride.get_values():
+            if lhs.dtype is rhs.dtype:
+                return lhs + rhs
+            return lhs._clone_with_dtype(result_dtype)
+        return Memory(
+            lhs.shape,
+            result_dtype,
+            space=lhs.space,
+            stride=_build_add_stride(lhs.shape),
+            format=Farmat.Norm,
+        )
     target_shape = _infer_implicit_broadcast_shape(lhs, rhs)
-    return Memory(target_shape, lhs.dtype, space=lhs.space, stride=None, format=lhs.format)
+    return Memory(
+        target_shape,
+        result_dtype,
+        space=lhs.space,
+        stride=_build_add_stride(target_shape),
+        format=Farmat.Norm,
+    )
 
 
 def _binary_add_result(lhs: Memory, rhs: Memory) -> Memory:
@@ -296,7 +280,7 @@ def _compare_memory_result(lhs: Memory, rhs: Memory) -> Memory:
 
     功能说明:
     - 支持隐式 broadcast 推导目标 shape。
-    - 结果 dtype 固定为 Int32。
+    - 结果 dtype 固定为 Bool。
 
     使用示例:
     - _compare_memory_result(lhs, rhs)
@@ -311,9 +295,9 @@ def _compare_memory_result(lhs: Memory, rhs: Memory) -> Memory:
     lhs_values = lhs.shape.get_values()
     rhs_values = rhs.shape.get_values()
     if lhs_values == rhs_values:
-        return lhs == rhs
+        return lhs._clone_with_dtype(NumericType.Bool)
     target_shape = _infer_implicit_broadcast_shape(lhs, rhs)
-    return Memory(target_shape, NumericType.Int32, space=lhs.space, stride=None, format=lhs.format)
+    return Memory(target_shape, NumericType.Bool, space=lhs.space, stride=None, format=lhs.format)
 
 
 def _ensure_memory_operand(lhs: object, rhs: object) -> None:
@@ -335,6 +319,29 @@ def _ensure_memory_operand(lhs: object, rhs: object) -> None:
     """
     if not isinstance(lhs, Memory) and not isinstance(rhs, Memory):
         raise TypeError("At least one operand must be Memory")
+
+
+def _ensure_scalar_value(value: object) -> None:
+    """校验标量输入类型。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅允许 int/float/bool 标量。
+
+    使用示例:
+    - _ensure_scalar_value(1)
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    if isinstance(value, bool):
+        return
+    if not isinstance(value, (int, float)):
+        raise TypeError("Unsupported scalar type for nn operation")
 
 
 def _infer_broadcast_shape(lhs: SymbolShape, rhs: SymbolShape) -> SymbolShape:
@@ -404,8 +411,16 @@ def _broadcast_memory_pair(lhs: Memory, rhs: Memory) -> tuple[Memory, Memory]:
         return lhs, rhs
     target_shape = _infer_broadcast_shape(lhs.shape, rhs.shape)
     target_values = target_shape.get_values()
-    lhs_b = lhs if lhs_values == target_values else broadcast(lhs, target_shape)
-    rhs_b = rhs if rhs_values == target_values else broadcast(rhs, target_shape)
+    if lhs_values == target_values:
+        lhs_b = lhs
+    else:
+        lhs_target = Memory(target_shape, lhs.dtype, space=lhs.space, stride=lhs.stride, format=lhs.format)
+        lhs_b = broadcast(lhs, lhs_target)
+    if rhs_values == target_values:
+        rhs_b = rhs
+    else:
+        rhs_target = Memory(target_shape, rhs.dtype, space=rhs.space, stride=rhs.stride, format=rhs.format)
+        rhs_b = broadcast(rhs, rhs_target)
     return lhs_b, rhs_b
 
 
@@ -430,8 +445,10 @@ def _dispatch_binary(lhs: object, rhs: object, op: str, rop: str) -> Memory:
     if isinstance(lhs, Memory) and isinstance(rhs, Memory):
         return _binary_memory_result(lhs, rhs)
     if isinstance(lhs, Memory):
-        return getattr(lhs, op)(rhs)
-    return getattr(rhs, rop)(lhs)
+        _ensure_scalar_value(rhs)
+        return lhs._clone_with_dtype(lhs.dtype)
+    _ensure_scalar_value(lhs)
+    return rhs._clone_with_dtype(rhs.dtype)
 
 
 def _dispatch_compare(lhs: object, rhs: object, op: str, rop: str) -> Memory:
@@ -455,8 +472,10 @@ def _dispatch_compare(lhs: object, rhs: object, op: str, rop: str) -> Memory:
     if isinstance(lhs, Memory) and isinstance(rhs, Memory):
         return _compare_memory_result(lhs, rhs)
     if isinstance(lhs, Memory):
-        return getattr(lhs, op)(rhs)
-    return getattr(rhs, rop)(lhs)
+        _ensure_scalar_value(rhs)
+        return lhs._clone_with_dtype(NumericType.Bool)
+    _ensure_scalar_value(lhs)
+    return rhs._clone_with_dtype(NumericType.Bool)
 
 
 def add(lhs: object, rhs: object) -> Memory:
@@ -480,8 +499,10 @@ def add(lhs: object, rhs: object) -> Memory:
     if isinstance(lhs, Memory) and isinstance(rhs, Memory):
         return _binary_add_result(lhs, rhs)
     if isinstance(lhs, Memory):
-        return getattr(lhs, "__add__")(rhs)
-    return getattr(rhs, "__radd__")(lhs)
+        _ensure_scalar_value(rhs)
+        return lhs._clone_with_dtype(lhs.dtype)
+    _ensure_scalar_value(lhs)
+    return rhs._clone_with_dtype(rhs.dtype)
 
 
 def sub(lhs: object, rhs: object) -> Memory:
@@ -542,6 +563,33 @@ def truediv(lhs: object, rhs: object) -> Memory:
     - 功能实现: kernel_gen/operation/nn.py
     """
     return _dispatch_binary(lhs, rhs, "__truediv__", "__rtruediv__")
+
+
+def floordiv(lhs: object, rhs: object) -> Memory:
+    """逐元素整除。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 支持 Memory 与 Memory/标量的整除。
+
+    使用示例:
+    - floordiv(mem, 2)
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    _ensure_memory_operand(lhs, rhs)
+    if isinstance(lhs, Memory) and isinstance(rhs, Memory):
+        return _binary_memory_result(lhs, rhs)
+    if isinstance(lhs, Memory):
+        _ensure_scalar_value(rhs)
+        return lhs._clone_with_dtype(lhs.dtype)
+    _ensure_scalar_value(lhs)
+    return rhs._clone_with_dtype(rhs.dtype)
 
 
 def eq(lhs: object, rhs: object) -> Memory:
@@ -664,7 +712,7 @@ def ge(lhs: object, rhs: object) -> Memory:
     return _dispatch_compare(lhs, rhs, "__ge__", "__le__")
 
 
-def matmul(lhs: object, rhs: object) -> Memory:
+def matmul(lhs: object, rhs: object, memoryspace: MemorySpace | None = None) -> Memory:
     """二维矩阵乘。
 
     创建者: 金铲铲大作战
@@ -672,7 +720,8 @@ def matmul(lhs: object, rhs: object) -> Memory:
 
     功能说明:
     - 仅接受二维 Memory x Memory。
-    - 校验 contracting dim、dtype 与 space 一致性。
+    - 校验 contracting dim 与 space 一致性。
+    - dtype 按固定优先级决议。
 
     使用示例:
     - matmul(Memory(["M", "K"], NumericType.Float32), Memory(["K", "N"], NumericType.Float32))
@@ -690,31 +739,31 @@ def matmul(lhs: object, rhs: object) -> Memory:
         raise ValueError("matmul operands must be rank-2 Memory")
     if lhs_values[1] != rhs_values[0]:
         raise ValueError("matmul contracting dimension mismatch")
-    if lhs.dtype is not rhs.dtype:
-        raise TypeError("matmul dtype mismatch")
     if lhs.space is not rhs.space:
         raise ValueError("matmul space mismatch")
+    result_dtype = _resolve_add_dtype(lhs.dtype, rhs.dtype)
+    result_space = lhs.space if memoryspace is None else memoryspace
     return Memory(
         [lhs_values[0], rhs_values[1]],
-        lhs.dtype,
-        space=lhs.space,
-        stride=None,
-        format=lhs.format,
+        result_dtype,
+        space=result_space,
+        stride=_build_add_stride(SymbolShape([lhs_values[0], rhs_values[1]])),
+        format=Farmat.Norm,
     )
 
 
-def broadcast(value: object, shape: object) -> Memory:
-    """显式广播 Memory 到目标 shape。
+def broadcast(value: object, target: object) -> Memory:
+    """显式广播 Memory 到目标描述。
 
     创建者: 小李飞刀
     最后一次更改: 小李飞刀
 
     功能说明:
     - 按尾维对齐规则扩张 singleton dim。
-    - 保持 dtype/space 不变，并返回新的 Memory。
+    - 返回结果在 shape/dtype/space/stride/format 上与 target 完全一致。
 
     使用示例:
-    - broadcast(Memory([1, "N"], NumericType.Float32), ["M", "N"])
+    - broadcast(Memory([1, "N"], NumericType.Float32), Memory(["M", "N"], NumericType.Float32))
 
     关联文件:
     - spec: spec/operation/nn.md
@@ -723,9 +772,10 @@ def broadcast(value: object, shape: object) -> Memory:
     """
     if not isinstance(value, Memory):
         raise TypeError("broadcast value must be Memory")
-    target_shape = _normalize_broadcast_shape(shape)
+    if not isinstance(target, Memory):
+        raise TypeError("broadcast target must be Memory")
     input_values = value.shape.get_values()
-    target_values = target_shape.get_values()
+    target_values = target.shape.get_values()
 
     if len(target_values) < len(input_values):
         raise ValueError("broadcast target rank must be >= input rank")
@@ -738,12 +788,32 @@ def broadcast(value: object, shape: object) -> Memory:
         raise ValueError("broadcast dimension mismatch")
 
     return Memory(
-        target_shape,
-        value.dtype,
-        space=value.space,
-        stride=None,
-        format=value.format,
+        target.shape,
+        target.dtype,
+        space=target.space,
+        stride=target.stride,
+        format=target.format,
     )
+
+
+def broadcast_to(value: object, target: object) -> Memory:
+    """broadcast 的别名接口。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 复用 broadcast 语义。
+
+    使用示例:
+    - broadcast_to(mem, target)
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    return broadcast(value, target)
 
 
 __all__ = [
@@ -751,6 +821,7 @@ __all__ = [
     "sub",
     "mul",
     "truediv",
+    "floordiv",
     "eq",
     "ne",
     "lt",
@@ -759,4 +830,5 @@ __all__ = [
     "ge",
     "matmul",
     "broadcast",
+    "broadcast_to",
 ]

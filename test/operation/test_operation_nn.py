@@ -1,7 +1,7 @@
 """nn operation API tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 kernel_gen/operation/nn.py 的逐元素算术与比较 API。
@@ -9,7 +9,7 @@
 使用示例:
 - pytest -q test/operation/test_operation_nn.py
 
-当前覆盖率信息: 95%（kernel_gen/operation/nn.py，2026-03-24 01:43:10 +0800）
+当前覆盖率信息: 100%（kernel_gen/operation/nn.py，2026-03-24 04:03:10 +0800）
 覆盖率命令: pytest --cov=kernel_gen.operation.nn --cov-report=term-missing -q test/operation/test_operation_nn.py
 
 关联文件:
@@ -21,7 +21,6 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -31,13 +30,16 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.operation.nn import (
+    _AddStrideDim,
     _broadcast_memory_pair,
     _infer_broadcast_shape,
     _merge_broadcast_dim,
-    _normalize_broadcast_shape,
+    _resolve_add_dtype,
     add,
     broadcast,
+    broadcast_to,
     eq,
+    floordiv,
     ge,
     gt,
     le,
@@ -49,6 +51,7 @@ from kernel_gen.operation.nn import (
     truediv,
 )
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolList, SymbolShape
 from kernel_gen.symbol_variable.type import Farmat, NumericType
 
@@ -163,6 +166,38 @@ def test_nn_dtype_mismatch() -> None:
     assert result.dtype is NumericType.Int32
 
 
+# OP-008
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-24 04:03:10 +0800
+# 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
+# 测试目的: 验证不支持的 dtype 触发 TypeError。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_dtype_invalid_error
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_dtype_invalid_error() -> None:
+    with pytest.raises(TypeError):
+        _ = _resolve_add_dtype(NumericType.Bool, NumericType.Int32)
+
+
+# OP-005
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-24 04:03:10 +0800
+# 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
+# 测试目的: 验证 bool 标量可被接受。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_add_bool_scalar
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_add_bool_scalar() -> None:
+    lhs = Memory(["A", "B"], NumericType.Int32)
+    result = add(lhs, True)
+    assert result.shape.get_values() == ["A", "B"]
+    assert result.dtype is NumericType.Int32
+
+
 # OP-007
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
@@ -198,9 +233,9 @@ def test_nn_compare_predicate() -> None:
     with pytest.raises(TypeError):
         _ = eq(Memory(["A", "B"], NumericType.Float32), Memory(["A", "B"], NumericType.Int32))
     assert eq_result.shape.get_values() == ["A", "B"]
-    assert eq_result.dtype is NumericType.Int32
-    assert lt_result.dtype is NumericType.Int32
-    assert gt_result.dtype is NumericType.Int32
+    assert eq_result.dtype is NumericType.Bool
+    assert lt_result.dtype is NumericType.Bool
+    assert gt_result.dtype is NumericType.Bool
 
 
 # OP-010
@@ -238,6 +273,72 @@ def test_nn_other_arithmetic() -> None:
     assert truediv(lhs, 1).shape.get_values() == [2, 2]
 
 
+# OP-002
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-24 04:03:10 +0800
+# 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
+# 测试目的: 验证 sub 的 dtype 规则与标量反向调用。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_sub_reverse_and_dtype_mismatch
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_sub_reverse_and_dtype_mismatch() -> None:
+    lhs = Memory(["A", "B"], NumericType.Int32)
+    rhs = Memory(["A", "B"], NumericType.Float32)
+    result = sub(lhs, rhs)
+    assert result.shape.get_values() == ["A", "B"]
+    assert result.dtype is NumericType.Int32
+    reverse = sub(1, lhs)
+    assert reverse.shape.get_values() == ["A", "B"]
+
+
+# OP-002
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-24 04:03:10 +0800
+# 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
+# 测试目的: 验证 sub 在 format/stride 不一致时回落默认布局。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_sub_format_fallback
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_sub_format_fallback() -> None:
+    lhs = Memory(["M", "N"], NumericType.Int32, stride=["N", 1], format=Farmat.CLast)
+    rhs = Memory(["M", "N"], NumericType.Int32, stride=["N", 2], format=Farmat.Norm)
+    result = sub(lhs, rhs)
+    assert result.get_format() is Farmat.Norm
+    assert result.get_stride()[1] == 1
+
+
+# OP-017
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-24 04:03:10 +0800
+# 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
+# 测试目的: 验证 floordiv 复用算术规则、支持标量并覆盖错误路径。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_floordiv_rules
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_floordiv_rules() -> None:
+    lhs = Memory(["M", "N"], NumericType.Int32)
+    rhs = Memory([1, "N"], NumericType.Float32, format=Farmat.CLast)
+    result = floordiv(lhs, rhs)
+    assert result.shape.get_values() == ["M", "N"]
+    assert result.dtype is NumericType.Int32
+    assert result.format is Farmat.Norm
+    assert result.get_stride()[1] == 1
+    scalar_result = floordiv(lhs, 2)
+    assert scalar_result.shape.get_values() == ["M", "N"]
+    assert scalar_result.dtype is NumericType.Int32
+    reverse_result = floordiv(2, lhs)
+    assert reverse_result.shape.get_values() == ["M", "N"]
+    assert reverse_result.dtype is NumericType.Int32
+    with pytest.raises(ValueError):
+        _ = floordiv(lhs, Memory(["K"], NumericType.Int32))
+
+
 # OP-011
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
@@ -266,9 +367,9 @@ def test_nn_scalar_only_error() -> None:
 def test_nn_compare_alias() -> None:
     lhs = Memory([1], NumericType.Int32)
     rhs = Memory([1], NumericType.Int32)
-    assert ne(lhs, rhs).dtype is NumericType.Int32
-    assert le(lhs, rhs).dtype is NumericType.Int32
-    assert ge(lhs, rhs).dtype is NumericType.Int32
+    assert ne(lhs, rhs).dtype is NumericType.Bool
+    assert le(lhs, rhs).dtype is NumericType.Bool
+    assert ge(lhs, rhs).dtype is NumericType.Bool
 
 
 # OP-013
@@ -333,51 +434,71 @@ def test_nn_add_stride_fallback() -> None:
     assert result.get_stride()[1] == 1
 
 
+# OP-016
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-24 04:03:10 +0800
+# 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
+# 测试目的: 验证 stride 序列化维度的符号与常量路径。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_add_stride_dim_serialization
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_add_stride_dim_serialization() -> None:
+    symbolic = _AddStrideDim(SymbolDim("N").get_symbol())
+    constant = _AddStrideDim(SymbolDim(3).get_symbol())
+    assert symbolic.get_value() == "N"
+    assert constant.get_value() == 3
+
+
 # OP-BC-001
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-22 14:33:34 +0800
-# 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
-# 测试目的: 验证 broadcast 可扩张 singleton dim。
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-24 04:03:10 +0800
+# 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
+# 测试目的: 验证 broadcast/broadcast_to 可扩张 singleton dim 且结果对齐 target。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_broadcast_success
 # 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_broadcast_success() -> None:
     value = Memory([1, "N"], NumericType.Float32)
-    normalized = _normalize_broadcast_shape(SymbolShape(["M", "N"]))
-    result = broadcast(value, ["M", "N"])
-    normalized_result = broadcast(value, normalized)
-    assert normalized is not None
-    assert result.shape.get_values() == ["M", "N"]
-    assert result.dtype is NumericType.Float32
-    assert result.space is value.space
-    assert normalized_result.shape.get_values() == ["M", "N"]
-    assert normalized_result.dtype is NumericType.Float32
+    target = Memory(["M", "N"], NumericType.Float32, space=MemorySpace.LM, stride=["N", 1], format=Farmat.CLast)
+    result = broadcast(value, target)
+    alias_result = broadcast_to(value, target)
+    assert result.get_shape() == target.get_shape()
+    assert result.get_type() is target.get_type()
+    assert result.get_space() is target.get_space()
+    assert result.get_format() is target.get_format()
+    assert result.get_stride() == target.get_stride()
+    assert alias_result.get_shape() == target.get_shape()
+    assert alias_result.get_type() is target.get_type()
 
 
 # OP-BC-002
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-22 14:33:34 +0800
-# 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
-# 测试目的: 验证 broadcast 可插入前置维。
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-24 04:03:10 +0800
+# 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
+# 测试目的: 验证 broadcast 可插入前置维并对齐 target 描述。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_broadcast_prepend_dimension
 # 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_broadcast_prepend_dimension() -> None:
     value = Memory(["N"], NumericType.Int32)
-    result = broadcast(value, ["M", "N"])
-    assert result.shape.get_values() == ["M", "N"]
-    assert result.dtype is NumericType.Int32
+    target = Memory(["M", "N"], NumericType.Int32, space=MemorySpace.SM, stride=["N", 1], format=Farmat.Norm)
+    result = broadcast(value, target)
+    assert result.get_shape() == target.get_shape()
+    assert result.get_type() is target.get_type()
+    assert result.get_space() is target.get_space()
 
 
 # OP-BC-003
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-22 14:33:34 +0800
-# 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-24 04:03:10 +0800
+# 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
 # 测试目的: 验证非 singleton 维度不兼容时报错。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_broadcast_dimension_mismatch
 # 对应功能实现文件路径: kernel_gen/operation/nn.py
@@ -386,14 +507,14 @@ def test_nn_broadcast_prepend_dimension() -> None:
 def test_nn_broadcast_dimension_mismatch() -> None:
     value = Memory(["M", "N"], NumericType.Float32)
     with pytest.raises(ValueError):
-        _ = broadcast(value, ["M", "K"])
+        _ = broadcast(value, Memory(["M", "K"], NumericType.Float32))
 
 
 # OP-BC-004
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-22 14:33:34 +0800
-# 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-24 04:03:10 +0800
+# 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
 # 测试目的: 验证目标 rank 更小时报错。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_broadcast_rank_error
 # 对应功能实现文件路径: kernel_gen/operation/nn.py
@@ -402,14 +523,14 @@ def test_nn_broadcast_dimension_mismatch() -> None:
 def test_nn_broadcast_rank_error() -> None:
     value = Memory(["M", "N"], NumericType.Float32)
     with pytest.raises(ValueError):
-        _ = broadcast(value, ["N"])
+        _ = broadcast(value, Memory(["N"], NumericType.Float32))
 
 
 # OP-BC-005
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-22 14:33:34 +0800
-# 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-24 04:03:10 +0800
+# 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
 # 测试目的: 验证非 Memory 输入触发 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_broadcast_non_memory_error
 # 对应功能实现文件路径: kernel_gen/operation/nn.py
@@ -417,34 +538,23 @@ def test_nn_broadcast_rank_error() -> None:
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_broadcast_non_memory_error() -> None:
     with pytest.raises(TypeError):
-        _ = broadcast(1, ["M", "N"])
+        _ = broadcast(1, Memory(["M", "N"], NumericType.Float32))
 
 
 # OP-BC-006
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-22 14:33:34 +0800
-# 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
-# 测试目的: 验证非法 shape 描述触发错误。
-# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_broadcast_invalid_shape_error
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-24 04:03:10 +0800
+# 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
+# 测试目的: 验证非 Memory target 触发 TypeError。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_broadcast_target_type_error
 # 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
-def test_nn_broadcast_invalid_shape_error() -> None:
+def test_nn_broadcast_target_type_error() -> None:
     value = Memory([1, "N"], NumericType.Float32)
-    with pytest.raises((TypeError, ValueError)):
-        _ = broadcast(value, "MN")
-    class BadSequence(Sequence):
-        def __len__(self) -> int:
-            return 1
-
-        def __getitem__(self, index: int) -> object:
-            raise ValueError("bad sequence")
-
     with pytest.raises(TypeError):
-        _ = broadcast(value, BadSequence())
-    with pytest.raises(TypeError):
-        _ = broadcast(value, 123)
+        _ = broadcast(value, ["M", "N"])
 
 
 # OP-IB-001
@@ -468,6 +578,8 @@ def test_nn_add_implicit_broadcast_singleton() -> None:
     inferred_rhs_short = _infer_broadcast_shape(SymbolShape(["A", "B"]), SymbolShape(["B"]))
     inferred_lhs_one = _infer_broadcast_shape(SymbolShape([1, "B"]), SymbolShape(["A", "B"]))
     inferred_rhs_one = _infer_broadcast_shape(SymbolShape(["A", "B"]), SymbolShape([1, "B"]))
+    rhs_singleton = Memory([1, "B"], NumericType.Float32)
+    lhs_b3, rhs_b3 = _broadcast_memory_pair(lhs_same, rhs_singleton)
     assert _merge_broadcast_dim("N", 1) == "N"
     assert _merge_broadcast_dim("?", "?") == "?"
     with pytest.raises(ValueError):
@@ -480,6 +592,8 @@ def test_nn_add_implicit_broadcast_singleton() -> None:
     assert inferred_rhs_short.get_values() == ["A", "B"]
     assert inferred_lhs_one.get_values() == ["A", "B"]
     assert inferred_rhs_one.get_values() == ["A", "B"]
+    assert lhs_b3 is lhs_same
+    assert rhs_b3.shape.get_values() == ["A", "B"]
 
 
 # OP-IB-002
@@ -516,7 +630,7 @@ def test_nn_compare_implicit_broadcast() -> None:
     rhs = Memory(["A", "B"], NumericType.Float32)
     result = eq(lhs, rhs)
     assert result.shape.get_values() == ["A", "B"]
-    assert result.dtype is NumericType.Int32
+    assert result.dtype is NumericType.Bool
 
 
 # OP-IB-004
@@ -549,13 +663,35 @@ def test_nn_add_implicit_broadcast_mismatch() -> None:
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_matmul_success() -> None:
-    lhs = Memory(["M", "K"], NumericType.Float32)
-    rhs = Memory(["K", "N"], NumericType.Float32)
+    lhs = Memory(["M", "K"], NumericType.Float32, format=Farmat.CLast)
+    rhs = Memory(["K", "N"], NumericType.Float32, stride=["N", 1], format=Farmat.CLast)
     result = matmul(lhs, rhs)
     assert isinstance(result, Memory)
     assert result.shape.get_values() == ["M", "N"]
     assert result.dtype is NumericType.Float32
     assert result.space is lhs.space
+    assert result.format is Farmat.Norm
+    assert result.get_stride() == ["N", 1]
+
+
+# OP-MM-008
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-24 04:03:10 +0800
+# 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
+# 测试目的: 验证 matmul 显式 memoryspace 仅覆盖结果 space。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_matmul_space_override
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_matmul_space_override() -> None:
+    lhs = Memory(["M", "K"], NumericType.Float32, space=MemorySpace.GM, format=Farmat.CLast)
+    rhs = Memory(["K", "N"], NumericType.Float32, space=MemorySpace.GM, format=Farmat.CLast)
+    result = matmul(lhs, rhs, memoryspace=MemorySpace.SM)
+    assert result.shape.get_values() == ["M", "N"]
+    assert result.dtype is NumericType.Float32
+    assert result.space is MemorySpace.SM
+    assert result.format is Farmat.Norm
 
 
 # OP-MM-002
@@ -610,10 +746,10 @@ def test_nn_matmul_scalar_operand_error() -> None:
 
 # OP-MM-005
 # 创建者: 金铲铲大作战
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-22 14:33:34 +0800
-# 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
-# 测试目的: 验证 matmul dtype 不兼容报错。
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-24 04:03:10 +0800
+# 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
+# 测试目的: 验证 matmul dtype 按固定优先级决议。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_matmul_dtype_mismatch
 # 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
@@ -621,8 +757,9 @@ def test_nn_matmul_scalar_operand_error() -> None:
 def test_nn_matmul_dtype_mismatch() -> None:
     lhs = Memory(["M", "K"], NumericType.Float32)
     rhs = Memory(["K", "N"], NumericType.Int32)
-    with pytest.raises(TypeError):
-        _ = matmul(lhs, rhs)
+    result = matmul(lhs, rhs)
+    assert result.shape.get_values() == ["M", "N"]
+    assert result.dtype is NumericType.Int32
 
 
 # OP-MM-006
