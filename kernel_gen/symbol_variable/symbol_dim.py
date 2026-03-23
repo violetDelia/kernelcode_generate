@@ -1,7 +1,7 @@
 """SymbolDim implementation.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 我不是牛马
 
 功能说明:
 - 提供符号维度表达、基础算术运算与动态性判断。
@@ -45,7 +45,7 @@ class _SymbolDim:
         """统一规范化字符串输入并校验。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 我不是牛马
 
         功能说明:
         - 使用 strip() 去除首尾空白。
@@ -72,7 +72,7 @@ class _SymbolDim:
         """基于字符串创建带假设的符号。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 我不是牛马
 
         功能说明:
         - 统一使用 integer=True, real=True 的假设构造符号。
@@ -92,7 +92,7 @@ class _SymbolDim:
         """规范化 sympy.Symbol 的默认假设。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 我不是牛马
 
         功能说明:
         - 当 sym 为未显式指定 is_integer/is_real 的 Symbol 时，按名称重建为 integer=True, real=True。
@@ -114,7 +114,7 @@ class _SymbolDim:
         """初始化符号维度。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 我不是牛马
 
         功能说明:
         - int 转为 sympy.Integer。
@@ -133,7 +133,11 @@ class _SymbolDim:
         - test: test/symbol_variable/test_symbol_dim.py
         - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
         """
-        if isinstance(sym, int):
+        if isinstance(sym, _SymbolDim):
+            self.sym = sym.get_symbol()
+        elif isinstance(sym, float):
+            raise NotImplementedError("Float input is not supported")
+        elif isinstance(sym, int):
             self.sym = sp.Integer(sym)
         elif isinstance(sym, str):
             self.sym = self._symbol_from_str(sym)
@@ -163,6 +167,8 @@ class _SymbolDim:
         - test: test/symbol_variable/test_symbol_dim.py
         - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
         """
+        if isinstance(value, float):
+            raise NotImplementedError("Float operand is not supported")
         if isinstance(value, _SymbolDim):
             return value.get_symbol()
         if isinstance(value, int):
@@ -191,6 +197,36 @@ class _SymbolDim:
         - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
         """
         return self.sym
+
+    def get_value(self):
+        """获取对外可比较的数值/表达式。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 静态整数/表达式返回 Python 数值。
+        - 含符号表达式返回 sympy 表达式。
+
+        使用示例:
+        - SymbolDim(8).get_value()
+        - (SymbolDim(9) / SymbolDim(4)).get_value()
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+        expr = self.get_symbol()
+        if expr.free_symbols:
+            return expr
+
+        simplified = sp.simplify(expr)
+        if simplified.is_number:
+            if simplified.is_integer:
+                return int(simplified)
+            return float(simplified)
+        return simplified
 
     def __repr__(self) -> str:
         """返回符号维度的字符串表示。
@@ -266,7 +302,10 @@ class _SymbolDim:
         - test: test/symbol_variable/test_symbol_dim.py
         - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
         """
-        return SymbolDim(self.get_symbol() - self._normalize_operand(other))
+        other_sym = self._normalize_operand(other)
+        if not self.get_symbol().free_symbols and other_sym.free_symbols:
+            return SymbolDim(other_sym + self.get_symbol())
+        return SymbolDim(self.get_symbol() - other_sym)
 
     def __rsub__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度反向减法。
@@ -342,7 +381,8 @@ class _SymbolDim:
         - test: test/symbol_variable/test_symbol_dim.py
         - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
         """
-        return SymbolDim(self.get_symbol() / self._normalize_operand(other))
+        other_sym = self._normalize_operand(other)
+        return SymbolDim(sp.Mul(self.get_symbol(), sp.Pow(other_sym, -1, evaluate=False), evaluate=False))
 
     def __rtruediv__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度反向除法。
@@ -361,7 +401,54 @@ class _SymbolDim:
         - test: test/symbol_variable/test_symbol_dim.py
         - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
         """
-        return SymbolDim(self._normalize_operand(other) / self.get_symbol())
+        other_sym = self._normalize_operand(other)
+        return SymbolDim(sp.Mul(other_sym, sp.Pow(self.get_symbol(), -1, evaluate=False), evaluate=False))
+
+    def __floordiv__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
+        """符号维度整除。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 支持 int/str/SymbolDim，返回 SymbolDim。
+
+        使用示例:
+        - SymbolDim("N") // 2
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+        other_sym = self._normalize_operand(other)
+        if not self.get_symbol().free_symbols and not other_sym.free_symbols:
+            return SymbolDim(sp.Integer(int(sp.simplify(self.get_symbol())) // int(sp.simplify(other_sym))))
+        expr = sp.Mul(self.get_symbol(), sp.Pow(other_sym, -1, evaluate=False), evaluate=False)
+        return SymbolDim(sp.floor(expr))
+
+    def __rfloordiv__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
+        """符号维度反向整除。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 支持 int/str/SymbolDim，返回 SymbolDim。
+
+        使用示例:
+        - 3 // SymbolDim("N")
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+        other_sym = self._normalize_operand(other)
+        if not self.get_symbol().free_symbols and not other_sym.free_symbols:
+            return SymbolDim(sp.Integer(int(sp.simplify(other_sym)) // int(sp.simplify(self.get_symbol()))))
+        expr = sp.Mul(other_sym, sp.Pow(self.get_symbol(), -1, evaluate=False), evaluate=False)
+        return SymbolDim(sp.floor(expr))
 
     def __eq__(self, other: object) -> bool:
         """比较符号维度表达式等价性。

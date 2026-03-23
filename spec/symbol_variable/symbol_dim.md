@@ -7,34 +7,44 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`朽木露琪亚`
+- 最后一次更改：`我不是牛马`
 - `spec`：[`spec/symbol_variable/symbol_dim.md`](../../spec/symbol_variable/symbol_dim.md)
 - `功能实现`：[`kernel_gen/symbol_variable/symbol_dim.py`](../../kernel_gen/symbol_variable/symbol_dim.py)
 - `test`：[`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py)
 
 ## 依赖
 
-- `sympy`：符号与表达式构造。
-
-## 术语
-
-- 静态维度：由整数表示的维度。
-- 动态维度：表达式包含自由符号的维度。
-- 纯数字字符串：对输入字符串执行 `strip()` 后结果非空且 `isdigit()` 为 `True` 的字符串，例如 `"12"`、`" 12 "`、`"001"`、`"１２"`、`"٠١٢"`。
+- `sympy`：负责整数符号、静态整数与混合表达式的底层表示。
+- [`expectation/symbol_variable/symbol_dim.py`](../../expectation/symbol_variable/symbol_dim.py)：本链路的只读 acceptance 定义来源。
+- [`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py)：当前单元测试承载文件；后续实现阶段需按本 spec 补齐 expectation 闭环。
 
 ## 目标
 
-- 统一输入规整：`int`、合法 `str`、`sympy.Basic`。
-- 统一表达与运算：支持基础算术、相等比较、动态性判断。
-- 保持 `sympy` 语义，不引入额外化简或求解。
-- 不负责广播、约束求解、形状推导或高阶语义。
+- 提供统一的 `SymbolDim` 公开入口，覆盖静态整数、动态符号与整数混合表达式。
+- 明确 `+`、`-`、`*`、`/`、`//` 的公开语义、动态性传播与错误路径。
+- 明确 `get_symbol()`、`get_value()`、`is_dynamic()` 的公开行为，支撑 [`expectation/symbol_variable/symbol_dim.py`](../../expectation/symbol_variable/symbol_dim.py) 最终运行成功。
+- 以 [`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py) 承载单元测试，以 `python expectation/symbol_variable/symbol_dim.py` 作为只读 acceptance gate。
 
 ## 限制与边界
 
-- 公共构造入口仅为 `SymbolDim(value)`。
-- 纯数字字符串与空白字符串继续拒绝，异常类型为 `ValueError`。
-- 非纯数字字符串继续作为符号名处理（例如 `"+1"`、`"-1"`、`"3.14"`）。
-- `sympy.Symbol` 若未显式设置 `is_integer/is_real`，需统一规范化为 `integer=True, real=True`。
+- `SymbolDim` 只表示整数维度及其整型符号表达，不负责广播、约束求解、形状推导或高阶张量语义。
+- 公开接口限定为 `SymbolDim(value)`、`get_symbol()`、`get_value()`、`is_dynamic()`、`__repr__()`、`__eq__()`，以及 `+`、`-`、`*`、`/`、`//` 对应的正向/反向运算；除为满足本文件要求所需的这些接口外，不再引入其他额外公开入口。
+- 构造输入仅允许：
+  - `int`：表示静态整数维度。
+  - `str`：表示符号名；字符串执行 `strip()` 后不能为空，且不能是纯数字字符串。
+  - `sympy.Basic`：表示已构造好的整数符号或整数表达式。
+- 浮点输入与浮点算术操作数均不受支持：
+  - `SymbolDim(1.5)` 必须抛出 `NotImplementedError`。
+  - `SymbolDim(...)+1.5`、`-1.5`、`*1.5`、`/1.5`、`//1.5` 及对应反向运算必须抛出 `NotImplementedError`。
+- 纯数字字符串与空白字符串属于非法输入，必须抛出 `ValueError`；除浮点外的其他非法类型必须抛出 `TypeError`。
+- 动态性判断以表达式是否含自由符号为准：
+  - 静态整数输入、静态整数之间的 `+`、`-`、`*`、`/`、`//` 结果必须保持 `is_dynamic() == False`。
+  - 只要任一操作数含自由符号，结果必须保持 `is_dynamic() == True`。
+- `get_value()` 的公开返回语义必须满足 expectation：
+  - 静态整数、静态加减乘与静态整除结果返回可直接与 Python 对应结果比较的具体值。
+  - 静态真除法结果返回可直接与 Python `/` 结果比较的具体值。
+  - 动态符号或混合表达式返回可稳定比较的符号表达值。
+- 不额外承诺异常消息文本；兼容性只要求异常类型与公开行为稳定。
 
 ## 公开接口
 
@@ -42,11 +52,11 @@
 
 功能说明：
 
-- 统一的公开构造入口。
+- 统一的公开构造入口，用于创建静态整数维度、动态符号维度或混合整数表达式维度。
 
 参数说明：
 
-- `value` (`int|str|sympy.Basic`): 输入维度。
+- `value`（`int | str | sympy.Basic`）：维度输入。
 
 使用示例：
 
@@ -56,23 +66,25 @@ import sympy as sp
 
 SymbolDim(32)
 SymbolDim("N")
-SymbolDim(sp.Symbol("M"))
+SymbolDim(sp.Symbol("M", integer=True, real=True) + 1)
 ```
 
 注意事项：
 
-- 纯数字字符串与空白字符串不被接受。
+- `"12"`、`" 12 "`、`""`、`"   "` 必须抛出 `ValueError`。
+- `1.5`、`-2.25` 等浮点输入必须抛出 `NotImplementedError`。
+- `sympy.Symbol` 若未显式指定整数假设，实现需统一为整数语义。
 
 返回与限制：
 
 - 返回 `SymbolDim` 实例。
-- 非法输入抛出 `TypeError` 或 `ValueError`。
+- 非法输入按“限制与边界”中的异常类型处理。
 
 ### `get_symbol()`
 
 功能说明：
 
-- 返回内部 `sympy` 表达式。
+- 返回内部规整后的 `sympy` 表达式，作为实现侧统一表达。
 
 参数说明：
 
@@ -83,23 +95,54 @@ SymbolDim(sp.Symbol("M"))
 ```python
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
-dim = SymbolDim("N")
-sym = dim.get_symbol()
+expr = SymbolDim("N").get_symbol()
 ```
 
 注意事项：
 
-- 返回类型为 `sympy.Basic`。
+- 返回值始终是 `sympy.Basic`。
+- 该接口用于实现与测试读取标准化表达，不替代 `get_value()` 的对外比较语义。
 
 返回与限制：
 
 - 返回 `sympy.Basic`。
 
+### `get_value()`
+
+功能说明：
+
+- 返回用于公开比较的当前值。
+- 用于支撑 expectation 与测试中的静态值断言、动态表达式断言与混合表达式断言。
+
+参数说明：
+
+- 无参数。
+
+使用示例：
+
+```python
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+
+assert SymbolDim(8).get_value() == 8
+assert (SymbolDim(9) // SymbolDim(4)).get_value() == 2
+assert (SymbolDim(9) / SymbolDim(4)).get_value() == 9 / 4
+```
+
+注意事项：
+
+- 静态整数、静态加减乘与静态整除结果必须返回可与 Python 对应结果直接比较的具体值。
+- 静态真除法结果必须返回可与 Python `/` 结果直接比较的具体值。
+- 动态表达式可返回规整后的符号表达值，但必须保证 expectation 中的相等/不等比较稳定。
+
+返回与限制：
+
+- 返回具体值或规整后的符号表达值。
+
 ### `__repr__()`
 
 功能说明：
 
-- 返回 `str(get_symbol())`。
+- 返回当前内部表达式的公开字符串表示。
 
 参数说明：
 
@@ -115,129 +158,164 @@ assert repr(SymbolDim("N")) == "N"
 
 注意事项：
 
-- 输出字符串由 `sympy` 表达式决定。
+- 输出以内部规整后的表达式为准。
 
 返回与限制：
 
 - 返回 `str`。
 
-### `__add__ / __radd__`
+### `__add__() / __radd__()`
 
 功能说明：
 
-- 符号加法，返回 `SymbolDim`。
+- 执行整数符号加法并返回新的 `SymbolDim`。
 
 参数说明：
 
-- `other` (`int|str|sympy.Basic|SymbolDim`): 右操作数。
+- `other`（`int | str | sympy.Basic | SymbolDim`）：右操作数或左操作数。
 
 使用示例：
 
 ```python
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
-SymbolDim("N") + 2
-2 + SymbolDim("N")
+static_sum = SymbolDim(3) + SymbolDim(4)
+dynamic_sum = 3 + SymbolDim("N")
 ```
 
 注意事项：
 
-- 操作数规整规则与构造一致。
+- 静态整数加静态整数的结果必须保持非动态。
+- 只要任一操作数含自由符号，结果必须保持动态。
+- 浮点操作数必须抛出 `NotImplementedError`。
 
 返回与限制：
 
 - 返回 `SymbolDim`。
 
-### `__sub__ / __rsub__`
+### `__sub__() / __rsub__()`
 
 功能说明：
 
-- 符号减法，返回 `SymbolDim`。
+- 执行整数符号减法并返回新的 `SymbolDim`。
 
 参数说明：
 
-- `other` (`int|str|sympy.Basic|SymbolDim`): 右操作数。
+- `other`（`int | str | sympy.Basic | SymbolDim`）：右操作数或左操作数。
 
 使用示例：
 
 ```python
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
-SymbolDim("N") - "M"
-10 - SymbolDim("N")
+static_diff = SymbolDim(9) - SymbolDim(4)
+dynamic_diff = SymbolDim(9) - SymbolDim("N")
 ```
 
 注意事项：
 
-- 操作数规整规则与构造一致。
+- 结果动态性遵循“限制与边界”中的传播规则。
+- 浮点操作数必须抛出 `NotImplementedError`。
 
 返回与限制：
 
 - 返回 `SymbolDim`。
 
-### `__mul__ / __rmul__`
+### `__mul__() / __rmul__()`
 
 功能说明：
 
-- 符号乘法，返回 `SymbolDim`。
+- 执行整数符号乘法并返回新的 `SymbolDim`。
 
 参数说明：
 
-- `other` (`int|str|sympy.Basic|SymbolDim`): 右操作数。
+- `other`（`int | str | sympy.Basic | SymbolDim`）：右操作数或左操作数。
 
 使用示例：
 
 ```python
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
-SymbolDim("N") * 4
-4 * SymbolDim("N")
+static_prod = SymbolDim(3) * SymbolDim(5)
+dynamic_prod = SymbolDim(3) * SymbolDim("N")
 ```
 
 注意事项：
 
-- 操作数规整规则与构造一致。
+- 结果动态性遵循“限制与边界”中的传播规则。
+- 浮点操作数必须抛出 `NotImplementedError`。
 
 返回与限制：
 
 - 返回 `SymbolDim`。
 
-### `__truediv__ / __rtruediv__`
+### `__truediv__() / __rtruediv__()`
 
 功能说明：
 
-- 符号除法，返回 `SymbolDim`。
+- 执行整数符号真除法并返回新的 `SymbolDim`。
 
 参数说明：
 
-- `other` (`int|str|sympy.Basic|SymbolDim`): 右操作数。
+- `other`（`int | str | sympy.Basic | SymbolDim`）：右操作数或左操作数。
 
 使用示例：
 
 ```python
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
-SymbolDim("N") / 2
-"K" / SymbolDim("N")
+static_div = SymbolDim(9) / SymbolDim(4)
+dynamic_div = SymbolDim("N") / SymbolDim(4)
 ```
 
 注意事项：
 
-- 操作数规整规则与构造一致。
+- 静态整数之间的真除法结果必须可通过 `get_value()` 与 Python `/` 结果直接比较。
+- 含符号的真除法结果必须保持动态，并保留链式运算的结合顺序。
+- 浮点操作数必须抛出 `NotImplementedError`。
 
 返回与限制：
 
 - 返回 `SymbolDim`。
 
-### `__eq__`
+### `__floordiv__() / __rfloordiv__()`
 
 功能说明：
 
-- 比较底层 `sympy` 表达式等价性，返回 `bool`。
+- 执行整数符号整除并返回新的 `SymbolDim`。
 
 参数说明：
 
-- `other` (`int|str|sympy.Basic|SymbolDim`): 右操作数。
+- `other`（`int | str | sympy.Basic | SymbolDim`）：右操作数或左操作数。
+
+使用示例：
+
+```python
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+
+static_div = SymbolDim(9) // SymbolDim(4)
+dynamic_div = SymbolDim("N") // SymbolDim(4)
+```
+
+注意事项：
+
+- 静态整数之间的整除结果必须可通过 `get_value()` 与 Python `//` 结果直接比较。
+- 含符号的整除结果必须保持动态，并保留链式运算的结合顺序。
+- 浮点操作数必须抛出 `NotImplementedError`。
+
+返回与限制：
+
+- 返回 `SymbolDim`。
+
+### `__eq__(other)`
+
+功能说明：
+
+- 比较当前值与 `other` 的公开等价性。
+
+参数说明：
+
+- `other`（`int | str | sympy.Basic | SymbolDim`）：比较对象。
 
 使用示例：
 
@@ -245,13 +323,13 @@ SymbolDim("N") / 2
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 assert SymbolDim(4) == 4
-assert SymbolDim("N") == "N"
 assert SymbolDim("N") == SymbolDim("N")
 ```
 
 注意事项：
 
-- 操作数规整规则与构造一致；非法输入继续抛 `TypeError` 或 `ValueError`。
+- 比较规则必须基于规整后的整数符号表达。
+- 非法类型比较继续抛出 `TypeError`；本接口不负责浮点算术语义。
 
 返回与限制：
 
@@ -261,7 +339,7 @@ assert SymbolDim("N") == SymbolDim("N")
 
 功能说明：
 
-- 当表达式包含自由符号时返回 `True`。
+- 判断当前值是否包含自由符号。
 
 参数说明：
 
@@ -273,52 +351,48 @@ assert SymbolDim("N") == SymbolDim("N")
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 assert SymbolDim(8).is_dynamic() is False
-assert SymbolDim("N").is_dynamic() is True
+assert (SymbolDim(8) + SymbolDim("N")).is_dynamic() is True
 ```
 
 注意事项：
 
-- 以 `sympy` 自由符号判断为准。
+- 静态整数与静态整数算术结果必须返回 `False`。
+- 只要表达式中仍有自由符号，必须返回 `True`。
 
 返回与限制：
 
 - 返回 `bool`。
 
-## 额外补充
-
-- 合法输入：
-  - `int`：转为 `sympy.Integer`。
-  - `sympy.Basic`：直接接收；若为未设定整数/实数假设的 `sympy.Symbol`，按名称规范化为 `integer=True, real=True`。
-  - `str`：仅当非空白且非纯数字字符串时合法，按 `sympy.symbols(..., integer=True, real=True)` 构造。
-- 非法输入：
-  - 纯数字字符串：抛 `ValueError`。
-  - 空白字符串：抛 `ValueError`。
-  - 不支持的其他类型：抛 `TypeError`。
-- `_normalize_str(value)`：`strip()` 后为空或纯数字字符串抛 `ValueError`，其余字符串返回规整后的符号名。
-- `_symbol_from_str(value)`：按 `sympy.symbols(value, integer=True, real=True)` 构造。
-- `_normalize_symbol(sym)`：若 `sympy.Symbol` 未设置 `is_integer/is_real`，按名称规范化为 `integer=True, real=True`。
-- `_normalize_operand(value)`：统一规整算术与比较操作数，规则与构造一致。
-- 异常消息文本不作为兼容承诺，兼容性仅要求异常类型稳定。
-
 ## 测试
 
 - 测试文件：[`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py)
-- 执行命令：`pytest -q test/symbol_variable/test_symbol_dim.py`
+- 执行命令：
+  - `pytest -q test/symbol_variable/test_symbol_dim.py`
+  - `python expectation/symbol_variable/symbol_dim.py`
 
 ### 测试目标
 
-- 覆盖构造、运算、比较、动态性判断与错误分支。
+- 保持现有构造、比较、动态性判断与错误分支的回归覆盖。
+- 补齐静态整数、动态符号与混合表达式在 `+`、`-`、`*`、`/`、`//` 下的目标行为。
+- 补齐浮点构造与浮点算术操作数必须抛出 `NotImplementedError` 的错误路径。
+- 验证 `get_value()` 的公开返回语义满足 expectation：静态值可与 Python 结果直接比较，动态表达式可稳定比较。
+- 明确 [`expectation/symbol_variable/symbol_dim.py`](../../expectation/symbol_variable/symbol_dim.py) 保持只读；后续实现阶段以该脚本运行成功作为 acceptance gate。
 
 ### 功能与用例清单
 
-| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 |
-|---|---|---|---|---|---|
-| SD-001 | 构造 | `int` 输入 | N/A | `SymbolDim(4)` | 构造成功 |
-| SD-002 | 构造 | `str` 符号输入 | N/A | `SymbolDim("N")` | 构造成功 |
-| SD-003 | 构造 | `sympy.Basic` 输入 | N/A | `SymbolDim(sympy.Symbol("M"))` | 构造成功 |
-| SD-004 | 运算 | 加减乘除 | N/A | `SymbolDim("N") + 2` | 返回 `SymbolDim` |
-| SD-005 | 比较 | 等价性 | N/A | `SymbolDim("N") == "N"` | 返回 `True` |
-| SD-006 | 动态性 | 动态判断 | N/A | `SymbolDim("N").is_dynamic()` | 返回 `True` |
-| SD-007 | 异常 | 纯数字字符串 | N/A | `SymbolDim("12")` | 抛 `ValueError` |
-| SD-008 | 异常 | 空白字符串 | N/A | `SymbolDim(" ")` | 抛 `ValueError` |
-| SD-009 | 异常 | 非法类型 | N/A | `SymbolDim(object())` | 抛 `TypeError` |
+- SD-001：`int` 输入可构造 `SymbolDim`。（`test_init_accepts_int`）
+- SD-002：非纯数字字符串符号输入可构造 `SymbolDim`。（`test_init_accepts_symbol_string`）
+- SD-003：`sympy.Basic` 输入可构造 `SymbolDim`。（`test_init_accepts_sympy_basic`）
+- SD-004：基础算术 `+`、`-`、`*`、`/` 与反向运算返回 `SymbolDim`。（`test_arithmetic_ops`）
+- SD-005：等价比较返回 `bool`。（`test_equality`）
+- SD-006：`is_dynamic()` 能区分静态整数与动态符号。（`test_is_dynamic`）
+- SD-007：纯数字字符串输入与操作数抛出 `ValueError`。（`test_numeric_string_rejected`）
+- SD-008：空白字符串输入与操作数抛出 `ValueError`。（`test_blank_string_rejected`）
+- SD-009：非浮点非法类型输入与比较抛出 `TypeError`。（`test_invalid_type_rejected`）
+- SD-010：静态整数之间的 `+/-/*` 结果保持非动态，`get_value()` 与 Python 运算结果一致。（`test_static_arithmetic_get_value_semantics`）
+- SD-011：静态整数与动态符号混合参与 `+/-/*` 时，结果保持动态，链式运算顺序可稳定比较。（`test_dynamic_mixed_add_sub_mul_semantics`）
+- SD-012：静态整数真除法 `a / b` 的结果可由 `get_value()` 直接与 Python `/` 结果比较；含符号真除法保持动态并保留结合顺序。（`test_truediv_get_value_and_order_semantics`）
+- SD-013：静态整数整除 `a // b` 的结果可由 `get_value()` 直接与 Python `//` 结果比较；含符号整除保持动态并保留结合顺序。（`test_floordiv_get_value_and_order_semantics`）
+- SD-014：混合表达式 `static + symbol - static * symbol / static` 的动态性传播与 `get_value()` 表达式比较稳定。（`test_mixed_expression_get_value_semantics`）
+- SD-015：浮点构造输入必须抛出 `NotImplementedError`。（`test_float_constructor_rejected`）
+- SD-016：浮点算术操作数在 `+`、`-`、`*`、`/`、`//` 中必须抛出 `NotImplementedError`。（`test_float_operands_rejected`）
