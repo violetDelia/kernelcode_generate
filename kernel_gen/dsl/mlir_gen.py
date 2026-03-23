@@ -59,8 +59,6 @@ def _symbol_expr_from_runtime_arg(runtime_arg: object) -> str | None:
     if isinstance(runtime_arg, SymbolDim):
         return str(runtime_arg.get_symbol())
     if isinstance(runtime_arg, int):
-        if runtime_arg < 0:
-            return f"0 - {abs(runtime_arg)}"
         return str(runtime_arg)
     return None
 
@@ -203,11 +201,19 @@ def _build_func_op_from_ast_impl(
     arg_types, type_map = _build_signature_types(func_ast, runtime_args=runtime_args)
     statements = _ensure_supported_statements(func_ast)
     result_types: list[object] = []
+    infer_scalar_return = False
     if func_ast.outputs:
         return_expr = statements[-1]
         result_type = _infer_expr_type(return_expr, dict(type_map))
         _validate_return_type(func_ast, result_type)
         result_types = [result_type]
+    elif _is_symbol_scalar_function(func_ast):
+        return_expr = statements[-1]
+        result_type = _infer_expr_type(return_expr, dict(type_map))
+        if not isinstance(result_type, SymbolValueType):
+            raise _LoweringError("Symbol scalar function return must lower to !symbol.int", location=func_ast.location)
+        result_types = [result_type]
+        infer_scalar_return = True
 
     func_type = FunctionType.from_lists(arg_types, result_types)
     block = Block(arg_types=arg_types)
@@ -216,7 +222,7 @@ def _build_func_op_from_ast_impl(
     ctx = EmitContext(builder=block, symbols={}, types=dict(type_map), config=config)
     visitor = AstVisitor(config=config)
     return_value = visitor.visit_function(func_ast, ctx)
-    if func_ast.outputs:
+    if func_ast.outputs or infer_scalar_return:
         if return_value is None:
             raise _LoweringError("Function body is empty", location=func_ast.location)
         block.add_op(func.ReturnOp(return_value))

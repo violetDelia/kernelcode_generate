@@ -66,7 +66,9 @@ def _normalize_expr(expr: str) -> str:
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
-    return expr.strip()
+    normalized = expr.strip()
+    concrete_value = _evaluate_concrete_expr(normalized)
+    return str(concrete_value) if concrete_value is not None else normalized
 
 
 def _evaluate_concrete_expr(expr: str) -> int | None:
@@ -88,7 +90,7 @@ def _evaluate_concrete_expr(expr: str) -> int | None:
     - 功能实现: kernel_gen/dialect/symbol.py
     """
 
-    normalized = _normalize_expr(expr)
+    normalized = expr.strip()
     try:
         parsed = py_ast.parse(normalized, mode="eval")
     except SyntaxError:
@@ -309,6 +311,11 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
         """校验整数符号值类型。"""
 
         self.expr.verify()
+
+    def __str__(self) -> str:
+        """返回公开的 symbol.int 文本表示。"""
+
+        return f"symbol.int<{_normalize_expr(self.expr.expr.data)}>"
 
     def get_value(self) -> int | str:
         """返回 symbol.int 的公开值。

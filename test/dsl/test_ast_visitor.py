@@ -10,8 +10,8 @@
 - pytest -q test/dsl/test_ast_visitor.py
 
 覆盖率信息:
-- 覆盖率命令: coverage run -m pytest -q test/dsl/test_ast_visitor.py && coverage report --include=kernel_gen/dsl/ast_visitor.py,kernel_gen/dsl/emit_mlir.py,kernel_gen/dsl/mlir_gen.py -m
-- 覆盖率结果: ast_visitor 98%, emit_mlir 98%, mlir_gen 99%（2026-03-23 05:10:36 +0800）
+- 覆盖率命令: pytest --cov=kernel_gen.dsl.ast_visitor --cov=kernel_gen.dsl.emit_mlir --cov=kernel_gen.dsl.mlir_gen --cov-report=term-missing -q test/dsl/test_ast_visitor.py
+- 覆盖率结果: ast_visitor 98%, emit_mlir 98%, mlir_gen 99%（2026-03-24 03:29:58 +0800）
 - 达标线: 95%
 
 关联文件:
@@ -779,8 +779,8 @@ def test_symbol_scalar_function_lowers_add_to_symbol_add() -> None:
 # MGEN-020
 # 创建者: 朽木露琪亚
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-23 04:16:19 +0800
-# 最近一次运行成功时间: 2026-03-23 04:16:19 +0800
+# 最近一次运行测试时间: 2026-03-24 03:29:58 +0800
+# 最近一次运行成功时间: 2026-03-24 03:29:58 +0800
 # 功能说明: 验证 Python int 运行时实参会 lowering 为携带具体整数值的 SymbolValueType，并满足 add-scalar expectation 基线。
 # 测试目的: 验证 build_func_op(add, lhs, rhs) 在整型标量链路中生成 symbol.add，且赋值后 return 场景保持 expectation 断言成立。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type
@@ -794,17 +794,23 @@ def test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type() -> N
 
     func_op = build_func_op(add, -3, 5)
     arg_types = [arg.type for arg in func_op.args]
-    assert arg_types == [SymbolValueType.from_expr("0 - 3"), SymbolValueType.from_expr("5")]
+    assert arg_types == [SymbolValueType.from_expr("-3"), SymbolValueType.from_expr("5")]
     assert not arg_types[0].is_symbol()
     assert not arg_types[1].is_symbol()
     assert arg_types[0].get_value() == -3
     assert arg_types[1].get_value() == 5
+    assert str(arg_types[0]) == "symbol.int<-3>"
+    assert str(arg_types[1]) == "symbol.int<5>"
 
     add_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolAddOp)]
-    assert len(add_ops) == 2
-    assert add_ops[0].result.type == SymbolValueType.from_expr("0 - 3 + 5")
+    assert len(add_ops) == 1
+    assert list(func_op.function_type.outputs) == [SymbolValueType.from_expr("2")]
+    assert add_ops[0].result.type == SymbolValueType.from_expr("2")
     assert not add_ops[0].result.type.is_symbol()
     assert add_ops[0].result.type.get_value() == 2
+    assert str(add_ops[0].result.type) == "symbol.int<2>"
+    return_op = next(op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp))
+    assert return_op.arguments[0].type == SymbolValueType.from_expr("2")
     assert "symbol.add" in _print_module(ModuleOp([func_op]))
 
 
