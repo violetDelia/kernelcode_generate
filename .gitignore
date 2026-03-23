@@ -1,7 +1,7 @@
 tmp
-.pytest_cache
+**pytest_cache**
 agents/codex-multi-agents/config
-*__pycache__
+**__pycache__**
 run_periodically
 main
 temp
