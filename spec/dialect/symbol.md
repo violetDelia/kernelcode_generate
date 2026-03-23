@@ -396,6 +396,7 @@ symbol.for %i = %start to %end step %step
 - 语义采用半开区间：从 `start` 开始，每轮累加 `step`，当下一轮将不再满足区间进入条件时终止；不包含 `end` 本身。
 - `start`、`end`、`step`、`it` 必须全部是 `!symbol.int<"expr">`，不接受普通整数类型、浮点类型或其他 dialect 的标量类型。
 - verifier 必须逐项校验 `it` 为 `SymbolValueType`；即使 `start/end/step` 合法，只要 `it` 为 `f32`、`f64`、`index`、普通 `i32` 或其他非 `SymbolValueType`，都必须报错。
+- `symbol.for` 不接受 builtin 数值类型替代 `SymbolValueType`；来自 Python 层的普通数值也必须先 materialize 为 `!symbol.int<"expr">` SSA value 后才能作为 `symbol.for` 的操作数或块参数类型使用。
 - `it` 是循环体内部可见的迭代变量，其值语义应与当前迭代点一致；打印与解析时必须保持 `it` 的类型稳定。
 - 当前 verifier 只约束类型、region 结构、文本语法与可静态判定的错误路径；不要求在 `symbol dialect` 内完成一般符号大小关系证明。
 - 若 `step` 的表达式可静态判定为 `0`，必须报错；若 `step` 为纯符号表达且当前无法静态证明为非零，本 spec 不额外引入证明规则，由后续实现按最小可实现口径处理。

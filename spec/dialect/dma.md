@@ -53,6 +53,7 @@
 - 对 `dma.cast`，只允许 `element_type` 发生显式变化；`shape/stride/space` 必须保持一致。
 - `shape/stride` 的 rank 必须与相关 `offsets/sizes/strides` 列表长度一致。
 - `offsets`、`sizes`、`strides`、动态 `shape`、动态 `stride` 必须建模为显式 `!symbol.int<"expr">` SSA 操作数列表；不得只靠 `StringAttr("?")`、`ArrayAttr` 或其他 attribute 独立表达运行期值。
+- 所有 index-like 标量 operand 仅接受 `!symbol.int<"expr">` SSA value；禁止直接使用 Python `int/float` 或 builtin 数值类型替代，静态常量必须先 materialize 为 `!symbol.int<"expr">`。
 - `!nn.memory<...>` 类型仍负责承载 rank、元素类型、内存空间以及可静态判定的布局信息；凡是运行期才确定的布局值，必须由 op operand 传入。
 - 若实现保留静态维度或静态 stride 在类型中，assembly 中的静态值也应允许通过 `!symbol.int<"1">` 这类 symbol 常量值、或等价 materialize 后的 `!symbol.int<"expr">` SSA value 显式传入 operand，保证“布局参数来源统一为 operand”。
 - `dma.load/store/slice/deslice` 的 `offsets/sizes/strides` 必须为 variadic `!symbol.int<"expr">` operand。
@@ -452,7 +453,7 @@ op = DmaCastOp(source, result_type)
 - 验证默认连续 stride 在符号维度（如 `N` / `M*N` / `?`）下的推导与退化规则已覆盖。
 - 验证 `dma.cast` 只允许改变元素类型，且保持 `shape/stride/space` 不变。
 - 验证当前阶段对 stride 的限制会在 verifier 阶段明确报错。
-- 验证所有受影响的 dma 标量输入统一为 `!symbol.int<"expr">`，并拒绝 builtin `index` 或其他非 symbol 标量类型。
+- 验证所有受影响的 dma 标量输入统一为 `!symbol.int<"expr">`，并拒绝 builtin `index`、浮点或其他非 symbol 标量类型（包含未 materialize 的 Python 数值输入）。
 
 ### 功能与用例清单
 
