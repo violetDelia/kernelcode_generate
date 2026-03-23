@@ -34,3 +34,12 @@
   - 核对 `spec/operation/scf.md` 的差异仅为补充只读 acceptance gate `expectation/operation/scf/loop.py` 的依赖与测试章节说明。
   - 按当前合并规则补充本任务记录，准备将 `spec/operation/scf.md` 与本任务日志一并最小合入 `main`。
 - 结论：已完成合并准备；expectation 保持只读，默认不额外复测，沿用链路已通过结果：`python expectation/operation/scf/loop.py` 通过，`pytest -q test/operation/test_operation_scf.py` 为 `5 passed`，coverage 为 `97%`。下一步执行最小提交并申请独立清理任务。
+
+- 时间：`2026-03-24 03:00:06 +0800`
+- 任务：`T-20260324-57ba64e2`
+- 任务目标：确认 `scf` expectation 链路相对 `main` 已无待合入业务改动，确认 `expectation/operation/scf/loop.py` 保持只读未改，并按最小范围清理 `/home/lfr/kernelcode_generate/wt-20260324-expectation-operation-scf-dir` 与同名分支残留。
+- 改动：
+  - 核对 `main` 已包含本链路业务改动；`spec/operation/scf.md`、`kernel_gen/operation/scf.py`、`test/operation/test_operation_scf.py` 相对 `main` 无内容差异。
+  - 核对 `expectation/operation/scf/loop.py` 相对 `main` 无差异，expectation 文件保持只读未修改。
+  - 核对 worktree 相对 `main` 不存在待合入业务差异；仅保留清理记录，同名分支可在移除 worktree 后删除。
+- 结论：该链路已完成合入且无残留业务差异；expectation 保持只读；本轮默认不复测，可按最小范围清理 worktree 与同名分支。
