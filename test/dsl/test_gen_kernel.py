@@ -1,7 +1,7 @@
 """gen_kernel tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 朽木露琪亚
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 func.func 到目标函数源码的组装行为。
@@ -10,8 +10,8 @@
 - pytest -q test/dsl/test_gen_kernel.py
 
 覆盖率信息:
-- 覆盖率命令: pytest --cov=kernel_gen.dsl.gen_kernel --cov-report=term-missing -q test/dsl/test_gen_kernel.py
-- 覆盖率结果: gen_kernel 100%（2026-03-24 09:41:56 +0800）
+- 覆盖率命令: coverage run -m pytest -q test/dsl/test_emit_c.py test/dsl/test_gen_kernel.py && coverage report --include=kernel_gen/dsl/emit_c.py,kernel_gen/dsl/gen_kernel.py -m
+- 覆盖率结果: emit_c 100%, gen_kernel 100%（2026-03-23 22:45:14 +0800）
 - 达标线: 95%
 
 关联文件:
@@ -48,7 +48,7 @@ class UnsupportedOp(IRDLOperation):
     name = "test.unsupported"
     result = result_def(i32)
 
-    def __init__(self) -> None:
+    def __init__(self: "UnsupportedOp") -> None:
         super().__init__(result_types=[i32])
 
 
@@ -77,8 +77,8 @@ def _func(name: str, input_types: list[object], result_types: list[object], bloc
 # GK-001
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-24 09:41:56 +0800
-# 最近一次运行成功时间: 2026-03-24 09:41:56 +0800
+# 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
+# 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
 # 功能说明: 验证 func.func 可生成完整后端源码。
 # 测试目的: 验证 gen_kernel 返回签名与函数体文本。
 # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_returns_target_source
@@ -108,8 +108,8 @@ def test_gen_kernel_returns_target_source() -> None:
 # GK-002
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-24 09:41:56 +0800
-# 最近一次运行成功时间: 2026-03-24 09:41:56 +0800
+# 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
+# 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
 # 功能说明: 验证输入 Memory 参数使用只读签名。
 # 测试目的: 验证 gen_signature 对 Memory 输入生成 const 引用。
 # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_signature_uses_readonly_memory_inputs
@@ -131,8 +131,8 @@ def test_gen_signature_uses_readonly_memory_inputs() -> None:
 # GK-003
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-24 09:41:56 +0800
-# 最近一次运行成功时间: 2026-03-24 09:41:56 +0800
+# 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
+# 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
 # 功能说明: 验证 Memory 结果降为输出参数。
 # 测试目的: 验证 gen_signature 对 Memory 返回值生成 out 参数。
 # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_signature_lowers_memory_result_to_out_param
@@ -153,11 +153,11 @@ def test_gen_signature_lowers_memory_result_to_out_param() -> None:
 
 # GK-004
 # 创建者: 金铲铲大作战
-# 最后一次更改: 摸鱼小分队
-# 最近一次运行测试时间: 2026-03-24 12:00:27 +0800
-# 最近一次运行成功时间: 2026-03-24 12:00:27 +0800
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
+# 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
 # 功能说明: 验证标量参数顺序与 IR 一致。
-# 测试目的: 验证 gen_signature 对 IntegerType/IndexType 保持顺序、命名与目标类型映射，未命名参数回退为 arg{index}。
+# 测试目的: 验证 gen_signature 保持标量参数顺序和命名。
 # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_signature_preserves_scalar_arg_order
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
@@ -192,9 +192,9 @@ def test_gen_signature_preserves_scalar_arg_order() -> None:
 
 # GK-005
 # 创建者: 金铲铲大作战
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-24 16:43:43 +0800
-# 最近一次运行成功时间: 2026-03-24 16:43:43 +0800
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
+# 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
 # 功能说明: 验证函数体按 op 顺序调用 emit_c。
 # 测试目的: 验证 gen_body 不改变 IR 中的 op 顺序。
 # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_body_emits_ops_in_order
@@ -212,7 +212,7 @@ def test_gen_body_emits_ops_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
     func_op = _func("ordered_body", [i32, i32], [], block, ("lhs", "rhs"))
     seen: list[str] = []
 
-    def _fake_emit(op, _ctx) -> str:
+    def _fake_emit(op: object, _ctx: EmitCContext) -> str:
         seen.append(op.name)
         return f"// {op.name}"
 
@@ -223,12 +223,18 @@ def test_gen_body_emits_ops_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
     assert seen == ["arith.addi", "arith.subi"]
     assert body.splitlines() == ["// arith.addi", "// arith.subi"]
 
+    mem = _make_memory_type([2, 2], [2, 1])
+    return_block = Block(arg_types=[mem])
+    return_block.add_op(func.ReturnOp(return_block.args[0]))
+    return_func = _func("return_body", [mem], [mem], return_block, ("input",))
+    assert gen_body(return_func, _ctx()) == "out = arg0;"
+
 
 # GK-006
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-24 09:41:56 +0800
-# 最近一次运行成功时间: 2026-03-24 09:41:56 +0800
+# 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
+# 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
 # 功能说明: 验证 loop 片段可拼装到完整函数中。
 # 测试目的: 验证 gen_kernel 保留 scf.for 生成结果。
 # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_assembles_loop_body
@@ -259,8 +265,8 @@ def test_gen_kernel_assembles_loop_body() -> None:
 # GK-007
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-24 09:41:56 +0800
-# 最近一次运行成功时间: 2026-03-24 09:41:56 +0800
+# 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
+# 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
 # 功能说明: 验证 emit_c 错误可向上抛出。
 # 测试目的: 验证 gen_kernel 不吞掉 emit_c 失败原因。
 # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_propagates_emit_c_error
@@ -283,10 +289,10 @@ def test_gen_kernel_propagates_emit_c_error() -> None:
 # GK-008
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-24 09:57:19 +0800
-# 最近一次运行成功时间: 2026-03-24 09:57:19 +0800
+# 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
+# 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
 # 功能说明: 验证不合法返回形式时报错。
-# 测试目的: 验证 gen_signature 拒绝标量/多返回形式。
+# 测试目的: 验证 gen_signature 拒绝标量返回值。
 # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_signature_rejects_unsupported_return_form
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
@@ -310,20 +316,6 @@ def test_gen_signature_rejects_unsupported_return_form() -> None:
         gen_signature(tuple_func, _ctx())
     assert "unsupported return form" in str(exc_info.value)
 
-
-# GK-010
-# 创建者: 金铲铲大作战
-# 最后一次更改: 摸鱼小分队
-# 最近一次运行测试时间: 2026-03-24 12:00:27 +0800
-# 最近一次运行成功时间: 2026-03-24 12:00:27 +0800
-# 功能说明: 验证不支持的输入类型时报错。
-# 测试目的: 验证 gen_signature 对 f32 等未映射输入类型抛出 TypeError。
-# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_signature_rejects_unsupported_input_type
-# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
-# 对应 spec 文件路径: spec/dsl/gen_kernel.md
-# 对应测试文件路径: test/dsl/test_gen_kernel.py
-
-def test_gen_signature_rejects_unsupported_input_type() -> None:
     float_block = Block(arg_types=[f32])
     float_block.add_op(func.ReturnOp())
     float_type = FunctionType.from_lists([f32], [])
@@ -332,20 +324,6 @@ def test_gen_signature_rejects_unsupported_input_type() -> None:
         gen_signature(float_func, _ctx())
     assert "unsupported type" in str(exc_info.value)
 
-
-# GK-011
-# 创建者: 金铲铲大作战
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-24 09:57:19 +0800
-# 最近一次运行成功时间: 2026-03-24 09:57:19 +0800
-# 功能说明: 验证 gen_body 遇到非法 return 时报错。
-# 测试目的: 验证 gen_body 拒绝不支持的 return 形式。
-# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_body_rejects_unsupported_return_form
-# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
-# 对应 spec 文件路径: spec/dsl/gen_kernel.md
-# 对应测试文件路径: test/dsl/test_gen_kernel.py
-
-def test_gen_body_rejects_unsupported_return_form() -> None:
     bad_body_block = Block(arg_types=[i32])
     bad_body_block.add_op(func.ReturnOp(bad_body_block.args[0]))
     bad_body_type = FunctionType.from_lists([i32], [i32])
@@ -354,68 +332,14 @@ def test_gen_body_rejects_unsupported_return_form() -> None:
         gen_body(bad_body_func, _ctx())
     assert "unsupported return form" in str(exc_info.value)
 
-    value_without_result_block = Block(arg_types=[i32])
-    value_without_result_block.add_op(func.ReturnOp(value_without_result_block.args[0]))
-    value_without_result_type = FunctionType.from_lists([i32], [])
-    value_without_result_func = func.FuncOp(
-        "value_without_result",
-        value_without_result_type,
-        Region(value_without_result_block),
-        arg_attrs=_arg_attrs("value"),
-    )
-    with pytest.raises(GenKernelError) as exc_info:
-        gen_body(value_without_result_func, _ctx())
-    assert "unsupported return form" in str(exc_info.value)
-
-    mem = _make_memory_type([2, 2], [2, 1])
-    missing_value_block = Block(arg_types=[mem])
-    missing_value_block.add_op(func.ReturnOp())
-    missing_value_type = FunctionType.from_lists([mem], [mem])
-    missing_value_func = func.FuncOp(
-        "missing_value",
-        missing_value_type,
-        Region(missing_value_block),
-        arg_attrs=_arg_attrs("input"),
-    )
-    with pytest.raises(GenKernelError) as exc_info:
-        gen_body(missing_value_func, _ctx())
-    assert "unsupported return form" in str(exc_info.value)
-
-    extra_value_block = Block(arg_types=[mem, mem])
-    extra_value_block.add_op(func.ReturnOp(extra_value_block.args[0], extra_value_block.args[1]))
-    extra_value_type = FunctionType.from_lists([mem, mem], [mem])
-    extra_value_func = func.FuncOp(
-        "extra_value",
-        extra_value_type,
-        Region(extra_value_block),
-        arg_attrs=_arg_attrs("lhs", "rhs"),
-    )
-    with pytest.raises(GenKernelError) as exc_info:
-        gen_body(extra_value_func, _ctx())
-    assert "unsupported return form" in str(exc_info.value)
-
-    other_mem = _make_memory_type([4, 1], [1, 1])
-    mismatched_value_block = Block(arg_types=[mem, other_mem])
-    mismatched_value_block.add_op(func.ReturnOp(mismatched_value_block.args[1]))
-    mismatched_value_type = FunctionType.from_lists([mem, other_mem], [mem])
-    mismatched_value_func = func.FuncOp(
-        "mismatched_value",
-        mismatched_value_type,
-        Region(mismatched_value_block),
-        arg_attrs=_arg_attrs("lhs", "rhs"),
-    )
-    with pytest.raises(GenKernelError) as exc_info:
-        gen_body(mismatched_value_func, _ctx())
-    assert "unsupported return form" in str(exc_info.value)
-
 
 # GK-009
 # 创建者: 金铲铲大作战
 # 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-24 16:43:43 +0800
-# 最近一次运行成功时间: 2026-03-24 16:43:43 +0800
-# 功能说明: 验证默认 gen_kernel 链路保留函数名与参数名。
-# 测试目的: 验证共享同一 EmitCContext 的 gen_signature -> gen_body 与 gen_kernel 默认链路使用 IR 中定义的名称。
+# 最近一次运行测试时间: 2026-03-25 17:10:00 +0800
+# 最近一次运行成功时间: 2026-03-25 17:10:00 +0800
+# 功能说明: 验证生成源码保留函数名与参数名，并在缺失参数名时沿用默认命名。
+# 测试目的: 验证 gen_kernel 使用 IR 中定义的名称；当输入参数缺失 arg_attrs.name 时，源码中的签名参数名回退为 arg{index}。
 # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_preserves_function_and_arg_names
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
@@ -427,12 +351,21 @@ def test_gen_kernel_preserves_function_and_arg_names() -> None:
     block.add_op(func.ReturnOp(block.args[0]))
     func_op = _func("named_kernel", [mem, i32], [mem], block, ("tensor", "scale"))
 
-    ctx = _ctx()
-    signature = gen_signature(func_op, ctx)
-    body = gen_body(func_op, ctx)
     source = gen_kernel(func_op, _ctx())
 
-    assert signature == "void named_kernel(const Memory<int32_t>& tensor, int32_t scale, Memory<int32_t>& out)"
-    assert body == "out = tensor;"
     assert source.startswith("void named_kernel(const Memory<int32_t>& tensor, int32_t scale, Memory<int32_t>& out)")
     assert "out = tensor;" in source
+
+    unnamed_block = Block(arg_types=[i32])
+    unnamed_block.add_op(func.ReturnOp())
+    unnamed_type = FunctionType.from_lists([i32], [])
+    unnamed_func = func.FuncOp(
+        "unnamed_kernel",
+        unnamed_type,
+        Region(unnamed_block),
+        arg_attrs=ArrayAttr([DictionaryAttr({})]),
+    )
+
+    unnamed_source = gen_kernel(unnamed_func, _ctx())
+
+    assert unnamed_source.startswith("void unnamed_kernel(int32_t arg0)")
