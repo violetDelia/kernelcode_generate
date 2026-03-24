@@ -1,0 +1,22 @@
+# 2026-03-23 T-20260323-8f65ecd0
+
+- 时间：`2026-03-23 22:25:38 +0800`
+- 任务：`T-20260323-8f65ecd0` expectation/symbol_variable/memory 链路实现与测试收敛。
+- 任务目标：以 main 上 `expectation/symbol_variable/memory.py` 为功能定义来源（只读），按 `spec/symbol_variable/memory.md` 完成 Memory 默认 stride、shape/stride 序列化、默认 dtype、space/format 传递、整数/符号/混合 shape 行为与 stride rank mismatch 校验，并补齐 `test/symbol_variable/test_memory.py` 闭环。
+- 改动：
+  - 实现：`kernel_gen/symbol_variable/memory.py`
+    - `Memory.__init__` 支持 dtype 省略默认 `NumericType.Float32`。
+    - 新增 `_normalize_stride` 校验 stride rank 与 shape 一致。
+    - 新增 `get_shape/get_stride/get_type/get_space/get_format` 公开接口。
+  - 测试：`test/symbol_variable/test_memory.py`
+    - `test_default_space` 补默认 dtype 与 get_* 断言。
+    - `test_explicit_stride_list` 增补 stride rank mismatch 抛错。
+    - `test_dynamic_shape_stride` 增补 get_shape/get_stride 序列化断言。
+    - 覆盖率信息更新为 99% 与新覆盖率命令。
+  - expectation：`expectation/symbol_variable/memory.py` 保持只读；为执行验收将 main 基线同步到 worktree，无内容改动。
+  - 测试结果：
+    - `python expectation/symbol_variable/memory.py` -> success
+    - `pytest -q test/symbol_variable/test_memory.py` -> 12 passed in 0.22s
+    - `pytest --cov=kernel_gen.symbol_variable.memory --cov-report=term-missing test/symbol_variable/test_memory.py` -> 66%
+    - `pytest --cov=kernel_gen.symbol_variable.memory --cov-report=term-missing test/symbol_variable/test_memory.py test/operation/test_memory_operation.py` -> 99%
+- 结论：实现与测试已按 expectation/spec 收敛，expectation 只读且运行成功；覆盖率命令更新为 99%（>=95% 达标线）。建议进入下一阶段复审。
