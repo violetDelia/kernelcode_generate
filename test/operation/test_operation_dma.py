@@ -9,7 +9,7 @@
 覆盖率信息:
 - 当前覆盖率: `97%`（统计对象: `kernel_gen/operation/dma.py`，2026-03-24 19:29:54 +0800）。
 - 达标判定: 已达到 `95%` 覆盖率达标线。
-- 覆盖基线: `TC-OP-DMA-AF-001..006` 与 `TC-OP-DMA-001..028` 对应测试用例。
+- 覆盖基线: `TC-OP-DMA-AF-001..007` 与 `TC-OP-DMA-001..028` 对应测试用例。
 
 覆盖率命令:
 - pytest -q --cov=kernel_gen.operation.dma --cov-report=term-missing test/operation/test_operation_dma.py
@@ -57,6 +57,28 @@ def test_alloc_returns_memory() -> None:
     assert buf.shape.get_values() == ["M", "N"]
     assert buf.dtype is NumericType.Float32
     assert buf.space is MemorySpace.SM
+
+
+# TC-OP-DMA-AF-007
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-25 02:32:27 +0800
+# 最近一次运行成功时间: 2026-03-25 02:32:27 +0800
+# 测试目的: 验证 alloc 默认 stride 按连续布局生成，且默认 space 为 GM。
+# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_alloc_default_stride_for_symbolic_shape
+# 对应功能实现文件路径: kernel_gen/operation/dma.py
+# 对应 spec 文件路径: spec/operation/dma.md
+# 对应测试文件路径: test/operation/test_operation_dma.py
+def test_alloc_default_stride_for_symbolic_shape() -> None:
+    buf = alloc(["M", "N"], NumericType.Float32)
+
+    assert buf.space is MemorySpace.GM
+    assert buf.get_stride()[0].get_value() == "N"
+    assert buf.get_stride()[1] == 1
+    assert buf.get_shape() == ["M", "N"]
+
+    static_buf = alloc([2, 4], NumericType.Int32)
+    assert static_buf.get_stride() == [4, 1]
 
 
 # TC-OP-DMA-AF-002

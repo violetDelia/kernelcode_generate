@@ -376,13 +376,14 @@ dst = flatten(src)
 - 验证 `store/deslice` 的源块大小约束、dtype 校验与索引边界。
 - 验证 `view` 的 `offset/size/stride` 子视图语义与返回 `Memory` 规格继承规则。
 - 验证 `reshape/flatten` 的连续布局要求与结果形状规则。
-- 验证测试编号 `TC-OP-DMA-AF-001..006` 与 `TC-OP-DMA-001..028` 在文档和测试文件中一一对应。
+- 验证测试编号 `TC-OP-DMA-AF-001..007` 与 `TC-OP-DMA-001..028` 在文档和测试文件中一一对应。
 
 ### 功能与用例清单
 
 | 用例 ID | 测试点 | 说明 | 建议测试 |
 | --- | --- | --- | --- |
 | TC-OP-DMA-AF-001 | `alloc` 基础分配 | 返回带指定 `shape/dtype/space` 的 `Memory` | `test_alloc_returns_memory` |
+| TC-OP-DMA-AF-007 | `alloc` 默认 space/stride | 未提供 `space` 时默认 `MemorySpace.GM`，未提供 `stride` 时按连续布局生成默认 stride | `test_alloc_default_stride_for_symbolic_shape` |
 | TC-OP-DMA-AF-002 | `alloc` 显式 stride | 显式 `stride` 被正确保留到返回 `Memory` | `test_alloc_preserves_explicit_stride` |
 | TC-OP-DMA-AF-003 | `alloc` 非法 shape/stride | 非法 `shape` 或 rank/stride 不一致时报错 | `test_alloc_invalid_shape_or_stride` |
 | TC-OP-DMA-AF-004 | `free` 基础释放 | `free` 接受 `Memory` 并返回 `None` | `test_free_returns_none` |
