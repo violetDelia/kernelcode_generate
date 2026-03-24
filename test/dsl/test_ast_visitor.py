@@ -50,7 +50,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.dma import DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp
 from kernel_gen.dialect.nn import NnAddOp, NnBroadcastOp, NnEqOp, NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolAddOp, SymbolForOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolAddOp, SymbolFloorDivOp, SymbolForOp, SymbolValueType
 from kernel_gen.dsl.ast import (
     AstParseError,
     BlockAST,
@@ -194,8 +194,8 @@ def test_ast_parse_function_parses_annotations() -> None:
 # AST-003
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-24 22:08:00 +0800
-# 最近一次运行成功时间: 2026-03-24 22:08:00 +0800
+# 最近一次运行测试时间: 2026-03-22 15:38:56 +0800
+# 最近一次运行成功时间: 2026-03-22 15:38:56 +0800
 # 功能说明: 验证 parse_function 对非法注解抛出带诊断信息的错误。
 # 测试目的: 验证 parse_function 对非法注解抛出带诊断信息的错误。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_ast_parse_function_missing_annotation_reports_diagnostics
@@ -203,25 +203,14 @@ def test_ast_parse_function_parses_annotations() -> None:
 # 对应 spec 文件路径: spec/dsl/ast.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_ast_parse_function_missing_annotation_reports_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
-    import kernel_gen.dsl.ast as ast_module
-
-    def bad(x: object, y: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+    def bad(x: int, y: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
         return y
 
-    original_parse_annotation = ast_module._parse_annotation_node
-
-    def _fake_parse_annotation_node(
-        node: object,
-        arg_name: str | None,
-        globals_table: dict[str, object],
-        builtins_table: dict[str, object],
-        runtime_table: dict[str, object] | None,
-    ) -> object:
-        if arg_name == "x":
-            return None
-        return original_parse_annotation(node, arg_name, globals_table, builtins_table, runtime_table)
-
-    monkeypatch.setattr(ast_module, "_parse_annotation_node", _fake_parse_annotation_node)
+    missing_annotation_source = '''
+def bad(x, y: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+    return y
+'''
+    monkeypatch.setattr(inspect, "getsource", lambda _obj: missing_annotation_source)
 
     with pytest.raises(AstParseError) as exc_info:
         parse_function(bad)
@@ -832,6 +821,60 @@ def test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type() -> N
     assert "symbol.add" in _print_module(ModuleOp([func_op]))
 
 
+# MGEN-021
+# 创建者: 不要啊教练
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-25 00:14:17 +0800
+# 最近一次运行成功时间: 2026-03-25 00:14:17 +0800
+# 功能说明: 验证符号整型标量整除 lowering 为 symbol.floordiv。
+# 测试目的: 验证 build_func_op 在整型标量 floordiv 场景下对直接返回与 assign-then-return 两种函数体都生成 SymbolValueType 输入与 symbol.floordiv 结果。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_floordiv_scalar_runtime_ints_lower_to_symbol_value_type
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_floordiv_scalar_runtime_ints_lower_to_symbol_value_type() -> None:
+    def floordiv_func(a: int, b: int) -> int:
+        return a // b
+
+    def floordiv_assign_then_return(a: int, b: int) -> int:
+        result = a // b
+        return result
+
+    for target_func in (floordiv_func, floordiv_assign_then_return):
+        func_op = build_func_op(target_func, -7, 3)
+        arg_types = [arg.type for arg in func_op.args]
+        assert arg_types == [SymbolValueType.from_expr("-7"), SymbolValueType.from_expr("3")]
+        floordiv_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolFloorDivOp)]
+        assert len(floordiv_ops) == 1
+        assert floordiv_ops[0].result.type == SymbolValueType.from_expr(str(-7 // 3))
+        return_op = next(op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp))
+        assert return_op.arguments[0].type == SymbolValueType.from_expr(str(-7 // 3))
+
+        symbol_lhs = SymbolDim("M")
+        symbol_rhs = SymbolDim("N")
+        func_op = build_func_op(target_func, symbol_lhs, symbol_rhs)
+        arg_types = [arg.type for arg in func_op.args]
+        assert arg_types == [SymbolValueType.from_expr("M"), SymbolValueType.from_expr("N")]
+        floordiv_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolFloorDivOp)]
+        assert len(floordiv_ops) == 1
+        assert floordiv_ops[0].result.type == SymbolValueType.from_expr("floor(M/N)")
+        return_op = next(op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp))
+        assert return_op.arguments[0].type == SymbolValueType.from_expr("floor(M/N)")
+
+        func_op = build_func_op(target_func, symbol_lhs, 3)
+        floordiv_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolFloorDivOp)]
+        assert len(floordiv_ops) == 1
+        assert floordiv_ops[0].result.type == SymbolValueType.from_expr("floor(M/3)")
+        return_op = next(op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp))
+        assert return_op.arguments[0].type == SymbolValueType.from_expr("floor(M/3)")
+
+        func_op = build_func_op(target_func, 3, symbol_rhs)
+        floordiv_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolFloorDivOp)]
+        assert len(floordiv_ops) == 1
+        assert floordiv_ops[0].result.type == SymbolValueType.from_expr("floor(3/N)")
+        return_op = next(op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp))
+        assert return_op.arguments[0].type == SymbolValueType.from_expr("floor(3/N)")
+
 # MGEN-001A
 # 创建者: 金铲铲大作战
 # 最后一次更改: 我不是牛马
@@ -872,16 +915,9 @@ def test_build_func_op_accepts_object_builtins_env(monkeypatch: pytest.MonkeyPat
     builtins_env = _BuiltinsEnv()
     builtins_env.MemorySpace = MemorySpace
 
-    def take_local(A: object) -> object:
+    def take_local(A: "Tensor[f32, 4]"):
         slice(A, [0], [1], [1], MemorySpace.LM)
 
-    def _fake_getsource(_obj: object) -> str:
-        return """
-def take_local(A: "Tensor[f32, 4]"):
-    slice(A, [0], [1], [1], MemorySpace.LM)
-"""
-
-    monkeypatch.setattr(inspect, "getsource", _fake_getsource)
     monkeypatch.delitem(take_local.__globals__, "MemorySpace", raising=False)
 
     with pytest.raises(AstVisitorError, match="Unknown name"):
@@ -988,7 +1024,7 @@ def test_build_func_op_from_ast_config_preserves_runtime_signature(monkeypatch: 
             observed["visitor_config"] = config
             super().__init__(config=config)
 
-        def visit_function(self: "RecordingAstVisitor", func_ast: object, ctx: object) -> object:
+        def visit_function(self: "RecordingAstVisitor", func_ast: FunctionAST, ctx: EmitContext) -> object:
             observed["ctx_config"] = ctx.config
             return super().visit_function(func_ast, ctx)
 
@@ -1000,28 +1036,18 @@ def test_build_func_op_from_ast_config_preserves_runtime_signature(monkeypatch: 
     step = SymbolDim("step")
 
     def add(
-        A: object,
-        B: object,
-        C: object,
+        A: "Tensor[f32, L]",
+        B: "Tensor[f32, L]",
+        C: "Tensor[f32, L]",
         end: int,
         start: int,
         step: int,
-    ) -> object:
+    ):
         for index in LoopRange(start, end, step):
             SA = slice(A, [index], [step], [1], MemorySpace.LM)
             SB = slice(B, [index], [step], [1], MemorySpace.LM)
             SC = SA + SB
             deslice(SC, C, [index], [step], [1], MemorySpace.LM)
-
-    def _fake_getsource(_obj: object) -> str:
-        return """
-def add(A: "Tensor[f32, L]", B: "Tensor[f32, L]", C: "Tensor[f32, L]", end: int, start: int, step: int):
-    for index in LoopRange(start, end, step):
-        SA = slice(A, [index], [step], [1], MemorySpace.LM)
-        SB = slice(B, [index], [step], [1], MemorySpace.LM)
-        SC = SA + SB
-        deslice(SC, C, [index], [step], [1], MemorySpace.LM)
-"""
 
     monkeypatch.setitem(add.__globals__, "A", A)
     monkeypatch.setitem(add.__globals__, "B", B)
@@ -1033,7 +1059,6 @@ def add(A: "Tensor[f32, L]", B: "Tensor[f32, L]", C: "Tensor[f32, L]", end: int,
     monkeypatch.setitem(add.__globals__, "slice", slice)
     monkeypatch.setitem(add.__globals__, "deslice", deslice)
     monkeypatch.setitem(add.__globals__, "LoopRange", LoopRange)
-    monkeypatch.setattr(inspect, "getsource", _fake_getsource)
     monkeypatch.setattr(ast_visitor_module, "AstVisitor", RecordingAstVisitor)
 
     func_ast = parse_function(add)
@@ -1494,16 +1519,11 @@ def test_parse_function_infers_symboldim_arguments_without_annotations(monkeypat
     def loop_fn(start: int, end: int, step: int, x: "Tensor[f32, N]") -> "Tensor[f32, N]":
         return x
 
-    missing_annotation_source = """
-def loop_fn(start: int, end: int, step: int, x: "Tensor[f32, N]"):
+    missing_annotation_source = '''
+def loop_fn(start, end, step, x: "Tensor[f32, N]") -> "Tensor[f32, N]":
     return x
-"""
-
-    def _fake_getsource(_obj: object) -> str:
-        return missing_annotation_source
-
-    monkeypatch.setattr(inspect, "getsource", _fake_getsource)
-
+'''
+    monkeypatch.setattr(inspect, "getsource", lambda _obj: missing_annotation_source)
     monkeypatch.setitem(loop_fn.__globals__, "start", SymbolDim("start"))
     monkeypatch.setitem(loop_fn.__globals__, "end", SymbolDim("end"))
     monkeypatch.setitem(loop_fn.__globals__, "step", SymbolDim("step"))
@@ -1535,28 +1555,18 @@ def test_build_func_op_supports_symbolic_for_loop_dma_without_return(monkeypatch
     step = SymbolDim("step")
 
     def add(
-        A: object,
-        B: object,
-        C: object,
+        A: "Tensor[f32, L]",
+        B: "Tensor[f32, L]",
+        C: "Tensor[f32, L]",
         end: int,
         start: int,
         step: int,
-    ) -> object:
+    ):
         for index in LoopRange(start, end, step):
             SA = slice(A, [index], [step], [1], MemorySpace.LM)
             SB = slice(B, [index], [step], [1], MemorySpace.LM)
             SC = SA + SB
             deslice(SC, C, [index], [step], [1], MemorySpace.LM)
-
-    def _fake_getsource(_obj: object) -> str:
-        return """
-def add(A: "Tensor[f32, L]", B: "Tensor[f32, L]", C: "Tensor[f32, L]", end: int, start: int, step: int):
-    for index in LoopRange(start, end, step):
-        SA = slice(A, [index], [step], [1], MemorySpace.LM)
-        SB = slice(B, [index], [step], [1], MemorySpace.LM)
-        SC = SA + SB
-        deslice(SC, C, [index], [step], [1], MemorySpace.LM)
-"""
 
     monkeypatch.setitem(add.__globals__, "A", A)
     monkeypatch.setitem(add.__globals__, "B", B)
@@ -1568,7 +1578,6 @@ def add(A: "Tensor[f32, L]", B: "Tensor[f32, L]", C: "Tensor[f32, L]", end: int,
     monkeypatch.setitem(add.__globals__, "slice", slice)
     monkeypatch.setitem(add.__globals__, "deslice", deslice)
     monkeypatch.setitem(add.__globals__, "LoopRange", LoopRange)
-    monkeypatch.setattr(inspect, "getsource", _fake_getsource)
 
     func_op = build_func_op(add, A, B, C, end, start, step)
     assert isinstance(func_op, func.FuncOp)
