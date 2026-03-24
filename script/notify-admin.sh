@@ -29,6 +29,7 @@ readonly RC_INTERNAL=5
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 TMUX_SCRIPT="$REPO_ROOT/skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh"
+LIST_SCRIPT="$REPO_ROOT/skills/codex-multi-agents/scripts/codex-multi-agents-list.sh"
 
 # -----------------------------
 # 可直接修改的配置区
@@ -49,6 +50,8 @@ read -r -d '' MESSAGE <<'EOF' || true
 推进任务，直到任务全部完成，要求用脚本回报信息，回报后继续任务。
 EOF
 
+MODE="loop"
+
 err() {
   local code="$1"
   shift
@@ -60,6 +63,7 @@ usage() {
   cat <<'EOF'
 Usage:
   notify-admin.sh
+  notify-admin.sh -init
 EOF
 }
 
@@ -75,6 +79,10 @@ log_path() {
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      -init)
+        MODE="init"
+        shift
+        ;;
       -h|--help)
         usage
         exit "$RC_OK"
@@ -86,18 +94,23 @@ parse_args() {
   done
 }
 
-validate_config() {
+validate_common_config() {
+  [[ -n "$TO_NAME" ]] || err "$RC_DATA" "TO_NAME is required"
+  [[ -n "$AGENTS_LIST_FILE" ]] || err "$RC_DATA" "AGENTS_LIST_FILE is required"
+  [[ -x "$LIST_SCRIPT" ]] || err "$RC_FILE" "agents list script is not executable: $LIST_SCRIPT"
+  [[ -f "$(log_path "$AGENTS_LIST_FILE")" ]] || err "$RC_FILE" "agents list not found: $(log_path "$AGENTS_LIST_FILE")"
+}
+
+validate_loop_config() {
+  validate_common_config
   [[ -n "$INTERVAL_SECONDS" ]] || err "$RC_DATA" "INTERVAL_SECONDS is required"
   [[ "$INTERVAL_SECONDS" =~ ^[0-9]+$ ]] || err "$RC_DATA" "INTERVAL_SECONDS must be a positive integer"
   [[ "$INTERVAL_SECONDS" -gt 0 ]] || err "$RC_DATA" "INTERVAL_SECONDS must be greater than 0"
   [[ -n "$FROM_NAME" ]] || err "$RC_DATA" "FROM_NAME is required"
-  [[ -n "$TO_NAME" ]] || err "$RC_DATA" "TO_NAME is required"
-  [[ -n "$AGENTS_LIST_FILE" ]] || err "$RC_DATA" "AGENTS_LIST_FILE is required"
   [[ -n "$LOG_FILE" ]] || err "$RC_DATA" "LOG_FILE is required"
   [[ -n "$MESSAGE" ]] || err "$RC_DATA" "MESSAGE is required"
 
   [[ -x "$TMUX_SCRIPT" ]] || err "$RC_FILE" "tmux script is not executable: $TMUX_SCRIPT"
-  [[ -f "$(log_path "$AGENTS_LIST_FILE")" ]] || err "$RC_FILE" "agents list not found: $(log_path "$AGENTS_LIST_FILE")"
 
   mkdir -p "$(dirname "$(log_path "$LOG_FILE")")" || err "$RC_FILE" "failed to create log directory"
 }
@@ -116,9 +129,17 @@ send_once() {
     -log "$(log_path "$LOG_FILE")"
 }
 
+run_init() {
+  validate_common_config
+  bash "$LIST_SCRIPT" \
+    -file "$(log_path "$AGENTS_LIST_FILE")" \
+    -init \
+    -name "$TO_NAME"
+}
+
 main_loop() {
   while true; do
-    validate_config
+    validate_loop_config
     send_once
     sleep "$INTERVAL_SECONDS" || err "$RC_INTERNAL" "sleep failed"
   done
@@ -127,6 +148,10 @@ main_loop() {
 main() {
   parse_args "$@"
   trap cleanup INT TERM
+  if [[ "$MODE" == "init" ]]; then
+    run_init
+    exit "$RC_OK"
+  fi
   main_loop
 }
 
