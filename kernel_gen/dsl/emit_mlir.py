@@ -60,6 +60,7 @@ from kernel_gen.dialect.symbol import (
     SymbolMulOp,
     SymbolSubOp,
     SymbolValueType,
+    build_public_symbol_expr,
 )
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.type import NumericType
@@ -555,7 +556,7 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
                 "div": "/",
                 "floordiv": "//",
             }[expr.op]
-            result_type = SymbolValueType.from_expr(f"{lhs_expr} {op_symbol} {rhs_expr}")
+            result_type = SymbolValueType.from_expr(build_public_symbol_expr(lhs_expr, rhs_expr, op_symbol))
             type_map[expr_key] = result_type
             return result_type
         if not isinstance(lhs_type, NnMemoryType) or not isinstance(rhs_type, NnMemoryType):

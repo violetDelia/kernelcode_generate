@@ -344,14 +344,25 @@ def test_nn_floordiv_rules() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-22 14:33:34 +0800
 # 最近一次运行成功时间: 2026-03-22 14:33:34 +0800
-# 测试目的: 验证纯标量输入抛 TypeError。
+# 测试目的: 验证逐元素算术包装在纯标量输入下复用 Python/SymbolDim 算术语义，并保持非法标量类型报错。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_scalar_only_error
 # 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_scalar_only_error() -> None:
+    symbol = SymbolDim("N")
+
+    assert add(1, 2) == 3
+    assert sub(5, 2) == 3
+    assert truediv(6, 3) == 2.0
+    assert floordiv(7, 3) == 2
+    assert add(1, symbol).get_value() == "N + 1"
+    assert sub(5, symbol).get_value() == "5 - N"
+    assert mul(2, symbol).get_value() == "2*N"
+    assert floordiv(7, symbol).get_value() == "floor(7/N)"
+
     with pytest.raises(TypeError):
-        _ = add(1, 2)
+        _ = add("lhs", "rhs")
 
 
 # OP-012

@@ -654,6 +654,7 @@ def _parse_dma_call(
     功能说明:
     - 将 `slice(...)` 解析为 `LoadAST`。
     - 将 `deslice(...)` 解析为 `StoreAST`。
+    - 将 `nn.add/sub/mul/truediv/floordiv(...)` 解析为对应的 `BinaryExprAST`。
 
     使用示例:
     - _parse_dma_call(py_ast.parse("slice(A, [i], [n])").body[0].value, env, globals(), __builtins__)
@@ -663,6 +664,33 @@ def _parse_dma_call(
     - test: test/dsl/test_ast_visitor.py
     - 功能实现: kernel_gen/dsl/ast.py
     """
+
+    if isinstance(expr.func, py_ast.Attribute):
+        if isinstance(expr.func.value, py_ast.Name):
+            base_object = _lookup_python_name(expr.func.value.id, globals_table, builtins_table)
+        elif isinstance(expr.func.value, py_ast.Attribute):
+            base_object = _parse_attribute_object(expr.func.value, globals_table, builtins_table)
+        else:
+            _raise_parse_error("Unsupported call expression", expr)
+        symbol_binary_map = {
+            "add": "add",
+            "sub": "sub",
+            "mul": "mul",
+            "truediv": "div",
+            "floordiv": "floordiv",
+        }
+        if getattr(base_object, "__name__", None) == "kernel_gen.operation.nn" and expr.func.attr in symbol_binary_map:
+            if len(expr.args) != 2 or expr.keywords:
+                _raise_parse_error("Unsupported nn arithmetic arity", expr)
+            lhs = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+            rhs = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+            return BinaryExprAST(
+                op=symbol_binary_map[expr.func.attr],
+                lhs=lhs,
+                rhs=rhs,
+                location=_location_from_node(expr),
+            )
+        _raise_parse_error("Unsupported call expression", expr)
 
     if not isinstance(expr.func, py_ast.Name):
         _raise_parse_error("Unsupported call expression", expr)

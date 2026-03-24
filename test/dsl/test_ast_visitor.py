@@ -117,6 +117,7 @@ from kernel_gen.dsl.mlir_gen import (
 )
 from kernel_gen.dsl import mlir_gen as mlir_gen_module
 from kernel_gen.dsl import ast_visitor as ast_visitor_module
+import kernel_gen.operation.nn as nn
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
@@ -866,38 +867,57 @@ def test_symbol_scalar_function_uses_symbol_value_type_signature() -> None:
 
 # MGEN-018 / MGEN-021 / MGEN-022 / MGEN-023 / MGEN-024
 # 创建者: OpenAI
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-25 03:06:30 +0800
-# 最近一次运行成功时间: 2026-03-25 03:06:30 +0800
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-25 04:33:06 +0800
+# 最近一次运行成功时间: 2026-03-25 04:33:06 +0800
 # 功能说明: 验证纯 symbol 标量算术 lowering 为对应的 symbol dialect op。
 # 测试目的: 验证纯 symbol 标量加减乘除在静态、动态与混合输入下不会退回 nn dialect 或 builtin 整数算术。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_symbol_scalar_function_lowers_symbol_binary_ops
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
+@pytest.mark.parametrize("style", ["python", "nn"])
 @pytest.mark.parametrize(
-    ("name", "operator_token", "builder", "runtime_args", "expected_result"),
+    ("name", "operator_token", "builder", "runtime_args"),
     [
-        ("add", "symbol.add", SymbolAddOp, (SymbolDim("s"), SymbolDim("t")), SymbolValueType.from_expr("s + t")),
-        ("sub", "symbol.sub", SymbolSubOp, (SymbolDim("s"), 3), SymbolValueType.from_expr("s - 3")),
-        ("mul", "symbol.mul", SymbolMulOp, (2, SymbolDim("t")), SymbolValueType.from_expr("2 * t")),
-        ("truediv", "symbol.div", SymbolDivOp, (SymbolDim("s"), SymbolDim("t")), SymbolValueType.from_expr("s / t")),
-        ("truediv", "symbol.div", SymbolDivOp, (6, 3), SymbolValueType.from_expr("2")),
-        ("truediv", "symbol.div", SymbolDivOp, (6, SymbolDim("N")), SymbolValueType.from_expr("6 / N")),
-        ("truediv", "symbol.div", SymbolDivOp, (SymbolDim("M"), 3), SymbolValueType.from_expr("M / 3")),
-        ("floordiv", "symbol.floordiv", SymbolFloorDivOp, (7, 3), SymbolValueType.from_expr("2")),
-        ("floordiv", "symbol.floordiv", SymbolFloorDivOp, (SymbolDim("M"), SymbolDim("N")), SymbolValueType.from_expr("M // N")),
-        ("floordiv", "symbol.floordiv", SymbolFloorDivOp, (7, SymbolDim("N")), SymbolValueType.from_expr("7 // N")),
-        ("floordiv", "symbol.floordiv", SymbolFloorDivOp, (SymbolDim("M"), 3), SymbolValueType.from_expr("M // 3")),
+        ("add", "symbol.add", SymbolAddOp, (4, 5)),
+        ("add", "symbol.add", SymbolAddOp, (SymbolDim("s"), SymbolDim("t"))),
+        ("add", "symbol.add", SymbolAddOp, (4, SymbolDim("t"))),
+        ("add", "symbol.add", SymbolAddOp, (SymbolDim("s"), 5)),
+        ("sub", "symbol.sub", SymbolSubOp, (9, 4)),
+        ("sub", "symbol.sub", SymbolSubOp, (SymbolDim("s"), SymbolDim("t"))),
+        ("sub", "symbol.sub", SymbolSubOp, (9, SymbolDim("t"))),
+        ("sub", "symbol.sub", SymbolSubOp, (SymbolDim("s"), 4)),
+        ("mul", "symbol.mul", SymbolMulOp, (3, 4)),
+        ("mul", "symbol.mul", SymbolMulOp, (SymbolDim("s"), SymbolDim("t"))),
+        ("mul", "symbol.mul", SymbolMulOp, (3, SymbolDim("t"))),
+        ("mul", "symbol.mul", SymbolMulOp, (SymbolDim("s"), 4)),
+        ("truediv", "symbol.div", SymbolDivOp, (6, 3)),
+        ("truediv", "symbol.div", SymbolDivOp, (SymbolDim("s"), SymbolDim("t"))),
+        ("truediv", "symbol.div", SymbolDivOp, (6, SymbolDim("t"))),
+        ("truediv", "symbol.div", SymbolDivOp, (SymbolDim("s"), 3)),
+        ("floordiv", "symbol.floordiv", SymbolFloorDivOp, (7, 3)),
+        ("floordiv", "symbol.floordiv", SymbolFloorDivOp, (SymbolDim("s"), SymbolDim("t"))),
+        ("floordiv", "symbol.floordiv", SymbolFloorDivOp, (7, SymbolDim("t"))),
+        ("floordiv", "symbol.floordiv", SymbolFloorDivOp, (SymbolDim("s"), 3)),
     ],
 )
 def test_symbol_scalar_function_lowers_symbol_binary_ops(
+    style: str,
     name: str,
     operator_token: str,
     builder: type[object],
     runtime_args: tuple[object, object],
-    expected_result: SymbolValueType,
 ) -> None:
+    def normalize_runtime_value(value: object) -> int | str:
+        if isinstance(value, SymbolDim):
+            return value.get_value()
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        if isinstance(value, (int, str)):
+            return value
+        raise TypeError(f"Unsupported runtime result type: {type(value)!r}")
+
     def add(lhs: int, rhs: int) -> int:
         return lhs + rhs
 
@@ -913,20 +933,55 @@ def test_symbol_scalar_function_lowers_symbol_binary_ops(
     def floordiv(lhs: int, rhs: int) -> int:
         return lhs // rhs
 
-    functions: dict[str, object] = {
-        "add": add,
-        "sub": sub,
-        "mul": mul,
-        "truediv": truediv,
-        "floordiv": floordiv,
+    def add_nn(lhs: int, rhs: int) -> int:
+        return nn.add(lhs, rhs)
+
+    def sub_nn(lhs: int, rhs: int) -> int:
+        return nn.sub(lhs, rhs)
+
+    def mul_nn(lhs: int, rhs: int) -> int:
+        return nn.mul(lhs, rhs)
+
+    def truediv_nn(lhs: int, rhs: int) -> int:
+        return nn.truediv(lhs, rhs)
+
+    def floordiv_nn(lhs: int, rhs: int) -> int:
+        return nn.floordiv(lhs, rhs)
+
+    functions: dict[tuple[str, str], object] = {
+        ("python", "add"): add,
+        ("python", "sub"): sub,
+        ("python", "mul"): mul,
+        ("python", "truediv"): truediv,
+        ("python", "floordiv"): floordiv,
+        ("nn", "add"): add_nn,
+        ("nn", "sub"): sub_nn,
+        ("nn", "mul"): mul_nn,
+        ("nn", "truediv"): truediv_nn,
+        ("nn", "floordiv"): floordiv_nn,
     }
 
-    func_op = build_func_op(functions[name], *runtime_args)
+    func_op = build_func_op(functions[(style, name)], *runtime_args)
+    runtime_result = normalize_runtime_value(functions[(style, name)](*runtime_args))
+    expected_result = SymbolValueType.from_expr(str(runtime_result))
+    arg_types = [arg.type for arg in func_op.args]
+    expected_arg_types = [
+        SymbolValueType.from_expr(str(value.get_value()) if isinstance(value, SymbolDim) else str(value))
+        for value in runtime_args
+    ]
+    assert arg_types == expected_arg_types
     ops = list(func_op.body.blocks[0].ops)
     symbol_ops = [op for op in ops if isinstance(op, builder)]
+    return_ops = [op for op in ops if isinstance(op, func.ReturnOp)]
     assert len(symbol_ops) == 1
+    assert len(return_ops) == 1
     assert symbol_ops[0].result.type == expected_result
+    assert symbol_ops[0].result.type.get_value() == runtime_result
+    assert len(return_ops[0].arguments) == 1
+    assert return_ops[0].arguments[0].type == expected_result
+    assert return_ops[0].arguments[0].type.get_value() == runtime_result
     assert list(func_op.function_type.outputs) == [expected_result]
+    assert func_op.function_type.outputs.data[0].get_value() == runtime_result
     assert operator_token in _print_module(ModuleOp([func_op]))
 
 
@@ -1438,13 +1493,16 @@ def test_parse_function_infers_symboldim_arguments_without_annotations(monkeypat
     def loop_fn(start: int, end: int, step: int, x: "Tensor[f32, N]") -> "Tensor[f32, N]":
         return x
 
+    def fake_getsource(_obj: object) -> str:
+        return """
+def loop_fn(start, end, step, x: "Tensor[f32, N]"):
+    return x
+"""
+
     monkeypatch.setattr(
         inspect,
         "getsource",
-        lambda _obj: """
-def loop_fn(start, end, step, x: "Tensor[f32, N]"):
-    return x
-""",
+        fake_getsource,
     )
     monkeypatch.setitem(loop_fn.__globals__, "start", SymbolDim("start"))
     monkeypatch.setitem(loop_fn.__globals__, "end", SymbolDim("end"))

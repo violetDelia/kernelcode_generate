@@ -23,6 +23,7 @@ import re
 from collections.abc import Sequence
 from typing import ClassVar
 
+import sympy as sp
 from xdsl.dialects.builtin import IntAttr, StringAttr, f32, i1
 from xdsl.ir import Attribute, Block, Dialect, Operation, ParametrizedAttribute, Region, SSAValue, TypeAttribute
 from xdsl.irdl import (
@@ -42,9 +43,11 @@ from xdsl.traits import NoTerminator
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import NnMemoryType
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
+_SYMBOL_TOKEN_PATTERN = r"(?:[A-Za-z_][A-Za-z0-9_]*|[+-]?[0-9]+)"
 _SYMBOL_EXPR_PATTERN = re.compile(
-    r"^(?:[A-Za-z_][A-Za-z0-9_]*|[+-]?[0-9]+)(?:\s*(?://|[+\-*/])\s*(?:[A-Za-z_][A-Za-z0-9_]*|[+-]?[0-9]+))*$"
+    rf"^(?:{_SYMBOL_TOKEN_PATTERN}(?:\s*(?://|[+\-*/])\s*{_SYMBOL_TOKEN_PATTERN})*|floor\(\s*{_SYMBOL_TOKEN_PATTERN}\s*/\s*{_SYMBOL_TOKEN_PATTERN}\s*\))$"
 )
 
 
@@ -126,6 +129,182 @@ def _evaluate_concrete_expr(expr: str) -> int | None:
         return _eval(parsed)
     except ValueError:
         return None
+
+
+def _make_symbol_runtime_value(expr: str) -> int | SymbolDim:
+    """将公开 symbol 表达解析为运行时可比较值。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 以 `SymbolDim` 的运行时算术语义解释 `+/-/*///` 与 `floor(...)`。
+    - 对纯常量表达直接返回 `int`；对符号表达返回 `SymbolDim`。
+
+    使用示例:
+    - _make_symbol_runtime_value("4 + N")
+
+    关联文件:
+    - spec: spec/dsl/mlir_gen.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    concrete_value = _evaluate_concrete_expr(expr)
+    if concrete_value is not None:
+        return concrete_value
+
+    try:
+        parsed = py_ast.parse(expr, mode="eval")
+    except SyntaxError:
+        symbol_names = {
+            name
+            for name in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", expr)
+            if name != "floor"
+        }
+        locals_map = {name: sp.Symbol(name, integer=True, real=True) for name in symbol_names}
+        locals_map["floor"] = sp.floor
+        parsed_expr = sp.sympify(expr, locals=locals_map, evaluate=False)
+        concrete_value = _evaluate_concrete_expr(str(parsed_expr))
+        return concrete_value if concrete_value is not None else SymbolDim(parsed_expr)
+
+    def _eval(node: py_ast.AST) -> int | SymbolDim:
+        if isinstance(node, py_ast.Expression):
+            return _eval(node.body)
+        if isinstance(node, py_ast.Constant) and isinstance(node.value, int):
+            return int(node.value)
+        if isinstance(node, py_ast.Name):
+            return SymbolDim(node.id)
+        if isinstance(node, py_ast.UnaryOp) and isinstance(node.op, py_ast.UAdd):
+            return _eval(node.operand)
+        if isinstance(node, py_ast.UnaryOp) and isinstance(node.op, py_ast.USub):
+            operand = _eval(node.operand)
+            return -operand if isinstance(operand, int) else 0 - operand
+        if isinstance(node, py_ast.BinOp):
+            lhs = _eval(node.left)
+            rhs = _eval(node.right)
+            if isinstance(node.op, py_ast.Add):
+                return lhs + rhs
+            if isinstance(node.op, py_ast.Sub):
+                return lhs - rhs
+            if isinstance(node.op, py_ast.Mult):
+                return lhs * rhs
+            if isinstance(node.op, py_ast.Div):
+                return lhs / rhs
+            if isinstance(node.op, py_ast.FloorDiv):
+                return lhs // rhs
+        if isinstance(node, py_ast.Call):
+            if (
+                isinstance(node.func, py_ast.Name)
+                and node.func.id == "floor"
+                and not node.keywords
+                and len(node.args) == 1
+            ):
+                arg_value = _eval(node.args[0])
+                if isinstance(arg_value, int):
+                    return arg_value
+                return SymbolDim(sp.floor(arg_value.get_symbol()))
+        raise ValueError("unsupported public symbol expression")
+
+    return _eval(parsed)
+
+
+def _canonicalize_symbolic_expr(expr: str) -> str:
+    """生成对外比较用的稳定符号表达文本。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 基于 `SymbolDim` 运行时语义生成公开比较文本。
+
+    使用示例:
+    - _canonicalize_symbolic_expr("4 + N")
+
+    关联文件:
+    - spec: spec/dsl/mlir_gen.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    value = _make_symbol_runtime_value(expr)
+    return str(value if isinstance(value, int) else value.get_value())
+
+
+def build_public_symbol_expr(lhs_expr: str, rhs_expr: str, op_symbol: str) -> str:
+    """按运行时 symbol 语义构造公开表达文本。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 统一收敛 lowering 结果类型上的公开 `symbol.int<expr>` 文本。
+
+    使用示例:
+    - build_public_symbol_expr("N", "4", "*")
+
+    关联文件:
+    - spec: spec/dsl/mlir_gen.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    value = _make_symbol_runtime_value(f"{lhs_expr} {op_symbol} {rhs_expr}")
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    if isinstance(value, int):
+        return str(value)
+    return str(value.get_value())
+
+
+def _is_supported_symbol_expr(expr: str) -> bool:
+    """判断符号表达是否属于当前 dialect 支持的最小语法。 
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 允许整数常量、标识符、一元 `+/-`、二元 `+/-/*///` 与 `floor(...)`。
+    - 用于替代纯正则匹配，接受 SymPy 规范化后的 `-N + M`、`floor(7/N)` 等公开文本。
+
+    使用示例:
+    - _is_supported_symbol_expr("-N + M")
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/dialect/test_symbol_dialect.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    try:
+        parsed = py_ast.parse(expr, mode="eval")
+    except SyntaxError:
+        return False
+
+    def _check(node: py_ast.AST) -> bool:
+        if isinstance(node, py_ast.Expression):
+            return _check(node.body)
+        if isinstance(node, py_ast.Name):
+            return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", node.id))
+        if isinstance(node, py_ast.Constant):
+            return isinstance(node.value, int)
+        if isinstance(node, py_ast.UnaryOp):
+            return isinstance(node.op, (py_ast.UAdd, py_ast.USub)) and _check(node.operand)
+        if isinstance(node, py_ast.BinOp):
+            return isinstance(node.op, (py_ast.Add, py_ast.Sub, py_ast.Mult, py_ast.Div, py_ast.FloorDiv)) and _check(
+                node.left
+            ) and _check(node.right)
+        if isinstance(node, py_ast.Call):
+            return (
+                isinstance(node.func, py_ast.Name)
+                and node.func.id == "floor"
+                and not node.keywords
+                and len(node.args) == 1
+                and _check(node.args[0])
+            )
+        return False
+
+    return _check(parsed)
 
 
 def _verify_axis(axis: Attribute, rank: int, op_name: str) -> int:
@@ -266,8 +445,8 @@ class SymbolExprAttr(ParametrizedAttribute):
         expr = _normalize_expr(self.expr.data)
         if not expr:
             raise VerifyException("symbol expr must not be empty")
-        if not _SYMBOL_EXPR_PATTERN.fullmatch(expr):
-            raise VerifyException("symbol expr must contain identifiers, integers, spaces, +, - or *")
+        if not _is_supported_symbol_expr(expr):
+            raise VerifyException("symbol expr must contain identifiers, integers, +, -, *, /, // or floor(...)")
 
     @classmethod
     def from_expr(cls: type["SymbolExprAttr"], expr: str) -> "SymbolExprAttr":
@@ -346,7 +525,7 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
 
         expr = _normalize_expr(self.expr.expr.data)
         concrete_value = _evaluate_concrete_expr(expr)
-        return concrete_value if concrete_value is not None else expr
+        return concrete_value if concrete_value is not None else _canonicalize_symbolic_expr(expr)
 
     def is_symbol(self: "SymbolValueType") -> bool:
         """判断当前值是否为非字面量符号表达。

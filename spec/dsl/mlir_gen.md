@@ -11,7 +11,7 @@
 - 创建者：`榕`
 - 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
-- `功能实现`：[`kernel_gen/dsl/mlir_gen.py`](../../kernel_gen/dsl/mlir_gen.py)、[`python/dsl/mlir_gen.py`](../../python/dsl/mlir_gen.py)（统一规范覆盖两条实现入口）
+- `功能实现`：[`kernel_gen/dsl/mlir_gen.py`](../../kernel_gen/dsl/mlir_gen.py)
 - `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
 
 ## 依赖
@@ -88,6 +88,7 @@ func_op = build_func_op(only_symbol, s)
 - 允许 `for` 循环内包含 `dma.slice`/`dma.deslice` 相关语义；当循环来自 `LoopRange` 且边界为 symbol 整数时，必须保留 `symbol.for` 结构，且迭代变量 `it` 不能退化为 `index`、`i32`、浮点或其他非 `SymbolValueType`。
 - 当函数场景为纯 symbol 标量函数时，输入参数与返回值都必须 lowering 为 `!symbol.int<"expr">`。
 - 当函数场景为纯 symbol 整型标量算术时，函数体中的 `+`、`-`、`*`、`/`、`//` 必须分别 lowering 为 `symbol.add`、`symbol.sub`、`symbol.mul`、`symbol.div`、`symbol.floordiv`，且结果类型保持为 `SymbolValueType`。
+- 当函数体使用 `kernel_gen.operation.nn.add/sub/mul/truediv/floordiv` 包装同一组纯 symbol 整型标量算术时，lowering 结果必须与直接使用 Python 二元运算保持一致；`const/symbol` 与 `symbol/const` 的操作数顺序必须在结果表达式文本中原样保留。
 - 纯 symbol 标量函数的参数/返回类型必须复用 `spec/dialect/symbol.md` 中定义的 `SymbolValueType`，不能退回 builtin 整数类型。
 - `LoopRange` 场景中传给 `dma.slice` / `dma.deslice` 的标量 operand 必须直接复用 `!symbol.int<"expr">` value，不允许通过 `arith.index_cast` 做中间桥接。
 
@@ -139,7 +140,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
 ## 测试
 
 - 测试文件：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
-- 执行命令：`pytest -q test/dsl/test_ast_visitor.py -k 'test_build_func_op or test_visit_to_nn_ir_builds_module or test_emit_mlir_output or test_scalar_arg_lowering_in_signature or test_build_func_op_signature_uses_runtime_args_not_parse_env or test_symbol_scalar_function_uses_symbol_value_type_signature or test_symbol_scalar_function_lowers_add_to_symbol_add or test_invalid_tensor_return_annotation_reports_diagnostics or test_constant_lowering_reports_diagnostics or test_return_type_mismatch_reports_diagnostics or test_multi_statement_ssa_order_and_reuse or test_build_func_op_supports_symbolic_for_loop_dma_without_return or test_tensor_binary_implicit_broadcast_lowering or test_tensor_binary_prepend_broadcast_lowering or test_compare_implicit_broadcast_lowering or test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics or test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type or test_build_func_op_globals_and_builtins_cannot_replace_runtime_args or test_mlir_gen_build_func_op_builtins_and_parse_error or test_mlir_gen_signature_validation_errors'`
+- 执行命令：`pytest -q test/dsl/test_ast_visitor.py -k 'test_build_func_op or test_visit_to_nn_ir_builds_module or test_emit_mlir_output or test_scalar_arg_lowering_in_signature or test_build_func_op_signature_uses_runtime_args_not_parse_env or test_symbol_scalar_function_uses_symbol_value_type_signature or test_symbol_scalar_function_lowers_symbol_binary_ops or test_invalid_tensor_return_annotation_reports_diagnostics or test_constant_lowering_reports_diagnostics or test_return_type_mismatch_reports_diagnostics or test_multi_statement_ssa_order_and_reuse or test_build_func_op_supports_symbolic_for_loop_dma_without_return or test_tensor_binary_implicit_broadcast_lowering or test_tensor_binary_prepend_broadcast_lowering or test_compare_implicit_broadcast_lowering or test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics or test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type or test_build_func_op_globals_and_builtins_cannot_replace_runtime_args or test_mlir_gen_build_func_op_builtins_and_parse_error or test_mlir_gen_signature_validation_errors'`
 - 测试目标：
   - 验证 `build_func_op(...)` 生成 `func.func`。
   - 验证 `build_func_op(fn, *runtime_args, globals=None, builtins=None)` 的输入签名仅由运行时参数决定。
@@ -152,7 +153,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - 通过测试辅助封装验证 `func.func` 的结构输出（不改变本模块的边界）。
   - 覆盖无返回 `for` 循环与 `slice/deslice` 的生成能力，并要求 `LoopRange` lowering 为 `symbol.for`，且循环迭代变量 `it` 保持 `!symbol.int<"...">`。
   - 验证纯 symbol 函数场景会生成 `!symbol.int<"...">` 输入与 `!symbol.int<"...">` 返回。
-  - 验证纯 symbol 标量算术在 lowering 后生成 `symbol.add/sub/mul/div/floordiv`，不退回 builtin 算术或其他 dialect op。
+  - 验证纯 symbol 标量算术在 lowering 后生成 `symbol.add/sub/mul/div/floordiv`，不退回 builtin 算术或其他 dialect op；直接 Python 二元运算与 `kernel_gen.operation.nn` 对应包装必须共享同一 lowering 结果。
   - 验证整型标量函数场景中，`build_func_op(add, lhs, rhs)` 会把 Python `int` 实参 lowering 为携带具体整数值的 `SymbolValueType` 输入，并生成 `symbol.add` 结果。
   - 验证负数 Python `int` 实参不会导致 lowering 失败；负值的 `SymbolValueType.__str__` 必须保持 `symbol.int<-3>` 这类十进制负数字面量口径，且 `get_value()` 可还原原始负数值。
   - 验证 `LoopRange + slice/deslice` 场景生成 `symbol.for + dma.slice/dma.deslice`，且循环相关 lowering 不生成 `arith.index_cast`。
@@ -178,10 +179,10 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - MGEN-015：`LoopRange + slice/deslice + 无 return` 场景生成 `symbol.for + dma.slice/dma.deslice`，且循环迭代变量 `it` 与 DMA operand 直接保持 `!symbol.int<"...">`，不生成 `arith.index_cast`。（`test_build_func_op_supports_symbolic_for_loop_dma_without_return`）
   - MGEN-016：纯 symbol 函数参数 lowering 为 `func.func` 的 `!symbol.int<"...">` 输入。（`test_symbol_scalar_function_uses_symbol_value_type_signature`）
   - MGEN-017：纯 symbol 函数返回 lowering 为 `func.func` 的 `!symbol.int<"...">` 输出。（`test_symbol_scalar_function_uses_symbol_value_type_signature`）
-  - MGEN-018：纯 symbol 标量加法 lowering 为 `symbol.add`。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
-  - MGEN-021：纯 symbol 标量减法 lowering 为 `symbol.sub`。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
-  - MGEN-022：纯 symbol 标量乘法 lowering 为 `symbol.mul`。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
-  - MGEN-023：纯 symbol 标量除法 lowering 为 `symbol.div`；`const/const` 输入按静态整除结果收敛为常量整数，动态表达式在 `symbol/symbol`、`const/symbol`、`symbol/const` 输入下分别保持 `/` 文本。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
-  - MGEN-024：纯 symbol 标量整除 lowering 为 `symbol.floordiv`；`const/const` 输入按 Python `//` 语义收敛，动态表达式在 `symbol/symbol`、`const/symbol`、`symbol/const` 输入下保持 `//` 文本。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
+  - MGEN-018：纯 symbol 标量加法 lowering 为 `symbol.add`；直接 Python `+` 与 `nn.add(...)` 包装在 `const/const`、`symbol/symbol`、`const/symbol`、`symbol/const` 四类输入下必须保持一致；比较公开结果时以 `SymbolValueType.get_value()` 与对应 Python/SymbolDim 运行时结果一致为准。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
+  - MGEN-021：纯 symbol 标量减法 lowering 为 `symbol.sub`；直接 Python `-` 与 `nn.sub(...)` 包装在四类输入下必须保持一致；比较公开结果时以 `SymbolValueType.get_value()` 与对应 Python/SymbolDim 运行时结果一致为准。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
+  - MGEN-022：纯 symbol 标量乘法 lowering 为 `symbol.mul`；直接 Python `*` 与 `nn.mul(...)` 包装在四类输入下必须保持一致；比较公开结果时以 `SymbolValueType.get_value()` 与对应 Python/SymbolDim 运行时结果一致为准。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
+  - MGEN-023：纯 symbol 标量除法 lowering 为 `symbol.div`；直接 Python `/` 与 `nn.truediv(...)` 包装在四类输入下必须保持一致；`const/const` 输入按静态整除结果收敛为常量整数；比较公开结果时以 `SymbolValueType.get_value()` 与对应 Python/SymbolDim 运行时结果一致为准。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
+  - MGEN-024：纯 symbol 标量整除 lowering 为 `symbol.floordiv`；直接 Python `//` 与 `nn.floordiv(...)` 包装在四类输入下必须保持一致；`const/const` 输入按 Python `//` 语义收敛；比较公开结果时以 `SymbolValueType.get_value()` 与对应 Python/SymbolDim 运行时结果一致为准。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
   - MGEN-019：`build_func_op` 的运行时参数为必填，且公开契约仅覆盖 `fn + runtime_args` 的可位置绑定形参；省略实参、实参数量不匹配，或试图以 `globals/builtins` 替代时必须报错。（`test_build_func_op_requires_explicit_runtime_args`、`test_build_func_op_rejects_runtime_arg_count_mismatch`、`test_build_func_op_globals_and_builtins_cannot_replace_runtime_args`）
   - MGEN-020：`build_func_op(add, lhs, rhs)` 对普通 Python `int` runtime args 的 lowering 必须产出携带具体整数值的 `SymbolValueType` 输入；若实参包含负数，其对外字符串表示必须保持 `symbol.int<-3>` 这类十进制负数字面量口径，并在函数体内生成 `symbol.add` 结果。（`test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type`）

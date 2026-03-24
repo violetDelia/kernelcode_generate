@@ -1,0 +1,72 @@
+# 20260325-expectation-mlir-gen-symbol-arith-group-r2
+
+- 时间：2026-03-25 04:26:29 +0800
+- 执行人：金铲铲大作战
+- 经办人：金铲铲大作战
+- 任务：T-20260325-157e25c9
+- 任务目标：以主工作目录 `expectation/dsl/mlir_gen/dialect/symbol/add.py`、`expectation/dsl/mlir_gen/dialect/symbol/sub.py`、`expectation/dsl/mlir_gen/dialect/symbol/mul.py`、`expectation/dsl/mlir_gen/dialect/symbol/truediv.py`、`expectation/dsl/mlir_gen/dialect/symbol/floordiv.py` 为唯一基线，核对并最小收敛对应 `spec/实现/测试`。
+- 改动：
+  - 只读核对后确认链路未闭环：`nn.add/sub/mul/truediv/floordiv` 纯 symbol 标量包装未与直接 Python 二元运算共享 lowering 结果，且 `SymbolValueType.get_value()` / lowering 结果类型文本在 `symbol/const`、`const/symbol`、`/`、`//` 场景下与 `SymbolDim` 运行时公开值不一致。
+  - 在 `kernel_gen/operation/nn.py` 增加纯标量算术调度，允许 `int/float/bool/SymbolDim` 走同一算术包装入口，不改 expectation。
+  - 在 `kernel_gen/dsl/ast.py` 支持将 `nn.add/sub/mul/truediv/floordiv(...)` 解析为 symbol `BinaryExprAST`。
+  - 在 `kernel_gen/dialect/symbol.py` 增加基于 `SymbolDim` 运行时语义的公开表达解析/格式化辅助逻辑，使 `build_public_symbol_expr(...)` 与 `SymbolValueType.get_value()` 对 `Q/1`、`4*s`、`s-4`、`floor(7/N)` 等场景输出与运行时一致，并保留 Python 文件参数类型提示完整性。
+  - 在 `kernel_gen/dsl/emit_mlir.py` 复用 `build_public_symbol_expr(...)` 统一 lowering 结果类型文本。
+  - 在 `spec/dsl/mlir_gen.md` 补充 MGEN-018/021/022/023/024 对直接 Python 二元运算与 `kernel_gen.operation.nn` 包装一致性的约束与测试映射。
+  - 在 `test/dsl/test_ast_visitor.py` 扩展 `test_symbol_scalar_function_lowers_symbol_binary_ops`，覆盖 add/sub/mul/truediv/floordiv 的 `const/const`、`symbol/symbol`、`const/symbol`、`symbol/const` 以及 `python/nn` 两种调用风格。
+  - 在 `test/operation/test_operation_nn.py` 将纯标量算术包装测试调整为验证纯标量支持与非法类型报错。
+- 结论：已完成最小收敛；五个 expectation 文件在保持只读前提下均通过，相关实现/测试闭环成立。建议下一阶段由审查角色基于同一记录文件做严格复审，重点核对 `spec/dsl/mlir_gen.md` 与 `kernel_gen/dialect/symbol.py` / `kernel_gen/operation/nn.py` / `test/dsl/test_ast_visitor.py` 的一一映射关系。
+- 验证：
+  - `PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260325-expectation-mlir-gen-symbol-arith-group-r2 python expectation/dsl/mlir_gen/dialect/symbol/add.py && .../sub.py && .../mul.py && .../truediv.py && .../floordiv.py`：通过
+  - `pytest -q test/dsl/test_ast_visitor.py`：`116 passed`
+  - `pytest -q test/operation/test_operation_nn.py`：`38 passed`
+  - `pytest -q test/dialect/test_symbol_dialect.py`：`36 passed`
+
+- 时间：2026-03-25 04:32:04 +0800
+- 执行人：小李飞刀
+- 经办人：小李飞刀
+- 任务：T-20260325-2ce60fc4
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-mlir-gen-symbol-arith-group-r2`，只读严格复审主工作目录 `expectation/dsl/mlir_gen/dialect/symbol/{add,sub,mul,truediv,floordiv}.py` 五文件与 `spec/dsl/mlir_gen.md`、`kernel_gen/dialect/symbol.py`、`kernel_gen/dsl/ast.py`、`kernel_gen/dsl/emit_mlir.py`、`kernel_gen/operation/nn.py`、`test/dsl/test_ast_visitor.py`、`test/operation/test_operation_nn.py` 的闭环，重点核对 expectation 只读状态、五文件语义证明完备性与 MGEN 映射。
+- 改动：
+  - 只读核对主工作目录与 worktree 中 `expectation/dsl/mlir_gen/dialect/symbol/{add,sub,mul,truediv,floordiv}.py`，五文件内容一致，expectation 保持只读未改。
+  - 复核 `spec/dsl/mlir_gen.md` 中 `MGEN-018`、`MGEN-021`、`MGEN-022`、`MGEN-023`、`MGEN-024` 均映射到 `test/dsl/test_ast_visitor.py::test_symbol_scalar_function_lowers_symbol_binary_ops`。
+  - 复核 `kernel_gen/dsl/ast.py` 已支持 Python 二元算术与 `nn.add/sub/mul/truediv/floordiv(...)` 统一解析到 `BinaryExprAST`，`kernel_gen/dsl/emit_mlir.py` 可分别 lowering 到 `symbol.add/sub/mul/div/floordiv`，`kernel_gen/operation/nn.py` 具备对应纯标量包装入口。
+  - 复核 `test/dsl/test_ast_visitor.py::test_symbol_scalar_function_lowers_symbol_binary_ops` 仅断言参数类型、目标 `symbol.*` op 存在、结果类型与打印文本；未覆盖 expectation 五文件共同要求的 `func.ReturnOp` 数量与返回操作数类型断言。
+  - 复核 `test/dsl/test_ast_visitor.py::test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type` 仅补充了 `add + const/const` 单一路径的 `ReturnOp` 断言，不能覆盖 `sub/mul/truediv/floordiv` 以及 `add` 的 `symbol/symbol`、`const/symbol`、`symbol/const` 与 `nn.*` 包装路径。
+- 结论：需修改。`expectation/dsl/mlir_gen/dialect/symbol/add.py:62-119`、`expectation/dsl/mlir_gen/dialect/symbol/sub.py:60-117`、`expectation/dsl/mlir_gen/dialect/symbol/truediv.py:60-117` 等五个 expectation 文件都把“函数体中恰有一个对应 `Symbol*Op`，且恰有一个 `ReturnOp` 返回相同公开类型”作为验收条件；但映射测试 `test/dsl/test_ast_visitor.py:905-980` 没有对 `ReturnOp` 做断言，现有测试只能证明输出类型签名，不足以完整证明 expectation 里的返回链路语义。建议创建最小改进任务，只修改 `test/dsl/test_ast_visitor.py`，为 `MGEN-018/021/022/023/024` 的参数化用例补齐 `func.ReturnOp` 数量与返回值类型断言，并保持 expectation 继续只读。
+
+- 时间：2026-03-25 04:34:08 +0800
+- 执行人：金铲铲大作战
+- 经办人：金铲铲大作战
+- 任务：T-20260325-3f4d94aa
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-mlir-gen-symbol-arith-group-r2`，只修改 `test/dsl/test_ast_visitor.py`，为 `MGEN-018/021/022/023/024` 对应的 symbol add/sub/mul/truediv/floordiv lowering 测试补齐 `ReturnOp` 数量与返回值类型断言，证明五个 expectation 文件的返回链路语义。
+- 改动：
+  - 仅修改 `test/dsl/test_ast_visitor.py` 中 `test_symbol_scalar_function_lowers_symbol_binary_ops`。
+  - 补充 `func.ReturnOp` 数量断言，要求每个参数化用例恰有一个 `ReturnOp`。
+  - 补充 `ReturnOp` 返回操作数数量、返回值类型与 `SymbolValueType.get_value()` 断言，使返回链路与对应 symbol op 结果、函数输出签名保持一致。
+  - 同步更新该测试函数头注释中的最后修改人与最近一次运行时间。
+- 结论：已完成最小补测；未修改 expectation/spec/实现文件，`MGEN-018/021/022/023/024` 对应五组 symbol lowering 测试现已显式证明 `ReturnOp` 返回链路语义。
+- 验证：
+  - `pytest -q test/dsl/test_ast_visitor.py`：`116 passed`
+
+- 时间：2026-03-25 04:40:25 +08:00
+- 执行人：不要啊教练
+- 经办人：不要啊教练
+- 任务：T-20260325-7164bd2c
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-mlir-gen-symbol-arith-group-r2`，只读最终严格复审主工作目录 `expectation/dsl/mlir_gen/dialect/symbol/{add,sub,mul,truediv,floordiv}.py` 五文件与 `spec/dsl/mlir_gen.md`、`kernel_gen/dialect/symbol.py`、`kernel_gen/dsl/ast.py`、`kernel_gen/dsl/emit_mlir.py`、`kernel_gen/operation/nn.py`、`test/dsl/test_ast_visitor.py`、`test/operation/test_operation_nn.py` 的闭环，重点确认 `MGEN-018/021/022/023/024` 的返回链路语义与 expectation 只读状态。
+- 改动：
+  - 只读核对主工作目录 `expectation/dsl/mlir_gen/dialect/symbol/add.py`、`expectation/dsl/mlir_gen/dialect/symbol/sub.py`、`expectation/dsl/mlir_gen/dialect/symbol/mul.py`、`expectation/dsl/mlir_gen/dialect/symbol/truediv.py`、`expectation/dsl/mlir_gen/dialect/symbol/floordiv.py` 与 worktree 同路径 `.py` 文件内容一致，expectation 五文件保持只读未改。
+  - 复核 `spec/dsl/mlir_gen.md` 已将 `MGEN-018/021/022/023/024` 收敛为同一参数化测试 `test/dsl/test_ast_visitor.py::test_symbol_scalar_function_lowers_symbol_binary_ops`，并明确 direct Python 二元运算与 `nn.add/sub/mul/truediv/floordiv(...)` 包装在 `const/const`、`symbol/symbol`、`const/symbol`、`symbol/const` 四类输入下必须共享 lowering 结果，比较口径以 `SymbolValueType.get_value()` 为准。
+  - 复核 `kernel_gen/dsl/ast.py` 已将 `nn.add/sub/mul/truediv/floordiv(...)` 统一解析为 `BinaryExprAST`，`kernel_gen/dsl/emit_mlir.py` 对纯 symbol 标量统一 lowering 到 `symbol.add/sub/mul/div/floordiv`，并通过 `kernel_gen/dialect/symbol.py::build_public_symbol_expr(...)` 统一公开结果表达；`kernel_gen/operation/nn.py` 保留纯标量包装入口，参数类型提示完整。
+  - 复核 `test/dsl/test_ast_visitor.py::test_symbol_scalar_function_lowers_symbol_binary_ops` 已覆盖 `style in {python, nn}` 与五种算术 op 的 20 组 runtime 输入，逐案断言：输入参数类型、唯一一个目标 `symbol.*` op、唯一一个 `func.ReturnOp`、`ReturnOp` 仅返回 1 个操作数、返回值类型与函数输出签名一致，且 `SymbolValueType.get_value()` 与运行时计算结果一致。
+  - 复核 `test/operation/test_operation_nn.py::test_nn_scalar_only_error` 已补充纯标量包装返回公开值断言，作为 `nn.*` 包装运行时语义补充；本轮未发现范围外改动，也未发现目标文件缺失参数类型提示。
+  - 本轮沿用链路内既有验证结果，未重复复测：`pytest -q test/dsl/test_ast_visitor.py` 为 `116 passed`，`pytest -q test/operation/test_operation_nn.py` 为 `38 passed`。
+- 结论：通过。`MGEN-018/021/022/023/024` 对应的 direct Python 与 `nn.*` 包装链路，现已由同一参数化测试完整证明 `ReturnOp` 数量、返回值数量、返回值类型与 `get_value()` 公开语义；expectation 五文件保持只读，spec/实现/测试闭环成立。建议下一阶段由神秘人按主分支 TODO.md 发起该链路的收口或合并任务。
+- 时间：2026-03-25 04:43:08 +0800
+- 执行人：我不是牛马
+- 经办人：我不是牛马
+- 任务：T-20260325-ed22f5a8
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-mlir-gen-symbol-arith-group-r2`，将 expectation symbol 五文件链路已通过复审的业务改动按限定范围合入 `main`。
+- 改动：
+  - 核对 worktree 当前未提交业务改动仅涉及 `spec/dsl/mlir_gen.md`、`kernel_gen/dialect/symbol.py`、`kernel_gen/dsl/ast.py`、`kernel_gen/dsl/emit_mlir.py`、`kernel_gen/operation/nn.py`、`test/dsl/test_ast_visitor.py`、`test/operation/test_operation_nn.py` 与对应任务记录；其余仅有 `agents/codex-multi-agents/log/talk.log` 本地变化，不纳入合并。
+  - 计划将上述 7 个业务文件与记录文件一并合入主分支，并在主分支执行相关 pytest 验证。
+- 结论：满足限定范围合并前提，可执行主分支合并与验证。

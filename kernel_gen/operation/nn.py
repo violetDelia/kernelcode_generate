@@ -24,6 +24,9 @@ from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import Farmat, NumericType
 
+ScalarArithmeticValue = int | float | SymbolDim
+ArithmeticResult = Memory | ScalarArithmeticValue
+
 _NN_ADD_PROMOTION_ORDER = (
     NumericType.Int8,
     NumericType.Uint8,
@@ -59,7 +62,7 @@ class _AddStrideDim(SymbolDim):
     - 功能实现: kernel_gen/operation/nn.py
     """
 
-    def get_value(self):
+    def get_value(self: "_AddStrideDim") -> int | str:
         expr = self.get_symbol()
         if expr.free_symbols:
             return str(expr)
@@ -344,6 +347,91 @@ def _ensure_scalar_value(value: object) -> None:
         raise TypeError("Unsupported scalar type for nn operation")
 
 
+def _ensure_scalar_arithmetic_value(value: object) -> None:
+    """校验纯标量算术输入类型。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 允许 int/float/bool/SymbolDim 参与纯标量算术。
+
+    使用示例:
+    - _ensure_scalar_arithmetic_value(SymbolDim("N"))
+
+    关联文件:
+    - spec: spec/dsl/mlir_gen.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    if isinstance(value, SymbolDim):
+        return
+    _ensure_scalar_value(value)
+
+
+def _apply_scalar_operator(lhs: object, rhs: object, op: str, rop: str) -> ScalarArithmeticValue:
+    """执行纯标量算术并保持 Python 操作数顺序语义。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 优先尝试左操作数实现，失败后回退到右操作数反向实现。
+    - 用于支持 symbol/int 混合的纯标量算术辅助路径。
+
+    使用示例:
+    - _apply_scalar_operator(SymbolDim("M"), 2, "__add__", "__radd__")
+
+    关联文件:
+    - spec: spec/dsl/mlir_gen.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+
+    def _call_operator(target: object, method_name: str, operand: object) -> object:
+        method = getattr(target, method_name, None)
+        if method is None:
+            return NotImplemented
+        try:
+            return method(operand)
+        except TypeError:
+            return NotImplemented
+
+    _ensure_scalar_arithmetic_value(lhs)
+    _ensure_scalar_arithmetic_value(rhs)
+
+    direct_result = _call_operator(lhs, op, rhs)
+    if direct_result is not NotImplemented:
+        return direct_result
+    reverse_result = _call_operator(rhs, rop, lhs)
+    if reverse_result is not NotImplemented:
+        return reverse_result
+    raise TypeError("Unsupported scalar type for nn operation")
+
+
+def _dispatch_scalar_binary(lhs: object, rhs: object, op: str, rop: str) -> ScalarArithmeticValue | None:
+    """在无 Memory 参与时执行纯标量算术调度。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 当两侧都不是 Memory 时，直接返回 Python/SymbolDim 算术结果。
+    - 当任一侧为 Memory 时返回 None，由 Memory 路径继续处理。
+
+    使用示例:
+    - _dispatch_scalar_binary(2, SymbolDim("N"), "__mul__", "__rmul__")
+
+    关联文件:
+    - spec: spec/dsl/mlir_gen.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    if isinstance(lhs, Memory) or isinstance(rhs, Memory):
+        return None
+    return _apply_scalar_operator(lhs, rhs, op, rop)
+
+
 def _infer_broadcast_shape(lhs: SymbolShape, rhs: SymbolShape) -> SymbolShape:
     """推导逐元素隐式 broadcast 的目标 shape。
 
@@ -424,7 +512,7 @@ def _broadcast_memory_pair(lhs: Memory, rhs: Memory) -> tuple[Memory, Memory]:
     return lhs_b, rhs_b
 
 
-def _dispatch_binary(lhs: object, rhs: object, op: str, rop: str) -> Memory:
+def _dispatch_binary(lhs: object, rhs: object, op: str, rop: str) -> ArithmeticResult:
     """二元算术调度。
 
     创建者: 金铲铲大作战
@@ -441,6 +529,9 @@ def _dispatch_binary(lhs: object, rhs: object, op: str, rop: str) -> Memory:
     - test: test/operation/test_operation_nn.py
     - 功能实现: kernel_gen/operation/nn.py
     """
+    scalar_result = _dispatch_scalar_binary(lhs, rhs, op, rop)
+    if scalar_result is not None:
+        return scalar_result
     _ensure_memory_operand(lhs, rhs)
     if isinstance(lhs, Memory) and isinstance(rhs, Memory):
         return _binary_memory_result(lhs, rhs)
@@ -478,7 +569,7 @@ def _dispatch_compare(lhs: object, rhs: object, op: str, rop: str) -> Memory:
     return rhs._clone_with_dtype(NumericType.Bool)
 
 
-def add(lhs: object, rhs: object) -> Memory:
+def add(lhs: object, rhs: object) -> ArithmeticResult:
     """逐元素加法。
 
     创建者: 金铲铲大作战
@@ -486,15 +577,24 @@ def add(lhs: object, rhs: object) -> Memory:
 
     功能说明:
     - 支持 Memory 与 Memory/标量的加法。
+    - 当两侧都为纯标量时，复用 Python / SymbolDim 的加法结果。
 
     使用示例:
     - add(mem, 1)
+    - add(SymbolDim("M"), 2)
 
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
     - 功能实现: kernel_gen/operation/nn.py
+    返回与限制：
+
+    - 当任一侧为 `Memory` 时，返回 `Memory`。
+    - 当两侧都为纯标量时，返回 Python 标量或 `SymbolDim` 算术结果。
     """
+    scalar_result = _dispatch_scalar_binary(lhs, rhs, "__add__", "__radd__")
+    if scalar_result is not None:
+        return scalar_result
     _ensure_memory_operand(lhs, rhs)
     if isinstance(lhs, Memory) and isinstance(rhs, Memory):
         return _binary_add_result(lhs, rhs)
@@ -505,7 +605,7 @@ def add(lhs: object, rhs: object) -> Memory:
     return rhs._clone_with_dtype(rhs.dtype)
 
 
-def sub(lhs: object, rhs: object) -> Memory:
+def sub(lhs: object, rhs: object) -> ArithmeticResult:
     """逐元素减法。
 
     创建者: 金铲铲大作战
@@ -513,19 +613,25 @@ def sub(lhs: object, rhs: object) -> Memory:
 
     功能说明:
     - 支持 Memory 与 Memory/标量的减法。
+    - 当两侧都为纯标量时，复用 Python / SymbolDim 的减法结果。
 
     使用示例:
     - sub(mem, 1)
+    - sub(SymbolDim("M"), 2)
 
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
     - 功能实现: kernel_gen/operation/nn.py
+    返回与限制：
+
+    - 当任一侧为 `Memory` 时，返回 `Memory`。
+    - 当两侧都为纯标量时，返回 Python 标量或 `SymbolDim` 算术结果。
     """
     return _dispatch_binary(lhs, rhs, "__sub__", "__rsub__")
 
 
-def mul(lhs: object, rhs: object) -> Memory:
+def mul(lhs: object, rhs: object) -> ArithmeticResult:
     """逐元素乘法。
 
     创建者: 金铲铲大作战
@@ -533,19 +639,25 @@ def mul(lhs: object, rhs: object) -> Memory:
 
     功能说明:
     - 支持 Memory 与 Memory/标量的乘法。
+    - 当两侧都为纯标量时，复用 Python / SymbolDim 的乘法结果。
 
     使用示例:
     - mul(mem, 2)
+    - mul(2, SymbolDim("N"))
 
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
     - 功能实现: kernel_gen/operation/nn.py
+    返回与限制：
+
+    - 当任一侧为 `Memory` 时，返回 `Memory`。
+    - 当两侧都为纯标量时，返回 Python 标量或 `SymbolDim` 算术结果。
     """
     return _dispatch_binary(lhs, rhs, "__mul__", "__rmul__")
 
 
-def truediv(lhs: object, rhs: object) -> Memory:
+def truediv(lhs: object, rhs: object) -> ArithmeticResult:
     """逐元素除法。
 
     创建者: 金铲铲大作战
@@ -553,19 +665,25 @@ def truediv(lhs: object, rhs: object) -> Memory:
 
     功能说明:
     - 支持 Memory 与 Memory/标量的除法。
+    - 当两侧都为纯标量时，复用 Python / SymbolDim 的除法结果。
 
     使用示例:
     - truediv(mem, 2)
+    - truediv(SymbolDim("M"), 2)
 
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
     - 功能实现: kernel_gen/operation/nn.py
+    返回与限制：
+
+    - 当任一侧为 `Memory` 时，返回 `Memory`。
+    - 当两侧都为纯标量时，返回 Python 标量或 `SymbolDim` 算术结果。
     """
     return _dispatch_binary(lhs, rhs, "__truediv__", "__rtruediv__")
 
 
-def floordiv(lhs: object, rhs: object) -> Memory:
+def floordiv(lhs: object, rhs: object) -> ArithmeticResult:
     """逐元素整除。
 
     创建者: 金铲铲大作战
@@ -573,15 +691,24 @@ def floordiv(lhs: object, rhs: object) -> Memory:
 
     功能说明:
     - 支持 Memory 与 Memory/标量的整除。
+    - 当两侧都为纯标量时，复用 Python / SymbolDim 的整除结果。
 
     使用示例:
     - floordiv(mem, 2)
+    - floordiv(7, SymbolDim("N"))
 
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
     - 功能实现: kernel_gen/operation/nn.py
+    返回与限制：
+
+    - 当任一侧为 `Memory` 时，返回 `Memory`。
+    - 当两侧都为纯标量时，返回 Python 标量或 `SymbolDim` 算术结果。
     """
+    scalar_result = _dispatch_scalar_binary(lhs, rhs, "__floordiv__", "__rfloordiv__")
+    if scalar_result is not None:
+        return scalar_result
     _ensure_memory_operand(lhs, rhs)
     if isinstance(lhs, Memory) and isinstance(rhs, Memory):
         return _binary_memory_result(lhs, rhs)
