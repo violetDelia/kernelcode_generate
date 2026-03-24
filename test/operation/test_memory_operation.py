@@ -7,11 +7,11 @@
 - 覆盖 Memory 的逐元素算术与比较运算约束。
 
 覆盖率信息:
-- 当前覆盖率: 99%（kernel_gen/symbol_variable/memory.py）。
+- 当前覆盖率: 98%（kernel_gen/symbol_variable/memory.py）。
 - 达标判定: 已达到 95% 覆盖率达标线。
 
 覆盖率命令:
-- pytest --cov=kernel_gen.symbol_variable.memory --cov-report=term-missing test/operation/test_memory_operation.py
+- pytest --cov=kernel_gen.symbol_variable.memory --cov-report=term-missing test/symbol_variable/test_memory.py test/operation/test_memory_operation.py
 
 使用示例:
 - pytest -q test/operation/test_memory_operation.py
@@ -34,21 +34,21 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
-from kernel_gen.symbol_variable.type import NumericType
+from kernel_gen.symbol_variable.type import Farmat, NumericType
 
 
 # ME-010
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 14:02:42 +0800
-# 最近一次运行成功时间: 2026-03-22 14:02:42 +0800
-# 测试目的: 验证 Memory + Memory 的逐元素运算。
+# 最近一次运行测试时间: 2026-03-24 12:05:49 +0800
+# 最近一次运行成功时间: 2026-03-24 12:05:49 +0800
+# 测试目的: 验证 Memory + Memory 的逐元素运算继承 lhs 的 format 与 space，并按规则返回结果 dtype。
 # 使用示例: pytest -q test/operation/test_memory_operation.py -k test_memory_add_memory
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
 # 对应测试文件路径: test/operation/test_memory_operation.py
 def test_memory_add_memory() -> None:
-    lhs = Memory(["N", 4], NumericType.Float32, space=MemorySpace.SM)
+    lhs = Memory(["N", 4], NumericType.Float32, space=MemorySpace.SM, format=Farmat.CLast)
     rhs = Memory(["N", 4], NumericType.Float32, space=MemorySpace.GM)
     result = lhs + rhs
     result_sub = lhs - rhs
@@ -59,12 +59,16 @@ def test_memory_add_memory() -> None:
     assert result.shape.get_values() == ["N", 4]
     assert result.dtype is NumericType.Float32
     assert result.space is MemorySpace.SM
+    assert result.format is Farmat.CLast
     assert result_sub.shape.get_values() == ["N", 4]
     assert result_sub.dtype is NumericType.Float32
+    assert result_sub.format is Farmat.CLast
     assert result_mul.shape.get_values() == ["N", 4]
     assert result_mul.dtype is NumericType.Float32
+    assert result_mul.format is Farmat.CLast
     assert result_div.shape.get_values() == ["N", 4]
     assert result_div.dtype is NumericType.Float32
+    assert result_div.format is Farmat.CLast
     assert rep.startswith("Memory(")
     assert str(lhs) == rep
 
@@ -72,8 +76,8 @@ def test_memory_add_memory() -> None:
 # ME-011
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 14:02:42 +0800
-# 最近一次运行成功时间: 2026-03-22 14:02:42 +0800
+# 最近一次运行测试时间: 2026-03-24 12:05:49 +0800
+# 最近一次运行成功时间: 2026-03-24 12:05:49 +0800
 # 测试目的: 验证 Memory 与标量的逐元素运算。
 # 使用示例: pytest -q test/operation/test_memory_operation.py -k test_memory_add_scalar
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -89,6 +93,8 @@ def test_memory_add_scalar() -> None:
     mul_right = 2 * mem
     div_left = mem / 2
     div_right = 2 / mem
+    floor_left = mem // 2
+    floor_right = 2 // mem
     bool_add = mem + True
     assert left.shape.get_values() == [2, 2]
     assert left.dtype is NumericType.Int32
@@ -106,6 +112,10 @@ def test_memory_add_scalar() -> None:
     assert div_left.dtype is NumericType.Int32
     assert div_right.shape.get_values() == [2, 2]
     assert div_right.dtype is NumericType.Int32
+    assert floor_left.shape.get_values() == [2, 2]
+    assert floor_left.dtype is NumericType.Int32
+    assert floor_right.shape.get_values() == [2, 2]
+    assert floor_right.dtype is NumericType.Int32
     assert bool_add.shape.get_values() == [2, 2]
     assert bool_add.dtype is NumericType.Int32
 
@@ -113,8 +123,8 @@ def test_memory_add_scalar() -> None:
 # ME-012
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 14:02:42 +0800
-# 最近一次运行成功时间: 2026-03-22 14:02:42 +0800
+# 最近一次运行测试时间: 2026-03-24 12:05:49 +0800
+# 最近一次运行成功时间: 2026-03-24 12:05:49 +0800
 # 测试目的: 验证运算结果元数据独立性，不复用 lhs shape/stride。
 # 使用示例: pytest -q test/operation/test_memory_operation.py -k test_memory_metadata_independent
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -136,8 +146,8 @@ def test_memory_metadata_independent() -> None:
 # ME-013
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 14:02:42 +0800
-# 最近一次运行成功时间: 2026-03-22 14:02:42 +0800
+# 最近一次运行测试时间: 2026-03-24 12:05:49 +0800
+# 最近一次运行成功时间: 2026-03-24 12:05:49 +0800
 # 测试目的: 验证比较运算返回 predicate dtype。
 # 使用示例: pytest -q test/operation/test_memory_operation.py -k test_memory_compare_predicate
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -165,9 +175,9 @@ def test_memory_compare_predicate() -> None:
 # ME-014
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 14:02:42 +0800
-# 最近一次运行成功时间: 2026-03-22 14:02:42 +0800
-# 测试目的: 验证形状不一致时抛 ValueError。
+# 最近一次运行测试时间: 2026-03-24 12:05:49 +0800
+# 最近一次运行成功时间: 2026-03-24 12:05:49 +0800
+# 测试目的: 验证算术与比较在形状不一致时都抛 ValueError。
 # 使用示例: pytest -q test/operation/test_memory_operation.py -k test_memory_shape_mismatch
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
 # 对应 spec 文件路径: spec/symbol_variable/memory.md
@@ -177,30 +187,15 @@ def test_memory_shape_mismatch() -> None:
     rhs = Memory([1, 2, 3], NumericType.Float32)
     with pytest.raises(ValueError):
         _ = lhs + rhs
-
-
-# ME-015
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 14:02:42 +0800
-# 最近一次运行成功时间: 2026-03-22 14:02:42 +0800
-# 测试目的: 验证 dtype 不兼容时抛 TypeError。
-# 使用示例: pytest -q test/operation/test_memory_operation.py -k test_memory_dtype_mismatch
-# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
-# 对应 spec 文件路径: spec/symbol_variable/memory.md
-# 对应测试文件路径: test/operation/test_memory_operation.py
-def test_memory_dtype_mismatch() -> None:
-    lhs = Memory([1, 2], NumericType.Float32)
-    rhs = Memory([1, 2], NumericType.Int32)
-    with pytest.raises(TypeError):
-        _ = lhs + rhs
+    with pytest.raises(ValueError):
+        _ = lhs == rhs
 
 
 # ME-016
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 14:02:42 +0800
-# 最近一次运行成功时间: 2026-03-22 14:02:42 +0800
+# 最近一次运行测试时间: 2026-03-24 12:05:49 +0800
+# 最近一次运行成功时间: 2026-03-24 12:05:49 +0800
 # 测试目的: 验证不支持的标量类型抛 TypeError。
 # 使用示例: pytest -q test/operation/test_memory_operation.py -k test_memory_scalar_type_error
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -210,6 +205,5 @@ def test_memory_scalar_type_error() -> None:
     mem = Memory([1], NumericType.Int32)
     with pytest.raises(TypeError):
         _ = mem + "1"
-    mem64 = Memory([1], NumericType.Int64)
     with pytest.raises(TypeError):
-        _ = mem64 + 1
+        _ = mem + 1j

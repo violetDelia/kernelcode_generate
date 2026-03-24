@@ -15,7 +15,7 @@
 - 测试文件: test/symbol_variable/test_memory.py
 
 覆盖率:
-- 覆盖率: 99% (kernel_gen/symbol_variable/memory.py)
+- 覆盖率: 98% (kernel_gen/symbol_variable/memory.py)
 - 覆盖率命令: pytest --cov=kernel_gen.symbol_variable.memory --cov-report=term-missing test/symbol_variable/test_memory.py test/operation/test_memory_operation.py
 """
 
@@ -40,8 +40,8 @@ from kernel_gen.symbol_variable.type import Farmat, NumericType
 # ME-001
 # 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-23 22:25:38 +0800
-# 最近一次运行成功时间: 2026-03-23 22:25:38 +0800
+# 最近一次运行测试时间: 2026-03-24 12:05:49 +0800
+# 最近一次运行成功时间: 2026-03-24 12:05:49 +0800
 # 测试目的: 验证默认空间为 GM，且默认 dtype/shape/stride/format 可通过公开接口获取。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_default_space
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -64,8 +64,8 @@ def test_default_space() -> None:
 # ME-002
 # 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-18 01:27:43 +0800
-# 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
+# 最近一次运行测试时间: 2026-03-24 12:05:49 +0800
+# 最近一次运行成功时间: 2026-03-24 12:05:49 +0800
 # 测试目的: 验证指定空间写入。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_custom_space
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -79,8 +79,8 @@ def test_custom_space() -> None:
 # ME-003
 # 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-18 01:27:43 +0800
-# 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
+# 最近一次运行测试时间: 2026-03-24 12:05:49 +0800
+# 最近一次运行成功时间: 2026-03-24 12:05:49 +0800
 # 测试目的: 验证 __repr__ 包含空间名与张量字段表达。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_repr
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -101,8 +101,8 @@ def test_repr() -> None:
 # ME-004
 # 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-18 01:27:43 +0800
-# 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
+# 最近一次运行测试时间: 2026-03-24 12:05:49 +0800
+# 最近一次运行成功时间: 2026-03-24 12:05:49 +0800
 # 测试目的: 验证 tensor-like 字段直入构造保持 shape/dtype/stride/format。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_construct_from_tensor_fields
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -134,8 +134,8 @@ def test_construct_from_tensor_fields() -> None:
 # ME-005
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-23 22:25:38 +0800
-# 最近一次运行成功时间: 2026-03-23 22:25:38 +0800
+# 最近一次运行测试时间: 2026-03-24 12:05:49 +0800
+# 最近一次运行成功时间: 2026-03-24 12:05:49 +0800
 # 测试目的: 验证显式 stride 列表输入可被规整为 SymbolShape，且 rank 不匹配时抛错。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_explicit_stride_list
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -152,8 +152,8 @@ def test_explicit_stride_list() -> None:
 # ME-006
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-23 22:25:38 +0800
-# 最近一次运行成功时间: 2026-03-23 22:25:38 +0800
+# 最近一次运行测试时间: 2026-03-24 12:05:49 +0800
+# 最近一次运行成功时间: 2026-03-24 12:05:49 +0800
 # 测试目的: 验证动态 shape/stride 输入保持动态维度语义，并通过公开接口序列化。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_dynamic_shape_stride
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -170,8 +170,8 @@ def test_dynamic_shape_stride() -> None:
 # ME-007
 # 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-18 01:27:43 +0800
-# 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
+# 最近一次运行测试时间: 2026-03-24 12:05:49 +0800
+# 最近一次运行成功时间: 2026-03-24 12:05:49 +0800
 # 测试目的: 验证 shape/stride 可直接接收 SymbolShape。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_shape_stride_accept_symbol_shape
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -188,8 +188,8 @@ def test_shape_stride_accept_symbol_shape() -> None:
 # ME-008
 # 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-18 01:27:43 +0800
-# 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
+# 最近一次运行测试时间: 2026-03-24 12:05:49 +0800
+# 最近一次运行成功时间: 2026-03-24 12:05:49 +0800
 # 测试目的: 验证默认 format 与显式 format 保持可见。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_default_format
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -205,8 +205,8 @@ def test_default_format() -> None:
 # ME-009
 # 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-18 01:27:43 +0800
-# 最近一次运行成功时间: 2026-03-18 01:27:43 +0800
+# 最近一次运行测试时间: 2026-03-24 12:05:49 +0800
+# 最近一次运行成功时间: 2026-03-24 12:05:49 +0800
 # 测试目的: 验证 LocalSpaceMeta 冻结与 MemorySpace 元信息字段。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_space_meta
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -225,8 +225,8 @@ def test_space_meta() -> None:
 # ME-017
 # 创建者: OpenAI
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 00:00:00 +0800
-# 最近一次运行成功时间: 2026-03-21 00:00:00 +0800
+# 最近一次运行测试时间: 2026-03-24 12:05:49 +0800
+# 最近一次运行成功时间: 2026-03-24 12:05:49 +0800
 # 测试目的: 验证未显式提供 stride 时默认生成连续行主序步幅。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_default_stride_generated_row_major
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -241,8 +241,8 @@ def test_default_stride_generated_row_major() -> None:
 # ME-018
 # 创建者: OpenAI
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-21 00:00:00 +0800
-# 最近一次运行成功时间: 2026-03-21 00:00:00 +0800
+# 最近一次运行测试时间: 2026-03-24 12:05:49 +0800
+# 最近一次运行成功时间: 2026-03-24 12:05:49 +0800
 # 测试目的: 验证符号维度默认 stride 使用无空格乘法表达式并保持字符串表示一致。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_default_stride_symbolic_expression_repr
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -264,8 +264,8 @@ def test_default_stride_symbolic_expression_repr() -> None:
 # ME-019
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 11:36:35 +0800
-# 最近一次运行成功时间: 2026-03-22 11:36:35 +0800
+# 最近一次运行测试时间: 2026-03-24 12:05:49 +0800
+# 最近一次运行成功时间: 2026-03-24 12:05:49 +0800
 # 测试目的: 验证字符串形状输入时默认 stride 生成与字符串表示一致。
 # 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_default_stride_symbolic_expression_from_strings
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -279,3 +279,88 @@ def test_default_stride_symbolic_expression_from_strings() -> None:
         "Memory(GM,Tensor(shape=Shape(M, K, N), dtype=NumericType.Float32, "
         "stride=Shape(K*N, N, 1), format=Farmat.Norm))"
     )
+
+
+# ME-015
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-24 12:05:49 +0800
+# 最近一次运行成功时间: 2026-03-24 12:05:49 +0800
+# 测试目的: 验证混合 dtype 时结果使用更高精度类型。
+# 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_memory_mixed_dtype_promotes_to_highest_precision
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
+# 对应 spec 文件路径: spec/symbol_variable/memory.md
+# 对应测试文件路径: test/symbol_variable/test_memory.py
+def test_memory_mixed_dtype_promotes_to_highest_precision() -> None:
+    lhs = Memory([1], NumericType.Int32)
+    rhs = Memory([1], NumericType.Float32)
+    result = lhs + rhs
+    assert result.dtype is NumericType.Float32
+
+
+# ME-021
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-24 12:05:49 +0800
+# 最近一次运行成功时间: 2026-03-24 12:05:49 +0800
+# 测试目的: 验证浮点标量参与运算时结果提升到 Float32。
+# 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_memory_float_scalar_promotes_to_highest_precision
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
+# 对应 spec 文件路径: spec/symbol_variable/memory.md
+# 对应测试文件路径: test/symbol_variable/test_memory.py
+def test_memory_float_scalar_promotes_to_highest_precision() -> None:
+    mem = Memory([1], NumericType.Int32)
+    result = mem + 1.5
+    assert result.dtype is NumericType.Float32
+
+
+# ME-022
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-24 12:05:49 +0800
+# 最近一次运行成功时间: 2026-03-24 12:05:49 +0800
+# 测试目的: 验证 / 与 // 采用相同的最高精度提升规则。
+# 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_memory_division_uses_highest_precision_dtype
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
+# 对应 spec 文件路径: spec/symbol_variable/memory.md
+# 对应测试文件路径: test/symbol_variable/test_memory.py
+def test_memory_division_uses_highest_precision_dtype() -> None:
+    lhs = Memory([1], NumericType.Float16)
+    rhs = Memory([1], NumericType.Float32)
+    truediv = lhs / rhs
+    floordiv = lhs // rhs
+    assert truediv.dtype is NumericType.Float32
+    assert floordiv.dtype is NumericType.Float32
+
+
+# ME-023
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-24 12:05:49 +0800
+# 最近一次运行成功时间: 2026-03-24 12:05:49 +0800
+# 测试目的: 验证 reflected 算术与正向运算使用相同的提升规则。
+# 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_memory_reflected_arithmetic_uses_same_promotion_rule
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
+# 对应 spec 文件路径: spec/symbol_variable/memory.md
+# 对应测试文件路径: test/symbol_variable/test_memory.py
+def test_memory_reflected_arithmetic_uses_same_promotion_rule() -> None:
+    mem = Memory([1], NumericType.Int8)
+    results = [2 + mem, 2 - mem, 2 * mem, 2 / mem, 2 // mem]
+    for result in results:
+        assert result.dtype is NumericType.Int32
+
+
+# ME-024
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-24 12:05:49 +0800
+# 最近一次运行成功时间: 2026-03-24 12:05:49 +0800
+# 测试目的: 验证不支持的对象操作数抛 TypeError。
+# 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_memory_invalid_operand_type_error
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
+# 对应 spec 文件路径: spec/symbol_variable/memory.md
+# 对应测试文件路径: test/symbol_variable/test_memory.py
+def test_memory_invalid_operand_type_error() -> None:
+    mem = Memory([1], NumericType.Float32)
+    with pytest.raises(TypeError):
+        _ = mem + object()

@@ -27,7 +27,7 @@
 - 仅负责描述 `Memory` 的结构化元信息，不负责真实分配、释放或生命周期管理。
 - 不负责容量校验、对齐校验或空间可用性判断，只暴露空间元信息。
 - 不负责跨空间迁移、拷贝、同步与调度策略。
-- 不负责广播、自动类型提升、约束求解或推导真实存储偏移。
+- 不负责广播、约束求解或推导真实存储偏移；`Memory` 公开算术运算符的结果 `dtype` 提升规则由本文件定义，其余场景不额外提供自动类型提升策略。
 - 不定义 dialect 层的整数 symbol type/attr；`shape`、`stride`、`offset`、`size` 中单个整型分量的 symbol 语义统一以 [`spec/dialect/symbol.md`](../../spec/dialect/symbol.md) 为准。
 - 不负责 `MemoryType`、`dma` memory result type 等 IR type；本文件只描述 Python 侧 `Memory` 容器。
 - 本文件中的 `Memory` 指 Python 侧高层复合元信息容器，聚合 `shape`、`stride`、`dtype`、`format`、`space`；其中 `shape`、`stride`、`offset`、`size` 的单个整型分量若需进入 IR，则统一复用 `symbol dialect` 的整数-only 语义。
@@ -481,9 +481,9 @@ format_value = mem.get_format()
 参数说明：
 
 - `lhs (Memory)`：左操作数，为当前 `Memory` 实例。
-- `rhs (Memory | int)`：右操作数；支持 `Memory` 或 `int` 标量（`bool` 视作 `int`）。
-- `lhs`/`rhs` 均为 `Memory` 时：`shape` 必须完全一致。
-- `rhs` 为标量时：标量需与 `lhs.dtype` 兼容。
+- `rhs (Memory | bool | int | float)`：右操作数；支持 `Memory` 或 Python 数值标量。
+- `lhs`/`rhs` 均为 `Memory` 时：`shape` 必须完全一致，结果 `dtype` 取参与运算双方中精度最高的公开 `NumericType`。
+- `rhs` 为标量时：先将标量规范化为公开 `NumericType`，再按同一 `dtype` 提升规则参与运算；公开标量映射为 `bool -> NumericType.Bool`、`int -> NumericType.Int32`、`float -> NumericType.Float32`。
 
 使用示例：
 
@@ -491,19 +491,24 @@ format_value = mem.get_format()
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.type import NumericType
 
-lhs = Memory(["M", "N"], NumericType.Float32)
+lhs = Memory(["M", "N"], NumericType.Int32)
 rhs = Memory(["M", "N"], NumericType.Float32)
 
 sum_mem = lhs + rhs
+floordiv_mem = lhs // 2
 cmp_mem = lhs < 0
 ```
 
 注意事项：
 
 - 当前阶段不支持广播，`shape` 不一致抛 `ValueError`。
-- 类型不兼容或标量类型不支持时抛 `TypeError`。
+- 算术运算 `+`、`-`、`*`、`/`、`//` 及其 reflected 变体（如 `1 + mem`）统一遵循相同的 `dtype` 提升规则。
+- 公开 `dtype` 提升顺序固定为 `NumericType.Bool < NumericType.Int8 < NumericType.Uint8 < NumericType.Int16 < NumericType.Uint16 < NumericType.Int32 < NumericType.Uint32 < NumericType.Int64 < NumericType.Uint64 < NumericType.Float16 < NumericType.BFloat16 < NumericType.Float32 < NumericType.Float64`；结果 `dtype` 取序列中位置更高者。
+- `/` 与 `//` 仅区分逐元素数值语义，`dtype` 提升规则一致；`//` 的结果仍返回 `Memory`，不退化为 Python 标量。
+- 不支持的标量类型（如 `str`、`bytes`、`complex`）或无法映射到公开 `NumericType` 的输入抛 `TypeError`。
+- 不支持的对象操作数（既不是 `Memory`，也不是公开数值标量）抛 `TypeError`。
 - 比较结果的 `dtype` 统一为 `NumericType.Int32`。
-- 输出继承 `lhs` 的 `space`、`format` 与 `stride` 语义。
+- 输出继承 `lhs` 的 `space`、`format` 与 `stride` 语义；结果 `shape`/`stride` 需要与 `lhs` 元数据解耦，不复用原对象引用。
 - 本小节只定义 Python 侧 `Memory` 运算结果的高层元数据继承规则，不新增 dialect 层 memory type 或 symbol type。
 
 返回与限制：
@@ -532,7 +537,9 @@ cmp_mem = lhs < 0
 - 验证 `shape` 与 `stride` 可直接接收 `SymbolShape` 或普通可迭代输入。
 - 验证 `tensor-like` 字段直入能够通过公开构造入口完成。
 - 验证 `__repr__` 包含空间与张量元信息。
-- 验证运算符重载覆盖算术、比较与错误路径（形状不一致、dtype 不兼容、标量类型非法）。
+- 验证 `Memory` 算术运算 `+`、`-`、`*`、`/`、`//` 的结果 `dtype` 统一取参与运算类型中的最高精度类型。
+- 验证 `Memory` 与 Python 标量 `bool`/`int`/`float` 运算时，标量先映射到公开 `NumericType`，再参与同一 `dtype` 提升规则。
+- 验证运算符重载覆盖比较与错误路径（算术/比较的形状不一致、不支持的标量类型、不支持的对象操作数）。
 - 验证运算符重载结果元数据独立（对应 `ME-012`）。
 - 验证比较结果 `dtype` 为 `NumericType.Int32`（对应 `ME-013`）。
 - 验证 memory 相关单值整数语义的 dialect 归属由 [`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py) 覆盖，本文件测试仅覆盖 `Memory` 容器行为本身。
@@ -550,14 +557,18 @@ cmp_mem = lhs < 0
 | ME-007 | 构造 | shape/stride 接收 SymbolShape | N/A | `Memory(SymbolShape(...), NumericType.Float32, stride=SymbolShape(...))` | 接收成功 | `test_shape_stride_accept_symbol_shape` |
 | ME-008 | 默认格式 | 省略 format | N/A | `Memory([1, 2], NumericType.Float32)` | `format` 为 `Farmat.Norm` | `test_default_format` |
 | ME-009 | 空间元信息 | 枚举元信息 | N/A | `MemorySpace.GM.value` | `align=1024`、`max_size=None` | `test_space_meta` |
-| ME-010 | 运算符 | `Memory + Memory` | N/A | `lhs + rhs` | shape/dtype/space 继承约束成立 | `test_memory_add_memory` |
-| ME-011 | 运算符 | `Memory + scalar` | N/A | `mem + 1` / `1 + mem` | 返回 `Memory` 且 shape/dtype 一致 | `test_memory_add_scalar` |
+| ME-010 | 运算符 | `Memory + Memory` | `lhs.shape == rhs.shape` | `lhs + rhs` | 返回 `Memory`，`shape` 与输入一致，结果 `dtype` 取两侧更高精度类型，`space`/`format` 继承 `lhs` | `test/operation/test_memory_operation.py::test_memory_add_memory` |
+| ME-011 | 运算符 | `Memory + scalar` | `mem` 已构造完成 | `mem + 1` / `1 + mem` / `mem + True` | 标量先映射为公开 `NumericType`，再按同一提升规则返回 `Memory` | `test/operation/test_memory_operation.py::test_memory_add_scalar` |
 | ME-012 | 运算符 | 结果元信息独立 | N/A | `mem + 1` | 结果 `shape/stride` 独立，不复用原引用 | `test_memory_metadata_independent` |
 | ME-013 | 运算符 | 比较 predicate | N/A | `lhs == rhs` / `lhs < 1` | `dtype` 为 `NumericType.Int32` | `test_memory_compare_predicate` |
-| ME-014 | 运算符 | 形状不一致 | N/A | `lhs + rhs` | 抛 `ValueError` | `test_memory_shape_mismatch` |
-| ME-015 | 运算符 | dtype 不兼容 | N/A | `lhs + rhs` | 抛 `TypeError` | `test_memory_dtype_mismatch` |
-| ME-016 | 运算符 | 标量类型非法 | N/A | `mem + \"1\"` | 抛 `TypeError` | `test_memory_scalar_type_error` |
+| ME-014 | 运算符 | 形状不一致 | N/A | `lhs + rhs` / `lhs == rhs` | 算术与比较在 `shape` 不一致时都抛 `ValueError` | `test/operation/test_memory_operation.py::test_memory_shape_mismatch` |
+| ME-015 | 运算符 | 混合 `dtype` 提升 | `lhs.shape == rhs.shape` | `Memory([1], NumericType.Int32) + Memory([1], NumericType.Float32)` | 返回 `dtype=NumericType.Float32` 的 `Memory` | `test/symbol_variable/test_memory.py::test_memory_mixed_dtype_promotes_to_highest_precision` |
+| ME-016 | 运算符 | 标量类型非法 | N/A | `mem + \"1\"` | 抛 `TypeError` | `test/operation/test_memory_operation.py::test_memory_scalar_type_error` |
 | ME-017 | 构造 | 默认 stride 行主序 | N/A | `Memory([2, 3, 4], NumericType.Float32)` | 生成 `[12, 4, 1]` | `test_default_stride_generated_row_major` |
 | ME-018 | 构造 | 符号维度默认 stride | N/A | `Memory([SymbolDim(\"M\"), SymbolDim(\"K\"), SymbolDim(\"N\")], NumericType.Float32)` | `get_stride()` 返回 `[SymbolDim(\"K\") * SymbolDim(\"N\"), SymbolDim(\"N\"), 1]`，`str/repr` 序列化为 `Shape(K*N, N, 1)` | `test_default_stride_symbolic_expression_repr` |
 | ME-019 | 构造 | 字符串形状默认 stride | N/A | `Memory([\"M\", \"K\", \"N\"], NumericType.Float32)` | `get_stride()` 返回动态 `SymbolDim` 分量，`str/repr` 序列化为 `Shape(K*N, N, 1)` | `test_default_stride_symbolic_expression_from_strings` |
 | ME-020 | 职责边界 | memory 相关单值整数 symbol 归属 | 已存在单个维度或步幅分量 | 在 `Memory` 场景中使用 `N`、`K*N`、`1` 这类分量 | 本文件仅要求 `SymbolShape/SymbolDim` 保持分量语义；dialect 层类型表达由 `spec/dialect/symbol.md` 负责 | `test_dynamic_shape_stride`、`test_default_stride_symbolic_expression_repr`、`test_default_stride_symbolic_expression_from_strings`、`test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect` |
+| ME-021 | 运算符 | 标量浮点提升 | `mem.dtype=NumericType.Int32` | `mem + 1.5` / `mem * 1.5` | 结果 `dtype=NumericType.Float32` | `test/symbol_variable/test_memory.py::test_memory_float_scalar_promotes_to_highest_precision` |
+| ME-022 | 运算符 | 除法提升 | `lhs.shape == rhs.shape` | `lhs / rhs` / `lhs // rhs` | `/` 与 `//` 均返回 `Memory`，并使用相同的最高精度 `dtype` 规则 | `test/symbol_variable/test_memory.py::test_memory_division_uses_highest_precision_dtype` |
+| ME-023 | 运算符 | reflected 标量算术 | `mem` 已构造完成 | `2 + mem` / `2 - mem` / `2 * mem` / `2 / mem` / `2 // mem` | reflected 变体与正向运算使用相同的 `dtype` 提升与元数据继承规则 | `test/symbol_variable/test_memory.py::test_memory_reflected_arithmetic_uses_same_promotion_rule` |
+| ME-024 | 运算符 | 非法对象操作数 | N/A | `mem + object()` | 抛 `TypeError` | `test/symbol_variable/test_memory.py::test_memory_invalid_operand_type_error` |

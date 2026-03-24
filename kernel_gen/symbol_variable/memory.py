@@ -26,6 +26,75 @@ from .symbol_dim import SymbolDim
 from .symbol_shape import SymbolShape
 from .type import Farmat, NumericType
 
+_NUMERIC_TYPE_ORDER = [
+    NumericType.Bool,
+    NumericType.Int8,
+    NumericType.Uint8,
+    NumericType.Int16,
+    NumericType.Uint16,
+    NumericType.Int32,
+    NumericType.Uint32,
+    NumericType.Int64,
+    NumericType.Uint64,
+    NumericType.Float16,
+    NumericType.BFloat16,
+    NumericType.Float32,
+    NumericType.Float64,
+]
+_NUMERIC_TYPE_RANK = {dtype: index for index, dtype in enumerate(_NUMERIC_TYPE_ORDER)}
+
+
+def _promote_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
+    """选择更高精度的 NumericType。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 按公开顺序返回精度更高的 NumericType。
+
+    使用示例:
+    - _promote_dtype(NumericType.Int16, NumericType.Float32)
+
+    关联文件:
+    - spec: spec/symbol_variable/memory.md
+    - test: test/symbol_variable/test_memory.py
+    - test: test/operation/test_memory_operation.py
+    - 功能实现: kernel_gen/symbol_variable/memory.py
+    """
+    if lhs not in _NUMERIC_TYPE_RANK or rhs not in _NUMERIC_TYPE_RANK:
+        raise TypeError("Unsupported NumericType for Memory operation")
+    return lhs if _NUMERIC_TYPE_RANK[lhs] >= _NUMERIC_TYPE_RANK[rhs] else rhs
+
+
+def _scalar_to_dtype(value: object) -> NumericType:
+    """将 Python 标量映射到公开 NumericType。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - bool -> NumericType.Bool
+    - int -> NumericType.Int32
+    - float -> NumericType.Float32
+
+    使用示例:
+    - _scalar_to_dtype(1.5)
+
+    关联文件:
+    - spec: spec/symbol_variable/memory.md
+    - test: test/symbol_variable/test_memory.py
+    - test: test/operation/test_memory_operation.py
+    - 功能实现: kernel_gen/symbol_variable/memory.py
+    """
+    if isinstance(value, bool):
+        return NumericType.Bool
+    if isinstance(value, int):
+        return NumericType.Int32
+    if isinstance(value, float):
+        return NumericType.Float32
+    raise TypeError("Unsupported scalar type for Memory operation")
+
 
 @dataclass(frozen=True)
 class LocalSpaceMeta:
@@ -368,50 +437,6 @@ class Memory:
         if self.shape.get_values() != other.shape.get_values():
             raise ValueError("Memory shape mismatch")
 
-    def _ensure_same_dtype(self, other: "Memory") -> None:
-        """校验 Memory 数据类型兼容性。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 当前实现仅允许 dtype 完全一致。
-
-        使用示例:
-        - mem._ensure_same_dtype(other)
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        if self.dtype is not other.dtype:
-            raise TypeError("Memory dtype mismatch")
-
-    def _ensure_scalar_compatible(self, value: object) -> None:
-        """校验标量输入兼容性。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 阶段一仅支持 int 标量，且需与 dtype 兼容。
-
-        使用示例:
-        - mem._ensure_scalar_compatible(1)
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        if isinstance(value, bool):
-            value = int(value)
-        if not isinstance(value, int):
-            raise TypeError("Unsupported scalar type for Memory operation")
-        if self.dtype not in (NumericType.Int32, NumericType.Float32):
-            raise TypeError("Scalar incompatible with Memory dtype")
-
     def _clone_symbol_list(self, value) -> "SymbolShape | None":
         """克隆符号列表对象。
 
@@ -461,7 +486,8 @@ class Memory:
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 支持 Memory/Memory 与 Memory/int，返回 Memory。
+        - 支持 Memory/Memory 与 Memory/bool|int|float，返回 Memory。
+        - Memory/Memory 与 Memory/标量都按公开 NumericType 顺序提升结果 dtype。
 
         使用示例:
         - mem._binary_arithmetic(other)
@@ -473,10 +499,11 @@ class Memory:
         """
         if isinstance(other, Memory):
             self._ensure_same_shape(other)
-            self._ensure_same_dtype(other)
-            return self._clone_with_dtype(self.dtype)
-        self._ensure_scalar_compatible(other)
-        return self._clone_with_dtype(self.dtype)
+            promoted = _promote_dtype(self.dtype, other.dtype)
+            return self._clone_with_dtype(promoted)
+        scalar_dtype = _scalar_to_dtype(other)
+        promoted = _promote_dtype(self.dtype, scalar_dtype)
+        return self._clone_with_dtype(promoted)
 
     def _binary_compare(self, other: object) -> "Memory":
         """逐元素比较运算入口。
@@ -485,7 +512,8 @@ class Memory:
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 支持 Memory/Memory 与 Memory/int，返回 predicate dtype。
+        - 支持 Memory/Memory 与 Memory/bool|int|float，返回 predicate dtype。
+        - Memory/Memory 需保持 shape 一致；标量输入需能映射到公开 NumericType。
 
         使用示例:
         - mem._binary_compare(other)
@@ -497,9 +525,8 @@ class Memory:
         """
         if isinstance(other, Memory):
             self._ensure_same_shape(other)
-            self._ensure_same_dtype(other)
             return self._clone_with_dtype(NumericType.Int32)
-        self._ensure_scalar_compatible(other)
+        _scalar_to_dtype(other)
         return self._clone_with_dtype(NumericType.Int32)
 
     def __add__(self, other: object) -> "Memory":
@@ -509,7 +536,8 @@ class Memory:
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 支持 Memory/Memory 与 Memory/int。
+        - 支持 Memory/Memory 与 Memory/bool|int|float。
+        - 标量输入先映射到公开 NumericType，再按同一提升规则参与运算。
 
         使用示例:
         - mem + 1
@@ -528,7 +556,8 @@ class Memory:
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 支持 int + Memory。
+        - 支持 bool|int|float + Memory。
+        - reflected 路径与正向加法使用相同的 dtype 提升规则。
 
         使用示例:
         - 1 + mem
@@ -547,7 +576,8 @@ class Memory:
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 支持 Memory/Memory 与 Memory/int。
+        - 支持 Memory/Memory 与 Memory/bool|int|float。
+        - 标量输入先映射到公开 NumericType，再按同一提升规则参与运算。
 
         使用示例:
         - mem - 1
@@ -566,7 +596,8 @@ class Memory:
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 支持 int - Memory。
+        - 支持 bool|int|float - Memory。
+        - reflected 路径与正向减法使用相同的 dtype 提升规则。
 
         使用示例:
         - 1 - mem
@@ -585,7 +616,8 @@ class Memory:
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 支持 Memory/Memory 与 Memory/int。
+        - 支持 Memory/Memory 与 Memory/bool|int|float。
+        - 标量输入先映射到公开 NumericType，再按同一提升规则参与运算。
 
         使用示例:
         - mem * 2
@@ -604,7 +636,8 @@ class Memory:
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 支持 int * Memory。
+        - 支持 bool|int|float * Memory。
+        - reflected 路径与正向乘法使用相同的 dtype 提升规则。
 
         使用示例:
         - 2 * mem
@@ -623,7 +656,8 @@ class Memory:
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 支持 Memory/Memory 与 Memory/int。
+        - 支持 Memory/Memory 与 Memory/bool|int|float。
+        - 标量输入先映射到公开 NumericType，再按同一提升规则参与运算。
 
         使用示例:
         - mem / 2
@@ -642,10 +676,51 @@ class Memory:
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 支持 int / Memory。
+        - 支持 bool|int|float / Memory。
+        - reflected 路径与正向除法使用相同的 dtype 提升规则。
 
         使用示例:
         - 2 / mem
+
+        关联文件:
+        - spec: spec/symbol_variable/memory.md
+        - test: test/operation/test_memory_operation.py
+        - 功能实现: kernel_gen/symbol_variable/memory.py
+        """
+        return self._binary_arithmetic(other)
+
+    def __floordiv__(self, other: object) -> "Memory":
+        """逐元素整除。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 支持 Memory/Memory 与 Memory/bool|int|float。
+        - 标量输入先映射到公开 NumericType，再按同一提升规则参与运算。
+
+        使用示例:
+        - mem // 2
+
+        关联文件:
+        - spec: spec/symbol_variable/memory.md
+        - test: test/operation/test_memory_operation.py
+        - 功能实现: kernel_gen/symbol_variable/memory.py
+        """
+        return self._binary_arithmetic(other)
+
+    def __rfloordiv__(self, other: object) -> "Memory":
+        """逐元素反向整除。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 支持 bool|int|float // Memory。
+        - reflected 路径与正向整除使用相同的 dtype 提升规则。
+
+        使用示例:
+        - 2 // mem
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
@@ -661,7 +736,8 @@ class Memory:
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 支持 Memory/Memory 与 Memory/int，返回 predicate dtype。
+        - 支持 Memory/Memory 与 Memory/bool|int|float，返回 predicate dtype。
+        - 标量输入需能映射到公开 NumericType；结果 dtype 固定为 NumericType.Int32。
 
         使用示例:
         - mem == other
@@ -680,7 +756,8 @@ class Memory:
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 支持 Memory/Memory 与 Memory/int，返回 predicate dtype。
+        - 支持 Memory/Memory 与 Memory/bool|int|float，返回 predicate dtype。
+        - 标量输入需能映射到公开 NumericType；结果 dtype 固定为 NumericType.Int32。
 
         使用示例:
         - mem != other
@@ -699,7 +776,8 @@ class Memory:
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 支持 Memory/Memory 与 Memory/int，返回 predicate dtype。
+        - 支持 Memory/Memory 与 Memory/bool|int|float，返回 predicate dtype。
+        - 标量输入需能映射到公开 NumericType；结果 dtype 固定为 NumericType.Int32。
 
         使用示例:
         - mem < other
@@ -718,7 +796,8 @@ class Memory:
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 支持 Memory/Memory 与 Memory/int，返回 predicate dtype。
+        - 支持 Memory/Memory 与 Memory/bool|int|float，返回 predicate dtype。
+        - 标量输入需能映射到公开 NumericType；结果 dtype 固定为 NumericType.Int32。
 
         使用示例:
         - mem <= other
@@ -737,7 +816,8 @@ class Memory:
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 支持 Memory/Memory 与 Memory/int，返回 predicate dtype。
+        - 支持 Memory/Memory 与 Memory/bool|int|float，返回 predicate dtype。
+        - 标量输入需能映射到公开 NumericType；结果 dtype 固定为 NumericType.Int32。
 
         使用示例:
         - mem > other
@@ -756,7 +836,8 @@ class Memory:
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 支持 Memory/Memory 与 Memory/int，返回 predicate dtype。
+        - 支持 Memory/Memory 与 Memory/bool|int|float，返回 predicate dtype。
+        - 标量输入需能映射到公开 NumericType；结果 dtype 固定为 NumericType.Int32。
 
         使用示例:
         - mem >= other
