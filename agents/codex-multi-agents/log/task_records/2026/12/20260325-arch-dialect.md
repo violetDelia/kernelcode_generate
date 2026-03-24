@@ -1,0 +1,122 @@
+- 时间：`2026-03-25 12:00:00 +0800`
+- 经办人：`摸鱼小分队`
+- 任务：`T-20260325-179b3d18`
+- 任务目标：在授权 worktree 内新增并收敛 `arch dialect` spec，定义执行维度查询、动态内存入口与 kernel 启动描述的公开接口、IR 形式、类型约束、verify 边界与测试清单。
+- 改动：
+  - 新增 `spec/dialect/arch.md`，定义 `arch.get_block_id`、`arch.get_block_num`、`arch.get_thread_id`、`arch.get_thread_num`、`arch.get_subthread_id`、`arch.get_subthread_num`、`arch.get_dynamic_memory(memory_space)`、`arch.launch_kernel(name, block, thread, subthread)` 的职责边界、IR 文本示例与 parse/print 口径。
+  - 在 spec 中明确六个查询 op 的固定结果类型分别为 `!symbol.int<"block_id">`、`!symbol.int<"block_num">`、`!symbol.int<"thread_id">`、`!symbol.int<"thread_num">`、`!symbol.int<"subthread_id">`、`!symbol.int<"subthread_num">`，并明确 `arch.get_dynamic_memory` 返回 `!nn.memory<[?], [1], i8, #nn.space<space>>` 的约束以及 `arch.launch_kernel` 的名称、operand 类型、静态非法规模错误路径。
+  - 补齐 `test/dialect/test_arch_dialect.py` 的测试目标与 `TC-ARCH-001` 至 `TC-ARCH-011` 用例映射，覆盖固定结果类型、动态 memory verifier、launch_kernel 错误路径与 parse/print round-trip。
+- 结论：已完成 spec 阶段收敛；本轮未修改实现或测试，也未运行测试。建议下一阶段创建实现任务，在 `kernel_gen/dialect/arch.py` 与 `test/dialect/test_arch_dialect.py` 中按 `TC-ARCH-001` 至 `TC-ARCH-011` 落地 dialect、verifier 与 parse/print 行为。
+- 时间：`2026-03-25 04:10:53 +0800`
+- 经办人：`朽木露琪亚`
+- 任务：`T-20260325-eac7f4e8`
+- 任务目标：在授权 worktree 内按 `spec/dialect/arch.md` 实现 `arch` dialect，并完成 `TC-ARCH-001` 至 `TC-ARCH-011` 对应测试闭环。
+- 改动：
+  - 新增 `kernel_gen/dialect/arch.py`，落地 `arch.get_block_id/get_block_num/get_thread_id/get_thread_num/get_subthread_id/get_subthread_num`、`arch.get_dynamic_memory`、`arch.launch_kernel`，补齐自定义 `parse/print`、固定结果类型与 verifier 约束。
+  - 新增 `test/dialect/test_arch_dialect.py`，按 `TC-ARCH-001` 至 `TC-ARCH-011` 建立固定结果类型、动态 memory 合法/非法路径、launch_kernel 合法/错误路径与 parse/print round-trip 测试。
+  - 执行 `pytest -q test/dialect/test_arch_dialect.py`，结果 `11 passed`。
+- 结论：已完成本轮实现与测试闭环；`arch` dialect 的公开文本语法、类型约束与错误路径已按 spec 落地。建议下一阶段创建严格复审任务，重点核对 `spec/实现/测试` 三者的一一映射、错误信息口径和 `kernel_gen/dialect/__init__.py` 是否需要在后续公共导出任务中补齐。
+- 时间：`2026-03-25 04:14:49 +0800`
+- 经办人：`李白`
+- 任务：`T-20260325-cc930f65`
+- 任务目标：只读复审 `arch dialect` 链路，核对 `spec/dialect/arch.md`、`kernel_gen/dialect/arch.py`、`test/dialect/test_arch_dialect.py` 的映射闭环、错误路径口径与公共导出边界，并确认 `TC-ARCH-001..011` 是否与实现/测试一致。
+- 改动：
+  - 只读核对 `spec/dialect/arch.md` 中 `TC-ARCH-001..011` 的测试目标与用例映射，确认其与 `test/dialect/test_arch_dialect.py` 的 11 个测试函数一一对应。
+  - 只读核对 `kernel_gen/dialect/arch.py` 的固定结果类型、`arch.get_dynamic_memory` verifier、`arch.launch_kernel` verifier、自定义 parse/print 与 Python 参数类型提示，确认模块内公开语义与 spec 基本一致。
+  - 额外核对公共导出边界，发现 `kernel_gen/dialect/__init__.py` 仍只导出 `nn` dialect，未导出 `Arch` 及其 op，当前测试也未覆盖 `from kernel_gen.dialect import Arch` 这一包级入口。
+- 结论：`需修改`。`spec/dialect/arch.md`、`kernel_gen/dialect/arch.py` 与 `test/dialect/test_arch_dialect.py` 三者内部闭环基本成立，`TC-ARCH-001..011` 也能对应当前实现与测试；但任务要求同时核对“公共导出边界”，而 `kernel_gen/dialect/__init__.py` 尚未导出 `Arch` / `ArchGetBlockIdOp` / `ArchGetDynamicMemoryOp` / `ArchLaunchKernelOp` 等公共符号，导致包级公开入口未闭环，现有测试也无法证明该边界成立。建议下一阶段创建最小改进任务：补齐 `kernel_gen/dialect/__init__.py` 的 arch 公开导出，并新增或收敛一条包级导入测试后再复审。本轮未复测，沿用链路内既有结果 `pytest -q test/dialect/test_arch_dialect.py` 为 `11 passed`。
+- 时间：`2026-03-25 04:17:45 +0800`
+- 经办人：`朽木露琪亚`
+- 任务：`T-20260325-eaaa76a3`
+- 任务目标：根据复审意见最小补齐 `kernel_gen/dialect/__init__.py` 的 `Arch` 包级导出，并在 `test/dialect/test_arch_dialect.py` 增加对应导入测试，不扩大改动范围。
+- 改动：
+  - 更新 `kernel_gen/dialect/__init__.py`，新增 `Arch`、`ArchGetBlockIdOp`、`ArchGetBlockNumOp`、`ArchGetThreadIdOp`、`ArchGetThreadNumOp`、`ArchGetSubthreadIdOp`、`ArchGetSubthreadNumOp`、`ArchGetDynamicMemoryOp`、`ArchLaunchKernelOp` 的包级导入与 `__all__` 导出。
+  - 更新 `test/dialect/test_arch_dialect.py`，新增 `kernel_gen.dialect` 包级导入断言测试 `test_arch_package_exports`，验证 `Arch` 与核心 op 可通过包级入口导入。
+  - 执行 `pytest -q test/dialect/test_arch_dialect.py`，结果 `12 passed`。
+- 结论：已按复审意见完成最小收敛，当前 `arch` 链路的包级公开入口与测试闭环已补齐。建议下一阶段创建复审任务，重点核对 `kernel_gen/dialect/__init__.py` 文档信息是否满足当前规范，以及新增包级导入测试是否足以证明公共导出边界。
+- 时间：`2026-03-25 04:27:47 +0800`
+- 经办人：`朽木露琪亚`
+- 任务：`T-20260325-5311dca3`
+- 任务目标：只修改 `test/dialect/test_arch_dialect.py`，将包级导出测试编号收敛为 `TC-ARCH-012`，并补齐 `kernel_gen/dialect/__init__.py` 中 9 个 arch 包级公开符号的导入/同一性断言。
+- 改动：
+  - 更新 `test/dialect/test_arch_dialect.py` 中 `test_arch_package_exports` 的测试编号注释，将其从 `TC-ARCH-011` 收敛为 `TC-ARCH-012`。
+  - 在同一测试中补齐 `ArchGetBlockNumOp`、`ArchGetThreadIdOp`、`ArchGetThreadNumOp`、`ArchGetSubthreadIdOp`、`ArchGetSubthreadNumOp` 的包级导入与同一性断言，使 9 个 arch 包级导出均被证明。
+  - 执行 `pytest -q test/dialect/test_arch_dialect.py`，结果 `12 passed`。
+- 结论：已按要求完成最小测试收敛，未修改 spec 与实现文件。建议下一阶段创建复审任务，重点核对 `TC-ARCH-012` 与公共导出边界映射是否充分、测试注释口径是否与当前链路一致。
+
+- 时间：`2026-03-25 04:20:41 +0800`
+- 经办人：`小李飞刀`
+- 任务：`T-20260325-bf716422`
+- 任务目标：严格只读复审 `arch dialect` 链路，重点核对包级导出边界、文档信息口径与新增导入测试是否充分。
+- 改动：无（只读核对 `spec/dialect/arch.md`、`kernel_gen/dialect/arch.py`、`kernel_gen/dialect/__init__.py`、`test/dialect/test_arch_dialect.py`）。
+- 结论：`需修改`。
+  - `kernel_gen/dialect/__init__.py` 的文档信息口径不闭环。该文件头声明“暴露 nn 与 arch dialect 的 type、attr 与 op 定义”，且 `__all__` 同时导出 `arch` 与 `nn` 公共符号，但关联文件只链接 `spec/dialect/arch.md` 与 `test/dialect/test_arch_dialect.py`，没有覆盖 `nn` 导出边界，也没有说明为什么一个包入口文件由单个 `arch` spec/test 承接，违反当前文档信息应与实际职责一致的要求。
+  - `test/dialect/test_arch_dialect.py` 中新增的 `test_arch_package_exports` 证明力度不足，并且与 spec 映射不一致。该测试注释复用 `TC-ARCH-011`，但 `spec/dialect/arch.md` 中 `TC-ARCH-011` 已用于 `arch` 方言 parse/print round-trip，不存在包级导出对应的用例编号，造成测试编号一对多；同时该测试只断言了 `Arch`、`ArchGetBlockIdOp`、`ArchGetDynamicMemoryOp`、`ArchLaunchKernelOp` 四个入口，而 `kernel_gen/dialect/__init__.py` 的 `__all__` 还公开了其余五个 `arch` 导出，当前测试不足以证明包级导出边界成立。
+- 结论补充：
+  - `spec/dialect/arch.md`、`kernel_gen/dialect/arch.py` 与 `test/dialect/test_arch_dialect.py` 对 `arch` 方言本体的 11 条用例基本一致，未发现本体实现层面的额外功能错误。
+  - 当前阻塞点集中在 `kernel_gen/dialect/__init__.py` 的公开职责未被独立 spec/test 正确承接，以及新增导入测试未覆盖其声明边界。
+- 下一步建议：
+  - 为 `kernel_gen/dialect/__init__.py` 的包级导出建立明确 spec 归属，或最小调整该文件头文档信息，避免以 `arch` 单文件 spec/test 代表整个包入口职责。
+  - 为包级导出测试分配独立用例编号，并补齐 `ArchGetBlockNumOp`、`ArchGetThreadIdOp`、`ArchGetThreadNumOp`、`ArchGetSubthreadIdOp`、`ArchGetSubthreadNumOp` 的导入断言；若要声明 `nn` 也属于该包入口公开职责，则还需明确其 spec/test 归属。
+
+- 时间：`2026-03-25 04:23:38 +0800`
+- 经办人：`咯咯咯`
+- 任务：`T-20260325-143f9d99`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-arch-dialect`，仅修改 `spec/dialect/arch.md`，最小收敛 `arch` 包级导出边界，明确 `kernel_gen/dialect/__init__.py` 的 spec 归属例外，并为包级导出测试建立独立编号与映射。
+- 改动：
+  - 更新 `spec/dialect/arch.md` 的文档信息、依赖与限制与边界，明确 `kernel_gen/dialect/__init__.py` 作为共享包入口文件属于本 spec 的包级导出例外，且本 spec 只约束其中 `arch` 公开符号，不延伸约束同文件中的 `nn` 导出。
+  - 更新 `spec/dialect/arch.md` 的测试目标与功能用例清单，新增独立编号 `TC-ARCH-012` 映射 `test_arch_package_exports`，不再在 spec 中复用 `TC-ARCH-011`。
+- 结论：已完成本轮 spec 最小收敛，改动范围仅限 `spec/dialect/arch.md`；未修改实现或测试文件，未复测。
+- 下一步建议：申请复审任务，重点核对 `spec/dialect/arch.md` 新增的包级导出例外说明是否足以支撑现有 `test_arch_package_exports`，并确认测试侧编号注释是否需要后续单独收敛。
+- 时间：`2026-03-25 04:25:45 +0800`
+- 经办人：`李白`
+- 任务：`T-20260325-76ff2e0b`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-arch-dialect`，只读严格复审 `spec/dialect/arch.md`、`kernel_gen/dialect/arch.py`、`kernel_gen/dialect/__init__.py`、`test/dialect/test_arch_dialect.py`，重点确认 `__init__.py` 的 spec 例外归属说明、`TC-ARCH-012` 与 `test_arch_package_exports` 的映射，以及包级导出边界是否被现有测试充分证明。
+- 改动：
+  - 只读核对 `spec/dialect/arch.md` 中对 `kernel_gen/dialect/__init__.py` 的例外归属说明，确认文档已在“文档信息”“依赖”“限制与边界”三处明确该共享包入口仅以 `arch` 公开符号为本 spec 的例外约束范围。
+  - 只读核对 `test/dialect/test_arch_dialect.py` 的新增包级导入测试，发现 `test_arch_package_exports` 的测试函数级注释仍写为 `TC-ARCH-011`，而 `spec/dialect/arch.md` 已将包级导出映射独立编号为 `TC-ARCH-012`。
+  - 只读核对 `kernel_gen/dialect/__init__.py` 与 `test_arch_package_exports` 的断言覆盖范围，发现当前测试仅验证 `Arch`、`ArchGetBlockIdOp`、`ArchGetDynamicMemoryOp`、`ArchLaunchKernelOp` 四个包级入口，未证明其余 `arch` 导出符号的包级公开边界。
+- 结论：`需修改`。
+  - `spec/dialect/arch.md` 中对 `kernel_gen/dialect/__init__.py` 的例外归属说明已较清晰，可以支撑“共享包入口文件但仅约束 arch 导出子集”的公开口径。
+  - 但 `TC-ARCH-012` 与 `test_arch_package_exports` 的映射当前不成立：`test/dialect/test_arch_dialect.py` 中该测试仍标注 `TC-ARCH-011`，与 `spec/dialect/arch.md` 的 `TC-ARCH-012 -> test_arch_package_exports` 不一致，违反 spec 与测试清单一一对应要求。
+  - 同时，包级导出边界尚未被现有测试充分证明。`kernel_gen/dialect/__init__.py` 当前导出了 `Arch`、六个 query op、`ArchGetDynamicMemoryOp`、`ArchLaunchKernelOp` 共九个 `arch` 公开符号，但 `test_arch_package_exports` 只覆盖其中四个断言，未覆盖 `ArchGetBlockNumOp`、`ArchGetThreadIdOp`、`ArchGetThreadNumOp`、`ArchGetSubthreadIdOp`、`ArchGetSubthreadNumOp`，也未校验 `__all__` 的 `arch` 子集是否完整暴露。
+  - 建议下一阶段创建最小改进任务：1）将 `test_arch_package_exports` 的注释编号收敛为 `TC-ARCH-012`；2）补齐其余五个 `arch` 包级导出断言，或以等效方式证明 `kernel_gen.dialect` 的 `arch` 公共导出边界与 spec 完全一致；随后再发起复审。本轮默认未复测，沿用链路内既有结果 `pytest -q test/dialect/test_arch_dialect.py` 为 `12 passed`。
+
+- 时间：`2026-03-25 04:31:20 +0800`
+- 经办人：`不要啊教练`
+- 任务：`T-20260325-7da5bfb7`
+- 任务目标：严格复审 `arch dialect` 链路，确认 `TC-ARCH-012` 映射、9 个包级公开符号证明力度，以及 `kernel_gen/dialect/__init__.py` 的导出边界与 spec 例外归属说明是否闭环。
+- 改动：
+  - 只读核对 `spec/dialect/arch.md`、`kernel_gen/dialect/arch.py`、`kernel_gen/dialect/__init__.py`、`test/dialect/test_arch_dialect.py` 的当前状态，重点比对 `TC-ARCH-012`、`test_arch_package_exports` 与 `__all__` 的 arch 导出子集。
+  - 额外核对 Python 参数类型提示，`kernel_gen/dialect/arch.py`、`kernel_gen/dialect/__init__.py`、`test/dialect/test_arch_dialect.py` 当前无缺失参数类型提示。
+- 结论：`需修改`。
+  - `TC-ARCH-012` 与 `test_arch_package_exports` 的映射当前只部分成立。`test/dialect/test_arch_dialect.py:446` 到 `test/dialect/test_arch_dialect.py:455` 已对 `Arch` 与其余 8 个 arch 包级公开符号逐一做 identity 断言，9 个公开符号“存在且指向实现对象”这一层已被证明，`spec/dialect/arch.md:301` 到 `spec/dialect/arch.md:315` 的用例编号映射本身没有漂移。
+  - 但“包级导出边界”仍未被充分证明。`spec/dialect/arch.md:41` 明确把 `kernel_gen/dialect/__init__.py` 的例外约束限定为 9 个 arch 公开符号的导出边界，而 `kernel_gen/dialect/__init__.py:47` 到 `kernel_gen/dialect/__init__.py:72` 实际通过 `__all__` 暴露 arch 与 nn 的共享包入口；现有 `test_arch_package_exports` 没有断言 `__all__` 中 arch 子集恰好等于这 9 个符号，也没有验证不存在额外 arch 导出。当前测试证明的是“可从包入口导入并与实现同一”，不是 spec 要求的“包级导出边界闭环”。
+  - 修改方向：最小补充 `test_arch_package_exports`，直接校验 `kernel_gen.dialect.__all__` 中的 arch 子集与 spec 列出的 9 个符号完全一致；若不希望把 `__all__` 视为公开边界，则需先收窄 `spec/dialect/arch.md` 对“导出边界”的表述，再发起复审。
+- 时间：`2026-03-25 04:33:39 +0800`
+- 经办人：`朽木露琪亚`
+- 任务：`T-20260325-bbb230c8`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-arch-dialect`，仅修改 `test/dialect/test_arch_dialect.py`，为 `test_arch_package_exports` 最小补齐 `kernel_gen.dialect.__all__` 的 arch 导出边界证明，并执行目标 pytest。
+- 改动：
+  - 更新 `test/dialect/test_arch_dialect.py`，在 `test_arch_package_exports` 中新增 `expected_arch_exports` 集合断言，直接校验 `kernel_gen.dialect.__all__` 至少包含 spec 列出的 9 个 arch 公开符号。
+  - 在同一测试中新增 `name.startswith("Arch")` 的 `__all__` 子集等值断言，证明包级导出的 arch 子集恰好为 `Arch` 与 8 个 arch op，避免缺失或额外 arch 导出未被发现。
+  - 同步刷新 `TC-ARCH-012` 的最近一次运行测试时间与最近一次运行成功时间为 `2026-03-25 04:33:15 +0800`。
+  - 执行 `pytest -q test/dialect/test_arch_dialect.py`，结果 `12 passed`。
+- 结论：已按本轮任务要求完成最小测试收敛，未修改 spec 与实现文件。`test_arch_package_exports` 现已同时证明 9 个 arch 包级公开符号的对象同一性与 `kernel_gen.dialect.__all__` 的导出边界。建议下一阶段创建严格复审任务，重点核对 `TC-ARCH-012` 与当前 `__all__` 断言的闭环是否已充分满足 spec 的包级导出边界要求。
+- 时间：`2026-03-25 04:38:22 +0800`
+- 经办人：`李白`
+- 任务：`T-20260325-32568539`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-arch-dialect`，只读最终严格复审 `spec/dialect/arch.md`、`kernel_gen/dialect/arch.py`、`kernel_gen/dialect/__init__.py`、`test/dialect/test_arch_dialect.py`，确认 `TC-ARCH-012`、9 个 identity 断言与 `__all__` 边界断言已共同充分证明包级导出边界，且与 spec 的例外归属说明闭环。
+- 改动：
+  - 只读核对 `spec/dialect/arch.md`，确认文档已在“文档信息”“依赖”“限制与边界”中明确 `kernel_gen/dialect/__init__.py` 属于共享包入口例外，且本 spec 仅约束 `Arch`、6 个 query op、`ArchGetDynamicMemoryOp`、`ArchLaunchKernelOp` 共 9 个 `arch` 公开符号的导出边界。
+  - 只读核对 `test/dialect/test_arch_dialect.py`，确认 `TC-ARCH-012 -> test_arch_package_exports` 映射成立；测试内 9 个 package import identity 断言与 `name.startswith("Arch")` 的 `__all__` 等值断言，能够同时证明“导出对象同一性”与“无缺失、无额外 arch 导出”。
+  - 只读核对 `kernel_gen/dialect/__init__.py` 与 `kernel_gen/dialect/arch.py`，确认当前 `__all__` 的 arch 子集与 spec 列举完全一致，且本轮审查范围内 Python 函数参数类型提示无缺失；本轮未复测，沿用链路内既有结果 `pytest -q test/dialect/test_arch_dialect.py` 为 `12 passed`。
+- 结论：`通过`。当前 `spec/dialect/arch.md` 对共享包入口的例外归属说明、`kernel_gen/dialect/__init__.py` 的 arch 导出集合，以及 `test_arch_package_exports` 的 9 个 identity 断言和 `__all__` 边界断言已经闭环一致，足以证明 `TC-ARCH-012` 所要求的包级导出边界。建议下一步由神秘人按主分支 TODO 推进本链路的收尾或归档，无需再拆分新的 arch 改进任务。
+- 时间：`2026-03-25 04:40:25 +0800`
+- 经办人：`我不是牛马`
+- 任务：`T-20260325-f516486e`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-arch-dialect`，将 arch dialect 链路已通过复审的业务改动按限定范围合入 `main`。
+- 改动：
+  - 核对 worktree 仅存在 `spec/dialect/arch.md`、`kernel_gen/dialect/arch.py`、`kernel_gen/dialect/__init__.py`、`test/dialect/test_arch_dialect.py` 与对应任务记录的变更，未发现其他进行中业务文件。
+  - 计划将以上 4 个业务文件与任务记录一并合入主分支，并在主分支执行 `pytest -q test/dialect/test_arch_dialect.py` 作为验证。
+- 结论：满足限定范围合并前提，可执行主分支合并与验证。
