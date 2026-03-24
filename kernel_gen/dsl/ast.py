@@ -376,7 +376,7 @@ class FunctionAST:
     py_ast: object | None = None
     diagnostics: list[Diagnostic] = field(default_factory=list)
 
-    def iter_inputs(self) -> Iterable[TensorAST | ScalarArgAST]:
+    def iter_inputs(self: FunctionAST) -> Iterable[TensorAST | ScalarArgAST]:
         """迭代输入参数。
 
         创建者: 小李飞刀
@@ -415,17 +415,17 @@ class AstParseError(Exception):
     - 功能实现: kernel_gen/dsl/ast.py
     """
 
-    def __init__(self, message: str, diagnostics: list[Diagnostic]) -> None:
+    def __init__(self: AstParseError, message: str, diagnostics: list[Diagnostic]) -> None:
         super().__init__(message)
         self.message = message
         self.diagnostics = diagnostics
 
-    def __str__(self) -> str:
+    def __str__(self: AstParseError) -> str:
         return self.message
 
 
 class _ParseFailure(Exception):
-    def __init__(self, message: str, location: SourceLocation | None) -> None:
+    def __init__(self: _ParseFailure, message: str, location: SourceLocation | None) -> None:
         super().__init__(message)
         self.message = message
         self.location = location
@@ -463,6 +463,7 @@ _BIN_OP_MAP: dict[type, str] = {
     py_ast.Sub: "sub",
     py_ast.Mult: "mul",
     py_ast.Div: "div",
+    py_ast.FloorDiv: "floordiv",
 }
 
 _CMP_OP_MAP: dict[type, str] = {

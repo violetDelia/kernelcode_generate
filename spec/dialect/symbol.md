@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-定义 `symbol dialect` 的类型与基础构件，用于在 IR 中显式表示“带符号值语义的整型标量”。该方言的核心目标是让类型本身携带一个符号表达，例如 `!symbol.int<"N">` 表示“这是一个整数值，其值语义为符号 `N`”。本方言同时作为 memory 相关符号标量语义的唯一归属：`shape`、`stride`、`offset`、`size`、循环边界等位置只要进入 IR 并需要表达单个整数符号值，就统一落到 `symbol dialect`。在此基础上，本方言允许最小范围的整数符号算术与比较 op，用于在 IR 中显式表达 `symbol.int` 标量之间的加、减、乘以及比较计算，并提供将 `symbol.int` 显式转换为 `f32` 的 `symbol.to_float` op。该方言不负责张量、内存容器、通用控制流或超出最小整数符号算术/比较范围的数值计算语义。
+定义 `symbol dialect` 的类型与基础构件，用于在 IR 中显式表示“带符号值语义的整型标量”。该方言的核心目标是让类型本身携带一个符号表达，例如 `!symbol.int<"N">` 表示“这是一个整数值，其值语义为符号 `N`”。本方言同时作为 memory 相关符号标量语义的唯一归属：`shape`、`stride`、`offset`、`size`、循环边界等位置只要进入 IR 并需要表达单个整数符号值，就统一落到 `symbol dialect`。在此基础上，本方言允许最小范围的整数符号算术与比较 op，用于在 IR 中显式表达 `symbol.int` 标量之间的加、减、乘、除、整除以及比较计算，并提供将 `symbol.int` 显式转换为 `f32` 的 `symbol.to_float` op。该方言不负责张量、内存容器、通用控制流或超出最小整数符号算术/比较范围的数值计算语义。
 
 ## 文档信息
 
@@ -26,7 +26,7 @@
 - 收敛 memory 相关符号标量的方言归属：`Memory`、`MemoryType`、`dma` 相关 op 若需要表达单个维度、步幅、偏移或切片大小的整数符号语义，应统一复用 `SymbolExprAttr` / `SymbolValueType`，而不是在各自 spec 中再定义一套标量 symbol type。
 - 提供从 memory type 读取单个维度或步幅并返回 symbol value 的查询接口，避免其他方言重复定义 `dim/stride -> value` 读取语义。
 - 为后续 `nn`、`dma`、`kernel`、`dsl` 等方言提供统一的符号值口径，避免每个方言各自维护一套符号标量表达。
-- 提供最小整数符号算术与比较接口，使 `!symbol.int<"expr">` 标量可在方言内完成基础加、减、乘组合与相等/大小关系判断，而无需回退到其他算术方言。
+- 提供最小整数符号算术与比较接口，使 `!symbol.int<"expr">` 标量可在方言内完成基础加、减、乘、除、整除组合与相等/大小关系判断，而无需回退到其他算术方言。
 - 保持类型表达尽量简单，优先服务开发者理解和方言间协同，而不是追求复杂的符号推导系统。
 - 本文件中的“符号值”指与 SSA value 绑定的单个整数值语义表达，可以是具名符号、整型表达式或整型常量，如 `N`、`M + 1`、`B * K`、`1`、`2`、`3`。
 
@@ -47,7 +47,7 @@
 - `symbol.get_dim` / `symbol.get_stride` 的轴号当前必须是静态整数索引；越界、负数或非整数轴号必须报错。
 - 本方言暂不定义“未知但无名字”的匿名符号值；若需要动态未知值，应优先使用具名符号或由其他方言以 SSA value 传递。
 - 当前只定义整数语义，不区分 `int/int8/int16/int32/int64` 等具体整型宽度，也不定义 `index`、浮点或其他非整型 symbol 类型。
-- 当前最小算术/比较范围仅包含 `symbol.add`、`symbol.sub`、`symbol.mul`、`symbol.eq`、`symbol.ne`、`symbol.lt`、`symbol.le`、`symbol.gt`、`symbol.ge`；不定义除法、取模、按位运算、布尔逻辑组合、广播或张量级算术。
+- 当前最小算术/比较范围仅包含 `symbol.add`、`symbol.sub`、`symbol.mul`、`symbol.div`、`symbol.floordiv`、`symbol.eq`、`symbol.ne`、`symbol.lt`、`symbol.le`、`symbol.gt`、`symbol.ge`；不定义取模、按位运算、布尔逻辑组合、广播或张量级算术。
 - 当前仅定义 `symbol.to_float` 将 `!symbol.int<"...">` 转为 `f32`；不定义其他符号值到浮点/整数的转换规则。
 
 ## 公开接口
@@ -228,7 +228,7 @@ SymbolValueType.from_expr("N")
 - 返回类型：归属规则定义。
 - 限制：只定义 memory 元信息中的单值整型 symbol 语义，不定义 memory 容器、memory type 或 memory space。
 
-### `symbol.add` / `symbol.sub` / `symbol.mul`
+### `symbol.add` / `symbol.sub` / `symbol.mul` / `symbol.div` / `symbol.floordiv`
 
 功能说明：
 
@@ -236,6 +236,8 @@ SymbolValueType.from_expr("N")
 - `symbol.add` 表示两个 `!symbol.int<"expr">` 标量的整数加法。
 - `symbol.sub` 表示两个 `!symbol.int<"expr">` 标量的整数减法。
 - `symbol.mul` 表示两个 `!symbol.int<"expr">` 标量的整数乘法。
+- `symbol.div` 表示两个 `!symbol.int<"expr">` 标量的符号除法；若输入可静态化简为整除结果，结果类型可收敛为常量整数，否则保持 `/` 表达式文本。
+- `symbol.floordiv` 表示两个 `!symbol.int<"expr">` 标量的符号整除；静态整数输入按 Python `//` 语义收敛，动态输入保持 `//` 表达式文本。
 
 参数说明：
 
@@ -249,6 +251,8 @@ SymbolValueType.from_expr("N")
 %sum = symbol.add %m, %one : !symbol.int<"M">, !symbol.int<"1"> -> !symbol.int<"M + 1">
 %diff = symbol.sub %n, %one : !symbol.int<"N">, !symbol.int<"1"> -> !symbol.int<"N - 1">
 %prod = symbol.mul %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> !symbol.int<"M*N">
+%quot = symbol.div %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> !symbol.int<"M / N">
+%floor = symbol.floordiv %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> !symbol.int<"M // N">
 ```
 
 注意事项：
@@ -256,7 +260,9 @@ SymbolValueType.from_expr("N")
 - `lhs`、`rhs` 与结果都必须是 `!symbol.int<"expr">`；不接受普通整数、浮点、`index` 或其他 dialect 标量类型。
 - 这组 op 只表达整数符号值之间的标量算术，不承担张量逐元素计算、广播、循环控制或 memory 语义。
 - verifier 只约束类型一致性、结果类型合法性与 parse/print 稳定性；不要求在方言内证明不同表达式的数学等价性。
-- `symbol.add/sub/mul` 可以用于构造后续 `symbol.for` 边界、memory 元信息或其他要求 `!symbol.int<"...">` 的整数标量值，但不会自动化简表达式。
+- `symbol.add/sub/mul/div/floordiv` 可以用于构造后续 `symbol.for` 边界、memory 元信息或其他要求 `!symbol.int<"...">` 的整数标量值，但不会要求 dialect 内部完成复杂化简。
+- `symbol.div` 的结果文本允许包含 `/`；当输入是可整除的静态整数表达式时，可直接打印化简后的整数常量。
+- `symbol.floordiv` 的结果文本允许包含 `//`；静态整数输入按 Python `//` 语义化简。
 - parse/print 必须稳定遵循 `symbol.<op> %lhs, %rhs : !symbol.int<"...">, !symbol.int<"..."> -> !symbol.int<"...">` 的公开文本形式。
 - 错误信息至少应包含具体 op 名称、失败原因以及出错操作数或结果类型。
 
@@ -455,7 +461,7 @@ symbol.for %i = %start to %end step %step
 - 验证 legacy 宽度整型文本、空表达式、非法表达式的错误路径。
 - 验证 parse/print 循环稳定。
 - 验证 memory 相关标量语义复用同一套整数-only symbol 规则，包括具名维度表达、乘法步幅表达与常量步幅表达。
-- 验证 `symbol.add/sub/mul` 的最小整数符号算术语义、`!symbol.int<"...">` 类型约束、parse/print 稳定性与错误路径。
+- 验证 `symbol.add/sub/mul/div/floordiv` 的最小整数符号算术语义、`!symbol.int<"...">` 类型约束、parse/print 稳定性与错误路径。
 - 验证 `symbol.eq/ne/lt/le/gt/ge` 的最小整数符号比较语义、`!symbol.int<"..."> -> i1` 约束、parse/print 稳定性与错误路径。
 - 验证 `symbol.to_float` 的整数符号到 `f32` 转换语义、类型约束与 parse/print 稳定性。
 - 验证 `symbol.get_dim` / `symbol.get_stride` 能从 memory type 读取真实 dim/stride，并返回对应的 symbol value。
@@ -481,11 +487,11 @@ symbol.for %i = %start to %end step %step
 | TC-SYM-012 | 相等性 | 表达式不同 | 无 | 比较 `!symbol.int<"N">` 与 `!symbol.int<"M">` | 不相等 | `test_symbol_value_type_equality_depends_on_expr_only` |
 | TC-SYM-013 | memory 元信息标量 | 符号维度或步幅分量 | 无 | 解析 `#symbol.expr<"K*N">` 或 `!symbol.int<"N">` | 作为 memory 相关单值整数语义合法并稳定 round-trip | `test_symbol_expr_attr_round_trip`、`test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect` |
 | TC-SYM-014 | memory 元信息标量 | 常量步幅或常量维度分量 | 无 | 解析 `!symbol.int<"1">`、`!symbol.int<"2">`、`!symbol.int<"3">` | 作为常量整数值语义合法 | `test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect` |
-| TC-SYM-015 | `symbol.add/sub/mul` | 基础算术合法路径 | `lhs/rhs/result` 均为 `!symbol.int<"...">` | 构造 `symbol.add`、`symbol.sub`、`symbol.mul` | verifier 通过；返回 `!symbol.int<"...">` | `test_symbol_arith_ops_verify_success` |
-| TC-SYM-016 | `symbol.add/sub/mul` | parse/print 稳定 | 已实现公开文本语法 | parse 后再 print | 文本与结果类型稳定 | `test_symbol_arith_ops_round_trip` |
-| TC-SYM-017 | `symbol.add/sub/mul` | 非 symbol 类型非法 | 任一操作数或结果不是 `!symbol.int<"...">` | 构造并校验 op | verifier 报错 | `test_symbol_arith_ops_reject_non_symbol_int_types` |
-| TC-SYM-018 | `symbol.add/sub/mul` | 文本或结果签名非法 | 缺少结果类型、操作数数量错误或文本不完整 | parse / 构造并校验 op | parse/verifier 报错 | `test_symbol_arith_ops_reject_malformed_signatures` |
-| TC-SYM-019 | `symbol.add/sub/mul` | 错误信息闭环 | 触发类型或签名错误 | verifier / parse 失败 | 错误信息包含具体 op 名称与失败原因 | `test_symbol_arith_ops_error_messages_include_context` |
+| TC-SYM-015 | `symbol.add/sub/mul/div/floordiv` | 基础算术合法路径 | `lhs/rhs/result` 均为 `!symbol.int<"...">` | 构造 `symbol.add`、`symbol.sub`、`symbol.mul`、`symbol.div`、`symbol.floordiv` | verifier 通过；返回 `!symbol.int<"...">` | `test_symbol_arith_ops_verify_success` |
+| TC-SYM-016 | `symbol.add/sub/mul/div/floordiv` | parse/print 稳定 | 已实现公开文本语法 | parse 后再 print | 文本与结果类型稳定 | `test_symbol_arith_ops_round_trip` |
+| TC-SYM-017 | `symbol.add/sub/mul/div/floordiv` | 非 symbol 类型非法 | 任一操作数或结果不是 `!symbol.int<"...">` | 构造并校验 op | verifier 报错 | `test_symbol_arith_ops_reject_non_symbol_int_types` |
+| TC-SYM-018 | `symbol.add/sub/mul/div/floordiv` | 文本或结果签名非法 | 缺少结果类型、操作数数量错误或文本不完整 | parse / 构造并校验 op | parse/verifier 报错 | `test_symbol_arith_ops_reject_malformed_signatures` |
+| TC-SYM-019 | `symbol.add/sub/mul/div/floordiv` | 错误信息闭环 | 触发类型或签名错误 | verifier / parse 失败 | 错误信息包含具体 op 名称与失败原因 | `test_symbol_arith_ops_error_messages_include_context` |
 | TC-SYM-020 | `symbol.eq/ne/lt/le/gt/ge` | 基础比较合法路径 | `lhs/rhs` 为 `!symbol.int<"...">`，结果为 `i1` | 构造各比较 op | verifier 通过；返回 true/false 语义结果 | `test_symbol_compare_ops_verify_success` |
 | TC-SYM-021 | `symbol.eq/ne/lt/le/gt/ge` | parse/print 稳定 | 已实现公开文本语法 | parse 后再 print | 文本、谓词与结果类型稳定 | `test_symbol_compare_ops_round_trip` |
 | TC-SYM-022 | `symbol.eq/ne/lt/le/gt/ge` | 非 symbol 类型操作数非法 | 任一操作数不是 `!symbol.int<"...">` | 构造并校验 op | verifier 报错 | `test_symbol_compare_ops_reject_non_symbol_int_operands` |

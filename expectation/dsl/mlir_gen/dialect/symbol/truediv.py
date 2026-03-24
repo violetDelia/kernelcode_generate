@@ -1,14 +1,12 @@
 """DSL symbol.div expectation.
-[immutable-file]
+
 创建者: 榕
-最后一次更改: 榕
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 验证 `build_func_op` 可以将 Python `truediv(a, b)` 函数转换为 `FuncOp`。
-- 验证静态整数 runtime args 会被转换为携带具体值的 `SymbolValueType`。
-- 验证动态符号参数和符号混合常量参数会被转换为对应的符号整数类型。
-- 验证函数体内生成一个 `symbol.div` 和一个 `ReturnOp`。
-- 验证 `symbol.div` 结果类型与 `ReturnOp` 返回值类型都与期望值一致。
+- 验证静态整除、动态符号与混合输入在 lowering 后保持 `symbol.int` 语义。
+- 验证函数体内生成一个 `SymbolDivOp` 和一个 `ReturnOp`。
 
 使用示例:
 - python expectation/dsl/mlir_gen/dialect/symbol/truediv.py
@@ -19,7 +17,9 @@
 - 功能实现: kernel_gen/dsl/mlir_gen.py
 """
 
-import random
+from __future__ import annotations
+
+from collections.abc import Callable
 from pathlib import Path
 import sys
 
@@ -30,106 +30,76 @@ if str(REPO_ROOT) not in sys.path:
 from xdsl.dialects.func import FuncOp, ReturnOp
 
 from expectation.utils.compare import assert_dynamic_symbol_int, assert_static_symbol_int
-from expectation.utils.random import get_random_alpha_string
+from kernel_gen.dialect.symbol import SymbolDivOp
 from kernel_gen.dsl.mlir_gen import build_func_op
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
-lhs = random.randint(-1024, 1024)
-while lhs == 0:
-    lhs = random.randint(-1024, 1024)
-rhs = random.randint(-1024, 1024)
-while rhs == 0:
-    rhs = random.randint(-1024, 1024)
-dim_m = get_random_alpha_string()
-dim_n = get_random_alpha_string()
-symbol_lhs = SymbolDim(dim_m)
-symbol_rhs = SymbolDim(dim_n)
+LHS = 6
+RHS = 3
+SYMBOL_LHS = SymbolDim("M")
+SYMBOL_RHS = SymbolDim("N")
 
 
-def truediv_func(a, b):
+def truediv_func(a: int, b: int) -> int:
     c = a / b
     return c
 
 
-def truediv_func2(a, b):
+def truediv_func2(a: int, b: int) -> int:
     return a / b
 
 
-def _get_symbol_div_ops(func_op):
-    return [op for op in func_op.body.block.ops if getattr(op, "name", "") == "symbol.div"]
-
-
-def check_const_div_const(func):
-    """验证 c / c 会生成静态 symbol.int 返回值。"""
-    expected_expr = SymbolDim(lhs) / SymbolDim(rhs)
-
-    func_op = build_func_op(func, lhs, rhs)
+def check_const_div_const(func: Callable[[int, int], int]) -> None:
+    expected_expr = SymbolDim(LHS) / SymbolDim(RHS)
+    func_op = build_func_op(func, LHS, RHS)
     assert isinstance(func_op, FuncOp)
-
-    assert_static_symbol_int(func_op.args[0].type, lhs)
-    assert_static_symbol_int(func_op.args[1].type, rhs)
-
-    div_ops = _get_symbol_div_ops(func_op)
+    assert_static_symbol_int(func_op.args[0].type, LHS)
+    assert_static_symbol_int(func_op.args[1].type, RHS)
+    div_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolDivOp)]
     assert len(div_ops) == 1
     assert_static_symbol_int(div_ops[0].result.type, expected_expr.get_value())
-
     return_ops = [op for op in func_op.body.block.ops if isinstance(op, ReturnOp)]
     assert len(return_ops) == 1
     assert_static_symbol_int(return_ops[0].arguments[0].type, expected_expr.get_value())
 
 
-def check_dynamic_div_dynamic(func):
-    """验证 d / d 会生成动态符号表达式返回值。"""
-    expected_expr = symbol_lhs / symbol_rhs
-
-    func_op = build_func_op(func, symbol_lhs, symbol_rhs)
+def check_dynamic_div_dynamic(func: Callable[[int, int], int]) -> None:
+    expected_expr = "M / N"
+    func_op = build_func_op(func, SYMBOL_LHS, SYMBOL_RHS)
     assert isinstance(func_op, FuncOp)
-
-    assert_dynamic_symbol_int(func_op.args[0].type, symbol_lhs)
-    assert_dynamic_symbol_int(func_op.args[1].type, symbol_rhs)
-
-    div_ops = _get_symbol_div_ops(func_op)
+    assert_dynamic_symbol_int(func_op.args[0].type, SYMBOL_LHS)
+    assert_dynamic_symbol_int(func_op.args[1].type, SYMBOL_RHS)
+    div_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolDivOp)]
     assert len(div_ops) == 1
     assert_dynamic_symbol_int(div_ops[0].result.type, expected_expr)
-
     return_ops = [op for op in func_op.body.block.ops if isinstance(op, ReturnOp)]
     assert len(return_ops) == 1
     assert_dynamic_symbol_int(return_ops[0].arguments[0].type, expected_expr)
 
 
-def check_const_div_dynamic(func):
-    """验证 c / d 会按操作数顺序生成动态符号表达式返回值。"""
-    expected_expr = SymbolDim(lhs) / symbol_rhs
-
-    func_op = build_func_op(func, lhs, symbol_rhs)
+def check_const_div_dynamic(func: Callable[[int, int], int]) -> None:
+    expected_expr = "6 / N"
+    func_op = build_func_op(func, LHS, SYMBOL_RHS)
     assert isinstance(func_op, FuncOp)
-
-    assert_static_symbol_int(func_op.args[0].type, lhs)
-    assert_dynamic_symbol_int(func_op.args[1].type, symbol_rhs)
-
-    div_ops = _get_symbol_div_ops(func_op)
+    assert_static_symbol_int(func_op.args[0].type, LHS)
+    assert_dynamic_symbol_int(func_op.args[1].type, SYMBOL_RHS)
+    div_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolDivOp)]
     assert len(div_ops) == 1
     assert_dynamic_symbol_int(div_ops[0].result.type, expected_expr)
-
     return_ops = [op for op in func_op.body.block.ops if isinstance(op, ReturnOp)]
     assert len(return_ops) == 1
     assert_dynamic_symbol_int(return_ops[0].arguments[0].type, expected_expr)
 
 
-def check_dynamic_div_const(func):
-    """验证 d / c 会按操作数顺序生成动态符号表达式返回值。"""
-    expected_expr = symbol_lhs / SymbolDim(rhs)
-
-    func_op = build_func_op(func, symbol_lhs, rhs)
+def check_dynamic_div_const(func: Callable[[int, int], int]) -> None:
+    expected_expr = "M / 3"
+    func_op = build_func_op(func, SYMBOL_LHS, RHS)
     assert isinstance(func_op, FuncOp)
-
-    assert_dynamic_symbol_int(func_op.args[0].type, symbol_lhs)
-    assert_static_symbol_int(func_op.args[1].type, rhs)
-
-    div_ops = _get_symbol_div_ops(func_op)
+    assert_dynamic_symbol_int(func_op.args[0].type, SYMBOL_LHS)
+    assert_static_symbol_int(func_op.args[1].type, RHS)
+    div_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolDivOp)]
     assert len(div_ops) == 1
     assert_dynamic_symbol_int(div_ops[0].result.type, expected_expr)
-
     return_ops = [op for op in func_op.body.block.ops if isinstance(op, ReturnOp)]
     assert len(return_ops) == 1
     assert_dynamic_symbol_int(return_ops[0].arguments[0].type, expected_expr)

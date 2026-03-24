@@ -87,7 +87,7 @@ func_op = build_func_op(only_symbol, s)
 - 当 `runtime_args` 为普通 Python `int` 且函数场景属于整型标量运算时，输入参数必须 lowering 为携带该整数值的 `SymbolValueType`，而不是 builtin 整数类型；负数实参的对外字符串表示必须保持 `symbol.int<-3>` 这类十进制负数字面量形式。
 - 允许 `for` 循环内包含 `dma.slice`/`dma.deslice` 相关语义；当循环来自 `LoopRange` 且边界为 symbol 整数时，必须保留 `symbol.for` 结构，且迭代变量 `it` 不能退化为 `index`、`i32`、浮点或其他非 `SymbolValueType`。
 - 当函数场景为纯 symbol 标量函数时，输入参数与返回值都必须 lowering 为 `!symbol.int<"expr">`。
-- 当函数场景为整型标量加法时，函数体中的标量加法必须 lowering 为 `symbol.add`，且结果类型保持为携带具体整数值的 `SymbolValueType`。
+- 当函数场景为纯 symbol 整型标量算术时，函数体中的 `+`、`-`、`*`、`/`、`//` 必须分别 lowering 为 `symbol.add`、`symbol.sub`、`symbol.mul`、`symbol.div`、`symbol.floordiv`，且结果类型保持为 `SymbolValueType`。
 - 纯 symbol 标量函数的参数/返回类型必须复用 `spec/dialect/symbol.md` 中定义的 `SymbolValueType`，不能退回 builtin 整数类型。
 - `LoopRange` 场景中传给 `dma.slice` / `dma.deslice` 的标量 operand 必须直接复用 `!symbol.int<"expr">` value，不允许通过 `arith.index_cast` 做中间桥接。
 
@@ -152,7 +152,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - 通过测试辅助封装验证 `func.func` 的结构输出（不改变本模块的边界）。
   - 覆盖无返回 `for` 循环与 `slice/deslice` 的生成能力，并要求 `LoopRange` lowering 为 `symbol.for`，且循环迭代变量 `it` 保持 `!symbol.int<"...">`。
   - 验证纯 symbol 函数场景会生成 `!symbol.int<"...">` 输入与 `!symbol.int<"...">` 返回。
-  - 验证纯 symbol 标量加法在 lowering 后生成 `symbol.add`，不退回 builtin 算术或其他 dialect op。
+  - 验证纯 symbol 标量算术在 lowering 后生成 `symbol.add/sub/mul/div/floordiv`，不退回 builtin 算术或其他 dialect op。
   - 验证整型标量函数场景中，`build_func_op(add, lhs, rhs)` 会把 Python `int` 实参 lowering 为携带具体整数值的 `SymbolValueType` 输入，并生成 `symbol.add` 结果。
   - 验证负数 Python `int` 实参不会导致 lowering 失败；负值的 `SymbolValueType.__str__` 必须保持 `symbol.int<-3>` 这类十进制负数字面量口径，且 `get_value()` 可还原原始负数值。
   - 验证 `LoopRange + slice/deslice` 场景生成 `symbol.for + dma.slice/dma.deslice`，且循环相关 lowering 不生成 `arith.index_cast`。
@@ -178,6 +178,10 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - MGEN-015：`LoopRange + slice/deslice + 无 return` 场景生成 `symbol.for + dma.slice/dma.deslice`，且循环迭代变量 `it` 与 DMA operand 直接保持 `!symbol.int<"...">`，不生成 `arith.index_cast`。（`test_build_func_op_supports_symbolic_for_loop_dma_without_return`）
   - MGEN-016：纯 symbol 函数参数 lowering 为 `func.func` 的 `!symbol.int<"...">` 输入。（`test_symbol_scalar_function_uses_symbol_value_type_signature`）
   - MGEN-017：纯 symbol 函数返回 lowering 为 `func.func` 的 `!symbol.int<"...">` 输出。（`test_symbol_scalar_function_uses_symbol_value_type_signature`）
-  - MGEN-018：纯 symbol 标量加法 lowering 为 `symbol.add`。（`test_symbol_scalar_function_lowers_add_to_symbol_add`）
+  - MGEN-018：纯 symbol 标量加法 lowering 为 `symbol.add`。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
+  - MGEN-021：纯 symbol 标量减法 lowering 为 `symbol.sub`。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
+  - MGEN-022：纯 symbol 标量乘法 lowering 为 `symbol.mul`。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
+  - MGEN-023：纯 symbol 标量除法 lowering 为 `symbol.div`；`const/const` 输入按静态整除结果收敛为常量整数，动态表达式在 `symbol/symbol`、`const/symbol`、`symbol/const` 输入下分别保持 `/` 文本。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
+  - MGEN-024：纯 symbol 标量整除 lowering 为 `symbol.floordiv`；`const/const` 输入按 Python `//` 语义收敛，动态表达式在 `symbol/symbol`、`const/symbol`、`symbol/const` 输入下保持 `//` 文本。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
   - MGEN-019：`build_func_op` 的运行时参数为必填，且公开契约仅覆盖 `fn + runtime_args` 的可位置绑定形参；省略实参、实参数量不匹配，或试图以 `globals/builtins` 替代时必须报错。（`test_build_func_op_requires_explicit_runtime_args`、`test_build_func_op_rejects_runtime_arg_count_mismatch`、`test_build_func_op_globals_and_builtins_cannot_replace_runtime_args`）
   - MGEN-020：`build_func_op(add, lhs, rhs)` 对普通 Python `int` runtime args 的 lowering 必须产出携带具体整数值的 `SymbolValueType` 输入；若实参包含负数，其对外字符串表示必须保持 `symbol.int<-3>` 这类十进制负数字面量口径，并在函数体内生成 `symbol.add` 结果。（`test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type`）

@@ -311,7 +311,7 @@ LoadAST(tensor=tensor, offset=offset, stride=None)
 
 参数说明：
 
-- `op` (`str`)：操作符（例如 `add/sub/mul/div`）。
+- `op` (`str`)：操作符（例如 `add/sub/mul/div/floordiv`）。
 - `lhs` (`object`)：左操作数。
 - `rhs` (`object`)：右操作数。
 - `location` (`SourceLocation|None`)：可选源码位置。

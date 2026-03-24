@@ -105,7 +105,7 @@ value = emit_mlir(expr_ast, ctx)
 节点映射示例：
 
 - `ConstAST`：生成常量或等价字面量 op/value。
-- `BinaryExprAST(add/sub/mul/div)`：生成对应的二元算术 op。
+- `BinaryExprAST(add/sub/mul/div/floordiv)`：生成对应的二元算术 op。
 - `CompareExprAST(eq/ne/lt/le/gt/ge)`：生成对应的比较 op。
 - `LoadAST`：生成张量读取相关 op/value；当携带 `sizes` 时发射 `dma.slice`。
 - `StoreAST`：生成张量写入相关 op；当携带 `sizes` 时发射 `dma.deslice`。

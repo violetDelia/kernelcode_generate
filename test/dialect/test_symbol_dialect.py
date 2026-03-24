@@ -42,8 +42,10 @@ from kernel_gen.dialect.nn import Nn, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import (
     Symbol,
     SymbolAddOp,
+    SymbolDivOp,
     SymbolEqOp,
     SymbolExprAttr,
+    SymbolFloorDivOp,
     SymbolGeOp,
     SymbolGetDimOp,
     SymbolGetStrideOp,
@@ -305,7 +307,7 @@ def test_symbol_value_type_equality_depends_on_expr_only() -> None:
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_verifier_rejects_illegal_expression_characters() -> None:
     with pytest.raises(VerifyException, match="must contain identifiers"):
-        SymbolExprAttr.from_expr("N/2").verify()
+        SymbolExprAttr.from_expr("N@2").verify()
     with pytest.raises(VerifyException, match="must contain identifiers"):
         SymbolValueType.from_expr("N@1").verify()
 
@@ -315,21 +317,31 @@ def test_symbol_verifier_rejects_illegal_expression_characters() -> None:
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-22 22:26:51 +0800
 # 最近一次运行成功时间: 2026-03-22 22:26:51 +0800
-# 测试目的: 验证 symbol.add/sub/mul 在 symbol.int 输入与输出下可通过 verifier。
+# 测试目的: 验证 symbol.add/sub/mul/div/floordiv 在 symbol.int 输入与输出下可通过 verifier。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_arith_ops_verify_success() -> None:
     add_op = SymbolAddOp(_make_symbol_value("M"), _make_symbol_value("1"), SymbolValueType.from_expr("M + 1"))
     sub_op = SymbolSubOp(_make_symbol_value("N"), _make_symbol_value("1"), SymbolValueType.from_expr("N - 1"))
     mul_op = SymbolMulOp(_make_symbol_value("M"), _make_symbol_value("N"), SymbolValueType.from_expr("M*N"))
+    div_op = SymbolDivOp(_make_symbol_value("M"), _make_symbol_value("N"), SymbolValueType.from_expr("M / N"))
+    floordiv_op = SymbolFloorDivOp(
+        _make_symbol_value("M"),
+        _make_symbol_value("N"),
+        SymbolValueType.from_expr("M // N"),
+    )
 
     add_op.verify()
     sub_op.verify()
     mul_op.verify()
+    div_op.verify()
+    floordiv_op.verify()
 
     assert _print_attr(add_op.result.type) == '!symbol.int<"M + 1">'
     assert _print_attr(sub_op.result.type) == '!symbol.int<"N - 1">'
     assert _print_attr(mul_op.result.type) == '!symbol.int<"M*N">'
+    assert _print_attr(div_op.result.type) == '!symbol.int<"M / N">'
+    assert _print_attr(floordiv_op.result.type) == '!symbol.int<"M // N">'
 
 
 # TC-SYM-016
@@ -337,7 +349,7 @@ def test_symbol_arith_ops_verify_success() -> None:
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-22 22:26:51 +0800
 # 最近一次运行成功时间: 2026-03-22 22:26:51 +0800
-# 测试目的: 验证 symbol.add/sub/mul 的 parse/print round-trip 稳定。
+# 测试目的: 验证 symbol.add/sub/mul/div/floordiv 的 parse/print round-trip 稳定。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_arith_ops_round_trip() -> None:
@@ -352,6 +364,8 @@ builtin.module {
   %sum = symbol.add %m, %one : !symbol.int<"M">, !symbol.int<"1"> -> !symbol.int<"M + 1">
   %diff = symbol.sub %n, %one : !symbol.int<"N">, !symbol.int<"1"> -> !symbol.int<"N - 1">
   %prod = symbol.mul %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> !symbol.int<"M*N">
+  %quot = symbol.div %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> !symbol.int<"M / N">
+  %floor = symbol.floordiv %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> !symbol.int<"M // N">
 }
 """,
     ).parse_module()
@@ -361,6 +375,8 @@ builtin.module {
     assert "symbol.add %m, %one : !symbol.int<\"M\">, !symbol.int<\"1\"> -> !symbol.int<\"M + 1\">" in printed
     assert "symbol.sub %n, %one : !symbol.int<\"N\">, !symbol.int<\"1\"> -> !symbol.int<\"N - 1\">" in printed
     assert "symbol.mul %m, %n : !symbol.int<\"M\">, !symbol.int<\"N\"> -> !symbol.int<\"M*N\">" in printed
+    assert "symbol.div %m, %n : !symbol.int<\"M\">, !symbol.int<\"N\"> -> !symbol.int<\"M / N\">" in printed
+    assert "symbol.floordiv %m, %n : !symbol.int<\"M\">, !symbol.int<\"N\"> -> !symbol.int<\"M // N\">" in printed
 
 
 # TC-SYM-017
@@ -368,7 +384,7 @@ builtin.module {
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-22 22:26:51 +0800
 # 最近一次运行成功时间: 2026-03-22 22:26:51 +0800
-# 测试目的: 验证 symbol.add/sub/mul 会拒绝非 symbol.int 的操作数或结果类型。
+# 测试目的: 验证 symbol.add/sub/mul/div/floordiv 会拒绝非 symbol.int 的操作数或结果类型。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_arith_ops_reject_non_symbol_int_types() -> None:
@@ -381,6 +397,10 @@ def test_symbol_arith_ops_reject_non_symbol_int_types() -> None:
         SymbolSubOp(symbol_value, non_symbol_value, SymbolValueType.from_expr("N")).verify()
     with pytest.raises(VerifyException, match='symbol.mul result type must be !symbol.int<"expr">'):
         SymbolMulOp(symbol_value, symbol_value, i32).verify()
+    with pytest.raises(VerifyException, match='symbol.div lhs must have type !symbol.int<"expr">'):
+        SymbolDivOp(non_symbol_value, symbol_value, SymbolValueType.from_expr("N / 2")).verify()
+    with pytest.raises(VerifyException, match='symbol.floordiv result type must be !symbol.int<"expr">'):
+        SymbolFloorDivOp(symbol_value, symbol_value, i32).verify()
 
 
 # TC-SYM-018
@@ -388,7 +408,7 @@ def test_symbol_arith_ops_reject_non_symbol_int_types() -> None:
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-22 22:26:51 +0800
 # 最近一次运行成功时间: 2026-03-22 22:26:51 +0800
-# 测试目的: 验证 symbol.add/sub/mul 对不完整文本签名会报 parse 错误。
+# 测试目的: 验证 symbol.add/sub/mul/div/floordiv 对不完整文本签名会报 parse 错误。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_arith_ops_reject_malformed_signatures() -> None:
@@ -416,6 +436,17 @@ builtin.module {
 }
 """,
         ).parse_module()
+    with pytest.raises(ParseError, match="symbol.floordiv"):
+        Parser(
+            ctx,
+            """
+builtin.module {
+  %m = "test.op"() : () -> !symbol.int<"M">
+  %n = "test.op"() : () -> !symbol.int<"N">
+  %floor = symbol.floordiv %m : !symbol.int<"M"> -> !symbol.int<"M // N">
+}
+""",
+        ).parse_module()
 
 
 # TC-SYM-019
@@ -423,7 +454,7 @@ builtin.module {
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-22 22:26:51 +0800
 # 最近一次运行成功时间: 2026-03-22 22:26:51 +0800
-# 测试目的: 验证 symbol.add/sub/mul 的错误信息包含具体 op 名称与失败原因。
+# 测试目的: 验证 symbol.add/sub/mul/div/floordiv 的错误信息包含具体 op 名称与失败原因。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_arith_ops_error_messages_include_context() -> None:
@@ -441,6 +472,17 @@ builtin.module {
   %n = "test.op"() : () -> !symbol.int<"N">
   %one = "test.op"() : () -> !symbol.int<"1">
   %diff = symbol.sub %n %one : !symbol.int<"N">, !symbol.int<"1"> -> !symbol.int<"N - 1">
+}
+""",
+        ).parse_module()
+    with pytest.raises(ParseError, match="symbol.div"):
+        Parser(
+            ctx,
+            """
+builtin.module {
+  %n = "test.op"() : () -> !symbol.int<"N">
+  %one = "test.op"() : () -> !symbol.int<"1">
+  %quot = symbol.div %n %one : !symbol.int<"N">, !symbol.int<"1"> -> !symbol.int<"N / 1">
 }
 """,
         ).parse_module()

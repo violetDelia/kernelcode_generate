@@ -50,7 +50,15 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.dma import DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp
 from kernel_gen.dialect.nn import NnAddOp, NnBroadcastOp, NnEqOp, NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolAddOp, SymbolForOp, SymbolValueType
+from kernel_gen.dialect.symbol import (
+    SymbolAddOp,
+    SymbolDivOp,
+    SymbolFloorDivOp,
+    SymbolForOp,
+    SymbolMulOp,
+    SymbolSubOp,
+    SymbolValueType,
+)
 from kernel_gen.dsl.ast import (
     AstParseError,
     BlockAST,
@@ -856,26 +864,70 @@ def test_symbol_scalar_function_uses_symbol_value_type_signature() -> None:
     assert outputs == [SymbolValueType.from_expr("expr")]
 
 
-# MGEN-018
+# MGEN-018 / MGEN-021 / MGEN-022 / MGEN-023 / MGEN-024
 # 创建者: OpenAI
 # 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-25 16:05:00 +0800
-# 最近一次运行成功时间: 2026-03-25 16:05:00 +0800
-# 功能说明: 验证纯 symbol 标量加法 lowering 为 symbol.add。
-# 测试目的: 验证纯 symbol 标量加法不会退回 nn.add 或 builtin 整数算术。
-# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_symbol_scalar_function_lowers_add_to_symbol_add
+# 最近一次运行测试时间: 2026-03-25 03:06:30 +0800
+# 最近一次运行成功时间: 2026-03-25 03:06:30 +0800
+# 功能说明: 验证纯 symbol 标量算术 lowering 为对应的 symbol dialect op。
+# 测试目的: 验证纯 symbol 标量加减乘除在静态、动态与混合输入下不会退回 nn dialect 或 builtin 整数算术。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_symbol_scalar_function_lowers_symbol_binary_ops
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_symbol_scalar_function_lowers_add_to_symbol_add() -> None:
-    def only_symbol(s: int) -> int:
-        return s + s
+@pytest.mark.parametrize(
+    ("name", "operator_token", "builder", "runtime_args", "expected_result"),
+    [
+        ("add", "symbol.add", SymbolAddOp, (SymbolDim("s"), SymbolDim("t")), SymbolValueType.from_expr("s + t")),
+        ("sub", "symbol.sub", SymbolSubOp, (SymbolDim("s"), 3), SymbolValueType.from_expr("s - 3")),
+        ("mul", "symbol.mul", SymbolMulOp, (2, SymbolDim("t")), SymbolValueType.from_expr("2 * t")),
+        ("truediv", "symbol.div", SymbolDivOp, (SymbolDim("s"), SymbolDim("t")), SymbolValueType.from_expr("s / t")),
+        ("truediv", "symbol.div", SymbolDivOp, (6, 3), SymbolValueType.from_expr("2")),
+        ("truediv", "symbol.div", SymbolDivOp, (6, SymbolDim("N")), SymbolValueType.from_expr("6 / N")),
+        ("truediv", "symbol.div", SymbolDivOp, (SymbolDim("M"), 3), SymbolValueType.from_expr("M / 3")),
+        ("floordiv", "symbol.floordiv", SymbolFloorDivOp, (7, 3), SymbolValueType.from_expr("2")),
+        ("floordiv", "symbol.floordiv", SymbolFloorDivOp, (SymbolDim("M"), SymbolDim("N")), SymbolValueType.from_expr("M // N")),
+        ("floordiv", "symbol.floordiv", SymbolFloorDivOp, (7, SymbolDim("N")), SymbolValueType.from_expr("7 // N")),
+        ("floordiv", "symbol.floordiv", SymbolFloorDivOp, (SymbolDim("M"), 3), SymbolValueType.from_expr("M // 3")),
+    ],
+)
+def test_symbol_scalar_function_lowers_symbol_binary_ops(
+    name: str,
+    operator_token: str,
+    builder: type[object],
+    runtime_args: tuple[object, object],
+    expected_result: SymbolValueType,
+) -> None:
+    def add(lhs: int, rhs: int) -> int:
+        return lhs + rhs
 
-    func_op = build_func_op(only_symbol, SymbolDim("s"))
+    def sub(lhs: int, rhs: int) -> int:
+        return lhs - rhs
+
+    def mul(lhs: int, rhs: int) -> int:
+        return lhs * rhs
+
+    def truediv(lhs: int, rhs: int) -> int:
+        return lhs / rhs
+
+    def floordiv(lhs: int, rhs: int) -> int:
+        return lhs // rhs
+
+    functions: dict[str, object] = {
+        "add": add,
+        "sub": sub,
+        "mul": mul,
+        "truediv": truediv,
+        "floordiv": floordiv,
+    }
+
+    func_op = build_func_op(functions[name], *runtime_args)
     ops = list(func_op.body.blocks[0].ops)
-    symbol_add_ops = [op for op in ops if isinstance(op, SymbolAddOp)]
-    assert len(symbol_add_ops) == 1
-    assert "symbol.add" in _print_module(ModuleOp([func_op]))
+    symbol_ops = [op for op in ops if isinstance(op, builder)]
+    assert len(symbol_ops) == 1
+    assert symbol_ops[0].result.type == expected_result
+    assert list(func_op.function_type.outputs) == [expected_result]
+    assert operator_token in _print_module(ModuleOp([func_op]))
 
 
 # MGEN-020
@@ -1840,11 +1892,11 @@ def test_emit_mlir_infer_expr_type_branches() -> None:
     sym_rhs = ScalarArgAST("b", int, is_symbolic=True)
     type_map[_expr_key(sym_lhs)] = SymbolValueType.from_expr("A")
     type_map[_expr_key(sym_rhs)] = SymbolValueType.from_expr("B")
-    symbol_add = BinaryExprAST(op="add", lhs=sym_lhs, rhs=sym_rhs)
-    assert isinstance(_infer_expr_type(symbol_add, type_map), SymbolValueType)
+    for op_name in ("add", "mul", "div", "floordiv"):
+        assert isinstance(_infer_expr_type(BinaryExprAST(op=op_name, lhs=sym_lhs, rhs=sym_rhs), type_map), SymbolValueType)
 
     with pytest.raises(_LoweringError, match="Unsupported symbol binary op"):
-        _infer_expr_type(BinaryExprAST(op="mul", lhs=sym_lhs, rhs=sym_rhs), type_map)
+        _infer_expr_type(BinaryExprAST(op="mod", lhs=sym_lhs, rhs=sym_rhs), type_map)
 
     type_map[_expr_key(sym_lhs)] = i32
     type_map[_expr_key(sym_rhs)] = i32
@@ -2172,8 +2224,18 @@ def test_emit_mlir_lower_expr_unknown_and_symbol_errors() -> None:
     symbol_ctx._set_cache(_expr_key(rhs), block.args[1])
     symbol_ctx.types[_expr_key(lhs)] = block.args[0].type
     symbol_ctx.types[_expr_key(rhs)] = block.args[1].type
+    expr_cases = [
+        (BinaryExprAST(lhs=lhs, rhs=rhs, op="sub", location=None), SymbolSubOp),
+        (BinaryExprAST(lhs=lhs, rhs=rhs, op="mul", location=None), SymbolMulOp),
+        (BinaryExprAST(lhs=lhs, rhs=rhs, op="div", location=None), SymbolDivOp),
+        (BinaryExprAST(lhs=lhs, rhs=rhs, op="floordiv", location=None), SymbolFloorDivOp),
+    ]
+    for expr, op_type in expr_cases:
+        lowered = _lower_expr(expr, symbol_ctx)
+        assert isinstance(lowered.owner, op_type)
+
     with pytest.raises(_LoweringError, match="Unsupported symbol binary op"):
-        _lower_expr(BinaryExprAST(lhs=lhs, rhs=rhs, op="sub", location=None), symbol_ctx)
+        _lower_expr(BinaryExprAST(lhs=lhs, rhs=rhs, op="mod", location=None), symbol_ctx)
 
     with pytest.raises(_LoweringError, match="Unsupported expression for lowering"):
         _lower_expr(object(), symbol_ctx)

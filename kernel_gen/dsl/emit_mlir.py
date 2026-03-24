@@ -52,7 +52,15 @@ from kernel_gen.dialect.nn import (
     NnSubOp,
     NnTrueDivOp,
 )
-from kernel_gen.dialect.symbol import SymbolAddOp, SymbolForOp, SymbolSubOp, SymbolValueType
+from kernel_gen.dialect.symbol import (
+    SymbolAddOp,
+    SymbolDivOp,
+    SymbolFloorDivOp,
+    SymbolForOp,
+    SymbolMulOp,
+    SymbolSubOp,
+    SymbolValueType,
+)
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.type import NumericType
 
@@ -536,11 +544,17 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
         lhs_type = _infer_expr_type(expr.lhs, type_map)
         rhs_type = _infer_expr_type(expr.rhs, type_map)
         if isinstance(lhs_type, SymbolValueType) and isinstance(rhs_type, SymbolValueType):
-            if expr.op not in {"add", "sub"}:
+            if expr.op not in {"add", "sub", "mul", "div", "floordiv"}:
                 raise _LoweringError("Unsupported symbol binary op", location=expr.location)
             lhs_expr = lhs_type.expr.expr.data
             rhs_expr = rhs_type.expr.expr.data
-            op_symbol = "+" if expr.op == "add" else "-"
+            op_symbol = {
+                "add": "+",
+                "sub": "-",
+                "mul": "*",
+                "div": "/",
+                "floordiv": "//",
+            }[expr.op]
             result_type = SymbolValueType.from_expr(f"{lhs_expr} {op_symbol} {rhs_expr}")
             type_map[expr_key] = result_type
             return result_type
@@ -640,12 +654,19 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         lhs_attr = getattr(lhs, "type", None)
         rhs_attr = getattr(rhs, "type", None)
         if isinstance(lhs_attr, SymbolValueType) and isinstance(rhs_attr, SymbolValueType):
-            if expr.op not in {"add", "sub"}:
+            if expr.op not in {"add", "sub", "mul", "div", "floordiv"}:
                 raise _LoweringError("Unsupported symbol binary op", location=expr.location)
             result_type = _infer_expr_type(expr, ctx.types)
             if not isinstance(result_type, SymbolValueType):
                 raise _LoweringError("Symbol binary op result must be !symbol.int", location=expr.location)
-            op = SymbolAddOp(lhs, rhs, result_type) if expr.op == "add" else SymbolSubOp(lhs, rhs, result_type)
+            op_map = {
+                "add": SymbolAddOp,
+                "sub": SymbolSubOp,
+                "mul": SymbolMulOp,
+                "div": SymbolDivOp,
+                "floordiv": SymbolFloorDivOp,
+            }
+            op = op_map[expr.op](lhs, rhs, result_type)
             ctx.builder.add_op(op)
             ctx._set_cache(expr_key, op.result)
             return op.result

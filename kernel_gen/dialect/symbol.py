@@ -5,10 +5,10 @@
 
 功能说明:
 - 定义仅表示整数符号值语义的 symbol dialect。
-- 提供 `SymbolExprAttr`、`SymbolValueType`、`symbol.add/sub/mul`、`symbol.eq/ne/lt/le/gt/ge`、`symbol.to_float` 与 `symbol.get_dim/get_stride` 查询 op，不区分 `int8/int64` 等整型宽度。
+- 提供 `SymbolExprAttr`、`SymbolValueType`、`symbol.add/sub/mul/div/floordiv`、`symbol.eq/ne/lt/le/gt/ge`、`symbol.to_float` 与 `symbol.get_dim/get_stride` 查询 op，不区分 `int8/int64` 等整型宽度。
 
 使用示例:
-- from kernel_gen.dialect.symbol import Symbol, SymbolAddOp, SymbolEqOp, SymbolSubOp, SymbolMulOp, SymbolExprAttr, SymbolGetDimOp, SymbolGetStrideOp, SymbolValueType
+- from kernel_gen.dialect.symbol import Symbol, SymbolAddOp, SymbolDivOp, SymbolEqOp, SymbolFloorDivOp, SymbolSubOp, SymbolMulOp, SymbolExprAttr, SymbolGetDimOp, SymbolGetStrideOp, SymbolValueType
 
 关联文件:
 - spec: spec/dialect/symbol.md
@@ -44,7 +44,7 @@ from xdsl.utils.exceptions import VerifyException
 from kernel_gen.dialect.nn import NnMemoryType
 
 _SYMBOL_EXPR_PATTERN = re.compile(
-    r"^(?:[A-Za-z_][A-Za-z0-9_]*|[+-]?[0-9]+)(?:\s*[+\-*]\s*(?:[A-Za-z_][A-Za-z0-9_]*|[+-]?[0-9]+))*$"
+    r"^(?:[A-Za-z_][A-Za-z0-9_]*|[+-]?[0-9]+)(?:\s*(?://|[+\-*/])\s*(?:[A-Za-z_][A-Za-z0-9_]*|[+-]?[0-9]+))*$"
 )
 
 
@@ -104,14 +104,22 @@ def _evaluate_concrete_expr(expr: str) -> int | None:
         if isinstance(node, py_ast.UnaryOp) and isinstance(node.op, (py_ast.UAdd, py_ast.USub)):
             operand = _eval(node.operand)
             return operand if isinstance(node.op, py_ast.UAdd) else -operand
-        if isinstance(node, py_ast.BinOp) and isinstance(node.op, (py_ast.Add, py_ast.Sub, py_ast.Mult)):
+        if isinstance(node, py_ast.BinOp) and isinstance(node.op, (py_ast.Add, py_ast.Sub, py_ast.Mult, py_ast.Div, py_ast.FloorDiv)):
             lhs = _eval(node.left)
             rhs = _eval(node.right)
             if isinstance(node.op, py_ast.Add):
                 return lhs + rhs
             if isinstance(node.op, py_ast.Sub):
                 return lhs - rhs
-            return lhs * rhs
+            if isinstance(node.op, py_ast.Mult):
+                return lhs * rhs
+            if rhs == 0:
+                raise ValueError("division by zero is not a concrete integer expression")
+            if isinstance(node.op, py_ast.FloorDiv):
+                return lhs // rhs
+            if lhs % rhs == 0:
+                return lhs // rhs
+            raise ValueError("division result is not an exact integer expression")
         raise ValueError("expression is not a concrete integer expression")
 
     try:
@@ -586,6 +594,20 @@ class SymbolMulOp(_BaseSymbolBinaryArithOp):
 
 
 @irdl_op_definition
+class SymbolDivOp(_BaseSymbolBinaryArithOp):
+    """两个 symbol.int 值的符号除法。"""
+
+    name = "symbol.div"
+
+
+@irdl_op_definition
+class SymbolFloorDivOp(_BaseSymbolBinaryArithOp):
+    """两个 symbol.int 值的符号整除。"""
+
+    name = "symbol.floordiv"
+
+
+@irdl_op_definition
 class SymbolEqOp(_BaseSymbolCompareOp):
     """两个 symbol.int 值的相等比较。"""
 
@@ -940,6 +962,8 @@ Symbol = Dialect(
         SymbolAddOp,
         SymbolSubOp,
         SymbolMulOp,
+        SymbolDivOp,
+        SymbolFloorDivOp,
         SymbolEqOp,
         SymbolNeOp,
         SymbolLtOp,
@@ -960,6 +984,7 @@ Symbol = Dialect(
 __all__ = [
     "Symbol",
     "SymbolAddOp",
+    "SymbolDivOp",
     "SymbolEqOp",
     "SymbolExprAttr",
     "SymbolGeOp",
@@ -971,6 +996,7 @@ __all__ = [
     "SymbolNeOp",
     "SymbolToFloatOp",
     "SymbolForOp",
+    "SymbolFloorDivOp",
     "SymbolGetStrideOp",
     "SymbolSubOp",
     "SymbolValueType",
