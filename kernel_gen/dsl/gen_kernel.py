@@ -30,7 +30,7 @@ from .emit_c import EmitCContext, emit_c_op
 
 
 class GenKernelError(ValueError):
-    """gen_kernel 阶段错误。"""
+    """Raised when `gen_kernel` cannot emit a valid target function."""
 
 
 def _error(ctx: EmitCContext, func_name: str, reason: str) -> GenKernelError:
@@ -65,7 +65,19 @@ def _type_to_c(attr: Any) -> str:
 
 
 def gen_signature(func_op: func.FuncOp, ctx: EmitCContext) -> str:
-    """生成目标函数签名。"""
+    """Generate a target signature for a single lowered `func.func`.
+
+    Parameters:
+        func_op: MLIR `func.func` operation to analyze.
+        ctx: Shared emit context used to bind stable argument names.
+
+    Returns:
+        A function signature string without the function body.
+
+    Raises:
+        GenKernelError: If the function return form is unsupported.
+        TypeError: If an input or output type cannot be mapped to the target.
+    """
 
     func_name = func_op.sym_name.data
     input_types = list(func_op.function_type.inputs.data)
@@ -91,15 +103,33 @@ def gen_signature(func_op: func.FuncOp, ctx: EmitCContext) -> str:
 
 
 def gen_body(func_op: func.FuncOp, ctx: EmitCContext) -> str:
-    """按 op 顺序生成函数体。"""
+    """Generate the function body in IR order.
+
+    Parameters:
+        func_op: MLIR `func.func` operation whose entry block will be emitted.
+        ctx: Shared emit context reused by `gen_signature` and `emit_c`.
+
+    Returns:
+        The emitted function body text without the signature wrapper.
+
+    Raises:
+        GenKernelError: If the function return form is unsupported.
+        ValueError: Propagated from `emit_c` when an op cannot be emitted.
+    """
 
     result_types = list(func_op.function_type.outputs.data)
     lines: list[str] = []
     for op in func_op.body.block.ops:
         if isinstance(op, func.ReturnOp):
-            if not op.arguments:
+            if not result_types:
+                if op.arguments:
+                    raise _error(ctx, func_op.sym_name.data, "unsupported return form")
                 continue
             if len(result_types) != 1 or not isinstance(result_types[0], NnMemoryType):
+                raise _error(ctx, func_op.sym_name.data, "unsupported return form")
+            if len(op.arguments) != 1:
+                raise _error(ctx, func_op.sym_name.data, "unsupported return form")
+            if op.arguments[0].type != result_types[0]:
                 raise _error(ctx, func_op.sym_name.data, "unsupported return form")
             value_name = ctx.lookup_name(op.arguments[0])
             if value_name is None:
@@ -115,7 +145,20 @@ def gen_body(func_op: func.FuncOp, ctx: EmitCContext) -> str:
 
 
 def gen_kernel(func_op: func.FuncOp, ctx: EmitCContext) -> str:
-    """生成完整函数源码。"""
+    """Generate the full target function source for one lowered `func.func`.
+
+    Parameters:
+        func_op: MLIR `func.func` operation to emit.
+        ctx: Shared emit context carrying target and naming state.
+
+    Returns:
+        Complete target function source text including signature and body.
+
+    Raises:
+        GenKernelError: If the function return contract is unsupported.
+        ValueError: Propagated from `emit_c` for unsupported IR constructs.
+        TypeError: If a type cannot be lowered to the target.
+    """
 
     signature = gen_signature(func_op, ctx)
     ctx.push_indent()
