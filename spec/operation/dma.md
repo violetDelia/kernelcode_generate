@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`李白`
+- 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/operation/dma.md`](../../spec/operation/dma.md)
 - `功能实现`：[`kernel_gen/operation/dma.py`](../../kernel_gen/operation/dma.py)
 - `test`：[`test/operation/test_operation_dma.py`](../../test/operation/test_operation_dma.py)
@@ -20,24 +20,12 @@
 - [`spec/symbol_variable/type.md`](../../spec/symbol_variable/type.md)：`NumericType` 定义。
 - [`kernel_gen/operation/dma.py`](../../kernel_gen/operation/dma.py)：高层 API 实现。
 - [`kernel_gen/symbol_variable/memory.py`](../../kernel_gen/symbol_variable/memory.py)：`Memory` 与 `MemorySpace` 实现。
-- [`expectation/operation/dma/alloc.py`](../../expectation/operation/dma/alloc.py)：`alloc` acceptance gate。
-- [`expectation/operation/dma/cast.py`](../../expectation/operation/dma/cast.py)：`cast` acceptance gate。
-- [`expectation/operation/dma/copy.py`](../../expectation/operation/dma/copy.py)：`copy` acceptance gate。
-- [`expectation/operation/dma/deslice.py`](../../expectation/operation/dma/deslice.py)：`deslice` acceptance gate。
-- [`expectation/operation/dma/flatten.py`](../../expectation/operation/dma/flatten.py)：`flatten` acceptance gate。
-- [`expectation/operation/dma/free.py`](../../expectation/operation/dma/free.py)：`free` acceptance gate。
-- [`expectation/operation/dma/load.py`](../../expectation/operation/dma/load.py)：`load` acceptance gate。
-- [`expectation/operation/dma/reshape.py`](../../expectation/operation/dma/reshape.py)：`reshape` acceptance gate。
-- [`expectation/operation/dma/slice.py`](../../expectation/operation/dma/slice.py)：`slice` acceptance gate。
-- [`expectation/operation/dma/store.py`](../../expectation/operation/dma/store.py)：`store` acceptance gate。
-- [`expectation/operation/dma/view.py`](../../expectation/operation/dma/view.py)：`view` acceptance gate。
 
 ## 目标
 
 - 为 `Memory` 提供统一、稳定的搬运与视图操作语义入口。
 - 明确 `alloc/free/copy/cast/load/store/slice/deslice/view/reshape/flatten` 的输入约束、输出语义与错误边界。
 - 保留动态 `shape` 与 `offsets/sizes/strides` 的表达能力，支持后续 lowering 保留切片信息。
-- 将 `expectation/operation/dma/*.py` 作为 acceptance gate，确保 spec 与 expectation 一致。
 
 ## 限制与边界
 
@@ -375,32 +363,10 @@ dst = flatten(src)
 
 ## 测试
 
-- 测试文件：
-  - [`test/operation/test_operation_dma.py`](../../test/operation/test_operation_dma.py)
-  - [`expectation/operation/dma/alloc.py`](../../expectation/operation/dma/alloc.py)
-  - [`expectation/operation/dma/cast.py`](../../expectation/operation/dma/cast.py)
-  - [`expectation/operation/dma/copy.py`](../../expectation/operation/dma/copy.py)
-  - [`expectation/operation/dma/deslice.py`](../../expectation/operation/dma/deslice.py)
-  - [`expectation/operation/dma/flatten.py`](../../expectation/operation/dma/flatten.py)
-  - [`expectation/operation/dma/free.py`](../../expectation/operation/dma/free.py)
-  - [`expectation/operation/dma/load.py`](../../expectation/operation/dma/load.py)
-  - [`expectation/operation/dma/reshape.py`](../../expectation/operation/dma/reshape.py)
-  - [`expectation/operation/dma/slice.py`](../../expectation/operation/dma/slice.py)
-  - [`expectation/operation/dma/store.py`](../../expectation/operation/dma/store.py)
-  - [`expectation/operation/dma/view.py`](../../expectation/operation/dma/view.py)
+- 测试文件：[`test/operation/test_operation_dma.py`](../../test/operation/test_operation_dma.py)
 - 执行命令：
   - `pytest -q test/operation/test_operation_dma.py`
-  - `python expectation/operation/dma/alloc.py`
-  - `python expectation/operation/dma/cast.py`
-  - `python expectation/operation/dma/copy.py`
-  - `python expectation/operation/dma/deslice.py`
-  - `python expectation/operation/dma/flatten.py`
-  - `python expectation/operation/dma/free.py`
-  - `python expectation/operation/dma/load.py`
-  - `python expectation/operation/dma/reshape.py`
-  - `python expectation/operation/dma/slice.py`
-  - `python expectation/operation/dma/store.py`
-  - `python expectation/operation/dma/view.py`
+  - `pytest --cov=kernel_gen.operation.dma --cov-report=term-missing -q test/operation/test_operation_dma.py`
 
 ### 测试目标
 
@@ -410,42 +376,43 @@ dst = flatten(src)
 - 验证 `store/deslice` 的源块大小约束、dtype 校验与索引边界。
 - 验证 `view` 的 `offset/size/stride` 子视图语义与返回 `Memory` 规格继承规则。
 - 验证 `reshape/flatten` 的连续布局要求与结果形状规则。
-- 确保 `expectation/operation/dma/*.py` 作为 acceptance gate 可直接运行成功。
+- 验证测试编号 `TC-OP-DMA-AF-001..006` 与 `TC-OP-DMA-001..028` 在文档和测试文件中一一对应。
 
 ### 功能与用例清单
 
 | 用例 ID | 测试点 | 说明 | 建议测试 |
 | --- | --- | --- | --- |
-| TC-OP-DMA-AF-001 | `alloc` 基础分配 | 返回带指定 `shape/dtype/space` 的 `Memory` | `test_alloc_returns_memory`；`python expectation/operation/dma/alloc.py` |
-| TC-OP-DMA-AF-002 | `alloc` 显式 stride | 显式 `stride` 被正确保留到返回 `Memory` | `test_alloc_preserves_explicit_stride`；`python expectation/operation/dma/alloc.py` |
-| TC-OP-DMA-AF-003 | `alloc` 非法 shape/stride | 非法 `shape` 或 rank/stride 不一致时报错 | `test_alloc_invalid_shape_or_stride`；`python expectation/operation/dma/alloc.py` |
-| TC-OP-DMA-AF-004 | `free` 基础释放 | `free` 接受 `Memory` 并返回 `None` | `test_free_returns_none`；`python expectation/operation/dma/free.py` |
-| TC-OP-DMA-AF-005 | `free` 类型错误 | 非 `Memory` 输入触发 `TypeError` | `test_free_type_error`；`python expectation/operation/dma/free.py` |
-| TC-OP-DMA-AF-006 | `alloc` 类型错误 | `dtype/space` 类型不合法触发错误 | `test_alloc_invalid_dtype_or_space`；`python expectation/operation/dma/alloc.py` |
-| TC-OP-DMA-001 | `copy` 目标空间 | `copy` 返回新 `Memory`，仅 `space` 被覆盖 | `python expectation/operation/dma/copy.py` |
-| TC-OP-DMA-002 | `copy` 类型错误 | `source` 或 `space` 类型非法时报错 | `python expectation/operation/dma/copy.py` |
-| TC-OP-DMA-003 | `load` 结果空间 | `load` 返回结果块并切换到目标空间 | `test_load_result_space`；`python expectation/operation/dma/load.py` |
-| TC-OP-DMA-004 | `slice` 结果形状 | `slice` 返回块的 `shape` 等于 `sizes` | `test_slice_result_shape`；`python expectation/operation/dma/slice.py` |
-| TC-OP-DMA-005 | `store` 大小校验 | `source.shape` 与写回大小不一致时报错 | `test_store_size_mismatch`；`python expectation/operation/dma/store.py` |
-| TC-OP-DMA-006 | `deslice` 大小校验 | `source.shape` 与回写区域大小不一致时报错 | `test_deslice_size_mismatch`；`python expectation/operation/dma/deslice.py` |
-| TC-OP-DMA-007 | 索引长度约束 | `offsets/sizes/strides` 长度与 rank 不一致时报错 | `test_dma_index_rank_mismatch`；`python expectation/operation/dma/load.py` |
-| TC-OP-DMA-008 | stride 边界 | 非单位 stride 需进行边界校验 | `python expectation/operation/dma/load.py`；`python expectation/operation/dma/slice.py` |
-| TC-OP-DMA-009 | 类型错误 | 非 `Memory` 输入触发 `TypeError` | `python expectation/operation/dma/store.py`；`python expectation/operation/dma/load.py` |
-| TC-OP-DMA-010 | `copy` 规格继承 | `copy` 继承 `shape/stride/format` | `python expectation/operation/dma/copy.py` |
-| TC-OP-DMA-011 | `cast` 基础转换 | `cast` 返回相同 `shape/stride/space`、新 `dtype` 的 `Memory` | `test_cast_changes_dtype`；`python expectation/operation/dma/cast.py` |
-| TC-OP-DMA-012 | `cast` 非法 dtype | 非法目标 `dtype` 触发 `TypeError` | `test_cast_invalid_dtype`；`python expectation/operation/dma/cast.py` |
+| TC-OP-DMA-AF-001 | `alloc` 基础分配 | 返回带指定 `shape/dtype/space` 的 `Memory` | `test_alloc_returns_memory` |
+| TC-OP-DMA-AF-002 | `alloc` 显式 stride | 显式 `stride` 被正确保留到返回 `Memory` | `test_alloc_preserves_explicit_stride` |
+| TC-OP-DMA-AF-003 | `alloc` 非法 shape/stride | 非法 `shape` 或 rank/stride 不一致时报错 | `test_alloc_invalid_shape_or_stride` |
+| TC-OP-DMA-AF-004 | `free` 基础释放 | `free` 接受 `Memory` 并返回 `None` | `test_free_returns_none` |
+| TC-OP-DMA-AF-005 | `free` 类型错误 | 非 `Memory` 输入触发 `TypeError` | `test_free_type_error` |
+| TC-OP-DMA-AF-006 | `alloc` 类型错误 | `dtype/space` 类型不合法触发错误 | `test_alloc_invalid_dtype_or_space` |
+| TC-OP-DMA-001 | `copy` 目标空间 | `copy` 返回新 `Memory`，仅 `space` 被覆盖 | `test_copy_success` |
+| TC-OP-DMA-002 | `copy` 类型错误 | `source` 或 `space` 类型非法时报错 | `test_copy_type_error` |
+| TC-OP-DMA-003 | `load` 结果空间 | `load` 返回结果块并切换到目标空间 | `test_load_result_space` |
+| TC-OP-DMA-004 | `slice` 结果形状 | `slice` 返回块的 `shape` 等于 `sizes` | `test_slice_result_shape` |
+| TC-OP-DMA-005 | `store` 大小校验 | `source.shape` 与写回大小不一致时报错 | `test_store_size_mismatch` |
+| TC-OP-DMA-006 | `deslice` 大小校验 | `source.shape` 与回写区域大小不一致时报错 | `test_deslice_size_mismatch` |
+| TC-OP-DMA-007 | 索引长度约束 | `offsets/sizes/strides` 长度与 rank 不一致时报错 | `test_dma_index_rank_mismatch` |
+| TC-OP-DMA-008 | stride 边界 | 非单位 stride 需进行边界校验 | `test_dma_non_unit_stride_checked` |
+| TC-OP-DMA-009 | 类型错误 | 非 `Memory` 输入触发 `TypeError` | `test_dma_type_error` |
+| TC-OP-DMA-010 | `copy` 规格继承 | `copy` 继承 `shape/stride/format` | `test_copy_preserves_spec` |
+| TC-OP-DMA-011 | `cast` 基础转换 | `cast` 返回相同 `shape/stride/space`、新 `dtype` 的 `Memory` | `test_cast_changes_dtype` |
+| TC-OP-DMA-012 | `cast` 非法 dtype | 非法目标 `dtype` 触发 `TypeError` | `test_cast_invalid_dtype` |
 | TC-OP-DMA-013 | `cast` 不支持的转换 | 不支持的转换路径显式报错 | `test_cast_unsupported_conversion` |
-| TC-OP-DMA-014 | `view` 子视图基础语义 | `view` 返回 `shape == size` 的 `Memory` | `test_view_subview_returns_memory`；`python expectation/operation/dma/view.py` |
-| TC-OP-DMA-015 | `view` 规格继承 | `view` 返回 `dtype/space/format/stride` 继承 `source` | `test_view_inherits_source_memoryspec`；`python expectation/operation/dma/view.py` |
-| TC-OP-DMA-016 | `view` 非法参数 | `offset/size/stride` rank 不一致或非法 size 报错 | `python expectation/operation/dma/view.py` |
-| TC-OP-DMA-017 | `flatten` 连续布局 | 连续布局下 `flatten` 返回一维 `shape` 与 `stride=[1]` | `test_flatten_contiguous`；`python expectation/operation/dma/flatten.py` |
-| TC-OP-DMA-018 | `flatten` 非连续布局 | 非连续布局触发错误 | `test_flatten_non_contiguous_rejected`；`python expectation/operation/dma/flatten.py` |
-| TC-OP-DMA-019 | `reshape` 基础变换 | `reshape` 返回新 `Memory` 且 `dtype/space/format` 继承 | `test_reshape_returns_memory`；`python expectation/operation/dma/reshape.py` |
-| TC-OP-DMA-020 | `reshape` 连续布局 | 连续布局下 `reshape` 生成默认步幅 | `test_reshape_default_stride_contiguous`；`python expectation/operation/dma/reshape.py` |
-| TC-OP-DMA-021 | `reshape` 非法参数 | 非法 `shape` 或非连续布局触发错误 | `test_reshape_invalid_shape_or_stride`；`python expectation/operation/dma/reshape.py` |
-| TC-OP-DMA-022 | `cast` 空间覆盖 | `memoryspace` 覆盖结果 `space` | `python expectation/operation/dma/cast.py` |
-| TC-OP-DMA-023 | `load` 空间类型错误 | `space` 类型不合法触发 `TypeError` | `test_load_invalid_space_type`；`python expectation/operation/dma/load.py` |
-| TC-OP-DMA-024 | `load` sizes 正长度 | `sizes` 包含非正维度触发错误 | `test_dma_invalid_sizes`；`python expectation/operation/dma/load.py` |
-| TC-OP-DMA-025 | `store` dtype mismatch | `source/target` dtype 不一致触发错误 | `test_store_dtype_mismatch`；`python expectation/operation/dma/store.py` |
-| TC-OP-DMA-026 | `store` 基础写回 | 合法写回返回 `None` | `test_store_success`；`python expectation/operation/dma/store.py` |
+| TC-OP-DMA-014 | `view` 子视图基础语义 | `view` 返回 `shape == size` 的 `Memory` | `test_view_subview_returns_memory` |
+| TC-OP-DMA-015 | `view` 规格继承 | `view` 返回 `dtype/space/format/stride` 继承 `source` | `test_view_inherits_source_memoryspec` |
+| TC-OP-DMA-016 | `view` 边界校验 | `view` 在静态场景下对 `offset + (size - 1) * stride` 执行边界检查 | `test_view_bounds_check` |
+| TC-OP-DMA-017 | `flatten` 连续布局 | 连续布局下 `flatten` 返回一维 `shape` 与 `stride=[1]` | `test_flatten_contiguous` |
+| TC-OP-DMA-018 | `flatten` 非连续布局 | 非连续布局触发错误 | `test_flatten_non_contiguous_rejected` |
+| TC-OP-DMA-019 | `reshape` 基础变换 | `reshape` 返回新 `Memory` 且 `dtype/space/format` 继承 | `test_reshape_returns_memory` |
+| TC-OP-DMA-020 | `reshape` 连续布局 | 连续布局下 `reshape` 生成默认步幅 | `test_reshape_default_stride_contiguous` |
+| TC-OP-DMA-021 | `reshape` 非法参数 | 非法 `shape` 或非连续布局触发错误 | `test_reshape_invalid_shape_or_stride` |
+| TC-OP-DMA-022 | `cast` 空间覆盖 | `memoryspace` 覆盖结果 `space` | `test_cast_overrides_space` |
+| TC-OP-DMA-023 | `load` 空间类型错误 | `space` 类型不合法触发 `TypeError` | `test_load_invalid_space_type` |
+| TC-OP-DMA-024 | `load` sizes 正长度 | `sizes` 包含非正维度触发错误 | `test_dma_invalid_sizes` |
+| TC-OP-DMA-025 | `store` dtype mismatch | `source/target` dtype 不一致触发错误 | `test_store_dtype_mismatch` |
+| TC-OP-DMA-026 | `store` 基础写回 | 合法写回返回 `None` | `test_store_success` |
 | TC-OP-DMA-027 | `cast` 支持转换 | 支持同 dtype 或整数类型间转换 | `test_cast_supported_conversions` |
+| TC-OP-DMA-028 | `view` 非法参数 | `offset/size/stride` rank 不一致、负 offset 或非正 stride 显式报错 | `test_view_invalid_offset_size_stride` |

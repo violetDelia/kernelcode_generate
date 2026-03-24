@@ -1,15 +1,15 @@
 """dma operation API tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: 摸鱼小分队
 
 功能说明:
 - 覆盖 kernel_gen/operation/dma.py 的搬运 API。
 
 覆盖率信息:
-- 当前覆盖率: `97%`（统计对象: `kernel_gen/operation/dma.py`）。
+- 当前覆盖率: `97%`（统计对象: `kernel_gen/operation/dma.py`，2026-03-24 19:29:54 +0800）。
 - 达标判定: 已达到 `95%` 覆盖率达标线。
-- 覆盖基线: `TC-OP-DMA-AF-001..006` 与 `TC-OP-DMA-001..027` 对应测试用例。
+- 覆盖基线: `TC-OP-DMA-AF-001..006` 与 `TC-OP-DMA-001..028` 对应测试用例。
 
 覆盖率命令:
 - pytest -q --cov=kernel_gen.operation.dma --cov-report=term-missing test/operation/test_operation_dma.py
@@ -44,8 +44,8 @@ from kernel_gen.symbol_variable.type import Farmat, NumericType
 # TC-OP-DMA-AF-001
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 alloc 返回指定 shape/dtype/space 的 Memory。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_alloc_returns_memory
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -62,8 +62,8 @@ def test_alloc_returns_memory() -> None:
 # TC-OP-DMA-AF-002
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 alloc 显式 stride 被保留。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_alloc_preserves_explicit_stride
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -78,8 +78,8 @@ def test_alloc_preserves_explicit_stride() -> None:
 # TC-OP-DMA-AF-003
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 alloc 非法 shape/stride 抛 ValueError。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_alloc_invalid_shape_or_stride
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -97,8 +97,8 @@ def test_alloc_invalid_shape_or_stride() -> None:
 # TC-OP-DMA-AF-006
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 alloc 的 dtype/space 类型错误。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_alloc_invalid_dtype_or_space
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -114,8 +114,8 @@ def test_alloc_invalid_dtype_or_space() -> None:
 # TC-OP-DMA-AF-004
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 free 接受 Memory 并返回 None。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_free_returns_none
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -130,8 +130,8 @@ def test_free_returns_none() -> None:
 # TC-OP-DMA-AF-005
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 free 非 Memory 输入抛 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_free_type_error
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -145,8 +145,8 @@ def test_free_type_error() -> None:
 # TC-OP-DMA-001
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-24 02:59:00 +0800
-# 最近一次运行成功时间: 2026-03-24 02:59:00 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 copy 返回新 Memory，仅覆盖目标 space。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_copy_success
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -167,8 +167,8 @@ def test_copy_success() -> None:
 # TC-OP-DMA-002
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-24 02:59:00 +0800
-# 最近一次运行成功时间: 2026-03-24 02:59:00 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 copy 输入类型错误触发 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_copy_type_error
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -185,8 +185,8 @@ def test_copy_type_error() -> None:
 # TC-OP-DMA-010
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-24 02:59:00 +0800
-# 最近一次运行成功时间: 2026-03-24 02:59:00 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 copy 继承 source 的 shape/stride/format 规格。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_copy_preserves_spec
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -204,8 +204,8 @@ def test_copy_preserves_spec() -> None:
 # TC-OP-DMA-003
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 load 返回结果块并切换到目标空间。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_load_result_space
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -224,8 +224,8 @@ def test_load_result_space() -> None:
 # TC-OP-DMA-023
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 load 的 space 类型错误触发 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_load_invalid_space_type
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -240,8 +240,8 @@ def test_load_invalid_space_type() -> None:
 # TC-OP-DMA-004
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 slice 返回块的 shape 等于 sizes。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_slice_result_shape
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -258,8 +258,8 @@ def test_slice_result_shape() -> None:
 # TC-OP-DMA-005
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 store 的 source.shape 与 sizes 不一致时报错。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_store_size_mismatch
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -275,8 +275,8 @@ def test_store_size_mismatch() -> None:
 # TC-OP-DMA-025
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 store dtype mismatch 触发 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_store_dtype_mismatch
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -292,8 +292,8 @@ def test_store_dtype_mismatch() -> None:
 # TC-OP-DMA-026
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 store 在匹配时返回 None。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_store_success
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -309,8 +309,8 @@ def test_store_success() -> None:
 # TC-OP-DMA-006
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 deslice 的 source.shape 与 sizes 不一致时报错。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_deslice_size_mismatch
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -326,8 +326,8 @@ def test_deslice_size_mismatch() -> None:
 # TC-OP-DMA-007
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 offsets/sizes/strides 长度与 rank 不一致时报错。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_dma_index_rank_mismatch
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -344,8 +344,8 @@ def test_dma_index_rank_mismatch() -> None:
 # TC-OP-DMA-024
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 sizes 中非正长度触发 ValueError。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_dma_invalid_sizes
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -360,8 +360,8 @@ def test_dma_invalid_sizes() -> None:
 # TC-OP-DMA-008
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-24 02:59:00 +0800
-# 最近一次运行成功时间: 2026-03-24 02:59:00 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证非单位 stride 允许使用且执行边界校验。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_dma_non_unit_stride_checked
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -378,8 +378,8 @@ def test_dma_non_unit_stride_checked() -> None:
 # TC-OP-DMA-009
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-24 02:59:00 +0800
-# 最近一次运行成功时间: 2026-03-24 02:59:00 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证非 Memory 输入触发 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_dma_type_error
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -396,8 +396,8 @@ def test_dma_type_error() -> None:
 # TC-OP-DMA-011
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-24 03:34:55 +0800
-# 最近一次运行成功时间: 2026-03-24 03:34:55 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 cast 返回相同 shape/stride/space 的新 Memory 且 dtype 发生变化。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_cast_changes_dtype
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -416,8 +416,8 @@ def test_cast_changes_dtype() -> None:
 # TC-OP-DMA-022
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-24 03:34:55 +0800
-# 最近一次运行成功时间: 2026-03-24 03:34:55 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 cast 显式覆盖 memoryspace。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_cast_overrides_space
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -437,8 +437,8 @@ def test_cast_overrides_space() -> None:
 # TC-OP-DMA-012
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 cast 非法 dtype 或 memoryspace 触发 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_cast_invalid_dtype
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -455,8 +455,8 @@ def test_cast_invalid_dtype() -> None:
 # TC-OP-DMA-013
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 cast 不支持的转换路径显式报错。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_cast_unsupported_conversion
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -471,8 +471,8 @@ def test_cast_unsupported_conversion() -> None:
 # TC-OP-DMA-027
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-24 03:34:55 +0800
-# 最近一次运行成功时间: 2026-03-24 03:34:55 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 cast 支持同 dtype 与整数类型之间的转换。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_cast_supported_conversions
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -492,8 +492,8 @@ def test_cast_supported_conversions() -> None:
 # TC-OP-DMA-014
 # 创建者: ChatGPT
 # 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 view(source, offset, size, stride) 返回 shape == size 的子视图 Memory。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_view_subview_returns_memory
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -514,8 +514,8 @@ def test_view_subview_returns_memory() -> None:
 # TC-OP-DMA-015
 # 创建者: ChatGPT
 # 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 view 沿用 source 规格。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_view_inherits_source_memoryspec
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -535,8 +535,8 @@ def test_view_inherits_source_memoryspec() -> None:
 # TC-OP-DMA-016
 # 创建者: 我不是牛马
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-24 02:59:00 +0800
-# 最近一次运行成功时间: 2026-03-24 02:59:00 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 view 在静态场景下执行边界检查。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_view_bounds_check
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -550,12 +550,12 @@ def test_view_bounds_check() -> None:
         view(src, offset=[0, 14], size=[2, 2], stride=[1, 2])
 
 
-# TC-OP-DMA-016
+# TC-OP-DMA-028
 # 创建者: ChatGPT
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-24 02:59:00 +0800
-# 最近一次运行成功时间: 2026-03-24 02:59:00 +0800
-# 测试目的: 验证 view 的 offset/size/stride rank 与 size 正长度约束。
+# 最后一次更改: 摸鱼小分队
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
+# 测试目的: 验证 view 的 offset/size/stride rank、负 offset、非正 size 与非正 stride 约束。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_view_invalid_offset_size_stride
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -579,8 +579,8 @@ def test_view_invalid_offset_size_stride() -> None:
 # TC-OP-DMA-019
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 reshape 返回新 Memory 且继承 dtype/space/format。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_reshape_returns_memory
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -599,8 +599,8 @@ def test_reshape_returns_memory() -> None:
 # TC-OP-DMA-020
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 reshape 在连续布局下生成默认 stride。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_reshape_default_stride_contiguous
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -616,8 +616,8 @@ def test_reshape_default_stride_contiguous() -> None:
 # TC-OP-DMA-021
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 reshape 非法 shape 或非连续布局触发错误。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_reshape_invalid_shape_or_stride
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -637,8 +637,8 @@ def test_reshape_invalid_shape_or_stride() -> None:
 # TC-OP-DMA-017
 # 创建者: ChatGPT
 # 最后一次更改: ChatGPT
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 flatten 在连续布局下返回一维 shape 与 stride=[1]。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_flatten_contiguous
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
@@ -658,8 +658,8 @@ def test_flatten_contiguous() -> None:
 # TC-OP-DMA-018
 # 创建者: ChatGPT
 # 最后一次更改: ChatGPT
-# 最近一次运行测试时间: 2026-03-22 13:24:08 +0800
-# 最近一次运行成功时间: 2026-03-22 13:24:08 +0800
+# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
+# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 flatten 对非连续布局显式报错。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_flatten_non_contiguous_rejected
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
