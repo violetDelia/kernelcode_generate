@@ -19,6 +19,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
@@ -91,10 +93,10 @@ def _ensure_shape_value(value: object, name: str) -> SymbolShape:
 
 
 def alloc(
-    shape,
+    shape: Sequence[int | str] | SymbolShape,
     dtype: NumericType,
     space: MemorySpace = MemorySpace.GM,
-    stride=None,
+    stride: Sequence[int | str] | SymbolShape | None = None,
 ) -> Memory:
     """分配新的 Memory 描述对象。
 
@@ -459,9 +461,9 @@ def copy(source: object, space: object) -> Memory:
 
 def load(
     source: object,
-    offsets,
-    sizes,
-    strides=None,
+    offsets: Sequence[int | str] | SymbolShape,
+    sizes: Sequence[int | str] | SymbolShape,
+    strides: Sequence[int | str] | SymbolShape | None = None,
     space: MemorySpace | None = None,
 ) -> Memory:
     """从 source 读取切片块。
@@ -504,9 +506,9 @@ def load(
 def store(
     source: object,
     target: object,
-    offsets,
-    sizes,
-    strides=None,
+    offsets: Sequence[int | str] | SymbolShape,
+    sizes: Sequence[int | str] | SymbolShape,
+    strides: Sequence[int | str] | SymbolShape | None = None,
 ) -> None:
     """把 source 块写回 target 区域。
 
@@ -543,9 +545,9 @@ def store(
 
 def slice(
     source: object,
-    offsets,
-    sizes,
-    strides=None,
+    offsets: Sequence[int | str] | SymbolShape,
+    sizes: Sequence[int | str] | SymbolShape,
+    strides: Sequence[int | str] | SymbolShape | None = None,
     space: MemorySpace | None = None,
 ) -> Memory:
     """从 source 抽取切片块。
@@ -570,9 +572,9 @@ def slice(
 def deslice(
     source: object,
     target: object,
-    offsets,
-    sizes,
-    strides=None,
+    offsets: Sequence[int | str] | SymbolShape,
+    sizes: Sequence[int | str] | SymbolShape,
+    strides: Sequence[int | str] | SymbolShape | None = None,
 ) -> None:
     """把切片块写回 target 区域。
 
@@ -593,7 +595,12 @@ def deslice(
     return store(source, target, offsets, sizes, strides=strides)
 
 
-def view(source: object, offset, size, stride) -> Memory:
+def view(
+    source: object,
+    offset: Sequence[int | str] | SymbolShape,
+    size: Sequence[int | str] | SymbolShape,
+    stride: Sequence[int | str] | SymbolShape,
+) -> Memory:
     """返回 source 的子视图结果。
 
     创建者: ChatGPT
@@ -630,7 +637,7 @@ def view(source: object, offset, size, stride) -> Memory:
     )
 
 
-def reshape(source: object, shape) -> Memory:
+def reshape(source: object, shape: Sequence[int | str] | SymbolShape) -> Memory:
     """返回 source 的形状重塑结果。
 
     创建者: 金铲铲大作战
