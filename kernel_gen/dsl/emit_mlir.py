@@ -1,7 +1,7 @@
 """AST emit utilities for DSL nodes.
 
 创建者: 小李飞刀
-最后一次更改: 不要啊教练
+最后一次更改: 小李飞刀
 
 功能说明:
 - 提供 AST 节点到 MLIR SSA value/op 的发射入口。
@@ -52,7 +52,7 @@ from kernel_gen.dialect.nn import (
     NnSubOp,
     NnTrueDivOp,
 )
-from kernel_gen.dialect.symbol import SymbolAddOp, SymbolForOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolAddOp, SymbolForOp, SymbolSubOp, SymbolValueType
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.type import NumericType
 
@@ -84,7 +84,7 @@ _MEMORY_SPACE_MAP = {
 class _LoweringError(ValueError):
     """lowering/emit 阶段错误。"""
 
-    def __init__(self, message: str, location: SourceLocation | None = None) -> None:
+    def __init__(self: "_LoweringError", message: str, location: SourceLocation | None = None) -> None:
         super().__init__(message)
         self.location = location
 
@@ -93,7 +93,7 @@ class EmitContext:
     """AST 节点发射上下文。"""
 
     def __init__(
-        self,
+        self: "EmitContext",
         builder: Block,
         symbols: dict[str, object],
         types: dict[int, object],
@@ -105,22 +105,22 @@ class EmitContext:
         self.config = config
         self._cache: dict[int, object] = {}
 
-    def _has_cache(self, key: int) -> bool:
+    def _has_cache(self: "EmitContext", key: int) -> bool:
         return key in self._cache
 
-    def _get_cache(self, key: int) -> object | None:
+    def _get_cache(self: "EmitContext", key: int) -> object | None:
         return self._cache.get(key)
 
-    def _set_cache(self, key: int, value: object) -> None:
+    def _set_cache(self: "EmitContext", key: int, value: object) -> None:
         self._cache[key] = value
 
-    def _setdefault_cache(self, key: int, value: object) -> object:
+    def _setdefault_cache(self: "EmitContext", key: int, value: object) -> object:
         return self._cache.setdefault(key, value)
 
-    def _snapshot_cache(self) -> dict[int, object]:
+    def _snapshot_cache(self: "EmitContext") -> dict[int, object]:
         return dict(self._cache)
 
-    def _restore_cache(self, snapshot: dict[int, object]) -> None:
+    def _restore_cache(self: "EmitContext", snapshot: dict[int, object]) -> None:
         self._cache = dict(snapshot)
 
 
@@ -536,11 +536,12 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
         lhs_type = _infer_expr_type(expr.lhs, type_map)
         rhs_type = _infer_expr_type(expr.rhs, type_map)
         if isinstance(lhs_type, SymbolValueType) and isinstance(rhs_type, SymbolValueType):
-            if expr.op != "add":
+            if expr.op not in {"add", "sub"}:
                 raise _LoweringError("Unsupported symbol binary op", location=expr.location)
             lhs_expr = lhs_type.expr.expr.data
             rhs_expr = rhs_type.expr.expr.data
-            result_type = SymbolValueType.from_expr(f"{lhs_expr} + {rhs_expr}")
+            op_symbol = "+" if expr.op == "add" else "-"
+            result_type = SymbolValueType.from_expr(f"{lhs_expr} {op_symbol} {rhs_expr}")
             type_map[expr_key] = result_type
             return result_type
         if not isinstance(lhs_type, NnMemoryType) or not isinstance(rhs_type, NnMemoryType):
@@ -639,12 +640,12 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         lhs_attr = getattr(lhs, "type", None)
         rhs_attr = getattr(rhs, "type", None)
         if isinstance(lhs_attr, SymbolValueType) and isinstance(rhs_attr, SymbolValueType):
-            if expr.op != "add":
+            if expr.op not in {"add", "sub"}:
                 raise _LoweringError("Unsupported symbol binary op", location=expr.location)
             result_type = _infer_expr_type(expr, ctx.types)
             if not isinstance(result_type, SymbolValueType):
                 raise _LoweringError("Symbol binary op result must be !symbol.int", location=expr.location)
-            op = SymbolAddOp(lhs, rhs, result_type)
+            op = SymbolAddOp(lhs, rhs, result_type) if expr.op == "add" else SymbolSubOp(lhs, rhs, result_type)
             ctx.builder.add_op(op)
             ctx._set_cache(expr_key, op.result)
             return op.result

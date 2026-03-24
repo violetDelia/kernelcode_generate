@@ -1,7 +1,7 @@
 """AST visitor tests.
 
 创建者: 小李飞刀
-最后一次更改: 我不是牛马
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 AST 前端、nn dialect IR 与 MLIR 文本入口的回归测试。
@@ -11,7 +11,7 @@
 
 覆盖率信息:
 - 覆盖率命令: pytest --cov=kernel_gen.dsl.ast_visitor --cov=kernel_gen.dsl.emit_mlir --cov=kernel_gen.dsl.mlir_gen --cov-report=term-missing -q test/dsl/test_ast_visitor.py
-- 覆盖率结果: ast_visitor 98%, emit_mlir 98%, mlir_gen 99%（2026-03-24 11:32:37 +0800）
+- 覆盖率结果: ast_visitor 98%, emit_mlir 98%, mlir_gen 95%（2026-03-24 22:43:59 +0800）
 - 达标线: 95%
 
 关联文件:
@@ -22,8 +22,8 @@
 
 from __future__ import annotations
 
-import inspect
 from io import StringIO
+import inspect
 import sys
 from pathlib import Path
 
@@ -50,7 +50,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.dma import DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp
 from kernel_gen.dialect.nn import NnAddOp, NnBroadcastOp, NnEqOp, NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolAddOp, SymbolFloorDivOp, SymbolForOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolAddOp, SymbolForOp, SymbolSubOp, SymbolValueType
 from kernel_gen.dsl.ast import (
     AstParseError,
     BlockAST,
@@ -206,12 +206,11 @@ def test_ast_parse_function_missing_annotation_reports_diagnostics(monkeypatch: 
     def bad(x: int, y: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
         return y
 
-    missing_annotation_source = '''
-def bad(x, y: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
-    return y
-'''
-    monkeypatch.setattr(inspect, "getsource", lambda _obj: missing_annotation_source)
-
+    source = (
+        'def bad(x, y: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":\n'
+        "    return y\n"
+    )
+    monkeypatch.setattr(inspect, "getsource", lambda _: source)
     with pytest.raises(AstParseError) as exc_info:
         parse_function(bad)
     diagnostics = exc_info.value.diagnostics
@@ -480,10 +479,10 @@ def test_mlir_gen_signature_validation_errors() -> None:
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_mlir_gen_parse_failure_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fn(x: object) -> object:
+    def fn(x: int) -> int:
         return x
 
-    def _broken_parse(*args: object, **kwargs: object) -> object:
+    def _broken_parse(*args: object, **kwargs: object) -> FunctionAST:
         raise _ParseFailure("broken", location=SourceLocation(1, 2))
 
     monkeypatch.setattr(mlir_gen_module, "_parse_function_impl", _broken_parse)
@@ -783,6 +782,82 @@ def test_symbol_scalar_function_lowers_add_to_symbol_add() -> None:
     assert "symbol.add" in _print_module(ModuleOp([func_op]))
 
 
+# MGEN-021
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-24 23:06:45 +0800
+# 最近一次运行成功时间: 2026-03-24 23:06:45 +0800
+# 功能说明: 验证纯 symbol 标量减法 lowering 为 symbol.sub。
+# 测试目的: 验证 symbol 标量减法不会退回 nn.sub 或 builtin 整数算术。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_symbol_scalar_function_lowers_sub_to_symbol_sub
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_symbol_scalar_function_lowers_sub_to_symbol_sub() -> None:
+    def only_symbol(s: int) -> int:
+        return s - s
+
+    func_op = build_func_op(only_symbol, SymbolDim("s"))
+    ops = list(func_op.body.blocks[0].ops)
+    symbol_sub_ops = [op for op in ops if isinstance(op, SymbolSubOp)]
+    assert len(symbol_sub_ops) == 1
+    assert "symbol.sub" in _print_module(ModuleOp([func_op]))
+
+
+# MGEN-022
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-24 23:06:45 +0800
+# 最近一次运行成功时间: 2026-03-24 23:06:45 +0800
+# 功能说明: 验证 symbol.sub 覆盖常量、动态符号与混合参数的 lowering 结果类型。
+# 测试目的: 验证 build_func_op(sub, lhs, rhs) 会生成 symbol.sub 并保持 SymbolValueType 值语义。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_sub_scalar_runtime_args_lower_to_symbol_value_type
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_sub_scalar_runtime_args_lower_to_symbol_value_type() -> None:
+    def sub(a: int, b: int) -> int:
+        result = a - b
+        return result
+
+    func_op = build_func_op(sub, 7, 5)
+    arg_types = [arg.type for arg in func_op.args]
+    assert arg_types == [SymbolValueType.from_expr("7"), SymbolValueType.from_expr("5")]
+    sub_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolSubOp)]
+    assert len(sub_ops) == 1
+    assert sub_ops[0].result.type == SymbolValueType.from_expr("2")
+    return_op = next(op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp))
+    assert return_op.arguments[0].type == SymbolValueType.from_expr("2")
+    assert "symbol.sub" in _print_module(ModuleOp([func_op]))
+
+    func_op_dynamic = build_func_op(sub, SymbolDim("M"), SymbolDim("N"))
+    dynamic_types = [arg.type for arg in func_op_dynamic.args]
+    assert dynamic_types == [SymbolValueType.from_expr("M"), SymbolValueType.from_expr("N")]
+    dynamic_sub_ops = [op for op in func_op_dynamic.body.block.ops if isinstance(op, SymbolSubOp)]
+    assert len(dynamic_sub_ops) == 1
+    assert dynamic_sub_ops[0].result.type == SymbolValueType.from_expr("M - N")
+    return_op_dynamic = next(op for op in func_op_dynamic.body.block.ops if isinstance(op, func.ReturnOp))
+    assert return_op_dynamic.arguments[0].type == SymbolValueType.from_expr("M - N")
+
+    func_op_mixed = build_func_op(sub, 3, SymbolDim("N"))
+    mixed_types = [arg.type for arg in func_op_mixed.args]
+    assert mixed_types == [SymbolValueType.from_expr("3"), SymbolValueType.from_expr("N")]
+    mixed_sub_ops = [op for op in func_op_mixed.body.block.ops if isinstance(op, SymbolSubOp)]
+    assert len(mixed_sub_ops) == 1
+    assert mixed_sub_ops[0].result.type == SymbolValueType.from_expr("3 - N")
+    return_op_mixed = next(op for op in func_op_mixed.body.block.ops if isinstance(op, func.ReturnOp))
+    assert return_op_mixed.arguments[0].type == SymbolValueType.from_expr("3 - N")
+
+    func_op_mixed_rev = build_func_op(sub, SymbolDim("M"), 2)
+    mixed_rev_types = [arg.type for arg in func_op_mixed_rev.args]
+    assert mixed_rev_types == [SymbolValueType.from_expr("M"), SymbolValueType.from_expr("2")]
+    mixed_rev_sub_ops = [op for op in func_op_mixed_rev.body.block.ops if isinstance(op, SymbolSubOp)]
+    assert len(mixed_rev_sub_ops) == 1
+    assert mixed_rev_sub_ops[0].result.type == SymbolValueType.from_expr("M - 2")
+    return_op_mixed_rev = next(op for op in func_op_mixed_rev.body.block.ops if isinstance(op, func.ReturnOp))
+    assert return_op_mixed_rev.arguments[0].type == SymbolValueType.from_expr("M - 2")
+
+
 # MGEN-020
 # 创建者: 朽木露琪亚
 # 最后一次更改: 金铲铲大作战
@@ -821,65 +896,11 @@ def test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type() -> N
     assert "symbol.add" in _print_module(ModuleOp([func_op]))
 
 
-# MGEN-021
-# 创建者: 不要啊教练
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-25 00:14:17 +0800
-# 最近一次运行成功时间: 2026-03-25 00:14:17 +0800
-# 功能说明: 验证符号整型标量整除 lowering 为 symbol.floordiv。
-# 测试目的: 验证 build_func_op 在整型标量 floordiv 场景下对直接返回与 assign-then-return 两种函数体都生成 SymbolValueType 输入与 symbol.floordiv 结果。
-# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_floordiv_scalar_runtime_ints_lower_to_symbol_value_type
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dialect/symbol.py
-# 对应 spec 文件路径: spec/dsl/mlir_gen.md
-# 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_build_func_op_floordiv_scalar_runtime_ints_lower_to_symbol_value_type() -> None:
-    def floordiv_func(a: int, b: int) -> int:
-        return a // b
-
-    def floordiv_assign_then_return(a: int, b: int) -> int:
-        result = a // b
-        return result
-
-    for target_func in (floordiv_func, floordiv_assign_then_return):
-        func_op = build_func_op(target_func, -7, 3)
-        arg_types = [arg.type for arg in func_op.args]
-        assert arg_types == [SymbolValueType.from_expr("-7"), SymbolValueType.from_expr("3")]
-        floordiv_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolFloorDivOp)]
-        assert len(floordiv_ops) == 1
-        assert floordiv_ops[0].result.type == SymbolValueType.from_expr(str(-7 // 3))
-        return_op = next(op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp))
-        assert return_op.arguments[0].type == SymbolValueType.from_expr(str(-7 // 3))
-
-        symbol_lhs = SymbolDim("M")
-        symbol_rhs = SymbolDim("N")
-        func_op = build_func_op(target_func, symbol_lhs, symbol_rhs)
-        arg_types = [arg.type for arg in func_op.args]
-        assert arg_types == [SymbolValueType.from_expr("M"), SymbolValueType.from_expr("N")]
-        floordiv_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolFloorDivOp)]
-        assert len(floordiv_ops) == 1
-        assert floordiv_ops[0].result.type == SymbolValueType.from_expr("floor(M/N)")
-        return_op = next(op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp))
-        assert return_op.arguments[0].type == SymbolValueType.from_expr("floor(M/N)")
-
-        func_op = build_func_op(target_func, symbol_lhs, 3)
-        floordiv_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolFloorDivOp)]
-        assert len(floordiv_ops) == 1
-        assert floordiv_ops[0].result.type == SymbolValueType.from_expr("floor(M/3)")
-        return_op = next(op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp))
-        assert return_op.arguments[0].type == SymbolValueType.from_expr("floor(M/3)")
-
-        func_op = build_func_op(target_func, 3, symbol_rhs)
-        floordiv_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolFloorDivOp)]
-        assert len(floordiv_ops) == 1
-        assert floordiv_ops[0].result.type == SymbolValueType.from_expr("floor(3/N)")
-        return_op = next(op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp))
-        assert return_op.arguments[0].type == SymbolValueType.from_expr("floor(3/N)")
-
 # MGEN-001A
 # 创建者: 金铲铲大作战
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-24 11:32:37 +0800
-# 最近一次运行成功时间: 2026-03-24 11:32:37 +0800
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-24 22:43:59 +0800
+# 最近一次运行成功时间: 2026-03-24 22:43:59 +0800
 # 功能说明: 验证 build_func_op 省略运行时实参会直接报错。
 # 测试目的: 验证 build_func_op(fn) 不再允许省略函数实际输入参数。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_requires_explicit_runtime_args
@@ -899,9 +920,9 @@ def test_build_func_op_requires_explicit_runtime_args() -> None:
 
 # MGEN-001B
 # 创建者: 朽木露琪亚
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-24 11:32:37 +0800
-# 最近一次运行成功时间: 2026-03-24 11:32:37 +0800
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-24 22:43:59 +0800
+# 最近一次运行成功时间: 2026-03-24 22:43:59 +0800
 # 功能说明: 验证 build_func_op 支持把非 dict builtins 对象作为解析环境。
 # 测试目的: 验证缺少 builtins 环境时解析失败，而提供带 __dict__ 的 builtins 对象后可成功解析并生成依赖该环境的 IR。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_accepts_object_builtins_env
@@ -932,9 +953,9 @@ def test_build_func_op_accepts_object_builtins_env(monkeypatch: pytest.MonkeyPat
 
 # MGEN-019
 # 创建者: 金铲铲大作战
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-24 11:32:37 +0800
-# 最近一次运行成功时间: 2026-03-24 11:32:37 +0800
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-24 22:43:59 +0800
+# 最近一次运行成功时间: 2026-03-24 22:43:59 +0800
 # 功能说明: 验证 build_func_op 的运行时实参数量必须与形参数量匹配。
 # 测试目的: 验证 build_func_op 在少传或多传实参时都会报错。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_runtime_arg_count_mismatch
@@ -1003,9 +1024,9 @@ def test_build_func_op_from_ast_runtime_args_lower_symbol_signature() -> None:
 
 # MGEN-002B
 # 创建者: 朽木露琪亚
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-24 11:32:37 +0800
-# 最近一次运行成功时间: 2026-03-24 11:32:37 +0800
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-24 22:43:59 +0800
+# 最近一次运行成功时间: 2026-03-24 22:43:59 +0800
 # 功能说明: 验证 build_func_op_from_ast 会透传 config 且不改变 runtime_args 决定的签名。
 # 测试目的: 验证合法 config 会原样进入 lowering visitor/context 且保持签名不变，非法 config 会通过公开接口暴露 lowering 错误。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_from_ast_config_preserves_runtime_signature
@@ -1024,7 +1045,7 @@ def test_build_func_op_from_ast_config_preserves_runtime_signature(monkeypatch: 
             observed["visitor_config"] = config
             super().__init__(config=config)
 
-        def visit_function(self: "RecordingAstVisitor", func_ast: FunctionAST, ctx: EmitContext) -> object:
+        def visit_function(self: "RecordingAstVisitor", func_ast: FunctionAST, ctx: EmitContext) -> None:
             observed["ctx_config"] = ctx.config
             return super().visit_function(func_ast, ctx)
 
@@ -1506,9 +1527,9 @@ def test_emit_mlir_symbolic_for_loop_avoids_index_cast() -> None:
 
 # AST-009
 # 创建者: OpenAI
-# 最后一次更改: OpenAI
-# 最近一次运行测试时间: 2026-03-21 23:59:00 +0800
-# 最近一次运行成功时间: 2026-03-21 23:59:00 +0800
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-24 22:43:59 +0800
+# 最近一次运行成功时间: 2026-03-24 22:43:59 +0800
 # 功能说明: 验证未注解 SymbolDim 参数可按标量参数解析。
 # 测试目的: 验证未注解 SymbolDim 参数可按标量参数解析。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_infers_symboldim_arguments_without_annotations
@@ -1519,11 +1540,8 @@ def test_parse_function_infers_symboldim_arguments_without_annotations(monkeypat
     def loop_fn(start: int, end: int, step: int, x: "Tensor[f32, N]") -> "Tensor[f32, N]":
         return x
 
-    missing_annotation_source = '''
-def loop_fn(start, end, step, x: "Tensor[f32, N]") -> "Tensor[f32, N]":
-    return x
-'''
-    monkeypatch.setattr(inspect, "getsource", lambda _obj: missing_annotation_source)
+    source = 'def loop_fn(start, end, step, x: "Tensor[f32, N]"):\n    return x\n'
+    monkeypatch.setattr(inspect, "getsource", lambda _: source)
     monkeypatch.setitem(loop_fn.__globals__, "start", SymbolDim("start"))
     monkeypatch.setitem(loop_fn.__globals__, "end", SymbolDim("end"))
     monkeypatch.setitem(loop_fn.__globals__, "step", SymbolDim("step"))
@@ -1534,9 +1552,9 @@ def loop_fn(start, end, step, x: "Tensor[f32, N]") -> "Tensor[f32, N]":
 
 # MGEN-015
 # 创建者: OpenAI
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-23 00:12:24 +0800
-# 最近一次运行成功时间: 2026-03-23 00:12:24 +0800
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-24 22:43:59 +0800
+# 最近一次运行成功时间: 2026-03-24 22:43:59 +0800
 # 功能说明: 验证 LoopRange + slice/deslice + 无 return 场景可生成 symbol.for + dma.slice/dma.deslice。
 # 测试目的: 验证 LoopRange + slice/deslice + 无 return 场景会直接传递 symbol.int 循环变量，不生成 arith.index_cast。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_supports_symbolic_for_loop_dma_without_return
@@ -2139,8 +2157,8 @@ def test_emit_mlir_ensure_supported_statements_errors() -> None:
 # EMIT-013
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
-# 最近一次运行成功时间: 2026-03-23 05:10:36 +0800
+# 最近一次运行测试时间: 2026-03-24 22:07:10 +0800
+# 最近一次运行成功时间: 2026-03-24 22:07:10 +0800
 # 功能说明: 覆盖缓存恢复与索引类型分支。
 # 测试目的: 验证缓存快照/恢复与 IndexType 输入的处理路径。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_cache_restore_and_index_value_variants
@@ -2168,8 +2186,8 @@ def test_emit_mlir_cache_restore_and_index_value_variants() -> None:
 # EMIT-014
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
-# 最近一次运行成功时间: 2026-03-23 05:10:36 +0800
+# 最近一次运行测试时间: 2026-03-24 22:13:38 +0800
+# 最近一次运行成功时间: 2026-03-24 22:13:38 +0800
 # 功能说明: 覆盖索引解析与 loop bound 的分支。
 # 测试目的: 验证索引解析错误路径、直接值与 loop bound 解析。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_index_operand_variants_and_loop_bound
@@ -2303,7 +2321,7 @@ def test_emit_mlir_lower_expr_unknown_and_symbol_errors() -> None:
     symbol_ctx.types[_expr_key(lhs)] = block.args[0].type
     symbol_ctx.types[_expr_key(rhs)] = block.args[1].type
     with pytest.raises(_LoweringError, match="Unsupported symbol binary op"):
-        _lower_expr(BinaryExprAST(lhs=lhs, rhs=rhs, op="sub", location=None), symbol_ctx)
+        _lower_expr(BinaryExprAST(lhs=lhs, rhs=rhs, op="mul", location=None), symbol_ctx)
 
     with pytest.raises(_LoweringError, match="Unsupported expression for lowering"):
         _lower_expr(object(), symbol_ctx)

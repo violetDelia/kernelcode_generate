@@ -237,7 +237,7 @@ class SymbolExprAttr(ParametrizedAttribute):
     expr: StringAttr = param_def(StringAttr)
 
     @classmethod
-    def parse_parameters(cls, parser: AttrParser) -> Sequence[Attribute]:
+    def parse_parameters(cls: type["SymbolExprAttr"], parser: AttrParser) -> Sequence[Attribute]:
         """解析符号表达参数。"""
 
         parser.parse_punctuation("<", "Expected '<' for symbol expr attribute.")
@@ -245,14 +245,14 @@ class SymbolExprAttr(ParametrizedAttribute):
         parser.parse_punctuation(">", "Expected '>' for symbol expr attribute.")
         return (StringAttr(expr),)
 
-    def print_parameters(self, printer: Printer) -> None:
+    def print_parameters(self: "SymbolExprAttr", printer: Printer) -> None:
         """打印符号表达参数。"""
 
         printer.print_string("<")
         printer.print_string_literal(_normalize_expr(self.expr.data))
         printer.print_string(">")
 
-    def verify(self) -> None:
+    def verify(self: "SymbolExprAttr") -> None:
         """校验符号表达。"""
 
         expr = _normalize_expr(self.expr.data)
@@ -262,7 +262,7 @@ class SymbolExprAttr(ParametrizedAttribute):
             raise VerifyException("symbol expr must contain identifiers, integers, spaces, +, - or *")
 
     @classmethod
-    def from_expr(cls, expr: str) -> "SymbolExprAttr":
+    def from_expr(cls: type["SymbolExprAttr"], expr: str) -> "SymbolExprAttr":
         """从字符串构造符号表达 attribute。
 
         创建者: 金铲铲大作战
@@ -292,7 +292,7 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
     expr: SymbolExprAttr = param_def(SymbolExprAttr)
 
     @classmethod
-    def parse_parameters(cls, parser: AttrParser) -> Sequence[Attribute]:
+    def parse_parameters(cls: type["SymbolValueType"], parser: AttrParser) -> Sequence[Attribute]:
         """解析整数符号值类型参数。"""
 
         parser.parse_punctuation("<", "Expected '<' for symbol int type.")
@@ -300,24 +300,24 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
         parser.parse_punctuation(">", "Expected '>' for symbol int type.")
         return (SymbolExprAttr.from_expr(expr),)
 
-    def print_parameters(self, printer: Printer) -> None:
+    def print_parameters(self: "SymbolValueType", printer: Printer) -> None:
         """打印整数符号值类型参数。"""
 
         printer.print_string("<")
         printer.print_string_literal(_normalize_expr(self.expr.expr.data))
         printer.print_string(">")
 
-    def verify(self) -> None:
+    def verify(self: "SymbolValueType") -> None:
         """校验整数符号值类型。"""
 
         self.expr.verify()
 
-    def __str__(self) -> str:
+    def __str__(self: "SymbolValueType") -> str:
         """返回公开的 symbol.int 文本表示。"""
 
         return f"symbol.int<{_normalize_expr(self.expr.expr.data)}>"
 
-    def get_value(self) -> int | str:
+    def get_value(self: "SymbolValueType") -> int | str:
         """返回 symbol.int 的公开值。
 
         创建者: 我不是牛马
@@ -340,7 +340,7 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
         concrete_value = _evaluate_concrete_expr(expr)
         return concrete_value if concrete_value is not None else expr
 
-    def is_symbol(self) -> bool:
+    def is_symbol(self: "SymbolValueType") -> bool:
         """判断当前值是否为非字面量符号表达。
 
         创建者: 我不是牛马
@@ -362,7 +362,7 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
         return _evaluate_concrete_expr(self.expr.expr.data) is None
 
     @classmethod
-    def from_expr(cls, expr: str) -> "SymbolValueType":
+    def from_expr(cls: type["SymbolValueType"], expr: str) -> "SymbolValueType":
         """从字符串构造整数符号值类型。
 
         创建者: 金铲铲大作战
@@ -391,7 +391,7 @@ class _BaseSymbolBinaryArithOp(IRDLOperation):
     result = result_def(Attribute)
 
     def __init__(
-        self,
+        self: "_BaseSymbolBinaryArithOp",
         lhs: SSAValue | Operation,
         rhs: SSAValue | Operation,
         result_type: Attribute,
@@ -415,7 +415,7 @@ class _BaseSymbolBinaryArithOp(IRDLOperation):
 
         super().__init__(operands=[lhs, rhs], result_types=[result_type])
 
-    def verify_(self) -> None:
+    def verify_(self: "_BaseSymbolBinaryArithOp") -> None:
         """校验 symbol 二元整数算术 op 的类型约束。
 
         创建者: 我不是牛马
@@ -440,7 +440,7 @@ class _BaseSymbolBinaryArithOp(IRDLOperation):
         if not _is_symbol_int_type(self.result.type):
             raise VerifyException(f"{self.name} result type must be !symbol.int<\"expr\">")
 
-    def print(self, printer: Printer) -> None:
+    def print(self: "_BaseSymbolBinaryArithOp", printer: Printer) -> None:
         """打印 symbol 二元整数算术 op 自定义文本语法。"""
 
         printer.print_string(" ")
@@ -455,7 +455,7 @@ class _BaseSymbolBinaryArithOp(IRDLOperation):
         printer.print_attribute(self.result.type)
 
     @classmethod
-    def parse(cls, parser: AttrParser):
+    def parse(cls: type["_BaseSymbolBinaryArithOp"], parser: AttrParser) -> "_BaseSymbolBinaryArithOp":
         """解析 symbol 二元整数算术 op 自定义文本语法。"""
 
         unresolved_lhs = parser.parse_unresolved_operand()
@@ -481,7 +481,7 @@ class _BaseSymbolCompareOp(IRDLOperation):
     result = result_def(Attribute)
 
     def __init__(
-        self,
+        self: "_BaseSymbolCompareOp",
         lhs: SSAValue | Operation,
         rhs: SSAValue | Operation,
         result_type: Attribute = i1,
@@ -505,7 +505,7 @@ class _BaseSymbolCompareOp(IRDLOperation):
 
         super().__init__(operands=[lhs, rhs], result_types=[result_type])
 
-    def verify_(self) -> None:
+    def verify_(self: "_BaseSymbolCompareOp") -> None:
         """校验 symbol 二元整数比较 op 的类型约束。
 
         创建者: 我不是牛马
@@ -531,7 +531,7 @@ class _BaseSymbolCompareOp(IRDLOperation):
         if self.result.type != i1:
             raise VerifyException(f"{self.name} result type must be i1")
 
-    def print(self, printer: Printer) -> None:
+    def print(self: "_BaseSymbolCompareOp", printer: Printer) -> None:
         """打印 symbol 二元整数比较 op 自定义文本语法。"""
 
         printer.print_string(" ")
@@ -546,7 +546,7 @@ class _BaseSymbolCompareOp(IRDLOperation):
         printer.print_attribute(self.result.type)
 
     @classmethod
-    def parse(cls, parser: AttrParser):
+    def parse(cls: type["_BaseSymbolCompareOp"], parser: AttrParser) -> "_BaseSymbolCompareOp":
         """解析 symbol 二元整数比较 op 自定义文本语法。"""
 
         unresolved_lhs = parser.parse_unresolved_operand()
@@ -636,7 +636,11 @@ class _BaseSymbolMemoryQueryOp(IRDLOperation):
 
     FIELD_NAME: ClassVar[str]
 
-    def __init__(self, source: SSAValue | Operation, axis: int | Attribute) -> None:
+    def __init__(
+        self: "_BaseSymbolMemoryQueryOp",
+        source: SSAValue | Operation,
+        axis: int | Attribute,
+    ) -> None:
         """初始化 memory 元信息查询 op。
 
         创建者: 我不是牛马
@@ -661,7 +665,7 @@ class _BaseSymbolMemoryQueryOp(IRDLOperation):
             attributes={"axis": axis_attr},
         )
 
-    def verify_(self) -> None:
+    def verify_(self: "_BaseSymbolMemoryQueryOp") -> None:
         """校验 memory 元信息查询 op。
 
         创建者: 我不是牛马
@@ -719,7 +723,7 @@ class SymbolForOp(IRDLOperation):
     traits = traits_def(NoTerminator())
 
     def __init__(
-        self,
+        self: "SymbolForOp",
         start: SSAValue | Operation,
         end: SSAValue | Operation,
         step: SSAValue | Operation,
@@ -749,7 +753,7 @@ class SymbolForOp(IRDLOperation):
             body = Region(list(body))
         super().__init__(operands=[start, end, step], regions=[body])
 
-    def verify_(self) -> None:
+    def verify_(self: "SymbolForOp") -> None:
         """校验 symbol.for 约束。
 
         创建者: 我不是牛马
@@ -789,7 +793,7 @@ class SymbolForOp(IRDLOperation):
         if not _is_symbol_int_type(iter_arg.type):
             raise VerifyException(f"{self.name} it must have type !symbol.int<\"expr\">")
 
-    def print(self, printer: Printer) -> None:
+    def print(self: "SymbolForOp", printer: Printer) -> None:
         """打印 symbol.for 自定义文本语法。"""
 
         blocks = list(self.body.blocks)
@@ -824,7 +828,7 @@ class SymbolForOp(IRDLOperation):
         printer.print_string("}")
 
     @classmethod
-    def parse(cls, parser: AttrParser) -> "SymbolForOp":
+    def parse(cls: type["SymbolForOp"], parser: AttrParser) -> "SymbolForOp":
         """解析 symbol.for 自定义文本语法。"""
 
         unresolved_iter = parser.parse_argument(expect_type=False)
