@@ -30,14 +30,20 @@ if str(REPO_ROOT) not in sys.path:
 from xdsl.dialects.func import FuncOp, ReturnOp
 
 from expectation.utils.compare import assert_dynamic_symbol_int, assert_static_symbol_int
+from expectation.utils.random import get_random_alpha_string, get_random_int, get_random_non_zero_int
 from kernel_gen.dialect.symbol import SymbolFloorDivOp
 from kernel_gen.dsl.mlir_gen import build_func_op
+import kernel_gen.operation.nn as nn
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
-LHS = 7
-RHS = 3
-SYMBOL_LHS = SymbolDim("M")
-SYMBOL_RHS = SymbolDim("N")
+LHS = get_random_int()
+RHS = get_random_non_zero_int()
+SYMBOL_LHS_NAME = get_random_alpha_string().upper()
+SYMBOL_RHS_NAME = get_random_alpha_string().upper()
+while SYMBOL_RHS_NAME == SYMBOL_LHS_NAME:
+    SYMBOL_RHS_NAME = get_random_alpha_string().upper()
+SYMBOL_LHS = SymbolDim(SYMBOL_LHS_NAME)
+SYMBOL_RHS = SymbolDim(SYMBOL_RHS_NAME)
 
 
 def floordiv_func(a: int, b: int) -> int:
@@ -46,67 +52,72 @@ def floordiv_func(a: int, b: int) -> int:
 
 
 def floordiv_func2(a: int, b: int) -> int:
-    return a // b
+    return nn.floordiv(a, b)
+
+TARGET_FUNCS: tuple[Callable[[int, int], int], ...] = (floordiv_func, floordiv_func2)
 
 
-def check_const_floordiv_const(func: Callable[[int, int], int]) -> None:
-    expected_expr = SymbolDim(LHS) // SymbolDim(RHS)
-    func_op = build_func_op(func, LHS, RHS)
-    assert isinstance(func_op, FuncOp)
-    assert_static_symbol_int(func_op.args[0].type, LHS)
-    assert_static_symbol_int(func_op.args[1].type, RHS)
-    floordiv_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolFloorDivOp)]
-    assert len(floordiv_ops) == 1
-    assert_static_symbol_int(floordiv_ops[0].result.type, expected_expr.get_value())
-    return_ops = [op for op in func_op.body.block.ops if isinstance(op, ReturnOp)]
-    assert len(return_ops) == 1
-    assert_static_symbol_int(return_ops[0].arguments[0].type, expected_expr.get_value())
+def check_const_floordiv_const() -> None:
+    for target_func in TARGET_FUNCS:
+        expected_expr = target_func(LHS, RHS)
+        func_op = build_func_op(target_func, LHS, RHS)
+        assert isinstance(func_op, FuncOp)
+        assert_static_symbol_int(func_op.args[0].type, LHS)
+        assert_static_symbol_int(func_op.args[1].type, RHS)
+        floordiv_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolFloorDivOp)]
+        assert len(floordiv_ops) == 1
+        assert_static_symbol_int(floordiv_ops[0].result.type, expected_expr)
+        return_ops = [op for op in func_op.body.block.ops if isinstance(op, ReturnOp)]
+        assert len(return_ops) == 1
+        assert_static_symbol_int(return_ops[0].arguments[0].type, expected_expr)
 
 
-def check_dynamic_floordiv_dynamic(func: Callable[[int, int], int]) -> None:
-    expected_expr = "M // N"
-    func_op = build_func_op(func, SYMBOL_LHS, SYMBOL_RHS)
-    assert isinstance(func_op, FuncOp)
-    assert_dynamic_symbol_int(func_op.args[0].type, SYMBOL_LHS)
-    assert_dynamic_symbol_int(func_op.args[1].type, SYMBOL_RHS)
-    floordiv_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolFloorDivOp)]
-    assert len(floordiv_ops) == 1
-    assert_dynamic_symbol_int(floordiv_ops[0].result.type, expected_expr)
-    return_ops = [op for op in func_op.body.block.ops if isinstance(op, ReturnOp)]
-    assert len(return_ops) == 1
-    assert_dynamic_symbol_int(return_ops[0].arguments[0].type, expected_expr)
+def check_dynamic_floordiv_dynamic() -> None:
+    for target_func in TARGET_FUNCS:
+        expected_expr = target_func(SYMBOL_LHS, SYMBOL_RHS)
+        func_op = build_func_op(target_func, SYMBOL_LHS, SYMBOL_RHS)
+        assert isinstance(func_op, FuncOp)
+        assert_dynamic_symbol_int(func_op.args[0].type, SYMBOL_LHS)
+        assert_dynamic_symbol_int(func_op.args[1].type, SYMBOL_RHS)
+        floordiv_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolFloorDivOp)]
+        assert len(floordiv_ops) == 1
+        assert_dynamic_symbol_int(floordiv_ops[0].result.type, expected_expr)
+        return_ops = [op for op in func_op.body.block.ops if isinstance(op, ReturnOp)]
+        assert len(return_ops) == 1
+        assert_dynamic_symbol_int(return_ops[0].arguments[0].type, expected_expr)
 
 
-def check_const_floordiv_dynamic(func: Callable[[int, int], int]) -> None:
-    expected_expr = "7 // N"
-    func_op = build_func_op(func, LHS, SYMBOL_RHS)
-    assert isinstance(func_op, FuncOp)
-    assert_static_symbol_int(func_op.args[0].type, LHS)
-    assert_dynamic_symbol_int(func_op.args[1].type, SYMBOL_RHS)
-    floordiv_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolFloorDivOp)]
-    assert len(floordiv_ops) == 1
-    assert_dynamic_symbol_int(floordiv_ops[0].result.type, expected_expr)
-    return_ops = [op for op in func_op.body.block.ops if isinstance(op, ReturnOp)]
-    assert len(return_ops) == 1
-    assert_dynamic_symbol_int(return_ops[0].arguments[0].type, expected_expr)
+def check_const_floordiv_dynamic() -> None:
+    for target_func in TARGET_FUNCS:
+        expected_expr = target_func(LHS, SYMBOL_RHS)
+        func_op = build_func_op(target_func, LHS, SYMBOL_RHS)
+        assert isinstance(func_op, FuncOp)
+        assert_static_symbol_int(func_op.args[0].type, LHS)
+        assert_dynamic_symbol_int(func_op.args[1].type, SYMBOL_RHS)
+        floordiv_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolFloorDivOp)]
+        assert len(floordiv_ops) == 1
+        assert_dynamic_symbol_int(floordiv_ops[0].result.type, expected_expr)
+        return_ops = [op for op in func_op.body.block.ops if isinstance(op, ReturnOp)]
+        assert len(return_ops) == 1
+        assert_dynamic_symbol_int(return_ops[0].arguments[0].type, expected_expr)
 
 
-def check_dynamic_floordiv_const(func: Callable[[int, int], int]) -> None:
-    expected_expr = "M // 3"
-    func_op = build_func_op(func, SYMBOL_LHS, RHS)
-    assert isinstance(func_op, FuncOp)
-    assert_dynamic_symbol_int(func_op.args[0].type, SYMBOL_LHS)
-    assert_static_symbol_int(func_op.args[1].type, RHS)
-    floordiv_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolFloorDivOp)]
-    assert len(floordiv_ops) == 1
-    assert_dynamic_symbol_int(floordiv_ops[0].result.type, expected_expr)
-    return_ops = [op for op in func_op.body.block.ops if isinstance(op, ReturnOp)]
-    assert len(return_ops) == 1
-    assert_dynamic_symbol_int(return_ops[0].arguments[0].type, expected_expr)
+def check_dynamic_floordiv_const() -> None:
+    for target_func in TARGET_FUNCS:
+        expected_expr = target_func(SYMBOL_LHS, RHS)
+        func_op = build_func_op(target_func, SYMBOL_LHS, RHS)
+        assert isinstance(func_op, FuncOp)
+        assert_dynamic_symbol_int(func_op.args[0].type, SYMBOL_LHS)
+        assert_static_symbol_int(func_op.args[1].type, RHS)
+        floordiv_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolFloorDivOp)]
+        assert len(floordiv_ops) == 1
+        assert_dynamic_symbol_int(floordiv_ops[0].result.type, expected_expr)
+        return_ops = [op for op in func_op.body.block.ops if isinstance(op, ReturnOp)]
+        assert len(return_ops) == 1
+        assert_dynamic_symbol_int(return_ops[0].arguments[0].type, expected_expr)
 
 
-for target_func in (floordiv_func, floordiv_func2):
-    check_const_floordiv_const(target_func)
-    check_dynamic_floordiv_dynamic(target_func)
-    check_const_floordiv_dynamic(target_func)
-    check_dynamic_floordiv_const(target_func)
+check_const_floordiv_const()
+check_dynamic_floordiv_dynamic()
+check_const_floordiv_dynamic()
+check_dynamic_floordiv_const()
