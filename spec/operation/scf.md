@@ -17,7 +17,6 @@
 ## 依赖
 
 - [`spec/symbol_variable/symbol_dim.md`](../../spec/symbol_variable/symbol_dim.md)：`SymbolDim` 的符号维度语义。
-- [`expectation/operation/scf/loop.py`](../../expectation/operation/scf/loop.py)：`scf.loop` 的只读 acceptance gate。
 
 ## 目标
 
@@ -86,7 +85,6 @@ for j in loop(K, M, SymbolDim("S")):
 
 - 测试文件：[`test/operation/test_operation_scf.py`](../../test/operation/test_operation_scf.py)
 - 执行命令：`pytest -q test/operation/test_operation_scf.py`
-- Acceptance Gate：[`expectation/operation/scf/loop.py`](../../expectation/operation/scf/loop.py)（只读，用于确认整数与符号输入的核心语义）。
 - 测试目标：
   - 纯整数 `loop` 与 `range(start, end, step)` 的半开区间语义一致。
   - `SymbolDim` 输入可构建 `LoopRange` 并保留 `start/end/step` 语义。

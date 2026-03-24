@@ -1,0 +1,22 @@
+- 时间：`2026-03-24 09:36:38 +0800`
+- 任务：`T-20260324-7b8c0179`
+- 任务类型：spec 清理
+- 任务目标：清理 `spec/operation/scf.md` 中所有 expectation 相关内容，仅保留接口语义、参数、返回、错误路径、限制边界与测试映射。
+- 改动：
+  - 移除依赖章节中的 `expectation/operation/scf/loop.py` 引用。
+  - 移除测试章节中的 acceptance gate 相关表述。
+- 结论：已完成 spec 清理，spec 内不再包含 expectation 内容，测试映射保持指向 `test/operation/test_operation_scf.py`。
+- 测试：未复测。
+- 下一步建议：请安排审查确认 spec 口径与实现/测试一致性。
+
+- 时间：`2026-03-24 09:38:48 +0800`
+- 任务：`T-20260324-f78e01a8` 衍生复审
+- 任务类型：spec 复审
+- 任务目标：复审 `spec/operation/scf.md`，确认无 expectation 相关内容，且 `loop` 接口语义、错误路径、限制边界与 `test/operation/test_operation_scf.py` 的映射一致。
+- 结论：通过。
+- 细项：
+  - spec 中未发现 expectation 路径、只读说明或 acceptance gate 等内容。
+  - `loop(start, end, step)` 的半开区间语义、`step == 0` 抛 `ValueError`、非法类型抛 `TypeError`、`SymbolDim` 保留语义，与 `test_operation_scf.py` 的 TC-OP-SCF-001..005 一致。
+  - 测试映射与执行命令仅指向 `test/operation/test_operation_scf.py`，符合要求。
+- 测试：未复测（按要求）。
+- 下一步建议：可进入实现/测试复审或合并阶段。
