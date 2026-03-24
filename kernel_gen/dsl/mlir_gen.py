@@ -172,6 +172,7 @@ def build_func_op(
         raise AstVisitorError(reason, location=None)
 
     runtime_table = {param.name: runtime_args[index] for index, param in enumerate(positional_params)}
+    # globals/builtins 仅作为解析环境，不参与签名推导。
     globals_table = dict(getattr(fn, "__globals__", {}) or {})
     if globals is not None:
         globals_table.update(globals)
