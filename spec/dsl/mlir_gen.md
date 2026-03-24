@@ -9,10 +9,10 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`小李飞刀`
+- 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
 - `功能实现`：[`kernel_gen/dsl/mlir_gen.py`](../../kernel_gen/dsl/mlir_gen.py)、[`python/dsl/mlir_gen.py`](../../python/dsl/mlir_gen.py)（统一规范覆盖两条实现入口）
-- `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)（`mlir_gen` 链路测试承载文件）
+- `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
 
 ## 依赖
 
@@ -27,7 +27,6 @@
 - 保证函数签名、参数顺序与返回类型与 AST 一致。
 - 使用函数实际接收的运行时参数推导 `func.func` 输入签名。
 - 为上层打印或封装提供稳定的 func op 结果。
-- 为整型标量函数场景定义稳定的 `func.func` / `symbol.add` / `symbol.sub` lowering 口径。
 
 ## 限制与边界
 
@@ -35,16 +34,17 @@
 - 不负责 MLIR 文本打印或后端代码生成。
 - 不定义节点级发射细节，节点发射规则由 `emit_mlir` 约束。
 - 不做优化或自动修复非法 IR。
-- `build_func_op` 的公开签名推导仅依赖 `fn + runtime_args`；允许通过 `globals`/`builtins` 提供解析环境，但不得影响签名推导或替代运行时实参。
+- `build_func_op` 的公开入口接收目标函数、运行时参数，以及仅用于补充源码解析环境的可选 `globals` / `builtins`；这些额外参数不得改变由 `runtime_args` 决定的函数输入签名，也不能代替必填的运行时参数。
+- `build_func_op` 的公开契约仅覆盖可位置绑定的形参；`runtime_args` 必须按这些形参的顺序传入。
 - 运行时参数必须按目标函数形参顺序传入；数量不一致、顺序不一致或类型无法映射时必须报错。
 - 运行时参数的类型 lowering 必须基于“实际传入的参数对象”决定，而不是基于额外配置推断。
+- `build_func_op_from_ast` 要求 `func_ast.inputs` 非空；若提供 `runtime_args`，其长度必须与 `func_ast.inputs` 一致；若输入包含未支持的 AST 类型、未支持的标量类型，或函数既不属于纯 symbol 标量函数又缺少 tensor 输入时，必须报错。
 - 当运行时参数为 `SymbolDim("s")` 这类 symbol 标量时，对应的 `func.func` 输入必须 lowering 为 `!symbol.int<"s">`；若为常量 symbol，例如 `SymbolDim(1)`，则必须 lowering 为 `!symbol.int<"1">`。
-- 当运行时参数是 Python `int` 且函数场景属于 symbol 整型标量运算时，对应的 `func.func` 输入必须 lowering 为携带具体整数值的 `SymbolValueType`，不得退回 `i32`、`index` 或其他 builtin 标量类型；若整数值为负数，对外字符串口径必须直接表现为十进制负数字面量，例如 `symbol.int<-7>`。
+- 当运行时参数是 Python `int` 且函数场景属于 symbol 整型标量运算时，对应的 `func.func` 输入必须 lowering 为携带具体整数值的 `SymbolValueType`，不得退回 `i32`、`index` 或其他 builtin 标量类型；若整数值为负数，对外字符串表示必须直接表现为十进制负数字面量，例如 `symbol.int<-7>`。
 - 当函数体仅包含 `for` 循环且没有 `return` 时，输出 `func.func` 允许零返回值。
 - 当 `ForAST` 来源于 `LoopRange(start, end, step)` 且循环边界保持 symbol 整数语义时，lowering 后必须生成 `symbol.for`，不得退回 `scf.for`；其循环块参数 `it` 必须为 `!symbol.int<"expr">`。
 - `LoopRange` 场景中的循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand，必须直接保持 `!symbol.int<"expr">` 语义传递，不得额外生成 `arith.index_cast`。
 - 对于纯 symbol 标量函数（仅符号标量入参/返回），函数签名中的输入与输出必须统一使用 `!symbol.int<"expr">`，不得降级为 `i32`、`index` 或其他 builtin 标量类型。
-- 对于整型标量 runtime-arg lowering 场景：`build_func_op(add/sub, lhs, rhs)` 中的 `lhs`、`rhs` 为普通 Python `int` 时，生成结果中的 `func.func` 输入必须为携带具体整数值的 `SymbolValueType`，函数体必须生成 `symbol.add` 或 `symbol.sub`，并保持结果值语义与 `lhs + rhs` / `lhs - rhs` 一致；若 `lhs` 或 `rhs` 为负数，必须仍能稳定 lowering，且 `str(SymbolValueType)` 的对外表现必须保持十进制负数字面量口径。
 - 如需 `builtin.module` 封装，由调用方完成。
 
 ## 公开接口
@@ -61,8 +61,8 @@
 
 - `fn` (`callable`)：受限 Python 函数。
 - `runtime_args` (`tuple[object, ...]`)：目标函数实际传入的运行时参数，顺序必须与 `fn` 的形参顺序一致。
-- `globals` (`dict[str, object] | None`)：可选解析环境补充表，仅用于补全源码解析时的名称查找。
-- `builtins` (`dict[str, object] | object | None`)：可选内建环境；若传入对象，将读取其 `__dict__` 作为内建名称表。
+- `globals` (`dict[str, object] | None`)：可选的解析环境补充表，仅用于补充 `parse_function(...)` 所需的全局名称解析。
+- `builtins` (`dict[str, object] | object | None`)：可选的内建名称补充表；若传入非 `dict` 对象，则按其 `__dict__` 参与解析环境构造。
 
 使用示例：
 
@@ -78,15 +78,16 @@ func_op = build_func_op(only_symbol, s)
 注意事项：
 
 - 解析失败或发射失败必须抛出可定位的错误。
-- 允许通过 `globals`/`builtins` 提供解析环境，但不得改变函数签名推导行为，也不能替代 `runtime_args`。
+- `globals` / `builtins` 只用于补充源码解析环境，不能改变函数签名推导行为，也不能替代 `runtime_args`。
+- `build_func_op` 不接收 `config`；如需 `config`，应改用 `build_func_op_from_ast(...)`。
 - `runtime_args` 的个数必须与函数形参数量一致。
-- `globals`/`builtins` 仅参与 AST 解析环境构造，不参与 `func.func` 输入签名推导。
+- `build_func_op` 仅保证可位置绑定形参按位置顺序接收 `runtime_args`。
 - 张量类运行时参数应按其对应 spec lowering 为项目内的 memory type。
 - `SymbolDim("s")` 这类运行时参数必须 lowering 为 `!symbol.int<"s">`；`SymbolDim(1)` 这类常量 symbol 必须 lowering 为 `!symbol.int<"1">`。
-- 当 `runtime_args` 为普通 Python `int` 且函数属于整型标量运算场景时，输入参数必须 lowering 为携带该整数值的 `SymbolValueType`，而不是 builtin 整数类型；负数实参的对外字符串表示必须保持 `symbol.int<-3>` 这类十进制负数字面量形式。
+- 当 `runtime_args` 为普通 Python `int` 且函数场景属于整型标量运算时，输入参数必须 lowering 为携带该整数值的 `SymbolValueType`，而不是 builtin 整数类型；负数实参的对外字符串表示必须保持 `symbol.int<-3>` 这类十进制负数字面量形式。
 - 允许 `for` 循环内包含 `dma.slice`/`dma.deslice` 相关语义；当循环来自 `LoopRange` 且边界为 symbol 整数时，必须保留 `symbol.for` 结构，且迭代变量 `it` 不能退化为 `index`、`i32`、浮点或其他非 `SymbolValueType`。
-- 当 `fn` 为纯 symbol 标量函数时，输入参数与返回值都必须 lowering 为 `!symbol.int<"expr">`。
-- 当 `fn` 为整型标量加/减法函数时，函数体中的标量加/减必须 lowering 为 `symbol.add` / `symbol.sub`，且结果类型保持为携带具体整数值的 `SymbolValueType`。
+- 当函数场景为纯 symbol 标量函数时，输入参数与返回值都必须 lowering 为 `!symbol.int<"expr">`。
+- 当函数场景为整型标量加法时，函数体中的标量加法必须 lowering 为 `symbol.add`，且结果类型保持为携带具体整数值的 `SymbolValueType`。
 - 纯 symbol 标量函数的参数/返回类型必须复用 `spec/dialect/symbol.md` 中定义的 `SymbolValueType`，不能退回 builtin 整数类型。
 - `LoopRange` 场景中传给 `dma.slice` / `dma.deslice` 的标量 operand 必须直接复用 `!symbol.int<"expr">` value，不允许通过 `arith.index_cast` 做中间桥接。
 
@@ -106,8 +107,8 @@ func_op = build_func_op(only_symbol, s)
 参数说明：
 
 - `func_ast` (`FunctionAST`)：函数 AST。
-- `runtime_args` (`tuple[object, ...] | list[object] | None`)：可选运行时参数；若提供，顺序必须与 `func_ast.inputs` 一致。
-- `config` (`dict[str, object] | None`)：可选 lowering 配置，透传给 `AstVisitor` 与 `EmitContext`，不参与函数签名推导。
+- `runtime_args` (`tuple[object, ...] | list[object] | None`)：目标函数实际传入的运行时参数；若提供，则顺序必须与 `func_ast.inputs` 一致，并用于驱动 `func.func` 输入签名的 lowering。
+- `config` (`dict[str, object] | None`)：可选的 visitor / lowering 配置，会透传给 `AstVisitor(config=...)` 与 `EmitContext(..., config=...)`，但不得改变 `runtime_args` 驱动签名的公开契约。
 
 使用示例：
 
@@ -116,14 +117,20 @@ func_ast = parse_function(add)
 func_op = build_func_op_from_ast(func_ast, [A, B])
 ```
 
+```python
+func_ast = parse_function(loop_body)
+func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars": {"i": "outer"}})
+```
+
 注意事项：
 
 - 输入 AST 必须满足 `ast.md` 的结构约束。
-- `runtime_args` 若提供，必须与 `func_ast.inputs` 一一对应；省略时仅使用 AST 定义的形参信息生成签名。
-- `config` 仅影响 lowering 过程中的上下文配置，不得改变 `runtime_args` 决定的签名类型。
+- `runtime_args` 省略时，输入签名按 AST 注解 lowering；提供时，必须与 `func_ast.inputs` 一一对应，并以实际运行时参数语义驱动签名 lowering。
+- `config` 只用于 visitor / lowering 配置透传，不得替代 `runtime_args`，也不得改变由 `runtime_args` 决定的输入签名。
+- `func_ast.inputs` 不能为空；若提供 `runtime_args`，长度必须与 `func_ast.inputs` 一致。
+- 若 AST 输入包含未支持的节点类型、未支持的标量类型，或函数既不属于纯 symbol 标量函数又缺少 tensor 输入，必须报错。
 - 若 `runtime_args` 中存在 `SymbolDim("s")` 这类 symbol 标量，对应输入必须 lowering 为 `!symbol.int<"s">`。
 - 若 AST 仅包含符号标量输入/输出，则生成的 `func.func` 签名必须保持 `!symbol.int<"expr">` 输入与返回，不得改写为 builtin 标量类型。
-- 若需要将普通 Python `int` 运行时实参 lowering 为携带具体整数值的 `SymbolValueType`，必须显式传入 `runtime_args`。
 
 返回与限制：
 
@@ -131,33 +138,31 @@ func_op = build_func_op_from_ast(func_ast, [A, B])
 
 ## 测试
 
-- 测试文件：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)（`mlir_gen` 链路实际承载文件）
-- 执行命令：`pytest -q test/dsl/test_ast_visitor.py -k 'test_build_func_op or test_visit_to_nn_ir_builds_module or test_emit_mlir_output or test_scalar_arg_lowering_in_signature or test_symbol_scalar_function_uses_symbol_value_type_signature or test_symbol_scalar_function_lowers_add_to_symbol_add or test_symbol_scalar_function_lowers_sub_to_symbol_sub or test_invalid_tensor_return_annotation_reports_diagnostics or test_constant_lowering_reports_diagnostics or test_return_type_mismatch_reports_diagnostics or test_multi_statement_ssa_order_and_reuse or test_build_func_op_supports_symbolic_for_loop_dma_without_return or test_tensor_binary_implicit_broadcast_lowering or test_tensor_binary_prepend_broadcast_lowering or test_compare_implicit_broadcast_lowering or test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics or test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type or test_build_func_op_sub_scalar_runtime_args_lower_to_symbol_value_type'`
+- 测试文件：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
+- 执行命令：`pytest -q test/dsl/test_ast_visitor.py -k 'test_build_func_op or test_visit_to_nn_ir_builds_module or test_emit_mlir_output or test_scalar_arg_lowering_in_signature or test_build_func_op_signature_uses_runtime_args_not_parse_env or test_symbol_scalar_function_uses_symbol_value_type_signature or test_symbol_scalar_function_lowers_add_to_symbol_add or test_invalid_tensor_return_annotation_reports_diagnostics or test_constant_lowering_reports_diagnostics or test_return_type_mismatch_reports_diagnostics or test_multi_statement_ssa_order_and_reuse or test_build_func_op_supports_symbolic_for_loop_dma_without_return or test_tensor_binary_implicit_broadcast_lowering or test_tensor_binary_prepend_broadcast_lowering or test_compare_implicit_broadcast_lowering or test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics or test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type or test_build_func_op_globals_and_builtins_cannot_replace_runtime_args or test_mlir_gen_build_func_op_builtins_and_parse_error or test_mlir_gen_signature_validation_errors'`
 - 测试目标：
-  - `mlir_gen` 链路测试由 [`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py) 中的 `MGEN-*` 用例承载。
   - 验证 `build_func_op(...)` 生成 `func.func`。
-- 验证 `build_func_op(fn, *runtime_args)` 仅通过运行时参数推导输入签名。
-- 验证 `build_func_op(...)` 缺少运行时参数、运行时实参数量不匹配，以及额外 `globals/builtins` 调用方式的错误路径。
-- 验证 `build_func_op_from_ast(..., runtime_args=...)` 的直接成功路径会按运行时实参收敛 symbol/Python int 标量签名。
-- 验证 `build_func_op_from_ast(..., config=...)` 会直接透传 lowering 配置；合法配置必须可观察地进入 lowering 上下文且不改变签名，非法配置必须通过公开接口暴露错误。
-- 验证 `build_func_op_from_ast(..., runtime_args=...)` 的直接失败路径会在数量不匹配时报错。
-- 验证函数签名与返回值类型与 AST 一致。
+  - 验证 `build_func_op(fn, *runtime_args, globals=None, builtins=None)` 的输入签名仅由运行时参数决定。
+  - 验证 `build_func_op(...)` 仅支持按位置参数传入运行时参数；缺少运行时参数、数量不匹配或试图以 `globals/builtins` 替代时必须报错。
+  - 验证 `build_func_op_from_ast(func_ast, runtime_args=None, config=None)` 的公开接口与实现签名一致，且 `runtime_args` / `config` 成功路径可由测试直接观察。
+  - 验证 `build_func_op_from_ast(...)` 的输入校验错误路径，包括空输入、`runtime_args` 长度不匹配、未支持的标量类型、未支持的输入节点类型，以及非纯 symbol 标量函数缺少 tensor 输入时报错。
+  - 验证 `globals/builtins` 只补充解析环境，不替代运行时参数；缺少运行时参数、运行时实参数量不匹配或误用 `globals/builtins` 时必须报错。
+  - 验证非 `dict` 的 `builtins` 实参可作为解析环境输入成功构建 `func.func`。
+  - 验证函数签名与返回值类型与 AST 一致。
   - 通过测试辅助封装验证 `func.func` 的结构输出（不改变本模块的边界）。
-- 覆盖无返回 `for` 循环与 `slice/deslice` 的生成能力，并要求 `LoopRange` lowering 为 `symbol.for`，且循环迭代变量 `it` 保持 `!symbol.int<"...">`。
-- 验证纯 symbol 函数场景会生成 `!symbol.int<"...">` 输入与 `!symbol.int<"...">` 返回。
-- 验证纯 symbol 标量加法在 lowering 后生成 `symbol.add`，不退回 builtin 算术或其他 dialect op。
-- 验证纯 symbol 标量减法在 lowering 后生成 `symbol.sub`，不退回 builtin 算术或其他 dialect op。
-- 验证整型标量函数场景中，`build_func_op(add, lhs, rhs)` 会把 Python `int` 实参 lowering 为携带具体整数值的 `SymbolValueType` 输入，并生成满足语义的 `symbol.add` 结果。
-- 验证整型标量函数场景中，`build_func_op(sub, lhs, rhs)` 会把 Python `int` / `SymbolDim` 实参 lowering 为 `SymbolValueType` 输入，并生成满足语义的 `symbol.sub` 结果。
-- 验证负数 Python `int` 实参不会导致 lowering 失败；负值的 `SymbolValueType.__str__` 必须保持 `symbol.int<-3>` 这类十进制负数字面量口径，且 `get_value()` 可还原原始负数值。
-- 验证 `LoopRange + slice/deslice` 场景生成 `symbol.for + dma.slice/dma.deslice`，且循环相关 lowering 不生成 `arith.index_cast`。
+  - 覆盖无返回 `for` 循环与 `slice/deslice` 的生成能力，并要求 `LoopRange` lowering 为 `symbol.for`，且循环迭代变量 `it` 保持 `!symbol.int<"...">`。
+  - 验证纯 symbol 函数场景会生成 `!symbol.int<"...">` 输入与 `!symbol.int<"...">` 返回。
+  - 验证纯 symbol 标量加法在 lowering 后生成 `symbol.add`，不退回 builtin 算术或其他 dialect op。
+  - 验证整型标量函数场景中，`build_func_op(add, lhs, rhs)` 会把 Python `int` 实参 lowering 为携带具体整数值的 `SymbolValueType` 输入，并生成 `symbol.add` 结果。
+  - 验证负数 Python `int` 实参不会导致 lowering 失败；负值的 `SymbolValueType.__str__` 必须保持 `symbol.int<-3>` 这类十进制负数字面量口径，且 `get_value()` 可还原原始负数值。
+  - 验证 `LoopRange + slice/deslice` 场景生成 `symbol.for + dma.slice/dma.deslice`，且循环相关 lowering 不生成 `arith.index_cast`。
 - 功能与用例清单：
   - MGEN-001：`build_func_op(...)` 返回 `func.func`。（`test_build_func_op_returns_func_op`）
-  - MGEN-001A：`build_func_op(...)` 必须显式传入运行时实参，省略实参应报错。（`test_build_func_op_requires_explicit_runtime_args`）
-  - MGEN-001B：`build_func_op(...)` 允许传入非 `dict` 的 `builtins` 解析环境；当解析依赖该环境中的 Python 名称时，应能观察到“缺少环境时报错、提供对象环境后成功 lowering”的差异。（`test_build_func_op_accepts_object_builtins_env`）
-  - MGEN-002：参数顺序与 AST 一致。（`test_build_func_op_from_ast_preserves_arg_order`）
-  - MGEN-002A：`build_func_op_from_ast(..., runtime_args=...)` 会按传入的 `SymbolDim` / Python `int` 直接收敛 symbol 标量签名。（`test_build_func_op_from_ast_runtime_args_lower_symbol_signature`）
-  - MGEN-002B：`build_func_op_from_ast(..., config=...)` 会直接透传 lowering 配置；合法配置必须可观察地进入 lowering visitor/context 且不改变由 `runtime_args` 决定的函数签名，非法配置会通过公开接口暴露 lowering 错误。（`test_build_func_op_from_ast_config_preserves_runtime_signature`）
+  - MGEN-001A：`build_func_op(...)` 的输入签名只由 `runtime_args` 决定；即使 `globals` 中存在同名对象且额外传入 `builtins`，成功路径的签名推导也不得被解析环境覆盖。（`test_build_func_op_signature_uses_runtime_args_not_parse_env`）
+  - MGEN-001B：非 `dict` 的 `builtins` 可作为解析环境补充输入，且解析失败必须收敛为 `AstVisitorError`。（`test_mlir_gen_build_func_op_builtins_and_parse_error`）
+  - MGEN-002：`build_func_op_from_ast(...)` 保留 AST 参数顺序；当传入 `runtime_args` 时，输入签名仍由运行时参数语义驱动。（`test_build_func_op_from_ast_preserves_arg_order`、`test_build_func_op_from_ast_uses_runtime_args_for_symbol_signature`）
+  - MGEN-002A：`build_func_op_from_ast(..., config=...)` 接收并透传 visitor / lowering 配置。（`test_build_func_op_from_ast_forwards_config_to_visitor_and_context`）
+  - MGEN-002B：`build_func_op_from_ast(...)` 的公开入口必须覆盖空输入、`runtime_args` 长度不匹配、未支持的标量类型、未支持的输入节点类型，以及非纯 symbol 标量函数缺少 tensor 输入等错误路径。（`test_mlir_gen_signature_validation_errors`）
   - MGEN-003：返回值类型与 AST 对齐。（`test_build_func_op_return_type_matches_annotation`）
   - MGEN-004：经测试辅助封装后 module 含 `func.func`/`nn` op。（`test_visit_to_nn_ir_builds_module`）
   - MGEN-005：经测试辅助打印文本包含 `func.func`/`nn`。（`test_emit_mlir_output`）
@@ -170,13 +175,9 @@ func_op = build_func_op_from_ast(func_ast, [A, B])
   - MGEN-012：前置维度隐式 broadcast。（`test_tensor_binary_prepend_broadcast_lowering`）
   - MGEN-013：比较表达式隐式 broadcast。（`test_compare_implicit_broadcast_lowering`）
   - MGEN-014：不可 broadcast 报错与定位。（`test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics`）
-- MGEN-015：`LoopRange + slice/deslice + 无 return` 场景生成 `symbol.for + dma.slice/dma.deslice`，且循环迭代变量 `it` 与 DMA operand 直接保持 `!symbol.int<"...">`，不生成 `arith.index_cast`。（`test_build_func_op_supports_symbolic_for_loop_dma_without_return`）
-- MGEN-016：纯 symbol 函数参数 lowering 为 `func.func` 的 `!symbol.int<"...">` 输入。（`test_symbol_scalar_function_uses_symbol_value_type_signature`）
-- MGEN-017：纯 symbol 函数返回 lowering 为 `func.func` 的 `!symbol.int<"...">` 输出。（`test_symbol_scalar_function_uses_symbol_value_type_signature`）
-- MGEN-018：纯 symbol 标量加法 lowering 为 `symbol.add`。（`test_symbol_scalar_function_lowers_add_to_symbol_add`）
-- MGEN-019：`build_func_op` 的运行时实参数量少传或多传时都必须报错。（`test_build_func_op_rejects_runtime_arg_count_mismatch`）
-- MGEN-019A：`build_func_op` 在缺少必需 `runtime_args` 时，`globals/builtins` 不能替代真实运行时实参。（`test_build_func_op_globals_and_builtins_cannot_replace_runtime_args`）
-- MGEN-019B：`build_func_op_from_ast(..., runtime_args=...)` 的运行时实参数量少传或多传时都必须报错，并保留 `FunctionAST` 定位信息。（`test_build_func_op_from_ast_rejects_runtime_arg_count_mismatch`）
-- MGEN-020：整型标量函数场景中，`build_func_op(add, lhs, rhs)` 对普通 Python `int` runtime args 的 lowering 必须产出携带具体整数值的 `SymbolValueType` 输入；若实参包含负数，其对外字符串表示必须保持 `symbol.int<-3>` 这类十进制负数字面量口径，并在函数体内生成满足语义的 `symbol.add` 结果。（`test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type`）
-- MGEN-021：纯 symbol 标量减法 lowering 为 `symbol.sub`。（`test_symbol_scalar_function_lowers_sub_to_symbol_sub`）
-- MGEN-022：整型标量函数场景中，`build_func_op(sub, lhs, rhs)` 必须生成 `symbol.sub`，并保持常量/符号/混合参数的 `SymbolValueType` 结果语义。（`test_build_func_op_sub_scalar_runtime_args_lower_to_symbol_value_type`）
+  - MGEN-015：`LoopRange + slice/deslice + 无 return` 场景生成 `symbol.for + dma.slice/dma.deslice`，且循环迭代变量 `it` 与 DMA operand 直接保持 `!symbol.int<"...">`，不生成 `arith.index_cast`。（`test_build_func_op_supports_symbolic_for_loop_dma_without_return`）
+  - MGEN-016：纯 symbol 函数参数 lowering 为 `func.func` 的 `!symbol.int<"...">` 输入。（`test_symbol_scalar_function_uses_symbol_value_type_signature`）
+  - MGEN-017：纯 symbol 函数返回 lowering 为 `func.func` 的 `!symbol.int<"...">` 输出。（`test_symbol_scalar_function_uses_symbol_value_type_signature`）
+  - MGEN-018：纯 symbol 标量加法 lowering 为 `symbol.add`。（`test_symbol_scalar_function_lowers_add_to_symbol_add`）
+  - MGEN-019：`build_func_op` 的运行时参数为必填，且公开契约仅覆盖 `fn + runtime_args` 的可位置绑定形参；省略实参、实参数量不匹配，或试图以 `globals/builtins` 替代时必须报错。（`test_build_func_op_requires_explicit_runtime_args`、`test_build_func_op_rejects_runtime_arg_count_mismatch`、`test_build_func_op_globals_and_builtins_cannot_replace_runtime_args`）
+  - MGEN-020：`build_func_op(add, lhs, rhs)` 对普通 Python `int` runtime args 的 lowering 必须产出携带具体整数值的 `SymbolValueType` 输入；若实参包含负数，其对外字符串表示必须保持 `symbol.int<-3>` 这类十进制负数字面量口径，并在函数体内生成 `symbol.add` 结果。（`test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type`）
