@@ -1,7 +1,7 @@
 """symbol dialect tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 我不是牛马
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 symbol dialect 的整数符号 attribute/type、verifier、parse/print 与错误路径。
@@ -54,6 +54,7 @@ from kernel_gen.dialect.symbol import (
     SymbolMulOp,
     SymbolNeOp,
     SymbolSubOp,
+    SymbolToFloatOp,
     SymbolValueType,
 )
 from kernel_gen.symbol_variable.memory import Memory
@@ -602,6 +603,64 @@ builtin.module {
 }
 """,
         ).parse_module()
+
+
+# TC-SYM-039
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-25 00:17:51 +0800
+# 最近一次运行成功时间: 2026-03-25 00:17:51 +0800
+# 测试目的: 验证 symbol.to_float 在 symbol.int 输入与 f32 结果下可通过 verifier。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_to_float_verify_success() -> None:
+    op = SymbolToFloatOp(_make_symbol_value("N"), f32)
+
+    op.verify()
+    assert _print_attr(op.result.type) == "f32"
+
+
+# TC-SYM-040
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-25 00:17:51 +0800
+# 最近一次运行成功时间: 2026-03-25 00:17:51 +0800
+# 测试目的: 验证 symbol.to_float 的 parse/print round-trip 稳定。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_to_float_round_trip() -> None:
+    ctx = _build_context()
+    module = Parser(
+        ctx,
+        """
+builtin.module {
+  %n = "test.op"() : () -> !symbol.int<"N">
+  %f = symbol.to_float %n : !symbol.int<"N"> -> f32
+}
+""",
+    ).parse_module()
+
+    module.verify()
+    printed = _print_op(module)
+    assert 'symbol.to_float %n : !symbol.int<"N"> -> f32' in printed
+
+
+# TC-SYM-041
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-25 00:17:51 +0800
+# 最近一次运行成功时间: 2026-03-25 00:17:51 +0800
+# 测试目的: 验证 symbol.to_float 会拒绝非 symbol.int 输入或非 f32 结果类型。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_to_float_rejects_invalid_types() -> None:
+    non_symbol_value = _TestOp(result_types=[i32]).results[0]
+    symbol_value = _make_symbol_value("N")
+
+    with pytest.raises(VerifyException, match='symbol.to_float source must have type !symbol.int<"expr">'):
+        SymbolToFloatOp(non_symbol_value, f32).verify()
+    with pytest.raises(VerifyException, match="symbol.to_float result type must be f32"):
+        SymbolToFloatOp(symbol_value, f64).verify()
 
 
 # TC-SYM-026
