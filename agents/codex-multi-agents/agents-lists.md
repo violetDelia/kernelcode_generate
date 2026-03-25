@@ -5,7 +5,7 @@
 | 神秘人 | free | 神秘人 | codex | 神秘人 | 管理员 | agents/codex-multi-agents/agents/神秘人/神秘人.prompt.md | ./agents/神秘人 | 负责分发与协调 |
 | 小李飞刀 | free | 小李飞刀 | codex | 小李飞刀 | DMA expectation cleanup | agents/codex-multi-agents/agents/小李飞刀/小李飞刀.prompt.md | agents/codex-multi-agents/agents/小李飞刀 | 负责实现与测试，审查、合并 |
 | 金铲铲大作战 | free | 金铲铲大作战 | codex | 金铲铲大作战 | 已合并 symbol arith expectation 链路 | agents/codex-multi-agents/agents/金铲铲大作战/金铲铲大作战.prompt.md | agents/codex-multi-agents/agents/金铲铲大作战 | 负责实现与测试，审查、合并 |
-| 我不是牛马 | free | 我不是牛马 | codex | 我不是牛马 | 擅长 DSL 合并与冲突收敛 | agents/codex-multi-agents/agents/我不是牛马/我不是牛马.prompt.md | agents/codex-multi-agents/agents/我不是牛马 | 负责实现与测试，审查、合并 |
+| 我不是牛马 | free | 我不是牛马 | codex | 我不是牛马 | 擅长cleanup与合并收尾，熟悉DSL符号链路 | agents/codex-multi-agents/agents/我不是牛马/我不是牛马.prompt.md | agents/codex-multi-agents/agents/我不是牛马 | 负责实现与测试，审查、合并 |
 | 摸鱼小分队 | free | 摸鱼小分队 | codex | 摸鱼小分队 | 收敛Memory算术类型提升spec | agents/codex-multi-agents/agents/摸鱼小分队/摸鱼小分队.prompt.md | agents/codex-multi-agents/agents/摸鱼小分队 | 负责 spec 文档编写、审查、合并 |
 | 李白 | busy | 李白 | codex | 李白 | 擅长 spec 严格审查、cleanup 收口与日志一致性核对 | agents/codex-multi-agents/agents/李白/李白.prompt.md | agents/codex-multi-agents/agents/李白 | 负责 spec 文档编写、审查、合并 |
 | 不要啊教练 | free | 不要啊教练 | codex | 不要啊教练 | 复审mlir_gen spec-clean | agents/codex-multi-agents/agents/不要啊教练/不要啊教练.prompt.md | agents/codex-multi-agents/agents/不要啊教练 | 负责 spec 文档编写、审查、合并 |

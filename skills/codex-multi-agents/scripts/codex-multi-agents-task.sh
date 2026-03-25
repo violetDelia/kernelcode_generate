@@ -5,11 +5,11 @@
 # 最后一次更改: 神秘人
 #
 # 功能:
-# - 管理 TODO.md 任务流转: 分发、完成、暂停、新建。
+# - 管理 TODO.md 任务流转: 分发、完成、暂停、继续、新建。
 # - 支持 DONE.md 自动创建与完成记录追加。
-# - 在分发、完成、暂停时同步更新 agents-lists.md 角色状态。
+# - 在分发、完成、暂停、继续时同步更新 agents-lists.md 角色状态。
 # - 在分发时可选调用 tmux 对话脚本，向目标角色发送任务消息。
-# - 在分发时以 1/2 概率调用 list 的 -init，更新目标角色信息并提醒其同步自身提示词信息。
+# - 在分发前固定调用一次 list 的 -init，更新目标角色信息并提醒其同步自身提示词信息。
 # - 写操作统一使用 flock 文件锁。
 #
 # 对应文件:
@@ -30,6 +30,7 @@ readonly RC_INTERNAL=5
 OP_DISPATCH=0
 OP_DONE=0
 OP_PAUSE=0
+OP_CONTINUE=0
 OP_NEW=0
 OP_STATUS=0
 
@@ -81,6 +82,7 @@ Usage:
   codex-multi-agents-task.sh -file <TODO.md> -dispatch -task_id <id> -to <worker> -agents-list <agents-lists.md> [-message <text>]
   codex-multi-agents-task.sh -file <TODO.md> -done -task_id <id> -log <log_path> -agents-list <agents-lists.md>
   codex-multi-agents-task.sh -file <TODO.md> -pause -task_id <id> -agents-list <agents-lists.md>
+  codex-multi-agents-task.sh -file <TODO.md> -continue -task_id <id> -agents-list <agents-lists.md>
   codex-multi-agents-task.sh -file <TODO.md> -new -info <desc> [-to <worker>] [-from <owner>] [-worktree <path>] [-log <record_path>]
   codex-multi-agents-task.sh -file <TODO.md> -status -doing
   codex-multi-agents-task.sh -file <TODO.md> -status -task-list
@@ -89,6 +91,7 @@ Examples:
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -dispatch -task_id EX-3 -to worker-a -agents-list ./agents/codex-multi-agents/agents-lists.md -message "请处理任务 EX-3"
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -done -task_id EX-1 -log ./agents/codex-multi-agents/log/task-EX-1.log -agents-list ./agents/codex-multi-agents/agents-lists.md
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -pause -task_id EX-2 -agents-list ./agents/codex-multi-agents/agents-lists.md
+  codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -continue -task_id EX-2 -agents-list ./agents/codex-multi-agents/agents-lists.md
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -new -info "补充单元测试" -to worker-b -from 李白 -worktree repo-x -log ./log/record.md
   codex-multi-agents-task.sh ./skills/codex-multi-agents/examples/TODO.md -file -status -doing
   codex-multi-agents-task.sh ./skills/codex-multi-agents/examples/TODO.md -file -status -task-list
@@ -121,6 +124,10 @@ parse_args() {
         ;;
       -pause)
         OP_PAUSE=1
+        shift
+        ;;
+      -continue)
+        OP_CONTINUE=1
         shift
         ;;
       -new)
@@ -261,8 +268,8 @@ parse_args() {
   [[ "$HAS_FILE" -eq 1 ]] || err "$RC_ARG" "missing required argument: -file"
   [[ -n "$(trim "$FILE")" ]] || err "$RC_ARG" "empty value for -file"
 
-  local op_count=$((OP_DISPATCH + OP_DONE + OP_PAUSE + OP_NEW + OP_STATUS))
-  [[ "$op_count" -eq 1 ]] || err "$RC_ARG" "exactly one operation is required: -dispatch|-done|-pause|-new|-status"
+  local op_count=$((OP_DISPATCH + OP_DONE + OP_PAUSE + OP_CONTINUE + OP_NEW + OP_STATUS))
+  [[ "$op_count" -eq 1 ]] || err "$RC_ARG" "exactly one operation is required: -dispatch|-done|-pause|-continue|-new|-status"
 
   if [[ "$OP_DISPATCH" -eq 1 ]]; then
     [[ "$HAS_TASK_ID" -eq 1 ]] || err "$RC_ARG" "-dispatch requires -task_id"
@@ -293,6 +300,14 @@ parse_args() {
     [[ -n "$(trim "$TASK_ID")" ]] || err "$RC_ARG" "empty value for -task_id"
     [[ -n "$(trim "$AGENTS_LIST")" ]] || err "$RC_ARG" "empty value for -agents-list"
     [[ "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 ]] || err "$RC_ARG" "-pause does not accept -to/-info/-log/-from/-worktree/-message"
+  fi
+
+  if [[ "$OP_CONTINUE" -eq 1 ]]; then
+    [[ "$HAS_TASK_ID" -eq 1 ]] || err "$RC_ARG" "-continue requires -task_id"
+    [[ "$HAS_AGENTS_LIST" -eq 1 ]] || err "$RC_ARG" "-continue requires -agents-list"
+    [[ -n "$(trim "$TASK_ID")" ]] || err "$RC_ARG" "empty value for -task_id"
+    [[ -n "$(trim "$AGENTS_LIST")" ]] || err "$RC_ARG" "empty value for -agents-list"
+    [[ "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 ]] || err "$RC_ARG" "-continue does not accept -to/-info/-log/-from/-worktree/-message"
   fi
 
   if [[ "$OP_NEW" -eq 1 ]]; then
@@ -393,7 +408,7 @@ send_dispatch_init() {
 }
 
 should_dispatch_init() {
-  (( RANDOM % 2 == 0 ))
+  return 0
 }
 
 send_dispatch_message() {
@@ -783,7 +798,7 @@ def main() -> int:
     agents_rows = None
     message_lines: list[str] = []
 
-    if op in {"dispatch", "done", "pause"}:
+    if op in {"dispatch", "done", "pause", "continue"}:
         agents_lines, agents_table = parse_agents_table(agents_file)
         agents_rows = [r[:] for r in agents_table["rows"]]
 
@@ -871,6 +886,28 @@ def main() -> int:
             else:
                 agents_rows[agent_idx][agents_table["status_idx"]] = "busy"
 
+    elif op == "continue":
+        idx = find_row_index(exec_rows, task_id)
+        if idx < 0:
+            fail(RC_DATA, f"task not found in running list: {task_id}")
+
+        if exec_rows[idx][6].strip() != "暂停":
+            fail(RC_DATA, f"task status is not paused: {task_id}")
+
+        assignee = exec_rows[idx][5].strip()
+        if assignee:
+            assert agents_table is not None
+            assert agents_rows is not None
+            agent_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], assignee)
+            if agent_idx < 0:
+                fail(RC_DATA, f"agent not found in agents list: {assignee}")
+
+        exec_rows[idx][6] = "进行中"
+        message_lines.append(f"OK: continue {task_id}")
+        if assignee:
+            agents_rows[agent_idx][agents_table["status_idx"]] = "busy"
+            message_lines.append(f"OK: replace {assignee} 状态")
+
     elif op == "new":
         existing_ids = {r[0].strip() for r in (exec_rows + list_rows) if not is_empty_row(r)}
         new_id = generate_task_id(info, to, existing_ids)
@@ -934,6 +971,8 @@ main() {
     op="done"
   elif [[ "$OP_PAUSE" -eq 1 ]]; then
     op="pause"
+  elif [[ "$OP_CONTINUE" -eq 1 ]]; then
+    op="continue"
   elif [[ "$OP_NEW" -eq 1 ]]; then
     op="new"
   elif [[ "$OP_STATUS" -eq 1 ]]; then
@@ -962,7 +1001,7 @@ main() {
     acquire_lock_on_file "$done_file" done_lock_fd
   fi
 
-  if [[ "$op" == "dispatch" || "$op" == "done" || "$op" == "pause" ]]; then
+  if [[ "$op" == "dispatch" || "$op" == "done" || "$op" == "pause" || "$op" == "continue" ]]; then
     acquire_lock_on_file "$AGENTS_LIST" agents_lock_fd
   fi
 
