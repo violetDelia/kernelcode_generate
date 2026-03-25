@@ -4,7 +4,7 @@
 最后一次更改: 我不是牛马
 
 功能说明:
-- 覆盖 kernel_gen/pass/pass_manager.py 的 Pass 管理行为。
+- 覆盖 kernel_gen/passes/pass_manager.py 的 Pass 管理行为。
 
 当前覆盖率信息:
 - 当前覆盖率: `100%`（语句覆盖 `100%`，分支覆盖 `100%`）。
@@ -12,13 +12,13 @@
 - 本文件覆盖 `TC-PASS-001..005`，并补充 `Pass` 缺少 `name` 属性的非法输入分支。
 
 覆盖率命令:
-- `pytest -q --cov=kernel_gen.pass.pass_manager --cov-branch --cov-report=term-missing test/pass/test_pass_manager.py`
+- `pytest -q --cov=kernel_gen.passes.pass_manager --cov-branch --cov-report=term-missing test/pass/test_pass_manager.py`
 
 使用示例:
 - pytest -q test/pass/test_pass_manager.py
 
 关联文件:
-- 功能实现: kernel_gen/pass/pass_manager.py
+- 功能实现: kernel_gen/passes/pass_manager.py
 - Spec 文档: spec/pass/pass_manager.md
 - 测试文件: test/pass/test_pass_manager.py
 """
@@ -35,7 +35,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-pass_module = importlib.import_module("kernel_gen.pass.pass_manager")
+pass_module = importlib.import_module("kernel_gen.passes.pass_manager")
 Pass = pass_module.Pass
 PassManager = pass_module.PassManager
 
@@ -47,14 +47,14 @@ PassManager = pass_module.PassManager
 # 最近一次运行成功时间: 2026-03-22 13:24:21 +0800
 # 功能说明: 验证单 Pass 正常执行。
 # 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_single_pass
-# 对应功能实现文件路径: kernel_gen/pass/pass_manager.py
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
 def test_pass_manager_single_pass() -> None:
     class AddOnePass(Pass):
         name = "add-one"
 
-        def run(self, target):
+        def run(self: "AddOnePass", target: int) -> int:
             return target + 1
 
     pm = PassManager(name="opt")
@@ -69,20 +69,20 @@ def test_pass_manager_single_pass() -> None:
 # 最近一次运行成功时间: 2026-03-22 13:24:21 +0800
 # 功能说明: 验证多 Pass 顺序执行。
 # 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_multiple_passes_order
-# 对应功能实现文件路径: kernel_gen/pass/pass_manager.py
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
 def test_pass_manager_multiple_passes_order() -> None:
     class AddOnePass(Pass):
         name = "add-one"
 
-        def run(self, target):
+        def run(self: "AddOnePass", target: int) -> int:
             return target + 1
 
     class TimesTwoPass(Pass):
         name = "times-two"
 
-        def run(self, target):
+        def run(self: "TimesTwoPass", target: int) -> int:
             return target * 2
 
     pm = PassManager()
@@ -97,7 +97,7 @@ def test_pass_manager_multiple_passes_order() -> None:
 # 最近一次运行成功时间: 2026-03-22 13:24:21 +0800
 # 功能说明: 验证空管理器返回原输入。
 # 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_empty_returns_input
-# 对应功能实现文件路径: kernel_gen/pass/pass_manager.py
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
 def test_pass_manager_empty_returns_input() -> None:
@@ -113,7 +113,7 @@ def test_pass_manager_empty_returns_input() -> None:
 # 最近一次运行成功时间: 2026-03-22 13:24:21 +0800
 # 功能说明: 验证非法 Pass 类型报错。
 # 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_invalid_pass_type
-# 对应功能实现文件路径: kernel_gen/pass/pass_manager.py
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
 def test_pass_manager_invalid_pass_type() -> None:
@@ -125,7 +125,7 @@ def test_pass_manager_invalid_pass_type() -> None:
         pm.extend([object()])  # type: ignore[arg-type]
 
     class MissingNamePass:
-        def run(self, target):
+        def run(self: "MissingNamePass", target: object) -> object:
             return target
 
     with pytest.raises(TypeError):
@@ -134,7 +134,7 @@ def test_pass_manager_invalid_pass_type() -> None:
     class BadNamePass(Pass):
         name = 123
 
-        def run(self, target):
+        def run(self: "BadNamePass", target: object) -> object:
             return target
 
     with pytest.raises(TypeError):
@@ -148,14 +148,14 @@ def test_pass_manager_invalid_pass_type() -> None:
 # 最近一次运行成功时间: 2026-03-22 13:24:21 +0800
 # 功能说明: 验证 Pass 异常向上抛出。
 # 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_exception_propagation
-# 对应功能实现文件路径: kernel_gen/pass/pass_manager.py
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
 def test_pass_manager_exception_propagation() -> None:
     class FailPass(Pass):
         name = "fail-pass"
 
-        def run(self, target):
+        def run(self: "FailPass", target: object) -> object:
             raise ValueError("boom")
 
     pm = PassManager()

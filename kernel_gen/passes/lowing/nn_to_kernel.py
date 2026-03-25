@@ -8,13 +8,13 @@
 - 当结果无法复用已有输出时，为结果插入 dma.alloc。
 
 使用示例:
-- from kernel_gen.pass.lowing.nn_to_kernel import LowerNnToKernelPass
+- from kernel_gen.passes.lowing.nn_to_kernel import LowerNnToKernelPass
 - module = LowerNnToKernelPass().run(module)
 
 关联文件:
 - spec: spec/pass/lowing/nn_to_kernel.md
 - test: test/pass/test_lowing_nn_to_kernel.py
-- 功能实现: kernel_gen/pass/lowing/nn_to_kernel.py
+- 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ class LowerNnToKernelError(ValueError):
     关联文件:
     - spec: spec/pass/lowing/nn_to_kernel.md
     - test: test/pass/test_lowing_nn_to_kernel.py
-    - 功能实现: kernel_gen/pass/lowing/nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
     """
 
 
@@ -86,7 +86,7 @@ def _ensure_space_attr(op: Operation) -> NnMemorySpaceAttr:
     关联文件:
     - spec: spec/pass/lowing/nn_to_kernel.md
     - test: test/pass/test_lowing_nn_to_kernel.py
-    - 功能实现: kernel_gen/pass/lowing/nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
     """
 
     space = op.attributes.get("space")
@@ -111,7 +111,7 @@ def _ensure_single_result(op: Operation) -> NnMemoryType:
     关联文件:
     - spec: spec/pass/lowing/nn_to_kernel.md
     - test: test/pass/test_lowing_nn_to_kernel.py
-    - 功能实现: kernel_gen/pass/lowing/nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
     """
 
     if len(op.results) != 1:
@@ -137,7 +137,7 @@ def _ensure_operand_count(op: Operation, expected: int) -> None:
     关联文件:
     - spec: spec/pass/lowing/nn_to_kernel.md
     - test: test/pass/test_lowing_nn_to_kernel.py
-    - 功能实现: kernel_gen/pass/lowing/nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
     """
 
     if len(op.operands) != expected:
@@ -166,7 +166,7 @@ def _build_kernel_op(
     关联文件:
     - spec: spec/pass/lowing/nn_to_kernel.md
     - test: test/pass/test_lowing_nn_to_kernel.py
-    - 功能实现: kernel_gen/pass/lowing/nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
     """
 
     if op.name in _SUPPORTED_BINARY:
@@ -201,7 +201,7 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
     关联文件:
     - spec: spec/pass/lowing/nn_to_kernel.md
     - test: test/pass/test_lowing_nn_to_kernel.py
-    - 功能实现: kernel_gen/pass/lowing/nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
     """
 
     result_type = _ensure_single_result(op)
@@ -235,7 +235,7 @@ def _lower_block(block: Block) -> None:
     关联文件:
     - spec: spec/pass/lowing/nn_to_kernel.md
     - test: test/pass/test_lowing_nn_to_kernel.py
-    - 功能实现: kernel_gen/pass/lowing/nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
     """
 
     ops = list(block.ops)
@@ -261,7 +261,7 @@ def _lower_region(region: Region) -> None:
     关联文件:
     - spec: spec/pass/lowing/nn_to_kernel.md
     - test: test/pass/test_lowing_nn_to_kernel.py
-    - 功能实现: kernel_gen/pass/lowing/nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
     """
 
     for block in region.blocks:
@@ -283,7 +283,7 @@ def _lower_module(module: Operation) -> None:
     关联文件:
     - spec: spec/pass/lowing/nn_to_kernel.md
     - test: test/pass/test_lowing_nn_to_kernel.py
-    - 功能实现: kernel_gen/pass/lowing/nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
     """
 
     for op in module.ops:
@@ -307,7 +307,7 @@ def _iter_ops(module: Operation) -> Iterable[Operation]:
     关联文件:
     - spec: spec/pass/lowing/nn_to_kernel.md
     - test: test/pass/test_lowing_nn_to_kernel.py
-    - 功能实现: kernel_gen/pass/lowing/nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
     """
 
     stack: list[Operation] = list(module.ops)
@@ -334,7 +334,7 @@ def _ensure_no_nn_ops(module: Operation) -> None:
     关联文件:
     - spec: spec/pass/lowing/nn_to_kernel.md
     - test: test/pass/test_lowing_nn_to_kernel.py
-    - 功能实现: kernel_gen/pass/lowing/nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
     """
 
     for op in _iter_ops(module):
@@ -357,12 +357,12 @@ class LowerNnToKernelPass(Pass):
     关联文件:
     - spec: spec/pass/lowing/nn_to_kernel.md
     - test: test/pass/test_lowing_nn_to_kernel.py
-    - 功能实现: kernel_gen/pass/lowing/nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
     """
 
     name = "lower-nn-to-kernel"
 
-    def run(self, module: Operation):
+    def run(self: "LowerNnToKernelPass", module: Operation) -> Operation:
         """执行 pass。
 
         创建者: 金铲铲大作战
@@ -377,7 +377,7 @@ class LowerNnToKernelPass(Pass):
         关联文件:
         - spec: spec/pass/lowing/nn_to_kernel.md
         - test: test/pass/test_lowing_nn_to_kernel.py
-        - 功能实现: kernel_gen/pass/lowing/nn_to_kernel.py
+        - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
         """
 
         _lower_module(module)
