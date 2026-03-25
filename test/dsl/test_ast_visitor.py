@@ -1,7 +1,7 @@
 """AST visitor tests.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: 我不是牛马
 
 功能说明:
 - 覆盖 AST 前端、nn dialect IR 与 MLIR 文本入口的回归测试。
@@ -1434,6 +1434,98 @@ def test_build_func_op_globals_and_builtins_cannot_replace_runtime_args() -> Non
         build_func_op(only_symbol, globals={"expr": expr}, builtins=__builtins__)
 
     assert exc_info.value.location is None
+
+
+# MGEN-027
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-25 22:18:52 +0800
+# 最近一次运行成功时间: 2026-03-25 22:18:52 +0800
+# 功能说明: 验证 build_func_op 会拒绝闭包外部值引用。
+# 测试目的: 验证闭包捕获值不会被当作局部常量或隐式输入参与 lowering。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_external_value_reference_inside_function_body
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_rejects_external_value_reference_inside_function_body() -> None:
+    outer_value = 7
+
+    def use_outer_value() -> int:
+        return outer_value
+
+    with pytest.raises(AstVisitorError, match="cannot use external value inside function body") as exc_info:
+        build_func_op(use_outer_value)
+
+    assert exc_info.value.location is not None
+    assert exc_info.value.location.line == 2
+
+
+# MGEN-027
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-25 22:18:52 +0800
+# 最近一次运行成功时间: 2026-03-25 22:18:52 +0800
+# 功能说明: 验证 build_func_op 会拒绝函数体中直接引用全局外部值。
+# 测试目的: 验证全局名称不会被当作局部常量或隐式输入参与 lowering。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_global_external_value_reference
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_rejects_global_external_value_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+    def use_global_value() -> int:
+        return GLOBAL_EXTERNAL_VALUE
+
+    monkeypatch.setitem(use_global_value.__globals__, "GLOBAL_EXTERNAL_VALUE", 11)
+
+    with pytest.raises(AstVisitorError, match="cannot use external value inside function body") as exc_info:
+        build_func_op(use_global_value)
+
+    assert exc_info.value.location is not None
+
+
+# MGEN-027
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-25 22:18:52 +0800
+# 最近一次运行成功时间: 2026-03-25 22:18:52 +0800
+# 功能说明: 验证 build_func_op 会拒绝函数体中直接引用 builtins 外部值。
+# 测试目的: 验证 builtins 补充表中的外部值不会被当作局部常量或隐式输入参与 lowering。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_builtins_external_value_reference
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_rejects_builtins_external_value_reference() -> None:
+    def use_builtin_value() -> int:
+        return BUILTIN_EXTERNAL_VALUE
+
+    with pytest.raises(AstVisitorError, match="cannot use external value inside function body") as exc_info:
+        build_func_op(use_builtin_value, builtins={"BUILTIN_EXTERNAL_VALUE": 13})
+
+    assert exc_info.value.location is not None
+
+
+# MGEN-027
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-25 22:18:52 +0800
+# 最近一次运行成功时间: 2026-03-25 22:18:52 +0800
+# 功能说明: 验证 build_func_op 会拒绝 Attribute 形式的外部值引用。
+# 测试目的: 验证 `module.CONST` 这类外部属性值不会被当作局部常量或隐式输入参与 lowering。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_attribute_external_value_reference
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_rejects_attribute_external_value_reference() -> None:
+    class ExternalModule:
+        CONST = 17
+
+    def use_attribute_value() -> int:
+        return ExternalModule.CONST
+
+    with pytest.raises(AstVisitorError, match="cannot use external value inside function body") as exc_info:
+        build_func_op(use_attribute_value)
+
+    assert exc_info.value.location is not None
 
 
 # AST-005

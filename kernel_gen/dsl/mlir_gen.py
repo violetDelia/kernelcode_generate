@@ -1,7 +1,7 @@
 """MLIR function assembly entrypoints for DSL.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: 我不是牛马
 
 功能说明:
 - 负责将 `FunctionAST` 组装为 `func.func`。
@@ -248,6 +248,7 @@ def build_func_op(
     runtime_table = {param.name: runtime_args[index] for index, param in enumerate(positional_params)}
     # globals/builtins 仅作为解析环境，不参与签名推导。
     globals_table = dict(getattr(fn, "__globals__", {}) or {})
+    globals_table.update(inspect.getclosurevars(fn).nonlocals)
     if globals is not None:
         globals_table.update(globals)
     globals_table.update(runtime_table)
@@ -258,7 +259,13 @@ def build_func_op(
         builtins_table = getattr(builtins_obj, "__dict__", {})
 
     try:
-        func_ast = _parse_function_with_env(fn, globals_table, builtins_table, runtime_table, config=None)
+        func_ast = _parse_function_with_env(
+            fn,
+            globals_table,
+            builtins_table,
+            runtime_table,
+            config={"reject_external_values": True},
+        )
     except AstParseError as exc:
         location = exc.diagnostics[0].location if exc.diagnostics else None
         raise AstVisitorError(exc.message, location=location) from exc
