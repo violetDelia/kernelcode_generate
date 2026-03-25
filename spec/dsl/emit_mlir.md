@@ -35,6 +35,7 @@
 - 不解析 Python 函数，不遍历 AST。
 - 不做优化、常量折叠或后端特化。
 - 不生成 MLIR 文本；文本输出由上游调用方负责。
+- 当 `CompareExprAST(op="eq")` 的左右操作数都保持 `!symbol.int<"expr">` 语义时，必须 lowering 为 `symbol.eq`，结果类型为 `i1`；该场景不得回退为 `nn.eq`、`arith.cmpi` 或其他非 symbol dialect 比较 op。
 - 当 `ForAST` 来自 `LoopRange(start, end, step)` 且边界与循环变量保持 symbol 整数语义时，必须 lowering 为 `symbol.for`，不得回退为 `scf.for`；其循环块参数 `it` 必须为 `!symbol.int<"expr">`。
 - 在上述 `LoopRange` 场景中，循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand 必须直接复用 `!symbol.int<"expr">` value，不得插入 `arith.index_cast`；若循环变量 `it` 退化为 `index`、普通整数或浮点类型，应视为 lowering 违规。
 - 当 DSL AST 表达 `alloc`、`copy`、`cast`、`view`、`reshape`、`flatten`、`load`、`store`、`slice`、`deslice` 这组 DMA helper 调用时，`emit_mlir` 必须按对应 memory 语义 lowering；其中 `flatten` 公开上视为一维 `reshape` 语义，不要求生成独立 dialect op。
@@ -118,7 +119,7 @@ value = emit_mlir(expr_ast, ctx)
 
 - `ConstAST`：生成常量或等价字面量 op/value。
 - `BinaryExprAST(add/sub/mul/div/floordiv)`：生成对应的二元算术 op。
-- `CompareExprAST(eq/ne/lt/le/gt/ge)`：生成对应的比较 op。
+- `CompareExprAST(eq/ne/lt/le/gt/ge)`：张量/内存操作数生成对应的 `nn` 比较 op；当左右操作数都为 `!symbol.int<"expr">` 且操作为 `eq` 时，生成 `symbol.eq`，结果类型为 `i1`。
 - `LoadAST`：生成张量读取相关 op/value；当携带 `sizes` 时发射 `dma.slice`。
 - `StoreAST`：生成张量写入相关 op；当携带 `sizes` 时发射 `dma.deslice`。
 - `CallAST(alloc/copy/cast/view/reshape/flatten)`：生成对应 DMA memory 结果。
@@ -146,7 +147,11 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-009：`StoreAST` 输入非 memory 抛出错误。（`test_store_ast_lowering_raises_lowering_error`）
   - EMIT-010：`ForAST` 在 `LoopRange` 场景下 lowering 为 `symbol.for`，循环块参数 `it` 与循环体内相关 DMA operand 直接复用 `!symbol.int<"...">`，不生成 `arith.index_cast`。（`test_emit_mlir_symbolic_for_loop_avoids_index_cast`）
   - EMIT-011：循环变量表初始化与非法配置报错路径。（`test_emit_mlir_loop_vars_validation`）
-  - EMIT-012：索引解析与 rank mismatch 的错误路径。（`test_emit_mlir_index_expr_rejections`）
+  - EMIT-012：`CompareExprAST(op="eq")` 在 symbol 操作数场景的类型推导必须返回 `i1`。（`test_emit_mlir_infer_expr_type_branches`）
+  - EMIT-012A：索引解析与 rank mismatch 的错误路径。（`test_emit_mlir_index_expr_rejections`）
+  - EMIT-012B：`CompareExprAST(op="eq")` 在 symbol 操作数场景的 lowering 必须生成 `symbol.eq` 且结果类型为 `i1`；非 `eq` 的 symbol compare 必须报错。（`test_emit_mlir_lower_expr_branches`）
+  - EMIT-012C：stride/layout 辅助分支与静态索引解析的错误路径。（`test_emit_mlir_stride_and_layout_helpers`）
+  - EMIT-012D：索引解析与 loop_vars 查表的分支。（`test_emit_mlir_index_resolution_helpers`）
   - EMIT-013：默认 stride 推导遇到未知 attr 的分支。（`test_emit_mlir_default_stride_handles_unknown_attr`）
   - EMIT-014：`ForAST` lowering 会保留循环结构并在循环体内生成 `dma.load`。（`test_for_ast_lowering_emits_loads`）
   - EMIT-015：`alloc(...)` lowering 为 `dma.alloc` 并返回 memory 结果。（`test_emit_mlir_dma_alloc_lowering`）
@@ -156,3 +161,5 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-019：`reshape(...)` lowering 为 `dma.reshape` 并返回重排后的 memory 结果。（`test_emit_mlir_dma_reshape_lowering`）
   - EMIT-020：`flatten(...)` 以一维 `reshape` 语义 lowering，返回一维 memory 结果。（`test_emit_mlir_dma_flatten_lowering`）
   - EMIT-021：`free(...)` 作为无返回值语句执行，不产生新的 SSA 结果。（`test_emit_mlir_dma_free_statement`）
+  - EMIT-022：`StoreAST` rank mismatch 抛错，`sizes` 分支生成 `dma.deslice`。（`test_emit_mlir_store_rank_mismatch_and_deslice`）
+  - EMIT-023：`_ensure_supported_statements` 为空体与不支持语句抛出明确错误。（`test_emit_mlir_ensure_supported_statements_errors`）

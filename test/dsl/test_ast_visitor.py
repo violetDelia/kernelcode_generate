@@ -2556,7 +2556,7 @@ def test_emit_mlir_loop_vars_validation() -> None:
         _get_loop_vars(bad_ctx)
 
 
-# EMIT-012
+# EMIT-012A
 # 创建者: 不要啊教练
 # 最后一次更改: 不要啊教练
 # 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
@@ -2596,7 +2596,7 @@ def test_emit_mlir_default_stride_handles_unknown_attr() -> None:
     assert len(attrs) == 1
 
 
-# EMIT-012
+# EMIT-012C
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
@@ -2636,7 +2636,7 @@ def test_emit_mlir_stride_and_layout_helpers() -> None:
     assert _memory_space_from_ast(MemorySpace.LM, fallback).space.data == "local"
 
 
-# EMIT-012
+# EMIT-012D
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
@@ -2742,7 +2742,7 @@ def test_emit_mlir_infer_expr_type_branches() -> None:
         _infer_expr_type(object(), type_map)
 
 
-# EMIT-012
+# EMIT-012B
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
@@ -2809,7 +2809,7 @@ def test_emit_mlir_lower_expr_branches() -> None:
         _lookup_symbol(VarAST("missing"), EmitContext(builder=block, symbols={}, types={}))
 
 
-# EMIT-012
+# EMIT-022
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
@@ -2856,7 +2856,7 @@ def test_emit_mlir_store_rank_mismatch_and_deslice() -> None:
     assert isinstance(deslice, DmaDesliceOp)
 
 
-# EMIT-012
+# EMIT-023
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
