@@ -8,7 +8,7 @@
 
 使用示例:
 - import importlib
-- pass_module = importlib.import_module("kernel_gen.pass.pass_manager")
+- pass_module = importlib.import_module("kernel_gen.passes.pass_manager")
 - Pass, PassManager = pass_module.Pass, pass_module.PassManager
 - pm = PassManager(name="opt")
 - pm.add_pass(MyPass())
@@ -17,7 +17,7 @@
 关联文件:
 - spec: spec/pass/pass_manager.md
 - test: test/pass/test_pass_manager.py
-- 功能实现: kernel_gen/pass/pass_manager.py
+- 功能实现: kernel_gen/passes/pass_manager.py
 """
 
 from __future__ import annotations
@@ -43,12 +43,12 @@ class Pass:
     关联文件:
     - spec: spec/pass/pass_manager.md
     - test: test/pass/test_pass_manager.py
-    - 功能实现: kernel_gen/pass/pass_manager.py
+    - 功能实现: kernel_gen/passes/pass_manager.py
     """
 
     name = "pass"
 
-    def run(self, target):  # pragma: no cover - abstract hook
+    def run(self: "Pass", target: object) -> object:  # pragma: no cover - abstract hook
         """执行 Pass。
 
         创建者: 李白
@@ -63,7 +63,7 @@ class Pass:
         关联文件:
         - spec: spec/pass/pass_manager.md
         - test: test/pass/test_pass_manager.py
-        - 功能实现: kernel_gen/pass/pass_manager.py
+        - 功能实现: kernel_gen/passes/pass_manager.py
         """
         raise NotImplementedError("Pass.run must be implemented")
 
@@ -93,14 +93,14 @@ class PassManager:
     关联文件:
     - spec: spec/pass/pass_manager.md
     - test: test/pass/test_pass_manager.py
-    - 功能实现: kernel_gen/pass/pass_manager.py
+    - 功能实现: kernel_gen/passes/pass_manager.py
     """
 
-    def __init__(self, name: str | None = None) -> None:
+    def __init__(self: "PassManager", name: str | None = None) -> None:
         self.name = name
         self._passes: list[Pass] = []
 
-    def add_pass(self, pass_obj: Pass) -> None:
+    def add_pass(self: "PassManager", pass_obj: Pass) -> None:
         """注册单个 Pass。
 
         创建者: 李白
@@ -115,13 +115,13 @@ class PassManager:
         关联文件:
         - spec: spec/pass/pass_manager.md
         - test: test/pass/test_pass_manager.py
-        - 功能实现: kernel_gen/pass/pass_manager.py
+        - 功能实现: kernel_gen/passes/pass_manager.py
         """
         if not _is_pass_like(pass_obj):
             raise TypeError("pass_obj must provide name(str) and run(target)")
         self._passes.append(pass_obj)
 
-    def extend(self, passes: Sequence[Pass]) -> None:
+    def extend(self: "PassManager", passes: Sequence[Pass]) -> None:
         """批量注册 Pass。
 
         创建者: 李白
@@ -136,14 +136,14 @@ class PassManager:
         关联文件:
         - spec: spec/pass/pass_manager.md
         - test: test/pass/test_pass_manager.py
-        - 功能实现: kernel_gen/pass/pass_manager.py
+        - 功能实现: kernel_gen/passes/pass_manager.py
         """
         for item in passes:
             if not _is_pass_like(item):
                 raise TypeError("passes must contain Pass items")
             self._passes.append(item)
 
-    def run(self, target):
+    def run(self: "PassManager", target: object) -> object:
         """依序执行 Pass。
 
         创建者: 李白
@@ -158,7 +158,7 @@ class PassManager:
         关联文件:
         - spec: spec/pass/pass_manager.md
         - test: test/pass/test_pass_manager.py
-        - 功能实现: kernel_gen/pass/pass_manager.py
+        - 功能实现: kernel_gen/passes/pass_manager.py
         """
         result = target
         for item in self._passes:

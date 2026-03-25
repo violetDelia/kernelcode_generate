@@ -11,7 +11,7 @@
 - 创建者：`摸鱼小分队`
 - 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/pass/lowing/nn_to_kernel.md`](../../../spec/pass/lowing/nn_to_kernel.md)
-- `功能实现`：[`kernel_gen/pass/lowing/nn_to_kernel.py`](../../../kernel_gen/pass/lowing/nn_to_kernel.py)
+- `功能实现`：[`kernel_gen/passes/lowing/nn_to_kernel.py`](../../../kernel_gen/passes/lowing/nn_to_kernel.py)
 - `test`：[`test/pass/test_lowing_nn_to_kernel.py`](../../../test/pass/test_lowing_nn_to_kernel.py)
 
 ## 依赖
@@ -51,8 +51,8 @@
 使用示例：
 
 ```python
-from kernel_gen.pass.pass_manager import PassManager
-from kernel_gen.pass.lowing.nn_to_kernel import LowerNnToKernelPass
+from kernel_gen.passes.pass_manager import PassManager
+from kernel_gen.passes.lowing.nn_to_kernel import LowerNnToKernelPass
 
 pm = PassManager(name="lowering")
 pm.add_pass(LowerNnToKernelPass())

@@ -10,7 +10,7 @@
 - 创建者：`李白`
 - 最后一次更改：`李白`
 - `spec`：[`spec/pass/pass_manager.md`](../../spec/pass/pass_manager.md)
-- `功能实现`：[`kernel_gen/pass/pass_manager.py`](../../kernel_gen/pass/pass_manager.py)
+- `功能实现`：[`kernel_gen/passes/pass_manager.py`](../../kernel_gen/passes/pass_manager.py)
 - `test`：[`test/pass/test_pass_manager.py`](../../test/pass/test_pass_manager.py)
 
 ## 依赖
