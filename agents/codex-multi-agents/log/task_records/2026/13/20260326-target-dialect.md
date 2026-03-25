@@ -41,3 +41,10 @@
 - 改动：只读核对 kernel_gen/target/registry.py、kernel_gen/dialect/arch.py、test/target/test_target_registry.py、test/dialect/test_arch_dialect.py 与记录文件；未修改实现/测试，未复测。
 - 问题与建议：未发现映射不一致或 target=cpu 拒绝逻辑缺口。
 - 结论：通过。
+
+- 时间：2026-03-26 02:03:33 +0800
+- 经手人：朽木露琪亚
+- 任务：T-20260326-8f2716ee 合并阶段
+- 任务目标：合入 target registry 与 arch verifier 变更，仅包含实现、测试与记录文件。
+- 改动：已将 kernel_gen/target/registry.py、kernel_gen/dialect/arch.py、test/target/test_target_registry.py、test/dialect/test_arch_dialect.py 与记录文件合入 main。
+- 结论：已合入，提交号 6c89852。
