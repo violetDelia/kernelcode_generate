@@ -25,6 +25,7 @@ from xdsl.dialects import arith, func, scf
 from xdsl.dialects.builtin import (
     ArrayAttr,
     FloatAttr,
+    Float16Type,
     IndexType,
     IntAttr,
     IntegerAttr,
@@ -32,21 +33,20 @@ from xdsl.dialects.builtin import (
     StringAttr,
     f32,
     i1,
-    i8,
     i32,
 )
 from xdsl.ir import Attribute, Block, SSAValue
 
-from kernel_gen.dialect.dma import DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp
-from kernel_gen.dialect.arch import (
-    ArchGetBlockIdOp,
-    ArchGetBlockNumOp,
-    ArchGetDynamicMemoryOp,
-    ArchGetSubthreadIdOp,
-    ArchGetSubthreadNumOp,
-    ArchGetThreadIdOp,
-    ArchGetThreadNumOp,
-    ArchLaunchKernelOp,
+from kernel_gen.dialect.dma import (
+    DmaAllocOp,
+    DmaCastOp,
+    DmaCopyOp,
+    DmaDesliceOp,
+    DmaLoadOp,
+    DmaReshapeOp,
+    DmaSliceOp,
+    DmaStoreOp,
+    DmaViewOp,
 )
 from kernel_gen.dialect.nn import (
     NnAddOp,
@@ -66,19 +66,10 @@ from kernel_gen.dialect.nn import (
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
     SymbolDivOp,
-    SymbolEqOp,
     SymbolFloorDivOp,
     SymbolForOp,
-    SymbolGeOp,
-    SymbolGetDimOp,
-    SymbolGetStrideOp,
-    SymbolGtOp,
-    SymbolLeOp,
-    SymbolLtOp,
     SymbolMulOp,
-    SymbolNeOp,
     SymbolSubOp,
-    SymbolToFloatOp,
     SymbolValueType,
     build_public_symbol_expr,
 )
@@ -86,18 +77,20 @@ from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.type import NumericType
 
 from .ast import (
-    ArchDynamicMemoryAST,
-    ArchLaunchKernelAST,
-    ArchQueryAST,
     BinaryExprAST,
     BlockAST,
-    CastExprAST,
     CompareExprAST,
     ConstAST,
+    DmaAllocAST,
+    DmaCastAST,
+    DmaCopyAST,
+    DmaFlattenAST,
+    DmaFreeAST,
+    DmaReshapeAST,
+    DmaViewAST,
     ForAST,
     FunctionAST,
     LoadAST,
-    MemoryQueryAST,
     ScalarArgAST,
     SourceLocation,
     StoreAST,
@@ -112,15 +105,6 @@ _MEMORY_SPACE_MAP = {
     MemorySpace.LM: "local",
     MemorySpace.TSM: "shared",
     MemorySpace.TLM: "local",
-}
-
-_ARCH_QUERY_OPS: dict[str, tuple[type[object], str]] = {
-    "get_block_id": (ArchGetBlockIdOp, "block_id"),
-    "get_block_num": (ArchGetBlockNumOp, "block_num"),
-    "get_thread_id": (ArchGetThreadIdOp, "thread_id"),
-    "get_thread_num": (ArchGetThreadNumOp, "thread_num"),
-    "get_subthread_id": (ArchGetSubthreadIdOp, "subthread_id"),
-    "get_subthread_num": (ArchGetSubthreadNumOp, "subthread_num"),
 }
 
 
@@ -168,10 +152,10 @@ class EmitContext:
 
 
 def _dtype_to_xdsl(dtype: NumericType, location: SourceLocation | None = None) -> object:
+    if dtype is NumericType.Float16:
+        return Float16Type()
     if dtype is NumericType.Float32:
         return f32
-    if dtype is NumericType.Int8:
-        return i8
     if dtype is NumericType.Int32:
         return i32
     raise _LoweringError(f"Unsupported dtype: {dtype}", location=location)
@@ -415,6 +399,90 @@ def _build_static_index_list(
     return [_dim_to_attr(item) for item in values]
 
 
+def _build_static_index_attrs_exact(
+    value: object,
+    *,
+    location: SourceLocation | None = None,
+) -> list[Attribute]:
+    """按显式维度列表构造静态索引属性。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 仅接受单个索引或显式索引序列，不使用默认补值。
+
+    使用示例:
+    - _build_static_index_attrs_exact([ConstAST(4), ScalarArgAST(name="n", value_type=int)])
+
+    关联文件:
+    - spec: spec/dsl/emit_mlir.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/emit_mlir.py
+    """
+
+    if isinstance(value, (list, tuple)):
+        entries = [_resolve_static_index_expr(entry, location) for entry in value]
+    else:
+        entries = [_resolve_static_index_expr(value, location)]
+    return [_dim_to_attr(entry) for entry in entries]
+
+
+def _build_index_operands_exact(
+    value: object,
+    ctx: EmitContext,
+    *,
+    location: SourceLocation | None = None,
+) -> list[SSAValue]:
+    """按显式维度列表构造 SSA 索引操作数。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 仅接受单个索引或显式索引序列，不使用默认补值。
+
+    使用示例:
+    - _build_index_operands_exact([ConstAST(4), ScalarArgAST(name="n", value_type=int)], ctx)
+
+    关联文件:
+    - spec: spec/dsl/emit_mlir.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/emit_mlir.py
+    """
+
+    if isinstance(value, (list, tuple)):
+        entries = list(value)
+    else:
+        entries = [value]
+    return [_resolve_index_operand(entry, ctx, getattr(entry, "location", None) or location) for entry in entries]
+
+
+def _memory_type_from_parts(
+    shape: Sequence[Attribute],
+    stride: Sequence[Attribute],
+    element_type: Attribute,
+    space: NnMemorySpaceAttr,
+) -> NnMemoryType:
+    """基于 shape/stride/element_type/space 组装内存类型。"""
+
+    return NnMemoryType(ArrayAttr(list(shape)), ArrayAttr(list(stride)), element_type, space)
+
+
+def _shape_numel_attr(shape: Sequence[Attribute]) -> Attribute:
+    """根据 shape 计算一维 flatten 结果的元素总数属性。"""
+
+    total: int | str = 1
+    for dim in shape:
+        if isinstance(dim, IntAttr):
+            total = _mul_symbol(dim.data, total)
+        elif isinstance(dim, StringAttr):
+            total = _mul_symbol(dim.data, total)
+        else:
+            total = "?"
+    return _dim_to_attr(total)
+
+
 def _memory_space_from_ast(space: MemorySpace | None, fallback: NnMemorySpaceAttr) -> NnMemorySpaceAttr:
     """将 AST 中的 `MemorySpace` 映射为 nn dialect space attribute。
 
@@ -529,19 +597,21 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
         if not isinstance(
             expr,
             (
-                ArchDynamicMemoryAST,
-                ArchLaunchKernelAST,
-                ArchQueryAST,
                 BinaryExprAST,
-                CastExprAST,
                 CompareExprAST,
                 ConstAST,
                 TensorAST,
                 ScalarArgAST,
                 VarAST,
                 LoadAST,
-                MemoryQueryAST,
                 StoreAST,
+                DmaAllocAST,
+                DmaCopyAST,
+                DmaCastAST,
+                DmaViewAST,
+                DmaReshapeAST,
+                DmaFlattenAST,
+                DmaFreeAST,
                 ForAST,
             ),
         ):
@@ -587,27 +657,82 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
         result_type = NnMemoryType(shape_attr, stride_attr, source_type.element_type, space_attr)
         type_map[expr_key] = result_type
         return result_type
-    if isinstance(expr, ArchQueryAST):
-        if expr.query_name not in _ARCH_QUERY_OPS:
-            raise _LoweringError("Unsupported arch query", location=expr.location)
-        _, symbol_name = _ARCH_QUERY_OPS[expr.query_name]
-        result_type = SymbolValueType.from_expr(symbol_name)
-        type_map[expr_key] = result_type
-        return result_type
-    if isinstance(expr, ArchDynamicMemoryAST):
-        space_name = _MEMORY_SPACE_MAP.get(expr.space, "global")
-        result_type = NnMemoryType(
-            ArrayAttr([StringAttr("?")]),
-            ArrayAttr([IntAttr(1)]),
-            i8,
-            NnMemorySpaceAttr.from_name(space_name),
+    if isinstance(expr, DmaAllocAST):
+        shape_attr = _build_static_index_attrs_exact(expr.shape, location=expr.location)
+        stride_attr = (
+            _build_static_index_attrs_exact(expr.stride, location=expr.location)
+            if expr.stride is not None
+            else _build_default_stride_attrs(shape_attr)
+        )
+        default_stride = _build_default_stride_attrs(shape_attr)
+        if stride_attr != default_stride:
+            raise _LoweringError("dma.alloc only supports contiguous stride", location=expr.location)
+        result_type = _memory_type_from_parts(
+            shape_attr,
+            default_stride,
+            _dtype_to_xdsl(expr.dtype, location=expr.location),
+            _memory_space_from_ast(expr.space, NnMemorySpaceAttr.from_name("global")),
         )
         type_map[expr_key] = result_type
         return result_type
-    if isinstance(expr, ArchLaunchKernelAST):
-        raise _LoweringError("ArchLaunchKernelAST does not produce a value", location=expr.location)
+    if isinstance(expr, DmaCopyAST):
+        source_type = _infer_expr_type(expr.source, type_map)
+        if not isinstance(source_type, NnMemoryType):
+            raise _LoweringError("copy source must have nn.memory type", location=expr.location)
+        result_type = _memory_type_from_parts(
+            source_type.shape.data,
+            source_type.stride.data,
+            source_type.element_type,
+            _memory_space_from_ast(expr.space, source_type.space),
+        )
+        type_map[expr_key] = result_type
+        return result_type
+    if isinstance(expr, DmaCastAST):
+        source_type = _infer_expr_type(expr.source, type_map)
+        if not isinstance(source_type, NnMemoryType):
+            raise _LoweringError("cast source must have nn.memory type", location=expr.location)
+        result_type = _memory_type_from_parts(
+            source_type.shape.data,
+            source_type.stride.data,
+            _dtype_to_xdsl(expr.dtype, location=expr.location),
+            _memory_space_from_ast(expr.memoryspace, source_type.space),
+        )
+        type_map[expr_key] = result_type
+        return result_type
+    if isinstance(expr, DmaViewAST):
+        source_type = _infer_expr_type(expr.source, type_map)
+        if not isinstance(source_type, NnMemoryType):
+            raise _LoweringError("view source must have nn.memory type", location=expr.location)
+        shape_attr = _build_static_index_attrs_exact(expr.size, location=expr.location)
+        stride_attr = _build_default_stride_attrs(shape_attr)
+        result_type = _memory_type_from_parts(shape_attr, stride_attr, source_type.element_type, source_type.space)
+        type_map[expr_key] = result_type
+        return result_type
+    if isinstance(expr, DmaReshapeAST):
+        source_type = _infer_expr_type(expr.source, type_map)
+        if not isinstance(source_type, NnMemoryType):
+            raise _LoweringError("reshape source must have nn.memory type", location=expr.location)
+        shape_attr = _build_static_index_attrs_exact(expr.shape, location=expr.location)
+        result_type = _memory_type_from_parts(
+            shape_attr,
+            _build_default_stride_attrs(shape_attr),
+            source_type.element_type,
+            source_type.space,
+        )
+        type_map[expr_key] = result_type
+        return result_type
+    if isinstance(expr, DmaFlattenAST):
+        source_type = _infer_expr_type(expr.source, type_map)
+        if not isinstance(source_type, NnMemoryType):
+            raise _LoweringError("flatten source must have nn.memory type", location=expr.location)
+        shape_attr = [_shape_numel_attr(source_type.shape.data)]
+        result_type = _memory_type_from_parts(shape_attr, [IntAttr(1)], source_type.element_type, source_type.space)
+        type_map[expr_key] = result_type
+        return result_type
     if isinstance(expr, StoreAST):
         raise _LoweringError("StoreAST does not produce a value", location=expr.location)
+    if isinstance(expr, DmaFreeAST):
+        raise _LoweringError("free does not produce a value", location=expr.location)
     if isinstance(expr, ForAST):
         raise _LoweringError("ForAST does not produce a value", location=expr.location)
 
@@ -638,21 +763,9 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
         type_map[expr_key] = target_type
         return target_type
 
-    if isinstance(expr, CastExprAST):
-        value_type = _infer_expr_type(expr.value, type_map)
-        if expr.target_type is float:
-            if not isinstance(value_type, SymbolValueType):
-                raise _LoweringError("float() operand must have !symbol.int type", location=expr.location)
-            type_map[expr_key] = f32
-            return f32
-        raise _LoweringError("Unsupported cast target", location=expr.location)
-
     if isinstance(expr, CompareExprAST):
         lhs_type = _infer_expr_type(expr.lhs, type_map)
         rhs_type = _infer_expr_type(expr.rhs, type_map)
-        if isinstance(lhs_type, SymbolValueType) and isinstance(rhs_type, SymbolValueType):
-            type_map[expr_key] = i1
-            return i1
         if not isinstance(lhs_type, NnMemoryType) or not isinstance(rhs_type, NnMemoryType):
             raise _LoweringError("Compare op operands must have nn.memory type", location=expr.location)
         if lhs_type == rhs_type:
@@ -661,23 +774,6 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
             return result_type
         target_type = _infer_broadcast_memory_type(lhs_type, rhs_type, expr.location)
         result_type = NnMemoryType(target_type.shape, target_type.stride, i1, target_type.space)
-        type_map[expr_key] = result_type
-        return result_type
-
-    if isinstance(expr, MemoryQueryAST):
-        source_type = _infer_expr_type(expr.source, type_map)
-        if not isinstance(source_type, NnMemoryType):
-            raise _LoweringError("Memory query source must have nn.memory type", location=expr.location)
-        entries = source_type.shape.data if expr.kind == "dim" else source_type.stride.data
-        if expr.axis < 0 or expr.axis >= len(entries):
-            raise _LoweringError("Memory query axis out of range", location=expr.location)
-        entry = entries[expr.axis]
-        if isinstance(entry, IntAttr):
-            result_type = SymbolValueType.from_expr(str(entry.data))
-        elif isinstance(entry, StringAttr) and entry.data != "?":
-            result_type = SymbolValueType.from_expr(entry.data)
-        else:
-            raise _LoweringError("Memory query does not support unknown entry '?'", location=expr.location)
         type_map[expr_key] = result_type
         return result_type
 
@@ -710,17 +806,6 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
         return op.result
-    if isinstance(expr, CastExprAST):
-        value = _lower_expr(expr.value, ctx)
-        value_type = getattr(value, "type", None)
-        if expr.target_type is float:
-            if not isinstance(value_type, SymbolValueType):
-                raise _LoweringError("float() operand must have !symbol.int type", location=expr.location)
-            op = SymbolToFloatOp(value, f32)
-            ctx.builder.add_op(op)
-            ctx._set_cache(expr_key, op.result)
-            return op.result
-        raise _LoweringError("Unsupported cast target", location=expr.location)
     if isinstance(expr, LoadAST):
         source = _lower_expr(expr.tensor, ctx)
         source_type = _expect_memory_value(source, expr.location)
@@ -735,7 +820,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         result_type = _infer_expr_type(expr, ctx.types)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("LoadAST result must be nn.memory", location=expr.location)
-        if expr.sizes is not None:
+        if expr.kind == "slice":
             load_op = DmaSliceOp(
                 source,
                 offsets,
@@ -756,29 +841,76 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         ctx.builder.add_op(load_op)
         ctx._set_cache(expr_key, load_op.result)
         return load_op.result
-    if isinstance(expr, ArchQueryAST):
-        if expr.query_name not in _ARCH_QUERY_OPS:
-            raise _LoweringError("Unsupported arch query", location=expr.location)
-        op_cls, _ = _ARCH_QUERY_OPS[expr.query_name]
-        op = op_cls()
-        ctx.builder.add_op(op)
-        ctx._set_cache(expr_key, op.result)
-        return op.result
-    if isinstance(expr, ArchDynamicMemoryAST):
+    if isinstance(expr, DmaAllocAST):
         result_type = _infer_expr_type(expr, ctx.types)
         if not isinstance(result_type, NnMemoryType):
-            raise _LoweringError("arch.get_dynamic_memory result must be nn.memory", location=expr.location)
-        op = ArchGetDynamicMemoryOp(
-            NnMemorySpaceAttr.from_name(_MEMORY_SPACE_MAP.get(expr.space, "global")),
-            result_type,
-        )
+            raise _LoweringError("alloc result must be nn.memory", location=expr.location)
+        shape = _build_index_operands_exact(expr.shape, ctx, location=expr.location)
+        op = DmaAllocOp(shape, result_type)
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
         return op.result
-    if isinstance(expr, ArchLaunchKernelAST):
-        raise _LoweringError("ArchLaunchKernelAST does not produce a value", location=expr.location)
+    if isinstance(expr, DmaCopyAST):
+        source = _lower_expr(expr.source, ctx)
+        source_type = _expect_memory_value(source, expr.location)
+        result_type = _infer_expr_type(expr, ctx.types)
+        if not isinstance(result_type, NnMemoryType):
+            raise _LoweringError("copy result must be nn.memory", location=expr.location)
+        alloc_op = DmaAllocOp(_build_index_operands_from_layout(result_type.shape, ctx, location=expr.location), result_type)
+        ctx.builder.add_op(alloc_op)
+        copy_op = DmaCopyOp(source, alloc_op.result)
+        ctx.builder.add_op(copy_op)
+        ctx._set_cache(expr_key, alloc_op.result)
+        ctx.types[_expr_key(expr.source)] = source_type
+        return alloc_op.result
+    if isinstance(expr, DmaCastAST):
+        source = _lower_expr(expr.source, ctx)
+        _expect_memory_value(source, expr.location)
+        result_type = _infer_expr_type(expr, ctx.types)
+        if not isinstance(result_type, NnMemoryType):
+            raise _LoweringError("cast result must be nn.memory", location=expr.location)
+        op = DmaCastOp(source, result_type)
+        ctx.builder.add_op(op)
+        ctx._set_cache(expr_key, op.result)
+        return op.result
+    if isinstance(expr, DmaViewAST):
+        source = _lower_expr(expr.source, ctx)
+        _expect_memory_value(source, expr.location)
+        result_type = _infer_expr_type(expr, ctx.types)
+        if not isinstance(result_type, NnMemoryType):
+            raise _LoweringError("view result must be nn.memory", location=expr.location)
+        shape = _build_index_operands_exact(expr.size, ctx, location=expr.location)
+        stride = _build_index_operands_from_layout(result_type.stride, ctx, location=expr.location)
+        op = DmaViewOp(source, shape, stride, result_type)
+        ctx.builder.add_op(op)
+        ctx._set_cache(expr_key, op.result)
+        return op.result
+    if isinstance(expr, DmaReshapeAST):
+        source = _lower_expr(expr.source, ctx)
+        _expect_memory_value(source, expr.location)
+        result_type = _infer_expr_type(expr, ctx.types)
+        if not isinstance(result_type, NnMemoryType):
+            raise _LoweringError("reshape result must be nn.memory", location=expr.location)
+        shape = _build_index_operands_exact(expr.shape, ctx, location=expr.location)
+        op = DmaReshapeOp(source, shape, result_type)
+        ctx.builder.add_op(op)
+        ctx._set_cache(expr_key, op.result)
+        return op.result
+    if isinstance(expr, DmaFlattenAST):
+        source = _lower_expr(expr.source, ctx)
+        source_type = _expect_memory_value(source, expr.location)
+        result_type = _infer_expr_type(expr, ctx.types)
+        if not isinstance(result_type, NnMemoryType):
+            raise _LoweringError("flatten result must be nn.memory", location=expr.location)
+        shape_operand = _build_index_operands_from_layout(ArrayAttr([_shape_numel_attr(source_type.shape.data)]), ctx, location=expr.location)
+        op = DmaReshapeOp(source, shape_operand, result_type)
+        ctx.builder.add_op(op)
+        ctx._set_cache(expr_key, op.result)
+        return op.result
     if isinstance(expr, StoreAST):
         raise _LoweringError("StoreAST does not produce a value", location=expr.location)
+    if isinstance(expr, DmaFreeAST):
+        raise _LoweringError("free does not produce a value", location=expr.location)
 
     if isinstance(expr, BinaryExprAST):
         lhs = _lower_expr(expr.lhs, ctx)
@@ -826,23 +958,6 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     if isinstance(expr, CompareExprAST):
         lhs = _lower_expr(expr.lhs, ctx)
         rhs = _lower_expr(expr.rhs, ctx)
-        lhs_attr = getattr(lhs, "type", None)
-        rhs_attr = getattr(rhs, "type", None)
-        if isinstance(lhs_attr, SymbolValueType) and isinstance(rhs_attr, SymbolValueType):
-            op_map = {
-                "eq": SymbolEqOp,
-                "ne": SymbolNeOp,
-                "lt": SymbolLtOp,
-                "le": SymbolLeOp,
-                "gt": SymbolGtOp,
-                "ge": SymbolGeOp,
-            }
-            if expr.op not in op_map:
-                raise _LoweringError(f"Unsupported compare op: {expr.op}", location=expr.location)
-            op = op_map[expr.op](lhs, rhs, i1)
-            ctx.builder.add_op(op)
-            ctx._set_cache(expr_key, op.result)
-            return op.result
         lhs_type = _expect_memory_value(lhs, expr.location)
         rhs_type = _expect_memory_value(rhs, expr.location)
         if lhs_type != rhs_type:
@@ -861,17 +976,6 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         if expr.op not in op_map:
             raise _LoweringError(f"Unsupported compare op: {expr.op}", location=expr.location)
         op = op_map[expr.op](lhs, rhs, result_type, lhs_type.space)
-        ctx.builder.add_op(op)
-        ctx._set_cache(expr_key, op.result)
-        return op.result
-
-    if isinstance(expr, MemoryQueryAST):
-        source = _lower_expr(expr.source, ctx)
-        source_type = _expect_memory_value(source, expr.location)
-        if expr.axis < 0 or expr.axis >= len(source_type.shape.data):
-            raise _LoweringError("Memory query axis out of range", location=expr.location)
-        op_cls = SymbolGetDimOp if expr.kind == "dim" else SymbolGetStrideOp
-        op = op_cls(source, expr.axis)
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
         return op.result
@@ -899,29 +1003,21 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
     if isinstance(
         node,
         (
-            ArchDynamicMemoryAST,
-            ArchQueryAST,
             BinaryExprAST,
-            CastExprAST,
             CompareExprAST,
             ConstAST,
             LoadAST,
-            MemoryQueryAST,
+            DmaAllocAST,
+            DmaCopyAST,
+            DmaCastAST,
+            DmaViewAST,
+            DmaReshapeAST,
+            DmaFlattenAST,
         ),
     ):
         if _expr_key(node) not in ctx.types and not isinstance(node, (TensorAST, ScalarArgAST, VarAST)):
             _infer_expr_type(node, ctx.types)
         return _lower_expr(node, ctx)
-    if isinstance(node, ArchLaunchKernelAST):
-        block = _lower_expr(node.block, ctx)
-        thread = _lower_expr(node.thread, ctx)
-        subthread = _lower_expr(node.subthread, ctx)
-        for operand in (block, thread, subthread):
-            if not isinstance(getattr(operand, "type", None), SymbolValueType):
-                raise _LoweringError("arch.launch_kernel operands must lower to !symbol.int", location=node.location)
-        op = ArchLaunchKernelOp(node.kernel_name, block, thread, subthread)
-        ctx.builder.add_op(op)
-        return op
     if isinstance(node, StoreAST):
         target = _lookup_symbol(node.tensor, ctx)
         target_type = _expect_memory_value(target, node.location)
@@ -937,12 +1033,16 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
             else _build_index_operands_from_layout(value_type.shape, ctx, location=node.location)
         )
         strides = _build_stride_attrs(node.stride, rank, ctx, location=node.location)
-        if node.sizes is not None:
+        if node.kind == "deslice":
             store_op = DmaDesliceOp(value, target, offsets, sizes, strides, target_type)
         else:
             store_op = DmaStoreOp(value, target, offsets, sizes, strides)
         ctx.builder.add_op(store_op)
         return store_op
+    if isinstance(node, DmaFreeAST):
+        value = _lower_expr(node.value, ctx)
+        _expect_memory_value(value, node.location)
+        return None
     if isinstance(node, ForAST):
         start_value = _lower_loop_bound(node.start, ctx)
         end_value = _lower_loop_bound(node.end, ctx)

@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)
 - `功能实现`：[`kernel_gen/dsl/emit_mlir.py`](../../kernel_gen/dsl/emit_mlir.py)
 - `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
@@ -18,7 +18,6 @@
 
 - AST 节点定义：[`spec/dsl/ast.md`](../../spec/dsl/ast.md)
 - AST 访问器：[`spec/dsl/ast_visitor.md`](../../spec/dsl/ast_visitor.md)
-- `arch` dialect 语义：[`spec/dialect/arch.md`](../../spec/dialect/arch.md)
 
 ## 术语
 
@@ -38,9 +37,8 @@
 - 不生成 MLIR 文本；文本输出由上游调用方负责。
 - 当 `ForAST` 来自 `LoopRange(start, end, step)` 且边界与循环变量保持 symbol 整数语义时，必须 lowering 为 `symbol.for`，不得回退为 `scf.for`；其循环块参数 `it` 必须为 `!symbol.int<"expr">`。
 - 在上述 `LoopRange` 场景中，循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand 必须直接复用 `!symbol.int<"expr">` value，不得插入 `arith.index_cast`；若循环变量 `it` 退化为 `index`、普通整数或浮点类型，应视为 lowering 违规。
-- `ArchQueryAST` 必须 lowering 为对应的 `arch.get_*` op，并保留其 `!symbol.int<"...">` 结果语义。
-- `ArchDynamicMemoryAST` 必须 lowering 为 `arch.get_dynamic_memory`，并返回固定的一维动态 `i8` memory value。
-- `ArchLaunchKernelAST` 必须 lowering 为 `arch.launch_kernel` 语句 op；该节点自身不产生公开 SSA 返回值。
+- 当 DSL AST 表达 `alloc`、`copy`、`cast`、`view`、`reshape`、`flatten`、`load`、`store`、`slice`、`deslice` 这组 DMA helper 调用时，`emit_mlir` 必须按对应 memory 语义 lowering；其中 `flatten` 公开上视为一维 `reshape` 语义，不要求生成独立 dialect op。
+- `free` 必须作为语句型 helper 处理，不产生新的 SSA 结果，也不承诺生成独立的 `dma.free` op。
 
 ## 公开接口
 
@@ -105,20 +103,27 @@ value = emit_mlir(expr_ast, ctx)
 - `emit_mlir` 必须覆盖 AST 中每一种节点类型。
 - 默认使用当前项目的目标 dialect（例如 `nn`），但节点到 op 的映射必须清晰可追踪。
 - `LoopRange` 触发的 `ForAST` 必须走 `symbol.for` 分支，并保持 symbol 整数值直接作为 DMA operand 传递。
+- DMA helper 的公开 lowering 约束如下：
+  - `alloc(...)`：lowering 为 `dma.alloc`，返回新的 memory value。
+  - `copy(...)`：lowering 为 `dma.copy`，返回目标 memory value。
+  - `cast(...)`：lowering 为 `dma.cast`，返回转换后 memory value。
+  - `view(...)`：lowering 为 `dma.view`，返回视图 memory value。
+  - `reshape(...)`：lowering 为 `dma.reshape`，返回重排后的 memory value。
+  - `flatten(...)`：按一维 `reshape` 语义 lowering，返回一维 memory value。
+  - `load(...)` / `slice(...)`：lowering 为读取类 DMA op，返回读取结果。
+  - `store(...)` / `deslice(...)`：lowering 为写回类 DMA op，作为语句执行。
+  - `free(...)`：作为语句执行，不产生新的 SSA 返回值。
 
 节点映射示例：
 
 - `ConstAST`：生成常量或等价字面量 op/value。
 - `BinaryExprAST(add/sub/mul/div/floordiv)`：生成对应的二元算术 op。
-- `CompareExprAST(eq/ne/lt/le/gt/ge)`：当操作数为 `nn.memory` 时生成 `nn` 比较 op；当操作数为 `!symbol.int<"...">` 时生成对应的 `symbol.eq/ne/lt/le/gt/ge`。
-- `CastExprAST(float)`：当源值为 `!symbol.int<"...">` 时生成 `symbol.to_float`。
-- `MemoryQueryAST(dim/stride)`：生成 `symbol.get_dim` / `symbol.get_stride`。
+- `CompareExprAST(eq/ne/lt/le/gt/ge)`：生成对应的比较 op。
 - `LoadAST`：生成张量读取相关 op/value；当携带 `sizes` 时发射 `dma.slice`。
 - `StoreAST`：生成张量写入相关 op；当携带 `sizes` 时发射 `dma.deslice`。
+- `CallAST(alloc/copy/cast/view/reshape/flatten)`：生成对应 DMA memory 结果。
+- `CallAST(free)`：作为无返回值语句处理。
 - `ForAST`：当来源于 `LoopRange(start, end, step)` 且边界为 symbol 整数时，生成 `symbol.for`；循环体内若包含 `dma.slice` / `dma.deslice`，其 DMA 标量 operand 直接使用 `!symbol.int<"expr">` value，不生成 `arith.index_cast`。
-- `ArchQueryAST`：生成对应的 `arch.get_block_id/get_block_num/get_thread_id/get_thread_num/get_subthread_id/get_subthread_num`。
-- `ArchDynamicMemoryAST`：生成 `arch.get_dynamic_memory`。
-- `ArchLaunchKernelAST`：生成 `arch.launch_kernel`。
 
 ## 测试
 
@@ -127,7 +132,7 @@ value = emit_mlir(expr_ast, ctx)
 - 测试目标：
   - 覆盖常见表达式与语句节点的发射结果。
   - 覆盖 `LoopRange` -> `symbol.for` 与 `it`/DMA operand 直接保持 `symbol.int` 的发射规则。
-  - 覆盖 `arch` 查询、动态内存入口与启动描述节点的发射结果。
+  - 覆盖 DMA helper 调用的 lowering 结果与语句/表达式边界：`alloc/copy/cast/view/reshape/flatten` 产生 memory 结果，`free` 为无返回值语句。
   - 覆盖不支持节点的错误路径。
 - 功能与用例清单：
   - EMIT-001：二元表达式节点生成对应 op/value。（`test_emit_context_reuses_cached_value`）
@@ -144,8 +149,10 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-012：索引解析与 rank mismatch 的错误路径。（`test_emit_mlir_index_expr_rejections`）
   - EMIT-013：默认 stride 推导遇到未知 attr 的分支。（`test_emit_mlir_default_stride_handles_unknown_attr`）
   - EMIT-014：`ForAST` lowering 会保留循环结构并在循环体内生成 `dma.load`。（`test_for_ast_lowering_emits_loads`）
-  - EMIT-015：六个无参 `arch` 查询节点 lowering 为对应的 `arch.get_*` op，并保持 `!symbol.int<"...">` 结果类型。（`test_build_func_op_lowers_arch_query_functions`）
-  - EMIT-016：`ArchDynamicMemoryAST` lowering 为 `arch.get_dynamic_memory`，结果为一维动态 `i8` memory；`ArchLaunchKernelAST` lowering 为零返回值的 `arch.launch_kernel` 语句 op。（`test_build_func_op_lowers_arch_dynamic_memory_function`、`test_build_func_op_lowers_arch_launch_kernel_statement`）
-  - EMIT-021：`CastExprAST(float)` 在 symbol 标量场景下生成 `symbol.to_float` 并返回 `f32`。（`test_build_func_op_lowers_symbol_to_float_return`）
-  - EMIT-022：`MemoryQueryAST(dim)` 在 `JoinedStr` 张量注解场景下生成 `symbol.get_dim`。（`test_build_func_op_lowers_symbol_memory_queries_from_joinedstr_annotations`）
-  - EMIT-023：`MemoryQueryAST(stride)` 在 `JoinedStr` 张量注解场景下生成 `symbol.get_stride`。（`test_build_func_op_lowers_symbol_memory_queries_from_joinedstr_annotations`）
+  - EMIT-015：`alloc(...)` lowering 为 `dma.alloc` 并返回 memory 结果。（`test_emit_mlir_dma_alloc_lowering`）
+  - EMIT-016：`copy(...)` lowering 为 `dma.copy` 并返回目标 memory 结果。（`test_emit_mlir_dma_copy_lowering`）
+  - EMIT-017：`cast(...)` lowering 为 `dma.cast` 并返回转换后的 memory 结果。（`test_emit_mlir_dma_cast_lowering`）
+  - EMIT-018：`view(...)` lowering 为 `dma.view` 并返回视图 memory 结果。（`test_emit_mlir_dma_view_lowering`）
+  - EMIT-019：`reshape(...)` lowering 为 `dma.reshape` 并返回重排后的 memory 结果。（`test_emit_mlir_dma_reshape_lowering`）
+  - EMIT-020：`flatten(...)` 以一维 `reshape` 语义 lowering，返回一维 memory 结果。（`test_emit_mlir_dma_flatten_lowering`）
+  - EMIT-021：`free(...)` 作为无返回值语句执行，不产生新的 SSA 结果。（`test_emit_mlir_dma_free_statement`）

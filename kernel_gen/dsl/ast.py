@@ -245,6 +245,7 @@ class StoreAST:
     value: object
     sizes: object | None = None
     space: MemorySpace | None = None
+    kind: str = "store"
     location: SourceLocation | None = None
 
 
@@ -272,6 +273,178 @@ class LoadAST:
     stride: object | None
     sizes: object | None = None
     space: MemorySpace | None = None
+    kind: str = "load"
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class DmaAllocAST:
+    """DMA alloc 节点。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 表示 `alloc(...)` 的 DSL 调用。
+
+    使用示例:
+    - DmaAllocAST(shape=[ConstAST(4)], dtype=NumericType.Float32, space=MemorySpace.SM)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    shape: object
+    dtype: NumericType
+    space: MemorySpace = MemorySpace.GM
+    stride: object | None = None
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class DmaCopyAST:
+    """DMA copy 节点。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 表示 `copy(...)` 的 DSL 调用。
+
+    使用示例:
+    - DmaCopyAST(source=TensorAST("src", memory), space=MemorySpace.SM)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    source: object
+    space: MemorySpace
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class DmaCastAST:
+    """DMA cast 节点。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 表示 `cast(...)` 的 DSL 调用。
+
+    使用示例:
+    - DmaCastAST(source=TensorAST("src", memory), dtype=NumericType.Float16)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    source: object
+    dtype: NumericType
+    memoryspace: MemorySpace | None = None
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class DmaViewAST:
+    """DMA view 节点。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 表示 `view(...)` 的 DSL 调用。
+
+    使用示例:
+    - DmaViewAST(source=tensor, offset=[ConstAST(0)], size=[ConstAST(4)], stride=[ConstAST(1)])
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    source: object
+    offset: object
+    size: object
+    stride: object
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class DmaReshapeAST:
+    """DMA reshape 节点。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 表示 `reshape(...)` 的 DSL 调用。
+
+    使用示例:
+    - DmaReshapeAST(source=tensor, shape=[ConstAST(8), ConstAST(8)])
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    source: object
+    shape: object
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class DmaFlattenAST:
+    """DMA flatten 节点。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 表示 `flatten(...)` 的 DSL 调用。
+
+    使用示例:
+    - DmaFlattenAST(source=tensor)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    source: object
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class DmaFreeAST:
+    """DMA free 节点。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 表示 `free(...)` 的 DSL 语句调用。
+
+    使用示例:
+    - DmaFreeAST(value=tensor)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    value: object
     location: SourceLocation | None = None
 
 
@@ -326,55 +499,6 @@ class CompareExprAST:
 
 
 @dataclass(frozen=True)
-class CastExprAST:
-    """显式标量转换表达式节点。
-
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
-
-    功能说明:
-    - 表示 `float(value)` 这类最小显式转换表达式。
-
-    使用示例:
-    - CastExprAST(value=VarAST("x"), target_type=float)
-
-    关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast.py
-    """
-
-    value: object
-    target_type: type
-    location: SourceLocation | None = None
-
-
-@dataclass(frozen=True)
-class MemoryQueryAST:
-    """memory 元信息查询表达式节点。
-
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
-
-    功能说明:
-    - 表示 `tensor.get_shape()[axis]` 与 `tensor.get_stride()[axis]` 查询。
-
-    使用示例:
-    - MemoryQueryAST(kind="dim", source=VarAST("x"), axis=1)
-
-    关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast.py
-    """
-
-    kind: str
-    source: object
-    axis: int
-    location: SourceLocation | None = None
-
-
-@dataclass(frozen=True)
 class ConstAST:
     """常量节点。
 
@@ -394,78 +518,6 @@ class ConstAST:
     """
 
     value: object
-    location: SourceLocation | None = None
-
-
-@dataclass(frozen=True)
-class ArchQueryAST:
-    """arch 查询节点。
-
-    创建者: OpenAI
-    最后一次更改: OpenAI
-
-    功能说明:
-    - 表示 `get_block_id/get_thread_id` 等无参 arch builtin 查询。
-
-    使用示例:
-    - ArchQueryAST(query_name="get_block_id")
-
-    关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast.py
-    """
-
-    query_name: str
-    location: SourceLocation | None = None
-
-
-@dataclass(frozen=True)
-class ArchDynamicMemoryAST:
-    """arch 动态内存入口节点。
-
-    创建者: OpenAI
-    最后一次更改: OpenAI
-
-    功能说明:
-    - 表示 `get_dynamic_memory(space)` DSL 调用。
-
-    使用示例:
-    - ArchDynamicMemoryAST(space=MemorySpace.SM)
-
-    关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast.py
-    """
-
-    space: MemorySpace
-    location: SourceLocation | None = None
-
-
-@dataclass(frozen=True)
-class ArchLaunchKernelAST:
-    """arch kernel 启动描述节点。
-
-    创建者: OpenAI
-    最后一次更改: OpenAI
-
-    功能说明:
-    - 表示 `launch_kernel(name, block, thread, subthread)` DSL 语句。
-
-    使用示例:
-    - ArchLaunchKernelAST("kernel", block=ConstAST(1), thread=ConstAST(1), subthread=ConstAST(1))
-
-    关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast.py
-    """
-
-    kernel_name: str
-    block: object
-    thread: object
-    subthread: object
     location: SourceLocation | None = None
 
 
@@ -596,15 +648,6 @@ _CMP_OP_MAP: dict[type, str] = {
     py_ast.GtE: "ge",
 }
 
-_ARCH_QUERY_NAMES: dict[str, str] = {
-    "get_block_id": "block_id",
-    "get_block_num": "block_num",
-    "get_thread_id": "thread_id",
-    "get_thread_num": "thread_num",
-    "get_subthread_id": "subthread_id",
-    "get_subthread_num": "subthread_num",
-}
-
 
 def _location_from_node(node: object | None) -> SourceLocation | None:
     if node is None:
@@ -618,24 +661,6 @@ def _location_from_node(node: object | None) -> SourceLocation | None:
 
 def _raise_parse_error(message: str, node: object | None) -> None:
     raise _ParseFailure(message, _location_from_node(node))
-
-
-def _is_none_annotation(node: object | None) -> bool:
-    return (isinstance(node, py_ast.Constant) and node.value is None) or (
-        isinstance(node, py_ast.Name) and node.id == "None"
-    )
-
-
-def _parse_scalar_annotation(
-    text: str,
-    arg_name: str | None,
-    node: object | None,
-) -> ScalarArgAST | None:
-    normalized = text.strip()
-    scalar_type = {"int": int, "bool": bool, "float": float}.get(normalized)
-    if scalar_type is None:
-        return None
-    return ScalarArgAST(name=arg_name or "ret0", value_type=scalar_type, location=_location_from_node(node))
 
 
 def _split_tensor_annotation(text: str, node: object | None) -> tuple[NumericType, list[int | str]]:
@@ -659,64 +684,95 @@ def _split_tensor_annotation(text: str, node: object | None) -> tuple[NumericTyp
     return dtype, dims
 
 
-def _stringify_annotation_expr(
-    node: object,
+def _format_joinedstr_value(
+    node: py_ast.FormattedValue,
     globals_table: dict[str, object],
     builtins_table: dict[str, object],
     runtime_table: dict[str, object] | None,
 ) -> str:
-    if isinstance(node, py_ast.Constant) and isinstance(node.value, (str, int, float)):
-        return str(node.value)
-    if isinstance(node, py_ast.UnaryOp) and isinstance(node.op, py_ast.USub):
-        if isinstance(node.operand, py_ast.Constant) and isinstance(node.operand.value, (int, float)):
-            return str(-node.operand.value)
-        _raise_parse_error("Unsupported annotation", node)
-    if isinstance(node, py_ast.Name):
-        if runtime_table is not None and node.id in runtime_table:
-            runtime_value = runtime_table[node.id]
-            if isinstance(runtime_value, SymbolDim):
-                return str(runtime_value.get_symbol())
-            if isinstance(runtime_value, (str, int, float)):
-                return str(runtime_value)
-        value = _lookup_python_name(node.id, globals_table, builtins_table)
-        if isinstance(value, SymbolDim):
-            return str(value.get_symbol())
-        if isinstance(value, (str, int, float)):
-            return str(value)
-        return node.id
-    if isinstance(node, py_ast.Attribute):
-        value = _parse_attribute_object(node, globals_table, builtins_table)
-        if isinstance(value, SymbolDim):
-            return str(value.get_symbol())
-        if isinstance(value, (str, int, float)):
-            return str(value)
-    _raise_parse_error("Unsupported annotation", node)
+    """静态归一化 f-string 中的表达式片段。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 仅接受可静态求值为 `int/str/SymbolDim` 的表达式。
+
+    使用示例:
+    - _format_joinedstr_value(node, globals(), __builtins__, {"N": 4})
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    if node.conversion != -1 or node.format_spec is not None:
+        _raise_parse_error("Unsupported formatted annotation", node)
+
+    value_node = node.value
+    if isinstance(value_node, py_ast.Name):
+        if runtime_table is not None and value_node.id in runtime_table:
+            value = runtime_table[value_node.id]
+        else:
+            value = _lookup_python_name(value_node.id, globals_table, builtins_table)
+    elif isinstance(value_node, py_ast.Constant) and isinstance(value_node.value, (int, str)):
+        value = value_node.value
+    elif isinstance(value_node, py_ast.UnaryOp) and isinstance(value_node.op, py_ast.USub):
+        operand = value_node.operand
+        if isinstance(operand, py_ast.Constant) and isinstance(operand.value, int):
+            value = -operand.value
+        else:
+            _raise_parse_error("Unsupported formatted annotation", value_node)
+    else:
+        _raise_parse_error("Unsupported formatted annotation", value_node)
+
+    if isinstance(value, SymbolDim):
+        return str(value.get_symbol())
+    if isinstance(value, (int, str)):
+        return str(value)
+    _raise_parse_error("Unsupported formatted annotation", value_node)
     return ""
 
 
-def _joined_annotation_to_text(
-    node: py_ast.JoinedStr,
+def _normalize_annotation_text(
+    node: py_ast.Constant | py_ast.JoinedStr,
     globals_table: dict[str, object],
     builtins_table: dict[str, object],
     runtime_table: dict[str, object] | None,
 ) -> str:
-    parts: list[str] = []
-    for value in node.values:
-        if isinstance(value, py_ast.Constant) and isinstance(value.value, str):
-            parts.append(value.value)
-            continue
-        if isinstance(value, py_ast.FormattedValue):
-            parts.append(
-                _stringify_annotation_expr(
-                    value.value,
-                    globals_table,
-                    builtins_table,
-                    runtime_table,
-                )
-            )
-            continue
-        _raise_parse_error("Unsupported annotation", value)
-    return "".join(parts)
+    """将字符串或 JoinedStr 注解归一化为普通文本。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 支持普通字符串字面量与可静态归一化的 `f"Tensor[...]"`。
+
+    使用示例:
+    - _normalize_annotation_text(node, globals(), __builtins__, runtime_table)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    if isinstance(node, py_ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, py_ast.JoinedStr):
+        parts: list[str] = []
+        for value in node.values:
+            if isinstance(value, py_ast.Constant) and isinstance(value.value, str):
+                parts.append(value.value)
+                continue
+            if isinstance(value, py_ast.FormattedValue):
+                parts.append(_format_joinedstr_value(value, globals_table, builtins_table, runtime_table))
+                continue
+            _raise_parse_error("Unsupported annotation", value)
+        return "".join(parts)
+    _raise_parse_error("Unsupported annotation", node)
+    return ""
 
 
 def _parse_annotation_node(
@@ -749,35 +805,21 @@ def _parse_annotation_node(
             return ScalarArgAST(name=arg_name, value_type=int, is_symbolic=True, location=None)
         _raise_parse_error("Missing annotation", node)
 
-    if _is_none_annotation(node):
-        return None
-
-    if isinstance(node, py_ast.Constant) and isinstance(node.value, str):
-        text = node.value
-        scalar = _parse_scalar_annotation(text, arg_name, node)
-        if scalar is not None:
-            return scalar
+    if isinstance(node, (py_ast.Constant, py_ast.JoinedStr)):
+        text = _normalize_annotation_text(node, globals_table, builtins_table, runtime_table)
+        if text.strip() == "int":
+            return ScalarArgAST(name=arg_name or "ret0", value_type=int, location=_location_from_node(node))
         dtype, dims = _split_tensor_annotation(text, node)
         memory = Memory(dims, dtype)
         return TensorAST(name=arg_name or "ret0", memory=memory, location=_location_from_node(node))
 
     if isinstance(node, py_ast.Name):
-        scalar = _parse_scalar_annotation(node.id, arg_name, node)
-        if scalar is not None:
-            return scalar
+        if node.id == "int":
+            return ScalarArgAST(name=arg_name or "ret0", value_type=int, location=_location_from_node(node))
         if node.id in globals_table and isinstance(globals_table[node.id], Memory):
             memory = globals_table[node.id]
             return TensorAST(name=arg_name or node.id, memory=memory, location=_location_from_node(node))
         _raise_parse_error("Unsupported annotation", node)
-
-    if isinstance(node, py_ast.JoinedStr):
-        text = _joined_annotation_to_text(node, globals_table, builtins_table, runtime_table)
-        scalar = _parse_scalar_annotation(text, arg_name, node)
-        if scalar is not None:
-            return scalar
-        dtype, dims = _split_tensor_annotation(text, node)
-        memory = Memory(dims, dtype)
-        return TensorAST(name=arg_name or "ret0", memory=memory, location=_location_from_node(node))
 
     if isinstance(node, py_ast.Subscript) and isinstance(node.value, py_ast.Name) and node.value.id == "Tensor":
         slice_node = node.slice
@@ -800,16 +842,6 @@ def _parse_annotation_node(
 
     _raise_parse_error("Unsupported annotation", node)
     return None
-
-
-def _parse_query_axis(slice_node: object) -> int:
-    if isinstance(slice_node, py_ast.Constant) and isinstance(slice_node.value, int):
-        return int(slice_node.value)
-    if isinstance(slice_node, py_ast.UnaryOp) and isinstance(slice_node.op, py_ast.USub):
-        if isinstance(slice_node.operand, py_ast.Constant) and isinstance(slice_node.operand.value, int):
-            return -int(slice_node.operand.value)
-    _raise_parse_error("Unsupported query axis", slice_node)
-    return 0
 
 
 def _lookup_python_name(name: str, globals_table: dict[str, object], builtins_table: dict[str, object]) -> object | None:
@@ -878,16 +910,14 @@ def _parse_dma_call(
     globals_table: dict[str, object],
     builtins_table: dict[str, object],
 ) -> object:
-    """解析 DSL 中的 `slice/deslice` 调用。
+    """解析 DSL 中的 DMA/NN helper 调用。
 
     创建者: OpenAI
     最后一次更改: OpenAI
 
     功能说明:
-    - 将 `slice(...)` 解析为 `LoadAST`。
-    - 将 `deslice(...)` 解析为 `StoreAST`。
+    - 将 `load/slice/store/deslice/...` 解析为对应 AST 节点。
     - 将 `nn.add/sub/mul/truediv/floordiv(...)` 解析为对应的 `BinaryExprAST`。
-    - 将 `float(symbol_expr)` 解析为显式 `CastExprAST`。
 
     使用示例:
     - _parse_dma_call(py_ast.parse("slice(A, [i], [n])").body[0].value, env, globals(), __builtins__)
@@ -898,6 +928,7 @@ def _parse_dma_call(
     - 功能实现: kernel_gen/dsl/ast.py
     """
 
+    call_name: str | None = None
     if isinstance(expr.func, py_ast.Attribute):
         if isinstance(expr.func.value, py_ast.Name):
             base_object = _lookup_python_name(expr.func.value.id, globals_table, builtins_table)
@@ -923,39 +954,35 @@ def _parse_dma_call(
                 rhs=rhs,
                 location=_location_from_node(expr),
             )
+        if getattr(base_object, "__name__", None) == "kernel_gen.operation.dma":
+            call_name = expr.func.attr
+        else:
+            _raise_parse_error("Unsupported call expression", expr)
+
+    elif isinstance(expr.func, py_ast.Name):
+        call_name = expr.func.id
+    else:
         _raise_parse_error("Unsupported call expression", expr)
 
-    if not isinstance(expr.func, py_ast.Name):
-        _raise_parse_error("Unsupported call expression", expr)
-
-    call_name = expr.func.id
-    if call_name in _ARCH_QUERY_NAMES:
-        if expr.args or expr.keywords:
-            _raise_parse_error("Unsupported arch query arity", expr)
-        return ArchQueryAST(query_name=call_name, location=_location_from_node(expr))
-
-    if call_name == "get_dynamic_memory":
-        if len(expr.args) != 1 or expr.keywords:
-            _raise_parse_error("Unsupported get_dynamic_memory arity", expr)
-        space = _parse_expr(expr.args[0], env, globals_table, builtins_table)
-        if not isinstance(space, MemorySpace):
-            _raise_parse_error("get_dynamic_memory space must be MemorySpace", expr.args[0])
-        return ArchDynamicMemoryAST(space=space, location=_location_from_node(expr))
-
-    if call_name == "launch_kernel":
-        if len(expr.args) != 4 or expr.keywords:
-            _raise_parse_error("Unsupported launch_kernel arity", expr)
-        kernel_name = _parse_expr(expr.args[0], env, globals_table, builtins_table)
-        if not isinstance(kernel_name, ConstAST) or not isinstance(kernel_name.value, str):
-            _raise_parse_error("launch_kernel kernel name must be a string literal", expr.args[0])
-        block = _parse_expr(expr.args[1], env, globals_table, builtins_table)
-        thread = _parse_expr(expr.args[2], env, globals_table, builtins_table)
-        subthread = _parse_expr(expr.args[3], env, globals_table, builtins_table)
-        return ArchLaunchKernelAST(
-            kernel_name=kernel_name.value,
-            block=block,
-            thread=thread,
-            subthread=subthread,
+    if call_name == "load":
+        if len(expr.args) < 3 or len(expr.args) > 5:
+            _raise_parse_error("Unsupported load arity", expr)
+        tensor = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+        if not isinstance(tensor, TensorAST):
+            _raise_parse_error("load source must be TensorAST", expr.args[0])
+        offsets = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+        sizes = _parse_expr(expr.args[2], env, globals_table, builtins_table)
+        stride = _parse_expr(expr.args[3], env, globals_table, builtins_table) if len(expr.args) >= 4 else None
+        space = _parse_expr(expr.args[4], env, globals_table, builtins_table) if len(expr.args) >= 5 else None
+        if space is not None and not isinstance(space, MemorySpace):
+            _raise_parse_error("load space must be MemorySpace", expr.args[4])
+        return LoadAST(
+            tensor=tensor,
+            offset=offsets,
+            sizes=sizes,
+            stride=stride,
+            space=space,
+            kind="load",
             location=_location_from_node(expr),
         )
 
@@ -977,6 +1004,27 @@ def _parse_dma_call(
             sizes=sizes,
             stride=stride,
             space=space,
+            kind="slice",
+            location=_location_from_node(expr),
+        )
+
+    if call_name == "store":
+        if len(expr.args) < 4 or len(expr.args) > 5:
+            _raise_parse_error("Unsupported store arity", expr)
+        value = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+        tensor = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+        if not isinstance(tensor, TensorAST):
+            _raise_parse_error("store target must be TensorAST", expr.args[1])
+        offsets = _parse_expr(expr.args[2], env, globals_table, builtins_table)
+        sizes = _parse_expr(expr.args[3], env, globals_table, builtins_table)
+        stride = _parse_expr(expr.args[4], env, globals_table, builtins_table) if len(expr.args) >= 5 else None
+        return StoreAST(
+            tensor=tensor,
+            offset=offsets,
+            sizes=sizes,
+            stride=stride,
+            value=value,
+            kind="store",
             location=_location_from_node(expr),
         )
 
@@ -1000,14 +1048,85 @@ def _parse_dma_call(
             sizes=sizes,
             stride=stride,
             value=value,
+            kind="deslice",
             location=_location_from_node(expr),
         )
 
-    if call_name == "float":
+    if call_name == "alloc":
+        if len(expr.args) < 2 or len(expr.args) > 4 or expr.keywords:
+            _raise_parse_error("Unsupported alloc arity", expr)
+        shape = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+        dtype = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+        if not isinstance(dtype, NumericType):
+            _raise_parse_error("alloc dtype must be NumericType", expr.args[1])
+        space = _parse_expr(expr.args[2], env, globals_table, builtins_table) if len(expr.args) >= 3 else MemorySpace.GM
+        if not isinstance(space, MemorySpace):
+            _raise_parse_error("alloc space must be MemorySpace", expr.args[2])
+        stride = _parse_expr(expr.args[3], env, globals_table, builtins_table) if len(expr.args) >= 4 else None
+        return DmaAllocAST(shape=shape, dtype=dtype, space=space, stride=stride, location=_location_from_node(expr))
+
+    if call_name == "copy":
+        if len(expr.args) != 2 or expr.keywords:
+            _raise_parse_error("Unsupported copy arity", expr)
+        source = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+        space = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+        if not isinstance(space, MemorySpace):
+            _raise_parse_error("copy space must be MemorySpace", expr.args[1])
+        return DmaCopyAST(source=source, space=space, location=_location_from_node(expr))
+
+    if call_name == "cast":
+        if len(expr.args) < 2 or len(expr.args) > 3:
+            _raise_parse_error("Unsupported cast arity", expr)
+        if len(expr.keywords) > 1:
+            _raise_parse_error("Unsupported cast arity", expr)
+        source = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+        dtype = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+        if not isinstance(dtype, NumericType):
+            _raise_parse_error("cast dtype must be NumericType", expr.args[1])
+        memoryspace = _parse_expr(expr.args[2], env, globals_table, builtins_table) if len(expr.args) == 3 else None
+        if expr.keywords:
+            keyword = expr.keywords[0]
+            if keyword.arg != "memoryspace" or len(expr.args) == 3:
+                _raise_parse_error("Unsupported cast arity", expr)
+            memoryspace = _parse_expr(keyword.value, env, globals_table, builtins_table)
+        if memoryspace is not None and not isinstance(memoryspace, MemorySpace):
+            location_node = expr.args[2] if len(expr.args) == 3 else expr.keywords[0].value
+            _raise_parse_error("cast memoryspace must be MemorySpace", location_node)
+        return DmaCastAST(source=source, dtype=dtype, memoryspace=memoryspace, location=_location_from_node(expr))
+
+    if call_name == "view":
+        if len(expr.args) != 4 or expr.keywords:
+            _raise_parse_error("Unsupported view arity", expr)
+        source = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+        offset = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+        size = _parse_expr(expr.args[2], env, globals_table, builtins_table)
+        stride = _parse_expr(expr.args[3], env, globals_table, builtins_table)
+        return DmaViewAST(
+            source=source,
+            offset=offset,
+            size=size,
+            stride=stride,
+            location=_location_from_node(expr),
+        )
+
+    if call_name == "reshape":
+        if len(expr.args) != 2 or expr.keywords:
+            _raise_parse_error("Unsupported reshape arity", expr)
+        source = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+        shape = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+        return DmaReshapeAST(source=source, shape=shape, location=_location_from_node(expr))
+
+    if call_name == "flatten":
         if len(expr.args) != 1 or expr.keywords:
-            _raise_parse_error("Unsupported float cast arity", expr)
+            _raise_parse_error("Unsupported flatten arity", expr)
+        source = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+        return DmaFlattenAST(source=source, location=_location_from_node(expr))
+
+    if call_name == "free":
+        if len(expr.args) != 1 or expr.keywords:
+            _raise_parse_error("Unsupported free arity", expr)
         value = _parse_expr(expr.args[0], env, globals_table, builtins_table)
-        return CastExprAST(value=value, target_type=float, location=_location_from_node(expr))
+        return DmaFreeAST(value=value, location=_location_from_node(expr))
 
     _raise_parse_error("Unsupported call expression", expr)
     return expr
@@ -1046,20 +1165,6 @@ def _parse_expr(
 
     if isinstance(expr, py_ast.Attribute):
         return _parse_attribute_object(expr, globals_table, builtins_table)
-
-    if isinstance(expr, py_ast.Subscript):
-        if (
-            isinstance(expr.value, py_ast.Call)
-            and isinstance(expr.value.func, py_ast.Attribute)
-            and not expr.value.args
-            and not expr.value.keywords
-            and expr.value.func.attr in {"get_shape", "get_stride"}
-        ):
-            source = _parse_expr(expr.value.func.value, env, globals_table, builtins_table)
-            axis = _parse_query_axis(expr.slice)
-            kind = "dim" if expr.value.func.attr == "get_shape" else "stride"
-            return MemoryQueryAST(kind=kind, source=source, axis=axis, location=_location_from_node(expr))
-        _raise_parse_error("Unsupported expression", expr)
 
     if isinstance(expr, py_ast.Call):
         return _parse_dma_call(expr, env, globals_table, builtins_table)
@@ -1205,19 +1310,14 @@ def _parse_function_impl(
             _raise_parse_error("Unsupported argument annotation", arg)
 
     outputs: list[TensorAST | ScalarArgAST] = []
-    explicit_none_return = False
     if func_def.returns is not None:
         parsed = _parse_annotation_node(func_def.returns, None, globals_table, builtins_table, runtime_table)
         if parsed is None:
-            if _is_none_annotation(func_def.returns):
-                explicit_none_return = True
-            else:
-                _raise_parse_error("Unsupported return annotation", func_def.returns)
+            _raise_parse_error("Unsupported return annotation", func_def.returns)
         if isinstance(parsed, (TensorAST, ScalarArgAST)):
             outputs.append(parsed)
         else:
-            if parsed is not None:
-                _raise_parse_error("Unsupported return annotation", func_def.returns)
+            _raise_parse_error("Unsupported return annotation", func_def.returns)
 
     statements: list[object] = []
     has_return = False
@@ -1227,7 +1327,7 @@ def _parse_function_impl(
         if isinstance(stmt, py_ast.Return):
             has_return = True
 
-    if func_def.returns is not None and not explicit_none_return and not has_return:
+    if func_def.returns is not None and not has_return:
         raise AstParseError("Missing return statement", [Diagnostic("Missing return statement", _location_from_node(func_def))])
     if has_return and not isinstance(func_def.body[-1], py_ast.Return):
         raise AstParseError("Return statement must be last", [Diagnostic("Return statement must be last", _location_from_node(func_def.body[-1]))])

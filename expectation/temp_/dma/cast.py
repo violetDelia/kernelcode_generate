@@ -1,19 +1,19 @@
 """DMA cast expectation.
 
 创建者: 榕
-最后一次更改: 榕
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 使用统一 expectation 结构描述 `cast(...)` 的 DSL 调用方式。
 - 参数与 Memory shape 使用随机整数，便于覆盖不同输入规模。
 
 使用示例:
-- python expectation/temp/dma/cast.py
+- python expectation/temp_/dma/cast.py
 
 关联文件:
-- spec: spec/dsl/mlir_gen.md
+- spec: spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
 - test: test/dsl/test_ast_visitor.py
-- 功能实现: kernel_gen/dsl/mlir_gen.py
+- 功能实现: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
 """
 
 from pathlib import Path
