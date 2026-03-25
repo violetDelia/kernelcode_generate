@@ -65,6 +65,7 @@ from kernel_gen.dialect import (
 import kernel_gen.dialect as dialect_pkg
 from kernel_gen.dialect.nn import Nn, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import Symbol, SymbolValueType
+from kernel_gen.target import registry as target_registry
 
 
 def _build_context() -> Context:
@@ -468,3 +469,20 @@ def test_arch_package_exports() -> None:
     assert ArchLaunchKernelOpFromPackage is ArchLaunchKernelOp
     assert expected_arch_exports <= set(dialect_pkg.__all__)
     assert {name for name in dialect_pkg.__all__ if name.startswith("Arch")} == expected_arch_exports
+
+
+# TC-ARCH-013
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-26 01:38:06 +0800
+# 最近一次运行成功时间: 2026-03-26 01:38:06 +0800
+# 测试目的: 验证 cpu target 下拒绝 arch.get_thread_id。
+# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 对应 spec 文件路径: spec/dialect/arch.md
+def test_target_registry_cpu_rejects_thread_id() -> None:
+    target_registry._set_current_target("cpu")
+    try:
+        with pytest.raises(VerifyException, match="arch.get_thread_id"):
+            ArchGetThreadIdOp().verify()
+    finally:
+        target_registry._set_current_target(None)

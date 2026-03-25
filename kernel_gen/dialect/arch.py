@@ -30,6 +30,7 @@ from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolValueType
+from kernel_gen.target import registry as target_registry
 
 _DYNAMIC_MEMORY_SPACES = {"shared", "local", "tsm", "tlm"}
 
@@ -108,6 +109,34 @@ def _dynamic_memory_result_type(space: NnMemorySpaceAttr) -> NnMemoryType:
     )
 
 
+def _verify_target_registry_support(op_name: str) -> None:
+    """按当前 target registry 配置校验 arch op 支持性。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 在启用 target registry 校验时，检查 arch op 是否被当前 target 支持。
+
+    使用示例:
+    - _verify_target_registry_support("arch.get_thread_id")
+
+    关联文件:
+    - spec: spec/target/registry.md
+    - test: test/dialect/test_arch_dialect.py
+    - 功能实现: kernel_gen/dialect/arch.py
+    """
+
+    current_target = target_registry._get_current_target()
+    if current_target is None:
+        return
+    try:
+        if not target_registry.is_arch_op_supported(current_target, op_name):
+            raise VerifyException(f"{op_name} is not supported by target {current_target}")
+    except ValueError as exc:
+        raise VerifyException(str(exc)) from exc
+
+
 class _BaseArchIndexQueryOp(IRDLOperation):
     """固定返回指定 symbol.int 类型的 arch 查询 op 基类。"""
 
@@ -139,11 +168,27 @@ class _BaseArchIndexQueryOp(IRDLOperation):
         super().__init__(result_types=[result_type or SymbolValueType.from_expr(self.RESULT_EXPR)])
 
     def verify_(self: "_BaseArchIndexQueryOp") -> None:
-        """校验固定结果类型查询 op。"""
+        """校验固定结果类型查询 op。
+
+        创建者: 朽木露琪亚
+        最后一次更改: 我不是牛马
+
+        功能说明:
+        - 校验固定结果类型并在启用 target registry 时执行支持性检查。
+
+        使用示例:
+        - ArchGetBlockIdOp().verify()
+
+        关联文件:
+        - spec: spec/dialect/arch.md
+        - test: test/dialect/test_arch_dialect.py
+        - 功能实现: kernel_gen/dialect/arch.py
+        """
 
         expected = SymbolValueType.from_expr(self.RESULT_EXPR)
         if self.result.type != expected:
             raise VerifyException(f"{self.name} result type must be !symbol.int<\"{self.RESULT_EXPR}\">")
+        _verify_target_registry_support(self.name)
 
     def print(self: "_BaseArchIndexQueryOp", printer: Printer) -> None:
         """打印固定结果类型查询 op 自定义文本语法。"""
@@ -244,8 +289,24 @@ class ArchGetDynamicMemoryOp(IRDLOperation):
         )
 
     def verify_(self: "ArchGetDynamicMemoryOp") -> None:
-        """校验动态 memory 入口 op。"""
+        """校验动态 memory 入口 op。
 
+        创建者: 朽木露琪亚
+        最后一次更改: 我不是牛马
+
+        功能说明:
+        - 校验 memory_space 与结果类型，并在启用 target registry 时执行支持性检查。
+
+        使用示例:
+        - ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("shared")).verify()
+
+        关联文件:
+        - spec: spec/dialect/arch.md
+        - test: test/dialect/test_arch_dialect.py
+        - 功能实现: kernel_gen/dialect/arch.py
+        """
+
+        _verify_target_registry_support(self.name)
         self.memory_space.verify()
         space_name = self.memory_space.space.data
         if space_name not in _DYNAMIC_MEMORY_SPACES:
@@ -331,8 +392,24 @@ class ArchLaunchKernelOp(IRDLOperation):
         )
 
     def verify_(self: "ArchLaunchKernelOp") -> None:
-        """校验 arch.launch_kernel 输入约束。"""
+        """校验 arch.launch_kernel 输入约束。
 
+        创建者: 朽木露琪亚
+        最后一次更改: 我不是牛马
+
+        功能说明:
+        - 校验 kernel 名称与启动维度，并在启用 target registry 时执行支持性检查。
+
+        使用示例:
+        - ArchLaunchKernelOp("kernel", block, thread, subthread).verify()
+
+        关联文件:
+        - spec: spec/dialect/arch.md
+        - test: test/dialect/test_arch_dialect.py
+        - 功能实现: kernel_gen/dialect/arch.py
+        """
+
+        _verify_target_registry_support(self.name)
         if not self.kernel_name.data:
             raise VerifyException("arch.launch_kernel kernel name must not be empty")
 
