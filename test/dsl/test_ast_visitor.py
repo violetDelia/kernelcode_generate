@@ -39,6 +39,7 @@ from xdsl.dialects.builtin import (
     StringAttr,
     f32,
     i1,
+    i8,
     i32,
 )
 from xdsl.ir import Block
@@ -48,6 +49,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.dialect.arch import (
+    ArchGetBlockIdOp,
+    ArchGetBlockNumOp,
+    ArchGetDynamicMemoryOp,
+    ArchGetSubthreadIdOp,
+    ArchGetSubthreadNumOp,
+    ArchGetThreadIdOp,
+    ArchGetThreadNumOp,
+    ArchLaunchKernelOp,
+)
 from kernel_gen.dialect.dma import DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp
 from kernel_gen.dialect.nn import NnAddOp, NnBroadcastOp, NnEqOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import (
@@ -2447,3 +2458,113 @@ def test_mlir_gen_build_func_op_builtins_and_parse_error() -> None:
 
     with pytest.raises(AstVisitorError, match="Tensor annotation missing dimensions"):
         build_func_op(bad, _tensor_arg([2]))
+
+
+# MGEN-ARCH-001
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-25 18:45:07 +0800
+# 最近一次运行成功时间: 2026-03-25 18:45:07 +0800
+# 功能说明: 验证无参 arch 查询 DSL 可生成对应 arch op，并保持 symbol 返回类型。
+# 测试目的: 证明 build_func_op 对 expectation/temp_/arch 的查询类入口已闭环。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_lowers_arch_query_functions
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_lowers_arch_query_functions() -> None:
+    def get_block_id_kernel() -> int:
+        return get_block_id()
+
+    def get_block_num_kernel() -> int:
+        return get_block_num()
+
+    def get_thread_id_kernel() -> int:
+        return get_thread_id()
+
+    def get_thread_num_kernel() -> int:
+        return get_thread_num()
+
+    def get_subthread_id_kernel() -> int:
+        return get_subthread_id()
+
+    def get_subthread_num_kernel() -> int:
+        return get_subthread_num()
+
+    cases: list[tuple[object, type[object], str]] = [
+        (get_block_id_kernel, ArchGetBlockIdOp, "block_id"),
+        (get_block_num_kernel, ArchGetBlockNumOp, "block_num"),
+        (get_thread_id_kernel, ArchGetThreadIdOp, "thread_id"),
+        (get_thread_num_kernel, ArchGetThreadNumOp, "thread_num"),
+        (get_subthread_id_kernel, ArchGetSubthreadIdOp, "subthread_id"),
+        (get_subthread_num_kernel, ArchGetSubthreadNumOp, "subthread_num"),
+    ]
+
+    for fn, op_type, result_expr in cases:
+        func_op = build_func_op(fn)
+        arch_ops = [op for op in func_op.body.block.ops if isinstance(op, op_type)]
+        return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
+
+        assert len(arch_ops) == 1
+        assert len(return_ops) == 1
+        assert arch_ops[0].result.type == SymbolValueType.from_expr(result_expr)
+        assert return_ops[0].arguments[0].type == SymbolValueType.from_expr(result_expr)
+
+
+# MGEN-ARCH-002
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-25 18:45:07 +0800
+# 最近一次运行成功时间: 2026-03-25 18:45:07 +0800
+# 功能说明: 验证 arch 动态内存入口 DSL 可生成固定结果类型的 arch.get_dynamic_memory。
+# 测试目的: 证明 `get_dynamic_memory(MemorySpace.SM)` 的 None 输入函数已闭环到 arch dialect。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_lowers_arch_dynamic_memory_function
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_lowers_arch_dynamic_memory_function() -> None:
+    def get_dynamic_memory_kernel() -> "Tensor[i8, ?]":
+        return get_dynamic_memory(MemorySpace.SM)
+
+    func_op = build_func_op(get_dynamic_memory_kernel)
+    arch_ops = [op for op in func_op.body.block.ops if isinstance(op, ArchGetDynamicMemoryOp)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
+
+    assert len(arch_ops) == 1
+    assert len(return_ops) == 1
+    assert isinstance(arch_ops[0].result.type, NnMemoryType)
+    assert arch_ops[0].result.type.shape.data == (StringAttr("?"),)
+    assert arch_ops[0].result.type.stride.data == (IntAttr(1),)
+    assert arch_ops[0].result.type.element_type == i8
+    assert arch_ops[0].result.type.space == NnMemorySpaceAttr.from_name("shared")
+    assert return_ops[0].arguments[0].type == arch_ops[0].result.type
+
+
+# MGEN-ARCH-003
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-25 18:45:07 +0800
+# 最近一次运行成功时间: 2026-03-25 18:45:07 +0800
+# 功能说明: 验证 `launch_kernel(...)->None` DSL 可保持 symbol 启动参数并生成 arch.launch_kernel。
+# 测试目的: 证明 None 返回注解与 arch 启动描述语句已在 build_func_op 链路闭环。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_lowers_arch_launch_kernel_statement
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_lowers_arch_launch_kernel_statement() -> None:
+    def launch_kernel_func(block: int, thread: int, subthread: int) -> None:
+        launch_kernel("generated_kernel", block, thread, subthread)
+
+    func_op = build_func_op(launch_kernel_func, SymbolDim("BLOCK"), 8, 2)
+    launch_ops = [op for op in func_op.body.block.ops if isinstance(op, ArchLaunchKernelOp)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
+
+    assert list(func_op.function_type.inputs) == [
+        SymbolValueType.from_expr("BLOCK"),
+        SymbolValueType.from_expr("8"),
+        SymbolValueType.from_expr("2"),
+    ]
+    assert list(func_op.function_type.outputs) == []
+    assert len(launch_ops) == 1
+    assert launch_ops[0].kernel_name.data == "generated_kernel"
+    assert len(return_ops) == 1
+    assert tuple(return_ops[0].arguments) == ()

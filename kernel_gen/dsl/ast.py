@@ -349,6 +349,78 @@ class ConstAST:
 
 
 @dataclass(frozen=True)
+class ArchQueryAST:
+    """arch 查询节点。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 表示 `get_block_id/get_thread_id` 等无参 arch builtin 查询。
+
+    使用示例:
+    - ArchQueryAST(query_name="get_block_id")
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    query_name: str
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class ArchDynamicMemoryAST:
+    """arch 动态内存入口节点。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 表示 `get_dynamic_memory(space)` DSL 调用。
+
+    使用示例:
+    - ArchDynamicMemoryAST(space=MemorySpace.SM)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    space: MemorySpace
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class ArchLaunchKernelAST:
+    """arch kernel 启动描述节点。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 表示 `launch_kernel(name, block, thread, subthread)` DSL 语句。
+
+    使用示例:
+    - ArchLaunchKernelAST("kernel", block=ConstAST(1), thread=ConstAST(1), subthread=ConstAST(1))
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    kernel_name: str
+    block: object
+    thread: object
+    subthread: object
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
 class FunctionAST:
     """函数节点。
 
@@ -475,6 +547,15 @@ _CMP_OP_MAP: dict[type, str] = {
     py_ast.GtE: "ge",
 }
 
+_ARCH_QUERY_NAMES: dict[str, str] = {
+    "get_block_id": "block_id",
+    "get_block_num": "block_num",
+    "get_thread_id": "thread_id",
+    "get_thread_num": "thread_num",
+    "get_subthread_id": "subthread_id",
+    "get_subthread_num": "subthread_num",
+}
+
 
 def _location_from_node(node: object | None) -> SourceLocation | None:
     if node is None:
@@ -488,6 +569,12 @@ def _location_from_node(node: object | None) -> SourceLocation | None:
 
 def _raise_parse_error(message: str, node: object | None) -> None:
     raise _ParseFailure(message, _location_from_node(node))
+
+
+def _is_none_annotation(node: object | None) -> bool:
+    return (isinstance(node, py_ast.Constant) and node.value is None) or (
+        isinstance(node, py_ast.Name) and node.id == "None"
+    )
 
 
 def _split_tensor_annotation(text: str, node: object | None) -> tuple[NumericType, list[int | str]]:
@@ -541,15 +628,20 @@ def _parse_annotation_node(
             return ScalarArgAST(name=arg_name, value_type=int, is_symbolic=True, location=None)
         _raise_parse_error("Missing annotation", node)
 
-    if isinstance(node, py_ast.Constant) and isinstance(node.value, str):
-        text = node.value
-        if text.strip() == "int":
-            return ScalarArgAST(name=arg_name or "ret0", value_type=int, location=_location_from_node(node))
-        dtype, dims = _split_tensor_annotation(text, node)
-        memory = Memory(dims, dtype)
-        return TensorAST(name=arg_name or "ret0", memory=memory, location=_location_from_node(node))
+    if isinstance(node, py_ast.Constant):
+        if node.value is None:
+            return None
+        if isinstance(node.value, str):
+            text = node.value
+            if text.strip() == "int":
+                return ScalarArgAST(name=arg_name or "ret0", value_type=int, location=_location_from_node(node))
+            dtype, dims = _split_tensor_annotation(text, node)
+            memory = Memory(dims, dtype)
+            return TensorAST(name=arg_name or "ret0", memory=memory, location=_location_from_node(node))
 
     if isinstance(node, py_ast.Name):
+        if node.id == "None":
+            return None
         if node.id == "int":
             return ScalarArgAST(name=arg_name or "ret0", value_type=int, location=_location_from_node(node))
         if node.id in globals_table and isinstance(globals_table[node.id], Memory):
@@ -696,6 +788,36 @@ def _parse_dma_call(
         _raise_parse_error("Unsupported call expression", expr)
 
     call_name = expr.func.id
+    if call_name in _ARCH_QUERY_NAMES:
+        if expr.args or expr.keywords:
+            _raise_parse_error("Unsupported arch query arity", expr)
+        return ArchQueryAST(query_name=call_name, location=_location_from_node(expr))
+
+    if call_name == "get_dynamic_memory":
+        if len(expr.args) != 1 or expr.keywords:
+            _raise_parse_error("Unsupported get_dynamic_memory arity", expr)
+        space = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+        if not isinstance(space, MemorySpace):
+            _raise_parse_error("get_dynamic_memory space must be MemorySpace", expr.args[0])
+        return ArchDynamicMemoryAST(space=space, location=_location_from_node(expr))
+
+    if call_name == "launch_kernel":
+        if len(expr.args) != 4 or expr.keywords:
+            _raise_parse_error("Unsupported launch_kernel arity", expr)
+        kernel_name = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+        if not isinstance(kernel_name, ConstAST) or not isinstance(kernel_name.value, str):
+            _raise_parse_error("launch_kernel kernel name must be a string literal", expr.args[0])
+        block = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+        thread = _parse_expr(expr.args[2], env, globals_table, builtins_table)
+        subthread = _parse_expr(expr.args[3], env, globals_table, builtins_table)
+        return ArchLaunchKernelAST(
+            kernel_name=kernel_name.value,
+            block=block,
+            thread=thread,
+            subthread=subthread,
+            location=_location_from_node(expr),
+        )
+
     if call_name == "slice":
         if len(expr.args) < 3 or len(expr.args) > 5:
             _raise_parse_error("Unsupported slice arity", expr)
@@ -922,14 +1044,19 @@ def _parse_function_impl(
             _raise_parse_error("Unsupported argument annotation", arg)
 
     outputs: list[TensorAST | ScalarArgAST] = []
+    explicit_none_return = False
     if func_def.returns is not None:
         parsed = _parse_annotation_node(func_def.returns, None, globals_table, builtins_table, runtime_table)
         if parsed is None:
-            _raise_parse_error("Unsupported return annotation", func_def.returns)
+            if _is_none_annotation(func_def.returns):
+                explicit_none_return = True
+            else:
+                _raise_parse_error("Unsupported return annotation", func_def.returns)
         if isinstance(parsed, (TensorAST, ScalarArgAST)):
             outputs.append(parsed)
         else:
-            _raise_parse_error("Unsupported return annotation", func_def.returns)
+            if parsed is not None:
+                _raise_parse_error("Unsupported return annotation", func_def.returns)
 
     statements: list[object] = []
     has_return = False
@@ -939,7 +1066,7 @@ def _parse_function_impl(
         if isinstance(stmt, py_ast.Return):
             has_return = True
 
-    if func_def.returns is not None and not has_return:
+    if func_def.returns is not None and not explicit_none_return and not has_return:
         raise AstParseError("Missing return statement", [Diagnostic("Missing return statement", _location_from_node(func_def))])
     if has_return and not isinstance(func_def.body[-1], py_ast.Return):
         raise AstParseError("Return statement must be last", [Diagnostic("Return statement must be last", _location_from_node(func_def.body[-1]))])

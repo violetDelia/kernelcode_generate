@@ -1,7 +1,7 @@
 """arch.get_block_id expectation.
 
 创建者: 榕
-最后一次更改: 榕
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 使用统一 expectation 结构描述 `arch.get_block_id` 的 DSL 调用方式。
@@ -11,9 +11,9 @@
 - python expectation/temp_/arch/get_block_id.py
 
 关联文件:
-- spec: spec/dialect/arch.md
-- test: test/dialect/test_arch_dialect.py
-- 功能实现: kernel_gen/dsl/mlir_gen.py
+- spec: spec/dsl/ast.md, spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
+- test: test/dsl/test_ast_visitor.py
+- 功能实现: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
 """
 
 from pathlib import Path

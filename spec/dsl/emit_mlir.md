@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)
 - `功能实现`：[`kernel_gen/dsl/emit_mlir.py`](../../kernel_gen/dsl/emit_mlir.py)
 - `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
@@ -18,6 +18,7 @@
 
 - AST 节点定义：[`spec/dsl/ast.md`](../../spec/dsl/ast.md)
 - AST 访问器：[`spec/dsl/ast_visitor.md`](../../spec/dsl/ast_visitor.md)
+- `arch` dialect 语义：[`spec/dialect/arch.md`](../../spec/dialect/arch.md)
 
 ## 术语
 
@@ -37,6 +38,9 @@
 - 不生成 MLIR 文本；文本输出由上游调用方负责。
 - 当 `ForAST` 来自 `LoopRange(start, end, step)` 且边界与循环变量保持 symbol 整数语义时，必须 lowering 为 `symbol.for`，不得回退为 `scf.for`；其循环块参数 `it` 必须为 `!symbol.int<"expr">`。
 - 在上述 `LoopRange` 场景中，循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand 必须直接复用 `!symbol.int<"expr">` value，不得插入 `arith.index_cast`；若循环变量 `it` 退化为 `index`、普通整数或浮点类型，应视为 lowering 违规。
+- `ArchQueryAST` 必须 lowering 为对应的 `arch.get_*` op，并保留其 `!symbol.int<"...">` 结果语义。
+- `ArchDynamicMemoryAST` 必须 lowering 为 `arch.get_dynamic_memory`，并返回固定的一维动态 `i8` memory value。
+- `ArchLaunchKernelAST` 必须 lowering 为 `arch.launch_kernel` 语句 op；该节点自身不产生公开 SSA 返回值。
 
 ## 公开接口
 
@@ -110,6 +114,9 @@ value = emit_mlir(expr_ast, ctx)
 - `LoadAST`：生成张量读取相关 op/value；当携带 `sizes` 时发射 `dma.slice`。
 - `StoreAST`：生成张量写入相关 op；当携带 `sizes` 时发射 `dma.deslice`。
 - `ForAST`：当来源于 `LoopRange(start, end, step)` 且边界为 symbol 整数时，生成 `symbol.for`；循环体内若包含 `dma.slice` / `dma.deslice`，其 DMA 标量 operand 直接使用 `!symbol.int<"expr">` value，不生成 `arith.index_cast`。
+- `ArchQueryAST`：生成对应的 `arch.get_block_id/get_block_num/get_thread_id/get_thread_num/get_subthread_id/get_subthread_num`。
+- `ArchDynamicMemoryAST`：生成 `arch.get_dynamic_memory`。
+- `ArchLaunchKernelAST`：生成 `arch.launch_kernel`。
 
 ## 测试
 
@@ -118,6 +125,7 @@ value = emit_mlir(expr_ast, ctx)
 - 测试目标：
   - 覆盖常见表达式与语句节点的发射结果。
   - 覆盖 `LoopRange` -> `symbol.for` 与 `it`/DMA operand 直接保持 `symbol.int` 的发射规则。
+  - 覆盖 `arch` 查询、动态内存入口与启动描述节点的发射结果。
   - 覆盖不支持节点的错误路径。
 - 功能与用例清单：
   - EMIT-001：二元表达式节点生成对应 op/value。（`test_emit_context_reuses_cached_value`）
@@ -134,3 +142,5 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-012：索引解析与 rank mismatch 的错误路径。（`test_emit_mlir_index_expr_rejections`）
   - EMIT-013：默认 stride 推导遇到未知 attr 的分支。（`test_emit_mlir_default_stride_handles_unknown_attr`）
   - EMIT-014：`ForAST` lowering 会保留循环结构并在循环体内生成 `dma.load`。（`test_for_ast_lowering_emits_loads`）
+  - EMIT-015：六个无参 `arch` 查询节点 lowering 为对应的 `arch.get_*` op，并保持 `!symbol.int<"...">` 结果类型。（`test_build_func_op_lowers_arch_query_functions`）
+  - EMIT-016：`ArchDynamicMemoryAST` lowering 为 `arch.get_dynamic_memory`，结果为一维动态 `i8` memory；`ArchLaunchKernelAST` lowering 为零返回值的 `arch.launch_kernel` 语句 op。（`test_build_func_op_lowers_arch_dynamic_memory_function`、`test_build_func_op_lowers_arch_launch_kernel_statement`）

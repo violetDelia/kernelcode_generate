@@ -26,10 +26,14 @@ from xdsl.dialects import func
 from xdsl.dialects.builtin import FunctionType, i32
 from xdsl.ir import Block, Region
 
+from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 from .ast import (
+    ArchDynamicMemoryAST,
+    ArchLaunchKernelAST,
+    ArchQueryAST,
     AstParseError,
     Diagnostic,
     FunctionAST,
@@ -63,16 +67,47 @@ def _symbol_expr_from_runtime_arg(runtime_arg: object) -> str | None:
     return None
 
 
+def _collect_launch_symbol_arg_names(func_ast: FunctionAST) -> set[str]:
+    symbol_names: set[str] = set()
+
+    def walk(node: object) -> None:
+        if isinstance(node, ArchLaunchKernelAST):
+            for operand in (node.block, node.thread, node.subthread):
+                if isinstance(operand, ScalarArgAST) and operand.value_type is int:
+                    symbol_names.add(operand.name)
+            return
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+            return
+        statements = getattr(node, "statements", None)
+        if isinstance(statements, list):
+            for statement in statements:
+                walk(statement)
+            return
+        body = getattr(node, "body", None)
+        if body is not None:
+            walk(body)
+
+    walk(func_ast.body)
+    return symbol_names
+
+
 def _build_signature_types(
     func_ast: FunctionAST,
     runtime_args: tuple[object, ...] | list[object] | None = None,
+    *,
+    allow_empty_inputs: bool = False,
 ) -> tuple[list[object], dict[int, object]]:
     if not func_ast.inputs:
+        if allow_empty_inputs:
+            return [], {}
         raise _LoweringError("Function has no inputs", location=func_ast.location)
     if runtime_args is not None and len(runtime_args) != len(func_ast.inputs):
         raise _LoweringError("runtime_args must align with func_ast inputs", location=func_ast.location)
 
     is_symbol_scalar_function = _is_symbol_scalar_function(func_ast)
+    launch_symbol_inputs = _collect_launch_symbol_arg_names(func_ast)
     arg_types: list[object] = []
     type_map: dict[int, object] = {}
     tensor_input_count = 0
@@ -85,9 +120,13 @@ def _build_signature_types(
             if item.value_type is not int:
                 raise _LoweringError("Unsupported scalar argument type", location=item.location)
             runtime_expr = _symbol_expr_from_runtime_arg(runtime_arg)
-            if runtime_expr is not None and (is_symbol_scalar_function or isinstance(runtime_arg, SymbolDim)):
+            if runtime_expr is not None and (
+                is_symbol_scalar_function or isinstance(runtime_arg, SymbolDim) or item.name in launch_symbol_inputs
+            ):
                 arg_type = SymbolValueType.from_expr(runtime_expr)
             elif _is_symbol_scalar_arg(item, is_symbol_scalar_function=is_symbol_scalar_function):
+                arg_type = SymbolValueType.from_expr(item.name)
+            elif item.name in launch_symbol_inputs:
                 arg_type = SymbolValueType.from_expr(item.name)
             else:
                 arg_type = i32
@@ -129,9 +168,23 @@ def _validate_return_type(func_ast: FunctionAST, result_type: object) -> None:
     output = func_ast.outputs[0]
     if isinstance(output, TensorAST):
         expected_type = _memory_to_nn_type(output.memory, location=output.location)
+        if (
+            len(func_ast.body.statements) == 1
+            and isinstance(func_ast.body.statements[0], ArchDynamicMemoryAST)
+            and isinstance(result_type, NnMemoryType)
+        ):
+            if result_type.shape == expected_type.shape and result_type.element_type == expected_type.element_type:
+                return
     elif isinstance(output, ScalarArgAST):
         if output.value_type is not int:
             raise _LoweringError("Unsupported scalar return type", location=output.location)
+        if (
+            not func_ast.inputs
+            and len(func_ast.body.statements) == 1
+            and isinstance(func_ast.body.statements[0], ArchQueryAST)
+            and isinstance(result_type, SymbolValueType)
+        ):
+            return
         if _is_symbol_scalar_function(func_ast):
             if isinstance(result_type, SymbolValueType):
                 return
@@ -188,6 +241,16 @@ def build_func_op(
     except AstParseError as exc:
         location = exc.diagnostics[0].location if exc.diagnostics else None
         raise AstVisitorError(exc.message, location=location) from exc
+    if not positional_params and not func_ast.inputs:
+        try:
+            return _build_func_op_from_ast_impl(
+                func_ast,
+                runtime_args=runtime_args,
+                config=None,
+                allow_empty_inputs=True,
+            )
+        except _LoweringError as exc:
+            raise AstVisitorError(str(exc), location=exc.location) from exc
     return build_func_op_from_ast(func_ast, runtime_args=runtime_args)
 
 
@@ -195,11 +258,17 @@ def _build_func_op_from_ast_impl(
     func_ast: FunctionAST,
     runtime_args: tuple[object, ...] | list[object] | None = None,
     config: dict[str, object] | None = None,
+    *,
+    allow_empty_inputs: bool = False,
 ) -> func.FuncOp:
     from .ast_visitor import AstVisitor
 
     config = config or {}
-    arg_types, type_map = _build_signature_types(func_ast, runtime_args=runtime_args)
+    arg_types, type_map = _build_signature_types(
+        func_ast,
+        runtime_args=runtime_args,
+        allow_empty_inputs=allow_empty_inputs,
+    )
     statements = _ensure_supported_statements(func_ast)
     result_types: list[object] = []
     infer_scalar_return = False
@@ -208,7 +277,7 @@ def _build_func_op_from_ast_impl(
         result_type = _infer_expr_type(return_expr, dict(type_map))
         _validate_return_type(func_ast, result_type)
         result_types = [result_type]
-    elif _is_symbol_scalar_function(func_ast):
+    elif _is_symbol_scalar_function(func_ast) and not isinstance(statements[-1], ArchLaunchKernelAST):
         return_expr = statements[-1]
         result_type = _infer_expr_type(return_expr, dict(type_map))
         if not isinstance(result_type, SymbolValueType):

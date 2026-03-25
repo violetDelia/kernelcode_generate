@@ -32,11 +32,22 @@ from xdsl.dialects.builtin import (
     StringAttr,
     f32,
     i1,
+    i8,
     i32,
 )
 from xdsl.ir import Attribute, Block, SSAValue
 
 from kernel_gen.dialect.dma import DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp
+from kernel_gen.dialect.arch import (
+    ArchGetBlockIdOp,
+    ArchGetBlockNumOp,
+    ArchGetDynamicMemoryOp,
+    ArchGetSubthreadIdOp,
+    ArchGetSubthreadNumOp,
+    ArchGetThreadIdOp,
+    ArchGetThreadNumOp,
+    ArchLaunchKernelOp,
+)
 from kernel_gen.dialect.nn import (
     NnAddOp,
     NnBroadcastOp,
@@ -66,6 +77,9 @@ from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.type import NumericType
 
 from .ast import (
+    ArchDynamicMemoryAST,
+    ArchLaunchKernelAST,
+    ArchQueryAST,
     BinaryExprAST,
     BlockAST,
     CompareExprAST,
@@ -87,6 +101,15 @@ _MEMORY_SPACE_MAP = {
     MemorySpace.LM: "local",
     MemorySpace.TSM: "shared",
     MemorySpace.TLM: "local",
+}
+
+_ARCH_QUERY_OPS: dict[str, tuple[type[object], str]] = {
+    "get_block_id": (ArchGetBlockIdOp, "block_id"),
+    "get_block_num": (ArchGetBlockNumOp, "block_num"),
+    "get_thread_id": (ArchGetThreadIdOp, "thread_id"),
+    "get_thread_num": (ArchGetThreadNumOp, "thread_num"),
+    "get_subthread_id": (ArchGetSubthreadIdOp, "subthread_id"),
+    "get_subthread_num": (ArchGetSubthreadNumOp, "subthread_num"),
 }
 
 
@@ -136,6 +159,8 @@ class EmitContext:
 def _dtype_to_xdsl(dtype: NumericType, location: SourceLocation | None = None) -> object:
     if dtype is NumericType.Float32:
         return f32
+    if dtype is NumericType.Int8:
+        return i8
     if dtype is NumericType.Int32:
         return i32
     raise _LoweringError(f"Unsupported dtype: {dtype}", location=location)
@@ -492,7 +517,20 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
     for expr in statements:
         if not isinstance(
             expr,
-            (BinaryExprAST, CompareExprAST, ConstAST, TensorAST, ScalarArgAST, VarAST, LoadAST, StoreAST, ForAST),
+            (
+                ArchDynamicMemoryAST,
+                ArchLaunchKernelAST,
+                ArchQueryAST,
+                BinaryExprAST,
+                CompareExprAST,
+                ConstAST,
+                TensorAST,
+                ScalarArgAST,
+                VarAST,
+                LoadAST,
+                StoreAST,
+                ForAST,
+            ),
         ):
             raise _LoweringError("Unsupported AST expression for lowering", location=getattr(expr, "location", None))
     return statements
@@ -536,6 +574,25 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
         result_type = NnMemoryType(shape_attr, stride_attr, source_type.element_type, space_attr)
         type_map[expr_key] = result_type
         return result_type
+    if isinstance(expr, ArchQueryAST):
+        if expr.query_name not in _ARCH_QUERY_OPS:
+            raise _LoweringError("Unsupported arch query", location=expr.location)
+        _, symbol_name = _ARCH_QUERY_OPS[expr.query_name]
+        result_type = SymbolValueType.from_expr(symbol_name)
+        type_map[expr_key] = result_type
+        return result_type
+    if isinstance(expr, ArchDynamicMemoryAST):
+        space_name = _MEMORY_SPACE_MAP.get(expr.space, "global")
+        result_type = NnMemoryType(
+            ArrayAttr([StringAttr("?")]),
+            ArrayAttr([IntAttr(1)]),
+            i8,
+            NnMemorySpaceAttr.from_name(space_name),
+        )
+        type_map[expr_key] = result_type
+        return result_type
+    if isinstance(expr, ArchLaunchKernelAST):
+        raise _LoweringError("ArchLaunchKernelAST does not produce a value", location=expr.location)
     if isinstance(expr, StoreAST):
         raise _LoweringError("StoreAST does not produce a value", location=expr.location)
     if isinstance(expr, ForAST):
@@ -646,6 +703,27 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         ctx.builder.add_op(load_op)
         ctx._set_cache(expr_key, load_op.result)
         return load_op.result
+    if isinstance(expr, ArchQueryAST):
+        if expr.query_name not in _ARCH_QUERY_OPS:
+            raise _LoweringError("Unsupported arch query", location=expr.location)
+        op_cls, _ = _ARCH_QUERY_OPS[expr.query_name]
+        op = op_cls()
+        ctx.builder.add_op(op)
+        ctx._set_cache(expr_key, op.result)
+        return op.result
+    if isinstance(expr, ArchDynamicMemoryAST):
+        result_type = _infer_expr_type(expr, ctx.types)
+        if not isinstance(result_type, NnMemoryType):
+            raise _LoweringError("arch.get_dynamic_memory result must be nn.memory", location=expr.location)
+        op = ArchGetDynamicMemoryOp(
+            NnMemorySpaceAttr.from_name(_MEMORY_SPACE_MAP.get(expr.space, "global")),
+            result_type,
+        )
+        ctx.builder.add_op(op)
+        ctx._set_cache(expr_key, op.result)
+        return op.result
+    if isinstance(expr, ArchLaunchKernelAST):
+        raise _LoweringError("ArchLaunchKernelAST does not produce a value", location=expr.location)
     if isinstance(expr, StoreAST):
         raise _LoweringError("StoreAST does not produce a value", location=expr.location)
 
@@ -737,10 +815,20 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
 
     if isinstance(node, (TensorAST, ScalarArgAST, VarAST)):
         return _lookup_symbol(node, ctx)
-    if isinstance(node, (BinaryExprAST, CompareExprAST, ConstAST, LoadAST)):
+    if isinstance(node, (ArchDynamicMemoryAST, ArchQueryAST, BinaryExprAST, CompareExprAST, ConstAST, LoadAST)):
         if _expr_key(node) not in ctx.types and not isinstance(node, (TensorAST, ScalarArgAST, VarAST)):
             _infer_expr_type(node, ctx.types)
         return _lower_expr(node, ctx)
+    if isinstance(node, ArchLaunchKernelAST):
+        block = _lower_expr(node.block, ctx)
+        thread = _lower_expr(node.thread, ctx)
+        subthread = _lower_expr(node.subthread, ctx)
+        for operand in (block, thread, subthread):
+            if not isinstance(getattr(operand, "type", None), SymbolValueType):
+                raise _LoweringError("arch.launch_kernel operands must lower to !symbol.int", location=node.location)
+        op = ArchLaunchKernelOp(node.kernel_name, block, thread, subthread)
+        ctx.builder.add_op(op)
+        return op
     if isinstance(node, StoreAST):
         target = _lookup_symbol(node.tensor, ctx)
         target_type = _expect_memory_value(target, node.location)
