@@ -1,0 +1,60 @@
+"""nn_to_kernel expectation.
+
+创建者: 榕
+最后一次更改: 榕
+
+功能说明:
+- 验证 `Memory + Memory` 可通过 `build_func_op` 生成 `func op`，且函数体包含 `nn.add`。
+- 验证对该 `func op` 运行 `LowerNnToKernelPass` 后，`nn.add` 被 lower 为 `kernel.add`，并插入 `dma.alloc`。
+
+使用示例:
+- python expectation/pass/lowing/nn_to_kernel
+
+关联文件:
+- spec: spec/pass/lowing/nn_to_kernel.md
+- test: test/pass/test_lowing_nn_to_kernel.py
+- 功能实现: kernel_gen/pass/lowing/nn_to_kernel.py
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+import sys
+
+from xdsl.dialects.builtin import ModuleOp
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from kernel_gen.dialect.dma import DmaAllocOp
+from kernel_gen.dialect.kernel import KernelAddOp
+from kernel_gen.dialect.nn import NnAddOp
+from kernel_gen.dsl.mlir_gen import build_func_op
+from kernel_gen.operation import nn
+from kernel_gen.pass.lowing.nn_to_kernel import LowerNnToKernelPass
+from kernel_gen.symbol_variable.memory import Memory, MemorySpace
+from kernel_gen.symbol_variable.type import NumericType
+
+
+def add_memory(
+    lhs: "Tensor[f32, 2, 2]",
+    rhs: "Tensor[f32, 2, 2]",
+) -> "Tensor[f32, 2, 2]":
+    return nn.add(lhs, rhs)
+
+
+lhs_memory = Memory([2, 2], NumericType.Float32, space=MemorySpace.GM)
+rhs_memory = Memory([2, 2], NumericType.Float32, space=MemorySpace.GM)
+
+func_op = build_func_op(add_memory, lhs_memory, rhs_memory)
+before_ops = list(func_op.body.block.ops)
+assert any(isinstance(op, NnAddOp) for op in before_ops)
+
+module = ModuleOp([func_op])
+LowerNnToKernelPass().run(module)
+
+after_ops = list(func_op.body.block.ops)
+assert any(isinstance(op, KernelAddOp) for op in after_ops)
+assert any(isinstance(op, DmaAllocOp) for op in after_ops)
+assert not any(op.name.startswith("nn.") for op in after_ops)

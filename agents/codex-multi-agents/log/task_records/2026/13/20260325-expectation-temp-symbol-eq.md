@@ -1,0 +1,11 @@
+- 时间：`2026-03-25 23:12:04 +0800`
+- 执行人：`咯咯咯`
+- 经办人：`咯咯咯`
+- 任务：`T-20260325-ed9f1c13`
+- 任务目标：对 expectation/temp_/symbol/eq 链路进行 cleanup，确认 main 已包含提交 `2d8bbcb` 且 worktree 无待合入差异后，删除 worktree 与同名分支。
+- 改动：
+  - 确认 main 为提交 `2d8bbcb`，worktree 分支为祖先提交 `03c2094`，无待合入提交。
+  - 执行 `git worktree remove --force /home/lfr/kernelcode_generate/wt-20260325-expectation-temp-symbol-eq`，并删除分支 `wt-20260325-expectation-temp-symbol-eq`。
+  - 未执行测试（cleanup 任务）。
+  - 本条为主仓补录记录，内容基于咯咯咯回报。
+- 结论：cleanup 已完成，worktree 与分支均已清理；如需保留或复核日志/链路，请创建后续补录或复审任务。

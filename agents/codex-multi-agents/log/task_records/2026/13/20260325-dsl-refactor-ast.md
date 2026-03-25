@@ -54,3 +54,14 @@
   - 将上述两份业务文件与当前记录文件同步到主分支工作目录，按限定范围执行主分支验证：`pytest -q test/dsl/test_ast_visitor.py`，结果为 `138 passed in 0.46s`。
   - 已按提交信息 `T-20260325-d3384ef9-merge-dsl-refactor-ast` 在主分支完成最小范围收口。
 - 结论：当前限定范围业务改动已合入主分支，主分支验证通过；建议下一阶段申请 cleanup 任务，清理 `/home/lfr/kernelcode_generate/wt-20260325-dsl-refactor-ast` 及对应分支残留。
+- 时间：`2026-03-25 12:13:27 +0800`
+- 执行人：`李白`
+- 经办人：`李白`
+- 任务：`T-20260325-a19ff987`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-dsl-refactor-ast` 与同一记录文件，确认 `main` 已包含 DSL AST 重构链路提交 `eedb91393fd71bab2d2016812081961dba6d0018` 后，安全清理该 worktree 与对应分支，且不删除未合入改动。
+- 改动：
+  - 核对主分支 `TODO.md`，确认 `T-20260325-a19ff987` 当前为进行中的 cleanup 任务。
+  - 核对主仓提交状态，确认 `main` 当前即位于 `eedb91393fd71bab2d2016812081961dba6d0018`，且该提交已被 `main` 包含。
+  - 核对任务记录文件已存在于主仓同一路径；并比对主仓与 worktree 内的 `agents/codex-multi-agents/log/task_records/2026/13/20260325-dsl-refactor-ast.md`，确认内容一致。为避免 cleanup 时丢失记录，本次 cleanup 记录直接追加到主仓日志文件。
+  - 核对 worktree 与 `main` 的差异，确认 `kernel_gen/dsl/ast.py`、`test/dsl/test_ast_visitor.py` 相对 `main` 已无额外业务差异；`git rev-list --left-right --count main...refs/heads/wt-20260325-dsl-refactor-ast` 结果为 `1 0`，表明 `main` 比该分支领先 1 个提交，分支无独有提交。当前 worktree 相对 `main` 的剩余差异仅为任务日志文件在 worktree 中仍是未跟踪残留，不涉及未合入业务内容。
+- 结论：`完成`。已确认 `main` 包含提交 `eedb91393fd71bab2d2016812081961dba6d0018`，任务日志已同步到主仓，且 `/home/lfr/kernelcode_generate/wt-20260325-dsl-refactor-ast` 不存在未合入的本链路业务差异，可安全执行 worktree 与分支清理。下一步为实际删除该 worktree 与本地分支，并复核残留情况。

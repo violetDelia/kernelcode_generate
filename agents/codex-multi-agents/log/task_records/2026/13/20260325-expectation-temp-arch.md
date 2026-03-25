@@ -1,0 +1,154 @@
+# 20260325-expectation-temp-arch
+
+- 时间：2026-03-25 09:35:00 +0800
+- 经手人：朽木露琪亚
+- 任务：T-20260325-0b1f2054 expectation/temp_/arch 首轮核对
+- 任务目标：以主工作目录 `expectation/temp_/arch` 为唯一优先基线，核对对应 spec/实现/测试闭环与缺口，判断是否需要拆分下一阶段任务。
+- 改动：
+  - 恢复并使用 worktree `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-arch` 作为本任务执行目录。
+  - 核对主分支 `TODO.md` 与 expectation 基线文件 `expectation/temp_/arch/{get_block_id,get_block_num,get_thread_id,get_thread_num,get_subthread_id,get_subthread_num,get_dynamic_memory,launch_kernel}.py`。
+  - 核对现有方言闭环文件 `spec/dialect/arch.md`、`kernel_gen/dialect/arch.py`、`test/dialect/test_arch_dialect.py`。
+  - 执行 `python expectation/temp_/arch/*.py` 逐个验证 expectation 入口。
+- 结论：
+  - `arch` 方言层闭环已存在：`spec/dialect/arch.md`、`kernel_gen/dialect/arch.py` 与 `test/dialect/test_arch_dialect.py` 已覆盖 parse/print/verifier 与包级导出，不是当前主缺口。
+  - `expectation/temp_/arch` 对应的 DSL 链路未闭环：`build_func_op(...)` 解析函数体时进入 `kernel_gen/dsl/ast.py::_parse_dma_call`，当前仅支持 `slice/deslice` 与 `kernel_gen.operation.nn` 算术调用，不支持 `get_block_id/get_block_num/get_thread_id/get_thread_num/get_subthread_id/get_subthread_num/get_dynamic_memory/launch_kernel` 这 8 类 arch 调用。
+  - expectation 运行结果：`get_block_id.py`、`get_block_num.py`、`get_thread_id.py`、`get_thread_num.py`、`get_subthread_id.py`、`get_subthread_num.py`、`get_dynamic_memory.py` 均因 `Unsupported call expression` 失败；`launch_kernel.py` 先因返回注解 `-> None` 触发 `Unsupported annotation`，即使绕过该问题仍会继续命中未支持的 arch 调用解析缺口。
+  - 现有 DSL 侧缺少与该 expectation 对应的 spec/测试闭环：未在 `spec/dsl/*` 与 `test/dsl/*` 中发现 arch builtin DSL 入口说明或测试映射。
+  - 建议拆分下一阶段任务：以 `expectation/temp_/arch` 为基线新增 DSL arch 支持，实现范围至少包括 `kernel_gen/dsl/ast.py`、`kernel_gen/dsl/emit_mlir.py`、相关 DSL spec 与 `test/dsl/test_ast_visitor.py`；目标是让 8 个 expectation 入口全部可运行并补齐对应测试闭环。
+
+- 时间：2026-03-25 09:32:08 +0800
+- 执行人：金铲铲大作战
+- 经办人：金铲铲大作战
+- 任务：T-20260325-4ae06a43 expectation/temp_/arch DSL 实现收敛
+- 任务目标：以主工作目录 `expectation/temp_/arch` 为唯一优先基线，最小补齐 DSL 对 arch builtin 调用与 `-> None` 返回注解的支持，使 8 个 expectation 入口可运行，并补齐直接证明测试。
+- 改动：
+  - 在 `kernel_gen/dsl/ast.py` 新增 `ArchQueryAST`、`ArchDynamicMemoryAST`、`ArchLaunchKernelAST`，补齐 `get_block_id/get_block_num/get_thread_id/get_thread_num/get_subthread_id/get_subthread_num/get_dynamic_memory/launch_kernel` 的 AST 解析；同时补齐 `None` 返回注解识别。
+  - 在 `kernel_gen/dsl/emit_mlir.py` 补齐 arch AST 节点的类型推导与 lowering，新增 `arch.get_*`、`arch.get_dynamic_memory`、`arch.launch_kernel` 发射路径，并补齐 `i8` lowering。
+  - 在 `kernel_gen/dsl/mlir_gen.py` 最小放开零入参 `build_func_op(...)` 内部成功路径，补齐 `arch.launch_kernel` 参数按 `!symbol.int` 签名 lowering，以及零入参 arch 查询/动态内存返回类型校验。
+  - 在 `test/dsl/test_ast_visitor.py` 新增 3 组 DSL 回归测试，直接覆盖 arch 查询、动态内存入口、`launch_kernel(...)->None` 语义。
+  - 保持 `expectation/temp_/arch/*.py` 只读，未修改 expectation 文件。
+- 结论：
+  - `expectation/temp_/arch` 下 8 个入口已全部可运行。
+  - 验证通过：`pytest -q test/dsl/test_ast_visitor.py` => `119 passed`；`for f in expectation/temp_/arch/*.py; do python "$f"; done` => 全部通过。
+  - 当前未改 DSL spec；若后续需要把 arch builtin DSL 映射写入 spec，请单独创建 spec 任务。建议下一阶段创建审查/复审任务，重点核对零入参 `build_func_op` 放开范围与 arch 返回类型校验边界是否足够最小。
+
+- 时间：2026-03-25 09:40:02 +0800
+- 执行人：咯咯咯
+- 经办人：咯咯咯
+- 任务：T-20260325-8e9dd249 expectation/temp_/arch DSL spec 补齐
+- 任务目标：沿用既有 worktree 与同一日志文件，最小补齐 `expectation/temp_/arch` 对应的 DSL spec 闭环，只收敛直接支撑 8 个入口的公开能力、边界与测试映射。
+- 改动：
+  - 更新 `spec/dsl/ast.md`，补齐显式 `-> None` 返回注解、`arch` builtin 调用解析边界，以及 `ArchQueryAST`、`ArchDynamicMemoryAST`、`ArchLaunchKernelAST` 三类 DSL AST 节点说明与 `AST-011`、`AST-012` 测试映射。
+  - 更新 `spec/dsl/emit_mlir.md`，补齐 `arch` dialect 依赖、三类 `arch` DSL AST 的 lowering 约束，并新增 `EMIT-015`、`EMIT-016` 测试映射。
+  - 更新 `spec/dsl/mlir_gen.md`，补齐零入参 `build_func_op` 的公开成功边界、显式 `-> None` 零返回值函数语义、`launch_kernel` 的 symbol 标量输入约束，以及 `MGEN-ARCH-001`、`MGEN-ARCH-002`、`MGEN-ARCH-003` 测试映射。
+  - 收窄 `MGEN-019`：仅当目标函数存在可位置绑定形参时 `runtime_args` 才为必填；零入参 `arch` 查询与动态内存函数允许省略 `runtime_args`，避免与新增公开边界冲突。
+  - 只改 `spec/dsl/ast.md`、`spec/dsl/emit_mlir.md`、`spec/dsl/mlir_gen.md` 与本记录文件，未修改实现、测试或 `expectation` 文件。
+- 结论：
+  - 已完成本轮 spec 收敛；三份 DSL spec 现已直接覆盖 `expectation/temp_/arch` 所需的 `arch` builtin 调用、`-> None` 返回注解与零入参 `build_func_op` 边界。
+  - 已核对新增编号 `AST-011/012`、`EMIT-015/016`、`MGEN-ARCH-001/002/003` 均存在，且三份 spec 中未写入 expectation 路径或 expectation 验收描述。
+  - 本轮未复跑 `pytest` 或 expectation 脚本，沿用上一阶段已通过的实现/测试结果；当前建议进入下一阶段严格复审，重点核对 spec/实现/测试是否对 8 个入口保持最小闭环且无额外承诺外溢。
+
+- 时间：2026-03-25 22:55:00 +0800
+- 执行人：小李飞刀
+- 经办人：小李飞刀
+- 任务：T-20260325-223121c1 expectation/temp_/arch 严格复审
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-arch` 与同一日志文件，只读核对 `expectation/temp_/arch` 八个入口与 `spec/dsl/{ast,emit_mlir,mlir_gen}.md`、`kernel_gen/dsl/{ast,emit_mlir,mlir_gen}.py`、`test/dsl/test_ast_visitor.py` 的闭环是否自洽，并按严格复审口径给出通过/需修改结论。
+- 改动：
+  - 以主分支 `TODO.md` 为准确认当前任务仍为进行中，并核对目标 worktree 与记录文件路径一致。
+  - 只读检查 `expectation/temp_/arch/{get_block_id,get_block_num,get_thread_id,get_thread_num,get_subthread_id,get_subthread_num,get_dynamic_memory,launch_kernel}.py` 的文档信息、关联 spec/test/实现链接与 8 个入口语义。
+  - 只读核对 `spec/dsl/ast.md`、`spec/dsl/emit_mlir.md`、`spec/dsl/mlir_gen.md` 中 `AST-011/012`、`EMIT-015/016`、`MGEN-ARCH-001/002/003` 的公开接口与测试映射。
+  - 只读核对 `kernel_gen/dsl/ast.py`、`kernel_gen/dsl/emit_mlir.py`、`kernel_gen/dsl/mlir_gen.py` 以及 `test/dsl/test_ast_visitor.py` 中 arch builtin、显式 `-> None`、零入参 `build_func_op` 与 3 组 arch 回归测试的闭环关系；本轮未复测，沿用链路内既有通过记录。
+- 结论：
+  - 结论：需修改。
+  - 问题 1：`expectation/temp_/arch` 八个入口的关联文件仍全部指向方言层 `spec/dialect/arch.md` 与 `test/dialect/test_arch_dialect.py`，例如 `expectation/temp_/arch/get_block_id.py:13`、`expectation/temp_/arch/get_dynamic_memory.py:13`、`expectation/temp_/arch/launch_kernel.py:13`。但本链路实际证明路径已经收敛到 DSL 层 `spec/dsl/{ast,emit_mlir,mlir_gen}.md` 与 `test/dsl/test_ast_visitor.py`；当前 expectation 元数据没有把真实闭环链路记录出来，导致 expectation/spec/实现/test 的追踪关系不自洽。
+  - 已确认 DSL 侧功能与测试映射基本齐备：`spec/dsl/mlir_gen.md:199`-`spec/dsl/mlir_gen.md:201` 已将 8 个 expectation 入口收敛到 `MGEN-ARCH-001/002/003`，`test/dsl/test_ast_visitor.py:2474`、`test/dsl/test_ast_visitor.py:2524`、`test/dsl/test_ast_visitor.py:2553` 也分别直接证明 6 个 query、1 个 dynamic memory、1 个 launch_kernel 入口；因此本轮不通过原因集中在 expectation 元数据仍未对齐真实 DSL 闭环，而非现有 DSL 行为缺失。
+  - 下一步建议：创建最小改进任务，只收敛 `expectation/temp_/arch/*.py` 的关联文件信息，使其指向当前真实的 DSL spec/test/实现链路；修正后再进入复审。
+
+- 时间：2026-03-25 10:17:22 +0800
+- 执行人：金铲铲大作战
+- 经办人：金铲铲大作战
+- 任务：T-20260325-ed882618
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-arch` 与同一日志文件，仅最小收敛 `expectation/temp_/arch/*.py` 的头部/关联元数据，不改 DSL 实现逻辑。
+- 改动：
+  - 仅修改 `expectation/temp_/arch/{get_block_id,get_block_num,get_thread_id,get_thread_num,get_subthread_id,get_subthread_num,get_dynamic_memory,launch_kernel}.py` 顶部文档字符串中的 `关联文件` 字段。
+  - 将 `spec` 从旧的 `spec/dialect/arch.md` 收敛为当前真实 DSL 闭环：`spec/dsl/ast.md`、`spec/dsl/emit_mlir.md`、`spec/dsl/mlir_gen.md`。
+  - 将 `test` 从 `test/dialect/test_arch_dialect.py` 收敛为 `test/dsl/test_ast_visitor.py`；将 `功能实现` 补齐为 `kernel_gen/dsl/ast.py`、`kernel_gen/dsl/emit_mlir.py`、`kernel_gen/dsl/mlir_gen.py`。
+  - 保持 `使用示例` 为实际路径 `python expectation/temp_/arch/...`；未修改任何断言、函数体或 DSL 语义。
+- 结论：
+  - 已完成 `expectation/temp_/arch` 8 个入口的元数据最小收敛，实际 diff 仅涉及文件头部说明。
+  - 验证方式为内容自检：逐文件复核头部字段，确认已对齐当前 DSL spec/test/实现链路；本轮未运行 `pytest`，也未执行 expectation 脚本，因为任务范围仅限元数据修正。
+  - 建议下一阶段创建严格复审任务，重点复核 `expectation/temp_/arch/*.py` 的元数据是否与 `spec/dsl/{ast,emit_mlir,mlir_gen}.md`、`test/dsl/test_ast_visitor.py` 保持一致且无范围外改动。
+- 时间：`2026-03-25 10:19:54 +0800`
+- 执行人：`李白`
+- 经办人：`李白`
+- 任务：`T-20260325-66421345`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-arch` 与同一日志文件，对 `expectation/temp_/arch` 元数据修正结果做只读严格复审，确认真实路径、关联 spec/test/实现文件与前序 DSL 闭环结论是否保持一致。
+- 改动：
+  - 只读核对主分支 `TODO.md`、worktree 内 `expectation/temp_/arch/{get_block_id,get_block_num,get_thread_id,get_thread_num,get_subthread_id,get_subthread_num,get_dynamic_memory,launch_kernel}.py` 的头部元数据，以及 `spec/dsl/ast.md`、`spec/dsl/emit_mlir.md`、`spec/dsl/mlir_gen.md`、`test/dsl/test_ast_visitor.py` 中的 arch DSL 映射编号。
+  - 已确认本轮业务 diff 仅涉及 `expectation/temp_/arch/*.py` 头部元数据；未发现实现、测试或 spec 被一并改动，前序 DSL 闭环结论未被破坏。
+  - 已确认 8 个 expectation 文件的 `使用示例` 均收敛为真实路径 `python expectation/temp_/arch/...`，`关联文件` 也已收敛到当前 DSL 闭环所依赖的 `spec/dsl/{ast,emit_mlir,mlir_gen}.md`、`test/dsl/test_ast_visitor.py` 与 `kernel_gen/dsl/{ast,emit_mlir,mlir_gen}.py`。
+  - 发现 8 个 expectation 文件的头部元数据仍存在一致性问题：文件已被本轮元数据修正实际改动，但 `最后一次更改` 仍全部保留为 `榕`，未反映最新修改者。例如 `expectation/temp_/arch/get_block_id.py:4`、`expectation/temp_/arch/get_dynamic_memory.py:4`、`expectation/temp_/arch/launch_kernel.py:4` 仍写为旧值；其余 5 个文件同样如此。
+  - 本轮未复测；仅做只读内容复核。
+- 结论：`需修改`。当前元数据修正已经把真实路径与 DSL 闭环文件收敛正确，且未破坏前序 spec/实现/测试链路；但 8 个 expectation 文件的 `最后一次更改` 元数据仍未随本轮实际修改更新，导致文件头部说明与真实变更历史不一致，不满足严格元数据自洽要求。建议下一阶段创建最小改进任务，仅修正 `expectation/temp_/arch/*.py` 的 `最后一次更改` 字段为本轮实际修改者；修正后即可再次进入只读复审。
+
+- 时间：2026-03-25 10:21:40 +0800
+- 执行人：金铲铲大作战
+- 经办人：金铲铲大作战
+- 任务：T-20260325-1a68f350
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-arch` 与同一日志文件，仅最小修正 `expectation/temp_/arch/*.py` 的 `最后一次更改` 字段，使其与本轮实际元数据修改一致。
+- 改动：
+  - 仅修改 `expectation/temp_/arch/{get_block_id,get_block_num,get_thread_id,get_thread_num,get_subthread_id,get_subthread_num,get_dynamic_memory,launch_kernel}.py` 头部文档中的 `最后一次更改` 字段。
+  - 将上述 8 个文件的 `最后一次更改` 从 `榕` 更新为 `金铲铲大作战`。
+  - 未改动实现逻辑、关联文件字段、使用示例路径或任何断言语义。
+- 结论：
+  - 已完成本轮最小收敛，8 个 arch expectation 文件的 `最后一次更改` 字段已与本轮元数据修改责任人一致。
+  - 验证方式为逐文件内容自检；本轮未运行 `pytest` 或 expectation 脚本，因为任务范围仅限头部文档字段修正。
+  - 建议下一阶段创建严格复审任务，复核 `expectation/temp_/arch/*.py` 的头部元数据整体是否与当前 DSL 闭环一致且无额外漂移。
+- 时间：`2026-03-25 10:23:08 +0800`
+- 执行人：`李白`
+- 经办人：`李白`
+- 任务：`T-20260325-bc528809`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-arch` 与同一日志文件，对 `expectation/temp_/arch` 头部元数据修正结果做只读严格复审，确认创建者、最后一次更改、使用示例、关联文件与当前 DSL 闭环保持一致。
+- 改动：
+  - 只读核对主分支 `TODO.md`、`expectation/temp_/arch/*.py` 8 个文件的头部文档字段，以及 `spec/dsl/ast.md`、`spec/dsl/emit_mlir.md`、`spec/dsl/mlir_gen.md` 中的 `AST-011/012`、`EMIT-015/016`、`MGEN-ARCH-001/002/003` 映射。
+  - 已确认 8 个 expectation 文件的 `使用示例` 均为真实路径 `python expectation/temp_/arch/...`，`关联文件` 已统一指向当前真实 DSL 闭环 `spec/dsl/{ast,emit_mlir,mlir_gen}.md`、`test/dsl/test_ast_visitor.py` 与 `kernel_gen/dsl/{ast,emit_mlir,mlir_gen}.py`。
+  - 已确认上一轮指出的元数据不一致问题已修复：8 个 expectation 文件的 `最后一次更改` 现统一为本轮实际修改者 `金铲铲大作战`，与本次头部元数据修正相符。
+  - 已确认本轮 worktree 中 `expectation/temp_/arch/*.py` 的业务 diff 仍仅限头部元数据字段，未引入实现、测试或 spec 的范围外改动；前序 DSL 闭环结论未被破坏。
+  - 本轮未复测；仅做只读内容复核。
+- 结论：`通过`。`expectation/temp_/arch` 8 个文件的头部元数据目前已与真实路径、当前 DSL spec/实现/测试闭环及本轮实际修改历史保持一致，且未发现范围外改动。建议下一步由神秘人按任务链推进后续状态更新；若需继续清理同类 expectation 元数据链路，可复用本轮校验口径处理 `temp_/symbol` 与 `temp_/dma`。
+- 时间：`2026-03-25 10:26:31 +0800`
+- 执行人：`我不是牛马`
+- 经办人：`我不是牛马`
+- 任务：`T-20260325-f32b1bfc`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-arch` 与同一日志文件，将 `expectation/temp_/arch` 链路已通过复审的业务改动按限定范围合入 `main`，不带入 `agents/`、`TODO.md`、`DONE.md`、`AGENTS.md`、`skills/` 等禁止内容。
+- 改动：
+  - 以主分支 `TODO.md` 为准确认当前合并任务仍处于进行中，并核对目标 worktree 为 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-arch`。
+  - 仅将以下 15 个业务文件从目标 worktree 收敛到主分支并提交：`expectation/temp_/arch/{get_block_id.py,get_block_num.py,get_dynamic_memory.py,get_subthread_id.py,get_subthread_num.py,get_thread_id.py,get_thread_num.py,launch_kernel.py}`、`kernel_gen/dsl/{ast.py,emit_mlir.py,mlir_gen.py}`、`spec/dsl/{ast.md,emit_mlir.md,mlir_gen.md}`、`test/dsl/test_ast_visitor.py`。
+  - 未带入 `agents/codex-multi-agents/log/talk.log`、任务日志、`TODO.md`、`DONE.md`、`AGENTS.md`、`skills/` 或其他范围外文件。
+  - 在主分支生成合并提交：`e120972`（`T-20260325-f32b1bfc-merge-expectation-temp-arch`）。
+  - 主分支验证：
+    - `python expectation/temp_/arch/get_block_id.py`
+    - `python expectation/temp_/arch/get_block_num.py`
+    - `python expectation/temp_/arch/get_dynamic_memory.py`
+    - `python expectation/temp_/arch/get_subthread_id.py`
+    - `python expectation/temp_/arch/get_subthread_num.py`
+    - `python expectation/temp_/arch/get_thread_id.py`
+    - `python expectation/temp_/arch/get_thread_num.py`
+    - `python expectation/temp_/arch/launch_kernel.py`
+    - `pytest -q test/dsl/test_ast_visitor.py`
+    - 结果：8 个 expectation 入口全部通过；`pytest` 结果为 `119 passed in 0.45s`。
+- 结论：本轮合并已完成，`expectation/temp_/arch` 链路通过复审的业务改动已按限定范围进入 `main`，主分支验证通过。建议由神秘人创建下一阶段 cleanup 任务，清理 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-arch` worktree 与对应分支残留。
+
+- 时间：2026-03-25 10:27:56 +0800
+- 执行人：金铲铲大作战
+- 经办人：金铲铲大作战
+- 任务：T-20260325-1851eefb
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-arch` 与同一日志文件，确认 `main` 已包含 `expectation/temp_/arch` 链路改动后执行 cleanup。
+- 改动：
+  - 核对主分支提交 `e120972`（`T-20260325-f32b1bfc-merge-expectation-temp-arch`）已包含 `expectation/temp_/arch` 链路 15 个业务文件改动。
+  - 核对 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-arch` 工作区内容相对 `main` 无额外业务差异；现存脏状态仅来自已被 `main` 吸收的文件与本地 `talk.log`/任务日志残留。
+  - 为保留链路记录，将同一路径任务日志同步到主工作目录后执行 cleanup。
+  - 清理目标 worktree `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-arch` 及对应分支 `wt-20260325-expectation-temp-arch`。
+- 结论：
+  - 已确认 `main` 包含 `expectation/temp_/arch` 链路改动，cleanup 可安全执行。
+  - 建议后续若无新的 arch expectation 任务，可视为该 worktree 已收口完成。

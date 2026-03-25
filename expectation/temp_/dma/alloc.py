@@ -32,7 +32,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from xdsl.dialects.func import FuncOp
 
-from expectation.utils.random import get_random_non_zero_int
+from expectation.utils.random import get_random_non_zero_int,get_random_alpha_string
 from kernel_gen.dialect.dma import DmaAllocOp
 from kernel_gen.dsl.mlir_gen import build_func_op
 from kernel_gen.operation.dma import alloc
@@ -41,14 +41,17 @@ from kernel_gen.symbol_variable.type import NumericType
 
 ALLOC_ROWS = get_random_non_zero_int(1, 8)
 ALLOC_COLS = get_random_non_zero_int(1, 8)
+SYMBOL_LHS_NAME = get_random_alpha_string().upper()
+SYMBOL_RHS_NAME = get_random_alpha_string().upper()
+
+def alloc_kernel(rank1,rank2) -> f"Tensor[f32, {ALLOC_ROWS}, {ALLOC_COLS}]":
+    return alloc([rank1, rank2], NumericType.Float32, MemorySpace.SM)
 
 
-def alloc_kernel() -> f"Tensor[f32, {ALLOC_ROWS}, {ALLOC_COLS}]":
-    return alloc([ALLOC_ROWS, ALLOC_COLS], NumericType.Float32, MemorySpace.SM)
 
-
-func_op = build_func_op(alloc_kernel)
+func_op = build_func_op(alloc_kernel,ALLOC_ROWS, ALLOC_COLS)
 assert isinstance(func_op, FuncOp)
 
 alloc_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaAllocOp)]
 assert len(alloc_ops) == 1
+print(func_op)

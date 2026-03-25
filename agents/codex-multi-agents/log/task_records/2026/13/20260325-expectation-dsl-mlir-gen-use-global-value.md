@@ -105,3 +105,13 @@
 - 执行测试：`pytest -q test/dsl/test_ast_visitor.py`，结果 `142 passed in 0.76s`。
 - 生成合并提交，提交信息按 `T-<task_id>-<desc>` 规范。
 结论：完成合并，变更已进入 main；无范围外文件被合入。建议后续进行常规 cleanup（如需）。
+
+时间：2026-03-25 23:33:46 +0800
+执行人：咯咯咯
+经办人：咯咯咯
+任务：T-20260325-5f9f21c0 cleanup
+任务目标：use_global_value 链路合入 main 后清理 worktree 与分支。
+改动：
+- 确认 main 已包含 use_global_value 合并提交。
+- 清理 /home/lfr/kernelcode_generate/wt-20260325-expectation-dsl-mlir-gen-use-global-value 并删除同名分支（见回报）。
+结论：cleanup 完成。

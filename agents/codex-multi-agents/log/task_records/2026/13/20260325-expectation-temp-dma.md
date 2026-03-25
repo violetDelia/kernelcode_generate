@@ -1,0 +1,174 @@
+- 时间：`2026-03-25 21:32:00 +0800`
+- 执行人：`小李飞刀`
+- 经办人：`小李飞刀`
+- 任务：`T-20260325-c7c6e424`
+- 任务目标：以主工作目录 `expectation/temp_/dma` 为唯一优先基线，对独立 expectation 链路做首轮核对，确认对应 spec/实现/测试闭环与缺口，并判断是否需要拆分下一阶段任务。
+- 改动：
+  - 发现任务指定 worktree `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-dma` 缺失；为保证在授权路径内执行，最小恢复同名 worktree 与分支 `wt-20260325-expectation-temp-dma`。
+  - 只读核对 `expectation/temp_/dma/*.py` 共 11 个 expectation 脚本，以及 `spec/dsl/mlir_gen.md`、`spec/dsl/emit_mlir.md`、`kernel_gen/dsl/ast.py`、`kernel_gen/dsl/emit_mlir.py`、`kernel_gen/dsl/mlir_gen.py`、`test/dsl/test_ast_visitor.py`。
+  - 执行 `python expectation/temp_/dma/*.py` 做 acceptance 首轮探测；11 个脚本全部失败，统一报错为 `Unsupported annotation`，根因是 expectation 中函数参数/返回注解全部使用 `f"Tensor[...]"`，其 AST 节点类型为 `JoinedStr`，当前 `kernel_gen/dsl/ast.py` 的 `_parse_annotation_node(...)` 仅支持 `Constant[str]`、`Name` 与 `Subscript(Tensor[...])`，不支持 `JoinedStr`。
+  - 核对当前 DSL 解析/ lowering 支持边界：`kernel_gen/dsl/ast.py` 的 `_parse_dma_call(...)` 目前只支持 `slice(...)` / `deslice(...)` 与 symbol 算术包装，不支持 `alloc/copy/cast/load/store/view/reshape/flatten/free` 形式的 DMA DSL 调用解析；`kernel_gen/dsl/emit_mlir.py` 仅存在 `DmaLoadOp`、`DmaStoreOp`、`DmaSliceOp`、`DmaDesliceOp` lowering，未见 `DmaAllocOp`、`DmaCopyOp`、`DmaCastOp`、`DmaViewOp`、`DmaReshapeOp`、`flatten` 对应 lowering。
+  - 核对当前 spec/test：`spec/dsl/mlir_gen.md` 与 `test/dsl/test_ast_visitor.py` 现阶段只覆盖 `LoopRange + dma.slice/dma.deslice` 等既有链路，没有为 `expectation/temp_/dma` 的 11 个脚本建立一一对应映射；`spec/dsl/emit_mlir.md` 仅覆盖 `LoadAST/StoreAST` 与 `symbol.for + dma.slice/dma.deslice`，未定义 alloc/copy/cast/view/reshape/flatten/free 的 DSL 公开约束。
+  - 额外发现 expectation 基线自身文档路径写法统一为 `python expectation/temp/dma/*.py`，与实际目录 `expectation/temp_/dma/*.py` 不一致；本轮按只读基线处理，未修改 expectation。
+- 结论：首轮核对完成，当前链路`未闭环`，且需要拆分下一阶段任务。现状可分为两类缺口：1）全量脚本共同阻塞点是 `JoinedStr` 形式张量注解不被 DSL 解析器支持，导致 11 个 expectation 均无法进入后续 lowering；2）即使补齐注解解析，当前 spec/实现/test 也只对 `load/store/slice/deslice` 有部分闭环，对 `alloc/copy/cast/view/reshape/flatten/free` 仍缺公开约束、解析支持、lowering 与测试映射。建议下一阶段至少拆为两个任务：其一，`spec` 任务先明确 `expectation/temp_/dma` 各脚本对应的 DSL 公开能力与测试映射，并统一 `mlir_gen` / `emit_mlir` 边界；其二，`实现` 任务在该 spec 基础上最小收敛 `kernel_gen/dsl/ast.py`、`kernel_gen/dsl/emit_mlir.py`、`kernel_gen/dsl/mlir_gen.py` 与 `test/dsl/test_ast_visitor.py`，优先解决 `JoinedStr` 注解解析，再分批补齐 DMA DSL 调用解析与 lowering。
+- 时间：`2026-03-25 09:38:38 +0800`
+- 经手人：`摸鱼小分队`
+- 任务：`T-20260325-b0aedfea`
+- 任务目标：沿用既有 worktree 与同一日志文件，以 `expectation/temp_/dma` 为外部基线，先最小补齐 DMA 相关 DSL spec 闭环，只修改直接用于 DSL 公开能力与测试映射的 spec。
+- 改动：
+  - 更新 `spec/dsl/mlir_gen.md`，补入两类公开约束：1）Tensor 注解允许普通字符串与可静态归一化的 `f"Tensor[...]"`；2）`alloc/copy/cast/view/reshape/flatten/free/load/store/slice/deslice` 作为 DMA helper 的 DSL 支持范围、`flatten` 的一维 reshape 语义、`free` 的语句型边界，并补充对应测试目标与 MGEN-025/MGEN-026 映射。
+  - 更新 `spec/dsl/emit_mlir.md`，补入 DMA helper 的 lowering 约束：`alloc/copy/cast/view/reshape` 对应 memory 结果、`flatten` 按一维 `reshape` 语义 lowering、`free` 不产生 SSA 结果；同步补充 EMIT-015..021 测试映射。
+  - 统一核对两份 spec 中不出现 expectation 路径、acceptance gate、只读说明或 expectation 命令，仅保留 DSL 接口语义、边界与测试映射。
+- 结论：本轮 spec 收敛已完成，未运行测试。当前 DSL spec 已为下一阶段实现提供最小公开依据，但实现与测试仍未闭环：`kernel_gen/dsl/ast.py` 尚未支持 JoinedStr Tensor 注解与 DMA helper 解析，`kernel_gen/dsl/emit_mlir.py` 尚未补齐 alloc/copy/cast/view/reshape/flatten/free lowering，`test/dsl/test_ast_visitor.py` 也缺对应新增用例。建议下一阶段由实现角色基于当前 worktree 补齐 `kernel_gen/dsl/ast.py`、`kernel_gen/dsl/emit_mlir.py`、必要时 `kernel_gen/dsl/mlir_gen.py` 与 `test/dsl/test_ast_visitor.py`。
+- 时间：`2026-03-25 10:10:58 +0800`
+- 执行人：`朽木露琪亚`
+- 经办人：`朽木露琪亚`
+- 任务：`T-20260325-b0b07180`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-dma`，以主工作目录 `expectation/temp_/dma` 为只读基线，最小补齐 DMA expectation 链路所需的 DSL 解析、lowering、返回类型校验与直接证明测试，使 expectation 脚本可运行并由 `test/dsl/test_ast_visitor.py` 闭环证明。
+- 改动：
+  - 更新 `kernel_gen/dsl/ast.py`，补齐 `JoinedStr` 形式 `Tensor` 注解静态归一化能力，并支持 `alloc/copy/cast/view/reshape/flatten/free/load/store/slice/deslice` 的 DMA helper 解析；其中 `cast(..., memoryspace=...)` 支持关键字参数，`load/store` 与 `slice/deslice` 的 `kind` 分流保持一致。
+  - 更新 `kernel_gen/dsl/emit_mlir.py`，补齐 `DmaAllocAST`、`DmaCopyAST`、`DmaCastAST`、`DmaViewAST`、`DmaReshapeAST`、`DmaFlattenAST`、`DmaFreeAST` 的 lowering 与类型推导；`flatten` 复用一维 `dma.reshape` 语义；补入 `NumericType.Float16` 到 xdsl 类型映射。
+  - 更新 `kernel_gen/dsl/mlir_gen.py`，放宽 Tensor 返回注解校验为仅比较公开约束 `shape + element_type`，允许 DMA helper 返回的 `space/stride` 与注解默认值不同；同时补齐 `NnMemoryType` 导入，修复返回类型校验链路。
+  - 更新 `test/dsl/test_ast_visitor.py`，补齐 JoinedStr 注解、DMA helper 成功路径、`free` 语句路径以及 `alloc/copy/cast/view/reshape/flatten/free` lowering 直接测试；同步修正既有 `load/store/deslice` 断言口径。
+  - expectation 保持只读，未修改 `expectation/temp_/dma/*.py`。
+  - 验证结果：
+    - `python -m pytest -q test/dsl/test_ast_visitor.py`：`127 passed in 0.45s`
+    - `python expectation/temp_/dma/alloc.py`
+    - `python expectation/temp_/dma/cast.py`
+    - `python expectation/temp_/dma/copy.py`
+    - `python expectation/temp_/dma/deslice.py`
+    - `python expectation/temp_/dma/flatten.py`
+    - `python expectation/temp_/dma/free.py`
+    - `python expectation/temp_/dma/load.py`
+    - `python expectation/temp_/dma/reshape.py`
+    - `python expectation/temp_/dma/slice.py`
+    - `python expectation/temp_/dma/store.py`
+    - `python expectation/temp_/dma/view.py`
+    - 上述 11 个 expectation 脚本均已运行成功。
+- 结论：本轮实现收敛完成，`expectation/temp_/dma` 当前 11 个脚本已全部跑通，且 `kernel_gen/dsl/ast.py`、`kernel_gen/dsl/emit_mlir.py`、`kernel_gen/dsl/mlir_gen.py` 与 `test/dsl/test_ast_visitor.py` 已形成可验证闭环。当前无新增阻塞。建议下一阶段创建严格复审任务，重点检查：1）本链路 spec/实现/测试映射是否一一对应；2）新增 DMA AST/helper 公开语义是否存在范围外扩张；3）本链路相关 Python 参数类型提示是否仍有遗漏。
+- 时间：`2026-03-25 10:15:13 +0800`
+- 执行人：`李白`
+- 经办人：`李白`
+- 任务：`T-20260325-756efa09`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-dma`，对 `expectation/temp_/dma` 链路做只读严格复审，核对 `spec/dsl/{mlir_gen,emit_mlir}.md`、`kernel_gen/dsl/{ast,emit_mlir,mlir_gen}.py`、`test/dsl/test_ast_visitor.py` 与主工作目录 `expectation/temp_/dma/*.py` 的闭环、一一映射与 helper 边界是否成立。
+- 改动：
+  - 只读核对主分支 `TODO.md` 与主工作目录 `expectation/temp_/dma/*.py` 11 个 expectation 基线文件，以及 worktree 中的 `spec/dsl/mlir_gen.md`、`spec/dsl/emit_mlir.md`、`kernel_gen/dsl/ast.py`、`kernel_gen/dsl/emit_mlir.py`、`kernel_gen/dsl/mlir_gen.py`、`test/dsl/test_ast_visitor.py`。
+  - 复核 `kernel_gen/dsl/ast.py`、`kernel_gen/dsl/emit_mlir.py`、`kernel_gen/dsl/mlir_gen.py`、`test/dsl/test_ast_visitor.py` 的参数类型提示，当前审查范围内未发现缺失参数类型提示的问题。
+  - 发现 `spec/dsl/mlir_gen.md` 的 `MGEN-026` 公开承诺与测试映射仍未完全闭环：文档把 `load/store/slice/deslice` 一并写入 `build_func_op(...)` 的 DMA helper 成功路径承诺，但其测试映射仅指向 `test_build_func_op_supports_dma_helper_calls` 与 `test_build_func_op_supports_dma_free_statement`；前者实际只直接证明 `alloc/copy/cast/view/reshape/flatten`，后者只证明 `free` 语句路径，`load/store/slice/deslice` 并无对应的 `build_func_op(...)` 级测试用例一一承接。
+  - 发现主工作目录 `expectation/temp_/dma/*.py` 的头部元数据仍未与当前真实链路对齐：`使用示例` 仍统一写为 `python expectation/temp/dma/*.py`，与实际路径 `expectation/temp_/dma/*.py` 不一致；`关联文件` 仅指向 `spec/dsl/mlir_gen.md` 与 `kernel_gen/dsl/mlir_gen.py`，未反映当前实际闭环还依赖 `spec/dsl/emit_mlir.md`、`kernel_gen/dsl/ast.py`、`kernel_gen/dsl/emit_mlir.py`。
+  - 当前未重新执行 pytest 或 expectation 脚本；本轮仅引用链路内既有结果，不新增测试。
+- 结论：`需修改`。当前链路的主要问题有两项：1）`spec/dsl/mlir_gen.md` 中 `MGEN-026` 的测试映射写宽了公开承诺，`load/store/slice/deslice` 尚未在 `test/dsl/test_ast_visitor.py` 中以 `build_func_op(...)` helper 场景得到直接证明，不满足 spec 与测试一一对应要求；建议二选一最小收敛：要么补四类 `build_func_op(...)` 级测试并映射到 `MGEN-026`，要么把 `MGEN-026` 收窄到当前已被直接证明的 `alloc/copy/cast/view/reshape/flatten/free` 子集，并将其余 helper 另行编号与映射。2）主工作目录 `expectation/temp_/dma/*.py` 的头部元数据仍引用错误路径 `expectation/temp/dma/...`，且关联文件未覆盖真实 DSL 闭环文件，建议创建最小 expectation 元数据修正任务，统一修正 11 个文件的 `使用示例` 与 `关联文件`。本轮无阻塞；建议下一阶段优先创建一个最小改进任务，先收敛 `MGEN-026` 的 spec/test 映射，再单独创建 expectation 元数据修正任务。
+- 时间：`2026-03-25 10:18:40 +0800`
+- 执行人：`朽木露琪亚`
+- 经办人：`朽木露琪亚`
+- 任务：`T-20260325-42673871`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-dma` 与同一日志文件，以 `expectation/temp_/dma` 为唯一基线，最小收敛 `MGEN-026` 的 spec/test 映射，并为 `load/store/slice/deslice` 补齐 `build_func_op(...)` 级直接证明。
+- 改动：
+  - 更新 `spec/dsl/mlir_gen.md` 中 `MGEN-026` 的测试映射，补入 `test_build_func_op_supports_dma_load_helper`、`test_build_func_op_supports_dma_store_helper`、`test_build_func_op_supports_dma_slice_helper`、`test_build_func_op_supports_dma_deslice_helper`，使 `load/store/slice/deslice` 的公开承诺与测试清单一一对应。
+  - 更新 `test/dsl/test_ast_visitor.py`，新增四条 `build_func_op(...)` 级测试，分别直接证明 `load` 生成 `DmaLoadOp`、`store` 生成 `DmaStoreOp`、`slice` 生成 `DmaSliceOp`、`deslice` 生成 `DmaDesliceOp`；同时刷新 `MGEN-026` 相关 6 条测试的最近运行时间与成功时间。
+  - expectation 保持只读，未修改 `expectation/temp_/dma/*.py`。
+  - 执行验证：`python -m pytest -q test/dsl/test_ast_visitor.py -k 'test_build_func_op_supports_dma_helper_calls or test_build_func_op_supports_dma_free_statement or test_build_func_op_supports_dma_load_helper or test_build_func_op_supports_dma_store_helper or test_build_func_op_supports_dma_slice_helper or test_build_func_op_supports_dma_deslice_helper'`
+  - 验证结果：`6 passed, 125 deselected in 0.33s`
+- 结论：本轮最小收敛已完成，`MGEN-026` 现已由 6 条 `build_func_op(...)` 级测试直接覆盖 `alloc/copy/cast/view/reshape/flatten/free/load/store/slice/deslice` 的公开分流语义，spec 与测试映射已闭环。当前剩余缺口不在本任务范围内，主要是 `expectation/temp_/dma/*.py` 的头部元数据尚未与真实路径及闭环文件对齐；建议下一阶段单独创建 expectation 元数据修正任务，避免与当前 spec/test 链路混改。
+
+- 时间：2026-03-25 10:31:31 +0800
+- 执行人：金铲铲大作战
+- 经办人：金铲铲大作战
+- 任务：T-20260325-87480eb5
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-dma` 与同一日志文件，仅最小收敛 `expectation/temp_/dma/*.py` 的文件头部元数据。
+- 改动：
+  - 仅修改 `expectation/temp_/dma/{alloc,cast,copy,deslice,flatten,free,load,reshape,slice,store,view}.py` 头部文档中的 `使用示例` 与 `关联文件` 字段。
+  - 将 `使用示例` 从错误的 `python expectation/temp/dma/...` 修正为真实路径 `python expectation/temp_/dma/...`。
+  - 将 `关联文件` 从仅指向 `spec/dsl/mlir_gen.md`、`kernel_gen/dsl/mlir_gen.py` 收敛为当前真实 DSL 闭环：`spec/dsl/emit_mlir.md`、`spec/dsl/mlir_gen.md`、`test/dsl/test_ast_visitor.py`、`kernel_gen/dsl/ast.py`、`kernel_gen/dsl/emit_mlir.py`、`kernel_gen/dsl/mlir_gen.py`。
+  - 未改动任何实现逻辑、expectation 断言、函数体或其他非头部元数据内容。
+- 结论：
+  - 已完成 11 个 DMA expectation 文件的头部元数据最小收敛，diff 仅涉及文件头说明。
+  - 验证方式为逐文件内容自检；本轮未运行 `pytest` 或 expectation 脚本，因为任务范围仅限元数据修正。
+  - 建议下一阶段创建严格复审任务，重点复核 `expectation/temp_/dma/*.py` 的头部元数据是否与当前 DSL spec/实现/测试闭环一一对应且无范围外改动。
+- 时间：`2026-03-25 10:34:10 +0800`
+- 执行人：`李白`
+- 经办人：`李白`
+- 任务：`T-20260325-86fc55e7`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-dma` 与同一日志文件，对 `expectation/temp_/dma` 头部元数据修正结果做只读严格复审，确认真实路径、关联文件与前序 DSL 闭环是否一致，且无范围外改动。
+- 改动：
+  - 只读核对主分支 `TODO.md` 与 worktree 中 `expectation/temp_/dma/{alloc,cast,copy,deslice,flatten,free,load,reshape,slice,store,view}.py` 共 11 个 expectation 文件，确认本轮 diff 仅涉及头部元数据，不含函数体、断言或导入逻辑改动。
+  - 复核 `spec/dsl/emit_mlir.md`、`spec/dsl/mlir_gen.md`、`kernel_gen/dsl/ast.py`、`kernel_gen/dsl/emit_mlir.py`、`kernel_gen/dsl/mlir_gen.py`、`test/dsl/test_ast_visitor.py` 与既有任务记录，确认前序 `MGEN-026` 映射补齐结论未被破坏，本轮头部 `使用示例` 路径与 `关联文件` 也已收敛到实际 DSL 闭环。
+  - 发现 11 个 expectation 文件的头部字段 `最后一次更改` 仍统一保留为旧值 `榕`，与本轮实际元数据编辑事实不一致；该问题在 `expectation/temp_/dma/alloc.py`、`expectation/temp_/dma/load.py`、`expectation/temp_/dma/view.py` 等文件中均可直接复现，其余同目录 8 个文件一致。
+  - 本轮未运行 `pytest` 或 expectation 脚本；原因是任务范围仅限头部元数据只读复审，且当前问题不涉及运行逻辑。
+- 结论：`需修改`。当前 11 个 DMA expectation 文件的 `使用示例` 路径与 `关联文件` 已对齐真实 DSL 闭环，前序 `MGEN-026` 补测映射也未被本轮改动破坏；但 11 个文件的 `最后一次更改` 仍全部停留在旧值 `榕`，与本轮实际元数据修改不一致，不满足头部元数据自洽要求。建议下一阶段仅创建一个最小元数据修正任务，统一更新 `expectation/temp_/dma/*.py` 的 `最后一次更改` 字段，然后再做一次只读复审确认。
+
+- 时间：2026-03-25 10:36:03 +0800
+- 执行人：金铲铲大作战
+- 经办人：金铲铲大作战
+- 任务：T-20260325-72fb6bb1
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-dma` 与同一日志文件，仅最小修正 `expectation/temp_/dma/{alloc,cast,copy,deslice,flatten,free,load,reshape,slice,store,view}.py` 的 `最后一次更改` 字段，使其与本轮实际元数据修改一致。
+- 改动：
+  - 仅修改 `expectation/temp_/dma/{alloc,cast,copy,deslice,flatten,free,load,reshape,slice,store,view}.py` 头部文档中的 `最后一次更改` 字段。
+  - 将上述 11 个文件的 `最后一次更改` 从 `榕` 更新为 `金铲铲大作战`。
+  - 未继续改动实现逻辑、关联文件字段、使用示例路径或任何 expectation 断言语义；worktree 中其余头部元数据差异为前序任务已存在内容，本轮未再扩展。
+- 结论：
+  - 已完成本轮最小收敛，11 个 DMA expectation 文件的 `最后一次更改` 字段已与本轮元数据修改责任人一致。
+  - 验证方式为逐文件内容自检；本轮未运行 `pytest` 或 expectation 脚本，因为任务范围仅限头部文档字段修正。
+  - 建议下一阶段创建严格复审任务，复核 `expectation/temp_/dma/*.py` 的头部元数据整体是否与当前 DSL 闭环一致且无额外漂移。
+
+- 时间：`2026-03-25 10:52:59 +08:00`
+- 执行人：`不要啊教练`
+- 经办人：`不要啊教练`
+- 任务：`T-20260325-33c91a6a`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-dma` 与同一日志文件，对 `expectation/temp_/dma` 11 个入口头部元数据做只读严格复审，核对创建者、最后一次更改、使用示例、关联文件是否与 `spec/dsl/{emit_mlir,mlir_gen}.md`、`kernel_gen/dsl/{ast,emit_mlir,mlir_gen}.py`、`test/dsl/test_ast_visitor.py` 及真实路径一致，并确认 `MGEN-026` 与 DMA helper `build_func_op` 测试映射未被破坏。
+- 改动：
+  - 只读核对主分支 `TODO.md` 与 worktree 中 `expectation/temp_/dma/{alloc,cast,copy,deslice,flatten,free,load,reshape,slice,store,view}.py` 共 11 个 expectation 文件，确认本轮未修改代码、未复测。
+  - 逐文件核对头部元数据：`创建者` 当前均为 `榕`，`最后一次更改` 当前均为 `金铲铲大作战`；`使用示例` 已统一收敛为真实路径 `python expectation/temp_/dma/*.py`；`关联文件` 已统一指向 `spec/dsl/emit_mlir.md`、`spec/dsl/mlir_gen.md`、`test/dsl/test_ast_visitor.py`、`kernel_gen/dsl/ast.py`、`kernel_gen/dsl/emit_mlir.py`、`kernel_gen/dsl/mlir_gen.py`，与当前 DSL 闭环一致。
+  - 复核 git diff，当前 11 个 expectation 文件相对基线的改动仅限文件头元数据：`最后一次更改`、`使用示例`、`关联文件`；未发现函数体、断言、导入逻辑或运行语义改动。
+  - 复核 `spec/dsl/mlir_gen.md` 中 `MGEN-026` 仍映射到 6 条 `build_func_op(...)` 级测试：`test_build_func_op_supports_dma_helper_calls`、`test_build_func_op_supports_dma_free_statement`、`test_build_func_op_supports_dma_load_helper`、`test_build_func_op_supports_dma_store_helper`、`test_build_func_op_supports_dma_slice_helper`、`test_build_func_op_supports_dma_deslice_helper`；对应测试函数仍存在于 `test/dsl/test_ast_visitor.py`，未被本轮元数据修正破坏。
+  - 复核本任务范围内真实路径与文件引用一致：`expectation/temp_/dma/*.py`、`spec/dsl/emit_mlir.md`、`spec/dsl/mlir_gen.md`、`kernel_gen/dsl/ast.py`、`kernel_gen/dsl/emit_mlir.py`、`kernel_gen/dsl/mlir_gen.py`、`test/dsl/test_ast_visitor.py` 均存在且路径口径一致。
+- 结论：`通过`。当前 `expectation/temp_/dma` 11 个入口文件的头部元数据已与真实路径及 DSL 闭环文件一致；`MGEN-026` 与 DMA helper `build_func_op(...)` 测试映射保持完整，未被本轮元数据收敛破坏；本轮未发现范围外改动。建议下一阶段由神秘人按主分支 `TODO.md` 发起该链路收口或合并任务。
+
+- 时间：`2026-03-25 10:57:04 +0800`
+- 执行人：`金铲铲大作战`
+- 经办人：`金铲铲大作战`
+- 任务：`T-20260325-332295d5`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-dma`，将 `expectation/temp_/dma` 链路已通过复审的业务改动按限定范围合入 `main`，且不得带入 `agents/`、`TODO.md`、`DONE.md`、`AGENTS.md`、`skills/` 等禁止内容。
+- 改动：
+  - 先按主分支 `TODO.md` 核对任务状态，确认 `T-20260325-332295d5` 当前仍为 `进行中`，指派人为 `金铲铲大作战`。
+  - 核对当前 worktree 与 `main` 的允许范围差异，确认候选业务文件为 `expectation/temp_/dma/{alloc,cast,copy,deslice,flatten,free,load,reshape,slice,store,view}.py`、`kernel_gen/dsl/{ast,emit_mlir,mlir_gen}.py`、`spec/dsl/{emit_mlir,mlir_gen}.md`、`test/dsl/test_ast_visitor.py`。
+  - 在主仓 `/home/lfr/kernelcode_generate` 检查 `main` 状态时发现仓库正处于一次未完成的 `git cherry-pick` 中：`git status` 显示 `You are currently cherry-picking commit f92a00d`，且本任务需触达的 `kernel_gen/dsl/{ast,emit_mlir,mlir_gen}.py`、`spec/dsl/{emit_mlir,mlir_gen}.md` 均处于 `UU` 冲突状态；同时 `test/dsl/test_ast_visitor.py` 也存在已暂存与未暂存并存的未收口改动。
+  - 由于当前主仓存在他人进行中的 symbol 合并冲突，且冲突文件与本任务目标文件直接重叠，继续在 `main` 上执行限定范围合入会混入无关任务状态，无法满足“仅合并本链路业务文件”的边界要求；因此本轮未执行 `git checkout`/`git commit`，也未运行主分支验证命令。
+- 结论：`阻塞`。阻塞原因是主仓 `main` 当前存在未完成的 `cherry-pick` 与重叠文件冲突，无法在不干扰他人进行中任务的前提下安全完成 `T-20260325-332295d5` 的最小范围合并。本任务尚未产生提交，主分支验证未执行。建议下一阶段先由对应负责人收口或清理主仓当前 `symbol` 合并冲突；待 `main` 恢复到无冲突、无进行中合并状态后，再重新执行本任务的限定范围合入与验证。
+
+- 时间：`2026-03-25 11:00:10 +0800`
+- 执行人：`金铲铲大作战`
+- 经办人：`金铲铲大作战`
+- 任务：`T-20260325-332295d5`
+- 任务目标：在主仓已恢复到无进行中 `cherry-pick` 状态后，继续完成 `expectation/temp_/dma` 链路的限定范围合并，并回报提交号、主分支验证结果与 cleanup 建议。
+- 改动：
+  - 重新核对主分支 `TODO.md`，确认 `T-20260325-332295d5` 仍为 `进行中`，且当前 worktree `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-dma` 无其他任务占用。
+  - 核对主仓 `main@73fd961` 已无进行中 `cherry-pick`，随后仅从指定 worktree 同步 17 个允许业务文件到主仓：`expectation/temp_/dma/{alloc,cast,copy,deslice,flatten,free,load,reshape,slice,store,view}.py`、`kernel_gen/dsl/{ast,emit_mlir,mlir_gen}.py`、`spec/dsl/{emit_mlir,mlir_gen}.md`、`test/dsl/test_ast_visitor.py`。
+  - 未带入 `agents/`、`TODO.md`、`DONE.md`、`AGENTS.md`、`skills/` 或其他禁止内容；主仓创建提交 `a2ac44713cf6093d2a2679b7d2ff352e49dc0952`，提交信息为 `T-20260325-332295d5-merge-expectation-temp-dma`。
+  - 在主仓执行验证：
+    - `python expectation/temp_/dma/alloc.py`
+    - `python expectation/temp_/dma/cast.py`
+    - `python expectation/temp_/dma/copy.py`
+    - `python expectation/temp_/dma/deslice.py`
+    - `python expectation/temp_/dma/flatten.py`
+    - `python expectation/temp_/dma/free.py`
+    - `python expectation/temp_/dma/load.py`
+    - `python expectation/temp_/dma/reshape.py`
+    - `python expectation/temp_/dma/slice.py`
+    - `python expectation/temp_/dma/store.py`
+    - `python expectation/temp_/dma/view.py`
+    - `pytest -q test/dsl/test_ast_visitor.py`
+  - 验证结果：11 个 expectation 入口均运行成功；`pytest -q test/dsl/test_ast_visitor.py` 结果为 `131 passed in 0.47s`。
+- 结论：`完成`。`expectation/temp_/dma` 链路已按限定范围合入 `main`，提交号为 `a2ac44713cf6093d2a2679b7d2ff352e49dc0952`，主分支验证通过。建议下一阶段创建 cleanup 任务，清理 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-dma` worktree 与对应分支。
+
+- 时间：`2026-03-25 11:04:19 +0800`
+- 执行人：`李白`
+- 经办人：`李白`
+- 任务：`T-20260325-0384345d`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-dma` 与同一日志文件，核对 `main` 已包含 `expectation/temp_/dma` 链路提交 `a2ac44713cf6093d2a2679b7d2ff352e49dc0952` 后，安全清理该 worktree 与对应分支，且不删除未合入改动。
+- 改动：
+  - 核对主分支 `TODO.md`，确认 `T-20260325-0384345d` 当前为进行中，目标为清理 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-dma` 与对应分支。
+  - 复核 git 提交关系：`main` 当前位于 `a2ac44713cf6093d2a2679b7d2ff352e49dc0952`，worktree 分支 `wt-20260325-expectation-temp-dma` 的分支头为 `9dcaf216ff66f66697f51a7f6ed67c330e7af82e`；`git rev-list --left-right --count main...refs/heads/wt-20260325-expectation-temp-dma` 结果为 `3 0`，表明 `main` 比该分支领先 3 个提交，分支无独有提交。
+  - 针对本链路业务文件核对 worktree 当前内容与 `main`，确认 `expectation/temp_/dma/*.py`、`spec/dsl/{emit_mlir,mlir_gen}.md`、`kernel_gen/dsl/{ast,emit_mlir,mlir_gen}.py`、`test/dsl/test_ast_visitor.py` 相对 `main` 无额外业务差异；不存在未合入但需保留的本链路业务改动。
+  - 为避免 cleanup 时丢失链路记录，先将同一路径任务日志从 worktree 同步回主仓，再追加本次 cleanup 记录。
+- 结论：`完成`。已确认 `main` 包含提交 `a2ac44713cf6093d2a2679b7d2ff352e49dc0952`，且 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-dma` 不存在未合入的本链路业务差异，可安全执行 worktree 与分支清理。下一步为实际删除 worktree 与本地分支，并复核是否仍有残留。

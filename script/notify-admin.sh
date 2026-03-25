@@ -47,7 +47,7 @@ LOG_FILE="agents/codex-multi-agents/log/talk.log"
 
 # 多行消息直接写在 MESSAGE 变量里。
 read -r -d '' MESSAGE <<'EOF' || true
-推进任务，直到任务全部完成，要求用脚本回报信息，回报后继续任务。
+询问任务进展，推进任务进度。
 EOF
 
 MODE="loop"

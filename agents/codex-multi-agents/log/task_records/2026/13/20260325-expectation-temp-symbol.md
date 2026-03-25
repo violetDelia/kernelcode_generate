@@ -176,3 +176,20 @@
 - 结论：
   - `T-20260325-fc443cb2` 已完成实际合并收口，提交已位于主分支 `main`。
   - 当前无合并阻塞；建议神秘人创建下一阶段 cleanup 任务，清理 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-symbol` 对应 worktree/分支残留。
+
+- 时间：`2026-03-25 20:56:33 +0800`
+- 执行人：`李白`
+- 经办人：`李白`
+- 任务：`T-20260325-9af55446`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-symbol-merge-tmp` 与同一记录文件执行 cleanup；确认临时分支 `tmp-symbol-merge-2664fc8e` 无需保留、日志已同步主仓后，删除该 worktree 与对应分支。
+- 改动：
+  - 以主分支 `TODO.md` 为准确认 `T-20260325-9af55446` 为进行中的 cleanup 任务，目标 worktree 为 `/home/lfr/kernelcode_generate/wt-20260325-symbol-merge-tmp`，记录文件沿用当前文件。
+  - 核对 `git rev-list --left-right --count main...tmp-symbol-merge-2664fc8e` 结果为 `3 0`，确认分支 `tmp-symbol-merge-2664fc8e` 无独有提交，仅落后 `main`。
+  - 核对 `git diff --name-only main...tmp-symbol-merge-2664fc8e` 为空，确认该分支历史上不存在尚未进入 `main` 的待保留提交。
+  - 核对 `/home/lfr/kernelcode_generate/wt-20260325-symbol-merge-tmp` 的当前工作区仅残留未经过当前主线审查/复审的暂存业务改动，涉及 `expectation/temp_/symbol/*.py`、`kernel_gen/dsl/*.py`、`spec/dsl/*.md`、`test/dsl/test_ast_visitor.py`；按任务要求，这些残留不再尝试合并，统一以 `main` 为唯一保留基线。
+  - 执行 `git worktree remove --force /home/lfr/kernelcode_generate/wt-20260325-symbol-merge-tmp` 删除 worktree；执行 `git branch -D tmp-symbol-merge-2664fc8e` 删除对应分支。
+  - 删除后复核：`git worktree list --porcelain` 仅剩主仓 worktree，`test -d /home/lfr/kernelcode_generate/wt-20260325-symbol-merge-tmp` 返回 `MISSING`，`git branch --list tmp-symbol-merge-2664fc8e` 为空，确认无 worktree 与本地分支残留。
+- 结论：
+  - cleanup 完成。`/home/lfr/kernelcode_generate/wt-20260325-symbol-merge-tmp` 已删除，`tmp-symbol-merge-2664fc8e` 已删除。
+  - 本次未执行测试，仅完成日志同步、删除与残留核对；未保留或合并该临时树中的残留业务改动。
+  - 建议由神秘人统一更新任务状态；该临时 cleanup 链路已无需继续保留。
