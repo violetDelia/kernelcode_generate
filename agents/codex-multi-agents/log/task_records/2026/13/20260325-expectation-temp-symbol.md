@@ -1,0 +1,178 @@
+- 时间：`2026-03-25 09:15:21 +0800`
+- 执行人：`金铲铲大作战`
+- 经办人：`金铲铲大作战`
+- 任务：`T-20260325-30ff23c2`
+- 任务目标：以主工作目录 `expectation/temp_/symbol` 为唯一优先基线，完成该独立 expectation 链路的首轮核对，确认对应 spec/实现/测试闭环与缺口，并判断是否需要拆分下一阶段任务。
+- 改动：
+  - 核对主分支 `TODO.md`，确认当前有效任务为 `T-20260325-30ff23c2`，目标 worktree 为 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-symbol`。
+  - 发现目标 worktree 缺失；已按同一路径恢复 worktree `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-symbol`，并沿用分支 `wt-20260325-expectation-temp-symbol` 继续核对。
+  - 只读核对主工作目录 `expectation/temp_/symbol/{eq,ne,lt,le,gt,ge,to_float,get_dim,get_stride,for_loop}.py` 与对应 `spec/dialect/symbol.md`、`spec/dsl/mlir_gen.md`、`kernel_gen/dsl/ast.py`、`kernel_gen/dsl/mlir_gen.py`、`test/dialect/test_symbol_dialect.py`、`test/dsl/test_ast_visitor.py`。
+  - 执行 expectation 现状验证：`python expectation/temp_/symbol/*.py`。结果：仅 `expectation/temp_/symbol/for_loop.py` 可通过；`eq/ne/lt/le/gt/ge/to_float/get_dim/get_stride` 均失败，统一报错为 `AstVisitorError: Unsupported annotation`。
+  - 进一步定位失败来源：
+    - `eq/ne/lt/le/gt/ge` 的 `-> bool` 返回注解当前未被 `kernel_gen/dsl/ast.py` 支持。
+    - `to_float` 的 `-> float` 返回注解当前未被 `kernel_gen/dsl/ast.py` 支持。
+    - `get_dim/get_stride` 的 `f"Tensor[...]"` 注解当前会以 `JoinedStr` 形式进入解析，`kernel_gen/dsl/ast.py` 现不支持该类注解节点。
+  - 执行现有回归核对：
+    - `pytest -q test/dialect/test_symbol_dialect.py`：`36 passed`
+    - `pytest -q test/dsl/test_ast_visitor.py -k 'test_symbol_scalar_function_lowers_symbol_binary_ops or test_build_func_op_supports_symbolic_for_loop_dma_without_return or test_emit_mlir_symbolic_for_loop_avoids_index_cast'`：`42 passed, 74 deselected`
+  - 核对结论：当前已有测试主要覆盖 `symbol dialect` verifier/round-trip 与 `LoopRange -> symbol.for` lowering；尚未形成对 `expectation/temp_/symbol` 中比较 lowering、`to_float` lowering、`get_dim/get_stride` lowering 的直接测试闭环。
+- 结论：首轮核对完成，当前链路存在明确闭环缺口，且建议拆分下一阶段任务后再推进实现。建议最少拆为两类任务：
+  1. `mlir_gen/ast` 实现任务：在 `kernel_gen/dsl/ast.py` / `kernel_gen/dsl/mlir_gen.py` 最小补齐 `bool`、`float` 与 `JoinedStr` 形式 tensor 注解解析支持，使 `expectation/temp_/symbol/{eq,ne,lt,le,gt,ge,to_float,get_dim,get_stride}.py` 可以真正运行。
+  2. `test/spec` 对齐任务：在 `test/dsl/test_ast_visitor.py` 与必要的 `spec/dsl/mlir_gen.md` 中补齐上述 expectation 对应的 lowering 测试映射，避免当前只有 dialect 测试通过、但 expectation 链路仍失败的脱节状态。
+
+- 时间：`2026-03-25 09:33:20 +0800`
+- 执行人：`我不是牛马`
+- 经办人：`我不是牛马`
+- 任务：`T-20260325-78af0801`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-symbol`，以主工作目录 `expectation/temp_/symbol` 为只读基线，最小补齐 DSL 对 `bool` 返回注解、`float` 返回注解、`JoinedStr` 形式 `Tensor[...]` 注解，以及 `eq/ne/lt/le/gt/ge/to_float/get_dim/get_stride` expectation 场景的实现与测试闭环。
+- 改动：
+  - 保持 `expectation/temp_/symbol/*.py` 只读，未修改 expectation 基线文件。
+  - 在 `kernel_gen/dsl/ast.py` 新增 `CastExprAST`、`MemoryQueryAST`，补齐 `int/bool/float` 标量注解、`JoinedStr` 形式 `Tensor[...]` 注解、`float(value)`、`value.get_shape()[axis]`、`value.get_stride()[axis]` 的 AST 解析。
+  - 在 `kernel_gen/dsl/emit_mlir.py` 补齐 symbol compare、`symbol.to_float`、`symbol.get_dim`、`symbol.get_stride` 的 lowering 与类型推断，保证对应 expression 可直接 lowering。
+  - 在 `kernel_gen/dsl/mlir_gen.py` 收敛纯 symbol 标量函数的返回类型校验，支持 `bool -> i1`、`float -> f32`，并允许 `get_dim/get_stride` 返回 `!symbol.int<"expr">`。
+  - 在 `test/dsl/test_ast_visitor.py` 新增并收敛 AST-011、MGEN-025、MGEN-026、MGEN-027 对应测试，补齐本轮修改涉及测试注释时间；同步将原不再成立的 `float` 错误路径改为 `str` 错误路径。
+  - 在 `spec/dsl/ast.md`、`spec/dsl/emit_mlir.md`、`spec/dsl/mlir_gen.md` 最小补齐与本链路直接对应的公开语义、限制与测试映射，不写 expectation 路径或执行命令。
+  - 本轮验证：
+    - `python expectation/temp_/symbol/eq.py`
+    - `python expectation/temp_/symbol/ne.py`
+    - `python expectation/temp_/symbol/lt.py`
+    - `python expectation/temp_/symbol/le.py`
+    - `python expectation/temp_/symbol/gt.py`
+    - `python expectation/temp_/symbol/ge.py`
+    - `python expectation/temp_/symbol/to_float.py`
+    - `python expectation/temp_/symbol/get_dim.py`
+    - `python expectation/temp_/symbol/get_stride.py`
+    - `pytest -q test/dsl/test_ast_visitor.py`
+    - 结果：以上 expectation 入口均通过，`pytest` 结果为 `120 passed in 0.39s`。
+- 结论：本轮实现闭环已完成，expectation/temp_/symbol 中 `eq/ne/lt/le/gt/ge/to_float/get_dim/get_stride` 已可按主工作目录基线运行；建议由神秘人创建同链路严格复审任务，重点核对 DSL spec/实现/测试映射、Python 参数类型提示与 expectation 闭环是否完全一致。
+
+- 时间：`2026-03-25 09:39:05 +0800`
+- 执行人：`李白`
+- 经办人：`李白`
+- 任务：`T-20260325-28d8a3dd`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-symbol`，以主工作目录 `expectation/temp_/symbol/{eq,ne,lt,le,gt,ge,to_float,get_dim,get_stride}.py` 为只读基线，对 `spec/dsl/{ast,emit_mlir,mlir_gen}.md`、`kernel_gen/dsl/{ast,emit_mlir,mlir_gen}.py` 与 `test/dsl/test_ast_visitor.py` 做严格复审，确认 spec/实现/测试映射、公开边界、参数类型提示与 expectation 逐项验证是否闭环。
+- 改动：
+  - 只读核对主分支 `TODO.md`，确认当前有效任务为 `T-20260325-28d8a3dd`，状态为进行中，目标 worktree 为 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-symbol`。
+  - 保持 main 上 `expectation/temp_/symbol/{eq,ne,lt,le,gt,ge,to_float,get_dim,get_stride}.py` 只读，逐个核对其目标场景与 `spec/dsl/{ast,emit_mlir,mlir_gen}.md`、`kernel_gen/dsl/{ast,emit_mlir,mlir_gen}.py`、`test/dsl/test_ast_visitor.py` 的对应关系。
+  - 复核实现/测试链路已引用的既有结果：`python expectation/temp_/symbol/{eq,ne,lt,le,gt,ge,to_float,get_dim,get_stride}.py` 全部通过，`pytest -q test/dsl/test_ast_visitor.py` 为 `120 passed in 0.39s`；本轮未重复执行测试。
+  - 额外执行参数类型提示审查：`kernel_gen/dsl/ast.py`、`kernel_gen/dsl/emit_mlir.py`、`kernel_gen/dsl/mlir_gen.py`、`test/dsl/test_ast_visitor.py` 以及本任务范围内的 `expectation/temp_/symbol/{eq,ne,lt,le,gt,ge,to_float,get_dim,get_stride}.py` 均未发现缺失参数类型提示。
+  - 严格复审发现以下闭环问题：
+    1. `spec/dsl/mlir_gen.md` 的 `MGEN-025` 将 `symbol.eq/ne/lt/le/gt/ge` 六类比较统一映射到 `test_build_func_op_lowers_symbol_compare_bool_return`，但该测试实际只覆盖 `lhs == rhs` 并断言 `SymbolEqOp`，未证明 `ne/lt/le/gt/ge` 五类 lowering 与返回契约。
+    2. `spec/dsl/ast.md` 的 `AST-011` 声明已覆盖 `bool/float` 返回注解、`JoinedStr` 张量注解与最小 symbol 查询/转换表达式解析，但对应测试 `test_ast_parse_function_supports_symbol_scalar_and_joinedstr_annotations` 仅断言 `float(...)` 与 `get_shape()[1] -> MemoryQueryAST(kind=\"dim\")`，没有对 `get_stride()[axis]` 的解析结果做断言。
+    3. `spec/dsl/emit_mlir.md` 在正文中公开声明了 `CompareExprAST(eq/ne/lt/le/gt/ge)`、`CastExprAST(float)`、`MemoryQueryAST(dim/stride)` 的节点映射，但测试章节仍只列出 `EMIT-002` 的 `eq` 比较映射，未为 `symbol.to_float`、`symbol.get_dim`、`symbol.get_stride` 建立对应的测试目标与用例清单，导致 spec/测试映射不完整。
+- 结论：`需修改`。当前实现与 expectation 运行结果可用，但 `spec/dsl/ast.md`、`spec/dsl/emit_mlir.md`、`spec/dsl/mlir_gen.md` 的公开承诺仍有超出实际测试证明范围的部分，未满足严格复审所要求的 spec/实现/测试一一闭环。建议由神秘人创建同链路最小改进任务，优先：
+  1. 为 `MGEN-025` 补齐 `ne/lt/le/gt/ge` 的独立测试或将编号收窄到 `eq` 已证实范围；
+  2. 为 `AST-011` 补齐 `get_stride()[axis]` 的解析断言或同步收窄文档；
+  3. 收敛 `spec/dsl/emit_mlir.md` 的测试章节，使 `CastExprAST(float)`、`MemoryQueryAST(dim/stride)` 与 symbol compare 的公开映射都有明确测试编号与实际用例对应。
+
+- 时间：`2026-03-25 09:48:19 +0800`
+- 执行人：`朽木露琪亚`
+- 经办人：`朽木露琪亚`
+- 任务：`T-20260325-c6c5bd94`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-symbol` 与同一日志文件，按复审意见最小收敛 `expectation/temp_/symbol` 的 `spec/test` 映射，不修改 expectation 基线。
+- 改动：
+  - 保持主工作目录 `expectation/temp_/symbol/*.py` 只读，未改动 expectation 基线文件。
+  - 在 `test/dsl/test_ast_visitor.py` 最小补齐 `AST-011` 对 `get_stride()[axis]` 的解析断言，并将 `MGEN-025` 扩展为覆盖 `eq/ne/lt/le/gt/ge` 六类 symbol compare lowering；同时为 `MGEN-026`、`MGEN-027` 补充与 `EMIT-021/022/023` 的编号对应注释。
+  - 在 `spec/dsl/ast.md` 将 `AST-011` 的测试映射收敛到 `float(...)`、`get_shape()[axis]`、`get_stride()[axis]` 三类已由测试直接证明的解析行为。
+  - 在 `spec/dsl/mlir_gen.md` 补齐测试执行命令中的 `test_build_func_op_lowers_symbol_compare_bool_return`、`test_build_func_op_lowers_symbol_to_float_return`、`test_build_func_op_lowers_symbol_memory_queries_from_joinedstr_annotations`，使 `MGEN-025/026/027` 与执行命令保持一致。
+  - 在 `spec/dsl/emit_mlir.md` 的测试章节新增 `EMIT-021`、`EMIT-022`、`EMIT-023`，分别映射 `symbol.to_float`、`symbol.get_dim`、`symbol.get_stride` 的现有测试证明。
+  - 执行验证：`pytest -q test/dsl/test_ast_visitor.py`，结果为 `125 passed in 0.61s`。
+- 结论：本轮最小改进已完成，`AST-011`、`MGEN-025` 与 `EMIT-021/022/023` 的 spec/test 映射已补齐并由现有测试直接证明；当前链路可进入下一阶段复审。建议神秘人发起同链路严格复审任务，重点复核 `spec/dsl/{ast,emit_mlir,mlir_gen}.md` 与 `test/dsl/test_ast_visitor.py` 的一一映射是否完整、是否仍存在超出测试证明范围的公开承诺。
+
+- 时间：`2026-03-25 09:49:20 +0800`
+- 执行人：`李白`
+- 经办人：`李白`
+- 任务：`T-20260325-ba612074`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-symbol` 与同一日志文件，对 `expectation/temp_/symbol` 链路做只读严格复审，重点核对 `spec/dsl/{ast,emit_mlir,mlir_gen}.md` 与 `test/dsl/test_ast_visitor.py` 的 `AST-011`、`MGEN-025`、`EMIT-021/022/023` 是否一一对应，并复查 `expectation/temp_/symbol/{eq,ne,lt,le,gt,ge,to_float,get_dim,get_stride}.py` 的闭环、参数类型提示与公开边界。
+- 改动：
+  - 只读核对主分支 `TODO.md`，确认当前有效任务为 `T-20260325-ba612074`，目标 worktree 为 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-symbol`。
+  - 只读核对 `spec/dsl/ast.md`、`spec/dsl/emit_mlir.md`、`spec/dsl/mlir_gen.md` 与 `test/dsl/test_ast_visitor.py` 的最新收敛结果：
+    - `AST-011` 已与 `test_ast_parse_function_supports_symbol_scalar_and_joinedstr_annotations` 对齐，测试同时断言了 `bool` 返回注解、`float(...)`、`get_shape()[axis]` 与 `get_stride()[axis]` 的解析结果。
+    - `MGEN-025` 已扩展为参数化测试，逐项覆盖 `eq/ne/lt/le/gt/ge` 六类 symbol compare lowering，并断言返回类型为 `i1`。
+    - `EMIT-021`、`EMIT-022`、`EMIT-023` 已在 `spec/dsl/emit_mlir.md` 建立测试清单映射，并由现有测试分别断言 `symbol.to_float`、`symbol.get_dim`、`symbol.get_stride` 的 lowering 结果。
+  - 只读复查 main 上 `expectation/temp_/symbol/{eq,ne,lt,le,gt,ge,to_float,get_dim,get_stride}.py`：
+    - 参数类型提示完整，未发现缺失。
+    - 但文件头部“关联文件”仍统一写为 `spec/dialect/symbol.md` 与 `test/dialect/test_symbol_dialect.py`，而当前实际证明这些 expectation 场景运行闭环的是 DSL 侧 `spec/dsl/{ast,emit_mlir,mlir_gen}.md` 与 `test/dsl/test_ast_visitor.py`。
+    - 文件头部“使用示例”仍写为 `python expectation/temp/symbol/...`，与当前真实路径 `expectation/temp_/symbol/...` 不一致。
+  - 本轮未修改业务文件，未复测；复审仅复用链路内既有结果 `pytest -q test/dsl/test_ast_visitor.py -> 125 passed in 0.61s`。
+- 结论：`需修改`。本轮重点编号 `AST-011`、`MGEN-025`、`EMIT-021/022/023` 已与测试一一对应，但 `expectation/temp_/symbol/{eq,ne,lt,le,gt,ge,to_float,get_dim,get_stride}.py` 的文件级公开元数据仍未与当前 DSL 闭环一致，导致 expectation 链路的公开边界和关联文件口径仍不充分。建议由神秘人创建同链路最小改进任务，仅收敛上述 expectation 文件头部的 `使用示例` 与 `关联文件` 字段，使其对齐真实路径 `expectation/temp_/symbol/...` 及当前实际闭环的 DSL spec/test 文件。
+
+- 时间：`2026-03-25 10:17:22 +0800`
+- 执行人：`金铲铲大作战`
+- 经办人：`金铲铲大作战`
+- 任务：`T-20260325-5c096417`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-symbol` 与同一日志文件，仅最小收敛 `expectation/temp_/symbol/{eq,ne,lt,le,gt,ge,to_float,get_dim,get_stride}.py` 的文件头部元数据，不改 DSL 实现逻辑。
+- 改动：
+  - 仅修改 `expectation/temp_/symbol/{eq,ne,lt,le,gt,ge,to_float,get_dim,get_stride}.py` 顶部文档字符串中的 `使用示例` 与 `关联文件` 字段。
+  - 将示例路径从错误的 `python expectation/temp/symbol/...` 修正为真实路径 `python expectation/temp_/symbol/...`。
+  - 将 `spec` 从旧的 `spec/dialect/symbol.md` 收敛为当前真实 DSL 闭环：`spec/dsl/ast.md`、`spec/dsl/emit_mlir.md`、`spec/dsl/mlir_gen.md`；将 `test` 收敛为 `test/dsl/test_ast_visitor.py`；将 `功能实现` 补齐为 `kernel_gen/dsl/ast.py`、`kernel_gen/dsl/emit_mlir.py`、`kernel_gen/dsl/mlir_gen.py`。
+  - 未修改任何 expectation 断言、函数签名或 lowering 语义。
+- 结论：
+  - 已完成 9 个 symbol expectation 文件的头部元数据最小收敛，diff 仅涉及文档字符串。
+  - 验证方式为内容自检：逐文件复核 `使用示例` 与 `关联文件` 字段已对齐真实 DSL 闭环；本轮未运行 `pytest`，也未执行 expectation 脚本，因为任务范围仅限元数据修正。
+  - 建议下一阶段创建严格复审任务，重点复核 `expectation/temp_/symbol` 九个入口的头部元数据是否已与 `spec/dsl/{ast,emit_mlir,mlir_gen}.md`、`test/dsl/test_ast_visitor.py` 一一对应且无范围外改动。
+
+- 时间：`2026-03-25 23:08:00 +0800`
+- 执行人：`小李飞刀`
+- 经办人：`小李飞刀`
+- 任务：`T-20260325-23cee0f8`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-symbol` 与同一日志文件，只读核对 `expectation/temp_/symbol/{eq,ne,lt,le,gt,ge,to_float,get_dim,get_stride}.py` 头部元数据是否与 `spec/dsl/{ast,emit_mlir,mlir_gen}.md`、`test/dsl/test_ast_visitor.py`、真实路径 `expectation/temp_/symbol/...` 一致，并确认前序 DSL 闭环结论未被破坏。
+- 改动：
+  - 以主分支 `TODO.md` 为准确认 `T-20260325-23cee0f8` 仍为进行中，目标 worktree 与记录文件路径一致。
+  - 只读核对 `expectation/temp_/symbol/{eq,ne,lt,le,gt,ge,to_float,get_dim,get_stride}.py` 的 `使用示例`、`关联文件`、`创建者`、`最后一次更改` 字段，以及对应函数参数类型提示。
+  - 只读复核 `spec/dsl/ast.md`、`spec/dsl/emit_mlir.md`、`spec/dsl/mlir_gen.md` 与 `test/dsl/test_ast_visitor.py` 中 `AST-011`、`MGEN-025/026/027`、`EMIT-021/022/023` 的映射关系，并复用链路内既有结果 `pytest -q test/dsl/test_ast_visitor.py -> 125 passed in 0.61s` 作为前序 DSL 闭环已通过的证明；本轮未复测。
+- 结论：
+  - 结论：需修改。
+  - 问题 1：9 个 expectation 文件虽然已把 `使用示例` 与 `关联文件` 收敛到真实 DSL 链路，但文件头 `最后一次更改` 仍全部保留为旧值 `榕`，未反映本轮元数据修正的实际修改者，例如 `expectation/temp_/symbol/eq.py:4`、`expectation/temp_/symbol/to_float.py:4`、`expectation/temp_/symbol/get_dim.py:4`。按 `AGENTS.md`，文件级文档信息需要准确维护创建者与最后修改人；当前元数据修正结果在这项要求上仍不自洽。
+  - 已确认其余本轮关注点已对齐：`expectation/temp_/symbol/*.py` 的 `使用示例` 均为真实路径 `expectation/temp_/symbol/...`，`关联文件` 已统一指向 `spec/dsl/{ast,emit_mlir,mlir_gen}.md`、`test/dsl/test_ast_visitor.py` 与 `kernel_gen/dsl/{ast,emit_mlir,mlir_gen}.py`；前序 DSL 闭环编号 `AST-011`、`MGEN-025/026/027`、`EMIT-021/022/023` 与测试映射未见被破坏。
+  - 下一步建议：创建最小改进任务，仅修正这 9 个 expectation 文件头部的 `最后一次更改` 字段，使其与本轮实际元数据修改一致；修正后再进入复审。
+
+- 时间：`2026-03-25 10:22:43 +0800`
+- 执行人：`金铲铲大作战`
+- 经办人：`金铲铲大作战`
+- 任务：`T-20260325-3f290a85`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-symbol` 与同一日志文件，仅最小修正 `expectation/temp_/symbol/{eq,ne,lt,le,gt,ge,to_float,get_dim,get_stride}.py` 的 `最后一次更改` 字段，使其与本轮实际元数据修改一致。
+- 改动：
+  - 仅修改 `expectation/temp_/symbol/{eq,ne,lt,le,gt,ge,to_float,get_dim,get_stride}.py` 头部文档中的 `最后一次更改` 字段。
+  - 将上述 9 个文件的 `最后一次更改` 从 `榕` 更新为 `金铲铲大作战`。
+  - 未改动实现逻辑、关联文件字段、使用示例路径或任何 expectation 断言语义。
+- 结论：
+  - 已完成本轮最小收敛，9 个 symbol expectation 文件的 `最后一次更改` 字段已与本轮元数据修改责任人一致。
+  - 验证方式为逐文件内容自检；本轮未运行 `pytest` 或 expectation 脚本，因为任务范围仅限头部文档字段修正。
+  - 建议下一阶段创建严格复审任务，复核 `expectation/temp_/symbol` 九个入口的头部元数据整体是否与当前 DSL 闭环一致且无额外漂移。
+
+- 时间：`2026-03-25 23:18:00 +0800`
+- 执行人：`小李飞刀`
+- 经办人：`小李飞刀`
+- 任务：`T-20260325-38946221`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-symbol` 与同一日志文件，只读核对 `expectation/temp_/symbol/{eq,ne,lt,le,gt,ge,to_float,get_dim,get_stride}.py` 的头部元数据（创建者、最后一次更改、关联文件、使用示例）是否与 `spec/dsl/{ast,emit_mlir,mlir_gen}.md`、`kernel_gen/dsl/{ast,emit_mlir,mlir_gen}.py`、`test/dsl/test_ast_visitor.py` 以及真实路径 `expectation/temp_/symbol/...` 一致，并确认前序 DSL 闭环结论未被破坏。
+- 改动：
+  - 以主分支 `TODO.md` 为准确认 `T-20260325-38946221` 仍为进行中，目标 worktree 与记录文件路径一致。
+  - 只读核对 `expectation/temp_/symbol/{eq,ne,lt,le,gt,ge,to_float,get_dim,get_stride}.py` 的文件头字段与函数参数类型提示。
+  - 只读复核 `spec/dsl/ast.md`、`spec/dsl/emit_mlir.md`、`spec/dsl/mlir_gen.md` 以及 `test/dsl/test_ast_visitor.py` 中 `AST-011`、`MGEN-025/026/027`、`EMIT-021/022/023` 的前序闭环映射，并核对当前 worktree 未出现超出既有链路的新改动范围。
+  - 本轮未复测，复用链路内既有结果 `pytest -q test/dsl/test_ast_visitor.py -> 125 passed in 0.61s` 作为前序 DSL 闭环已通过的证明。
+- 结论：
+  - 结论：通过。
+  - 已确认 9 个 expectation 文件的 `使用示例` 均为真实路径 `expectation/temp_/symbol/...`，`关联文件` 已统一指向 `spec/dsl/{ast,emit_mlir,mlir_gen}.md`、`test/dsl/test_ast_visitor.py` 与 `kernel_gen/dsl/{ast,emit_mlir,mlir_gen}.py`，`最后一次更改` 也已统一更新为本轮元数据修正责任人 `金铲铲大作战`，未再发现字段漂移。
+  - 已确认本轮关注范围内的 Python 文件参数类型提示完整，且前序 DSL 闭环编号 `AST-011`、`MGEN-025/026/027`、`EMIT-021/022/023` 与对应测试映射未被破坏。
+  - 当前未发现新的需修改项；建议由神秘人按任务链推进后续收口阶段。
+
+- 时间：`2026-03-25 10:59:49 +0800`
+- 执行人：`咯咯咯`
+- 经办人：`咯咯咯`
+- 任务：`T-20260325-fc443cb2`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-symbol` 与同一日志文件，将 `expectation/temp_/symbol` 链路已通过复审的限定范围业务文件实际合入 `main`，补齐主分支验证结果，并申请后续 cleanup。
+- 改动：
+  - 在主分支完成已审通过链路的实际合并，生成提交 `73fd96171a28a75d3690d16a55b62c1bb5bf5d12`（`T-20260325-fc443cb2-expectation-temp-symbol-merge`）。
+  - 实际合入文件限定为：
+    - `expectation/temp_/symbol/{eq,ge,get_dim,get_stride,gt,le,lt,ne,to_float}.py`
+    - `kernel_gen/dsl/{ast,emit_mlir,mlir_gen}.py`
+    - `spec/dsl/{ast,emit_mlir,mlir_gen}.md`
+    - `test/dsl/test_ast_visitor.py`
+  - 未带入 `agents/`、`TODO.md`、`DONE.md`、`AGENTS.md`、`skills/` 等范围外文件。
+  - 主分支验证：
+    - 执行 `pytest -q test/dsl/test_ast_visitor.py`，结果：`128 passed in 0.59s`
+    - 逐个执行 `python expectation/temp_/symbol/{eq,ne,lt,le,gt,ge,to_float,get_dim,get_stride}.py`，结果：全部通过
+- 结论：
+  - `T-20260325-fc443cb2` 已完成实际合并收口，提交已位于主分支 `main`。
+  - 当前无合并阻塞；建议神秘人创建下一阶段 cleanup 任务，清理 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-symbol` 对应 worktree/分支残留。
