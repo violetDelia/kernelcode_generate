@@ -830,7 +830,7 @@ def test_build_func_op_supports_dma_alloc_helper_with_runtime_shape_args(monkeyp
     rows = 2
     cols = 3
     source = """
-def alloc_kernel(rank1, rank2) -> f"Tensor[f32, {ALLOC_ROWS}, {ALLOC_COLS}]":
+def alloc_kernel(rank1: int, rank2: int) -> f"Tensor[f32, {ALLOC_ROWS}, {ALLOC_COLS}]":
     return alloc([rank1, rank2], NumericType.Float32, MemorySpace.SM)
 """
     namespace = {
@@ -901,6 +901,220 @@ def alloc_kernel(rank1: int, rank2: int) -> f"Tensor[f32, {ALLOC_ROWS}, {ALLOC_C
 
     with pytest.raises(AstVisitorError, match="Unsupported scalar argument type"):
         build_func_op(alloc_kernel, 1.5, cols)
+
+
+# MGEN-026B
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-26 02:03:12 +0800
+# 最近一次运行成功时间: 2026-03-26 02:03:12 +0800
+# 功能说明: 验证 alloc-only kernel 可接受 SymbolDim runtime_args 并保持符号 shape 表达式。
+# 测试目的: 锁定 SymbolDim runtime_args 会 lowering 为 !symbol.int 输入且结果类型 shape 保持符号名。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_supports_dma_alloc_helper_with_symbol_shape_args
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_supports_dma_alloc_helper_with_symbol_shape_args() -> None:
+    from kernel_gen.operation.dma import alloc
+
+    symbol_lhs = SymbolDim("M")
+    symbol_rhs = SymbolDim("N")
+    lhs_expr = str(symbol_lhs.get_symbol())
+    rhs_expr = str(symbol_rhs.get_symbol())
+
+    def alloc_kernel(rank1: int, rank2: int) -> f"Tensor[f32, {lhs_expr}, {rhs_expr}]":
+        return alloc([rank1, rank2], NumericType.Float32, MemorySpace.SM)
+
+    func_op = build_func_op(
+        alloc_kernel,
+        symbol_lhs,
+        symbol_rhs,
+        globals={"lhs_expr": lhs_expr, "rhs_expr": rhs_expr},
+    )
+    alloc_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaAllocOp)]
+
+    assert list(func_op.function_type.inputs) == [
+        SymbolValueType.from_expr(lhs_expr),
+        SymbolValueType.from_expr(rhs_expr),
+    ]
+    assert len(alloc_ops) == 1
+    assert [attr.data for attr in alloc_ops[0].result.type.shape.data] == [lhs_expr, rhs_expr]
+    assert list(func_op.function_type.outputs) == [alloc_ops[0].result.type]
+
+
+# MGEN-026B
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-26 02:03:12 +0800
+# 最近一次运行成功时间: 2026-03-26 02:03:12 +0800
+# 功能说明: 验证 alloc-only kernel 支持 SymbolDim + const 的混合 shape runtime_args。
+# 测试目的: 锁定符号表达式在输入与结果类型中保持一致。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_supports_dma_alloc_helper_with_symbol_plus_const_shape_args
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_supports_dma_alloc_helper_with_symbol_plus_const_shape_args() -> None:
+    from kernel_gen.operation.dma import alloc
+
+    symbol_lhs = SymbolDim("M") + 2
+    symbol_rhs = SymbolDim("N") + 3
+    lhs_expr = str(symbol_lhs.get_symbol())
+    rhs_expr = str(symbol_rhs.get_symbol())
+
+    def alloc_kernel(rank1: int, rank2: int) -> f"Tensor[f32, {lhs_expr}, {rhs_expr}]":
+        return alloc([rank1, rank2], NumericType.Float32, MemorySpace.SM)
+
+    func_op = build_func_op(
+        alloc_kernel,
+        symbol_lhs,
+        symbol_rhs,
+        globals={"lhs_expr": lhs_expr, "rhs_expr": rhs_expr},
+    )
+    alloc_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaAllocOp)]
+
+    assert list(func_op.function_type.inputs) == [
+        SymbolValueType.from_expr(lhs_expr),
+        SymbolValueType.from_expr(rhs_expr),
+    ]
+    assert len(alloc_ops) == 1
+    assert [attr.data for attr in alloc_ops[0].result.type.shape.data] == [lhs_expr, rhs_expr]
+    assert list(func_op.function_type.outputs) == [alloc_ops[0].result.type]
+
+
+# MGEN-026C
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-26 02:03:12 +0800
+# 最近一次运行成功时间: 2026-03-26 02:03:12 +0800
+# 功能说明: 验证 alloc-only kernel 在零参数常量形状场景下生成正确结果类型。
+# 测试目的: 锁定 func.func 无输入且 dma.alloc 结果类型与返回注解一致。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_supports_dma_alloc_helper_without_runtime_args
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_supports_dma_alloc_helper_without_runtime_args() -> None:
+    from kernel_gen.operation.dma import alloc
+
+    def alloc_kernel() -> "Tensor[f32, 3, 5]":
+        return alloc([3, 5], NumericType.Float32, MemorySpace.SM)
+
+    func_op = build_func_op(alloc_kernel)
+    alloc_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaAllocOp)]
+
+    assert list(func_op.function_type.inputs) == []
+    assert len(alloc_ops) == 1
+    assert [attr.data for attr in alloc_ops[0].result.type.shape.data] == [3, 5]
+    assert list(func_op.function_type.outputs) == [alloc_ops[0].result.type]
+
+
+# MGEN-026D
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-26 02:03:12 +0800
+# 最近一次运行成功时间: 2026-03-26 02:03:12 +0800
+# 功能说明: 验证 alloc-only kernel 支持显式连续 stride 输入。
+# 测试目的: 锁定显式 stride lowering 不改变结果类型与输入符号表达式。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_supports_dma_alloc_helper_with_explicit_stride
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_supports_dma_alloc_helper_with_explicit_stride() -> None:
+    from kernel_gen.operation.dma import alloc
+
+    rows = 2
+    cols = 3
+    row_stride = cols
+    col_stride = 1
+
+    def alloc_kernel(rank1: int, rank2: int, stride1: int, stride2: int) -> "Tensor[f32, 2, 3]":
+        return alloc(
+            [rank1, rank2],
+            NumericType.Float32,
+            MemorySpace.SM,
+            stride=[stride1, stride2],
+        )
+
+    func_op = build_func_op(alloc_kernel, rows, cols, row_stride, col_stride)
+    alloc_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaAllocOp)]
+
+    assert list(func_op.function_type.inputs) == [
+        SymbolValueType.from_expr(str(rows)),
+        SymbolValueType.from_expr(str(cols)),
+        SymbolValueType.from_expr(str(row_stride)),
+        SymbolValueType.from_expr(str(col_stride)),
+    ]
+    assert len(alloc_ops) == 1
+    assert [attr.data for attr in alloc_ops[0].result.type.shape.data] == [rows, cols]
+    assert [attr.data for attr in alloc_ops[0].result.type.stride.data] == [row_stride, col_stride]
+    assert list(func_op.function_type.outputs) == [alloc_ops[0].result.type]
+
+
+# MGEN-026E
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-26 02:03:12 +0800
+# 最近一次运行成功时间: 2026-03-26 02:03:12 +0800
+# 功能说明: 验证 alloc-only kernel 拒绝非法 dtype 参数。
+# 测试目的: 锁定 alloc dtype 校验错误信息与公开语义一致。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_dma_alloc_helper_with_invalid_dtype
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_rejects_dma_alloc_helper_with_invalid_dtype() -> None:
+    from kernel_gen.operation.dma import alloc
+
+    def alloc_kernel(rank1: int, rank2: int) -> "Tensor[f32, 2, 3]":
+        return alloc([rank1, rank2], "f32", MemorySpace.SM)
+
+    with pytest.raises(AstVisitorError, match="alloc dtype must be NumericType"):
+        build_func_op(alloc_kernel, 2, 3)
+
+
+# MGEN-026E
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-26 02:03:12 +0800
+# 最近一次运行成功时间: 2026-03-26 02:03:12 +0800
+# 功能说明: 验证 alloc-only kernel 拒绝非法 space 参数。
+# 测试目的: 锁定 alloc space 校验错误信息与公开语义一致。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_dma_alloc_helper_with_invalid_space
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_rejects_dma_alloc_helper_with_invalid_space() -> None:
+    from kernel_gen.operation.dma import alloc
+
+    def alloc_kernel(rank1: int, rank2: int) -> "Tensor[f32, 2, 3]":
+        return alloc([rank1, rank2], NumericType.Float32, "shared")
+
+    with pytest.raises(AstVisitorError, match="alloc space must be MemorySpace"):
+        build_func_op(alloc_kernel, 2, 3)
+
+
+# MGEN-026E
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-26 02:03:12 +0800
+# 最近一次运行成功时间: 2026-03-26 02:03:12 +0800
+# 功能说明: 验证 alloc-only kernel 拒绝非连续 stride。
+# 测试目的: 锁定非连续 stride 报错信息与公开语义一致。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_dma_alloc_helper_with_non_contiguous_stride
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_rejects_dma_alloc_helper_with_non_contiguous_stride() -> None:
+    from kernel_gen.operation.dma import alloc
+
+    def alloc_kernel(rank1: int, rank2: int, stride1: int, stride2: int) -> "Tensor[f32, 2, 3]":
+        return alloc(
+            [rank1, rank2],
+            NumericType.Float32,
+            MemorySpace.SM,
+            stride=[stride1, stride2],
+        )
+
+    with pytest.raises(AstVisitorError, match="dma.alloc only supports contiguous stride"):
+        build_func_op(alloc_kernel, 2, 3, 3, 2)
 
 
 # MGEN-026
@@ -2912,8 +3126,11 @@ def test_emit_mlir_infer_expr_type_branches() -> None:
     sym_rhs = ScalarArgAST("b", int, is_symbolic=True)
     type_map[_expr_key(sym_lhs)] = SymbolValueType.from_expr("A")
     type_map[_expr_key(sym_rhs)] = SymbolValueType.from_expr("B")
+    binary_exprs: list[BinaryExprAST] = []
     for op_name in ("add", "mul", "div", "floordiv"):
-        assert isinstance(_infer_expr_type(BinaryExprAST(op=op_name, lhs=sym_lhs, rhs=sym_rhs), type_map), SymbolValueType)
+        expr = BinaryExprAST(op=op_name, lhs=sym_lhs, rhs=sym_rhs)
+        binary_exprs.append(expr)
+        assert isinstance(_infer_expr_type(expr, type_map), SymbolValueType)
 
     with pytest.raises(_LoweringError, match="Unsupported symbol binary op"):
         _infer_expr_type(BinaryExprAST(op="mod", lhs=sym_lhs, rhs=sym_rhs), type_map)

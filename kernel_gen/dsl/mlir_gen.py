@@ -76,11 +76,13 @@ def _is_dma_alloc_only_function(func_ast: FunctionAST) -> bool:
     return isinstance(statements[-1], DmaAllocAST)
 
 
-def _resolve_dma_alloc_shape_value(expr: object, runtime_values: dict[str, object]) -> int | str:
+def _resolve_dma_alloc_shape_value(expr: object, runtime_values: dict[str, object]) -> int | str | SymbolDim:
     if isinstance(expr, ScalarArgAST):
         if expr.name in runtime_values:
             runtime_value = runtime_values[expr.name]
             if isinstance(runtime_value, int):
+                return runtime_value
+            if isinstance(runtime_value, SymbolDim):
                 return runtime_value
             runtime_expr = _symbol_expr_from_runtime_arg(runtime_value)
             if runtime_expr is None:
@@ -120,6 +122,9 @@ def _build_dma_alloc_only_result_type(
         else:
             stride_exprs = [alloc_expr.stride]
         stride = [_resolve_dma_alloc_shape_value(entry, runtime_values) for entry in stride_exprs]
+        default_stride = Memory._default_stride(Memory._normalize_shape(shape))
+        if Memory._normalize_shape(stride).get_values() != default_stride.get_values():
+            raise _LoweringError("dma.alloc only supports contiguous stride", location=alloc_expr.location)
     memory = Memory(shape, alloc_expr.dtype, space=alloc_expr.space, stride=stride)
     return _memory_to_nn_type(memory, location=alloc_expr.location)
 

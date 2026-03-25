@@ -21,9 +21,12 @@ from __future__ import annotations
 
 import ast as py_ast
 import inspect
+import re
 import textwrap
 from dataclasses import dataclass, field
 from typing import Iterable
+
+import sympy as sp
 
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -689,7 +692,7 @@ def _raise_parse_error(message: str, node: object | None) -> None:
     raise _ParseFailure(message, _location_from_node(node))
 
 
-def _split_tensor_annotation(text: str, node: object | None) -> tuple[NumericType, list[int | str]]:
+def _split_tensor_annotation(text: str, node: object | None) -> tuple[NumericType, list[int | str | SymbolDim]]:
     normalized = text.strip()
     if not normalized.startswith("Tensor[") or not normalized.endswith("]"):
         _raise_parse_error("Unsupported annotation", node)
@@ -701,10 +704,15 @@ def _split_tensor_annotation(text: str, node: object | None) -> tuple[NumericTyp
     if dtype_key not in _DTYPE_MAP:
         _raise_parse_error("Unsupported tensor dtype", node)
     dtype = _DTYPE_MAP[dtype_key]
-    dims: list[int | str] = []
+    dims: list[int | str | SymbolDim] = []
     for part in parts[1:]:
         if part.isdigit():
             dims.append(int(part))
+        elif any(op in part for op in ("+", "-", "*", "/")):
+            names = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", part))
+            locals_map = {name: sp.Symbol(name) for name in names}
+            expr = sp.sympify(part, locals=locals_map, evaluate=False)
+            dims.append(SymbolDim(expr))
         else:
             dims.append(part)
     return dtype, dims
@@ -1270,16 +1278,36 @@ def _parse_dma_call(
         return _parse_store_like_call(expr, call_name, env, globals_table, builtins_table)
 
     if call_name == "alloc":
-        if len(expr.args) < 2 or len(expr.args) > 4 or expr.keywords:
+        if len(expr.args) < 2 or len(expr.args) > 4:
+            _raise_parse_error("Unsupported alloc arity", expr)
+        if len(expr.keywords) > 2:
             _raise_parse_error("Unsupported alloc arity", expr)
         shape = _parse_expr(expr.args[0], env, globals_table, builtins_table)
         dtype = _parse_expr(expr.args[1], env, globals_table, builtins_table)
         if not isinstance(dtype, NumericType):
             _raise_parse_error("alloc dtype must be NumericType", expr.args[1])
         space = _parse_expr(expr.args[2], env, globals_table, builtins_table) if len(expr.args) >= 3 else MemorySpace.GM
-        if not isinstance(space, MemorySpace):
-            _raise_parse_error("alloc space must be MemorySpace", expr.args[2])
         stride = _parse_expr(expr.args[3], env, globals_table, builtins_table) if len(expr.args) >= 4 else None
+        seen_space = len(expr.args) >= 3
+        seen_stride = len(expr.args) >= 4
+        for keyword in expr.keywords:
+            if keyword.arg is None:
+                _raise_parse_error("Unsupported alloc arity", expr)
+            if keyword.arg == "space":
+                if seen_space:
+                    _raise_parse_error("Unsupported alloc arity", expr)
+                space = _parse_expr(keyword.value, env, globals_table, builtins_table)
+                seen_space = True
+                continue
+            if keyword.arg == "stride":
+                if seen_stride:
+                    _raise_parse_error("Unsupported alloc arity", expr)
+                stride = _parse_expr(keyword.value, env, globals_table, builtins_table)
+                seen_stride = True
+                continue
+            _raise_parse_error("Unsupported alloc arity", expr)
+        if not isinstance(space, MemorySpace):
+            _raise_parse_error("alloc space must be MemorySpace", expr.args[2] if len(expr.args) >= 3 else expr)
         return DmaAllocAST(shape=shape, dtype=dtype, space=space, stride=stride, location=_location_from_node(expr))
 
     if call_name == "copy":
