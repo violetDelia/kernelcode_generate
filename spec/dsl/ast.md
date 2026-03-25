@@ -68,8 +68,10 @@ func_ast = parse_function(add)
 
 - 必须能获取函数源码；否则应抛出解析错误。
 - 注解解析规则以本文件与测试清单为准。
+- 标量注解最小支持 `int`、`bool`、`float`；张量注解最小支持字符串形式 `Tensor[...]` 与 `JoinedStr` 形式 `f"Tensor[...]"`。
 - 若参数未写注解，但在 `globals`/`builtins` 中存在同名 `SymbolDim` 或 `Memory` 对象，可按标量参数或张量参数推断。
 - 若函数显式标注 `-> None`，则返回列表必须为空，且函数体可只包含 `launch_kernel(...)` 这类语句。
+- `float(value)`、`tensor.get_shape()[axis]` 与 `tensor.get_stride()[axis]` 等最小 DSL 表达式必须可解析为明确 AST 节点。
 
 返回与限制：
 
@@ -201,7 +203,7 @@ TensorAST(name="A", memory=memory)
 参数说明：
 
 - `name` (`str`)：参数名。
-- `value_type` (`type`)：标量类型。
+- `value_type` (`type`)：标量类型，最小支持 `int`、`bool`、`float`。
 - `location` (`SourceLocation|None`)：可选源码位置。
 
 使用示例：
@@ -483,3 +485,4 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
   - AST-010：不支持语法返回诊断。（`test_unsupported_syntax_reports_diagnostics`）
   - AST-011：六个无参 `arch` 查询与 `get_dynamic_memory(space)` 可解析为专用 `Arch*AST` 节点，并支撑零入参 DSL 函数场景继续向下游 lowering。（`test_build_func_op_lowers_arch_query_functions`、`test_build_func_op_lowers_arch_dynamic_memory_function`）
   - AST-012：显式 `-> None` 返回注解允许 `launch_kernel(name, block, thread, subthread)` 语句型函数省略 `return`，并解析为 `ArchLaunchKernelAST`。（`test_build_func_op_lowers_arch_launch_kernel_statement`）
+  - AST-013：支持 `bool/float` 返回注解、`JoinedStr` 张量注解，以及 `float(...)`、`get_shape()[axis]`、`get_stride()[axis]` 等最小 symbol 查询/转换表达式解析。（`test_ast_parse_function_supports_symbol_scalar_and_joinedstr_annotations`）

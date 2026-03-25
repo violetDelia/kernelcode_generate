@@ -66,10 +66,19 @@ from kernel_gen.dialect.nn import (
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
     SymbolDivOp,
+    SymbolEqOp,
     SymbolFloorDivOp,
     SymbolForOp,
+    SymbolGeOp,
+    SymbolGetDimOp,
+    SymbolGetStrideOp,
+    SymbolGtOp,
+    SymbolLeOp,
+    SymbolLtOp,
     SymbolMulOp,
+    SymbolNeOp,
     SymbolSubOp,
+    SymbolToFloatOp,
     SymbolValueType,
     build_public_symbol_expr,
 )
@@ -82,11 +91,13 @@ from .ast import (
     ArchQueryAST,
     BinaryExprAST,
     BlockAST,
+    CastExprAST,
     CompareExprAST,
     ConstAST,
     ForAST,
     FunctionAST,
     LoadAST,
+    MemoryQueryAST,
     ScalarArgAST,
     SourceLocation,
     StoreAST,
@@ -522,12 +533,14 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
                 ArchLaunchKernelAST,
                 ArchQueryAST,
                 BinaryExprAST,
+                CastExprAST,
                 CompareExprAST,
                 ConstAST,
                 TensorAST,
                 ScalarArgAST,
                 VarAST,
                 LoadAST,
+                MemoryQueryAST,
                 StoreAST,
                 ForAST,
             ),
@@ -625,9 +638,21 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
         type_map[expr_key] = target_type
         return target_type
 
+    if isinstance(expr, CastExprAST):
+        value_type = _infer_expr_type(expr.value, type_map)
+        if expr.target_type is float:
+            if not isinstance(value_type, SymbolValueType):
+                raise _LoweringError("float() operand must have !symbol.int type", location=expr.location)
+            type_map[expr_key] = f32
+            return f32
+        raise _LoweringError("Unsupported cast target", location=expr.location)
+
     if isinstance(expr, CompareExprAST):
         lhs_type = _infer_expr_type(expr.lhs, type_map)
         rhs_type = _infer_expr_type(expr.rhs, type_map)
+        if isinstance(lhs_type, SymbolValueType) and isinstance(rhs_type, SymbolValueType):
+            type_map[expr_key] = i1
+            return i1
         if not isinstance(lhs_type, NnMemoryType) or not isinstance(rhs_type, NnMemoryType):
             raise _LoweringError("Compare op operands must have nn.memory type", location=expr.location)
         if lhs_type == rhs_type:
@@ -636,6 +661,23 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
             return result_type
         target_type = _infer_broadcast_memory_type(lhs_type, rhs_type, expr.location)
         result_type = NnMemoryType(target_type.shape, target_type.stride, i1, target_type.space)
+        type_map[expr_key] = result_type
+        return result_type
+
+    if isinstance(expr, MemoryQueryAST):
+        source_type = _infer_expr_type(expr.source, type_map)
+        if not isinstance(source_type, NnMemoryType):
+            raise _LoweringError("Memory query source must have nn.memory type", location=expr.location)
+        entries = source_type.shape.data if expr.kind == "dim" else source_type.stride.data
+        if expr.axis < 0 or expr.axis >= len(entries):
+            raise _LoweringError("Memory query axis out of range", location=expr.location)
+        entry = entries[expr.axis]
+        if isinstance(entry, IntAttr):
+            result_type = SymbolValueType.from_expr(str(entry.data))
+        elif isinstance(entry, StringAttr) and entry.data != "?":
+            result_type = SymbolValueType.from_expr(entry.data)
+        else:
+            raise _LoweringError("Memory query does not support unknown entry '?'", location=expr.location)
         type_map[expr_key] = result_type
         return result_type
 
@@ -668,6 +710,17 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
         return op.result
+    if isinstance(expr, CastExprAST):
+        value = _lower_expr(expr.value, ctx)
+        value_type = getattr(value, "type", None)
+        if expr.target_type is float:
+            if not isinstance(value_type, SymbolValueType):
+                raise _LoweringError("float() operand must have !symbol.int type", location=expr.location)
+            op = SymbolToFloatOp(value, f32)
+            ctx.builder.add_op(op)
+            ctx._set_cache(expr_key, op.result)
+            return op.result
+        raise _LoweringError("Unsupported cast target", location=expr.location)
     if isinstance(expr, LoadAST):
         source = _lower_expr(expr.tensor, ctx)
         source_type = _expect_memory_value(source, expr.location)
@@ -773,6 +826,23 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     if isinstance(expr, CompareExprAST):
         lhs = _lower_expr(expr.lhs, ctx)
         rhs = _lower_expr(expr.rhs, ctx)
+        lhs_attr = getattr(lhs, "type", None)
+        rhs_attr = getattr(rhs, "type", None)
+        if isinstance(lhs_attr, SymbolValueType) and isinstance(rhs_attr, SymbolValueType):
+            op_map = {
+                "eq": SymbolEqOp,
+                "ne": SymbolNeOp,
+                "lt": SymbolLtOp,
+                "le": SymbolLeOp,
+                "gt": SymbolGtOp,
+                "ge": SymbolGeOp,
+            }
+            if expr.op not in op_map:
+                raise _LoweringError(f"Unsupported compare op: {expr.op}", location=expr.location)
+            op = op_map[expr.op](lhs, rhs, i1)
+            ctx.builder.add_op(op)
+            ctx._set_cache(expr_key, op.result)
+            return op.result
         lhs_type = _expect_memory_value(lhs, expr.location)
         rhs_type = _expect_memory_value(rhs, expr.location)
         if lhs_type != rhs_type:
@@ -791,6 +861,17 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         if expr.op not in op_map:
             raise _LoweringError(f"Unsupported compare op: {expr.op}", location=expr.location)
         op = op_map[expr.op](lhs, rhs, result_type, lhs_type.space)
+        ctx.builder.add_op(op)
+        ctx._set_cache(expr_key, op.result)
+        return op.result
+
+    if isinstance(expr, MemoryQueryAST):
+        source = _lower_expr(expr.source, ctx)
+        source_type = _expect_memory_value(source, expr.location)
+        if expr.axis < 0 or expr.axis >= len(source_type.shape.data):
+            raise _LoweringError("Memory query axis out of range", location=expr.location)
+        op_cls = SymbolGetDimOp if expr.kind == "dim" else SymbolGetStrideOp
+        op = op_cls(source, expr.axis)
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
         return op.result
@@ -815,7 +896,19 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
 
     if isinstance(node, (TensorAST, ScalarArgAST, VarAST)):
         return _lookup_symbol(node, ctx)
-    if isinstance(node, (ArchDynamicMemoryAST, ArchQueryAST, BinaryExprAST, CompareExprAST, ConstAST, LoadAST)):
+    if isinstance(
+        node,
+        (
+            ArchDynamicMemoryAST,
+            ArchQueryAST,
+            BinaryExprAST,
+            CastExprAST,
+            CompareExprAST,
+            ConstAST,
+            LoadAST,
+            MemoryQueryAST,
+        ),
+    ):
         if _expr_key(node) not in ctx.types and not isinstance(node, (TensorAST, ScalarArgAST, VarAST)):
             _infer_expr_type(node, ctx.types)
         return _lower_expr(node, ctx)

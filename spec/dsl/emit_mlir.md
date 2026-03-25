@@ -110,7 +110,9 @@ value = emit_mlir(expr_ast, ctx)
 
 - `ConstAST`：生成常量或等价字面量 op/value。
 - `BinaryExprAST(add/sub/mul/div/floordiv)`：生成对应的二元算术 op。
-- `CompareExprAST(eq/ne/lt/le/gt/ge)`：生成对应的比较 op。
+- `CompareExprAST(eq/ne/lt/le/gt/ge)`：当操作数为 `nn.memory` 时生成 `nn` 比较 op；当操作数为 `!symbol.int<"...">` 时生成对应的 `symbol.eq/ne/lt/le/gt/ge`。
+- `CastExprAST(float)`：当源值为 `!symbol.int<"...">` 时生成 `symbol.to_float`。
+- `MemoryQueryAST(dim/stride)`：生成 `symbol.get_dim` / `symbol.get_stride`。
 - `LoadAST`：生成张量读取相关 op/value；当携带 `sizes` 时发射 `dma.slice`。
 - `StoreAST`：生成张量写入相关 op；当携带 `sizes` 时发射 `dma.deslice`。
 - `ForAST`：当来源于 `LoopRange(start, end, step)` 且边界为 symbol 整数时，生成 `symbol.for`；循环体内若包含 `dma.slice` / `dma.deslice`，其 DMA 标量 operand 直接使用 `!symbol.int<"expr">` value，不生成 `arith.index_cast`。
@@ -144,3 +146,6 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-014：`ForAST` lowering 会保留循环结构并在循环体内生成 `dma.load`。（`test_for_ast_lowering_emits_loads`）
   - EMIT-015：六个无参 `arch` 查询节点 lowering 为对应的 `arch.get_*` op，并保持 `!symbol.int<"...">` 结果类型。（`test_build_func_op_lowers_arch_query_functions`）
   - EMIT-016：`ArchDynamicMemoryAST` lowering 为 `arch.get_dynamic_memory`，结果为一维动态 `i8` memory；`ArchLaunchKernelAST` lowering 为零返回值的 `arch.launch_kernel` 语句 op。（`test_build_func_op_lowers_arch_dynamic_memory_function`、`test_build_func_op_lowers_arch_launch_kernel_statement`）
+  - EMIT-021：`CastExprAST(float)` 在 symbol 标量场景下生成 `symbol.to_float` 并返回 `f32`。（`test_build_func_op_lowers_symbol_to_float_return`）
+  - EMIT-022：`MemoryQueryAST(dim)` 在 `JoinedStr` 张量注解场景下生成 `symbol.get_dim`。（`test_build_func_op_lowers_symbol_memory_queries_from_joinedstr_annotations`）
+  - EMIT-023：`MemoryQueryAST(stride)` 在 `JoinedStr` 张量注解场景下生成 `symbol.get_stride`。（`test_build_func_op_lowers_symbol_memory_queries_from_joinedstr_annotations`）

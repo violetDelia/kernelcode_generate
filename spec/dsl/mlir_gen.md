@@ -48,6 +48,9 @@
 - 零入参 DSL 函数仅在其返回与函数体语义可直接由源码解析确定时属于公开成功路径；当前公开支持范围包括六个无参 `arch` 查询与 `get_dynamic_memory(space)`。
 - 显式 `-> None` 返回注解表示 `func.func` 无返回值；该场景允许函数体只包含 `launch_kernel(name, block, thread, subthread)` 这类语句，并以空 `func.return` 收尾。
 - `launch_kernel(name, block, thread, subthread)` 的 3 个运行时参数若来自 `SymbolDim` 或 Python `int`，必须按既有 symbol 标量 lowering 规则生成 `!symbol.int<"...">` 输入签名。
+- 当纯 symbol 标量函数的返回注解为 `bool` 时，比较表达式必须 lowering 为 `symbol.eq/ne/lt/le/gt/ge`，并返回 `i1`。
+- 当纯 symbol 标量函数的返回注解为 `float` 时，`float(symbol_int)` 必须 lowering 为 `symbol.to_float`，并返回 `f32`。
+- 当张量参数使用 `JoinedStr` 形式的 `Tensor[...]` 注解，且函数体返回 `tensor.get_shape()[axis]` 或 `tensor.get_stride()[axis]` 时，lowering 必须生成 `symbol.get_dim` / `symbol.get_stride`，并返回对应 `!symbol.int<"expr">`。
 - 如需 `builtin.module` 封装，由调用方完成。
 
 ## 公开接口
@@ -95,9 +98,12 @@ func_op = build_func_op(only_symbol, s)
 - 当函数体使用六个无参 `arch` 查询时，`build_func_op` 必须允许零入参成功路径，并生成对应的 `arch.get_*` op 与 `!symbol.int<"...">` 返回类型。
 - 当函数体使用 `get_dynamic_memory(space)` 且返回 `Tensor[i8, ?]` 时，`build_func_op` 必须允许零入参成功路径，并生成 `arch.get_dynamic_memory` 及一致的返回 memory type。
 - 当函数体仅包含 `launch_kernel(name, block, thread, subthread)` 且函数显式标注 `-> None` 时，`build_func_op` 必须生成零返回值 `func.func`，并在函数体中发射 `arch.launch_kernel` 与空 `func.return`。
+- 当函数场景为纯 symbol 标量比较时，函数体中的 `==`、`!=`、`<`、`<=`、`>`、`>=` 必须 lowering 为 `symbol.eq/ne/lt/le/gt/ge`，并返回 `i1`。
+- 当函数体使用 `float(symbol_int)` 时，必须 lowering 为 `symbol.to_float`，并返回 `f32`。
 - 当函数体使用 `kernel_gen.operation.nn.add/sub/mul/truediv/floordiv` 包装同一组纯 symbol 整型标量算术时，lowering 结果必须与直接使用 Python 二元运算保持一致；`const/symbol` 与 `symbol/const` 的操作数顺序必须在结果表达式文本中原样保留。
 - 纯 symbol 标量函数的参数/返回类型必须复用 `spec/dialect/symbol.md` 中定义的 `SymbolValueType`，不能退回 builtin 整数类型。
 - `LoopRange` 场景中传给 `dma.slice` / `dma.deslice` 的标量 operand 必须直接复用 `!symbol.int<"expr">` value，不允许通过 `arith.index_cast` 做中间桥接。
+- 张量参数的 `JoinedStr` 形式 `Tensor[...]` 注解必须与普通字符串注解保持同一 lowering 语义；`get_shape()[axis]` / `get_stride()[axis]` 返回值必须保持 `!symbol.int<"expr">`。
 
 返回与限制：
 
@@ -147,7 +153,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
 ## 测试
 
 - 测试文件：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
-- 执行命令：`pytest -q test/dsl/test_ast_visitor.py -k 'test_build_func_op or test_visit_to_nn_ir_builds_module or test_emit_mlir_output or test_scalar_arg_lowering_in_signature or test_build_func_op_signature_uses_runtime_args_not_parse_env or test_symbol_scalar_function_uses_symbol_value_type_signature or test_symbol_scalar_function_lowers_symbol_binary_ops or test_invalid_tensor_return_annotation_reports_diagnostics or test_constant_lowering_reports_diagnostics or test_return_type_mismatch_reports_diagnostics or test_multi_statement_ssa_order_and_reuse or test_build_func_op_supports_symbolic_for_loop_dma_without_return or test_tensor_binary_implicit_broadcast_lowering or test_tensor_binary_prepend_broadcast_lowering or test_compare_implicit_broadcast_lowering or test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics or test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type or test_build_func_op_globals_and_builtins_cannot_replace_runtime_args or test_mlir_gen_build_func_op_builtins_and_parse_error or test_mlir_gen_signature_validation_errors or test_build_func_op_lowers_arch_query_functions or test_build_func_op_lowers_arch_dynamic_memory_function or test_build_func_op_lowers_arch_launch_kernel_statement'`
+- 执行命令：`pytest -q test/dsl/test_ast_visitor.py -k 'test_build_func_op or test_visit_to_nn_ir_builds_module or test_emit_mlir_output or test_scalar_arg_lowering_in_signature or test_build_func_op_signature_uses_runtime_args_not_parse_env or test_symbol_scalar_function_uses_symbol_value_type_signature or test_symbol_scalar_function_lowers_symbol_binary_ops or test_build_func_op_lowers_symbol_compare_bool_return or test_build_func_op_lowers_symbol_to_float_return or test_build_func_op_lowers_symbol_memory_queries_from_joinedstr_annotations or test_invalid_tensor_return_annotation_reports_diagnostics or test_constant_lowering_reports_diagnostics or test_return_type_mismatch_reports_diagnostics or test_multi_statement_ssa_order_and_reuse or test_build_func_op_supports_symbolic_for_loop_dma_without_return or test_tensor_binary_implicit_broadcast_lowering or test_tensor_binary_prepend_broadcast_lowering or test_compare_implicit_broadcast_lowering or test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics or test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type or test_build_func_op_globals_and_builtins_cannot_replace_runtime_args or test_mlir_gen_build_func_op_builtins_and_parse_error or test_mlir_gen_signature_validation_errors or test_build_func_op_lowers_arch_query_functions or test_build_func_op_lowers_arch_dynamic_memory_function or test_build_func_op_lowers_arch_launch_kernel_statement'`
 - 测试目标：
   - 验证 `build_func_op(...)` 生成 `func.func`。
   - 验证 `build_func_op(fn, *runtime_args, globals=None, builtins=None)` 的输入签名仅由运行时参数决定。
@@ -161,6 +167,9 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - 覆盖无返回 `for` 循环与 `slice/deslice` 的生成能力，并要求 `LoopRange` lowering 为 `symbol.for`，且循环迭代变量 `it` 保持 `!symbol.int<"...">`。
   - 验证纯 symbol 函数场景会生成 `!symbol.int<"...">` 输入与 `!symbol.int<"...">` 返回。
   - 验证纯 symbol 标量算术在 lowering 后生成 `symbol.add/sub/mul/div/floordiv`，不退回 builtin 算术或其他 dialect op；直接 Python 二元运算与 `kernel_gen.operation.nn` 对应包装必须共享同一 lowering 结果。
+  - 验证纯 symbol 标量比较在 lowering 后生成 `symbol.eq/ne/lt/le/gt/ge`，并返回 `i1`。
+  - 验证 `float(symbol_int)` lowering 为 `symbol.to_float` 并返回 `f32`。
+  - 验证 `JoinedStr` 形式张量注解下的 `get_shape()[axis]` / `get_stride()[axis]` lowering 为 `symbol.get_dim` / `symbol.get_stride`。
   - 验证整型标量函数场景中，`build_func_op(add, lhs, rhs)` 会把 Python `int` 实参 lowering 为携带具体整数值的 `SymbolValueType` 输入，并生成 `symbol.add` 结果。
   - 验证负数 Python `int` 实参不会导致 lowering 失败；负值的 `SymbolValueType.__str__` 必须保持 `symbol.int<-3>` 这类十进制负数字面量口径，且 `get_value()` 可还原原始负数值。
   - 验证 `LoopRange + slice/deslice` 场景生成 `symbol.for + dma.slice/dma.deslice`，且循环相关 lowering 不生成 `arith.index_cast`。
@@ -195,6 +204,9 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - MGEN-023：纯 symbol 标量除法 lowering 为 `symbol.div`；直接 Python `/` 与 `nn.truediv(...)` 包装在四类输入下必须保持一致；`const/const` 输入按静态整除结果收敛为常量整数；比较公开结果时以 `SymbolValueType.get_value()` 与对应 Python/SymbolDim 运行时结果一致为准。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
   - MGEN-024：纯 symbol 标量整除 lowering 为 `symbol.floordiv`；直接 Python `//` 与 `nn.floordiv(...)` 包装在四类输入下必须保持一致；`const/const` 输入按 Python `//` 语义收敛；比较公开结果时以 `SymbolValueType.get_value()` 与对应 Python/SymbolDim 运行时结果一致为准。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
   - MGEN-019：当 `build_func_op` 目标函数存在可位置绑定形参时，`runtime_args` 为必填，且公开契约仅覆盖这些形参；省略实参、实参数量不匹配，或试图以 `globals/builtins` 替代时必须报错。若目标函数没有输入形参，则允许零 `runtime_args` 成功生成 `func.func`。（`test_build_func_op_requires_explicit_runtime_args`、`test_build_func_op_rejects_runtime_arg_count_mismatch`、`test_build_func_op_globals_and_builtins_cannot_replace_runtime_args`、`test_build_func_op_lowers_arch_query_functions`、`test_build_func_op_lowers_arch_dynamic_memory_function`）
+  - MGEN-025：纯 symbol 标量比较函数 lowering 为 `symbol.eq/ne/lt/le/gt/ge`，并返回 `i1`。（`test_build_func_op_lowers_symbol_compare_bool_return`）
+  - MGEN-026：纯 symbol 标量 `float(...)` 转换 lowering 为 `symbol.to_float`，并返回 `f32`。（`test_build_func_op_lowers_symbol_to_float_return`）
+  - MGEN-027：`JoinedStr` 形式 `Tensor[...]` 注解下的 `get_shape()[axis]` / `get_stride()[axis]` lowering 为 `symbol.get_dim` / `symbol.get_stride`，并返回 `!symbol.int<"expr">`。（`test_build_func_op_lowers_symbol_memory_queries_from_joinedstr_annotations`）
   - MGEN-020：`build_func_op(add, lhs, rhs)` 对普通 Python `int` runtime args 的 lowering 必须产出携带具体整数值的 `SymbolValueType` 输入；若实参包含负数，其对外字符串表示必须保持 `symbol.int<-3>` 这类十进制负数字面量口径，并在函数体内生成 `symbol.add` 结果。（`test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type`）
   - MGEN-ARCH-001：六个无参 `arch` 查询在零入参 `build_func_op` 场景下 lowering 为对应的 `arch.get_*`，并保持 `!symbol.int<"...">` 返回类型。（`test_build_func_op_lowers_arch_query_functions`）
   - MGEN-ARCH-002：`get_dynamic_memory(space)` 在零入参 `build_func_op` 场景下 lowering 为 `arch.get_dynamic_memory`，并返回固定一维动态 `i8` memory type。（`test_build_func_op_lowers_arch_dynamic_memory_function`）

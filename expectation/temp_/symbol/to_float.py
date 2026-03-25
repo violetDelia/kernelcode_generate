@@ -1,19 +1,19 @@
 """symbol.to_float expectation.
 
 创建者: 榕
-最后一次更改: 榕
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 使用函数 + `build_func_op` 组织 `symbol.to_float` 的目标态 expectation。
 - 验证静态整数与动态符号输入都可以成功 lowering 为 `symbol.to_float`。
 
 使用示例:
-- python expectation/temp/symbol/to_float.py
+- python expectation/temp_/symbol/to_float.py
 
 关联文件:
-- spec: spec/dialect/symbol.md
-- test: test/dialect/test_symbol_dialect.py
-- 功能实现: kernel_gen/dsl/mlir_gen.py
+- spec: spec/dsl/ast.md, spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
+- test: test/dsl/test_ast_visitor.py
+- 功能实现: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
 """
 
 from pathlib import Path

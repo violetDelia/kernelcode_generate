@@ -23,7 +23,7 @@ import inspect
 from typing import Callable
 
 from xdsl.dialects import func
-from xdsl.dialects.builtin import FunctionType, i32
+from xdsl.dialects.builtin import FunctionType, f32, i1, i32
 from xdsl.ir import Block, Region
 
 from kernel_gen.dialect.nn import NnMemoryType
@@ -52,7 +52,10 @@ def _is_symbol_scalar_function(func_ast: FunctionAST) -> bool:
         return False
     if not func_ast.outputs:
         return True
-    return all(isinstance(item, ScalarArgAST) and item.value_type is int for item in func_ast.outputs)
+    return all(
+        isinstance(item, ScalarArgAST) and item.value_type in {int, bool, float}
+        for item in func_ast.outputs
+    )
 
 
 def _is_symbol_scalar_arg(item: ScalarArgAST, *, is_symbol_scalar_function: bool) -> bool:
@@ -176,18 +179,15 @@ def _validate_return_type(func_ast: FunctionAST, result_type: object) -> None:
             if result_type.shape == expected_type.shape and result_type.element_type == expected_type.element_type:
                 return
     elif isinstance(output, ScalarArgAST):
-        if output.value_type is not int:
+        if output.value_type not in {int, bool, float}:
             raise _LoweringError("Unsupported scalar return type", location=output.location)
-        if (
-            not func_ast.inputs
-            and len(func_ast.body.statements) == 1
-            and isinstance(func_ast.body.statements[0], ArchQueryAST)
-            and isinstance(result_type, SymbolValueType)
-        ):
+        if output.value_type is bool:
+            expected_type = i1
+        elif output.value_type is float:
+            expected_type = f32
+        elif isinstance(result_type, SymbolValueType):
             return
-        if _is_symbol_scalar_function(func_ast):
-            if isinstance(result_type, SymbolValueType):
-                return
+        elif _is_symbol_scalar_function(func_ast):
             expected_type = SymbolValueType.from_expr(output.name)
         else:
             expected_type = i32

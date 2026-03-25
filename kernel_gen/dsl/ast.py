@@ -326,6 +326,55 @@ class CompareExprAST:
 
 
 @dataclass(frozen=True)
+class CastExprAST:
+    """显式标量转换表达式节点。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 表示 `float(value)` 这类最小显式转换表达式。
+
+    使用示例:
+    - CastExprAST(value=VarAST("x"), target_type=float)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    value: object
+    target_type: type
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class MemoryQueryAST:
+    """memory 元信息查询表达式节点。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 表示 `tensor.get_shape()[axis]` 与 `tensor.get_stride()[axis]` 查询。
+
+    使用示例:
+    - MemoryQueryAST(kind="dim", source=VarAST("x"), axis=1)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    kind: str
+    source: object
+    axis: int
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
 class ConstAST:
     """常量节点。
 
@@ -577,6 +626,18 @@ def _is_none_annotation(node: object | None) -> bool:
     )
 
 
+def _parse_scalar_annotation(
+    text: str,
+    arg_name: str | None,
+    node: object | None,
+) -> ScalarArgAST | None:
+    normalized = text.strip()
+    scalar_type = {"int": int, "bool": bool, "float": float}.get(normalized)
+    if scalar_type is None:
+        return None
+    return ScalarArgAST(name=arg_name or "ret0", value_type=scalar_type, location=_location_from_node(node))
+
+
 def _split_tensor_annotation(text: str, node: object | None) -> tuple[NumericType, list[int | str]]:
     normalized = text.strip()
     if not normalized.startswith("Tensor[") or not normalized.endswith("]"):
@@ -596,6 +657,66 @@ def _split_tensor_annotation(text: str, node: object | None) -> tuple[NumericTyp
         else:
             dims.append(part)
     return dtype, dims
+
+
+def _stringify_annotation_expr(
+    node: object,
+    globals_table: dict[str, object],
+    builtins_table: dict[str, object],
+    runtime_table: dict[str, object] | None,
+) -> str:
+    if isinstance(node, py_ast.Constant) and isinstance(node.value, (str, int, float)):
+        return str(node.value)
+    if isinstance(node, py_ast.UnaryOp) and isinstance(node.op, py_ast.USub):
+        if isinstance(node.operand, py_ast.Constant) and isinstance(node.operand.value, (int, float)):
+            return str(-node.operand.value)
+        _raise_parse_error("Unsupported annotation", node)
+    if isinstance(node, py_ast.Name):
+        if runtime_table is not None and node.id in runtime_table:
+            runtime_value = runtime_table[node.id]
+            if isinstance(runtime_value, SymbolDim):
+                return str(runtime_value.get_symbol())
+            if isinstance(runtime_value, (str, int, float)):
+                return str(runtime_value)
+        value = _lookup_python_name(node.id, globals_table, builtins_table)
+        if isinstance(value, SymbolDim):
+            return str(value.get_symbol())
+        if isinstance(value, (str, int, float)):
+            return str(value)
+        return node.id
+    if isinstance(node, py_ast.Attribute):
+        value = _parse_attribute_object(node, globals_table, builtins_table)
+        if isinstance(value, SymbolDim):
+            return str(value.get_symbol())
+        if isinstance(value, (str, int, float)):
+            return str(value)
+    _raise_parse_error("Unsupported annotation", node)
+    return ""
+
+
+def _joined_annotation_to_text(
+    node: py_ast.JoinedStr,
+    globals_table: dict[str, object],
+    builtins_table: dict[str, object],
+    runtime_table: dict[str, object] | None,
+) -> str:
+    parts: list[str] = []
+    for value in node.values:
+        if isinstance(value, py_ast.Constant) and isinstance(value.value, str):
+            parts.append(value.value)
+            continue
+        if isinstance(value, py_ast.FormattedValue):
+            parts.append(
+                _stringify_annotation_expr(
+                    value.value,
+                    globals_table,
+                    builtins_table,
+                    runtime_table,
+                )
+            )
+            continue
+        _raise_parse_error("Unsupported annotation", value)
+    return "".join(parts)
 
 
 def _parse_annotation_node(
@@ -628,26 +749,35 @@ def _parse_annotation_node(
             return ScalarArgAST(name=arg_name, value_type=int, is_symbolic=True, location=None)
         _raise_parse_error("Missing annotation", node)
 
-    if isinstance(node, py_ast.Constant):
-        if node.value is None:
-            return None
-        if isinstance(node.value, str):
-            text = node.value
-            if text.strip() == "int":
-                return ScalarArgAST(name=arg_name or "ret0", value_type=int, location=_location_from_node(node))
-            dtype, dims = _split_tensor_annotation(text, node)
-            memory = Memory(dims, dtype)
-            return TensorAST(name=arg_name or "ret0", memory=memory, location=_location_from_node(node))
+    if _is_none_annotation(node):
+        return None
+
+    if isinstance(node, py_ast.Constant) and isinstance(node.value, str):
+        text = node.value
+        scalar = _parse_scalar_annotation(text, arg_name, node)
+        if scalar is not None:
+            return scalar
+        dtype, dims = _split_tensor_annotation(text, node)
+        memory = Memory(dims, dtype)
+        return TensorAST(name=arg_name or "ret0", memory=memory, location=_location_from_node(node))
 
     if isinstance(node, py_ast.Name):
-        if node.id == "None":
-            return None
-        if node.id == "int":
-            return ScalarArgAST(name=arg_name or "ret0", value_type=int, location=_location_from_node(node))
+        scalar = _parse_scalar_annotation(node.id, arg_name, node)
+        if scalar is not None:
+            return scalar
         if node.id in globals_table and isinstance(globals_table[node.id], Memory):
             memory = globals_table[node.id]
             return TensorAST(name=arg_name or node.id, memory=memory, location=_location_from_node(node))
         _raise_parse_error("Unsupported annotation", node)
+
+    if isinstance(node, py_ast.JoinedStr):
+        text = _joined_annotation_to_text(node, globals_table, builtins_table, runtime_table)
+        scalar = _parse_scalar_annotation(text, arg_name, node)
+        if scalar is not None:
+            return scalar
+        dtype, dims = _split_tensor_annotation(text, node)
+        memory = Memory(dims, dtype)
+        return TensorAST(name=arg_name or "ret0", memory=memory, location=_location_from_node(node))
 
     if isinstance(node, py_ast.Subscript) and isinstance(node.value, py_ast.Name) and node.value.id == "Tensor":
         slice_node = node.slice
@@ -670,6 +800,16 @@ def _parse_annotation_node(
 
     _raise_parse_error("Unsupported annotation", node)
     return None
+
+
+def _parse_query_axis(slice_node: object) -> int:
+    if isinstance(slice_node, py_ast.Constant) and isinstance(slice_node.value, int):
+        return int(slice_node.value)
+    if isinstance(slice_node, py_ast.UnaryOp) and isinstance(slice_node.op, py_ast.USub):
+        if isinstance(slice_node.operand, py_ast.Constant) and isinstance(slice_node.operand.value, int):
+            return -int(slice_node.operand.value)
+    _raise_parse_error("Unsupported query axis", slice_node)
+    return 0
 
 
 def _lookup_python_name(name: str, globals_table: dict[str, object], builtins_table: dict[str, object]) -> object | None:
@@ -747,6 +887,7 @@ def _parse_dma_call(
     - 将 `slice(...)` 解析为 `LoadAST`。
     - 将 `deslice(...)` 解析为 `StoreAST`。
     - 将 `nn.add/sub/mul/truediv/floordiv(...)` 解析为对应的 `BinaryExprAST`。
+    - 将 `float(symbol_expr)` 解析为显式 `CastExprAST`。
 
     使用示例:
     - _parse_dma_call(py_ast.parse("slice(A, [i], [n])").body[0].value, env, globals(), __builtins__)
@@ -862,6 +1003,12 @@ def _parse_dma_call(
             location=_location_from_node(expr),
         )
 
+    if call_name == "float":
+        if len(expr.args) != 1 or expr.keywords:
+            _raise_parse_error("Unsupported float cast arity", expr)
+        value = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+        return CastExprAST(value=value, target_type=float, location=_location_from_node(expr))
+
     _raise_parse_error("Unsupported call expression", expr)
     return expr
 
@@ -899,6 +1046,20 @@ def _parse_expr(
 
     if isinstance(expr, py_ast.Attribute):
         return _parse_attribute_object(expr, globals_table, builtins_table)
+
+    if isinstance(expr, py_ast.Subscript):
+        if (
+            isinstance(expr.value, py_ast.Call)
+            and isinstance(expr.value.func, py_ast.Attribute)
+            and not expr.value.args
+            and not expr.value.keywords
+            and expr.value.func.attr in {"get_shape", "get_stride"}
+        ):
+            source = _parse_expr(expr.value.func.value, env, globals_table, builtins_table)
+            axis = _parse_query_axis(expr.slice)
+            kind = "dim" if expr.value.func.attr == "get_shape" else "stride"
+            return MemoryQueryAST(kind=kind, source=source, axis=axis, location=_location_from_node(expr))
+        _raise_parse_error("Unsupported expression", expr)
 
     if isinstance(expr, py_ast.Call):
         return _parse_dma_call(expr, env, globals_table, builtins_table)

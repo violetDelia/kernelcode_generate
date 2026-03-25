@@ -64,21 +64,32 @@ from kernel_gen.dialect.nn import NnAddOp, NnBroadcastOp, NnEqOp, NnMemorySpaceA
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
     SymbolDivOp,
+    SymbolEqOp,
     SymbolFloorDivOp,
     SymbolForOp,
+    SymbolGetDimOp,
+    SymbolGetStrideOp,
+    SymbolGeOp,
+    SymbolGtOp,
+    SymbolLeOp,
+    SymbolLtOp,
     SymbolMulOp,
+    SymbolNeOp,
     SymbolSubOp,
+    SymbolToFloatOp,
     SymbolValueType,
 )
 from kernel_gen.dsl.ast import (
     AstParseError,
     BlockAST,
     BinaryExprAST,
+    CastExprAST,
     CompareExprAST,
     ConstAST,
     FunctionAST,
     ForAST,
     LoadAST,
+    MemoryQueryAST,
     SourceLocation,
     StoreAST,
     TensorAST,
@@ -210,6 +221,55 @@ def test_ast_parse_function_parses_annotations() -> None:
     assert len(func_ast.inputs) == 2
     assert isinstance(func_ast.inputs[0], TensorAST)
     assert isinstance(func_ast.inputs[1], ScalarArgAST)
+
+
+# AST-013
+# 创建者: 我不是牛马
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-25 17:05:14 +0800
+# 最近一次运行成功时间: 2026-03-25 17:05:14 +0800
+# 功能说明: 验证 parse_function 支持 symbol 标量返回注解与 JoinedStr Tensor 注解解析。
+# 测试目的: 验证 parse_function 支持 bool/float 返回注解、JoinedStr Tensor 注解以及 float/get_shape/get_stride 对应最小 DSL 表达式节点。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_ast_parse_function_supports_symbol_scalar_and_joinedstr_annotations
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_ast_parse_function_supports_symbol_scalar_and_joinedstr_annotations() -> None:
+    dim_name = "M"
+    stride_name = "N"
+
+    def compare(lhs: int, rhs: int) -> bool:
+        return lhs == rhs
+
+    def cast_value(value: int) -> float:
+        return float(value)
+
+    def get_dim(value: f"Tensor[f32, {dim_name}, {stride_name}]") -> int:
+        return value.get_shape()[1]
+
+    def get_stride(value: f"Tensor[f32, {dim_name}, {stride_name}]") -> int:
+        return value.get_stride()[0]
+
+    compare_ast = parse_function(compare)
+    cast_ast = parse_function(cast_value)
+    get_dim_ast = parse_function(get_dim)
+    get_stride_ast = parse_function(get_stride)
+
+    assert compare_ast.outputs[0].value_type is bool
+    assert isinstance(compare_ast.body.statements[0], CompareExprAST)
+
+    assert cast_ast.outputs[0].value_type is float
+    assert isinstance(cast_ast.body.statements[0], CastExprAST)
+
+    assert isinstance(get_dim_ast.inputs[0], TensorAST)
+    assert isinstance(get_dim_ast.body.statements[0], MemoryQueryAST)
+    assert get_dim_ast.body.statements[0].kind == "dim"
+    assert get_dim_ast.body.statements[0].axis == 1
+
+    assert isinstance(get_stride_ast.inputs[0], TensorAST)
+    assert isinstance(get_stride_ast.body.statements[0], MemoryQueryAST)
+    assert get_stride_ast.body.statements[0].kind == "stride"
+    assert get_stride_ast.body.statements[0].axis == 0
 
 
 # AST-003
@@ -512,6 +572,130 @@ def test_build_func_op_return_type_matches_annotation() -> None:
     assert outputs[0] == expected
 
 
+# MGEN-025
+# 创建者: 我不是牛马
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-25 17:05:14 +0800
+# 最近一次运行成功时间: 2026-03-25 17:05:14 +0800
+# 功能说明: 验证纯 symbol 标量比较函数 lowering 为对应的 symbol compare op。
+# 测试目的: 验证纯 symbol 标量比较函数在 eq/ne/lt/le/gt/ge 六类比较下都会生成对应的 symbol compare op 并返回 i1。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_lowers_symbol_compare_bool_return
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+@pytest.mark.parametrize(
+    ("name", "builder"),
+    [
+        ("eq", SymbolEqOp),
+        ("ne", SymbolNeOp),
+        ("lt", SymbolLtOp),
+        ("le", SymbolLeOp),
+        ("gt", SymbolGtOp),
+        ("ge", SymbolGeOp),
+    ],
+)
+def test_build_func_op_lowers_symbol_compare_bool_return(name: str, builder: type[object]) -> None:
+    def eq_func(lhs: int, rhs: int) -> bool:
+        return lhs == rhs
+
+    def ne_func(lhs: int, rhs: int) -> bool:
+        return lhs != rhs
+
+    def lt_func(lhs: int, rhs: int) -> bool:
+        return lhs < rhs
+
+    def le_func(lhs: int, rhs: int) -> bool:
+        return lhs <= rhs
+
+    def gt_func(lhs: int, rhs: int) -> bool:
+        return lhs > rhs
+
+    def ge_func(lhs: int, rhs: int) -> bool:
+        return lhs >= rhs
+
+    functions: dict[str, object] = {
+        "eq": eq_func,
+        "ne": ne_func,
+        "lt": lt_func,
+        "le": le_func,
+        "gt": gt_func,
+        "ge": ge_func,
+    }
+
+    func_op = build_func_op(functions[name], SymbolDim("M"), 4)
+    assert isinstance(func_op, func.FuncOp)
+    assert list(func_op.function_type.outputs) == [i1]
+    compare_ops = [op for op in func_op.body.block.ops if isinstance(op, builder)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
+    assert len(compare_ops) == 1
+    assert len(return_ops) == 1
+    assert return_ops[0].arguments[0].type == i1
+
+
+# MGEN-026 / EMIT-021
+# 创建者: 我不是牛马
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-25 17:05:14 +0800
+# 最近一次运行成功时间: 2026-03-25 17:05:14 +0800
+# 功能说明: 验证纯 symbol 标量 float() 转换经过 emit/mlir_gen lowering 为 symbol.to_float。
+# 测试目的: 验证纯 symbol 标量 float() 转换会生成 symbol.to_float 并返回 f32。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_lowers_symbol_to_float_return
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_lowers_symbol_to_float_return() -> None:
+    def to_float_func(value: int) -> float:
+        return float(value)
+
+    func_op = build_func_op(to_float_func, SymbolDim("S"))
+    assert isinstance(func_op, func.FuncOp)
+    assert list(func_op.function_type.outputs) == [f32]
+    cast_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolToFloatOp)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
+    assert len(cast_ops) == 1
+    assert len(return_ops) == 1
+    assert return_ops[0].arguments[0].type == f32
+
+
+# MGEN-027 / EMIT-022 / EMIT-023
+# 创建者: 我不是牛马
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-25 17:05:14 +0800
+# 最近一次运行成功时间: 2026-03-25 17:05:14 +0800
+# 功能说明: 验证 JoinedStr Tensor 注解下的内存查询会经过 emit/mlir_gen lowering 为 symbol 查询 op。
+# 测试目的: 验证 JoinedStr Tensor 注解与 get_shape/get_stride 查询会 lowering 为 symbol.get_dim/get_stride。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_lowers_symbol_memory_queries_from_joinedstr_annotations
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_lowers_symbol_memory_queries_from_joinedstr_annotations() -> None:
+    dim0_name = "M"
+    dim1_name = "N"
+    dim0 = SymbolDim(dim0_name)
+    dim1 = SymbolDim(dim1_name)
+    memory = Memory([dim0, dim1], NumericType.Float32)
+
+    def get_dim(value: f"Tensor[f32, {dim0_name}, {dim1_name}]") -> int:
+        return value.get_shape()[1]
+
+    def get_stride(value: f"Tensor[f32, {dim0_name}, {dim1_name}]") -> int:
+        return value.get_stride()[0]
+
+    dim_func = build_func_op(get_dim, memory)
+    stride_func = build_func_op(get_stride, memory)
+
+    dim_ops = [op for op in dim_func.body.block.ops if isinstance(op, SymbolGetDimOp)]
+    stride_ops = [op for op in stride_func.body.block.ops if isinstance(op, SymbolGetStrideOp)]
+    dim_returns = [op for op in dim_func.body.block.ops if isinstance(op, func.ReturnOp)]
+    stride_returns = [op for op in stride_func.body.block.ops if isinstance(op, func.ReturnOp)]
+    assert len(dim_ops) == 1
+    assert len(stride_ops) == 1
+    assert len(dim_returns) == 1
+    assert len(stride_returns) == 1
+    assert isinstance(dim_returns[0].arguments[0].type, SymbolValueType)
+    assert isinstance(stride_returns[0].arguments[0].type, SymbolValueType)
+
+
 # MGEN-003
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
@@ -608,11 +792,11 @@ def test_mlir_gen_parse_failure_wrapped(monkeypatch: pytest.MonkeyPatch) -> None
 
 # MGEN-007
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
-# 最近一次运行成功时间: 2026-03-23 10:30:00 +0800
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-25 09:32:58 +0800
+# 最近一次运行成功时间: 2026-03-25 09:32:58 +0800
 # 功能说明: 覆盖返回类型校验的错误分支。
-# 测试目的: 验证多返回、非法返回注解与不匹配类型时报错。
+# 测试目的: 验证多返回、未支持标量返回注解与不匹配类型时报错。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_mlir_gen_validate_return_type_errors
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -626,7 +810,7 @@ def test_mlir_gen_validate_return_type_errors() -> None:
     with pytest.raises(_LoweringError, match="Only single return value is supported"):
         _validate_return_type(func_multi, _memory_to_nn_type(memory))
 
-    func_scalar_bad = FunctionAST("bad", [scalar_out], [ScalarArgAST("f", float)], BlockAST([]))
+    func_scalar_bad = FunctionAST("bad", [scalar_out], [ScalarArgAST("s", str)], BlockAST([]))
     with pytest.raises(_LoweringError, match="Unsupported scalar return type"):
         _validate_return_type(func_scalar_bad, i32)
 
