@@ -73,3 +73,12 @@
   - 合入 kernel_gen/dsl/ast.py、kernel_gen/dsl/mlir_gen.py、spec/dsl/mlir_gen.md、test/dsl/test_ast_visitor.py。
   - 合入记录文件 agents/codex-multi-agents/log/task_records/2026/13/20260325-expectation-dsl-mlir-gen-dma-alloc.md。
 - 结论: 已完成合并提交，待回报。
+
+## 2026-03-26 02:40:03 +0800
+- 时间: 2026-03-26 02:40:03 +0800
+- 经手人: 朽木露琪亚
+- 任务: T-20260326-06e1f1aa cleanup
+- 任务目标: 确认 main 已包含 fe2f9af 后清理 worktree /home/lfr/kernelcode_generate/wt-20260325-expectation-dsl-mlir-gen-dma-alloc。
+- 改动:
+  - 确认 `fe2f9af` 已在 main：`git branch --contains fe2f9af` 显示 main 包含该提交。
+- 结论: 已完成 worktree 与分支清理。
