@@ -46,3 +46,13 @@
 - 任务目标：合入 nn.add 编号映射收敛变更，仅包含 spec/test 与记录文件。
 - 改动：合入 spec/pass/lowing/nn_to_kernel.md、test/pass/test_lowing_nn_to_kernel.py 与记录文件。
 - 结论：已完成合并提交，待回报。
+
+- 时间：2026-03-26 02:51:21 +0800
+- 经办人：我不是牛马
+- 任务：T-20260326-c6a22d7e cleanup
+- 任务目标：确认 main 包含 8474bfe 后清理 worktree /home/lfr/kernelcode_generate/wt-20260325-expectation-pass-lowing-nn-to-kernel-add 并删除分支。
+- 改动：
+  - 核对 `main` 包含 `8474bfe`（`git branch --contains 8474bfe` 返回 `main`）。
+  - 清理 worktree `/home/lfr/kernelcode_generate/wt-20260325-expectation-pass-lowing-nn-to-kernel-add`。
+  - 删除分支 `wt-20260325-expectation-pass-lowing-nn-to-kernel-add`。
+- 结论：清理完成，worktree 与分支均已移除。

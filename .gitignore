@@ -2,16 +2,10 @@ tmp
 **pytest_cache**
 agents/codex-multi-agents/config
 **__pycache__**
-run_periodically
 main
 temp
-log.txt
 .coverage
 command.txt
 .vscode
 *.lock
-agents-lists.mds
-TODO.md
-DONE.md
-agents-lists.md
 
