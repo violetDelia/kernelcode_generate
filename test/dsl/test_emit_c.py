@@ -45,7 +45,7 @@ class UnsupportedOp(IRDLOperation):
     name = "test.unsupported"
     result = result_def(i32)
 
-    def __init__(self) -> None:
+    def __init__(self: "UnsupportedOp") -> None:
         super().__init__(result_types=[i32])
 
 
@@ -92,7 +92,7 @@ def test_emit_c_op_lowers_arith_add() -> None:
     assert repeated == "int32_t v0 = v0;"
 
     class _Allocator:
-        def allocate(self, _value) -> str:
+        def allocate(self: "_Allocator", _value: object) -> str:
             return "named"
 
     ctx_named = EmitCContext(target="cpu", naming=_Allocator())
@@ -111,7 +111,7 @@ def test_emit_c_op_lowers_arith_add() -> None:
     assert emit_c_op(op, ctx_converter) == "custom v0 = (lhs + rhs);"
 
     class _Converter:
-        def convert(self, _attr) -> str:
+        def convert(self: "_Converter", _attr: object) -> str:
             return "custom2"
 
     ctx_convert = EmitCContext(target="cpu", type_converter=_Converter())
