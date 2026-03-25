@@ -1,0 +1,55 @@
+- 时间：`2026-03-25 08:38:00 +0800`
+- 经办人：`朽木露琪亚`
+- 任务：`T-20260325-65fec47c`
+- 任务目标：恢复 `/home/lfr/kernelcode_generate/wt-20260325-expectation-alloc-root`，以主工作目录 `expectation/alloc.py` 为唯一优先基线，收敛 alloc expectation 与对应 spec/实现/测试闭环，并在已获授权前提下最小修改 `expectation/alloc.py`。
+- 改动：
+  - 恢复缺失的 worktree：新建 `/home/lfr/kernelcode_generate/wt-20260325-expectation-alloc-root` 并沿用同名分支 `wt-20260325-expectation-alloc-root`。
+  - 只读核对 `spec/operation/dma.md`、`kernel_gen/operation/dma.py`、`test/operation/test_operation_dma.py` 与现有 alloc/free 测试清单，确认 `alloc(shape, dtype, space=MemorySpace.GM, stride=None)` 的公开语义、错误边界与 `TC-OP-DMA-AF-001..007` 已闭环，不需要本轮修改 spec/实现/测试。
+  - 更新 `expectation/alloc.py`，移除错误的 `mlir_gen/nn.add` 链路内容，改为与 DMA alloc 高层 API 一致的 expectation：覆盖指定 `shape/dtype/space` 返回值、默认 `space/stride`、显式 `stride` 与 `dtype/space/shape/stride` 错误路径。
+  - 执行 `python expectation/alloc.py`，结果通过。
+  - 执行 `pytest -q test/operation/test_operation_dma.py -k 'alloc or free'`，结果 `7 passed, 28 deselected`。
+- 结论：已完成本轮 expectation 续作收敛。当前主基线 `expectation/alloc.py` 已与 `spec/operation/dma.md`、`kernel_gen/operation/dma.py`、`test/operation/test_operation_dma.py` 对齐；本轮无需改动 spec/实现/测试。建议下一阶段创建严格复审任务，重点核对 root `expectation/alloc.py` 与 `expectation/operation/dma/alloc.py` 是否应继续并存，以及两者文档信息与行为语义是否需要统一收口。
+
+- 时间：`2026-03-25 21:10:00 +0800`
+- 执行人：`小李飞刀`
+- 经办人：`小李飞刀`
+- 任务：`T-20260325-b8f66c6a`
+- 任务目标：严格复审 `/home/lfr/kernelcode_generate/wt-20260325-expectation-alloc-root` 中 alloc root expectation 链路，核对 `expectation/alloc.py` 与 `expectation/operation/dma/alloc.py` 是否应继续并存，并检查其文档信息、行为语义与 `spec/operation/dma.md`、`kernel_gen/operation/dma.py`、`test/operation/test_operation_dma.py` 的闭环一致性。
+- 改动：
+  - 只读核对主分支 `TODO.md`，确认任务 `T-20260325-b8f66c6a` 当前状态为 `进行中`。
+  - 只读比对主工作目录与当前 worktree 中的 `expectation/alloc.py`、`expectation/operation/dma/alloc.py`。
+  - 只读核对 `spec/operation/dma.md`、`kernel_gen/operation/dma.py`、`test/operation/test_operation_dma.py` 的 alloc/free 公开语义、测试映射与参数类型提示情况；本轮未复测。
+- 结论：`需修改`。1）主工作目录 `expectation/alloc.py` 仍是错误链路内容，文件头与行为指向 DSL `nn.add`，与 alloc expectation 审查目标不一致，当前 main 基线未形成 alloc 闭环。2）当前 worktree 虽将 `expectation/alloc.py` 修正为 DMA alloc 语义，但它与 `expectation/operation/dma/alloc.py` 在文档信息与断言行为上几乎完全重复，`spec/operation/dma.md`、`kernel_gen/operation/dma.py`、`test/operation/test_operation_dma.py` 仅证明了 alloc API 语义正确，并未定义两个 expectation 文件各自的职责边界，因此“继续并存”缺少可验证依据。建议下一阶段创建最小实现/收口任务：明确唯一权威 alloc expectation 路径，或为两个 expectation 文件补齐不重叠的职责划分与映射，再进入复审。
+
+- 时间：`2026-03-25 08:46:48 +0800`
+- 执行人：`金铲铲大作战`
+- 经办人：`金铲铲大作战`
+- 任务：`T-20260325-84dbd40f`
+- 任务目标：最小收口 alloc root expectation，消除 `expectation/alloc.py` 与 `expectation/operation/dma/alloc.py` 的重复语义，并将 root 文件收敛为可验证的兼容入口。
+- 改动：
+  - 只读核对主分支 `TODO.md`，确认当前有效任务为 `T-20260325-84dbd40f`。
+  - 将 `expectation/alloc.py` 改为最小兼容入口：保留 root 执行入口与文档信息，删除重复的 alloc 断言实现，改为直接导入 `expectation.operation.dma.alloc` 复用其既有 expectation 行为。
+  - 保持 `expectation/operation/dma/alloc.py` 不变，继续作为 alloc expectation 的语义权威文件。
+  - 执行 `python expectation/alloc.py`，结果通过。
+  - 执行 `python expectation/operation/dma/alloc.py`，结果通过。
+  - 执行 `pytest -q test/operation/test_operation_dma.py -k 'alloc or free'`，结果 `7 passed, 28 deselected`。
+- 结论：已完成本轮最小收口。`expectation/alloc.py` 现仅承担 root 兼容/转发职责，重复断言已收敛到 `expectation/operation/dma/alloc.py` 单一路径，复审问题可直接围绕“root 入口是否正确复用权威 alloc expectation”继续验证。建议下一阶段创建严格复审任务，确认 root 兼容入口的职责边界与文档口径是否足够稳定，然后再决定是否合并。
+
+- 时间：`2026-03-25 08:50:25 +0800`
+- 经办人：`李白`
+- 任务：`T-20260325-d2267bdb`
+- 任务目标：严格复审 alloc root expectation 最小收口结果，核对 `expectation/alloc.py` 作为 root 兼容/转发入口的职责边界、其与 `expectation/operation/dma/alloc.py` 的复用关系，以及它们与 `spec/operation/dma.md`、`kernel_gen/operation/dma.py`、`test/operation/test_operation_dma.py` 的闭环一致性。
+- 改动：
+  - 只读核对主分支 `TODO.md`，确认当前有效任务为 `T-20260325-d2267bdb`，worktree 为 `/home/lfr/kernelcode_generate/wt-20260325-expectation-alloc-root`。
+  - 只读核对 `expectation/alloc.py` 与 `expectation/operation/dma/alloc.py`，确认 root 文件当前仅保留兼容入口职责：通过 `import_module("expectation.operation.dma.alloc")` 复用权威 alloc expectation 断言，不再重复维护第二套 alloc 语义；`expectation/operation/dma/alloc.py` 仍是实际承载 alloc 断言与错误路径的唯一语义权威文件。
+  - 只读核对 `spec/operation/dma.md`、`kernel_gen/operation/dma.py`、`test/operation/test_operation_dma.py`，确认 `alloc(shape, dtype, space=MemorySpace.GM, stride=None)` 与 `free(value)` 的公开语义、`TC-OP-DMA-AF-001..007` 映射及现有测试断言与权威 expectation 一致；同时复查本轮审查范围内 Python 文件参数类型提示，未发现缺失。本轮未复测，沿用链路已有结果：`python expectation/alloc.py` 通过、`python expectation/operation/dma/alloc.py` 通过、`pytest -q test/operation/test_operation_dma.py -k 'alloc or free'` 为 `7 passed, 28 deselected`。
+- 结论：`通过`。当前 `expectation/alloc.py` 的职责已收敛为 root 兼容/转发入口，不再与 `expectation/operation/dma/alloc.py` 重复承载 alloc 断言；后者作为唯一权威 expectation，与 [`spec/operation/dma.md`](../../../../../../spec/operation/dma.md) 中 `TC-OP-DMA-AF-001..007` 的 alloc/free 语义、[`kernel_gen/operation/dma.py`](../../../../../../kernel_gen/operation/dma.py) 的实现，以及 [`test/operation/test_operation_dma.py`](../../../../../../test/operation/test_operation_dma.py) 的测试映射保持一致。建议下一步由神秘人按主分支 TODO 决定是否进入合并/收尾阶段，无需再拆分新的 alloc root 改进任务。
+
+- 时间：`2026-03-25 08:57:05 +0800`
+- 经办人：`我不是牛马`
+- 任务：`T-20260325-c61dc293`
+- 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-alloc-root`，将 alloc root expectation 链路按限定范围合入 `main`，仅带入 `expectation/alloc.py` 与对应记录文件。
+- 改动：
+  - 核对 worktree 当前仅存在 `expectation/alloc.py` 与 `agents/codex-multi-agents/log/task_records/2026/12/20260325-expectation-alloc-root.md` 的待合入差异；历史任务 `T-20260325-364a3440` 状态为暂停，不构成新的进行中业务改动。
+  - 计划仅将上述两个文件合入主分支，并在主分支执行 `python expectation/alloc.py` 作为最小验证。
+- 结论：满足限定范围合并前提，可执行主分支合并与验证。
