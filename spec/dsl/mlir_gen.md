@@ -49,6 +49,7 @@
 - DSL 函数体内允许出现 `alloc`、`copy`、`cast`、`view`、`reshape`、`flatten`、`free`、`load`、`store`、`slice`、`deslice` 这组 DMA helper 调用；其公开语义由 `emit_mlir` 负责落实到具体 lowering。
 - `flatten(x)` 在 DSL 公开契约中视为一维重排 helper，要求保留元素总数并输出一维 memory 结果；不要求存在独立的 dialect op。
 - `free(x)` 在 DSL 公开契约中是语句型 helper，不产生新的 SSA 返回值，也不能作为函数返回值直接 lowering 为独立结果。
+- `build_func_op` 必须拒绝函数体内直接引用外部定义值；除显式 `runtime_args`、局部常量字面量与受支持 DSL helper 外，外部值不得作为隐式输入参与 lowering。
 - 如需 `builtin.module` 封装，由调用方完成。
 
 ## 公开接口
@@ -83,6 +84,7 @@ func_op = build_func_op(only_symbol, s)
 
 - 解析失败或发射失败必须抛出可定位的错误。
 - `globals` / `builtins` 只用于补充源码解析环境，不能改变函数签名推导行为，也不能替代 `runtime_args`。
+- `globals` / `builtins` 仅可用于注解、helper 名称等解析辅助；若函数体直接引用外部定义值，`build_func_op` 必须拒绝，而不是将该值当作局部常量或隐式输入继续 lowering。
 - `build_func_op` 不接收 `config`；如需 `config`，应改用 `build_func_op_from_ast(...)`。
 - `runtime_args` 的个数必须与函数形参数量一致。
 - `build_func_op` 仅保证可位置绑定形参按位置顺序接收 `runtime_args`。
@@ -155,6 +157,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - 验证 `build_func_op_from_ast(func_ast, runtime_args=None, config=None)` 的公开接口与实现签名一致，且 `runtime_args` / `config` 成功路径可由测试直接观察。
   - 验证 `build_func_op_from_ast(...)` 的输入校验错误路径，包括空输入、`runtime_args` 长度不匹配、未支持的标量类型、未支持的输入节点类型，以及非纯 symbol 标量函数缺少 tensor 输入时报错。
   - 验证 `globals/builtins` 只补充解析环境，不替代运行时参数；缺少运行时参数、运行时实参数量不匹配或误用 `globals/builtins` 时必须报错。
+  - 验证 `build_func_op` 会拒绝函数体直接引用外部定义值，且不会把外部值当作局部常量或隐式输入参与 lowering。
   - 验证非 `dict` 的 `builtins` 实参可作为解析环境输入成功构建 `func.func`。
   - 验证函数签名与返回值类型与 AST 一致。
   - 通过测试辅助封装验证 `func.func` 的结构输出（不改变本模块的边界）。
@@ -197,3 +200,4 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - MGEN-020：`build_func_op(add, lhs, rhs)` 对普通 Python `int` runtime args 的 lowering 必须产出携带具体整数值的 `SymbolValueType` 输入；若实参包含负数，其对外字符串表示必须保持 `symbol.int<-3>` 这类十进制负数字面量口径，并在函数体内生成 `symbol.add` 结果。（`test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type`）
   - MGEN-025：Tensor 注解支持普通字符串字面量与可静态归一化的 `f"Tensor[...]"` 两种源码形式；若归一化结果不满足 Tensor 语法则必须报错。（`test_build_func_op_accepts_joinedstr_tensor_annotation`、`test_build_func_op_rejects_invalid_joinedstr_tensor_annotation`）
   - MGEN-026：DMA helper 调用在 `build_func_op(...)` 链路中按公开语义分流：`alloc/copy/cast/view/reshape/flatten` 生成对应 memory 结果，`free` 作为无返回值语句参与 lowering，`load/store/slice/deslice` 保持既有 memory 读写行为。（`test_build_func_op_supports_dma_helper_calls`、`test_build_func_op_supports_dma_free_statement`、`test_build_func_op_supports_dma_load_helper`、`test_build_func_op_supports_dma_store_helper`、`test_build_func_op_supports_dma_slice_helper`、`test_build_func_op_supports_dma_deslice_helper`）
+  - MGEN-027：`build_func_op` 必须拒绝函数体中直接使用外部定义值；外部值不得被解释为局部常量、隐式输入或其他可 lowering 的合法操作数，并应返回包含 `cannot use external value inside function body` 的错误信息。该约束至少覆盖闭包捕获值、全局名称、`builtins` 补充表中的外部值，以及 `module.CONST` 这类 Attribute 形式的外部值。（`test_build_func_op_rejects_external_value_reference_inside_function_body`、`test_build_func_op_rejects_global_external_value_reference`、`test_build_func_op_rejects_builtins_external_value_reference`、`test_build_func_op_rejects_attribute_external_value_reference`）

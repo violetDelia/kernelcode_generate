@@ -1,7 +1,7 @@
 """DSL AST definitions.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 我不是牛马
 
 功能说明:
 - 定义 DSL 前端使用的 AST 节点数据结构。
@@ -28,6 +28,8 @@ from typing import Iterable
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
+
+_REJECT_EXTERNAL_VALUES_ENV_KEY = "__dsl_reject_external_values__"
 
 
 @dataclass(frozen=True)
@@ -991,6 +993,28 @@ def _parse_attribute_object(
     return getattr(base, expr.attr)
 
 
+def _is_allowed_attribute_value(value: object) -> bool:
+    """判断属性表达式是否属于 DSL 允许的静态值。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 仅允许 `MemorySpace.*` 与 `NumericType.*` 这类 DSL 静态属性值参与函数体解析。
+    - 拒绝将其他 Attribute 形式的外部值当作局部常量或隐式输入继续 lowering。
+
+    使用示例:
+    - _is_allowed_attribute_value(MemorySpace.LM)
+
+    关联文件:
+    - spec: spec/dsl/mlir_gen.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    return isinstance(value, (MemorySpace, NumericType))
+
+
 def _resolve_call_base_object(
     expr: py_ast.expr,
     globals_table: dict[str, object],
@@ -1306,6 +1330,8 @@ def _parse_expr(
         if expr.id in env:
             return env[expr.id]
         value = _lookup_python_name(expr.id, globals_table, builtins_table)
+        if value is not None and bool(env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)):
+            _raise_parse_error("cannot use external value inside function body", expr)
         if isinstance(value, Memory):
             return TensorAST(name=expr.id, memory=value, location=_location_from_node(expr))
         if isinstance(value, SymbolDim):
@@ -1328,7 +1354,10 @@ def _parse_expr(
         return tuple(_parse_expr(item, env, globals_table, builtins_table) for item in expr.elts)
 
     if isinstance(expr, py_ast.Attribute):
-        return _parse_attribute_object(expr, globals_table, builtins_table)
+        value = _parse_attribute_object(expr, globals_table, builtins_table)
+        if bool(env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)) and not _is_allowed_attribute_value(value):
+            _raise_parse_error("cannot use external value inside function body", expr)
+        return value
 
     if isinstance(expr, py_ast.Call):
         return _parse_dma_call(expr, env, globals_table, builtins_table)
@@ -1436,7 +1465,7 @@ def _parse_function_impl(
     runtime_table: dict[str, object] | None = None,
     config: dict[str, object] | None = None,
 ) -> FunctionAST:
-    del config
+    reject_external_values = bool((config or {}).get("reject_external_values", False))
     if globals_table is None:
         globals_table = getattr(fn, "__globals__", {}) or {}
     if builtins_table is None:
@@ -1462,6 +1491,8 @@ def _parse_function_impl(
         raise AstParseError("Function definition not found", [Diagnostic("Function definition not found", None)])
 
     env: dict[str, object] = {}
+    if reject_external_values:
+        env[_REJECT_EXTERNAL_VALUES_ENV_KEY] = True
     inputs: list[TensorAST | ScalarArgAST] = []
     for arg in func_def.args.args:
         parsed = _parse_annotation_node(arg.annotation, arg.arg, globals_table, builtins_table, runtime_table)
