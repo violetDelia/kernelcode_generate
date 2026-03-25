@@ -705,6 +705,96 @@ def test_build_func_op_supports_dma_helper_calls() -> None:
     assert any(isinstance(op, DmaReshapeOp) for op in flatten_func.body.block.ops)
 
 
+# MGEN-026A
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-25 22:17:59 +0800
+# 最近一次运行成功时间: 2026-03-25 22:17:59 +0800
+# 功能说明: 验证 build_func_op 支持仅依赖标量 runtime_args 的 DMA alloc-only kernel。
+# 测试目的: 验证 alloc-only kernel 会将 runtime shape 参数 lowering 为 symbol.int 输入，并保持 dma.alloc 结果类型与返回注解一致。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_supports_dma_alloc_helper_with_runtime_shape_args
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_supports_dma_alloc_helper_with_runtime_shape_args(monkeypatch: pytest.MonkeyPatch) -> None:
+    from kernel_gen.operation.dma import alloc
+
+    rows = 2
+    cols = 3
+    source = """
+def alloc_kernel(rank1, rank2) -> f"Tensor[f32, {ALLOC_ROWS}, {ALLOC_COLS}]":
+    return alloc([rank1, rank2], NumericType.Float32, MemorySpace.SM)
+"""
+    namespace = {
+        "alloc": alloc,
+        "NumericType": NumericType,
+        "MemorySpace": MemorySpace,
+        "ALLOC_ROWS": rows,
+        "ALLOC_COLS": cols,
+    }
+    exec(source, namespace)
+    alloc_kernel = namespace["alloc_kernel"]
+
+    def fake_getsource(_obj: object) -> str:
+        return source
+
+    monkeypatch.setattr(inspect, "getsource", fake_getsource)
+
+    func_op = build_func_op(alloc_kernel, rows, cols)
+    alloc_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaAllocOp)]
+
+    assert list(func_op.function_type.inputs) == [
+        SymbolValueType.from_expr(str(rows)),
+        SymbolValueType.from_expr(str(cols)),
+    ]
+    assert len(alloc_ops) == 1
+    assert list(alloc_ops[0].dynamic_shape) == list(func_op.body.block.args)
+    assert alloc_ops[0].result.type.space == NnMemorySpaceAttr.from_name("shared")
+    assert [attr.data for attr in alloc_ops[0].result.type.shape.data] == [rows, cols]
+    assert list(func_op.function_type.outputs) == [alloc_ops[0].result.type]
+
+
+# MGEN-026A
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-25 22:17:59 +0800
+# 最近一次运行成功时间: 2026-03-25 22:17:59 +0800
+# 功能说明: 覆盖 alloc-only runtime_args 无法映射为 !symbol.int 时的错误分支。
+# 测试目的: 验证 alloc-only kernel 遇到非法 runtime_args 类型会报错并与 MGEN-002B 保持一致。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_dma_alloc_helper_with_invalid_runtime_shape_args
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_rejects_dma_alloc_helper_with_invalid_runtime_shape_args(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.dma import alloc
+
+    rows = 2
+    cols = 3
+    source = """
+def alloc_kernel(rank1: int, rank2: int) -> f"Tensor[f32, {ALLOC_ROWS}, {ALLOC_COLS}]":
+    return alloc([rank1, rank2], NumericType.Float32, MemorySpace.SM)
+"""
+    namespace = {
+        "alloc": alloc,
+        "NumericType": NumericType,
+        "MemorySpace": MemorySpace,
+        "ALLOC_ROWS": rows,
+        "ALLOC_COLS": cols,
+    }
+    exec(source, namespace)
+    alloc_kernel = namespace["alloc_kernel"]
+
+    def fake_getsource(_obj: object) -> str:
+        return source
+
+    monkeypatch.setattr(inspect, "getsource", fake_getsource)
+
+    with pytest.raises(AstVisitorError, match="Unsupported scalar argument type"):
+        build_func_op(alloc_kernel, 1.5, cols)
+
+
 # MGEN-026
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚

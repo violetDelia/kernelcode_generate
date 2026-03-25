@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`不要啊教练`
 - `spec`：[`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
 - `功能实现`：[`kernel_gen/dsl/mlir_gen.py`](../../kernel_gen/dsl/mlir_gen.py)
 - `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
@@ -38,9 +38,10 @@
 - `build_func_op` 的公开契约仅覆盖可位置绑定的形参；`runtime_args` 必须按这些形参的顺序传入。
 - 运行时参数必须按目标函数形参顺序传入；数量不一致、顺序不一致或类型无法映射时必须报错。
 - 运行时参数的类型 lowering 必须基于“实际传入的参数对象”决定，而不是基于额外配置推断。
-- `build_func_op_from_ast` 要求 `func_ast.inputs` 非空；若提供 `runtime_args`，其长度必须与 `func_ast.inputs` 一致；若输入包含未支持的 AST 类型、未支持的标量类型，或函数既不属于纯 symbol 标量函数又缺少 tensor 输入时，必须报错。
+- `build_func_op_from_ast` 要求 `func_ast.inputs` 非空；若提供 `runtime_args`，其长度必须与 `func_ast.inputs` 一致；若输入包含未支持的 AST 类型、未支持的标量类型，或函数既不属于纯 symbol 标量函数、也不属于仅通过 `alloc(...)` 返回 memory 结果的 DMA alloc-only kernel 且缺少 tensor 输入时，必须报错。
 - 当运行时参数为 `SymbolDim("s")` 这类 symbol 标量时，对应的 `func.func` 输入必须 lowering 为 `!symbol.int<"s">`；若为常量 symbol，例如 `SymbolDim(1)`，则必须 lowering 为 `!symbol.int<"1">`。
 - 当运行时参数是 Python `int` 且函数场景属于 symbol 整型标量运算时，对应的 `func.func` 输入必须 lowering 为携带具体整数值的 `SymbolValueType`，不得退回 `i32`、`index` 或其他 builtin 标量类型；若整数值为负数，对外字符串表示必须直接表现为十进制负数字面量，例如 `symbol.int<-7>`。
+- DMA alloc-only kernel 的 `runtime_args` 必须可映射为 `SymbolValueType` 并 lower 为 `!symbol.int<...>`；若实参类型无法映射为 symbol 标量，必须报错。
 - 当函数体仅包含 `for` 循环且没有 `return` 时，输出 `func.func` 允许零返回值。
 - 当 `ForAST` 来源于 `LoopRange(start, end, step)` 且循环边界保持 symbol 整数语义时，lowering 后必须生成 `symbol.for`，不得退回 `scf.for`；其循环块参数 `it` 必须为 `!symbol.int<"expr">`。
 - `LoopRange` 场景中的循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand，必须直接保持 `!symbol.int<"expr">` 语义传递，不得额外生成 `arith.index_cast`。
@@ -89,6 +90,8 @@ func_op = build_func_op(only_symbol, s)
 - 张量类运行时参数应按其对应 spec lowering 为项目内的 memory type。
 - `SymbolDim("s")` 这类运行时参数必须 lowering 为 `!symbol.int<"s">`；`SymbolDim(1)` 这类常量 symbol 必须 lowering 为 `!symbol.int<"1">`。
 - 当 `runtime_args` 为普通 Python `int` 且函数场景属于整型标量运算时，输入参数必须 lowering 为携带该整数值的 `SymbolValueType`，而不是 builtin 整数类型；负数实参的对外字符串表示必须保持 `symbol.int<-3>` 这类十进制负数字面量形式。
+- 当函数体唯一返回值为 `alloc(shape, dtype, space[, stride])` 时，允许函数只接收用于 `shape` 的标量 `runtime_args` 而不提供 tensor 输入；这类 DMA alloc-only kernel 仍必须生成 `func.func`，并把 `alloc(...)` 作为返回值表达式参与 lowering。
+- DMA alloc-only kernel 的 `runtime_args` 必须可 lowering 为 `!symbol.int<...>`；若实参类型无法映射为 `SymbolValueType`，应报错并与 `build_func_op_from_ast(...)` 的未支持标量类型错误路径保持一致。
 - 允许 `for` 循环内包含 `dma.slice`/`dma.deslice` 相关语义；当循环来自 `LoopRange` 且边界为 symbol 整数时，必须保留 `symbol.for` 结构，且迭代变量 `it` 不能退化为 `index`、`i32`、浮点或其他非 `SymbolValueType`。
 - 当函数场景为纯 symbol 标量函数时，输入参数与返回值都必须 lowering 为 `!symbol.int<"expr">`。
 - 当函数场景为纯 symbol 整型标量算术时，函数体中的 `+`、`-`、`*`、`/`、`//` 必须分别 lowering 为 `symbol.add`、`symbol.sub`、`symbol.mul`、`symbol.div`、`symbol.floordiv`，且结果类型保持为 `SymbolValueType`。
@@ -136,7 +139,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
 - `runtime_args` 省略时，输入签名按 AST 注解 lowering；提供时，必须与 `func_ast.inputs` 一一对应，并以实际运行时参数语义驱动签名 lowering。
 - `config` 只用于 visitor / lowering 配置透传，不得替代 `runtime_args`，也不得改变由 `runtime_args` 决定的输入签名。
 - `func_ast.inputs` 不能为空；若提供 `runtime_args`，长度必须与 `func_ast.inputs` 一致。
-- 若 AST 输入包含未支持的节点类型、未支持的标量类型，或函数既不属于纯 symbol 标量函数又缺少 tensor 输入，必须报错。
+- 若 AST 输入包含未支持的节点类型、未支持的标量类型，或函数既不属于纯 symbol 标量函数、也不属于仅通过 `alloc(...)` 返回 memory 结果的 DMA alloc-only kernel 且缺少 tensor 输入，必须报错。
 - 若 `runtime_args` 中存在 `SymbolDim("s")` 这类 symbol 标量，对应输入必须 lowering 为 `!symbol.int<"s">`。
 - 若 AST 仅包含符号标量输入/输出，则生成的 `func.func` 签名必须保持 `!symbol.int<"expr">` 输入与返回，不得改写为 builtin 标量类型。
 
@@ -166,6 +169,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - 验证 `LoopRange + slice/deslice` 场景生成 `symbol.for + dma.slice/dma.deslice`，且循环相关 lowering 不生成 `arith.index_cast`。
   - 验证 Tensor 注解可接受普通字符串字面量与可静态归一化的 `f"Tensor[...]"` 两种源码形式，并在归一化失败时报错。
   - 验证 DMA helper 调用在 `build_func_op(...)` 链路中被识别为受支持 DSL 公开能力：`alloc/copy/cast/view/reshape/flatten` 作为返回值表达式参与 lowering，`free` 作为无返回值语句参与 lowering。
+  - 验证 DMA alloc-only kernel 可在无 tensor 输入时接收标量 `runtime_args` 作为 `shape` 来源，并配合 `f"Tensor[...]"` 返回注解生成 `func.func` 与 `dma.alloc`。
 - 功能与用例清单：
   - MGEN-001：`build_func_op(...)` 返回 `func.func`。（`test_build_func_op_returns_func_op`）
   - MGEN-001A：`build_func_op(...)` 的输入签名只由 `runtime_args` 决定；即使 `globals` 中存在同名对象且额外传入 `builtins`，成功路径的签名推导也不得被解析环境覆盖。（`test_build_func_op_signature_uses_runtime_args_not_parse_env`）
@@ -197,3 +201,4 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - MGEN-020：`build_func_op(add, lhs, rhs)` 对普通 Python `int` runtime args 的 lowering 必须产出携带具体整数值的 `SymbolValueType` 输入；若实参包含负数，其对外字符串表示必须保持 `symbol.int<-3>` 这类十进制负数字面量口径，并在函数体内生成 `symbol.add` 结果。（`test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type`）
   - MGEN-025：Tensor 注解支持普通字符串字面量与可静态归一化的 `f"Tensor[...]"` 两种源码形式；若归一化结果不满足 Tensor 语法则必须报错。（`test_build_func_op_accepts_joinedstr_tensor_annotation`、`test_build_func_op_rejects_invalid_joinedstr_tensor_annotation`）
   - MGEN-026：DMA helper 调用在 `build_func_op(...)` 链路中按公开语义分流：`alloc/copy/cast/view/reshape/flatten` 生成对应 memory 结果，`free` 作为无返回值语句参与 lowering，`load/store/slice/deslice` 保持既有 memory 读写行为。（`test_build_func_op_supports_dma_helper_calls`、`test_build_func_op_supports_dma_free_statement`、`test_build_func_op_supports_dma_load_helper`、`test_build_func_op_supports_dma_store_helper`、`test_build_func_op_supports_dma_slice_helper`、`test_build_func_op_supports_dma_deslice_helper`）
+  - MGEN-026A：DMA alloc-only kernel 允许仅依赖标量 `runtime_args` 构造 `shape` 并返回 `alloc(...)` 结果；该链路必须同时保持 `f"Tensor[...]"` 返回注解、`func.func` 构造与 `dma.alloc` lowering 一致；`runtime_args` 必须可 lowering 为 `!symbol.int<...>`，不支持的标量类型必须报错并与 `MGEN-002B` 的未支持标量类型错误路径保持一致。（`test_build_func_op_supports_dma_alloc_helper_with_runtime_shape_args`、`test_build_func_op_rejects_dma_alloc_helper_with_invalid_runtime_shape_args`）
