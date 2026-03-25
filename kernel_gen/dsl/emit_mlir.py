@@ -67,6 +67,7 @@ from kernel_gen.dialect.nn import (
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
     SymbolDivOp,
+    SymbolEqOp,
     SymbolFloorDivOp,
     SymbolForOp,
     SymbolMulOp,
@@ -775,6 +776,11 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
     if isinstance(expr, CompareExprAST):
         lhs_type = _infer_expr_type(expr.lhs, type_map)
         rhs_type = _infer_expr_type(expr.rhs, type_map)
+        if isinstance(lhs_type, SymbolValueType) and isinstance(rhs_type, SymbolValueType):
+            if expr.op != "eq":
+                raise _LoweringError("Unsupported symbol compare op", location=expr.location)
+            type_map[expr_key] = i1
+            return i1
         if not isinstance(lhs_type, NnMemoryType) or not isinstance(rhs_type, NnMemoryType):
             raise _LoweringError("Compare op operands must have nn.memory type", location=expr.location)
         if lhs_type == rhs_type:
@@ -975,6 +981,15 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     if isinstance(expr, CompareExprAST):
         lhs = _lower_expr(expr.lhs, ctx)
         rhs = _lower_expr(expr.rhs, ctx)
+        lhs_attr = getattr(lhs, "type", None)
+        rhs_attr = getattr(rhs, "type", None)
+        if isinstance(lhs_attr, SymbolValueType) and isinstance(rhs_attr, SymbolValueType):
+            if expr.op != "eq":
+                raise _LoweringError("Unsupported symbol compare op", location=expr.location)
+            op = SymbolEqOp(lhs, rhs, i1)
+            ctx.builder.add_op(op)
+            ctx._set_cache(expr_key, op.result)
+            return op.result
         lhs_type = _expect_memory_value(lhs, expr.location)
         rhs_type = _expect_memory_value(rhs, expr.location)
         if lhs_type != rhs_type:

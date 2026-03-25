@@ -23,7 +23,7 @@ import inspect
 from typing import Callable
 
 from xdsl.dialects import func
-from xdsl.dialects.builtin import FunctionType, i32
+from xdsl.dialects.builtin import FunctionType, i1, i32
 from xdsl.ir import Block, Region
 
 from kernel_gen.dialect.nn import NnMemoryType
@@ -52,7 +52,7 @@ def _is_symbol_scalar_function(func_ast: FunctionAST) -> bool:
         return False
     if not func_ast.outputs:
         return True
-    return all(isinstance(item, ScalarArgAST) and item.value_type is int for item in func_ast.outputs)
+    return all(isinstance(item, ScalarArgAST) and item.value_type in {int, bool} for item in func_ast.outputs)
 
 
 def _is_symbol_scalar_arg(item: ScalarArgAST, *, is_symbol_scalar_function: bool) -> bool:
@@ -204,16 +204,19 @@ def _validate_return_type(func_ast: FunctionAST, result_type: object) -> None:
             raise _LoweringError("Return type does not match annotation", location=func_ast.location)
         return
     elif isinstance(output, ScalarArgAST):
-        if output.value_type is not int:
-            raise _LoweringError("Unsupported scalar return type", location=output.location)
-        if not func_ast.inputs and isinstance(result_type, SymbolValueType):
-            return
-        if _is_symbol_scalar_function(func_ast):
-            if isinstance(result_type, SymbolValueType):
+        if output.value_type is bool:
+            expected_type = i1
+        elif output.value_type is int:
+            if not func_ast.inputs and isinstance(result_type, SymbolValueType):
                 return
-            expected_type = SymbolValueType.from_expr(output.name)
+            if _is_symbol_scalar_function(func_ast):
+                if isinstance(result_type, SymbolValueType):
+                    return
+                expected_type = SymbolValueType.from_expr(output.name)
+            else:
+                expected_type = i32
         else:
-            expected_type = i32
+            raise _LoweringError("Unsupported scalar return type", location=output.location)
     else:
         raise _LoweringError("Unsupported return annotation type", location=getattr(output, "location", None))
     if result_type != expected_type:
