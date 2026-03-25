@@ -1,7 +1,7 @@
 """AST emit utilities for DSL nodes.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 我不是牛马
 
 功能说明:
 - 提供 AST 节点到 MLIR SSA value/op 的发射入口。
@@ -37,6 +37,7 @@ from xdsl.dialects.builtin import (
 )
 from xdsl.ir import Attribute, Block, SSAValue
 
+from kernel_gen.dialect.arch import ArchGetBlockIdOp
 from kernel_gen.dialect.dma import (
     DmaAllocOp,
     DmaCastOp,
@@ -77,6 +78,7 @@ from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.type import NumericType
 
 from .ast import (
+    ArchQueryAST,
     BinaryExprAST,
     BlockAST,
     CompareExprAST,
@@ -613,6 +615,7 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
                 DmaFlattenAST,
                 DmaFreeAST,
                 ForAST,
+                ArchQueryAST,
             ),
         ):
             raise _LoweringError("Unsupported AST expression for lowering", location=getattr(expr, "location", None))
@@ -735,6 +738,12 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
         raise _LoweringError("free does not produce a value", location=expr.location)
     if isinstance(expr, ForAST):
         raise _LoweringError("ForAST does not produce a value", location=expr.location)
+    if isinstance(expr, ArchQueryAST):
+        if expr.query_name != "get_block_id":
+            raise _LoweringError("Unsupported arch query", location=expr.location)
+        result_type = SymbolValueType.from_expr("block_id")
+        type_map[expr_key] = result_type
+        return result_type
 
     if isinstance(expr, BinaryExprAST):
         lhs_type = _infer_expr_type(expr.lhs, type_map)
@@ -911,6 +920,14 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         raise _LoweringError("StoreAST does not produce a value", location=expr.location)
     if isinstance(expr, DmaFreeAST):
         raise _LoweringError("free does not produce a value", location=expr.location)
+    if isinstance(expr, ArchQueryAST):
+        if expr.query_name != "get_block_id":
+            raise _LoweringError("Unsupported arch query", location=expr.location)
+        op = ArchGetBlockIdOp()
+        ctx.builder.add_op(op)
+        ctx._set_cache(expr_key, op.result)
+        ctx.types[expr_key] = op.result.type
+        return op.result
 
     if isinstance(expr, BinaryExprAST):
         lhs = _lower_expr(expr.lhs, ctx)
@@ -1013,6 +1030,7 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
             DmaViewAST,
             DmaReshapeAST,
             DmaFlattenAST,
+            ArchQueryAST,
         ),
     ):
         if _expr_key(node) not in ctx.types and not isinstance(node, (TensorAST, ScalarArgAST, VarAST)):

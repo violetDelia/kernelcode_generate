@@ -1,7 +1,7 @@
 """DSL AST definitions.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 我不是牛马
 
 功能说明:
 - 定义 DSL 前端使用的 AST 节点数据结构。
@@ -495,6 +495,30 @@ class CompareExprAST:
     op: str
     lhs: object
     rhs: object
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class ArchQueryAST:
+    """arch 查询表达式节点。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 表示 DSL 中最小 `arch` 查询调用。
+    - 当前仅承载 `get_block_id()` 查询名。
+
+    使用示例:
+    - ArchQueryAST(query_name="get_block_id")
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    query_name: str
     location: SourceLocation | None = None
 
 
@@ -1178,6 +1202,7 @@ def _parse_dma_call(
     功能说明:
     - 将 `load/slice/store/deslice/...` 解析为对应 AST 节点。
     - 将 `nn.add/sub/mul/truediv/floordiv(...)` 解析为对应的 `BinaryExprAST`。
+    - 将 `get_block_id()` 解析为 `ArchQueryAST`。
 
     使用示例:
     - _parse_dma_call(py_ast.parse("slice(A, [i], [n])").body[0].value, env, globals(), __builtins__)
@@ -1291,6 +1316,11 @@ def _parse_dma_call(
             _raise_parse_error("Unsupported free arity", expr)
         value = _parse_expr(expr.args[0], env, globals_table, builtins_table)
         return DmaFreeAST(value=value, location=_location_from_node(expr))
+
+    if call_name == "get_block_id":
+        if expr.args or expr.keywords:
+            _raise_parse_error("Unsupported get_block_id arity", expr)
+        return ArchQueryAST(query_name="get_block_id", location=_location_from_node(expr))
 
     _raise_parse_error("Unsupported call expression", expr)
     return expr
