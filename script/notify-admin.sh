@@ -97,8 +97,12 @@ parse_args() {
 validate_common_config() {
   [[ -n "$TO_NAME" ]] || err "$RC_DATA" "TO_NAME is required"
   [[ -n "$AGENTS_LIST_FILE" ]] || err "$RC_DATA" "AGENTS_LIST_FILE is required"
-  [[ -x "$LIST_SCRIPT" ]] || err "$RC_FILE" "agents list script is not executable: $LIST_SCRIPT"
   [[ -f "$(log_path "$AGENTS_LIST_FILE")" ]] || err "$RC_FILE" "agents list not found: $(log_path "$AGENTS_LIST_FILE")"
+}
+
+validate_init_config() {
+  validate_common_config
+  [[ -x "$LIST_SCRIPT" ]] || err "$RC_FILE" "list script is not executable: $LIST_SCRIPT"
 }
 
 validate_loop_config() {
@@ -130,10 +134,9 @@ send_once() {
 }
 
 run_init() {
-  validate_common_config
+  validate_init_config
   bash "$LIST_SCRIPT" \
     -file "$(log_path "$AGENTS_LIST_FILE")" \
-    -init \
     -name "$TO_NAME"
 }
 

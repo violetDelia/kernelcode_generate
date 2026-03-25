@@ -59,7 +59,7 @@
 注意事项：
 
 - 发送会调用 `codex-multi-agents-tmux.sh -talk`。
-- 初始化会调用 `codex-multi-agents-list.sh -init -name "$TO_NAME"`。
+- 初始化会调用 `codex-multi-agents-list.sh -file <agents-lists.md> -init -name "$TO_NAME"`。
 - `INTERVAL_SECONDS` 必须大于 `0`。
 - 循环通知模式下，`FROM_NAME`、`TO_NAME`、`LOG_FILE`、`MESSAGE` 均不能为空。
 - 初始化模式下，`TO_NAME` 与 `AGENTS_LIST_FILE` 均不能为空。
@@ -83,4 +83,4 @@
   - NA-001：合法配置下脚本可通过语法检查。
   - NA-002：缺少必要配置时脚本报错退出。
   - NA-003：发送逻辑使用 `codex-multi-agents-tmux.sh -talk`。
-  - NA-004：`-init` 使用 `codex-multi-agents-list.sh -init -name <TO_NAME>`。
+  - NA-004：`-init` 使用 `codex-multi-agents-list.sh -file <AGENTS_LIST_FILE> -init -name <TO_NAME>`。

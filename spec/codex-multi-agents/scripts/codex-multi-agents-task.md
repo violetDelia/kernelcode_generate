@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-定义 `skills/codex-multi-agents/scripts/codex-multi-agents-task.sh` 的任务调度行为，覆盖任务分发、完成、暂停、新建与状态查询，并约束 `TODO.md`/`DONE.md`、`agents-lists.md` 以及分发消息发送、随机初始化提醒链路的协同更新规则。
+定义 `skills/codex-multi-agents/scripts/codex-multi-agents-task.sh` 的任务调度行为，覆盖任务分发、完成、暂停、新建与状态查询，并约束 `TODO.md`/`DONE.md`、`agents-lists.md` 以及分发消息发送、分发前角色信息初始化链路的协同更新规则。
 
 ## 文档信息
 
@@ -28,7 +28,7 @@
 - 维护 `TODO.md` 与 `DONE.md` 的一致性与可追踪性。
 - 在分发、完成、暂停时同步维护 `agents-lists.md` 的角色状态。
 - 在 `-dispatch` 提供 `-message` 时，自动向目标角色 tmux 会话发送任务消息。
-- 在 `-dispatch` 成功后，以 `1/5` 概率调用 `codex-multi-agents-list.sh -init`，提醒目标角色同步自身提示词信息。
+- 在每次 `-dispatch` 执行前，固定调用一次 `codex-multi-agents-list.sh -init`，更新目标角色信息并提醒其同步自身提示词信息。
 - 在缺参、缺文件、坏数据或锁冲突时给出明确返回码。
 
 ## 限制与边界
@@ -58,15 +58,16 @@
   - `-done` / `-pause` 成功后，若该角色已无其他 `状态=进行中` 的任务，则更新为 `free`。
   - `-done` / `-pause` 若该角色仍有其他 `状态=进行中` 的任务，则保持 `busy`。
 - 分发消息规则：
-  - `-dispatch -message <text>` 时，先提交 `TODO.md`/`agents-lists.md` 更新，再调用 `codex-multi-agents-tmux.sh -talk`。
+  - `-dispatch` 时，先尽力执行一次 `codex-multi-agents-list.sh -init`，再提交 `TODO.md`/`agents-lists.md` 更新。
+  - `-dispatch -message <text>` 时，提交 `TODO.md`/`agents-lists.md` 更新后，再调用 `codex-multi-agents-tmux.sh -talk`。
   - `-from` 固定取 `config.txt` 的 `ROOT_NAME`；若配置缺失，则回退为 `scheduler`。
   - `codex-multi-agents-tmux.sh -talk` 使用 `-agents-list`，由脚本内部按目标角色 `-to` 自动解析 `会话` 列。
   - `-log` 固定取 `config.txt` 的 `LOG_DIR/talk.log`；若配置缺失，则回退为 `$(dirname agents-lists.md)/log/talk.log`。
   - 若消息发送失败，不回滚已提交的分发结果；命令返回消息发送链路的错误码，并提示只需补发 `codex-multi-agents-tmux.sh -talk`。
-- 分发初始化提醒规则：
-  - `-dispatch` 成功提交后，以 `1/5` 概率调用 `codex-multi-agents-list.sh -init -file <agents-lists.md> -name <指派>`。
-  - 初始化提醒用于提示角色重新同步 `提示词`、`AGENTS.md` 与自身职责信息。
-  - 初始化提醒为尽力而为链路；若执行失败，仅输出告警，不回滚分发结果，也不改变命令成功/失败语义。
+- 分发前角色信息初始化规则：
+  - 每次执行 `-dispatch` 前，必须调用一次 `codex-multi-agents-list.sh -init -file <agents-lists.md> -name <指派>`。
+  - 初始化用于更新目标角色信息，并提示角色重新同步 `提示词`、`AGENTS.md` 与自身职责信息。
+  - 初始化为尽力而为链路；若执行失败，仅输出告警，不阻塞后续分发，也不改变命令成功/失败语义。
 - 并发约束：
   - `-dispatch/-done/-pause/-new` 必须使用 `flock` 锁定目标文件。
   - `-dispatch/-pause` 同时写 `TODO.md` 与 `agents-lists.md` 时，锁顺序固定为先 `TODO.md` 后 `agents-lists.md`。
@@ -159,11 +160,11 @@ codex-multi-agents-task.sh -file "./skills/codex-multi-agents/examples/TODO.md" 
 - 若任务不在任务列表中，返回 `3`。
 - 若 `worktree` 为空，保持空值。
 - 迁移后写入 `状态=进行中`，`用户指导` 保持空列。
+- 分发前会先执行一次 `codex-multi-agents-list.sh -init`，更新目标角色信息并提醒其同步自身信息。
 - 成功后需同步将目标角色状态更新为 `busy`。
-- 分发提交成功后，会以 `1/5` 概率额外执行一次 `codex-multi-agents-list.sh -init`，提醒目标角色同步自身信息。
 - 若提供 `-message`，成功分发后还需调用 `codex-multi-agents-tmux.sh -talk -agents-list <agents-lists.md>`，由对话脚本自动解析目标角色会话。
 - 若消息发送失败，分发结果保持已提交，不回滚 `TODO.md` 与 `agents-lists.md`。
-- 若随机初始化提醒失败，仅输出警告，不影响分发结果。
+- 若分发前初始化失败，仅输出警告，不影响分发结果。
 
 返回与限制：
 
@@ -267,7 +268,7 @@ codex-multi-agents-task.sh -file "./skills/codex-multi-agents/examples/TODO.md" 
 - 验证 `TODO.md` 与 `DONE.md` 的跨文件流转。
 - 验证 `agents-lists.md` 的角色状态会随 `-dispatch/-done/-pause` 正确同步。
 - 验证 `-dispatch -message` 会自动调用 tmux 对话脚本，并在失败时保留分发结果。
-- 验证 `-dispatch` 成功后会按概率触发 `codex-multi-agents-list.sh -init` 提醒链路。
+- 验证每次 `-dispatch` 前都会触发一次 `codex-multi-agents-list.sh -init` 链路。
 - 验证返回码约定 `0/1/2/3/4/5`。
 - 验证并发锁冲突返回 `RC=4`。
 
@@ -292,7 +293,7 @@ codex-multi-agents-task.sh -file "./skills/codex-multi-agents/examples/TODO.md" 
 | TC-015 | `-status` | 参数组合错误 | TODO 结构合法 | `-file F -status` 或 `-file F -status -doing -task-list` | 返回码 `1`；报错 requires exactly one of -doing/-task-list |
 | TC-016 | `-dispatch` | 分发后自动发消息成功 | 任务位于任务列表；目标角色存在会话；tmux 可用 | `-file F -dispatch -task_id EX-3 -to worker-a -agents-list G -message M` | 返回码 `0`；任务移入正在执行；角色状态=`busy`；调用 `tmux -talk` 并写入 `talk.log` |
 | TC-017 | `-dispatch` | 分发成功但发消息失败 | 任务位于任务列表；目标角色会话不存在 | `-file F -dispatch -task_id EX-3 -to worker-a -agents-list G -message M` | 返回消息链路错误码；stderr 提示仅需补发消息；任务仍已移入正在执行且角色状态=`busy` |
-| TC-018 | `-dispatch` | 随机初始化提醒成功 | 任务位于任务列表；命中提醒概率；目标角色会话存在 | `-file F -dispatch -task_id EX-3 -to worker-a -agents-list G` | 返回码 `0`；任务移入正在执行；角色状态=`busy`；调用 `list -init` 向目标会话发送提示词同步提醒 |
+| TC-018 | `-dispatch` | 分发前初始化成功 | 任务位于任务列表；目标角色会话存在 | `-file F -dispatch -task_id EX-3 -to worker-a -agents-list G` | 返回码 `0`；先调用 `list -init`；再完成任务分发；角色状态=`busy` |
 
 ### 用例与自动化映射
 
@@ -313,4 +314,4 @@ codex-multi-agents-task.sh -file "./skills/codex-multi-agents/examples/TODO.md" 
 - TC-015 -> `test_status_requires_exactly_one_mode`
 - TC-016 -> `test_dispatch_with_message_sends_talk_success`
 - TC-017 -> `test_dispatch_with_message_failure_keeps_dispatch_result`
-- TC-018 -> `test_dispatch_triggers_random_init_reminder_when_selected`
+- TC-018 -> `test_dispatch_runs_init_before_dispatch`

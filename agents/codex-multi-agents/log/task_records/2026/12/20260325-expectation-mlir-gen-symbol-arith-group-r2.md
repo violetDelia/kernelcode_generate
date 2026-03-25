@@ -70,3 +70,14 @@
   - 核对 worktree 当前未提交业务改动仅涉及 `spec/dsl/mlir_gen.md`、`kernel_gen/dialect/symbol.py`、`kernel_gen/dsl/ast.py`、`kernel_gen/dsl/emit_mlir.py`、`kernel_gen/operation/nn.py`、`test/dsl/test_ast_visitor.py`、`test/operation/test_operation_nn.py` 与对应任务记录；其余仅有 `agents/codex-multi-agents/log/talk.log` 本地变化，不纳入合并。
   - 计划将上述 7 个业务文件与记录文件一并合入主分支，并在主分支执行相关 pytest 验证。
 - 结论：满足限定范围合并前提，可执行主分支合并与验证。
+
+- 时间：2026-03-25 04:46:58 +0800
+- 执行人：金铲铲大作战
+- 经办人：金铲铲大作战
+- 任务：T-20260325-6d533b29
+- 任务目标：cleanup expectation symbol arith group worktree；确认 `main` 提交 `c9c4815` 已包含链路业务改动后，清理 `/home/lfr/kernelcode_generate/wt-20260325-expectation-mlir-gen-symbol-arith-group-r2` 与对应分支。
+- 改动：
+  - 核对 `c9c4815` 已包含本链路业务文件与对应任务记录：`kernel_gen/dialect/symbol.py`、`kernel_gen/dsl/ast.py`、`kernel_gen/dsl/emit_mlir.py`、`kernel_gen/operation/nn.py`、`spec/dsl/mlir_gen.md`、`test/dsl/test_ast_visitor.py`、`test/operation/test_operation_nn.py`、`agents/codex-multi-agents/log/task_records/2026/12/20260325-expectation-mlir-gen-symbol-arith-group-r2.md`。
+  - 核对 worktree 同路径业务文件与主分支当前内容一致，仅剩 worktree 本地残留与 `talk.log` 本地状态，不存在未合入的额外业务差异。
+  - 清理 worktree `/home/lfr/kernelcode_generate/wt-20260325-expectation-mlir-gen-symbol-arith-group-r2`，并删除对应分支 `wt-20260325-expectation-mlir-gen-symbol-arith-group-r2`。
+- 结论：cleanup 已完成；该链路 worktree/分支已清理，无需继续保留。

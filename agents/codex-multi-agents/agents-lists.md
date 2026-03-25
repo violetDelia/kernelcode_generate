@@ -5,9 +5,9 @@
 | 神秘人 | free | 神秘人 | codex | 神秘人 | 管理员 | agents/codex-multi-agents/agents/神秘人/神秘人.prompt.md | ./agents/神秘人 | 负责分发与协调 |
 | 小李飞刀 | free | 小李飞刀 | codex | 小李飞刀 | DMA expectation cleanup | agents/codex-multi-agents/agents/小李飞刀/小李飞刀.prompt.md | agents/codex-multi-agents/agents/小李飞刀 | 负责实现与测试，审查、合并 |
 | 金铲铲大作战 | free | 金铲铲大作战 | codex | 金铲铲大作战 | 已合并 symbol arith expectation 链路 | agents/codex-multi-agents/agents/金铲铲大作战/金铲铲大作战.prompt.md | agents/codex-multi-agents/agents/金铲铲大作战 | 负责实现与测试，审查、合并 |
-| 我不是牛马 | free | 我不是牛马 | codex | 我不是牛马 | 已合并alloc expectation链路待cleanup | agents/codex-multi-agents/agents/我不是牛马/我不是牛马.prompt.md | agents/codex-multi-agents/agents/我不是牛马 | 负责实现与测试，审查、合并 |
+| 我不是牛马 | free | 我不是牛马 | codex | 我不是牛马 | 已合并alloc root expectation待cleanup | agents/codex-multi-agents/agents/我不是牛马/我不是牛马.prompt.md | agents/codex-multi-agents/agents/我不是牛马 | 负责实现与测试，审查、合并 |
 | 摸鱼小分队 | free | 摸鱼小分队 | codex | 摸鱼小分队 | 收敛Memory算术类型提升spec | agents/codex-multi-agents/agents/摸鱼小分队/摸鱼小分队.prompt.md | agents/codex-multi-agents/agents/摸鱼小分队 | 负责 spec 文档编写、审查、合并 |
-| 李白 | free | 李白 | codex | 李白 | 严格复审spec闭环、测试映射与合并收口 | agents/codex-multi-agents/agents/李白/李白.prompt.md | agents/codex-multi-agents/agents/李白 | 负责 spec 文档编写、审查、合并 |
+| 李白 | free | 李白 | codex | 李白 | 擅长spec严格复审、expectation收口与合并收尾 | agents/codex-multi-agents/agents/李白/李白.prompt.md | agents/codex-multi-agents/agents/李白 | 负责 spec 文档编写、审查、合并 |
 | 不要啊教练 | free | 不要啊教练 | codex | 不要啊教练 | 复审mlir_gen spec-clean | agents/codex-multi-agents/agents/不要啊教练/不要啊教练.prompt.md | agents/codex-multi-agents/agents/不要啊教练 | 负责 spec 文档编写、审查、合并 |
-| 朽木露琪亚 | free | 朽木露琪亚 | codex | 朽木露琪亚 | 收敛add-scalar expectation实现闭环 | agents/codex-multi-agents/agents/朽木露琪亚/朽木露琪亚.prompt.md | agents/codex-multi-agents/agents/朽木露琪亚 | 全能 |
+| 朽木露琪亚 | free | 朽木露琪亚 | codex | 朽木露琪亚 | 擅长 expectation 收敛、dialect 测试与严格复审 | agents/codex-multi-agents/agents/朽木露琪亚/朽木露琪亚.prompt.md | agents/codex-multi-agents/agents/朽木露琪亚 | 全能 |
 | 咯咯咯 | free | 咯咯咯 | codex | 咯咯咯 | 复审scf.loop闭环通过 | agents/codex-multi-agents/agents/咯咯咯/咯咯咯.prompt.md | agents/codex-multi-agents/agents/咯咯咯 | 负责 spec 文档编写，兼职审查 |

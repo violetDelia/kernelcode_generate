@@ -113,13 +113,18 @@ bash ./scripts/codex-multi-agents-task.sh \
 ```bash
 bash ./scripts/codex-multi-agents-task.sh \
   -file ./TODO.md \
-  -dispatch -task_id T-20260308-xxxxxxx1 -to worker-a
+  -dispatch -task_id T-20260308-xxxxxxx1 -to worker-a \
+  -agents-list ./agents/codex-multi-agents/agents-lists.md
 ```
+
+说明：
+- 每次 `-dispatch` 前，脚本都会先执行一次 `codex-multi-agents-list.sh -init`。
+- 若再提供 `-message`，则会在分发成功后继续发送一条对话消息。
 
 ### 暂停任务
 ```bash
 bash ./scripts/codex-multi-agents-task.sh \
-  -file ./TODO.md \
+  -file ./TODO.md -agents-list ./agents/codex-multi-agents/agents-lists.md \
   -pause -task_id T-20260308-xxxxxxx1
 ```
 
@@ -128,7 +133,8 @@ bash ./scripts/codex-multi-agents-task.sh \
 bash ./scripts/codex-multi-agents-task.sh \
   -file ./TODO.md \
   -done -task_id T-20260308-xxxxxxx1 \
-  -log ./agents/codex-multi-agents/log/task-T-20260308-xxxxxxx1.log
+  -log ./agents/codex-multi-agents/log/task-T-20260308-xxxxxxx1.log \
+  -agents-list ./agents/codex-multi-agents/agents-lists.md
 ```
 
 ### 查看状态
@@ -147,7 +153,8 @@ bash ./scripts/codex-multi-agents-task.sh \
 - `-new/-dispatch/-pause/-done` 操作类型
 - `-task_id` 任务 ID
 - `-info` 任务描述
-- `-to/-from/-worktree/-log` 可选任务字段
+- `-agents-list` 角色名单路径（`-dispatch/-pause/-done` 必填）
+- `-to/-from/-worktree/-log` 任务字段
 - `-status -doing/-task-list` 状态查询
 
 ## 4. 任务流转速记

@@ -9,7 +9,7 @@
 覆盖率信息:
 - 当前覆盖率: `N/A`。该链路的功能实现为 shell 脚本 `skills/codex-multi-agents/scripts/codex-multi-agents-task.sh`，`pytest-cov` 无法直接采集脚本覆盖率，执行覆盖率命令会得到 `no-data-collected`。
 - 达标判定: shell 实现按规则豁免 `95%` 覆盖率达标线。
-- 当前以 `TC-001..018` 共 18 条测试用例作为覆盖基线，覆盖分发、随机初始化提醒、分发消息发送、完成、暂停、新建、状态查询、文件错误、结构错误与锁冲突路径。
+- 当前以 `TC-001..018` 共 18 条测试用例作为覆盖基线，覆盖分发、分发前初始化、分发消息发送、完成、暂停、新建、状态查询、文件错误、结构错误与锁冲突路径。
 
 覆盖率命令:
 - `pytest -q --cov=skills/codex-multi-agents/scripts/codex-multi-agents-task.sh --cov-branch --cov-report=term-missing test/codex-multi-agents/test_codex-multi-agents-task.py`
@@ -588,8 +588,8 @@ def test_status_task_list_outputs_list_table(tmp_path: Path) -> None:
 # TC-015
 # 创建者: 榕
 # 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-22 17:24:46 +0800
-# 最近一次运行成功时间: 2026-03-22 17:24:46 +0800
+# 最近一次运行测试时间: 2026-03-25 03:41:48 +0800
+# 最近一次运行成功时间: 2026-03-25 03:41:48 +0800
 # 测试目的: 验证 -status 参数组合错误返回 RC=1。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -609,9 +609,9 @@ def test_status_requires_exactly_one_mode(tmp_path: Path) -> None:
 # TC-016
 # 创建者: 榕
 # 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-22 17:24:46 +0800
-# 最近一次运行成功时间: 2026-03-22 17:24:46 +0800
-# 测试目的: 验证 -dispatch 携带 -message 时会调用 tmux 对话脚本向目标会话发消息。
+# 最近一次运行测试时间: 2026-03-25 03:41:48 +0800
+# 最近一次运行成功时间: 2026-03-25 03:41:48 +0800
+# 测试目的: 验证 -dispatch 携带 -message 时，仍会先执行一次 -init，再调用 tmux 对话脚本向目标会话发消息。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
 def test_dispatch_with_message_sends_talk_success(tmp_path: Path) -> None:
@@ -639,8 +639,6 @@ def test_dispatch_with_message_sends_talk_success(tmp_path: Path) -> None:
     env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
     env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
     env["CODEX_MULTI_AGENTS_CONFIG"] = str(config)
-    env["CODEX_MULTI_AGENTS_DISPATCH_INIT_MODE"] = "never"
-
     result = run_script(
         "-file",
         str(todo),
@@ -657,9 +655,14 @@ def test_dispatch_with_message_sends_talk_success(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0
+    assert "OK: init worker-a" in result.stdout
     assert "OK: dispatch EX-3 -> worker-a" in result.stdout
+    assert result.stdout.index("OK: init worker-a") < result.stdout.index("OK: dispatch EX-3 -> worker-a")
     assert "OK: talk 神秘人 -> worker-a (worker-a-session)" in result.stdout
-    assert "send:worker-a-session:@神秘人向@worker-a发起会话: 请处理任务 EX-3，完成后回报。:" in calls_file.read_text(encoding="utf-8")
+    calls_text = calls_file.read_text(encoding="utf-8")
+    assert "你的名字叫做worker-a" in calls_text
+    assert calls_text.index("你的名字叫做worker-a") < calls_text.index("@神秘人向@worker-a发起会话: 请处理任务 EX-3，完成后回报。")
+    assert "send:worker-a-session:@神秘人向@worker-a发起会话: 请处理任务 EX-3，完成后回报。:" in calls_text
     assert "@神秘人向@worker-a发起会话: 请处理任务 EX-3，完成后回报。" in talk_log.read_text(encoding="utf-8")
 
 
@@ -668,7 +671,7 @@ def test_dispatch_with_message_sends_talk_success(tmp_path: Path) -> None:
 # 最后一次更改: 神秘人
 # 最近一次运行测试时间: 2026-03-22 17:24:46 +0800
 # 最近一次运行成功时间: 2026-03-22 17:24:46 +0800
-# 测试目的: 验证 -dispatch 携带 -message 时若消息发送失败，会保留已提交的分发结果并返回错误。
+# 测试目的: 验证 -dispatch 携带 -message 时，即使分发前 -init 失败，仍会保留已提交的分发结果并在消息发送失败时返回错误。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
 def test_dispatch_with_message_failure_keeps_dispatch_result(tmp_path: Path) -> None:
@@ -686,8 +689,6 @@ def test_dispatch_with_message_failure_keeps_dispatch_result(tmp_path: Path) -> 
     env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
     env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
     env["CODEX_MULTI_AGENTS_CONFIG"] = str(config)
-    env["CODEX_MULTI_AGENTS_DISPATCH_INIT_MODE"] = "never"
-
     result = run_script(
         "-file",
         str(todo),
@@ -707,6 +708,7 @@ def test_dispatch_with_message_failure_keeps_dispatch_result(tmp_path: Path) -> 
     list_rows = parse_section_rows(content, "## 任务列表")
 
     assert result.returncode == 3
+    assert "WARN: dispatch init failed for worker-a:" in result.stderr
     assert "target session not found: worker-a-session" in result.stderr
     assert "dispatch succeeded but message delivery failed for task EX-3" in result.stderr
     assert any(r[0] == "EX-3" and r[5] == "worker-a" and r[6] == "进行中" for r in running_rows)
@@ -717,12 +719,12 @@ def test_dispatch_with_message_failure_keeps_dispatch_result(tmp_path: Path) -> 
 # TC-018
 # 创建者: 榕
 # 最后一次更改: 神秘人
-# 最近一次运行测试时间: 2026-03-22 19:05:00 +0800
-# 最近一次运行成功时间: 2026-03-22 19:05:00 +0800
-# 测试目的: 验证 -dispatch 成功后在命中概率时会调用 list -init 向目标会话发送角色信息提醒。
+# 最近一次运行测试时间: 2026-03-25 03:41:48 +0800
+# 最近一次运行成功时间: 2026-03-25 03:41:48 +0800
+# 测试目的: 验证 -dispatch 在真正分发前会固定调用一次 list -init 向目标会话发送角色信息提醒。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
-def test_dispatch_triggers_random_init_reminder_when_selected(tmp_path: Path) -> None:
+def test_dispatch_runs_init_before_dispatch(tmp_path: Path) -> None:
     todo = tmp_path / "TODO.md"
     agents = tmp_path / "agents-lists.md"
     bin_dir = tmp_path / "bin"
@@ -734,8 +736,6 @@ def test_dispatch_triggers_random_init_reminder_when_selected(tmp_path: Path) ->
     env = os.environ.copy()
     env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
     env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
-    env["CODEX_MULTI_AGENTS_DISPATCH_INIT_MODE"] = "always"
-
     result = run_script(
         "-file",
         str(todo),
@@ -750,7 +750,7 @@ def test_dispatch_triggers_random_init_reminder_when_selected(tmp_path: Path) ->
     )
 
     assert result.returncode == 0
-    assert "OK: dispatch EX-3 -> worker-a" in result.stdout
     assert "OK: init worker-a" in result.stdout
+    assert result.stdout.index("OK: init worker-a") < result.stdout.index("OK: dispatch EX-3 -> worker-a")
     assert "你的名字叫做worker-a" in calls_file.read_text(encoding="utf-8")
     assert get_agent_status(agents, "worker-a") == "busy"

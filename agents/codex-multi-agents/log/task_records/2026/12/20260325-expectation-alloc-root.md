@@ -53,3 +53,16 @@
   - 核对 worktree 当前仅存在 `expectation/alloc.py` 与 `agents/codex-multi-agents/log/task_records/2026/12/20260325-expectation-alloc-root.md` 的待合入差异；历史任务 `T-20260325-364a3440` 状态为暂停，不构成新的进行中业务改动。
   - 计划仅将上述两个文件合入主分支，并在主分支执行 `python expectation/alloc.py` 作为最小验证。
 - 结论：满足限定范围合并前提，可执行主分支合并与验证。
+
+- 时间：`2026-03-25 09:00:12 +0800`
+- 执行人：`金铲铲大作战`
+- 经办人：`金铲铲大作战`
+- 任务：`T-20260325-92cf067f`
+- 任务目标：确认 `main` 提交 `3d26f20` 已包含 alloc root expectation 链路业务改动与记录文件后，清理 `/home/lfr/kernelcode_generate/wt-20260325-expectation-alloc-root` 及对应分支。
+- 改动：
+  - 只读核对主分支 `TODO.md`，确认当前有效任务为 `T-20260325-92cf067f`。
+  - 核对主分支提交 `3d26f20`（`T-20260325-c61dc293-alloc-root-merge`）已包含 `expectation/alloc.py` 与 `agents/codex-multi-agents/log/task_records/2026/12/20260325-expectation-alloc-root.md`。
+  - 核对待清理分支 `wt-20260325-expectation-alloc-root` 已被 `main` 吸收，worktree 仅剩与 `main` 一致的本地残留。
+  - 执行 `git worktree remove --force /home/lfr/kernelcode_generate/wt-20260325-expectation-alloc-root` 清理 worktree。
+  - 执行 `git branch -d wt-20260325-expectation-alloc-root` 清理对应分支。
+- 结论：已完成 cleanup。`/home/lfr/kernelcode_generate/wt-20260325-expectation-alloc-root` 与分支 `wt-20260325-expectation-alloc-root` 均已删除，当前无该链路残留 worktree/分支。建议下一步由神秘人按主分支 TODO 继续分发后续任务，无需再为 alloc root expectation 建立 cleanup 子任务。

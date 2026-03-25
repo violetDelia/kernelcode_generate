@@ -9,7 +9,7 @@
 # - 支持 DONE.md 自动创建与完成记录追加。
 # - 在分发、完成、暂停时同步更新 agents-lists.md 角色状态。
 # - 在分发时可选调用 tmux 对话脚本，向目标角色发送任务消息。
-# - 在分发后以 1/5 概率调用 list 的 -init，提醒目标角色同步自身提示词信息。
+# - 在每次分发前固定调用 list 的 -init，更新目标角色信息并提醒其同步自身提示词信息。
 # - 写操作统一使用 flock 文件锁。
 #
 # 对应文件:
@@ -375,29 +375,9 @@ resolve_dispatch_talk_log() {
   printf "%s/log/talk.log" "$(dirname "$AGENTS_LIST")"
 }
 
-should_send_dispatch_init_reminder() {
-  local mode="${CODEX_MULTI_AGENTS_DISPATCH_INIT_MODE-random}"
-  case "$mode" in
-    always)
-      return 0
-      ;;
-    never)
-      return 1
-      ;;
-    random)
-      ;;
-    *)
-      printf "WARN: unknown CODEX_MULTI_AGENTS_DISPATCH_INIT_MODE=%s, fallback to random\n" "$mode" >&2
-      ;;
-  esac
-
-  (( RANDOM % 1==0))
-}
-
-send_dispatch_init_reminder() {
-  should_send_dispatch_init_reminder || return 0
+send_dispatch_init() {
   if [[ ! -f "$LIST_SCRIPT" ]]; then
-    printf "WARN: list script not found, skip dispatch init reminder: %s\n" "$LIST_SCRIPT" >&2
+    printf "WARN: list script not found, skip dispatch init: %s\n" "$LIST_SCRIPT" >&2
     return 0
   fi
 
@@ -405,7 +385,7 @@ send_dispatch_init_reminder() {
   local rc=0
   output="$(bash "$LIST_SCRIPT" -file "$AGENTS_LIST" -init -name "$TO" 2>&1)" || rc=$?
   if [[ "$rc" -ne 0 ]]; then
-    printf "WARN: dispatch init reminder failed for %s: %s\n" "$TO" "$output" >&2
+    printf "WARN: dispatch init failed for %s: %s\n" "$TO" "$output" >&2
     return 0
   fi
 
@@ -982,6 +962,14 @@ main() {
     acquire_lock_on_file "$AGENTS_LIST" agents_lock_fd
   fi
 
+  if [[ "$op" == "dispatch" ]]; then
+    release_lock_fd "$agents_lock_fd"
+    release_lock_fd "$todo_lock_fd"
+    send_dispatch_init
+    acquire_lock_on_file "$FILE" todo_lock_fd
+    acquire_lock_on_file "$AGENTS_LIST" agents_lock_fd
+  fi
+
   run_python_core "$op" "$FILE" "$TASK_ID" "$TO" "$INFO" "$LOG_FILE" "$FROM" "$WORKTREE" "$done_file" "$AGENTS_LIST"
   local rc=$?
   if [[ "$rc" -ne 0 ]]; then
@@ -991,7 +979,6 @@ main() {
   if [[ "$op" == "dispatch" && "$HAS_MESSAGE" -eq 1 ]]; then
     release_lock_fd "$agents_lock_fd"
     release_lock_fd "$todo_lock_fd"
-    send_dispatch_init_reminder
     send_dispatch_message
     local talk_rc=$?
     if [[ "$talk_rc" -ne 0 ]]; then
@@ -1001,7 +988,6 @@ main() {
   elif [[ "$op" == "dispatch" ]]; then
     release_lock_fd "$agents_lock_fd"
     release_lock_fd "$todo_lock_fd"
-    send_dispatch_init_reminder
   fi
 }
 
