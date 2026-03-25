@@ -1,0 +1,48 @@
+- 时间：`2026-03-26 00:32:51 +0800`
+- 执行人：`金铲铲大作战`
+- 经办人：`金铲铲大作战`
+- 任务：`T-20260326-4141eff4`
+- 任务目标：以 expectation/pass/lowing/nn_to_kernel/add.py 为基线，补齐 nn.add lowering 输出 shape 维度保持的 spec/测试闭环，不修改 expectation。
+- 改动：
+  - 补充 spec `nn_to_kernel` 中关于 `dma.alloc` 结果 shape 维度值保持的约束，并新增对应用例映射。
+  - 在 `test/pass/test_lowing_nn_to_kernel.py` 新增静态/符号 shape 维度保持断言测试。
+  - 未修改 expectation 与 pass 实现。
+- 测试：
+  - `pytest -q test/pass/test_lowing_nn_to_kernel.py`
+  - 结果：`17 passed`
+- 结论：spec/测试与实现闭环已补齐，等待复审。
+
+- 时间：2026-03-26 02:31:46 +0800
+- 经办人：朽木露琪亚
+- 任务：T-20260326-36e9af65
+- 任务目标：只读复审 nn.add 变更；核对 spec/pass/lowing/nn_to_kernel.md 与 test/pass/test_lowing_nn_to_kernel.py 的静态/符号 shape 约束与测试映射。
+- 改动：只读核对 spec/test/记录文件；未修改实现/测试，未复测。
+- 问题与可执行建议：
+  - spec 定义 COV-N2K-008/009（静态/符号 shape 保持），但测试文件对应用例标注为 TC-PASS-N2K-007/008，且测试文件内没有 COV-N2K-008/009 标注，编号映射不一致，容易导致测试清单追踪漂移。建议将 test_lower_preserves_static_shape_in_alloc 与 test_lower_preserves_symbol_shape_in_alloc 的编号调整为 COV-N2K-008/009，或同步收敛 spec 的用例编号体系并保持一一对应。（test/pass/test_lowing_nn_to_kernel.py:599-666；spec/pass/lowing/nn_to_kernel.md 用例清单）
+- 结论：需修改。
+
+- 时间：2026-03-26 02:42:37 +0800
+- 执行人：金铲铲大作战
+- 经办人：金铲铲大作战
+- 任务：T-20260326-578ef51e
+- 任务目标：最小修复 nn.add shape 保持编号映射，确保 spec 与测试一一对应，不修改 expectation。
+- 改动：
+  - 将 test_lower_preserves_static_shape_in_alloc / test_lower_preserves_symbol_shape_in_alloc 编号注释调整为 COV-N2K-008/009。
+  - 复位 test_lower_unsupported_nn_op_raises / test_lower_removes_all_nn_ops 的 TC-PASS 编号，避免编号漂移。
+- 测试：未复测（按任务要求默认不复测）。
+- 结论：编号映射已修复，申请复审。
+
+- 时间：2026-03-26 02:48:01 +0800
+- 执行人：李白
+- 经办人：李白
+- 任务：T-20260326-ad056590
+- 任务目标：只读复审 nn.add 编号映射收敛，核对 COV-N2K-008/009 与 TC-PASS 编号复位一致性。
+- 改动：只读核对 spec/pass/lowing/nn_to_kernel.md 与 test/pass/test_lowing_nn_to_kernel.py，确认 COV-N2K-008/009 与对应测试一一映射；TC-PASS-N2K-001..008 顺序未漂移；测试函数参数类型提示齐全；未修改任何文件，未复测。
+- 结论：通过。
+
+- 时间：2026-03-26 02:49:21 +0800
+- 经手人：朽木露琪亚
+- 任务：T-20260326-578ef51e 合并阶段
+- 任务目标：合入 nn.add 编号映射收敛变更，仅包含 spec/test 与记录文件。
+- 改动：合入 spec/pass/lowing/nn_to_kernel.md、test/pass/test_lowing_nn_to_kernel.py 与记录文件。
+- 结论：已完成合并提交，待回报。

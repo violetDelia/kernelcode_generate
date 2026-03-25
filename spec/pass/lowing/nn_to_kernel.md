@@ -25,6 +25,7 @@
 
 - 将 `nn` dialect 的逐元素算术/比较/select/cast lower 为 `kernel` dialect 对应 op。
 - 保证 Memory 类型与空间在 lowering 前后保持一致，输出 Memory 由 `dma.alloc` 创建并交给 kernel op 使用。
+- 当结果类型包含符号或静态维度时，`dma.alloc` 必须保留对应 `shape` 的维度值。
 - 产出仅包含 `kernel`/`dma`/`func`/`builtin` 等必要 op，不再保留 `nn` op。
 
 ## 限制与边界
@@ -104,6 +105,7 @@ module = pass_obj.run(module)
 - 测试目标：
   - 验证支持的 `nn` op 被替换为 `kernel` op。
   - 验证输出 Memory 由 `dma.alloc` 创建，且类型/空间与原结果一致。
+  - 验证 `dma.alloc` 结果类型中的 `shape` 维度值与原 `nn` 结果保持一致。
   - 验证不支持 op 或类型不一致时抛出错误。
 - 功能与用例清单：
 
@@ -116,3 +118,5 @@ module = pass_obj.run(module)
 | COV-N2K-005 | kernel op 校验失败转为 `LowerNnToKernelError` | `test_lower_wraps_kernel_verify_exception` |
 | COV-N2K-006 | 包含 region 的 op 触发递归 lowering | `test_lower_recurses_into_regions` |
 | COV-N2K-007 | module 内残留 `nn` op 抛错 | `test_ensure_no_nn_ops_raises` |
+| COV-N2K-008 | 静态维度 `shape` 在 `dma.alloc` 中保持一致 | `test_lower_preserves_static_shape_in_alloc` |
+| COV-N2K-009 | 符号维度 `shape` 在 `dma.alloc` 中保持一致 | `test_lower_preserves_symbol_shape_in_alloc` |

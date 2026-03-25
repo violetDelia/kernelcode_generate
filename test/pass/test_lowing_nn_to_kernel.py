@@ -596,6 +596,76 @@ def test_lower_preserves_memory_type_and_space() -> None:
     assert alloc_ops[0].result.type == result_type
 
 
+# COV-N2K-008
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-26 00:32:51 +0800
+# 最近一次运行成功时间: 2026-03-26 00:32:51 +0800
+# 测试目的: 验证 dma.alloc 保留静态 shape 维度值。
+# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_preserves_static_shape_in_alloc
+# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+def test_lower_preserves_static_shape_in_alloc() -> None:
+    shape = ArrayAttr([IntAttr(3), IntAttr(5)])
+    stride = ArrayAttr([IntAttr(5), IntAttr(1)])
+    lhs_type = _make_memory_type(shape=shape, stride=stride)
+    rhs_type = _make_memory_type(shape=shape, stride=stride)
+    result_type = _make_memory_type(shape=shape, stride=stride)
+    space = _make_space("global")
+
+    module, block = _build_module(
+        [lhs_type, rhs_type],
+        result_type,
+        lambda block: [NnAddOp(block.args[0], block.args[1], result_type, space)],
+    )
+    LowerNnToKernelPass().run(module)
+
+    alloc_ops = [op for op in _collect_ops(block) if isinstance(op, DmaAllocOp)]
+    assert len(alloc_ops) == 1
+    alloc_shape = alloc_ops[0].result.type.shape.data
+    assert len(alloc_shape) == 2
+    assert isinstance(alloc_shape[0], IntAttr)
+    assert isinstance(alloc_shape[1], IntAttr)
+    assert alloc_shape[0].data == 3
+    assert alloc_shape[1].data == 5
+
+
+# COV-N2K-009
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-26 00:32:51 +0800
+# 最近一次运行成功时间: 2026-03-26 00:32:51 +0800
+# 测试目的: 验证 dma.alloc 保留符号 shape 维度值。
+# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_preserves_symbol_shape_in_alloc
+# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+def test_lower_preserves_symbol_shape_in_alloc() -> None:
+    shape = ArrayAttr([StringAttr("M"), StringAttr("N")])
+    stride = ArrayAttr([StringAttr("N"), IntAttr(1)])
+    lhs_type = _make_memory_type(shape=shape, stride=stride)
+    rhs_type = _make_memory_type(shape=shape, stride=stride)
+    result_type = _make_memory_type(shape=shape, stride=stride)
+    space = _make_space("global")
+
+    module, block = _build_module(
+        [lhs_type, rhs_type],
+        result_type,
+        lambda block: [NnAddOp(block.args[0], block.args[1], result_type, space)],
+    )
+    LowerNnToKernelPass().run(module)
+
+    alloc_ops = [op for op in _collect_ops(block) if isinstance(op, DmaAllocOp)]
+    assert len(alloc_ops) == 1
+    alloc_shape = alloc_ops[0].result.type.shape.data
+    assert len(alloc_shape) == 2
+    assert isinstance(alloc_shape[0], StringAttr)
+    assert isinstance(alloc_shape[1], StringAttr)
+    assert alloc_shape[0].data == "M"
+    assert alloc_shape[1].data == "N"
+
+
 # TC-PASS-N2K-007
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
