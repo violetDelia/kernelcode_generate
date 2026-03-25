@@ -1,7 +1,7 @@
 """AST visitor tests.
 
 创建者: 小李飞刀
-最后一次更改: 不要啊教练
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 AST 前端、nn dialect IR 与 MLIR 文本入口的回归测试。
@@ -164,6 +164,25 @@ def _unwrap_index_cast(value: object) -> object:
     if isinstance(owner, arith.IndexCastOp):
         return owner.input
     return value
+
+
+def _parse_function_from_source(
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+    runtime_table: dict[str, object] | None = None,
+) -> FunctionAST:
+    def kernel(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return None
+
+    def fake_getsource(_obj: object) -> str:
+        return source
+
+    monkeypatch.setattr(inspect, "getsource", fake_getsource)
+    globals_table = dict(getattr(kernel, "__globals__", {}))
+    builtins_obj = globals_table.get("__builtins__", __builtins__)
+    builtins_table = builtins_obj if isinstance(builtins_obj, dict) else getattr(builtins_obj, "__dict__", {})
+    return _parse_function_with_env(kernel, globals_table, builtins_table, runtime_table, config=None)
 
 
 # AST-001
@@ -1929,6 +1948,240 @@ def loop_fn(start, end, step, x: "Tensor[f32, N]"):
     func_ast = parse_function(loop_fn)
     assert [item.name for item in func_ast.inputs[:3]] == ["start", "end", "step"]
     assert all(isinstance(item, ScalarArgAST) for item in func_ast.inputs[:3])
+
+
+# AST-010
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-25 12:01:58 +0800
+# 最近一次运行成功时间: 2026-03-25 12:01:58 +0800
+# 功能说明: 验证未注解 bool runtime 参数仍按整型标量参数解析。
+# 测试目的: 锁定 bool runtime 参数在 AST 解析阶段继续复用整型推断分支，避免等价重构后发生类型漂移。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_infers_bool_runtime_arguments_without_annotations
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_parse_function_infers_bool_runtime_arguments_without_annotations(monkeypatch: pytest.MonkeyPatch) -> None:
+    func_ast = _parse_function_from_source(
+        monkeypatch,
+        """
+def kernel(flag, x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+    return x
+""",
+        runtime_table={"flag": True},
+    )
+
+    if not isinstance(func_ast.inputs[0], ScalarArgAST):
+        raise AssertionError("expected first input to be ScalarArgAST")
+    if func_ast.inputs[0].name != "flag":
+        raise AssertionError("expected first input name to stay flag")
+    if func_ast.inputs[0].value_type is not int:
+        raise AssertionError("expected bool runtime argument to infer int type")
+    if func_ast.inputs[0].is_symbolic is not False:
+        raise AssertionError("expected bool runtime argument to stay non-symbolic")
+    if not isinstance(func_ast.inputs[1], TensorAST):
+        raise AssertionError("expected annotated tensor input to remain TensorAST")
+
+
+# AST-011
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-25 12:01:58 +0800
+# 最近一次运行成功时间: 2026-03-25 12:01:58 +0800
+# 功能说明: 验证未注解 float runtime 参数仍报 Missing annotation。
+# 测试目的: 锁定 float runtime 参数不会被缺失注解回退推断为标量参数，避免重构放宽公开语义。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_float_runtime_arguments_without_annotations
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_parse_function_rejects_float_runtime_arguments_without_annotations(monkeypatch: pytest.MonkeyPatch) -> None:
+    with pytest.raises(AstParseError) as exc_info:
+        _parse_function_from_source(
+            monkeypatch,
+            """
+def kernel(scale, x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+    return x
+""",
+            runtime_table={"scale": 1.5},
+        )
+
+    diagnostics = exc_info.value.diagnostics
+    if not diagnostics:
+        raise AssertionError("expected diagnostics for missing annotation")
+    if diagnostics[0].message != "Missing annotation":
+        raise AssertionError("expected Missing annotation diagnostic for float runtime argument")
+
+
+# AST-012
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-25 12:01:58 +0800
+# 最近一次运行成功时间: 2026-03-25 12:01:58 +0800
+# 功能说明: 验证 nn 算术 helper 非法参数个数保持 Unsupported nn arithmetic arity 报错。
+# 测试目的: 锁定 _parse_nn_arithmetic_call 抽取后的 too-few/too-many arity 负路径诊断口径。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_unsupported_nn_arithmetic_arity_variants
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_parse_function_rejects_unsupported_nn_arithmetic_arity_variants() -> None:
+    def too_few(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return nn.add(x)
+
+    def too_many(
+        x: "Tensor[f32, 2, 2]",
+        y: "Tensor[f32, 2, 2]",
+        z: "Tensor[f32, 2, 2]",
+    ) -> "Tensor[f32, 2, 2]":
+        return nn.add(x, y, z)
+
+    for fn in (too_few, too_many):
+        with pytest.raises(AstParseError) as exc_info:
+            parse_function(fn)
+        diagnostics = exc_info.value.diagnostics
+        if not diagnostics:
+            raise AssertionError("expected diagnostics for invalid nn arithmetic arity")
+        if diagnostics[0].message != "Unsupported nn arithmetic arity":
+            raise AssertionError("expected Unsupported nn arithmetic arity diagnostic")
+
+
+# AST-013
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-25 12:01:58 +0800
+# 最近一次运行成功时间: 2026-03-25 12:01:58 +0800
+# 功能说明: 验证 load helper 的 arity/source/space 负路径报错口径不变。
+# 测试目的: 锁定 _parse_load_like_call 在 load 分支上的非法参数个数、非法 source 与非法 space 诊断。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_invalid_load_helper_variants
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_parse_function_rejects_invalid_load_helper_variants() -> None:
+    def bad_arity(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
+        return load(src, [0, 0])
+
+    def bad_source(src: int) -> "Tensor[f32, 2, 2]":
+        return load(src, [0], [1])
+
+    def bad_space(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
+        return load(src, [0, 0], [2, 2], [1, 1], 1)
+
+    expected_messages = (
+        ("Unsupported load arity", bad_arity),
+        ("load source must be TensorAST", bad_source),
+        ("load space must be MemorySpace", bad_space),
+    )
+    for expected_message, fn in expected_messages:
+        with pytest.raises(AstParseError) as exc_info:
+            parse_function(fn)
+        diagnostics = exc_info.value.diagnostics
+        if not diagnostics:
+            raise AssertionError(f"expected diagnostics for load variant: {expected_message}")
+        if diagnostics[0].message != expected_message:
+            raise AssertionError(f"expected load diagnostic {expected_message!r}, got {diagnostics[0].message!r}")
+
+
+# AST-014
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-25 12:01:58 +0800
+# 最近一次运行成功时间: 2026-03-25 12:01:58 +0800
+# 功能说明: 验证 slice helper 的 arity/source/space 负路径报错口径不变。
+# 测试目的: 锁定 _parse_load_like_call 在 slice 分支上的非法参数个数、非法 source 与非法 space 诊断。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_invalid_slice_helper_variants
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_parse_function_rejects_invalid_slice_helper_variants() -> None:
+    def bad_arity(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
+        return slice(src, [0, 0], [2, 2], [1, 1], MemorySpace.SM, 1)
+
+    def bad_source(src: int) -> "Tensor[f32, 2, 2]":
+        return slice(src, [0], [1])
+
+    def bad_space(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
+        return slice(src, [0, 0], [2, 2], [1, 1], 1)
+
+    expected_messages = (
+        ("Unsupported slice arity", bad_arity),
+        ("slice source must be TensorAST", bad_source),
+        ("slice space must be MemorySpace", bad_space),
+    )
+    for expected_message, fn in expected_messages:
+        with pytest.raises(AstParseError) as exc_info:
+            parse_function(fn)
+        diagnostics = exc_info.value.diagnostics
+        if not diagnostics:
+            raise AssertionError(f"expected diagnostics for slice variant: {expected_message}")
+        if diagnostics[0].message != expected_message:
+            raise AssertionError(f"expected slice diagnostic {expected_message!r}, got {diagnostics[0].message!r}")
+
+
+# AST-015
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-25 12:01:58 +0800
+# 最近一次运行成功时间: 2026-03-25 12:01:58 +0800
+# 功能说明: 验证 store helper 的 arity/target 负路径报错口径不变。
+# 测试目的: 锁定 _parse_store_like_call 在 store 分支上的非法参数个数与非法 target 诊断。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_invalid_store_helper_variants
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_parse_function_rejects_invalid_store_helper_variants() -> None:
+    def bad_arity(tile: "Tensor[f32, 2, 2]", dst: "Tensor[f32, 4, 4]"):
+        store(tile, dst, [0, 0])
+
+    def bad_target(tile: "Tensor[f32, 2, 2]", dst: int):
+        store(tile, dst, [0, 0], [2, 2])
+
+    expected_messages = (
+        ("Unsupported store arity", bad_arity),
+        ("store target must be TensorAST", bad_target),
+    )
+    for expected_message, fn in expected_messages:
+        with pytest.raises(AstParseError) as exc_info:
+            parse_function(fn)
+        diagnostics = exc_info.value.diagnostics
+        if not diagnostics:
+            raise AssertionError(f"expected diagnostics for store variant: {expected_message}")
+        if diagnostics[0].message != expected_message:
+            raise AssertionError(f"expected store diagnostic {expected_message!r}, got {diagnostics[0].message!r}")
+
+
+# AST-016
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-25 12:01:58 +0800
+# 最近一次运行成功时间: 2026-03-25 12:01:58 +0800
+# 功能说明: 验证 deslice helper 的 arity/target/space 负路径报错口径不变。
+# 测试目的: 锁定 _parse_store_like_call 在 deslice 分支上的非法参数个数、非法 target 与非法 space 诊断。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_invalid_deslice_helper_variants
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_parse_function_rejects_invalid_deslice_helper_variants() -> None:
+    def bad_arity(tile: "Tensor[f32, 2, 2]", dst: "Tensor[f32, 4, 4]"):
+        deslice(tile, dst, [0, 0])
+
+    def bad_target(tile: "Tensor[f32, 2, 2]", dst: int):
+        deslice(tile, dst, [0, 0], [2, 2])
+
+    def bad_space(tile: "Tensor[f32, 2, 2]", dst: "Tensor[f32, 4, 4]"):
+        deslice(tile, dst, [0, 0], [2, 2], [1, 1], 1)
+
+    expected_messages = (
+        ("Unsupported deslice arity", bad_arity),
+        ("deslice target must be TensorAST", bad_target),
+        ("deslice space must be MemorySpace", bad_space),
+    )
+    for expected_message, fn in expected_messages:
+        with pytest.raises(AstParseError) as exc_info:
+            parse_function(fn)
+        diagnostics = exc_info.value.diagnostics
+        if not diagnostics:
+            raise AssertionError(f"expected diagnostics for deslice variant: {expected_message}")
+        if diagnostics[0].message != expected_message:
+            raise AssertionError(f"expected deslice diagnostic {expected_message!r}, got {diagnostics[0].message!r}")
 
 
 # MGEN-015

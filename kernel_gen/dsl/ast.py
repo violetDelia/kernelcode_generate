@@ -775,6 +775,121 @@ def _normalize_annotation_text(
     return ""
 
 
+def _annotation_from_runtime_value(arg_name: str, runtime_value: object) -> TensorAST | ScalarArgAST | None:
+    """根据 runtime 实参推断缺失注解。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 将 runtime 中的 `Memory`、`SymbolDim`、`int` 转为对应参数 AST。
+
+    使用示例:
+    - _annotation_from_runtime_value("n", 4)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    if isinstance(runtime_value, Memory):
+        return TensorAST(name=arg_name, memory=runtime_value, location=None)
+    if isinstance(runtime_value, SymbolDim):
+        return ScalarArgAST(name=arg_name, value_type=int, is_symbolic=True, location=None)
+    if isinstance(runtime_value, int):
+        return ScalarArgAST(name=arg_name, value_type=int, location=None)
+    return None
+
+
+def _annotation_from_name_lookup(arg_name: str, namespace: dict[str, object]) -> TensorAST | ScalarArgAST | None:
+    """根据名称查找结果推断缺失注解。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 将 globals/builtins 中的 `Memory`、`SymbolDim` 转为对应参数 AST。
+
+    使用示例:
+    - _annotation_from_name_lookup("A", {"A": Memory([4], NumericType.Float32)})
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    value = namespace.get(arg_name)
+    if isinstance(value, Memory):
+        return TensorAST(name=arg_name, memory=value, location=None)
+    if isinstance(value, SymbolDim):
+        return ScalarArgAST(name=arg_name, value_type=int, is_symbolic=True, location=None)
+    return None
+
+
+def _annotation_from_text(
+    text: str,
+    arg_name: str | None,
+    node: object | None,
+) -> TensorAST | ScalarArgAST:
+    """根据归一化注解文本构造参数 AST。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 支持 `int` 与 `Tensor[...]` 两类公开注解文本。
+
+    使用示例:
+    - _annotation_from_text("Tensor[f32, 4]", "A", node)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    location = _location_from_node(node)
+    if text.strip() == "int":
+        return ScalarArgAST(name=arg_name or "ret0", value_type=int, location=location)
+    dtype, dims = _split_tensor_annotation(text, node)
+    memory = Memory(dims, dtype)
+    return TensorAST(name=arg_name or "ret0", memory=memory, location=location)
+
+
+def _tensor_annotation_text_from_subscript(node: py_ast.Subscript) -> str:
+    """将 `Tensor[...]` 下标注解节点还原为文本。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 仅接受 `Name` 与 `Constant` 组成的张量注解元素。
+
+    使用示例:
+    - _tensor_annotation_text_from_subscript(py_ast.parse(\"Tensor[f32, M]\", mode=\"eval\").body)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    slice_node = node.slice
+    elements = slice_node.elts if isinstance(slice_node, py_ast.Tuple) else [slice_node]
+    items: list[str] = []
+    for element in elements:
+        if isinstance(element, py_ast.Name):
+            items.append(element.id)
+            continue
+        if isinstance(element, py_ast.Constant):
+            items.append(str(element.value))
+            continue
+        _raise_parse_error("Unsupported tensor annotation element", element)
+    return "Tensor[" + ", ".join(items) + "]"
+
+
 def _parse_annotation_node(
     node: object | None,
     arg_name: str | None,
@@ -784,34 +899,22 @@ def _parse_annotation_node(
 ) -> TensorAST | ScalarArgAST | None:
     if node is None:
         if runtime_table is not None and arg_name is not None and arg_name in runtime_table:
-            runtime_value = runtime_table[arg_name]
-            if isinstance(runtime_value, Memory):
-                return TensorAST(name=arg_name, memory=runtime_value, location=None)
-            if isinstance(runtime_value, SymbolDim):
-                return ScalarArgAST(name=arg_name, value_type=int, is_symbolic=True, location=None)
-            if isinstance(runtime_value, int):
-                return ScalarArgAST(name=arg_name, value_type=int, location=None)
+            inferred = _annotation_from_runtime_value(arg_name, runtime_table[arg_name])
+            if inferred is not None:
+                return inferred
         if arg_name is None:
             return None
-        if arg_name in globals_table and isinstance(globals_table[arg_name], Memory):
-            memory = globals_table[arg_name]
-            return TensorAST(name=arg_name, memory=memory, location=None)
-        if arg_name in globals_table and isinstance(globals_table[arg_name], SymbolDim):
-            return ScalarArgAST(name=arg_name, value_type=int, is_symbolic=True, location=None)
-        if arg_name in builtins_table and isinstance(builtins_table[arg_name], Memory):
-            memory = builtins_table[arg_name]
-            return TensorAST(name=arg_name, memory=memory, location=None)
-        if arg_name in builtins_table and isinstance(builtins_table[arg_name], SymbolDim):
-            return ScalarArgAST(name=arg_name, value_type=int, is_symbolic=True, location=None)
+        inferred = _annotation_from_name_lookup(arg_name, globals_table)
+        if inferred is not None:
+            return inferred
+        inferred = _annotation_from_name_lookup(arg_name, builtins_table)
+        if inferred is not None:
+            return inferred
         _raise_parse_error("Missing annotation", node)
 
     if isinstance(node, (py_ast.Constant, py_ast.JoinedStr)):
         text = _normalize_annotation_text(node, globals_table, builtins_table, runtime_table)
-        if text.strip() == "int":
-            return ScalarArgAST(name=arg_name or "ret0", value_type=int, location=_location_from_node(node))
-        dtype, dims = _split_tensor_annotation(text, node)
-        memory = Memory(dims, dtype)
-        return TensorAST(name=arg_name or "ret0", memory=memory, location=_location_from_node(node))
+        return _annotation_from_text(text, arg_name, node)
 
     if isinstance(node, py_ast.Name):
         if node.id == "int":
@@ -822,23 +925,7 @@ def _parse_annotation_node(
         _raise_parse_error("Unsupported annotation", node)
 
     if isinstance(node, py_ast.Subscript) and isinstance(node.value, py_ast.Name) and node.value.id == "Tensor":
-        slice_node = node.slice
-        items: list[str] = []
-        if isinstance(slice_node, py_ast.Tuple):
-            elements = slice_node.elts
-        else:
-            elements = [slice_node]
-        for elt in elements:
-            if isinstance(elt, py_ast.Name):
-                items.append(elt.id)
-            elif isinstance(elt, py_ast.Constant):
-                items.append(str(elt.value))
-            else:
-                _raise_parse_error("Unsupported tensor annotation element", elt)
-        text = "Tensor[" + ", ".join(items) + "]"
-        dtype, dims = _split_tensor_annotation(text, node)
-        memory = Memory(dims, dtype)
-        return TensorAST(name=arg_name or "ret0", memory=memory, location=_location_from_node(node))
+        return _annotation_from_text(_tensor_annotation_text_from_subscript(node), arg_name, node)
 
     _raise_parse_error("Unsupported annotation", node)
     return None
@@ -904,6 +991,179 @@ def _parse_attribute_object(
     return getattr(base, expr.attr)
 
 
+def _resolve_call_base_object(
+    expr: py_ast.expr,
+    globals_table: dict[str, object],
+    builtins_table: dict[str, object],
+) -> object:
+    """解析 helper 调用的基对象。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 支持 `Name` 与嵌套 `Attribute` 两种基对象表达式。
+
+    使用示例:
+    - _resolve_call_base_object(py_ast.parse(\"dma.load\", mode=\"eval\").body.value, globals(), __builtins__)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    if isinstance(expr, py_ast.Name):
+        return _lookup_python_name(expr.id, globals_table, builtins_table)
+    if isinstance(expr, py_ast.Attribute):
+        return _parse_attribute_object(expr, globals_table, builtins_table)
+    _raise_parse_error("Unsupported call expression", expr)
+    return None
+
+
+def _parse_nn_arithmetic_call(
+    expr: py_ast.Call,
+    env: dict[str, object],
+    globals_table: dict[str, object],
+    builtins_table: dict[str, object],
+) -> BinaryExprAST | None:
+    """解析 `nn.*` 形式的二元算术 helper。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 将 `nn.add/sub/mul/truediv/floordiv` 统一映射为 `BinaryExprAST`。
+
+    使用示例:
+    - _parse_nn_arithmetic_call(expr, env, globals(), __builtins__)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    if not isinstance(expr.func, py_ast.Attribute):
+        return None
+    base_object = _resolve_call_base_object(expr.func.value, globals_table, builtins_table)
+    symbol_binary_map = {
+        "add": "add",
+        "sub": "sub",
+        "mul": "mul",
+        "truediv": "div",
+        "floordiv": "floordiv",
+    }
+    if getattr(base_object, "__name__", None) != "kernel_gen.operation.nn" or expr.func.attr not in symbol_binary_map:
+        return None
+    if len(expr.args) != 2 or expr.keywords:
+        _raise_parse_error("Unsupported nn arithmetic arity", expr)
+    lhs = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+    rhs = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+    return BinaryExprAST(
+        op=symbol_binary_map[expr.func.attr],
+        lhs=lhs,
+        rhs=rhs,
+        location=_location_from_node(expr),
+    )
+
+
+def _parse_load_like_call(
+    expr: py_ast.Call,
+    call_name: str,
+    env: dict[str, object],
+    globals_table: dict[str, object],
+    builtins_table: dict[str, object],
+) -> LoadAST:
+    """解析 `load/slice` 这类读取 helper。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 统一处理 `load` 与 `slice` 的参数解析和类型校验。
+
+    使用示例:
+    - _parse_load_like_call(expr, \"load\", env, globals(), __builtins__)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    if len(expr.args) < 3 or len(expr.args) > 5:
+        _raise_parse_error(f"Unsupported {call_name} arity", expr)
+    tensor = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+    if not isinstance(tensor, TensorAST):
+        _raise_parse_error(f"{call_name} source must be TensorAST", expr.args[0])
+    offsets = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+    sizes = _parse_expr(expr.args[2], env, globals_table, builtins_table)
+    stride = _parse_expr(expr.args[3], env, globals_table, builtins_table) if len(expr.args) >= 4 else None
+    space = _parse_expr(expr.args[4], env, globals_table, builtins_table) if len(expr.args) >= 5 else None
+    if space is not None and not isinstance(space, MemorySpace):
+        _raise_parse_error(f"{call_name} space must be MemorySpace", expr.args[4])
+    return LoadAST(
+        tensor=tensor,
+        offset=offsets,
+        sizes=sizes,
+        stride=stride,
+        space=space,
+        kind=call_name,
+        location=_location_from_node(expr),
+    )
+
+
+def _parse_store_like_call(
+    expr: py_ast.Call,
+    call_name: str,
+    env: dict[str, object],
+    globals_table: dict[str, object],
+    builtins_table: dict[str, object],
+) -> StoreAST:
+    """解析 `store/deslice` 这类写回 helper。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 统一处理 `store` 与 `deslice` 的参数解析和类型校验。
+
+    使用示例:
+    - _parse_store_like_call(expr, \"store\", env, globals(), __builtins__)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    min_arity = 4
+    max_arity = 5 if call_name == "store" else 6
+    if len(expr.args) < min_arity or len(expr.args) > max_arity:
+        _raise_parse_error(f"Unsupported {call_name} arity", expr)
+    value = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+    tensor = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+    if not isinstance(tensor, TensorAST):
+        _raise_parse_error(f"{call_name} target must be TensorAST", expr.args[1])
+    offsets = _parse_expr(expr.args[2], env, globals_table, builtins_table)
+    sizes = _parse_expr(expr.args[3], env, globals_table, builtins_table)
+    stride = _parse_expr(expr.args[4], env, globals_table, builtins_table) if len(expr.args) >= 5 else None
+    if call_name == "deslice" and len(expr.args) == 6:
+        extra_space = _parse_expr(expr.args[5], env, globals_table, builtins_table)
+        if not isinstance(extra_space, MemorySpace):
+            _raise_parse_error("deslice space must be MemorySpace", expr.args[5])
+    return StoreAST(
+        tensor=tensor,
+        offset=offsets,
+        sizes=sizes,
+        stride=stride,
+        value=value,
+        kind=call_name,
+        location=_location_from_node(expr),
+    )
+
+
 def _parse_dma_call(
     expr: py_ast.Call,
     env: dict[str, object],
@@ -930,30 +1190,10 @@ def _parse_dma_call(
 
     call_name: str | None = None
     if isinstance(expr.func, py_ast.Attribute):
-        if isinstance(expr.func.value, py_ast.Name):
-            base_object = _lookup_python_name(expr.func.value.id, globals_table, builtins_table)
-        elif isinstance(expr.func.value, py_ast.Attribute):
-            base_object = _parse_attribute_object(expr.func.value, globals_table, builtins_table)
-        else:
-            _raise_parse_error("Unsupported call expression", expr)
-        symbol_binary_map = {
-            "add": "add",
-            "sub": "sub",
-            "mul": "mul",
-            "truediv": "div",
-            "floordiv": "floordiv",
-        }
-        if getattr(base_object, "__name__", None) == "kernel_gen.operation.nn" and expr.func.attr in symbol_binary_map:
-            if len(expr.args) != 2 or expr.keywords:
-                _raise_parse_error("Unsupported nn arithmetic arity", expr)
-            lhs = _parse_expr(expr.args[0], env, globals_table, builtins_table)
-            rhs = _parse_expr(expr.args[1], env, globals_table, builtins_table)
-            return BinaryExprAST(
-                op=symbol_binary_map[expr.func.attr],
-                lhs=lhs,
-                rhs=rhs,
-                location=_location_from_node(expr),
-            )
+        nn_expr = _parse_nn_arithmetic_call(expr, env, globals_table, builtins_table)
+        if nn_expr is not None:
+            return nn_expr
+        base_object = _resolve_call_base_object(expr.func.value, globals_table, builtins_table)
         if getattr(base_object, "__name__", None) == "kernel_gen.operation.dma":
             call_name = expr.func.attr
         else:
@@ -965,92 +1205,16 @@ def _parse_dma_call(
         _raise_parse_error("Unsupported call expression", expr)
 
     if call_name == "load":
-        if len(expr.args) < 3 or len(expr.args) > 5:
-            _raise_parse_error("Unsupported load arity", expr)
-        tensor = _parse_expr(expr.args[0], env, globals_table, builtins_table)
-        if not isinstance(tensor, TensorAST):
-            _raise_parse_error("load source must be TensorAST", expr.args[0])
-        offsets = _parse_expr(expr.args[1], env, globals_table, builtins_table)
-        sizes = _parse_expr(expr.args[2], env, globals_table, builtins_table)
-        stride = _parse_expr(expr.args[3], env, globals_table, builtins_table) if len(expr.args) >= 4 else None
-        space = _parse_expr(expr.args[4], env, globals_table, builtins_table) if len(expr.args) >= 5 else None
-        if space is not None and not isinstance(space, MemorySpace):
-            _raise_parse_error("load space must be MemorySpace", expr.args[4])
-        return LoadAST(
-            tensor=tensor,
-            offset=offsets,
-            sizes=sizes,
-            stride=stride,
-            space=space,
-            kind="load",
-            location=_location_from_node(expr),
-        )
+        return _parse_load_like_call(expr, call_name, env, globals_table, builtins_table)
 
     if call_name == "slice":
-        if len(expr.args) < 3 or len(expr.args) > 5:
-            _raise_parse_error("Unsupported slice arity", expr)
-        tensor = _parse_expr(expr.args[0], env, globals_table, builtins_table)
-        if not isinstance(tensor, TensorAST):
-            _raise_parse_error("slice source must be TensorAST", expr.args[0])
-        offsets = _parse_expr(expr.args[1], env, globals_table, builtins_table)
-        sizes = _parse_expr(expr.args[2], env, globals_table, builtins_table)
-        stride = _parse_expr(expr.args[3], env, globals_table, builtins_table) if len(expr.args) >= 4 else None
-        space = _parse_expr(expr.args[4], env, globals_table, builtins_table) if len(expr.args) >= 5 else None
-        if space is not None and not isinstance(space, MemorySpace):
-            _raise_parse_error("slice space must be MemorySpace", expr.args[4])
-        return LoadAST(
-            tensor=tensor,
-            offset=offsets,
-            sizes=sizes,
-            stride=stride,
-            space=space,
-            kind="slice",
-            location=_location_from_node(expr),
-        )
+        return _parse_load_like_call(expr, call_name, env, globals_table, builtins_table)
 
     if call_name == "store":
-        if len(expr.args) < 4 or len(expr.args) > 5:
-            _raise_parse_error("Unsupported store arity", expr)
-        value = _parse_expr(expr.args[0], env, globals_table, builtins_table)
-        tensor = _parse_expr(expr.args[1], env, globals_table, builtins_table)
-        if not isinstance(tensor, TensorAST):
-            _raise_parse_error("store target must be TensorAST", expr.args[1])
-        offsets = _parse_expr(expr.args[2], env, globals_table, builtins_table)
-        sizes = _parse_expr(expr.args[3], env, globals_table, builtins_table)
-        stride = _parse_expr(expr.args[4], env, globals_table, builtins_table) if len(expr.args) >= 5 else None
-        return StoreAST(
-            tensor=tensor,
-            offset=offsets,
-            sizes=sizes,
-            stride=stride,
-            value=value,
-            kind="store",
-            location=_location_from_node(expr),
-        )
+        return _parse_store_like_call(expr, call_name, env, globals_table, builtins_table)
 
     if call_name == "deslice":
-        if len(expr.args) < 4 or len(expr.args) > 6:
-            _raise_parse_error("Unsupported deslice arity", expr)
-        value = _parse_expr(expr.args[0], env, globals_table, builtins_table)
-        tensor = _parse_expr(expr.args[1], env, globals_table, builtins_table)
-        if not isinstance(tensor, TensorAST):
-            _raise_parse_error("deslice target must be TensorAST", expr.args[1])
-        offsets = _parse_expr(expr.args[2], env, globals_table, builtins_table)
-        sizes = _parse_expr(expr.args[3], env, globals_table, builtins_table)
-        stride = _parse_expr(expr.args[4], env, globals_table, builtins_table) if len(expr.args) >= 5 else None
-        if len(expr.args) == 6:
-            extra_space = _parse_expr(expr.args[5], env, globals_table, builtins_table)
-            if not isinstance(extra_space, MemorySpace):
-                _raise_parse_error("deslice space must be MemorySpace", expr.args[5])
-        return StoreAST(
-            tensor=tensor,
-            offset=offsets,
-            sizes=sizes,
-            stride=stride,
-            value=value,
-            kind="deslice",
-            location=_location_from_node(expr),
-        )
+        return _parse_store_like_call(expr, call_name, env, globals_table, builtins_table)
 
     if call_name == "alloc":
         if len(expr.args) < 2 or len(expr.args) > 4 or expr.keywords:
