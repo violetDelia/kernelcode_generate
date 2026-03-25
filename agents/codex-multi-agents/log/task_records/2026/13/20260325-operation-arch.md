@@ -1,0 +1,89 @@
+- 时间：`2026-03-25 21:20:00 +0800`
+- 执行人：`咯咯咯`
+- 经办人：`咯咯咯`
+- 任务：`T-20260325-74b02347`
+- 任务目标：基于现有 `arch dialect` 新增 `operation/arch` 链路 spec，收敛 operation 层公开职责、与 `kernel_gen/dialect/arch.py` 的关系边界、计划暴露的 helper/API、对应实现文件与测试文件；本轮不实现业务代码。
+- 改动：
+  - 恢复并创建授权 worktree `/home/lfr/kernelcode_generate/wt-20260325-operation-arch`，沿用主分支 `TODO.md` 中登记的任务 ID、worktree 与记录文件。
+  - 只读核对现有 `spec/dialect/arch.md`、`kernel_gen/dialect/arch.py`、`test/dialect/test_arch_dialect.py`、`spec/operation/{dma,scf,nn}.md`、`kernel_gen/operation/{__init__,scf,nn}.py` 与现有 DSL/expectation 中 `arch` 相关调用形态，确认仓内尚无 `kernel_gen/operation/arch.py`、`test/operation/test_operation_arch.py` 与 `spec/operation/arch.md`。
+  - 新增 `spec/operation/arch.md`，收敛 `operation/arch` 的公开职责、限制与边界、八个计划暴露 helper/API、对应实现/测试文件，以及与 `arch dialect` 的一一映射关系。
+  - 在 spec 中明确：
+    - operation 层只定义高层 helper，不重复定义 dialect 语义；
+    - 六个执行维度查询 helper 返回 `SymbolDim` 风格语义；
+    - `get_dynamic_memory(space)` 返回一维动态字节 `Memory` 语义，且仅允许片上空间；
+    - `launch_kernel(name, block, thread, subthread)` 只记录启动请求，返回 `None`；
+    - 后续测试文件应为 `test/operation/test_operation_arch.py`，并建立 `TC-OP-ARCH-001..010` 与 `TC-ARCH-001..010` 的映射。
+  - 本轮未修改任何实现文件、测试文件或 expectation 文件。
+- 结论：
+  - 已完成 `operation/arch` 首版 spec 收敛，当前涉及文件为 `spec/operation/arch.md` 与本任务记录文件。
+  - 当前无实现代码可运行，本轮未执行测试；该 spec 已足以支撑下一阶段实现任务创建。
+  - 建议下一步由神秘人创建实现任务：新增 `kernel_gen/operation/arch.py` 与 `test/operation/test_operation_arch.py`，按 spec 补齐八个 helper/API 与 `TC-OP-ARCH-001..010` 测试闭环。
+
+- 时间：`2026-03-25 21:24:50 +0800`
+- 执行人：`金铲铲大作战`
+- 经办人：`金铲铲大作战`
+- 任务：`T-20260325-51a9c217`
+- 任务目标：依据 `spec/operation/arch.md` 新增 `kernel_gen/operation/arch.py` 与 `test/operation/test_operation_arch.py`，完成 operation/arch helper/API 与测试闭环；严格保持与 `kernel_gen/dialect/arch.py` 的职责边界，只在 operation 层提供 spec 约定的公开 helper。
+- 改动：
+  - 新增 `kernel_gen/operation/arch.py`，实现 `get_block_id/get_block_num/get_thread_id/get_thread_num/get_subthread_id/get_subthread_num/get_dynamic_memory/launch_kernel` 八个公开 helper，并在 operation 层完成动态内存空间与 launch 参数校验；未修改 `kernel_gen/dialect/arch.py`。
+  - 新增 `test/operation/test_operation_arch.py`，按 `TC-OP-ARCH-001..010` 建立执行维度查询、动态内存入口、kernel 启动合法/非法路径的测试闭环，补齐文件头与函数级注释所需的文档信息、使用示例及 spec/test/功能实现链接。
+  - 运行 `pytest -q test/operation/test_operation_arch.py`，结果为 `10 passed`；并将测试注释中的最近一次运行/成功时间同步为本次实际执行时间。
+  - 本轮未修改 `spec/operation/arch.md`、`kernel_gen/dialect/arch.py`、expectation 文件或其他无关业务文件。
+- 结论：
+  - `operation/arch` 实现与测试已按 `spec/operation/arch.md` 最小收敛完成，当前涉及业务文件为 `kernel_gen/operation/arch.py` 与 `test/operation/test_operation_arch.py`。
+  - 本轮自测通过：`pytest -q test/operation/test_operation_arch.py` => `10 passed in 0.24s`。
+  - 建议下一步由神秘人创建审查任务，重点复核 `launch_kernel` 参数边界、`get_dynamic_memory` 片上空间限制，以及 `TC-OP-ARCH-001..010` 与 spec 清单的一一对应关系。
+
+- 时间：`2026-03-25 21:36:25 +0800`
+- 执行人：`李白`
+- 经办人：`李白`
+- 任务：`T-20260325-b704f45a`
+- 任务目标：严格审查 `operation/arch` 链路实现，核对 `spec/operation/arch.md`、`kernel_gen/operation/arch.py`、`test/operation/test_operation_arch.py` 与记录文件，重点复核 `launch_kernel` 参数边界、`get_dynamic_memory` 的 `memory_space` 限制，以及 `TC-OP-ARCH-001..010` 与 spec/test 的一一对应。
+- 改动：
+  - 只读核对主分支 `TODO.md` 中任务 `T-20260325-b704f45a` 的 worktree 与记录文件，确认当前授权目录为 `/home/lfr/kernelcode_generate/wt-20260325-operation-arch`。
+  - 逐项审查 `spec/operation/arch.md`、`kernel_gen/operation/arch.py`、`test/operation/test_operation_arch.py`，核对公开接口、错误路径、测试编号映射与 Python 参数类型提示规则。
+  - 审查确认：
+    - `kernel_gen/operation/arch.py` 的函数参数均已显式标注类型；
+    - `launch_kernel` 的非空名称、`int | SymbolDim` 限制与静态正整数错误路径，在现有实现与测试之间基本一致；
+    - `get_dynamic_memory(space)` 的实现允许 `MemorySpace.SM/LM/TSM/TLM` 四类片上空间，但现有测试仅证明 `MemorySpace.SM` 成功路径，以及非法类型与 `MemorySpace.GM` 失败路径。
+  - 发现必须修改项：
+    - [`spec/operation/arch.md`](../../../../../spec/operation/arch.md) 第 40-41、219-239、282-293 行公开承诺 `get_dynamic_memory(space)` 接受四类片上空间并保持 `space=<输入空间>` 的返回语义，但 [`test/operation/test_operation_arch.py`](../../../../../test/operation/test_operation_arch.py) 第 152-186 行只验证了 `MemorySpace.SM` 的成功路径，未证明 `MemorySpace.LM`、`MemorySpace.TSM`、`MemorySpace.TLM` 的正向行为，导致 spec 与测试清单未完全闭环。
+  - 本轮按任务要求未修改业务文件，亦未复测。
+- 结论：
+  - 审查结论：`需修改`
+  - 需要修改的文件与原因：
+    - [`test/operation/test_operation_arch.py`](../../../../../test/operation/test_operation_arch.py)：缺少 `MemorySpace.LM`、`MemorySpace.TSM`、`MemorySpace.TLM` 的正向测试，当前无法证明 [`spec/operation/arch.md`](../../../../../spec/operation/arch.md) 已公开承诺的“四类片上空间均可接受且返回空间与输入一致”。
+    - 若当前设计并不打算对四类片上空间都提供相同保证，则应改为收窄 [`spec/operation/arch.md`](../../../../../spec/operation/arch.md) 的公开契约，使之只覆盖已被测试证明的范围；否则应补齐正向测试并将测试清单映射补足到实际测试函数。
+  - 期望修改方向：
+    - 优先在 [`test/operation/test_operation_arch.py`](../../../../../test/operation/test_operation_arch.py) 补充 `LM/TSM/TLM` 三类片上空间的成功路径断言，至少校验 `shape=[\"?\"]`、`stride=[1]`、`dtype=NumericType.Int8`、`space` 与输入一致。
+    - 同步检查 [`spec/operation/arch.md`](../../../../../spec/operation/arch.md) 的 `TC-OP-ARCH-007/008` 是否需要更细化拆分，以保持测试目标与实际测试函数一一对应。
+  - 测试情况：未复测，本轮仅基于现有链路结果做只读审查。
+
+- 时间：`2026-03-25 21:53:28 +0800`
+- 执行人：`李白`
+- 经办人：`李白`
+- 任务：`T-20260325-d18df485`
+- 任务目标：复审 `operation/arch` 链路中 `get_dynamic_memory` 的片上空间正向覆盖补齐，核对 `spec/operation/arch.md`、`test/operation/test_operation_arch.py` 与记录文件，确认 `TC-OP-ARCH-007` 对 `SM/LM/TSM/TLM` 覆盖与 spec 一致性，且本轮无范围外改动。
+- 改动：
+  - 只读核对主分支 `TODO.md` 中任务 `T-20260325-d18df485` 的 worktree 与记录文件，确认当前授权目录为 `/home/lfr/kernelcode_generate/wt-20260325-operation-arch`。
+  - 审查 `spec/operation/arch.md` 的 `get_dynamic_memory(space)` 公开承诺与测试清单（`TC-OP-ARCH-007`），核对 `test/operation/test_operation_arch.py` 的覆盖范围与断言内容。
+  - 复核确认：`test_get_dynamic_memory_returns_dynamic_int8_memory` 已覆盖 `MemorySpace.SM/LM/TSM/TLM` 四类片上空间的正向路径，并逐项断言 `shape=["?"]`、`stride=[1]`、`dtype=NumericType.Int8`、`space` 与输入一致，满足 `spec/operation/arch.md` 的公开承诺与测试清单描述。
+  - 本轮按任务要求未修改任何业务文件，亦未复测。
+- 结论：
+  - 审查结论：`通过`
+  - 影响范围：无（只读复审）。
+  - 测试情况：未复测；沿用链路内既有测试结果，本轮仅做映射与覆盖一致性核对。
+
+- 时间：`2026-03-25 21:41:11 +0800`
+- 执行人：`金铲铲大作战`
+- 经办人：`金铲铲大作战`
+- 任务：`T-20260325-d63f855c`
+- 任务目标：最小补齐 `operation/arch` 链路中 `get_dynamic_memory` 对 `MemorySpace.LM`、`MemorySpace.TSM`、`MemorySpace.TLM` 的正向测试闭环，保持 `spec/operation/arch.md` 中 SM/LM/TSM/TLM 四类片上空间公开契约不变。
+- 改动：
+  - 仅修改 `test/operation/test_operation_arch.py` 中 `TC-OP-ARCH-007`，将 `get_dynamic_memory` 成功路径断言从单一 `MemorySpace.SM` 扩展为覆盖 `MemorySpace.SM`、`MemorySpace.LM`、`MemorySpace.TSM`、`MemorySpace.TLM` 四类片上空间，统一断言 `shape=["?"]`、`stride=[1]`、`dtype=NumericType.Int8` 与返回 `space` 保持输入一致。
+  - 未修改 `kernel_gen/operation/arch.py`；现有实现已满足新增正向测试闭环。
+  - 运行 `pytest -q test/operation/test_operation_arch.py`，结果为 `10 passed`；并将测试文件内最近一次运行/成功时间同步为本轮实际执行时间。
+- 结论：
+  - `get_dynamic_memory` 在 `SM/LM/TSM/TLM` 四类片上空间的正向测试闭环已补齐，当前仅新增测试断言，无需调整实现或 spec。
+  - 自测结果：`pytest -q test/operation/test_operation_arch.py` => `10 passed in 0.23s`。
+  - 建议下一步由神秘人创建复审任务，重点核对 `TC-OP-ARCH-007` 对四类片上空间的覆盖是否与 `spec/operation/arch.md` 完全一致，并复核本轮未引入额外范围改动。
