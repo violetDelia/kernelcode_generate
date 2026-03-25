@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-定义 `symbol dialect` 的类型与基础构件，用于在 IR 中显式表示“带符号值语义的整型标量”。该方言的核心目标是让类型本身携带一个符号表达，例如 `!symbol.int<"N">` 表示“这是一个整数值，其值语义为符号 `N`”。本方言同时作为 memory 相关符号标量语义的唯一归属：`shape`、`stride`、`offset`、`size`、循环边界等位置只要进入 IR 并需要表达单个整数符号值，就统一落到 `symbol dialect`。在此基础上，本方言允许最小范围的整数符号算术与比较 op，用于在 IR 中显式表达 `symbol.int` 标量之间的加、减、乘、除、整除以及比较计算，并提供将 `symbol.int` 显式转换为 `f32` 的 `symbol.to_float` op。该方言不负责张量、内存容器、通用控制流或超出最小整数符号算术/比较范围的数值计算语义。
+定义 `symbol dialect` 的类型与基础构件，用于在 IR 中显式表示“带符号值语义的整型标量”。该方言的核心目标是让类型本身携带一个符号表达，例如 `!symbol.int<"N">` 表示“这是一个整数值，其值语义为符号 `N`”。本方言同时作为 memory 相关符号标量语义的唯一归属：`shape`、`stride`、`offset`、`size`、循环边界等位置只要进入 IR 并需要表达单个整数符号值，就统一落到 `symbol dialect`。在此基础上，本方言允许最小范围的整数符号算术与比较 op，用于在 IR 中显式表达 `symbol.int` 标量之间的加、减、乘、除、整除以及比较计算，并提供 `symbol.to_int`（转为普通整型）与 `symbol.to_float`（转为 `f32`）两类显式类型转换 op。该方言不负责张量、内存容器、通用控制流或超出最小整数符号算术/比较范围的数值计算语义。
 
 ## 文档信息
 
@@ -48,7 +48,7 @@
 - 本方言暂不定义“未知但无名字”的匿名符号值；若需要动态未知值，应优先使用具名符号或由其他方言以 SSA value 传递。
 - 当前只定义整数语义，不区分 `int/int8/int16/int32/int64` 等具体整型宽度，也不定义 `index`、浮点或其他非整型 symbol 类型。
 - 当前最小算术/比较范围仅包含 `symbol.add`、`symbol.sub`、`symbol.mul`、`symbol.div`、`symbol.floordiv`、`symbol.eq`、`symbol.ne`、`symbol.lt`、`symbol.le`、`symbol.gt`、`symbol.ge`；不定义取模、按位运算、布尔逻辑组合、广播或张量级算术。
-- 当前仅定义 `symbol.to_float` 将 `!symbol.int<"...">` 转为 `f32`；不定义其他符号值到浮点/整数的转换规则。
+- 当前仅定义 `symbol.to_int` 与 `symbol.to_float` 两类转换：`symbol.to_int` 将 `!symbol.int<"...">` 转为普通整型（覆盖各整型变体），`symbol.to_float` 将 `!symbol.int<"...">` 转为 `f32`；不定义反向转换或其他跨类型规则。
 
 ## 公开接口
 
@@ -310,6 +310,39 @@ SymbolValueType.from_expr("N")
 - 返回语义：返回表达 true/false 语义的单结果 SSA value。
 - 限制：当前只定义二元单结果比较 op，不定义三路比较、链式比较、逻辑与/或/非、谓词折叠或跨类型比较规则。
 
+### `symbol.to_int`
+
+功能说明：
+
+- 定义 `symbol.to_int` op，用于将 `!symbol.int<"...">` 标量显式转换为普通整型。
+- 该 op 仅负责类型转换，不做符号表达求值或简化。
+
+参数说明：
+
+- `source(value)`：输入操作数，必须为 `!symbol.int<"...">`。
+- `result_type(type)`：结果类型，必须为 builtin 整型（如 `i8`、`i16`、`i32`、`i64`）。
+
+使用示例：
+
+```text
+%i32 = symbol.to_int %n : !symbol.int<"N"> -> i32
+%i64 = symbol.to_int %n : !symbol.int<"N"> -> i64
+```
+
+注意事项：
+
+- `source` 必须是 `!symbol.int<"...">`；不接受 `i32`、`index`、`f64` 或其他非 symbol 标量类型作为输入。
+- 结果类型必须是 builtin 整型；当前覆盖各整型变体（如 `i8`、`i16`、`i32`、`i64`）。
+- `symbol.to_int` 不引入新的符号表达式语义；仅在 IR 层完成类型转换表述。
+- parse/print 必须稳定遵循 `symbol.to_int %source : !symbol.int<"..."> -> i32/i64/...` 的公开文本形式。
+- 错误信息至少应包含具体 op 名称与失败原因。
+
+返回与限制：
+
+- 返回类型：builtin 整型（`IntegerType`）。
+- 返回语义：返回 `source` 对应的整数表达值（仅转换类型，不做数值求值）。
+- 限制：当前只定义从 `!symbol.int<"...">` 到普通整型的显式转换，不定义反向转换。
+
 ### `symbol.to_float`
 
 功能说明：
@@ -463,6 +496,7 @@ symbol.for %i = %start to %end step %step
 - 验证 memory 相关标量语义复用同一套整数-only symbol 规则，包括具名维度表达、乘法步幅表达与常量步幅表达。
 - 验证 `symbol.add/sub/mul/div/floordiv` 的最小整数符号算术语义、`!symbol.int<"...">` 类型约束、parse/print 稳定性与错误路径。
 - 验证 `symbol.eq/ne/lt/le/gt/ge` 的最小整数符号比较语义、`!symbol.int<"..."> -> i1` 约束、parse/print 稳定性与错误路径。
+- 验证 `symbol.to_int` 的整数符号到普通整型转换语义、整型变体覆盖、类型约束与 parse/print 稳定性。
 - 验证 `symbol.to_float` 的整数符号到 `f32` 转换语义、类型约束与 parse/print 稳定性。
 - 验证 `symbol.get_dim` / `symbol.get_stride` 能从 memory type 读取真实 dim/stride，并返回对应的 symbol value。
 - 验证 `symbol.get_dim` / `symbol.get_stride` 的错误路径，包括非 memory type、轴号越界、匿名动态条目 `?` 与非法轴号。
@@ -514,3 +548,6 @@ symbol.for %i = %start to %end step %step
 | TC-SYM-039 | `symbol.to_float` | 基础转换合法路径 | `source` 为 `!symbol.int<"...">`，结果为 `f32` | 构造 `symbol.to_float` | verifier 通过；返回 `f32` | `test_symbol_to_float_verify_success` |
 | TC-SYM-040 | `symbol.to_float` | parse/print 稳定 | 已实现公开文本语法 | parse 后再 print | 文本稳定 | `test_symbol_to_float_round_trip` |
 | TC-SYM-041 | `symbol.to_float` | 非法类型 | `source` 非 `!symbol.int<"...">` 或结果非 `f32` | 构造并校验 op | verifier 报错 | `test_symbol_to_float_rejects_invalid_types` |
+| TC-SYM-042 | `symbol.to_int` | 覆盖整型变体 | `source` 为 `!symbol.int<"...">`，结果为普通整型 | 以 `i8/i16/i32/i64` 构造 `symbol.to_int` | verifier 通过；结果类型保持对应整型变体 | `test_symbol_to_int_verify_success_for_integer_variants` |
+| TC-SYM-043 | `symbol.to_int` | parse/print 稳定 | 已实现公开文本语法 | parse 后再 print | `symbol.to_int` 文本与结果整型保持稳定 | `test_symbol_to_int_round_trip` |
+| TC-SYM-044 | `symbol.to_int` | 非法类型 | `source` 非 `!symbol.int<"...">` 或结果非整型 | 构造并校验 op | verifier 报错 | `test_symbol_to_int_rejects_invalid_types` |

@@ -5,10 +5,10 @@
 
 功能说明:
 - 定义仅表示整数符号值语义的 symbol dialect。
-- 提供 `SymbolExprAttr`、`SymbolValueType`、`symbol.add/sub/mul/div/floordiv`、`symbol.eq/ne/lt/le/gt/ge`、`symbol.to_float` 与 `symbol.get_dim/get_stride` 查询 op，不区分 `int8/int64` 等整型宽度。
+- 提供 `SymbolExprAttr`、`SymbolValueType`、`symbol.add/sub/mul/div/floordiv`、`symbol.eq/ne/lt/le/gt/ge`、`symbol.to_int/symbol.to_float` 与 `symbol.get_dim/get_stride` 查询 op，不区分 `int8/int64` 等整型宽度。
 
 使用示例:
-- from kernel_gen.dialect.symbol import Symbol, SymbolAddOp, SymbolDivOp, SymbolEqOp, SymbolFloorDivOp, SymbolSubOp, SymbolMulOp, SymbolExprAttr, SymbolGetDimOp, SymbolGetStrideOp, SymbolValueType
+- from kernel_gen.dialect.symbol import Symbol, SymbolAddOp, SymbolDivOp, SymbolEqOp, SymbolFloorDivOp, SymbolSubOp, SymbolMulOp, SymbolToIntOp, SymbolExprAttr, SymbolGetDimOp, SymbolGetStrideOp, SymbolValueType
 
 关联文件:
 - spec: spec/dialect/symbol.md
@@ -24,7 +24,7 @@ from collections.abc import Sequence
 from typing import ClassVar
 
 import sympy as sp
-from xdsl.dialects.builtin import IntAttr, StringAttr, f32, i1
+from xdsl.dialects.builtin import IntAttr, IntegerType, StringAttr, f32, i1, i32
 from xdsl.ir import Attribute, Block, Dialect, Operation, ParametrizedAttribute, Region, SSAValue, TypeAttribute
 from xdsl.irdl import (
     IRDLOperation,
@@ -909,6 +909,87 @@ class SymbolToFloatOp(IRDLOperation):
         return cls(source, result_type)
 
 
+@irdl_op_definition
+class SymbolToIntOp(IRDLOperation):
+    """将 symbol.int 标量转换为普通整型。"""
+
+    name = "symbol.to_int"
+
+    source = operand_def(Attribute)
+    result = result_def(Attribute)
+
+    def __init__(
+        self: "SymbolToIntOp",
+        source: SSAValue | Operation,
+        result_type: Attribute = i32,
+    ) -> None:
+        """初始化 symbol.to_int。
+
+        创建者: 摸鱼小分队
+        最后一次更改: 摸鱼小分队
+
+        功能说明:
+        - 设置单个 `!symbol.int<"expr">` 操作数与普通整型结果类型。
+
+        使用示例:
+        - SymbolToIntOp(source, i32)
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        super().__init__(operands=[source], result_types=[result_type])
+
+    def verify_(self: "SymbolToIntOp") -> None:
+        """校验 symbol.to_int 的类型约束。
+
+        创建者: 摸鱼小分队
+        最后一次更改: 摸鱼小分队
+
+        功能说明:
+        - 校验 source 必须为 `!symbol.int<"expr">`。
+        - 校验 result 必须为 builtin 整型（`IntegerType`）。
+
+        使用示例:
+        - SymbolToIntOp(source, i32).verify_()
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        source_value = SSAValue.get(self.source)
+        if not _is_symbol_int_type(source_value.type):
+            raise VerifyException(f"{self.name} source must have type !symbol.int<\"expr\">")
+        if not isinstance(self.result.type, IntegerType):
+            raise VerifyException(f"{self.name} result type must be integer")
+
+    def print(self: "SymbolToIntOp", printer: Printer) -> None:
+        """打印 symbol.to_int 自定义文本语法。"""
+
+        printer.print_string(" ")
+        printer.print_ssa_value(self.source)
+        printer.print_string(" : ")
+        printer.print_attribute(SSAValue.get(self.source).type)
+        printer.print_string(" -> ")
+        printer.print_attribute(self.result.type)
+
+    @classmethod
+    def parse(cls: type["SymbolToIntOp"], parser: AttrParser) -> "SymbolToIntOp":
+        """解析 symbol.to_int 自定义文本语法。"""
+
+        unresolved_source = parser.parse_unresolved_operand()
+        parser.parse_characters(":", f" in {cls.name}")
+        source_type = parser.parse_type()
+        parser.parse_characters("->", f" in {cls.name}")
+        result_type = parser.parse_type()
+        source = parser.resolve_operand(unresolved_source, source_type)
+        return cls(source, result_type)
+
+
 class _BaseSymbolMemoryQueryOp(IRDLOperation):
     """memory 元信息查询 op 基类。"""
 
@@ -1149,6 +1230,7 @@ Symbol = Dialect(
         SymbolLeOp,
         SymbolGtOp,
         SymbolGeOp,
+        SymbolToIntOp,
         SymbolToFloatOp,
         SymbolGetDimOp,
         SymbolGetStrideOp,
@@ -1178,5 +1260,6 @@ __all__ = [
     "SymbolFloorDivOp",
     "SymbolGetStrideOp",
     "SymbolSubOp",
+    "SymbolToIntOp",
     "SymbolValueType",
 ]

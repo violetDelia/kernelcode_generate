@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 from xdsl.context import Context
-from xdsl.dialects.builtin import ArrayAttr, Builtin, IndexType, IntAttr, StringAttr, f32, f64, i1, i32
+from xdsl.dialects.builtin import ArrayAttr, Builtin, IndexType, IntAttr, IntegerType, StringAttr, f32, f64, i1, i8, i16, i32, i64
 from xdsl.dialects.test import Test, TestOp as _TestOp
 from xdsl.ir import Block, Region
 from xdsl.parser import Parser
@@ -56,6 +56,7 @@ from kernel_gen.dialect.symbol import (
     SymbolMulOp,
     SymbolNeOp,
     SymbolSubOp,
+    SymbolToIntOp,
     SymbolToFloatOp,
     SymbolValueType,
 )
@@ -703,6 +704,74 @@ def test_symbol_to_float_rejects_invalid_types() -> None:
         SymbolToFloatOp(non_symbol_value, f32).verify()
     with pytest.raises(VerifyException, match="symbol.to_float result type must be f32"):
         SymbolToFloatOp(symbol_value, f64).verify()
+
+
+# TC-SYM-042
+# 创建者: 摸鱼小分队
+# 最后一次更改: 摸鱼小分队
+# 最近一次运行测试时间: 2026-03-26 00:28:22 +0800
+# 最近一次运行成功时间: 2026-03-26 00:28:22 +0800
+# 测试目的: 验证 symbol.to_int 支持常见整型变体（i8/i16/i32/i64）并通过 verifier。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+@pytest.mark.parametrize(
+    ("result_type", "expected_text"),
+    [(i8, "i8"), (i16, "i16"), (i32, "i32"), (i64, "i64")],
+)
+def test_symbol_to_int_verify_success_for_integer_variants(result_type: IntegerType, expected_text: str) -> None:
+    op = SymbolToIntOp(_make_symbol_value("N"), result_type)
+
+    op.verify()
+    assert _print_attr(op.result.type) == expected_text
+
+
+# TC-SYM-043
+# 创建者: 摸鱼小分队
+# 最后一次更改: 摸鱼小分队
+# 最近一次运行测试时间: 2026-03-26 00:28:22 +0800
+# 最近一次运行成功时间: 2026-03-26 00:28:22 +0800
+# 测试目的: 验证 symbol.to_int 的 parse/print 在不同整型结果类型下 round-trip 稳定。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_to_int_round_trip() -> None:
+    ctx = _build_context()
+    module = Parser(
+        ctx,
+        """
+builtin.module {
+  %n = "test.op"() : () -> !symbol.int<"N">
+  %i8 = symbol.to_int %n : !symbol.int<"N"> -> i8
+  %i32 = symbol.to_int %n : !symbol.int<"N"> -> i32
+  %i64 = symbol.to_int %n : !symbol.int<"N"> -> i64
+}
+""",
+    ).parse_module()
+
+    module.verify()
+    printed = _print_op(module)
+    assert 'symbol.to_int %n : !symbol.int<"N"> -> i8' in printed
+    assert 'symbol.to_int %n : !symbol.int<"N"> -> i32' in printed
+    assert 'symbol.to_int %n : !symbol.int<"N"> -> i64' in printed
+
+
+# TC-SYM-044
+# 创建者: 摸鱼小分队
+# 最后一次更改: 摸鱼小分队
+# 最近一次运行测试时间: 2026-03-26 00:28:22 +0800
+# 最近一次运行成功时间: 2026-03-26 00:28:22 +0800
+# 测试目的: 验证 symbol.to_int 会拒绝非 symbol.int 输入或非整型结果类型。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_to_int_rejects_invalid_types() -> None:
+    non_symbol_value = _TestOp(result_types=[i32]).results[0]
+    symbol_value = _make_symbol_value("N")
+
+    with pytest.raises(VerifyException, match='symbol.to_int source must have type !symbol.int<"expr">'):
+        SymbolToIntOp(non_symbol_value, i32).verify()
+    with pytest.raises(VerifyException, match="symbol.to_int result type must be integer"):
+        SymbolToIntOp(symbol_value, f32).verify()
+    with pytest.raises(VerifyException, match="symbol.to_int result type must be integer"):
+        SymbolToIntOp(symbol_value, IndexType()).verify()
 
 
 # TC-SYM-026
