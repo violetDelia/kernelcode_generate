@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/dsl/ast.md`](../../spec/dsl/ast.md)
 - `功能实现`：[`kernel_gen/dsl/ast.py`](../../kernel_gen/dsl/ast.py)
 - `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
@@ -39,7 +39,7 @@
 - `for` 循环仅支持 `range(...)`、`LoopRange(...)` 或 `loop(...)` 的 1~3 参数形式，并解析为 `ForAST` 的 `start/end/step` 字段。
 - `for` 循环体内不允许出现 `return`；出现即视为语法不支持并报错。
 - 显式 `-> None` 返回注解表示函数无公开返回值；该场景允许函数体只包含语句且省略 `return`。
-- DSL 解析入口支持 `get_block_id/get_block_num/get_thread_id/get_thread_num/get_subthread_id/get_subthread_num` 六个无参 `arch` builtin 查询、`get_dynamic_memory(space)` 以及 `launch_kernel(name, block, thread, subthread)`，并分别解析为专用 `Arch*AST` 节点。
+- DSL 解析入口当前仅将无参 `get_block_id()` 识别为 `arch` 查询 builtin，并解析为专用 `ArchQueryAST` 节点。
 
 ## 公开接口
 
@@ -70,7 +70,7 @@ func_ast = parse_function(add)
 - 注解解析规则以本文件与测试清单为准。
 - 标量注解最小支持 `int`、`bool`、`float`；张量注解最小支持字符串形式 `Tensor[...]` 与 `JoinedStr` 形式 `f"Tensor[...]"`。
 - 若参数未写注解，但在 `globals`/`builtins` 中存在同名 `SymbolDim` 或 `Memory` 对象，可按标量参数或张量参数推断。
-- 若函数显式标注 `-> None`，则返回列表必须为空，且函数体可只包含 `launch_kernel(...)` 这类语句。
+- 若函数显式标注 `-> None`，则返回列表必须为空，且函数体可只包含语句并省略 `return`。
 - `float(value)`、`tensor.get_shape()[axis]` 与 `tensor.get_stride()[axis]` 等最小 DSL 表达式必须可解析为明确 AST 节点。
 
 返回与限制：
@@ -377,7 +377,7 @@ ConstAST(value=1)
 
 参数说明：
 
-- `query_name` (`str`)：查询名，仅允许 `get_block_id`、`get_block_num`、`get_thread_id`、`get_thread_num`、`get_subthread_id`、`get_subthread_num`。
+- `query_name` (`str`)：查询名，当前仅允许 `get_block_id`。
 - `location` (`SourceLocation|None`)：可选源码位置。
 
 使用示例：
@@ -389,59 +389,7 @@ ArchQueryAST(query_name="get_block_id")
 注意事项：
 
 - 该节点只表示 DSL 解析结果，不定义结果类型或 lowering 细节。
-- 仅允许上述六个 `arch` 查询名；其他调用不属于本节点职责。
-
-返回与限制：返回不可变的数据结构实例。
-
-### `ArchDynamicMemoryAST`
-
-功能说明：表示 `get_dynamic_memory(space)` DSL 调用节点。
-
-参数说明：
-
-- `space` (`MemorySpace`)：目标动态内存空间。
-- `location` (`SourceLocation|None`)：可选源码位置。
-
-使用示例：
-
-```python
-ArchDynamicMemoryAST(space=MemorySpace.SM)
-```
-
-注意事项：
-
-- 该节点只保留解析得到的 `MemorySpace` 语义，不定义返回 memory type。
-- `space` 必须在解析阶段可确定为 `MemorySpace` 枚举值。
-
-返回与限制：返回不可变的数据结构实例。
-
-### `ArchLaunchKernelAST`
-
-功能说明：表示 `launch_kernel(name, block, thread, subthread)` DSL 语句节点。
-
-参数说明：
-
-- `kernel_name` (`str`)：kernel 名称。
-- `block` (`object`)：block 规模表达式。
-- `thread` (`object`)：thread 规模表达式。
-- `subthread` (`object`)：subthread 规模表达式。
-- `location` (`SourceLocation|None`)：可选源码位置。
-
-使用示例：
-
-```python
-ArchLaunchKernelAST(
-    kernel_name="generated_kernel",
-    block=VarAST("block"),
-    thread=VarAST("thread"),
-    subthread=VarAST("subthread"),
-)
-```
-
-注意事项：
-
-- 该节点表示语句语义，不携带公开返回值。
-- `kernel_name` 必须来自字符串字面量；其余 3 个参数按表达式节点保留，具体类型约束由下游阶段定义。
+- 当前仅允许 `get_block_id`；其他 `arch` 调用不属于本节点职责。
 
 返回与限制：返回不可变的数据结构实例。
 
@@ -470,6 +418,8 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
 - 测试目标：
   - 覆盖 `parse_function(...)` 的源码解析与 AST 构建。
   - 覆盖 AST 节点字段与诊断信息的构造。
+  - 覆盖 `get_block_id()` 解析为 `ArchQueryAST` 的最小 arch 查询入口。
+  - 覆盖 `get_block_id()` 的非法参数在 AST 解析阶段被拒绝。
 - 功能与用例清单：
   - AST-001：解析函数生成 `FunctionAST`。（`test_visit_function_builds_ast`）
   - AST-001A：提供独立解析入口。（`test_parse_function_entry`）
@@ -483,6 +433,8 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
   - AST-008：缺少 Tensor 维度返回诊断。（`test_missing_tensor_dimensions_reports_diagnostics`）
   - AST-009：未注解 SymbolDim 参数可按标量参数解析。（`test_parse_function_infers_symboldim_arguments_without_annotations`）
   - AST-010：不支持语法返回诊断。（`test_unsupported_syntax_reports_diagnostics`）
-  - AST-011：六个无参 `arch` 查询与 `get_dynamic_memory(space)` 可解析为专用 `Arch*AST` 节点，并支撑零入参 DSL 函数场景继续向下游 lowering。（`test_build_func_op_lowers_arch_query_functions`、`test_build_func_op_lowers_arch_dynamic_memory_function`）
-  - AST-012：显式 `-> None` 返回注解允许 `launch_kernel(name, block, thread, subthread)` 语句型函数省略 `return`，并解析为 `ArchLaunchKernelAST`。（`test_build_func_op_lowers_arch_launch_kernel_statement`）
+  - AST-011：未注解的 float runtime 参数仍视为缺失注解并返回 `Missing annotation` 诊断。（`test_parse_function_rejects_float_runtime_arguments_without_annotations`）
+  - AST-012：`nn` 算术 helper 的非法参数个数必须返回 `Unsupported nn arithmetic arity` 诊断。（`test_parse_function_rejects_unsupported_nn_arithmetic_arity_variants`）
   - AST-013：支持 `bool/float` 返回注解、`JoinedStr` 张量注解，以及 `float(...)`、`get_shape()[axis]`、`get_stride()[axis]` 等最小 symbol 查询/转换表达式解析。（`test_ast_parse_function_supports_symbol_scalar_and_joinedstr_annotations`）
+  - AST-014A：零入参函数中的 `get_block_id()` 可解析为 `ArchQueryAST`，并保留继续向下游 lowering 所需的查询名语义。（`test_build_func_op_lowers_arch_get_block_id_query`）
+  - AST-014B：`get_block_id(1)` 与 `get_block_id(x=1)` 必须在 AST 解析阶段返回 `Unsupported get_block_id arity` 诊断。（`test_parse_function_rejects_invalid_get_block_id_arity_variants`）

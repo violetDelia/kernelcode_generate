@@ -206,6 +206,8 @@ def _validate_return_type(func_ast: FunctionAST, result_type: object) -> None:
     elif isinstance(output, ScalarArgAST):
         if output.value_type is not int:
             raise _LoweringError("Unsupported scalar return type", location=output.location)
+        if not func_ast.inputs and isinstance(result_type, SymbolValueType):
+            return
         if _is_symbol_scalar_function(func_ast):
             if isinstance(result_type, SymbolValueType):
                 return
