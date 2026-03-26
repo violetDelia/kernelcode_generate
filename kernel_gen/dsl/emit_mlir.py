@@ -82,6 +82,7 @@ from kernel_gen.dialect.symbol import (
     SymbolValueType,
     build_public_symbol_expr,
 )
+from kernel_gen.operation.nn import _resolve_add_dtype
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.type import NumericType
 
@@ -577,17 +578,19 @@ def _infer_broadcast_memory_type(
     lhs_type: NnMemoryType,
     rhs_type: NnMemoryType,
     location: SourceLocation | None,
+    element_type: Attribute | None = None,
 ) -> NnMemoryType:
-    if lhs_type.element_type != rhs_type.element_type:
+    if element_type is None and lhs_type.element_type != rhs_type.element_type:
         raise _LoweringError("Binary op operands must have the same element_type", location=location)
     if lhs_type.space != rhs_type.space:
         raise _LoweringError("Binary op operands must have the same space", location=location)
+    target_element_type = element_type or lhs_type.element_type
     target_shape = _infer_broadcast_shape(lhs_type.shape.data, rhs_type.shape.data, location)
     target_stride = _build_broadcast_stride(target_shape)
     return NnMemoryType(
         ArrayAttr(list(target_shape)),
         ArrayAttr(list(target_stride)),
-        lhs_type.element_type,
+        target_element_type,
         lhs_type.space,
     )
 
@@ -788,7 +791,33 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
         if lhs_type == rhs_type:
             type_map[expr_key] = lhs_type
             return lhs_type
-        target_type = _infer_broadcast_memory_type(lhs_type, rhs_type, expr.location)
+        target_element_type = lhs_type.element_type
+        if lhs_type.element_type != rhs_type.element_type:
+            def _element_type_to_numeric(element_type: Attribute) -> NumericType:
+                if isinstance(element_type, Float16Type):
+                    return NumericType.Float16
+                if element_type == f32:
+                    return NumericType.Float32
+                if element_type == i32:
+                    return NumericType.Int32
+                if element_type == i1:
+                    return NumericType.Bool
+                raise _LoweringError("Unsupported dtype for nn.add", location=expr.location)
+
+            try:
+                target_numeric = _resolve_add_dtype(
+                    _element_type_to_numeric(lhs_type.element_type),
+                    _element_type_to_numeric(rhs_type.element_type),
+                )
+            except TypeError as exc:
+                raise _LoweringError(str(exc), location=expr.location) from exc
+            target_element_type = _dtype_to_xdsl(target_numeric, location=expr.location)
+        target_type = _infer_broadcast_memory_type(
+            lhs_type,
+            rhs_type,
+            expr.location,
+            element_type=target_element_type,
+        )
         type_map[expr_key] = target_type
         return target_type
 
@@ -987,21 +1016,46 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
             return op.result
         lhs_type = _expect_memory_value(lhs, expr.location)
         rhs_type = _expect_memory_value(rhs, expr.location)
-        if lhs_type != rhs_type:
-            target_type = _infer_broadcast_memory_type(lhs_type, rhs_type, expr.location)
-            if lhs_type != target_type:
-                broadcast_op = NnBroadcastOp(lhs, target_type, target_type.space)
-                ctx.builder.add_op(broadcast_op)
-                lhs = broadcast_op.result
-            if rhs_type != target_type:
-                broadcast_op = NnBroadcastOp(rhs, target_type, target_type.space)
-                ctx.builder.add_op(broadcast_op)
-                rhs = broadcast_op.result
+        result_type = _infer_expr_type(expr, ctx.types)
+        if not isinstance(result_type, NnMemoryType):
+            raise _LoweringError("Binary op result must be nn.memory", location=expr.location)
+        target_type = result_type
+        if lhs_type.element_type != target_type.element_type:
+            cast_type = _memory_type_from_parts(
+                lhs_type.shape.data,
+                lhs_type.stride.data,
+                target_type.element_type,
+                lhs_type.space,
+            )
+            cast_op = DmaCastOp(lhs, cast_type)
+            ctx.builder.add_op(cast_op)
+            lhs = cast_op.result
+            lhs_type = cast_type
+        if rhs_type.element_type != target_type.element_type:
+            cast_type = _memory_type_from_parts(
+                rhs_type.shape.data,
+                rhs_type.stride.data,
+                target_type.element_type,
+                rhs_type.space,
+            )
+            cast_op = DmaCastOp(rhs, cast_type)
+            ctx.builder.add_op(cast_op)
+            rhs = cast_op.result
+            rhs_type = cast_type
+        if lhs_type != target_type:
+            broadcast_op = NnBroadcastOp(lhs, target_type, target_type.space)
+            ctx.builder.add_op(broadcast_op)
+            lhs = broadcast_op.result
             lhs_type = target_type
+        if rhs_type != target_type:
+            broadcast_op = NnBroadcastOp(rhs, target_type, target_type.space)
+            ctx.builder.add_op(broadcast_op)
+            rhs = broadcast_op.result
+            rhs_type = target_type
         op_map = {"add": NnAddOp, "sub": NnSubOp, "mul": NnMulOp, "div": NnTrueDivOp}
         if expr.op not in op_map:
             raise _LoweringError(f"Unsupported binary op: {expr.op}", location=expr.location)
-        op = op_map[expr.op](lhs, rhs, lhs_type, lhs_type.space)
+        op = op_map[expr.op](lhs, rhs, target_type, target_type.space)
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
         return op.result

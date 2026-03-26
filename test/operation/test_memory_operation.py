@@ -33,8 +33,8 @@ from kernel_gen.symbol_variable.type import Farmat, NumericType
 # ME-010
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-27 03:15:22 +0800
-# 最近一次运行成功时间: 2026-03-27 03:15:22 +0800
+# 最近一次运行测试时间: 2026-03-27 04:13:57 +0800
+# 最近一次运行成功时间: 2026-03-27 04:13:57 +0800
 # 测试目的: 验证 Memory + Memory 逐元素运算的 dtype 提升与 format/stride/space 继承。
 # 使用示例: pytest -q test/operation/test_memory_operation.py -k test_memory_add_memory
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -51,27 +51,27 @@ def test_memory_add_memory() -> None:
     rep = repr(lhs)
     assert isinstance(result, Memory)
     assert result.shape.get_values() == ["N", 4]
-    assert result.dtype is NumericType.Float32
+    assert result.dtype is NumericType.Int32
     assert result.space is MemorySpace.SM
     assert result.format is Farmat.CLast
     assert result.stride.get_values() == [4, 1]
     assert result_sub.shape.get_values() == ["N", 4]
-    assert result_sub.dtype is NumericType.Float32
+    assert result_sub.dtype is NumericType.Int32
     assert result_sub.space is MemorySpace.SM
     assert result_sub.format is Farmat.CLast
     assert result_sub.stride.get_values() == [4, 1]
     assert result_mul.shape.get_values() == ["N", 4]
-    assert result_mul.dtype is NumericType.Float32
+    assert result_mul.dtype is NumericType.Int32
     assert result_mul.space is MemorySpace.SM
     assert result_mul.format is Farmat.CLast
     assert result_mul.stride.get_values() == [4, 1]
     assert result_div.shape.get_values() == ["N", 4]
-    assert result_div.dtype is NumericType.Float32
+    assert result_div.dtype is NumericType.Int32
     assert result_div.space is MemorySpace.SM
     assert result_div.format is Farmat.CLast
     assert result_div.stride.get_values() == [4, 1]
     assert result_floor.shape.get_values() == ["N", 4]
-    assert result_floor.dtype is NumericType.Float32
+    assert result_floor.dtype is NumericType.Int32
     assert result_floor.space is MemorySpace.SM
     assert result_floor.format is Farmat.CLast
     assert result_floor.stride.get_values() == [4, 1]

@@ -70,6 +70,7 @@ assert D.get_stride()[1] == 1
 - `Memory` 与 `Memory` 可触发隐式 broadcast；广播规则为尾维对齐，较低 rank 一侧按前置维补 `1` 后参与比较。
 - 对齐后的任一维若既不相等，也不包含 `1`，必须抛出 `ValueError`。
 - `Memory/Memory` 路径的 `dtype` 按固定优先级决议：`Int8`、`Uint8`、`Int16`、`Uint16`、`Int32`、`Uint32`、`Int64`、`Uint64`、`Float16`、`BFloat16`、`Float32`、`Float64`；结果选择顺序更靠前的类型。
+- `Memory/标量` 路径标量视作 `NumericType.Int32`，结果 `dtype` 按相同优先级选择顺序更靠后的类型。
 - 当两侧 `shape`、`dtype`、`format`、`stride` 一致时，结果保持原有 `Memory` 描述。
 - 当 `format` 或 `stride` 任一不一致时，结果必须回落到默认布局：`format=Farmat.Norm`，`stride` 使用连续行主序默认步幅。
 - 默认步幅与其字符串化口径沿用 [`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)：公开接口继续通过 `Memory.get_stride()` 返回步幅分量，`str` / `repr` 继续使用 `Shape(...)` 序列化表示。

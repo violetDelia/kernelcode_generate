@@ -66,7 +66,15 @@ from kernel_gen.dialect.arch import (
     ArchGetSubthreadNumOp,
     ArchGetThreadIdOp,
 )
-from kernel_gen.dialect.nn import NnAddOp, NnBroadcastOp, NnEqOp, NnMemorySpaceAttr, NnMemoryType, NnNeOp
+from kernel_gen.dialect.nn import (
+    NnAddOp,
+    NnBroadcastOp,
+    NnEqOp,
+    NnMemorySpaceAttr,
+    NnMemoryType,
+    NnNeOp,
+    NnTrueDivOp,
+)
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
     SymbolDivOp,
@@ -3340,6 +3348,36 @@ def test_tensor_binary_prepend_broadcast_lowering() -> None:
     assert len(broadcast_ops) == 1
     add_op = next(op for op in func_op.body.block.ops if isinstance(op, NnAddOp))
     assert add_op.lhs is broadcast_ops[0].result or add_op.rhs is broadcast_ops[0].result
+
+
+# MGEN-011A
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-27 04:14:28 +0800
+# 最近一次运行成功时间: 2026-03-27 04:14:28 +0800
+# 功能说明: 验证 nn.truediv 在 dtype 不一致时插入 dma.cast 并使用固定优先级决议 dtype。
+# 测试目的: 保证 truediv lowering 结果包含 dma.cast + nn.truediv 且输出类型一致。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_tensor_truediv_dtype_promotion_lowering
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_tensor_truediv_dtype_promotion_lowering() -> None:
+    def truediv(
+        x: "Tensor[f32, 2, 2]",
+        y: "Tensor[i32, 2, 2]",
+    ) -> "Tensor[i32, 2, 2]":
+        return x / y
+
+    lhs_memory = Memory([2, 2], NumericType.Float32)
+    rhs_memory = Memory([2, 2], NumericType.Int32)
+    func_op = build_func_op(truediv, lhs_memory, rhs_memory)
+    cast_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaCastOp)]
+    div_ops = [op for op in func_op.body.block.ops if isinstance(op, NnTrueDivOp)]
+    assert len(cast_ops) == 1
+    assert len(div_ops) == 1
+    expected_type = _memory_to_nn_type(Memory([2, 2], NumericType.Int32))
+    assert cast_ops[0].result.type == expected_type
+    assert div_ops[0].result.type == expected_type
 
 
 # MGEN-013

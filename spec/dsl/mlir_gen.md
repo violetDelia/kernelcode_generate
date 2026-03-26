@@ -105,6 +105,7 @@ func_op = build_func_op(only_symbol, s)
 - 当函数场景为 tensor `!=` 比较时，返回注解必须与 `nn.ne` 结果类型一致（element type 为 `i1`，shape/space 按 broadcast 后结果确定）；若返回注解与实际 lowering 结果不一致必须报错。
 - 当函数场景为纯 symbol 整型标量算术时，函数体中的 `+`、`-`、`*`、`/`、`//` 必须分别 lowering 为 `symbol.add`、`symbol.sub`、`symbol.mul`、`symbol.div`、`symbol.floordiv`，且结果类型保持为 `SymbolValueType`。
 - 当函数体使用 `kernel_gen.operation.nn.add/sub/mul/truediv/floordiv` 包装同一组纯 symbol 整型标量算术时，lowering 结果必须与直接使用 Python 二元运算保持一致；`const/symbol` 与 `symbol/const` 的操作数顺序必须在结果表达式文本中原样保留。
+- 当函数体包含 tensor `truediv` 且两侧 `dtype` 不一致时，必须按固定优先级决议目标 dtype，并在 lowering 中插入 `dma.cast`；`nn.truediv` 与 `func.return` 的结果类型必须与 promotion 结果一致。
 - 纯 symbol 标量函数的参数/返回类型必须复用 `spec/dialect/symbol.md` 中定义的 `SymbolValueType`，不能退回 builtin 整数类型。
 - `LoopRange` 场景中传给 `dma.slice` / `dma.deslice` 的标量 operand 必须直接复用 `!symbol.int<"expr">` value，不允许通过 `arith.index_cast` 做中间桥接。
 - `"Tensor[...]"` 注解允许来自普通字符串字面量或可静态归一化的 `f"Tensor[...]"`；归一化后若不是合法 Tensor 注解，必须在解析阶段直接报错。
@@ -214,6 +215,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - MGEN-009：返回类型不匹配时报错。（`test_return_type_mismatch_reports_diagnostics`）
   - MGEN-010：多语句 SSA 顺序与复用。（`test_multi_statement_ssa_order_and_reuse`）
   - MGEN-011：逐元素二元隐式 broadcast。（`test_tensor_binary_implicit_broadcast_lowering`）
+  - MGEN-011A：tensor `truediv` mixed dtype promotion 必须插入 `dma.cast`，并保持 `nn.truediv` 与返回类型一致。（`test_tensor_truediv_dtype_promotion_lowering`）
   - MGEN-012：前置维度隐式 broadcast。（`test_tensor_binary_prepend_broadcast_lowering`）
   - MGEN-013：比较表达式隐式 broadcast。（`test_compare_implicit_broadcast_lowering`）
   - MGEN-014：不可 broadcast 报错与定位。（`test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics`）
