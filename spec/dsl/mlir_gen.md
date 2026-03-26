@@ -52,6 +52,7 @@
 - 当函数体仅返回 `alloc(...)` 且没有 tensor 输入时，允许仅依赖标量 `runtime_args` 构建签名与结果类型；`alloc` 结果类型需由 `shape`/`stride`/`dtype`/`space` 与 `runtime_args` 共同决定，且显式 `stride` 必须与默认连续布局一致，否则必须报错。
 - `flatten(x)` 在 DSL 公开契约中视为一维重排 helper，要求保留元素总数并输出一维 memory 结果；不要求存在独立的 dialect op。
 - `free(x)` 在 DSL 公开契约中是语句型 helper，不产生新的 SSA 返回值，也不能作为函数返回值直接 lowering 为独立结果。
+- `free(x)` 必须且仅接受单个 memory source；非法参数个数、非 memory source 或表达式上下文必须报错。
 - 零入参 DSL 函数允许通过 `build_func_op` / `build_func_op_from_ast` 构建 `func.func`；当函数体返回 `get_block_id()` 查询结果时，lowering 必须生成 `arch.get_block_id`，并保持返回类型为 `!symbol.int<"block_id">`。
 - 零入参 DSL 函数允许通过 `build_func_op` / `build_func_op_from_ast` 构建 `func.func`；当函数体返回 `get_block_num()` 查询结果时，lowering 必须生成 `arch.get_block_num`，并保持返回类型为 `!symbol.int<"block_num">`。
 - 零入参 DSL 函数允许通过 `build_func_op` / `build_func_op_from_ast` 构建 `func.func`；当函数体返回 `get_subthread_id()` 查询结果时，lowering 必须生成 `arch.get_subthread_id`，并保持返回类型为 `!symbol.int<"subthread_id">`。
@@ -183,6 +184,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - 验证 `LoopRange + slice/deslice` 场景生成 `symbol.for + dma.slice/dma.deslice`，且循环相关 lowering 不生成 `arith.index_cast`。
   - 验证 Tensor 注解可接受普通字符串字面量与可静态归一化的 `f"Tensor[...]"` 两种源码形式，并在归一化失败时报错。
   - 验证 DMA helper 调用在 `build_func_op(...)` 链路中被识别为受支持 DSL 公开能力：`alloc/copy/cast/view/reshape/flatten` 作为返回值表达式参与 lowering，`free` 作为无返回值语句参与 lowering。
+  - 验证 `free(...)` 在非法参数个数、非 memory source 与表达式上下文时的错误路径。
   - 验证 alloc-only helper 场景在运行时参数、显式 stride 与非法 dtype/space 输入时的返回类型与错误路径。
   - 验证零入参 DSL 函数可通过 `build_func_op(...)` / `build_func_op_from_ast(...)` 生成 `func.func`，并在返回 `get_block_id()` 时 lowering 为 `arch.get_block_id` 与 `!symbol.int<"block_id">` 返回类型。
   - 验证零入参 DSL 函数可通过 `build_func_op(...)` / `build_func_op_from_ast(...)` 生成 `func.func`，并在返回 `get_block_num()` 时 lowering 为 `arch.get_block_num` 与 `!symbol.int<"block_num">` 返回类型。
@@ -232,3 +234,6 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - MGEN-030：纯 symbol 标量 `>=` 比较 lowering 为 `symbol.ge`，返回类型为 `i1`；`const/const` 与 `symbol/symbol` 两类输入下均应保持 `SymbolValueType` 输入签名，并覆盖 `return a >= b` 与 `c = a >= b; return c` 两种函数体形态。（`test_build_func_op_lowers_symbol_ge`）
   - MGEN-031：零入参函数直接返回 `get_subthread_id()` 时，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须生成零参数 `func.func`、单个 `arch.get_subthread_id`，并返回 `!symbol.int<"subthread_id">`。（`test_build_func_op_lowers_arch_get_subthread_id_query`）
   - MGEN-032：零入参函数直接返回 `get_thread_id()` 时，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须生成零参数 `func.func`、单个 `arch.get_thread_id`，并返回 `!symbol.int<"thread_id">`。（`test_build_func_op_lowers_arch_get_thread_id_query`）
+  - MGEN-033：`free(...)` 的非法参数个数必须报错 `Unsupported free arity`。（`test_build_func_op_rejects_dma_free_invalid_arity`）
+  - MGEN-034：`free(...)` 的 source 非 memory 时必须报错。（`test_build_func_op_rejects_dma_free_with_non_memory_source`）
+  - MGEN-035：`free(...)` 作为表达式上下文使用时必须报错。（`test_build_func_op_rejects_dma_free_expression_context`）

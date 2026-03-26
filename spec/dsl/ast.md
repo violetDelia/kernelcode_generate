@@ -310,6 +310,28 @@ LoadAST(tensor=tensor, offset=offset, stride=None)
 
 返回与限制：返回不可变的数据结构实例。
 
+### `DmaFreeAST`
+
+功能说明：释放 memory 的语义节点（`free(...)` 语句）。
+
+参数说明：
+
+- `value` (`object`)：待释放的 memory 来源表达式。
+- `location` (`SourceLocation|None`)：可选源码位置。
+
+使用示例：
+
+```python
+DmaFreeAST(value=TensorAST(name="src", memory=memory, location=None), location=None)
+```
+
+注意事项：
+
+- 仅由 `free(...)` 语句解析生成，作为语句型节点使用。
+- 非法参数个数或关键字形式应在解析阶段报错。
+
+返回与限制：返回不可变的数据结构实例。
+
 ### `BinaryExprAST`
 
 功能说明：二元算术表达式。
@@ -425,6 +447,8 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
   - 覆盖 `get_block_id()` 的非法参数在 AST 解析阶段被拒绝。
   - 覆盖 `get_block_num()` 解析为 `ArchQueryAST` 的最小 arch 查询入口。
   - 覆盖 `get_block_num()` 的非法参数在 AST 解析阶段被拒绝。
+  - 覆盖 `free(...)` 语句解析进入 DMA free AST 语义节点。
+  - 覆盖 `free(...)` 非法参数个数或关键字形式的诊断输出。
 - 功能与用例清单：
   - AST-001：解析函数生成 `FunctionAST`。（`test_visit_function_builds_ast`）
   - AST-001A：提供独立解析入口。（`test_parse_function_entry`）
@@ -449,3 +473,5 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
   - AST-014F：`get_subthread_id(1)` 与 `get_subthread_id(x=1)` 必须在 AST 解析阶段返回 `Unsupported get_subthread_id arity` 诊断。（`test_parse_function_rejects_invalid_get_subthread_id_arity_variants`）
   - AST-014G：零入参函数中的 `get_thread_id()` 可解析为 `ArchQueryAST`，并保留继续向下游 lowering 所需的查询名语义。（`test_build_func_op_lowers_arch_get_thread_id_query`）
   - AST-014H：`get_thread_id(1)` 与 `get_thread_id(x=1)` 必须在 AST 解析阶段返回 `Unsupported get_thread_id arity` 诊断。（`test_parse_function_rejects_invalid_get_thread_id_arity_variants`）
+  - AST-017：`free(...)` 在语句位置可解析为 `DmaFreeAST`。（`test_parse_function_supports_dma_free_helper_statement`）
+  - AST-018：`free(...)` 的非法参数个数与关键字形式必须返回 `Unsupported free arity` 诊断。（`test_parse_function_rejects_invalid_free_helper_variants`）
