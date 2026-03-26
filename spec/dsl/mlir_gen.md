@@ -55,6 +55,7 @@
 - 零入参 DSL 函数允许通过 `build_func_op` / `build_func_op_from_ast` 构建 `func.func`；当函数体返回 `get_block_id()` 查询结果时，lowering 必须生成 `arch.get_block_id`，并保持返回类型为 `!symbol.int<"block_id">`。
 - 零入参 DSL 函数允许通过 `build_func_op` / `build_func_op_from_ast` 构建 `func.func`；当函数体返回 `get_block_num()` 查询结果时，lowering 必须生成 `arch.get_block_num`，并保持返回类型为 `!symbol.int<"block_num">`。
 - 零入参 DSL 函数允许通过 `build_func_op` / `build_func_op_from_ast` 构建 `func.func`；当函数体返回 `get_subthread_id()` 查询结果时，lowering 必须生成 `arch.get_subthread_id`，并保持返回类型为 `!symbol.int<"subthread_id">`。
+- 零入参 DSL 函数允许通过 `build_func_op` / `build_func_op_from_ast` 构建 `func.func`；当函数体返回 `get_subthread_num()` 查询结果时，lowering 必须生成 `arch.get_subthread_num`，并保持返回类型为 `!symbol.int<"subthread_num">`。
 - 零入参 DSL 函数允许通过 `build_func_op` / `build_func_op_from_ast` 构建 `func.func`；当函数体返回 `get_thread_id()` 查询结果时，lowering 必须生成 `arch.get_thread_id`，并保持返回类型为 `!symbol.int<"thread_id">`。
 - 如需 `builtin.module` 封装，由调用方完成。
 
@@ -110,6 +111,7 @@ func_op = build_func_op(only_symbol, s)
 - 当零入参函数直接返回 `get_block_id()` 时，结果必须通过 `arch.get_block_id` 生成，并在 `func.func` 返回值中保持 `!symbol.int<"block_id">`。
 - 当零入参函数直接返回 `get_block_num()` 时，结果必须通过 `arch.get_block_num` 生成，并在 `func.func` 返回值中保持 `!symbol.int<"block_num">`。
 - 当零入参函数直接返回 `get_subthread_id()` 时，结果必须通过 `arch.get_subthread_id` 生成，并在 `func.func` 返回值中保持 `!symbol.int<"subthread_id">`。
+- 当零入参函数直接返回 `get_subthread_num()` 时，结果必须通过 `arch.get_subthread_num` 生成，并在 `func.func` 返回值中保持 `!symbol.int<"subthread_num">`。
 - 当零入参函数直接返回 `get_thread_id()` 时，结果必须通过 `arch.get_thread_id` 生成，并在 `func.func` 返回值中保持 `!symbol.int<"thread_id">`。
 
 返回与限制：
@@ -155,6 +157,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
 - 当 `func_ast` 没有输入且返回表达式为 `get_block_id()` 时，必须允许零参数签名，并生成返回 `!symbol.int<"block_id">` 的 `func.func`。
 - 当 `func_ast` 没有输入且返回表达式为 `get_block_num()` 时，必须允许零参数签名，并生成返回 `!symbol.int<"block_num">` 的 `func.func`。
 - 当 `func_ast` 没有输入且返回表达式为 `get_subthread_id()` 时，必须允许零参数签名，并生成返回 `!symbol.int<"subthread_id">` 的 `func.func`。
+- 当 `func_ast` 没有输入且返回表达式为 `get_subthread_num()` 时，必须允许零参数签名，并生成返回 `!symbol.int<"subthread_num">` 的 `func.func`。
 - 当 `func_ast` 没有输入且返回表达式为 `get_thread_id()` 时，必须允许零参数签名，并生成返回 `!symbol.int<"thread_id">` 的 `func.func`。
 
 返回与限制：
@@ -187,6 +190,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - 验证零入参 DSL 函数可通过 `build_func_op(...)` / `build_func_op_from_ast(...)` 生成 `func.func`，并在返回 `get_block_id()` 时 lowering 为 `arch.get_block_id` 与 `!symbol.int<"block_id">` 返回类型。
   - 验证零入参 DSL 函数可通过 `build_func_op(...)` / `build_func_op_from_ast(...)` 生成 `func.func`，并在返回 `get_block_num()` 时 lowering 为 `arch.get_block_num` 与 `!symbol.int<"block_num">` 返回类型。
   - 验证零入参 DSL 函数可通过 `build_func_op(...)` / `build_func_op_from_ast(...)` 生成 `func.func`，并在返回 `get_subthread_id()` 时 lowering 为 `arch.get_subthread_id` 与 `!symbol.int<"subthread_id">` 返回类型。
+  - 验证零入参 DSL 函数可通过 `build_func_op(...)` / `build_func_op_from_ast(...)` 生成 `func.func`，并在返回 `get_subthread_num()` 时 lowering 为 `arch.get_subthread_num` 与 `!symbol.int<"subthread_num">` 返回类型。
   - 验证零入参 DSL 函数可通过 `build_func_op(...)` / `build_func_op_from_ast(...)` 生成 `func.func`，并在返回 `get_thread_id()` 时 lowering 为 `arch.get_thread_id` 与 `!symbol.int<"thread_id">` 返回类型。
   - 验证纯 symbol 标量 `==` 比较会生成 `symbol.eq`，返回类型为 `i1`，并覆盖静态整数与动态符号两类 runtime args。
   - 验证纯 symbol 标量 `>=` 比较会生成 `symbol.ge`，返回类型为 `i1`，并覆盖静态整数与动态符号两类 runtime args。
@@ -232,3 +236,4 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - MGEN-030：纯 symbol 标量 `>=` 比较 lowering 为 `symbol.ge`，返回类型为 `i1`；`const/const` 与 `symbol/symbol` 两类输入下均应保持 `SymbolValueType` 输入签名，并覆盖 `return a >= b` 与 `c = a >= b; return c` 两种函数体形态。（`test_build_func_op_lowers_symbol_ge`）
   - MGEN-031：零入参函数直接返回 `get_subthread_id()` 时，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须生成零参数 `func.func`、单个 `arch.get_subthread_id`，并返回 `!symbol.int<"subthread_id">`。（`test_build_func_op_lowers_arch_get_subthread_id_query`）
   - MGEN-032：零入参函数直接返回 `get_thread_id()` 时，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须生成零参数 `func.func`、单个 `arch.get_thread_id`，并返回 `!symbol.int<"thread_id">`。（`test_build_func_op_lowers_arch_get_thread_id_query`）
+  - MGEN-033：零入参函数直接返回 `get_subthread_num()` 时，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须生成零参数 `func.func`、单个 `arch.get_subthread_num`，并返回 `!symbol.int<"subthread_num">`。（`test_build_func_op_lowers_arch_get_subthread_num_query`）
