@@ -1094,12 +1094,13 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
         use_symbol_for = all(
             isinstance(value.type, SymbolValueType) for value in (start_value, end_value, step_value)
         )
-        body_block = Block(arg_types=[start_value.type])
-        loop_op = (
-            SymbolForOp(start_value, end_value, step_value, body_block)
-            if use_symbol_for
-            else scf.ForOp(start_value, end_value, step_value, [], body_block)
-        )
+        if use_symbol_for:
+            iter_type = SymbolValueType.from_expr(node.var.name)
+            body_block = Block(arg_types=[iter_type])
+            loop_op = SymbolForOp(start_value, end_value, step_value, body_block)
+        else:
+            body_block = Block(arg_types=[start_value.type])
+            loop_op = scf.ForOp(start_value, end_value, step_value, [], body_block)
         ctx.builder.add_op(loop_op)
 
         nested_symbols = dict(ctx.symbols)

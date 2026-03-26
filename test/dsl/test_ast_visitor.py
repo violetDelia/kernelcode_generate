@@ -2348,9 +2348,9 @@ def test_for_ast_lowering_emits_loads() -> None:
 
 # EMIT-010
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 02:43:15 +0800
-# 最近一次运行成功时间: 2026-03-23 02:43:15 +0800
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-26 21:43:31 +0800
+# 最近一次运行成功时间: 2026-03-26 21:43:31 +0800
 # 功能说明: 验证符号边界 ForAST lowering 为 symbol.for 并直接复用 symbol.int 作为 DMA operand。
 # 测试目的: 验证符号边界 ForAST lowering 为 symbol.for 并直接复用 symbol.int 作为 DMA operand。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_symbolic_for_loop_avoids_index_cast
@@ -2384,6 +2384,7 @@ def test_emit_mlir_symbolic_for_loop_avoids_index_cast() -> None:
     func_op = build_func_op_from_ast(func_ast)
     loop_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolForOp)]
     assert len(loop_ops) == 1
+    assert isinstance(loop_ops[0].body.block.args[0].type, SymbolValueType)
     loop_body_ops = list(loop_ops[0].body.block.ops)
     assert not any(isinstance(op, arith.IndexCastOp) for op in loop_body_ops)
     load_ops = [op for op in loop_body_ops if isinstance(op, DmaLoadOp)]
@@ -2572,9 +2573,9 @@ def test_emit_mlir_dma_free_statement() -> None:
 
 # AST-009
 # 创建者: OpenAI
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-25 16:05:00 +0800
-# 最近一次运行成功时间: 2026-03-25 16:05:00 +0800
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-26 21:43:31 +0800
+# 最近一次运行成功时间: 2026-03-26 21:43:31 +0800
 # 功能说明: 验证未注解 SymbolDim 参数可按标量参数解析。
 # 测试目的: 验证未注解 SymbolDim 参数可按标量参数解析。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_infers_symboldim_arguments_without_annotations
@@ -2900,6 +2901,7 @@ def test_build_func_op_supports_symbolic_for_loop_dma_without_return(monkeypatch
     assert not any(isinstance(op, arith.IndexCastOp) for op in loop_body_ops)
     assert slice_ops[0].space.space.data == "local"
     loop_body = loop_ops[0].body.block
+    assert isinstance(loop_body.args[0].type, SymbolValueType)
     offsets = list(slice_ops[0].offsets)
     sizes = list(slice_ops[0].sizes)
     assert offsets[0] is loop_body.args[0]
