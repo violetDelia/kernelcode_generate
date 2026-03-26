@@ -1,7 +1,7 @@
 """NN operation API.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 小李飞刀
 
 功能说明:
 - 提供 Memory 的逐元素算术、比较与显式 broadcast 运算 API。
@@ -879,6 +879,140 @@ def matmul(lhs: object, rhs: object, memoryspace: MemorySpace | None = None) -> 
     )
 
 
+def _normalize_img2col_param(name: str, value: int | SymbolDim, allow_zero: bool) -> SymbolDim:
+    """规范化 img2col 参数为 SymbolDim。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅接受 int 或 SymbolDim。
+    - 对静态可判定的值校验正数/非负约束。
+
+    使用示例:
+    - _normalize_img2col_param("kh", 3, allow_zero=False)
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    if isinstance(value, bool):
+        raise TypeError(f"img2col {name} must be int or SymbolDim")
+    if isinstance(value, int):
+        if allow_zero and value < 0:
+            raise ValueError(f"img2col {name} must be >= 0")
+        if not allow_zero and value <= 0:
+            raise ValueError(f"img2col {name} must be > 0")
+        return SymbolDim(value)
+    if isinstance(value, SymbolDim):
+        if not value.is_dynamic():
+            resolved = value.get_value()
+            if not isinstance(resolved, int):
+                raise ValueError(f"img2col {name} must be integer")
+            if allow_zero and resolved < 0:
+                raise ValueError(f"img2col {name} must be >= 0")
+            if not allow_zero and resolved <= 0:
+                raise ValueError(f"img2col {name} must be > 0")
+        return value
+    raise TypeError(f"img2col {name} must be int or SymbolDim")
+
+
+def _img2col_output_dim(
+    size: SymbolDim,
+    kernel: SymbolDim,
+    stride: SymbolDim,
+    dilation: SymbolDim,
+    pad_low: SymbolDim,
+    pad_high: SymbolDim,
+) -> SymbolDim:
+    """计算 img2col 的输出维度。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 按 floor((size + pad_low + pad_high - dilation*(kernel-1) - 1) / stride) + 1 计算。
+
+    使用示例:
+    - _img2col_output_dim(SymbolDim(5), SymbolDim(3), SymbolDim(1), SymbolDim(1), SymbolDim(1), SymbolDim(1))
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    return ((size + pad_low + pad_high - dilation * (kernel - 1) - 1) // stride) + 1
+
+
+def img2col(
+    value: object,
+    kh: int | SymbolDim,
+    kw: int | SymbolDim,
+    sh: int | SymbolDim,
+    sw: int | SymbolDim,
+    dh: int | SymbolDim,
+    dw: int | SymbolDim,
+    ph: int | SymbolDim,
+    pw: int | SymbolDim,
+    pl: int | SymbolDim,
+    pr: int | SymbolDim,
+) -> Memory:
+    """将四维输入按卷积窗口展开为列矩阵。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 校验输入类型与 rank。
+    - 校验 kernel/stride/dilation/padding 参数。
+    - 返回 img2col 展开后的 Memory 描述。
+
+    使用示例:
+    - img2col(Memory([1, 3, 5, 5], NumericType.Float32), 3, 3, 1, 1, 1, 1, 1, 1, 1, 1)
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    if not isinstance(value, Memory):
+        raise TypeError("img2col value must be Memory")
+    if len(value.shape) != 4:
+        raise ValueError("img2col value must be rank-4 Memory")
+
+    kh_dim = _normalize_img2col_param("kh", kh, allow_zero=False)
+    kw_dim = _normalize_img2col_param("kw", kw, allow_zero=False)
+    sh_dim = _normalize_img2col_param("sh", sh, allow_zero=False)
+    sw_dim = _normalize_img2col_param("sw", sw, allow_zero=False)
+    dh_dim = _normalize_img2col_param("dh", dh, allow_zero=False)
+    dw_dim = _normalize_img2col_param("dw", dw, allow_zero=False)
+    ph_dim = _normalize_img2col_param("ph", ph, allow_zero=True)
+    pw_dim = _normalize_img2col_param("pw", pw, allow_zero=True)
+    pl_dim = _normalize_img2col_param("pl", pl, allow_zero=True)
+    pr_dim = _normalize_img2col_param("pr", pr, allow_zero=True)
+
+    n_dim, c_dim, h_dim, w_dim = value.shape.get_shape()
+    h_out = _img2col_output_dim(h_dim, kh_dim, sh_dim, dh_dim, ph_dim, pw_dim)
+    w_out = _img2col_output_dim(w_dim, kw_dim, sw_dim, dw_dim, pl_dim, pr_dim)
+
+    h_out_value = h_out.get_value()
+    if isinstance(h_out_value, int) and h_out_value <= 0:
+        raise ValueError("img2col output height must be positive")
+    w_out_value = w_out.get_value()
+    if isinstance(w_out_value, int) and w_out_value <= 0:
+        raise ValueError("img2col output width must be positive")
+
+    out_shape = SymbolShape([n_dim, c_dim * kh_dim * kw_dim, h_out * w_out])
+    return Memory(
+        out_shape,
+        value.dtype,
+        space=value.space,
+        stride=_build_add_stride(out_shape),
+        format=Farmat.Norm,
+    )
+
+
 def broadcast(value: object, target: object) -> Memory:
     """显式广播 Memory 到目标描述。
 
@@ -956,6 +1090,7 @@ __all__ = [
     "gt",
     "ge",
     "matmul",
+    "img2col",
     "broadcast",
     "broadcast_to",
 ]

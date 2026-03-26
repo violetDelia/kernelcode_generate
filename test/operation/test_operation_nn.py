@@ -1,7 +1,7 @@
 """nn operation API tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 kernel_gen/operation/nn.py 的逐元素算术与比较 API。
@@ -42,6 +42,7 @@ from kernel_gen.operation.nn import (
     floordiv,
     ge,
     gt,
+    img2col,
     le,
     lt,
     matmul,
@@ -788,3 +789,44 @@ def test_nn_matmul_space_mismatch() -> None:
     rhs = Memory(["K", "N"], NumericType.Float32, space=MemorySpace.SM)
     with pytest.raises(ValueError):
         _ = matmul(lhs, rhs)
+
+
+# OP-IMG2COL-001
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-27 00:49:24 +0800
+# 最近一次运行成功时间: 2026-03-27 00:49:24 +0800
+# 测试目的: 验证 img2col 输出形状与参数校验规则。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_img2col_basic
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_img2col_basic() -> None:
+    value = Memory([1, 3, 5, 5], NumericType.Float32, space=MemorySpace.GM)
+    result = img2col(value, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr=1)
+    assert result.shape.get_values() == [1, 27, 25]
+    assert result.dtype is NumericType.Float32
+    assert result.space is MemorySpace.GM
+    assert result.format is Farmat.Norm
+    assert result.get_stride() == [675, 25, 1]
+
+    with pytest.raises(TypeError):
+        _ = img2col("bad", kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)
+
+    with pytest.raises(ValueError):
+        _ = img2col(Memory([1, 3, 5], NumericType.Float32), kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)
+
+    with pytest.raises(TypeError):
+        _ = img2col(value, kh="3", kw=3, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)
+
+    with pytest.raises(ValueError):
+        _ = img2col(value, kh=0, kw=3, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)
+
+    with pytest.raises(ValueError):
+        _ = img2col(value, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=-1, pw=0, pl=0, pr=0)
+
+    with pytest.raises(TypeError):
+        _ = img2col(value, kh=True, kw=3, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)
+
+    with pytest.raises(ValueError):
+        _ = img2col(value, kh=7, kw=7, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)
