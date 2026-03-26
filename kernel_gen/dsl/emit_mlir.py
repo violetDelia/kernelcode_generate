@@ -738,7 +738,11 @@ def _expr_key(expr: object) -> int:
     return id(expr)
 
 
-def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
+def _infer_expr_type(
+    expr: object,
+    type_map: dict[int, object],
+    runtime_values: dict[str, object] | None = None,
+) -> object:
     expr_key = _expr_key(expr)
     if expr_key in type_map:
         return type_map[expr_key]
