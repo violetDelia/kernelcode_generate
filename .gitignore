@@ -8,4 +8,7 @@ temp
 command.txt
 .vscode
 *.lock
+TODO.md
+DONE.md
+agents-lists.md
 
