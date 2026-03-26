@@ -1,11 +1,11 @@
 """Symbol dialect definitions.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: 我不是牛马
 
 功能说明:
 - 定义仅表示整数符号值语义的 symbol dialect。
-- 提供 `SymbolExprAttr`、`SymbolValueType`、`symbol.add/sub/mul/div/floordiv`、`symbol.eq/ne/lt/le/gt/ge`、`symbol.to_int/symbol.to_float` 与 `symbol.get_dim/get_stride` 查询 op，不区分 `int8/int64` 等整型宽度。
+- 提供 `SymbolExprAttr`、`SymbolValueType`、`SymbolDimType`、`symbol.add/sub/mul/div/floordiv`、`symbol.eq/ne/lt/le/gt/ge`、`symbol.to_int/symbol.to_float` 与 `symbol.get_dim/get_stride` 查询 op，不区分 `int8/int64` 等整型宽度。
 
 使用示例:
 - from kernel_gen.dialect.symbol import Symbol, SymbolAddOp, SymbolDivOp, SymbolEqOp, SymbolFloorDivOp, SymbolSubOp, SymbolMulOp, SymbolToIntOp, SymbolExprAttr, SymbolGetDimOp, SymbolGetStrideOp, SymbolValueType
@@ -49,6 +49,34 @@ _SYMBOL_TOKEN_PATTERN = r"(?:[A-Za-z_][A-Za-z0-9_]*|[+-]?[0-9]+)"
 _SYMBOL_EXPR_PATTERN = re.compile(
     rf"^(?:{_SYMBOL_TOKEN_PATTERN}(?:\s*(?://|[+\-*/])\s*{_SYMBOL_TOKEN_PATTERN})*|floor\(\s*{_SYMBOL_TOKEN_PATTERN}\s*/\s*{_SYMBOL_TOKEN_PATTERN}\s*\))$"
 )
+_SYMBOL_DIM_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _normalize_symbol_dim_name(name: str) -> str:
+    """规范化 symbol.dim 名称。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 去除首尾空白并校验名称合法性。
+    - 确保名称满足标识符格式 `[A-Za-z_][A-Za-z0-9_]*`。
+
+    使用示例:
+    - _normalize_symbol_dim_name("BLOCK_M")
+
+    关联文件:
+    - spec: spec/dialect/tuner.md
+    - test: test/dialect/test_tuner_dialect.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    normalized = name.strip()
+    if not normalized:
+        raise VerifyException("symbol dim name must not be empty")
+    if _SYMBOL_DIM_NAME_PATTERN.fullmatch(normalized) is None:
+        raise VerifyException("symbol dim name must match [A-Za-z_][A-Za-z0-9_]*")
+    return normalized
 
 
 def _normalize_expr(expr: str) -> str:
@@ -468,6 +496,144 @@ class SymbolExprAttr(ParametrizedAttribute):
         """
 
         return cls(StringAttr(_normalize_expr(expr)))
+
+
+@irdl_attr_definition
+class SymbolDimType(ParametrizedAttribute, TypeAttribute):
+    """表示符号维度名称的类型。"""
+
+    name = "symbol.dim"
+
+    dim: StringAttr = param_def(StringAttr)
+
+    def __post_init__(self: "SymbolDimType") -> None:
+        """延迟 symbol.dim 构造期校验。
+
+        创建者: 我不是牛马
+        最后一次更改: 我不是牛马
+
+        功能说明:
+        - 跳过构造期校验，改由显式 verify 或 op/module verify 触发。
+        - 允许 Parser.parse_module 完成后再由 verifier 统一拒绝非法名称。
+
+        使用示例:
+        - SymbolDimType(StringAttr("BLOCK_M")).verify()
+
+        关联文件:
+        - spec: spec/dialect/tuner.md
+        - test: test/dialect/test_tuner_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        if not isinstance(self, ParametrizedAttribute):
+            raise TypeError("SymbolDimType must be ParametrizedAttribute")
+
+    @classmethod
+    def parse_parameters(cls: type["SymbolDimType"], parser: AttrParser) -> Sequence[Attribute]:
+        """解析 symbol.dim 类型参数。
+
+        创建者: 我不是牛马
+        最后一次更改: 我不是牛马
+
+        功能说明:
+        - 解析 `!symbol.dim<"name">` 的名称参数。
+
+        使用示例:
+        - SymbolDimType.parse_parameters(parser)
+
+        关联文件:
+        - spec: spec/dialect/tuner.md
+        - test: test/dialect/test_tuner_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        parser.parse_punctuation("<", "Expected '<' for symbol dim type.")
+        name = parser.parse_str_literal("Expected quoted symbol dim name.")
+        parser.parse_punctuation(">", "Expected '>' for symbol dim type.")
+        return (StringAttr(name),)
+
+    def print_parameters(self: "SymbolDimType", printer: Printer) -> None:
+        """打印 symbol.dim 类型参数。
+
+        创建者: 我不是牛马
+        最后一次更改: 我不是牛马
+
+        功能说明:
+        - 输出 `!symbol.dim<\"name\">` 的名称参数。
+
+        使用示例:
+        - SymbolDimType.from_name("BLOCK_M").print_parameters(printer)
+
+        关联文件:
+        - spec: spec/dialect/tuner.md
+        - test: test/dialect/test_tuner_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        printer.print_string("<")
+        printer.print_string_literal(self.dim.data)
+        printer.print_string(">")
+
+    def verify(self: "SymbolDimType") -> None:
+        """校验 symbol.dim 名称合法性。
+
+        创建者: 我不是牛马
+        最后一次更改: 我不是牛马
+
+        功能说明:
+        - 拒绝空名称或非法标识符。
+
+        使用示例:
+        - SymbolDimType.from_name("BLOCK_M").verify()
+
+        关联文件:
+        - spec: spec/dialect/tuner.md
+        - test: test/dialect/test_tuner_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        _normalize_symbol_dim_name(self.dim.data)
+
+    def __str__(self: "SymbolDimType") -> str:
+        """返回公开的 symbol.dim 文本表示。
+
+        创建者: 我不是牛马
+        最后一次更改: 我不是牛马
+
+        功能说明:
+        - 生成 `symbol.dim<name>` 形式的字符串表示。
+
+        使用示例:
+        - str(SymbolDimType.from_name("BLOCK_M"))
+
+        关联文件:
+        - spec: spec/dialect/tuner.md
+        - test: test/dialect/test_tuner_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        return f"symbol.dim<{self.dim.data}>"
+
+    @classmethod
+    def from_name(cls: type["SymbolDimType"], name: str) -> "SymbolDimType":
+        """从名称构造 symbol.dim 类型。
+
+        创建者: 我不是牛马
+        最后一次更改: 我不是牛马
+
+        功能说明:
+        - 对名称执行规范化校验并返回类型实例。
+
+        使用示例:
+        - SymbolDimType.from_name("BLOCK_M")
+
+        关联文件:
+        - spec: spec/dialect/tuner.md
+        - test: test/dialect/test_tuner_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        return cls(StringAttr(_normalize_symbol_dim_name(name)))
 
 
 @irdl_attr_definition
@@ -1238,6 +1404,7 @@ Symbol = Dialect(
     ],
     [
         SymbolExprAttr,
+        SymbolDimType,
         SymbolValueType,
     ],
 )
@@ -1246,6 +1413,7 @@ __all__ = [
     "Symbol",
     "SymbolAddOp",
     "SymbolDivOp",
+    "SymbolDimType",
     "SymbolEqOp",
     "SymbolExprAttr",
     "SymbolGeOp",
