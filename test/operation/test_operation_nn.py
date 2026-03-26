@@ -147,7 +147,7 @@ def test_nn_rank_mismatch() -> None:
         _ = add(lhs, rhs)
 
 
-# OP-008
+# OP-014
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-24 01:43:10 +0800
@@ -181,7 +181,7 @@ def test_nn_dtype_invalid_error() -> None:
         _ = _resolve_add_dtype(NumericType.Bool, NumericType.Int32)
 
 
-# OP-005
+# OP-005A
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-24 04:03:10 +0800
@@ -255,7 +255,7 @@ def test_nn_compare_shape_order() -> None:
         _ = eq(lhs, rhs)
 
 
-# OP-002
+# OP-002A
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-22 14:33:34 +0800
@@ -273,7 +273,7 @@ def test_nn_other_arithmetic() -> None:
     assert truediv(lhs, 1).shape.get_values() == [2, 2]
 
 
-# OP-002
+# OP-002B
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-24 04:03:10 +0800
@@ -426,7 +426,7 @@ def test_nn_add_format_fallback() -> None:
     assert result.get_stride()[1] == 1
 
 
-# OP-016
+# OP-016A
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-24 01:43:10 +0800
@@ -685,7 +685,7 @@ def test_nn_matmul_success() -> None:
     assert result.get_stride() == ["N", 1]
 
 
-# OP-MM-008
+# OP-MM-002
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-24 04:03:10 +0800
@@ -705,7 +705,7 @@ def test_nn_matmul_space_override() -> None:
     assert result.format is Farmat.Norm
 
 
-# OP-MM-002
+# OP-MM-003
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-22 14:33:34 +0800
@@ -722,7 +722,7 @@ def test_nn_matmul_contracting_dim_mismatch() -> None:
         _ = matmul(lhs, rhs)
 
 
-# OP-MM-003
+# OP-MM-004
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-22 14:33:34 +0800
@@ -739,7 +739,7 @@ def test_nn_matmul_rank_error() -> None:
         _ = matmul(lhs, rhs)
 
 
-# OP-MM-004
+# OP-MM-005
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-22 14:33:34 +0800
@@ -755,7 +755,7 @@ def test_nn_matmul_scalar_operand_error() -> None:
         _ = matmul(lhs, 1)
 
 
-# OP-MM-005
+# OP-MM-006
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-24 04:03:10 +0800
@@ -773,7 +773,7 @@ def test_nn_matmul_dtype_mismatch() -> None:
     assert result.dtype is NumericType.Int32
 
 
-# OP-MM-006
+# OP-MM-007
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-22 14:33:34 +0800

@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/operation/nn.md`](../../spec/operation/nn.md)
 - `功能实现`：[`kernel_gen/operation/nn.py`](../../kernel_gen/operation/nn.py)
 - `test`：[`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py)
@@ -31,7 +31,6 @@
 - 不定义归约、卷积等其他算子。
 - 不引入复杂自动类型提升规则；`dtype` 兼容性需显式检查。
 - 不负责 AST/IR/lowering 设计。
-- `main` 上 `expectation/operation/nn/*.py` 是本链路只读 acceptance gate；当前 spec 需与这些 expectation 的接口、结果元信息与错误路径保持一致。
 
 ## 公开接口
 
@@ -40,7 +39,6 @@
 功能说明：
 
 - 逐元素加法。
-- 当两侧均为 `Memory` 时，公开行为以只读验收入口 [`expectation/operation/nn/add.py`](../../expectation/operation/nn/add.py) 为准。
 
 参数说明：
 
@@ -167,7 +165,6 @@ D = truediv(A, 2)
 功能说明：
 
 - 逐元素整除。
-- 公开行为以只读验收入口 [`expectation/operation/nn/floordiv.py`](../../expectation/operation/nn/floordiv.py) 为准。
 
 参数说明：
 
@@ -353,7 +350,6 @@ CMP = ge(A, B)
 功能说明：
 
 - 显式广播，把 `value` 扩张到目标 `target`。
-- 公开行为以只读验收入口 [`expectation/operation/nn/broadcast.py`](../../expectation/operation/nn/broadcast.py) 为准。
 
 参数说明：
 
@@ -389,7 +385,6 @@ out = broadcast(value, target)
 功能说明：
 
 - `broadcast` 的等价公开别名，使用相同的显式目标 `Memory` 描述。
-- 公开行为以只读验收入口 [`expectation/operation/nn/broadcast_to.py`](../../expectation/operation/nn/broadcast_to.py) 为准。
 
 参数说明：
 
@@ -447,7 +442,6 @@ out = transpose(value, perm=[1, 0, 2])
 功能说明：
 
 - 二维矩阵乘。
-- 公开行为以只读验收入口 [`expectation/operation/nn/matmul.py`](../../expectation/operation/nn/matmul.py) 为准。
 
 参数说明：
 
@@ -485,7 +479,7 @@ tmp = matmul(lhs, rhs, memoryspace=MemorySpace.SM)
 ## 测试
 
 - 测试文件：[`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py)
-- 执行命令：`pytest -q test/operation/test_operation_nn.py`；`python expectation/operation/nn/add.py`；`python expectation/operation/nn/broadcast.py`；`python expectation/operation/nn/broadcast_to.py`；`python expectation/operation/nn/eq.py`；`python expectation/operation/nn/floordiv.py`；`python expectation/operation/nn/ge.py`；`python expectation/operation/nn/gt.py`；`python expectation/operation/nn/le.py`；`python expectation/operation/nn/lt.py`；`python expectation/operation/nn/matmul.py`；`python expectation/operation/nn/mul.py`；`python expectation/operation/nn/ne.py`；`python expectation/operation/nn/sub.py`；`python expectation/operation/nn/truediv.py`
+- 执行命令：`pytest -q test/operation/test_operation_nn.py`
 
 ### 测试目标
 
@@ -497,7 +491,6 @@ tmp = matmul(lhs, rhs, memoryspace=MemorySpace.SM)
 - 验证 `matmul(lhs, rhs, memoryspace=None)` 的二维输入约束、`memoryspace` 覆盖、结果 `format/stride` 口径与错误规则。
 - 验证比较结果使用 `NumericType.Bool` 作为 predicate 载体。
 - 验证 nn 操作不依赖已移除的旧 shape 规范化入口。
-- 验证 `main` 上 `expectation/operation/nn/*.py` 作为只读 acceptance gate，与当前公开接口与测试映射保持一致。
 
 ### 功能与用例清单
 
@@ -505,35 +498,39 @@ tmp = matmul(lhs, rhs, memoryspace=MemorySpace.SM)
 | --- | --- | --- |
 | OP-001 | `add` 基础逐元素运算 | `test_nn_add_memory` |
 | OP-002 | `sub`/`mul`/`truediv` 逐元素算术可调用 | `test_nn_other_arithmetic` |
+| OP-002A | `sub` 支持标量反向调用，且 `dtype` 决议与 `add` 一致 | `test_nn_sub_reverse_and_dtype_mismatch` |
+| OP-002B | `sub` 在 `format/stride` 不一致时回落默认布局 | `test_nn_sub_format_fallback` |
 | OP-003 | shape 不一致报错 | `test_nn_shape_mismatch` |
 | OP-004 | rank 不一致报错 | `test_nn_rank_mismatch` |
 | OP-005 | `Memory + scalar` | `test_nn_add_scalar` |
+| OP-005A | `Memory + bool scalar` 仍走标量路径并保持 `Memory` 结果描述 | `test_nn_add_bool_scalar` |
 | OP-006 | 链式表达式保持形状与 dtype | `test_nn_chain_expression` |
 | OP-007 | 非法标量类型报 `TypeError` | `test_nn_scalar_type_error` |
-| OP-008 | `add` 的 `dtype` 决议与当前实现中的错误路径约束 | `test_nn_dtype_mismatch`、`python expectation/operation/nn/add.py` |
-| OP-009 | 比较结果使用 `NumericType.Bool` 作为 predicate 载体 | `test_nn_compare_predicate`、`python expectation/operation/nn/eq.py`、`python expectation/operation/nn/lt.py`、`python expectation/operation/nn/gt.py` |
+| OP-008 | `add` 的不支持 `dtype` 输入触发 `TypeError` | `test_nn_dtype_invalid_error` |
+| OP-009 | 比较结果使用 `NumericType.Bool` 作为 predicate 载体 | `test_nn_compare_predicate` |
 | OP-010 | 比较时 shape 顺序不同报错 | `test_nn_compare_shape_order` |
 | OP-011 | 纯标量输入报 `TypeError` | `test_nn_scalar_only_error` |
-| OP-012 | `ne`/`le`/`ge` 比较别名可调用，且结果 `dtype` 为 `NumericType.Bool` | `test_nn_compare_alias`、`python expectation/operation/nn/ne.py`、`python expectation/operation/nn/le.py`、`python expectation/operation/nn/ge.py` |
-| OP-013 | 同布局的 `Memory/Memory add` 保持原有 `Memory` 描述，且不依赖已移除的旧 shape 规范化入口 | `test_nn_operation_does_not_require_convert_from_list`、`python expectation/operation/nn/add.py` |
-| OP-017 | `floordiv` 复用逐元素算术规则、支持标量并在布局不一致时回落默认布局 | `test_nn_floordiv_rules`、`python expectation/operation/nn/floordiv.py` |
-| OP-BC-001 | `broadcast` / `broadcast_to` 可通过 singleton dim 扩张并返回与 `target` 完全一致的描述 | `test_nn_broadcast_success`、`python expectation/operation/nn/broadcast.py`、`python expectation/operation/nn/broadcast_to.py` |
-| OP-BC-002 | `broadcast` / `broadcast_to` 支持前置维扩张并保持 `target` 描述 | `test_nn_broadcast_prepend_dimension`、`python expectation/operation/nn/broadcast.py`、`python expectation/operation/nn/broadcast_to.py` |
-| OP-BC-003 | `broadcast` / `broadcast_to` 维度不兼容报错 | `test_nn_broadcast_dimension_mismatch`、`python expectation/operation/nn/broadcast.py`、`python expectation/operation/nn/broadcast_to.py` |
-| OP-BC-004 | `broadcast` / `broadcast_to` 目标 rank 更小时报错 | `test_nn_broadcast_rank_error`、`python expectation/operation/nn/broadcast.py`、`python expectation/operation/nn/broadcast_to.py` |
+| OP-012 | `ne`/`le`/`ge` 比较别名可调用，且结果 `dtype` 为 `NumericType.Bool` | `test_nn_compare_alias` |
+| OP-013 | 同布局的 `Memory/Memory add` 保持原有 `Memory` 描述，且不依赖已移除的旧 shape 规范化入口 | `test_nn_operation_does_not_require_convert_from_list` |
+| OP-017 | `floordiv` 复用逐元素算术规则、支持标量并在布局不一致时回落默认布局 | `test_nn_floordiv_rules` |
+| OP-BC-001 | `broadcast` / `broadcast_to` 可通过 singleton dim 扩张并返回与 `target` 完全一致的描述 | `test_nn_broadcast_success` |
+| OP-BC-002 | `broadcast` / `broadcast_to` 支持前置维扩张并保持 `target` 描述 | `test_nn_broadcast_prepend_dimension` |
+| OP-BC-003 | `broadcast` / `broadcast_to` 维度不兼容报错 | `test_nn_broadcast_dimension_mismatch` |
+| OP-BC-004 | `broadcast` / `broadcast_to` 目标 rank 更小时报错 | `test_nn_broadcast_rank_error` |
 | OP-BC-005 | `broadcast` / `broadcast_to` 非 `Memory` 输入报错 | `test_nn_broadcast_non_memory_error` |
 | OP-BC-006 | `broadcast` / `broadcast_to` 非 `Memory` target 报错 | `test_nn_broadcast_target_type_error` |
-| OP-IB-001 | 算术支持 singleton dim 隐式 broadcast | `test_nn_add_implicit_broadcast_singleton`、`python expectation/operation/nn/add.py` |
-| OP-IB-002 | 算术支持前置维隐式 broadcast | `test_nn_add_implicit_broadcast_prepend_dimension`、`python expectation/operation/nn/add.py` |
+| OP-IB-001 | 算术支持 singleton dim 隐式 broadcast | `test_nn_add_implicit_broadcast_singleton` |
+| OP-IB-002 | 算术支持前置维隐式 broadcast | `test_nn_add_implicit_broadcast_prepend_dimension` |
 | OP-IB-003 | 比较运算复用隐式 broadcast | `test_nn_compare_implicit_broadcast` |
 | OP-IB-004 | 隐式 broadcast 维度不兼容报错 | `test_nn_add_implicit_broadcast_mismatch` |
-| OP-014 | `add` 的 `Memory/Memory` 结果 `dtype` 按固定优先级决议 | `test_nn_dtype_mismatch`、`python expectation/operation/nn/add.py` |
-| OP-015 | `add` 在 `format` 不一致时回落默认布局 | `test_nn_add_format_fallback`、`python expectation/operation/nn/add.py` |
-| OP-016 | `add` 在 `stride` 不一致时回落默认布局，默认 stride 与序列化口径沿用 `Memory` 规范 | `test_nn_add_stride_fallback`、`python expectation/operation/nn/add.py` |
-| OP-MM-001 | `matmul(lhs, rhs, memoryspace=None)` 成功路径：结果 shape/dtype/space/format/stride 收敛到公开口径 | `test_nn_matmul_success`、`python expectation/operation/nn/matmul.py` |
-| OP-MM-002 | `matmul` 显式 `memoryspace` 仅覆盖结果 `space` | `test_nn_matmul_space_override`、`python expectation/operation/nn/matmul.py` |
-| OP-MM-003 | `matmul` contracting dim 不一致报错 | `test_nn_matmul_contracting_dim_mismatch`、`python expectation/operation/nn/matmul.py` |
-| OP-MM-004 | `matmul` 非二维输入报错 | `test_nn_matmul_rank_error`、`python expectation/operation/nn/matmul.py` |
+| OP-014 | `add` 的 `Memory/Memory` 结果 `dtype` 按固定优先级决议 | `test_nn_dtype_mismatch` |
+| OP-015 | `add` 在 `format` 不一致时回落默认布局 | `test_nn_add_format_fallback` |
+| OP-016 | `add` 在 `stride` 不一致时回落默认布局，默认 stride 与序列化口径沿用 `Memory` 规范 | `test_nn_add_stride_fallback` |
+| OP-016A | `add` 默认 stride 分量的序列化口径保持稳定 | `test_nn_add_stride_dim_serialization` |
+| OP-MM-001 | `matmul(lhs, rhs, memoryspace=None)` 成功路径：结果 shape/dtype/space/format/stride 收敛到公开口径 | `test_nn_matmul_success` |
+| OP-MM-002 | `matmul` 显式 `memoryspace` 仅覆盖结果 `space` | `test_nn_matmul_space_override` |
+| OP-MM-003 | `matmul` contracting dim 不一致报错 | `test_nn_matmul_contracting_dim_mismatch` |
+| OP-MM-004 | `matmul` 非二维输入报错 | `test_nn_matmul_rank_error` |
 | OP-MM-005 | `matmul` 标量输入非法 | `test_nn_matmul_scalar_operand_error` |
-| OP-MM-006 | `matmul` 的 `dtype` 按固定优先级决议 | `test_nn_matmul_dtype_mismatch`、`python expectation/operation/nn/matmul.py` |
-| OP-MM-007 | `matmul` 输入 `space` 不一致报错 | `test_nn_matmul_space_mismatch`、`python expectation/operation/nn/matmul.py` |
+| OP-MM-006 | `matmul` 的 `dtype` 按固定优先级决议 | `test_nn_matmul_dtype_mismatch` |
+| OP-MM-007 | `matmul` 输入 `space` 不一致报错 | `test_nn_matmul_space_mismatch` |
