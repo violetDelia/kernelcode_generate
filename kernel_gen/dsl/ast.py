@@ -512,11 +512,13 @@ class ArchQueryAST:
 
     功能说明:
     - 表示 DSL 中最小 `arch` 查询调用。
-    - 当前仅承载 `get_block_id()` / `get_block_num()` 查询名。
+    - 当前仅承载 `get_block_id()` / `get_block_num()` / `get_subthread_id()` / `get_thread_id()` 查询名。
 
     使用示例:
     - ArchQueryAST(query_name="get_block_id")
     - ArchQueryAST(query_name="get_block_num")
+    - ArchQueryAST(query_name="get_subthread_id")
+    - ArchQueryAST(query_name="get_thread_id")
 
     关联文件:
     - spec: spec/dsl/ast.md
@@ -1239,7 +1241,7 @@ def _parse_dma_call(
     功能说明:
     - 将 `load/slice/store/deslice/...` 解析为对应 AST 节点。
     - 将 `nn.add/sub/mul/truediv/floordiv(...)` 解析为对应的 `BinaryExprAST`。
-    - 将 `get_block_id()` / `get_block_num()` 解析为 `ArchQueryAST`。
+    - 将 `get_block_id()` / `get_block_num()` / `get_subthread_id()` / `get_thread_id()` 解析为 `ArchQueryAST`。
 
     使用示例:
     - _parse_dma_call(py_ast.parse("slice(A, [i], [n])").body[0].value, env, globals(), __builtins__)
@@ -1382,6 +1384,14 @@ def _parse_dma_call(
         if expr.args or expr.keywords:
             _raise_parse_error("Unsupported get_block_num arity", expr)
         return ArchQueryAST(query_name="get_block_num", location=_location_from_node(expr))
+    if call_name == "get_subthread_id":
+        if expr.args or expr.keywords:
+            _raise_parse_error("Unsupported get_subthread_id arity", expr)
+        return ArchQueryAST(query_name="get_subthread_id", location=_location_from_node(expr))
+    if call_name == "get_thread_id":
+        if expr.args or expr.keywords:
+            _raise_parse_error("Unsupported get_thread_id arity", expr)
+        return ArchQueryAST(query_name="get_thread_id", location=_location_from_node(expr))
 
     _raise_parse_error("Unsupported call expression", expr)
     return expr

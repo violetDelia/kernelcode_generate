@@ -37,7 +37,12 @@ from xdsl.dialects.builtin import (
 )
 from xdsl.ir import Attribute, Block, SSAValue
 
-from kernel_gen.dialect.arch import ArchGetBlockIdOp, ArchGetBlockNumOp
+from kernel_gen.dialect.arch import (
+    ArchGetBlockIdOp,
+    ArchGetBlockNumOp,
+    ArchGetSubthreadIdOp,
+    ArchGetThreadIdOp,
+)
 from kernel_gen.dialect.dma import (
     DmaAllocOp,
     DmaCastOp,
@@ -744,6 +749,8 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
         query_map = {
             "get_block_id": "block_id",
             "get_block_num": "block_num",
+            "get_subthread_id": "subthread_id",
+            "get_thread_id": "thread_id",
         }
         symbol_name = query_map.get(expr.query_name)
         if symbol_name is None:
@@ -937,6 +944,10 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
             op = ArchGetBlockIdOp()
         elif expr.query_name == "get_block_num":
             op = ArchGetBlockNumOp()
+        elif expr.query_name == "get_subthread_id":
+            op = ArchGetSubthreadIdOp()
+        elif expr.query_name == "get_thread_id":
+            op = ArchGetThreadIdOp()
         else:
             raise _LoweringError("Unsupported arch query", location=expr.location)
         ctx.builder.add_op(op)
