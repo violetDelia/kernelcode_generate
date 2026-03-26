@@ -72,6 +72,9 @@ func_ast = parse_function(add)
 - 若参数未写注解，但在 `globals`/`builtins` 中存在同名 `SymbolDim` 或 `Memory` 对象，可按标量参数或张量参数推断。
 - 若函数显式标注 `-> None`，则返回列表必须为空，且函数体可只包含语句并省略 `return`。
 - `float(value)`、`tensor.get_shape()[axis]` 与 `tensor.get_stride()[axis]` 等最小 DSL 表达式必须可解析为明确 AST 节点。
+- `slice(...)` helper 仅允许 3~5 个位置参数；超出范围必须返回 `Unsupported slice arity` 诊断。
+- `slice` 的首参必须解析为 `TensorAST`；否则必须返回 `slice source must be TensorAST` 诊断。
+- `slice` 的 `space` 可选，但一旦提供必须为 `MemorySpace`；否则必须返回 `slice space must be MemorySpace` 诊断。
 
 返回与限制：
 
@@ -426,6 +429,7 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
   - 覆盖 `get_block_id()` 的非法参数在 AST 解析阶段被拒绝。
   - 覆盖 `get_block_num()` 解析为 `ArchQueryAST` 的最小 arch 查询入口。
   - 覆盖 `get_block_num()` 的非法参数在 AST 解析阶段被拒绝。
+  - 覆盖 `slice` helper 的参数数量、source 类型与 space 约束的错误路径。
 - 功能与用例清单：
   - AST-001：解析函数生成 `FunctionAST`。（`test_visit_function_builds_ast`）
   - AST-001A：提供独立解析入口。（`test_parse_function_entry`）
@@ -442,6 +446,7 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
   - AST-011：未注解的 float runtime 参数仍视为缺失注解并返回 `Missing annotation` 诊断。（`test_parse_function_rejects_float_runtime_arguments_without_annotations`）
   - AST-012：`nn` 算术 helper 的非法参数个数必须返回 `Unsupported nn arithmetic arity` 诊断。（`test_parse_function_rejects_unsupported_nn_arithmetic_arity_variants`）
   - AST-013：支持 `bool/float` 返回注解、`JoinedStr` 张量注解，以及 `float(...)`、`get_shape()[axis]`、`get_stride()[axis]` 等最小 symbol 查询/转换表达式解析。（`test_ast_parse_function_supports_symbol_scalar_and_joinedstr_annotations`）
+  - AST-014：`slice` helper 的非法参数个数、非法 source 与非法 space 必须返回对应诊断。（`test_parse_function_rejects_invalid_slice_helper_variants`）
   - AST-014A：零入参函数中的 `get_block_id()` 可解析为 `ArchQueryAST`，并保留继续向下游 lowering 所需的查询名语义。（`test_build_func_op_lowers_arch_get_block_id_query`）
   - AST-014B：`get_block_id(1)` 与 `get_block_id(x=1)` 必须在 AST 解析阶段返回 `Unsupported get_block_id arity` 诊断。（`test_parse_function_rejects_invalid_get_block_id_arity_variants`）
   - AST-014C：零入参函数中的 `get_block_num()` 可解析为 `ArchQueryAST`，并保留继续向下游 lowering 所需的查询名语义。（`test_build_func_op_lowers_arch_get_block_num_query`）
