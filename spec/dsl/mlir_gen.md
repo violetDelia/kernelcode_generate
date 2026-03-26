@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`金铲铲大作战`
+- 最后一次更改：`我不是牛马`
 - `spec`：[`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
 - `功能实现`：[`kernel_gen/dsl/mlir_gen.py`](../../kernel_gen/dsl/mlir_gen.py)
 - `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
@@ -43,12 +43,13 @@
 - 当运行时参数为 `SymbolDim("s")` 这类 symbol 标量时，对应的 `func.func` 输入必须 lowering 为 `!symbol.int<"s">`；若为常量 symbol，例如 `SymbolDim(1)`，则必须 lowering 为 `!symbol.int<"1">`。
 - 当运行时参数是 Python `int` 且函数场景属于 symbol 整型标量运算时，对应的 `func.func` 输入必须 lowering 为携带具体整数值的 `SymbolValueType`，不得退回 `i32`、`index` 或其他 builtin 标量类型；若整数值为负数，对外字符串表示必须直接表现为十进制负数字面量，例如 `symbol.int<-7>`。
 - 当函数体仅包含 `for` 循环且没有 `return` 时，输出 `func.func` 允许零返回值。
+- 当函数体仅包含 `deslice` 等写回语句且无显式 `return` 时，输出 `func.func` 允许零返回值，`ReturnOp` 必须无返回参数。
 - 当 `ForAST` 来源于 `LoopRange(start, end, step)` 且循环边界保持 symbol 整数语义时，lowering 后必须生成 `symbol.for`，不得退回 `scf.for`；其循环块参数 `it` 必须为 `!symbol.int<"expr">`。
 - `LoopRange` 场景中的循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand，必须直接保持 `!symbol.int<"expr">` 语义传递，不得额外生成 `arith.index_cast`。
 - 对于纯 symbol 标量算术函数（仅符号标量入参/返回且返回为整型标量），函数签名中的输入与输出必须统一使用 `!symbol.int<"expr">`，不得降级为 `i32`、`index` 或其他 builtin 标量类型。
 - 对于纯 symbol 标量比较函数（当前仅覆盖 `==`），函数签名中的输入必须保持 `!symbol.int<"expr">`，返回类型必须为 `i1`，不得退回 `!symbol.int<"expr">` 或其他 builtin 标量类型。
 - Tensor 注解既可使用普通字符串字面量 `"Tensor[...]"`，也可使用在源码层面可归一化为同等文本的 `f"Tensor[...]"`；归一化后的文本必须满足 Tensor 注解语法，若包含无法静态归一化的格式化片段或归一化后仍不符合语法，必须报错。
-- DSL 函数体内允许出现 `alloc`、`copy`、`cast`、`view`、`reshape`、`flatten`、`free`、`load`、`store`、`slice`、`deslice` 这组 DMA helper 调用；其公开语义由 `emit_mlir` 负责落实到具体 lowering。
+- DSL 函数体内允许出现 `alloc`、`copy`、`cast`、`view`、`reshape`、`flatten`、`free`、`load`、`store`、`slice`、`deslice` 这组 DMA helper 调用；其公开语义由 `emit_mlir` 负责落实到具体 lowering，其中 `deslice` 必须 lowering 为 `dma.deslice` 且不得生成 `dma.store`。
 - 当函数体仅返回 `alloc(...)` 且没有 tensor 输入时，允许仅依赖标量 `runtime_args` 构建签名与结果类型；`alloc` 结果类型需由 `shape`/`stride`/`dtype`/`space` 与 `runtime_args` 共同决定，且显式 `stride` 必须与默认连续布局一致，否则必须报错。
 - `flatten(x)` 在 DSL 公开契约中视为一维重排 helper，要求保留元素总数并输出一维 memory 结果；不要求存在独立的 dialect op。
 - `free(x)` 在 DSL 公开契约中是语句型 helper，不产生新的 SSA 返回值，也不能作为函数返回值直接 lowering 为独立结果。
@@ -177,6 +178,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - 验证整型标量函数场景中，`build_func_op(add, lhs, rhs)` 会把 Python `int` 实参 lowering 为携带具体整数值的 `SymbolValueType` 输入，并生成 `symbol.add` 结果。
   - 验证负数 Python `int` 实参不会导致 lowering 失败；负值的 `SymbolValueType.__str__` 必须保持 `symbol.int<-3>` 这类十进制负数字面量口径，且 `get_value()` 可还原原始负数值。
   - 验证 `LoopRange + slice/deslice` 场景生成 `symbol.for + dma.slice/dma.deslice`，且循环相关 lowering 不生成 `arith.index_cast`。
+  - 验证 deslice helper 在 runtime_args offsets/sizes 场景仍可 lowering 为 `dma.deslice`，且不生成 `dma.store`。
   - 验证 Tensor 注解可接受普通字符串字面量与可静态归一化的 `f"Tensor[...]"` 两种源码形式，并在归一化失败时报错。
   - 验证 DMA helper 调用在 `build_func_op(...)` 链路中被识别为受支持 DSL 公开能力：`alloc/copy/cast/view/reshape/flatten` 作为返回值表达式参与 lowering，`free` 作为无返回值语句参与 lowering。
   - 验证 alloc-only helper 场景在运行时参数、显式 stride 与非法 dtype/space 输入时的返回类型与错误路径。
@@ -215,12 +217,13 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - MGEN-019：`build_func_op` 的运行时参数为必填，且公开契约仅覆盖 `fn + runtime_args` 的可位置绑定形参；省略实参、实参数量不匹配，或试图以 `globals/builtins` 替代时必须报错。（`test_build_func_op_requires_explicit_runtime_args`、`test_build_func_op_rejects_runtime_arg_count_mismatch`、`test_build_func_op_globals_and_builtins_cannot_replace_runtime_args`）
   - MGEN-020：`build_func_op(add, lhs, rhs)` 对普通 Python `int` runtime args 的 lowering 必须产出携带具体整数值的 `SymbolValueType` 输入；若实参包含负数，其对外字符串表示必须保持 `symbol.int<-3>` 这类十进制负数字面量口径，并在函数体内生成 `symbol.add` 结果。（`test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type`）
   - MGEN-025：Tensor 注解支持普通字符串字面量与可静态归一化的 `f"Tensor[...]"` 两种源码形式；若归一化结果不满足 Tensor 语法则必须报错。（`test_build_func_op_accepts_joinedstr_tensor_annotation`、`test_build_func_op_rejects_invalid_joinedstr_tensor_annotation`）
-  - MGEN-026：DMA helper 调用在 `build_func_op(...)` 链路中按公开语义分流：`alloc/copy/cast/view/reshape/flatten` 生成对应 memory 结果，`free` 作为无返回值语句参与 lowering，`load/store/slice/deslice` 保持既有 memory 读写行为。（`test_build_func_op_supports_dma_helper_calls`、`test_build_func_op_supports_dma_free_statement`、`test_build_func_op_supports_dma_load_helper`、`test_build_func_op_supports_dma_store_helper`、`test_build_func_op_supports_dma_slice_helper`、`test_build_func_op_supports_dma_deslice_helper`）
+  - MGEN-026：DMA helper 调用在 `build_func_op(...)` 链路中按公开语义分流：`alloc/copy/cast/view/reshape/flatten` 生成对应 memory 结果，`free` 作为无返回值语句参与 lowering，`load/store/slice/deslice` 保持既有 memory 读写行为；`deslice` 不得生成 `dma.store`。（`test_build_func_op_supports_dma_helper_calls`、`test_build_func_op_supports_dma_free_statement`、`test_build_func_op_supports_dma_load_helper`、`test_build_func_op_supports_dma_store_helper`、`test_build_func_op_supports_dma_slice_helper`、`test_build_func_op_supports_dma_deslice_helper`、`test_build_func_op_supports_dma_deslice_helper_with_runtime_args`）
   - MGEN-026A：alloc-only kernel 的 runtime shape 参数会 lowering 为 `!symbol.int` 输入，并保持 `dma.alloc` 结果类型与返回注解一致。（`test_build_func_op_supports_dma_alloc_helper_with_runtime_shape_args`）
   - MGEN-026B：alloc-only kernel 支持 `SymbolDim` 运行时参数与 `SymbolDim + const` 混合场景，`dma.alloc` 结果 `shape` 保持符号表达式。（`test_build_func_op_supports_dma_alloc_helper_with_symbol_shape_args`、`test_build_func_op_supports_dma_alloc_helper_with_symbol_plus_const_shape_args`）
   - MGEN-026C：alloc-only kernel 允许零参数常量形状，`func.func` 无输入且结果类型与 `alloc` 返回一致。（`test_build_func_op_supports_dma_alloc_helper_without_runtime_args`）
   - MGEN-026D：alloc-only kernel 支持显式连续 `stride` 输入并保持结果类型一致。（`test_build_func_op_supports_dma_alloc_helper_with_explicit_stride`）
   - MGEN-026E：alloc-only kernel 遇到非法 dtype / space 或非连续 stride 时必须报错。（`test_build_func_op_rejects_dma_alloc_helper_with_invalid_dtype`、`test_build_func_op_rejects_dma_alloc_helper_with_invalid_space`、`test_build_func_op_rejects_dma_alloc_helper_with_non_contiguous_stride`）
+  - MGEN-026F：`build_func_op` 遇到 `deslice` helper 的非法 arity/target/space 时必须抛 `AstVisitorError`，报错文本与解析诊断一致。（`test_build_func_op_rejects_invalid_deslice_helper_variants`）
   - MGEN-027：零入参函数直接返回 `get_block_id()` 时，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须生成零参数 `func.func`、单个 `arch.get_block_id`，并返回 `!symbol.int<"block_id">`。（`test_build_func_op_lowers_arch_get_block_id_query`）
   - MGEN-028：纯 symbol 标量 `==` 比较 lowering 为 `symbol.eq`，返回类型为 `i1`；`const/const` 与 `symbol/symbol` 两类输入下均应保持 `SymbolValueType` 输入签名，并覆盖 `return a == b` 与 `c = a == b; return c` 两种函数体形态。（`test_build_func_op_lowers_symbol_eq`）
   - MGEN-029：零入参函数直接返回 `get_block_num()` 时，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须生成零参数 `func.func`、单个 `arch.get_block_num`，并返回 `!symbol.int<"block_num">`。（`test_build_func_op_lowers_arch_get_block_num_query`）

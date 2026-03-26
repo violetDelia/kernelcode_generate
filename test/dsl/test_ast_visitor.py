@@ -930,9 +930,9 @@ def test_mlir_gen_signature_validation_errors() -> None:
 
 # MGEN-025
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-25 10:18:40 +0800
-# 最近一次运行成功时间: 2026-03-25 10:18:40 +0800
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-26 23:33:50 +0800
+# 最近一次运行成功时间: 2026-03-26 23:33:50 +0800
 # 功能说明: 验证 build_func_op 支持可静态归一化的 JoinedStr Tensor 注解。
 # 测试目的: 验证 f"Tensor[...]" 形式的输入/输出注解可被归一化并成功参与 lowering。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_accepts_joinedstr_tensor_annotation
@@ -1435,8 +1435,8 @@ def test_build_func_op_supports_dma_slice_helper() -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-25 10:18:40 +0800
 # 最近一次运行成功时间: 2026-03-25 10:18:40 +0800
-# 功能说明: 验证 build_func_op 在 deslice helper 场景下生成 dma.deslice。
-# 测试目的: 验证 deslice(...) 在 build_func_op 链路中被直接识别并 lowering 为 DmaDesliceOp。
+# 功能说明: 验证 build_func_op 在 deslice helper 场景下生成 dma.deslice，且不生成 dma.store。
+# 测试目的: 验证 deslice(...) 在 build_func_op 链路中被直接识别并 lowering 为 DmaDesliceOp，ReturnOp 无返回值。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_supports_dma_deslice_helper
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -1452,8 +1452,104 @@ def test_build_func_op_supports_dma_deslice_helper() -> None:
 
     func_op = build_func_op(deslice_kernel, source, target)
     deslice_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaDesliceOp)]
+    store_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaStoreOp)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
     assert isinstance(func_op, func.FuncOp)
     assert len(deslice_ops) == 1
+    assert len(store_ops) == 0
+    assert len(return_ops) == 1
+    assert len(return_ops[0].arguments) == 0
+
+
+# MGEN-026
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-26 23:33:50 +0800
+# 最近一次运行成功时间: 2026-03-26 23:33:50 +0800
+# 功能说明: 验证 deslice helper 在 runtime_args offsets/sizes 场景可被 build_func_op lowering。
+# 测试目的: 覆盖 deslice(...) 接收运行时 offsets/sizes 并生成 DmaDesliceOp，ReturnOp 无返回值。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_supports_dma_deslice_helper_with_runtime_args
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_supports_dma_deslice_helper_with_runtime_args() -> None:
+    from kernel_gen.operation.dma import deslice
+
+    source = Memory([2, 2], NumericType.Float32, space=MemorySpace.LM)
+    target = Memory([4, 4], NumericType.Float32, space=MemorySpace.GM)
+
+    offset_row = 1
+    offset_col = 0
+    size_row = 2
+    size_col = 2
+
+    def deslice_param_kernel(
+        tile: "Tensor[f32, 2, 2]",
+        dst: "Tensor[f32, 4, 4]",
+        offset_row: int,
+        offset_col: int,
+        size_row: int,
+        size_col: int,
+    ):
+        deslice(tile, dst, [offset_row, offset_col], [size_row, size_col], [1, 1])
+
+    func_op = build_func_op(
+        deslice_param_kernel,
+        source,
+        target,
+        offset_row,
+        offset_col,
+        size_row,
+        size_col,
+    )
+    deslice_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaDesliceOp)]
+    store_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaStoreOp)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
+    assert isinstance(func_op, func.FuncOp)
+    assert len(deslice_ops) == 1
+    assert len(store_ops) == 0
+    assert len(return_ops) == 1
+    assert len(return_ops[0].arguments) == 0
+
+
+# MGEN-026F
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-27 00:37:18 +0800
+# 最近一次运行成功时间: 2026-03-27 00:37:18 +0800
+# 功能说明: 验证 build_func_op 触发 deslice helper 负路径时抛出 AstVisitorError。
+# 测试目的: 锁定 deslice arity/target/space 诊断在 build_func_op 链路的报错文本不变。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_invalid_deslice_helper_variants
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_rejects_invalid_deslice_helper_variants() -> None:
+    from kernel_gen.operation.dma import deslice
+
+    source = Memory([2, 2], NumericType.Float32, space=MemorySpace.LM)
+    target = Memory([4, 4], NumericType.Float32, space=MemorySpace.GM)
+
+    def bad_arity(tile: "Tensor[f32, 2, 2]", dst: "Tensor[f32, 4, 4]"):
+        deslice(tile, dst, [0, 0])
+
+    def bad_target(tile: "Tensor[f32, 2, 2]", dst: int):
+        deslice(tile, dst, [0, 0], [2, 2], [1, 1])
+
+    def bad_space(tile: "Tensor[f32, 2, 2]", dst: "Tensor[f32, 4, 4]"):
+        deslice(tile, dst, [0, 0], [2, 2], [1, 1], 1)
+
+    expected_messages = (
+        ("Unsupported deslice arity", bad_arity, (source, target)),
+        ("deslice target must be TensorAST", bad_target, (source, 0)),
+        ("deslice space must be MemorySpace", bad_space, (source, target)),
+    )
+    for expected_message, fn, runtime_args in expected_messages:
+        with pytest.raises(AstVisitorError) as exc_info:
+            build_func_op(fn, *runtime_args)
+        if exc_info.value.message != expected_message:
+            raise AssertionError(
+                f"expected deslice diagnostic {expected_message!r}, got {exc_info.value.message!r}"
+            )
 
 
 # MGEN-007
@@ -3343,9 +3439,9 @@ def test_emit_mlir_index_resolution_helpers() -> None:
 
 # EMIT-012
 # 创建者: 小李飞刀
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-26 22:20:00 +0800
-# 最近一次运行成功时间: 2026-03-26 22:20:00 +0800
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-27 00:37:18 +0800
+# 最近一次运行成功时间: 2026-03-27 00:37:18 +0800
 # 功能说明: 覆盖 emit_mlir 类型推导与 broadcast 错误分支。
 # 测试目的: 覆盖常量类型、symbol binary op、broadcast mismatch 等路径。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_infer_expr_type_branches
@@ -3392,10 +3488,17 @@ def test_emit_mlir_infer_expr_type_branches() -> None:
     with pytest.raises(_LoweringError, match="Unsupported symbol binary op"):
         _infer_expr_type(BinaryExprAST(op="mod", lhs=sym_lhs, rhs=sym_rhs), type_map)
 
-    assert _infer_expr_type(CompareExprAST(op="eq", lhs=sym_lhs, rhs=sym_rhs), type_map) == i1
-    assert _infer_expr_type(CompareExprAST(op="ge", lhs=sym_lhs, rhs=sym_rhs), type_map) == i1
+    compare_exprs: list[CompareExprAST] = []
+    compare_eq = CompareExprAST(op="eq", lhs=sym_lhs, rhs=sym_rhs)
+    compare_exprs.append(compare_eq)
+    assert _infer_expr_type(compare_eq, type_map) == i1
+    compare_ge = CompareExprAST(op="ge", lhs=sym_lhs, rhs=sym_rhs)
+    compare_exprs.append(compare_ge)
+    assert _infer_expr_type(compare_ge, type_map) == i1
     with pytest.raises(_LoweringError, match="Unsupported symbol compare op"):
-        _infer_expr_type(CompareExprAST(op="gt", lhs=sym_lhs, rhs=sym_rhs), type_map)
+        compare_gt = CompareExprAST(op="gt", lhs=sym_lhs, rhs=sym_rhs)
+        compare_exprs.append(compare_gt)
+        _infer_expr_type(compare_gt, type_map)
 
     type_map[_expr_key(sym_lhs)] = i32
     type_map[_expr_key(sym_rhs)] = i32
@@ -3403,7 +3506,9 @@ def test_emit_mlir_infer_expr_type_branches() -> None:
         _infer_expr_type(BinaryExprAST(op="add", lhs=sym_lhs, rhs=sym_rhs), type_map)
 
     with pytest.raises(_LoweringError, match="Compare op operands must have nn.memory type"):
-        _infer_expr_type(CompareExprAST(op="eq", lhs=sym_lhs, rhs=sym_rhs), type_map)
+        compare_invalid = CompareExprAST(op="eq", lhs=sym_lhs, rhs=sym_rhs)
+        compare_exprs.append(compare_invalid)
+        _infer_expr_type(compare_invalid, type_map)
 
     lhs_type = _memory_to_nn_type(Memory([2, 1], NumericType.Float32))
     with pytest.raises(_LoweringError, match="Implicit broadcast dimension mismatch"):
