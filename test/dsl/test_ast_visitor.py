@@ -1,7 +1,7 @@
 """AST visitor tests.
 
 创建者: 小李飞刀
-最后一次更改: 咯咯咯
+最后一次更改: 我不是牛马
 
 功能说明:
 - 覆盖 AST 前端、nn dialect IR 与 MLIR 文本入口的回归测试。
@@ -66,6 +66,7 @@ from kernel_gen.dialect.symbol import (
     SymbolDivOp,
     SymbolFloorDivOp,
     SymbolForOp,
+    SymbolGeOp,
     SymbolMulOp,
     SymbolSubOp,
     SymbolValueType,
@@ -753,9 +754,9 @@ def test_build_func_op_return_type_matches_annotation() -> None:
 
 # MGEN-003
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
-# 最近一次运行成功时间: 2026-03-23 10:30:00 +0800
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-26 22:20:00 +0800
+# 最近一次运行成功时间: 2026-03-26 22:20:00 +0800
 # 功能说明: 覆盖 mlir_gen 的符号标量函数与签名构造分支。
 # 测试目的: 验证符号标量函数识别与 runtime arg 到 symbol expr 的映射。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_mlir_gen_symbol_scalar_helpers
@@ -921,7 +922,7 @@ def test_build_func_op_supports_dma_helper_calls() -> None:
 
 # MGEN-026A
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-25 22:17:59 +0800
 # 最近一次运行成功时间: 2026-03-25 22:17:59 +0800
 # 功能说明: 验证 build_func_op 支持仅依赖标量 runtime_args 的 DMA alloc-only kernel。
@@ -1799,6 +1800,49 @@ def test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type() -> N
     return_op = next(op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp))
     assert return_op.arguments[0].type == SymbolValueType.from_expr("2")
     assert "symbol.add" in _print_module(ModuleOp([func_op]))
+
+
+# MGEN-030
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-26 22:20:00 +0800
+# 最近一次运行成功时间: 2026-03-26 22:20:00 +0800
+# 功能说明: 验证 symbol 标量 >= 比较 lowering 为 symbol.ge 且返回 i1。
+# 测试目的: 覆盖 const/const 与 symbol/symbol 输入下的 return 与赋值返回形态。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_lowers_symbol_ge
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_lowers_symbol_ge() -> None:
+    def ge_return(lhs: int, rhs: int) -> bool:
+        return lhs >= rhs
+
+    def ge_assign(lhs: int, rhs: int) -> bool:
+        result = lhs >= rhs
+        return result
+
+    def _expected_expr(value: object) -> str:
+        if isinstance(value, SymbolDim):
+            return str(value.get_symbol())
+        return str(value)
+
+    runtime_cases = [
+        (ge_return, (3, 1)),
+        (ge_assign, (3, 1)),
+        (ge_return, (SymbolDim("M"), SymbolDim("N"))),
+        (ge_assign, (SymbolDim("M"), SymbolDim("N"))),
+    ]
+    for fn, runtime_args in runtime_cases:
+        func_op = build_func_op(fn, *runtime_args)
+        expected_arg_types = [SymbolValueType.from_expr(_expected_expr(arg)) for arg in runtime_args]
+        assert [arg.type for arg in func_op.args] == expected_arg_types
+        compare_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolGeOp)]
+        assert len(compare_ops) == 1
+        assert compare_ops[0].result.type == i1
+        return_op = next(op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp))
+        assert return_op.arguments[0].type == i1
+        assert list(func_op.function_type.outputs) == [i1]
+        assert "symbol.ge" in _print_module(ModuleOp([func_op]))
 
 
 # MGEN-019
@@ -3192,9 +3236,9 @@ def test_emit_mlir_index_resolution_helpers() -> None:
 
 # EMIT-012
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
-# 最近一次运行成功时间: 2026-03-23 10:30:00 +0800
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-26 22:20:00 +0800
+# 最近一次运行成功时间: 2026-03-26 22:20:00 +0800
 # 功能说明: 覆盖 emit_mlir 类型推导与 broadcast 错误分支。
 # 测试目的: 覆盖常量类型、symbol binary op、broadcast mismatch 等路径。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_infer_expr_type_branches
@@ -3240,6 +3284,11 @@ def test_emit_mlir_infer_expr_type_branches() -> None:
 
     with pytest.raises(_LoweringError, match="Unsupported symbol binary op"):
         _infer_expr_type(BinaryExprAST(op="mod", lhs=sym_lhs, rhs=sym_rhs), type_map)
+
+    assert _infer_expr_type(CompareExprAST(op="eq", lhs=sym_lhs, rhs=sym_rhs), type_map) == i1
+    assert _infer_expr_type(CompareExprAST(op="ge", lhs=sym_lhs, rhs=sym_rhs), type_map) == i1
+    with pytest.raises(_LoweringError, match="Unsupported symbol compare op"):
+        _infer_expr_type(CompareExprAST(op="gt", lhs=sym_lhs, rhs=sym_rhs), type_map)
 
     type_map[_expr_key(sym_lhs)] = i32
     type_map[_expr_key(sym_rhs)] = i32
@@ -3405,8 +3454,8 @@ def test_emit_mlir_ensure_supported_statements_errors() -> None:
 # EMIT-013
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
-# 最近一次运行成功时间: 2026-03-23 05:10:36 +0800
+# 最近一次运行测试时间: 2026-03-26 22:20:00 +0800
+# 最近一次运行成功时间: 2026-03-26 22:20:00 +0800
 # 功能说明: 覆盖缓存恢复与索引类型分支。
 # 测试目的: 验证缓存快照/恢复与 IndexType 输入的处理路径。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_cache_restore_and_index_value_variants
@@ -3545,9 +3594,9 @@ def test_emit_mlir_infer_expr_type_unknown_inputs() -> None:
 
 # EMIT-018
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
-# 最近一次运行成功时间: 2026-03-23 05:10:36 +0800
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-26 22:20:00 +0800
+# 最近一次运行成功时间: 2026-03-26 22:20:00 +0800
 # 功能说明: 覆盖 lowering 的错误路径与符号运算分支。
 # 测试目的: 验证未知输入、符号运算非法 op 与不支持表达式报错。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_lower_expr_unknown_and_symbol_errors
@@ -3578,11 +3627,41 @@ def test_emit_mlir_lower_expr_unknown_and_symbol_errors() -> None:
         lowered = _lower_expr(expr, symbol_ctx)
         assert isinstance(lowered.owner, op_type)
 
+    with pytest.raises(_LoweringError, match="Unsupported symbol compare op"):
+        _lower_expr(CompareExprAST(lhs=lhs, rhs=rhs, op="gt", location=None), symbol_ctx)
+
     with pytest.raises(_LoweringError, match="Unsupported symbol binary op"):
         _lower_expr(BinaryExprAST(lhs=lhs, rhs=rhs, op="mod", location=None), symbol_ctx)
 
     with pytest.raises(_LoweringError, match="Unsupported expression for lowering"):
         _lower_expr(object(), symbol_ctx)
+
+
+# EMIT-024
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-26 22:20:00 +0800
+# 最近一次运行成功时间: 2026-03-26 22:20:00 +0800
+# 功能说明: 验证 symbol 标量 >= 比较在 emit 阶段生成 symbol.ge 并返回 i1。
+# 测试目的: 锁定 symbol.ge lowering 与 i1 结果类型。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_lowers_symbol_ge
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_lowers_symbol_ge() -> None:
+    block = Block(arg_types=[SymbolValueType.from_expr("A"), SymbolValueType.from_expr("B")])
+    ctx = EmitContext(builder=block, symbols={"a": block.args[0], "b": block.args[1]}, types={})
+    lhs = ScalarArgAST(name="a", value_type=int, is_symbolic=True)
+    rhs = ScalarArgAST(name="b", value_type=int, is_symbolic=True)
+    ctx._set_cache(_expr_key(lhs), block.args[0])
+    ctx._set_cache(_expr_key(rhs), block.args[1])
+    ctx.types[_expr_key(lhs)] = block.args[0].type
+    ctx.types[_expr_key(rhs)] = block.args[1].type
+    expr = CompareExprAST(op="ge", lhs=lhs, rhs=rhs, location=None)
+
+    result = _lower_expr(expr, ctx)
+    assert isinstance(result.owner, SymbolGeOp)
+    assert result.type == i1
 
 
 # EMIT-019

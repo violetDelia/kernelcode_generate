@@ -106,6 +106,7 @@ value = emit_mlir(expr_ast, ctx)
 - `emit_mlir` 必须覆盖 AST 中每一种节点类型。
 - 默认使用当前项目的目标 dialect（例如 `nn`），但节点到 op 的映射必须清晰可追踪。
 - `LoopRange` 触发的 `ForAST` 必须走 `symbol.for` 分支，并保持 symbol 整数值直接作为 DMA operand 传递。
+- 当 `CompareExprAST` 的两侧均为 `!symbol.int<"expr">` 时，`eq` 必须 lowering 为 `symbol.eq`，`ge` 必须 lowering 为 `symbol.ge`，两者结果类型均为 `i1`；其余 symbol 比较操作符必须报错 `Unsupported symbol compare op`。
 - DMA helper 的公开 lowering 约束如下：
   - `alloc(...)`：lowering 为 `dma.alloc`，返回新的 memory value。
   - `copy(...)`：lowering 为 `dma.copy`，返回目标 memory value。
@@ -121,7 +122,7 @@ value = emit_mlir(expr_ast, ctx)
 
 - `ConstAST`：生成常量或等价字面量 op/value。
 - `BinaryExprAST(add/sub/mul/div/floordiv)`：生成对应的二元算术 op。
-- `CompareExprAST(eq/ne/lt/le/gt/ge)`：生成对应的比较 op。
+- `CompareExprAST(eq/ne/lt/le/gt/ge)`：在 memory 路径生成对应 `nn` 比较 op；在 symbol 路径仅支持 `eq/ge`，分别生成 `symbol.eq/symbol.ge`。
 - `LoadAST`：生成张量读取相关 op/value；当携带 `sizes` 时发射 `dma.slice`。
 - `StoreAST`：生成张量写入相关 op；当携带 `sizes` 时发射 `dma.deslice`。
 - `CallAST(alloc/copy/cast/view/reshape/flatten)`：生成对应 DMA memory 结果。
@@ -165,3 +166,4 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-021：`free(...)` 作为无返回值语句执行，不产生新的 SSA 结果。（`test_emit_mlir_dma_free_statement`）
   - EMIT-022：`ArchQueryAST(query_name="get_block_id")` lowering 为单个 `arch.get_block_id`，并返回 `!symbol.int<"block_id">`。（`test_emit_mlir_lowers_arch_get_block_id_query`）
   - EMIT-023：`ArchQueryAST(query_name="get_block_num")` lowering 为单个 `arch.get_block_num`，并返回 `!symbol.int<"block_num">`。（`test_emit_mlir_lowers_arch_get_block_num_query`）
+  - EMIT-024：纯 symbol 标量 `>=` 比较在 emit 阶段 lowering 为 `symbol.ge` 且结果为 `i1`；对 symbol 路径中除 `eq/ge` 以外的比较操作符报错 `Unsupported symbol compare op`。（`test_emit_mlir_infer_expr_type_branches`、`test_emit_mlir_lower_expr_unknown_and_symbol_errors`、`test_emit_mlir_lowers_symbol_ge`）
