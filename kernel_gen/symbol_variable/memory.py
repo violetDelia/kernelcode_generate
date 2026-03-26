@@ -150,7 +150,6 @@ class Memory:
         self.stride = self._default_stride(self.shape) if stride is None else self._normalize_stride(stride)
         self.format = format
         self.space = space
-        self._is_predicate = False
 
     @staticmethod
     def _normalize_shape(value: ShapeLike) -> SymbolShape:

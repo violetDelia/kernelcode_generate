@@ -33,8 +33,6 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
 _REJECT_EXTERNAL_VALUES_ENV_KEY = "__dsl_reject_external_values__"
-_ALLOW_EXTERNAL_CONST_ENV_KEY = "__dsl_allow_external_const__"
-_ALLOW_EXTERNAL_VALUES_ENV_KEY = "__dsl_allow_external_values__"
 
 
 @dataclass(frozen=True)
@@ -640,6 +638,7 @@ class _ParseFailure(Exception):
 
 
 _DTYPE_MAP: dict[str, NumericType] = {
+    "i1": NumericType.Bool,
     "f16": NumericType.Float16,
     "float16": NumericType.Float16,
     "bf16": NumericType.BFloat16,
@@ -656,8 +655,6 @@ _DTYPE_MAP: dict[str, NumericType] = {
     "int32": NumericType.Int32,
     "i64": NumericType.Int64,
     "int64": NumericType.Int64,
-    "i1": NumericType.Bool,
-    "bool": NumericType.Bool,
     "u8": NumericType.Uint8,
     "uint8": NumericType.Uint8,
     "u16": NumericType.Uint16,
@@ -666,6 +663,7 @@ _DTYPE_MAP: dict[str, NumericType] = {
     "uint32": NumericType.Uint32,
     "u64": NumericType.Uint64,
     "uint64": NumericType.Uint64,
+    "bool": NumericType.Bool,
 }
 
 _BIN_OP_MAP: dict[type, str] = {
@@ -881,7 +879,7 @@ def _annotation_from_text(
     最后一次更改: OpenAI
 
     功能说明:
-    - 支持 `int`、`bool`、`SymbolDim` 与 `Tensor[...]` 四类公开注解文本。
+    - 支持 `int`、`bool` 与 `Tensor[...]` 三类公开注解文本。
 
     使用示例:
     - _annotation_from_text("Tensor[f32, 4]", "A", node)
@@ -897,8 +895,6 @@ def _annotation_from_text(
         return ScalarArgAST(name=arg_name or "ret0", value_type=int, location=location)
     if text.strip() == "bool":
         return ScalarArgAST(name=arg_name or "ret0", value_type=bool, location=location)
-    if text.strip() == "SymbolDim":
-        return ScalarArgAST(name=arg_name or "ret0", value_type=int, is_symbolic=True, location=location)
     dtype, dims = _split_tensor_annotation(text, node)
     memory = Memory(dims, dtype)
     return TensorAST(name=arg_name or "ret0", memory=memory, location=location)
@@ -967,21 +963,6 @@ def _parse_annotation_node(
             return ScalarArgAST(name=arg_name or "ret0", value_type=int, location=_location_from_node(node))
         if node.id == "bool":
             return ScalarArgAST(name=arg_name or "ret0", value_type=bool, location=_location_from_node(node))
-        if node.id == "SymbolDim":
-            symbol_name = arg_name or "ret0"
-            if (
-                runtime_table is not None
-                and arg_name is not None
-                and arg_name in runtime_table
-                and isinstance(runtime_table[arg_name], SymbolDim)
-            ):
-                symbol_name = str(runtime_table[arg_name].get_symbol())
-            return ScalarArgAST(
-                name=symbol_name,
-                value_type=int,
-                is_symbolic=True,
-                location=_location_from_node(node),
-            )
         if node.id in globals_table and isinstance(globals_table[node.id], Memory):
             memory = globals_table[node.id]
             return TensorAST(name=arg_name or node.id, memory=memory, location=_location_from_node(node))
@@ -1231,13 +1212,9 @@ def _parse_store_like_call(
     tensor = _parse_expr(expr.args[1], env, globals_table, builtins_table)
     if not isinstance(tensor, TensorAST):
         _raise_parse_error(f"{call_name} target must be TensorAST", expr.args[1])
-    allow_const_env = dict(env)
-    allow_const_env[_ALLOW_EXTERNAL_CONST_ENV_KEY] = True
-    offsets = _parse_expr(expr.args[2], allow_const_env, globals_table, builtins_table)
-    sizes = _parse_expr(expr.args[3], allow_const_env, globals_table, builtins_table)
-    stride = (
-        _parse_expr(expr.args[4], allow_const_env, globals_table, builtins_table) if len(expr.args) >= 5 else None
-    )
+    offsets = _parse_expr(expr.args[2], env, globals_table, builtins_table)
+    sizes = _parse_expr(expr.args[3], env, globals_table, builtins_table)
+    stride = _parse_expr(expr.args[4], env, globals_table, builtins_table) if len(expr.args) >= 5 else None
     if call_name == "deslice" and len(expr.args) == 6:
         extra_space = _parse_expr(expr.args[5], env, globals_table, builtins_table)
         if not isinstance(extra_space, MemorySpace):
@@ -1372,9 +1349,9 @@ def _parse_dma_call(
         if len(expr.args) != 4 or expr.keywords:
             _raise_parse_error("Unsupported view arity", expr)
         source = _parse_expr(expr.args[0], env, globals_table, builtins_table)
-        offset = _parse_expr_allow_external(expr.args[1], env, globals_table, builtins_table)
-        size = _parse_expr_allow_external(expr.args[2], env, globals_table, builtins_table)
-        stride = _parse_expr_allow_external(expr.args[3], env, globals_table, builtins_table)
+        offset = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+        size = _parse_expr(expr.args[2], env, globals_table, builtins_table)
+        stride = _parse_expr(expr.args[3], env, globals_table, builtins_table)
         return DmaViewAST(
             source=source,
             offset=offset,
@@ -1387,15 +1364,7 @@ def _parse_dma_call(
         if len(expr.args) != 2 or expr.keywords:
             _raise_parse_error("Unsupported reshape arity", expr)
         source = _parse_expr(expr.args[0], env, globals_table, builtins_table)
-        previous_allow_external = env.get(_ALLOW_EXTERNAL_CONST_ENV_KEY, False)
-        env[_ALLOW_EXTERNAL_CONST_ENV_KEY] = True
-        try:
-            shape = _parse_expr(expr.args[1], env, globals_table, builtins_table)
-        finally:
-            if previous_allow_external:
-                env[_ALLOW_EXTERNAL_CONST_ENV_KEY] = True
-            else:
-                env.pop(_ALLOW_EXTERNAL_CONST_ENV_KEY, None)
+        shape = _parse_expr(expr.args[1], env, globals_table, builtins_table)
         return DmaReshapeAST(source=source, shape=shape, location=_location_from_node(expr))
 
     if call_name == "flatten":
@@ -1446,16 +1415,7 @@ def _parse_expr(
             return env[expr.id]
         value = _lookup_python_name(expr.id, globals_table, builtins_table)
         if value is not None and bool(env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)):
-            allow_external_values = bool(env.get(_ALLOW_EXTERNAL_VALUES_ENV_KEY, False))
-            allow_external_const = bool(env.get(_ALLOW_EXTERNAL_CONST_ENV_KEY, False))
-            if allow_external_values:
-                if not isinstance(value, (int, float, str, SymbolDim)):
-                    _raise_parse_error("cannot use external value inside function body", expr)
-            elif allow_external_const:
-                if not isinstance(value, (int, float, str)):
-                    _raise_parse_error("cannot use external value inside function body", expr)
-            else:
-                _raise_parse_error("cannot use external value inside function body", expr)
+            _raise_parse_error("cannot use external value inside function body", expr)
         if isinstance(value, Memory):
             return TensorAST(name=expr.id, memory=value, location=_location_from_node(expr))
         if isinstance(value, SymbolDim):
@@ -1480,16 +1440,7 @@ def _parse_expr(
     if isinstance(expr, py_ast.Attribute):
         value = _parse_attribute_object(expr, globals_table, builtins_table)
         if bool(env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)) and not _is_allowed_attribute_value(value):
-            allow_external_values = bool(env.get(_ALLOW_EXTERNAL_VALUES_ENV_KEY, False))
-            allow_external_const = bool(env.get(_ALLOW_EXTERNAL_CONST_ENV_KEY, False))
-            if allow_external_values:
-                if not isinstance(value, (int, float, str, SymbolDim)):
-                    _raise_parse_error("cannot use external value inside function body", expr)
-            elif allow_external_const:
-                if not isinstance(value, (int, float, str)):
-                    _raise_parse_error("cannot use external value inside function body", expr)
-            else:
-                _raise_parse_error("cannot use external value inside function body", expr)
+            _raise_parse_error("cannot use external value inside function body", expr)
         return value
 
     if isinstance(expr, py_ast.Call):
@@ -1520,17 +1471,6 @@ def _parse_expr(
 
     _raise_parse_error("Unsupported expression", expr)
     return expr
-
-
-def _parse_expr_allow_external(
-    expr: object,
-    env: dict[str, object],
-    globals_table: dict[str, object],
-    builtins_table: dict[str, object],
-) -> object:
-    allow_env = dict(env)
-    allow_env[_ALLOW_EXTERNAL_VALUES_ENV_KEY] = True
-    return _parse_expr(expr, allow_env, globals_table, builtins_table)
 
 
 def _parse_for(
