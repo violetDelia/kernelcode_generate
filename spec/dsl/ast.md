@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`金铲铲大作战`
+- 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/dsl/ast.md`](../../spec/dsl/ast.md)
 - `功能实现`：[`kernel_gen/dsl/ast.py`](../../kernel_gen/dsl/ast.py)
 - `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
@@ -41,6 +41,7 @@
 - 显式 `-> None` 返回注解表示函数无公开返回值；该场景允许函数体只包含语句且省略 `return`。
 - DSL 解析入口当前仅将无参 `get_block_id()` / `get_block_num()` / `get_subthread_id()` / `get_subthread_num()` / `get_thread_id()` 识别为 `arch` 查询 builtin，并解析为专用 `ArchQueryAST` 节点。
 - `view(src, offset, size, stride)` 仅允许四个位置参数且不接受关键字参数；否则必须报错 `Unsupported view arity`。
+- `nn.add(...)` 作为 `nn` 算术 helper 入口时仅允许两个位置参数，并等价解析为 `BinaryExprAST(op="add")`；参数个数不合法时必须返回 `Unsupported nn arithmetic arity` 诊断。
 
 ## 公开接口
 
@@ -451,6 +452,8 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
 - 测试目标：
   - 覆盖 `parse_function(...)` 的源码解析与 AST 构建。
   - 覆盖 AST 节点字段与诊断信息的构造。
+  - 覆盖 `nn.add(lhs, rhs)` 作为 `BinaryExprAST(op="add")` 的最小解析入口。
+  - 覆盖 `nn.add(...)` 的非法参数个数在 AST 解析阶段被拒绝，并返回固定诊断文案 `Unsupported nn arithmetic arity`。
   - 覆盖 `get_block_id()` 解析为 `ArchQueryAST` 的最小 arch 查询入口。
   - 覆盖 `get_block_id()` 的非法参数在 AST 解析阶段被拒绝。
   - 覆盖 `get_block_num()` 解析为 `ArchQueryAST` 的最小 arch 查询入口。
@@ -472,6 +475,7 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
   - AST-009：未注解 SymbolDim 参数可按标量参数解析。（`test_parse_function_infers_symboldim_arguments_without_annotations`）
   - AST-010：不支持语法返回诊断。（`test_unsupported_syntax_reports_diagnostics`）
   - AST-011：未注解的 float runtime 参数仍视为缺失注解并返回 `Missing annotation` 诊断。（`test_parse_function_rejects_float_runtime_arguments_without_annotations`）
+  - AST-012A：`nn.add(lhs, rhs)` 必须解析为 `BinaryExprAST(op="add")` 并进入后续 lowering 链路。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
   - AST-012：`nn` 算术 helper 的非法参数个数必须返回 `Unsupported nn arithmetic arity` 诊断。（`test_parse_function_rejects_unsupported_nn_arithmetic_arity_variants`）
   - AST-013：支持 `bool/float` 返回注解、`JoinedStr` 张量注解，以及 `float(...)`、`get_shape()[axis]`、`get_stride()[axis]` 等最小 symbol 查询/转换表达式解析。（`test_ast_parse_function_supports_symbol_scalar_and_joinedstr_annotations`）
   - AST-014：`slice` helper 的非法参数个数、非法 source 与非法 space 必须返回对应诊断。（`test_parse_function_rejects_invalid_slice_helper_variants`）

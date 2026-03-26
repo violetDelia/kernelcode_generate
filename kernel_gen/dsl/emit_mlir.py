@@ -1,7 +1,7 @@
 """AST emit utilities for DSL nodes.
 
 创建者: 小李飞刀
-最后一次更改: 我不是牛马
+最后一次更改: 摸鱼小分队
 
 功能说明:
 - 提供 AST 节点到 MLIR SSA value/op 的发射入口。
@@ -117,6 +117,11 @@ _MEMORY_SPACE_MAP = {
     MemorySpace.LM: "local",
     MemorySpace.TSM: "shared",
     MemorySpace.TLM: "local",
+}
+_NN_ADD_PROMOTION_RANK = {
+    "i32": 4,
+    "f16": 8,
+    "f32": 10,
 }
 
 
@@ -587,13 +592,109 @@ def _build_broadcast_stride(shape: Sequence[Attribute]) -> list[Attribute]:
     return _build_default_stride_attrs(shape)
 
 
+def _nn_add_element_type_key(element_type: Attribute, location: SourceLocation | None) -> str:
+    if element_type == i32:
+        return "i32"
+    if isinstance(element_type, Float16Type):
+        return "f16"
+    if element_type == f32:
+        return "f32"
+    raise _LoweringError("Unsupported dtype for nn.add", location=location)
+
+
+def _resolve_nn_add_element_type(
+    lhs_element_type: Attribute,
+    rhs_element_type: Attribute,
+    location: SourceLocation | None,
+) -> Attribute:
+    lhs_key = _nn_add_element_type_key(lhs_element_type, location)
+    rhs_key = _nn_add_element_type_key(rhs_element_type, location)
+    lhs_rank = _NN_ADD_PROMOTION_RANK[lhs_key]
+    rhs_rank = _NN_ADD_PROMOTION_RANK[rhs_key]
+    return lhs_element_type if lhs_rank >= rhs_rank else rhs_element_type
+
+
+def _cast_memory_value(
+    value: SSAValue,
+    source_type: NnMemoryType,
+    target_element_type: Attribute,
+    ctx: EmitContext,
+) -> SSAValue:
+    if source_type.element_type == target_element_type:
+        return value
+    cast_result_type = _memory_type_from_parts(
+        source_type.shape.data,
+        source_type.stride.data,
+        target_element_type,
+        source_type.space,
+    )
+    cast_op = DmaCastOp(value, cast_result_type)
+    ctx.builder.add_op(cast_op)
+    return cast_op.result
+
+
+def _broadcast_memory_value(
+    value: SSAValue,
+    source_type: NnMemoryType,
+    target_type: NnMemoryType,
+    ctx: EmitContext,
+) -> SSAValue:
+    if source_type == target_type:
+        return value
+    broadcast_op = NnBroadcastOp(value, target_type, target_type.space)
+    ctx.builder.add_op(broadcast_op)
+    return broadcast_op.result
+
+
+def _align_binary_memory_operands(
+    lhs: SSAValue,
+    rhs: SSAValue,
+    lhs_type: NnMemoryType,
+    rhs_type: NnMemoryType,
+    *,
+    allow_element_promotion: bool,
+    ctx: EmitContext,
+    location: SourceLocation | None,
+) -> tuple[SSAValue, SSAValue, NnMemoryType]:
+    target_type = _infer_broadcast_memory_type(
+        lhs_type,
+        rhs_type,
+        location,
+        allow_element_promotion=allow_element_promotion,
+    )
+    lhs = _cast_memory_value(lhs, lhs_type, target_type.element_type, ctx)
+    rhs = _cast_memory_value(rhs, rhs_type, target_type.element_type, ctx)
+    lhs_cast_type = _memory_type_from_parts(
+        lhs_type.shape.data,
+        lhs_type.stride.data,
+        target_type.element_type,
+        lhs_type.space,
+    )
+    rhs_cast_type = _memory_type_from_parts(
+        rhs_type.shape.data,
+        rhs_type.stride.data,
+        target_type.element_type,
+        rhs_type.space,
+    )
+    lhs = _broadcast_memory_value(lhs, lhs_cast_type, target_type, ctx)
+    rhs = _broadcast_memory_value(rhs, rhs_cast_type, target_type, ctx)
+    return lhs, rhs, target_type
+
+
 def _infer_broadcast_memory_type(
     lhs_type: NnMemoryType,
     rhs_type: NnMemoryType,
     location: SourceLocation | None,
+    *,
+    allow_element_promotion: bool = False,
 ) -> NnMemoryType:
     if lhs_type.element_type != rhs_type.element_type:
-        raise _LoweringError("Binary op operands must have the same element_type", location=location)
+        if allow_element_promotion:
+            element_type = _resolve_nn_add_element_type(lhs_type.element_type, rhs_type.element_type, location)
+        else:
+            raise _LoweringError("Binary op operands must have the same element_type", location=location)
+    else:
+        element_type = lhs_type.element_type
     if lhs_type.space != rhs_type.space:
         raise _LoweringError("Binary op operands must have the same space", location=location)
     target_shape = _infer_broadcast_shape(lhs_type.shape.data, rhs_type.shape.data, location)
@@ -601,7 +702,7 @@ def _infer_broadcast_memory_type(
     return NnMemoryType(
         ArrayAttr(list(target_shape)),
         ArrayAttr(list(target_stride)),
-        lhs_type.element_type,
+        element_type,
         lhs_type.space,
     )
 
@@ -816,7 +917,12 @@ def _infer_expr_type(
         if lhs_type == rhs_type:
             type_map[expr_key] = lhs_type
             return lhs_type
-        target_type = _infer_broadcast_memory_type(lhs_type, rhs_type, expr.location)
+        target_type = _infer_broadcast_memory_type(
+            lhs_type,
+            rhs_type,
+            expr.location,
+            allow_element_promotion=expr.op == "add",
+        )
         type_map[expr_key] = target_type
         return target_type
 
@@ -1020,16 +1126,15 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         lhs_type = _expect_memory_value(lhs, expr.location)
         rhs_type = _expect_memory_value(rhs, expr.location)
         if lhs_type != rhs_type:
-            target_type = _infer_broadcast_memory_type(lhs_type, rhs_type, expr.location)
-            if lhs_type != target_type:
-                broadcast_op = NnBroadcastOp(lhs, target_type, target_type.space)
-                ctx.builder.add_op(broadcast_op)
-                lhs = broadcast_op.result
-            if rhs_type != target_type:
-                broadcast_op = NnBroadcastOp(rhs, target_type, target_type.space)
-                ctx.builder.add_op(broadcast_op)
-                rhs = broadcast_op.result
-            lhs_type = target_type
+            lhs, rhs, lhs_type = _align_binary_memory_operands(
+                lhs,
+                rhs,
+                lhs_type,
+                rhs_type,
+                allow_element_promotion=expr.op == "add",
+                ctx=ctx,
+                location=expr.location,
+            )
         op_map = {"add": NnAddOp, "sub": NnSubOp, "mul": NnMulOp, "div": NnTrueDivOp}
         if expr.op not in op_map:
             raise _LoweringError(f"Unsupported binary op: {expr.op}", location=expr.location)

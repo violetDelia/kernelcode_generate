@@ -1,7 +1,7 @@
 """AST visitor tests.
 
 创建者: 小李飞刀
-最后一次更改: 我不是牛马
+最后一次更改: 摸鱼小分队
 
 功能说明:
 - 覆盖 AST 前端、nn dialect IR 与 MLIR 文本入口的回归测试。
@@ -3604,6 +3604,67 @@ def test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics() -> None
         build_func_op(add, _tensor_arg(["A", "B"]), _tensor_arg(["A", "C"]))
     assert exc_info.value.location is not None
 
+
+# MGEN-032C
+# 创建者: 摸鱼小分队
+# 最后一次更改: 摸鱼小分队
+# 最近一次运行测试时间: 2026-03-27 02:20:00 +0800
+# 最近一次运行成功时间: 2026-03-27 02:20:00 +0800
+# 功能说明: 验证 build_func_op 在 nn.add dtype 不一致时插入 dma.cast 后再发射 nn.add。
+# 测试目的: 锁定 nn.add memory add 的 dtype promotion lowering 链路与返回类型。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_lowers_nn_add_with_dtype_promotion
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_lowers_nn_add_with_dtype_promotion() -> None:
+    def add_promote(
+        lhs: "Tensor[f32, 2, 3]",
+        rhs: "Tensor[i32, 2, 3]",
+    ) -> "Tensor[i32, 2, 3]":
+        return nn.add(lhs, rhs)
+
+    lhs_memory = Memory([2, 3], NumericType.Float32)
+    rhs_memory = Memory([2, 3], NumericType.Int32)
+    func_op = build_func_op(add_promote, lhs_memory, rhs_memory)
+    ops = list(func_op.body.block.ops)
+    cast_ops = [op for op in ops if isinstance(op, DmaCastOp)]
+    add_ops = [op for op in ops if isinstance(op, NnAddOp)]
+    return_ops = [op for op in ops if isinstance(op, func.ReturnOp)]
+    broadcast_ops = [op for op in ops if isinstance(op, NnBroadcastOp)]
+
+    assert len(cast_ops) == 1
+    assert len(add_ops) == 1
+    assert len(return_ops) == 1
+    assert len(broadcast_ops) == 0
+    assert cast_ops[0].result.type.element_type == f32
+    assert add_ops[0].result.type.element_type == f32
+    assert return_ops[0].arguments[0].type.element_type == f32
+    assert add_ops[0].lhs is cast_ops[0].result or add_ops[0].rhs is cast_ops[0].result
+
+
+# MGEN-032D
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-27 12:10:00 +0800
+# 最近一次运行成功时间: 2026-03-27 12:10:00 +0800
+# 功能说明: 验证 nn.add 在同 dtype 下不允许返回注解 element_type 不匹配。
+# 测试目的: 防止 dtype promotion 容忍逻辑误放大。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_nn_add_return_annotation_mismatch_without_promotion
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_rejects_nn_add_return_annotation_mismatch_without_promotion() -> None:
+    def add_bad(
+        lhs: "Tensor[f32, 2, 3]",
+        rhs: "Tensor[f32, 2, 3]",
+    ) -> "Tensor[i32, 2, 3]":
+        return nn.add(lhs, rhs)
+
+    lhs_memory = Memory([2, 3], NumericType.Float32)
+    rhs_memory = Memory([2, 3], NumericType.Float32)
+    with pytest.raises(AstVisitorError, match="Return type does not match annotation"):
+        build_func_op(add_bad, lhs_memory, rhs_memory)
+
 # AST-009
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
@@ -3987,6 +4048,50 @@ def test_emit_mlir_lower_expr_branches() -> None:
 
     with pytest.raises(_LoweringError, match="Unknown input reference"):
         _lookup_symbol(VarAST("missing"), EmitContext(builder=block, symbols={}, types={}))
+
+
+# EMIT-026C
+# 创建者: 摸鱼小分队
+# 最后一次更改: 摸鱼小分队
+# 最近一次运行测试时间: 2026-03-27 02:20:00 +0800
+# 最近一次运行成功时间: 2026-03-27 02:20:00 +0800
+# 功能说明: 验证 emit_mlir 在 memory add dtype 不一致时插入 dma.cast 再发射 nn.add。
+# 测试目的: 锁定 BinaryExprAST(op="add") 的 dtype promotion 与 op 序列。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_nn_add_promotes_dtype_with_dma_cast
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_nn_add_promotes_dtype_with_dma_cast() -> None:
+    lhs_memory = Memory([2, 3], NumericType.Float32)
+    rhs_memory = Memory([2, 3], NumericType.Int32)
+    lhs = TensorAST(name="lhs", memory=lhs_memory, location=None)
+    rhs = TensorAST(name="rhs", memory=rhs_memory, location=None)
+    lhs_type = _memory_to_nn_type(lhs_memory)
+    rhs_type = _memory_to_nn_type(rhs_memory)
+    block = Block(arg_types=[lhs_type, rhs_type])
+    ctx = EmitContext(
+        builder=block,
+        symbols={"lhs": block.args[0], "rhs": block.args[1]},
+        types={},
+    )
+    ctx._set_cache(_expr_key(lhs), block.args[0])
+    ctx._set_cache(_expr_key(rhs), block.args[1])
+    ctx.types[_expr_key(lhs)] = lhs_type
+    ctx.types[_expr_key(rhs)] = rhs_type
+
+    result = emit_node_mlir(BinaryExprAST(op="add", lhs=lhs, rhs=rhs), ctx)
+    ops = list(block.ops)
+    cast_ops = [op for op in ops if isinstance(op, DmaCastOp)]
+    add_ops = [op for op in ops if isinstance(op, NnAddOp)]
+    broadcast_ops = [op for op in ops if isinstance(op, NnBroadcastOp)]
+
+    assert len(cast_ops) == 1
+    assert len(add_ops) == 1
+    assert len(broadcast_ops) == 0
+    assert result is add_ops[0].result
+    assert cast_ops[0].result.type.element_type == f32
+    assert add_ops[0].result.type.element_type == f32
+    assert add_ops[0].lhs is cast_ops[0].result or add_ops[0].rhs is cast_ops[0].result
 
 
 # EMIT-022

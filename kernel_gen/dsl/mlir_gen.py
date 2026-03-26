@@ -33,6 +33,7 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 from .ast import (
     AstParseError,
+    BinaryExprAST,
     ConstAST,
     DmaAllocAST,
     DmaFreeAST,
@@ -199,7 +200,12 @@ def _parse_function_with_env(
         raise AstParseError(exc.message, diagnostics) from exc
 
 
-def _validate_return_type(func_ast: FunctionAST, result_type: object) -> None:
+def _validate_return_type(
+    func_ast: FunctionAST,
+    result_type: object,
+    *,
+    allow_element_type_mismatch: bool = False,
+) -> None:
     if not func_ast.outputs:
         return
     if len(func_ast.outputs) != 1:
@@ -210,7 +216,9 @@ def _validate_return_type(func_ast: FunctionAST, result_type: object) -> None:
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("Return type does not match annotation", location=func_ast.location)
         # Tensor 注解只公开约束 shape 与 element_type；DMA helper 允许返回不同的 space/stride。
-        if result_type.shape != expected_type.shape or result_type.element_type != expected_type.element_type:
+        if result_type.shape != expected_type.shape:
+            raise _LoweringError("Return type does not match annotation", location=func_ast.location)
+        if not allow_element_type_mismatch and result_type.element_type != expected_type.element_type:
             raise _LoweringError("Return type does not match annotation", location=func_ast.location)
         return
     elif isinstance(output, ScalarArgAST):
@@ -231,6 +239,16 @@ def _validate_return_type(func_ast: FunctionAST, result_type: object) -> None:
         raise _LoweringError("Unsupported return annotation type", location=getattr(output, "location", None))
     if result_type != expected_type:
         raise _LoweringError("Return type does not match annotation", location=func_ast.location)
+
+
+def _allow_add_element_type_mismatch(expr: BinaryExprAST, type_map: dict[int, object]) -> bool:
+    if expr.op != "add":
+        return False
+    lhs_type = _infer_expr_type(expr.lhs, dict(type_map))
+    rhs_type = _infer_expr_type(expr.rhs, dict(type_map))
+    if isinstance(lhs_type, NnMemoryType) and isinstance(rhs_type, NnMemoryType):
+        return lhs_type.element_type != rhs_type.element_type
+    return False
 
 
 def build_func_op(
@@ -319,7 +337,10 @@ def _build_func_op_from_ast_impl(
             result_type = _build_dma_alloc_only_result_type(func_ast, return_expr, runtime_args)
         else:
             result_type = _infer_expr_type(return_expr, dict(type_map), runtime_values)
-        _validate_return_type(func_ast, result_type)
+        allow_element_type_mismatch = False
+        if isinstance(return_expr, BinaryExprAST) and isinstance(result_type, NnMemoryType):
+            allow_element_type_mismatch = _allow_add_element_type_mismatch(return_expr, type_map)
+        _validate_return_type(func_ast, result_type, allow_element_type_mismatch=allow_element_type_mismatch)
         type_map[_expr_key(return_expr)] = result_type
         result_types = [result_type]
     elif _is_symbol_scalar_function(func_ast):

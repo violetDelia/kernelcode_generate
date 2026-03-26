@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`金铲铲大作战`
+- 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
 - `功能实现`：[`kernel_gen/dsl/mlir_gen.py`](../../kernel_gen/dsl/mlir_gen.py)
 - `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
@@ -52,6 +52,7 @@
 - DSL 函数体内允许出现 `alloc`、`copy`、`cast`、`view`、`reshape`、`flatten`、`free`、`load`、`store`、`slice`、`deslice` 这组 DMA helper 调用；其公开语义由 `emit_mlir` 负责落实到具体 lowering。
 - `view(src, offset, size, stride)` 仅允许四个位置参数且不接受关键字参数；否则必须报错 `Unsupported view arity`。
 - 当 `view(...)` 的 source 无法解析为 `nn.memory` 类型时，`build_func_op` 必须报错 `view source must have nn.memory type`。
+- 当函数体以 `x + y` 或 `nn.add(x, y)` 表达 memory 加法时，必须走同一 `BinaryExprAST(op="add")` lowering 链路；该链路允许 implicit broadcast 与 dtype 对齐（必要时插入 `dma.cast`），并在不可 broadcast 时报错 `Implicit broadcast dimension mismatch`。
 - 当函数体仅返回 `alloc(...)` 且没有 tensor 输入时，允许仅依赖标量 `runtime_args` 构建签名与结果类型；`alloc` 结果类型需由 `shape`/`stride`/`dtype`/`space` 与 `runtime_args` 共同决定，且显式 `stride` 必须与默认连续布局一致，否则必须报错。
 - `flatten(x)` 在 DSL 公开契约中视为一维重排 helper，要求保留元素总数并输出一维 memory 结果；不要求存在独立的 dialect op。
 - `free(x)` 在 DSL 公开契约中是语句型 helper，不产生新的 SSA 返回值，也不能作为函数返回值直接 lowering 为独立结果。
@@ -189,6 +190,9 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - 验证负数 Python `int` 实参不会导致 lowering 失败；负值的 `SymbolValueType.__str__` 必须保持 `symbol.int<-3>` 这类十进制负数字面量口径，且 `get_value()` 可还原原始负数值。
   - 验证 `LoopRange + slice/deslice` 场景生成 `symbol.for + dma.slice/dma.deslice`，且循环相关 lowering 不生成 `arith.index_cast`。
   - 验证 Tensor 注解可接受普通字符串字面量与可静态归一化的 `f"Tensor[...]"` 两种源码形式，并在归一化失败时报错。
+  - 验证 memory 加法在 `x + y` 与 `nn.add(x, y)` 两种入口下共享同一 lowering 契约，并支持 implicit broadcast。
+  - 验证 memory 加法在不可 broadcast 时保持 `Implicit broadcast dimension mismatch` 错误口径。
+  - 验证 memory 加法在 element type 不一致时会通过 `dma.cast` 完成 dtype 对齐。
   - 验证 DMA helper 调用在 `build_func_op(...)` 链路中被识别为受支持 DSL 公开能力：`alloc/copy/cast/view/reshape/flatten` 作为返回值表达式参与 lowering，`free` 作为无返回值语句参与 lowering，`load/store/slice/deslice` 维持 memory 读写语义。
   - 验证 `free(...)` 在非法参数个数、非 memory source 与表达式上下文时的错误路径。
   - 验证 alloc-only helper 场景在运行时参数、显式 stride 与非法 dtype/space 输入时的返回类型与错误路径。
@@ -241,6 +245,9 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - MGEN-030：纯 symbol 标量 `>=` 比较 lowering 为 `symbol.ge`，返回类型为 `i1`；`const/const` 与 `symbol/symbol` 两类输入下均应保持 `SymbolValueType` 输入签名，并覆盖 `return a >= b` 与 `c = a >= b; return c` 两种函数体形态。（`test_build_func_op_lowers_symbol_ge`）
   - MGEN-031：零入参函数直接返回 `get_subthread_id()` 时，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须生成零参数 `func.func`、单个 `arch.get_subthread_id`，并返回 `!symbol.int<"subthread_id">`。（`test_build_func_op_lowers_arch_get_subthread_id_query`）
   - MGEN-032：零入参函数直接返回 `get_thread_id()` 时，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须生成零参数 `func.func`、单个 `arch.get_thread_id`，并返回 `!symbol.int<"thread_id">`。（`test_build_func_op_lowers_arch_get_thread_id_query`）
+  - MGEN-032A：memory 加法在 `x + y` 与 `nn.add(x, y)` 两种入口下必须共享 `BinaryExprAST(op="add")` lowering 语义，并支持 implicit broadcast。（`test_tensor_binary_implicit_broadcast_lowering`、`test_tensor_binary_prepend_broadcast_lowering`）
+  - MGEN-032B：memory 加法在不可 broadcast 时，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须报错 `Implicit broadcast dimension mismatch` 并保留定位信息。（`test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics`）
+  - MGEN-032C：memory 加法在 element type 不一致时，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须通过 `dma.cast` 对齐 dtype 后再发射 `nn.add`。（`test_build_func_op_lowers_nn_add_with_dtype_promotion`）
   - MGEN-033：`free(...)` 的非法参数个数必须报错 `Unsupported free arity`。（`test_build_func_op_rejects_dma_free_invalid_arity`）
   - MGEN-034：`free(...)` 的 source 非 memory 时必须报错。（`test_build_func_op_rejects_dma_free_with_non_memory_source`）
   - MGEN-035：`free(...)` 作为表达式上下文使用时必须报错。（`test_build_func_op_rejects_dma_free_expression_context`）

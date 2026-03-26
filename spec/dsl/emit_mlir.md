@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`金铲铲大作战`
+- 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)
 - `功能实现`：[`kernel_gen/dsl/emit_mlir.py`](../../kernel_gen/dsl/emit_mlir.py)
 - `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
@@ -40,6 +40,7 @@
 - 在上述 `LoopRange` 场景中，循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand 必须直接复用 `!symbol.int<"expr">` value，不得插入 `arith.index_cast`；若循环变量 `it` 退化为 `index`、普通整数或浮点类型，应视为 lowering 违规。
 - 当 DSL AST 表达 `alloc`、`copy`、`cast`、`view`、`reshape`、`flatten`、`load`、`store`、`slice`、`deslice` 这组 DMA helper 调用时，`emit_mlir` 必须按对应 memory 语义 lowering；其中 `flatten` 公开上视为一维 `reshape` 语义，不要求生成独立 dialect op。
 - `view(...)` 的 source 必须为 `nn.memory` 类型；否则必须报错 `view source must have nn.memory type`。
+- `BinaryExprAST(op="add")`（包括由 `nn.add(lhs, rhs)` 解析得到的等价节点）在 memory 路径必须 lowering 为 `nn.add`；若 shape 无法隐式 broadcast，必须报错 `Implicit broadcast dimension mismatch`。
 - `free` 必须作为语句型 helper 处理，不产生新的 SSA 结果，也不承诺生成独立的 `dma.free` op；其 source 必须为 memory，且不得出现在表达式上下文。
 - `ArchQueryAST(query_name="get_block_id")` 必须 lowering 为单个 `arch.get_block_id`，并保持结果类型为 `!symbol.int<"block_id">`。
 - `ArchQueryAST(query_name="get_block_num")` 必须 lowering 为单个 `arch.get_block_num`，并保持结果类型为 `!symbol.int<"block_num">`。
@@ -126,7 +127,7 @@ value = emit_mlir(expr_ast, ctx)
 节点映射示例：
 
 - `ConstAST`：生成常量或等价字面量 op/value。
-- `BinaryExprAST(add/sub/mul/div/floordiv)`：生成对应的二元算术 op。
+- `BinaryExprAST(add/sub/mul/div/floordiv)`：生成对应的二元算术 op；其中 memory 路径的 `add` 支持隐式 broadcast，并在需要时通过 `dma.cast` 对齐 element type 后再发射 `nn.add`。
 - `CompareExprAST(eq/ne/lt/le/gt/ge)`：在 memory 路径生成对应 `nn` 比较 op（返回 `i1` element_type），必要时隐式 broadcast；在 symbol 路径仅支持 `eq/ge`，分别生成 `symbol.eq/symbol.ge`。
 - `LoadAST`：生成张量读取相关 op/value；当携带 `sizes` 时发射 `dma.slice`。
 - `StoreAST`：生成张量写入相关 op；当携带 `sizes` 时发射 `dma.deslice`。
@@ -145,6 +146,8 @@ value = emit_mlir(expr_ast, ctx)
 - 执行命令：`pytest -q test/dsl/test_ast_visitor.py`
 - 测试目标：
   - 覆盖常见表达式与语句节点的发射结果。
+  - 覆盖 memory 路径 `BinaryExprAST(op="add")`（含 `nn.add` 等价入口）的 implicit broadcast lowering。
+  - 覆盖 memory 路径 `BinaryExprAST(op="add")` 的 broadcast mismatch 错误路径，并保持 `Implicit broadcast dimension mismatch` 诊断口径。
   - 覆盖 `LoopRange` -> `symbol.for` 与 `it`/DMA operand 直接保持 `symbol.int` 的发射规则。
   - 覆盖 DMA helper 调用的 lowering 结果与语句/表达式边界：`alloc/copy/cast/view/reshape/flatten` 产生 memory 结果，`free` 为无返回值语句。
   - 覆盖 `free` helper 的错误路径：非 memory source 与表达式上下文必须报错。
@@ -183,4 +186,7 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-024：纯 symbol 标量 `>=` 比较在 emit 阶段 lowering 为 `symbol.ge` 且结果为 `i1`；对 symbol 路径中除 `eq/ge` 以外的比较操作符报错 `Unsupported symbol compare op`。（`test_emit_mlir_infer_expr_type_branches`、`test_emit_mlir_lower_expr_unknown_and_symbol_errors`、`test_emit_mlir_lowers_symbol_ge`）
   - EMIT-025：`ArchQueryAST(query_name="get_subthread_id")` lowering 为单个 `arch.get_subthread_id`，并返回 `!symbol.int<"subthread_id">`。（`test_emit_mlir_lowers_arch_get_subthread_id_query`）
   - EMIT-026：`ArchQueryAST(query_name="get_thread_id")` lowering 为单个 `arch.get_thread_id`，并返回 `!symbol.int<"thread_id">`。（`test_emit_mlir_lowers_arch_get_thread_id_query`）
+  - EMIT-026A：memory 路径 `BinaryExprAST(op="add")` 必须支持 implicit broadcast，并发射 `nn.broadcast + nn.add` 组合。（`test_emit_mlir_binary_compare_broadcast_rhs`）
+  - EMIT-026B：memory 路径 `BinaryExprAST(op="add")` 在不可 broadcast 时必须报错 `Implicit broadcast dimension mismatch`。（`test_emit_mlir_infer_expr_type_branches`、`test_emit_mlir_static_index_list_and_broadcast_shape`）
+  - EMIT-026C：memory 路径 `BinaryExprAST(op="add")` 的 element type 不一致时，emit 阶段需通过 `dma.cast` 对齐后再发射 `nn.add`。（`test_emit_mlir_nn_add_promotes_dtype_with_dma_cast`）
   - EMIT-027：`ArchQueryAST(query_name="get_subthread_num")` lowering 为单个 `arch.get_subthread_num`，并返回 `!symbol.int<"subthread_num">`。（`test_emit_mlir_lowers_arch_get_subthread_num_query`）
