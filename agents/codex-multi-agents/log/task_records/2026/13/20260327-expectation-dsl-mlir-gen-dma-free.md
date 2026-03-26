@@ -30,3 +30,25 @@
 测试：PYTHONPATH=/home/lfr/kernelcode_generate python expectation/dsl/mlir_gen/dialect/dma/free.py
 结果：失败，报错 "free does not produce a value" 未命中 expectation 断言 "Operand must be nn.memory"。
 结论：spec 修正完成；expectation 需实现阶段排查错误路径顺序或诊断文案。
+
+时间：2026-03-27 03:02:41 +0800
+经手人：小李飞刀
+任务：T-20260327-a0cb4c0a
+任务目标：修复 dma.free 错误路径顺序/文案，使 expectation/dsl/mlir_gen/dialect/dma/free.py 通过。
+改动：
+- kernel_gen/dsl/mlir_gen.py：symbol-scalar 分支遇到 DmaFreeAST 时跳过返回类型推断，避免触发 "free does not produce a value" 抢先报错。
+- kernel_gen/dsl/mlir_gen.py：补充 DmaFreeAST 导入。
+- expectation/utils：同步主目录版本以保障 expectation 脚本可运行（仅同步，不改内容）。
+验证：
+- 命令：PYTHONPATH=. python expectation/dsl/mlir_gen/dialect/dma/free.py
+- 退出码：0
+结论：expectation 通过，进入复审阶段。
+
+时间：2026-03-27 02:36:30 +0800
+经手人：李白
+任务：T-20260327-1144bdda
+任务目标：复审 dma.free 错误路径顺序/文案修复，确认 expectation 通过且未直改 expectation 文件。
+改动：只读核对 kernel_gen/dsl/mlir_gen.py、test/dsl/test_ast_visitor.py 与 spec/dsl/{ast,emit_mlir,mlir_gen}.md；未修改实现/测试文件。
+验证：PYTHONPATH=. python expectation/dsl/mlir_gen/dialect/dma/free.py
+退出码：0
+结论：复审通过，可进入合并阶段。

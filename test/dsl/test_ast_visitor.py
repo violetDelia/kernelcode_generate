@@ -1568,6 +1568,81 @@ def test_build_func_op_supports_dma_deslice_helper() -> None:
     assert len(deslice_ops) == 1
 
 
+# MGEN-033
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-27 01:56:36 +0800
+# 最近一次运行成功时间: 2026-03-27 01:56:36 +0800
+# 功能说明: 验证 free helper 在参数个数非法时会在 build_func_op 报错。
+# 测试目的: 锁定 free(...) 非法 arity 的固定诊断文案。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_dma_free_invalid_arity
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_rejects_dma_free_invalid_arity() -> None:
+    from kernel_gen.operation.dma import free
+
+    source = Memory([2, 2], NumericType.Float32, space=MemorySpace.GM)
+
+    def free_kernel(src: "Tensor[f32, 2, 2]"):
+        free(src, src)
+
+    with pytest.raises(AstVisitorError, match="Unsupported free arity"):
+        build_func_op(free_kernel, source)
+
+
+# MGEN-034
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-27 01:56:36 +0800
+# 最近一次运行成功时间: 2026-03-27 01:56:36 +0800
+# 功能说明: 验证 free helper 的 source 非 memory 时在 build 链路报错。
+# 测试目的: 锁定 free(...) source 类型校验的固定诊断文案。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_dma_free_with_non_memory_source
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_rejects_dma_free_with_non_memory_source() -> None:
+    from kernel_gen.operation.dma import free
+
+    source = Memory([2, 2], NumericType.Float32, space=MemorySpace.GM)
+
+    def free_kernel(src: "Tensor[f32, 2, 2]"):
+        free(1)
+
+    func_ast = parse_function(free_kernel)
+    with pytest.raises(AstVisitorError, match="Operand must be nn.memory"):
+        build_func_op(free_kernel, source)
+    with pytest.raises(AstVisitorError, match="Operand must be nn.memory"):
+        build_func_op_from_ast(func_ast, runtime_args=[source])
+
+
+# MGEN-035
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-27 01:56:36 +0800
+# 最近一次运行成功时间: 2026-03-27 01:56:36 +0800
+# 功能说明: 验证 free helper 作为表达式求值时在 build 链路报错。
+# 测试目的: 锁定 free(...) 表达式上下文的固定诊断文案。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_dma_free_expression_context
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_rejects_dma_free_expression_context() -> None:
+    from kernel_gen.operation.dma import free
+
+    source = Memory([2, 2], NumericType.Float32, space=MemorySpace.GM)
+
+    def free_kernel(src: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return free(src)
+
+    func_ast = parse_function(free_kernel)
+    with pytest.raises(AstVisitorError, match="free does not produce a value"):
+        build_func_op(free_kernel, source)
+    with pytest.raises(AstVisitorError, match="free does not produce a value"):
+        build_func_op_from_ast(func_ast, runtime_args=[source])
+
+
 # MGEN-007
 # 创建者: 小李飞刀
 # 最后一次更改: 朽木露琪亚
@@ -2788,6 +2863,42 @@ def test_emit_mlir_dma_free_statement() -> None:
     assert list(block.ops) == []
 
 
+# EMIT-027
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-27 01:56:36 +0800
+# 最近一次运行成功时间: 2026-03-27 01:56:36 +0800
+# 功能说明: 验证 free AST 在 source 非 memory 时抛出固定诊断。
+# 测试目的: 锁定 emit_mlir 的 free source 类型校验错误文案。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_dma_free_rejects_non_memory_source
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_dma_free_rejects_non_memory_source() -> None:
+    block = Block()
+    ctx = EmitContext(builder=block, symbols={}, types={})
+    with pytest.raises(_LoweringError, match="Operand must be nn.memory"):
+        emit_node_mlir(DmaFreeAST(value=ConstAST(1, location=None), location=None), ctx)
+
+
+# EMIT-028
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-27 01:56:36 +0800
+# 最近一次运行成功时间: 2026-03-27 01:56:36 +0800
+# 功能说明: 验证 free AST 作为表达式求值时抛出固定诊断。
+# 测试目的: 锁定 emit_mlir 对 free 表达式上下文的报错文案。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_dma_free_rejects_expression_context
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_dma_free_rejects_expression_context() -> None:
+    block = Block()
+    ctx = EmitContext(builder=block, symbols={}, types={})
+    with pytest.raises(_LoweringError, match="free does not produce a value"):
+        _lower_expr(DmaFreeAST(value=ConstAST(1, location=None), location=None), ctx)
+
+
 # AST-009
 # 创建者: OpenAI
 # 最后一次更改: 金铲铲大作战
@@ -3054,6 +3165,64 @@ def test_parse_function_rejects_invalid_deslice_helper_variants() -> None:
             raise AssertionError(f"expected diagnostics for deslice variant: {expected_message}")
         if diagnostics[0].message != expected_message:
             raise AssertionError(f"expected deslice diagnostic {expected_message!r}, got {diagnostics[0].message!r}")
+
+
+# AST-017
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-27 01:56:36 +0800
+# 最近一次运行成功时间: 2026-03-27 01:56:36 +0800
+# 功能说明: 验证 free helper 在语句位置可解析为 DmaFreeAST。
+# 测试目的: 锁定 free(...) 语句解析进入 DMA free AST 语义节点。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_supports_dma_free_helper_statement
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_parse_function_supports_dma_free_helper_statement() -> None:
+    from kernel_gen.operation.dma import free
+
+    def free_kernel(src: "Tensor[f32, 2, 2]"):
+        free(src)
+
+    func_ast = parse_function(free_kernel)
+    assert isinstance(func_ast, FunctionAST)
+    assert isinstance(func_ast.body.statements[-1], DmaFreeAST)
+    assert isinstance(func_ast.body.statements[-1].value, TensorAST)
+    assert func_ast.body.statements[-1].value.name == "src"
+
+
+# AST-018
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-27 01:56:36 +0800
+# 最近一次运行成功时间: 2026-03-27 01:56:36 +0800
+# 功能说明: 验证 free helper 非法参数形式会在 AST 解析阶段报错。
+# 测试目的: 锁定 free(...) 非法参数个数与关键字形式的固定诊断文案。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_invalid_free_helper_variants
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_parse_function_rejects_invalid_free_helper_variants() -> None:
+    from kernel_gen.operation.dma import free
+
+    def bad_arity(src: "Tensor[f32, 2, 2]"):
+        free(src, src)
+
+    def bad_keyword(src: "Tensor[f32, 2, 2]"):
+        free(src=src)
+
+    expected_messages = (
+        ("Unsupported free arity", bad_arity),
+        ("Unsupported free arity", bad_keyword),
+    )
+    for expected_message, fn in expected_messages:
+        with pytest.raises(AstParseError) as exc_info:
+            parse_function(fn)
+        diagnostics = exc_info.value.diagnostics
+        if not diagnostics:
+            raise AssertionError(f"expected diagnostics for free variant: {expected_message}")
+        if diagnostics[0].message != expected_message:
+            raise AssertionError(f"expected free diagnostic {expected_message!r}, got {diagnostics[0].message!r}")
 
 
 # MGEN-015
