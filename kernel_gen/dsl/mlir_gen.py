@@ -35,6 +35,7 @@ from .ast import (
     AstParseError,
     ConstAST,
     DmaAllocAST,
+    DmaFreeAST,
     Diagnostic,
     FunctionAST,
     ScalarArgAST,
@@ -312,11 +313,17 @@ def _build_func_op_from_ast_impl(
         result_types = [result_type]
     elif _is_symbol_scalar_function(func_ast):
         return_expr = statements[-1]
-        result_type = _infer_expr_type(return_expr, dict(type_map))
-        if not isinstance(result_type, SymbolValueType):
-            raise _LoweringError("Symbol scalar function return must lower to !symbol.int", location=func_ast.location)
-        result_types = [result_type]
-        infer_scalar_return = True
+        if isinstance(return_expr, DmaFreeAST):
+            result_types = []
+        else:
+            result_type = _infer_expr_type(return_expr, dict(type_map))
+            if not isinstance(result_type, SymbolValueType):
+                raise _LoweringError(
+                    "Symbol scalar function return must lower to !symbol.int",
+                    location=func_ast.location,
+                )
+            result_types = [result_type]
+            infer_scalar_return = True
 
     func_type = FunctionType.from_lists(arg_types, result_types)
     block = Block(arg_types=arg_types)

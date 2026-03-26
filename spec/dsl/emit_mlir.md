@@ -39,7 +39,7 @@
 - 当 `ForAST` 来自 `LoopRange(start, end, step)` 且边界与循环变量保持 symbol 整数语义时，必须 lowering 为 `symbol.for`，不得回退为 `scf.for`；其循环块参数 `it` 必须为 `!symbol.int<"expr">`。
 - 在上述 `LoopRange` 场景中，循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand 必须直接复用 `!symbol.int<"expr">` value，不得插入 `arith.index_cast`；若循环变量 `it` 退化为 `index`、普通整数或浮点类型，应视为 lowering 违规。
 - 当 DSL AST 表达 `alloc`、`copy`、`cast`、`view`、`reshape`、`flatten`、`load`、`store`、`slice`、`deslice` 这组 DMA helper 调用时，`emit_mlir` 必须按对应 memory 语义 lowering；其中 `flatten` 公开上视为一维 `reshape` 语义，不要求生成独立 dialect op。
-- `free` 必须作为语句型 helper 处理，不产生新的 SSA 结果，也不承诺生成独立的 `dma.free` op。
+- `free` 必须作为语句型 helper 处理，不产生新的 SSA 结果，也不承诺生成独立的 `dma.free` op；其 source 必须为 memory，且不得出现在表达式上下文。
 - `ArchQueryAST(query_name="get_block_id")` 必须 lowering 为单个 `arch.get_block_id`，并保持结果类型为 `!symbol.int<"block_id">`。
 - `ArchQueryAST(query_name="get_block_num")` 必须 lowering 为单个 `arch.get_block_num`，并保持结果类型为 `!symbol.int<"block_num">`。
 - `ArchQueryAST(query_name="get_subthread_id")` 必须 lowering 为单个 `arch.get_subthread_id`，并保持结果类型为 `!symbol.int<"subthread_id">`。
@@ -145,6 +145,7 @@ value = emit_mlir(expr_ast, ctx)
   - 覆盖常见表达式与语句节点的发射结果。
   - 覆盖 `LoopRange` -> `symbol.for` 与 `it`/DMA operand 直接保持 `symbol.int` 的发射规则。
   - 覆盖 DMA helper 调用的 lowering 结果与语句/表达式边界：`alloc/copy/cast/view/reshape/flatten` 产生 memory 结果，`free` 为无返回值语句。
+  - 覆盖 `free` helper 的错误路径：非 memory source 与表达式上下文必须报错。
   - 覆盖 `ArchQueryAST(query_name="get_block_id")` lowering 为 `arch.get_block_id` 的最小查询路径。
   - 覆盖 `ArchQueryAST(query_name="get_block_num")` lowering 为 `arch.get_block_num` 的最小查询路径。
   - 覆盖 `ArchQueryAST(query_name="get_subthread_id")` lowering 为 `arch.get_subthread_id` 的最小查询路径。
@@ -173,6 +174,8 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-019：`reshape(...)` lowering 为 `dma.reshape` 并返回重排后的 memory 结果。（`test_emit_mlir_dma_reshape_lowering`）
   - EMIT-020：`flatten(...)` 以一维 `reshape` 语义 lowering，返回一维 memory 结果。（`test_emit_mlir_dma_flatten_lowering`）
   - EMIT-021：`free(...)` 作为无返回值语句执行，不产生新的 SSA 结果。（`test_emit_mlir_dma_free_statement`）
+  - EMIT-027：`free(...)` 的 source 非 memory 时必须报错。（`test_emit_mlir_dma_free_rejects_non_memory_source`）
+  - EMIT-028：`free(...)` 用于表达式上下文时必须报错。（`test_emit_mlir_dma_free_rejects_expression_context`）
   - EMIT-022：`ArchQueryAST(query_name="get_block_id")` lowering 为单个 `arch.get_block_id`，并返回 `!symbol.int<"block_id">`。（`test_emit_mlir_lowers_arch_get_block_id_query`）
   - EMIT-023：`ArchQueryAST(query_name="get_block_num")` lowering 为单个 `arch.get_block_num`，并返回 `!symbol.int<"block_num">`。（`test_emit_mlir_lowers_arch_get_block_num_query`）
   - EMIT-024：纯 symbol 标量 `>=` 比较在 emit 阶段 lowering 为 `symbol.ge` 且结果为 `i1`；对 symbol 路径中除 `eq/ge` 以外的比较操作符报错 `Unsupported symbol compare op`。（`test_emit_mlir_infer_expr_type_branches`、`test_emit_mlir_lower_expr_unknown_and_symbol_errors`、`test_emit_mlir_lowers_symbol_ge`）
