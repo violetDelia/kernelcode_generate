@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`李白`
 - `spec`：[`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
 - `功能实现`：[`kernel_gen/dsl/mlir_gen.py`](../../kernel_gen/dsl/mlir_gen.py)
 - `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
@@ -47,6 +47,7 @@
 - `LoopRange` 场景中的循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand，必须直接保持 `!symbol.int<"expr">` 语义传递，不得额外生成 `arith.index_cast`。
 - 对于纯 symbol 标量算术函数（仅符号标量入参/返回且返回为整型标量），函数签名中的输入与输出必须统一使用 `!symbol.int<"expr">`，不得降级为 `i32`、`index` 或其他 builtin 标量类型。
 - 对于纯 symbol 标量比较函数（当前仅覆盖 `==`），函数签名中的输入必须保持 `!symbol.int<"expr">`，返回类型必须为 `i1`，不得退回 `!symbol.int<"expr">` 或其他 builtin 标量类型。
+- 当函数体以 `return lhs == rhs` 承载 tensor 比较语义时，必须复用 `CompareExprAST(op="eq")` lowering 链路生成 `nn.eq`；该链路允许 implicit broadcast，若 shape 不可 broadcast 必须报错 `Implicit broadcast dimension mismatch`，若 element type 不一致必须报错 `Binary op operands must have the same element_type`。
 - Tensor 注解既可使用普通字符串字面量 `"Tensor[...]"`，也可使用在源码层面可归一化为同等文本的 `f"Tensor[...]"`；归一化后的文本必须满足 Tensor 注解语法，若包含无法静态归一化的格式化片段或归一化后仍不符合语法，必须报错。
 - memory 路径的比较表达式（`eq/ne/lt/le/gt/ge`）必须复用逐元素隐式 broadcast 规则，且 `lhs/rhs` 的 `element_type`/`space` 必须一致；当隐式 broadcast 失败或类型不一致时，`build_func_op(...)` 必须抛出 `AstVisitorError` 并保留位置（例如 `Implicit broadcast dimension mismatch`、`Binary op operands must have the same element_type`）。
 - DSL 函数体内允许出现 `alloc`、`copy`、`cast`、`view`、`reshape`、`flatten`、`free`、`load`、`store`、`slice`、`deslice` 这组 DMA helper 调用；其公开语义由 `emit_mlir` 负责落实到具体 lowering。
@@ -106,6 +107,7 @@ func_op = build_func_op(only_symbol, s)
 - 允许 `for` 循环内包含 `dma.slice`/`dma.deslice` 相关语义；当循环来自 `LoopRange` 且边界为 symbol 整数时，必须保留 `symbol.for` 结构，且迭代变量 `it` 不能退化为 `index`、`i32`、浮点或其他非 `SymbolValueType`。
 - 当函数场景为纯 symbol 标量算术函数时，输入参数与返回值都必须 lowering 为 `!symbol.int<"expr">`。
 - 当函数场景为纯 symbol 标量 `==` 比较且返回 `bool` 时，输入参数必须 lowering 为 `!symbol.int<"expr">`，函数体必须生成 `symbol.eq`，返回类型必须为 `i1`。
+- 当函数场景为 tensor `==` 比较时，返回注解必须与 `nn.eq` 结果类型一致（element type 为 `i1`，shape/space 按 broadcast 后结果确定）；若返回注解与实际 lowering 结果不一致必须报错。
 - 当函数场景为纯 symbol 整型标量算术时，函数体中的 `+`、`-`、`*`、`/`、`//` 必须分别 lowering 为 `symbol.add`、`symbol.sub`、`symbol.mul`、`symbol.div`、`symbol.floordiv`，且结果类型保持为 `SymbolValueType`。
 - 当函数体使用 `kernel_gen.operation.nn.add/sub/mul/truediv/floordiv` 包装同一组纯 symbol 整型标量算术时，lowering 结果必须与直接使用 Python 二元运算保持一致；`const/symbol` 与 `symbol/const` 的操作数顺序必须在结果表达式文本中原样保留。
 - 纯 symbol 标量函数的参数/返回类型必须复用 `spec/dialect/symbol.md` 中定义的 `SymbolValueType`，不能退回 builtin 整数类型。
@@ -193,6 +195,8 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - 验证 memory 加法在 `x + y` 与 `nn.add(x, y)` 两种入口下共享同一 lowering 契约，并支持 implicit broadcast。
   - 验证 memory 加法在不可 broadcast 时保持 `Implicit broadcast dimension mismatch` 错误口径。
   - 验证 memory 加法在 element type 不一致时会通过 `dma.cast` 完成 dtype 对齐。
+  - 验证 tensor `==` 比较在 `build_func_op(...)` / `build_func_op_from_ast(...)` 链路中复用 `CompareExprAST(op="eq")`，并在 memory 路径生成 `nn.eq`（必要时带 `nn.broadcast`）。
+  - 验证 tensor `==` 比较链路在 shape 不可 broadcast、返回注解不匹配或 element type 不一致时的错误路径。
   - 验证 DMA helper 调用在 `build_func_op(...)` 链路中被识别为受支持 DSL 公开能力：`alloc/copy/cast/view/reshape/flatten` 作为返回值表达式参与 lowering，`free` 作为无返回值语句参与 lowering，`load/store/slice/deslice` 维持 memory 读写语义。
   - 验证 `free(...)` 在非法参数个数、非 memory source 与表达式上下文时的错误路径。
   - 验证 alloc-only helper 场景在运行时参数、显式 stride 与非法 dtype/space 输入时的返回类型与错误路径。
@@ -216,12 +220,12 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - MGEN-006：标量参数 lowering 为 `func.func` 标量输入。（`test_scalar_arg_lowering_in_signature`）
   - MGEN-007：Tensor 返回注解不匹配时报错。（`test_invalid_tensor_return_annotation_reports_diagnostics`）
   - MGEN-008：常量返回 lowering 失败时报错。（`test_constant_lowering_reports_diagnostics`）
-  - MGEN-009：返回类型不匹配时报错。（`test_return_type_mismatch_reports_diagnostics`）
+  - MGEN-009：返回类型不匹配时报错；当函数体为 tensor `==` 比较时，返回注解与 `nn.eq` 结果不一致同样必须报错。（`test_return_type_mismatch_reports_diagnostics`）
   - MGEN-010：多语句 SSA 顺序与复用。（`test_multi_statement_ssa_order_and_reuse`）
   - MGEN-011：逐元素二元隐式 broadcast。（`test_tensor_binary_implicit_broadcast_lowering`）
   - MGEN-012：前置维度隐式 broadcast。（`test_tensor_binary_prepend_broadcast_lowering`）
-  - MGEN-013：比较表达式（含 `gt`）隐式 broadcast。（`test_compare_implicit_broadcast_lowering`）
-  - MGEN-014：逐元素表达式不可 broadcast 时必须报错并保留位置。（`test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics`）
+  - MGEN-013：比较表达式（含 `lhs == rhs`）在 memory 路径支持隐式 broadcast，必要时生成 `nn.broadcast + nn.eq`。（`test_compare_implicit_broadcast_lowering`）
+  - MGEN-014：比较/二元表达式共用 broadcast 失败错误口径；shape 不可 broadcast 时必须报错并保留定位信息。（`test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics`）
   - MGEN-015：`LoopRange + slice/deslice + 无 return` 场景生成 `symbol.for + dma.slice/dma.deslice`，且循环迭代变量 `it` 与 DMA operand 直接保持 `!symbol.int<"...">`，不生成 `arith.index_cast`。（`test_build_func_op_supports_symbolic_for_loop_dma_without_return`）
   - MGEN-016：纯 symbol 函数参数 lowering 为 `func.func` 的 `!symbol.int<"...">` 输入。（`test_symbol_scalar_function_uses_symbol_value_type_signature`）
   - MGEN-017：纯 symbol 函数返回 lowering 为 `func.func` 的 `!symbol.int<"...">` 输出。（`test_symbol_scalar_function_uses_symbol_value_type_signature`）
