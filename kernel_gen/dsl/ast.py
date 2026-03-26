@@ -33,6 +33,7 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
 _REJECT_EXTERNAL_VALUES_ENV_KEY = "__dsl_reject_external_values__"
+_ALLOW_EXTERNAL_CONST_ENV_KEY = "__dsl_allow_external_const__"
 
 
 @dataclass(frozen=True)
@@ -1227,9 +1228,13 @@ def _parse_store_like_call(
     tensor = _parse_expr(expr.args[1], env, globals_table, builtins_table)
     if not isinstance(tensor, TensorAST):
         _raise_parse_error(f"{call_name} target must be TensorAST", expr.args[1])
-    offsets = _parse_expr(expr.args[2], env, globals_table, builtins_table)
-    sizes = _parse_expr(expr.args[3], env, globals_table, builtins_table)
-    stride = _parse_expr(expr.args[4], env, globals_table, builtins_table) if len(expr.args) >= 5 else None
+    allow_const_env = dict(env)
+    allow_const_env[_ALLOW_EXTERNAL_CONST_ENV_KEY] = True
+    offsets = _parse_expr(expr.args[2], allow_const_env, globals_table, builtins_table)
+    sizes = _parse_expr(expr.args[3], allow_const_env, globals_table, builtins_table)
+    stride = (
+        _parse_expr(expr.args[4], allow_const_env, globals_table, builtins_table) if len(expr.args) >= 5 else None
+    )
     if call_name == "deslice" and len(expr.args) == 6:
         extra_space = _parse_expr(expr.args[5], env, globals_table, builtins_table)
         if not isinstance(extra_space, MemorySpace):
@@ -1430,6 +1435,8 @@ def _parse_expr(
             return env[expr.id]
         value = _lookup_python_name(expr.id, globals_table, builtins_table)
         if value is not None and bool(env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)):
+            if bool(env.get(_ALLOW_EXTERNAL_CONST_ENV_KEY, False)) and isinstance(value, (int, float, str)):
+                return ConstAST(value=value, location=_location_from_node(expr))
             _raise_parse_error("cannot use external value inside function body", expr)
         if isinstance(value, Memory):
             return TensorAST(name=expr.id, memory=value, location=_location_from_node(expr))

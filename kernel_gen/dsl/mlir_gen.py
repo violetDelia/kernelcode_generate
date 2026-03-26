@@ -146,7 +146,8 @@ def _build_signature_types(
     for index, item in enumerate(func_ast.inputs):
         runtime_arg = None if runtime_args is None else runtime_args[index]
         if isinstance(item, TensorAST):
-            arg_type = _memory_to_nn_type(item.memory, location=item.location)
+            runtime_memory = runtime_arg if isinstance(runtime_arg, Memory) else None
+            arg_type = _memory_to_nn_type(runtime_memory or item.memory, location=item.location)
             tensor_input_count += 1
         elif isinstance(item, ScalarArgAST):
             if item.value_type is not int:
