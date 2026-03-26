@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 from xdsl.dialects.builtin import ArrayAttr, Float16Type, Float32Type, IntAttr, StringAttr, i1, i32
 from xdsl.dialects.test import TestOp as _TestOp
+from xdsl.ir import Attribute
 from xdsl.utils.exceptions import VerifyException
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -73,7 +74,7 @@ def _make_space(name: str) -> NnMemorySpaceAttr:
 def _make_memory_type(
     shape: ArrayAttr | None = None,
     stride: ArrayAttr | None = None,
-    element_type=i32,
+    element_type: Attribute = i32,
     space: str = "global",
 ) -> NnMemoryType:
     """构造 nn.memory type。
