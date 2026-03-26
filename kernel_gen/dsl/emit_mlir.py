@@ -41,6 +41,7 @@ from kernel_gen.dialect.arch import (
     ArchGetBlockIdOp,
     ArchGetBlockNumOp,
     ArchGetSubthreadIdOp,
+    ArchGetSubthreadNumOp,
     ArchGetThreadIdOp,
 )
 from kernel_gen.dialect.dma import (
@@ -750,6 +751,7 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
             "get_block_id": "block_id",
             "get_block_num": "block_num",
             "get_subthread_id": "subthread_id",
+            "get_subthread_num": "subthread_num",
             "get_thread_id": "thread_id",
         }
         symbol_name = query_map.get(expr.query_name)
@@ -946,6 +948,8 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
             op = ArchGetBlockNumOp()
         elif expr.query_name == "get_subthread_id":
             op = ArchGetSubthreadIdOp()
+        elif expr.query_name == "get_subthread_num":
+            op = ArchGetSubthreadNumOp()
         elif expr.query_name == "get_thread_id":
             op = ArchGetThreadIdOp()
         else:

@@ -63,6 +63,7 @@ from kernel_gen.dialect.arch import (
     ArchGetBlockIdOp,
     ArchGetBlockNumOp,
     ArchGetSubthreadIdOp,
+    ArchGetSubthreadNumOp,
     ArchGetThreadIdOp,
 )
 from kernel_gen.dialect.nn import NnAddOp, NnBroadcastOp, NnEqOp, NnMemorySpaceAttr, NnMemoryType
@@ -615,6 +616,112 @@ def test_emit_mlir_lowers_arch_get_thread_id_query() -> None:
         raise AssertionError("expected emitted op to be ArchGetThreadIdOp")
     if result.type != SymbolValueType.from_expr("thread_id"):
         raise AssertionError('expected emitted result type to be !symbol.int<"thread_id">')
+
+
+# AST-014I / MGEN-033
+# 创建者: 摸鱼小分队
+# 最后一次更改: 摸鱼小分队
+# 最近一次运行测试时间: 2026-03-27 02:08:59 +0800
+# 最近一次运行成功时间: 2026-03-27 02:08:59 +0800
+# 功能说明: 验证零入参 get_subthread_num DSL 函数可解析并 lowering 为 arch.get_subthread_num。
+# 测试目的: 锁定 get_subthread_num 查询的 AST 解析、build_func_op 与 build_func_op_from_ast 返回类型为 !symbol.int<"subthread_num">。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_lowers_arch_get_subthread_num_query
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_lowers_arch_get_subthread_num_query() -> None:
+    def get_subthread_num_kernel() -> int:
+        return get_subthread_num()
+
+    func_ast = parse_function(get_subthread_num_kernel)
+    if len(func_ast.inputs) != 0:
+        raise AssertionError("expected get_subthread_num kernel to have no inputs")
+    if len(func_ast.outputs) != 1:
+        raise AssertionError("expected get_subthread_num kernel to have one output annotation")
+    if len(func_ast.body.statements) != 1:
+        raise AssertionError("expected get_subthread_num kernel to lower to one AST statement")
+    if not isinstance(func_ast.body.statements[0], ArchQueryAST):
+        raise AssertionError("expected get_subthread_num kernel to parse into ArchQueryAST")
+    if func_ast.body.statements[0].query_name != "get_subthread_num":
+        raise AssertionError("expected arch query name to stay get_subthread_num")
+
+    for func_op in (build_func_op(get_subthread_num_kernel), build_func_op_from_ast(func_ast)):
+        if len(tuple(func_op.body.block.args)) != 0:
+            raise AssertionError("expected zero-argument func.func for get_subthread_num kernel")
+        body_ops = list(func_op.body.block.ops)
+        query_ops = [op for op in body_ops if isinstance(op, ArchGetSubthreadNumOp)]
+        return_ops = [op for op in body_ops if isinstance(op, func.ReturnOp)]
+        if len(query_ops) != 1:
+            raise AssertionError("expected exactly one arch.get_subthread_num op")
+        if query_ops[0].result.type != SymbolValueType.from_expr("subthread_num"):
+            raise AssertionError('expected arch.get_subthread_num result type to be !symbol.int<"subthread_num">')
+        if len(return_ops) != 1:
+            raise AssertionError("expected exactly one func.return op")
+        if len(return_ops[0].arguments) != 1:
+            raise AssertionError("expected func.return to carry one value")
+        if return_ops[0].arguments[0].type != SymbolValueType.from_expr("subthread_num"):
+            raise AssertionError('expected func.return type to stay !symbol.int<"subthread_num">')
+
+
+# AST-014J
+# 创建者: 摸鱼小分队
+# 最后一次更改: 摸鱼小分队
+# 最近一次运行测试时间: 2026-03-27 02:08:59 +0800
+# 最近一次运行成功时间: 2026-03-27 02:08:59 +0800
+# 功能说明: 验证 get_subthread_num helper 拒绝位置参数与关键字参数。
+# 测试目的: 锁定 get_subthread_num(1) 与 get_subthread_num(x=1) 在 AST 解析阶段保持 Unsupported get_subthread_num arity 诊断。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_invalid_get_subthread_num_arity_variants
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_parse_function_rejects_invalid_get_subthread_num_arity_variants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    invalid_sources = (
+        """\
+def kernel() -> int:
+    return get_subthread_num(1)
+""",
+        """\
+def kernel() -> int:
+    return get_subthread_num(x=1)
+""",
+    )
+
+    for source in invalid_sources:
+        with pytest.raises(AstParseError) as exc_info:
+            _parse_function_from_source(monkeypatch, source)
+        diagnostics = exc_info.value.diagnostics
+        if not diagnostics:
+            raise AssertionError("expected diagnostics for invalid get_subthread_num arity")
+        if diagnostics[0].message != "Unsupported get_subthread_num arity":
+            raise AssertionError("expected Unsupported get_subthread_num arity diagnostic")
+
+
+# EMIT-027
+# 创建者: 摸鱼小分队
+# 最后一次更改: 摸鱼小分队
+# 最近一次运行测试时间: 2026-03-27 02:08:59 +0800
+# 最近一次运行成功时间: 2026-03-27 02:08:59 +0800
+# 功能说明: 验证 ArchQueryAST(query_name="get_subthread_num") lowering 为 arch.get_subthread_num。
+# 测试目的: 锁定 emit_mlir 对 get_subthread_num 查询的发射语义与结果类型。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_lowers_arch_get_subthread_num_query
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_lowers_arch_get_subthread_num_query() -> None:
+    block = Block()
+    ctx = EmitContext(builder=block, symbols={}, types={})
+
+    result = emit_node_mlir(ArchQueryAST(query_name="get_subthread_num"), ctx)
+
+    body_ops = list(block.ops)
+    if len(body_ops) != 1:
+        raise AssertionError("expected one emitted op for get_subthread_num query")
+    if not isinstance(body_ops[0], ArchGetSubthreadNumOp):
+        raise AssertionError("expected emitted op to be ArchGetSubthreadNumOp")
+    if result.type != SymbolValueType.from_expr("subthread_num"):
+        raise AssertionError('expected emitted result type to be !symbol.int<"subthread_num">')
 
 
 # AST-001
