@@ -2408,6 +2408,32 @@ def test_invalid_tensor_return_annotation_reports_diagnostics() -> None:
     assert exc_info.value.location is not None
 
 
+# MGEN-022C
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-27 06:03:53 +0800
+# 最近一次运行成功时间: 2026-03-27 06:03:53 +0800
+# 功能说明: 覆盖 mixed dtype 场景下非法返回注解的拒绝边界。
+# 测试目的: 确认返回注解 element_type 不来自操作数时抛出错误。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_mixed_dtype_return_annotation_requires_operand_element_type
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_mixed_dtype_return_annotation_requires_operand_element_type() -> None:
+    def mul_mixed_invalid(
+        lhs: "Tensor[f32, 2, 2]",
+        rhs: "Tensor[i32, 2, 2]",
+    ) -> "Tensor[f16, 2, 2]":
+        return lhs * rhs
+
+    with pytest.raises(AstVisitorError, match="Return type does not match annotation"):
+        build_func_op(
+            mul_mixed_invalid,
+            Memory([2, 2], NumericType.Float32),
+            Memory([2, 2], NumericType.Int32),
+        )
+
+
 # MGEN-008
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀

@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/dsl/ast.md`](../../spec/dsl/ast.md)
 - `功能实现`：[`kernel_gen/dsl/ast.py`](../../kernel_gen/dsl/ast.py)
 - `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
@@ -40,6 +40,7 @@
 - `for` 循环体内不允许出现 `return`；出现即视为语法不支持并报错。
 - 显式 `-> None` 返回注解表示函数无公开返回值；该场景允许函数体只包含语句且省略 `return`。
 - DSL 解析入口当前仅将无参 `get_block_id()` / `get_block_num()` / `get_subthread_id()` / `get_subthread_num()` / `get_thread_id()` 识别为 `arch` 查询 builtin，并解析为专用 `ArchQueryAST` 节点。
+- 二元乘法入口采用 Python `lhs * rhs` 与 `nn.mul(lhs, rhs)` 双入口；两者都必须解析为 `BinaryExprAST(op="mul")`，以复用后续统一 lowering 语义。
 
 ## 公开接口
 
@@ -72,6 +73,7 @@ func_ast = parse_function(add)
 - 若参数未写注解，但在 `globals`/`builtins` 中存在同名 `SymbolDim` 或 `Memory` 对象，可按标量参数或张量参数推断。
 - 若函数显式标注 `-> None`，则返回列表必须为空，且函数体可只包含语句并省略 `return`。
 - `float(value)`、`tensor.get_shape()[axis]` 与 `tensor.get_stride()[axis]` 等最小 DSL 表达式必须可解析为明确 AST 节点。
+- `nn.add/sub/mul/truediv/floordiv` helper 仅允许 2 个位置参数且禁止关键字参数；参数个数或形态不匹配时必须返回 `Unsupported nn arithmetic arity` 诊断。
 - `slice(...)` helper 仅允许 3~5 个位置参数；超出范围必须返回 `Unsupported slice arity` 诊断。
 - `slice` 的首参必须解析为 `TensorAST`；否则必须返回 `slice source must be TensorAST` 诊断。
 - `slice` 的 `space` 可选，但一旦提供必须为 `MemorySpace`；否则必须返回 `slice space must be MemorySpace` 诊断。
@@ -425,6 +427,7 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
 - 测试目标：
   - 覆盖 `parse_function(...)` 的源码解析与 AST 构建。
   - 覆盖 AST 节点字段与诊断信息的构造。
+  - 覆盖 Python `lhs * rhs` 与 `nn.mul(lhs, rhs)` 共用 `BinaryExprAST(op="mul")` 入口语义，以及 `nn.mul` 非法参数个数诊断。
   - 覆盖 `get_block_id()` 解析为 `ArchQueryAST` 的最小 arch 查询入口。
   - 覆盖 `get_block_id()` 的非法参数在 AST 解析阶段被拒绝。
   - 覆盖 `get_block_num()` 解析为 `ArchQueryAST` 的最小 arch 查询入口。
@@ -457,3 +460,4 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
   - AST-014J：`get_subthread_num(1)` 与 `get_subthread_num(x=1)` 必须在 AST 解析阶段返回 `Unsupported get_subthread_num arity` 诊断。（`test_parse_function_rejects_invalid_get_subthread_num_arity_variants`）
   - AST-014G：零入参函数中的 `get_thread_id()` 可解析为 `ArchQueryAST`，并保留继续向下游 lowering 所需的查询名语义。（`test_build_func_op_lowers_arch_get_thread_id_query`）
   - AST-014H：`get_thread_id(1)` 与 `get_thread_id(x=1)` 必须在 AST 解析阶段返回 `Unsupported get_thread_id arity` 诊断。（`test_parse_function_rejects_invalid_get_thread_id_arity_variants`）
+  - AST-018：`nn.mul(lhs, rhs)` 与 `lhs * rhs` 必须共用 `BinaryExprAST(op="mul")` 入口；`nn.mul` 的 arity 负路径继续复用 `Unsupported nn arithmetic arity` 诊断口径。（`test_symbol_scalar_function_lowers_symbol_binary_ops`、`test_parse_function_rejects_unsupported_nn_arithmetic_arity_variants`）

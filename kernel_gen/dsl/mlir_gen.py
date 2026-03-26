@@ -33,6 +33,7 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 from .ast import (
     AstParseError,
+    BinaryExprAST,
     ConstAST,
     DmaAllocAST,
     Diagnostic,
@@ -42,7 +43,15 @@ from .ast import (
     _ParseFailure,
     _parse_function_impl,
 )
-from .emit_mlir import EmitContext, _LoweringError, _ensure_supported_statements, _expr_key, _infer_expr_type, _memory_to_nn_type
+from .emit_mlir import (
+    EmitContext,
+    _LoweringError,
+    _ensure_supported_statements,
+    _expr_key,
+    _infer_binary_memory_type,
+    _infer_expr_type,
+    _memory_to_nn_type,
+)
 
 
 def _is_symbol_scalar_function(func_ast: FunctionAST) -> bool:
@@ -194,7 +203,55 @@ def _parse_function_with_env(
         raise AstParseError(exc.message, diagnostics) from exc
 
 
-def _validate_return_type(func_ast: FunctionAST, result_type: object) -> None:
+def _allow_mixed_dtype_return(
+    return_expr: object,
+    type_map: dict[int, object],
+    result_type: NnMemoryType,
+    expected_type: NnMemoryType,
+) -> bool:
+    """判断是否允许 mixed dtype promotion 的返回注解差异。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 仅在 return 表达式为 tensor 二元算术且左右 dtype 不一致时放宽。
+    - 注解 element_type 必须来自左右操作数之一。
+    - 要求推导出的目标类型与实际 result_type 对齐。
+
+    使用示例:
+    - _allow_mixed_dtype_return(return_expr, type_map, result_type, expected_type)
+
+    关联文件:
+    - spec: spec/dsl/mlir_gen.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/mlir_gen.py
+    """
+    if not isinstance(return_expr, BinaryExprAST):
+        return False
+    if return_expr.op not in {"add", "sub", "mul", "div", "floordiv"}:
+        return False
+    lhs_type = _infer_expr_type(return_expr.lhs, dict(type_map))
+    rhs_type = _infer_expr_type(return_expr.rhs, dict(type_map))
+    if not isinstance(lhs_type, NnMemoryType) or not isinstance(rhs_type, NnMemoryType):
+        return False
+    if lhs_type.element_type == rhs_type.element_type:
+        return False
+    if expected_type.element_type not in {lhs_type.element_type, rhs_type.element_type}:
+        return False
+    try:
+        target_type = _infer_binary_memory_type(lhs_type, rhs_type, return_expr.location)
+    except _LoweringError:
+        return False
+    return result_type.shape == target_type.shape and result_type.element_type == target_type.element_type
+
+
+def _validate_return_type(
+    func_ast: FunctionAST,
+    result_type: object,
+    return_expr: object | None = None,
+    type_map: dict[int, object] | None = None,
+) -> None:
     if not func_ast.outputs:
         return
     if len(func_ast.outputs) != 1:
@@ -205,7 +262,12 @@ def _validate_return_type(func_ast: FunctionAST, result_type: object) -> None:
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("Return type does not match annotation", location=func_ast.location)
         # Tensor 注解只公开约束 shape 与 element_type；DMA helper 允许返回不同的 space/stride。
-        if result_type.shape != expected_type.shape or result_type.element_type != expected_type.element_type:
+        if result_type.shape != expected_type.shape:
+            raise _LoweringError("Return type does not match annotation", location=func_ast.location)
+        if result_type.element_type != expected_type.element_type:
+            if return_expr is not None and type_map is not None:
+                if _allow_mixed_dtype_return(return_expr, type_map, result_type, expected_type):
+                    return
             raise _LoweringError("Return type does not match annotation", location=func_ast.location)
         return
     elif isinstance(output, ScalarArgAST):
@@ -307,7 +369,7 @@ def _build_func_op_from_ast_impl(
             result_type = _build_dma_alloc_only_result_type(func_ast, return_expr, runtime_args)
         else:
             result_type = _infer_expr_type(return_expr, dict(type_map))
-        _validate_return_type(func_ast, result_type)
+        _validate_return_type(func_ast, result_type, return_expr, dict(type_map))
         type_map[_expr_key(return_expr)] = result_type
         result_types = [result_type]
     elif _is_symbol_scalar_function(func_ast):

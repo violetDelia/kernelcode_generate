@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`金铲铲大作战`
+- 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
 - `功能实现`：[`kernel_gen/dsl/mlir_gen.py`](../../kernel_gen/dsl/mlir_gen.py)
 - `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
@@ -47,6 +47,8 @@
 - `LoopRange` 场景中的循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand，必须直接保持 `!symbol.int<"expr">` 语义传递，不得额外生成 `arith.index_cast`。
 - 对于纯 symbol 标量算术函数（仅符号标量入参/返回且返回为整型标量），函数签名中的输入与输出必须统一使用 `!symbol.int<"expr">`，不得降级为 `i32`、`index` 或其他 builtin 标量类型。
 - 对于纯 symbol 标量比较函数（当前仅覆盖 `==`），函数签名中的输入必须保持 `!symbol.int<"expr">`，返回类型必须为 `i1`，不得退回 `!symbol.int<"expr">` 或其他 builtin 标量类型。
+- 当函数体以 `return lhs * rhs` 或 `return nn.mul(lhs, rhs)` 承载 tensor 乘法语义时，必须复用 `BinaryExprAST(op="mul")` lowering 链路生成 `nn.mul`；该链路允许 implicit broadcast，若 shape 不可 broadcast 必须报错 `Implicit broadcast dimension mismatch`。当两侧 `element_type` 不一致但 `space` 一致时，必须按二元算术 dtype promotion（`i32 < f16 < f32`）选择目标 element_type，并通过 `dma.cast` 将非目标侧对齐后再执行 `nn.mul`；若 `space` 不一致必须报错 `Binary op operands must have the same space`。
+- Tensor 返回注解放宽仅适用于“二元算术 mixed dtype”场景：仅当 `return` 表达式是 tensor 二元算术且两操作数 `element_type` 不一致时，允许返回注解与最终 lowering 结果在 `element_type` 上暂不一致；且注解 `element_type` 必须是左右操作数 `element_type` 之一，否则必须报错 `Return type does not match annotation`。
 - Tensor 注解既可使用普通字符串字面量 `"Tensor[...]"`，也可使用在源码层面可归一化为同等文本的 `f"Tensor[...]"`；归一化后的文本必须满足 Tensor 注解语法，若包含无法静态归一化的格式化片段或归一化后仍不符合语法，必须报错。
 - DSL 函数体内允许出现 `alloc`、`copy`、`cast`、`view`、`reshape`、`flatten`、`free`、`load`、`store`、`slice`、`deslice` 这组 DMA helper 调用；其公开语义由 `emit_mlir` 负责落实到具体 lowering。
 - 当函数体仅返回 `alloc(...)` 且没有 tensor 输入时，允许仅依赖标量 `runtime_args` 构建签名与结果类型；`alloc` 结果类型需由 `shape`/`stride`/`dtype`/`space` 与 `runtime_args` 共同决定，且显式 `stride` 必须与默认连续布局一致，否则必须报错。
@@ -103,6 +105,7 @@ func_op = build_func_op(only_symbol, s)
 - 当函数场景为纯 symbol 标量 `==` 比较且返回 `bool` 时，输入参数必须 lowering 为 `!symbol.int<"expr">`，函数体必须生成 `symbol.eq`，返回类型必须为 `i1`。
 - 当函数场景为纯 symbol 整型标量算术时，函数体中的 `+`、`-`、`*`、`/`、`//` 必须分别 lowering 为 `symbol.add`、`symbol.sub`、`symbol.mul`、`symbol.div`、`symbol.floordiv`，且结果类型保持为 `SymbolValueType`。
 - 当函数体使用 `kernel_gen.operation.nn.add/sub/mul/truediv/floordiv` 包装同一组纯 symbol 整型标量算术时，lowering 结果必须与直接使用 Python 二元运算保持一致；`const/symbol` 与 `symbol/const` 的操作数顺序必须在结果表达式文本中原样保留。
+- 当函数场景为 tensor 乘法时，返回注解默认必须与 `nn.mul` 实际结果一致（shape/space 按 broadcast 后结果确定）。仅在二元算术 mixed dtype 场景下允许 `element_type` 放宽，且注解 `element_type` 必须来自左右操作数之一；超出该边界必须报错 `Return type does not match annotation`。
 - 纯 symbol 标量函数的参数/返回类型必须复用 `spec/dialect/symbol.md` 中定义的 `SymbolValueType`，不能退回 builtin 整数类型。
 - `LoopRange` 场景中传给 `dma.slice` / `dma.deslice` 的标量 operand 必须直接复用 `!symbol.int<"expr">` value，不允许通过 `arith.index_cast` 做中间桥接。
 - `"Tensor[...]"` 注解允许来自普通字符串字面量或可静态归一化的 `f"Tensor[...]"`；归一化后若不是合法 Tensor 注解，必须在解析阶段直接报错。
@@ -181,6 +184,8 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - 覆盖无返回 `for` 循环与 `slice/deslice` 的生成能力，并要求 `LoopRange` lowering 为 `symbol.for`，且循环迭代变量 `it` 保持 `!symbol.int<"...">`。
   - 验证纯 symbol 函数场景会生成 `!symbol.int<"...">` 输入与 `!symbol.int<"...">` 返回。
   - 验证纯 symbol 标量算术在 lowering 后生成 `symbol.add/sub/mul/div/floordiv`，不退回 builtin 算术或其他 dialect op；直接 Python 二元运算与 `kernel_gen.operation.nn` 对应包装必须共享同一 lowering 结果。
+  - 验证 tensor 二元算术（含 `mul`）在 `build_func_op(...)` / `build_func_op_from_ast(...)` 链路中复用统一 implicit broadcast 路径。
+  - 验证 tensor 乘法链路在 mixed dtype promotion + `dma.cast` 对齐、shape 不可 broadcast、返回注解边界越界（非 mixed dtype 或注解 dtype 非操作数之一）及 `space` 不一致时的行为与诊断文案。
   - 验证整型标量函数场景中，`build_func_op(add, lhs, rhs)` 会把 Python `int` 实参 lowering 为携带具体整数值的 `SymbolValueType` 输入，并生成 `symbol.add` 结果。
   - 验证负数 Python `int` 实参不会导致 lowering 失败；负值的 `SymbolValueType.__str__` 必须保持 `symbol.int<-3>` 这类十进制负数字面量口径，且 `get_value()` 可还原原始负数值。
   - 验证 `LoopRange + slice/deslice` 场景生成 `symbol.for + dma.slice/dma.deslice`，且循环相关 lowering 不生成 `arith.index_cast`。
@@ -219,6 +224,9 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - MGEN-018：纯 symbol 标量加法 lowering 为 `symbol.add`；直接 Python `+` 与 `nn.add(...)` 包装在 `const/const`、`symbol/symbol`、`const/symbol`、`symbol/const` 四类输入下必须保持一致；比较公开结果时以 `SymbolValueType.get_value()` 与对应 Python/SymbolDim 运行时结果一致为准。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
   - MGEN-021：纯 symbol 标量减法 lowering 为 `symbol.sub`；直接 Python `-` 与 `nn.sub(...)` 包装在四类输入下必须保持一致；比较公开结果时以 `SymbolValueType.get_value()` 与对应 Python/SymbolDim 运行时结果一致为准。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
   - MGEN-022：纯 symbol 标量乘法 lowering 为 `symbol.mul`；直接 Python `*` 与 `nn.mul(...)` 包装在四类输入下必须保持一致；比较公开结果时以 `SymbolValueType.get_value()` 与对应 Python/SymbolDim 运行时结果一致为准。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
+  - MGEN-022A：tensor 二元算术（含 `mul`）必须走统一 memory lowering 路径并支持 implicit broadcast；`nn.add` 代表性用例用于锁定该共享路径行为。（`test_tensor_binary_implicit_broadcast_lowering`、`test_tensor_binary_prepend_broadcast_lowering`）
+  - MGEN-022B：tensor `mul` mixed dtype 路径必须执行 dtype promotion 并通过 `dma.cast` 对齐到目标 element_type 后再发射算术 op；shape 不可 broadcast 或 `space` 不一致时必须报错并保持固定诊断文案。（`python expectation/dsl/mlir_gen/dialect/nn/mul.py`、`test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics`）
+  - MGEN-022C：返回注解放宽仅限二元算术 mixed dtype，且注解 `element_type` 必须是操作数 `element_type` 之一；不满足条件时必须报错 `Return type does not match annotation`。（`python expectation/dsl/mlir_gen/dialect/nn/mul.py`、`test_invalid_tensor_return_annotation_reports_diagnostics`）
   - MGEN-023：纯 symbol 标量除法 lowering 为 `symbol.div`；直接 Python `/` 与 `nn.truediv(...)` 包装在四类输入下必须保持一致；`const/const` 输入按静态整除结果收敛为常量整数；比较公开结果时以 `SymbolValueType.get_value()` 与对应 Python/SymbolDim 运行时结果一致为准。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
   - MGEN-024：纯 symbol 标量整除 lowering 为 `symbol.floordiv`；直接 Python `//` 与 `nn.floordiv(...)` 包装在四类输入下必须保持一致；`const/const` 输入按 Python `//` 语义收敛；比较公开结果时以 `SymbolValueType.get_value()` 与对应 Python/SymbolDim 运行时结果一致为准。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
   - MGEN-019：`build_func_op` 的运行时参数为必填，且公开契约仅覆盖 `fn + runtime_args` 的可位置绑定形参；省略实参、实参数量不匹配，或试图以 `globals/builtins` 替代时必须报错。（`test_build_func_op_requires_explicit_runtime_args`、`test_build_func_op_rejects_runtime_arg_count_mismatch`、`test_build_func_op_globals_and_builtins_cannot_replace_runtime_args`）

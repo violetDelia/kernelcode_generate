@@ -588,6 +588,85 @@ def _infer_broadcast_memory_type(
     )
 
 
+def _resolve_binary_element_type(
+    lhs_type: Attribute,
+    rhs_type: Attribute,
+    location: SourceLocation | None,
+) -> Attribute:
+    """解析 nn 二元算术的 element_type 决议。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 对支持的 element_type 按固定优先级选择目标类型。
+    - 不支持的类型组合保持原有诊断文案。
+
+    使用示例:
+    - _resolve_binary_element_type(i32, f32, location=None)
+
+    关联文件:
+    - spec: spec/dsl/emit_mlir.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/emit_mlir.py
+    """
+    if lhs_type == rhs_type:
+        return lhs_type
+    if lhs_type == i32:
+        lhs_rank = 4
+    elif isinstance(lhs_type, Float16Type):
+        lhs_rank = 8
+    elif lhs_type == f32:
+        lhs_rank = 10
+    else:
+        raise _LoweringError("Binary op operands must have the same element_type", location=location)
+
+    if rhs_type == i32:
+        rhs_rank = 4
+    elif isinstance(rhs_type, Float16Type):
+        rhs_rank = 8
+    elif rhs_type == f32:
+        rhs_rank = 10
+    else:
+        raise _LoweringError("Binary op operands must have the same element_type", location=location)
+    return lhs_type if lhs_rank >= rhs_rank else rhs_type
+
+
+def _infer_binary_memory_type(
+    lhs_type: NnMemoryType,
+    rhs_type: NnMemoryType,
+    location: SourceLocation | None,
+) -> NnMemoryType:
+    """推导 nn 二元算术的目标 nn.memory 类型。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 允许隐式 broadcast 推导共同目标 shape。
+    - element_type 按 nn 二元算术固定优先级决议。
+
+    使用示例:
+    - _infer_binary_memory_type(lhs_type, rhs_type, location=None)
+
+    关联文件:
+    - spec: spec/dsl/emit_mlir.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/emit_mlir.py
+    """
+    if lhs_type.space != rhs_type.space:
+        raise _LoweringError("Binary op operands must have the same space", location=location)
+    target_shape = _infer_broadcast_shape(lhs_type.shape.data, rhs_type.shape.data, location)
+    target_stride = _build_broadcast_stride(target_shape)
+    target_element_type = _resolve_binary_element_type(lhs_type.element_type, rhs_type.element_type, location)
+    return NnMemoryType(
+        ArrayAttr(list(target_shape)),
+        ArrayAttr(list(target_stride)),
+        target_element_type,
+        lhs_type.space,
+    )
+
+
 def _memory_to_nn_type(memory: Memory, location: SourceLocation | None = None) -> NnMemoryType:
     shape = memory.shape.get_values()
     stride_values = memory.stride.get_values() if memory.stride is not None else _build_stride(shape)
@@ -784,7 +863,7 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
         if lhs_type == rhs_type:
             type_map[expr_key] = lhs_type
             return lhs_type
-        target_type = _infer_broadcast_memory_type(lhs_type, rhs_type, expr.location)
+        target_type = _infer_binary_memory_type(lhs_type, rhs_type, expr.location)
         type_map[expr_key] = target_type
         return target_type
 
@@ -984,7 +1063,29 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         lhs_type = _expect_memory_value(lhs, expr.location)
         rhs_type = _expect_memory_value(rhs, expr.location)
         if lhs_type != rhs_type:
-            target_type = _infer_broadcast_memory_type(lhs_type, rhs_type, expr.location)
+            target_type = _infer_binary_memory_type(lhs_type, rhs_type, expr.location)
+            if lhs_type.element_type != target_type.element_type:
+                cast_type = NnMemoryType(
+                    lhs_type.shape,
+                    lhs_type.stride,
+                    target_type.element_type,
+                    lhs_type.space,
+                )
+                cast_op = DmaCastOp(lhs, cast_type)
+                ctx.builder.add_op(cast_op)
+                lhs = cast_op.result
+                lhs_type = cast_type
+            if rhs_type.element_type != target_type.element_type:
+                cast_type = NnMemoryType(
+                    rhs_type.shape,
+                    rhs_type.stride,
+                    target_type.element_type,
+                    rhs_type.space,
+                )
+                cast_op = DmaCastOp(rhs, cast_type)
+                ctx.builder.add_op(cast_op)
+                rhs = cast_op.result
+                rhs_type = cast_type
             if lhs_type != target_type:
                 broadcast_op = NnBroadcastOp(lhs, target_type, target_type.space)
                 ctx.builder.add_op(broadcast_op)
