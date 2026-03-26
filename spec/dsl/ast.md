@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/dsl/ast.md`](../../spec/dsl/ast.md)
 - `功能实现`：[`kernel_gen/dsl/ast.py`](../../kernel_gen/dsl/ast.py)
 - `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
@@ -432,6 +432,8 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
   - 覆盖 `get_block_id()` 的非法参数在 AST 解析阶段被拒绝。
   - 覆盖 `get_block_num()` 解析为 `ArchQueryAST` 的最小 arch 查询入口。
   - 覆盖 `get_block_num()` 的非法参数在 AST 解析阶段被拒绝。
+  - 覆盖 `get_thread_id()` 解析为 `ArchQueryAST` 的最小 arch 查询入口。
+  - 覆盖 `get_thread_id()` 的非法参数在 AST 解析阶段被拒绝。
   - 覆盖 `slice` helper 的参数数量、source 类型与 space 约束的错误路径。
 - 功能与用例清单：
   - AST-001：解析函数生成 `FunctionAST`。（`test_visit_function_builds_ast`）
