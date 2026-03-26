@@ -181,6 +181,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - 验证零入参 DSL 函数可通过 `build_func_op(...)` / `build_func_op_from_ast(...)` 生成 `func.func`，并在返回 `get_block_id()` 时 lowering 为 `arch.get_block_id` 与 `!symbol.int<"block_id">` 返回类型。
   - 验证零入参 DSL 函数可通过 `build_func_op(...)` / `build_func_op_from_ast(...)` 生成 `func.func`，并在返回 `get_block_num()` 时 lowering 为 `arch.get_block_num` 与 `!symbol.int<"block_num">` 返回类型。
   - 验证纯 symbol 标量 `==` 比较会生成 `symbol.eq`，返回类型为 `i1`，并覆盖静态整数与动态符号两类 runtime args。
+  - 验证纯 symbol 标量 `>=` 比较会生成 `symbol.ge`，返回类型为 `i1`，并覆盖静态整数与动态符号两类 runtime args。
 - 功能与用例清单：
   - MGEN-001：`build_func_op(...)` 返回 `func.func`。（`test_build_func_op_returns_func_op`）
   - MGEN-001A：`build_func_op(...)` 的输入签名只由 `runtime_args` 决定；即使 `globals` 中存在同名对象且额外传入 `builtins`，成功路径的签名推导也不得被解析环境覆盖。（`test_build_func_op_signature_uses_runtime_args_not_parse_env`）
@@ -220,3 +221,4 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - MGEN-027：零入参函数直接返回 `get_block_id()` 时，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须生成零参数 `func.func`、单个 `arch.get_block_id`，并返回 `!symbol.int<"block_id">`。（`test_build_func_op_lowers_arch_get_block_id_query`）
   - MGEN-028：纯 symbol 标量 `==` 比较 lowering 为 `symbol.eq`，返回类型为 `i1`；`const/const` 与 `symbol/symbol` 两类输入下均应保持 `SymbolValueType` 输入签名，并覆盖 `return a == b` 与 `c = a == b; return c` 两种函数体形态。（`test_build_func_op_lowers_symbol_eq`）
   - MGEN-029：零入参函数直接返回 `get_block_num()` 时，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须生成零参数 `func.func`、单个 `arch.get_block_num`，并返回 `!symbol.int<"block_num">`。（`test_build_func_op_lowers_arch_get_block_num_query`）
+  - MGEN-030：纯 symbol 标量 `>=` 比较 lowering 为 `symbol.ge`，返回类型为 `i1`；`const/const` 与 `symbol/symbol` 两类输入下均应保持 `SymbolValueType` 输入签名，并覆盖 `return a >= b` 与 `c = a >= b; return c` 两种函数体形态。（`test_build_func_op_lowers_symbol_ge`）

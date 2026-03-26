@@ -1,7 +1,7 @@
 """AST emit utilities for DSL nodes.
 
 创建者: 小李飞刀
-最后一次更改: 咯咯咯
+最后一次更改: 我不是牛马
 
 功能说明:
 - 提供 AST 节点到 MLIR SSA value/op 的发射入口。
@@ -68,6 +68,7 @@ from kernel_gen.dialect.symbol import (
     SymbolAddOp,
     SymbolDivOp,
     SymbolEqOp,
+    SymbolGeOp,
     SymbolFloorDivOp,
     SymbolForOp,
     SymbolMulOp,
@@ -782,7 +783,7 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
         lhs_type = _infer_expr_type(expr.lhs, type_map)
         rhs_type = _infer_expr_type(expr.rhs, type_map)
         if isinstance(lhs_type, SymbolValueType) and isinstance(rhs_type, SymbolValueType):
-            if expr.op != "eq":
+            if expr.op not in {"eq", "ge"}:
                 raise _LoweringError("Unsupported symbol compare op", location=expr.location)
             type_map[expr_key] = i1
             return i1
@@ -992,9 +993,10 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         lhs_attr = getattr(lhs, "type", None)
         rhs_attr = getattr(rhs, "type", None)
         if isinstance(lhs_attr, SymbolValueType) and isinstance(rhs_attr, SymbolValueType):
-            if expr.op != "eq":
+            if expr.op not in {"eq", "ge"}:
                 raise _LoweringError("Unsupported symbol compare op", location=expr.location)
-            op = SymbolEqOp(lhs, rhs, i1)
+            op_map = {"eq": SymbolEqOp, "ge": SymbolGeOp}
+            op = op_map[expr.op](lhs, rhs, i1)
             ctx.builder.add_op(op)
             ctx._set_cache(expr_key, op.result)
             return op.result
