@@ -1,7 +1,7 @@
 """AST emit utilities for DSL nodes.
 
 创建者: 小李飞刀
-最后一次更改: 我不是牛马
+最后一次更改: 咯咯咯
 
 功能说明:
 - 提供 AST 节点到 MLIR SSA value/op 的发射入口。
@@ -37,7 +37,7 @@ from xdsl.dialects.builtin import (
 )
 from xdsl.ir import Attribute, Block, SSAValue
 
-from kernel_gen.dialect.arch import ArchGetBlockIdOp
+from kernel_gen.dialect.arch import ArchGetBlockIdOp, ArchGetBlockNumOp
 from kernel_gen.dialect.dma import (
     DmaAllocOp,
     DmaCastOp,
@@ -740,9 +740,14 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
     if isinstance(expr, ForAST):
         raise _LoweringError("ForAST does not produce a value", location=expr.location)
     if isinstance(expr, ArchQueryAST):
-        if expr.query_name != "get_block_id":
+        query_map = {
+            "get_block_id": "block_id",
+            "get_block_num": "block_num",
+        }
+        symbol_name = query_map.get(expr.query_name)
+        if symbol_name is None:
             raise _LoweringError("Unsupported arch query", location=expr.location)
-        result_type = SymbolValueType.from_expr("block_id")
+        result_type = SymbolValueType.from_expr(symbol_name)
         type_map[expr_key] = result_type
         return result_type
 
@@ -927,9 +932,12 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     if isinstance(expr, DmaFreeAST):
         raise _LoweringError("free does not produce a value", location=expr.location)
     if isinstance(expr, ArchQueryAST):
-        if expr.query_name != "get_block_id":
+        if expr.query_name == "get_block_id":
+            op = ArchGetBlockIdOp()
+        elif expr.query_name == "get_block_num":
+            op = ArchGetBlockNumOp()
+        else:
             raise _LoweringError("Unsupported arch query", location=expr.location)
-        op = ArchGetBlockIdOp()
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
         ctx.types[expr_key] = op.result.type

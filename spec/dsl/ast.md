@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/dsl/ast.md`](../../spec/dsl/ast.md)
 - `功能实现`：[`kernel_gen/dsl/ast.py`](../../kernel_gen/dsl/ast.py)
 - `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
@@ -39,7 +39,7 @@
 - `for` 循环仅支持 `range(...)`、`LoopRange(...)` 或 `loop(...)` 的 1~3 参数形式，并解析为 `ForAST` 的 `start/end/step` 字段。
 - `for` 循环体内不允许出现 `return`；出现即视为语法不支持并报错。
 - 显式 `-> None` 返回注解表示函数无公开返回值；该场景允许函数体只包含语句且省略 `return`。
-- DSL 解析入口当前仅将无参 `get_block_id()` 识别为 `arch` 查询 builtin，并解析为专用 `ArchQueryAST` 节点。
+- DSL 解析入口当前仅将无参 `get_block_id()` / `get_block_num()` 识别为 `arch` 查询 builtin，并解析为专用 `ArchQueryAST` 节点。
 
 ## 公开接口
 
@@ -377,19 +377,20 @@ ConstAST(value=1)
 
 参数说明：
 
-- `query_name` (`str`)：查询名，当前仅允许 `get_block_id`。
+- `query_name` (`str`)：查询名，当前仅允许 `get_block_id` / `get_block_num`。
 - `location` (`SourceLocation|None`)：可选源码位置。
 
 使用示例：
 
 ```python
 ArchQueryAST(query_name="get_block_id")
+ArchQueryAST(query_name="get_block_num")
 ```
 
 注意事项：
 
 - 该节点只表示 DSL 解析结果，不定义结果类型或 lowering 细节。
-- 当前仅允许 `get_block_id`；其他 `arch` 调用不属于本节点职责。
+- 当前仅允许 `get_block_id` / `get_block_num`；其他 `arch` 调用不属于本节点职责。
 
 返回与限制：返回不可变的数据结构实例。
 
@@ -420,6 +421,8 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
   - 覆盖 AST 节点字段与诊断信息的构造。
   - 覆盖 `get_block_id()` 解析为 `ArchQueryAST` 的最小 arch 查询入口。
   - 覆盖 `get_block_id()` 的非法参数在 AST 解析阶段被拒绝。
+  - 覆盖 `get_block_num()` 解析为 `ArchQueryAST` 的最小 arch 查询入口。
+  - 覆盖 `get_block_num()` 的非法参数在 AST 解析阶段被拒绝。
 - 功能与用例清单：
   - AST-001：解析函数生成 `FunctionAST`。（`test_visit_function_builds_ast`）
   - AST-001A：提供独立解析入口。（`test_parse_function_entry`）
@@ -438,3 +441,5 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
   - AST-013：支持 `bool/float` 返回注解、`JoinedStr` 张量注解，以及 `float(...)`、`get_shape()[axis]`、`get_stride()[axis]` 等最小 symbol 查询/转换表达式解析。（`test_ast_parse_function_supports_symbol_scalar_and_joinedstr_annotations`）
   - AST-014A：零入参函数中的 `get_block_id()` 可解析为 `ArchQueryAST`，并保留继续向下游 lowering 所需的查询名语义。（`test_build_func_op_lowers_arch_get_block_id_query`）
   - AST-014B：`get_block_id(1)` 与 `get_block_id(x=1)` 必须在 AST 解析阶段返回 `Unsupported get_block_id arity` 诊断。（`test_parse_function_rejects_invalid_get_block_id_arity_variants`）
+  - AST-014C：零入参函数中的 `get_block_num()` 可解析为 `ArchQueryAST`，并保留继续向下游 lowering 所需的查询名语义。（`test_build_func_op_lowers_arch_get_block_num_query`）
+  - AST-014D：`get_block_num(1)` 与 `get_block_num(x=1)` 必须在 AST 解析阶段返回 `Unsupported get_block_num arity` 诊断。（`test_parse_function_rejects_invalid_get_block_num_arity_variants`）
