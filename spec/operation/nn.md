@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`朽木露琪亚`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/operation/nn.md`](../../spec/operation/nn.md)
 - `功能实现`：[`kernel_gen/operation/nn.py`](../../kernel_gen/operation/nn.py)
 - `test`：[`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py)
@@ -476,53 +476,6 @@ tmp = matmul(lhs, rhs, memoryspace=MemorySpace.SM)
 - `out.format == Farmat.Norm`。
 - `out.stride == [rhs.shape[1], 1]`。
 
-### `img2col(value, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr)`
-
-功能说明：
-
-- 将四维输入按滑动窗口展开为列矩阵语义，用于卷积类计算的显式展开。
-
-参数说明：
-
-- `value` (`Memory`)：输入张量，`rank == 4`，形状顺序为 `[N, C, H, W]`。
-- `kh` (`int | SymbolDim`)：kernel height，必须为正整数。
-- `kw` (`int | SymbolDim`)：kernel width，必须为正整数。
-- `sh` (`int | SymbolDim`)：stride height，必须为正整数。
-- `sw` (`int | SymbolDim`)：stride width，必须为正整数。
-- `dh` (`int | SymbolDim`)：dilation height，必须为正整数。
-- `dw` (`int | SymbolDim`)：dilation width，必须为正整数。
-- `ph` (`int | SymbolDim`)：padding height 在低端（top）方向的补齐量，必须为非负整数。
-- `pw` (`int | SymbolDim`)：padding height 在高端（bottom）方向的补齐量，必须为非负整数。
-- `pl` (`int | SymbolDim`)：padding width 在低端（left）方向的补齐量，必须为非负整数。
-- `pr` (`int | SymbolDim`)：padding width 在高端（right）方向的补齐量，必须为非负整数。
-
-使用示例：
-
-```python
-from kernel_gen.operation.nn import img2col
-from kernel_gen.symbol_variable.memory import Memory
-from kernel_gen.symbol_variable.type import NumericType
-
-X = Memory([1, 3, 5, 5], NumericType.Float32)
-out = img2col(X, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr=1)
-assert out.get_shape() == [1, 27, 25]
-```
-
-注意事项：
-
-- `value` 必须为 `Memory` 且 `rank == 4`；否则抛出 `TypeError` 或 `ValueError`。
-- `kh/kw/sh/sw/dh/dw` 必须为正整数或 `SymbolDim`，`ph/pw/pl/pr` 必须为非负整数或 `SymbolDim`；类型或范围不合法时抛出 `TypeError` 或 `ValueError`。
-- 输出形状按下式计算：
-  - `H_out = floor((H + ph + pw - dh * (kh - 1) - 1) / sh) + 1`
-  - `W_out = floor((W + pl + pr - dw * (kw - 1) - 1) / sw) + 1`
-  - `out.shape == [N, C * kh * kw, H_out * W_out]`
-- 若 `H_out` 或 `W_out` 在静态可判定场景下不为正数，必须抛出 `ValueError`。
-- 输出 `dtype` 与 `space` 继承自输入，`format` 固定为 `Farmat.Norm`，`stride` 按连续行主序默认步幅生成。
-
-返回与限制：
-
-- 返回 `Memory` 语义结果。
-
 ## 测试
 
 - 测试文件：[`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py)
@@ -538,7 +491,6 @@ assert out.get_shape() == [1, 27, 25]
 - 验证 `matmul(lhs, rhs, memoryspace=None)` 的二维输入约束、`memoryspace` 覆盖、结果 `format/stride` 口径与错误规则。
 - 验证比较结果使用 `NumericType.Bool` 作为 predicate 载体。
 - 验证 nn 操作不依赖已移除的旧 shape 规范化入口。
-- 验证 `img2col` 的输入 rank/参数校验与输出 shape 规则。
 
 ### 功能与用例清单
 
@@ -582,4 +534,3 @@ assert out.get_shape() == [1, 27, 25]
 | OP-MM-005 | `matmul` 标量输入非法 | `test_nn_matmul_scalar_operand_error` |
 | OP-MM-006 | `matmul` 的 `dtype` 按固定优先级决议 | `test_nn_matmul_dtype_mismatch` |
 | OP-MM-007 | `matmul` 输入 `space` 不一致报错 | `test_nn_matmul_space_mismatch` |
-| OP-IMG2COL-001 | `img2col` 输出形状与参数校验规则 | `test_nn_img2col_basic` |
