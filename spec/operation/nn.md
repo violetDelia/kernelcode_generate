@@ -492,6 +492,7 @@ tmp = matmul(lhs, rhs, memoryspace=MemorySpace.SM)
 - 验证 `matmul(lhs, rhs, memoryspace=None)` 的二维输入约束、`memoryspace` 覆盖、结果 `format/stride` 口径与错误规则。
 - 验证比较结果使用 `NumericType.Bool` 作为 predicate 载体。
 - 验证 nn 操作不依赖已移除的旧 shape 规范化入口。
+- 验证 `img2col` 输出形状与参数校验规则。
 
 ### 功能与用例清单
 
@@ -535,3 +536,4 @@ tmp = matmul(lhs, rhs, memoryspace=MemorySpace.SM)
 | OP-MM-005 | `matmul` 标量输入非法 | `test_nn_matmul_scalar_operand_error` |
 | OP-MM-006 | `matmul` 的 `dtype` 按固定优先级决议 | `test_nn_matmul_dtype_mismatch` |
 | OP-MM-007 | `matmul` 输入 `space` 不一致报错 | `test_nn_matmul_space_mismatch` |
+| OP-IMG2COL-001 | `img2col` 输出形状与参数校验规则 | `test_nn_img2col_basic` |
