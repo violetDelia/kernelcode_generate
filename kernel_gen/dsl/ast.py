@@ -877,7 +877,7 @@ def _annotation_from_text(
     最后一次更改: OpenAI
 
     功能说明:
-    - 支持 `int`、`bool` 与 `Tensor[...]` 三类公开注解文本。
+    - 支持 `int`、`bool`、`SymbolDim` 与 `Tensor[...]` 四类公开注解文本。
 
     使用示例:
     - _annotation_from_text("Tensor[f32, 4]", "A", node)
@@ -893,6 +893,8 @@ def _annotation_from_text(
         return ScalarArgAST(name=arg_name or "ret0", value_type=int, location=location)
     if text.strip() == "bool":
         return ScalarArgAST(name=arg_name or "ret0", value_type=bool, location=location)
+    if text.strip() == "SymbolDim":
+        return ScalarArgAST(name=arg_name or "ret0", value_type=int, is_symbolic=True, location=location)
     dtype, dims = _split_tensor_annotation(text, node)
     memory = Memory(dims, dtype)
     return TensorAST(name=arg_name or "ret0", memory=memory, location=location)
@@ -961,6 +963,21 @@ def _parse_annotation_node(
             return ScalarArgAST(name=arg_name or "ret0", value_type=int, location=_location_from_node(node))
         if node.id == "bool":
             return ScalarArgAST(name=arg_name or "ret0", value_type=bool, location=_location_from_node(node))
+        if node.id == "SymbolDim":
+            symbol_name = arg_name or "ret0"
+            if (
+                runtime_table is not None
+                and arg_name is not None
+                and arg_name in runtime_table
+                and isinstance(runtime_table[arg_name], SymbolDim)
+            ):
+                symbol_name = str(runtime_table[arg_name].get_symbol())
+            return ScalarArgAST(
+                name=symbol_name,
+                value_type=int,
+                is_symbolic=True,
+                location=_location_from_node(node),
+            )
         if node.id in globals_table and isinstance(globals_table[node.id], Memory):
             memory = globals_table[node.id]
             return TensorAST(name=arg_name or node.id, memory=memory, location=_location_from_node(node))
