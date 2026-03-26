@@ -1384,7 +1384,15 @@ def _parse_dma_call(
         if len(expr.args) != 2 or expr.keywords:
             _raise_parse_error("Unsupported reshape arity", expr)
         source = _parse_expr(expr.args[0], env, globals_table, builtins_table)
-        shape = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+        previous_allow_external = env.get(_ALLOW_EXTERNAL_CONST_ENV_KEY, False)
+        env[_ALLOW_EXTERNAL_CONST_ENV_KEY] = True
+        try:
+            shape = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+        finally:
+            if previous_allow_external:
+                env[_ALLOW_EXTERNAL_CONST_ENV_KEY] = True
+            else:
+                env.pop(_ALLOW_EXTERNAL_CONST_ENV_KEY, None)
         return DmaReshapeAST(source=source, shape=shape, location=_location_from_node(expr))
 
     if call_name == "flatten":

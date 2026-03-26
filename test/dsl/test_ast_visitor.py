@@ -2922,6 +2922,31 @@ def test_emit_mlir_dma_reshape_lowering() -> None:
     assert [attr.data for attr in result.type.shape.data] == [2, 8]
 
 
+# EMIT-019B
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-27 02:35:30 +0800
+# 最近一次运行成功时间: 2026-03-27 02:35:30 +0800
+# 功能说明: 验证 reshape lowering 结果类型校验错误路径。
+# 测试目的: 当结果类型不是 nn.memory 时抛出 reshape result must be nn.memory。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_rejects_non_memory_reshape_result
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_rejects_non_memory_reshape_result() -> None:
+    source_memory = Memory([2, 2], NumericType.Float32, space=MemorySpace.GM)
+    source = TensorAST(name="src", memory=source_memory, location=None)
+    block = Block(arg_types=[_memory_to_nn_type(source_memory)])
+    ctx = EmitContext(builder=block, symbols={"src": block.args[0]}, types={})
+    ctx._set_cache(_expr_key(source), block.args[0])
+    ctx.types[_expr_key(source)] = block.args[0].type
+
+    expr = DmaReshapeAST(source=source, shape=[ConstAST(1), ConstAST(4)], location=None)
+    ctx.types[_expr_key(expr)] = i32
+    with pytest.raises(_LoweringError, match="reshape result must be nn.memory"):
+        _lower_expr(expr, ctx)
+
+
 # EMIT-020
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚
@@ -3330,6 +3355,40 @@ def test_parse_function_rejects_invalid_free_helper_variants() -> None:
             raise AssertionError(f"expected diagnostics for free variant: {expected_message}")
         if diagnostics[0].message != expected_message:
             raise AssertionError(f"expected free diagnostic {expected_message!r}, got {diagnostics[0].message!r}")
+
+
+# AST-019
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-27 02:18:00 +0800
+# 最近一次运行成功时间: 2026-03-27 02:18:00 +0800
+# 功能说明: 验证 reshape helper 的非法参数个数报错口径。
+# 测试目的: 锁定 reshape 在非法参数个数或关键字参数时保持 Unsupported reshape arity 诊断。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_invalid_reshape_helper_variants
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_parse_function_rejects_invalid_reshape_helper_variants() -> None:
+    from kernel_gen.operation.dma import reshape
+
+    def bad_arity(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 8]":
+        return reshape(src, [2, 8], [1, 1])
+
+    def bad_keyword(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 8]":
+        return reshape(source=src, shape=[2, 8])
+
+    expected_messages = (
+        ("Unsupported reshape arity", bad_arity),
+        ("Unsupported reshape arity", bad_keyword),
+    )
+    for expected_message, fn in expected_messages:
+        with pytest.raises(AstParseError) as exc_info:
+            parse_function(fn)
+        diagnostics = exc_info.value.diagnostics
+        if not diagnostics:
+            raise AssertionError(f"expected diagnostics for reshape variant: {expected_message}")
+        if diagnostics[0].message != expected_message:
+            raise AssertionError(f"expected reshape diagnostic {expected_message!r}, got {diagnostics[0].message!r}")
 
 
 # MGEN-015
@@ -3759,6 +3818,11 @@ def test_emit_mlir_infer_expr_type_branches() -> None:
     load_type = _infer_expr_type(load, type_map)
     assert isinstance(load_type, NnMemoryType)
     assert [dim.data for dim in load_type.shape.data] == [1, 1]
+
+    bad_tensor = TensorAST(name="bad", memory=memory, location=None)
+    bad_type_map = {_expr_key(bad_tensor): i32}
+    with pytest.raises(_LoweringError, match="reshape source must have nn.memory type"):
+        _infer_expr_type(DmaReshapeAST(source=bad_tensor, shape=[ConstAST(2)], location=None), bad_type_map)
 
     with pytest.raises(_LoweringError, match="StoreAST does not produce a value"):
         _infer_expr_type(StoreAST(tensor=tensor, offset=ConstAST(0), stride=None, value=tensor), type_map)

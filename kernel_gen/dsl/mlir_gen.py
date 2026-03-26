@@ -36,6 +36,7 @@ from .ast import (
     ConstAST,
     DmaAllocAST,
     DmaFreeAST,
+    DmaReshapeAST,
     Diagnostic,
     FunctionAST,
     ScalarArgAST,
@@ -171,7 +172,18 @@ def _build_signature_types(
         arg_types.append(arg_type)
         type_map[_expr_key(item)] = arg_type
 
+    allow_missing_tensor_input = False
     if func_ast.inputs and tensor_input_count == 0 and not is_symbol_scalar_function and not allow_dma_alloc_only:
+        allow_missing_tensor_input = any(
+            isinstance(statement, DmaReshapeAST) for statement in func_ast.body.statements
+        )
+    if (
+        func_ast.inputs
+        and tensor_input_count == 0
+        and not is_symbol_scalar_function
+        and not allow_dma_alloc_only
+        and not allow_missing_tensor_input
+    ):
         raise _LoweringError("At least one tensor input is required", location=func_ast.location)
     return arg_types, type_map
 
