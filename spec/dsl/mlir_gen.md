@@ -50,6 +50,8 @@
 - Tensor 注解既可使用普通字符串字面量 `"Tensor[...]"`，也可使用在源码层面可归一化为同等文本的 `f"Tensor[...]"`；归一化后的文本必须满足 Tensor 注解语法，若包含无法静态归一化的格式化片段或归一化后仍不符合语法，必须报错。
 - memory 路径的比较表达式（`eq/ne/lt/le/gt/ge`）必须复用逐元素隐式 broadcast 规则，且 `lhs/rhs` 的 `element_type`/`space` 必须一致；当隐式 broadcast 失败或类型不一致时，`build_func_op(...)` 必须抛出 `AstVisitorError` 并保留位置（例如 `Implicit broadcast dimension mismatch`、`Binary op operands must have the same element_type`）。
 - DSL 函数体内允许出现 `alloc`、`copy`、`cast`、`view`、`reshape`、`flatten`、`free`、`load`、`store`、`slice`、`deslice` 这组 DMA helper 调用；其公开语义由 `emit_mlir` 负责落实到具体 lowering。
+- `view(src, offset, size, stride)` 仅允许四个位置参数且不接受关键字参数；否则必须报错 `Unsupported view arity`。
+- 当 `view(...)` 的 source 无法解析为 `nn.memory` 类型时，`build_func_op` 必须报错 `view source must have nn.memory type`。
 - 当函数体仅返回 `alloc(...)` 且没有 tensor 输入时，允许仅依赖标量 `runtime_args` 构建签名与结果类型；`alloc` 结果类型需由 `shape`/`stride`/`dtype`/`space` 与 `runtime_args` 共同决定，且显式 `stride` 必须与默认连续布局一致，否则必须报错。
 - `flatten(x)` 在 DSL 公开契约中视为一维重排 helper，要求保留元素总数并输出一维 memory 结果；不要求存在独立的 dialect op。
 - `free(x)` 在 DSL 公开契约中是语句型 helper，不产生新的 SSA 返回值，也不能作为函数返回值直接 lowering 为独立结果。

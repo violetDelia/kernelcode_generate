@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)
 - `功能实现`：[`kernel_gen/dsl/emit_mlir.py`](../../kernel_gen/dsl/emit_mlir.py)
 - `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
@@ -39,6 +39,7 @@
 - 当 `ForAST` 来自 `LoopRange(start, end, step)` 且边界与循环变量保持 symbol 整数语义时，必须 lowering 为 `symbol.for`，不得回退为 `scf.for`；其循环块参数 `it` 必须为 `!symbol.int<"expr">`。
 - 在上述 `LoopRange` 场景中，循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand 必须直接复用 `!symbol.int<"expr">` value，不得插入 `arith.index_cast`；若循环变量 `it` 退化为 `index`、普通整数或浮点类型，应视为 lowering 违规。
 - 当 DSL AST 表达 `alloc`、`copy`、`cast`、`view`、`reshape`、`flatten`、`load`、`store`、`slice`、`deslice` 这组 DMA helper 调用时，`emit_mlir` 必须按对应 memory 语义 lowering；其中 `flatten` 公开上视为一维 `reshape` 语义，不要求生成独立 dialect op。
+- `view(...)` 的 source 必须为 `nn.memory` 类型；否则必须报错 `view source must have nn.memory type`。
 - `free` 必须作为语句型 helper 处理，不产生新的 SSA 结果，也不承诺生成独立的 `dma.free` op；其 source 必须为 memory，且不得出现在表达式上下文。
 - `ArchQueryAST(query_name="get_block_id")` 必须 lowering 为单个 `arch.get_block_id`，并保持结果类型为 `!symbol.int<"block_id">`。
 - `ArchQueryAST(query_name="get_block_num")` 必须 lowering 为单个 `arch.get_block_num`，并保持结果类型为 `!symbol.int<"block_num">`。

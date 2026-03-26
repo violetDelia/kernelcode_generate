@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/dsl/ast.md`](../../spec/dsl/ast.md)
 - `功能实现`：[`kernel_gen/dsl/ast.py`](../../kernel_gen/dsl/ast.py)
 - `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
@@ -40,6 +40,7 @@
 - `for` 循环体内不允许出现 `return`；出现即视为语法不支持并报错。
 - 显式 `-> None` 返回注解表示函数无公开返回值；该场景允许函数体只包含语句且省略 `return`。
 - DSL 解析入口当前仅将无参 `get_block_id()` / `get_block_num()` / `get_subthread_id()` / `get_subthread_num()` / `get_thread_id()` 识别为 `arch` 查询 builtin，并解析为专用 `ArchQueryAST` 节点。
+- `view(src, offset, size, stride)` 仅允许四个位置参数且不接受关键字参数；否则必须报错 `Unsupported view arity`。
 
 ## 公开接口
 

@@ -34,6 +34,7 @@ from kernel_gen.symbol_variable.type import NumericType
 
 _REJECT_EXTERNAL_VALUES_ENV_KEY = "__dsl_reject_external_values__"
 _ALLOW_EXTERNAL_CONST_ENV_KEY = "__dsl_allow_external_const__"
+_ALLOW_EXTERNAL_VALUES_ENV_KEY = "__dsl_allow_external_values__"
 
 
 @dataclass(frozen=True)
@@ -1371,9 +1372,9 @@ def _parse_dma_call(
         if len(expr.args) != 4 or expr.keywords:
             _raise_parse_error("Unsupported view arity", expr)
         source = _parse_expr(expr.args[0], env, globals_table, builtins_table)
-        offset = _parse_expr(expr.args[1], env, globals_table, builtins_table)
-        size = _parse_expr(expr.args[2], env, globals_table, builtins_table)
-        stride = _parse_expr(expr.args[3], env, globals_table, builtins_table)
+        offset = _parse_expr_allow_external(expr.args[1], env, globals_table, builtins_table)
+        size = _parse_expr_allow_external(expr.args[2], env, globals_table, builtins_table)
+        stride = _parse_expr_allow_external(expr.args[3], env, globals_table, builtins_table)
         return DmaViewAST(
             source=source,
             offset=offset,
@@ -1445,9 +1446,16 @@ def _parse_expr(
             return env[expr.id]
         value = _lookup_python_name(expr.id, globals_table, builtins_table)
         if value is not None and bool(env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)):
-            if bool(env.get(_ALLOW_EXTERNAL_CONST_ENV_KEY, False)) and isinstance(value, (int, float, str)):
-                return ConstAST(value=value, location=_location_from_node(expr))
-            _raise_parse_error("cannot use external value inside function body", expr)
+            allow_external_values = bool(env.get(_ALLOW_EXTERNAL_VALUES_ENV_KEY, False))
+            allow_external_const = bool(env.get(_ALLOW_EXTERNAL_CONST_ENV_KEY, False))
+            if allow_external_values:
+                if not isinstance(value, (int, float, str, SymbolDim)):
+                    _raise_parse_error("cannot use external value inside function body", expr)
+            elif allow_external_const:
+                if not isinstance(value, (int, float, str)):
+                    _raise_parse_error("cannot use external value inside function body", expr)
+            else:
+                _raise_parse_error("cannot use external value inside function body", expr)
         if isinstance(value, Memory):
             return TensorAST(name=expr.id, memory=value, location=_location_from_node(expr))
         if isinstance(value, SymbolDim):
@@ -1472,7 +1480,16 @@ def _parse_expr(
     if isinstance(expr, py_ast.Attribute):
         value = _parse_attribute_object(expr, globals_table, builtins_table)
         if bool(env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)) and not _is_allowed_attribute_value(value):
-            _raise_parse_error("cannot use external value inside function body", expr)
+            allow_external_values = bool(env.get(_ALLOW_EXTERNAL_VALUES_ENV_KEY, False))
+            allow_external_const = bool(env.get(_ALLOW_EXTERNAL_CONST_ENV_KEY, False))
+            if allow_external_values:
+                if not isinstance(value, (int, float, str, SymbolDim)):
+                    _raise_parse_error("cannot use external value inside function body", expr)
+            elif allow_external_const:
+                if not isinstance(value, (int, float, str)):
+                    _raise_parse_error("cannot use external value inside function body", expr)
+            else:
+                _raise_parse_error("cannot use external value inside function body", expr)
         return value
 
     if isinstance(expr, py_ast.Call):
@@ -1503,6 +1520,17 @@ def _parse_expr(
 
     _raise_parse_error("Unsupported expression", expr)
     return expr
+
+
+def _parse_expr_allow_external(
+    expr: object,
+    env: dict[str, object],
+    globals_table: dict[str, object],
+    builtins_table: dict[str, object],
+) -> object:
+    allow_env = dict(env)
+    allow_env[_ALLOW_EXTERNAL_VALUES_ENV_KEY] = True
+    return _parse_expr(expr, allow_env, globals_table, builtins_table)
 
 
 def _parse_for(

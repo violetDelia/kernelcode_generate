@@ -1244,6 +1244,52 @@ def test_build_func_op_supports_dma_helper_calls() -> None:
     assert any(isinstance(op, DmaReshapeOp) for op in flatten_func.body.block.ops)
 
 
+# MGEN-026
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-27 02:07:49 +0800
+# 最近一次运行成功时间: 2026-03-27 02:07:49 +0800
+# 功能说明: 验证 build_func_op 在 view 调用参数数目不匹配时抛出错误。
+# 测试目的: 锁定 view 仅允许四个位置参数且不接受关键字参数。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_dma_view_invalid_arity
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_rejects_dma_view_invalid_arity() -> None:
+    from kernel_gen.operation.dma import view
+
+    source = Memory([4, 4], NumericType.Float32, space=MemorySpace.GM)
+
+    def view_invalid_arity_kernel(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
+        return view(src, [1, 1], [2, 2])
+
+    with pytest.raises(AstVisitorError, match="Unsupported view arity"):
+        build_func_op(view_invalid_arity_kernel, source)
+
+
+# MGEN-026
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-27 02:07:49 +0800
+# 最近一次运行成功时间: 2026-03-27 02:07:49 +0800
+# 功能说明: 验证 build_func_op 在 view source 类型非法时抛出错误。
+# 测试目的: 锁定 view source 需为 nn.memory 类型，否则报错。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_dma_view_invalid_source_type
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_rejects_dma_view_invalid_source_type() -> None:
+    from kernel_gen.operation.dma import view
+
+    source = Memory([2, 2], NumericType.Float32, space=MemorySpace.GM)
+
+    def view_invalid_source_kernel(dummy: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return view(1, [1, 1], [2, 2], [1, 1])
+
+    with pytest.raises(AstVisitorError, match="view source must have nn.memory type"):
+        build_func_op(view_invalid_source_kernel, source)
+
+
 # MGEN-026A
 # 创建者: 小李飞刀
 # 最后一次更改: 我不是牛马
@@ -3849,13 +3895,16 @@ def test_emit_mlir_infer_expr_type_branches() -> None:
     with pytest.raises(_LoweringError, match="Unsupported symbol compare op"):
         _infer_expr_type(CompareExprAST(op="gt", lhs=sym_lhs, rhs=sym_rhs), type_map)
 
-    type_map[_expr_key(sym_lhs)] = i32
-    type_map[_expr_key(sym_rhs)] = i32
+    scalar_type_map = {
+        _expr_key(tensor): _memory_to_nn_type(memory),
+        _expr_key(sym_lhs): i32,
+        _expr_key(sym_rhs): i32,
+    }
     with pytest.raises(_LoweringError, match="Binary op operands must have nn.memory type"):
-        _infer_expr_type(BinaryExprAST(op="add", lhs=sym_lhs, rhs=sym_rhs), type_map)
+        _infer_expr_type(BinaryExprAST(op="add", lhs=sym_lhs, rhs=sym_rhs), scalar_type_map)
 
     with pytest.raises(_LoweringError, match="Compare op operands must have nn.memory type"):
-        _infer_expr_type(CompareExprAST(op="eq", lhs=sym_lhs, rhs=sym_rhs), type_map)
+        _infer_expr_type(CompareExprAST(op="eq", lhs=sym_lhs, rhs=sym_rhs), scalar_type_map)
 
     lhs_type = _memory_to_nn_type(Memory([2, 1], NumericType.Float32))
     with pytest.raises(_LoweringError, match="Implicit broadcast dimension mismatch"):

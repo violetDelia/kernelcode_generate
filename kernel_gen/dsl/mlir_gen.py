@@ -305,6 +305,13 @@ def _build_func_op_from_ast_impl(
 
     config = config or {}
     is_dma_alloc_only = _is_dma_alloc_only_function(func_ast)
+    runtime_values: dict[str, object] = {}
+    if runtime_args is not None:
+        runtime_values = {
+            input_arg.name: runtime_args[index]
+            for index, input_arg in enumerate(func_ast.inputs)
+            if isinstance(input_arg, ScalarArgAST)
+        }
     arg_types, type_map = _build_signature_types(
         func_ast,
         runtime_args=runtime_args,
@@ -320,7 +327,7 @@ def _build_func_op_from_ast_impl(
                 raise _LoweringError("Return type does not match annotation", location=func_ast.location)
             result_type = _build_dma_alloc_only_result_type(func_ast, return_expr, runtime_args)
         else:
-            result_type = _infer_expr_type(return_expr, dict(type_map))
+            result_type = _infer_expr_type(return_expr, dict(type_map), runtime_values)
         _validate_return_type(func_ast, result_type)
         type_map[_expr_key(return_expr)] = result_type
         result_types = [result_type]
@@ -329,7 +336,7 @@ def _build_func_op_from_ast_impl(
         if isinstance(return_expr, DmaFreeAST):
             result_types = []
         else:
-            result_type = _infer_expr_type(return_expr, dict(type_map))
+            result_type = _infer_expr_type(return_expr, dict(type_map), runtime_values)
             if not isinstance(result_type, SymbolValueType):
                 raise _LoweringError(
                     "Symbol scalar function return must lower to !symbol.int",

@@ -77,12 +77,14 @@ from kernel_gen.dialect.symbol import (
     SymbolGeOp,
     SymbolFloorDivOp,
     SymbolForOp,
+    SymbolGetStrideOp,
     SymbolMulOp,
     SymbolSubOp,
     SymbolValueType,
     build_public_symbol_expr,
 )
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
 from .ast import (
@@ -346,7 +348,11 @@ def _build_stride_attrs(
     return stride
 
 
-def _resolve_static_index_expr(expr: object, location: SourceLocation | None = None) -> int | str:
+def _resolve_static_index_expr(
+    expr: object,
+    location: SourceLocation | None = None,
+    runtime_values: dict[str, object] | None = None,
+) -> int | str:
     """解析类型推导阶段使用的索引表达式。
 
     创建者: OpenAI
@@ -368,7 +374,15 @@ def _resolve_static_index_expr(expr: object, location: SourceLocation | None = N
         if isinstance(expr.value, (int, str)):
             return expr.value
         raise _LoweringError("Index must be int or str", location=expr.location)
-    if isinstance(expr, (ScalarArgAST, VarAST)):
+    if isinstance(expr, ScalarArgAST):
+        if expr.is_symbolic and runtime_values is not None and expr.name in runtime_values:
+            runtime_value = runtime_values[expr.name]
+            if isinstance(runtime_value, SymbolDim):
+                return str(runtime_value.get_symbol())
+            if isinstance(runtime_value, int):
+                return runtime_value
+        return expr.name
+    if isinstance(expr, VarAST):
         return expr.name
     if isinstance(expr, (int, str)):
         return expr
@@ -381,6 +395,7 @@ def _build_static_index_list(
     *,
     default_value: int,
     location: SourceLocation | None = None,
+    runtime_values: dict[str, object] | None = None,
 ) -> list[Attribute]:
     """构造类型推导阶段使用的索引属性列表。
 
@@ -404,9 +419,9 @@ def _build_static_index_list(
     elif isinstance(value, (list, tuple)):
         if len(value) != rank:
             raise _LoweringError("Index rank mismatch", location=location)
-        values = [_resolve_static_index_expr(entry, location) for entry in value]
+        values = [_resolve_static_index_expr(entry, location, runtime_values) for entry in value]
     else:
-        scalar = _resolve_static_index_expr(value, location)
+        scalar = _resolve_static_index_expr(value, location, runtime_values)
         values = [scalar for _ in range(rank)]
     return [_dim_to_attr(item) for item in values]
 
@@ -415,6 +430,7 @@ def _build_static_index_attrs_exact(
     value: object,
     *,
     location: SourceLocation | None = None,
+    runtime_values: dict[str, object] | None = None,
 ) -> list[Attribute]:
     """按显式维度列表构造静态索引属性。
 
@@ -434,9 +450,9 @@ def _build_static_index_attrs_exact(
     """
 
     if isinstance(value, (list, tuple)):
-        entries = [_resolve_static_index_expr(entry, location) for entry in value]
+        entries = [_resolve_static_index_expr(entry, location, runtime_values) for entry in value]
     else:
-        entries = [_resolve_static_index_expr(value, location)]
+        entries = [_resolve_static_index_expr(value, location, runtime_values)]
     return [_dim_to_attr(entry) for entry in entries]
 
 
@@ -645,7 +661,11 @@ def _expr_key(expr: object) -> int:
     return id(expr)
 
 
-def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
+def _infer_expr_type(
+    expr: object,
+    type_map: dict[int, object],
+    runtime_values: dict[str, object] | None = None,
+) -> object:
     expr_key = _expr_key(expr)
     if expr_key in type_map:
         return type_map[expr_key]
@@ -667,16 +687,24 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
         if expr.sizes is None:
             shape_attr = source_type.shape
         else:
-            shape_attr = ArrayAttr(_build_static_index_list(expr.sizes, rank, default_value=1, location=expr.location))
+            shape_attr = ArrayAttr(
+                _build_static_index_list(
+                    expr.sizes,
+                    rank,
+                    default_value=1,
+                    location=expr.location,
+                    runtime_values=runtime_values,
+                )
+            )
         stride_attr = ArrayAttr(_build_default_stride_attrs(shape_attr.data))
         space_attr = _memory_space_from_ast(expr.space, source_type.space)
         result_type = NnMemoryType(shape_attr, stride_attr, source_type.element_type, space_attr)
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, DmaAllocAST):
-        shape_attr = _build_static_index_attrs_exact(expr.shape, location=expr.location)
+        shape_attr = _build_static_index_attrs_exact(expr.shape, location=expr.location, runtime_values=runtime_values)
         stride_attr = (
-            _build_static_index_attrs_exact(expr.stride, location=expr.location)
+            _build_static_index_attrs_exact(expr.stride, location=expr.location, runtime_values=runtime_values)
             if expr.stride is not None
             else _build_default_stride_attrs(shape_attr)
         )
@@ -692,7 +720,7 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, DmaCopyAST):
-        source_type = _infer_expr_type(expr.source, type_map)
+        source_type = _infer_expr_type(expr.source, type_map, runtime_values)
         if not isinstance(source_type, NnMemoryType):
             raise _LoweringError("copy source must have nn.memory type", location=expr.location)
         result_type = _memory_type_from_parts(
@@ -704,7 +732,7 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, DmaCastAST):
-        source_type = _infer_expr_type(expr.source, type_map)
+        source_type = _infer_expr_type(expr.source, type_map, runtime_values)
         if not isinstance(source_type, NnMemoryType):
             raise _LoweringError("cast source must have nn.memory type", location=expr.location)
         result_type = _memory_type_from_parts(
@@ -716,19 +744,18 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, DmaViewAST):
-        source_type = _infer_expr_type(expr.source, type_map)
+        source_type = _infer_expr_type(expr.source, type_map, runtime_values)
         if not isinstance(source_type, NnMemoryType):
             raise _LoweringError("view source must have nn.memory type", location=expr.location)
-        shape_attr = _build_static_index_attrs_exact(expr.size, location=expr.location)
-        stride_attr = _build_default_stride_attrs(shape_attr)
-        result_type = _memory_type_from_parts(shape_attr, stride_attr, source_type.element_type, source_type.space)
+        shape_attr = _build_static_index_attrs_exact(expr.size, location=expr.location, runtime_values=runtime_values)
+        result_type = _memory_type_from_parts(shape_attr, source_type.stride, source_type.element_type, source_type.space)
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, DmaReshapeAST):
-        source_type = _infer_expr_type(expr.source, type_map)
+        source_type = _infer_expr_type(expr.source, type_map, runtime_values)
         if not isinstance(source_type, NnMemoryType):
             raise _LoweringError("reshape source must have nn.memory type", location=expr.location)
-        shape_attr = _build_static_index_attrs_exact(expr.shape, location=expr.location)
+        shape_attr = _build_static_index_attrs_exact(expr.shape, location=expr.location, runtime_values=runtime_values)
         result_type = _memory_type_from_parts(
             shape_attr,
             _build_default_stride_attrs(shape_attr),
@@ -738,7 +765,7 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, DmaFlattenAST):
-        source_type = _infer_expr_type(expr.source, type_map)
+        source_type = _infer_expr_type(expr.source, type_map, runtime_values)
         if not isinstance(source_type, NnMemoryType):
             raise _LoweringError("flatten source must have nn.memory type", location=expr.location)
         shape_attr = [_shape_numel_attr(source_type.shape.data)]
@@ -767,8 +794,8 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
         return result_type
 
     if isinstance(expr, BinaryExprAST):
-        lhs_type = _infer_expr_type(expr.lhs, type_map)
-        rhs_type = _infer_expr_type(expr.rhs, type_map)
+        lhs_type = _infer_expr_type(expr.lhs, type_map, runtime_values)
+        rhs_type = _infer_expr_type(expr.rhs, type_map, runtime_values)
         if isinstance(lhs_type, SymbolValueType) and isinstance(rhs_type, SymbolValueType):
             if expr.op not in {"add", "sub", "mul", "div", "floordiv"}:
                 raise _LoweringError("Unsupported symbol binary op", location=expr.location)
@@ -794,8 +821,8 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
         return target_type
 
     if isinstance(expr, CompareExprAST):
-        lhs_type = _infer_expr_type(expr.lhs, type_map)
-        rhs_type = _infer_expr_type(expr.rhs, type_map)
+        lhs_type = _infer_expr_type(expr.lhs, type_map, runtime_values)
+        rhs_type = _infer_expr_type(expr.rhs, type_map, runtime_values)
         if isinstance(lhs_type, SymbolValueType) and isinstance(rhs_type, SymbolValueType):
             if expr.op not in {"eq", "ge"}:
                 raise _LoweringError("Unsupported symbol compare op", location=expr.location)
@@ -910,12 +937,16 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         return op.result
     if isinstance(expr, DmaViewAST):
         source = _lower_expr(expr.source, ctx)
-        _expect_memory_value(source, expr.location)
+        source_type = _expect_memory_value(source, expr.location)
         result_type = _infer_expr_type(expr, ctx.types)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("view result must be nn.memory", location=expr.location)
         shape = _build_index_operands_exact(expr.size, ctx, location=expr.location)
-        stride = _build_index_operands_from_layout(result_type.stride, ctx, location=expr.location)
+        stride: list[SSAValue] = []
+        for axis in range(len(source_type.stride.data)):
+            op = SymbolGetStrideOp(source, axis)
+            ctx.builder.add_op(op)
+            stride.append(op.result)
         op = DmaViewOp(source, shape, stride, result_type)
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
