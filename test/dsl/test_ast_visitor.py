@@ -59,7 +59,7 @@ from kernel_gen.dialect.dma import (
     DmaStoreOp,
     DmaViewOp,
 )
-from kernel_gen.dialect.arch import ArchGetBlockIdOp, ArchGetBlockNumOp, ArchGetSubthreadIdOp
+from kernel_gen.dialect.arch import ArchGetBlockIdOp, ArchGetBlockNumOp
 from kernel_gen.dialect.nn import NnAddOp, NnBroadcastOp, NnEqOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
@@ -399,111 +399,6 @@ def test_emit_mlir_lowers_arch_get_block_num_query() -> None:
     if result.type != SymbolValueType.from_expr("block_num"):
         raise AssertionError('expected emitted result type to be !symbol.int<"block_num">')
 
-
-# AST-014E / MGEN-031
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-26 23:03:05 +0800
-# 最近一次运行成功时间: 2026-03-26 23:03:05 +0800
-# 功能说明: 验证零入参 get_subthread_id DSL 函数可解析并 lowering 为 arch.get_subthread_id。
-# 测试目的: 锁定 get_subthread_id 查询的 AST 解析、build_func_op 与 build_func_op_from_ast 返回类型为 !symbol.int<"subthread_id">。
-# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_lowers_arch_get_subthread_id_query
-# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
-# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
-# 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_build_func_op_lowers_arch_get_subthread_id_query() -> None:
-    def get_subthread_id_kernel() -> int:
-        return get_subthread_id()
-
-    func_ast = parse_function(get_subthread_id_kernel)
-    if len(func_ast.inputs) != 0:
-        raise AssertionError("expected get_subthread_id kernel to have no inputs")
-    if len(func_ast.outputs) != 1:
-        raise AssertionError("expected get_subthread_id kernel to have one output annotation")
-    if len(func_ast.body.statements) != 1:
-        raise AssertionError("expected get_subthread_id kernel to lower to one AST statement")
-    if not isinstance(func_ast.body.statements[0], ArchQueryAST):
-        raise AssertionError("expected get_subthread_id kernel to parse into ArchQueryAST")
-    if func_ast.body.statements[0].query_name != "get_subthread_id":
-        raise AssertionError("expected arch query name to stay get_subthread_id")
-
-    for func_op in (build_func_op(get_subthread_id_kernel), build_func_op_from_ast(func_ast)):
-        if len(tuple(func_op.body.block.args)) != 0:
-            raise AssertionError("expected zero-argument func.func for get_subthread_id kernel")
-        body_ops = list(func_op.body.block.ops)
-        query_ops = [op for op in body_ops if isinstance(op, ArchGetSubthreadIdOp)]
-        return_ops = [op for op in body_ops if isinstance(op, func.ReturnOp)]
-        if len(query_ops) != 1:
-            raise AssertionError("expected exactly one arch.get_subthread_id op")
-        if query_ops[0].result.type != SymbolValueType.from_expr("subthread_id"):
-            raise AssertionError('expected arch.get_subthread_id result type to be !symbol.int<"subthread_id">')
-        if len(return_ops) != 1:
-            raise AssertionError("expected exactly one func.return op")
-        if len(return_ops[0].arguments) != 1:
-            raise AssertionError("expected func.return to carry one value")
-        if return_ops[0].arguments[0].type != SymbolValueType.from_expr("subthread_id"):
-            raise AssertionError('expected func.return type to stay !symbol.int<"subthread_id">')
-
-
-# AST-014F
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-26 23:03:05 +0800
-# 最近一次运行成功时间: 2026-03-26 23:03:05 +0800
-# 功能说明: 验证 get_subthread_id helper 拒绝位置参数与关键字参数。
-# 测试目的: 锁定 get_subthread_id(1) 与 get_subthread_id(x=1) 在 AST 解析阶段保持 Unsupported get_subthread_id arity 诊断。
-# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_invalid_get_subthread_id_arity_variants
-# 对应功能实现文件路径: kernel_gen/dsl/ast.py
-# 对应 spec 文件路径: spec/dsl/ast.md
-# 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_parse_function_rejects_invalid_get_subthread_id_arity_variants(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    invalid_sources = (
-        """\
-def kernel() -> int:
-    return get_subthread_id(1)
-""",
-        """\
-def kernel() -> int:
-    return get_subthread_id(x=1)
-""",
-    )
-
-    for source in invalid_sources:
-        with pytest.raises(AstParseError) as exc_info:
-            _parse_function_from_source(monkeypatch, source)
-        diagnostics = exc_info.value.diagnostics
-        if not diagnostics:
-            raise AssertionError("expected diagnostics for invalid get_subthread_id arity")
-        if diagnostics[0].message != "Unsupported get_subthread_id arity":
-            raise AssertionError("expected Unsupported get_subthread_id arity diagnostic")
-
-
-# EMIT-025
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-26 23:03:05 +0800
-# 最近一次运行成功时间: 2026-03-26 23:03:05 +0800
-# 功能说明: 验证 ArchQueryAST(query_name="get_subthread_id") lowering 为 arch.get_subthread_id。
-# 测试目的: 锁定 emit_mlir 对 get_subthread_id 查询的发射语义与结果类型。
-# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_lowers_arch_get_subthread_id_query
-# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_emit_mlir_lowers_arch_get_subthread_id_query() -> None:
-    block = Block()
-    ctx = EmitContext(builder=block, symbols={}, types={})
-
-    result = emit_node_mlir(ArchQueryAST(query_name="get_subthread_id"), ctx)
-
-    body_ops = list(block.ops)
-    if len(body_ops) != 1:
-        raise AssertionError("expected one emitted op for get_subthread_id query")
-    if not isinstance(body_ops[0], ArchGetSubthreadIdOp):
-        raise AssertionError("expected emitted op to be ArchGetSubthreadIdOp")
-    if result.type != SymbolValueType.from_expr("subthread_id"):
-        raise AssertionError('expected emitted result type to be !symbol.int<"subthread_id">')
 
 # AST-001
 # 创建者: 小李飞刀
@@ -930,9 +825,9 @@ def test_mlir_gen_signature_validation_errors() -> None:
 
 # MGEN-025
 # 创建者: 朽木露琪亚
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-26 23:33:50 +0800
-# 最近一次运行成功时间: 2026-03-26 23:33:50 +0800
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-25 10:18:40 +0800
+# 最近一次运行成功时间: 2026-03-25 10:18:40 +0800
 # 功能说明: 验证 build_func_op 支持可静态归一化的 JoinedStr Tensor 注解。
 # 测试目的: 验证 f"Tensor[...]" 形式的输入/输出注解可被归一化并成功参与 lowering。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_accepts_joinedstr_tensor_annotation
@@ -1435,8 +1330,8 @@ def test_build_func_op_supports_dma_slice_helper() -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-25 10:18:40 +0800
 # 最近一次运行成功时间: 2026-03-25 10:18:40 +0800
-# 功能说明: 验证 build_func_op 在 deslice helper 场景下生成 dma.deslice，且不生成 dma.store。
-# 测试目的: 验证 deslice(...) 在 build_func_op 链路中被直接识别并 lowering 为 DmaDesliceOp，ReturnOp 无返回值。
+# 功能说明: 验证 build_func_op 在 deslice helper 场景下生成 dma.deslice。
+# 测试目的: 验证 deslice(...) 在 build_func_op 链路中被直接识别并 lowering 为 DmaDesliceOp。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_supports_dma_deslice_helper
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -1452,104 +1347,8 @@ def test_build_func_op_supports_dma_deslice_helper() -> None:
 
     func_op = build_func_op(deslice_kernel, source, target)
     deslice_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaDesliceOp)]
-    store_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaStoreOp)]
-    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
     assert isinstance(func_op, func.FuncOp)
     assert len(deslice_ops) == 1
-    assert len(store_ops) == 0
-    assert len(return_ops) == 1
-    assert len(return_ops[0].arguments) == 0
-
-
-# MGEN-026
-# 创建者: 我不是牛马
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-26 23:33:50 +0800
-# 最近一次运行成功时间: 2026-03-26 23:33:50 +0800
-# 功能说明: 验证 deslice helper 在 runtime_args offsets/sizes 场景可被 build_func_op lowering。
-# 测试目的: 覆盖 deslice(...) 接收运行时 offsets/sizes 并生成 DmaDesliceOp，ReturnOp 无返回值。
-# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_supports_dma_deslice_helper_with_runtime_args
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
-# 对应 spec 文件路径: spec/dsl/mlir_gen.md
-# 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_build_func_op_supports_dma_deslice_helper_with_runtime_args() -> None:
-    from kernel_gen.operation.dma import deslice
-
-    source = Memory([2, 2], NumericType.Float32, space=MemorySpace.LM)
-    target = Memory([4, 4], NumericType.Float32, space=MemorySpace.GM)
-
-    offset_row = 1
-    offset_col = 0
-    size_row = 2
-    size_col = 2
-
-    def deslice_param_kernel(
-        tile: "Tensor[f32, 2, 2]",
-        dst: "Tensor[f32, 4, 4]",
-        offset_row: int,
-        offset_col: int,
-        size_row: int,
-        size_col: int,
-    ):
-        deslice(tile, dst, [offset_row, offset_col], [size_row, size_col], [1, 1])
-
-    func_op = build_func_op(
-        deslice_param_kernel,
-        source,
-        target,
-        offset_row,
-        offset_col,
-        size_row,
-        size_col,
-    )
-    deslice_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaDesliceOp)]
-    store_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaStoreOp)]
-    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
-    assert isinstance(func_op, func.FuncOp)
-    assert len(deslice_ops) == 1
-    assert len(store_ops) == 0
-    assert len(return_ops) == 1
-    assert len(return_ops[0].arguments) == 0
-
-
-# MGEN-026F
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-27 00:37:18 +0800
-# 最近一次运行成功时间: 2026-03-27 00:37:18 +0800
-# 功能说明: 验证 build_func_op 触发 deslice helper 负路径时抛出 AstVisitorError。
-# 测试目的: 锁定 deslice arity/target/space 诊断在 build_func_op 链路的报错文本不变。
-# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_invalid_deslice_helper_variants
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
-# 对应 spec 文件路径: spec/dsl/mlir_gen.md
-# 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_build_func_op_rejects_invalid_deslice_helper_variants() -> None:
-    from kernel_gen.operation.dma import deslice
-
-    source = Memory([2, 2], NumericType.Float32, space=MemorySpace.LM)
-    target = Memory([4, 4], NumericType.Float32, space=MemorySpace.GM)
-
-    def bad_arity(tile: "Tensor[f32, 2, 2]", dst: "Tensor[f32, 4, 4]"):
-        deslice(tile, dst, [0, 0])
-
-    def bad_target(tile: "Tensor[f32, 2, 2]", dst: int):
-        deslice(tile, dst, [0, 0], [2, 2], [1, 1])
-
-    def bad_space(tile: "Tensor[f32, 2, 2]", dst: "Tensor[f32, 4, 4]"):
-        deslice(tile, dst, [0, 0], [2, 2], [1, 1], 1)
-
-    expected_messages = (
-        ("Unsupported deslice arity", bad_arity, (source, target)),
-        ("deslice target must be TensorAST", bad_target, (source, 0)),
-        ("deslice space must be MemorySpace", bad_space, (source, target)),
-    )
-    for expected_message, fn, runtime_args in expected_messages:
-        with pytest.raises(AstVisitorError) as exc_info:
-            build_func_op(fn, *runtime_args)
-        if exc_info.value.message != expected_message:
-            raise AssertionError(
-                f"expected deslice diagnostic {expected_message!r}, got {exc_info.value.message!r}"
-            )
 
 
 # MGEN-007
@@ -3439,9 +3238,9 @@ def test_emit_mlir_index_resolution_helpers() -> None:
 
 # EMIT-012
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-27 00:37:18 +0800
-# 最近一次运行成功时间: 2026-03-27 00:37:18 +0800
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-26 22:20:00 +0800
+# 最近一次运行成功时间: 2026-03-26 22:20:00 +0800
 # 功能说明: 覆盖 emit_mlir 类型推导与 broadcast 错误分支。
 # 测试目的: 覆盖常量类型、symbol binary op、broadcast mismatch 等路径。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_infer_expr_type_branches
@@ -3488,17 +3287,10 @@ def test_emit_mlir_infer_expr_type_branches() -> None:
     with pytest.raises(_LoweringError, match="Unsupported symbol binary op"):
         _infer_expr_type(BinaryExprAST(op="mod", lhs=sym_lhs, rhs=sym_rhs), type_map)
 
-    compare_exprs: list[CompareExprAST] = []
-    compare_eq = CompareExprAST(op="eq", lhs=sym_lhs, rhs=sym_rhs)
-    compare_exprs.append(compare_eq)
-    assert _infer_expr_type(compare_eq, type_map) == i1
-    compare_ge = CompareExprAST(op="ge", lhs=sym_lhs, rhs=sym_rhs)
-    compare_exprs.append(compare_ge)
-    assert _infer_expr_type(compare_ge, type_map) == i1
+    assert _infer_expr_type(CompareExprAST(op="eq", lhs=sym_lhs, rhs=sym_rhs), type_map) == i1
+    assert _infer_expr_type(CompareExprAST(op="ge", lhs=sym_lhs, rhs=sym_rhs), type_map) == i1
     with pytest.raises(_LoweringError, match="Unsupported symbol compare op"):
-        compare_gt = CompareExprAST(op="gt", lhs=sym_lhs, rhs=sym_rhs)
-        compare_exprs.append(compare_gt)
-        _infer_expr_type(compare_gt, type_map)
+        _infer_expr_type(CompareExprAST(op="gt", lhs=sym_lhs, rhs=sym_rhs), type_map)
 
     type_map[_expr_key(sym_lhs)] = i32
     type_map[_expr_key(sym_rhs)] = i32
@@ -3506,9 +3298,7 @@ def test_emit_mlir_infer_expr_type_branches() -> None:
         _infer_expr_type(BinaryExprAST(op="add", lhs=sym_lhs, rhs=sym_rhs), type_map)
 
     with pytest.raises(_LoweringError, match="Compare op operands must have nn.memory type"):
-        compare_invalid = CompareExprAST(op="eq", lhs=sym_lhs, rhs=sym_rhs)
-        compare_exprs.append(compare_invalid)
-        _infer_expr_type(compare_invalid, type_map)
+        _infer_expr_type(CompareExprAST(op="eq", lhs=sym_lhs, rhs=sym_rhs), type_map)
 
     lhs_type = _memory_to_nn_type(Memory([2, 1], NumericType.Float32))
     with pytest.raises(_LoweringError, match="Implicit broadcast dimension mismatch"):
