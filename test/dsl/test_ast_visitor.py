@@ -513,10 +513,10 @@ def test_emit_mlir_lowers_arch_get_subthread_id_query() -> None:
 
 
 # AST-014G / MGEN-032
-# 创建者: 我不是牛马
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-25 21:41:29 +0800
-# 最近一次运行成功时间: 2026-03-25 21:41:29 +0800
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-27 01:38:30 +0800
+# 最近一次运行成功时间: 2026-03-27 01:38:30 +0800
 # 功能说明: 验证零入参 get_thread_id DSL 函数可解析并 lowering 为 arch.get_thread_id。
 # 测试目的: 锁定 get_thread_id 查询的 AST 解析、build_func_op 与 build_func_op_from_ast 返回类型为 !symbol.int<"thread_id">。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_lowers_arch_get_thread_id_query
@@ -558,10 +558,10 @@ def test_build_func_op_lowers_arch_get_thread_id_query() -> None:
 
 
 # AST-014H
-# 创建者: 我不是牛马
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-25 21:41:29 +0800
-# 最近一次运行成功时间: 2026-03-25 21:41:29 +0800
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-27 01:38:30 +0800
+# 最近一次运行成功时间: 2026-03-27 01:38:30 +0800
 # 功能说明: 验证 get_thread_id helper 拒绝位置参数与关键字参数。
 # 测试目的: 锁定 get_thread_id(1) 与 get_thread_id(x=1) 在 AST 解析阶段保持 Unsupported get_thread_id arity 诊断。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_invalid_get_thread_id_arity_variants
@@ -593,10 +593,10 @@ def kernel() -> int:
 
 
 # EMIT-026
-# 创建者: 我不是牛马
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-25 21:41:29 +0800
-# 最近一次运行成功时间: 2026-03-25 21:41:29 +0800
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-27 01:38:30 +0800
+# 最近一次运行成功时间: 2026-03-27 01:38:30 +0800
 # 功能说明: 验证 ArchQueryAST(query_name="get_thread_id") lowering 为 arch.get_thread_id。
 # 测试目的: 锁定 emit_mlir 对 get_thread_id 查询的发射语义与结果类型。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_lowers_arch_get_thread_id_query
