@@ -110,6 +110,7 @@ value = emit_mlir(expr_ast, ctx)
 - 默认使用当前项目的目标 dialect（例如 `nn`），但节点到 op 的映射必须清晰可追踪。
 - `LoopRange` 触发的 `ForAST` 必须走 `symbol.for` 分支，并保持 symbol 整数值直接作为 DMA operand 传递。
 - 当 `CompareExprAST` 的两侧均为 `!symbol.int<"expr">` 时，`eq` 必须 lowering 为 `symbol.eq`，`ge` 必须 lowering 为 `symbol.ge`，两者结果类型均为 `i1`；其余 symbol 比较操作符必须报错 `Unsupported symbol compare op`。
+- 当 `CompareExprAST` 进入 memory 路径时，`lhs/rhs` 必须为 `nn.memory` 类型且 `element_type`/`space` 一致；必要时执行隐式 broadcast。若 `element_type`/`space` 不一致或 broadcast 失败，必须报错并保留位置（例如 `Binary op operands must have the same element_type`、`Binary op operands must have the same space`、`Implicit broadcast dimension mismatch`）。
 - DMA helper 的公开 lowering 约束如下：
   - `alloc(...)`：lowering 为 `dma.alloc`，返回新的 memory value。
   - `copy(...)`：lowering 为 `dma.copy`，返回目标 memory value。
@@ -125,7 +126,7 @@ value = emit_mlir(expr_ast, ctx)
 
 - `ConstAST`：生成常量或等价字面量 op/value。
 - `BinaryExprAST(add/sub/mul/div/floordiv)`：生成对应的二元算术 op。
-- `CompareExprAST(eq/ne/lt/le/gt/ge)`：在 memory 路径生成对应 `nn` 比较 op；在 symbol 路径仅支持 `eq/ge`，分别生成 `symbol.eq/symbol.ge`。
+- `CompareExprAST(eq/ne/lt/le/gt/ge)`：在 memory 路径生成对应 `nn` 比较 op（返回 `i1` element_type），必要时隐式 broadcast；在 symbol 路径仅支持 `eq/ge`，分别生成 `symbol.eq/symbol.ge`。
 - `LoadAST`：生成张量读取相关 op/value；当携带 `sizes` 时发射 `dma.slice`。
 - `StoreAST`：生成张量写入相关 op；当携带 `sizes` 时发射 `dma.deslice`。
 - `CallAST(alloc/copy/cast/view/reshape/flatten)`：生成对应 DMA memory 结果。
@@ -154,7 +155,7 @@ value = emit_mlir(expr_ast, ctx)
   - 覆盖不支持节点的错误路径。
 - 功能与用例清单：
   - EMIT-001：二元表达式节点生成对应 op/value。（`test_emit_context_reuses_cached_value`）
-  - EMIT-002：比较表达式节点生成对应 op/value。（`test_emit_mlir_compare_expr_emits_eq`）
+  - EMIT-002：比较表达式节点生成对应 op/value；memory 路径以 `eq` 覆盖，其余比较 op 与 `eq` 共用相同发射分支。（`test_emit_mlir_compare_expr_emits_eq`）
   - EMIT-003：不支持节点抛出错误并携带位置信息。（`test_emit_mlir_unsupported_node_reports_location`）
   - EMIT-004：`TensorAST` 可通过符号表直接解析。（`test_emit_mlir_tensor_uses_symbol_table`）
   - EMIT-005：`LoadAST` 生成 `dma.load`。（`test_load_ast_lowering_rejected`）

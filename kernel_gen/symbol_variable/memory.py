@@ -150,6 +150,7 @@ class Memory:
         self.stride = self._default_stride(self.shape) if stride is None else self._normalize_stride(stride)
         self.format = format
         self.space = space
+        self._is_predicate = False
 
     @staticmethod
     def _normalize_shape(value: ShapeLike) -> SymbolShape:
@@ -568,9 +569,13 @@ class Memory:
         if isinstance(other, Memory):
             self._ensure_same_shape(other)
             self._ensure_same_dtype(other)
-            return self._clone_with_dtype(NumericType.Int32)
+            result = self._clone_with_dtype(NumericType.Int32)
+            result._is_predicate = True
+            return result
         self._ensure_scalar_compatible(other)
-        return self._clone_with_dtype(NumericType.Int32)
+        result = self._clone_with_dtype(NumericType.Int32)
+        result._is_predicate = True
+        return result
 
     def __add__(self: "Memory", other: object) -> "Memory":
         """逐元素加法。

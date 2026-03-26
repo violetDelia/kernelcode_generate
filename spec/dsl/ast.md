@@ -373,7 +373,10 @@ BinaryExprAST(op="add", lhs=a, rhs=b)
 CompareExprAST(op="lt", lhs=a, rhs=b)
 ```
 
-注意事项：比较语义由下游定义。
+注意事项：
+
+- `op` 仅允许 `eq/ne/lt/le/gt/ge`，分别对应 `==`/`!=`/`<`/`<=`/`>`/`>=`。
+- 比较语义与错误路径由下游 `emit_mlir` / `mlir_gen` 定义；不支持的比较操作符必须在下游抛出可定位错误。
 
 返回与限制：返回不可变的数据结构实例。
 

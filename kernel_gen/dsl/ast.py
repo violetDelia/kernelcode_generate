@@ -655,6 +655,8 @@ _DTYPE_MAP: dict[str, NumericType] = {
     "int32": NumericType.Int32,
     "i64": NumericType.Int64,
     "int64": NumericType.Int64,
+    "i1": NumericType.Bool,
+    "bool": NumericType.Bool,
     "u8": NumericType.Uint8,
     "uint8": NumericType.Uint8,
     "u16": NumericType.Uint16,
