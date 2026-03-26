@@ -166,10 +166,10 @@ def _dtype_to_xdsl(dtype: NumericType, location: SourceLocation | None = None) -
         return Float16Type()
     if dtype is NumericType.Float32:
         return f32
-    if dtype is NumericType.Int32:
-        return i32
     if dtype is NumericType.Bool:
         return i1
+    if dtype is NumericType.Int32:
+        return i32
     raise _LoweringError(f"Unsupported dtype: {dtype}", location=location)
 
 
@@ -596,8 +596,6 @@ def _memory_to_nn_type(memory: Memory, location: SourceLocation | None = None) -
     shape_attr = ArrayAttr([_dim_to_attr(dim) for dim in shape])
     stride_attr = ArrayAttr([_dim_to_attr(dim) for dim in stride_values])
     element_type = _dtype_to_xdsl(memory.dtype, location=location)
-    if getattr(memory, "_is_predicate", False):
-        element_type = i1
     space_name = _MEMORY_SPACE_MAP.get(memory.space, "global")
     space = NnMemorySpaceAttr.from_name(space_name)
     return NnMemoryType(shape_attr, stride_attr, element_type, space)

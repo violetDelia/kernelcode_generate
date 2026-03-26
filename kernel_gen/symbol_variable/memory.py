@@ -130,7 +130,7 @@ class Memory:
         """初始化 Memory。
 
         创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
+        最后一次更改: 小李飞刀
 
         功能说明:
         - 规范化 shape/stride，并记录 space/format/dtype。
@@ -555,7 +555,7 @@ class Memory:
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 支持 Memory/Memory 与 Memory/int，返回 predicate dtype。
+        - 支持 Memory/Memory 与 Memory/int，返回 predicate dtype（Bool）。
 
         使用示例:
         - mem._binary_compare(other)
@@ -568,13 +568,9 @@ class Memory:
         if isinstance(other, Memory):
             self._ensure_same_shape(other)
             self._ensure_same_dtype(other)
-            result = self._clone_with_dtype(NumericType.Int32)
-            result._is_predicate = True
-            return result
+            return self._clone_with_dtype(NumericType.Bool)
         self._ensure_scalar_compatible(other)
-        result = self._clone_with_dtype(NumericType.Int32)
-        result._is_predicate = True
-        return result
+        return self._clone_with_dtype(NumericType.Bool)
 
     def __add__(self: "Memory", other: object) -> "Memory":
         """逐元素加法。

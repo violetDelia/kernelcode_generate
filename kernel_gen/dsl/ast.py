@@ -638,7 +638,6 @@ class _ParseFailure(Exception):
 
 
 _DTYPE_MAP: dict[str, NumericType] = {
-    "i1": NumericType.Bool,
     "f16": NumericType.Float16,
     "float16": NumericType.Float16,
     "bf16": NumericType.BFloat16,
@@ -663,6 +662,7 @@ _DTYPE_MAP: dict[str, NumericType] = {
     "uint32": NumericType.Uint32,
     "u64": NumericType.Uint64,
     "uint64": NumericType.Uint64,
+    "i1": NumericType.Bool,
     "bool": NumericType.Bool,
 }
 

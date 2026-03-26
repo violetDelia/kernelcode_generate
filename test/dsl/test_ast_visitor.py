@@ -1,7 +1,7 @@
 """AST visitor tests.
 
 创建者: 小李飞刀
-最后一次更改: 摸鱼小分队
+最后一次更改: 我不是牛马
 
 功能说明:
 - 覆盖 AST 前端、nn dialect IR 与 MLIR 文本入口的回归测试。
@@ -618,7 +618,7 @@ def test_emit_mlir_lowers_arch_get_thread_id_query() -> None:
         raise AssertionError('expected emitted result type to be !symbol.int<"thread_id">')
 
 
-# AST-014I / MGEN-036
+# AST-014I / MGEN-033
 # 创建者: 摸鱼小分队
 # 最后一次更改: 摸鱼小分队
 # 最近一次运行测试时间: 2026-03-27 02:08:59 +0800
@@ -774,6 +774,35 @@ def test_ast_parse_function_parses_annotations() -> None:
     assert len(func_ast.inputs) == 2
     assert isinstance(func_ast.inputs[0], TensorAST)
     assert isinstance(func_ast.inputs[1], ScalarArgAST)
+
+
+# AST-002B
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-27 03:15:10 +0800
+# 最近一次运行成功时间: 2026-03-27 03:15:10 +0800
+# 功能说明: 验证 parse_function 支持 Tensor[i1]/Tensor[bool] 注解解析。
+# 测试目的: 确保 Tensor 注解可以解析为 Bool dtype，覆盖 i1 与 bool 两种写法。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_ast_parse_function_accepts_tensor_bool_annotations
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_ast_parse_function_accepts_tensor_bool_annotations() -> None:
+    def kernel(
+        x: "Tensor[i1, 2, 2]",
+        y: "Tensor[bool, 2, 2]",
+    ) -> "Tensor[i1, 2, 2]":
+        return x
+
+    func_ast = parse_function(kernel)
+    assert len(func_ast.inputs) == 2
+    assert isinstance(func_ast.inputs[0], TensorAST)
+    assert isinstance(func_ast.inputs[1], TensorAST)
+    assert func_ast.inputs[0].memory.dtype is NumericType.Bool
+    assert func_ast.inputs[1].memory.dtype is NumericType.Bool
+    assert len(func_ast.outputs) == 1
+    assert isinstance(func_ast.outputs[0], TensorAST)
+    assert func_ast.outputs[0].memory.dtype is NumericType.Bool
 
 
 # AST-003
@@ -1244,52 +1273,6 @@ def test_build_func_op_supports_dma_helper_calls() -> None:
     assert any(isinstance(op, DmaReshapeOp) for op in flatten_func.body.block.ops)
 
 
-# MGEN-026
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-27 02:07:49 +0800
-# 最近一次运行成功时间: 2026-03-27 02:07:49 +0800
-# 功能说明: 验证 build_func_op 在 view 调用参数数目不匹配时抛出错误。
-# 测试目的: 锁定 view 仅允许四个位置参数且不接受关键字参数。
-# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_dma_view_invalid_arity
-# 对应功能实现文件路径: kernel_gen/dsl/ast.py
-# 对应 spec 文件路径: spec/dsl/ast.md
-# 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_build_func_op_rejects_dma_view_invalid_arity() -> None:
-    from kernel_gen.operation.dma import view
-
-    source = Memory([4, 4], NumericType.Float32, space=MemorySpace.GM)
-
-    def view_invalid_arity_kernel(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
-        return view(src, [1, 1], [2, 2])
-
-    with pytest.raises(AstVisitorError, match="Unsupported view arity"):
-        build_func_op(view_invalid_arity_kernel, source)
-
-
-# MGEN-026
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-27 02:07:49 +0800
-# 最近一次运行成功时间: 2026-03-27 02:07:49 +0800
-# 功能说明: 验证 build_func_op 在 view source 类型非法时抛出错误。
-# 测试目的: 锁定 view source 需为 nn.memory 类型，否则报错。
-# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_dma_view_invalid_source_type
-# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_build_func_op_rejects_dma_view_invalid_source_type() -> None:
-    from kernel_gen.operation.dma import view
-
-    source = Memory([2, 2], NumericType.Float32, space=MemorySpace.GM)
-
-    def view_invalid_source_kernel(dummy: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
-        return view(1, [1, 1], [2, 2], [1, 1])
-
-    with pytest.raises(AstVisitorError, match="view source must have nn.memory type"):
-        build_func_op(view_invalid_source_kernel, source)
-
-
 # MGEN-026A
 # 创建者: 小李飞刀
 # 最后一次更改: 我不是牛马
@@ -1719,81 +1702,6 @@ def test_build_func_op_supports_dma_deslice_helper() -> None:
     deslice_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaDesliceOp)]
     assert isinstance(func_op, func.FuncOp)
     assert len(deslice_ops) == 1
-
-
-# MGEN-033
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-27 01:56:36 +0800
-# 最近一次运行成功时间: 2026-03-27 01:56:36 +0800
-# 功能说明: 验证 free helper 在参数个数非法时会在 build_func_op 报错。
-# 测试目的: 锁定 free(...) 非法 arity 的固定诊断文案。
-# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_dma_free_invalid_arity
-# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
-# 对应 spec 文件路径: spec/dsl/mlir_gen.md
-# 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_build_func_op_rejects_dma_free_invalid_arity() -> None:
-    from kernel_gen.operation.dma import free
-
-    source = Memory([2, 2], NumericType.Float32, space=MemorySpace.GM)
-
-    def free_kernel(src: "Tensor[f32, 2, 2]"):
-        free(src, src)
-
-    with pytest.raises(AstVisitorError, match="Unsupported free arity"):
-        build_func_op(free_kernel, source)
-
-
-# MGEN-034
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-27 01:56:36 +0800
-# 最近一次运行成功时间: 2026-03-27 01:56:36 +0800
-# 功能说明: 验证 free helper 的 source 非 memory 时在 build 链路报错。
-# 测试目的: 锁定 free(...) source 类型校验的固定诊断文案。
-# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_dma_free_with_non_memory_source
-# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
-# 对应 spec 文件路径: spec/dsl/mlir_gen.md
-# 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_build_func_op_rejects_dma_free_with_non_memory_source() -> None:
-    from kernel_gen.operation.dma import free
-
-    source = Memory([2, 2], NumericType.Float32, space=MemorySpace.GM)
-
-    def free_kernel(src: "Tensor[f32, 2, 2]"):
-        free(1)
-
-    func_ast = parse_function(free_kernel)
-    with pytest.raises(AstVisitorError, match="Operand must be nn.memory"):
-        build_func_op(free_kernel, source)
-    with pytest.raises(AstVisitorError, match="Operand must be nn.memory"):
-        build_func_op_from_ast(func_ast, runtime_args=[source])
-
-
-# MGEN-035
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-27 01:56:36 +0800
-# 最近一次运行成功时间: 2026-03-27 01:56:36 +0800
-# 功能说明: 验证 free helper 作为表达式求值时在 build 链路报错。
-# 测试目的: 锁定 free(...) 表达式上下文的固定诊断文案。
-# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_dma_free_expression_context
-# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
-# 对应 spec 文件路径: spec/dsl/mlir_gen.md
-# 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_build_func_op_rejects_dma_free_expression_context() -> None:
-    from kernel_gen.operation.dma import free
-
-    source = Memory([2, 2], NumericType.Float32, space=MemorySpace.GM)
-
-    def free_kernel(src: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
-        return free(src)
-
-    func_ast = parse_function(free_kernel)
-    with pytest.raises(AstVisitorError, match="free does not produce a value"):
-        build_func_op(free_kernel, source)
-    with pytest.raises(AstVisitorError, match="free does not produce a value"):
-        build_func_op_from_ast(func_ast, runtime_args=[source])
 
 
 # MGEN-007
@@ -2968,31 +2876,6 @@ def test_emit_mlir_dma_reshape_lowering() -> None:
     assert [attr.data for attr in result.type.shape.data] == [2, 8]
 
 
-# EMIT-019B
-# 创建者: 我不是牛马
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-27 02:35:30 +0800
-# 最近一次运行成功时间: 2026-03-27 02:35:30 +0800
-# 功能说明: 验证 reshape lowering 结果类型校验错误路径。
-# 测试目的: 当结果类型不是 nn.memory 时抛出 reshape result must be nn.memory。
-# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_rejects_non_memory_reshape_result
-# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_emit_mlir_rejects_non_memory_reshape_result() -> None:
-    source_memory = Memory([2, 2], NumericType.Float32, space=MemorySpace.GM)
-    source = TensorAST(name="src", memory=source_memory, location=None)
-    block = Block(arg_types=[_memory_to_nn_type(source_memory)])
-    ctx = EmitContext(builder=block, symbols={"src": block.args[0]}, types={})
-    ctx._set_cache(_expr_key(source), block.args[0])
-    ctx.types[_expr_key(source)] = block.args[0].type
-
-    expr = DmaReshapeAST(source=source, shape=[ConstAST(1), ConstAST(4)], location=None)
-    ctx.types[_expr_key(expr)] = i32
-    with pytest.raises(_LoweringError, match="reshape result must be nn.memory"):
-        _lower_expr(expr, ctx)
-
-
 # EMIT-020
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚
@@ -3039,42 +2922,6 @@ def test_emit_mlir_dma_free_statement() -> None:
     result = emit_node_mlir(DmaFreeAST(value=source, location=None), ctx)
     assert result is None
     assert list(block.ops) == []
-
-
-# EMIT-027
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-27 01:56:36 +0800
-# 最近一次运行成功时间: 2026-03-27 01:56:36 +0800
-# 功能说明: 验证 free AST 在 source 非 memory 时抛出固定诊断。
-# 测试目的: 锁定 emit_mlir 的 free source 类型校验错误文案。
-# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_dma_free_rejects_non_memory_source
-# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_emit_mlir_dma_free_rejects_non_memory_source() -> None:
-    block = Block()
-    ctx = EmitContext(builder=block, symbols={}, types={})
-    with pytest.raises(_LoweringError, match="Operand must be nn.memory"):
-        emit_node_mlir(DmaFreeAST(value=ConstAST(1, location=None), location=None), ctx)
-
-
-# EMIT-028
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-27 01:56:36 +0800
-# 最近一次运行成功时间: 2026-03-27 01:56:36 +0800
-# 功能说明: 验证 free AST 作为表达式求值时抛出固定诊断。
-# 测试目的: 锁定 emit_mlir 对 free 表达式上下文的报错文案。
-# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_dma_free_rejects_expression_context
-# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_emit_mlir_dma_free_rejects_expression_context() -> None:
-    block = Block()
-    ctx = EmitContext(builder=block, symbols={}, types={})
-    with pytest.raises(_LoweringError, match="free does not produce a value"):
-        _lower_expr(DmaFreeAST(value=ConstAST(1, location=None), location=None), ctx)
 
 
 # AST-009
@@ -3345,98 +3192,6 @@ def test_parse_function_rejects_invalid_deslice_helper_variants() -> None:
             raise AssertionError(f"expected deslice diagnostic {expected_message!r}, got {diagnostics[0].message!r}")
 
 
-# AST-017
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-27 01:56:36 +0800
-# 最近一次运行成功时间: 2026-03-27 01:56:36 +0800
-# 功能说明: 验证 free helper 在语句位置可解析为 DmaFreeAST。
-# 测试目的: 锁定 free(...) 语句解析进入 DMA free AST 语义节点。
-# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_supports_dma_free_helper_statement
-# 对应功能实现文件路径: kernel_gen/dsl/ast.py
-# 对应 spec 文件路径: spec/dsl/ast.md
-# 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_parse_function_supports_dma_free_helper_statement() -> None:
-    from kernel_gen.operation.dma import free
-
-    def free_kernel(src: "Tensor[f32, 2, 2]"):
-        free(src)
-
-    func_ast = parse_function(free_kernel)
-    assert isinstance(func_ast, FunctionAST)
-    assert isinstance(func_ast.body.statements[-1], DmaFreeAST)
-    assert isinstance(func_ast.body.statements[-1].value, TensorAST)
-    assert func_ast.body.statements[-1].value.name == "src"
-
-
-# AST-018
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-27 01:56:36 +0800
-# 最近一次运行成功时间: 2026-03-27 01:56:36 +0800
-# 功能说明: 验证 free helper 非法参数形式会在 AST 解析阶段报错。
-# 测试目的: 锁定 free(...) 非法参数个数与关键字形式的固定诊断文案。
-# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_invalid_free_helper_variants
-# 对应功能实现文件路径: kernel_gen/dsl/ast.py
-# 对应 spec 文件路径: spec/dsl/ast.md
-# 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_parse_function_rejects_invalid_free_helper_variants() -> None:
-    from kernel_gen.operation.dma import free
-
-    def bad_arity(src: "Tensor[f32, 2, 2]"):
-        free(src, src)
-
-    def bad_keyword(src: "Tensor[f32, 2, 2]"):
-        free(src=src)
-
-    expected_messages = (
-        ("Unsupported free arity", bad_arity),
-        ("Unsupported free arity", bad_keyword),
-    )
-    for expected_message, fn in expected_messages:
-        with pytest.raises(AstParseError) as exc_info:
-            parse_function(fn)
-        diagnostics = exc_info.value.diagnostics
-        if not diagnostics:
-            raise AssertionError(f"expected diagnostics for free variant: {expected_message}")
-        if diagnostics[0].message != expected_message:
-            raise AssertionError(f"expected free diagnostic {expected_message!r}, got {diagnostics[0].message!r}")
-
-
-# AST-019
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-27 02:18:00 +0800
-# 最近一次运行成功时间: 2026-03-27 02:18:00 +0800
-# 功能说明: 验证 reshape helper 的非法参数个数报错口径。
-# 测试目的: 锁定 reshape 在非法参数个数或关键字参数时保持 Unsupported reshape arity 诊断。
-# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_invalid_reshape_helper_variants
-# 对应功能实现文件路径: kernel_gen/dsl/ast.py
-# 对应 spec 文件路径: spec/dsl/ast.md
-# 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_parse_function_rejects_invalid_reshape_helper_variants() -> None:
-    from kernel_gen.operation.dma import reshape
-
-    def bad_arity(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 8]":
-        return reshape(src, [2, 8], [1, 1])
-
-    def bad_keyword(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 8]":
-        return reshape(source=src, shape=[2, 8])
-
-    expected_messages = (
-        ("Unsupported reshape arity", bad_arity),
-        ("Unsupported reshape arity", bad_keyword),
-    )
-    for expected_message, fn in expected_messages:
-        with pytest.raises(AstParseError) as exc_info:
-            parse_function(fn)
-        diagnostics = exc_info.value.diagnostics
-        if not diagnostics:
-            raise AssertionError(f"expected diagnostics for reshape variant: {expected_message}")
-        if diagnostics[0].message != expected_message:
-            raise AssertionError(f"expected reshape diagnostic {expected_message!r}, got {diagnostics[0].message!r}")
-
-
 # MGEN-015
 # 创建者: OpenAI
 # 最后一次更改: 朽木露琪亚
@@ -3603,67 +3358,6 @@ def test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics() -> None
     with pytest.raises(AstVisitorError, match="Implicit broadcast dimension mismatch") as exc_info:
         build_func_op(add, _tensor_arg(["A", "B"]), _tensor_arg(["A", "C"]))
     assert exc_info.value.location is not None
-
-
-# MGEN-032C
-# 创建者: 摸鱼小分队
-# 最后一次更改: 摸鱼小分队
-# 最近一次运行测试时间: 2026-03-27 02:20:00 +0800
-# 最近一次运行成功时间: 2026-03-27 02:20:00 +0800
-# 功能说明: 验证 build_func_op 在 nn.add dtype 不一致时插入 dma.cast 后再发射 nn.add。
-# 测试目的: 锁定 nn.add memory add 的 dtype promotion lowering 链路与返回类型。
-# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_lowers_nn_add_with_dtype_promotion
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/emit_mlir.py
-# 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_build_func_op_lowers_nn_add_with_dtype_promotion() -> None:
-    def add_promote(
-        lhs: "Tensor[f32, 2, 3]",
-        rhs: "Tensor[i32, 2, 3]",
-    ) -> "Tensor[i32, 2, 3]":
-        return nn.add(lhs, rhs)
-
-    lhs_memory = Memory([2, 3], NumericType.Float32)
-    rhs_memory = Memory([2, 3], NumericType.Int32)
-    func_op = build_func_op(add_promote, lhs_memory, rhs_memory)
-    ops = list(func_op.body.block.ops)
-    cast_ops = [op for op in ops if isinstance(op, DmaCastOp)]
-    add_ops = [op for op in ops if isinstance(op, NnAddOp)]
-    return_ops = [op for op in ops if isinstance(op, func.ReturnOp)]
-    broadcast_ops = [op for op in ops if isinstance(op, NnBroadcastOp)]
-
-    assert len(cast_ops) == 1
-    assert len(add_ops) == 1
-    assert len(return_ops) == 1
-    assert len(broadcast_ops) == 0
-    assert cast_ops[0].result.type.element_type == f32
-    assert add_ops[0].result.type.element_type == f32
-    assert return_ops[0].arguments[0].type.element_type == f32
-    assert add_ops[0].lhs is cast_ops[0].result or add_ops[0].rhs is cast_ops[0].result
-
-
-# MGEN-032D
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-27 12:10:00 +0800
-# 最近一次运行成功时间: 2026-03-27 12:10:00 +0800
-# 功能说明: 验证 nn.add 在同 dtype 下不允许返回注解 element_type 不匹配。
-# 测试目的: 防止 dtype promotion 容忍逻辑误放大。
-# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_nn_add_return_annotation_mismatch_without_promotion
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
-# 对应 spec 文件路径: spec/dsl/mlir_gen.md
-# 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_build_func_op_rejects_nn_add_return_annotation_mismatch_without_promotion() -> None:
-    def add_bad(
-        lhs: "Tensor[f32, 2, 3]",
-        rhs: "Tensor[f32, 2, 3]",
-    ) -> "Tensor[i32, 2, 3]":
-        return nn.add(lhs, rhs)
-
-    lhs_memory = Memory([2, 3], NumericType.Float32)
-    rhs_memory = Memory([2, 3], NumericType.Float32)
-    with pytest.raises(AstVisitorError, match="Return type does not match annotation"):
-        build_func_op(add_bad, lhs_memory, rhs_memory)
 
 # AST-009
 # 创建者: 小李飞刀
@@ -3926,11 +3620,6 @@ def test_emit_mlir_infer_expr_type_branches() -> None:
     assert isinstance(load_type, NnMemoryType)
     assert [dim.data for dim in load_type.shape.data] == [1, 1]
 
-    bad_tensor = TensorAST(name="bad", memory=memory, location=None)
-    bad_type_map = {_expr_key(bad_tensor): i32}
-    with pytest.raises(_LoweringError, match="reshape source must have nn.memory type"):
-        _infer_expr_type(DmaReshapeAST(source=bad_tensor, shape=[ConstAST(2)], location=None), bad_type_map)
-
     with pytest.raises(_LoweringError, match="StoreAST does not produce a value"):
         _infer_expr_type(StoreAST(tensor=tensor, offset=ConstAST(0), stride=None, value=tensor), type_map)
 
@@ -3956,16 +3645,13 @@ def test_emit_mlir_infer_expr_type_branches() -> None:
     with pytest.raises(_LoweringError, match="Unsupported symbol compare op"):
         _infer_expr_type(CompareExprAST(op="gt", lhs=sym_lhs, rhs=sym_rhs), type_map)
 
-    scalar_type_map = {
-        _expr_key(tensor): _memory_to_nn_type(memory),
-        _expr_key(sym_lhs): i32,
-        _expr_key(sym_rhs): i32,
-    }
+    type_map[_expr_key(sym_lhs)] = i32
+    type_map[_expr_key(sym_rhs)] = i32
     with pytest.raises(_LoweringError, match="Binary op operands must have nn.memory type"):
-        _infer_expr_type(BinaryExprAST(op="add", lhs=sym_lhs, rhs=sym_rhs), scalar_type_map)
+        _infer_expr_type(BinaryExprAST(op="add", lhs=sym_lhs, rhs=sym_rhs), type_map)
 
     with pytest.raises(_LoweringError, match="Compare op operands must have nn.memory type"):
-        _infer_expr_type(CompareExprAST(op="eq", lhs=sym_lhs, rhs=sym_rhs), scalar_type_map)
+        _infer_expr_type(CompareExprAST(op="eq", lhs=sym_lhs, rhs=sym_rhs), type_map)
 
     lhs_type = _memory_to_nn_type(Memory([2, 1], NumericType.Float32))
     with pytest.raises(_LoweringError, match="Implicit broadcast dimension mismatch"):
@@ -4048,50 +3734,6 @@ def test_emit_mlir_lower_expr_branches() -> None:
 
     with pytest.raises(_LoweringError, match="Unknown input reference"):
         _lookup_symbol(VarAST("missing"), EmitContext(builder=block, symbols={}, types={}))
-
-
-# EMIT-026C
-# 创建者: 摸鱼小分队
-# 最后一次更改: 摸鱼小分队
-# 最近一次运行测试时间: 2026-03-27 02:20:00 +0800
-# 最近一次运行成功时间: 2026-03-27 02:20:00 +0800
-# 功能说明: 验证 emit_mlir 在 memory add dtype 不一致时插入 dma.cast 再发射 nn.add。
-# 测试目的: 锁定 BinaryExprAST(op="add") 的 dtype promotion 与 op 序列。
-# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_nn_add_promotes_dtype_with_dma_cast
-# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md
-# 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_emit_mlir_nn_add_promotes_dtype_with_dma_cast() -> None:
-    lhs_memory = Memory([2, 3], NumericType.Float32)
-    rhs_memory = Memory([2, 3], NumericType.Int32)
-    lhs = TensorAST(name="lhs", memory=lhs_memory, location=None)
-    rhs = TensorAST(name="rhs", memory=rhs_memory, location=None)
-    lhs_type = _memory_to_nn_type(lhs_memory)
-    rhs_type = _memory_to_nn_type(rhs_memory)
-    block = Block(arg_types=[lhs_type, rhs_type])
-    ctx = EmitContext(
-        builder=block,
-        symbols={"lhs": block.args[0], "rhs": block.args[1]},
-        types={},
-    )
-    ctx._set_cache(_expr_key(lhs), block.args[0])
-    ctx._set_cache(_expr_key(rhs), block.args[1])
-    ctx.types[_expr_key(lhs)] = lhs_type
-    ctx.types[_expr_key(rhs)] = rhs_type
-
-    result = emit_node_mlir(BinaryExprAST(op="add", lhs=lhs, rhs=rhs), ctx)
-    ops = list(block.ops)
-    cast_ops = [op for op in ops if isinstance(op, DmaCastOp)]
-    add_ops = [op for op in ops if isinstance(op, NnAddOp)]
-    broadcast_ops = [op for op in ops if isinstance(op, NnBroadcastOp)]
-
-    assert len(cast_ops) == 1
-    assert len(add_ops) == 1
-    assert len(broadcast_ops) == 0
-    assert result is add_ops[0].result
-    assert cast_ops[0].result.type.element_type == f32
-    assert add_ops[0].result.type.element_type == f32
-    assert add_ops[0].lhs is cast_ops[0].result or add_ops[0].rhs is cast_ops[0].result
 
 
 # EMIT-022

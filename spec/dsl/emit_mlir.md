@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)
 - `功能实现`：[`kernel_gen/dsl/emit_mlir.py`](../../kernel_gen/dsl/emit_mlir.py)
 - `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
@@ -39,7 +39,6 @@
 - 当 `ForAST` 来自 `LoopRange(start, end, step)` 且边界与循环变量保持 symbol 整数语义时，必须 lowering 为 `symbol.for`，不得回退为 `scf.for`；其循环块参数 `it` 必须为 `!symbol.int<"expr">`。
 - 在上述 `LoopRange` 场景中，循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand 必须直接复用 `!symbol.int<"expr">` value，不得插入 `arith.index_cast`；若循环变量 `it` 退化为 `index`、普通整数或浮点类型，应视为 lowering 违规。
 - 当 DSL AST 表达 `alloc`、`copy`、`cast`、`view`、`reshape`、`flatten`、`load`、`store`、`slice`、`deslice` 这组 DMA helper 调用时，`emit_mlir` 必须按对应 memory 语义 lowering；其中 `flatten` 公开上视为一维 `reshape` 语义，不要求生成独立 dialect op。
-- 当 `CompareExprAST(op="eq")` 来自 `lhs == rhs` 入口且两侧为 `nn.memory` 时，必须 lowering 为 `nn.eq`；允许按隐式 broadcast 规则插入 `nn.broadcast`，若无法广播则必须报错 `Implicit broadcast dimension mismatch`，若 element type 不一致则必须报错 `Binary op operands must have the same element_type`。
 - `free` 必须作为语句型 helper 处理，不产生新的 SSA 结果，也不承诺生成独立的 `dma.free` op。
 - `ArchQueryAST(query_name="get_block_id")` 必须 lowering 为单个 `arch.get_block_id`，并保持结果类型为 `!symbol.int<"block_id">`。
 - `ArchQueryAST(query_name="get_block_num")` 必须 lowering 为单个 `arch.get_block_num`，并保持结果类型为 `!symbol.int<"block_num">`。
@@ -111,7 +110,7 @@ value = emit_mlir(expr_ast, ctx)
 - 默认使用当前项目的目标 dialect（例如 `nn`），但节点到 op 的映射必须清晰可追踪。
 - `LoopRange` 触发的 `ForAST` 必须走 `symbol.for` 分支，并保持 symbol 整数值直接作为 DMA operand 传递。
 - 当 `CompareExprAST` 的两侧均为 `!symbol.int<"expr">` 时，`eq` 必须 lowering 为 `symbol.eq`，`ge` 必须 lowering 为 `symbol.ge`，两者结果类型均为 `i1`；其余 symbol 比较操作符必须报错 `Unsupported symbol compare op`。
-- 当 `CompareExprAST(op="eq")` 走 memory 路径时，结果 element type 必须为 `i1`，并保持 shape/space 与 broadcast 对齐后的 memory 结果一致。
+- 当 `CompareExprAST` 进入 memory 路径时，`lhs/rhs` 必须为 `nn.memory` 类型且 `element_type`/`space` 一致；必要时执行隐式 broadcast。若 `element_type`/`space` 不一致或 broadcast 失败，必须报错并保留位置（例如 `Binary op operands must have the same element_type`、`Binary op operands must have the same space`、`Implicit broadcast dimension mismatch`）。
 - DMA helper 的公开 lowering 约束如下：
   - `alloc(...)`：lowering 为 `dma.alloc`，返回新的 memory value。
   - `copy(...)`：lowering 为 `dma.copy`，返回目标 memory value。
@@ -127,7 +126,7 @@ value = emit_mlir(expr_ast, ctx)
 
 - `ConstAST`：生成常量或等价字面量 op/value。
 - `BinaryExprAST(add/sub/mul/div/floordiv)`：生成对应的二元算术 op。
-- `CompareExprAST(eq/ne/lt/le/gt/ge)`：在 memory 路径生成对应 `nn` 比较 op；在 symbol 路径仅支持 `eq/ge`，分别生成 `symbol.eq/symbol.ge`。
+- `CompareExprAST(eq/ne/lt/le/gt/ge)`：在 memory 路径生成对应 `nn` 比较 op（结果 `element_type` 为 `i1`），必要时隐式 broadcast；在 symbol 路径仅支持 `eq/ge`，分别生成 `symbol.eq/symbol.ge`。
 - `LoadAST`：生成张量读取相关 op/value；当携带 `sizes` 时发射 `dma.slice`。
 - `StoreAST`：生成张量写入相关 op；当携带 `sizes` 时发射 `dma.deslice`。
 - `CallAST(alloc/copy/cast/view/reshape/flatten)`：生成对应 DMA memory 结果。
@@ -145,8 +144,6 @@ value = emit_mlir(expr_ast, ctx)
 - 执行命令：`pytest -q test/dsl/test_ast_visitor.py`
 - 测试目标：
   - 覆盖常见表达式与语句节点的发射结果。
-  - 覆盖 `lhs == rhs` 到 `CompareExprAST(op="eq")` 的 memory lowering：`nn.eq` 结果为 `i1`，并支持 implicit broadcast。
-  - 覆盖 `CompareExprAST(op="eq")` memory 路径在不可 broadcast 与 element type 不一致时的错误分支与诊断文案。
   - 覆盖 `LoopRange` -> `symbol.for` 与 `it`/DMA operand 直接保持 `symbol.int` 的发射规则。
   - 覆盖 DMA helper 调用的 lowering 结果与语句/表达式边界：`alloc/copy/cast/view/reshape/flatten` 产生 memory 结果，`free` 为无返回值语句。
   - 覆盖 `ArchQueryAST(query_name="get_block_id")` lowering 为 `arch.get_block_id` 的最小查询路径。
@@ -157,7 +154,7 @@ value = emit_mlir(expr_ast, ctx)
   - 覆盖不支持节点的错误路径。
 - 功能与用例清单：
   - EMIT-001：二元表达式节点生成对应 op/value。（`test_emit_context_reuses_cached_value`）
-  - EMIT-002：比较表达式节点生成对应 op/value。（`test_emit_mlir_compare_expr_emits_eq`）
+  - EMIT-002：比较表达式节点在 memory 路径生成对应 op/value。（`test_emit_mlir_compare_expr_emits_eq`）
   - EMIT-003：不支持节点抛出错误并携带位置信息。（`test_emit_mlir_unsupported_node_reports_location`）
   - EMIT-004：`TensorAST` 可通过符号表直接解析。（`test_emit_mlir_tensor_uses_symbol_table`）
   - EMIT-005：`LoadAST` 生成 `dma.load`。（`test_load_ast_lowering_rejected`）
@@ -183,5 +180,3 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-025：`ArchQueryAST(query_name="get_subthread_id")` lowering 为单个 `arch.get_subthread_id`，并返回 `!symbol.int<"subthread_id">`。（`test_emit_mlir_lowers_arch_get_subthread_id_query`）
   - EMIT-026：`ArchQueryAST(query_name="get_thread_id")` lowering 为单个 `arch.get_thread_id`，并返回 `!symbol.int<"thread_id">`。（`test_emit_mlir_lowers_arch_get_thread_id_query`）
   - EMIT-027：`ArchQueryAST(query_name="get_subthread_num")` lowering 为单个 `arch.get_subthread_num`，并返回 `!symbol.int<"subthread_num">`。（`test_emit_mlir_lowers_arch_get_subthread_num_query`）
-  - EMIT-028：`CompareExprAST(op="eq")` 在 memory 路径必须生成 `nn.eq`（必要时带 `nn.broadcast`），结果 element type 为 `i1`。（`test_emit_mlir_compare_expr_emits_eq`、`test_emit_mlir_binary_compare_broadcast_rhs`）
-  - EMIT-029：`CompareExprAST(op="eq")` memory 路径在不可 broadcast 或 element type 不一致时必须报错并保持固定诊断文案。（`test_emit_mlir_infer_expr_type_branches`、`test_emit_mlir_static_index_list_and_broadcast_shape`）

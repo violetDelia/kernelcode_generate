@@ -32,9 +32,9 @@ from kernel_gen.symbol_variable.type import Farmat, NumericType
 
 # ME-010
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-25 01:12:46 +0800
-# 最近一次运行成功时间: 2026-03-25 01:12:46 +0800
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-27 03:15:22 +0800
+# 最近一次运行成功时间: 2026-03-27 03:15:22 +0800
 # 测试目的: 验证 Memory + Memory 逐元素运算的 dtype 提升与 format/stride/space 继承。
 # 使用示例: pytest -q test/operation/test_memory_operation.py -k test_memory_add_memory
 # 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
@@ -237,12 +237,12 @@ def test_memory_compare_predicate() -> None:
     ge_result = lhs >= rhs
     assert isinstance(eq_result, Memory)
     assert eq_result.shape.get_values() == [1, "M"]
-    assert eq_result.dtype is NumericType.Int32
-    assert lt_result.dtype is NumericType.Int32
-    assert ne_result.dtype is NumericType.Int32
-    assert le_result.dtype is NumericType.Int32
-    assert gt_result.dtype is NumericType.Int32
-    assert ge_result.dtype is NumericType.Int32
+    assert eq_result.dtype is NumericType.Bool
+    assert lt_result.dtype is NumericType.Bool
+    assert ne_result.dtype is NumericType.Bool
+    assert le_result.dtype is NumericType.Bool
+    assert gt_result.dtype is NumericType.Bool
+    assert ge_result.dtype is NumericType.Bool
 
 
 # ME-014
