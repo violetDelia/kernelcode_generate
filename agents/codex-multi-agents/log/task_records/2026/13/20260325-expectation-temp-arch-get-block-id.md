@@ -62,3 +62,14 @@
 - 检查 `test/dsl/test_ast_visitor.py` 参数类型提示：AST 解析/测试函数参数均有明确类型标注，未发现缺失。
 - 本轮未修改任何业务文件，未复测。
 结论：通过。
+
+时间：2026-03-26 09:33:01 +0800
+执行人：李白
+经办人：李白
+任务：T-20260325-c1539555（cleanup：wt-20260325-expectation-temp-arch-get-block-id）
+任务目标：确认 main 已包含 5014418 并清理 worktree/分支残留。
+核对：
+- `git merge-base --is-ancestor 5014418 main` 返回 ancestor。
+- `git worktree list --porcelain` 未发现 `wt-20260325-expectation-temp-arch-get-block-id`。
+- `git branch --list '*get-block-id*'` 无匹配分支。
+结论：cleanup 已完成，无残留。
