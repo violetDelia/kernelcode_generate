@@ -65,7 +65,10 @@ ALLOC_ROWS = get_random_non_zero_int(1, 8)
 ALLOC_COLS = get_random_non_zero_int(1, 8)
 
 
-def alloc_kernel(rank1, rank2) -> f"Tensor[f32, {ALLOC_ROWS}, {ALLOC_COLS}]":
+def alloc_kernel(
+    rank1: int | SymbolDim,
+    rank2: int | SymbolDim,
+) -> f"Tensor[f32, {ALLOC_ROWS}, {ALLOC_COLS}]":
     return alloc([rank1, rank2], NumericType.Float32, MemorySpace.SM)
 
 
@@ -89,7 +92,10 @@ SYMBOL_LHS = SymbolDim(SYMBOL_LHS_NAME)
 SYMBOL_RHS = SymbolDim(SYMBOL_RHS_NAME)
 
 
-def alloc_symbol_kernel(rank1, rank2) -> f"Tensor[f32, {SYMBOL_LHS_NAME}, {SYMBOL_RHS_NAME}]":
+def alloc_symbol_kernel(
+    rank1: int | SymbolDim,
+    rank2: int | SymbolDim,
+) -> f"Tensor[f32, {SYMBOL_LHS_NAME}, {SYMBOL_RHS_NAME}]":
     return alloc([rank1, rank2], NumericType.Float32, MemorySpace.SM)
 
 
@@ -120,8 +126,8 @@ SYMBOL_PLUS_CONST_RHS_EXPR = str(SYMBOL_PLUS_CONST_RHS.get_symbol())
 
 
 def alloc_symbol_plus_const_kernel(
-    rank1,
-    rank2,
+    rank1: int | SymbolDim,
+    rank2: int | SymbolDim,
 ) -> f"Tensor[f32, {SYMBOL_PLUS_CONST_LHS_EXPR}, {SYMBOL_PLUS_CONST_RHS_EXPR}]":
     return alloc([rank1, rank2], NumericType.Float32, MemorySpace.SM)
 
@@ -179,10 +185,10 @@ COL_STRIDE = 1
 
 
 def alloc_with_stride_kernel(
-    rank1,
-    rank2,
-    stride1,
-    stride2,
+    rank1: int | SymbolDim,
+    rank2: int | SymbolDim,
+    stride1: int,
+    stride2: int,
 ) -> f"Tensor[f32, {STRIDE_ROWS}, {STRIDE_COLS}]":
     return alloc([rank1, rank2], NumericType.Float32, MemorySpace.SM, stride=[stride1, stride2])
 
@@ -201,7 +207,10 @@ _assert_output_memory_matches_expected(func_op_stride, expected_stride)
 
 
 # case 6: invalid arguments in kernel should raise
-def alloc_invalid_dtype_kernel(rank1, rank2) -> f"Tensor[f32, {ALLOC_ROWS}, {ALLOC_COLS}]":
+def alloc_invalid_dtype_kernel(
+    rank1: int | SymbolDim,
+    rank2: int | SymbolDim,
+) -> f"Tensor[f32, {ALLOC_ROWS}, {ALLOC_COLS}]":
     return alloc([rank1, rank2], "f32", MemorySpace.SM)
 
 
@@ -212,7 +221,10 @@ except AstVisitorError as exc:
     assert "alloc dtype must be NumericType" in str(exc)
 
 
-def alloc_invalid_space_kernel(rank1, rank2) -> f"Tensor[f32, {ALLOC_ROWS}, {ALLOC_COLS}]":
+def alloc_invalid_space_kernel(
+    rank1: int | SymbolDim,
+    rank2: int | SymbolDim,
+) -> f"Tensor[f32, {ALLOC_ROWS}, {ALLOC_COLS}]":
     return alloc([rank1, rank2], NumericType.Float32, "shared")
 
 
@@ -224,10 +236,10 @@ except AstVisitorError as exc:
 
 
 def alloc_invalid_stride_kernel(
-    rank1,
-    rank2,
-    stride1,
-    stride2,
+    rank1: int | SymbolDim,
+    rank2: int | SymbolDim,
+    stride1: int,
+    stride2: int,
 ) -> f"Tensor[f32, {ALLOC_ROWS}, {ALLOC_COLS}]":
     return alloc([rank1, rank2], NumericType.Float32, MemorySpace.SM, stride=[stride1, stride2])
 
@@ -237,5 +249,13 @@ try:
     assert False, "build_func_op should fail when alloc stride is non-contiguous inside kernel"
 except AstVisitorError as exc:
     assert "dma.alloc only supports contiguous stride" in str(exc)
+
+
+# case 7: invalid runtime_args type should raise
+try:
+    build_func_op(alloc_kernel, 1.5, ALLOC_COLS)
+    assert False, "build_func_op should fail when alloc runtime args type is invalid"
+except AstVisitorError as exc:
+    assert "Unsupported scalar argument type" in str(exc)
 
 print(func_op_stride)
