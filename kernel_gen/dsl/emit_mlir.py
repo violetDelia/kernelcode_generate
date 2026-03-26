@@ -82,7 +82,6 @@ from kernel_gen.dialect.symbol import (
     SymbolValueType,
     build_public_symbol_expr,
 )
-from kernel_gen.operation.nn import _resolve_add_dtype
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.type import NumericType
 
@@ -163,17 +162,92 @@ class EmitContext:
 
 
 def _dtype_to_xdsl(dtype: NumericType, location: SourceLocation | None = None) -> object:
+    """将 NumericType 映射为 xdsl element type。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 将 DSL NumericType 转为 nn.memory 的 element_type。
+    - 遇到不支持类型时抛出 LoweringError。
+
+    使用示例:
+    - _dtype_to_xdsl(NumericType.Float32)
+
+    关联文件:
+    - spec: spec/dsl/emit_mlir.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/emit_mlir.py
+    """
     if dtype is NumericType.Bool:
         return i1
     if dtype is NumericType.Float16:
         return Float16Type()
     if dtype is NumericType.Float32:
         return f32
-    if dtype is NumericType.Bool:
-        return i1
     if dtype is NumericType.Int32:
         return i32
     raise _LoweringError(f"Unsupported dtype: {dtype}", location=location)
+
+
+def _xdsl_to_dtype(element_type: Attribute, location: SourceLocation | None = None) -> NumericType:
+    """将 xdsl element_type 还原为 NumericType。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 支持 Float16/Float32/Int32/Bool 解析为 NumericType。
+    - 不支持的 element_type 抛出 LoweringError。
+
+    使用示例:
+    - _xdsl_to_dtype(f32)
+
+    关联文件:
+    - spec: spec/dsl/emit_mlir.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/emit_mlir.py
+    """
+    if isinstance(element_type, Float16Type):
+        return NumericType.Float16
+    if element_type == f32:
+        return NumericType.Float32
+    if element_type == i32:
+        return NumericType.Int32
+    if element_type == i1:
+        return NumericType.Bool
+    raise _LoweringError("Unsupported element_type for nn arithmetic", location=location)
+
+
+def _resolve_nn_arith_element_type(
+    lhs_type: NnMemoryType,
+    rhs_type: NnMemoryType,
+    location: SourceLocation | None,
+) -> Attribute:
+    """解析 nn 算术 element_type 决议结果。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 按 Memory 算术 dtype 决议规则选择目标 element_type。
+    - 无法解析时抛出 LoweringError。
+
+    使用示例:
+    - _resolve_nn_arith_element_type(lhs_type, rhs_type, location)
+
+    关联文件:
+    - spec: spec/dsl/emit_mlir.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/emit_mlir.py
+    """
+    try:
+        lhs_dtype = _xdsl_to_dtype(lhs_type.element_type, location)
+        rhs_dtype = _xdsl_to_dtype(rhs_type.element_type, location)
+        target_dtype = Memory._promote_dtype(lhs_dtype, rhs_dtype)
+    except TypeError as exc:
+        raise _LoweringError("Binary op operands must have compatible element_type", location=location) from exc
+    return _dtype_to_xdsl(target_dtype, location)
 
 
 def _build_stride(shape: list[int | str]) -> list[int | str]:
@@ -580,6 +654,23 @@ def _infer_broadcast_memory_type(
     location: SourceLocation | None,
     element_type: Attribute | None = None,
 ) -> NnMemoryType:
+    """推导二元 broadcast 目标 memory type。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 依据隐式 broadcast 推导目标 shape 与 stride。
+    - 默认要求 element_type 一致；允许显式传入 element_type 覆盖。
+
+    使用示例:
+    - _infer_broadcast_memory_type(lhs_type, rhs_type, location)
+
+    关联文件:
+    - spec: spec/dsl/emit_mlir.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/emit_mlir.py
+    """
     if element_type is None and lhs_type.element_type != rhs_type.element_type:
         raise _LoweringError("Binary op operands must have the same element_type", location=location)
     if lhs_type.space != rhs_type.space:
@@ -793,25 +884,7 @@ def _infer_expr_type(expr: object, type_map: dict[int, object]) -> object:
             return lhs_type
         target_element_type = lhs_type.element_type
         if lhs_type.element_type != rhs_type.element_type:
-            def _element_type_to_numeric(element_type: Attribute) -> NumericType:
-                if isinstance(element_type, Float16Type):
-                    return NumericType.Float16
-                if element_type == f32:
-                    return NumericType.Float32
-                if element_type == i32:
-                    return NumericType.Int32
-                if element_type == i1:
-                    return NumericType.Bool
-                raise _LoweringError("Unsupported dtype for nn.add", location=expr.location)
-
-            try:
-                target_numeric = _resolve_add_dtype(
-                    _element_type_to_numeric(lhs_type.element_type),
-                    _element_type_to_numeric(rhs_type.element_type),
-                )
-            except TypeError as exc:
-                raise _LoweringError(str(exc), location=expr.location) from exc
-            target_element_type = _dtype_to_xdsl(target_numeric, location=expr.location)
+            target_element_type = _resolve_nn_arith_element_type(lhs_type, rhs_type, expr.location)
         target_type = _infer_broadcast_memory_type(
             lhs_type,
             rhs_type,

@@ -3461,6 +3461,41 @@ def test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics() -> None
         build_func_op(add, _tensor_arg(["A", "B"]), _tensor_arg(["A", "C"]))
     assert exc_info.value.location is not None
 
+
+# MGEN-034 / EMIT-028
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-27 04:16:44 +0800
+# 最近一次运行成功时间: 2026-03-27 04:16:44 +0800
+# 功能说明: 验证 nn.sub dtype promotion 会插入 dma.cast 并返回目标 dtype 的 nn.sub。
+# 测试目的: 锁定 build_func_op 对 nn.sub 混合 dtype 的 cast lowering 与返回类型。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast() -> None:
+    def sub(
+        lhs: "Tensor[f32, 2, 2]",
+        rhs: "Tensor[i32, 2, 2]",
+    ) -> "Tensor[i32, 2, 2]":
+        return lhs - rhs
+
+    lhs_memory = Memory([2, 2], NumericType.Float32)
+    rhs_memory = Memory([2, 2], NumericType.Int32)
+    expected_type = _memory_to_nn_type(lhs_memory - rhs_memory)
+
+    func_op = build_func_op(sub, lhs_memory, rhs_memory)
+    cast_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaCastOp)]
+    sub_ops = [op for op in func_op.body.block.ops if isinstance(op, NnSubOp)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
+
+    assert len(cast_ops) == 1
+    assert len(sub_ops) == 1
+    assert len(return_ops) == 1
+    assert cast_ops[0].result.type == expected_type
+    assert sub_ops[0].result.type == expected_type
+    assert return_ops[0].arguments[0].type == expected_type
+
 # AST-009
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀

@@ -206,6 +206,23 @@ def _validate_return_type(
     *,
     allow_element_type_mismatch: bool = False,
 ) -> None:
+    """校验函数返回类型与注解一致性。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 检查 Tensor 返回的 shape 与 element_type 是否匹配注解。
+    - 在允许元素类型不一致时，仅校验 shape。
+
+    使用示例:
+    - _validate_return_type(func_ast, result_type, allow_element_type_mismatch=True)
+
+    关联文件:
+    - spec: spec/dsl/mlir_gen.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/mlir_gen.py
+    """
     if not func_ast.outputs:
         return
     if len(func_ast.outputs) != 1:
@@ -241,8 +258,24 @@ def _validate_return_type(
         raise _LoweringError("Return type does not match annotation", location=func_ast.location)
 
 
-def _allow_add_element_type_mismatch(expr: BinaryExprAST, type_map: dict[int, object]) -> bool:
-    if expr.op != "add":
+def _allow_arith_element_type_mismatch(expr: BinaryExprAST, type_map: dict[int, object]) -> bool:
+    """判定二元算术是否允许返回 element_type 不一致。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 仅允许 add/sub 这类算术操作在 dtype promotion 下放宽返回注解。
+
+    使用示例:
+    - _allow_arith_element_type_mismatch(expr, type_map)
+
+    关联文件:
+    - spec: spec/dsl/mlir_gen.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/mlir_gen.py
+    """
+    if expr.op not in {"add", "sub"}:
         return False
     lhs_type = _infer_expr_type(expr.lhs, dict(type_map))
     rhs_type = _infer_expr_type(expr.rhs, dict(type_map))
@@ -314,13 +347,6 @@ def _build_func_op_from_ast_impl(
 
     config = config or {}
     is_dma_alloc_only = _is_dma_alloc_only_function(func_ast)
-    runtime_values: dict[str, object] = {}
-    if runtime_args is not None:
-        runtime_values = {
-            input_arg.name: runtime_args[index]
-            for index, input_arg in enumerate(func_ast.inputs)
-            if isinstance(input_arg, ScalarArgAST)
-        }
     arg_types, type_map = _build_signature_types(
         func_ast,
         runtime_args=runtime_args,
@@ -336,10 +362,10 @@ def _build_func_op_from_ast_impl(
                 raise _LoweringError("Return type does not match annotation", location=func_ast.location)
             result_type = _build_dma_alloc_only_result_type(func_ast, return_expr, runtime_args)
         else:
-            result_type = _infer_expr_type(return_expr, dict(type_map), runtime_values)
+            result_type = _infer_expr_type(return_expr, dict(type_map))
         allow_element_type_mismatch = False
         if isinstance(return_expr, BinaryExprAST) and isinstance(result_type, NnMemoryType):
-            allow_element_type_mismatch = _allow_add_element_type_mismatch(return_expr, type_map)
+            allow_element_type_mismatch = _allow_arith_element_type_mismatch(return_expr, type_map)
         _validate_return_type(func_ast, result_type, allow_element_type_mismatch=allow_element_type_mismatch)
         type_map[_expr_key(return_expr)] = result_type
         result_types = [result_type]
@@ -348,7 +374,7 @@ def _build_func_op_from_ast_impl(
         if isinstance(return_expr, DmaFreeAST):
             result_types = []
         else:
-            result_type = _infer_expr_type(return_expr, dict(type_map), runtime_values)
+            result_type = _infer_expr_type(return_expr, dict(type_map))
             if not isinstance(result_type, SymbolValueType):
                 raise _LoweringError(
                     "Symbol scalar function return must lower to !symbol.int",
