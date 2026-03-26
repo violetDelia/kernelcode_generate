@@ -4,12 +4,12 @@
 最后一次更改: 神秘人
 
 功能说明:
-- 覆盖 task 脚本的任务分发、完成、暂停、继续、新建、状态查询与错误返回码路径。
+- 覆盖 task 脚本的任务分发、完成、暂停、继续、改派、新建、状态查询与错误返回码路径。
 
 覆盖率信息:
 - 当前覆盖率: `N/A`。该链路的功能实现为 shell 脚本 `skills/codex-multi-agents/scripts/codex-multi-agents-task.sh`，`pytest-cov` 无法直接采集脚本覆盖率，执行覆盖率命令会得到 `no-data-collected`。
 - 达标判定: shell 实现按规则豁免 `95%` 覆盖率达标线。
-- 当前以 `TC-001..022` 共 22 条测试用例作为覆盖基线，覆盖分发、分发前初始化、分发消息发送、完成、暂停、继续、新建、状态查询、文件错误、结构错误与锁冲突路径。
+- 当前以 `TC-001..025` 共 25 条测试用例作为覆盖基线，覆盖分发、分发前初始化、分发消息发送、完成、暂停、继续、改派、新建、状态查询、文件错误、结构错误与锁冲突路径。
 
 覆盖率命令:
 - `pytest -q --cov=skills/codex-multi-agents/scripts/codex-multi-agents-task.sh --cov-branch --cov-report=term-missing test/codex-multi-agents/test_codex-multi-agents-task.py`
@@ -843,3 +843,73 @@ def test_continue_requires_agents_list(tmp_path: Path) -> None:
 
     assert result.returncode == 1
     assert "-continue requires -agents-list" in result.stderr
+
+
+# TC-023
+# 创建者: 神秘人
+# 最后一次更改: 神秘人
+# 最近一次运行测试时间: 2026-03-26 11:00:00 +0800
+# 最近一次运行成功时间: 2026-03-26 11:00:00 +0800
+# 测试目的: 验证 -reassign 成功更新任务指派并同步旧/新角色状态。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_reassign_task_success(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file(
+        todo,
+        running_rows=[
+            row_running("EX-1", "李白", "2026-03-08 16:10:00 +0800", ".", "创建 src", "worker-a", "进行中", "xxx", "./log/ex1.md"),
+            row_running("EX-2", "杜甫", "2026-03-08 16:20:00 +0800", ".", "创建 test", "worker-b", "进行中", "xxx", "./log/ex2.md"),
+        ],
+    )
+    write_agents_file(agents, [agent_row("worker-a", "busy"), agent_row("worker-b", "busy"), agent_row("worker-c", "free")])
+
+    result = run_script("-file", str(todo), "-reassign", "-task_id", "EX-2", "-to", "worker-c", "-agents-list", str(agents))
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+
+    assert result.returncode == 0
+    assert "OK: reassign EX-2 -> worker-c" in result.stdout
+    assert any(r[0] == "EX-2" and r[5] == "worker-c" for r in running_rows)
+    assert get_agent_status(agents, "worker-a") == "busy"
+    assert get_agent_status(agents, "worker-b") == "free"
+    assert get_agent_status(agents, "worker-c") == "busy"
+
+
+# TC-024
+# 创建者: 神秘人
+# 最后一次更改: 神秘人
+# 最近一次运行测试时间: 2026-03-26 11:00:00 +0800
+# 最近一次运行成功时间: 2026-03-26 11:00:00 +0800
+# 测试目的: 验证 -reassign 任务不存在时返回 RC=3。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_reassign_missing_task_returns_rc3(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file(todo)
+    write_agents_file(agents)
+
+    result = run_script("-file", str(todo), "-reassign", "-task_id", "BAD", "-to", "worker-a", "-agents-list", str(agents))
+
+    assert result.returncode == 3
+    assert "task not found in running list: BAD" in result.stderr
+
+
+# TC-025
+# 创建者: 神秘人
+# 最后一次更改: 神秘人
+# 最近一次运行测试时间: 2026-03-26 11:00:00 +0800
+# 最近一次运行成功时间: 2026-03-26 11:00:00 +0800
+# 测试目的: 验证 -reassign 缺少 -agents-list 参数时返回 RC=1。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_reassign_requires_agents_list(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file(todo)
+
+    result = run_script("-file", str(todo), "-reassign", "-task_id", "EX-2", "-to", "worker-a")
+
+    assert result.returncode == 1
+    assert "-reassign requires -agents-list" in result.stderr

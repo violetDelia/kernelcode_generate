@@ -5,7 +5,7 @@
 # 最后一次更改: 神秘人
 #
 # 功能:
-# - 管理 TODO.md 任务流转: 分发、完成、暂停、继续、新建。
+# - 管理 TODO.md 任务流转: 分发、完成、暂停、继续、改派、新建。
 # - 支持 DONE.md 自动创建与完成记录追加。
 # - 在分发、完成、暂停、继续时同步更新 agents-lists.md 角色状态。
 # - 在分发时可选调用 tmux 对话脚本，向目标角色发送任务消息。
@@ -31,6 +31,7 @@ OP_DISPATCH=0
 OP_DONE=0
 OP_PAUSE=0
 OP_CONTINUE=0
+OP_REASSIGN=0
 OP_NEW=0
 OP_STATUS=0
 
@@ -83,6 +84,7 @@ Usage:
   codex-multi-agents-task.sh -file <TODO.md> -done -task_id <id> -log <log_path> -agents-list <agents-lists.md>
   codex-multi-agents-task.sh -file <TODO.md> -pause -task_id <id> -agents-list <agents-lists.md>
   codex-multi-agents-task.sh -file <TODO.md> -continue -task_id <id> -agents-list <agents-lists.md>
+  codex-multi-agents-task.sh -file <TODO.md> -reassign -task_id <id> -to <worker> -agents-list <agents-lists.md>
   codex-multi-agents-task.sh -file <TODO.md> -new -info <desc> [-to <worker>] [-from <owner>] [-worktree <path>] [-log <record_path>]
   codex-multi-agents-task.sh -file <TODO.md> -status -doing
   codex-multi-agents-task.sh -file <TODO.md> -status -task-list
@@ -92,6 +94,7 @@ Examples:
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -done -task_id EX-1 -log ./agents/codex-multi-agents/log/task-EX-1.log -agents-list ./agents/codex-multi-agents/agents-lists.md
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -pause -task_id EX-2 -agents-list ./agents/codex-multi-agents/agents-lists.md
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -continue -task_id EX-2 -agents-list ./agents/codex-multi-agents/agents-lists.md
+  codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -reassign -task_id EX-2 -to worker-c -agents-list ./agents/codex-multi-agents/agents-lists.md
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -new -info "补充单元测试" -to worker-b -from 李白 -worktree repo-x -log ./log/record.md
   codex-multi-agents-task.sh ./skills/codex-multi-agents/examples/TODO.md -file -status -doing
   codex-multi-agents-task.sh ./skills/codex-multi-agents/examples/TODO.md -file -status -task-list
@@ -128,6 +131,10 @@ parse_args() {
         ;;
       -continue)
         OP_CONTINUE=1
+        shift
+        ;;
+      -reassign)
+        OP_REASSIGN=1
         shift
         ;;
       -new)
@@ -268,8 +275,8 @@ parse_args() {
   [[ "$HAS_FILE" -eq 1 ]] || err "$RC_ARG" "missing required argument: -file"
   [[ -n "$(trim "$FILE")" ]] || err "$RC_ARG" "empty value for -file"
 
-  local op_count=$((OP_DISPATCH + OP_DONE + OP_PAUSE + OP_CONTINUE + OP_NEW + OP_STATUS))
-  [[ "$op_count" -eq 1 ]] || err "$RC_ARG" "exactly one operation is required: -dispatch|-done|-pause|-continue|-new|-status"
+  local op_count=$((OP_DISPATCH + OP_DONE + OP_PAUSE + OP_CONTINUE + OP_REASSIGN + OP_NEW + OP_STATUS))
+  [[ "$op_count" -eq 1 ]] || err "$RC_ARG" "exactly one operation is required: -dispatch|-done|-pause|-continue|-reassign|-new|-status"
 
   if [[ "$OP_DISPATCH" -eq 1 ]]; then
     [[ "$HAS_TASK_ID" -eq 1 ]] || err "$RC_ARG" "-dispatch requires -task_id"
@@ -308,6 +315,16 @@ parse_args() {
     [[ -n "$(trim "$TASK_ID")" ]] || err "$RC_ARG" "empty value for -task_id"
     [[ -n "$(trim "$AGENTS_LIST")" ]] || err "$RC_ARG" "empty value for -agents-list"
     [[ "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 ]] || err "$RC_ARG" "-continue does not accept -to/-info/-log/-from/-worktree/-message"
+  fi
+
+  if [[ "$OP_REASSIGN" -eq 1 ]]; then
+    [[ "$HAS_TASK_ID" -eq 1 ]] || err "$RC_ARG" "-reassign requires -task_id"
+    [[ "$HAS_TO" -eq 1 ]] || err "$RC_ARG" "-reassign requires -to"
+    [[ "$HAS_AGENTS_LIST" -eq 1 ]] || err "$RC_ARG" "-reassign requires -agents-list"
+    [[ -n "$(trim "$TASK_ID")" ]] || err "$RC_ARG" "empty value for -task_id"
+    [[ -n "$(trim "$TO")" ]] || err "$RC_ARG" "empty value for -to"
+    [[ -n "$(trim "$AGENTS_LIST")" ]] || err "$RC_ARG" "empty value for -agents-list"
+    [[ "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 ]] || err "$RC_ARG" "-reassign does not accept -info/-log/-from/-worktree/-message"
   fi
 
   if [[ "$OP_NEW" -eq 1 ]]; then
@@ -798,7 +815,7 @@ def main() -> int:
     agents_rows = None
     message_lines: list[str] = []
 
-    if op in {"dispatch", "done", "pause", "continue"}:
+    if op in {"dispatch", "done", "pause", "continue", "reassign"}:
         agents_lines, agents_table = parse_agents_table(agents_file)
         agents_rows = [r[:] for r in agents_table["rows"]]
 
@@ -908,6 +925,43 @@ def main() -> int:
             agents_rows[agent_idx][agents_table["status_idx"]] = "busy"
             message_lines.append(f"OK: replace {assignee} 状态")
 
+    elif op == "reassign":
+        idx = find_row_index(exec_rows, task_id)
+        if idx < 0:
+            fail(RC_DATA, f"task not found in running list: {task_id}")
+
+        assert agents_table is not None
+        assert agents_rows is not None
+        new_assignee = to.strip()
+        if not new_assignee:
+            fail(RC_ARG, "empty value for -to")
+        new_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], new_assignee)
+        if new_idx < 0:
+            fail(RC_DATA, f"agent not found in agents list: {new_assignee}")
+
+        old_assignee = exec_rows[idx][5].strip()
+        old_idx = None
+        if old_assignee:
+            old_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], old_assignee)
+            if old_idx < 0:
+                fail(RC_DATA, f"agent not found in agents list: {old_assignee}")
+
+        exec_rows[idx][5] = new_assignee
+        message_lines.append(f"OK: reassign {task_id} -> {new_assignee}")
+
+        updated: set[str] = set()
+
+        def update_agent(name: str, row_idx: int | None) -> None:
+            if not name or row_idx is None or name in updated:
+                return
+            status = "busy" if count_doing_tasks(exec_rows, name) > 0 else "free"
+            agents_rows[row_idx][agents_table["status_idx"]] = status
+            message_lines.append(f"OK: replace {name} 状态")
+            updated.add(name)
+
+        update_agent(old_assignee, old_idx)
+        update_agent(new_assignee, new_idx)
+
     elif op == "new":
         existing_ids = {r[0].strip() for r in (exec_rows + list_rows) if not is_empty_row(r)}
         new_id = generate_task_id(info, to, existing_ids)
@@ -973,6 +1027,8 @@ main() {
     op="pause"
   elif [[ "$OP_CONTINUE" -eq 1 ]]; then
     op="continue"
+  elif [[ "$OP_REASSIGN" -eq 1 ]]; then
+    op="reassign"
   elif [[ "$OP_NEW" -eq 1 ]]; then
     op="new"
   elif [[ "$OP_STATUS" -eq 1 ]]; then
@@ -1001,7 +1057,7 @@ main() {
     acquire_lock_on_file "$done_file" done_lock_fd
   fi
 
-  if [[ "$op" == "dispatch" || "$op" == "done" || "$op" == "pause" || "$op" == "continue" ]]; then
+  if [[ "$op" == "dispatch" || "$op" == "done" || "$op" == "pause" || "$op" == "continue" || "$op" == "reassign" ]]; then
     acquire_lock_on_file "$AGENTS_LIST" agents_lock_fd
   fi
 
