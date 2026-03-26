@@ -162,6 +162,8 @@ class EmitContext:
 
 
 def _dtype_to_xdsl(dtype: NumericType, location: SourceLocation | None = None) -> object:
+    if dtype is NumericType.Bool:
+        return i1
     if dtype is NumericType.Float16:
         return Float16Type()
     if dtype is NumericType.Float32:

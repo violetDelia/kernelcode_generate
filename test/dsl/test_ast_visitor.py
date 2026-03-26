@@ -66,7 +66,7 @@ from kernel_gen.dialect.arch import (
     ArchGetSubthreadNumOp,
     ArchGetThreadIdOp,
 )
-from kernel_gen.dialect.nn import NnAddOp, NnBroadcastOp, NnEqOp, NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.nn import NnAddOp, NnBroadcastOp, NnEqOp, NnMemorySpaceAttr, NnMemoryType, NnNeOp
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
     SymbolDivOp,
@@ -3020,6 +3020,36 @@ def kernel(scale, x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
         raise AssertionError("expected Missing annotation diagnostic for float runtime argument")
 
 
+# AST-011A
+# 创建者: 摸鱼小分队
+# 最后一次更改: 摸鱼小分队
+# 最近一次运行测试时间: 2026-03-27 03:45:00 +0800
+# 最近一次运行成功时间: 2026-03-27 03:45:00 +0800
+# 功能说明: 验证 parse_function 支持 Tensor[i1, ...] 返回注解并解析为 Bool 张量类型。
+# 测试目的: 锁定 Tensor[i1, ...] 在 AST 注解解析阶段不会再触发 Unsupported tensor dtype。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_supports_tensor_i1_return_annotation
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_parse_function_supports_tensor_i1_return_annotation() -> None:
+    def ne_kernel(
+        lhs: "Tensor[f32, 2, 2]",
+        rhs: "Tensor[f32, 2, 2]",
+    ) -> "Tensor[i1, 2, 2]":
+        return lhs != rhs
+
+    func_ast = parse_function(ne_kernel)
+
+    if len(func_ast.outputs) != 1:
+        raise AssertionError("expected one output annotation for ne_kernel")
+    if not isinstance(func_ast.outputs[0], TensorAST):
+        raise AssertionError("expected TensorAST output annotation for ne_kernel")
+    if func_ast.outputs[0].memory.dtype is not NumericType.Bool:
+        raise AssertionError("expected Tensor[i1, ...] to parse as NumericType.Bool")
+    if func_ast.outputs[0].memory.shape.get_values() != [2, 2]:
+        raise AssertionError("expected Tensor[i1, ...] shape to stay [2, 2]")
+
+
 # AST-012
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
@@ -3335,6 +3365,40 @@ def test_compare_implicit_broadcast_lowering() -> None:
     assert len(broadcast_ops) == 1
     eq_op = next(op for op in func_op.body.block.ops if isinstance(op, NnEqOp))
     assert eq_op.lhs is broadcast_ops[0].result or eq_op.rhs is broadcast_ops[0].result
+
+
+# MGEN-013A
+# 创建者: 摸鱼小分队
+# 最后一次更改: 摸鱼小分队
+# 最近一次运行测试时间: 2026-03-27 03:45:00 +0800
+# 最近一次运行成功时间: 2026-03-27 03:45:00 +0800
+# 功能说明: 验证 build_func_op 在 nn.ne 场景支持 Tensor[i1, ...] 返回注解。
+# 测试目的: 锁定 nn.ne 的 dtype 解析与 lowering 闭环，确保结果 element type 为 i1。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_lowers_nn_ne_with_tensor_i1_return_annotation
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_lowers_nn_ne_with_tensor_i1_return_annotation() -> None:
+    def ne_kernel(
+        lhs: "Tensor[f32, 2, 2]",
+        rhs: "Tensor[f32, 2, 2]",
+    ) -> "Tensor[i1, 2, 2]":
+        return lhs != rhs
+
+    func_op = build_func_op(ne_kernel, _tensor_arg([2, 2]), _tensor_arg([2, 2]))
+
+    ne_ops = [op for op in func_op.body.block.ops if isinstance(op, NnNeOp)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
+    if len(ne_ops) != 1:
+        raise AssertionError("expected exactly one nn.ne op")
+    if len(return_ops) != 1:
+        raise AssertionError("expected exactly one func.return op")
+    if not isinstance(ne_ops[0].result.type, NnMemoryType):
+        raise AssertionError("expected nn.ne result type to be nn.memory")
+    if ne_ops[0].result.type.element_type != i1:
+        raise AssertionError("expected nn.ne result element type to be i1")
+    if return_ops[0].arguments[0].type != ne_ops[0].result.type:
+        raise AssertionError("expected return type to match nn.ne result type")
 
 
 # MGEN-014
@@ -4019,13 +4083,13 @@ def test_emit_mlir_lowers_symbol_ge() -> None:
     assert result.type == i1
 
 
-# EMIT-019
+# EMIT-002A
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
-# 最近一次运行成功时间: 2026-03-23 05:10:36 +0800
-# 功能说明: 覆盖广播路径中 rhs 需要扩展的分支。
-# 测试目的: 验证 binary/compare 的 rhs 广播与 dtype 产物。
+# 最后一次更改: 咯咯咯
+# 最近一次运行测试时间: 2026-03-27 04:40:00 +0800
+# 最近一次运行成功时间: 2026-03-27 04:40:00 +0800
+# 功能说明: 覆盖 compare 广播路径中 rhs 需要扩展的分支。
+# 测试目的: 验证 CompareExprAST(op="ne") 的 rhs 广播与结果 element type 为 i1。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_binary_compare_broadcast_rhs
 # 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
@@ -4047,9 +4111,37 @@ def test_emit_mlir_binary_compare_broadcast_rhs() -> None:
     assert add_value.owner is not None
     assert any(isinstance(op, NnBroadcastOp) for op in block.ops)
 
-    compare_expr = CompareExprAST(lhs=lhs, rhs=rhs, op="eq", location=None)
+    compare_expr = CompareExprAST(lhs=lhs, rhs=rhs, op="ne", location=None)
     compare_value = _lower_expr(compare_expr, ctx)
+    assert isinstance(compare_value.owner, NnNeOp)
     assert compare_value.type.element_type == i1
+
+
+# EMIT-002B
+# 创建者: 咯咯咯
+# 最后一次更改: 咯咯咯
+# 最近一次运行测试时间: 2026-03-27 04:40:00 +0800
+# 最近一次运行成功时间: 2026-03-27 04:40:00 +0800
+# 功能说明: 覆盖 compare memory 路径的 broadcast 与 dtype/space 错误分支。
+# 测试目的: 验证 CompareExprAST(op="ne") 相关的 broadcast mismatch 与 element type/space 报错文案。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_compare_memory_mismatch_reports_diagnostics
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_compare_memory_mismatch_reports_diagnostics() -> None:
+    lhs_type = _memory_to_nn_type(Memory([2, 1], NumericType.Float32))
+    rhs_type_mismatch = _memory_to_nn_type(Memory([3, 1], NumericType.Float32))
+
+    with pytest.raises(_LoweringError, match="Implicit broadcast dimension mismatch"):
+        _infer_broadcast_memory_type(lhs_type, rhs_type_mismatch, location=None)
+
+    rhs_element_mismatch = _memory_to_nn_type(Memory([2, 1], NumericType.Int32))
+    with pytest.raises(_LoweringError, match="Binary op operands must have the same element_type"):
+        _infer_broadcast_memory_type(lhs_type, rhs_element_mismatch, location=None)
+
+    rhs_space_mismatch = _memory_to_nn_type(Memory([2, 1], NumericType.Float32, space=MemorySpace.LM))
+    with pytest.raises(_LoweringError, match="Binary op operands must have the same space"):
+        _infer_broadcast_memory_type(lhs_type, rhs_space_mismatch, location=None)
 
 
 # EMIT-020
