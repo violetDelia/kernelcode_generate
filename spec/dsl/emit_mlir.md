@@ -175,7 +175,8 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-009：`StoreAST` 输入非 memory 抛出错误。（`test_store_ast_lowering_raises_lowering_error`）
   - EMIT-010：`ForAST` 在 `LoopRange` 场景下 lowering 为 `symbol.for`，循环块参数 `it` 与循环体内相关 DMA operand 直接复用 `!symbol.int<"...">`，不生成 `arith.index_cast`。（`test_emit_mlir_symbolic_for_loop_avoids_index_cast`）
   - EMIT-011：循环变量表初始化与非法配置报错路径。（`test_emit_mlir_loop_vars_validation`）
-  - EMIT-012：索引解析与 rank mismatch 的错误路径。（`test_emit_mlir_index_expr_rejections`）
+  - EMIT-012：类型推导与 broadcast 错误分支。（`test_emit_mlir_infer_expr_type_branches`）
+  - EMIT-012A：索引解析与 rank mismatch 的错误路径。（`test_emit_mlir_index_expr_rejections`）
   - EMIT-013：默认 stride 推导遇到未知 attr 的分支。（`test_emit_mlir_default_stride_handles_unknown_attr`）
   - EMIT-014：`ForAST` lowering 会保留循环结构并在循环体内生成 `dma.load`。（`test_for_ast_lowering_emits_loads`）
   - EMIT-015：`alloc(...)` lowering 为 `dma.alloc` 并返回 memory 结果。（`test_emit_mlir_dma_alloc_lowering`）
