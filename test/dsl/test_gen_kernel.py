@@ -37,6 +37,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.symbol import SymbolAddOp, SymbolValueType
 from kernel_gen.dsl.emit_c import EmitCContext
 from kernel_gen.dsl.gen_kernel import GenKernelError, gen_body, gen_kernel, gen_signature
 
@@ -369,3 +370,59 @@ def test_gen_kernel_preserves_function_and_arg_names() -> None:
     unnamed_source = gen_kernel(unnamed_func, _ctx())
 
     assert unnamed_source.startswith("void unnamed_kernel(int32_t arg0)")
+
+
+# GK-010
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-03-28 07:20:00 +0800
+# 最近一次运行成功时间: 2026-03-28 07:20:00 +0800
+# 功能说明: 验证 !symbol.int 返回在 cpu target 下可生成函数返回值。
+# 测试目的: 锁定 gen_signature/gen_kernel 对 symbol 标量返回的契约，避免退化为 unsupported return form。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_supports_symbol_scalar_return
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_supports_symbol_scalar_return() -> None:
+    lhs_type = SymbolValueType.from_expr("3")
+    rhs_type = SymbolValueType.from_expr("4")
+    out_type = SymbolValueType.from_expr("7")
+    block = Block(arg_types=[lhs_type, rhs_type])
+    add = SymbolAddOp(block.args[0], block.args[1], out_type)
+    block.add_op(add)
+    block.add_op(func.ReturnOp(add.result))
+    func_op = _func("symbol_sum", [lhs_type, rhs_type], [out_type], block, ("lhs", "rhs"))
+
+    signature = gen_signature(func_op, _ctx())
+    source = gen_kernel(func_op, _ctx())
+
+    assert signature == "long long symbol_sum(long long lhs, long long rhs)"
+    assert source.startswith("long long symbol_sum(long long lhs, long long rhs)")
+    assert "long long v0 = (lhs + rhs);" in source
+    assert "return v0;" in source
+
+
+# GK-011
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-28 04:12:37 +0800
+# 最近一次运行成功时间: 2026-03-28 04:12:37 +0800
+# 功能说明: 验证非 cpu target 下 !symbol.int 返回必须报错。
+# 测试目的: 锁定 gen_kernel 对 symbol 标量返回的 target=cpu 约束。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_rejects_symbol_scalar_return_on_non_cpu
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_rejects_symbol_scalar_return_on_non_cpu() -> None:
+    lhs_type = SymbolValueType.from_expr("3")
+    rhs_type = SymbolValueType.from_expr("4")
+    out_type = SymbolValueType.from_expr("7")
+    block = Block(arg_types=[lhs_type, rhs_type])
+    add = SymbolAddOp(block.args[0], block.args[1], out_type)
+    block.add_op(add)
+    block.add_op(func.ReturnOp(add.result))
+    func_op = _func("symbol_sum", [lhs_type, rhs_type], [out_type], block, ("lhs", "rhs"))
+    ctx = EmitCContext(target="gpu")
+
+    with pytest.raises(GenKernelError, match="symbol scalar return is cpu-only"):
+        gen_kernel(func_op, ctx)

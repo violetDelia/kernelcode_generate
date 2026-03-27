@@ -25,6 +25,7 @@ from xdsl.dialects import func
 from xdsl.dialects.builtin import ArrayAttr, DictionaryAttr, IntegerType, IndexType, StringAttr
 
 from kernel_gen.dialect.nn import NnMemoryType
+from kernel_gen.dialect.symbol import SymbolValueType
 
 from .emit_c import EmitCContext, emit_c_op
 
@@ -61,6 +62,8 @@ def _type_to_c(attr: Any) -> str:
         return "long long"
     if isinstance(attr, NnMemoryType):
         return f"Memory<{_type_to_c(attr.element_type)}>"
+    if isinstance(attr, SymbolValueType):
+        return "long long"
     raise TypeError(f"unsupported type: {attr}")
 
 
@@ -84,8 +87,10 @@ def gen_signature(func_op: func.FuncOp, ctx: EmitCContext) -> str:
     result_types = list(func_op.function_type.outputs.data)
     if len(result_types) > 1:
         raise _error(ctx, func_name, "unsupported return form")
-    if result_types and not isinstance(result_types[0], NnMemoryType):
+    if result_types and not isinstance(result_types[0], (NnMemoryType, SymbolValueType)):
         raise _error(ctx, func_name, "unsupported return form")
+    if result_types and isinstance(result_types[0], SymbolValueType) and ctx.target != "cpu":
+        raise _error(ctx, func_name, "symbol scalar return is cpu-only")
 
     arg_names = _extract_arg_names(func_op)
     params: list[str] = []
@@ -96,10 +101,13 @@ def gen_signature(func_op: func.FuncOp, ctx: EmitCContext) -> str:
         else:
             params.append(f"{_type_to_c(arg_type)} {arg_name}")
 
-    if result_types:
+    return_type = "void"
+    if result_types and isinstance(result_types[0], SymbolValueType):
+        return_type = _type_to_c(result_types[0])
+    elif result_types:
         params.append(f"{_type_to_c(result_types[0])}& out")
 
-    return f"void {func_name}({', '.join(params)})"
+    return f"{return_type} {func_name}({', '.join(params)})"
 
 
 def gen_body(func_op: func.FuncOp, ctx: EmitCContext) -> str:
@@ -125,18 +133,30 @@ def gen_body(func_op: func.FuncOp, ctx: EmitCContext) -> str:
                 if op.arguments:
                     raise _error(ctx, func_op.sym_name.data, "unsupported return form")
                 continue
-            if len(result_types) != 1 or not isinstance(result_types[0], NnMemoryType):
+            if len(result_types) != 1:
                 raise _error(ctx, func_op.sym_name.data, "unsupported return form")
+            result_type = result_types[0]
             if len(op.arguments) != 1:
                 raise _error(ctx, func_op.sym_name.data, "unsupported return form")
-            if op.arguments[0].type != result_types[0]:
+            if op.arguments[0].type != result_type:
                 raise _error(ctx, func_op.sym_name.data, "unsupported return form")
-            value_name = ctx.lookup_name(op.arguments[0])
-            if value_name is None:
+            if isinstance(result_type, NnMemoryType):
+                value_name = ctx.lookup_name(op.arguments[0])
+                if value_name is None:
+                    from .emit_c import emit_c_value
+
+                    value_name = emit_c_value(op.arguments[0], ctx)
+                lines.append(f"{ctx.current_indent}out = {value_name};")
+                continue
+            if isinstance(result_type, SymbolValueType):
+                if ctx.target != "cpu":
+                    raise _error(ctx, func_op.sym_name.data, "symbol scalar return is cpu-only")
                 from .emit_c import emit_c_value
 
-                value_name = emit_c_value(op.arguments[0], ctx)
-            lines.append(f"{ctx.current_indent}out = {value_name};")
+                value_expr = emit_c_value(op.arguments[0], ctx)
+                lines.append(f"{ctx.current_indent}return {value_expr};")
+                continue
+            raise _error(ctx, func_op.sym_name.data, "unsupported return form")
             continue
         stmt = emit_c_op(op, ctx)
         if stmt:

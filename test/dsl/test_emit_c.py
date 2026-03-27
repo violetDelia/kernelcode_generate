@@ -37,6 +37,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.dma import DmaLoadOp, DmaStoreOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.symbol import SymbolAddOp, SymbolValueType
 from kernel_gen.dsl.emit_c import EmitCContext, EmitCError, emit_c_op, emit_c_value
 
 
@@ -360,3 +361,56 @@ def test_emit_c_value_rejects_invalid_dependency() -> None:
 
     assert "invalid dependency" in str(exc_info.value)
     assert "test.unsupported" in str(exc_info.value)
+
+
+# EC-007
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-03-28 07:20:00 +0800
+# 最近一次运行成功时间: 2026-03-28 07:20:00 +0800
+# 功能说明: 验证 symbol.add 在 cpu target 下可生成标量表达式与赋值语句。
+# 测试目的: 锁定 emit_c 对 symbol.add 的最小支持范围，保障 symbol 标量返回链路可用。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_op_lowers_symbol_add
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_op_lowers_symbol_add() -> None:
+    lhs_type = SymbolValueType.from_expr("L")
+    rhs_type = SymbolValueType.from_expr("R")
+    out_type = SymbolValueType.from_expr("L + R")
+    block = Block(arg_types=[lhs_type, rhs_type])
+    ctx = _ctx()
+    ctx.bind_name(block.args[0], "lhs")
+    ctx.bind_name(block.args[1], "rhs")
+    op = SymbolAddOp(block.args[0], block.args[1], out_type)
+
+    expr = emit_c_value(op.result, ctx)
+    stmt = emit_c_op(op, ctx)
+
+    assert expr == "(lhs + rhs)"
+    assert stmt == "long long v0 = (lhs + rhs);"
+
+
+# EC-008
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-28 04:12:37 +0800
+# 最近一次运行成功时间: 2026-03-28 04:12:37 +0800
+# 功能说明: 验证非 cpu target 下 symbol.add 必须报错。
+# 测试目的: 锁定 emit_c 对 symbol.add 的 target=cpu 约束，避免错误下发。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_op_rejects_symbol_add_on_non_cpu
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_op_rejects_symbol_add_on_non_cpu() -> None:
+    lhs_type = SymbolValueType.from_expr("L")
+    rhs_type = SymbolValueType.from_expr("R")
+    out_type = SymbolValueType.from_expr("L + R")
+    block = Block(arg_types=[lhs_type, rhs_type])
+    ctx = EmitCContext(target="cuda")
+    ctx.bind_name(block.args[0], "lhs")
+    ctx.bind_name(block.args[1], "rhs")
+    op = SymbolAddOp(block.args[0], block.args[1], out_type)
+
+    with pytest.raises(EmitCError, match="symbol scalar ops are cpu-only"):
+        emit_c_value(op.result, ctx)
