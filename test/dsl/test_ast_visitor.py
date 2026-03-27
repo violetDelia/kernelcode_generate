@@ -78,6 +78,7 @@ from kernel_gen.dialect.nn import (
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
     SymbolDivOp,
+    SymbolEqOp,
     SymbolFloorDivOp,
     SymbolForOp,
     SymbolGeOp,
@@ -2161,6 +2162,49 @@ def test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type() -> N
     return_op = next(op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp))
     assert return_op.arguments[0].type == SymbolValueType.from_expr("2")
     assert "symbol.add" in _print_module(ModuleOp([func_op]))
+
+
+# MGEN-028
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-26 22:20:00 +0800
+# 最近一次运行成功时间: 2026-03-26 22:20:00 +0800
+# 功能说明: 验证 symbol 标量 == 比较 lowering 为 symbol.eq 且返回 i1。
+# 测试目的: 覆盖 const/const 与 symbol/symbol 输入下的 return 与赋值返回形态。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_lowers_symbol_eq
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_lowers_symbol_eq() -> None:
+    def eq_return(lhs: int, rhs: int) -> bool:
+        return lhs == rhs
+
+    def eq_assign(lhs: int, rhs: int) -> bool:
+        result = lhs == rhs
+        return result
+
+    def _expected_expr(value: object) -> str:
+        if isinstance(value, SymbolDim):
+            return str(value.get_symbol())
+        return str(value)
+
+    runtime_cases = [
+        (eq_return, (3, 3)),
+        (eq_assign, (3, 3)),
+        (eq_return, (SymbolDim("M"), SymbolDim("N"))),
+        (eq_assign, (SymbolDim("M"), SymbolDim("N"))),
+    ]
+    for fn, runtime_args in runtime_cases:
+        func_op = build_func_op(fn, *runtime_args)
+        expected_arg_types = [SymbolValueType.from_expr(_expected_expr(arg)) for arg in runtime_args]
+        assert [arg.type for arg in func_op.args] == expected_arg_types
+        compare_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolEqOp)]
+        assert len(compare_ops) == 1
+        assert compare_ops[0].result.type == i1
+        return_op = next(op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp))
+        assert return_op.arguments[0].type == i1
+        assert list(func_op.function_type.outputs) == [i1]
+        assert "symbol.eq" in _print_module(ModuleOp([func_op]))
 
 
 # MGEN-030
