@@ -78,3 +78,13 @@
   - 问题：未发现必须修改项；功能正确性、边界条件、异常路径与潜在漏洞排查未见可利用绕过或回归风险。
   - 可选建议（可维护性）：`_build_alloc_dynamic_shape` 构造的 `symbol.get_dim` 未显式 `verify()`，错误信息依赖 `dma.alloc` 的校验；可考虑对 `shape_ops` 逐个 `verify()` 或在捕获异常时补充更明确的轴/来源提示，以便定位维度不一致问题。
   - 结论：`通过`。
+
+- 时间：`2026-03-28 04:35:32 +0800`
+- 任务：`T-20260328-e2519fc7`
+- 任务目标：合并 nn_to_kernel lowering dma.alloc dynamic_shape/verify 修复链路并清理 worktree。
+- 改动：
+  - 无新增代码改动；确认待合并提交为 `8214227`（包含实现、测试与记录）。
+- 复核：
+  - `pytest -q test/pass/test_lowing_nn_to_kernel.py` -> `exit 0`（`21 passed`）。
+  - `for f in expectation/pass/lowing/nn_to_kernel/*.py; do PYTHONPATH=. python "$f"; done` -> `exit 0`。
+- 结论：通过合并条件检查，进入合并阶段。
