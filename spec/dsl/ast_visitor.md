@@ -12,7 +12,7 @@
 - 最后一次更改：`小李飞刀`
 - `spec`：[`spec/dsl/ast_visitor.md`](../../spec/dsl/ast_visitor.md)
 - `功能实现`：[`kernel_gen/dsl/ast_visitor.py`](../../kernel_gen/dsl/ast_visitor.py)
-- `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
+- `test`：[`test/dsl/test_emit_mlir.py`](../../test/dsl/test_emit_mlir.py)
 
 ## 依赖
 
@@ -190,8 +190,11 @@ raise AstVisitorError("Unsupported node", location)
 
 ## 测试
 
-- 测试文件：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
-- 执行命令：`pytest -q test/dsl/test_ast_visitor.py`
+- 测试文件：[`test/dsl/test_emit_mlir.py`](../../test/dsl/test_emit_mlir.py)
+- 集成测试文件：[`test/dsl/test_mlir_gen.py`](../../test/dsl/test_mlir_gen.py)
+- 执行命令（visitor/emit 单测）：`pytest -q test/dsl/test_emit_mlir.py`
+- 执行命令（端到端集成）：`pytest -q test/dsl/test_mlir_gen.py`
+- 拆分归属：访问顺序、表达式缓存复用与 visitor 异常传播归属 `test_emit_mlir.py`；依赖 `build_func_op(...)` 的端到端回归归属 `test_mlir_gen.py`。
 - 测试目标：
   - 覆盖遍历顺序与节点分发。
   - 覆盖变量绑定复用与错误传播。

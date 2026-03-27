@@ -12,7 +12,7 @@
 - 最后一次更改：`不要啊教练`
 - `spec`：[`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
 - `功能实现`：[`kernel_gen/dsl/mlir_gen.py`](../../kernel_gen/dsl/mlir_gen.py)
-- `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
+- `test`：[`test/dsl/test_mlir_gen.py`](../../test/dsl/test_mlir_gen.py)
 
 ## 依赖
 
@@ -173,8 +173,11 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
 
 ## 测试
 
-- 测试文件：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
-- 执行命令：`pytest -q test/dsl/test_ast_visitor.py`
+- 测试文件：[`test/dsl/test_mlir_gen.py`](../../test/dsl/test_mlir_gen.py)
+- 依赖测试文件：[`test/dsl/test_ast.py`](../../test/dsl/test_ast.py)、[`test/dsl/test_emit_mlir.py`](../../test/dsl/test_emit_mlir.py)
+- 执行命令（mlir_gen 集成）：`pytest -q test/dsl/test_mlir_gen.py`
+- 执行命令（依赖子链路）：`pytest -q test/dsl/test_ast.py && pytest -q test/dsl/test_emit_mlir.py`
+- 拆分归属：MGEN-001~MGEN-034 全量归属 `test_mlir_gen.py`；其中 AST/emit 的前置语义分别由 `test_ast.py` 与 `test_emit_mlir.py` 单测保证。
 - 测试目标：
   - 验证 `build_func_op(...)` 生成 `func.func`。
   - 验证 `build_func_op(fn, *runtime_args, globals=None, builtins=None)` 的输入签名仅由运行时参数决定。
