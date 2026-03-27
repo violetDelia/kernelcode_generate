@@ -12,7 +12,7 @@
 - 最后一次更改：`不要啊教练`
 - `spec`：[`spec/dsl/ast.md`](../../spec/dsl/ast.md)
 - `功能实现`：[`kernel_gen/dsl/ast.py`](../../kernel_gen/dsl/ast.py)
-- `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
+- `test`：[`test/dsl/test_ast.py`](../../test/dsl/test_ast.py)
 
 ## 依赖
 
@@ -426,8 +426,11 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
 
 ## 测试
 
-- 测试文件：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
-- 执行命令：`pytest -q test/dsl/test_ast_visitor.py`
+- 测试文件：[`test/dsl/test_ast.py`](../../test/dsl/test_ast.py)
+- 集成测试文件：[`test/dsl/test_mlir_gen.py`](../../test/dsl/test_mlir_gen.py)
+- 执行命令（AST 单测）：`pytest -q test/dsl/test_ast.py`
+- 执行命令（AST→MLIR 集成）：`pytest -q test/dsl/test_mlir_gen.py`
+- 拆分归属：AST 解析入口、注解解析、诊断负路径与 helper arity 校验归属 `test_ast.py`；依赖 `build_func_op(...)` 观察 AST 语义透传的链路回归归属 `test_mlir_gen.py`。
 - 测试目标：
   - 覆盖 `parse_function(...)` 的源码解析与 AST 构建。
   - 覆盖 AST 节点字段与诊断信息的构造。
@@ -439,6 +442,7 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
   - 覆盖 `get_block_num()` 的非法参数在 AST 解析阶段被拒绝。
   - 覆盖 `get_thread_id()` 解析为 `ArchQueryAST` 的最小 arch 查询入口。
   - 覆盖 `get_thread_id()` 的非法参数在 AST 解析阶段被拒绝。
+  - 覆盖 `load` helper 的参数数量、source 类型与 space 约束的错误路径。
   - 覆盖 `slice` helper 的参数数量、source 类型与 space 约束的错误路径。
 - 功能与用例清单：
   - AST-001：解析函数生成 `FunctionAST`。（`test_visit_function_builds_ast`）
@@ -456,7 +460,8 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
   - AST-011：未注解的 float runtime 参数仍视为缺失注解并返回 `Missing annotation` 诊断。（`test_parse_function_rejects_float_runtime_arguments_without_annotations`）
   - AST-011A：`Tensor[i1, ...]` 返回注解可被解析为 `NumericType.Bool` 且保持 shape 不变。（`test_parse_function_supports_tensor_i1_return_annotation`）
   - AST-012：`nn` 算术 helper 的非法参数个数必须返回 `Unsupported nn arithmetic arity` 诊断。（`test_parse_function_rejects_unsupported_nn_arithmetic_arity_variants`）
-  - AST-013：支持 `bool/float` 返回注解、`JoinedStr` 张量注解，以及 `float(...)`、`get_shape()[axis]`、`get_stride()[axis]` 等最小 symbol 查询/转换表达式解析。（`test_ast_parse_function_supports_symbol_scalar_and_joinedstr_annotations`）
+  - AST-013：支持 `bool` 返回注解与可静态归一化的 `JoinedStr` 张量注解。（`test_ast_parse_function_supports_symbol_scalar_and_joinedstr_annotations`）
+  - AST-013A：`load` helper 的非法参数个数、非法 source 与非法 space 必须返回对应诊断。（`test_parse_function_rejects_invalid_load_helper_variants`）
   - AST-014：`slice` helper 的非法参数个数、非法 source 与非法 space 必须返回对应诊断。（`test_parse_function_rejects_invalid_slice_helper_variants`）
   - AST-014A：零入参函数中的 `get_block_id()` 可解析为 `ArchQueryAST`，并保留继续向下游 lowering 所需的查询名语义。（`test_build_func_op_lowers_arch_get_block_id_query`）
   - AST-014B：`get_block_id(1)` 与 `get_block_id(x=1)` 必须在 AST 解析阶段返回 `Unsupported get_block_id arity` 诊断。（`test_parse_function_rejects_invalid_get_block_id_arity_variants`）

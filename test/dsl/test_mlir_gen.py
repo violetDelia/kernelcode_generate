@@ -1,0 +1,2163 @@
+"""MLIR gen integration tests.
+
+创建者: 小李飞刀
+最后一次更改: 金铲铲大作战
+
+功能说明:
+- 覆盖 build_func_op/build_func_op_from_ast 及相关 lowering 集成回归。
+
+使用示例:
+- pytest -q test/dsl/test_mlir_gen.py
+
+覆盖率信息:
+- 覆盖率命令: coverage run -m pytest -q test/dsl/test_mlir_gen.py && coverage report --include=kernel_gen/dsl/mlir_gen.py -m
+- 覆盖率结果: 未统计（待补充）
+- 达标线: 95%
+
+关联文件:
+- 功能实现: kernel_gen/dsl/mlir_gen.py
+- Spec 文档: spec/dsl/mlir_gen.md
+- 测试文件: test/dsl/test_mlir_gen.py
+"""
+
+from __future__ import annotations
+
+import inspect
+from io import StringIO
+import sys
+from pathlib import Path
+
+import pytest
+from xdsl.dialects import arith, func, scf
+from xdsl.dialects.builtin import (
+    ArrayAttr,
+    FloatAttr,
+    IndexType,
+    IntAttr,
+    IntegerType,
+    ModuleOp,
+    StringAttr,
+    f32,
+    i1,
+    i32,
+)
+from xdsl.ir import Block
+from xdsl.printer import Printer
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from kernel_gen.dialect.dma import (
+    DmaAllocOp,
+    DmaCastOp,
+    DmaCopyOp,
+    DmaDesliceOp,
+    DmaLoadOp,
+    DmaReshapeOp,
+    DmaSliceOp,
+    DmaStoreOp,
+    DmaViewOp,
+)
+from kernel_gen.dialect.arch import (
+    ArchGetBlockIdOp,
+    ArchGetBlockNumOp,
+    ArchGetSubthreadIdOp,
+    ArchGetSubthreadNumOp,
+    ArchGetThreadIdOp,
+)
+from kernel_gen.dialect.nn import (
+    NnAddOp,
+    NnBroadcastOp,
+    NnEqOp,
+    NnMemorySpaceAttr,
+    NnMemoryType,
+    NnNeOp,
+    NnSubOp,
+    NnTrueDivOp,
+)
+from kernel_gen.dialect.symbol import (
+    SymbolAddOp,
+    SymbolDivOp,
+    SymbolEqOp,
+    SymbolFloorDivOp,
+    SymbolForOp,
+    SymbolGeOp,
+    SymbolMulOp,
+    SymbolSubOp,
+    SymbolValueType,
+)
+from kernel_gen.dsl.ast import (
+    AstParseError,
+    ArchQueryAST,
+    BlockAST,
+    BinaryExprAST,
+    CompareExprAST,
+    ConstAST,
+    DmaAllocAST,
+    DmaCastAST,
+    DmaCopyAST,
+    DmaFlattenAST,
+    DmaFreeAST,
+    DmaReshapeAST,
+    DmaViewAST,
+    FunctionAST,
+    ForAST,
+    LoadAST,
+    SourceLocation,
+    StoreAST,
+    TensorAST,
+    VarAST,
+    ScalarArgAST,
+    _ParseFailure,
+    parse_function,
+)
+from kernel_gen.dsl.ast_visitor import AstVisitor, AstVisitorError
+from kernel_gen.dsl.emit_mlir import (
+    EmitContext,
+    _LoweringError,
+    _build_default_stride_attrs,
+    _build_index_operands_from_layout,
+    _build_static_index_list,
+    _build_stride,
+    _build_stride_attrs,
+    _build_index_attrs,
+    _dtype_to_xdsl,
+    _ensure_index_value,
+    _ensure_supported_statements,
+    _expr_key,
+    _get_loop_vars,
+    _infer_broadcast_memory_type,
+    _infer_broadcast_shape,
+    _infer_expr_type,
+    _lower_loop_bound,
+    _lower_expr,
+    _lookup_symbol,
+    _memory_space_from_ast,
+    _memory_to_nn_type,
+    _mul_symbol,
+    _resolve_index_operand,
+    _resolve_index_symbol,
+    _resolve_static_index_expr,
+    _resolve_index_expr,
+    emit_mlir as emit_node_mlir,
+)
+from kernel_gen.dsl.mlir_gen import (
+    _build_signature_types,
+    _is_symbol_scalar_function,
+    _parse_function_with_env,
+    _symbol_expr_from_runtime_arg,
+    _validate_return_type,
+    build_func_op,
+    build_func_op_from_ast,
+)
+from kernel_gen.dsl import mlir_gen as mlir_gen_module
+from kernel_gen.dsl import ast_visitor as ast_visitor_module
+import kernel_gen.operation.nn as nn
+from kernel_gen.symbol_variable.memory import Memory, MemorySpace
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.symbol_variable.type import NumericType
+
+
+def _tensor_arg(shape: list[object]) -> Memory:
+    return Memory(shape, NumericType.Float32)
+
+
+def _module_from_func(fn: object, *runtime_args: object) -> ModuleOp:
+    return ModuleOp([build_func_op(fn, *runtime_args)])
+
+
+def _module_from_ast(func_ast: FunctionAST) -> ModuleOp:
+    return ModuleOp([build_func_op_from_ast(func_ast)])
+
+
+def _print_module(module: ModuleOp) -> str:
+    stream = StringIO()
+    printer = Printer(stream=stream)
+    printer.print_op(module)
+    return stream.getvalue()
+
+
+def _unwrap_index_cast(value: object) -> object:
+    owner = getattr(value, "owner", None)
+    if isinstance(owner, arith.IndexCastOp):
+        return owner.input
+    return value
+
+
+def _parse_function_from_source(
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+    runtime_table: dict[str, object] | None = None,
+) -> FunctionAST:
+    def kernel(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return None
+
+    def fake_getsource(_obj: object) -> str:
+        return source
+
+    monkeypatch.setattr(inspect, "getsource", fake_getsource)
+    globals_table = dict(getattr(kernel, "__globals__", {}))
+    builtins_obj = globals_table.get("__builtins__", __builtins__)
+    builtins_table = builtins_obj if isinstance(builtins_obj, dict) else getattr(builtins_obj, "__dict__", {})
+    return _parse_function_with_env(kernel, globals_table, builtins_table, runtime_table, config=None)
+
+
+# AST-014A / MGEN-027
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-25 21:41:29 +0800
+# 最近一次运行成功时间: 2026-03-25 21:41:29 +0800
+# 功能说明: 验证零入参 get_block_id DSL 函数可解析并 lowering 为 arch.get_block_id。
+# 测试目的: 锁定 get_block_id 查询的 AST 解析、build_func_op 与 build_func_op_from_ast 返回类型为 !symbol.int<"block_id">。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_arch_get_block_id_query
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_lowers_arch_get_block_id_query() -> None:
+    def get_block_id_kernel() -> int:
+        return get_block_id()
+
+    func_ast = parse_function(get_block_id_kernel)
+    if len(func_ast.inputs) != 0:
+        raise AssertionError("expected get_block_id kernel to have no inputs")
+    if len(func_ast.outputs) != 1:
+        raise AssertionError("expected get_block_id kernel to have one output annotation")
+    if len(func_ast.body.statements) != 1:
+        raise AssertionError("expected get_block_id kernel to lower to one AST statement")
+    if not isinstance(func_ast.body.statements[0], ArchQueryAST):
+        raise AssertionError("expected get_block_id kernel to parse into ArchQueryAST")
+    if func_ast.body.statements[0].query_name != "get_block_id":
+        raise AssertionError("expected arch query name to stay get_block_id")
+
+    for func_op in (build_func_op(get_block_id_kernel), build_func_op_from_ast(func_ast)):
+        if len(tuple(func_op.body.block.args)) != 0:
+            raise AssertionError("expected zero-argument func.func for get_block_id kernel")
+        body_ops = list(func_op.body.block.ops)
+        query_ops = [op for op in body_ops if isinstance(op, ArchGetBlockIdOp)]
+        return_ops = [op for op in body_ops if isinstance(op, func.ReturnOp)]
+        if len(query_ops) != 1:
+            raise AssertionError("expected exactly one arch.get_block_id op")
+        if query_ops[0].result.type != SymbolValueType.from_expr("block_id"):
+            raise AssertionError('expected arch.get_block_id result type to be !symbol.int<"block_id">')
+        if len(return_ops) != 1:
+            raise AssertionError("expected exactly one func.return op")
+        if len(return_ops[0].arguments) != 1:
+            raise AssertionError("expected func.return to carry one value")
+        if return_ops[0].arguments[0].type != SymbolValueType.from_expr("block_id"):
+            raise AssertionError('expected func.return type to stay !symbol.int<"block_id">')
+
+
+# AST-014C / MGEN-029
+# 创建者: 咯咯咯
+# 最后一次更改: 咯咯咯
+# 最近一次运行测试时间: 2026-03-26 00:27:39 +0800
+# 最近一次运行成功时间: 2026-03-26 00:27:39 +0800
+# 功能说明: 验证零入参 get_block_num DSL 函数可解析并 lowering 为 arch.get_block_num。
+# 测试目的: 锁定 get_block_num 查询的 AST 解析、build_func_op 与 build_func_op_from_ast 返回类型为 !symbol.int<"block_num">。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_arch_get_block_num_query
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_lowers_arch_get_block_num_query() -> None:
+    def get_block_num_kernel() -> int:
+        return get_block_num()
+
+    func_ast = parse_function(get_block_num_kernel)
+    if len(func_ast.inputs) != 0:
+        raise AssertionError("expected get_block_num kernel to have no inputs")
+    if len(func_ast.outputs) != 1:
+        raise AssertionError("expected get_block_num kernel to have one output annotation")
+    if len(func_ast.body.statements) != 1:
+        raise AssertionError("expected get_block_num kernel to lower to one AST statement")
+    if not isinstance(func_ast.body.statements[0], ArchQueryAST):
+        raise AssertionError("expected get_block_num kernel to parse into ArchQueryAST")
+    if func_ast.body.statements[0].query_name != "get_block_num":
+        raise AssertionError("expected arch query name to stay get_block_num")
+
+    for func_op in (build_func_op(get_block_num_kernel), build_func_op_from_ast(func_ast)):
+        if len(tuple(func_op.body.block.args)) != 0:
+            raise AssertionError("expected zero-argument func.func for get_block_num kernel")
+        body_ops = list(func_op.body.block.ops)
+        query_ops = [op for op in body_ops if isinstance(op, ArchGetBlockNumOp)]
+        return_ops = [op for op in body_ops if isinstance(op, func.ReturnOp)]
+        if len(query_ops) != 1:
+            raise AssertionError("expected exactly one arch.get_block_num op")
+        if query_ops[0].result.type != SymbolValueType.from_expr("block_num"):
+            raise AssertionError('expected arch.get_block_num result type to be !symbol.int<"block_num">')
+        if len(return_ops) != 1:
+            raise AssertionError("expected exactly one func.return op")
+        if len(return_ops[0].arguments) != 1:
+            raise AssertionError("expected func.return to carry one value")
+        if return_ops[0].arguments[0].type != SymbolValueType.from_expr("block_num"):
+            raise AssertionError('expected func.return type to stay !symbol.int<"block_num">')
+
+
+# AST-014E / MGEN-031
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-25 21:41:29 +0800
+# 最近一次运行成功时间: 2026-03-25 21:41:29 +0800
+# 功能说明: 验证零入参 get_subthread_id DSL 函数可解析并 lowering 为 arch.get_subthread_id。
+# 测试目的: 锁定 get_subthread_id 查询的 AST 解析、build_func_op 与 build_func_op_from_ast 返回类型为 !symbol.int<"subthread_id">。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_arch_get_subthread_id_query
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_lowers_arch_get_subthread_id_query() -> None:
+    def get_subthread_id_kernel() -> int:
+        return get_subthread_id()
+
+    func_ast = parse_function(get_subthread_id_kernel)
+    if len(func_ast.inputs) != 0:
+        raise AssertionError("expected get_subthread_id kernel to have no inputs")
+    if len(func_ast.outputs) != 1:
+        raise AssertionError("expected get_subthread_id kernel to have one output annotation")
+    if len(func_ast.body.statements) != 1:
+        raise AssertionError("expected get_subthread_id kernel to lower to one AST statement")
+    if not isinstance(func_ast.body.statements[0], ArchQueryAST):
+        raise AssertionError("expected get_subthread_id kernel to parse into ArchQueryAST")
+    if func_ast.body.statements[0].query_name != "get_subthread_id":
+        raise AssertionError("expected arch query name to stay get_subthread_id")
+
+    for func_op in (build_func_op(get_subthread_id_kernel), build_func_op_from_ast(func_ast)):
+        if len(tuple(func_op.body.block.args)) != 0:
+            raise AssertionError("expected zero-argument func.func for get_subthread_id kernel")
+        body_ops = list(func_op.body.block.ops)
+        query_ops = [op for op in body_ops if isinstance(op, ArchGetSubthreadIdOp)]
+        return_ops = [op for op in body_ops if isinstance(op, func.ReturnOp)]
+        if len(query_ops) != 1:
+            raise AssertionError("expected exactly one arch.get_subthread_id op")
+        if query_ops[0].result.type != SymbolValueType.from_expr("subthread_id"):
+            raise AssertionError('expected arch.get_subthread_id result type to be !symbol.int<"subthread_id">')
+        if len(return_ops) != 1:
+            raise AssertionError("expected exactly one func.return op")
+        if len(return_ops[0].arguments) != 1:
+            raise AssertionError("expected func.return to carry one value")
+        if return_ops[0].arguments[0].type != SymbolValueType.from_expr("subthread_id"):
+            raise AssertionError('expected func.return type to stay !symbol.int<"subthread_id">')
+
+
+# AST-014G / MGEN-032
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-27 01:38:30 +0800
+# 最近一次运行成功时间: 2026-03-27 01:38:30 +0800
+# 功能说明: 验证零入参 get_thread_id DSL 函数可解析并 lowering 为 arch.get_thread_id。
+# 测试目的: 锁定 get_thread_id 查询的 AST 解析、build_func_op 与 build_func_op_from_ast 返回类型为 !symbol.int<"thread_id">。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_arch_get_thread_id_query
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_lowers_arch_get_thread_id_query() -> None:
+    def get_thread_id_kernel() -> int:
+        return get_thread_id()
+
+    func_ast = parse_function(get_thread_id_kernel)
+    if len(func_ast.inputs) != 0:
+        raise AssertionError("expected get_thread_id kernel to have no inputs")
+    if len(func_ast.outputs) != 1:
+        raise AssertionError("expected get_thread_id kernel to have one output annotation")
+    if len(func_ast.body.statements) != 1:
+        raise AssertionError("expected get_thread_id kernel to lower to one AST statement")
+    if not isinstance(func_ast.body.statements[0], ArchQueryAST):
+        raise AssertionError("expected get_thread_id kernel to parse into ArchQueryAST")
+    if func_ast.body.statements[0].query_name != "get_thread_id":
+        raise AssertionError("expected arch query name to stay get_thread_id")
+
+    for func_op in (build_func_op(get_thread_id_kernel), build_func_op_from_ast(func_ast)):
+        if len(tuple(func_op.body.block.args)) != 0:
+            raise AssertionError("expected zero-argument func.func for get_thread_id kernel")
+        body_ops = list(func_op.body.block.ops)
+        query_ops = [op for op in body_ops if isinstance(op, ArchGetThreadIdOp)]
+        return_ops = [op for op in body_ops if isinstance(op, func.ReturnOp)]
+        if len(query_ops) != 1:
+            raise AssertionError("expected exactly one arch.get_thread_id op")
+        if query_ops[0].result.type != SymbolValueType.from_expr("thread_id"):
+            raise AssertionError('expected arch.get_thread_id result type to be !symbol.int<"thread_id">')
+        if len(return_ops) != 1:
+            raise AssertionError("expected exactly one func.return op")
+        if len(return_ops[0].arguments) != 1:
+            raise AssertionError("expected func.return to carry one value")
+        if return_ops[0].arguments[0].type != SymbolValueType.from_expr("thread_id"):
+            raise AssertionError('expected func.return type to stay !symbol.int<"thread_id">')
+
+
+# AST-014I / MGEN-033
+# 创建者: 摸鱼小分队
+# 最后一次更改: 摸鱼小分队
+# 最近一次运行测试时间: 2026-03-27 02:08:59 +0800
+# 最近一次运行成功时间: 2026-03-27 02:08:59 +0800
+# 功能说明: 验证零入参 get_subthread_num DSL 函数可解析并 lowering 为 arch.get_subthread_num。
+# 测试目的: 锁定 get_subthread_num 查询的 AST 解析、build_func_op 与 build_func_op_from_ast 返回类型为 !symbol.int<"subthread_num">。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_arch_get_subthread_num_query
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_lowers_arch_get_subthread_num_query() -> None:
+    def get_subthread_num_kernel() -> int:
+        return get_subthread_num()
+
+    func_ast = parse_function(get_subthread_num_kernel)
+    if len(func_ast.inputs) != 0:
+        raise AssertionError("expected get_subthread_num kernel to have no inputs")
+    if len(func_ast.outputs) != 1:
+        raise AssertionError("expected get_subthread_num kernel to have one output annotation")
+    if len(func_ast.body.statements) != 1:
+        raise AssertionError("expected get_subthread_num kernel to lower to one AST statement")
+    if not isinstance(func_ast.body.statements[0], ArchQueryAST):
+        raise AssertionError("expected get_subthread_num kernel to parse into ArchQueryAST")
+    if func_ast.body.statements[0].query_name != "get_subthread_num":
+        raise AssertionError("expected arch query name to stay get_subthread_num")
+
+    for func_op in (build_func_op(get_subthread_num_kernel), build_func_op_from_ast(func_ast)):
+        if len(tuple(func_op.body.block.args)) != 0:
+            raise AssertionError("expected zero-argument func.func for get_subthread_num kernel")
+        body_ops = list(func_op.body.block.ops)
+        query_ops = [op for op in body_ops if isinstance(op, ArchGetSubthreadNumOp)]
+        return_ops = [op for op in body_ops if isinstance(op, func.ReturnOp)]
+        if len(query_ops) != 1:
+            raise AssertionError("expected exactly one arch.get_subthread_num op")
+        if query_ops[0].result.type != SymbolValueType.from_expr("subthread_num"):
+            raise AssertionError('expected arch.get_subthread_num result type to be !symbol.int<"subthread_num">')
+        if len(return_ops) != 1:
+            raise AssertionError("expected exactly one func.return op")
+        if len(return_ops[0].arguments) != 1:
+            raise AssertionError("expected func.return to carry one value")
+        if return_ops[0].arguments[0].type != SymbolValueType.from_expr("subthread_num"):
+            raise AssertionError('expected func.return type to stay !symbol.int<"subthread_num">')
+
+
+# MGEN-004
+# 创建者: 小李飞刀
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 15:38:56 +0800
+# 最近一次运行成功时间: 2026-03-22 15:38:56 +0800
+# 功能说明: 验证 build_func_op 生成 func.func 并包含 nn dialect IR。
+# 测试目的: 验证 build_func_op 生成 func.func 并包含 nn dialect IR。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_visit_to_nn_ir_builds_module
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_visit_to_nn_ir_builds_module() -> None:
+    def add(
+        x: "Tensor[f32, 2, 2]",
+        y: "Tensor[f32, 2, 2]",
+    ) -> "Tensor[f32, 2, 2]":
+        z = x + y
+        return z
+
+    module = _module_from_func(add, _tensor_arg([2, 2]), _tensor_arg([2, 2]))
+    assert isinstance(module, ModuleOp)
+    assert any(isinstance(op, func.FuncOp) for op in module.ops)
+    assert any(isinstance(op, NnAddOp) for op in module.walk())
+
+
+# MGEN-005
+# 创建者: 小李飞刀
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 15:38:56 +0800
+# 最近一次运行成功时间: 2026-03-22 15:38:56 +0800
+# 功能说明: 验证 func.func 打印输出包含 nn dialect 文本。
+# 测试目的: 验证 func.func 打印输出包含 nn dialect 文本。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_emit_mlir_output
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_emit_mlir_output() -> None:
+    def add(
+        x: "Tensor[f32, 2, 2]",
+        y: "Tensor[f32, 2, 2]",
+    ) -> "Tensor[f32, 2, 2]":
+        z = x + y
+        return z
+
+    module = _module_from_func(add, _tensor_arg([2, 2]), _tensor_arg([2, 2]))
+    text = _print_module(module)
+    assert "nn.add" in text
+    assert "func.func" in text
+
+
+# MGEN-001
+# 创建者: 朽木露琪亚
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 15:38:56 +0800
+# 最近一次运行成功时间: 2026-03-22 15:38:56 +0800
+# 功能说明: 验证 build_func_op 返回 func.func 并生成正确参数类型。
+# 测试目的: 验证 build_func_op 返回 func.func 并生成正确参数类型。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_returns_func_op
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_returns_func_op() -> None:
+    def add(
+        x: "Tensor[f32, 2, 2]",
+        y: "Tensor[f32, 2, 2]",
+        n: int,
+    ) -> "Tensor[f32, 2, 2]":
+        return x + y
+
+    func_op = build_func_op(add, _tensor_arg([2, 2]), _tensor_arg([2, 2]), 4)
+    assert isinstance(func_op, func.FuncOp)
+    inputs = list(func_op.function_type.inputs)
+    assert len(inputs) == 3
+    assert inputs[2] == i32
+
+
+# MGEN-001A
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-25 17:10:00 +0800
+# 最近一次运行成功时间: 2026-03-25 17:10:00 +0800
+# 功能说明: 验证 build_func_op 的输入签名只由 runtime_args 决定，不受解析环境中同名对象影响。
+# 测试目的: 证明即使 globals 中提供同名 shadow symbol，成功路径的 func.func 签名仍以 runtime_args 为准。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_signature_uses_runtime_args_not_parse_env
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_signature_uses_runtime_args_not_parse_env() -> None:
+    runtime_expr = SymbolDim("runtime")
+    shadow_expr = SymbolDim("shadow")
+
+    def only_symbol(expr: int) -> int:
+        return expr
+
+    func_op = build_func_op(
+        only_symbol,
+        runtime_expr,
+        globals={"expr": shadow_expr, "__builtins__": __builtins__},
+        builtins=object(),
+    )
+    inputs = list(func_op.function_type.inputs)
+    outputs = list(func_op.function_type.outputs)
+    assert inputs == [SymbolValueType.from_expr("runtime")]
+    assert outputs == [SymbolValueType.from_expr("runtime")]
+
+
+# MGEN-002
+# 创建者: 朽木露琪亚
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 15:38:56 +0800
+# 最近一次运行成功时间: 2026-03-22 15:38:56 +0800
+# 功能说明: 验证 build_func_op_from_ast 保留 AST 参数顺序。
+# 测试目的: 验证 build_func_op_from_ast 保留 AST 参数顺序。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_from_ast_preserves_arg_order
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_from_ast_preserves_arg_order() -> None:
+    def add(
+        x: "Tensor[f32, 2, 2]",
+        y: "Tensor[f32, 2, 2]",
+        n: int,
+    ) -> "Tensor[f32, 2, 2]":
+        return x + y
+
+    func_ast = parse_function(add)
+    func_op = build_func_op_from_ast(func_ast)
+    assert isinstance(func_op, func.FuncOp)
+    inputs = list(func_op.function_type.inputs)
+    assert len(inputs) == 3
+    assert inputs[2] == i32
+
+
+# MGEN-002
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-25 16:45:00 +0800
+# 最近一次运行成功时间: 2026-03-25 16:45:00 +0800
+# 功能说明: 验证 build_func_op_from_ast 在提供 runtime_args 时按运行时参数语义构造签名。
+# 测试目的: 证明 build_func_op_from_ast 的公开成功路径会用 runtime_args 驱动 symbol 标量签名 lowering。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_from_ast_uses_runtime_args_for_symbol_signature
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_from_ast_uses_runtime_args_for_symbol_signature() -> None:
+    def only_symbol(expr: int) -> int:
+        return expr
+
+    func_ast = parse_function(only_symbol)
+    func_op = build_func_op_from_ast(func_ast, runtime_args=[SymbolDim("expr")])
+    inputs = list(func_op.function_type.inputs)
+    outputs = list(func_op.function_type.outputs)
+    assert inputs == [SymbolValueType.from_expr("expr")]
+    assert outputs == [SymbolValueType.from_expr("expr")]
+
+
+# MGEN-002A
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-25 16:45:00 +0800
+# 最近一次运行成功时间: 2026-03-25 16:45:00 +0800
+# 功能说明: 验证 build_func_op_from_ast 会把 config 透传给 visitor 与 lowering context。
+# 测试目的: 证明 build_func_op_from_ast(..., config=...) 的公开成功路径不是空签名兼容，而是可观察地把配置传入 visitor/context。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_from_ast_forwards_config_to_visitor_and_context
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_from_ast_forwards_config_to_visitor_and_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class RecordingVisitor(ast_visitor_module.AstVisitor):
+        def __init__(self: "RecordingVisitor", config: dict[str, object] | None = None) -> None:
+            super().__init__(config=config)
+            captured["visitor_config"] = dict(self.config)
+
+        def visit_function(self: "RecordingVisitor", func_ast: FunctionAST, ctx: EmitContext) -> object:
+            captured["ctx_config"] = dict(ctx.config)
+            return super().visit_function(func_ast, ctx)
+
+    def identity(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return x
+
+    monkeypatch.setattr(ast_visitor_module, "AstVisitor", RecordingVisitor)
+    func_ast = parse_function(identity)
+    config: dict[str, object] = {"loop_vars": {"i": "outer"}}
+    func_op = build_func_op_from_ast(func_ast, config=config)
+
+    assert isinstance(func_op, func.FuncOp)
+    assert captured["visitor_config"] == config
+    assert captured["ctx_config"] == config
+
+
+# MGEN-003
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
+# 最近一次运行成功时间: 2026-03-22 14:59:58 +0800
+# 功能说明: 验证 build_func_op 返回类型与 AST 返回注解一致。
+# 测试目的: 验证 build_func_op 返回类型与 AST 返回注解一致。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_return_type_matches_annotation
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_return_type_matches_annotation() -> None:
+    def add(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return x
+
+    func_ast = parse_function(add)
+    func_op = build_func_op(add, _tensor_arg([2, 2]))
+    outputs = list(func_op.function_type.outputs)
+    assert outputs
+    expected = _memory_to_nn_type(func_ast.outputs[0].memory)
+    assert outputs[0] == expected
+
+
+# MGEN-003
+# 创建者: 小李飞刀
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-26 22:20:00 +0800
+# 最近一次运行成功时间: 2026-03-26 22:20:00 +0800
+# 功能说明: 覆盖 mlir_gen 的符号标量函数与签名构造分支。
+# 测试目的: 验证符号标量函数识别与 runtime arg 到 symbol expr 的映射。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_mlir_gen_symbol_scalar_helpers
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_mlir_gen_symbol_scalar_helpers() -> None:
+    func_ast = FunctionAST(
+        name="only_symbol",
+        inputs=[ScalarArgAST("n", int)],
+        outputs=[ScalarArgAST("n", int)],
+        body=BlockAST([]),
+    )
+    assert _is_symbol_scalar_function(func_ast)
+    assert not _is_symbol_scalar_function(FunctionAST("no_inputs", [], [], BlockAST([])))
+
+    assert _symbol_expr_from_runtime_arg(SymbolDim("S")) == "S"
+    assert _symbol_expr_from_runtime_arg(4) == "4"
+    assert _symbol_expr_from_runtime_arg("bad") is None
+
+    arg_types, type_map = _build_signature_types(func_ast, runtime_args=[SymbolDim("S")])
+    assert len(arg_types) == 1
+    assert isinstance(arg_types[0], SymbolValueType)
+    assert type_map[_expr_key(func_ast.inputs[0])] == arg_types[0]
+
+
+# MGEN-002B
+# 创建者: 小李飞刀
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-25 16:25:00 +0800
+# 最近一次运行成功时间: 2026-03-25 16:25:00 +0800
+# 功能说明: 覆盖 build_func_op_from_ast 签名构造与输入校验错误分支。
+# 测试目的: 验证 build_func_op_from_ast 对空函数体、runtime_args 长度不匹配、未支持的输入类型与缺少 tensor 输入等约束都会报错。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_mlir_gen_signature_validation_errors
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_mlir_gen_signature_validation_errors() -> None:
+    with pytest.raises(AstVisitorError, match="Function body is empty"):
+        build_func_op_from_ast(FunctionAST("empty", [], [], BlockAST([])))
+
+    single_tensor = FunctionAST(
+        "one",
+        [TensorAST("x", Memory([2, 2], NumericType.Float32))],
+        [],
+        BlockAST([]),
+    )
+    with pytest.raises(AstVisitorError, match="runtime_args must align"):
+        build_func_op_from_ast(single_tensor, runtime_args=[])
+
+    with pytest.raises(AstVisitorError, match="Unsupported scalar argument type"):
+        build_func_op_from_ast(FunctionAST("bad", [ScalarArgAST("n", float)], [], BlockAST([])))
+
+    with pytest.raises(AstVisitorError, match="Unsupported input type"):
+        build_func_op_from_ast(FunctionAST("bad", [VarAST("x")], [], BlockAST([])))
+
+    outputs_tensor = FunctionAST(
+        "no_tensor",
+        [ScalarArgAST("n", int)],
+        [TensorAST("out", Memory([2], NumericType.Float32))],
+        BlockAST([]),
+    )
+    with pytest.raises(AstVisitorError, match="At least one tensor input is required"):
+        build_func_op_from_ast(outputs_tensor)
+
+
+# MGEN-025
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-25 10:18:40 +0800
+# 最近一次运行成功时间: 2026-03-25 10:18:40 +0800
+# 功能说明: 验证 build_func_op 支持可静态归一化的 JoinedStr Tensor 注解。
+# 测试目的: 验证 f"Tensor[...]" 形式的输入/输出注解可被归一化并成功参与 lowering。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_accepts_joinedstr_tensor_annotation
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_accepts_joinedstr_tensor_annotation(monkeypatch: pytest.MonkeyPatch) -> None:
+    rows = 2
+    cols = 3
+
+    def identity(src: f"Tensor[f32, {ROWS}, {COLS}]") -> f"Tensor[f32, {ROWS}, {COLS}]":
+        return src
+
+    monkeypatch.setitem(identity.__globals__, "ROWS", rows)
+    monkeypatch.setitem(identity.__globals__, "COLS", cols)
+    func_op = build_func_op(identity, _tensor_arg([rows, cols]))
+    assert isinstance(func_op, func.FuncOp)
+    assert list(func_op.function_type.inputs) == [_memory_to_nn_type(Memory([rows, cols], NumericType.Float32))]
+    assert list(func_op.function_type.outputs) == [_memory_to_nn_type(Memory([rows, cols], NumericType.Float32))]
+
+
+# MGEN-025
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-25 10:18:40 +0800
+# 最近一次运行成功时间: 2026-03-25 10:18:40 +0800
+# 功能说明: 验证 build_func_op 会拒绝无法归一化为合法 Tensor 语法的 JoinedStr 注解。
+# 测试目的: 验证 JoinedStr 注解归一化后缺少维度时会抛出带诊断的错误。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_rejects_invalid_joinedstr_tensor_annotation
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_rejects_invalid_joinedstr_tensor_annotation(monkeypatch: pytest.MonkeyPatch) -> None:
+    bad_spec = "Tensor[f32]"
+
+    def invalid(src: f"{BAD_SPEC}") -> f"{BAD_SPEC}":
+        return src
+
+    monkeypatch.setitem(invalid.__globals__, "BAD_SPEC", bad_spec)
+    with pytest.raises(AstVisitorError, match="Tensor annotation missing dimensions"):
+        build_func_op(invalid, _tensor_arg([2]))
+
+
+# MGEN-026
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-25 10:04:04 +0800
+# 最近一次运行成功时间: 2026-03-25 10:04:04 +0800
+# 功能说明: 验证 build_func_op 在 DMA helper 场景下按公开语义生成对应 memory 结果。
+# 测试目的: 验证 alloc/copy/cast/view/reshape/flatten 六类 helper 在 build_func_op 链路中都能成功 lowering。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_dma_helper_calls
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_dma_helper_calls() -> None:
+    from kernel_gen.operation.dma import alloc, cast, copy, flatten, reshape, view
+
+    source = Memory([4, 4], NumericType.Float32, space=MemorySpace.GM)
+
+    def alloc_kernel() -> "Tensor[f32, 2, 3]":
+        return alloc([2, 3], NumericType.Float32, MemorySpace.SM)
+
+    def copy_kernel(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 4, 4]":
+        return copy(src, MemorySpace.SM)
+
+    def cast_kernel(src: "Tensor[f32, 4, 4]") -> "Tensor[f16, 4, 4]":
+        return cast(src, NumericType.Float16, memoryspace=MemorySpace.SM)
+
+    def view_kernel(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
+        return view(src, [1, 1], [2, 2], [1, 1])
+
+    def reshape_kernel(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 8]":
+        return reshape(src, [2, 8])
+
+    def flatten_kernel(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 16]":
+        return flatten(src)
+
+    alloc_func = build_func_op(alloc_kernel)
+    copy_func = build_func_op(copy_kernel, source)
+    cast_func = build_func_op(cast_kernel, source)
+    view_func = build_func_op(view_kernel, source)
+    reshape_func = build_func_op(reshape_kernel, source)
+    flatten_func = build_func_op(flatten_kernel, source)
+
+    assert any(isinstance(op, DmaAllocOp) for op in alloc_func.body.block.ops)
+    assert any(isinstance(op, DmaCopyOp) for op in copy_func.body.block.ops)
+    assert any(isinstance(op, DmaCastOp) for op in cast_func.body.block.ops)
+    assert any(isinstance(op, DmaViewOp) for op in view_func.body.block.ops)
+    assert any(isinstance(op, DmaReshapeOp) for op in reshape_func.body.block.ops)
+    assert any(isinstance(op, DmaReshapeOp) for op in flatten_func.body.block.ops)
+
+
+# MGEN-026A
+# 创建者: 小李飞刀
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-25 22:17:59 +0800
+# 最近一次运行成功时间: 2026-03-25 22:17:59 +0800
+# 功能说明: 验证 build_func_op 支持仅依赖标量 runtime_args 的 DMA alloc-only kernel。
+# 测试目的: 验证 alloc-only kernel 会将 runtime shape 参数 lowering 为 symbol.int 输入，并保持 dma.alloc 结果类型与返回注解一致。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_dma_alloc_helper_with_runtime_shape_args
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_dma_alloc_helper_with_runtime_shape_args(monkeypatch: pytest.MonkeyPatch) -> None:
+    from kernel_gen.operation.dma import alloc
+
+    rows = 2
+    cols = 3
+    source = """
+def alloc_kernel(rank1: int, rank2: int) -> f"Tensor[f32, {ALLOC_ROWS}, {ALLOC_COLS}]":
+    return alloc([rank1, rank2], NumericType.Float32, MemorySpace.SM)
+"""
+    namespace = {
+        "alloc": alloc,
+        "NumericType": NumericType,
+        "MemorySpace": MemorySpace,
+        "ALLOC_ROWS": rows,
+        "ALLOC_COLS": cols,
+    }
+    exec(source, namespace)
+    alloc_kernel = namespace["alloc_kernel"]
+
+    def fake_getsource(_obj: object) -> str:
+        return source
+
+    monkeypatch.setattr(inspect, "getsource", fake_getsource)
+
+    func_op = build_func_op(alloc_kernel, rows, cols)
+    alloc_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaAllocOp)]
+
+    assert list(func_op.function_type.inputs) == [
+        SymbolValueType.from_expr(str(rows)),
+        SymbolValueType.from_expr(str(cols)),
+    ]
+    assert len(alloc_ops) == 1
+    assert list(alloc_ops[0].dynamic_shape) == list(func_op.body.block.args)
+    assert alloc_ops[0].result.type.space == NnMemorySpaceAttr.from_name("shared")
+    assert [attr.data for attr in alloc_ops[0].result.type.shape.data] == [rows, cols]
+    assert list(func_op.function_type.outputs) == [alloc_ops[0].result.type]
+
+
+# MGEN-026A
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-25 22:17:59 +0800
+# 最近一次运行成功时间: 2026-03-25 22:17:59 +0800
+# 功能说明: 覆盖 alloc-only runtime_args 无法映射为 !symbol.int 时的错误分支。
+# 测试目的: 验证 alloc-only kernel 遇到非法 runtime_args 类型会报错并与 MGEN-002B 保持一致。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_rejects_dma_alloc_helper_with_invalid_runtime_shape_args
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_rejects_dma_alloc_helper_with_invalid_runtime_shape_args(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.dma import alloc
+
+    rows = 2
+    cols = 3
+    source = """
+def alloc_kernel(rank1: int, rank2: int) -> f"Tensor[f32, {ALLOC_ROWS}, {ALLOC_COLS}]":
+    return alloc([rank1, rank2], NumericType.Float32, MemorySpace.SM)
+"""
+    namespace = {
+        "alloc": alloc,
+        "NumericType": NumericType,
+        "MemorySpace": MemorySpace,
+        "ALLOC_ROWS": rows,
+        "ALLOC_COLS": cols,
+    }
+    exec(source, namespace)
+    alloc_kernel = namespace["alloc_kernel"]
+
+    def fake_getsource(_obj: object) -> str:
+        return source
+
+    monkeypatch.setattr(inspect, "getsource", fake_getsource)
+
+    with pytest.raises(AstVisitorError, match="Unsupported scalar argument type"):
+        build_func_op(alloc_kernel, 1.5, cols)
+
+
+# MGEN-026B
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-26 02:03:12 +0800
+# 最近一次运行成功时间: 2026-03-26 02:03:12 +0800
+# 功能说明: 验证 alloc-only kernel 可接受 SymbolDim runtime_args 并保持符号 shape 表达式。
+# 测试目的: 锁定 SymbolDim runtime_args 会 lowering 为 !symbol.int 输入且结果类型 shape 保持符号名。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_dma_alloc_helper_with_symbol_shape_args
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_dma_alloc_helper_with_symbol_shape_args() -> None:
+    from kernel_gen.operation.dma import alloc
+
+    symbol_lhs = SymbolDim("M")
+    symbol_rhs = SymbolDim("N")
+    lhs_expr = str(symbol_lhs.get_symbol())
+    rhs_expr = str(symbol_rhs.get_symbol())
+
+    def alloc_kernel(rank1: int, rank2: int) -> f"Tensor[f32, {lhs_expr}, {rhs_expr}]":
+        return alloc([rank1, rank2], NumericType.Float32, MemorySpace.SM)
+
+    func_op = build_func_op(
+        alloc_kernel,
+        symbol_lhs,
+        symbol_rhs,
+        globals={"lhs_expr": lhs_expr, "rhs_expr": rhs_expr},
+    )
+    alloc_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaAllocOp)]
+
+    assert list(func_op.function_type.inputs) == [
+        SymbolValueType.from_expr(lhs_expr),
+        SymbolValueType.from_expr(rhs_expr),
+    ]
+    assert len(alloc_ops) == 1
+    assert [attr.data for attr in alloc_ops[0].result.type.shape.data] == [lhs_expr, rhs_expr]
+    assert list(func_op.function_type.outputs) == [alloc_ops[0].result.type]
+
+
+# MGEN-026B
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-26 02:03:12 +0800
+# 最近一次运行成功时间: 2026-03-26 02:03:12 +0800
+# 功能说明: 验证 alloc-only kernel 支持 SymbolDim + const 的混合 shape runtime_args。
+# 测试目的: 锁定符号表达式在输入与结果类型中保持一致。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_dma_alloc_helper_with_symbol_plus_const_shape_args
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_dma_alloc_helper_with_symbol_plus_const_shape_args() -> None:
+    from kernel_gen.operation.dma import alloc
+
+    symbol_lhs = SymbolDim("M") + 2
+    symbol_rhs = SymbolDim("N") + 3
+    lhs_expr = str(symbol_lhs.get_symbol())
+    rhs_expr = str(symbol_rhs.get_symbol())
+
+    def alloc_kernel(rank1: int, rank2: int) -> f"Tensor[f32, {lhs_expr}, {rhs_expr}]":
+        return alloc([rank1, rank2], NumericType.Float32, MemorySpace.SM)
+
+    func_op = build_func_op(
+        alloc_kernel,
+        symbol_lhs,
+        symbol_rhs,
+        globals={"lhs_expr": lhs_expr, "rhs_expr": rhs_expr},
+    )
+    alloc_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaAllocOp)]
+
+    assert list(func_op.function_type.inputs) == [
+        SymbolValueType.from_expr(lhs_expr),
+        SymbolValueType.from_expr(rhs_expr),
+    ]
+    assert len(alloc_ops) == 1
+    assert [attr.data for attr in alloc_ops[0].result.type.shape.data] == [lhs_expr, rhs_expr]
+    assert list(func_op.function_type.outputs) == [alloc_ops[0].result.type]
+
+
+# MGEN-026C
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-26 02:03:12 +0800
+# 最近一次运行成功时间: 2026-03-26 02:03:12 +0800
+# 功能说明: 验证 alloc-only kernel 在零参数常量形状场景下生成正确结果类型。
+# 测试目的: 锁定 func.func 无输入且 dma.alloc 结果类型与返回注解一致。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_dma_alloc_helper_without_runtime_args
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_dma_alloc_helper_without_runtime_args() -> None:
+    from kernel_gen.operation.dma import alloc
+
+    def alloc_kernel() -> "Tensor[f32, 3, 5]":
+        return alloc([3, 5], NumericType.Float32, MemorySpace.SM)
+
+    func_op = build_func_op(alloc_kernel)
+    alloc_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaAllocOp)]
+
+    assert list(func_op.function_type.inputs) == []
+    assert len(alloc_ops) == 1
+    assert [attr.data for attr in alloc_ops[0].result.type.shape.data] == [3, 5]
+    assert list(func_op.function_type.outputs) == [alloc_ops[0].result.type]
+
+
+# MGEN-026D
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-26 02:03:12 +0800
+# 最近一次运行成功时间: 2026-03-26 02:03:12 +0800
+# 功能说明: 验证 alloc-only kernel 支持显式连续 stride 输入。
+# 测试目的: 锁定显式 stride lowering 不改变结果类型与输入符号表达式。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_dma_alloc_helper_with_explicit_stride
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_dma_alloc_helper_with_explicit_stride() -> None:
+    from kernel_gen.operation.dma import alloc
+
+    rows = 2
+    cols = 3
+    row_stride = cols
+    col_stride = 1
+
+    def alloc_kernel(rank1: int, rank2: int, stride1: int, stride2: int) -> "Tensor[f32, 2, 3]":
+        return alloc(
+            [rank1, rank2],
+            NumericType.Float32,
+            MemorySpace.SM,
+            stride=[stride1, stride2],
+        )
+
+    func_op = build_func_op(alloc_kernel, rows, cols, row_stride, col_stride)
+    alloc_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaAllocOp)]
+
+    assert list(func_op.function_type.inputs) == [
+        SymbolValueType.from_expr(str(rows)),
+        SymbolValueType.from_expr(str(cols)),
+        SymbolValueType.from_expr(str(row_stride)),
+        SymbolValueType.from_expr(str(col_stride)),
+    ]
+    assert len(alloc_ops) == 1
+    assert [attr.data for attr in alloc_ops[0].result.type.shape.data] == [rows, cols]
+    assert [attr.data for attr in alloc_ops[0].result.type.stride.data] == [row_stride, col_stride]
+    assert list(func_op.function_type.outputs) == [alloc_ops[0].result.type]
+
+
+# MGEN-026E
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-26 02:03:12 +0800
+# 最近一次运行成功时间: 2026-03-26 02:03:12 +0800
+# 功能说明: 验证 alloc-only kernel 拒绝非法 dtype 参数。
+# 测试目的: 锁定 alloc dtype 校验错误信息与公开语义一致。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_rejects_dma_alloc_helper_with_invalid_dtype
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_rejects_dma_alloc_helper_with_invalid_dtype() -> None:
+    from kernel_gen.operation.dma import alloc
+
+    def alloc_kernel(rank1: int, rank2: int) -> "Tensor[f32, 2, 3]":
+        return alloc([rank1, rank2], "f32", MemorySpace.SM)
+
+    with pytest.raises(AstVisitorError, match="alloc dtype must be NumericType"):
+        build_func_op(alloc_kernel, 2, 3)
+
+
+# MGEN-026E
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-26 02:03:12 +0800
+# 最近一次运行成功时间: 2026-03-26 02:03:12 +0800
+# 功能说明: 验证 alloc-only kernel 拒绝非法 space 参数。
+# 测试目的: 锁定 alloc space 校验错误信息与公开语义一致。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_rejects_dma_alloc_helper_with_invalid_space
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_rejects_dma_alloc_helper_with_invalid_space() -> None:
+    from kernel_gen.operation.dma import alloc
+
+    def alloc_kernel(rank1: int, rank2: int) -> "Tensor[f32, 2, 3]":
+        return alloc([rank1, rank2], NumericType.Float32, "shared")
+
+    with pytest.raises(AstVisitorError, match="alloc space must be MemorySpace"):
+        build_func_op(alloc_kernel, 2, 3)
+
+
+# MGEN-026E
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-26 02:03:12 +0800
+# 最近一次运行成功时间: 2026-03-26 02:03:12 +0800
+# 功能说明: 验证 alloc-only kernel 拒绝非连续 stride。
+# 测试目的: 锁定非连续 stride 报错信息与公开语义一致。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_rejects_dma_alloc_helper_with_non_contiguous_stride
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_rejects_dma_alloc_helper_with_non_contiguous_stride() -> None:
+    from kernel_gen.operation.dma import alloc
+
+    def alloc_kernel(rank1: int, rank2: int, stride1: int, stride2: int) -> "Tensor[f32, 2, 3]":
+        return alloc(
+            [rank1, rank2],
+            NumericType.Float32,
+            MemorySpace.SM,
+            stride=[stride1, stride2],
+        )
+
+    with pytest.raises(AstVisitorError, match="dma.alloc only supports contiguous stride"):
+        build_func_op(alloc_kernel, 2, 3, 3, 2)
+
+
+# MGEN-026
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-25 10:04:04 +0800
+# 最近一次运行成功时间: 2026-03-25 10:04:04 +0800
+# 功能说明: 验证 build_func_op 在 free 语句场景下不会生成额外返回值。
+# 测试目的: 验证 free 作为无返回值语句参与 lowering，函数体最终只保留 func.return。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_dma_free_statement
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_dma_free_statement() -> None:
+    from kernel_gen.operation.dma import free
+
+    source = Memory([4, 4], NumericType.Float32, space=MemorySpace.GM)
+
+    def free_kernel(src: "Tensor[f32, 4, 4]"):
+        free(src)
+
+    func_op = build_func_op(free_kernel, source)
+    assert isinstance(func_op, func.FuncOp)
+    assert list(func_op.function_type.outputs) == []
+    assert [type(op) for op in func_op.body.block.ops] == [func.ReturnOp]
+
+
+# MGEN-026
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-25 10:18:40 +0800
+# 最近一次运行成功时间: 2026-03-25 10:18:40 +0800
+# 功能说明: 验证 build_func_op 在 load helper 场景下生成 dma.load。
+# 测试目的: 验证 load(...) 在 build_func_op 链路中被直接识别并 lowering 为 DmaLoadOp。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_dma_load_helper
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_dma_load_helper() -> None:
+    from kernel_gen.operation.dma import load
+
+    source = Memory([4, 4], NumericType.Float32, space=MemorySpace.GM)
+
+    def load_kernel(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
+        return load(src, [1, 1], [2, 2], [1, 1], MemorySpace.SM)
+
+    func_op = build_func_op(load_kernel, source)
+    load_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaLoadOp)]
+    assert isinstance(func_op, func.FuncOp)
+    assert len(load_ops) == 1
+
+
+# MGEN-026
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-25 10:18:40 +0800
+# 最近一次运行成功时间: 2026-03-25 10:18:40 +0800
+# 功能说明: 验证 build_func_op 在 store helper 场景下生成 dma.store。
+# 测试目的: 验证 store(...) 在 build_func_op 链路中被直接识别并 lowering 为 DmaStoreOp。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_dma_store_helper
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_dma_store_helper() -> None:
+    from kernel_gen.operation.dma import store
+
+    source = Memory([2, 2], NumericType.Float32, space=MemorySpace.SM)
+    target = Memory([4, 4], NumericType.Float32, space=MemorySpace.GM)
+
+    def store_kernel(tile: "Tensor[f32, 2, 2]", dst: "Tensor[f32, 4, 4]"):
+        store(tile, dst, [1, 1], [2, 2], [1, 1])
+
+    func_op = build_func_op(store_kernel, source, target)
+    store_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaStoreOp)]
+    assert isinstance(func_op, func.FuncOp)
+    assert len(store_ops) == 1
+
+
+# MGEN-026
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-25 10:18:40 +0800
+# 最近一次运行成功时间: 2026-03-25 10:18:40 +0800
+# 功能说明: 验证 build_func_op 在 slice helper 场景下生成 dma.slice。
+# 测试目的: 验证 slice(...) 在 build_func_op 链路中被直接识别并 lowering 为 DmaSliceOp。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_dma_slice_helper
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_dma_slice_helper() -> None:
+    from kernel_gen.operation.dma import slice
+
+    source = Memory([4, 4], NumericType.Float32, space=MemorySpace.GM)
+
+    def slice_kernel(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
+        return slice(src, [1, 1], [2, 2], [1, 1], MemorySpace.LM)
+
+    func_op = build_func_op(slice_kernel, source)
+    slice_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaSliceOp)]
+    assert isinstance(func_op, func.FuncOp)
+    assert len(slice_ops) == 1
+
+
+# MGEN-026
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-25 10:18:40 +0800
+# 最近一次运行成功时间: 2026-03-25 10:18:40 +0800
+# 功能说明: 验证 build_func_op 在 deslice helper 场景下生成 dma.deslice。
+# 测试目的: 验证 deslice(...) 在 build_func_op 链路中被直接识别并 lowering 为 DmaDesliceOp。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_dma_deslice_helper
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_dma_deslice_helper() -> None:
+    from kernel_gen.operation.dma import deslice
+
+    source = Memory([2, 2], NumericType.Float32, space=MemorySpace.LM)
+    target = Memory([4, 4], NumericType.Float32, space=MemorySpace.GM)
+
+    def deslice_kernel(tile: "Tensor[f32, 2, 2]", dst: "Tensor[f32, 4, 4]"):
+        deslice(tile, dst, [1, 1], [2, 2], [1, 1])
+
+    func_op = build_func_op(deslice_kernel, source, target)
+    deslice_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaDesliceOp)]
+    assert isinstance(func_op, func.FuncOp)
+    assert len(deslice_ops) == 1
+
+
+# MGEN-007
+# 创建者: 小李飞刀
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-25 16:05:00 +0800
+# 最近一次运行成功时间: 2026-03-25 16:05:00 +0800
+# 功能说明: 覆盖解析失败时的错误包装路径。
+# 测试目的: 验证 _parse_function_with_env 将 _ParseFailure 转换为 AstParseError。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_mlir_gen_parse_failure_wrapped
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_mlir_gen_parse_failure_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fn(x: object) -> object:
+        return x
+
+    def _broken_parse(*args: object, **kwargs: object) -> object:
+        raise _ParseFailure("broken", location=SourceLocation(1, 2))
+
+    monkeypatch.setattr(mlir_gen_module, "_parse_function_impl", _broken_parse)
+    with pytest.raises(AstParseError, match="broken"):
+        _parse_function_with_env(fn, globals_table={}, builtins_table={}, runtime_table={}, config=None)
+
+
+# MGEN-007
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
+# 最近一次运行成功时间: 2026-03-23 10:30:00 +0800
+# 功能说明: 覆盖返回类型校验的错误分支。
+# 测试目的: 验证多返回、非法返回注解与不匹配类型时报错。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_mlir_gen_validate_return_type_errors
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_mlir_gen_validate_return_type_errors() -> None:
+    memory = Memory([2, 2], NumericType.Float32)
+    tensor_out = TensorAST("out", memory)
+    scalar_out = ScalarArgAST("n", int)
+
+    func_multi = FunctionAST("multi", [tensor_out], [tensor_out, tensor_out], BlockAST([]))
+    with pytest.raises(_LoweringError, match="Only single return value is supported"):
+        _validate_return_type(func_multi, _memory_to_nn_type(memory))
+
+    func_scalar_bad = FunctionAST("bad", [scalar_out], [ScalarArgAST("f", float)], BlockAST([]))
+    with pytest.raises(_LoweringError, match="Unsupported scalar return type"):
+        _validate_return_type(func_scalar_bad, i32)
+
+    func_unknown = FunctionAST("bad", [scalar_out], [VarAST("x")], BlockAST([]))
+    with pytest.raises(_LoweringError, match="Unsupported return annotation type"):
+        _validate_return_type(func_unknown, i32)
+
+    func_mismatch = FunctionAST("bad", [tensor_out], [tensor_out], BlockAST([]))
+    with pytest.raises(_LoweringError, match="Return type does not match annotation"):
+        _validate_return_type(func_mismatch, i32)
+
+    func_symbol = FunctionAST("sym", [scalar_out], [scalar_out], BlockAST([]))
+    with pytest.raises(_LoweringError, match="Return type does not match annotation"):
+        _validate_return_type(func_symbol, i32)
+
+
+# MGEN-006
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-18 10:56:41 +0800
+# 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
+# 功能说明: 验证 ScalarArgAST 会 lowering 为 func.func 标量参数。
+# 测试目的: 验证 ScalarArgAST 会 lowering 为 func.func 标量参数。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_scalar_arg_lowering_in_signature
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_scalar_arg_lowering_in_signature() -> None:
+    def add(
+        x: "Tensor[f32, 2, 2]",
+        y: "Tensor[f32, 2, 2]",
+        n: int,
+    ) -> "Tensor[f32, 2, 2]":
+        return x + y
+
+    func_op = build_func_op(add, _tensor_arg([2, 2]), _tensor_arg([2, 2]), 4)
+    inputs = list(func_op.function_type.inputs)
+    assert len(inputs) == 3
+    assert isinstance(inputs[0], NnMemoryType)
+    assert isinstance(inputs[1], NnMemoryType)
+    assert inputs[2] == i32
+
+
+# MGEN-016 / MGEN-017
+# 创建者: OpenAI
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-25 16:05:00 +0800
+# 最近一次运行成功时间: 2026-03-25 16:05:00 +0800
+# 功能说明: 验证纯 symbol 标量函数的 func.func 输入与返回保持为 !symbol.int<"expr">。
+# 测试目的: 验证纯 symbol 标量函数不会退回 builtin 整数类型。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_symbol_scalar_function_uses_symbol_value_type_signature
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_symbol_scalar_function_uses_symbol_value_type_signature() -> None:
+    expr = SymbolDim("expr")
+
+    def only_symbol(expr: int) -> int:
+        return expr
+
+    func_op = build_func_op(only_symbol, expr, globals={"expr": expr, "__builtins__": __builtins__})
+    inputs = list(func_op.function_type.inputs)
+    outputs = list(func_op.function_type.outputs)
+    assert inputs == [SymbolValueType.from_expr("expr")]
+    assert outputs == [SymbolValueType.from_expr("expr")]
+
+
+# MGEN-018 / MGEN-021 / MGEN-022 / MGEN-023 / MGEN-024
+# 创建者: OpenAI
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-25 04:33:06 +0800
+# 最近一次运行成功时间: 2026-03-25 04:33:06 +0800
+# 功能说明: 验证纯 symbol 标量算术 lowering 为对应的 symbol dialect op。
+# 测试目的: 验证纯 symbol 标量加减乘除在静态、动态与混合输入下不会退回 nn dialect 或 builtin 整数算术。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_symbol_scalar_function_lowers_symbol_binary_ops
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_symbol_scalar_function_lowers_symbol_binary_ops(
+    style: str,
+    name: str,
+    operator_token: str,
+    builder: type[object],
+    runtime_args: tuple[object, object],
+) -> None:
+    def normalize_runtime_value(value: object) -> int | str:
+        if isinstance(value, SymbolDim):
+            return value.get_value()
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        if isinstance(value, (int, str)):
+            return value
+        raise TypeError(f"Unsupported runtime result type: {type(value)!r}")
+
+    def add(lhs: int, rhs: int) -> int:
+        return lhs + rhs
+
+    def sub(lhs: int, rhs: int) -> int:
+        return lhs - rhs
+
+    def mul(lhs: int, rhs: int) -> int:
+        return lhs * rhs
+
+    def truediv(lhs: int, rhs: int) -> int:
+        return lhs / rhs
+
+    def floordiv(lhs: int, rhs: int) -> int:
+        return lhs // rhs
+
+    def add_nn(lhs: int, rhs: int) -> int:
+        return nn.add(lhs, rhs)
+
+    def sub_nn(lhs: int, rhs: int) -> int:
+        return nn.sub(lhs, rhs)
+
+    def mul_nn(lhs: int, rhs: int) -> int:
+        return nn.mul(lhs, rhs)
+
+    def truediv_nn(lhs: int, rhs: int) -> int:
+        return nn.truediv(lhs, rhs)
+
+    def floordiv_nn(lhs: int, rhs: int) -> int:
+        return nn.floordiv(lhs, rhs)
+
+    functions: dict[tuple[str, str], object] = {
+        ("python", "add"): add,
+        ("python", "sub"): sub,
+        ("python", "mul"): mul,
+        ("python", "truediv"): truediv,
+        ("python", "floordiv"): floordiv,
+        ("nn", "add"): add_nn,
+        ("nn", "sub"): sub_nn,
+        ("nn", "mul"): mul_nn,
+        ("nn", "truediv"): truediv_nn,
+        ("nn", "floordiv"): floordiv_nn,
+    }
+
+    func_op = build_func_op(functions[(style, name)], *runtime_args)
+    runtime_result = normalize_runtime_value(functions[(style, name)](*runtime_args))
+    expected_result = SymbolValueType.from_expr(str(runtime_result))
+    arg_types = [arg.type for arg in func_op.args]
+    expected_arg_types = [
+        SymbolValueType.from_expr(str(value.get_value()) if isinstance(value, SymbolDim) else str(value))
+        for value in runtime_args
+    ]
+    assert arg_types == expected_arg_types
+    ops = list(func_op.body.blocks[0].ops)
+    symbol_ops = [op for op in ops if isinstance(op, builder)]
+    return_ops = [op for op in ops if isinstance(op, func.ReturnOp)]
+    assert len(symbol_ops) == 1
+    assert len(return_ops) == 1
+    assert symbol_ops[0].result.type == expected_result
+    assert symbol_ops[0].result.type.get_value() == runtime_result
+    assert len(return_ops[0].arguments) == 1
+    assert return_ops[0].arguments[0].type == expected_result
+    assert return_ops[0].arguments[0].type.get_value() == runtime_result
+    assert list(func_op.function_type.outputs) == [expected_result]
+    assert func_op.function_type.outputs.data[0].get_value() == runtime_result
+    assert operator_token in _print_module(ModuleOp([func_op]))
+
+
+test_symbol_scalar_function_lowers_symbol_binary_ops = pytest.mark.parametrize(
+    ("name", "operator_token", "builder", "runtime_args"),
+    [
+        ("add", "symbol.add", SymbolAddOp, (4, 5)),
+        ("add", "symbol.add", SymbolAddOp, (SymbolDim("s"), SymbolDim("t"))),
+        ("add", "symbol.add", SymbolAddOp, (4, SymbolDim("t"))),
+        ("add", "symbol.add", SymbolAddOp, (SymbolDim("s"), 5)),
+        ("sub", "symbol.sub", SymbolSubOp, (9, 4)),
+        ("sub", "symbol.sub", SymbolSubOp, (SymbolDim("s"), SymbolDim("t"))),
+        ("sub", "symbol.sub", SymbolSubOp, (9, SymbolDim("t"))),
+        ("sub", "symbol.sub", SymbolSubOp, (SymbolDim("s"), 4)),
+        ("mul", "symbol.mul", SymbolMulOp, (3, 4)),
+        ("mul", "symbol.mul", SymbolMulOp, (SymbolDim("s"), SymbolDim("t"))),
+        ("mul", "symbol.mul", SymbolMulOp, (3, SymbolDim("t"))),
+        ("mul", "symbol.mul", SymbolMulOp, (SymbolDim("s"), 4)),
+        ("truediv", "symbol.div", SymbolDivOp, (6, 3)),
+        ("truediv", "symbol.div", SymbolDivOp, (SymbolDim("s"), SymbolDim("t"))),
+        ("truediv", "symbol.div", SymbolDivOp, (6, SymbolDim("t"))),
+        ("truediv", "symbol.div", SymbolDivOp, (SymbolDim("s"), 3)),
+        ("floordiv", "symbol.floordiv", SymbolFloorDivOp, (7, 3)),
+        ("floordiv", "symbol.floordiv", SymbolFloorDivOp, (SymbolDim("s"), SymbolDim("t"))),
+        ("floordiv", "symbol.floordiv", SymbolFloorDivOp, (7, SymbolDim("t"))),
+        ("floordiv", "symbol.floordiv", SymbolFloorDivOp, (SymbolDim("s"), 3)),
+    ],
+)(test_symbol_scalar_function_lowers_symbol_binary_ops)
+test_symbol_scalar_function_lowers_symbol_binary_ops = pytest.mark.parametrize(
+    "style",
+    ["python", "nn"],
+)(test_symbol_scalar_function_lowers_symbol_binary_ops)
+
+
+# MGEN-028
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-28 12:10:00 +0800
+# 最近一次运行成功时间: 2026-03-28 12:10:00 +0800
+# 功能说明: 验证纯 symbol 标量比较 lowering 为 symbol.eq 并返回 i1。
+# 测试目的: 覆盖 const/const 与 symbol/symbol 输入，锁定 return 与赋值后 return 两类形态。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_symbol_eq
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_lowers_symbol_eq() -> None:
+    def eq_return(a: int, b: int) -> bool:
+        return a == b
+
+    def eq_assign(a: int, b: int) -> bool:
+        result = a == b
+        return result
+
+    cases = (
+        (eq_return, (3, 4)),
+        (eq_assign, (3, 4)),
+        (eq_return, (SymbolDim("M"), SymbolDim("N"))),
+        (eq_assign, (SymbolDim("M"), SymbolDim("N"))),
+    )
+
+    for fn, runtime_args in cases:
+        func_op = build_func_op(fn, *runtime_args)
+        eq_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolEqOp)]
+        assert len(eq_ops) == 1
+        assert eq_ops[0].result.type == i1
+        assert list(func_op.function_type.outputs) == [i1]
+        arg_types = [arg.type for arg in func_op.args]
+        expected_arg_types = [
+            SymbolValueType.from_expr(str(value.get_value()) if isinstance(value, SymbolDim) else str(value))
+            for value in runtime_args
+        ]
+        assert arg_types == expected_arg_types
+        assert "symbol.eq" in _print_module(ModuleOp([func_op]))
+
+
+# MGEN-020
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-25 16:05:00 +0800
+# 最近一次运行成功时间: 2026-03-25 16:05:00 +0800
+# 功能说明: 验证 Python int 运行时实参会 lowering 为携带具体整数值的 SymbolValueType。
+# 测试目的: 验证 build_func_op(add, lhs, rhs) 在整型标量链路中生成 symbol.add，且赋值后 return 场景保持公开类型与结果口径稳定。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type() -> None:
+    def add(a: int, b: int) -> int:
+        result = a + b
+        return result
+
+    func_op = build_func_op(add, -3, 5)
+    arg_types = [arg.type for arg in func_op.args]
+    assert arg_types == [SymbolValueType.from_expr("-3"), SymbolValueType.from_expr("5")]
+    assert not arg_types[0].is_symbol()
+    assert not arg_types[1].is_symbol()
+    assert arg_types[0].get_value() == -3
+    assert arg_types[1].get_value() == 5
+    assert str(arg_types[0]) == "symbol.int<-3>"
+    assert str(arg_types[1]) == "symbol.int<5>"
+
+    add_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolAddOp)]
+    assert len(add_ops) == 1
+    assert list(func_op.function_type.outputs) == [SymbolValueType.from_expr("2")]
+    assert add_ops[0].result.type == SymbolValueType.from_expr("2")
+    assert not add_ops[0].result.type.is_symbol()
+    assert add_ops[0].result.type.get_value() == 2
+    assert str(add_ops[0].result.type) == "symbol.int<2>"
+    return_op = next(op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp))
+    assert return_op.arguments[0].type == SymbolValueType.from_expr("2")
+    assert "symbol.add" in _print_module(ModuleOp([func_op]))
+
+
+# MGEN-030
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-26 22:20:00 +0800
+# 最近一次运行成功时间: 2026-03-26 22:20:00 +0800
+# 功能说明: 验证 symbol 标量 >= 比较 lowering 为 symbol.ge 且返回 i1。
+# 测试目的: 覆盖 const/const 与 symbol/symbol 输入下的 return 与赋值返回形态。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_symbol_ge
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_lowers_symbol_ge() -> None:
+    def ge_return(lhs: int, rhs: int) -> bool:
+        return lhs >= rhs
+
+    def ge_assign(lhs: int, rhs: int) -> bool:
+        result = lhs >= rhs
+        return result
+
+    def _expected_expr(value: object) -> str:
+        if isinstance(value, SymbolDim):
+            return str(value.get_symbol())
+        return str(value)
+
+    runtime_cases = [
+        (ge_return, (3, 1)),
+        (ge_assign, (3, 1)),
+        (ge_return, (SymbolDim("M"), SymbolDim("N"))),
+        (ge_assign, (SymbolDim("M"), SymbolDim("N"))),
+    ]
+    for fn, runtime_args in runtime_cases:
+        func_op = build_func_op(fn, *runtime_args)
+        expected_arg_types = [SymbolValueType.from_expr(_expected_expr(arg)) for arg in runtime_args]
+        assert [arg.type for arg in func_op.args] == expected_arg_types
+        compare_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolGeOp)]
+        assert len(compare_ops) == 1
+        assert compare_ops[0].result.type == i1
+        return_op = next(op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp))
+        assert return_op.arguments[0].type == i1
+        assert list(func_op.function_type.outputs) == [i1]
+        assert "symbol.ge" in _print_module(ModuleOp([func_op]))
+
+
+# MGEN-019
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-23 00:20:00 +0800
+# 最近一次运行成功时间: 2026-03-23 00:20:00 +0800
+# 功能说明: 验证 build_func_op 省略运行时实参会直接报错。
+# 测试目的: 验证 build_func_op(fn) 不再允许省略函数实际输入参数。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_requires_explicit_runtime_args
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_requires_explicit_runtime_args() -> None:
+    def add(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return x
+
+    with pytest.raises(AstVisitorError, match="requires explicit runtime args") as exc_info:
+        build_func_op(add)
+
+    assert exc_info.value.location is None
+    assert "expected 1, got 0" in str(exc_info.value)
+
+
+# MGEN-019
+# 创建者: 金铲铲大作战
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-25 16:25:00 +0800
+# 最近一次运行成功时间: 2026-03-25 16:25:00 +0800
+# 功能说明: 验证 build_func_op 的运行时实参数量必须与形参数量匹配。
+# 测试目的: 验证多传或少传实参都属于调用错误。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_rejects_runtime_arg_count_mismatch
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_rejects_runtime_arg_count_mismatch() -> None:
+    def add(x: "Tensor[f32, 2, 2]", y: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return x + y
+
+    with pytest.raises(AstVisitorError, match="expected 2, got 1"):
+        build_func_op(add, _tensor_arg([2, 2]))
+
+
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-23 00:20:00 +0800
+# 最近一次运行成功时间: 2026-03-23 00:20:00 +0800
+# 功能说明: 验证 globals/builtins 只参与解析，不能代替 runtime_args。
+# 测试目的: 验证即使 globals/builtins 完整，也必须显式传入函数实际输入参数。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_globals_and_builtins_cannot_replace_runtime_args
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_globals_and_builtins_cannot_replace_runtime_args() -> None:
+    expr = SymbolDim("expr")
+
+    def only_symbol(expr: int) -> int:
+        return expr
+
+    with pytest.raises(AstVisitorError, match="globals/builtins cannot replace function runtime args") as exc_info:
+        build_func_op(only_symbol, globals={"expr": expr}, builtins=__builtins__)
+
+    assert exc_info.value.location is None
+
+
+# MGEN-027
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-25 22:18:52 +0800
+# 最近一次运行成功时间: 2026-03-25 22:18:52 +0800
+# 功能说明: 验证 build_func_op 会拒绝闭包外部值引用。
+# 测试目的: 验证闭包捕获值不会被当作局部常量或隐式输入参与 lowering。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_rejects_external_value_reference_inside_function_body
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_rejects_external_value_reference_inside_function_body() -> None:
+    outer_value = 7
+
+    def use_outer_value() -> int:
+        return outer_value
+
+    with pytest.raises(AstVisitorError, match="cannot use external value inside function body") as exc_info:
+        build_func_op(use_outer_value)
+
+    assert exc_info.value.location is not None
+    assert exc_info.value.location.line == 2
+
+
+# MGEN-027
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-25 22:18:52 +0800
+# 最近一次运行成功时间: 2026-03-25 22:18:52 +0800
+# 功能说明: 验证 build_func_op 会拒绝函数体中直接引用全局外部值。
+# 测试目的: 验证全局名称不会被当作局部常量或隐式输入参与 lowering。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_rejects_global_external_value_reference
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_rejects_global_external_value_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+    def use_global_value() -> int:
+        return GLOBAL_EXTERNAL_VALUE
+
+    monkeypatch.setitem(use_global_value.__globals__, "GLOBAL_EXTERNAL_VALUE", 11)
+
+    with pytest.raises(AstVisitorError, match="cannot use external value inside function body") as exc_info:
+        build_func_op(use_global_value)
+
+    assert exc_info.value.location is not None
+
+
+# MGEN-027
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-25 22:18:52 +0800
+# 最近一次运行成功时间: 2026-03-25 22:18:52 +0800
+# 功能说明: 验证 build_func_op 会拒绝函数体中直接引用 builtins 外部值。
+# 测试目的: 验证 builtins 补充表中的外部值不会被当作局部常量或隐式输入参与 lowering。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_rejects_builtins_external_value_reference
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_rejects_builtins_external_value_reference() -> None:
+    def use_builtin_value() -> int:
+        return BUILTIN_EXTERNAL_VALUE
+
+    with pytest.raises(AstVisitorError, match="cannot use external value inside function body") as exc_info:
+        build_func_op(use_builtin_value, builtins={"BUILTIN_EXTERNAL_VALUE": 13})
+
+    assert exc_info.value.location is not None
+
+
+# MGEN-027
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-25 22:18:52 +0800
+# 最近一次运行成功时间: 2026-03-25 22:18:52 +0800
+# 功能说明: 验证 build_func_op 会拒绝 Attribute 形式的外部值引用。
+# 测试目的: 验证 `module.CONST` 这类外部属性值不会被当作局部常量或隐式输入参与 lowering。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_rejects_attribute_external_value_reference
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_rejects_attribute_external_value_reference() -> None:
+    class ExternalModule:
+        CONST = 17
+
+    def use_attribute_value() -> int:
+        return ExternalModule.CONST
+
+    with pytest.raises(AstVisitorError, match="cannot use external value inside function body") as exc_info:
+        build_func_op(use_attribute_value)
+
+    assert exc_info.value.location is not None
+
+
+# MGEN-007
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-18 10:56:41 +0800
+# 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
+# 功能说明: 验证非法 Tensor 返回注解会抛出带诊断的错误。
+# 测试目的: 验证非法 Tensor 返回注解会抛出带诊断的错误。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_invalid_tensor_return_annotation_reports_diagnostics
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_invalid_tensor_return_annotation_reports_diagnostics() -> None:
+    def bad_return(x: "Tensor[f32, 2, 2]") -> "Tensor[f16, 2, 2]":
+        return x
+
+    with pytest.raises(AstVisitorError) as exc_info:
+        build_func_op(bad_return, _tensor_arg([2, 2]))
+    assert exc_info.value.location is not None
+
+
+# MGEN-022C
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-27 06:03:53 +0800
+# 最近一次运行成功时间: 2026-03-27 06:03:53 +0800
+# 功能说明: 覆盖 mixed dtype 场景下非法返回注解的拒绝边界。
+# 测试目的: 确认返回注解 element_type 不来自操作数时抛出错误。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_mixed_dtype_return_annotation_requires_operand_element_type
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_mixed_dtype_return_annotation_requires_operand_element_type() -> None:
+    def mul_mixed_invalid(
+        lhs: "Tensor[f32, 2, 2]",
+        rhs: "Tensor[i32, 2, 2]",
+    ) -> "Tensor[f16, 2, 2]":
+        return lhs * rhs
+
+    with pytest.raises(AstVisitorError, match="Return type does not match annotation"):
+        build_func_op(
+            mul_mixed_invalid,
+            Memory([2, 2], NumericType.Float32),
+            Memory([2, 2], NumericType.Int32),
+        )
+
+
+# MGEN-008
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-18 10:56:41 +0800
+# 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
+# 功能说明: 验证常量 lowering 失败会抛出带诊断的错误。
+# 测试目的: 验证常量 lowering 失败会抛出带诊断的错误。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_constant_lowering_reports_diagnostics
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_constant_lowering_reports_diagnostics() -> None:
+    def bad(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return 1
+
+    with pytest.raises(AstVisitorError) as exc_info:
+        build_func_op(bad, _tensor_arg([2, 2]))
+    assert exc_info.value.location is not None
+
+
+# MGEN-009
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-18 10:56:41 +0800
+# 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
+# 功能说明: 验证返回类型不匹配会抛出带诊断的错误。
+# 测试目的: 验证返回类型不匹配会抛出带诊断的错误。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_return_type_mismatch_reports_diagnostics
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_return_type_mismatch_reports_diagnostics() -> None:
+    def bad(x: "Tensor[f32, 2, 2]", y: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return x == y
+
+    with pytest.raises(AstVisitorError) as exc_info:
+        build_func_op(bad, _tensor_arg([2, 2]), _tensor_arg([2, 2]))
+    assert exc_info.value.location is not None
+
+
+# MGEN-010
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-18 10:56:41 +0800
+# 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
+# 功能说明: 验证多语句 SSA 顺序与 value 复用。
+# 测试目的: 验证多语句 SSA 顺序与 value 复用。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_multi_statement_ssa_order_and_reuse
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_multi_statement_ssa_order_and_reuse() -> None:
+    def add(
+        x: "Tensor[f32, 2, 2]",
+        y: "Tensor[f32, 2, 2]",
+    ) -> "Tensor[f32, 2, 2]":
+        z = x + y
+        w = z + z
+        return w
+
+    func_op = build_func_op(add, _tensor_arg([2, 2]), _tensor_arg([2, 2]))
+    ops = [op for op in func_op.body.block.ops if isinstance(op, NnAddOp)]
+    assert len(ops) == 2
+    first, second = ops
+    assert second.lhs is first.result
+    assert second.rhs is first.result
+
+
+# MGEN-015
+# 创建者: OpenAI
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-25 16:05:00 +0800
+# 最近一次运行成功时间: 2026-03-25 16:05:00 +0800
+# 功能说明: 验证 LoopRange + slice/deslice + 无 return 场景可生成 symbol.for + dma.slice/dma.deslice。
+# 测试目的: 验证 LoopRange + slice/deslice + 无 return 场景会直接传递 symbol.int 循环变量，不生成 arith.index_cast。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_symbolic_for_loop_dma_without_return
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_symbolic_for_loop_dma_without_return(monkeypatch: pytest.MonkeyPatch) -> None:
+    from kernel_gen.operation.dma import deslice, slice
+    from kernel_gen.operation.scf import LoopRange
+
+    A = Memory(["L"], NumericType.Float32)
+    B = Memory(["L"], NumericType.Float32)
+    C = Memory(["L"], NumericType.Float32)
+    start = SymbolDim("start")
+    end = SymbolDim("end")
+    step = SymbolDim("step")
+
+    def add(
+        A: "Tensor[f32, L]",
+        B: "Tensor[f32, L]",
+        C: "Tensor[f32, L]",
+        end: int,
+        start: int,
+        step: int,
+    ):
+        for index in LoopRange(start, end, step):
+            SA = slice(A, [index], [step], [1], MemorySpace.LM)
+            SB = slice(B, [index], [step], [1], MemorySpace.LM)
+            SC = SA + SB
+            deslice(SC, C, [index], [step], [1], MemorySpace.LM)
+
+    monkeypatch.setitem(add.__globals__, "A", A)
+    monkeypatch.setitem(add.__globals__, "B", B)
+    monkeypatch.setitem(add.__globals__, "C", C)
+    monkeypatch.setitem(add.__globals__, "start", start)
+    monkeypatch.setitem(add.__globals__, "end", end)
+    monkeypatch.setitem(add.__globals__, "step", step)
+    monkeypatch.setitem(add.__globals__, "MemorySpace", MemorySpace)
+    monkeypatch.setitem(add.__globals__, "slice", slice)
+    monkeypatch.setitem(add.__globals__, "deslice", deslice)
+    monkeypatch.setitem(add.__globals__, "LoopRange", LoopRange)
+
+    func_op = build_func_op(add, A, B, C, end, start, step)
+    assert isinstance(func_op, func.FuncOp)
+    assert len(list(func_op.function_type.outputs)) == 0
+    loop_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolForOp)]
+    assert len(loop_ops) == 1
+    loop_body_ops = list(loop_ops[0].body.block.ops)
+    slice_ops = [op for op in loop_body_ops if isinstance(op, DmaSliceOp)]
+    deslice_ops = [op for op in loop_body_ops if isinstance(op, DmaDesliceOp)]
+    assert len(slice_ops) == 2
+    assert len(deslice_ops) == 1
+    assert not any(isinstance(op, DmaLoadOp) for op in loop_body_ops)
+    assert not any(isinstance(op, DmaStoreOp) for op in loop_body_ops)
+    assert not any(isinstance(op, arith.IndexCastOp) for op in loop_body_ops)
+    assert slice_ops[0].space.space.data == "local"
+    loop_body = loop_ops[0].body.block
+    assert isinstance(loop_body.args[0].type, SymbolValueType)
+    offsets = list(slice_ops[0].offsets)
+    sizes = list(slice_ops[0].sizes)
+    assert offsets[0] is loop_body.args[0]
+    assert sizes[0] is func_op.body.block.args[5]
+    assert list(deslice_ops[0].offsets)[0] is loop_body.args[0]
+
+
+# MGEN-011
+# 创建者: 金铲铲大作战
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-19 03:24:32 +0800
+# 最近一次运行成功时间: 2026-03-19 03:24:32 +0800
+# 功能说明: 验证 singleton dim 隐式 broadcast lowering 为 nn.broadcast + nn.add。
+# 测试目的: 验证 singleton dim 隐式 broadcast lowering 为 nn.broadcast + nn.add。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_tensor_binary_implicit_broadcast_lowering
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_tensor_binary_implicit_broadcast_lowering() -> None:
+    def add(
+        x: "Tensor[f32, 1, N]",
+        y: "Tensor[f32, M, N]",
+    ) -> "Tensor[f32, M, N]":
+        return x + y
+
+    func_op = build_func_op(add, _tensor_arg([1, "N"]), _tensor_arg(["M", "N"]))
+    broadcast_ops = [op for op in func_op.body.block.ops if isinstance(op, NnBroadcastOp)]
+    assert len(broadcast_ops) == 1
+    add_op = next(op for op in func_op.body.block.ops if isinstance(op, NnAddOp))
+    assert add_op.lhs is broadcast_ops[0].result or add_op.rhs is broadcast_ops[0].result
+
+
+# MGEN-012
+# 创建者: 金铲铲大作战
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-19 03:24:32 +0800
+# 最近一次运行成功时间: 2026-03-19 03:24:32 +0800
+# 功能说明: 验证前置维隐式 broadcast lowering 为 nn.broadcast + nn.add。
+# 测试目的: 验证前置维隐式 broadcast lowering 为 nn.broadcast + nn.add。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_tensor_binary_prepend_broadcast_lowering
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_tensor_binary_prepend_broadcast_lowering() -> None:
+    def add(
+        x: "Tensor[f32, N]",
+        y: "Tensor[f32, M, N]",
+    ) -> "Tensor[f32, M, N]":
+        return x + y
+
+    func_op = build_func_op(add, _tensor_arg(["N"]), _tensor_arg(["M", "N"]))
+    broadcast_ops = [op for op in func_op.body.block.ops if isinstance(op, NnBroadcastOp)]
+    assert len(broadcast_ops) == 1
+    add_op = next(op for op in func_op.body.block.ops if isinstance(op, NnAddOp))
+    assert add_op.lhs is broadcast_ops[0].result or add_op.rhs is broadcast_ops[0].result
+
+
+# MGEN-011A
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-27 04:14:28 +0800
+# 最近一次运行成功时间: 2026-03-27 04:14:28 +0800
+# 功能说明: 验证 nn.truediv 在 dtype 不一致时插入 dma.cast 并使用固定优先级决议 dtype。
+# 测试目的: 保证 truediv lowering 结果包含 dma.cast + nn.truediv 且输出类型一致。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_tensor_truediv_dtype_promotion_lowering
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_tensor_truediv_dtype_promotion_lowering() -> None:
+    def truediv(
+        x: "Tensor[f32, 2, 2]",
+        y: "Tensor[i32, 2, 2]",
+    ) -> "Tensor[i32, 2, 2]":
+        return x / y
+
+    lhs_memory = Memory([2, 2], NumericType.Float32)
+    rhs_memory = Memory([2, 2], NumericType.Int32)
+    func_op = build_func_op(truediv, lhs_memory, rhs_memory)
+    cast_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaCastOp)]
+    div_ops = [op for op in func_op.body.block.ops if isinstance(op, NnTrueDivOp)]
+    assert len(cast_ops) == 1
+    assert len(div_ops) == 1
+    expected_type = _memory_to_nn_type(Memory([2, 2], NumericType.Int32))
+    assert cast_ops[0].result.type == expected_type
+    assert div_ops[0].result.type == expected_type
+
+
+# MGEN-013
+# 创建者: 金铲铲大作战
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-19 03:24:32 +0800
+# 最近一次运行成功时间: 2026-03-19 03:24:32 +0800
+# 功能说明: 验证比较表达式隐式 broadcast lowering 为 nn.broadcast + nn.eq。
+# 测试目的: 验证比较表达式隐式 broadcast lowering 为 nn.broadcast + nn.eq。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_compare_implicit_broadcast_lowering
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_compare_implicit_broadcast_lowering() -> None:
+    lhs_memory = Memory([1, "N"], NumericType.Float32)
+    rhs_memory = Memory(["M", "N"], NumericType.Float32)
+    lhs = TensorAST(name="x", memory=lhs_memory, location=None)
+    rhs = TensorAST(name="y", memory=rhs_memory, location=None)
+    expr = CompareExprAST(op="eq", lhs=lhs, rhs=rhs, location=None)
+    func_ast = FunctionAST(name="eq", inputs=[lhs, rhs], outputs=[], body=BlockAST([expr]))
+    func_op = build_func_op_from_ast(func_ast)
+    broadcast_ops = [op for op in func_op.body.block.ops if isinstance(op, NnBroadcastOp)]
+    assert len(broadcast_ops) == 1
+    eq_op = next(op for op in func_op.body.block.ops if isinstance(op, NnEqOp))
+    assert eq_op.lhs is broadcast_ops[0].result or eq_op.rhs is broadcast_ops[0].result
+
+
+# MGEN-013A
+# 创建者: 摸鱼小分队
+# 最后一次更改: 摸鱼小分队
+# 最近一次运行测试时间: 2026-03-27 03:45:00 +0800
+# 最近一次运行成功时间: 2026-03-27 03:45:00 +0800
+# 功能说明: 验证 build_func_op 在 nn.ne 场景支持 Tensor[i1, ...] 返回注解。
+# 测试目的: 锁定 nn.ne 的 dtype 解析与 lowering 闭环，确保结果 element type 为 i1。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_nn_ne_with_tensor_i1_return_annotation
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_lowers_nn_ne_with_tensor_i1_return_annotation() -> None:
+    def ne_kernel(
+        lhs: "Tensor[f32, 2, 2]",
+        rhs: "Tensor[f32, 2, 2]",
+    ) -> "Tensor[i1, 2, 2]":
+        return lhs != rhs
+
+    func_op = build_func_op(ne_kernel, _tensor_arg([2, 2]), _tensor_arg([2, 2]))
+
+    ne_ops = [op for op in func_op.body.block.ops if isinstance(op, NnNeOp)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
+    if len(ne_ops) != 1:
+        raise AssertionError("expected exactly one nn.ne op")
+    if len(return_ops) != 1:
+        raise AssertionError("expected exactly one func.return op")
+    if not isinstance(ne_ops[0].result.type, NnMemoryType):
+        raise AssertionError("expected nn.ne result type to be nn.memory")
+    if ne_ops[0].result.type.element_type != i1:
+        raise AssertionError("expected nn.ne result element type to be i1")
+    if return_ops[0].arguments[0].type != ne_ops[0].result.type:
+        raise AssertionError("expected return type to match nn.ne result type")
+
+
+# MGEN-014
+# 创建者: 金铲铲大作战
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-19 03:24:32 +0800
+# 最近一次运行成功时间: 2026-03-19 03:24:32 +0800
+# 功能说明: 验证不可广播的逐元素表达式抛 LoweringError 且保留位置。
+# 测试目的: 验证不可广播的逐元素表达式抛 LoweringError 且保留位置。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics() -> None:
+    def add(
+        x: "Tensor[f32, A, B]",
+        y: "Tensor[f32, A, C]",
+    ) -> "Tensor[f32, A, B]":
+        return x + y
+
+    with pytest.raises(AstVisitorError, match="Implicit broadcast dimension mismatch") as exc_info:
+        build_func_op(add, _tensor_arg(["A", "B"]), _tensor_arg(["A", "C"]))
+    assert exc_info.value.location is not None
+
+
+# MGEN-034 / EMIT-028
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-27 04:16:44 +0800
+# 最近一次运行成功时间: 2026-03-27 04:16:44 +0800
+# 功能说明: 验证 nn.sub dtype promotion 会插入 dma.cast 并返回目标 dtype 的 nn.sub。
+# 测试目的: 锁定 build_func_op 对 nn.sub 混合 dtype 的 cast lowering 与返回类型。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast() -> None:
+    def sub(
+        lhs: "Tensor[f32, 2, 2]",
+        rhs: "Tensor[i32, 2, 2]",
+    ) -> "Tensor[i32, 2, 2]":
+        return lhs - rhs
+
+    lhs_memory = Memory([2, 2], NumericType.Float32)
+    rhs_memory = Memory([2, 2], NumericType.Int32)
+    expected_type = _memory_to_nn_type(lhs_memory - rhs_memory)
+
+    func_op = build_func_op(sub, lhs_memory, rhs_memory)
+    cast_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaCastOp)]
+    sub_ops = [op for op in func_op.body.block.ops if isinstance(op, NnSubOp)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
+
+    assert len(cast_ops) == 1
+    assert len(sub_ops) == 1
+    assert len(return_ops) == 1
+    assert cast_ops[0].result.type == expected_type
+    assert sub_ops[0].result.type == expected_type
+    assert return_ops[0].arguments[0].type == expected_type
+
+# MGEN-001B
+# 创建者: 小李飞刀
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-25 17:10:00 +0800
+# 最近一次运行成功时间: 2026-03-25 17:10:00 +0800
+# 功能说明: 覆盖 build_func_op 对 builtins 与解析失败的处理。
+# 测试目的: 验证非 dict builtins 作为解析环境补充可成功运行，且解析失败会收敛为 AstVisitorError。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_mlir_gen_build_func_op_builtins_and_parse_error
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_mlir_gen_build_func_op_builtins_and_parse_error() -> None:
+    def add(x: "Tensor[f32, 2, 2]", y: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return x + y
+
+    func_op = build_func_op(add, _tensor_arg([2, 2]), _tensor_arg([2, 2]), builtins=object())
+    assert isinstance(func_op, func.FuncOp)
+
+    def bad(x: "Tensor[f32]") -> "Tensor[f32]":
+        return x
+
+    with pytest.raises(AstVisitorError, match="Tensor annotation missing dimensions"):
+        build_func_op(bad, _tensor_arg([2]))
