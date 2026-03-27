@@ -22,3 +22,11 @@
 - 任务目标：复审 relu/leaky_relu/sigmoid/tanh/hard_sigmoid 实现与测试闭环，核对 OP-ACT-001/002/003 覆盖与 spec 一致性。
 - 改动：审查 spec/operation/nn.md、kernel_gen/operation/nn.py、test/operation/test_operation_nn.py；执行 pytest -q test/operation/test_operation_nn.py -k activation（exit=0）。
 - 结论：通过。spec、实现与测试一致，覆盖 OP-ACT-001/002/003，错误路径与参数约束符合规范。
+
+- 时间：2026-03-27 21:33:17 +0800
+- 任务：T-20260327-1390bd91（nn activation 合并阶段）
+- 任务目标：合并 activation 链路到主分支并清理 worktree。
+- 说明：收到新规“合并任务仅由李白承担”，当前不再执行合并。
+- 现状：主仓库处于 merge 冲突状态，冲突文件为 kernel_gen/operation/nn.py、spec/operation/nn.md、test/operation/test_operation_nn.py；未继续解决/提交。
+- 建议：由李白接手处理合并冲突并完成提交/清理。
+- 结论：阻塞（因职责调整移交）。
