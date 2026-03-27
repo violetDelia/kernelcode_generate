@@ -2,12 +2,12 @@
 
 ## 功能简介
 
-用于定义 `Memory` 高层运算规范，覆盖逐元素算术、比较、显式 `broadcast` / `broadcast_to` 与二维 `matmul`。本层只描述可调用语义、结果元信息约束与错误规则。
+用于定义 `Memory` 高层运算规范，覆盖逐元素算术、比较、显式 `broadcast` / `broadcast_to`、全连接 `fc` 与二维 `matmul`。本层只描述可调用语义、结果元信息约束与错误规则。
 
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/operation/nn.md`](../../spec/operation/nn.md)
 - `功能实现`：[`kernel_gen/operation/nn.py`](../../kernel_gen/operation/nn.py)
 - `test`：[`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py)
@@ -20,13 +20,14 @@
 ## 目标
 
 - 提供 `Memory` 的逐元素算术与比较高层语义。
-- 提供显式 `broadcast` / `broadcast_to` 与二维 `matmul` 的输入输出约束与错误规则。
+- 提供显式 `broadcast` / `broadcast_to`、全连接 `fc` 与二维 `matmul` 的输入输出约束与错误规则。
 - 保持与下游 `nn dialect` 的分层：本层作为用户直接使用的接口，不受限于IR的表达。
 
 ## 限制与边界
 
 - 逐元素算术/比较支持隐式广播，仅允许尾维对齐与 singleton dim 扩张。
 - `transpose` 仅支持 `Memory` 输入与显式轴置换，不支持标量或隐式转置。
+- `fc` 仅定义“输入末维 × 权重输入特征维”的全连接语义；`bias` 为可选参数。
 - `matmul` 仅定义二维矩阵乘，不支持 batch、广播或隐式转置。
 - 不定义归约、卷积等其他算子。
 - 不引入复杂自动类型提升规则；`dtype` 兼容性需显式检查。
@@ -438,6 +439,49 @@ out = transpose(value, perm=[1, 0, 2])
 - 若 `value.stride` 存在，`out.stride` 按相同 `perm` 重排。
 - `out.dtype` 与 `out.space` 继承自 `value`。
 
+### `fc(value, weight, bias=None)`
+
+功能说明：
+
+- 全连接（fully connected）运算，对输入末维与权重输入特征维执行线性变换；`bias` 为可选项。
+
+参数说明：
+
+- `value` (`Memory`)：输入张量，`rank >= 2`，末维表示输入特征维 `in_features`。
+- `weight` (`Memory`)：权重张量，`rank == 2`，形状为 `[out_features, in_features]`。
+- `bias` (`Memory|None`)：可选偏置，默认 `None`；提供时必须与输出特征维对齐（`shape == [out_features]`）。
+
+使用示例：
+
+```python
+value = Memory(shape=["B", "T", "K"], dtype=NumericType.Float32)
+weight = Memory(shape=["N", "K"], dtype=NumericType.Float32)
+out = fc(value, weight)
+bias = Memory(shape=["N"], dtype=NumericType.Float32)
+out_with_bias = fc(value, weight, bias=bias)
+```
+
+注意事项：
+
+- `value` 与 `weight` 必须为 `Memory`，否则抛出 `TypeError`。
+- `bias` 仅允许为 `None` 或 `Memory`，其他类型必须抛出 `TypeError`。
+- `value.rank < 2` 或 `weight.rank != 2` 必须抛出 `ValueError`。
+- 维度约束：`value.shape[-1]` 必须与 `weight.shape[1]` 一致；不一致必须抛出 `ValueError`。
+- `bias` 提供时必须满足 `bias.rank == 1` 且 `bias.shape[0] == weight.shape[0]`（与输出特征维对齐）；不满足必须抛出 `ValueError`。
+- `value.space` 与 `weight.space` 必须一致；`bias` 提供时其 `space` 也必须一致，不一致必须抛出 `ValueError`。
+- `dtype` 决议沿用 `add` 的固定优先级规则；`bias` 提供时其 `dtype` 必须与结果 `dtype` 兼容，否则抛出 `TypeError`。
+- 批维处理规则：除末维外，`value` 的前缀维度按原顺序保留到输出。
+- 与现有 nn 算子兼容：`fc` 输出仍为 `Memory`，可直接作为逐元素算术、比较、`matmul` 等算子的输入。
+
+返回与限制：
+
+- 返回 `Memory` 语义结果。
+- 设 `value.shape = [d0, d1, ..., d{n-1}, in_features]`、`weight.shape = [out_features, in_features]`，则 `out.shape = [d0, d1, ..., d{n-1}, out_features]`。
+- `out.dtype` 按固定优先级规则决议。
+- `out.space == value.space`。
+- `out.format == Farmat.Norm`。
+- `out.stride` 使用连续行主序默认步幅。
+
 ### `matmul(lhs, rhs, memoryspace=None)`
 
 功能说明：
@@ -489,6 +533,8 @@ tmp = matmul(lhs, rhs, memoryspace=MemorySpace.SM)
 - 验证显式 `broadcast(value, target)` / `broadcast_to(value, target)` 的尾维对齐、前置维扩张、target 对齐与错误规则。
 - 验证逐元素隐式 broadcast 的 singleton dim / 前置维扩张与错误规则。
 - 验证 `nn.add` / `nn.floordiv` 的 `dtype` 固定优先级决议，以及 `format/stride` 不一致时回落默认布局。
+- 验证 `fc(value, weight, bias=None)` 的输入/权重约束、可选 `bias` 对齐规则、批维保留与输出 shape 推导。
+- 验证 `fc` 的非法输入与报错规则：参数类型、rank、特征维不匹配、`bias` 维度不对齐、`space` 不一致。
 - 验证 `matmul(lhs, rhs, memoryspace=None)` 的二维输入约束、`memoryspace` 覆盖、结果 `format/stride` 口径与错误规则。
 - 验证比较结果使用 `NumericType.Bool` 作为 predicate 载体。
 - 验证 nn 操作不依赖已移除的旧 shape 规范化入口。
@@ -529,6 +575,13 @@ tmp = matmul(lhs, rhs, memoryspace=MemorySpace.SM)
 | OP-015 | `add` 在 `format` 不一致时回落默认布局 | `test_nn_add_format_fallback` |
 | OP-016 | `add` 在 `stride` 不一致时回落默认布局，默认 stride 与序列化口径沿用 `Memory` 规范 | `test_nn_add_stride_fallback` |
 | OP-016A | `add` 默认 stride 分量的序列化口径保持稳定 | `test_nn_add_stride_dim_serialization` |
+| OP-FC-001 | `fc` 支持 `bias=None`，输出保留输入批维并将末维替换为 `out_features` | `test_nn_fc_without_bias` |
+| OP-FC-002 | `fc` 的 `bias` 为可选参数；提供时必须与输出特征维对齐（`shape == [out_features]`） | `test_nn_fc_with_optional_bias` |
+| OP-FC-003 | `fc` 的 `value/weight` 类型非法或 `bias` 非 `Memory|None` 时抛 `TypeError` | `test_nn_fc_type_error` |
+| OP-FC-004 | `fc` 的 `rank` 约束（`value.rank >= 2`、`weight.rank == 2`）不满足时报 `ValueError` | `test_nn_fc_rank_error` |
+| OP-FC-005 | `fc` 输入特征维与权重输入特征维不一致时报 `ValueError` | `test_nn_fc_feature_mismatch` |
+| OP-FC-006 | `fc` 的 `bias` 维度不对齐（非 1D 或长度不等于 `out_features`）时报 `ValueError` | `test_nn_fc_bias_shape_error` |
+| OP-FC-007 | `fc` 输入 `space` 不一致时报 `ValueError`，并保持与现有 nn 算子链式兼容 | `test_nn_fc_space_mismatch`, `test_nn_fc_chain_compatibility` |
 | OP-MM-001 | `matmul(lhs, rhs, memoryspace=None)` 成功路径：结果 shape/dtype/space/format/stride 收敛到公开口径 | `test_nn_matmul_success` |
 | OP-MM-002 | `matmul` 显式 `memoryspace` 仅覆盖结果 `space` | `test_nn_matmul_space_override` |
 | OP-MM-003 | `matmul` contracting dim 不一致报错 | `test_nn_matmul_contracting_dim_mismatch` |

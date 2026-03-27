@@ -39,6 +39,7 @@ from kernel_gen.operation.nn import (
     broadcast,
     broadcast_to,
     eq,
+    fc,
     floordiv,
     ge,
     gt,
@@ -662,6 +663,167 @@ def test_nn_add_implicit_broadcast_mismatch() -> None:
         _ = add(lhs, rhs)
     with pytest.raises(ValueError):
         _infer_broadcast_shape(SymbolShape(["A", "B"]), SymbolShape(["A", "C"]))
+
+
+# OP-FC-001
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-27 09:39:01 +0800
+# 最近一次运行成功时间: 2026-03-27 09:39:01 +0800
+# 测试目的: 验证 fc 在无 bias 场景下保留批维并输出默认布局。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_fc_without_bias
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_fc_without_bias() -> None:
+    value = Memory([2, 3, 4], NumericType.Float32, space=MemorySpace.GM, format=Farmat.CLast)
+    weight = Memory([5, 4], NumericType.Float32, space=MemorySpace.GM, format=Farmat.CLast)
+    result = fc(value, weight)
+    assert result.shape.get_values() == [2, 3, 5]
+    assert result.dtype is NumericType.Float32
+    assert result.space is MemorySpace.GM
+    assert result.format is Farmat.Norm
+    assert result.get_stride() == [15, 5, 1]
+
+
+# OP-FC-002
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-27 09:39:01 +0800
+# 最近一次运行成功时间: 2026-03-27 09:39:01 +0800
+# 测试目的: 验证 fc 支持可选 bias 且与输出特征维对齐。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_fc_with_optional_bias
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_fc_with_optional_bias() -> None:
+    value = Memory(["B", "K"], NumericType.Float32, space=MemorySpace.GM)
+    weight = Memory(["N", "K"], NumericType.Float32, space=MemorySpace.GM)
+    bias = Memory(["N"], NumericType.Float32, space=MemorySpace.GM)
+    result = fc(value, weight, bias=bias)
+    assert result.shape.get_values() == ["B", "N"]
+    assert result.dtype is NumericType.Float32
+    assert result.space is MemorySpace.GM
+
+
+# OP-FC-003
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-27 09:39:01 +0800
+# 最近一次运行成功时间: 2026-03-27 09:39:01 +0800
+# 测试目的: 验证 fc 对非法类型输入报 TypeError。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_fc_type_error
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_fc_type_error() -> None:
+    value = Memory([2, 3], NumericType.Float32)
+    weight = Memory([4, 3], NumericType.Float32)
+    with pytest.raises(TypeError):
+        _ = fc("bad", weight)
+    with pytest.raises(TypeError):
+        _ = fc(value, "bad")
+    with pytest.raises(TypeError):
+        _ = fc(value, weight, bias=1.0)
+
+
+# OP-FC-004
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-27 09:39:01 +0800
+# 最近一次运行成功时间: 2026-03-27 09:39:01 +0800
+# 测试目的: 验证 fc 的 value/weight rank 约束报错。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_fc_rank_error
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_fc_rank_error() -> None:
+    value = Memory([4], NumericType.Float32)
+    weight = Memory([5, 4], NumericType.Float32)
+    with pytest.raises(ValueError):
+        _ = fc(value, weight)
+    value_ok = Memory([2, 4], NumericType.Float32)
+    weight_bad = Memory([2, 4, 6], NumericType.Float32)
+    with pytest.raises(ValueError):
+        _ = fc(value_ok, weight_bad)
+
+
+# OP-FC-005
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-27 09:39:01 +0800
+# 最近一次运行成功时间: 2026-03-27 09:39:01 +0800
+# 测试目的: 验证 fc 输入特征维不一致报错。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_fc_feature_mismatch
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_fc_feature_mismatch() -> None:
+    value = Memory([2, 3, 4], NumericType.Float32)
+    weight = Memory([5, 6], NumericType.Float32)
+    with pytest.raises(ValueError):
+        _ = fc(value, weight)
+
+
+# OP-FC-006
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-27 09:39:01 +0800
+# 最近一次运行成功时间: 2026-03-27 09:39:01 +0800
+# 测试目的: 验证 fc bias 维度不对齐报错。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_fc_bias_shape_error
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_fc_bias_shape_error() -> None:
+    value = Memory([2, 3, 4], NumericType.Float32)
+    weight = Memory([5, 4], NumericType.Float32)
+    bias_rank = Memory([1, 5], NumericType.Float32)
+    bias_mismatch = Memory([4], NumericType.Float32)
+    with pytest.raises(ValueError):
+        _ = fc(value, weight, bias=bias_rank)
+    with pytest.raises(ValueError):
+        _ = fc(value, weight, bias=bias_mismatch)
+
+
+# OP-FC-007
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-27 09:39:01 +0800
+# 最近一次运行成功时间: 2026-03-27 09:39:01 +0800
+# 测试目的: 验证 fc space 不一致报错。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_fc_space_mismatch
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_fc_space_mismatch() -> None:
+    value = Memory([2, 3], NumericType.Float32, space=MemorySpace.GM)
+    weight = Memory([4, 3], NumericType.Float32, space=MemorySpace.SM)
+    with pytest.raises(ValueError):
+        _ = fc(value, weight)
+    bias = Memory([4], NumericType.Float32, space=MemorySpace.SM)
+    weight_ok = Memory([4, 3], NumericType.Float32, space=MemorySpace.GM)
+    with pytest.raises(ValueError):
+        _ = fc(value, weight_ok, bias=bias)
+
+
+# OP-FC-007
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-27 09:39:01 +0800
+# 最近一次运行成功时间: 2026-03-27 09:39:01 +0800
+# 测试目的: 验证 fc 输出可继续参与 nn 算术链路。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_fc_chain_compatibility
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_fc_chain_compatibility() -> None:
+    value = Memory([2, 3], NumericType.Float32)
+    weight = Memory([4, 3], NumericType.Float32)
+    result = fc(value, weight)
+    combined = add(result, Memory([2, 4], NumericType.Float32))
+    assert combined.shape.get_values() == [2, 4]
+    assert combined.dtype is NumericType.Float32
 
 
 # OP-MM-001
