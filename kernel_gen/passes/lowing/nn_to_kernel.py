@@ -22,6 +22,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from xdsl.dialects import func
+from xdsl.dialects.builtin import IntAttr, StringAttr
 from xdsl.ir import Block, Operation, Region, SSAValue
 from xdsl.utils.exceptions import VerifyException
 
@@ -31,13 +32,17 @@ from kernel_gen.dialect.kernel import (
     KernelCastOp,
     KernelDivOp,
     KernelEqOp,
+    KernelGeOp,
     KernelGtOp,
+    KernelLeOp,
     KernelLtOp,
     KernelMulOp,
+    KernelNeOp,
     KernelSelectOp,
     KernelSubOp,
 )
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.symbol import SymbolGetDimOp
 from ..pass_manager import Pass
 
 
@@ -65,9 +70,13 @@ _SUPPORTED_BINARY = {
     "nn.sub": KernelSubOp,
     "nn.mul": KernelMulOp,
     "nn.div": KernelDivOp,
+    "nn.truediv": KernelDivOp,
     "nn.eq": KernelEqOp,
+    "nn.ne": KernelNeOp,
     "nn.lt": KernelLtOp,
+    "nn.le": KernelLeOp,
     "nn.gt": KernelGtOp,
+    "nn.ge": KernelGeOp,
 }
 
 
@@ -146,6 +155,39 @@ def _ensure_operand_count(op: Operation, expected: int) -> None:
         )
 
 
+def _build_alloc_dynamic_shape(
+    source: SSAValue,
+    result_type: NnMemoryType,
+) -> tuple[list[Operation], list[SSAValue]]:
+    """构造 dma.alloc 的 dynamic_shape operands。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 通过 symbol.get_dim 读取结果 shape 对应的符号值。
+    - 逐维生成 !symbol.int operands，确保长度与 rank 一致。
+
+    使用示例:
+    - ops, operands = _build_alloc_dynamic_shape(op.operands[0], result_type)
+
+    关联文件:
+    - spec: spec/pass/lowing/nn_to_kernel.md
+    - test: test/pass/test_lowing_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
+    """
+
+    ops: list[Operation] = []
+    operands: list[SSAValue] = []
+    for axis, dim in enumerate(result_type.shape.data):
+        if isinstance(dim, StringAttr) and dim.data == "?":
+            raise LowerNnToKernelError("nn op result shape must not contain '?'")
+        op = SymbolGetDimOp(source, IntAttr(axis))
+        ops.append(op)
+        operands.append(op.result)
+    return ops, operands
+
+
 def _build_kernel_op(
     op: Operation,
     out_value: SSAValue,
@@ -207,15 +249,17 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
     result_type = _ensure_single_result(op)
     space = _ensure_space_attr(op)
 
-    alloc = DmaAllocOp([], result_type)
+    shape_ops, dynamic_shape = _build_alloc_dynamic_shape(op.operands[0], result_type)
+    alloc = DmaAllocOp(dynamic_shape, result_type)
     kernel_op = _build_kernel_op(op, alloc.result, space)
 
     try:
+        alloc.verify()
         kernel_op.verify()
     except VerifyException as exc:
         raise LowerNnToKernelError(str(exc)) from exc
 
-    block.insert_ops_before([alloc, kernel_op], op)
+    block.insert_ops_before([*shape_ops, alloc, kernel_op], op)
     op.results[0].replace_by(alloc.result)
     block.erase_op(op)
 
