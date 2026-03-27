@@ -64,3 +64,15 @@ expectation 复测：
 - 命令：PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260327-expectation-dma-flatten python expectation/dsl/mlir_gen/dialect/dma/flatten.py
 - 退出码：0
 结论：通过。
+
+时间：2026-03-27 22:34:10 +0800
+任务：T-20260327-c15488ed（dma.flatten 合并提交同步确认）
+目标：确认 c6dc1bf 是否进入 origin/main；未进入则推送。
+执行与结果：
+- timeout 120s git fetch origin -> exit=0
+- git merge-base --is-ancestor c6dc1bf origin/main -> exit=1（未包含）
+- timeout 120s git ls-remote origin refs/heads/main -> exit=0（main=c3b2444067281b394d585cef6d7ac2a5ca776905）
+- timeout 180s git push git@github.com:violetDelia/kernelcode_generate.git main -> exit=0
+- timeout 120s git fetch origin -> exit=0（origin/main 更新到 c6dc1bf）
+- git merge-base --is-ancestor c6dc1bf origin/main -> exit=0（已包含）
+结论：已通过 SSH 推送，c6dc1bf 已进入 origin/main。

@@ -51,3 +51,21 @@
 - pytest -q test/operation/test_memory_operation.py -k test_memory_compare_predicate -> exit code 0
 结论: 通过。
 - 实现/测试与 spec 一致，nn.ge expectation 可进入合并阶段。
+- 时间：2026-03-27 09:20:32 +0800
+- 任务：T-20260327-f288f8d1
+- 任务目标：同步确认 nn.ge 合并提交 cb13d35 是否已到 origin/main，必要时推送。
+- 改动：执行 git fetch origin（exit code 0）、git merge-base --is-ancestor cb13d35 origin/main（exit code 1）、git ls-remote origin refs/heads/main（exit code 0）、git push origin main（exit code 0）。
+- 结论：origin/main 原未包含 cb13d35，已推送 main -> origin/main，同步完成。
+
+
+时间: 2026-03-27 11:09:40 +0800
+任务: T-20260327-d304bf4f
+任务目标: 按关闭任务方式收口被替代任务，不做代码改动。
+改动: 仅追加关闭说明。该任务已被 T-20260327-cee7527c 覆盖并完成，相关 spec 修正（ME-013 比较 predicate dtype 统一为 NumericType.Bool）已落地并进入后续实现/复审/合并链路。
+结论: 任务关闭，不再单独执行；无代码变更。
+
+时间: 2026-03-27 21:15:20 +0800
+任务: T-20260327-25273d93
+任务目标: 按关闭任务方式收口被替代任务，不做代码改动。
+改动: 仅追加关闭说明。该任务已被 T-20260327-2fadd44c 覆盖并完成，无需重复执行。
+结论: 任务关闭，不再单独执行；无代码变更。

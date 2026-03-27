@@ -35,3 +35,8 @@
 任务目标: 合并 nn 类型提升链路 OP-TP-001~006（spec/operation/nn.md、kernel_gen/operation/nn.py、test/operation/test_operation_nn.py）并清理 worktree。
 改动: 确认仅业务文件与任务记录变更，执行合并并删除对应 worktree/分支。
 结论: 合并完成，worktree 已清理。
+时间: 2026-03-27 21:38:27 +0800
+任务: T-20260327-e4fcc05d
+任务目标: 核对提交 3d22586 是否已包含在 origin/main，必要时推送并回报。
+改动: 执行 git fetch origin（exit=0）；git merge-base --is-ancestor 3d22586 origin/main（exit=0）；git ls-remote origin refs/heads/main（exit=0）。无需推送。
+结论: origin/main 已包含 3d22586，无需推送。

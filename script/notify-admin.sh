@@ -47,7 +47,7 @@ LOG_FILE="agents/codex-multi-agents/log/talk.log"
 
 # 多行消息直接写在 MESSAGE 变量里。
 read -r -d '' MESSAGE <<'EOF' || true
-询问任务进展，推进任务进度。
+询问任务进展所有任务，任务完成后进行重构。主要针对/home/lfr/kernelcode_generate/spec/dsl 进行重构，尤其是test_ast_visitor文件呢内容太多，拆分成test_mlir_gen test_ast test_emit_mlir. 另外新建target，可以读取给出的.txt文件，注册后端。不必看已有的实现，重新实现。最后对spec的测试进行梳理，spec测试因为不停加新需求，导致测试内容多且杂，需要梳理。
 EOF
 
 MODE="loop"

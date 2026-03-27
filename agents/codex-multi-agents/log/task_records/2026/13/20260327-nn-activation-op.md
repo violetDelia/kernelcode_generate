@@ -30,3 +30,35 @@
 - 现状：主仓库处于 merge 冲突状态，冲突文件为 kernel_gen/operation/nn.py、spec/operation/nn.md、test/operation/test_operation_nn.py；未继续解决/提交。
 - 建议：由李白接手处理合并冲突并完成提交/清理。
 - 结论：阻塞（因职责调整移交）。
+
+- 时间：2026-03-27 22:06:00 +0800
+- 任务：T-20260327-23dabe84（nn activation 合并提交同步确认）
+- 任务目标：确认 c3b2444 是否已进入 origin/main；必要时推送。
+- 执行与结果：
+  - git fetch origin（timeout 120s）-> exit=124（超时）
+  - git merge-base --is-ancestor c3b2444 origin/main -> exit=1（基于本地 origin/main 未确认）
+  - git ls-remote origin refs/heads/main（timeout 120s）-> exit=124（超时）
+- 结论：远端访问超时，无法确认是否已同步；待网络恢复后重试 fetch/ls-remote，并据 merge-base 结果决定是否 push。
+
+- 时间：2026-03-27 22:12:30 +0800
+- 任务：T-20260327-16706d3f（nn activation 合并提交同步确认重试）
+- 任务目标：重试确认 c3b2444 是否已进入 origin/main；未进入则推送。
+- 执行与结果：
+  - timeout 120s git fetch origin -> exit=0
+  - git merge-base --is-ancestor c3b2444 origin/main -> exit=1（未包含）
+  - timeout 120s git ls-remote origin refs/heads/main -> exit=0（main=3d22586556fff894594629693c4c51cf4a5c4455）
+  - timeout 180s git push origin main -> exit=128（askpass 脚本缺失导致无法读取凭据）
+- 结论：确认 c3b2444 尚未进入 origin/main；推送被凭据/askpass 阻塞。建议提供可用凭据或改用已配置的推送通道后重试 push。
+
+- 时间：2026-03-27 22:18:40 +0800
+- 任务：T-20260327-3a559b61（nn activation 合并提交同步确认与推送）
+- 任务目标：确认 c3b2444 是否进入 origin/main；未进入则推送。
+- 执行与结果：
+  - timeout 120s git fetch origin -> exit=0
+  - git merge-base --is-ancestor c3b2444 origin/main -> exit=1（未包含）
+  - timeout 120s git ls-remote origin refs/heads/main -> exit=0（main=3d22586556fff894594629693c4c51cf4a5c4455）
+  - timeout 180s git push origin main -> exit=128（https askpass 缺失）
+  - timeout 180s git push git@github.com:violetDelia/kernelcode_generate.git main -> exit=0
+  - timeout 120s git fetch origin -> exit=0（origin/main 更新到 c3b2444）
+  - git merge-base --is-ancestor c3b2444 origin/main -> exit=0（已包含）
+- 结论：通过 SSH 推送成功，c3b2444 已进入 origin/main。
