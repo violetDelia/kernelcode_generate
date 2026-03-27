@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-`nn dialect` 定义方言层稳定接口，负责建模 memory space、memory type，以及逐元素算术、逐元素比较、显式 `broadcast` 和二维 `matmul` 的 IR 形态与 verifier 约束。本规范仅描述方言层字段、文本形式与校验语义，不包含上游高层 API 调度逻辑。
+`nn dialect` 定义方言层稳定接口，负责建模 memory space、memory type，以及逐元素算术、逐元素比较、显式 `broadcast`、`transpose` 和二维 `matmul` 的 IR 形态与 verifier 约束。本规范仅描述方言层字段、文本形式与校验语义，不包含上游高层 API 调度逻辑。
 
 ## 文档信息
 
@@ -23,7 +23,7 @@
 
 - 提供 `global/shared/local/tsm/tlm` 五种 memory space 的统一属性表示。
 - 提供可解析、可打印、可校验的 `!nn.memory<...>` 类型表示。
-- 为 `nn.add/sub/mul/truediv/eq/ne/lt/le/gt/ge/broadcast/matmul` 提供稳定的方言层接口。
+- 为 `nn.add/sub/mul/truediv/eq/ne/lt/le/gt/ge/broadcast/transpose/matmul` 提供稳定的方言层接口。
 - 明确 `nn dialect` 不支持逐元素隐式 broadcast，所有广播必须显式使用 `nn.broadcast`。
 - 保证合法文本 IR 可以 round-trip，非法输入在 parse 或 verifier 阶段被拒绝。
 
@@ -375,6 +375,38 @@ op = NnBroadcastOp(inp, result_type, NnMemorySpaceAttr.from_name("global"))
 
 - 返回 `NnBroadcastOp`；广播必须显式建模。
 
+### nn.transpose
+
+功能说明：
+
+- 置换维度顺序的转置 op。
+
+参数说明：
+
+- `input: !nn.memory<...>`：输入 memory。
+- `result: !nn.memory<...>`：转置后的结果类型。
+- `perm: ArrayAttr[IntegerAttr]`：轴置换顺序。
+- `space: #nn.space<...>`：op 的空间属性。
+
+使用示例：
+
+```python
+op = NnTransposeOp(inp, result_type, perm=[1, 0, 2], space=NnMemorySpaceAttr.from_name("global"))
+```
+
+注意事项：
+
+- `input/result` 必须为 `NnMemoryType`。
+- `perm` 长度必须与 `input.rank` 一致，且必须是 `0..rank-1` 的排列。
+- `result.shape` 必须按 `perm` 重排 `input.shape`。
+- `result.stride` 必须按 `perm` 重排 `input.stride`。
+- `input.element_type == result.element_type`。
+- `input.space == result.space == op.space`。
+
+返回与限制：
+
+- 返回 `NnTransposeOp`；不支持隐式广播或隐式转置。
+
 ### nn.matmul
 
 功能说明：
@@ -417,6 +449,7 @@ op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 - 验证 `NnMemoryType` 的字段完整性、rank 约束、`shape/stride` 合法性与文本 round-trip。
 - 验证 `nn.add/sub/mul/truediv/eq/ne/lt/le/gt/ge` 的 operand/result/type/space verifier 约束。
 - 验证 `nn.broadcast` 的显式广播规则、space 一致性、element type 一致性与文本 round-trip。
+- 验证 `nn.transpose` 的 perm/shape/stride/space/element type 约束与文本 round-trip。
 - 验证 `nn.matmul` 的 rank、shape、space、element type 约束与文本 round-trip。
 - 验证逐元素链路拒绝隐式 broadcast。
 
@@ -459,3 +492,7 @@ op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 | NN-DIA-033 | 比较 op(ne/lt/le/gt/ge) 合法路径 | `test_compare_ops_verify_success` |
 | NN-DIA-034 | `nn.broadcast` space/rank/shape 不一致 | `test_broadcast_op_rejects_invalid_inputs` |
 | NN-DIA-035 | `nn.matmul` result space 不一致 | `test_matmul_op_result_space_mismatch` |
+| NN-DIA-036 | `nn.transpose` 合法路径 | `test_transpose_op_verify_success` |
+| NN-DIA-037 | `nn.transpose` perm 非法 | `test_transpose_op_rejects_invalid_perm` |
+| NN-DIA-038 | `nn.transpose` shape/stride 不匹配 | `test_transpose_op_result_mismatch` |
+| NN-DIA-039 | transpose 模块 round-trip | `test_transpose_module_round_trip` |

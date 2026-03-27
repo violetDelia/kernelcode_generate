@@ -1,0 +1,33 @@
+- 时间：2026-03-27 09:29:09 +0800
+- 任务：T-20260327-f3f21d8d
+- 任务目标：为 nn 新增 transpose op 规范。
+- 改动：在 spec/dialect/nn.md 增补 nn.transpose 语义、参数、约束与测试映射，并更新目标/测试目标描述。
+- 结论：spec 已补齐 transpose op 规范，待进入实现阶段。
+
+- 时间：2026-03-27 09:37:44 +0800
+- 经手人：朽木露琪亚
+- 任务：T-20260327-cb30b806（nn.transpose 实现与测试）
+- 任务目标：实现 nn.transpose op 与 verifier 约束，补齐测试覆盖 perm/shape/stride/space/element type 校验与 round-trip。
+- 改动：
+  - kernel_gen/dialect/nn.py：新增 NnTransposeOp 与 perm/shape/stride 校验逻辑，补齐 dialect/export。
+  - test/dialect/test_nn_dialect.py：新增 transpose 相关测试并补齐 round-trip 文本。
+  - 执行 `pytest -q test/dialect/test_nn_dialect.py`，退出码 0。
+- 结论：实现与测试已收敛，等待审查。
+
+- 时间：2026-03-27 09:41:49 +0800
+- 经手人：咯咯咯
+- 任务：T-20260327-5b313317（nn.transpose 复审）
+- 任务目标：复核 nn.transpose 实现与测试映射（perm/shape/stride/space/element type + round-trip），复验 pytest。
+- 核对要点：
+  - spec/dialect/nn.md 的 nn.transpose 约束与 NN-DIA-036..039 映射一致。
+  - kernel_gen/dialect/nn.py 对 perm/shape/stride/space/element type 的 verifier 与 spec 口径一致。
+  - test/dialect/test_nn_dialect.py 覆盖合法路径、非法 perm、结果 mismatch 与模块 round-trip。
+- 测试：pytest -q test/dialect/test_nn_dialect.py（exit code 0）。
+- 结论：通过，进入合并阶段。
+
+- 时间：2026-03-27 10:07:20 +0800
+- 经手人：不要啊教练
+- 任务：T-20260327-2d64f801（合并 nn.transpose）
+- 任务目标：合并 nn.transpose op 链路并清理 worktree。
+- 改动：合并 spec/dialect/nn.md、kernel_gen/dialect/nn.py、test/dialect/test_nn_dialect.py 与记录文件。
+- 结论：合并与清理执行中。

@@ -56,6 +56,7 @@ from kernel_gen.dialect import (
     NnSubOp,
     NnTrueDivOp,
 )
+from kernel_gen.dialect.nn import NnTransposeOp
 
 
 def _build_context() -> Context:
@@ -732,6 +733,141 @@ def test_broadcast_module_round_trip() -> None:
     text = """builtin.module {
   %0 = "test.op"() : () -> !nn.memory<[1, N], [1, 1], i32, #nn.space<global>>
   %1 = "nn.broadcast"(%0) {space = #nn.space<global>} : (!nn.memory<[1, N], [1, 1], i32, #nn.space<global>>) -> !nn.memory<[M, N], [1, 1], i32, #nn.space<global>>
+}
+"""
+    module = Parser(ctx, text).parse_module()
+    module.verify()
+    assert _print_ir(module) == text.rstrip()
+
+
+# NN-DIA-036
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-27 09:37:44 +0800
+# 最近一次运行成功时间: 2026-03-27 09:37:44 +0800
+# 功能说明: 验证 nn.transpose 在合法输入下通过 verifier。
+# 测试目的: 保证 perm/shape/stride/space/element type 校验通过时可成功生成 op。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_transpose_op_verify_success
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_transpose_op_verify_success() -> None:
+    input_type = _make_simple_memory_type(
+        [StringAttr("M"), StringAttr("N"), IntAttr(4)],
+        [IntAttr(8), IntAttr(4), IntAttr(1)],
+        space="global",
+    )
+    result_type = _make_simple_memory_type(
+        [StringAttr("N"), StringAttr("M"), IntAttr(4)],
+        [IntAttr(4), IntAttr(8), IntAttr(1)],
+        space="global",
+    )
+    inp = _TestOp(result_types=[input_type]).results[0]
+    op = NnTransposeOp(inp, result_type, perm=[1, 0, 2], space=_make_space("global"))
+    op.verify()
+
+
+# NN-DIA-037
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-27 09:37:44 +0800
+# 最近一次运行成功时间: 2026-03-27 09:37:44 +0800
+# 功能说明: 验证 nn.transpose perm 非法时会触发 verifier。
+# 测试目的: 保证 perm 长度/排列不合法时及时拒绝。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_transpose_op_rejects_invalid_perm
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+@pytest.mark.parametrize(
+    ("perm", "message"),
+    [
+        ([0], "perm must match input rank"),
+        ([0, 0], "permutation"),
+        ([0, 2], "permutation"),
+    ],
+)
+def test_transpose_op_rejects_invalid_perm(perm: Sequence[int], message: str) -> None:
+    input_type = _make_simple_memory_type([StringAttr("M"), StringAttr("N")], [IntAttr(2), IntAttr(1)])
+    result_type = _make_simple_memory_type([StringAttr("N"), StringAttr("M")], [IntAttr(1), IntAttr(2)])
+    inp = _TestOp(result_types=[input_type]).results[0]
+    op = NnTransposeOp(inp, result_type, perm=perm, space=_make_space("global"))
+    with pytest.raises(VerifyException, match=message):
+        op.verify()
+
+
+# NN-DIA-038
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-27 09:37:44 +0800
+# 最近一次运行成功时间: 2026-03-27 09:37:44 +0800
+# 功能说明: 验证 nn.transpose 在 shape/stride/space/element type 不一致时拒绝。
+# 测试目的: 确保 result 类型与空间约束严格匹配 perm 规则。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_transpose_op_result_mismatch
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+@pytest.mark.parametrize(
+    ("result_type", "space", "message"),
+    [
+        (
+            _make_simple_memory_type([StringAttr("M"), StringAttr("N")], [IntAttr(1), IntAttr(2)]),
+            "global",
+            "result shape",
+        ),
+        (
+            _make_simple_memory_type([StringAttr("N"), StringAttr("M")], [IntAttr(2), IntAttr(1)]),
+            "global",
+            "result stride",
+        ),
+        (
+            _make_simple_memory_type(
+                [StringAttr("N"), StringAttr("M")],
+                [IntAttr(1), IntAttr(2)],
+                element_type=IntegerType(16),
+            ),
+            "global",
+            "element_type",
+        ),
+        (
+            _make_simple_memory_type([StringAttr("N"), StringAttr("M")], [IntAttr(1), IntAttr(2)], space="shared"),
+            "global",
+            "input/result must use the same space",
+        ),
+        (
+            _make_simple_memory_type([StringAttr("N"), StringAttr("M")], [IntAttr(1), IntAttr(2)]),
+            "shared",
+            "attribute space",
+        ),
+    ],
+)
+def test_transpose_op_result_mismatch(
+    result_type: NnMemoryType,
+    space: str,
+    message: str,
+) -> None:
+    input_type = _make_simple_memory_type([StringAttr("M"), StringAttr("N")], [IntAttr(2), IntAttr(1)])
+    inp = _TestOp(result_types=[input_type]).results[0]
+    op = NnTransposeOp(inp, result_type, perm=[1, 0], space=_make_space(space))
+    with pytest.raises(VerifyException, match=message):
+        op.verify()
+
+
+# NN-DIA-039
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-27 09:37:44 +0800
+# 最近一次运行成功时间: 2026-03-27 09:37:44 +0800
+# 功能说明: 验证含 nn.transpose 的模块可 round-trip。
+# 测试目的: 确保 nn.transpose 的 parse/print 文本稳定。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_transpose_module_round_trip
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_transpose_module_round_trip() -> None:
+    ctx = _build_context()
+    text = """builtin.module {
+  %0 = "test.op"() : () -> !nn.memory<[M, N, 4], [8, 4, 1], i32, #nn.space<global>>
+  %1 = "nn.transpose"(%0) {perm = [1 : i64, 0 : i64, 2 : i64], space = #nn.space<global>} : (!nn.memory<[M, N, 4], [8, 4, 1], i32, #nn.space<global>>) -> !nn.memory<[N, M, 4], [4, 8, 1], i32, #nn.space<global>>
 }
 """
     module = Parser(ctx, text).parse_module()

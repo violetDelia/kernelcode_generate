@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from xdsl.dialects.builtin import ArrayAttr, IntAttr, IntegerType, StringAttr, i1
+from xdsl.dialects.builtin import ArrayAttr, IntAttr, IntegerAttr, IntegerType, StringAttr, i1
 from xdsl.ir import Attribute, Dialect, Operation, ParametrizedAttribute, SSAValue, TypeAttribute
 from xdsl.irdl import (
     IRDLOperation,
@@ -390,6 +390,72 @@ def _verify_broadcast_compat(input_type: NnMemoryType, result_type: NnMemoryType
         raise VerifyException("nn.broadcast shape mismatch")
 
 
+def _verify_transpose_perm(perm: ArrayAttr, rank: int) -> list[int]:
+    """校验 nn.transpose 的 perm 合法性并返回序列。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 校验 perm 长度与 rank 一致。
+    - 校验 perm 为 0..rank-1 的排列。
+
+    使用示例:
+    - _verify_transpose_perm(ArrayAttr([IntAttr(1), IntAttr(0)]), rank=2)
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+    if len(perm.data) != rank:
+        raise VerifyException("nn.transpose perm must match input rank")
+    perm_values: list[int] = []
+    for entry in perm.data:
+        if isinstance(entry, IntAttr):
+            perm_values.append(entry.data)
+            continue
+        if isinstance(entry, IntegerAttr) and isinstance(entry.value, IntAttr):
+            perm_values.append(entry.value.data)
+            continue
+        raise VerifyException("nn.transpose perm must be a permutation of 0..rank-1")
+    if sorted(perm_values) != list(range(rank)):
+        raise VerifyException("nn.transpose perm must be a permutation of 0..rank-1")
+    return perm_values
+
+
+def _verify_transpose_layout(
+    input_type: NnMemoryType,
+    result_type: NnMemoryType,
+    perm_values: Sequence[int],
+) -> None:
+    """校验 nn.transpose 的 shape/stride 是否按 perm 重排。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 按 perm 重排 input shape/stride，并与 result 对齐校验。
+
+    使用示例:
+    - _verify_transpose_layout(input_type, result_type, [1, 0])
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+    expected_shape = [input_type.shape.data[index] for index in perm_values]
+    for expected_dim, actual_dim in zip(expected_shape, result_type.shape.data, strict=True):
+        if not _dims_equal(expected_dim, actual_dim):
+            raise VerifyException("nn.transpose result shape must match permuted input")
+
+    expected_stride = [input_type.stride.data[index] for index in perm_values]
+    for expected_dim, actual_dim in zip(expected_stride, result_type.stride.data, strict=True):
+        if not _dims_equal(expected_dim, actual_dim):
+            raise VerifyException("nn.transpose result stride must match permuted input")
+
+
 class _BaseNnBinaryOp(IRDLOperation):
     """NN 二元 op 基类。"""
 
@@ -616,6 +682,79 @@ class NnBroadcastOp(IRDLOperation):
 
 
 @irdl_op_definition
+class NnTransposeOp(IRDLOperation):
+    """nn.transpose。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 定义 nn.transpose 方言 op 与 verifier 约束。
+
+    使用示例:
+    - NnTransposeOp(inp, result_type, perm=[1, 0], space=NnMemorySpaceAttr.from_name("global"))
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    name = "nn.transpose"
+
+    input = operand_def(NnMemoryType)
+    result = result_def(NnMemoryType)
+    perm = attr_def(ArrayAttr)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        input_value: SSAValue | Operation,
+        result_type: NnMemoryType,
+        perm: Sequence[int] | ArrayAttr,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        """初始化 transpose op。
+
+        创建者: 朽木露琪亚
+        最后一次更改: 朽木露琪亚
+
+        功能说明:
+        - 绑定输入、结果类型、perm 与 space 属性。
+
+        使用示例:
+        - NnTransposeOp(inp, result_type, perm=[1, 0], space=NnMemorySpaceAttr.from_name("global"))
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/test_nn_dialect.py
+        - 功能实现: kernel_gen/dialect/nn.py
+        """
+        perm_attr = perm if isinstance(perm, ArrayAttr) else ArrayAttr([IntAttr(value) for value in perm])
+        super().__init__(
+            operands=[input_value],
+            result_types=[result_type],
+            attributes={"perm": perm_attr, "space": space},
+        )
+
+    def verify_(self) -> None:
+        input_type = _verify_memory_type(self.input.type, "input")
+        result_type = _verify_memory_type(self.result.type, "result")
+
+        self.space.verify()
+        if input_type.space.space.data != result_type.space.space.data:
+            raise VerifyException("nn.transpose input/result must use the same space")
+        if input_type.space.space.data != self.space.space.data:
+            raise VerifyException("nn.transpose attribute space must match type space")
+
+        if input_type.element_type != result_type.element_type:
+            raise VerifyException("nn.transpose element_type must match")
+
+        perm_values = _verify_transpose_perm(self.perm, len(input_type.shape.data))
+        _verify_transpose_layout(input_type, result_type, perm_values)
+
+
+@irdl_op_definition
 class NnMatmulOp(IRDLOperation):
     """nn.matmul。
 
@@ -704,6 +843,7 @@ Nn = Dialect(
         NnGtOp,
         NnGeOp,
         NnBroadcastOp,
+        NnTransposeOp,
         NnMatmulOp,
     ],
     [
@@ -725,6 +865,7 @@ __all__ = [
     "NnGtOp",
     "NnGeOp",
     "NnBroadcastOp",
+    "NnTransposeOp",
     "NnMatmulOp",
     "NnMemorySpaceAttr",
     "NnMemoryType",
