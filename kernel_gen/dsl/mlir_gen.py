@@ -20,10 +20,12 @@
 from __future__ import annotations
 
 import inspect
+import re
 from typing import Callable
 
+import sympy as sp
 from xdsl.dialects import func
-from xdsl.dialects.builtin import FunctionType, i1, i32
+from xdsl.dialects.builtin import FunctionType, IntAttr, StringAttr, i1, i32
 from xdsl.ir import Block, Region
 
 from kernel_gen.dialect.nn import NnMemoryType
@@ -36,6 +38,7 @@ from .ast import (
     BinaryExprAST,
     ConstAST,
     DmaAllocAST,
+    DmaFlattenAST,
     DmaFreeAST,
     DmaReshapeAST,
     Diagnostic,
@@ -251,6 +254,70 @@ def _allow_mixed_dtype_return(
     return result_type.shape == target_type.shape and result_type.element_type == target_type.element_type
 
 
+def _parse_symbolic_dim_expr(expr: str) -> sp.Basic | None:
+    """解析符号维度表达式字符串。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 接受不含 `?` 的字符串并转为 sympy 表达式。
+    - 解析失败时返回 None。
+
+    使用示例:
+    - _parse_symbolic_dim_expr("M*N*K")
+
+    关联文件:
+    - spec: spec/dsl/mlir_gen.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/mlir_gen.py
+    """
+    normalized = expr.strip()
+    if not normalized or "?" in normalized:
+        return None
+    names = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", normalized))
+    locals_map = {name: sp.Symbol(name, integer=True, real=True) for name in names}
+    try:
+        return sp.sympify(normalized, locals=locals_map)
+    except (sp.SympifyError, TypeError, ValueError):
+        return None
+
+
+def _flatten_numel_annotation_matches(result_type: NnMemoryType, expected_type: NnMemoryType) -> bool:
+    """校验 flatten 返回注解的 numel 符号表达式等价性。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅在一维 shape 场景比较维度表达式是否等价。
+    - 支持符号乘法的交换律判断。
+
+    使用示例:
+    - _flatten_numel_annotation_matches(result_type, expected_type)
+
+    关联文件:
+    - spec: spec/dsl/mlir_gen.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/mlir_gen.py
+    """
+    if len(result_type.shape.data) != 1 or len(expected_type.shape.data) != 1:
+        return False
+    lhs = result_type.shape.data[0]
+    rhs = expected_type.shape.data[0]
+    if isinstance(lhs, IntAttr) and isinstance(rhs, IntAttr):
+        return lhs.data == rhs.data
+    if isinstance(lhs, StringAttr) and isinstance(rhs, StringAttr):
+        if lhs.data == rhs.data:
+            return True
+        lhs_expr = _parse_symbolic_dim_expr(lhs.data)
+        rhs_expr = _parse_symbolic_dim_expr(rhs.data)
+        if lhs_expr is None or rhs_expr is None:
+            return False
+        return sp.simplify(lhs_expr - rhs_expr) == 0
+    return False
+
+
 def _validate_return_type(
     func_ast: FunctionAST,
     result_type: object,
@@ -260,7 +327,7 @@ def _validate_return_type(
     """校验函数返回类型与注解一致性。
 
     创建者: 我不是牛马
-    最后一次更改: 我不是牛马
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 检查 Tensor 返回的 shape 与 element_type 是否匹配注解。
@@ -284,7 +351,10 @@ def _validate_return_type(
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("Return type does not match annotation", location=func_ast.location)
         # Tensor 注解只公开约束 shape 与 element_type；DMA helper 允许返回不同的 space/stride。
-        if result_type.shape != expected_type.shape:
+        shape_matches = result_type.shape == expected_type.shape
+        if not shape_matches and isinstance(return_expr, DmaFlattenAST):
+            shape_matches = _flatten_numel_annotation_matches(result_type, expected_type)
+        if not shape_matches:
             raise _LoweringError("Return type does not match annotation", location=func_ast.location)
         if result_type.element_type != expected_type.element_type:
             if return_expr is not None and type_map is not None:
