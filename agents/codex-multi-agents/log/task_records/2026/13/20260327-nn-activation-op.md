@@ -1,0 +1,24 @@
+- 时间：2026-03-27 09:33:40 +0800
+- 任务：T-20260327-69604c1a（nn activation spec 阶段）
+- 任务目标：为 nn 新增激活函数 op 规范，明确首批支持集合、输入输出约束、参数规则、数值语义/边界行为、非法输入报错约定，并补齐 spec->测试映射与验收命令。
+- 改动：
+  - 更新 spec/operation/nn.md：
+    - 在功能简介/目标/限制中新增激活函数描述与浮点 dtype 约束。
+    - 新增公开接口：`relu`、`leaky_relu(alpha)`、`sigmoid`、`tanh`、`hard_sigmoid(alpha,beta)`，补充输入输出、参数校验、数值语义与边界行为。
+    - 测试目标新增激活函数覆盖说明，并补充验收命令 `pytest -q test/operation/test_operation_nn.py -k activation`。
+    - 新增测试映射：OP-ACT-001/002/003。
+- 结论：spec 阶段完成，可进入实现阶段。
+
+- 时间：2026-03-27 09:45:22 +0800
+- 任务：T-20260327-09e64241（nn activation 实现阶段）
+- 任务目标：实现 relu/leaky_relu/sigmoid/tanh/hard_sigmoid，并补齐 OP-ACT-001/002/003 测试与参数/shape/dtype 校验。
+- 改动：
+  - 更新 kernel_gen/operation/nn.py：新增激活函数实现、浮点输入与参数校验、导出列表。
+  - 更新 test/operation/test_operation_nn.py：补充 OP-ACT-001/002/003 测试覆盖。
+- 结论：实现完成，pytest -q test/operation/test_operation_nn.py -k activation 通过。
+
+- 时间：2026-03-27 21:00:02 +0800
+- 任务：T-20260327-08fb9635（nn activation 复审）
+- 任务目标：复审 relu/leaky_relu/sigmoid/tanh/hard_sigmoid 实现与测试闭环，核对 OP-ACT-001/002/003 覆盖与 spec 一致性。
+- 改动：审查 spec/operation/nn.md、kernel_gen/operation/nn.py、test/operation/test_operation_nn.py；执行 pytest -q test/operation/test_operation_nn.py -k activation（exit=0）。
+- 结论：通过。spec、实现与测试一致，覆盖 OP-ACT-001/002/003，错误路径与参数约束符合规范。

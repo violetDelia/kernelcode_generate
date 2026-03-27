@@ -1,14 +1,16 @@
 """NN operation API.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: 我不是牛马
 
 功能说明:
 - 提供 Memory 的逐元素算术、比较与显式 broadcast 运算 API。
+- 提供常用激活函数（relu/leaky_relu/sigmoid/tanh/hard_sigmoid）API。
 
 使用示例:
-- from kernel_gen.operation.nn import add, broadcast, eq
+- from kernel_gen.operation.nn import add, broadcast, eq, relu
 - result = add(mem, 1)
+- activated = relu(mem)
 - expanded = broadcast(mem, Memory(["M", "N"], NumericType.Float32))
 
 关联文件:
@@ -18,6 +20,8 @@
 """
 
 from __future__ import annotations
+
+import math
 
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
@@ -42,6 +46,12 @@ _NN_ADD_PROMOTION_ORDER = (
     NumericType.Float64,
 )
 _NN_ADD_PROMOTION_RANK = {dtype: index for index, dtype in enumerate(_NN_ADD_PROMOTION_ORDER)}
+_NN_FLOAT_DTYPES = {
+    NumericType.Float16,
+    NumericType.BFloat16,
+    NumericType.Float32,
+    NumericType.Float64,
+}
 
 
 class _AddStrideDim(SymbolDim):
@@ -367,6 +377,57 @@ def _ensure_scalar_arithmetic_value(value: object) -> None:
     if isinstance(value, SymbolDim):
         return
     _ensure_scalar_value(value)
+
+
+def _ensure_float_memory(value: object, op_name: str) -> Memory:
+    """校验激活函数的 Memory 与浮点 dtype 输入。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 仅接受 Memory 输入。
+    - dtype 必须为浮点类型。
+
+    使用示例:
+    - _ensure_float_memory(mem, "relu")
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    if not isinstance(value, Memory):
+        raise TypeError(f"{op_name} value must be Memory")
+    if value.dtype not in _NN_FLOAT_DTYPES:
+        raise TypeError(f"{op_name} value dtype must be float")
+    return value
+
+
+def _ensure_activation_scalar(name: str, value: object) -> None:
+    """校验激活函数数值参数。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 仅接受 int/float，不接受 bool 或 SymbolDim。
+    - 拒绝 NaN/Inf 数值。
+
+    使用示例:
+    - _ensure_activation_scalar("alpha", 0.2)
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    if isinstance(value, bool) or isinstance(value, SymbolDim):
+        raise TypeError(f"{name} must be int or float")
+    if not isinstance(value, (int, float)):
+        raise TypeError(f"{name} must be int or float")
+    if not math.isfinite(value):
+        raise ValueError(f"{name} must be finite")
 
 
 def _apply_scalar_operator(lhs: object, rhs: object, op: str, rop: str) -> ScalarArithmeticValue:
@@ -839,6 +900,121 @@ def ge(lhs: object, rhs: object) -> Memory:
     return _dispatch_compare(lhs, rhs, "__ge__", "__le__")
 
 
+def relu(value: object) -> Memory:
+    """逐元素 ReLU 激活。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 仅接受 Memory 输入，dtype 需为浮点类型。
+    - 输出继承输入的 shape/dtype/space/format/stride。
+
+    使用示例:
+    - relu(Memory(["M", "N"], NumericType.Float32))
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    memory = _ensure_float_memory(value, "relu")
+    return memory._clone_with_dtype(memory.dtype)
+
+
+def leaky_relu(value: object, alpha: int | float = 0.01) -> Memory:
+    """逐元素 Leaky ReLU 激活。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 仅接受 Memory 输入，dtype 需为浮点类型。
+    - alpha 必须为有限的 int/float。
+    - 输出继承输入的 shape/dtype/space/format/stride。
+
+    使用示例:
+    - leaky_relu(Memory(["M", "N"], NumericType.Float16), alpha=0.2)
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    memory = _ensure_float_memory(value, "leaky_relu")
+    _ensure_activation_scalar("alpha", alpha)
+    return memory._clone_with_dtype(memory.dtype)
+
+
+def sigmoid(value: object) -> Memory:
+    """逐元素 Sigmoid 激活。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 仅接受 Memory 输入，dtype 需为浮点类型。
+    - 输出继承输入的 shape/dtype/space/format/stride。
+
+    使用示例:
+    - sigmoid(Memory(["M", "N"], NumericType.Float32))
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    memory = _ensure_float_memory(value, "sigmoid")
+    return memory._clone_with_dtype(memory.dtype)
+
+
+def tanh(value: object) -> Memory:
+    """逐元素 Tanh 激活。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 仅接受 Memory 输入，dtype 需为浮点类型。
+    - 输出继承输入的 shape/dtype/space/format/stride。
+
+    使用示例:
+    - tanh(Memory(["M", "N"], NumericType.Float32))
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    memory = _ensure_float_memory(value, "tanh")
+    return memory._clone_with_dtype(memory.dtype)
+
+
+def hard_sigmoid(value: object, alpha: int | float = 0.2, beta: int | float = 0.5) -> Memory:
+    """逐元素 Hard Sigmoid 激活。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 仅接受 Memory 输入，dtype 需为浮点类型。
+    - alpha/beta 必须为有限的 int/float。
+    - 输出继承输入的 shape/dtype/space/format/stride。
+
+    使用示例:
+    - hard_sigmoid(Memory(["M", "N"], NumericType.Float32), alpha=0.2, beta=0.5)
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    memory = _ensure_float_memory(value, "hard_sigmoid")
+    _ensure_activation_scalar("alpha", alpha)
+    _ensure_activation_scalar("beta", beta)
+    return memory._clone_with_dtype(memory.dtype)
+
+
 def matmul(lhs: object, rhs: object, memoryspace: MemorySpace | None = None) -> Memory:
     """二维矩阵乘。
 
@@ -1089,6 +1265,11 @@ __all__ = [
     "le",
     "gt",
     "ge",
+    "relu",
+    "leaky_relu",
+    "sigmoid",
+    "tanh",
+    "hard_sigmoid",
     "matmul",
     "img2col",
     "broadcast",
