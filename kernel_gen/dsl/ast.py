@@ -662,6 +662,8 @@ _DTYPE_MAP: dict[str, NumericType] = {
     "uint32": NumericType.Uint32,
     "u64": NumericType.Uint64,
     "uint64": NumericType.Uint64,
+    "i1": NumericType.Bool,
+    "bool": NumericType.Bool,
 }
 
 _BIN_OP_MAP: dict[type, str] = {

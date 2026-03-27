@@ -168,6 +168,8 @@ def _dtype_to_xdsl(dtype: NumericType, location: SourceLocation | None = None) -
         return f32
     if dtype is NumericType.Int32:
         return i32
+    if dtype is NumericType.Bool:
+        return i1
     raise _LoweringError(f"Unsupported dtype: {dtype}", location=location)
 
 

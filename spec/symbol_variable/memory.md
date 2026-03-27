@@ -536,7 +536,7 @@ cmp_mem = lhs < 0
 - 验证 `__repr__` 包含空间与张量元信息。
 - 验证运算符重载覆盖算术、比较与错误路径（形状不一致、dtype 不支持、标量类型非法）。
 - 验证运算符重载结果元数据独立（对应 `ME-012`）。
-- 验证比较结果 `dtype` 为 `NumericType.Int32`（对应 `ME-013`）。
+- 验证比较结果 `dtype` 为 `NumericType.Bool`（对应 `ME-013`）。
 - 验证 memory 相关单值整数语义的 dialect 归属由 [`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py) 覆盖，本文件测试仅覆盖 `Memory` 容器行为本身。
 
 ### 功能与用例清单
@@ -555,7 +555,7 @@ cmp_mem = lhs < 0
 | ME-010 | 运算符 | `Memory + Memory` | N/A | `lhs + rhs` | `shape` 一致，`dtype` 按提升规则取高，`space/format/stride` 继承 | `test_memory_add_memory` |
 | ME-011 | 运算符 | `Memory + scalar` | N/A | `mem + 1` / `1 + mem` | 返回 `Memory` 且 `dtype` 按提升规则取高 | `test_memory_add_scalar` |
 | ME-012 | 运算符 | 结果元信息独立 | N/A | `mem + 1` | 结果 `shape/stride` 独立，不复用原引用 | `test_memory_metadata_independent` |
-| ME-013 | 运算符 | 比较 predicate | N/A | `lhs == rhs` / `lhs < 1` | `dtype` 为 `NumericType.Int32` | `test_memory_compare_predicate` |
+| ME-013 | 运算符 | 比较 predicate | N/A | `lhs == rhs` / `lhs < 1` | `dtype` 为 `NumericType.Bool` | `test_memory_compare_predicate` |
 | ME-014 | 运算符 | 形状不一致 | N/A | `lhs + rhs` | 抛 `ValueError` | `test_memory_shape_mismatch` |
 | ME-015 | 运算符 | dtype 不支持 | N/A | `lhs + rhs` | 抛 `TypeError` | `test_memory_dtype_mismatch` |
 | ME-016 | 运算符 | 标量类型非法 | N/A | `mem + \"1\"` | 抛 `TypeError` | `test_memory_scalar_type_error` |

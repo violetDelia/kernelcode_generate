@@ -237,12 +237,12 @@ def test_memory_compare_predicate() -> None:
     ge_result = lhs >= rhs
     assert isinstance(eq_result, Memory)
     assert eq_result.shape.get_values() == [1, "M"]
-    assert eq_result.dtype is NumericType.Int32
-    assert lt_result.dtype is NumericType.Int32
-    assert ne_result.dtype is NumericType.Int32
-    assert le_result.dtype is NumericType.Int32
-    assert gt_result.dtype is NumericType.Int32
-    assert ge_result.dtype is NumericType.Int32
+    assert eq_result.dtype is NumericType.Bool
+    assert lt_result.dtype is NumericType.Bool
+    assert ne_result.dtype is NumericType.Bool
+    assert le_result.dtype is NumericType.Bool
+    assert gt_result.dtype is NumericType.Bool
+    assert ge_result.dtype is NumericType.Bool
 
 
 # ME-014

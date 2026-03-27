@@ -568,9 +568,9 @@ class Memory:
         if isinstance(other, Memory):
             self._ensure_same_shape(other)
             self._ensure_same_dtype(other)
-            return self._clone_with_dtype(NumericType.Int32)
+            return self._clone_with_dtype(NumericType.Bool)
         self._ensure_scalar_compatible(other)
-        return self._clone_with_dtype(NumericType.Int32)
+        return self._clone_with_dtype(NumericType.Bool)
 
     def __add__(self: "Memory", other: object) -> "Memory":
         """逐元素加法。
