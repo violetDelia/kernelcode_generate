@@ -61,6 +61,27 @@ def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
     return value
 
 
+def _verify_memory_operand(value: SSAValue, field_name: str) -> NnMemoryType:
+    """校验 SSA operand 为 nn.memory type。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 统一处理 SSA operand 的 nn.memory 类型校验与内部验证。
+
+    使用示例:
+    - _verify_memory_operand(op.source, "source")
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma_dialect.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    return _verify_memory_type(value.type, field_name)
+
+
 def _operand_int_value(value: SSAValue) -> int | None:
     """尝试从 `!symbol.int<"expr">` SSA operand 恢复静态整型值。
 
@@ -438,7 +459,7 @@ class DmaFreeOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
-        _verify_memory_type(self.source.type, "source")
+        _verify_memory_operand(self.source, "source")
 
 
 @irdl_op_definition
