@@ -77,12 +77,14 @@ from kernel_gen.dialect.symbol import (
     SymbolGeOp,
     SymbolFloorDivOp,
     SymbolForOp,
+    SymbolGetDimOp,
     SymbolMulOp,
     SymbolSubOp,
     SymbolValueType,
     build_public_symbol_expr,
 )
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
 from .ast import (
@@ -321,6 +323,70 @@ def _resolve_index_symbol(name: str, ctx: EmitContext, location: SourceLocation 
     return _ensure_index_value(value, ctx, location)
 
 
+def _split_symbol_multiplication(expr: str) -> list[str] | None:
+    """将符号乘法表达式拆分为多个 symbol 名称。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅支持以 `*` 连接的简单 symbol 乘法表达式。
+    - 包含其他运算符或空段时返回 None。
+
+    使用示例:
+    - _split_symbol_multiplication("M*N*K") -> ["M", "N", "K"]
+
+    关联文件:
+    - spec: spec/dsl/emit_mlir.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/emit_mlir.py
+    """
+    normalized = expr.strip()
+    if not normalized:
+        return None
+    for token in ("+", "-", "/", "//", "(", ")", " "):
+        if token in normalized:
+            return None
+    parts = normalized.split("*")
+    if any(not part for part in parts):
+        return None
+    return parts
+
+
+def _resolve_index_symbol_product(expr: str, ctx: EmitContext, location: SourceLocation | None) -> SSAValue:
+    """将 `A*B*...` 解析为 symbol.mul 链。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅支持符号名的乘法链，逐步 lowering 为 SymbolMulOp。
+    - 确保生成结果为 !symbol.int<...>。
+
+    使用示例:
+    - _resolve_index_symbol_product("M*N", ctx, location)
+
+    关联文件:
+    - spec: spec/dsl/emit_mlir.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/emit_mlir.py
+    """
+    parts = _split_symbol_multiplication(expr)
+    if parts is None:
+        raise _LoweringError("Unsupported index expression", location=location)
+    if len(parts) == 1:
+        return _resolve_index_symbol(parts[0], ctx, location)
+    current = _resolve_index_symbol(parts[0], ctx, location)
+    for part in parts[1:]:
+        rhs = _resolve_index_symbol(part, ctx, location)
+        rhs_expr = rhs.type.expr.expr.data
+        result_type = SymbolValueType.from_expr(build_public_symbol_expr(current.type.expr.expr.data, rhs_expr, "*"))
+        op = SymbolMulOp(current, rhs, result_type)
+        ctx.builder.add_op(op)
+        current = op.result
+    return current
+
+
 def _resolve_index_operand(expr: object, ctx: EmitContext, location: SourceLocation | None) -> SSAValue:
     if isinstance(expr, ConstAST):
         if isinstance(expr.value, int):
@@ -334,6 +400,8 @@ def _resolve_index_operand(expr: object, ctx: EmitContext, location: SourceLocat
     if isinstance(expr, int):
         return _const_index(expr, ctx)
     if isinstance(expr, str):
+        if "*" in expr:
+            return _resolve_index_symbol_product(expr, ctx, location)
         return _resolve_index_symbol(expr, ctx, location)
     raise _LoweringError("Unsupported index expression", location=location or getattr(expr, "location", None))
 
@@ -398,6 +466,55 @@ def _build_index_operands_from_layout(
         else:
             raise _LoweringError("Unsupported layout attribute", location=location)
     return [_resolve_index_operand(item, ctx, location) for item in values]
+
+
+def _build_flatten_shape_operands(
+    source: SSAValue,
+    source_type: NnMemoryType,
+    ctx: EmitContext,
+    *,
+    location: SourceLocation | None = None,
+) -> list[SSAValue]:
+    """构造 flatten 结果的一维 shape operand。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 静态 shape 直接使用常量 operand。
+    - 符号 shape 通过 symbol.get_dim/symbol.mul 组合出总元素数。
+
+    使用示例:
+    - _build_flatten_shape_operands(source, source_type, ctx)
+
+    关联文件:
+    - spec: spec/dsl/emit_mlir.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/emit_mlir.py
+    """
+
+    if all(isinstance(dim, IntAttr) for dim in source_type.shape.data):
+        return _build_index_operands_from_layout(
+            ArrayAttr([_shape_numel_attr(source_type.shape.data)]),
+            ctx,
+            location=location,
+        )
+    dim_values: list[SSAValue] = []
+    for axis, _ in enumerate(source_type.shape.data):
+        op = SymbolGetDimOp(source, IntAttr(axis))
+        ctx.builder.add_op(op)
+        dim_values.append(op.result)
+    if not dim_values:
+        raise _LoweringError("flatten source rank must be >= 1", location=location)
+    total = dim_values[0]
+    for value in dim_values[1:]:
+        result_type = SymbolValueType.from_expr(
+            build_public_symbol_expr(total.type.expr.expr.data, value.type.expr.expr.data, "*")
+        )
+        op = SymbolMulOp(total, value, result_type)
+        ctx.builder.add_op(op)
+        total = op.result
+    return [total]
 
 
 def _lower_loop_bound(expr: object, ctx: EmitContext) -> object:
@@ -563,15 +680,29 @@ def _memory_type_from_parts(
 def _shape_numel_attr(shape: Sequence[Attribute]) -> Attribute:
     """根据 shape 计算一维 flatten 结果的元素总数属性。"""
 
-    total: int | str = 1
+    total_static = 1
+    total_symbol: SymbolDim | None = None
     for dim in shape:
         if isinstance(dim, IntAttr):
-            total = _mul_symbol(dim.data, total)
-        elif isinstance(dim, StringAttr):
-            total = _mul_symbol(dim.data, total)
-        else:
-            total = "?"
-    return _dim_to_attr(total)
+            if total_symbol is None:
+                total_static *= dim.data
+            else:
+                total_symbol = total_symbol * dim.data
+            continue
+        if isinstance(dim, StringAttr):
+            if dim.data == "?":
+                return StringAttr("?")
+            if total_symbol is None:
+                total_symbol = SymbolDim(total_static) * dim.data
+            else:
+                total_symbol = total_symbol * dim.data
+            continue
+        return StringAttr("?")
+    if total_symbol is None:
+        return IntAttr(total_static)
+    if not total_symbol.is_dynamic():
+        return IntAttr(int(total_symbol.get_symbol()))
+    return StringAttr(str(total_symbol.get_symbol()))
 
 
 def _memory_space_from_ast(space: MemorySpace | None, fallback: NnMemorySpaceAttr) -> NnMemorySpaceAttr:
@@ -1123,7 +1254,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         result_type = _infer_expr_type(expr, ctx.types)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("flatten result must be nn.memory", location=expr.location)
-        shape_operand = _build_index_operands_from_layout(ArrayAttr([_shape_numel_attr(source_type.shape.data)]), ctx, location=expr.location)
+        shape_operand = _build_flatten_shape_operands(source, source_type, ctx, location=expr.location)
         op = DmaReshapeOp(source, shape_operand, result_type)
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
