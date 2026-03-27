@@ -877,6 +877,57 @@ def softmax(value: object, axis: int = -1) -> Memory:
     return value._clone_with_dtype(value.dtype)
 
 
+def fc(value: object, weight: object, bias: object | None = None) -> Memory:
+    """全连接（fully connected）运算。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 支持 Memory 的末维与权重输入特征维线性变换。
+    - bias 可选，提供时需与输出特征维对齐。
+
+    使用示例:
+    - fc(Memory(["B", "K"], NumericType.Float32), Memory(["N", "K"], NumericType.Float32))
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    if not isinstance(value, Memory) or not isinstance(weight, Memory):
+        raise TypeError("fc operands must be Memory")
+    if bias is not None and not isinstance(bias, Memory):
+        raise TypeError("fc bias must be Memory or None")
+    value_values = value.shape.get_values()
+    weight_values = weight.shape.get_values()
+    if len(value_values) < 2:
+        raise ValueError("fc value rank must be >= 2")
+    if len(weight_values) != 2:
+        raise ValueError("fc weight must be rank-2 Memory")
+    if value_values[-1] != weight_values[1]:
+        raise ValueError("fc input feature mismatch")
+    if value.space is not weight.space:
+        raise ValueError("fc space mismatch")
+    if bias is not None:
+        bias_values = bias.shape.get_values()
+        if len(bias_values) != 1 or bias_values[0] != weight_values[0]:
+            raise ValueError("fc bias shape mismatch")
+        if bias.space is not value.space:
+            raise ValueError("fc space mismatch")
+    result_dtype = _resolve_add_dtype(value.dtype, weight.dtype)
+    if bias is not None and _resolve_add_dtype(result_dtype, bias.dtype) is not result_dtype:
+        raise TypeError("fc bias dtype mismatch")
+    output_shape = [*value_values[:-1], weight_values[0]]
+    return Memory(
+        output_shape,
+        result_dtype,
+        space=value.space,
+        stride=_build_add_stride(SymbolShape(output_shape)),
+        format=Farmat.Norm,
+    )
+
+
 def matmul(lhs: object, rhs: object, memoryspace: MemorySpace | None = None) -> Memory:
     """二维矩阵乘。
 
