@@ -167,7 +167,9 @@ def test_nn_dtype_mismatch() -> None:
     rhs = Memory(["A", "B"], NumericType.Float32)
     result = add(lhs, rhs)
     assert result.shape.get_values() == ["A", "B"]
-    assert result.dtype is NumericType.Int32
+    assert result.dtype is NumericType.Float32
+    scalar_result = add(Memory(["A"], NumericType.Int8), 1)
+    assert scalar_result.dtype is NumericType.Int32
 
 
 # OP-008
@@ -292,7 +294,7 @@ def test_nn_sub_reverse_and_dtype_mismatch() -> None:
     rhs = Memory(["A", "B"], NumericType.Float32)
     result = sub(lhs, rhs)
     assert result.shape.get_values() == ["A", "B"]
-    assert result.dtype is NumericType.Int32
+    assert result.dtype is NumericType.Float32
     reverse = sub(1, lhs)
     assert reverse.shape.get_values() == ["A", "B"]
 
@@ -330,7 +332,7 @@ def test_nn_floordiv_rules() -> None:
     rhs = Memory([1, "N"], NumericType.Float32, format=Farmat.CLast)
     result = floordiv(lhs, rhs)
     assert result.shape.get_values() == ["M", "N"]
-    assert result.dtype is NumericType.Int32
+    assert result.dtype is NumericType.Float32
     assert result.format is Farmat.Norm
     assert result.get_stride()[1] == 1
     scalar_result = floordiv(lhs, 2)
@@ -935,7 +937,7 @@ def test_nn_matmul_dtype_mismatch() -> None:
     rhs = Memory(["K", "N"], NumericType.Int32)
     result = matmul(lhs, rhs)
     assert result.shape.get_values() == ["M", "N"]
-    assert result.dtype is NumericType.Int32
+    assert result.dtype is NumericType.Float32
 
 
 # OP-MM-007

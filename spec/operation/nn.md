@@ -35,6 +35,19 @@
 - 不引入复杂自动类型提升规则；`dtype` 兼容性需显式检查。
 - 不负责 AST/IR/lowering 设计。
 
+## nn 类型提升规则（算术算子统一口径）
+
+- 统一优先级（从低到高）为：`Int8`、`Uint8`、`Int16`、`Uint16`、`Int32`、`Uint32`、`Int64`、`Uint64`、`Float16`、`BFloat16`、`Float32`、`Float64`。
+- `Memory/Memory` 路径按上述优先级选择顺序更靠后的类型（高优先级）。
+- `Memory/标量` 路径中，标量按 `NumericType.Int32` 参与同一优先级决议，再选择顺序更靠后的类型。
+- 适用范围：`add`、`sub`、`mul`、`truediv`、`floordiv`、`matmul`。
+- 整数与浮点混合时，结果按统一优先级选择顺序更靠后的浮点类型。
+- 反例与边界：
+  - 比较算子（`eq/ne/lt/le/gt/ge`）不使用该提升规则，结果 `dtype` 固定为 `NumericType.Bool`。
+  - `broadcast` / `broadcast_to` / `transpose` 不做算术类型提升，结果 `dtype` 由接口约束决定。
+  - 纯标量路径复用 Python/SymbolDim 算术语义，不纳入 `Memory` 类型提升决议。
+  - 不支持的 `dtype`（如 `NumericType.Bool` 参与算术提升）必须抛出 `TypeError`。
+
 ## 公开接口
 
 ### `add(lhs, rhs)`
@@ -72,7 +85,7 @@ assert D.get_stride()[1] == 1
 
 - `Memory` 与 `Memory` 可触发隐式 broadcast；广播规则为尾维对齐，较低 rank 一侧按前置维补 `1` 后参与比较。
 - 对齐后的任一维若既不相等，也不包含 `1`，必须抛出 `ValueError`。
-- `Memory/Memory` 路径的 `dtype` 按固定优先级决议：`Int8`、`Uint8`、`Int16`、`Uint16`、`Int32`、`Uint32`、`Int64`、`Uint64`、`Float16`、`BFloat16`、`Float32`、`Float64`；结果选择顺序更靠前的类型。
+- `Memory/Memory` 路径的 `dtype` 按固定优先级决议：`Int8`、`Uint8`、`Int16`、`Uint16`、`Int32`、`Uint32`、`Int64`、`Uint64`、`Float16`、`BFloat16`、`Float32`、`Float64`；结果选择顺序更靠后的类型。
 - `Memory/标量` 路径标量视作 `NumericType.Int32`，结果 `dtype` 按相同优先级选择顺序更靠后的类型。
 - 当两侧 `shape`、`dtype`、`format`、`stride` 一致时，结果保持原有 `Memory` 描述。
 - 当 `format` 或 `stride` 任一不一致时，结果必须回落到默认布局：`format=Farmat.Norm`，`stride` 使用连续行主序默认步幅。
@@ -547,7 +560,7 @@ tmp = matmul(lhs, rhs, memoryspace=MemorySpace.SM)
 - 仅支持二维 `Memory x Memory`。
 - 不支持 batch、广播或隐式转置。
 - `lhs.space` 与 `rhs.space` 必须一致；即使显式传入 `memoryspace`，输入两侧的 `space` 仍必须先满足一致性。
-- `dtype` 按与 `add` 相同的固定优先级决议。
+- `dtype` 按与 `add` 相同的固定优先级决议，选择顺序更靠后的类型。
 - 结果 `format` 固定回落为 `Farmat.Norm`。
 - 结果 `stride` 固定为连续行主序默认步幅，即 `[rhs.shape[1], 1]`；符号维场景下继续复用 `Memory` 默认 stride 语义与序列化口径。
 
@@ -555,7 +568,7 @@ tmp = matmul(lhs, rhs, memoryspace=MemorySpace.SM)
 
 - 返回 `Memory` 语义结果。
 - `out.shape == ["M", "N"]`。
-- `out.dtype` 按固定优先级决议。
+- `out.dtype` 按固定优先级决议并选择顺序更靠后的类型。
 - `out.space` 在 `memoryspace is None` 时继承输入共同 `space`，否则取显式传入的 `memoryspace`。
 - `out.format == Farmat.Norm`。
 - `out.stride == [rhs.shape[1], 1]`。
@@ -615,7 +628,10 @@ out = conv(value, weight, bias=bias, sh=2, sw=2, dh=1, dw=1, ph=0, pw=0, pl=0, p
 - 验证 `nn.add` 在同形状输入时保持原有 `Memory` 描述。
 - 验证显式 `broadcast(value, target)` / `broadcast_to(value, target)` 的尾维对齐、前置维扩张、target 对齐与错误规则。
 - 验证逐元素隐式 broadcast 的 singleton dim / 前置维扩张与错误规则。
-- 验证 `nn.add` / `nn.floordiv` 的 `dtype` 固定优先级决议，以及 `format/stride` 不一致时回落默认布局。
+- 验证 nn 算术算子（`add/sub/mul/truediv/floordiv/matmul`）遵循统一 OP-TP 类型提升规则。
+- 验证 `Memory/Memory` 路径按固定优先级选择更靠后类型，`Memory/标量` 路径按 `Int32` 参与提升。
+- 验证整浮 mixed dtype 参与算术时提升到顺序更靠后的浮点类型，以及 `format/stride` 不一致时回落默认布局。
+- 验证比较算子与 `broadcast` 路径不适用算术类型提升规则。
 - 验证 `fc(value, weight, bias=None)` 的输入/权重约束、可选 `bias` 对齐规则、批维保留与输出 shape 推导。
 - 验证 `fc` 的非法输入与报错规则：参数类型、rank、特征维不匹配、`bias` 维度不对齐、`space` 不一致。
 - 验证 `matmul(lhs, rhs, memoryspace=None)` 的二维输入约束、`memoryspace` 覆盖、结果 `format/stride` 口径与错误规则。
@@ -646,6 +662,12 @@ out = conv(value, weight, bias=bias, sh=2, sw=2, dh=1, dw=1, ph=0, pw=0, pl=0, p
 | OP-012 | `ne`/`le`/`ge` 比较别名可调用，且结果 `dtype` 为 `NumericType.Bool` | `test_nn_compare_alias` |
 | OP-013 | 同布局的 `Memory/Memory add` 保持原有 `Memory` 描述，且不依赖已移除的旧 shape 规范化入口 | `test_nn_operation_does_not_require_convert_from_list` |
 | OP-017 | `floordiv` 复用逐元素算术规则、支持标量并在布局不一致时回落默认布局 | `test_nn_floordiv_rules` |
+| OP-TP-001 | nn 算术统一类型优先级按 `Int8` 到 `Float64`，`Memory/Memory` 结果选择顺序更靠后类型 | `test_nn_dtype_mismatch`, `test_nn_matmul_dtype_mismatch` |
+| OP-TP-002 | 整数与浮点 mixed dtype 的算术结果提升到顺序更靠后的浮点类型 | `test_nn_dtype_mismatch`, `test_nn_sub_reverse_and_dtype_mismatch`, `test_nn_floordiv_rules`, `test_nn_matmul_dtype_mismatch` |
+| OP-TP-003 | `Memory/标量` 路径按 `Int32` 参与类型提升，再选择顺序更靠后类型 | `test_nn_dtype_mismatch`, `test_nn_floordiv_rules` |
+| OP-TP-004 | OP-TP 规则仅适用于算术算子（`add/sub/mul/truediv/floordiv/matmul`） | `test_nn_other_arithmetic`, `test_nn_sub_reverse_and_dtype_mismatch`, `test_nn_floordiv_rules`, `test_nn_matmul_success` |
+| OP-TP-005 | 比较算子与显式广播路径不适用 OP-TP：比较结果固定 `Bool`，broadcast 结果对齐 target 描述 | `test_nn_compare_predicate`, `test_nn_compare_alias`, `test_nn_broadcast_success` |
+| OP-TP-006 | 不支持的 dtype 参与算术提升或非法标量输入必须抛错 | `test_nn_dtype_invalid_error`, `test_nn_scalar_type_error` |
 | OP-BC-001 | `broadcast` / `broadcast_to` 可通过 singleton dim 扩张并返回与 `target` 完全一致的描述 | `test_nn_broadcast_success` |
 | OP-BC-002 | `broadcast` / `broadcast_to` 支持前置维扩张并保持 `target` 描述 | `test_nn_broadcast_prepend_dimension` |
 | OP-BC-003 | `broadcast` / `broadcast_to` 维度不兼容报错 | `test_nn_broadcast_dimension_mismatch` |
@@ -672,7 +694,7 @@ out = conv(value, weight, bias=bias, sh=2, sw=2, dh=1, dw=1, ph=0, pw=0, pl=0, p
 | OP-MM-003 | `matmul` contracting dim 不一致报错 | `test_nn_matmul_contracting_dim_mismatch` |
 | OP-MM-004 | `matmul` 非二维输入报错 | `test_nn_matmul_rank_error` |
 | OP-MM-005 | `matmul` 标量输入非法 | `test_nn_matmul_scalar_operand_error` |
-| OP-MM-006 | `matmul` 的 `dtype` 按固定优先级决议 | `test_nn_matmul_dtype_mismatch` |
+| OP-MM-006 | `matmul` 的 `dtype` 按固定优先级决议并选择顺序更靠后类型 | `test_nn_matmul_dtype_mismatch` |
 | OP-MM-007 | `matmul` 输入 `space` 不一致报错 | `test_nn_matmul_space_mismatch` |
 | OP-SM-001 | `softmax` 默认 `axis=-1`，结果保持输入 `shape/dtype/space/format/stride` | `test_nn_softmax_default_axis` |
 | OP-SM-002 | `softmax` 支持负轴并归一化到合法维度 | `test_nn_softmax_negative_axis` |

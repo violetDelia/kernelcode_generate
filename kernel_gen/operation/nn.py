@@ -103,7 +103,7 @@ def _resolve_add_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 按固定优先级选择更靠前的类型。
+    - 按固定优先级选择更靠后的类型。
     - 不支持的 dtype 触发 TypeError。
 
     使用示例:
@@ -119,7 +119,27 @@ def _resolve_add_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
         rhs_rank = _NN_ADD_PROMOTION_RANK[rhs]
     except KeyError as exc:
         raise TypeError("Unsupported dtype for nn.add") from exc
-    return lhs if lhs_rank <= rhs_rank else rhs
+    return lhs if lhs_rank >= rhs_rank else rhs
+
+
+def _resolve_scalar_dtype(memory_dtype: NumericType) -> NumericType:
+    """解析 Memory/标量路径的 dtype 决议。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 标量按 Int32 参与类型提升规则。
+
+    使用示例:
+    - _resolve_scalar_dtype(NumericType.Int8)
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    return _resolve_add_dtype(memory_dtype, NumericType.Int32)
 
 
 def _merge_broadcast_dim(lhs_dim: int | str, rhs_dim: int | str) -> int | str:
@@ -537,9 +557,9 @@ def _dispatch_binary(lhs: object, rhs: object, op: str, rop: str) -> ArithmeticR
         return _binary_memory_result(lhs, rhs)
     if isinstance(lhs, Memory):
         _ensure_scalar_value(rhs)
-        return lhs._clone_with_dtype(lhs.dtype)
+        return lhs._clone_with_dtype(_resolve_scalar_dtype(lhs.dtype))
     _ensure_scalar_value(lhs)
-    return rhs._clone_with_dtype(rhs.dtype)
+    return rhs._clone_with_dtype(_resolve_scalar_dtype(rhs.dtype))
 
 
 def _dispatch_compare(lhs: object, rhs: object, op: str, rop: str) -> Memory:
@@ -600,9 +620,9 @@ def add(lhs: object, rhs: object) -> ArithmeticResult:
         return _binary_add_result(lhs, rhs)
     if isinstance(lhs, Memory):
         _ensure_scalar_value(rhs)
-        return lhs._clone_with_dtype(lhs.dtype)
+        return lhs._clone_with_dtype(_resolve_scalar_dtype(lhs.dtype))
     _ensure_scalar_value(lhs)
-    return rhs._clone_with_dtype(rhs.dtype)
+    return rhs._clone_with_dtype(_resolve_scalar_dtype(rhs.dtype))
 
 
 def sub(lhs: object, rhs: object) -> ArithmeticResult:
@@ -714,9 +734,9 @@ def floordiv(lhs: object, rhs: object) -> ArithmeticResult:
         return _binary_memory_result(lhs, rhs)
     if isinstance(lhs, Memory):
         _ensure_scalar_value(rhs)
-        return lhs._clone_with_dtype(lhs.dtype)
+        return lhs._clone_with_dtype(_resolve_scalar_dtype(lhs.dtype))
     _ensure_scalar_value(lhs)
-    return rhs._clone_with_dtype(rhs.dtype)
+    return rhs._clone_with_dtype(_resolve_scalar_dtype(rhs.dtype))
 
 
 def eq(lhs: object, rhs: object) -> Memory:
