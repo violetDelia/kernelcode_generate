@@ -47,14 +47,27 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.dialect.dma import DmaAllocOp
-from kernel_gen.dialect.kernel import KernelAddOp, KernelCastOp, KernelEqOp, KernelSelectOp
+from kernel_gen.dialect.kernel import (
+    KernelAddOp,
+    KernelCastOp,
+    KernelDivOp,
+    KernelEqOp,
+    KernelGeOp,
+    KernelLeOp,
+    KernelNeOp,
+    KernelSelectOp,
+)
 from kernel_gen.dialect.nn import (
     NnAddOp,
     NnEqOp,
+    NnGeOp,
+    NnLeOp,
     NnMemorySpaceAttr,
     NnMemoryType,
     NnNeOp,
+    NnTrueDivOp,
 )
+from kernel_gen.dialect.symbol import SymbolValueType
 pass_module = importlib.import_module("kernel_gen.passes.lowing.nn_to_kernel")
 LowerNnToKernelError = pass_module.LowerNnToKernelError
 LowerNnToKernelPass = pass_module.LowerNnToKernelPass
@@ -209,6 +222,46 @@ class NnBadResultTypeOp(IRDLOperation):
         super().__init__(
             operands=[lhs, rhs],
             result_types=[i32],
+            attributes={"space": space},
+        )
+
+
+@irdl_op_definition
+class NnUnsupportedOp(IRDLOperation):
+    """测试用不支持的 nn op。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 构造不在支持列表中的 nn op，用于错误路径测试。
+
+    使用示例:
+    - NnUnsupportedOp(lhs, rhs, result_type, space)
+
+    关联文件:
+    - spec: spec/pass/lowing/nn_to_kernel.md
+    - test: test/pass/test_lowing_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
+    """
+
+    name = "nn.unsupported"
+
+    lhs = operand_def(NnMemoryType)
+    rhs = operand_def(NnMemoryType)
+    result = result_def(NnMemoryType)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self: "NnUnsupportedOp",
+        lhs: SSAValue | Operation,
+        rhs: SSAValue | Operation,
+        result_type: NnMemoryType,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        super().__init__(
+            operands=[lhs, rhs],
+            result_types=[result_type],
             attributes={"space": space},
         )
 
@@ -428,7 +481,7 @@ def _collect_ops(block: Block) -> list[Operation]:
 
 # TC-PASS-N2K-001
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证 nn.add lower 为 kernel.add。
@@ -455,7 +508,7 @@ def test_lower_add_to_kernel() -> None:
 
 # TC-PASS-N2K-002
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证 nn.eq lower 为 kernel.eq。
@@ -477,6 +530,110 @@ def test_lower_eq_to_kernel() -> None:
     LowerNnToKernelPass().run(module)
     ops = _collect_ops(block)
     assert any(isinstance(op, KernelEqOp) for op in ops)
+
+
+# TC-PASS-N2K-020
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-28 02:48:07 +0800
+# 最近一次运行成功时间: 2026-03-28 02:48:07 +0800
+# 测试目的: 验证 nn.ne lower 为 kernel.ne。
+# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_ne_to_kernel
+# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+def test_lower_ne_to_kernel() -> None:
+    lhs_type = _make_memory_type()
+    rhs_type = _make_memory_type()
+    result_type = _make_memory_type(element_type=i1)
+    space = _make_space("global")
+
+    module, block = _build_module(
+        [lhs_type, rhs_type],
+        result_type,
+        lambda block: [NnNeOp(block.args[0], block.args[1], result_type, space)],
+    )
+    LowerNnToKernelPass().run(module)
+    ops = _collect_ops(block)
+    assert any(isinstance(op, KernelNeOp) for op in ops)
+
+
+# TC-PASS-N2K-021
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-28 02:48:07 +0800
+# 最近一次运行成功时间: 2026-03-28 02:48:07 +0800
+# 测试目的: 验证 nn.le lower 为 kernel.le。
+# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_le_to_kernel
+# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+def test_lower_le_to_kernel() -> None:
+    lhs_type = _make_memory_type()
+    rhs_type = _make_memory_type()
+    result_type = _make_memory_type(element_type=i1)
+    space = _make_space("global")
+
+    module, block = _build_module(
+        [lhs_type, rhs_type],
+        result_type,
+        lambda block: [NnLeOp(block.args[0], block.args[1], result_type, space)],
+    )
+    LowerNnToKernelPass().run(module)
+    ops = _collect_ops(block)
+    assert any(isinstance(op, KernelLeOp) for op in ops)
+
+
+# TC-PASS-N2K-022
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-28 02:48:07 +0800
+# 最近一次运行成功时间: 2026-03-28 02:48:07 +0800
+# 测试目的: 验证 nn.ge lower 为 kernel.ge。
+# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_ge_to_kernel
+# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+def test_lower_ge_to_kernel() -> None:
+    lhs_type = _make_memory_type()
+    rhs_type = _make_memory_type()
+    result_type = _make_memory_type(element_type=i1)
+    space = _make_space("global")
+
+    module, block = _build_module(
+        [lhs_type, rhs_type],
+        result_type,
+        lambda block: [NnGeOp(block.args[0], block.args[1], result_type, space)],
+    )
+    LowerNnToKernelPass().run(module)
+    ops = _collect_ops(block)
+    assert any(isinstance(op, KernelGeOp) for op in ops)
+
+
+# TC-PASS-N2K-023
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-28 02:48:07 +0800
+# 最近一次运行成功时间: 2026-03-28 02:48:07 +0800
+# 测试目的: 验证 nn.truediv lower 为 kernel.div。
+# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_truediv_to_kernel
+# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+def test_lower_truediv_to_kernel() -> None:
+    lhs_type = _make_memory_type()
+    rhs_type = _make_memory_type()
+    result_type = _make_memory_type()
+    space = _make_space("global")
+
+    module, block = _build_module(
+        [lhs_type, rhs_type],
+        result_type,
+        lambda block: [NnTrueDivOp(block.args[0], block.args[1], result_type, space)],
+    )
+    LowerNnToKernelPass().run(module)
+    ops = _collect_ops(block)
+    assert any(isinstance(op, KernelDivOp) for op in ops)
 
 
 # TC-PASS-N2K-003
@@ -599,9 +756,9 @@ def test_lower_preserves_memory_type_and_space() -> None:
 # COV-N2K-008
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-26 00:32:51 +0800
-# 最近一次运行成功时间: 2026-03-26 00:32:51 +0800
-# 测试目的: 验证 dma.alloc 保留静态 shape 维度值。
+# 最近一次运行测试时间: 2026-03-28 04:17:04 +0800
+# 最近一次运行成功时间: 2026-03-28 04:17:04 +0800
+# 测试目的: 验证 dma.alloc 保留静态 shape 维度值，并确保 dynamic_shape 与 stride 约束一致。
 # 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_preserves_static_shape_in_alloc
 # 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
 # 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
@@ -624,19 +781,35 @@ def test_lower_preserves_static_shape_in_alloc() -> None:
     alloc_ops = [op for op in _collect_ops(block) if isinstance(op, DmaAllocOp)]
     assert len(alloc_ops) == 1
     alloc_shape = alloc_ops[0].result.type.shape.data
+    alloc_dynamic_shape = alloc_ops[0].dynamic_shape
     assert len(alloc_shape) == 2
+    assert len(alloc_dynamic_shape) == 2
     assert isinstance(alloc_shape[0], IntAttr)
     assert isinstance(alloc_shape[1], IntAttr)
     assert alloc_shape[0].data == 3
     assert alloc_shape[1].data == 5
+    assert isinstance(alloc_dynamic_shape[0].type, SymbolValueType)
+    assert isinstance(alloc_dynamic_shape[1].type, SymbolValueType)
+    assert alloc_dynamic_shape[0].type.get_value() == 3
+    assert alloc_dynamic_shape[1].type.get_value() == 5
+
+    non_contig_stride = ArrayAttr([IntAttr(6), IntAttr(1)])
+    bad_type = _make_memory_type(shape=shape, stride=non_contig_stride)
+    module, _ = _build_module(
+        [bad_type, bad_type],
+        bad_type,
+        lambda block: [NnAddOp(block.args[0], block.args[1], bad_type, space)],
+    )
+    with pytest.raises(LowerNnToKernelError, match="dma.alloc requires contiguous result stride"):
+        LowerNnToKernelPass().run(module)
 
 
 # COV-N2K-009
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-26 00:32:51 +0800
-# 最近一次运行成功时间: 2026-03-26 00:32:51 +0800
-# 测试目的: 验证 dma.alloc 保留符号 shape 维度值。
+# 最近一次运行测试时间: 2026-03-28 04:17:04 +0800
+# 最近一次运行成功时间: 2026-03-28 04:17:04 +0800
+# 测试目的: 验证 dma.alloc 保留符号 shape 维度值，并生成对应 dynamic_shape。
 # 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_preserves_symbol_shape_in_alloc
 # 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
 # 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
@@ -659,11 +832,17 @@ def test_lower_preserves_symbol_shape_in_alloc() -> None:
     alloc_ops = [op for op in _collect_ops(block) if isinstance(op, DmaAllocOp)]
     assert len(alloc_ops) == 1
     alloc_shape = alloc_ops[0].result.type.shape.data
+    alloc_dynamic_shape = alloc_ops[0].dynamic_shape
     assert len(alloc_shape) == 2
+    assert len(alloc_dynamic_shape) == 2
     assert isinstance(alloc_shape[0], StringAttr)
     assert isinstance(alloc_shape[1], StringAttr)
     assert alloc_shape[0].data == "M"
     assert alloc_shape[1].data == "N"
+    assert isinstance(alloc_dynamic_shape[0].type, SymbolValueType)
+    assert isinstance(alloc_dynamic_shape[1].type, SymbolValueType)
+    assert alloc_dynamic_shape[0].type.get_value() == "M"
+    assert alloc_dynamic_shape[1].type.get_value() == "N"
 
 
 # TC-PASS-N2K-007
@@ -685,7 +864,7 @@ def test_lower_unsupported_nn_op_raises() -> None:
     module, _ = _build_module(
         [lhs_type, rhs_type],
         result_type,
-        lambda block: [NnNeOp(block.args[0], block.args[1], result_type, space)],
+        lambda block: [NnUnsupportedOp(block.args[0], block.args[1], result_type, space)],
     )
     with pytest.raises(LowerNnToKernelError, match="Unsupported nn op"):
         LowerNnToKernelPass().run(module)

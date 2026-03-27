@@ -242,6 +242,21 @@ class KernelEqOp(_BaseKernelBinaryOp):
 
 
 @irdl_op_definition
+class KernelNeOp(_BaseKernelBinaryOp):
+    """kernel.ne。"""
+
+    name = "kernel.ne"
+
+    def verify_(self) -> None:
+        lhs_type = _verify_memory_type(self.lhs.type, "lhs")
+        rhs_type = _verify_memory_type(self.rhs.type, "rhs")
+        out_type = _verify_memory_type(self.out.type, "out")
+        _verify_same_layout([lhs_type, rhs_type, out_type], self.space)
+        if out_type.element_type != i1:
+            raise VerifyException("kernel compare output element_type must be i1")
+
+
+@irdl_op_definition
 class KernelLtOp(_BaseKernelBinaryOp):
     """kernel.lt。"""
 
@@ -257,10 +272,40 @@ class KernelLtOp(_BaseKernelBinaryOp):
 
 
 @irdl_op_definition
+class KernelLeOp(_BaseKernelBinaryOp):
+    """kernel.le。"""
+
+    name = "kernel.le"
+
+    def verify_(self) -> None:
+        lhs_type = _verify_memory_type(self.lhs.type, "lhs")
+        rhs_type = _verify_memory_type(self.rhs.type, "rhs")
+        out_type = _verify_memory_type(self.out.type, "out")
+        _verify_same_layout([lhs_type, rhs_type, out_type], self.space)
+        if out_type.element_type != i1:
+            raise VerifyException("kernel compare output element_type must be i1")
+
+
+@irdl_op_definition
 class KernelGtOp(_BaseKernelBinaryOp):
     """kernel.gt。"""
 
     name = "kernel.gt"
+
+    def verify_(self) -> None:
+        lhs_type = _verify_memory_type(self.lhs.type, "lhs")
+        rhs_type = _verify_memory_type(self.rhs.type, "rhs")
+        out_type = _verify_memory_type(self.out.type, "out")
+        _verify_same_layout([lhs_type, rhs_type, out_type], self.space)
+        if out_type.element_type != i1:
+            raise VerifyException("kernel compare output element_type must be i1")
+
+
+@irdl_op_definition
+class KernelGeOp(_BaseKernelBinaryOp):
+    """kernel.ge。"""
+
+    name = "kernel.ge"
 
     def verify_(self) -> None:
         lhs_type = _verify_memory_type(self.lhs.type, "lhs")
@@ -347,8 +392,11 @@ Kernel = Dialect(
         KernelMulOp,
         KernelDivOp,
         KernelEqOp,
+        KernelNeOp,
         KernelLtOp,
+        KernelLeOp,
         KernelGtOp,
+        KernelGeOp,
         KernelSelectOp,
         KernelCastOp,
     ],
@@ -362,8 +410,11 @@ __all__ = [
     "KernelMulOp",
     "KernelDivOp",
     "KernelEqOp",
+    "KernelNeOp",
     "KernelLtOp",
+    "KernelLeOp",
     "KernelGtOp",
+    "KernelGeOp",
     "KernelSelectOp",
     "KernelCastOp",
 ]
