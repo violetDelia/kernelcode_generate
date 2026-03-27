@@ -38,6 +38,7 @@ from kernel_gen.operation.nn import (
     add,
     broadcast,
     broadcast_to,
+    conv,
     eq,
     fc,
     floordiv,
@@ -1097,3 +1098,73 @@ def test_nn_softmax_dtype_error() -> None:
 def test_nn_softmax_numerical_stability_contract() -> None:
     doc = softmax.__doc__ or ""
     assert "exp(x - max(x)) / sum(exp(x - max(x)))" in doc
+# OP-CONV-001
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-27 09:41:12 +0800
+# 最近一次运行成功时间: 2026-03-27 09:41:12 +0800
+# 测试目的: 验证 conv 基础路径、输出形状与参数校验规则（含 bias 对齐）。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_conv_basic
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_conv_basic() -> None:
+    value = Memory([1, 3, 5, 5], NumericType.Float32, space=MemorySpace.GM)
+    weight = Memory([8, 3, 3, 3], NumericType.Float32, space=MemorySpace.GM)
+    result = conv(value, weight, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr=1)
+    assert result.shape.get_values() == [1, 8, 5, 5]
+    assert result.dtype is NumericType.Float32
+    assert result.space is MemorySpace.GM
+    assert result.format is Farmat.Norm
+    assert result.get_stride() == [200, 25, 5, 1]
+
+    bias = Memory([8], NumericType.Float32, space=MemorySpace.GM)
+    _ = conv(value, weight, bias=bias, sh=2, sw=2, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)
+
+    with pytest.raises(TypeError):
+        _ = conv("bad", weight)
+    with pytest.raises(TypeError):
+        _ = conv(value, "bad")
+    with pytest.raises(ValueError):
+        _ = conv(Memory([1, 3, 5], NumericType.Float32), weight)
+    with pytest.raises(ValueError):
+        _ = conv(value, Memory([8, 3, 3], NumericType.Float32))
+    with pytest.raises(ValueError):
+        _ = conv(Memory([1, 4, 5, 5], NumericType.Float32), weight)
+    with pytest.raises(TypeError):
+        _ = conv(Memory([1, 3, 5, 5], NumericType.Int32), weight)
+    with pytest.raises(ValueError):
+        _ = conv(Memory([1, 3, 5, 5], NumericType.Float32, space=MemorySpace.SM), weight)
+
+    with pytest.raises(TypeError):
+        _ = conv(value, weight, bias="bad")
+    with pytest.raises(ValueError):
+        _ = conv(value, weight, bias=Memory([1, 8], NumericType.Float32))
+    with pytest.raises(ValueError):
+        _ = conv(value, weight, bias=Memory([4], NumericType.Float32))
+    with pytest.raises(TypeError):
+        _ = conv(value, weight, bias=Memory([8], NumericType.Int32))
+    with pytest.raises(ValueError):
+        _ = conv(value, weight, bias=Memory([8], NumericType.Float32, space=MemorySpace.SM))
+
+    with pytest.raises(ValueError):
+        _ = conv(value, weight, sh=0, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)
+    with pytest.raises(ValueError):
+        _ = conv(value, weight, sh=1, sw=1, dh=0, dw=1, ph=0, pw=0, pl=0, pr=0)
+    with pytest.raises(ValueError):
+        _ = conv(value, weight, sh=1, sw=1, dh=1, dw=1, ph=-1, pw=0, pl=0, pr=0)
+    with pytest.raises(TypeError):
+        _ = conv(value, weight, sh=True, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)
+    with pytest.raises(ValueError):
+        _ = conv(
+            value,
+            Memory([8, 3, 7, 7], NumericType.Float32, space=MemorySpace.GM),
+            sh=1,
+            sw=1,
+            dh=1,
+            dw=1,
+            ph=0,
+            pw=0,
+            pl=0,
+            pr=0,
+        )

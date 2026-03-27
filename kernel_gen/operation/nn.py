@@ -1034,6 +1034,134 @@ def _img2col_output_dim(
     return ((size + pad_low + pad_high - dilation * (kernel - 1) - 1) // stride) + 1
 
 
+def _normalize_conv_param(name: str, value: int | SymbolDim, allow_zero: bool) -> SymbolDim:
+    """规范化 conv 参数为 SymbolDim。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅接受 int 或 SymbolDim。
+    - 对静态可判定的值校验正数/非负约束。
+
+    使用示例:
+    - _normalize_conv_param("sh", 1, allow_zero=False)
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    if isinstance(value, bool):
+        raise TypeError(f"conv {name} must be int or SymbolDim")
+    if isinstance(value, int):
+        if allow_zero and value < 0:
+            raise ValueError(f"conv {name} must be >= 0")
+        if not allow_zero and value <= 0:
+            raise ValueError(f"conv {name} must be > 0")
+        return SymbolDim(value)
+    if isinstance(value, SymbolDim):
+        if not value.is_dynamic():
+            resolved = value.get_value()
+            if not isinstance(resolved, int):
+                raise ValueError(f"conv {name} must be integer")
+            if allow_zero and resolved < 0:
+                raise ValueError(f"conv {name} must be >= 0")
+            if not allow_zero and resolved <= 0:
+                raise ValueError(f"conv {name} must be > 0")
+        return value
+    raise TypeError(f"conv {name} must be int or SymbolDim")
+
+
+def conv(
+    value: object,
+    weight: object,
+    bias: object | None = None,
+    sh: int | SymbolDim = 1,
+    sw: int | SymbolDim = 1,
+    dh: int | SymbolDim = 1,
+    dw: int | SymbolDim = 1,
+    ph: int | SymbolDim = 0,
+    pw: int | SymbolDim = 0,
+    pl: int | SymbolDim = 0,
+    pr: int | SymbolDim = 0,
+) -> Memory:
+    """二维卷积（NCHW）语义推导。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 校验输入类型、rank、空间与 dtype 一致性。
+    - 支持可选 bias 对齐 C_out。
+    - 按公式推导输出高宽并保持 Memory 元信息约束。
+
+    使用示例:
+    - conv(Memory([1, 3, 32, 32], NumericType.Float32), Memory([8, 3, 3, 3], NumericType.Float32))
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    if not isinstance(value, Memory):
+        raise TypeError("conv value must be Memory")
+    if not isinstance(weight, Memory):
+        raise TypeError("conv weight must be Memory")
+    if len(value.shape) != 4:
+        raise ValueError("conv value must be rank-4 Memory")
+    if len(weight.shape) != 4:
+        raise ValueError("conv weight must be rank-4 Memory")
+
+    n_dim, c_in_dim, h_dim, w_dim = value.shape.get_shape()
+    c_out_dim, c_in_weight_dim, kh_dim, kw_dim = weight.shape.get_shape()
+    if c_in_dim != c_in_weight_dim:
+        raise ValueError("conv input channel mismatch")
+    if value.dtype is not weight.dtype:
+        raise TypeError("conv dtype mismatch")
+    if value.space is not weight.space:
+        raise ValueError("conv space mismatch")
+
+    if bias is not None:
+        if not isinstance(bias, Memory):
+            raise TypeError("conv bias must be Memory")
+        if len(bias.shape) != 1:
+            raise ValueError("conv bias must be rank-1 Memory")
+        bias_dim = bias.shape.get_shape()[0]
+        if bias_dim != c_out_dim:
+            raise ValueError("conv bias shape mismatch")
+        if bias.dtype is not value.dtype:
+            raise TypeError("conv bias dtype mismatch")
+        if bias.space is not value.space:
+            raise ValueError("conv bias space mismatch")
+
+    sh_dim = _normalize_conv_param("sh", sh, allow_zero=False)
+    sw_dim = _normalize_conv_param("sw", sw, allow_zero=False)
+    dh_dim = _normalize_conv_param("dh", dh, allow_zero=False)
+    dw_dim = _normalize_conv_param("dw", dw, allow_zero=False)
+    ph_dim = _normalize_conv_param("ph", ph, allow_zero=True)
+    pw_dim = _normalize_conv_param("pw", pw, allow_zero=True)
+    pl_dim = _normalize_conv_param("pl", pl, allow_zero=True)
+    pr_dim = _normalize_conv_param("pr", pr, allow_zero=True)
+
+    h_out = _img2col_output_dim(h_dim, kh_dim, sh_dim, dh_dim, ph_dim, pw_dim)
+    w_out = _img2col_output_dim(w_dim, kw_dim, sw_dim, dw_dim, pl_dim, pr_dim)
+
+    h_out_value = h_out.get_value()
+    if isinstance(h_out_value, int) and h_out_value <= 0:
+        raise ValueError("conv output height must be positive")
+    w_out_value = w_out.get_value()
+    if isinstance(w_out_value, int) and w_out_value <= 0:
+        raise ValueError("conv output width must be positive")
+
+    return Memory(
+        SymbolShape([n_dim, c_out_dim, h_out, w_out]),
+        value.dtype,
+        space=value.space,
+        format=Farmat.Norm,
+    )
+
+
 def img2col(
     value: object,
     kh: int | SymbolDim,

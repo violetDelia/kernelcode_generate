@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-用于定义 `Memory` 高层运算规范，覆盖逐元素算术、比较、显式 `broadcast` / `broadcast_to`、`softmax`、全连接 `fc` 与二维 `matmul`。本层只描述可调用语义、结果元信息约束与错误规则。
+用于定义 `Memory` 高层运算规范，覆盖逐元素算术、比较、显式 `broadcast` / `broadcast_to`、`softmax`、全连接 `fc`、二维 `matmul` 与二维 `conv`。本层只描述可调用语义、结果元信息约束与错误规则。
 
 ## 文档信息
 
@@ -20,7 +20,7 @@
 ## 目标
 
 - 提供 `Memory` 的逐元素算术与比较高层语义。
-- 提供显式 `broadcast` / `broadcast_to`、`softmax`、全连接 `fc` 与二维 `matmul` 的输入输出约束与错误规则。
+- 提供显式 `broadcast` / `broadcast_to`、`softmax`、全连接 `fc`、二维 `matmul` 与二维 `conv` 的输入输出约束与错误规则。
 - 保持与下游 `nn dialect` 的分层：本层作为用户直接使用的接口，不受限于IR的表达。
 
 ## 限制与边界
@@ -30,7 +30,8 @@
 - `fc` 仅定义“输入末维 × 权重输入特征维”的全连接语义；`bias` 为可选参数。
 - `matmul` 仅定义二维矩阵乘，不支持 batch、广播或隐式转置。
 - `softmax` 仅支持 `Memory` 输入，默认沿最后一维归一化，不负责跨算子融合或近似策略选择。
-- 不定义归约、卷积等其他算子。
+- `conv` 仅覆盖二维卷积，不支持 group、batch/broadcast 或隐式转置。
+- 不定义归约等其他算子。
 - 不引入复杂自动类型提升规则；`dtype` 兼容性需显式检查。
 - 不负责 AST/IR/lowering 设计。
 
@@ -559,6 +560,50 @@ tmp = matmul(lhs, rhs, memoryspace=MemorySpace.SM)
 - `out.format == Farmat.Norm`。
 - `out.stride == [rhs.shape[1], 1]`。
 
+### `conv(value, weight, bias=None, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)`
+
+功能说明：
+
+- 二维卷积（NCHW），返回新的 `Memory` 描述。
+
+参数说明：
+
+- `value` (`Memory`)：输入特征图，shape 为 `[N, C_in, H, W]`。
+- `weight` (`Memory`)：卷积核权重，shape 为 `[C_out, C_in, K_h, K_w]`。
+- `bias` (`Memory|None`)：可选偏置，省略时不执行偏置加法；提供时必须与 `C_out` 对齐。
+- `sh`/`sw` (`int|SymbolDim`)：stride，高度/宽度方向，必须为正数。
+- `dh`/`dw` (`int|SymbolDim`)：dilation，高度/宽度方向，必须为正数。
+- `ph`/`pw`/`pl`/`pr` (`int|SymbolDim`)：padding，分别为上/下/左/右，必须为非负数。
+
+使用示例：
+
+```python
+value = Memory([1, 3, 32, 32], NumericType.Float32)
+weight = Memory([8, 3, 3, 3], NumericType.Float32)
+out = conv(value, weight, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr=1)
+
+bias = Memory([8], NumericType.Float32)
+out = conv(value, weight, bias=bias, sh=2, sw=2, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)
+```
+
+注意事项：
+
+- `value`/`weight` 必须为 `Memory` 且 rank=4，否则抛出 `TypeError`/`ValueError`。
+- `value.shape[1]` 必须与 `weight.shape[1]` 一致，否则抛出 `ValueError`。
+- `value.dtype` 与 `weight.dtype` 必须一致；`value.space` 与 `weight.space` 必须一致。
+- `bias` 省略时不参与计算；提供时必须为 `Memory` 且 rank=1，`bias.shape == [C_out]`，且 `bias.dtype`/`bias.space` 与输出一致，否则抛出 `TypeError`/`ValueError`。
+- 输出高宽按公式计算：
+  - `H_out = floor((H + ph + pw - dh * (K_h - 1) - 1) / sh) + 1`
+  - `W_out = floor((W + pl + pr - dw * (K_w - 1) - 1) / sw) + 1`
+- 当 `H_out` 或 `W_out` 为确定整数且不为正时，必须抛出 `ValueError`。
+
+返回与限制：
+
+- 返回 `Memory` 语义结果。
+- `out.shape == [N, C_out, H_out, W_out]`，`C_out` 取自 `weight.shape[0]`。
+- `out.dtype == value.dtype`，`out.space == value.space`。
+- `out.format == Farmat.Norm`，`out.stride` 为连续行主序默认步幅（沿用 `Memory` 默认 stride 语义与序列化口径）。
+
 ## 测试
 
 - 测试文件：[`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py)
@@ -578,6 +623,7 @@ tmp = matmul(lhs, rhs, memoryspace=MemorySpace.SM)
 - 验证比较结果使用 `NumericType.Bool` 作为 predicate 载体。
 - 验证 nn 操作不依赖已移除的旧 shape 规范化入口。
 - 验证 `img2col` 输出形状与参数校验规则。
+- 验证 `conv` 的参数校验、输出形状公式与 bias 可选对齐规则。
 
 ### 功能与用例清单
 
@@ -635,3 +681,4 @@ tmp = matmul(lhs, rhs, memoryspace=MemorySpace.SM)
 | OP-SM-005 | `softmax` 非浮点 `dtype` 输入报 `TypeError` | `test_nn_softmax_dtype_error` |
 | OP-SM-006 | `softmax` 限定数值稳定语义为 `exp(x - max(x)) / sum(exp(x - max(x)))` | `test_nn_softmax_numerical_stability_contract` |
 | OP-IMG2COL-001 | `img2col` 输出形状与参数校验规则 | `test_nn_img2col_basic` |
+| OP-CONV-001 | `conv` 基础路径与参数校验（含可选 bias 对齐） | `test_nn_conv_basic` |
