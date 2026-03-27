@@ -235,3 +235,38 @@ def test_launch_kernel_rejects_invalid_arguments() -> None:
         launch_kernel("my_kernel", 1, -1, 1)
     with pytest.raises(ValueError, match="subthread must be > 0"):
         launch_kernel("my_kernel", 1, 1, 0)
+
+
+# TC-OP-ARCH-011
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-28 02:04:02 +0800
+# 最近一次运行成功时间: 2026-03-28 02:04:02 +0800
+# 测试目的: 验证 launch_kernel 调用签名固定为四参且未知关键字/缺参/多参报 TypeError。
+# 使用示例: pytest -q test/operation/test_operation_arch.py -k test_launch_kernel_call_signature_errors
+# 对应功能实现文件路径: kernel_gen/operation/arch.py
+# 对应 spec 文件路径: spec/operation/arch.md
+# 对应测试文件路径: test/operation/test_operation_arch.py
+def test_launch_kernel_call_signature_errors() -> None:
+    with pytest.raises(TypeError):
+        launch_kernel("my_kernel", 1, 1)
+    with pytest.raises(TypeError):
+        launch_kernel("my_kernel", 1, 1, 1, 1)
+    with pytest.raises(TypeError):
+        launch_kernel(name="my_kernel", block=1, thread=1, subthread=1, grid=1)
+
+
+# TC-OP-ARCH-012
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-28 02:04:02 +0800
+# 最近一次运行成功时间: 2026-03-28 02:04:02 +0800
+# 测试目的: 验证 launch_kernel 关键字调用仅允许 name/block/thread/subthread 且语义一致。
+# 使用示例: pytest -q test/operation/test_operation_arch.py -k test_launch_kernel_keyword_call_success
+# 对应功能实现文件路径: kernel_gen/operation/arch.py
+# 对应 spec 文件路径: spec/operation/arch.md
+# 对应测试文件路径: test/operation/test_operation_arch.py
+def test_launch_kernel_keyword_call_success() -> None:
+    result = launch_kernel(thread=2, subthread=1, block=4, name="my_kernel")
+
+    assert result is None

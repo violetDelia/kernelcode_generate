@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`咯咯咯`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/operation/arch.md`](../../spec/operation/arch.md)
 - `功能实现`：[`kernel_gen/operation/arch.py`](../../kernel_gen/operation/arch.py)
 - `test`：[`test/operation/test_operation_arch.py`](../../test/operation/test_operation_arch.py)
@@ -40,6 +40,8 @@
 - `get_dynamic_memory(space)` 的公开结果语义必须收敛为一维动态字节缓冲：逻辑 shape 为 `[?]`、stride 为 `[1]`、dtype 为 `NumericType.Int8`、space 与输入一致；operation 层不得额外承诺容量、对齐或多维布局。
 - `get_dynamic_memory(space)` 只允许片上空间 `MemorySpace.SM`、`MemorySpace.LM`、`MemorySpace.TSM`、`MemorySpace.TLM`；`MemorySpace.GM` 不属于动态片上内存入口范围，必须报错。
 - `launch_kernel(name, block, thread, subthread)` 只描述一次启动请求，不返回新的 `Memory`、`SymbolDim` 或句柄对象；公开返回值固定为 `None`。
+- `launch_kernel` 调用签名固定为 `launch_kernel(name, block, thread, subthread)`：参数顺序必须为 `name -> block -> thread -> subthread`，四个参数均为必填，不提供可选参数与默认值。
+- `launch_kernel` 仅允许参数名 `name/block/thread/subthread`；缺失参数、额外位置参数或未知关键字参数属于调用边界错误，必须抛出 `TypeError`。
 - `launch_kernel(...)` 的 `block/thread/subthread` 只允许 `int` 或 `SymbolDim`；若输入为静态整数，必须满足 `> 0`；operation 层不得接受浮点、`Memory`、列表或其他运行时对象。
 - operation 层与 dialect 层采用一一映射：`get_*` helper 分别映射到对应 `arch.get_*` op，`get_dynamic_memory` 映射到 `arch.get_dynamic_memory`，`launch_kernel` 映射到 `arch.launch_kernel`；不得通过其他 dialect 或 builtin op 绕过 `arch dialect`。
 
@@ -247,10 +249,11 @@ smem = get_dynamic_memory(MemorySpace.SM)
 
 参数说明：
 
-- `name (str)`：kernel 名称，必须为非空字符串。
-- `block (int | SymbolDim)`：block 规模。
-- `thread (int | SymbolDim)`：thread 规模。
-- `subthread (int | SymbolDim)`：subthread 规模。
+- 参数列表与顺序：`(name, block, thread, subthread)`。
+- `name (str)`：必填，参数序号 `#1`；kernel 名称，必须为非空字符串；默认值：无。
+- `block (int | SymbolDim)`：必填，参数序号 `#2`；block 规模；默认值：无。
+- `thread (int | SymbolDim)`：必填，参数序号 `#3`；thread 规模；默认值：无。
+- `subthread (int | SymbolDim)`：必填，参数序号 `#4`；subthread 规模；默认值：无。
 
 使用示例：
 
@@ -262,6 +265,9 @@ launch_kernel("my_kernel", SymbolDim("GRID_X"), 128, 4)
 
 注意事项：
 
+- 四个参数全部为必填参数，且不定义可选参数与默认值。
+- 允许按关键字调用（如 `launch_kernel(name="k", block=1, thread=1, subthread=1)`），但关键字名必须是 `name/block/thread/subthread`。
+- 调用边界错误（缺失任一必填参数、传入额外位置参数、传入未知关键字参数）必须抛出 `TypeError`，并在进入语义校验前失败。
 - `name` 为空字符串时必须抛出 `ValueError`。
 - `block/thread/subthread` 若不是 `int` 或 `SymbolDim`，必须抛出 `TypeError`。
 - 当 `block/thread/subthread` 为静态整数时，必须要求其大于 `0`；`0` 或负值必须抛出 `ValueError`。
@@ -277,10 +283,12 @@ launch_kernel("my_kernel", SymbolDim("GRID_X"), 128, 4)
 
 - 测试文件：[`test/operation/test_operation_arch.py`](../../test/operation/test_operation_arch.py)
 - 执行命令：`pytest -q test/operation/test_operation_arch.py`
+- 验收命令（launch_kernel 参数规范）：`pytest -q test/operation/test_operation_arch.py -k launch_kernel`
 - 测试目标：
   - 验证六个执行维度查询 helper 的公开返回语义均为 `SymbolDim` 风格标量，并与 `arch dialect` 的固定结果语义一一对应。
   - 验证 `get_dynamic_memory(space)` 只接受允许的片上空间，且返回一维动态字节 `Memory` 语义。
   - 验证 `launch_kernel(name, block, thread, subthread)` 的输入类型、非空名称与静态正整数约束。
+  - 验证 `launch_kernel` 的参数列表/顺序/必填与默认值语义：仅允许 `(name, block, thread, subthread)` 四个参数，不允许缺参、多参与未知关键字。
   - 验证 operation helper 到 `arch dialect` 的映射边界清晰，不引入新的方言或非 `arch` lowering 路径。
 - 功能与用例清单：
   - `TC-OP-ARCH-001`：`get_block_id()` 返回 `SymbolDim` 风格 block 索引语义，并映射 `TC-ARCH-001`。
@@ -293,3 +301,5 @@ launch_kernel("my_kernel", SymbolDim("GRID_X"), 128, 4)
   - `TC-OP-ARCH-008`：`get_dynamic_memory(...)` 对非法空间或非法类型报错，并覆盖 `MemorySpace.GM` 错误路径；对应 `TC-ARCH-008` 的方言边界。
   - `TC-OP-ARCH-009`：`launch_kernel("my_kernel", block, thread, subthread)` 接受合法 `int | SymbolDim` 输入并返回 `None`，对应 `TC-ARCH-009`。
   - `TC-OP-ARCH-010`：`launch_kernel(...)` 对空名称、非法类型、静态 `<= 0` 的规模输入报错，并对应 `TC-ARCH-010`。
+  - `TC-OP-ARCH-011`：`launch_kernel` 调用签名固定为 `(name, block, thread, subthread)`，四参均必填且无默认值；缺参/多参/未知关键字必须在调用边界报 `TypeError`。映射测试：`test_launch_kernel_call_signature_errors`（实现阶段补齐）。
+  - `TC-OP-ARCH-012`：`launch_kernel` 关键字调用仅接受 `name/block/thread/subthread` 四个参数名，语义与位置调用一致。映射测试：`test_launch_kernel_keyword_call_success`（实现阶段补齐）。
