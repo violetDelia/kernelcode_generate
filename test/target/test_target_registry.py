@@ -59,6 +59,29 @@ def _write_target_json(directory: Path, name: str, payload: dict[str, object]) -
     return path
 
 
+def _write_target_txt(directory: Path, name: str, lines: list[str]) -> Path:
+    """写入单个 target TXT 文件。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 在临时目录中生成 `<name>.txt` 并写入 lines。
+
+    使用示例:
+    - _write_target_txt(tmp_path, "cpu", ["name=cpu"])
+
+    关联文件:
+    - spec: spec/target/registry.md
+    - test: test/target/test_target_registry.py
+    - 功能实现: kernel_gen/target/registry.py
+    """
+
+    path = directory / f"{name}.txt"
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
 # TC-TGT-001
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
@@ -147,3 +170,150 @@ def test_target_registry_rejects_conflicting_ops(tmp_path: Path) -> None:
 # 对应 spec 文件路径: spec/target/registry.md
 def test_target_registry_cpu_rejects_thread_id() -> None:
     assert target_registry.is_arch_op_supported("cpu", "arch.get_thread_id") is False
+
+
+# TC-TGT-005
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-28 03:22:36 +0800
+# 最近一次运行成功时间: 2026-03-28 03:22:36 +0800
+# 测试目的: 验证加载合法 target TXT 并读取硬件参数。
+# 对应功能实现文件路径: kernel_gen/target/registry.py
+# 对应 spec 文件路径: spec/target/registry.md
+def test_target_registry_loads_txt_specs(tmp_path: Path) -> None:
+    _write_target_txt(
+        tmp_path,
+        "cpu_txt_valid",
+        [
+            "name=cpu_txt_valid",
+            "arch.supported_ops=arch.get_thread_id,arch.get_block_num",
+            "arch.unsupported_ops=",
+            "hw.thread_num=8",
+            "hw.block_num=1024",
+        ],
+    )
+    loaded = target_registry.load_targets(tmp_path)
+    assert "cpu_txt_valid" in loaded
+    assert target_registry.is_arch_op_supported("cpu_txt_valid", "arch.get_thread_id") is True
+    assert target_registry.get_target_hardware("cpu_txt_valid", "thread_num") == 8
+    assert target_registry.get_target_hardware("cpu_txt_valid", "sm_memory_size") is None
+
+
+# TC-TGT-006
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-28 03:22:36 +0800
+# 最近一次运行成功时间: 2026-03-28 03:22:36 +0800
+# 测试目的: 验证 json/txt 混合目录可同时加载。
+# 对应功能实现文件路径: kernel_gen/target/registry.py
+# 对应 spec 文件路径: spec/target/registry.md
+def test_target_registry_loads_mixed_formats(tmp_path: Path) -> None:
+    _write_target_json(
+        tmp_path,
+        "gpu_mix",
+        {
+            "name": "gpu_mix",
+            "arch": {"supported_ops": ["arch.get_thread_id"], "unsupported_ops": []},
+            "hardware": {"thread_num": 256},
+        },
+    )
+    _write_target_txt(
+        tmp_path,
+        "cpu_mix",
+        [
+            "name=cpu_mix",
+            "arch.supported_ops=",
+            "arch.unsupported_ops=",
+            "hw.thread_num=1",
+        ],
+    )
+    loaded = target_registry.load_targets(tmp_path)
+    assert set(loaded.keys()) >= {"gpu_mix", "cpu_mix"}
+    assert target_registry.get_target_hardware("gpu_mix", "thread_num") == 256
+    assert target_registry.get_target_hardware("cpu_mix", "thread_num") == 1
+
+
+# TC-TGT-009
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-28 04:20:32 +0800
+# 最近一次运行成功时间: 2026-03-28 04:20:32 +0800
+# 测试目的: 验证默认目录 kernel_gen/target/targets 可加载且 cpu.txt 可覆盖内置 cpu。
+# 对应功能实现文件路径: kernel_gen/target/registry.py
+# 对应 spec 文件路径: spec/target/registry.md
+def test_target_registry_loads_default_cpu_directory() -> None:
+    default_dir = REPO_ROOT / "kernel_gen" / "target" / "targets"
+    assert default_dir.is_dir()
+    assert (default_dir / "cpu.txt").is_file()
+    loaded = target_registry.load_targets(default_dir)
+    assert "cpu" in loaded
+    assert loaded["cpu"].arch_supported_ops is None
+    assert target_registry.is_arch_op_supported("cpu", "arch.get_thread_id") is False
+    assert target_registry.is_arch_op_supported("cpu", "arch.get_block_num") is True
+    assert target_registry.get_target_hardware("cpu", "thread_num") == 1
+
+
+# TC-TGT-010
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-28 04:20:32 +0800
+# 最近一次运行成功时间: 2026-03-28 04:20:32 +0800
+# 测试目的: 验证默认目录重复加载不会触发 cpu 冲突。
+# 对应功能实现文件路径: kernel_gen/target/registry.py
+# 对应 spec 文件路径: spec/target/registry.md
+def test_target_registry_default_directory_idempotent_load() -> None:
+    default_dir = REPO_ROOT / "kernel_gen" / "target" / "targets"
+    assert default_dir.is_dir()
+    target_registry.load_targets(default_dir)
+    loaded = target_registry.load_targets(default_dir)
+    assert "cpu" in loaded
+
+
+# TC-TGT-007
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-28 03:22:36 +0800
+# 最近一次运行成功时间: 2026-03-28 03:22:36 +0800
+# 测试目的: 验证 TXT 未知 key 与非整数硬件值被拒绝。
+# 对应功能实现文件路径: kernel_gen/target/registry.py
+# 对应 spec 文件路径: spec/target/registry.md
+@pytest.mark.parametrize(
+    ("file_name", "lines"),
+    [
+        ("bad_key", ["name=bad_key", "arch.supported_ops=", "unknown.key=1"]),
+        ("bad_hw", ["name=bad_hw", "arch.supported_ops=", "hw.thread_num=1.5"]),
+    ],
+)
+def test_target_registry_rejects_txt_invalid_fields(
+    tmp_path: Path,
+    file_name: str,
+    lines: list[str],
+) -> None:
+    _write_target_txt(tmp_path, file_name, lines)
+    with pytest.raises(ValueError):
+        target_registry.load_targets(tmp_path)
+
+
+# TC-TGT-008
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-28 03:22:36 +0800
+# 最近一次运行成功时间: 2026-03-28 03:22:36 +0800
+# 测试目的: 验证 current target 硬件读取行为。
+# 对应功能实现文件路径: kernel_gen/target/registry.py
+# 对应 spec 文件路径: spec/target/registry.md
+def test_target_registry_current_target_hardware() -> None:
+    assert target_registry.get_current_target_hardware("thread_num") is None
+    spec = target_registry.TargetSpec(
+        name="current_hw",
+        arch_supported_ops=None,
+        arch_unsupported_ops=set(),
+        hardware={"thread_num": 4},
+    )
+    target_registry.register_target(spec)
+    target_registry._set_current_target("current_hw")
+    try:
+        assert target_registry.get_current_target_hardware("thread_num") == 4
+        assert target_registry.get_current_target_hardware("sm_memory_size") is None
+    finally:
+        target_registry._set_current_target(None)
