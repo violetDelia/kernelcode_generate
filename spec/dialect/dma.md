@@ -2,12 +2,12 @@
 
 ## 功能简介
 
-用于定义 `dma dialect` 的稳定方言语义，描述 `dma.alloc`、`dma.copy`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.view`、`dma.reshape`、`dma.cast` 如何表示内存对象之间的数据搬运与布局转换，包括整块搬运、切片读取、切片回写、跨空间迁移、视图变换与显式数据转换，并支持动态 shape 的表达。该方言不单独定义 memory type / memory space，而是统一复用 `nn dialect` 中的 `NnMemoryType` 与 `NnMemorySpaceAttr`。
+用于定义 `dma dialect` 的稳定方言语义，描述 `dma.alloc`、`dma.free`、`dma.copy`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.view`、`dma.reshape`、`dma.cast` 如何表示内存对象之间的数据搬运与布局转换，包括整块搬运、切片读取、切片回写、跨空间迁移、视图变换与显式数据转换，并支持动态 shape 的表达。该方言不单独定义 memory type / memory space，而是统一复用 `nn dialect` 中的 `NnMemoryType` 与 `NnMemorySpaceAttr`。
 
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`不要啊教练`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/dialect/dma.md`](../../spec/dialect/dma.md)
 - `test`：[`test/dialect/test_dma_dialect.py`](../../test/dialect/test_dma_dialect.py)
 - `功能实现`：[`kernel_gen/dialect/dma.py`](../../kernel_gen/dialect/dma.py)
@@ -34,7 +34,7 @@
 - `dma dialect` 不单独维护 memory type / memory space，所有相关 operand / result 类型统一复用 `NnMemoryType` 与 `NnMemorySpaceAttr`。
 - 本文件只定义方言层的数据搬运、布局转换与显式数据转换语义，不负责真实 DMA 硬件调度、流水线编排、带宽建模、同步原语、事件、barrier 或 async token 设计。
 - 本文件不负责广播、逐元素算术、比较等张量计算语义，也不负责自动求解 `offsets/sizes/strides` 或自动推导最优搬运策略。
-- 当前方言范围包含 `dma.alloc`、`dma.copy`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.view`、`dma.reshape`、`dma.cast`；`operation/dma.free` 不属于本方言公开 op。
+- 当前方言范围包含 `dma.alloc`、`dma.free`、`dma.copy`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.view`、`dma.reshape`、`dma.cast`。
 - 除 `dma.cast` 外，其他搬运 op 不改变元素值语义，只改变数据所在的逻辑位置、切片范围、布局表达或空间；同一个 op 不应同时承担计算和搬运语义。
 - 本文件中的“转换”包含两类：布局、切片视图或空间层面的转换，以及通过 `dma.cast` 表达的显式元素类型转换；不包括广播、归约或通用数值计算。
 
@@ -48,6 +48,7 @@
 
 - 所有参与搬运或转换的 `source`、`target`、`result` 必须是 `!nn.memory<...>`。
 - `dma.alloc` 仅产生结果内存，结果类型必须为 `!nn.memory<...>`。
+- `dma.free` 仅接受待释放的内存 operand，不产生结果。
 - `dma.view/reshape` 必须保证 `result.element_type` 与 `source.element_type` 一致，`result.space` 与 `source.space` 一致。
 - 对 `dma.copy/load/store/slice/deslice`，相关 `element_type` 必须一致，不允许隐式类型转换。
 - 对 `dma.cast`，只允许 `element_type` 发生显式变化；`shape/stride/space` 必须保持一致。
@@ -78,6 +79,7 @@
 - `NnMemorySpaceAttr` 非法值、`NnMemoryType.shape` 与 `stride` rank 不一致等类型错误，必须按 `nn dialect` 规则报错。
 - `dma.copy` 中 `source/target` 的 `shape/stride/element_type` 不一致必须报错。
 - `dma.alloc` 的动态 `shape` operand 与结果 rank 不匹配时必须报错；任一 `shape` operand 不是 `!symbol.int<"expr">` 时必须报错；结果类型非法必须报错。
+- `dma.free` 的 operand 不是 `!nn.memory<...>` 时必须报错。
 - `dma.load/slice` 中 `offsets/sizes/strides` 长度与输入 rank 不一致必须报错；任一相关 operand 不是 `!symbol.int<"expr">` 时必须报错。
 - `dma.store/deslice` 中 `source.shape` 与切片目标大小不一致必须报错。
 - `dma.view/reshape` 中 `source/result` 的 `element_type/space` 不一致必须报错；可判定的 `numel` 不一致必须报错。
@@ -95,7 +97,7 @@
 
 - `dma dialect` 的公开构件由两部分组成：
   - 复用 `nn dialect` 的 `NnMemoryType` 与 `NnMemorySpaceAttr`
-  - 提供 `dma.alloc`、`dma.copy`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.view`、`dma.reshape`、`dma.cast` 九个公开 op
+  - 提供 `dma.alloc`、`dma.free`、`dma.copy`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.view`、`dma.reshape`、`dma.cast` 十个公开 op
 
 参数说明：
 
@@ -109,6 +111,7 @@ from kernel_gen.dialect.dma import (
     DmaCastOp,
     DmaCopyOp,
     DmaDesliceOp,
+    DmaFreeOp,
     DmaLoadOp,
     DmaReshapeOp,
     DmaSliceOp,
@@ -120,7 +123,7 @@ from kernel_gen.dialect.nn import NnMemorySpaceAttr
 
 注意事项：
 
-- `dma dialect` 不提供 `free` 生命周期 op。
+- `dma.free` 只负责释放指定的内存对象，不返回新 `!nn.memory<...>`。
 - memory type / memory space 必须始终沿用 `nn dialect` 口径。
 - 动态布局相关信息统一走 operand，不再把运行期 `offset/size/stride/shape` 只放在 attribute 中；但 `dma.alloc` 和 `dma.reshape` 的 `stride` 都由默认连续布局规则生成，不单独接收 operand。
 
@@ -158,6 +161,33 @@ op = DmaAllocOp(dynamic_shape, result_type)
 
 - 返回新的 `!nn.memory<...>`；当前 op result 数量固定为 `1`。
 - 仅表达“存在一个内存对象”的语义，不负责初始化或填充值。
+
+### `dma.free`
+
+功能说明：
+
+- 表示显式释放内存对象，结束该 `!nn.memory<...>` 的生命周期。
+- 仅表达释放语义，不负责数据搬运或数据清零。
+
+参数说明：
+
+- `source`：待释放的内存对象，类型为 `!nn.memory<...>`。
+
+使用示例：
+
+```python
+op = DmaFreeOp(source)
+```
+
+注意事项：
+
+- `source` 必须为 `!nn.memory<...>`；其他类型必须在 verifier 阶段报错。
+- `dma.free` 不改变 `source` 的类型信息，也不返回新的内存对象。
+
+返回与限制：
+
+- 返回类型为无返回值；当前 op result 数量固定为 `0`。
+- 语义上通过 side effect 表达释放行为，不产生新的 `!nn.memory<...>`。
 
 ### `dma.reshape`
 
@@ -449,6 +479,7 @@ op = DmaCastOp(source, result_type)
 - 验证 `dma.load/slice` 的结果形状、目标空间与标量输入长度约束，并覆盖动态 `!symbol.int<"expr">` operand 表达。
 - 验证 `dma.store/deslice` 的源块与目标切片大小匹配约束。
 - 验证 `dma.alloc` 结果类型约束与结果数量。
+- 验证 `dma.free` 的内存类型约束与无返回值语义。
 - 验证 `dma.view/reshape` 的元素类型/空间一致性与形状约束，其中 `dma.view` 覆盖动态 `shape/stride` 的 `!symbol.int<"expr">` operand，`dma.reshape` 覆盖动态 `shape` 的 `!symbol.int<"expr">` operand。
 - 验证默认连续 stride 在符号维度（如 `N` / `M*N` / `?`）下的推导与退化规则已覆盖。
 - 验证 `dma.cast` 只允许改变元素类型，且保持 `shape/stride/space` 不变。
@@ -481,3 +512,4 @@ op = DmaCastOp(source, result_type)
 | TC-DMA-020 | 分配 | `dma.alloc` 动态形状输入 | `dynamic_shape` 由 SSA `!symbol.int<"expr">` operand 提供，长度与 rank 一致，符号维度默认 stride 规则（如 `N`/`M*N`/`?`）生效 | 构造并校验 `dma.alloc` | verifier 通过 | `test_dma_alloc_dynamic_symbol_int_shape_operands_valid` |
 | TC-DMA-021 | 解析/打印 | 动态 shape round-trip | 包含 `dma.alloc/view/load/store/slice/deslice/reshape/cast` 的 SSA `!symbol.int<"expr">` operand 文本 | parse/print | 与输入文本一致 | `test_dma_dynamic_symbol_int_parse_print_round_trip` |
 | TC-DMA-022 | 标量输入 | 非 symbol.int 非法 | 任一受影响标量输入为 builtin `index` 或其他非 symbol 标量类型 | 构造并校验 `dma` op | verifier 报错 | `test_dma_rejects_non_symbol_int_scalar_operands` |
+| TC-DMA-023 | 生命周期 | `dma.free` 释放内存 | `source` 为 `!nn.memory<...>` 或非该类型 | 构造并校验 `dma.free` | 非内存类型报错 | `test_dma_free_requires_nn_memory_type` |

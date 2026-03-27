@@ -46,6 +46,7 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.dialect.dma import (
     Dma,
     DmaAllocOp,
+    DmaFreeOp,
     DmaCastOp,
     DmaCopyOp,
     DmaDesliceOp,
@@ -492,6 +493,28 @@ def test_dma_alloc_verify_success() -> None:
     result_type = _make_memory_type()
     op = DmaAllocOp(_make_symbol_operands([2, 4]), result_type)
     op.verify()
+
+
+# TC-DMA-023
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-27 23:48:38 +0800
+# 最近一次运行成功时间: 2026-03-27 23:48:38 +0800
+# 功能说明: 验证 dma.free 仅接受 nn.memory 类型，非内存类型报错。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_free_requires_nn_memory_type
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_free_requires_nn_memory_type() -> None:
+    memory_type = _make_memory_type()
+    source = _TestOp(result_types=[memory_type]).results[0]
+    op = DmaFreeOp(source)
+    op.verify()
+
+    bad_source = _TestOp(result_types=[i32]).results[0]
+    op = DmaFreeOp(bad_source)
+    with pytest.raises(VerifyException, match="nn.memory"):
+        op.verify()
 
 
 # TC-DMA-014
