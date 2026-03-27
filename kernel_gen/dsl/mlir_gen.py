@@ -29,7 +29,7 @@ from xdsl.dialects.builtin import FunctionType, IntAttr, StringAttr, i1, i32
 from xdsl.ir import Block, Region
 
 from kernel_gen.dialect.nn import NnMemoryType
-from kernel_gen.dialect.symbol import SymbolValueType
+from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
@@ -450,6 +450,13 @@ def _build_func_op_from_ast_impl(
         runtime_args=runtime_args,
         allow_dma_alloc_only=is_dma_alloc_only,
     )
+    runtime_values: dict[str, object] | None = None
+    if runtime_args is not None:
+        runtime_values = {
+            input_arg.name: runtime_args[index]
+            for index, input_arg in enumerate(func_ast.inputs)
+            if isinstance(input_arg, ScalarArgAST)
+        }
     statements = _ensure_supported_statements(func_ast)
     result_types: list[object] = []
     infer_scalar_return = False
@@ -460,7 +467,7 @@ def _build_func_op_from_ast_impl(
                 raise _LoweringError("Return type does not match annotation", location=func_ast.location)
             result_type = _build_dma_alloc_only_result_type(func_ast, return_expr, runtime_args)
         else:
-            result_type = _infer_expr_type(return_expr, dict(type_map))
+            result_type = _infer_expr_type(return_expr, dict(type_map), runtime_values=runtime_values)
         _validate_return_type(func_ast, result_type, return_expr, dict(type_map))
         type_map[_expr_key(return_expr)] = result_type
         result_types = [result_type]
@@ -469,7 +476,7 @@ def _build_func_op_from_ast_impl(
         if isinstance(return_expr, DmaFreeAST):
             result_types = []
         else:
-            result_type = _infer_expr_type(return_expr, dict(type_map))
+            result_type = _infer_expr_type(return_expr, dict(type_map), runtime_values=runtime_values)
             if not isinstance(result_type, SymbolValueType):
                 raise _LoweringError(
                     "Symbol scalar function return must lower to !symbol.int",
@@ -482,7 +489,26 @@ def _build_func_op_from_ast_impl(
     block = Block(arg_types=arg_types)
     func_op = func.FuncOp(func_ast.name, func_type, Region(block))
 
-    ctx = EmitContext(builder=block, symbols={}, types=dict(type_map), config=config)
+    symbol_values: dict[str, object] = {}
+    input_names = {item.name for item in func_ast.inputs}
+    for index, item in enumerate(func_ast.inputs):
+        if not isinstance(item, TensorAST):
+            continue
+        if index >= len(block.args):
+            continue
+        arg_type = arg_types[index]
+        if not isinstance(arg_type, NnMemoryType):
+            continue
+        for axis, dim in enumerate(arg_type.shape.data):
+            if not isinstance(dim, StringAttr):
+                continue
+            symbol_name = dim.data
+            if symbol_name in input_names or symbol_name in symbol_values:
+                continue
+            op = SymbolGetDimOp(block.args[index], IntAttr(axis))
+            block.add_op(op)
+            symbol_values[symbol_name] = op.result
+    ctx = EmitContext(builder=block, symbols=symbol_values, types=dict(type_map), config=config)
     visitor = AstVisitor(config=config)
     return_value = visitor.visit_function(func_ast, ctx)
     if func_ast.outputs or infer_scalar_return:

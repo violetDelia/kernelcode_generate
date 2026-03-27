@@ -530,16 +530,17 @@ def test_dma_free_requires_nn_memory_type() -> None:
 def test_dma_view_type_or_space_mismatch() -> None:
     source_type = _make_memory_type()
     source = _TestOp(result_types=[source_type]).results[0]
+    offsets = _make_symbol_operands([None, None])
     shape = _make_symbol_operands([2, 4])
     stride = _make_symbol_operands([4, 1])
 
     result_type = NnMemoryType(source_type.shape, source_type.stride, i1, source_type.space)
-    op = DmaViewOp(source, shape, stride, result_type)
+    op = DmaViewOp(source, offsets, shape, stride, result_type)
     with pytest.raises(VerifyException, match="element_type mismatch"):
         op.verify()
 
     result_type = _make_memory_type(space="shared")
-    op = DmaViewOp(source, shape, stride, result_type)
+    op = DmaViewOp(source, offsets, shape, stride, result_type)
     with pytest.raises(VerifyException, match="space mismatch"):
         op.verify()
 
@@ -561,7 +562,13 @@ def test_dma_view_numel_mismatch() -> None:
         shape=ArrayAttr([IntAttr(2), IntAttr(5)]),
         stride=ArrayAttr([IntAttr(5), IntAttr(1)]),
     )
-    op = DmaViewOp(source, _make_symbol_operands([2, 5]), _make_symbol_operands([5, 1]), result_type)
+    op = DmaViewOp(
+        source,
+        _make_symbol_operands([None, None]),
+        _make_symbol_operands([2, 5]),
+        _make_symbol_operands([5, 1]),
+        result_type,
+    )
     with pytest.raises(VerifyException, match="numel mismatch"):
         op.verify()
 
@@ -668,7 +675,13 @@ def test_dma_view_dynamic_symbol_int_layout_operands_valid() -> None:
         stride=ArrayAttr([StringAttr("TN"), IntAttr(1)]),
     )
     source = _TestOp(result_types=[source_type]).results[0]
-    op = DmaViewOp(source, _make_symbol_operands(["TM", "TN"]), _make_symbol_operands(["TN", 1]), result_type)
+    op = DmaViewOp(
+        source,
+        _make_symbol_operands([0, 0]),
+        _make_symbol_operands(["TM", "TN"]),
+        _make_symbol_operands(["TN", 1]),
+        result_type,
+    )
     op.verify()
 
 
@@ -718,13 +731,22 @@ def test_dma_dynamic_symbol_int_parse_print_round_trip() -> None:
 
     alloc_type = _make_memory_type()
     view_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(4), IntAttr(2)]),
-        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
+        stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+    )
+    reshape_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
     )
     load_type = _make_memory_type(space="shared")
 
     alloc = DmaAllocOp([c0.results[0], c1.results[0]], alloc_type)
-    view = DmaViewOp(alloc.result, [c1.results[0], c0.results[0]], [c0.results[0], c3.results[0]], view_type)
+    view = DmaViewOp(
+        alloc.result,
+        [c2.results[0], c2.results[0]],
+        [c0.results[0], c1.results[0]],
+        [c3.results[0], c3.results[0]],
+        view_type,
+    )
     load = DmaLoadOp(
         alloc.result,
         [c2.results[0], c2.results[0]],
@@ -756,7 +778,7 @@ def test_dma_dynamic_symbol_int_parse_print_round_trip() -> None:
         [c3.results[0], c3.results[0]],
         alloc_type,
     )
-    reshape = DmaReshapeOp(alloc.result, [c1.results[0], c0.results[0]], view_type)
+    reshape = DmaReshapeOp(alloc.result, [c0.results[0], c1.results[0]], reshape_type)
     cast = DmaCastOp(alloc.result, NnMemoryType(alloc_type.shape, alloc_type.stride, i1, alloc_type.space))
 
     module = ModuleOp([c0, c1, c2, c3, alloc, view, load, store, slice_op, deslice, reshape, cast])
@@ -800,6 +822,7 @@ def test_dma_rejects_non_symbol_int_scalar_operands() -> None:
     with pytest.raises(VerifyException, match="base attribute symbol.int"):
         DmaViewOp(
             source,
+            [index_operand, index_operand],
             [index_operand, index_operand],
             _make_symbol_operands([4, 1]),
             source_type,

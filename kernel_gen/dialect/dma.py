@@ -217,6 +217,43 @@ def _verify_unit_stride_operands(strides: Sequence[SSAValue]) -> None:
             raise VerifyException("dma stride must be 1 in current implementation")
 
 
+def _verify_view_offsets_within_bounds(
+    offsets: Sequence[SSAValue],
+    shape: Sequence[SSAValue],
+    strides: Sequence[SSAValue],
+    source_shape: ArrayAttr[Attribute],
+) -> None:
+    """校验 dma.view 的 offsets/shape/stride 不越界。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 若 offsets/shape/stride 与 source.shape 可静态解析，则验证
+      `offset + (size - 1) * stride < source.shape`。
+    - 动态维度或符号表达式无法静态判定时跳过。
+
+    使用示例:
+    - _verify_view_offsets_within_bounds(offsets, shape, strides, source_type.shape)
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma_dialect.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    for offset, size, stride, source_dim in zip(offsets, shape, strides, source_shape.data, strict=True):
+        if not isinstance(source_dim, IntAttr):
+            continue
+        offset_value = _operand_int_value(offset)
+        size_value = _operand_int_value(size)
+        stride_value = _operand_int_value(stride)
+        if offset_value is None or size_value is None or stride_value is None:
+            continue
+        if offset_value + (size_value - 1) * stride_value >= source_dim.data:
+            raise VerifyException("dma.view offset out of bounds")
+
+
 def _maybe_numel(shape: ArrayAttr[Attribute]) -> int | None:
     """尝试计算 shape 的元素总数。
 
@@ -854,6 +891,7 @@ class DmaViewOp(IRDLOperation):
     name = "dma.view"
 
     source = operand_def(NnMemoryType)
+    offsets = var_operand_def(SymbolValueType)
     shape = var_operand_def(SymbolValueType)
     stride = var_operand_def(SymbolValueType)
     result = result_def(NnMemoryType)
@@ -863,6 +901,7 @@ class DmaViewOp(IRDLOperation):
     def __init__(
         self,
         source: SSAValue | Operation,
+        offsets: Sequence[SSAValue],
         shape: Sequence[SSAValue],
         stride: Sequence[SSAValue],
         result_type: NnMemoryType,
@@ -873,10 +912,10 @@ class DmaViewOp(IRDLOperation):
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 设置 source、动态 shape/stride operand 与结果类型。
+        - 设置 source、动态 offsets/shape/stride operand 与结果类型。
 
         使用示例:
-        - DmaViewOp(source, shape, stride, result_type)
+        - DmaViewOp(source, offsets, shape, stride, result_type)
 
         关联文件:
         - spec: spec/dialect/dma.md
@@ -884,7 +923,7 @@ class DmaViewOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
-        super().__init__(operands=[source, shape, stride], result_types=[result_type])
+        super().__init__(operands=[source, offsets, shape, stride], result_types=[result_type])
 
     def verify_(self) -> None:
         """校验 dma.view。
@@ -907,10 +946,13 @@ class DmaViewOp(IRDLOperation):
 
         source_type = _verify_memory_type(self.source.type, "source")
         result_type = _verify_memory_type(self.result.type, "result")
+        offsets = _verify_symbol_int_operands(self.offsets, "offsets", min_value=0)
         shape = _verify_symbol_int_operands(self.shape, "shape", min_value=1)
         stride = _verify_symbol_int_operands(self.stride, "stride", min_value=1)
-        _verify_rank_match(shape, len(result_type.shape.data), "shape")
-        _verify_rank_match(stride, len(result_type.shape.data), "stride")
+        rank = len(result_type.shape.data)
+        _verify_rank_match(offsets, rank, "offsets")
+        _verify_rank_match(shape, rank, "shape")
+        _verify_rank_match(stride, rank, "stride")
         _verify_operands_match_layout(shape, result_type.shape, "shape must match result shape")
         _verify_operands_match_layout(stride, result_type.stride, "stride must match result stride")
         if source_type.element_type != result_type.element_type:
@@ -922,6 +964,7 @@ class DmaViewOp(IRDLOperation):
         result_numel = _maybe_numel(result_type.shape)
         if source_numel is not None and result_numel is not None and source_numel != result_numel:
             raise VerifyException("dma.view numel mismatch")
+        _verify_view_offsets_within_bounds(offsets, shape, stride, source_type.shape)
 
 
 @irdl_op_definition
