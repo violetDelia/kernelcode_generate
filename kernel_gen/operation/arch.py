@@ -255,7 +255,7 @@ def get_dynamic_memory(space: object) -> Memory:
     return Memory(["?"], NumericType.Int8, space=normalized_space, stride=[1])
 
 
-def launch_kernel(name: object, block: object, thread: object, subthread: object) -> None:
+def launch_kernel(name: str, block: LaunchExtent, thread: LaunchExtent, subthread: LaunchExtent) -> None:
     """记录一次 kernel 启动请求。
 
     创建者: 金铲铲大作战
