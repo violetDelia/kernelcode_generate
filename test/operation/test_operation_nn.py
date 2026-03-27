@@ -1,10 +1,10 @@
 """nn operation API tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: 我不是牛马
 
 功能说明:
-- 覆盖 kernel_gen/operation/nn.py 的逐元素算术与比较 API。
+- 覆盖 kernel_gen/operation/nn.py 的逐元素算术、比较与激活 API。
 
 使用示例:
 - pytest -q test/operation/test_operation_nn.py
@@ -44,14 +44,19 @@ from kernel_gen.operation.nn import (
     floordiv,
     ge,
     gt,
+    hard_sigmoid,
     img2col,
+    leaky_relu,
     le,
     lt,
     matmul,
     mul,
     ne,
+    relu,
+    sigmoid,
     softmax,
     sub,
+    tanh,
     truediv,
 )
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
@@ -1170,3 +1175,94 @@ def test_nn_conv_basic() -> None:
             pl=0,
             pr=0,
         )
+# OP-ACT-001
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-27 09:44:59 +0800
+# 最近一次运行成功时间: 2026-03-27 09:44:59 +0800
+# 测试目的: 验证 relu/sigmoid/tanh/hard_sigmoid 输出继承输入描述。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_activation_basic
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_activation_basic() -> None:
+    value = Memory([2, 3], NumericType.Float32, space=MemorySpace.SM, stride=[3, 1], format=Farmat.CLast)
+    for func in (relu, sigmoid, tanh):
+        result = func(value)
+        assert result.shape.get_values() == value.shape.get_values()
+        assert result.dtype is value.dtype
+        assert result.space is value.space
+        assert result.format is value.format
+        assert result.get_stride() == value.get_stride()
+
+    hard_result = hard_sigmoid(value, alpha=0.2, beta=0.5)
+    assert hard_result.shape.get_values() == value.shape.get_values()
+    assert hard_result.dtype is value.dtype
+    assert hard_result.space is value.space
+    assert hard_result.format is value.format
+    assert hard_result.get_stride() == value.get_stride()
+
+
+# OP-ACT-002
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-27 09:44:59 +0800
+# 最近一次运行成功时间: 2026-03-27 09:44:59 +0800
+# 测试目的: 验证 leaky_relu alpha 参数接受有限数值并继承输入描述。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_activation_leaky_relu_alpha
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_activation_leaky_relu_alpha() -> None:
+    value = Memory([4, 1], NumericType.Float16, space=MemorySpace.GM, stride=[1, 1], format=Farmat.Norm)
+    for alpha in (0.01, 0, -0.5, 2):
+        result = leaky_relu(value, alpha=alpha)
+        assert result.shape.get_values() == value.shape.get_values()
+        assert result.dtype is value.dtype
+        assert result.space is value.space
+        assert result.format is value.format
+        assert result.get_stride() == value.get_stride()
+
+
+# OP-ACT-003
+# 创建者: 我不是牛马
+# 最后一次更改: 我不是牛马
+# 最近一次运行测试时间: 2026-03-27 09:44:59 +0800
+# 最近一次运行成功时间: 2026-03-27 09:44:59 +0800
+# 测试目的: 验证激活函数对非法输入、dtype 与参数报错。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_activation_invalid_input
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_activation_invalid_input() -> None:
+    value = Memory([2, 2], NumericType.Float32)
+
+    with pytest.raises(TypeError):
+        _ = relu("bad")
+
+    with pytest.raises(TypeError):
+        _ = sigmoid(Memory([2, 2], NumericType.Int32))
+
+    with pytest.raises(TypeError):
+        _ = tanh(Memory([2, 2], NumericType.Bool))
+
+    with pytest.raises(TypeError):
+        _ = leaky_relu(value, alpha=True)
+
+    with pytest.raises(TypeError):
+        _ = leaky_relu(value, alpha=SymbolDim("N"))
+
+    with pytest.raises(ValueError):
+        _ = leaky_relu(value, alpha=float("nan"))
+
+    with pytest.raises(ValueError):
+        _ = leaky_relu(value, alpha=float("inf"))
+
+    with pytest.raises(TypeError):
+        _ = hard_sigmoid(value, alpha=True, beta=0.5)
+
+    with pytest.raises(TypeError):
+        _ = hard_sigmoid(value, alpha=0.2, beta=SymbolDim("B"))
+
+    with pytest.raises(ValueError):
+        _ = hard_sigmoid(value, alpha=0.2, beta=float("-inf"))

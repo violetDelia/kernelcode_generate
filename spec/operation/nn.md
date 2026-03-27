@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-用于定义 `Memory` 高层运算规范，覆盖逐元素算术、比较、显式 `broadcast` / `broadcast_to`、`softmax`、全连接 `fc`、二维 `matmul` 与二维 `conv`。本层只描述可调用语义、结果元信息约束与错误规则。
+用于定义 `Memory` 高层运算规范，覆盖逐元素算术、比较、激活函数、显式 `broadcast` / `broadcast_to`、`softmax`、全连接 `fc`、二维 `matmul` 与二维 `conv`。本层只描述可调用语义、结果元信息约束与错误规则。
 
 ## 文档信息
 
@@ -20,6 +20,7 @@
 ## 目标
 
 - 提供 `Memory` 的逐元素算术与比较高层语义。
+- 提供常用激活函数的输入输出约束与错误规则。
 - 提供显式 `broadcast` / `broadcast_to`、`softmax`、全连接 `fc`、二维 `matmul` 与二维 `conv` 的输入输出约束与错误规则。
 - 保持与下游 `nn dialect` 的分层：本层作为用户直接使用的接口，不受限于IR的表达。
 
@@ -34,6 +35,7 @@
 - 不定义归约等其他算子。
 - 不引入复杂自动类型提升规则；`dtype` 兼容性需显式检查。
 - 不负责 AST/IR/lowering 设计。
+- 激活函数仅支持 `Memory` 输入；输出 `shape`/`dtype`/`space`/`format`/`stride` 继承输入，仅允许浮点 `dtype`（`Float16`/`BFloat16`/`Float32`/`Float64`）。
 
 ## nn 类型提升规则（算术算子统一口径）
 
@@ -362,6 +364,146 @@ CMP = ge(A, B)
 
 - 返回 `Memory` 语义结果，`dtype` 为 `NumericType.Bool`。
 
+### `relu(value)`
+
+功能说明：
+
+- 逐元素 ReLU 激活。
+
+参数说明：
+
+- `value` (`Memory`)：待激活输入。
+
+使用示例：
+
+```python
+value = Memory(["M", "N"], NumericType.Float32)
+out = relu(value)
+```
+
+注意事项：
+
+- 仅支持 `Memory` 输入，`value.dtype` 必须为浮点类型；否则抛出 `TypeError`。
+- 数值语义：`relu(x) = max(x, 0)`，`x == 0` 时返回 `0`。
+- 输出 `shape`/`dtype`/`space`/`format`/`stride` 均继承 `value`。
+
+返回与限制：
+
+- 返回 `Memory` 语义结果。
+
+### `leaky_relu(value, alpha=0.01)`
+
+功能说明：
+
+- 逐元素 Leaky ReLU 激活。
+
+参数说明：
+
+- `value` (`Memory`)：待激活输入。
+- `alpha` (`int|float`)：负半轴斜率，默认 `0.01`。
+
+使用示例：
+
+```python
+value = Memory(["M", "N"], NumericType.Float16)
+out = leaky_relu(value, alpha=0.2)
+```
+
+注意事项：
+
+- 仅支持 `Memory` 输入，`value.dtype` 必须为浮点类型；否则抛出 `TypeError`。
+- `alpha` 仅接受 `int|float`，不接受 `bool` 或 `SymbolDim`；非数值或 `NaN/Inf` 触发 `TypeError`/`ValueError`。
+- 数值语义：`x >= 0` 时返回 `x`，`x < 0` 时返回 `alpha * x`；`x == 0` 时返回 `0`。当 `alpha == 0` 时退化为 `relu`。
+- 输出 `shape`/`dtype`/`space`/`format`/`stride` 均继承 `value`。
+
+返回与限制：
+
+- 返回 `Memory` 语义结果。
+
+### `sigmoid(value)`
+
+功能说明：
+
+- 逐元素 Sigmoid 激活。
+
+参数说明：
+
+- `value` (`Memory`)：待激活输入。
+
+使用示例：
+
+```python
+value = Memory(["M", "N"], NumericType.Float32)
+out = sigmoid(value)
+```
+
+注意事项：
+
+- 仅支持 `Memory` 输入，`value.dtype` 必须为浮点类型；否则抛出 `TypeError`。
+- 数值语义：`sigmoid(x) = 1 / (1 + exp(-x))`，大幅正/负输入分别趋近 `1/0`。
+- 输出 `shape`/`dtype`/`space`/`format`/`stride` 均继承 `value`。
+
+返回与限制：
+
+- 返回 `Memory` 语义结果。
+
+### `tanh(value)`
+
+功能说明：
+
+- 逐元素 Tanh 激活。
+
+参数说明：
+
+- `value` (`Memory`)：待激活输入。
+
+使用示例：
+
+```python
+value = Memory(["M", "N"], NumericType.Float32)
+out = tanh(value)
+```
+
+注意事项：
+
+- 仅支持 `Memory` 输入，`value.dtype` 必须为浮点类型；否则抛出 `TypeError`。
+- 数值语义：`tanh(x) = (exp(x) - exp(-x)) / (exp(x) + exp(-x))`，大幅正/负输入分别趋近 `1/-1`。
+- 输出 `shape`/`dtype`/`space`/`format`/`stride` 均继承 `value`。
+
+返回与限制：
+
+- 返回 `Memory` 语义结果。
+
+### `hard_sigmoid(value, alpha=0.2, beta=0.5)`
+
+功能说明：
+
+- 逐元素 Hard Sigmoid 激活。
+
+参数说明：
+
+- `value` (`Memory`)：待激活输入。
+- `alpha` (`int|float`)：线性项系数，默认 `0.2`。
+- `beta` (`int|float`)：线性项偏置，默认 `0.5`。
+
+使用示例：
+
+```python
+value = Memory(["M", "N"], NumericType.Float32)
+out = hard_sigmoid(value, alpha=0.2, beta=0.5)
+```
+
+注意事项：
+
+- 仅支持 `Memory` 输入，`value.dtype` 必须为浮点类型；否则抛出 `TypeError`。
+- `alpha`/`beta` 仅接受 `int|float`，不接受 `bool` 或 `SymbolDim`；非数值或 `NaN/Inf` 触发 `TypeError`/`ValueError`。
+- 数值语义：`hard_sigmoid(x) = clamp(alpha * x + beta, 0, 1)`，边界处输出被截断到 `[0, 1]`。
+- 输出 `shape`/`dtype`/`space`/`format`/`stride` 均继承 `value`。
+
+返回与限制：
+
+- 返回 `Memory` 语义结果。
+
 ### `broadcast(value, target)`
 
 功能说明：
@@ -621,6 +763,7 @@ out = conv(value, weight, bias=bias, sh=2, sw=2, dh=1, dw=1, ph=0, pw=0, pl=0, p
 
 - 测试文件：[`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py)
 - 执行命令：`pytest -q test/operation/test_operation_nn.py`
+- 验收命令（激活函数）：`pytest -q test/operation/test_operation_nn.py -k activation`
 
 ### 测试目标
 
@@ -640,6 +783,7 @@ out = conv(value, weight, bias=bias, sh=2, sw=2, dh=1, dw=1, ph=0, pw=0, pl=0, p
 - 验证 nn 操作不依赖已移除的旧 shape 规范化入口。
 - 验证 `img2col` 输出形状与参数校验规则。
 - 验证 `conv` 的参数校验、输出形状公式与 bias 可选对齐规则。
+- 验证激活函数的输入输出约束、参数规则与错误路径。
 
 ### 功能与用例清单
 
@@ -668,6 +812,9 @@ out = conv(value, weight, bias=bias, sh=2, sw=2, dh=1, dw=1, ph=0, pw=0, pl=0, p
 | OP-TP-004 | OP-TP 规则仅适用于算术算子（`add/sub/mul/truediv/floordiv/matmul`） | `test_nn_other_arithmetic`, `test_nn_sub_reverse_and_dtype_mismatch`, `test_nn_floordiv_rules`, `test_nn_matmul_success` |
 | OP-TP-005 | 比较算子与显式广播路径不适用 OP-TP：比较结果固定 `Bool`，broadcast 结果对齐 target 描述 | `test_nn_compare_predicate`, `test_nn_compare_alias`, `test_nn_broadcast_success` |
 | OP-TP-006 | 不支持的 dtype 参与算术提升或非法标量输入必须抛错 | `test_nn_dtype_invalid_error`, `test_nn_scalar_type_error` |
+| OP-ACT-001 | `relu`/`sigmoid`/`tanh`/`hard_sigmoid` 输出 `shape/dtype/space/stride/format` 继承输入 | `test_nn_activation_basic` |
+| OP-ACT-002 | `leaky_relu` 的 `alpha` 参数规则与边界行为 | `test_nn_activation_leaky_relu_alpha` |
+| OP-ACT-003 | 激活函数的非 `Memory` 输入、非浮点 `dtype` 与无效参数报错 | `test_nn_activation_invalid_input` |
 | OP-BC-001 | `broadcast` / `broadcast_to` 可通过 singleton dim 扩张并返回与 `target` 完全一致的描述 | `test_nn_broadcast_success` |
 | OP-BC-002 | `broadcast` / `broadcast_to` 支持前置维扩张并保持 `target` 描述 | `test_nn_broadcast_prepend_dimension` |
 | OP-BC-003 | `broadcast` / `broadcast_to` 维度不兼容报错 | `test_nn_broadcast_dimension_mismatch` |
