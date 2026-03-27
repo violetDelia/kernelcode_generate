@@ -37,6 +37,7 @@ from xdsl.dialects.builtin import (
     IntegerType,
     ModuleOp,
     StringAttr,
+    UnrealizedConversionCastOp,
     f32,
     i1,
     i32,
@@ -53,6 +54,7 @@ from kernel_gen.dialect.dma import (
     DmaCastOp,
     DmaCopyOp,
     DmaDesliceOp,
+    DmaFreeOp,
     DmaLoadOp,
     DmaReshapeOp,
     DmaSliceOp,
@@ -73,6 +75,7 @@ from kernel_gen.dialect.nn import (
     NnMemorySpaceAttr,
     NnMemoryType,
     NnNeOp,
+    NnSubOp,
     NnTrueDivOp,
 )
 from kernel_gen.dialect.symbol import (
@@ -80,6 +83,7 @@ from kernel_gen.dialect.symbol import (
     SymbolDivOp,
     SymbolFloorDivOp,
     SymbolForOp,
+    SymbolGetDimOp,
     SymbolGeOp,
     SymbolMulOp,
     SymbolSubOp,
@@ -180,6 +184,8 @@ def _unwrap_index_cast(value: object) -> object:
     owner = getattr(value, "owner", None)
     if isinstance(owner, arith.IndexCastOp):
         return owner.input
+    if isinstance(owner, UnrealizedConversionCastOp):
+        return owner.operands[0]
     return value
 
 
@@ -1330,6 +1336,106 @@ def alloc_kernel(rank1: int, rank2: int) -> f"Tensor[f32, {ALLOC_ROWS}, {ALLOC_C
     assert list(func_op.function_type.outputs) == [alloc_ops[0].result.type]
 
 
+# MGEN-026F
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-03-28 03:34:20 +0800
+# 最近一次运行成功时间: 2026-03-28 03:34:20 +0800
+# 功能说明: 验证 alloc-only kernel 支持 `int | SymbolDim` / `SymbolDim | int` 参数注解。
+# 测试目的: 锁定 PEP 604 联合注解在 parse_function + build_func_op 链路不会触发 Unsupported annotation。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_supports_dma_alloc_helper_with_union_symbol_annotations
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_supports_dma_alloc_helper_with_union_symbol_annotations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.dma import alloc
+
+    rows = 2
+    cols = 3
+    source = """
+def alloc_kernel(rank1: int | SymbolDim, rank2: SymbolDim | int) -> f"Tensor[f32, {ALLOC_ROWS}, {ALLOC_COLS}]":
+    return alloc([rank1, rank2], NumericType.Float32, MemorySpace.SM)
+"""
+    namespace = {
+        "alloc": alloc,
+        "NumericType": NumericType,
+        "MemorySpace": MemorySpace,
+        "SymbolDim": SymbolDim,
+        "ALLOC_ROWS": rows,
+        "ALLOC_COLS": cols,
+    }
+    exec(source, namespace)
+    alloc_kernel = namespace["alloc_kernel"]
+
+    def fake_getsource(_obj: object) -> str:
+        return source
+
+    monkeypatch.setattr(inspect, "getsource", fake_getsource)
+
+    func_op = build_func_op(alloc_kernel, rows, cols)
+    alloc_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaAllocOp)]
+
+    assert list(func_op.function_type.inputs) == [
+        SymbolValueType.from_expr(str(rows)),
+        SymbolValueType.from_expr(str(cols)),
+    ]
+    assert len(alloc_ops) == 1
+    assert [attr.data for attr in alloc_ops[0].result.type.shape.data] == [rows, cols]
+    assert list(func_op.function_type.outputs) == [alloc_ops[0].result.type]
+
+
+# MGEN-026G
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-03-28 06:45:00 +0800
+# 最近一次运行成功时间: 2026-03-28 06:45:00 +0800
+# 功能说明: 验证 alloc-only kernel 支持 `SymbolDim` 直接参数注解。
+# 测试目的: 锁定 `size: SymbolDim` 注解在 parse_function + build_func_op 链路中被识别为符号标量参数。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_supports_dma_alloc_helper_with_name_symbol_annotations
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_supports_dma_alloc_helper_with_name_symbol_annotations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.dma import alloc
+
+    rows = 2
+    cols = 3
+    source = """
+def alloc_kernel(rank1: SymbolDim, rank2: SymbolDim) -> f"Tensor[f32, {ALLOC_ROWS}, {ALLOC_COLS}]":
+    return alloc([rank1, rank2], NumericType.Float32, MemorySpace.SM)
+"""
+    namespace = {
+        "alloc": alloc,
+        "NumericType": NumericType,
+        "MemorySpace": MemorySpace,
+        "SymbolDim": SymbolDim,
+        "ALLOC_ROWS": rows,
+        "ALLOC_COLS": cols,
+    }
+    exec(source, namespace)
+    alloc_kernel = namespace["alloc_kernel"]
+
+    def fake_getsource(_obj: object) -> str:
+        return source
+
+    monkeypatch.setattr(inspect, "getsource", fake_getsource)
+
+    func_op = build_func_op(alloc_kernel, rows, cols)
+    alloc_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaAllocOp)]
+
+    assert list(func_op.function_type.inputs) == [
+        SymbolValueType.from_expr(str(rows)),
+        SymbolValueType.from_expr(str(cols)),
+    ]
+    assert len(alloc_ops) == 1
+    assert [attr.data for attr in alloc_ops[0].result.type.shape.data] == [rows, cols]
+    assert list(func_op.function_type.outputs) == [alloc_ops[0].result.type]
+
+
 # MGEN-026A
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
@@ -1590,8 +1696,8 @@ def test_build_func_op_rejects_dma_alloc_helper_with_non_contiguous_stride() -> 
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-25 10:04:04 +0800
 # 最近一次运行成功时间: 2026-03-25 10:04:04 +0800
-# 功能说明: 验证 build_func_op 在 free 语句场景下不会生成额外返回值。
-# 测试目的: 验证 free 作为无返回值语句参与 lowering，函数体最终只保留 func.return。
+# 功能说明: 验证 build_func_op 在 free 语句场景生成 dma.free 并保持空返回。
+# 测试目的: 验证 free 作为无返回值语句参与 lowering，函数体包含 dma.free 与 func.return。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_supports_dma_free_statement
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -1607,7 +1713,7 @@ def test_build_func_op_supports_dma_free_statement() -> None:
     func_op = build_func_op(free_kernel, source)
     assert isinstance(func_op, func.FuncOp)
     assert list(func_op.function_type.outputs) == []
-    assert [type(op) for op in func_op.body.block.ops] == [func.ReturnOp]
+    assert [type(op) for op in func_op.body.block.ops] == [DmaFreeOp, func.ReturnOp]
 
 
 # MGEN-026
@@ -2825,6 +2931,32 @@ def test_emit_mlir_dma_copy_lowering() -> None:
     assert result.type.space.space.data == "shared"
 
 
+# EMIT-016A
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-03-28 06:45:00 +0800
+# 最近一次运行成功时间: 2026-03-28 06:45:00 +0800
+# 功能说明: 验证 copy AST lowering 在缺少显式符号输入时可从 source memory 物化 symbol 维度。
+# 测试目的: 锁定符号 shape 场景不会触发 Unknown index symbol，并会发射 symbol.get_dim。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_dma_copy_lowering_materializes_missing_symbol_dims
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_dma_copy_lowering_materializes_missing_symbol_dims() -> None:
+    source_memory = Memory([SymbolDim("M"), SymbolDim("N")], NumericType.Float32, space=MemorySpace.GM)
+    source = TensorAST(name="src", memory=source_memory, location=None)
+    block = Block(arg_types=[_memory_to_nn_type(source_memory)])
+    ctx = EmitContext(builder=block, symbols={"src": block.args[0]}, types={})
+    ctx._set_cache(_expr_key(source), block.args[0])
+    ctx.types[_expr_key(source)] = block.args[0].type
+
+    result = _lower_expr(DmaCopyAST(source=source, space=MemorySpace.SM, location=None), ctx)
+    assert isinstance(result.owner, DmaAllocOp)
+    assert any(isinstance(op, SymbolGetDimOp) for op in block.ops)
+    assert any(isinstance(op, DmaCopyOp) for op in block.ops)
+    assert result.type.space.space.data == "shared"
+
+
 # EMIT-017
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚
@@ -2954,8 +3086,8 @@ def test_emit_mlir_dma_free_statement() -> None:
     ctx.types[_expr_key(source)] = block.args[0].type
 
     result = emit_node_mlir(DmaFreeAST(value=source, location=None), ctx)
-    assert result is None
-    assert list(block.ops) == []
+    assert isinstance(result, DmaFreeOp)
+    assert any(isinstance(op, DmaFreeOp) for op in block.ops)
 
 
 # AST-009
@@ -3740,10 +3872,10 @@ def test_emit_mlir_index_resolution_helpers() -> None:
         _resolve_index_symbol("missing", ctx, location=None)
 
     const_value = _resolve_index_operand(ConstAST(3), ctx, location=None)
-    assert isinstance(const_value.owner, arith.ConstantOp)
+    assert isinstance(_unwrap_index_cast(const_value).owner, arith.ConstantOp)
 
     symbol_value = _resolve_index_operand(ConstAST("n"), ctx, location=None)
-    assert symbol_value is block.args[1]
+    assert _unwrap_index_cast(symbol_value) is block.args[1]
 
     assert _resolve_index_expr(ScalarArgAST(name="k", value_type=int), ctx) == "k"
     ctx.config["loop_vars"] = {"i": "i"}
@@ -4017,10 +4149,10 @@ def test_emit_mlir_index_operand_variants_and_loop_bound() -> None:
         _resolve_index_operand(ConstAST(1.5), ctx, location=None)
 
     const_value = _resolve_index_operand(2, ctx, location=None)
-    assert isinstance(const_value.owner, arith.ConstantOp)
+    assert isinstance(_unwrap_index_cast(const_value).owner, arith.ConstantOp)
 
     symbol_value = _resolve_index_operand("n", ctx, location=None)
-    assert symbol_value is block.args[0]
+    assert _unwrap_index_cast(symbol_value) is block.args[0]
 
     assert _resolve_index_expr(ConstAST("k"), ctx) == "k"
     assert _resolve_index_expr(ConstAST(3), ctx) == 3
@@ -4028,6 +4160,32 @@ def test_emit_mlir_index_operand_variants_and_loop_bound() -> None:
     scalar_arg = ScalarArgAST(name="n", value_type=int)
     bound_value = _lower_loop_bound(scalar_arg, ctx)
     assert bound_value is block.args[0]
+
+
+# EMIT-014B
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-28 06:10:00 +0800
+# 最近一次运行成功时间: 2026-03-28 06:10:00 +0800
+# 功能说明: 覆盖 index operand 类型校验的错误分支。
+# 测试目的: 确保 _resolve_index_operand/_cast_to_symbol_int 拒绝非整数 SSA value。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_index_operand_rejects_non_integer_symbol
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_emit_mlir_index_operand_rejects_non_integer_symbol() -> None:
+    memory = Memory([2], NumericType.Float32)
+    block = Block(arg_types=[_memory_to_nn_type(memory)])
+    ctx = EmitContext(builder=block, symbols={"m": block.args[0]}, types={}, config={})
+
+    with pytest.raises(_LoweringError, match="Index operand must be integer or index"):
+        _resolve_index_operand("m", ctx, location=None)
+
+    float_op = arith.ConstantOp(FloatAttr(1.0, f32))
+    block.add_op(float_op)
+    ctx.symbols["f"] = float_op.result
+    with pytest.raises(_LoweringError, match="Index operand must be integer or index"):
+        _resolve_index_operand("f", ctx, location=None)
 
 
 # EMIT-015
@@ -4047,8 +4205,8 @@ def test_emit_mlir_layout_and_stride_helpers() -> None:
     layout = ArrayAttr([IntAttr(0), StringAttr("n")])
     operands = _build_index_operands_from_layout(layout, ctx, location=None)
     assert len(operands) == 2
-    assert isinstance(operands[0].owner, arith.ConstantOp)
-    assert operands[1] is block.args[0]
+    assert isinstance(_unwrap_index_cast(operands[0]).owner, arith.ConstantOp)
+    assert _unwrap_index_cast(operands[1]) is block.args[0]
 
     with pytest.raises(_LoweringError, match="Only unit stride is supported"):
         _build_stride_attrs([ConstAST(2)], rank=1, ctx=ctx, location=None)

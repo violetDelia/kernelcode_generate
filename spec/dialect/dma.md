@@ -54,11 +54,11 @@
 - 对 `dma.cast`，只允许 `element_type` 发生显式变化；`shape/stride/space` 必须保持一致。
 - `shape/stride` 的 rank 必须与相关 `offsets/sizes/strides` 列表长度一致。
 - `offsets`、`sizes`、`strides`、动态 `shape`、动态 `stride` 必须建模为显式 `!symbol.int<"expr">` SSA 操作数列表；不得只靠 `StringAttr("?")`、`ArrayAttr` 或其他 attribute 独立表达运行期值。
-- 所有 index-like 标量 operand 仅接受 `!symbol.int<"expr">` SSA value；禁止直接使用 Python `int/float` 或 builtin 数值类型替代，静态常量必须先 materialize 为 `!symbol.int<"expr">`。
+- 所有 index-like 标量 operand 仅接受 `!symbol.int<"expr">` SSA value；覆盖 `dma.view` 的 `offsets/shape/stride`、`dma.alloc/reshape` 的 `shape`、`dma.load/store/slice/deslice` 的 `offsets/sizes/strides`。禁止直接使用 Python `int/float` 或 builtin 数值类型替代，静态常量必须先 materialize 为 `!symbol.int<"expr">`。
 - `!nn.memory<...>` 类型仍负责承载 rank、元素类型、内存空间以及可静态判定的布局信息；凡是运行期才确定的布局值，必须由 op operand 传入。
 - 若实现保留静态维度或静态 stride 在类型中，assembly 中的静态值也应允许通过 `!symbol.int<"1">` 这类 symbol 常量值、或等价 materialize 后的 `!symbol.int<"expr">` SSA value 显式传入 operand，保证“布局参数来源统一为 operand”。
 - `dma.load/store/slice/deslice` 的 `offsets/sizes/strides` 必须为 variadic `!symbol.int<"expr">` operand。
-- `dma.view` 中与动态布局相关的 `shape/stride` 元信息必须通过 `!symbol.int<"expr">` operand 显式传入；不得仅依赖结果类型里的符号维度推断。
+- `dma.view` 中与动态布局相关的 `offsets/shape/stride` 元信息必须通过 `!symbol.int<"expr">` operand 显式传入；不得仅依赖结果类型里的符号维度推断。
 - `dma.reshape` 仅接受动态 `shape` operand，且这些 operand 必须为 `!symbol.int<"expr">`；结果 `stride` 按 `shape` 的默认连续布局语义生成。
 - `dma.alloc` 仅接受动态 `shape` operand，且这些 operand 必须为 `!symbol.int<"expr">`；`stride` 不作为输入，而是按默认连续布局语义生成。
 - `strides` 当前每一维仍限制为单位步长语义，但该约束应体现在 operand 校验阶段，而不是要求使用 `IntAttr(1)` attribute。
@@ -83,7 +83,8 @@
 - `dma.load/slice` 中 `offsets/sizes/strides` 长度与输入 rank 不一致必须报错；任一相关 operand 不是 `!symbol.int<"expr">` 时必须报错。
 - `dma.store/deslice` 中 `source.shape` 与切片目标大小不一致必须报错。
 - `dma.view/reshape` 中 `source/result` 的 `element_type/space` 不一致必须报错；可判定的 `numel` 不一致必须报错。
-- `dma.view` 的动态 `shape/stride` operand 数量与 rank 不一致必须报错；任一相关 operand 不是 `!symbol.int<"expr">` 时必须报错；`dma.reshape` 的动态 `shape` operand 数量与 rank 不一致必须报错，且其 operand 必须为 `!symbol.int<"expr">`。
+- `dma.view` 的动态 `offsets/shape/stride` operand 数量与 rank 不一致必须报错；任一相关 operand 不是 `!symbol.int<"expr">` 时必须报错；`dma.reshape` 的动态 `shape` operand 数量与 rank 不一致必须报错，且其 operand 必须为 `!symbol.int<"expr">`。
+- 当 `source.shape` 与 `offsets/shape/stride` 在某一维可静态判定时，`dma.view` 必须检查 `offset + (size - 1) * stride < source.shape`；若不满足则报错。
 - `dma.view` 的 `result.stride` rank 与 `result.shape` 不一致必须报错；`dma.reshape` 的 `result.stride` 非连续行主序必须报错。
 - `dma.cast` 中 `source/result` 的 `shape/stride/space` 不一致必须报错。
 - `strides` 当前仅允许单位步长语义；若当前实现限制 stride 为 1，则 `stride != 1` 的切片搬运必须显式报错，不得 silently 接受。
@@ -228,10 +229,12 @@ op = DmaReshapeOp(source, shape, result_type)
 
 - 表示对 `source` 的视图变换，仅调整 `shape/stride` 元信息。
 - 用于表达不发生搬运的数据视图重解释。
+- `offsets` 以显式 operand 形式给出子视图的起始偏移；方言层要求通过 `offsets/shape/stride` 明确视图窗口。
 
 参数说明：
 
 - `source`：源内存，类型为 `!nn.memory<...>`。
+- `offsets`：variadic `!symbol.int<"expr">` operand，按 rank 顺序提供结果视图的起始偏移。
 - `shape`：variadic `!symbol.int<"expr">` operand，按 rank 顺序提供结果视图的 shape。
 - `stride`：variadic `!symbol.int<"expr">` operand，按 rank 顺序提供结果视图的 stride。
 - `result_type`：结果类型，必须为 `!nn.memory<...>`。
@@ -239,7 +242,7 @@ op = DmaReshapeOp(source, shape, result_type)
 使用示例：
 
 ```python
-op = DmaViewOp(source, shape, stride, result_type)
+op = DmaViewOp(source, offsets, shape, stride, result_type)
 ```
 
 注意事项：
@@ -248,7 +251,9 @@ op = DmaViewOp(source, shape, stride, result_type)
 - `result.space` 必须与 `source.space` 一致。
 - 若 `source.shape` 与 `result.shape` 的元素总数可判定不一致，必须报错。
 - `dma.view` 不要求 `source` 为连续布局，但 `result.stride` 必须与 `result.shape` rank 一致。
-- `shape` 与 `stride` operand 数量必须与结果 rank 一致，且每个 operand 都必须是 `!symbol.int<"expr">`。
+- `offsets/shape/stride` operand 数量必须与结果 rank 一致，且每个 operand 都必须是 `!symbol.int<"expr">`。
+- `offsets` 必须为非负整数语义；`shape` 每一维必须为正整数语义；`stride` 每一维必须为正整数语义。
+- 若 `source.shape`、`offsets`、`shape`、`stride` 在某一维可静态判定为整数，则必须满足边界：`offset + (size - 1) * stride < source.shape`；不可静态判定时允许通过但不得接受显式负值或零值。
 - 动态视图信息通过 operand 传入；结果类型中的动态维度只用于描述结果布局的动态性，不替代运行期值来源。
 
 返回与限制：

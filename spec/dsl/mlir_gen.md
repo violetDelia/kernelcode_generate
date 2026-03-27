@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`不要啊教练`
+- 最后一次更改：`jcc你莫辜负`
 - `spec`：[`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
 - `功能实现`：[`kernel_gen/dsl/mlir_gen.py`](../../kernel_gen/dsl/mlir_gen.py)
 - `test`：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
@@ -175,6 +175,9 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
 
 - 测试文件：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
 - 执行命令：`pytest -q test/dsl/test_ast_visitor.py`
+- 验收命令（dma helper：alloc/copy/deslice/free/load/reshape/slice/store/view）：
+  - `pytest -q test/dsl/test_ast_visitor.py -k "test_build_func_op_supports_dma_helper_calls or test_build_func_op_supports_dma_alloc_helper_with_runtime_shape_args or test_build_func_op_supports_dma_alloc_helper_with_symbol_shape_args or test_build_func_op_supports_dma_alloc_helper_with_symbol_plus_const_shape_args or test_build_func_op_supports_dma_alloc_helper_without_runtime_args or test_build_func_op_supports_dma_alloc_helper_with_explicit_stride or test_build_func_op_supports_dma_free_statement or test_build_func_op_supports_dma_load_helper or test_build_func_op_supports_dma_store_helper or test_build_func_op_supports_dma_slice_helper or test_build_func_op_supports_dma_deslice_helper"`
+  - `pytest -q test/dsl/test_ast_visitor.py -k "test_emit_mlir_dma_alloc_lowering or test_emit_mlir_dma_copy_lowering or test_emit_mlir_dma_view_lowering or test_emit_mlir_dma_reshape_lowering or test_emit_mlir_dma_free_statement"`
 - 测试目标：
   - 验证 `build_func_op(...)` 生成 `func.func`。
   - 验证 `build_func_op(fn, *runtime_args, globals=None, builtins=None)` 的输入签名仅由运行时参数决定。
@@ -197,6 +200,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - 验证 tensor `!=` 比较在 `build_func_op(...)` / `build_func_op_from_ast(...)` 链路中复用 `CompareExprAST(op="ne")`，并在 memory 路径生成 `nn.ne`（必要时带 `nn.broadcast`）。
   - 验证 tensor `!=` 比较链路在 shape 不可 broadcast、返回注解不匹配或 element type 不一致时的错误路径。
   - 验证 DMA helper 调用在 `build_func_op(...)` 链路中被识别为受支持 DSL 公开能力：`alloc/copy/cast/view/reshape/flatten` 作为返回值表达式参与 lowering，`free` 作为无返回值语句参与 lowering，`load/store/slice/deslice` 维持 memory 读写语义。
+  - 验证 dma helper 子集 `alloc/copy/deslice/free/load/reshape/slice/store/view` 在 `build_func_op(...)` / `emit_mlir` 链路具备稳定覆盖，且参数边界与返回类型约束可由测试直接观测。
   - 验证 alloc-only helper 场景在运行时参数、显式 stride 与非法 dtype/space 输入时的返回类型与错误路径。
   - 验证零入参 DSL 函数可通过 `build_func_op(...)` / `build_func_op_from_ast(...)` 生成 `func.func`，并在返回 `get_block_id()` 时 lowering 为 `arch.get_block_id` 与 `!symbol.int<"block_id">` 返回类型。
   - 验证零入参 DSL 函数可通过 `build_func_op(...)` / `build_func_op_from_ast(...)` 生成 `func.func`，并在返回 `get_block_num()` 时 lowering 为 `arch.get_block_num` 与 `!symbol.int<"block_num">` 返回类型。
@@ -246,6 +250,15 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - MGEN-026C：alloc-only kernel 允许零参数常量形状，`func.func` 无输入且结果类型与 `alloc` 返回一致。（`test_build_func_op_supports_dma_alloc_helper_without_runtime_args`）
   - MGEN-026D：alloc-only kernel 支持显式连续 `stride` 输入并保持结果类型一致。（`test_build_func_op_supports_dma_alloc_helper_with_explicit_stride`）
   - MGEN-026E：alloc-only kernel 遇到非法 dtype / space 或非连续 stride 时必须报错。（`test_build_func_op_rejects_dma_alloc_helper_with_invalid_dtype`、`test_build_func_op_rejects_dma_alloc_helper_with_invalid_space`、`test_build_func_op_rejects_dma_alloc_helper_with_non_contiguous_stride`）
+  - MGEN-026F：`alloc` helper 需覆盖静态 shape、SymbolDim shape、`SymbolDim + const` shape、零参数常量 shape、显式 stride 及非法 dtype/space/stride 错误路径。（`test_build_func_op_supports_dma_alloc_helper_with_runtime_shape_args`、`test_build_func_op_supports_dma_alloc_helper_with_symbol_shape_args`、`test_build_func_op_supports_dma_alloc_helper_with_symbol_plus_const_shape_args`、`test_build_func_op_supports_dma_alloc_helper_without_runtime_args`、`test_build_func_op_supports_dma_alloc_helper_with_explicit_stride`、`test_build_func_op_rejects_dma_alloc_helper_with_invalid_dtype`、`test_build_func_op_rejects_dma_alloc_helper_with_invalid_space`、`test_build_func_op_rejects_dma_alloc_helper_with_non_contiguous_stride`、`test_emit_mlir_dma_alloc_lowering`）
+  - MGEN-026G：`copy` helper 在 DSL 构建与 emit 阶段都必须生成 `dma.copy` 语义并保持目标 memory 结果。（`test_build_func_op_supports_dma_helper_calls`、`test_emit_mlir_dma_copy_lowering`）
+  - MGEN-026H：`deslice` helper 在 DSL 构建阶段必须生成 `dma.deslice` 写回语义。（`test_build_func_op_supports_dma_deslice_helper`）
+  - MGEN-026I：`free` helper 必须作为无返回值语句执行，不生成额外 SSA 结果。（`test_build_func_op_supports_dma_free_statement`、`test_emit_mlir_dma_free_statement`）
+  - MGEN-026J：`load` helper 在 DSL 构建阶段必须生成 `dma.load` 读取语义。（`test_build_func_op_supports_dma_load_helper`）
+  - MGEN-026K：`reshape` helper 在 DSL 构建与 emit 阶段均需收敛为 `dma.reshape` 语义。（`test_build_func_op_supports_dma_helper_calls`、`test_emit_mlir_dma_reshape_lowering`）
+  - MGEN-026L：`slice` helper 在 DSL 构建阶段必须生成 `dma.slice` 切片读取语义。（`test_build_func_op_supports_dma_slice_helper`）
+  - MGEN-026M：`store` helper 在 DSL 构建阶段必须生成 `dma.store` 写回语义。（`test_build_func_op_supports_dma_store_helper`）
+  - MGEN-026N：`view` helper 在 DSL 构建与 emit 阶段均需收敛为 `dma.view` 语义。（`test_build_func_op_supports_dma_helper_calls`、`test_emit_mlir_dma_view_lowering`）
   - MGEN-027：零入参函数直接返回 `get_block_id()` 时，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须生成零参数 `func.func`、单个 `arch.get_block_id`，并返回 `!symbol.int<"block_id">`。（`test_build_func_op_lowers_arch_get_block_id_query`）
   - MGEN-028：纯 symbol 标量 `==` 比较 lowering 为 `symbol.eq`，返回类型为 `i1`；`const/const` 与 `symbol/symbol` 两类输入下均应保持 `SymbolValueType` 输入签名，并覆盖 `return a == b` 与 `c = a == b; return c` 两种函数体形态。（`test_build_func_op_lowers_symbol_eq`）
   - MGEN-029：零入参函数直接返回 `get_block_num()` 时，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须生成零参数 `func.func`、单个 `arch.get_block_num`，并返回 `!symbol.int<"block_num">`。（`test_build_func_op_lowers_arch_get_block_num_query`）

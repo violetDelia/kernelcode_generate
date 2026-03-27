@@ -33,6 +33,7 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
 _REJECT_EXTERNAL_VALUES_ENV_KEY = "__dsl_reject_external_values__"
+_ALLOW_EXTERNAL_CONSTANTS_ENV_KEY = "__dsl_allow_external_constants__"
 
 
 @dataclass(frozen=True)
@@ -932,6 +933,29 @@ def _tensor_annotation_text_from_subscript(node: py_ast.Subscript) -> str:
     return "Tensor[" + ", ".join(items) + "]"
 
 
+def _flatten_pep604_union_nodes(node: object) -> list[object]:
+    """展开 PEP 604 联合注解节点。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 将 `int | SymbolDim` 这类 BitOr 链式注解扁平化为原子节点列表。
+
+    使用示例:
+    - _flatten_pep604_union_nodes(py_ast.parse("int | SymbolDim", mode="eval").body)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    if isinstance(node, py_ast.BinOp) and isinstance(node.op, py_ast.BitOr):
+        return _flatten_pep604_union_nodes(node.left) + _flatten_pep604_union_nodes(node.right)
+    return [node]
+
+
 def _parse_annotation_node(
     node: object | None,
     arg_name: str | None,
@@ -958,11 +982,34 @@ def _parse_annotation_node(
         text = _normalize_annotation_text(node, globals_table, builtins_table, runtime_table)
         return _annotation_from_text(text, arg_name, node)
 
+    if isinstance(node, py_ast.BinOp) and isinstance(node.op, py_ast.BitOr):
+        union_nodes = _flatten_pep604_union_nodes(node)
+        union_name_set: set[str] = set()
+        for union_node in union_nodes:
+            if not isinstance(union_node, py_ast.Name):
+                _raise_parse_error("Unsupported annotation", union_node)
+            union_name_set.add(union_node.id)
+        if union_name_set == {"int", "SymbolDim"}:
+            return ScalarArgAST(
+                name=arg_name or "ret0",
+                value_type=int,
+                is_symbolic=True,
+                location=_location_from_node(node),
+            )
+        _raise_parse_error("Unsupported annotation", node)
+
     if isinstance(node, py_ast.Name):
         if node.id == "int":
             return ScalarArgAST(name=arg_name or "ret0", value_type=int, location=_location_from_node(node))
         if node.id == "bool":
             return ScalarArgAST(name=arg_name or "ret0", value_type=bool, location=_location_from_node(node))
+        if node.id == "SymbolDim":
+            return ScalarArgAST(
+                name=arg_name or "ret0",
+                value_type=int,
+                is_symbolic=True,
+                location=_location_from_node(node),
+            )
         if node.id in globals_table and isinstance(globals_table[node.id], Memory):
             memory = globals_table[node.id]
             return TensorAST(name=arg_name or node.id, memory=memory, location=_location_from_node(node))
@@ -1163,9 +1210,12 @@ def _parse_load_like_call(
     tensor = _parse_expr(expr.args[0], env, globals_table, builtins_table)
     if not isinstance(tensor, TensorAST):
         _raise_parse_error(f"{call_name} source must be TensorAST", expr.args[0])
-    offsets = _parse_expr(expr.args[1], env, globals_table, builtins_table)
-    sizes = _parse_expr(expr.args[2], env, globals_table, builtins_table)
-    stride = _parse_expr(expr.args[3], env, globals_table, builtins_table) if len(expr.args) >= 4 else None
+    index_env = dict(env)
+    if bool(index_env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)):
+        index_env[_ALLOW_EXTERNAL_CONSTANTS_ENV_KEY] = True
+    offsets = _parse_expr(expr.args[1], index_env, globals_table, builtins_table)
+    sizes = _parse_expr(expr.args[2], index_env, globals_table, builtins_table)
+    stride = _parse_expr(expr.args[3], index_env, globals_table, builtins_table) if len(expr.args) >= 4 else None
     space = _parse_expr(expr.args[4], env, globals_table, builtins_table) if len(expr.args) >= 5 else None
     if space is not None and not isinstance(space, MemorySpace):
         _raise_parse_error(f"{call_name} space must be MemorySpace", expr.args[4])
@@ -1212,9 +1262,12 @@ def _parse_store_like_call(
     tensor = _parse_expr(expr.args[1], env, globals_table, builtins_table)
     if not isinstance(tensor, TensorAST):
         _raise_parse_error(f"{call_name} target must be TensorAST", expr.args[1])
-    offsets = _parse_expr(expr.args[2], env, globals_table, builtins_table)
-    sizes = _parse_expr(expr.args[3], env, globals_table, builtins_table)
-    stride = _parse_expr(expr.args[4], env, globals_table, builtins_table) if len(expr.args) >= 5 else None
+    index_env = dict(env)
+    if bool(index_env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)):
+        index_env[_ALLOW_EXTERNAL_CONSTANTS_ENV_KEY] = True
+    offsets = _parse_expr(expr.args[2], index_env, globals_table, builtins_table)
+    sizes = _parse_expr(expr.args[3], index_env, globals_table, builtins_table)
+    stride = _parse_expr(expr.args[4], index_env, globals_table, builtins_table) if len(expr.args) >= 5 else None
     if call_name == "deslice" and len(expr.args) == 6:
         extra_space = _parse_expr(expr.args[5], env, globals_table, builtins_table)
         if not isinstance(extra_space, MemorySpace):
@@ -1349,9 +1402,12 @@ def _parse_dma_call(
         if len(expr.args) != 4 or expr.keywords:
             _raise_parse_error("Unsupported view arity", expr)
         source = _parse_expr(expr.args[0], env, globals_table, builtins_table)
-        offset = _parse_expr(expr.args[1], env, globals_table, builtins_table)
-        size = _parse_expr(expr.args[2], env, globals_table, builtins_table)
-        stride = _parse_expr(expr.args[3], env, globals_table, builtins_table)
+        index_env = dict(env)
+        if bool(index_env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)):
+            index_env[_ALLOW_EXTERNAL_CONSTANTS_ENV_KEY] = True
+        offset = _parse_expr(expr.args[1], index_env, globals_table, builtins_table)
+        size = _parse_expr(expr.args[2], index_env, globals_table, builtins_table)
+        stride = _parse_expr(expr.args[3], index_env, globals_table, builtins_table)
         return DmaViewAST(
             source=source,
             offset=offset,
@@ -1364,7 +1420,10 @@ def _parse_dma_call(
         if len(expr.args) != 2 or expr.keywords:
             _raise_parse_error("Unsupported reshape arity", expr)
         source = _parse_expr(expr.args[0], env, globals_table, builtins_table)
-        shape = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+        index_env = dict(env)
+        if bool(index_env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)):
+            index_env[_ALLOW_EXTERNAL_CONSTANTS_ENV_KEY] = True
+        shape = _parse_expr(expr.args[1], index_env, globals_table, builtins_table)
         return DmaReshapeAST(source=source, shape=shape, location=_location_from_node(expr))
 
     if call_name == "flatten":
@@ -1415,7 +1474,9 @@ def _parse_expr(
             return env[expr.id]
         value = _lookup_python_name(expr.id, globals_table, builtins_table)
         if value is not None and bool(env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)):
-            _raise_parse_error("cannot use external value inside function body", expr)
+            allow_constants = bool(env.get(_ALLOW_EXTERNAL_CONSTANTS_ENV_KEY, False))
+            if not (allow_constants and isinstance(value, (int, float, str))):
+                _raise_parse_error("cannot use external value inside function body", expr)
         if isinstance(value, Memory):
             return TensorAST(name=expr.id, memory=value, location=_location_from_node(expr))
         if isinstance(value, SymbolDim):
