@@ -26,6 +26,7 @@
 - 为优化后的单个 MLIR `func.func` 提供稳定的函数级后端源码生成能力。
 - 统一约束签名、参数顺序、输出参数风格与函数体拼装规则。
 - 明确支持：只读 `Memory` 输入、`Memory` 结果降为显式输出参数、标量参数顺序与默认命名保持、`emit_c` 错误向上抛出。
+- 支持 `!symbol.int<"...">` 标量返回在 `target=cpu` 下生成函数返回值文本。
 
 ## 限制与边界
 
@@ -34,6 +35,7 @@
 - 不负责定义单个 op/value 的代码生成细节；这些由 [`spec/dsl/emit_c.md`](../../spec/dsl/emit_c.md) 负责。
 - 输出源码必须保持函数名、参数名与 IR 定义一致，不能引入额外公开接口。
 - 对于不支持的返回形式、未知 op 或无法映射到目标后端源码的 IR，必须明确报错。
+- 除 `Memory` 结果外，仅允许单一 `!symbol.int<"...">` 标量结果生成返回值；其他非 `Memory` 结果仍需报错。
 
 ## 公开接口
 
@@ -91,6 +93,7 @@ signature = gen_signature(func_op, ctx)
 
 - `Memory` 输入参数在当前恢复范围内必须生成为只读输入参数形式。
 - `Memory` 结果在当前恢复范围内必须生成为显式 `out` 输出参数，而不是直接函数返回值。
+- `!symbol.int<"...">` 结果在 `target=cpu` 下生成为 `long long` 返回值，不生成 `out` 参数。
 - 不支持的返回形式必须明确报错。
 - 参数名来自 `func.func` 的 `arg_attrs.name`；缺失或为空时必须使用 `arg{index}` 默认命名，保持与 `func.func` 参数顺序一致。
 
@@ -122,9 +125,10 @@ body = gen_body(func_op, ctx)
 注意事项：
 
 - 必须保持 IR 中 op 的语义顺序。
-- `func.return` 在当前恢复范围下仅支持无返回或 `Memory` 结果写回 `out`。
+- `func.return` 在当前恢复范围下仅支持无返回、`Memory` 结果写回 `out`，或 `!symbol.int<"...">` 标量返回。
 - 不得在本层引入未在 `emit_c` 中定义的单 op 生成特例。
 - 当 `func.return` 回写 `out` 的值未在 `EmitCContext` 中绑定名称，且该值为 `BlockArgument` 时，必须回退为 `arg{index}` 默认命名以保持与 `gen_signature` 一致。
+- 当 `func.return` 返回 `!symbol.int<"...">` 时，必须生成 `return <expr>;` 并复用 `emit_c` 的命名/表达式规则。
 
 返回与限制：
 
@@ -142,6 +146,8 @@ body = gen_body(func_op, ctx)
 - 验证 `func.func` 到完整目标后端函数源码的生成能力。
 - 验证签名生成与函数体拼装的职责边界清晰。
 - 验证 `Memory` 输入/输出参数规则、参数顺序、错误传播与名称保持行为。
+- 验证 `!symbol.int<"...">` 标量返回的签名与函数体生成规则。
+- 验证 `!symbol.int<"...">` 标量返回仅允许 `target=cpu`；非 cpu target 必须报错。
 
 ### 功能与用例清单
 
@@ -154,3 +160,5 @@ body = gen_body(func_op, ctx)
 - GK-007：`emit_c` 错误向上抛出并保留失败原因。（`test_gen_kernel_propagates_emit_c_error`）
 - GK-008：不支持的返回形式或输入类型明确报错。（`test_gen_signature_rejects_unsupported_return_form`）
 - GK-009：生成源码保留函数名与已命名参数名；当 `gen_signature` 可观察到输入参数缺失 `arg_attrs.name` 时，生成源码沿用 `arg{index}` 默认名。（`test_gen_kernel_preserves_function_and_arg_names`）
+- GK-010：`!symbol.int<"...">` 标量返回可生成函数返回值。（`test_gen_kernel_supports_symbol_scalar_return`）
+- GK-011：非 cpu target 下 `!symbol.int<"...">` 标量返回必须报错，防止跨 target 误生成返回签名/函数体。（`test_gen_kernel_rejects_symbol_scalar_return_on_non_cpu`）

@@ -28,6 +28,7 @@ from xdsl.ir import BlockArgument, Operation, SSAValue
 
 from kernel_gen.dialect.dma import DmaLoadOp, DmaStoreOp
 from kernel_gen.dialect.nn import NnMemoryType
+from kernel_gen.dialect.symbol import SymbolValueType
 
 
 class EmitCError(ValueError):
@@ -99,6 +100,7 @@ _BINARY_SIGILS = {
     "arith.muli": "*",
     "arith.mulf": "*",
     "arith.divf": "/",
+    "symbol.add": "+",
 }
 
 _CMPI_SIGILS = {
@@ -126,6 +128,8 @@ def _type_to_c(attr: Any, ctx: EmitCContext) -> str:
         return "long long"
     if isinstance(attr, NnMemoryType):
         return f"Memory<{_type_to_c(attr.element_type, ctx)}>"
+    if isinstance(attr, SymbolValueType):
+        return "long long"
     raise _emit_error(ctx, f"type {attr}", "unsupported type")
 
 
@@ -189,6 +193,8 @@ def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
     if isinstance(owner, arith.ConstantOp):
         return _format_literal(owner, ctx)
     if owner.name in _BINARY_SIGILS:
+        if owner.name == "symbol.add" and ctx.target != "cpu":
+            raise _emit_error(ctx, owner.name, "symbol scalar ops are cpu-only")
         lhs = emit_c_value(owner.operands[0], ctx)
         rhs = emit_c_value(owner.operands[1], ctx)
         return f"({lhs} {_BINARY_SIGILS[owner.name]} {rhs})"

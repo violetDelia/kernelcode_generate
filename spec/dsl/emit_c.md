@@ -25,7 +25,7 @@
 
 - 为常见算术、比较、控制流与访存 op 提供稳定的节点级源码片段生成规则。
 - 保证同一 SSA value 在同一 `EmitCContext` 中具备稳定命名与稳定表达式输出。
-- 为后续实现恢复明确最小支持范围：`arith` 二元算术、`arith.cmpi`、`scf.for`、unit-tile `dma.load`/`dma.store` 与错误路径。
+- 为后续实现恢复明确最小支持范围：`arith` 二元算术、`arith.cmpi`、`scf.for`、unit-tile `dma.load`/`dma.store`、`symbol.add`（cpu 标量）与错误路径。
 
 ## 限制与边界
 
@@ -34,6 +34,8 @@
 - 不负责 AST 解析、MLIR 构造、优化、文件写盘、编译、链接或运行。
 - 同一接口可针对不同 `target` 生成不同源码，但参数与错误语义必须稳定。
 - 对于无法映射的 op、value 依赖、类型或控制流，必须明确报错，不能静默忽略或降级。
+- 仅新增 `symbol.add` 的 cpu 标量支持；其余 `symbol.*` 仍按不支持处理。
+- 当 value 类型为 `!symbol.int<"...">` 时，`target=cpu` 默认映射为 `long long`。
 - 当前规范恢复范围仅覆盖 `test/dsl/test_emit_c.py` 已定义的用例映射，不在本阶段扩展到其他 dialect/op。
 
 ## 公开接口
@@ -94,6 +96,7 @@ stmt = emit_c_op(op, EmitCContext(target="cpu"))
 - 有副作用 op 与控制流 op 必须保留 IR 顺序语义。
 - `scf.for` 必须生成完整循环语句块。
 - 当前恢复范围下，unit-tile `dma.load`/`dma.store` 必须保留索引顺序与读写方向。
+- `target=cpu` 下 `symbol.add` 必须生成与二元算术等价的赋值语句。
 
 返回与限制：
 
@@ -125,12 +128,13 @@ expr = emit_c_value(value, EmitCContext(target="cpu"))
 - 仅纯表达式 value 允许使用该接口。
 - 若 value 依赖未支持的 owner op 或非法依赖路径，必须报错。
 - 输出表达式必须与 `emit_c_op(...)` 使用的命名策略保持一致。
+- `target=cpu` 下 `symbol.add` 结果可作为右值表达式生成。
 
 返回与限制：
 
 - 返回类型：`str`。
 - 返回语义：可嵌入右值位置的表达式文本。
-- 限制条件：当前恢复范围覆盖算术表达式、比较表达式、常量与 unit-tile `dma.load` 结果。
+- 限制条件：当前恢复范围覆盖算术表达式、比较表达式、常量、unit-tile `dma.load` 结果与 `symbol.add` 标量表达式（仅 cpu）。
 
 ## 测试
 
@@ -142,6 +146,7 @@ expr = emit_c_value(value, EmitCContext(target="cpu"))
 - 验证节点级算术、比较、循环与访存 op 的源码片段生成规则。
 - 验证 `EmitCContext` 下 SSA 命名与表达式生成的一致性。
 - 验证不支持 op 与非法 value 依赖的错误路径。
+- 验证 `symbol.add` 仅允许 `target=cpu`；非 cpu target 必须明确报错。
 
 ### 功能与用例清单
 
@@ -151,3 +156,5 @@ expr = emit_c_value(value, EmitCContext(target="cpu"))
 - EC-004：unit-tile `dma.load`/`dma.store` 可生成合法索引访问代码。（`test_emit_c_op_lowers_memory_access`）
 - EC-005：不支持 op 时抛出包含 op 名称的错误。（`test_emit_c_op_rejects_unsupported_op`）
 - EC-006：非法 value 依赖生成时报错。（`test_emit_c_value_rejects_invalid_dependency`）
+- EC-007：`symbol.add` 在 cpu target 下可生成标量赋值语句与右值表达式。（`test_emit_c_op_lowers_symbol_add`）
+- EC-008：非 cpu target 下 `symbol.add` 必须报错，禁止跨 target 误下发。（`test_emit_c_op_rejects_symbol_add_on_non_cpu`）
