@@ -2,12 +2,12 @@
 
 ## 功能简介
 
-用于定义 `Memory` 高层运算规范，覆盖逐元素算术、比较、显式 `broadcast` / `broadcast_to` 与二维 `matmul`。本层只描述可调用语义、结果元信息约束与错误规则。
+用于定义 `Memory` 高层运算规范，覆盖逐元素算术、比较、显式 `broadcast` / `broadcast_to`、`softmax` 与二维 `matmul`。本层只描述可调用语义、结果元信息约束与错误规则。
 
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/operation/nn.md`](../../spec/operation/nn.md)
 - `功能实现`：[`kernel_gen/operation/nn.py`](../../kernel_gen/operation/nn.py)
 - `test`：[`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py)
@@ -20,7 +20,7 @@
 ## 目标
 
 - 提供 `Memory` 的逐元素算术与比较高层语义。
-- 提供显式 `broadcast` / `broadcast_to` 与二维 `matmul` 的输入输出约束与错误规则。
+- 提供显式 `broadcast` / `broadcast_to`、`softmax` 与二维 `matmul` 的输入输出约束与错误规则。
 - 保持与下游 `nn dialect` 的分层：本层作为用户直接使用的接口，不受限于IR的表达。
 
 ## 限制与边界
@@ -28,6 +28,7 @@
 - 逐元素算术/比较支持隐式广播，仅允许尾维对齐与 singleton dim 扩张。
 - `transpose` 仅支持 `Memory` 输入与显式轴置换，不支持标量或隐式转置。
 - `matmul` 仅定义二维矩阵乘，不支持 batch、广播或隐式转置。
+- `softmax` 仅支持 `Memory` 输入，默认沿最后一维归一化，不负责跨算子融合或近似策略选择。
 - 不定义归约、卷积等其他算子。
 - 不引入复杂自动类型提升规则；`dtype` 兼容性需显式检查。
 - 不负责 AST/IR/lowering 设计。
@@ -438,6 +439,43 @@ out = transpose(value, perm=[1, 0, 2])
 - 若 `value.stride` 存在，`out.stride` 按相同 `perm` 重排。
 - `out.dtype` 与 `out.space` 继承自 `value`。
 
+### `softmax(value, axis=-1)`
+
+功能说明：
+
+- 沿给定轴对输入执行 softmax 归一化，返回概率分布语义的 `Memory` 结果。
+
+参数说明：
+
+- `value` (`Memory`)：待归一化输入。
+- `axis` (`int`)：归一化轴，默认 `-1`（最后一维）。
+
+使用示例：
+
+```python
+value = Memory(shape=["M", "N"], dtype=NumericType.Float32)
+out = softmax(value)
+out_last_dim = softmax(value, axis=1)
+```
+
+注意事项：
+
+- `value` 必须为 `Memory`，否则抛出 `TypeError`。
+- `value.dtype` 必须为浮点类型：`Float16`、`BFloat16`、`Float32`、`Float64`；其他类型必须抛出 `TypeError`。
+- `axis` 必须为整数且不允许 `bool`；非法类型必须抛出 `TypeError`。
+- 允许负轴索引；归一化后的 `axis` 必须满足 `-rank <= axis < rank`，越界必须抛出 `ValueError`。
+- 数值稳定性要求：实现必须采用“减去该轴最大值后再指数化”的等价语义，即 `exp(x - max(x)) / sum(exp(x - max(x)))`，避免直接对原值指数化。
+- 与现有 nn 算子兼容：`softmax` 输出仍为 `Memory`，可直接作为 `add/sub/mul/truediv/floordiv/compare` 的输入。
+
+返回与限制：
+
+- 返回 `Memory` 语义结果。
+- `out.shape == value.shape`。
+- `out.dtype == value.dtype`。
+- `out.space == value.space`。
+- `out.format == value.format`。
+- `out.stride == value.stride`。
+
 ### `matmul(lhs, rhs, memoryspace=None)`
 
 功能说明：
@@ -490,6 +528,7 @@ tmp = matmul(lhs, rhs, memoryspace=MemorySpace.SM)
 - 验证逐元素隐式 broadcast 的 singleton dim / 前置维扩张与错误规则。
 - 验证 `nn.add` / `nn.floordiv` 的 `dtype` 固定优先级决议，以及 `format/stride` 不一致时回落默认布局。
 - 验证 `matmul(lhs, rhs, memoryspace=None)` 的二维输入约束、`memoryspace` 覆盖、结果 `format/stride` 口径与错误规则。
+- 验证 `softmax(value, axis=-1)` 的 axis 默认值/负轴归一化、输入 dtype 约束、数值稳定性语义要求与错误路径。
 - 验证比较结果使用 `NumericType.Bool` 作为 predicate 载体。
 - 验证 nn 操作不依赖已移除的旧 shape 规范化入口。
 - 验证 `img2col` 输出形状与参数校验规则。
@@ -536,4 +575,10 @@ tmp = matmul(lhs, rhs, memoryspace=MemorySpace.SM)
 | OP-MM-005 | `matmul` 标量输入非法 | `test_nn_matmul_scalar_operand_error` |
 | OP-MM-006 | `matmul` 的 `dtype` 按固定优先级决议 | `test_nn_matmul_dtype_mismatch` |
 | OP-MM-007 | `matmul` 输入 `space` 不一致报错 | `test_nn_matmul_space_mismatch` |
+| OP-SM-001 | `softmax` 默认 `axis=-1`，结果保持输入 `shape/dtype/space/format/stride` | `test_nn_softmax_default_axis` |
+| OP-SM-002 | `softmax` 支持负轴并归一化到合法维度 | `test_nn_softmax_negative_axis` |
+| OP-SM-003 | `softmax` 的 `axis` 非整数或为 `bool` 时报 `TypeError` | `test_nn_softmax_axis_type_error` |
+| OP-SM-004 | `softmax` 的 `axis` 越界时报 `ValueError` | `test_nn_softmax_axis_out_of_range` |
+| OP-SM-005 | `softmax` 非浮点 `dtype` 输入报 `TypeError` | `test_nn_softmax_dtype_error` |
+| OP-SM-006 | `softmax` 限定数值稳定语义为 `exp(x - max(x)) / sum(exp(x - max(x)))` | `test_nn_softmax_numerical_stability_contract` |
 | OP-IMG2COL-001 | `img2col` 输出形状与参数校验规则 | `test_nn_img2col_basic` |

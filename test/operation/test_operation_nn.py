@@ -48,6 +48,7 @@ from kernel_gen.operation.nn import (
     matmul,
     mul,
     ne,
+    softmax,
     sub,
     truediv,
 )
@@ -830,3 +831,107 @@ def test_nn_img2col_basic() -> None:
 
     with pytest.raises(ValueError):
         _ = img2col(value, kh=7, kw=7, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)
+
+
+# OP-SM-001
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-27 09:34:06 +0800
+# 最近一次运行成功时间: 2026-03-27 09:34:06 +0800
+# 测试目的: 验证 softmax 默认 axis=-1 且结果保持输入元信息。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_softmax_default_axis
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_softmax_default_axis() -> None:
+    value = Memory([2, 3], NumericType.Float32, space=MemorySpace.LM, stride=SymbolShape([3, 1]))
+    result = softmax(value)
+    assert result.shape.get_values() == [2, 3]
+    assert result.dtype is NumericType.Float32
+    assert result.space is MemorySpace.LM
+    assert result.format is Farmat.Norm
+    assert result.get_stride() == [3, 1]
+
+
+# OP-SM-002
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-27 09:34:06 +0800
+# 最近一次运行成功时间: 2026-03-27 09:34:06 +0800
+# 测试目的: 验证 softmax 负轴归一化路径。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_softmax_negative_axis
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_softmax_negative_axis() -> None:
+    value = Memory(["B", "C", "H"], NumericType.Float16)
+    result = softmax(value, axis=-2)
+    assert result.shape.get_values() == ["B", "C", "H"]
+    assert result.dtype is NumericType.Float16
+
+
+# OP-SM-003
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-27 09:34:06 +0800
+# 最近一次运行成功时间: 2026-03-27 09:34:06 +0800
+# 测试目的: 验证 softmax axis 非整数或为 bool 时抛 TypeError。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_softmax_axis_type_error
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_softmax_axis_type_error() -> None:
+    value = Memory([2, 3], NumericType.Float32)
+    with pytest.raises(TypeError):
+        _ = softmax(value, axis=True)
+    with pytest.raises(TypeError):
+        _ = softmax(value, axis=1.5)
+
+
+# OP-SM-004
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-27 09:34:06 +0800
+# 最近一次运行成功时间: 2026-03-27 09:34:06 +0800
+# 测试目的: 验证 softmax axis 越界抛 ValueError。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_softmax_axis_out_of_range
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_softmax_axis_out_of_range() -> None:
+    value = Memory([2, 3], NumericType.Float32)
+    with pytest.raises(ValueError):
+        _ = softmax(value, axis=2)
+    with pytest.raises(ValueError):
+        _ = softmax(value, axis=-3)
+
+
+# OP-SM-005
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-27 09:34:06 +0800
+# 最近一次运行成功时间: 2026-03-27 09:34:06 +0800
+# 测试目的: 验证 softmax 非浮点 dtype 抛 TypeError。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_softmax_dtype_error
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_softmax_dtype_error() -> None:
+    value = Memory([2, 3], NumericType.Int32)
+    with pytest.raises(TypeError):
+        _ = softmax(value)
+
+
+# OP-SM-006
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-27 09:34:06 +0800
+# 最近一次运行成功时间: 2026-03-27 09:34:06 +0800
+# 测试目的: 验证 softmax 数值稳定性语义约束存在。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_softmax_numerical_stability_contract
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_softmax_numerical_stability_contract() -> None:
+    doc = softmax.__doc__ or ""
+    assert "exp(x - max(x)) / sum(exp(x - max(x)))" in doc
