@@ -1,0 +1,80 @@
+## 2026-03-28 03:18:16 +0800
+- 时间: 2026-03-28 03:18:16 +0800
+- 经手人: 朽木露琪亚
+- 任务: T-20260328-dcbb4233 symbol 组 expectation spec
+- 任务目标: 补齐 symbol 组 expectation 修复链路规范、测试映射与验收命令
+- 改动:
+  - 同步 expectation/dsl/mlir_gen/dialect/symbol 与 expectation/utils 为主目录版本，确保 expectation 在本 worktree 可执行。
+  - 更新 spec/dsl/mlir_gen.md：补充 symbol 组 expectation 验收命令与 MGEN-018/021/022/023/024/028/030 的 expectation 映射。
+  - 执行 `python expectation/dsl/mlir_gen/dialect/symbol/add`，退出码 0。
+  - 执行 `python expectation/dsl/mlir_gen/dialect/symbol/sub`，退出码 0。
+  - 执行 `python expectation/dsl/mlir_gen/dialect/symbol/mul`，退出码 0。
+  - 执行 `python expectation/dsl/mlir_gen/dialect/symbol/truediv`，退出码 0。
+  - 执行 `python expectation/dsl/mlir_gen/dialect/symbol/floordiv`，退出码 0。
+  - 执行 `python expectation/dsl/mlir_gen/dialect/symbol/eq`，退出码 0。
+  - 执行 `python expectation/dsl/mlir_gen/dialect/symbol/ge`，退出码 0。
+- 结论: spec 阶段收敛完成且 expectation 通过；建议进入实现阶段确认符号算术/比较链路的实现与测试闭环。
+## 2026-03-28 03:58:28 +0800
+- 时间: 2026-03-28 03:58:28 +0800
+- 经手人: 金铲铲大作战
+- 任务: T-20260328-c18d38aa symbol 组 expectation 实现/测试
+- 任务目标: 核对 symbol 组 lowering 链路实现与测试闭环，确保 expectation 可运行通过。
+- 改动:
+  - 未改动实现与测试代码；现有实现满足 spec 与测试要求。
+  - 执行 `PYTHONPATH=. python expectation/dsl/mlir_gen/dialect/symbol/add`，退出码 0。
+  - 执行 `PYTHONPATH=. python expectation/dsl/mlir_gen/dialect/symbol/sub`，退出码 0。
+  - 执行 `PYTHONPATH=. python expectation/dsl/mlir_gen/dialect/symbol/mul`，退出码 0。
+  - 执行 `PYTHONPATH=. python expectation/dsl/mlir_gen/dialect/symbol/truediv`，退出码 0。
+  - 执行 `PYTHONPATH=. python expectation/dsl/mlir_gen/dialect/symbol/floordiv`，退出码 0。
+  - 执行 `PYTHONPATH=. python expectation/dsl/mlir_gen/dialect/symbol/eq`，退出码 0。
+  - 执行 `PYTHONPATH=. python expectation/dsl/mlir_gen/dialect/symbol/ge`，退出码 0。
+- 结论: expectation 全部通过，建议进入审查阶段核对 spec/实现/测试一致性后收敛。
+## 2026-03-28 04:12:51 +0800
+- 时间: 2026-03-28 04:12:51 +0800
+- 经手人: 不要啊教练
+- 任务: T-20260328-7e6b165f symbol 组 expectation 审查
+- 任务目标: 复核 symbol add/sub/mul/truediv/floordiv/eq/ge 链路 spec/实现/测试一致性并完成 expectation 复验。
+- 改动:
+  - 复核 spec/dsl/mlir_gen.md MGEN-018/021/022/023/024/028/030 与实现 kernel_gen/dsl/{ast.py,emit_mlir.py,mlir_gen.py}；确认 symbol binary/compare 仅在 SymbolValueType 分支 lowering，非 symbol/不支持 op 路径会抛错。
+  - 复核 test/dsl/test_ast_visitor.py：存在 test_symbol_scalar_function_lowers_symbol_binary_ops、test_build_func_op_lowers_symbol_ge/test_emit_mlir_lowers_symbol_ge；未发现 spec MGEN-028 指向的 test_build_func_op_lowers_symbol_eq。
+  - 执行 `PYTHONPATH=. python expectation/dsl/mlir_gen/dialect/symbol/add`，退出码 0。
+  - 执行 `PYTHONPATH=. python expectation/dsl/mlir_gen/dialect/symbol/sub`，退出码 0。
+  - 执行 `PYTHONPATH=. python expectation/dsl/mlir_gen/dialect/symbol/mul`，退出码 0。
+  - 执行 `PYTHONPATH=. python expectation/dsl/mlir_gen/dialect/symbol/truediv`，退出码 0。
+  - 执行 `PYTHONPATH=. python expectation/dsl/mlir_gen/dialect/symbol/floordiv`，退出码 0。
+  - 执行 `PYTHONPATH=. python expectation/dsl/mlir_gen/dialect/symbol/eq`，退出码 0。
+  - 执行 `PYTHONPATH=. python expectation/dsl/mlir_gen/dialect/symbol/ge`，退出码 0。
+- 结论:
+  - 问题1（测试缺失/映射不闭环）: spec/dsl/mlir_gen.md 的 MGEN-028 映射到 test_build_func_op_lowers_symbol_eq，但 test/dsl/test_ast_visitor.py 中不存在该用例，导致 symbol.eq build_func_op 关键路径缺少测试覆盖，spec/test 映射不闭环。
+  - 影响范围: symbol.eq 的 build_func_op 语义（const/const 与 symbol/symbol，直接 return 与中间变量 return）缺少测试锁定，存在回归风险。
+  - 漏洞/边界排查: 已检查 symbol binary/compare 的类型分支、异常路径（unsupported op、非 symbol 输入）与返回类型校验；未发现除测试缺失外的新增可利用绕过路径。
+  - 可维护性建议（可选）: 为 symbol compare/binary 建立复用测试 helper，统一 eq/ge 断言结构，降低后续映射漂移风险。
+  - 结论: 需修改。
+## 2026-03-28 04:22:13 +0800
+- 时间: 2026-03-28 04:22:13 +0800
+- 经手人: jcc你莫辜负
+- 任务: T-20260328-e0c104e5 MGEN-028 symbol.eq build_func_op 用例补齐
+- 任务目标: 修复 MGEN-028 测试缺失，补充 symbol.eq 的 build_func_op 覆盖（const/const、symbol/symbol、直接 return、中间变量 return），并完成验收。
+- 改动:
+  - 更新 test/dsl/test_ast_visitor.py：补充 SymbolEqOp 导入并新增 test_build_func_op_lowers_symbol_eq。
+  - 新用例覆盖 4 类输入/返回形态：const/const + 直接 return、const/const + 中间变量 return、symbol/symbol + 直接 return、symbol/symbol + 中间变量 return。
+  - 新用例断言 SymbolEqOp 数量、compare 结果类型 i1、return 类型 i1、函数输出类型 i1，并检查 IR 中存在 symbol.eq。
+  - 执行 `pytest -q test/dsl/test_ast_visitor.py -k 'test_build_func_op_lowers_symbol_eq or test_build_func_op_lowers_symbol_ge'`，退出码 0（2 passed, 174 deselected）。
+  - 执行 `PYTHONPATH=. python expectation/dsl/mlir_gen/dialect/symbol/eq`，退出码 0。
+- 结论: MGEN-028 映射测试已补齐并通过验收；建议进入审查阶段重点复核 symbol.eq 新增断言的边界覆盖与回归风险。
+## 2026-03-28 04:25:10 +0800
+- 时间: 2026-03-28 04:25:10 +0800
+- 经手人: 不要啊教练
+- 任务: T-20260328-fcbcd3a6 MGEN-028 symbol.eq 复审
+- 任务目标: 复核 spec/实现/测试/expectation 一致性，覆盖功能正确性、边界条件、异常路径、可利用绕过路径、回归风险与可维护性。
+- 改动:
+  - 复核 spec/dsl/mlir_gen.md、kernel_gen/dsl/{ast.py,emit_mlir.py,mlir_gen.py} 与 test/dsl/test_ast_visitor.py；确认新增 test_build_func_op_lowers_symbol_eq 覆盖 const/const 与 symbol/symbol、return/赋值返回形态。
+  - 复测: pytest -q test/dsl/test_ast_visitor.py -k 'test_build_func_op_lowers_symbol_eq or test_build_func_op_lowers_symbol_ge'（exit=0，2 passed）。
+  - 复验: PYTHONPATH=. python expectation/dsl/mlir_gen/dialect/symbol/eq（exit=0）。
+- 结论:
+  - 功能正确性: build_func_op 对 symbol.eq 输出 i1，函数签名与 ReturnOp 类型一致；与 spec MGEN-028 要求一致。
+  - 边界/异常路径: symbol compare 仅在 SymbolValueType 分支 lowering，非 symbol/不支持 op 触发错误路径；新增测试覆盖 const/const 与 symbol/symbol 输入两端。
+  - 可利用绕过路径: 未发现可绕过 SymbolValueType 校验或在非 symbol 输入下生成 symbol.eq 的路径。
+  - 回归风险: 已补齐对应测试用例，spec/test 映射闭环。
+  - 可维护性建议（可选）: 可抽取 compare 测试的 _expected_expr/断言逻辑，降低 eq/ge 用例重复维护成本。
+  - 结论: 通过。
