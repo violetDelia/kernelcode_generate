@@ -393,6 +393,55 @@ class DmaAllocOp(IRDLOperation):
 
 
 @irdl_op_definition
+class DmaFreeOp(IRDLOperation):
+    """dma.free。"""
+
+    name = "dma.free"
+
+    source = operand_def(NnMemoryType)
+
+    def __init__(self, source: SSAValue | Operation) -> None:
+        """初始化 dma.free。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 设置待释放的 source operand。
+
+        使用示例:
+        - DmaFreeOp(source)
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma_dialect.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        super().__init__(operands=[source])
+
+    def verify_(self) -> None:
+        """校验 dma.free。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - source 必须为 nn.memory。
+
+        使用示例:
+        - DmaFreeOp(...).verify_()
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma_dialect.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        _verify_memory_type(self.source.type, "source")
+
+
+@irdl_op_definition
 class DmaCopyOp(IRDLOperation):
     """dma.copy。"""
 
@@ -1010,6 +1059,7 @@ class Dma(Dialect):
     name = "dma"
     operations = [
         DmaAllocOp,
+        DmaFreeOp,
         DmaCopyOp,
         DmaLoadOp,
         DmaStoreOp,
@@ -1025,6 +1075,7 @@ class Dma(Dialect):
 __all__ = [
     "Dma",
     "DmaAllocOp",
+    "DmaFreeOp",
     "DmaCopyOp",
     "DmaLoadOp",
     "DmaStoreOp",
