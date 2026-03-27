@@ -113,7 +113,7 @@ def _resolve_add_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 按固定优先级选择更靠后的类型。
+    - 按固定优先级选择更靠前的类型。
     - 不支持的 dtype 触发 TypeError。
 
     使用示例:
@@ -129,7 +129,7 @@ def _resolve_add_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
         rhs_rank = _NN_ADD_PROMOTION_RANK[rhs]
     except KeyError as exc:
         raise TypeError("Unsupported dtype for nn.add") from exc
-    return lhs if lhs_rank >= rhs_rank else rhs
+    return lhs if lhs_rank <= rhs_rank else rhs
 
 
 def _resolve_scalar_dtype(memory_dtype: NumericType) -> NumericType:
