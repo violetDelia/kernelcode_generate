@@ -446,6 +446,10 @@ def _resolve_index_symbol(name: str, ctx: EmitContext, location: SourceLocation 
     value = ctx.symbols[name]
     if not isinstance(value, SSAValue):
         raise _LoweringError("Index symbol must be SSA value", location=location)
+    if isinstance(value.type, SymbolValueType):
+        return value
+    if isinstance(value.type, (IndexType, IntegerType)):
+        return _ensure_index_value(value, ctx, location)
     return _cast_to_symbol_int(value, ctx, name, location)
 
 
@@ -502,9 +506,9 @@ def _resolve_index_symbol_product(expr: str, ctx: EmitContext, location: SourceL
         raise _LoweringError("Unsupported index expression", location=location)
     if len(parts) == 1:
         return _resolve_index_symbol(parts[0], ctx, location)
-    current = _resolve_index_symbol(parts[0], ctx, location)
+    current = _cast_to_symbol_int(_resolve_index_symbol(parts[0], ctx, location), ctx, parts[0], location)
     for part in parts[1:]:
-        rhs = _resolve_index_symbol(part, ctx, location)
+        rhs = _cast_to_symbol_int(_resolve_index_symbol(part, ctx, location), ctx, part, location)
         rhs_expr = rhs.type.expr.expr.data
         result_type = SymbolValueType.from_expr(build_public_symbol_expr(current.type.expr.expr.data, rhs_expr, "*"))
         op = SymbolMulOp(current, rhs, result_type)
@@ -516,7 +520,7 @@ def _resolve_index_symbol_product(expr: str, ctx: EmitContext, location: SourceL
 def _resolve_index_operand(expr: object, ctx: EmitContext, location: SourceLocation | None) -> SSAValue:
     if isinstance(expr, ConstAST):
         if isinstance(expr.value, int):
-            return _const_symbol_int(expr.value, ctx, expr.location)
+            return _const_index(expr.value, ctx)
         if isinstance(expr.value, str):
             return _resolve_index_symbol(expr.value, ctx, expr.location)
         raise _LoweringError("Index must be int or str", location=expr.location)
@@ -524,9 +528,9 @@ def _resolve_index_operand(expr: object, ctx: EmitContext, location: SourceLocat
         value = _lookup_symbol(expr, ctx)
         if not isinstance(value, SSAValue):
             raise _LoweringError("Index operand must be SSA value", location=expr.location)
-        return _cast_to_symbol_int(value, ctx, expr.name, expr.location)
+        return _ensure_index_value(value, ctx, expr.location)
     if isinstance(expr, int):
-        return _const_symbol_int(expr, ctx, location)
+        return _const_index(expr, ctx)
     if isinstance(expr, str):
         if "*" in expr:
             return _resolve_index_symbol_product(expr, ctx, location)
@@ -1640,9 +1644,7 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
     if isinstance(node, DmaFreeAST):
         value = _lower_expr(node.value, ctx)
         _expect_memory_value(value, node.location)
-        op = DmaFreeOp(value)
-        ctx.builder.add_op(op)
-        return op
+        return None
     if isinstance(node, ArchLaunchKernelAST):
         if not isinstance(node.name, str) or node.name == "":
             raise _LoweringError("launch_kernel name must be non-empty str", location=node.location)
