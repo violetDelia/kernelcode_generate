@@ -93,6 +93,7 @@ from kernel_gen.dialect.symbol import (
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
+from kernel_gen.target import registry
 
 from .ast import (
     ArchGetDynamicMemoryAST,
@@ -144,6 +145,48 @@ class _LoweringError(ValueError):
         self.location = location
 
 
+def _validate_emit_context_config(config: dict[str, object] | None) -> None:
+    """校验 EmitContext.config 中的 target/hardware 字段。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 当 config 中包含 target/hardware 时，校验其类型与字段约束。
+    - 约束规则与 spec/target/registry.md 一致，仅做字段合法性检查。
+
+    使用示例:
+    - _validate_emit_context_config({"target": "gpu_a", "hardware": {"thread_num": 256}})
+
+    关联文件:
+    - spec: spec/dsl/emit_mlir.md, spec/target/registry.md
+    - test: test/dsl/test_emit_mlir.py
+    - 功能实现: kernel_gen/dsl/emit_mlir.py
+    """
+    if config is None:
+        return
+    if not isinstance(config, dict):
+        raise _LoweringError("EmitContext config must be dict or None")
+    if "target" in config:
+        target = config["target"]
+        if not isinstance(target, str):
+            raise _LoweringError("EmitContext target must be str")
+        try:
+            registry._validate_target_name(target)
+        except ValueError as exc:
+            raise _LoweringError(str(exc)) from exc
+    if "hardware" in config:
+        hardware = config["hardware"]
+        if not isinstance(hardware, dict):
+            raise _LoweringError("EmitContext hardware must be dict[str, int]")
+        target_name = config.get("target")
+        target_label = target_name if isinstance(target_name, str) else "emit_context"
+        try:
+            registry._validate_hardware_map(hardware, target_label)
+        except ValueError as exc:
+            raise _LoweringError(str(exc)) from exc
+
+
 class EmitContext:
     """AST 节点发射上下文。"""
 
@@ -154,6 +197,7 @@ class EmitContext:
         types: dict[int, object],
         config: dict[str, object] | None = None,
     ) -> None:
+        _validate_emit_context_config(config)
         self.builder = builder
         self.symbols = symbols
         self.types = types

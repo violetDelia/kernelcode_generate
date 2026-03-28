@@ -1018,6 +1018,50 @@ def test_emit_mlir_loop_vars_validation() -> None:
         _get_loop_vars(bad_ctx)
 
 
+# EMIT-011B
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-28 20:10:00 +0800
+# 最近一次运行成功时间: 2026-03-28 20:10:00 +0800
+# 功能说明: 验证 EmitContext 对非法 target 配置的报错路径。
+# 测试目的: 覆盖 config.target 未满足 target registry 命名约束时的异常路径。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_context_rejects_invalid_target_name
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md, spec/target/registry.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_emit_context_rejects_invalid_target_name() -> None:
+    with pytest.raises(_LoweringError) as exc_info:
+        EmitContext(
+            builder=Block(arg_types=[]),
+            symbols={},
+            types={},
+            config={"target": "Bad-Name"},
+        )
+    assert "target name must match" in str(exc_info.value)
+
+
+# EMIT-011C
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-28 20:10:00 +0800
+# 最近一次运行成功时间: 2026-03-28 20:10:00 +0800
+# 功能说明: 验证 EmitContext 对非法 hardware 配置的报错路径。
+# 测试目的: 覆盖 config.hardware 未满足 target registry 字段约束时的异常路径。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_context_rejects_invalid_hardware_field
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md, spec/target/registry.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_emit_context_rejects_invalid_hardware_field() -> None:
+    with pytest.raises(_LoweringError) as exc_info:
+        EmitContext(
+            builder=Block(arg_types=[]),
+            symbols={},
+            types={},
+            config={"hardware": {"bad_key": 1}},
+        )
+    assert "hardware has unknown key" in str(exc_info.value)
+
+
 # EMIT-012A
 # 创建者: 不要啊教练
 # 最后一次更改: 不要啊教练

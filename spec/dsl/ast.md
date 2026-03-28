@@ -36,6 +36,10 @@
 - 只支持受限语法子集，具体范围以测试清单为准。
 - 不做优化、融合或后端相关行为。
 - [immutable]只提供ast节点定义以及将函数翻译为ast树的能力。
+- AST 节点仅表达前端语义，不携带 `target` 或 `hardware` 字段；`target` 为目标后端名称，`hardware` 为硬件参数表（字段范围见 [`spec/target/registry.md`](../../spec/target/registry.md)）。
+- target/硬件相关信息仅允许在后续 lowering 或 emit 阶段通过上下文注入，AST 不解析也不回写这些字段。
+- `MemorySpace` 由 [`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md) 定义；AST 仅在 helper 参数校验中引用该枚举，不定义成员或语义。
+- `ArchQueryAST` 归属 AST 层，仅覆盖无参 arch builtin 查询入口，结果类型与 target/hardware 的解析由下游层负责。
 - `for` 循环仅支持 `range(...)`、`LoopRange(...)` 或 `loop(...)` 的 1~3 参数形式，并解析为 `ForAST` 的 `start/end/step` 字段。
 - `for` 循环体内不允许出现 `return`；出现即视为语法不支持并报错。
 - 显式 `-> None` 返回注解表示函数无公开返回值；该场景允许函数体只包含语句且省略 `return`。

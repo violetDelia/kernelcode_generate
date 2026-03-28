@@ -24,6 +24,8 @@
 
 - `EmitContext`：发射上下文，包含 builder、类型映射与符号表。
 - `MLIR Value`：MLIR SSA value 的抽象表示。
+- `target`：目标后端名称（`str`），与 [`spec/target/registry.md`](../../spec/target/registry.md) 的 `TargetSpec.name` 一致。
+- `hardware`：硬件参数表（`dict[str, int]`），字段范围见 [`spec/target/registry.md`](../../spec/target/registry.md)（如 `thread_num`、`block_num`、`subthread_num`、`*_memory_size`）。
 
 ## 目标
 
@@ -36,6 +38,7 @@
 - 不解析 Python 函数，不遍历 AST。
 - 不做优化、常量折叠或后端特化。
 - 不生成 MLIR 文本；文本输出由上游调用方负责。
+- 发射阶段仅消费 AST 与上下文，不向 AST 注入 `target`/`hardware` 字段；相关信息只能通过 `EmitContext` 或外部上下文传入。
 - 当 `ForAST` 来自 `LoopRange(start, end, step)` 且边界与循环变量保持 symbol 整数语义时，必须 lowering 为 `symbol.for`，不得回退为 `scf.for`；其循环块参数 `it` 必须为 `!symbol.int<"expr">`。
 - 在上述 `LoopRange` 场景中，循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand 必须直接复用 `!symbol.int<"expr">` value，不得插入 `arith.index_cast`；若循环变量 `it` 退化为 `index`、普通整数或浮点类型，应视为 lowering 违规。
 - 当 DSL AST 表达 `alloc`、`copy`、`cast`、`view`、`reshape`、`flatten`、`load`、`store`、`slice`、`deslice` 这组 DMA helper 调用时，`emit_mlir` 必须按对应 memory 语义 lowering；其中 `flatten` 公开上视为一维 `reshape` 语义，不要求生成独立 dialect op。
@@ -64,17 +67,23 @@
 - `builder` (`object`)：MLIR 构建器或等价接口。
 - `symbols` (`dict`)：变量名到 MLIR value 的映射。
 - `types` (`object`)：类型映射或类型系统入口。
-- `config` (`dict|None`)：可选配置。
+- `config` (`dict|None`)：可选配置，可包含 `target`（`str`）与 `hardware`（`dict[str, int]`）。
 
 使用示例：
 
 ```python
-ctx = EmitContext(builder=builder, symbols={}, types=types, config={"keep_location": True})
+ctx = EmitContext(
+    builder=builder,
+    symbols={},
+    types=types,
+    config={"keep_location": True, "target": "gpu_a", "hardware": {"thread_num": 256}},
+)
 ```
 
 注意事项：
 
 - `symbols` 必须在遍历过程中保持一致性。
+- `config` 中的 `target`/`hardware` 若提供，必须满足 target registry 的字段约束；发射阶段不得修改这些值。
 
 返回与限制：
 

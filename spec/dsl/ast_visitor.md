@@ -36,6 +36,7 @@
 - 不解析 Python 函数源码；解析入口由 `ast.parse_function(...)` 提供。
 - 不定义任何节点的 MLIR 生成细节；仅负责遍历与分发。
 - 不生成 MLIR 文本，不负责 module 封装。
+- 不引入 target/硬件字段或默认值；`EmitContext.config` 中的 `target`/`hardware` 由上游注入，访问器仅透传至 emit 逻辑。
 
 ## 公开接口
 
@@ -79,12 +80,19 @@ visitor = AstVisitor(config={"keep_location": True})
 使用示例：
 
 ```python
+ctx = EmitContext(
+    builder=builder,
+    symbols={},
+    types=types,
+    config={"target": "gpu_a", "hardware": {"thread_num": 256}},
+)
 result = visitor.visit_function(func_ast, ctx)
 ```
 
 注意事项：
 
 - 必须保证语句遍历顺序与 AST 一致。
+- `ctx.config` 中的 `target`/`hardware` 必须保持原样传递，不得由访问器篡改或注入默认值。
 
 返回与限制：
 
