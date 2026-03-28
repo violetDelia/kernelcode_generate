@@ -809,15 +809,22 @@ def test_emit_mlir_dma_view_lowering() -> None:
     result = _lower_expr(
         DmaViewAST(
             source=source,
-            offset=[ConstAST(1), ConstAST(1)],
+            offset=[ConstAST(0), ConstAST(1)],
             size=[ConstAST(2), ConstAST(2)],
-            stride=[ConstAST(1), ConstAST(1)],
+            stride=[ConstAST(3), ConstAST(1)],
             location=None,
         ),
         ctx,
     )
     assert isinstance(result.owner, DmaViewOp)
     assert [attr.data for attr in result.type.shape.data] == [2, 2]
+    assert [attr.data for attr in result.type.stride.data] == [3, 1]
+    offsets = list(result.owner.offsets)
+    stride = list(result.owner.stride)
+    assert offsets[0].owner.value.value.data == 0
+    assert offsets[1].owner.value.value.data == 1
+    assert stride[0].owner.value.value.data == 3
+    assert stride[1].owner.value.value.data == 1
 
 
 # EMIT-019
