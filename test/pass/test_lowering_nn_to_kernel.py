@@ -7,18 +7,18 @@
 - 覆盖 nn_to_kernel pass 的 lowering 行为与错误路径。
 
 使用示例:
-- pytest -q test/pass/test_lowing_nn_to_kernel.py
+- pytest -q test/pass/test_lowering_nn_to_kernel.py
 
 当前覆盖率信息:
-- `kernel_gen.passes.lowing.nn_to_kernel`：`100%`（2026-03-23 04:07:56 +0800，`15 passed`）。
+- `kernel_gen.passes.lowering.nn_to_kernel`：`100%`（2026-03-23 04:07:56 +0800，`15 passed`）。
 
 覆盖率命令:
-- `pytest --cov=kernel_gen.passes.lowing.nn_to_kernel --cov-report=term-missing -q test/pass/test_lowing_nn_to_kernel.py`
+- `pytest --cov=kernel_gen.passes.lowering.nn_to_kernel --cov-report=term-missing -q test/pass/test_lowering_nn_to_kernel.py`
 
 关联文件:
-- 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
-- Spec 文档: spec/pass/lowing/nn_to_kernel.md
-- 测试文件: test/pass/test_lowing_nn_to_kernel.py
+- 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+- Spec 文档: spec/pass/lowering/nn_to_kernel.md
+- 测试文件: test/pass/test_lowering_nn_to_kernel.py
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ from kernel_gen.dialect.nn import (
     NnTrueDivOp,
 )
 from kernel_gen.dialect.symbol import SymbolValueType
-pass_module = importlib.import_module("kernel_gen.passes.lowing.nn_to_kernel")
+pass_module = importlib.import_module("kernel_gen.passes.lowering.nn_to_kernel")
 LowerNnToKernelError = pass_module.LowerNnToKernelError
 LowerNnToKernelPass = pass_module.LowerNnToKernelPass
 
@@ -87,9 +87,9 @@ class NnSelectOp(IRDLOperation):
     - NnSelectOp(cond, lhs, rhs, result_type, space)
 
     关联文件:
-    - spec: spec/pass/lowing/nn_to_kernel.md
-    - test: test/pass/test_lowing_nn_to_kernel.py
-    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
     """
 
     name = "nn.select"
@@ -129,9 +129,9 @@ class NnCastOp(IRDLOperation):
     - NnCastOp(input_value, result_type, space)
 
     关联文件:
-    - spec: spec/pass/lowing/nn_to_kernel.md
-    - test: test/pass/test_lowing_nn_to_kernel.py
-    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
     """
 
     name = "nn.cast"
@@ -167,9 +167,9 @@ class NnNoSpaceOp(IRDLOperation):
     - NnNoSpaceOp(lhs, rhs, result_type)
 
     关联文件:
-    - spec: spec/pass/lowing/nn_to_kernel.md
-    - test: test/pass/test_lowing_nn_to_kernel.py
-    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
     """
 
     name = "nn.add"
@@ -201,9 +201,9 @@ class NnBadResultTypeOp(IRDLOperation):
     - NnBadResultTypeOp(lhs, rhs, space)
 
     关联文件:
-    - spec: spec/pass/lowing/nn_to_kernel.md
-    - test: test/pass/test_lowing_nn_to_kernel.py
-    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
     """
 
     name = "nn.add"
@@ -240,9 +240,9 @@ class NnUnsupportedOp(IRDLOperation):
     - NnUnsupportedOp(lhs, rhs, result_type, space)
 
     关联文件:
-    - spec: spec/pass/lowing/nn_to_kernel.md
-    - test: test/pass/test_lowing_nn_to_kernel.py
-    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
     """
 
     name = "nn.unsupported"
@@ -280,9 +280,9 @@ class NnMultiResultOp(IRDLOperation):
     - NnMultiResultOp(lhs, rhs, result_type, space)
 
     关联文件:
-    - spec: spec/pass/lowing/nn_to_kernel.md
-    - test: test/pass/test_lowing_nn_to_kernel.py
-    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
     """
 
     name = "nn.add"
@@ -321,9 +321,9 @@ class NnBadOperandOp(IRDLOperation):
     - NnBadOperandOp(lhs, result_type, space)
 
     关联文件:
-    - spec: spec/pass/lowing/nn_to_kernel.md
-    - test: test/pass/test_lowing_nn_to_kernel.py
-    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
     """
 
     name = "nn.add"
@@ -359,9 +359,9 @@ class RegionWrapperOp(IRDLOperation):
     - RegionWrapperOp(region)
 
     关联文件:
-    - spec: spec/pass/lowing/nn_to_kernel.md
-    - test: test/pass/test_lowing_nn_to_kernel.py
-    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
     """
 
     name = "test.wrapper"
@@ -385,9 +385,9 @@ def _make_space(name: str) -> NnMemorySpaceAttr:
     - _make_space("global")
 
     关联文件:
-    - spec: spec/pass/lowing/nn_to_kernel.md
-    - test: test/pass/test_lowing_nn_to_kernel.py
-    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
     """
 
     return NnMemorySpaceAttr(StringAttr(name))
@@ -411,9 +411,9 @@ def _make_memory_type(
     - _make_memory_type()
 
     关联文件:
-    - spec: spec/pass/lowing/nn_to_kernel.md
-    - test: test/pass/test_lowing_nn_to_kernel.py
-    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
     """
 
     if shape is None:
@@ -440,9 +440,9 @@ def _build_module(
     - module, block = _build_module([lhs_type, rhs_type], result_type, lambda block: [nn_op])
 
     关联文件:
-    - spec: spec/pass/lowing/nn_to_kernel.md
-    - test: test/pass/test_lowing_nn_to_kernel.py
-    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
     """
 
     block = Block(arg_types=arg_types)
@@ -471,9 +471,9 @@ def _collect_ops(block: Block) -> list[Operation]:
     - ops = _collect_ops(block)
 
     关联文件:
-    - spec: spec/pass/lowing/nn_to_kernel.md
-    - test: test/pass/test_lowing_nn_to_kernel.py
-    - 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
     """
 
     return list(block.ops)
@@ -485,10 +485,10 @@ def _collect_ops(block: Block) -> list[Operation]:
 # 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证 nn.add lower 为 kernel.add。
-# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_add_to_kernel
-# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
-# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
-# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_add_to_kernel
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
 def test_lower_add_to_kernel() -> None:
     lhs_type = _make_memory_type()
     rhs_type = _make_memory_type()
@@ -512,10 +512,10 @@ def test_lower_add_to_kernel() -> None:
 # 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证 nn.eq lower 为 kernel.eq。
-# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_eq_to_kernel
-# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
-# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
-# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_eq_to_kernel
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
 def test_lower_eq_to_kernel() -> None:
     lhs_type = _make_memory_type()
     rhs_type = _make_memory_type()
@@ -538,10 +538,10 @@ def test_lower_eq_to_kernel() -> None:
 # 最近一次运行测试时间: 2026-03-28 02:48:07 +0800
 # 最近一次运行成功时间: 2026-03-28 02:48:07 +0800
 # 测试目的: 验证 nn.ne lower 为 kernel.ne。
-# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_ne_to_kernel
-# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
-# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
-# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_ne_to_kernel
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
 def test_lower_ne_to_kernel() -> None:
     lhs_type = _make_memory_type()
     rhs_type = _make_memory_type()
@@ -564,10 +564,10 @@ def test_lower_ne_to_kernel() -> None:
 # 最近一次运行测试时间: 2026-03-28 02:48:07 +0800
 # 最近一次运行成功时间: 2026-03-28 02:48:07 +0800
 # 测试目的: 验证 nn.le lower 为 kernel.le。
-# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_le_to_kernel
-# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
-# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
-# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_le_to_kernel
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
 def test_lower_le_to_kernel() -> None:
     lhs_type = _make_memory_type()
     rhs_type = _make_memory_type()
@@ -590,10 +590,10 @@ def test_lower_le_to_kernel() -> None:
 # 最近一次运行测试时间: 2026-03-28 02:48:07 +0800
 # 最近一次运行成功时间: 2026-03-28 02:48:07 +0800
 # 测试目的: 验证 nn.ge lower 为 kernel.ge。
-# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_ge_to_kernel
-# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
-# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
-# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_ge_to_kernel
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
 def test_lower_ge_to_kernel() -> None:
     lhs_type = _make_memory_type()
     rhs_type = _make_memory_type()
@@ -616,10 +616,10 @@ def test_lower_ge_to_kernel() -> None:
 # 最近一次运行测试时间: 2026-03-28 02:48:07 +0800
 # 最近一次运行成功时间: 2026-03-28 02:48:07 +0800
 # 测试目的: 验证 nn.truediv lower 为 kernel.div。
-# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_truediv_to_kernel
-# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
-# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
-# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_truediv_to_kernel
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
 def test_lower_truediv_to_kernel() -> None:
     lhs_type = _make_memory_type()
     rhs_type = _make_memory_type()
@@ -642,10 +642,10 @@ def test_lower_truediv_to_kernel() -> None:
 # 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证 nn.select lower 为 kernel.select。
-# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_select_to_kernel
-# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
-# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
-# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_select_to_kernel
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
 def test_lower_select_to_kernel() -> None:
     cond_type = _make_memory_type(element_type=i1)
     lhs_type = _make_memory_type()
@@ -678,10 +678,10 @@ def test_lower_select_to_kernel() -> None:
 # 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证 nn.cast lower 为 kernel.cast。
-# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_cast_to_kernel
-# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
-# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
-# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_cast_to_kernel
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
 def test_lower_cast_to_kernel() -> None:
     input_type = _make_memory_type(element_type=i32)
     result_type = _make_memory_type(element_type=f32)
@@ -704,10 +704,10 @@ def test_lower_cast_to_kernel() -> None:
 # 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证输出分配使用 dma.alloc。
-# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_inserts_dma_alloc_for_output
-# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
-# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
-# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_inserts_dma_alloc_for_output
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
 def test_lower_inserts_dma_alloc_for_output() -> None:
     lhs_type = _make_memory_type()
     rhs_type = _make_memory_type()
@@ -731,10 +731,10 @@ def test_lower_inserts_dma_alloc_for_output() -> None:
 # 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证输出 memory 类型/空间保持一致。
-# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_preserves_memory_type_and_space
-# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
-# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
-# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_preserves_memory_type_and_space
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
 def test_lower_preserves_memory_type_and_space() -> None:
     lhs_type = _make_memory_type(space="global")
     rhs_type = _make_memory_type(space="global")
@@ -759,10 +759,10 @@ def test_lower_preserves_memory_type_and_space() -> None:
 # 最近一次运行测试时间: 2026-03-28 04:17:04 +0800
 # 最近一次运行成功时间: 2026-03-28 04:17:04 +0800
 # 测试目的: 验证 dma.alloc 保留静态 shape 维度值，并确保 dynamic_shape 与 stride 约束一致。
-# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_preserves_static_shape_in_alloc
-# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
-# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
-# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_preserves_static_shape_in_alloc
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
 def test_lower_preserves_static_shape_in_alloc() -> None:
     shape = ArrayAttr([IntAttr(3), IntAttr(5)])
     stride = ArrayAttr([IntAttr(5), IntAttr(1)])
@@ -810,10 +810,10 @@ def test_lower_preserves_static_shape_in_alloc() -> None:
 # 最近一次运行测试时间: 2026-03-28 04:17:04 +0800
 # 最近一次运行成功时间: 2026-03-28 04:17:04 +0800
 # 测试目的: 验证 dma.alloc 保留符号 shape 维度值，并生成对应 dynamic_shape。
-# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_preserves_symbol_shape_in_alloc
-# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
-# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
-# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_preserves_symbol_shape_in_alloc
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
 def test_lower_preserves_symbol_shape_in_alloc() -> None:
     shape = ArrayAttr([StringAttr("M"), StringAttr("N")])
     stride = ArrayAttr([StringAttr("N"), IntAttr(1)])
@@ -851,10 +851,10 @@ def test_lower_preserves_symbol_shape_in_alloc() -> None:
 # 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证不支持的 nn op 抛错。
-# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_unsupported_nn_op_raises
-# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
-# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
-# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_unsupported_nn_op_raises
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
 def test_lower_unsupported_nn_op_raises() -> None:
     lhs_type = _make_memory_type()
     rhs_type = _make_memory_type()
@@ -876,10 +876,10 @@ def test_lower_unsupported_nn_op_raises() -> None:
 # 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证 lowering 后不再残留 nn op。
-# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_removes_all_nn_ops
-# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
-# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
-# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_removes_all_nn_ops
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
 def test_lower_removes_all_nn_ops() -> None:
     lhs_type = _make_memory_type()
     rhs_type = _make_memory_type()
@@ -909,10 +909,10 @@ def test_lower_removes_all_nn_ops() -> None:
 # 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证缺失 nn.space attribute 会触发错误。
-# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_missing_space_attribute_raises
-# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
-# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
-# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_missing_space_attribute_raises
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
 def test_lower_missing_space_attribute_raises() -> None:
     lhs_type = _make_memory_type()
     rhs_type = _make_memory_type()
@@ -933,10 +933,10 @@ def test_lower_missing_space_attribute_raises() -> None:
 # 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证 nn op 多结果时抛错。
-# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_rejects_multi_result_op
-# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
-# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
-# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_rejects_multi_result_op
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
 def test_lower_rejects_multi_result_op() -> None:
     lhs_type = _make_memory_type()
     rhs_type = _make_memory_type()
@@ -958,10 +958,10 @@ def test_lower_rejects_multi_result_op() -> None:
 # 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证 nn op 结果类型非 nn.memory 时抛错。
-# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_rejects_non_memory_result_type
-# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
-# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
-# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_rejects_non_memory_result_type
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
 def test_lower_rejects_non_memory_result_type() -> None:
     lhs_type = _make_memory_type()
     rhs_type = _make_memory_type()
@@ -983,10 +983,10 @@ def test_lower_rejects_non_memory_result_type() -> None:
 # 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证 nn op operand 数量不匹配时抛错。
-# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_rejects_operand_count_mismatch
-# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
-# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
-# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_rejects_operand_count_mismatch
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
 def test_lower_rejects_operand_count_mismatch() -> None:
     lhs_type = _make_memory_type()
     result_type = _make_memory_type()
@@ -1007,10 +1007,10 @@ def test_lower_rejects_operand_count_mismatch() -> None:
 # 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证 kernel op 校验失败时抛 LowerNnToKernelError。
-# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_wraps_kernel_verify_exception
-# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
-# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
-# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_wraps_kernel_verify_exception
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
 def test_lower_wraps_kernel_verify_exception(monkeypatch: pytest.MonkeyPatch) -> None:
     lhs_type = _make_memory_type()
     rhs_type = _make_memory_type()
@@ -1037,10 +1037,10 @@ def test_lower_wraps_kernel_verify_exception(monkeypatch: pytest.MonkeyPatch) ->
 # 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证包含 region 的 op 会触发递归 lowering。
-# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_lower_recurses_into_regions
-# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
-# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
-# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_recurses_into_regions
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
 def test_lower_recurses_into_regions() -> None:
     lhs_type = _make_memory_type()
     rhs_type = _make_memory_type()
@@ -1068,10 +1068,10 @@ def test_lower_recurses_into_regions() -> None:
 # 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证 module 内残留 nn op 时直接抛错。
-# 使用示例: pytest -q test/pass/test_lowing_nn_to_kernel.py -k test_ensure_no_nn_ops_raises
-# 对应功能实现文件路径: kernel_gen/passes/lowing/nn_to_kernel.py
-# 对应 spec 文件路径: spec/pass/lowing/nn_to_kernel.md
-# 对应测试文件路径: test/pass/test_lowing_nn_to_kernel.py
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_ensure_no_nn_ops_raises
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
 def test_ensure_no_nn_ops_raises() -> None:
     lhs_type = _make_memory_type()
     rhs_type = _make_memory_type()

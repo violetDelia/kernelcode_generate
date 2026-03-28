@@ -10,9 +10,9 @@
 
 - 创建者：`摸鱼小分队`
 - 最后一次更改：`摸鱼小分队`
-- `spec`：[`spec/pass/lowing/nn_to_kernel.md`](../../../spec/pass/lowing/nn_to_kernel.md)
-- `功能实现`：[`kernel_gen/passes/lowing/nn_to_kernel.py`](../../../kernel_gen/passes/lowing/nn_to_kernel.py)
-- `test`：[`test/pass/test_lowing_nn_to_kernel.py`](../../../test/pass/test_lowing_nn_to_kernel.py)
+- `spec`：[`spec/pass/lowering/nn_to_kernel.md`](../../../spec/pass/lowering/nn_to_kernel.md)
+- `功能实现`：[`kernel_gen/passes/lowering/nn_to_kernel.py`](../../../kernel_gen/passes/lowering/nn_to_kernel.py)
+- `test`：[`test/pass/test_lowering_nn_to_kernel.py`](../../../test/pass/test_lowering_nn_to_kernel.py)
 
 ## 依赖
 
@@ -54,7 +54,7 @@
 
 ```python
 from kernel_gen.passes.pass_manager import PassManager
-from kernel_gen.passes.lowing.nn_to_kernel import LowerNnToKernelPass
+from kernel_gen.passes.lowering.nn_to_kernel import LowerNnToKernelPass
 
 pm = PassManager(name="lowering")
 pm.add_pass(LowerNnToKernelPass())
@@ -114,16 +114,14 @@ module = pass_obj.run(module)
 
 ## 测试
 
-- 测试文件：[`test/pass/test_lowing_nn_to_kernel.py`](../../../test/pass/test_lowing_nn_to_kernel.py)
+- 测试文件：[`test/pass/test_lowering_nn_to_kernel.py`](../../../test/pass/test_lowering_nn_to_kernel.py)
 - 执行命令：
-  - `pytest -q test/pass/test_lowing_nn_to_kernel.py`
-  - `for f in expectation/pass/lowing/nn_to_kernel/*.py; do PYTHONPATH=. python "$f"; done`
+  - `pytest -q test/pass/test_lowering_nn_to_kernel.py`
 - 测试目标：
   - 验证支持的 `nn` op 被替换为 `kernel` op，且 `nn.truediv`/`nn.div` 统一映射到 `kernel.div`。
   - 验证输出 Memory 由 `dma.alloc` 创建，且类型/空间与原结果一致。
   - 验证 `dma.alloc` 结果类型中的 `shape` 维度值与原 `nn` 结果保持一致。
   - 验证不支持 op、结果类型非法、缺失 `nn.space`、operand 数量不匹配或 kernel 校验失败时抛出明确错误。
-  - 验证 `expectation/pass/lowing/nn_to_kernel` 目录下 `add/sub/mul/truediv/eq/ne/lt/le/gt/ge` 十个脚本可独立执行并全部通过。
 - 功能与用例清单：
 
 | 用例 ID | 约束点 | 对应测试 |
@@ -137,17 +135,3 @@ module = pass_obj.run(module)
 | COV-N2K-007 | module 内残留 `nn` op 抛错 | `test_ensure_no_nn_ops_raises` |
 | COV-N2K-008 | 静态维度 `shape` 在 `dma.alloc` 中保持一致 | `test_lower_preserves_static_shape_in_alloc` |
 | COV-N2K-009 | 符号维度 `shape` 在 `dma.alloc` 中保持一致 | `test_lower_preserves_symbol_shape_in_alloc` |
-| COV-N2K-010 | `nn.add -> kernel.add` expectation 链路 | `python expectation/pass/lowing/nn_to_kernel/add.py` |
-| COV-N2K-011 | `nn.sub -> kernel.sub` expectation 链路 | `python expectation/pass/lowing/nn_to_kernel/sub.py` |
-| COV-N2K-012 | `nn.mul -> kernel.mul` expectation 链路 | `python expectation/pass/lowing/nn_to_kernel/mul.py` |
-| COV-N2K-013 | `nn.eq -> kernel.eq` expectation 链路 | `python expectation/pass/lowing/nn_to_kernel/eq.py` |
-| COV-N2K-014 | `nn.lt -> kernel.lt` expectation 链路 | `python expectation/pass/lowing/nn_to_kernel/lt.py` |
-| COV-N2K-015 | `nn.gt -> kernel.gt` expectation 链路 | `python expectation/pass/lowing/nn_to_kernel/gt.py` |
-| COV-N2K-016 | `nn.ne -> kernel.ne` expectation 链路 | `python expectation/pass/lowing/nn_to_kernel/ne.py` |
-| COV-N2K-017 | `nn.le -> kernel.le` expectation 链路 | `python expectation/pass/lowing/nn_to_kernel/le.py` |
-| COV-N2K-018 | `nn.ge -> kernel.ge` expectation 链路 | `python expectation/pass/lowing/nn_to_kernel/ge.py` |
-| COV-N2K-019 | `nn.truediv -> kernel.div` expectation 链路 | `python expectation/pass/lowing/nn_to_kernel/truediv.py` |
-| COV-N2K-020 | `nn.ne -> kernel.ne` 单测映射（实现阶段新增） | `test_lower_ne_to_kernel` |
-| COV-N2K-021 | `nn.le -> kernel.le` 单测映射（实现阶段新增） | `test_lower_le_to_kernel` |
-| COV-N2K-022 | `nn.ge -> kernel.ge` 单测映射（实现阶段新增） | `test_lower_ge_to_kernel` |
-| COV-N2K-023 | `nn.truediv -> kernel.div` 单测映射（实现阶段新增） | `test_lower_truediv_to_kernel_div` |

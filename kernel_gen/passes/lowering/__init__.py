@@ -7,13 +7,13 @@
 - 提供 nn -> kernel lowering pass 的公开入口。
 
 使用示例:
-- from kernel_gen.passes.lowing.nn_to_kernel import LowerNnToKernelPass
+- from kernel_gen.passes.lowering.nn_to_kernel import LowerNnToKernelPass
 - pass_obj = LowerNnToKernelPass()
 
 关联文件:
-- spec: spec/pass/lowing/nn_to_kernel.md
-- test: test/pass/test_lowing_nn_to_kernel.py
-- 功能实现: kernel_gen/passes/lowing/nn_to_kernel.py
+- spec: spec/pass/lowering/nn_to_kernel.md
+- test: test/pass/test_lowering_nn_to_kernel.py
+- 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
 """
 
 from .nn_to_kernel import LowerNnToKernelPass, LowerNnToKernelError
