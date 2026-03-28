@@ -1,0 +1,95 @@
+- 时间：`2026-03-28 16:56:04 +0800`
+- 任务：`T-20260328-d9ed7acb`
+- 任务目标：整理 emit_mlir/mlir_gen 测试映射，完成 spec 对测试覆盖与编号闭环。
+- 改动：
+  - `spec/dsl/emit_mlir.md`：更新拆分归属；移除无测试的 get_thread_num 目标与 EMIT-030；修正 EMIT-012B/012C/012D/029/031/032 映射并移除 EMIT-001A/001B。
+  - `spec/dsl/mlir_gen.md`：更新“最后一次更改”；调整拆分归属与测试目标；移除无测试的 get_thread_num/MGEN-035；补齐 MGEN-036/037 映射归属 `test_ast_visitor.py`。
+- 结论：spec 与现有测试用例映射已对齐，编号闭环完成；未执行测试（仅文档整理）。
+- 时间：`2026-03-28 18:51:26 +0800`
+- 任务：`T-20260328-1e8f9719`
+- 任务目标：审查 `spec/dsl/emit_mlir.md` 与 `spec/dsl/mlir_gen.md` 的测试映射是否与现有实现/测试一致，覆盖功能正确性、边界条件、异常路径与潜在漏洞。
+- 改动：
+  - 仅审查与核对，无代码修改。
+  - 核对文件：`spec/dsl/emit_mlir.md`、`spec/dsl/mlir_gen.md`、`test/dsl/test_emit_mlir.py`、`test/dsl/test_mlir_gen.py`。
+  - 未执行测试。
+- 结论：`需修改`。
+  - 功能/一致性问题：`test/dsl/test_emit_mlir.py` 存在 EMIT 编号重用，导致 `spec/dsl/emit_mlir.md` 的映射与测试注释不一致（示例：EMIT-022 在 `#L206` 为 arch.get_block_id，但在 `#L1282` 又被用于 store rank mismatch/deslice；EMIT-023 在 `#L232` 为 arch.get_block_num，但在 `#L1329` 又被用于 `_ensure_supported_statements` 错误分支；EMIT-013 在 `#L1045` 与 `#L1352` 重复）。该重号使测试-规格闭环不可追溯。
+  - 安全/边界/异常风险：`test/dsl/test_mlir_gen.py` 的 MGEN-027 同时用于 `get_block_id`（`#L207`）与“外部值引用拒绝”错误路径（`#L1669` 起多处），而 `spec/dsl/mlir_gen.md` 仅定义 MGEN-027 为 `get_block_id`，未显式纳入外部值引用拒绝的契约。该约束涉及闭包/全局值绕过风险，若缺失规范映射，易在回归时被误删或放松。
+  - 可维护性问题：EMIT/MGEN 编号重复与缺失映射导致测试清单无法与规范一一对应，违反审查规范中“测试清单必须能映射到实际用例”的要求。
+  - 期望修改方向：统一 EMIT/MGEN 编号，消除重复；补齐外部值引用拒绝的规范条目与测试映射；必要时为新增/补充测试分配新编号并同步更新 spec 与测试注释。
+- 时间：`2026-03-28 19:15:21 +0800`
+- 任务：`T-20260328-3d9b3e7f`
+- 经办人：`摸鱼小分队`
+- 任务目标：消除 EMIT/MGEN 编号重用并补齐外部值引用拒绝规范条目与映射，释放后续测试标注修正任务。
+- 改动：
+  - `spec/dsl/emit_mlir.md`：新增 EMIT-013A/014A/015A/016A/017A/018A/020A/022A/023A 条目，对应原测试注释中重号用例，确保编号唯一；补充拆分归属说明含后缀条目。
+  - `spec/dsl/mlir_gen.md`：新增 MGEN-027A 外部值引用拒绝条目与测试映射，补充测试目标描述；拆分归属说明含后缀条目。
+- 结论：已完成 spec 编号唯一化与外部值引用拒绝映射补齐；未执行测试。
+- 验证：未执行（本阶段仅 spec 修正）。
+- 时间：`2026-03-28 20:01:17 +0800`
+- 任务：`T-20260328-ec9f4c48`
+- 任务目标：按最新 spec 修正 `test/dsl/test_emit_mlir.py` 与 `test/dsl/test_mlir_gen.py` 的 EMIT/MGEN 标注，消除重复编号并对齐后缀条目。
+- 改动：
+  - `test/dsl/test_emit_mlir.py`：清理遗留 `MLIR-015/016` 标注，分别对齐为 `MGEN-016` 与 `MGEN-003`；保持 EMIT 编号与后缀条目一致。
+  - `test/dsl/test_mlir_gen.py`：
+    - 修正 `MGEN-016`、`MGEN-001B`、`MGEN-009`、`MGEN-002B` 等标注映射；
+    - 外部值引用拒绝路径统一为 `MGEN-027A`；
+    - 为 implicit broadcast/错误路径补齐 `MGEN-022A/022B`；
+    - `MGEN-019` 仅覆盖运行时参数缺失/数目不匹配/globals/builtins 替代三类用例。
+- 结论：测试标注与 `spec/dsl/emit_mlir.md`、`spec/dsl/mlir_gen.md` 已对齐；未执行测试（仅标注修正）。
+- 时间：`2026-03-28 20:27:12 +0800`
+- 任务：`T-20260328-02e55032`
+- 任务目标：复核 `test/dsl/test_emit_mlir.py`、`test/dsl/test_mlir_gen.py` 与 `spec/dsl/{emit_mlir,mlir_gen}.md` 的 EMIT/MGEN 编号唯一性、后缀条目归属及映射闭环。
+- 改动：
+  - 仅审查与核对，无代码修改。
+  - 核对文件：`spec/dsl/emit_mlir.md`、`spec/dsl/mlir_gen.md`、`test/dsl/test_emit_mlir.py`、`test/dsl/test_mlir_gen.py`。
+  - 未执行测试。
+- 结论：`需修改`。
+  - 问题列表：
+    - `spec/dsl/emit_mlir.md#L216` 将 EMIT-024 映射到 `test_emit_mlir_infer_expr_type_branches`/`test_emit_mlir_lower_expr_unknown_and_symbol_errors`/`test_emit_mlir_lowers_symbol_ge`；但 `test/dsl/test_emit_mlir.py#L1135` 为 EMIT-012、`#L1493` 为 EMIT-018A，仅 `#L1538` 为 EMIT-024，映射闭环不一致。风险：EMIT-024 归属不可追溯，回归时易误删覆盖。建议：调整 spec 映射或补齐测试标注。优先级：P1。
+    - `spec/dsl/emit_mlir.md#L221` 定义 EMIT-029 对应 `test_tensor_truediv_dtype_promotion_lowering`，但 `test/dsl/test_mlir_gen.py#L1996` 仅标注 MGEN-011A，无 EMIT-029。风险：emit 阶段覆盖缺口无法追踪。建议：为该用例补充 EMIT-029 标注或调整 spec 映射。优先级：P1。
+    - `spec/dsl/mlir_gen.md#L227` 仅将 MGEN-001B 映射到 `test_mlir_gen_build_func_op_builtins_and_parse_error`，但 `test/dsl/test_mlir_gen.py#L1248` 的 `test_mlir_gen_parse_failure_wrapped` 同样标注 MGEN-001B。风险：编号唯一性与覆盖范围不清晰。建议：补齐 spec 映射或调整测试标注。优先级：P1。
+    - `spec/dsl/mlir_gen.md#L230` 仅将 MGEN-002B 映射到 `test_mlir_gen_signature_validation_errors`，但 `test/dsl/test_mlir_gen.py#L866` 的 `test_build_func_op_rejects_dma_alloc_helper_with_invalid_runtime_shape_args` 同样标注 MGEN-002B。风险：错误路径归属混乱。建议：补齐 spec 映射或调整测试标注。优先级：P1。
+    - `spec/dsl/mlir_gen.md#L237` 仅将 MGEN-009 映射到 `test_return_type_mismatch_reports_diagnostics`，但 `test/dsl/test_mlir_gen.py#L1271` 的 `test_mlir_gen_validate_return_type_errors` 也标注 MGEN-009。风险：编号唯一性与映射闭环不一致。建议：补齐 spec 映射或调整测试标注。优先级：P1。
+    - `spec/dsl/mlir_gen.md#L246` 仅将 MGEN-016 映射到 `test_symbol_scalar_function_uses_symbol_value_type_signature`，但 `test/dsl/test_mlir_gen.py#L649` 的 `test_mlir_gen_symbol_scalar_helpers` 也标注 MGEN-016。风险：符号标量相关测试归属不清。建议：补齐 spec 映射或调整测试标注。优先级：P1。
+    - `spec/dsl/mlir_gen.md#L253` 将 MGEN-022C 映射到 `test_invalid_tensor_return_annotation_reports_diagnostics`，但 `test/dsl/test_mlir_gen.py#L1782` 的 MGEN-022C 实际对应 `test_mixed_dtype_return_annotation_requires_operand_element_type`。风险：后缀条目归属不一致。建议：修正 spec 映射或调整测试标注。优先级：P1。
+  - 漏洞排查结果：
+    - 输入校验绕过：未发现新增绕过路径；但映射缺口会削弱回归审计可追溯性。
+    - 类型/形状绕过：未发现新增绕过路径；映射不一致使类型/形状边界测试难以定位。
+    - 边界越界：未发现新增越界问题；映射不一致可能导致边界用例回归时被遗漏。
+    - 错误处理缺失：未发现新增缺失；但错误路径映射不清增加回归风险。
+    - 状态污染：未发现新增问题。
+    - 资源释放问题：未发现新增问题。
+  - 改进建议：暂无额外 P2 建议（上述为必须修正项）。
+  - 验证：未执行测试。
+时间: 2026-03-28 20:37:09 +0800
+任务: T-20260328-8b307731
+任务目标: 修正 spec/dsl/{emit_mlir,mlir_gen}.md 的 EMIT/MGEN 映射缺口，补齐多测试映射并修正 MGEN-022C 归属。
+改动:
+- 经办人: 摸鱼小分队
+- 更新 spec/dsl/emit_mlir.md：EMIT-024 仅映射 test_emit_mlir_lowers_symbol_ge。
+- 更新 spec/dsl/mlir_gen.md：补齐 MGEN-001B/002B/009/016 多测试映射，修正 MGEN-022C 对应测试。
+结论: 已完成（未执行测试）。
+- 时间：`2026-03-28 21:45:23 +0800`
+- 任务：`T-20260328-18195cc1`
+- 任务目标：为 truediv dtype promotion lowering 用例补齐 EMIT-029 标注并与 MGEN-011A 并列，闭环 emit 映射。
+- 改动：
+  - `test/dsl/test_mlir_gen.py`：`# MGEN-011A` 更新为 `# MGEN-011A / EMIT-029`。
+- 结论：标注已对齐 `spec/dsl/emit_mlir.md` 的 EMIT-029 映射，闭环完成。
+- 验证：未执行测试（仅标注修正）。
+- 时间：`2026-03-28 22:45:00 +0800`
+- 任务：`T-20260328-f1fc5f23`
+- 任务目标：复核 EMIT-024/MGEN-001B/002B/009/016/022C 映射修正与测试标注闭环。
+- 改动：
+  - 审查范围：`spec/dsl/emit_mlir.md`、`spec/dsl/mlir_gen.md`、`test/dsl/test_emit_mlir.py`、`test/dsl/test_mlir_gen.py`。
+  - 逐条核对：
+    - EMIT-024 ↔ `test_emit_mlir_lowers_symbol_ge` 标注一致。
+    - MGEN-001B ↔ `test_mlir_gen_build_func_op_builtins_and_parse_error` + `test_mlir_gen_parse_failure_wrapped` 一致。
+    - MGEN-002B ↔ `test_mlir_gen_signature_validation_errors` + `test_build_func_op_rejects_dma_alloc_helper_with_invalid_runtime_shape_args` 一致。
+    - MGEN-009 ↔ `test_mlir_gen_validate_return_type_errors` + `test_return_type_mismatch_reports_diagnostics` 一致。
+    - MGEN-016 ↔ `test_mlir_gen_symbol_scalar_helpers` + `test_symbol_scalar_function_uses_symbol_value_type_signature` 一致。
+    - MGEN-022C ↔ `test_mixed_dtype_return_annotation_requires_operand_element_type` 一致。
+- 结论：通过。
+  - 功能正确性/边界/异常路径：映射到的测试均为异常路径或边界校验，spec 与标注一致，未发现缺口。
+  - 潜在漏洞与可维护性：未发现新增风险或编号冲突；映射闭环可追溯。
+- 验证：未执行测试（本次为标注/映射核对）。

@@ -1330,7 +1330,7 @@ def test_emit_mlir_lower_expr_branches() -> None:
         _lookup_symbol(VarAST("missing"), EmitContext(builder=block, symbols={}, types={}))
 
 
-# EMIT-022
+# EMIT-022A
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
@@ -1377,7 +1377,7 @@ def test_emit_mlir_store_rank_mismatch_and_deslice() -> None:
     assert isinstance(deslice, DmaDesliceOp)
 
 
-# EMIT-023
+# EMIT-023A
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
@@ -1400,7 +1400,7 @@ def test_emit_mlir_ensure_supported_statements_errors() -> None:
         _ensure_supported_statements(bad_func)
 
 
-# EMIT-013
+# EMIT-013A
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-26 22:20:00 +0800
@@ -1429,7 +1429,7 @@ def test_emit_mlir_cache_restore_and_index_value_variants() -> None:
         _ensure_index_value(float_op.result, ctx, location=None)
 
 
-# EMIT-014
+# EMIT-014A
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
@@ -1461,7 +1461,7 @@ def test_emit_mlir_index_operand_variants_and_loop_bound() -> None:
     assert bound_value is block.args[0]
 
 
-# EMIT-015
+# EMIT-015A
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
@@ -1485,7 +1485,7 @@ def test_emit_mlir_layout_and_stride_helpers() -> None:
         _build_stride_attrs([ConstAST(2)], rank=1, ctx=ctx, location=None)
 
 
-# EMIT-016
+# EMIT-016A
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
@@ -1520,7 +1520,7 @@ def test_emit_mlir_static_index_list_and_broadcast_shape() -> None:
     assert broadcast[0].data == 2
 
 
-# EMIT-017
+# EMIT-017A
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
@@ -1541,7 +1541,7 @@ def test_emit_mlir_infer_expr_type_unknown_inputs() -> None:
         _infer_expr_type(tensor, {})
 
 
-# EMIT-018
+# EMIT-018A
 # 创建者: 小李飞刀
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-26 22:20:00 +0800
@@ -1674,7 +1674,7 @@ def test_emit_mlir_compare_memory_mismatch_reports_diagnostics() -> None:
         _infer_broadcast_memory_type(lhs_type, rhs_space_mismatch, location=None)
 
 
-# EMIT-020
+# EMIT-020A
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
@@ -1716,7 +1716,7 @@ def test_emit_mlir_for_loop_restores_loop_vars_and_errors() -> None:
         emit_node_mlir(object(), ctx)
 
 
-# MLIR-015
+# MGEN-016
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
@@ -1737,7 +1737,7 @@ def test_mlir_gen_symbol_scalar_function_no_outputs() -> None:
     assert _is_symbol_scalar_function(func_ast) is True
 
 
-# MLIR-016
+# MGEN-003
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 05:10:36 +0800

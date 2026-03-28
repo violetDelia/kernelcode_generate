@@ -646,7 +646,7 @@ def test_build_func_op_return_type_matches_annotation() -> None:
     assert outputs[0] == expected
 
 
-# MGEN-003
+# MGEN-016
 # 创建者: 小李飞刀
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-26 22:20:00 +0800
@@ -863,7 +863,7 @@ def alloc_kernel(rank1: int, rank2: int) -> f"Tensor[f32, {ALLOC_ROWS}, {ALLOC_C
     assert list(func_op.function_type.outputs) == [alloc_ops[0].result.type]
 
 
-# MGEN-026A
+# MGEN-002B
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-25 22:17:59 +0800
@@ -1245,7 +1245,7 @@ def test_build_func_op_supports_dma_deslice_helper() -> None:
     assert len(deslice_ops) == 1
 
 
-# MGEN-007
+# MGEN-001B
 # 创建者: 小李飞刀
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-25 16:05:00 +0800
@@ -1268,7 +1268,7 @@ def test_mlir_gen_parse_failure_wrapped(monkeypatch: pytest.MonkeyPatch) -> None
         _parse_function_with_env(fn, globals_table={}, builtins_table={}, runtime_table={}, config=None)
 
 
-# MGEN-007
+# MGEN-009
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
@@ -1644,6 +1644,7 @@ def test_build_func_op_rejects_runtime_arg_count_mismatch() -> None:
         build_func_op(add, _tensor_arg([2, 2]))
 
 
+# MGEN-019
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-23 00:20:00 +0800
@@ -1666,7 +1667,7 @@ def test_build_func_op_globals_and_builtins_cannot_replace_runtime_args() -> Non
     assert exc_info.value.location is None
 
 
-# MGEN-027
+# MGEN-027A
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-25 22:18:52 +0800
@@ -1690,7 +1691,7 @@ def test_build_func_op_rejects_external_value_reference_inside_function_body() -
     assert exc_info.value.location.line == 2
 
 
-# MGEN-027
+# MGEN-027A
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-25 22:18:52 +0800
@@ -1713,7 +1714,7 @@ def test_build_func_op_rejects_global_external_value_reference(monkeypatch: pyte
     assert exc_info.value.location is not None
 
 
-# MGEN-027
+# MGEN-027A
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-25 22:18:52 +0800
@@ -1734,7 +1735,7 @@ def test_build_func_op_rejects_builtins_external_value_reference() -> None:
     assert exc_info.value.location is not None
 
 
-# MGEN-027
+# MGEN-027A
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-25 22:18:52 +0800
@@ -1942,7 +1943,7 @@ def test_build_func_op_supports_symbolic_for_loop_dma_without_return(monkeypatch
     assert list(deslice_ops[0].offsets)[0] is loop_body.args[0]
 
 
-# MGEN-011
+# MGEN-011 / MGEN-022A
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-19 03:24:32 +0800
@@ -1967,7 +1968,7 @@ def test_tensor_binary_implicit_broadcast_lowering() -> None:
     assert add_op.lhs is broadcast_ops[0].result or add_op.rhs is broadcast_ops[0].result
 
 
-# MGEN-012
+# MGEN-012 / MGEN-022A
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-19 03:24:32 +0800
@@ -1992,7 +1993,7 @@ def test_tensor_binary_prepend_broadcast_lowering() -> None:
     assert add_op.lhs is broadcast_ops[0].result or add_op.rhs is broadcast_ops[0].result
 
 
-# MGEN-011A
+# MGEN-011A / EMIT-029
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-27 04:14:28 +0800
@@ -2081,7 +2082,7 @@ def test_build_func_op_lowers_nn_ne_with_tensor_i1_return_annotation() -> None:
         raise AssertionError("expected return type to match nn.ne result type")
 
 
-# MGEN-014
+# MGEN-014 / MGEN-022B
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-19 03:24:32 +0800
