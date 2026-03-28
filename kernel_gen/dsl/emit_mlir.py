@@ -34,6 +34,7 @@ from xdsl.dialects.builtin import (
     UnrealizedConversionCastOp,
     f32,
     i1,
+    i8,
     i32,
 )
 from xdsl.ir import Attribute, Block, SSAValue
@@ -41,9 +42,12 @@ from xdsl.ir import Attribute, Block, SSAValue
 from kernel_gen.dialect.arch import (
     ArchGetBlockIdOp,
     ArchGetBlockNumOp,
+    ArchGetDynamicMemoryOp,
     ArchGetSubthreadIdOp,
     ArchGetSubthreadNumOp,
     ArchGetThreadIdOp,
+    ArchGetThreadNumOp,
+    ArchLaunchKernelOp,
 )
 from kernel_gen.dialect.dma import (
     DmaAllocOp,
@@ -91,6 +95,8 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
 from .ast import (
+    ArchGetDynamicMemoryAST,
+    ArchLaunchKernelAST,
     ArchQueryAST,
     BinaryExprAST,
     BlockAST,
@@ -120,6 +126,13 @@ _MEMORY_SPACE_MAP = {
     MemorySpace.LM: "local",
     MemorySpace.TSM: "shared",
     MemorySpace.TLM: "local",
+}
+
+_DYNAMIC_MEMORY_SPACE_MAP = {
+    MemorySpace.SM: "shared",
+    MemorySpace.LM: "local",
+    MemorySpace.TSM: "tsm",
+    MemorySpace.TLM: "tlm",
 }
 
 
@@ -190,6 +203,8 @@ def _dtype_to_xdsl(dtype: NumericType, location: SourceLocation | None = None) -
         return Float16Type()
     if dtype is NumericType.Float32:
         return f32
+    if dtype is NumericType.Int8:
+        return i8
     if dtype is NumericType.Int32:
         return i32
     if dtype is NumericType.Bool:
@@ -219,6 +234,8 @@ def _xdsl_to_dtype(element_type: Attribute, location: SourceLocation | None = No
         return NumericType.Float16
     if element_type == f32:
         return NumericType.Float32
+    if element_type == i8:
+        return NumericType.Int8
     if element_type == i32:
         return NumericType.Int32
     if element_type == i1:
@@ -1038,6 +1055,21 @@ def _memory_to_nn_type(memory: Memory, location: SourceLocation | None = None) -
     return NnMemoryType(shape_attr, stride_attr, element_type, space)
 
 
+def _build_dynamic_memory_type(
+    space: MemorySpace,
+    location: SourceLocation | None = None,
+) -> NnMemoryType:
+    space_name = _DYNAMIC_MEMORY_SPACE_MAP.get(space)
+    if space_name is None:
+        raise _LoweringError("get_dynamic_memory space must be on-chip MemorySpace", location=location)
+    return NnMemoryType(
+        ArrayAttr([StringAttr("?")]),
+        ArrayAttr([IntAttr(1)]),
+        i8,
+        NnMemorySpaceAttr.from_name(space_name),
+    )
+
+
 def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
     statements = function_ast.body.statements
     if not statements:
@@ -1062,6 +1094,8 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
                 DmaFlattenAST,
                 DmaFreeAST,
                 ForAST,
+                ArchGetDynamicMemoryAST,
+                ArchLaunchKernelAST,
                 ArchQueryAST,
             ),
         ):
@@ -1197,6 +1231,12 @@ def _infer_expr_type(
         raise _LoweringError("free does not produce a value", location=expr.location)
     if isinstance(expr, ForAST):
         raise _LoweringError("ForAST does not produce a value", location=expr.location)
+    if isinstance(expr, ArchLaunchKernelAST):
+        raise _LoweringError("launch_kernel does not produce a value", location=expr.location)
+    if isinstance(expr, ArchGetDynamicMemoryAST):
+        result_type = _build_dynamic_memory_type(expr.space, location=expr.location)
+        type_map[expr_key] = result_type
+        return result_type
     if isinstance(expr, ArchQueryAST):
         query_map = {
             "get_block_id": "block_id",
@@ -1204,6 +1244,7 @@ def _infer_expr_type(
             "get_subthread_id": "subthread_id",
             "get_subthread_num": "subthread_num",
             "get_thread_id": "thread_id",
+            "get_thread_num": "thread_num",
         }
         symbol_name = query_map.get(expr.query_name)
         if symbol_name is None:
@@ -1402,6 +1443,16 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         raise _LoweringError("StoreAST does not produce a value", location=expr.location)
     if isinstance(expr, DmaFreeAST):
         raise _LoweringError("free does not produce a value", location=expr.location)
+    if isinstance(expr, ArchGetDynamicMemoryAST):
+        result_type = _build_dynamic_memory_type(expr.space, location=expr.location)
+        space_name = _DYNAMIC_MEMORY_SPACE_MAP.get(expr.space)
+        if space_name is None:
+            raise _LoweringError("get_dynamic_memory space must be on-chip MemorySpace", location=expr.location)
+        op = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name(space_name), result_type)
+        ctx.builder.add_op(op)
+        ctx._set_cache(expr_key, op.result)
+        ctx.types[expr_key] = op.result.type
+        return op.result
     if isinstance(expr, ArchQueryAST):
         if expr.query_name == "get_block_id":
             op = ArchGetBlockIdOp()
@@ -1413,6 +1464,8 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
             op = ArchGetSubthreadNumOp()
         elif expr.query_name == "get_thread_id":
             op = ArchGetThreadIdOp()
+        elif expr.query_name == "get_thread_num":
+            op = ArchGetThreadNumOp()
         else:
             raise _LoweringError("Unsupported arch query", location=expr.location)
         ctx.builder.add_op(op)
@@ -1556,6 +1609,7 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
             DmaViewAST,
             DmaReshapeAST,
             DmaFlattenAST,
+            ArchGetDynamicMemoryAST,
             ArchQueryAST,
         ),
     ):
@@ -1587,6 +1641,27 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
         value = _lower_expr(node.value, ctx)
         _expect_memory_value(value, node.location)
         op = DmaFreeOp(value)
+        ctx.builder.add_op(op)
+        return op
+    if isinstance(node, ArchLaunchKernelAST):
+        if not isinstance(node.name, str) or node.name == "":
+            raise _LoweringError("launch_kernel name must be non-empty str", location=node.location)
+        block = _lower_expr(node.block, ctx)
+        thread = _lower_expr(node.thread, ctx)
+        subthread = _lower_expr(node.subthread, ctx)
+
+        def _ensure_symbol_extent(value: SSAValue, dim_name: str) -> None:
+            if not isinstance(value.type, SymbolValueType):
+                raise _LoweringError(f"launch_kernel {dim_name} must be !symbol.int", location=node.location)
+            expr_text = value.type.expr.expr.data
+            if isinstance(expr_text, str) and expr_text.lstrip("-").isdigit():
+                if int(expr_text) <= 0:
+                    raise _LoweringError(f"launch_kernel {dim_name} must be > 0", location=node.location)
+
+        _ensure_symbol_extent(block, "block")
+        _ensure_symbol_extent(thread, "thread")
+        _ensure_symbol_extent(subthread, "subthread")
+        op = ArchLaunchKernelOp(node.name, block, thread, subthread)
         ctx.builder.add_op(op)
         return op
     if isinstance(node, ForAST):

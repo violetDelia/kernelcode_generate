@@ -35,6 +35,7 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 from .ast import (
     AstParseError,
+    ArchLaunchKernelAST,
     BinaryExprAST,
     ConstAST,
     DmaAllocAST,
@@ -473,7 +474,7 @@ def _build_func_op_from_ast_impl(
         result_types = [result_type]
     elif _is_symbol_scalar_function(func_ast):
         return_expr = statements[-1]
-        if isinstance(return_expr, DmaFreeAST):
+        if isinstance(return_expr, (DmaFreeAST, ArchLaunchKernelAST)):
             result_types = []
         else:
             result_type = _infer_expr_type(return_expr, dict(type_map), runtime_values=runtime_values)

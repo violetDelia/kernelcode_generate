@@ -53,6 +53,7 @@
 - Tensor 注解既可使用普通字符串字面量 `"Tensor[...]"`，也可使用在源码层面可归一化为同等文本的 `f"Tensor[...]"`；归一化后的文本必须满足 Tensor 注解语法，若包含无法静态归一化的格式化片段或归一化后仍不符合语法，必须报错。
 - 当函数体使用 `nn.sub` 且左右操作数 element_type 不一致时，必须插入 `dma.cast` 并按二元算术的 dtype promotion 结果生成 `nn.sub` 与 `func.return` 结果类型；当前公开覆盖仅限 `nn.sub` mixed dtype 场景。
 - DSL 函数体内允许出现 `alloc`、`copy`、`cast`、`view`、`reshape`、`flatten`、`free`、`load`、`store`、`slice`、`deslice` 这组 DMA helper 调用；其公开语义由 `emit_mlir` 负责落实到具体 lowering。
+- DSL 函数体内允许出现 `arch` helper 调用：`get_thread_num`（查询表达式）、`get_dynamic_memory`（返回 memory 表达式）与 `launch_kernel`（语句型启动描述）；其公开语义由 `emit_mlir` 负责落实到具体 lowering。
 - 当函数体仅返回 `alloc(...)` 且没有 tensor 输入时，允许仅依赖标量 `runtime_args` 构建签名与结果类型；`alloc` 结果类型需由 `shape`/`stride`/`dtype`/`space` 与 `runtime_args` 共同决定，且显式 `stride` 必须与默认连续布局一致，否则必须报错。
 - `flatten(x)` 在 DSL 公开契约中视为一维重排 helper，要求保留元素总数并输出一维 memory 结果；不要求存在独立的 dialect op。
 - `free(x)` 在 DSL 公开契约中是语句型 helper，不产生新的 SSA 返回值，也不能作为函数返回值直接 lowering 为独立结果。
@@ -61,6 +62,9 @@
 - 零入参 DSL 函数允许通过 `build_func_op` / `build_func_op_from_ast` 构建 `func.func`；当函数体返回 `get_subthread_id()` 查询结果时，lowering 必须生成 `arch.get_subthread_id`，并保持返回类型为 `!symbol.int<"subthread_id">`。
 - 零入参 DSL 函数允许通过 `build_func_op` / `build_func_op_from_ast` 构建 `func.func`；当函数体返回 `get_subthread_num()` 查询结果时，lowering 必须生成 `arch.get_subthread_num`，并保持返回类型为 `!symbol.int<"subthread_num">`。
 - 零入参 DSL 函数允许通过 `build_func_op` / `build_func_op_from_ast` 构建 `func.func`；当函数体返回 `get_thread_id()` 查询结果时，lowering 必须生成 `arch.get_thread_id`，并保持返回类型为 `!symbol.int<"thread_id">`。
+- 零入参 DSL 函数允许通过 `build_func_op` / `build_func_op_from_ast` 构建 `func.func`；当函数体返回 `get_thread_num()` 查询结果时，lowering 必须生成 `arch.get_thread_num`，并保持返回类型为 `!symbol.int<"thread_num">`。
+- 当函数体返回 `get_dynamic_memory(space)` 时，lowering 必须生成 `arch.get_dynamic_memory`，返回类型固定为 `!nn.memory<[?], [1], i8, #nn.space<space>>`；`space` 非片上空间（`SM/LM/TSM/TLM`）时必须报错。
+- 当函数体包含 `launch_kernel(name, block, thread, subthread)` 语句时，lowering 必须生成无返回值 `arch.launch_kernel`；`name` 非空字符串约束与 extent 约束必须在链路中被校验：AST 入口要求 `block/thread/subthread` 为正整数或 `SymbolDim` 语义，emit 阶段进一步要求三者可归一化为正整数 `!symbol.int`，违规时必须报错。
 - 如需 `builtin.module` 封装，由调用方完成。
 
 ## 公开接口
@@ -120,6 +124,9 @@ func_op = build_func_op(only_symbol, s)
 - 当零入参函数直接返回 `get_subthread_id()` 时，结果必须通过 `arch.get_subthread_id` 生成，并在 `func.func` 返回值中保持 `!symbol.int<"subthread_id">`。
 - 当零入参函数直接返回 `get_subthread_num()` 时，结果必须通过 `arch.get_subthread_num` 生成，并在 `func.func` 返回值中保持 `!symbol.int<"subthread_num">`。
 - 当零入参函数直接返回 `get_thread_id()` 时，结果必须通过 `arch.get_thread_id` 生成，并在 `func.func` 返回值中保持 `!symbol.int<"thread_id">`。
+- 当零入参函数直接返回 `get_thread_num()` 时，结果必须通过 `arch.get_thread_num` 生成，并在 `func.func` 返回值中保持 `!symbol.int<"thread_num">`。
+- 当函数体直接返回 `get_dynamic_memory(space)` 时，结果必须通过 `arch.get_dynamic_memory` 生成，并在 `func.func` 返回值中保持 `!nn.memory<[?], [1], i8, #nn.space<space>>`。
+- 当函数体包含 `launch_kernel(name, block, thread, subthread)` 语句时，必须生成单个 `arch.launch_kernel` 且函数本身不引入额外返回值（除显式 `return` 以外）。
 
 返回与限制：
 
@@ -166,6 +173,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
 - 当 `func_ast` 没有输入且返回表达式为 `get_subthread_id()` 时，必须允许零参数签名，并生成返回 `!symbol.int<"subthread_id">` 的 `func.func`。
 - 当 `func_ast` 没有输入且返回表达式为 `get_subthread_num()` 时，必须允许零参数签名，并生成返回 `!symbol.int<"subthread_num">` 的 `func.func`。
 - 当 `func_ast` 没有输入且返回表达式为 `get_thread_id()` 时，必须允许零参数签名，并生成返回 `!symbol.int<"thread_id">` 的 `func.func`。
+- 当 `func_ast` 没有输入且返回表达式为 `get_thread_num()` 时，必须允许零参数签名，并生成返回 `!symbol.int<"thread_num">` 的 `func.func`。
 
 返回与限制：
 
@@ -175,9 +183,11 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
 
 - 测试文件：[`test/dsl/test_mlir_gen.py`](../../test/dsl/test_mlir_gen.py)
 - 依赖测试文件：[`test/dsl/test_ast.py`](../../test/dsl/test_ast.py)、[`test/dsl/test_emit_mlir.py`](../../test/dsl/test_emit_mlir.py)
+- 补充测试文件：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
 - 执行命令（mlir_gen 集成）：`pytest -q test/dsl/test_mlir_gen.py`
 - 执行命令（依赖子链路）：`pytest -q test/dsl/test_ast.py && pytest -q test/dsl/test_emit_mlir.py`
-- 拆分归属：MGEN-001~MGEN-034 全量归属 `test_mlir_gen.py`；其中 AST/emit 的前置语义分别由 `test_ast.py` 与 `test_emit_mlir.py` 单测保证。
+- 执行命令（ast_visitor 负路径）：`pytest -q test/dsl/test_ast_visitor.py`
+- 拆分归属：MGEN-001~MGEN-034 全量归属 `test_mlir_gen.py`；其中 AST/emit 的前置语义分别由 `test_ast.py` 与 `test_emit_mlir.py` 单测保证；arch helper 负路径与 ast_visitor 边界回归归属 `test_ast_visitor.py`。
 - 测试目标：
   - 验证 `build_func_op(...)` 生成 `func.func`。
   - 验证 `build_func_op(fn, *runtime_args, globals=None, builtins=None)` 的输入签名仅由运行时参数决定。
@@ -206,6 +216,9 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - 验证零入参 DSL 函数可通过 `build_func_op(...)` / `build_func_op_from_ast(...)` 生成 `func.func`，并在返回 `get_subthread_id()` 时 lowering 为 `arch.get_subthread_id` 与 `!symbol.int<"subthread_id">` 返回类型。
   - 验证零入参 DSL 函数可通过 `build_func_op(...)` / `build_func_op_from_ast(...)` 生成 `func.func`，并在返回 `get_subthread_num()` 时 lowering 为 `arch.get_subthread_num` 与 `!symbol.int<"subthread_num">` 返回类型。
   - 验证零入参 DSL 函数可通过 `build_func_op(...)` / `build_func_op_from_ast(...)` 生成 `func.func`，并在返回 `get_thread_id()` 时 lowering 为 `arch.get_thread_id` 与 `!symbol.int<"thread_id">` 返回类型。
+  - 验证零入参 DSL 函数可通过 `build_func_op(...)` / `build_func_op_from_ast(...)` 生成 `func.func`，并在返回 `get_thread_num()` 时 lowering 为 `arch.get_thread_num` 与 `!symbol.int<"thread_num">` 返回类型。
+  - 验证 `get_dynamic_memory(space)` 在 `build_func_op(...)` / `build_func_op_from_ast(...)` 链路中 lowering 为 `arch.get_dynamic_memory`，并固定返回 `!nn.memory<[?], [1], i8, #nn.space<space>>`。
+  - 验证 `launch_kernel(name, block, thread, subthread)` 在 `build_func_op(...)` / `build_func_op_from_ast(...)` 链路中 lowering 为无返回值 `arch.launch_kernel`，并覆盖名称/extent 非法输入错误路径。
   - 验证纯 symbol 标量 `==` 比较会生成 `symbol.eq`，返回类型为 `i1`，并覆盖静态整数与动态符号两类 runtime args。
   - 验证纯 symbol 标量 `>=` 比较会生成 `symbol.ge`，返回类型为 `i1`，并覆盖静态整数与动态符号两类 runtime args。
 - 功能与用例清单：
@@ -236,8 +249,8 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - MGEN-021：纯 symbol 标量减法 lowering 为 `symbol.sub`；直接 Python `-` 与 `nn.sub(...)` 包装在四类输入下必须保持一致；比较公开结果时以 `SymbolValueType.get_value()` 与对应 Python/SymbolDim 运行时结果一致为准。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
   - MGEN-022：纯 symbol 标量乘法 lowering 为 `symbol.mul`；直接 Python `*` 与 `nn.mul(...)` 包装在四类输入下必须保持一致；比较公开结果时以 `SymbolValueType.get_value()` 与对应 Python/SymbolDim 运行时结果一致为准。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
   - MGEN-022A：tensor 二元算术（含 `mul`）必须走统一 memory lowering 路径并支持 implicit broadcast；`nn.add` 代表性用例用于锁定该共享路径行为。（`test_tensor_binary_implicit_broadcast_lowering`、`test_tensor_binary_prepend_broadcast_lowering`）
-  - MGEN-022B：tensor `mul` mixed dtype 路径必须执行 dtype promotion 并通过 `dma.cast` 对齐到目标 element_type 后再发射算术 op；shape 不可 broadcast 或 `space` 不一致时必须报错并保持固定诊断文案。（`python expectation/dsl/mlir_gen/dialect/nn/mul.py`、`test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics`）
-  - MGEN-022C：返回注解放宽仅限二元算术 mixed dtype，且注解 `element_type` 必须是操作数 `element_type` 之一；不满足条件时必须报错 `Return type does not match annotation`。（`python expectation/dsl/mlir_gen/dialect/nn/mul.py`、`test_invalid_tensor_return_annotation_reports_diagnostics`）
+  - MGEN-022B：tensor `mul` mixed dtype 路径必须执行 dtype promotion 并通过 `dma.cast` 对齐到目标 element_type 后再发射算术 op；shape 不可 broadcast 或 `space` 不一致时必须报错并保持固定诊断文案。（`test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics`）
+  - MGEN-022C：返回注解放宽仅限二元算术 mixed dtype，且注解 `element_type` 必须是操作数 `element_type` 之一；不满足条件时必须报错 `Return type does not match annotation`。（`test_invalid_tensor_return_annotation_reports_diagnostics`）
   - MGEN-023：纯 symbol 标量除法 lowering 为 `symbol.div`；直接 Python `/` 与 `nn.truediv(...)` 包装在四类输入下必须保持一致；`const/const` 输入按静态整除结果收敛为常量整数；比较公开结果时以 `SymbolValueType.get_value()` 与对应 Python/SymbolDim 运行时结果一致为准。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
   - MGEN-024：纯 symbol 标量整除 lowering 为 `symbol.floordiv`；直接 Python `//` 与 `nn.floordiv(...)` 包装在四类输入下必须保持一致；`const/const` 输入按 Python `//` 语义收敛；比较公开结果时以 `SymbolValueType.get_value()` 与对应 Python/SymbolDim 运行时结果一致为准。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
   - MGEN-019：`build_func_op` 的运行时参数为必填，且公开契约仅覆盖 `fn + runtime_args` 的可位置绑定形参；省略实参、实参数量不匹配，或试图以 `globals/builtins` 替代时必须报错。（`test_build_func_op_requires_explicit_runtime_args`、`test_build_func_op_rejects_runtime_arg_count_mismatch`、`test_build_func_op_globals_and_builtins_cannot_replace_runtime_args`）
@@ -257,3 +270,6 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - MGEN-032：零入参函数直接返回 `get_thread_id()` 时，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须生成零参数 `func.func`、单个 `arch.get_thread_id`，并返回 `!symbol.int<"thread_id">`。（`test_build_func_op_lowers_arch_get_thread_id_query`）
   - MGEN-033：零入参函数直接返回 `get_subthread_num()` 时，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须生成零参数 `func.func`、单个 `arch.get_subthread_num`，并返回 `!symbol.int<"subthread_num">`。（`test_build_func_op_lowers_arch_get_subthread_num_query`）
   - MGEN-034：`nn.sub` mixed dtype promotion 需插入 `dma.cast`，并保持 `nn.sub` 与 `func.return` 的结果类型为 promotion 结果。（`test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast`）
+  - MGEN-035：零入参函数直接返回 `get_thread_num()` 时，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须生成零参数 `func.func`、单个 `arch.get_thread_num`，并返回 `!symbol.int<"thread_num">`。
+  - MGEN-036：返回 `get_dynamic_memory(space)` 的 DSL 函数必须 lowering 为 `arch.get_dynamic_memory`，并固定返回 `!nn.memory<[?], [1], i8, #nn.space<space>>`；非法 `space` 必须报错。（`test_build_func_op_rejects_invalid_arch_get_dynamic_memory_space`）
+  - MGEN-037：包含 `launch_kernel(name, block, thread, subthread)` 语句的 DSL 函数必须 lowering 为单个无返回值 `arch.launch_kernel`；非法 `name`/extent（含非 `!symbol.int` 或静态 `<= 0`）必须报错。（`test_build_func_op_rejects_invalid_arch_launch_kernel_args`）

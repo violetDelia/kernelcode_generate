@@ -47,6 +47,9 @@
 - `ArchQueryAST(query_name="get_subthread_id")` 必须 lowering 为单个 `arch.get_subthread_id`，并保持结果类型为 `!symbol.int<"subthread_id">`。
 - `ArchQueryAST(query_name="get_subthread_num")` 必须 lowering 为单个 `arch.get_subthread_num`，并保持结果类型为 `!symbol.int<"subthread_num">`。
 - `ArchQueryAST(query_name="get_thread_id")` 必须 lowering 为单个 `arch.get_thread_id`，并保持结果类型为 `!symbol.int<"thread_id">`。
+- `ArchQueryAST(query_name="get_thread_num")` 必须 lowering 为单个 `arch.get_thread_num`，并保持结果类型为 `!symbol.int<"thread_num">`。
+- `ArchGetDynamicMemoryAST(space=...)` 必须 lowering 为单个 `arch.get_dynamic_memory`，结果类型固定为 `!nn.memory<[?], [1], i8, #nn.space<space>>`；`space` 非 `SM/LM/TSM/TLM` 时必须报错。
+- `ArchLaunchKernelAST(name, block, thread, subthread)` 必须 lowering 为单个无返回值 `arch.launch_kernel`；extent 公开语义统一为 `!symbol.int` 启动规模：AST 虽允许 `int | SymbolDim` 入口，但 emit 阶段若 extent 不是 `!symbol.int<"...">`（或可静态判定为 `<= 0`）必须报错。
 
 ## 公开接口
 
@@ -142,14 +145,19 @@ value = emit_mlir(expr_ast, ctx)
 - `ArchQueryAST(query_name="get_subthread_id")`：生成 `arch.get_subthread_id`，返回 `!symbol.int<"subthread_id">`。
 - `ArchQueryAST(query_name="get_subthread_num")`：生成 `arch.get_subthread_num`，返回 `!symbol.int<"subthread_num">`。
 - `ArchQueryAST(query_name="get_thread_id")`：生成 `arch.get_thread_id`，返回 `!symbol.int<"thread_id">`。
+- `ArchQueryAST(query_name="get_thread_num")`：生成 `arch.get_thread_num`，返回 `!symbol.int<"thread_num">`。
+- `ArchGetDynamicMemoryAST(space=...)`：生成 `arch.get_dynamic_memory`，返回 `!nn.memory<[?], [1], i8, #nn.space<space>>`。
+- `ArchLaunchKernelAST(name, block, thread, subthread)`：生成无返回值 `arch.launch_kernel`。
 
 ## 测试
 
 - 测试文件：[`test/dsl/test_emit_mlir.py`](../../test/dsl/test_emit_mlir.py)
 - 集成测试文件：[`test/dsl/test_mlir_gen.py`](../../test/dsl/test_mlir_gen.py)
+- 补充测试文件：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
 - 执行命令（emit 单测）：`pytest -q test/dsl/test_emit_mlir.py`
 - 执行命令（emit 端到端回归）：`pytest -q test/dsl/test_mlir_gen.py`
-- 拆分归属：EMIT-001~EMIT-028 归属 `test_emit_mlir.py`；EMIT-029 归属 `test_mlir_gen.py`；清单内引用 `python expectation/...` 的条目作为链路验收命令保留在 expectation 阶段执行。
+- 执行命令（ast_visitor 负路径）：`pytest -q test/dsl/test_ast_visitor.py`
+- 拆分归属：EMIT-001~EMIT-028 归属 `test_emit_mlir.py`；EMIT-029 归属 `test_mlir_gen.py`；arch helper 负路径与 ast_visitor 驱动的边界覆盖归属 `test_ast_visitor.py`。
 - 测试目标：
   - 覆盖常见表达式与语句节点的发射结果。
   - 覆盖 `lhs != rhs` 到 `CompareExprAST(op="ne")` 的 memory lowering：`nn.ne` 结果为 `i1`，并支持 implicit broadcast。
@@ -163,11 +171,14 @@ value = emit_mlir(expr_ast, ctx)
   - 覆盖 `ArchQueryAST(query_name="get_subthread_id")` lowering 为 `arch.get_subthread_id` 的最小查询路径。
   - 覆盖 `ArchQueryAST(query_name="get_subthread_num")` lowering 为 `arch.get_subthread_num` 的最小查询路径。
   - 覆盖 `ArchQueryAST(query_name="get_thread_id")` lowering 为 `arch.get_thread_id` 的最小查询路径。
+  - 覆盖 `ArchQueryAST(query_name="get_thread_num")` lowering 为 `arch.get_thread_num` 的最小查询路径。
+  - 覆盖 `ArchGetDynamicMemoryAST(space=...)` lowering 为 `arch.get_dynamic_memory` 的结果类型与 `space` 约束错误路径。
+  - 覆盖 `ArchLaunchKernelAST(name, block, thread, subthread)` lowering 为 `arch.launch_kernel` 的语句语义与参数错误路径。
   - 覆盖不支持节点的错误路径。
 - 功能与用例清单：
   - EMIT-001：二元表达式节点生成对应 op/value。（`test_emit_context_reuses_cached_value`）
   - EMIT-001A：`BinaryExprAST(op="mul")` 在 symbol 路径必须生成 `symbol.mul`，并与其他 symbol 二元算术共享相同分发入口。（`test_emit_mlir_infer_expr_type_branches`、`test_emit_mlir_lower_expr_unknown_and_symbol_errors`）
-  - EMIT-001B：tensor 二元算术（含 `mul`）在 memory 路径必须复用统一 `dtype promotion + dma.cast + broadcast` 校验；mixed dtype 场景需先对齐 dtype 再生成目标 op，shape 不可 broadcast、space 不一致或 dtype 组合不受支持时必须报错并保持固定诊断文案。（`test_emit_mlir_infer_expr_type_branches`、`python expectation/dsl/mlir_gen/dialect/nn/mul.py`）
+  - EMIT-001B：tensor 二元算术（含 `mul`）在 memory 路径必须复用统一 `dtype promotion + dma.cast + broadcast` 校验；mixed dtype 场景需先对齐 dtype 再生成目标 op，shape 不可 broadcast、space 不一致或 dtype 组合不受支持时必须报错并保持固定诊断文案。（`test_emit_mlir_infer_expr_type_branches`）
   - EMIT-002：比较表达式节点生成对应 op/value。（`test_emit_mlir_compare_expr_emits_eq`）
   - EMIT-003：不支持节点抛出错误并携带位置信息。（`test_emit_mlir_unsupported_node_reports_location`）
   - EMIT-004：`TensorAST` 可通过符号表直接解析。（`test_emit_mlir_tensor_uses_symbol_table`）
@@ -195,6 +206,9 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-025：`ArchQueryAST(query_name="get_subthread_id")` lowering 为单个 `arch.get_subthread_id`，并返回 `!symbol.int<"subthread_id">`。（`test_emit_mlir_lowers_arch_get_subthread_id_query`）
   - EMIT-026：`ArchQueryAST(query_name="get_thread_id")` lowering 为单个 `arch.get_thread_id`，并返回 `!symbol.int<"thread_id">`。（`test_emit_mlir_lowers_arch_get_thread_id_query`）
   - EMIT-027：`ArchQueryAST(query_name="get_subthread_num")` lowering 为单个 `arch.get_subthread_num`，并返回 `!symbol.int<"subthread_num">`。（`test_emit_mlir_lowers_arch_get_subthread_num_query`）
+  - EMIT-030：`ArchQueryAST(query_name="get_thread_num")` lowering 为单个 `arch.get_thread_num`，并返回 `!symbol.int<"thread_num">`。
+  - EMIT-031：`ArchGetDynamicMemoryAST(space=...)` lowering 为 `arch.get_dynamic_memory`，并固定返回 `!nn.memory<[?], [1], i8, #nn.space<space>>`；非法 `space` 必须报错。（`test_emit_mlir_rejects_invalid_arch_get_dynamic_memory_space`）
+  - EMIT-032：`ArchLaunchKernelAST(name, block, thread, subthread)` lowering 为单个无返回值 `arch.launch_kernel`；extent 必须为正整数 `!symbol.int`，非法 `name`/extent 必须报错。（`test_emit_mlir_rejects_invalid_arch_launch_kernel_args`）
   - EMIT-002A：`CompareExprAST(op="ne")` 在 memory 路径必须生成 compare op（必要时带 `nn.broadcast`），结果 element type 为 `i1`。（`test_emit_mlir_binary_compare_broadcast_rhs`）
   - EMIT-002B：`CompareExprAST(op="ne")` memory 路径在不可 broadcast 或 element type/space 不一致时必须报错并保持固定诊断文案。（`test_emit_mlir_compare_memory_mismatch_reports_diagnostics`）
   - EMIT-028：`nn.sub` mixed dtype promotion 触发 `dma.cast` 并保持 `nn.sub` 与 `func.return` 的结果类型与 promotion 结果一致。（`test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast`）

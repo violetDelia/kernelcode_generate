@@ -39,7 +39,7 @@
 - `for` 循环仅支持 `range(...)`、`LoopRange(...)` 或 `loop(...)` 的 1~3 参数形式，并解析为 `ForAST` 的 `start/end/step` 字段。
 - `for` 循环体内不允许出现 `return`；出现即视为语法不支持并报错。
 - 显式 `-> None` 返回注解表示函数无公开返回值；该场景允许函数体只包含语句且省略 `return`。
-- DSL 解析入口当前仅将无参 `get_block_id()` / `get_block_num()` / `get_subthread_id()` / `get_subthread_num()` / `get_thread_id()` 识别为 `arch` 查询 builtin，并解析为专用 `ArchQueryAST` 节点。
+- DSL 解析入口必须覆盖 `arch` helper：无参 `get_block_id()` / `get_block_num()` / `get_subthread_id()` / `get_subthread_num()` / `get_thread_id()` / `get_thread_num()` 解析为 `ArchQueryAST`；`get_dynamic_memory(space)` 解析为 `ArchGetDynamicMemoryAST`；`launch_kernel(name, block, thread, subthread)` 解析为 `ArchLaunchKernelAST`。
 - 比较表达式入口采用 Python 比较语法；`lhs != rhs` 必须解析为 `CompareExprAST(op="ne")`，以供下游 `nn.ne` lowering 复用同一 AST 语义。
 - 二元乘法入口采用 Python `lhs * rhs` 与 `nn.mul(lhs, rhs)` 双入口；两者都必须解析为 `BinaryExprAST(op="mul")`，以复用后续统一 lowering 语义。
 
@@ -78,6 +78,9 @@ func_ast = parse_function(add)
 - `slice(...)` helper 仅允许 3~5 个位置参数；超出范围必须返回 `Unsupported slice arity` 诊断。
 - `slice` 的首参必须解析为 `TensorAST`；否则必须返回 `slice source must be TensorAST` 诊断。
 - `slice` 的 `space` 可选，但一旦提供必须为 `MemorySpace`；否则必须返回 `slice space must be MemorySpace` 诊断。
+- `get_block_id/get_block_num/get_subthread_id/get_subthread_num/get_thread_id/get_thread_num` helper 仅允许 0 个参数且禁止关键字参数；不满足时必须返回 `Unsupported <helper> arity` 诊断。
+- `get_dynamic_memory(...)` helper 仅允许 1 个位置参数且禁止关键字参数；参数必须是 `MemorySpace` 且仅允许片上空间（`SM/LM/TSM/TLM`），否则必须返回 `Unsupported get_dynamic_memory arity`、`get_dynamic_memory space must be MemorySpace` 或 `get_dynamic_memory space must be on-chip MemorySpace` 诊断。
+- `launch_kernel(...)` helper 仅允许 4 个位置参数且禁止关键字参数；`name` 必须是非空字符串，`block/thread/subthread` 仅做 AST 入口语法校验（必须是正整数或 `SymbolDim` 语义），否则必须返回 `Unsupported launch_kernel arity`、`launch_kernel name must be non-empty str`、`launch_kernel <dim> must be int or SymbolDim` 或 `launch_kernel <dim> must be > 0` 诊断；AST 阶段不承诺 extent 已完成 `!symbol.int` 归一化。
 
 返回与限制：
 
@@ -386,7 +389,7 @@ ConstAST(value=1)
 
 参数说明：
 
-- `query_name` (`str`)：查询名，当前仅允许 `get_block_id` / `get_block_num` / `get_subthread_id` / `get_subthread_num` / `get_thread_id`。
+- `query_name` (`str`)：查询名，当前仅允许 `get_block_id` / `get_block_num` / `get_subthread_id` / `get_subthread_num` / `get_thread_id` / `get_thread_num`。
 - `location` (`SourceLocation|None`)：可选源码位置。
 
 使用示例：
@@ -397,12 +400,60 @@ ArchQueryAST(query_name="get_block_num")
 ArchQueryAST(query_name="get_subthread_id")
 ArchQueryAST(query_name="get_subthread_num")
 ArchQueryAST(query_name="get_thread_id")
+ArchQueryAST(query_name="get_thread_num")
 ```
 
 注意事项：
 
 - 该节点只表示 DSL 解析结果，不定义结果类型或 lowering 细节。
-- 当前仅允许 `get_block_id` / `get_block_num` / `get_subthread_id` / `get_subthread_num` / `get_thread_id`；其他 `arch` 调用不属于本节点职责。
+- 当前仅允许 `get_block_id` / `get_block_num` / `get_subthread_id` / `get_subthread_num` / `get_thread_id` / `get_thread_num`；`get_dynamic_memory` 与 `launch_kernel` 不属于本节点职责。
+
+返回与限制：返回不可变的数据结构实例。
+
+### `ArchGetDynamicMemoryAST`
+
+功能说明：表示 `get_dynamic_memory(space)` 的 `arch` 动态内存入口调用节点。
+
+参数说明：
+
+- `space` (`MemorySpace`)：动态内存空间，公开语义仅允许 `SM/LM/TSM/TLM`。
+- `location` (`SourceLocation|None`)：可选源码位置。
+
+使用示例：
+
+```python
+ArchGetDynamicMemoryAST(space=MemorySpace.SM)
+```
+
+注意事项：
+
+- 该节点只表示 DSL 解析结果，不定义具体 lowering。
+- `space` 必须是 `MemorySpace` 且属于片上空间；`global` 或其他非法输入必须在 AST 阶段报错。
+
+返回与限制：返回不可变的数据结构实例。
+
+### `ArchLaunchKernelAST`
+
+功能说明：表示 `launch_kernel(name, block, thread, subthread)` 的启动描述语句节点。
+
+参数说明：
+
+- `name` (`str`)：kernel 名称，必须为非空字符串。
+- `block` (`object`)：block 规模，必须可解析为正整数或 `SymbolDim`。
+- `thread` (`object`)：thread 规模，必须可解析为正整数或 `SymbolDim`。
+- `subthread` (`object`)：subthread 规模，必须可解析为正整数或 `SymbolDim`。
+- `location` (`SourceLocation|None`)：可选源码位置。
+
+使用示例：
+
+```python
+ArchLaunchKernelAST(name="k", block=ConstAST(1), thread=ConstAST(128), subthread=ConstAST(4))
+```
+
+注意事项：
+
+- 该节点属于语句型 helper，默认不产生独立返回值。
+- 启动规模参数类型与正值约束需在 AST 阶段给出可定位诊断。
 
 返回与限制：返回不可变的数据结构实例。
 
@@ -428,9 +479,11 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
 
 - 测试文件：[`test/dsl/test_ast.py`](../../test/dsl/test_ast.py)
 - 集成测试文件：[`test/dsl/test_mlir_gen.py`](../../test/dsl/test_mlir_gen.py)
+- 补充测试文件：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
 - 执行命令（AST 单测）：`pytest -q test/dsl/test_ast.py`
 - 执行命令（AST→MLIR 集成）：`pytest -q test/dsl/test_mlir_gen.py`
-- 拆分归属：AST 解析入口、注解解析、诊断负路径与 helper arity 校验归属 `test_ast.py`；依赖 `build_func_op(...)` 观察 AST 语义透传的链路回归归属 `test_mlir_gen.py`。
+- 执行命令（ast_visitor 负路径）：`pytest -q test/dsl/test_ast_visitor.py`
+- 拆分归属：AST 解析入口、注解解析、诊断负路径与 helper arity 校验归属 `test_ast.py`；依赖 `build_func_op(...)` 观察 AST 语义透传的链路回归归属 `test_mlir_gen.py`；ast_visitor 负路径与 arch helper 入口校验归属 `test_ast_visitor.py`。
 - 测试目标：
   - 覆盖 `parse_function(...)` 的源码解析与 AST 构建。
   - 覆盖 AST 节点字段与诊断信息的构造。
@@ -442,6 +495,10 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
   - 覆盖 `get_block_num()` 的非法参数在 AST 解析阶段被拒绝。
   - 覆盖 `get_thread_id()` 解析为 `ArchQueryAST` 的最小 arch 查询入口。
   - 覆盖 `get_thread_id()` 的非法参数在 AST 解析阶段被拒绝。
+  - 覆盖 `get_thread_num()` 解析为 `ArchQueryAST` 的最小 arch 查询入口。
+  - 覆盖 `get_thread_num()` 的非法参数在 AST 解析阶段被拒绝。
+  - 覆盖 `get_dynamic_memory(space)` 的 AST 入口语义与 `MemorySpace` 约束错误路径。
+  - 覆盖 `launch_kernel(name, block, thread, subthread)` 的语句解析入口语义与 arity/name/extent 错误路径。
   - 覆盖 `load` helper 的参数数量、source 类型与 space 约束的错误路径。
   - 覆盖 `slice` helper 的参数数量、source 类型与 space 约束的错误路径。
 - 功能与用例清单：
@@ -473,5 +530,11 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
   - AST-014J：`get_subthread_num(1)` 与 `get_subthread_num(x=1)` 必须在 AST 解析阶段返回 `Unsupported get_subthread_num arity` 诊断。（`test_parse_function_rejects_invalid_get_subthread_num_arity_variants`）
   - AST-014G：零入参函数中的 `get_thread_id()` 可解析为 `ArchQueryAST`，并保留继续向下游 lowering 所需的查询名语义。（`test_build_func_op_lowers_arch_get_thread_id_query`）
   - AST-014H：`get_thread_id(1)` 与 `get_thread_id(x=1)` 必须在 AST 解析阶段返回 `Unsupported get_thread_id arity` 诊断。（`test_parse_function_rejects_invalid_get_thread_id_arity_variants`）
+  - AST-014K：零入参函数中的 `get_thread_num()` 可解析为 `ArchQueryAST`，并保留继续向下游 lowering 所需的查询名语义。
+  - AST-014L：`get_thread_num(1)` 与 `get_thread_num(x=1)` 必须在 AST 解析阶段返回 `Unsupported get_thread_num arity` 诊断。（`test_parse_function_rejects_invalid_get_thread_num_arity_variants`）
+  - AST-014M：`get_dynamic_memory(MemorySpace.SM)` 必须在 AST 解析阶段生成 `ArchGetDynamicMemoryAST` 并保留 `space` 语义。
+  - AST-014N：`get_dynamic_memory` 的参数个数或 `space` 类型/取值非法时，必须在 AST 解析阶段返回约定诊断。（`test_parse_function_rejects_invalid_get_dynamic_memory_variants`）
+  - AST-014O：`launch_kernel("k", block, thread, subthread)` 必须在 AST 解析阶段生成 `ArchLaunchKernelAST` 语句节点。
+  - AST-014P：`launch_kernel` 的参数个数、名称或启动规模非法时，必须在 AST 解析阶段返回约定诊断；合法路径需保留到下游 `arch.launch_kernel` lowering。（`test_parse_function_rejects_invalid_launch_kernel_variants`）
   - AST-015：`lhs != rhs` 必须在 AST 中保持 `CompareExprAST(op="ne")` 语义，并与其他比较表达式共享后续 lowering 入口。（`test_build_func_op_lowers_nn_ne_with_tensor_i1_return_annotation`）
   - AST-018：`nn.mul(lhs, rhs)` 与 `lhs * rhs` 必须共用 `BinaryExprAST(op="mul")` 入口；`nn.mul` 的 arity 负路径继续复用 `Unsupported nn arithmetic arity` 诊断口径。（`test_symbol_scalar_function_lowers_symbol_binary_ops`、`test_parse_function_rejects_unsupported_nn_arithmetic_arity_variants`）

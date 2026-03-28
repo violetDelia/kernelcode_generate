@@ -513,7 +513,7 @@ class ArchQueryAST:
 
     功能说明:
     - 表示 DSL 中最小 `arch` 查询调用。
-    - 当前仅承载 `get_block_id()` / `get_block_num()` / `get_subthread_id()` / `get_subthread_num()` / `get_thread_id()` 查询名。
+    - 当前仅承载 `get_block_id()` / `get_block_num()` / `get_subthread_id()` / `get_subthread_num()` / `get_thread_id()` / `get_thread_num()` 查询名。
 
     使用示例:
     - ArchQueryAST(query_name="get_block_id")
@@ -521,6 +521,7 @@ class ArchQueryAST:
     - ArchQueryAST(query_name="get_subthread_id")
     - ArchQueryAST(query_name="get_subthread_num")
     - ArchQueryAST(query_name="get_thread_id")
+    - ArchQueryAST(query_name="get_thread_num")
 
     关联文件:
     - spec: spec/dsl/ast.md
@@ -529,6 +530,57 @@ class ArchQueryAST:
     """
 
     query_name: str
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class ArchGetDynamicMemoryAST:
+    """arch 动态内存入口表达式节点。
+
+    创建者: 我不是牛马
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 表示 `get_dynamic_memory(space)` 的调用节点。
+    - 仅允许片上空间 `SM/LM/TSM/TLM`。
+
+    使用示例:
+    - ArchGetDynamicMemoryAST(space=MemorySpace.SM)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    space: MemorySpace
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class ArchLaunchKernelAST:
+    """arch 启动描述语句节点。
+
+    创建者: 我不是牛马
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 表示 `launch_kernel(name, block, thread, subthread)` 的启动描述。
+    - 仅校验 name 与三层规模的基础约束，不承担 lowering 细节。
+
+    使用示例:
+    - ArchLaunchKernelAST(name="kernel", block=ScalarArgAST("block", int), thread=ConstAST(128), subthread=ConstAST(4))
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    name: str
+    block: object
+    thread: object
+    subthread: object
     location: SourceLocation | None = None
 
 
@@ -978,6 +1030,11 @@ def _parse_annotation_node(
             return inferred
         _raise_parse_error("Missing annotation", node)
 
+    if isinstance(node, py_ast.Constant) and node.value is None:
+        if arg_name is None:
+            return None
+        _raise_parse_error("Unsupported annotation", node)
+
     if isinstance(node, (py_ast.Constant, py_ast.JoinedStr)):
         text = _normalize_annotation_text(node, globals_table, builtins_table, runtime_table)
         return _annotation_from_text(text, arg_name, node)
@@ -1297,7 +1354,9 @@ def _parse_dma_call(
     功能说明:
     - 将 `load/slice/store/deslice/...` 解析为对应 AST 节点。
     - 将 `nn.add/sub/mul/truediv/floordiv(...)` 解析为对应的 `BinaryExprAST`。
-    - 将 `get_block_id()` / `get_block_num()` / `get_subthread_id()` / `get_subthread_num()` / `get_thread_id()` 解析为 `ArchQueryAST`。
+    - 将 `get_block_id()` / `get_block_num()` / `get_subthread_id()` / `get_subthread_num()` / `get_thread_id()` / `get_thread_num()` 解析为 `ArchQueryAST`。
+    - 将 `get_dynamic_memory(space)` 解析为 `ArchGetDynamicMemoryAST`。
+    - 将 `launch_kernel(name, block, thread, subthread)` 解析为 `ArchLaunchKernelAST`。
 
     使用示例:
     - _parse_dma_call(py_ast.parse("slice(A, [i], [n])").body[0].value, env, globals(), __builtins__)
@@ -1458,6 +1517,64 @@ def _parse_dma_call(
         if expr.args or expr.keywords:
             _raise_parse_error("Unsupported get_thread_id arity", expr)
         return ArchQueryAST(query_name="get_thread_id", location=_location_from_node(expr))
+    if call_name == "get_thread_num":
+        if expr.args or expr.keywords:
+            _raise_parse_error("Unsupported get_thread_num arity", expr)
+        return ArchQueryAST(query_name="get_thread_num", location=_location_from_node(expr))
+
+    if call_name == "get_dynamic_memory":
+        if len(expr.args) != 1 or expr.keywords:
+            _raise_parse_error("Unsupported get_dynamic_memory arity", expr)
+        space = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+        if not isinstance(space, MemorySpace):
+            _raise_parse_error("get_dynamic_memory space must be MemorySpace", expr.args[0])
+        if space not in {MemorySpace.SM, MemorySpace.LM, MemorySpace.TSM, MemorySpace.TLM}:
+            _raise_parse_error("get_dynamic_memory space must be on-chip MemorySpace", expr.args[0])
+        return ArchGetDynamicMemoryAST(space=space, location=_location_from_node(expr))
+
+    if call_name == "launch_kernel":
+        if len(expr.args) != 4 or expr.keywords:
+            _raise_parse_error("Unsupported launch_kernel arity", expr)
+        name_expr = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+        if isinstance(name_expr, ConstAST):
+            kernel_name = name_expr.value
+        else:
+            kernel_name = name_expr
+        if not isinstance(kernel_name, str) or kernel_name == "":
+            _raise_parse_error("launch_kernel name must be non-empty str", expr.args[0])
+
+        def _validate_launch_extent(value: object, dim_name: str, node: object) -> None:
+            if isinstance(value, ConstAST):
+                if not isinstance(value.value, int):
+                    _raise_parse_error(f"launch_kernel {dim_name} must be int or SymbolDim", node)
+                if value.value <= 0:
+                    _raise_parse_error(f"launch_kernel {dim_name} must be > 0", node)
+                return
+            if isinstance(value, ScalarArgAST):
+                if value.value_type is not int:
+                    _raise_parse_error(f"launch_kernel {dim_name} must be int or SymbolDim", node)
+                return
+            if isinstance(value, SymbolDim):
+                return
+            if isinstance(value, int):
+                if value <= 0:
+                    _raise_parse_error(f"launch_kernel {dim_name} must be > 0", node)
+                return
+            _raise_parse_error(f"launch_kernel {dim_name} must be int or SymbolDim", node)
+
+        block = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+        thread = _parse_expr(expr.args[2], env, globals_table, builtins_table)
+        subthread = _parse_expr(expr.args[3], env, globals_table, builtins_table)
+        _validate_launch_extent(block, "block", expr.args[1])
+        _validate_launch_extent(thread, "thread", expr.args[2])
+        _validate_launch_extent(subthread, "subthread", expr.args[3])
+        return ArchLaunchKernelAST(
+            name=kernel_name,
+            block=block,
+            thread=thread,
+            subthread=subthread,
+            location=_location_from_node(expr),
+        )
 
     _raise_parse_error("Unsupported call expression", expr)
     return expr
@@ -1650,11 +1767,12 @@ def _parse_function_impl(
             _raise_parse_error("Unsupported argument annotation", arg)
 
     outputs: list[TensorAST | ScalarArgAST] = []
+    return_allows_empty = False
     if func_def.returns is not None:
         parsed = _parse_annotation_node(func_def.returns, None, globals_table, builtins_table, runtime_table)
         if parsed is None:
-            _raise_parse_error("Unsupported return annotation", func_def.returns)
-        if isinstance(parsed, (TensorAST, ScalarArgAST)):
+            return_allows_empty = True
+        elif isinstance(parsed, (TensorAST, ScalarArgAST)):
             outputs.append(parsed)
         else:
             _raise_parse_error("Unsupported return annotation", func_def.returns)
@@ -1667,7 +1785,7 @@ def _parse_function_impl(
         if isinstance(stmt, py_ast.Return):
             has_return = True
 
-    if func_def.returns is not None and not has_return:
+    if func_def.returns is not None and not has_return and not return_allows_empty:
         raise AstParseError("Missing return statement", [Diagnostic("Missing return statement", _location_from_node(func_def))])
     if has_return and not isinstance(func_def.body[-1], py_ast.Return):
         raise AstParseError("Return statement must be last", [Diagnostic("Return statement must be last", _location_from_node(func_def.body[-1]))])
