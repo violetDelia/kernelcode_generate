@@ -929,11 +929,12 @@ class DmaViewOp(IRDLOperation):
         """校验 dma.view。
 
         创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
+        最后一次更改: 朽木露琪亚
 
         功能说明:
         - element_type/space 必须一致。
         - 可判定 numel 不一致必须报错。
+        - source/result 的 rank 必须一致。
 
         使用示例:
         - DmaViewOp(...).verify_()
@@ -950,6 +951,8 @@ class DmaViewOp(IRDLOperation):
         shape = _verify_symbol_int_operands(self.shape, "shape", min_value=1)
         stride = _verify_symbol_int_operands(self.stride, "stride", min_value=1)
         rank = len(result_type.shape.data)
+        if len(source_type.shape.data) != rank:
+            raise VerifyException("dma.view source/result rank mismatch")
         _verify_rank_match(offsets, rank, "offsets")
         _verify_rank_match(shape, rank, "shape")
         _verify_rank_match(stride, rank, "stride")

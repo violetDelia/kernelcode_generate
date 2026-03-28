@@ -685,6 +685,62 @@ def test_dma_view_dynamic_symbol_int_layout_operands_valid() -> None:
     op.verify()
 
 
+# TC-DMA-019A
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-28 18:59:18 +0800
+# 最近一次运行成功时间: 2026-03-28 18:59:18 +0800
+# 功能说明: 验证 dma.view 在 offsets/shape/stride 可静态判定时会拒绝越界视图。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_view_offset_out_of_bounds
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_view_offset_out_of_bounds() -> None:
+    source_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(4)]))
+    source = _TestOp(result_types=[source_type]).results[0]
+    result_type = _make_memory_type()
+    op = DmaViewOp(
+        source,
+        _make_symbol_operands([1, 3]),
+        _make_symbol_operands([2, 4]),
+        _make_symbol_operands([4, 1]),
+        result_type,
+    )
+    with pytest.raises(VerifyException, match="dma.view offset out of bounds"):
+        op.verify()
+
+
+# TC-DMA-019B
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-28 18:59:18 +0800
+# 最近一次运行成功时间: 2026-03-28 18:59:18 +0800
+# 功能说明: 验证 dma.view source/result rank 不一致时会直接报错。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_view_source_result_rank_mismatch
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_view_source_result_rank_mismatch() -> None:
+    source_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(4), IntAttr(8)]),
+        stride=ArrayAttr([IntAttr(32), IntAttr(8), IntAttr(1)]),
+    )
+    source = _TestOp(result_types=[source_type]).results[0]
+    result_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
+        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+    )
+    op = DmaViewOp(
+        source,
+        _make_symbol_operands([0, 0]),
+        _make_symbol_operands([2, 4]),
+        _make_symbol_operands([4, 1]),
+        result_type,
+    )
+    with pytest.raises(VerifyException, match="dma.view source/result rank mismatch"):
+        op.verify()
+
+
 # TC-DMA-020
 # 创建者: 朽木露琪亚
 # 最后一次更改: OpenAI
