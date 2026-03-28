@@ -45,6 +45,7 @@ from kernel_gen.operation.arch import (
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
+from kernel_gen.target import registry as target_registry
 
 
 # TC-OP-ARCH-001
@@ -270,3 +271,81 @@ def test_launch_kernel_keyword_call_success() -> None:
     result = launch_kernel(thread=2, subthread=1, block=4, name="my_kernel")
 
     assert result is None
+
+
+# TC-OP-ARCH-013
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-28 13:56:08 +0800
+# 最近一次运行成功时间: 2026-03-28 13:56:08 +0800
+# 测试目的: 验证 target registry 硬件值优先、生效与缺失回退语义。
+# 使用示例: pytest -q test/operation/test_operation_arch.py -k test_arch_queries_prefer_target_hardware_with_fallback
+# 对应功能实现文件路径: kernel_gen/operation/arch.py
+# 对应 spec 文件路径: spec/operation/arch.md
+# 对应测试文件路径: test/operation/test_operation_arch.py
+def test_arch_queries_prefer_target_hardware_with_fallback() -> None:
+    spec = target_registry.TargetSpec(
+        name="op_arch_hw_fallback",
+        arch_supported_ops=None,
+        arch_unsupported_ops=set(),
+        hardware={"block_num": 256, "thread_num": 128, "sm_memory_size": 4096},
+    )
+    target_registry.register_target(spec)
+    target_registry._set_current_target("op_arch_hw_fallback")
+    try:
+        block_num = get_block_num()
+        thread_num = get_thread_num()
+        subthread_num = get_subthread_num()
+        smem = get_dynamic_memory(MemorySpace.SM)
+        lmem = get_dynamic_memory(MemorySpace.LM)
+
+        assert block_num.get_value() == 256
+        assert thread_num.get_value() == 128
+        assert subthread_num.get_value() == "subthread_num"
+        assert smem.get_shape() == [4096]
+        assert smem.get_stride() == [1]
+        assert smem.dtype is NumericType.Int8
+        assert smem.space is MemorySpace.SM
+        assert lmem.get_shape() == ["?"]
+        assert lmem.get_stride() == [1]
+        assert lmem.dtype is NumericType.Int8
+        assert lmem.space is MemorySpace.LM
+    finally:
+        target_registry._set_current_target(None)
+
+
+# TC-OP-ARCH-014
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-28 13:56:08 +0800
+# 最近一次运行成功时间: 2026-03-28 13:56:08 +0800
+# 测试目的: 验证 target registry 白名单限制下的不支持 op 触发错误。
+# 使用示例: pytest -q test/operation/test_operation_arch.py -k test_arch_queries_reject_unsupported_target_ops
+# 对应功能实现文件路径: kernel_gen/operation/arch.py
+# 对应 spec 文件路径: spec/operation/arch.md
+# 对应测试文件路径: test/operation/test_operation_arch.py
+def test_arch_queries_reject_unsupported_target_ops() -> None:
+    spec = target_registry.TargetSpec(
+        name="op_arch_support_gate",
+        arch_supported_ops={"arch.get_block_id"},
+        arch_unsupported_ops=set(),
+        hardware={},
+    )
+    target_registry.register_target(spec)
+    target_registry._set_current_target("op_arch_support_gate")
+    try:
+        assert get_block_id().get_value() == "block_id"
+        with pytest.raises(ValueError, match="arch.get_block_num"):
+            get_block_num()
+        with pytest.raises(ValueError, match="arch.get_thread_id"):
+            get_thread_id()
+        with pytest.raises(ValueError, match="arch.get_thread_num"):
+            get_thread_num()
+        with pytest.raises(ValueError, match="arch.get_subthread_num"):
+            get_subthread_num()
+        with pytest.raises(ValueError, match="arch.get_dynamic_memory"):
+            get_dynamic_memory(MemorySpace.SM)
+        with pytest.raises(ValueError, match="arch.launch_kernel"):
+            launch_kernel("kernel", 1, 1, 1)
+    finally:
+        target_registry._set_current_target(None)
