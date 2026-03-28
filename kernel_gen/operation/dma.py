@@ -42,6 +42,9 @@ _INT_DTYPES = {
     NumericType.Uint32,
     NumericType.Uint64,
 }
+_ERROR_TEMPLATE = "场景: {scene}; 期望: {expected}; 实际: {actual}; 建议动作: {action}"
+_ERROR_ACTION = "请按接口约束传参"
+_ERROR_SCENE = "dma operation 参数校验"
 
 
 def _ensure_memory(value: object, name: str) -> Memory:
@@ -62,7 +65,14 @@ def _ensure_memory(value: object, name: str) -> Memory:
     - 功能实现: kernel_gen/operation/dma.py
     """
     if not isinstance(value, Memory):
-        raise TypeError(f"{name} must be Memory")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected=f"{name} must be Memory",
+                actual=type(value).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     return value
 
 
@@ -85,11 +95,25 @@ def _ensure_shape_value(value: object, name: str) -> SymbolShape:
     - 功能实现: kernel_gen/operation/dma.py
     """
     if isinstance(value, (str, bytes)):
-        raise ValueError(f"{name} must be a dimension sequence")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="dma.alloc 参数校验",
+                expected=f"{name} must be a dimension sequence",
+                actual=type(value).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     try:
         return SymbolShape(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a valid dimension sequence") from exc
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="dma.alloc 参数校验",
+                expected=f"{name} must be a valid dimension sequence",
+                actual=type(value).__name__,
+                action=_ERROR_ACTION,
+            )
+        ) from exc
 
 
 def alloc(
@@ -115,15 +139,36 @@ def alloc(
     - 功能实现: kernel_gen/operation/dma.py
     """
     if not isinstance(dtype, NumericType):
-        raise TypeError("alloc dtype must be NumericType")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="dma.alloc 参数校验",
+                expected="alloc dtype must be NumericType",
+                actual=type(dtype).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     if not isinstance(space, MemorySpace):
-        raise TypeError("alloc space must be MemorySpace")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="dma.alloc 参数校验",
+                expected="alloc space must be MemorySpace",
+                actual=type(space).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     shape_value = _ensure_shape_value(shape, "shape")
     stride_value = None
     if stride is not None:
         stride_value = _ensure_shape_value(stride, "stride")
         if len(stride_value) != len(shape_value):
-            raise ValueError("stride rank mismatch")
+            raise ValueError(
+                _ERROR_TEMPLATE.format(
+                    scene="dma.alloc 参数校验",
+                    expected="stride rank mismatch",
+                    actual=f"shape_rank={len(shape_value)} stride_rank={len(stride_value)}",
+                    action=_ERROR_ACTION,
+                )
+            )
     return Memory(shape_value, dtype, space=space, stride=stride_value)
 
 
@@ -189,9 +234,23 @@ def _ensure_index_rank(memory: Memory, offsets: SymbolShape, sizes: SymbolShape,
     """
     rank = len(memory.shape)
     if len(offsets) != rank or len(sizes) != rank:
-        raise ValueError("Index rank mismatch")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected="Index rank mismatch",
+                actual=f"rank={rank} offsets={len(offsets)} sizes={len(sizes)}",
+                action=_ERROR_ACTION,
+            )
+        )
     if strides is not None and len(strides) != rank:
-        raise ValueError("Index rank mismatch")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected="Index rank mismatch",
+                actual=f"rank={rank} strides={len(strides)}",
+                action=_ERROR_ACTION,
+            )
+        )
 
 
 def _ensure_sizes_positive(sizes: SymbolShape) -> None:
@@ -213,7 +272,14 @@ def _ensure_sizes_positive(sizes: SymbolShape) -> None:
     """
     for dim in sizes.get_values():
         if isinstance(dim, int) and dim <= 0:
-            raise ValueError("Invalid size")
+            raise ValueError(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="Invalid size",
+                    actual=str(dim),
+                    action=_ERROR_ACTION,
+                )
+            )
 
 
 def _ensure_offsets_non_negative(offsets: SymbolShape) -> None:
@@ -235,7 +301,14 @@ def _ensure_offsets_non_negative(offsets: SymbolShape) -> None:
     """
     for dim in offsets.get_values():
         if isinstance(dim, int) and dim < 0:
-            raise ValueError("Invalid offset")
+            raise ValueError(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="Invalid offset",
+                    actual=str(dim),
+                    action=_ERROR_ACTION,
+                )
+            )
 
 
 def _ensure_strides_positive(strides: SymbolShape | None) -> None:
@@ -259,7 +332,14 @@ def _ensure_strides_positive(strides: SymbolShape | None) -> None:
         return
     for dim in strides.get_values():
         if isinstance(dim, int) and dim <= 0:
-            raise ValueError("Invalid stride")
+            raise ValueError(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="Invalid stride",
+                    actual=str(dim),
+                    action=_ERROR_ACTION,
+                )
+            )
 
 
 def _clone_symbol_list(value: SymbolShape | None) -> SymbolShape | None:
@@ -316,16 +396,44 @@ def _ensure_bounds(
         stride_values = strides.get_values()
     for dim, offset, size, stride in zip(shape_values, offset_values, size_values, stride_values):
         if isinstance(offset, int) and offset < 0:
-            raise ValueError("Invalid offset")
+            raise ValueError(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="Invalid offset",
+                    actual=str(offset),
+                    action=_ERROR_ACTION,
+                )
+            )
         if isinstance(size, int) and size <= 0:
-            raise ValueError("Invalid size")
+            raise ValueError(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="Invalid size",
+                    actual=str(size),
+                    action=_ERROR_ACTION,
+                )
+            )
         if isinstance(stride, int) and stride <= 0:
-            raise ValueError("Invalid stride")
+            raise ValueError(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="Invalid stride",
+                    actual=str(stride),
+                    action=_ERROR_ACTION,
+                )
+            )
         if not all(isinstance(value, int) for value in (dim, offset, size, stride)):
             continue
         last_index = offset + (size - 1) * stride
         if last_index >= dim:
-            raise ValueError("Index out of bounds")
+            raise ValueError(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="Index out of bounds",
+                    actual=f"dim={dim} offset={offset} size={size} stride={stride}",
+                    action=_ERROR_ACTION,
+                )
+            )
 
 
 def _is_contiguous(memory: Memory) -> bool:
@@ -401,7 +509,14 @@ def _ensure_view_numel_compatible(source: Memory, shape: SymbolShape) -> None:
     if diff == 0:
         return
     if not diff.free_symbols:
-        raise ValueError("View shape numel mismatch")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="dma.view 参数校验",
+                expected="View shape numel mismatch",
+                actual=f"source={source_numel} target={target_numel}",
+                action=_ERROR_ACTION,
+            )
+        )
 
 
 def _is_supported_cast(source: NumericType, target: NumericType) -> bool:
@@ -449,7 +564,14 @@ def copy(source: object, space: object) -> Memory:
     """
     src = _ensure_memory(source, "source")
     if not isinstance(space, MemorySpace):
-        raise TypeError("space must be MemorySpace")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="dma.copy 参数校验",
+                expected="space must be MemorySpace",
+                actual=type(space).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     return Memory(
         _clone_symbol_list(src.shape),
         src.dtype,
@@ -484,7 +606,14 @@ def load(
     """
     src = _ensure_memory(source, "source")
     if space is not None and not isinstance(space, MemorySpace):
-        raise TypeError("space must be MemorySpace")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="dma.load 参数校验",
+                expected="space must be MemorySpace",
+                actual=type(space).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     offsets_shape = _normalize_index_list(offsets, "offsets")
     sizes_shape = _normalize_index_list(sizes, "sizes")
     strides_shape = None if strides is None else _normalize_index_list(strides, "strides")
@@ -529,7 +658,14 @@ def store(
     src = _ensure_memory(source, "source")
     dst = _ensure_memory(target, "target")
     if src.dtype is not dst.dtype:
-        raise TypeError("Memory dtype mismatch")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="dma.store 参数校验",
+                expected="Memory dtype mismatch",
+                actual=f"source={src.dtype} target={dst.dtype}",
+                action=_ERROR_ACTION,
+            )
+        )
     offsets_shape = _normalize_index_list(offsets, "offsets")
     sizes_shape = _normalize_index_list(sizes, "sizes")
     strides_shape = None if strides is None else _normalize_index_list(strides, "strides")
@@ -539,7 +675,14 @@ def store(
     _ensure_strides_positive(strides_shape)
     _ensure_bounds(dst, offsets_shape, sizes_shape, strides_shape)
     if src.shape.get_values() != sizes_shape.get_values():
-        raise ValueError("Store size mismatch")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="dma.store 参数校验",
+                expected="Store size mismatch",
+                actual=f"source={src.shape.get_values()} sizes={sizes_shape.get_values()}",
+                action=_ERROR_ACTION,
+            )
+        )
     return None
 
 
@@ -659,7 +802,14 @@ def reshape(source: object, shape: Sequence[int | str] | SymbolShape) -> Memory:
     shape_value = _ensure_shape_value(shape, "shape")
     _ensure_view_numel_compatible(src, shape_value)
     if not _is_contiguous(src):
-        raise ValueError("Reshape requires contiguous source")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="dma.reshape 参数校验",
+                expected="Reshape requires contiguous source",
+                actual="non-contiguous",
+                action=_ERROR_ACTION,
+            )
+        )
     return Memory(
         _clone_symbol_list(shape_value),
         src.dtype,
@@ -689,7 +839,14 @@ def flatten(source: object) -> Memory:
     """
     src = _ensure_memory(source, "source")
     if not _is_contiguous(src):
-        raise ValueError("Flatten requires contiguous source")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="dma.flatten 参数校验",
+                expected="Flatten requires contiguous source",
+                actual="non-contiguous",
+                action=_ERROR_ACTION,
+            )
+        )
     flattened = _shape_numel(src.shape)
     return Memory(
         [flattened],
@@ -719,11 +876,32 @@ def cast(source: object, dtype: NumericType, memoryspace: MemorySpace | None = N
     """
     src = _ensure_memory(source, "source")
     if not isinstance(dtype, NumericType):
-        raise TypeError("cast dtype must be NumericType")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="dma.cast 参数校验",
+                expected="cast dtype must be NumericType",
+                actual=type(dtype).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     if memoryspace is not None and not isinstance(memoryspace, MemorySpace):
-        raise TypeError("cast memoryspace must be MemorySpace")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="dma.cast 参数校验",
+                expected="cast memoryspace must be MemorySpace",
+                actual=type(memoryspace).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     if not _is_supported_cast(src.dtype, dtype):
-        raise NotImplementedError("Unsupported cast conversion")
+        raise NotImplementedError(
+            _ERROR_TEMPLATE.format(
+                scene="dma.cast 参数校验",
+                expected="Unsupported cast conversion",
+                actual=f"{src.dtype}->{dtype}",
+                action=_ERROR_ACTION,
+            )
+        )
     target_space = src.space if memoryspace is None else memoryspace
     return Memory(
         _clone_symbol_list(src.shape),

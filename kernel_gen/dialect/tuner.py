@@ -25,6 +25,10 @@ from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.symbol import SymbolDimType
 
+_ERROR_TEMPLATE = "场景: {scene}; 期望: {expected}; 实际: {actual}; 建议动作: {action}"
+_ERROR_ACTION = "请按接口约束传参"
+_ERROR_ACTUAL = "不满足期望"
+_ERROR_SCENE = "dialect.tuner verifier"
 
 def _verify_symbol_dim_result_type(result_type: Attribute, op_name: str) -> SymbolDimType:
     """校验 tuner.param 的结果类型。
@@ -45,7 +49,14 @@ def _verify_symbol_dim_result_type(result_type: Attribute, op_name: str) -> Symb
     """
 
     if not isinstance(result_type, SymbolDimType):
-        raise VerifyException(f"{op_name} result type must be !symbol.dim<\"name\">")
+        raise VerifyException(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected=f"{op_name} result type must be !symbol.dim<\"name\">",
+                actual=_ERROR_ACTUAL,
+                action=_ERROR_ACTION,
+            )
+        )
     result_type.verify()
     return result_type
 

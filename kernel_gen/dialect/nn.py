@@ -35,6 +35,23 @@ from xdsl.printer import Printer
 from xdsl.utils.exceptions import VerifyException
 
 _VALID_SPACES = {"global", "shared", "local", "tsm", "tlm"}
+_ERROR_TEMPLATE = "场景: {scene}; 期望: {expected}; 实际: {actual}; 建议动作: {action}"
+_ERROR_ACTION = "请按接口约束传参"
+_ERROR_ACTUAL = "不满足期望"
+_ERROR_SCENE = "dialect.nn verifier"
+
+
+def _raise_verify_error(expected: str, *, actual: str = _ERROR_ACTUAL) -> None:
+    """统一抛出 nn dialect verifier 错误。"""
+
+    raise VerifyException(
+        _ERROR_TEMPLATE.format(
+            scene=_ERROR_SCENE,
+            expected=expected,
+            actual=actual,
+            action=_ERROR_ACTION,
+        )
+    )
 
 
 def _parse_dim_list(parser: AttrParser) -> ArrayAttr[Attribute]:
@@ -104,7 +121,7 @@ def _print_dim_list(printer: Printer, dims: ArrayAttr[Attribute]) -> None:
         elif isinstance(dim, StringAttr):
             printer.print_string(dim.data)
         else:
-            raise VerifyException("Dimension list only supports IntAttr or StringAttr")
+            _raise_verify_error("Dimension list only supports IntAttr or StringAttr")
     printer.print_string("]")
 
 
@@ -128,13 +145,13 @@ def _verify_dim_entry(dim: Attribute, field_name: str) -> None:
 
     if isinstance(dim, IntAttr):
         if dim.data < 0:
-            raise VerifyException(f"{field_name} dimensions must be non-negative")
+            _raise_verify_error(f"{field_name} dimensions must be non-negative")
         return
 
     if isinstance(dim, StringAttr) and dim.data:
         return
 
-    raise VerifyException(f"{field_name} dimensions must be IntAttr or StringAttr")
+    _raise_verify_error(f"{field_name} dimensions must be IntAttr or StringAttr")
 
 
 @irdl_attr_definition
@@ -180,7 +197,7 @@ class NnMemorySpaceAttr(ParametrizedAttribute):
         """校验 space attribute。"""
 
         if self.space.data not in _VALID_SPACES:
-            raise VerifyException("nn space must be one of global/shared/local/tsm/tlm")
+            _raise_verify_error("nn space must be one of global/shared/local/tsm/tlm")
 
     @classmethod
     def from_name(cls, space: str) -> "NnMemorySpaceAttr":
@@ -244,7 +261,7 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
         space = parser.parse_attribute()
         parser.parse_punctuation(">", "Expected '>' for nn memory type.")
         if not isinstance(space, NnMemorySpaceAttr):
-            raise VerifyException("nn memory type space must be #nn.space<...>")
+            _raise_verify_error("nn memory type space must be #nn.space<...>")
         return (shape, stride, element_type, space)
 
     def print_parameters(self, printer: Printer) -> None:
@@ -265,7 +282,7 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
 
         self.space.verify()
         if len(self.shape.data) != len(self.stride.data):
-            raise VerifyException("nn memory shape and stride rank must match")
+            _raise_verify_error("nn memory shape and stride rank must match")
 
         for dim in self.shape.data:
             _verify_dim_entry(dim, "shape")
@@ -279,14 +296,14 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
                 and isinstance(shape_dim, StringAttr)
                 and shape_dim.data == "?"
             ):
-                raise VerifyException("stride '?' requires corresponding shape dimension to be symbol or integer")
+                _raise_verify_error("stride '?' requires corresponding shape dimension to be symbol or integer")
 
 
 def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
     """校验并返回 memory type。"""
 
     if not isinstance(value, NnMemoryType):
-        raise VerifyException(f"{field_name} must be nn.memory")
+        _raise_verify_error(f"{field_name} must be nn.memory")
     value.verify()
     return value
 
@@ -315,24 +332,24 @@ def _verify_binary_memory_op(op: "_BaseNnBinaryOp", compare_result: bool) -> Non
 
     op.space.verify()
     if lhs_type.space.space.data != rhs_type.space.space.data:
-        raise VerifyException("nn op operands must use the same space")
+        _raise_verify_error("nn op operands must use the same space")
     if lhs_type.space.space.data != op.space.space.data:
-        raise VerifyException("nn op attribute space must match operand space")
+        _raise_verify_error("nn op attribute space must match operand space")
     if result_type.space.space.data != op.space.space.data:
-        raise VerifyException("nn op attribute space must match result space")
+        _raise_verify_error("nn op attribute space must match result space")
 
     if lhs_type.shape != rhs_type.shape or lhs_type.shape != result_type.shape:
-        raise VerifyException("nn op shape must match across operands and result")
+        _raise_verify_error("nn op shape must match across operands and result")
     if lhs_type.stride != rhs_type.stride or lhs_type.stride != result_type.stride:
-        raise VerifyException("nn op stride must match across operands and result")
+        _raise_verify_error("nn op stride must match across operands and result")
     if lhs_type.element_type != rhs_type.element_type:
-        raise VerifyException("nn op operand element_type must match")
+        _raise_verify_error("nn op operand element_type must match")
 
     if compare_result:
         if result_type.element_type != i1:
-            raise VerifyException("nn compare result element_type must be i1")
+            _raise_verify_error("nn compare result element_type must be i1")
     elif result_type.element_type != lhs_type.element_type:
-        raise VerifyException("nn arithmetic result element_type must match operand element_type")
+        _raise_verify_error("nn arithmetic result element_type must match operand element_type")
 
 
 def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
@@ -380,14 +397,14 @@ def _verify_broadcast_compat(input_type: NnMemoryType, result_type: NnMemoryType
     input_dims = input_type.shape.data
     result_dims = result_type.shape.data
     if len(result_dims) < len(input_dims):
-        raise VerifyException("nn.broadcast result rank must be >= input rank")
+        _raise_verify_error("nn.broadcast result rank must be >= input rank")
 
     for input_dim, result_dim in zip(reversed(input_dims), reversed(result_dims), strict=False):
         if _dims_equal(input_dim, result_dim):
             continue
         if isinstance(input_dim, IntAttr) and input_dim.data == 1:
             continue
-        raise VerifyException("nn.broadcast shape mismatch")
+        _raise_verify_error("nn.broadcast shape mismatch")
 
 
 def _verify_transpose_perm(perm: ArrayAttr, rank: int) -> list[int]:
@@ -409,7 +426,7 @@ def _verify_transpose_perm(perm: ArrayAttr, rank: int) -> list[int]:
     - 功能实现: kernel_gen/dialect/nn.py
     """
     if len(perm.data) != rank:
-        raise VerifyException("nn.transpose perm must match input rank")
+        _raise_verify_error("nn.transpose perm must match input rank")
     perm_values: list[int] = []
     for entry in perm.data:
         if isinstance(entry, IntAttr):
@@ -418,9 +435,9 @@ def _verify_transpose_perm(perm: ArrayAttr, rank: int) -> list[int]:
         if isinstance(entry, IntegerAttr) and isinstance(entry.value, IntAttr):
             perm_values.append(entry.value.data)
             continue
-        raise VerifyException("nn.transpose perm must be a permutation of 0..rank-1")
+        _raise_verify_error("nn.transpose perm must be a permutation of 0..rank-1")
     if sorted(perm_values) != list(range(rank)):
-        raise VerifyException("nn.transpose perm must be a permutation of 0..rank-1")
+        _raise_verify_error("nn.transpose perm must be a permutation of 0..rank-1")
     return perm_values
 
 
@@ -448,12 +465,12 @@ def _verify_transpose_layout(
     expected_shape = [input_type.shape.data[index] for index in perm_values]
     for expected_dim, actual_dim in zip(expected_shape, result_type.shape.data, strict=True):
         if not _dims_equal(expected_dim, actual_dim):
-            raise VerifyException("nn.transpose result shape must match permuted input")
+            _raise_verify_error("nn.transpose result shape must match permuted input")
 
     expected_stride = [input_type.stride.data[index] for index in perm_values]
     for expected_dim, actual_dim in zip(expected_stride, result_type.stride.data, strict=True):
         if not _dims_equal(expected_dim, actual_dim):
-            raise VerifyException("nn.transpose result stride must match permuted input")
+            _raise_verify_error("nn.transpose result stride must match permuted input")
 
 
 class _BaseNnBinaryOp(IRDLOperation):
@@ -603,13 +620,13 @@ def _verify_matmul_shape(
     """
 
     if len(lhs_shape) != 2 or len(rhs_shape) != 2 or len(result_shape) != 2:
-        raise VerifyException("nn.matmul requires rank-2 memory types")
+        _raise_verify_error("nn.matmul requires rank-2 memory types")
 
     if lhs_shape[1] != rhs_shape[0]:
-        raise VerifyException("nn.matmul contracting dimensions must match")
+        _raise_verify_error("nn.matmul contracting dimensions must match")
 
     if result_shape[0] != lhs_shape[0] or result_shape[1] != rhs_shape[1]:
-        raise VerifyException("nn.matmul result shape must match lhs/rhs")
+        _raise_verify_error("nn.matmul result shape must match lhs/rhs")
 
 
 @irdl_op_definition
@@ -672,11 +689,11 @@ class NnBroadcastOp(IRDLOperation):
 
         self.space.verify()
         if input_type.space.space.data != result_type.space.space.data:
-            raise VerifyException("nn.broadcast input/result must use the same space")
+            _raise_verify_error("nn.broadcast input/result must use the same space")
         if input_type.space.space.data != self.space.space.data:
-            raise VerifyException("nn.broadcast attribute space must match type space")
+            _raise_verify_error("nn.broadcast attribute space must match type space")
         if input_type.element_type != result_type.element_type:
-            raise VerifyException("nn.broadcast element_type must match")
+            _raise_verify_error("nn.broadcast element_type must match")
 
         _verify_broadcast_compat(input_type, result_type)
 
@@ -743,12 +760,12 @@ class NnTransposeOp(IRDLOperation):
 
         self.space.verify()
         if input_type.space.space.data != result_type.space.space.data:
-            raise VerifyException("nn.transpose input/result must use the same space")
+            _raise_verify_error("nn.transpose input/result must use the same space")
         if input_type.space.space.data != self.space.space.data:
-            raise VerifyException("nn.transpose attribute space must match type space")
+            _raise_verify_error("nn.transpose attribute space must match type space")
 
         if input_type.element_type != result_type.element_type:
-            raise VerifyException("nn.transpose element_type must match")
+            _raise_verify_error("nn.transpose element_type must match")
 
         perm_values = _verify_transpose_perm(self.perm, len(input_type.shape.data))
         _verify_transpose_layout(input_type, result_type, perm_values)
@@ -817,16 +834,16 @@ class NnMatmulOp(IRDLOperation):
 
         self.space.verify()
         if lhs_type.space.space.data != rhs_type.space.space.data:
-            raise VerifyException("nn.matmul operands must use the same space")
+            _raise_verify_error("nn.matmul operands must use the same space")
         if lhs_type.space.space.data != self.space.space.data:
-            raise VerifyException("nn.matmul attribute space must match operand space")
+            _raise_verify_error("nn.matmul attribute space must match operand space")
         if result_type.space.space.data != self.space.space.data:
-            raise VerifyException("nn.matmul attribute space must match result space")
+            _raise_verify_error("nn.matmul attribute space must match result space")
 
         _verify_matmul_shape(lhs_type.shape.data, rhs_type.shape.data, result_type.shape.data)
 
         if lhs_type.element_type != rhs_type.element_type or lhs_type.element_type != result_type.element_type:
-            raise VerifyException("nn.matmul operand/result element_type must match")
+            _raise_verify_error("nn.matmul operand/result element_type must match")
 
 
 Nn = Dialect(

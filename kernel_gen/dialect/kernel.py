@@ -28,6 +28,10 @@ from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 
+_ERROR_TEMPLATE = "场景: {scene}; 期望: {expected}; 实际: {actual}; 建议动作: {action}"
+_ERROR_ACTION = "请按接口约束传参"
+_ERROR_ACTUAL = "不满足期望"
+_ERROR_SCENE = "dialect.kernel verifier"
 
 def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
     """校验并返回 nn.memory type。
@@ -48,7 +52,14 @@ def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
     """
 
     if not isinstance(value, NnMemoryType):
-        raise VerifyException(f"{field_name} must be nn.memory")
+        raise VerifyException(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected=f"{field_name} must be nn.memory",
+                actual=_ERROR_ACTUAL,
+                action=_ERROR_ACTION,
+            )
+        )
     value.verify()
     return value
 
@@ -79,13 +90,41 @@ def _verify_same_layout(types: Iterable[NnMemoryType], op_space: NnMemorySpaceAt
     base = types[0]
     for other in types[1:]:
         if other.space.space.data != base.space.space.data:
-            raise VerifyException("kernel op operands must use the same space")
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel op operands must use the same space",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
         if other.shape != base.shape:
-            raise VerifyException("kernel op shape must match across operands")
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel op shape must match across operands",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
         if other.stride != base.stride:
-            raise VerifyException("kernel op stride must match across operands")
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel op stride must match across operands",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
     if base.space.space.data != op_space.space.data:
-        raise VerifyException("kernel op attribute space must match operand space")
+        raise VerifyException(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected="kernel op attribute space must match operand space",
+                actual=_ERROR_ACTUAL,
+                action=_ERROR_ACTION,
+            )
+        )
 
 
 def _verify_element_type_match(types: Iterable[NnMemoryType], message: str) -> None:
@@ -112,7 +151,14 @@ def _verify_element_type_match(types: Iterable[NnMemoryType], message: str) -> N
     base_type = types[0].element_type
     for other in types[1:]:
         if other.element_type != base_type:
-            raise VerifyException(message)
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected=message,
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
 
 
 def _is_cast_element_type(value: Attribute) -> bool:
@@ -238,7 +284,14 @@ class KernelEqOp(_BaseKernelBinaryOp):
         out_type = _verify_memory_type(self.out.type, "out")
         _verify_same_layout([lhs_type, rhs_type, out_type], self.space)
         if out_type.element_type != i1:
-            raise VerifyException("kernel compare output element_type must be i1")
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel compare output element_type must be i1",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
 
 
 @irdl_op_definition
@@ -253,7 +306,14 @@ class KernelNeOp(_BaseKernelBinaryOp):
         out_type = _verify_memory_type(self.out.type, "out")
         _verify_same_layout([lhs_type, rhs_type, out_type], self.space)
         if out_type.element_type != i1:
-            raise VerifyException("kernel compare output element_type must be i1")
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel compare output element_type must be i1",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
 
 
 @irdl_op_definition
@@ -268,7 +328,14 @@ class KernelLtOp(_BaseKernelBinaryOp):
         out_type = _verify_memory_type(self.out.type, "out")
         _verify_same_layout([lhs_type, rhs_type, out_type], self.space)
         if out_type.element_type != i1:
-            raise VerifyException("kernel compare output element_type must be i1")
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel compare output element_type must be i1",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
 
 
 @irdl_op_definition
@@ -283,7 +350,14 @@ class KernelLeOp(_BaseKernelBinaryOp):
         out_type = _verify_memory_type(self.out.type, "out")
         _verify_same_layout([lhs_type, rhs_type, out_type], self.space)
         if out_type.element_type != i1:
-            raise VerifyException("kernel compare output element_type must be i1")
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel compare output element_type must be i1",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
 
 
 @irdl_op_definition
@@ -298,7 +372,14 @@ class KernelGtOp(_BaseKernelBinaryOp):
         out_type = _verify_memory_type(self.out.type, "out")
         _verify_same_layout([lhs_type, rhs_type, out_type], self.space)
         if out_type.element_type != i1:
-            raise VerifyException("kernel compare output element_type must be i1")
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel compare output element_type must be i1",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
 
 
 @irdl_op_definition
@@ -313,7 +394,14 @@ class KernelGeOp(_BaseKernelBinaryOp):
         out_type = _verify_memory_type(self.out.type, "out")
         _verify_same_layout([lhs_type, rhs_type, out_type], self.space)
         if out_type.element_type != i1:
-            raise VerifyException("kernel compare output element_type must be i1")
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel compare output element_type must be i1",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
 
 
 @irdl_op_definition
@@ -346,7 +434,14 @@ class KernelSelectOp(IRDLOperation):
         rhs_type = _verify_memory_type(self.rhs.type, "rhs")
         out_type = _verify_memory_type(self.out.type, "out")
         if cond_type.element_type != i1:
-            raise VerifyException("kernel.select cond element_type must be i1")
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.select cond element_type must be i1",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
         _verify_same_layout([cond_type, lhs_type, rhs_type, out_type], self.space)
         _verify_element_type_match(
             [lhs_type, rhs_type, out_type],
@@ -381,7 +476,14 @@ class KernelCastOp(IRDLOperation):
         if not _is_cast_element_type(input_type.element_type) or not _is_cast_element_type(
             out_type.element_type
         ):
-            raise VerifyException("kernel.cast element_type must be integer or float and not i1")
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.cast element_type must be integer or float and not i1",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
 
 
 Kernel = Dialect(

@@ -33,6 +33,10 @@ from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.target import registry as target_registry
 
 _DYNAMIC_MEMORY_SPACES = {"shared", "local", "tsm", "tlm"}
+_ERROR_TEMPLATE = "场景: {scene}; 期望: {expected}; 实际: {actual}; 建议动作: {action}"
+_ERROR_ACTION = "请按接口约束传参"
+_ERROR_ACTUAL = "不满足期望"
+_ERROR_SCENE = "dialect.arch verifier"
 
 
 def _verify_symbol_int_operand(value: SSAValue, field_name: str, op_name: str) -> SymbolValueType:
@@ -54,7 +58,14 @@ def _verify_symbol_int_operand(value: SSAValue, field_name: str, op_name: str) -
     """
 
     if not isinstance(value.type, SymbolValueType):
-        raise VerifyException(f"{op_name} {field_name} must have type !symbol.int<\"expr\">")
+        raise VerifyException(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected=f"{op_name} {field_name} must have type !symbol.int<\"expr\">",
+                actual=_ERROR_ACTUAL,
+                action=_ERROR_ACTION,
+            )
+        )
     value.type.verify()
     return value.type
 
@@ -80,7 +91,14 @@ def _verify_positive_static_symbol(operand_type: SymbolValueType, field_name: st
 
     static_value = operand_type.get_value()
     if isinstance(static_value, int) and static_value <= 0:
-        raise VerifyException(f"{op_name} {field_name} must be > 0 when statically known")
+        raise VerifyException(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected=f"{op_name} {field_name} must be > 0 when statically known",
+                actual=str(static_value),
+                action=_ERROR_ACTION,
+            )
+        )
 
 
 def _dynamic_memory_result_type(space: NnMemorySpaceAttr) -> NnMemoryType:
@@ -132,9 +150,23 @@ def _verify_target_registry_support(op_name: str) -> None:
         return
     try:
         if not target_registry.is_arch_op_supported(current_target, op_name):
-            raise VerifyException(f"{op_name} is not supported by target {current_target}")
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected=f"{op_name} is not supported by target {current_target}",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
     except ValueError as exc:
-        raise VerifyException(str(exc)) from exc
+        raise VerifyException(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected=str(exc),
+                actual=_ERROR_ACTUAL,
+                action=_ERROR_ACTION,
+            )
+        ) from exc
 
 
 class _BaseArchIndexQueryOp(IRDLOperation):
@@ -187,7 +219,14 @@ class _BaseArchIndexQueryOp(IRDLOperation):
 
         expected = SymbolValueType.from_expr(self.RESULT_EXPR)
         if self.result.type != expected:
-            raise VerifyException(f"{self.name} result type must be !symbol.int<\"{self.RESULT_EXPR}\">")
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected=f"{self.name} result type must be !symbol.int<\"{self.RESULT_EXPR}\">",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
         _verify_target_registry_support(self.name)
 
     def print(self: "_BaseArchIndexQueryOp", printer: Printer) -> None:
@@ -310,26 +349,82 @@ class ArchGetDynamicMemoryOp(IRDLOperation):
         self.memory_space.verify()
         space_name = self.memory_space.space.data
         if space_name not in _DYNAMIC_MEMORY_SPACES:
-            raise VerifyException("arch.get_dynamic_memory memory_space must be shared/local/tsm/tlm")
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="arch.get_dynamic_memory memory_space must be shared/local/tsm/tlm",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
 
         if not isinstance(self.result.type, NnMemoryType):
-            raise VerifyException("arch.get_dynamic_memory result type must be nn.memory")
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="arch.get_dynamic_memory result type must be nn.memory",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
 
         result_type = self.result.type
         result_type.verify()
 
         if len(result_type.shape.data) != 1:
-            raise VerifyException("arch.get_dynamic_memory result must be 1-D")
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="arch.get_dynamic_memory result must be 1-D",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
         if len(result_type.stride.data) != 1:
-            raise VerifyException("arch.get_dynamic_memory result stride rank must be 1")
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="arch.get_dynamic_memory result stride rank must be 1",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
         if result_type.shape.data[0] != StringAttr("?"):
-            raise VerifyException("arch.get_dynamic_memory result shape must be [?]")
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="arch.get_dynamic_memory result shape must be [?]",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
         if result_type.stride.data[0] != IntAttr(1):
-            raise VerifyException("arch.get_dynamic_memory result stride must be [1]")
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="arch.get_dynamic_memory result stride must be [1]",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
         if result_type.element_type != i8:
-            raise VerifyException("arch.get_dynamic_memory result element type must be i8")
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="arch.get_dynamic_memory result element type must be i8",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
         if result_type.space != self.memory_space:
-            raise VerifyException("arch.get_dynamic_memory result space must match memory_space")
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="arch.get_dynamic_memory result space must match memory_space",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
 
     def print(self: "ArchGetDynamicMemoryOp", printer: Printer) -> None:
         """打印 arch.get_dynamic_memory 自定义文本语法。"""
@@ -345,7 +440,14 @@ class ArchGetDynamicMemoryOp(IRDLOperation):
 
         memory_space = parser.parse_attribute()
         if not isinstance(memory_space, NnMemorySpaceAttr):
-            raise VerifyException("arch.get_dynamic_memory memory_space must be #nn.space<...>")
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="arch.get_dynamic_memory memory_space must be #nn.space<...>",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
         parser.parse_characters(":", f" in {cls.name}")
         return cls(memory_space, parser.parse_type())
 
@@ -411,7 +513,14 @@ class ArchLaunchKernelOp(IRDLOperation):
 
         _verify_target_registry_support(self.name)
         if not self.kernel_name.data:
-            raise VerifyException("arch.launch_kernel kernel name must not be empty")
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="arch.launch_kernel kernel name must not be empty",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
 
         for field_name in ("block", "thread", "subthread"):
             operand_value = SSAValue.get(getattr(self, field_name))

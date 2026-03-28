@@ -52,6 +52,9 @@ _NN_FLOAT_DTYPES = {
     NumericType.Float32,
     NumericType.Float64,
 }
+_ERROR_TEMPLATE = "场景: {scene}; 期望: {expected}; 实际: {actual}; 建议动作: {action}"
+_ERROR_ACTION = "请按接口约束传参"
+_ERROR_SCENE = "nn operation 参数校验"
 
 
 class _AddStrideDim(SymbolDim):
@@ -128,7 +131,14 @@ def _resolve_add_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
         lhs_rank = _NN_ADD_PROMOTION_RANK[lhs]
         rhs_rank = _NN_ADD_PROMOTION_RANK[rhs]
     except KeyError as exc:
-        raise TypeError("Unsupported dtype for nn.add") from exc
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.add 参数校验",
+                expected="Unsupported dtype for nn.add",
+                actual=f"lhs={lhs} rhs={rhs}",
+                action=_ERROR_ACTION,
+            )
+        ) from exc
     return lhs if lhs_rank <= rhs_rank else rhs
 
 
@@ -174,14 +184,28 @@ def _merge_broadcast_dim(lhs_dim: int | str, rhs_dim: int | str) -> int | str:
     if lhs_dim == "?" or rhs_dim == "?":
         if lhs_dim == rhs_dim:
             return lhs_dim
-        raise ValueError("Implicit broadcast dimension mismatch")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.add 参数校验",
+                expected="Implicit broadcast dimension mismatch",
+                actual=f"lhs={lhs_dim} rhs={rhs_dim}",
+                action=_ERROR_ACTION,
+            )
+        )
     if lhs_dim == rhs_dim:
         return lhs_dim
     if lhs_dim == 1:
         return rhs_dim
     if rhs_dim == 1:
         return lhs_dim
-    raise ValueError("Implicit broadcast dimension mismatch")
+    raise ValueError(
+        _ERROR_TEMPLATE.format(
+            scene="nn.add 参数校验",
+            expected="Implicit broadcast dimension mismatch",
+            actual=f"lhs={lhs_dim} rhs={rhs_dim}",
+            action=_ERROR_ACTION,
+        )
+    )
 
 
 def _infer_implicit_broadcast_shape(lhs: Memory, rhs: Memory) -> SymbolShape:
@@ -324,7 +348,14 @@ def _compare_memory_result(lhs: Memory, rhs: Memory) -> Memory:
     - 功能实现: kernel_gen/operation/nn.py
     """
     if lhs.dtype is not rhs.dtype:
-        raise TypeError("Memory dtype mismatch")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.compare 参数校验",
+                expected="Memory dtype mismatch",
+                actual=f"lhs={lhs.dtype} rhs={rhs.dtype}",
+                action=_ERROR_ACTION,
+            )
+        )
     lhs_values = lhs.shape.get_values()
     rhs_values = rhs.shape.get_values()
     if lhs_values == rhs_values:
@@ -351,7 +382,14 @@ def _ensure_memory_operand(lhs: object, rhs: object) -> None:
     - 功能实现: kernel_gen/operation/nn.py
     """
     if not isinstance(lhs, Memory) and not isinstance(rhs, Memory):
-        raise TypeError("At least one operand must be Memory")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected="At least one operand must be Memory",
+                actual=f"lhs={type(lhs).__name__} rhs={type(rhs).__name__}",
+                action=_ERROR_ACTION,
+            )
+        )
 
 
 def _ensure_scalar_value(value: object) -> None:
@@ -374,7 +412,14 @@ def _ensure_scalar_value(value: object) -> None:
     if isinstance(value, bool):
         return
     if not isinstance(value, (int, float)):
-        raise TypeError("Unsupported scalar type for nn operation")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected="Unsupported scalar type for nn operation",
+                actual=type(value).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
 
 
 def _ensure_scalar_arithmetic_value(value: object) -> None:
@@ -418,9 +463,23 @@ def _ensure_float_memory(value: object, op_name: str) -> Memory:
     - 功能实现: kernel_gen/operation/nn.py
     """
     if not isinstance(value, Memory):
-        raise TypeError(f"{op_name} value must be Memory")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene=f"nn.{op_name} 参数校验",
+                expected=f"{op_name} value must be Memory",
+                actual=type(value).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     if value.dtype not in _NN_FLOAT_DTYPES:
-        raise TypeError(f"{op_name} value dtype must be float")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene=f"nn.{op_name} 参数校验",
+                expected=f"{op_name} value dtype must be float",
+                actual=str(value.dtype),
+                action=_ERROR_ACTION,
+            )
+        )
     return value
 
 
@@ -443,11 +502,32 @@ def _ensure_activation_scalar(name: str, value: object) -> None:
     - 功能实现: kernel_gen/operation/nn.py
     """
     if isinstance(value, bool) or isinstance(value, SymbolDim):
-        raise TypeError(f"{name} must be int or float")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.activation 参数校验",
+                expected=f"{name} must be int or float",
+                actual=type(value).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     if not isinstance(value, (int, float)):
-        raise TypeError(f"{name} must be int or float")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.activation 参数校验",
+                expected=f"{name} must be int or float",
+                actual=type(value).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     if not math.isfinite(value):
-        raise ValueError(f"{name} must be finite")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.activation 参数校验",
+                expected=f"{name} must be finite",
+                actual=str(value),
+                action=_ERROR_ACTION,
+            )
+        )
 
 
 def _apply_scalar_operator(lhs: object, rhs: object, op: str, rop: str) -> ScalarArithmeticValue:
@@ -487,7 +567,14 @@ def _apply_scalar_operator(lhs: object, rhs: object, op: str, rop: str) -> Scala
     reverse_result = _call_operator(rhs, rop, lhs)
     if reverse_result is not NotImplemented:
         return reverse_result
-    raise TypeError("Unsupported scalar type for nn operation")
+    raise TypeError(
+        _ERROR_TEMPLATE.format(
+            scene=_ERROR_SCENE,
+            expected="Unsupported scalar type for nn operation",
+            actual=f"lhs={type(lhs).__name__} rhs={type(rhs).__name__}",
+            action=_ERROR_ACTION,
+        )
+    )
 
 
 def _dispatch_scalar_binary(lhs: object, rhs: object, op: str, rop: str) -> ScalarArithmeticValue | None:
@@ -553,7 +640,14 @@ def _infer_broadcast_shape(lhs: SymbolShape, rhs: SymbolShape) -> SymbolShape:
         if rhs_dim == 1:
             result.insert(0, lhs_dim)
             continue
-        raise ValueError("broadcast dimension mismatch")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.broadcast 参数校验",
+                expected="broadcast dimension mismatch",
+                actual=f"lhs={lhs_dim} rhs={rhs_dim}",
+                action=_ERROR_ACTION,
+            )
+        )
     return SymbolShape(result)
 
 
@@ -1054,19 +1148,47 @@ def softmax(value: object, axis: int = -1) -> Memory:
     - 功能实现: kernel_gen/operation/nn.py
     """
     if not isinstance(value, Memory):
-        raise TypeError("softmax value must be Memory")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.softmax 参数校验",
+                expected="softmax value must be Memory",
+                actual=type(value).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     if value.dtype not in (
         NumericType.Float16,
         NumericType.BFloat16,
         NumericType.Float32,
         NumericType.Float64,
     ):
-        raise TypeError("softmax value dtype must be float")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.softmax 参数校验",
+                expected="softmax value dtype must be float",
+                actual=str(value.dtype),
+                action=_ERROR_ACTION,
+            )
+        )
     if isinstance(axis, bool) or not isinstance(axis, int):
-        raise TypeError("softmax axis must be int")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.softmax 参数校验",
+                expected="softmax axis must be int",
+                actual=type(axis).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     rank = len(value.shape)
     if axis < -rank or axis >= rank:
-        raise ValueError("softmax axis out of range")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.softmax 参数校验",
+                expected="softmax axis out of range",
+                actual=f"axis={axis} rank={rank}",
+                action=_ERROR_ACTION,
+            )
+        )
     _ = axis + rank if axis < 0 else axis
     return value._clone_with_dtype(value.dtype)
 
@@ -1090,28 +1212,91 @@ def fc(value: object, weight: object, bias: object | None = None) -> Memory:
     - 功能实现: kernel_gen/operation/nn.py
     """
     if not isinstance(value, Memory) or not isinstance(weight, Memory):
-        raise TypeError("fc operands must be Memory")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.fc 参数校验",
+                expected="fc operands must be Memory",
+                actual=f"value={type(value).__name__} weight={type(weight).__name__}",
+                action=_ERROR_ACTION,
+            )
+        )
     if bias is not None and not isinstance(bias, Memory):
-        raise TypeError("fc bias must be Memory or None")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.fc 参数校验",
+                expected="fc bias must be Memory or None",
+                actual=type(bias).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     value_values = value.shape.get_values()
     weight_values = weight.shape.get_values()
     if len(value_values) < 2:
-        raise ValueError("fc value rank must be >= 2")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.fc 参数校验",
+                expected="fc value rank must be >= 2",
+                actual=f"rank={len(value_values)}",
+                action=_ERROR_ACTION,
+            )
+        )
     if len(weight_values) != 2:
-        raise ValueError("fc weight must be rank-2 Memory")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.fc 参数校验",
+                expected="fc weight must be rank-2 Memory",
+                actual=f"rank={len(weight_values)}",
+                action=_ERROR_ACTION,
+            )
+        )
     if value_values[-1] != weight_values[1]:
-        raise ValueError("fc input feature mismatch")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.fc 参数校验",
+                expected="fc input feature mismatch",
+                actual=f"value={value_values[-1]} weight={weight_values[1]}",
+                action=_ERROR_ACTION,
+            )
+        )
     if value.space is not weight.space:
-        raise ValueError("fc space mismatch")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.fc 参数校验",
+                expected="fc space mismatch",
+                actual=f"value={value.space} weight={weight.space}",
+                action=_ERROR_ACTION,
+            )
+        )
     if bias is not None:
         bias_values = bias.shape.get_values()
         if len(bias_values) != 1 or bias_values[0] != weight_values[0]:
-            raise ValueError("fc bias shape mismatch")
+            raise ValueError(
+                _ERROR_TEMPLATE.format(
+                    scene="nn.fc 参数校验",
+                    expected="fc bias shape mismatch",
+                    actual=f"bias={bias_values} weight_out={weight_values[0]}",
+                    action=_ERROR_ACTION,
+                )
+            )
         if bias.space is not value.space:
-            raise ValueError("fc space mismatch")
+            raise ValueError(
+                _ERROR_TEMPLATE.format(
+                    scene="nn.fc 参数校验",
+                    expected="fc space mismatch",
+                    actual=f"bias={bias.space} value={value.space}",
+                    action=_ERROR_ACTION,
+                )
+            )
     result_dtype = _resolve_add_dtype(value.dtype, weight.dtype)
     if bias is not None and _resolve_add_dtype(result_dtype, bias.dtype) is not result_dtype:
-        raise TypeError("fc bias dtype mismatch")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.fc 参数校验",
+                expected="fc bias dtype mismatch",
+                actual=f"result={result_dtype} bias={bias.dtype}",
+                action=_ERROR_ACTION,
+            )
+        )
     output_shape = [*value_values[:-1], weight_values[0]]
     return Memory(
         output_shape,
@@ -1142,15 +1327,43 @@ def matmul(lhs: object, rhs: object, memoryspace: MemorySpace | None = None) -> 
     - 功能实现: kernel_gen/operation/nn.py
     """
     if not isinstance(lhs, Memory) or not isinstance(rhs, Memory):
-        raise TypeError("matmul operands must be Memory")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.matmul 参数校验",
+                expected="matmul operands must be Memory",
+                actual=f"lhs={type(lhs).__name__} rhs={type(rhs).__name__}",
+                action=_ERROR_ACTION,
+            )
+        )
     lhs_values = lhs.shape.get_values()
     rhs_values = rhs.shape.get_values()
     if len(lhs_values) != 2 or len(rhs_values) != 2:
-        raise ValueError("matmul operands must be rank-2 Memory")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.matmul 参数校验",
+                expected="matmul operands must be rank-2 Memory",
+                actual=f"lhs_rank={len(lhs_values)} rhs_rank={len(rhs_values)}",
+                action=_ERROR_ACTION,
+            )
+        )
     if lhs_values[1] != rhs_values[0]:
-        raise ValueError("matmul contracting dimension mismatch")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.matmul 参数校验",
+                expected="matmul contracting dimension mismatch",
+                actual=f"lhs_k={lhs_values[1]} rhs_k={rhs_values[0]}",
+                action=_ERROR_ACTION,
+            )
+        )
     if lhs.space is not rhs.space:
-        raise ValueError("matmul space mismatch")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.matmul 参数校验",
+                expected="matmul space mismatch",
+                actual=f"lhs={lhs.space} rhs={rhs.space}",
+                action=_ERROR_ACTION,
+            )
+        )
     result_dtype = _resolve_add_dtype(lhs.dtype, rhs.dtype)
     result_space = lhs.space if memoryspace is None else memoryspace
     return Memory(
@@ -1181,24 +1394,73 @@ def _normalize_img2col_param(name: str, value: int | SymbolDim, allow_zero: bool
     - 功能实现: kernel_gen/operation/nn.py
     """
     if isinstance(value, bool):
-        raise TypeError(f"img2col {name} must be int or SymbolDim")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.img2col 参数校验",
+                expected=f"img2col {name} must be int or SymbolDim",
+                actual=type(value).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     if isinstance(value, int):
         if allow_zero and value < 0:
-            raise ValueError(f"img2col {name} must be >= 0")
+            raise ValueError(
+                _ERROR_TEMPLATE.format(
+                    scene="nn.img2col 参数校验",
+                    expected=f"img2col {name} must be >= 0",
+                    actual=str(value),
+                    action=_ERROR_ACTION,
+                )
+            )
         if not allow_zero and value <= 0:
-            raise ValueError(f"img2col {name} must be > 0")
+            raise ValueError(
+                _ERROR_TEMPLATE.format(
+                    scene="nn.img2col 参数校验",
+                    expected=f"img2col {name} must be > 0",
+                    actual=str(value),
+                    action=_ERROR_ACTION,
+                )
+            )
         return SymbolDim(value)
     if isinstance(value, SymbolDim):
         if not value.is_dynamic():
             resolved = value.get_value()
             if not isinstance(resolved, int):
-                raise ValueError(f"img2col {name} must be integer")
+                raise ValueError(
+                    _ERROR_TEMPLATE.format(
+                        scene="nn.img2col 参数校验",
+                        expected=f"img2col {name} must be integer",
+                        actual=str(resolved),
+                        action=_ERROR_ACTION,
+                    )
+                )
             if allow_zero and resolved < 0:
-                raise ValueError(f"img2col {name} must be >= 0")
+                raise ValueError(
+                    _ERROR_TEMPLATE.format(
+                        scene="nn.img2col 参数校验",
+                        expected=f"img2col {name} must be >= 0",
+                        actual=str(resolved),
+                        action=_ERROR_ACTION,
+                    )
+                )
             if not allow_zero and resolved <= 0:
-                raise ValueError(f"img2col {name} must be > 0")
+                raise ValueError(
+                    _ERROR_TEMPLATE.format(
+                        scene="nn.img2col 参数校验",
+                        expected=f"img2col {name} must be > 0",
+                        actual=str(resolved),
+                        action=_ERROR_ACTION,
+                    )
+                )
         return value
-    raise TypeError(f"img2col {name} must be int or SymbolDim")
+    raise TypeError(
+        _ERROR_TEMPLATE.format(
+            scene="nn.img2col 参数校验",
+            expected=f"img2col {name} must be int or SymbolDim",
+            actual=type(value).__name__,
+            action=_ERROR_ACTION,
+        )
+    )
 
 
 def _img2col_output_dim(
@@ -1247,24 +1509,73 @@ def _normalize_conv_param(name: str, value: int | SymbolDim, allow_zero: bool) -
     - 功能实现: kernel_gen/operation/nn.py
     """
     if isinstance(value, bool):
-        raise TypeError(f"conv {name} must be int or SymbolDim")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.conv 参数校验",
+                expected=f"conv {name} must be int or SymbolDim",
+                actual=type(value).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     if isinstance(value, int):
         if allow_zero and value < 0:
-            raise ValueError(f"conv {name} must be >= 0")
+            raise ValueError(
+                _ERROR_TEMPLATE.format(
+                    scene="nn.conv 参数校验",
+                    expected=f"conv {name} must be >= 0",
+                    actual=str(value),
+                    action=_ERROR_ACTION,
+                )
+            )
         if not allow_zero and value <= 0:
-            raise ValueError(f"conv {name} must be > 0")
+            raise ValueError(
+                _ERROR_TEMPLATE.format(
+                    scene="nn.conv 参数校验",
+                    expected=f"conv {name} must be > 0",
+                    actual=str(value),
+                    action=_ERROR_ACTION,
+                )
+            )
         return SymbolDim(value)
     if isinstance(value, SymbolDim):
         if not value.is_dynamic():
             resolved = value.get_value()
             if not isinstance(resolved, int):
-                raise ValueError(f"conv {name} must be integer")
+                raise ValueError(
+                    _ERROR_TEMPLATE.format(
+                        scene="nn.conv 参数校验",
+                        expected=f"conv {name} must be integer",
+                        actual=str(resolved),
+                        action=_ERROR_ACTION,
+                    )
+                )
             if allow_zero and resolved < 0:
-                raise ValueError(f"conv {name} must be >= 0")
+                raise ValueError(
+                    _ERROR_TEMPLATE.format(
+                        scene="nn.conv 参数校验",
+                        expected=f"conv {name} must be >= 0",
+                        actual=str(resolved),
+                        action=_ERROR_ACTION,
+                    )
+                )
             if not allow_zero and resolved <= 0:
-                raise ValueError(f"conv {name} must be > 0")
+                raise ValueError(
+                    _ERROR_TEMPLATE.format(
+                        scene="nn.conv 参数校验",
+                        expected=f"conv {name} must be > 0",
+                        actual=str(resolved),
+                        action=_ERROR_ACTION,
+                    )
+                )
         return value
-    raise TypeError(f"conv {name} must be int or SymbolDim")
+    raise TypeError(
+        _ERROR_TEMPLATE.format(
+            scene="nn.conv 参数校验",
+            expected=f"conv {name} must be int or SymbolDim",
+            actual=type(value).__name__,
+            action=_ERROR_ACTION,
+        )
+    )
 
 
 def conv(
@@ -1299,35 +1610,119 @@ def conv(
     - 功能实现: kernel_gen/operation/nn.py
     """
     if not isinstance(value, Memory):
-        raise TypeError("conv value must be Memory")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.conv 参数校验",
+                expected="conv value must be Memory",
+                actual=type(value).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     if not isinstance(weight, Memory):
-        raise TypeError("conv weight must be Memory")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.conv 参数校验",
+                expected="conv weight must be Memory",
+                actual=type(weight).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     if len(value.shape) != 4:
-        raise ValueError("conv value must be rank-4 Memory")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.conv 参数校验",
+                expected="conv value must be rank-4 Memory",
+                actual=f"rank={len(value.shape)}",
+                action=_ERROR_ACTION,
+            )
+        )
     if len(weight.shape) != 4:
-        raise ValueError("conv weight must be rank-4 Memory")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.conv 参数校验",
+                expected="conv weight must be rank-4 Memory",
+                actual=f"rank={len(weight.shape)}",
+                action=_ERROR_ACTION,
+            )
+        )
 
     n_dim, c_in_dim, h_dim, w_dim = value.shape.get_shape()
     c_out_dim, c_in_weight_dim, kh_dim, kw_dim = weight.shape.get_shape()
     if c_in_dim != c_in_weight_dim:
-        raise ValueError("conv input channel mismatch")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.conv 参数校验",
+                expected="conv input channel mismatch",
+                actual=f"value={c_in_dim} weight={c_in_weight_dim}",
+                action=_ERROR_ACTION,
+            )
+        )
     if value.dtype is not weight.dtype:
-        raise TypeError("conv dtype mismatch")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.conv 参数校验",
+                expected="conv dtype mismatch",
+                actual=f"value={value.dtype} weight={weight.dtype}",
+                action=_ERROR_ACTION,
+            )
+        )
     if value.space is not weight.space:
-        raise ValueError("conv space mismatch")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.conv 参数校验",
+                expected="conv space mismatch",
+                actual=f"value={value.space} weight={weight.space}",
+                action=_ERROR_ACTION,
+            )
+        )
 
     if bias is not None:
         if not isinstance(bias, Memory):
-            raise TypeError("conv bias must be Memory")
+            raise TypeError(
+                _ERROR_TEMPLATE.format(
+                    scene="nn.conv 参数校验",
+                    expected="conv bias must be Memory",
+                    actual=type(bias).__name__,
+                    action=_ERROR_ACTION,
+                )
+            )
         if len(bias.shape) != 1:
-            raise ValueError("conv bias must be rank-1 Memory")
+            raise ValueError(
+                _ERROR_TEMPLATE.format(
+                    scene="nn.conv 参数校验",
+                    expected="conv bias must be rank-1 Memory",
+                    actual=f"rank={len(bias.shape)}",
+                    action=_ERROR_ACTION,
+                )
+            )
         bias_dim = bias.shape.get_shape()[0]
         if bias_dim != c_out_dim:
-            raise ValueError("conv bias shape mismatch")
+            raise ValueError(
+                _ERROR_TEMPLATE.format(
+                    scene="nn.conv 参数校验",
+                    expected="conv bias shape mismatch",
+                    actual=f"bias={bias_dim} out={c_out_dim}",
+                    action=_ERROR_ACTION,
+                )
+            )
         if bias.dtype is not value.dtype:
-            raise TypeError("conv bias dtype mismatch")
+            raise TypeError(
+                _ERROR_TEMPLATE.format(
+                    scene="nn.conv 参数校验",
+                    expected="conv bias dtype mismatch",
+                    actual=f"bias={bias.dtype} value={value.dtype}",
+                    action=_ERROR_ACTION,
+                )
+            )
         if bias.space is not value.space:
-            raise ValueError("conv bias space mismatch")
+            raise ValueError(
+                _ERROR_TEMPLATE.format(
+                    scene="nn.conv 参数校验",
+                    expected="conv bias space mismatch",
+                    actual=f"bias={bias.space} value={value.space}",
+                    action=_ERROR_ACTION,
+                )
+            )
 
     sh_dim = _normalize_conv_param("sh", sh, allow_zero=False)
     sw_dim = _normalize_conv_param("sw", sw, allow_zero=False)
@@ -1343,10 +1738,24 @@ def conv(
 
     h_out_value = h_out.get_value()
     if isinstance(h_out_value, int) and h_out_value <= 0:
-        raise ValueError("conv output height must be positive")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.conv 参数校验",
+                expected="conv output height must be positive",
+                actual=str(h_out_value),
+                action=_ERROR_ACTION,
+            )
+        )
     w_out_value = w_out.get_value()
     if isinstance(w_out_value, int) and w_out_value <= 0:
-        raise ValueError("conv output width must be positive")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.conv 参数校验",
+                expected="conv output width must be positive",
+                actual=str(w_out_value),
+                action=_ERROR_ACTION,
+            )
+        )
 
     return Memory(
         SymbolShape([n_dim, c_out_dim, h_out, w_out]),
@@ -1388,9 +1797,23 @@ def img2col(
     - 功能实现: kernel_gen/operation/nn.py
     """
     if not isinstance(value, Memory):
-        raise TypeError("img2col value must be Memory")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.img2col 参数校验",
+                expected="img2col value must be Memory",
+                actual=type(value).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     if len(value.shape) != 4:
-        raise ValueError("img2col value must be rank-4 Memory")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.img2col 参数校验",
+                expected="img2col value must be rank-4 Memory",
+                actual=f"rank={len(value.shape)}",
+                action=_ERROR_ACTION,
+            )
+        )
 
     kh_dim = _normalize_img2col_param("kh", kh, allow_zero=False)
     kw_dim = _normalize_img2col_param("kw", kw, allow_zero=False)
@@ -1409,10 +1832,24 @@ def img2col(
 
     h_out_value = h_out.get_value()
     if isinstance(h_out_value, int) and h_out_value <= 0:
-        raise ValueError("img2col output height must be positive")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.img2col 参数校验",
+                expected="img2col output height must be positive",
+                actual=str(h_out_value),
+                action=_ERROR_ACTION,
+            )
+        )
     w_out_value = w_out.get_value()
     if isinstance(w_out_value, int) and w_out_value <= 0:
-        raise ValueError("img2col output width must be positive")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.img2col 参数校验",
+                expected="img2col output width must be positive",
+                actual=str(w_out_value),
+                action=_ERROR_ACTION,
+            )
+        )
 
     out_shape = SymbolShape([n_dim, c_dim * kh_dim * kw_dim, h_out * w_out])
     return Memory(
@@ -1443,21 +1880,49 @@ def broadcast(value: object, target: object) -> Memory:
     - 功能实现: kernel_gen/operation/nn.py
     """
     if not isinstance(value, Memory):
-        raise TypeError("broadcast value must be Memory")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.broadcast 参数校验",
+                expected="broadcast value must be Memory",
+                actual=type(value).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     if not isinstance(target, Memory):
-        raise TypeError("broadcast target must be Memory")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.broadcast 参数校验",
+                expected="broadcast target must be Memory",
+                actual=type(target).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     input_values = value.shape.get_values()
     target_values = target.shape.get_values()
 
     if len(target_values) < len(input_values):
-        raise ValueError("broadcast target rank must be >= input rank")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.broadcast 参数校验",
+                expected="broadcast target rank must be >= input rank",
+                actual=f"input_rank={len(input_values)} target_rank={len(target_values)}",
+                action=_ERROR_ACTION,
+            )
+        )
 
     for input_dim, target_dim in zip(reversed(input_values), reversed(target_values), strict=False):
         if input_dim == target_dim:
             continue
         if input_dim == 1:
             continue
-        raise ValueError("broadcast dimension mismatch")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.broadcast 参数校验",
+                expected="broadcast dimension mismatch",
+                actual=f"input={input_dim} target={target_dim}",
+                action=_ERROR_ACTION,
+            )
+        )
 
     return Memory(
         target.shape,

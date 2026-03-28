@@ -31,6 +31,8 @@ _DYNAMIC_MEMORY_SPACES = (
     MemorySpace.TSM,
     MemorySpace.TLM,
 )
+_ERROR_TEMPLATE = "场景: {scene}; 期望: {expected}; 实际: {actual}; 建议动作: {action}"
+_ERROR_ACTION = "请按接口约束传参"
 
 
 def _build_query_symbol(name: str) -> SymbolDim:
@@ -74,9 +76,23 @@ def _ensure_dynamic_memory_space(space: object) -> MemorySpace:
     """
 
     if not isinstance(space, MemorySpace):
-        raise TypeError("space must be MemorySpace")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="arch.get_dynamic_memory 参数校验",
+                expected="space must be MemorySpace",
+                actual=type(space).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     if space not in _DYNAMIC_MEMORY_SPACES:
-        raise ValueError("space must be on-chip MemorySpace")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="arch.get_dynamic_memory 参数校验",
+                expected="space must be on-chip MemorySpace",
+                actual=str(space),
+                action=_ERROR_ACTION,
+            )
+        )
     return space
 
 
@@ -100,9 +116,23 @@ def _ensure_launch_extent(value: object, name: str) -> LaunchExtent:
     """
 
     if isinstance(value, bool) or not isinstance(value, (int, SymbolDim)):
-        raise TypeError(f"{name} must be int or SymbolDim")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="arch.launch_kernel 参数校验",
+                expected=f"{name} must be int or SymbolDim",
+                actual=type(value).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     if isinstance(value, int) and value <= 0:
-        raise ValueError(f"{name} must be > 0")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="arch.launch_kernel 参数校验",
+                expected=f"{name} must be > 0",
+                actual=str(value),
+                action=_ERROR_ACTION,
+            )
+        )
     return value
 
 
@@ -275,9 +305,23 @@ def launch_kernel(name: str, block: LaunchExtent, thread: LaunchExtent, subthrea
     """
 
     if not isinstance(name, str):
-        raise TypeError("name must be str")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="arch.launch_kernel 参数校验",
+                expected="name must be str",
+                actual=type(name).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     if name == "":
-        raise ValueError("name must not be empty")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="arch.launch_kernel 参数校验",
+                expected="name must not be empty",
+                actual="empty",
+                action=_ERROR_ACTION,
+            )
+        )
     _ensure_launch_extent(block, "block")
     _ensure_launch_extent(thread, "thread")
     _ensure_launch_extent(subthread, "subthread")

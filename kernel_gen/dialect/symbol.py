@@ -50,6 +50,37 @@ _SYMBOL_EXPR_PATTERN = re.compile(
     rf"^(?:{_SYMBOL_TOKEN_PATTERN}(?:\s*(?://|[+\-*/])\s*{_SYMBOL_TOKEN_PATTERN})*|floor\(\s*{_SYMBOL_TOKEN_PATTERN}\s*/\s*{_SYMBOL_TOKEN_PATTERN}\s*\))$"
 )
 _SYMBOL_DIM_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_ERROR_TEMPLATE = "场景: {scene}; 期望: {expected}; 实际: {actual}; 建议动作: {action}"
+_ERROR_ACTION = "请按接口约束传参"
+_ERROR_ACTUAL = "不满足期望"
+_ERROR_SCENE = "dialect.symbol"
+
+
+def _format_error(expected: str, actual: str = _ERROR_ACTUAL) -> str:
+    return _ERROR_TEMPLATE.format(
+        scene=_ERROR_SCENE,
+        expected=expected,
+        actual=actual,
+        action=_ERROR_ACTION,
+    )
+
+
+def _raise_verify_error(expected: str, *, actual: str = _ERROR_ACTUAL) -> None:
+    """统一抛出 symbol dialect verifier 错误。"""
+
+    raise VerifyException(_format_error(expected, actual))
+
+
+def _raise_value_error(expected: str, *, actual: str = _ERROR_ACTUAL) -> None:
+    """统一抛出 symbol dialect value error。"""
+
+    raise ValueError(_format_error(expected, actual))
+
+
+def _raise_type_error(expected: str, *, actual: str = _ERROR_ACTUAL) -> None:
+    """统一抛出 symbol dialect type error。"""
+
+    raise TypeError(_format_error(expected, actual))
 
 
 def _normalize_symbol_dim_name(name: str) -> str:
@@ -73,9 +104,9 @@ def _normalize_symbol_dim_name(name: str) -> str:
 
     normalized = name.strip()
     if not normalized:
-        raise VerifyException("symbol dim name must not be empty")
+        _raise_verify_error("symbol dim name must not be empty")
     if _SYMBOL_DIM_NAME_PATTERN.fullmatch(normalized) is None:
-        raise VerifyException("symbol dim name must match [A-Za-z_][A-Za-z0-9_]*")
+        _raise_verify_error("symbol dim name must match [A-Za-z_][A-Za-z0-9_]*")
     return normalized
 
 
@@ -145,13 +176,13 @@ def _evaluate_concrete_expr(expr: str) -> int | None:
             if isinstance(node.op, py_ast.Mult):
                 return lhs * rhs
             if rhs == 0:
-                raise ValueError("division by zero is not a concrete integer expression")
+                _raise_value_error("division by zero is not a concrete integer expression")
             if isinstance(node.op, py_ast.FloorDiv):
                 return lhs // rhs
             if lhs % rhs == 0:
                 return lhs // rhs
-            raise ValueError("division result is not an exact integer expression")
-        raise ValueError("expression is not a concrete integer expression")
+            _raise_value_error("division result is not an exact integer expression")
+        _raise_value_error("expression is not a concrete integer expression")
 
     try:
         return _eval(parsed)
@@ -232,7 +263,7 @@ def _make_symbol_runtime_value(expr: str) -> int | SymbolDim:
                 if isinstance(arg_value, int):
                     return arg_value
                 return SymbolDim(sp.floor(arg_value.get_symbol()))
-        raise ValueError("unsupported public symbol expression")
+        _raise_value_error("unsupported public symbol expression")
 
     return _eval(parsed)
 
@@ -354,9 +385,9 @@ def _verify_axis(axis: Attribute, rank: int, op_name: str) -> int:
     """
 
     if not isinstance(axis, IntAttr):
-        raise VerifyException(f"{op_name} axis must be a static integer")
+        _raise_verify_error(f"{op_name} axis must be a static integer")
     if axis.data < 0 or axis.data >= rank:
-        raise VerifyException(f"{op_name} axis out of range")
+        _raise_verify_error(f"{op_name} axis out of range")
     return axis.data
 
 
@@ -382,7 +413,7 @@ def _entry_to_expr(entry: Attribute, op_name: str, field_name: str) -> str:
         return str(entry.data)
     if isinstance(entry, StringAttr) and entry.data != "?":
         return entry.data
-    raise VerifyException(f"{op_name} does not support unknown {field_name} entry '?'")
+    _raise_verify_error(f"{op_name} does not support unknown {field_name} entry '?'")
 
 
 def _infer_result_type(
@@ -472,9 +503,9 @@ class SymbolExprAttr(ParametrizedAttribute):
 
         expr = _normalize_expr(self.expr.data)
         if not expr:
-            raise VerifyException("symbol expr must not be empty")
+            _raise_verify_error("symbol expr must not be empty")
         if not _is_supported_symbol_expr(expr):
-            raise VerifyException("symbol expr must contain identifiers, integers, +, -, *, /, // or floor(...)")
+            _raise_verify_error("symbol expr must contain identifiers, integers, +, -, *, /, // or floor(...)")
 
     @classmethod
     def from_expr(cls: type["SymbolExprAttr"], expr: str) -> "SymbolExprAttr":
@@ -526,7 +557,7 @@ class SymbolDimType(ParametrizedAttribute, TypeAttribute):
         """
 
         if not isinstance(self, ParametrizedAttribute):
-            raise TypeError("SymbolDimType must be ParametrizedAttribute")
+            _raise_type_error("SymbolDimType must be ParametrizedAttribute")
 
     @classmethod
     def parse_parameters(cls: type["SymbolDimType"], parser: AttrParser) -> Sequence[Attribute]:
@@ -789,9 +820,9 @@ class _BaseSymbolBinaryArithOp(IRDLOperation):
         for field_name in ("lhs", "rhs"):
             operand = SSAValue.get(getattr(self, field_name))
             if not _is_symbol_int_type(operand.type):
-                raise VerifyException(f"{self.name} {field_name} must have type !symbol.int<\"expr\">")
+                _raise_verify_error(f"{self.name} {field_name} must have type !symbol.int<\"expr\">")
         if not _is_symbol_int_type(self.result.type):
-            raise VerifyException(f"{self.name} result type must be !symbol.int<\"expr\">")
+            _raise_verify_error(f"{self.name} result type must be !symbol.int<\"expr\">")
 
     def print(self: "_BaseSymbolBinaryArithOp", printer: Printer) -> None:
         """打印 symbol 二元整数算术 op 自定义文本语法。"""
@@ -880,9 +911,9 @@ class _BaseSymbolCompareOp(IRDLOperation):
         for field_name in ("lhs", "rhs"):
             operand = SSAValue.get(getattr(self, field_name))
             if not _is_symbol_int_type(operand.type):
-                raise VerifyException(f"{self.name} {field_name} must have type !symbol.int<\"expr\">")
+                _raise_verify_error(f"{self.name} {field_name} must have type !symbol.int<\"expr\">")
         if self.result.type != i1:
-            raise VerifyException(f"{self.name} result type must be i1")
+            _raise_verify_error(f"{self.name} result type must be i1")
 
     def print(self: "_BaseSymbolCompareOp", printer: Printer) -> None:
         """打印 symbol 二元整数比较 op 自定义文本语法。"""
@@ -1048,9 +1079,9 @@ class SymbolToFloatOp(IRDLOperation):
 
         source_value = SSAValue.get(self.source)
         if not _is_symbol_int_type(source_value.type):
-            raise VerifyException(f"{self.name} source must have type !symbol.int<\"expr\">")
+            _raise_verify_error(f"{self.name} source must have type !symbol.int<\"expr\">")
         if self.result.type != f32:
-            raise VerifyException(f"{self.name} result type must be f32")
+            _raise_verify_error(f"{self.name} result type must be f32")
 
     def print(self: "SymbolToFloatOp", printer: Printer) -> None:
         """打印 symbol.to_float 自定义文本语法。"""
@@ -1129,9 +1160,9 @@ class SymbolToIntOp(IRDLOperation):
 
         source_value = SSAValue.get(self.source)
         if not _is_symbol_int_type(source_value.type):
-            raise VerifyException(f"{self.name} source must have type !symbol.int<\"expr\">")
+            _raise_verify_error(f"{self.name} source must have type !symbol.int<\"expr\">")
         if not isinstance(self.result.type, IntegerType):
-            raise VerifyException(f"{self.name} result type must be integer")
+            _raise_verify_error(f"{self.name} result type must be integer")
 
     def print(self: "SymbolToIntOp", printer: Printer) -> None:
         """打印 symbol.to_int 自定义文本语法。"""
@@ -1214,13 +1245,13 @@ class _BaseSymbolMemoryQueryOp(IRDLOperation):
 
         source_type = SSAValue.get(self.source).type
         if not isinstance(source_type, NnMemoryType):
-            raise VerifyException(f"{self.name} source must be nn.memory")
+            _raise_verify_error(f"{self.name} source must be nn.memory")
         source_type.verify()
         entries = source_type.shape.data if self.FIELD_NAME == "shape" else source_type.stride.data
         axis = _verify_axis(self.axis, len(entries), self.name)
         expected = SymbolValueType.from_expr(_entry_to_expr(entries[axis], self.name, self.FIELD_NAME))
         if self.result.type != expected:
-            raise VerifyException(f"{self.name} result type must match source {self.FIELD_NAME} entry")
+            _raise_verify_error(f"{self.name} result type must match source {self.FIELD_NAME} entry")
 
 
 @irdl_op_definition
@@ -1305,22 +1336,22 @@ class SymbolForOp(IRDLOperation):
         for operand_name in ("start", "end", "step"):
             operand = SSAValue.get(getattr(self, operand_name))
             if not _is_symbol_int_type(operand.type):
-                raise VerifyException(f"{self.name} {operand_name} must have type !symbol.int<\"expr\">")
+                _raise_verify_error(f"{self.name} {operand_name} must have type !symbol.int<\"expr\">")
 
         step_type = SSAValue.get(self.step).type
         assert isinstance(step_type, SymbolValueType)
         if _normalize_expr(step_type.expr.expr.data) == "0":
-            raise VerifyException(f"{self.name} step must not be zero")
+            _raise_verify_error(f"{self.name} step must not be zero")
 
         blocks = list(self.body.blocks)
         if len(blocks) != 1:
-            raise VerifyException(f"{self.name} only supports single-block regions")
+            _raise_verify_error(f"{self.name} only supports single-block regions")
         block = blocks[0]
         if len(block.args) != 1:
-            raise VerifyException(f"{self.name} body must have exactly one block argument")
+            _raise_verify_error(f"{self.name} body must have exactly one block argument")
         iter_arg = block.args[0]
         if not _is_symbol_int_type(iter_arg.type):
-            raise VerifyException(f"{self.name} it must have type !symbol.int<\"expr\">")
+            _raise_verify_error(f"{self.name} it must have type !symbol.int<\"expr\">")
 
     def print(self: "SymbolForOp", printer: Printer) -> None:
         """打印 symbol.for 自定义文本语法。"""

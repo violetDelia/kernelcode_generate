@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
+_ERROR_TEMPLATE = "场景: {scene}; 期望: {expected}; 实际: {actual}; 建议动作: {action}"
+_ERROR_ACTION = "请按接口约束传参"
 
 class LoopRange:
     """符号范围迭代对象。
@@ -143,7 +145,14 @@ def _ensure_loop_operand(value: object, name: str) -> int | SymbolDim:
     - 功能实现: kernel_gen/operation/scf.py
     """
     if not isinstance(value, (int, SymbolDim)):
-        raise TypeError(f"{name} must be int or SymbolDim")
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="scf.loop 参数校验",
+                expected=f"{name} must be int or SymbolDim",
+                actual=type(value).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     return value
 
 
@@ -190,7 +199,14 @@ def loop(start: object, end: object, step: object):
     end_value = _ensure_loop_operand(end, "end")
     step_value = _ensure_loop_operand(step, "step")
     if step_value == 0:
-        raise ValueError("step must not be 0")
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="scf.loop 参数校验",
+                expected="step must not be 0",
+                actual=str(step),
+                action=_ERROR_ACTION,
+            )
+        )
     if not (_is_symbolic(start_value) or _is_symbolic(end_value) or _is_symbolic(step_value)):
         return range(start_value, end_value, step_value)
     return LoopRange(start_value, end_value, step_value)
