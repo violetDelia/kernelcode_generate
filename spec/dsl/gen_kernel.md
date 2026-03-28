@@ -37,6 +37,19 @@
 - 对于不支持的返回形式、未知 op 或无法映射到目标后端源码的 IR，必须明确报错。
 - 除 `Memory` 结果外，仅允许单一 `!symbol.int<"...">` 标量结果生成返回值；其他非 `Memory` 结果仍需报错。
 
+### 支持矩阵
+
+| 场景 | 支持/限制 | 对应测试 |
+| --- | --- | --- |
+| 基础函数生成 | 仅支持单个 `func.func`；可生成完整函数源码与空函数体。 | GK-001 |
+| `Memory` 输入参数 | 生成 `const Memory<T>&` 只读输入参数。 | GK-002 |
+| `Memory` 结果 | 降为 `Memory<T>& out` 输出参数；函数体回写 `out = <value>;`。 | GK-003、GK-005 |
+| 标量参数 | 支持 `i1`/`i32`/`index`/`!symbol.int<"...">`；保持参数顺序；缺失命名时回退 `arg{index}`。 | GK-004、GK-009、GK-010 |
+| 循环片段 | 支持 `scf.for` 通过 `emit_c` 拼装到函数体。 | GK-006 |
+| `emit_c` 错误 | `emit_c` 报错必须向上抛出并保留失败原因。 | GK-007 |
+| 不支持返回形式/输入类型 | 标量返回或 tuple 返回需报错；`f32` 输入必须报 `TypeError`。 | GK-008 |
+| `!symbol.int<"...">` 返回 | 仅 `target=cpu` 允许生成 `long long` 返回值；非 cpu target 必须报错。 | GK-010、GK-011 |
+
 ## 公开接口
 
 ### `gen_kernel(func_op, ctx)`

@@ -94,22 +94,12 @@ def _emit_error(ctx: EmitCContext, subject: str, reason: str) -> EmitCError:
 
 _BINARY_SIGILS = {
     "arith.addi": "+",
-    "arith.addf": "+",
     "arith.subi": "-",
-    "arith.subf": "-",
-    "arith.muli": "*",
-    "arith.mulf": "*",
-    "arith.divf": "/",
     "symbol.add": "+",
 }
 
 _CMPI_SIGILS = {
     0: "==",
-    1: "!=",
-    2: "<",
-    3: "<=",
-    4: ">",
-    5: ">=",
 }
 
 
@@ -161,7 +151,11 @@ def _format_indices(indices: tuple[SSAValue, ...], ctx: EmitCContext) -> str:
 def _is_unit_tile(memory_type: NnMemoryType) -> bool:
     if len(memory_type.shape.data) == 0:
         return False
-    return all(isinstance(dim, IntAttr) and dim.data == 1 for dim in memory_type.shape.data)
+    if len(memory_type.shape.data) != len(memory_type.stride.data):
+        return False
+    if not all(isinstance(dim, IntAttr) and dim.data == 1 for dim in memory_type.shape.data):
+        return False
+    return all(isinstance(dim, IntAttr) and dim.data == 1 for dim in memory_type.stride.data)
 
 
 def _emit_dma_load_expr(op: DmaLoadOp, ctx: EmitCContext) -> str:
@@ -175,6 +169,8 @@ def _emit_dma_load_expr(op: DmaLoadOp, ctx: EmitCContext) -> str:
 def _emit_dma_store_stmt(op: DmaStoreOp, ctx: EmitCContext) -> str:
     source_type = op.source.type
     if not isinstance(source_type, NnMemoryType) or not _is_unit_tile(source_type):
+        raise _emit_error(ctx, op.name, "only unit-tile dma.store source is supported")
+    if not isinstance(op.source.owner, DmaLoadOp):
         raise _emit_error(ctx, op.name, "only unit-tile dma.store source is supported")
     source_expr = _memory_base_name(op.source, ctx)
     target_expr = _memory_base_name(op.target, ctx)
@@ -193,6 +189,7 @@ def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
     if isinstance(owner, arith.ConstantOp):
         return _format_literal(owner, ctx)
     if owner.name in _BINARY_SIGILS:
+        _type_to_c(value.type, ctx)
         if owner.name == "symbol.add" and ctx.target != "cpu":
             raise _emit_error(ctx, owner.name, "symbol scalar ops are cpu-only")
         lhs = emit_c_value(owner.operands[0], ctx)
@@ -221,6 +218,12 @@ def _emit_assignment(op: Operation, ctx: EmitCContext) -> str:
 
 
 def _emit_loop(op: scf.ForOp, ctx: EmitCContext) -> str:
+    if op.iter_args:
+        raise _emit_error(ctx, op.name, "loop-carried values are unsupported")
+    if len(op.body.block.args) != 1:
+        raise _emit_error(ctx, op.name, "only index iteration variable is supported")
+    if not isinstance(op.body.block.args[0].type, IndexType):
+        raise _emit_error(ctx, op.name, "only index iteration variable is supported")
     iv_name = ctx.allocate_name(op.body.block.args[0], prefix="i")
     lower = emit_c_value(op.lb, ctx)
     upper = emit_c_value(op.ub, ctx)

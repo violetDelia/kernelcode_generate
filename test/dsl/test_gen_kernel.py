@@ -286,6 +286,22 @@ def test_gen_kernel_propagates_emit_c_error() -> None:
 
     assert "test.unsupported" in str(exc_info.value)
 
+    loop_block = Block(arg_types=[])
+    c0 = arith.ConstantOp(IntegerAttr(0, IndexType()))
+    c4 = arith.ConstantOp(IntegerAttr(4, IndexType()))
+    c1 = arith.ConstantOp(IntegerAttr(1, IndexType()))
+    init = arith.ConstantOp(IntegerAttr(0, IndexType()))
+    for op in (c0, c4, c1, init):
+        loop_block.add_op(op)
+    loop_body = Block(arg_types=[IndexType(), IndexType()])
+    loop_body.add_op(scf.YieldOp(loop_body.args[1]))
+    loop_block.add_op(scf.ForOp(c0.result, c4.result, c1.result, [init.result], loop_body))
+    loop_block.add_op(func.ReturnOp())
+    loop_func = _func("bad_loop_kernel", [], [], loop_block, ())
+    with pytest.raises(ValueError) as exc_info:
+        gen_kernel(loop_func, _ctx())
+    assert "loop-carried values are unsupported" in str(exc_info.value)
+
 
 # GK-008
 # 创建者: 金铲铲大作战
