@@ -139,7 +139,7 @@ def _resolve_add_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
                 action=_ERROR_ACTION,
             )
         ) from exc
-    return lhs if lhs_rank <= rhs_rank else rhs
+    return lhs if lhs_rank >= rhs_rank else rhs
 
 
 def _resolve_scalar_dtype(memory_dtype: NumericType) -> NumericType:
