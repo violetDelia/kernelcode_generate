@@ -65,6 +65,7 @@ from kernel_gen.dialect.arch import (
     ArchGetSubthreadIdOp,
     ArchGetSubthreadNumOp,
     ArchGetThreadIdOp,
+    ArchGetThreadNumOp,
 )
 from kernel_gen.dialect.nn import (
     NnAddOp,
@@ -382,6 +383,51 @@ def test_build_func_op_lowers_arch_get_thread_id_query() -> None:
             raise AssertionError("expected func.return to carry one value")
         if return_ops[0].arguments[0].type != SymbolValueType.from_expr("thread_id"):
             raise AssertionError('expected func.return type to stay !symbol.int<"thread_id">')
+
+
+# AST-014K / MGEN-035
+# 创建者: 金铲铲大作战
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-29 18:04:37 +0800
+# 最近一次运行成功时间: 2026-03-29 18:04:37 +0800
+# 功能说明: 验证零入参 get_thread_num DSL 函数可解析并 lowering 为 arch.get_thread_num。
+# 测试目的: 锁定 get_thread_num 查询的 AST 解析、build_func_op 与 build_func_op_from_ast 返回类型为 !symbol.int<"thread_num">。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_arch_get_thread_num_query
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_lowers_arch_get_thread_num_query() -> None:
+    def get_thread_num_kernel() -> int:
+        return get_thread_num()
+
+    func_ast = parse_function(get_thread_num_kernel)
+    if len(func_ast.inputs) != 0:
+        raise AssertionError("expected get_thread_num kernel to have no inputs")
+    if len(func_ast.outputs) != 1:
+        raise AssertionError("expected get_thread_num kernel to have one output annotation")
+    if len(func_ast.body.statements) != 1:
+        raise AssertionError("expected get_thread_num kernel to lower to one AST statement")
+    if not isinstance(func_ast.body.statements[0], ArchQueryAST):
+        raise AssertionError("expected get_thread_num kernel to parse into ArchQueryAST")
+    if func_ast.body.statements[0].query_name != "get_thread_num":
+        raise AssertionError("expected arch query name to stay get_thread_num")
+
+    for func_op in (build_func_op(get_thread_num_kernel), build_func_op_from_ast(func_ast)):
+        if len(tuple(func_op.body.block.args)) != 0:
+            raise AssertionError("expected zero-argument func.func for get_thread_num kernel")
+        body_ops = list(func_op.body.block.ops)
+        query_ops = [op for op in body_ops if isinstance(op, ArchGetThreadNumOp)]
+        return_ops = [op for op in body_ops if isinstance(op, func.ReturnOp)]
+        if len(query_ops) != 1:
+            raise AssertionError("expected exactly one arch.get_thread_num op")
+        if query_ops[0].result.type != SymbolValueType.from_expr("thread_num"):
+            raise AssertionError('expected arch.get_thread_num result type to be !symbol.int<"thread_num">')
+        if len(return_ops) != 1:
+            raise AssertionError("expected exactly one func.return op")
+        if len(return_ops[0].arguments) != 1:
+            raise AssertionError("expected func.return to carry one value")
+        if return_ops[0].arguments[0].type != SymbolValueType.from_expr("thread_num"):
+            raise AssertionError('expected func.return type to stay !symbol.int<"thread_num">')
 
 
 # AST-014I / MGEN-033

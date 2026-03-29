@@ -392,6 +392,36 @@ def build_func_op(
     globals: dict[str, object] | None = None,
     builtins: dict[str, object] | object | None = None,
 ) -> func.FuncOp:
+    """从 Python 函数构建 MLIR `func.func`。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 解析 Python 函数为 `FunctionAST`，并生成 `func.FuncOp`。
+    - 校验运行时参数数量，拒绝外部值引用。
+
+    参数说明:
+    - fn: 待解析的 Python 函数。
+    - runtime_args: 与函数位置参数一一对应的运行时参数。
+    - globals: 解析环境追加的全局变量（仅用于解析，不参与签名推导）。
+    - builtins: 解析环境的内建对象覆盖（可为 dict 或内建模块对象）。
+
+    返回说明:
+    - 返回构建完成的 `func.FuncOp`。
+
+    限制与异常:
+    - 运行时参数数量不匹配会抛出 `AstVisitorError`。
+    - 解析或下沉失败会抛出 `AstVisitorError`。
+
+    使用示例:
+    - func_op = build_func_op(fn, *runtime_args)
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+    """
     from .ast_visitor import AstVisitorError
 
     signature = inspect.signature(fn)
@@ -529,6 +559,34 @@ def build_func_op_from_ast(
     runtime_args: tuple[object, ...] | list[object] | None = None,
     config: dict[str, object] | None = None,
 ) -> func.FuncOp:
+    """从 `FunctionAST` 生成 MLIR `func.func`。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 调用内部构建流程生成 `func.FuncOp`。
+    - 将 `_LoweringError` 统一转换为 `AstVisitorError`。
+
+    参数说明:
+    - func_ast: 已解析的函数 AST。
+    - runtime_args: 运行时参数，用于推导标量类型/符号表达式。
+    - config: 构建配置（例如外部值拒绝策略）。
+
+    返回说明:
+    - 返回构建完成的 `func.FuncOp`。
+
+    限制与异常:
+    - 语义检查或下沉失败会抛出 `AstVisitorError`。
+
+    使用示例:
+    - func_op = build_func_op_from_ast(func_ast, runtime_args=runtime_args)
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+    """
     from .ast_visitor import AstVisitorError
 
     try:
