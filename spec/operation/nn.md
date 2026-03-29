@@ -2,12 +2,13 @@
 
 ## 功能简介
 
-用于定义 `Memory` 高层运算规范，覆盖逐元素算术、比较、激活函数、显式 `broadcast` / `broadcast_to`、`softmax`、全连接 `fc`、二维 `matmul`、`img2col1d`、`img2col2d` 与二维 `conv`。本层只描述可调用语义、结果元信息约束与错误规则。
+用于定义 `Memory` 高层运算规范，覆盖逐元素算术、比较、激活函数、显式 `broadcast` / `broadcast_to`、`softmax`、全连接 `fc`、二维 `matmul` 与二维 `conv`。本层只描述可调用语义、结果元信息约束与错误规则。
 
 ## 文档信息
 
 - 创建者：`榕`
 - 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/operation/nn.md`](../../spec/operation/nn.md)
 - `功能实现`：[`kernel_gen/operation/nn.py`](../../kernel_gen/operation/nn.py)
 - `test`：[`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py)
@@ -21,7 +22,8 @@
 
 - 提供 `Memory` 的逐元素算术与比较高层语义。
 - 提供常用激活函数的输入输出约束与错误规则。
-- 提供显式 `broadcast` / `broadcast_to`、`softmax`、全连接 `fc`、二维 `matmul`、`img2col1d`、`img2col2d` 与二维 `conv` 的输入输出约束与错误规则。
+- 提供显式 `broadcast` / `broadcast_to`、`softmax`、全连接 `fc`、二维 `matmul` 与二维 `conv` 的输入输出约束与错误规则。
+- 提供 `img2col1d` / `img2col2d` 的高层语义锚点，并与 `nn dialect` 的结构化合同建立引用关系。
 - 保持与下游 `nn dialect` 的分层：本层作为用户直接使用的接口，不受限于IR的表达。
 
 ## 限制与边界
@@ -30,11 +32,10 @@
 - `transpose` 仅支持 `Memory` 输入与显式轴置换，不支持标量或隐式转置。
 - `fc` 仅定义“输入末维 × 权重输入特征维”的全连接语义；`bias` 为可选参数。
 - `matmul` 仅定义二维矩阵乘，不支持 batch、广播或隐式转置。
-- `img2col1d` 仅定义 rank-3 `Memory[N, C, W] -> Memory[N, C*Kw, Wo]` 的公开语义。
-- `img2col2d` 仅定义 rank-4 `Memory[N, C, H, W] -> Memory[N, C*Kh*Kw, Ho*Wo]` 的公开语义。
-- `img2col` 为 forbidden public name，禁止继续扩展或新增笼统 `img2col(...)` 公开入口。
 - `softmax` 仅支持 `Memory` 输入，默认沿最后一维归一化，不负责跨算子融合或近似策略选择。
 - `conv` 仅覆盖二维卷积，不支持 group、batch/broadcast 或隐式转置。
+- `img2col` 高层接口按维度拆分为 `img2col1d` 与 `img2col2d` 语义锚点；禁止继续使用笼统公开名 `img2col` 作为稳定对外规范名。
+- 与 `nn dialect` 的分层关系：本层定义高层 shape/参数/错误语义，方言层仅定义 `nn.img2col1d` / `nn.img2col2d` 的 IR 字段与 verifier 合同（见 [`spec/dialect/nn.md`](../../spec/dialect/nn.md)）。
 - 不定义归约等其他算子。
 - 不引入超出本文规则的复杂自动类型提升；`dtype` 兼容性需显式检查。
 - 不负责 AST/IR/lowering 设计。
@@ -718,107 +719,6 @@ tmp = matmul(lhs, rhs, memoryspace=MemorySpace.SM)
 - `out.format == Farmat.Norm`。
 - `out.stride == [rhs.shape[1], 1]`。
 
-### `img2col1d(value, kw, sw=1, dw=1, pl=0, pr=0)`
-
-功能说明：
-
-- 一维滑窗展开（img2col1d），将输入 `Memory[N, C, W]` 展开为列矩阵语义 `Memory[N, C*Kw, Wo]`。
-
-参数说明：
-
-- `value` (`Memory`)：输入特征，`rank == 3`，形状为 `[N, C, W]`。
-- `kw` (`int|SymbolDim`)：窗口宽度，必须为正数。
-- `sw` (`int|SymbolDim`)：步长，必须为正数。
-- `dw` (`int|SymbolDim`)：膨胀系数，必须为正数。
-- `pl`/`pr` (`int|SymbolDim`)：左/右 padding，必须为非负数。
-
-使用示例：
-
-```python
-from kernel_gen.operation.nn import img2col1d
-
-col1d = img2col1d(
-    value_1d,
-    kw=3,
-    sw=1,
-    dw=1,
-    pl=1,
-    pr=1,
-)
-```
-
-注意事项：
-
-- `value` 必须为 `Memory`，否则抛出 `TypeError`（reject: `value-not-memory`）。
-- `value.rank != 3` 必须抛出 `ValueError`（reject: `value-rank-not-3`）。
-- `kw/sw/dw` 必须为正整数或正 `SymbolDim`，否则抛出 `ValueError`（reject: `kw-sw-dw-not-positive-int-or-symboldim`）。
-- `pl/pr` 必须为非负整数或非负 `SymbolDim`，否则抛出 `ValueError`（reject: `pl-pr-negative`）。
-- 输出宽度公式：
-  - `Wo = floor((W + pl + pr - dw * (kw - 1) - 1) / sw) + 1`
-- 当 `Wo` 可静态判定且 `Wo <= 0` 时必须抛出 `ValueError`（reject: `output-width-non-positive`）。
-- 本接口仅定义高层 `Memory -> Memory` 语义，不引入 tiling、pass 或 CPU-only 模板细节。
-
-返回与限制：
-
-- 返回 `Memory` 语义结果。
-- `out.shape == [N, C * kw, Wo]`。
-- `out.dtype == value.dtype`，`out.space == value.space`，`out.format == Farmat.Norm`。
-- `out.stride` 使用输出 shape 的连续行主序默认步幅，即 `[C * kw * Wo, Wo, 1]`；符号维场景沿用 `Memory` 默认 stride 语义与序列化口径。
-
-### `img2col2d(value, kh, kw, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)`
-
-功能说明：
-
-- 二维滑窗展开（img2col2d），将输入 `Memory[N, C, H, W]` 展开为列矩阵语义 `Memory[N, C*Kh*Kw, Ho*Wo]`。
-
-参数说明：
-
-- `value` (`Memory`)：输入特征，`rank == 4`，形状为 `[N, C, H, W]`。
-- `kh`/`kw` (`int|SymbolDim`)：窗口高/宽，必须为正数。
-- `sh`/`sw` (`int|SymbolDim`)：步长（高/宽），必须为正数。
-- `dh`/`dw` (`int|SymbolDim`)：膨胀系数（高/宽），必须为正数。
-- `ph`/`pw`/`pl`/`pr` (`int|SymbolDim`)：上/下/左/右 padding，必须为非负数。
-
-使用示例：
-
-```python
-from kernel_gen.operation.nn import img2col2d
-
-col2d = img2col2d(
-    value_2d,
-    kh=3,
-    kw=3,
-    sh=1,
-    sw=1,
-    dh=1,
-    dw=1,
-    ph=1,
-    pw=1,
-    pl=1,
-    pr=1,
-)
-```
-
-注意事项：
-
-- `value` 必须为 `Memory`，否则抛出 `TypeError`（reject: `value-not-memory`）。
-- `value.rank != 4` 必须抛出 `ValueError`（reject: `value-rank-not-4`）。
-- `kh/kw/sh/sw/dh/dw` 必须为正整数或正 `SymbolDim`，否则抛出 `ValueError`（reject: `kh-kw-sh-sw-dh-dw-not-positive-int-or-symboldim`）。
-- `ph/pw/pl/pr` 必须为非负整数或非负 `SymbolDim`，否则抛出 `ValueError`（reject: `ph-pw-pl-pr-negative`）。
-- 输出尺寸公式：
-  - `Ho = floor((H + ph + pw - dh * (kh - 1) - 1) / sh) + 1`
-  - `Wo = floor((W + pl + pr - dw * (kw - 1) - 1) / sw) + 1`
-- 当 `Ho` 可静态判定且 `Ho <= 0` 时必须抛出 `ValueError`（reject: `output-height-non-positive`）。
-- 当 `Wo` 可静态判定且 `Wo <= 0` 时必须抛出 `ValueError`（reject: `output-width-non-positive`）。
-- 本接口仅定义高层 `Memory -> Memory` 语义，不引入 tiling、pass 或 CPU-only 模板细节。
-
-返回与限制：
-
-- 返回 `Memory` 语义结果。
-- `out.shape == [N, C * kh * kw, Ho * Wo]`。
-- `out.dtype == value.dtype`，`out.space == value.space`，`out.format == Farmat.Norm`。
-- `out.stride` 使用输出 shape 的连续行主序默认步幅，即 `[C * kh * kw * Ho * Wo, Ho * Wo, 1]`；符号维场景沿用 `Memory` 默认 stride 语义与序列化口径。
-
 ### `conv(value, weight, bias=None, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)`
 
 功能说明：
@@ -863,6 +763,80 @@ out = conv(value, weight, bias=bias, sh=2, sw=2, dh=1, dw=1, ph=0, pw=0, pl=0, p
 - `out.dtype == value.dtype`，`out.space == value.space`。
 - `out.format == Farmat.Norm`，`out.stride` 为连续行主序默认步幅（沿用 `Memory` 默认 stride 语义与序列化口径）。
 
+### `img2col1d(value, kw, sw=1, dw=1, pl=0, pr=0)`
+
+功能说明：
+
+- 一维窗口展开高层接口语义锚点：把 rank-3 输入 `Memory` 按滑窗重排为 rank-3 列块表示。
+
+参数说明：
+
+- `value` (`Memory`)：输入特征图，shape 为 `[N, C, W]`。
+- `kw` (`int|SymbolDim`)：卷积核宽度，必须为正数。
+- `sw` (`int|SymbolDim`)：宽度步长，必须为正数。
+- `dw` (`int|SymbolDim`)：宽度膨胀，必须为正数。
+- `pl`/`pr` (`int|SymbolDim`)：左/右 padding，必须为非负数。
+
+使用示例：
+
+```python
+value = Memory([1, 16, 32], NumericType.Float32)
+cols = img2col1d(value, kw=3, sw=1, dw=1, pl=1, pr=1)
+```
+
+注意事项：
+
+- `value` 必须为 `Memory` 且 rank=3，否则抛出 `TypeError`/`ValueError`。
+- `kw/sw/dw` 必须为正数，`pl/pr` 必须为非负数，否则抛出 `ValueError`。
+- 输出宽度按 `W_out = floor((W + pl + pr - dw * (kw - 1) - 1) / sw) + 1` 计算。
+- 当 `W_out` 为确定整数且不为正时，必须抛出 `ValueError`。
+- 与方言合同关系：lowering 后对应 `nn.img2col1d`，IR 结构与 verifier 规则见 [`spec/dialect/nn.md`](../../spec/dialect/nn.md)；方言规范不复写本节高层 shape/错误语义。
+
+返回与限制：
+
+- 返回 `Memory` 语义结果。
+- `out.shape == [N, C * kw, W_out]`。
+- `out.dtype == value.dtype`，`out.space == value.space`。
+- `out.format == Farmat.Norm`，`out.stride` 为连续行主序默认步幅。
+
+### `img2col2d(value, kh, kw, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)`
+
+功能说明：
+
+- 二维窗口展开高层接口语义锚点：把 rank-4 输入 `Memory` 按滑窗重排为 rank-3 列块表示。
+
+参数说明：
+
+- `value` (`Memory`)：输入特征图，shape 为 `[N, C, H, W]`。
+- `kh`/`kw` (`int|SymbolDim`)：卷积核高/宽，必须为正数。
+- `sh`/`sw` (`int|SymbolDim`)：步长高/宽，必须为正数。
+- `dh`/`dw` (`int|SymbolDim`)：膨胀高/宽，必须为正数。
+- `ph`/`pw`/`pl`/`pr` (`int|SymbolDim`)：上/下/左/右 padding，必须为非负数。
+
+使用示例：
+
+```python
+value = Memory([1, 3, 5, 5], NumericType.Float32)
+cols = img2col2d(value, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr=1)
+```
+
+注意事项：
+
+- `value` 必须为 `Memory` 且 rank=4，否则抛出 `TypeError`/`ValueError`。
+- `kh/kw/sh/sw/dh/dw` 必须为正数，`ph/pw/pl/pr` 必须为非负数，否则抛出 `ValueError`。
+- 输出尺寸按以下公式计算：
+  - `H_out = floor((H + ph + pw - dh * (kh - 1) - 1) / sh) + 1`
+  - `W_out = floor((W + pl + pr - dw * (kw - 1) - 1) / sw) + 1`
+- 当 `H_out` 或 `W_out` 为确定整数且不为正时，必须抛出 `ValueError`。
+- 与方言合同关系：lowering 后对应 `nn.img2col2d`，IR 结构与 verifier 规则见 [`spec/dialect/nn.md`](../../spec/dialect/nn.md)；方言规范不复写本节高层 shape/错误语义。
+
+返回与限制：
+
+- 返回 `Memory` 语义结果。
+- `out.shape == [N, C * kh * kw, H_out * W_out]`。
+- `out.dtype == value.dtype`，`out.space == value.space`。
+- `out.format == Farmat.Norm`，`out.stride` 为连续行主序默认步幅。
+
 ## 测试
 
 - 测试文件：[`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py)
@@ -886,9 +860,8 @@ out = conv(value, weight, bias=bias, sh=2, sw=2, dh=1, dw=1, ph=0, pw=0, pl=0, p
 - 验证 `softmax(value, axis=-1)` 的 axis 默认值/负轴归一化、输入 dtype 约束、数值稳定性语义要求与错误路径。
 - 验证比较结果使用 `NumericType.Bool` 作为 predicate 载体。
 - 验证 nn 操作不依赖已移除的旧 shape 规范化入口。
-- 验证 `img2col1d` 的输入 rank、参数校验、输出形状公式、`format=Farmat.Norm` 与默认连续 `stride` 规则、错误边界。
-- 验证 `img2col2d` 的输入 rank、参数校验、输出形状公式、`format=Farmat.Norm` 与默认连续 `stride` 规则、错误边界。
-- 验证 forbidden public name：禁止继续扩展笼统 `img2col(...)` 公开名，且映射不依赖 `img2col(...)` 成功路径。
+- 验证 `img2col2d` 输出形状与参数校验规则，并保持与 `nn.img2col2d` 方言合同的分层引用关系。
+- 验证 `img2col1d` 的高层语义锚点与 `nn.img2col1d` 方言合同引用关系（本阶段不要求实现与测试闭环）。
 - 验证 `conv` 的参数校验、输出形状公式与 bias 可选对齐规则。
 - 验证激活函数的输入输出约束、参数规则与错误路径。
 
@@ -956,7 +929,6 @@ out = conv(value, weight, bias=bias, sh=2, sw=2, dh=1, dw=1, ph=0, pw=0, pl=0, p
 | OP-SM-004 | `softmax` 的 `axis` 越界时报 `ValueError` | `test_nn_softmax_axis_out_of_range` |
 | OP-SM-005 | `softmax` 非浮点 `dtype` 输入报 `TypeError` | `test_nn_softmax_dtype_error` |
 | OP-SM-006 | `softmax` 限定数值稳定语义为 `exp(x - max(x)) / sum(exp(x - max(x)))` | `test_nn_softmax_numerical_stability_contract` |
-| OP-IMG2COL-001 | `img2col1d` 的 `Memory[N,C,W] -> Memory[N,C*Kw,Wo]` 语义、参数校验、输出形状/format/stride 与错误边界 | `test_nn_img2col1d_contract` |
-| OP-IMG2COL-002 | `img2col2d` 的 `Memory[N,C,H,W] -> Memory[N,C*Kh*Kw,Ho*Wo]` 语义、参数校验、输出形状/format/stride 与错误边界 | `test_nn_img2col2d_contract` |
-| OP-IMG2COL-003 | forbidden public name：禁止继续扩展笼统 `img2col(...)` 公开名（不依赖 `img2col(...)` 成功路径） | `test_nn_img2col_forbidden_public_name` |
+| OP-IMG2COL-001 | `img2col1d` 输出形状与参数校验规则 | `test_nn_img2col1d_contract` |
+| OP-IMG2COL-002 | `img2col2d` 输出形状与参数校验规则 | `test_nn_img2col2d_contract` |
 | OP-CONV-001 | `conv` 基础路径与参数校验（含可选 bias 对齐） | `test_nn_conv_basic` |

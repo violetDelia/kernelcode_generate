@@ -33,6 +33,8 @@ from .nn import (
     NnEqOp,
     NnGeOp,
     NnGtOp,
+    NnImg2col1dOp,
+    NnImg2col2dOp,
     NnLeOp,
     NnLtOp,
     NnMatmulOp,
@@ -67,6 +69,8 @@ __all__ = [
     "NnGtOp",
     "NnGeOp",
     "NnMatmulOp",
+    "NnImg2col1dOp",
+    "NnImg2col2dOp",
     "NnMemorySpaceAttr",
     "NnMemoryType",
 ]

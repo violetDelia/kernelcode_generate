@@ -608,7 +608,7 @@ def _infer_broadcast_shape(lhs: SymbolShape, rhs: SymbolShape) -> SymbolShape:
 
     功能说明:
     - 按尾维对齐规则推导共同目标 shape。
-    - 仅允许 singleton dim 扩张，"?" 仅与 "?" 兼容。
+    - 仅允许 singleton dim 扩张。
 
     使用示例:
     - _infer_broadcast_shape(SymbolShape([1, "B"]), SymbolShape(["A", "B"]))
@@ -621,12 +621,34 @@ def _infer_broadcast_shape(lhs: SymbolShape, rhs: SymbolShape) -> SymbolShape:
     lhs_dims = lhs.get_values()
     rhs_dims = rhs.get_values()
     max_rank = max(len(lhs_dims), len(rhs_dims))
-    result_reversed: list[int | str] = []
+    result: list[object] = []
     for index in range(1, max_rank + 1):
-        lhs_dim = lhs_dims[-index] if index <= len(lhs_dims) else 1
-        rhs_dim = rhs_dims[-index] if index <= len(rhs_dims) else 1
-        result_reversed.append(_merge_broadcast_dim(lhs_dim, rhs_dim))
-    return SymbolShape(list(reversed(result_reversed)))
+        lhs_dim = lhs_dims[-index] if index <= len(lhs_dims) else None
+        rhs_dim = rhs_dims[-index] if index <= len(rhs_dims) else None
+        if lhs_dim is None:
+            result.insert(0, rhs_dim)
+            continue
+        if rhs_dim is None:
+            result.insert(0, lhs_dim)
+            continue
+        if lhs_dim == rhs_dim:
+            result.insert(0, lhs_dim)
+            continue
+        if lhs_dim == 1:
+            result.insert(0, rhs_dim)
+            continue
+        if rhs_dim == 1:
+            result.insert(0, lhs_dim)
+            continue
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.broadcast 参数校验",
+                expected="broadcast dimension mismatch",
+                actual=f"lhs={lhs_dim} rhs={rhs_dim}",
+                action=_ERROR_ACTION,
+            )
+        )
+    return SymbolShape(result)
 
 
 def _broadcast_memory_pair(lhs: Memory, rhs: Memory) -> tuple[Memory, Memory]:
@@ -1751,18 +1773,18 @@ def img2col1d(
     pl: int | SymbolDim = 0,
     pr: int | SymbolDim = 0,
 ) -> Memory:
-    """将三维输入按一维窗口展开为列矩阵。
+    """一维窗口展开高层语义推导。
 
     创建者: 金铲铲大作战
     最后一次更改: 金铲铲大作战
 
     功能说明:
     - 校验输入类型与 rank。
-    - 校验 kw/sw/dw 与 padding 参数。
+    - 校验 kernel/stride/dilation/padding 参数。
     - 返回 img2col1d 展开后的 Memory 描述。
 
     使用示例:
-    - img2col1d(Memory([1, 3, 5], NumericType.Float32), kw=3, sw=1, dw=1, pl=1, pr=1)
+    - img2col1d(Memory([1, 16, 32], NumericType.Float32), kw=3, sw=1, dw=1, pl=1, pr=1)
 
     关联文件:
     - spec: spec/operation/nn.md
@@ -1772,7 +1794,7 @@ def img2col1d(
     if not isinstance(value, Memory):
         raise TypeError(
             _ERROR_TEMPLATE.format(
-                scene="nn.img2col 参数校验",
+                scene="nn.img2col1d 参数校验",
                 expected="img2col1d value must be Memory",
                 actual=type(value).__name__,
                 action=_ERROR_ACTION,
@@ -1781,7 +1803,7 @@ def img2col1d(
     if len(value.shape) != 3:
         raise ValueError(
             _ERROR_TEMPLATE.format(
-                scene="nn.img2col 参数校验",
+                scene="nn.img2col1d 参数校验",
                 expected="img2col1d value must be rank-3 Memory",
                 actual=f"rank={len(value.shape)}",
                 action=_ERROR_ACTION,
@@ -1801,7 +1823,7 @@ def img2col1d(
     if isinstance(w_out_value, int) and w_out_value <= 0:
         raise ValueError(
             _ERROR_TEMPLATE.format(
-                scene="nn.img2col 参数校验",
+                scene="nn.img2col1d 参数校验",
                 expected="img2col1d output width must be positive",
                 actual=str(w_out_value),
                 action=_ERROR_ACTION,
@@ -1831,7 +1853,7 @@ def img2col2d(
     pl: int | SymbolDim = 0,
     pr: int | SymbolDim = 0,
 ) -> Memory:
-    """将四维输入按二维窗口展开为列矩阵。
+    """二维窗口展开高层语义推导。
 
     创建者: 金铲铲大作战
     最后一次更改: 金铲铲大作战
@@ -1842,7 +1864,41 @@ def img2col2d(
     - 返回 img2col2d 展开后的 Memory 描述。
 
     使用示例:
-    - img2col2d(Memory([1, 3, 5, 5], NumericType.Float32), 3, 3, 1, 1, 1, 1, 1, 1, 1, 1)
+    - img2col2d(Memory([1, 3, 5, 5], NumericType.Float32), kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr=1)
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    return _img2col(value, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr)
+
+
+def _img2col(
+    value: object,
+    kh: int | SymbolDim,
+    kw: int | SymbolDim,
+    sh: int | SymbolDim,
+    sw: int | SymbolDim,
+    dh: int | SymbolDim,
+    dw: int | SymbolDim,
+    ph: int | SymbolDim,
+    pw: int | SymbolDim,
+    pl: int | SymbolDim,
+    pr: int | SymbolDim,
+) -> Memory:
+    """img2col2d 的内部展开实现。
+
+    创建者: 小李飞刀
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 供 img2col2d 复用的内部实现。
+    - 校验输入类型与 rank、kernel/stride/dilation/padding 参数。
+    - 返回展开后的 Memory 描述。
+
+    使用示例:
+    - _img2col(Memory([1, 3, 5, 5], NumericType.Float32), 3, 3, 1, 1, 1, 1, 1, 1, 1, 1)
 
     关联文件:
     - spec: spec/operation/nn.md
@@ -1853,7 +1909,7 @@ def img2col2d(
         raise TypeError(
             _ERROR_TEMPLATE.format(
                 scene="nn.img2col 参数校验",
-                expected="img2col2d value must be Memory",
+                expected="img2col value must be Memory",
                 actual=type(value).__name__,
                 action=_ERROR_ACTION,
             )
@@ -1862,7 +1918,7 @@ def img2col2d(
         raise ValueError(
             _ERROR_TEMPLATE.format(
                 scene="nn.img2col 参数校验",
-                expected="img2col2d value must be rank-4 Memory",
+                expected="img2col value must be rank-4 Memory",
                 actual=f"rank={len(value.shape)}",
                 action=_ERROR_ACTION,
             )
@@ -1888,7 +1944,7 @@ def img2col2d(
         raise ValueError(
             _ERROR_TEMPLATE.format(
                 scene="nn.img2col 参数校验",
-                expected="img2col2d output height must be positive",
+                expected="img2col output height must be positive",
                 actual=str(h_out_value),
                 action=_ERROR_ACTION,
             )
@@ -1898,7 +1954,7 @@ def img2col2d(
         raise ValueError(
             _ERROR_TEMPLATE.format(
                 scene="nn.img2col 参数校验",
-                expected="img2col2d output width must be positive",
+                expected="img2col output width must be positive",
                 actual=str(w_out_value),
                 action=_ERROR_ACTION,
             )
@@ -1911,46 +1967,6 @@ def img2col2d(
         space=value.space,
         stride=_build_add_stride(out_shape),
         format=Farmat.Norm,
-    )
-
-
-def img2col(
-    value: object,
-    kh: int | SymbolDim,
-    kw: int | SymbolDim,
-    sh: int | SymbolDim,
-    sw: int | SymbolDim,
-    dh: int | SymbolDim,
-    dw: int | SymbolDim,
-    ph: int | SymbolDim,
-    pw: int | SymbolDim,
-    pl: int | SymbolDim,
-    pr: int | SymbolDim,
-) -> Memory:
-    """禁用笼统 img2col 公开入口。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 禁止继续使用 img2col 作为公开入口。
-    - 请改用 img2col1d 或 img2col2d。
-
-    使用示例:
-    - img2col(value, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)  # 将抛出异常
-
-    关联文件:
-    - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
-    - 功能实现: kernel_gen/operation/nn.py
-    """
-    raise ValueError(
-        _ERROR_TEMPLATE.format(
-            scene="nn.img2col 参数校验",
-            expected="img2col is forbidden public name",
-            actual="img2col called",
-            action="请改用 img2col1d/img2col2d",
-        )
     )
 
 
@@ -2007,15 +2023,6 @@ def broadcast(value: object, target: object) -> Memory:
         if input_dim == target_dim:
             continue
         if input_dim == 1:
-            if target_dim == "?":
-                raise ValueError(
-                    _ERROR_TEMPLATE.format(
-                        scene="nn.broadcast 参数校验",
-                        expected="broadcast dimension mismatch",
-                        actual=f"input={input_dim} target={target_dim}",
-                        action=_ERROR_ACTION,
-                    )
-                )
             continue
         raise ValueError(
             _ERROR_TEMPLATE.format(

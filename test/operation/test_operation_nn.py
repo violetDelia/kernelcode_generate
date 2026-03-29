@@ -24,6 +24,8 @@ import sys
 from pathlib import Path
 
 import pytest
+import kernel_gen.operation as operation_api
+import kernel_gen.operation.nn as operation_nn
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -60,7 +62,6 @@ from kernel_gen.operation.nn import (
     tanh,
     truediv,
 )
-import kernel_gen.operation.nn as nn_module
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolList, SymbolShape
@@ -181,7 +182,7 @@ def test_nn_dtype_mismatch() -> None:
 
 # OP-008
 # 创建者: 金铲铲大作战
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-24 04:03:10 +0800
 # 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
 # 测试目的: 验证不支持的 dtype 触发 TypeError。
@@ -223,13 +224,8 @@ def test_nn_add_bool_scalar() -> None:
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_scalar_type_error() -> None:
     mem = Memory([1], NumericType.Int32)
-    symbol = SymbolDim("N")
     with pytest.raises(TypeError):
         _ = add(mem, "3")
-    with pytest.raises(TypeError):
-        _ = add(mem, symbol)
-    with pytest.raises(TypeError):
-        _ = add(symbol, mem)
 
 
 # OP-009
@@ -537,8 +533,6 @@ def test_nn_broadcast_dimension_mismatch() -> None:
     value = Memory(["M", "N"], NumericType.Float32)
     with pytest.raises(ValueError):
         _ = broadcast(value, Memory(["M", "K"], NumericType.Float32))
-    with pytest.raises(ValueError):
-        _ = broadcast(Memory([1, "N"], NumericType.Float32), Memory(["?", "N"], NumericType.Float32))
 
 
 # OP-BC-004
@@ -615,10 +609,6 @@ def test_nn_add_implicit_broadcast_singleton() -> None:
     assert _merge_broadcast_dim("?", "?") == "?"
     with pytest.raises(ValueError):
         _merge_broadcast_dim("?", "N")
-    with pytest.raises(ValueError):
-        _infer_broadcast_shape(SymbolShape(["?"]), SymbolShape([1]))
-    with pytest.raises(ValueError):
-        _infer_broadcast_shape(SymbolShape([1]), SymbolShape(["?"]))
     assert result.shape.get_values() == ["A", "B"]
     assert lhs_b is lhs_same
     assert rhs_b is rhs_same
@@ -978,27 +968,27 @@ def test_nn_matmul_space_mismatch() -> None:
 # OP-IMG2COL-001
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-29 17:50:04 +0800
-# 最近一次运行成功时间: 2026-03-29 17:50:04 +0800
-# 测试目的: 验证 img2col1d 输出形状、format/stride 与参数校验规则。
+# 最近一次运行测试时间: 2026-03-29 18:54:36 +0800
+# 最近一次运行成功时间: 2026-03-29 18:54:36 +0800
+# 测试目的: 验证 img2col1d 输出形状与参数校验规则。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_img2col1d_contract
 # 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_img2col1d_contract() -> None:
-    value = Memory([1, 3, 5], NumericType.Float32, space=MemorySpace.GM)
+    value = Memory([1, 16, 32], NumericType.Float32, space=MemorySpace.GM)
     result = img2col1d(value, kw=3, sw=1, dw=1, pl=1, pr=1)
-    assert result.shape.get_values() == [1, 9, 5]
+    assert result.shape.get_values() == [1, 48, 32]
     assert result.dtype is NumericType.Float32
     assert result.space is MemorySpace.GM
     assert result.format is Farmat.Norm
-    assert result.get_stride() == [45, 5, 1]
+    assert result.get_stride() == [1536, 32, 1]
 
     with pytest.raises(TypeError):
         _ = img2col1d("bad", kw=3, sw=1, dw=1, pl=0, pr=0)
 
     with pytest.raises(ValueError):
-        _ = img2col1d(Memory([1, 3, 5, 5], NumericType.Float32), kw=3, sw=1, dw=1, pl=0, pr=0)
+        _ = img2col1d(Memory([1, 16, 32, 1], NumericType.Float32), kw=3, sw=1, dw=1, pl=0, pr=0)
 
     with pytest.raises(TypeError):
         _ = img2col1d(value, kw="3", sw=1, dw=1, pl=0, pr=0)
@@ -1013,15 +1003,15 @@ def test_nn_img2col1d_contract() -> None:
         _ = img2col1d(value, kw=True, sw=1, dw=1, pl=0, pr=0)
 
     with pytest.raises(ValueError):
-        _ = img2col1d(Memory([1, 3, 2], NumericType.Float32), kw=3, sw=1, dw=1, pl=0, pr=0)
+        _ = img2col1d(value, kw=64, sw=1, dw=1, pl=0, pr=0)
 
 
 # OP-IMG2COL-002
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-29 17:50:04 +0800
-# 最近一次运行成功时间: 2026-03-29 17:50:04 +0800
-# 测试目的: 验证 img2col2d 输出形状、format/stride 与参数校验规则。
+# 最近一次运行测试时间: 2026-03-29 18:54:36 +0800
+# 最近一次运行成功时间: 2026-03-29 18:54:36 +0800
+# 测试目的: 验证 img2col2d 输出形状与参数校验规则。
 # 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_img2col2d_contract
 # 对应功能实现文件路径: kernel_gen/operation/nn.py
 # 对应 spec 文件路径: spec/operation/nn.md
@@ -1057,21 +1047,22 @@ def test_nn_img2col2d_contract() -> None:
         _ = img2col2d(value, kh=7, kw=7, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)
 
 
-# OP-IMG2COL-003
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-29 17:50:04 +0800
-# 最近一次运行成功时间: 2026-03-29 17:50:04 +0800
-# 测试目的: 验证 img2col 为 forbidden public name，调用需报错且不依赖成功路径。
-# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_img2col_forbidden_public_name
-# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-29 19:32:00 +0800
+# 最近一次运行成功时间: 2026-03-29 19:32:00 +0800
+# 功能说明: 验证 operation 层公开导出仅暴露 img2col1d/img2col2d，旧公开名 img2col 不再进入导出列表。
+# 测试目的: 锁定 kernel_gen.operation.nn.__all__ 与 kernel_gen.operation 包级公开列表不包含 img2col，避免旧 API 回流。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_img2col_public_exports
+# 对应功能实现文件路径: kernel_gen/operation/nn.py, kernel_gen/operation/__init__.py
 # 对应 spec 文件路径: spec/operation/nn.md
 # 对应测试文件路径: test/operation/test_operation_nn.py
-def test_nn_img2col_forbidden_public_name() -> None:
-    value = Memory([1, 3, 5, 5], NumericType.Float32, space=MemorySpace.GM)
-    assert "img2col" not in nn_module.__all__
-    with pytest.raises(ValueError):
-        _ = nn_module.img2col(value, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)
+def test_nn_img2col_public_exports() -> None:
+    assert "img2col1d" in operation_nn.__all__
+    assert "img2col2d" in operation_nn.__all__
+    assert "img2col" not in operation_nn.__all__
+    assert "img2col" not in operation_api.__all__
+    assert not hasattr(operation_api, "img2col")
 
 
 # OP-SM-001

@@ -473,6 +473,149 @@ def _verify_transpose_layout(
             _raise_verify_error("nn.transpose result stride must match permuted input")
 
 
+def _normalize_i64_attr(value: int | IntegerAttr | IntAttr, field_name: str) -> IntegerAttr:
+    """将数值规范化为 i64 IntegerAttr。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 支持传入 int/IntAttr/IntegerAttr，统一为 i64 IntegerAttr。
+    - 用于 nn.img2col1d/nn.img2col2d 属性构造入口。
+
+    使用示例:
+    - _normalize_i64_attr(3, "kw")
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    if isinstance(value, IntegerAttr):
+        return value
+    if isinstance(value, IntAttr):
+        value = value.data
+    return IntegerAttr(value, IntegerType(64))
+
+
+def _verify_i64_attr_value(attr: IntegerAttr, field_name: str, *, allow_zero: bool) -> int:
+    """校验 i64 属性值并返回整数。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 校验属性类型为 i64。
+    - 校验正数/非负数约束并返回值。
+
+    使用示例:
+    - _verify_i64_attr_value(attr, "kw", allow_zero=False)
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    if not isinstance(attr.type, IntegerType):
+        _raise_verify_error(f"{field_name} must be i64")
+    width_attr = attr.type.width
+    width_value = width_attr.data if isinstance(width_attr, IntAttr) else width_attr
+    if width_value != 64:
+        _raise_verify_error(f"{field_name} must be i64")
+    value = attr.value.data
+    if allow_zero:
+        if value < 0:
+            _raise_verify_error(f"{field_name} must be non-negative")
+    elif value <= 0:
+        _raise_verify_error(f"{field_name} must be positive")
+    return value
+
+
+def _collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None:
+    """提取维度中的整数值列表。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 仅当所有维度均为 IntAttr 时返回整数列表。
+    - 任何非 IntAttr 维度返回 None，表示无法进行数值合同校验。
+
+    使用示例:
+    - _collect_int_dims([IntAttr(1), IntAttr(2)])
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    values: list[int] = []
+    for dim in dims:
+        if not isinstance(dim, IntAttr):
+            return None
+        values.append(dim.data)
+    return values
+
+
+def _build_contiguous_stride(shape: Sequence[int]) -> list[int]:
+    """按连续行主序构建 stride 列表。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 以最后一维 stride=1 计算前序 stride。
+
+    使用示例:
+    - _build_contiguous_stride([1, 4, 8])
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    running = 1
+    strides: list[int] = []
+    for dim in reversed(shape):
+        strides.append(running)
+        running *= dim
+    strides.reverse()
+    return strides
+
+
+def _img2col_output_dim(
+    input_dim: int,
+    kernel: int,
+    stride: int,
+    dilation: int,
+    pad_before: int,
+    pad_after: int,
+) -> int:
+    """计算 img2col 输出维度。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 复用卷积输出维度公式并返回整数结果。
+
+    使用示例:
+    - _img2col_output_dim(8, 3, 1, 1, 1, 1)
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    numerator = input_dim + pad_before + pad_after - dilation * (kernel - 1) - 1
+    return numerator // stride + 1
+
+
 class _BaseNnBinaryOp(IRDLOperation):
     """NN 二元 op 基类。"""
 
@@ -772,6 +915,295 @@ class NnTransposeOp(IRDLOperation):
 
 
 @irdl_op_definition
+class NnImg2col1dOp(IRDLOperation):
+    """nn.img2col1d。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 定义一维 img2col 方言 op 与 verifier 约束。
+
+    使用示例:
+    - NnImg2col1dOp(inp, result_type, kw=3, sw=1, dw=1, pl=1, pr=1, space=NnMemorySpaceAttr.from_name("global"))
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    name = "nn.img2col1d"
+
+    input = operand_def(NnMemoryType)
+    result = result_def(NnMemoryType)
+    kw = attr_def(IntegerAttr)
+    sw = attr_def(IntegerAttr)
+    dw = attr_def(IntegerAttr)
+    pl = attr_def(IntegerAttr)
+    pr = attr_def(IntegerAttr)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        input_value: SSAValue | Operation,
+        result_type: NnMemoryType,
+        kw: int | IntegerAttr | IntAttr,
+        sw: int | IntegerAttr | IntAttr,
+        dw: int | IntegerAttr | IntAttr,
+        pl: int | IntegerAttr | IntAttr,
+        pr: int | IntegerAttr | IntAttr,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        """初始化 img2col1d op。
+
+        创建者: jcc你莫辜负
+        最后一次更改: jcc你莫辜负
+
+        功能说明:
+        - 绑定输入 operand、结果类型、窗口属性与 space 属性。
+
+        使用示例:
+        - NnImg2col1dOp(inp, result_type, kw=3, sw=1, dw=1, pl=1, pr=1, space=NnMemorySpaceAttr.from_name("global"))
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/test_nn_dialect.py
+        - 功能实现: kernel_gen/dialect/nn.py
+        """
+
+        super().__init__(
+            operands=[input_value],
+            result_types=[result_type],
+            attributes={
+                "kw": _normalize_i64_attr(kw, "kw"),
+                "sw": _normalize_i64_attr(sw, "sw"),
+                "dw": _normalize_i64_attr(dw, "dw"),
+                "pl": _normalize_i64_attr(pl, "pl"),
+                "pr": _normalize_i64_attr(pr, "pr"),
+                "space": space,
+            },
+        )
+
+    def verify_(self) -> None:
+        """校验 nn.img2col1d。
+
+        创建者: jcc你莫辜负
+        最后一次更改: jcc你莫辜负
+
+        功能说明:
+        - 校验 operand rank、属性合法性、result rank/type/space 与合同约束。
+
+        使用示例:
+        - NnImg2col1dOp(...).verify_()
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/test_nn_dialect.py
+        - 功能实现: kernel_gen/dialect/nn.py
+        """
+
+        input_type = _verify_memory_type(self.input.type, "input")
+        result_type = _verify_memory_type(self.result.type, "result")
+
+        if len(input_type.shape.data) != 3:
+            _raise_verify_error("nn.img2col1d input must be rank-3 nn.memory")
+        if len(result_type.shape.data) != 3:
+            _raise_verify_error("nn.img2col1d result rank must be 3")
+
+        kw_value = _verify_i64_attr_value(self.kw, "kw", allow_zero=False)
+        sw_value = _verify_i64_attr_value(self.sw, "sw", allow_zero=False)
+        dw_value = _verify_i64_attr_value(self.dw, "dw", allow_zero=False)
+        pl_value = _verify_i64_attr_value(self.pl, "pl", allow_zero=True)
+        pr_value = _verify_i64_attr_value(self.pr, "pr", allow_zero=True)
+
+        self.space.verify()
+        if input_type.space.space.data != self.space.space.data:
+            _raise_verify_error("nn.img2col1d attribute space must match input space")
+        if result_type.space.space.data != input_type.space.space.data:
+            _raise_verify_error("nn.img2col1d result space must match input")
+        if result_type.element_type != input_type.element_type:
+            _raise_verify_error("nn.img2col1d result element_type must match input")
+
+        input_dims = _collect_int_dims(input_type.shape.data)
+        result_dims = _collect_int_dims(result_type.shape.data)
+        if input_dims is None or result_dims is None:
+            return
+
+        n_dim, c_dim, w_dim = input_dims
+        w_out = _img2col_output_dim(w_dim, kw_value, sw_value, dw_value, pl_value, pr_value)
+        if w_out <= 0:
+            _raise_verify_error("nn.img2col1d output width must be positive")
+
+        expected_shape = [n_dim, c_dim * kw_value, w_out]
+        if result_dims != expected_shape:
+            _raise_verify_error("nn.img2col1d result shape must match img2col1d contract")
+
+        result_strides = _collect_int_dims(result_type.stride.data)
+        if result_strides is None:
+            _raise_verify_error("nn.img2col1d result stride must match img2col1d contract")
+        expected_stride = _build_contiguous_stride(expected_shape)
+        if result_strides != expected_stride:
+            _raise_verify_error("nn.img2col1d result stride must match img2col1d contract")
+
+
+@irdl_op_definition
+class NnImg2col2dOp(IRDLOperation):
+    """nn.img2col2d。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 定义二维 img2col 方言 op 与 verifier 约束。
+
+    使用示例:
+    - NnImg2col2dOp(inp, result_type, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr=1, space=NnMemorySpaceAttr.from_name("global"))
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    name = "nn.img2col2d"
+
+    input = operand_def(NnMemoryType)
+    result = result_def(NnMemoryType)
+    kh = attr_def(IntegerAttr)
+    kw = attr_def(IntegerAttr)
+    sh = attr_def(IntegerAttr)
+    sw = attr_def(IntegerAttr)
+    dh = attr_def(IntegerAttr)
+    dw = attr_def(IntegerAttr)
+    ph = attr_def(IntegerAttr)
+    pw = attr_def(IntegerAttr)
+    pl = attr_def(IntegerAttr)
+    pr = attr_def(IntegerAttr)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        input_value: SSAValue | Operation,
+        result_type: NnMemoryType,
+        kh: int | IntegerAttr | IntAttr,
+        kw: int | IntegerAttr | IntAttr,
+        sh: int | IntegerAttr | IntAttr,
+        sw: int | IntegerAttr | IntAttr,
+        dh: int | IntegerAttr | IntAttr,
+        dw: int | IntegerAttr | IntAttr,
+        ph: int | IntegerAttr | IntAttr,
+        pw: int | IntegerAttr | IntAttr,
+        pl: int | IntegerAttr | IntAttr,
+        pr: int | IntegerAttr | IntAttr,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        """初始化 img2col2d op。
+
+        创建者: jcc你莫辜负
+        最后一次更改: jcc你莫辜负
+
+        功能说明:
+        - 绑定输入 operand、结果类型、窗口属性与 space 属性。
+
+        使用示例:
+        - NnImg2col2dOp(inp, result_type, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr=1, space=NnMemorySpaceAttr.from_name("global"))
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/test_nn_dialect.py
+        - 功能实现: kernel_gen/dialect/nn.py
+        """
+
+        super().__init__(
+            operands=[input_value],
+            result_types=[result_type],
+            attributes={
+                "kh": _normalize_i64_attr(kh, "kh"),
+                "kw": _normalize_i64_attr(kw, "kw"),
+                "sh": _normalize_i64_attr(sh, "sh"),
+                "sw": _normalize_i64_attr(sw, "sw"),
+                "dh": _normalize_i64_attr(dh, "dh"),
+                "dw": _normalize_i64_attr(dw, "dw"),
+                "ph": _normalize_i64_attr(ph, "ph"),
+                "pw": _normalize_i64_attr(pw, "pw"),
+                "pl": _normalize_i64_attr(pl, "pl"),
+                "pr": _normalize_i64_attr(pr, "pr"),
+                "space": space,
+            },
+        )
+
+    def verify_(self) -> None:
+        """校验 nn.img2col2d。
+
+        创建者: jcc你莫辜负
+        最后一次更改: jcc你莫辜负
+
+        功能说明:
+        - 校验 operand rank、属性合法性、result rank/type/space 与合同约束。
+
+        使用示例:
+        - NnImg2col2dOp(...).verify_()
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/test_nn_dialect.py
+        - 功能实现: kernel_gen/dialect/nn.py
+        """
+
+        input_type = _verify_memory_type(self.input.type, "input")
+        result_type = _verify_memory_type(self.result.type, "result")
+
+        if len(input_type.shape.data) != 4:
+            _raise_verify_error("nn.img2col2d input must be rank-4 nn.memory")
+        if len(result_type.shape.data) != 3:
+            _raise_verify_error("nn.img2col2d result rank must be 3")
+
+        kh_value = _verify_i64_attr_value(self.kh, "kh", allow_zero=False)
+        kw_value = _verify_i64_attr_value(self.kw, "kw", allow_zero=False)
+        sh_value = _verify_i64_attr_value(self.sh, "sh", allow_zero=False)
+        sw_value = _verify_i64_attr_value(self.sw, "sw", allow_zero=False)
+        dh_value = _verify_i64_attr_value(self.dh, "dh", allow_zero=False)
+        dw_value = _verify_i64_attr_value(self.dw, "dw", allow_zero=False)
+        ph_value = _verify_i64_attr_value(self.ph, "ph", allow_zero=True)
+        pw_value = _verify_i64_attr_value(self.pw, "pw", allow_zero=True)
+        pl_value = _verify_i64_attr_value(self.pl, "pl", allow_zero=True)
+        pr_value = _verify_i64_attr_value(self.pr, "pr", allow_zero=True)
+
+        self.space.verify()
+        if input_type.space.space.data != self.space.space.data:
+            _raise_verify_error("nn.img2col2d attribute space must match input space")
+        if result_type.space.space.data != input_type.space.space.data:
+            _raise_verify_error("nn.img2col2d result space must match input")
+        if result_type.element_type != input_type.element_type:
+            _raise_verify_error("nn.img2col2d result element_type must match input")
+
+        input_dims = _collect_int_dims(input_type.shape.data)
+        result_dims = _collect_int_dims(result_type.shape.data)
+        if input_dims is None or result_dims is None:
+            return
+
+        n_dim, c_dim, h_dim, w_dim = input_dims
+        h_out = _img2col_output_dim(h_dim, kh_value, sh_value, dh_value, ph_value, pw_value)
+        w_out = _img2col_output_dim(w_dim, kw_value, sw_value, dw_value, pl_value, pr_value)
+        if h_out <= 0:
+            _raise_verify_error("nn.img2col2d output height must be positive")
+        if w_out <= 0:
+            _raise_verify_error("nn.img2col2d output width must be positive")
+
+        expected_shape = [n_dim, c_dim * kh_value * kw_value, h_out * w_out]
+        if result_dims != expected_shape:
+            _raise_verify_error("nn.img2col2d result shape must match img2col2d contract")
+
+        result_strides = _collect_int_dims(result_type.stride.data)
+        if result_strides is None:
+            _raise_verify_error("nn.img2col2d result stride must match img2col2d contract")
+        expected_stride = _build_contiguous_stride(expected_shape)
+        if result_strides != expected_stride:
+            _raise_verify_error("nn.img2col2d result stride must match img2col2d contract")
+
+
+@irdl_op_definition
 class NnMatmulOp(IRDLOperation):
     """nn.matmul。
 
@@ -861,6 +1293,8 @@ Nn = Dialect(
         NnGeOp,
         NnBroadcastOp,
         NnTransposeOp,
+        NnImg2col1dOp,
+        NnImg2col2dOp,
         NnMatmulOp,
     ],
     [
@@ -883,6 +1317,8 @@ __all__ = [
     "NnGeOp",
     "NnBroadcastOp",
     "NnTransposeOp",
+    "NnImg2col1dOp",
+    "NnImg2col2dOp",
     "NnMatmulOp",
     "NnMemorySpaceAttr",
     "NnMemoryType",

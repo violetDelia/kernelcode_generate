@@ -2,12 +2,12 @@
 
 ## 功能简介
 
-`nn dialect` 定义方言层稳定接口，负责建模 memory space、memory type，以及逐元素算术、逐元素比较、显式 `broadcast`、`transpose` 和二维 `matmul` 的 IR 形态与 verifier 约束。本规范仅描述方言层字段、文本形式与校验语义，不包含上游高层 API 调度逻辑。
+`nn dialect` 定义方言层稳定接口，负责建模 memory space、memory type，以及逐元素算术、逐元素比较、显式 `broadcast`、`transpose`、`img2col1d/img2col2d` 和二维 `matmul` 的 IR 形态与 verifier 约束。本规范仅描述方言层字段、文本形式与校验语义，不包含上游高层 API 调度逻辑。
 
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/dialect/nn.md`](../../spec/dialect/nn.md)
 - `功能实现`：[`kernel_gen/dialect/nn.py`](../../kernel_gen/dialect/nn.py)
 - `test`：[`test/dialect/test_nn_dialect.py`](../../test/dialect/test_nn_dialect.py)
@@ -23,7 +23,7 @@
 
 - 提供 `global/shared/local/tsm/tlm` 五种 memory space 的统一属性表示。
 - 提供可解析、可打印、可校验的 `!nn.memory<...>` 类型表示。
-- 为 `nn.add/sub/mul/truediv/eq/ne/lt/le/gt/ge/broadcast/transpose/matmul` 提供稳定的方言层接口。
+- 为 `nn.add/sub/mul/truediv/eq/ne/lt/le/gt/ge/broadcast/transpose/img2col1d/img2col2d/matmul` 提供稳定的方言层接口。
 - 明确 `nn dialect` 不支持逐元素隐式 broadcast，所有广播必须显式使用 `nn.broadcast`。
 - 保证合法文本 IR 可以 round-trip，非法输入在 parse 或 verifier 阶段被拒绝。
 
@@ -31,6 +31,8 @@
 
 - 本文件只定义 `kernel_gen/dialect/nn.py` 的方言层接口，不重复上游 `operation/nn` 的高层 API 语义。
 - 上游若允许逐元素隐式 broadcast，进入 `nn dialect` 前必须显式展开为 `nn.broadcast`。
+- `img2col` 在方言层只允许公开 `nn.img2col1d` 与 `nn.img2col2d` 两个稳定 op，禁止新增笼统公开名 `nn.img2col`。
+- `nn.img2col1d/img2col2d` 仅定义 operand/attribute/result/verifier 合同，不在方言层重复上游 `operation/nn` 的 shape/stride 公式与错误边界全文。
 - `NnMemorySpaceAttr` 仅允许 `global/shared/local/tsm/tlm` 五种取值。
 - `NnMemoryType.space` 与各 op 的 `space` attribute 必须使用同一语义口径。
 - `NnMemoryType` 中 `shape` 与 `stride` 的 rank 必须一致；每一维支持静态整数、符号或 `?`。
@@ -42,36 +44,6 @@
 - `memory type` 指 `NnMemoryType`，由 `shape/stride/element_type/space` 组成。
 - `round-trip` 指文本 IR 在 parse 后再 print，得到稳定且等价的文本表示。
 - 合法 `!nn.memory<...>`、`#nn.space<...>` 与包含公开 op 的模块文本必须支持 round-trip。
-
-## operation API 映射
-
-对照 [`spec/operation/nn.md`](../../spec/operation/nn.md)，operation 层算子与 `nn dialect` op 的对应关系如下。未提供映射的 operation API 不在 `nn dialect` 范围内，需在进入方言层前完成改写或下沉到其他方言。
-
-| operation API | dialect op | 说明 |
-| --- | --- | --- |
-| `add(lhs, rhs)` | `nn.add` | 逐元素加法。 |
-| `sub(lhs, rhs)` | `nn.sub` | 逐元素减法。 |
-| `mul(lhs, rhs)` | `nn.mul` | 逐元素乘法。 |
-| `truediv(lhs, rhs)` | `nn.truediv` | 逐元素真除法。 |
-| `floordiv(lhs, rhs)` | 无 | `nn dialect` 未定义整除 op，需在方言层外处理。 |
-| `eq(lhs, rhs)` | `nn.eq` | 逐元素相等比较。 |
-| `ne(lhs, rhs)` | `nn.ne` | 逐元素不等比较。 |
-| `lt(lhs, rhs)` | `nn.lt` | 逐元素小于比较。 |
-| `le(lhs, rhs)` | `nn.le` | 逐元素小于等于比较。 |
-| `gt(lhs, rhs)` | `nn.gt` | 逐元素大于比较。 |
-| `ge(lhs, rhs)` | `nn.ge` | 逐元素大于等于比较。 |
-| `relu(value)` | 无 | 激活算子不在 `nn dialect` 范围内。 |
-| `leaky_relu(value, alpha)` | 无 | 激活算子不在 `nn dialect` 范围内。 |
-| `sigmoid(value)` | 无 | 激活算子不在 `nn dialect` 范围内。 |
-| `tanh(value)` | 无 | 激活算子不在 `nn dialect` 范围内。 |
-| `hard_sigmoid(value, alpha, beta)` | 无 | 激活算子不在 `nn dialect` 范围内。 |
-| `broadcast(value, target)` | `nn.broadcast` | 显式广播。 |
-| `broadcast_to(value, target)` | `nn.broadcast` | 等价于显式广播到 `target` 形状。 |
-| `transpose(value, perm)` | `nn.transpose` | 显式维度置换。 |
-| `softmax(value, axis)` | 无 | 高阶算子不在 `nn dialect` 范围内。 |
-| `fc(value, weight, bias)` | 无 | 高阶算子不在 `nn dialect` 范围内。 |
-| `matmul(lhs, rhs, memoryspace)` | `nn.matmul` | 二维矩阵乘，`memoryspace` 映射为 `space` 属性。 |
-| `conv(value, weight, bias, sh, sw, dh, dw, ph, pw, pl, pr)` | 无 | 高阶算子不在 `nn dialect` 范围内。 |
 
 ## 公开接口
 
@@ -468,6 +440,110 @@ op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 
 - 返回 `NnMatmulOp`；仅定义二维矩阵乘语义。
 
+### nn.img2col1d
+
+功能说明：
+
+- 一维窗口展开方言 op，将 rank-3 输入 memory 显式重排为 rank-3 列块 memory。
+
+参数说明：
+
+- `input: !nn.memory<...>`：输入 memory，rank 必须为 3。
+- `kw: i64`：卷积核宽度，必须为正整数。
+- `sw: i64`：窗口宽度步长，必须为正整数。
+- `dw: i64`：窗口宽度膨胀，必须为正整数。
+- `pl: i64`：左侧 padding，必须为非负整数。
+- `pr: i64`：右侧 padding，必须为非负整数。
+- `space: #nn.space<...>`：op 的空间属性。
+- `result: !nn.memory<...>`：结果 memory，rank 必须为 3。
+
+使用示例：
+
+```mlir
+%0 = nn.img2col1d %value {
+  kw = 3, sw = 1, dw = 1, pl = 1, pr = 1,
+  space = #nn.space<global>
+} : !nn.memory<[1, 16, 32], [512, 32, 1], f32, #nn.space<global>>
+ -> !nn.memory<[1, 48, 32], [1536, 32, 1], f32, #nn.space<global>>
+```
+
+注意事项：
+
+- operand/result 必须是 `!nn.memory`。
+- operand rank 必须是 3，result rank 必须是 3。
+- `kw/sw/dw` 必须为正整数；`pl/pr` 必须为非负整数。
+- `result.element_type` 必须与 `input.element_type` 一致。
+- `result.space` 必须与 `input.space` 和 `op.space` 一致。
+- `result.shape/stride` 必须满足 `img2col1d` 方言合同；具体高层公式由 `operation/nn` 规范定义。
+
+返回与限制：
+
+- 返回 `NnImg2col1dOp`。
+- verifier 合同关键字：
+  - `operand-must-be-rank-3-nn-memory`
+  - `kw-sw-dw-must-be-positive`
+  - `pl-pr-must-be-non-negative`
+  - `result-rank-must-be-3`
+  - `result-element-type-matches-input`
+  - `result-space-matches-input`
+  - `result-shape-stride-must-match-img2col1d-contract`
+
+### nn.img2col2d
+
+功能说明：
+
+- 二维窗口展开方言 op，将 rank-4 输入 memory 显式重排为 rank-3 列块 memory。
+
+参数说明：
+
+- `input: !nn.memory<...>`：输入 memory，rank 必须为 4。
+- `kh: i64`：卷积核高度，必须为正整数。
+- `kw: i64`：卷积核宽度，必须为正整数。
+- `sh: i64`：高度步长，必须为正整数。
+- `sw: i64`：宽度步长，必须为正整数。
+- `dh: i64`：高度膨胀，必须为正整数。
+- `dw: i64`：宽度膨胀，必须为正整数。
+- `ph: i64`：顶部 padding，必须为非负整数。
+- `pw: i64`：底部 padding，必须为非负整数。
+- `pl: i64`：左侧 padding，必须为非负整数。
+- `pr: i64`：右侧 padding，必须为非负整数。
+- `space: #nn.space<...>`：op 的空间属性。
+- `result: !nn.memory<...>`：结果 memory，rank 必须为 3。
+
+使用示例：
+
+```mlir
+%0 = nn.img2col2d %value {
+  kh = 3, kw = 3,
+  sh = 1, sw = 1,
+  dh = 1, dw = 1,
+  ph = 1, pw = 1, pl = 1, pr = 1,
+  space = #nn.space<global>
+} : !nn.memory<[1, 3, 5, 5], [75, 25, 5, 1], f32, #nn.space<global>>
+ -> !nn.memory<[1, 27, 25], [675, 25, 1], f32, #nn.space<global>>
+```
+
+注意事项：
+
+- operand/result 必须是 `!nn.memory`。
+- operand rank 必须是 4，result rank 必须是 3。
+- `kh/kw/sh/sw/dh/dw` 必须为正整数；`ph/pw/pl/pr` 必须为非负整数。
+- `result.element_type` 必须与 `input.element_type` 一致。
+- `result.space` 必须与 `input.space` 和 `op.space` 一致。
+- `result.shape/stride` 必须满足 `img2col2d` 方言合同；具体高层公式由 `operation/nn` 规范定义。
+
+返回与限制：
+
+- 返回 `NnImg2col2dOp`。
+- verifier 合同关键字：
+  - `operand-must-be-rank-4-nn-memory`
+  - `kh-kw-sh-sw-dh-dw-must-be-positive`
+  - `ph-pw-pl-pr-must-be-non-negative`
+  - `result-rank-must-be-3`
+  - `result-element-type-matches-input`
+  - `result-space-matches-input`
+  - `result-shape-stride-must-match-img2col2d-contract`
+
 ## 测试
 
 - 测试文件：[`test/dialect/test_nn_dialect.py`](../../test/dialect/test_nn_dialect.py)
@@ -480,6 +556,8 @@ op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 - 验证 `nn.add/sub/mul/truediv/eq/ne/lt/le/gt/ge` 的 operand/result/type/space verifier 约束。
 - 验证 `nn.broadcast` 的显式广播规则、space 一致性、element type 一致性与文本 round-trip。
 - 验证 `nn.transpose` 的 perm/shape/stride/space/element type 约束与文本 round-trip。
+- 验证 `nn.img2col1d` 的 operand rank、属性合法性、result rank/type/space 与方言合同约束。
+- 验证 `nn.img2col2d` 的 operand rank、属性合法性、result rank/type/space 与方言合同约束。
 - 验证 `nn.matmul` 的 rank、shape、space、element type 约束与文本 round-trip。
 - 验证逐元素链路拒绝隐式 broadcast。
 
@@ -526,3 +604,5 @@ op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 | NN-DIA-037 | `nn.transpose` perm 非法 | `test_transpose_op_rejects_invalid_perm` |
 | NN-DIA-038 | `nn.transpose` shape/stride 不匹配 | `test_transpose_op_result_mismatch` |
 | NN-DIA-039 | transpose 模块 round-trip | `test_transpose_module_round_trip` |
+| NN-DIA-040 | `nn.img2col1d` 合同（operand/attrs/result/verifier） | `test_nn_dialect_img2col1d_contract_v1` |
+| NN-DIA-041 | `nn.img2col2d` 合同（operand/attrs/result/verifier） | `test_nn_dialect_img2col2d_contract_v1` |
