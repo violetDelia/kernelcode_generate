@@ -608,7 +608,7 @@ def _infer_broadcast_shape(lhs: SymbolShape, rhs: SymbolShape) -> SymbolShape:
 
     功能说明:
     - 按尾维对齐规则推导共同目标 shape。
-    - 仅允许 singleton dim 扩张。
+    - 仅允许 singleton dim 扩张，"?" 仅与 "?" 兼容。
 
     使用示例:
     - _infer_broadcast_shape(SymbolShape([1, "B"]), SymbolShape(["A", "B"]))
@@ -621,34 +621,12 @@ def _infer_broadcast_shape(lhs: SymbolShape, rhs: SymbolShape) -> SymbolShape:
     lhs_dims = lhs.get_values()
     rhs_dims = rhs.get_values()
     max_rank = max(len(lhs_dims), len(rhs_dims))
-    result: list[object] = []
+    result_reversed: list[int | str] = []
     for index in range(1, max_rank + 1):
-        lhs_dim = lhs_dims[-index] if index <= len(lhs_dims) else None
-        rhs_dim = rhs_dims[-index] if index <= len(rhs_dims) else None
-        if lhs_dim is None:
-            result.insert(0, rhs_dim)
-            continue
-        if rhs_dim is None:
-            result.insert(0, lhs_dim)
-            continue
-        if lhs_dim == rhs_dim:
-            result.insert(0, lhs_dim)
-            continue
-        if lhs_dim == 1:
-            result.insert(0, rhs_dim)
-            continue
-        if rhs_dim == 1:
-            result.insert(0, lhs_dim)
-            continue
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
-                scene="nn.broadcast 参数校验",
-                expected="broadcast dimension mismatch",
-                actual=f"lhs={lhs_dim} rhs={rhs_dim}",
-                action=_ERROR_ACTION,
-            )
-        )
-    return SymbolShape(result)
+        lhs_dim = lhs_dims[-index] if index <= len(lhs_dims) else 1
+        rhs_dim = rhs_dims[-index] if index <= len(rhs_dims) else 1
+        result_reversed.append(_merge_broadcast_dim(lhs_dim, rhs_dim))
+    return SymbolShape(list(reversed(result_reversed)))
 
 
 def _broadcast_memory_pair(lhs: Memory, rhs: Memory) -> tuple[Memory, Memory]:
@@ -2029,6 +2007,15 @@ def broadcast(value: object, target: object) -> Memory:
         if input_dim == target_dim:
             continue
         if input_dim == 1:
+            if target_dim == "?":
+                raise ValueError(
+                    _ERROR_TEMPLATE.format(
+                        scene="nn.broadcast 参数校验",
+                        expected="broadcast dimension mismatch",
+                        actual=f"input={input_dim} target={target_dim}",
+                        action=_ERROR_ACTION,
+                    )
+                )
             continue
         raise ValueError(
             _ERROR_TEMPLATE.format(
