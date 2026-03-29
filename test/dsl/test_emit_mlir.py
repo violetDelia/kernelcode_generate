@@ -914,7 +914,7 @@ def test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast() -> None:
     def sub(
         lhs: "Tensor[f32, 2, 2]",
         rhs: "Tensor[i32, 2, 2]",
-    ) -> "Tensor[i32, 2, 2]":
+    ) -> "Tensor[f32, 2, 2]":
         return lhs - rhs
 
     lhs_memory = Memory([2, 2], NumericType.Float32)

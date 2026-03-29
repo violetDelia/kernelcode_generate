@@ -460,13 +460,13 @@ class Memory:
 
     @staticmethod
     def _promote_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
-        """根据固定优先级选择更靠前的 dtype。
+        """根据固定优先级选择顺序更靠后的 dtype。
 
         创建者: 金铲铲大作战
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 依据 `_ARITHMETIC_DTYPE_ORDER` 返回参与运算中更靠前的类型。
+        - 依据 `_ARITHMETIC_DTYPE_ORDER` 返回参与运算中顺序更靠后的类型。
 
         使用示例:
         - Memory._promote_dtype(NumericType.Int32, NumericType.Float32)
@@ -478,17 +478,17 @@ class Memory:
         """
         if lhs not in _ARITHMETIC_DTYPE_RANK or rhs not in _ARITHMETIC_DTYPE_RANK:
             raise TypeError("Memory dtype mismatch")
-        return lhs if _ARITHMETIC_DTYPE_RANK[lhs] <= _ARITHMETIC_DTYPE_RANK[rhs] else rhs
+        return lhs if _ARITHMETIC_DTYPE_RANK[lhs] >= _ARITHMETIC_DTYPE_RANK[rhs] else rhs
 
     @staticmethod
     def _promote_scalar_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
-        """根据固定优先级选择更高精度的 dtype。
+        """根据固定优先级选择顺序更靠后的 dtype。
 
         创建者: 金铲铲大作战
         最后一次更改: 小李飞刀
 
         功能说明:
-        - 标量参与运算时，按 `_ARITHMETIC_DTYPE_ORDER` 选择更高精度类型。
+        - 标量参与运算时，按 `_ARITHMETIC_DTYPE_ORDER` 选择顺序更靠后类型。
 
         使用示例:
         - Memory._promote_scalar_dtype(NumericType.Int8, NumericType.Int32)

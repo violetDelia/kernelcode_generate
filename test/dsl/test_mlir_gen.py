@@ -2052,7 +2052,7 @@ def test_tensor_truediv_dtype_promotion_lowering() -> None:
     def truediv(
         x: "Tensor[f32, 2, 2]",
         y: "Tensor[i32, 2, 2]",
-    ) -> "Tensor[i32, 2, 2]":
+    ) -> "Tensor[f32, 2, 2]":
         return x / y
 
     lhs_memory = Memory([2, 2], NumericType.Float32)
@@ -2062,7 +2062,7 @@ def test_tensor_truediv_dtype_promotion_lowering() -> None:
     div_ops = [op for op in func_op.body.block.ops if isinstance(op, NnTrueDivOp)]
     assert len(cast_ops) == 1
     assert len(div_ops) == 1
-    expected_type = _memory_to_nn_type(Memory([2, 2], NumericType.Int32))
+    expected_type = _memory_to_nn_type(Memory([2, 2], NumericType.Float32))
     assert cast_ops[0].result.type == expected_type
     assert div_ops[0].result.type == expected_type
 
@@ -2164,7 +2164,7 @@ def test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast() -> None:
     def sub(
         lhs: "Tensor[f32, 2, 2]",
         rhs: "Tensor[i32, 2, 2]",
-    ) -> "Tensor[i32, 2, 2]":
+    ) -> "Tensor[f32, 2, 2]":
         return lhs - rhs
 
     lhs_memory = Memory([2, 2], NumericType.Float32)
