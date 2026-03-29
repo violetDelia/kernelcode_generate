@@ -40,9 +40,13 @@
 - `offsets` 中静态值必须为非负整数；`sizes/strides` 中静态值必须为正整数；动态值使用符号整型表达。
 - 对于可静态判定的场景，必须检查边界：`offset + (size - 1) * stride < dim`，越界时显式报错。
 - `load/slice` 的 `strides` 仅作为访问步进参与校验，不会写入返回 `Memory.stride`。
+- `load/slice/store/deslice` 允许非单位 `strides` 作为访问步进并执行边界校验；但当前 `dma dialect` 仅支持单位步长语义，进入方言层时任一维 `stride != 1` 必须显式报错，以避免生成无法验证的方言 op。
 - `store/deslice` 的 `sizes` 必须与 `source.shape` 一致。
 - `copy/cast` 仅改变 `Memory` 规格，不负责数据填充或变形。
 - `view` 不提供 `space` 或 `memoryspec` 参数；返回值总是继承 `source` 的 `dtype/space/format/stride`。
+- `view` 的 `stride` 参数只用于描述 subview 窗口步进与边界检查，不会覆盖返回值的 `Memory.stride`。
+- `view` 在 operation 层不要求 `source.shape` 与 `size` 的 `numel` 相等，只要求窗口边界合法。
+- operation 到 dialect 的映射边界：`view` 的 `offset/size/stride` 必须在调用点直接保留并传递给方言；仅依赖 `view` 返回的 `Memory` 无法恢复完整 subview 参数。
 
 ## 公开接口
 
@@ -297,6 +301,7 @@ sub = view(src, offset=["M_t", "K_t"], size=[2, 2], stride=["stride", 1])
 - `offset/size/stride` 都必须可被 `SymbolShape` 规范化，且长度必须与 `source.rank` 一致。
 - `size` 中静态维度必须为正。
 - `stride` 仅用于描述子视图访问步进，不等同于返回 `Memory` 的连续布局步幅。
+- `view` 仅做窗口合法性检查，不要求 `source.shape` 与 `size` 的 `numel` 在 operation 层相等。
 - 对于可静态判定的场景，必须进行边界检查。
 
 返回与限制：

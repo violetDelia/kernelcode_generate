@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`金铲铲大作战`
+- 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/dialect/nn.md`](../../spec/dialect/nn.md)
 - `功能实现`：[`kernel_gen/dialect/nn.py`](../../kernel_gen/dialect/nn.py)
 - `test`：[`test/dialect/test_nn_dialect.py`](../../test/dialect/test_nn_dialect.py)
@@ -42,6 +42,36 @@
 - `memory type` 指 `NnMemoryType`，由 `shape/stride/element_type/space` 组成。
 - `round-trip` 指文本 IR 在 parse 后再 print，得到稳定且等价的文本表示。
 - 合法 `!nn.memory<...>`、`#nn.space<...>` 与包含公开 op 的模块文本必须支持 round-trip。
+
+## operation API 映射
+
+对照 [`spec/operation/nn.md`](../../spec/operation/nn.md)，operation 层算子与 `nn dialect` op 的对应关系如下。未提供映射的 operation API 不在 `nn dialect` 范围内，需在进入方言层前完成改写或下沉到其他方言。
+
+| operation API | dialect op | 说明 |
+| --- | --- | --- |
+| `add(lhs, rhs)` | `nn.add` | 逐元素加法。 |
+| `sub(lhs, rhs)` | `nn.sub` | 逐元素减法。 |
+| `mul(lhs, rhs)` | `nn.mul` | 逐元素乘法。 |
+| `truediv(lhs, rhs)` | `nn.truediv` | 逐元素真除法。 |
+| `floordiv(lhs, rhs)` | 无 | `nn dialect` 未定义整除 op，需在方言层外处理。 |
+| `eq(lhs, rhs)` | `nn.eq` | 逐元素相等比较。 |
+| `ne(lhs, rhs)` | `nn.ne` | 逐元素不等比较。 |
+| `lt(lhs, rhs)` | `nn.lt` | 逐元素小于比较。 |
+| `le(lhs, rhs)` | `nn.le` | 逐元素小于等于比较。 |
+| `gt(lhs, rhs)` | `nn.gt` | 逐元素大于比较。 |
+| `ge(lhs, rhs)` | `nn.ge` | 逐元素大于等于比较。 |
+| `relu(value)` | 无 | 激活算子不在 `nn dialect` 范围内。 |
+| `leaky_relu(value, alpha)` | 无 | 激活算子不在 `nn dialect` 范围内。 |
+| `sigmoid(value)` | 无 | 激活算子不在 `nn dialect` 范围内。 |
+| `tanh(value)` | 无 | 激活算子不在 `nn dialect` 范围内。 |
+| `hard_sigmoid(value, alpha, beta)` | 无 | 激活算子不在 `nn dialect` 范围内。 |
+| `broadcast(value, target)` | `nn.broadcast` | 显式广播。 |
+| `broadcast_to(value, target)` | `nn.broadcast` | 等价于显式广播到 `target` 形状。 |
+| `transpose(value, perm)` | `nn.transpose` | 显式维度置换。 |
+| `softmax(value, axis)` | 无 | 高阶算子不在 `nn dialect` 范围内。 |
+| `fc(value, weight, bias)` | 无 | 高阶算子不在 `nn dialect` 范围内。 |
+| `matmul(lhs, rhs, memoryspace)` | `nn.matmul` | 二维矩阵乘，`memoryspace` 映射为 `space` 属性。 |
+| `conv(value, weight, bias, sh, sw, dh, dw, ph, pw, pl, pr)` | 无 | 高阶算子不在 `nn dialect` 范围内。 |
 
 ## 公开接口
 

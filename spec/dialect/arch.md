@@ -40,6 +40,21 @@
 - 本文件只约束公开 IR 形式与 verifier 边界；不承诺 host/runtime 如何消费这些 op。
 - `kernel_gen/dialect/__init__.py` 属于共享包入口文件，是本 spec “每个 spec 原则上只对应一个源文件”的例外；本文件只定义该包入口中 `Arch`、`ArchGetBlockIdOp`、`ArchGetBlockNumOp`、`ArchGetThreadIdOp`、`ArchGetThreadNumOp`、`ArchGetSubthreadIdOp`、`ArchGetSubthreadNumOp`、`ArchGetDynamicMemoryOp`、`ArchLaunchKernelOp` 这些 `arch` 公开符号的导出边界，不延伸约束同文件中的 `nn` 导出。
 
+## operation API 映射
+
+对照 [`spec/operation/arch.md`](../../spec/operation/arch.md)，operation 层 helper 与 `arch dialect` op 的对应关系如下。
+
+| operation API | dialect op | 说明 |
+| --- | --- | --- |
+| `get_block_id()` | `arch.get_block_id` | block 索引查询。 |
+| `get_block_num()` | `arch.get_block_num` | block 数量查询。 |
+| `get_thread_id()` | `arch.get_thread_id` | thread 索引查询。 |
+| `get_thread_num()` | `arch.get_thread_num` | thread 数量查询。 |
+| `get_subthread_id()` | `arch.get_subthread_id` | subthread 索引查询。 |
+| `get_subthread_num()` | `arch.get_subthread_num` | subthread 数量查询。 |
+| `get_dynamic_memory(space)` | `arch.get_dynamic_memory` | 动态片上内存入口。 |
+| `launch_kernel(name, block, thread, subthread)` | `arch.launch_kernel` | kernel 启动描述。 |
+
 ## 公开接口
 
 ### arch.get_block_id

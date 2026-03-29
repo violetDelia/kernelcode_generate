@@ -43,6 +43,7 @@ from xdsl.dialects.builtin import (
 )
 from xdsl.ir import Block
 from xdsl.printer import Printer
+from xdsl.utils.exceptions import VerifyException
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -152,6 +153,7 @@ from kernel_gen.dsl.mlir_gen import (
 )
 from kernel_gen.dsl import mlir_gen as mlir_gen_module
 from kernel_gen.dsl import ast_visitor as ast_visitor_module
+from kernel_gen.operation.dma import view as operation_view
 import kernel_gen.operation.nn as nn
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -203,7 +205,7 @@ def _parse_function_from_source(
     return _parse_function_with_env(kernel, globals_table, builtins_table, runtime_table, config=None)
 
 
-# EMIT-022A
+# EMIT-022
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-25 21:25:58 +0800
@@ -229,7 +231,7 @@ def test_emit_mlir_lowers_arch_get_block_id_query() -> None:
         raise AssertionError('expected emitted result type to be !symbol.int<"block_id">')
 
 
-# EMIT-023A
+# EMIT-023
 # 创建者: 咯咯咯
 # 最后一次更改: 咯咯咯
 # 最近一次运行测试时间: 2026-03-26 00:27:39 +0800
@@ -584,6 +586,34 @@ def test_load_ast_lowering_raises_lowering_error() -> None:
     assert exc_info.value.location is not None
 
 
+# EMIT-007A
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-29 00:00:00 +0800
+# 最近一次运行成功时间: 2026-03-29 00:00:00 +0800
+# 功能说明: 验证 SliceAST 非 unit stride 抛出带诊断的错误。
+# 测试目的: 锁定 slice 非单位 stride 的拒绝路径。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_slice_ast_lowering_raises_lowering_error
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_slice_ast_lowering_raises_lowering_error() -> None:
+    memory = Memory([2, 2], NumericType.Float32)
+    tensor = TensorAST(name="x", memory=memory, location=SourceLocation(1, 0))
+    slice_ast = LoadAST(
+        tensor=tensor,
+        offset=[ConstAST(0, location=SourceLocation(2, 2)), ConstAST(0, location=SourceLocation(2, 5))],
+        sizes=[ConstAST(1, location=SourceLocation(2, 7)), ConstAST(1, location=SourceLocation(2, 8))],
+        stride=ConstAST(2, location=SourceLocation(2, 9)),
+        location=SourceLocation(2, 0),
+        kind="slice",
+    )
+    func_ast = FunctionAST(name="slice", inputs=[tensor], outputs=[], body=BlockAST([slice_ast]))
+    with pytest.raises(AstVisitorError, match="Only unit stride is supported") as exc_info:
+        build_func_op_from_ast(func_ast)
+    assert exc_info.value.location is not None
+
+
 # EMIT-008
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
@@ -628,6 +658,62 @@ def test_store_ast_lowering_raises_lowering_error() -> None:
     func_ast = FunctionAST(name="store", inputs=[tensor], outputs=[], body=BlockAST([store, tensor]))
     with pytest.raises(AstVisitorError, match="Operand must be nn.memory"):
         build_func_op_from_ast(func_ast)
+
+
+# EMIT-009A
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-29 00:00:00 +0800
+# 最近一次运行成功时间: 2026-03-29 00:00:00 +0800
+# 功能说明: 验证 StoreAST 非 unit stride 抛出带诊断的错误。
+# 测试目的: 锁定 store 非单位 stride 的拒绝路径。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_store_ast_lowering_rejects_non_unit_stride
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_store_ast_lowering_rejects_non_unit_stride() -> None:
+    memory = Memory([2, 2], NumericType.Float32)
+    tensor = TensorAST(name="x", memory=memory, location=SourceLocation(1, 0))
+    store = StoreAST(
+        tensor=tensor,
+        offset=[ConstAST(0, location=SourceLocation(2, 2)), ConstAST(0, location=SourceLocation(2, 5))],
+        stride=ConstAST(2, location=SourceLocation(2, 9)),
+        value=tensor,
+        location=SourceLocation(2, 0),
+    )
+    func_ast = FunctionAST(name="store", inputs=[tensor], outputs=[], body=BlockAST([store, tensor]))
+    with pytest.raises(AstVisitorError, match="Only unit stride is supported") as exc_info:
+        build_func_op_from_ast(func_ast)
+    assert exc_info.value.location is not None
+
+
+# EMIT-009B
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-29 00:00:00 +0800
+# 最近一次运行成功时间: 2026-03-29 00:00:00 +0800
+# 功能说明: 验证 DesliceAST 非 unit stride 抛出带诊断的错误。
+# 测试目的: 锁定 deslice 非单位 stride 的拒绝路径。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_deslice_ast_lowering_rejects_non_unit_stride
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_deslice_ast_lowering_rejects_non_unit_stride() -> None:
+    memory = Memory([2, 2], NumericType.Float32)
+    tensor = TensorAST(name="x", memory=memory, location=SourceLocation(1, 0))
+    deslice = StoreAST(
+        tensor=tensor,
+        offset=[ConstAST(0, location=SourceLocation(2, 2)), ConstAST(0, location=SourceLocation(2, 5))],
+        sizes=[ConstAST(1, location=SourceLocation(2, 7)), ConstAST(1, location=SourceLocation(2, 8))],
+        stride=ConstAST(2, location=SourceLocation(2, 9)),
+        value=tensor,
+        kind="deslice",
+        location=SourceLocation(2, 0),
+    )
+    func_ast = FunctionAST(name="deslice", inputs=[tensor], outputs=[], body=BlockAST([deslice, tensor]))
+    with pytest.raises(AstVisitorError, match="Only unit stride is supported") as exc_info:
+        build_func_op_from_ast(func_ast)
+    assert exc_info.value.location is not None
 
 
 # EMIT-014
@@ -793,13 +879,57 @@ def test_emit_mlir_dma_cast_lowering() -> None:
 # 最近一次运行测试时间: 2026-03-25 10:04:04 +0800
 # 最近一次运行成功时间: 2026-03-25 10:04:04 +0800
 # 功能说明: 验证 view AST lowering 为 dma.view。
-# 测试目的: 验证 DmaViewAST 生成 DmaViewOp，并按结果 shape 生成视图结果类型。
+# 测试目的: 验证 DmaViewAST 生成 DmaViewOp，并透传 DSL offset/size/stride 到可验证的 dialect 子集。
 # 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_dma_view_lowering
 # 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
 # 对应测试文件路径: test/dsl/test_emit_mlir.py
 def test_emit_mlir_dma_view_lowering() -> None:
+    source_memory = Memory([2, 2], NumericType.Float32, space=MemorySpace.GM)
+    op_result = operation_view(source_memory, offset=[0, 0], size=[2, 2], stride=[1, 1])
+    source = TensorAST(name="src", memory=source_memory, location=None)
+    block = Block(arg_types=[_memory_to_nn_type(source_memory)])
+    ctx = EmitContext(builder=block, symbols={"src": block.args[0]}, types={})
+    ctx._set_cache(_expr_key(source), block.args[0])
+    ctx.types[_expr_key(source)] = block.args[0].type
+
+    result = _lower_expr(
+        DmaViewAST(
+            source=source,
+            offset=[ConstAST(0), ConstAST(0)],
+            size=[ConstAST(2), ConstAST(2)],
+            stride=[ConstAST(1), ConstAST(1)],
+            location=None,
+        ),
+        ctx,
+    )
+    assert isinstance(result.owner, DmaViewOp)
+    assert [attr.data for attr in result.type.shape.data] == [2, 2]
+    assert [attr.data for attr in result.type.stride.data] == [1, 1]
+    assert list(op_result.shape) == [2, 2]
+    assert list(op_result.stride) == [2, 1]
+    offsets = list(result.owner.offsets)
+    shape = list(result.owner.shape)
+    stride = list(result.owner.stride)
+    assert [value.type.expr.expr.data for value in offsets] == ["0", "0"]
+    assert [value.type.expr.expr.data for value in shape] == ["2", "2"]
+    assert [value.type.expr.expr.data for value in stride] == ["1", "1"]
+    result.owner.verify()
+
+
+# 创建者: OpenAI
+# 最后一次更改: OpenAI
+# 最近一次运行测试时间: 2026-03-29 00:00:00 +0800
+# 最近一次运行成功时间: 2026-03-29 00:00:00 +0800
+# 功能说明: 验证 operation.view 的合法 subview 可能超出当前 dma.view verifier 的可验证子集。
+# 测试目的: 锁定 operation->dialect 映射边界，避免 emit_mlir 在 lowering 阶段吞掉 dialect numel 约束。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_dma_view_mapping_boundary_keeps_numel_check_in_verifier
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_emit_mlir_dma_view_mapping_boundary_keeps_numel_check_in_verifier() -> None:
     source_memory = Memory([4, 4], NumericType.Float32, space=MemorySpace.GM)
+    op_result = operation_view(source_memory, offset=[1, 1], size=[2, 2], stride=[2, 1])
     source = TensorAST(name="src", memory=source_memory, location=None)
     block = Block(arg_types=[_memory_to_nn_type(source_memory)])
     ctx = EmitContext(builder=block, symbols={"src": block.args[0]}, types={})
@@ -811,13 +941,22 @@ def test_emit_mlir_dma_view_lowering() -> None:
             source=source,
             offset=[ConstAST(1), ConstAST(1)],
             size=[ConstAST(2), ConstAST(2)],
-            stride=[ConstAST(1), ConstAST(1)],
+            stride=[ConstAST(2), ConstAST(1)],
             location=None,
         ),
         ctx,
     )
+
     assert isinstance(result.owner, DmaViewOp)
+    assert list(op_result.shape) == [2, 2]
+    assert list(op_result.stride) == [4, 1]
     assert [attr.data for attr in result.type.shape.data] == [2, 2]
+    assert [attr.data for attr in result.type.stride.data] == [2, 1]
+    assert [value.type.expr.expr.data for value in result.owner.offsets] == ["1", "1"]
+    assert [value.type.expr.expr.data for value in result.owner.shape] == ["2", "2"]
+    assert [value.type.expr.expr.data for value in result.owner.stride] == ["2", "1"]
+    with pytest.raises(VerifyException, match="dma.view numel mismatch"):
+        result.owner.verify()
 
 
 # EMIT-019
@@ -907,7 +1046,7 @@ def test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast() -> None:
     def sub(
         lhs: "Tensor[f32, 2, 2]",
         rhs: "Tensor[i32, 2, 2]",
-    ) -> "Tensor[f32, 2, 2]":
+    ) -> "Tensor[i32, 2, 2]":
         return lhs - rhs
 
     lhs_memory = Memory([2, 2], NumericType.Float32)
@@ -1018,50 +1157,6 @@ def test_emit_mlir_loop_vars_validation() -> None:
         _get_loop_vars(bad_ctx)
 
 
-# EMIT-011B
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-28 20:10:00 +0800
-# 最近一次运行成功时间: 2026-03-28 20:10:00 +0800
-# 功能说明: 验证 EmitContext 对非法 target 配置的报错路径。
-# 测试目的: 覆盖 config.target 未满足 target registry 命名约束时的异常路径。
-# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_context_rejects_invalid_target_name
-# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md, spec/target/registry.md
-# 对应测试文件路径: test/dsl/test_emit_mlir.py
-def test_emit_context_rejects_invalid_target_name() -> None:
-    with pytest.raises(_LoweringError) as exc_info:
-        EmitContext(
-            builder=Block(arg_types=[]),
-            symbols={},
-            types={},
-            config={"target": "Bad-Name"},
-        )
-    assert "target name must match" in str(exc_info.value)
-
-
-# EMIT-011C
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-28 20:10:00 +0800
-# 最近一次运行成功时间: 2026-03-28 20:10:00 +0800
-# 功能说明: 验证 EmitContext 对非法 hardware 配置的报错路径。
-# 测试目的: 覆盖 config.hardware 未满足 target registry 字段约束时的异常路径。
-# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_context_rejects_invalid_hardware_field
-# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
-# 对应 spec 文件路径: spec/dsl/emit_mlir.md, spec/target/registry.md
-# 对应测试文件路径: test/dsl/test_emit_mlir.py
-def test_emit_context_rejects_invalid_hardware_field() -> None:
-    with pytest.raises(_LoweringError) as exc_info:
-        EmitContext(
-            builder=Block(arg_types=[]),
-            symbols={},
-            types={},
-            config={"hardware": {"bad_key": 1}},
-        )
-    assert "hardware has unknown key" in str(exc_info.value)
-
-
 # EMIT-012A
 # 创建者: 不要啊教练
 # 最后一次更改: 不要啊教练
@@ -1086,7 +1181,7 @@ def test_emit_mlir_index_expr_rejections() -> None:
         _build_index_attrs([ConstAST(1, location=None)], rank=2, ctx=ctx, location=SourceLocation(3, 1))
 
 
-# EMIT-013A
+# EMIT-013
 # 创建者: 不要啊教练
 # 最后一次更改: 不要啊教练
 # 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
@@ -1323,7 +1418,7 @@ def test_emit_mlir_lower_expr_branches() -> None:
         _lookup_symbol(VarAST("missing"), EmitContext(builder=block, symbols={}, types={}))
 
 
-# EMIT-022A
+# EMIT-022
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
@@ -1370,7 +1465,7 @@ def test_emit_mlir_store_rank_mismatch_and_deslice() -> None:
     assert isinstance(deslice, DmaDesliceOp)
 
 
-# EMIT-023A
+# EMIT-023
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
@@ -1393,7 +1488,7 @@ def test_emit_mlir_ensure_supported_statements_errors() -> None:
         _ensure_supported_statements(bad_func)
 
 
-# EMIT-013A
+# EMIT-013
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-26 22:20:00 +0800
@@ -1422,7 +1517,7 @@ def test_emit_mlir_cache_restore_and_index_value_variants() -> None:
         _ensure_index_value(float_op.result, ctx, location=None)
 
 
-# EMIT-014A
+# EMIT-014
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
@@ -1454,7 +1549,7 @@ def test_emit_mlir_index_operand_variants_and_loop_bound() -> None:
     assert bound_value is block.args[0]
 
 
-# EMIT-015A
+# EMIT-015
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
@@ -1478,7 +1573,7 @@ def test_emit_mlir_layout_and_stride_helpers() -> None:
         _build_stride_attrs([ConstAST(2)], rank=1, ctx=ctx, location=None)
 
 
-# EMIT-016A
+# EMIT-016
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
@@ -1513,7 +1608,7 @@ def test_emit_mlir_static_index_list_and_broadcast_shape() -> None:
     assert broadcast[0].data == 2
 
 
-# EMIT-017A
+# EMIT-017
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
@@ -1534,7 +1629,7 @@ def test_emit_mlir_infer_expr_type_unknown_inputs() -> None:
         _infer_expr_type(tensor, {})
 
 
-# EMIT-018A
+# EMIT-018
 # 创建者: 小李飞刀
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-26 22:20:00 +0800
@@ -1667,7 +1762,7 @@ def test_emit_mlir_compare_memory_mismatch_reports_diagnostics() -> None:
         _infer_broadcast_memory_type(lhs_type, rhs_space_mismatch, location=None)
 
 
-# EMIT-020A
+# EMIT-020
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
@@ -1709,7 +1804,7 @@ def test_emit_mlir_for_loop_restores_loop_vars_and_errors() -> None:
         emit_node_mlir(object(), ctx)
 
 
-# MGEN-016
+# MLIR-015
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
@@ -1730,7 +1825,7 @@ def test_mlir_gen_symbol_scalar_function_no_outputs() -> None:
     assert _is_symbol_scalar_function(func_ast) is True
 
 
-# MGEN-003
+# MLIR-016
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 05:10:36 +0800

@@ -36,24 +36,6 @@ from xdsl.utils.exceptions import VerifyException
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolValueType
 
-_ERROR_TEMPLATE = "场景: {scene}; 期望: {expected}; 实际: {actual}; 建议动作: {action}"
-_ERROR_ACTION = "请按接口约束传参"
-_ERROR_ACTUAL = "不满足期望"
-_ERROR_SCENE = "dialect.dma verifier"
-
-
-def _raise_verify_error(expected: str, *, actual: str = _ERROR_ACTUAL) -> None:
-    """统一抛出 dma dialect verifier 错误。"""
-
-    raise VerifyException(
-        _ERROR_TEMPLATE.format(
-            scene=_ERROR_SCENE,
-            expected=expected,
-            actual=actual,
-            action=_ERROR_ACTION,
-        )
-    )
-
 
 def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
     """校验并返回 nn.memory type。
@@ -74,7 +56,7 @@ def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
     """
 
     if not isinstance(value, NnMemoryType):
-        _raise_verify_error(f"{field_name} must be nn.memory")
+        raise VerifyException(f"{field_name} must be nn.memory")
     value.verify()
     return value
 
@@ -151,11 +133,11 @@ def _verify_symbol_int_operands(
 
     for value in values:
         if not isinstance(value.type, SymbolValueType):
-            _raise_verify_error(f"{field_name} entries must be !symbol.int")
+            raise VerifyException(f"{field_name} entries must be !symbol.int")
         value.type.verify()
         static_value = _operand_int_value(value)
         if static_value is not None and static_value < min_value:
-            _raise_verify_error(f"{field_name} entries must be >= {min_value}")
+            raise VerifyException(f"{field_name} entries must be >= {min_value}")
     return values
 
 
@@ -178,7 +160,7 @@ def _verify_rank_match(values: Sequence[SSAValue], rank: int, field_name: str) -
     """
 
     if len(values) != rank:
-        _raise_verify_error(f"{field_name} length must match rank")
+        raise VerifyException(f"{field_name} length must match rank")
 
 
 def _verify_operands_match_layout(
@@ -208,7 +190,7 @@ def _verify_operands_match_layout(
         if isinstance(expected, IntAttr):
             static_value = _operand_int_value(value)
             if static_value != expected.data:
-                _raise_verify_error(mismatch_message)
+                raise VerifyException(mismatch_message)
 
 
 def _verify_unit_stride_operands(strides: Sequence[SSAValue]) -> None:
@@ -232,44 +214,7 @@ def _verify_unit_stride_operands(strides: Sequence[SSAValue]) -> None:
 
     for value in strides:
         if _operand_int_value(value) != 1:
-            _raise_verify_error("dma stride must be 1 in current implementation")
-
-
-def _verify_view_offsets_within_bounds(
-    offsets: Sequence[SSAValue],
-    shape: Sequence[SSAValue],
-    strides: Sequence[SSAValue],
-    source_shape: ArrayAttr[Attribute],
-) -> None:
-    """校验 dma.view 的 offsets/shape/stride 不越界。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 若 offsets/shape/stride 与 source.shape 可静态解析，则验证
-      `offset + (size - 1) * stride < source.shape`。
-    - 动态维度或符号表达式无法静态判定时跳过。
-
-    使用示例:
-    - _verify_view_offsets_within_bounds(offsets, shape, strides, source_type.shape)
-
-    关联文件:
-    - spec: spec/dialect/dma.md
-    - test: test/dialect/test_dma_dialect.py
-    - 功能实现: kernel_gen/dialect/dma.py
-    """
-
-    for offset, size, stride, source_dim in zip(offsets, shape, strides, source_shape.data, strict=True):
-        if not isinstance(source_dim, IntAttr):
-            continue
-        offset_value = _operand_int_value(offset)
-        size_value = _operand_int_value(size)
-        stride_value = _operand_int_value(stride)
-        if offset_value is None or size_value is None or stride_value is None:
-            continue
-        if offset_value + (size_value - 1) * stride_value >= source_dim.data:
-            raise VerifyException("dma.view offset out of bounds")
+            raise VerifyException("dma stride must be 1 in current implementation")
 
 
 def _maybe_numel(shape: ArrayAttr[Attribute]) -> int | None:
@@ -296,6 +241,43 @@ def _maybe_numel(shape: ArrayAttr[Attribute]) -> int | None:
             return None
         numel *= dim.data
     return numel
+
+
+def _verify_static_view_bounds(
+    source_shape: ArrayAttr[Attribute],
+    offsets: Sequence[SSAValue],
+    shape: Sequence[SSAValue],
+    stride: Sequence[SSAValue],
+) -> None:
+    """校验 dma.view 可静态判定的边界约束。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 当 `source.shape` 与 `offsets/shape/stride` 都可静态恢复时，执行
+      `offset + (size - 1) * stride < dim` 检查。
+
+    使用示例:
+    - _verify_static_view_bounds(source_type.shape, op.offsets, op.shape, op.stride)
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma_dialect.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    for index, source_dim in enumerate(source_shape.data):
+        if not isinstance(source_dim, IntAttr):
+            continue
+        offset_value = _operand_int_value(offsets[index])
+        size_value = _operand_int_value(shape[index])
+        stride_value = _operand_int_value(stride[index])
+        if offset_value is None or size_value is None or stride_value is None:
+            continue
+        last_index = offset_value + (size_value - 1) * stride_value
+        if last_index >= source_dim.data:
+            raise VerifyException("dma.view bounds mismatch")
 
 
 def _default_contiguous_stride(shape: ArrayAttr[Attribute]) -> list[Attribute]:
@@ -405,7 +387,7 @@ def _verify_default_contiguous_stride(memory_type: NnMemoryType, message: str) -
     """
 
     if not _is_contiguous(memory_type):
-        _raise_verify_error(message)
+        raise VerifyException(message)
 
 
 @irdl_op_definition
@@ -567,11 +549,11 @@ class DmaCopyOp(IRDLOperation):
         source_type = _verify_memory_type(self.source.type, "source")
         target_type = _verify_memory_type(self.target.type, "target")
         if source_type.shape != target_type.shape:
-            _raise_verify_error("dma.copy source/target shape mismatch")
+            raise VerifyException("dma.copy source/target shape mismatch")
         if source_type.stride != target_type.stride:
-            _raise_verify_error("dma.copy source/target stride mismatch")
+            raise VerifyException("dma.copy source/target stride mismatch")
         if source_type.element_type != target_type.element_type:
-            _raise_verify_error("dma.copy source/target element_type mismatch")
+            raise VerifyException("dma.copy source/target element_type mismatch")
 
 
 @irdl_op_definition
@@ -652,10 +634,10 @@ class DmaLoadOp(IRDLOperation):
         _verify_unit_stride_operands(strides)
         _verify_operands_match_layout(sizes, result_type.shape, "shape must match sizes")
         if source_type.element_type != result_type.element_type:
-            _raise_verify_error("dma.load element_type mismatch")
+            raise VerifyException("dma.load element_type mismatch")
         self.space.verify()
         if result_type.space.space.data != self.space.space.data:
-            _raise_verify_error("dma.load space attribute must match result space")
+            raise VerifyException("dma.load space attribute must match result space")
 
 
 @irdl_op_definition
@@ -730,7 +712,7 @@ class DmaStoreOp(IRDLOperation):
         _verify_unit_stride_operands(strides)
         _verify_operands_match_layout(sizes, source_type.shape, "source shape must match sizes")
         if source_type.element_type != target_type.element_type:
-            _raise_verify_error("dma.store element_type mismatch")
+            raise VerifyException("dma.store element_type mismatch")
 
 
 @irdl_op_definition
@@ -812,10 +794,10 @@ class DmaSliceOp(IRDLOperation):
         _verify_unit_stride_operands(strides)
         _verify_operands_match_layout(sizes, result_type.shape, "shape must match sizes")
         if source_type.element_type != result_type.element_type:
-            _raise_verify_error("dma.slice element_type mismatch")
+            raise VerifyException("dma.slice element_type mismatch")
         self.space.verify()
         if result_type.space.space.data != self.space.space.data:
-            _raise_verify_error("dma.slice space attribute must match result space")
+            raise VerifyException("dma.slice space attribute must match result space")
 
 
 @irdl_op_definition
@@ -897,9 +879,9 @@ class DmaDesliceOp(IRDLOperation):
         _verify_unit_stride_operands(strides)
         _verify_operands_match_layout(sizes, source_type.shape, "source shape must match sizes")
         if source_type.element_type != target_type.element_type:
-            _raise_verify_error("dma.deslice element_type mismatch")
+            raise VerifyException("dma.deslice element_type mismatch")
         if result_type != target_type:
-            _raise_verify_error("dma.deslice result must match target type")
+            raise VerifyException("dma.deslice result must match target type")
 
 
 @irdl_op_definition
@@ -927,7 +909,7 @@ class DmaViewOp(IRDLOperation):
         """初始化 dma.view。
 
         创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
+        最后一次更改: OpenAI
 
         功能说明:
         - 设置 source、动态 offsets/shape/stride operand 与结果类型。
@@ -941,18 +923,22 @@ class DmaViewOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
+        if not isinstance(result_type, NnMemoryType):
+            raise TypeError("result_type must be nn.memory")
+
         super().__init__(operands=[source, offsets, shape, stride], result_types=[result_type])
 
     def verify_(self) -> None:
         """校验 dma.view。
 
         创建者: 金铲铲大作战
-        最后一次更改: 朽木露琪亚
+        最后一次更改: OpenAI
 
         功能说明:
         - element_type/space 必须一致。
+        - `offsets`/`shape`/`stride` 必须是 `!symbol.int<"expr">` 且长度与 rank 一致。
+        - 当边界可静态判定时，必须满足 `offset + (size - 1) * stride < dim`。
         - 可判定 numel 不一致必须报错。
-        - source/result 的 rank 必须一致。
 
         使用示例:
         - DmaViewOp(...).verify_()
@@ -977,15 +963,15 @@ class DmaViewOp(IRDLOperation):
         _verify_operands_match_layout(shape, result_type.shape, "shape must match result shape")
         _verify_operands_match_layout(stride, result_type.stride, "stride must match result stride")
         if source_type.element_type != result_type.element_type:
-            _raise_verify_error("dma.view element_type mismatch")
+            raise VerifyException("dma.view element_type mismatch")
         if source_type.space.space.data != result_type.space.space.data:
-            _raise_verify_error("dma.view space mismatch")
+            raise VerifyException("dma.view space mismatch")
 
         source_numel = _maybe_numel(source_type.shape)
         result_numel = _maybe_numel(result_type.shape)
         if source_numel is not None and result_numel is not None and source_numel != result_numel:
-            _raise_verify_error("dma.view numel mismatch")
-        _verify_view_offsets_within_bounds(offsets, shape, stride, source_type.shape)
+            raise VerifyException("dma.view numel mismatch")
+        _verify_static_view_bounds(source_type.shape, offsets, shape, stride)
 
 
 @irdl_op_definition
@@ -1051,17 +1037,17 @@ class DmaReshapeOp(IRDLOperation):
         _verify_rank_match(shape, len(result_type.shape.data), "shape")
         _verify_operands_match_layout(shape, result_type.shape, "shape must match result shape")
         if source_type.element_type != result_type.element_type:
-            _raise_verify_error("dma.reshape element_type mismatch")
+            raise VerifyException("dma.reshape element_type mismatch")
         if source_type.space.space.data != result_type.space.space.data:
-            _raise_verify_error("dma.reshape space mismatch")
+            raise VerifyException("dma.reshape space mismatch")
 
         source_numel = _maybe_numel(source_type.shape)
         result_numel = _maybe_numel(result_type.shape)
         if source_numel is not None and result_numel is not None and source_numel != result_numel:
-            _raise_verify_error("dma.reshape numel mismatch")
+            raise VerifyException("dma.reshape numel mismatch")
 
         if not _is_contiguous(source_type):
-            _raise_verify_error("dma.reshape requires contiguous source")
+            raise VerifyException("dma.reshape requires contiguous source")
 
         _verify_default_contiguous_stride(result_type, "dma.reshape requires contiguous result stride")
 
@@ -1116,11 +1102,11 @@ class DmaCastOp(IRDLOperation):
         source_type = _verify_memory_type(self.source.type, "source")
         result_type = _verify_memory_type(self.result.type, "result")
         if source_type.shape != result_type.shape:
-            _raise_verify_error("dma.cast shape mismatch")
+            raise VerifyException("dma.cast shape mismatch")
         if source_type.stride != result_type.stride:
-            _raise_verify_error("dma.cast stride mismatch")
+            raise VerifyException("dma.cast stride mismatch")
         if source_type.space.space.data != result_type.space.space.data:
-            _raise_verify_error("dma.cast space mismatch")
+            raise VerifyException("dma.cast space mismatch")
 
 
 class Dma(Dialect):

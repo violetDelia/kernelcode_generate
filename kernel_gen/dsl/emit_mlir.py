@@ -34,7 +34,6 @@ from xdsl.dialects.builtin import (
     UnrealizedConversionCastOp,
     f32,
     i1,
-    i8,
     i32,
 )
 from xdsl.ir import Attribute, Block, SSAValue
@@ -42,19 +41,15 @@ from xdsl.ir import Attribute, Block, SSAValue
 from kernel_gen.dialect.arch import (
     ArchGetBlockIdOp,
     ArchGetBlockNumOp,
-    ArchGetDynamicMemoryOp,
     ArchGetSubthreadIdOp,
     ArchGetSubthreadNumOp,
     ArchGetThreadIdOp,
-    ArchGetThreadNumOp,
-    ArchLaunchKernelOp,
 )
 from kernel_gen.dialect.dma import (
     DmaAllocOp,
     DmaCastOp,
     DmaCopyOp,
     DmaDesliceOp,
-    DmaFreeOp,
     DmaLoadOp,
     DmaReshapeOp,
     DmaSliceOp,
@@ -84,7 +79,6 @@ from kernel_gen.dialect.symbol import (
     SymbolFloorDivOp,
     SymbolForOp,
     SymbolGetDimOp,
-    SymbolGetStrideOp,
     SymbolMulOp,
     SymbolSubOp,
     SymbolValueType,
@@ -93,11 +87,8 @@ from kernel_gen.dialect.symbol import (
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
-from kernel_gen.target import registry
 
 from .ast import (
-    ArchGetDynamicMemoryAST,
-    ArchLaunchKernelAST,
     ArchQueryAST,
     BinaryExprAST,
     BlockAST,
@@ -129,13 +120,6 @@ _MEMORY_SPACE_MAP = {
     MemorySpace.TLM: "local",
 }
 
-_DYNAMIC_MEMORY_SPACE_MAP = {
-    MemorySpace.SM: "shared",
-    MemorySpace.LM: "local",
-    MemorySpace.TSM: "tsm",
-    MemorySpace.TLM: "tlm",
-}
-
 
 class _LoweringError(ValueError):
     """lowering/emit 阶段错误。"""
@@ -143,48 +127,6 @@ class _LoweringError(ValueError):
     def __init__(self: "_LoweringError", message: str, location: SourceLocation | None = None) -> None:
         super().__init__(message)
         self.location = location
-
-
-def _validate_emit_context_config(config: dict[str, object] | None) -> None:
-    """校验 EmitContext.config 中的 target/hardware 字段。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 当 config 中包含 target/hardware 时，校验其类型与字段约束。
-    - 约束规则与 spec/target/registry.md 一致，仅做字段合法性检查。
-
-    使用示例:
-    - _validate_emit_context_config({"target": "gpu_a", "hardware": {"thread_num": 256}})
-
-    关联文件:
-    - spec: spec/dsl/emit_mlir.md, spec/target/registry.md
-    - test: test/dsl/test_emit_mlir.py
-    - 功能实现: kernel_gen/dsl/emit_mlir.py
-    """
-    if config is None:
-        return
-    if not isinstance(config, dict):
-        raise _LoweringError("EmitContext config must be dict or None")
-    if "target" in config:
-        target = config["target"]
-        if not isinstance(target, str):
-            raise _LoweringError("EmitContext target must be str")
-        try:
-            registry._validate_target_name(target)
-        except ValueError as exc:
-            raise _LoweringError(str(exc)) from exc
-    if "hardware" in config:
-        hardware = config["hardware"]
-        if not isinstance(hardware, dict):
-            raise _LoweringError("EmitContext hardware must be dict[str, int]")
-        target_name = config.get("target")
-        target_label = target_name if isinstance(target_name, str) else "emit_context"
-        try:
-            registry._validate_hardware_map(hardware, target_label)
-        except ValueError as exc:
-            raise _LoweringError(str(exc)) from exc
 
 
 class EmitContext:
@@ -197,7 +139,6 @@ class EmitContext:
         types: dict[int, object],
         config: dict[str, object] | None = None,
     ) -> None:
-        _validate_emit_context_config(config)
         self.builder = builder
         self.symbols = symbols
         self.types = types
@@ -247,8 +188,6 @@ def _dtype_to_xdsl(dtype: NumericType, location: SourceLocation | None = None) -
         return Float16Type()
     if dtype is NumericType.Float32:
         return f32
-    if dtype is NumericType.Int8:
-        return i8
     if dtype is NumericType.Int32:
         return i32
     if dtype is NumericType.Bool:
@@ -278,8 +217,6 @@ def _xdsl_to_dtype(element_type: Attribute, location: SourceLocation | None = No
         return NumericType.Float16
     if element_type == f32:
         return NumericType.Float32
-    if element_type == i8:
-        return NumericType.Int8
     if element_type == i32:
         return NumericType.Int32
     if element_type == i1:
@@ -368,64 +305,6 @@ def _const_index(value: int, ctx: EmitContext) -> SSAValue:
     return op.result
 
 
-def _cast_to_symbol_int(
-    value: SSAValue,
-    ctx: EmitContext,
-    expr: str,
-    location: SourceLocation | None,
-) -> SSAValue:
-    """将 SSAValue 转换为指定表达式的 !symbol.int<"expr">。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 若已是 SymbolValueType，则直接返回。
-    - 否则通过 UnrealizedConversionCastOp 生成 !symbol.int<"expr">。
-
-    使用示例:
-    - _cast_to_symbol_int(value, ctx, "M", location)
-
-    关联文件:
-    - spec: spec/dsl/emit_mlir.md
-    - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/emit_mlir.py
-    """
-
-    if isinstance(value.type, SymbolValueType):
-        return value
-    if not isinstance(value.type, (IndexType, IntegerType)):
-        raise _LoweringError("Index operand must be integer or index", location=location)
-    result_type = SymbolValueType.from_expr(expr)
-    op = UnrealizedConversionCastOp(operands=[value], result_types=[result_type])
-    ctx.builder.add_op(op)
-    return op.results[0]
-
-
-def _const_symbol_int(value: int, ctx: EmitContext, location: SourceLocation | None) -> SSAValue:
-    """构造 !symbol.int<"expr"> 常量 SSA value。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 先创建 i32 常量，再转换为 !symbol.int<"expr">。
-
-    使用示例:
-    - _const_symbol_int(4, ctx, location)
-
-    关联文件:
-    - spec: spec/dsl/emit_mlir.md
-    - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/emit_mlir.py
-    """
-
-    attr = IntegerAttr(value, i32)
-    op = arith.ConstantOp(attr)
-    ctx.builder.add_op(op)
-    return _cast_to_symbol_int(op.result, ctx, str(value), location)
-
-
 def _ensure_index_value(value: SSAValue, ctx: EmitContext, location: SourceLocation | None) -> SSAValue:
     if isinstance(value.type, SymbolValueType):
         return value
@@ -438,63 +317,11 @@ def _ensure_index_value(value: SSAValue, ctx: EmitContext, location: SourceLocat
     raise _LoweringError("Index operand must be integer or index", location=location)
 
 
-def _materialize_index_symbol_from_memory(
-    name: str,
-    ctx: EmitContext,
-    location: SourceLocation | None,
-) -> SSAValue | None:
-    """从上下文 memory 值中物化符号索引。
-
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 当 `ctx.symbols` 缺少目标符号时，尝试在已知 `nn.memory` 的 shape/stride 中查找同名符号。
-    - 命中 shape 时生成 `symbol.get_dim`，命中 stride 时生成 `symbol.get_stride`，并写回 `ctx.symbols` 缓存。
-
-    使用示例:
-    - _materialize_index_symbol_from_memory("M", ctx, location)
-
-    关联文件:
-    - spec: spec/dsl/emit_mlir.md
-    - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/emit_mlir.py
-    """
-
-    for candidate in ctx.symbols.values():
-        if not isinstance(candidate, SSAValue):
-            continue
-        candidate_type = candidate.type
-        if not isinstance(candidate_type, NnMemoryType):
-            continue
-        for axis, dim in enumerate(candidate_type.shape.data):
-            if isinstance(dim, StringAttr) and dim.data == name:
-                op = SymbolGetDimOp(candidate, IntAttr(axis))
-                ctx.builder.add_op(op)
-                ctx.symbols[name] = op.result
-                return op.result
-        for axis, stride in enumerate(candidate_type.stride.data):
-            if isinstance(stride, StringAttr) and stride.data == name:
-                op = SymbolGetStrideOp(candidate, IntAttr(axis))
-                ctx.builder.add_op(op)
-                ctx.symbols[name] = op.result
-                return op.result
-    return None
-
-
 def _resolve_index_symbol(name: str, ctx: EmitContext, location: SourceLocation | None) -> SSAValue:
     if name not in ctx.symbols:
-        materialized = _materialize_index_symbol_from_memory(name, ctx, location)
-        if materialized is None:
-            raise _LoweringError("Unknown index symbol", location=location)
+        raise _LoweringError("Unknown index symbol", location=location)
     value = ctx.symbols[name]
-    if not isinstance(value, SSAValue):
-        raise _LoweringError("Index symbol must be SSA value", location=location)
-    if isinstance(value.type, SymbolValueType):
-        return value
-    if isinstance(value.type, (IndexType, IntegerType)):
-        return _ensure_index_value(value, ctx, location)
-    return _cast_to_symbol_int(value, ctx, name, location)
+    return _ensure_index_value(value, ctx, location)
 
 
 def _split_symbol_multiplication(expr: str) -> list[str] | None:
@@ -550,9 +377,9 @@ def _resolve_index_symbol_product(expr: str, ctx: EmitContext, location: SourceL
         raise _LoweringError("Unsupported index expression", location=location)
     if len(parts) == 1:
         return _resolve_index_symbol(parts[0], ctx, location)
-    current = _cast_to_symbol_int(_resolve_index_symbol(parts[0], ctx, location), ctx, parts[0], location)
+    current = _resolve_index_symbol(parts[0], ctx, location)
     for part in parts[1:]:
-        rhs = _cast_to_symbol_int(_resolve_index_symbol(part, ctx, location), ctx, part, location)
+        rhs = _resolve_index_symbol(part, ctx, location)
         rhs_expr = rhs.type.expr.expr.data
         result_type = SymbolValueType.from_expr(build_public_symbol_expr(current.type.expr.expr.data, rhs_expr, "*"))
         op = SymbolMulOp(current, rhs, result_type)
@@ -570,8 +397,6 @@ def _resolve_index_operand(expr: object, ctx: EmitContext, location: SourceLocat
         raise _LoweringError("Index must be int or str", location=expr.location)
     if isinstance(expr, (ScalarArgAST, VarAST)):
         value = _lookup_symbol(expr, ctx)
-        if not isinstance(value, SSAValue):
-            raise _LoweringError("Index operand must be SSA value", location=expr.location)
         return _ensure_index_value(value, ctx, expr.location)
     if isinstance(expr, int):
         return _const_index(expr, ctx)
@@ -710,10 +535,6 @@ def _build_stride_attrs(
 ) -> list[SSAValue]:
     stride = _build_index_attrs(value, rank, ctx, default_value=1, location=location)
     for entry in stride:
-        if isinstance(entry.type, SymbolValueType):
-            if entry.type.get_value() != 1:
-                raise _LoweringError("Only unit stride is supported", location=location)
-            continue
         owner = entry.owner
         if not isinstance(owner, arith.ConstantOp) or not isinstance(owner.value, IntegerAttr):
             raise _LoweringError("Only unit stride is supported", location=location)
@@ -722,11 +543,7 @@ def _build_stride_attrs(
     return stride
 
 
-def _resolve_static_index_expr(
-    expr: object,
-    location: SourceLocation | None = None,
-    runtime_values: dict[str, object] | None = None,
-) -> int | str:
+def _resolve_static_index_expr(expr: object, location: SourceLocation | None = None) -> int | str:
     """解析类型推导阶段使用的索引表达式。
 
     创建者: OpenAI
@@ -748,15 +565,7 @@ def _resolve_static_index_expr(
         if isinstance(expr.value, (int, str)):
             return expr.value
         raise _LoweringError("Index must be int or str", location=expr.location)
-    if isinstance(expr, ScalarArgAST):
-        if runtime_values is not None and expr.name in runtime_values:
-            runtime_value = runtime_values[expr.name]
-            if isinstance(runtime_value, SymbolDim):
-                return str(runtime_value.get_symbol())
-            if isinstance(runtime_value, int):
-                return runtime_value
-        return expr.name
-    if isinstance(expr, VarAST):
+    if isinstance(expr, (ScalarArgAST, VarAST)):
         return expr.name
     if isinstance(expr, (int, str)):
         return expr
@@ -769,7 +578,6 @@ def _build_static_index_list(
     *,
     default_value: int,
     location: SourceLocation | None = None,
-    runtime_values: dict[str, object] | None = None,
 ) -> list[Attribute]:
     """构造类型推导阶段使用的索引属性列表。
 
@@ -793,9 +601,9 @@ def _build_static_index_list(
     elif isinstance(value, (list, tuple)):
         if len(value) != rank:
             raise _LoweringError("Index rank mismatch", location=location)
-        values = [_resolve_static_index_expr(entry, location, runtime_values) for entry in value]
+        values = [_resolve_static_index_expr(entry, location) for entry in value]
     else:
-        scalar = _resolve_static_index_expr(value, location, runtime_values)
+        scalar = _resolve_static_index_expr(value, location)
         values = [scalar for _ in range(rank)]
     return [_dim_to_attr(item) for item in values]
 
@@ -804,7 +612,6 @@ def _build_static_index_attrs_exact(
     value: object,
     *,
     location: SourceLocation | None = None,
-    runtime_values: dict[str, object] | None = None,
 ) -> list[Attribute]:
     """按显式维度列表构造静态索引属性。
 
@@ -824,9 +631,9 @@ def _build_static_index_attrs_exact(
     """
 
     if isinstance(value, (list, tuple)):
-        entries = [_resolve_static_index_expr(entry, location, runtime_values) for entry in value]
+        entries = [_resolve_static_index_expr(entry, location) for entry in value]
     else:
-        entries = [_resolve_static_index_expr(value, location, runtime_values)]
+        entries = [_resolve_static_index_expr(value, location)]
     return [_dim_to_attr(entry) for entry in entries]
 
 
@@ -858,6 +665,50 @@ def _build_index_operands_exact(
     else:
         entries = [value]
     return [_resolve_index_operand(entry, ctx, getattr(entry, "location", None) or location) for entry in entries]
+
+
+def _build_symbol_int_operands_exact(
+    value: object,
+    ctx: EmitContext,
+    *,
+    location: SourceLocation | None = None,
+) -> list[SSAValue]:
+    """按显式维度列表构造 `!symbol.int<"...">` SSA 操作数。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 复用索引解析逻辑拿到原始 SSA 值。
+    - 对 `index`/整数 SSA 通过 `builtin.unrealized_conversion_cast` 物化为 `!symbol.int<"...">`，
+      以满足 `dma.view` 对公开标量语义的 verifier 要求。
+
+    使用示例:
+    - _build_symbol_int_operands_exact([ConstAST(4), ScalarArgAST(name="n", value_type=int)], ctx)
+
+    关联文件:
+    - spec: spec/dsl/emit_mlir.md
+    - test: test/dsl/test_emit_mlir.py
+    - 功能实现: kernel_gen/dsl/emit_mlir.py
+    """
+
+    if isinstance(value, (list, tuple)):
+        entries = list(value)
+    else:
+        entries = [value]
+
+    operands: list[SSAValue] = []
+    for entry in entries:
+        entry_location = getattr(entry, "location", None) or location
+        operand = _resolve_index_operand(entry, ctx, entry_location)
+        if isinstance(operand.type, SymbolValueType):
+            operands.append(operand)
+            continue
+        symbol_expr = _resolve_static_index_expr(entry, entry_location)
+        cast_op = UnrealizedConversionCastOp.get([operand], [SymbolValueType.from_expr(str(symbol_expr))])
+        ctx.builder.add_op(cast_op)
+        operands.append(cast_op.results[0])
+    return operands
 
 
 def _memory_type_from_parts(
@@ -1103,21 +954,6 @@ def _memory_to_nn_type(memory: Memory, location: SourceLocation | None = None) -
     return NnMemoryType(shape_attr, stride_attr, element_type, space)
 
 
-def _build_dynamic_memory_type(
-    space: MemorySpace,
-    location: SourceLocation | None = None,
-) -> NnMemoryType:
-    space_name = _DYNAMIC_MEMORY_SPACE_MAP.get(space)
-    if space_name is None:
-        raise _LoweringError("get_dynamic_memory space must be on-chip MemorySpace", location=location)
-    return NnMemoryType(
-        ArrayAttr([StringAttr("?")]),
-        ArrayAttr([IntAttr(1)]),
-        i8,
-        NnMemorySpaceAttr.from_name(space_name),
-    )
-
-
 def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
     statements = function_ast.body.statements
     if not statements:
@@ -1142,8 +978,6 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
                 DmaFlattenAST,
                 DmaFreeAST,
                 ForAST,
-                ArchGetDynamicMemoryAST,
-                ArchLaunchKernelAST,
                 ArchQueryAST,
             ),
         ):
@@ -1187,24 +1021,16 @@ def _infer_expr_type(
         if expr.sizes is None:
             shape_attr = source_type.shape
         else:
-            shape_attr = ArrayAttr(
-                _build_static_index_list(
-                    expr.sizes,
-                    rank,
-                    default_value=1,
-                    location=expr.location,
-                    runtime_values=runtime_values,
-                )
-            )
+            shape_attr = ArrayAttr(_build_static_index_list(expr.sizes, rank, default_value=1, location=expr.location))
         stride_attr = ArrayAttr(_build_default_stride_attrs(shape_attr.data))
         space_attr = _memory_space_from_ast(expr.space, source_type.space)
         result_type = NnMemoryType(shape_attr, stride_attr, source_type.element_type, space_attr)
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, DmaAllocAST):
-        shape_attr = _build_static_index_attrs_exact(expr.shape, location=expr.location, runtime_values=runtime_values)
+        shape_attr = _build_static_index_attrs_exact(expr.shape, location=expr.location)
         stride_attr = (
-            _build_static_index_attrs_exact(expr.stride, location=expr.location, runtime_values=runtime_values)
+            _build_static_index_attrs_exact(expr.stride, location=expr.location)
             if expr.stride is not None
             else _build_default_stride_attrs(shape_attr)
         )
@@ -1220,7 +1046,7 @@ def _infer_expr_type(
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, DmaCopyAST):
-        source_type = _infer_expr_type(expr.source, type_map, runtime_values=runtime_values)
+        source_type = _infer_expr_type(expr.source, type_map)
         if not isinstance(source_type, NnMemoryType):
             raise _LoweringError("copy source must have nn.memory type", location=expr.location)
         result_type = _memory_type_from_parts(
@@ -1232,7 +1058,7 @@ def _infer_expr_type(
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, DmaCastAST):
-        source_type = _infer_expr_type(expr.source, type_map, runtime_values=runtime_values)
+        source_type = _infer_expr_type(expr.source, type_map)
         if not isinstance(source_type, NnMemoryType):
             raise _LoweringError("cast source must have nn.memory type", location=expr.location)
         result_type = _memory_type_from_parts(
@@ -1244,19 +1070,19 @@ def _infer_expr_type(
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, DmaViewAST):
-        source_type = _infer_expr_type(expr.source, type_map, runtime_values=runtime_values)
+        source_type = _infer_expr_type(expr.source, type_map)
         if not isinstance(source_type, NnMemoryType):
             raise _LoweringError("view source must have nn.memory type", location=expr.location)
-        shape_attr = _build_static_index_attrs_exact(expr.size, location=expr.location, runtime_values=runtime_values)
-        stride_attr = source_type.stride.data
+        shape_attr = _build_static_index_attrs_exact(expr.size, location=expr.location)
+        stride_attr = _build_static_index_attrs_exact(expr.stride, location=expr.location)
         result_type = _memory_type_from_parts(shape_attr, stride_attr, source_type.element_type, source_type.space)
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, DmaReshapeAST):
-        source_type = _infer_expr_type(expr.source, type_map, runtime_values=runtime_values)
+        source_type = _infer_expr_type(expr.source, type_map)
         if not isinstance(source_type, NnMemoryType):
             raise _LoweringError("reshape source must have nn.memory type", location=expr.location)
-        shape_attr = _build_static_index_attrs_exact(expr.shape, location=expr.location, runtime_values=runtime_values)
+        shape_attr = _build_static_index_attrs_exact(expr.shape, location=expr.location)
         result_type = _memory_type_from_parts(
             shape_attr,
             _build_default_stride_attrs(shape_attr),
@@ -1266,7 +1092,7 @@ def _infer_expr_type(
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, DmaFlattenAST):
-        source_type = _infer_expr_type(expr.source, type_map, runtime_values=runtime_values)
+        source_type = _infer_expr_type(expr.source, type_map)
         if not isinstance(source_type, NnMemoryType):
             raise _LoweringError("flatten source must have nn.memory type", location=expr.location)
         shape_attr = [_shape_numel_attr(source_type.shape.data)]
@@ -1279,12 +1105,6 @@ def _infer_expr_type(
         raise _LoweringError("free does not produce a value", location=expr.location)
     if isinstance(expr, ForAST):
         raise _LoweringError("ForAST does not produce a value", location=expr.location)
-    if isinstance(expr, ArchLaunchKernelAST):
-        raise _LoweringError("launch_kernel does not produce a value", location=expr.location)
-    if isinstance(expr, ArchGetDynamicMemoryAST):
-        result_type = _build_dynamic_memory_type(expr.space, location=expr.location)
-        type_map[expr_key] = result_type
-        return result_type
     if isinstance(expr, ArchQueryAST):
         query_map = {
             "get_block_id": "block_id",
@@ -1292,7 +1112,6 @@ def _infer_expr_type(
             "get_subthread_id": "subthread_id",
             "get_subthread_num": "subthread_num",
             "get_thread_id": "thread_id",
-            "get_thread_num": "thread_num",
         }
         symbol_name = query_map.get(expr.query_name)
         if symbol_name is None:
@@ -1302,8 +1121,8 @@ def _infer_expr_type(
         return result_type
 
     if isinstance(expr, BinaryExprAST):
-        lhs_type = _infer_expr_type(expr.lhs, type_map, runtime_values=runtime_values)
-        rhs_type = _infer_expr_type(expr.rhs, type_map, runtime_values=runtime_values)
+        lhs_type = _infer_expr_type(expr.lhs, type_map)
+        rhs_type = _infer_expr_type(expr.rhs, type_map)
         if isinstance(lhs_type, SymbolValueType) and isinstance(rhs_type, SymbolValueType):
             if expr.op not in {"add", "sub", "mul", "div", "floordiv"}:
                 raise _LoweringError("Unsupported symbol binary op", location=expr.location)
@@ -1337,8 +1156,8 @@ def _infer_expr_type(
         return target_type
 
     if isinstance(expr, CompareExprAST):
-        lhs_type = _infer_expr_type(expr.lhs, type_map, runtime_values=runtime_values)
-        rhs_type = _infer_expr_type(expr.rhs, type_map, runtime_values=runtime_values)
+        lhs_type = _infer_expr_type(expr.lhs, type_map)
+        rhs_type = _infer_expr_type(expr.rhs, type_map)
         if isinstance(lhs_type, SymbolValueType) and isinstance(rhs_type, SymbolValueType):
             if expr.op not in {"eq", "ge"}:
                 raise _LoweringError("Unsupported symbol compare op", location=expr.location)
@@ -1457,10 +1276,9 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         result_type = _infer_expr_type(expr, ctx.types)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("view result must be nn.memory", location=expr.location)
-        rank = len(result_type.shape.data)
-        offsets = _build_index_attrs(expr.offset, rank, ctx, location=expr.location)
-        shape = _build_index_operands_exact(expr.size, ctx, location=expr.location)
-        stride = _build_index_operands_from_layout(result_type.stride, ctx, location=expr.location)
+        offsets = _build_symbol_int_operands_exact(expr.offset, ctx, location=expr.location)
+        shape = _build_symbol_int_operands_exact(expr.size, ctx, location=expr.location)
+        stride = _build_symbol_int_operands_exact(expr.stride, ctx, location=expr.location)
         op = DmaViewOp(source, offsets, shape, stride, result_type)
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
@@ -1491,16 +1309,6 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         raise _LoweringError("StoreAST does not produce a value", location=expr.location)
     if isinstance(expr, DmaFreeAST):
         raise _LoweringError("free does not produce a value", location=expr.location)
-    if isinstance(expr, ArchGetDynamicMemoryAST):
-        result_type = _build_dynamic_memory_type(expr.space, location=expr.location)
-        space_name = _DYNAMIC_MEMORY_SPACE_MAP.get(expr.space)
-        if space_name is None:
-            raise _LoweringError("get_dynamic_memory space must be on-chip MemorySpace", location=expr.location)
-        op = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name(space_name), result_type)
-        ctx.builder.add_op(op)
-        ctx._set_cache(expr_key, op.result)
-        ctx.types[expr_key] = op.result.type
-        return op.result
     if isinstance(expr, ArchQueryAST):
         if expr.query_name == "get_block_id":
             op = ArchGetBlockIdOp()
@@ -1512,8 +1320,6 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
             op = ArchGetSubthreadNumOp()
         elif expr.query_name == "get_thread_id":
             op = ArchGetThreadIdOp()
-        elif expr.query_name == "get_thread_num":
-            op = ArchGetThreadNumOp()
         else:
             raise _LoweringError("Unsupported arch query", location=expr.location)
         ctx.builder.add_op(op)
@@ -1657,7 +1463,6 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
             DmaViewAST,
             DmaReshapeAST,
             DmaFlattenAST,
-            ArchGetDynamicMemoryAST,
             ArchQueryAST,
         ),
     ):
@@ -1689,27 +1494,6 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
         value = _lower_expr(node.value, ctx)
         _expect_memory_value(value, node.location)
         return None
-    if isinstance(node, ArchLaunchKernelAST):
-        if not isinstance(node.name, str) or node.name == "":
-            raise _LoweringError("launch_kernel name must be non-empty str", location=node.location)
-        block = _lower_expr(node.block, ctx)
-        thread = _lower_expr(node.thread, ctx)
-        subthread = _lower_expr(node.subthread, ctx)
-
-        def _ensure_symbol_extent(value: SSAValue, dim_name: str) -> None:
-            if not isinstance(value.type, SymbolValueType):
-                raise _LoweringError(f"launch_kernel {dim_name} must be !symbol.int", location=node.location)
-            expr_text = value.type.expr.expr.data
-            if isinstance(expr_text, str) and expr_text.lstrip("-").isdigit():
-                if int(expr_text) <= 0:
-                    raise _LoweringError(f"launch_kernel {dim_name} must be > 0", location=node.location)
-
-        _ensure_symbol_extent(block, "block")
-        _ensure_symbol_extent(thread, "thread")
-        _ensure_symbol_extent(subthread, "subthread")
-        op = ArchLaunchKernelOp(node.name, block, thread, subthread)
-        ctx.builder.add_op(op)
-        return op
     if isinstance(node, ForAST):
         start_value = _lower_loop_bound(node.start, ctx)
         end_value = _lower_loop_bound(node.end, ctx)

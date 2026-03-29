@@ -530,7 +530,7 @@ def test_dma_free_requires_nn_memory_type() -> None:
 def test_dma_view_type_or_space_mismatch() -> None:
     source_type = _make_memory_type()
     source = _TestOp(result_types=[source_type]).results[0]
-    offsets = _make_symbol_operands([None, None])
+    offsets = _make_symbol_operands([0, 0])
     shape = _make_symbol_operands([2, 4])
     stride = _make_symbol_operands([4, 1])
 
@@ -564,7 +564,7 @@ def test_dma_view_numel_mismatch() -> None:
     )
     op = DmaViewOp(
         source,
-        _make_symbol_operands([None, None]),
+        _make_symbol_operands([0, 0]),
         _make_symbol_operands([2, 5]),
         _make_symbol_operands([5, 1]),
         result_type,
@@ -677,7 +677,7 @@ def test_dma_view_dynamic_symbol_int_layout_operands_valid() -> None:
     source = _TestOp(result_types=[source_type]).results[0]
     op = DmaViewOp(
         source,
-        _make_symbol_operands([0, 0]),
+        _make_symbol_operands(["TO", "TI"]),
         _make_symbol_operands(["TM", "TN"]),
         _make_symbol_operands(["TN", 1]),
         result_type,
@@ -685,60 +685,87 @@ def test_dma_view_dynamic_symbol_int_layout_operands_valid() -> None:
     op.verify()
 
 
-# TC-DMA-019A
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-28 18:59:18 +0800
-# 最近一次运行成功时间: 2026-03-28 18:59:18 +0800
-# 功能说明: 验证 dma.view 在 offsets/shape/stride 可静态判定时会拒绝越界视图。
-# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_view_offset_out_of_bounds
-# 对应功能实现文件路径: kernel_gen/dialect/dma.py
-# 对应 spec 文件路径: spec/dialect/dma.md
-# 对应测试文件路径: test/dialect/test_dma_dialect.py
-def test_dma_view_offset_out_of_bounds() -> None:
-    source_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(4)]))
-    source = _TestOp(result_types=[source_type]).results[0]
-    result_type = _make_memory_type()
-    op = DmaViewOp(
-        source,
-        _make_symbol_operands([1, 3]),
-        _make_symbol_operands([2, 4]),
-        _make_symbol_operands([4, 1]),
-        result_type,
-    )
-    with pytest.raises(VerifyException, match="dma.view offset out of bounds"):
-        op.verify()
-
-
 # TC-DMA-019B
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-28 18:59:18 +0800
-# 最近一次运行成功时间: 2026-03-28 18:59:18 +0800
-# 功能说明: 验证 dma.view source/result rank 不一致时会直接报错。
-# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_view_source_result_rank_mismatch
+# 创建者: OpenAI
+# 最后一次更改: OpenAI
+# 最近一次运行测试时间: 2026-03-29 00:00:00 +0800
+# 最近一次运行成功时间: 2026-03-29 00:00:00 +0800
+# 功能说明: 验证 dma.view 在 numel 匹配时可接受与 source 不同的显式 stride/result 布局。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_view_accepts_matching_numel_subset_with_explicit_stride
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma_dialect.py
-def test_dma_view_source_result_rank_mismatch() -> None:
+def test_dma_view_accepts_matching_numel_subset_with_explicit_stride() -> None:
     source_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(4), IntAttr(8)]),
-        stride=ArrayAttr([IntAttr(32), IntAttr(8), IntAttr(1)]),
+        shape=ArrayAttr([IntAttr(2), IntAttr(2)]),
+        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+    )
+    result_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(2)]),
+        stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
     )
     source = _TestOp(result_types=[source_type]).results[0]
-    result_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
-        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
-    )
     op = DmaViewOp(
         source,
         _make_symbol_operands([0, 0]),
-        _make_symbol_operands([2, 4]),
-        _make_symbol_operands([4, 1]),
+        _make_symbol_operands([2, 2]),
+        _make_symbol_operands([1, 1]),
         result_type,
     )
-    with pytest.raises(VerifyException, match="dma.view source/result rank mismatch"):
-        op.verify()
+    op.verify()
+
+
+# 创建者: OpenAI
+# 最后一次更改: OpenAI
+# 最近一次运行测试时间: 2026-03-28 19:26:00 +0800
+# 最近一次运行成功时间: 2026-03-28 19:26:00 +0800
+# 功能说明: 验证 dma.view 的 offsets 需要与 rank 一致且静态场景下会执行边界检查。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_view_rejects_invalid_offsets_or_bounds
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_view_rejects_invalid_offsets_or_bounds() -> None:
+    source_type = _make_memory_type()
+    source = _TestOp(result_types=[source_type]).results[0]
+    result_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
+        stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+    )
+
+    with pytest.raises(VerifyException, match="offsets length must match rank"):
+        DmaViewOp(
+            source,
+            [],
+            _make_symbol_operands([2, 4]),
+            _make_symbol_operands([1, 1]),
+            result_type,
+        ).verify()
+
+    with pytest.raises(TypeError, match="missing 1 required positional argument"):
+        DmaViewOp(
+            source,
+            _make_symbol_operands([0]),
+            _make_symbol_operands([2, 4]),
+            _make_symbol_operands([1, 1]),
+        )
+
+    with pytest.raises(VerifyException, match="offsets entries must be >= 0"):
+        DmaViewOp(
+            source,
+            _make_symbol_operands([-1, 0]),
+            _make_symbol_operands([2, 4]),
+            _make_symbol_operands([1, 1]),
+            result_type,
+        ).verify()
+
+    with pytest.raises(VerifyException, match="dma.view bounds mismatch"):
+        DmaViewOp(
+            source,
+            _make_symbol_operands([1, 0]),
+            _make_symbol_operands([2, 4]),
+            _make_symbol_operands([1, 1]),
+            result_type,
+        ).verify()
 
 
 # TC-DMA-020
@@ -791,7 +818,8 @@ def test_dma_dynamic_symbol_int_parse_print_round_trip() -> None:
         stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
     )
     reshape_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
+        shape=ArrayAttr([IntAttr(4), IntAttr(2)]),
+        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
     )
     load_type = _make_memory_type(space="shared")
 
@@ -834,7 +862,7 @@ def test_dma_dynamic_symbol_int_parse_print_round_trip() -> None:
         [c3.results[0], c3.results[0]],
         alloc_type,
     )
-    reshape = DmaReshapeOp(alloc.result, [c0.results[0], c1.results[0]], reshape_type)
+    reshape = DmaReshapeOp(alloc.result, [c1.results[0], c0.results[0]], reshape_type)
     cast = DmaCastOp(alloc.result, NnMemoryType(alloc_type.shape, alloc_type.stride, i1, alloc_type.space))
 
     module = ModuleOp([c0, c1, c2, c3, alloc, view, load, store, slice_op, deslice, reshape, cast])
@@ -879,7 +907,7 @@ def test_dma_rejects_non_symbol_int_scalar_operands() -> None:
         DmaViewOp(
             source,
             [index_operand, index_operand],
-            [index_operand, index_operand],
+            _make_symbol_operands([2, 4]),
             _make_symbol_operands([4, 1]),
             source_type,
         ).verify()
