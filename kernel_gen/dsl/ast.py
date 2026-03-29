@@ -455,6 +455,32 @@ class DmaFreeAST:
 
 
 @dataclass(frozen=True)
+class Img2ColAST:
+    """img2col helper 节点。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 表示 `img2col1d/img2col2d` 的 DSL helper 调用。
+    - 保留调用名、位置参数与关键字参数的 AST 表达式。
+
+    使用示例:
+    - Img2ColAST(kind="img2col2d", args=[tile], kwargs={"kh": ConstAST(3)})
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    kind: str
+    args: list[object]
+    kwargs: dict[str, object]
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
 class BinaryExprAST:
     """二元表达式节点。
 
@@ -501,6 +527,32 @@ class CompareExprAST:
     op: str
     lhs: object
     rhs: object
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class TensorAxisAccessAST:
+    """张量 shape/stride 访问节点。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 表示 `tensor.get_shape()[axis]` 或 `tensor.get_stride()[axis]` 的入口语义。
+    - 保留张量引用、访问类型与轴索引表达式，避免在 AST 层提前求值。
+
+    使用示例:
+    - TensorAxisAccessAST(tensor=TensorAST("value", memory), kind="shape", axis=ConstAST(0))
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    tensor: TensorAST
+    kind: str
+    axis: object
     location: SourceLocation | None = None
 
 
@@ -1349,11 +1401,12 @@ def _parse_dma_call(
     """解析 DSL 中的 DMA/NN helper 调用。
 
     创建者: OpenAI
-    最后一次更改: OpenAI
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 将 `load/slice/store/deslice/...` 解析为对应 AST 节点。
     - 将 `nn.add/sub/mul/truediv/floordiv(...)` 解析为对应的 `BinaryExprAST`。
+    - 将 `img2col1d/img2col2d(...)` 解析为对应的 `Img2ColAST`。
     - 将 `get_block_id()` / `get_block_num()` / `get_subthread_id()` / `get_subthread_num()` / `get_thread_id()` / `get_thread_num()` 解析为 `ArchQueryAST`。
     - 将 `get_dynamic_memory(space)` 解析为 `ArchGetDynamicMemoryAST`。
     - 将 `launch_kernel(name, block, thread, subthread)` 解析为 `ArchLaunchKernelAST`。
@@ -1497,6 +1550,25 @@ def _parse_dma_call(
         value = _parse_expr(expr.args[0], env, globals_table, builtins_table)
         return DmaFreeAST(value=value, location=_location_from_node(expr))
 
+    if call_name == "img2col":
+        _raise_parse_error("Unsupported img2col call", expr)
+
+    if call_name in {"img2col1d", "img2col2d"}:
+        if not expr.args:
+            _raise_parse_error(f"Unsupported {call_name} arity", expr)
+        args = [_parse_expr(arg, env, globals_table, builtins_table) for arg in expr.args]
+        kwargs: dict[str, object] = {}
+        for keyword in expr.keywords:
+            if keyword.arg is None:
+                _raise_parse_error(f"Unsupported {call_name} arity", expr)
+            kwargs[keyword.arg] = _parse_expr(keyword.value, env, globals_table, builtins_table)
+        return Img2ColAST(
+            kind=call_name,
+            args=args,
+            kwargs=kwargs,
+            location=_location_from_node(expr),
+        )
+
     if call_name == "get_block_id":
         if expr.args or expr.keywords:
             _raise_parse_error("Unsupported get_block_id arity", expr)
@@ -1586,6 +1658,25 @@ def _parse_expr(
     globals_table: dict[str, object],
     builtins_table: dict[str, object],
 ) -> object:
+    """解析 DSL 表达式节点为 AST。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 解析 Name/Constant/List/Tuple/Attribute/Call/Subscript/UnaryOp/BinOp/Compare 等表达式节点。
+    - 支持 `img2col1d/img2col2d` helper 与 `get_shape/get_stride` 轴访问入口解析。
+    - 当开启外部值拒绝时，限定索引表达式仅可使用允许的常量。
+
+    使用示例:
+    - _parse_expr(py_ast.parse("value.get_shape()[0]").body[0].value, env, globals(), __builtins__)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
     if isinstance(expr, py_ast.Name):
         if expr.id in env:
             return env[expr.id]
@@ -1624,6 +1715,27 @@ def _parse_expr(
     if isinstance(expr, py_ast.Call):
         return _parse_dma_call(expr, env, globals_table, builtins_table)
 
+    if isinstance(expr, py_ast.Subscript):
+        if isinstance(expr.value, py_ast.Call) and isinstance(expr.value.func, py_ast.Attribute):
+            accessor = expr.value.func
+            if accessor.attr in {"get_shape", "get_stride"}:
+                if expr.value.args or expr.value.keywords:
+                    _raise_parse_error(f"Unsupported {accessor.attr} arity", expr.value)
+                tensor_expr = _parse_expr(accessor.value, env, globals_table, builtins_table)
+                if not isinstance(tensor_expr, TensorAST):
+                    _raise_parse_error(f"{accessor.attr} source must be TensorAST", accessor.value)
+                axis_env = dict(env)
+                if bool(axis_env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)):
+                    axis_env[_ALLOW_EXTERNAL_CONSTANTS_ENV_KEY] = True
+                axis_expr = _parse_expr(expr.slice, axis_env, globals_table, builtins_table)
+                return TensorAxisAccessAST(
+                    tensor=tensor_expr,
+                    kind="shape" if accessor.attr == "get_shape" else "stride",
+                    axis=axis_expr,
+                    location=_location_from_node(expr),
+                )
+        _raise_parse_error("Unsupported expression", expr)
+
     if isinstance(expr, py_ast.UnaryOp) and isinstance(expr.op, py_ast.USub):
         if isinstance(expr.operand, py_ast.Constant) and isinstance(expr.operand.value, (int, float)):
             return ConstAST(value=-expr.operand.value, location=_location_from_node(expr))
@@ -1657,6 +1769,24 @@ def _parse_for(
     globals_table: dict[str, object],
     builtins_table: dict[str, object],
 ) -> ForAST:
+    """解析 for 语句为 ForAST。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 解析 `for i in range/LoopRange/loop(...)` 语句，生成循环变量与起止步长。
+    - 禁止循环体内直接 return，并将 body 递归交由 `_parse_stmt` 处理。
+
+    使用示例:
+    - _parse_for(py_ast.parse("for i in range(4):\n    x = i").body[0], env, globals(), __builtins__)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
     if not isinstance(stmt.target, py_ast.Name):
         _raise_parse_error("Unsupported for target", stmt.target)
     if not isinstance(stmt.iter, py_ast.Call) or not isinstance(stmt.iter.func, py_ast.Name):
@@ -1702,6 +1832,40 @@ def _parse_stmt(
     globals_table: dict[str, object],
     builtins_table: dict[str, object],
 ) -> object:
+    """解析 DSL 语句节点为 AST 语句。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 解析 Assign/Return/For/Expr 语句，并委托 `_parse_expr/_parse_for` 处理子节点。
+    - 禁止嵌套 FunctionDef、通用 if 语句、`if bias is not None` 分支。
+
+    使用示例:
+    - _parse_stmt(py_ast.parse("x = y").body[0], env, globals(), __builtins__)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    if isinstance(stmt, py_ast.FunctionDef):
+        _raise_parse_error("Nested function definition is not supported", stmt)
+    if isinstance(stmt, py_ast.If):
+        test = stmt.test
+        if (
+            isinstance(test, py_ast.Compare)
+            and len(test.ops) == 1
+            and isinstance(test.ops[0], py_ast.IsNot)
+            and len(test.comparators) == 1
+            and isinstance(test.left, py_ast.Name)
+            and test.left.id == "bias"
+            and isinstance(test.comparators[0], py_ast.Constant)
+            and test.comparators[0].value is None
+        ):
+            _raise_parse_error("Unsupported if bias is not None", stmt)
+        _raise_parse_error("Unsupported if statement", stmt)
     if isinstance(stmt, py_ast.Assign):
         if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], py_ast.Name):
             _raise_parse_error("Unsupported assignment target", stmt)
@@ -1727,6 +1891,25 @@ def _parse_function_impl(
     runtime_table: dict[str, object] | None = None,
     config: dict[str, object] | None = None,
 ) -> FunctionAST:
+    """解析 Python 函数实现为 FunctionAST。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 从源码中定位唯一顶层 FunctionDef，并解析参数/返回注解为 TensorAST/ScalarArgAST。
+    - 解析函数体语句，收集诊断并执行返回语句位置与缺失校验。
+    - 可按配置拒绝外部值，确保 AST 合同与禁用项诊断一致。
+
+    使用示例:
+    - func_ast = _parse_function_impl(my_kernel)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
     reject_external_values = bool((config or {}).get("reject_external_values", False))
     if globals_table is None:
         globals_table = getattr(fn, "__globals__", {}) or {}
@@ -1744,6 +1927,10 @@ def _parse_function_impl(
 
     source = textwrap.dedent(source)
     module = py_ast.parse(source)
+    function_defs = [node for node in module.body if isinstance(node, py_ast.FunctionDef)]
+    if len(function_defs) != 1:
+        target_node = function_defs[0] if function_defs else module
+        _raise_parse_error("Multiple top-level function definitions are not supported", target_node)
     func_def = None
     for node in module.body:
         if isinstance(node, py_ast.FunctionDef) and node.name == getattr(fn, "__name__", ""):
