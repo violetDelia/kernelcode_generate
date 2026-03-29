@@ -138,3 +138,36 @@
 - 复测：`pytest -q test/operation/test_operation_arch.py`，exit=`0`。
 问题列表：无。
 结论：通过。TC-OP-ARCH-014 已覆盖 `get_block_num/get_thread_num/get_subthread_num/get_dynamic_memory` 不支持路径，断言与 `_verify_target_support` 行为一致，未发现边界/异常/漏洞缺口。
+
+时间：2026-03-29 09:56:39 +0800
+任务：T-20260329-8d472944
+任务目标：核对并清理 `wt-20260328-operation-arch-target-gate-fix`；确认是否存在未合并改动，若需后续处理则创建任务，否则执行清理。
+改动：
+- 核对 worktree 状态：`git status --short --branch`，exit=`0`；结果显示当前 worktree 仍有未提交改动：`kernel_gen/operation/arch.py`、`spec/operation/arch.md`。
+- 核对最近已提交状态：`git merge-base --is-ancestor 6de82c5 main`，exit=`0`；`git branch --contains 6de82c5` 显示 `main` 包含该提交，说明最近已提交链路已进入主线。
+- 核对未提交改动内容：`git diff -- spec/operation/arch.md`，exit=`0`；`git diff -- kernel_gen/operation/arch.py`，exit=`0`。其中 `spec/operation/arch.md` 为 target registry 支持性/硬件回退/`TC-OP-ARCH-013/014` 的补充说明，`kernel_gen/operation/arch.py` 为对应实现侧未提交改动。
+- 本任务未执行清理：为避免误删未提交变更，未运行任何删除 worktree、删除分支或恢复文件的命令。
+结论：当前 worktree 不可清理。原因：最近提交 `6de82c5` 已在 `main`，但目录中仍有两处未提交改动，且至少包含一条实现链路文件 `kernel_gen/operation/arch.py`，不应由 cleanup 任务直接丢弃。建议下一步新建复审任务，复核 `spec/operation/arch.md`、`kernel_gen/operation/arch.py` 与 `test/operation/test_operation_arch.py` 的闭环一致性；若复审通过，再由管理员分发给李白承接合并与后续清理。
+- 时间：`2026-03-29 10:15:57 +0800`
+- 任务：`T-20260329-141e89db`
+- 任务目标：复审 operation-arch-target-gate-fix 未提交改动链路，核对 spec/实现/测试闭环与边界/异常/漏洞路径。
+- 改动：
+  - 仅审查核对，无代码修改。
+  - 核对文件：`spec/operation/arch.md`、`kernel_gen/operation/arch.py`、`test/operation/test_operation_arch.py`。
+  - 复测：`pytest -q test/operation/test_operation_arch.py -k "test_arch_queries_prefer_target_hardware_with_fallback or test_arch_queries_reject_unsupported_target_ops"`，exit=`0`。
+- 结论：`通过`。
+  - 一致性：spec 已补齐 target registry 支持性校验与硬件值优先/缺失回退语义，`get_block_num/get_thread_num/get_subthread_num/get_dynamic_memory/launch_kernel` 实现与 `TC-OP-ARCH-013/014` 测试一致。
+  - 边界/异常：不支持 op 的 `ValueError`、硬件值缺失回退、动态内存 shape 回退均已覆盖。
+  - 漏洞排查：未发现输入校验绕过、类型/形状绕过或错误处理缺失风险。
+  - 可维护性：未发现需新增的改进建议。
+
+时间：2026-03-29 16:04:26 +0800
+任务：T-20260329-5a655917
+任务目标：合并 operation-arch-target-gate-fix 未提交改动（spec/operation/arch.md、kernel_gen/operation/arch.py）并按规范清理 worktree。
+改动：
+- 在干净临时 worktree `/home/lfr/kernelcode_generate/wt-main-merge-5a655917`（基于 `origin/main`）执行合并，避免将源 worktree 以外内容带入主线。
+- 合并 `spec/operation/arch.md`：收敛 operation arch helper 在 target registry 支持性、硬件回退语义与 `TC-OP-ARCH-013/014` 映射口径。
+- 合并 `kernel_gen/operation/arch.py`：与上述 spec 对齐的 target gate 逻辑修正。
+- 合并提交仅包含上述两个业务文件与本任务记录文件。
+结论：完成合并内容整理，进入提交/push 与 cleanup。
+- 验证：`pytest -q test/operation/test_operation_arch.py -k "test_arch_queries_prefer_target_hardware_with_fallback or test_arch_queries_reject_unsupported_target_ops"`，exit=`0`，结果：`2 passed, 12 deselected`。

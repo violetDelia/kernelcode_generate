@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`咯咯咯`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/operation/arch.md`](../../spec/operation/arch.md)
 - `功能实现`：[`kernel_gen/operation/arch.py`](../../kernel_gen/operation/arch.py)
 - `test`：[`test/operation/test_operation_arch.py`](../../test/operation/test_operation_arch.py)
@@ -20,9 +20,11 @@
 - [`spec/symbol_variable/symbol_dim.md`](../../spec/symbol_variable/symbol_dim.md)：定义 `SymbolDim` 的公开语义，供执行维度 helper 返回与入参校验复用。
 - [`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)：定义 `Memory` / `MemorySpace` 的高层语义，供动态内存 helper 返回与空间映射复用。
 - [`spec/symbol_variable/type.md`](../../spec/symbol_variable/type.md)：定义 `NumericType` / `Farmat`，供动态内存结果 dtype 与格式语义复用。
+- [`spec/target/registry.md`](../../spec/target/registry.md)：定义 current target 支持性校验与硬件字段读取规则。
 - [`kernel_gen/dialect/arch.py`](../../kernel_gen/dialect/arch.py)：operation helper 的唯一 dialect 映射目标。
 - [`kernel_gen/symbol_variable/symbol_dim.py`](../../kernel_gen/symbol_variable/symbol_dim.py)：`SymbolDim` 运行时容器实现。
 - [`kernel_gen/symbol_variable/memory.py`](../../kernel_gen/symbol_variable/memory.py)：`Memory` / `MemorySpace` 运行时容器实现。
+- [`kernel_gen/target/registry.py`](../../kernel_gen/target/registry.py)：operation helper 所依赖的 target registry 查询实现。
 
 ## 目标
 
@@ -37,13 +39,16 @@
 - operation 层不得定义新的执行维度类型体系；执行维度查询 helper 的公开返回统一复用 `SymbolDim` 语义，对应 lowering 必须映射到 `arch dialect` 的固定 `!symbol.int<"...">` 结果类型。
 - `get_block_id/get_block_num/get_thread_id/get_thread_num/get_subthread_id/get_subthread_num` 均为无参 helper，不接受 axis、rank 或其他附加配置。
 - `get_dynamic_memory(space)` 只描述“获取某个片上空间的运行期动态内存入口”；不负责容量估算、布局推导、分配策略、初始化填充或跨空间拷贝。
-- `get_dynamic_memory(space)` 的公开结果语义必须收敛为一维动态字节缓冲：逻辑 shape 为 `[?]`、stride 为 `[1]`、dtype 为 `NumericType.Int8`、space 与输入一致；operation 层不得额外承诺容量、对齐或多维布局。
+- `get_dynamic_memory(space)` 的公开结果语义必须收敛为一维字节缓冲：当 target registry 提供对应硬件 size 时逻辑 shape 为 `[size]`，缺失时回退为 `[?]`；stride 固定为 `[1]`、dtype 固定为 `NumericType.Int8`、space 与输入一致；operation 层不得额外承诺容量、对齐或多维布局。
 - `get_dynamic_memory(space)` 只允许片上空间 `MemorySpace.SM`、`MemorySpace.LM`、`MemorySpace.TSM`、`MemorySpace.TLM`；`MemorySpace.GM` 不属于动态片上内存入口范围，必须报错。
 - `launch_kernel(name, block, thread, subthread)` 只描述一次启动请求，不返回新的 `Memory`、`SymbolDim` 或句柄对象；公开返回值固定为 `None`。
 - `launch_kernel` 调用签名固定为 `launch_kernel(name, block, thread, subthread)`：参数顺序必须为 `name -> block -> thread -> subthread`，四个参数均为必填，不提供可选参数与默认值。
 - `launch_kernel` 仅允许参数名 `name/block/thread/subthread`；缺失参数、额外位置参数或未知关键字参数属于调用边界错误，必须抛出 `TypeError`。
 - `launch_kernel(...)` 的 `block/thread/subthread` 只允许 `int` 或 `SymbolDim`；若输入为静态整数，必须满足 `> 0`；operation 层不得接受浮点、`Memory`、列表或其他运行时对象。
 - operation 层与 dialect 层采用一一映射：`get_*` helper 分别映射到对应 `arch.get_*` op，`get_dynamic_memory` 映射到 `arch.get_dynamic_memory`，`launch_kernel` 映射到 `arch.launch_kernel`；不得通过其他 dialect 或 builtin op 绕过 `arch dialect`。
+- 当 target registry 设置了 current target 时，所有 `arch` helper 在调用前都必须执行支持性校验；若当前 target 不支持对应 `arch.*` op，必须抛出 `ValueError`，且错误信息应包含 op 名与 target 名。
+- `get_block_num/get_thread_num/get_subthread_num` 在 target registry 提供对应硬件值时必须优先返回静态值；缺失时回退为各自 `SymbolDim("<name>")` 语义。
+- `get_dynamic_memory(space)` 在 target registry 提供对应 `*_memory_size` 时必须优先使用静态 size；缺失时回退为动态 `[?]`。
 
 ## 公开接口
 
@@ -68,6 +73,7 @@ bid = get_block_id()
 
 - operation 层返回值语义应表现为 `SymbolDim` 风格的执行维度标量，不得退化为 Python `int` 常量或其他标量封装。
 - 公开 helper 不接受 axis、device 或 rank 参数。
+- 当设置 current target 时必须通过 target registry 校验 `arch.get_block_id` 支持性；不支持时抛出 `ValueError`。
 
 返回与限制：
 
@@ -95,6 +101,8 @@ bnum = get_block_num()
 
 - operation 层返回值语义应表现为 `SymbolDim` 风格标量。
 - 不接受额外配置参数。
+- 当设置 current target 时必须通过 target registry 校验 `arch.get_block_num` 支持性；不支持时抛出 `ValueError`。
+- 当硬件 `block_num` 可用时必须优先返回静态值；缺失时回退 `SymbolDim("block_num")` 语义。
 
 返回与限制：
 
@@ -122,6 +130,7 @@ tid = get_thread_id()
 
 - operation 层返回值语义应表现为 `SymbolDim` 风格标量。
 - 不接受 axis、warp 或其他附加参数。
+- 当设置 current target 时必须通过 target registry 校验 `arch.get_thread_id` 支持性；不支持时抛出 `ValueError`。
 
 返回与限制：
 
@@ -149,6 +158,8 @@ tnum = get_thread_num()
 
 - operation 层返回值语义应表现为 `SymbolDim` 风格标量。
 - 不接受额外配置参数。
+- 当设置 current target 时必须通过 target registry 校验 `arch.get_thread_num` 支持性；不支持时抛出 `ValueError`。
+- 当硬件 `thread_num` 可用时必须优先返回静态值；缺失时回退 `SymbolDim("thread_num")` 语义。
 
 返回与限制：
 
@@ -176,6 +187,7 @@ stid = get_subthread_id()
 
 - operation 层返回值语义应表现为 `SymbolDim` 风格标量。
 - 不接受 lane、rank 或其他附加参数。
+- 当设置 current target 时必须通过 target registry 校验 `arch.get_subthread_id` 支持性；不支持时抛出 `ValueError`。
 
 返回与限制：
 
@@ -203,6 +215,8 @@ stnum = get_subthread_num()
 
 - operation 层返回值语义应表现为 `SymbolDim` 风格标量。
 - 不接受额外配置参数。
+- 当设置 current target 时必须通过 target registry 校验 `arch.get_subthread_num` 支持性；不支持时抛出 `ValueError`。
+- 当硬件 `subthread_num` 可用时必须优先返回静态值；缺失时回退 `SymbolDim("subthread_num")` 语义。
 
 返回与限制：
 
@@ -232,13 +246,14 @@ smem = get_dynamic_memory(MemorySpace.SM)
 
 - 输入若不是 `MemorySpace`，必须抛出 `TypeError`。
 - 输入若为 `MemorySpace.GM`，必须抛出 `ValueError`。
-- 返回结果的公开语义必须是 `shape=[?]`、`stride=[1]`、`dtype=NumericType.Int8`、`space=<输入空间>` 的一维动态字节缓冲。
+- 返回结果的公开语义必须是一维字节缓冲：`stride=[1]`、`dtype=NumericType.Int8`、`space=<输入空间>`；当 target registry 提供对应 `*_memory_size` 时 `shape=[size]`，缺失时回退 `shape=[?]`。
 - operation 层不得公开承诺容量、对齐或多维 view 语义；这些约束由后续 DMA/view helper 单独承担。
+- 当设置 current target 时必须通过 target registry 校验 `arch.get_dynamic_memory` 支持性；不支持时抛出 `ValueError`。
 
 返回与限制：
 
 - 返回类型：`Memory`
-- 限制：lowering 后结果必须对应 `!nn.memory<[?], [1], i8, #nn.space<space>>`，其中 `space` 与输入映射一致。
+- 限制：lowering 后结果必须对应 `!nn.memory<[?], [1], i8, #nn.space<space>>`，其中 `space` 与输入映射一致；若 operation 层持有静态 `shape=[size]`，该静态信息仅用于高层语义与类型推断，不改变 `arch.get_dynamic_memory` 的 IR 结果类型约束。
 
 ### `launch_kernel(name, block, thread, subthread)`
 
@@ -273,6 +288,7 @@ launch_kernel("my_kernel", SymbolDim("GRID_X"), 128, 4)
 - 当 `block/thread/subthread` 为静态整数时，必须要求其大于 `0`；`0` 或负值必须抛出 `ValueError`。
 - 当输入为 `SymbolDim` 时，operation 层只保留符号语义，不要求在 Python 运行期求值。
 - operation 层 helper 只描述启动请求，不负责真正执行 kernel，也不返回事件、句柄或状态值。
+- 当设置 current target 时必须通过 target registry 校验 `arch.launch_kernel` 支持性；不支持时抛出 `ValueError`。
 
 返回与限制：
 
@@ -290,6 +306,8 @@ launch_kernel("my_kernel", SymbolDim("GRID_X"), 128, 4)
   - 验证 `launch_kernel(name, block, thread, subthread)` 的输入类型、非空名称与静态正整数约束。
   - 验证 `launch_kernel` 的参数列表/顺序/必填与默认值语义：仅允许 `(name, block, thread, subthread)` 四个参数，不允许缺参、多参与未知关键字。
   - 验证 operation helper 到 `arch dialect` 的映射边界清晰，不引入新的方言或非 `arch` lowering 路径。
+  - 验证 target registry 硬件值优先生效，缺失时回退符号/动态语义。
+  - 验证当前 target 不支持的 `arch.*` helper 调用必须报错。
 - 功能与用例清单：
   - `TC-OP-ARCH-001`：`get_block_id()` 返回 `SymbolDim` 风格 block 索引语义，并映射 `TC-ARCH-001`。
   - `TC-OP-ARCH-002`：`get_block_num()` 返回 `SymbolDim` 风格 block 数量语义，并映射 `TC-ARCH-002`。
@@ -297,9 +315,11 @@ launch_kernel("my_kernel", SymbolDim("GRID_X"), 128, 4)
   - `TC-OP-ARCH-004`：`get_thread_num()` 返回 `SymbolDim` 风格 thread 数量语义，并映射 `TC-ARCH-004`。
   - `TC-OP-ARCH-005`：`get_subthread_id()` 返回 `SymbolDim` 风格 subthread 索引语义，并映射 `TC-ARCH-005`。
   - `TC-OP-ARCH-006`：`get_subthread_num()` 返回 `SymbolDim` 风格 subthread 数量语义，并映射 `TC-ARCH-006`。
-  - `TC-OP-ARCH-007`：`get_dynamic_memory(MemorySpace.SM)` 返回 `shape=[?]`、`stride=[1]`、`dtype=NumericType.Int8`、`space=MemorySpace.SM` 的动态内存语义，并映射 `TC-ARCH-007`。
+  - `TC-OP-ARCH-007`：当无硬件 size 时，`get_dynamic_memory(MemorySpace.SM)` 返回 `shape=[?]`、`stride=[1]`、`dtype=NumericType.Int8`、`space=MemorySpace.SM` 的动态内存语义，并映射 `TC-ARCH-007`。
   - `TC-OP-ARCH-008`：`get_dynamic_memory(...)` 对非法空间或非法类型报错，并覆盖 `MemorySpace.GM` 错误路径；对应 `TC-ARCH-008` 的方言边界。
   - `TC-OP-ARCH-009`：`launch_kernel("my_kernel", block, thread, subthread)` 接受合法 `int | SymbolDim` 输入并返回 `None`，对应 `TC-ARCH-009`。
   - `TC-OP-ARCH-010`：`launch_kernel(...)` 对空名称、非法类型、静态 `<= 0` 的规模输入报错，并对应 `TC-ARCH-010`。
-  - `TC-OP-ARCH-011`：`launch_kernel` 调用签名固定为 `(name, block, thread, subthread)`，四参均必填且无默认值；缺参/多参/未知关键字必须在调用边界报 `TypeError`。映射测试：`test_launch_kernel_call_signature_errors`。
-  - `TC-OP-ARCH-012`：`launch_kernel` 关键字调用仅接受 `name/block/thread/subthread` 四个参数名，语义与位置调用一致。映射测试：`test_launch_kernel_keyword_call_success`。
+  - `TC-OP-ARCH-011`：`launch_kernel` 调用签名固定为 `(name, block, thread, subthread)`，四参均必填且无默认值；缺参/多参/未知关键字必须在调用边界报 `TypeError`。映射测试：`test_launch_kernel_call_signature_errors`（实现阶段补齐）。
+  - `TC-OP-ARCH-012`：`launch_kernel` 关键字调用仅接受 `name/block/thread/subthread` 四个参数名，语义与位置调用一致。映射测试：`test_launch_kernel_keyword_call_success`（实现阶段补齐）。
+  - `TC-OP-ARCH-013`：target registry 提供硬件值时，`get_block_num()` / `get_thread_num()` / `get_subthread_num()` / `get_dynamic_memory()` 必须优先使用硬件值；缺失时分别回退 `SymbolDim("block_num")` / `SymbolDim("thread_num")` / `SymbolDim("subthread_num")` 或动态 `[?]`。映射测试：`test_arch_queries_prefer_target_hardware_with_fallback`。
+  - `TC-OP-ARCH-014`：当当前 target 不支持某个 `arch.*` op 时，对应 helper 的 target registry 支持性校验必须抛出 `ValueError` 并包含 op 名称；本条覆盖 `get_block_num()` / `get_thread_num()` / `get_subthread_num()` / `get_dynamic_memory()` 的错误路径。映射测试：`test_arch_queries_reject_unsupported_target_ops`。
