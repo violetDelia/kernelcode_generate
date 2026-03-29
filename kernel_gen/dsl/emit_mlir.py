@@ -1248,7 +1248,7 @@ def _infer_expr_type(
         if not isinstance(source_type, NnMemoryType):
             raise _LoweringError("view source must have nn.memory type", location=expr.location)
         shape_attr = _build_static_index_attrs_exact(expr.size, location=expr.location, runtime_values=runtime_values)
-        stride_attr = _build_static_index_attrs_exact(expr.stride, location=expr.location, runtime_values=runtime_values)
+        stride_attr = source_type.stride.data
         result_type = _memory_type_from_parts(shape_attr, stride_attr, source_type.element_type, source_type.space)
         type_map[expr_key] = result_type
         return result_type
@@ -1457,7 +1457,8 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         result_type = _infer_expr_type(expr, ctx.types)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("view result must be nn.memory", location=expr.location)
-        offsets = _build_index_operands_exact(expr.offset, ctx, location=expr.location)
+        rank = len(result_type.shape.data)
+        offsets = _build_index_attrs(expr.offset, rank, ctx, location=expr.location)
         shape = _build_index_operands_exact(expr.size, ctx, location=expr.location)
         stride = _build_index_operands_from_layout(result_type.stride, ctx, location=expr.location)
         op = DmaViewOp(source, offsets, shape, stride, result_type)

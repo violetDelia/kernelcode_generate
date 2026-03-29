@@ -9,7 +9,7 @@
 # - 支持 DONE.md 自动创建与完成记录追加。
 # - 在分发、完成、暂停、继续时同步更新 agents-lists.md 角色状态。
 # - 在分发时可选调用 tmux 对话脚本，向目标角色发送任务消息。
-# - 在分发前固定调用一次 list 的 -init，更新目标角色信息并提醒其同步自身提示词信息。
+# - 在分发前按 1/6 概率调用 list 的 -init，更新目标角色信息并提醒其同步自身提示词信息。
 # - 写操作统一使用 flock 文件锁。
 #
 # 对应文件:
@@ -425,7 +425,20 @@ send_dispatch_init() {
 }
 
 should_dispatch_init() {
-  return 0
+  local forced_roll="${CODEX_MULTI_AGENTS_DISPATCH_INIT_ROLL-}"
+  local roll=0
+
+  if [[ -n "$forced_roll" ]]; then
+    if [[ "$forced_roll" =~ ^[0-9]+$ ]]; then
+      roll="$forced_roll"
+    else
+      roll=1
+    fi
+  else
+    roll=$((RANDOM % 6))
+  fi
+
+  (( roll % 2 == 0 ))
 }
 
 send_dispatch_message() {

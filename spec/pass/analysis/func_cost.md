@@ -236,7 +236,7 @@ module = pass_obj.run(module)
 
 ## 测试
 
-- 测试文件：`test/pass/test_analysis_func_cost.py`
+- 测试文件：[`test/pass/test_analysis_func_cost.py`](../../../test/pass/test_analysis_func_cost.py)
 - 执行命令：`pytest -q test/pass/test_analysis_func_cost.py`
 - 覆盖 `FC-001` ~ `FC-008` 用例。
 

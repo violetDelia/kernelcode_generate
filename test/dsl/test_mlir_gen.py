@@ -648,7 +648,7 @@ def test_build_func_op_from_ast_forwards_config_to_visitor_and_context(
     assert captured["ctx_config"] == config
 
 
-# MGEN-003
+# MGEN-016
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
