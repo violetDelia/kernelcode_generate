@@ -35,6 +35,7 @@
 - `softmax` 仅支持 `Memory` 输入，默认沿最后一维归一化，不负责跨算子融合或近似策略选择。
 - `exp` 与激活函数同层，输入必须是浮点 `Memory`，不定义自动 cast 策略。
 - `reduce_sum` / `reduce_min` / `reduce_max` 只定义按轴归约语义，不定义跨算子融合、并行调度或硬件特化策略。
+- `softmax` 在 operation 层定义默认参数、负轴归一化、数值稳定语义与错误边界；对应 dialect 层仅承接结构化 `nn.softmax` 合同（operand/result/axis/space verifier），不在 dialect 层重复高层数值语义全文。
 - `conv` 仅覆盖二维卷积，不支持 group、batch/broadcast 或隐式转置。
 - `img2col` 高层接口按维度拆分为 `img2col1d` 与 `img2col2d` 语义锚点；禁止继续使用笼统公开名 `img2col` 作为稳定对外规范名。
 - 与 `nn dialect` 的分层关系：本层定义高层 shape/参数/错误语义，方言层仅定义 `nn.img2col1d` / `nn.img2col2d` 的 IR 字段与 verifier 合同（见 [`spec/dialect/nn.md`](../../spec/dialect/nn.md)）。
@@ -756,9 +757,10 @@ out_last_dim = softmax(value, axis=1)
 - `value` 必须为 `Memory`，否则抛出 `TypeError`。
 - `value.dtype` 必须为浮点类型：`Float16`、`BFloat16`、`Float32`、`Float64`；其他类型必须抛出 `TypeError`。
 - `axis` 必须为整数且不允许 `bool`；非法类型必须抛出 `TypeError`。
-- 允许负轴索引；归一化后的 `axis` 必须满足 `-rank <= axis < rank`，越界必须抛出 `ValueError`。
+- 允许负轴索引；归一化后的 `axis` 必须满足 `-rank <= axis < rank`，越界必须抛出 `ValueError`；因此 rank 为 `0` 的输入（若上游构造）始终无法通过 axis 校验。
 - 数值稳定性要求：实现必须采用“减去该轴最大值后再指数化”的等价语义，即 `exp(x - max(x)) / sum(exp(x - max(x)))`，避免直接对原值指数化。
 - 与现有 nn 算子兼容：`softmax` 输出仍为 `Memory`，可直接作为 `add/sub/mul/truediv/floordiv/compare` 的输入。
+- 与 `nn dialect` 的映射边界：operation 层冻结高层语义与异常口径；dialect 层只冻结结构化字段与 verifier，见 [`spec/dialect/nn.md`](../../spec/dialect/nn.md) 的 `nn.softmax` 小节。
 
 返回与限制：
 

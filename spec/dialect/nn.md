@@ -2,12 +2,13 @@
 
 ## 功能简介
 
-`nn dialect` 定义方言层稳定接口，负责建模 memory space、memory type，以及逐元素算术、逐元素比较、显式 `broadcast`、`transpose`、`img2col1d/img2col2d` 和二维 `matmul` 的 IR 形态与 verifier 约束。本规范仅描述方言层字段、文本形式与校验语义，不包含上游高层 API 调度逻辑。
+`nn dialect` 定义方言层稳定接口，负责建模 memory space、memory type，以及逐元素算术、逐元素比较、显式 `broadcast`、`transpose`、`softmax`、`img2col1d/img2col2d` 和二维 `matmul` 的 IR 形态与 verifier 约束。本规范仅描述方言层字段、文本形式与校验语义，不包含上游高层 API 调度逻辑。
 
 ## 文档信息
 
 - 创建者：`规格小队`
 - 最后一次更改：`金铲铲大作战`
+- 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/dialect/nn.md`](../../spec/dialect/nn.md)
 - `功能实现`：[`kernel_gen/dialect/nn.py`](../../kernel_gen/dialect/nn.py)
 - `test`：[`test/dialect/test_nn_dialect.py`](../../test/dialect/test_nn_dialect.py)
@@ -23,7 +24,7 @@
 
 - 提供 `global/shared/local/tsm/tlm` 五种 memory space 的统一属性表示。
 - 提供可解析、可打印、可校验的 `!nn.memory<...>` 类型表示。
-- 为 `nn.add/sub/mul/truediv/eq/ne/lt/le/gt/ge/broadcast/transpose/img2col1d/img2col2d/matmul` 提供稳定的方言层接口。
+- 为 `nn.add/sub/mul/truediv/eq/ne/lt/le/gt/ge/broadcast/transpose/softmax/img2col1d/img2col2d/matmul` 提供稳定的方言层接口。
 - 明确 `nn dialect` 不支持逐元素隐式 broadcast，所有广播必须显式使用 `nn.broadcast`。
 - 保证合法文本 IR 可以 round-trip，非法输入在 parse 或 verifier 阶段被拒绝。
 
@@ -33,6 +34,7 @@
 - 上游若允许逐元素隐式 broadcast，进入 `nn dialect` 前必须显式展开为 `nn.broadcast`。
 - `img2col` 在方言层只允许公开 `nn.img2col1d` 与 `nn.img2col2d` 两个稳定 op，禁止新增笼统公开名 `nn.img2col`。
 - `nn.img2col1d/img2col2d` 仅定义 operand/attribute/result/verifier 合同，不在方言层重复上游 `operation/nn` 的 shape/stride 公式与错误边界全文。
+- `nn.softmax` 在方言层只定义 `input/result/axis/space` 的结构化合同；`axis=-1` 默认值、负轴归一化与数值稳定公式属于上游 `operation/nn` 语义，不在方言层重复展开。
 - `NnMemorySpaceAttr` 仅允许 `global/shared/local/tsm/tlm` 五种取值。
 - `NnMemoryType.space` 与各 op 的 `space` attribute 必须使用同一语义口径。
 - `NnMemoryType` 中 `shape` 与 `stride` 的 rank 必须一致；每一维支持静态整数、符号或 `?`。
@@ -40,6 +42,7 @@
 - 二元逐元素 op 的 `lhs/rhs/result` 必须满足 `shape/stride/space` 的 verifier 约束，不能依赖方言层做隐式 broadcast。
 - 比较 op 的结果 `element_type` 必须为 `i1`。
 - `nn.matmul` 仅建模二维矩阵乘，`lhs.shape[1]` 与 `rhs.shape[0]` 必须语义一致。
+- `nn.softmax` 已在 `kernel_gen/dialect/nn.py` 与 `test/dialect/test_nn_dialect.py` 落地；本节作为公开契约与映射编号基线，后续改动必须保持与本合同闭环一致。
 - `space` 指 `nn dialect` 中 memory 所在的物理或逻辑空间，由 `NnMemorySpaceAttr` 表示。
 - `memory type` 指 `NnMemoryType`，由 `shape/stride/element_type/space` 组成。
 - `round-trip` 指文本 IR 在 parse 后再 print，得到稳定且等价的文本表示。
@@ -416,6 +419,51 @@ op = NnTransposeOp(inp, result_type, perm=[1, 0, 2], space=NnMemorySpaceAttr.fro
 
 - 返回 `NnTransposeOp`；不支持隐式广播或隐式转置。
 
+### nn.softmax
+
+功能说明：
+
+- softmax 归一化 op，表示沿给定轴执行归一化并输出与输入同 rank 的 memory。
+
+参数说明：
+
+- `input: !nn.memory<...>`：输入 memory。
+- `result: !nn.memory<...>`：输出 memory，rank 必须与 `input` 一致。
+- `axis: i64`：归一化轴属性，必须满足 `-rank <= axis < rank`。
+- `space: #nn.space<...>`：op 的空间属性。
+
+使用示例：
+
+```mlir
+%0 = nn.softmax %value {
+  axis = -1,
+  space = #nn.space<global>
+} : !nn.memory<[B, C], [C, 1], f32, #nn.space<global>>
+ -> !nn.memory<[B, C], [C, 1], f32, #nn.space<global>>
+```
+
+注意事项：
+
+- `input/result` 必须为 `NnMemoryType`。
+- `input.rank` 必须大于 `0`，`axis` 必须落在合法区间 `[-rank, rank-1]`。
+- `result.shape` 必须与 `input.shape` 一致。
+- `result.stride` 必须与 `input.stride` 一致。
+- `result.element_type` 必须与 `input.element_type` 一致，且当前合同只允许浮点元素类型（`f16/bf16/f32/f64`）。
+- `input.space == result.space == op.space`。
+- 与 `operation/nn` 分层边界：方言层不定义 `axis` 默认值，也不复写数值稳定公式，仅校验结构化字段与类型约束。
+
+返回与限制：
+
+- 返回 `NnSoftmaxOp`（合同名）。
+- verifier 合同关键字：
+  - `operand-and-result-must-be-nn-memory`
+  - `input-rank-must-be-positive`
+  - `axis-must-be-in-range`
+  - `result-shape-must-match-input`
+  - `result-stride-must-match-input`
+  - `result-element-type-must-match-input-and-be-float`
+  - `result-space-must-match-input-and-attr`
+
 ### nn.matmul
 
 功能说明：
@@ -563,6 +611,7 @@ op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 - 验证 `nn.add/sub/mul/truediv/eq/ne/lt/le/gt/ge` 的 operand/result/type/space verifier 约束，其中 `nn.add` 覆盖 memory+scalar/symbol 与 dtype promotion 规则。
 - 验证 `nn.broadcast` 的显式广播规则、space 一致性、element type 一致性与文本 round-trip。
 - 验证 `nn.transpose` 的 perm/shape/stride/space/element type 约束与文本 round-trip。
+- 验证 `nn.softmax` 的 rank/axis/shape/stride/space/element type verifier 约束与错误路径闭环。
 - 验证 `nn.img2col1d` 的 operand rank、属性合法性、result rank/type/space 与方言合同约束。
 - 验证 `nn.img2col2d` 的 operand rank、属性合法性、result rank/type/space 与方言合同约束。
 - 验证 `nn.matmul` 的 rank、shape、space、element type 约束与文本 round-trip。
@@ -616,3 +665,6 @@ op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 | NN-DIA-042 | `nn.add` mixed 形态 result shape 不匹配拒绝 | `test_add_op_rejects_mixed_result_shape_mismatch` |
 | NN-DIA-043 | `nn.img2col1d` 合同（operand/attrs/result/verifier） | `test_nn_dialect_img2col1d_contract_v1` |
 | NN-DIA-044 | `nn.img2col2d` 合同（operand/attrs/result/verifier） | `test_nn_dialect_img2col2d_contract_v1` |
+| NN-DIA-045 | `nn.softmax` 合法路径（rank/axis/shape/stride/space/element type） | `test_softmax_op_verify_success` |
+| NN-DIA-046 | `nn.softmax` axis 越界或输入 rank 非法时拒绝 | `test_softmax_op_rejects_invalid_axis_or_rank` |
+| NN-DIA-047 | `nn.softmax` result shape/stride/dtype/space 不一致时拒绝 | `test_softmax_op_rejects_result_mismatch` |

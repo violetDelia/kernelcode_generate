@@ -1,7 +1,7 @@
 """NN dialect definitions.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 定义 nn dialect 的 memory type、space attribute 与逐元素/广播 op。
@@ -19,7 +19,19 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from xdsl.dialects.builtin import ArrayAttr, Float16Type, Float32Type, IntAttr, IntegerAttr, IntegerType, StringAttr, i1, i32
+from xdsl.dialects.builtin import (
+    ArrayAttr,
+    BFloat16Type,
+    Float16Type,
+    Float32Type,
+    Float64Type,
+    IntAttr,
+    IntegerAttr,
+    IntegerType,
+    StringAttr,
+    i1,
+    i32,
+)
 from xdsl.ir import Attribute, Dialect, Operation, ParametrizedAttribute, SSAValue, TypeAttribute
 from xdsl.irdl import (
     IRDLOperation,
@@ -408,6 +420,27 @@ def _resolve_add_dtype_key(attr: Attribute) -> str | None:
     return None
 
 
+def _is_float_element_type(attr: Attribute) -> bool:
+    """判断是否为允许的浮点 element type。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 允许 f16/bf16/f32/f64 四类浮点类型。
+
+    使用示例:
+    - _is_float_element_type(Float32Type())
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    return isinstance(attr, (Float16Type, BFloat16Type, Float32Type, Float64Type))
+
+
 def _promote_add_dtype(lhs_type: Attribute, rhs_type: Attribute) -> Attribute | None:
     """计算 nn.add 的 dtype promotion 结果类型。
 
@@ -670,6 +703,34 @@ def _verify_i64_attr_value(attr: IntegerAttr, field_name: str, *, allow_zero: bo
     return value
 
 
+def _verify_i64_attr(attr: IntegerAttr, field_name: str) -> int:
+    """校验 i64 属性并返回整数值。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 校验属性类型为 i64，但不限制符号正负。
+    - 用于需要允许负值的 axis 等字段。
+
+    使用示例:
+    - axis_value = _verify_i64_attr(axis_attr, "axis")
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    if not isinstance(attr.type, IntegerType):
+        _raise_verify_error(f"{field_name} must be i64")
+    width_attr = attr.type.width
+    width_value = width_attr.data if isinstance(width_attr, IntAttr) else width_attr
+    if width_value != 64:
+        _raise_verify_error(f"{field_name} must be i64")
+    return attr.value.data
+
+
 def _collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None:
     """提取维度中的整数值列表。
 
@@ -927,6 +988,131 @@ def _verify_matmul_shape(
 
     if result_shape[0] != lhs_shape[0] or result_shape[1] != rhs_shape[1]:
         _raise_verify_error("nn.matmul result shape must match lhs/rhs")
+
+
+def _verify_softmax_op(op: "NnSoftmaxOp") -> None:
+    """校验 nn.softmax 的结构化合同。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 校验 operand/result 必须是 nn.memory，且 rank/axis 合法。
+    - 校验 shape/stride/element_type/space 与 op 属性一致性。
+
+    使用示例:
+    - _verify_softmax_op(op)
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    input_type = op.input.type
+    result_type = op.result.type
+    if not isinstance(input_type, NnMemoryType) or not isinstance(result_type, NnMemoryType):
+        _raise_verify_error("operand-and-result-must-be-nn-memory")
+    input_type.verify()
+    result_type.verify()
+
+    rank = len(input_type.shape.data)
+    if rank <= 0:
+        _raise_verify_error("input-rank-must-be-positive")
+    axis_value = _verify_i64_attr(op.axis, "axis")
+    if axis_value < -rank or axis_value >= rank:
+        _raise_verify_error("axis-must-be-in-range")
+
+    op.space.verify()
+    if input_type.space.space.data != result_type.space.space.data:
+        _raise_verify_error("result-space-must-match-input-and-attr")
+    if input_type.space.space.data != op.space.space.data:
+        _raise_verify_error("result-space-must-match-input-and-attr")
+
+    if input_type.shape != result_type.shape:
+        _raise_verify_error("result-shape-must-match-input")
+    if input_type.stride != result_type.stride:
+        _raise_verify_error("result-stride-must-match-input")
+
+    if input_type.element_type != result_type.element_type or not _is_float_element_type(input_type.element_type):
+        _raise_verify_error("result-element-type-must-match-input-and-be-float")
+
+
+@irdl_op_definition
+class NnSoftmaxOp(IRDLOperation):
+    """nn.softmax。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 定义 nn.softmax 方言 op 与 verifier 约束。
+
+    使用示例:
+    - NnSoftmaxOp(inp, result_type, axis=-1, space=NnMemorySpaceAttr.from_name("global"))
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    name = "nn.softmax"
+
+    input = operand_def(NnMemoryType)
+    result = result_def(NnMemoryType)
+    axis = attr_def(IntegerAttr)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        input_value: SSAValue | Operation,
+        result_type: NnMemoryType,
+        axis: int | IntegerAttr | IntAttr,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        """初始化 softmax op。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 绑定输入、结果类型、axis 与 space 属性。
+        - axis 会规整为 i64 IntegerAttr 以便 verifier 校验。
+
+        使用示例:
+        - NnSoftmaxOp(inp, result_type, axis=-1, space=NnMemorySpaceAttr.from_name("global"))
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/test_nn_dialect.py
+        - 功能实现: kernel_gen/dialect/nn.py
+        """
+        axis_attr = _normalize_i64_attr(axis, "axis")
+        super().__init__(
+            operands=[input_value],
+            result_types=[result_type],
+            attributes={"axis": axis_attr, "space": space},
+        )
+
+    def verify_(self) -> None:
+        """校验 nn.softmax 的 verifier 合同。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 调用统一的 softmax 合同校验逻辑。
+
+        使用示例:
+        - NnSoftmaxOp(inp, result_type, axis=-1, space=NnMemorySpaceAttr.from_name("global")).verify_()
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/test_nn_dialect.py
+        - 功能实现: kernel_gen/dialect/nn.py
+        """
+        _verify_softmax_op(self)
 
 
 @irdl_op_definition
@@ -1450,6 +1636,7 @@ Nn = Dialect(
         NnGeOp,
         NnBroadcastOp,
         NnTransposeOp,
+        NnSoftmaxOp,
         NnImg2col1dOp,
         NnImg2col2dOp,
         NnMatmulOp,
@@ -1474,6 +1661,7 @@ __all__ = [
     "NnGeOp",
     "NnBroadcastOp",
     "NnTransposeOp",
+    "NnSoftmaxOp",
     "NnImg2col1dOp",
     "NnImg2col2dOp",
     "NnMatmulOp",

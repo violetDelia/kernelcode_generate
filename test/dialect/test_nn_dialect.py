@@ -58,7 +58,7 @@ from kernel_gen.dialect import (
     NnSubOp,
     NnTrueDivOp,
 )
-from kernel_gen.dialect.nn import NnTransposeOp
+from kernel_gen.dialect.nn import NnSoftmaxOp, NnTransposeOp
 from kernel_gen.dialect.symbol import SymbolValueType
 
 
@@ -942,6 +942,156 @@ def test_transpose_module_round_trip() -> None:
     module = Parser(ctx, text).parse_module()
     module.verify()
     assert _print_ir(module) == text.rstrip()
+
+
+# NN-DIA-045
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-30 02:25:55 +0800
+# 最近一次运行成功时间: 2026-03-30 02:25:55 +0800
+# 功能说明: 验证 nn.softmax 在合法输入下通过 verifier。
+# 测试目的: 保证 rank/axis/shape/stride/space/element type 合法时可构造 op。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_softmax_op_verify_success
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_softmax_op_verify_success() -> None:
+    input_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(3)],
+        [IntAttr(3), IntAttr(1)],
+        element_type=Float32Type(),
+    )
+    result_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(3)],
+        [IntAttr(3), IntAttr(1)],
+        element_type=Float32Type(),
+    )
+    inp = _TestOp(result_types=[input_type]).results[0]
+    op = NnSoftmaxOp(inp, result_type, axis=-1, space=_make_space("global"))
+    op.verify()
+
+
+# NN-DIA-046
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-30 02:25:55 +0800
+# 最近一次运行成功时间: 2026-03-30 02:25:55 +0800
+# 功能说明: 验证 nn.softmax axis 越界或 rank 非法时拒绝。
+# 测试目的: 覆盖 rank<=0 与 axis 超界的 verifier 错误路径。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_softmax_op_rejects_invalid_axis_or_rank
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+@pytest.mark.parametrize(
+    ("input_type", "axis", "message"),
+    [
+        (
+            _make_simple_memory_type(
+                [IntAttr(2), IntAttr(3)],
+                [IntAttr(3), IntAttr(1)],
+                element_type=Float32Type(),
+            ),
+            2,
+            "axis-must-be-in-range",
+        ),
+        (
+            _make_simple_memory_type(
+                [],
+                [],
+                element_type=Float32Type(),
+            ),
+            0,
+            "input-rank-must-be-positive",
+        ),
+    ],
+)
+def test_softmax_op_rejects_invalid_axis_or_rank(
+    input_type: NnMemoryType,
+    axis: int,
+    message: str,
+) -> None:
+    inp = _TestOp(result_types=[input_type]).results[0]
+    op = NnSoftmaxOp(inp, input_type, axis=axis, space=_make_space("global"))
+    with pytest.raises(VerifyException, match=message):
+        op.verify()
+
+
+# NN-DIA-047
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-30 02:25:55 +0800
+# 最近一次运行成功时间: 2026-03-30 02:25:55 +0800
+# 功能说明: 验证 nn.softmax result shape/stride/space/element type 不一致时拒绝。
+# 测试目的: 覆盖 result 不匹配与空间不一致的 verifier 错误路径。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_softmax_op_rejects_result_mismatch
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+@pytest.mark.parametrize(
+    ("result_type", "space", "message"),
+    [
+        (
+            _make_simple_memory_type(
+                [IntAttr(2), IntAttr(2)],
+                [IntAttr(2), IntAttr(1)],
+                element_type=Float32Type(),
+            ),
+            "global",
+            "result-shape-must-match-input",
+        ),
+        (
+            _make_simple_memory_type(
+                [IntAttr(2), IntAttr(3)],
+                [IntAttr(1), IntAttr(1)],
+                element_type=Float32Type(),
+            ),
+            "global",
+            "result-stride-must-match-input",
+        ),
+        (
+            _make_simple_memory_type(
+                [IntAttr(2), IntAttr(3)],
+                [IntAttr(3), IntAttr(1)],
+                element_type=i32,
+            ),
+            "global",
+            "result-element-type-must-match-input-and-be-float",
+        ),
+        (
+            _make_simple_memory_type(
+                [IntAttr(2), IntAttr(3)],
+                [IntAttr(3), IntAttr(1)],
+                element_type=Float32Type(),
+                space="shared",
+            ),
+            "global",
+            "result-space-must-match-input-and-attr",
+        ),
+        (
+            _make_simple_memory_type(
+                [IntAttr(2), IntAttr(3)],
+                [IntAttr(3), IntAttr(1)],
+                element_type=Float32Type(),
+            ),
+            "shared",
+            "result-space-must-match-input-and-attr",
+        ),
+    ],
+)
+def test_softmax_op_rejects_result_mismatch(
+    result_type: NnMemoryType,
+    space: str,
+    message: str,
+) -> None:
+    input_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(3)],
+        [IntAttr(3), IntAttr(1)],
+        element_type=Float32Type(),
+    )
+    inp = _TestOp(result_types=[input_type]).results[0]
+    op = NnSoftmaxOp(inp, result_type, axis=1, space=_make_space(space))
+    with pytest.raises(VerifyException, match=message):
+        op.verify()
 
 
 # TC-NN-MM-001
