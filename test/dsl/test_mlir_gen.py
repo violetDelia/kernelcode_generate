@@ -623,7 +623,7 @@ def test_build_func_op_from_ast_forwards_config_to_visitor_and_context(
     assert captured["ctx_config"] == config
 
 
-# MGEN-003
+# MGEN-016
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
@@ -646,7 +646,7 @@ def test_build_func_op_return_type_matches_annotation() -> None:
     assert outputs[0] == expected
 
 
-# MGEN-003
+# MGEN-016
 # 创建者: 小李飞刀
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-26 22:20:00 +0800
@@ -1942,7 +1942,7 @@ def test_build_func_op_supports_symbolic_for_loop_dma_without_return(monkeypatch
     assert list(deslice_ops[0].offsets)[0] is loop_body.args[0]
 
 
-# MGEN-011
+# MGEN-011 / MGEN-022A
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-19 03:24:32 +0800
@@ -1967,7 +1967,7 @@ def test_tensor_binary_implicit_broadcast_lowering() -> None:
     assert add_op.lhs is broadcast_ops[0].result or add_op.rhs is broadcast_ops[0].result
 
 
-# MGEN-012
+# MGEN-012 / MGEN-022A
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-19 03:24:32 +0800
@@ -2081,7 +2081,7 @@ def test_build_func_op_lowers_nn_ne_with_tensor_i1_return_annotation() -> None:
         raise AssertionError("expected return type to match nn.ne result type")
 
 
-# MGEN-014
+# MGEN-014 / MGEN-022B
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-19 03:24:32 +0800

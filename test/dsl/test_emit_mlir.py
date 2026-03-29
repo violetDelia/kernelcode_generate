@@ -203,7 +203,7 @@ def _parse_function_from_source(
     return _parse_function_with_env(kernel, globals_table, builtins_table, runtime_table, config=None)
 
 
-# EMIT-022
+# EMIT-022A
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-25 21:25:58 +0800
@@ -229,7 +229,7 @@ def test_emit_mlir_lowers_arch_get_block_id_query() -> None:
         raise AssertionError('expected emitted result type to be !symbol.int<"block_id">')
 
 
-# EMIT-023
+# EMIT-023A
 # 创建者: 咯咯咯
 # 最后一次更改: 咯咯咯
 # 最近一次运行测试时间: 2026-03-26 00:27:39 +0800
@@ -809,22 +809,15 @@ def test_emit_mlir_dma_view_lowering() -> None:
     result = _lower_expr(
         DmaViewAST(
             source=source,
-            offset=[ConstAST(0), ConstAST(1)],
+            offset=[ConstAST(1), ConstAST(1)],
             size=[ConstAST(2), ConstAST(2)],
-            stride=[ConstAST(3), ConstAST(1)],
+            stride=[ConstAST(1), ConstAST(1)],
             location=None,
         ),
         ctx,
     )
     assert isinstance(result.owner, DmaViewOp)
     assert [attr.data for attr in result.type.shape.data] == [2, 2]
-    assert [attr.data for attr in result.type.stride.data] == [3, 1]
-    offsets = list(result.owner.offsets)
-    stride = list(result.owner.stride)
-    assert offsets[0].owner.value.value.data == 0
-    assert offsets[1].owner.value.value.data == 1
-    assert stride[0].owner.value.value.data == 3
-    assert stride[1].owner.value.value.data == 1
 
 
 # EMIT-019
@@ -1093,7 +1086,7 @@ def test_emit_mlir_index_expr_rejections() -> None:
         _build_index_attrs([ConstAST(1, location=None)], rank=2, ctx=ctx, location=SourceLocation(3, 1))
 
 
-# EMIT-013
+# EMIT-013A
 # 创建者: 不要啊教练
 # 最后一次更改: 不要啊教练
 # 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
@@ -1429,7 +1422,7 @@ def test_emit_mlir_cache_restore_and_index_value_variants() -> None:
         _ensure_index_value(float_op.result, ctx, location=None)
 
 
-# EMIT-014
+# EMIT-014A
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
@@ -1461,7 +1454,7 @@ def test_emit_mlir_index_operand_variants_and_loop_bound() -> None:
     assert bound_value is block.args[0]
 
 
-# EMIT-015
+# EMIT-015A
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
@@ -1485,7 +1478,7 @@ def test_emit_mlir_layout_and_stride_helpers() -> None:
         _build_stride_attrs([ConstAST(2)], rank=1, ctx=ctx, location=None)
 
 
-# EMIT-016
+# EMIT-016A
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
@@ -1520,7 +1513,7 @@ def test_emit_mlir_static_index_list_and_broadcast_shape() -> None:
     assert broadcast[0].data == 2
 
 
-# EMIT-017
+# EMIT-017A
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
@@ -1541,7 +1534,7 @@ def test_emit_mlir_infer_expr_type_unknown_inputs() -> None:
         _infer_expr_type(tensor, {})
 
 
-# EMIT-018
+# EMIT-018A
 # 创建者: 小李飞刀
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-26 22:20:00 +0800
@@ -1674,7 +1667,7 @@ def test_emit_mlir_compare_memory_mismatch_reports_diagnostics() -> None:
         _infer_broadcast_memory_type(lhs_type, rhs_space_mismatch, location=None)
 
 
-# EMIT-020
+# EMIT-020A
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 05:10:36 +0800

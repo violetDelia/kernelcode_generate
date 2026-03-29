@@ -91,7 +91,7 @@ codex-multi-agents-tmux.sh -init-env -file "agents-lists.md" -name xiaoming
 - 通过名单文件读取目标角色 `会话`、`启动设置/启动类型`、`agent session` 字段。
 - 执行 `tmux new-session -d -s <会话>` 创建会话。
   - [immutable]若启动类型为 `codex`，依次执行以下初始化命令,中间间隔"3"秒：
-    - `tmux send-keys -t <会话> "codex /resume <agent session>"`
+    - `tmux send-keys -t <会话> "codex resume <agent session>"`
     - `tmux send-keys -t <会话> ENTER`
 注意事项：
 

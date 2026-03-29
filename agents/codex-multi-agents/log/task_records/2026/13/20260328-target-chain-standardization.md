@@ -138,3 +138,64 @@
 - 复测：`pytest -q test/operation/test_operation_arch.py`，exit=`0`。
 问题列表：无。
 结论：通过。TC-OP-ARCH-014 已覆盖 `get_block_num/get_thread_num/get_subthread_num/get_dynamic_memory` 不支持路径，断言与 `_verify_target_support` 行为一致，未发现边界/异常/漏洞缺口。
+
+时间：2026-03-28 20:49:09 +0800
+任务：T-20260328-be5d1103
+任务目标：operation/arch helper target gating 修复；当前 target 不支持 get_block_num/get_thread_num/get_subthread_num 等时抛 ValueError，并闭环 TC-OP-ARCH-014 负路径。
+改动：
+- kernel_gen/operation/arch.py：新增 target registry 支持性校验与硬件 fallback helper；get_block_id/get_thread_id/get_block_num/get_thread_num/get_subthread_num/get_dynamic_memory/launch_kernel 调用前执行支持性校验。
+- kernel_gen/operation/arch.py：get_block_num/get_thread_num/get_subthread_num 读取 target hardware 数值；get_dynamic_memory 对 SM/LM/TSM/TLM 读取硬件 size，缺失回退为 `?`。
+验证：
+- pytest -q test/operation/test_operation_arch.py，exit=0
+结论：
+- 实现与测试闭环通过，target gating 与硬件回退行为符合 TC-OP-ARCH-013/014 预期，未发现阻塞。
+
+时间：2026-03-28 21:02:05 +0800
+任务：T-20260328-71ed8998
+任务目标：复审 `arch.get_block_num/get_thread_num/get_subthread_num` 的 target 支持性校验与硬件回退是否符合 spec，核对负路径测试是否齐全。
+改动：
+- 审查范围：`spec/operation/arch.md`、`kernel_gen/operation/arch.py`、`test/operation/test_operation_arch.py`。
+- 复测：`pytest -q test/operation/test_operation_arch.py`，exit=`0`（`14 passed in 0.32s`）。
+问题列表：
+1. 文件/接口：`spec/operation/arch.md`（`get_block_num/get_thread_num/get_subthread_num` 小节）
+   - 现象：spec 未描述 target registry 支持性校验与硬件值优先/缺失回退语义，也未列出 `TC-OP-ARCH-013/014` 的映射；实现与测试已覆盖 target gate 与硬件 fallback。
+   - 风险：spec-实现-测试口径不一致，后续维护可能误删 target gate 或硬件 fallback；测试用例与 spec 映射不可追溯，形成契约漂移。
+   - 建议：新增 spec 修复任务，在三个 helper 小节补齐 target registry 支持性与硬件回退语义，并将 `TC-OP-ARCH-013/014` 映射到对应测试（`test_arch_queries_prefer_target_hardware_with_fallback` / `test_arch_queries_reject_unsupported_target_ops`）。
+漏洞排查结果：
+- 输入校验绕过：`_verify_target_registry_support` 对不支持 op 抛错，未发现可绕过路径；但 spec 未覆盖该校验语义。
+- 类型/形状绕过：`get_*_num` 返回 `SymbolDim`，`get_dynamic_memory` 的空间校验仍在；未发现新绕过。
+- 边界越界：硬件值使用路径未限定数值范围，依赖 target registry 数据；spec 缺失导致不可追溯。
+- 错误处理缺失：不支持 op 已抛 ValueError；spec 未明确异常口径。
+- 状态污染：当前 target 通过 registry 注入，未发现跨调用污染，但 spec 未定义清理/回退语义。
+- 资源释放问题：无持久资源分配。
+改进建议：
+- 需补齐 spec 中 target registry 支持性与硬件回退的明确语义与测试映射；修复前不应判定通过。
+结论：需修改。原因：spec 未覆盖 target gate 与硬件回退语义，且缺失 `TC-OP-ARCH-013/014` 映射，导致 spec-实现-测试闭环不完整。
+
+时间：2026-03-28 21:14:03 +0800
+任务：T-20260328-6a795e2c
+任务目标：复审 spec/operation/arch.md 中 target registry 支持性校验与硬件回退语义、TC-OP-ARCH-013/014 映射是否与实现/测试闭环一致。
+改动：
+- 审查范围：`spec/operation/arch.md`、`kernel_gen/operation/arch.py`、`test/operation/test_operation_arch.py`。
+- 复测：`pytest -q test/operation/test_operation_arch.py -k "test_arch_queries_prefer_target_hardware_with_fallback or test_arch_queries_reject_unsupported_target_ops"`，exit=`0`（`2 passed, 12 deselected`）。
+问题列表：无。
+漏洞排查结果：
+- 输入校验绕过：`_verify_target_registry_support` 覆盖所有 arch helper 调用前校验，未发现绕过路径。
+- 类型/形状绕过：`get_*_num` 返回 `SymbolDim` 或硬件静态值，`get_dynamic_memory` 对空间/shape 约束清晰；未发现绕过。
+- 边界越界：硬件值回退与缺失回退路径具备测试覆盖；未发现未检边界。
+- 错误处理缺失：不支持 op 抛 `ValueError` 且包含 op 名；测试覆盖。
+- 状态污染：target registry 使用显式设置/清理，测试包含恢复；未发现污染。
+- 资源释放问题：该层无持久资源分配。
+改进建议：未发现额外改进点。
+结论：通过。spec 已补齐 target registry 支持性与硬件回退语义并映射 `TC-OP-ARCH-013/014`，与实现/测试一致。
+
+时间：2026-03-28 21:09:13 +0800
+任务：T-20260328-03cf92d8
+任务目标：在 `spec/operation/arch.md` 补充 target registry 支持性校验与硬件回退语义，并补齐 `TC-OP-ARCH-013/014` 映射；不改实现/测试。
+改动：
+- 更新 `/home/lfr/kernelcode_generate/wt-20260328-operation-arch-target-gate-fix/spec/operation/arch.md`：补齐 `arch` helper 的 current target 支持性校验边界，分别在 `get_block_num/get_thread_num/get_subthread_num/get_dynamic_memory` 小节补入硬件静态值优先、缺失时回退到符号/动态形态的公开语义。
+- 更新 `TC-OP-ARCH-013/014` 的测试映射：明确对应 `test_arch_queries_prefer_target_hardware_with_fallback` 与 `test_arch_queries_reject_unsupported_target_ops`，并把 helper 小节与测试目标口径对齐。
+- 验证：
+  - `rg -n 'spec/target/registry.md|kernel_gen/target/registry.py|TC-OP-ARCH-013|TC-OP-ARCH-014|test_arch_queries_prefer_target_hardware_with_fallback|test_arch_queries_reject_unsupported_target_ops|arch.get_block_num|arch.get_thread_num|arch.get_subthread_num|arch.get_dynamic_memory' /home/lfr/kernelcode_generate/wt-20260328-operation-arch-target-gate-fix/spec/operation/arch.md`，exit=`0`
+  - `pytest -q test/operation/test_operation_arch.py -k "test_arch_queries_prefer_target_hardware_with_fallback or test_arch_queries_reject_unsupported_target_ops"`（worktree=`/home/lfr/kernelcode_generate/wt-20260328-operation-arch-target-gate-fix`），exit=`0`
+结论：完成。`spec/operation/arch.md` 已收敛到当前实现与测试可证明范围，target registry 支持性校验、硬件回退语义与 `TC-OP-ARCH-013/014` 映射闭环一致；建议下一步进入审查，复核 spec/实现/测试三者逐项对应关系。

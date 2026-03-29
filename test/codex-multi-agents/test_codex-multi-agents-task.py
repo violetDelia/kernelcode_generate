@@ -639,6 +639,7 @@ def test_dispatch_with_message_sends_talk_success(tmp_path: Path) -> None:
     env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
     env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
     env["CODEX_MULTI_AGENTS_CONFIG"] = str(config)
+    env["CODEX_MULTI_AGENTS_DISPATCH_INIT_ROLL"] = "0"
     result = run_script(
         "-file",
         str(todo),
@@ -689,6 +690,7 @@ def test_dispatch_with_message_failure_keeps_dispatch_result(tmp_path: Path) -> 
     env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
     env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
     env["CODEX_MULTI_AGENTS_CONFIG"] = str(config)
+    env["CODEX_MULTI_AGENTS_DISPATCH_INIT_ROLL"] = "0"
     result = run_script(
         "-file",
         str(todo),
@@ -736,6 +738,7 @@ def test_dispatch_runs_init_before_dispatch(tmp_path: Path) -> None:
     env = os.environ.copy()
     env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
     env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["CODEX_MULTI_AGENTS_DISPATCH_INIT_ROLL"] = "0"
     result = run_script(
         "-file",
         str(todo),

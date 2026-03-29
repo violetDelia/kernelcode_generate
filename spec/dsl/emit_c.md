@@ -38,18 +38,6 @@
 - 当 value 类型为 `!symbol.int<"...">` 时，`target=cpu` 默认映射为 `long long`。
 - 当前规范恢复范围仅覆盖 `test/dsl/test_emit_c.py` 已定义的用例映射，不在本阶段扩展到其他 dialect/op。
 
-### 支持矩阵
-
-| 范围 | 支持/限制 | 对应测试 |
-| --- | --- | --- |
-| `arith.addi` / `arith.subi` | 仅支持整型与 `index`；生成赋值语句并复用命名策略；不支持 `arith.addf` 或浮点算术，必须抛出 `EmitCError`。 | EC-001、EC-005 |
-| `arith.cmpi` | 仅支持 `eq` 谓词；返回布尔表达式；其他谓词必须报错。 | EC-002 |
-| 常量与参数 value | 支持整型/浮点常量与 `BlockArgument` 表达式；不支持 tensor 常量；未绑定参数名需回退为 `arg{index}`。 | EC-002 |
-| `scf.for` / `func.return` | 仅支持 index 迭代变量与单块循环体；`func.return` 允许 0 或 1 返回值，2+ 必须报错。 | EC-003 |
-| `dma.load` / `dma.store` | 仅支持 unit-tile（`shape=[1, 1]` 且 `stride=[1, 1]`）访存；`dma.load` 来源必须是合法 memory value；`dma.store` 仅支持 unit-tile load 结果作为源；非法依赖必须报错。 | EC-004 |
-| `symbol.add` | 仅 `target=cpu`；生成 `long long` 标量表达式/赋值；非 cpu target 必须报错。 | EC-007、EC-008 |
-| 未支持 op / 依赖 | 不支持的 op 或非法 value 依赖必须报错并包含 op 名称。 | EC-005、EC-006 |
-
 ## 公开接口
 
 ### `EmitCContext(target, indent="    ", naming=None, type_converter=None, config=None)`
