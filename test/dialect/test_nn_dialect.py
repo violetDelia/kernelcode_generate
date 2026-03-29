@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 from xdsl.context import Context
-from xdsl.dialects.builtin import ArrayAttr, Builtin, IntAttr, IntegerType, ModuleOp, StringAttr, i32
+from xdsl.dialects.builtin import ArrayAttr, Builtin, Float32Type, IntAttr, IntegerType, ModuleOp, StringAttr, i32
 from xdsl.dialects.test import Test, TestOp as _TestOp
 from xdsl.ir import Attribute, Operation
 from xdsl.parser import Parser
@@ -59,6 +59,7 @@ from kernel_gen.dialect import (
     NnTrueDivOp,
 )
 from kernel_gen.dialect.nn import NnTransposeOp
+from kernel_gen.dialect.symbol import SymbolValueType
 
 
 def _build_context() -> Context:
@@ -278,6 +279,46 @@ def test_add_op_verify_success() -> None:
     memory_type = _make_memory_type()
     lhs = _TestOp(result_types=[memory_type]).results[0]
     rhs = _TestOp(result_types=[memory_type]).results[0]
+    op = NnAddOp(lhs, rhs, memory_type, _make_space("global"))
+    op.verify()
+
+
+# NN-ADD-A1-001
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 nn.add 支持 memory + const scalar。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_add_op_accepts_memory_const_rhs
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_add_op_accepts_memory_const_rhs() -> None:
+    memory_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(3)],
+        [IntAttr(3), IntAttr(1)],
+        space="global",
+    )
+    lhs = _TestOp(result_types=[memory_type]).results[0]
+    rhs = _TestOp(result_types=[i32]).results[0]
+    op = NnAddOp(lhs, rhs, memory_type, _make_space("global"))
+    op.verify()
+
+
+# NN-ADD-A1-002
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 nn.add 支持 memory + symbol.int。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_add_op_accepts_memory_symbol_rhs
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_add_op_accepts_memory_symbol_rhs() -> None:
+    memory_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(3)],
+        [IntAttr(3), IntAttr(1)],
+        space="global",
+    )
+    lhs = _TestOp(result_types=[memory_type]).results[0]
+    rhs = _TestOp(result_types=[SymbolValueType.from_expr("K")]).results[0]
     op = NnAddOp(lhs, rhs, memory_type, _make_space("global"))
     op.verify()
 
@@ -537,17 +578,43 @@ def test_compare_ops_verify_success(op_cls: type[Operation]) -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-22 13:09:11 +0800
 # 最近一次运行成功时间: 2026-03-22 13:09:11 +0800
-# 功能说明: 验证 nn.add 在非 nn.memory operand 下会触发 verifier。
-# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_add_op_rejects_non_memory_operand
+# 功能说明: 验证 nn.add 在纯 scalar operand 下会触发 verifier。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_add_op_rejects_pure_scalar_operands
 # 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
-def test_add_op_rejects_non_memory_operand() -> None:
-    memory_type = _make_memory_type()
+def test_add_op_rejects_pure_scalar_operands() -> None:
+    result_type = _make_simple_memory_type([IntAttr(2), IntAttr(3)], [IntAttr(3), IntAttr(1)], space="global")
     lhs = _TestOp(result_types=[i32]).results[0]
-    rhs = _TestOp(result_types=[memory_type]).results[0]
-    op = NnAddOp(lhs, rhs, memory_type, _make_space("global"))
-    with pytest.raises(VerifyException, match="base attribute nn.memory"):
+    rhs = _TestOp(result_types=[Float32Type()]).results[0]
+    op = NnAddOp(lhs, rhs, result_type, _make_space("global"))
+    with pytest.raises(VerifyException, match="at least one nn.memory operand"):
+        op.verify()
+
+
+# NN-ADD-A1-003
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 nn.add 在 memory+scalar 场景 result shape 不一致会触发 verifier。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_add_op_rejects_mixed_result_shape_mismatch
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_add_op_rejects_mixed_result_shape_mismatch() -> None:
+    memory_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(3)],
+        [IntAttr(3), IntAttr(1)],
+        space="global",
+    )
+    result_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(2)],
+        [IntAttr(2), IntAttr(1)],
+        space="global",
+    )
+    lhs = _TestOp(result_types=[memory_type]).results[0]
+    rhs = _TestOp(result_types=[i32]).results[0]
+    op = NnAddOp(lhs, rhs, result_type, _make_space("global"))
+    with pytest.raises(VerifyException, match="result shape must match memory operand"):
         op.verify()
 
 

@@ -108,8 +108,8 @@ mem_ty = NnMemoryType(shape, stride, element_type, space)
 
 参数说明：
 
-- `lhs: !nn.memory<...>`：左操作数。
-- `rhs: !nn.memory<...>`：右操作数。
+- `lhs: !nn.memory<...> | i32 | f16 | f32 | !symbol.int`：左操作数。
+- `rhs: !nn.memory<...> | i32 | f16 | f32 | !symbol.int`：右操作数。
 - `result: !nn.memory<...>`：结果类型。
 - `space: #nn.space<...>`：op 的空间属性。
 
@@ -117,17 +117,24 @@ mem_ty = NnMemoryType(shape, stride, element_type, space)
 
 ```python
 op = NnAddOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
+# mixed 形态示例：memory + scalar/symbol
+op = NnAddOp(lhs_memory, rhs_scalar_or_symbol, result_type, NnMemorySpaceAttr.from_name("global"))
 ```
 
 注意事项：
 
-- `lhs/rhs/result` 必须为 `NnMemoryType`。
-- `shape/stride/space` 必须一致。
+- `result` 必须为 `NnMemoryType`，且 `lhs/rhs` 至少一侧必须为 `NnMemoryType`。
+- 当 `lhs/rhs` 均为 `NnMemoryType` 时，`shape/stride/space` 必须一致。
+- 当为 `memory + scalar/symbol` 时，`result.shape/stride/space` 必须与 memory operand 一致。
+- `scalar/symbol` 仅支持 `i32/f16/f32/!symbol.int`，其中 `!symbol.int` 按 `i32` 参与 dtype promotion。
+- dtype promotion 顺序固定为 `i32 < f16 < f32`。
 - 不支持隐式 broadcast。
 
 返回与限制：
 
-- 返回 `NnAddOp`；`result.element_type` 必须与 operand 一致。
+- 返回 `NnAddOp`：
+- memory+memory 形态下，`result.element_type` 必须与 operand 一致；
+- memory+scalar/symbol 形态下，`result.element_type` 必须等于 promotion 后类型。
 
 ### nn.sub
 
@@ -553,7 +560,7 @@ op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 
 - 验证 `NnMemorySpaceAttr` 的合法取值、非法输入与文本 round-trip。
 - 验证 `NnMemoryType` 的字段完整性、rank 约束、`shape/stride` 合法性与文本 round-trip。
-- 验证 `nn.add/sub/mul/truediv/eq/ne/lt/le/gt/ge` 的 operand/result/type/space verifier 约束。
+- 验证 `nn.add/sub/mul/truediv/eq/ne/lt/le/gt/ge` 的 operand/result/type/space verifier 约束，其中 `nn.add` 覆盖 memory+scalar/symbol 与 dtype promotion 规则。
 - 验证 `nn.broadcast` 的显式广播规则、space 一致性、element type 一致性与文本 round-trip。
 - 验证 `nn.transpose` 的 perm/shape/stride/space/element type 约束与文本 round-trip。
 - 验证 `nn.img2col1d` 的 operand rank、属性合法性、result rank/type/space 与方言合同约束。
@@ -594,7 +601,7 @@ op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 | NN-DIA-027 | memory type space 不是 `nn.space` | `test_memory_type_parse_rejects_non_space_attr` |
 | NN-DIA-028 | memory type 非法维度条目 | `test_memory_type_rejects_invalid_dim_entry` |
 | NN-DIA-029 | stride `?` 与 shape `?` 同位拒绝 | `test_memory_type_rejects_stride_question_dim_pair` |
-| NN-DIA-030 | `nn.add` 非 memory operand 拒绝 | `test_add_op_rejects_non_memory_operand` |
+| NN-DIA-030 | `nn.add` 纯 scalar/symbol operand 拒绝 | `test_add_op_rejects_pure_scalar_operands` |
 | NN-DIA-031 | `nn.add` space/stride/element type 不一致 | `test_add_op_rejects_type_mismatch` |
 | NN-DIA-032 | 算术 op(sub/mul/truediv) 合法路径 | `test_arithmetic_ops_verify_success` |
 | NN-DIA-033 | 比较 op(ne/lt/le/gt/ge) 合法路径 | `test_compare_ops_verify_success` |
@@ -604,5 +611,8 @@ op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 | NN-DIA-037 | `nn.transpose` perm 非法 | `test_transpose_op_rejects_invalid_perm` |
 | NN-DIA-038 | `nn.transpose` shape/stride 不匹配 | `test_transpose_op_result_mismatch` |
 | NN-DIA-039 | transpose 模块 round-trip | `test_transpose_module_round_trip` |
-| NN-DIA-040 | `nn.img2col1d` 合同（operand/attrs/result/verifier） | `test_nn_dialect_img2col1d_contract_v1` |
-| NN-DIA-041 | `nn.img2col2d` 合同（operand/attrs/result/verifier） | `test_nn_dialect_img2col2d_contract_v1` |
+| NN-DIA-040 | `nn.add` 接受 memory + const scalar 并做 promotion | `test_add_op_accepts_memory_const_rhs` |
+| NN-DIA-041 | `nn.add` 接受 memory + symbol.int 并做 promotion | `test_add_op_accepts_memory_symbol_rhs` |
+| NN-DIA-042 | `nn.add` mixed 形态 result shape 不匹配拒绝 | `test_add_op_rejects_mixed_result_shape_mismatch` |
+| NN-DIA-043 | `nn.img2col1d` 合同（operand/attrs/result/verifier） | `test_nn_dialect_img2col1d_contract_v1` |
+| NN-DIA-044 | `nn.img2col2d` 合同（operand/attrs/result/verifier） | `test_nn_dialect_img2col2d_contract_v1` |

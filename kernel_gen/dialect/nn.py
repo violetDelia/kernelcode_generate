@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from xdsl.dialects.builtin import ArrayAttr, IntAttr, IntegerAttr, IntegerType, StringAttr, i1
+from xdsl.dialects.builtin import ArrayAttr, Float16Type, Float32Type, IntAttr, IntegerAttr, IntegerType, StringAttr, i1, i32
 from xdsl.ir import Attribute, Dialect, Operation, ParametrizedAttribute, SSAValue, TypeAttribute
 from xdsl.irdl import (
     IRDLOperation,
@@ -352,6 +352,143 @@ def _verify_binary_memory_op(op: "_BaseNnBinaryOp", compare_result: bool) -> Non
         _raise_verify_error("nn arithmetic result element_type must match operand element_type")
 
 
+_ADD_DTYPE_ORDER = {"i32": 0, "f16": 1, "f32": 2}
+_ADD_DTYPE_ATTR = {"i32": i32, "f16": Float16Type(), "f32": Float32Type()}
+
+
+def _is_symbol_int_type(attr: Attribute) -> bool:
+    """判断 attribute 是否为 symbol.int。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅通过 `name` 字段判断是否为 `symbol.int` 类型，避免 nn/symbol 循环依赖。
+
+    使用示例:
+    - _is_symbol_int_type(SymbolValueType.from_expr("K"))
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    return getattr(attr, "name", None) == "symbol.int"
+
+
+def _resolve_add_dtype_key(attr: Attribute) -> str | None:
+    """解析 nn.add 标量/element_type 的 promotion key。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 支持 i32/f16/f32 三种类型；
+    - `!symbol.int` 视作 i32 参与 promotion。
+
+    使用示例:
+    - _resolve_add_dtype_key(i32)
+    - _resolve_add_dtype_key(SymbolValueType.from_expr("K"))
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    if _is_symbol_int_type(attr):
+        return "i32"
+    if isinstance(attr, IntegerType) and attr.width.data == 32:
+        return "i32"
+    if isinstance(attr, Float16Type):
+        return "f16"
+    if isinstance(attr, Float32Type):
+        return "f32"
+    return None
+
+
+def _promote_add_dtype(lhs_type: Attribute, rhs_type: Attribute) -> Attribute | None:
+    """计算 nn.add 的 dtype promotion 结果类型。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 按 i32 < f16 < f32 顺序进行 promotion。
+
+    使用示例:
+    - _promote_add_dtype(i32, Float16Type())
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    lhs_key = _resolve_add_dtype_key(lhs_type)
+    rhs_key = _resolve_add_dtype_key(rhs_type)
+    if lhs_key is None or rhs_key is None:
+        return None
+    promoted_key = lhs_key if _ADD_DTYPE_ORDER[lhs_key] >= _ADD_DTYPE_ORDER[rhs_key] else rhs_key
+    return _ADD_DTYPE_ATTR[promoted_key]
+
+
+def _verify_add_op(op: "NnAddOp") -> None:
+    """校验 nn.add，支持 memory + scalar/symbol。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 允许 `nn.memory + scalar`、`scalar + nn.memory`、`nn.memory + !symbol.int`；
+    - 至少一侧必须为 `nn.memory`，结果的 shape/stride/space 继承 memory operand；
+    - scalar dtype promotion 固定为 i32 < f16 < f32。
+
+    使用示例:
+    - _verify_add_op(op)
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    lhs_value = SSAValue.get(op.lhs)
+    rhs_value = SSAValue.get(op.rhs)
+    lhs_type = lhs_value.type
+    rhs_type = rhs_value.type
+    result_type = _verify_memory_type(op.result.type, "result")
+
+    lhs_is_memory = isinstance(lhs_type, NnMemoryType)
+    rhs_is_memory = isinstance(rhs_type, NnMemoryType)
+    if not lhs_is_memory and not rhs_is_memory:
+        _raise_verify_error("nn.add requires at least one nn.memory operand")
+
+    op.space.verify()
+    if lhs_is_memory and rhs_is_memory:
+        _verify_binary_memory_op(op, compare_result=False)
+        return
+
+    memory_type = _verify_memory_type(lhs_type if lhs_is_memory else rhs_type, "memory operand")
+    if memory_type.space.space.data != op.space.space.data:
+        _raise_verify_error("nn.add attribute space must match memory operand space")
+    if result_type.space.space.data != memory_type.space.space.data:
+        _raise_verify_error("nn.add result space must match memory operand")
+
+    if result_type.shape != memory_type.shape:
+        _raise_verify_error("nn.add result shape must match memory operand")
+    if result_type.stride != memory_type.stride:
+        _raise_verify_error("nn.add result stride must match memory operand")
+
+    scalar_type = rhs_type if lhs_is_memory else lhs_type
+    promoted_type = _promote_add_dtype(memory_type.element_type, scalar_type)
+    if promoted_type is None:
+        _raise_verify_error("nn.add scalar element_type must be i32/f16/f32 or symbol.int")
+    if result_type.element_type != promoted_type:
+        _raise_verify_error("nn.add result element_type must match promoted element_type")
+
+
 def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
     """判断两个维度是否语义一致。
 
@@ -646,8 +783,28 @@ class NnAddOp(_BaseNnBinaryOp):
 
     name = "nn.add"
 
+    lhs = operand_def(Attribute)
+    rhs = operand_def(Attribute)
+
     def verify_(self) -> None:
-        _verify_binary_memory_op(self, compare_result=False)
+        """校验 nn.add 的 memory/scalar 组合。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 支持 memory+scalar/symbol 的 verifier 校验。
+
+        使用示例:
+        - NnAddOp(lhs, rhs, result_type, space).verify_()
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/test_nn_dialect.py
+        - 功能实现: kernel_gen/dialect/nn.py
+        """
+
+        _verify_add_op(self)
 
 
 @irdl_op_definition
