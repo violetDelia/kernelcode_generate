@@ -1765,31 +1765,26 @@ def conv(
     )
 
 
-def img2col(
+def img2col1d(
     value: object,
-    kh: int | SymbolDim,
     kw: int | SymbolDim,
-    sh: int | SymbolDim,
-    sw: int | SymbolDim,
-    dh: int | SymbolDim,
-    dw: int | SymbolDim,
-    ph: int | SymbolDim,
-    pw: int | SymbolDim,
-    pl: int | SymbolDim,
-    pr: int | SymbolDim,
+    sw: int | SymbolDim = 1,
+    dw: int | SymbolDim = 1,
+    pl: int | SymbolDim = 0,
+    pr: int | SymbolDim = 0,
 ) -> Memory:
-    """将四维输入按卷积窗口展开为列矩阵。
+    """将三维输入按一维窗口展开为列矩阵。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 校验输入类型与 rank。
-    - 校验 kernel/stride/dilation/padding 参数。
-    - 返回 img2col 展开后的 Memory 描述。
+    - 校验 kw/sw/dw 与 padding 参数。
+    - 返回 img2col1d 展开后的 Memory 描述。
 
     使用示例:
-    - img2col(Memory([1, 3, 5, 5], NumericType.Float32), 3, 3, 1, 1, 1, 1, 1, 1, 1, 1)
+    - img2col1d(Memory([1, 3, 5], NumericType.Float32), kw=3, sw=1, dw=1, pl=1, pr=1)
 
     关联文件:
     - spec: spec/operation/nn.md
@@ -1800,7 +1795,87 @@ def img2col(
         raise TypeError(
             _ERROR_TEMPLATE.format(
                 scene="nn.img2col 参数校验",
-                expected="img2col value must be Memory",
+                expected="img2col1d value must be Memory",
+                actual=type(value).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
+    if len(value.shape) != 3:
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.img2col 参数校验",
+                expected="img2col1d value must be rank-3 Memory",
+                actual=f"rank={len(value.shape)}",
+                action=_ERROR_ACTION,
+            )
+        )
+
+    kw_dim = _normalize_img2col_param("kw", kw, allow_zero=False)
+    sw_dim = _normalize_img2col_param("sw", sw, allow_zero=False)
+    dw_dim = _normalize_img2col_param("dw", dw, allow_zero=False)
+    pl_dim = _normalize_img2col_param("pl", pl, allow_zero=True)
+    pr_dim = _normalize_img2col_param("pr", pr, allow_zero=True)
+
+    n_dim, c_dim, w_dim = value.shape.get_shape()
+    w_out = _img2col_output_dim(w_dim, kw_dim, sw_dim, dw_dim, pl_dim, pr_dim)
+
+    w_out_value = w_out.get_value()
+    if isinstance(w_out_value, int) and w_out_value <= 0:
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.img2col 参数校验",
+                expected="img2col1d output width must be positive",
+                actual=str(w_out_value),
+                action=_ERROR_ACTION,
+            )
+        )
+
+    out_shape = SymbolShape([n_dim, c_dim * kw_dim, w_out])
+    return Memory(
+        out_shape,
+        value.dtype,
+        space=value.space,
+        stride=_build_add_stride(out_shape),
+        format=Farmat.Norm,
+    )
+
+
+def img2col2d(
+    value: object,
+    kh: int | SymbolDim,
+    kw: int | SymbolDim,
+    sh: int | SymbolDim = 1,
+    sw: int | SymbolDim = 1,
+    dh: int | SymbolDim = 1,
+    dw: int | SymbolDim = 1,
+    ph: int | SymbolDim = 0,
+    pw: int | SymbolDim = 0,
+    pl: int | SymbolDim = 0,
+    pr: int | SymbolDim = 0,
+) -> Memory:
+    """将四维输入按二维窗口展开为列矩阵。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 校验输入类型与 rank。
+    - 校验 kernel/stride/dilation/padding 参数。
+    - 返回 img2col2d 展开后的 Memory 描述。
+
+    使用示例:
+    - img2col2d(Memory([1, 3, 5, 5], NumericType.Float32), 3, 3, 1, 1, 1, 1, 1, 1, 1, 1)
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    if not isinstance(value, Memory):
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.img2col 参数校验",
+                expected="img2col2d value must be Memory",
                 actual=type(value).__name__,
                 action=_ERROR_ACTION,
             )
@@ -1809,7 +1884,7 @@ def img2col(
         raise ValueError(
             _ERROR_TEMPLATE.format(
                 scene="nn.img2col 参数校验",
-                expected="img2col value must be rank-4 Memory",
+                expected="img2col2d value must be rank-4 Memory",
                 actual=f"rank={len(value.shape)}",
                 action=_ERROR_ACTION,
             )
@@ -1835,7 +1910,7 @@ def img2col(
         raise ValueError(
             _ERROR_TEMPLATE.format(
                 scene="nn.img2col 参数校验",
-                expected="img2col output height must be positive",
+                expected="img2col2d output height must be positive",
                 actual=str(h_out_value),
                 action=_ERROR_ACTION,
             )
@@ -1845,7 +1920,7 @@ def img2col(
         raise ValueError(
             _ERROR_TEMPLATE.format(
                 scene="nn.img2col 参数校验",
-                expected="img2col output width must be positive",
+                expected="img2col2d output width must be positive",
                 actual=str(w_out_value),
                 action=_ERROR_ACTION,
             )
@@ -1858,6 +1933,46 @@ def img2col(
         space=value.space,
         stride=_build_add_stride(out_shape),
         format=Farmat.Norm,
+    )
+
+
+def img2col(
+    value: object,
+    kh: int | SymbolDim,
+    kw: int | SymbolDim,
+    sh: int | SymbolDim,
+    sw: int | SymbolDim,
+    dh: int | SymbolDim,
+    dw: int | SymbolDim,
+    ph: int | SymbolDim,
+    pw: int | SymbolDim,
+    pl: int | SymbolDim,
+    pr: int | SymbolDim,
+) -> Memory:
+    """禁用笼统 img2col 公开入口。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 禁止继续使用 img2col 作为公开入口。
+    - 请改用 img2col1d 或 img2col2d。
+
+    使用示例:
+    - img2col(value, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)  # 将抛出异常
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    raise ValueError(
+        _ERROR_TEMPLATE.format(
+            scene="nn.img2col 参数校验",
+            expected="img2col is forbidden public name",
+            actual="img2col called",
+            action="请改用 img2col1d/img2col2d",
+        )
     )
 
 
@@ -1971,7 +2086,8 @@ __all__ = [
     "tanh",
     "hard_sigmoid",
     "matmul",
-    "img2col",
+    "img2col1d",
+    "img2col2d",
     "broadcast",
     "broadcast_to",
 ]
