@@ -2,13 +2,13 @@
 
 ## 功能简介
 
-定义 CPU 后端 include/cpu 头文件规范，覆盖 `include/cpu/Memory.h` 与 `include/cpu/Nn.h` 的公开接口、行为与约束。当前基线要求 `cpu::Memory<T>` 使用运行期 `rank`，并以 `MAX_DIM=8` 作为内部固定上限；逐元素/显式 broadcast 与 `img2col1d/img2col2d` CPU 叶子接口语义仍由 CPU include 层实现负责承接。
+定义 CPU 后端 include/cpu 头文件规范，覆盖 `include/cpu/Memory.h` 与 `include/cpu/Nn.h` 的公开接口、行为与约束。当前基线要求 `cpu::Memory<T>` 使用运行期 `rank`，并以 `MAX_DIM=8` 作为内部固定上限；逐元素/显式 broadcast、`add` 的 scalar overload（`Memory+scalar` / `scalar+Memory`）与 `img2col1d/img2col2d` CPU 叶子接口语义仍由 CPU include 层实现负责承接。
 
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
 - 最后一次更改：`朽木露琪亚`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/include/cpu/cpu.md`](../../../spec/include/cpu/cpu.md)
 - `功能实现`：[`include/cpu/Memory.h`](../../../include/cpu/Memory.h)、[`include/cpu/Nn.h`](../../../include/cpu/Nn.h)
 - `test`：[`test/include/cpu/test_memory.py`](../../../test/include/cpu/test_memory.py)、[`test/include/cpu/test_nn.py`](../../../test/include/cpu/test_nn.py)
@@ -30,7 +30,7 @@
 
 - `cpu::Memory<T>` 以运行期 `rank` 描述维度，并在内部以 `MAX_DIM=8` 保存 `shape/stride`；调用方必须满足前置条件 `0 < rank <= 8`，实现不得对 `rank > 8` 做静默截断。
 - 公开接口均为纯头文件模板与内联实现，不提供动态分配、异常或运行时边界检查。
-- 逐元素与比较算子要求输入与输出形状一致，广播仅支持显式 `broadcast`，不提供隐式广播或标量重载。
+- 逐元素与比较算子要求输入与输出形状一致，广播仅支持显式 `broadcast`，不提供隐式广播；仅 `cpu::add` 允许 `Memory+scalar` / `scalar+Memory` 两个公开 overload。
 - `img2col1d/img2col2d` 只定义 CPU include 层叶子接口，不反向规定 AST 节点类型、`nn dialect` 运行时类型、`build_func_op(...)` 结构或 pass 名称。
 - 禁止新增笼统 `cpu::img2col(...)` 公开名；CPU include 层只公开 `cpu::img2col1d(...)` 与 `cpu::img2col2d(...)`。
 - 运行时错误由调用方规避；接口返回 `void`，不提供状态码。
@@ -485,6 +485,70 @@ cpu::add(lhs, rhs, out);
 
 - 返回类型：`void`。
 - 返回语义：结果写入 `out`。
+- 限制条件：输入不满足约束时行为未定义。
+
+### `cpu::add(lhs, rhs_scalar, out)`
+
+功能说明：
+
+- 对 `cpu::Memory<T>` 与标量 `T` 执行逐元素加法（`Memory+scalar` overload）。
+
+参数说明：
+
+- `lhs (const cpu::Memory<T>&)`：左操作数视图。
+- `rhs_scalar (T)`：右操作数标量。
+- `out (cpu::Memory<T>&)`：输出视图。
+
+使用示例：
+
+```cpp
+// Memory + scalar：对 lhs 每个元素加上同一个标量值。
+cpu::add(lhs, 3.0f, out);
+```
+
+注意事项：
+
+- 公开 overload 契约为 `Memory+scalar`，不等价于隐式 broadcast API。
+- `lhs/out` 的运行期 `rank`、`shape` 与 `stride` 需保持一致。
+- `out` 的 `space/format` 应与 `lhs` 一致；接口不做运行时检查。
+- `rhs_scalar` 仅表示单个标量值，不携带独立 `shape/stride/space` 语义。
+
+返回与限制：
+
+- 返回类型：`void`。
+- 返回语义：结果写入 `out`，元素语义为 `out[i] = lhs[i] + rhs_scalar`。
+- 限制条件：输入不满足约束时行为未定义。
+
+### `cpu::add(lhs_scalar, rhs, out)`
+
+功能说明：
+
+- 对标量 `T` 与 `cpu::Memory<T>` 执行逐元素加法（`scalar+Memory` overload）。
+
+参数说明：
+
+- `lhs_scalar (T)`：左操作数标量。
+- `rhs (const cpu::Memory<T>&)`：右操作数视图。
+- `out (cpu::Memory<T>&)`：输出视图。
+
+使用示例：
+
+```cpp
+// scalar + Memory：对 rhs 每个元素加上同一个标量值。
+cpu::add(3.0f, rhs, out);
+```
+
+注意事项：
+
+- 公开 overload 契约为 `scalar+Memory`，不等价于隐式 broadcast API。
+- `rhs/out` 的运行期 `rank`、`shape` 与 `stride` 需保持一致。
+- `out` 的 `space/format` 应与 `rhs` 一致；接口不做运行时检查。
+- `lhs_scalar` 仅表示单个标量值，不携带独立 `shape/stride/space` 语义。
+
+返回与限制：
+
+- 返回类型：`void`。
+- 返回语义：结果写入 `out`，元素语义为 `out[i] = lhs_scalar + rhs[i]`。
 - 限制条件：输入不满足约束时行为未定义。
 
 ### `cpu::sub(lhs, rhs, out)`

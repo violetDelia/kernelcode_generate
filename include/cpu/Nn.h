@@ -7,7 +7,7 @@
 - cpu::add(A, B, C);
 
 创建者: 神秘人
-最后修改人: 朽木露琪亚
+最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
@@ -294,6 +294,58 @@ void apply_binary(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out, Op
 
 /*
 功能说明:
+- 统一执行逐元素二元算子（Memory + scalar）。
+
+使用示例:
+- cpu::detail::apply_binary_scalar_rhs(lhs, 3.0f, out, [](float a, float b) { return a + b; });
+
+创建者: 金铲铲大作战
+最后修改人: 金铲铲大作战
+
+关联文件:
+- spec: spec/include/cpu/cpu.md
+- test: test/include/cpu/test_nn.py
+- 功能实现: include/cpu/Nn.h
+*/
+template <typename T, typename Op>
+void apply_binary_scalar_rhs(const Memory<T>& lhs, T rhs_scalar, Memory<T>& out, Op op) {
+    long long indices[MAX_DIM];
+    init_indices(out.rank(), indices);
+    const long long total = out.element_count();
+    for (long long linear = 0; linear < total; ++linear) {
+        out.at(indices) = op(lhs.at(indices), rhs_scalar);
+        advance_indices(out.rank(), out.shape(), indices);
+    }
+}
+
+/*
+功能说明:
+- 统一执行逐元素二元算子（scalar + Memory）。
+
+使用示例:
+- cpu::detail::apply_binary_scalar_lhs(3.0f, rhs, out, [](float a, float b) { return a + b; });
+
+创建者: 金铲铲大作战
+最后修改人: 金铲铲大作战
+
+关联文件:
+- spec: spec/include/cpu/cpu.md
+- test: test/include/cpu/test_nn.py
+- 功能实现: include/cpu/Nn.h
+*/
+template <typename T, typename Op>
+void apply_binary_scalar_lhs(T lhs_scalar, const Memory<T>& rhs, Memory<T>& out, Op op) {
+    long long indices[MAX_DIM];
+    init_indices(out.rank(), indices);
+    const long long total = out.element_count();
+    for (long long linear = 0; linear < total; ++linear) {
+        out.at(indices) = op(lhs_scalar, rhs.at(indices));
+        advance_indices(out.rank(), out.shape(), indices);
+    }
+}
+
+/*
+功能说明:
 - 统一执行逐元素比较算子，并把结果写成 predicate 数值。
 
 使用示例:
@@ -339,6 +391,46 @@ void apply_compare(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& ou
 template <typename T>
 void add(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out) {
     detail::apply_binary(lhs, rhs, out, [](T a, T b) { return a + b; });
+}
+
+/*
+功能说明:
+- 逐元素加法（Memory + scalar）。
+
+使用示例:
+- cpu::add(lhs, 3.0f, out);
+
+创建者: 金铲铲大作战
+最后修改人: 金铲铲大作战
+
+关联文件:
+- spec: spec/include/cpu/cpu.md
+- test: test/include/cpu/test_nn.py
+- 功能实现: include/cpu/Nn.h
+*/
+template <typename T>
+void add(const Memory<T>& lhs, T rhs_scalar, Memory<T>& out) {
+    detail::apply_binary_scalar_rhs(lhs, rhs_scalar, out, [](T a, T b) { return a + b; });
+}
+
+/*
+功能说明:
+- 逐元素加法（scalar + Memory）。
+
+使用示例:
+- cpu::add(3.0f, rhs, out);
+
+创建者: 金铲铲大作战
+最后修改人: 金铲铲大作战
+
+关联文件:
+- spec: spec/include/cpu/cpu.md
+- test: test/include/cpu/test_nn.py
+- 功能实现: include/cpu/Nn.h
+*/
+template <typename T>
+void add(T lhs_scalar, const Memory<T>& rhs, Memory<T>& out) {
+    detail::apply_binary_scalar_lhs(lhs_scalar, rhs, out, [](T a, T b) { return a + b; });
 }
 
 /*

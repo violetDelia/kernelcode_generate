@@ -1,7 +1,7 @@
 """CPU NN include tests.
 
 创建者: 小李飞刀
-最后一次更改: 我不是牛马
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 include/cpu/Nn.h 的逐元素、broadcast 与 img2col 语义。
@@ -9,8 +9,8 @@
 覆盖率信息:
 - 当前覆盖率: `N/A`。该链路的功能实现为 C++ 头文件，当前任务不使用 `pytest-cov` 直接统计覆盖率。
 - 达标判定: C++ 实现按规则豁免 `95%` 覆盖率达标线。
-- 当前以 `INC-NN-001..018` 对应测试作为覆盖基线。
-- 最近一次测试核对: `2026-03-22 19:31:12 +0800`，本次执行 `pytest -q test/include/cpu/test_memory.py test/include/cpu/test_nn.py`，结果为 `16 passed`。
+- 当前以 `INC-NN-001..020` 对应测试作为覆盖基线。
+- 最近一次测试核对: `2026-03-29 21:03:08 +0800`，本次执行 `pytest -q test/include/cpu/test_nn.py`，结果为 `20 passed`。
 
 覆盖率命令:
 - N/A（C++ 头文件实现，当前任务不使用 `pytest-cov` 统计覆盖率）
@@ -908,3 +908,77 @@ int main() {
 }
 """
     _compile_expect_failure(source, "img2col")
+
+
+# INC-NN-019
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-29 21:03:08 +0800
+# 最近一次运行成功时间: 2026-03-29 21:03:08 +0800
+# 测试目的: 验证 cpu::add 支持 Memory + scalar overload。
+# 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_add_scalar_rhs_success
+# 对应功能实现文件路径: include/cpu/Nn.h
+# 对应 spec 文件路径: spec/include/cpu/cpu.md
+# 对应测试文件路径: test/include/cpu/test_nn.py
+def test_cpu_nn_add_scalar_rhs_success() -> None:
+    source = r"""
+#include "include/cpu/Memory.h"
+#include "include/cpu/Nn.h"
+
+static int fail(int code) { return code; }
+
+int main() {
+    float lhs_data[6] = {1, 2, 3, 4, 5, 6};
+    float out_data[6] = {0};
+    long long shape[2] = {2, 3};
+    long long stride[2] = {3, 1};
+
+    cpu::Memory<float> lhs(lhs_data, 2, shape, stride);
+    cpu::Memory<float> out(out_data, 2, shape, stride);
+
+    cpu::add(lhs, 3.0f, out);
+
+    if (out_data[0] != 4 || out_data[1] != 5 || out_data[5] != 9) {
+        return fail(1);
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
+# INC-NN-020
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-29 21:03:08 +0800
+# 最近一次运行成功时间: 2026-03-29 21:03:08 +0800
+# 测试目的: 验证 cpu::add 支持 scalar + Memory overload。
+# 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_add_scalar_lhs_success
+# 对应功能实现文件路径: include/cpu/Nn.h
+# 对应 spec 文件路径: spec/include/cpu/cpu.md
+# 对应测试文件路径: test/include/cpu/test_nn.py
+def test_cpu_nn_add_scalar_lhs_success() -> None:
+    source = r"""
+#include "include/cpu/Memory.h"
+#include "include/cpu/Nn.h"
+
+static int fail(int code) { return code; }
+
+int main() {
+    float rhs_data[6] = {6, 5, 4, 3, 2, 1};
+    float out_data[6] = {0};
+    long long shape[2] = {2, 3};
+    long long stride[2] = {3, 1};
+
+    cpu::Memory<float> rhs(rhs_data, 2, shape, stride);
+    cpu::Memory<float> out(out_data, 2, shape, stride);
+
+    cpu::add(2.0f, rhs, out);
+
+    if (out_data[0] != 8 || out_data[1] != 7 || out_data[5] != 3) {
+        return fail(1);
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
