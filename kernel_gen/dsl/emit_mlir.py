@@ -2320,15 +2320,18 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
     最后一次更改: 小李飞刀
 
     功能说明:
+    - 统一处理 expression 与 statement 节点的 lowering 入口。
     - 按节点类型分派到符号查找、表达式 lowering 或 store 发射路径。
     - 对需要类型信息的表达式先补做 `_infer_expr_type`，再进入 `_lower_expr`。
+    - `free(...)` 作为语句 helper 时会发射单个 `dma.free`，但不会产生新的 SSA 结果。
 
     使用示例:
-    - emit_mlir(BinaryExprAST(op="add", lhs=lhs, rhs=rhs), ctx)
+    - value = emit_mlir(BinaryExprAST(op="add", lhs=lhs, rhs=rhs), ctx)
+    - emit_mlir(DmaFreeAST(value=tensor_ast, location=None), ctx)
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py), [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
     - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
     """
 
@@ -2378,7 +2381,9 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
     if isinstance(node, DmaFreeAST):
         value = _lower_expr(node.value, ctx)
         _expect_memory_value(value, node.location)
-        return None
+        free_op = DmaFreeOp(value)
+        ctx.builder.add_op(free_op)
+        return free_op
     if isinstance(node, ArchLaunchKernelAST):
         if not isinstance(node.name, str) or node.name == "":
             raise _LoweringError("launch_kernel name must be non-empty str", location=node.location)

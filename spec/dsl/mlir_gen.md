@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`不要啊教练`
+- 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
 - `功能实现`：[`kernel_gen/dsl/mlir_gen.py`](../../kernel_gen/dsl/mlir_gen.py)
 - `test`：[`test/dsl/test_mlir_gen.py`](../../test/dsl/test_mlir_gen.py)
@@ -56,7 +56,7 @@
 - DSL 函数体内允许出现 `arch` helper 调用：`get_thread_num`（查询表达式）、`get_dynamic_memory`（返回 memory 表达式）与 `launch_kernel`（语句型启动描述）；其公开语义由 `emit_mlir` 负责落实到具体 lowering。
 - 当函数体仅返回 `alloc(...)` 且没有 tensor 输入时，允许仅依赖标量 `runtime_args` 构建签名与结果类型；`alloc` 结果类型需由 `shape`/`stride`/`dtype`/`space` 与 `runtime_args` 共同决定，且显式 `stride` 必须与默认连续布局一致，否则必须报错。
 - `flatten(x)` 在 DSL 公开契约中视为一维重排 helper，要求保留元素总数并输出一维 memory 结果；不要求存在独立的 dialect op。
-- `free(x)` 在 DSL 公开契约中是语句型 helper，不产生新的 SSA 返回值，也不能作为函数返回值直接 lowering 为独立结果。
+- `free(x)` 在 DSL 公开契约中是语句型 helper，不产生新的 SSA 返回值，也不能作为函数返回值直接 lowering 为独立结果；合法输入下必须在函数体中保留 `dma.free` 语句。`free` 非法参数个数与非法 source 类型分别保持 `Unsupported free arity`、`Operand must be nn.memory` 诊断口径。
 - 零入参 DSL 函数允许通过 `build_func_op` / `build_func_op_from_ast` 构建 `func.func`；当函数体返回 `get_block_id()` 查询结果时，lowering 必须生成 `arch.get_block_id`，并保持返回类型为 `!symbol.int<"block_id">`。
 - 零入参 DSL 函数允许通过 `build_func_op` / `build_func_op_from_ast` 构建 `func.func`；当函数体返回 `get_block_num()` 查询结果时，lowering 必须生成 `arch.get_block_num`，并保持返回类型为 `!symbol.int<"block_num">`。
 - 零入参 DSL 函数允许通过 `build_func_op` / `build_func_op_from_ast` 构建 `func.func`；当函数体返回 `get_subthread_id()` 查询结果时，lowering 必须生成 `arch.get_subthread_id`，并保持返回类型为 `!symbol.int<"subthread_id">`。
@@ -117,7 +117,7 @@ func_op = build_func_op(only_symbol, s)
 - 纯 symbol 标量函数的参数/返回类型必须复用 `spec/dialect/symbol.md` 中定义的 `SymbolValueType`，不能退回 builtin 整数类型。
 - `LoopRange` 场景中传给 `dma.slice` / `dma.deslice` 的标量 operand 必须直接复用 `!symbol.int<"expr">` value，不允许通过 `arith.index_cast` 做中间桥接。
 - `"Tensor[...]"` 注解允许来自普通字符串字面量或可静态归一化的 `f"Tensor[...]"`；归一化后若不是合法 Tensor 注解，必须在解析阶段直接报错。
-- 函数体内使用 DMA helper 调用时，`alloc/copy/cast/view/reshape/flatten` 必须作为有返回值表达式参与 lowering，`free` 必须作为无返回值语句参与 lowering，`load/store/slice/deslice` 继续遵循既有 memory 读写语义。
+- 函数体内使用 DMA helper 调用时，`alloc/copy/cast/view/reshape/flatten` 必须作为有返回值表达式参与 lowering，`free` 必须作为无返回值语句参与 lowering 并在函数体中发射 `dma.free`，`load/store/slice/deslice` 继续遵循既有 memory 读写语义。
 - `flatten(...)` 的 lowering 结果必须与一维 `reshape(...)` 的公开结果语义一致，即输出元素总数不变的一维 memory；不要求生成独立 `dma.flatten` op。
 - 当零入参函数直接返回 `get_block_id()` 时，结果必须通过 `arch.get_block_id` 生成，并在 `func.func` 返回值中保持 `!symbol.int<"block_id">`。
 - 当零入参函数直接返回 `get_block_num()` 时，结果必须通过 `arch.get_block_num` 生成，并在 `func.func` 返回值中保持 `!symbol.int<"block_num">`。
@@ -209,7 +209,8 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - 验证 Tensor 注解可接受普通字符串字面量与可静态归一化的 `f"Tensor[...]"` 两种源码形式，并在归一化失败时报错。
   - 验证 tensor `!=` 比较在 `build_func_op(...)` / `build_func_op_from_ast(...)` 链路中复用 `CompareExprAST(op="ne")`，并在 memory 路径生成 `nn.ne`（必要时带 `nn.broadcast`）。
   - 验证 tensor `!=` 比较链路在 shape 不可 broadcast、返回注解不匹配或 element type 不一致时的错误路径。
-  - 验证 DMA helper 调用在 `build_func_op(...)` 链路中被识别为受支持 DSL 公开能力：`alloc/copy/cast/view/reshape/flatten` 作为返回值表达式参与 lowering，`free` 作为无返回值语句参与 lowering，`load/store/slice/deslice` 维持 memory 读写语义。
+  - 验证 DMA helper 调用在 `build_func_op(...)` 链路中被识别为受支持 DSL 公开能力：`alloc/copy/cast/view/reshape/flatten` 作为返回值表达式参与 lowering，`free` 作为无返回值语句参与 lowering 且函数体保留 `dma.free`，`load/store/slice/deslice` 维持 memory 读写语义。
+  - 验证 `free` helper 错误边界：非法参数个数与非法 source 类型分别保持 `Unsupported free arity`、`Operand must be nn.memory` 诊断口径。
   - 验证 alloc-only helper 场景在运行时参数、显式 stride 与非法 dtype/space 输入时的返回类型与错误路径。
   - 验证零入参 DSL 函数可通过 `build_func_op(...)` / `build_func_op_from_ast(...)` 生成 `func.func`，并在返回 `get_block_id()` 时 lowering 为 `arch.get_block_id` 与 `!symbol.int<"block_id">` 返回类型。
   - 验证零入参 DSL 函数可通过 `build_func_op(...)` / `build_func_op_from_ast(...)` 生成 `func.func`，并在返回 `get_block_num()` 时 lowering 为 `arch.get_block_num` 与 `!symbol.int<"block_num">` 返回类型。
@@ -254,7 +255,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - MGEN-019：`build_func_op` 的运行时参数为必填，且公开契约仅覆盖 `fn + runtime_args` 的可位置绑定形参；省略实参、实参数量不匹配，或试图以 `globals/builtins` 替代时必须报错。（`test_build_func_op_requires_explicit_runtime_args`、`test_build_func_op_rejects_runtime_arg_count_mismatch`、`test_build_func_op_globals_and_builtins_cannot_replace_runtime_args`）
   - MGEN-020：`build_func_op(add, lhs, rhs)` 对普通 Python `int` runtime args 的 lowering 必须产出携带具体整数值的 `SymbolValueType` 输入；若实参包含负数，其对外字符串表示必须保持 `symbol.int<-3>` 这类十进制负数字面量口径，并在函数体内生成 `symbol.add` 结果。（`test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type`）
   - MGEN-025：Tensor 注解支持普通字符串字面量与可静态归一化的 `f"Tensor[...]"` 两种源码形式；若归一化结果不满足 Tensor 语法则必须报错。（`test_build_func_op_accepts_joinedstr_tensor_annotation`、`test_build_func_op_rejects_invalid_joinedstr_tensor_annotation`）
-  - MGEN-026：DMA helper 调用在 `build_func_op(...)` 链路中按公开语义分流：`alloc/copy/cast/view/reshape/flatten` 生成对应 memory 结果，`free` 作为无返回值语句参与 lowering，`load/store/slice/deslice` 保持既有 memory 读写行为。（`test_build_func_op_supports_dma_helper_calls`、`test_build_func_op_supports_dma_free_statement`、`test_build_func_op_supports_dma_load_helper`、`test_build_func_op_supports_dma_store_helper`、`test_build_func_op_supports_dma_slice_helper`、`test_build_func_op_supports_dma_deslice_helper`）
+  - MGEN-026：DMA helper 调用在 `build_func_op(...)` 链路中按公开语义分流：`alloc/copy/cast/view/reshape/flatten` 生成对应 memory 结果，`free` 作为无返回值语句参与 lowering 且函数体必须保留 `dma.free`，`load/store/slice/deslice` 保持既有 memory 读写行为；`free` 非法参数个数与非法 source 类型分别保持 `Unsupported free arity`、`Operand must be nn.memory` 诊断口径。（`test_build_func_op_supports_dma_helper_calls`、`test_build_func_op_supports_dma_free_statement`、`test_build_func_op_supports_dma_load_helper`、`test_build_func_op_supports_dma_store_helper`、`test_build_func_op_supports_dma_slice_helper`、`test_build_func_op_supports_dma_deslice_helper`）
   - MGEN-026A：alloc-only kernel 的 runtime shape 参数会 lowering 为 `!symbol.int` 输入，并保持 `dma.alloc` 结果类型与返回注解一致。（`test_build_func_op_supports_dma_alloc_helper_with_runtime_shape_args`）
   - MGEN-026B：alloc-only kernel 支持 `SymbolDim` 运行时参数与 `SymbolDim + const` 混合场景，`dma.alloc` 结果 `shape` 保持符号表达式。（`test_build_func_op_supports_dma_alloc_helper_with_symbol_shape_args`、`test_build_func_op_supports_dma_alloc_helper_with_symbol_plus_const_shape_args`）
   - MGEN-026C：alloc-only kernel 允许零参数常量形状，`func.func` 无输入且结果类型与 `alloc` 返回一致。（`test_build_func_op_supports_dma_alloc_helper_without_runtime_args`）

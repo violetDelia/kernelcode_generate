@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`不要啊教练`
+- 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)
 - `功能实现`：[`kernel_gen/dsl/emit_mlir.py`](../../kernel_gen/dsl/emit_mlir.py)
 - `test`：[`test/dsl/test_emit_mlir.py`](../../test/dsl/test_emit_mlir.py)
@@ -44,7 +44,7 @@
 - 当 DSL AST 表达 `alloc`、`copy`、`cast`、`view`、`reshape`、`flatten`、`load`、`store`、`slice`、`deslice` 这组 DMA helper 调用时，`emit_mlir` 必须按对应 memory 语义 lowering；其中 `flatten` 公开上视为一维 `reshape` 语义，不要求生成独立 dialect op。
 - 当 `CompareExprAST(op="ne")` 来自 `lhs != rhs` 入口且两侧为 `nn.memory` 时，必须 lowering 为 `nn.ne`；允许按隐式 broadcast 规则插入 `nn.broadcast`，若无法广播必须报错 `Implicit broadcast dimension mismatch`，若 element type 不一致必须报错 `Binary op operands must have the same element_type`。
 - 当 `BinaryExprAST(op="mul")` 来自 `lhs * rhs` 或 `nn.mul(lhs, rhs)` 入口且两侧为 `nn.memory` 时，必须 lowering 为 `nn.mul`；若 shape 不一致但可 broadcast，允许按需插入 `nn.broadcast`，若不可 broadcast 必须报错 `Implicit broadcast dimension mismatch`。当两侧 `element_type` 不一致但 `space` 一致时，必须按二元算术 dtype promotion（`i32 < f16 < f32`）决议目标 element_type，并仅对非目标侧插入 `dma.cast` 再发射 `nn.mul`；若 `space` 不一致必须报错 `Binary op operands must have the same space`。
-- `free` 必须作为语句型 helper 处理，不产生新的 SSA 结果，也不承诺生成独立的 `dma.free` op。
+- `free` 必须作为语句型 helper 处理，不产生新的 SSA 结果；合法输入必须在当前位置发射单个 `dma.free`。`free` 仅允许单参数调用且参数必须为 `nn.memory`，非法参数个数与参数类型分别保持 `Unsupported free arity`、`Operand must be nn.memory` 诊断口径。
 - `ArchQueryAST(query_name="get_block_id")` 必须 lowering 为单个 `arch.get_block_id`，并保持结果类型为 `!symbol.int<"block_id">`。
 - `ArchQueryAST(query_name="get_block_num")` 必须 lowering 为单个 `arch.get_block_num`，并保持结果类型为 `!symbol.int<"block_num">`。
 - `ArchQueryAST(query_name="get_subthread_id")` 必须 lowering 为单个 `arch.get_subthread_id`，并保持结果类型为 `!symbol.int<"subthread_id">`。
@@ -138,7 +138,7 @@ value = emit_mlir(expr_ast, ctx)
   - `flatten(...)`：按一维 `reshape` 语义 lowering，返回一维 memory value。
   - `load(...)` / `slice(...)`：lowering 为读取类 DMA op，返回读取结果。
   - `store(...)` / `deslice(...)`：lowering 为写回类 DMA op，作为语句执行。
-  - `free(...)`：作为语句执行，不产生新的 SSA 返回值。
+  - `free(...)`：lowering 为单个 `dma.free` 语句，不产生新的 SSA 返回值。
 
 节点映射示例：
 
@@ -148,7 +148,7 @@ value = emit_mlir(expr_ast, ctx)
 - `LoadAST`：生成张量读取相关 op/value；当携带 `sizes` 时发射 `dma.slice`。
 - `StoreAST`：生成张量写入相关 op；当携带 `sizes` 时发射 `dma.deslice`。
 - `CallAST(alloc/copy/cast/view/reshape/flatten)`：生成对应 DMA memory 结果。
-- `CallAST(free)`：作为无返回值语句处理。
+- `CallAST(free)`：发射单个无返回值 `dma.free` 语句。
 - `ForAST`：当来源于 `LoopRange(start, end, step)` 且边界为 symbol 整数时，生成 `symbol.for`；循环体内若包含 `dma.slice` / `dma.deslice`，其 DMA 标量 operand 直接使用 `!symbol.int<"expr">` value，不生成 `arith.index_cast`。
 - `ArchQueryAST(query_name="get_block_id")`：生成 `arch.get_block_id`，返回 `!symbol.int<"block_id">`。
 - `ArchQueryAST(query_name="get_block_num")`：生成 `arch.get_block_num`，返回 `!symbol.int<"block_num">`。
@@ -175,7 +175,8 @@ value = emit_mlir(expr_ast, ctx)
   - 覆盖 `CompareExprAST(op="ne")` memory 路径在不可 broadcast 与 element type 不一致时的错误分支与诊断文案。
   - 覆盖 `BinaryExprAST(op="add")` mixed memory+const/symbol lowering：`!symbol.int -> i32` promotion、按需 `dma.cast` 插入、以及纯 scalar/symbol 输入拒绝路径。
   - 覆盖 `LoopRange` -> `symbol.for` 与 `it`/DMA operand 直接保持 `symbol.int` 的发射规则。
-  - 覆盖 DMA helper 调用的 lowering 结果与语句/表达式边界：`alloc/copy/cast/view/reshape/flatten` 产生 memory 结果，`free` 为无返回值语句。
+  - 覆盖 DMA helper 调用的 lowering 结果与语句/表达式边界：`alloc/copy/cast/view/reshape/flatten` 产生 memory 结果，`free` 为无返回值语句且会发射 `dma.free`。
+  - 覆盖 `free` helper 的参数边界：非法参数个数与非法 source 类型分别保持 `Unsupported free arity`、`Operand must be nn.memory` 诊断口径。
   - 覆盖 `ArchQueryAST(query_name="get_block_id")` lowering 为 `arch.get_block_id` 的最小查询路径。
   - 覆盖 `ArchQueryAST(query_name="get_block_num")` lowering 为 `arch.get_block_num` 的最小查询路径。
   - 覆盖 `ArchQueryAST(query_name="get_subthread_id")` lowering 为 `arch.get_subthread_id` 的最小查询路径。
@@ -215,7 +216,7 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-018：`view(...)` lowering 为 `dma.view` 并返回视图 memory 结果。（`test_emit_mlir_dma_view_lowering`）
   - EMIT-019：`reshape(...)` lowering 为 `dma.reshape` 并返回重排后的 memory 结果。（`test_emit_mlir_dma_reshape_lowering`）
   - EMIT-020：`flatten(...)` 以一维 `reshape` 语义 lowering，返回一维 memory 结果。（`test_emit_mlir_dma_flatten_lowering`）
-  - EMIT-021：`free(...)` 作为无返回值语句执行，不产生新的 SSA 结果。（`test_emit_mlir_dma_free_statement`）
+  - EMIT-021：`free(...)` 在合法输入下必须发射单个 `dma.free` 且不产生新的 SSA 结果；非法 source 类型必须报错 `Operand must be nn.memory`。（`test_emit_mlir_dma_free_statement`）
   - EMIT-022：`ArchQueryAST(query_name="get_block_id")` lowering 为单个 `arch.get_block_id`，并返回 `!symbol.int<"block_id">`。（`test_emit_mlir_lowers_arch_get_block_id_query`）
   - EMIT-023：`ArchQueryAST(query_name="get_block_num")` lowering 为单个 `arch.get_block_num`，并返回 `!symbol.int<"block_num">`。（`test_emit_mlir_lowers_arch_get_block_num_query`）
   - EMIT-024：纯 symbol 标量 `>=` 比较在 emit 阶段 lowering 为 `symbol.ge` 且结果为 `i1`；对 symbol 路径中除 `eq/ge` 以外的比较操作符报错 `Unsupported symbol compare op`。（`test_emit_mlir.py::test_emit_mlir_lowers_symbol_ge`、`test_ast_visitor.py::test_emit_mlir_lowers_symbol_ge`）

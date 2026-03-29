@@ -52,6 +52,7 @@ from kernel_gen.dialect.dma import (
     DmaAllocOp,
     DmaCastOp,
     DmaCopyOp,
+    DmaFreeOp,
     DmaDesliceOp,
     DmaLoadOp,
     DmaReshapeOp,
@@ -897,11 +898,11 @@ def test_emit_mlir_dma_flatten_lowering() -> None:
 
 # EMIT-021
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-25 10:04:04 +0800
-# 最近一次运行成功时间: 2026-03-25 10:04:04 +0800
-# 功能说明: 验证 free AST 作为无返回值语句处理。
-# 测试目的: 验证 DmaFreeAST 不生成新的 SSA 结果，也不会向 block 中插入额外 DMA op。
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-30 03:03:30 +0800
+# 最近一次运行成功时间: 2026-03-30 03:03:30 +0800
+# 功能说明: 验证 free AST 作为 statement lowering 时发射单个 dma.free。
+# 测试目的: 验证 DmaFreeAST 不生成新的 SSA 结果，但会向 block 中插入单个 DmaFreeOp。
 # 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_dma_free_statement
 # 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
@@ -915,8 +916,30 @@ def test_emit_mlir_dma_free_statement() -> None:
     ctx.types[_expr_key(source)] = block.args[0].type
 
     result = emit_node_mlir(DmaFreeAST(value=source, location=None), ctx)
-    assert result is None
-    assert list(block.ops) == []
+    ops = list(block.ops)
+    assert isinstance(result, DmaFreeOp)
+    assert len(ops) == 1
+    assert ops[0] is result
+    assert result.source is block.args[0]
+
+
+# EMIT-021
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-30 03:03:30 +0800
+# 最近一次运行成功时间: 2026-03-30 03:03:30 +0800
+# 功能说明: 验证 free AST 遇到非 memory operand 时抛出错误。
+# 测试目的: 锁定 emit_mlir 在 dma.free statement lowering 中对 Operand must be nn.memory 的错误口径。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_dma_free_rejects_non_memory_operand
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_emit_mlir_dma_free_rejects_non_memory_operand() -> None:
+    block = Block()
+    ctx = EmitContext(builder=block, symbols={}, types={})
+
+    with pytest.raises(_LoweringError, match="Operand must be nn.memory"):
+        emit_node_mlir(DmaFreeAST(value=ConstAST(1, location=None), location=None), ctx)
 
 
 # MGEN-034 / EMIT-028
