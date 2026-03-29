@@ -585,6 +585,31 @@ def test_build_func_op_from_ast_uses_runtime_args_for_symbol_signature() -> None
     assert outputs == [SymbolValueType.from_expr("expr")]
 
 
+# MGEN-002B
+# 创建者: OpenAI
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-28 14:20:00 +0800
+# 最近一次运行成功时间: 2026-03-28 14:20:00 +0800
+# 功能说明: 验证 build_func_op_from_ast 在 runtime_args 省略时按 AST 注解生成签名。
+# 测试目的: 证明 runtime_args 缺失时仍可通过 AST 注解构建 symbol 标量签名。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_from_ast_rejects_symbol_scalar_missing_runtime_args
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_from_ast_rejects_symbol_scalar_missing_runtime_args() -> None:
+    def only_symbol(expr: int) -> int:
+        return expr
+
+    func_ast = parse_function(only_symbol)
+    func_op = build_func_op_from_ast(func_ast)
+    inputs = list(func_op.function_type.inputs)
+    outputs = list(func_op.function_type.outputs)
+    assert inputs == [SymbolValueType.from_expr("expr")]
+    assert outputs == [SymbolValueType.from_expr("expr")]
+    with pytest.raises(AstVisitorError, match="runtime_args must align"):
+        build_func_op_from_ast(func_ast, runtime_args=[])
+
+
 # MGEN-002A
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚
@@ -1354,6 +1379,25 @@ def test_symbol_scalar_function_uses_symbol_value_type_signature() -> None:
     outputs = list(func_op.function_type.outputs)
     assert inputs == [SymbolValueType.from_expr("expr")]
     assert outputs == [SymbolValueType.from_expr("expr")]
+
+
+# MGEN-002B
+# 创建者: OpenAI
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-28 14:05:00 +0800
+# 最近一次运行成功时间: 2026-03-28 14:05:00 +0800
+# 功能说明: 验证纯 symbol 标量函数 runtime_args 类型校验，拒绝 float 等非法标量。
+# 测试目的: 覆盖 build_func_op 纯 symbol 标量场景下的输入类型错误分支。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_rejects_symbol_scalar_float_runtime_args
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_rejects_symbol_scalar_float_runtime_args() -> None:
+    def only_symbol(expr: int) -> int:
+        return expr
+
+    with pytest.raises(AstVisitorError, match="Unsupported scalar argument type"):
+        build_func_op(only_symbol, 1.5)
 
 
 # MGEN-018 / MGEN-021 / MGEN-022 / MGEN-023 / MGEN-024

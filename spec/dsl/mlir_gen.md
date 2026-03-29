@@ -67,6 +67,54 @@
 - 当函数体包含 `launch_kernel(name, block, thread, subthread)` 语句时，lowering 必须生成无返回值 `arch.launch_kernel`；`name` 非空字符串约束与 extent 约束必须在链路中被校验：AST 入口要求 `block/thread/subthread` 为正整数或 `SymbolDim` 语义，emit 阶段进一步要求三者可归一化为正整数 `!symbol.int`，违规时必须报错。
 - 如需 `builtin.module` 封装，由调用方完成。
 
+## 输入输出契约
+
+输入：
+
+- 公开入口以“函数 + 运行时参数”为唯一输入契约：
+  - `build_func_op(fn, *runtime_args, ...)`
+  - `build_func_op_from_ast(func_ast, runtime_args=..., ...)`
+- `runtime_args` 必须按 `fn` / `func_ast.inputs` 的可位置绑定形参顺序传入；不可被 `globals` / `builtins` 替代。
+
+输出：
+
+- 返回值是单个 `func.func` op，且**不**生成 `builtin.module`。
+- 如需 `builtin.module` 封装，由调用方自行完成。
+
+类型映射（运行时参数 -> `func.func` 输入）：
+
+- `Memory` 运行时参数必须 lowering 为项目内的 memory type（参见 `spec/symbol_variable/memory.md`）。
+- `SymbolDim("s")` / `SymbolDim(1)` 必须分别 lowering 为 `!symbol.int<"s">` / `!symbol.int<"1">`。
+- 当函数场景属于纯 symbol 整型标量运算时，Python `int` 运行时参数必须 lowering 为携带具体整数值的 `SymbolValueType`（例如 `symbol.int<"3">`，负数保持 `symbol.int<-3>`）。
+- 不支持的运行时参数类型必须报错。
+
+返回规则：
+
+- 以函数体 `return` 表达式为准生成返回类型；返回注解必须与 lowering 结果一致，除非满足“二元算术 mixed dtype”放宽边界。
+- 若函数体仅包含 `for` 循环且没有 `return`，则允许 `func.func` 为零返回值。
+- 纯 symbol 标量算术函数返回 `!symbol.int<"...">`；纯 symbol 标量比较函数返回 `i1`。
+
+完整 I/O 示例（输入=函数+runtime 参数，输出=func.func）：
+
+```python
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.dsl.mlir_gen import build_func_op
+
+def eq(a: int, b: int) -> bool:
+    return a == b
+
+func_op = build_func_op(eq, SymbolDim("M"), SymbolDim("N"))
+```
+
+输出（`func.func`，非 `builtin.module`）：
+
+```mlir
+func.func @eq(%0 : !symbol.int<"M">, %1 : !symbol.int<"N">) -> i1 {
+  %2 = symbol.eq %0, %1 : !symbol.int<"M">, !symbol.int<"N"> -> i1
+  func.return %2 : i1
+}
+```
+
 ## 公开接口
 
 ### `build_func_op(fn, *runtime_args, globals=None, builtins=None)`
