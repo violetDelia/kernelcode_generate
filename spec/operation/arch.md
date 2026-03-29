@@ -301,5 +301,5 @@ launch_kernel("my_kernel", SymbolDim("GRID_X"), 128, 4)
   - `TC-OP-ARCH-008`：`get_dynamic_memory(...)` 对非法空间或非法类型报错，并覆盖 `MemorySpace.GM` 错误路径；对应 `TC-ARCH-008` 的方言边界。
   - `TC-OP-ARCH-009`：`launch_kernel("my_kernel", block, thread, subthread)` 接受合法 `int | SymbolDim` 输入并返回 `None`，对应 `TC-ARCH-009`。
   - `TC-OP-ARCH-010`：`launch_kernel(...)` 对空名称、非法类型、静态 `<= 0` 的规模输入报错，并对应 `TC-ARCH-010`。
-  - `TC-OP-ARCH-011`：`launch_kernel` 调用签名固定为 `(name, block, thread, subthread)`，四参均必填且无默认值；缺参/多参/未知关键字必须在调用边界报 `TypeError`。映射测试：`test_launch_kernel_call_signature_errors`（实现阶段补齐）。
-  - `TC-OP-ARCH-012`：`launch_kernel` 关键字调用仅接受 `name/block/thread/subthread` 四个参数名，语义与位置调用一致。映射测试：`test_launch_kernel_keyword_call_success`（实现阶段补齐）。
+  - `TC-OP-ARCH-011`：`launch_kernel` 调用签名固定为 `(name, block, thread, subthread)`，四参均必填且无默认值；缺参/多参/未知关键字必须在调用边界报 `TypeError`。映射测试：`test_launch_kernel_call_signature_errors`。
+  - `TC-OP-ARCH-012`：`launch_kernel` 关键字调用仅接受 `name/block/thread/subthread` 四个参数名，语义与位置调用一致。映射测试：`test_launch_kernel_keyword_call_success`。

@@ -99,3 +99,70 @@
 任务目标: 复审 func_cost DMA sizes<shape 统计修复与新增用例闭环。
 改动: 经办人=不要啊教练；复核 kernel_gen/passes/analysis/func_cost.py 的 dma.load/slice/store/deslice 按 sizes 统计逻辑与 _numel_from_symbol_operands 行为；复核 test/pass/test_analysis_func_cost.py 新增 sizes<shape 用例覆盖；一致性核对 spec/pass/analysis/func_cost.md。复测 pytest -q test/pass/test_analysis_func_cost.py（exit=0，8 passed）。
 结论: 通过。sizes<shape 统计已按 sizes 计，load/slice/read/write 与 store/deslice/write 口径与 spec/测试一致；未发现边界/异常/绕过与可维护性新增风险。
+
+时间：2026-03-29 11:05:00 +0800
+任务：T-20260329-893552a0
+任务目标：核对并清理 `wt-20260328-test-matrix-alignment`，确认是否存在未合并改动；若不能直接清理，明确下一步后续任务类型。
+改动：
+- 核对工作区状态：`git status --short --branch` 显示当前 worktree 仍有 12 个未提交 spec 修改，涉及 `spec/dsl/{ast,ast_visitor,emit_c,emit_mlir,gen_kernel,mlir_gen}.md`、`spec/operation/{arch,dma,nn,scf}.md`、`spec/pass/{lowing/nn_to_kernel,pass_manager}.md`。
+- 核对已提交链路：`git rev-list --left-right --count main...HEAD` 为 `14 1`，分支相对 `main` 仍挂着 1 个历史提交 `c448678`；进一步执行 `git log --oneline --decorate --grep='T-20260328-13331a18\\|func_cost DMA sizes<shape\\|sizes<shape' main` 确认 `main` 已包含 `377b17c (main) T-20260328-13331a18-func-cost-dma-sizes-shape-chain`。
+- 核对已提交内容是否仍待合并：`git diff --stat main -- kernel_gen/passes/analysis/func_cost.py kernel_gen/passes/analysis/__init__.py test/pass/test_analysis_func_cost.py spec/pass/analysis/func_cost.md` 为空，说明 `func_cost` 已提交链路已等价落入主线，无需再建合并任务。
+- 核对残余改动是否真实存在：`git diff --stat main -- <12 个 spec 文件>` 显示共 `12 files changed, 383 insertions(+), 359 deletions(-)`，说明当前未提交 spec 修改与 `main` 仍有实际差异，不可直接丢弃或清理 worktree。
+- 核对复核前置：当前记录文件仅包含 `func_cost` 子链路的实现/复审/合并记录，未见上述 12 个未提交 spec 修改的复核结论；按“没有复核记录，就不要建立合并任务”的最新规则，此处只能新建复核任务，不能直接新建合并任务。
+结论：
+- `wt-20260328-test-matrix-alignment` 当前不能清理。
+- `func_cost` 已提交部分已在 `main`，无需后续合并任务。
+- 剩余 12 个未提交 spec 改动需先进入复核，再由管理员根据复核结论决定是否创建合并任务。
+- 已新建后续任务：`T-20260329-1a7a4164`，用于复核并收口上述 12 个未提交 spec 改动。
+时间: 2026-03-29 13:42:42 +0800
+任务: T-20260329-1a7a4164
+任务目标: 复核残余未提交 spec 改动是否具备合并条件，给出结论与阻塞点。
+审查范围: spec/dsl/{ast,ast_visitor,emit_c,emit_mlir,gen_kernel,mlir_gen}.md、spec/operation/{arch,dma,nn,scf}.md、spec/pass/{lowing/nn_to_kernel,pass_manager}.md。
+审查方式:
+- 逐文件检查结构与测试清单映射一致性。
+- 脚本抽检所有 `test_` 引用函数存在性与 test 文件存在性。
+问题列表:
+- [P2][spec/dsl/emit_mlir.md] “拆分归属：EMIT-001~EMIT-027 归属 test_emit_mlir.py；EMIT-028~EMIT-029 归属 test_mlir_gen.py”与 EMIT-001B 中显式引用 test_mlir_gen.py 的条目不一致，导致归属描述失真。建议将该行调整为“默认归属 test_emit_mlir.py，若条目显式标注其他文件以条目为准”，或将 EMIT-001B 中的跨文件用例移动到归属说明中明确例外。
+- [P2][spec/operation/arch.md] TC-OP-ARCH-011/012 的“（实现阶段补齐）”已与当前仓库实际测试不符（test_operation_arch.py 已存在对应用例），且属于过程性描述，违反 spec 不写任务过程要求。建议移除该备注，仅保留真实测试映射。
+结论: 需修改。
+测试: 未执行（仅做文档一致性与映射核对）。
+
+时间: 2026-03-29 13:56:18 +0800
+任务: T-20260329-b91d8ed4
+任务目标: 修正 `spec/dsl/emit_mlir.md` 测试拆分归属描述与 `EMIT-001B` 跨文件映射不一致，并移除 `spec/operation/arch.md` 中 `TC-OP-ARCH-011/012` 的过期过程性备注。
+改动:
+- 更新 `spec/dsl/emit_mlir.md`：将“拆分归属”收敛为“默认归属 + 条目显式映射优先”，保持 `EMIT-001B` 的跨 `test_emit_mlir.py` / `test_mlir_gen.py` 映射为真实例外，不再与总述冲突。
+- 更新 `spec/operation/arch.md`：删除 `TC-OP-ARCH-011/012` 末尾“（实现阶段补齐）”备注，仅保留当前仓库已存在的真实测试函数映射。
+- 复核 `test/operation/test_operation_arch.py`：确认 `test_launch_kernel_call_signature_errors` 与 `test_launch_kernel_keyword_call_success` 已存在，对应映射无需再写过程性说明。
+结论: 当前两处 spec 映射失真已最小修正，未触及实现与测试文件。
+测试: 未执行自动化测试；已用 `rg` 复核目标条目与测试函数存在性。
+
+时间：2026-03-29 19:48:26 +0800
+任务：T-20260329-0d3cee72
+任务目标：复核 spec/dsl/emit_mlir.md 与 spec/operation/arch.md 映射修正，确认 EMIT-001B 跨文件归属说明与 TC-OP-ARCH-011/012 测试映射闭环一致。
+审查范围：spec/dsl/emit_mlir.md、spec/operation/arch.md、test/operation/test_operation_arch.py、test/dsl/test_emit_mlir.py、test/dsl/test_mlir_gen.py。
+验证方式：
+- rg -n "EMIT-001B|TC-OP-ARCH-011|TC-OP-ARCH-012" spec/dsl/emit_mlir.md spec/operation/arch.md test/operation/test_operation_arch.py test/dsl/test_emit_mlir.py test/dsl/test_mlir_gen.py
+- rg -n "test_emit_mlir_infer_expr_type_branches|test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast|test_tensor_truediv_dtype_promotion_lowering" test/dsl/test_emit_mlir.py test/dsl/test_mlir_gen.py
+问题列表：未发现需修改项。
+- EMIT-001B：拆分归属已明确“默认归属 + 条目显式映射优先”，跨 test_emit_mlir/test_mlir_gen 的映射与条目一致，测试函数存在。
+- TC-OP-ARCH-011/012：spec 映射与 test_operation_arch.py 的用例一致，已去除过程性备注。
+漏洞排查结果（6 类风险）：
+- 输入校验绕过：未发现（本次仅映射审查，无执行逻辑变更）。
+- 类型/形状绕过：未发现（映射与测试一致）。
+- 边界越界：未发现（文档/映射核对）。
+- 错误处理缺失：未发现（映射核对）。
+- 状态污染：未发现。
+- 资源释放问题：未发现。
+可维护性建议：未发现额外改进点。
+结论：通过。
+
+时间：2026-03-29 15:48:17 +0800
+任务：T-20260329-230addb0
+任务目标：合并 spec/dsl/emit_mlir.md 与 spec/operation/arch.md 映射修正（EMIT-001B 归属说明、TC-OP-ARCH-011/012 真实映射）并执行 cleanup。
+改动：
+- 在干净临时 worktree `/home/lfr/kernelcode_generate/wt-main-merge-230addb0`（基于 `origin/main`）执行合并，避免源 worktree 未提交改动混入主线。
+- 更新 `spec/dsl/emit_mlir.md`：将拆分归属改为“默认归属 + 条目显式映射优先”，并明确跨文件映射按条目为准（覆盖 EMIT-001B 归属说明场景）。
+- 更新 `spec/operation/arch.md`：将 `TC-OP-ARCH-011/012` 映射测试描述改为真实现状，移除“实现阶段补齐”过程性备注。
+- 合并提交仅包含上述两份 spec 文件与本任务记录文件。
+结论：变更已完成，进入提交与 push、-done、cleanup 收尾阶段。

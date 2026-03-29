@@ -166,7 +166,7 @@ value = emit_mlir(expr_ast, ctx)
 - 执行命令（emit 单测）：`pytest -q test/dsl/test_emit_mlir.py`
 - 执行命令（emit 端到端回归）：`pytest -q test/dsl/test_mlir_gen.py`
 - 执行命令（ast_visitor 负路径）：`pytest -q test/dsl/test_ast_visitor.py`
-- 拆分归属：EMIT-001~EMIT-028 归属 `test_emit_mlir.py`；其中 EMIT-012A/012B/012C/012D/013/024 在 `test_ast_visitor.py` 有边界回归覆盖；EMIT-031/EMIT-032 与 arch helper 负路径补充由 `test_ast_visitor.py` 覆盖。
+- 拆分归属：EMIT-001~EMIT-027 默认归属 `test_emit_mlir.py`；EMIT-028 默认归属 `test_mlir_gen.py`；EMIT-012A/012B/012C/012D/013/024 与 EMIT-031/EMIT-032 在 `test_ast_visitor.py` 有边界回归覆盖；若条目显式标注其他测试文件或跨文件映射（含 EMIT-001B 场景），以条目为准。
 - 测试目标：
   - 覆盖常见表达式与语句节点的发射结果。
   - 覆盖 `lhs != rhs` 到 `CompareExprAST(op="ne")` 的 memory lowering：`nn.ne` 结果为 `i1`，并支持 implicit broadcast。
