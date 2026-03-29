@@ -386,6 +386,33 @@ def _ensure_no_nn_ops(module: Operation) -> None:
             raise LowerNnToKernelError(f"nn op remains after lowering: {op.name}")
 
 
+def _ensure_module_iterable(module: Operation) -> None:
+    """校验 module 为 builtin.module 且可遍历。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - module 需为 builtin.module。
+    - module.ops 必须可迭代。
+
+    使用示例:
+    - _ensure_module_iterable(module)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    if not isinstance(module, Operation) or module.name != "builtin.module":
+        raise LowerNnToKernelError("module must be builtin.module")
+    try:
+        iter(module.ops)
+    except Exception as exc:
+        raise LowerNnToKernelError("module ops must be iterable") from exc
+
+
 class LowerNnToKernelPass(Pass):
     """nn -> kernel lowering pass。
 
@@ -424,8 +451,14 @@ class LowerNnToKernelPass(Pass):
         - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
         """
 
-        _lower_module(module)
-        _ensure_no_nn_ops(module)
+        try:
+            _ensure_module_iterable(module)
+            _lower_module(module)
+            _ensure_no_nn_ops(module)
+        except LowerNnToKernelError:
+            raise
+        except Exception as exc:
+            raise LowerNnToKernelError(str(exc)) from exc
         return module
 
 

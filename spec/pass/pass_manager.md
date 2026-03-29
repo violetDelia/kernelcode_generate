@@ -8,7 +8,7 @@
 ## 文档信息
 
 - 创建者：`李白`
-- 最后一次更改：`李白`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/pass/pass_manager.md`](../../spec/pass/pass_manager.md)
 - `功能实现`：[`kernel_gen/passes/pass_manager.py`](../../kernel_gen/passes/pass_manager.py)
 - `test`：[`test/pass/test_pass_manager.py`](../../test/pass/test_pass_manager.py)
@@ -55,6 +55,14 @@ class MyPass(Pass):
 - `run` 必须接收一个输入并返回一个输出对象。
 - `name` 需可读且稳定，便于测试匹配。
 
+前置条件：
+
+- 传入 `run` 的对象必须满足该 Pass 的输入类型约束（由具体 Pass 规范定义）。
+
+后置条件：
+
+- `run` 返回值必须可作为下游 Pass 的输入；若无法继续传递必须显式抛错。
+
 返回与限制：
 
 - `run` 返回值作为下游 Pass 的输入。
@@ -81,6 +89,14 @@ result = pm.run(ir)
 注意事项：
 
 - Pass 执行顺序与添加顺序一致。
+
+前置条件：
+
+- `run` 的输入必须是上游 AST/IR 发射已完成的对象；若输入尚未完成发射，必须由上游阶段抛出错误或中止。
+
+后置条件：
+
+- `run` 返回最后一个 Pass 的输出；当无 Pass 时，返回对象与输入为同一语义对象。
 
 返回与限制：
 
@@ -155,6 +171,14 @@ result = pm.run(ir)
 - Pass 的输出必须作为下一个 Pass 的输入。
 - 任何 Pass 抛出的异常应原样传播。
 
+前置条件：
+
+- `target` 必须满足第一个 Pass 的输入约束。
+
+后置条件：
+
+- 若未抛出异常，输出必须满足最后一个 Pass 的输出约束，且可供后续验证/打印阶段使用。
+
 返回与限制：
 
 - 返回最终 Pass 的输出；无 Pass 时返回输入本身。
@@ -180,3 +204,9 @@ result = pm.run(ir)
 | TC-PASS-003 | 空管理器返回原输入 | `test_pass_manager_empty_returns_input` |
 | TC-PASS-004 | 非法 Pass 类型报错 | `test_pass_manager_invalid_pass_type` |
 | TC-PASS-005 | Pass 异常向上抛出 | `test_pass_manager_exception_propagation` |
+
+## 失败归因
+
+- AST 发射失败：上游 DSL/AST 构建阶段无法生成合法 IR，表现为进入 PassManager 前已抛错或传入 `target` 为空/类型不符。
+- Dialect verify 失败：某 Pass 调用 verifier 或验证器抛错，原因通常为 IR 类型、attribute 或 operand 约束不满足。
+- Lowering 失败：具体 lowering Pass 在 op 映射、类型转换或结果分配时抛错，PassManager 仅负责透传异常，不做吞并或重写。

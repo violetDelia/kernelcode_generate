@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`榕`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/pass/analysis/func_cost.md`](../../../spec/pass/analysis/func_cost.md)
 - `功能实现`：[`kernel_gen/passes/analysis/func_cost.py`](../../../kernel_gen/passes/analysis/func_cost.py)
 - `test`：[`test/pass/test_analysis_func_cost.py`](../../../test/pass/test_analysis_func_cost.py)
@@ -194,6 +194,14 @@ summary = cost_pass.get_summary("func_B")
   - `analysis.read_bytes`
   - `analysis.write_bytes`
 
+前置条件：
+
+- `predicate_size` 必须为正整数；`dtype_size_overrides` 中的值必须为正整数。
+
+后置条件：
+
+- `run` 成功后，pass 实例中必须可查询到至少一个函数的分析汇总（若 module 内存在 `func.func`）。
+
 返回与限制：
 
 - 返回输入 `module`。
@@ -221,6 +229,14 @@ module = pass_obj.run(module)
 - 必须支持符号维度表达式，不得将符号维强制转为具体整数。
 - 函数内 `func.return`、`arith.constant` 等非业务 op 默认不计入成本。
 
+前置条件：
+
+- `module` 必须是可遍历的 `builtin.module`；内部 `func.func` 的结果类型必须可解析。
+
+后置条件：
+
+- 成功完成时，`module` 返回值保持语义不变；当 `attach_attrs=True` 时，每个被统计的 `func.func` 必须带上 `analysis.*` 属性。
+
 返回与限制：
 
 - 返回 `module`（允许附加统计属性）。
@@ -238,7 +254,6 @@ module = pass_obj.run(module)
 
 - 测试文件：[`test/pass/test_analysis_func_cost.py`](../../../test/pass/test_analysis_func_cost.py)
 - 执行命令：`pytest -q test/pass/test_analysis_func_cost.py`
-- 覆盖 `FC-001` ~ `FC-008` 用例。
 
 ### 测试目标
 
@@ -252,13 +267,19 @@ module = pass_obj.run(module)
 
 ### 功能与用例清单
 
-| 用例 ID | 场景描述 | 测试文件 | 对应测试 | 状态说明 |
-| --- | --- | --- | --- | --- |
-| `FC-001` | 输入 `shape=[A,B]` 的 `nn.add`，预期 `compute=A*B`。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_nn_add_symbolic_shape` | 已闭环。 |
-| `FC-002` | 输入 `tensor + const`，预期 `compute=A*B` 且常量不计读取流量。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_tensor_plus_const` | 已闭环。 |
-| `FC-003` | 输入同一 `func` 内串联两个逐元素 op，预期函数总量为两 op 逐项求和。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_chain_accumulate` | 已闭环。 |
-| `FC-004` | 输入 `lhs=[M,K], rhs=[K,N]` 的 `nn.matmul`，预期 `compute=2*M*N*K`。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_matmul_formula` | 已闭环。 |
-| `FC-005` | 输入 `dma.copy/load/store`，预期 `compute=0` 且读写字节按元素数统计。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_dma_memory_traffic` | 已闭环。 |
-| `FC-006` | 输入同时含未知 op 与受支持 op 的函数，预期未知 op 被跳过并告警，其余统计保持正常。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_skips_unknown_op_with_warning` | 已闭环。 |
-| `FC-007` | 输入 `attach_attrs=True` 的分析 pass，预期 `func` 回写 `analysis.*` 属性。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_attach_attrs` | 已闭环。 |
-| `FC-008` | 输入 `nn.eq` 输出 `i1`，预期 `write_bytes` 优先按 `predicate_size` 统计（高于 `dtype_size_overrides["i1"]`）。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_compare_i1_uses_predicate_size` | 已闭环。 |
+| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
+| --- | --- | --- | --- | --- | --- | --- |
+| FC-001 | 逐元素计算量 | `nn.add`，`shape=[A,B]` | 两输入同 shape | 运行 pass | `compute=A*B` | `test_func_cost_nn_add_symbolic_shape` |
+| FC-002 | 标量参与运算 | `tensor + const` | 输出 shape `[A,B]` | 运行 pass | `compute=A*B`，常量不计读 | `test_func_cost_tensor_plus_const` |
+| FC-003 | 链式统计 | 两个逐元素 op 串联 | 同一 `func` 内 | 运行 pass | 总量为两 op 逐项求和 | `test_func_cost_chain_accumulate` |
+| FC-004 | 矩阵乘统计 | `nn.matmul` | `lhs=[M,K], rhs=[K,N]` | 运行 pass | `compute=2*M*N*K` | `test_func_cost_matmul_formula` |
+| FC-005 | DMA 访存统计 | `dma.copy/load/store` | 类型合法 | 运行 pass | `compute=0`，读写按元素数计 | `test_func_cost_dma_memory_traffic` |
+| FC-006 | 未知 op 处理 | 含未知 op | 同时存在已支持 op | 运行 pass | 未知 op 被跳过并告警，其余统计正常 | `test_func_cost_skips_unknown_op_with_warning` |
+| FC-007 | 属性回写 | `attach_attrs=True` | 含可统计 op | 运行 pass | `func` 带 `analysis.*` 属性 | `test_func_cost_attach_attrs` |
+| FC-008 | 比较写回口径 | `nn.eq` 输出 `i1` | `predicate_size>0`，且 `dtype_size_overrides` 可覆盖 `i1` | 运行 pass | `write_bytes` 按 `predicate_size` 统计，并优先于 `dtype_size_overrides["i1"]` | `test_func_cost_compare_i1_uses_predicate_size` |
+
+## 失败归因
+
+- AST 发射失败：`module` 非 `builtin.module`、无法遍历或缺失必要结构，导致分析无法开始。
+- Dialect verify 失败：输入 module 中 op 的类型/属性不满足 verifier 约束，导致统计所需信息不可用。
+- Lowering 失败：上游 pass 未按预期完成导致残留不支持 op、缺失 `space` 或形参类型信息，分析阶段需抛出 `FuncCostAnalysisError`。

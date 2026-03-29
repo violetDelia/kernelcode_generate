@@ -1085,3 +1085,35 @@ def test_ensure_no_nn_ops_raises() -> None:
     )
     with pytest.raises(LowerNnToKernelError, match="nn op remains after lowering"):
         pass_module._ensure_no_nn_ops(module)
+
+
+# COV-N2K-024
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-28 19:54:50 +0800
+# 最近一次运行成功时间: 2026-03-28 19:54:50 +0800
+# 测试目的: 验证 module 非 builtin.module 时归因 AST 发射失败。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_run_rejects_non_module_input
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
+def test_run_rejects_non_module_input() -> None:
+    with pytest.raises(LowerNnToKernelError, match="module must be builtin.module"):
+        LowerNnToKernelPass().run(123)  # type: ignore[arg-type]
+
+
+# COV-N2K-025
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-28 19:54:50 +0800
+# 最近一次运行成功时间: 2026-03-28 19:54:50 +0800
+# 测试目的: 验证 module ops 不可遍历时归因 AST 发射失败。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_run_rejects_non_iterable_module_ops
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
+def test_run_rejects_non_iterable_module_ops(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = ModuleOp([])
+    monkeypatch.setattr(ModuleOp, "ops", None, raising=False)
+    with pytest.raises(LowerNnToKernelError, match="module ops must be iterable"):
+        LowerNnToKernelPass().run(module)

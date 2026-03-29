@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/pass/lowering/nn_to_kernel.md`](../../../spec/pass/lowering/nn_to_kernel.md)
 - `功能实现`：[`kernel_gen/passes/lowering/nn_to_kernel.py`](../../../kernel_gen/passes/lowering/nn_to_kernel.py)
 - `test`：[`test/pass/test_lowering_nn_to_kernel.py`](../../../test/pass/test_lowering_nn_to_kernel.py)
@@ -66,6 +66,16 @@ module = pm.run(module)
 - pass 只对 `func.func` 中的 `nn` op 生效。
 - 输出 Memory 由 `dma.alloc` 创建，并作为 kernel op 的 `outs` operand。
 
+前置条件：
+
+- 输入 `module` 已完成 AST/IR 发射，必须是可解析的 `builtin.module`。
+- `module` 内 `nn` op 的结果类型必须是 `nn.memory`，并包含必要的 `nn.space` attribute。
+
+后置条件：
+
+- 输出 module 不得包含任何 `nn` op；所有支持的 `nn` op 必须替换为对应 `kernel` op。
+- `dma.alloc` 的 `shape/space/dtype` 与原 `nn` 结果保持一致。
+
 返回与限制：
 
 - 返回完成 lowering 后的 module（可原地修改或返回新对象，以实现为准）。
@@ -107,6 +117,15 @@ module = pass_obj.run(module)
   - `nn.ge -> kernel.ge`
 - 二元 op（含比较）operand arity 固定为 2；`nn.select` 固定为 3；`nn.cast` 固定为 1；不满足时必须报错 `nn op <name> expects <expected> operands, got <actual>`。
 
+前置条件：
+
+- `module` 必须包含至少一个 `func.func` 或为空 module；当无 `func.func` 时直接返回原 module。
+- 传入的 `module` 必须是可遍历 IR；无法遍历或解析时视为 AST 发射失败。
+
+后置条件：
+
+- 若成功完成，结果 module 不包含任何 `nn` op；否则必须抛出 `LowerNnToKernelError`。
+
 返回与限制：
 
 - 返回 lowering 后的 module。
@@ -117,11 +136,13 @@ module = pass_obj.run(module)
 - 测试文件：[`test/pass/test_lowering_nn_to_kernel.py`](../../../test/pass/test_lowering_nn_to_kernel.py)
 - 执行命令：
   - `pytest -q test/pass/test_lowering_nn_to_kernel.py`
+  - `for f in expectation/pass/lowing/nn_to_kernel/*.py; do PYTHONPATH=. python "$f"; done`
 - 测试目标：
   - 验证支持的 `nn` op 被替换为 `kernel` op，且 `nn.truediv`/`nn.div` 统一映射到 `kernel.div`。
   - 验证输出 Memory 由 `dma.alloc` 创建，且类型/空间与原结果一致。
   - 验证 `dma.alloc` 结果类型中的 `shape` 维度值与原 `nn` 结果保持一致。
   - 验证不支持 op、结果类型非法、缺失 `nn.space`、operand 数量不匹配或 kernel 校验失败时抛出明确错误。
+  - 验证当前 expectation 目录 `expectation/pass/lowing/nn_to_kernel` 下 `add/sub/mul/truediv/eq/ne/lt/le/gt/ge` 十个脚本可独立执行并全部通过。
 - 功能与用例清单：
 
 | 用例 ID | 约束点 | 对应测试 |
@@ -135,3 +156,25 @@ module = pass_obj.run(module)
 | COV-N2K-007 | module 内残留 `nn` op 抛错 | `test_ensure_no_nn_ops_raises` |
 | COV-N2K-008 | 静态维度 `shape` 在 `dma.alloc` 中保持一致 | `test_lower_preserves_static_shape_in_alloc` |
 | COV-N2K-009 | 符号维度 `shape` 在 `dma.alloc` 中保持一致 | `test_lower_preserves_symbol_shape_in_alloc` |
+| COV-N2K-010 | `nn.add -> kernel.add` expectation 链路 | `python expectation/pass/lowing/nn_to_kernel/add.py` |
+| COV-N2K-011 | `nn.sub -> kernel.sub` expectation 链路 | `python expectation/pass/lowing/nn_to_kernel/sub.py` |
+| COV-N2K-012 | `nn.mul -> kernel.mul` expectation 链路 | `python expectation/pass/lowing/nn_to_kernel/mul.py` |
+| COV-N2K-013 | `nn.eq -> kernel.eq` expectation 链路 | `python expectation/pass/lowing/nn_to_kernel/eq.py` |
+| COV-N2K-014 | `nn.lt -> kernel.lt` expectation 链路 | `python expectation/pass/lowing/nn_to_kernel/lt.py` |
+| COV-N2K-015 | `nn.gt -> kernel.gt` expectation 链路 | `python expectation/pass/lowing/nn_to_kernel/gt.py` |
+| COV-N2K-016 | `nn.ne -> kernel.ne` expectation 链路 | `python expectation/pass/lowing/nn_to_kernel/ne.py` |
+| COV-N2K-017 | `nn.le -> kernel.le` expectation 链路 | `python expectation/pass/lowing/nn_to_kernel/le.py` |
+| COV-N2K-018 | `nn.ge -> kernel.ge` expectation 链路 | `python expectation/pass/lowing/nn_to_kernel/ge.py` |
+| COV-N2K-019 | `nn.truediv -> kernel.div` expectation 链路 | `python expectation/pass/lowing/nn_to_kernel/truediv.py` |
+| COV-N2K-020 | `nn.ne -> kernel.ne` 单测映射（实现阶段新增） | `test_lower_ne_to_kernel` |
+| COV-N2K-021 | `nn.le -> kernel.le` 单测映射（实现阶段新增） | `test_lower_le_to_kernel` |
+| COV-N2K-022 | `nn.ge -> kernel.ge` 单测映射（实现阶段新增） | `test_lower_ge_to_kernel` |
+| COV-N2K-023 | `nn.truediv -> kernel.div` 单测映射（实现阶段新增） | `test_lower_truediv_to_kernel_div` |
+| COV-N2K-024 | `run(module)` 拒绝非 `builtin.module` 输入并统一归因为 `LowerNnToKernelError` | `test_run_rejects_non_module_input` |
+| COV-N2K-025 | `run(module)` 拒绝 `module.ops` 不可遍历输入并统一归因为 `LowerNnToKernelError` | `test_run_rejects_non_iterable_module_ops` |
+
+## 失败归因
+
+- AST 发射失败：`module` 非 `builtin.module`、无法遍历或缺失必要结构，lowering 进入前即无法执行。
+- Dialect verify 失败：`kernel` 或 `dma` op verifier 抛错（类型/space/operand 约束不满足）时，必须包装为 `LowerNnToKernelError` 并中止。
+- Lowering 失败：不支持的 `nn` op、结果类型非法、缺失 `nn.space`、operand 数量不匹配或 `dma.alloc` 构造失败导致的错误均归类为 lowering 失败。
