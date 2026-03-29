@@ -1,6 +1,6 @@
 /*
 功能说明:
-- 定义 cpu::Memory 的逐元素算术、比较与显式 broadcast 头文件接口。
+- 定义 cpu::Memory 的逐元素算术、比较、显式 broadcast 与 img2col 头文件接口。
 
 使用示例:
 - #include "include/cpu/Nn.h"
@@ -24,12 +24,43 @@ namespace cpu {
 
 namespace detail {
 
+/*
+功能说明:
+- 将多维索引数组初始化为全 0。
+
+使用示例:
+- long long indices[MAX_DIM];
+- cpu::detail::init_indices(3, indices);
+
+创建者: 小李飞刀
+最后修改人: 小李飞刀
+
+关联文件:
+- spec: spec/include/cpu/cpu.md
+- test: test/include/cpu/test_nn.py
+- 功能实现: include/cpu/Nn.h
+*/
 inline void init_indices(unsigned long long rank, long long* indices) {
     for (unsigned long long i = 0; i < rank; ++i) {
         indices[i] = 0;
     }
 }
 
+/*
+功能说明:
+- 按行主序递增多维索引。
+
+使用示例:
+- cpu::detail::advance_indices(rank, shape, indices);
+
+创建者: 小李飞刀
+最后修改人: 小李飞刀
+
+关联文件:
+- spec: spec/include/cpu/cpu.md
+- test: test/include/cpu/test_nn.py
+- 功能实现: include/cpu/Nn.h
+*/
 inline void advance_indices(unsigned long long rank, const long long* shape, long long* indices) {
     for (unsigned long long reverse_index = 0; reverse_index < rank; ++reverse_index) {
         const unsigned long long i = rank - 1 - reverse_index;
@@ -41,6 +72,215 @@ inline void advance_indices(unsigned long long rank, const long long* shape, lon
     }
 }
 
+/*
+功能说明:
+- 在契约不满足时直接终止，用于无异常 CPU 头文件前置条件检查。
+
+使用示例:
+- cpu::detail::contract_or_trap(rank == 3);
+
+创建者: 小李飞刀
+最后修改人: 小李飞刀
+
+关联文件:
+- spec: spec/include/cpu/cpu.md
+- test: test/include/cpu/test_nn.py
+- 功能实现: include/cpu/Nn.h
+*/
+inline void contract_or_trap(bool condition) {
+    if (!condition) {
+#if defined(__clang__) || defined(__GNUC__)
+        __builtin_trap();
+#else
+        *(volatile int*)0 = 0;
+#endif
+    }
+}
+
+/*
+功能说明:
+- 判断 Memory 是否满足给定 rank 的连续行主序布局。
+
+使用示例:
+- bool ok = cpu::detail::has_contiguous_rank(mem, 3);
+
+创建者: 小李飞刀
+最后修改人: 小李飞刀
+
+关联文件:
+- spec: spec/include/cpu/cpu.md
+- test: test/include/cpu/test_nn.py
+- 功能实现: include/cpu/Nn.h
+*/
+template <typename T>
+bool has_contiguous_rank(const Memory<T>& mem, unsigned long long expected_rank) {
+    return mem.rank() == expected_rank && mem.is_contiguous();
+}
+
+/*
+功能说明:
+- 计算 1D img2col 的输出宽度。
+
+使用示例:
+- long long wo = cpu::detail::compute_img2col1d_output_width(width, 3, 1, 1, 1, 1);
+
+创建者: 小李飞刀
+最后修改人: 小李飞刀
+
+关联文件:
+- spec: spec/include/cpu/cpu.md
+- test: test/include/cpu/test_nn.py
+- 功能实现: include/cpu/Nn.h
+*/
+inline long long compute_img2col1d_output_width(
+    long long width,
+    long long kw,
+    long long sw,
+    long long dw,
+    long long pl,
+    long long pr) {
+    return (width + pl + pr - dw * (kw - 1) - 1) / sw + 1;
+}
+
+/*
+功能说明:
+- 校验 1D img2col 的 rank、shape 与 stride 前置条件。
+
+使用示例:
+- cpu::detail::verify_img2col1d_contract(value, out, 3, 1, 1, 1, 1);
+
+创建者: 小李飞刀
+最后修改人: 小李飞刀
+
+关联文件:
+- spec: spec/include/cpu/cpu.md
+- test: test/include/cpu/test_nn.py
+- 功能实现: include/cpu/Nn.h
+*/
+template <typename T>
+void verify_img2col1d_contract(
+    const Memory<T>& value,
+    const Memory<T>& out,
+    long long kw,
+    long long sw,
+    long long dw,
+    long long pl,
+    long long pr) {
+    contract_or_trap(kw > 0);
+    contract_or_trap(sw > 0);
+    contract_or_trap(dw > 0);
+    contract_or_trap(pl >= 0);
+    contract_or_trap(pr >= 0);
+    contract_or_trap(has_contiguous_rank(value, 3));
+    contract_or_trap(has_contiguous_rank(out, 3));
+
+    const long long n = value.shape()[0];
+    const long long c = value.shape()[1];
+    const long long width = value.shape()[2];
+    const long long wo = compute_img2col1d_output_width(width, kw, sw, dw, pl, pr);
+
+    contract_or_trap(wo > 0);
+    contract_or_trap(out.shape()[0] == n);
+    contract_or_trap(out.shape()[1] == c * kw);
+    contract_or_trap(out.shape()[2] == wo);
+}
+
+/*
+功能说明:
+- 计算 2D img2col 的输出高度或宽度。
+
+使用示例:
+- long long ho = cpu::detail::compute_img2col2d_output_extent(height, 3, 1, 1, 1, 1);
+
+创建者: 小李飞刀
+最后修改人: 小李飞刀
+
+关联文件:
+- spec: spec/include/cpu/cpu.md
+- test: test/include/cpu/test_nn.py
+- 功能实现: include/cpu/Nn.h
+*/
+inline long long compute_img2col2d_output_extent(
+    long long extent,
+    long long kernel,
+    long long stride,
+    long long dilation,
+    long long pad_before,
+    long long pad_after) {
+    return (extent + pad_before + pad_after - dilation * (kernel - 1) - 1) / stride + 1;
+}
+
+/*
+功能说明:
+- 校验 2D img2col 的 rank、shape 与 stride 前置条件。
+
+使用示例:
+- cpu::detail::verify_img2col2d_contract(value, out, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr);
+
+创建者: 小李飞刀
+最后修改人: 小李飞刀
+
+关联文件:
+- spec: spec/include/cpu/cpu.md
+- test: test/include/cpu/test_nn.py
+- 功能实现: include/cpu/Nn.h
+*/
+template <typename T>
+void verify_img2col2d_contract(
+    const Memory<T>& value,
+    const Memory<T>& out,
+    long long kh,
+    long long kw,
+    long long sh,
+    long long sw,
+    long long dh,
+    long long dw,
+    long long ph,
+    long long pw,
+    long long pl,
+    long long pr) {
+    contract_or_trap(kh > 0);
+    contract_or_trap(kw > 0);
+    contract_or_trap(sh > 0);
+    contract_or_trap(sw > 0);
+    contract_or_trap(dh > 0);
+    contract_or_trap(dw > 0);
+    contract_or_trap(ph >= 0);
+    contract_or_trap(pw >= 0);
+    contract_or_trap(pl >= 0);
+    contract_or_trap(pr >= 0);
+    contract_or_trap(has_contiguous_rank(value, 4));
+    contract_or_trap(has_contiguous_rank(out, 3));
+
+    const long long n = value.shape()[0];
+    const long long c = value.shape()[1];
+    const long long height = value.shape()[2];
+    const long long width = value.shape()[3];
+    const long long ho = compute_img2col2d_output_extent(height, kh, sh, dh, ph, pw);
+    const long long wo = compute_img2col2d_output_extent(width, kw, sw, dw, pl, pr);
+
+    contract_or_trap(ho > 0);
+    contract_or_trap(wo > 0);
+    contract_or_trap(out.shape()[0] == n);
+    contract_or_trap(out.shape()[1] == c * kh * kw);
+    contract_or_trap(out.shape()[2] == ho * wo);
+}
+
+/*
+功能说明:
+- 统一执行逐元素二元算子。
+
+使用示例:
+- cpu::detail::apply_binary(lhs, rhs, out, [](float a, float b) { return a + b; });
+
+创建者: 小李飞刀
+最后修改人: 小李飞刀
+
+关联文件:
+- spec: spec/include/cpu/cpu.md
+- test: test/include/cpu/test_nn.py
+- 功能实现: include/cpu/Nn.h
+*/
 template <typename T, typename Op>
 void apply_binary(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out, Op op) {
     long long indices[MAX_DIM];
@@ -52,6 +292,21 @@ void apply_binary(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out, Op
     }
 }
 
+/*
+功能说明:
+- 统一执行逐元素比较算子，并把结果写成 predicate 数值。
+
+使用示例:
+- cpu::detail::apply_compare(lhs, rhs, out, [](float a, float b) { return a < b; });
+
+创建者: 小李飞刀
+最后修改人: 小李飞刀
+
+关联文件:
+- spec: spec/include/cpu/cpu.md
+- test: test/include/cpu/test_nn.py
+- 功能实现: include/cpu/Nn.h
+*/
 template <typename T, typename PredT, typename Op>
 void apply_compare(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out, Op op) {
     long long indices[MAX_DIM];
@@ -301,6 +556,131 @@ void broadcast(const Memory<T>& input, Memory<T>& out) {
         }
         out.at(out_indices) = input.at(in_indices);
         detail::advance_indices(out.rank(), out.shape(), out_indices);
+    }
+}
+
+/*
+功能说明:
+- 将 rank-3 输入视图 `[N, C, W]` 按 1D img2col 规则展开到 `[N, C * kw, Wo]`。
+
+使用示例:
+- cpu::img2col1d(value, out, 3, 1, 1, 1, 1);
+
+创建者: 小李飞刀
+最后修改人: 小李飞刀
+
+关联文件:
+- spec: spec/include/cpu/cpu.md
+- test: test/include/cpu/test_nn.py
+- 功能实现: include/cpu/Nn.h
+*/
+void img2col1d(
+    const Memory<float>& value,
+    Memory<float>& out,
+    long long kw,
+    long long sw,
+    long long dw,
+    long long pl,
+    long long pr) {
+    detail::verify_img2col1d_contract(value, out, kw, sw, dw, pl, pr);
+
+    const long long n = value.shape()[0];
+    const long long c = value.shape()[1];
+    const long long width = value.shape()[2];
+    const long long wo = out.shape()[2];
+    const float zero = 0.0f;
+    long long value_indices[3] = {0, 0, 0};
+    long long out_indices[3] = {0, 0, 0};
+
+    for (long long batch = 0; batch < n; ++batch) {
+        for (long long channel = 0; channel < c; ++channel) {
+            for (long long kernel_w = 0; kernel_w < kw; ++kernel_w) {
+                const long long out_channel = channel * kw + kernel_w;
+                for (long long out_w = 0; out_w < wo; ++out_w) {
+                    const long long in_w = out_w * sw + kernel_w * dw - pl;
+                    out_indices[0] = batch;
+                    out_indices[1] = out_channel;
+                    out_indices[2] = out_w;
+                    if (in_w < 0 || in_w >= width) {
+                        out.at(out_indices) = zero;
+                        continue;
+                    }
+                    value_indices[0] = batch;
+                    value_indices[1] = channel;
+                    value_indices[2] = in_w;
+                    out.at(out_indices) = value.at(value_indices);
+                }
+            }
+        }
+    }
+}
+
+/*
+功能说明:
+- 将 rank-4 输入视图 `[N, C, H, W]` 按 2D img2col 规则展开到 `[N, C * kh * kw, Ho * Wo]`。
+
+使用示例:
+- cpu::img2col2d(value, out, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr);
+
+创建者: 小李飞刀
+最后修改人: 小李飞刀
+
+关联文件:
+- spec: spec/include/cpu/cpu.md
+- test: test/include/cpu/test_nn.py
+- 功能实现: include/cpu/Nn.h
+*/
+void img2col2d(
+    const Memory<float>& value,
+    Memory<float>& out,
+    long long kh,
+    long long kw,
+    long long sh,
+    long long sw,
+    long long dh,
+    long long dw,
+    long long ph,
+    long long pw,
+    long long pl,
+    long long pr) {
+    detail::verify_img2col2d_contract(value, out, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr);
+
+    const long long n = value.shape()[0];
+    const long long c = value.shape()[1];
+    const long long height = value.shape()[2];
+    const long long width = value.shape()[3];
+    const long long ho = detail::compute_img2col2d_output_extent(height, kh, sh, dh, ph, pw);
+    const long long wo = detail::compute_img2col2d_output_extent(width, kw, sw, dw, pl, pr);
+    const float zero = 0.0f;
+    long long value_indices[4] = {0, 0, 0, 0};
+    long long out_indices[3] = {0, 0, 0};
+
+    for (long long batch = 0; batch < n; ++batch) {
+        for (long long channel = 0; channel < c; ++channel) {
+            for (long long kernel_h = 0; kernel_h < kh; ++kernel_h) {
+                for (long long kernel_w = 0; kernel_w < kw; ++kernel_w) {
+                    const long long out_channel = channel * kh * kw + kernel_h * kw + kernel_w;
+                    for (long long out_h = 0; out_h < ho; ++out_h) {
+                        const long long in_h = out_h * sh + kernel_h * dh - ph;
+                        for (long long out_w = 0; out_w < wo; ++out_w) {
+                            const long long in_w = out_w * sw + kernel_w * dw - pl;
+                            out_indices[0] = batch;
+                            out_indices[1] = out_channel;
+                            out_indices[2] = out_h * wo + out_w;
+                            if (in_h < 0 || in_h >= height || in_w < 0 || in_w >= width) {
+                                out.at(out_indices) = zero;
+                                continue;
+                            }
+                            value_indices[0] = batch;
+                            value_indices[1] = channel;
+                            value_indices[2] = in_h;
+                            value_indices[3] = in_w;
+                            out.at(out_indices) = value.at(value_indices);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -2,12 +2,13 @@
 
 ## 功能简介
 
-定义 CPU 后端 include/cpu 头文件规范，覆盖 `include/cpu/Memory.h` 与 `include/cpu/Nn.h` 的公开接口、行为与约束。当前基线要求 `cpu::Memory<T>` 使用运行期 `rank`，并以 `MAX_DIM=8` 作为内部固定上限；逐元素/显式 broadcast 语义仍由 CPU include 层实现负责承接。
+定义 CPU 后端 include/cpu 头文件规范，覆盖 `include/cpu/Memory.h` 与 `include/cpu/Nn.h` 的公开接口、行为与约束。当前基线要求 `cpu::Memory<T>` 使用运行期 `rank`，并以 `MAX_DIM=8` 作为内部固定上限；逐元素/显式 broadcast 与 `img2col1d/img2col2d` CPU 叶子接口语义仍由 CPU include 层实现负责承接。
 
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`朽木露琪亚`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/include/cpu/cpu.md`](../../../spec/include/cpu/cpu.md)
 - `功能实现`：[`include/cpu/Memory.h`](../../../include/cpu/Memory.h)、[`include/cpu/Nn.h`](../../../include/cpu/Nn.h)
 - `test`：[`test/include/cpu/test_memory.py`](../../../test/include/cpu/test_memory.py)、[`test/include/cpu/test_nn.py`](../../../test/include/cpu/test_nn.py)
@@ -23,12 +24,15 @@
 - 规范 CPU 后端 `Memory` 视图与 `Nn` 运算接口，便于与 `spec/operation/nn.md` 的语义对齐。
 - 保持纯头文件、无标准库依赖、无异常机制的实现约束。
 - 明确 CPU 后端 `Memory` 视图使用运行期 `rank` 的接口边界，并以 `MAX_DIM=8` 作为固定容量基线。
+- 冻结 `cpu::img2col1d(...)` 与 `cpu::img2col2d(...)` 的稳定 CPU 公开接口，使 `emit_c/gen_kernel` 在 CPU 侧拥有固定调用目标。
 
 ## 限制与边界
 
 - `cpu::Memory<T>` 以运行期 `rank` 描述维度，并在内部以 `MAX_DIM=8` 保存 `shape/stride`；调用方必须满足前置条件 `0 < rank <= 8`，实现不得对 `rank > 8` 做静默截断。
 - 公开接口均为纯头文件模板与内联实现，不提供动态分配、异常或运行时边界检查。
 - 逐元素与比较算子要求输入与输出形状一致，广播仅支持显式 `broadcast`，不提供隐式广播或标量重载。
+- `img2col1d/img2col2d` 只定义 CPU include 层叶子接口，不反向规定 AST 节点类型、`nn dialect` 运行时类型、`build_func_op(...)` 结构或 pass 名称。
+- 禁止新增笼统 `cpu::img2col(...)` 公开名；CPU include 层只公开 `cpu::img2col1d(...)` 与 `cpu::img2col2d(...)`。
 - 运行时错误由调用方规避；接口返回 `void`，不提供状态码。
 - 本 spec 同时覆盖 `include/cpu/Memory.h` 与 `include/cpu/Nn.h`，原因是两者在 CPU 后端中紧密耦合并共用同一视图语义。
 
@@ -764,6 +768,187 @@ cpu::broadcast(input, out);
 - 返回类型：`void`。
 - 返回语义：结果写入 `out`。
 - 限制条件：广播条件不满足时行为未定义。
+
+### `cpu::img2col1d(value, out, kw, sw, dw, pl, pr)`
+
+功能说明：
+
+- 将 rank-3 输入视图 `value[N, C, W]` 按 1D `img2col` 规则展开到 rank-3 输出视图 `out[N, C*Kw, Wo]`。
+- 该接口是 CPU emitter 的稳定叶子调用目标，只依赖 `cpu::Memory<T>` 与普通整型标量参数。
+
+参数说明：
+
+- `value (const cpu::Memory<T>&)`：输入视图，运行期 `rank` 必须为 `3`。
+- `out (cpu::Memory<T>&)`：输出视图，运行期 `rank` 必须为 `3`，并由调用方预先分配。
+- `kw (long long)`：kernel width，必须为正整数。
+- `sw (long long)`：stride width，必须为正整数。
+- `dw (long long)`：dilation width，必须为正整数。
+- `pl (long long)`：左侧 padding，必须为非负整数。
+- `pr (long long)`：右侧 padding，必须为非负整数。
+
+使用示例：
+
+```cpp
+cpu::img2col1d(value_1d, out_1d, 3, 1, 1, 1, 1);
+```
+
+注意事项：
+
+- 该接口的公开签名固定为：
+  `void cpu::img2col1d(const cpu::Memory<float>& value, cpu::Memory<float>& out, long long kw, long long sw, long long dw, long long pl, long long pr)`。
+- `value` 必须解释为 `shape=[N, C, W]`；`out` 必须解释为 `shape=[N, C * kw, Wo]`，其中
+  `Wo = (W + pl + pr - dw * (kw - 1) - 1) / sw + 1`，按整除下取整口径理解。
+- `shape-formula-check` 的含义是：调用方必须保证 `out.shape()` 与上式完全一致。
+- `stride-consistency-check` 的含义是：调用方必须保证 `value` 的 `shape/stride` 与其运行期 `rank` 自洽，且 `out` 采用与 `[N, C * kw, Wo]` 一致的密集行主序布局，等价 stride 为 `[(C * kw) * Wo, Wo, 1]`。
+- 本接口只依赖 `cpu::Memory`、`long long`、rank 检查、shape 公式检查与 stride 一致性检查；不得依赖 AST 节点类型、`nn dialect` 运行时类型、`build_func_op(...)` 结构或 pass 名称。
+- 若调用方违反以下任一前置条件，应视为契约不满足：`value-rank-not-3`、`out-rank-not-3`、`shape-stride-mismatch-with-img2col1d-formula`、`kw-sw-dw-not-positive`、`pl-pr-negative`。
+- 禁止继续新增或暴露笼统 `cpu::img2col(...)` 公开接口名。
+
+返回与限制：
+
+- 返回类型：`void`。
+- 返回语义：按 `img2col1d` 规则把 `value` 展开写入 `out`。
+- 限制条件：接口不提供异常、状态码或运行时分派；契约校验失败属于调用方违约。
+
+### `cpu::img2col2d(value, out, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr)`
+
+功能说明：
+
+- 将 rank-4 输入视图 `value[N, C, H, W]` 按 2D `img2col` 规则展开到 rank-3 输出视图 `out[N, C*Kh*Kw, Ho*Wo]`。
+- 该接口是 CPU emitter 的稳定叶子调用目标，只依赖 `cpu::Memory<T>` 与普通整型标量参数。
+
+参数说明：
+
+- 除 `value/out` 外，固定签名必须包含且仅包含 10 个 `long long` 标量参数：`kh/kw/sh/sw/dh/dw/ph/pw/pl/pr`。
+- `value (const cpu::Memory<T>&)`：输入视图，运行期 `rank` 必须为 `4`。
+- `out (cpu::Memory<T>&)`：输出视图，运行期 `rank` 必须为 `3`，并由调用方预先分配。
+- `kh (long long)`：kernel height，必须为正整数。
+- `kw (long long)`：kernel width，必须为正整数。
+- `sh (long long)`：stride height，必须为正整数。
+- `sw (long long)`：stride width，必须为正整数。
+- `dh (long long)`：dilation height，必须为正整数。
+- `dw (long long)`：dilation width，必须为正整数。
+- `ph (long long)`：上侧 padding，必须为非负整数。
+- `pw (long long)`：下侧 padding，必须为非负整数。
+- `pl (long long)`：左侧 padding，必须为非负整数。
+- `pr (long long)`：右侧 padding，必须为非负整数。
+
+使用示例：
+
+```cpp
+cpu::img2col2d(value_2d, out_2d, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1);
+// 固定签名口径：value/out + 10 个 long long 标量参数。
+```
+
+注意事项：
+
+- 该接口的公开签名固定为：
+  `void cpu::img2col2d(const cpu::Memory<float>& value, cpu::Memory<float>& out, long long kh, long long kw, long long sh, long long sw, long long dh, long long dw, long long ph, long long pw, long long pl, long long pr)`。
+- 调用示例必须与固定签名保持一致：`value/out` 之后只允许 10 个标量参数，不能扩展为其他参数个数。
+- `value` 必须解释为 `shape=[N, C, H, W]`；`out` 必须解释为 `shape=[N, C * kh * kw, Ho * Wo]`，其中
+  `Ho = (H + ph + pw - dh * (kh - 1) - 1) / sh + 1`，
+  `Wo = (W + pl + pr - dw * (kw - 1) - 1) / sw + 1`，
+  按整除下取整口径理解。
+- `shape-formula-check` 的含义是：调用方必须保证 `out.shape()` 与上述二维公式完全一致。
+- `stride-consistency-check` 的含义是：调用方必须保证 `value` 的 `shape/stride` 与其运行期 `rank` 自洽，且 `out` 采用与 `[N, C * kh * kw, Ho * Wo]` 一致的密集行主序布局，等价 stride 为 `[(C * kh * kw) * (Ho * Wo), Ho * Wo, 1]`。
+- 本接口只依赖 `cpu::Memory`、`long long`、rank 检查、shape 公式检查与 stride 一致性检查；不得依赖 AST 节点类型、`nn dialect` 运行时类型、`build_func_op(...)` 结构或 pass 名称。
+- 若调用方违反以下任一前置条件，应视为契约不满足：`value-rank-not-4`、`out-rank-not-3`、`shape-stride-mismatch-with-img2col2d-formula`、`kh-kw-sh-sw-dh-dw-not-positive`、`ph-pw-pl-pr-negative`。
+- 禁止继续新增或暴露笼统 `cpu::img2col(...)` 公开接口名。
+
+返回与限制：
+
+- 返回类型：`void`。
+- 返回语义：按 `img2col2d` 规则把 `value` 展开写入 `out`。
+- 限制条件：接口不提供异常、状态码或运行时分派；契约校验失败属于调用方违约。
+
+## 额外补充
+
+### `img2col1d/img2col2d` CPU API 契约
+
+目标：
+
+- 在 `spec/include/cpu/cpu.md` 冻结 `cpu::img2col1d(...)` 与 `cpu::img2col2d(...)` 的公开接口与最小行为契约，作为 `emit_c/gen_kernel` 的稳定 CPU 调用目标。
+
+边界：
+
+- 本文只定义 CPU include 层的公开接口；不定义 DSL lowering、`nn dialect` 结构、`build_func_op(...)` 结构、pass 名称或完整 conv 模板。
+- 本文只修改 `spec/include/cpu/cpu.md` 所覆盖的公开契约，不反向规定上游 AST/IR 该如何组织。
+
+注意事项：
+
+- CPU runtime 只依赖 `cpu::Memory`、普通标量参数和本层运行时契约，不依赖 AST 节点类型、`nn dialect` 运行时类型、`build_func_op(...)` 结构或 pass 名称。
+- `cpu::img2col1d(...)` 与 `cpu::img2col2d(...)` 是稳定公开名；不得继续新增 `cpu::img2col(...)` 笼统接口。
+- 下文中的 `describe_cpu_api_contract(...)` 仅是验收辅助伪名，不是产品接口，不能在 `include/cpu` 中实现为公开 API。
+
+依赖：
+
+- 无硬依赖；允许与上游 `img2col` 公开名相关规格并行推进。
+- 验收口径必须与固定公开名 `img2col1d/img2col2d` 保持一致，并以上游高层公开语义冻结文本为命名与公式基准。
+
+验证命令：
+
+- 无；由管理者人工核对文档。
+
+验收标准：
+
+- 本文必须能直接支撑下面这个验收辅助函数的 `expected` 结构；若文档无法推出同样的契约，则该规格不通过。
+
+```python
+def test_cpu_img2col_api_contract_v1():
+    actual = describe_cpu_api_contract(
+        names=["cpu::img2col1d", "cpu::img2col2d"],
+        template_type="float",
+    )
+    expected = {
+        "apis": {
+            "cpu::img2col1d": {
+                "signature": "void cpu::img2col1d(const cpu::Memory<float>& value, cpu::Memory<float>& out, long long kw, long long sw, long long dw, long long pl, long long pr)",
+                "depends_only_on": [
+                    "cpu::Memory",
+                    "long long",
+                    "rank-check",
+                    "shape-formula-check",
+                    "stride-consistency-check",
+                ],
+                "value_rank": 3,
+                "out_rank": 3,
+                "rejects": [
+                    "value-rank-not-3",
+                    "out-rank-not-3",
+                    "shape-stride-mismatch-with-img2col1d-formula",
+                    "kw-sw-dw-not-positive",
+                    "pl-pr-negative",
+                ],
+            },
+            "cpu::img2col2d": {
+                "signature": "void cpu::img2col2d(const cpu::Memory<float>& value, cpu::Memory<float>& out, long long kh, long long kw, long long sh, long long sw, long long dh, long long dw, long long ph, long long pw, long long pl, long long pr)",
+                "depends_only_on": [
+                    "cpu::Memory",
+                    "long long",
+                    "rank-check",
+                    "shape-formula-check",
+                    "stride-consistency-check",
+                ],
+                "value_rank": 4,
+                "out_rank": 3,
+                "rejects": [
+                    "value-rank-not-4",
+                    "out-rank-not-3",
+                    "shape-stride-mismatch-with-img2col2d-formula",
+                    "kh-kw-sh-sw-dh-dw-not-positive",
+                    "ph-pw-pl-pr-negative",
+                ],
+            },
+        },
+        "forbidden_dependencies": [
+            "ast-node-types",
+            "nn-dialect-runtime-types",
+            "build_func_op-structure",
+            "pass-names",
+        ],
+        "forbidden_public_names": ["cpu::img2col"],
+    }
+```
 
 ## 测试
 

@@ -4,12 +4,12 @@
 最后一次更改: 我不是牛马
 
 功能说明:
-- 通过编译并运行 C++ 片段验证 include/cpu/Nn.h 的逐元素与 broadcast 语义。
+- 通过编译并运行 C++ 片段验证 include/cpu/Nn.h 的逐元素、broadcast 与 img2col 语义。
 
 覆盖率信息:
 - 当前覆盖率: `N/A`。该链路的功能实现为 C++ 头文件，当前任务不使用 `pytest-cov` 直接统计覆盖率。
 - 达标判定: C++ 实现按规则豁免 `95%` 覆盖率达标线。
-- 当前以 `INC-NN-001..012` 对应测试作为覆盖基线。
+- 当前以 `INC-NN-001..018` 对应测试作为覆盖基线。
 - 最近一次测试核对: `2026-03-22 19:31:12 +0800`，本次执行 `pytest -q test/include/cpu/test_memory.py test/include/cpu/test_nn.py`，结果为 `16 passed`。
 
 覆盖率命令:
@@ -86,6 +86,110 @@ def _compile_and_run(source: str) -> None:
         if run_result.returncode != 0:
             raise AssertionError(
                 "compiled program failed:\n"
+                f"stdout:\n{run_result.stdout}\n"
+                f"stderr:\n{run_result.stderr}"
+            )
+
+
+def _compile_expect_failure(source: str, expected_stderr: str) -> None:
+    """编译 C++ 片段并断言其编译失败且报错包含指定关键字。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 使用 g++ 编译临时源码，并验证失败信息命中指定关键字。
+
+    使用示例:
+    - _compile_expect_failure("int main() { missing(); }", "missing")
+
+    关联文件:
+    - spec: spec/include/cpu/cpu.md
+    - test: test/include/cpu/test_nn.py
+    - 功能实现: test/include/cpu/test_nn.py
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        source_path = Path(tmpdir) / "nn_compile_fail.cpp"
+        binary_path = Path(tmpdir) / "nn_compile_fail"
+        source_path.write_text(source, encoding="utf-8")
+
+        compile_result = subprocess.run(
+            [
+                "g++",
+                "-std=c++17",
+                "-I",
+                str(REPO_ROOT),
+                str(source_path),
+                "-o",
+                str(binary_path),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if compile_result.returncode == 0:
+            raise AssertionError("expected g++ compile failure, but compilation succeeded")
+        if expected_stderr not in compile_result.stderr:
+            raise AssertionError(
+                "compile stderr does not contain expected text:\n"
+                f"expected: {expected_stderr}\n"
+                f"stdout:\n{compile_result.stdout}\n"
+                f"stderr:\n{compile_result.stderr}"
+            )
+
+
+def _compile_and_run_expect_failure(source: str) -> None:
+    """编译并运行 C++ 片段，断言程序因契约失败而非零退出。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 使用 g++ 编译临时源码，并验证运行结果为非零退出码。
+
+    使用示例:
+    - _compile_and_run_expect_failure("int main() { __builtin_trap(); }")
+
+    关联文件:
+    - spec: spec/include/cpu/cpu.md
+    - test: test/include/cpu/test_nn.py
+    - 功能实现: test/include/cpu/test_nn.py
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        source_path = Path(tmpdir) / "nn_runtime_fail.cpp"
+        binary_path = Path(tmpdir) / "nn_runtime_fail"
+        source_path.write_text(source, encoding="utf-8")
+
+        compile_result = subprocess.run(
+            [
+                "g++",
+                "-std=c++17",
+                "-I",
+                str(REPO_ROOT),
+                str(source_path),
+                "-o",
+                str(binary_path),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if compile_result.returncode != 0:
+            raise AssertionError(
+                "g++ compile failed:\n"
+                f"stdout:\n{compile_result.stdout}\n"
+                f"stderr:\n{compile_result.stderr}"
+            )
+
+        run_result = subprocess.run(
+            [str(binary_path)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if run_result.returncode == 0:
+            raise AssertionError(
+                "expected compiled program to fail, but it exited successfully:\n"
                 f"stdout:\n{run_result.stdout}\n"
                 f"stderr:\n{run_result.stderr}"
             )
@@ -568,3 +672,239 @@ int main() {
 }
 """
     _compile_and_run(source)
+
+
+# INC-NN-013
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-29 18:20:00 +0800
+# 最近一次运行成功时间: 2026-03-29 18:20:00 +0800
+# 测试目的: 验证 cpu::img2col1d 的固定签名与成功展开语义。
+# 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_img2col1d_success_and_signature
+# 对应功能实现文件路径: include/cpu/Nn.h
+# 对应 spec 文件路径: spec/include/cpu/cpu.md
+# 对应测试文件路径: test/include/cpu/test_nn.py
+def test_cpu_nn_img2col1d_success_and_signature() -> None:
+    source = r"""
+#include "include/cpu/Memory.h"
+#include "include/cpu/Nn.h"
+
+using Img2Col1dFn = void (*)(
+    const cpu::Memory<float>&,
+    cpu::Memory<float>&,
+    long long,
+    long long,
+    long long,
+    long long,
+    long long);
+
+static int fail(int code) { return code; }
+
+int main() {
+    Img2Col1dFn fn = &cpu::img2col1d;
+    (void)fn;
+
+    float value_data[4] = {1, 2, 3, 4};
+    float out_data[12] = {0};
+    long long value_shape[3] = {1, 1, 4};
+    long long value_stride[3] = {4, 4, 1};
+    long long out_shape[3] = {1, 3, 4};
+    long long out_stride[3] = {12, 4, 1};
+
+    cpu::Memory<float> value(value_data, 3, value_shape, value_stride);
+    cpu::Memory<float> out(out_data, 3, out_shape, out_stride);
+
+    cpu::img2col1d(value, out, 3, 1, 1, 1, 1);
+
+    float expected[12] = {0, 1, 2, 3, 1, 2, 3, 4, 2, 3, 4, 0};
+    for (int i = 0; i < 12; ++i) {
+        if (out_data[i] != expected[i]) {
+            return fail(i + 1);
+        }
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
+# INC-NN-014
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-29 18:20:00 +0800
+# 最近一次运行成功时间: 2026-03-29 18:20:00 +0800
+# 测试目的: 验证 cpu::img2col2d 的固定签名与成功展开语义。
+# 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_img2col2d_success_and_signature
+# 对应功能实现文件路径: include/cpu/Nn.h
+# 对应 spec 文件路径: spec/include/cpu/cpu.md
+# 对应测试文件路径: test/include/cpu/test_nn.py
+def test_cpu_nn_img2col2d_success_and_signature() -> None:
+    source = r"""
+#include "include/cpu/Memory.h"
+#include "include/cpu/Nn.h"
+
+using Img2Col2dFn = void (*)(
+    const cpu::Memory<float>&,
+    cpu::Memory<float>&,
+    long long,
+    long long,
+    long long,
+    long long,
+    long long,
+    long long,
+    long long,
+    long long,
+    long long,
+    long long);
+
+static int fail(int code) { return code; }
+
+int main() {
+    Img2Col2dFn fn = &cpu::img2col2d;
+    (void)fn;
+
+    float value_data[6] = {1, 2, 3, 4, 5, 6};
+    float out_data[8] = {0};
+    long long value_shape[4] = {1, 1, 2, 3};
+    long long value_stride[4] = {6, 6, 3, 1};
+    long long out_shape[3] = {1, 4, 2};
+    long long out_stride[3] = {8, 2, 1};
+
+    cpu::Memory<float> value(value_data, 4, value_shape, value_stride);
+    cpu::Memory<float> out(out_data, 3, out_shape, out_stride);
+
+    cpu::img2col2d(value, out, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0);
+
+    float expected[8] = {1, 2, 2, 3, 4, 5, 5, 6};
+    for (int i = 0; i < 8; ++i) {
+        if (out_data[i] != expected[i]) {
+            return fail(i + 1);
+        }
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
+# INC-NN-015
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-29 18:20:00 +0800
+# 最近一次运行成功时间: 2026-03-29 18:20:00 +0800
+# 测试目的: 验证 cpu::img2col1d 在 rank 前置条件不满足时触发契约失败。
+# 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_img2col1d_contract_violation_traps
+# 对应功能实现文件路径: include/cpu/Nn.h
+# 对应 spec 文件路径: spec/include/cpu/cpu.md
+# 对应测试文件路径: test/include/cpu/test_nn.py
+def test_cpu_nn_img2col1d_contract_violation_traps() -> None:
+    source = r"""
+#include "include/cpu/Memory.h"
+#include "include/cpu/Nn.h"
+
+int main() {
+    float value_data[4] = {1, 2, 3, 4};
+    float out_data[12] = {0};
+    long long value_shape[2] = {1, 4};
+    long long value_stride[2] = {4, 1};
+    long long out_shape[3] = {1, 3, 4};
+    long long out_stride[3] = {12, 4, 1};
+
+    cpu::Memory<float> value(value_data, 2, value_shape, value_stride);
+    cpu::Memory<float> out(out_data, 3, out_shape, out_stride);
+
+    cpu::img2col1d(value, out, 3, 1, 1, 1, 1);
+    return 0;
+}
+"""
+    _compile_and_run_expect_failure(source)
+
+
+# INC-NN-016
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-29 18:20:00 +0800
+# 最近一次运行成功时间: 2026-03-29 18:20:00 +0800
+# 测试目的: 验证 cpu::img2col2d 在 shape 前置条件不满足时触发契约失败。
+# 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_img2col2d_contract_violation_traps
+# 对应功能实现文件路径: include/cpu/Nn.h
+# 对应 spec 文件路径: spec/include/cpu/cpu.md
+# 对应测试文件路径: test/include/cpu/test_nn.py
+def test_cpu_nn_img2col2d_contract_violation_traps() -> None:
+    source = r"""
+#include "include/cpu/Memory.h"
+#include "include/cpu/Nn.h"
+
+int main() {
+    float value_data[6] = {1, 2, 3, 4, 5, 6};
+    float out_data[8] = {0};
+    long long value_shape[4] = {1, 1, 2, 3};
+    long long value_stride[4] = {6, 6, 3, 1};
+    long long out_shape[3] = {1, 4, 3};
+    long long out_stride[3] = {12, 3, 1};
+
+    cpu::Memory<float> value(value_data, 4, value_shape, value_stride);
+    cpu::Memory<float> out(out_data, 3, out_shape, out_stride);
+
+    cpu::img2col2d(value, out, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0);
+    return 0;
+}
+"""
+    _compile_and_run_expect_failure(source)
+
+
+# INC-NN-017
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-29 18:20:00 +0800
+# 最近一次运行成功时间: 2026-03-29 18:20:00 +0800
+# 测试目的: 验证 cpu::img2col1d 在 stride 前置条件不满足时触发契约失败。
+# 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_img2col1d_stride_violation_traps
+# 对应功能实现文件路径: include/cpu/Nn.h
+# 对应 spec 文件路径: spec/include/cpu/cpu.md
+# 对应测试文件路径: test/include/cpu/test_nn.py
+def test_cpu_nn_img2col1d_stride_violation_traps() -> None:
+    source = r"""
+#include "include/cpu/Memory.h"
+#include "include/cpu/Nn.h"
+
+int main() {
+    float value_data[4] = {1, 2, 3, 4};
+    float out_data[12] = {0};
+    long long value_shape[3] = {1, 1, 4};
+    long long value_stride[3] = {4, 4, 1};
+    long long out_shape[3] = {1, 3, 4};
+    long long out_stride[3] = {99, 4, 1};
+
+    cpu::Memory<float> value(value_data, 3, value_shape, value_stride);
+    cpu::Memory<float> out(out_data, 3, out_shape, out_stride);
+
+    cpu::img2col1d(value, out, 3, 1, 1, 1, 1);
+    return 0;
+}
+"""
+    _compile_and_run_expect_failure(source)
+
+
+# INC-NN-018
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-29 18:20:00 +0800
+# 最近一次运行成功时间: 2026-03-29 18:20:00 +0800
+# 测试目的: 验证 include/cpu/Nn.h 不暴露笼统 cpu::img2col 公开名。
+# 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_img2col_generic_name_is_forbidden
+# 对应功能实现文件路径: include/cpu/Nn.h
+# 对应 spec 文件路径: spec/include/cpu/cpu.md
+# 对应测试文件路径: test/include/cpu/test_nn.py
+def test_cpu_nn_img2col_generic_name_is_forbidden() -> None:
+    source = r"""
+#include "include/cpu/Memory.h"
+#include "include/cpu/Nn.h"
+
+int main() {
+    auto fn = &cpu::img2col;
+    (void)fn;
+    return 0;
+}
+"""
+    _compile_expect_failure(source, "img2col")
