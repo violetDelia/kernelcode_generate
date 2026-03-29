@@ -28,7 +28,18 @@ from pathlib import Path
 
 import pytest
 from xdsl.context import Context
-from xdsl.dialects.builtin import ArrayAttr, Builtin, Float32Type, IntAttr, IntegerType, ModuleOp, StringAttr, i32
+from xdsl.dialects.builtin import (
+    ArrayAttr,
+    Builtin,
+    Float16Type,
+    Float32Type,
+    IntAttr,
+    IntegerAttr,
+    IntegerType,
+    ModuleOp,
+    StringAttr,
+    i32,
+)
 from xdsl.dialects.test import Test, TestOp as _TestOp
 from xdsl.ir import Attribute, Operation
 from xdsl.parser import Parser
@@ -58,7 +69,14 @@ from kernel_gen.dialect import (
     NnSubOp,
     NnTrueDivOp,
 )
-from kernel_gen.dialect.nn import NnSoftmaxOp, NnTransposeOp
+from kernel_gen.dialect.nn import (
+    NnExpOp,
+    NnReduceMaxOp,
+    NnReduceMinOp,
+    NnReduceSumOp,
+    NnSoftmaxOp,
+    NnTransposeOp,
+)
 from kernel_gen.dialect.symbol import SymbolValueType
 
 
@@ -1648,3 +1666,408 @@ def test_nn_dialect_img2col2d_contract_v1() -> None:
         )
         with pytest.raises(VerifyException, match=message):
             case_op.verify()
+
+
+# NN-DIA-045
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 nn.exp 浮点输入与元信息保持的合法路径。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_exp_op_verify_success
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_exp_op_verify_success() -> None:
+    input_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(4)],
+        [IntAttr(4), IntAttr(1)],
+        space="global",
+        element_type=Float32Type(),
+    )
+    result_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(4)],
+        [IntAttr(4), IntAttr(1)],
+        space="global",
+        element_type=Float32Type(),
+    )
+    inp = _TestOp(result_types=[input_type]).results[0]
+    op = NnExpOp(inp, result_type, _make_space("global"))
+    op.verify()
+
+
+# NN-DIA-046
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 nn.exp 对非浮点输入与 shape/stride/space 不一致的拒绝路径。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_exp_op_rejects_invalid_inputs
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_exp_op_rejects_invalid_inputs() -> None:
+    float_input = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(4)],
+        [IntAttr(4), IntAttr(1)],
+        space="global",
+        element_type=Float32Type(),
+    )
+    float_result = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(4)],
+        [IntAttr(4), IntAttr(1)],
+        space="global",
+        element_type=Float32Type(),
+    )
+    cases = [
+        (
+            _make_simple_memory_type(
+                [IntAttr(2), IntAttr(4)],
+                [IntAttr(4), IntAttr(1)],
+                space="global",
+                element_type=i32,
+            ),
+            _make_simple_memory_type(
+                [IntAttr(2), IntAttr(4)],
+                [IntAttr(4), IntAttr(1)],
+                space="global",
+                element_type=i32,
+            ),
+            "global",
+            "operand-element-type-must-be-float",
+        ),
+        (
+            float_input,
+            _make_simple_memory_type(
+                [IntAttr(2), IntAttr(5)],
+                [IntAttr(5), IntAttr(1)],
+                space="global",
+                element_type=Float32Type(),
+            ),
+            "global",
+            "result-shape-stride-must-match-input",
+        ),
+        (
+            float_input,
+            _make_simple_memory_type(
+                [IntAttr(2), IntAttr(4)],
+                [IntAttr(5), IntAttr(1)],
+                space="global",
+                element_type=Float32Type(),
+            ),
+            "global",
+            "result-shape-stride-must-match-input",
+        ),
+        (
+            float_input,
+            _make_simple_memory_type(
+                [IntAttr(2), IntAttr(4)],
+                [IntAttr(4), IntAttr(1)],
+                space="global",
+                element_type=Float16Type(),
+            ),
+            "global",
+            "result-element-type-must-match-input",
+        ),
+        (
+            float_input,
+            _make_simple_memory_type(
+                [IntAttr(2), IntAttr(4)],
+                [IntAttr(4), IntAttr(1)],
+                space="shared",
+                element_type=Float32Type(),
+            ),
+            "global",
+            "result-space-must-match-input-and-attr",
+        ),
+        (
+            float_input,
+            float_result,
+            "shared",
+            "result-space-must-match-input-and-attr",
+        ),
+    ]
+    for input_type, result_type, space, message in cases:
+        inp = _TestOp(result_types=[input_type]).results[0]
+        op = NnExpOp(inp, result_type, _make_space(space))
+        with pytest.raises(VerifyException, match=message):
+            op.verify()
+
+
+# NN-DIA-047
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 nn.reduce_sum 的 axes/keepdim 与结果 shape 合同。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_reduce_sum_op_shape_contract
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_reduce_sum_op_shape_contract() -> None:
+    input_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(3), IntAttr(4)],
+        [IntAttr(12), IntAttr(4), IntAttr(1)],
+        space="global",
+    )
+    inp = _TestOp(result_types=[input_type]).results[0]
+    cases = [
+        (
+            [1],
+            True,
+            _make_simple_memory_type(
+                [IntAttr(2), IntAttr(1), IntAttr(4)],
+                [IntAttr(4), IntAttr(4), IntAttr(1)],
+                space="global",
+            ),
+        ),
+        (
+            [1],
+            False,
+            _make_simple_memory_type(
+                [IntAttr(2), IntAttr(4)],
+                [IntAttr(4), IntAttr(1)],
+                space="global",
+            ),
+        ),
+    ]
+    for axes, keepdim, result_type in cases:
+        op = NnReduceSumOp(inp, result_type, axes=axes, keepdim=keepdim, space=_make_space("global"))
+        op.verify()
+
+
+# NN-DIA-048
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 nn.reduce_sum 对非法 axes 的拒绝路径。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_reduce_sum_op_rejects_invalid_axes
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_reduce_sum_op_rejects_invalid_axes() -> None:
+    input_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(3), IntAttr(4)],
+        [IntAttr(12), IntAttr(4), IntAttr(1)],
+        space="global",
+    )
+    result_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(3), IntAttr(4)],
+        [IntAttr(12), IntAttr(4), IntAttr(1)],
+        space="global",
+    )
+    inp = _TestOp(result_types=[input_type]).results[0]
+    cases = [
+        ArrayAttr([]),
+        ArrayAttr([IntegerAttr(0, IntegerType(64)), IntegerAttr(0, IntegerType(64))]),
+        ArrayAttr([IntegerAttr(3, IntegerType(64))]),
+        ArrayAttr([IntegerAttr(1, IntegerType(32))]),
+        ArrayAttr([IntAttr(1)]),
+    ]
+    for axes_attr in cases:
+        op = NnReduceSumOp(inp, result_type, axes=[0], keepdim=True, space=_make_space("global"))
+        op.attributes["axes"] = axes_attr
+        with pytest.raises(VerifyException, match="axes-must-be-non-empty-unique-and-in-range"):
+            op.verify()
+
+
+# NN-DIA-049
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 nn.reduce_min 的 keepdim 合同与静态空归约域拒绝。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_reduce_min_op_contract_and_empty_extent_rejection
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_reduce_min_op_contract_and_empty_extent_rejection() -> None:
+    input_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(3)],
+        [IntAttr(3), IntAttr(1)],
+        space="global",
+    )
+    result_type = _make_simple_memory_type(
+        [IntAttr(1), IntAttr(3)],
+        [IntAttr(3), IntAttr(1)],
+        space="global",
+    )
+    inp = _TestOp(result_types=[input_type]).results[0]
+    op = NnReduceMinOp(inp, result_type, axes=[0], keepdim=True, space=_make_space("global"))
+    op.verify()
+
+    empty_input_type = _make_simple_memory_type(
+        [IntAttr(0), IntAttr(3)],
+        [IntAttr(3), IntAttr(1)],
+        space="global",
+    )
+    empty_result_type = _make_simple_memory_type(
+        [IntAttr(1), IntAttr(3)],
+        [IntAttr(3), IntAttr(1)],
+        space="global",
+    )
+    empty_inp = _TestOp(result_types=[empty_input_type]).results[0]
+    empty_op = NnReduceMinOp(empty_inp, empty_result_type, axes=[0], keepdim=True, space=_make_space("global"))
+    with pytest.raises(VerifyException, match="empty-reduction-extent-must-be-rejected-when-static"):
+        empty_op.verify()
+
+
+# NN-DIA-050
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 nn.reduce_max 的 keepdim 合同与静态空归约域拒绝。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_reduce_max_op_contract_and_empty_extent_rejection
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_reduce_max_op_contract_and_empty_extent_rejection() -> None:
+    input_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(3), IntAttr(4)],
+        [IntAttr(12), IntAttr(4), IntAttr(1)],
+        space="global",
+    )
+    result_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(4)],
+        [IntAttr(4), IntAttr(1)],
+        space="global",
+    )
+    inp = _TestOp(result_types=[input_type]).results[0]
+    op = NnReduceMaxOp(inp, result_type, axes=[1], keepdim=False, space=_make_space("global"))
+    op.verify()
+
+    empty_input_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(0), IntAttr(4)],
+        [IntAttr(0), IntAttr(0), IntAttr(1)],
+        space="global",
+    )
+    empty_result_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(4)],
+        [IntAttr(4), IntAttr(1)],
+        space="global",
+    )
+    empty_inp = _TestOp(result_types=[empty_input_type]).results[0]
+    empty_op = NnReduceMaxOp(empty_inp, empty_result_type, axes=[1], keepdim=False, space=_make_space("global"))
+    with pytest.raises(VerifyException, match="empty-reduction-extent-must-be-rejected-when-static"):
+        empty_op.verify()
+
+
+# NN-DIA-051
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 nn.reduce_* 的 element_type/space 不一致拒绝路径。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_reduce_ops_reject_type_or_space_mismatch
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_reduce_ops_reject_type_or_space_mismatch() -> None:
+    input_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(3)],
+        [IntAttr(3), IntAttr(1)],
+        space="global",
+        element_type=i32,
+    )
+    inp = _TestOp(result_types=[input_type]).results[0]
+    cases = [
+        (
+            _make_simple_memory_type(
+                [IntAttr(2)],
+                [IntAttr(1)],
+                space="global",
+                element_type=Float32Type(),
+            ),
+            "global",
+            "result-element-type-must-match-input",
+        ),
+        (
+            _make_simple_memory_type(
+                [IntAttr(2)],
+                [IntAttr(1)],
+                space="shared",
+                element_type=i32,
+            ),
+            "global",
+            "result-space-must-match-input-and-attr",
+        ),
+        (
+            _make_simple_memory_type(
+                [IntAttr(2)],
+                [IntAttr(1)],
+                space="global",
+                element_type=i32,
+            ),
+            "shared",
+            "result-space-must-match-input-and-attr",
+        ),
+    ]
+    for result_type, space, message in cases:
+        op = NnReduceSumOp(inp, result_type, axes=[1], keepdim=False, space=_make_space(space))
+        with pytest.raises(VerifyException, match=message):
+            op.verify()
+
+
+# NN-DIA-052
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 nn.exp 与 nn.reduce_* 在模块文本中 round-trip。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_exp_reduce_module_round_trip
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_exp_reduce_module_round_trip() -> None:
+    ctx = _build_context()
+    text = """builtin.module {
+  %0 = "test.op"() : () -> !nn.memory<[2, 4], [4, 1], f32, #nn.space<global>>
+  %1 = "nn.exp"(%0) {space = #nn.space<global>} : (!nn.memory<[2, 4], [4, 1], f32, #nn.space<global>>) -> !nn.memory<[2, 4], [4, 1], f32, #nn.space<global>>
+  %2 = "nn.reduce_sum"(%1) {axes = [1 : i64], keepdim = true, space = #nn.space<global>} : (!nn.memory<[2, 4], [4, 1], f32, #nn.space<global>>) -> !nn.memory<[2, 1], [1, 1], f32, #nn.space<global>>
+  %3 = "nn.reduce_max"(%1) {axes = [0 : i64], keepdim = false, space = #nn.space<global>} : (!nn.memory<[2, 4], [4, 1], f32, #nn.space<global>>) -> !nn.memory<[4], [1], f32, #nn.space<global>>
+}
+"""
+    module = Parser(ctx, text).parse_module()
+    module.verify()
+    assert _print_ir(module) == text.rstrip()
+
+
+# NN-DIA-053
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 功能说明: 验证 nn.reduce_* 对非 i1 keepdim attribute 的拒绝路径。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_reduce_ops_reject_non_i1_keepdim_attr
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_reduce_ops_reject_non_i1_keepdim_attr() -> None:
+    input_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(3), IntAttr(4)],
+        [IntAttr(12), IntAttr(4), IntAttr(1)],
+        space="global",
+    )
+    result_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(4)],
+        [IntAttr(4), IntAttr(1)],
+        space="global",
+    )
+    op_types = (NnReduceSumOp, NnReduceMinOp, NnReduceMaxOp)
+    for op_type in op_types:
+        inp = _TestOp(result_types=[input_type]).results[0]
+        op = op_type(inp, result_type, axes=[1], keepdim=False, space=_make_space("global"))
+        op.attributes["keepdim"] = IntegerAttr(1, IntegerType(32))
+        with pytest.raises(VerifyException, match="keepdim-must-be-i1-bool-attr"):
+            op.verify()
+
+
+# NN-DIA-054
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 功能说明: 验证 nn.reduce_* 对非连续结果 stride 的拒绝路径。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_reduce_ops_reject_non_contiguous_result_stride
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_reduce_ops_reject_non_contiguous_result_stride() -> None:
+    input_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(3), IntAttr(4)],
+        [IntAttr(12), IntAttr(4), IntAttr(1)],
+        space="global",
+    )
+    bad_result_type = _make_simple_memory_type(
+        [IntAttr(2), IntAttr(4)],
+        [IntAttr(5), IntAttr(1)],
+        space="global",
+    )
+    op_types = (NnReduceSumOp, NnReduceMinOp, NnReduceMaxOp)
+    for op_type in op_types:
+        inp = _TestOp(result_types=[input_type]).results[0]
+        op = op_type(inp, bad_result_type, axes=[1], keepdim=False, space=_make_space("global"))
+        with pytest.raises(VerifyException, match="result-stride-must-be-contiguous-for-result-shape"):
+            op.verify()

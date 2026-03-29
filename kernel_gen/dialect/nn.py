@@ -421,7 +421,7 @@ def _resolve_add_dtype_key(attr: Attribute) -> str | None:
 
 
 def _is_float_element_type(attr: Attribute) -> bool:
-    """判断是否为允许的浮点 element type。
+    """判断 element_type 是否为浮点类型。
 
     创建者: 金铲铲大作战
     最后一次更改: 金铲铲大作战
@@ -783,6 +783,330 @@ def _build_contiguous_stride(shape: Sequence[int]) -> list[int]:
         running *= dim
     strides.reverse()
     return strides
+
+
+def _normalize_axes_attr(axes: Sequence[int] | ArrayAttr) -> ArrayAttr:
+    """将归约 axes 规范化为 i64 ArrayAttr。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 支持传入轴序列或 ArrayAttr。
+    - 统一输出元素为 i64 IntegerAttr 的 ArrayAttr。
+
+    使用示例:
+    - _normalize_axes_attr([0, 2])
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    if isinstance(axes, ArrayAttr):
+        return axes
+    return ArrayAttr([IntegerAttr(int(axis), IntegerType(64)) for axis in axes])
+
+
+def _normalize_bool_attr(value: bool | int | IntegerAttr | IntAttr, field_name: str) -> IntegerAttr:
+    """将布尔语义规范化为 i1 IntegerAttr。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 支持 bool/int/IntAttr/IntegerAttr 输入，统一为 i1 IntegerAttr。
+    - 具体合法性由 verifier 进一步校验。
+
+    使用示例:
+    - _normalize_bool_attr(True, "keepdim")
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    if isinstance(value, IntegerAttr):
+        return value
+    if isinstance(value, IntAttr):
+        value = value.data
+    if isinstance(value, bool):
+        value = 1 if value else 0
+    return IntegerAttr(int(value), IntegerType(1))
+
+
+def _verify_exp_op(op: "NnExpOp") -> None:
+    """校验 nn.exp 的结构化合同。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 校验 operand/result 必须是 nn.memory 且输入为浮点类型。
+    - 校验 shape/stride/element_type/space 一致性。
+
+    使用示例:
+    - _verify_exp_op(op)
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    input_type = op.input.type
+    result_type = op.result.type
+    if not isinstance(input_type, NnMemoryType) or not isinstance(result_type, NnMemoryType):
+        _raise_verify_error("operand-must-be-nn-memory")
+    input_type.verify()
+    result_type.verify()
+
+    if not _is_float_element_type(input_type.element_type):
+        _raise_verify_error("operand-element-type-must-be-float")
+
+    if input_type.shape != result_type.shape or input_type.stride != result_type.stride:
+        _raise_verify_error("result-shape-stride-must-match-input")
+
+    if input_type.element_type != result_type.element_type:
+        _raise_verify_error("result-element-type-must-match-input")
+
+    op.space.verify()
+    if input_type.space.space.data != result_type.space.space.data:
+        _raise_verify_error("result-space-must-match-input-and-attr")
+    if input_type.space.space.data != op.space.space.data:
+        _raise_verify_error("result-space-must-match-input-and-attr")
+
+
+def _verify_reduce_axes(axes: ArrayAttr, rank: int) -> list[int]:
+    """校验归约 axes 并返回整数列表。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 校验 axes 非空、元素唯一且在合法范围内。
+    - 仅接受 i64 IntegerAttr 轴值。
+
+    使用示例:
+    - axes = _verify_reduce_axes(ArrayAttr([IntegerAttr(1, IntegerType(64))]), rank=3)
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    if len(axes.data) == 0:
+        _raise_verify_error("axes-must-be-non-empty-unique-and-in-range")
+
+    values: list[int] = []
+    for entry in axes.data:
+        if not isinstance(entry, IntegerAttr):
+            _raise_verify_error("axes-must-be-non-empty-unique-and-in-range")
+        width_attr = entry.type.width
+        width_value = width_attr.data if isinstance(width_attr, IntAttr) else width_attr
+        if width_value != 64:
+            _raise_verify_error("axes-must-be-non-empty-unique-and-in-range")
+        axis_value = entry.value.data
+        if axis_value < 0 or axis_value >= rank:
+            _raise_verify_error("axes-must-be-non-empty-unique-and-in-range")
+        values.append(axis_value)
+
+    if len(set(values)) != len(values):
+        _raise_verify_error("axes-must-be-non-empty-unique-and-in-range")
+
+    return values
+
+
+def _verify_keepdim_attr(keepdim: IntegerAttr) -> bool:
+    """校验 keepdim 的 i1 布尔属性并返回布尔值。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅接受 i1 IntegerAttr，且值必须为 0/1/-1（i1 真值可能以 -1 表示）。
+
+    使用示例:
+    - keep = _verify_keepdim_attr(IntegerAttr(1, IntegerType(1)))
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    if not isinstance(keepdim, IntegerAttr):
+        _raise_verify_error("keepdim-must-be-i1-bool-attr")
+    width_attr = keepdim.type.width
+    width_value = width_attr.data if isinstance(width_attr, IntAttr) else width_attr
+    if width_value != 1:
+        _raise_verify_error("keepdim-must-be-i1-bool-attr")
+    value = keepdim.value.data
+    if value not in (0, 1, -1):
+        _raise_verify_error("keepdim-must-be-i1-bool-attr")
+    return value != 0
+
+
+def _build_reduce_result_shape(
+    input_dims: Sequence[Attribute],
+    axes: set[int],
+    keepdim: bool,
+) -> list[Attribute]:
+    """构造归约结果的 shape 属性列表。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - keepdim=true 时将归约轴替换为 1。
+    - keepdim=false 时移除归约轴；若结果 rank 为 0 则规范为 [1]。
+
+    使用示例:
+    - _build_reduce_result_shape([IntAttr(2), IntAttr(3)], {0}, keepdim=False)
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    if keepdim:
+        return [IntAttr(1) if index in axes else dim for index, dim in enumerate(input_dims)]
+
+    result_dims = [dim for index, dim in enumerate(input_dims) if index not in axes]
+    if not result_dims:
+        return [IntAttr(1)]
+    return result_dims
+
+
+def _verify_reduce_result_shape(result_type: NnMemoryType, expected_shape: Sequence[Attribute]) -> None:
+    """校验归约结果 shape 合同。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 比较结果 shape 与期望 shape 的长度与逐维一致性。
+
+    使用示例:
+    - _verify_reduce_result_shape(result_type, expected_shape)
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    if len(result_type.shape.data) != len(expected_shape):
+        _raise_verify_error("result-shape-must-match-reduce-contract")
+
+    for expected_dim, actual_dim in zip(expected_shape, result_type.shape.data, strict=True):
+        if not _dims_equal(expected_dim, actual_dim):
+            _raise_verify_error("result-shape-must-match-reduce-contract")
+
+
+def _verify_reduce_result_stride(result_type: NnMemoryType, expected_shape: Sequence[Attribute]) -> None:
+    """校验归约结果 stride 必须为连续布局。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅在结果 shape 静态可判定时校验 stride 等于连续布局。
+
+    使用示例:
+    - _verify_reduce_result_stride(result_type, expected_shape)
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    expected_dims = _collect_int_dims(expected_shape)
+    if expected_dims is None:
+        return
+
+    result_strides = _collect_int_dims(result_type.stride.data)
+    if result_strides is None:
+        _raise_verify_error("result-stride-must-be-contiguous-for-result-shape")
+
+    expected_stride = _build_contiguous_stride(expected_dims)
+    if result_strides != expected_stride:
+        _raise_verify_error("result-stride-must-be-contiguous-for-result-shape")
+
+
+def _verify_non_empty_reduction_extent(input_dims: Sequence[Attribute], axes: Sequence[int]) -> None:
+    """校验静态归约轴的维度不为空。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 对静态维度为 0 的归约轴直接报错。
+
+    使用示例:
+    - _verify_non_empty_reduction_extent([IntAttr(2), IntAttr(0)], [1])
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    for axis in axes:
+        dim = input_dims[axis]
+        if isinstance(dim, IntAttr) and dim.data == 0:
+            _raise_verify_error("empty-reduction-extent-must-be-rejected-when-static")
+
+
+def _verify_reduce_op(op: "NnReduceSumOp | NnReduceMinOp | NnReduceMaxOp", *, require_non_empty: bool) -> None:
+    """统一校验 nn.reduce_* 的结构化合同。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 校验 input/result 类型、axes/keepdim、shape/stride 与空间一致性。
+    - 按需检查静态空归约域错误路径。
+
+    使用示例:
+    - _verify_reduce_op(op, require_non_empty=True)
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    input_type = op.input.type
+    result_type = op.result.type
+    if not isinstance(input_type, NnMemoryType) or not isinstance(result_type, NnMemoryType):
+        _raise_verify_error("operand-must-be-nn-memory")
+    input_type.verify()
+    result_type.verify()
+
+    axes = _verify_reduce_axes(op.axes, len(input_type.shape.data))
+    keepdim = _verify_keepdim_attr(op.keepdim)
+
+    if require_non_empty:
+        _verify_non_empty_reduction_extent(input_type.shape.data, axes)
+
+    if result_type.element_type != input_type.element_type:
+        _raise_verify_error("result-element-type-must-match-input")
+
+    op.space.verify()
+    if input_type.space.space.data != result_type.space.space.data:
+        _raise_verify_error("result-space-must-match-input-and-attr")
+    if input_type.space.space.data != op.space.space.data:
+        _raise_verify_error("result-space-must-match-input-and-attr")
+
+    expected_shape = _build_reduce_result_shape(input_type.shape.data, set(axes), keepdim)
+    _verify_reduce_result_shape(result_type, expected_shape)
+    _verify_reduce_result_stride(result_type, expected_shape)
 
 
 def _img2col_output_dim(
@@ -1258,6 +1582,329 @@ class NnTransposeOp(IRDLOperation):
 
 
 @irdl_op_definition
+class NnExpOp(IRDLOperation):
+    """nn.exp。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 定义 nn.exp 方言 op 与 verifier 约束。
+
+    使用示例:
+    - NnExpOp(inp, result_type, NnMemorySpaceAttr.from_name("global"))
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    name = "nn.exp"
+
+    input = operand_def(NnMemoryType)
+    result = result_def(NnMemoryType)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        input_value: SSAValue | Operation,
+        result_type: NnMemoryType,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        """初始化 exp op。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 绑定输入、结果类型与 space 属性。
+
+        使用示例:
+        - NnExpOp(inp, result_type, NnMemorySpaceAttr.from_name("global"))
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/test_nn_dialect.py
+        - 功能实现: kernel_gen/dialect/nn.py
+        """
+
+        super().__init__(
+            operands=[input_value],
+            result_types=[result_type],
+            attributes={"space": space},
+        )
+
+    def verify_(self) -> None:
+        """校验 nn.exp verifier 合同。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 调用统一的 nn.exp 合同校验逻辑。
+
+        使用示例:
+        - NnExpOp(inp, result_type, NnMemorySpaceAttr.from_name("global")).verify_()
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/test_nn_dialect.py
+        - 功能实现: kernel_gen/dialect/nn.py
+        """
+        _verify_exp_op(self)
+
+
+@irdl_op_definition
+class NnReduceSumOp(IRDLOperation):
+    """nn.reduce_sum。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 定义 nn.reduce_sum 方言 op 与 verifier 约束。
+
+    使用示例:
+    - NnReduceSumOp(inp, result_type, axes=[1], keepdim=True, space=NnMemorySpaceAttr.from_name("global"))
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    name = "nn.reduce_sum"
+
+    input = operand_def(NnMemoryType)
+    result = result_def(NnMemoryType)
+    axes = attr_def(ArrayAttr)
+    keepdim = attr_def(IntegerAttr)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        input_value: SSAValue | Operation,
+        result_type: NnMemoryType,
+        axes: Sequence[int] | ArrayAttr,
+        keepdim: bool | int | IntegerAttr | IntAttr,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        """初始化 reduce_sum op。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 绑定输入、结果类型、axes/keepdim 与 space 属性。
+
+        使用示例:
+        - NnReduceSumOp(inp, result_type, axes=[1], keepdim=True, space=NnMemorySpaceAttr.from_name("global"))
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/test_nn_dialect.py
+        - 功能实现: kernel_gen/dialect/nn.py
+        """
+        axes_attr = _normalize_axes_attr(axes)
+        keepdim_attr = _normalize_bool_attr(keepdim, "keepdim")
+        super().__init__(
+            operands=[input_value],
+            result_types=[result_type],
+            attributes={
+                "axes": axes_attr,
+                "keepdim": keepdim_attr,
+                "space": space,
+            },
+        )
+
+    def verify_(self) -> None:
+        """校验 nn.reduce_sum verifier 合同。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 调用统一的归约合同校验逻辑。
+
+        使用示例:
+        - NnReduceSumOp(inp, result_type, axes=[1], keepdim=True, space=NnMemorySpaceAttr.from_name("global")).verify_()
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/test_nn_dialect.py
+        - 功能实现: kernel_gen/dialect/nn.py
+        """
+        _verify_reduce_op(self, require_non_empty=False)
+
+
+@irdl_op_definition
+class NnReduceMinOp(IRDLOperation):
+    """nn.reduce_min。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 定义 nn.reduce_min 方言 op 与 verifier 约束。
+
+    使用示例:
+    - NnReduceMinOp(inp, result_type, axes=[1], keepdim=False, space=NnMemorySpaceAttr.from_name("global"))
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    name = "nn.reduce_min"
+
+    input = operand_def(NnMemoryType)
+    result = result_def(NnMemoryType)
+    axes = attr_def(ArrayAttr)
+    keepdim = attr_def(IntegerAttr)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        input_value: SSAValue | Operation,
+        result_type: NnMemoryType,
+        axes: Sequence[int] | ArrayAttr,
+        keepdim: bool | int | IntegerAttr | IntAttr,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        """初始化 reduce_min op。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 绑定输入、结果类型、axes/keepdim 与 space 属性。
+
+        使用示例:
+        - NnReduceMinOp(inp, result_type, axes=[1], keepdim=False, space=NnMemorySpaceAttr.from_name("global"))
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/test_nn_dialect.py
+        - 功能实现: kernel_gen/dialect/nn.py
+        """
+        axes_attr = _normalize_axes_attr(axes)
+        keepdim_attr = _normalize_bool_attr(keepdim, "keepdim")
+        super().__init__(
+            operands=[input_value],
+            result_types=[result_type],
+            attributes={
+                "axes": axes_attr,
+                "keepdim": keepdim_attr,
+                "space": space,
+            },
+        )
+
+    def verify_(self) -> None:
+        """校验 nn.reduce_min verifier 合同。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 调用归约合同校验逻辑，并拒绝静态空归约域。
+
+        使用示例:
+        - NnReduceMinOp(inp, result_type, axes=[1], keepdim=False, space=NnMemorySpaceAttr.from_name("global")).verify_()
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/test_nn_dialect.py
+        - 功能实现: kernel_gen/dialect/nn.py
+        """
+        _verify_reduce_op(self, require_non_empty=True)
+
+
+@irdl_op_definition
+class NnReduceMaxOp(IRDLOperation):
+    """nn.reduce_max。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 定义 nn.reduce_max 方言 op 与 verifier 约束。
+
+    使用示例:
+    - NnReduceMaxOp(inp, result_type, axes=[1], keepdim=False, space=NnMemorySpaceAttr.from_name("global"))
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    name = "nn.reduce_max"
+
+    input = operand_def(NnMemoryType)
+    result = result_def(NnMemoryType)
+    axes = attr_def(ArrayAttr)
+    keepdim = attr_def(IntegerAttr)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        input_value: SSAValue | Operation,
+        result_type: NnMemoryType,
+        axes: Sequence[int] | ArrayAttr,
+        keepdim: bool | int | IntegerAttr | IntAttr,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        """初始化 reduce_max op。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 绑定输入、结果类型、axes/keepdim 与 space 属性。
+
+        使用示例:
+        - NnReduceMaxOp(inp, result_type, axes=[1], keepdim=False, space=NnMemorySpaceAttr.from_name("global"))
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/test_nn_dialect.py
+        - 功能实现: kernel_gen/dialect/nn.py
+        """
+        axes_attr = _normalize_axes_attr(axes)
+        keepdim_attr = _normalize_bool_attr(keepdim, "keepdim")
+        super().__init__(
+            operands=[input_value],
+            result_types=[result_type],
+            attributes={
+                "axes": axes_attr,
+                "keepdim": keepdim_attr,
+                "space": space,
+            },
+        )
+
+    def verify_(self) -> None:
+        """校验 nn.reduce_max verifier 合同。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 调用归约合同校验逻辑，并拒绝静态空归约域。
+
+        使用示例:
+        - NnReduceMaxOp(inp, result_type, axes=[1], keepdim=False, space=NnMemorySpaceAttr.from_name("global")).verify_()
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/test_nn_dialect.py
+        - 功能实现: kernel_gen/dialect/nn.py
+        """
+        _verify_reduce_op(self, require_non_empty=True)
+
+
+@irdl_op_definition
 class NnImg2col1dOp(IRDLOperation):
     """nn.img2col1d。
 
@@ -1637,6 +2284,10 @@ Nn = Dialect(
         NnBroadcastOp,
         NnTransposeOp,
         NnSoftmaxOp,
+        NnExpOp,
+        NnReduceSumOp,
+        NnReduceMinOp,
+        NnReduceMaxOp,
         NnImg2col1dOp,
         NnImg2col2dOp,
         NnMatmulOp,
@@ -1662,6 +2313,10 @@ __all__ = [
     "NnBroadcastOp",
     "NnTransposeOp",
     "NnSoftmaxOp",
+    "NnExpOp",
+    "NnReduceSumOp",
+    "NnReduceMinOp",
+    "NnReduceMaxOp",
     "NnImg2col1dOp",
     "NnImg2col2dOp",
     "NnMatmulOp",

@@ -96,3 +96,105 @@
   - `rg -n "OP-EXP|OP-RD" spec/operation/nn.md`（exit code=0）
   - `rg -n "test_nn_exp_|test_nn_reduce_(sum|min|max)" test/operation/test_operation_nn.py`（exit code=0）
 - 未运行 pytest（任务仅为映射一致性审查）。
+
+---
+
+时间：2026-03-30 02:45:25 +0800
+任务：T-20260330-7318ea03
+任务目标：spec/dialect：补齐 `nn.exp` 与 `nn.reduce_{sum/min/max}` 的方言 op 合同、验证规则、shape/dtype/space 约束与测试映射（`spec/dialect/nn.md`），提供中文示例与链接。
+改动：
+- `spec/dialect/nn.md`
+  - 在功能简介、目标与限制边界中新增 `nn.exp`、`nn.reduce_sum`、`nn.reduce_min`、`nn.reduce_max` 的方言层职责描述。
+  - 新增 `nn.exp` 小节：补齐 operand/result/space 合同、浮点输入约束、`shape/stride/dtype/space` 一致性 verifier 关键字、中文 MLIR 示例，并锚定到 [`spec/operation/nn.md`](../../../../../../spec/operation/nn.md) 的高层语义。
+  - 新增 `nn.reduce_sum`、`nn.reduce_min`、`nn.reduce_max` 小节：补齐 `axes`/`keepdim` 字段合同、轴合法性、结果 shape 与连续 stride 约束、`dtype/space` 一致性、静态空归约域错误路径与 verifier 关键字，并提供中文 MLIR 示例与高层语义链接。
+  - 在测试目标与用例清单新增 `NN-DIA-045`~`NN-DIA-052`，明确当前为“待新增”测试映射，避免与实现现状冲突。
+结论：
+- 任务完成，改动仅限 `spec/dialect/nn.md` 与本记录文件，未改实现/测试代码。
+- 自检命令：
+  - `rg -n "### nn\\.exp|### nn\\.reduce_sum|### nn\\.reduce_min|### nn\\.reduce_max|NN-DIA-045|NN-DIA-052|待新增" spec/dialect/nn.md`（exit code=0）
+  - `rg -n "def test_.*(exp|reduce_(sum|min|max)|exp_reduce)" test/dialect/test_nn_dialect.py`（exit code=0，仅命中既有 `test_explicit_broadcast_then_add_verify_success`，确认 exp/reduce 方言测试尚未落地，映射“待新增”口径成立）
+  - `git status --short`（exit code=0，当前任务变更为 `spec/dialect/nn.md`）
+时间：2026-03-30 03:11:28 +0800
+任务：T-20260330-32bc2ea1
+任务目标：实现/测试阶段在 `kernel_gen/dialect/nn.py` 与 `test/dialect/test_nn_dialect.py` 落地 `nn.exp` 与 `nn.reduce_sum/reduce_min/reduce_max`，补齐 axes/keepdim、shape/stride/dtype/space 与静态空归约域等 verifier 规则，并与 `spec/dialect/nn.md` 的 NN-DIA-045~052 对齐。
+改动：
+- `kernel_gen/dialect/nn.py`
+  - 新增 `_is_float_element_type`，用于 `nn.exp` 浮点类型判定。
+  - 修正 `_verify_keepdim_attr` 支持 i1 真值 `-1` 表示，返回值按 `!= 0` 归一化。
+  - 新增 `nn.exp`、`nn.reduce_sum/reduce_min/reduce_max` 的 verifier 辅助函数与 op 定义，并补齐中文注释（含示例与关联文件）。
+  - 将 `NnExpOp`/`NnReduce*Op` 加入 `Nn` 方言 op 列表与 `__all__` 导出。
+- `test/dialect/test_nn_dialect.py`
+  - 新增 `test_exp_op_verify_success` / `test_exp_op_rejects_invalid_inputs`。
+  - 新增 `test_reduce_sum_op_shape_contract` / `test_reduce_sum_op_rejects_invalid_axes`。
+  - 新增 `test_reduce_min_op_contract_and_empty_extent_rejection` / `test_reduce_max_op_contract_and_empty_extent_rejection`。
+  - 新增 `test_reduce_ops_reject_type_or_space_mismatch` 与 `test_exp_reduce_module_round_trip`。
+  - 更新导入以覆盖 `NnExpOp`/`NnReduce*Op` 与所需类型。
+结论：
+- 已完成实现/测试闭环；本任务未改动 `spec`。
+- 验证命令：
+  - `PYTHONPATH=. pytest -q test/dialect/test_nn_dialect.py -k 'exp_op or reduce_sum_op or reduce_min_op or reduce_max_op or reduce_ops_reject_type_or_space_mismatch or exp_reduce_module_round_trip'`（exit code=0，8 passed，63 deselected）。
+
+时间：2026-03-30 03:18:00 +0800
+任务：T-20260330-9c76adfa
+任务目标：复审 nn.exp/nn.reduce_* 方言实现与测试闭环，核对 NN-DIA-045~052 在 spec/test/impl 一致性，并检查边界/异常/漏洞与中文注释一致性。
+改动：
+- 审查 `spec/dialect/nn.md` 的 `nn.exp`/`nn.reduce_*` 合同与 NN-DIA-045~052 映射条目。
+- 核对 `kernel_gen/dialect/nn.py` 的 exp/reduce verifier 约束与中文注释。
+- 核对 `test/dialect/test_nn_dialect.py` 中 NN-DIA-045~052 测试函数与注释。
+结论：
+- 不通过：`spec/dialect/nn.md` 的 NN-DIA-045~052 仍标注“（待新增）”，但 `test/dialect/test_nn_dialect.py` 已存在对应测试函数，映射未闭环。
+- 功能/边界/异常/漏洞检查：实现已覆盖浮点输入、axis 范围/唯一性、keepdim/shape/stride/element_type/space 校验与静态空归约域拒绝；测试覆盖合法路径与错误路径，未发现可利用绕过路径。
+- 中文注释一致性：实现与测试均含中文功能说明与使用示例，且与语义一致。
+- 复核命令：
+  - `rg -n "NN-DIA-045|NN-DIA-046|NN-DIA-047|NN-DIA-048|NN-DIA-049|NN-DIA-050|NN-DIA-051|NN-DIA-052|待新增" spec/dialect/nn.md`（exit code=0，仍命中待新增）
+  - `rg -n "test_exp_op_verify_success|test_exp_op_rejects_invalid_inputs|test_reduce_sum_op_shape_contract|test_reduce_sum_op_rejects_invalid_axes|test_reduce_min_op_contract_and_empty_extent_rejection|test_reduce_max_op_contract_and_empty_extent_rejection|test_reduce_ops_reject_type_or_space_mismatch|test_exp_reduce_module_round_trip" test/dialect/test_nn_dialect.py`（exit code=0）
+- 未运行 pytest（本次为映射与注释一致性复审）。
+
+时间：2026-03-30 03:23:25 +0800
+任务：T-20260330-97d3dffa
+任务目标：修复 `nn.exp/nn.reduce_*` 方言映射，更新 `NN-DIA-045~052` 去除“待新增”并绑定现有测试；核对功能正确性、边界条件、异常路径、潜在漏洞与中文注释/示例一致性。
+改动：
+- `spec/dialect/nn.md`
+  - 将 `NN-DIA-045~052` 的“（待新增）”占位全部移除，映射到已落地测试：
+    - `test_exp_op_verify_success`
+    - `test_exp_op_rejects_invalid_inputs`
+    - `test_reduce_sum_op_shape_contract`
+    - `test_reduce_sum_op_rejects_invalid_axes`
+    - `test_reduce_min_op_contract_and_empty_extent_rejection`
+    - `test_reduce_max_op_contract_and_empty_extent_rejection`
+    - `test_reduce_ops_reject_type_or_space_mismatch`
+    - `test_exp_reduce_module_round_trip`
+- 只读核对：
+  - `kernel_gen/dialect/nn.py`：`NnExpOp` 与 `NnReduce{Sum,Min,Max}Op` verifier 覆盖浮点输入、axes 非空唯一且范围合法、keepdim i1、shape/stride 合同、dtype/space 一致性、静态空归约域拒绝。
+  - `test/dialect/test_nn_dialect.py`：`NN-DIA-045~052` 对应 8 个测试函数均存在，覆盖合法路径与主要错误路径；函数级中文注释与使用示例存在且与行为一致。
+- 验证命令：
+  - `rg -n "NN-DIA-045|NN-DIA-046|NN-DIA-047|NN-DIA-048|NN-DIA-049|NN-DIA-050|NN-DIA-051|NN-DIA-052|待新增" spec/dialect/nn.md`（exit code=0，不再出现“待新增”）
+  - `rg -n "def test_exp_op_verify_success|def test_exp_op_rejects_invalid_inputs|def test_reduce_sum_op_shape_contract|def test_reduce_sum_op_rejects_invalid_axes|def test_reduce_min_op_contract_and_empty_extent_rejection|def test_reduce_max_op_contract_and_empty_extent_rejection|def test_reduce_ops_reject_type_or_space_mismatch|def test_exp_reduce_module_round_trip" test/dialect/test_nn_dialect.py`（exit code=0）
+  - `PYTHONPATH=. pytest -q test/dialect/test_nn_dialect.py -k 'test_exp_op_verify_success or test_exp_op_rejects_invalid_inputs or test_reduce_sum_op_shape_contract or test_reduce_sum_op_rejects_invalid_axes or test_reduce_min_op_contract_and_empty_extent_rejection or test_reduce_max_op_contract_and_empty_extent_rejection or test_reduce_ops_reject_type_or_space_mismatch or test_exp_reduce_module_round_trip'`（exit code=0，8 passed）
+结论：
+- 任务完成；`NN-DIA-045~052` 已与现有测试闭环，不再依赖“待新增”。
+- 本次仅修改 `spec/dialect/nn.md` 与任务记录文件；未修改实现/测试代码。
+- 基于实现与测试的只读核对，当前未发现新增漏洞路径；边界与异常路径覆盖与 spec 口径一致。
+
+时间：2026-03-30 03:28:33 +0800
+任务：T-20260330-1fc6376e
+任务目标：复核 spec/dialect/nn.md NN-DIA-045~052 与 test/dialect/test_nn_dialect.py 映射一致性，检查边界/异常路径覆盖与中文注释/示例一致性。
+改动：
+- 无代码改动。
+- 审查文件：spec/dialect/nn.md、kernel_gen/dialect/nn.py、test/dialect/test_nn_dialect.py。
+- 复测：`PYTHONPATH=. pytest -q test/dialect/test_nn_dialect.py -k "exp_op_ or reduce_"`（exit code=0，8 passed，63 deselected）。
+结论：
+- 不通过：NN-DIA-045~052 映射无“待新增”，但异常路径覆盖仍缺口。
+  - spec 明确要求 `keepdim-must-be-i1-bool-attr` 与 `result-stride-must-be-contiguous-for-result-shape` 的 verifier 约束，现有测试未覆盖 keepdim 非 i1 及 result stride 非连续的拒绝路径。
+- 风险：keepdim/stride 非法输入无法在测试层锁定错误口径，可能在回归中被误放行。
+- 建议：补充 test/dialect/test_nn_dialect.py 中 reduce_* 相关异常用例，覆盖 keepdim 非 i1 与非连续 stride 的报错路径，并在现有 NN-DIA-047/049/050/051 中关联。
+
+时间：2026-03-30 03:43:53 +0800
+任务：T-20260330-fb4e391d
+任务目标：复核 nn.exp/nn.reduce_* dialect 异常路径补测收口，核对 keepdim-must-be-i1-bool-attr 与 result-stride-must-be-contiguous-for-result-shape 口径一致性，并检查边界/异常/潜在漏洞与中文注释示例一致性。
+改动：
+- 无代码改动。
+- 审查文件：spec/dialect/nn.md、kernel_gen/dialect/nn.py、test/dialect/test_nn_dialect.py。
+- 复测：`PYTHONPATH=. pytest -q test/dialect/test_nn_dialect.py -k "reduce_ops_reject_non_i1_keepdim_attr or reduce_ops_reject_non_contiguous_result_stride"`（exit code=0，2 passed，71 deselected）。
+结论：
+- 通过：spec/实现/测试对 keepdim-must-be-i1-bool-attr 与 result-stride-must-be-contiguous-for-result-shape 口径一致，NN-DIA-045~052 映射无待新增占位，新增 NN-DIA-053/054 覆盖 keepdim/stride 异常路径；中文注释与示例一致。

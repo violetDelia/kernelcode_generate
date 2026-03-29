@@ -2,12 +2,11 @@
 
 ## 功能简介
 
-`nn dialect` 定义方言层稳定接口，负责建模 memory space、memory type，以及逐元素算术、逐元素比较、显式 `broadcast`、`transpose`、`softmax`、`img2col1d/img2col2d` 和二维 `matmul` 的 IR 形态与 verifier 约束。本规范仅描述方言层字段、文本形式与校验语义，不包含上游高层 API 调度逻辑。
+`nn dialect` 定义方言层稳定接口，负责建模 memory space、memory type，以及逐元素算术、逐元素比较、逐元素 `exp`、按轴归约（`reduce_sum/reduce_min/reduce_max`）、显式 `broadcast`、`transpose`、`softmax`、`img2col1d/img2col2d` 和二维 `matmul` 的 IR 形态与 verifier 约束。本规范仅描述方言层字段、文本形式与校验语义，不包含上游高层 API 调度逻辑。
 
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`金铲铲大作战`
 - 最后一次更改：`摸鱼小分队`
 - `spec`：[`spec/dialect/nn.md`](../../spec/dialect/nn.md)
 - `功能实现`：[`kernel_gen/dialect/nn.py`](../../kernel_gen/dialect/nn.py)
@@ -24,7 +23,7 @@
 
 - 提供 `global/shared/local/tsm/tlm` 五种 memory space 的统一属性表示。
 - 提供可解析、可打印、可校验的 `!nn.memory<...>` 类型表示。
-- 为 `nn.add/sub/mul/truediv/eq/ne/lt/le/gt/ge/broadcast/transpose/softmax/img2col1d/img2col2d/matmul` 提供稳定的方言层接口。
+- 为 `nn.add/sub/mul/truediv/eq/ne/lt/le/gt/ge/exp/reduce_sum/reduce_min/reduce_max/broadcast/transpose/softmax/img2col1d/img2col2d/matmul` 提供稳定的方言层接口。
 - 明确 `nn dialect` 不支持逐元素隐式 broadcast，所有广播必须显式使用 `nn.broadcast`。
 - 保证合法文本 IR 可以 round-trip，非法输入在 parse 或 verifier 阶段被拒绝。
 
@@ -41,6 +40,8 @@
 - `shape` 中的 `?` 表示动态维度；`stride` 中的 `?` 不允许与同位置 `shape` 中的 `?` 直接成对出现。
 - 二元逐元素 op 的 `lhs/rhs/result` 必须满足 `shape/stride/space` 的 verifier 约束，不能依赖方言层做隐式 broadcast。
 - 比较 op 的结果 `element_type` 必须为 `i1`。
+- `nn.exp` 仅接受浮点 `!nn.memory`，结果必须与输入保持同 `shape/stride/element_type/space`。
+- `nn.reduce_sum/reduce_min/reduce_max` 使用规范化后的 `axes` 与显式 `keepdim` 建模归约语义；`result.shape/stride` 必须与归约合同一致。
 - `nn.matmul` 仅建模二维矩阵乘，`lhs.shape[1]` 与 `rhs.shape[0]` 必须语义一致。
 - `nn.softmax` 已在 `kernel_gen/dialect/nn.py` 与 `test/dialect/test_nn_dialect.py` 落地；本节作为公开契约与映射编号基线，后续改动必须保持与本合同闭环一致。
 - `space` 指 `nn dialect` 中 memory 所在的物理或逻辑空间，由 `NnMemorySpaceAttr` 表示。
@@ -357,6 +358,168 @@ op = NnGeOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 
 - 返回 `NnGeOp`；结果元素类型固定为 `i1`。
 
+### nn.exp
+
+功能说明：
+
+- 逐元素指数 op，计算 `e^x`。
+
+参数说明：
+
+- `input: !nn.memory<...>`：输入 memory。
+- `result: !nn.memory<...>`：结果 memory。
+- `space: #nn.space<...>`：op 的空间属性。
+
+使用示例：
+
+```mlir
+%0 = nn.exp %value {space = #nn.space<global>}
+  : !nn.memory<[2, 4], [4, 1], f32, #nn.space<global>>
+ -> !nn.memory<[2, 4], [4, 1], f32, #nn.space<global>>
+```
+
+注意事项：
+
+- `input/result` 必须为 `NnMemoryType`。
+- `input.element_type` 必须为浮点类型。
+- `result.shape == input.shape`，`result.stride == input.stride`。
+- `result.element_type == input.element_type`。
+- `input.space == result.space == op.space`。
+- 高层语义与错误边界锚点见 [`spec/operation/nn.md`](../../spec/operation/nn.md) 的 `exp(value)`。
+
+返回与限制：
+
+- 返回 `NnExpOp`。
+- verifier 合同关键字：
+  - `operand-must-be-nn-memory`
+  - `operand-element-type-must-be-float`
+  - `result-shape-stride-must-match-input`
+  - `result-element-type-must-match-input`
+  - `result-space-must-match-input-and-attr`
+
+### nn.reduce_sum
+
+功能说明：
+
+- 按指定轴执行求和归约。
+
+参数说明：
+
+- `input: !nn.memory<...>`：输入 memory。
+- `axes: ArrayAttr[IntegerAttr]`：归约轴集合，必须是规范化后的非空唯一列表。
+- `keepdim: IntegerAttr(i1)`：是否保留被归约轴。
+- `result: !nn.memory<...>`：结果 memory。
+- `space: #nn.space<...>`：op 的空间属性。
+
+使用示例：
+
+```mlir
+%0 = nn.reduce_sum %value {
+  axes = [1, 2], keepdim = true, space = #nn.space<global>
+} : !nn.memory<[2, 3, 4], [12, 4, 1], f32, #nn.space<global>>
+ -> !nn.memory<[2, 1, 1], [1, 1, 1], f32, #nn.space<global>>
+```
+
+注意事项：
+
+- `input/result` 必须为 `NnMemoryType`。
+- `axes` 必须非空、元素唯一且每个轴满足 `0 <= axis < input.rank`。
+- `keepdim` 必须是 `i1` 布尔语义 attribute。
+- `result.element_type == input.element_type`。
+- `input.space == result.space == op.space`。
+- `keepdim=true` 时，`result.rank == input.rank` 且 `axes` 位置维度必须为 `1`。
+- `keepdim=false` 时，`result.rank == input.rank - len(axes)`；若归约后 rank 为 `0`，结果必须规范化为 rank-1 形状 `[1]`。
+- `result.stride` 必须与 `result.shape` 的连续布局一致。
+- 高层语义与错误边界锚点见 [`spec/operation/nn.md`](../../spec/operation/nn.md) 的 `reduce_sum`。
+
+返回与限制：
+
+- 返回 `NnReduceSumOp`。
+- verifier 合同关键字：
+  - `operand-must-be-nn-memory`
+  - `axes-must-be-non-empty-unique-and-in-range`
+  - `keepdim-must-be-i1-bool-attr`
+  - `result-element-type-must-match-input`
+  - `result-space-must-match-input-and-attr`
+  - `result-shape-must-match-reduce-contract`
+  - `result-stride-must-be-contiguous-for-result-shape`
+
+### nn.reduce_min
+
+功能说明：
+
+- 按指定轴执行最小值归约。
+
+参数说明：
+
+- 同 `nn.reduce_sum`。
+
+使用示例：
+
+```mlir
+%0 = nn.reduce_min %value {
+  axes = [2], keepdim = false, space = #nn.space<global>
+} : !nn.memory<[2, 3, 4], [12, 4, 1], f32, #nn.space<global>>
+ -> !nn.memory<[2, 3], [3, 1], f32, #nn.space<global>>
+```
+
+注意事项：
+
+- `axes/keepdim/shape/stride/element_type/space` 约束与 `nn.reduce_sum` 一致。
+- 静态可判定时，任一归约轴维度若为 `0` 必须显式报错。
+- 高层语义与错误边界锚点见 [`spec/operation/nn.md`](../../spec/operation/nn.md) 的 `reduce_min`。
+
+返回与限制：
+
+- 返回 `NnReduceMinOp`。
+- verifier 合同关键字：
+  - `operand-must-be-nn-memory`
+  - `axes-must-be-non-empty-unique-and-in-range`
+  - `keepdim-must-be-i1-bool-attr`
+  - `result-element-type-must-match-input`
+  - `result-space-must-match-input-and-attr`
+  - `result-shape-must-match-reduce-contract`
+  - `result-stride-must-be-contiguous-for-result-shape`
+  - `empty-reduction-extent-must-be-rejected-when-static`
+
+### nn.reduce_max
+
+功能说明：
+
+- 按指定轴执行最大值归约。
+
+参数说明：
+
+- 同 `nn.reduce_sum`。
+
+使用示例：
+
+```mlir
+%0 = nn.reduce_max %value {
+  axes = [0], keepdim = true, space = #nn.space<global>
+} : !nn.memory<[2, 3, 4], [12, 4, 1], f32, #nn.space<global>>
+ -> !nn.memory<[1, 3, 4], [12, 4, 1], f32, #nn.space<global>>
+```
+
+注意事项：
+
+- `axes/keepdim/shape/stride/element_type/space` 约束与 `nn.reduce_sum` 一致。
+- 静态可判定时，任一归约轴维度若为 `0` 必须显式报错。
+- 高层语义与错误边界锚点见 [`spec/operation/nn.md`](../../spec/operation/nn.md) 的 `reduce_max`。
+
+返回与限制：
+
+- 返回 `NnReduceMaxOp`。
+- verifier 合同关键字：
+  - `operand-must-be-nn-memory`
+  - `axes-must-be-non-empty-unique-and-in-range`
+  - `keepdim-must-be-i1-bool-attr`
+  - `result-element-type-must-match-input`
+  - `result-space-must-match-input-and-attr`
+  - `result-shape-must-match-reduce-contract`
+  - `result-stride-must-be-contiguous-for-result-shape`
+  - `empty-reduction-extent-must-be-rejected-when-static`
+
 ### nn.broadcast
 
 功能说明：
@@ -609,6 +772,8 @@ op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 - 验证 `NnMemorySpaceAttr` 的合法取值、非法输入与文本 round-trip。
 - 验证 `NnMemoryType` 的字段完整性、rank 约束、`shape/stride` 合法性与文本 round-trip。
 - 验证 `nn.add/sub/mul/truediv/eq/ne/lt/le/gt/ge` 的 operand/result/type/space verifier 约束，其中 `nn.add` 覆盖 memory+scalar/symbol 与 dtype promotion 规则。
+- 验证 `nn.exp` 的浮点输入约束、`shape/stride/element_type/space` 一致性与错误路径。
+- 验证 `nn.reduce_sum/reduce_min/reduce_max` 的 `axes/keepdim` 约束、结果 `shape/stride` 合同、`dtype/space` 一致性、`keepdim` 非 `i1` 拒绝、结果 `stride` 非连续布局拒绝与静态空归约域错误路径。
 - 验证 `nn.broadcast` 的显式广播规则、space 一致性、element type 一致性与文本 round-trip。
 - 验证 `nn.transpose` 的 perm/shape/stride/space/element type 约束与文本 round-trip。
 - 验证 `nn.softmax` 的 rank/axis/shape/stride/space/element type verifier 约束与错误路径闭环。
@@ -668,3 +833,13 @@ op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 | NN-DIA-045 | `nn.softmax` 合法路径（rank/axis/shape/stride/space/element type） | `test_softmax_op_verify_success` |
 | NN-DIA-046 | `nn.softmax` axis 越界或输入 rank 非法时拒绝 | `test_softmax_op_rejects_invalid_axis_or_rank` |
 | NN-DIA-047 | `nn.softmax` result shape/stride/dtype/space 不一致时拒绝 | `test_softmax_op_rejects_result_mismatch` |
+| NN-DIA-048 | `nn.exp` 合法路径（浮点输入与元信息保持） | `test_exp_op_verify_success` |
+| NN-DIA-049 | `nn.exp` 拒绝非浮点输入与 space/shape/stride 不一致 | `test_exp_op_rejects_invalid_inputs` |
+| NN-DIA-050 | `nn.reduce_sum` 的 `axes/keepdim` 与结果 shape 合同 | `test_reduce_sum_op_shape_contract` |
+| NN-DIA-051 | `nn.reduce_sum` 的 `axes` 非法输入拒绝 | `test_reduce_sum_op_rejects_invalid_axes` |
+| NN-DIA-052 | `nn.reduce_min` 的 `keepdim` 与静态空归约域拒绝 | `test_reduce_min_op_contract_and_empty_extent_rejection` |
+| NN-DIA-053 | `nn.reduce_max` 的 `keepdim` 与静态空归约域拒绝 | `test_reduce_max_op_contract_and_empty_extent_rejection` |
+| NN-DIA-054 | `nn.reduce_*` 的 `dtype/space` 不一致拒绝 | `test_reduce_ops_reject_type_or_space_mismatch` |
+| NN-DIA-055 | `nn.exp` 与 `nn.reduce_*` 模块 round-trip | `test_exp_reduce_module_round_trip` |
+| NN-DIA-056 | `nn.reduce_*` 的 `keepdim` 非 `i1` attribute 拒绝 | `test_reduce_ops_reject_non_i1_keepdim_attr` |
+| NN-DIA-057 | `nn.reduce_*` 的结果 `stride` 非连续布局拒绝 | `test_reduce_ops_reject_non_contiguous_result_stride` |
