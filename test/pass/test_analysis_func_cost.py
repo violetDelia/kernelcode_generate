@@ -40,6 +40,7 @@ from xdsl.dialects.builtin import (
     ModuleOp,
     StringAttr,
     f32,
+    i1,
     i32,
 )
 from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def, result_def
@@ -52,6 +53,7 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.dialect.dma import DmaCopyOp, DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp
 from kernel_gen.dialect.nn import (
     NnAddOp,
+    NnEqOp,
     NnMatmulOp,
     NnMemorySpaceAttr,
     NnMemoryType,
@@ -531,3 +533,34 @@ def test_func_cost_attach_attrs() -> None:
     assert func_op.attributes["analysis.compute"].data == "6"
     assert func_op.attributes["analysis.read_bytes"].data == "48"
     assert func_op.attributes["analysis.write_bytes"].data == "24"
+
+
+# FC-008
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-29 13:21:48 +0800
+# 最近一次运行成功时间: 2026-03-29 13:21:48 +0800
+# 测试目的: compare 输出为 i1 时，write_bytes 按 predicate_size 统计，且优先于 dtype_size_overrides。
+# 使用示例: pytest -q test/pass/test_analysis_func_cost.py -k test_func_cost_compare_i1_uses_predicate_size
+# 对应功能实现文件路径: kernel_gen/passes/analysis/func_cost.py
+# 对应 spec 文件路径: spec/pass/analysis/func_cost.md
+# 对应测试文件路径: test/pass/test_analysis_func_cost.py
+def test_func_cost_compare_i1_uses_predicate_size() -> None:
+    lhs_type = _make_memory_type([IntAttr(2), IntAttr(3)], f32, "global")
+    result_type = _make_memory_type([IntAttr(2), IntAttr(3)], i1, "global")
+    space = _make_space("global")
+
+    def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
+        eq_op = NnEqOp(block.args[0], block.args[1], result_type, space)
+        return [eq_op], eq_op.result
+
+    module, _, _ = _build_module([lhs_type, lhs_type], result_type, _builder)
+    pass_obj = AnalyzeFuncCostPass(predicate_size=2, dtype_size_overrides={"i1": 8})
+    pass_obj.run(module)
+    summary = pass_obj.get_summary("main")
+
+    op_cost = summary.ops[0]
+    expected_numel = sp.Integer(6)
+    _assert_expr_equal(op_cost.compute, expected_numel)
+    _assert_expr_equal(op_cost.read_bytes, expected_numel * 2 * 4)
+    _assert_expr_equal(op_cost.write_bytes, expected_numel * 2)

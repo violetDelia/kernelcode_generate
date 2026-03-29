@@ -238,7 +238,7 @@ module = pass_obj.run(module)
 
 - 测试文件：`test/pass/test_analysis_func_cost.py`
 - 执行命令：`pytest -q test/pass/test_analysis_func_cost.py`
-- 覆盖 `FC-001` ~ `FC-007` 用例。
+- 覆盖 `FC-001` ~ `FC-008` 用例。
 
 ### 测试目标
 
@@ -248,6 +248,7 @@ module = pass_obj.run(module)
 - 验证 DMA 搬运类 op 的读写统计。
 - 验证未知 op 会被跳过并输出告警，不影响其余 op 统计。
 - 验证符号维度表达式（如 `A*B`）可正确保留。
+- 验证 compare 输出为 `i1` 时，`write_bytes` 按 `predicate_size` 统计，且优先于 `dtype_size_overrides["i1"]`。
 
 ### 功能与用例清单
 
@@ -260,3 +261,4 @@ module = pass_obj.run(module)
 | `FC-005` | 输入 `dma.copy/load/store`，预期 `compute=0` 且读写字节按元素数统计。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_dma_memory_traffic` | 已闭环。 |
 | `FC-006` | 输入同时含未知 op 与受支持 op 的函数，预期未知 op 被跳过并告警，其余统计保持正常。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_skips_unknown_op_with_warning` | 已闭环。 |
 | `FC-007` | 输入 `attach_attrs=True` 的分析 pass，预期 `func` 回写 `analysis.*` 属性。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_attach_attrs` | 已闭环。 |
+| `FC-008` | 输入 `nn.eq` 输出 `i1`，预期 `write_bytes` 优先按 `predicate_size` 统计（高于 `dtype_size_overrides["i1"]`）。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_compare_i1_uses_predicate_size` | 已闭环。 |

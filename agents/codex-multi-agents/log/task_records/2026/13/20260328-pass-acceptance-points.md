@@ -122,3 +122,129 @@
     - 资源释放问题：该 pass 不引入持久资源。
   - 改进建议：未发现额外改进点。
   - 最终结论：`通过`。
+
+- 时间：`2026-03-29 12:42:57 +0800`
+- 任务：`T-20260328-5ac2e44b`
+- 任务目标：补齐 `kernel_gen/passes/analysis/func_cost.py` 与 `test/pass/test_analysis_func_cost.py`，确保 `spec/pass/analysis/func_cost.md` 前后置/失败归因可执行闭环。
+- 改动：
+  - 新增 `kernel_gen/passes/analysis/func_cost.py`：实现 func_cost 统计，增加 module 类型/可遍历性校验、predicate_size/dtype 覆盖校验、符号维度解析与 DMA sizes 口径处理，支持 attach_attrs 回写。
+  - 新增 `test/pass/test_analysis_func_cost.py`：覆盖 FC-001~FC-007（符号维度、tensor+const、累计统计、matmul 公式、DMA 统计、未知 op 告警、属性回写）。
+  - 验证：`cd /home/lfr/kernelcode_generate/wt-20260328-pass-acceptance-points && pytest -q test/pass/test_analysis_func_cost.py`（exit=0，8 passed）。
+- 结论：实现与测试闭环完成，待进入审查阶段。
+- 时间：`2026-03-29 19:22:10 +0800`
+- 任务：`T-20260329-ba9ef693`
+- 任务目标：复审 func_cost pass，核对 spec/实现/测试闭环，验证 compute/read/write 口径与告警/属性回写，并检查边界、异常路径与潜在漏洞。
+- 审查范围：
+  - `spec/pass/analysis/func_cost.md`
+  - `kernel_gen/passes/analysis/func_cost.py`
+  - `test/pass/test_analysis_func_cost.py`
+- 验证：
+  - `pytest -q test/pass/test_analysis_func_cost.py`
+  - 退出码：`0`
+- 问题列表：
+  - `test/pass/test_analysis_func_cost.py`：缺少对比较类输出 i1 predicate_size 的显式覆盖（spec 明确要求 compare 输出按 predicate_size 写回，但测试未覆盖 `nn.eq/lt/...` 的 i1 输出）。
+    - 风险：compare 输出写回口径回归时无测试守护，易引入统计偏差。
+    - 建议：补充 compare op 用例，覆盖 i1 输出写回 predicate_size 与 dtype_size_overrides 的交互，至少新增一条 FC-00X 用例。
+    - 优先级：`P2`。
+- 漏洞排查结果（6 类风险）：
+  - 输入校验绕过：未发现（pass 对 module/类型缺失会抛错或跳过并告警）。
+  - 类型/形状绕过：未发现（形状/类型无法解析时跳过并告警）。
+  - 边界越界：未发现（sympy 表达式构造不执行索引）。
+  - 错误处理缺失：未发现（异常统一封装为 FuncCostAnalysisError）。
+  - 状态污染：未发现（仅写入本 pass 实例内 summaries；attach_attrs 可控）。
+  - 资源释放问题：未发现（无显式资源占用）。
+- 可维护性建议：
+  - 增补 compare op 的 predicate_size 测试，确保 spec 口径稳定。
+- 结论：`需修改`（存在改进建议，需派生修复任务后复审）。
+
+- 时间：`2026-03-29 13:21:48 +0800`
+- 任务：`T-20260329-f98dc2e2`
+- 任务目标：补充 `func_cost` compare op `i1 predicate_size` 覆盖，必要时更新 `spec/pass/analysis/func_cost.md`，并复测 `pytest -q test/pass/test_analysis_func_cost.py`。
+- 改动：
+  - `test/pass/test_analysis_func_cost.py`：新增 `FC-008 / test_func_cost_compare_i1_uses_predicate_size`，构造 `nn.eq` 输出 `i1` 的 compare 场景，验证 `write_bytes` 按 `predicate_size` 统计，且优先于 `dtype_size_overrides["i1"]`。
+  - `spec/pass/analysis/func_cost.md`：已核对 compare 输出 `i1` 按 `predicate_size` 写回、且优先于默认 `i1 -> 1` 映射的口径，当前文档无需修改。
+- 验证：
+  - `pytest -q test/pass/test_analysis_func_cost.py`，exit=`0`（`9 passed in 0.55s`）。
+- 结论：
+  - 本轮实现/测试已完成，`func_cost` compare 输出 `i1 predicate_size` 口径已具备显式回归测试保护。
+  - 建议进入审查阶段，重点核对新增 `FC-008` 是否与 `spec/pass/analysis/func_cost.md` 的 compare 写回规则保持一致。
+- 时间：`2026-03-29 19:30:12 +0800`
+- 任务：`T-20260329-75daa9a4`
+- 任务目标：复审 func_cost compare i1 predicate_size 覆盖闭环，核对 spec/实现/测试一致性，并检查边界/异常/漏洞。
+- 审查范围：
+  - `spec/pass/analysis/func_cost.md`
+  - `kernel_gen/passes/analysis/func_cost.py`
+  - `test/pass/test_analysis_func_cost.py`
+- 验证：
+  - `pytest -q test/pass/test_analysis_func_cost.py`
+  - 退出码：`0`
+- 问题列表：
+  - `spec/pass/analysis/func_cost.md` 未新增 FC-008 用例条目，测试已新增 compare i1 predicate_size 覆盖但 spec 用例清单仍停留在 FC-001~FC-007。
+    - 风险：spec 与测试编号不一致，映射不可追溯，后续维护易遗漏。
+    - 建议：在 spec 用例清单补充 FC-008（compare 输出 i1 写回 predicate_size 优先级覆盖），同步测试目标描述。
+    - 优先级：`P1`。
+- 漏洞排查结果（6 类风险）：
+  - 输入校验绕过：未发现（predicate_size 与 dtype_size_overrides 均做正整数校验）。
+  - 类型/形状绕过：未发现（解析失败会 skip 并告警）。
+  - 边界越界：未发现（仅符号表达式计算，无索引访问）。
+  - 错误处理缺失：未发现（异常封装为 FuncCostAnalysisError）。
+  - 状态污染：未发现（只写入本 pass summary/可选 func attrs）。
+  - 资源释放问题：未发现（无资源持有）。
+- 可维护性建议：补齐 spec 用例清单与测试目标，确保编号闭环。
+- 结论：`需修改`（spec/test 映射不一致）。
+
+- 时间：`2026-03-29 13:38:36 +0800`
+- 任务：`T-20260329-4e25b578`
+- 任务目标：补充 `spec/pass/analysis/func_cost.md` 中 `FC-008` 用例条目与测试目标描述，明确 compare 输出 `i1` 时 `predicate_size` 的优先级，保持编号闭环。
+- 改动：
+  - `spec/pass/analysis/func_cost.md`：在“测试目标”补充 compare 输出 `i1` 时 `write_bytes` 按 `predicate_size` 统计、且优先于 `dtype_size_overrides["i1"]` 的描述。
+  - `spec/pass/analysis/func_cost.md`：在“功能与用例清单”新增 `FC-008 -> test_func_cost_compare_i1_uses_predicate_size` 映射，补齐 compare `i1` 写回口径闭环。
+- 验证：
+  - `pytest -q test/pass/test_analysis_func_cost.py -k test_func_cost_compare_i1_uses_predicate_size`，exit=`0`（`1 passed, 8 deselected in 0.31s`）。
+  - `rg -n 'FC-008|predicate_size|dtype_size_overrides\\[\"i1\"\\]' spec/pass/analysis/func_cost.md`，exit=`0`。
+- 结论：
+  - 本轮为最小 spec 收敛；实现与测试行为保持不变，文档编号与测试映射补齐到 `FC-008`。
+  - 下一步建议进入审查阶段，确认 `FC-008` 文案与 `kernel_gen/passes/analysis/func_cost.py` / `test/pass/test_analysis_func_cost.py` 口径一致。
+- 时间：`2026-03-29 19:38:58 +0800`
+- 任务：`T-20260329-aff3b950`
+- 任务目标：复审 func_cost FC-008 compare i1 predicate_size 映射收敛，核对 spec/实现/测试闭环与边界/异常/漏洞。
+- 审查范围：
+  - `spec/pass/analysis/func_cost.md`
+  - `kernel_gen/passes/analysis/func_cost.py`
+  - `test/pass/test_analysis_func_cost.py`
+- 核对要点：
+  - FC-008 已补入 spec 用例清单与测试目标描述；与 `test_func_cost_compare_i1_uses_predicate_size` 一致。
+  - 口径一致：compare 输出为 i1 时 `write_bytes` 使用 `predicate_size`，优先于 `dtype_size_overrides["i1"]`。
+  - 实现中 `_write_bytes_from_output` 对 compare + i1 分支优先使用 `predicate_size`，与 spec/测试一致。
+- 验证：
+  - `pytest -q test/pass/test_analysis_func_cost.py`
+  - 退出码：`0`
+- 问题列表：未发现需修改项。
+- 漏洞排查结果（6 类风险）：
+  - 输入校验绕过：未发现（predicate_size/dtype_size_overrides 均做正整数校验）。
+  - 类型/形状绕过：未发现（类型/shape 解析失败会 skip 并告警）。
+  - 边界越界：未发现（仅符号表达式计算）。
+  - 错误处理缺失：未发现（异常封装为 FuncCostAnalysisError）。
+  - 状态污染：未发现（仅写入 pass summaries/可选 attrs）。
+  - 资源释放问题：未发现。
+- 可维护性建议：未发现额外改进点。
+- 结论：`通过`。
+- 时间：`2026-03-29 14:00:19 +0800`
+- 任务：`T-20260329-1d90152e`
+- 任务目标：合并 func_cost FC-008 predicate_size 映射收敛变更并 cleanup `wt-20260328-pass-acceptance-points`。
+- 改动：
+  - 核对 worktree 状态：存在已修改文件 `kernel_gen/passes/lowing/__init__.py`、`kernel_gen/passes/lowing/nn_to_kernel.py`，以及未跟踪文件（含 `spec/pass/analysis/func_cost.md`、`test/pass/test_analysis_func_cost.py`、`kernel_gen/passes/analysis/func_cost.py` 等）。
+  - 已尝试切换到基于 `origin/main` 的合并分支：`git switch -c li-bai-merge-T-20260329-1d90152e origin/main`。
+  - 命令失败：切分支会覆盖现有已修改/未跟踪文件，Git 阻止切换。
+  - 已按阻塞流程通知管理员：`codex-multi-agents-tmux.sh -talk ... task_id=T-20260329-1d90152e`。
+- 结论：`阻塞`，等待管理员指示（先处置残留改动或重新分配干净 worktree）后继续。
+- 时间：`2026-03-29 14:12:23 +0800`
+- 任务：`T-20260329-1d90152e`
+- 任务目标：在干净临时合并 worktree 吸收 FC-008 链路相关改动并完成合并推送。
+- 改动：
+  - 在 `wt-main-merge-1d90152e`（基于 `origin/main`）仅吸收 FC-008 链路业务文件：
+    - `spec/pass/analysis/func_cost.md`：补齐 FC-008 测试目标与用例映射。
+    - `test/pass/test_analysis_func_cost.py`：补充 `test_func_cost_compare_i1_uses_predicate_size`（FC-008）及必要导入。
+  - 同步记录文件：`agents/codex-multi-agents/log/task_records/2026/13/20260328-pass-acceptance-points.md`（保留阻塞与续作上下文）。
+  - 验证：`pytest -q test/pass/test_analysis_func_cost.py -k test_func_cost_compare_i1_uses_predicate_size`，exit=`0`（`1 passed, 8 deselected`）。
+- 结论：`已完成合并提交准备`，下一步执行提交、push、`-done` 与 cleanup 评估。
