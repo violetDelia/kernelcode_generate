@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-用于定义 `Memory` 高层运算规范，覆盖逐元素算术、比较、激活函数、显式 `broadcast` / `broadcast_to`、`softmax`、全连接 `fc`、二维 `matmul` 与二维 `conv`。本层只描述可调用语义、结果元信息约束与错误规则。
+用于定义 `Memory` 高层运算规范，覆盖逐元素算术、比较、激活函数（含 `exp`）、归约（`reduce_sum` / `reduce_min` / `reduce_max`）、显式 `broadcast` / `broadcast_to`、`softmax`、全连接 `fc`、二维 `matmul` 与二维 `conv`。本层只描述可调用语义、结果元信息约束与错误规则。
 
 ## 文档信息
 
@@ -22,7 +22,7 @@
 
 - 提供 `Memory` 的逐元素算术与比较高层语义。
 - 提供常用激活函数的输入输出约束与错误规则。
-- 提供显式 `broadcast` / `broadcast_to`、`softmax`、全连接 `fc`、二维 `matmul` 与二维 `conv` 的输入输出约束与错误规则。
+- 提供显式 `broadcast` / `broadcast_to`、`softmax`、`exp`、`reduce_sum` / `reduce_min` / `reduce_max`、全连接 `fc`、二维 `matmul` 与二维 `conv` 的输入输出约束与错误规则。
 - 提供 `img2col1d` / `img2col2d` 的高层语义锚点，并与 `nn dialect` 的结构化合同建立引用关系。
 - 保持与下游 `nn dialect` 的分层：本层作为用户直接使用的接口，不受限于IR的表达。
 
@@ -33,10 +33,12 @@
 - `fc` 仅定义“输入末维 × 权重输入特征维”的全连接语义；`bias` 为可选参数。
 - `matmul` 仅定义二维矩阵乘，不支持 batch、广播或隐式转置。
 - `softmax` 仅支持 `Memory` 输入，默认沿最后一维归一化，不负责跨算子融合或近似策略选择。
+- `exp` 与激活函数同层，输入必须是浮点 `Memory`，不定义自动 cast 策略。
+- `reduce_sum` / `reduce_min` / `reduce_max` 只定义按轴归约语义，不定义跨算子融合、并行调度或硬件特化策略。
 - `conv` 仅覆盖二维卷积，不支持 group、batch/broadcast 或隐式转置。
 - `img2col` 高层接口按维度拆分为 `img2col1d` 与 `img2col2d` 语义锚点；禁止继续使用笼统公开名 `img2col` 作为稳定对外规范名。
 - 与 `nn dialect` 的分层关系：本层定义高层 shape/参数/错误语义，方言层仅定义 `nn.img2col1d` / `nn.img2col2d` 的 IR 字段与 verifier 合同（见 [`spec/dialect/nn.md`](../../spec/dialect/nn.md)）。
-- 不定义归约等其他算子。
+- 不定义归约以外的统计类算子（如 `mean` / `var` / `argmax` / `argmin`）。
 - 不引入超出本文规则的复杂自动类型提升；`dtype` 兼容性需显式检查。
 - 不负责 AST/IR/lowering 设计。
 - 激活函数仅支持 `Memory` 输入；输出 `shape`/`dtype`/`space`/`format`/`stride` 继承输入，仅允许浮点 `dtype`（`Float16`/`BFloat16`/`Float32`/`Float64`）。
@@ -508,6 +510,136 @@ out = hard_sigmoid(value, alpha=0.2, beta=0.5)
 
 - 返回 `Memory` 语义结果。
 
+### `exp(value)`
+
+功能说明：
+
+- 逐元素指数函数，计算 `e^x`。
+
+参数说明：
+
+- `value` (`Memory`)：待计算输入。
+
+使用示例：
+
+```python
+value = Memory(["M", "N"], NumericType.Float32)
+out = exp(value)
+```
+
+注意事项：
+
+- `value` 必须为 `Memory`，否则抛出 `TypeError`。
+- `value.dtype` 必须为浮点类型：`Float16`、`BFloat16`、`Float32`、`Float64`；其他类型必须抛出 `TypeError`。
+- 数值语义：`exp(x)` 与自然指数函数一致；输入很大时可能产生溢出，是否截断或特殊值处理由后端实现负责，本层仅约束接口与返回元信息。
+- 输出 `shape`/`dtype`/`space`/`format`/`stride` 均继承 `value`。
+
+返回与限制：
+
+- 返回 `Memory` 语义结果。
+
+### `reduce_sum(value, axis=None, keepdim=False)`
+
+功能说明：
+
+- 对输入按指定轴执行求和归约。
+
+参数说明：
+
+- `value` (`Memory`)：待归约输入。
+- `axis` (`None|int|Sequence[int]`)：归约轴；`None` 表示归约全部轴。
+- `keepdim` (`bool`)：是否保留被归约轴，默认 `False`。
+
+使用示例：
+
+```python
+value = Memory([2, 3, 4], NumericType.Float32)
+all_sum = reduce_sum(value)
+dim1_sum = reduce_sum(value, axis=1, keepdim=True)
+```
+
+注意事项：
+
+- `value` 必须为 `Memory`，否则抛出 `TypeError`。
+- `axis` 仅允许 `None`、`int` 或 `Sequence[int]`，且不允许 `bool`；其他类型必须抛出 `TypeError`。
+- 当 `axis` 为序列时，元素必须全为整数且不允许重复；空序列必须抛出 `ValueError`。
+- 允许负轴索引；归一化后轴索引必须满足 `0 <= axis < rank`，越界必须抛出 `ValueError`。
+- `keepdim` 必须为 `bool`，否则抛出 `TypeError`。
+- 输出 `dtype` 与 `value.dtype` 保持一致；`space` 继承 `value.space`。
+- 当归约后得到空 `shape`（全部轴归约且 `keepdim=False`）时，输出使用 rank-1 单元素形状 `[1]` 表示标量结果。
+- 输出 `format` 固定为 `Farmat.Norm`，`stride` 使用连续行主序默认步幅。
+
+返回与限制：
+
+- 返回 `Memory` 语义结果。
+- `keepdim=True` 时，被归约轴对应维度为 `1`；`keepdim=False` 时移除被归约轴。
+
+### `reduce_min(value, axis=None, keepdim=False)`
+
+功能说明：
+
+- 对输入按指定轴执行最小值归约。
+
+参数说明：
+
+- `value` (`Memory`)：待归约输入。
+- `axis` (`None|int|Sequence[int]`)：归约轴；`None` 表示归约全部轴。
+- `keepdim` (`bool`)：是否保留被归约轴，默认 `False`。
+
+使用示例：
+
+```python
+value = Memory([2, 3, 4], NumericType.Float32)
+all_min = reduce_min(value)
+dim2_min = reduce_min(value, axis=[2], keepdim=False)
+```
+
+注意事项：
+
+- `value`、`axis`、`keepdim` 的类型与边界规则与 `reduce_sum` 一致。
+- 额外边界：若被归约轴在静态形状上可判定为 `0`（空归约域），必须抛出 `ValueError`。
+- 输出 `dtype` 与 `value.dtype` 保持一致；`space` 继承 `value.space`。
+- 当归约后得到空 `shape`（全部轴归约且 `keepdim=False`）时，输出使用 rank-1 单元素形状 `[1]` 表示标量结果。
+- 输出 `format` 固定为 `Farmat.Norm`，`stride` 使用连续行主序默认步幅。
+
+返回与限制：
+
+- 返回 `Memory` 语义结果。
+- `keepdim=True` 时，被归约轴对应维度为 `1`；`keepdim=False` 时移除被归约轴。
+
+### `reduce_max(value, axis=None, keepdim=False)`
+
+功能说明：
+
+- 对输入按指定轴执行最大值归约。
+
+参数说明：
+
+- `value` (`Memory`)：待归约输入。
+- `axis` (`None|int|Sequence[int]`)：归约轴；`None` 表示归约全部轴。
+- `keepdim` (`bool`)：是否保留被归约轴，默认 `False`。
+
+使用示例：
+
+```python
+value = Memory([2, 3, 4], NumericType.Float32)
+all_max = reduce_max(value)
+dim0_max = reduce_max(value, axis=0, keepdim=True)
+```
+
+注意事项：
+
+- `value`、`axis`、`keepdim` 的类型与边界规则与 `reduce_sum` 一致。
+- 额外边界：若被归约轴在静态形状上可判定为 `0`（空归约域），必须抛出 `ValueError`。
+- 输出 `dtype` 与 `value.dtype` 保持一致；`space` 继承 `value.space`。
+- 当归约后得到空 `shape`（全部轴归约且 `keepdim=False`）时，输出使用 rank-1 单元素形状 `[1]` 表示标量结果。
+- 输出 `format` 固定为 `Farmat.Norm`，`stride` 使用连续行主序默认步幅。
+
+返回与限制：
+
+- 返回 `Memory` 语义结果。
+- `keepdim=True` 时，被归约轴对应维度为 `1`；`keepdim=False` 时移除被归约轴。
+
 ### `broadcast(value, target)`
 
 功能说明：
@@ -843,6 +975,7 @@ cols = img2col2d(value, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr
 - 执行命令：`pytest -q test/operation/test_operation_nn.py`
 - 验收命令（激活函数）：`pytest -q test/operation/test_operation_nn.py -k activation`
 - 验收命令（算术与 matmul）：`pytest -q test/operation/test_operation_nn.py -k "test_nn_add_memory or test_nn_other_arithmetic or test_nn_floordiv_rules or test_nn_matmul_success or test_nn_dtype_mismatch or test_nn_matmul_dtype_mismatch"`
+- 验收命令（exp/reduce 映射核对）：`rg -n "test_nn_(exp|reduce_(sum|min|max))" test/operation/test_operation_nn.py`
 
 ### 测试目标
 
@@ -858,6 +991,9 @@ cols = img2col2d(value, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr
 - 验证 `fc` 的非法输入与报错规则：参数类型、rank、特征维不匹配、`bias` 维度不对齐、`space` 不一致。
 - 验证 `matmul(lhs, rhs, memoryspace=None)` 的二维输入约束、`memoryspace` 覆盖、结果 `format/stride` 口径与错误规则。
 - 验证 `softmax(value, axis=-1)` 的 axis 默认值/负轴归一化、输入 dtype 约束、数值稳定性语义要求与错误路径。
+- 验证 `exp(value)` 的浮点输入约束、输出元信息继承与错误路径。
+- 验证 `reduce_sum` / `reduce_min` / `reduce_max` 的 axis 规范化、`keepdim` 规则与输出 shape 推导。
+- 验证 `reduce_min` / `reduce_max` 的空归约域错误路径（静态可判定维度为 `0`）。
 - 验证比较结果使用 `NumericType.Bool` 作为 predicate 载体。
 - 验证 nn 操作不依赖已移除的旧 shape 规范化入口。
 - 验证 `img2col2d` 输出形状与参数校验规则，并保持与 `nn.img2col2d` 方言合同的分层引用关系。
@@ -895,6 +1031,12 @@ cols = img2col2d(value, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr
 | OP-ACT-001 | `relu`/`sigmoid`/`tanh`/`hard_sigmoid` 输出 `shape/dtype/space/stride/format` 继承输入 | `test_nn_activation_basic` |
 | OP-ACT-002 | `leaky_relu` 的 `alpha` 参数规则与边界行为 | `test_nn_activation_leaky_relu_alpha` |
 | OP-ACT-003 | 激活函数的非 `Memory` 输入、非浮点 `dtype` 与无效参数报错 | `test_nn_activation_invalid_input` |
+| OP-EXP-001 | `exp` 仅接受浮点 `Memory` 输入并继承输入元信息 | `test_nn_exp_basic` |
+| OP-EXP-002 | `exp` 对非 `Memory` 或非浮点 `dtype` 输入报错 | `test_nn_exp_invalid_input` |
+| OP-RD-001 | `reduce_sum` 的 `axis=None/int/Sequence[int]` 归约规则与 shape 推导 | `test_nn_reduce_sum_shape_contract` |
+| OP-RD-002 | `reduce_sum` 的 `axis` 类型错误、越界、重复轴与空序列报错 | `test_nn_reduce_sum_axis_error` |
+| OP-RD-003 | `reduce_min` / `reduce_max` 的 `keepdim` 规则与输出元信息口径 | `test_nn_reduce_min_max_keepdim_contract` |
+| OP-RD-004 | `reduce_min` / `reduce_max` 在静态空归约域时报错 | `test_nn_reduce_min_max_empty_extent_error` |
 | OP-BC-001 | `broadcast` / `broadcast_to` 可通过 singleton dim 扩张并返回与 `target` 完全一致的描述 | `test_nn_broadcast_success` |
 | OP-BC-002 | `broadcast` / `broadcast_to` 支持前置维扩张并保持 `target` 描述 | `test_nn_broadcast_prepend_dimension` |
 | OP-BC-003 | `broadcast` / `broadcast_to` 维度不兼容报错 | `test_nn_broadcast_dimension_mismatch` |

@@ -1,10 +1,11 @@
 """nn operation API tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 我不是牛马
+最后一次更改: 金铲铲大作战
 
 功能说明:
-- 覆盖 kernel_gen/operation/nn.py 的逐元素算术、比较与激活 API。
+- 覆盖 kernel_gen/operation/nn.py 的逐元素算术、比较、激活与归约 API。
+- 覆盖显式广播、矩阵乘与卷积等操作的主要约束与错误路径。
 
 使用示例:
 - pytest -q test/operation/test_operation_nn.py
@@ -42,6 +43,7 @@ from kernel_gen.operation.nn import (
     broadcast_to,
     conv,
     eq,
+    exp,
     fc,
     floordiv,
     ge,
@@ -56,6 +58,9 @@ from kernel_gen.operation.nn import (
     mul,
     ne,
     relu,
+    reduce_max,
+    reduce_min,
+    reduce_sum,
     sigmoid,
     softmax,
     sub,
@@ -1328,3 +1333,151 @@ def test_nn_activation_invalid_input() -> None:
 
     with pytest.raises(ValueError):
         _ = hard_sigmoid(value, alpha=0.2, beta=float("-inf"))
+
+
+# OP-EXP-001
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-30 02:24:00 +0800
+# 最近一次运行成功时间: 2026-03-30 02:24:00 +0800
+# 测试目的: 验证 exp 仅接受浮点 Memory 且输出继承输入元信息。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_exp_basic
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_exp_basic() -> None:
+    value = Memory([2, 3], NumericType.Float32, space=MemorySpace.SM, stride=[3, 1], format=Farmat.CLast)
+    result = exp(value)
+    assert result.shape.get_values() == [2, 3]
+    assert result.dtype is NumericType.Float32
+    assert result.space is MemorySpace.SM
+    assert result.format is Farmat.CLast
+    assert result.get_stride() == [3, 1]
+
+
+# OP-EXP-002
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-30 02:24:00 +0800
+# 最近一次运行成功时间: 2026-03-30 02:24:00 +0800
+# 测试目的: 验证 exp 对非 Memory 或非浮点 dtype 输入报错。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_exp_invalid_input
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_exp_invalid_input() -> None:
+    with pytest.raises(TypeError):
+        _ = exp("bad")
+    with pytest.raises(TypeError):
+        _ = exp(Memory([2, 3], NumericType.Int32))
+
+
+# OP-RD-001
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-30 02:24:00 +0800
+# 最近一次运行成功时间: 2026-03-30 02:24:00 +0800
+# 测试目的: 验证 reduce_sum 的 axis=None/int/Sequence[int] 路径与输出 shape 推导。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_reduce_sum_shape_contract
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_reduce_sum_shape_contract() -> None:
+    value = Memory([2, 3, 4], NumericType.Float32, space=MemorySpace.LM, stride=[12, 4, 1], format=Farmat.CLast)
+    all_sum = reduce_sum(value)
+    dim1_sum = reduce_sum(value, axis=1, keepdim=True)
+    seq_sum = reduce_sum(value, axis=[-1, 0], keepdim=False)
+
+    assert all_sum.shape.get_values() == [1]
+    assert all_sum.dtype is NumericType.Float32
+    assert all_sum.space is MemorySpace.LM
+    assert all_sum.format is Farmat.Norm
+    assert all_sum.get_stride() == [1]
+
+    assert dim1_sum.shape.get_values() == [2, 1, 4]
+    assert dim1_sum.dtype is NumericType.Float32
+    assert dim1_sum.space is MemorySpace.LM
+    assert dim1_sum.format is Farmat.Norm
+    assert dim1_sum.get_stride() == [4, 4, 1]
+
+    assert seq_sum.shape.get_values() == [3]
+    assert seq_sum.dtype is NumericType.Float32
+    assert seq_sum.space is MemorySpace.LM
+    assert seq_sum.format is Farmat.Norm
+    assert seq_sum.get_stride() == [1]
+
+
+# OP-RD-002
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-30 02:24:00 +0800
+# 最近一次运行成功时间: 2026-03-30 02:24:00 +0800
+# 测试目的: 验证 reduce_sum 的 axis/keepdim 边界与异常路径。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_reduce_sum_axis_error
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_reduce_sum_axis_error() -> None:
+    value = Memory([2, 3, 4], NumericType.Float32)
+
+    with pytest.raises(TypeError):
+        _ = reduce_sum(value, axis=True)
+    with pytest.raises(TypeError):
+        _ = reduce_sum(value, axis=1.5)
+    with pytest.raises(TypeError):
+        _ = reduce_sum(value, axis=[0, "1"])
+    with pytest.raises(ValueError):
+        _ = reduce_sum(value, axis=3)
+    with pytest.raises(ValueError):
+        _ = reduce_sum(value, axis=[0, -3])
+    with pytest.raises(ValueError):
+        _ = reduce_sum(value, axis=[])
+    with pytest.raises(TypeError):
+        _ = reduce_sum(value, keepdim=1)
+
+
+# OP-RD-003
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-30 02:24:00 +0800
+# 最近一次运行成功时间: 2026-03-30 02:24:00 +0800
+# 测试目的: 验证 reduce_min/reduce_max 的 keepdim 规则与输出元信息口径。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_reduce_min_max_keepdim_contract
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_reduce_min_max_keepdim_contract() -> None:
+    value = Memory([2, 3, 4], NumericType.Float16, space=MemorySpace.SM, stride=[12, 4, 1], format=Farmat.CLast)
+    min_keepdim = reduce_min(value, axis=[2], keepdim=True)
+    max_reduce = reduce_max(value, axis=0, keepdim=False)
+
+    assert min_keepdim.shape.get_values() == [2, 3, 1]
+    assert min_keepdim.dtype is NumericType.Float16
+    assert min_keepdim.space is MemorySpace.SM
+    assert min_keepdim.format is Farmat.Norm
+    assert min_keepdim.get_stride() == [3, 1, 1]
+
+    assert max_reduce.shape.get_values() == [3, 4]
+    assert max_reduce.dtype is NumericType.Float16
+    assert max_reduce.space is MemorySpace.SM
+    assert max_reduce.format is Farmat.Norm
+    assert max_reduce.get_stride() == [4, 1]
+
+
+# OP-RD-004
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-30 02:24:00 +0800
+# 最近一次运行成功时间: 2026-03-30 02:24:00 +0800
+# 测试目的: 验证 reduce_min/reduce_max 在静态空归约域时报错。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_reduce_min_max_empty_extent_error
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_reduce_min_max_empty_extent_error() -> None:
+    empty_axis = Memory([0, 4], NumericType.Float32)
+
+    with pytest.raises(ValueError):
+        _ = reduce_min(empty_axis, axis=0)
+    with pytest.raises(ValueError):
+        _ = reduce_max(empty_axis, axis=None)
