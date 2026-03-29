@@ -238,6 +238,7 @@ module = pass_obj.run(module)
 
 - 测试文件：[`test/pass/test_analysis_func_cost.py`](../../../test/pass/test_analysis_func_cost.py)
 - 执行命令：`pytest -q test/pass/test_analysis_func_cost.py`
+- 覆盖 `FC-001` ~ `FC-008` 用例。
 
 ### 测试目标
 
@@ -247,15 +248,17 @@ module = pass_obj.run(module)
 - 验证 DMA 搬运类 op 的读写统计。
 - 验证未知 op 会被跳过并输出告警，不影响其余 op 统计。
 - 验证符号维度表达式（如 `A*B`）可正确保留。
+- 验证 compare 输出为 `i1` 时，`write_bytes` 按 `predicate_size` 统计，且优先于 `dtype_size_overrides["i1"]`。
 
 ### 功能与用例清单
 
-| 用例 ID | 功能 | 场景 | 前置条件 | 操作 | 预期结果 | 建议测试 |
-| --- | --- | --- | --- | --- | --- | --- |
-| FC-001 | 逐元素计算量 | `nn.add`，`shape=[A,B]` | 两输入同 shape | 运行 pass | `compute=A*B` | `test_func_cost_nn_add_symbolic_shape` |
-| FC-002 | 标量参与运算 | `tensor + const` | 输出 shape `[A,B]` | 运行 pass | `compute=A*B`，常量不计读 | `test_func_cost_tensor_plus_const` |
-| FC-003 | 链式统计 | 两个逐元素 op 串联 | 同一 `func` 内 | 运行 pass | 总量为两 op 逐项求和 | `test_func_cost_chain_accumulate` |
-| FC-004 | 矩阵乘统计 | `nn.matmul` | `lhs=[M,K], rhs=[K,N]` | 运行 pass | `compute=2*M*N*K` | `test_func_cost_matmul_formula` |
-| FC-005 | DMA 访存统计 | `dma.copy/load/store` | 类型合法 | 运行 pass | `compute=0`，读写按元素数计 | `test_func_cost_dma_memory_traffic` |
-| FC-006 | 未知 op 处理 | 含未知 op | 同时存在已支持 op | 运行 pass | 未知 op 被跳过并告警，其余统计正常 | `test_func_cost_skips_unknown_op_with_warning` |
-| FC-007 | 属性回写 | `attach_attrs=True` | 含可统计 op | 运行 pass | `func` 带 `analysis.*` 属性 | `test_func_cost_attach_attrs` |
+| 用例 ID | 场景描述 | 测试文件 | 对应测试 | 状态说明 |
+| --- | --- | --- | --- | --- |
+| `FC-001` | 输入 `shape=[A,B]` 的 `nn.add`，预期 `compute=A*B`。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_nn_add_symbolic_shape` | 已闭环。 |
+| `FC-002` | 输入 `tensor + const`，预期 `compute=A*B` 且常量不计读取流量。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_tensor_plus_const` | 已闭环。 |
+| `FC-003` | 输入同一 `func` 内串联两个逐元素 op，预期函数总量为两 op 逐项求和。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_chain_accumulate` | 已闭环。 |
+| `FC-004` | 输入 `lhs=[M,K], rhs=[K,N]` 的 `nn.matmul`，预期 `compute=2*M*N*K`。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_matmul_formula` | 已闭环。 |
+| `FC-005` | 输入 `dma.copy/load/store`，预期 `compute=0` 且读写字节按元素数统计。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_dma_memory_traffic` | 已闭环。 |
+| `FC-006` | 输入同时含未知 op 与受支持 op 的函数，预期未知 op 被跳过并告警，其余统计保持正常。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_skips_unknown_op_with_warning` | 已闭环。 |
+| `FC-007` | 输入 `attach_attrs=True` 的分析 pass，预期 `func` 回写 `analysis.*` 属性。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_attach_attrs` | 已闭环。 |
+| `FC-008` | 输入 `nn.eq` 输出 `i1`，预期 `write_bytes` 优先按 `predicate_size` 统计（高于 `dtype_size_overrides["i1"]`）。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_compare_i1_uses_predicate_size` | 已闭环。 |

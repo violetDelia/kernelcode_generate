@@ -585,6 +585,31 @@ def test_build_func_op_from_ast_uses_runtime_args_for_symbol_signature() -> None
     assert outputs == [SymbolValueType.from_expr("expr")]
 
 
+# MGEN-002B
+# 创建者: OpenAI
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-28 14:20:00 +0800
+# 最近一次运行成功时间: 2026-03-28 14:20:00 +0800
+# 功能说明: 验证 build_func_op_from_ast 在 runtime_args 省略时按 AST 注解生成签名。
+# 测试目的: 证明 runtime_args 缺失时仍可通过 AST 注解构建 symbol 标量签名。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_from_ast_rejects_symbol_scalar_missing_runtime_args
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_from_ast_rejects_symbol_scalar_missing_runtime_args() -> None:
+    def only_symbol(expr: int) -> int:
+        return expr
+
+    func_ast = parse_function(only_symbol)
+    func_op = build_func_op_from_ast(func_ast)
+    inputs = list(func_op.function_type.inputs)
+    outputs = list(func_op.function_type.outputs)
+    assert inputs == [SymbolValueType.from_expr("expr")]
+    assert outputs == [SymbolValueType.from_expr("expr")]
+    with pytest.raises(AstVisitorError, match="runtime_args must align"):
+        build_func_op_from_ast(func_ast, runtime_args=[])
+
+
 # MGEN-002A
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚
@@ -863,7 +888,7 @@ def alloc_kernel(rank1: int, rank2: int) -> f"Tensor[f32, {ALLOC_ROWS}, {ALLOC_C
     assert list(func_op.function_type.outputs) == [alloc_ops[0].result.type]
 
 
-# MGEN-026A
+# MGEN-002B
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-25 22:17:59 +0800
@@ -1245,7 +1270,7 @@ def test_build_func_op_supports_dma_deslice_helper() -> None:
     assert len(deslice_ops) == 1
 
 
-# MGEN-007
+# MGEN-001B
 # 创建者: 小李飞刀
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-25 16:05:00 +0800
@@ -1268,7 +1293,7 @@ def test_mlir_gen_parse_failure_wrapped(monkeypatch: pytest.MonkeyPatch) -> None
         _parse_function_with_env(fn, globals_table={}, builtins_table={}, runtime_table={}, config=None)
 
 
-# MGEN-007
+# MGEN-009
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
@@ -1354,6 +1379,25 @@ def test_symbol_scalar_function_uses_symbol_value_type_signature() -> None:
     outputs = list(func_op.function_type.outputs)
     assert inputs == [SymbolValueType.from_expr("expr")]
     assert outputs == [SymbolValueType.from_expr("expr")]
+
+
+# MGEN-002B
+# 创建者: OpenAI
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-28 14:05:00 +0800
+# 最近一次运行成功时间: 2026-03-28 14:05:00 +0800
+# 功能说明: 验证纯 symbol 标量函数 runtime_args 类型校验，拒绝 float 等非法标量。
+# 测试目的: 覆盖 build_func_op 纯 symbol 标量场景下的输入类型错误分支。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_rejects_symbol_scalar_float_runtime_args
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_rejects_symbol_scalar_float_runtime_args() -> None:
+    def only_symbol(expr: int) -> int:
+        return expr
+
+    with pytest.raises(AstVisitorError, match="Unsupported scalar argument type"):
+        build_func_op(only_symbol, 1.5)
 
 
 # MGEN-018 / MGEN-021 / MGEN-022 / MGEN-023 / MGEN-024
@@ -1644,6 +1688,7 @@ def test_build_func_op_rejects_runtime_arg_count_mismatch() -> None:
         build_func_op(add, _tensor_arg([2, 2]))
 
 
+# MGEN-019
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-23 00:20:00 +0800
@@ -1666,7 +1711,7 @@ def test_build_func_op_globals_and_builtins_cannot_replace_runtime_args() -> Non
     assert exc_info.value.location is None
 
 
-# MGEN-027
+# MGEN-027A
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-25 22:18:52 +0800
@@ -1690,7 +1735,7 @@ def test_build_func_op_rejects_external_value_reference_inside_function_body() -
     assert exc_info.value.location.line == 2
 
 
-# MGEN-027
+# MGEN-027A
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-25 22:18:52 +0800
@@ -1713,7 +1758,7 @@ def test_build_func_op_rejects_global_external_value_reference(monkeypatch: pyte
     assert exc_info.value.location is not None
 
 
-# MGEN-027
+# MGEN-027A
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-25 22:18:52 +0800
@@ -1734,7 +1779,7 @@ def test_build_func_op_rejects_builtins_external_value_reference() -> None:
     assert exc_info.value.location is not None
 
 
-# MGEN-027
+# MGEN-027A
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-25 22:18:52 +0800
@@ -1992,7 +2037,7 @@ def test_tensor_binary_prepend_broadcast_lowering() -> None:
     assert add_op.lhs is broadcast_ops[0].result or add_op.rhs is broadcast_ops[0].result
 
 
-# MGEN-011A
+# MGEN-011A / EMIT-029
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-27 04:14:28 +0800
@@ -2007,7 +2052,7 @@ def test_tensor_truediv_dtype_promotion_lowering() -> None:
     def truediv(
         x: "Tensor[f32, 2, 2]",
         y: "Tensor[i32, 2, 2]",
-    ) -> "Tensor[i32, 2, 2]":
+    ) -> "Tensor[f32, 2, 2]":
         return x / y
 
     lhs_memory = Memory([2, 2], NumericType.Float32)
@@ -2017,7 +2062,7 @@ def test_tensor_truediv_dtype_promotion_lowering() -> None:
     div_ops = [op for op in func_op.body.block.ops if isinstance(op, NnTrueDivOp)]
     assert len(cast_ops) == 1
     assert len(div_ops) == 1
-    expected_type = _memory_to_nn_type(Memory([2, 2], NumericType.Int32))
+    expected_type = _memory_to_nn_type(Memory([2, 2], NumericType.Float32))
     assert cast_ops[0].result.type == expected_type
     assert div_ops[0].result.type == expected_type
 
@@ -2119,7 +2164,7 @@ def test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast() -> None:
     def sub(
         lhs: "Tensor[f32, 2, 2]",
         rhs: "Tensor[i32, 2, 2]",
-    ) -> "Tensor[i32, 2, 2]":
+    ) -> "Tensor[f32, 2, 2]":
         return lhs - rhs
 
     lhs_memory = Memory([2, 2], NumericType.Float32)

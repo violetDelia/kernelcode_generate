@@ -147,7 +147,7 @@ def _memory_base_name(value: SSAValue, ctx: EmitCContext) -> str:
     if bound is not None:
         return bound
     if isinstance(value, BlockArgument):
-        return ctx.allocate_name(value, prefix="arg")
+        return ctx.bind_name(value, f"arg{value.index}")
     owner = value.owner
     if isinstance(owner, DmaLoadOp):
         return ctx.allocate_name(value)
@@ -188,7 +188,7 @@ def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
     if bound is not None:
         return bound
     if isinstance(value, BlockArgument):
-        return ctx.allocate_name(value, prefix="arg")
+        return ctx.bind_name(value, f"arg{value.index}")
     owner = value.owner
     if isinstance(owner, arith.ConstantOp):
         return _format_literal(owner, ctx)

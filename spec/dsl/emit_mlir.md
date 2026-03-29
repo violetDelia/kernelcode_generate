@@ -166,13 +166,11 @@ value = emit_mlir(expr_ast, ctx)
 - 执行命令（emit 单测）：`pytest -q test/dsl/test_emit_mlir.py`
 - 执行命令（emit 端到端回归）：`pytest -q test/dsl/test_mlir_gen.py`
 - 执行命令（ast_visitor 负路径）：`pytest -q test/dsl/test_ast_visitor.py`
-- 拆分归属：EMIT-001~EMIT-028 归属 `test_emit_mlir.py`；EMIT-029 归属 `test_mlir_gen.py`；arch helper 负路径与 ast_visitor 驱动的边界覆盖归属 `test_ast_visitor.py`。
+- 拆分归属：EMIT-001~EMIT-028 归属 `test_emit_mlir.py`；其中 EMIT-012A/012B/012C/012D/013/024 在 `test_ast_visitor.py` 有边界回归覆盖；EMIT-031/EMIT-032 与 arch helper 负路径补充由 `test_ast_visitor.py` 覆盖。
 - 测试目标：
   - 覆盖常见表达式与语句节点的发射结果。
   - 覆盖 `lhs != rhs` 到 `CompareExprAST(op="ne")` 的 memory lowering：`nn.ne` 结果为 `i1`，并支持 implicit broadcast。
   - 覆盖 `CompareExprAST(op="ne")` memory 路径在不可 broadcast 与 element type 不一致时的错误分支与诊断文案。
-  - 覆盖 `BinaryExprAST(op="mul")` 在 symbol 与 memory 共用 lowering 分流中的入口语义。
-  - 覆盖 tensor 二元算术（含 `mul`）memory 路径的 mixed dtype promotion + `dma.cast` 对齐，以及 broadcast 失败 / 非法 dtype 组合 / space 不一致错误分支与诊断文案。
   - 覆盖 `LoopRange` -> `symbol.for` 与 `it`/DMA operand 直接保持 `symbol.int` 的发射规则。
   - 覆盖 DMA helper 调用的 lowering 结果与语句/表达式边界：`alloc/copy/cast/view/reshape/flatten` 产生 memory 结果，`free` 为无返回值语句。
   - 覆盖 `ArchQueryAST(query_name="get_block_id")` lowering 为 `arch.get_block_id` 的最小查询路径。
@@ -180,14 +178,11 @@ value = emit_mlir(expr_ast, ctx)
   - 覆盖 `ArchQueryAST(query_name="get_subthread_id")` lowering 为 `arch.get_subthread_id` 的最小查询路径。
   - 覆盖 `ArchQueryAST(query_name="get_subthread_num")` lowering 为 `arch.get_subthread_num` 的最小查询路径。
   - 覆盖 `ArchQueryAST(query_name="get_thread_id")` lowering 为 `arch.get_thread_id` 的最小查询路径。
-  - 覆盖 `ArchQueryAST(query_name="get_thread_num")` lowering 为 `arch.get_thread_num` 的最小查询路径。
   - 覆盖 `ArchGetDynamicMemoryAST(space=...)` lowering 为 `arch.get_dynamic_memory` 的结果类型与 `space` 约束错误路径。
   - 覆盖 `ArchLaunchKernelAST(name, block, thread, subthread)` lowering 为 `arch.launch_kernel` 的语句语义与参数错误路径。
   - 覆盖不支持节点的错误路径。
 - 功能与用例清单：
   - EMIT-001：二元表达式节点生成对应 op/value。（`test_emit_context_reuses_cached_value`）
-  - EMIT-001A：`BinaryExprAST(op="mul")` 在 symbol 路径必须生成 `symbol.mul`，并与其他 symbol 二元算术共享相同分发入口。（`test_emit_mlir_infer_expr_type_branches`、`test_emit_mlir_lower_expr_unknown_and_symbol_errors`）
-  - EMIT-001B：tensor 二元算术（含 `mul`）在 memory 路径必须复用统一 `dtype promotion + dma.cast + broadcast` 校验；mixed dtype 场景需先对齐 dtype 再生成目标 op，shape 不可 broadcast、space 不一致或 dtype 组合不受支持时必须报错并保持固定诊断文案。（`test_emit_mlir_infer_expr_type_branches`）
   - EMIT-002：比较表达式节点生成对应 op/value。（`test_emit_mlir_compare_expr_emits_eq`）
   - EMIT-003：不支持节点抛出错误并携带位置信息。（`test_emit_mlir_unsupported_node_reports_location`）
   - EMIT-004：`TensorAST` 可通过符号表直接解析。（`test_emit_mlir_tensor_uses_symbol_table`）
@@ -198,9 +193,14 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-009：`StoreAST` 输入非 memory 抛出错误。（`test_store_ast_lowering_raises_lowering_error`）
   - EMIT-010：`ForAST` 在 `LoopRange` 场景下 lowering 为 `symbol.for`，循环块参数 `it` 与循环体内相关 DMA operand 直接复用 `!symbol.int<"...">`，不生成 `arith.index_cast`。（`test_emit_mlir_symbolic_for_loop_avoids_index_cast`）
   - EMIT-011：循环变量表初始化与非法配置报错路径。（`test_emit_mlir_loop_vars_validation`）
+  - EMIT-011B：`EmitContext` 校验 `config.target` 命名约束的错误路径。（`test_emit_context_rejects_invalid_target_name`）
+  - EMIT-011C：`EmitContext` 校验 `config.hardware` 字段约束的错误路径。（`test_emit_context_rejects_invalid_hardware_field`）
   - EMIT-012：类型推导与 broadcast 错误分支。（`test_emit_mlir_infer_expr_type_branches`）
-  - EMIT-012A：索引解析与 rank mismatch 的错误路径。（`test_emit_mlir_index_expr_rejections`）
-  - EMIT-013：默认 stride 推导遇到未知 attr 的分支。（`test_emit_mlir_default_stride_handles_unknown_attr`）
+  - EMIT-012B：`emit_mlir` lowering 的错误分支覆盖（常量、load/store、symbol binary op、compare 等）。（`test_emit_mlir.py::test_emit_mlir_lower_expr_branches`、`test_ast_visitor.py::test_emit_mlir_lower_expr_branches`）
+  - EMIT-012A：索引解析与 rank mismatch 的错误路径。（`test_emit_mlir.py::test_emit_mlir_index_expr_rejections`、`test_ast_visitor.py::test_emit_mlir_index_expr_rejections`）
+  - EMIT-012C：stride/layout/index 辅助函数与非 unit stride 拒绝路径。（`test_emit_mlir.py::test_emit_mlir_stride_and_layout_helpers`、`test_ast_visitor.py::test_emit_mlir_stride_and_layout_helpers`）
+  - EMIT-012D：索引解析与 loop_vars 查表分支。（`test_emit_mlir.py::test_emit_mlir_index_resolution_helpers`、`test_ast_visitor.py::test_emit_mlir_index_resolution_helpers`）
+  - EMIT-013：默认 stride 推导遇到未知 attr 的分支。（`test_emit_mlir.py::test_emit_mlir_default_stride_handles_unknown_attr`、`test_ast_visitor.py::test_emit_mlir_default_stride_handles_unknown_attr`）
   - EMIT-014：`ForAST` lowering 会保留循环结构并在循环体内生成 `dma.load`。（`test_for_ast_lowering_emits_loads`）
   - EMIT-015：`alloc(...)` lowering 为 `dma.alloc` 并返回 memory 结果。（`test_emit_mlir_dma_alloc_lowering`）
   - EMIT-016：`copy(...)` lowering 为 `dma.copy` 并返回目标 memory 结果。（`test_emit_mlir_dma_copy_lowering`）
@@ -211,14 +211,12 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-021：`free(...)` 作为无返回值语句执行，不产生新的 SSA 结果。（`test_emit_mlir_dma_free_statement`）
   - EMIT-022：`ArchQueryAST(query_name="get_block_id")` lowering 为单个 `arch.get_block_id`，并返回 `!symbol.int<"block_id">`。（`test_emit_mlir_lowers_arch_get_block_id_query`）
   - EMIT-023：`ArchQueryAST(query_name="get_block_num")` lowering 为单个 `arch.get_block_num`，并返回 `!symbol.int<"block_num">`。（`test_emit_mlir_lowers_arch_get_block_num_query`）
-  - EMIT-024：纯 symbol 标量 `>=` 比较在 emit 阶段 lowering 为 `symbol.ge` 且结果为 `i1`；对 symbol 路径中除 `eq/ge` 以外的比较操作符报错 `Unsupported symbol compare op`。（`test_emit_mlir_infer_expr_type_branches`、`test_emit_mlir_lower_expr_unknown_and_symbol_errors`、`test_emit_mlir_lowers_symbol_ge`）
+  - EMIT-024：纯 symbol 标量 `>=` 比较在 emit 阶段 lowering 为 `symbol.ge` 且结果为 `i1`；对 symbol 路径中除 `eq/ge` 以外的比较操作符报错 `Unsupported symbol compare op`。（`test_emit_mlir.py::test_emit_mlir_lowers_symbol_ge`、`test_ast_visitor.py::test_emit_mlir_lowers_symbol_ge`）
   - EMIT-025：`ArchQueryAST(query_name="get_subthread_id")` lowering 为单个 `arch.get_subthread_id`，并返回 `!symbol.int<"subthread_id">`。（`test_emit_mlir_lowers_arch_get_subthread_id_query`）
   - EMIT-026：`ArchQueryAST(query_name="get_thread_id")` lowering 为单个 `arch.get_thread_id`，并返回 `!symbol.int<"thread_id">`。（`test_emit_mlir_lowers_arch_get_thread_id_query`）
   - EMIT-027：`ArchQueryAST(query_name="get_subthread_num")` lowering 为单个 `arch.get_subthread_num`，并返回 `!symbol.int<"subthread_num">`。（`test_emit_mlir_lowers_arch_get_subthread_num_query`）
-  - EMIT-030：`ArchQueryAST(query_name="get_thread_num")` lowering 为单个 `arch.get_thread_num`，并返回 `!symbol.int<"thread_num">`。
   - EMIT-031：`ArchGetDynamicMemoryAST(space=...)` lowering 为 `arch.get_dynamic_memory`，并固定返回 `!nn.memory<[?], [1], i8, #nn.space<space>>`；非法 `space` 必须报错。（`test_emit_mlir_rejects_invalid_arch_get_dynamic_memory_space`）
   - EMIT-032：`ArchLaunchKernelAST(name, block, thread, subthread)` lowering 为单个无返回值 `arch.launch_kernel`；extent 必须为正整数 `!symbol.int`，非法 `name`/extent 必须报错。（`test_emit_mlir_rejects_invalid_arch_launch_kernel_args`）
   - EMIT-002A：`CompareExprAST(op="ne")` 在 memory 路径必须生成 compare op（必要时带 `nn.broadcast`），结果 element type 为 `i1`。（`test_emit_mlir_binary_compare_broadcast_rhs`）
   - EMIT-002B：`CompareExprAST(op="ne")` memory 路径在不可 broadcast 或 element type/space 不一致时必须报错并保持固定诊断文案。（`test_emit_mlir_compare_memory_mismatch_reports_diagnostics`）
   - EMIT-028：`nn.sub` mixed dtype promotion 触发 `dma.cast` 并保持 `nn.sub` 与 `func.return` 的结果类型与 promotion 结果一致。（`test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast`）
-  - EMIT-029：tensor `truediv` mixed dtype promotion 需插入 `dma.cast`，且 `nn.truediv` 结果类型与决议 dtype 一致。（`test_mlir_gen.py::test_tensor_truediv_dtype_promotion_lowering`）

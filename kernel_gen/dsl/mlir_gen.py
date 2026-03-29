@@ -150,10 +150,10 @@ def _build_signature_types(
     *,
     allow_dma_alloc_only: bool = False,
 ) -> tuple[list[object], dict[int, object]]:
+    is_symbol_scalar_function = _is_symbol_scalar_function(func_ast)
     if runtime_args is not None and len(runtime_args) != len(func_ast.inputs):
         raise _LoweringError("runtime_args must align with func_ast inputs", location=func_ast.location)
 
-    is_symbol_scalar_function = _is_symbol_scalar_function(func_ast)
     arg_types: list[object] = []
     type_map: dict[int, object] = {}
     tensor_input_count = 0
@@ -166,6 +166,9 @@ def _build_signature_types(
         elif isinstance(item, ScalarArgAST):
             if item.value_type is not int:
                 raise _LoweringError("Unsupported scalar argument type", location=item.location)
+            if runtime_args is not None:
+                if not isinstance(runtime_arg, (int, SymbolDim)):
+                    raise _LoweringError("Unsupported scalar argument type", location=item.location)
             runtime_expr = _symbol_expr_from_runtime_arg(runtime_arg)
             if allow_dma_alloc_only:
                 if runtime_args is not None:

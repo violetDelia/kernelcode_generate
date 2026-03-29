@@ -907,7 +907,7 @@ def test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast() -> None:
     def sub(
         lhs: "Tensor[f32, 2, 2]",
         rhs: "Tensor[i32, 2, 2]",
-    ) -> "Tensor[i32, 2, 2]":
+    ) -> "Tensor[f32, 2, 2]":
         return lhs - rhs
 
     lhs_memory = Memory([2, 2], NumericType.Float32)
@@ -1323,7 +1323,7 @@ def test_emit_mlir_lower_expr_branches() -> None:
         _lookup_symbol(VarAST("missing"), EmitContext(builder=block, symbols={}, types={}))
 
 
-# EMIT-022
+# EMIT-022A
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
@@ -1370,7 +1370,7 @@ def test_emit_mlir_store_rank_mismatch_and_deslice() -> None:
     assert isinstance(deslice, DmaDesliceOp)
 
 
-# EMIT-023
+# EMIT-023A
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 10:30:00 +0800
@@ -1393,7 +1393,7 @@ def test_emit_mlir_ensure_supported_statements_errors() -> None:
         _ensure_supported_statements(bad_func)
 
 
-# EMIT-013
+# EMIT-013A
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-26 22:20:00 +0800
@@ -1709,7 +1709,7 @@ def test_emit_mlir_for_loop_restores_loop_vars_and_errors() -> None:
         emit_node_mlir(object(), ctx)
 
 
-# MLIR-015
+# MGEN-016
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 05:10:36 +0800
@@ -1730,7 +1730,7 @@ def test_mlir_gen_symbol_scalar_function_no_outputs() -> None:
     assert _is_symbol_scalar_function(func_ast) is True
 
 
-# MLIR-016
+# MGEN-003
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 05:10:36 +0800

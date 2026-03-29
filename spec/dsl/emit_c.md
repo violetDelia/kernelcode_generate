@@ -128,6 +128,7 @@ expr = emit_c_value(value, EmitCContext(target="cpu"))
 - 仅纯表达式 value 允许使用该接口。
 - 若 value 依赖未支持的 owner op 或非法依赖路径，必须报错。
 - 输出表达式必须与 `emit_c_op(...)` 使用的命名策略保持一致。
+- 当 value 为未绑定名称的 `BlockArgument` 时，必须回退为 `arg{index}` 默认命名，避免受访问顺序影响。
 - `target=cpu` 下 `symbol.add` 结果可作为右值表达式生成。
 
 返回与限制：
@@ -152,6 +153,7 @@ expr = emit_c_value(value, EmitCContext(target="cpu"))
 
 - EC-001：算术 op 可生成合法赋值语句。（`test_emit_c_op_lowers_arith_add`）
 - EC-002：比较 value 可生成合法比较表达式。（`test_emit_c_value_lowers_compare`）
+- EC-002A：未绑定 `BlockArgument` 默认命名按参数索引回退为 `arg{index}`。（`test_emit_c_value_unbound_block_argument_uses_index`）
 - EC-003：`scf.for` 可生成目标循环结构与循环体语句。（`test_emit_c_op_lowers_scf_for`）
 - EC-004：unit-tile `dma.load`/`dma.store` 可生成合法索引访问代码。（`test_emit_c_op_lowers_memory_access`）
 - EC-005：不支持 op 时抛出包含 op 名称的错误。（`test_emit_c_op_rejects_unsupported_op`）
