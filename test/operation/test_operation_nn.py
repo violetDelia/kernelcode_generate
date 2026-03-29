@@ -179,7 +179,7 @@ def test_nn_dtype_mismatch() -> None:
 
 # OP-008
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-24 04:03:10 +0800
 # 最近一次运行成功时间: 2026-03-24 04:03:10 +0800
 # 测试目的: 验证不支持的 dtype 触发 TypeError。
@@ -221,8 +221,13 @@ def test_nn_add_bool_scalar() -> None:
 # 对应测试文件路径: test/operation/test_operation_nn.py
 def test_nn_scalar_type_error() -> None:
     mem = Memory([1], NumericType.Int32)
+    symbol = SymbolDim("N")
     with pytest.raises(TypeError):
         _ = add(mem, "3")
+    with pytest.raises(TypeError):
+        _ = add(mem, symbol)
+    with pytest.raises(TypeError):
+        _ = add(symbol, mem)
 
 
 # OP-009
@@ -530,6 +535,8 @@ def test_nn_broadcast_dimension_mismatch() -> None:
     value = Memory(["M", "N"], NumericType.Float32)
     with pytest.raises(ValueError):
         _ = broadcast(value, Memory(["M", "K"], NumericType.Float32))
+    with pytest.raises(ValueError):
+        _ = broadcast(Memory([1, "N"], NumericType.Float32), Memory(["?", "N"], NumericType.Float32))
 
 
 # OP-BC-004
@@ -606,6 +613,10 @@ def test_nn_add_implicit_broadcast_singleton() -> None:
     assert _merge_broadcast_dim("?", "?") == "?"
     with pytest.raises(ValueError):
         _merge_broadcast_dim("?", "N")
+    with pytest.raises(ValueError):
+        _infer_broadcast_shape(SymbolShape(["?"]), SymbolShape([1]))
+    with pytest.raises(ValueError):
+        _infer_broadcast_shape(SymbolShape([1]), SymbolShape(["?"]))
     assert result.shape.get_values() == ["A", "B"]
     assert lhs_b is lhs_same
     assert rhs_b is rhs_same

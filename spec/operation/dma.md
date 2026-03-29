@@ -71,6 +71,11 @@ buf = alloc([32, 32], NumericType.Float32, space=MemorySpace.SM, stride=[1, 1])
 - `dtype` 必须为 `NumericType`，`space` 必须为 `MemorySpace`。
 - 未提供 `stride` 时，按连续布局生成默认 stride。
 
+非法输入：
+
+- `shape/stride` 无法规范化或 rank 不一致时必须抛出 `ValueError`。
+- `dtype` 非 `NumericType` 或 `space` 非 `MemorySpace` 时必须抛出 `TypeError`。
+
 返回与限制：
 
 - 返回新的 `Memory`，`format` 使用 `Memory` 默认格式。
@@ -95,6 +100,10 @@ free(buf)
 注意事项：
 
 - 非 `Memory` 输入必须报 `TypeError`。
+
+非法输入：
+
+- `value` 不是 `Memory` 时必须抛出 `TypeError`。
 
 返回与限制：
 
@@ -122,6 +131,10 @@ dst = copy(src, MemorySpace.SM)
 - `source` 必须为 `Memory`，`space` 必须为 `MemorySpace`。
 - 返回结果仅描述搬运意图，不执行实际数据拷贝。
 
+非法输入：
+
+- `source` 不是 `Memory` 或 `space` 不是 `MemorySpace` 时必须抛出 `TypeError`。
+
 返回与限制：
 
 - 返回新的 `Memory`，`shape/stride/dtype/format` 继承 `source`，`space` 由参数决定。
@@ -148,6 +161,11 @@ dst = cast(src, NumericType.Float16, memoryspace=MemorySpace.GM)
 
 - `dtype` 必须为合法的 `NumericType`，`memoryspace` 若提供必须为 `MemorySpace`。
 - 不支持的转换路径必须显式报错。
+
+非法输入：
+
+- `source` 不是 `Memory`、`dtype` 非 `NumericType` 或 `memoryspace` 非 `MemorySpace|None` 时必须抛出 `TypeError`。
+- 不支持的转换路径必须抛出 `NotImplementedError`。
 
 返回与限制：
 
@@ -178,6 +196,12 @@ tile = load(src, offsets=[0, 0], sizes=[32, 32], strides=[1, 1], space=MemorySpa
 - `offsets/sizes/strides` 长度必须与 `source.rank` 一致。
 - `sizes` 中静态维度必须为正。
 - 对于可静态判定的场景，必须进行边界检查。
+- 当 `offsets/sizes/strides` 含 `SymbolDim` 或 `?` 且无法静态判定越界时，允许通过并保留符号表达。
+
+非法输入：
+
+- `source` 不是 `Memory` 或 `space` 非 `MemorySpace|None` 时必须抛出 `TypeError`。
+- `offsets/sizes/strides` 与 `source.rank` 不一致、`sizes` 含非正静态维度、或静态边界校验失败时必须抛出 `ValueError`。
 
 返回与限制：
 
@@ -207,6 +231,11 @@ sub = slice(src, offsets=[0, 16], sizes=[8, 8], strides=[1, 1], space=MemorySpac
 注意事项：
 
 - 校验规则与 `load` 一致。
+
+非法输入：
+
+- `source` 不是 `Memory` 时必须抛出 `TypeError`。
+- 其余 rank/边界/`sizes` 约束与 `load` 相同，违反时必须抛出 `ValueError`。
 
 返回与限制：
 
@@ -239,6 +268,12 @@ store(tile, dst, offsets=[0, 0], sizes=[32, 32], strides=[1, 1])
 - `source.shape` 必须与 `sizes` 一致。
 - 对于可静态判定的场景，必须进行边界检查。
 
+非法输入：
+
+- `source` 或 `target` 不是 `Memory` 时必须抛出 `TypeError`。
+- `source.dtype != target.dtype` 时必须抛出 `TypeError`。
+- `sizes` 与 `source.shape` 不一致、或静态边界校验失败时必须抛出 `ValueError`。
+
 返回与限制：
 
 - 返回 `None`。
@@ -266,6 +301,12 @@ deslice(sub, dst, offsets=[0, 16], sizes=[32, 32], strides=[1, 1])
 注意事项：
 
 - 校验规则与 `store` 一致。
+
+非法输入：
+
+- `source` 或 `target` 不是 `Memory` 时必须抛出 `TypeError`。
+- `source.dtype != target.dtype` 时必须抛出 `TypeError`。
+- 其余大小/边界约束与 `store` 相同，违反时必须抛出 `ValueError`。
 
 返回与限制：
 
@@ -298,6 +339,12 @@ sub = view(src, offset=["M_t", "K_t"], size=[2, 2], stride=["stride", 1])
 - `size` 中静态维度必须为正。
 - `stride` 仅用于描述子视图访问步进，不等同于返回 `Memory` 的连续布局步幅。
 - 对于可静态判定的场景，必须进行边界检查。
+- 当 `offset/size/stride` 含 `SymbolDim` 或 `?` 且无法静态判定越界时，允许通过并保留符号表达。
+
+非法输入：
+
+- `source` 不是 `Memory` 时必须抛出 `TypeError`。
+- `offset/size/stride` 长度与 rank 不一致、`offset` 含负值、`size/stride` 含非正静态值或静态边界校验失败时必须抛出 `ValueError`。
 
 返回与限制：
 
@@ -328,6 +375,11 @@ dst = reshape(src, shape=[6, 4])
 - `source` 必须是连续布局；非连续布局必须显式报错。
 - 若可判定，`shape` 的元素总数必须与 `source.shape` 一致。
 
+非法输入：
+
+- `source` 不是 `Memory` 时必须抛出 `TypeError`。
+- `shape` 无法规范化、`source` 非连续布局或静态元素总数不一致时必须抛出 `ValueError`。
+
 返回与限制：
 
 - 返回新的 `Memory`，其 `dtype/space/format` 继承 `source`。
@@ -356,6 +408,11 @@ dst = flatten(src)
 - `source` 必须是连续布局；非连续布局必须显式报错。
 - 展平后的 `shape` 为所有维度长度的乘积；符号维度使用无空格 `*` 表达式。
 
+非法输入：
+
+- `source` 不是 `Memory` 时必须抛出 `TypeError`。
+- `source` 非连续布局时必须抛出 `ValueError`。
+
 返回与限制：
 
 - 返回新的 `Memory`，其 `shape` 为一维，`stride` 为 `[1]`。
@@ -364,9 +421,7 @@ dst = flatten(src)
 ## 测试
 
 - 测试文件：[`test/operation/test_operation_dma.py`](../../test/operation/test_operation_dma.py)
-- 执行命令：
-  - `pytest -q test/operation/test_operation_dma.py`
-  - `pytest --cov=kernel_gen.operation.dma --cov-report=term-missing -q test/operation/test_operation_dma.py`
+- 执行命令：`pytest -q test/operation/test_operation_dma.py`
 
 ### 测试目标
 
@@ -380,40 +435,40 @@ dst = flatten(src)
 
 ### 功能与用例清单
 
-| 用例 ID | 测试点 | 说明 | 建议测试 |
-| --- | --- | --- | --- |
-| TC-OP-DMA-AF-001 | `alloc` 基础分配 | 返回带指定 `shape/dtype/space` 的 `Memory` | `test_alloc_returns_memory` |
-| TC-OP-DMA-AF-007 | `alloc` 默认 space/stride | 未提供 `space` 时默认 `MemorySpace.GM`，未提供 `stride` 时按连续布局生成默认 stride | `test_alloc_default_stride_for_symbolic_shape` |
-| TC-OP-DMA-AF-002 | `alloc` 显式 stride | 显式 `stride` 被正确保留到返回 `Memory` | `test_alloc_preserves_explicit_stride` |
-| TC-OP-DMA-AF-003 | `alloc` 非法 shape/stride | 非法 `shape` 或 rank/stride 不一致时报错 | `test_alloc_invalid_shape_or_stride` |
-| TC-OP-DMA-AF-004 | `free` 基础释放 | `free` 接受 `Memory` 并返回 `None` | `test_free_returns_none` |
-| TC-OP-DMA-AF-005 | `free` 类型错误 | 非 `Memory` 输入触发 `TypeError` | `test_free_type_error` |
-| TC-OP-DMA-AF-006 | `alloc` 类型错误 | `dtype/space` 类型不合法触发错误 | `test_alloc_invalid_dtype_or_space` |
-| TC-OP-DMA-001 | `copy` 目标空间 | `copy` 返回新 `Memory`，仅 `space` 被覆盖 | `test_copy_success` |
-| TC-OP-DMA-002 | `copy` 类型错误 | `source` 或 `space` 类型非法时报错 | `test_copy_type_error` |
-| TC-OP-DMA-003 | `load` 结果空间 | `load` 返回结果块并切换到目标空间 | `test_load_result_space` |
-| TC-OP-DMA-004 | `slice` 结果形状 | `slice` 返回块的 `shape` 等于 `sizes` | `test_slice_result_shape` |
-| TC-OP-DMA-005 | `store` 大小校验 | `source.shape` 与写回大小不一致时报错 | `test_store_size_mismatch` |
-| TC-OP-DMA-006 | `deslice` 大小校验 | `source.shape` 与回写区域大小不一致时报错 | `test_deslice_size_mismatch` |
-| TC-OP-DMA-007 | 索引长度约束 | `offsets/sizes/strides` 长度与 rank 不一致时报错 | `test_dma_index_rank_mismatch` |
-| TC-OP-DMA-008 | stride 边界 | 非单位 stride 需进行边界校验 | `test_dma_non_unit_stride_checked` |
-| TC-OP-DMA-009 | 类型错误 | 非 `Memory` 输入触发 `TypeError` | `test_dma_type_error` |
-| TC-OP-DMA-010 | `copy` 规格继承 | `copy` 继承 `shape/stride/format` | `test_copy_preserves_spec` |
-| TC-OP-DMA-011 | `cast` 基础转换 | `cast` 返回相同 `shape/stride/space`、新 `dtype` 的 `Memory` | `test_cast_changes_dtype` |
-| TC-OP-DMA-012 | `cast` 非法 dtype | 非法目标 `dtype` 触发 `TypeError` | `test_cast_invalid_dtype` |
-| TC-OP-DMA-013 | `cast` 不支持的转换 | 不支持的转换路径显式报错 | `test_cast_unsupported_conversion` |
-| TC-OP-DMA-014 | `view` 子视图基础语义 | `view` 返回 `shape == size` 的 `Memory` | `test_view_subview_returns_memory` |
-| TC-OP-DMA-015 | `view` 规格继承 | `view` 返回 `dtype/space/format/stride` 继承 `source` | `test_view_inherits_source_memoryspec` |
-| TC-OP-DMA-016 | `view` 边界校验 | `view` 在静态场景下对 `offset + (size - 1) * stride` 执行边界检查 | `test_view_bounds_check` |
-| TC-OP-DMA-017 | `flatten` 连续布局 | 连续布局下 `flatten` 返回一维 `shape` 与 `stride=[1]` | `test_flatten_contiguous` |
-| TC-OP-DMA-018 | `flatten` 非连续布局 | 非连续布局触发错误 | `test_flatten_non_contiguous_rejected` |
-| TC-OP-DMA-019 | `reshape` 基础变换 | `reshape` 返回新 `Memory` 且 `dtype/space/format` 继承 | `test_reshape_returns_memory` |
-| TC-OP-DMA-020 | `reshape` 连续布局 | 连续布局下 `reshape` 生成默认步幅 | `test_reshape_default_stride_contiguous` |
-| TC-OP-DMA-021 | `reshape` 非法参数 | 非法 `shape` 或非连续布局触发错误 | `test_reshape_invalid_shape_or_stride` |
-| TC-OP-DMA-022 | `cast` 空间覆盖 | `memoryspace` 覆盖结果 `space` | `test_cast_overrides_space` |
-| TC-OP-DMA-023 | `load` 空间类型错误 | `space` 类型不合法触发 `TypeError` | `test_load_invalid_space_type` |
-| TC-OP-DMA-024 | `load` sizes 正长度 | `sizes` 包含非正维度触发错误 | `test_dma_invalid_sizes` |
-| TC-OP-DMA-025 | `store` dtype mismatch | `source/target` dtype 不一致触发错误 | `test_store_dtype_mismatch` |
-| TC-OP-DMA-026 | `store` 基础写回 | 合法写回返回 `None` | `test_store_success` |
-| TC-OP-DMA-027 | `cast` 支持转换 | 支持同 dtype 或整数类型间转换 | `test_cast_supported_conversions` |
-| TC-OP-DMA-028 | `view` 非法参数 | `offset/size/stride` rank 不一致、负 offset 或非正 stride 显式报错 | `test_view_invalid_offset_size_stride` |
+| 用例 ID | 测试点 | 说明 | 建议测试 | 测试文件 |
+| --- | --- | --- | --- | --- |
+| TC-OP-DMA-AF-001 | `alloc` 基础分配 | 返回带指定 `shape/dtype/space` 的 `Memory` | `test_alloc_returns_memory` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-AF-007 | `alloc` 默认 space/stride | 未提供 `space` 时默认 `MemorySpace.GM`，未提供 `stride` 时按连续布局生成默认 stride | `test_alloc_default_stride_for_symbolic_shape` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-AF-002 | `alloc` 显式 stride | 显式 `stride` 被正确保留到返回 `Memory` | `test_alloc_preserves_explicit_stride` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-AF-003 | `alloc` 非法 shape/stride | 非法 `shape` 或 rank/stride 不一致时报错 | `test_alloc_invalid_shape_or_stride` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-AF-004 | `free` 基础释放 | `free` 接受 `Memory` 并返回 `None` | `test_free_returns_none` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-AF-005 | `free` 类型错误 | 非 `Memory` 输入触发 `TypeError` | `test_free_type_error` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-AF-006 | `alloc` 类型错误 | `dtype/space` 类型不合法触发错误 | `test_alloc_invalid_dtype_or_space` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-001 | `copy` 目标空间 | `copy` 返回新 `Memory`，仅 `space` 被覆盖 | `test_copy_success` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-002 | `copy` 类型错误 | `source` 或 `space` 类型非法时报错 | `test_copy_type_error` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-003 | `load` 结果空间 | `load` 返回结果块并切换到目标空间 | `test_load_result_space` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-004 | `slice` 结果形状 | `slice` 返回块的 `shape` 等于 `sizes` | `test_slice_result_shape` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-005 | `store` 大小校验 | `source.shape` 与写回大小不一致时报错 | `test_store_size_mismatch` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-006 | `deslice` 大小校验 | `source.shape` 与回写区域大小不一致时报错 | `test_deslice_size_mismatch` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-007 | 索引长度约束 | `offsets/sizes/strides` 长度与 rank 不一致时报错 | `test_dma_index_rank_mismatch` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-008 | stride 边界 | 非单位 stride 需进行边界校验 | `test_dma_non_unit_stride_checked` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-009 | 类型错误 | 非 `Memory` 输入触发 `TypeError` | `test_dma_type_error` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-010 | `copy` 规格继承 | `copy` 继承 `shape/stride/format` | `test_copy_preserves_spec` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-011 | `cast` 基础转换 | `cast` 返回相同 `shape/stride/space`、新 `dtype` 的 `Memory` | `test_cast_changes_dtype` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-012 | `cast` 非法 dtype | 非法目标 `dtype` 触发 `TypeError` | `test_cast_invalid_dtype` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-013 | `cast` 不支持的转换 | 不支持的转换路径显式报错 | `test_cast_unsupported_conversion` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-014 | `view` 子视图基础语义 | `view` 返回 `shape == size` 的 `Memory` | `test_view_subview_returns_memory` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-015 | `view` 规格继承 | `view` 返回 `dtype/space/format/stride` 继承 `source` | `test_view_inherits_source_memoryspec` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-016 | `view` 边界校验 | `view` 在静态场景下对 `offset + (size - 1) * stride` 执行边界检查 | `test_view_bounds_check` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-017 | `flatten` 连续布局 | 连续布局下 `flatten` 返回一维 `shape` 与 `stride=[1]` | `test_flatten_contiguous` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-018 | `flatten` 非连续布局 | 非连续布局触发错误 | `test_flatten_non_contiguous_rejected` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-019 | `reshape` 基础变换 | `reshape` 返回新 `Memory` 且 `dtype/space/format` 继承 | `test_reshape_returns_memory` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-020 | `reshape` 连续布局 | 连续布局下 `reshape` 生成默认步幅 | `test_reshape_default_stride_contiguous` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-021 | `reshape` 非法参数 | 非法 `shape` 或非连续布局触发错误 | `test_reshape_invalid_shape_or_stride` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-022 | `cast` 空间覆盖 | `memoryspace` 覆盖结果 `space` | `test_cast_overrides_space` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-023 | `load` 空间类型错误 | `space` 类型不合法触发 `TypeError` | `test_load_invalid_space_type` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-024 | `load` sizes 正长度 | `sizes` 包含非正维度触发错误 | `test_dma_invalid_sizes` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-025 | `store/deslice` dtype mismatch | `source/target` dtype 不一致触发 `TypeError` | `test_store_dtype_mismatch` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-026 | `store` 基础写回 | 合法写回返回 `None` | `test_store_success` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-027 | `cast` 支持转换 | 支持同 dtype 或整数类型间转换 | `test_cast_supported_conversions` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-028 | `view` 非法参数 | `offset/size/stride` rank 不一致、负 offset 或非正 stride 显式报错 | `test_view_invalid_offset_size_stride` | `test/operation/test_operation_dma.py` |

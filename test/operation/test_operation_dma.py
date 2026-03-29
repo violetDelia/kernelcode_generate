@@ -295,11 +295,12 @@ def test_store_size_mismatch() -> None:
 
 
 # TC-OP-DMA-025
+# TC-OP-DMA-025
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
 # 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
-# 测试目的: 验证 store dtype mismatch 触发 TypeError。
+# 测试目的: 验证 store/deslice dtype mismatch 触发 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_store_dtype_mismatch
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -309,6 +310,8 @@ def test_store_dtype_mismatch() -> None:
     dst = Memory(["M", "N"], NumericType.Float16)
     with pytest.raises(TypeError):
         store(src, dst, offsets=[0, 0], sizes=[16, 16], strides=[1, 1])
+    with pytest.raises(TypeError):
+        deslice(src, dst, offsets=[0, 0], sizes=[16, 16], strides=[1, 1])
 
 
 # TC-OP-DMA-026

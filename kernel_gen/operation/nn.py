@@ -337,7 +337,7 @@ def _ensure_memory_operand(lhs: object, rhs: object) -> None:
     """校验至少一侧为 Memory。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 仅允许 Memory 或与 Memory 组合的二元运算。
@@ -521,7 +521,7 @@ def _infer_broadcast_shape(lhs: SymbolShape, rhs: SymbolShape) -> SymbolShape:
 
     功能说明:
     - 按尾维对齐规则推导共同目标 shape。
-    - 仅允许 singleton dim 扩张。
+    - 仅允许 singleton dim 扩张，"?" 仅与 "?" 兼容。
 
     使用示例:
     - _infer_broadcast_shape(SymbolShape([1, "B"]), SymbolShape(["A", "B"]))
@@ -534,27 +534,12 @@ def _infer_broadcast_shape(lhs: SymbolShape, rhs: SymbolShape) -> SymbolShape:
     lhs_dims = lhs.get_values()
     rhs_dims = rhs.get_values()
     max_rank = max(len(lhs_dims), len(rhs_dims))
-    result: list[object] = []
+    result_reversed: list[int | str] = []
     for index in range(1, max_rank + 1):
-        lhs_dim = lhs_dims[-index] if index <= len(lhs_dims) else None
-        rhs_dim = rhs_dims[-index] if index <= len(rhs_dims) else None
-        if lhs_dim is None:
-            result.insert(0, rhs_dim)
-            continue
-        if rhs_dim is None:
-            result.insert(0, lhs_dim)
-            continue
-        if lhs_dim == rhs_dim:
-            result.insert(0, lhs_dim)
-            continue
-        if lhs_dim == 1:
-            result.insert(0, rhs_dim)
-            continue
-        if rhs_dim == 1:
-            result.insert(0, lhs_dim)
-            continue
-        raise ValueError("broadcast dimension mismatch")
-    return SymbolShape(result)
+        lhs_dim = lhs_dims[-index] if index <= len(lhs_dims) else 1
+        rhs_dim = rhs_dims[-index] if index <= len(rhs_dims) else 1
+        result_reversed.append(_merge_broadcast_dim(lhs_dim, rhs_dim))
+    return SymbolShape(list(reversed(result_reversed)))
 
 
 def _broadcast_memory_pair(lhs: Memory, rhs: Memory) -> tuple[Memory, Memory]:
@@ -1432,6 +1417,7 @@ def broadcast(value: object, target: object) -> Memory:
 
     功能说明:
     - 按尾维对齐规则扩张 singleton dim。
+    - "?" 维度仅与 "?" 兼容。
     - 返回结果在 shape/dtype/space/stride/format 上与 target 完全一致。
 
     使用示例:
@@ -1456,6 +1442,8 @@ def broadcast(value: object, target: object) -> Memory:
         if input_dim == target_dim:
             continue
         if input_dim == 1:
+            if target_dim == "?":
+                raise ValueError("broadcast dimension mismatch")
             continue
         raise ValueError("broadcast dimension mismatch")
 

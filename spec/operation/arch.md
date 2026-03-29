@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`咯咯咯`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/operation/arch.md`](../../spec/operation/arch.md)
 - `功能实现`：[`kernel_gen/operation/arch.py`](../../kernel_gen/operation/arch.py)
 - `test`：[`test/operation/test_operation_arch.py`](../../test/operation/test_operation_arch.py)
@@ -69,6 +69,10 @@ bid = get_block_id()
 - operation 层返回值语义应表现为 `SymbolDim` 风格的执行维度标量，不得退化为 Python `int` 常量或其他标量封装。
 - 公开 helper 不接受 axis、device 或 rank 参数。
 
+非法输入：
+
+- 传入任何参数必须抛出 `TypeError`。
+
 返回与限制：
 
 - 返回类型：`SymbolDim`
@@ -95,6 +99,10 @@ bnum = get_block_num()
 
 - operation 层返回值语义应表现为 `SymbolDim` 风格标量。
 - 不接受额外配置参数。
+
+非法输入：
+
+- 传入任何参数必须抛出 `TypeError`。
 
 返回与限制：
 
@@ -123,6 +131,10 @@ tid = get_thread_id()
 - operation 层返回值语义应表现为 `SymbolDim` 风格标量。
 - 不接受 axis、warp 或其他附加参数。
 
+非法输入：
+
+- 传入任何参数必须抛出 `TypeError`。
+
 返回与限制：
 
 - 返回类型：`SymbolDim`
@@ -149,6 +161,10 @@ tnum = get_thread_num()
 
 - operation 层返回值语义应表现为 `SymbolDim` 风格标量。
 - 不接受额外配置参数。
+
+非法输入：
+
+- 传入任何参数必须抛出 `TypeError`。
 
 返回与限制：
 
@@ -177,6 +193,10 @@ stid = get_subthread_id()
 - operation 层返回值语义应表现为 `SymbolDim` 风格标量。
 - 不接受 lane、rank 或其他附加参数。
 
+非法输入：
+
+- 传入任何参数必须抛出 `TypeError`。
+
 返回与限制：
 
 - 返回类型：`SymbolDim`
@@ -203,6 +223,10 @@ stnum = get_subthread_num()
 
 - operation 层返回值语义应表现为 `SymbolDim` 风格标量。
 - 不接受额外配置参数。
+
+非法输入：
+
+- 传入任何参数必须抛出 `TypeError`。
 
 返回与限制：
 
@@ -234,6 +258,11 @@ smem = get_dynamic_memory(MemorySpace.SM)
 - 输入若为 `MemorySpace.GM`，必须抛出 `ValueError`。
 - 返回结果的公开语义必须是 `shape=[?]`、`stride=[1]`、`dtype=NumericType.Int8`、`space=<输入空间>` 的一维动态字节缓冲。
 - operation 层不得公开承诺容量、对齐或多维 view 语义；这些约束由后续 DMA/view helper 单独承担。
+
+非法输入：
+
+- `space` 不是 `MemorySpace` 时必须抛出 `TypeError`。
+- `space` 为 `MemorySpace.GM` 或不在允许列表内时必须抛出 `ValueError`。
 
 返回与限制：
 
@@ -274,6 +303,12 @@ launch_kernel("my_kernel", SymbolDim("GRID_X"), 128, 4)
 - 当输入为 `SymbolDim` 时，operation 层只保留符号语义，不要求在 Python 运行期求值。
 - operation 层 helper 只描述启动请求，不负责真正执行 kernel，也不返回事件、句柄或状态值。
 
+非法输入：
+
+- 缺失必填参数、存在额外位置参数或未知关键字参数时必须抛出 `TypeError`。
+- `name` 为空字符串时必须抛出 `ValueError`。
+- `block/thread/subthread` 不是 `int|SymbolDim` 或静态值 `<= 0` 时必须抛出 `TypeError`/`ValueError`。
+
 返回与限制：
 
 - 返回类型：`None`
@@ -290,16 +325,19 @@ launch_kernel("my_kernel", SymbolDim("GRID_X"), 128, 4)
   - 验证 `launch_kernel(name, block, thread, subthread)` 的输入类型、非空名称与静态正整数约束。
   - 验证 `launch_kernel` 的参数列表/顺序/必填与默认值语义：仅允许 `(name, block, thread, subthread)` 四个参数，不允许缺参、多参与未知关键字。
   - 验证 operation helper 到 `arch dialect` 的映射边界清晰，不引入新的方言或非 `arch` lowering 路径。
-- 功能与用例清单：
-  - `TC-OP-ARCH-001`：`get_block_id()` 返回 `SymbolDim` 风格 block 索引语义，并映射 `TC-ARCH-001`。
-  - `TC-OP-ARCH-002`：`get_block_num()` 返回 `SymbolDim` 风格 block 数量语义，并映射 `TC-ARCH-002`。
-  - `TC-OP-ARCH-003`：`get_thread_id()` 返回 `SymbolDim` 风格 thread 索引语义，并映射 `TC-ARCH-003`。
-  - `TC-OP-ARCH-004`：`get_thread_num()` 返回 `SymbolDim` 风格 thread 数量语义，并映射 `TC-ARCH-004`。
-  - `TC-OP-ARCH-005`：`get_subthread_id()` 返回 `SymbolDim` 风格 subthread 索引语义，并映射 `TC-ARCH-005`。
-  - `TC-OP-ARCH-006`：`get_subthread_num()` 返回 `SymbolDim` 风格 subthread 数量语义，并映射 `TC-ARCH-006`。
-  - `TC-OP-ARCH-007`：`get_dynamic_memory(MemorySpace.SM)` 返回 `shape=[?]`、`stride=[1]`、`dtype=NumericType.Int8`、`space=MemorySpace.SM` 的动态内存语义，并映射 `TC-ARCH-007`。
-  - `TC-OP-ARCH-008`：`get_dynamic_memory(...)` 对非法空间或非法类型报错，并覆盖 `MemorySpace.GM` 错误路径；对应 `TC-ARCH-008` 的方言边界。
-  - `TC-OP-ARCH-009`：`launch_kernel("my_kernel", block, thread, subthread)` 接受合法 `int | SymbolDim` 输入并返回 `None`，对应 `TC-ARCH-009`。
-  - `TC-OP-ARCH-010`：`launch_kernel(...)` 对空名称、非法类型、静态 `<= 0` 的规模输入报错，并对应 `TC-ARCH-010`。
-  - `TC-OP-ARCH-011`：`launch_kernel` 调用签名固定为 `(name, block, thread, subthread)`，四参均必填且无默认值；缺参/多参/未知关键字必须在调用边界报 `TypeError`。映射测试：`test_launch_kernel_call_signature_errors`（实现阶段补齐）。
-  - `TC-OP-ARCH-012`：`launch_kernel` 关键字调用仅接受 `name/block/thread/subthread` 四个参数名，语义与位置调用一致。映射测试：`test_launch_kernel_keyword_call_success`（实现阶段补齐）。
+### 功能与用例清单
+
+| 用例 ID | 约束点 | 对应测试 | 测试文件 |
+| --- | --- | --- | --- |
+| TC-OP-ARCH-001 | `get_block_id()` 返回 `SymbolDim` 风格 block 索引语义，并映射 `TC-ARCH-001` | `test_get_block_id_returns_symbol_dim` | `test/operation/test_operation_arch.py` |
+| TC-OP-ARCH-002 | `get_block_num()` 返回 `SymbolDim` 风格 block 数量语义，并映射 `TC-ARCH-002` | `test_get_block_num_returns_symbol_dim` | `test/operation/test_operation_arch.py` |
+| TC-OP-ARCH-003 | `get_thread_id()` 返回 `SymbolDim` 风格 thread 索引语义，并映射 `TC-ARCH-003` | `test_get_thread_id_returns_symbol_dim` | `test/operation/test_operation_arch.py` |
+| TC-OP-ARCH-004 | `get_thread_num()` 返回 `SymbolDim` 风格 thread 数量语义，并映射 `TC-ARCH-004` | `test_get_thread_num_returns_symbol_dim` | `test/operation/test_operation_arch.py` |
+| TC-OP-ARCH-005 | `get_subthread_id()` 返回 `SymbolDim` 风格 subthread 索引语义，并映射 `TC-ARCH-005` | `test_get_subthread_id_returns_symbol_dim` | `test/operation/test_operation_arch.py` |
+| TC-OP-ARCH-006 | `get_subthread_num()` 返回 `SymbolDim` 风格 subthread 数量语义，并映射 `TC-ARCH-006` | `test_get_subthread_num_returns_symbol_dim` | `test/operation/test_operation_arch.py` |
+| TC-OP-ARCH-007 | `get_dynamic_memory(MemorySpace.SM)` 返回 `shape=[?]`、`stride=[1]`、`dtype=NumericType.Int8`、`space=MemorySpace.SM` 的动态内存语义，并映射 `TC-ARCH-007` | `test_get_dynamic_memory_returns_dynamic_int8_memory` | `test/operation/test_operation_arch.py` |
+| TC-OP-ARCH-008 | `get_dynamic_memory(...)` 对非法空间或非法类型报错，并覆盖 `MemorySpace.GM` 错误路径；对应 `TC-ARCH-008` 的方言边界 | `test_get_dynamic_memory_rejects_invalid_space` | `test/operation/test_operation_arch.py` |
+| TC-OP-ARCH-009 | `launch_kernel("my_kernel", block, thread, subthread)` 接受合法 `int | SymbolDim` 输入并返回 `None`，对应 `TC-ARCH-009` | `test_launch_kernel_accepts_valid_extents` | `test/operation/test_operation_arch.py` |
+| TC-OP-ARCH-010 | `launch_kernel(...)` 对空名称、非法类型、静态 `<= 0` 的规模输入报错，并对应 `TC-ARCH-010` | `test_launch_kernel_rejects_invalid_arguments` | `test/operation/test_operation_arch.py` |
+| TC-OP-ARCH-011 | `launch_kernel` 调用签名固定为 `(name, block, thread, subthread)`，四参均必填且无默认值；缺参/多参/未知关键字必须在调用边界报 `TypeError` | `test_launch_kernel_call_signature_errors` | `test/operation/test_operation_arch.py` |
+| TC-OP-ARCH-012 | `launch_kernel` 关键字调用仅接受 `name/block/thread/subthread` 四个参数名，语义与位置调用一致 | `test_launch_kernel_keyword_call_success` | `test/operation/test_operation_arch.py` |
