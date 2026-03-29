@@ -73,6 +73,7 @@ from kernel_gen.dialect.nn import (
     NnMemorySpaceAttr,
     NnMemoryType,
     NnNeOp,
+    NnSubOp,
     NnTrueDivOp,
 )
 from kernel_gen.dialect.symbol import (
@@ -2632,7 +2633,7 @@ def test_unknown_name_reports_diagnostics() -> None:
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_lowering_failure_reports_diagnostics() -> None:
     def bad(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
-        return x + 1
+        return x - 1
 
     with pytest.raises(AstVisitorError) as exc_info:
         build_func_op(bad, _tensor_arg([2, 2]))
@@ -3624,10 +3625,12 @@ def test_tensor_binary_prepend_broadcast_lowering() -> None:
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_tensor_truediv_dtype_promotion_lowering() -> None:
+    # 功能说明: 构造 f32 / i32 的 truediv 场景，验证 lowering 后按 promotion 输出 f32。
+    # 使用示例: 配合 build_func_op(truediv, lhs_memory, rhs_memory) 生成目标 IR。
     def truediv(
         x: "Tensor[f32, 2, 2]",
         y: "Tensor[i32, 2, 2]",
-    ) -> "Tensor[i32, 2, 2]":
+    ) -> "Tensor[f32, 2, 2]":
         return x / y
 
     lhs_memory = Memory([2, 2], NumericType.Float32)
@@ -3637,7 +3640,7 @@ def test_tensor_truediv_dtype_promotion_lowering() -> None:
     div_ops = [op for op in func_op.body.block.ops if isinstance(op, NnTrueDivOp)]
     assert len(cast_ops) == 1
     assert len(div_ops) == 1
-    expected_type = _memory_to_nn_type(Memory([2, 2], NumericType.Int32))
+    expected_type = _memory_to_nn_type(Memory([2, 2], NumericType.Float32))
     assert cast_ops[0].result.type == expected_type
     assert div_ops[0].result.type == expected_type
 
@@ -3756,6 +3759,35 @@ def test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast() -> None:
     assert len(return_ops) == 1
     assert cast_ops[0].result.type == expected_type
     assert sub_ops[0].result.type == expected_type
+    assert return_ops[0].arguments[0].type == expected_type
+
+
+# EMIT-033
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 build_func_op 支持 nn.add 的 memory+const lowering。
+# 测试目的: 锁定 AST visitor 链路对 tensor + const 的 nn.add 发射，并确保无需额外 dma.cast 时直接复用 memory dtype。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_lowers_nn_add_memory_const_without_dma_cast
+# 对应功能实现文件路径: kernel_gen/dsl/ast_visitor.py, kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_lowers_nn_add_memory_const_without_dma_cast() -> None:
+    def add(lhs: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return lhs + 1
+
+    lhs_memory = Memory([2, 2], NumericType.Float32)
+    expected_type = _memory_to_nn_type(lhs_memory)
+
+    func_op = build_func_op(add, lhs_memory)
+    cast_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaCastOp)]
+    add_ops = [op for op in func_op.body.block.ops if isinstance(op, NnAddOp)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
+
+    assert len(cast_ops) == 0
+    assert len(add_ops) == 1
+    assert len(return_ops) == 1
+    assert isinstance(add_ops[0].rhs.owner, arith.SIToFPOp)
+    assert add_ops[0].result.type == expected_type
     assert return_ops[0].arguments[0].type == expected_type
 
 # AST-009
@@ -4003,8 +4035,17 @@ def test_emit_mlir_infer_expr_type_branches() -> None:
     memory = Memory([2, 2], NumericType.Float32)
     tensor = TensorAST(name="x", memory=memory, location=None)
     type_map = {_expr_key(tensor): _memory_to_nn_type(memory)}
+    int_memory = Memory([2, 2], NumericType.Int32)
+    int_tensor = TensorAST(name="xi", memory=int_memory, location=None)
+    int_tensor_type = _memory_to_nn_type(int_memory)
+    type_map[_expr_key(int_tensor)] = int_tensor_type
+    half_memory = Memory([2, 2], NumericType.Float16)
+    half_tensor = TensorAST(name="xh", memory=half_memory, location=None)
+    half_tensor_type = _memory_to_nn_type(half_memory)
+    type_map[_expr_key(half_tensor)] = half_tensor_type
+    float_const = ConstAST(1.5)
 
-    assert _infer_expr_type(ConstAST(1.5), type_map) == f32
+    assert _infer_expr_type(float_const, type_map) == f32
     with pytest.raises(_LoweringError, match="Unsupported constant type"):
         _infer_expr_type(ConstAST("bad"), type_map)
 
@@ -4044,13 +4085,35 @@ def test_emit_mlir_infer_expr_type_branches() -> None:
     with pytest.raises(_LoweringError, match="Unsupported symbol compare op"):
         _infer_expr_type(CompareExprAST(op="gt", lhs=sym_lhs, rhs=sym_rhs), type_map)
 
-    type_map[_expr_key(sym_lhs)] = i32
-    type_map[_expr_key(sym_rhs)] = i32
-    with pytest.raises(_LoweringError, match="Binary op operands must have nn.memory type"):
-        _infer_expr_type(BinaryExprAST(op="add", lhs=sym_lhs, rhs=sym_rhs), type_map)
+    mixed_type_map = {
+        _expr_key(int_tensor): int_tensor_type,
+        _expr_key(half_tensor): half_tensor_type,
+    }
+    mixed_const_type = _infer_expr_type(BinaryExprAST(op="add", lhs=int_tensor, rhs=float_const, location=None), mixed_type_map)
+    assert isinstance(mixed_const_type, NnMemoryType)
+    assert mixed_const_type.shape == int_tensor_type.shape
+    assert mixed_const_type.stride == int_tensor_type.stride
+    assert mixed_const_type.element_type == f32
 
+    mixed_type_map[_expr_key(sym_lhs)] = SymbolValueType.from_expr("K")
+    mixed_symbol_expr = BinaryExprAST(op="add", lhs=half_tensor, rhs=sym_lhs, location=None)
+    mixed_symbol_type = _infer_expr_type(mixed_symbol_expr, mixed_type_map)
+    assert isinstance(mixed_symbol_type, NnMemoryType)
+    assert mixed_symbol_type.shape == half_tensor_type.shape
+    assert mixed_symbol_type.stride == half_tensor_type.stride
+    assert mixed_symbol_type.element_type == half_tensor_type.element_type
+
+    scalar_only_type_map = {_expr_key(sym_lhs): i32, _expr_key(sym_rhs): i32}
+    with pytest.raises(_LoweringError, match="nn.add requires at least one nn.memory operand"):
+        _infer_expr_type(BinaryExprAST(op="add", lhs=sym_lhs, rhs=sym_rhs), scalar_only_type_map)
+
+    invalid_scalar_type_map = {_expr_key(int_tensor): int_tensor_type, _expr_key(sym_lhs): i1}
+    with pytest.raises(_LoweringError, match="nn.add scalar element_type must be i32/f16/f32 or symbol.int"):
+        _infer_expr_type(BinaryExprAST(op="add", lhs=int_tensor, rhs=sym_lhs, location=None), invalid_scalar_type_map)
+
+    compare_type_map = {_expr_key(sym_lhs): i32, _expr_key(sym_rhs): i32}
     with pytest.raises(_LoweringError, match="Compare op operands must have nn.memory type"):
-        _infer_expr_type(CompareExprAST(op="eq", lhs=sym_lhs, rhs=sym_rhs), type_map)
+        _infer_expr_type(CompareExprAST(op="eq", lhs=sym_lhs, rhs=sym_rhs), compare_type_map)
 
     lhs_type = _memory_to_nn_type(Memory([2, 1], NumericType.Float32))
     with pytest.raises(_LoweringError, match="Implicit broadcast dimension mismatch"):
@@ -4119,6 +4182,48 @@ def test_emit_mlir_lower_expr_branches() -> None:
     ctx.types[_expr_key(bad_symbol)] = i32
     with pytest.raises(_LoweringError, match="Symbol binary op result must be !symbol.int"):
         _lower_expr(bad_symbol, ctx)
+
+    mixed_int_memory = Memory([2, 2], NumericType.Int32)
+    mixed_int_tensor = TensorAST(name="xi", memory=mixed_int_memory, location=None)
+    mixed_int_type = _memory_to_nn_type(mixed_int_memory)
+    mixed_block = Block(arg_types=[mixed_int_type])
+    mixed_ctx = EmitContext(builder=mixed_block, symbols={"xi": mixed_block.args[0]}, types={})
+    mixed_ctx._set_cache(_expr_key(mixed_int_tensor), mixed_block.args[0])
+    mixed_ctx.types[_expr_key(mixed_int_tensor)] = mixed_int_type
+    mixed_const_expr = BinaryExprAST(op="add", lhs=mixed_int_tensor, rhs=ConstAST(1.5), location=None)
+    mixed_const_value = _lower_expr(mixed_const_expr, mixed_ctx)
+    mixed_const_cast_ops = [op for op in mixed_block.ops if isinstance(op, DmaCastOp)]
+    mixed_const_add_ops = [op for op in mixed_block.ops if isinstance(op, NnAddOp)]
+    assert len(mixed_const_cast_ops) == 1
+    assert len(mixed_const_add_ops) == 1
+    assert mixed_const_value is mixed_const_add_ops[0].result
+    assert mixed_const_cast_ops[0].result.type == mixed_const_add_ops[0].result.type
+    assert mixed_const_add_ops[0].lhs is mixed_const_cast_ops[0].result
+    assert isinstance(mixed_const_add_ops[0].rhs.owner, arith.ConstantOp)
+
+    mixed_half_memory = Memory([2, 2], NumericType.Float16)
+    mixed_half_tensor = TensorAST(name="xh", memory=mixed_half_memory, location=None)
+    mixed_half_type = _memory_to_nn_type(mixed_half_memory)
+    mixed_symbol = ScalarArgAST("k", int, is_symbolic=True)
+    mixed_symbol_block = Block(arg_types=[mixed_half_type, SymbolValueType.from_expr("K")])
+    mixed_symbol_ctx = EmitContext(
+        builder=mixed_symbol_block,
+        symbols={"xh": mixed_symbol_block.args[0], "k": mixed_symbol_block.args[1]},
+        types={},
+    )
+    mixed_symbol_ctx._set_cache(_expr_key(mixed_half_tensor), mixed_symbol_block.args[0])
+    mixed_symbol_ctx._set_cache(_expr_key(mixed_symbol), mixed_symbol_block.args[1])
+    mixed_symbol_ctx.types[_expr_key(mixed_half_tensor)] = mixed_half_type
+    mixed_symbol_ctx.types[_expr_key(mixed_symbol)] = mixed_symbol_block.args[1].type
+    mixed_symbol_expr = BinaryExprAST(op="add", lhs=mixed_half_tensor, rhs=mixed_symbol, location=None)
+    mixed_symbol_value = _lower_expr(mixed_symbol_expr, mixed_symbol_ctx)
+    mixed_symbol_cast_ops = [op for op in mixed_symbol_block.ops if isinstance(op, arith.SIToFPOp)]
+    mixed_symbol_add_ops = [op for op in mixed_symbol_block.ops if isinstance(op, NnAddOp)]
+    assert len(mixed_symbol_cast_ops) == 1
+    assert len(mixed_symbol_add_ops) == 1
+    assert mixed_symbol_value is mixed_symbol_add_ops[0].result
+    assert mixed_symbol_add_ops[0].rhs is mixed_symbol_cast_ops[0].result
+    assert mixed_symbol_add_ops[0].result.type == mixed_half_type
 
     bad_binary = BinaryExprAST(op="mod", lhs=tensor, rhs=tensor)
     with pytest.raises(_LoweringError, match="Unsupported binary op"):

@@ -227,7 +227,7 @@ def _dtype_to_xdsl(dtype: NumericType, location: SourceLocation | None = None) -
     """将 NumericType 映射为 xdsl element type。
 
     创建者: 我不是牛马
-    最后一次更改: 我不是牛马
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 将 DSL NumericType 转为 nn.memory 的 element_type。
@@ -260,7 +260,7 @@ def _xdsl_to_dtype(element_type: Attribute, location: SourceLocation | None = No
     """将 xdsl element_type 还原为 NumericType。
 
     创建者: 我不是牛马
-    最后一次更改: 我不是牛马
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 支持 Float16/Float32/Int32/Bool 解析为 NumericType。
@@ -295,7 +295,7 @@ def _resolve_nn_arith_element_type(
     """解析 nn 算术 element_type 决议结果。
 
     创建者: 我不是牛马
-    最后一次更改: 我不是牛马
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 按 Memory 算术 dtype 决议规则选择目标 element_type。
@@ -319,6 +319,23 @@ def _resolve_nn_arith_element_type(
 
 
 def _build_stride(shape: list[int | str]) -> list[int | str]:
+    """根据 shape 列表构造默认连续内存 stride。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 按行主序从尾到头累计计算 stride。
+    - 遇到符号维时保留 `?`，避免在静态阶段做错误折叠。
+
+    使用示例:
+    - _build_stride([2, 3, 4]) -> [12, 4, 1]
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
     stride: list[int | str] = []
     acc = 1
     for dim in reversed(shape):
@@ -331,6 +348,23 @@ def _build_stride(shape: list[int | str]) -> list[int | str]:
 
 
 def _mul_symbol(dim: int | str, running: int | str) -> int | str:
+    """组合静态/符号维度乘法表达式。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 在 stride 与 numel 推导时合并 `int|str` 两类维度。
+    - 对乘以 1 的场景做最小化化简，其他情况保留字符串表达式。
+
+    使用示例:
+    - _mul_symbol("M", 4) -> "M*4"
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
     if isinstance(dim, int) and isinstance(running, int):
         return dim * running
     if isinstance(dim, int) and dim == 1:
@@ -341,6 +375,23 @@ def _mul_symbol(dim: int | str, running: int | str) -> int | str:
 
 
 def _build_default_stride_attrs(shape: Sequence[Attribute]) -> list[Attribute]:
+    """从 shape 属性列表生成默认 stride 属性列表。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 输入为 `IntAttr/StringAttr` 形式的 shape 属性。
+    - 输出连续布局 stride，并复用 `_mul_symbol` 处理符号维表达式。
+
+    使用示例:
+    - _build_default_stride_attrs([IntAttr(2), IntAttr(4)])
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
     stride_values: list[int | str] = []
     running: int | str = 1
     for dim in reversed(shape):
@@ -356,12 +407,46 @@ def _build_default_stride_attrs(shape: Sequence[Attribute]) -> list[Attribute]:
 
 
 def _dim_to_attr(value: int | str) -> object:
+    """将静态或符号维度值转换为 xDSL 属性。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - `int` 转为 `IntAttr`。
+    - `str` 转为 `StringAttr`，用于符号维与动态占位。
+
+    使用示例:
+    - _dim_to_attr("M")
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
     if isinstance(value, int):
         return IntAttr(value)
     return StringAttr(value)
 
 
 def _const_index(value: int, ctx: EmitContext) -> SSAValue:
+    """构造 `index` 常量 SSA 值。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 以 `arith.constant` 发射 `IndexType` 常量。
+    - 统一供 offset/shape/stride 等索引 operand 构造复用。
+
+    使用示例:
+    - _const_index(4, ctx)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
     attr = IntegerAttr(value, IndexType())
     op = arith.ConstantOp(attr)
     ctx.builder.add_op(op)
@@ -427,6 +512,23 @@ def _const_symbol_int(value: int, ctx: EmitContext, location: SourceLocation | N
 
 
 def _ensure_index_value(value: SSAValue, ctx: EmitContext, location: SourceLocation | None) -> SSAValue:
+    """确保索引 operand 为可接受的 `index` 或 `!symbol.int` 值。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - `!symbol.int` 与 `index` 直接复用。
+    - `i32` 等整数值通过 `arith.index_cast` 转成 `index`。
+
+    使用示例:
+    - _ensure_index_value(value, ctx, location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
     if isinstance(value.type, SymbolValueType):
         return value
     if isinstance(value.type, IndexType):
@@ -446,7 +548,7 @@ def _materialize_index_symbol_from_memory(
     """从上下文 memory 值中物化符号索引。
 
     创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 当 `ctx.symbols` 缺少目标符号时，尝试在已知 `nn.memory` 的 shape/stride 中查找同名符号。
@@ -483,6 +585,23 @@ def _materialize_index_symbol_from_memory(
 
 
 def _resolve_index_symbol(name: str, ctx: EmitContext, location: SourceLocation | None) -> SSAValue:
+    """解析索引表达式中的符号名引用。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 优先从 `ctx.symbols` 命中已有符号。
+    - 若缺失则尝试从已知 `nn.memory` 的 shape/stride 中物化同名符号。
+
+    使用示例:
+    - _resolve_index_symbol("M", ctx, location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
     if name not in ctx.symbols:
         materialized = _materialize_index_symbol_from_memory(name, ctx, location)
         if materialized is None:
@@ -562,6 +681,23 @@ def _resolve_index_symbol_product(expr: str, ctx: EmitContext, location: SourceL
 
 
 def _resolve_index_operand(expr: object, ctx: EmitContext, location: SourceLocation | None) -> SSAValue:
+    """将索引表达式 lowering 为 SSA operand。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 支持常量、symbol 名称、循环变量和显式字符串乘法表达式。
+    - 对非法输入保持统一的 index 诊断文案。
+
+    使用示例:
+    - _resolve_index_operand(ConstAST(2), ctx, location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
     if isinstance(expr, ConstAST):
         if isinstance(expr.value, int):
             return _const_index(expr.value, ctx)
@@ -583,6 +719,23 @@ def _resolve_index_operand(expr: object, ctx: EmitContext, location: SourceLocat
 
 
 def _get_loop_vars(ctx: EmitContext) -> dict[str, int]:
+    """读取并初始化上下文中的循环变量表。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 确保 `ctx.config["loop_vars"]` 始终存在且类型为 `dict`。
+    - 供索引解析阶段查询 `ForAST` 绑定的循环变量。
+
+    使用示例:
+    - loop_vars = _get_loop_vars(ctx)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
     if ctx.config is None:
         ctx.config = {}
     loop_vars = ctx.config.setdefault("loop_vars", {})
@@ -592,6 +745,23 @@ def _get_loop_vars(ctx: EmitContext) -> dict[str, int]:
 
 
 def _resolve_index_expr(expr: object, ctx: EmitContext) -> int | str:
+    """在静态解析阶段提取索引表达式的 `int|str` 形式。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 供 shape/stride 等类型推导路径复用。
+    - 支持常量、标量参数、循环变量与直接字面量。
+
+    使用示例:
+    - _resolve_index_expr(VarAST(name="i"), ctx)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
     if isinstance(expr, ConstAST):
         if isinstance(expr.value, (int, str)):
             return expr.value
@@ -616,6 +786,23 @@ def _build_index_attrs(
     default_value: int = 0,
     location: SourceLocation | None = None,
 ) -> list[SSAValue]:
+    """按 rank 构造索引 operand 列表。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 支持单值广播到整 rank，或校验显式索引列表长度。
+    - 默认值常用于 offset=0、stride=1 等场景补位。
+
+    使用示例:
+    - _build_index_attrs(None, 2, ctx, default_value=0)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
     if value is None:
         values = [default_value for _ in range(rank)]
     elif isinstance(value, (list, tuple)):
@@ -633,6 +820,23 @@ def _build_index_operands_from_layout(
     *,
     location: SourceLocation | None = None,
 ) -> list[SSAValue]:
+    """将 `ArrayAttr` 布局描述转换为索引 operand。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 接收由 `IntAttr/StringAttr` 组成的 shape/stride 布局属性。
+    - 逐项下沉为 `index` 或 `!symbol.int` SSA 值。
+
+    使用示例:
+    - _build_index_operands_from_layout(ArrayAttr([IntAttr(4)]), ctx)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
     values: list[object] = []
     for dim in layout.data:
         if isinstance(dim, IntAttr):
@@ -694,6 +898,23 @@ def _build_flatten_shape_operands(
 
 
 def _lower_loop_bound(expr: object, ctx: EmitContext) -> object:
+    """将 `for` 上下界表达式 lowering 为 SSA 值。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 支持常量、标量参数与循环变量引用。
+    - 不支持的表达式维持统一的 loop bound 诊断。
+
+    使用示例:
+    - _lower_loop_bound(ConstAST(8), ctx)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
     if isinstance(expr, ConstAST):
         return _lower_expr(expr, ctx)
     if isinstance(expr, (ScalarArgAST, VarAST)):
@@ -708,6 +929,23 @@ def _build_stride_attrs(
     *,
     location: SourceLocation | None = None,
 ) -> list[SSAValue]:
+    """构造 store/deslice 使用的 stride operand，并限制为单位步长。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 基于 `_build_index_attrs` 生成 stride operand。
+    - 当前仅允许全 1 stride，非单位步长统一报错。
+
+    使用示例:
+    - _build_stride_attrs(None, 2, ctx, location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
     stride = _build_index_attrs(value, rank, ctx, default_value=1, location=location)
     for entry in stride:
         if isinstance(entry.type, SymbolValueType):
@@ -730,13 +968,13 @@ def _resolve_static_index_expr(
     """解析类型推导阶段使用的索引表达式。
 
     创建者: OpenAI
-    最后一次更改: OpenAI
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 支持 `ConstAST`、`ScalarArgAST`、`VarAST` 以及直接的 `int|str`。
 
     使用示例:
-    - _resolve_static_index_expr(ScalarArgAST(name="n", value_type=int))
+    - _resolve_static_index_expr("N")
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
@@ -774,13 +1012,13 @@ def _build_static_index_list(
     """构造类型推导阶段使用的索引属性列表。
 
     创建者: OpenAI
-    最后一次更改: OpenAI
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 将静态或符号索引表达式转成 `IntAttr/StringAttr`。
 
     使用示例:
-    - _build_static_index_list([ScalarArgAST(name="n", value_type=int)], 1, default_value=1)
+    - _build_static_index_list([4, "N"], 2, default_value=1)
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
@@ -809,13 +1047,13 @@ def _build_static_index_attrs_exact(
     """按显式维度列表构造静态索引属性。
 
     创建者: OpenAI
-    最后一次更改: OpenAI
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 仅接受单个索引或显式索引序列，不使用默认补值。
 
     使用示例:
-    - _build_static_index_attrs_exact([ConstAST(4), ScalarArgAST(name="n", value_type=int)])
+    - _build_static_index_attrs_exact([ConstAST(4), "N"])
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
@@ -839,13 +1077,13 @@ def _build_index_operands_exact(
     """按显式维度列表构造 SSA 索引操作数。
 
     创建者: OpenAI
-    最后一次更改: OpenAI
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 仅接受单个索引或显式索引序列，不使用默认补值。
 
     使用示例:
-    - _build_index_operands_exact([ConstAST(4), ScalarArgAST(name="n", value_type=int)], ctx)
+    - _build_index_operands_exact([ConstAST(4), "N"], ctx)
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
@@ -866,13 +1104,45 @@ def _memory_type_from_parts(
     element_type: Attribute,
     space: NnMemorySpaceAttr,
 ) -> NnMemoryType:
-    """基于 shape/stride/element_type/space 组装内存类型。"""
+    """基于 shape/stride/element_type/space 组装 `NnMemoryType`。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 统一封装 `NnMemoryType` 的构造逻辑，避免重复写 `ArrayAttr(list(...))`。
+    - 保持 shape/stride/space 不变，仅组合目标 element_type。
+
+    使用示例:
+    - _memory_type_from_parts(shape, stride, f32, space)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
 
     return NnMemoryType(ArrayAttr(list(shape)), ArrayAttr(list(stride)), element_type, space)
 
 
 def _shape_numel_attr(shape: Sequence[Attribute]) -> Attribute:
-    """根据 shape 计算一维 flatten 结果的元素总数属性。"""
+    """根据 shape 计算 flatten 后的一维元素总数属性。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 全静态 shape 返回 `IntAttr(numel)`。
+    - 含符号维时返回折叠后的 `StringAttr` 符号表达式，动态未知时返回 `?`。
+
+    使用示例:
+    - _shape_numel_attr([IntAttr(2), StringAttr("N")])
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
 
     total_static = 1
     total_symbol: SymbolDim | None = None
@@ -903,7 +1173,7 @@ def _memory_space_from_ast(space: MemorySpace | None, fallback: NnMemorySpaceAtt
     """将 AST 中的 `MemorySpace` 映射为 nn dialect space attribute。
 
     创建者: OpenAI
-    最后一次更改: OpenAI
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 未显式指定时返回 fallback。
@@ -925,6 +1195,23 @@ def _memory_space_from_ast(space: MemorySpace | None, fallback: NnMemorySpaceAtt
 
 
 def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
+    """比较两个维度属性是否语义相等。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅比较 `IntAttr` 与 `StringAttr` 两类维度。
+    - 用于 broadcast 过程中判断维度是否可直接复用。
+
+    使用示例:
+    - _dims_equal(IntAttr(4), IntAttr(4)) -> True
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
     if isinstance(lhs, IntAttr) and isinstance(rhs, IntAttr):
         return lhs.data == rhs.data
     if isinstance(lhs, StringAttr) and isinstance(rhs, StringAttr):
@@ -937,6 +1224,23 @@ def _infer_broadcast_shape(
     rhs_shape: Sequence[Attribute],
     location: SourceLocation | None,
 ) -> list[Attribute]:
+    """推导两个 memory 参与隐式 broadcast 后的目标 shape。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 按 numpy 风格从尾维开始对齐比较。
+    - 支持 `1` 扩展和完全相等维度；其余不兼容情况直接报错。
+
+    使用示例:
+    - _infer_broadcast_shape([IntAttr(1), IntAttr(4)], [IntAttr(2), IntAttr(4)], None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
     max_rank = max(len(lhs_shape), len(rhs_shape))
     result: list[Attribute] = []
     for index in range(1, max_rank + 1):
@@ -972,6 +1276,23 @@ def _infer_broadcast_shape(
 
 
 def _build_broadcast_stride(shape: Sequence[Attribute]) -> list[Attribute]:
+    """为 broadcast 结果 shape 生成默认 stride。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 当前 broadcast 结果使用默认连续布局。
+    - 逻辑委托给 `_build_default_stride_attrs` 统一处理。
+
+    使用示例:
+    - _build_broadcast_stride([IntAttr(2), IntAttr(4)])
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
     return _build_default_stride_attrs(shape)
 
 
@@ -984,7 +1305,7 @@ def _infer_broadcast_memory_type(
     """推导二元 broadcast 目标 memory type。
 
     创建者: 我不是牛马
-    最后一次更改: 我不是牛马
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 依据隐式 broadcast 推导目标 shape 与 stride。
@@ -1021,7 +1342,7 @@ def _resolve_binary_element_type(
     """解析 nn 二元算术的 element_type 决议。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 对支持的 element_type 按固定优先级选择目标类型。
@@ -1057,6 +1378,71 @@ def _resolve_binary_element_type(
     return lhs_type if lhs_rank >= rhs_rank else rhs_type
 
 
+def _normalize_add_scalar_element_type(
+    scalar_type: Attribute,
+    location: SourceLocation | None,
+) -> Attribute:
+    """归一化 `nn.add` mixed memory+scalar/symbol 的标量 dtype。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 将 `!symbol.int` 统一视为 `i32` 参与 `nn.add` promotion。
+    - 仅接受 `i32/f16/f32` 与 `!symbol.int` 四类标量输入。
+
+    使用示例:
+    - _normalize_add_scalar_element_type(SymbolValueType.from_expr("K"), location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    if isinstance(scalar_type, SymbolValueType):
+        return i32
+    if scalar_type == i32 or isinstance(scalar_type, Float16Type) or scalar_type == f32:
+        return scalar_type
+    raise _LoweringError("nn.add scalar element_type must be i32/f16/f32 or symbol.int", location=location)
+
+
+def _infer_add_mixed_memory_type(
+    memory_type: NnMemoryType,
+    scalar_type: Attribute,
+    location: SourceLocation | None,
+) -> NnMemoryType:
+    """推导 `nn.add` mixed memory+scalar/symbol 的目标类型。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 结果 `shape/stride/space` 直接继承 memory operand。
+    - 标量侧按 `i32 < f16 < f32` 与 `!symbol.int -> i32` 规则参与 promotion。
+
+    使用示例:
+    - _infer_add_mixed_memory_type(memory_type, i32, location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    target_element_type = _resolve_binary_element_type(
+        memory_type.element_type,
+        _normalize_add_scalar_element_type(scalar_type, location),
+        location,
+    )
+    return _memory_type_from_parts(
+        memory_type.shape.data,
+        memory_type.stride.data,
+        target_element_type,
+        memory_type.space,
+    )
+
+
 def _infer_binary_memory_type(
     lhs_type: NnMemoryType,
     rhs_type: NnMemoryType,
@@ -1065,7 +1451,7 @@ def _infer_binary_memory_type(
     """推导 nn 二元算术的目标 nn.memory 类型。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 允许隐式 broadcast 推导共同目标 shape。
@@ -1093,6 +1479,23 @@ def _infer_binary_memory_type(
 
 
 def _memory_to_nn_type(memory: Memory, location: SourceLocation | None = None) -> NnMemoryType:
+    """将运行时 `Memory` 描述转换为 `NnMemoryType`。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 读取 `Memory` 的 shape/stride/dtype/space，并映射到 nn dialect 类型。
+    - 未显式提供 stride 时自动按连续布局补齐。
+
+    使用示例:
+    - _memory_to_nn_type(Memory([2, 2], NumericType.Float32))
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
     shape = memory.shape.get_values()
     stride_values = memory.stride.get_values() if memory.stride is not None else _build_stride(shape)
     shape_attr = ArrayAttr([_dim_to_attr(dim) for dim in shape])
@@ -1107,6 +1510,23 @@ def _build_dynamic_memory_type(
     space: MemorySpace,
     location: SourceLocation | None = None,
 ) -> NnMemoryType:
+    """构造 `arch.get_dynamic_memory` 返回的动态 memory 类型。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅允许 on-chip memory space。
+    - 返回 `shape=[?]`、`stride=[1]`、`element_type=i8` 的占位动态内存类型。
+
+    使用示例:
+    - _build_dynamic_memory_type(MemorySpace.LM, location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
     space_name = _DYNAMIC_MEMORY_SPACE_MAP.get(space)
     if space_name is None:
         raise _LoweringError("get_dynamic_memory space must be on-chip MemorySpace", location=location)
@@ -1119,6 +1539,23 @@ def _build_dynamic_memory_type(
 
 
 def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
+    """校验函数体中的 AST 语句是否属于当前 lowering 支持范围。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 拒绝空函数体。
+    - 遍历并检查每条语句的 AST 类型，提前在发射前给出统一诊断。
+
+    使用示例:
+    - _ensure_supported_statements(function_ast)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
     statements = function_ast.body.statements
     if not statements:
         raise _LoweringError("Function body is empty", location=function_ast.location)
@@ -1152,12 +1589,46 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
 
 
 def _expect_memory_value(value: object, location: SourceLocation | None) -> NnMemoryType:
+    """断言 operand/result 的类型为 `nn.memory`。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 统一校验 `value.type` 是否为 `NnMemoryType`。
+    - 校验成功时返回具体类型，便于调用方继续使用。
+
+    使用示例:
+    - value_type = _expect_memory_value(value, location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
     if not isinstance(value.type, NnMemoryType):
         raise _LoweringError("Operand must be nn.memory", location=location)
     return value.type
 
 
 def _expr_key(expr: object) -> int:
+    """为 AST 节点生成缓存键。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 当前直接使用 Python 对象 `id(expr)` 作为缓存键。
+    - 供 `ctx.cache` 与 `ctx.types` 在单次 lowering 流程中复用。
+
+    使用示例:
+    - key = _expr_key(expr)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
     return id(expr)
 
 
@@ -1166,6 +1637,24 @@ def _infer_expr_type(
     type_map: dict[int, object],
     runtime_values: dict[str, object] | None = None,
 ) -> object:
+    """推导表达式在 lowering 前的结果类型。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 统一处理常量、DMA、arch query、symbol 与 nn 二元表达式的类型推导。
+    - 对 `nn.add` mixed memory+const/symbol 路径执行 promotion，并在纯 scalar/symbol 输入时给出显式诊断。
+
+    使用示例:
+    - _infer_expr_type(BinaryExprAST(op="add", lhs=lhs, rhs=rhs), type_map)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
     expr_key = _expr_key(expr)
     if expr_key in type_map:
         return type_map[expr_key]
@@ -1319,6 +1808,18 @@ def _infer_expr_type(
             result_type = SymbolValueType.from_expr(build_public_symbol_expr(lhs_expr, rhs_expr, op_symbol))
             type_map[expr_key] = result_type
             return result_type
+        lhs_is_memory = isinstance(lhs_type, NnMemoryType)
+        rhs_is_memory = isinstance(rhs_type, NnMemoryType)
+        if expr.op == "add" and lhs_is_memory != rhs_is_memory:
+            memory_type = lhs_type if lhs_is_memory else rhs_type
+            scalar_type = rhs_type if lhs_is_memory else lhs_type
+            if not isinstance(memory_type, NnMemoryType):
+                raise _LoweringError("nn.add requires at least one nn.memory operand", location=expr.location)
+            result_type = _infer_add_mixed_memory_type(memory_type, scalar_type, expr.location)
+            type_map[expr_key] = result_type
+            return result_type
+        if expr.op == "add" and not lhs_is_memory and not rhs_is_memory:
+            raise _LoweringError("nn.add requires at least one nn.memory operand", location=expr.location)
         if not isinstance(lhs_type, NnMemoryType) or not isinstance(rhs_type, NnMemoryType):
             raise _LoweringError("Binary op operands must have nn.memory type", location=expr.location)
         if lhs_type == rhs_type:
@@ -1361,6 +1862,119 @@ def _infer_expr_type(
         return type_map[expr_key]
 
     raise _LoweringError("Unsupported expression for lowering", location=getattr(expr, "location", None))
+
+
+def _cast_add_scalar_operand(
+    value: SSAValue,
+    target_element_type: Attribute,
+    ctx: EmitContext,
+    location: SourceLocation | None,
+) -> SSAValue:
+    """将 `nn.add` mixed 路径中的标量 operand 转换到目标 dtype。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - `!symbol.int` 视为有符号整数，并在需要时 lowering 为浮点 cast。
+    - 仅生成满足 `nn.add` mixed promotion 所需的最少标量 cast。
+
+    使用示例:
+    - _cast_add_scalar_operand(value, f32, ctx, location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    source_type = value.type
+    _normalize_add_scalar_element_type(source_type, location)
+    if source_type == target_element_type:
+        return value
+
+    if isinstance(source_type, SymbolValueType) or source_type == i32:
+        if isinstance(target_element_type, Float16Type) or target_element_type == f32:
+            cast_op = arith.SIToFPOp(value, target_element_type)
+            ctx.builder.add_op(cast_op)
+            return cast_op.result
+        return value
+    if isinstance(source_type, Float16Type) and target_element_type == f32:
+        cast_op = arith.ExtFOp(value, target_element_type)
+        ctx.builder.add_op(cast_op)
+        return cast_op.result
+    if source_type == f32 and isinstance(target_element_type, Float16Type):
+        cast_op = arith.TruncFOp(value, target_element_type)
+        ctx.builder.add_op(cast_op)
+        return cast_op.result
+    raise _LoweringError("nn.add scalar element_type must be i32/f16/f32 or symbol.int", location=location)
+
+
+def _lower_mixed_add_expr(
+    expr: BinaryExprAST,
+    lhs: SSAValue,
+    rhs: SSAValue,
+    ctx: EmitContext,
+) -> SSAValue | None:
+    """lower `nn.add` 的 mixed memory+scalar/symbol 路径。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 保持 memory operand 的 `shape/stride/space`，并只在 memory dtype 落后于目标 dtype 时插入 `dma.cast`。
+    - 标量侧根据 promotion 结果插入最少 `arith` cast，最终发射单个 `nn.add`。
+
+    使用示例:
+    - _lower_mixed_add_expr(expr, lhs, rhs, ctx)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    lhs_type = getattr(lhs, "type", None)
+    rhs_type = getattr(rhs, "type", None)
+    lhs_is_memory = isinstance(lhs_type, NnMemoryType)
+    rhs_is_memory = isinstance(rhs_type, NnMemoryType)
+    if lhs_is_memory and rhs_is_memory:
+        return None
+    if not lhs_is_memory and not rhs_is_memory:
+        raise _LoweringError("nn.add requires at least one nn.memory operand", location=expr.location)
+
+    result_type = _infer_expr_type(expr, ctx.types)
+    if not isinstance(result_type, NnMemoryType):
+        raise _LoweringError("Binary op result must be nn.memory", location=expr.location)
+
+    memory_value = lhs if lhs_is_memory else rhs
+    memory_type = lhs_type if lhs_is_memory else rhs_type
+    scalar_value = rhs if lhs_is_memory else lhs
+    if not isinstance(memory_type, NnMemoryType):
+        raise _LoweringError("nn.add requires at least one nn.memory operand", location=expr.location)
+
+    if memory_type.element_type != result_type.element_type:
+        cast_type = _memory_type_from_parts(
+            memory_type.shape.data,
+            memory_type.stride.data,
+            result_type.element_type,
+            memory_type.space,
+        )
+        cast_op = DmaCastOp(memory_value, cast_type)
+        ctx.builder.add_op(cast_op)
+        memory_value = cast_op.result
+        memory_type = cast_type
+
+    scalar_value = _cast_add_scalar_operand(scalar_value, result_type.element_type, ctx, expr.location)
+    op = NnAddOp(
+        memory_value if lhs_is_memory else scalar_value,
+        scalar_value if lhs_is_memory else memory_value,
+        result_type,
+        result_type.space,
+    )
+    ctx.builder.add_op(op)
+    ctx._set_cache(_expr_key(expr), op.result)
+    return op.result
 
 
 def _lower_expr(expr: object, ctx: EmitContext) -> object:
@@ -1572,6 +2186,10 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
             ctx.builder.add_op(op)
             ctx._set_cache(expr_key, op.result)
             return op.result
+        if expr.op == "add":
+            mixed_add_result = _lower_mixed_add_expr(expr, lhs, rhs, ctx)
+            if mixed_add_result is not None:
+                return mixed_add_result
         lhs_type = _expect_memory_value(lhs, expr.location)
         rhs_type = _expect_memory_value(rhs, expr.location)
         result_type = _infer_expr_type(expr, ctx.types)
@@ -1696,7 +2314,23 @@ def _lookup_symbol(node: TensorAST | ScalarArgAST | VarAST, ctx: EmitContext) ->
 
 
 def emit_mlir(node: object, ctx: EmitContext) -> object:
-    """将单个 AST 节点发射为 MLIR value 或 op。"""
+    """将单个 AST 节点发射为 MLIR value 或 op。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 按节点类型分派到符号查找、表达式 lowering 或 store 发射路径。
+    - 对需要类型信息的表达式先补做 `_infer_expr_type`，再进入 `_lower_expr`。
+
+    使用示例:
+    - emit_mlir(BinaryExprAST(op="add", lhs=lhs, rhs=rhs), ctx)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
 
     if isinstance(node, (TensorAST, ScalarArgAST, VarAST)):
         return _lookup_symbol(node, ctx)

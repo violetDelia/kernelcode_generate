@@ -2229,6 +2229,38 @@ def test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast() -> None:
     assert sub_ops[0].result.type == expected_type
     assert return_ops[0].arguments[0].type == expected_type
 
+
+# EMIT-033
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 build_func_op 支持 nn.add 的 memory+symbol lowering。
+# 测试目的: 锁定 MLIR 组装链路对 tensor + symbol.int 的 promotion 与标量 cast 发射，不额外生成 dma.cast。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_nn_add_memory_symbol_with_scalar_promotion
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_lowers_nn_add_memory_symbol_with_scalar_promotion() -> None:
+    def add(lhs: "Tensor[f16, 2, 2]", bias: int) -> "Tensor[f16, 2, 2]":
+        return lhs + bias
+
+    lhs_memory = Memory([2, 2], NumericType.Float16)
+    expected_type = _memory_to_nn_type(lhs_memory)
+
+    func_op = build_func_op(add, lhs_memory, SymbolDim("K"))
+    add_ops = [op for op in func_op.body.block.ops if isinstance(op, NnAddOp)]
+    dma_cast_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaCastOp)]
+    scalar_cast_ops = [op for op in func_op.body.block.ops if isinstance(op, arith.SIToFPOp)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
+
+    assert list(func_op.function_type.inputs) == [expected_type, SymbolValueType.from_expr("K")]
+    assert len(add_ops) == 1
+    assert len(dma_cast_ops) == 0
+    assert len(scalar_cast_ops) == 1
+    assert len(return_ops) == 1
+    assert add_ops[0].rhs is scalar_cast_ops[0].result
+    assert add_ops[0].result.type == expected_type
+    assert return_ops[0].arguments[0].type == expected_type
+
 # MGEN-001B
 # 创建者: 小李飞刀
 # 最后一次更改: 朽木露琪亚
