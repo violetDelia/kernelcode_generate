@@ -230,6 +230,11 @@ def test_gen_body_emits_ops_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
     return_func = _func("return_body", [mem], [mem], return_block, ("input",))
     assert gen_body(return_func, _ctx()) == "out = arg0;"
 
+    second_block = Block(arg_types=[mem, mem])
+    second_block.add_op(func.ReturnOp(second_block.args[1]))
+    second_func = _func("return_second", [mem, mem], [mem], second_block, ("lhs", "rhs"))
+    assert gen_body(second_func, _ctx()) == "out = arg1;"
+
 
 # GK-006
 # 创建者: 金铲铲大作战

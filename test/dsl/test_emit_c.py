@@ -180,6 +180,28 @@ def test_emit_c_value_lowers_compare() -> None:
     assert "unsupported comparison predicate" in str(exc_info.value)
 
 
+# EC-002A
+# 创建者: 李白
+# 最后一次更改: 李白
+# 最近一次运行测试时间: 2026-03-29 09:10:00 +0800
+# 最近一次运行成功时间: 2026-03-29 09:10:00 +0800
+# 功能说明: 验证未绑定 BlockArgument 默认命名按参数索引回退。
+# 测试目的: 避免先访问高位参数时生成连续编号，确保命名稳定为 arg{index}。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_value_unbound_block_argument_uses_index
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_value_unbound_block_argument_uses_index() -> None:
+    block = Block(arg_types=[i32, i32])
+    ctx = _ctx()
+
+    second_expr = emit_c_value(block.args[1], ctx)
+    first_expr = emit_c_value(block.args[0], ctx)
+
+    assert second_expr == "arg1"
+    assert first_expr == "arg0"
+
+
 # EC-003
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
