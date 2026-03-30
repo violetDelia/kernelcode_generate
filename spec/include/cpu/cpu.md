@@ -2,13 +2,13 @@
 
 ## 功能简介
 
-定义 CPU 后端 include/cpu 头文件规范，覆盖 `include/cpu/Memory.h` 与 `include/cpu/Nn.h` 的公开接口、行为与约束。当前基线要求 `cpu::Memory<T>` 使用运行期 `rank`，并以 `MAX_DIM=8` 作为内部固定上限；逐元素/显式 broadcast、`add` 的 scalar overload（`Memory+scalar` / `scalar+Memory`）与 `img2col1d/img2col2d` CPU 叶子接口语义仍由 CPU include 层实现负责承接。
+定义 CPU 后端 include/cpu 头文件规范，覆盖 `include/cpu/Memory.h` 与 `include/cpu/Nn.h` 的公开接口、行为与约束。当前基线要求 `cpu::Memory<T>` 使用运行期 `rank`，并以 `MAX_DIM=8` 作为内部固定上限；逐元素/显式 broadcast、`add` 的 scalar overload（`Memory+scalar` / `scalar+Memory`）、`exp`、`reduce_sum/reduce_min/reduce_max` 与 `img2col1d/img2col2d` CPU 叶子接口语义仍由 CPU include 层实现负责承接。
 
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
 - 最后一次更改：`朽木露琪亚`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/include/cpu/cpu.md`](../../../spec/include/cpu/cpu.md)
 - `功能实现`：[`include/cpu/Memory.h`](../../../include/cpu/Memory.h)、[`include/cpu/Nn.h`](../../../include/cpu/Nn.h)
 - `test`：[`test/include/cpu/test_memory.py`](../../../test/include/cpu/test_memory.py)、[`test/include/cpu/test_nn.py`](../../../test/include/cpu/test_nn.py)
@@ -24,6 +24,7 @@
 - 规范 CPU 后端 `Memory` 视图与 `Nn` 运算接口，便于与 `spec/operation/nn.md` 的语义对齐。
 - 保持纯头文件、无标准库依赖、无异常机制的实现约束。
 - 明确 CPU 后端 `Memory` 视图使用运行期 `rank` 的接口边界，并以 `MAX_DIM=8` 作为固定容量基线。
+- 冻结 `cpu::exp(...)` 与 `cpu::reduce_sum/reduce_min/reduce_max(...)` 的稳定 CPU 公开接口，明确参数约束、输出契约与违约路径。
 - 冻结 `cpu::img2col1d(...)` 与 `cpu::img2col2d(...)` 的稳定 CPU 公开接口，使 `emit_c/gen_kernel` 在 CPU 侧拥有固定调用目标。
 
 ## 限制与边界
@@ -32,6 +33,9 @@
 - 公开接口均为纯头文件模板与内联实现，不提供动态分配、异常或运行时边界检查。
 - 逐元素与比较算子要求输入与输出形状一致，广播仅支持显式 `broadcast`，不提供隐式广播；仅 `cpu::add` 允许 `Memory+scalar` / `scalar+Memory` 两个公开 overload。
 - `img2col1d/img2col2d` 只定义 CPU include 层叶子接口，不反向规定 AST 节点类型、`nn dialect` 运行时类型、`build_func_op(...)` 结构或 pass 名称。
+- `exp/reduce_*` 只定义 CPU include 层叶子接口，不反向规定 AST 节点类型、`nn dialect` 运行时类型、`build_func_op(...)` 结构或 pass 名称。
+- `exp/reduce_*` 当前公开口径固定为 `float` 入参与出参，不在 include 层提供自动类型提升或隐式 cast。
+- `reduce_*` 的 `axes` 由调用方提供规范化后的非空轴列表（去重、非负、升序）；`axis=None` 语义由上游在进入 include 层前显式展开。
 - 禁止新增笼统 `cpu::img2col(...)` 公开名；CPU include 层只公开 `cpu::img2col1d(...)` 与 `cpu::img2col2d(...)`。
 - 运行时错误由调用方规避；接口返回 `void`，不提供状态码。
 - 本 spec 同时覆盖 `include/cpu/Memory.h` 与 `include/cpu/Nn.h`，原因是两者在 CPU 后端中紧密耦合并共用同一视图语义。
@@ -635,6 +639,168 @@ cpu::truediv(lhs, rhs, out);
 - 返回语义：结果写入 `out`。
 - 限制条件：不检查除零或形状约束。
 
+### `cpu::exp(value, out)`
+
+功能说明：
+
+- 对输入 `cpu::Memory<float>` 视图执行逐元素指数运算，并把结果写入输出视图。
+
+参数说明：
+
+- `value (const cpu::Memory<float>&)`：输入视图。
+- `out (cpu::Memory<float>&)`：输出视图。
+
+使用示例：
+
+```cpp
+float in_data[4] = {0.0f, 1.0f, -1.0f, 2.0f};
+float out_data[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+long long shape[2] = {2, 2};
+long long stride[2] = {2, 1};
+
+cpu::Memory<float> value(in_data, 2, shape, stride);
+cpu::Memory<float> out(out_data, 2, shape, stride);
+cpu::exp(value, out);
+```
+
+注意事项：
+
+- 公开签名固定为：`void cpu::exp(const cpu::Memory<float>& value, cpu::Memory<float>& out)`。
+- `value.rank()` 与 `out.rank()` 必须一致，`value.shape()/stride()` 与 `out.shape()/stride()` 必须逐维一致。
+- 不提供隐式广播、自动类型提升或 `float` 之外的公开重载。
+- 若调用方违反任一前置条件，应视为契约不满足：`value-out-rank-mismatch`、`value-out-shape-mismatch`、`value-out-stride-mismatch`。
+
+返回与限制：
+
+- 返回类型：`void`。
+- 返回语义：结果写入 `out`。
+- 限制条件：接口不提供异常与状态码，违约路径由契约失败处理。
+
+### `cpu::reduce_sum(value, out, axes, axes_rank, keepdim)`
+
+功能说明：
+
+- 对输入 `cpu::Memory<float>` 按给定轴集合执行求和归约，并把结果写入输出视图。
+
+参数说明：
+
+- `value (const cpu::Memory<float>&)`：输入视图。
+- `out (cpu::Memory<float>&)`：输出视图。
+- `axes (const long long*)`：归约轴数组首地址。
+- `axes_rank (unsigned long long)`：`axes` 长度，必须大于 `0`。
+- `keepdim (bool)`：是否保留归约轴。
+
+使用示例：
+
+```cpp
+float in_data[24] = {0.0f};
+float out_data[2] = {0.0f, 0.0f};
+long long in_shape[3] = {2, 3, 4};
+long long in_stride[3] = {12, 4, 1};
+long long out_shape[1] = {2};
+long long out_stride[1] = {1};
+long long axes[2] = {1, 2};
+
+cpu::Memory<float> value(in_data, 3, in_shape, in_stride);
+cpu::Memory<float> out(out_data, 1, out_shape, out_stride);
+cpu::reduce_sum(value, out, axes, 2, false);
+```
+
+注意事项：
+
+- 公开签名固定为：
+  `void cpu::reduce_sum(const cpu::Memory<float>& value, cpu::Memory<float>& out, const long long* axes, unsigned long long axes_rank, bool keepdim)`。
+- `axes_rank > 0`，`axes` 必须非空，且每个轴满足 `0 <= axis < value.rank()`。
+- `axes` 必须由调用方预先规范化（去重、非负、升序）；include 层不负责 `axis=None` 语义解析。
+- `keepdim=true` 时，`out.rank() == value.rank()` 且归约轴维度必须为 `1`。
+- `keepdim=false` 时，`out.rank() == value.rank() - axes_rank`；若归约后 rank 为 `0`，`out` 必须按 rank-1 形状 `[1]` 表达标量结果。
+- `out.stride()` 必须与 `out.shape()` 对应的连续行主序一致。
+- 若调用方违反任一前置条件，应视为契约不满足：`axes-empty-or-null`、`axes-not-normalized-or-out-of-range`、`out-shape-stride-mismatch-with-reduce-contract`。
+
+返回与限制：
+
+- 返回类型：`void`。
+- 返回语义：结果写入 `out`。
+- 限制条件：接口不提供异常与状态码，违约路径由契约失败处理。
+
+### `cpu::reduce_min(value, out, axes, axes_rank, keepdim)`
+
+功能说明：
+
+- 对输入 `cpu::Memory<float>` 按给定轴集合执行最小值归约，并把结果写入输出视图。
+
+参数说明：
+
+- 同 `cpu::reduce_sum`。
+
+使用示例：
+
+```cpp
+float in_data[24] = {0.0f};
+float out_data[6] = {0.0f};
+long long in_shape[3] = {2, 3, 4};
+long long in_stride[3] = {12, 4, 1};
+long long out_shape[2] = {2, 3};
+long long out_stride[2] = {3, 1};
+long long axes[1] = {2};
+
+cpu::Memory<float> value(in_data, 3, in_shape, in_stride);
+cpu::Memory<float> out(out_data, 2, out_shape, out_stride);
+cpu::reduce_min(value, out, axes, 1, false);
+```
+
+注意事项：
+
+- 公开签名固定为：
+  `void cpu::reduce_min(const cpu::Memory<float>& value, cpu::Memory<float>& out, const long long* axes, unsigned long long axes_rank, bool keepdim)`。
+- `axes/keepdim/out.shape/out.stride` 合同与 `cpu::reduce_sum` 一致。
+- 静态可判定时，任一归约轴维度为 `0` 应视为契约不满足：`empty-reduction-extent`。
+
+返回与限制：
+
+- 返回类型：`void`。
+- 返回语义：结果写入 `out`。
+- 限制条件：接口不提供异常与状态码，违约路径由契约失败处理。
+
+### `cpu::reduce_max(value, out, axes, axes_rank, keepdim)`
+
+功能说明：
+
+- 对输入 `cpu::Memory<float>` 按给定轴集合执行最大值归约，并把结果写入输出视图。
+
+参数说明：
+
+- 同 `cpu::reduce_sum`。
+
+使用示例：
+
+```cpp
+float in_data[24] = {0.0f};
+float out_data[12] = {0.0f};
+long long in_shape[3] = {2, 3, 4};
+long long in_stride[3] = {12, 4, 1};
+long long out_shape[3] = {1, 3, 4};
+long long out_stride[3] = {12, 4, 1};
+long long axes[1] = {0};
+
+cpu::Memory<float> value(in_data, 3, in_shape, in_stride);
+cpu::Memory<float> out(out_data, 3, out_shape, out_stride);
+cpu::reduce_max(value, out, axes, 1, true);
+```
+
+注意事项：
+
+- 公开签名固定为：
+  `void cpu::reduce_max(const cpu::Memory<float>& value, cpu::Memory<float>& out, const long long* axes, unsigned long long axes_rank, bool keepdim)`。
+- `axes/keepdim/out.shape/out.stride` 合同与 `cpu::reduce_sum` 一致。
+- 静态可判定时，任一归约轴维度为 `0` 应视为契约不满足：`empty-reduction-extent`。
+
+返回与限制：
+
+- 返回类型：`void`。
+- 返回语义：结果写入 `out`。
+- 限制条件：接口不提供异常与状态码，违约路径由契约失败处理。
+
 ### `cpu::eq(lhs, rhs, out)`
 
 功能说明：
@@ -1021,6 +1187,8 @@ def test_cpu_img2col_api_contract_v1():
   - `test/include/cpu/test_nn.py`
 - 执行命令：`pytest -q test/include/cpu/test_memory.py test/include/cpu/test_nn.py`
 - 测试说明：`test/include/cpu/test_memory.py` 与 `test/include/cpu/test_nn.py` 均统一引用本 spec `spec/include/cpu/cpu.md`，不再拆分为独立 `Memory.md` / `Nn.md`。
+- 测试说明：`INC-NN-019` ~ `INC-NN-026` 已在 `test/include/cpu/test_nn.py` 落地，用于覆盖 `exp/reduce_*` 成功路径与契约失败路径。
+- 测试说明：`INC-NN-027` ~ `INC-NN-028` 用于覆盖 `cpu::add` 的 `Memory+scalar` / `scalar+Memory` overload。
 - 测试目标：
   - CPU-MEM-001：显式 stride 构造与访问。
   - CPU-MEM-002：连续 stride 自动推导。
@@ -1041,6 +1209,22 @@ def test_cpu_img2col_api_contract_v1():
   - INC-NN-010：逐元素小于等于比较输出。
   - INC-NN-011：逐元素大于比较输出。
   - INC-NN-012：逐元素大于等于比较输出。
+  - INC-NN-013：`img2col1d` 基础展开与固定签名校验。
+  - INC-NN-014：`img2col2d` 基础展开与固定签名校验。
+  - INC-NN-015：`img2col1d` 契约违约触发失败。
+  - INC-NN-016：`img2col2d` 契约违约触发失败。
+  - INC-NN-017：`img2col1d` 非连续 stride 违约触发失败。
+  - INC-NN-018：禁止笼统 `cpu::img2col` 公开名。
+  - INC-NN-019：`exp` 逐元素计算成功路径与元信息一致性。
+  - INC-NN-020：`exp` rank/shape/stride 违约路径。
+  - INC-NN-021：`reduce_sum` 轴集合与 `keepdim` 契约成功路径。
+  - INC-NN-022：`reduce_sum` 轴集合非法输入拒绝路径。
+  - INC-NN-023：`reduce_min` 归约成功路径与输出契约。
+  - INC-NN-024：`reduce_min` 空归约域拒绝路径。
+  - INC-NN-025：`reduce_max` 归约成功路径与输出契约。
+  - INC-NN-026：`reduce_max` 空归约域拒绝路径。
+  - INC-NN-027：`add` 的 `Memory+scalar` overload。
+  - INC-NN-028：`add` 的 `scalar+Memory` overload。
 - 功能与用例清单：
   - CPU-MEM-001 -> `test/include/cpu/test_memory.py::test_cpu_memory_header_compiles_and_runs`
   - CPU-MEM-002 -> `test/include/cpu/test_memory.py::test_cpu_memory_header_compiles_and_runs`
@@ -1061,3 +1245,19 @@ def test_cpu_img2col_api_contract_v1():
   - INC-NN-010 -> `test/include/cpu/test_nn.py::test_cpu_nn_compare_le`
   - INC-NN-011 -> `test/include/cpu/test_nn.py::test_cpu_nn_compare_gt`
   - INC-NN-012 -> `test/include/cpu/test_nn.py::test_cpu_nn_compare_ge`
+  - INC-NN-013 -> `test/include/cpu/test_nn.py::test_cpu_nn_img2col1d_success_and_signature`
+  - INC-NN-014 -> `test/include/cpu/test_nn.py::test_cpu_nn_img2col2d_success_and_signature`
+  - INC-NN-015 -> `test/include/cpu/test_nn.py::test_cpu_nn_img2col1d_contract_violation_traps`
+  - INC-NN-016 -> `test/include/cpu/test_nn.py::test_cpu_nn_img2col2d_contract_violation_traps`
+  - INC-NN-017 -> `test/include/cpu/test_nn.py::test_cpu_nn_img2col1d_stride_violation_traps`
+  - INC-NN-018 -> `test/include/cpu/test_nn.py::test_cpu_nn_img2col_generic_name_is_forbidden`
+  - INC-NN-019 -> `test/include/cpu/test_nn.py::test_cpu_nn_exp_success`
+  - INC-NN-020 -> `test/include/cpu/test_nn.py::test_cpu_nn_exp_contract_violation_traps`
+  - INC-NN-021 -> `test/include/cpu/test_nn.py::test_cpu_nn_reduce_sum_success`
+  - INC-NN-022 -> `test/include/cpu/test_nn.py::test_cpu_nn_reduce_sum_axis_contract_violation_traps`
+  - INC-NN-023 -> `test/include/cpu/test_nn.py::test_cpu_nn_reduce_min_success`
+  - INC-NN-024 -> `test/include/cpu/test_nn.py::test_cpu_nn_reduce_min_empty_extent_traps`
+  - INC-NN-025 -> `test/include/cpu/test_nn.py::test_cpu_nn_reduce_max_success`
+  - INC-NN-026 -> `test/include/cpu/test_nn.py::test_cpu_nn_reduce_max_empty_extent_traps`
+  - INC-NN-027 -> `test/include/cpu/test_nn.py::test_cpu_nn_add_scalar_rhs_success`
+  - INC-NN-028 -> `test/include/cpu/test_nn.py::test_cpu_nn_add_scalar_lhs_success`

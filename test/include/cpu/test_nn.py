@@ -1,7 +1,7 @@
 """CPU NN include tests.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: 我不是牛马
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 include/cpu/Nn.h 的逐元素、broadcast 与 img2col 语义。
@@ -9,8 +9,8 @@
 覆盖率信息:
 - 当前覆盖率: `N/A`。该链路的功能实现为 C++ 头文件，当前任务不使用 `pytest-cov` 直接统计覆盖率。
 - 达标判定: C++ 实现按规则豁免 `95%` 覆盖率达标线。
-- 当前以 `INC-NN-001..020` 对应测试作为覆盖基线。
-- 最近一次测试核对: `2026-03-29 21:03:08 +0800`，本次执行 `pytest -q test/include/cpu/test_nn.py`，结果为 `20 passed`。
+- 当前以 `INC-NN-001..028` 对应测试作为覆盖基线。
+- 最近一次测试核对: `2026-03-30 04:10:02 +0800`，本次执行 `pytest -q test/include/cpu/test_memory.py test/include/cpu/test_nn.py`，结果为 `30 passed`。
 
 覆盖率命令:
 - N/A（C++ 头文件实现，当前任务不使用 `pytest-cov` 统计覆盖率）
@@ -913,6 +913,317 @@ int main() {
 # INC-NN-019
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-30 04:10:02 +0800
+# 最近一次运行成功时间: 2026-03-30 04:10:02 +0800
+# 测试目的: 验证 cpu::exp 逐元素计算与元信息一致性。
+# 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_exp_success
+# 对应功能实现文件路径: include/cpu/Nn.h
+# 对应 spec 文件路径: spec/include/cpu/cpu.md
+# 对应测试文件路径: test/include/cpu/test_nn.py
+def test_cpu_nn_exp_success() -> None:
+    source = r"""
+#include "include/cpu/Memory.h"
+#include "include/cpu/Nn.h"
+
+static int fail(int code) { return code; }
+
+static float absf(float v) { return v < 0.0f ? -v : v; }
+
+int main() {
+    float in_data[4] = {0.0f, 1.0f, -1.0f, 2.0f};
+    float out_data[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    long long shape[2] = {2, 2};
+    long long stride[2] = {2, 1};
+
+    cpu::Memory<float> value(in_data, 2, shape, stride);
+    cpu::Memory<float> out(out_data, 2, shape, stride);
+    cpu::exp(value, out);
+
+    if (out.rank() != 2 || out.shape()[0] != 2 || out.shape()[1] != 2) {
+        return fail(1);
+    }
+    if (out.stride()[0] != 2 || out.stride()[1] != 1) {
+        return fail(2);
+    }
+
+    float expected[4] = {1.0f, 2.7182817f, 0.3678794f, 7.389056f};
+    for (int i = 0; i < 4; ++i) {
+        if (absf(out_data[i] - expected[i]) > 1e-3f) {
+            return fail(10 + i);
+        }
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
+# INC-NN-020
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-30 04:10:02 +0800
+# 最近一次运行成功时间: 2026-03-30 04:10:02 +0800
+# 测试目的: 验证 cpu::exp 在 rank/shape/stride 不匹配时触发契约失败。
+# 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_exp_contract_violation_traps
+# 对应功能实现文件路径: include/cpu/Nn.h
+# 对应 spec 文件路径: spec/include/cpu/cpu.md
+# 对应测试文件路径: test/include/cpu/test_nn.py
+def test_cpu_nn_exp_contract_violation_traps() -> None:
+    source = r"""
+#include "include/cpu/Memory.h"
+#include "include/cpu/Nn.h"
+
+int main() {
+    float in_data[4] = {0.0f, 1.0f, -1.0f, 2.0f};
+    float out_data[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    long long shape[2] = {2, 2};
+    long long in_stride[2] = {2, 1};
+    long long out_stride[2] = {3, 1};
+
+    cpu::Memory<float> value(in_data, 2, shape, in_stride);
+    cpu::Memory<float> out(out_data, 2, shape, out_stride);
+    cpu::exp(value, out);
+    return 0;
+}
+"""
+    _compile_and_run_expect_failure(source)
+
+
+# INC-NN-021
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-30 04:10:02 +0800
+# 最近一次运行成功时间: 2026-03-30 04:10:02 +0800
+# 测试目的: 验证 cpu::reduce_sum 归约成功路径与 keepdim=false 输出契约。
+# 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_reduce_sum_success
+# 对应功能实现文件路径: include/cpu/Nn.h
+# 对应 spec 文件路径: spec/include/cpu/cpu.md
+# 对应测试文件路径: test/include/cpu/test_nn.py
+def test_cpu_nn_reduce_sum_success() -> None:
+    source = r"""
+#include "include/cpu/Memory.h"
+#include "include/cpu/Nn.h"
+
+static int fail(int code) { return code; }
+
+int main() {
+    float in_data[24] = {
+        1, 2, 3, 4,
+        5, 6, 7, 8,
+        9, 10, 11, 12,
+        13, 14, 15, 16,
+        17, 18, 19, 20,
+        21, 22, 23, 24
+    };
+    float out_data[2] = {0.0f, 0.0f};
+    long long in_shape[3] = {2, 3, 4};
+    long long in_stride[3] = {12, 4, 1};
+    long long out_shape[1] = {2};
+    long long out_stride[1] = {1};
+    long long axes[2] = {1, 2};
+
+    cpu::Memory<float> value(in_data, 3, in_shape, in_stride);
+    cpu::Memory<float> out(out_data, 1, out_shape, out_stride);
+    cpu::reduce_sum(value, out, axes, 2, false);
+
+    if (out_data[0] != 78.0f || out_data[1] != 222.0f) {
+        return fail(1);
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
+# INC-NN-022
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-30 04:10:02 +0800
+# 最近一次运行成功时间: 2026-03-30 04:10:02 +0800
+# 测试目的: 验证 cpu::reduce_sum 在轴集合非法时触发契约失败。
+# 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_reduce_sum_axis_contract_violation_traps
+# 对应功能实现文件路径: include/cpu/Nn.h
+# 对应 spec 文件路径: spec/include/cpu/cpu.md
+# 对应测试文件路径: test/include/cpu/test_nn.py
+def test_cpu_nn_reduce_sum_axis_contract_violation_traps() -> None:
+    source = r"""
+#include "include/cpu/Memory.h"
+#include "include/cpu/Nn.h"
+
+int main() {
+    float in_data[24] = {0.0f};
+    float out_data[2] = {0.0f, 0.0f};
+    long long in_shape[3] = {2, 3, 4};
+    long long in_stride[3] = {12, 4, 1};
+    long long out_shape[1] = {2};
+    long long out_stride[1] = {1};
+    long long axes[2] = {2, 1};
+
+    cpu::Memory<float> value(in_data, 3, in_shape, in_stride);
+    cpu::Memory<float> out(out_data, 1, out_shape, out_stride);
+    cpu::reduce_sum(value, out, axes, 2, false);
+    return 0;
+}
+"""
+    _compile_and_run_expect_failure(source)
+
+
+# INC-NN-023
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-30 04:10:02 +0800
+# 最近一次运行成功时间: 2026-03-30 04:10:02 +0800
+# 测试目的: 验证 cpu::reduce_min 归约成功路径与输出契约。
+# 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_reduce_min_success
+# 对应功能实现文件路径: include/cpu/Nn.h
+# 对应 spec 文件路径: spec/include/cpu/cpu.md
+# 对应测试文件路径: test/include/cpu/test_nn.py
+def test_cpu_nn_reduce_min_success() -> None:
+    source = r"""
+#include "include/cpu/Memory.h"
+#include "include/cpu/Nn.h"
+
+static int fail(int code) { return code; }
+
+int main() {
+    float in_data[12] = {
+        1.0f, 3.0f,
+        2.0f, 0.0f,
+        -1.0f, 4.0f,
+        5.0f, 6.0f,
+        -2.0f, 7.0f,
+        8.0f, 9.0f
+    };
+    float out_data[6] = {0.0f};
+    long long in_shape[3] = {2, 3, 2};
+    long long in_stride[3] = {6, 2, 1};
+    long long out_shape[2] = {2, 3};
+    long long out_stride[2] = {3, 1};
+    long long axes[1] = {2};
+
+    cpu::Memory<float> value(in_data, 3, in_shape, in_stride);
+    cpu::Memory<float> out(out_data, 2, out_shape, out_stride);
+    cpu::reduce_min(value, out, axes, 1, false);
+
+    float expected[6] = {1.0f, 0.0f, -1.0f, 5.0f, -2.0f, 8.0f};
+    for (int i = 0; i < 6; ++i) {
+        if (out_data[i] != expected[i]) {
+            return fail(i + 1);
+        }
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
+# INC-NN-024
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-30 04:10:02 +0800
+# 最近一次运行成功时间: 2026-03-30 04:10:02 +0800
+# 测试目的: 验证 cpu::reduce_min 在空归约域时触发契约失败。
+# 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_reduce_min_empty_extent_traps
+# 对应功能实现文件路径: include/cpu/Nn.h
+# 对应 spec 文件路径: spec/include/cpu/cpu.md
+# 对应测试文件路径: test/include/cpu/test_nn.py
+def test_cpu_nn_reduce_min_empty_extent_traps() -> None:
+    source = r"""
+#include "include/cpu/Memory.h"
+#include "include/cpu/Nn.h"
+
+int main() {
+    float in_data[1] = {0.0f};
+    float out_data[6] = {0.0f};
+    long long in_shape[3] = {2, 0, 3};
+    long long in_stride[3] = {0, 0, 1};
+    long long out_shape[2] = {2, 3};
+    long long out_stride[2] = {3, 1};
+    long long axes[1] = {1};
+
+    cpu::Memory<float> value(in_data, 3, in_shape, in_stride);
+    cpu::Memory<float> out(out_data, 2, out_shape, out_stride);
+    cpu::reduce_min(value, out, axes, 1, false);
+    return 0;
+}
+"""
+    _compile_and_run_expect_failure(source)
+
+
+# INC-NN-025
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-30 04:10:02 +0800
+# 最近一次运行成功时间: 2026-03-30 04:10:02 +0800
+# 测试目的: 验证 cpu::reduce_max 归约成功路径与 keepdim=true 输出契约。
+# 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_reduce_max_success
+# 对应功能实现文件路径: include/cpu/Nn.h
+# 对应 spec 文件路径: spec/include/cpu/cpu.md
+# 对应测试文件路径: test/include/cpu/test_nn.py
+def test_cpu_nn_reduce_max_success() -> None:
+    source = r"""
+#include "include/cpu/Memory.h"
+#include "include/cpu/Nn.h"
+
+static int fail(int code) { return code; }
+
+int main() {
+    float in_data[4] = {1.0f, 5.0f, 3.0f, 2.0f};
+    float out_data[2] = {0.0f, 0.0f};
+    long long in_shape[2] = {2, 2};
+    long long in_stride[2] = {2, 1};
+    long long out_shape[2] = {1, 2};
+    long long out_stride[2] = {2, 1};
+    long long axes[1] = {0};
+
+    cpu::Memory<float> value(in_data, 2, in_shape, in_stride);
+    cpu::Memory<float> out(out_data, 2, out_shape, out_stride);
+    cpu::reduce_max(value, out, axes, 1, true);
+
+    if (out_data[0] != 3.0f || out_data[1] != 5.0f) {
+        return fail(1);
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
+# INC-NN-026
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-30 04:10:02 +0800
+# 最近一次运行成功时间: 2026-03-30 04:10:02 +0800
+# 测试目的: 验证 cpu::reduce_max 在空归约域时触发契约失败。
+# 使用示例: pytest -q test/include/cpu/test_nn.py -k test_cpu_nn_reduce_max_empty_extent_traps
+# 对应功能实现文件路径: include/cpu/Nn.h
+# 对应 spec 文件路径: spec/include/cpu/cpu.md
+# 对应测试文件路径: test/include/cpu/test_nn.py
+def test_cpu_nn_reduce_max_empty_extent_traps() -> None:
+    source = r"""
+#include "include/cpu/Memory.h"
+#include "include/cpu/Nn.h"
+
+int main() {
+    float in_data[1] = {0.0f};
+    float out_data[2] = {0.0f, 0.0f};
+    long long in_shape[2] = {0, 2};
+    long long in_stride[2] = {0, 1};
+    long long out_shape[2] = {1, 2};
+    long long out_stride[2] = {2, 1};
+    long long axes[1] = {0};
+
+    cpu::Memory<float> value(in_data, 2, in_shape, in_stride);
+    cpu::Memory<float> out(out_data, 2, out_shape, out_stride);
+    cpu::reduce_max(value, out, axes, 1, true);
+    return 0;
+}
+"""
+    _compile_and_run_expect_failure(source)
+
+# INC-NN-027
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-29 21:03:08 +0800
 # 最近一次运行成功时间: 2026-03-29 21:03:08 +0800
 # 测试目的: 验证 cpu::add 支持 Memory + scalar overload。
@@ -946,8 +1257,7 @@ int main() {
 """
     _compile_and_run(source)
 
-
-# INC-NN-020
+# INC-NN-028
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-29 21:03:08 +0800
@@ -982,3 +1292,4 @@ int main() {
 }
 """
     _compile_and_run(source)
+
