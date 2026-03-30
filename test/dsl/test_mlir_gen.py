@@ -1,7 +1,7 @@
 """MLIR gen integration tests.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 build_func_op/build_func_op_from_ast 及相关 lowering 集成回归。
@@ -15,9 +15,9 @@
 - 达标线: 95%
 
 关联文件:
-- 功能实现: kernel_gen/dsl/mlir_gen.py
-- Spec 文档: spec/dsl/mlir_gen.md
-- 测试文件: test/dsl/test_mlir_gen.py
+- 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+- Spec 文档: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+- 测试文件: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
 """
 
 from __future__ import annotations
@@ -162,18 +162,86 @@ from kernel_gen.symbol_variable.type import NumericType
 
 
 def _tensor_arg(shape: list[object]) -> Memory:
+    """构造默认使用 `f32` 的测试 tensor 参数。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 为 `test_mlir_gen.py` 中的 helper / case 统一生成连续布局的 `Memory`。
+    - 默认使用 `NumericType.Float32`，避免各测试重复拼装基础参数。
+
+    使用示例:
+    - tensor = _tensor_arg([4, 8])
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+    """
     return Memory(shape, NumericType.Float32)
 
 
 def _module_from_func(fn: object, *runtime_args: object) -> ModuleOp:
+    """将 DSL 函数 helper 包装为单函数 `ModuleOp`。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 调用 `build_func_op(...)` 生成 `func.func`。
+    - 统一包装到 `ModuleOp` 中，便于后续打印与结构断言。
+
+    使用示例:
+    - module = _module_from_func(kernel, 16, 32)
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+    """
     return ModuleOp([build_func_op(fn, *runtime_args)])
 
 
 def _module_from_ast(func_ast: FunctionAST) -> ModuleOp:
+    """将已解析的 `FunctionAST` 包装为单函数 `ModuleOp`。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 调用 `build_func_op_from_ast(...)` 生成 `func.func`。
+    - 供 AST 级断言复用，避免测试内部重复创建 `ModuleOp`。
+
+    使用示例:
+    - module = _module_from_ast(func_ast)
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+    """
     return ModuleOp([build_func_op_from_ast(func_ast)])
 
 
 def _print_module(module: ModuleOp) -> str:
+    """将 `ModuleOp` 打印为可断言的 MLIR 文本。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 通过 `Printer` 将 `ModuleOp` 渲染到字符串。
+    - 供字符串匹配类测试复用，避免每个 case 手写打印逻辑。
+
+    使用示例:
+    - text = _print_module(module)
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+    """
     stream = StringIO()
     printer = Printer(stream=stream)
     printer.print_op(module)
@@ -181,6 +249,23 @@ def _print_module(module: ModuleOp) -> str:
 
 
 def _unwrap_index_cast(value: object) -> object:
+    """解开测试中常见的单层 `arith.index_cast` 包装。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 若 `value.owner` 是 `arith.IndexCastOp`，返回其输入值。
+    - 否则原样返回，便于测试同时兼容 cast 前后两种 IR 形态。
+
+    使用示例:
+    - raw_value = _unwrap_index_cast(result)
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+    """
     owner = getattr(value, "owner", None)
     if isinstance(owner, arith.IndexCastOp):
         return owner.input
@@ -192,6 +277,23 @@ def _parse_function_from_source(
     source: str,
     runtime_table: dict[str, object] | None = None,
 ) -> FunctionAST:
+    """使用伪造源码与运行时表解析 DSL 函数。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 通过 monkeypatch 覆盖 `inspect.getsource(...)`，让测试可直接用字符串构造 DSL 函数源码。
+    - 将 `runtime_table` 一并传入 `_parse_function_with_env(...)`，覆盖 runtime 参数参与签名/符号解析的场景。
+
+    使用示例:
+    - func_ast = _parse_function_from_source(monkeypatch, \"def kernel(x):\\n    return x\\n\")
+
+    关联文件:
+    - spec: [spec/dsl/ast.md](spec/dsl/ast.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/ast.py](kernel_gen/dsl/ast.py)
+    """
     def kernel(*args: object, **kwargs: object) -> object:
         del args, kwargs
         return None
@@ -840,10 +942,10 @@ def test_build_func_op_rejects_invalid_joinedstr_tensor_annotation(monkeypatch: 
 # MGEN-026
 # 创建者: 朽木露琪亚
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-30 03:03:30 +0800
-# 最近一次运行成功时间: 2026-03-30 03:03:30 +0800
+# 最近一次运行测试时间: 2026-03-30 08:31:43 +0800
+# 最近一次运行成功时间: 2026-03-30 08:31:43 +0800
 # 功能说明: 验证 build_func_op 在 DMA helper 场景下按公开语义生成对应 memory 结果。
-# 测试目的: 验证 alloc/copy/cast/view/reshape/flatten 六类 helper 在 build_func_op 链路中都能成功 lowering。
+# 测试目的: 验证 alloc/copy/cast/view/reshape/flatten 六类 helper 在 build_func_op 链路中都能成功 lowering，且 dma.view 返回类型取自 DSL size/stride。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_dma_helper_calls
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -884,6 +986,14 @@ def test_build_func_op_supports_dma_helper_calls() -> None:
     assert any(isinstance(op, DmaViewOp) for op in view_func.body.block.ops)
     assert any(isinstance(op, DmaReshapeOp) for op in reshape_func.body.block.ops)
     assert any(isinstance(op, DmaReshapeOp) for op in flatten_func.body.block.ops)
+    view_ops = [op for op in view_func.body.block.ops if isinstance(op, DmaViewOp)]
+    return_ops = [op for op in view_func.body.block.ops if isinstance(op, func.ReturnOp)]
+    assert len(view_ops) == 1
+    assert len(return_ops) == 1
+    assert [attr.data for attr in view_ops[0].result.type.shape.data] == [2, 2]
+    assert [attr.data for attr in view_ops[0].result.type.stride.data] == [1, 1]
+    assert list(view_func.function_type.outputs) == [view_ops[0].result.type]
+    assert return_ops[0].arguments[0].type == view_ops[0].result.type
 
 
 # MGEN-026A
