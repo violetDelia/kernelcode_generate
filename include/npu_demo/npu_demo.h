@@ -12,9 +12,9 @@
 最后修改人: 朽木露琪亚
 
 关联文件:
-- spec: spec/include/npu_demo/npu_demo.md
-- test: test/include/npu_demo/test_kernel_context.py
-- 功能实现: include/npu_demo/npu_demo.h
+- spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
+- test: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
+- 功能实现: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
 */
 
 #ifndef KERNELCODE_GENERATE_INCLUDE_NPU_DEMO_NPU_DEMO_H_
@@ -54,9 +54,9 @@ static constexpr long long kTlmMemorySize = 2048;
 最后修改人: 朽木露琪亚
 
 关联文件:
-- spec: spec/include/npu_demo/npu_demo.md
-- test: test/include/npu_demo/test_kernel_context.py
-- 功能实现: include/npu_demo/npu_demo.h
+- spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
+- test: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
+- 功能实现: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
 */
 template <typename T>
 inline Memory<T> make_linear_memory(long long size, MemorySpace space) {
@@ -76,9 +76,9 @@ inline Memory<T> make_linear_memory(long long size, MemorySpace space) {
 最后修改人: 朽木露琪亚
 
 关联文件:
-- spec: spec/include/npu_demo/npu_demo.md
-- test: test/include/npu_demo/test_kernel_context.py
-- 功能实现: include/npu_demo/npu_demo.h
+- spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
+- test: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
+- 功能实现: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
 */
 inline void throw_zero_sized_memory(const char* message) {
     throw std::runtime_error(message);
@@ -99,9 +99,9 @@ inline void throw_zero_sized_memory(const char* message) {
 最后修改人: 朽木露琪亚
 
 关联文件:
-- spec: spec/include/npu_demo/npu_demo.md
-- test: test/include/npu_demo/test_kernel_context.py
-- 功能实现: include/npu_demo/npu_demo.h
+- spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
+- test: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
+- 功能实现: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
 */
 class KernelContext {
 public:
@@ -116,9 +116,9 @@ public:
     最后修改人: 朽木露琪亚
 
     关联文件:
-    - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/test_kernel_context.py
-    - 功能实现: include/npu_demo/npu_demo.h
+    - spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
+    - test: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
+    - 功能实现: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
     */
     long long block_id() const {
         return detail::kBlockId;
@@ -135,9 +135,9 @@ public:
     最后修改人: 朽木露琪亚
 
     关联文件:
-    - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/test_kernel_context.py
-    - 功能实现: include/npu_demo/npu_demo.h
+    - spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
+    - test: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
+    - 功能实现: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
     */
     long long block_num() const {
         return detail::kBlockNum;
@@ -154,9 +154,9 @@ public:
     最后修改人: 朽木露琪亚
 
     关联文件:
-    - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/test_kernel_context.py
-    - 功能实现: include/npu_demo/npu_demo.h
+    - spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
+    - test: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
+    - 功能实现: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
     */
     long long thread_id() const {
         return detail::kThreadId;
@@ -173,9 +173,9 @@ public:
     最后修改人: 朽木露琪亚
 
     关联文件:
-    - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/test_kernel_context.py
-    - 功能实现: include/npu_demo/npu_demo.h
+    - spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
+    - test: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
+    - 功能实现: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
     */
     long long thread_num() const {
         return detail::kThreadNum;
@@ -192,9 +192,9 @@ public:
     最后修改人: 朽木露琪亚
 
     关联文件:
-    - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/test_kernel_context.py
-    - 功能实现: include/npu_demo/npu_demo.h
+    - spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
+    - test: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
+    - 功能实现: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
     */
     long long subthread_id() const {
         return detail::kSubthreadId;
@@ -211,9 +211,9 @@ public:
     最后修改人: 朽木露琪亚
 
     关联文件:
-    - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/test_kernel_context.py
-    - 功能实现: include/npu_demo/npu_demo.h
+    - spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
+    - test: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
+    - 功能实现: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
     */
     long long subthread_num() const {
         return detail::kSubthreadNum;
@@ -230,9 +230,9 @@ public:
     最后修改人: 朽木露琪亚
 
     关联文件:
-    - spec: spec/include/npu_demo/npu_demo.md
-    - test: test/include/npu_demo/test_kernel_context.py
-    - 功能实现: include/npu_demo/npu_demo.h
+    - spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
+    - test: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
+    - 功能实现: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
     */
     template <typename T>
     Memory<T> get_dynamic_memory(MemorySpace space) const {
@@ -244,16 +244,13 @@ public:
             case MemorySpace::SM:
                 detail::throw_zero_sized_memory(
                     "npu_demo::KernelContext::get_dynamic_memory rejected MemorySpace::SM because sm_memory_size=0");
-                break;
             case MemorySpace::LM:
                 detail::throw_zero_sized_memory(
                     "npu_demo::KernelContext::get_dynamic_memory rejected MemorySpace::LM because lm_memory_size=0");
-                break;
             default:
                 throw std::invalid_argument(
                     "npu_demo::KernelContext::get_dynamic_memory requires on-chip MemorySpace");
         }
-        return detail::make_linear_memory<T>(0, space);
     }
 };
 

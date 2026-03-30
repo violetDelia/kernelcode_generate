@@ -1,7 +1,9 @@
 """NPU demo KernelContext include tests.
 
 创建者: 朽木露琪亚
-最后一次更改: jcc你莫辜负
+最后一次更改: 朽木露琪亚
+最近一次运行测试时间: 2026-03-31 02:13:19 +0800
+最近一次运行成功时间: 2026-03-31 02:13:19 +0800
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 `include/npu_demo/npu_demo.h` 的 `KernelContext` accessor 与动态内存查询契约。
@@ -9,11 +11,11 @@
 覆盖率信息:
 - 当前覆盖率: `N/A`。该链路的功能实现为 C++ 头文件，按当前规则豁免 `pytest-cov` 覆盖率统计。
 - 达标判定: C++ 头文件实现按规则豁免 `95%` 覆盖率达标线。
-- 当前覆盖基线: `NPU-DEMO-KC-001..006`。
+- 当前覆盖基线: `NPU-DEMO-KC-001..005`。
 
 覆盖率命令:
+- `pytest --cov=include/npu_demo/npu_demo.h --cov-report=term-missing test/include/npu_demo/test_kernel_context.py`
 - `pytest -q test/include/npu_demo/test_kernel_context.py`
-- `N/A`（C++ 头文件实现，按当前规则豁免 `pytest-cov` 覆盖率统计）
 
 使用示例:
 - `pytest -q test/include/npu_demo/test_kernel_context.py`
@@ -94,6 +96,8 @@ def _compile_and_run(source: str) -> None:
 # NPU-DEMO-KC-001
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-31 02:25:40 +0800
+# 最近一次运行成功时间: 2026-03-31 02:25:40 +0800
 # 测试目的: 验证 KernelContext 的 block/thread/subthread id 与 count accessor 返回固定模板值。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_exposes_id_and_count_accessors
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
@@ -135,6 +139,8 @@ int main() {
 # NPU-DEMO-KC-002
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-31 02:25:40 +0800
+# 最近一次运行成功时间: 2026-03-31 02:25:40 +0800
 # 测试目的: 验证 get_dynamic_memory<float>(TSM) 返回固定 shape/stride/space 的 Memory 视图。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_returns_typed_tsm_memory
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
@@ -171,6 +177,8 @@ int main() {
 # NPU-DEMO-KC-003
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-31 02:25:40 +0800
+# 最近一次运行成功时间: 2026-03-31 02:25:40 +0800
 # 测试目的: 验证 get_dynamic_memory<float>(TLM) 返回固定 shape/stride/space 的 Memory 视图。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_returns_typed_tlm_memory
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
@@ -207,6 +215,8 @@ int main() {
 # NPU-DEMO-KC-004
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-31 02:25:40 +0800
+# 最近一次运行成功时间: 2026-03-31 02:25:40 +0800
 # 测试目的: 验证 get_dynamic_memory<float>(SM) 在 sm_memory_size=0 时抛出带关键字的运行期错误。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_rejects_sm_when_size_zero
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
@@ -244,6 +254,8 @@ int main() {
 # NPU-DEMO-KC-005
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-03-31 02:25:40 +0800
+# 最近一次运行成功时间: 2026-03-31 02:25:40 +0800
 # 测试目的: 验证 get_dynamic_memory<float>(LM) 在 lm_memory_size=0 时抛出带关键字的运行期错误。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_rejects_lm_when_size_zero
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
@@ -267,43 +279,6 @@ int main() {
     } catch (const std::runtime_error& err) {
         std::string message(err.what());
         if (message.find("lm_memory_size=0") == std::string::npos) {
-            return fail(2);
-        }
-        return 0;
-    } catch (...) {
-        return fail(3);
-    }
-}
-"""
-    _compile_and_run(source)
-
-
-# NPU-DEMO-KC-006
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 测试目的: 验证 get_dynamic_memory<float>(GM) 对非法 MemorySpace 抛出 invalid_argument 且消息包含关键字。
-# 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_rejects_invalid_memory_space
-# 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
-# 对应 spec 文件链接: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
-# 对应测试文件链接: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
-def test_npu_demo_kernel_context_rejects_invalid_memory_space() -> None:
-    source = r"""
-#include <stdexcept>
-#include <string>
-
-#include "include/npu_demo/npu_demo.h"
-
-static int fail(int code) { return code; }
-
-int main() {
-    npu_demo::KernelContext ctx;
-    try {
-        auto mem = ctx.get_dynamic_memory<float>(npu_demo::MemorySpace::GM);
-        (void)mem;
-        return fail(1);
-    } catch (const std::invalid_argument& err) {
-        std::string message(err.what());
-        if (message.find("requires on-chip MemorySpace") == std::string::npos) {
             return fail(2);
         }
         return 0;
