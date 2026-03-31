@@ -82,6 +82,8 @@ from kernel_gen.dialect.symbol import (
     SymbolFloorDivOp,
     SymbolForOp,
     SymbolGeOp,
+    SymbolGetDimOp,
+    SymbolGetStrideOp,
     SymbolMulOp,
     SymbolSubOp,
     SymbolValueType,
@@ -106,6 +108,7 @@ from kernel_gen.dsl.ast import (
     SourceLocation,
     StoreAST,
     TensorAST,
+    TensorAxisAccessAST,
     VarAST,
     ScalarArgAST,
     _ParseFailure,
@@ -341,6 +344,62 @@ def kernel() -> int:
             raise AssertionError("expected diagnostics for invalid get_thread_id arity")
         if diagnostics[0].message != "Unsupported get_thread_id arity":
             raise AssertionError("expected Unsupported get_thread_id arity diagnostic")
+
+
+# AST-014I
+# 创建者: OpenAI
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-31 03:20:00 +0800
+# 最近一次运行成功时间: 2026-03-31 03:20:00 +0800
+# 功能说明: 验证 `value.get_shape()[axis]` 可解析为 TensorAxisAccessAST。
+# 测试目的: 锁定 AST 层对 Memory shape 轴访问语义的保留，不在解析阶段提前降级或求值。
+# 使用示例: pytest -q test/dsl/test_ast.py -k test_parse_function_supports_memory_get_shape_index
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast.py
+def test_parse_function_supports_memory_get_shape_index() -> None:
+    def kernel(value: "Tensor[f32, 4, 8]") -> int:
+        return value.get_shape()[1]
+
+    func_ast = parse_function(kernel)
+
+    if len(func_ast.body.statements) != 1:
+        raise AssertionError("expected one AST statement for get_shape()[axis]")
+    stmt = func_ast.body.statements[0]
+    if not isinstance(stmt, TensorAxisAccessAST):
+        raise AssertionError("expected get_shape()[axis] to parse into TensorAxisAccessAST")
+    if stmt.kind != "shape":
+        raise AssertionError("expected TensorAxisAccessAST kind to be shape")
+    if not isinstance(stmt.axis, ConstAST) or stmt.axis.value != 1:
+        raise AssertionError("expected get_shape axis to stay ConstAST(1)")
+
+
+# AST-014J
+# 创建者: OpenAI
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-31 03:20:00 +0800
+# 最近一次运行成功时间: 2026-03-31 03:20:00 +0800
+# 功能说明: 验证 `value.get_stride()[axis]` 可解析为 TensorAxisAccessAST。
+# 测试目的: 锁定 AST 层对 Memory stride 轴访问语义的保留，不在解析阶段提前降级或求值。
+# 使用示例: pytest -q test/dsl/test_ast.py -k test_parse_function_supports_memory_get_stride_index
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast.py
+def test_parse_function_supports_memory_get_stride_index() -> None:
+    def kernel(value: "Tensor[f32, 4, 8]") -> int:
+        return value.get_stride()[0]
+
+    func_ast = parse_function(kernel)
+
+    if len(func_ast.body.statements) != 1:
+        raise AssertionError("expected one AST statement for get_stride()[axis]")
+    stmt = func_ast.body.statements[0]
+    if not isinstance(stmt, TensorAxisAccessAST):
+        raise AssertionError("expected get_stride()[axis] to parse into TensorAxisAccessAST")
+    if stmt.kind != "stride":
+        raise AssertionError("expected TensorAxisAccessAST kind to be stride")
+    if not isinstance(stmt.axis, ConstAST) or stmt.axis.value != 0:
+        raise AssertionError("expected get_stride axis to stay ConstAST(0)")
 
 
 # AST-014J

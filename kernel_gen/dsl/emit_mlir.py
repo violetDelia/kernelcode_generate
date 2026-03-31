@@ -38,6 +38,7 @@ from xdsl.dialects.builtin import (
     i32,
 )
 from xdsl.ir import Attribute, Block, SSAValue
+from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.arch import (
     ArchGetBlockIdOp,
@@ -120,6 +121,7 @@ from .ast import (
     SourceLocation,
     StoreAST,
     TensorAST,
+    TensorAxisAccessAST,
     VarAST,
 )
 
@@ -1552,6 +1554,75 @@ def _build_dynamic_memory_type(
     )
 
 
+def _resolve_tensor_axis_index(
+    axis_expr: object,
+    location: SourceLocation | None = None,
+    runtime_values: dict[str, object] | None = None,
+) -> int:
+    """解析 `tensor.get_shape/get_stride()[axis]` 的静态轴号。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 复用静态索引解析逻辑收敛 `shape/stride` 访问的轴号。
+    - 拒绝非静态整数、负数轴号，保证查询 op 只接收合法静态轴。
+
+    使用示例:
+    - _resolve_tensor_axis_index(ConstAST(1), location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    axis = _resolve_static_index_expr(axis_expr, location, runtime_values)
+    if not isinstance(axis, int):
+        raise _LoweringError("Tensor axis must be static int", location=location)
+    if axis < 0:
+        raise _LoweringError("Tensor axis must be non-negative", location=location)
+    return axis
+
+
+def _infer_tensor_axis_access_type(
+    expr: TensorAxisAccessAST,
+    type_map: dict[int, object],
+    runtime_values: dict[str, object] | None = None,
+) -> SymbolValueType:
+    """推导 `tensor.get_shape/get_stride()[axis]` 的 symbol 返回类型。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 从 `TensorAST` 对应的 `nn.memory` 类型中读取指定轴的 `shape/stride` 条目。
+    - 将静态整数或符号条目映射为 `!symbol.int`，并统一拒绝越界轴号与匿名动态条目。
+
+    使用示例:
+    - _infer_tensor_axis_access_type(expr, type_map)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    tensor_type = type_map.get(_expr_key(expr.tensor))
+    if not isinstance(tensor_type, NnMemoryType):
+        raise _LoweringError("Tensor axis access source must be nn.memory", location=expr.location)
+    axis = _resolve_tensor_axis_index(expr.axis, expr.location, runtime_values)
+    entries = tensor_type.shape.data if expr.kind == "shape" else tensor_type.stride.data
+    if axis >= len(entries):
+        raise _LoweringError("Tensor axis out of range", location=expr.location)
+    entry = entries[axis]
+    if isinstance(entry, IntAttr):
+        return SymbolValueType.from_expr(str(entry.data))
+    if isinstance(entry, StringAttr) and entry.data != "?":
+        return SymbolValueType.from_expr(entry.data)
+    raise _LoweringError("Tensor axis access does not support unknown entry '?'", location=expr.location)
+
+
 def _parse_img2col_helper(expr: Img2ColAST) -> tuple[object, dict[str, int]]:
     """解析 img2col helper 调用参数。
 
@@ -1658,6 +1729,7 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
                 ArchGetDynamicMemoryAST,
                 ArchLaunchKernelAST,
                 ArchQueryAST,
+                TensorAxisAccessAST,
             ),
         ):
             raise _LoweringError("Unsupported AST expression for lowering", location=getattr(expr, "location", None))
@@ -1976,6 +2048,10 @@ def _infer_expr_type(
         if symbol_name is None:
             raise _LoweringError("Unsupported arch query", location=expr.location)
         result_type = SymbolValueType.from_expr(symbol_name)
+        type_map[expr_key] = result_type
+        return result_type
+    if isinstance(expr, TensorAxisAccessAST):
+        result_type = _infer_tensor_axis_access_type(expr, type_map, runtime_values=runtime_values)
         type_map[expr_key] = result_type
         return result_type
 
@@ -2391,6 +2467,24 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         ctx._set_cache(expr_key, op.result)
         ctx.types[expr_key] = op.result.type
         return op.result
+    if isinstance(expr, TensorAxisAccessAST):
+        source = _lower_expr(expr.tensor, ctx)
+        _expect_memory_value(source, expr.location)
+        axis = _resolve_tensor_axis_index(expr.axis, expr.location)
+        if expr.kind == "shape":
+            op = SymbolGetDimOp(source, IntAttr(axis))
+        elif expr.kind == "stride":
+            op = SymbolGetStrideOp(source, IntAttr(axis))
+        else:
+            raise _LoweringError("Unsupported tensor axis access kind", location=expr.location)
+        try:
+            op.verify()
+        except VerifyException as exc:
+            raise _LoweringError(str(exc), location=expr.location) from exc
+        ctx.builder.add_op(op)
+        ctx._set_cache(expr_key, op.result)
+        ctx.types[expr_key] = op.result.type
+        return op.result
 
     if isinstance(expr, BinaryExprAST):
         lhs = _lower_expr(expr.lhs, ctx)
@@ -2581,6 +2675,7 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
             Img2ColAST,
             ArchGetDynamicMemoryAST,
             ArchQueryAST,
+            TensorAxisAccessAST,
         ),
     ):
         if _expr_key(node) not in ctx.types and not isinstance(node, (TensorAST, ScalarArgAST, VarAST)):

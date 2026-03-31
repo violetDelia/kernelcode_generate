@@ -86,6 +86,8 @@ from kernel_gen.dialect.symbol import (
     SymbolFloorDivOp,
     SymbolForOp,
     SymbolGeOp,
+    SymbolGetDimOp,
+    SymbolGetStrideOp,
     SymbolMulOp,
     SymbolSubOp,
     SymbolValueType,
@@ -111,6 +113,7 @@ from kernel_gen.dsl.ast import (
     SourceLocation,
     StoreAST,
     TensorAST,
+    TensorAxisAccessAST,
     VarAST,
     ScalarArgAST,
     _ParseFailure,
@@ -336,6 +339,81 @@ def test_emit_mlir_lowers_arch_get_thread_num_query() -> None:
         raise AssertionError("expected emitted op to be ArchGetThreadNumOp")
     if result.type != SymbolValueType.from_expr("thread_num"):
         raise AssertionError('expected emitted result type to be !symbol.int<"thread_num">')
+
+
+# EMIT-034
+# 创建者: OpenAI
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-31 03:20:00 +0800
+# 最近一次运行成功时间: 2026-03-31 03:20:00 +0800
+# 功能说明: 验证 TensorAxisAccessAST(kind="shape") lowering 为 symbol.get_dim。
+# 测试目的: 锁定 emit_mlir 对 `Memory.get_shape()[axis]` 的发射语义与静态 symbol 结果类型。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_lowers_symbol_get_dim_from_tensor_shape
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_emit_mlir_lowers_symbol_get_dim_from_tensor_shape() -> None:
+    block = Block()
+    tensor = TensorAST("value", _tensor_arg([4, 8]))
+    tensor_type = _memory_to_nn_type(tensor.memory, location=tensor.location)
+    tensor_value = block.insert_arg(tensor_type, 0)
+    ctx = EmitContext(
+        builder=block,
+        symbols={"value": tensor_value},
+        types={_expr_key(tensor): tensor_type},
+    )
+    ctx._set_cache(_expr_key(tensor), tensor_value)
+
+    result = emit_node_mlir(
+        TensorAxisAccessAST(tensor=tensor, kind="shape", axis=ConstAST(1)),
+        ctx,
+    )
+
+    body_ops = list(block.ops)
+    if len(body_ops) != 1:
+        raise AssertionError("expected one emitted op for get_shape()[axis]")
+    if not isinstance(body_ops[0], SymbolGetDimOp):
+        raise AssertionError("expected emitted op to be SymbolGetDimOp")
+    if result.type != SymbolValueType.from_expr("8"):
+        raise AssertionError('expected emitted result type to be !symbol.int<"8">')
+
+
+# EMIT-035
+# 创建者: OpenAI
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-31 03:20:00 +0800
+# 最近一次运行成功时间: 2026-03-31 03:20:00 +0800
+# 功能说明: 验证 TensorAxisAccessAST(kind="stride") lowering 为 symbol.get_stride。
+# 测试目的: 锁定 emit_mlir 对 `Memory.get_stride()[axis]` 的发射语义与静态 symbol 结果类型。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_lowers_symbol_get_stride_from_tensor_stride
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_emit_mlir_lowers_symbol_get_stride_from_tensor_stride() -> None:
+    block = Block()
+    tensor_memory = Memory([4, 8], NumericType.Float32, stride=[8, 1])
+    tensor = TensorAST("value", tensor_memory)
+    tensor_type = _memory_to_nn_type(tensor.memory, location=tensor.location)
+    tensor_value = block.insert_arg(tensor_type, 0)
+    ctx = EmitContext(
+        builder=block,
+        symbols={"value": tensor_value},
+        types={_expr_key(tensor): tensor_type},
+    )
+    ctx._set_cache(_expr_key(tensor), tensor_value)
+
+    result = emit_node_mlir(
+        TensorAxisAccessAST(tensor=tensor, kind="stride", axis=ConstAST(0)),
+        ctx,
+    )
+
+    body_ops = list(block.ops)
+    if len(body_ops) != 1:
+        raise AssertionError("expected one emitted op for get_stride()[axis]")
+    if not isinstance(body_ops[0], SymbolGetStrideOp):
+        raise AssertionError("expected emitted op to be SymbolGetStrideOp")
+    if result.type != SymbolValueType.from_expr("8"):
+        raise AssertionError('expected emitted result type to be !symbol.int<"8">')
 
 
 # EMIT-027
