@@ -50,7 +50,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dialect.dma import DmaCopyOp, DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaCopyOp, DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp
 from kernel_gen.dialect.nn import (
     NnAddOp,
     NnEqOp,
@@ -462,10 +462,11 @@ def test_func_cost_dma_sizes_smaller_than_shape() -> None:
         sizes = [block.args[4], block.args[5]]
         strides = [block.args[6], block.args[7]]
         load_op = DmaLoadOp(block.args[0], offsets, sizes, strides, tile_type, space)
-        slice_op = DmaSliceOp(block.args[0], offsets, sizes, strides, tile_type, space)
+        alloc_op = DmaAllocOp(sizes, tile_type)
+        slice_op = DmaSliceOp(alloc_op.result, block.args[0], offsets, sizes, strides)
         store_op = DmaStoreOp(load_op.result, block.args[1], offsets, sizes, strides)
         deslice_op = DmaDesliceOp(load_op.result, block.args[1], offsets, sizes, strides, full_type)
-        return [load_op, slice_op, store_op, deslice_op], deslice_op.result
+        return [load_op, alloc_op, slice_op, store_op, deslice_op], deslice_op.result
 
     module, _, _ = _build_module(arg_types, full_type, _builder)
     pass_obj = AnalyzeFuncCostPass()

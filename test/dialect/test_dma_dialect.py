@@ -289,20 +289,21 @@ def test_dma_load_result_space_mismatch() -> None:
 # 对应测试文件路径: test/dialect/test_dma_dialect.py
 def test_dma_slice_rank_mismatch() -> None:
     source_type = _make_memory_type()
-    result_type = _make_memory_type()
     source = _TestOp(result_types=[source_type]).results[0]
+    target = _TestOp(result_types=[source_type]).results[0]
     offsets = _make_symbol_operands([0])
     sizes = _make_symbol_operands([2])
     strides = _make_symbol_operands([1])
-    op = DmaSliceOp(source, offsets, sizes, strides, result_type, _make_space("global"))
+    op = DmaSliceOp(target, source, offsets, sizes, strides)
     with pytest.raises(VerifyException, match="length must match rank"):
         op.verify()
 
     offsets = _make_symbol_operands([0, 0])
     sizes = _make_symbol_operands([2, 4])
     strides = _make_symbol_operands([1, 1])
-    result_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(3)]))
-    op = DmaSliceOp(source, offsets, sizes, strides, result_type, _make_space("global"))
+    target_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(3)]))
+    target = _TestOp(result_types=[target_type]).results[0]
+    op = DmaSliceOp(target, source, offsets, sizes, strides)
     with pytest.raises(VerifyException, match="shape must match sizes"):
         op.verify()
 
@@ -319,12 +320,12 @@ def test_dma_slice_rank_mismatch() -> None:
 # 对应测试文件路径: test/dialect/test_dma_dialect.py
 def test_dma_slice_non_unit_stride_rejected() -> None:
     source_type = _make_memory_type()
-    result_type = _make_memory_type()
     source = _TestOp(result_types=[source_type]).results[0]
+    target = _TestOp(result_types=[source_type]).results[0]
     offsets = _make_symbol_operands([0, 0])
     sizes = _make_symbol_operands([2, 4])
     strides = _make_symbol_operands([1, 2])
-    op = DmaSliceOp(source, offsets, sizes, strides, result_type, _make_space("global"))
+    op = DmaSliceOp(target, source, offsets, sizes, strides)
     with pytest.raises(VerifyException, match="dma stride must be 1 in current implementation"):
         op.verify()
 
@@ -426,7 +427,7 @@ def test_dma_dynamic_symbol_int_operands_valid() -> None:
     strides = _make_symbol_operands([1, 1])
 
     DmaLoadOp(source, offsets, sizes, strides, result_type, _make_space("shared")).verify()
-    DmaSliceOp(source, offsets, sizes, strides, result_type, _make_space("shared")).verify()
+    DmaSliceOp(tile, source, offsets, sizes, strides).verify()
     DmaStoreOp(tile, target, offsets, sizes, strides).verify()
     DmaDesliceOp(tile, target, offsets, sizes, strides, source_type).verify()
 
@@ -848,11 +849,10 @@ def test_dma_dynamic_symbol_int_parse_print_round_trip() -> None:
     )
     slice_op = DmaSliceOp(
         alloc.result,
+        alloc.result,
         [c2.results[0], c2.results[0]],
         [c0.results[0], c1.results[0]],
         [c3.results[0], c3.results[0]],
-        load_type,
-        _make_space("shared"),
     )
     deslice = DmaDesliceOp(
         load.result,
@@ -972,13 +972,9 @@ def test_dma_transfer_ops_reject_element_space_or_result_mismatch() -> None:
         op.verify()
 
     bad_slice_type = NnMemoryType(source_type.shape, source_type.stride, i1, source_type.space)
-    op = DmaSliceOp(source, offsets, sizes, strides, bad_slice_type, _make_space("global"))
+    bad_slice_target = _TestOp(result_types=[bad_slice_type]).results[0]
+    op = DmaSliceOp(bad_slice_target, source, offsets, sizes, strides)
     with pytest.raises(VerifyException, match="dma.slice element_type mismatch"):
-        op.verify()
-
-    bad_slice_space_type = _make_memory_type(space="shared")
-    op = DmaSliceOp(source, offsets, sizes, strides, bad_slice_space_type, _make_space("global"))
-    with pytest.raises(VerifyException, match="dma.slice space attribute must match result space"):
         op.verify()
 
     deslice_source = _TestOp(result_types=[source_type]).results[0]

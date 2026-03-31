@@ -852,7 +852,8 @@ class AnalyzeFuncCostPass(Pass):
         功能说明:
         - copy 使用 target 作为输出。
         - store 使用 target（第 2 个 operand）作为输出。
-        - load/slice/deslice/view/reshape/flatten/cast 使用 result。
+        - slice 使用 target（第 1 个 operand）作为输出。
+        - load/deslice/view/reshape/flatten/cast 使用 result。
 
         使用示例:
         - output_type = self._get_dma_output_type(op)
@@ -871,6 +872,10 @@ class AnalyzeFuncCostPass(Pass):
             if len(op.operands) < 2:
                 return None
             return self._get_mem_type(op.operands[1])
+        if op.name == "dma.slice":
+            if not op.operands:
+                return None
+            return self._get_mem_type(op.operands[0])
         if op.results:
             return self._get_mem_type(op.results[0])
         return None
@@ -968,7 +973,6 @@ class AnalyzeFuncCostPass(Pass):
             "dma.copy",
             "dma.load",
             "dma.store",
-            "dma.slice",
             "dma.deslice",
             "dma.view",
             "dma.reshape",
@@ -976,6 +980,10 @@ class AnalyzeFuncCostPass(Pass):
             "dma.cast",
         }:
             return list(op.operands[:1])
+        if name == "dma.slice":
+            if len(op.operands) < 2:
+                return []
+            return [op.operands[1]]
         return []
 
     def _write_bytes_from_output(self, op: Operation, mem_type: NnMemoryType) -> sp.Basic | None:

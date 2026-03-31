@@ -58,6 +58,7 @@
 - `!nn.memory<...>` 类型仍负责承载 rank、元素类型、内存空间以及可静态判定的布局信息；凡是运行期才确定的布局值，必须由 op operand 传入。
 - 若实现保留静态维度或静态 stride 在类型中，assembly 中的静态值也应允许通过 `!symbol.int<"1">` 这类 symbol 常量值、或等价 materialize 后的 `!symbol.int<"expr">` SSA value 显式传入 operand，保证“布局参数来源统一为 operand”。
 - `dma.load/store/slice/deslice` 的 `offsets/sizes/strides` 必须为 variadic `!symbol.int<"expr">` operand。
+- `dma.slice` 必须采用目标式 `dma.slice(target, source, offsets, sizes, strides)`：由 `target` 承载切片结果，op 本身不产生 result。
 - `dma.view` 中与动态布局相关的 `offsets/shape/stride` 元信息必须通过 `!symbol.int<"expr">` operand 显式传入；不得仅依赖结果类型里的符号维度推断。
 - `dma.view` 的 `shape/stride` operand 必须与 `result_type.shape/stride` 对齐；静态可判定时 `source/result` 的 `numel` 必须一致。
 - `dma.reshape` 仅接受动态 `shape` operand，且这些 operand 必须为 `!symbol.int<"expr">`；结果 `stride` 按 `shape` 的默认连续布局语义生成。
@@ -104,7 +105,7 @@
 | `cast(source, dtype, memoryspace=None)` | `dma.cast` | 显式元素类型转换。 |
 | `load(source, offsets, sizes, strides=None, space=None)` | `dma.load` | 切片读取。 |
 | `store(source, target, offsets, sizes, strides=None)` | `dma.store` | 切片写回。 |
-| `slice(source, offsets, sizes, strides=None, space=None)` | `dma.slice` | 切片结果返回。 |
+| `slice(source, offsets, sizes, strides=None, space=None)` | `dma.alloc + dma.slice(target, source, offsets, sizes, strides)` | 先分配 `target`，再执行目标式切片写入；表达式值绑定到 `dma.alloc` 的结果。 |
 | `deslice(source, target, offsets, sizes, strides=None)` | `dma.deslice` | 切片写回（语义等价于 `store`）。 |
 | `view(source, offset, size, stride)` | `dma.view` | 视图重解释，`offset/size/stride` 分别映射为 `dma.view` 的 `offsets/shape/stride` operand；`shape/stride` operand 必须与 `result_type.shape/stride` 对齐，静态可判定时要求 `source/result` `numel` 一致。 |
 | `reshape(source, shape)` | `dma.reshape` | 连续布局 reshape。 |
@@ -115,6 +116,7 @@
 - `view` 的 `offset/size/stride` 在方言层分别对应 `dma.view` 的 `offsets/shape/stride` operand；`shape/stride` operand 与 `result_type.shape/stride` 必须一致。
 - operation 层 `view` 返回值会继承 `source.stride`，而 `dma.view` 需要显式 `result_type.stride` 与 `stride` operand 对齐；因此映射时必须使用 `view` 调用参数，不能只依赖返回 `Memory` 规格。
 - operation 层允许“静态可判定的缩小 subview”（`size` 的 `numel` 小于 `source.shape`），但当前 `dma.view` 在静态可判定时要求 `source/result` `numel` 一致；该场景不属于当前 `dma.view` 的可验证映射子集。
+- `operation.slice(...)-> dma.alloc + dma.slice(target, source, offsets, sizes, strides)`：`dma.slice` 只负责把切片内容写入 `target`，不返回新的 memory result；operation 表达式返回值来自前置 `dma.alloc` 的 result。
 
 ## 公开接口
 
@@ -395,42 +397,36 @@ op = DmaStoreOp(source, target, offsets, sizes, strides)
 
 功能说明：
 
-- 表示从 `source` 中抽取一个切片块，语义上接近切片读取。
-- 它与 `dma.load` 一样返回新结果块，但更强调源区域裁剪而非整块空间搬运。
+- 表示把 `source` 指定切片区域写入预先分配的 `target`，语义上是“目标式切片搬运”。
+- 该 op 不分配新内存，也不返回结果值；切片结果由 `target` 承载。
 
 参数说明：
 
+- `target`：切片写入目标内存，类型为 `!nn.memory<...>`。
 - `source`：源内存，类型为 `!nn.memory<...>`。
 - `offsets`：variadic `!symbol.int<"expr">` operand；每一维表示对应维度的起始索引，长度必须与 `source.rank` 一致。
 - `sizes`：variadic `!symbol.int<"expr">` operand；每一维表示对应维度的切片大小，长度必须与 `source.rank` 一致。
 - `strides`：variadic `!symbol.int<"expr">` operand；每一维表示对应维度的切片步长，长度必须与 `source.rank` 一致，当前每一维必须具有单位步长语义。
-- `space`：切片结果所在空间，使用 `NnMemorySpaceAttr` 表示。
-- `result_type`：结果类型，必须为 `!nn.memory<...>`。
 
 使用示例：
 
 ```python
-op = DmaSliceOp(
-    source,
-    offsets,
-    sizes,
-    strides,
-    result_type,
-    NnMemorySpaceAttr.from_name("local"),
-)
+op = DmaSliceOp(target, source, offsets, sizes, strides)
 ```
 
 注意事项：
 
-- `result.shape` 由 `sizes` 决定。
-- `result.element_type` 必须与 `source.element_type` 一致。
+- `target.shape` 必须与 `sizes` 描述的切片形状一致。
+- `target.element_type` 必须与 `source.element_type` 一致。
 - 当前阶段必须限制 `strides` 为全 1；出现其他值时 verifier 必须报错。
 - `offsets/sizes/strides` 必须全部通过 `!symbol.int<"expr">` operand 提供。
+- `target` 与 `source` 必须是同 rank 且兼容布局的 `!nn.memory<...>`；该约束用于保证切片写入合法。
+- `dma.slice` 不负责返回新内存，若上层 API 需要切片表达式返回值，必须通过 `dma.alloc` 先构造 `target` 并返回该 `target`。
 
 返回与限制：
 
-- 返回新的 `!nn.memory<...>` 切片结果。
-- 可 lowering 到 `tensor.extract_slice`、`memref.subview` 或等价目标。
+- 返回类型为无返回值；当前 op result 数量固定为 `0`。
+- 可 lowering 到“对子视图目标执行 copy/insert”的等价目标形式。
 
 ### `dma.deslice`
 

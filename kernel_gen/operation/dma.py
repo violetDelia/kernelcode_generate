@@ -700,6 +700,7 @@ def slice(
 
     功能说明:
     - 返回新的 Memory 块，强调切片语义。
+    - lowering 会桥接为 `alloc + dma.slice(target, source, offsets, sizes, strides)`，返回值对应自动分配的 target。
 
     使用示例:
     - sub = slice(src, offsets=[0, 0], sizes=[8, 8], space=MemorySpace.LM)
@@ -709,7 +710,28 @@ def slice(
     - test: test/operation/test_operation_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
-    return load(source, offsets, sizes, strides=strides, space=space)
+    src = _ensure_memory(source, "source")
+    if space is not None and not isinstance(space, MemorySpace):
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="dma.slice 参数校验",
+                expected="space must be MemorySpace",
+                actual=type(space).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
+    offsets_shape = _normalize_index_list(offsets, "offsets")
+    sizes_shape = _normalize_index_list(sizes, "sizes")
+    strides_shape = None if strides is None else _normalize_index_list(strides, "strides")
+    _ensure_index_rank(src, offsets_shape, sizes_shape, strides_shape)
+    _ensure_sizes_positive(sizes_shape)
+    _ensure_offsets_non_negative(offsets_shape)
+    _ensure_strides_positive(strides_shape)
+    _ensure_bounds(src, offsets_shape, sizes_shape, strides_shape)
+    target_space = src.space if space is None else space
+    target = alloc(_clone_symbol_list(sizes_shape), src.dtype, space=target_space)
+    target.format = src.format
+    return target
 
 
 def deslice(

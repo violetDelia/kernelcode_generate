@@ -2307,23 +2307,21 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("LoadAST result must be nn.memory", location=expr.location)
         if expr.kind == "slice":
-            load_op = DmaSliceOp(
-                source,
-                offsets,
-                sizes,
-                strides,
-                result_type,
-                _memory_space_from_ast(expr.space, source_type.space),
-            )
-        else:
-            load_op = DmaLoadOp(
-                source,
-                offsets,
-                sizes,
-                strides,
-                result_type,
-                _memory_space_from_ast(expr.space, source_type.space),
-            )
+            alloc_shape = _build_index_operands_from_layout(result_type.shape, ctx, location=expr.location)
+            alloc_op = DmaAllocOp(alloc_shape, result_type)
+            ctx.builder.add_op(alloc_op)
+            slice_op = DmaSliceOp(alloc_op.result, source, offsets, sizes, strides)
+            ctx.builder.add_op(slice_op)
+            ctx._set_cache(expr_key, alloc_op.result)
+            return alloc_op.result
+        load_op = DmaLoadOp(
+            source,
+            offsets,
+            sizes,
+            strides,
+            result_type,
+            _memory_space_from_ast(expr.space, source_type.space),
+        )
         ctx.builder.add_op(load_op)
         ctx._set_cache(expr_key, load_op.result)
         return load_op.result

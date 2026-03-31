@@ -1511,9 +1511,15 @@ def test_build_func_op_supports_dma_slice_helper() -> None:
         return slice(src, [1, 1], [2, 2], [1, 1], MemorySpace.LM)
 
     func_op = build_func_op(slice_kernel, source)
+    alloc_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaAllocOp)]
     slice_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaSliceOp)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
     assert isinstance(func_op, func.FuncOp)
+    assert len(alloc_ops) == 1
     assert len(slice_ops) == 1
+    assert len(return_ops) == 1
+    assert slice_ops[0].target is alloc_ops[0].result
+    assert return_ops[0].operands[0] is alloc_ops[0].result
 
 
 # MGEN-026
@@ -2242,14 +2248,16 @@ def test_build_func_op_supports_symbolic_for_loop_dma_without_return(monkeypatch
     loop_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolForOp)]
     assert len(loop_ops) == 1
     loop_body_ops = list(loop_ops[0].body.block.ops)
+    alloc_ops = [op for op in loop_body_ops if isinstance(op, DmaAllocOp)]
     slice_ops = [op for op in loop_body_ops if isinstance(op, DmaSliceOp)]
     deslice_ops = [op for op in loop_body_ops if isinstance(op, DmaDesliceOp)]
+    assert len(alloc_ops) == 2
     assert len(slice_ops) == 2
     assert len(deslice_ops) == 1
     assert not any(isinstance(op, DmaLoadOp) for op in loop_body_ops)
     assert not any(isinstance(op, DmaStoreOp) for op in loop_body_ops)
     assert not any(isinstance(op, arith.IndexCastOp) for op in loop_body_ops)
-    assert slice_ops[0].space.space.data == "local"
+    assert alloc_ops[0].result.type.space.space.data == "local"
     loop_body = loop_ops[0].body.block
     assert isinstance(loop_body.args[0].type, SymbolValueType)
     offsets = list(slice_ops[0].offsets)
