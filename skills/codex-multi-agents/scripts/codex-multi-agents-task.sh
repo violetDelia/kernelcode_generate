@@ -5,7 +5,7 @@
 # 最后一次更改: 神秘人
 #
 # 功能:
-# - 管理 TODO.md 任务流转: 分发、完成、暂停、继续、改派、新建。
+# - 管理 TODO.md 任务流转: 分发、完成、暂停、继续、改派、新建、删除。
 # - 支持 DONE.md 自动创建与完成记录追加。
 # - 在分发、完成、暂停、继续时同步更新 agents-lists.md 角色状态。
 # - 在分发时可选调用 tmux 对话脚本，向目标角色发送任务消息。
@@ -34,6 +34,7 @@ OP_CONTINUE=0
 OP_REASSIGN=0
 OP_NEW=0
 OP_STATUS=0
+OP_DELETE=0
 
 FILE=""
 AGENTS_LIST=""
@@ -88,6 +89,7 @@ Usage:
   codex-multi-agents-task.sh -file <TODO.md> -new -info <desc> [-to <worker>] [-from <owner>] [-worktree <path>] [-log <record_path>]
   codex-multi-agents-task.sh -file <TODO.md> -status -doing
   codex-multi-agents-task.sh -file <TODO.md> -status -task-list
+  codex-multi-agents-task.sh -file <TODO.md> -delete -task_id <id>
 
 Examples:
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -dispatch -task_id EX-3 -to worker-a -agents-list ./agents/codex-multi-agents/agents-lists.md -message "请处理任务 EX-3"
@@ -98,6 +100,7 @@ Examples:
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -new -info "补充单元测试" -to worker-b -from 李白 -worktree repo-x -log ./log/record.md
   codex-multi-agents-task.sh ./skills/codex-multi-agents/examples/TODO.md -file -status -doing
   codex-multi-agents-task.sh ./skills/codex-multi-agents/examples/TODO.md -file -status -task-list
+  codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -delete -task_id EX-4
 
 Return codes:
   0 success
@@ -139,6 +142,10 @@ parse_args() {
         ;;
       -new)
         OP_NEW=1
+        shift
+        ;;
+      -delete)
+        OP_DELETE=1
         shift
         ;;
       -status)
@@ -276,7 +283,8 @@ parse_args() {
   [[ -n "$(trim "$FILE")" ]] || err "$RC_ARG" "empty value for -file"
 
   local op_count=$((OP_DISPATCH + OP_DONE + OP_PAUSE + OP_CONTINUE + OP_REASSIGN + OP_NEW + OP_STATUS))
-  [[ "$op_count" -eq 1 ]] || err "$RC_ARG" "exactly one operation is required: -dispatch|-done|-pause|-continue|-reassign|-new|-status"
+  op_count=$((op_count + OP_DELETE))
+  [[ "$op_count" -eq 1 ]] || err "$RC_ARG" "exactly one operation is required: -dispatch|-done|-pause|-continue|-reassign|-new|-status|-delete"
 
   if [[ "$OP_DISPATCH" -eq 1 ]]; then
     [[ "$HAS_TASK_ID" -eq 1 ]] || err "$RC_ARG" "-dispatch requires -task_id"
@@ -347,6 +355,12 @@ parse_args() {
     [[ "$HAS_TASK_ID" -eq 0 && "$HAS_TO" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_AGENTS_LIST" -eq 0 && "$HAS_MESSAGE" -eq 0 ]] || err "$RC_ARG" "-status does not accept -task_id/-to/-from/-info/-log/-worktree/-agents-list/-message"
     local status_count=$((HAS_DOING + HAS_TASK_LIST))
     [[ "$status_count" -eq 1 ]] || err "$RC_ARG" "-status requires exactly one of -doing/-task-list"
+  fi
+
+  if [[ "$OP_DELETE" -eq 1 ]]; then
+    [[ "$HAS_TASK_ID" -eq 1 ]] || err "$RC_ARG" "-delete requires -task_id"
+    [[ -n "$(trim "$TASK_ID")" ]] || err "$RC_ARG" "empty value for -task_id"
+    [[ "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_AGENTS_LIST" -eq 0 ]] || err "$RC_ARG" "-delete does not accept -to/-info/-log/-from/-worktree/-message/-agents-list"
   fi
 }
 
@@ -985,6 +999,21 @@ def main() -> int:
         list_rows.append([new_id, from_val, created_at, worktree_val, info, to, record_file])
         message_lines.append(f"OK: new {new_id}")
 
+    elif op == "delete":
+        exec_idx = find_row_index(exec_rows, task_id)
+        if exec_idx >= 0:
+            # 允许直接删除暂停任务，避免“待命/占位”任务长期滞留在正在执行列表。
+            if exec_rows[exec_idx][6].strip() != "暂停":
+                fail(RC_DATA, f"task already exists in running list: {task_id}")
+            exec_rows.pop(exec_idx)
+            message_lines.append(f"OK: delete {task_id}")
+        else:
+            idx = find_row_index(list_rows, task_id)
+            if idx < 0:
+                fail(RC_DATA, f"task not found in task list: {task_id}")
+            list_rows.pop(idx)
+            message_lines.append(f"OK: delete {task_id}")
+
     else:
         fail(RC_INTERNAL, f"unsupported operation: {op}")
 
@@ -1050,6 +1079,8 @@ main() {
     else
       op="status-task-list"
     fi
+  elif [[ "$OP_DELETE" -eq 1 ]]; then
+    op="delete"
   else
     err "$RC_INTERNAL" "unexpected operation state"
   fi

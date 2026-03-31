@@ -27,9 +27,24 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from collections.abc import Callable
 
 import sympy as sp
 import pytest
+from xdsl.dialects import arith, func
+from xdsl.dialects.builtin import (
+    ArrayAttr,
+    FunctionType,
+    IntAttr,
+    IntegerAttr,
+    ModuleOp,
+    StringAttr,
+    f32,
+    i1,
+    i32,
+)
+from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def, result_def
+from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -38,21 +53,226 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.analysis.analysis import (
     AnalysisError,
     AnalysisSummary,
+    AnalyzeKernelSummary,
     MemoryRef,
     OpStats,
     Operation,
+    ValueTraffic,
     analyze_add,
     analyze_elementwise,
     analyze_broadcast,
     analyze_broadcast_op,
     analyze_eq,
+    analyze_kernel,
     analyze_function,
     analyze_matmul,
     analyze_matmul_op,
 )
 import kernel_gen.analysis.analysis as analysis_module
+from kernel_gen.dialect.dma import DmaLoadOp
+from kernel_gen.dialect.nn import (
+    NnAddOp,
+    NnEqOp,
+    NnMatmulOp,
+    NnMemorySpaceAttr,
+    NnMemoryType,
+    NnMulOp,
+)
+from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
+
+
+@irdl_op_definition
+class FakeNnAddOp(IRDLOperation):
+    """测试用 nn.add op，允许常量 operand。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 用于构造 memory + const 的测试输入。
+
+    使用示例:
+    - FakeNnAddOp(lhs, const, result_type, space)
+
+    关联文件:
+    - spec: spec/analysis/analysis_kernel.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    name = "nn.add"
+
+    lhs = operand_def(Attribute)
+    rhs = operand_def(Attribute)
+    result = result_def(NnMemoryType)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        lhs: SSAValue | Operation,
+        rhs: SSAValue | Operation,
+        result_type: NnMemoryType,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        super().__init__(
+            operands=[lhs, rhs],
+            result_types=[result_type],
+            attributes={"space": space},
+        )
+
+
+@irdl_op_definition
+class UnknownOp(IRDLOperation):
+    """测试用未知 op。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 用于触发 analyze_kernel 的 unknown op warning。
+
+    使用示例:
+    - UnknownOp()
+
+    关联文件:
+    - spec: spec/analysis/analysis_kernel.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    name = "test.unknown"
+
+    def __init__(self) -> None:
+        super().__init__(operands=[], result_types=[])
+
+
+def _make_space(space_name: str) -> NnMemorySpaceAttr:
+    """构造 nn.memory 空间属性。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 统一从名称创建 NnMemorySpaceAttr。
+
+    使用示例:
+    - space = _make_space("global")
+
+    关联文件:
+    - spec: spec/analysis/analysis_kernel.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+    return NnMemorySpaceAttr.from_name(space_name)
+
+
+def _make_memory_type(
+    shape: list[Attribute],
+    element_type: Attribute,
+    space_name: str,
+    stride: list[Attribute] | None = None,
+) -> NnMemoryType:
+    """构造 nn.memory type。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 以 shape/stride/element_type/space 生成 NnMemoryType。
+
+    使用示例:
+    - mem_type = _make_memory_type([IntAttr(2), IntAttr(4)], f32, "global")
+
+    关联文件:
+    - spec: spec/analysis/analysis_kernel.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+    if stride is None:
+        stride = [IntAttr(1) for _ in shape]
+    return NnMemoryType(
+        ArrayAttr(shape),
+        ArrayAttr(stride),
+        element_type,
+        _make_space(space_name),
+    )
+
+
+def _build_module(
+    arg_types: list[Attribute],
+    result_type: Attribute,
+    op_builder: Callable[[Block], tuple[list[Operation], SSAValue]],
+) -> tuple[ModuleOp, func.FuncOp, Block]:
+    """构造包含单个 func 的 module。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 根据 op_builder 生成 ops，并追加 func.return。
+
+    使用示例:
+    - module, func_op, block = _build_module([lhs_type], result_type, builder)
+
+    关联文件:
+    - spec: spec/analysis/analysis_kernel.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+    block = Block(arg_types=arg_types)
+    ops, return_value = op_builder(block)
+    if not ops:
+        raise ValueError("op_builder must return at least one operation")
+    for op in ops:
+        block.add_op(op)
+    block.add_op(func.ReturnOp(return_value))
+    func_type = FunctionType.from_lists(arg_types, [result_type])
+    func_op = func.FuncOp("main", func_type, Region(block))
+    module = ModuleOp([func_op])
+    return module, func_op, block
+
+
+def _assert_expr_equal(actual: sp.Basic, expected: sp.Basic) -> None:
+    """断言 sympy 表达式等价。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 使用 sympy.simplify 校验表达式差值为 0。
+
+    使用示例:
+    - _assert_expr_equal(summary.total_compute, expected)
+
+    关联文件:
+    - spec: spec/analysis/analysis_kernel.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+    assert sp.simplify(actual - expected) == 0
+
+
+def _value_traffic_map(summary: AnalyzeKernelSummary) -> dict[str, ValueTraffic]:
+    """将 value_traffic 列表转为 dict。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 以 value_key 为 key 构造映射，方便断言。
+
+    使用示例:
+    - traffic = _value_traffic_map(summary)
+
+    关联文件:
+    - spec: spec/analysis/analysis_kernel.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+    return {item.value_key: item for item in summary.value_traffic}
 
 
 # AN-001
@@ -434,3 +654,287 @@ def test_analysis_function_unsupported_op() -> None:
     ops = [Operation("noop", [MemoryRef("A1", inp)], MemoryRef("B1", inp))]
     with pytest.raises(AnalysisError, match="Unsupported op for analysis"):
         analyze_function(ops)
+
+
+# AK-001
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-31 00:00:00 +0800
+# 最近一次运行成功时间: 2026-03-31 00:00:00 +0800
+# 测试目的: 验证 analyze_kernel 逐元素统计。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analyze_kernel_nn_add_symbolic_shape
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_kernel.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analyze_kernel_nn_add_symbolic_shape() -> None:
+    mem_type = _make_memory_type([StringAttr("A"), StringAttr("B")], f32, "global")
+    space = _make_space("global")
+
+    def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
+        add_op = NnAddOp(block.args[0], block.args[1], mem_type, space)
+        return [add_op], add_op.result
+
+    _, func_op, _ = _build_module([mem_type, mem_type], mem_type, _builder)
+    summary = analyze_kernel(func_op, dtype_size_overrides={"f32": 4})
+
+    expected_numel = SymbolDim("A").get_symbol() * SymbolDim("B").get_symbol()
+    assert summary.func_name == "main"
+    _assert_expr_equal(summary.total_compute, expected_numel)
+    _assert_expr_equal(summary.total_read_bytes, expected_numel * 2 * 4)
+    _assert_expr_equal(summary.total_write_bytes, expected_numel * 4)
+    assert summary.op_costs[0].op_name == "nn.add"
+
+
+# AK-002
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-31 00:00:00 +0800
+# 最近一次运行成功时间: 2026-03-31 00:00:00 +0800
+# 测试目的: 验证 analyze_kernel tensor + const 不计常量读流量。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analyze_kernel_tensor_plus_const
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_kernel.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analyze_kernel_tensor_plus_const() -> None:
+    mem_type = _make_memory_type([StringAttr("A"), StringAttr("B")], f32, "global")
+    space = _make_space("global")
+
+    def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
+        const_op = arith.ConstantOp(IntegerAttr(1, i32))
+        add_op = FakeNnAddOp(block.args[0], const_op.result, mem_type, space)
+        return [const_op, add_op], add_op.result
+
+    _, func_op, _ = _build_module([mem_type], mem_type, _builder)
+    summary = analyze_kernel(func_op, dtype_size_overrides={"f32": 4})
+
+    expected_numel = SymbolDim("A").get_symbol() * SymbolDim("B").get_symbol()
+    _assert_expr_equal(summary.total_compute, expected_numel)
+    _assert_expr_equal(summary.total_read_bytes, expected_numel * 4)
+    _assert_expr_equal(summary.total_write_bytes, expected_numel * 4)
+    traffic = _value_traffic_map(summary)
+    assert set(traffic.keys()) == {"arg0", "op0.result0"}
+
+
+# AK-003
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-31 00:00:00 +0800
+# 最近一次运行成功时间: 2026-03-31 00:00:00 +0800
+# 测试目的: 验证 value_traffic 对中间结果读写归属。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analyze_kernel_chain_value_traffic
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_kernel.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analyze_kernel_chain_value_traffic() -> None:
+    mem_type = _make_memory_type([StringAttr("A"), StringAttr("B")], f32, "global")
+    space = _make_space("global")
+
+    def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
+        add_op = NnAddOp(block.args[0], block.args[1], mem_type, space)
+        mul_op = NnMulOp(add_op.result, block.args[2], mem_type, space)
+        return [add_op, mul_op], mul_op.result
+
+    _, func_op, _ = _build_module([mem_type, mem_type, mem_type], mem_type, _builder)
+    summary = analyze_kernel(func_op, dtype_size_overrides={"f32": 4})
+    traffic = _value_traffic_map(summary)
+    for key in ["arg0", "arg1", "arg2", "op0.result0", "op1.result0"]:
+        assert key in traffic
+
+    expected_bytes = SymbolDim("A").get_symbol() * SymbolDim("B").get_symbol() * 4
+    _assert_expr_equal(traffic["op0.result0"].write_bytes, expected_bytes)
+    _assert_expr_equal(traffic["op0.result0"].read_bytes, expected_bytes)
+
+
+# AK-004
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-31 00:00:00 +0800
+# 最近一次运行成功时间: 2026-03-31 00:00:00 +0800
+# 测试目的: 验证 analyze_kernel matmul 公式。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analyze_kernel_matmul_formula
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_kernel.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analyze_kernel_matmul_formula() -> None:
+    lhs_type = _make_memory_type([StringAttr("M"), StringAttr("K")], f32, "global")
+    rhs_type = _make_memory_type([StringAttr("K"), StringAttr("N")], f32, "global")
+    out_type = _make_memory_type([StringAttr("M"), StringAttr("N")], f32, "global")
+    space = _make_space("global")
+
+    def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
+        matmul_op = NnMatmulOp(block.args[0], block.args[1], out_type, space)
+        return [matmul_op], matmul_op.result
+
+    _, func_op, _ = _build_module([lhs_type, rhs_type], out_type, _builder)
+    summary = analyze_kernel(func_op, dtype_size_overrides={"f32": 4})
+
+    m = SymbolDim("M").get_symbol()
+    n = SymbolDim("N").get_symbol()
+    k = SymbolDim("K").get_symbol()
+    _assert_expr_equal(summary.total_compute, sp.Integer(2) * m * n * k)
+    _assert_expr_equal(summary.total_read_bytes, (m * k + k * n) * 4)
+    _assert_expr_equal(summary.total_write_bytes, m * n * 4)
+
+
+# AK-005
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-31 00:00:00 +0800
+# 最近一次运行成功时间: 2026-03-31 00:00:00 +0800
+# 测试目的: 验证 dma.load 同时记录源读与结果写流量。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analyze_kernel_dma_load_tracks_source_and_result
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_kernel.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analyze_kernel_dma_load_tracks_source_and_result() -> None:
+    mem_type = _make_memory_type([IntAttr(2), IntAttr(2)], f32, "global")
+    space = _make_space("global")
+    symbol_types = [
+        SymbolValueType.from_expr("0"),
+        SymbolValueType.from_expr("0"),
+        SymbolValueType.from_expr("2"),
+        SymbolValueType.from_expr("2"),
+        SymbolValueType.from_expr("1"),
+        SymbolValueType.from_expr("1"),
+    ]
+
+    arg_types = [mem_type, *symbol_types]
+
+    def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
+        offsets = [block.args[1], block.args[2]]
+        sizes = [block.args[3], block.args[4]]
+        strides = [block.args[5], block.args[6]]
+        load_op = DmaLoadOp(block.args[0], offsets, sizes, strides, mem_type, space)
+        return [load_op], load_op.result
+
+    _, func_op, _ = _build_module(arg_types, mem_type, _builder)
+    summary = analyze_kernel(func_op, dtype_size_overrides={"f32": 4})
+    expected_bytes = sp.Integer(16)
+    _assert_expr_equal(summary.total_compute, sp.Integer(0))
+    _assert_expr_equal(summary.total_read_bytes, expected_bytes)
+    _assert_expr_equal(summary.total_write_bytes, expected_bytes)
+
+    traffic = _value_traffic_map(summary)
+    _assert_expr_equal(traffic["arg0"].read_bytes, expected_bytes)
+    _assert_expr_equal(traffic["op0.result0"].write_bytes, expected_bytes)
+
+
+# AK-006
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-31 00:00:00 +0800
+# 最近一次运行成功时间: 2026-03-31 00:00:00 +0800
+# 测试目的: 验证 analyze_kernel 拒绝非 func 输入。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analyze_kernel_rejects_non_func_input
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_kernel.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analyze_kernel_rejects_non_func_input() -> None:
+    module = ModuleOp([])
+    with pytest.raises(AnalysisError, match="func.FuncOp"):
+        analyze_kernel(module)
+
+
+# AK-007
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-31 00:00:00 +0800
+# 最近一次运行成功时间: 2026-03-31 00:00:00 +0800
+# 测试目的: 验证 analyze_kernel 拒绝非 iterable args。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analyze_kernel_rejects_non_iterable_args
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_kernel.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analyze_kernel_rejects_non_iterable_args() -> None:
+    mem_type = _make_memory_type([IntAttr(2), IntAttr(2)], f32, "global")
+    space = _make_space("global")
+
+    def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
+        add_op = NnAddOp(block.args[0], block.args[1], mem_type, space)
+        return [add_op], add_op.result
+
+    _, func_op, _ = _build_module([mem_type, mem_type], mem_type, _builder)
+    with pytest.raises(AnalysisError, match="args must be iterable"):
+        analyze_kernel(func_op, args=object())
+
+
+# AK-008
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-31 00:00:00 +0800
+# 最近一次运行成功时间: 2026-03-31 00:00:00 +0800
+# 测试目的: 验证 analyze_kernel args 长度与参数位次不匹配时报错。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analyze_kernel_rejects_args_length_mismatch
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_kernel.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analyze_kernel_rejects_args_length_mismatch() -> None:
+    mem_type = _make_memory_type([IntAttr(2), IntAttr(2)], f32, "global")
+    space = _make_space("global")
+
+    def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
+        add_op = NnAddOp(block.args[0], block.args[1], mem_type, space)
+        return [add_op], add_op.result
+
+    _, func_op, _ = _build_module([mem_type, mem_type], mem_type, _builder)
+    with pytest.raises(AnalysisError, match="args length mismatch"):
+        analyze_kernel(func_op, args=[object()])
+
+
+# AK-009
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-31 00:00:00 +0800
+# 最近一次运行成功时间: 2026-03-31 00:00:00 +0800
+# 测试目的: 验证未知 op skip + warning。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analyze_kernel_unknown_op_warns_and_skips
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_kernel.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analyze_kernel_unknown_op_warns_and_skips() -> None:
+    mem_type = _make_memory_type([StringAttr("A"), StringAttr("B")], f32, "global")
+    space = _make_space("global")
+
+    def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
+        unknown = UnknownOp()
+        add_op = NnAddOp(block.args[0], block.args[1], mem_type, space)
+        return [unknown, add_op], add_op.result
+
+    _, func_op, _ = _build_module([mem_type, mem_type], mem_type, _builder)
+    with pytest.warns(UserWarning, match="test.unknown"):
+        summary = analyze_kernel(func_op, dtype_size_overrides={"f32": 4})
+
+    expected_numel = SymbolDim("A").get_symbol() * SymbolDim("B").get_symbol()
+    _assert_expr_equal(summary.total_compute, expected_numel)
+    assert len(summary.op_costs) == 1
+
+
+# AK-010
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-03-31 00:00:00 +0800
+# 最近一次运行成功时间: 2026-03-31 00:00:00 +0800
+# 测试目的: 验证 compare i1 写回使用 predicate_size 优先级。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analyze_kernel_compare_i1_uses_predicate_size
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_kernel.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analyze_kernel_compare_i1_uses_predicate_size() -> None:
+    lhs_type = _make_memory_type([StringAttr("A"), StringAttr("B")], f32, "global")
+    rhs_type = _make_memory_type([StringAttr("A"), StringAttr("B")], f32, "global")
+    out_type = _make_memory_type([StringAttr("A"), StringAttr("B")], i1, "global")
+    space = _make_space("global")
+
+    def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
+        eq_op = NnEqOp(block.args[0], block.args[1], out_type, space)
+        return [eq_op], eq_op.result
+
+    _, func_op, _ = _build_module([lhs_type, rhs_type], out_type, _builder)
+    summary = analyze_kernel(
+        func_op,
+        predicate_size=2,
+        dtype_size_overrides={"f32": 4, "i1": 8},
+    )
+
+    expected_numel = SymbolDim("A").get_symbol() * SymbolDim("B").get_symbol()
+    _assert_expr_equal(summary.total_write_bytes, expected_numel * 2)

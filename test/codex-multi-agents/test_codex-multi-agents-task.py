@@ -4,12 +4,12 @@
 最后一次更改: 神秘人
 
 功能说明:
-- 覆盖 task 脚本的任务分发、完成、暂停、继续、改派、新建、状态查询与错误返回码路径。
+- 覆盖 task 脚本的任务分发、完成、暂停、继续、改派、新建、删除、状态查询与错误返回码路径。
 
 覆盖率信息:
 - 当前覆盖率: `N/A`。该链路的功能实现为 shell 脚本 `skills/codex-multi-agents/scripts/codex-multi-agents-task.sh`，`pytest-cov` 无法直接采集脚本覆盖率，执行覆盖率命令会得到 `no-data-collected`。
 - 达标判定: shell 实现按规则豁免 `95%` 覆盖率达标线。
-- 当前以 `TC-001..025` 共 25 条测试用例作为覆盖基线，覆盖分发、分发前初始化、分发消息发送、完成、暂停、继续、改派、新建、状态查询、文件错误、结构错误与锁冲突路径。
+- 当前以 `TC-001..029` 共 29 条测试用例作为覆盖基线，覆盖分发、分发前初始化、分发消息发送、完成、暂停、继续、改派、新建、删除、状态查询、文件错误、结构错误与锁冲突路径。
 
 覆盖率命令:
 - `pytest -q --cov=skills/codex-multi-agents/scripts/codex-multi-agents-task.sh --cov-branch --cov-report=term-missing test/codex-multi-agents/test_codex-multi-agents-task.py`
@@ -916,3 +916,97 @@ def test_reassign_requires_agents_list(tmp_path: Path) -> None:
 
     assert result.returncode == 1
     assert "-reassign requires -agents-list" in result.stderr
+
+
+# TC-026
+# 创建者: 神秘人
+# 最后一次更改: 神秘人
+# 最近一次运行测试时间: 2026-03-29 19:15:00 +0800
+# 最近一次运行成功时间: 2026-03-29 19:15:00 +0800
+# 测试目的: 验证 -delete 成功删除任务列表中的任务。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_delete_task_list_success(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file(todo)
+
+    result = run_script("-file", str(todo), "-delete", "-task_id", "EX-3")
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+    list_rows = parse_section_rows(content, "## 任务列表")
+
+    assert result.returncode == 0
+    assert "OK: delete EX-3" in result.stdout
+    assert any(r[0] == "EX-1" for r in running_rows)
+    assert not any(r[0] == "EX-3" for r in list_rows)
+
+
+# TC-027
+# 创建者: 神秘人
+# 最后一次更改: 神秘人
+# 最近一次运行测试时间: 2026-03-29 19:15:00 +0800
+# 最近一次运行成功时间: 2026-03-29 19:15:00 +0800
+# 测试目的: 验证 -delete 任务不存在返回 RC=3。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_delete_missing_task_returns_rc3(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file(todo)
+
+    result = run_script("-file", str(todo), "-delete", "-task_id", "BAD")
+
+    assert result.returncode == 3
+    assert "task not found in task list: BAD" in result.stderr
+
+
+# TC-028
+# 创建者: 神秘人
+# 最后一次更改: 神秘人
+# 最近一次运行测试时间: 2026-03-29 19:15:00 +0800
+# 最近一次运行成功时间: 2026-03-29 19:15:00 +0800
+# 测试目的: 验证 -delete 任务位于正在执行列表时返回 RC=3。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_delete_running_task_returns_rc3(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file(todo)
+
+    result = run_script("-file", str(todo), "-delete", "-task_id", "EX-1")
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+
+    assert result.returncode == 3
+    assert "task already exists in running list: EX-1" in result.stderr
+    assert any(r[0] == "EX-1" for r in running_rows)
+
+
+# TC-029
+# 创建者: 神秘人
+# 最后一次更改: 神秘人
+# 最近一次运行测试时间: 2026-03-31 10:20:00 +0800
+# 最近一次运行成功时间: 2026-03-31 10:20:00 +0800
+# 测试目的: 验证 -delete 允许删除状态为暂停的正在执行任务。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_delete_paused_running_task_success(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file(
+        todo,
+        running_rows=[
+            row_running("EX-1", "李白", "2026-03-08 16:10:00 +0800", ".", "创建 src", "worker-a", "进行中", "xxx", "./log/ex1.md"),
+            row_running("EX-2", "杜甫", "2026-03-08 16:20:00 +0800", ".", "创建 test", "worker-b", "暂停", "xxx", "./log/ex2.md"),
+        ],
+    )
+    write_agents_file(agents, rows=[agent_row("worker-a", "busy"), agent_row("worker-b", "free")])
+
+    result = run_script("-file", str(todo), "-delete", "-task_id", "EX-2")
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+    list_rows = parse_section_rows(content, "## 任务列表")
+
+    assert result.returncode == 0
+    assert "OK: delete EX-2" in result.stdout
+    assert any(r[0] == "EX-1" for r in running_rows)
+    assert not any(r[0] == "EX-2" for r in running_rows)
+    assert not any(r[0] == "EX-2" for r in list_rows)

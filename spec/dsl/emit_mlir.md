@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`不要啊教练`
 - `spec`：[`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)
 - `功能实现`：[`kernel_gen/dsl/emit_mlir.py`](../../kernel_gen/dsl/emit_mlir.py)
 - `test`：[`test/dsl/test_emit_mlir.py`](../../test/dsl/test_emit_mlir.py)
@@ -44,7 +44,7 @@
 - 当 DSL AST 表达 `alloc`、`copy`、`cast`、`view`、`reshape`、`flatten`、`load`、`store`、`slice`、`deslice` 这组 DMA helper 调用时，`emit_mlir` 必须按对应 memory 语义 lowering；其中 `flatten` 公开上视为一维 `reshape` 语义，不要求生成独立 dialect op。
 - 当 `CompareExprAST(op="ne")` 来自 `lhs != rhs` 入口且两侧为 `nn.memory` 时，必须 lowering 为 `nn.ne`；允许按隐式 broadcast 规则插入 `nn.broadcast`，若无法广播必须报错 `Implicit broadcast dimension mismatch`，若 element type 不一致必须报错 `Binary op operands must have the same element_type`。
 - 当 `BinaryExprAST(op="mul")` 来自 `lhs * rhs` 或 `nn.mul(lhs, rhs)` 入口且两侧为 `nn.memory` 时，必须 lowering 为 `nn.mul`；若 shape 不一致但可 broadcast，允许按需插入 `nn.broadcast`，若不可 broadcast 必须报错 `Implicit broadcast dimension mismatch`。当两侧 `element_type` 不一致但 `space` 一致时，必须按二元算术 dtype promotion（`i32 < f16 < f32`）决议目标 element_type，并仅对非目标侧插入 `dma.cast` 再发射 `nn.mul`；若 `space` 不一致必须报错 `Binary op operands must have the same space`。
-- `free` 必须作为语句型 helper 处理，不产生新的 SSA 结果；合法输入必须在当前位置发射单个 `dma.free`。`free` 仅允许单参数调用且参数必须为 `nn.memory`，非法参数个数与参数类型分别保持 `Unsupported free arity`、`Operand must be nn.memory` 诊断口径。
+- `free` 必须作为语句型 helper 处理，不产生新的 SSA 结果，也不承诺生成独立的 `dma.free` op。
 - `ArchQueryAST(query_name="get_block_id")` 必须 lowering 为单个 `arch.get_block_id`，并保持结果类型为 `!symbol.int<"block_id">`。
 - `ArchQueryAST(query_name="get_block_num")` 必须 lowering 为单个 `arch.get_block_num`，并保持结果类型为 `!symbol.int<"block_num">`。
 - `ArchQueryAST(query_name="get_subthread_id")` 必须 lowering 为单个 `arch.get_subthread_id`，并保持结果类型为 `!symbol.int<"subthread_id">`。
@@ -53,6 +53,7 @@
 - `ArchQueryAST(query_name="get_thread_num")` 必须 lowering 为单个 `arch.get_thread_num`，并保持结果类型为 `!symbol.int<"thread_num">`。
 - `ArchGetDynamicMemoryAST(space=...)` 必须 lowering 为单个 `arch.get_dynamic_memory`，结果类型固定为 `!nn.memory<[?], [1], i8, #nn.space<space>>`；`space` 非 `SM/LM/TSM/TLM` 时必须报错。
 - `ArchLaunchKernelAST(name, block, thread, subthread)` 必须 lowering 为单个无返回值 `arch.launch_kernel`；extent 公开语义统一为 `!symbol.int` 启动规模：AST 虽允许 `int | SymbolDim` 入口，但 emit 阶段若 extent 不是 `!symbol.int<"...">`（或可静态判定为 `<= 0`）必须报错。
+- `TensorAxisAccessAST(tensor, kind, axis)` 必须按节点语义降级为 symbol 方言查询：`kind="shape"` lowering 为 `symbol.get_dim`，`kind="stride"` lowering 为 `symbol.get_stride`。其中 `tensor` 必须为 `nn.memory` 值，`axis` 必须为静态非负整数且落在 rank 范围内；不满足约束时必须报错（例如 `get_shape source must be nn.memory`、`get_shape axis must be static int`、`get_shape axis out of range`、`Unsupported tensor axis access kind`）。
 
 ## 公开接口
 
@@ -126,8 +127,7 @@ value = emit_mlir(expr_ast, ctx)
 - 当 `CompareExprAST` 的两侧均为 `!symbol.int<"expr">` 时，`eq` 必须 lowering 为 `symbol.eq`，`ge` 必须 lowering 为 `symbol.ge`，两者结果类型均为 `i1`；其余 symbol 比较操作符必须报错 `Unsupported symbol compare op`。
 - 当 `CompareExprAST` 进入 memory 路径时，`lhs/rhs` 必须为 `nn.memory` 类型且 `element_type`/`space` 一致；必要时执行隐式 broadcast。若 `element_type`/`space` 不一致或 broadcast 失败，必须报错并保留位置（例如 `Binary op operands must have the same element_type`、`Binary op operands must have the same space`、`Implicit broadcast dimension mismatch`）。memory 路径的比较结果 element type 必须为 `i1`，并保持与 broadcast 对齐后的 shape/space 一致。
 - 当 tensor `truediv` 两侧 dtype 不一致时，必须按固定优先级决议目标 dtype，并在 lowering 中插入 `dma.cast`；`nn.truediv` 的结果类型必须与决议 dtype 一致。
-- 当 `BinaryExprAST(op="add")` 进入 memory 路径且另一侧为常量或 symbol 标量时，`emit_mlir` 必须按 mixed memory+const/symbol 语义完成 lowering：至少一侧 operand 为 `nn.memory`，`!symbol.int` 按 `i32` 参与 dtype promotion，promotion 顺序固定为 `i32 < f16 < f32`，并仅对非目标侧插入最少 `dma.cast`；结果 `nn.add` 的 `shape/stride/space` 必须继承 memory operand，`result.element_type` 必须与 promotion 结果一致。若出现纯 scalar/symbol 双侧输入、非法 scalar dtype 或 memory `space` 不一致，必须报错并保留定位信息。
-- 当二元算术 mixed dtype 需要插入显式 cast 时（由上游判定并生成 `DmaCastAST`），`emit_mlir` 必须发射 `dma.cast` 并保证 `nn.sub` 的结果类型与 dtype promotion 结果一致；当前公开覆盖包含 `nn.sub` 与 `nn.add` 的 mixed dtype 场景。
+- 当二元算术 mixed dtype 需要插入显式 cast 时（由上游判定并生成 `DmaCastAST`），`emit_mlir` 必须发射 `dma.cast` 并保证 `nn.sub` 的结果类型与 dtype promotion 结果一致；当前公开覆盖仅限 `nn.sub` 的 mixed dtype 场景。
 - 当 `BinaryExprAST(op="mul")` 走 memory 路径时，`emit_mlir` 必须负责 `dtype promotion + dma.cast + broadcast` 的完整对齐流程：`element_type` 不一致时按 `i32 < f16 < f32` 决议目标类型并插入最少 `dma.cast`，shape 不一致时按 implicit broadcast 对齐；若 `space` 不一致必须报错 `Binary op operands must have the same space`，若 dtype 组合不受支持则报错 `Binary op operands must have the same element_type`。
 - DMA helper 的公开 lowering 约束如下：
   - `alloc(...)`：lowering 为 `dma.alloc`，返回新的 memory value。
@@ -138,7 +138,7 @@ value = emit_mlir(expr_ast, ctx)
   - `flatten(...)`：按一维 `reshape` 语义 lowering，返回一维 memory value。
   - `load(...)` / `slice(...)`：lowering 为读取类 DMA op，返回读取结果。
   - `store(...)` / `deslice(...)`：lowering 为写回类 DMA op，作为语句执行。
-  - `free(...)`：lowering 为单个 `dma.free` 语句，不产生新的 SSA 返回值。
+  - `free(...)`：作为语句执行，不产生新的 SSA 返回值。
 
 节点映射示例：
 
@@ -148,8 +148,10 @@ value = emit_mlir(expr_ast, ctx)
 - `LoadAST`：生成张量读取相关 op/value；当携带 `sizes` 时发射 `dma.slice`。
 - `StoreAST`：生成张量写入相关 op；当携带 `sizes` 时发射 `dma.deslice`。
 - `CallAST(alloc/copy/cast/view/reshape/flatten)`：生成对应 DMA memory 结果。
-- `CallAST(free)`：发射单个无返回值 `dma.free` 语句。
+- `CallAST(free)`：作为无返回值语句处理。
 - `ForAST`：当来源于 `LoopRange(start, end, step)` 且边界为 symbol 整数时，生成 `symbol.for`；循环体内若包含 `dma.slice` / `dma.deslice`，其 DMA 标量 operand 直接使用 `!symbol.int<"expr">` value，不生成 `arith.index_cast`。
+- `TensorAxisAccessAST(kind="shape")`：生成 `symbol.get_dim`，返回 `!symbol.int<"...">`。
+- `TensorAxisAccessAST(kind="stride")`：生成 `symbol.get_stride`，返回 `!symbol.int<"...">`。
 - `ArchQueryAST(query_name="get_block_id")`：生成 `arch.get_block_id`，返回 `!symbol.int<"block_id">`。
 - `ArchQueryAST(query_name="get_block_num")`：生成 `arch.get_block_num`，返回 `!symbol.int<"block_num">`。
 - `ArchQueryAST(query_name="get_subthread_id")`：生成 `arch.get_subthread_id`，返回 `!symbol.int<"subthread_id">`。
@@ -173,10 +175,8 @@ value = emit_mlir(expr_ast, ctx)
   - 覆盖常见表达式与语句节点的发射结果。
   - 覆盖 `lhs != rhs` 到 `CompareExprAST(op="ne")` 的 memory lowering：`nn.ne` 结果为 `i1`，并支持 implicit broadcast。
   - 覆盖 `CompareExprAST(op="ne")` memory 路径在不可 broadcast 与 element type 不一致时的错误分支与诊断文案。
-  - 覆盖 `BinaryExprAST(op="add")` mixed memory+const/symbol lowering：`!symbol.int -> i32` promotion、按需 `dma.cast` 插入、以及纯 scalar/symbol 输入拒绝路径。
   - 覆盖 `LoopRange` -> `symbol.for` 与 `it`/DMA operand 直接保持 `symbol.int` 的发射规则。
-  - 覆盖 DMA helper 调用的 lowering 结果与语句/表达式边界：`alloc/copy/cast/view/reshape/flatten` 产生 memory 结果，`free` 为无返回值语句且会发射 `dma.free`。
-  - 覆盖 `free` helper 的参数边界：非法参数个数与非法 source 类型分别保持 `Unsupported free arity`、`Operand must be nn.memory` 诊断口径。
+  - 覆盖 DMA helper 调用的 lowering 结果与语句/表达式边界：`alloc/copy/cast/view/reshape/flatten` 产生 memory 结果，`free` 为无返回值语句。
   - 覆盖 `ArchQueryAST(query_name="get_block_id")` lowering 为 `arch.get_block_id` 的最小查询路径。
   - 覆盖 `ArchQueryAST(query_name="get_block_num")` lowering 为 `arch.get_block_num` 的最小查询路径。
   - 覆盖 `ArchQueryAST(query_name="get_subthread_id")` lowering 为 `arch.get_subthread_id` 的最小查询路径。
@@ -186,6 +186,8 @@ value = emit_mlir(expr_ast, ctx)
   - 覆盖 `get_thread_num` helper 的参数约束错误路径，确保 `ArchQueryAST(query_name="get_thread_num")` 的入口边界稳定。
   - 覆盖 `ArchGetDynamicMemoryAST(space=...)` lowering 为 `arch.get_dynamic_memory` 的结果类型与 `space` 约束错误路径。
   - 覆盖 `ArchLaunchKernelAST(name, block, thread, subthread)` lowering 为 `arch.launch_kernel` 的语句语义与参数错误路径。
+  - 覆盖 `TensorAxisAccessAST(kind="shape")` lowering 为 `symbol.get_dim`，并校验 `axis` 与 `nn.memory` 前置约束。
+  - 覆盖 `TensorAxisAccessAST(kind="stride")` lowering 为 `symbol.get_stride`，并校验 `axis` 与 `nn.memory` 前置约束。
   - 覆盖不支持节点的错误路径。
 - 功能与用例清单：
   - EMIT-001：二元表达式节点生成对应 op/value。（`test_emit_context_reuses_cached_value`）
@@ -216,7 +218,7 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-018：`view(...)` lowering 为 `dma.view` 并返回视图 memory 结果。（`test_emit_mlir_dma_view_lowering`）
   - EMIT-019：`reshape(...)` lowering 为 `dma.reshape` 并返回重排后的 memory 结果。（`test_emit_mlir_dma_reshape_lowering`）
   - EMIT-020：`flatten(...)` 以一维 `reshape` 语义 lowering，返回一维 memory 结果。（`test_emit_mlir_dma_flatten_lowering`）
-  - EMIT-021：`free(...)` 在合法输入下必须发射单个 `dma.free` 且不产生新的 SSA 结果；非法 source 类型必须报错 `Operand must be nn.memory`。（`test_emit_mlir_dma_free_statement`）
+  - EMIT-021：`free(...)` 作为无返回值语句执行，不产生新的 SSA 结果。（`test_emit_mlir_dma_free_statement`）
   - EMIT-022：`ArchQueryAST(query_name="get_block_id")` lowering 为单个 `arch.get_block_id`，并返回 `!symbol.int<"block_id">`。（`test_emit_mlir_lowers_arch_get_block_id_query`）
   - EMIT-023：`ArchQueryAST(query_name="get_block_num")` lowering 为单个 `arch.get_block_num`，并返回 `!symbol.int<"block_num">`。（`test_emit_mlir_lowers_arch_get_block_num_query`）
   - EMIT-024：纯 symbol 标量 `>=` 比较在 emit 阶段 lowering 为 `symbol.ge` 且结果为 `i1`；对 symbol 路径中除 `eq/ge` 以外的比较操作符报错 `Unsupported symbol compare op`。（`test_emit_mlir.py::test_emit_mlir_lowers_symbol_ge`、`test_ast_visitor.py::test_emit_mlir_lowers_symbol_ge`）
@@ -228,7 +230,8 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-029：tensor `truediv` mixed dtype promotion 需插入 `dma.cast`，且 `nn.truediv` 结果类型与决议 dtype 一致。（`test_mlir_gen.py::test_tensor_truediv_dtype_promotion_lowering`、`test_ast_visitor.py::test_tensor_truediv_dtype_promotion_lowering`）
   - EMIT-031：`ArchGetDynamicMemoryAST(space=...)` lowering 为 `arch.get_dynamic_memory`，并固定返回 `!nn.memory<[?], [1], i8, #nn.space<space>>`；非法 `space` 必须报错。（`test_ast_visitor.py::test_emit_mlir_rejects_invalid_arch_get_dynamic_memory_space`）
   - EMIT-032：`ArchLaunchKernelAST(name, block, thread, subthread)` lowering 为单个无返回值 `arch.launch_kernel`；extent 必须为正整数 `!symbol.int`，非法 `name`/extent 必须报错。（`test_ast_visitor.py::test_emit_mlir_rejects_invalid_arch_launch_kernel_args`）
+  - EMIT-033：`TensorAxisAccessAST(kind="shape")` 必须 lowering 为 `symbol.get_dim`，并保持 `axis` 为静态非负整数且未越界；非 `nn.memory` 来源或非法 `axis` 必须报错。（`expectation/dsl/mlir_gen/dialect/symbol/get_dim.py`）
+  - EMIT-034：`TensorAxisAccessAST(kind="stride")` 必须 lowering 为 `symbol.get_stride`，并保持 `axis` 为静态非负整数且未越界；非 `nn.memory` 来源或非法 `axis` 必须报错。（`expectation/dsl/mlir_gen/dialect/symbol/get_stride.py`）
   - EMIT-002A：`CompareExprAST(op="ne")` 在 memory 路径必须生成 compare op（必要时带 `nn.broadcast`），结果 element type 为 `i1`。（`test_emit_mlir_binary_compare_broadcast_rhs`）
   - EMIT-002B：`CompareExprAST(op="ne")` memory 路径在不可 broadcast 或 element type/space 不一致时必须报错并保持固定诊断文案。（`test_emit_mlir_compare_memory_mismatch_reports_diagnostics`）
   - EMIT-028：`nn.sub` mixed dtype promotion 触发 `dma.cast` 并保持 `nn.sub` 与 `func.return` 的结果类型与 promotion 结果一致。（`test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast`）
-  - EMIT-033：`nn.add` mixed memory+const/symbol lowering 需按 `i32 < f16 < f32` 执行 dtype promotion，`!symbol.int` 按 `i32` 参与决议；仅允许一侧为 memory 并按需插入 `dma.cast`，纯 scalar/symbol 双侧输入必须拒绝。（`test/dialect/test_nn_dialect.py::test_add_op_accepts_memory_const_rhs`、`test/dialect/test_nn_dialect.py::test_add_op_accepts_memory_symbol_rhs`、`test/dialect/test_nn_dialect.py::test_add_op_rejects_pure_scalar_operands`）

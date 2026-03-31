@@ -65,27 +65,6 @@ codex-multi-agents-tmux.sh -talk -from "scheduler" -to "worker-a" -agents-list "
 ```bash
 codex-multi-agents-tmux.sh -wake -file "agents-lists.md" -name xiaoming
 ```
-
-功能说明：
-
-- 通过名单文件读取目标角色 `会话`、`启动设置/启动类型`、`agent session` 字段。
-- 执行 `tmux new-session -d -s <会话>` 创建会话。
-  - [immutable]若启动类型为 `codex`，依次执行以下初始化命令,中间间隔"3"秒：
-    - `tmux send-keys -t <会话> "codex"`
-    - `tmux send-keys -t <会话> "/rename <agent session>"`
-    - `tmux send-keys -t <会话> ENTER`
-注意事项：
-
-- `-file`、`-name` 为必填参数。
-- `-wake` 不接受 `-from/-to/-message/-log` 参数。
-- 若名单文件缺失、不可读或格式不合法，返回文件错误。
-- 若角色不存在或关键字段读取失败，返回数据错误。
-
-## 唤醒角色
-```bash
-codex-multi-agents-tmux.sh -init-env -file "agents-lists.md" -name xiaoming
-```
-
 功能说明：
 
 - 通过名单文件读取目标角色 `会话`、`启动设置/启动类型`、`agent session` 字段。
@@ -107,6 +86,27 @@ codex-multi-agents-tmux.sh -init-env -file "agents-lists.md" -name xiaoming
 - 返回码：`0`
 - 含义：命令执行成功，目标操作已完成。
 - 输出：在标准输出（stdout）打印结果信息。
+
+
+## 唤醒角色
+```bash
+codex-multi-agents-tmux.sh -init-env -file "agents-lists.md" -name xiaoming
+```
+功能说明：
+
+- 通过名单文件读取目标角色 `会话`、`启动设置/启动类型`、`agent session` 字段。
+- 执行 `tmux new-session -d -s <会话>` 创建会话。
+  - [immutable]若启动类型为 `codex`，依次执行以下初始化命令,中间间隔"3"秒：
+    - `tmux send-keys -t <会话> "codex"`
+    - `tmux send-keys -t <会话> "/resume <agent session>"`
+    - `tmux send-keys -t <会话> ENTER`
+注意事项：
+
+- `-file`、`-name` 为必填参数。
+- `-wake` 不接受 `-from/-to/-message/-log` 参数。
+- 若名单文件缺失、不可读或格式不合法，返回文件错误。
+- 若角色不存在或关键字段读取失败，返回数据错误。
+
 
 ### 失败返回说明
 

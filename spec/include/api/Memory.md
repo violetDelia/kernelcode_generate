@@ -5,12 +5,13 @@
 定义统一对外 `Memory<T>` API 规范，描述多维内存视图的元信息与访问接口，`rank` 为运行期维度。该规范不绑定具体后端实现，也不负责内存分配、释放、拷贝或运行时边界检查。
 
 - `Memory<T>` 是视图类型，仅保存 `data`、`shape`、`stride`、`rank`、`format`、`space` 元信息，不拥有底层存储。
+- `get_shape(axis)` 与 `get_stride(axis)` 是 include/api 层统一公开的按轴查询接口；后端 spec 不得重新发明同义查询名称。
 - 连续布局指 `stride` 等于按 `shape` 自后向前推导出的行主序步幅；若需要连续步幅，由调用方提供可写缓冲并显式生成。
 
 ## 文档信息
 
 - 创建者：`神秘人`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`大闸蟹`
 - `spec`：[`spec/include/api/Memory.md`](../../../spec/include/api/Memory.md)
 - `功能实现`：无（API 规范不绑定实现）
 - `test`：无（API 规范不提供测试）
@@ -23,6 +24,7 @@
 
 - 为跨后端的多维数据视图提供统一的 API 标准与最小元信息表达，`rank` 使用运行期维度。
 - 明确元素类型、维度、布局格式与内存空间等基础语义，便于上层在不复制数据的前提下传递张量信息。
+- 为统一代码生成目标提供稳定的按轴查询接口，避免 `get_shape/get_stride` 被后端私有头文件重复定义。
 - 约束 API 不依赖 C++ 标准库与异常机制，便于在受限环境落地实现。
 
 ## 限制与边界
@@ -174,6 +176,7 @@ int value = mem.at(index);
 - 本规范不提供动态分配，`shape/stride` 由调用方持有并保证生命周期。
 - `data()` 提供 `T*` 与 `const T*` 两个重载；`at()` 提供 `T&` 与 `const T&` 两个重载。
 - `shape()`、`stride()` 返回内部指针；调用方需自行保证后续访问合法。
+- `get_shape(axis)` 与 `get_stride(axis)` 为统一公开查询接口；调用方需保证 `0 <= axis < rank()`。
 - `linear_offset()` 与 `at()` 不做运行时范围检查。
 
 返回与限制：
@@ -183,6 +186,8 @@ int value = mem.at(index);
   - 构造时记录 `data/shape/stride/rank/format/space`。
   - `data()` 返回底层数据指针。
   - `shape()` 与 `stride()` 返回数组指针。
+  - `get_shape(axis)` 返回 `shape[axis]`。
+  - `get_stride(axis)` 返回 `stride[axis]`。
   - `rank()` 返回运行期维度数。
   - `format()` 与 `space()` 返回当前记录的布局格式与内存空间。
   - `element_count()` 返回全部维度长度乘积。
@@ -192,6 +197,68 @@ int value = mem.at(index);
 - 限制条件：
   - 非法 `data`、`shape`、`stride` 或索引会导致未定义行为。
   - 本文档不定义运行时异常、错误码或自动恢复行为。
+
+### `get_shape(axis)`
+
+功能说明：
+
+- 返回指定轴的维度长度。
+
+参数说明：
+
+- `axis (unsigned long long)`：目标维度下标。
+
+使用示例：
+
+```cpp
+#include "include/api/Memory.h"
+
+long long n = mem.get_shape(0);
+long long c = mem.get_shape(1);
+```
+
+注意事项：
+
+- `get_shape(axis)` 属于 include/api 统一公开接口，不得在后端私有 spec 中重新定义同义方法。
+- 调用方需保证 `axis < rank()`。
+- 本规范不要求运行时越界检查。
+
+返回与限制：
+
+- 返回类型：`long long`。
+- 返回语义：返回 `shape[axis]` 对应的维度长度。
+- 限制条件：越界 `axis` 属于调用方违约。
+
+### `get_stride(axis)`
+
+功能说明：
+
+- 返回指定轴的步长。
+
+参数说明：
+
+- `axis (unsigned long long)`：目标维度下标。
+
+使用示例：
+
+```cpp
+#include "include/api/Memory.h"
+
+long long n_stride = mem.get_stride(0);
+long long c_stride = mem.get_stride(1);
+```
+
+注意事项：
+
+- `get_stride(axis)` 属于 include/api 统一公开接口，不得在后端私有 spec 中重新定义同义方法。
+- 调用方需保证 `axis < rank()`。
+- 本规范不要求运行时越界检查。
+
+返回与限制：
+
+- 返回类型：`long long`。
+- 返回语义：返回 `stride[axis]` 对应的步长。
+- 限制条件：越界 `axis` 属于调用方违约。
 
 ## 测试
 

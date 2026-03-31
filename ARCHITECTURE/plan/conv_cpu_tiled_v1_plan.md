@@ -1,5 +1,20 @@
 # conv_cpu_tiled_v1_plan.md
 
+## 进度
+
+- 更新日期：2026-03-31
+- 更新规则：每个任务块进入新子阶段后立即更新本段。
+- W0/P10：合并完成（operation 层 img2col1d/2d 规范与测试闭环）。
+- W0/P11：合并完成（NN-DIA-040/041 负路径补测与 operation 层导出校验已收口）。
+- W0/P16：合并完成（CPU API 规范与实现/测试闭环）。
+- W0（汇总）：P10/P11/P16 合并完成；当前任务块已封板。
+- W1/P12：同步确认完成（main=ada0738）。
+- W2/P13：spec 完成（T-20260330-f144f2d0）；实现完成（T-20260330-f041ccc0）；注释规范修复完成（T-20260330-561560b3）；复审不通过（T-20260331-2eacc18a）；范围收口修复完成（T-20260331-97c2335b）；复审通过（T-20260331-a9055658）；归档确认完成（T-20260331-927b3acc）；合并完成（T-20260331-ca02fea1，main=2d64711）。
+- W3/P14：spec 完成（T-20260331-d007d7f3）；复审不通过（T-20260331-72adac74，缺少真实测试锚点与禁止项覆盖）；实现/测试修复完成（T-20260331-41a8dffb）；审查不通过（T-20260331-aabae375，MGEN-038 缺少 `img2col1d` 正向锚点）；二次实现/测试修复完成（T-20260331-6935fe60）；二次复审不通过（T-20260331-98539cc7，MGEN-038 在 spec/test 间编号映射不唯一）；映射收敛修复完成（T-20260331-dd599545，MGEN-038 仅绑定 conv2d，conv1d 独立为 MGEN-038A）；当前进入复审链路（T-20260331-ba2e5e1d）。
+- W4/P15：未开始（如需启用按计划说明）。
+- W5/P17：未开始。
+- W6/P18：未开始。
+
 ## 功能简介
 
 - 定义第一版 `for-loop + img2col2d + tiled compute -> CPU C/C++` 的可执行推进计划。
@@ -457,7 +472,7 @@ def conv2d_img2col2d_tiled(value, weight, stride=(1, 1), dilation=(1, 1), pad=(0
 - 可并行放行：
   - `P10`：`spec/operation/nn.md`
   - `P11`：`spec/dialect/nn.md`
-- `P16`：`spec/include/cpu/cpu.md`
+  - `P16`：`spec/include/cpu/cpu.md`
 - 原因：这三个文件分别冻结“高层语义名”“IR 公开名”“最终 CPU 调用名”，文件独立、边界独立、都围绕同一组 `img2col1d/img2col2d` 公开名工作，适合在管理员统一口径下并行推进。
 - 这一步直接对应当前仓库最靠前的三个缺口：
   - 高层公开能力名与输入输出口径未拆干净
@@ -535,6 +550,13 @@ def conv2d_img2col2d_tiled(value, weight, stride=(1, 1), dilation=(1, 1), pad=(0
 
 ## 任务清单
 
+### 分发必带说明
+
+- 管理员分发以下任一单任务时，必须原样保留该任务块中的“验收标准”整段，不得只摘抄函数名或 `expected` 片段。
+- 各任务验收示例中的 `describe_*contract(...)`、`normalize_*contract(...)`、`emit_mlir_function(...)` 都是验收辅助伪名，只用于表达“如何把规格约束整理成可比较结果”。
+- 这些名字不是要求执行者新增的产品接口；若后续测试阶段确需辅助函数，只能放测试侧，或直接复用现有真实入口，如 `build_func_op(...)`、`emit_mlir(...)`、Printer、IR walker、测试文件内局部 helper。
+- 若执行者因为验收示例中的伪名而新增同名公开 API、运行时接口或主链产品代码，管理员应直接判不通过。
+
 ### P10
 
 - 任务类型：`spec任务`
@@ -573,8 +595,13 @@ col2d = img2col2d(
 ```
 
 - 示例说明：这个任务应明确 `img2col1d` 的输入是 rank-3 `Memory[N,C,W]`、输出是 rank-3 `Memory[N,C*Kw,Wo]`；`img2col2d` 的输入是 rank-4 `Memory[N,C,H,W]`、输出是 rank-3 `Memory[N,C*Kh*Kw,Ho*Wo]`；同时写清参数校验、输出维度公式与失败边界。
-- 验证命令：无；管理者人工核对
-- 验收标准：`spec/operation/nn.md` 必须能直接支撑下面这个验收测试函数；若文档无法推出同样的 `expected`，则该任务不通过。
+- 验证命令：
+
+```bash
+git diff -- spec/operation/nn.md
+rg -n "img2col1d|img2col2d|img2col\\b|rank|stride|forbidden" spec/operation/nn.md
+```
+- 验收标准：下方测试函数中的 `describe_operation_contract(...)` 是验收辅助伪名，不要求新增同名产品接口；`spec/operation/nn.md` 必须能直接支撑该测试中的 `expected`，若文档无法推出同样结果，则该任务不通过。
 
 ```python
 def test_operation_img2col1d_img2col2d_contract_v1():
@@ -679,8 +706,13 @@ def test_operation_img2col1d_img2col2d_contract_v1():
 ```
 
 - 示例说明：这个任务应把 `nn.img2col1d` 与 `nn.img2col2d` 定义成一组稳定的 `nn dialect` op：前者输入 rank-3 `!nn.memory` 输出 rank-3 `!nn.memory`，后者输入 rank-4 `!nn.memory` 输出 rank-3 `!nn.memory`，并明确属性、结果类型与 verifier 约束；但不在方言层重复写一份高层 `img2col1d/img2col2d` 的完整 shape/stride 公式说明。
-- 验证命令：无；管理者人工核对
-- 验收标准：`spec/dialect/nn.md` 必须能直接支撑下面这个验收测试函数；若文档无法推出同样的 `expected`，则该任务不通过。
+- 验证命令：
+
+```bash
+git diff -- spec/dialect/nn.md
+rg -n "nn.img2col1d|nn.img2col2d|nn.img2col\\b|verifier|operand|result" spec/dialect/nn.md
+```
+- 验收标准：下方测试函数中的 `describe_dialect_contract(...)` 是验收辅助伪名，不要求新增同名产品接口；`spec/dialect/nn.md` 必须能直接支撑该测试中的 `expected`，若文档无法推出同样结果，则该任务不通过。
 
 ```python
 def test_nn_dialect_img2col1d_img2col2d_contract_v1():
@@ -737,7 +769,7 @@ def test_nn_dialect_img2col1d_img2col2d_contract_v1():
 - 目标：在 [`spec/dsl/ast.md`](../../spec/dsl/ast.md) 增加 `img2col1d` / `img2col2d`、`get_shape/get_stride` 与单顶层 `for-loop` 样例的 DSL 语法支持说明。
 - 边界：只改 `spec/dsl/ast.md`；不改实现和测试。
 - 注意事项：这里只定义前端语法与 AST 边界；不得把 `cpu::img2col2d`、tile 模板或 pass 细节写进 AST 规格。必须明确 v1 只支持单个顶层函数，暂不承诺局部 `FunctionDef`、通用 `if`、`if bias is not None`。同时明确禁止新的 DSL 样例继续使用笼统 `img2col(...)`。
-- 依赖：硬依赖为 `P10`；管理放行顺序上建议等待 `P11`、`P16` 一并冻结后再发，避免 DSL 样例先于公开名和 CPU 叶子 API 漂移
+- 依赖：仅当 `P10`、`P11`、`P16` 在管理记录中均已 `DONE` 且完成封板核对后，方可分发本任务；否则不得分发
 - 可改文件：`spec/dsl/ast.md`
 - 示例：
 
@@ -774,8 +806,13 @@ def conv2d_img2col2d_tiled(value, weight, sh, sw, ph, pw, pl, pr):
 ```
 
 - 示例说明：这个任务应把 `get_shape()[axis]`、`loop(...)`、`slice(...)`、`img2col1d(...)`、`img2col2d(...)` 写成可解析 DSL 语法，同时写清哪些语法不属于 v1 公开能力；当前 conv2d 样例固定使用 `img2col2d(...)`。
-- 验证命令：无；管理者人工核对
-- 验收标准：`spec/dsl/ast.md` 必须能直接支撑下面这个验收测试函数；若文档无法推出同样的 `expected`，则该任务不通过。
+- 验证命令：
+
+```bash
+git diff -- spec/dsl/ast.md
+rg -n "img2col1d|img2col2d|get_shape|get_stride|FunctionDef|if bias is not None|loop\\(" spec/dsl/ast.md
+```
+- 验收标准：下方测试函数中的 `normalize_ast_contract(...)` 只是测试侧规整结果的伪名，不要求新增同名产品接口；`spec/dsl/ast.md` 必须能直接支撑该测试中的 `expected`，若文档无法推出同样结果，则该任务不通过。
 
 ```python
 def test_ast_contract_conv2d_img2col2d_tiled_v1():
@@ -847,8 +884,13 @@ tile = img2col2d(
 ```
 
 - 示例说明：这个任务应写清 `slice(...)` 如何 lowering 为 `dma.slice`，`img2col1d(...)` 如何 lowering 为 `nn.img2col1d`，`img2col2d(...)` 如何 lowering 为 `nn.img2col2d`，以及循环/返回值如何保持在通用 IR 层；不得出现 `cpu::img2col2d` 或任何 `for (...) { ... }` 的 C++ 模板。
-- 验证命令：无；管理者人工核对
-- 验收标准：`spec/dsl/emit_mlir.md` 必须能直接支撑下面这个验收测试函数；若文档无法推出同样的 `expected`，则该任务不通过。
+- 验证命令：
+
+```bash
+git diff -- spec/dsl/emit_mlir.md
+rg -n "nn.img2col1d|nn.img2col2d|dma.slice|dma.deslice|cpu::img2col2d|kernel|nn_to_kernel" spec/dsl/emit_mlir.md
+```
+- 验收标准：下方测试函数中的 `normalize_emit_mlir_contract(...)`、`emit_mlir_function(...)` 都是验收辅助伪名，不要求新增同名产品接口；执行阶段应优先复用现有 `emit_mlir(...)` / `build_func_op(...)` 链或测试侧 helper 表达同等 `expected`。`spec/dsl/emit_mlir.md` 必须能直接支撑该测试中的 `expected`，否则该任务不通过。
 
 ```python
 def test_emit_mlir_contract_img2col2d_tile_v1():
@@ -929,8 +971,13 @@ def conv2d_img2col2d_tiled(value, weight, sh, sw, ph, pw, pl, pr):
 ```
 
 - 示例说明：这个任务应写清 `build_func_op(...)` 如何把这类单顶层函数转换成稳定 `func.func`，包括参数顺序、`Memory`/标量签名、返回值与函数体中 `nn.img2col2d` 的出现位置；同时注明 `img2col1d` 遵循同一命名族 lowering 规则。
-- 验证命令：无；管理者人工核对
-- 验收标准：`spec/dsl/mlir_gen.md` 必须能直接支撑下面这个验收测试函数；若文档无法推出同样的 `expected`，则该任务不通过。
+- 验证命令：
+
+```bash
+git diff -- spec/dsl/mlir_gen.md
+rg -n "build_func_op|img2col1d|img2col2d|func.func|capture|FunctionDef" spec/dsl/mlir_gen.md
+```
+- 验收标准：下方测试函数中的 `normalize_build_func_contract(...)` 是验收辅助伪名，不要求新增同名产品接口；`spec/dsl/mlir_gen.md` 必须能直接支撑该测试中的 `expected`，若文档无法推出同样结果，则该任务不通过。
 
 ```python
 def test_build_func_op_contract_conv2d_img2col2d_tiled_v1():
@@ -995,8 +1042,13 @@ def test_build_func_op_contract_conv2d_img2col2d_tiled_v1():
 ```
 
 - 示例说明：只有在中间结构整理成为公共阶段时才启用本任务；该任务要写清 pass 的输入、输出、不变量与失败边界，而不是把优化藏在 emitter 里。
-- 验证命令：无；管理者人工核对
-- 验收标准：`spec/pass/optimization/nn_tiling.md` 仅在阻塞证据成立后启用；文档必须能支撑下面这个验收测试函数，否则该任务不通过。
+- 验证命令：
+
+```bash
+git diff -- spec/pass/optimization/nn_tiling.md
+rg -n "nn_tiling|tile-local|tail|Ctile|Ktile|kernel|nn_to_kernel" spec/pass/optimization/nn_tiling.md
+```
+- 验收标准：下方测试函数中的 `normalize_pass_contract(...)` 是验收辅助伪名，不要求新增同名产品接口；`spec/pass/optimization/nn_tiling.md` 仅在阻塞证据成立后启用，且文档必须能支撑该测试中的 `expected`，否则该任务不通过。
 
 ```python
 def test_nn_tiling_pass_contract_v1():
@@ -1042,7 +1094,7 @@ def test_nn_tiling_pass_contract_v1():
 - 目标：在 [`spec/include/cpu/cpu.md`](../../spec/include/cpu/cpu.md) 增加 `cpu::img2col1d(...)` 与 `cpu::img2col2d(...)` 公开接口与最小行为契约。
 - 边界：只改 `spec/include/cpu/cpu.md`；不改实现和测试。
 - 注意事项：这里只定义 CPU include 层的公开接口，不定义 DSL lowering，也不定义完整 conv 模板。接口应服务最终 emitter 调用，而不是反向规定上游 AST/IR 长什么样。必须显式写清 CPU runtime 只依赖 `cpu::Memory`、普通标量参数和本层运行时契约，不依赖 AST 节点类型、`nn dialect` 类型、`build_func_op(...)` 结构或 pass 名称。
-- 依赖：无硬依赖；允许与 `P10`、`P11` 并行推进；验收时必须与本文固定的 `img2col1d/img2col2d` 公开名及 `P10` 最终文本保持一致
+- 依赖：允许与 `P10`、`P11` 并行起草；但仅当 `P10` 在管理记录中已 `DONE` 且完成封板核对后，方可验收关闭本任务；否则不得关闭
 - 可改文件：`spec/include/cpu/cpu.md`
 - 示例：
 
@@ -1052,8 +1104,13 @@ cpu::img2col2d<float>(value_2d, out_2d, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1);
 ```
 
 - 示例说明：这个任务应写清 `cpu::img2col1d(...)` 与 `cpu::img2col2d(...)` 的签名、输入 rank、输出 rank、形状关系与调用方前置条件，作为 `emit_c` 的稳定调用目标；并明确禁止继续新增 `cpu::img2col(...)` 笼统接口。
-- 验证命令：无；管理者人工核对
-- 验收标准：`spec/include/cpu/cpu.md` 必须能直接支撑下面这个验收测试函数；若文档无法推出同样的 `expected`，则该任务不通过。
+- 验证命令：
+
+```bash
+git diff -- spec/include/cpu/cpu.md
+rg -n "cpu::img2col1d|cpu::img2col2d|cpu::img2col\\b|cpu::Memory|rank-check|shape-formula-check|stride-consistency-check" spec/include/cpu/cpu.md
+```
+- 验收标准：下方测试函数中的 `describe_cpu_api_contract(...)` 是验收辅助伪名，不要求新增同名产品接口；`spec/include/cpu/cpu.md` 必须能直接支撑该测试中的 `expected`，若文档无法推出同样结果，则该任务不通过。
 
 ```python
 def test_cpu_img2col_api_contract_v1():
@@ -1140,8 +1197,13 @@ for (long long n0 = 0; n0 < N; n0 += 1) {
 ```
 
 - 示例说明：这个任务应把上面的结构写成“允许出现的 CPU emitter 结果形态”：固定 `Ntile=1/Ftile=16/Ctile=16/Hotile=16/Wotile=16`、`packed_k = current_ctile * Kh * Kw`、显式 tail、`cpu::img2col2d(...)` 调用与 tile-local compute；但不能反向定义上游 DSL/IR 契约。
-- 验证命令：无；管理者人工核对
-- 验收标准：`spec/dsl/emit_c.md` 必须能直接支撑下面这个验收测试函数；若文档无法推出同样的 `expected`，则该任务不通过。
+- 验证命令：
+
+```bash
+git diff -- spec/dsl/emit_c.md
+rg -n "cpu::img2col2d|Ntile|Ctile|Ftile|Hotile|Wotile|tail|Ktile|scalar|nn_to_kernel|kernel" spec/dsl/emit_c.md
+```
+- 验收标准：下方测试函数中的 `normalize_emit_c_contract(...)` 是验收辅助伪名，不要求新增同名产品接口；`spec/dsl/emit_c.md` 必须能直接支撑该测试中的 `expected`，若文档无法推出同样结果，则该任务不通过。
 
 ```python
 def test_emit_c_contract_conv2d_img2col2d_tiled_v1():
@@ -1213,8 +1275,13 @@ void conv2d_img2col2d_tiled(
 ```
 
 - 示例说明：只有当 `emit_c` 已经稳定输出节点级片段，但 `gen_kernel` 仍缺少函数签名/出参拼装规则时，才启用本任务。
-- 验证命令：无；管理者人工核对
-- 验收标准：`spec/dsl/gen_kernel.md` 仅在 `P17` 阻塞时补充下面这个验收测试函数；若文档无法推出同样的 `expected`，则该任务不通过。
+- 验证命令：
+
+```bash
+git diff -- spec/dsl/gen_kernel.md
+rg -n "gen_kernel|memory-out-param|img2col1d|img2col2d|tile|tail" spec/dsl/gen_kernel.md
+```
+- 验收标准：下方测试函数中的 `normalize_gen_kernel_contract(...)`、`gen_kernel(...)` 仅用于表达验收口径；除仓库现有真实入口外，不要求新增同名产品接口。`spec/dsl/gen_kernel.md` 仅在 `P17` 阻塞时补充该测试中的 `expected`；若文档无法推出同样结果，则该任务不通过。
 
 ```python
 def test_gen_kernel_contract_conv2d_img2col2d_tiled_v1():
@@ -1258,6 +1325,16 @@ def test_gen_kernel_contract_conv2d_img2col2d_tiled_v1():
     }
     assert actual == expected
 ```
+
+## 验收辅助命名约定
+
+1. 本文所有验收示例中的 `describe_*contract(...)`、`normalize_*contract(...)`、`emit_mlir_function(...)` 一律视为“验收辅助伪名”，仅用于表达“如何把文档约束规整成可比较的 `expected = {...}`”。
+2. 这些名字不是公开产品接口，不是要求新增的运行时 API，不是要求在 `kernel_gen/`、`include/`、`spec/` 主链中补一层同名实现。
+3. 若后续测试阶段需要真正落地辅助函数，应优先：
+   - 直接复用现有真实入口，如 `build_func_op(...)`、`emit_mlir(...)`、IR walker、Printer、测试文件内局部 helper；
+   - 或把辅助函数限制在测试侧，不得把它们包装成新的产品主链接口。
+4. 其中 `emit_mlir_function(...)` 只是“函数级 emit_mlIR 验收入口”的伪名；按当前仓库真实结构，优先对应现有 `build_func_op(...)` / `emit_mlir(...)` 链，而不是新增一个同名实现接口。
+5. 若执行者因为本文中的伪名而试图新增 `normalize_emit_mlir_contract`、`describe_cpu_api_contract`、`emit_mlir_function` 等产品代码文件或公开 API，管理员应直接判不通过。
 
 ## 共通验收规则
 

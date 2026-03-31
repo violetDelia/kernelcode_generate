@@ -325,7 +325,7 @@ find_startup_type() {
   err "$RC_DATA" "failed to read startup type for agent: $AGENT_NAME"
 }
 
-do_init_env() {
+do_wake() {
   ensure_agent_file_readable
   load_agent_runtime_fields
 
@@ -335,13 +335,13 @@ do_init_env() {
 
   if [[ "$RUNTIME_STARTUP_TYPE" == "codex" ]]; then
     [[ -n "$(trim "$RUNTIME_AGENT_SESSION")" ]] || err "$RC_DATA" "empty agent session for codex agent: $AGENT_NAME"
-    send_tmux_bootstrap_command "$RUNTIME_SESSION" "codex /resume $RUNTIME_AGENT_SESSION"
+    send_tmux_bootstrap_command "$RUNTIME_SESSION" "codex resume $RUNTIME_AGENT_SESSION"
   fi
 
-  printf "OK: init-env %s (%s)\n" "$AGENT_NAME" "$RUNTIME_SESSION"
+  printf "OK: wake %s (%s)\n" "$AGENT_NAME" "$RUNTIME_SESSION"
 }
 
-do_wake() {
+do_init_env() {
   ensure_agent_file_readable
   load_agent_runtime_fields
 
@@ -356,7 +356,7 @@ do_wake() {
     send_tmux_bootstrap_command "$RUNTIME_SESSION" "/rename $RUNTIME_AGENT_SESSION"
   fi
 
-  printf "OK: wake %s (%s)\n" "$AGENT_NAME" "$RUNTIME_SESSION"
+  printf "OK: init-env %s (%s)\n" "$AGENT_NAME" "$RUNTIME_SESSION"
 }
 
 main() {

@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-定义 `skills/codex-multi-agents/scripts/codex-multi-agents-task.sh` 的任务调度行为，覆盖任务分发、完成、暂停、继续、改派、新建与状态查询，并约束 `TODO.md`/`DONE.md`、`agents-lists.md` 以及分发消息发送、分发前角色信息初始化链路的协同更新规则。
+定义 `skills/codex-multi-agents/scripts/codex-multi-agents-task.sh` 的任务调度行为，覆盖任务分发、完成、暂停、继续、改派、新建、删除与状态查询，并约束 `TODO.md`/`DONE.md`、`agents-lists.md` 以及分发消息发送、分发前角色信息初始化链路的协同更新规则。
 
 ## 文档信息
 
@@ -24,7 +24,7 @@
 
 ## 目标
 
-- 提供统一的任务分发、完成、暂停、继续、改派、新建与状态查询命令。
+- 提供统一的任务分发、完成、暂停、继续、改派、新建、删除与状态查询命令。
 - 维护 `TODO.md` 与 `DONE.md` 的一致性与可追踪性。
 - 在分发、完成、暂停、继续时同步维护 `agents-lists.md` 的角色状态。
 - 在 `-dispatch` 提供 `-message` 时，自动向目标角色 tmux 会话发送任务消息。
@@ -34,8 +34,9 @@
 ## 限制与边界
 
 - `TODO.md`、`DONE.md` 与 `agents-lists.md` 的表格更新必须局限于对应任务/角色记录，不得改写无关段落。
-- 一次命令只能执行一个主操作：`-dispatch/-done/-pause/-continue/-reassign/-new/-status` 七选一。
+- 一次命令只能执行一个主操作：`-dispatch/-done/-pause/-continue/-reassign/-new/-delete/-status` 八选一。
 - `-dispatch/-done/-pause/-continue/-reassign` 必须提供 `-agents-list <path>`，用于同步角色状态。
+- `-delete` 默认删除 `任务列表` 中的任务；若任务在 `正在执行的任务` 表中且 `状态=进行中`，则拒绝并返回错误；若 `状态=暂停`，允许直接删除该暂停任务。
 - `-reassign` 仅适用于 `正在执行的任务` 表中的任务；任务列表中的任务不可改派。
 - `-dispatch` 可选提供 `-message <text>`；提供后会在分发提交成功后继续发送一条对话消息。
 - `TODO.md` 必须包含段落：
@@ -72,7 +73,7 @@
   - 初始化用于更新目标角色信息，并提示角色重新同步 `提示词`、`AGENTS.md` 与自身职责信息。
   - 初始化为尽力而为链路；若执行失败，仅输出告警，不阻塞后续分发，也不改变命令成功/失败语义。
 - 并发约束：
-  - `-dispatch/-done/-pause/-continue/-reassign/-new` 必须使用 `flock` 锁定目标文件。
+  - `-dispatch/-done/-pause/-continue/-reassign/-new/-delete` 必须使用 `flock` 锁定目标文件。
   - `-dispatch/-pause/-continue/-reassign` 同时写 `TODO.md` 与 `agents-lists.md` 时，锁顺序固定为先 `TODO.md` 后 `agents-lists.md`。
   - `-done` 同时写 `TODO.md`、`DONE.md` 与 `agents-lists.md` 时，锁顺序固定为先 `TODO.md` 后 `DONE.md` 再 `agents-lists.md`。
   - `-status` 只读，不加锁。
@@ -97,6 +98,7 @@
 - `-file <path>`：`TODO.md` 文件路径（必填）。
 - `-agents-list <path>`：`agents-lists.md` 文件路径；`-dispatch/-done/-pause/-continue/-reassign` 时必填。
 - `-message <text>`：仅 `-dispatch` 可用；提供后自动向目标角色发送任务消息。
+- `-delete`：删除任务列表中的任务，仅与 `-task_id` 搭配使用。
 
 使用示例：
 
@@ -286,6 +288,34 @@ codex-multi-agents-task.sh -file "./skills/codex-multi-agents/examples/TODO.md" 
 
 - 成功返回 `0`；失败返回对应错误码。
 
+#### `-delete`
+
+功能说明：
+
+- 删除指定任务；支持删除 `任务列表` 中的待分发任务，以及 `正在执行的任务` 表中 `状态=暂停` 的任务。
+
+参数说明：
+
+- `-delete`：执行删除操作。
+- `-task_id <id>`：目标任务 ID（必填）。
+
+使用示例：
+
+```bash
+codex-multi-agents-task.sh -file "./skills/codex-multi-agents/examples/TODO.md" -delete -task_id "EX-3"
+```
+
+注意事项：
+
+- 若任务存在于 `正在执行的任务` 表中且 `状态=进行中`，返回 `3` 并拒绝删除。
+- 若任务存在于 `正在执行的任务` 表中且 `状态=暂停`，允许直接删除；该操作不会写入 `DONE.md`，也不会移动到 `任务列表`。
+- 若任务既不在 `正在执行的任务` 表，也不在 `任务列表` 中，返回 `3`。
+- 删除操作不会写入 `DONE.md`。
+
+返回与限制：
+
+- 成功返回 `0`；任务不存在或冲突返回 `3`。
+
 #### `-new`
 
 功能说明：
@@ -320,11 +350,11 @@ codex-multi-agents-task.sh -file "./skills/codex-multi-agents/examples/TODO.md" 
 - 测试文件：[`test/codex-multi-agents/test_codex-multi-agents-task.py`](../../../test/codex-multi-agents/test_codex-multi-agents-task.py)
 - 执行命令：`pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py`
 - 覆盖率命令：`pytest -q --cov=skills/codex-multi-agents/scripts/codex-multi-agents-task.sh --cov-branch --cov-report=term-missing test/codex-multi-agents/test_codex-multi-agents-task.py`
-- 当前覆盖率信息：`N/A`（shell 脚本由子进程执行，`pytest-cov` 会报告 `no-data-collected`；按规则豁免 `95%` 覆盖率达标线，以 `TC-001..025` 用例覆盖为当前基线）
+- 当前覆盖率信息：`N/A`（shell 脚本由子进程执行，`pytest-cov` 会报告 `no-data-collected`；按规则豁免 `95%` 覆盖率达标线，以 `TC-001..028` 用例覆盖为当前基线）
 
 ### 测试目标
 
-- 验证任务分发、完成、暂停、继续、改派、新建与状态查询。
+- 验证任务分发、完成、暂停、继续、改派、新建、删除与状态查询。
 - 验证 `TODO.md` 与 `DONE.md` 的跨文件流转。
 - 验证 `agents-lists.md` 的角色状态会随 `-dispatch/-done/-pause/-continue/-reassign` 正确同步。
 - 验证 `-dispatch -message` 会自动调用 tmux 对话脚本，并在失败时保留分发结果。
@@ -361,6 +391,10 @@ codex-multi-agents-task.sh -file "./skills/codex-multi-agents/examples/TODO.md" 
 | TC-023 | `-reassign` | 改派成功 | 任务位于正在执行；新角色存在 | `-file F -reassign -task_id EX-2 -to worker-a -agents-list G` | 返回码 `0`；任务指派更新；旧/新角色状态按规则更新 |
 | TC-024 | `-reassign` | 任务不存在 | 正在执行不存在该 ID | `-file F -reassign -task_id BAD -to worker-a -agents-list G` | 返回码 `3`；报错 task not found |
 | TC-025 | 参数校验 | 改派缺少角色名单参数 | TODO 存在 | `-file F -reassign -task_id EX-2 -to worker-a` | 返回码 `1`；报错缺少 `-agents-list` |
+| TC-026 | `-delete` | 删除成功 | 任务位于任务列表 | `-file F -delete -task_id EX-3` | 返回码 `0`；任务从任务列表移除 |
+| TC-027 | `-delete` | 任务不存在 | 任务列表不存在该 ID | `-file F -delete -task_id BAD` | 返回码 `3`；报错 task not found |
+| TC-028 | `-delete` | 任务在正在执行 | 任务位于正在执行且状态=`进行中` | `-file F -delete -task_id EX-1` | 返回码 `3`；报错 task already exists in running list |
+| TC-029 | `-delete` | 删除暂停任务 | 任务位于正在执行且状态=`暂停` | `-file F -delete -task_id EX-2` | 返回码 `0`；任务从正在执行列表移除 |
 
 ### 用例与自动化映射
 
@@ -389,3 +423,7 @@ codex-multi-agents-task.sh -file "./skills/codex-multi-agents/examples/TODO.md" 
 - TC-023 -> `test_reassign_task_success`
 - TC-024 -> `test_reassign_missing_task_returns_rc3`
 - TC-025 -> `test_reassign_requires_agents_list`
+- TC-026 -> `test_delete_task_list_success`
+- TC-027 -> `test_delete_missing_task_returns_rc3`
+- TC-028 -> `test_delete_running_task_returns_rc3`
+- TC-029 -> `test_delete_paused_running_task_success`
