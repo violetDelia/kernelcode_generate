@@ -21,8 +21,8 @@
   2. `test/spec` 对齐任务：在 `test/dsl/test_ast_visitor.py` 与必要的 `spec/dsl/mlir_gen.md` 中补齐上述 expectation 对应的 lowering 测试映射，避免当前只有 dialect 测试通过、但 expectation 链路仍失败的脱节状态。
 
 - 时间：`2026-03-25 09:33:20 +0800`
-- 执行人：`我不是牛马`
-- 经办人：`我不是牛马`
+- 执行人：`提莫炖蘑菇`
+- 经办人：`提莫炖蘑菇`
 - 任务：`T-20260325-78af0801`
 - 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-symbol`，以主工作目录 `expectation/temp_/symbol` 为只读基线，最小补齐 DSL 对 `bool` 返回注解、`float` 返回注解、`JoinedStr` 形式 `Tensor[...]` 注解，以及 `eq/ne/lt/le/gt/ge/to_float/get_dim/get_stride` expectation 场景的实现与测试闭环。
 - 改动：

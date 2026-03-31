@@ -3,7 +3,7 @@
 ## T-20260315-1b34b7f4
 
 - 时间：2026-03-15
-- 角色：摸鱼小分队
+- 角色：睡觉小分队
 - 任务描述：规划 symbol_variable 迁移至 python/ 目录的结构、导入路径与同步更新要求。
 - worktree：`wt-20260315-symbol-variable-python-migration`
 - 产出文件：`spec/symbol_variable/python_migration.md`
@@ -127,7 +127,7 @@
 ## T-20260316-6d5f2c4a
 
 - 时间：2026-03-16
-- 角色：`摸鱼小分队`
+- 角色：`睡觉小分队`
 - 任务描述：清理 `wt-20260315-symbol-variable-python-migration` 中相关 spec 的重构过程、迁移步骤等非设计文档信息，收敛为单实现文件对应的设计文档表述。
 - worktree：`wt-20260315-symbol-variable-python-migration`
 - 产出文件：
@@ -180,7 +180,7 @@
 ## T-20260316-b9d05a4f
 
 - 时间：2026-03-16 02:01:17 +0800
-- 角色：`摸鱼小分队`
+- 角色：`睡觉小分队`
 - 任务描述：在 `wt-20260315-symbol-variable-python-migration` 补回并收敛 `spec/symbol_variable/type.md` 与 `spec/symbol_variable/package_api.md`，确保符合单实现文件设计文档规则并覆盖主路径 `type/package_api` 边界。
 - worktree：`wt-20260315-symbol-variable-python-migration`
 - 产出文件：
@@ -275,7 +275,7 @@
 ## T-20260316-20a0868c
 
 - 时间：2026-03-16 02:18:00 +0800
-- 角色：`摸鱼小分队`
+- 角色：`睡觉小分队`
 - 任务描述：修正 `wt-20260315-symbol-variable-python-migration` 中 `spec/symbol_variable/type.md` 与 `spec/symbol_variable/package_api.md` 的测试链接与执行命令，并核对迁移兼容性 spec 边界。
 - worktree：`wt-20260315-symbol-variable-python-migration`
 - 产出文件：
@@ -414,7 +414,7 @@
 ## T-20260316-7fca4340
 
 - 时间：2026-03-16 02:44:00 +0800
-- 角色：`摸鱼小分队`
+- 角色：`睡觉小分队`
 - 任务描述：在 `wt-20260315-symbol-variable-python-migration` 为 compat 子模块补充真实 spec 落点，优先收敛到 `spec/symbol_variable/package_api.md`。
 - worktree：`wt-20260315-symbol-variable-python-migration`
 - 产出文件：

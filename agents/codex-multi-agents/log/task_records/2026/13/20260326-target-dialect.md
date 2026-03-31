@@ -29,7 +29,7 @@
   - spec/dialect/arch.md 将 TC-ARCH-013 映射到 `test_target_registry_cpu_rejects_thread_id`，但该测试当前不存在且 `执行命令` 仅覆盖 `test/dialect/test_arch_dialect.py`。建议补齐对应测试并更新执行命令覆盖该用例，或移除该映射并收敛 spec 的公开测试承诺。
 
 - 时间：2026-03-26 01:38:06 +0800
-- 任务：T-20260326-8f2716ee（经办人：我不是牛马）
+- 任务：T-20260326-8f2716ee（经办人：提莫炖蘑菇）
 - 任务目标：补齐 target 注册机制实现与测试，接入 arch verifier 的 target 支持检查并落地测试闭环。
 - 改动：新增 kernel_gen/target/registry.py；新增 test/target/test_target_registry.py；在 kernel_gen/dialect/arch.py 引入 target registry 支持性校验；在 test/dialect/test_arch_dialect.py 补 TC-ARCH-013。
 - 结论：已完成实现与测试闭环；pytest -q test/target/test_target_registry.py（8 passed），pytest -q test/dialect/test_arch_dialect.py（13 passed）。

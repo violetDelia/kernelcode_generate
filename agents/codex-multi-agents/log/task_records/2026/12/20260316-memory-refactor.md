@@ -125,7 +125,7 @@
 ## T-20260317-d82ca883
 
 - 时间：2026-03-17 01:33:00 +0800
-- 角色：`摸鱼小分队`
+- 角色：`睡觉小分队`
 - 任务描述：在 `wt-20260316-memory-refactor` 改进 `spec/symbol_variable/memory.md`，与当前实现/测试严格对齐，修正测试命令与 `ME-*` 用例清单的一一对应关系，并闭合比较结果 dtype 契约。
 - worktree：`wt-20260316-memory-refactor`
 - 产出文件：
@@ -145,7 +145,7 @@
 ## T-20260317-8c826383
 
 - 时间：2026-03-17 01:38:00 +0800
-- 角色：`摸鱼小分队`
+- 角色：`睡觉小分队`
 - 任务描述：在 `wt-20260316-memory-refactor` 改进 `spec/operation/nn.md`，将 compare 结果 dtype、独立示例、测试目标与 `OP-009` 用例表统一到当前已落地的 `NumericType.Int32` 口径，并与 `spec/symbol_variable/memory.md`、现有实现和测试描述对齐。
 - worktree：`wt-20260316-memory-refactor`
 - 产出文件：
@@ -247,7 +247,7 @@
 ## T-20260317-f31f20ee
 
 - 时间：2026-03-17 01:52:00 +0800
-- 角色：`摸鱼小分队`
+- 角色：`睡觉小分队`
 - 任务描述：在 `wt-20260316-memory-refactor` 补齐 `spec/operation/nn.md` 的测试清单与测试目标，完整映射当前 `OP-*` 覆盖范围，并保持与 `spec/symbol_variable/memory.md`、现有实现与测试一致。
 - worktree：`wt-20260316-memory-refactor`
 - 产出文件：

@@ -38,7 +38,7 @@
 - 任务：`T-20260325-9ac637d0`
 - 任务目标：清理已通过的 `wt-20260324-spec-clean-scf` worktree，并确认是否仍有残留。
 - 改动：
-  - 经办人：`我不是牛马`
+  - 经办人：`提莫炖蘑菇`
   - 核对主分支 `TODO.md` 后确认该 cleanup 任务为当前唯一在办项。
   - 确认 `wt-20260324-spec-clean-scf` 分支提交已被 `main` 包含，`git diff main...wt-20260324-spec-clean-scf` 无业务差异。
   - 将 worktree 中仅剩的任务记录补记同步到主分支记录文件后，清理 worktree 本地残留并删除对应 worktree/分支。

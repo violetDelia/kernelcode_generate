@@ -8,7 +8,7 @@
 测试: 未运行（spec 阶段不执行测试）。
 结论: spec 收敛完成，等待实现/测试阶段任务。
 时间: 2026-03-27 01:53:10 +0800
-任务: T-20260327-dfc84763（经办人：我不是牛马）
+任务: T-20260327-dfc84763（经办人：提莫炖蘑菇）
 任务目标: 核对 dma.slice 错误路径（参数数量/space/source）与 spec 映射一致，最小收敛实现/测试（不改 spec）。
 改动:
 - 无。核对 kernel_gen/dsl/ast.py 与 test/dsl/test_ast_visitor.py 已覆盖 "Unsupported slice arity" / "slice source must be TensorAST" / "slice space must be MemorySpace"；emit_mlir/mlir_gen 无新增差异。

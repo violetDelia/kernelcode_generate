@@ -17,7 +17,7 @@
 结论：实现与测试收敛完成；python expectation/dsl/mlir_gen/dialect/dma/store.py 退出码 0；pytest -q test/dsl/test_ast_visitor.py 通过。
 
 时间：2026-03-27 02:47:11 +0800
-经手人：摸鱼小分队
+经手人：睡觉小分队
 任务：T-20260327-1194d46c
 任务目标：复审 dma.store DSL 链路实现/测试与 expectation 闭环一致性，确认 expectation 文件仅同步未直改。
 改动：

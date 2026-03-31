@@ -82,7 +82,7 @@
 ## T-20260317-b222c60e
 
 - 时间：2026-03-17 02:05:00 +0800
-- 角色：`摸鱼小分队`
+- 角色：`睡觉小分队`
 - 任务描述：在 `wt-20260317-nn-compare-dtype-align` 补齐 compare 相关 spec 用例条目与测试目标，使其与当前测试注释编号一一映射；重点完善 `spec/symbol_variable/memory.md` 与 `spec/operation/nn.md` 的 compare predicate、compare 结果重入算术报错、compare alias API 的独立用例条目。
 - worktree：`wt-20260317-nn-compare-dtype-align`
 - 产出文件：

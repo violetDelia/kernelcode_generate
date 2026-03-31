@@ -1,5 +1,5 @@
 时间：2026-03-26 21:34:40 +0800
-经手人：摸鱼小分队
+经手人：睡觉小分队
 任务：T-20260326-9fb546d6（spec 收敛：symbol.ge expectation 链路）
 任务目标：先收敛 spec，修复 symbol.ge 链路在 emit_mlir 阶段出现 `Unsupported symbol compare op` 的口径缺失，明确 symbol.ge 语义与测试映射，并保持 expectation 以主目录基线为准。
 改动：
@@ -17,7 +17,7 @@
 结论：spec 已完成收敛，明确了 symbol.ge 的公开语义与 MGEN-030/EMIT-024 映射；下一阶段需实现 `kernel_gen/dsl/emit_mlir.py` 与 `kernel_gen/dsl/mlir_gen.py` 的 symbol.ge lowering，并在 `test/dsl/test_ast_visitor.py` 补齐对应用例以闭环。
 
 时间：2026-03-26 21:52:40 +0800
-任务：T-20260326-49737fbc（经手人：我不是牛马）
+任务：T-20260326-49737fbc（经手人：提莫炖蘑菇）
 任务目标：按 MGEN-030/EMIT-024 补齐 symbol.ge DSL lowering，闭环 symbol.ge runtime args 场景，expectation 只读。
 改动：
 - 更新 kernel_gen/dsl/emit_mlir.py：symbol compare 支持 ge，infer/lower 均返回 i1 并生成 symbol.ge。

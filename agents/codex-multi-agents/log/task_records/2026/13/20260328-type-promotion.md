@@ -1,7 +1,7 @@
 时间: 2026-03-28 13:54:17 +0800
 任务: T-20260328-4eb1e697
 任务目标: 统一类型提升为低精度->高精度并明确整浮混合取浮点，补齐优先级/支持与拒绝组合/错误路径并映射既有测试编号。
-改动: 更新 spec/operation/nn.md 的类型提升规则、测试目标与 OP-TP/OP-MM 映射；更新 spec/symbol_variable/memory.md 的算术提升说明与 ME-010/ME-011 映射；更新 spec/dsl/emit_mlir.md 与 spec/dsl/mlir_gen.md 的 dtype promotion 口径与相关测试描述并清理 expectation 引用。经办人: 摸鱼小分队。
+改动: 更新 spec/operation/nn.md 的类型提升规则、测试目标与 OP-TP/OP-MM 映射；更新 spec/symbol_variable/memory.md 的算术提升说明与 ME-010/ME-011 映射；更新 spec/dsl/emit_mlir.md 与 spec/dsl/mlir_gen.md 的 dtype promotion 口径与相关测试描述并清理 expectation 引用。经办人: 睡觉小分队。
 结论: 已完成 spec 收敛与映射更新，后续需实现/测试按新规则调整以闭环。
 
 时间: 2026-03-28 15:03:58 +0800
@@ -40,7 +40,7 @@
 时间: 2026-03-28 20:48:00 +0800
 任务: T-20260328-e50e1973
 任务目标: 统一相关 spec 类型提升为低精度->高精度，并明确整型/浮点混合时提升为浮点；补齐边界/异常说明与测试映射。
-改动: 统一 spec/operation/nn.md 中类型提升描述与 OP-014 口径；统一 spec/symbol_variable/memory.md 算术提升表述（保持已有边界/异常与映射）；统一 spec/dsl/emit_mlir.md 与 spec/dsl/mlir_gen.md 中 mixed dtype promotion 口径为低精度->高精度并显式整浮混合取浮点；更新 spec/dsl/{emit_mlir,mlir_gen}.md 文档信息“最后一次更改”。经办人: 摸鱼小分队。
+改动: 统一 spec/operation/nn.md 中类型提升描述与 OP-014 口径；统一 spec/symbol_variable/memory.md 算术提升表述（保持已有边界/异常与映射）；统一 spec/dsl/emit_mlir.md 与 spec/dsl/mlir_gen.md 中 mixed dtype promotion 口径为低精度->高精度并显式整浮混合取浮点；更新 spec/dsl/{emit_mlir,mlir_gen}.md 文档信息“最后一次更改”。经办人: 睡觉小分队。
 结论: 本阶段仅完成 spec 收敛；未触及实现/测试。当前 worktree 存在既有实现/测试改动，未纳入本次任务范围。
 
 时间: 2026-03-29 10:45:00 +0800

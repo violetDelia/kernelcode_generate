@@ -19,7 +19,7 @@
 - 如后续要清理该 stash，应由合并/清理角色单独处理；当前不建议作为 spec 来源继续使用。
 
 - 任务: T-20260318-1bbdc172
-- 执行人: 摸鱼小分队
+- 执行人: 睡觉小分队
 - worktree: /home/lfr/kernelcode_generate
 - 时间: 2026-03-18 10:26:00 +0800
 
@@ -71,7 +71,7 @@
 - 上述用例应直接覆盖 lowering 层错误分支，并验证异常类型为 `LoweringError`。
 
 - 任务: T-20260318-21d8d280
-- 执行人: 摸鱼小分队
+- 执行人: 睡觉小分队
 - worktree: /home/lfr/kernelcode_generate/wt-20260318-mlir-gen-refactor
 - 时间: 2026-03-18 10:12:00 +0800
 
@@ -109,7 +109,7 @@
 - 如后续仍需推进 mlir_gen 链路，请由管理员基于新口径重新派发 spec 或合并类任务。
 
 - 任务: T-20260318-b8b1bb37
-- 执行人: 摸鱼小分队
+- 执行人: 睡觉小分队
 - worktree: /home/lfr/kernelcode_generate/wt-20260318-mlir-gen-refactor
 - 时间: 2026-03-18 10:01:00 +0800
 
@@ -125,7 +125,7 @@
 - 需在合并阶段将 worktree spec 合入 main 以消除主线冲突与漂移。
 
 - 任务: T-20260318-27f0b40c
-- 执行人: 摸鱼小分队
+- 执行人: 睡觉小分队
 - worktree: /home/lfr/kernelcode_generate/wt-20260318-mlir-gen-refactor
 - 时间: 2026-03-18 09:41:00 +0800
 
@@ -141,7 +141,7 @@
 - 主线 spec 仍需合并本 worktree 中的 `ast_visitor.md`/`ast.md`/`lowering.md`/`mlir_gen.md` 以消除漂移。
 
 - 任务: T-20260318-e4610ba2
-- 执行人: 摸鱼小分队
+- 执行人: 睡觉小分队
 - worktree: /home/lfr/kernelcode_generate/wt-20260318-mlir-gen-refactor
 - 时间: 2026-03-18 09:23:00 +0800
 
@@ -396,7 +396,7 @@
 ## 审查记录 T-20260318-6df9d568
 
 - 时间：2026-03-18 09:20:54 +0800
-- 角色：`我不是牛马`
+- 角色：`提莫炖蘑菇`
 - worktree：`/home/lfr/kernelcode_generate/wt-20260318-mlir-gen-refactor`
 - 审查范围：
   - `spec/dsl/ast.md`
@@ -439,7 +439,7 @@
 ## 审查记录 T-20260318-fcd788ec
 
 - 时间：2026-03-18 09:45:42 +0800
-- 角色：`我不是牛马`
+- 角色：`提莫炖蘑菇`
 - worktree：`/home/lfr/kernelcode_generate/wt-20260318-mlir-gen-refactor`
 - 审查范围：
   - `spec/dsl/ast.md`

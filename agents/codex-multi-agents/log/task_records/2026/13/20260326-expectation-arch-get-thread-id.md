@@ -13,13 +13,13 @@
 - expectation 文件已同步；spec/实现/测试闭环缺口存在，需要新增 spec 与测试并补齐 DSL lowering。
 
 时间: 2026-03-27 00:26:32 +0800
-任务: T-20260327-77900ae1（经办人：摸鱼小分队）
+任务: T-20260327-77900ae1（经办人：睡觉小分队）
 任务目标: 补齐 get_thread_id 的 DSL 解析与 lowering 约束（spec/dsl/ast.md、spec/dsl/emit_mlir.md、spec/dsl/mlir_gen.md），并补充测试映射。
 改动:
 - 更新 spec/dsl/ast.md：扩展 ArchQueryAST 允许集合为 get_block_id/get_block_num/get_thread_id；补充 get_thread_id 的解析边界与测试目标；新增映射 AST-014E/AST-014F。
 - 更新 spec/dsl/emit_mlir.md：补充 ArchQueryAST(query_name="get_thread_id") -> arch.get_thread_id / !symbol.int<"thread_id"> lowering 约束；新增测试目标与映射 EMIT-025。
 - 更新 spec/dsl/mlir_gen.md：补充 build_func_op 与 build_func_op_from_ast 对零入参 get_thread_id 查询的 lowering 与返回类型约束；新增测试目标与映射 MGEN-031。
-- 三份文档“最后一次更改”统一更新为 摸鱼小分队。
+- 三份文档“最后一次更改”统一更新为 睡觉小分队。
 结论:
 - 已完成本次 spec 任务范围内的文档收敛，形成 get_thread_id 的 AST 解析、emit lowering、mlir_gen 入口约束闭环。
 - 本任务未修改实现与测试代码；后续需创建实现任务补齐 kernel_gen/dsl/{ast.py,emit_mlir.py,mlir_gen.py} 与 test/dsl/test_ast_visitor.py 对应用例。

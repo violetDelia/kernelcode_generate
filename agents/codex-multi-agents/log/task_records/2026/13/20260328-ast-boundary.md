@@ -49,7 +49,7 @@
 最终结论：需修改；建议派生 spec 修复任务以消除术语歧义并补齐上下文注入接口。
 
 时间：2026-03-28 15:10:01 +0800
-经手人：摸鱼小分队
+经手人：睡觉小分队
 任务：T-20260328-d2395437
 任务目标：修复 AST 边界 spec，定义 target/硬件字段范围，明确 MemorySpace/ArchQueryAST 归属，并补齐 EmitContext/visitor 的 target/hardware 注入约定与示例。
 改动：

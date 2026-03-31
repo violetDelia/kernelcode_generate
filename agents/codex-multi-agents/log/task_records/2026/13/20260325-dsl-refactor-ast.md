@@ -44,8 +44,8 @@
 结论: 通过。当前新增回归测试已把上一轮复审指出的重构敏感负路径补齐，并且与 kernel_gen/dsl/ast.py 当前公开语义、错误文本一一对应；worktree 变更范围仍受控在 ast.py 与 test/dsl/test_ast_visitor.py，未越界修改 expectation/spec/其他实现。建议下一阶段由神秘人创建合并或收口任务，仅处理 kernel_gen/dsl/ast.py、test/dsl/test_ast_visitor.py 与本记录文件。
 
 - 时间：`2026-03-25 12:10:29 +0800`
-- 执行人：`我不是牛马`
-- 经办人：`我不是牛马`
+- 执行人：`提莫炖蘑菇`
+- 经办人：`提莫炖蘑菇`
 - 任务：`T-20260325-d3384ef9`
 - 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-dsl-refactor-ast`，将 DSL AST 重构链路按限定范围合入 `main`，仅带入 `kernel_gen/dsl/ast.py`、`test/dsl/test_ast_visitor.py` 与当前记录文件。
 - 改动：

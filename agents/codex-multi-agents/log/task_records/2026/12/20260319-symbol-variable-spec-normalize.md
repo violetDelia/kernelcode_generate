@@ -21,7 +21,7 @@
 # 20260319-symbol-variable-spec-normalize
 
 - 任务: T-20260319-27df6f10
-- 执行人: 我不是牛马
+- 执行人: 提莫炖蘑菇
 - worktree: /home/lfr/kernelcode_generate
 - 时间: 2026-03-19 03:43:37 +0800
 
@@ -119,7 +119,7 @@
 
 ## T-20260319-9f78f79c（再次审查）
 
-- 执行人: 我不是牛马
+- 执行人: 提莫炖蘑菇
 - worktree: /home/lfr/kernelcode_generate
 - 时间: 2026-03-19 07:40:30 +0800
 - 结论: 通过

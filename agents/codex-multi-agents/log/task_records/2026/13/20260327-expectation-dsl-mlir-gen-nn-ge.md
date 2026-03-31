@@ -6,7 +6,7 @@
 经办人: 小李飞刀
 
 时间: 2026-03-27 09:05:48 +0800
-经办人: 我不是牛马
+经办人: 提莫炖蘑菇
 任务: T-20260327-1edd6619（nn.ge expectation 审查）
 任务目标: 复审 _DTYPE_MAP i1/bool 解析、emit_mlir Bool->i1、Memory compare 返回 Bool 与测试一致性，并回报 expectation/测试结果。
 改动:
@@ -38,7 +38,7 @@
 结论：nn.ge 链路实现/测试已与最新 spec 对齐，expectation 通过，可进入审查阶段。
 
 时间: 2026-03-27 09:14:28 +0800
-经办人: 我不是牛马
+经办人: 提莫炖蘑菇
 任务: T-20260327-c19cc8ba（nn.ge 复审）
 任务目标: 复核实现/测试与 spec 对齐，并回报 expectation/pytest 结果。
 改动:

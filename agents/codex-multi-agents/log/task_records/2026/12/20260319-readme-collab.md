@@ -1,7 +1,7 @@
 # 20260319-readme-collab
 
 - 任务: T-20260319-b87aa687
-- 执行人: 摸鱼小分队
+- 执行人: 睡觉小分队
 - worktree: /home/lfr/kernelcode_generate/wt-20260319-readme-collab
 - 时间: 2026-03-19 01:40:00 +0800
 
@@ -97,7 +97,7 @@
 
 ## T-20260319-939b6ff7（审查）
 
-- 执行人: 我不是牛马
+- 执行人: 提莫炖蘑菇
 - worktree: /home/lfr/kernelcode_generate/wt-20260319-readme-collab
 - 时间: 2026-03-19 08:46:25 +0800
 - 审查范围: `README.md`

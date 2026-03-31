@@ -35,7 +35,7 @@
 ## T-20260319-1604d4bb（审查）
 
 - 时间：2026-03-19 20:58:00 +0800
-- 角色：`我不是牛马`
+- 角色：`提莫炖蘑菇`
 - 任务描述：审查 `python/operation/__init__.py` 的 operation/nn 导出入口文档口径，确认其覆盖逐元素算术、比较与 `matmul`，并与 `spec/operation/nn.md` 与当前 matmul 链路一致；存在任何建议即判定不通过。
 - worktree：`/home/lfr/kernelcode_generate/wt-20260319-operation-nn-init-doc-fix`
 - 审查范围：

@@ -3,7 +3,7 @@
 ## T-20260315-a975dcc7
 
 - 时间：2026-03-15
-- 角色：摸鱼小分队
+- 角色：睡觉小分队
 - 任务描述：重构 symbol_shape 容器不变量说明，明确切片赋值约束、get_shape() 返回约束与 AttributeError 风险修复目标。
 - worktree：`wt-20260315-symbol-shape-refactor`
 - 产出文件：`spec/symbol_variable/symbol_shape.md`
@@ -128,7 +128,7 @@
 ## T-20260315-77fefbfd
 
 - 时间：2026-03-15
-- 角色：摸鱼小分队
+- 角色：睡觉小分队
 - 任务描述：同步更新 symbol_shape spec，明确 slice 赋值逐项规范化，并区分不可迭代对象与元素不可转换的异常语义。
 - worktree：`wt-20260315-symbol-shape-refactor`
 - 变更摘要：
@@ -138,7 +138,7 @@
 ## T-20260315-5b2adc3d
 
 - 时间：2026-03-15
-- 角色：摸鱼小分队
+- 角色：睡觉小分队
 - 任务描述：更新 symbol_shape spec，slice 赋值允许输入改为按 SymbolDim 可接受类型逐项规范化。
 - worktree：`wt-20260315-symbol-shape-refactor`
 - 变更摘要：

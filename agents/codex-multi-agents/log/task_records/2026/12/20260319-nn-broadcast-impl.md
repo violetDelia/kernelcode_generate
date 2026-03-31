@@ -29,7 +29,7 @@
 # 20260319-nn-broadcast-impl
 
 - 任务: T-20260319-0217f5c4
-- 执行人: 摸鱼小分队
+- 执行人: 睡觉小分队
 - worktree: /home/lfr/kernelcode_generate
 - 时间: 2026-03-19 02:36:00 +0800
 

@@ -1,7 +1,7 @@
 ## T-20260318-f9ba6759
 
 - 时间：2026-03-18 02:36:32 +0800
-- 角色：`摸鱼小分队`
+- 角色：`睡觉小分队`
 - 任务描述：在 `wt-20260318-memory-refactor` 收敛 `spec/symbol_variable/memory.md` 的 MemorySpace/LocalSpaceMeta 默认元信息约束，确保与实现与测试一致。
 - worktree：`wt-20260318-memory-refactor`
 - 产出文件：
@@ -19,7 +19,7 @@
 ## T-20260318-e280b62b
 
 - 时间：2026-03-18 10:11:00 +0800
-- 角色：`我不是牛马`
+- 角色：`提莫炖蘑菇`
 - 任务描述：在 `wt-20260318-memory-refactor` 审查 `spec/symbol_variable/memory.md`、`python/symbol_variable/memory.py`、`test/symbol_variable/test_memory.py` 的一致性；重点核对 `LocalSpaceMeta` 允许 `max_size=None`、`GM/SM/LM/TSM/TLM` 默认 `align=1024/max_size=None`、以及测试目标与 `test_space_meta` 映射是否一一对应。
 - worktree：`wt-20260318-memory-refactor`
 - 审查范围：

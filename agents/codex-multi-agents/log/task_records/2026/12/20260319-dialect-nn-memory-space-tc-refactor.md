@@ -1,7 +1,7 @@
 # 20260319-dialect-nn-memory-space-tc-refactor
 
 - 任务: T-20260319-a2c7545a
-- 执行人: 摸鱼小分队
+- 执行人: 睡觉小分队
 - worktree: /home/lfr/kernelcode_generate
 - 时间: 2026-03-19 01:05:00 +0800
 

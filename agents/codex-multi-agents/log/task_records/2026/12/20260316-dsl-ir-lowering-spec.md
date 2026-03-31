@@ -2,7 +2,7 @@
 ## T-20260316-74a25430
 
 - 时间：2026-03-16 04:30:00 +0800
-- 角色：`摸鱼小分队`
+- 角色：`睡觉小分队`
 - 任务描述：在 `wt-20260316-dsl-ir-lowering-spec` 补齐 `spec/dsl/ir.md` 与 `spec/dsl/lowering.md`，定义 AST->IR 数据流、IR 结构、`ScalarArgAST` / `TensorAST` 到 `func.func` 签名的 lowering 规则，并为相关 API / 规则补齐示例。
 - worktree：`wt-20260316-dsl-ir-lowering-spec`
 - 产出文件：
@@ -19,7 +19,7 @@
 ## T-20260316-74a25430
 
 - 时间：2026-03-16 04:34:00 +0800
-- 角色：`摸鱼小分队`
+- 角色：`睡觉小分队`
 - 任务描述：在 `wt-20260316-dsl-ir-lowering-spec` 补齐 `spec/dsl/ir.md` 与 `spec/dsl/lowering.md`，定义 AST->IR 数据流、IR 结构、`ScalarArgAST`/`TensorAST` 到 `func.func` 签名的 lowering 规则，并为相关 API/规则补齐示例。
 - worktree：`wt-20260316-dsl-ir-lowering-spec`
 - 产出文件：

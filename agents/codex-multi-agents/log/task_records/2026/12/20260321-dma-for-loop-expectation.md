@@ -1,7 +1,7 @@
 # 2026-03-22 T-20260322-30d8b325
 
 - 时间：2026-03-22 11:27:00 +0800
-- 角色：`我不是牛马`
+- 角色：`提莫炖蘑菇`
 - worktree：`/home/lfr/kernelcode_generate/wt-20260322-dsl-for-loop-dma-slice`
 - 任务描述：重构 DSL for-loop expectation，使 `expectation/dsl/for_loop.py` 生成正确的 `scf.for + dma.slice/dma.deslice` 链路。
 - 变更文件：
@@ -27,7 +27,7 @@
 # 2026-03-21 合并任务（DMA/DSL for-loop expectation）
 
 - 时间：2026-03-21 23:59:59 +0800
-- 角色：`我不是牛马`
+- 角色：`提莫炖蘑菇`
 - worktree：`/home/lfr/kernelcode_generate/wt-20260321-dma-for-loop-expectation`
 - 任务描述：将 DMA/DSL for-loop expectation 链路与同一 task log 一并合入 `main`。
 - 合入文件：
@@ -57,7 +57,7 @@
 ## T-20260321-11627722
 
 - 时间：2026-03-21 23:16:37 +0800
-- 角色：`我不是牛马`
+- 角色：`提莫炖蘑菇`
 - worktree：`/home/lfr/kernelcode_generate/wt-20260321-dma-for-loop-expectation`
 - 任务描述：收敛 DMA/DSL for-loop expectation 链路，使 `expectation/dsl/for_loop.py` 可运行。
 - 变更文件：
@@ -112,7 +112,7 @@
 ## T-20260321-4e3430e8
 
 - 时间：2026-03-21 23:59:00 +0800
-- 角色：`摸鱼小分队`
+- 角色：`睡觉小分队`
 - worktree：`/home/lfr/kernelcode_generate/wt-20260321-dma-for-loop-expectation`
 - 任务描述：按复审结论收敛 `spec/dsl/ast.md` 与 `spec/dsl/mlir_gen.md`，补齐 for-loop 解析与无返回 slice/deslice 语义映射。
 - 变更文件：

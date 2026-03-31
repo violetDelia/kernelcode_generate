@@ -7,7 +7,7 @@
 结论: 已完成 spec 阶段收敛，待进入实现与测试阶段闭环。
 
 时间: 2026-03-26 23:06:28 +0800
-任务: T-20260326-2391f0f6（经办人：我不是牛马）
+任务: T-20260326-2391f0f6（经办人：提莫炖蘑菇）
 任务目标: 实现 tuner dialect 与 !symbol.dim 的 parse/print/verify，补齐测试闭环。
 改动: 新增 kernel_gen/dialect/tuner.py；在 kernel_gen/dialect/symbol.py 增加 SymbolDimType 与名称校验；新增 test/dialect/test_tuner_dialect.py 覆盖 TC-TUNER-001..003；pytest -q test/dialect/test_tuner_dialect.py（3 passed）。
 结论: 实现完成，已自测通过，申请进入审查阶段。
@@ -25,7 +25,7 @@
 2) TC-TUNER-003 触发路径不充分: 当前 test_tuner_param_rejects_invalid_name 仅直接构造 SymbolDimType，未通过 tuner.param 解析/verify 触发 op 级错误路径，无法证明 `tuner.param` 对非法 name 的 parse/verify 行为。建议新增使用 Parser/Module 的非法 name 用例，验证 module.verify() 抛出异常。
 
 时间: 2026-03-26 23:17:57 +0800
-任务: T-20260326-90df7c46（经办人：我不是牛马）
+任务: T-20260326-90df7c46（经办人：提莫炖蘑菇）
 任务目标: 补齐 TC-TUNER-002/003 覆盖，新增 builtin index/IntegerType 结果类型拒绝用例，并通过 Parser/module 验证非法 name。
 改动: 扩展 test/dialect/test_tuner_dialect.py：补充 IndexType/IntegerType 拒绝断言，新增 Parser 解析非法 name 的错误路径；pytest -q test/dialect/test_tuner_dialect.py（3 passed）。
 结论: 改进完成，申请进入审查阶段。
@@ -41,7 +41,7 @@
 1) TC-TUNER-003 Parser 路径仍不闭环: 新增用例仅调用 Parser(...).parse_module()，未执行 module.verify()；xdsl 解析不会自动校验，因此不会触发 VerifyException，无法证明 tuner.param 在非法 name 上的 verify 行为。建议改为 parse 后显式 module.verify() 并断言 VerifyException。
 
 时间: 2026-03-27 00:18:48 +0800
-经办人: 我不是牛马
+经办人: 提莫炖蘑菇
 任务: T-20260326-627efabf
 任务目标: 修正 test_tuner_param_rejects_invalid_name，Parser.parse_module 后显式 module.verify() 并断言 VerifyException，确保 TC-TUNER-003 op 级非法 name 校验闭环。
 改动:

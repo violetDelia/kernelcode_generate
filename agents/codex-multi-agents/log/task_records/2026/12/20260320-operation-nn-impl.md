@@ -3,7 +3,7 @@
 ## T-20260321-8f7a8506
 
 - 时间：2026-03-21 02:05:00 +0800
-- 角色：`摸鱼小分队`
+- 角色：`睡觉小分队`
 - worktree：`/home/lfr/kernelcode_generate/wt-20260320-operation-nn-impl`
 - 变更文件：`spec/operation/nn.md`
 - 处理内容：合入 transpose 测试映射改动（OP-TR-001..004 对应 test_nn_transpose_*）。
@@ -32,7 +32,7 @@
 ## T-20260321-b3e362a0
 
 - 时间：2026-03-21 01:20:46 +0800
-- 角色：`摸鱼小分队`
+- 角色：`睡觉小分队`
 - worktree：`/home/lfr/kernelcode_generate/wt-20260320-operation-nn-impl`
 - 范围：
   - `spec/operation/nn.md`
@@ -44,7 +44,7 @@
 ## T-20260321-fb8947b4
 
 - 时间：2026-03-21 01:02:00 +0800
-- 角色：`我不是牛马`
+- 角色：`提莫炖蘑菇`
 - worktree：`/home/lfr/kernelcode_generate/wt-20260320-operation-nn-impl`
 - 范围：
   - `spec/operation/nn.md`

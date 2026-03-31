@@ -3,7 +3,7 @@
 ## T-20260315-a5cf3c62
 
 - 时间：2026-03-15
-- 角色：摸鱼小分队
+- 角色：睡觉小分队
 - 任务描述：按 spec/operation/nn.md 重构完善 Memory 逐元素算术与比较运算规范。
 - worktree：`wt-20260315-operation-nn-refactor`
 - 产出文件：`spec/symbol_variable/memory.md`
@@ -28,7 +28,7 @@
 ## T-20260315-4db743fe
 
 - 时间：2026-03-15
-- 角色：摸鱼小分队
+- 角色：睡觉小分队
 - 任务描述：更新 spec/operation/nn.md，明确必须提供 nn API 层实现与对应测试。
 - worktree：`wt-20260315-operation-nn-refactor`
 - 产出文件：`spec/operation/nn.md`
@@ -39,7 +39,7 @@
 ## T-20260315-e2c9fb11
 
 - 时间：2026-03-15 19:41:23 +0800
-- 角色：我不是牛马
+- 角色：提莫炖蘑菇
 - 任务描述：审查 `symbol_variable/memory.py` 与 `test/operation/test_memory_operation.py` 的 Memory 逐元素算术/比较实现及测试，并按补充口径核对 `spec/operation/nn.md` 要求的独立 nn API 层。
 - worktree：`wt-20260315-operation-nn-refactor`
 - 结论：不通过

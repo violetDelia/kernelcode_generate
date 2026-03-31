@@ -3,7 +3,7 @@
 ## T-20260315-76a6f8da
 
 - 时间：2026-03-15
-- 角色：摸鱼小分队
+- 角色：睡觉小分队
 - 任务描述：完善 spec/symbol_variable/memory.md，明确功能边界、兼容性与测试标准。
 - worktree：`/home/lfr/kernelcode_generate/wt-20260315-memory`
 - 产出文件：`spec/symbol_variable/memory.md`
@@ -86,7 +86,7 @@
 ## T-20260315-16f1148a
 
 - 时间：2026-03-15
-- 角色：摸鱼小分队
+- 角色：睡觉小分队
 - 任务描述：memory spec 去除 FakeTensor 语义与命名，明确 format 为 c last=NHWC、c not last=NCHW，并同步测试目标与用例。
 - worktree：`wt-20260315-memory`
 - 产出文件：`spec/symbol_variable/memory.md`
@@ -267,7 +267,7 @@
 ## T-20260315-14f9d820
 
 - 时间：2026-03-15
-- 角色：摸鱼小分队
+- 角色：睡觉小分队
 - 任务描述：同步 memory spec 的 format 映射与 convert_from_tensor 文案，移除 FakeTensor 语义/命名。
 - worktree：`wt-20260315-memory`
 - 结果：已核对当前 spec 已符合要求，本次无需额外变更。
@@ -292,7 +292,7 @@
 ## T-20260315-57ea2c18
 
 - 时间：2026-03-15
-- 角色：摸鱼小分队
+- 角色：睡觉小分队
 - 任务描述：更新 memory spec 绑定 Farmat.Norm->NCHW、Farmat.CLast->NHWC，并同步 convert_from_tensor/format 文案。
 - worktree：`wt-20260315-memory`
 - 变更摘要：
@@ -316,7 +316,7 @@
 ## T-20260315-170ba30a
 
 - 时间：2026-03-15
-- 角色：摸鱼小分队
+- 角色：睡觉小分队
 - 任务描述：统一 memory spec 与测试对 Farmat 约束范围，补充枚举别名 name/repr 行为。
 - worktree：`wt-20260315-memory`
 - 变更摘要：

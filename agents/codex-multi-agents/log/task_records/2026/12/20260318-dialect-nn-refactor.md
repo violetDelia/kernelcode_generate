@@ -122,7 +122,7 @@
   - `python/dialect/nn.py`
   - `test/dialect/test_nn_dialect.py`
 - 当前状态: 阻塞（角色职责冲突）
-  - 说明: 我不是牛马 为“审查与建议”角色，按 `agents/codex-multi-agents/agents/我不是牛马/我不是牛马.prompt.md` 不承担实现/合并/提交整理阶段工作；因此无法直接代为产出提交，但已提供可执行的整理步骤与当前 worktree 状态，供后续接手者快速完成。
+  - 说明: 提莫炖蘑菇 为“审查与建议”角色，按 `agents/codex-multi-agents/agents/提莫炖蘑菇/提莫炖蘑菇.prompt.md` 不承担实现/合并/提交整理阶段工作；因此无法直接代为产出提交，但已提供可执行的整理步骤与当前 worktree 状态，供后续接手者快速完成。
 
 ### worktree 现状（供接手者）
 - worktree: `/home/lfr/kernelcode_generate/wt-20260318-dialect-nn-refactor`

@@ -18,7 +18,7 @@
 ## T-20260321-1ef7096a
 
 - 时间：2026-03-21 23:40:40 +0800
-- 角色：`摸鱼小分队`
+- 角色：`睡觉小分队`
 - worktree：`/home/lfr/kernelcode_generate/wt-20260321-dialect-dma-alloc-reshape-view`
 - 任务描述：按 spec 收敛 `dma.reshape` verifier，允许符号维度并补齐 reshape 相关测试闭环（不改 md）。
 - 变更文件：

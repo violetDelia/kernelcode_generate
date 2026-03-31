@@ -82,7 +82,7 @@
 
 - 任务 ID：`T-20260323-a9b072dd`
 - 任务类型：`spec`
-- 记录人：`摸鱼小分队`
+- 记录人：`睡觉小分队`
 - 时间：`2026-03-23`
 - worktree：`/home/lfr/kernelcode_generate/wt-20260323-expectation-dsl-add-scalar`
 
@@ -198,7 +198,7 @@
 
 - 任务 ID：`T-20260323-e48175dc`
 - 任务类型：`spec`
-- 记录人：`摸鱼小分队`
+- 记录人：`睡觉小分队`
 - 时间：`2026-03-23`
 - worktree：`/home/lfr/kernelcode_generate/wt-20260323-expectation-dsl-add-scalar`
 

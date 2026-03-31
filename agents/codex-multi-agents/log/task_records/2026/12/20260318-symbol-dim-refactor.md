@@ -1,7 +1,7 @@
 ## T-20260318-e23b70b3
 
 - 时间：2026-03-18 03:13:01 +0800
-- 角色：`摸鱼小分队`
+- 角色：`睡觉小分队`
 - 任务描述：在 `wt-20260318-symbol-dim-refactor` 改进 `spec/symbol_variable/symbol_dim.md`，补齐 SD-018 与 `test_sympy_basic_expression_operands` 的映射并更新测试说明。
 - worktree：`wt-20260318-symbol-dim-refactor`
 - 产出文件：

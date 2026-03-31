@@ -12,7 +12,7 @@
   - 额外发现 expectation 基线自身文档路径写法统一为 `python expectation/temp/dma/*.py`，与实际目录 `expectation/temp_/dma/*.py` 不一致；本轮按只读基线处理，未修改 expectation。
 - 结论：首轮核对完成，当前链路`未闭环`，且需要拆分下一阶段任务。现状可分为两类缺口：1）全量脚本共同阻塞点是 `JoinedStr` 形式张量注解不被 DSL 解析器支持，导致 11 个 expectation 均无法进入后续 lowering；2）即使补齐注解解析，当前 spec/实现/test 也只对 `load/store/slice/deslice` 有部分闭环，对 `alloc/copy/cast/view/reshape/flatten/free` 仍缺公开约束、解析支持、lowering 与测试映射。建议下一阶段至少拆为两个任务：其一，`spec` 任务先明确 `expectation/temp_/dma` 各脚本对应的 DSL 公开能力与测试映射，并统一 `mlir_gen` / `emit_mlir` 边界；其二，`实现` 任务在该 spec 基础上最小收敛 `kernel_gen/dsl/ast.py`、`kernel_gen/dsl/emit_mlir.py`、`kernel_gen/dsl/mlir_gen.py` 与 `test/dsl/test_ast_visitor.py`，优先解决 `JoinedStr` 注解解析，再分批补齐 DMA DSL 调用解析与 lowering。
 - 时间：`2026-03-25 09:38:38 +0800`
-- 经手人：`摸鱼小分队`
+- 经手人：`睡觉小分队`
 - 任务：`T-20260325-b0aedfea`
 - 任务目标：沿用既有 worktree 与同一日志文件，以 `expectation/temp_/dma` 为外部基线，先最小补齐 DMA 相关 DSL spec 闭环，只修改直接用于 DSL 公开能力与测试映射的 spec。
 - 改动：

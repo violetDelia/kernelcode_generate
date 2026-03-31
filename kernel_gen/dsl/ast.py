@@ -154,6 +154,31 @@ class ScalarArgAST:
 
 
 @dataclass(frozen=True)
+class PtrArgAST:
+    """指针参数节点。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 表示函数签名中的指针输入参数。
+    - 仅承载 pointee dtype，不提供 shape/stride 语义。
+
+    使用示例:
+    - PtrArgAST(name="data", dtype=f32)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    name: str
+    dtype: object
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
 class VarAST:
     """变量节点。
 
@@ -679,7 +704,7 @@ class FunctionAST:
     """
 
     name: str
-    inputs: list[TensorAST | ScalarArgAST]
+    inputs: list[TensorAST | ScalarArgAST | PtrArgAST]
     outputs: list[TensorAST | ScalarArgAST]
     body: BlockAST
     location: SourceLocation | None = None
@@ -687,14 +712,14 @@ class FunctionAST:
     py_ast: object | None = None
     diagnostics: list[Diagnostic] = field(default_factory=list)
 
-    def iter_inputs(self: FunctionAST) -> Iterable[TensorAST | ScalarArgAST]:
+    def iter_inputs(self: FunctionAST) -> Iterable[TensorAST | ScalarArgAST | PtrArgAST]:
         """迭代输入参数。
 
         创建者: 小李飞刀
         最后一次更改: 小李飞刀
 
         功能说明:
-        - 提供输入参数的统一迭代入口。
+        - 提供输入参数（Tensor/Scalar/Ptr）的统一迭代入口。
 
         使用示例:
         - list(func_ast.iter_inputs())
@@ -1066,7 +1091,24 @@ def _parse_annotation_node(
     globals_table: dict[str, object],
     builtins_table: dict[str, object],
     runtime_table: dict[str, object] | None = None,
-) -> TensorAST | ScalarArgAST | None:
+) -> TensorAST | ScalarArgAST | PtrArgAST | None:
+    """解析单个注解节点为输入/输出 AST。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 支持 `int/bool/SymbolDim`、`Tensor[...]` 与 `Ptr(dtype)` 注解解析。
+    - 对 `Ptr()` / `Ptr(f32, f32)` 等非法参数数量给出固定诊断。
+
+    使用示例:
+    - _parse_annotation_node(py_ast.parse("Ptr(f32)", mode="eval").body, "data", globals(), __builtins__)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
     if node is None:
         if runtime_table is not None and arg_name is not None and arg_name in runtime_table:
             inferred = _annotation_from_runtime_value(arg_name, runtime_table[arg_name])

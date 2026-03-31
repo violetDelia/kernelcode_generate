@@ -42,7 +42,7 @@
 ## T-20260318-e54720b3
 
 - 时间：2026-03-18 21:11:31 +0800
-- 角色：`我不是牛马`
+- 角色：`提莫炖蘑菇`
 - 任务描述：审查 operation/dma 实现与 `spec/operation/dma.md` 一致性；重点关注与 `dialect/dma` 的分层关系、错误规则、stride 限制、返回语义。
 - worktree：`/home/lfr/kernelcode_generate/wt-20260318-operation-dma-refactor`
 - 审查结论：不通过
@@ -76,7 +76,7 @@
 ## T-20260318-29b91e98
 
 - 时间：2026-03-18 22:51:06 +0800
-- 角色：`我不是牛马`
+- 角色：`提莫炖蘑菇`
 - 任务描述：再次审查最新修复（范围：`spec/operation/dma.md`、`python/operation/dma.py`、`test/operation/test_operation_dma.py`）；重点核对 `load/slice` 返回的 `Memory.stride` 已为 `None`，不再承载切片 `strides`；`offsets/sizes/strides` 由调用方保留并传下游；错误规则、返回语义与测试映射一致。
 - worktree：`/home/lfr/kernelcode_generate/wt-20260318-operation-dma-refactor`
 - 审查结论：通过

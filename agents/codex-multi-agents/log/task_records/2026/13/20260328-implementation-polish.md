@@ -62,5 +62,5 @@
 - 核对 `git status --short` 与提交记录，未发现除任务记录外的未合并改动。
 - 通过 `git branch --contains 867ec99` 确认当前 worktree HEAD 已在 main 中。
 - 无需合并业务改动；准备清理 worktree。
-- 经办人：摸鱼小分队。
+- 经办人：睡觉小分队。
 结论：无需合并，执行 worktree 清理。

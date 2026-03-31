@@ -1,7 +1,7 @@
 # T-20260315-5ee2b244 spec 更新记录
 
 - 时间：2026-03-15
-- 角色：摸鱼小分队
+- 角色：睡觉小分队
 - 任务描述：更新 `spec/symbol_variable/symbol_dim.md`，反映数字字符串改为 `ValueError`、`str` 操作数符号假设统一与 `Symbol` 输入规范化。
 - 使用 worktree：`/home/lfr/kernelcode_generate/wt-20260315-symbol-dim-spec`
 - 产出文件：`spec/symbol_variable/symbol_dim.md`

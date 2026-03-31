@@ -100,7 +100,7 @@
 # 2026-03-22 T-20260322-20404fc0 合并执行
 
 - 时间：2026-03-22 19:43:57 +0800
-- 角色：`我不是牛马`
+- 角色：`提莫炖蘑菇`
 - worktree：`/home/lfr/kernelcode_generate/wt-20260322-include-cpu-impl-fix`
 - 任务描述：将 include/cpu 实现修正链路业务文件收敛到主分支，并清理 worktree。
 

@@ -20,7 +20,7 @@
 - 将 img2col 相关实现/测试改动拆分到独立任务链路。
 
 时间：2026-03-26 23:15:35 +0800
-经手人：摸鱼小分队
+经手人：睡觉小分队
 任务：T-20260326-9e229fa0
 任务目标：修正 nn 非 img2col 测试映射，确保 spec/operation/nn.md 与 test/operation/test_operation_nn.py 的 OP 编号一一对应，并修复 OP-MM 编号漂移。
 改动：

@@ -1,5 +1,5 @@
 时间：2026-03-25 21:50:00 +0800
-经手人：摸鱼小分队
+经手人：睡觉小分队
 任务：T-20260325-e4bf0a5c spec 阶段，核对 use_global_value 链路与当前 DSL spec/实现/test 的映射，并在闭环缺失时最小收敛 spec。
 任务目标：以 `build_func_op` 拒绝函数体直接使用外部定义值、禁止外部值作为隐式输入参与 lowering 为基线，明确对应实现文件、测试文件与测试清单，不修改 expectation 文件。
 改动：
@@ -8,8 +8,8 @@
 结论：当前链路未闭环。`kernel_gen/dsl/ast.py` 现状会把函数体中的全局 `int/float/str` 解析为 `ConstAST`，`test/dsl/test_ast_visitor.py` 也缺少“拒绝外部值引用”的用例，因此实现与测试尚不能证明该约束。已完成最小 spec 收敛；未运行测试。下一阶段需要沿用同一 worktree 与记录文件创建实现任务，补 `kernel_gen/dsl/ast.py` / `kernel_gen/dsl/mlir_gen.py` 的拒绝逻辑和 `test/dsl/test_ast_visitor.py` 的对应测试，再进入审查链路。
 
 时间：2026-03-25 21:58:37 +0800
-执行人：我不是牛马
-经办人：我不是牛马
+执行人：提莫炖蘑菇
+经办人：提莫炖蘑菇
 任务：T-20260325-ec435832 实现阶段，收敛 use_global_value 链路对外部值引用的拒绝逻辑与测试闭环。
 任务目标：在不修改 expectation 基线的前提下，使 `build_func_op` 拒绝函数体内直接引用外部定义值，且外部值不得作为隐式输入参与 lowering；补齐 MGEN-027 对应测试并完成必要验证。
 改动：
@@ -37,8 +37,8 @@
   - 在 test/dsl/test_ast_visitor.py 为全局/内建外部值引用补充 MGEN-027 正向错误用例，确保与 spec 口径闭环。
 
 时间：2026-03-25 22:25:11 +0800
-执行人：我不是牛马
-经办人：我不是牛马
+执行人：提莫炖蘑菇
+经办人：提莫炖蘑菇
 任务：T-20260325-7da6a13f
 任务目标：补齐 `build_func_op` 对 Attribute / 全局 / builtins 外部值引用的拒绝闭环，最小修改 `kernel_gen/dsl/ast.py` 与 `test/dsl/test_ast_visitor.py`，必要时同步 `spec/dsl/mlir_gen.md` 的 MGEN-027 映射说明；expectation 保持只读。
 改动：
@@ -67,8 +67,8 @@
 下一步建议: 明确 kernel_gen/dsl/mlir_gen.py 是否应纳入本链路范围；若需要纳入，请更新任务范围并补充同链路审查；若不需要，剔除该文件变更后再申请复审。
 
 时间：2026-03-25 23:04:33 +0800
-执行人：我不是牛马
-经办人：我不是牛马
+执行人：提莫炖蘑菇
+经办人：提莫炖蘑菇
 任务：T-20260325-b229998a
 任务目标：清理 use_global_value 链路 worktree 中的超范围变更，仅保留本链路闭环所必需的业务改动，并明确 `kernel_gen/dsl/mlir_gen.py` 是否必须保留。
 改动：
@@ -79,8 +79,8 @@
 结论：本轮清理结论为“无可移除的超范围业务改动”。`kernel_gen/dsl/mlir_gen.py` 虽超出最初最小修改列表，但属于 use_global_value 链路实现闭环的必要改动，已由 MGEN-027 的 spec/test 映射覆盖；当前业务 diff 范围为 `kernel_gen/dsl/ast.py`、`kernel_gen/dsl/mlir_gen.py`、`spec/dsl/mlir_gen.md`、`test/dsl/test_ast_visitor.py`，pytest 结果为 `142 passed`。下一步建议由神秘人创建复审任务，重点只读核对 `kernel_gen/dsl/mlir_gen.py` 的必要性说明与 MGEN-027 闭环是否一致。
 
 时间：2026-03-25 23:10:42 +0800
-执行人：摸鱼小分队
-经办人：摸鱼小分队
+执行人：睡觉小分队
+经办人：睡觉小分队
 任务：T-20260325-c28b1987
 任务目标：严格只读复审 use_global_value 链路，核对 `kernel_gen/dsl/ast.py`、`kernel_gen/dsl/mlir_gen.py`、`spec/dsl/mlir_gen.md`、`test/dsl/test_ast_visitor.py` 与记录文件，重点确认 `reject_external_values` / `inspect.getclosurevars(fn).nonlocals` 逻辑必要性，以及 MGEN-027 对闭包/全局/builtins/Attribute 四类外部值拒绝映射闭环。
 改动：
@@ -96,8 +96,8 @@
 - 建议由神秘人创建下一阶段合并任务，合并范围限定为 `kernel_gen/dsl/{ast.py,mlir_gen.py}`、`spec/dsl/mlir_gen.md`、`test/dsl/test_ast_visitor.py` 与本记录文件；合并前再做一次只读 diff 复核，确保无范围外文件进入提交。
 
 时间：2026-03-25 23:20:48 +0800
-执行人：我不是牛马
-经办人：我不是牛马
+执行人：提莫炖蘑菇
+经办人：提莫炖蘑菇
 任务：T-20260325-5f9f21c0
 任务目标：按合并规范将 use_global_value 链路已通过复审的变更合入 main，范围限定 kernel_gen/dsl/ast.py、kernel_gen/dsl/mlir_gen.py、spec/dsl/mlir_gen.md、test/dsl/test_ast_visitor.py 与记录文件。
 改动：

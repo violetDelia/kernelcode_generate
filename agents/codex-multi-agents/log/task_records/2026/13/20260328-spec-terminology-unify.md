@@ -1,7 +1,7 @@
 时间: 2026-03-28 17:25:00 +0800
 任务: T-20260328-193d9f9b
 任务目标: 统一 spec 术语与阶段命名（lowering/emit_c/gen_kernel/operation/dialect）。
-改动: 经办人=摸鱼小分队；统一 spec/pass/lowing/nn_to_kernel.md 中 lowing->lowering 命名，更新 spec/功能实现/测试链接与示例引用，移除 expectation 相关执行命令与用例映射，保留 test_lowing_nn_to_kernel.py 对应的 COV-N2K-001..009 映射。
+改动: 经办人=睡觉小分队；统一 spec/pass/lowing/nn_to_kernel.md 中 lowing->lowering 命名，更新 spec/功能实现/测试链接与示例引用，移除 expectation 相关执行命令与用例映射，保留 test_lowing_nn_to_kernel.py 对应的 COV-N2K-001..009 映射。
 结论: 已完成术语统一并满足 rg 校验；实现/测试侧命名与路径需后续任务同步到 lowering。
 时间: 2026-03-28 19:41:20 +0800
 任务: T-20260328-849e9377

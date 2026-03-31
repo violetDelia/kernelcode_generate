@@ -767,6 +767,101 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
         return cls(SymbolExprAttr.from_expr(expr))
 
 
+@irdl_attr_definition
+class SymbolPtrType(ParametrizedAttribute, TypeAttribute):
+    """符号指针类型。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 表示 `!symbol.ptr<dtype>` 的指针类型承载。
+    - 作为 DSL `Ptr(dtype)` 与 IR 类型的唯一桥接入口。
+
+    使用示例:
+    - SymbolPtrType(f32)
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/dialect/test_symbol_dialect.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    name = "symbol.ptr"
+
+    dtype: TypeAttribute = param_def(TypeAttribute)
+
+    @classmethod
+    def parse_parameters(cls: type["SymbolPtrType"], parser: AttrParser) -> Sequence[Attribute]:
+        """解析 symbol.ptr 类型参数。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 解析 `!symbol.ptr<dtype>` 中的 dtype。
+
+        使用示例:
+        - SymbolPtrType.parse_parameters(parser)
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        parser.parse_punctuation("<", "Expected '<' for symbol ptr type.")
+        dtype = parser.parse_type()
+        parser.parse_punctuation(">", "Expected '>' for symbol ptr type.")
+        return (dtype,)
+
+    def print_parameters(self: "SymbolPtrType", printer: Printer) -> None:
+        """打印 symbol.ptr 类型参数。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 输出 `!symbol.ptr<dtype>` 的 dtype 部分。
+
+        使用示例:
+        - SymbolPtrType(f32).print_parameters(printer)
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        printer.print_string("<")
+        printer.print_attribute(self.dtype)
+        printer.print_string(">")
+
+    def verify(self: "SymbolPtrType") -> None:
+        """校验 symbol.ptr 的 dtype。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 要求 dtype 为合法 TypeAttribute。
+        - 明确拒绝 `!symbol.int<...>` 作为 ptr dtype。
+
+        使用示例:
+        - SymbolPtrType(f32).verify()
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        if not isinstance(self.dtype, TypeAttribute):
+            _raise_verify_error("symbol.ptr dtype must be type")
+        if isinstance(self.dtype, SymbolValueType):
+            _raise_verify_error("symbol.ptr dtype must not be symbol.int")
+
+
 class _BaseSymbolBinaryArithOp(IRDLOperation):
     """symbol 二元整数算术 op 基类。"""
 
@@ -1436,6 +1531,7 @@ Symbol = Dialect(
     [
         SymbolExprAttr,
         SymbolDimType,
+        SymbolPtrType,
         SymbolValueType,
     ],
 )
@@ -1458,6 +1554,7 @@ __all__ = [
     "SymbolForOp",
     "SymbolFloorDivOp",
     "SymbolGetStrideOp",
+    "SymbolPtrType",
     "SymbolSubOp",
     "SymbolToIntOp",
     "SymbolValueType",

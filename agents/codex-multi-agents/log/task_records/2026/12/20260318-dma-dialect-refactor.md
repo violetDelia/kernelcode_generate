@@ -23,7 +23,7 @@
 ## T-20260318-bd5445c1
 
 - 时间：2026-03-18 10:43:16 +0800
-- 角色：`我不是牛马`
+- 角色：`提莫炖蘑菇`
 - 任务描述：按 `spec/dialect/dma.md` 审查 `python/dialect/dma.py` 与 `test/dialect/test_dma_dialect.py` 一致性；硬约束：不得定义 `DmaMemoryType` / `DmaMemorySpaceAttr`，必须复用 `NnMemoryType` / `NnMemorySpaceAttr`。
 - worktree：`/home/lfr/kernelcode_generate/wt-20260318-dma-dialect-refactor`
 - 审查结论：不通过
@@ -52,7 +52,7 @@
 ## T-20260318-d8ecb600
 
 - 时间：2026-03-18 20:47:49 +0800
-- 角色：`我不是牛马`
+- 角色：`提莫炖蘑菇`
 - 任务描述：再次审查 dma dialect（按最新 `spec/dialect/dma.md` 复核实现/测试一致性）；重点确认：仅支持 `IntAttr/StringAttr` 的 attribute 索引、暂不支持 SSA 动态 index；不得定义 `DmaMemoryType` / `DmaMemorySpaceAttr`；判断是否可进入提交整理阶段。
 - worktree：`/home/lfr/kernelcode_generate/wt-20260318-dma-dialect-refactor`
 - 审查结论：不通过
@@ -80,7 +80,7 @@
 ## T-20260318-b5d06f59
 
 - 时间：2026-03-18 10:48:00 +0800
-- 角色：`摸鱼小分队`
+- 角色：`睡觉小分队`
 - 任务描述：按收敛口径修正 `spec/dialect/dma.md`（offsets/sizes 允许 IntAttr/StringAttr；strides 仅允许 IntAttr(1)；暂不支持 SSA 动态 index），仅改 spec。
 - worktree：`/home/lfr/kernelcode_generate`
 - 产出文件：

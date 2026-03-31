@@ -1,5 +1,5 @@
 时间：2026-03-25 21:35:00 +0800
-经手人：摸鱼小分队
+经手人：睡觉小分队
 任务：T-20260325-d61a210f spec 阶段，核对 expectation/temp_/arch/get_block_id.py 与当前 DSL spec/实现/test 的映射关系，并在闭环缺失时最小收敛 spec。
 任务目标：以 `get_block_id()` 零入参 DSL 函数为基线，明确对应 DSL spec、实现文件、测试文件与最小测试清单，不修改 expectation 文件。
 改动：
@@ -9,8 +9,8 @@
 结论：当前链路仍未闭环；spec 已完成最小收敛，但 `kernel_gen/dsl/ast.py`、`kernel_gen/dsl/emit_mlir.py`、`kernel_gen/dsl/mlir_gen.py` 与 `test/dsl/test_ast_visitor.py` 仍缺 `get_block_id()` 对应实现/测试。未运行测试；下一阶段需要同 worktree、同记录文件上的实现任务，再进入审查链路。
 
 时间：2026-03-25 21:36:10 +0800
-执行人：我不是牛马
-经办人：我不是牛马
+执行人：提莫炖蘑菇
+经办人：提莫炖蘑菇
 任务：T-20260325-14a9a8be 实现阶段，补齐 `expectation/temp_/arch/get_block_id.py` 对应 DSL AST / emit / mlir_gen / 测试闭环。
 任务目标：在不修改 expectation 的前提下，最小实现 `get_block_id()` 的 AST 解析、MLIR 发射与函数组装支持，并补齐直接证明该链路的 DSL 测试。
 改动：
@@ -39,8 +39,8 @@
 - 经办人：`不要啊教练`
 
 时间：2026-03-25 21:43:04 +0800
-执行人：我不是牛马
-经办人：我不是牛马
+执行人：提莫炖蘑菇
+经办人：提莫炖蘑菇
 任务：T-20260325-bac87233 改进阶段，补齐 `expectation/temp_/arch/get_block_id.py` 链路的非法参数边界测试闭环。
 任务目标：在不修改 expectation、且不扩散实现范围的前提下，补充 `get_block_id(1)` 与 `get_block_id(x=1)` 的 AST 解析失败测试，并最小收敛对应 spec/test 映射。
 改动：

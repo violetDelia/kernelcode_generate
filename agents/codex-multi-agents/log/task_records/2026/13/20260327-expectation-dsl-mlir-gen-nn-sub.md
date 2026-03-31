@@ -1,6 +1,6 @@
 ## 2026-03-27 04:18:02 +0800
 - 时间: 2026-03-27 04:18:02 +0800
-- 经手人: 我不是牛马
+- 经手人: 提莫炖蘑菇
 - 任务: T-20260327-b81fd057 nn.sub dtype promotion + dma.cast lowering
 - 任务目标: 补齐 nn.sub dtype promotion + dma.cast lowering，收敛 element_type mismatch 并跑通 expectation
 - 改动:

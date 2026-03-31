@@ -79,7 +79,7 @@
 
 - 任务 ID：`T-20260323-88f0a267`
 - 任务类型：`清理收尾`
-- 记录人：`我不是牛马`
+- 记录人：`提莫炖蘑菇`
 - 时间：`2026-03-23`
 - worktree：`/home/lfr/kernelcode_generate/wt-20260323-expectation-operation-subview-view-params-r2`
 

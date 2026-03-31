@@ -117,8 +117,8 @@
   - 本轮未复测；仅做只读内容复核。
 - 结论：`通过`。`expectation/temp_/arch` 8 个文件的头部元数据目前已与真实路径、当前 DSL spec/实现/测试闭环及本轮实际修改历史保持一致，且未发现范围外改动。建议下一步由神秘人按任务链推进后续状态更新；若需继续清理同类 expectation 元数据链路，可复用本轮校验口径处理 `temp_/symbol` 与 `temp_/dma`。
 - 时间：`2026-03-25 10:26:31 +0800`
-- 执行人：`我不是牛马`
-- 经办人：`我不是牛马`
+- 执行人：`提莫炖蘑菇`
+- 经办人：`提莫炖蘑菇`
 - 任务：`T-20260325-f32b1bfc`
 - 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-temp-arch` 与同一日志文件，将 `expectation/temp_/arch` 链路已通过复审的业务改动按限定范围合入 `main`，不带入 `agents/`、`TODO.md`、`DONE.md`、`AGENTS.md`、`skills/` 等禁止内容。
 - 改动：

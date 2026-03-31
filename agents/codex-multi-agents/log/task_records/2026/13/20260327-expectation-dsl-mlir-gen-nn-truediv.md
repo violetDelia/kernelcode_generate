@@ -59,7 +59,7 @@
 - 结论: spec 收敛完成，expectation 通过；建议进入实现/审查链路确认后续改动影响。
 
 时间: 2026-03-27 04:40:26 +0800
-经办人: 我不是牛马
+经办人: 提莫炖蘑菇
 任务: T-20260327-80b82794（Memory dtype promotion 口径核对）
 任务目标: 核对 Memory dtype promotion 实现/测试口径，并对齐 spec/symbol_variable/memory.md 与 spec/operation/nn.md；按要求运行 nn.truediv expectation。
 改动:
@@ -100,7 +100,7 @@
 - 结论: spec 收敛完成，expectation 跑通；建议进入实现/审查链路确认后续改动影响。
 
 时间: 2026-03-27 04:54:01 +0800
-经办人: 我不是牛马
+经办人: 提莫炖蘑菇
 任务: T-20260327-9d55d3eb（nn.truediv mixed dtype + dma.cast 实现/测试）
 任务目标: 按 spec/dsl/emit_mlir.md 与 spec/dsl/mlir_gen.md 补齐 nn.truediv mixed dtype + dma.cast lowering 与 MGEN-011A 对应实现/测试闭环，并跑通 expectation。
 改动:

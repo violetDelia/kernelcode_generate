@@ -1,5 +1,5 @@
 - 时间：`2026-03-25 12:00:00 +0800`
-- 经办人：`摸鱼小分队`
+- 经办人：`睡觉小分队`
 - 任务：`T-20260325-179b3d18`
 - 任务目标：在授权 worktree 内新增并收敛 `arch dialect` spec，定义执行维度查询、动态内存入口与 kernel 启动描述的公开接口、IR 形式、类型约束、verify 边界与测试清单。
 - 改动：
@@ -113,7 +113,7 @@
   - 只读核对 `kernel_gen/dialect/__init__.py` 与 `kernel_gen/dialect/arch.py`，确认当前 `__all__` 的 arch 子集与 spec 列举完全一致，且本轮审查范围内 Python 函数参数类型提示无缺失；本轮未复测，沿用链路内既有结果 `pytest -q test/dialect/test_arch_dialect.py` 为 `12 passed`。
 - 结论：`通过`。当前 `spec/dialect/arch.md` 对共享包入口的例外归属说明、`kernel_gen/dialect/__init__.py` 的 arch 导出集合，以及 `test_arch_package_exports` 的 9 个 identity 断言和 `__all__` 边界断言已经闭环一致，足以证明 `TC-ARCH-012` 所要求的包级导出边界。建议下一步由神秘人按主分支 TODO 推进本链路的收尾或归档，无需再拆分新的 arch 改进任务。
 - 时间：`2026-03-25 04:40:25 +0800`
-- 经办人：`我不是牛马`
+- 经办人：`提莫炖蘑菇`
 - 任务：`T-20260325-f516486e`
 - 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-arch-dialect`，将 arch dialect 链路已通过复审的业务改动按限定范围合入 `main`。
 - 改动：

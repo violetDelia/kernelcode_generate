@@ -57,8 +57,8 @@ codex-multi-agents-tmux.sh -talk -from "scheduler" -to "worker-a" -agents-list "
 - 目标角色不在名单中或 `会话` 字段为空时返回数据错误（`RC=3`）。
 - 写日志时使用 `flock` 加锁，锁超时或冲突返回锁错误（`RC=4`）。
 
+## 唤醒角色
 
-### 初始化环境
 
 命令：
 
@@ -88,7 +88,7 @@ codex-multi-agents-tmux.sh -wake -file "agents-lists.md" -name xiaoming
 - 输出：在标准输出（stdout）打印结果信息。
 
 
-## 唤醒角色
+### 初始化环境
 ```bash
 codex-multi-agents-tmux.sh -init-env -file "agents-lists.md" -name xiaoming
 ```
@@ -98,7 +98,7 @@ codex-multi-agents-tmux.sh -init-env -file "agents-lists.md" -name xiaoming
 - 执行 `tmux new-session -d -s <会话>` 创建会话。
   - [immutable]若启动类型为 `codex`，依次执行以下初始化命令,中间间隔"3"秒：
     - `tmux send-keys -t <会话> "codex"`
-    - `tmux send-keys -t <会话> "/resume <agent session>"`
+    - `tmux send-keys -t <会话> "/rename <agent session>"`
     - `tmux send-keys -t <会话> ENTER`
 注意事项：
 

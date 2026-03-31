@@ -1,7 +1,7 @@
 # 20260319-dialect-nn-matmul-refactor
 
 - 任务: T-20260319-b30e7676 / T-20260319-d3fd8cd7
-- 执行人: 摸鱼小分队
+- 执行人: 睡觉小分队
 - worktree: /home/lfr/kernelcode_generate/wt-20260319-dialect-nn-matmul
 - 时间: 2026-03-19 02:18:00 +0800
 
@@ -21,7 +21,7 @@
 ### T-20260319-dbe84785
 
 - 时间: 2026-03-19 02:22:40 +0800
-- 角色: `我不是牛马`
+- 角色: `提莫炖蘑菇`
 - worktree: `/home/lfr/kernelcode_generate/wt-20260319-dialect-nn-matmul`
 - 审查范围:
   - `spec/dialect/nn.md`
@@ -89,7 +89,7 @@
 ### T-20260319-40900394
 
 - 时间: 2026-03-19 02:33:15 +0800
-- 角色: `我不是牛马`
+- 角色: `提莫炖蘑菇`
 - worktree: `/home/lfr/kernelcode_generate/wt-20260319-dialect-nn-matmul`
 - 审查范围:
   - `spec/dialect/nn.md`
@@ -137,7 +137,7 @@
 ### T-20260319-b13cb31e
 
 - 时间: 2026-03-19 02:38:51 +0800
-- 角色: `我不是牛马`
+- 角色: `提莫炖蘑菇`
 - worktree: `/home/lfr/kernelcode_generate/wt-20260319-dialect-nn-matmul`
 - 审查范围:
   - `spec/dialect/nn.md`

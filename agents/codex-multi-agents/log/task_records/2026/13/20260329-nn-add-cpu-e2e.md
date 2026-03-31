@@ -127,7 +127,7 @@
 任务：T-20260329-b55b3d3e
 任务目标：合并 cpu::add Memory+scalar / scalar+Memory overload 链路（spec/include/cpu/cpu.md、include/cpu/Nn.h、test/include/cpu/test_nn.py 与记录文件）。
 状态：阻塞（恢复后复核）。
-阻塞点：同一 worktree `/home/lfr/kernelcode_generate/wt-20260329-nn-add-cpu-e2e` 新增/存在其他进行中任务 `T-20260329-1e43b31b`（审查任务，负责人：我不是牛马），不满足《合并规范》“合并前必须确认目标 worktree 内不存在其他进行中任务；若仍有未完成任务，禁止合并”。
+阻塞点：同一 worktree `/home/lfr/kernelcode_generate/wt-20260329-nn-add-cpu-e2e` 新增/存在其他进行中任务 `T-20260329-1e43b31b`（审查任务，负责人：提莫炖蘑菇），不满足《合并规范》“合并前必须确认目标 worktree 内不存在其他进行中任务；若仍有未完成任务，禁止合并”。
 已尝试动作：
 - 已复核当前改动与目标范围，仅计划合并 `spec/include/cpu/cpu.md`、`include/cpu/Nn.h`、`test/include/cpu/test_nn.py` 与记录文件；
 - 已复核 TODO.md，确认同 worktree 另有进行中任务 `T-20260329-1e43b31b`；

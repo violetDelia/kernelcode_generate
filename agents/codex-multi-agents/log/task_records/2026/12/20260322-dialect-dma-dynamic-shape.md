@@ -1,7 +1,7 @@
 # 2026-03-22 T-20260322-dialect-dma-dynamic-shape
 
 - 时间：2026-03-22 00:24:03 +0800
-- 角色：`我不是牛马`
+- 角色：`提莫炖蘑菇`
 - worktree：`/home/lfr/kernelcode_generate/wt-20260322-dialect-dma-dynamic-shape`
 - 任务描述：实现 `dma dialect dynamic shape` 支持，并补齐动态 shape / dynamic offsets-sizes / reshape 测试。
 - 变更文件：

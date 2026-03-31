@@ -3,7 +3,7 @@
 ## T-20260315-13ca001e
 
 - 时间：2026-03-15
-- 角色：摸鱼小分队
+- 角色：睡觉小分队
 - 任务描述：完善 spec/symbol_variable/symbol_shape.md，明确功能边界、兼容性与测试标准。
 - worktree：`/home/lfr/kernelcode_generate/wt-20260315-symbol-shape`
 - 产出文件：`spec/symbol_variable/symbol_shape.md`

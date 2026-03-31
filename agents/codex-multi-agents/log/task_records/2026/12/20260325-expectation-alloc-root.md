@@ -46,7 +46,7 @@
 - 结论：`通过`。当前 `expectation/alloc.py` 的职责已收敛为 root 兼容/转发入口，不再与 `expectation/operation/dma/alloc.py` 重复承载 alloc 断言；后者作为唯一权威 expectation，与 [`spec/operation/dma.md`](../../../../../../spec/operation/dma.md) 中 `TC-OP-DMA-AF-001..007` 的 alloc/free 语义、[`kernel_gen/operation/dma.py`](../../../../../../kernel_gen/operation/dma.py) 的实现，以及 [`test/operation/test_operation_dma.py`](../../../../../../test/operation/test_operation_dma.py) 的测试映射保持一致。建议下一步由神秘人按主分支 TODO 决定是否进入合并/收尾阶段，无需再拆分新的 alloc root 改进任务。
 
 - 时间：`2026-03-25 08:57:05 +0800`
-- 经办人：`我不是牛马`
+- 经办人：`提莫炖蘑菇`
 - 任务：`T-20260325-c61dc293`
 - 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-alloc-root`，将 alloc root expectation 链路按限定范围合入 `main`，仅带入 `expectation/alloc.py` 与对应记录文件。
 - 改动：

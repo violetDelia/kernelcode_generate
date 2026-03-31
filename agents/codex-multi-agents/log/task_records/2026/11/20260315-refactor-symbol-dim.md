@@ -3,7 +3,7 @@
 ## T-20260315-6f1416d4
 
 - 时间：2026-03-15
-- 角色：摸鱼小分队
+- 角色：睡觉小分队
 - 任务描述：重构 symbol_variable/symbol_dim.py 设计文档，明确重构目标、边界、兼容性与测试标准。
 - worktree：`/home/lfr/kernelcode_generate/wt-20260315-symbol-dim-refactor`
 - 产出文件：`spec/symbol_variable/symbol_dim.md`

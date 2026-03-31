@@ -5,7 +5,7 @@
 - 任务 ID：`T-20260322-45c4c0c4`
 - 任务类型：`spec 改进`
 - worktree：`/home/lfr/kernelcode_generate/wt-20260322-dialect-symbol-integer-only`
-- 记录人：`摸鱼小分队`
+- 记录人：`睡觉小分队`
 
 ## 任务目标
 

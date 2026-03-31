@@ -9,7 +9,7 @@
 下一步建议：请神秘人创建实现任务，范围建议包含 `kernel_gen/dsl/ast.py`、`kernel_gen/dsl/mlir_gen.py`、`kernel_gen/dsl/emit_mlir.py` 与 `test/dsl/test_ast_visitor.py`，补齐 symbol.eq 解析/类型推断/发射与测试闭环，并在同一记录文件继续记录。
 
 时间：2026-03-26 01:06:30 +0800
-经手人：摸鱼小分队
+经手人：睡觉小分队
 任务：T-20260326-6670f272 实现阶段，补齐 symbol.eq DSL 链路实现与测试闭环。
 任务目标：在不修改 expectation 的前提下，完成 `kernel_gen/dsl/{ast,emit_mlir,mlir_gen}.py` 与 `test/dsl/test_ast_visitor.py` 的最小实现，使 MGEN-028/EMIT-023 闭环可验证。
 改动：

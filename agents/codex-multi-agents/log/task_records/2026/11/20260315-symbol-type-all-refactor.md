@@ -3,7 +3,7 @@
 ## T-20260315-df4e6231
 
 - 时间：2026-03-15
-- 角色：摸鱼小分队
+- 角色：睡觉小分队
 - 任务描述：重构 symbol_variable/type.py 的导出边界，明确 __all__ 与 import * 暴露范围及测试要求。
 - worktree：`wt-20260315-symbol-type-all-refactor`
 - 产出文件：`spec/symbol_variable/type.md`

@@ -62,8 +62,8 @@
   - 本轮沿用链路内既有验证结果，未重复复测：`pytest -q test/dsl/test_ast_visitor.py` 为 `116 passed`，`pytest -q test/operation/test_operation_nn.py` 为 `38 passed`。
 - 结论：通过。`MGEN-018/021/022/023/024` 对应的 direct Python 与 `nn.*` 包装链路，现已由同一参数化测试完整证明 `ReturnOp` 数量、返回值数量、返回值类型与 `get_value()` 公开语义；expectation 五文件保持只读，spec/实现/测试闭环成立。建议下一阶段由神秘人按主分支 TODO.md 发起该链路的收口或合并任务。
 - 时间：2026-03-25 04:43:08 +0800
-- 执行人：我不是牛马
-- 经办人：我不是牛马
+- 执行人：提莫炖蘑菇
+- 经办人：提莫炖蘑菇
 - 任务：T-20260325-ed22f5a8
 - 任务目标：沿用 `/home/lfr/kernelcode_generate/wt-20260325-expectation-mlir-gen-symbol-arith-group-r2`，将 expectation symbol 五文件链路已通过复审的业务改动按限定范围合入 `main`。
 - 改动：

@@ -26,7 +26,7 @@
 - 补充测试或 spec 约束，确保 deslice lowering 不生成 DmaStoreOp 且 ReturnOp 无返回值。
 
 时间: 2026-03-26 23:33:50 +0800
-经办人: 我不是牛马
+经办人: 提莫炖蘑菇
 任务: T-20260326-8cb95691
 任务目标: 补齐 deslice expectation 闭环（AST 解析规则与映射、deslice runtime_args 测试、deslice 不生成 DmaStoreOp/空返回值约束）。
 改动:
@@ -61,7 +61,7 @@
 结论: 已完成，待复审。
 
 时间: 2026-03-27 00:42:37 +0800
-经办人: 摸鱼小分队
+经办人: 睡觉小分队
 任务: T-20260327-9dadfa65
 任务目标: 复审 deslice build_func_op 负路径测试与 MGEN-026F 映射闭环，核对实现/测试/记录一致性。
 改动:

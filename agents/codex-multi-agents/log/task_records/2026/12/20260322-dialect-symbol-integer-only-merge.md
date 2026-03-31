@@ -3,7 +3,7 @@
 ## T-20260322-cc79de0a
 
 - 时间：2026-03-22 19:10:57 +0800
-- 角色：`我不是牛马`
+- 角色：`提莫炖蘑菇`
 - worktree：`/home/lfr/kernelcode_generate/wt-20260322-dialect-symbol-integer-only`
 - 任务描述：按合并规范将 symbol dialect integer-only 链路收敛到主分支，仅检查并合入 `spec/dialect/symbol.md`、`kernel_gen/dialect/symbol.py`、`test/dialect/test_symbol_dialect.py`。
 - 对比结果：
