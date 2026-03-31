@@ -83,6 +83,8 @@ from kernel_gen.dialect.symbol import (
     SymbolFloorDivOp,
     SymbolForOp,
     SymbolGeOp,
+    SymbolGetDimOp,
+    SymbolGetStrideOp,
     SymbolMulOp,
     SymbolSubOp,
     SymbolValueType,
@@ -109,6 +111,7 @@ from kernel_gen.dsl.ast import (
     SourceLocation,
     StoreAST,
     TensorAST,
+    TensorAxisAccessAST,
     VarAST,
     ScalarArgAST,
     _ParseFailure,
@@ -310,6 +313,72 @@ def test_emit_mlir_lowers_arch_get_block_id_query() -> None:
         raise AssertionError("expected emitted op to be ArchGetBlockIdOp")
     if result.type != SymbolValueType.from_expr("block_id"):
         raise AssertionError('expected emitted result type to be !symbol.int<"block_id">')
+
+
+# AST-014K / MGEN-038
+# 创建者: OpenAI
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-31 03:20:00 +0800
+# 最近一次运行成功时间: 2026-03-31 03:20:00 +0800
+# 功能说明: 验证 `Memory.get_shape()[axis]` 可沿 build_func_op/build_func_op_from_ast lowering 为 symbol.get_dim。
+# 测试目的: 锁定 get_shape 轴访问在 AST visitor 路径返回 `!symbol.int` 并发射单个 symbol.get_dim。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_lowers_symbol_get_dim
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_lowers_symbol_get_dim() -> None:
+    static_memory = Memory([4, 8], NumericType.Float32)
+
+    def get_dim_static(value: "Tensor[f32, 4, 8]") -> int:
+        return value.get_shape()[1]
+
+    func_ast = parse_function(get_dim_static)
+    if not isinstance(func_ast.body.statements[0], TensorAxisAccessAST):
+        raise AssertionError("expected get_dim_static to parse into TensorAxisAccessAST")
+
+    for func_op in (build_func_op(get_dim_static, static_memory), build_func_op_from_ast(func_ast, (static_memory,))):
+        body_ops = list(func_op.body.block.ops)
+        query_ops = [op for op in body_ops if isinstance(op, SymbolGetDimOp)]
+        return_ops = [op for op in body_ops if isinstance(op, func.ReturnOp)]
+        if len(query_ops) != 1:
+            raise AssertionError("expected one symbol.get_dim op for static shape query")
+        if query_ops[0].result.type != SymbolValueType.from_expr("8"):
+            raise AssertionError('expected static get_shape result type to be !symbol.int<"8">')
+        if len(return_ops) != 1 or len(return_ops[0].arguments) != 1:
+            raise AssertionError("expected func.return to carry one symbol result")
+
+
+# AST-014L / MGEN-039
+# 创建者: OpenAI
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-31 03:20:00 +0800
+# 最近一次运行成功时间: 2026-03-31 03:20:00 +0800
+# 功能说明: 验证 `Memory.get_stride()[axis]` 可沿 build_func_op/build_func_op_from_ast lowering 为 symbol.get_stride。
+# 测试目的: 锁定 get_stride 轴访问在 AST visitor 路径返回 `!symbol.int` 并发射单个 symbol.get_stride。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_lowers_symbol_get_stride
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_lowers_symbol_get_stride() -> None:
+    static_memory = Memory([4, 8], NumericType.Float32, stride=[8, 1])
+
+    def get_stride_static(value: "Tensor[f32, 4, 8]") -> int:
+        return value.get_stride()[0]
+
+    func_ast = parse_function(get_stride_static)
+    if not isinstance(func_ast.body.statements[0], TensorAxisAccessAST):
+        raise AssertionError("expected get_stride_static to parse into TensorAxisAccessAST")
+
+    for func_op in (build_func_op(get_stride_static, static_memory), build_func_op_from_ast(func_ast, (static_memory,))):
+        body_ops = list(func_op.body.block.ops)
+        query_ops = [op for op in body_ops if isinstance(op, SymbolGetStrideOp)]
+        return_ops = [op for op in body_ops if isinstance(op, func.ReturnOp)]
+        if len(query_ops) != 1:
+            raise AssertionError("expected one symbol.get_stride op for static stride query")
+        if query_ops[0].result.type != SymbolValueType.from_expr("8"):
+            raise AssertionError('expected static get_stride result type to be !symbol.int<"8">')
+        if len(return_ops) != 1 or len(return_ops[0].arguments) != 1:
+            raise AssertionError("expected func.return to carry one symbol result")
 
 
 # AST-014C / MGEN-029
@@ -1942,9 +2011,15 @@ def test_build_func_op_supports_dma_slice_helper() -> None:
         return slice(src, [1, 1], [2, 2], [1, 1], MemorySpace.LM)
 
     func_op = build_func_op(slice_kernel, source)
+    alloc_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaAllocOp)]
     slice_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaSliceOp)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
     assert isinstance(func_op, func.FuncOp)
+    assert len(alloc_ops) == 1
     assert len(slice_ops) == 1
+    assert len(return_ops) == 1
+    assert slice_ops[0].target is alloc_ops[0].result
+    assert return_ops[0].operands[0] is alloc_ops[0].result
 
 
 # MGEN-026
@@ -3592,14 +3667,16 @@ def test_build_func_op_supports_symbolic_for_loop_dma_without_return(monkeypatch
     loop_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolForOp)]
     assert len(loop_ops) == 1
     loop_body_ops = list(loop_ops[0].body.block.ops)
+    alloc_ops = [op for op in loop_body_ops if isinstance(op, DmaAllocOp)]
     slice_ops = [op for op in loop_body_ops if isinstance(op, DmaSliceOp)]
     deslice_ops = [op for op in loop_body_ops if isinstance(op, DmaDesliceOp)]
+    assert len(alloc_ops) == 2
     assert len(slice_ops) == 2
     assert len(deslice_ops) == 1
     assert not any(isinstance(op, DmaLoadOp) for op in loop_body_ops)
     assert not any(isinstance(op, DmaStoreOp) for op in loop_body_ops)
     assert not any(isinstance(op, arith.IndexCastOp) for op in loop_body_ops)
-    assert slice_ops[0].space.space.data == "local"
+    assert alloc_ops[0].result.type.space.space.data == "local"
     loop_body = loop_ops[0].body.block
     assert isinstance(loop_body.args[0].type, SymbolValueType)
     offsets = list(slice_ops[0].offsets)

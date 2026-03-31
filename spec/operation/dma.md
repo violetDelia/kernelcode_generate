@@ -216,7 +216,8 @@ tile = load(src, offsets=[0, 0], sizes=[32, 32], strides=[1, 1], space=MemorySpa
 
 功能说明：
 
-- 从 `source` 抽取切片块；语义等价于 `load`，强调“切片”语义。
+- 从 `source` 抽取切片块并返回 `Memory`；该接口是用户侧表达式式 helper。
+- `slice(...)` 在 operation 层保持“返回值式”写法，用于表达“需要一个切片结果块”的意图。
 
 参数说明：
 
@@ -229,12 +230,16 @@ tile = load(src, offsets=[0, 0], sizes=[32, 32], strides=[1, 1], space=MemorySpa
 使用示例：
 
 ```python
-sub = slice(src, offsets=[0, 16], sizes=[8, 8], strides=[1, 1], space=MemorySpace.LM)
+sub = slice(src, offsets=[32], sizes=[16], strides=[1], space=MemorySpace.TSM)
 ```
 
 注意事项：
 
 - 校验规则与 `load` 一致。
+- operation 层签名固定为 `slice(source, offsets, sizes, strides, space)`，不向用户暴露 include/api 的目标式 `target` 参数。
+- lowering 必须显式桥接到目标式链路：先创建 `target = alloc(shape=sizes, dtype=source.dtype, space=space)`，再发射 `dma.slice(target, source, offsets, sizes, strides)`。
+- `slice(...)` 的表达式返回值必须绑定到上述自动分配 `target`；不得把 `dma.slice` 误写为“自身返回新 memory result”。
+- 例如 `offsets=[32]`、`sizes=[16]`、`strides=[1]`、`space=MemorySpace.TSM` 时，返回值语义必须是 `shape=[16]`、`space=TSM` 的 `Memory<float>`（`dtype` 继承 `source`）。
 
 非法输入：
 
@@ -243,7 +248,8 @@ sub = slice(src, offsets=[0, 16], sizes=[8, 8], strides=[1, 1], space=MemorySpac
 
 返回与限制：
 
-- 返回新的 `Memory`；内部复用 `load` 的语义。
+- 返回新的 `Memory`；其 `shape == sizes`，`space` 由 `space` 参数决定（`None` 时沿用 `source.space`），`dtype/format` 继承 `source`。
+- 返回值对应 lowering 自动分配的 `target`，而不是 `dma.slice` 的直接返回结果。
 
 ### store(source, target, offsets, sizes, strides=None)
 

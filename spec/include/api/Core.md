@@ -29,8 +29,9 @@
 - 本规范仅定义状态类型、状态码语义与基础向量类型，不定义日志、异常、诊断对象或错误信息格式。
 - 实现侧可扩展更多状态码，但不得改变已定义状态码的语义与数值约束。
 - `Status` 表示 API 调用结果；失败时输出参数内容不做保证（由实现侧说明）。
-- `Vector` 是“调用方提供底层连续缓冲区，Core 仅做轻量视图封装”的基础类型；元素类型固定为 `int64`，不承担所有权，不做动态分配，不引入 `std::vector`、`std::array`、`std::initializer_list` 或其他标准库容器依赖。
-- `Vector` 用于表达 helper 的坐标/索引元组，例如 `view(source, offset, size, stride)`、`slice(source, offset, size, stride)`、`deslice(source, target, offset, size, stride)` 中的 `offset/size/stride`；它不是 `shape/stride` 元信息容器，也不负责推导内存布局。
+- `Vector` 是“调用方提供底层连续缓冲区，Core 仅做轻量视图封装”的基础类型；无模板参数，元素类型固定为 `int64`，不承担所有权，不做动态分配，不引入标准库容器、标准库数组包装或初始化列表依赖。
+- `Vector` 仅用于表达统一的坐标/索引序列；具体业务操作语义由上层 API 与后续规范定义，`Core` 不在此处展开。
+- `Core` 不定义 `slice/deslice/view` 的业务职责。
 
 ## 公开接口
 
@@ -100,17 +101,20 @@ Status status = StatusCode::kOk;
 使用示例：
 
 ```cpp
-long long coords_buf[4] = {1, 0, 2, 3};
-Vector coords(coords_buf, 4);
+long long coords_buf[3] = {5, 0, 7};
+Vector coords(coords_buf, 3);
+unsigned long long n = coords.size();
+long long first = coords[0];
+// 预期输出：coords.size()==3，coords[0]==5（即 n==3 且 first==5）
 ```
 
 注意事项：
 
 - `Vector` 只封装调用方提供的连续 `int64` 缓冲区，不复制、不分配、不释放底层数据。
-- `Vector` 不依赖 `std::vector`、`std::array`、`std::initializer_list` 或其他标准库容器。
+- `Vector` 不依赖标准库容器、标准库数组包装或初始化列表。
 - `Vector` 的公开职责是表达“坐标/索引序列”；不得把 `shape/stride/rank` 元信息重新塞入该类型。
-- 后端 helper 若需要多维坐标，必须通过 `Vector` 传入，不得各自发明 `std::vector<int64_t>`、`long long[rank]` 裸数组签名或后端私有坐标容器作为对外公开接口。
-- 当 `Vector` 用作 `view/slice/deslice` 的 `offset/size/stride` 时，向量长度必须与相关对象的 rank 一致；长度不一致属于公开契约违约。
+- 后端 helper 若需要多维坐标，必须通过 `Vector` 传入，不得将模板化向量名、标准库容器名或后端私有坐标容器暴露为稳定公开接口。
+- 当 `Vector` 用于表达多维坐标/索引元组时，调用方应保证其长度与对应对象的维度约束一致；长度不一致属于公开契约违约。
 
 返回与限制：
 
@@ -167,6 +171,7 @@ unsigned long long n = coords.size();
 注意事项：
 
 - `size()` 只反映视图长度，不表示 shape/rank/stride 的业务语义。
+- A0 验收示例中，`long long coords_buf[3] = {5, 0, 7}; Vector coords(coords_buf, 3);` 的预期输出必须为 `coords.size()==3`。
 
 返回与限制：
 
@@ -221,6 +226,7 @@ long long axis0 = coords[0];
 
 - 调用方需保证 `index < size()`。
 - 本规范不要求运行时越界检查，也不要求异常机制。
+- A0 验收示例中，`long long coords_buf[3] = {5, 0, 7}; Vector coords(coords_buf, 3);` 的预期输出必须为 `coords[0]==5`。
 
 返回与限制：
 

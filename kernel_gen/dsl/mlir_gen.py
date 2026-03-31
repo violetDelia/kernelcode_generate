@@ -29,7 +29,7 @@ from xdsl.dialects.builtin import FunctionType, IntAttr, StringAttr, i1, i32
 from xdsl.ir import Block, Region
 
 from kernel_gen.dialect.nn import NnMemoryType
-from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
@@ -46,6 +46,7 @@ from .ast import (
     FunctionAST,
     ScalarArgAST,
     TensorAST,
+    TensorAxisAccessAST,
     _ParseFailure,
     _parse_function_impl,
 )
@@ -336,6 +337,7 @@ def _validate_return_type(
     功能说明:
     - 检查 Tensor 返回的 shape 与 element_type 是否匹配注解。
     - mixed dtype 场景下允许返回注解 element_type 与实际结果不同，但仅限二元算术。
+    - 允许 `Memory.get_shape/get_stride()[axis]` 在 `-> int` 注解下返回 `!symbol.int`。
 
     使用示例:
     - _validate_return_type(func_ast, result_type, return_expr, type_map)
@@ -370,6 +372,8 @@ def _validate_return_type(
         if output.value_type is bool:
             expected_type = i1
         elif output.value_type is int:
+            if isinstance(return_expr, TensorAxisAccessAST) and isinstance(result_type, SymbolValueType):
+                return
             if not func_ast.inputs and isinstance(result_type, SymbolValueType):
                 return
             if _is_symbol_scalar_function(func_ast):
@@ -523,26 +527,7 @@ def _build_func_op_from_ast_impl(
     block = Block(arg_types=arg_types)
     func_op = func.FuncOp(func_ast.name, func_type, Region(block))
 
-    symbol_values: dict[str, object] = {}
-    input_names = {item.name for item in func_ast.inputs}
-    for index, item in enumerate(func_ast.inputs):
-        if not isinstance(item, TensorAST):
-            continue
-        if index >= len(block.args):
-            continue
-        arg_type = arg_types[index]
-        if not isinstance(arg_type, NnMemoryType):
-            continue
-        for axis, dim in enumerate(arg_type.shape.data):
-            if not isinstance(dim, StringAttr):
-                continue
-            symbol_name = dim.data
-            if symbol_name in input_names or symbol_name in symbol_values:
-                continue
-            op = SymbolGetDimOp(block.args[index], IntAttr(axis))
-            block.add_op(op)
-            symbol_values[symbol_name] = op.result
-    ctx = EmitContext(builder=block, symbols=symbol_values, types=dict(type_map), config=config)
+    ctx = EmitContext(builder=block, symbols={}, types=dict(type_map), config=config)
     visitor = AstVisitor(config=config)
     return_value = visitor.visit_function(func_ast, ctx)
     if func_ast.outputs or infer_scalar_return:

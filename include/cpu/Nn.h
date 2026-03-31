@@ -371,6 +371,148 @@ void apply_compare(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& ou
     }
 }
 
+/*
+功能说明:
+- 统一执行 float 归约算子，并校验 axes/keepdim/out 连续性等契约。
+
+使用示例:
+- cpu::detail::reduce_impl(value, out, axes, 1, false,
+  [](float a, float b) { return a + b; }, 0.0f, false, false);
+
+创建者: 金铲铲大作战
+最后修改人: 金铲铲大作战
+
+关联文件:
+- spec: spec/include/cpu/cpu.md
+- test: test/include/cpu/test_nn.py
+- 功能实现: include/cpu/Nn.h
+*/
+template <typename Op>
+void reduce_impl(
+    const Memory<float>& value,
+    Memory<float>& out,
+    const long long* axes,
+    unsigned long long axes_rank,
+    bool keepdim,
+    Op op,
+    float init_value,
+    bool init_with_first,
+    bool require_non_empty) {
+    const unsigned long long rank = value.rank();
+    contract_or_trap(axes != 0);
+    contract_or_trap(axes_rank > 0);
+    contract_or_trap(axes_rank <= rank);
+
+    bool reduce_axis[MAX_DIM] = {false};
+    for (unsigned long long i = 0; i < axes_rank; ++i) {
+        const long long axis = axes[i];
+        contract_or_trap(axis >= 0);
+        contract_or_trap(static_cast<unsigned long long>(axis) < rank);
+        if (i > 0) {
+            contract_or_trap(axis > axes[i - 1]);
+        }
+        reduce_axis[axis] = true;
+    }
+
+    unsigned long long non_reduce_rank = 0;
+    unsigned long long non_reduce_axes[MAX_DIM] = {0};
+    for (unsigned long long i = 0; i < rank; ++i) {
+        if (!reduce_axis[i]) {
+            non_reduce_axes[non_reduce_rank] = i;
+            non_reduce_rank += 1;
+        }
+    }
+
+    if (keepdim) {
+        contract_or_trap(out.rank() == rank);
+        for (unsigned long long i = 0; i < rank; ++i) {
+            if (reduce_axis[i]) {
+                contract_or_trap(out.shape()[i] == 1);
+            } else {
+                contract_or_trap(out.shape()[i] == value.shape()[i]);
+            }
+        }
+    } else {
+        if (axes_rank == rank) {
+            contract_or_trap(out.rank() == 1);
+            contract_or_trap(out.shape()[0] == 1);
+        } else {
+            contract_or_trap(out.rank() == non_reduce_rank);
+            for (unsigned long long i = 0; i < non_reduce_rank; ++i) {
+                contract_or_trap(out.shape()[i] == value.shape()[non_reduce_axes[i]]);
+            }
+        }
+    }
+    contract_or_trap(out.is_contiguous());
+
+    if (require_non_empty) {
+        for (unsigned long long i = 0; i < axes_rank; ++i) {
+            contract_or_trap(value.shape()[axes[i]] > 0);
+        }
+    }
+
+    long long reduce_shape[MAX_DIM] = {0};
+    long long reduce_total = 1;
+    for (unsigned long long i = 0; i < axes_rank; ++i) {
+        reduce_shape[i] = value.shape()[axes[i]];
+        reduce_total *= reduce_shape[i];
+    }
+
+    long long out_indices[MAX_DIM];
+    long long in_indices[MAX_DIM];
+    long long reduce_indices[MAX_DIM];
+    init_indices(out.rank(), out_indices);
+    const long long out_total = out.element_count();
+    for (long long linear = 0; linear < out_total; ++linear) {
+        for (unsigned long long dim = 0; dim < rank; ++dim) {
+            in_indices[dim] = 0;
+        }
+        if (keepdim) {
+            for (unsigned long long dim = 0; dim < rank; ++dim) {
+                if (!reduce_axis[dim]) {
+                    in_indices[dim] = out_indices[dim];
+                }
+            }
+        } else {
+            for (unsigned long long i = 0; i < non_reduce_rank; ++i) {
+                in_indices[non_reduce_axes[i]] = out_indices[i];
+            }
+        }
+
+        if (init_with_first) {
+            bool first = true;
+            init_indices(axes_rank, reduce_indices);
+            for (long long r = 0; r < reduce_total; ++r) {
+                for (unsigned long long i = 0; i < axes_rank; ++i) {
+                    in_indices[axes[i]] = reduce_indices[i];
+                }
+                const float v = value.at(in_indices);
+                if (first) {
+                    out.at(out_indices) = v;
+                    first = false;
+                } else {
+                    out.at(out_indices) = op(out.at(out_indices), v);
+                }
+                advance_indices(axes_rank, reduce_shape, reduce_indices);
+            }
+            if (first) {
+                out.at(out_indices) = init_value;
+            }
+        } else {
+            out.at(out_indices) = init_value;
+            init_indices(axes_rank, reduce_indices);
+            for (long long r = 0; r < reduce_total; ++r) {
+                for (unsigned long long i = 0; i < axes_rank; ++i) {
+                    in_indices[axes[i]] = reduce_indices[i];
+                }
+                out.at(out_indices) = op(out.at(out_indices), value.at(in_indices));
+                advance_indices(axes_rank, reduce_shape, reduce_indices);
+            }
+        }
+        advance_indices(out.rank(), out.shape(), out_indices);
+    }
+}
+
 }  // namespace detail
 
 /*
@@ -491,6 +633,147 @@ void mul(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out) {
 template <typename T>
 void truediv(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out) {
     detail::apply_binary(lhs, rhs, out, [](T a, T b) { return a / b; });
+}
+
+/*
+功能说明:
+- 对输入视图执行逐元素指数运算。
+
+使用示例:
+- cpu::exp(value, out);
+
+创建者: 金铲铲大作战
+最后修改人: 金铲铲大作战
+
+关联文件:
+- spec: spec/include/cpu/cpu.md
+- test: test/include/cpu/test_nn.py
+- 功能实现: include/cpu/Nn.h
+*/
+void exp(const Memory<float>& value, Memory<float>& out) {
+    detail::contract_or_trap(value.rank() == out.rank());
+    for (unsigned long long i = 0; i < value.rank(); ++i) {
+        detail::contract_or_trap(value.shape()[i] == out.shape()[i]);
+        detail::contract_or_trap(value.stride()[i] == out.stride()[i]);
+    }
+
+    long long indices[MAX_DIM];
+    detail::init_indices(out.rank(), indices);
+    const long long total = out.element_count();
+    for (long long linear = 0; linear < total; ++linear) {
+#if defined(__clang__) || defined(__GNUC__)
+        out.at(indices) = __builtin_expf(value.at(indices));
+#else
+        const float x = value.at(indices);
+        float term = 1.0f;
+        float sum = 1.0f;
+        for (int i = 1; i <= 6; ++i) {
+            term *= x / static_cast<float>(i);
+            sum += term;
+        }
+        out.at(indices) = sum;
+#endif
+        detail::advance_indices(out.rank(), out.shape(), indices);
+    }
+}
+
+/*
+功能说明:
+- 按给定轴集合执行求和归约。
+
+使用示例:
+- cpu::reduce_sum(value, out, axes, 2, false);
+
+创建者: 金铲铲大作战
+最后修改人: 金铲铲大作战
+
+关联文件:
+- spec: spec/include/cpu/cpu.md
+- test: test/include/cpu/test_nn.py
+- 功能实现: include/cpu/Nn.h
+*/
+void reduce_sum(
+    const Memory<float>& value,
+    Memory<float>& out,
+    const long long* axes,
+    unsigned long long axes_rank,
+    bool keepdim) {
+    detail::reduce_impl(
+        value,
+        out,
+        axes,
+        axes_rank,
+        keepdim,
+        [](float a, float b) { return a + b; },
+        0.0f,
+        false,
+        false);
+}
+
+/*
+功能说明:
+- 按给定轴集合执行最小值归约。
+
+使用示例:
+- cpu::reduce_min(value, out, axes, 1, false);
+
+创建者: 金铲铲大作战
+最后修改人: 金铲铲大作战
+
+关联文件:
+- spec: spec/include/cpu/cpu.md
+- test: test/include/cpu/test_nn.py
+- 功能实现: include/cpu/Nn.h
+*/
+void reduce_min(
+    const Memory<float>& value,
+    Memory<float>& out,
+    const long long* axes,
+    unsigned long long axes_rank,
+    bool keepdim) {
+    detail::reduce_impl(
+        value,
+        out,
+        axes,
+        axes_rank,
+        keepdim,
+        [](float a, float b) { return a < b ? a : b; },
+        0.0f,
+        true,
+        true);
+}
+
+/*
+功能说明:
+- 按给定轴集合执行最大值归约。
+
+使用示例:
+- cpu::reduce_max(value, out, axes, 1, true);
+
+创建者: 金铲铲大作战
+最后修改人: 金铲铲大作战
+
+关联文件:
+- spec: spec/include/cpu/cpu.md
+- test: test/include/cpu/test_nn.py
+- 功能实现: include/cpu/Nn.h
+*/
+void reduce_max(
+    const Memory<float>& value,
+    Memory<float>& out,
+    const long long* axes,
+    unsigned long long axes_rank,
+    bool keepdim) {
+    detail::reduce_impl(
+        value,
+        out,
+        axes,
+        axes_rank,
+        keepdim,
+        [](float a, float b) { return a > b ? a : b; },
+        0.0f,
+        true,
+        true);
 }
 
 /*

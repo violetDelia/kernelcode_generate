@@ -38,6 +38,7 @@ from xdsl.dialects.builtin import (
     i32,
 )
 from xdsl.ir import Attribute, Block, SSAValue
+from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.arch import (
     ArchGetBlockIdOp,
@@ -69,6 +70,8 @@ from kernel_gen.dialect.nn import (
     NnGtOp,
     NnLeOp,
     NnLtOp,
+    NnImg2col1dOp,
+    NnImg2col2dOp,
     NnMemorySpaceAttr,
     NnMemoryType,
     NnMulOp,
@@ -112,11 +115,13 @@ from .ast import (
     DmaViewAST,
     ForAST,
     FunctionAST,
+    Img2ColAST,
     LoadAST,
     ScalarArgAST,
     SourceLocation,
     StoreAST,
     TensorAST,
+    TensorAxisAccessAST,
     VarAST,
 )
 
@@ -134,6 +139,17 @@ _DYNAMIC_MEMORY_SPACE_MAP = {
     MemorySpace.LM: "local",
     MemorySpace.TSM: "tsm",
     MemorySpace.TLM: "tlm",
+}
+
+_IMG2COL_PARAM_TABLE: dict[str, tuple[tuple[str, ...], dict[str, int]]] = {
+    "img2col1d": (
+        ("value", "kw", "sw", "dw", "pl", "pr"),
+        {"sw": 1, "dw": 1, "pl": 0, "pr": 0},
+    ),
+    "img2col2d": (
+        ("value", "kh", "kw", "sh", "sw", "dh", "dw", "ph", "pw", "pl", "pr"),
+        {"sh": 1, "sw": 1, "dh": 1, "dw": 1, "ph": 0, "pw": 0, "pl": 0, "pr": 0},
+    ),
 }
 
 
@@ -1538,6 +1554,136 @@ def _build_dynamic_memory_type(
     )
 
 
+def _resolve_tensor_axis_index(
+    axis_expr: object,
+    location: SourceLocation | None = None,
+    runtime_values: dict[str, object] | None = None,
+) -> int:
+    """解析 `tensor.get_shape/get_stride()[axis]` 的静态轴号。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 复用静态索引解析逻辑收敛 `shape/stride` 访问的轴号。
+    - 拒绝非静态整数、负数轴号，保证查询 op 只接收合法静态轴。
+
+    使用示例:
+    - _resolve_tensor_axis_index(ConstAST(1), location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    axis = _resolve_static_index_expr(axis_expr, location, runtime_values)
+    if not isinstance(axis, int):
+        raise _LoweringError("Tensor axis must be static int", location=location)
+    if axis < 0:
+        raise _LoweringError("Tensor axis must be non-negative", location=location)
+    return axis
+
+
+def _infer_tensor_axis_access_type(
+    expr: TensorAxisAccessAST,
+    type_map: dict[int, object],
+    runtime_values: dict[str, object] | None = None,
+) -> SymbolValueType:
+    """推导 `tensor.get_shape/get_stride()[axis]` 的 symbol 返回类型。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 从 `TensorAST` 对应的 `nn.memory` 类型中读取指定轴的 `shape/stride` 条目。
+    - 将静态整数或符号条目映射为 `!symbol.int`，并统一拒绝越界轴号与匿名动态条目。
+
+    使用示例:
+    - _infer_tensor_axis_access_type(expr, type_map)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    tensor_type = type_map.get(_expr_key(expr.tensor))
+    if not isinstance(tensor_type, NnMemoryType):
+        raise _LoweringError("Tensor axis access source must be nn.memory", location=expr.location)
+    axis = _resolve_tensor_axis_index(expr.axis, expr.location, runtime_values)
+    entries = tensor_type.shape.data if expr.kind == "shape" else tensor_type.stride.data
+    if axis >= len(entries):
+        raise _LoweringError("Tensor axis out of range", location=expr.location)
+    entry = entries[axis]
+    if isinstance(entry, IntAttr):
+        return SymbolValueType.from_expr(str(entry.data))
+    if isinstance(entry, StringAttr) and entry.data != "?":
+        return SymbolValueType.from_expr(entry.data)
+    raise _LoweringError("Tensor axis access does not support unknown entry '?'", location=expr.location)
+
+
+def _parse_img2col_helper(expr: Img2ColAST) -> tuple[object, dict[str, int]]:
+    """解析 img2col helper 调用参数。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 统一解析 `img2col1d/img2col2d` 的位置参数与关键字参数。
+    - 应用默认值并输出数值化属性，供 emit/type 推导复用。
+
+    使用示例:
+    - input_expr, attrs = _parse_img2col_helper(img2col_ast)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+    spec = _IMG2COL_PARAM_TABLE.get(expr.kind)
+    if spec is None:
+        raise _LoweringError("Unsupported img2col helper", location=expr.location)
+    param_names, defaults = spec
+
+    if len(expr.args) > len(param_names):
+        raise _LoweringError(f"{expr.kind} arity mismatch", location=expr.location)
+
+    params: dict[str, object] = {}
+    for index, arg in enumerate(expr.args):
+        params[param_names[index]] = arg
+
+    for key, value in expr.kwargs.items():
+        if key not in param_names:
+            raise _LoweringError(f"{expr.kind} got unexpected keyword '{key}'", location=expr.location)
+        if key in params:
+            raise _LoweringError(f"{expr.kind} got multiple values for argument '{key}'", location=expr.location)
+        params[key] = value
+
+    for name in param_names:
+        if name in params:
+            continue
+        if name in defaults:
+            params[name] = defaults[name]
+            continue
+        raise _LoweringError(f"{expr.kind} missing required argument '{name}'", location=expr.location)
+
+    input_expr = params.pop("value")
+    resolved: dict[str, int] = {}
+    for name, value in params.items():
+        if isinstance(value, ConstAST):
+            if isinstance(value.value, int):
+                resolved[name] = value.value
+                continue
+            raise _LoweringError(f"{expr.kind} {name} must be int", location=value.location)
+        if isinstance(value, int):
+            resolved[name] = value
+            continue
+        raise _LoweringError(f"{expr.kind} {name} must be int", location=getattr(value, "location", None))
+
+    return input_expr, resolved
+
+
 def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
     """校验函数体中的 AST 语句是否属于当前 lowering 支持范围。
 
@@ -1577,11 +1723,13 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
                 DmaViewAST,
                 DmaReshapeAST,
                 DmaFlattenAST,
+                Img2ColAST,
                 DmaFreeAST,
                 ForAST,
                 ArchGetDynamicMemoryAST,
                 ArchLaunchKernelAST,
                 ArchQueryAST,
+                TensorAxisAccessAST,
             ),
         ):
             raise _LoweringError("Unsupported AST expression for lowering", location=getattr(expr, "location", None))
@@ -1762,6 +1910,119 @@ def _infer_expr_type(
         result_type = _memory_type_from_parts(shape_attr, [IntAttr(1)], source_type.element_type, source_type.space)
         type_map[expr_key] = result_type
         return result_type
+    if isinstance(expr, Img2ColAST):
+        input_expr, params = _parse_img2col_helper(expr)
+        input_type = _infer_expr_type(input_expr, type_map, runtime_values=runtime_values)
+        if not isinstance(input_type, NnMemoryType):
+            raise _LoweringError(f"{expr.kind} input must be nn.memory", location=expr.location)
+
+        def _dim_value(attr: Attribute) -> int | str:
+            """解析维度属性为 Python 值。
+
+            功能说明：
+            - 支持 `IntAttr` / `StringAttr`，分别返回整数或字符串；其他类型返回 `"?"`。
+
+            使用示例：
+            - `_dim_value(IntAttr(3)) -> 3`
+            - `_dim_value(StringAttr("K")) -> "K"`
+
+            创建者：朽木露琪亚
+            最后修改人：朽木露琪亚
+
+            关联文件：
+            - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+            - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+            - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+            """
+            if isinstance(attr, IntAttr):
+                return attr.data
+            if isinstance(attr, StringAttr):
+                return attr.data
+            return "?"
+
+        def _mul_dim(lhs: int | str, rhs: int | str) -> int | str:
+            """执行维度乘法合并。
+
+            功能说明：
+            - 当任一输入为 `"?"` 时返回 `"?"`；否则返回 `_mul_symbol` 的合并结果。
+
+            使用示例：
+            - `_mul_dim(2, 3) -> 6`
+            - `_mul_dim("?", 4) -> "?"`
+
+            创建者：朽木露琪亚
+            最后修改人：朽木露琪亚
+
+            关联文件：
+            - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+            - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+            - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+            """
+            if lhs == "?" or rhs == "?":
+                return "?"
+            return _mul_symbol(lhs, rhs)
+
+        def _img2col_out_dim(dim: int | str, k: int, s: int, d: int, p1: int, p2: int) -> int | str:
+            """计算 img2col 输出维度。
+
+            功能说明：
+            - 输入维度为整数且 `s != 0` 时计算输出尺寸；否则返回 `"?"`。
+
+            使用示例：
+            - `_img2col_out_dim(32, 3, 1, 1, 1, 1) -> 32`
+            - `_img2col_out_dim("?", 3, 1, 1, 0, 0) -> "?"`
+
+            创建者：朽木露琪亚
+            最后修改人：朽木露琪亚
+
+            关联文件：
+            - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+            - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+            - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+            """
+            if not isinstance(dim, int) or s == 0:
+                return "?"
+            return (dim + p1 + p2 - d * (k - 1) - 1) // s + 1
+
+        shape = list(input_type.shape.data)
+        if expr.kind == "img2col1d":
+            if len(shape) != 3:
+                raise _LoweringError("img2col1d input must be rank-3 nn.memory", location=expr.location)
+            n_dim, c_dim, w_dim = (_dim_value(item) for item in shape)
+            kw = params["kw"]
+            sw = params["sw"]
+            dw = params["dw"]
+            pl = params["pl"]
+            pr = params["pr"]
+            w_out = _img2col_out_dim(w_dim, kw, sw, dw, pl, pr)
+            out_channels = _mul_dim(c_dim, kw)
+            out_shape = [_dim_to_attr(n_dim), _dim_to_attr(out_channels), _dim_to_attr(w_out)]
+        elif expr.kind == "img2col2d":
+            if len(shape) != 4:
+                raise _LoweringError("img2col2d input must be rank-4 nn.memory", location=expr.location)
+            n_dim, c_dim, h_dim, w_dim = (_dim_value(item) for item in shape)
+            kh = params["kh"]
+            kw = params["kw"]
+            sh = params["sh"]
+            sw = params["sw"]
+            dh = params["dh"]
+            dw = params["dw"]
+            ph = params["ph"]
+            pw = params["pw"]
+            pl = params["pl"]
+            pr = params["pr"]
+            h_out = _img2col_out_dim(h_dim, kh, sh, dh, ph, pw)
+            w_out = _img2col_out_dim(w_dim, kw, sw, dw, pl, pr)
+            out_channels = _mul_dim(_mul_dim(c_dim, kh), kw)
+            out_hw = _mul_dim(h_out, w_out)
+            out_shape = [_dim_to_attr(n_dim), _dim_to_attr(out_channels), _dim_to_attr(out_hw)]
+        else:
+            raise _LoweringError("Unsupported img2col helper", location=expr.location)
+
+        stride_attr = _build_default_stride_attrs(out_shape)
+        result_type = _memory_type_from_parts(out_shape, stride_attr, input_type.element_type, input_type.space)
+        type_map[expr_key] = result_type
+        return result_type
     if isinstance(expr, StoreAST):
         raise _LoweringError("StoreAST does not produce a value", location=expr.location)
     if isinstance(expr, DmaFreeAST):
@@ -1787,6 +2048,10 @@ def _infer_expr_type(
         if symbol_name is None:
             raise _LoweringError("Unsupported arch query", location=expr.location)
         result_type = SymbolValueType.from_expr(symbol_name)
+        type_map[expr_key] = result_type
+        return result_type
+    if isinstance(expr, TensorAxisAccessAST):
+        result_type = _infer_tensor_axis_access_type(expr, type_map, runtime_values=runtime_values)
         type_map[expr_key] = result_type
         return result_type
 
@@ -2042,23 +2307,21 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("LoadAST result must be nn.memory", location=expr.location)
         if expr.kind == "slice":
-            load_op = DmaSliceOp(
-                source,
-                offsets,
-                sizes,
-                strides,
-                result_type,
-                _memory_space_from_ast(expr.space, source_type.space),
-            )
-        else:
-            load_op = DmaLoadOp(
-                source,
-                offsets,
-                sizes,
-                strides,
-                result_type,
-                _memory_space_from_ast(expr.space, source_type.space),
-            )
+            alloc_shape = _build_index_operands_from_layout(result_type.shape, ctx, location=expr.location)
+            alloc_op = DmaAllocOp(alloc_shape, result_type)
+            ctx.builder.add_op(alloc_op)
+            slice_op = DmaSliceOp(alloc_op.result, source, offsets, sizes, strides)
+            ctx.builder.add_op(slice_op)
+            ctx._set_cache(expr_key, alloc_op.result)
+            return alloc_op.result
+        load_op = DmaLoadOp(
+            source,
+            offsets,
+            sizes,
+            strides,
+            result_type,
+            _memory_space_from_ast(expr.space, source_type.space),
+        )
         ctx.builder.add_op(load_op)
         ctx._set_cache(expr_key, load_op.result)
         return load_op.result
@@ -2130,6 +2393,45 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
         return op.result
+    if isinstance(expr, Img2ColAST):
+        input_expr, params = _parse_img2col_helper(expr)
+        input_value = _lower_expr(input_expr, ctx)
+        input_type = _expect_memory_value(input_value, expr.location)
+        result_type = _infer_expr_type(expr, ctx.types)
+        if not isinstance(result_type, NnMemoryType):
+            raise _LoweringError(f"{expr.kind} result must be nn.memory", location=expr.location)
+        if expr.kind == "img2col1d":
+            op = NnImg2col1dOp(
+                input_value,
+                result_type,
+                kw=params["kw"],
+                sw=params["sw"],
+                dw=params["dw"],
+                pl=params["pl"],
+                pr=params["pr"],
+                space=input_type.space,
+            )
+        elif expr.kind == "img2col2d":
+            op = NnImg2col2dOp(
+                input_value,
+                result_type,
+                kh=params["kh"],
+                kw=params["kw"],
+                sh=params["sh"],
+                sw=params["sw"],
+                dh=params["dh"],
+                dw=params["dw"],
+                ph=params["ph"],
+                pw=params["pw"],
+                pl=params["pl"],
+                pr=params["pr"],
+                space=input_type.space,
+            )
+        else:
+            raise _LoweringError("Unsupported img2col helper", location=expr.location)
+        ctx.builder.add_op(op)
+        ctx._set_cache(expr_key, op.result)
+        return op.result
     if isinstance(expr, StoreAST):
         raise _LoweringError("StoreAST does not produce a value", location=expr.location)
     if isinstance(expr, DmaFreeAST):
@@ -2159,6 +2461,24 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
             op = ArchGetThreadNumOp()
         else:
             raise _LoweringError("Unsupported arch query", location=expr.location)
+        ctx.builder.add_op(op)
+        ctx._set_cache(expr_key, op.result)
+        ctx.types[expr_key] = op.result.type
+        return op.result
+    if isinstance(expr, TensorAxisAccessAST):
+        source = _lower_expr(expr.tensor, ctx)
+        _expect_memory_value(source, expr.location)
+        axis = _resolve_tensor_axis_index(expr.axis, expr.location)
+        if expr.kind == "shape":
+            op = SymbolGetDimOp(source, IntAttr(axis))
+        elif expr.kind == "stride":
+            op = SymbolGetStrideOp(source, IntAttr(axis))
+        else:
+            raise _LoweringError("Unsupported tensor axis access kind", location=expr.location)
+        try:
+            op.verify()
+        except VerifyException as exc:
+            raise _LoweringError(str(exc), location=expr.location) from exc
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
         ctx.types[expr_key] = op.result.type
@@ -2350,8 +2670,10 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
             DmaViewAST,
             DmaReshapeAST,
             DmaFlattenAST,
+            Img2ColAST,
             ArchGetDynamicMemoryAST,
             ArchQueryAST,
+            TensorAxisAccessAST,
         ),
     ):
         if _expr_key(node) not in ctx.types and not isinstance(node, (TensorAST, ScalarArgAST, VarAST)):

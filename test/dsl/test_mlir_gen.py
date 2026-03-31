@@ -1,7 +1,7 @@
 """MLIR gen integration tests.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 build_func_op/build_func_op_from_ast 及相关 lowering 集成回归。
@@ -15,9 +15,9 @@
 - 达标线: 95%
 
 关联文件:
-- 功能实现: kernel_gen/dsl/mlir_gen.py
-- Spec 文档: spec/dsl/mlir_gen.md
-- 测试文件: test/dsl/test_mlir_gen.py
+- 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+- Spec 文档: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+- 测试文件: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
 """
 
 from __future__ import annotations
@@ -85,6 +85,8 @@ from kernel_gen.dialect.symbol import (
     SymbolFloorDivOp,
     SymbolForOp,
     SymbolGeOp,
+    SymbolGetDimOp,
+    SymbolGetStrideOp,
     SymbolMulOp,
     SymbolSubOp,
     SymbolValueType,
@@ -109,6 +111,7 @@ from kernel_gen.dsl.ast import (
     SourceLocation,
     StoreAST,
     TensorAST,
+    TensorAxisAccessAST,
     VarAST,
     ScalarArgAST,
     _ParseFailure,
@@ -162,18 +165,86 @@ from kernel_gen.symbol_variable.type import NumericType
 
 
 def _tensor_arg(shape: list[object]) -> Memory:
+    """构造默认使用 `f32` 的测试 tensor 参数。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 为 `test_mlir_gen.py` 中的 helper / case 统一生成连续布局的 `Memory`。
+    - 默认使用 `NumericType.Float32`，避免各测试重复拼装基础参数。
+
+    使用示例:
+    - tensor = _tensor_arg([4, 8])
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+    """
     return Memory(shape, NumericType.Float32)
 
 
 def _module_from_func(fn: object, *runtime_args: object) -> ModuleOp:
+    """将 DSL 函数 helper 包装为单函数 `ModuleOp`。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 调用 `build_func_op(...)` 生成 `func.func`。
+    - 统一包装到 `ModuleOp` 中，便于后续打印与结构断言。
+
+    使用示例:
+    - module = _module_from_func(kernel, 16, 32)
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+    """
     return ModuleOp([build_func_op(fn, *runtime_args)])
 
 
 def _module_from_ast(func_ast: FunctionAST) -> ModuleOp:
+    """将已解析的 `FunctionAST` 包装为单函数 `ModuleOp`。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 调用 `build_func_op_from_ast(...)` 生成 `func.func`。
+    - 供 AST 级断言复用，避免测试内部重复创建 `ModuleOp`。
+
+    使用示例:
+    - module = _module_from_ast(func_ast)
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+    """
     return ModuleOp([build_func_op_from_ast(func_ast)])
 
 
 def _print_module(module: ModuleOp) -> str:
+    """将 `ModuleOp` 打印为可断言的 MLIR 文本。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 通过 `Printer` 将 `ModuleOp` 渲染到字符串。
+    - 供字符串匹配类测试复用，避免每个 case 手写打印逻辑。
+
+    使用示例:
+    - text = _print_module(module)
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+    """
     stream = StringIO()
     printer = Printer(stream=stream)
     printer.print_op(module)
@@ -181,6 +252,23 @@ def _print_module(module: ModuleOp) -> str:
 
 
 def _unwrap_index_cast(value: object) -> object:
+    """解开测试中常见的单层 `arith.index_cast` 包装。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 若 `value.owner` 是 `arith.IndexCastOp`，返回其输入值。
+    - 否则原样返回，便于测试同时兼容 cast 前后两种 IR 形态。
+
+    使用示例:
+    - raw_value = _unwrap_index_cast(result)
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+    """
     owner = getattr(value, "owner", None)
     if isinstance(owner, arith.IndexCastOp):
         return owner.input
@@ -192,6 +280,23 @@ def _parse_function_from_source(
     source: str,
     runtime_table: dict[str, object] | None = None,
 ) -> FunctionAST:
+    """使用伪造源码与运行时表解析 DSL 函数。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 通过 monkeypatch 覆盖 `inspect.getsource(...)`，让测试可直接用字符串构造 DSL 函数源码。
+    - 将 `runtime_table` 一并传入 `_parse_function_with_env(...)`，覆盖 runtime 参数参与签名/符号解析的场景。
+
+    使用示例:
+    - func_ast = _parse_function_from_source(monkeypatch, \"def kernel(x):\\n    return x\\n\")
+
+    关联文件:
+    - spec: [spec/dsl/ast.md](spec/dsl/ast.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/ast.py](kernel_gen/dsl/ast.py)
+    """
     def kernel(*args: object, **kwargs: object) -> object:
         del args, kwargs
         return None
@@ -384,6 +489,72 @@ def test_build_func_op_lowers_arch_get_thread_id_query() -> None:
             raise AssertionError("expected func.return to carry one value")
         if return_ops[0].arguments[0].type != SymbolValueType.from_expr("thread_id"):
             raise AssertionError('expected func.return type to stay !symbol.int<"thread_id">')
+
+
+# AST-014K / MGEN-038
+# 创建者: OpenAI
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-31 03:20:00 +0800
+# 最近一次运行成功时间: 2026-03-31 03:20:00 +0800
+# 功能说明: 验证 `Memory.get_shape()[axis]` 可沿 build_func_op/build_func_op_from_ast lowering 为 symbol.get_dim。
+# 测试目的: 锁定 get_shape 轴访问在函数构建阶段返回 `!symbol.int` 并发射单个 symbol.get_dim。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_symbol_get_dim
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_lowers_symbol_get_dim() -> None:
+    static_memory = Memory([4, 8], NumericType.Float32)
+
+    def get_dim_static(value: "Tensor[f32, 4, 8]") -> int:
+        return value.get_shape()[1]
+
+    func_ast = parse_function(get_dim_static)
+    if not isinstance(func_ast.body.statements[0], TensorAxisAccessAST):
+        raise AssertionError("expected get_dim_static to parse into TensorAxisAccessAST")
+
+    for func_op in (build_func_op(get_dim_static, static_memory), build_func_op_from_ast(func_ast, (static_memory,))):
+        body_ops = list(func_op.body.block.ops)
+        query_ops = [op for op in body_ops if isinstance(op, SymbolGetDimOp)]
+        return_ops = [op for op in body_ops if isinstance(op, func.ReturnOp)]
+        if len(query_ops) != 1:
+            raise AssertionError("expected one symbol.get_dim op for static shape query")
+        if query_ops[0].result.type != SymbolValueType.from_expr("8"):
+            raise AssertionError('expected static get_shape result type to be !symbol.int<"8">')
+        if len(return_ops) != 1 or len(return_ops[0].arguments) != 1:
+            raise AssertionError("expected func.return to carry one symbol result")
+
+
+# AST-014L / MGEN-039
+# 创建者: OpenAI
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-31 03:20:00 +0800
+# 最近一次运行成功时间: 2026-03-31 03:20:00 +0800
+# 功能说明: 验证 `Memory.get_stride()[axis]` 可沿 build_func_op/build_func_op_from_ast lowering 为 symbol.get_stride。
+# 测试目的: 锁定 get_stride 轴访问在函数构建阶段返回 `!symbol.int` 并发射单个 symbol.get_stride。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_symbol_get_stride
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_lowers_symbol_get_stride() -> None:
+    static_memory = Memory([4, 8], NumericType.Float32, stride=[8, 1])
+
+    def get_stride_static(value: "Tensor[f32, 4, 8]") -> int:
+        return value.get_stride()[0]
+
+    func_ast = parse_function(get_stride_static)
+    if not isinstance(func_ast.body.statements[0], TensorAxisAccessAST):
+        raise AssertionError("expected get_stride_static to parse into TensorAxisAccessAST")
+
+    for func_op in (build_func_op(get_stride_static, static_memory), build_func_op_from_ast(func_ast, (static_memory,))):
+        body_ops = list(func_op.body.block.ops)
+        query_ops = [op for op in body_ops if isinstance(op, SymbolGetStrideOp)]
+        return_ops = [op for op in body_ops if isinstance(op, func.ReturnOp)]
+        if len(query_ops) != 1:
+            raise AssertionError("expected one symbol.get_stride op for static stride query")
+        if query_ops[0].result.type != SymbolValueType.from_expr("8"):
+            raise AssertionError('expected static get_stride result type to be !symbol.int<"8">')
+        if len(return_ops) != 1 or len(return_ops[0].arguments) != 1:
+            raise AssertionError("expected func.return to carry one symbol result")
 
 
 # AST-014K / MGEN-035
@@ -840,10 +1011,10 @@ def test_build_func_op_rejects_invalid_joinedstr_tensor_annotation(monkeypatch: 
 # MGEN-026
 # 创建者: 朽木露琪亚
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-30 03:03:30 +0800
-# 最近一次运行成功时间: 2026-03-30 03:03:30 +0800
+# 最近一次运行测试时间: 2026-03-30 08:31:43 +0800
+# 最近一次运行成功时间: 2026-03-30 08:31:43 +0800
 # 功能说明: 验证 build_func_op 在 DMA helper 场景下按公开语义生成对应 memory 结果。
-# 测试目的: 验证 alloc/copy/cast/view/reshape/flatten 六类 helper 在 build_func_op 链路中都能成功 lowering。
+# 测试目的: 验证 alloc/copy/cast/view/reshape/flatten 六类 helper 在 build_func_op 链路中都能成功 lowering，且 dma.view 返回类型取自 DSL size/stride。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_dma_helper_calls
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -884,6 +1055,14 @@ def test_build_func_op_supports_dma_helper_calls() -> None:
     assert any(isinstance(op, DmaViewOp) for op in view_func.body.block.ops)
     assert any(isinstance(op, DmaReshapeOp) for op in reshape_func.body.block.ops)
     assert any(isinstance(op, DmaReshapeOp) for op in flatten_func.body.block.ops)
+    view_ops = [op for op in view_func.body.block.ops if isinstance(op, DmaViewOp)]
+    return_ops = [op for op in view_func.body.block.ops if isinstance(op, func.ReturnOp)]
+    assert len(view_ops) == 1
+    assert len(return_ops) == 1
+    assert [attr.data for attr in view_ops[0].result.type.shape.data] == [2, 2]
+    assert [attr.data for attr in view_ops[0].result.type.stride.data] == [1, 1]
+    assert list(view_func.function_type.outputs) == [view_ops[0].result.type]
+    assert return_ops[0].arguments[0].type == view_ops[0].result.type
 
 
 # MGEN-026A
@@ -1332,9 +1511,15 @@ def test_build_func_op_supports_dma_slice_helper() -> None:
         return slice(src, [1, 1], [2, 2], [1, 1], MemorySpace.LM)
 
     func_op = build_func_op(slice_kernel, source)
+    alloc_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaAllocOp)]
     slice_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaSliceOp)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
     assert isinstance(func_op, func.FuncOp)
+    assert len(alloc_ops) == 1
     assert len(slice_ops) == 1
+    assert len(return_ops) == 1
+    assert slice_ops[0].target is alloc_ops[0].result
+    assert return_ops[0].operands[0] is alloc_ops[0].result
 
 
 # MGEN-026
@@ -2063,14 +2248,16 @@ def test_build_func_op_supports_symbolic_for_loop_dma_without_return(monkeypatch
     loop_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolForOp)]
     assert len(loop_ops) == 1
     loop_body_ops = list(loop_ops[0].body.block.ops)
+    alloc_ops = [op for op in loop_body_ops if isinstance(op, DmaAllocOp)]
     slice_ops = [op for op in loop_body_ops if isinstance(op, DmaSliceOp)]
     deslice_ops = [op for op in loop_body_ops if isinstance(op, DmaDesliceOp)]
+    assert len(alloc_ops) == 2
     assert len(slice_ops) == 2
     assert len(deslice_ops) == 1
     assert not any(isinstance(op, DmaLoadOp) for op in loop_body_ops)
     assert not any(isinstance(op, DmaStoreOp) for op in loop_body_ops)
     assert not any(isinstance(op, arith.IndexCastOp) for op in loop_body_ops)
-    assert slice_ops[0].space.space.data == "local"
+    assert alloc_ops[0].result.type.space.space.data == "local"
     loop_body = loop_ops[0].body.block
     assert isinstance(loop_body.args[0].type, SymbolValueType)
     offsets = list(slice_ops[0].offsets)

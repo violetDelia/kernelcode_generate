@@ -72,6 +72,8 @@ from kernel_gen.dialect.nn import (
     NnAddOp,
     NnBroadcastOp,
     NnEqOp,
+    NnImg2col1dOp,
+    NnImg2col2dOp,
     NnMemorySpaceAttr,
     NnMemoryType,
     NnNeOp,
@@ -84,6 +86,8 @@ from kernel_gen.dialect.symbol import (
     SymbolFloorDivOp,
     SymbolForOp,
     SymbolGeOp,
+    SymbolGetDimOp,
+    SymbolGetStrideOp,
     SymbolMulOp,
     SymbolSubOp,
     SymbolValueType,
@@ -104,10 +108,12 @@ from kernel_gen.dsl.ast import (
     DmaViewAST,
     FunctionAST,
     ForAST,
+    Img2ColAST,
     LoadAST,
     SourceLocation,
     StoreAST,
     TensorAST,
+    TensorAxisAccessAST,
     VarAST,
     ScalarArgAST,
     _ParseFailure,
@@ -333,6 +339,81 @@ def test_emit_mlir_lowers_arch_get_thread_num_query() -> None:
         raise AssertionError("expected emitted op to be ArchGetThreadNumOp")
     if result.type != SymbolValueType.from_expr("thread_num"):
         raise AssertionError('expected emitted result type to be !symbol.int<"thread_num">')
+
+
+# EMIT-034
+# 创建者: OpenAI
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-31 03:20:00 +0800
+# 最近一次运行成功时间: 2026-03-31 03:20:00 +0800
+# 功能说明: 验证 TensorAxisAccessAST(kind="shape") lowering 为 symbol.get_dim。
+# 测试目的: 锁定 emit_mlir 对 `Memory.get_shape()[axis]` 的发射语义与静态 symbol 结果类型。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_lowers_symbol_get_dim_from_tensor_shape
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_emit_mlir_lowers_symbol_get_dim_from_tensor_shape() -> None:
+    block = Block()
+    tensor = TensorAST("value", _tensor_arg([4, 8]))
+    tensor_type = _memory_to_nn_type(tensor.memory, location=tensor.location)
+    tensor_value = block.insert_arg(tensor_type, 0)
+    ctx = EmitContext(
+        builder=block,
+        symbols={"value": tensor_value},
+        types={_expr_key(tensor): tensor_type},
+    )
+    ctx._set_cache(_expr_key(tensor), tensor_value)
+
+    result = emit_node_mlir(
+        TensorAxisAccessAST(tensor=tensor, kind="shape", axis=ConstAST(1)),
+        ctx,
+    )
+
+    body_ops = list(block.ops)
+    if len(body_ops) != 1:
+        raise AssertionError("expected one emitted op for get_shape()[axis]")
+    if not isinstance(body_ops[0], SymbolGetDimOp):
+        raise AssertionError("expected emitted op to be SymbolGetDimOp")
+    if result.type != SymbolValueType.from_expr("8"):
+        raise AssertionError('expected emitted result type to be !symbol.int<"8">')
+
+
+# EMIT-035
+# 创建者: OpenAI
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-03-31 03:20:00 +0800
+# 最近一次运行成功时间: 2026-03-31 03:20:00 +0800
+# 功能说明: 验证 TensorAxisAccessAST(kind="stride") lowering 为 symbol.get_stride。
+# 测试目的: 锁定 emit_mlir 对 `Memory.get_stride()[axis]` 的发射语义与静态 symbol 结果类型。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_lowers_symbol_get_stride_from_tensor_stride
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_emit_mlir_lowers_symbol_get_stride_from_tensor_stride() -> None:
+    block = Block()
+    tensor_memory = Memory([4, 8], NumericType.Float32, stride=[8, 1])
+    tensor = TensorAST("value", tensor_memory)
+    tensor_type = _memory_to_nn_type(tensor.memory, location=tensor.location)
+    tensor_value = block.insert_arg(tensor_type, 0)
+    ctx = EmitContext(
+        builder=block,
+        symbols={"value": tensor_value},
+        types={_expr_key(tensor): tensor_type},
+    )
+    ctx._set_cache(_expr_key(tensor), tensor_value)
+
+    result = emit_node_mlir(
+        TensorAxisAccessAST(tensor=tensor, kind="stride", axis=ConstAST(0)),
+        ctx,
+    )
+
+    body_ops = list(block.ops)
+    if len(body_ops) != 1:
+        raise AssertionError("expected one emitted op for get_stride()[axis]")
+    if not isinstance(body_ops[0], SymbolGetStrideOp):
+        raise AssertionError("expected emitted op to be SymbolGetStrideOp")
+    if result.type != SymbolValueType.from_expr("8"):
+        raise AssertionError('expected emitted result type to be !symbol.int<"8">')
 
 
 # EMIT-027
@@ -1880,3 +1961,96 @@ def test_mlir_gen_validate_return_type_variants() -> None:
         body=BlockAST([ConstAST(1)]),
     )
     _validate_return_type(scalar_output_ast, i32)
+
+
+# EMIT-034
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 覆盖 img2col1d helper 在 emit 阶段的 lowering 与类型推导。
+# 测试目的: 验证 Img2ColAST(img2col1d) 生成 nn.img2col1d 并返回正确的 nn.memory 类型。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_img2col1d_lowering
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_emit_mlir_img2col1d_lowering() -> None:
+    input_memory = Memory([1, 2, 8], NumericType.Float32, space=MemorySpace.GM)
+    tensor = TensorAST(name="x", memory=input_memory, location=None)
+    block = Block(arg_types=[_memory_to_nn_type(input_memory)])
+    ctx = EmitContext(builder=block, symbols={"x": block.args[0]}, types={})
+    ctx._set_cache(_expr_key(tensor), block.args[0])
+    ctx.types[_expr_key(tensor)] = block.args[0].type
+    expr = Img2ColAST(kind="img2col1d", args=[tensor, ConstAST(3)], kwargs={}, location=None)
+
+    result = emit_node_mlir(expr, ctx)
+
+    assert isinstance(result.owner, NnImg2col1dOp)
+    assert isinstance(result.type, NnMemoryType)
+    assert list(result.type.shape.data) == [IntAttr(1), IntAttr(6), IntAttr(6)]
+    assert list(result.type.stride.data) == [IntAttr(36), IntAttr(6), IntAttr(1)]
+    assert result.type.space.space.data == "global"
+
+
+# EMIT-035
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 覆盖 img2col2d helper 与 ForAST + dma.slice/dma.deslice 的协同 emit 路径。
+# 测试目的: 验证 img2col2d lowering 为 nn.img2col2d，循环保持 symbol.for 且 DMA operand 不引入 index_cast。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_img2col2d_with_loop_slice_deslice_lowering
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_emit_mlir_img2col2d_with_loop_slice_deslice_lowering() -> None:
+    input_memory = Memory([1, 1, 4, 4], NumericType.Float32, space=MemorySpace.GM)
+    output_memory = Memory([1, 4, 9], NumericType.Float32, space=MemorySpace.GM)
+    input_tensor = TensorAST(name="x", memory=input_memory, location=None)
+    output_tensor = TensorAST(name="y", memory=output_memory, location=None)
+    start = ScalarArgAST(name="start", value_type=int, is_symbolic=True, location=None)
+    end = ScalarArgAST(name="end", value_type=int, is_symbolic=True, location=None)
+    step = ScalarArgAST(name="step", value_type=int, is_symbolic=True, location=None)
+    loop_var = VarAST(name="i", location=None)
+    slice_expr = LoadAST(
+        tensor=input_tensor,
+        offset=[loop_var, ConstAST(0), ConstAST(0), ConstAST(0)],
+        stride=None,
+        sizes=[ConstAST(1), ConstAST(1), ConstAST(4), ConstAST(4)],
+        space=MemorySpace.LM,
+        kind="slice",
+        location=None,
+    )
+    img2col_expr = Img2ColAST(
+        kind="img2col2d",
+        args=[slice_expr],
+        kwargs={"kh": ConstAST(2), "kw": ConstAST(2)},
+        location=None,
+    )
+    store_expr = StoreAST(
+        tensor=output_tensor,
+        offset=[loop_var, ConstAST(0), ConstAST(0)],
+        stride=None,
+        value=img2col_expr,
+        kind="deslice",
+        location=None,
+    )
+    loop = ForAST(var=loop_var, start=start, end=end, step=step, body=BlockAST([store_expr]), location=None)
+    func_ast = FunctionAST(
+        name="img2col_loop",
+        inputs=[input_tensor, output_tensor, start, end, step],
+        outputs=[],
+        body=BlockAST([loop]),
+    )
+
+    func_op = build_func_op_from_ast(func_ast)
+
+    loop_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolForOp)]
+    assert len(loop_ops) == 1
+    loop_body = loop_ops[0].body.block
+    assert isinstance(loop_body.args[0].type, SymbolValueType)
+    loop_body_ops = list(loop_body.ops)
+    assert not any(isinstance(op, arith.IndexCastOp) for op in loop_body_ops)
+    slice_ops = [op for op in loop_body_ops if isinstance(op, DmaSliceOp)]
+    img2col_ops = [op for op in loop_body_ops if isinstance(op, NnImg2col2dOp)]
+    deslice_ops = [op for op in loop_body_ops if isinstance(op, DmaDesliceOp)]
+    assert len(slice_ops) == 1
+    assert len(img2col_ops) == 1
+    assert len(deslice_ops) == 1
+    assert list(slice_ops[0].offsets)[0] is loop_body.args[0]

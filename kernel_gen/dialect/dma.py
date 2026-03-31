@@ -721,34 +721,32 @@ class DmaSliceOp(IRDLOperation):
 
     name = "dma.slice"
 
+    target = operand_def(NnMemoryType)
     source = operand_def(NnMemoryType)
     offsets = var_operand_def(SymbolValueType)
     sizes = var_operand_def(SymbolValueType)
     strides = var_operand_def(SymbolValueType)
-    result = result_def(NnMemoryType)
-    space = attr_def(NnMemorySpaceAttr)
 
     irdl_options = [AttrSizedOperandSegments(as_property=True)]
 
     def __init__(
         self,
+        target: SSAValue | Operation,
         source: SSAValue | Operation,
         offsets: Sequence[SSAValue],
         sizes: Sequence[SSAValue],
         strides: Sequence[SSAValue],
-        result_type: NnMemoryType,
-        space: NnMemorySpaceAttr,
     ) -> None:
         """初始化 dma.slice。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 设置 source、索引属性、结果类型与 space。
+        - 设置 target/source 与索引属性。
 
         使用示例:
-        - DmaSliceOp(source, offsets, sizes, strides, result_type, space)
+        - DmaSliceOp(target, source, offsets, sizes, strides)
 
         关联文件:
         - spec: spec/dialect/dma.md
@@ -756,21 +754,17 @@ class DmaSliceOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
-        super().__init__(
-            operands=[source, offsets, sizes, strides],
-            result_types=[result_type],
-            attributes={"space": space},
-        )
+        super().__init__(operands=[target, source, offsets, sizes, strides])
 
     def verify_(self) -> None:
         """校验 dma.slice。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 金铲铲大作战
 
         功能说明:
         - offsets/sizes/strides 长度与 source rank 一致。
-        - result.shape == sizes 且 element_type/space 一致。
+        - target.shape == sizes 且 target/source element_type 一致。
         - 当前阶段 stride 必须为 1。
 
         使用示例:
@@ -782,22 +776,21 @@ class DmaSliceOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/dma.py
         """
 
+        target_type = _verify_memory_type(self.target.type, "target")
         source_type = _verify_memory_type(self.source.type, "source")
-        result_type = _verify_memory_type(self.result.type, "result")
         offsets = _verify_symbol_int_operands(self.offsets, "offsets", min_value=0)
         sizes = _verify_symbol_int_operands(self.sizes, "sizes", min_value=1)
         strides = _verify_symbol_int_operands(self.strides, "strides", min_value=1)
         rank = len(source_type.shape.data)
+        if len(target_type.shape.data) != rank:
+            raise VerifyException("dma.slice target rank must match source rank")
         _verify_rank_match(offsets, rank, "offsets")
         _verify_rank_match(sizes, rank, "sizes")
         _verify_rank_match(strides, rank, "strides")
         _verify_unit_stride_operands(strides)
-        _verify_operands_match_layout(sizes, result_type.shape, "shape must match sizes")
-        if source_type.element_type != result_type.element_type:
+        _verify_operands_match_layout(sizes, target_type.shape, "shape must match sizes")
+        if source_type.element_type != target_type.element_type:
             raise VerifyException("dma.slice element_type mismatch")
-        self.space.verify()
-        if result_type.space.space.data != self.space.space.data:
-            raise VerifyException("dma.slice space attribute must match result space")
 
 
 @irdl_op_definition
