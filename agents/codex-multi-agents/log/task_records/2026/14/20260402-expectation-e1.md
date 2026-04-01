@@ -58,3 +58,15 @@
 - 未发现额外改进点。
 - 测试情况：本次为审查阶段，未执行 `pytest` 或 expectation；证据来自 plan/spec/test/expectation 的静态对照与行号复核。
 - 下一步建议：按链路进入 `E2` spec 任务，仅修改 `spec/dialect/symbol.md`，冻结 `gt/le/lt/ne` 与 `to_float` 的 dialect 合同。
+时间：2026-04-02 03:45:38 +0800
+任务：T-20260402-3a01362d
+任务目标：将 `wt-20260402-expectation-e1` 中已通过审查的 `E1` spec 成果按最小范围合入主分支，仅包含 `spec/dialect/dma.md` 与同链路记录文件；完成单次同步、cleanup 与状态封板，不把 `E1` 未合并视为 `E4` 已满足依赖。
+改动：
+- 核对合并边界：`TODO.md` 中当前 `worktree=wt-20260402-expectation-e1` 仅存在本任务 `T-20260402-3a01362d`；`git -C wt-20260402-expectation-e1 status --short` 仅见 `spec/dialect/dma.md` 与同链路记录文件变更，未发现范围外业务文件。
+- 将 `wt-20260402-expectation-e1/spec/dialect/dma.md` 与同链路记录同步到主分支工作目录，复核 `git diff --check -- spec/dialect/dma.md agents/codex-multi-agents/log/task_records/2026/14/20260402-expectation-e1.md` 通过。
+- 在主分支生成合并提交 `bb5deca`（`T-20260402-3a01362d-merge-expectation-e1`），提交内容仅包含 `spec/dialect/dma.md` 与 `agents/codex-multi-agents/log/task_records/2026/14/20260402-expectation-e1.md`。
+- 执行 cleanup：`git worktree remove --force wt-20260402-expectation-e1` 与 `git branch -D wt-20260402-expectation-e1`（均 exit 0）；清理后 `git worktree list --porcelain` 不再包含 `wt-20260402-expectation-e1`，其余现存 worktree 保持原样未触碰。
+- 未新增本轮测试；本次合并直接引用链路内最近一次审查结论，证据来自 `ARCHITECTURE/plan/expectation_dsl_mlir_dma_symbol_closure_plan.md`、`spec/dialect/dma.md`、`test/dialect/test_dma_dialect.py`、`test/dsl/test_mlir_gen.py` 与 expectation 文件的静态对照。
+结论：
+- 完成。`E1` 已按限定范围合入主分支，对应 worktree/branch 已清理，无范围外文件混入。
+- 本任务未放行 `E4`，也不视为其依赖已全部满足；下一步建议仅在 `E2/E3` 等依赖全部已合并后，由管理员单独创建并分发 `E4` 任务。
