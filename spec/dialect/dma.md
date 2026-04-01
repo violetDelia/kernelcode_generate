@@ -60,7 +60,9 @@
 - `dma.load/store/slice/deslice` 的 `offsets/sizes/strides` 必须为 variadic `!symbol.int<"expr">` operand。
 - `dma.slice` 必须采用目标式 `dma.slice(target, source, offsets, sizes, strides)`：由 `target` 承载切片结果，op 本身不产生 result。
 - `dma.view` 中与动态布局相关的 `offsets/shape/stride` 元信息必须通过 `!symbol.int<"expr">` operand 显式传入；不得仅依赖结果类型里的符号维度推断。
-- `dma.view` 的 `shape/stride` operand 必须与 `result_type.shape/stride` 对齐；静态可判定时 `source/result` 的 `numel` 必须一致。
+- `dma.view` 的 `result_type.shape` 必须由 `shape` operand（DSL `view(..., size, ...)`）确定，`result_type.stride` 必须由 `stride` operand（DSL `view(..., stride)`）确定；二者都必须与对应 operand 一一对齐，不得只因“生成了 `dma.view` op”就视为 expectation 对齐成功。
+- 当 `dma.view` 结果直接参与 `func.return` 时，返回的 `!nn.memory<...>` 类型必须与同一份 `result_type` 完全一致；`expectation/dsl/mlir_gen/dialect/dma/view` 中的 `EXPECTED_MEMORY` 比对依赖这一边界。
+- 静态可判定时 `dma.view` 的 `source/result` `numel` 必须一致。
 - `dma.reshape` 仅接受动态 `shape` operand，且这些 operand 必须为 `!symbol.int<"expr">`；结果 `stride` 按 `shape` 的默认连续布局语义生成。
 - `dma.alloc` 仅接受动态 `shape` operand，且这些 operand 必须为 `!symbol.int<"expr">`；`stride` 不作为输入，而是按默认连续布局语义生成。
 - `strides` 当前每一维仍限制为单位步长语义，但该约束应体现在 operand 校验阶段，而不是要求使用 `IntAttr(1)` attribute。
@@ -107,14 +109,15 @@
 | `store(source, target, offsets, sizes, strides=None)` | `dma.store` | 切片写回。 |
 | `slice(source, offsets, sizes, strides=None, space=None)` | `dma.alloc + dma.slice(target, source, offsets, sizes, strides)` | 先分配 `target`，再执行目标式切片写入；表达式值绑定到 `dma.alloc` 的结果。 |
 | `deslice(source, target, offsets, sizes, strides=None)` | `dma.deslice` | 切片写回（语义等价于 `store`）。 |
-| `view(source, offset, size, stride)` | `dma.view` | 视图重解释，`offset/size/stride` 分别映射为 `dma.view` 的 `offsets/shape/stride` operand；`shape/stride` operand 必须与 `result_type.shape/stride` 对齐，静态可判定时要求 `source/result` `numel` 一致。 |
+| `view(source, offset, size, stride)` | `dma.view` | 视图重解释，`offset/size/stride` 分别映射为 `dma.view` 的 `offsets/shape/stride` operand；`result_type.shape == size`、`result_type.stride == stride`，静态可判定时要求 `source/result` `numel` 一致；若该结果直接返回，则 `func.return` 类型必须与同一 `result_type` 一致。 |
 | `reshape(source, shape)` | `dma.reshape` | 连续布局 reshape。 |
 | `flatten(source)` | `dma.reshape` | 视为 `reshape` 到一维形状。 |
 
 补充说明：
 
 - `view` 的 `offset/size/stride` 在方言层分别对应 `dma.view` 的 `offsets/shape/stride` operand；`shape/stride` operand 与 `result_type.shape/stride` 必须一致。
-- operation 层 `view` 返回值会继承 `source.stride`，而 `dma.view` 需要显式 `result_type.stride` 与 `stride` operand 对齐；因此映射时必须使用 `view` 调用参数，不能只依赖返回 `Memory` 规格。
+- 对 expectation 对齐子集，`dma.view` 的 `result_type.shape` 必须来自 DSL `size`，`result_type.stride` 必须来自 DSL `stride`；不得只复用上层 `Memory` 既有元信息或仅以“成功生成 `dma.view` op”为通过条件。
+- 若 `build_func_op(...)` / `emit_mlir` 让 `dma.view` 结果直接流向 `func.return`，则 `func.return` 携带的 `!nn.memory<...>` 类型必须与 `dma.view.result_type` 完全一致；`EXPECTED_MEMORY` 比对即基于这份返回类型。
 - operation 层允许“静态可判定的缩小 subview”（`size` 的 `numel` 小于 `source.shape`），但当前 `dma.view` 在静态可判定时要求 `source/result` `numel` 一致；该场景不属于当前 `dma.view` 的可验证映射子集。
 - `operation.slice(...)-> dma.alloc + dma.slice(target, source, offsets, sizes, strides)`：`dma.slice` 只负责把切片内容写入 `target`，不返回新的 memory result；operation 表达式返回值来自前置 `dma.alloc` 的 result。
 
@@ -280,9 +283,11 @@ op = DmaViewOp(source, offsets, shape, stride, result_type)
 - `dma.view` 不要求 `source` 为连续布局，但 `result.stride` 必须与 `result.shape` rank 一致。
 - `offsets/shape/stride` operand 数量必须与结果 rank 一致，且每个 operand 都必须是 `!symbol.int<"expr">`。
 - `shape` operand 必须与 `result_type.shape` 对齐，`stride` operand 必须与 `result_type.stride` 对齐。
+- 对 DSL `view(source, offset, size, stride)` lowering，`result_type.shape` 必须来自 `size`，`result_type.stride` 必须来自 `stride`；不得回退为复用 `source.shape/source.stride` 或其他既有 `Memory` 元信息。
 - `offsets` 必须为非负整数；若可静态判定为负值，必须报错。
 - 若 `source.shape`、`offsets`、`shape`、`stride` 都可静态判定，则必须执行边界校验：`offset + (size - 1) * stride` 不得超出对应维度的 `source.shape`。
 - 动态视图信息通过 operand 传入；结果类型中的动态维度只用于描述结果布局的动态性，不替代运行期值来源。
+- expectation 场景下不能只检查“生成了 `dma.view`”；若该结果直接作为函数返回值，则 `func.return` 与函数输出类型必须与 `dma.view.result_type` 完全一致，才能与 `EXPECTED_MEMORY` 比对对齐。
 
 返回与限制：
 
@@ -508,6 +513,7 @@ op = DmaCastOp(source, result_type)
 - 验证 `dma.alloc` 结果类型约束与结果数量。
 - 验证 `dma.free` 的内存类型约束与无返回值语义。
 - 验证 `dma.view/reshape` 的元素类型/空间一致性与形状约束，其中 `dma.view` 覆盖动态 `offsets/shape/stride` 的 `!symbol.int<"expr">` operand 与边界校验，`dma.reshape` 覆盖动态 `shape` 的 `!symbol.int<"expr">` operand。
+- 验证 `dma.view` 在 DSL helper / expectation 链路中不仅要生成 op，还要求返回 `Memory` 类型与 `dma.view.result_type` 一致；当直接 `func.return` 时，`EXPECTED_MEMORY` 比对必须成功。
 - 验证默认连续 stride 在符号维度（如 `N` / `M*N` / `?`）下的推导与退化规则已覆盖。
 - 验证 `dma.cast` 只允许改变元素类型，且保持 `shape/stride/space` 不变。
 - 验证当前阶段对 stride 的限制会在 verifier 阶段明确报错。
@@ -538,6 +544,7 @@ op = DmaCastOp(source, result_type)
 | TC-DMA-019 | 视图 | `dma.view` 动态布局输入 | `shape/stride` 由 SSA `!symbol.int<"expr">` operand 提供，且分别与 `result_type.shape/stride` 对齐，结果 rank 匹配 | 构造并校验 `dma.view` | verifier 通过 | `test_dma_view_dynamic_symbol_int_layout_operands_valid` |
 | TC-DMA-019A | 视图 | `dma.view` offsets 边界 | `offsets` 长度不匹配、负值或静态越界 | 构造并校验 `dma.view` | verifier 报错 | `test_dma_view_rejects_invalid_offsets_or_bounds` |
 | TC-DMA-019B | 视图 | `dma.view` 显式 stride 布局 | 在 `source/result` `numel` 一致前提下，允许 `result_type.stride` 与 `source.stride` 不同，只要求与 `stride` operand 对齐 | 构造并校验 `dma.view` | verifier 通过 | `test_dma_view_accepts_matching_numel_subset_with_explicit_stride` |
+| TC-DMA-019C | 视图 | `dma.view` expectation 返回类型对齐 | DSL `view(...)` 结果直接参与函数返回，且 `result_type.shape == size`、`result_type.stride == stride` | 执行 expectation 比对 | `func.return` 类型与 `dma.view.result_type` 一致，`EXPECTED_MEMORY` 比对成功 | `expectation/dsl/mlir_gen/dialect/dma/view` |
 | TC-DMA-020 | 分配 | `dma.alloc` 动态形状输入 | `dynamic_shape` 由 SSA `!symbol.int<"expr">` operand 提供，长度与 rank 一致，符号维度默认 stride 规则（如 `N`/`M*N`/`?`）生效 | 构造并校验 `dma.alloc` | verifier 通过 | `test_dma_alloc_dynamic_symbol_int_shape_operands_valid` |
 | TC-DMA-021 | 解析/打印 | 动态 shape round-trip | 包含 `dma.alloc/view/load/store/slice/deslice/reshape/cast` 的 SSA `!symbol.int<"expr">` operand 文本 | parse/print | 与输入文本一致 | `test_dma_dynamic_symbol_int_parse_print_round_trip` |
 | TC-DMA-022 | 标量输入 | 非 symbol.int 非法 | 任一受影响标量输入为 builtin `index` 或其他非 symbol 标量类型 | 构造并校验 `dma` op | verifier 报错 | `test_dma_rejects_non_symbol_int_scalar_operands` |
