@@ -62,3 +62,16 @@
 - 未发现额外改进点。
 - 测试情况：本次为复审阶段，未运行 `pytest`；证据来自 plan/spec/test 的静态对照与 grep/行号复核。
 - 下一步建议：按计划进入 `E4` spec 任务，仅修改 `spec/dsl/emit_mlir.md`，冻结 `dma.view`、`symbol compare family` 与 `symbol.to_float` 的 lowering 合同。
+时间：2026-04-02 05:31:25 +0800
+任务：T-20260402-4459da7d
+任务目标：将 `wt-20260402-expectation-e3` 中已通过审查的 `E3` spec 成果按最小范围合入主分支，仅包含 `spec/dsl/ast.md` 与同链路记录文件；完成单次同步、cleanup 与状态封板。
+改动：
+- 核对合并边界：`TODO.md` 中当前 `worktree=wt-20260402-expectation-e3` 仅存在本任务 `T-20260402-4459da7d`；`git -C wt-20260402-expectation-e3 status --short` 仅见 `spec/dsl/ast.md` 变更，未发现范围外业务文件。
+- 复核主分支差异：`git diff --name-only f2a0b80..HEAD -- spec/dsl/ast.md` 无输出，确认自 `wt-20260402-expectation-e3` 基线以来主仓未再修改该文件，因此本次无需人工冲突合并。
+- 将 `wt-20260402-expectation-e3/spec/dsl/ast.md` 与同链路记录同步到主分支工作目录，复核 `git diff --check -- spec/dsl/ast.md agents/codex-multi-agents/log/task_records/2026/14/20260402-expectation-e3.md` 通过。
+- 在主分支生成合并提交 `1c3b9c0`（`T-20260402-4459da7d-merge-expectation-e3`），提交内容仅包含 `spec/dsl/ast.md` 与 `agents/codex-multi-agents/log/task_records/2026/14/20260402-expectation-e3.md`。
+- 执行 cleanup：`git worktree remove --force wt-20260402-expectation-e3` 与 `git branch -D wt-20260402-expectation-e3`（均 exit 0）；清理后 `git worktree list --porcelain` 不再包含 `wt-20260402-expectation-e3`，其余现存 worktree 保持原样未触碰。
+- 未新增本轮测试；本次合并直接引用链路内最近一次审查结论，证据来自 `ARCHITECTURE/plan/expectation_dsl_mlir_dma_symbol_closure_plan.md`、`spec/dsl/ast.md` 与 `test/dsl/test_ast.py` 的静态对照。
+结论：
+- 完成。`E3` spec 已按限定范围合入主分支，对应 worktree/branch 已清理，无范围外文件混入。
+- 本任务未扩到 `spec/dsl/emit_mlir.md`、实现、测试或 expectation；下一步建议由管理员按计划单独创建后续任务。
