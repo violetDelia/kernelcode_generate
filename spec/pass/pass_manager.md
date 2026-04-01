@@ -4,6 +4,7 @@
 
 - 定义 Pass 管理与调度的最小可用规范，描述 Pass 的组织、排序与执行规则。
 - 面向上层 IR/DSL 的通用优化/规范化流程，不绑定具体 IR 类型或后端。
+- 对 analysis pass 仍保持单返回路径：`run(module)` 返回值只承接最终 `module`，分析结果通过 pass 实例缓存或 `attrs` 可观察。
 
 ## 文档信息
 
@@ -21,6 +22,7 @@
 
 - 提供可组合的 Pass 管理器，支持按顺序执行多个 Pass。
 - 统一 Pass 的注册、执行与错误传播规则，便于后续实现与测试闭环。
+- 冻结 analysis pass 在 manager 中的承接方式：`run(module)` 继续返回单一 `module`，不追加 summary 或第二返回值。
 
 ## 限制与边界
 
@@ -28,6 +30,7 @@
 - 不引入跨模块依赖或后端 lowering 规则。
 - 不要求 Pass 修改输入的方式（可返回新对象或就地修改），以 `run` 返回值为准。
 - 当管理器中无 Pass 时，执行结果必须等于输入（无副作用的空操作）。
+- 对 analysis pass，manager 不负责聚合第二份分析结果对象；若需观察分析结果，只能经由 pass 实例侧接口或 `attrs` 等副作用读取。
 
 ## 公开接口
 
@@ -86,9 +89,18 @@ pm.add_pass(MyPass())
 result = pm.run(ir)
 ```
 
+```python
+pm = PassManager(name="analysis")
+cost_pass = AnalyzeFuncCostPass(attach_attrs=True)
+pm.add_pass(cost_pass)
+module = pm.run(module)
+summary = cost_pass.get_summary("main")
+```
+
 注意事项：
 
 - Pass 执行顺序与添加顺序一致。
+- 当列表中包含 analysis pass 时，manager 仍只负责串联 `run(target)` 的单返回值流，不新增 `(module, summary)` 一类包装协议。
 
 前置条件：
 
@@ -101,6 +113,7 @@ result = pm.run(ir)
 返回与限制：
 
 - `run` 返回最后一个 Pass 的输出；无 Pass 时返回原输入。
+- 不得返回 `(module, summary)`、`(target, analysis_result)` 等多返回值结构。
 
 ### `PassManager.add_pass(pass_obj)`
 
@@ -166,10 +179,16 @@ pm.extend([PassA(), PassB()])
 result = pm.run(ir)
 ```
 
+```python
+module = pm.run(module)
+summary = cost_pass.get_summary("main")
+```
+
 注意事项：
 
 - Pass 的输出必须作为下一个 Pass 的输入。
 - 任何 Pass 抛出的异常应原样传播。
+- 若执行的是 analysis pass，分析结果不作为 `run(...)` 的第二返回值传出；调用方应通过 pass 实例或 `analysis.*` attrs 读取。
 
 前置条件：
 
@@ -182,6 +201,7 @@ result = pm.run(ir)
 返回与限制：
 
 - 返回最终 Pass 的输出；无 Pass 时返回输入本身。
+- 对 analysis pass 仍只返回最终 `module`；不得改为 `new_module, summary = pass_manager.run(module)`。
 
 ## 测试
 
@@ -194,6 +214,7 @@ result = pm.run(ir)
 - 验证空管理器执行返回原输入。
 - 验证显式注册非法 Pass 时触发 `TypeError`。
 - 验证 Pass 异常可向上抛出。
+- 当前下游验收标准建议补充 analysis pass 单返回路径验证：`test_pass_manager_runs_analysis_pass_without_second_return` 与 `test_pass_manager_preserves_analysis_side_effects`；在专项测试落地前，不将其写成当前已闭环映射。
 
 ### 功能与用例清单
 
@@ -205,8 +226,14 @@ result = pm.run(ir)
 | TC-PASS-004 | 非法 Pass 类型报错 | `test_pass_manager_invalid_pass_type` |
 | TC-PASS-005 | Pass 异常向上抛出 | `test_pass_manager_exception_propagation` |
 
+当前下游验收标准：
+
+- `test_pass_manager_runs_analysis_pass_without_second_return`：输入包含 analysis pass 的 manager；预期 `run(module)` 保持单返回路径。
+- `test_pass_manager_preserves_analysis_side_effects`：输入同上；预期分析结果通过 pass 实例或 `attrs` 可观察，而不是 manager 第二返回值。
+
 ## 失败归因
 
 - AST 发射失败：上游 DSL/AST 构建阶段无法生成合法 IR，表现为进入 PassManager 前已抛错或传入 `target` 为空/类型不符。
 - Dialect verify 失败：某 Pass 调用 verifier 或验证器抛错，原因通常为 IR 类型、attribute 或 operand 约束不满足。
 - Lowering 失败：具体 lowering Pass 在 op 映射、类型转换或结果分配时抛错，PassManager 仅负责透传异常，不做吞并或重写。
+- Analysis 结果读取失败：若调用方试图从 `run(...)` 第二返回值读取 summary，属于调用协议错误；analysis 结果应改由 pass 实例接口或 `analysis.*` attrs 获取。
