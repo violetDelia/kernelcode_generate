@@ -1,7 +1,7 @@
 """Analysis tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖逐元素算术/比较、broadcast、matmul 与函数级聚合统计。
@@ -69,7 +69,15 @@ from kernel_gen.analysis.analysis import (
     analyze_matmul_op,
 )
 import kernel_gen.analysis.analysis as analysis_module
-from kernel_gen.dialect.dma import DmaLoadOp
+from kernel_gen.dialect.dma import (
+    DmaAllocOp,
+    DmaCopyOp,
+    DmaDesliceOp,
+    DmaFreeOp,
+    DmaLoadOp,
+    DmaSliceOp,
+    DmaStoreOp,
+)
 from kernel_gen.dialect.nn import (
     NnAddOp,
     NnEqOp,
@@ -884,8 +892,8 @@ def test_analyze_kernel_rejects_args_length_mismatch() -> None:
 # AK-009
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-31 00:00:00 +0800
-# 最近一次运行成功时间: 2026-03-31 00:00:00 +0800
+# 最近一次运行测试时间: 2026-04-02 05:49:01 +0800
+# 最近一次运行成功时间: 2026-04-02 05:49:01 +0800
 # 测试目的: 验证未知 op skip + warning。
 # 使用示例: pytest -q test/analysis/test_analysis.py -k test_analyze_kernel_unknown_op_warns_and_skips
 # 对应功能实现文件路径: kernel_gen/analysis/analysis.py
@@ -907,13 +915,16 @@ def test_analyze_kernel_unknown_op_warns_and_skips() -> None:
     expected_numel = SymbolDim("A").get_symbol() * SymbolDim("B").get_symbol()
     _assert_expr_equal(summary.total_compute, expected_numel)
     assert len(summary.op_costs) == 1
+    assert summary.op_costs[0].op_name == "nn.add"
+    traffic = _value_traffic_map(summary)
+    assert set(traffic.keys()) == {"arg0", "arg1", "op0.result0"}
 
 
 # AK-010
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-31 00:00:00 +0800
-# 最近一次运行成功时间: 2026-03-31 00:00:00 +0800
+# 最近一次运行测试时间: 2026-04-02 05:49:01 +0800
+# 最近一次运行成功时间: 2026-04-02 05:49:01 +0800
 # 测试目的: 验证 compare i1 写回使用 predicate_size 优先级。
 # 使用示例: pytest -q test/analysis/test_analysis.py -k test_analyze_kernel_compare_i1_uses_predicate_size
 # 对应功能实现文件路径: kernel_gen/analysis/analysis.py
@@ -938,3 +949,127 @@ def test_analyze_kernel_compare_i1_uses_predicate_size() -> None:
 
     expected_numel = SymbolDim("A").get_symbol() * SymbolDim("B").get_symbol()
     _assert_expr_equal(summary.total_write_bytes, expected_numel * 2)
+    _assert_expr_equal(summary.op_costs[0].write_bytes, expected_numel * 2)
+    traffic = _value_traffic_map(summary)
+    _assert_expr_equal(traffic["op0.result0"].write_bytes, expected_numel * 2)
+
+
+# AN-018
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-02 05:49:01 +0800
+# 最近一次运行成功时间: 2026-04-02 05:49:01 +0800
+# 测试目的: 验证公开 DMA 分支中的 dma.copy 与 dma.store 会记录源读/目标写流量。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analyze_kernel_dma_copy_and_store_track_source_and_target_traffic
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_kernel.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analyze_kernel_dma_copy_and_store_track_source_and_target_traffic() -> None:
+    mem_type = _make_memory_type([IntAttr(2), IntAttr(2)], f32, "global")
+    symbol_types = [
+        SymbolValueType.from_expr("0"),
+        SymbolValueType.from_expr("0"),
+        SymbolValueType.from_expr("2"),
+        SymbolValueType.from_expr("2"),
+        SymbolValueType.from_expr("1"),
+        SymbolValueType.from_expr("1"),
+    ]
+
+    arg_types = [mem_type, mem_type, *symbol_types]
+
+    def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
+        copy_op = DmaCopyOp(block.args[0], block.args[1])
+        store_op = DmaStoreOp(
+            block.args[0],
+            block.args[1],
+            [block.args[2], block.args[3]],
+            [block.args[4], block.args[5]],
+            [block.args[6], block.args[7]],
+        )
+        return [copy_op, store_op], block.args[1]
+
+    _, func_op, _ = _build_module(arg_types, mem_type, _builder)
+    summary = analyze_kernel(func_op, dtype_size_overrides={"f32": 4})
+
+    expected_bytes = sp.Integer(16)
+    _assert_expr_equal(summary.total_compute, sp.Integer(0))
+    _assert_expr_equal(summary.total_read_bytes, expected_bytes * 2)
+    _assert_expr_equal(summary.total_write_bytes, expected_bytes * 2)
+    traffic = _value_traffic_map(summary)
+    _assert_expr_equal(traffic["arg0"].read_bytes, expected_bytes * 2)
+    _assert_expr_equal(traffic["arg1"].write_bytes, expected_bytes * 2)
+
+
+# AN-019
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-02 05:49:01 +0800
+# 最近一次运行成功时间: 2026-04-02 05:49:01 +0800
+# 测试目的: 验证公开 DMA 分支前置条件失败时 analyze_kernel 会抛出 AnalysisError。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analyze_kernel_rejects_invalid_public_dma_op
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_kernel.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analyze_kernel_rejects_invalid_public_dma_op() -> None:
+    source_type = _make_memory_type([IntAttr(2), IntAttr(2)], f32, "global")
+    target_type = _make_memory_type([IntAttr(2), IntAttr(4)], f32, "global")
+
+    def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
+        copy_op = DmaCopyOp(block.args[0], block.args[1])
+        return [copy_op], block.args[0]
+
+    _, func_op, _ = _build_module([source_type, target_type], source_type, _builder)
+    with pytest.raises(AnalysisError, match="dma.copy source/target shape mismatch"):
+        analyze_kernel(func_op, dtype_size_overrides={"f32": 4})
+
+
+# AN-020
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-02 05:49:01 +0800
+# 最近一次运行成功时间: 2026-04-02 05:49:01 +0800
+# 测试目的: 验证当前未公开 DMA 分支执行 skip + warning，且不计入主入口统计。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analyze_kernel_skips_non_public_dma_ops_with_warning
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_kernel.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analyze_kernel_skips_non_public_dma_ops_with_warning() -> None:
+    full_type = _make_memory_type([IntAttr(2), IntAttr(4)], f32, "global")
+    tile_type = _make_memory_type([IntAttr(1), IntAttr(2)], f32, "global")
+    symbol_types = [
+        SymbolValueType.from_expr("0"),
+        SymbolValueType.from_expr("0"),
+        SymbolValueType.from_expr("1"),
+        SymbolValueType.from_expr("2"),
+        SymbolValueType.from_expr("1"),
+        SymbolValueType.from_expr("1"),
+    ]
+
+    arg_types = [full_type, *symbol_types]
+
+    def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
+        offsets = [block.args[1], block.args[2]]
+        sizes = [block.args[3], block.args[4]]
+        strides = [block.args[5], block.args[6]]
+        alloc_op = DmaAllocOp(sizes, tile_type)
+        slice_op = DmaSliceOp(alloc_op.result, block.args[0], offsets, sizes, strides)
+        deslice_op = DmaDesliceOp(alloc_op.result, block.args[0], offsets, sizes, strides, full_type)
+        free_op = DmaFreeOp(alloc_op.result)
+        return [alloc_op, slice_op, deslice_op, free_op], block.args[0]
+
+    _, func_op, _ = _build_module(arg_types, full_type, _builder)
+    with pytest.warns(UserWarning) as records:
+        summary = analyze_kernel(func_op, dtype_size_overrides={"f32": 4})
+
+    assert [str(item.message) for item in records] == [
+        "analysis_kernel skip dma.alloc: unsupported op",
+        "analysis_kernel skip dma.slice: unsupported op",
+        "analysis_kernel skip dma.deslice: unsupported op",
+        "analysis_kernel skip dma.free: unsupported op",
+    ]
+    assert summary.op_costs == []
+    _assert_expr_equal(summary.total_compute, sp.Integer(0))
+    _assert_expr_equal(summary.total_read_bytes, sp.Integer(0))
+    _assert_expr_equal(summary.total_write_bytes, sp.Integer(0))
+    traffic = _value_traffic_map(summary)
+    assert set(traffic.keys()) == {f"arg{index}" for index in range(len(arg_types))}

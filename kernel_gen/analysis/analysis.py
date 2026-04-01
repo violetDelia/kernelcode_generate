@@ -42,8 +42,9 @@ from xdsl.dialects.builtin import (
     StringAttr,
 )
 from xdsl.ir import Attribute, Operation, SSAValue
+from xdsl.utils.exceptions import VerifyException
 
-from kernel_gen.dialect.dma import DmaAllocOp, DmaCopyOp, DmaDesliceOp, DmaFreeOp, DmaLoadOp, DmaSliceOp, DmaStoreOp
+from kernel_gen.dialect.dma import DmaCopyOp, DmaLoadOp, DmaStoreOp
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.symbol_variable.memory import Memory
@@ -642,6 +643,30 @@ def _iter_func_ops(func_op: func.FuncOp) -> Iterable[Operation]:
         yield from _iter_block_ops(block.ops)
 
 
+def _verify_public_dma_op(op: Operation) -> None:
+    """校验当前已公开 DMA 分支的前置条件。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 复用 DMA dialect verifier 校验 `dma.load/copy/store` 的公开前置条件。
+    - verifier 失败时统一转为 `AnalysisError`，避免主入口静默接受非法 IR。
+
+    使用示例:
+    - _verify_public_dma_op(op)
+
+    关联文件:
+    - spec: spec/analysis/analysis_kernel.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+    try:
+        op.verify()
+    except VerifyException as exc:
+        raise AnalysisError(str(exc)) from exc
+
+
 def _sum_expr(items: Iterable[sp.Basic]) -> sp.Basic:
     """求和 sympy 表达式列表。
 
@@ -1172,6 +1197,7 @@ def analyze_kernel(
             continue
 
         if isinstance(op, DmaCopyOp):
+            _verify_public_dma_op(op)
             source = op.source
             target = op.target
             if not isinstance(source.type, NnMemoryType) or not isinstance(target.type, NnMemoryType):
@@ -1199,6 +1225,7 @@ def analyze_kernel(
             continue
 
         if isinstance(op, DmaLoadOp):
+            _verify_public_dma_op(op)
             if len(op.operands) < 1 or len(op.results) != 1:
                 raise AnalysisError("dma.load must have 1 result")
             source = op.operands[0]
@@ -1232,6 +1259,7 @@ def analyze_kernel(
             continue
 
         if isinstance(op, DmaStoreOp):
+            _verify_public_dma_op(op)
             source = op.source
             target = op.target
             if not isinstance(source.type, NnMemoryType) or not isinstance(target.type, NnMemoryType):
@@ -1256,81 +1284,6 @@ def analyze_kernel(
                     compute=sp.Integer(0),
                     read_bytes=bytes_expr,
                     write_bytes=bytes_expr,
-                )
-            )
-            continue
-
-        if isinstance(op, DmaSliceOp):
-            source = op.source
-            target = op.target
-            if not isinstance(source.type, NnMemoryType) or not isinstance(target.type, NnMemoryType):
-                raise AnalysisError("dma.slice source/target must be nn.memory")
-            numel = _numel_from_symbol_values(op.sizes)
-            if numel is None:
-                numel = _numel_from_mem_type(target.type)
-            if numel is None:
-                raise AnalysisError("dma.slice sizes unsupported")
-            elem_size = _element_size(source.type.element_type, overrides)
-            if elem_size is None:
-                raise AnalysisError("dma.slice dtype unsupported")
-            bytes_expr = numel * sp.Integer(elem_size)
-
-            _record_value_read(source, bytes_expr, value_keys, traffic_map)
-            _record_value_write(target, bytes_expr, value_keys, traffic_map)
-
-            op_costs.append(
-                KernelOpCost(
-                    op_index=len(op_costs),
-                    op_name=op_name,
-                    compute=sp.Integer(0),
-                    read_bytes=bytes_expr,
-                    write_bytes=bytes_expr,
-                )
-            )
-            continue
-
-        if isinstance(op, DmaDesliceOp):
-            source = op.source
-            if not isinstance(source.type, NnMemoryType):
-                raise AnalysisError("dma.deslice source must be nn.memory")
-            if len(op.results) != 1 or not isinstance(op.result.type, NnMemoryType):
-                raise AnalysisError("dma.deslice result must be nn.memory")
-            numel = _numel_from_symbol_values(op.sizes)
-            if numel is None:
-                numel = _numel_from_mem_type(source.type)
-            if numel is None:
-                raise AnalysisError("dma.deslice sizes unsupported")
-            elem_size = _element_size(source.type.element_type, overrides)
-            if elem_size is None:
-                raise AnalysisError("dma.deslice dtype unsupported")
-            bytes_expr = numel * sp.Integer(elem_size)
-
-            _record_value_read(source, bytes_expr, value_keys, traffic_map)
-            op_index = len(op_costs)
-            _register_op_results(op, op_index, bytes_expr, value_keys, traffic_map)
-
-            op_costs.append(
-                KernelOpCost(
-                    op_index=op_index,
-                    op_name=op_name,
-                    compute=sp.Integer(0),
-                    read_bytes=bytes_expr,
-                    write_bytes=bytes_expr,
-                )
-            )
-            continue
-
-        if isinstance(op, (DmaAllocOp, DmaFreeOp)):
-            op_index = len(op_costs)
-            if len(op.results) > 0:
-                _register_op_results(op, op_index, sp.Integer(0), value_keys, traffic_map)
-            op_costs.append(
-                KernelOpCost(
-                    op_index=op_index,
-                    op_name=op_name,
-                    compute=sp.Integer(0),
-                    read_bytes=sp.Integer(0),
-                    write_bytes=sp.Integer(0),
                 )
             )
             continue
