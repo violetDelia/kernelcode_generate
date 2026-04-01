@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/dialect/symbol.md`](../../spec/dialect/symbol.md)
 - `test`：[`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)
 - `功能实现`：[`kernel_gen/dialect/symbol.py`](../../kernel_gen/dialect/symbol.py)
@@ -28,6 +28,7 @@
 - 提供从 memory type 读取单个维度或步幅并返回 symbol value 的查询接口，避免其他方言重复定义 `dim/stride -> value` 读取语义。
 - 为后续 `nn`、`dma`、`kernel`、`dsl` 等方言提供统一的符号值口径，避免每个方言各自维护一套符号标量表达。
 - 提供最小整数符号算术与比较接口，使 `!symbol.int<"expr">` 标量可在方言内完成基础加、减、乘、除、整除组合与相等/大小关系判断，而无需回退到其他算术方言。
+- 冻结 `symbol.gt` / `symbol.le` / `symbol.lt` / `symbol.ne` 与 `symbol.to_float` 的 dialect 合同，使上游 `a > b`、`a <= b`、`a < b`、`a != b` 与 `float(n)` 在进入 `symbol dialect` 后拥有稳定目标 op。
 - 提供 `!symbol.ptr<dtype>` 作为 DSL `Ptr(dtype)` 的最小 IR pointer type 载体，使函数签名 lowering 可以稳定表达“指向某个 pointee dtype 的指针输入”。
 - 保持类型表达尽量简单，优先服务开发者理解和方言间协同，而不是追求复杂的符号推导系统。
 - 本文件中的“符号值”指与 SSA value 绑定的单个整数值语义表达，可以是具名符号、整型表达式或整型常量，如 `N`、`M + 1`、`B * K`、`1`、`2`、`3`。
@@ -53,6 +54,7 @@
 - `!symbol.ptr<dtype>` 中的 `dtype` 必须是合法 `TypeAttribute`，且不得为 `!symbol.int<"...">`；当前不定义 `!symbol.ptr<!symbol.int<"...">>` 这类“指向 symbol.int”的 pointer carrier。
 - 当前最小算术/比较范围仅包含 `symbol.add`、`symbol.sub`、`symbol.mul`、`symbol.div`、`symbol.floordiv`、`symbol.eq`、`symbol.ne`、`symbol.lt`、`symbol.le`、`symbol.gt`、`symbol.ge`；不定义取模、按位运算、布尔逻辑组合、广播或张量级算术。
 - 当前仅定义 `symbol.to_int` 与 `symbol.to_float` 两类转换：`symbol.to_int` 将 `!symbol.int<"...">` 转为普通整型（覆盖各整型变体），`symbol.to_float` 将 `!symbol.int<"...">` 转为 `f32`；不定义反向转换或其他跨类型规则。
+- `symbol.ne` / `symbol.lt` / `symbol.le` / `symbol.gt` 属于同一 compare family：统一采用二元 `!symbol.int<"...">, !symbol.int<"..."> -> i1` 签名、统一 verifier 约束与统一 parse/print 规则，不能拆成互不一致的四套合同。
 - 当前不在 `symbol dialect` 中定义 `ptr.load`、`ptr.store`、pointer arithmetic、pointer compare、address cast 或任何基于 `symbol.ptr` 的 body-level 计算 op。
 
 ## 公开接口
@@ -328,6 +330,7 @@ SymbolPtrType(f32)
 - `symbol.eq` / `symbol.ne` 表示两个 `!symbol.int<"expr">` 标量的相等/不等比较。
 - `symbol.lt` / `symbol.le` / `symbol.gt` / `symbol.ge` 表示两个 `!symbol.int<"expr">` 标量的大小关系比较。
 - 比较结果统一表达 true/false 语义，结果类型固定为 `i1`。
+- 对 DSL 主链收口时，`a != b` 的目标 op 为 `symbol.ne`，`a < b` 的目标 op 为 `symbol.lt`，`a <= b` 的目标 op 为 `symbol.le`，`a > b` 的目标 op 为 `symbol.gt`。
 
 参数说明：
 
@@ -339,7 +342,10 @@ SymbolPtrType(f32)
 
 ```text
 %is_same = symbol.eq %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> i1
+%is_not_same = symbol.ne %m, %n : !symbol.int<"M">, !symbol.int<"N"> -> i1
 %is_less = symbol.lt %i, %end : !symbol.int<"i">, !symbol.int<"N"> -> i1
+%is_le = symbol.le %i, %end : !symbol.int<"i">, !symbol.int<"N"> -> i1
+%is_gt = symbol.gt %lhs, %rhs : !symbol.int<"M + 1">, !symbol.int<"N"> -> i1
 %is_last = symbol.ge %i, %limit : !symbol.int<"i">, !symbol.int<"N - 1"> -> i1
 ```
 
@@ -348,6 +354,8 @@ SymbolPtrType(f32)
 - `lhs` 与 `rhs` 必须都是 `!symbol.int<"expr">`；不接受普通整数、浮点、`index` 或其他 dialect 标量类型。
 - 结果类型固定为 `i1`，用于表达 true/false 语义；不允许结果继续保留为 `!symbol.int<"...">` 或其他非布尔类型。
 - 这组 op 只表达标量比较关系，不承担分支、短路逻辑、张量级比较、广播或控制流语义。
+- `symbol.ne` / `symbol.lt` / `symbol.le` / `symbol.gt` 必须共享同一 compare family 合同：输入类型、结果类型、错误边界与公开文本格式保持一致，不能把四个 op 拆成互不一致的规则。
+- 对 DSL 主链而言，`Unsupported symbol compare op` 不是 `symbol.ne` / `symbol.lt` / `symbol.le` / `symbol.gt` 的长期合理边界；这四个 op 已属于本方言的稳定公开合同。
 - verifier 只约束操作数类型、结果类型、op 名称对应的语义类别与 parse/print 稳定性；不要求在方言内证明两个符号表达式的数学关系是否恒真或恒假。
 - parse/print 必须稳定遵循 `symbol.<cmp> %lhs, %rhs : !symbol.int<"...">, !symbol.int<"..."> -> i1` 的公开文本形式。
 - 错误信息至少应包含具体 op 名称、失败原因以及出错操作数或结果类型。
@@ -397,6 +405,7 @@ SymbolPtrType(f32)
 
 - 定义 `symbol.to_float` op，用于将 `!symbol.int<"...">` 标量显式转换为 `f32`。
 - 该 op 仅负责类型转换，不做符号表达求值或简化。
+- 对 DSL 主链收口时，`float(n)` 的目标 op 为 `symbol.to_float`。
 
 参数说明：
 
@@ -414,6 +423,7 @@ SymbolPtrType(f32)
 - `source` 必须是 `!symbol.int<"...">`；不接受 `i32`、`index`、`f64` 或其他非 symbol 标量类型。
 - 结果类型固定为 `f32`，不支持 `f64`、`bf16` 或其他浮点宽度。
 - `symbol.to_float` 不引入新的符号表达式语义；仅在 IR 层完成类型转换表述。
+- 对 DSL 主链而言，`float(symbol.int)` 进入 `symbol dialect` 后的稳定落点是 `symbol.to_float`，而不是把该转换继续视为未定义边界。
 - parse/print 必须稳定遵循 `symbol.to_float %source : !symbol.int<"..."> -> f32` 的公开文本形式。
 - 错误信息至少应包含具体 op 名称与失败原因。
 
