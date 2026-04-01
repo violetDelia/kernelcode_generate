@@ -60,6 +60,7 @@ from kernel_gen.dialect.nn import (
     NnMulOp,
 )
 from kernel_gen.dialect.symbol import SymbolValueType
+from kernel_gen.analysis.analysis import analyze_kernel
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 pass_module = importlib.import_module("kernel_gen.passes.analysis.func_cost")
@@ -565,3 +566,36 @@ def test_func_cost_compare_i1_uses_predicate_size() -> None:
     _assert_expr_equal(op_cost.compute, expected_numel)
     _assert_expr_equal(op_cost.read_bytes, expected_numel * 2 * 4)
     _assert_expr_equal(op_cost.write_bytes, expected_numel * 2)
+
+
+# FC-010
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-01 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-01 00:00:00 +0800
+# 测试目的: 验证 func_cost pass 与 analyze_kernel 在同一 func 上复用同一统计结果。
+# 使用示例: pytest -q test/pass/test_analysis_func_cost.py -k test_func_cost_matches_analyze_kernel_on_same_func
+# 对应功能实现文件路径: kernel_gen/passes/analysis/func_cost.py
+# 对应 spec 文件路径: spec/pass/analysis/func_cost.md
+# 对应测试文件路径: test/pass/test_analysis_func_cost.py
+def test_func_cost_matches_analyze_kernel_on_same_func() -> None:
+    mem_type = _make_memory_type([StringAttr("A"), StringAttr("B")], f32, "global")
+    space = _make_space("global")
+
+    def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
+        add_op = NnAddOp(block.args[0], block.args[1], mem_type, space)
+        mul_op = NnMulOp(add_op.result, block.args[2], mem_type, space)
+        return [add_op, mul_op], mul_op.result
+
+    module, func_op, _ = _build_module([mem_type, mem_type, mem_type], mem_type, _builder)
+    pass_obj = AnalyzeFuncCostPass(dtype_size_overrides={"f32": 4})
+    pass_obj.run(module)
+
+    pass_summary = pass_obj.get_summary("main")
+    kernel_summary = analyze_kernel(func_op, dtype_size_overrides={"f32": 4})
+
+    assert pass_summary.op_costs == kernel_summary.op_costs
+    assert pass_summary.value_traffic == kernel_summary.value_traffic
+    _assert_expr_equal(pass_summary.total_compute, kernel_summary.total_compute)
+    _assert_expr_equal(pass_summary.total_read_bytes, kernel_summary.total_read_bytes)
+    _assert_expr_equal(pass_summary.total_write_bytes, kernel_summary.total_write_bytes)

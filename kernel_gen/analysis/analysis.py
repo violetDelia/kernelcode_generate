@@ -24,12 +24,30 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable as IterableABC
 from dataclasses import dataclass
 from typing import Iterable, Sequence
+import warnings
 
 import sympy as sp
+from xdsl.dialects import arith, func
+from xdsl.dialects.builtin import (
+    ArrayAttr,
+    BFloat16Type,
+    Float16Type,
+    Float32Type,
+    Float64Type,
+    IntAttr,
+    IntegerType,
+    StringAttr,
+)
+from xdsl.ir import Attribute, Operation, SSAValue
 
+from kernel_gen.dialect.dma import DmaAllocOp, DmaCopyOp, DmaDesliceOp, DmaFreeOp, DmaLoadOp, DmaSliceOp, DmaStoreOp
+from kernel_gen.dialect.nn import NnMemoryType
+from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 
 class AnalysisError(ValueError):
@@ -485,6 +503,56 @@ def _numel_from_mem_type(mem_type: NnMemoryType) -> sp.Basic | None:
     return _numel_from_shape(mem_type.shape)
 
 
+def _symbol_value_to_expr(value: SSAValue) -> sp.Basic | None:
+    """将 `!symbol.int` SSA value 转为 sympy 表达式。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 静态整数返回 Integer。
+    - 符号表达式返回对应 SymbolDim 符号。
+
+    使用示例:
+    - expr = _symbol_value_to_expr(op.sizes[0])
+
+    关联文件:
+    - spec: spec/analysis/analysis_kernel.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+    if not isinstance(value.type, SymbolValueType):
+        return None
+    return _to_symbol(value.type.get_value())
+
+
+def _numel_from_symbol_values(values: Sequence[SSAValue]) -> sp.Basic | None:
+    """将 `!symbol.int` operand 列表转为元素总数表达式。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 逐项转换为 sympy 表达式并相乘。
+    - 任一 operand 不是 `!symbol.int` 时返回 None。
+
+    使用示例:
+    - numel = _numel_from_symbol_values(op.sizes)
+
+    关联文件:
+    - spec: spec/analysis/analysis_kernel.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+    expr = sp.Integer(1)
+    for value in values:
+        dim_expr = _symbol_value_to_expr(value)
+        if dim_expr is None:
+            return None
+        expr = expr * dim_expr
+    return expr
+
+
 def _should_ignore_kernel_op(op: Operation) -> bool:
     """判断是否忽略 kernel 分析 op。
 
@@ -653,6 +721,37 @@ def _record_value_write(
         return
     traffic = traffic_map.setdefault(key, [sp.Integer(0), sp.Integer(0)])
     traffic[1] = traffic[1] + amount
+
+
+def _register_op_results(
+    op: Operation,
+    op_index: int,
+    write_bytes: sp.Basic,
+    value_keys: dict[SSAValue, str],
+    traffic_map: dict[str, list[sp.Basic]],
+) -> None:
+    """为 op 结果注册稳定 key，并记录写流量。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 统一生成 `op{idx}.result{n}` 形式的 value key。
+    - 将写流量累计到结果 value。
+
+    使用示例:
+    - _register_op_results(op, 0, bytes_expr, value_keys, traffic_map)
+
+    关联文件:
+    - spec: spec/analysis/analysis_kernel.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+    for result_index, result_value in enumerate(op.results):
+        key = f"op{op_index}.result{result_index}"
+        value_keys[result_value] = key
+        traffic_map.setdefault(key, [sp.Integer(0), sp.Integer(0)])
+        _record_value_write(result_value, write_bytes, value_keys, traffic_map)
 
 
 def _ensure_same_shape(lhs: Memory, rhs: Memory, message: str) -> None:
@@ -1003,11 +1102,7 @@ def analyze_kernel(
                 write_bytes = numel * sp.Integer(out_size)
 
             op_index = len(op_costs)
-            for result_index, result_value in enumerate(op.results):
-                key = f"op{op_index}.result{result_index}"
-                value_keys[result_value] = key
-                traffic_map.setdefault(key, [sp.Integer(0), sp.Integer(0)])
-                _record_value_write(result_value, write_bytes, value_keys, traffic_map)
+            _register_op_results(op, op_index, write_bytes, value_keys, traffic_map)
 
             op_costs.append(
                 KernelOpCost(
@@ -1063,11 +1158,7 @@ def analyze_kernel(
             _record_value_read(rhs, k_dim * n_dim * elem_size_expr, value_keys, traffic_map)
 
             op_index = len(op_costs)
-            for result_index, result_value in enumerate(op.results):
-                key = f"op{op_index}.result{result_index}"
-                value_keys[result_value] = key
-                traffic_map.setdefault(key, [sp.Integer(0), sp.Integer(0)])
-                _record_value_write(result_value, write_bytes, value_keys, traffic_map)
+            _register_op_results(op, op_index, write_bytes, value_keys, traffic_map)
 
             op_costs.append(
                 KernelOpCost(
@@ -1080,7 +1171,34 @@ def analyze_kernel(
             )
             continue
 
-        if op_name == "dma.load":
+        if isinstance(op, DmaCopyOp):
+            source = op.source
+            target = op.target
+            if not isinstance(source.type, NnMemoryType) or not isinstance(target.type, NnMemoryType):
+                raise AnalysisError("dma.copy source/target must be nn.memory")
+            numel = _numel_from_mem_type(source.type)
+            if numel is None:
+                raise AnalysisError("dma.copy shape unsupported")
+            elem_size = _element_size(source.type.element_type, overrides)
+            if elem_size is None:
+                raise AnalysisError("dma.copy dtype unsupported")
+            bytes_expr = numel * sp.Integer(elem_size)
+
+            _record_value_read(source, bytes_expr, value_keys, traffic_map)
+            _record_value_write(target, bytes_expr, value_keys, traffic_map)
+
+            op_costs.append(
+                KernelOpCost(
+                    op_index=len(op_costs),
+                    op_name=op_name,
+                    compute=sp.Integer(0),
+                    read_bytes=bytes_expr,
+                    write_bytes=bytes_expr,
+                )
+            )
+            continue
+
+        if isinstance(op, DmaLoadOp):
             if len(op.operands) < 1 or len(op.results) != 1:
                 raise AnalysisError("dma.load must have 1 result")
             source = op.operands[0]
@@ -1100,11 +1218,7 @@ def analyze_kernel(
 
             _record_value_read(source, bytes_expr, value_keys, traffic_map)
             op_index = len(op_costs)
-            for result_index, result_value in enumerate(op.results):
-                key = f"op{op_index}.result{result_index}"
-                value_keys[result_value] = key
-                traffic_map.setdefault(key, [sp.Integer(0), sp.Integer(0)])
-                _record_value_write(result_value, bytes_expr, value_keys, traffic_map)
+            _register_op_results(op, op_index, bytes_expr, value_keys, traffic_map)
 
             op_costs.append(
                 KernelOpCost(
@@ -1113,6 +1227,110 @@ def analyze_kernel(
                     compute=sp.Integer(0),
                     read_bytes=bytes_expr,
                     write_bytes=bytes_expr,
+                )
+            )
+            continue
+
+        if isinstance(op, DmaStoreOp):
+            source = op.source
+            target = op.target
+            if not isinstance(source.type, NnMemoryType) or not isinstance(target.type, NnMemoryType):
+                raise AnalysisError("dma.store source/target must be nn.memory")
+            numel = _numel_from_symbol_values(op.sizes)
+            if numel is None:
+                numel = _numel_from_mem_type(source.type)
+            if numel is None:
+                raise AnalysisError("dma.store sizes unsupported")
+            elem_size = _element_size(source.type.element_type, overrides)
+            if elem_size is None:
+                raise AnalysisError("dma.store dtype unsupported")
+            bytes_expr = numel * sp.Integer(elem_size)
+
+            _record_value_read(source, bytes_expr, value_keys, traffic_map)
+            _record_value_write(target, bytes_expr, value_keys, traffic_map)
+
+            op_costs.append(
+                KernelOpCost(
+                    op_index=len(op_costs),
+                    op_name=op_name,
+                    compute=sp.Integer(0),
+                    read_bytes=bytes_expr,
+                    write_bytes=bytes_expr,
+                )
+            )
+            continue
+
+        if isinstance(op, DmaSliceOp):
+            source = op.source
+            target = op.target
+            if not isinstance(source.type, NnMemoryType) or not isinstance(target.type, NnMemoryType):
+                raise AnalysisError("dma.slice source/target must be nn.memory")
+            numel = _numel_from_symbol_values(op.sizes)
+            if numel is None:
+                numel = _numel_from_mem_type(target.type)
+            if numel is None:
+                raise AnalysisError("dma.slice sizes unsupported")
+            elem_size = _element_size(source.type.element_type, overrides)
+            if elem_size is None:
+                raise AnalysisError("dma.slice dtype unsupported")
+            bytes_expr = numel * sp.Integer(elem_size)
+
+            _record_value_read(source, bytes_expr, value_keys, traffic_map)
+            _record_value_write(target, bytes_expr, value_keys, traffic_map)
+
+            op_costs.append(
+                KernelOpCost(
+                    op_index=len(op_costs),
+                    op_name=op_name,
+                    compute=sp.Integer(0),
+                    read_bytes=bytes_expr,
+                    write_bytes=bytes_expr,
+                )
+            )
+            continue
+
+        if isinstance(op, DmaDesliceOp):
+            source = op.source
+            if not isinstance(source.type, NnMemoryType):
+                raise AnalysisError("dma.deslice source must be nn.memory")
+            if len(op.results) != 1 or not isinstance(op.result.type, NnMemoryType):
+                raise AnalysisError("dma.deslice result must be nn.memory")
+            numel = _numel_from_symbol_values(op.sizes)
+            if numel is None:
+                numel = _numel_from_mem_type(source.type)
+            if numel is None:
+                raise AnalysisError("dma.deslice sizes unsupported")
+            elem_size = _element_size(source.type.element_type, overrides)
+            if elem_size is None:
+                raise AnalysisError("dma.deslice dtype unsupported")
+            bytes_expr = numel * sp.Integer(elem_size)
+
+            _record_value_read(source, bytes_expr, value_keys, traffic_map)
+            op_index = len(op_costs)
+            _register_op_results(op, op_index, bytes_expr, value_keys, traffic_map)
+
+            op_costs.append(
+                KernelOpCost(
+                    op_index=op_index,
+                    op_name=op_name,
+                    compute=sp.Integer(0),
+                    read_bytes=bytes_expr,
+                    write_bytes=bytes_expr,
+                )
+            )
+            continue
+
+        if isinstance(op, (DmaAllocOp, DmaFreeOp)):
+            op_index = len(op_costs)
+            if len(op.results) > 0:
+                _register_op_results(op, op_index, sp.Integer(0), value_keys, traffic_map)
+            op_costs.append(
+                KernelOpCost(
+                    op_index=op_index,
+                    op_name=op_name,
+                    compute=sp.Integer(0),
+                    read_bytes=sp.Integer(0),
+                    write_bytes=sp.Integer(0),
                 )
             )
             continue

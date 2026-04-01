@@ -1,7 +1,7 @@
 """symbol dialect tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 symbol dialect 的整数符号 attribute/type、verifier、parse/print 与错误路径。
@@ -11,7 +11,7 @@
 
 覆盖率:
 - 覆盖率命令: pytest -q --cov=kernel_gen.dialect.symbol --cov-report=term-missing test/dialect/test_symbol_dialect.py
-- 覆盖率结果: 97%（2026-03-23 02:46:56 +0800）
+- 覆盖率结果: 80%（2026-04-01 09:35:37 +0800）
 
 关联文件:
 - 功能实现: kernel_gen/dialect/symbol.py
@@ -58,6 +58,7 @@ from kernel_gen.dialect.symbol import (
     SymbolSubOp,
     SymbolToIntOp,
     SymbolToFloatOp,
+    SymbolPtrType,
     SymbolValueType,
 )
 from kernel_gen.symbol_variable.memory import Memory
@@ -772,6 +773,70 @@ def test_symbol_to_int_rejects_invalid_types() -> None:
         SymbolToIntOp(symbol_value, f32).verify()
     with pytest.raises(VerifyException, match="symbol.to_int result type must be integer"):
         SymbolToIntOp(symbol_value, IndexType()).verify()
+
+
+# TC-SYM-045
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-01 09:35:37 +0800
+# 最近一次运行成功时间: 2026-04-01 09:35:37 +0800
+# 测试目的: 验证 `SymbolPtrType` 的基础合法路径：构造/解析 `!symbol.ptr<dtype>` 均可通过 verifier。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_ptr_type_verify_success() -> None:
+    ctx = _build_context()
+
+    ty = SymbolPtrType(f32)
+    ty.verify()
+    assert _print_attr(ty) == "!symbol.ptr<f32>"
+
+    parsed = Parser(ctx, "!symbol.ptr<f32>").parse_attribute()
+    assert isinstance(parsed, SymbolPtrType)
+    parsed.verify()
+    assert _print_attr(parsed) == "!symbol.ptr<f32>"
+
+
+# TC-SYM-046
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-01 09:35:37 +0800
+# 最近一次运行成功时间: 2026-04-01 09:35:37 +0800
+# 测试目的: 验证 `!symbol.ptr<dtype>` 文本语法的 parse/print round-trip 稳定性。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_ptr_type_round_trip() -> None:
+    ctx = _build_context()
+    for text in ["!symbol.ptr<f32>", "!symbol.ptr<i32>"]:
+        ty = Parser(ctx, text).parse_attribute()
+        assert isinstance(ty, SymbolPtrType)
+        ty.verify()
+        assert _print_attr(ty) == text
+
+
+# TC-SYM-047
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-01 09:35:37 +0800
+# 最近一次运行成功时间: 2026-04-01 09:35:37 +0800
+# 测试目的: 验证 `!symbol.int<\"...\">` 作为 `!symbol.ptr<dtype>` 的 dtype 必须被拒绝。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_ptr_type_rejects_symbol_value_dtype() -> None:
+    with pytest.raises(VerifyException, match="symbol\\.ptr dtype must not be symbol\\.int"):
+        SymbolPtrType(SymbolValueType.from_expr("N")).verify()
+
+
+# TC-SYM-048
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-01 09:35:37 +0800
+# 最近一次运行成功时间: 2026-04-01 09:35:37 +0800
+# 测试目的: 验证非 `TypeAttribute` 作为 dtype 必须被 verifier 拒绝。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_ptr_type_rejects_non_type_dtype() -> None:
+    with pytest.raises(VerifyException, match="symbol\\.ptr dtype must be type"):
+        SymbolPtrType(StringAttr("not_type")).verify()
 
 
 # TC-SYM-026

@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/dsl/emit_c.md`](../../spec/dsl/emit_c.md)
 - `功能实现`：[`kernel_gen/dsl/emit_c.py`](../../kernel_gen/dsl/emit_c.py)
 - `test`：[`test/dsl/test_emit_c.py`](../../test/dsl/test_emit_c.py)
@@ -25,7 +25,7 @@
 
 - 为常见算术、比较、控制流与访存 op 提供稳定的节点级源码片段生成规则。
 - 保证同一 SSA value 在同一 `EmitCContext` 中具备稳定命名与稳定表达式输出。
-- 为后续实现恢复明确最小支持范围：`arith` 二元算术、`arith.cmpi`、`scf.for`、unit-tile `dma.load`/`dma.store`、`symbol.add`（cpu 标量）与错误路径。
+- 为后续实现恢复明确最小支持范围：`arith` 二元算术、`arith.cmpi`、`scf.for`、`symbol.for`、unit-tile `dma.load`/`dma.store`、`dma.alloc`/`dma.view`/`dma.slice`/`dma.deslice`、`symbol.add`（cpu 标量）、`nn.img2col2d`（cpu memory）与错误路径。
 
 ## 限制与边界
 
@@ -34,7 +34,10 @@
 - 不负责 AST 解析、MLIR 构造、优化、文件写盘、编译、链接或运行。
 - 同一接口可针对不同 `target` 生成不同源码，但参数与错误语义必须稳定。
 - 对于无法映射的 op、value 依赖、类型或控制流，必须明确报错，不能静默忽略或降级。
-- 仅新增 `symbol.add` 的 cpu 标量支持；其余 `symbol.*` 仍按不支持处理。
+- 仅新增 `symbol.add` 与 `symbol.for` 的 `target=cpu` 支持；其余 `symbol.*` 仍按不支持处理。
+- 本阶段补齐 `dma.alloc`/`dma.view`/`dma.slice`/`dma.deslice` 与 `nn.img2col2d` 的节点级 CPU 文本映射，用于 conv 链路最小闭环；语义范围以本规范与测试用例为准。
+- `dma.slice`/`dma.deslice` 当前仅支持发射显式 loop nest copy；不得生成 `slice(`/`deslice(` helper 调用，避免引入未声明依赖。
+- 对于需要 backing storage 的 memory（例如 `dma.alloc` 结果、`nn.img2col2d` 结果），当前仅支持**静态** shape（type.shape 全为 `IntAttr`）；动态 shape 必须报错，避免 `new[]` 生命周期不明确导致泄漏。
 - 当 value 类型为 `!symbol.int<"...">` 时，`target=cpu` 默认映射为 `long long`。
 - 当前规范恢复范围仅覆盖 `test/dsl/test_emit_c.py` 已定义的用例映射，不在本阶段扩展到其他 dialect/op。
 
@@ -95,8 +98,13 @@ stmt = emit_c_op(op, EmitCContext(target="cpu"))
 
 - 有副作用 op 与控制流 op 必须保留 IR 顺序语义。
 - `scf.for` 必须生成完整循环语句块。
+- `symbol.for` 必须生成与 `scf.for` 同风格的循环语句块，并过滤循环体中的空语句（例如常量 op 产生的空行）。
 - 当前恢复范围下，unit-tile `dma.load`/`dma.store` 必须保留索引顺序与读写方向。
 - `target=cpu` 下 `symbol.add` 必须生成与二元算术等价的赋值语句。
+- `target=cpu` 下 `dma.alloc` 必须生成 `shape/stride` 数组与 `Memory<T>` 声明；并为静态 shape 生成 backing buffer。
+- `target=cpu` 下 `dma.view` 必须生成 `offset` 计算，并生成基于源 memory 的视图声明（复用 format/space）。
+- `target=cpu` 下 `dma.slice`/`dma.deslice` 必须发射显式 loop nest copy，避免依赖外部 helper。
+- `target=cpu` 下 `nn.img2col2d` 必须声明输出 memory（含 backing storage）并发射 `cpu::img2col2d(...)` 调用。
 
 返回与限制：
 
@@ -148,6 +156,8 @@ expr = emit_c_value(value, EmitCContext(target="cpu"))
 - 验证 `EmitCContext` 下 SSA 命名与表达式生成的一致性。
 - 验证不支持 op 与非法 value 依赖的错误路径。
 - 验证 `symbol.add` 仅允许 `target=cpu`；非 cpu target 必须明确报错。
+- 验证 `symbol.for`、`dma.alloc/view/slice/deslice` 与 `nn.img2col2d` 的最小 CPU 发射闭环，并锁定输出文本不引入 `slice/deslice` helper 与 `nullptr`。
+- 验证重复 `dma.slice/dma.deslice` 发射时辅助变量名保持唯一，避免同一作用域命名冲突。
 
 ### 功能与用例清单
 
@@ -160,3 +170,6 @@ expr = emit_c_value(value, EmitCContext(target="cpu"))
 - EC-006：非法 value 依赖生成时报错。（`test_emit_c_value_rejects_invalid_dependency`）
 - EC-007：`symbol.add` 在 cpu target 下可生成标量赋值语句与右值表达式。（`test_emit_c_op_lowers_symbol_add`）
 - EC-008：非 cpu target 下 `symbol.add` 必须报错，禁止跨 target 误下发。（`test_emit_c_op_rejects_symbol_add_on_non_cpu`）
+- EC-009：`dma.alloc`/`dma.view` 在 cpu target 下可生成最小 CPU 文本片段。（`test_emit_c_op_lowers_dma_alloc_and_view`）
+- EC-010：`symbol.for + dma.alloc + dma.slice + nn.img2col2d + dma.deslice` 链路可发射稳定 CPU 文本片段，且不引入 `slice/deslice` helper 与 `nullptr`。（`test_emit_c_op_lowers_img2col2d_dma_loop_pipeline`）
+- EC-011：重复 `dma.slice/dma.deslice` 发射时辅助变量名必须保持唯一。（`test_emit_c_op_assigns_unique_helper_names_for_repeated_dma_slice_and_deslice`）

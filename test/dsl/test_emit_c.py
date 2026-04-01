@@ -1,7 +1,7 @@
 """emit_c tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 emit_c 节点级源码片段生成与错误路径。
@@ -27,7 +27,7 @@ import sys
 
 import pytest
 from xdsl.dialects import arith, func, scf
-from xdsl.dialects.builtin import ArrayAttr, DenseIntOrFPElementsAttr, FloatAttr, IndexType, IntAttr, IntegerAttr, TensorType, f32, i32
+from xdsl.dialects.builtin import ArrayAttr, DenseIntOrFPElementsAttr, FloatAttr, IndexType, IntAttr, IntegerAttr, StringAttr, TensorType, f32, i32
 from xdsl.ir import Block
 from xdsl.irdl import IRDLOperation, irdl_op_definition, result_def
 
@@ -35,10 +35,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dialect.dma import DmaLoadOp, DmaStoreOp
-from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolAddOp, SymbolValueType
+from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp, DmaViewOp
+from kernel_gen.dialect.nn import NnImg2col2dOp, NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.symbol import SymbolAddOp, SymbolForOp, SymbolValueType
+from kernel_gen.dsl.ast import BlockAST, ConstAST, ForAST, FunctionAST, Img2ColAST, LoadAST, ScalarArgAST, StoreAST, TensorAST, VarAST
 from kernel_gen.dsl.emit_c import EmitCContext, EmitCError, emit_c_op, emit_c_value
+from kernel_gen.dsl.mlir_gen import build_func_op_from_ast
+from kernel_gen.symbol_variable.memory import Memory, MemorySpace, NumericType
 
 
 @irdl_op_definition
@@ -54,20 +57,26 @@ def _ctx() -> EmitCContext:
     return EmitCContext(target="cpu")
 
 
-def _make_memory_type(shape: list[int], stride: list[int], space: str = "global") -> NnMemoryType:
+def _make_memory_type(
+    shape: list[int],
+    stride: list[int],
+    space: str = "global",
+    *,
+    element_type: object = i32,
+) -> NnMemoryType:
     return NnMemoryType(
         ArrayAttr([IntAttr(dim) for dim in shape]),
         ArrayAttr([IntAttr(dim) for dim in stride]),
-        i32,
+        element_type,
         NnMemorySpaceAttr.from_name(space),
     )
 
 
 # EC-001
 # 创建者: 金铲铲大作战
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
-# 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-01 10:43:06 +0800
+# 最近一次运行成功时间: 2026-04-01 10:43:06 +0800
 # 功能说明: 验证算术 op 可生成赋值语句。
 # 测试目的: 验证 emit_c_op 可把 addi 生成为右值赋值语句。
 # 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_op_lowers_arith_add
@@ -134,12 +143,19 @@ def test_emit_c_op_lowers_arith_add() -> None:
         emit_c_op(op, ctx_bad_naming)
     assert "unsupported naming strategy" in str(exc_info.value)
 
+    float_block = Block(arg_types=[f32, f32])
+    float_ctx = _ctx()
+    float_ctx.bind_name(float_block.args[0], "flhs")
+    float_ctx.bind_name(float_block.args[1], "frhs")
+    float_add = arith.AddfOp(float_block.args[0], float_block.args[1])
+    assert emit_c_op(float_add, float_ctx) == "float v0 = (flhs + frhs);"
+
 
 # EC-002
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
-# 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
+# 最近一次运行测试时间: 2026-04-01 10:43:06 +0800
+# 最近一次运行成功时间: 2026-04-01 10:43:06 +0800
 # 功能说明: 验证比较 value 可生成比较表达式。
 # 测试目的: 验证 emit_c_value 可把 cmpi 结果生成为布尔表达式。
 # 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_value_lowers_compare
@@ -342,7 +358,7 @@ def test_emit_c_op_lowers_memory_access() -> None:
 
 # EC-005
 # 创建者: 金铲铲大作战
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
 # 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
 # 功能说明: 验证不支持 op 时抛出带 op 名称的错误。
@@ -358,8 +374,13 @@ def test_emit_c_op_rejects_unsupported_op() -> None:
 
     assert "test.unsupported" in str(exc_info.value)
 
-    block = Block(arg_types=[f32, f32])
-    op = arith.AddfOp(block.args[0], block.args[1])
+    bad_memory = NnMemoryType(
+        ArrayAttr([IntAttr(1)]),
+        ArrayAttr([IntAttr(1)]),
+        TensorType(i32, [2]),
+        NnMemorySpaceAttr.from_name("global"),
+    )
+    op = DmaAllocOp([], bad_memory)
     with pytest.raises(EmitCError) as exc_info:
         emit_c_op(op, _ctx())
     assert "unsupported type" in str(exc_info.value)
@@ -436,3 +457,208 @@ def test_emit_c_op_rejects_symbol_add_on_non_cpu() -> None:
 
     with pytest.raises(EmitCError, match="symbol scalar ops are cpu-only"):
         emit_c_value(op.result, ctx)
+
+
+# EC-009
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-01 10:43:06 +0800
+# 最近一次运行成功时间: 2026-04-01 10:43:06 +0800
+# 功能说明: 验证 emit_c 可生成 dma.alloc/dma.view 的最小 CPU 文本片段。
+# 测试目的: 锁定 tile-local buffer 分配与子视图重解释的节点级映射，避免 conv 主线在 alloc/view 处提前失败。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_op_lowers_dma_alloc_and_view
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_op_lowers_dma_alloc_and_view() -> None:
+    alloc_type = _make_memory_type([2, 3], [3, 1], space="shared", element_type=f32)
+    alloc = DmaAllocOp([], alloc_type)
+
+    alloc_stmt = emit_c_op(alloc, _ctx())
+
+    assert alloc_stmt == (
+        "long long v0_shape[2] = {2, 3};\n"
+        "long long v0_stride[2] = {3, 1};\n"
+        "float v0_buffer[6] = {};\n"
+        "Memory<float> v0(v0_buffer, 2, v0_shape, v0_stride, MemoryFormat::Norm, MemorySpace::SM);"
+    )
+
+    dyn_shape0 = SymbolValueType.from_expr("N")
+    dyn_shape1 = SymbolValueType.from_expr("3")
+    dyn_block = Block(arg_types=[dyn_shape0, dyn_shape1])
+    dyn_ctx = _ctx()
+    dyn_ctx.bind_name(dyn_block.args[0], "N")
+    dyn_ctx.bind_name(dyn_block.args[1], "c3")
+    dyn_alloc_type = NnMemoryType(
+        ArrayAttr([StringAttr("N"), IntAttr(3)]),
+        ArrayAttr([IntAttr(3), IntAttr(1)]),
+        f32,
+        NnMemorySpaceAttr.from_name("shared"),
+    )
+    dyn_alloc = DmaAllocOp([dyn_block.args[0], dyn_block.args[1]], dyn_alloc_type)
+    with pytest.raises(EmitCError, match="dynamic shape backing is unsupported"):
+        emit_c_op(dyn_alloc, dyn_ctx)
+
+    source_type = _make_memory_type([2, 2], [2, 1], element_type=f32)
+    view_type = _make_memory_type([2, 2], [1, 1], element_type=f32)
+    block = Block(arg_types=[source_type])
+    ctx = _ctx()
+    ctx.bind_name(block.args[0], "source")
+    c0 = arith.ConstantOp(IntegerAttr(0, i32))
+    c1 = arith.ConstantOp(IntegerAttr(1, i32))
+    c2 = arith.ConstantOp(IntegerAttr(2, i32))
+    view = DmaViewOp(
+        block.args[0],
+        [c0.result, c0.result],
+        [c2.result, c2.result],
+        [c1.result, c1.result],
+        view_type,
+    )
+
+    view_stmt = emit_c_op(view, ctx)
+
+    assert view_stmt == (
+        "long long view_offset0 = (0 * source.stride()[0]) + (0 * source.stride()[1]);\n"
+        "long long v0_shape[2] = {2, 2};\n"
+        "long long v0_stride[2] = {1, 1};\n"
+        "Memory<float> v0(const_cast<float*>(source.data()) + view_offset0, 2, v0_shape, v0_stride, source.format(), source.space());"
+    )
+
+
+# EC-010
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-01 10:43:06 +0800
+# 最近一次运行成功时间: 2026-04-01 10:43:06 +0800
+# 功能说明: 验证 emit_c 可生成 symbol.for + dma.alloc + dma.slice + nn.img2col2d + dma.deslice 的真实链路片段。
+# 测试目的: 锁定 conv_cpu_tiled_v1 P10 的最小节点级闭环，确保 img2col2d 与 DMA 协同路径在 CPU emitter 可落到稳定文本。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_op_lowers_img2col2d_dma_loop_pipeline
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_op_lowers_img2col2d_dma_loop_pipeline() -> None:
+    input_memory = Memory([1, 1, 4, 4], NumericType.Float32, space=MemorySpace.GM)
+    output_memory = Memory([1, 4, 9], NumericType.Float32, space=MemorySpace.GM)
+    input_tensor = TensorAST(name="x", memory=input_memory, location=None)
+    output_tensor = TensorAST(name="y", memory=output_memory, location=None)
+    start = ScalarArgAST(name="start", value_type=int, is_symbolic=True, location=None)
+    end = ScalarArgAST(name="end", value_type=int, is_symbolic=True, location=None)
+    step = ScalarArgAST(name="step", value_type=int, is_symbolic=True, location=None)
+    loop_var = VarAST(name="i", location=None)
+    slice_expr = LoadAST(
+        tensor=input_tensor,
+        offset=[loop_var, ConstAST(0), ConstAST(0), ConstAST(0)],
+        stride=None,
+        sizes=[ConstAST(1), ConstAST(1), ConstAST(4), ConstAST(4)],
+        space=MemorySpace.LM,
+        kind="slice",
+        location=None,
+    )
+    img2col_expr = Img2ColAST(
+        kind="img2col2d",
+        args=[slice_expr],
+        kwargs={"kh": ConstAST(2), "kw": ConstAST(2)},
+        location=None,
+    )
+    store_expr = StoreAST(
+        tensor=output_tensor,
+        offset=[loop_var, ConstAST(0), ConstAST(0)],
+        stride=None,
+        value=img2col_expr,
+        kind="deslice",
+        location=None,
+    )
+    loop = ForAST(var=loop_var, start=start, end=end, step=step, body=BlockAST([store_expr]), location=None)
+    func_ast = FunctionAST(
+        name="img2col_loop",
+        inputs=[input_tensor, output_tensor, start, end, step],
+        outputs=[],
+        body=BlockAST([loop]),
+    )
+
+    func_op = build_func_op_from_ast(func_ast)
+    loop_op = next(op for op in func_op.body.block.ops if isinstance(op, SymbolForOp))
+    ctx = _ctx()
+    ctx.bind_name(func_op.args[0], "input")
+    ctx.bind_name(func_op.args[1], "output")
+    ctx.bind_name(func_op.args[2], "start")
+    ctx.bind_name(func_op.args[3], "end")
+    ctx.bind_name(func_op.args[4], "step")
+
+    stmt = emit_c_op(loop_op, ctx)
+
+    assert "for (long long i0 = start; i0 < end; i0 += step) {" in stmt
+    assert "float v1_buffer[16] = {};" in stmt
+    assert "Memory<float> v1(v1_buffer, 4, v1_shape, v1_stride, MemoryFormat::Norm, MemorySpace::LM);" in stmt
+    assert "v1.at(dma0_dst_indices) = input.at(dma0_src_indices);" in stmt
+    assert "float v2_buffer[36] = {};" in stmt
+    assert "Memory<float> v2(v2_buffer, 3, v2_shape, v2_stride, MemoryFormat::Norm, MemorySpace::LM);" in stmt
+    assert "cpu::img2col2d(v1, v2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0);" in stmt
+    assert "output.at(dma1_dst_indices) = v2.at(dma1_src_indices);" in stmt
+    assert "slice(" not in stmt
+    assert "deslice(" not in stmt
+    assert "nullptr" not in stmt
+
+
+# EC-011
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-01 10:43:06 +0800
+# 最近一次运行成功时间: 2026-04-01 10:43:06 +0800
+# 功能说明: 验证重复 dma.slice/dma.deslice 发射时辅助变量名保持唯一。
+# 测试目的: 防止同一作用域内重复生成同名索引缓冲区导致编译失败。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_op_assigns_unique_helper_names_for_repeated_dma_slice_and_deslice
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_op_assigns_unique_helper_names_for_repeated_dma_slice_and_deslice() -> None:
+    memory_type = _make_memory_type([2, 2], [2, 1], element_type=f32)
+    block = Block(arg_types=[memory_type, memory_type])
+    ctx = _ctx()
+    ctx.bind_name(block.args[0], "source")
+    ctx.bind_name(block.args[1], "target")
+    c0 = arith.ConstantOp(IntegerAttr(0, i32))
+    c1 = arith.ConstantOp(IntegerAttr(1, i32))
+    c2 = arith.ConstantOp(IntegerAttr(2, i32))
+    slice0 = DmaSliceOp(
+        block.args[1],
+        block.args[0],
+        [c0.result, c0.result],
+        [c2.result, c2.result],
+        [c1.result, c1.result],
+    )
+    slice1 = DmaSliceOp(
+        block.args[1],
+        block.args[0],
+        [c0.result, c0.result],
+        [c2.result, c2.result],
+        [c1.result, c1.result],
+    )
+    deslice0 = DmaDesliceOp(
+        block.args[0],
+        block.args[1],
+        [c0.result, c0.result],
+        [c2.result, c2.result],
+        [c1.result, c1.result],
+        memory_type,
+    )
+    deslice1 = DmaDesliceOp(
+        block.args[0],
+        block.args[1],
+        [c0.result, c0.result],
+        [c2.result, c2.result],
+        [c1.result, c1.result],
+        memory_type,
+    )
+
+    slice_stmt0 = emit_c_op(slice0, ctx)
+    slice_stmt1 = emit_c_op(slice1, ctx)
+    deslice_stmt0 = emit_c_op(deslice0, ctx)
+    deslice_stmt1 = emit_c_op(deslice1, ctx)
+
+    assert "dma0_src_indices" in slice_stmt0
+    assert "dma1_src_indices" in slice_stmt1
+    assert "dma0_src_indices" not in slice_stmt1
+    assert "dma2_src_indices" in deslice_stmt0
+    assert "dma3_src_indices" in deslice_stmt1
+    assert "dma2_src_indices" not in deslice_stmt1

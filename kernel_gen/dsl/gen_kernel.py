@@ -1,7 +1,7 @@
 """Function-level C-like kernel generation helpers.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 按 `emit_c` 的节点级规则，组装 `func.func` 的完整函数源码。
@@ -22,7 +22,7 @@ from __future__ import annotations
 from typing import Any
 
 from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, DictionaryAttr, IntegerType, IndexType, StringAttr
+from xdsl.dialects.builtin import ArrayAttr, DictionaryAttr, Float32Type, Float64Type, IntegerType, IndexType, StringAttr
 
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolValueType
@@ -54,10 +54,44 @@ def _extract_arg_names(func_op: func.FuncOp) -> list[str]:
 
 
 def _type_to_c(attr: Any) -> str:
+    """将 xdsl Attribute 映射为 C 侧类型名。
+
+    创建者: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 用于 `gen_signature` 生成函数签名时，将 IR 类型属性转换为 C/C++ 侧可用类型名。
+    - 支持的类型映射清单：
+      - `IntegerType(1)` -> `bool`
+      - `IntegerType(N)` -> `int{N}_t`
+      - `Float32Type` -> `float`
+      - `Float64Type` -> `double`
+      - `IndexType` -> `long long`
+      - `NnMemoryType<T>` -> `Memory<...>`（递归映射 `element_type`）
+      - `SymbolValueType` -> `long long`
+    - 若遇到不支持类型，将抛出 `TypeError("unsupported type: ...")`。
+
+    使用示例:
+    - from xdsl.dialects.builtin import ArrayAttr, IntAttr, f32, f64
+    - from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
+    - assert _type_to_c(f32) == "float"
+    - assert _type_to_c(f64) == "double"
+    - mem_f64 = NnMemoryType(ArrayAttr([IntAttr(2)]), ArrayAttr([IntAttr(1)]), f64, NnMemorySpaceAttr.from_name("global"))
+    - assert _type_to_c(mem_f64) == "Memory<double>"
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: kernel_gen/dsl/gen_kernel.py
+    """
     if isinstance(attr, IntegerType):
         if attr.width.data == 1:
             return "bool"
         return f"int{attr.width.data}_t"
+    if isinstance(attr, Float32Type):
+        return "float"
+    if isinstance(attr, Float64Type):
+        return "double"
     if isinstance(attr, IndexType):
         return "long long"
     if isinstance(attr, NnMemoryType):

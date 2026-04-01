@@ -1070,8 +1070,8 @@ def test_build_func_op_supports_dma_helper_calls() -> None:
 # MGEN-036
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-01 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-01 00:00:00 +0800
+# 最近一次运行测试时间: 2026-04-01 13:15:49 +0800
+# 最近一次运行成功时间: 2026-04-01 13:15:49 +0800
 # 功能说明: 验证 build_func_op 支持 img2col1d helper 并可被 -k 'img2col' 稳定选中。
 # 测试目的: 验证 img2col1d 会 lowering 为 nn.img2col1d，且返回类型与注解一致，避免 img2col gate 过滤命令 exit 5。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_img2col1d_helper_call
@@ -1099,8 +1099,8 @@ def test_build_func_op_supports_img2col1d_helper_call() -> None:
 # MGEN-036A
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-01 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-01 00:00:00 +0800
+# 最近一次运行测试时间: 2026-04-01 13:15:49 +0800
+# 最近一次运行成功时间: 2026-04-01 13:15:49 +0800
 # 功能说明: 验证 build_func_op 支持 img2col2d helper 并可被 -k 'img2col' 稳定选中。
 # 测试目的: 验证 img2col2d 会 lowering 为 nn.img2col2d，且返回类型与注解一致，避免 img2col gate 过滤命令 exit 5。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_img2col2d_helper_call
