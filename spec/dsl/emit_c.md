@@ -10,7 +10,7 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`jcc你莫辜负`
 - `spec`：[`spec/dsl/emit_c.md`](../../spec/dsl/emit_c.md)
 - `功能实现`：[`kernel_gen/dsl/emit_c.py`](../../kernel_gen/dsl/emit_c.py)
 - `test`：[`test/dsl/test_emit_c.py`](../../test/dsl/test_emit_c.py)
@@ -27,6 +27,7 @@
 - 为常见算术、比较、控制流与访存 op 提供稳定的节点级源码片段生成规则。
 - 保证同一 SSA value 在同一 `EmitCContext` 中具备稳定命名与稳定表达式输出。
 - 为后续实现恢复明确最小支持范围：`arith` 二元算术、`arith.cmpi`、`scf.for`、`symbol.for`、unit-tile `dma.load`/`dma.store`、`dma.alloc`/`dma.view`/`dma.slice`/`dma.deslice`、`symbol.add`（cpu 标量）、`nn.img2col2d`（cpu memory）、`nn.add`（cpu，需预绑定结果目标）与错误路径。
+- 为 `target="npu_demo"` 冻结节点级文本映射合同，明确 `KernelContext` 查询、`TSM/TLM` dynamic memory、`view/slice/deslice/add` 在节点层的稳定发射形态，供后续实现与 `gen_kernel` 骨架拼装收口。
 
 ## 限制与边界
 
@@ -44,6 +45,9 @@
 - 对于需要 backing storage 的 memory（例如 `dma.alloc` 结果、`nn.img2col2d` 结果），当前仅支持**静态** shape（type.shape 全为 `IntAttr`）；动态 shape 必须报错，避免 `new[]` 生命周期不明确导致泄漏。
 - 当 value 类型为 `!symbol.int<"...">` 时，`target=cpu` 默认映射为 `long long`。
 - 当前 `test/dsl/test_emit_c.py` 已定义并可直接映射的用例范围以本节 `EC-001` ~ `EC-011` 为准；`EC-012` ~ `EC-016` 在本阶段仅冻结为 `nn.add` 的节点级验收标准，待下游测试落地后再补具体测试映射。
+- 对 `target=npu_demo`，本层只冻结节点级文本映射，不定义完整函数签名或 `npu_demo::KernelContext& ctx` 的参数注入方式；上层 `gen_kernel` 需提供稳定上下文变量名 `ctx`，本层只消费该绑定。
+- 对 `target=npu_demo`，当前只承认 `thread_id/thread_num` 查询、`TSM/TLM` dynamic memory、`view/slice/deslice/add` 的成功发射路径；不得回退到 `source.view<T>(...)`、`load<...>`、`store<...>`、`launch`、`barrier` 或 `arch.launch_kernel`。
+- 当前 CPU 恢复范围继续以 `test/dsl/test_emit_c.py` 已定义用例为准；`target=npu_demo` 的专项验收目标先行冻结，留待后续实现阶段补齐对应测试。
 
 ## 公开接口
 
@@ -257,6 +261,121 @@ cpu::img2col2d(input_tile, col_tile, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr);
 - `input_tile` 与 `col_tile` 都是节点级 `Memory<T>` 引用；`col_tile` 可来自前序 `dma.alloc`，不得在本层改写为其他 helper 或 `kernel dialect` 中转。
 - `nn.img2col2d` 只负责当前节点的 tile-local 展开语句，不负责固定 tile 常量、外层分块循环或最终 `out` 写回。
 
+## npu_demo 节点级发射规则
+
+### 适用范围
+
+- 以下规则仅适用于 `target=npu_demo`，且只定义单个查询/访存/算子节点如何发成 body-level kernel 内部的局部文本片段。
+- 本层不声明 `npu_demo::KernelContext` 局部变量，也不定义完整函数签名；上层 `gen_kernel` 必须提供已绑定的上下文变量名 `ctx`，本层只负责引用 `ctx.thread_id()`、`ctx.thread_num()` 与 `ctx.get_dynamic_memory<T>(...)`。
+- 本层当前只收口 `thread_id/thread_num` 查询、`TSM/TLM` dynamic memory、`view`、目标式 `slice`、`deslice` 与 `add`。
+- 本层不得回退到 CPU 风格 `.view<T>()`、`load<...>`、`store<...>`、显式 loop nest copy、`launch`、`barrier` 或 `arch.launch_kernel`。
+
+### `arch.get_thread_id` / `arch.get_thread_num`
+
+功能说明：
+
+- 当节点表示 thread 维度查询时，必须发射为对当前上下文 `ctx` 的直接查询。
+
+使用示例：
+
+```cpp
+long long tid = ctx.thread_id();
+long long tnum = ctx.thread_num();
+```
+
+注意事项：
+
+- `thread_id` 与 `thread_num` 的目标文本必须分别收敛为 `ctx.thread_id()` 与 `ctx.thread_num()`。
+- 本层只负责节点级查询表达式或赋值语句，不在此处声明 `npu_demo::KernelContext& ctx` 签名。
+
+### `arch.get_dynamic_memory(memory_space)`
+
+功能说明：
+
+- 当节点表示 `npu_demo` 的 dynamic memory 查询时，必须发射为 `ctx.get_dynamic_memory<T>(MemorySpace::<space>)`。
+
+使用示例：
+
+```cpp
+auto tsm = ctx.get_dynamic_memory<float>(MemorySpace::TSM);
+auto tlm = ctx.get_dynamic_memory<float>(MemorySpace::TLM);
+```
+
+注意事项：
+
+- 当前 `npu_demo` 成功路径只承认 `MemorySpace::TSM` 与 `MemorySpace::TLM`。
+- 元素类型模板参数 `T` 取自结果 `Memory<T>` 的 element type，不得退回到字节级 `load/store` 组合。
+- 不得把 `TSM/TLM` dynamic memory 发射成 `malloc(...)`、`load<...>`、`store<...>` 或其他 CPU 旁路文本。
+
+### `dma.view`
+
+功能说明：
+
+- `npu_demo` 下的视图节点必须发射为稳定的 `view(source, offset, size, stride)` 调用，用于表达 source memory 上的局部视图。
+
+使用示例：
+
+```cpp
+auto src_view = view(source, tid * 16, 16, 1);
+auto work_tile = view(tsm, 0, 16, 1);
+```
+
+注意事项：
+
+- `view(...)` 的参数顺序必须保持 `source -> offset -> size -> stride`。
+- 不得发射为 `source.view<float>(...)`、手写 `Memory<T>` 构造旁路或 `load/store` 组合。
+
+### `dma.slice`
+
+功能说明：
+
+- `npu_demo` 下的拷入节点必须发射为目标式 `slice(target, source, offset, size, stride);`。
+
+使用示例：
+
+```cpp
+slice(work_tile, src_view, 0, 16, 1);
+```
+
+注意事项：
+
+- 参数顺序必须固定为 `target -> source -> offset -> size -> stride`。
+- 不得发射为 `auto tile = slice(source, ...)`、`target = slice(source, ...)` 或显式 loop nest copy。
+
+### `dma.deslice`
+
+功能说明：
+
+- `npu_demo` 下的回写节点必须发射为目标式 `deslice(source, target, offset, size, stride);`。
+
+使用示例：
+
+```cpp
+deslice(out_tile, out, tid * 16, 16, 1);
+```
+
+注意事项：
+
+- 参数顺序必须固定为 `source -> target -> offset -> size -> stride`。
+- 不得发射为显式 loop nest copy、`store<...>` 组合或其他 CPU 旁路文本。
+
+### `nn.add`
+
+功能说明：
+
+- `npu_demo` 下的逐元素加法节点必须发射为稳定的目标 helper 调用 `add(lhs, rhs, out);`。
+
+使用示例：
+
+```cpp
+add(work_tile, work_tile, out_tile);
+```
+
+注意事项：
+
+- 参数顺序必须固定为 `lhs -> rhs -> out`。
+- 不得回退到 `cpu::add(...)`、运算符表达式拼接或 `load/store` 形式。
+
 ## 测试
 
 - 测试文件：[`test/dsl/test_emit_c.py`](../../test/dsl/test_emit_c.py)
@@ -272,6 +391,9 @@ cpu::img2col2d(input_tile, col_tile, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr);
 - 验证 `nn.add` 在结果未预绑定或 `non-cpu target` 下明确报错，不生成临时 memory 或其他兜底语句。
 - 验证 `symbol.for`、`dma.alloc/view/slice/deslice` 与 `nn.img2col2d` 的最小 CPU 发射闭环，并锁定输出文本不引入 `slice/deslice` helper 与 `nullptr`。
 - 验证重复 `dma.slice/dma.deslice` 发射时辅助变量名保持唯一，避免同一作用域命名冲突。
+- 下游 `npu_demo` 专项验收至少应覆盖 `thread_id/thread_num` 查询，建议测试名为 `test_emit_c_lowers_npu_demo_kernel_context_queries`。
+- 下游 `npu_demo` 专项验收至少应覆盖 `TSM/TLM` dynamic memory 查询，建议测试名为 `test_emit_c_lowers_npu_demo_dynamic_memory_access`。
+- 下游 `npu_demo` 专项验收至少应覆盖 `view + slice + add + deslice` 管线，建议测试名为 `test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline`，且不得回退到 `.view<`、`load<`、`store<`。
 
 ### 功能与用例清单
 
