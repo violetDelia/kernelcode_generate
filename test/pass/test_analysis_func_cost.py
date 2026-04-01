@@ -1,7 +1,7 @@
 """func_cost analysis pass tests.
 
 创建者: jcc你莫辜负
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 func_cost pass 的 compute/read/write 统计与属性回写。
@@ -435,10 +435,10 @@ def test_func_cost_dma_memory_traffic() -> None:
 
 # FC-005 (sizes < shape)
 # 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-03-28 21:38:09 +0800
-# 最近一次运行成功时间: 2026-03-28 21:38:09 +0800
-# 测试目的: sizes 小于 shape 时 dma.load/slice/store/deslice 的读写按 sizes 计。
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-02 06:18:51 +0800
+# 最近一次运行成功时间: 2026-04-02 06:18:51 +0800
+# 测试目的: sizes 小于 shape 时仅当前公开 DMA 分支参与统计，非公开 DMA 分支执行 skip+warning。
 # 使用示例: pytest -q test/pass/test_analysis_func_cost.py -k test_func_cost_dma_sizes_smaller_than_shape
 # 对应功能实现文件路径: kernel_gen/passes/analysis/func_cost.py
 # 对应 spec 文件路径: spec/pass/analysis/func_cost.md
@@ -469,15 +469,33 @@ def test_func_cost_dma_sizes_smaller_than_shape() -> None:
         deslice_op = DmaDesliceOp(load_op.result, block.args[1], offsets, sizes, strides, full_type)
         return [load_op, alloc_op, slice_op, store_op, deslice_op], deslice_op.result
 
-    module, _, _ = _build_module(arg_types, full_type, _builder)
+    module, func_op, _ = _build_module(arg_types, full_type, _builder)
     pass_obj = AnalyzeFuncCostPass()
-    pass_obj.run(module)
+    with pytest.warns(UserWarning) as records:
+        pass_obj.run(module)
     summary = pass_obj.get_summary("main")
+    with pytest.warns(UserWarning) as kernel_records:
+        kernel_summary = analyze_kernel(func_op)
 
     expected_bytes = sp.Integer(8)
     _assert_expr_equal(summary.total_compute, sp.Integer(0))
-    _assert_expr_equal(summary.total_read_bytes, expected_bytes * 4)
-    _assert_expr_equal(summary.total_write_bytes, expected_bytes * 4)
+    _assert_expr_equal(summary.total_read_bytes, expected_bytes * 2)
+    _assert_expr_equal(summary.total_write_bytes, expected_bytes * 2)
+    assert [str(item.message) for item in records] == [
+        "func_cost skip dma.alloc: unsupported op",
+        "func_cost skip dma.slice: unsupported op",
+        "func_cost skip dma.deslice: unsupported op",
+    ]
+    assert [str(item.message) for item in kernel_records] == [
+        "analysis_kernel skip dma.alloc: unsupported op",
+        "analysis_kernel skip dma.slice: unsupported op",
+        "analysis_kernel skip dma.deslice: unsupported op",
+    ]
+    assert summary.op_costs == kernel_summary.op_costs
+    assert summary.value_traffic == kernel_summary.value_traffic
+    _assert_expr_equal(summary.total_compute, kernel_summary.total_compute)
+    _assert_expr_equal(summary.total_read_bytes, kernel_summary.total_read_bytes)
+    _assert_expr_equal(summary.total_write_bytes, kernel_summary.total_write_bytes)
 
 
 # FC-006
@@ -571,31 +589,47 @@ def test_func_cost_compare_i1_uses_predicate_size() -> None:
 # FC-010
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-01 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-01 00:00:00 +0800
-# 测试目的: 验证 func_cost pass 与 analyze_kernel 在同一 func 上复用同一统计结果。
+# 最近一次运行测试时间: 2026-04-02 06:18:51 +0800
+# 最近一次运行成功时间: 2026-04-02 06:18:51 +0800
+# 测试目的: 验证 func_cost pass 在相同 args/predicate_size/dtype_size_overrides 下复用 analyze_kernel，且 attach_attrs 可观察。
 # 使用示例: pytest -q test/pass/test_analysis_func_cost.py -k test_func_cost_matches_analyze_kernel_on_same_func
 # 对应功能实现文件路径: kernel_gen/passes/analysis/func_cost.py
 # 对应 spec 文件路径: spec/pass/analysis/func_cost.md
 # 对应测试文件路径: test/pass/test_analysis_func_cost.py
 def test_func_cost_matches_analyze_kernel_on_same_func() -> None:
     mem_type = _make_memory_type([StringAttr("A"), StringAttr("B")], f32, "global")
+    out_type = _make_memory_type([StringAttr("A"), StringAttr("B")], i1, "global")
     space = _make_space("global")
+    runtime_args = ["lhs", "rhs"]
+    dtype_overrides = {"f32": 4, "i1": 8}
 
     def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
-        add_op = NnAddOp(block.args[0], block.args[1], mem_type, space)
-        mul_op = NnMulOp(add_op.result, block.args[2], mem_type, space)
-        return [add_op, mul_op], mul_op.result
+        eq_op = NnEqOp(block.args[0], block.args[1], out_type, space)
+        return [eq_op], eq_op.result
 
-    module, func_op, _ = _build_module([mem_type, mem_type, mem_type], mem_type, _builder)
-    pass_obj = AnalyzeFuncCostPass(dtype_size_overrides={"f32": 4})
+    module, func_op, _ = _build_module([mem_type, mem_type], out_type, _builder)
+    pass_obj = AnalyzeFuncCostPass(
+        predicate_size=2,
+        attach_attrs=True,
+        dtype_size_overrides=dtype_overrides,
+        args={"main": runtime_args},
+    )
     pass_obj.run(module)
 
     pass_summary = pass_obj.get_summary("main")
-    kernel_summary = analyze_kernel(func_op, dtype_size_overrides={"f32": 4})
+    kernel_summary = analyze_kernel(
+        func_op,
+        args=runtime_args,
+        predicate_size=2,
+        dtype_size_overrides=dtype_overrides,
+        attach_attrs=True,
+    )
 
     assert pass_summary.op_costs == kernel_summary.op_costs
     assert pass_summary.value_traffic == kernel_summary.value_traffic
     _assert_expr_equal(pass_summary.total_compute, kernel_summary.total_compute)
     _assert_expr_equal(pass_summary.total_read_bytes, kernel_summary.total_read_bytes)
     _assert_expr_equal(pass_summary.total_write_bytes, kernel_summary.total_write_bytes)
+    assert func_op.attributes["analysis.compute"].data == str(kernel_summary.total_compute)
+    assert func_op.attributes["analysis.read_bytes"].data == str(kernel_summary.total_read_bytes)
+    assert func_op.attributes["analysis.write_bytes"].data == str(kernel_summary.total_write_bytes)
