@@ -28,6 +28,7 @@
 - 明确支持：只读 `Memory` 输入、`Memory` 结果降为显式输出参数、标量参数顺序与默认命名保持、`emit_c` 错误向上抛出。
 - 明确支持：`f32/f64` 类型在 `target=cpu` 下映射为 `float/double`，用于 `Memory<float>/Memory<double>` 与 `float/double` 标量参数生成。
 - 冻结 direct-return `nn.add -> cpu::add(..., out)` 的函数级 CPU 合同：仅当 `nn.add.result` 的唯一 use 为 `func.return` 且结果可直接绑定到函数 `out` 时，允许生成 `cpu::add(..., out);`。
+- 冻结 `target="npu_demo"` 的函数级 body-level kernel 骨架：签名包含 `npu_demo::KernelContext& ctx`，函数体按 `thread_id/thread_num -> TSM/TLM dynamic memory -> view -> slice -> add -> deslice` 的顺序组织。
 - 支持 `!symbol.int<"...">` 标量返回在 `target=cpu` 下生成函数返回值文本。
 - 对 `conv_cpu_tiled_v1` 当前子集，冻结 `conv2d_img2col2d_tiled(...)` 的函数级 CPU 骨架：固定 `Ntile=1`、`Ctile=16`、`Ftile=16`、`Hotile=16`、`Wotile=16`，包含外层分块循环、tile-local `col_buffer/acc_buffer`、`cpu::img2col2d(...)` 调用与最终写回 `out`。
 
@@ -40,6 +41,8 @@
 - 对于不支持的返回形式、未知 op 或无法映射到目标后端源码的 IR，必须明确报错。
 - 除 `Memory` 结果外，仅允许单一 `!symbol.int<"...">` 标量结果生成返回值；其他非 `Memory` 结果仍需报错。
 - direct-return `nn.add` 的函数级特化当前只覆盖 `func.return` 唯一使用 `nn.add.result` 的 `Memory` 返回场景；multi-use、无法直接绑定到函数 `out` 或需要 generic `out = tmp` 的路径都必须继续报 `unsupported op`。
+- `target="npu_demo"` 当前只冻结 body-level kernel 骨架，不定义 host wrapper、`launch`、`arch.launch_kernel`、`barrier` 或其他运行时调度骨架。
+- `target="npu_demo"` 的目标终态不得回退到 `.view<T>()`、`load<...>`、`store<...>` 或表达式式 `auto tile = slice(source, ...)`。
 - 对 `conv2d_img2col2d_tiled(...)` 这一固定 CPU 子集，不允许把函数级结构写成“由实现决定”“结构自定”或“必要时改走 kernel dialect”；函数骨架、tile 常量、循环层次、局部 buffer 与 `out` 写回都必须在本层直接冻结。
 
 ## 公开接口
@@ -107,6 +110,18 @@ void add(const Memory<int32_t>& lhs, const Memory<int32_t>& rhs, Memory<int32_t>
 }
 ```
 
+- `target="npu_demo"` 的 body-level kernel 签名必须把 `npu_demo::KernelContext& ctx` 作为首个参数，随后依次保留只读 `Memory` 输入与显式 `Memory` 输出参数。
+- `target="npu_demo"` 的完整目标签名形态可接近以下形式：
+
+```cpp
+void demo_kernel(
+    npu_demo::KernelContext& ctx,
+    const Memory<float>& source,
+    Memory<float>& out) {
+    /* body-level skeleton */
+}
+```
+
 - `!symbol.int<"...">` 结果在 `target=cpu` 下生成为 `long long` 返回值，不生成 `out` 参数。
 - 不支持的返回形式必须明确报错。
 - 参数名来自 `func.func` 的 `arg_attrs.name`；缺失或为空时必须使用 `arg{index}` 默认命名，保持与 `func.func` 参数顺序一致。
@@ -152,6 +167,30 @@ cpu::add(lhs, bias, out);
 - 这一路径的硬门禁是 `unique-use + func.return + direct bind to out`；三者缺一不可。
 - 上述 direct-return 特化只覆盖 `memory + memory`、`memory + const(i32)` 与 `memory + symbol.int` 三条路径；函数体不得退化为 `out = tmp`、`return tmp` 或其他 generic fallback。
 - 若 `nn.add.result` 有多个 use，或当前函数体无法直接把 `nn.add.result` 绑定到函数 `out`，则仍必须保持 `EmitCError target=cpu: nn.add: unsupported op`，不能 silent fallback。
+- `target="npu_demo"` 的 body-level kernel 骨架必须包含并保持如下顺序：
+
+```cpp
+void demo_kernel(
+    npu_demo::KernelContext& ctx,
+    const Memory<float>& source,
+    Memory<float>& out) {
+    long long tid = ctx.thread_id();
+    long long tnum = ctx.thread_num();
+
+    auto tsm = ctx.get_dynamic_memory<float>(MemorySpace::TSM);
+    auto tlm = ctx.get_dynamic_memory<float>(MemorySpace::TLM);
+
+    auto src_view = view(source, tid * 16, 16, 1);
+    auto work_tile = view(tsm, 0, 16, 1);
+    auto out_tile = view(tlm, 0, 16, 1);
+
+    slice(work_tile, src_view, 0, 16, 1);
+    add(work_tile, work_tile, out_tile);
+    deslice(out_tile, out, tid * 16, 16, 1);
+}
+```
+
+- 上述骨架顺序是 `thread_id/thread_num -> get_dynamic_memory(TSM/TLM) -> view -> slice -> add -> deslice`；不得插入 `launch(`、`arch.launch_kernel`、`barrier`、`.view<`、`load<`、`store<` 或表达式式 `slice(source, ...)`。
 - 当 `func.return` 回写 `out` 的值未在 `EmitCContext` 中绑定名称，且该值为 `BlockArgument` 时，必须回退为 `arg{index}` 默认命名以保持与 `gen_signature` 一致。
 - 当 `func.return` 返回 `!symbol.int<"...">` 时，必须生成 `return <expr>;` 并复用 `emit_c` 的命名/表达式规则。
 - 对 `conv_cpu_tiled_v1` 子集，函数体骨架必须固定包含：`constexpr Ntile/Ctile/Ftile/Hotile/Wotile`、tile-local `col_buffer/acc_buffer`、`n -> f -> ho -> wo` 分块循环、循环体内的 `cpu::img2col2d(...)` 与 `c` 方向 tiled compute、以及最终写回 `out` 的显式循环或等价机械可判定写回语句。
@@ -235,10 +274,13 @@ void conv2d_img2col2d_tiled(
 - 验证 `Memory` 输入/输出参数规则、参数顺序、错误传播与名称保持行为。
 - 验证 direct-return `nn.add` 在 `target=cpu` 下仅对唯一 use 为 `func.return` 的 `Memory` 返回场景特化为 `cpu::add(..., out);`，并覆盖 `memory + memory`、`memory + const(i32)`、`memory + symbol.int` 三条函数体形态。
 - 验证 direct-return `nn.add` 在 multi-use 或无法直接绑定 `out` 时继续报 `unsupported op`，不生成 generic `out = tmp` / `return tmp`。
+- 验证 `target="npu_demo"` 的函数级 body-level kernel 骨架包含 `npu_demo::KernelContext& ctx`、`ctx.thread_id()`、`ctx.thread_num()`、`ctx.get_dynamic_memory<float>(MemorySpace::TSM/TLM)` 与 `view/slice/deslice/add` 的固定顺序。
+- 验证 `target="npu_demo"` 的函数级骨架不回退到 `.view<`、`load<`、`store<`、表达式式 `slice(source, ...)`、`launch` 或 `barrier`。
 - 验证 `!symbol.int<"...">` 标量返回的签名与函数体生成规则。
 - 验证 `!symbol.int<"...">` 标量返回仅允许 `target=cpu`；非 cpu target 必须报错。
 - 对 `conv_cpu_tiled_v1` 下游实现阶段，验证 `conv2d_img2col2d_tiled(...)` 生成源码包含固定 tile 常量、`cpu::img2col2d(...)`、局部 `col_buffer/acc_buffer`、`n/f/ho/wo` 分块循环与最终写回 `out`。
 - 注：`S3` 计划中的四个 direct-return `nn.add` 验收用例当前先冻结为本 spec 的下游待补测试映射；在 `test/dsl/test_gen_kernel.py` 实际落地前，不把它们写成“当前已存在的可执行测试”。
+- 注：`N3` 计划中的 `npu_demo` 两个验收用例当前先冻结为本 spec 的下游待补测试映射；在 `test/dsl/test_gen_kernel.py` 实际落地前，不把它们写成“当前已存在的可执行测试”。
 
 ### 功能与用例清单
 
@@ -258,6 +300,8 @@ void conv2d_img2col2d_tiled(
 - GK-014：direct-return `nn.add(memory, const(i32))` 在 cpu target 下可生成 `cpu::add(lhs, 1, out);` 函数体。（下游待补测试映射：`test_gen_kernel_supports_direct_return_nn_add_memory_const_on_cpu`）
 - GK-015：direct-return `nn.add(memory, symbol.int)` 在 cpu target 下可生成 `long long bias` 标量参数与 `cpu::add(lhs, bias, out);` 函数体。（下游待补测试映射：`test_gen_kernel_supports_direct_return_nn_add_memory_symbol_on_cpu`）
 - GK-016：当 `nn.add.result` 为 multi-use 或无法 direct bind 到 `out` 时，specialization 必须继续报 `EmitCError target=cpu: nn.add: unsupported op`。（下游待补测试映射：`test_gen_kernel_rejects_nn_add_specialization_on_multi_use`）
+- GK-017：`target="npu_demo"` 的最小 kernel 可生成包含 `npu_demo::KernelContext& ctx`、`ctx.thread_id()` 与 `ctx.thread_num()` 的 body-level 函数骨架。（下游待补测试映射：`test_gen_kernel_emits_npu_demo_body_level_kernel`）
+- GK-018：`target="npu_demo"` 的 `view + slice + add + deslice` 链路可生成 `TSM/TLM` dynamic memory、`view(`、`slice(`、`add(`、`deslice(` 组成的函数体骨架，且不出现 `.view<`、`load<`、`store<`。（下游待补测试映射：`test_gen_kernel_emits_npu_demo_memory_pipeline`）
 
 ### C2 下游验收标准
 
