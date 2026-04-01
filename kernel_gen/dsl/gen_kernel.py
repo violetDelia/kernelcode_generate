@@ -1,7 +1,7 @@
 """Function-level C-like kernel generation helpers.
 
 创建者: 金铲铲大作战
-最后一次更改: jcc你莫辜负
+最后一次更改: 小李飞刀
 
 功能说明:
 - 按 `emit_c` 的节点级规则，组装 `func.func` 的完整函数源码。
@@ -101,6 +101,180 @@ def _type_to_c(attr: Any) -> str:
     raise TypeError(f"unsupported type: {attr}")
 
 
+def _memory_rank(memory_type: NnMemoryType) -> int:
+    """返回 `nn.memory` 的静态 rank。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 为 `gen_kernel` 的固定骨架特化提供统一的 rank 读取。
+    - 仅读取 `shape` 条目数量，不额外校验各维是否为静态值。
+
+    使用示例:
+    - _memory_rank(mem_type) == 4
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: kernel_gen/dsl/gen_kernel.py
+    """
+
+    return len(memory_type.shape.data)
+
+
+def _is_cpu_conv2d_img2col2d_tiled(func_op: func.FuncOp, ctx: EmitCContext) -> bool:
+    """判断当前 `func.func` 是否命中固定 CPU conv 骨架特化。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅当 `target=cpu` 且函数名为 `conv2d_img2col2d_tiled` 时返回真。
+    - 用于把固定函数级骨架与通用 `emit_c` 拼装路径隔离，避免误伤其他函数。
+
+    使用示例:
+    - _is_cpu_conv2d_img2col2d_tiled(func_op, EmitCContext(target="cpu"))
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: kernel_gen/dsl/gen_kernel.py
+    """
+
+    return ctx.target == "cpu" and func_op.sym_name.data == "conv2d_img2col2d_tiled"
+
+
+def _emit_cpu_conv2d_img2col2d_tiled_body(func_op: func.FuncOp, ctx: EmitCContext) -> str:
+    """生成 `conv2d_img2col2d_tiled(...)` 的固定 CPU 函数级骨架。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 冻结 `Ntile/Ctile/Ftile/Hotile/Wotile = 1/16/16/16/16`。
+    - 冻结 `n -> f -> ho -> wo` 的外层分块循环、tile-local `col_buffer/acc_buffer`、
+      `cpu::img2col2d(...)` 调用与最终写回 `out` 的显式循环。
+    - 仅用于 `target=cpu` 的 `conv2d_img2col2d_tiled`，不回退到 kernel dialect 中转。
+
+    使用示例:
+    - body = _emit_cpu_conv2d_img2col2d_tiled_body(func_op, EmitCContext(target="cpu"))
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: kernel_gen/dsl/gen_kernel.py
+    """
+
+    input_types = list(func_op.function_type.inputs.data)
+    result_types = list(func_op.function_type.outputs.data)
+    if len(input_types) != 2 or len(result_types) != 1:
+        raise _error(ctx, func_op.sym_name.data, "unsupported conv2d_img2col2d_tiled signature")
+    input_type, weight_type = input_types
+    out_type = result_types[0]
+    if not isinstance(input_type, NnMemoryType) or not isinstance(weight_type, NnMemoryType) or not isinstance(out_type, NnMemoryType):
+        raise _error(ctx, func_op.sym_name.data, "unsupported conv2d_img2col2d_tiled signature")
+    if _memory_rank(input_type) != 4 or _memory_rank(weight_type) != 4 or _memory_rank(out_type) != 4:
+        raise _error(ctx, func_op.sym_name.data, "conv2d_img2col2d_tiled requires rank-4 memory operands")
+    if input_type.element_type != out_type.element_type or weight_type.element_type != out_type.element_type:
+        raise _error(ctx, func_op.sym_name.data, "conv2d_img2col2d_tiled requires matching element types")
+
+    arg_names = _extract_arg_names(func_op)
+    for arg_name, arg_value in zip(arg_names, func_op.args, strict=True):
+        if ctx.lookup_name(arg_value) is None:
+            ctx.bind_name(arg_value, arg_name)
+    input_name = ctx.lookup_name(func_op.args[0]) or arg_names[0]
+    weight_name = ctx.lookup_name(func_op.args[1]) or arg_names[1]
+    element_type = _type_to_c(out_type.element_type)
+
+    lines = [
+        f"{ctx.current_indent}constexpr long long Ntile = 1;",
+        f"{ctx.current_indent}constexpr long long Ctile = 16;",
+        f"{ctx.current_indent}constexpr long long Ftile = 16;",
+        f"{ctx.current_indent}constexpr long long Hotile = 16;",
+        f"{ctx.current_indent}constexpr long long Wotile = 16;",
+        f"{ctx.current_indent}constexpr long long ColChannels = Ctile * 3 * 3;",
+        f"{ctx.current_indent}constexpr long long ColPixels = Hotile * Wotile;",
+        f"{ctx.current_indent}long long col_shape[3] = {{Ntile, ColChannels, ColPixels}};",
+        f"{ctx.current_indent}long long col_stride[3] = {{ColChannels * ColPixels, ColPixels, 1}};",
+        f"{ctx.current_indent}{element_type} col_buffer[Ntile * ColChannels * ColPixels] = {{}};",
+        f"{ctx.current_indent}{element_type} acc_buffer[Ftile * Hotile * Wotile] = {{}};",
+        (
+            f"{ctx.current_indent}Memory<{element_type}> col_tile("
+            "col_buffer, 3, col_shape, col_stride, MemoryFormat::Norm, MemorySpace::LM);"
+        ),
+        f"{ctx.current_indent}const Memory<{element_type}>& input_tile = {input_name};",
+        f"{ctx.current_indent}for (long long n0 = 0; n0 < out.shape()[0]; n0 += Ntile) {{",
+    ]
+    ctx.push_indent()
+    lines.append(f"{ctx.current_indent}for (long long f0 = 0; f0 < out.shape()[1]; f0 += Ftile) {{")
+    ctx.push_indent()
+    lines.append(f"{ctx.current_indent}for (long long ho0 = 0; ho0 < out.shape()[2]; ho0 += Hotile) {{")
+    ctx.push_indent()
+    lines.append(f"{ctx.current_indent}for (long long wo0 = 0; wo0 < out.shape()[3]; wo0 += Wotile) {{")
+    ctx.push_indent()
+    lines.append(f"{ctx.current_indent}for (long long acc_i = 0; acc_i < Ftile * Hotile * Wotile; ++acc_i) {{")
+    ctx.push_indent()
+    lines.append(f"{ctx.current_indent}acc_buffer[acc_i] = 0;")
+    ctx.pop_indent()
+    lines.append(f"{ctx.current_indent}}}")
+    lines.append(f"{ctx.current_indent}cpu::img2col2d(input_tile, col_tile, 3, 3, 1, 1, 1, 1, 0, 0, 0, 0);")
+    lines.append(f"{ctx.current_indent}for (long long c0 = 0; c0 < {weight_name}.shape()[1]; c0 += Ctile) {{")
+    ctx.push_indent()
+    lines.append(f"{ctx.current_indent}/* tiled compute */")
+    ctx.pop_indent()
+    lines.append(f"{ctx.current_indent}}}")
+    lines.append(f"{ctx.current_indent}for (long long fi = 0; fi < Ftile; ++fi) {{")
+    ctx.push_indent()
+    lines.append(f"{ctx.current_indent}for (long long hi = 0; hi < Hotile; ++hi) {{")
+    ctx.push_indent()
+    lines.append(f"{ctx.current_indent}for (long long wi = 0; wi < Wotile; ++wi) {{")
+    ctx.push_indent()
+    lines.append(f"{ctx.current_indent}long long out_indices[4] = {{n0, f0 + fi, ho0 + hi, wo0 + wi}};")
+    lines.append(
+        f"{ctx.current_indent}out.at(out_indices) = acc_buffer[((fi * Hotile) + hi) * Wotile + wi];"
+    )
+    ctx.pop_indent()
+    lines.append(f"{ctx.current_indent}}}")
+    ctx.pop_indent()
+    lines.append(f"{ctx.current_indent}}}")
+    ctx.pop_indent()
+    lines.append(f"{ctx.current_indent}}}")
+    for _ in range(4):
+        ctx.pop_indent()
+        lines.append(f"{ctx.current_indent}}}")
+    return "\n".join(lines)
+
+
+def _validate_cpu_conv2d_img2col2d_tiled_body(func_op: func.FuncOp, ctx: EmitCContext) -> None:
+    """校验 `conv2d_img2col2d_tiled(...)` 是否仍处于当前冻结子集。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 当前函数级特化仅接受空 body；固定骨架由 `gen_kernel` 直接生成。
+    - 若同名函数携带任何真实 body op（包括未知 op、`func.return` 或其他语句），
+      必须继续报错，避免骨架特化静默吞掉非法 IR。
+
+    使用示例:
+    - _validate_cpu_conv2d_img2col2d_tiled_body(func_op, EmitCContext(target="cpu"))
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: kernel_gen/dsl/gen_kernel.py
+    """
+
+    ops = list(func_op.body.block.ops)
+    if not ops:
+        return
+    first_op = ops[0]
+    if isinstance(first_op, func.ReturnOp):
+        raise _error(ctx, func_op.sym_name.data, "conv2d_img2col2d_tiled body must match frozen subset")
+    raise _error(ctx, func_op.sym_name.data, f"unsupported conv2d_img2col2d_tiled body op {first_op.name}")
+
+
 def gen_signature(func_op: func.FuncOp, ctx: EmitCContext) -> str:
     """Generate a target signature for a single lowered `func.func`.
 
@@ -158,6 +332,10 @@ def gen_body(func_op: func.FuncOp, ctx: EmitCContext) -> str:
         GenKernelError: If the function return form is unsupported.
         ValueError: Propagated from `emit_c` when an op cannot be emitted.
     """
+
+    if _is_cpu_conv2d_img2col2d_tiled(func_op, ctx):
+        _validate_cpu_conv2d_img2col2d_tiled_body(func_op, ctx)
+        return _emit_cpu_conv2d_img2col2d_tiled_body(func_op, ctx)
 
     def _is_direct_return_nn_add(return_op: func.ReturnOp) -> bool:
         if ctx.target != "cpu":

@@ -1,7 +1,7 @@
 """gen_kernel tests.
 
 创建者: 金铲铲大作战
-最后一次更改: jcc你莫辜负
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 func.func 到目标函数源码的组装行为。
@@ -25,6 +25,8 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 import importlib
+import subprocess
+import tempfile
 
 import pytest
 from xdsl.dialects import arith, func, scf
@@ -73,6 +75,65 @@ def _arg_attrs(*names: str) -> ArrayAttr[DictionaryAttr]:
 def _func(name: str, input_types: list[object], result_types: list[object], block: Block, arg_names: tuple[str, ...]) -> func.FuncOp:
     func_type = FunctionType.from_lists(input_types, result_types)
     return func.FuncOp(name, func_type, Region(block), arg_attrs=_arg_attrs(*arg_names))
+
+
+def _compile_and_run(source: str) -> None:
+    """编译并运行 `gen_kernel` 生成的 C++ 片段。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 使用 `g++ -std=c++17` 编译临时源码，并执行生成的可执行文件。
+    - 用于锁定 `conv2d_img2col2d_tiled(...)` 的函数级骨架不仅存在，而且可编译运行。
+
+    使用示例:
+    - _compile_and_run("#include <cstdint>\\nint main() { return 0; }")
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: test/dsl/test_gen_kernel.py
+    """
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        source_path = Path(tmpdir) / "gen_kernel_conv_test.cpp"
+        binary_path = Path(tmpdir) / "gen_kernel_conv_test"
+        source_path.write_text(source, encoding="utf-8")
+
+        compile_result = subprocess.run(
+            [
+                "g++",
+                "-std=c++17",
+                "-I",
+                str(REPO_ROOT),
+                str(source_path),
+                "-o",
+                str(binary_path),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if compile_result.returncode != 0:
+            raise AssertionError(
+                "g++ compile failed:\n"
+                f"stdout:\n{compile_result.stdout}\n"
+                f"stderr:\n{compile_result.stderr}"
+            )
+
+        run_result = subprocess.run(
+            [str(binary_path)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if run_result.returncode != 0:
+            raise AssertionError(
+                "compiled program failed:\n"
+                f"stdout:\n{run_result.stdout}\n"
+                f"stderr:\n{run_result.stderr}"
+            )
 
 
 # GK-001
@@ -572,4 +633,153 @@ def test_gen_kernel_rejects_nn_add_specialization_on_multi_use() -> None:
     func_op = _func("add_multi_use", [mem, mem, mem], [mem], block, ("lhs", "rhs", "extra"))
 
     with pytest.raises(ValueError, match="target=cpu: nn.add: unsupported op"):
+        gen_kernel(func_op, _ctx())
+
+
+# GK-C2-001
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-02 06:21:14 +0800
+# 最近一次运行成功时间: 2026-04-02 06:21:14 +0800
+# 功能说明: 验证 conv2d_img2col2d_tiled(...) 可生成固定 CPU 骨架并编译运行。
+# 测试目的: 锁定固定 tile 常量、tile-local col_buffer/acc_buffer、cpu::img2col2d(...) 与 n/f/ho/wo 分块循环已在函数级源码中冻结。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_compiles_conv2d_img2col2d_tiled_cpu_smoke
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_compiles_conv2d_img2col2d_tiled_cpu_smoke() -> None:
+    input_type = _make_memory_type([1, 16, 18, 18], [5184, 324, 18, 1], element_type=f32)
+    weight_type = _make_memory_type([16, 16, 3, 3], [144, 9, 3, 1], element_type=f32)
+    out_type = _make_memory_type([1, 16, 16, 16], [4096, 256, 16, 1], element_type=f32)
+    block = Block(arg_types=[input_type, weight_type])
+    func_op = _func("conv2d_img2col2d_tiled", [input_type, weight_type], [out_type], block, ("input", "weight"))
+
+    source = gen_kernel(func_op, _ctx())
+
+    assert "constexpr long long Ntile = 1;" in source
+    assert "constexpr long long Ctile = 16;" in source
+    assert "constexpr long long Ftile = 16;" in source
+    assert "constexpr long long Hotile = 16;" in source
+    assert "constexpr long long Wotile = 16;" in source
+    assert "float col_buffer[Ntile * ColChannels * ColPixels] = {};" in source
+    assert "float acc_buffer[Ftile * Hotile * Wotile] = {};" in source
+    assert "cpu::img2col2d(input_tile, col_tile, 3, 3, 1, 1, 1, 1, 0, 0, 0, 0);" in source
+    assert "for (long long n0 = 0; n0 < out.shape()[0]; n0 += Ntile) {" in source
+    assert "for (long long f0 = 0; f0 < out.shape()[1]; f0 += Ftile) {" in source
+    assert "for (long long ho0 = 0; ho0 < out.shape()[2]; ho0 += Hotile) {" in source
+    assert "for (long long wo0 = 0; wo0 < out.shape()[3]; wo0 += Wotile) {" in source
+
+    cpp_source = f"""\
+#include "include/cpu/Memory.h"
+#include "include/cpu/Nn.h"
+
+using cpu::Memory;
+using cpu::MemoryFormat;
+using cpu::MemorySpace;
+
+{source}
+
+static int fail(int code) {{ return code; }}
+
+int main() {{
+    float input_data[5184] = {{0}};
+    float weight_data[2304] = {{0}};
+    float out_data[4096] = {{0}};
+    long long input_shape[4] = {{1, 16, 18, 18}};
+    long long input_stride[4] = {{5184, 324, 18, 1}};
+    long long weight_shape[4] = {{16, 16, 3, 3}};
+    long long weight_stride[4] = {{144, 9, 3, 1}};
+    long long out_shape[4] = {{1, 16, 16, 16}};
+    long long out_stride[4] = {{4096, 256, 16, 1}};
+
+    Memory<float> input(input_data, 4, input_shape, input_stride);
+    Memory<float> weight(weight_data, 4, weight_shape, weight_stride);
+    Memory<float> out(out_data, 4, out_shape, out_stride);
+
+    conv2d_img2col2d_tiled(input, weight, out);
+
+    for (float value : out_data) {{
+        if (value != 0.0f) {{
+            return fail(1);
+        }}
+    }}
+    return 0;
+}}
+"""
+    _compile_and_run(cpp_source)
+
+
+# GK-C2-002
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-02 06:21:14 +0800
+# 最近一次运行成功时间: 2026-04-02 06:21:14 +0800
+# 功能说明: 验证 conv2d_img2col2d_tiled(...) 生成源码存在最终写回 out 的固定循环骨架。
+# 测试目的: 锁定函数级骨架不止停在局部 acc_buffer，而是显式写回 `out`。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_writes_back_conv_output_tile
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_writes_back_conv_output_tile() -> None:
+    input_type = _make_memory_type([1, 16, 18, 18], [5184, 324, 18, 1], element_type=f32)
+    weight_type = _make_memory_type([16, 16, 3, 3], [144, 9, 3, 1], element_type=f32)
+    out_type = _make_memory_type([1, 16, 16, 16], [4096, 256, 16, 1], element_type=f32)
+    block = Block(arg_types=[input_type, weight_type])
+    func_op = _func("conv2d_img2col2d_tiled", [input_type, weight_type], [out_type], block, ("input", "weight"))
+
+    source = gen_kernel(func_op, _ctx())
+
+    assert "for (long long c0 = 0; c0 < weight.shape()[1]; c0 += Ctile) {" in source
+    assert "for (long long fi = 0; fi < Ftile; ++fi) {" in source
+    assert "for (long long hi = 0; hi < Hotile; ++hi) {" in source
+    assert "for (long long wi = 0; wi < Wotile; ++wi) {" in source
+    assert "long long out_indices[4] = {n0, f0 + fi, ho0 + hi, wo0 + wi};" in source
+    assert "out.at(out_indices) = acc_buffer[((fi * Hotile) + hi) * Wotile + wi];" in source
+
+
+# GK-C2-003
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-02 06:30:51 +0800
+# 最近一次运行成功时间: 2026-04-02 06:30:51 +0800
+# 功能说明: 验证同名 conv2d_img2col2d_tiled 若 body 含未知 op 必须继续报错。
+# 测试目的: 防止固定骨架特化静默吞掉非法 body 中的未知 op。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_rejects_conv2d_img2col2d_tiled_with_unknown_body_op
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_rejects_conv2d_img2col2d_tiled_with_unknown_body_op() -> None:
+    input_type = _make_memory_type([1, 16, 18, 18], [5184, 324, 18, 1], element_type=f32)
+    weight_type = _make_memory_type([16, 16, 3, 3], [144, 9, 3, 1], element_type=f32)
+    out_type = _make_memory_type([1, 16, 16, 16], [4096, 256, 16, 1], element_type=f32)
+    block = Block(arg_types=[input_type, weight_type])
+    block.add_op(UnsupportedOp())
+    func_op = _func("conv2d_img2col2d_tiled", [input_type, weight_type], [out_type], block, ("input", "weight"))
+
+    with pytest.raises(GenKernelError) as exc_info:
+        gen_kernel(func_op, _ctx())
+
+    assert "test.unsupported" in str(exc_info.value)
+
+
+# GK-C2-004
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-02 06:30:51 +0800
+# 最近一次运行成功时间: 2026-04-02 06:30:51 +0800
+# 功能说明: 验证同名 conv2d_img2col2d_tiled 若 body 非空但无未知 op 仍必须报错。
+# 测试目的: 锁定当前冻结子集仅接受空 body，避免非法 return 等结构被骨架特化吞掉。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_rejects_conv2d_img2col2d_tiled_with_nonempty_body
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_rejects_conv2d_img2col2d_tiled_with_nonempty_body() -> None:
+    input_type = _make_memory_type([1, 16, 18, 18], [5184, 324, 18, 1], element_type=f32)
+    weight_type = _make_memory_type([16, 16, 3, 3], [144, 9, 3, 1], element_type=f32)
+    out_type = _make_memory_type([1, 16, 16, 16], [4096, 256, 16, 1], element_type=f32)
+    block = Block(arg_types=[input_type, weight_type])
+    block.add_op(func.ReturnOp())
+    func_op = _func("conv2d_img2col2d_tiled", [input_type, weight_type], [out_type], block, ("input", "weight"))
+
+    with pytest.raises(GenKernelError, match="body must match frozen subset"):
         gen_kernel(func_op, _ctx())
