@@ -15,6 +15,7 @@
 ## 访问与约束
 - 已授权访问 `spec`、`agents`、`skills` 文件夹。
 - 严格遵守 `AGENTS.md`。
+- 禁止使用 `codex-multi-agents-tmux.sh -wake` 与 `codex-multi-agents-tmux.sh -init-env`；无特别需求不要使用 `codex-multi-agents-list.sh -init`。
 - 不得查看当前工作目录外其他项目的实现文件；路径统一使用相对路径。
 - 默认工作分支为主分支。
 - 同一系列任务必须沿用同一个 `worktree`；创建后续任务与回报时都必须注明 `worktree`。

@@ -1885,7 +1885,13 @@ def _infer_expr_type(
         if not isinstance(source_type, NnMemoryType):
             raise _LoweringError("view source must have nn.memory type", location=expr.location)
         shape_attr = _build_static_index_attrs_exact(expr.size, location=expr.location, runtime_values=runtime_values)
-        stride_attr = source_type.stride.data
+        stride_attr = _build_static_index_list(
+            expr.stride,
+            len(shape_attr),
+            default_value=1,
+            location=expr.location,
+            runtime_values=runtime_values,
+        )
         result_type = _memory_type_from_parts(shape_attr, stride_attr, source_type.element_type, source_type.space)
         type_map[expr_key] = result_type
         return result_type

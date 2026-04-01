@@ -72,6 +72,8 @@ from kernel_gen.dialect.nn import (
     NnAddOp,
     NnBroadcastOp,
     NnEqOp,
+    NnImg2col1dOp,
+    NnImg2col2dOp,
     NnMemorySpaceAttr,
     NnMemoryType,
     NnNeOp,
@@ -1063,6 +1065,64 @@ def test_build_func_op_supports_dma_helper_calls() -> None:
     assert [attr.data for attr in view_ops[0].result.type.stride.data] == [1, 1]
     assert list(view_func.function_type.outputs) == [view_ops[0].result.type]
     assert return_ops[0].arguments[0].type == view_ops[0].result.type
+
+
+# MGEN-036
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-01 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-01 00:00:00 +0800
+# 功能说明: 验证 build_func_op 支持 img2col1d helper 并可被 -k 'img2col' 稳定选中。
+# 测试目的: 验证 img2col1d 会 lowering 为 nn.img2col1d，且返回类型与注解一致，避免 img2col gate 过滤命令 exit 5。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_img2col1d_helper_call
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_img2col1d_helper_call() -> None:
+    from kernel_gen.operation.nn import img2col1d
+
+    source = Memory([1, 4, 8], NumericType.Float32, space=MemorySpace.GM)
+
+    def img2col1d_kernel(src: "Tensor[f32, 1, 4, 8]") -> "Tensor[f32, 1, 12, 8]":
+        return img2col1d(src, kw=3, sw=1, dw=1, pl=1, pr=1)
+
+    func_op = build_func_op(img2col1d_kernel, source)
+    img2col_ops = [op for op in func_op.body.block.ops if isinstance(op, NnImg2col1dOp)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
+    assert len(img2col_ops) == 1
+    assert len(return_ops) == 1
+    assert [attr.data for attr in img2col_ops[0].result.type.shape.data] == [1, 12, 8]
+    assert list(func_op.function_type.outputs) == [img2col_ops[0].result.type]
+    assert return_ops[0].arguments[0].type == img2col_ops[0].result.type
+
+
+# MGEN-036A
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-01 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-01 00:00:00 +0800
+# 功能说明: 验证 build_func_op 支持 img2col2d helper 并可被 -k 'img2col' 稳定选中。
+# 测试目的: 验证 img2col2d 会 lowering 为 nn.img2col2d，且返回类型与注解一致，避免 img2col gate 过滤命令 exit 5。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_img2col2d_helper_call
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_img2col2d_helper_call() -> None:
+    from kernel_gen.operation.nn import img2col2d
+
+    source = Memory([1, 3, 5, 5], NumericType.Float32, space=MemorySpace.GM)
+
+    def img2col2d_kernel(src: "Tensor[f32, 1, 3, 5, 5]") -> "Tensor[f32, 1, 27, 9]":
+        return img2col2d(src, kh=3, kw=3)
+
+    func_op = build_func_op(img2col2d_kernel, source)
+    img2col_ops = [op for op in func_op.body.block.ops if isinstance(op, NnImg2col2dOp)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
+    assert len(img2col_ops) == 1
+    assert len(return_ops) == 1
+    assert [attr.data for attr in img2col_ops[0].result.type.shape.data] == [1, 27, 9]
+    assert list(func_op.function_type.outputs) == [img2col_ops[0].result.type]
+    assert return_ops[0].arguments[0].type == img2col_ops[0].result.type
 
 
 # MGEN-026A
