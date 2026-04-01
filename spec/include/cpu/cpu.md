@@ -2,13 +2,12 @@
 
 ## 功能简介
 
-定义 CPU 后端 include/cpu 头文件规范，覆盖 `include/cpu/Memory.h` 与 `include/cpu/Nn.h` 的公开接口、行为与约束。当前基线要求 `cpu::Memory<T>` 使用运行期 `rank`，并以 `MAX_DIM=8` 作为内部固定上限；逐元素/显式 broadcast、`add` 的 scalar overload（`Memory+scalar` / `scalar+Memory`）、`exp`、`reduce_sum/reduce_min/reduce_max` 与 `img2col1d/img2col2d` CPU 叶子接口语义仍由 CPU include 层实现负责承接。
+定义 CPU 后端 include/cpu 头文件规范，覆盖 `include/cpu/Memory.h` 与 `include/cpu/Nn.h` 的公开接口、行为与约束。当前基线要求 `cpu::Memory<T>` 使用运行期 `rank`，并以 `MAX_DIM=8` 作为内部固定上限；逐元素/显式 broadcast、`add` 的 scalar overload（`Memory+scalar` / `scalar+Memory`，其中 `memory + const(i32)` 的目标源码保持 CPU 整数实参直传，`memory + symbol.int` 的 CPU 终点整数标量口径固定为 `long long`）、`exp`、`reduce_sum/reduce_min/reduce_max` 与 `img2col1d/img2col2d` CPU 叶子接口语义仍由 CPU include 层实现负责承接。
 
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`朽木露琪亚`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/include/cpu/cpu.md`](../../../spec/include/cpu/cpu.md)
 - `功能实现`：[`include/cpu/Memory.h`](../../../include/cpu/Memory.h)、[`include/cpu/Nn.h`](../../../include/cpu/Nn.h)
 - `test`：[`test/include/cpu/test_memory.py`](../../../test/include/cpu/test_memory.py)、[`test/include/cpu/test_nn.py`](../../../test/include/cpu/test_nn.py)
@@ -24,6 +23,7 @@
 - 规范 CPU 后端 `Memory` 视图与 `Nn` 运算接口，便于与 `spec/operation/nn.md` 的语义对齐。
 - 保持纯头文件、无标准库依赖、无异常机制的实现约束。
 - 明确 CPU 后端 `Memory` 视图使用运行期 `rank` 的接口边界，并以 `MAX_DIM=8` 作为固定容量基线。
+- 冻结 `cpu::add` 的标量终点口径：上游 `memory + const(i32)` 在 `target=cpu` 下保持 CPU 整数实参直传，`memory + symbol.int` 在 `target=cpu` 下固定映射为 `long long` 标量调用形态。
 - 冻结 `cpu::exp(...)` 与 `cpu::reduce_sum/reduce_min/reduce_max(...)` 的稳定 CPU 公开接口，明确参数约束、输出契约与违约路径。
 - 冻结 `cpu::img2col1d(...)` 与 `cpu::img2col2d(...)` 的稳定 CPU 公开接口，使 `emit_c/gen_kernel` 在 CPU 侧拥有固定调用目标。
 
@@ -35,6 +35,7 @@
 - `img2col1d/img2col2d` 只定义 CPU include 层叶子接口，不反向规定 AST 节点类型、`nn dialect` 运行时类型、`build_func_op(...)` 结构或 pass 名称。
 - `exp/reduce_*` 只定义 CPU include 层叶子接口，不反向规定 AST 节点类型、`nn dialect` 运行时类型、`build_func_op(...)` 结构或 pass 名称。
 - `exp/reduce_*` 当前公开口径固定为 `float` 入参与出参，不在 include 层提供自动类型提升或隐式 cast。
+- `cpu::add` 的整数标量终点只冻结 `memory + const(i32)` 与 `memory + !symbol.int<"...">` 的 CPU 公开调用口径：前者保持整数实参直传，后者固定为 `long long`；本轮不定义 `f16/f32` mixed scalar 等其他混合标量提升规则，也不扩展到左标量整数形态。
 - `reduce_*` 的 `axes` 由调用方提供规范化后的非空轴列表（去重、非负、升序）；`axis=None` 语义由上游在进入 include 层前显式展开。
 - 禁止新增笼统 `cpu::img2col(...)` 公开名；CPU include 层只公开 `cpu::img2col1d(...)` 与 `cpu::img2col2d(...)`。
 - 运行时错误由调用方规避；接口返回 `void`，不提供状态码。
@@ -495,12 +496,12 @@ cpu::add(lhs, rhs, out);
 
 功能说明：
 
-- 对 `cpu::Memory<T>` 与标量 `T` 执行逐元素加法（`Memory+scalar` overload）。
+- 对 `cpu::Memory<T>` 与标量执行逐元素加法（`Memory+scalar` overload）。
 
 参数说明：
 
 - `lhs (const cpu::Memory<T>&)`：左操作数视图。
-- `rhs_scalar (T)`：右操作数标量。
+- `rhs_scalar (T 或 long long)`：右操作数标量；其中 `memory + const(i32)` 在 `target=cpu` 下保持整数实参直传，`memory + symbol.int` 的稳定公开形态为 `long long`。
 - `out (cpu::Memory<T>&)`：输出视图。
 
 使用示例：
@@ -508,6 +509,13 @@ cpu::add(lhs, rhs, out);
 ```cpp
 // Memory + scalar：对 lhs 每个元素加上同一个标量值。
 cpu::add(lhs, 3.0f, out);
+
+// memory + const(i32)：常量直接作为 CPU 整数实参出现。
+cpu::add(lhs, 1, out);
+
+// memory + symbol.int：CPU 终点公开形态为 long long 命名标量。
+long long bias = 7;
+cpu::add(lhs, bias, out);
 ```
 
 注意事项：
@@ -516,11 +524,14 @@ cpu::add(lhs, 3.0f, out);
 - `lhs/out` 的运行期 `rank`、`shape` 与 `stride` 需保持一致。
 - `out` 的 `space/format` 应与 `lhs` 一致；接口不做运行时检查。
 - `rhs_scalar` 仅表示单个标量值，不携带独立 `shape/stride/space` 语义。
+- 对 `emit_c/gen_kernel` 的稳定 CPU 调用目标，`memory + const(i32)` 必须收敛为 `cpu::add(lhs, 1, out)` 这一类“常量直接作为 CPU 整数实参”的形态，不把 `LL` 后缀写成强制源码口径。
+- 对 `emit_c/gen_kernel` 的稳定 CPU 调用目标，`memory + symbol.int` 必须收敛为 `long long bias = ...; cpu::add(lhs, bias, out)`。
+- `long long` 标量口径只用于冻结 `memory + symbol.int` 的整数标量终点；本节不定义 `f16/f32` mixed scalar 等其他混合标量调用形态。
 
 返回与限制：
 
 - 返回类型：`void`。
-- 返回语义：结果写入 `out`，元素语义为 `out[i] = lhs[i] + rhs_scalar`。
+- 返回语义：结果写入 `out`，元素语义为 `out[i] = lhs[i] + rhs_scalar`；当 `rhs_scalar` 来自 `const(i32)` 时保持整数实参直传，当来自 `symbol.int` 时公开 CPU 端调用口径固定为 `long long`。
 - 限制条件：输入不满足约束时行为未定义。
 
 ### `cpu::add(lhs_scalar, rhs, out)`
@@ -1188,7 +1199,7 @@ def test_cpu_img2col_api_contract_v1():
 - 执行命令：`pytest -q test/include/cpu/test_memory.py test/include/cpu/test_nn.py`
 - 测试说明：`test/include/cpu/test_memory.py` 与 `test/include/cpu/test_nn.py` 均统一引用本 spec `spec/include/cpu/cpu.md`，不再拆分为独立 `Memory.md` / `Nn.md`。
 - 测试说明：`INC-NN-019` ~ `INC-NN-026` 已在 `test/include/cpu/test_nn.py` 落地，用于覆盖 `exp/reduce_*` 成功路径与契约失败路径。
-- 测试说明：`INC-NN-027` ~ `INC-NN-028` 用于覆盖 `cpu::add` 的 `Memory+scalar` / `scalar+Memory` overload。
+- 测试说明：`INC-NN-027` ~ `INC-NN-028` 已在 `test/include/cpu/test_nn.py` 落地，用于覆盖 `cpu::add` 的 `Memory+scalar` / `scalar+Memory` overload。
 - 测试目标：
   - CPU-MEM-001：显式 stride 构造与访问。
   - CPU-MEM-002：连续 stride 自动推导。
