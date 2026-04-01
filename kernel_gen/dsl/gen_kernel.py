@@ -24,7 +24,7 @@ from typing import Any
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ArrayAttr, DictionaryAttr, Float32Type, Float64Type, IntegerType, IndexType, StringAttr
 
-from kernel_gen.dialect.nn import NnMemoryType
+from kernel_gen.dialect.nn import NnAddOp, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolValueType
 
 from .emit_c import EmitCContext, emit_c_op
@@ -159,6 +159,19 @@ def gen_body(func_op: func.FuncOp, ctx: EmitCContext) -> str:
         ValueError: Propagated from `emit_c` when an op cannot be emitted.
     """
 
+    def _is_direct_return_nn_add(return_op: func.ReturnOp) -> bool:
+        if ctx.target != "cpu":
+            return False
+        if len(return_op.arguments) != 1:
+            return False
+        returned = return_op.arguments[0]
+        owner = getattr(returned, "owner", None)
+        if not isinstance(owner, NnAddOp):
+            return False
+        if not owner.result.has_one_use():
+            return False
+        return owner.result.get_user_of_unique_use() is return_op
+
     result_types = list(func_op.function_type.outputs.data)
     lines: list[str] = []
     for op in func_op.body.block.ops:
@@ -175,6 +188,8 @@ def gen_body(func_op: func.FuncOp, ctx: EmitCContext) -> str:
             if op.arguments[0].type != result_type:
                 raise _error(ctx, func_op.sym_name.data, "unsupported return form")
             if isinstance(result_type, NnMemoryType):
+                if _is_direct_return_nn_add(op):
+                    continue
                 value_name = ctx.lookup_name(op.arguments[0])
                 if value_name is None:
                     from .emit_c import emit_c_value
@@ -192,6 +207,11 @@ def gen_body(func_op: func.FuncOp, ctx: EmitCContext) -> str:
                 continue
             raise _error(ctx, func_op.sym_name.data, "unsupported return form")
             continue
+        if isinstance(op, NnAddOp) and result_types and isinstance(result_types[0], NnMemoryType):
+            if op.result.has_one_use():
+                unique_user = op.result.get_user_of_unique_use()
+                if isinstance(unique_user, func.ReturnOp) and _is_direct_return_nn_add(unique_user):
+                    ctx.bind_name(op.result, "out")
         stmt = emit_c_op(op, ctx)
         if stmt:
             lines.append(stmt)

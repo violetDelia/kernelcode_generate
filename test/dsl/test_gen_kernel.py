@@ -36,7 +36,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolValueType
 from kernel_gen.dsl.emit_c import EmitCContext
 from kernel_gen.dsl.gen_kernel import GenKernelError, gen_body, gen_kernel, gen_signature
@@ -463,3 +463,113 @@ def test_gen_kernel_rejects_symbol_scalar_return_on_non_cpu() -> None:
 
     with pytest.raises(GenKernelError, match="symbol scalar return is cpu-only"):
         gen_kernel(func_op, ctx)
+
+
+# GK-013
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-02 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-02 00:00:00 +0800
+# 功能说明: 验证 direct-return nn.add(memory, memory) 在 cpu target 下可直接绑定到 out。
+# 测试目的: 锁定 unique-use + func.return + direct bind to out 的函数级特化输出为 cpu::add(lhs, rhs, out)。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_supports_direct_return_nn_add_memory_memory_on_cpu
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_supports_direct_return_nn_add_memory_memory_on_cpu() -> None:
+    mem = _make_memory_type([2, 2], [2, 1])
+    space = NnMemorySpaceAttr.from_name("global")
+    block = Block(arg_types=[mem, mem])
+    add = NnAddOp(block.args[0], block.args[1], mem, space)
+    block.add_op(add)
+    block.add_op(func.ReturnOp(add.result))
+    func_op = _func("add_direct", [mem, mem], [mem], block, ("lhs", "rhs"))
+
+    source = gen_kernel(func_op, _ctx())
+
+    assert source.startswith("void add_direct(const Memory<int32_t>& lhs, const Memory<int32_t>& rhs, Memory<int32_t>& out)")
+    assert "cpu::add(lhs, rhs, out);" in source
+    assert "out = " not in source
+
+
+# GK-014
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-02 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-02 00:00:00 +0800
+# 功能说明: 验证 direct-return nn.add(memory, const(i32)) 在 cpu target 下可直接绑定到 out。
+# 测试目的: 锁定 const(i32) 路径函数级特化输出为 cpu::add(lhs, 1, out)。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_supports_direct_return_nn_add_memory_const_on_cpu
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_supports_direct_return_nn_add_memory_const_on_cpu() -> None:
+    mem = _make_memory_type([2, 2], [2, 1])
+    space = NnMemorySpaceAttr.from_name("global")
+    block = Block(arg_types=[mem])
+    const = arith.ConstantOp(IntegerAttr(1, i32))
+    add = NnAddOp(block.args[0], const.result, mem, space)
+    block.add_op(const)
+    block.add_op(add)
+    block.add_op(func.ReturnOp(add.result))
+    func_op = _func("add_const_direct", [mem], [mem], block, ("lhs",))
+
+    source = gen_kernel(func_op, _ctx())
+
+    assert source.startswith("void add_const_direct(const Memory<int32_t>& lhs, Memory<int32_t>& out)")
+    assert "cpu::add(lhs, 1, out);" in source
+    assert "out = " not in source
+
+
+# GK-015
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-02 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-02 00:00:00 +0800
+# 功能说明: 验证 direct-return nn.add(memory, symbol.int) 在 cpu target 下可直接绑定到 out。
+# 测试目的: 锁定 symbol.int 路径函数级特化输出为 cpu::add(lhs, bias, out) 且签名暴露 long long bias。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_supports_direct_return_nn_add_memory_symbol_on_cpu
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_supports_direct_return_nn_add_memory_symbol_on_cpu() -> None:
+    mem = _make_memory_type([2, 2], [2, 1])
+    bias_type = SymbolValueType.from_expr("bias")
+    space = NnMemorySpaceAttr.from_name("global")
+    block = Block(arg_types=[mem, bias_type])
+    add = NnAddOp(block.args[0], block.args[1], mem, space)
+    block.add_op(add)
+    block.add_op(func.ReturnOp(add.result))
+    func_op = _func("add_symbol_direct", [mem, bias_type], [mem], block, ("lhs", "bias"))
+
+    source = gen_kernel(func_op, _ctx())
+
+    assert source.startswith("void add_symbol_direct(const Memory<int32_t>& lhs, long long bias, Memory<int32_t>& out)")
+    assert "cpu::add(lhs, bias, out);" in source
+    assert "out = " not in source
+
+
+# GK-016
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-02 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-02 00:00:00 +0800
+# 功能说明: 验证 multi-use 或无法 direct bind 到 out 时，nn.add 特化继续报 unsupported op。
+# 测试目的: 锁定 direct-return nn.add 的硬门禁，避免退化为 out = tmp 或其他 generic fallback。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_rejects_nn_add_specialization_on_multi_use
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_rejects_nn_add_specialization_on_multi_use() -> None:
+    mem = _make_memory_type([2, 2], [2, 1])
+    space = NnMemorySpaceAttr.from_name("global")
+    block = Block(arg_types=[mem, mem, mem])
+    add = NnAddOp(block.args[0], block.args[1], mem, space)
+    use_again = NnAddOp(add.result, block.args[2], mem, space)
+    block.add_op(add)
+    block.add_op(use_again)
+    block.add_op(func.ReturnOp(add.result))
+    func_op = _func("add_multi_use", [mem, mem, mem], [mem], block, ("lhs", "rhs", "extra"))
+
+    with pytest.raises(ValueError, match="target=cpu: nn.add: unsupported op"):
+        gen_kernel(func_op, _ctx())
