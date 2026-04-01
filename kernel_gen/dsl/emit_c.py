@@ -1,7 +1,7 @@
 """C-like fragment emission helpers for DSL lowering.
 
 创建者: 金铲铲大作战
-最后一次更改: 朽木露琪亚
+最后一次更改: 小李飞刀
 
 功能说明:
 - 提供单个 MLIR op/value 到 C 风格源码片段的最小生成规则。
@@ -27,7 +27,7 @@ from xdsl.dialects.builtin import FloatAttr, IndexType, IntAttr, IntegerAttr, In
 from xdsl.ir import BlockArgument, Operation, SSAValue
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp, DmaViewOp
-from kernel_gen.dialect.nn import NnImg2col2dOp, NnMemoryType
+from kernel_gen.dialect.nn import NnAddOp, NnImg2col2dOp, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolForOp, SymbolValueType
 
 
@@ -731,6 +731,59 @@ def _emit_img2col2d_stmt(op: NnImg2col2dOp, ctx: EmitCContext) -> str:
     return f"{decl}\n{ctx.current_indent}cpu::img2col2d({args});"
 
 
+def _emit_nn_add_stmt(op: NnAddOp, ctx: EmitCContext) -> str:
+    """生成 `nn.add` 的 CPU 侧 `cpu::add(...)` 调用片段。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅在 `target=cpu` 且 `op.result` 已在 `EmitCContext` 中预绑定名称时生效。
+    - 支持三条最小节点级路径：
+      - `Memory + Memory -> cpu::add(lhs, rhs, out);`
+      - `Memory + i32 const -> cpu::add(lhs, 1, out);`
+      - `Memory + !symbol.int -> cpu::add(lhs, bias, out);`
+    - mixed 路径固定要求 memory 位于 lhs；`const/symbol + memory` 必须继续报 `unsupported op`。
+    - 其余场景保持 `nn.add: unsupported op`，避免越界到函数级 result 分配或 mixed-promotion 收口。
+
+    使用示例:
+    - ctx.bind_name(op.result, "out"); emit_c_op(op, ctx) == "cpu::add(lhs, rhs, out);"
+
+    关联文件:
+    - spec: spec/dsl/emit_c.md
+    - test: test/dsl/test_emit_c.py
+    - 功能实现: kernel_gen/dsl/emit_c.py
+    """
+
+    if ctx.target != "cpu":
+        raise _emit_error(ctx, op.name, "unsupported op")
+    result_name = ctx.lookup_name(op.result)
+    if result_name is None:
+        raise _emit_error(ctx, op.name, "unsupported op")
+    if not isinstance(op.result.type, NnMemoryType):
+        raise _emit_error(ctx, op.name, "unsupported op")
+
+    lhs_is_memory = isinstance(op.lhs.type, NnMemoryType)
+    rhs_is_memory = isinstance(op.rhs.type, NnMemoryType)
+    if lhs_is_memory and rhs_is_memory:
+        lhs_expr = _memory_base_name(op.lhs, ctx)
+        rhs_expr = _memory_base_name(op.rhs, ctx)
+        return f"{ctx.current_indent}cpu::add({lhs_expr}, {rhs_expr}, {result_name});"
+
+    if not lhs_is_memory or rhs_is_memory:
+        raise _emit_error(ctx, op.name, "unsupported op")
+
+    scalar_value = op.rhs
+    scalar_type = scalar_value.type
+    is_i32_scalar = isinstance(scalar_type, IntegerType) and scalar_type.width.data == 32
+    if not (is_i32_scalar or isinstance(scalar_type, SymbolValueType)):
+        raise _emit_error(ctx, op.name, "unsupported op")
+
+    memory_expr = _memory_base_name(op.lhs, ctx)
+    scalar_expr = emit_c_value(scalar_value, ctx)
+    return f"{ctx.current_indent}cpu::add({memory_expr}, {scalar_expr}, {result_name});"
+
+
 def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
     """把 SSA value 生成为可嵌入右值位置的表达式文本。
 
@@ -861,11 +914,12 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
     """把单个 MLIR op 生成为目标后端的语句或语句块文本。
 
     创建者: 金铲铲大作战
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 小李飞刀
 
     功能说明:
-    - 负责把单个 op 转换为赋值语句、控制流语句块、访存语句、memory 视图声明或 `cpu::img2col2d` 调用片段。
+    - 负责把单个 op 转换为赋值语句、控制流语句块、访存语句、memory 视图声明或 CPU helper 调用片段。
     - 本阶段新增的 `symbol.for/dma.alloc/view/slice/deslice/nn.img2col2d` 仅支持 `target=cpu`。
+    - `nn.add` 仅支持 `target=cpu` 且 `result` 已预绑定名称的节点级 `cpu::add(...)` 发射。
 
     使用示例:
     - stmt = emit_c_op(op, EmitCContext(target=\"cpu\"))
@@ -892,6 +946,8 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
         return _emit_dma_view_stmt(op, ctx)
     if isinstance(op, arith.ConstantOp):
         return ""
+    if isinstance(op, NnAddOp):
+        return _emit_nn_add_stmt(op, ctx)
     if isinstance(op, scf.ForOp):
         return _emit_loop(op, ctx)
     if isinstance(op, SymbolForOp):

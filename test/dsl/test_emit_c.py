@@ -1,7 +1,7 @@
 """emit_c tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 朽木露琪亚
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 emit_c 节点级源码片段生成与错误路径。
@@ -36,7 +36,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp, DmaViewOp
-from kernel_gen.dialect.nn import NnImg2col2dOp, NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.nn import NnAddOp, NnImg2col2dOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolForOp, SymbolValueType
 from kernel_gen.dsl.ast import BlockAST, ConstAST, ForAST, FunctionAST, Img2ColAST, LoadAST, ScalarArgAST, StoreAST, TensorAST, VarAST
 from kernel_gen.dsl.emit_c import EmitCContext, EmitCError, emit_c_op, emit_c_value
@@ -457,6 +457,95 @@ def test_emit_c_op_rejects_symbol_add_on_non_cpu() -> None:
 
     with pytest.raises(EmitCError, match="symbol scalar ops are cpu-only"):
         emit_c_value(op.result, ctx)
+
+
+# EC-008A
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-02 05:59:07 +0800
+# 最近一次运行成功时间: 2026-04-02 05:59:07 +0800
+# 功能说明: 验证预绑定 result 的 nn.add 可在 cpu target 下生成 cpu::add 调用。
+# 测试目的: 锁定 nn.add 的 memory+memory、memory+const(i32)、memory+symbol.int 三条节点级 emit_c 收口路径，且 const 锚点固定为 `cpu::add(lhs, 1, out);`。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_op_lowers_prebound_nn_add_variants_to_cpu_add
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_op_lowers_prebound_nn_add_variants_to_cpu_add() -> None:
+    memory_type = _make_memory_type([2, 3], [3, 1])
+    space = NnMemorySpaceAttr.from_name("global")
+
+    pair_block = Block(arg_types=[memory_type, memory_type])
+    pair_ctx = _ctx()
+    pair_ctx.bind_name(pair_block.args[0], "lhs")
+    pair_ctx.bind_name(pair_block.args[1], "rhs")
+    pair_add = NnAddOp(pair_block.args[0], pair_block.args[1], memory_type, space)
+    pair_ctx.bind_name(pair_add.result, "out")
+    assert emit_c_op(pair_add, pair_ctx) == "cpu::add(lhs, rhs, out);"
+
+    const_block = Block(arg_types=[memory_type])
+    const_ctx = _ctx()
+    const_ctx.bind_name(const_block.args[0], "lhs")
+    const_value = arith.ConstantOp(IntegerAttr(1, i32))
+    const_add = NnAddOp(const_block.args[0], const_value.result, memory_type, space)
+    const_ctx.bind_name(const_add.result, "out")
+    assert emit_c_op(const_add, const_ctx) == "cpu::add(lhs, 1, out);"
+
+    symbol_block = Block(arg_types=[memory_type, SymbolValueType.from_expr("K")])
+    symbol_ctx = _ctx()
+    symbol_ctx.bind_name(symbol_block.args[0], "lhs")
+    symbol_ctx.bind_name(symbol_block.args[1], "bias")
+    symbol_add = NnAddOp(symbol_block.args[0], symbol_block.args[1], memory_type, space)
+    symbol_ctx.bind_name(symbol_add.result, "out")
+    assert emit_c_op(symbol_add, symbol_ctx) == "cpu::add(lhs, bias, out);"
+
+
+# EC-008B
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-02 05:59:07 +0800
+# 最近一次运行成功时间: 2026-04-02 05:59:07 +0800
+# 功能说明: 验证未预绑定 result、反向 mixed 操作数顺序或非 cpu target 的 nn.add 继续报 unsupported op。
+# 测试目的: 防止节点级 nn.add emitter 越界到函数级 result 分配，或错误接受 `const/symbol + memory` 与非 cpu target。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_op_keeps_nn_add_unsupported_without_prebound_result_or_on_non_cpu
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_op_keeps_nn_add_unsupported_without_prebound_result_or_on_non_cpu() -> None:
+    memory_type = _make_memory_type([2, 3], [3, 1])
+    space = NnMemorySpaceAttr.from_name("global")
+    block = Block(arg_types=[memory_type, memory_type])
+    op = NnAddOp(block.args[0], block.args[1], memory_type, space)
+
+    missing_result_ctx = _ctx()
+    missing_result_ctx.bind_name(block.args[0], "lhs")
+    missing_result_ctx.bind_name(block.args[1], "rhs")
+    with pytest.raises(EmitCError, match="nn.add: unsupported op"):
+        emit_c_op(op, missing_result_ctx)
+
+    non_cpu_ctx = EmitCContext(target="cuda")
+    non_cpu_ctx.bind_name(block.args[0], "lhs")
+    non_cpu_ctx.bind_name(block.args[1], "rhs")
+    non_cpu_ctx.bind_name(op.result, "out")
+    with pytest.raises(EmitCError, match="nn.add: unsupported op"):
+        emit_c_op(op, non_cpu_ctx)
+
+    reverse_const_block = Block(arg_types=[memory_type])
+    reverse_const_ctx = _ctx()
+    reverse_const_value = arith.ConstantOp(IntegerAttr(1, i32))
+    reverse_const_op = NnAddOp(reverse_const_value.result, reverse_const_block.args[0], memory_type, space)
+    reverse_const_ctx.bind_name(reverse_const_block.args[0], "rhs")
+    reverse_const_ctx.bind_name(reverse_const_op.result, "out")
+    with pytest.raises(EmitCError, match="nn.add: unsupported op"):
+        emit_c_op(reverse_const_op, reverse_const_ctx)
+
+    reverse_symbol_block = Block(arg_types=[SymbolValueType.from_expr("K"), memory_type])
+    reverse_symbol_ctx = _ctx()
+    reverse_symbol_ctx.bind_name(reverse_symbol_block.args[0], "bias")
+    reverse_symbol_ctx.bind_name(reverse_symbol_block.args[1], "rhs")
+    reverse_symbol_op = NnAddOp(reverse_symbol_block.args[0], reverse_symbol_block.args[1], memory_type, space)
+    reverse_symbol_ctx.bind_name(reverse_symbol_op.result, "out")
+    with pytest.raises(EmitCError, match="nn.add: unsupported op"):
+        emit_c_op(reverse_symbol_op, reverse_symbol_ctx)
 
 
 # EC-009
