@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`不要啊教练`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/dsl/ast.md`](../../spec/dsl/ast.md)
 - `功能实现`：[`kernel_gen/dsl/ast.py`](../../kernel_gen/dsl/ast.py)
 - `test`：[`test/dsl/test_ast.py`](../../test/dsl/test_ast.py)
@@ -46,6 +46,7 @@
 - DSL 解析入口必须覆盖 `arch` helper：无参 `get_block_id()` / `get_block_num()` / `get_subthread_id()` / `get_subthread_num()` / `get_thread_id()` / `get_thread_num()` 解析为 `ArchQueryAST`；`get_dynamic_memory(space)` 解析为 `ArchGetDynamicMemoryAST`；`launch_kernel(name, block, thread, subthread)` 解析为 `ArchLaunchKernelAST`。
 - 比较表达式入口采用 Python 比较语法；`lhs != rhs` 必须解析为 `CompareExprAST(op="ne")`，以供下游 `nn.ne` lowering 复用同一 AST 语义。
 - 二元乘法入口采用 Python `lhs * rhs` 与 `nn.mul(lhs, rhs)` 双入口；两者都必须解析为 `BinaryExprAST(op="mul")`，以复用后续统一 lowering 语义。
+- 本轮仅为 `symbol.to_float` 链路开放 `-> float` 返回注解与 `float(symbol.int)` 的 AST 语法入口；不得顺手扩展 `double`、`complex` 或其他新注解体系。
 
 ## 公开接口
 
@@ -85,6 +86,8 @@ func_ast = parse_function(add)
 - `get_block_id/get_block_num/get_subthread_id/get_subthread_num/get_thread_id/get_thread_num` helper 仅允许 0 个参数且禁止关键字参数；不满足时必须返回 `Unsupported <helper> arity` 诊断。
 - `get_dynamic_memory(...)` helper 仅允许 1 个位置参数且禁止关键字参数；参数必须是 `MemorySpace` 且仅允许片上空间（`SM/LM/TSM/TLM`），否则必须返回 `Unsupported get_dynamic_memory arity`、`get_dynamic_memory space must be MemorySpace` 或 `get_dynamic_memory space must be on-chip MemorySpace` 诊断。
 - `launch_kernel(...)` helper 仅允许 4 个位置参数且禁止关键字参数；`name` 必须是非空字符串，`block/thread/subthread` 仅做 AST 入口语法校验（必须是正整数或 `SymbolDim` 语义），否则必须返回 `Unsupported launch_kernel arity`、`launch_kernel name must be non-empty str`、`launch_kernel <dim> must be int or SymbolDim` 或 `launch_kernel <dim> must be > 0` 诊断；AST 阶段不承诺 extent 已完成 `!symbol.int` 归一化。
+- `-> float` 返回注解在本轮是合法 AST 入口，但仅用于 `symbol.to_float` 链路；除 `float(symbol.int)` 之外，不在 AST 层扩展新的浮点返回注解体系。
+- `float(value)` 在 AST 层当前仅作为 `symbol.int -> float` 的最小语法入口冻结；本轮只承诺 `def cast_dim(n: int) -> float: return float(n)` 这一类写法可进入后续链路，不在 AST 层扩展 `double`、`complex`、多参数 `float(...)`、关键字参数 `float(...)` 或其他 builtin cast 体系。
 
 返回与限制：
 
@@ -505,6 +508,7 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
   - 覆盖 `launch_kernel(name, block, thread, subthread)` 的语句解析入口语义与 arity/name/extent 错误路径。
   - 覆盖 `load` helper 的参数数量、source 类型与 space 约束的错误路径。
   - 覆盖 `slice` helper 的参数数量、source 类型与 space 约束的错误路径。
+  - 覆盖 `-> float` 返回注解与 `float(symbol.int)` 的 AST 入口合同；当前下游验收标准建议使用 `test_ast_accepts_float_return_annotation_for_symbol_to_float` 与 `test_ast_rejects_non_float_annotation_for_symbol_to_float`，在专项测试落地前不将其写成已闭环映射。
 - 功能与用例清单：
   - AST-001：解析函数生成 `FunctionAST`。（`test_visit_function_builds_ast`）
   - AST-001A：提供独立解析入口。（`test_parse_function_entry`）
@@ -542,3 +546,4 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
   - AST-014P：`launch_kernel` 的参数个数、名称或启动规模非法时，必须在 AST 解析阶段返回约定诊断；合法路径需保留到下游 `arch.launch_kernel` lowering。（`test_parse_function_rejects_invalid_launch_kernel_variants`）
   - AST-015：`lhs != rhs` 必须在 AST 中保持 `CompareExprAST(op="ne")` 语义，并与其他比较表达式共享后续 lowering 入口。（`test_build_func_op_lowers_nn_ne_with_tensor_i1_return_annotation`）
   - AST-018：`nn.mul(lhs, rhs)` 与 `lhs * rhs` 必须共用 `BinaryExprAST(op="mul")` 入口；`nn.mul` 的 arity 负路径继续复用 `Unsupported nn arithmetic arity` 诊断口径。（`test_symbol_scalar_function_lowers_symbol_binary_ops`、`test_parse_function_rejects_unsupported_nn_arithmetic_arity_variants`）
+  - E3 下游验收标准：`test_ast_accepts_float_return_annotation_for_symbol_to_float` 的输入应为 `def cast_dim(n: int) -> float: return float(n)`，预期 AST 解析通过；`test_ast_rejects_non_float_annotation_for_symbol_to_float` 的输入应为超出本轮范围的返回注解，预期固定报错。当前 `test/dsl/test_ast.py` 尚未落地这两个专项用例，因此此处仅冻结后续实现/测试链路应满足的验收口径，不将其写成已闭环映射。
