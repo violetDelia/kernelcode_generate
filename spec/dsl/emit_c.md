@@ -4,12 +4,13 @@
 
 - 定义单个 MLIR op 或 SSA value 到目标后端源码片段的转换规则。
 - 为 [`spec/dsl/gen_kernel.md`](../../spec/dsl/gen_kernel.md) 提供函数体拼装时可复用的节点级生成能力。
+- 约束 `target=cpu` 下 `nn.add` 的节点级发射只输出已绑定目标的 `cpu::add(...)` 语句，不负责函数级 `out/return` 收口。
 - 不负责 `func.func` 级签名拼装、完整函数输出或文件写盘。
 
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`朽木露琪亚`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/dsl/emit_c.md`](../../spec/dsl/emit_c.md)
 - `功能实现`：[`kernel_gen/dsl/emit_c.py`](../../kernel_gen/dsl/emit_c.py)
 - `test`：[`test/dsl/test_emit_c.py`](../../test/dsl/test_emit_c.py)
@@ -25,7 +26,7 @@
 
 - 为常见算术、比较、控制流与访存 op 提供稳定的节点级源码片段生成规则。
 - 保证同一 SSA value 在同一 `EmitCContext` 中具备稳定命名与稳定表达式输出。
-- 为后续实现恢复明确最小支持范围：`arith` 二元算术、`arith.cmpi`、`scf.for`、`symbol.for`、unit-tile `dma.load`/`dma.store`、`dma.alloc`/`dma.view`/`dma.slice`/`dma.deslice`、`symbol.add`（cpu 标量）、`nn.img2col2d`（cpu memory）与错误路径。
+- 为后续实现恢复明确最小支持范围：`arith` 二元算术、`arith.cmpi`、`scf.for`、`symbol.for`、unit-tile `dma.load`/`dma.store`、`dma.alloc`/`dma.view`/`dma.slice`/`dma.deslice`、`symbol.add`（cpu 标量）、`nn.img2col2d`（cpu memory）、`nn.add`（cpu，需预绑定结果目标）与错误路径。
 
 ## 限制与边界
 
@@ -35,11 +36,14 @@
 - 同一接口可针对不同 `target` 生成不同源码，但参数与错误语义必须稳定。
 - 对于无法映射的 op、value 依赖、类型或控制流，必须明确报错，不能静默忽略或降级。
 - 仅新增 `symbol.add` 与 `symbol.for` 的 `target=cpu` 支持；其余 `symbol.*` 仍按不支持处理。
+- `target=cpu` 下 `nn.add` 仅支持在调用方已为 `nn.add.result` 预绑定目标 memory 名称时发射 `cpu::add(...)` 语句；未预绑定结果时必须报错，不能在本层补建临时 `Memory` 变量，也不能生成 `out = temp` 之类的兜底语句。
+- `nn.add` 当前仅覆盖 `memory + memory`、`memory + const(i32)` 与 `memory + !symbol.int` 三类 operand 组合；其余 operand 组合仍按不支持处理。
+- `non-cpu target` 下 `nn.add` 必须按 `unsupported op` 报错，不能降级到其他 helper 或临时实现。
 - 本阶段补齐 `dma.alloc`/`dma.view`/`dma.slice`/`dma.deslice` 与 `nn.img2col2d` 的节点级 CPU 文本映射，用于 conv 链路最小闭环；语义范围以本规范与测试用例为准。
 - `dma.slice`/`dma.deslice` 当前仅支持发射显式 loop nest copy；不得生成 `slice(`/`deslice(` helper 调用，避免引入未声明依赖。
 - 对于需要 backing storage 的 memory（例如 `dma.alloc` 结果、`nn.img2col2d` 结果），当前仅支持**静态** shape（type.shape 全为 `IntAttr`）；动态 shape 必须报错，避免 `new[]` 生命周期不明确导致泄漏。
 - 当 value 类型为 `!symbol.int<"...">` 时，`target=cpu` 默认映射为 `long long`。
-- 当前规范恢复范围仅覆盖 `test/dsl/test_emit_c.py` 已定义的用例映射，不在本阶段扩展到其他 dialect/op。
+- 当前 `test/dsl/test_emit_c.py` 已定义并可直接映射的用例范围以本节 `EC-001` ~ `EC-011` 为准；`EC-012` ~ `EC-016` 在本阶段仅冻结为 `nn.add` 的节点级验收标准，待下游测试落地后再补具体测试映射。
 
 ## 公开接口
 
@@ -101,6 +105,17 @@ stmt = emit_c_op(op, EmitCContext(target="cpu"))
 - `symbol.for` 必须生成与 `scf.for` 同风格的循环语句块，并过滤循环体中的空语句（例如常量 op 产生的空行）。
 - 当前恢复范围下，unit-tile `dma.load`/`dma.store` 必须保留索引顺序与读写方向。
 - `target=cpu` 下 `symbol.add` 必须生成与二元算术等价的赋值语句。
+- `target=cpu` 下 `nn.add` 仅在 `ctx` 已把 `nn.add.result` 绑定到目标 memory 名称时生成 `cpu::add(...)` 语句；若结果未绑定，必须直接报错。
+- `target=cpu` 下 `nn.add` 的最小成功文本示例如下，分别对应 `memory + memory`、`memory + const(i32)` 与 `memory + !symbol.int`：
+
+```cpp
+cpu::add(lhs, rhs, out);
+cpu::add(lhs, 1, out);
+cpu::add(lhs, bias, out);
+```
+
+- `target=cpu` 下 `nn.add` 不得在本层偷偷声明临时 `Memory v0` 承接结果，也不得生成 `out = v0` 之类的二次收口语句。
+- `non-cpu target` 下 `nn.add` 必须报错 `unsupported op`。
 - `target=cpu` 下 `dma.alloc` 必须生成 `shape/stride` 数组与 `Memory<T>` 声明；并为静态 shape 生成 backing buffer。
 - `target=cpu` 下 `dma.view` 必须生成 `offset` 计算，并生成基于源 memory 的视图声明（复用 format/space）。
 - `target=cpu` 下 `dma.slice`/`dma.deslice` 必须发射显式 loop nest copy，避免依赖外部 helper。
@@ -138,6 +153,7 @@ expr = emit_c_value(value, EmitCContext(target="cpu"))
 - 输出表达式必须与 `emit_c_op(...)` 使用的命名策略保持一致。
 - 当 value 为未绑定名称的 `BlockArgument` 时，必须回退为 `arg{index}` 默认命名，避免受访问顺序影响。
 - `target=cpu` 下 `symbol.add` 结果可作为右值表达式生成。
+- `nn.add` 结果属于 memory 写入，不是纯右值表达式；不得通过 `emit_c_value(...)` 兜底生成。
 
 返回与限制：
 
@@ -252,6 +268,8 @@ cpu::img2col2d(input_tile, col_tile, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr);
 - 验证 `EmitCContext` 下 SSA 命名与表达式生成的一致性。
 - 验证不支持 op 与非法 value 依赖的错误路径。
 - 验证 `symbol.add` 仅允许 `target=cpu`；非 cpu target 必须明确报错。
+- 验证 `nn.add` 在 `target=cpu` 下仅对已预绑定目标的三类 operand 组合生成 `cpu::add(...)` 语句。
+- 验证 `nn.add` 在结果未预绑定或 `non-cpu target` 下明确报错，不生成临时 memory 或其他兜底语句。
 - 验证 `symbol.for`、`dma.alloc/view/slice/deslice` 与 `nn.img2col2d` 的最小 CPU 发射闭环，并锁定输出文本不引入 `slice/deslice` helper 与 `nullptr`。
 - 验证重复 `dma.slice/dma.deslice` 发射时辅助变量名保持唯一，避免同一作用域命名冲突。
 
@@ -269,3 +287,8 @@ cpu::img2col2d(input_tile, col_tile, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr);
 - EC-009：`dma.alloc`/`dma.view` 在 cpu target 下可生成最小 CPU 文本片段。（`test_emit_c_op_lowers_dma_alloc_and_view`）
 - EC-010：`symbol.for + dma.alloc + dma.slice + nn.img2col2d + dma.deslice` 链路可发射稳定 CPU 文本片段，且不引入 `slice/deslice` helper 与 `nullptr`。（`test_emit_c_op_lowers_img2col2d_dma_loop_pipeline`）
 - EC-011：重复 `dma.slice/dma.deslice` 发射时辅助变量名必须保持唯一。（`test_emit_c_op_assigns_unique_helper_names_for_repeated_dma_slice_and_deslice`）
+- EC-012：当 `ctx` 已把结果预绑定为 `out` 时，`NnAddOp(memory, memory)` 在 cpu target 下必须精确生成 `cpu::add(lhs, rhs, out);`。（下游待补测试映射）
+- EC-013：当 `ctx` 已把结果预绑定为 `out` 时，`NnAddOp(memory, i32 const)` 在 cpu target 下必须精确生成 `cpu::add(lhs, 1, out);`。（下游待补测试映射）
+- EC-014：当 `ctx` 已把结果预绑定为 `out` 时，`NnAddOp(memory, !symbol.int)` 在 cpu target 下必须精确生成 `cpu::add(lhs, bias, out);`。（下游待补测试映射）
+- EC-015：未预绑定 `nn.add.result` 时，合法 `NnAddOp` 在 cpu target 下必须抛出 `EmitCError`，错误消息包含 `target=cpu: nn.add: unsupported op`。（下游待补测试映射）
+- EC-016：`non-cpu target` 下合法 `NnAddOp` 必须抛出 `EmitCError`，错误消息包含 `target=npu_demo: nn.add: unsupported op`。（下游待补测试映射）
