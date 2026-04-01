@@ -56,3 +56,16 @@
 - 未发现额外改进点。
 - 测试情况：本次为审查阶段，未运行 `pytest` 或 expectation；证据来自 plan/spec/test/expectation 的静态对照与 grep/行号复核。
 - 下一步建议：按计划进入 `E5` spec 任务，仅修改 `spec/dsl/mlir_gen.md`，冻结 `build_func_op` 的函数级返回装配合同。
+时间：2026-04-02 05:48:00 +0800
+任务：T-20260402-c2033b74
+任务目标：将 `wt-20260402-expectation-e4` 中已通过审查的 `E4` spec 成果按最小范围合入主分支，仅包含 `spec/dsl/emit_mlir.md` 与同链路记录文件；完成单次同步、cleanup 与状态封板。
+改动：
+- 核对合并边界：`TODO.md` 中当前 `worktree=wt-20260402-expectation-e4` 仅存在本任务 `T-20260402-c2033b74`；`git -C wt-20260402-expectation-e4 status --short` 仅见 `spec/dsl/emit_mlir.md` 变更，未发现范围外业务文件。
+- 复核主分支差异：`git diff --name-only 9f46e8a..HEAD -- spec/dsl/emit_mlir.md` 无输出，确认自 `wt-20260402-expectation-e4` 基线以来主仓未再修改该文件，因此本次无需人工冲突合并。
+- 将 `wt-20260402-expectation-e4/spec/dsl/emit_mlir.md` 与同链路记录同步到主分支工作目录，复核 `git diff --check -- spec/dsl/emit_mlir.md agents/codex-multi-agents/log/task_records/2026/14/20260402-expectation-e4.md` 通过。
+- 在主分支生成合并提交 `726bcb5`（`T-20260402-c2033b74-merge-expectation-e4`），提交内容仅包含 `spec/dsl/emit_mlir.md` 与 `agents/codex-multi-agents/log/task_records/2026/14/20260402-expectation-e4.md`。
+- 执行 cleanup：`git worktree remove --force wt-20260402-expectation-e4` 与 `git branch -D wt-20260402-expectation-e4`（均 exit 0）；清理后 `git worktree list --porcelain` 不再包含 `wt-20260402-expectation-e4`，其余现存 worktree 保持原样未触碰。
+- 未新增本轮测试；本次合并直接引用链路内最近一次审查结论，证据来自 `ARCHITECTURE/plan/expectation_dsl_mlir_dma_symbol_closure_plan.md`、`spec/dsl/emit_mlir.md`、`test/dsl/test_emit_mlir.py`、`test/dsl/test_ast_visitor.py` 与 expectation 文件的静态对照。
+结论：
+- 完成。`E4` spec 已按限定范围合入主分支，对应 worktree/branch 已清理，无范围外文件混入。
+- 本任务未扩到 `spec/dsl/mlir_gen.md`、实现、测试或 expectation；下一步建议由管理员按计划单独创建后续任务。
