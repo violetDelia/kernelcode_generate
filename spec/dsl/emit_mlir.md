@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`不要啊教练`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)
 - `功能实现`：[`kernel_gen/dsl/emit_mlir.py`](../../kernel_gen/dsl/emit_mlir.py)
 - `test`：[`test/dsl/test_emit_mlir.py`](../../test/dsl/test_emit_mlir.py)
@@ -126,7 +126,14 @@ value = emit_mlir(expr_ast, ctx)
 - `emit_mlir` 必须覆盖 AST 中每一种节点类型。
 - 默认使用当前项目的目标 dialect（例如 `nn`），但节点到 op 的映射必须清晰可追踪。
 - `LoopRange` 触发的 `ForAST` 必须走 `symbol.for` 分支，并保持 symbol 整数值直接作为 DMA operand 传递。
-- 当 `CompareExprAST` 的两侧均为 `!symbol.int<"expr">` 时，`eq` 必须 lowering 为 `symbol.eq`，`ge` 必须 lowering 为 `symbol.ge`，两者结果类型均为 `i1`；其余 symbol 比较操作符必须报错 `Unsupported symbol compare op`。
+- 当 `CompareExprAST` 的两侧均为 `!symbol.int<"expr">` 时，symbol compare family 必须一一 lowering 为对应 `symbol` dialect op，且结果类型统一为 `i1`：
+  - `a == b` -> `symbol.eq`
+  - `a != b` -> `symbol.ne`
+  - `a < b` -> `symbol.lt`
+  - `a <= b` -> `symbol.le`
+  - `a > b` -> `symbol.gt`
+  - `a >= b` -> `symbol.ge`
+- 当比较表达式尝试进入 symbol 路径但任一操作数不是 `!symbol.int<"expr">` 时，必须报具体的 symbol compare operand 类型错误；不得继续使用笼统 `Unsupported symbol compare op` 作为 `ne/lt/le/gt` 的长期失败边界。
 - 当 `CompareExprAST` 进入 memory 路径时，`lhs/rhs` 必须为 `nn.memory` 类型且 `element_type`/`space` 一致；必要时执行隐式 broadcast。若 `element_type`/`space` 不一致或 broadcast 失败，必须报错并保留位置（例如 `Binary op operands must have the same element_type`、`Binary op operands must have the same space`、`Implicit broadcast dimension mismatch`）。memory 路径的比较结果 element type 必须为 `i1`，并保持与 broadcast 对齐后的 shape/space 一致。
 - 当 tensor `truediv` 两侧 dtype 不一致时，必须按固定优先级决议目标 dtype，并在 lowering 中插入 `dma.cast`；`nn.truediv` 的结果类型必须与决议 dtype 一致。
 - 当二元算术 mixed dtype 需要插入显式 cast 时（由上游判定并生成 `DmaCastAST`），`emit_mlir` 必须发射 `dma.cast` 并保证 `nn.sub` 的结果类型与 dtype promotion 结果一致；当前公开覆盖仅限 `nn.sub` 的 mixed dtype 场景。
@@ -136,12 +143,13 @@ value = emit_mlir(expr_ast, ctx)
   - `alloc(...)`：lowering 为 `dma.alloc`，返回新的 memory value。
   - `copy(...)`：lowering 为 `dma.copy`，返回目标 memory value。
   - `cast(...)`：lowering 为 `dma.cast`，返回转换后 memory value。
-  - `view(...)`：lowering 为 `dma.view`，返回视图 memory value。
+  - `view(...)`：lowering 为 `dma.view`，返回视图 memory value；`view(...) -> dma.view` 是一一映射，不得回退为 generic unsupported。若 source 不是 `nn.memory`，或 offset/size/stride 参数不满足 DMA helper 约束，必须报具体的 `view(...)` lowering 错误。
   - `reshape(...)`：lowering 为 `dma.reshape`，返回重排后的 memory value。
   - `flatten(...)`：按一维 `reshape` 语义 lowering，返回一维 memory value。
   - `load(...)` / `slice(...)`：lowering 为读取类 DMA op，返回读取结果。
   - `store(...)` / `deslice(...)`：lowering 为写回类 DMA op，作为语句执行。
   - `free(...)`：lowering 为单个 `dma.free` 语句，不产生新的 SSA 返回值。
+- 当 AST 表达 `float(symbol.int)` 转换入口时，`emit_mlir` 必须 lowering 为 `symbol.to_float`，返回 `f32` 结果；`float(n) -> symbol.to_float` 是当前公开合同。若 source 不是 `!symbol.int<"expr">`，则必须报具体的 source 类型错误，而不是继续使用笼统 `Unsupported annotation` 或 generic unsupported 失败边界。
 - img2col helper 的公开 lowering 约束如下：
   - `img2col1d(...)`：lowering 为 `nn.img2col1d`，返回 `nn.memory` 结果。
   - `img2col2d(...)`：lowering 为 `nn.img2col2d`，返回 `nn.memory` 结果。
@@ -151,10 +159,12 @@ value = emit_mlir(expr_ast, ctx)
 
 - `ConstAST`：生成常量或等价字面量 op/value。
 - `BinaryExprAST(add/sub/mul/div/floordiv)`：生成对应的二元算术 op。
-- `CompareExprAST(eq/ne/lt/le/gt/ge)`：在 memory 路径生成对应 `nn` 比较 op（结果 `element_type` 为 `i1`），必要时隐式 broadcast；在 symbol 路径仅支持 `eq/ge`，分别生成 `symbol.eq/symbol.ge`。
+- `CompareExprAST(eq/ne/lt/le/gt/ge)`：在 memory 路径生成对应 `nn` 比较 op（结果 `element_type` 为 `i1`），必要时隐式 broadcast；在 symbol 路径按 DSL 写法一一生成 `symbol.eq/symbol.ne/symbol.lt/symbol.le/symbol.gt/symbol.ge`。
 - `LoadAST`：生成张量读取相关 op/value；当携带 `sizes` 时发射 `dma.slice`。
 - `StoreAST`：生成张量写入相关 op；当携带 `sizes` 时发射 `dma.deslice`。
 - `CallAST(alloc/copy/cast/view/reshape/flatten)`：生成对应 DMA memory 结果。
+- `CallAST(view)`：一一生成 `dma.view` memory 结果。
+- `CallAST(float(symbol.int))`：生成 `symbol.to_float`，返回 `f32`。
 - `CallAST(free)`：发射单个无返回值 `dma.free` 语句。
 - `CallAST(img2col1d/img2col2d)`：分别生成 `nn.img2col1d/nn.img2col2d` memory 结果。
 - `ForAST`：当来源于 `LoopRange(start, end, step)` 且边界为 symbol 整数时，生成 `symbol.for`；循环体内若包含 `dma.slice` / `dma.deslice`，其 DMA 标量 operand 直接使用 `!symbol.int<"expr">` value，不生成 `arith.index_cast`。
@@ -226,13 +236,13 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-015：`alloc(...)` lowering 为 `dma.alloc` 并返回 memory 结果。（`test_emit_mlir_dma_alloc_lowering`）
   - EMIT-016：`copy(...)` lowering 为 `dma.copy` 并返回目标 memory 结果。（`test_emit_mlir_dma_copy_lowering`）
   - EMIT-017：`cast(...)` lowering 为 `dma.cast` 并返回转换后的 memory 结果。（`test_emit_mlir_dma_cast_lowering`）
-  - EMIT-018：`view(...)` lowering 为 `dma.view` 并返回视图 memory 结果。（`test_emit_mlir_dma_view_lowering`）
+  - EMIT-018：`view(...)` lowering 为 `dma.view` 并返回视图 memory 结果；source 或 DMA 参数不合法时必须报具体 `view(...)` lowering 错误，而不是 generic unsupported。（`test_emit_mlir_dma_view_lowering`）
   - EMIT-019：`reshape(...)` lowering 为 `dma.reshape` 并返回重排后的 memory 结果。（`test_emit_mlir_dma_reshape_lowering`）
   - EMIT-020：`flatten(...)` 以一维 `reshape` 语义 lowering，返回一维 memory 结果。（`test_emit_mlir_dma_flatten_lowering`）
   - EMIT-021：`free(...)` 作为无返回值语句执行，不产生新的 SSA 结果。（`test_emit_mlir_dma_free_statement`）
   - EMIT-022：`ArchQueryAST(query_name="get_block_id")` lowering 为单个 `arch.get_block_id`，并返回 `!symbol.int<"block_id">`。（`test_emit_mlir_lowers_arch_get_block_id_query`）
   - EMIT-023：`ArchQueryAST(query_name="get_block_num")` lowering 为单个 `arch.get_block_num`，并返回 `!symbol.int<"block_num">`。（`test_emit_mlir_lowers_arch_get_block_num_query`）
-  - EMIT-024：纯 symbol 标量 `>=` 比较在 emit 阶段 lowering 为 `symbol.ge` 且结果为 `i1`；对 symbol 路径中除 `eq/ge` 以外的比较操作符报错 `Unsupported symbol compare op`。（`test_emit_mlir.py::test_emit_mlir_lowers_symbol_ge`、`test_ast_visitor.py::test_emit_mlir_lowers_symbol_ge`）
+  - EMIT-024：纯 symbol 标量 compare family 在 emit 阶段按 DSL 写法一一 lowering 为 `symbol.eq/ne/lt/le/gt/ge`，结果均为 `i1`；`ge` 已有回归测试，`gt/le/lt/ne` 当前冻结为下游待补测试映射。（现有映射：`test_emit_mlir.py::test_emit_mlir_lowers_symbol_ge`、`test_ast_visitor.py::test_emit_mlir_lowers_symbol_ge`；下游待补测试映射：`test_emit_mlir_lowers_symbol_gt`、`test_emit_mlir_lowers_symbol_le`、`test_emit_mlir_lowers_symbol_lt`、`test_emit_mlir_lowers_symbol_ne`）
   - EMIT-025：`ArchQueryAST(query_name="get_subthread_id")` lowering 为单个 `arch.get_subthread_id`，并返回 `!symbol.int<"subthread_id">`。（`test_emit_mlir_lowers_arch_get_subthread_id_query`）
   - EMIT-026：`ArchQueryAST(query_name="get_thread_id")` lowering 为单个 `arch.get_thread_id`，并返回 `!symbol.int<"thread_id">`。（`test_emit_mlir_lowers_arch_get_thread_id_query`）
   - EMIT-027：`ArchQueryAST(query_name="get_subthread_num")` lowering 为单个 `arch.get_subthread_num`，并返回 `!symbol.int<"subthread_num">`。（`test_emit_mlir_lowers_arch_get_subthread_num_query`）
@@ -249,3 +259,4 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-033：`nn.add` mixed memory+const/symbol lowering 需按 `i32 < f16 < f32` 执行 dtype promotion，`!symbol.int` 按 `i32` 参与决议；仅允许一侧为 memory 并按需插入 `dma.cast`，纯 scalar/symbol 双侧输入必须拒绝。（`test/dialect/test_nn_dialect.py::test_add_op_accepts_memory_const_rhs`、`test/dialect/test_nn_dialect.py::test_add_op_accepts_memory_symbol_rhs`、`test/dialect/test_nn_dialect.py::test_add_op_rejects_pure_scalar_operands`）
   - EMIT-034：`CallAST(img2col1d)` 必须 lowering 为 `nn.img2col1d`，并保持参数到属性/operand 的节点级一一映射；禁止引入 kernel dialect / `nn_to_kernel` / `cpu::img2col2d` 语义。（`test/dsl/test_emit_mlir.py::test_emit_mlir_img2col1d_lowering`）
   - EMIT-035：`CallAST(img2col2d)` 必须 lowering 为 `nn.img2col2d`，并与 `ForAST + dma.slice/dma.deslice` 协同路径保持节点级映射一致，循环迭代与 DMA 标量 operand 继续保持 `!symbol.int` 语义。（`test/dsl/test_emit_mlir.py::test_emit_mlir_img2col2d_with_loop_slice_deslice_lowering`、`test/dsl/test_mlir_gen.py::test_build_func_op_supports_symbolic_for_loop_dma_without_return`、`test/dsl/test_ast_visitor.py::test_build_func_op_supports_symbolic_for_loop_dma_without_return`）
+  - EMIT-036：`float(symbol.int)` 必须 lowering 为 `symbol.to_float`，结果类型固定为 `f32`；source 非 `!symbol.int<"...">` 时必须报具体类型错误。（下游待补测试映射：`test_emit_mlir_lowers_symbol_to_float`）
