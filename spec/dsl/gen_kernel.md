@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`jcc你莫辜负`
 - `spec`：[`spec/dsl/gen_kernel.md`](../../spec/dsl/gen_kernel.md)
 - `功能实现`：[`kernel_gen/dsl/gen_kernel.py`](../../kernel_gen/dsl/gen_kernel.py)
 - `test`：[`test/dsl/test_gen_kernel.py`](../../test/dsl/test_gen_kernel.py)
@@ -26,6 +26,7 @@
 - 为优化后的单个 MLIR `func.func` 提供稳定的函数级后端源码生成能力。
 - 统一约束签名、参数顺序、输出参数风格与函数体拼装规则。
 - 明确支持：只读 `Memory` 输入、`Memory` 结果降为显式输出参数、标量参数顺序与默认命名保持、`emit_c` 错误向上抛出。
+- 明确支持：`f32/f64` 类型在 `target=cpu` 下映射为 `float/double`，用于 `Memory<float>/Memory<double>` 与 `float/double` 标量参数生成。
 - 支持 `!symbol.int<"...">` 标量返回在 `target=cpu` 下生成函数返回值文本。
 
 ## 限制与边界
@@ -162,3 +163,4 @@ body = gen_body(func_op, ctx)
 - GK-009：生成源码保留函数名与已命名参数名；当 `gen_signature` 可观察到输入参数缺失 `arg_attrs.name` 时，生成源码沿用 `arg{index}` 默认名。（`test_gen_kernel_preserves_function_and_arg_names`）
 - GK-010：`!symbol.int<"...">` 标量返回可生成函数返回值。（`test_gen_kernel_supports_symbol_scalar_return`）
 - GK-011：非 cpu target 下 `!symbol.int<"...">` 标量返回必须报错，防止跨 target 误生成返回签名/函数体。（`test_gen_kernel_rejects_symbol_scalar_return_on_non_cpu`）
+- GK-012：`f32/f64` 标量与 `Memory<f32/f64>` 可生成 `float/double` 与 `Memory<float>/Memory<double>` 形式签名。（`test_gen_signature_supports_float32_scalar_and_memory`）

@@ -1,7 +1,7 @@
 """gen_kernel tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 覆盖 func.func 到目标函数源码的组装行为。
@@ -28,7 +28,7 @@ import importlib
 
 import pytest
 from xdsl.dialects import arith, func, scf
-from xdsl.dialects.builtin import ArrayAttr, DictionaryAttr, FunctionType, IndexType, IntAttr, IntegerAttr, StringAttr, f32, i1, i32
+from xdsl.dialects.builtin import ArrayAttr, DictionaryAttr, FunctionType, IndexType, IntAttr, IntegerAttr, StringAttr, f16, f32, f64, i1, i32
 from xdsl.ir import Block, Region
 from xdsl.irdl import IRDLOperation, irdl_op_definition, result_def
 
@@ -57,11 +57,11 @@ def _ctx() -> EmitCContext:
     return EmitCContext(target="cpu")
 
 
-def _make_memory_type(shape: list[int], stride: list[int], space: str = "global") -> NnMemoryType:
+def _make_memory_type(shape: list[int], stride: list[int], element_type: object = i32, space: str = "global") -> NnMemoryType:
     return NnMemoryType(
         ArrayAttr([IntAttr(dim) for dim in shape]),
         ArrayAttr([IntAttr(dim) for dim in stride]),
-        i32,
+        element_type,
         NnMemorySpaceAttr.from_name(space),
     )
 
@@ -322,10 +322,10 @@ def test_gen_signature_rejects_unsupported_return_form() -> None:
         gen_signature(tuple_func, _ctx())
     assert "unsupported return form" in str(exc_info.value)
 
-    float_block = Block(arg_types=[f32])
+    float_block = Block(arg_types=[f16])
     float_block.add_op(func.ReturnOp())
-    float_type = FunctionType.from_lists([f32], [])
-    float_func = func.FuncOp("float_arg", float_type, Region(float_block))
+    float_type = FunctionType.from_lists([f16], [])
+    float_func = func.FuncOp("f16_arg", float_type, Region(float_block))
     with pytest.raises(TypeError) as exc_info:
         gen_signature(float_func, _ctx())
     assert "unsupported type" in str(exc_info.value)
@@ -337,6 +337,38 @@ def test_gen_signature_rejects_unsupported_return_form() -> None:
     with pytest.raises(GenKernelError) as exc_info:
         gen_body(bad_body_func, _ctx())
     assert "unsupported return form" in str(exc_info.value)
+
+
+# GK-012
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-01 15:07:50 +0800
+# 最近一次运行成功时间: 2026-04-01 15:07:50 +0800
+# 功能说明: 验证 f32/f64 标量与 Memory<f32/f64> 可生成 float/double 与 Memory<float>/Memory<double> 形式签名。
+# 测试目的: 锁定 gen_signature 对 f32/f64 的类型映射，避免 conv2d 链路在函数签名阶段被 TypeError 阻断或类型退化。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_signature_supports_float32_scalar_and_memory
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+
+def test_gen_signature_supports_float32_scalar_and_memory() -> None:
+    mem_f32 = _make_memory_type([2, 2], [2, 1], element_type=f32)
+    block_f32 = Block(arg_types=[mem_f32, f32])
+    block_f32.add_op(func.ReturnOp(block_f32.args[0]))
+    func_op_f32 = _func("float_kernel", [mem_f32, f32], [mem_f32], block_f32, ("input", "alpha"))
+
+    signature_f32 = gen_signature(func_op_f32, _ctx())
+
+    assert signature_f32 == "void float_kernel(const Memory<float>& input, float alpha, Memory<float>& out)"
+
+    mem_f64 = _make_memory_type([2, 2], [2, 1], element_type=f64)
+    block_f64 = Block(arg_types=[mem_f64, f64])
+    block_f64.add_op(func.ReturnOp(block_f64.args[0]))
+    func_op_f64 = _func("double_kernel", [mem_f64, f64], [mem_f64], block_f64, ("input", "alpha"))
+
+    signature_f64 = gen_signature(func_op_f64, _ctx())
+
+    assert signature_f64 == "void double_kernel(const Memory<double>& input, double alpha, Memory<double>& out)"
 
 
 # GK-009
