@@ -145,6 +145,102 @@ expr = emit_c_value(value, EmitCContext(target="cpu"))
 - 返回语义：可嵌入右值位置的表达式文本。
 - 限制条件：当前恢复范围覆盖算术表达式、比较表达式、常量、unit-tile `dma.load` 结果与 `symbol.add` 标量表达式（仅 cpu）。
 
+## CPU 节点级发射规则
+
+### 适用范围
+
+- 以下规则仅适用于 `target=cpu`，且只定义单个 op 在函数体中的节点级语句/语句块形态。
+- 本层只负责 tile-local `Memory<T>` 声明、memory 视图重解释、显式 copy loop、`cpu::img2col2d(...)` 调用与局部计算节点本身。
+- 本层不负责固定 tile 常量、外层分块循环、完整函数签名或最终写回 `out` 的整体骨架；这些由 [`spec/dsl/gen_kernel.md`](../../spec/dsl/gen_kernel.md) 负责。
+- 本层不得通过 `kernel dialect` / `nn_to_kernel` 中转补语义，也不得引入新的 `slice(...)` / `deslice(...)` helper API。
+
+### `dma.alloc`
+
+功能说明：
+
+- 为 tile-local buffer 或其他局部 `nn.memory` 结果生成独立的 `shape/stride` 数组、backing storage 与 `Memory<T>` 声明。
+
+使用示例：
+
+```cpp
+long long col_tile_shape[3] = {1, 4, 9};
+long long col_tile_stride[3] = {36, 9, 1};
+float col_tile_buffer[36] = {};
+Memory<float> col_tile(col_tile_buffer, 3, col_tile_shape, col_tile_stride, MemoryFormat::Norm, MemorySpace::LM);
+```
+
+注意事项：
+
+- 发射结果必须是可直接被后续 `nn.img2col2d`、局部计算或 `dma.deslice` 消费的节点级语句，不能把 `alloc` 延后到 `gen_kernel` 再决定。
+- 静态 shape 必须生成有效 backing storage；当前不支持动态 shape backing，遇到动态 shape 必须报错。
+- `Memory<T>` 的 `format/space` 取自结果 type，不在本层额外发明 CPU 专用旁路对象。
+
+### `dma.view`
+
+功能说明：
+
+- 基于源 `Memory<T>` 发射偏移计算与子视图声明，用于把已有 memory 重新解释为新的 shape/stride 视图。
+
+使用示例：
+
+```cpp
+long long view_offset0 = (0 * source.stride()[0]) + (0 * source.stride()[1]);
+long long v0_shape[2] = {2, 2};
+long long v0_stride[2] = {1, 1};
+Memory<float> v0(const_cast<float*>(source.data()) + view_offset0, 2, v0_shape, v0_stride, source.format(), source.space());
+```
+
+注意事项：
+
+- `offset` 必须按源 memory 的 `stride()` 计算；目标视图复用源 memory 的 `format()` 与 `space()`。
+- `dma.view` 只负责节点级视图表达，不额外分配 backing storage，也不决定该视图是否最终对应 `out` 或 tile-local buffer。
+
+### `dma.slice` / `dma.deslice`
+
+功能说明：
+
+- 将 DMA 拷贝节点发射为显式 loop nest copy，使用 `Memory::at(long long indices[])` 完成 source/target 间的数据搬运。
+
+使用示例：
+
+```cpp
+long long dma0_src_indices[4] = {0, 0, 0, 0};
+long long dma0_dst_indices[4] = {0, 0, 0, 0};
+for (long long dma0_i0 = 0; dma0_i0 < 1; ++dma0_i0) {
+    /* ... */
+    tile_local.at(dma0_dst_indices) = input_tile.at(dma0_src_indices);
+}
+```
+
+注意事项：
+
+- `dma.slice` 负责把带 `offsets/sizes/strides` 的源区域拷贝到单位偏移的 tile-local target。
+- `dma.deslice` 负责把单位偏移 source 拷回带 `offsets/sizes/strides` 的 target 区域；当 target 是最终 `out` 时，本层只发该节点自己的显式写回 loop，不负责定义整个 kernel 的输出骨架。
+- 当前规范禁止生成 `slice(` / `deslice(` helper 调用；必须继续发显式 copy loop。
+- 同一作用域重复发射 `dma.slice` / `dma.deslice` 时，辅助索引缓冲区与循环变量名必须保持唯一，避免节点级文本冲突。
+
+### `nn.img2col2d`
+
+功能说明：
+
+- 发射 `nn.img2col2d` 的 CPU 节点级文本：先声明结果 `Memory<T>`（含 backing storage），再发出 `cpu::img2col2d(...)` 调用。
+
+使用示例：
+
+```cpp
+long long col_tile_shape[3] = {1, 4, 9};
+long long col_tile_stride[3] = {36, 9, 1};
+float col_tile_buffer[36] = {};
+Memory<float> col_tile(col_tile_buffer, 3, col_tile_shape, col_tile_stride, MemoryFormat::Norm, MemorySpace::LM);
+cpu::img2col2d(input_tile, col_tile, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr);
+```
+
+注意事项：
+
+- 目标调用语句必须收敛为接近 `cpu::img2col2d(input_tile, col_tile, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr);` 的形态。
+- `input_tile` 与 `col_tile` 都是节点级 `Memory<T>` 引用；`col_tile` 可来自前序 `dma.alloc`，不得在本层改写为其他 helper 或 `kernel dialect` 中转。
+- `nn.img2col2d` 只负责当前节点的 tile-local 展开语句，不负责固定 tile 常量、外层分块循环或最终 `out` 写回。
+
 ## 测试
 
 - 测试文件：[`test/dsl/test_emit_c.py`](../../test/dsl/test_emit_c.py)
