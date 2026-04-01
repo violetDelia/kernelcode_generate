@@ -6,10 +6,10 @@
 
 | 任务 | 依赖 | 记录文件 | worktree | 当前进度 |
 | --- | --- | --- | --- | --- |
-| P1 | 无 | `20260401-ptr-symbol-func-input-p1.md` | `/wt-20260401-ptr-p1` | `spec进行中（2026-04-01 02:36:58 +0800，T-20260401-098531c0，睡觉小分队）` |
-| P2 | P1 | `20260401-ptr-symbol-func-input-p2.md` | `/wt-20260401-ptr-p2` | `已建档（T-20260401-35733aa2，待 P1 DONE）` |
-| P3 | P1 | `20260401-ptr-symbol-func-input-p3.md` | `/wt-20260401-ptr-p3` | `已建档（T-20260401-097adbdb，待 P1 DONE）` |
-| P4 | P1、P3 | `20260401-ptr-symbol-func-input-p4.md` | `/wt-20260401-ptr-p4` | `已建档（T-20260401-35484fb5，待 P1/P3 DONE）` |
+| P1 | 无 | `20260401-ptr-symbol-func-input-p1.md` | `/wt-20260401-ptr-p1` | `已完成并合并（2026-04-01 04:44:49 +0800，T-20260401-15913d60，李白）` |
+| P2 | P1 | `20260401-ptr-symbol-func-input-p2.md` | `/wt-20260401-ptr-p2` | `已放行（T-20260401-35733aa2，待执行）` |
+| P3 | P1 | `20260401-ptr-symbol-func-input-p3.md` | `/wt-20260401-ptr-p3` | `spec完成（2026-04-01 04:56:36 +0800，T-20260401-097adbdb，咯咯咯）` |
+| P4 | P1、P3 | `20260401-ptr-symbol-func-input-p4.md` | `/wt-20260401-ptr-p4` | `已放行（T-20260401-35484fb5，待执行）` |
 | P5 | P3、P4 | `20260401-ptr-symbol-func-input-p5.md` | `/wt-20260401-ptr-p5` | `已建档（T-20260401-34a5e426，待 P3/P4 DONE）` |
 | P6 | P2、P3、P4 | `20260401-ptr-symbol-func-input-p6.md` | `/wt-20260401-ptr-p6` | `已建档（T-20260401-94085d65，待 P2/P3/P4 DONE）` |
 | I1 | — |  |  |  |
@@ -19,7 +19,7 @@
 
 - 本计划基于当前仓库实现重新拟定，用来把 `Ptr` 相关链路从“已有 spec/dialect/AST 基线”推进到“用户可直接构造 `Ptr(dtype)` 并完成函数输入 lowering”的最终目标。
 - 下文只以当前实现为起点描述已具备能力、最终目标和剩余 gap；管理员后续分发应直接按本计划推进。
-- 当前最关键的判断是：`spec/symbol_variable/ptr.md`、`symbol.ptr` 类型和 `PtrArgAST` 已经存在，但 Python 包入口与 `build_func_op(...)` 侧还没有把这条链真正接通。
+- 当前最关键的判断是：P1 已在主线补齐 `Ptr(dtype)` 运行时对象与独立测试，而 P3 负责冻结 `symbol.ptr` 的 dialect 契约；当前主阻塞已收敛为 Python 包入口导出、`symbol.ptr` 的 dialect 测试闭环，以及 `build_func_op(...)` 侧的签名 lowering。
 
 ## 使用示例
 
@@ -35,7 +35,7 @@ rg -n 'class Ptr|PtrArgAST|symbol\.ptr|!symbol\.ptr' spec kernel_gen/dsl/ast.py 
 ## 文档信息
 
 - 创建者：`大闸蟹`
-- 最后一次更改：`大闸蟹`
+- 最后一次更改：`咯咯咯`
 - `文档`：[`ARCHITECTURE/plan/ptr_symbol_func_input_plan.md`](../../ARCHITECTURE/plan/ptr_symbol_func_input_plan.md)
 - `spec`：
   - [`spec/symbol_variable/ptr.md`](../../spec/symbol_variable/ptr.md)
@@ -45,11 +45,13 @@ rg -n 'class Ptr|PtrArgAST|symbol\.ptr|!symbol\.ptr' spec kernel_gen/dsl/ast.py 
   - [`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)
   - [`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
 - `功能实现`：
+  - [`kernel_gen/symbol_variable/ptr.py`](../../kernel_gen/symbol_variable/ptr.py)
   - [`kernel_gen/symbol_variable/__init__.py`](../../kernel_gen/symbol_variable/__init__.py)
   - [`kernel_gen/dialect/symbol.py`](../../kernel_gen/dialect/symbol.py)
   - [`kernel_gen/dsl/ast.py`](../../kernel_gen/dsl/ast.py)
   - [`kernel_gen/dsl/mlir_gen.py`](../../kernel_gen/dsl/mlir_gen.py)
 - `test`：
+  - [`test/symbol_variable/test_ptr.py`](../../test/symbol_variable/test_ptr.py)
   - [`test/symbol_variable/test_package_api.py`](../../test/symbol_variable/test_package_api.py)
   - [`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)
   - [`test/dsl/test_ast.py`](../../test/dsl/test_ast.py)
@@ -61,16 +63,17 @@ rg -n 'class Ptr|PtrArgAST|symbol\.ptr|!symbol\.ptr' spec kernel_gen/dsl/ast.py 
 ### 已具备
 
 - [`spec/symbol_variable/ptr.md`](../../spec/symbol_variable/ptr.md) 已经定义 `Ptr(dtype)` 的公开语义。
+- 主线已具备 [`kernel_gen/symbol_variable/ptr.py`](../../kernel_gen/symbol_variable/ptr.py) 与 [`test/symbol_variable/test_ptr.py`](../../test/symbol_variable/test_ptr.py)，P1 的 `Ptr(dtype)` 运行时对象、`ptr.dtype`、`repr(ptr)` 与缺参/多参错误边界已形成最小闭环。
 - [`kernel_gen/dialect/symbol.py`](../../kernel_gen/dialect/symbol.py) 已经实现 `symbol.ptr` 类型承载。
 - [`kernel_gen/dsl/ast.py`](../../kernel_gen/dsl/ast.py) 已经包含 `PtrArgAST`，并写入 `Ptr(dtype)` 注解解析分支。
 
 ### 当前断点
 
-1. [`kernel_gen/symbol_variable/`](../../kernel_gen/symbol_variable) 当前没有 `ptr.py`；[`kernel_gen/symbol_variable/__init__.py`](../../kernel_gen/symbol_variable/__init__.py) 也没有导出 `Ptr`。这意味着用户还没有可直接构造的 Python 运行时对象。
+1. [`kernel_gen/symbol_variable/__init__.py`](../../kernel_gen/symbol_variable/__init__.py) 当前仍没有导出 `Ptr`，因此用户还不能通过 `from kernel_gen.symbol_variable import Ptr` 走包入口直接构造该对象。
 
-2. [`kernel_gen/dsl/mlir_gen.py`](../../kernel_gen/dsl/mlir_gen.py) 当前没有 `PtrArgAST`、`symbol.ptr` 或 `Pointer argument ...` 相关签名 lowering 逻辑，因此 `build_func_op(...)` 还不能把 `Ptr(dtype)` 形参稳定 lower 为 `!symbol.ptr<dtype>`。
+2. [`spec/dialect/symbol.md`](../../spec/dialect/symbol.md) 与 [`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py) 当前尚未形成 `SymbolPtrType` 的公开契约与测试闭环；`symbol.ptr` 实现已存在，但缺少与 parse/print/verifier 对齐的 spec/test 锚点。
 
-3. 当前测试集中也没有 `test/symbol_variable/test_ptr.py`，说明 `Ptr` 运行时对象本身仍未形成独立测试闭环。
+3. [`kernel_gen/dsl/mlir_gen.py`](../../kernel_gen/dsl/mlir_gen.py) 当前没有 `PtrArgAST`、`symbol.ptr` 或 `Pointer argument ...` 相关签名 lowering 逻辑，因此 `build_func_op(...)` 还不能把 `Ptr(dtype)` 形参稳定 lower 为 `!symbol.ptr<dtype>`。
 
 ## 最终目标
 
@@ -87,14 +90,14 @@ rg -n 'class Ptr|PtrArgAST|symbol\.ptr|!symbol\.ptr' spec kernel_gen/dsl/ast.py 
 
 ## 本轮收口顺序
 
-1. 在 [`kernel_gen/symbol_variable/`](../../kernel_gen/symbol_variable) 中新增 `Ptr` 运行时对象，并在 [`kernel_gen/symbol_variable/__init__.py`](../../kernel_gen/symbol_variable/__init__.py) 对外导出。
-2. 为 `Ptr` 运行时对象补独立测试，覆盖构造参数数量、dtype 保留、与 `Memory/SymbolDim` 的职责边界。
+1. 先在 [`spec/dialect/symbol.md`](../../spec/dialect/symbol.md) 冻结 `SymbolPtrType` / `!symbol.ptr<dtype>` 的公开契约，并在实现阶段为 [`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py) 补 parse/print/verifier 用例。
+2. 再在 [`kernel_gen/symbol_variable/__init__.py`](../../kernel_gen/symbol_variable/__init__.py) 中对外导出 `Ptr`，让 Python 包入口与已合并的 P1 运行时对象接通。
 3. 在 [`kernel_gen/dsl/mlir_gen.py`](../../kernel_gen/dsl/mlir_gen.py) 中接通 `PtrArgAST + Ptr(dtype)` 到 `!symbol.ptr<dtype>` 的函数签名 lowering，并补对应测试。
 4. 在 `mlir_gen` 接通后，再确认 [`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md) 的 body-level 拒绝边界与实现一致。
 
 ## 管理员执行口径
 
-- `Ptr` 运行时对象和 `mlir_gen` 签名 lowering 必须连续推进；前者不落地，后者无法形成可运行入口。
+- `symbol.ptr` 的 dialect 契约和测试必须先闭环，再继续放大到 package export 或 `mlir_gen` 签名 lowering；否则后续链路会缺少统一的 IR 类型基线。
 - `Ptr` 不属于 body-level 运算功能，本轮不要分发任何 `ptr` 算术或比较相关实现任务。
 - 若执行者试图把 `Ptr` 实现成 `Memory`、`SymbolDim` 或其它现有对象的兼容别名，应直接退回。
 
@@ -121,4 +124,4 @@ rg -n 'class Ptr|PtrArgAST|symbol\.ptr|!symbol\.ptr' spec kernel_gen/dsl/ast.py 
 
 ## 当前最直接的下一步
 
-- 先补 [`kernel_gen/symbol_variable/`](../../kernel_gen/symbol_variable) 中的 `Ptr` 运行时对象和包导出；这是整条 `ptr` 输入链从规格骨架走向真实可用入口的第一道硬断点。
+- 沿 P3 对 [`spec/dialect/symbol.md`](../../spec/dialect/symbol.md) 的收口结果，先补 `SymbolPtrType` 对应的 dialect 测试与最小实现对齐；并行链路再由 P2 处理包入口导出。

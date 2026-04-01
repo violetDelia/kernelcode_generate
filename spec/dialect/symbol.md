@@ -2,12 +2,12 @@
 
 ## 功能简介
 
-定义 `symbol dialect` 的类型与基础构件，用于在 IR 中显式表示“带符号值语义的整型标量”。该方言的核心目标是让类型本身携带一个符号表达，例如 `!symbol.int<"N">` 表示“这是一个整数值，其值语义为符号 `N`”。本方言同时作为 memory 相关符号标量语义的唯一归属：`shape`、`stride`、`offset`、`size`、循环边界等位置只要进入 IR 并需要表达单个整数符号值，就统一落到 `symbol dialect`。在此基础上，本方言允许最小范围的整数符号算术与比较 op，用于在 IR 中显式表达 `symbol.int` 标量之间的加、减、乘、除、整除以及比较计算，并提供 `symbol.to_int`（转为普通整型）与 `symbol.to_float`（转为 `f32`）两类显式类型转换 op。该方言不负责张量、内存容器、通用控制流或超出最小整数符号算术/比较范围的数值计算语义。
+定义 `symbol dialect` 的类型与基础构件，用于在 IR 中显式表示“带符号值语义的整型标量”以及“最小 pointer type 承载”。该方言的核心目标是让类型本身携带一个符号表达，例如 `!symbol.int<"N">` 表示“这是一个整数值，其值语义为符号 `N`”。本方言同时作为 memory 相关符号标量语义的唯一归属：`shape`、`stride`、`offset`、`size`、循环边界等位置只要进入 IR 并需要表达单个整数符号值，就统一落到 `symbol dialect`。在此基础上，本方言允许最小范围的整数符号算术与比较 op，用于在 IR 中显式表达 `symbol.int` 标量之间的加、减、乘、除、整除以及比较计算，并提供 `symbol.to_int`（转为普通整型）与 `symbol.to_float`（转为 `f32`）两类显式类型转换 op；同时提供 `!symbol.ptr<dtype>` 作为 DSL `Ptr(dtype)` 在 IR 类型层的唯一最小载体。该方言不负责张量、内存容器、通用控制流、pointer body op，或超出最小整数符号算术/比较范围的数值计算语义。
 
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`小李飞刀`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/dialect/symbol.md`](../../spec/dialect/symbol.md)
 - `test`：[`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)
 - `功能实现`：[`kernel_gen/dialect/symbol.py`](../../kernel_gen/dialect/symbol.py)
@@ -16,6 +16,7 @@
 
 - [`spec/symbol_variable/symbol_dim.md`](../../spec/symbol_variable/symbol_dim.md)：提供符号维度与符号表达的基础语义。
 - [`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)：高层 `Memory` 容器复用本方言的 memory 相关符号标量语义。
+- [`spec/symbol_variable/ptr.md`](../../spec/symbol_variable/ptr.md)：定义 Python 上层 `Ptr(dtype)` 的公开语义；本文件负责其 IR 层 `!symbol.ptr<dtype>` 类型归属。
 - [`spec/dialect/nn.md`](../../spec/dialect/nn.md)：提供当前 IR 层唯一合法的 `MemoryType`（当前文本载体仍为 `!nn.memory<...>`）。
 - [`kernel_gen/dialect/symbol.py`](../../kernel_gen/dialect/symbol.py)：`symbol dialect` 的实现入口。
 
@@ -27,6 +28,7 @@
 - 提供从 memory type 读取单个维度或步幅并返回 symbol value 的查询接口，避免其他方言重复定义 `dim/stride -> value` 读取语义。
 - 为后续 `nn`、`dma`、`kernel`、`dsl` 等方言提供统一的符号值口径，避免每个方言各自维护一套符号标量表达。
 - 提供最小整数符号算术与比较接口，使 `!symbol.int<"expr">` 标量可在方言内完成基础加、减、乘、除、整除组合与相等/大小关系判断，而无需回退到其他算术方言。
+- 提供 `!symbol.ptr<dtype>` 作为 DSL `Ptr(dtype)` 的最小 IR pointer type 载体，使函数签名 lowering 可以稳定表达“指向某个 pointee dtype 的指针输入”。
 - 保持类型表达尽量简单，优先服务开发者理解和方言间协同，而不是追求复杂的符号推导系统。
 - 本文件中的“符号值”指与 SSA value 绑定的单个整数值语义表达，可以是具名符号、整型表达式或整型常量，如 `N`、`M + 1`、`B * K`、`1`、`2`、`3`。
 
@@ -47,8 +49,11 @@
 - `symbol.get_dim` / `symbol.get_stride` 的轴号当前必须是静态整数索引；越界、负数或非整数轴号必须报错。
 - 本方言暂不定义“未知但无名字”的匿名符号值；若需要动态未知值，应优先使用具名符号或由其他方言以 SSA value 传递。
 - 当前只定义整数语义，不区分 `int/int8/int16/int32/int64` 等具体整型宽度，也不定义 `index`、浮点或其他非整型 symbol 类型。
+- `symbol.ptr` 只定义 `!symbol.ptr<dtype>` 这一类最小 pointer type；它只承载 pointee dtype，不承载名字、地址值、shape、stride、offset 或 memory space。
+- `!symbol.ptr<dtype>` 中的 `dtype` 必须是合法 `TypeAttribute`，且不得为 `!symbol.int<"...">`；当前不定义 `!symbol.ptr<!symbol.int<"...">>` 这类“指向 symbol.int”的 pointer carrier。
 - 当前最小算术/比较范围仅包含 `symbol.add`、`symbol.sub`、`symbol.mul`、`symbol.div`、`symbol.floordiv`、`symbol.eq`、`symbol.ne`、`symbol.lt`、`symbol.le`、`symbol.gt`、`symbol.ge`；不定义取模、按位运算、布尔逻辑组合、广播或张量级算术。
 - 当前仅定义 `symbol.to_int` 与 `symbol.to_float` 两类转换：`symbol.to_int` 将 `!symbol.int<"...">` 转为普通整型（覆盖各整型变体），`symbol.to_float` 将 `!symbol.int<"...">` 转为 `f32`；不定义反向转换或其他跨类型规则。
+- 当前不在 `symbol dialect` 中定义 `ptr.load`、`ptr.store`、pointer arithmetic、pointer compare、address cast 或任何基于 `symbol.ptr` 的 body-level 计算 op。
 
 ## 公开接口
 
@@ -56,9 +61,10 @@
 
 功能说明：
 
-- `symbol dialect` 的公开构件由两部分组成：
+- `symbol dialect` 的公开构件由三部分组成：
   - `SymbolValueType`：带符号值语义的整型标量类型
   - `SymbolExprAttr`：用于承载符号表达的 attribute
+  - `SymbolPtrType`：用于承载 `Ptr(dtype)` 的最小 pointer type
 
 参数说明：
 
@@ -67,13 +73,14 @@
 使用示例：
 
 ```python
-from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolPtrType, SymbolValueType
 ```
 
 注意事项：
 
 - `SymbolValueType` 当前固定表示整数语义的符号值类型。
 - `SymbolExprAttr` 只承载单个标量值对应的整数值语义表达。
+- `SymbolPtrType` 只承载 pointee dtype，用于函数签名等类型位置的最小 pointer carrier。
 
 返回与限制：
 
@@ -138,6 +145,38 @@ const_ty = SymbolValueType.from_expr("3")
 - 返回类型：`SymbolValueType`
 - 限制：只表示单个整型标量值的符号语义，不表示 shape 列表或张量。
 
+### `SymbolPtrType`
+
+功能说明：
+
+- 表示“指向某个 pointee dtype 的最小 pointer type”。
+- 对应的正式文本形式为 `!symbol.ptr<dtype>`，例如 `!symbol.ptr<f32>`、`!symbol.ptr<i32>`。
+- 作为 DSL `Ptr(dtype)` 在 IR 类型层的唯一承载，不扩展为 body-level pointer 语义。
+
+参数说明：
+
+- `dtype(TypeAttribute)`：pointer 所指向的 pointee dtype。
+
+使用示例：
+
+```python
+from xdsl.dialects.builtin import f32
+
+ptr_ty = SymbolPtrType(f32)
+```
+
+注意事项：
+
+- `dtype` 必须是合法 `TypeAttribute`。
+- `dtype` 不得为 `!symbol.int<"...">`；`symbol.ptr` 不承载“指向 symbol.int”的二级语义。
+- `SymbolPtrType` 只负责类型承载，不定义 load/store、算术、比较或地址运算。
+- `SymbolPtrType` 不携带名字、shape、stride、offset 或 memory space。
+
+返回与限制：
+
+- 返回类型：`SymbolPtrType`
+- 限制：当前只表示最小 pointer carrier，不定义 pointer body op 或 runtime 地址行为。
+
 ### 文本语法
 
 功能说明：
@@ -147,6 +186,7 @@ const_ty = SymbolValueType.from_expr("3")
 参数说明：
 
 - `expr`：符号表达。
+- `dtype`：pointer pointee dtype。
 
 使用示例：
 
@@ -155,33 +195,38 @@ const_ty = SymbolValueType.from_expr("3")
 #symbol.expr<"M + 1">
 !symbol.int<"N">
 !symbol.int<"3">
+!symbol.ptr<f32>
+!symbol.ptr<i32>
 ```
 
 注意事项：
 
 - `SymbolExprAttr` 使用 `#symbol.expr<"expr">`。
 - `SymbolValueType` 使用 `!symbol.int<"expr">`。
-- 当前不接受按位宽区分的 legacy 整型文本，或任何非整型文本变体。
+- `SymbolPtrType` 使用 `!symbol.ptr<dtype>`。
+- 当前不接受按位宽区分的 legacy 整型文本，或任何非整型文本变体；`symbol.ptr` 也不定义别名文本。
 
 返回与限制：
 
 - 返回类型：文本约定。
-- 限制：当前 spec 只定义上述两种正式语法，不额外定义等价别名。
+- 限制：当前 spec 只定义上述三种正式语法，不额外定义等价别名。
 
 ### 类型校验规则
 
 功能说明：
 
-- 规定 `SymbolValueType` 的 verifier 行为。
+- 规定 `SymbolValueType` 与 `SymbolPtrType` 的 verifier 行为。
 
 参数说明：
 
 - `expr`：待校验符号表达。
+- `dtype`：待校验的 pointer pointee dtype。
 
 使用示例：
 
 ```python
 SymbolValueType.from_expr("N")
+SymbolPtrType(f32)
 ```
 
 注意事项：
@@ -192,11 +237,14 @@ SymbolValueType.from_expr("N")
 - 同一个 `SymbolValueType` 的相等性比较只比较整数语义下的 `expr`。
 - 打印后再解析必须能得到等价类型对象。
 - `!symbol.int<"N">` 表示“该 SSA value 的整数值由符号 `N` 表示”，不是变量声明；`!symbol.int<"1">`、`!symbol.int<"2">`、`!symbol.int<"3">` 表示该值已知为对应常量整数。
+- `SymbolPtrType` 的 `dtype` 必须为 `TypeAttribute`；若不是类型 attribute，必须报错。
+- `SymbolPtrType` 的 `dtype` 不得为 `SymbolValueType`；`!symbol.ptr<!symbol.int<"N">>` 必须视为非法。
+- `!symbol.ptr<dtype>` 打印后再解析必须能得到等价类型对象。
 
 返回与限制：
 
 - 返回类型：校验规则定义。
-- 限制：仅校验整数符号类型表达合法性，不负责判断两个不同表达式是否数学等价。
+- 限制：仅校验整数符号类型表达与 pointer carrier 的合法性，不负责判断两个不同表达式是否数学等价，也不定义 pointer body 语义。
 
 ### Memory 相关符号标量归属
 
@@ -498,6 +546,7 @@ symbol.for %i = %start to %end step %step
 - 验证 `symbol.eq/ne/lt/le/gt/ge` 的最小整数符号比较语义、`!symbol.int<"..."> -> i1` 约束、parse/print 稳定性与错误路径。
 - 验证 `symbol.to_int` 的整数符号到普通整型转换语义、整型变体覆盖、类型约束与 parse/print 稳定性。
 - 验证 `symbol.to_float` 的整数符号到 `f32` 转换语义、类型约束与 parse/print 稳定性。
+- 验证 `SymbolPtrType` 的 `!symbol.ptr<dtype>` 文本语法、verifier 约束、parse/print 稳定性，以及拒绝 `!symbol.int<"...">` 作为 dtype 的错误路径。
 - 验证 `symbol.get_dim` / `symbol.get_stride` 能从 memory type 读取真实 dim/stride，并返回对应的 symbol value。
 - 验证 `symbol.get_dim` / `symbol.get_stride` 的错误路径，包括非 memory type、轴号越界、匿名动态条目 `?` 与非法轴号。
 - 验证 `symbol.for` 的半开区间循环语义、`!symbol.int<"...">` 类型约束、parse/print 稳定性与 verifier 错误路径。
@@ -551,3 +600,7 @@ symbol.for %i = %start to %end step %step
 | TC-SYM-042 | `symbol.to_int` | 覆盖整型变体 | `source` 为 `!symbol.int<"...">`，结果为普通整型 | 以 `i8/i16/i32/i64` 构造 `symbol.to_int` | verifier 通过；结果类型保持对应整型变体 | `test_symbol_to_int_verify_success_for_integer_variants` |
 | TC-SYM-043 | `symbol.to_int` | parse/print 稳定 | 已实现公开文本语法 | parse 后再 print | `symbol.to_int` 文本与结果整型保持稳定 | `test_symbol_to_int_round_trip` |
 | TC-SYM-044 | `symbol.to_int` | 非法类型 | `source` 非 `!symbol.int<"...">` 或结果非整型 | 构造并校验 op | verifier 报错 | `test_symbol_to_int_rejects_invalid_types` |
+| TC-SYM-045 | `SymbolPtrType` | 基础 pointer type 合法路径 | `dtype` 为 builtin 或其他合法 `TypeAttribute` | 构造 `SymbolPtrType(f32)` 或解析 `!symbol.ptr<f32>` | verifier 通过；打印为 `!symbol.ptr<f32>` | `test_symbol_ptr_type_verify_success` |
+| TC-SYM-046 | `SymbolPtrType` | parse/print 稳定 | 已实现 `!symbol.ptr<dtype>` 文本语法 | parse 后再 print | pointer type 文本稳定 round-trip | `test_symbol_ptr_type_round_trip` |
+| TC-SYM-047 | `SymbolPtrType` | symbol.int 作为 dtype 非法 | `dtype` 为 `!symbol.int<"...">` | 构造并校验 `SymbolPtrType(SymbolValueType.from_expr("N"))` | verifier 报错 | `test_symbol_ptr_type_rejects_symbol_value_dtype` |
+| TC-SYM-048 | `SymbolPtrType` | 非 type attribute 非法 | `dtype` 不是 `TypeAttribute` | 构造并校验 `SymbolPtrType` | verifier 报错 | `test_symbol_ptr_type_rejects_non_type_dtype` |

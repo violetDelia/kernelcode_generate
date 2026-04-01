@@ -789,7 +789,7 @@ class SymbolPtrType(ParametrizedAttribute, TypeAttribute):
 
     name = "symbol.ptr"
 
-    dtype: TypeAttribute = param_def(TypeAttribute)
+    dtype: Attribute = param_def(Attribute)
 
     @classmethod
     def parse_parameters(cls: type["SymbolPtrType"], parser: AttrParser) -> Sequence[Attribute]:
