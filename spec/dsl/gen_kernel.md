@@ -27,6 +27,7 @@
 - 统一约束签名、参数顺序、输出参数风格与函数体拼装规则。
 - 明确支持：只读 `Memory` 输入、`Memory` 结果降为显式输出参数、标量参数顺序与默认命名保持、`emit_c` 错误向上抛出。
 - 明确支持：`f32/f64` 类型在 `target=cpu` 下映射为 `float/double`，用于 `Memory<float>/Memory<double>` 与 `float/double` 标量参数生成。
+- 冻结 direct-return `nn.add -> cpu::add(..., out)` 的函数级 CPU 合同：仅当 `nn.add.result` 的唯一 use 为 `func.return` 且结果可直接绑定到函数 `out` 时，允许生成 `cpu::add(..., out);`。
 - 支持 `!symbol.int<"...">` 标量返回在 `target=cpu` 下生成函数返回值文本。
 - 对 `conv_cpu_tiled_v1` 当前子集，冻结 `conv2d_img2col2d_tiled(...)` 的函数级 CPU 骨架：固定 `Ntile=1`、`Ctile=16`、`Ftile=16`、`Hotile=16`、`Wotile=16`，包含外层分块循环、tile-local `col_buffer/acc_buffer`、`cpu::img2col2d(...)` 调用与最终写回 `out`。
 
@@ -38,6 +39,7 @@
 - 输出源码必须保持函数名、参数名与 IR 定义一致，不能引入额外公开接口。
 - 对于不支持的返回形式、未知 op 或无法映射到目标后端源码的 IR，必须明确报错。
 - 除 `Memory` 结果外，仅允许单一 `!symbol.int<"...">` 标量结果生成返回值；其他非 `Memory` 结果仍需报错。
+- direct-return `nn.add` 的函数级特化当前只覆盖 `func.return` 唯一使用 `nn.add.result` 的 `Memory` 返回场景；multi-use、无法直接绑定到函数 `out` 或需要 generic `out = tmp` 的路径都必须继续报 `unsupported op`。
 - 对 `conv2d_img2col2d_tiled(...)` 这一固定 CPU 子集，不允许把函数级结构写成“由实现决定”“结构自定”或“必要时改走 kernel dialect”；函数骨架、tile 常量、循环层次、局部 buffer 与 `out` 写回都必须在本层直接冻结。
 
 ## 公开接口
@@ -96,6 +98,15 @@ signature = gen_signature(func_op, ctx)
 
 - `Memory` 输入参数在当前恢复范围内必须生成为只读输入参数形式。
 - `Memory` 结果在当前恢复范围内必须生成为显式 `out` 输出参数，而不是直接函数返回值。
+- 当 `target=cpu` 下的 `func.return` 唯一返回 `nn.add.result` 时，direct-return 特化后的签名仍必须保持 `Memory<...>& out` 输出参数形式；`memory + symbol.int` 场景的标量入参应生成为 `long long bias` 一类 CPU 标量参数。
+- direct-return `nn.add` 的完整目标源码形态可接近以下形式：
+
+```cpp
+void add(const Memory<int32_t>& lhs, const Memory<int32_t>& rhs, Memory<int32_t>& out) {
+    cpu::add(lhs, rhs, out);
+}
+```
+
 - `!symbol.int<"...">` 结果在 `target=cpu` 下生成为 `long long` 返回值，不生成 `out` 参数。
 - 不支持的返回形式必须明确报错。
 - 参数名来自 `func.func` 的 `arg_attrs.name`；缺失或为空时必须使用 `arg{index}` 默认命名，保持与 `func.func` 参数顺序一致。
@@ -130,6 +141,17 @@ body = gen_body(func_op, ctx)
 - 必须保持 IR 中 op 的语义顺序。
 - `func.return` 在当前恢复范围下仅支持无返回、`Memory` 结果写回 `out`，或 `!symbol.int<"...">` 标量返回。
 - 不得在本层引入未在 `emit_c` 中定义的单 op 生成特例。
+- `target=cpu` 下仅当 `nn.add.result` 的唯一 use 是 `func.return`，且该结果可直接绑定到函数 `out` 时，才允许函数级特化为：
+
+```cpp
+cpu::add(lhs, rhs, out);
+cpu::add(lhs, 1, out);
+cpu::add(lhs, bias, out);
+```
+
+- 这一路径的硬门禁是 `unique-use + func.return + direct bind to out`；三者缺一不可。
+- 上述 direct-return 特化只覆盖 `memory + memory`、`memory + const(i32)` 与 `memory + symbol.int` 三条路径；函数体不得退化为 `out = tmp`、`return tmp` 或其他 generic fallback。
+- 若 `nn.add.result` 有多个 use，或当前函数体无法直接把 `nn.add.result` 绑定到函数 `out`，则仍必须保持 `EmitCError target=cpu: nn.add: unsupported op`，不能 silent fallback。
 - 当 `func.return` 回写 `out` 的值未在 `EmitCContext` 中绑定名称，且该值为 `BlockArgument` 时，必须回退为 `arg{index}` 默认命名以保持与 `gen_signature` 一致。
 - 当 `func.return` 返回 `!symbol.int<"...">` 时，必须生成 `return <expr>;` 并复用 `emit_c` 的命名/表达式规则。
 - 对 `conv_cpu_tiled_v1` 子集，函数体骨架必须固定包含：`constexpr Ntile/Ctile/Ftile/Hotile/Wotile`、tile-local `col_buffer/acc_buffer`、`n -> f -> ho -> wo` 分块循环、循环体内的 `cpu::img2col2d(...)` 与 `c` 方向 tiled compute、以及最终写回 `out` 的显式循环或等价机械可判定写回语句。
@@ -211,9 +233,12 @@ void conv2d_img2col2d_tiled(
 - 验证 `func.func` 到完整目标后端函数源码的生成能力。
 - 验证签名生成与函数体拼装的职责边界清晰。
 - 验证 `Memory` 输入/输出参数规则、参数顺序、错误传播与名称保持行为。
+- 验证 direct-return `nn.add` 在 `target=cpu` 下仅对唯一 use 为 `func.return` 的 `Memory` 返回场景特化为 `cpu::add(..., out);`，并覆盖 `memory + memory`、`memory + const(i32)`、`memory + symbol.int` 三条函数体形态。
+- 验证 direct-return `nn.add` 在 multi-use 或无法直接绑定 `out` 时继续报 `unsupported op`，不生成 generic `out = tmp` / `return tmp`。
 - 验证 `!symbol.int<"...">` 标量返回的签名与函数体生成规则。
 - 验证 `!symbol.int<"...">` 标量返回仅允许 `target=cpu`；非 cpu target 必须报错。
 - 对 `conv_cpu_tiled_v1` 下游实现阶段，验证 `conv2d_img2col2d_tiled(...)` 生成源码包含固定 tile 常量、`cpu::img2col2d(...)`、局部 `col_buffer/acc_buffer`、`n/f/ho/wo` 分块循环与最终写回 `out`。
+- 注：`S3` 计划中的四个 direct-return `nn.add` 验收用例当前先冻结为本 spec 的下游待补测试映射；在 `test/dsl/test_gen_kernel.py` 实际落地前，不把它们写成“当前已存在的可执行测试”。
 
 ### 功能与用例清单
 
@@ -229,6 +254,10 @@ void conv2d_img2col2d_tiled(
 - GK-010：`!symbol.int<"...">` 标量返回可生成函数返回值。（`test_gen_kernel_supports_symbol_scalar_return`）
 - GK-011：非 cpu target 下 `!symbol.int<"...">` 标量返回必须报错，防止跨 target 误生成返回签名/函数体。（`test_gen_kernel_rejects_symbol_scalar_return_on_non_cpu`）
 - GK-012：`f32/f64` 标量与 `Memory<f32/f64>` 可生成 `float/double` 与 `Memory<float>/Memory<double>` 形式签名。（`test_gen_signature_supports_float32_scalar_and_memory`）
+- GK-013：direct-return `nn.add(memory, memory)` 在 cpu target 下可生成 `Memory<int32_t>& out` 签名与 `cpu::add(lhs, rhs, out);` 函数体。（下游待补测试映射：`test_gen_kernel_supports_direct_return_nn_add_memory_memory_on_cpu`）
+- GK-014：direct-return `nn.add(memory, const(i32))` 在 cpu target 下可生成 `cpu::add(lhs, 1, out);` 函数体。（下游待补测试映射：`test_gen_kernel_supports_direct_return_nn_add_memory_const_on_cpu`）
+- GK-015：direct-return `nn.add(memory, symbol.int)` 在 cpu target 下可生成 `long long bias` 标量参数与 `cpu::add(lhs, bias, out);` 函数体。（下游待补测试映射：`test_gen_kernel_supports_direct_return_nn_add_memory_symbol_on_cpu`）
+- GK-016：当 `nn.add.result` 为 multi-use 或无法 direct bind 到 `out` 时，specialization 必须继续报 `EmitCError target=cpu: nn.add: unsupported op`。（下游待补测试映射：`test_gen_kernel_rejects_nn_add_specialization_on_multi_use`）
 
 ### C2 下游验收标准
 
