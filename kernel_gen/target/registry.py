@@ -1,7 +1,7 @@
 """Target registry definitions.
 
 创建者: 我不是牛马
-最后一次更改: 我不是牛马
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 定义 target 注册与查询入口，用于管理 `arch` op 支持矩阵与硬件参数。
@@ -46,6 +46,25 @@ _DEFAULT_CPU_HARDWARE = {
     "lm_memory_size": 0,
     "tsm_memory_size": 0,
     "tlm_memory_size": 0,
+}
+_DEFAULT_NPU_DEMO_SUPPORTED_OPS = {
+    "arch.get_block_id",
+    "arch.get_block_num",
+    "arch.get_thread_id",
+    "arch.get_thread_num",
+    "arch.get_subthread_id",
+    "arch.get_subthread_num",
+    "arch.get_dynamic_memory",
+}
+_DEFAULT_NPU_DEMO_UNSUPPORTED_OPS = {"arch.launch_kernel"}
+_DEFAULT_NPU_DEMO_HARDWARE = {
+    "block_num": 6,
+    "thread_num": 8,
+    "subthread_num": 1,
+    "sm_memory_size": 0,
+    "lm_memory_size": 0,
+    "tsm_memory_size": 24576,
+    "tlm_memory_size": 2048,
 }
 _ERROR_TEMPLATE = "场景: {scene}; 期望: {expected}; 实际: {actual}; 建议动作: {action}"
 _ERROR_ACTION = "请按接口约束传参"
@@ -546,6 +565,36 @@ def _ensure_cpu_target() -> None:
     register_target(spec)
 
 
+def _ensure_npu_demo_target() -> None:
+    """注册内置 `npu_demo` target。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 确保 registry 始终包含 `npu_demo` 固定模板。
+    - 固定 `arch` 能力白名单、`arch.launch_kernel` 未启用结论与硬件参数。
+
+    使用示例:
+    - _ensure_npu_demo_target()
+
+    关联文件:
+    - spec: spec/target/registry.md
+    - test: test/target/test_target_registry.py
+    - 功能实现: kernel_gen/target/registry.py
+    """
+
+    if "npu_demo" in _TARGET_REGISTRY:
+        return
+    spec = TargetSpec(
+        name="npu_demo",
+        arch_supported_ops=set(_DEFAULT_NPU_DEMO_SUPPORTED_OPS),
+        arch_unsupported_ops=set(_DEFAULT_NPU_DEMO_UNSUPPORTED_OPS),
+        hardware=dict(_DEFAULT_NPU_DEMO_HARDWARE),
+    )
+    register_target(spec)
+
+
 def _is_default_cpu_spec(spec: TargetSpec) -> bool:
     """判断 target 是否为内置 cpu 规范。
 
@@ -819,6 +868,7 @@ def get_current_target_hardware(key: str) -> int | None:
 
 
 _ensure_cpu_target()
+_ensure_npu_demo_target()
 
 __all__ = [
     "TargetSpec",

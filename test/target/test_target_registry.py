@@ -1,7 +1,7 @@
 """target registry tests.
 
 创建者: 我不是牛马
-最后一次更改: 我不是牛马
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 target registry 的 JSON 加载、冲突校验与 arch op 支持矩阵行为。
@@ -317,3 +317,41 @@ def test_target_registry_current_target_hardware() -> None:
         assert target_registry.get_current_target_hardware("sm_memory_size") is None
     finally:
         target_registry._set_current_target(None)
+
+
+# TC-TGT-011
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-02 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-02 00:00:00 +0800
+# 测试目的: 验证 npu_demo 固定内置模板的能力矩阵与硬件值可直接查询。
+# 对应功能实现文件路径: kernel_gen/target/registry.py
+# 对应 spec 文件路径: spec/target/registry.md
+def test_target_registry_npu_demo_template() -> None:
+    assert target_registry.is_arch_op_supported("npu_demo", "arch.get_block_id") is True
+    assert target_registry.is_arch_op_supported("npu_demo", "arch.get_thread_id") is True
+    assert target_registry.is_arch_op_supported("npu_demo", "arch.get_thread_num") is True
+    assert target_registry.is_arch_op_supported("npu_demo", "arch.get_dynamic_memory") is True
+
+    assert target_registry.get_target_hardware("npu_demo", "block_num") == 6
+    assert target_registry.get_target_hardware("npu_demo", "thread_num") == 8
+    assert target_registry.get_target_hardware("npu_demo", "subthread_num") == 1
+    assert target_registry.get_target_hardware("npu_demo", "sm_memory_size") == 0
+    assert target_registry.get_target_hardware("npu_demo", "lm_memory_size") == 0
+    assert target_registry.get_target_hardware("npu_demo", "tsm_memory_size") == 24576
+    assert target_registry.get_target_hardware("npu_demo", "tlm_memory_size") == 2048
+
+
+# TC-TGT-012
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-02 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-02 00:00:00 +0800
+# 测试目的: 验证 npu_demo 对未启用能力与接口域外能力查询固定返回未启用。
+# 对应功能实现文件路径: kernel_gen/target/registry.py
+# 对应 spec 文件路径: spec/target/registry.md
+def test_target_registry_npu_demo_rejects_unsupported_ops() -> None:
+    assert target_registry.is_arch_op_supported("npu_demo", "arch.launch_kernel") is False
+    assert target_registry.is_arch_op_supported("npu_demo", "arch.unknown") is False
+    assert target_registry.is_arch_op_supported("npu_demo", "launch") is False
+    assert target_registry.is_arch_op_supported("npu_demo", "barrier") is False
