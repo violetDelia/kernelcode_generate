@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`jcc你莫辜负`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
 - `功能实现`：[`kernel_gen/dsl/mlir_gen.py`](../../kernel_gen/dsl/mlir_gen.py)
 - `test`：[`test/dsl/test_mlir_gen.py`](../../test/dsl/test_mlir_gen.py)
@@ -46,13 +46,15 @@
 - 当 `ForAST` 来源于 `LoopRange(start, end, step)` 且循环边界保持 symbol 整数语义时，lowering 后必须生成 `symbol.for`，不得退回 `scf.for`；其循环块参数 `it` 必须为 `!symbol.int<"expr">`。
 - `LoopRange` 场景中的循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand，必须直接保持 `!symbol.int<"expr">` 语义传递，不得额外生成 `arith.index_cast`。
 - 对于纯 symbol 标量算术函数（仅符号标量入参/返回且返回为整型标量），函数签名中的输入与输出必须统一使用 `!symbol.int<"expr">`，不得降级为 `i32`、`index` 或其他 builtin 标量类型。
-- 对于纯 symbol 标量比较函数（当前仅覆盖 `==`），函数签名中的输入必须保持 `!symbol.int<"expr">`，返回类型必须为 `i1`，不得退回 `!symbol.int<"expr">` 或其他 builtin 标量类型。
+- 对于纯 symbol 标量 compare family（`==` / `!=` / `<` / `<=` / `>` / `>=`）函数，函数签名中的输入必须保持 `!symbol.int<"expr">`，返回类型必须统一为 `i1`，不得退回 `!symbol.int<"expr">` 或其他 builtin 标量类型。
 - memory 路径的比较表达式（`eq/ne/lt/le/gt/ge`）必须复用逐元素隐式 broadcast 规则，且 `lhs/rhs` 的 `element_type`/`space` 必须一致；当隐式 broadcast 失败或类型不一致时，`build_func_op(...)` 必须抛出 `AstVisitorError` 并保留位置（例如 `Implicit broadcast dimension mismatch`、`Binary op operands must have the same element_type`、`Binary op operands must have the same space`）。当函数体以 `return lhs != rhs` 承载 tensor 比较语义时，必须复用 `CompareExprAST(op=\"ne\")` lowering 链路生成 `nn.ne`，且结果 element type 为 `i1`。
 - 当函数体以 `return lhs * rhs` 或 `return nn.mul(lhs, rhs)` 承载 tensor 乘法语义时，必须复用 `BinaryExprAST(op="mul")` lowering 链路生成 `nn.mul`；该链路允许 implicit broadcast，若 shape 不可 broadcast 必须报错 `Implicit broadcast dimension mismatch`。当两侧 `element_type` 不一致但 `space` 一致时，必须按二元算术 dtype promotion（`i32 < f16 < f32`）选择目标 element_type，并通过 `dma.cast` 将非目标侧对齐后再执行 `nn.mul`；若 `space` 不一致必须报错 `Binary op operands must have the same space`。
 - Tensor 返回注解放宽仅适用于“二元算术 mixed dtype”场景：仅当 `return` 表达式是 tensor 二元算术且两操作数 `element_type` 不一致时，允许返回注解与最终 lowering 结果在 `element_type` 上暂不一致；且注解 `element_type` 必须是左右操作数 `element_type` 之一，否则必须报错 `Return type does not match annotation`。
 - Tensor 注解既可使用普通字符串字面量 `"Tensor[...]"`，也可使用在源码层面可归一化为同等文本的 `f"Tensor[...]"`；归一化后的文本必须满足 Tensor 注解语法，若包含无法静态归一化的格式化片段或归一化后仍不符合语法，必须报错。
 - 当函数体使用 `nn.sub` 且左右操作数 element_type 不一致时，必须插入 `dma.cast` 并按二元算术的 dtype promotion 结果生成 `nn.sub` 与 `func.return` 结果类型；当前公开覆盖仅限 `nn.sub` mixed dtype 场景。
 - DSL 函数体内允许出现 `alloc`、`copy`、`cast`、`view`、`reshape`、`flatten`、`free`、`load`、`store`、`slice`、`deslice` 这组 DMA helper 调用；其公开语义由 `emit_mlir` 负责落实到具体 lowering。
+- 当函数体返回 `view(...)` helper 时，`func.return` 类型必须与 `dma.view` 的结果类型一致，并与 expectation 依赖的 `Memory` 口径对齐；不得把 `dma.view` 结果写成“生成 op 即可、return type 可另行决定”。
+- 当函数体返回 `float(symbol.int)` 且返回注解为 `float` 时，`build_func_op(...)` / `build_func_op_from_ast(...)` 的 `func.return` 类型必须固定为 `f32`，并与 `symbol.to_float` 的结果类型保持一致。
 - 当 `build_func_op(...)` / `build_func_op_from_ast(...)` 处理 `slice(...)` 时，必须先生成 `dma.alloc`，再生成 `dma.slice(target, source, ...)`；表达式返回值绑定到 alloc 结果，`func.return` 返回 alloc 结果，`dma.slice` 的结果不得直接作为返回值或局部变量绑定。
 - DSL 函数体内允许出现 `arch` helper 调用：`get_thread_num`（查询表达式）、`get_dynamic_memory`（返回 memory 表达式）与 `launch_kernel`（语句型启动描述）；其公开语义由 `emit_mlir` 负责落实到具体 lowering。
 - 当函数体仅返回 `alloc(...)` 且没有 tensor 输入时，允许仅依赖标量 `runtime_args` 构建签名与结果类型；`alloc` 结果类型需由 `shape`/`stride`/`dtype`/`space` 与 `runtime_args` 共同决定，且显式 `stride` 必须与默认连续布局一致，否则必须报错。
@@ -111,6 +113,7 @@ func_op = build_func_op(only_symbol, s)
 - 允许 `for` 循环内包含 `dma.slice`/`dma.deslice` 相关语义；当循环来自 `LoopRange` 且边界为 symbol 整数时，必须保留 `symbol.for` 结构，且迭代变量 `it` 不能退化为 `index`、`i32`、浮点或其他非 `SymbolValueType`。
 - 当函数场景为纯 symbol 标量算术函数时，输入参数与返回值都必须 lowering 为 `!symbol.int<"expr">`。
 - 当函数场景为纯 symbol 标量 `==` 比较且返回 `bool` 时，输入参数必须 lowering 为 `!symbol.int<"expr">`，函数体必须生成 `symbol.eq`，返回类型必须为 `i1`。
+- 当函数场景为纯 symbol 标量 `!=` / `<` / `<=` / `>` / `>=` 比较且返回 `bool` 时，输入参数同样必须 lowering 为 `!symbol.int<"expr">`，函数体分别生成 `symbol.ne` / `symbol.lt` / `symbol.le` / `symbol.gt` / `symbol.ge`，返回类型统一为 `i1`。
 - 当函数场景为 tensor `!=` 比较时，返回注解必须与 `nn.ne` 结果类型一致（element type 为 `i1`，shape/space 按 broadcast 后结果确定）；若返回注解与实际 lowering 结果不一致必须报错。
 - 当函数场景为纯 symbol 整型标量算术时，函数体中的 `+`、`-`、`*`、`/`、`//` 必须分别 lowering 为 `symbol.add`、`symbol.sub`、`symbol.mul`、`symbol.div`、`symbol.floordiv`，且结果类型保持为 `SymbolValueType`。
 - 当函数体使用 `kernel_gen.operation.nn.add/sub/mul/truediv/floordiv` 包装同一组纯 symbol 整型标量算术时，lowering 结果必须与直接使用 Python 二元运算保持一致；`const/symbol` 与 `symbol/const` 的操作数顺序必须在结果表达式文本中原样保留。
@@ -121,7 +124,9 @@ func_op = build_func_op(only_symbol, s)
 - `"Tensor[...]"` 注解允许来自普通字符串字面量或可静态归一化的 `f"Tensor[...]"`；归一化后若不是合法 Tensor 注解，必须在解析阶段直接报错。
 - 函数体内使用 DMA helper 调用时，`alloc/copy/cast/view/reshape/flatten` 必须作为有返回值表达式参与 lowering，`free` 必须作为无返回值语句参与 lowering 并在函数体中发射 `dma.free`，`load/store/slice/deslice` 继续遵循既有 memory 读写语义。
 - 当函数体内出现 `slice(...)` 表达式时，build_func_op 链路必须先生成 `dma.alloc` 并将表达式/局部变量绑定到 alloc 结果，再生成 `dma.slice(target, source, ...)`；`func.return` 返回 alloc 结果。
+- 当函数体内出现 `view(...)` 表达式并直接 `return view(...)` 时，`func.return` 必须直接返回 `dma.view` 的结果 memory；其返回类型必须与 `dma.view` 根据 source/offset/size/stride 推导出的结果类型一致。
 - `flatten(...)` 的 lowering 结果必须与一维 `reshape(...)` 的公开结果语义一致，即输出元素总数不变的一维 memory；不要求生成独立 `dma.flatten` op。
+- 当函数体内出现 `return float(n)`，且 `n` 走 `symbol.int` 链路时，`func.return` 必须直接返回 `symbol.to_float` 的 `f32` 结果；不得继续沿用 `Unsupported annotation` 或其他旧边界。
 - 当零入参函数直接返回 `get_block_id()` 时，结果必须通过 `arch.get_block_id` 生成，并在 `func.func` 返回值中保持 `!symbol.int<"block_id">`。
 - 当零入参函数直接返回 `get_block_num()` 时，结果必须通过 `arch.get_block_num` 生成，并在 `func.func` 返回值中保持 `!symbol.int<"block_num">`。
 - 当零入参函数直接返回 `get_subthread_id()` 时，结果必须通过 `arch.get_subthread_id` 生成，并在 `func.func` 返回值中保持 `!symbol.int<"subthread_id">`。
@@ -224,9 +229,10 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - 验证 `get_dynamic_memory(space)` 在 `build_func_op(...)` / `build_func_op_from_ast(...)` 链路中 lowering 为 `arch.get_dynamic_memory`，并固定返回 `!nn.memory<[?], [1], i8, #nn.space<space>>`。
   - 验证 `launch_kernel(name, block, thread, subthread)` 在 `build_func_op(...)` / `build_func_op_from_ast(...)` 链路中 lowering 为无返回值 `arch.launch_kernel`，并覆盖名称/extent 非法输入错误路径。
   - 验证 `get_shape/get_stride` 轴访问在 `build_func_op(...)` / `build_func_op_from_ast(...)` 链路中分别 lowering 为 `symbol.get_dim/symbol.get_stride`，并覆盖非 memory 来源、负轴、越界轴与非静态轴错误路径。
-  - 验证纯 symbol 标量 `==` 比较会生成 `symbol.eq`，返回类型为 `i1`，并覆盖静态整数与动态符号两类 runtime args。
-  - 验证纯 symbol 标量 `>=` 比较会生成 `symbol.ge`，返回类型为 `i1`，并覆盖静态整数与动态符号两类 runtime args。
+  - 验证纯 symbol 标量 compare family（`==` / `!=` / `<` / `<=` / `>` / `>=`）会生成对应 `symbol.*` 比较 op，且返回类型统一为 `i1`。
   - 验证 `build_func_op` 对 `slice(...)` 表达式先生成 `dma.alloc` 再生成 `dma.slice(target, source, ...)`，并确保 `func.return` 返回 alloc 结果。
+  - 验证 `build_func_op` 在 `view(...)` helper 场景下的 `func.return` 类型与 `dma.view` 结果类型及 expectation 口径一致。
+  - 验证 `build_func_op` 在 `float(symbol.int)` 场景下的 `func.return` 类型固定为 `f32`，并与 `symbol.to_float` 结果类型一致。
 - 功能与用例清单：
   - MGEN-001：`build_func_op(...)` 返回 `func.func`。（`test_build_func_op_returns_func_op`）
   - MGEN-001A：`build_func_op(...)` 的输入签名只由 `runtime_args` 决定；即使 `globals` 中存在同名对象且额外传入 `builtins`，成功路径的签名推导也不得被解析环境覆盖。（`test_build_func_op_signature_uses_runtime_args_not_parse_env`）
@@ -278,3 +284,6 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - MGEN-036：返回 `get_dynamic_memory(space)` 的 DSL 函数必须 lowering 为 `arch.get_dynamic_memory`，并固定返回 `!nn.memory<[?], [1], i8, #nn.space<space>>`；非法 `space` 必须报错。（`test_build_func_op_rejects_invalid_arch_get_dynamic_memory_space`）
   - MGEN-037：包含 `launch_kernel(name, block, thread, subthread)` 语句的 DSL 函数必须 lowering 为单个无返回值 `arch.launch_kernel`；非法 `name`/extent（含非 `!symbol.int` 或静态 `<= 0`）必须报错。（`test_build_func_op_rejects_invalid_arch_launch_kernel_args`）
   - MGEN-038：`build_func_op(...)` 处理 `slice(...)` 表达式时必须先生成 `dma.alloc`，再生成 `dma.slice(target, source, ...)`；表达式与 `func.return` 返回值绑定到 alloc 结果，`dma.slice` 结果不得直接作为返回值。（`test_build_func_op_slice_expression_lowers_to_alloc_then_target_slice`）
+  - MGEN-039：纯 symbol 标量 compare family 在函数级返回装配中统一返回 `i1`；`eq/ge` 已有回归测试，`ne/lt/le/gt` 当前冻结为下游待补测试映射。（现有映射：`test_build_func_op_lowers_symbol_eq`、`test_build_func_op_lowers_symbol_ge`；下游待补测试映射：`test_build_func_op_lowers_symbol_ne`、`test_build_func_op_lowers_symbol_lt`、`test_build_func_op_lowers_symbol_le`、`test_build_func_op_lowers_symbol_gt`）
+  - MGEN-040：`return float(symbol.int)` 在函数级返回装配中必须返回 `f32`，并与 `symbol.to_float` 结果类型一致。（下游待补测试映射：`test_build_func_op_lowers_symbol_to_float`）
+  - MGEN-041：`return view(...)` 在函数级返回装配中必须直接返回 `dma.view` 结果，`func.return` 类型与 expectation 依赖的 `dma.view` 结果类型一致。（下游待补测试映射：`test_build_func_op_supports_dma_view_helper`）
