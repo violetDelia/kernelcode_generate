@@ -1,7 +1,7 @@
 """C-like fragment emission helpers for DSL lowering.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 提供单个 MLIR op/value 到 C 风格源码片段的最小生成规则。
@@ -26,6 +26,7 @@ from xdsl.dialects import arith, func, scf
 from xdsl.dialects.builtin import FloatAttr, IndexType, IntAttr, IntegerAttr, IntegerType, f32
 from xdsl.ir import BlockArgument, Operation, SSAValue
 
+from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp, DmaViewOp
 from kernel_gen.dialect.nn import NnAddOp, NnImg2col2dOp, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolForOp, SymbolValueType
@@ -252,6 +253,38 @@ def _space_to_c(memory_type: NnMemoryType, ctx: EmitCContext) -> str:
         "tlm": "MemorySpace::TLM",
     }
     space_name = memory_type.space.space.data
+    mapped = mapping.get(space_name)
+    if mapped is None:
+        raise _emit_error(ctx, f"space {space_name}", "unsupported memory space")
+    return mapped
+
+
+def _space_name_to_c(space_name: str, ctx: EmitCContext) -> str:
+    """把 space 名称映射为 C 侧 `MemorySpace::...` 文本。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 统一处理 `global/shared/local/tsm/tlm` 到 `MemorySpace::GM/SM/LM/TSM/TLM` 的映射。
+    - 供 `npu_demo` 的 `arch.get_dynamic_memory` 文本发射复用。
+
+    使用示例:
+    - _space_name_to_c("tsm", EmitCContext(target="npu_demo")) == "MemorySpace::TSM"
+
+    关联文件:
+    - spec: spec/dsl/emit_c.md
+    - test: test/dsl/test_emit_c.py
+    - 功能实现: kernel_gen/dsl/emit_c.py
+    """
+
+    mapping = {
+        "global": "MemorySpace::GM",
+        "shared": "MemorySpace::SM",
+        "local": "MemorySpace::LM",
+        "tsm": "MemorySpace::TSM",
+        "tlm": "MemorySpace::TLM",
+    }
     mapped = mapping.get(space_name)
     if mapped is None:
         raise _emit_error(ctx, f"space {space_name}", "unsupported memory space")
@@ -784,6 +817,186 @@ def _emit_nn_add_stmt(op: NnAddOp, ctx: EmitCContext) -> str:
     return f"{ctx.current_indent}cpu::add({memory_expr}, {scalar_expr}, {result_name});"
 
 
+def _emit_npu_view_stmt(op: DmaViewOp, ctx: EmitCContext) -> str:
+    """生成 `target=npu_demo` 下 `dma.view` 的 helper 调用。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 把一维 `dma.view` 收口为 `auto name = view(source, offset, size, stride);`。
+    - 当前仅支持单维 offset/shape/stride，避免超出已冻结的 `npu_demo` helper 合同。
+
+    使用示例:
+    - stmt = emit_c_op(view_op, EmitCContext(target="npu_demo"))
+
+    关联文件:
+    - spec: spec/dsl/emit_c.md
+    - test: test/dsl/test_emit_c.py
+    - 功能实现: kernel_gen/dsl/emit_c.py
+    """
+
+    if len(op.offsets) != 1 or len(op.shape) != 1 or len(op.stride) != 1:
+        raise _emit_error(ctx, op.name, "npu_demo view requires 1-D offset/size/stride")
+    result_name = ctx.allocate_name(op.result)
+    source_expr = _memory_base_name(op.source, ctx)
+    offset_expr = emit_c_value(op.offsets[0], ctx)
+    size_expr = emit_c_value(op.shape[0], ctx)
+    stride_expr = emit_c_value(op.stride[0], ctx)
+    return (
+        f"{ctx.current_indent}auto {result_name} = "
+        f"view({source_expr}, {offset_expr}, {size_expr}, {stride_expr});"
+    )
+
+
+def _emit_npu_query_stmt(op: ArchGetThreadIdOp | ArchGetThreadNumOp, ctx: EmitCContext) -> str:
+    """生成 `target=npu_demo` 下 thread 查询的赋值语句。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 把 `arch.get_thread_id` / `arch.get_thread_num` 发射为 `ctx.thread_id()` / `ctx.thread_num()`。
+    - 即使结果预绑定了名称，也必须使用真实查询表达式，而不是回写为同名变量。
+
+    使用示例:
+    - stmt = emit_c_op(ArchGetThreadIdOp(), EmitCContext(target="npu_demo"))
+
+    关联文件:
+    - spec: spec/dsl/emit_c.md
+    - test: test/dsl/test_emit_c.py
+    - 功能实现: kernel_gen/dsl/emit_c.py
+    """
+
+    result_name = ctx.allocate_name(op.result)
+    expr = "ctx.thread_id()" if isinstance(op, ArchGetThreadIdOp) else "ctx.thread_num()"
+    return f"{ctx.current_indent}long long {result_name} = {expr};"
+
+
+def _emit_npu_dynamic_memory_stmt(op: ArchGetDynamicMemoryOp, ctx: EmitCContext) -> str:
+    """生成 `target=npu_demo` 下 dynamic memory 查询的赋值语句。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 把 `arch.get_dynamic_memory` 发射为 `ctx.get_dynamic_memory<T>(MemorySpace::TSM/TLM)`。
+    - 结果名可预绑定，但右值必须始终来自真实 helper 调用。
+
+    使用示例:
+    - stmt = emit_c_op(dynamic_mem_op, EmitCContext(target="npu_demo"))
+
+    关联文件:
+    - spec: spec/dsl/emit_c.md
+    - test: test/dsl/test_emit_c.py
+    - 功能实现: kernel_gen/dsl/emit_c.py
+    """
+
+    result_name = ctx.allocate_name(op.result)
+    element_type = _type_to_c(op.result.type.element_type, ctx)
+    space_expr = _space_name_to_c(op.memory_space.space.data, ctx)
+    if space_expr not in {"MemorySpace::TSM", "MemorySpace::TLM"}:
+        raise _emit_error(ctx, op.name, "unsupported dynamic memory space")
+    return (
+        f"{ctx.current_indent}Memory<{element_type}> {result_name} = "
+        f"ctx.get_dynamic_memory<{element_type}>({space_expr});"
+    )
+
+
+def _emit_npu_slice_stmt(op: DmaSliceOp, ctx: EmitCContext) -> str:
+    """生成 `target=npu_demo` 下 `dma.slice` 的目标式 helper 调用。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 把一维 `dma.slice` 发射为 `slice(target, source, offset, size, stride);`。
+    - 不回退到显式 loop nest copy、`load/store` 或表达式式 `slice(...)`。
+
+    使用示例:
+    - stmt = emit_c_op(slice_op, EmitCContext(target="npu_demo"))
+
+    关联文件:
+    - spec: spec/dsl/emit_c.md
+    - test: test/dsl/test_emit_c.py
+    - 功能实现: kernel_gen/dsl/emit_c.py
+    """
+
+    if len(op.offsets) != 1 or len(op.sizes) != 1 or len(op.strides) != 1:
+        raise _emit_error(ctx, op.name, "npu_demo slice requires 1-D offset/size/stride")
+    target_expr = _memory_base_name(op.target, ctx)
+    source_expr = _memory_base_name(op.source, ctx)
+    offset_expr = emit_c_value(op.offsets[0], ctx)
+    size_expr = emit_c_value(op.sizes[0], ctx)
+    stride_expr = emit_c_value(op.strides[0], ctx)
+    return (
+        f"{ctx.current_indent}slice({target_expr}, {source_expr}, "
+        f"{offset_expr}, {size_expr}, {stride_expr});"
+    )
+
+
+def _emit_npu_deslice_stmt(op: DmaDesliceOp, ctx: EmitCContext) -> str:
+    """生成 `target=npu_demo` 下 `dma.deslice` 的目标式 helper 调用。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 把一维 `dma.deslice` 发射为 `deslice(source, target, offset, size, stride);`。
+    - 结果值绑定到 target 名称，确保后续节点可稳定引用该 memory。
+
+    使用示例:
+    - stmt = emit_c_op(deslice_op, EmitCContext(target="npu_demo"))
+
+    关联文件:
+    - spec: spec/dsl/emit_c.md
+    - test: test/dsl/test_emit_c.py
+    - 功能实现: kernel_gen/dsl/emit_c.py
+    """
+
+    if len(op.offsets) != 1 or len(op.sizes) != 1 or len(op.strides) != 1:
+        raise _emit_error(ctx, op.name, "npu_demo deslice requires 1-D offset/size/stride")
+    source_expr = _memory_base_name(op.source, ctx)
+    target_expr = _memory_base_name(op.target, ctx)
+    ctx.bind_name(op.result, target_expr)
+    offset_expr = emit_c_value(op.offsets[0], ctx)
+    size_expr = emit_c_value(op.sizes[0], ctx)
+    stride_expr = emit_c_value(op.strides[0], ctx)
+    return (
+        f"{ctx.current_indent}deslice({source_expr}, {target_expr}, "
+        f"{offset_expr}, {size_expr}, {stride_expr});"
+    )
+
+
+def _emit_npu_add_stmt(op: NnAddOp, ctx: EmitCContext) -> str:
+    """生成 `target=npu_demo` 下 `nn.add` 的 helper 调用。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 把 `nn.add(memory, memory)` 发射为 `add(lhs, rhs, out);`。
+    - 结果必须预绑定为现有 memory 目标名；不在本层隐式声明临时输出。
+
+    使用示例:
+    - stmt = emit_c_op(add_op, EmitCContext(target="npu_demo"))
+
+    关联文件:
+    - spec: spec/dsl/emit_c.md
+    - test: test/dsl/test_emit_c.py
+    - 功能实现: kernel_gen/dsl/emit_c.py
+    """
+
+    if not isinstance(op.lhs.type, NnMemoryType) or not isinstance(op.rhs.type, NnMemoryType):
+        raise _emit_error(ctx, op.name, "unsupported op")
+    result_name = ctx.lookup_name(op.result)
+    if result_name is None:
+        raise _emit_error(ctx, op.name, "unsupported op")
+    lhs_expr = _memory_base_name(op.lhs, ctx)
+    rhs_expr = _memory_base_name(op.rhs, ctx)
+    return f"{ctx.current_indent}add({lhs_expr}, {rhs_expr}, {result_name});"
+
+
 def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
     """把 SSA value 生成为可嵌入右值位置的表达式文本。
 
@@ -811,6 +1024,17 @@ def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
     owner = value.owner
     if isinstance(owner, arith.ConstantOp):
         return _format_literal(owner, ctx)
+    if ctx.target == "npu_demo":
+        if isinstance(owner, ArchGetThreadIdOp):
+            return "ctx.thread_id()"
+        if isinstance(owner, ArchGetThreadNumOp):
+            return "ctx.thread_num()"
+        if isinstance(owner, ArchGetDynamicMemoryOp):
+            element_type = _type_to_c(owner.result.type.element_type, ctx)
+            space_expr = _space_name_to_c(owner.memory_space.space.data, ctx)
+            if space_expr not in {"MemorySpace::TSM", "MemorySpace::TLM"}:
+                raise _emit_error(ctx, owner.name, "unsupported dynamic memory space")
+            return f"ctx.get_dynamic_memory<{element_type}>({space_expr})"
     if owner.name in _BINARY_SIGILS:
         if owner.name == "symbol.add" and ctx.target != "cpu":
             raise _emit_error(ctx, owner.name, "symbol scalar ops are cpu-only")
@@ -914,12 +1138,12 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
     """把单个 MLIR op 生成为目标后端的语句或语句块文本。
 
     创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 负责把单个 op 转换为赋值语句、控制流语句块、访存语句、memory 视图声明或 CPU helper 调用片段。
-    - 本阶段新增的 `symbol.for/dma.alloc/view/slice/deslice/nn.img2col2d` 仅支持 `target=cpu`。
-    - `nn.add` 仅支持 `target=cpu` 且 `result` 已预绑定名称的节点级 `cpu::add(...)` 发射。
+    - 负责把单个 op 转换为赋值语句、控制流语句块、访存语句、memory 视图声明或 helper 调用片段。
+    - `target=cpu` 支持现有 `symbol.for/dma.alloc/view/slice/deslice/nn.img2col2d/nn.add` 节点级发射。
+    - `target=npu_demo` 仅支持当前公开的 `KernelContext` 查询、`TSM/TLM` dynamic memory、`view/slice/deslice/add` 节点级发射。
 
     使用示例:
     - stmt = emit_c_op(op, EmitCContext(target=\"cpu\"))
@@ -932,6 +1156,22 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
 
     if op.name in _BINARY_SIGILS or isinstance(op, arith.CmpiOp):
         return _emit_assignment(op, ctx)
+    if isinstance(op, arith.ConstantOp):
+        return ""
+    if ctx.target == "npu_demo":
+        if isinstance(op, (ArchGetThreadIdOp, ArchGetThreadNumOp)):
+            return _emit_npu_query_stmt(op, ctx)
+        if isinstance(op, ArchGetDynamicMemoryOp):
+            return _emit_npu_dynamic_memory_stmt(op, ctx)
+        if isinstance(op, DmaViewOp):
+            return _emit_npu_view_stmt(op, ctx)
+        if isinstance(op, DmaSliceOp):
+            return _emit_npu_slice_stmt(op, ctx)
+        if isinstance(op, DmaDesliceOp):
+            return _emit_npu_deslice_stmt(op, ctx)
+        if isinstance(op, NnAddOp):
+            return _emit_npu_add_stmt(op, ctx)
+        raise _emit_error(ctx, op.name, "unsupported op")
     if isinstance(op, DmaAllocOp):
         return _emit_dma_alloc_stmt(op, ctx)
     if isinstance(op, DmaLoadOp):
@@ -944,8 +1184,6 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
         return _emit_dma_deslice_stmt(op, ctx)
     if isinstance(op, DmaViewOp):
         return _emit_dma_view_stmt(op, ctx)
-    if isinstance(op, arith.ConstantOp):
-        return ""
     if isinstance(op, NnAddOp):
         return _emit_nn_add_stmt(op, ctx)
     if isinstance(op, scf.ForOp):

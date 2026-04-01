@@ -1,7 +1,7 @@
 """emit_c tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 覆盖 emit_c 节点级源码片段生成与错误路径。
@@ -35,6 +35,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp, DmaViewOp
 from kernel_gen.dialect.nn import NnAddOp, NnImg2col2dOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolForOp, SymbolValueType
@@ -55,6 +56,10 @@ class UnsupportedOp(IRDLOperation):
 
 def _ctx() -> EmitCContext:
     return EmitCContext(target="cpu")
+
+
+def _npu_ctx() -> EmitCContext:
+    return EmitCContext(target="npu_demo")
 
 
 def _make_memory_type(
@@ -751,3 +756,135 @@ def test_emit_c_op_assigns_unique_helper_names_for_repeated_dma_slice_and_deslic
     assert "dma2_src_indices" in deslice_stmt0
     assert "dma3_src_indices" in deslice_stmt1
     assert "dma2_src_indices" not in deslice_stmt1
+
+
+# EC-017
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-02 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-02 00:00:00 +0800
+# 功能说明: 验证 npu_demo 下 thread 查询节点发射为 ctx.thread_id/thread_num。
+# 测试目的: 锁定 target=npu_demo 的 KernelContext 查询文本，避免回退到其他 helper 或 launch 语义。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_lowers_npu_demo_kernel_context_queries
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_lowers_npu_demo_kernel_context_queries() -> None:
+    ctx = _npu_ctx()
+    tid = ArchGetThreadIdOp()
+    tnum = ArchGetThreadNumOp()
+    ctx.bind_name(tid.result, "tid")
+    ctx.bind_name(tnum.result, "tnum")
+
+    tid_stmt = emit_c_op(tid, ctx)
+    tnum_stmt = emit_c_op(tnum, ctx)
+
+    assert tid_stmt == "long long tid = ctx.thread_id();"
+    assert tnum_stmt == "long long tnum = ctx.thread_num();"
+    assert "launch" not in tid_stmt
+    assert "barrier" not in tnum_stmt
+
+
+# EC-018
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-02 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-02 00:00:00 +0800
+# 功能说明: 验证 npu_demo 下 dynamic memory 查询发射为 ctx.get_dynamic_memory<T>(MemorySpace::TSM/TLM)。
+# 测试目的: 锁定 target=npu_demo 的 TSM/TLM 动态片上内存入口文本，避免回退到 load/store/malloc。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_lowers_npu_demo_dynamic_memory_access
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_lowers_npu_demo_dynamic_memory_access() -> None:
+    ctx = _npu_ctx()
+    tsm_type = _make_memory_type([16], [1], space="tsm", element_type=f32)
+    tlm_type = _make_memory_type([16], [1], space="tlm", element_type=f32)
+    tsm = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("tsm"), tsm_type)
+    tlm = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("tlm"), tlm_type)
+    ctx.bind_name(tsm.result, "tsm")
+    ctx.bind_name(tlm.result, "tlm")
+
+    tsm_stmt = emit_c_op(tsm, ctx)
+    tlm_stmt = emit_c_op(tlm, ctx)
+
+    assert tsm_stmt == "Memory<float> tsm = ctx.get_dynamic_memory<float>(MemorySpace::TSM);"
+    assert tlm_stmt == "Memory<float> tlm = ctx.get_dynamic_memory<float>(MemorySpace::TLM);"
+    assert "load<" not in tsm_stmt
+    assert "store<" not in tlm_stmt
+
+
+# EC-019
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-02 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-02 00:00:00 +0800
+# 功能说明: 验证 npu_demo 下 view/slice/deslice/add 管线可发射稳定节点级文本。
+# 测试目的: 锁定 target=npu_demo 的 helper 形态，确保不回退到 .view<T>()、load/store、launch/barrier 或 arch.launch_kernel。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline() -> None:
+    mem_type = _make_memory_type([16], [1], space="global", element_type=f32)
+    tsm_type = _make_memory_type([16], [1], space="tsm", element_type=f32)
+    tlm_type = _make_memory_type([16], [1], space="tlm", element_type=f32)
+    block = Block(arg_types=[mem_type, mem_type])
+    ctx = _npu_ctx()
+    ctx.bind_name(block.args[0], "source")
+    ctx.bind_name(block.args[1], "out")
+
+    zero = arith.ConstantOp(IntegerAttr(0, i32))
+    size = arith.ConstantOp(IntegerAttr(16, i32))
+    stride = arith.ConstantOp(IntegerAttr(1, i32))
+    tid = ArchGetThreadIdOp()
+    tnum = ArchGetThreadNumOp()
+    tsm = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("tsm"), tsm_type)
+    tlm = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("tlm"), tlm_type)
+    src_view = DmaViewOp(block.args[0], [tid.result], [size.result], [stride.result], mem_type)
+    work_tile_view = DmaViewOp(tsm.result, [zero.result], [size.result], [stride.result], tsm_type)
+    out_tile_view = DmaViewOp(tlm.result, [zero.result], [size.result], [stride.result], tlm_type)
+    slice_op = DmaSliceOp(work_tile_view.result, src_view.result, [zero.result], [size.result], [stride.result])
+    add_op = NnAddOp(work_tile_view.result, work_tile_view.result, tlm_type, NnMemorySpaceAttr.from_name("tlm"))
+    deslice_op = DmaDesliceOp(add_op.result, block.args[1], [tid.result], [size.result], [stride.result], mem_type)
+
+    ctx.bind_name(tid.result, "tid")
+    ctx.bind_name(tnum.result, "tnum")
+    ctx.bind_name(tsm.result, "tsm")
+    ctx.bind_name(tlm.result, "tlm")
+    ctx.bind_name(src_view.result, "src_view")
+    ctx.bind_name(work_tile_view.result, "work_tile")
+    ctx.bind_name(out_tile_view.result, "out_tile")
+    ctx.bind_name(add_op.result, "out_tile")
+
+    stmt = "\n".join(
+        [
+            emit_c_op(tid, ctx),
+            emit_c_op(tnum, ctx),
+            emit_c_op(tsm, ctx),
+            emit_c_op(tlm, ctx),
+            emit_c_op(src_view, ctx),
+            emit_c_op(work_tile_view, ctx),
+            emit_c_op(out_tile_view, ctx),
+            emit_c_op(slice_op, ctx),
+            emit_c_op(add_op, ctx),
+            emit_c_op(deslice_op, ctx),
+        ]
+    )
+
+    assert "long long tid = ctx.thread_id();" in stmt
+    assert "long long tnum = ctx.thread_num();" in stmt
+    assert "Memory<float> tsm = ctx.get_dynamic_memory<float>(MemorySpace::TSM);" in stmt
+    assert "Memory<float> tlm = ctx.get_dynamic_memory<float>(MemorySpace::TLM);" in stmt
+    assert "auto src_view = view(source, tid, 16, 1);" in stmt
+    assert "auto work_tile = view(tsm, 0, 16, 1);" in stmt
+    assert "auto out_tile = view(tlm, 0, 16, 1);" in stmt
+    assert "slice(work_tile, src_view, 0, 16, 1);" in stmt
+    assert "add(work_tile, work_tile, out_tile);" in stmt
+    assert "deslice(out_tile, out, tid, 16, 1);" in stmt
+    assert ".view<" not in stmt
+    assert "load<" not in stmt
+    assert "store<" not in stmt
+    assert "launch" not in stmt
+    assert "barrier" not in stmt
+    assert "arch.launch_kernel" not in stmt
