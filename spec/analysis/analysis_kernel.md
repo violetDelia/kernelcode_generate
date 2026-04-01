@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-定义算子级与函数级的“计算量/搬运量”分析规范。除基于 `Memory` 形状的公式接口外，提供面向 `func.func`（`xdsl.dialects.func.FuncOp`）的主入口 `analyze_kernel(...)`：输出逐 op 成本、函数总量与稳定 `value_traffic`，并可选将汇总写回 `func.func` 属性（`analysis.*`）。
+定义算子级与函数级的“计算量/搬运量”分析规范。除基于 `Memory` 形状的兼容公式接口外，提供面向 `func.func`（`xdsl.dialects.func.FuncOp`）的唯一公开主入口 `analyze_kernel(...)`：输出逐 op 成本、函数总量与稳定 `value_traffic`，并可选将汇总写回 `func.func` 属性（`analysis.*`）。其中 `analyze_kernel(...)` 只对当前主入口已承接的统计范围产生成本/流量结果；当前已承接并在 `S1` 公开收口范围内的 DMA 分支包括 `dma.load`、`dma.copy`、`dma.store`；`dma.slice`、`dma.deslice`、`dma.alloc`、`dma.free` 当前不在 `S1` 公开收口范围内；基于 `Memory`/`Operation` 的公式接口仍只负责白名单公式算子。
 
 ## 文档信息
 
@@ -26,20 +26,23 @@
 ## 目标
 
 - 给出逐元素算术、逐元素比较、显式 `broadcast`、`matmul` 的计算量与读写字节口径。
-- 提供 `analyze_kernel(...)` 主入口：面向 `func.func` 统计 compute/read/write 与 `value_traffic`，并支持 `attach_attrs` 回写。
-- 保留 `analyze_function(...)` 兼容入口：按 `Operation` 序列聚合统计结果，区分中间结果是否物化。
+- 冻结 `analyze_kernel(func_op: func.FuncOp, ...) -> AnalyzeKernelSummary` 为当前唯一公开主入口：面向 `func.func` 统计 compute/read/write 与 `value_traffic`，并支持 `attach_attrs` 回写。
+- 保留基于 `Memory`/`Operation` 的兼容公式接口，供公式复用与兼容场景使用，但不把 `analyze_function(...)` 重新定义为与 `analyze_kernel(...)` 并列的长期主入口。
 - 对形状不匹配、参数非法等情况提供一致的错误边界。
 
 ## 限制与边界
 
-- 仅覆盖 `add/sub/mul/truediv/eq/ne/lt/le/gt/ge/broadcast/matmul`；其它算子必须拒绝。
+- 基于 `Memory`/`Operation` 的兼容公式接口（包括 `analyze_function(...)` 与各公式 helper）仅覆盖 `add/sub/mul/truediv/eq/ne/lt/le/gt/ge/broadcast/matmul`；在这一路径上传入其它算子必须拒绝。
+- `analyze_kernel(...)` 当前只对主入口已承接的逐元素/`matmul` 成本统计，以及 `dma.load`、`dma.copy`、`dma.store` 的 DMA 分支统计产生结果；`arith.constant` 与 `func.return` 默认忽略。
 - 逐元素算术/比较不允许隐式广播，输入与输出 `shape` 必须严格一致。
 - `broadcast` 仅为显式操作，要求输出 rank 不小于输入 rank，尾维对齐且维度相等或输入维为静态 `1`。
 - `matmul` 仅支持二维收缩：`lhs=[M,K]`、`rhs=[K,N]`、`out=[M,N]`。
 - 仅提供理论计数口径，不建模缓存复用、分块或硬件执行细节。
 - `dtype_size`/`predicate_size` 允许为 `None`，此时以符号 `S`/`P` 表示。
 - 形状缺失、规则不满足或参数校验失败必须抛出 `AnalysisError`。
-- `analyze_kernel(...)` 对未知 op 必须执行“skip + warning”，不计入总量；但对已支持 op 的前置条件不满足必须抛出 `AnalysisError`。
+- `analyze_kernel(...)` 对未知 op 必须执行“skip + warning”，不计入总量；但对已承接公开分支（包括当前 DMA 分支）的前置条件不满足必须抛出 `AnalysisError`。
+- 在当前计划与测试未同步前，`dma.slice`、`dma.deslice`、`dma.alloc`、`dma.free` 不纳入 `S1` 已承接公开合同；本规范当前不为这四类 DMA 分支建立测试映射或稳定统计细节。
+- `analyze_function(...)` 仅作为基于 `Memory`/`Operation` 的兼容公式接口存在，不与 `analyze_kernel(...)` 并列为长期公开主入口。
 
 ## 公开接口
 
@@ -126,10 +129,10 @@
   - `func_name: str`：函数名（`func.func` 的 `sym_name`）。
   - `op_costs: Sequence[KernelOpCost]`：逐 op 成本列表。
   - `value_traffic: Sequence[ValueTraffic]`：逐 value 读写流量列表。
-  - `total_compute: sympy.Basic`：函数总计算量。
-  - `total_read_bytes: sympy.Basic`：函数总读取字节。
-  - `total_write_bytes: sympy.Basic`：函数总写入字节。
-- 使用示例：`summary = analyze_kernel(func_op, dtype_size_overrides={"f32": 4})`
+- `total_compute: sympy.Basic`：函数总计算量。
+- `total_read_bytes: sympy.Basic`：函数总读取字节。
+- `total_write_bytes: sympy.Basic`：函数总写入字节。
+- 使用示例：`summary = analyze_kernel(func_op, dtype_size_overrides={"f32": 4}); summary.op_costs[0].op_name == "nn.add"`
 - 注意事项：`total_*` 必须等于 `op_costs` 中对应字段逐项求和。
 - 返回与限制：用于 `func_cost` 等分析 pass 复用的稳定汇总结构。
 
@@ -142,11 +145,19 @@
   - `predicate_size: int`：比较输出写回字节数（默认 `1`；必须为正整数）。
   - `dtype_size_overrides: dict[str, int] | None`：可选 dtype 字节覆盖表（如 `{"f32": 4}`）。
   - `attach_attrs: bool`：是否将汇总结果写回到 `func.func` 属性中（见“额外补充”）。
-- 使用示例：`summary = analyze_kernel(func_op, dtype_size_overrides={"f32": 4}, attach_attrs=True)`
+- 使用示例：
+
+```python
+summary = analyze_kernel(func_op, dtype_size_overrides={"f32": 4})
+assert summary.op_costs[0].op_name == "nn.add"
+```
+
 - 注意事项：
-  - 未知 op 必须 `skip + warning`，不计入总量。
+  - 主入口签名固定为 `analyze_kernel(func_op: func.FuncOp, args: Iterable[object] | None = None, predicate_size: int = 1, dtype_size_overrides: dict[str, int] | None = None, attach_attrs: bool = False) -> AnalyzeKernelSummary`。
+  - 未知 op 必须发出 `UserWarning`，warning 文本需包含 unknown op 信息，并执行 `skip + warning`：不计入 `op_costs`、`total_*` 或对应 `value_traffic`，但分析必须继续完成；当前已承接公开的 `dma.load`、`dma.copy`、`dma.store` 不属于该 warning 分支。
+  - 当前公开 DMA 分支中，`dma.load` 作为产生结果 value 的 op，需要把结果写流量登记到对应 `value_traffic`；`dma.copy`、`dma.store` 记录源读/目标写流量。
   - 默认忽略 `arith.constant` 与 `func.return`。
-  - 比较输出为 `i1` 时写回必须使用 `predicate_size`（不使用 `dtype_size_overrides["i1"]`）。
+  - 比较输出为 `i1` 时，`KernelOpCost.write_bytes`、对应结果的 `ValueTraffic.write_bytes` 与 `total_write_bytes` 必须统一使用 `predicate_size`，不使用 `dtype_size_overrides["i1"]`。
 - 返回与限制：返回 `AnalyzeKernelSummary`；参数/前置条件不满足时抛出 `AnalysisError`。
 
 **analyze_elementwise**
@@ -200,13 +211,14 @@
 
 **analyze_function**
 
-- 功能说明：按函数级算子序列聚合统计结果。
+- 功能说明：按函数级算子序列聚合统计结果的兼容公式接口，不是与 `analyze_kernel(...)` 并列的长期主入口。
 - 参数说明：
   - `ops: Sequence[Operation]`：算子序列。
   - `dtype_size: int | None`：传递给逐元素/广播/matmul 的字节大小。
   - `predicate_size: int | None`：传递给比较算子的字节大小。
 - 使用示例：`analyze_function([Operation("add", [a, b], c)])`
 - 注意事项：
+  - 面向 `func.func` 的公开主入口仍是 `analyze_kernel(...)`；`analyze_function(...)` 仅用于 `Memory`/`Operation` 级公式复用与兼容场景。
   - `Operation.materialize=False` 的输出不计写回，且后续读取自动置为不计读。
   - `Operation.inputs` 数量与算子类型不匹配必须抛出 `AnalysisError`。
   - 不支持的 `op` 必须抛出 `AnalysisError`。
@@ -260,9 +272,10 @@
 - **形状与符号推导**：`Memory.shape` 支持符号维度，元素个数以乘积表达式表示；形状缺失或不满足规则必须失败。
 - **中间结果计入口径**：物化中间结果计一次写回并在后续消费时计读；未物化中间结果不计写回且不计后续读。
 - **语义对齐**：逐元素/`broadcast`/`matmul` 形状规则与 `spec/operation/nn.md` 对齐，本规范仅定义统计口径。
-- **主入口与兼容接口**：`analyze_kernel(...)` 为当前面向 `func.func` 的主入口；`analyze_function(...)` 保留为基于 `Memory`/`Operation` 的兼容公式接口。
+- **主入口与兼容接口**：`analyze_kernel(...)` 是当前唯一公开主入口；`analyze_function(...)` 仅保留为基于 `Memory`/`Operation` 的兼容公式接口，不与前者并列为长期主入口。
 - **稳定 value_key**：`value_traffic` 使用稳定 key：函数参数为 `arg{index}`，op 结果为 `op{op_index}.result{result_index}`。
-- **未知 op 告警**：未知/未支持 op 必须 `skip + warning`（`UserWarning`），消息格式为 `analysis_kernel skip <op.name>: <reason>`，并跳过该 op。
+- **未知 op 告警**：未知 op 必须 `skip + warning`（`UserWarning`），消息格式为 `analysis_kernel skip <op.name>: <reason>`，warning 中必须包含 unknown op 信息；跳过该 op 后分析继续完成，不中止整个 `func.func`。当前已承接公开的 `dma.load`、`dma.copy`、`dma.store` 不属于该分支。
+- **compare i1 统计口径**：当比较结果 element type 为 `i1` 时，写回字节统一按 `predicate_size` 计入；`dtype_size_overrides["i1"]` 不能覆盖该口径。
 - **属性回写**：当 `attach_attrs=True` 时，需写回 `analysis.compute`、`analysis.read_bytes`、`analysis.write_bytes` 到 `func.func` attributes（字符串化表达式）。
 
 ## 测试
@@ -276,7 +289,8 @@
   - 验证函数级聚合在物化与融合场景下的统计差异。
   - 验证参数校验错误（`read_mask` 长度与 `Operation.inputs` 数量）。
   - 验证 `analyze_kernel(...)` 逐 op 统计、总量统计与 `value_traffic` 稳定 key。
-  - 验证未知 op `skip + warning` 口径与 compare `i1` 写回 `predicate_size` 优先级。
+  - 验证未知 op `skip + warning` 口径与 compare `i1` 写回 `predicate_size` 优先级；其中 unknown-op 的机械验收测试名统一为 `test_analyze_kernel_unknown_op_warns_and_skips`。
+  - 验证当前 DMA 的公开机械验收示例仍以 `AK-005` 的 `dma.load` 用例为准；在计划与测试同步前，不为 `dma.slice`、`dma.deslice`、`dma.alloc`、`dma.free` 新增公开测试映射。
   - 验证 `analyze_kernel(...)` 的入参校验（`func_op` 类型、`args` 可迭代性与长度一致性）。
 - 功能与用例清单：
 
@@ -292,11 +306,11 @@
 | AN-008 | 参数校验 | Operation.inputs 数量 | `Operation` 输入数量不匹配 | `analyze_function` | 抛 `AnalysisError` | `test_analysis_function_inputs_mismatch` |
 | AK-001 | analyze_kernel | nn.add 符号 shape | `func.func` 参数为 `nn.memory` | `analyze_kernel(func_op)` | compute/read/write 与 `op_costs[0].op_name` 满足约定 | `test_analyze_kernel_nn_add_symbolic_shape` |
 | AK-002 | analyze_kernel | tensor + const | rhs 为 `arith.constant` | `analyze_kernel(func_op)` | 常量不计读流量；`value_traffic` key 覆盖 `arg0/op0.result0` | `test_analyze_kernel_tensor_plus_const` |
-| AK-003 | value_traffic | chain 读写归属 | 串联两次逐元素 op | `analyze_kernel(func_op)` | 中间结果 `op0.result0` 的读写归属满足约定 | `test_analyze_kernel_chain_value_traffic` |
+| AK-003 | value_traffic | chain 读写归属 | 串联两次逐元素 op | `analyze_kernel(func_op)` | 中间结果 `op0.result0` 的 `read_bytes/write_bytes` 与链式中间值流量统计可机械判断一致 | `test_analyze_kernel_chain_value_traffic` |
 | AK-004 | analyze_kernel | matmul 公式 | `lhs=[M,K]`、`rhs=[K,N]` | `analyze_kernel(func_op)` | compute/read/write 满足 `2*M*N*K` 等公式 | `test_analyze_kernel_matmul_formula` |
 | AK-005 | analyze_kernel | dma.load 流量 | `dma.load` 参与链路 | `analyze_kernel(func_op)` | `value_traffic` 记录源与结果的读写流量 | `test_analyze_kernel_dma_load_tracks_source_and_result` |
 | AK-006 | 参数校验 | func_op 类型 | 输入非 `func.FuncOp` | `analyze_kernel(non_func)` | 抛 `AnalysisError` | `test_analyze_kernel_rejects_non_func_input` |
 | AK-007 | 参数校验 | args 可迭代性 | `args=object()` | `analyze_kernel(func_op, args=...)` | 抛 `AnalysisError` | `test_analyze_kernel_rejects_non_iterable_args` |
 | AK-008 | 参数校验 | args 长度一致性 | `len(args) != len(func.args)` | `analyze_kernel(func_op, args=...)` | 抛 `AnalysisError` | `test_analyze_kernel_rejects_args_length_mismatch` |
-| AK-009 | unknown op | skip + warning | 含未知 op | `analyze_kernel(func_op)` | 产生告警且未知 op 不计入 `op_costs` | `test_analyze_kernel_unknown_op_warns_and_skips` |
-| AK-010 | predicate_size | compare i1 | 输出 element type 为 `i1` | `analyze_kernel(..., predicate_size=2)` | 写回使用 `predicate_size` 优先 | `test_analyze_kernel_compare_i1_uses_predicate_size` |
+| AK-009 | unknown op | skip + warning | 含未知 op | `analyze_kernel(func_op)` | 产生包含 unknown op 信息的 warning，未知 op 不计入 `op_costs`，且分析继续完成 | `test_analyze_kernel_unknown_op_warns_and_skips` |
+| AK-010 | predicate_size | compare i1 | 输出 element type 为 `i1` | `analyze_kernel(..., predicate_size=2)` | `i1` 结果写回与总写流量按 `predicate_size` 计入 | `test_analyze_kernel_compare_i1_uses_predicate_size` |
