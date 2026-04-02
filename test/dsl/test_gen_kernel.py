@@ -1,7 +1,7 @@
 """gen_kernel tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 朽木露琪亚
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 func.func 到目标函数源码的组装行为。
@@ -30,7 +30,7 @@ import tempfile
 
 import pytest
 from xdsl.dialects import arith, func, scf
-from xdsl.dialects.builtin import ArrayAttr, DictionaryAttr, FunctionType, IndexType, IntAttr, IntegerAttr, StringAttr, f16, f32, f64, i1, i32
+from xdsl.dialects.builtin import ArrayAttr, DictionaryAttr, FunctionType, IndexType, IntAttr, IntegerAttr, ModuleOp, StringAttr, f16, f32, f64, i1, i32
 from xdsl.ir import Block, Region
 from xdsl.irdl import IRDLOperation, irdl_op_definition, result_def
 
@@ -42,6 +42,7 @@ from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolValueType
 from kernel_gen.dsl.emit_c import EmitCContext
 from kernel_gen.dsl.gen_kernel import GenKernelError, gen_body, gen_kernel, gen_signature
+from kernel_gen.passes.lowering.nn_to_kernel import LowerNnToKernelPass
 
 gen_kernel_module = importlib.import_module("kernel_gen.dsl.gen_kernel")
 
@@ -79,6 +80,30 @@ def _arg_attrs(*names: str) -> ArrayAttr[DictionaryAttr]:
 def _func(name: str, input_types: list[object], result_types: list[object], block: Block, arg_names: tuple[str, ...]) -> func.FuncOp:
     func_type = FunctionType.from_lists(input_types, result_types)
     return func.FuncOp(name, func_type, Region(block), arg_attrs=_arg_attrs(*arg_names))
+
+
+def _lower_func(func_op: func.FuncOp) -> func.FuncOp:
+    """对单个 `func.func` 执行 `LowerNnToKernelPass` 并返回改写后的函数。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 为 I3 的 pass-after IR codegen 测试提供最小包装。
+    - 直接在 module 内原地执行 lowering，并返回同一函数实例。
+
+    使用示例:
+    - lowered = _lower_func(func_op)
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: test/dsl/test_gen_kernel.py
+    """
+
+    module = ModuleOp([func_op])
+    LowerNnToKernelPass().run(module)
+    return next(op for op in module.ops if isinstance(op, func.FuncOp))
 
 
 def _compile_and_run(source: str) -> None:
@@ -750,14 +775,14 @@ def test_gen_kernel_rejects_npu_demo_body_level_kernel_with_nonempty_body() -> N
 
 # GK-I2-001
 # 创建者: 大闸蟹
-# 最后一次更改: 大闸蟹
-# 功能说明: 验证 direct-return nn.add 的三条 CPU 路径可生成源码并完成编译执行。
-# 测试目的: 锁定 memory+memory、memory+const(i32)、memory+symbol.int 不仅能生成 `cpu::add(..., out);`，而且能连同 include/cpu/Nn.h 编译并跑通。
-# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_compiles_and_runs_direct_return_nn_add_variants_on_cpu
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 pass 后 lowered IR 的三条 nn.add CPU 路径可生成源码并完成编译执行。
+# 测试目的: 锁定 `build_func_op -> LowerNnToKernelPass -> gen_kernel` 的 memory+memory、memory+const(i32)、memory+symbol.int 三条成功口径，并确保源码不再出现 `nn.add` / `kernel.add` 文本。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_compiles_and_runs_lowered_nn_add_variants_on_cpu
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
 # 对应测试文件路径: test/dsl/test_gen_kernel.py
-def test_gen_kernel_compiles_and_runs_direct_return_nn_add_variants_on_cpu() -> None:
+def test_gen_kernel_compiles_and_runs_lowered_nn_add_variants_on_cpu() -> None:
     mem = _make_memory_type([2, 2], [2, 1])
     space = NnMemorySpaceAttr.from_name("global")
 
@@ -766,7 +791,7 @@ def test_gen_kernel_compiles_and_runs_direct_return_nn_add_variants_on_cpu() -> 
     pair_block.add_op(pair_add)
     pair_block.add_op(func.ReturnOp(pair_add.result))
     pair_func = _func("add_direct", [mem, mem], [mem], pair_block, ("lhs", "rhs"))
-    pair_source = gen_kernel(pair_func, _ctx())
+    pair_source = gen_kernel(_lower_func(pair_func), _ctx())
 
     const_block = Block(arg_types=[mem])
     const_value = arith.ConstantOp(IntegerAttr(1, i32))
@@ -775,7 +800,7 @@ def test_gen_kernel_compiles_and_runs_direct_return_nn_add_variants_on_cpu() -> 
     const_block.add_op(const_add)
     const_block.add_op(func.ReturnOp(const_add.result))
     const_func = _func("add_const_direct", [mem], [mem], const_block, ("lhs",))
-    const_source = gen_kernel(const_func, _ctx())
+    const_source = gen_kernel(_lower_func(const_func), _ctx())
 
     symbol_type = SymbolValueType.from_expr("bias")
     symbol_block = Block(arg_types=[mem, symbol_type])
@@ -783,11 +808,25 @@ def test_gen_kernel_compiles_and_runs_direct_return_nn_add_variants_on_cpu() -> 
     symbol_block.add_op(symbol_add)
     symbol_block.add_op(func.ReturnOp(symbol_add.result))
     symbol_func = _func("add_symbol_direct", [mem, symbol_type], [mem], symbol_block, ("lhs", "bias"))
-    symbol_source = gen_kernel(symbol_func, _ctx())
+    symbol_source = gen_kernel(_lower_func(symbol_func), _ctx())
 
     assert "cpu::add(lhs, rhs, out);" in pair_source
-    assert "cpu::add(lhs, 1, out);" in const_source
-    assert "cpu::add(lhs, bias, out);" in symbol_source
+    assert "kernel.add" not in pair_source
+    assert "nn.add" not in pair_source
+    assert "lhs.shape()[0]" in const_source
+    assert "lhs.shape()[1]" in const_source
+    assert "cpu::add(lhs, v0, out);" in const_source
+    assert "for (long long fill0_i = 0; fill0_i < v0.element_count(); ++fill0_i) {" in const_source
+    assert "v0.data()[fill0_i] = 1;" in const_source
+    assert "kernel.add" not in const_source
+    assert "nn.add" not in const_source
+    assert "lhs.shape()[0]" in symbol_source
+    assert "lhs.shape()[1]" in symbol_source
+    assert "cpu::add(lhs, v0, out);" in symbol_source
+    assert "for (long long fill0_i = 0; fill0_i < v0.element_count(); ++fill0_i) {" in symbol_source
+    assert "v0.data()[fill0_i] = bias;" in symbol_source
+    assert "kernel.add" not in symbol_source
+    assert "nn.add" not in symbol_source
 
     cpp_source = f"""\
 #include <cstdint>
@@ -795,6 +834,8 @@ def test_gen_kernel_compiles_and_runs_direct_return_nn_add_variants_on_cpu() -> 
 #include "include/cpu/Nn.h"
 
 using cpu::Memory;
+using cpu::MemoryFormat;
+using cpu::MemorySpace;
 
 {pair_source}
 

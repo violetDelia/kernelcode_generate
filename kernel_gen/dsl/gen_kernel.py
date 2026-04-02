@@ -24,6 +24,7 @@ from typing import Any
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ArrayAttr, DictionaryAttr, Float32Type, Float64Type, IntegerType, IndexType, StringAttr
 
+from kernel_gen.dialect.dma import DmaAllocOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolValueType
 
@@ -484,6 +485,14 @@ def gen_body(func_op: func.FuncOp, ctx: EmitCContext) -> str:
         _validate_npu_demo_body_level_kernel_body(func_op, ctx)
         return _emit_npu_demo_body_level_kernel_body(func_op, ctx)
 
+    def _is_returned_output_alloc(op: DmaAllocOp) -> bool:
+        if ctx.target != "cpu":
+            return False
+        result_types = list(func_op.function_type.outputs.data)
+        if len(result_types) != 1 or not isinstance(result_types[0], NnMemoryType):
+            return False
+        return any(isinstance(use.operation, func.ReturnOp) for use in op.result.uses)
+
     def _is_direct_return_nn_add(return_op: func.ReturnOp) -> bool:
         if ctx.target != "cpu":
             return False
@@ -520,6 +529,8 @@ def gen_body(func_op: func.FuncOp, ctx: EmitCContext) -> str:
                     from .emit_c import emit_c_value
 
                     value_name = emit_c_value(op.arguments[0], ctx)
+                if value_name == "out":
+                    continue
                 lines.append(f"{ctx.current_indent}out = {value_name};")
                 continue
             if isinstance(result_type, SymbolValueType):
@@ -531,6 +542,9 @@ def gen_body(func_op: func.FuncOp, ctx: EmitCContext) -> str:
                 lines.append(f"{ctx.current_indent}return {value_expr};")
                 continue
             raise _error(ctx, func_op.sym_name.data, "unsupported return form")
+            continue
+        if isinstance(op, DmaAllocOp) and _is_returned_output_alloc(op):
+            ctx.bind_name(op.result, "out")
             continue
         if isinstance(op, NnAddOp) and result_types and isinstance(result_types[0], NnMemoryType):
             if op.result.has_one_use():

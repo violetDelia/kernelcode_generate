@@ -1,7 +1,7 @@
 """C-like fragment emission helpers for DSL lowering.
 
 创建者: 金铲铲大作战
-最后一次更改: jcc你莫辜负
+最后一次更改: 小李飞刀
 
 功能说明:
 - 提供单个 MLIR op/value 到 C 风格源码片段的最小生成规则。
@@ -27,9 +27,10 @@ from xdsl.dialects.builtin import FloatAttr, IndexType, IntAttr, IntegerAttr, In
 from xdsl.ir import BlockArgument, Operation, SSAValue
 
 from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp
-from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp, DmaViewOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFillOp, DmaLoadOp, DmaSliceOp, DmaStoreOp, DmaViewOp
+from kernel_gen.dialect.kernel import KernelAddOp
 from kernel_gen.dialect.nn import NnAddOp, NnImg2col2dOp, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolForOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolForOp, SymbolGetDimOp, SymbolValueType
 
 
 class EmitCError(ValueError):
@@ -540,6 +541,38 @@ def _emit_dma_alloc_stmt(op: DmaAllocOp, ctx: EmitCContext) -> str:
     return _emit_memory_decl(result_name, result_type, ctx, shape_values=shape_values, with_backing_storage=True)
 
 
+def _emit_dma_fill_stmt(op: DmaFillOp, ctx: EmitCContext) -> str:
+    """生成 `dma.fill` 的 CPU 侧填充循环片段。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 在 `target=cpu` 下把 `dma.fill(target, value)` 发射为对 backing storage 的显式线性填充循环。
+    - 当前按 `Memory<T>::element_count()` 与 `data()` 遍历，覆盖 pass 生成的 contiguous temporary memory 子集。
+
+    使用示例:
+    - stmt = emit_c_op(fill_op, EmitCContext(target=\"cpu\"))
+
+    关联文件:
+    - spec: spec/dsl/emit_c.md
+    - test: test/dsl/test_emit_c.py
+    - 功能实现: kernel_gen/dsl/emit_c.py
+    """
+
+    if ctx.target != "cpu":
+        raise _emit_error(ctx, op.name, "dma ops are cpu-only")
+    target_expr = _memory_base_name(op.target, ctx)
+    value_expr = emit_c_value(op.value, ctx)
+    loop_name = f"{ctx.allocate_temp_name('fill')}_i"
+    lines = [f"{ctx.current_indent}for (long long {loop_name} = 0; {loop_name} < {target_expr}.element_count(); ++{loop_name}) {{"]
+    ctx.push_indent()
+    lines.append(f"{ctx.current_indent}{target_expr}.data()[{loop_name}] = {value_expr};")
+    ctx.pop_indent()
+    lines.append(f"{ctx.current_indent}}}")
+    return "\n".join(lines)
+
+
 def _emit_dma_view_stmt(op: DmaViewOp, ctx: EmitCContext) -> str:
     """生成 `dma.view` 的 CPU 侧 memory 视图声明片段。
 
@@ -817,6 +850,33 @@ def _emit_nn_add_stmt(op: NnAddOp, ctx: EmitCContext) -> str:
     return f"{ctx.current_indent}cpu::add({memory_expr}, {scalar_expr}, {result_name});"
 
 
+def _emit_kernel_add_stmt(op: KernelAddOp, ctx: EmitCContext) -> str:
+    """生成 `kernel.add` 的 CPU 侧 `cpu::add(...)` 调用片段。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 在 `target=cpu` 下把 lowered `kernel.add(lhs, rhs, out)` 收口为 `cpu::add(lhs, rhs, out);`。
+    - 仅消费 memory-to-memory 形式，不在本层回退到 raw `nn.add` 或函数级特化。
+
+    使用示例:
+    - stmt = emit_c_op(kernel_add_op, EmitCContext(target=\"cpu\"))
+
+    关联文件:
+    - spec: spec/dsl/emit_c.md
+    - test: test/dsl/test_emit_c.py
+    - 功能实现: kernel_gen/dsl/emit_c.py
+    """
+
+    if ctx.target != "cpu":
+        raise _emit_error(ctx, op.name, "unsupported op")
+    lhs_expr = _memory_base_name(op.lhs, ctx)
+    rhs_expr = _memory_base_name(op.rhs, ctx)
+    out_expr = _memory_base_name(op.out, ctx)
+    return f"{ctx.current_indent}cpu::add({lhs_expr}, {rhs_expr}, {out_expr});"
+
+
 def _emit_npu_view_stmt(op: DmaViewOp, ctx: EmitCContext) -> str:
     """生成 `target=npu_demo` 下 `dma.view` 的 helper 调用。
 
@@ -1004,7 +1064,7 @@ def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
     最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 负责把常量、二元算术、比较、unit-tile `dma.load` 与 `symbol.add`（cpu）结果转换为右值表达式。
+    - 负责把常量、二元算术、比较、unit-tile `dma.load`、`symbol.add`（cpu）以及 `symbol.get_dim` 结果转换为右值表达式。
     - 若 value 已在 `EmitCContext` 中绑定名称，则直接复用稳定名称。
 
     使用示例:
@@ -1050,6 +1110,11 @@ def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
         return f"({lhs} {_CMPI_SIGILS[predicate]} {rhs})"
     if isinstance(owner, DmaLoadOp):
         return _emit_dma_load_expr(owner, ctx)
+    if isinstance(owner, SymbolGetDimOp):
+        if not isinstance(owner.axis, IntAttr):
+            raise _emit_error(ctx, owner.name, "axis must be IntAttr")
+        source_expr = _memory_base_name(owner.source, ctx)
+        return f"{source_expr}.shape()[{owner.axis.data}]"
     raise _emit_error(ctx, owner.name, f"invalid dependency for value {value}")
 
 
@@ -1142,7 +1207,7 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
 
     功能说明:
     - 负责把单个 op 转换为赋值语句、控制流语句块、访存语句、memory 视图声明或 helper 调用片段。
-    - `target=cpu` 支持现有 `symbol.for/dma.alloc/view/slice/deslice/nn.img2col2d/nn.add` 节点级发射。
+    - `target=cpu` 支持现有 `symbol.for/symbol.get_dim/dma.alloc/fill/view/slice/deslice/kernel.add/nn.img2col2d/nn.add` 节点级发射。
     - `target=npu_demo` 仅支持当前公开的 `KernelContext` 查询、`TSM/TLM` dynamic memory、`view/slice/deslice/add` 节点级发射。
 
     使用示例:
@@ -1172,8 +1237,12 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
         if isinstance(op, NnAddOp):
             return _emit_npu_add_stmt(op, ctx)
         raise _emit_error(ctx, op.name, "unsupported op")
+    if isinstance(op, SymbolGetDimOp):
+        return ""
     if isinstance(op, DmaAllocOp):
         return _emit_dma_alloc_stmt(op, ctx)
+    if isinstance(op, DmaFillOp):
+        return _emit_dma_fill_stmt(op, ctx)
     if isinstance(op, DmaLoadOp):
         return _emit_assignment(op, ctx)
     if isinstance(op, DmaStoreOp):
@@ -1184,6 +1253,8 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
         return _emit_dma_deslice_stmt(op, ctx)
     if isinstance(op, DmaViewOp):
         return _emit_dma_view_stmt(op, ctx)
+    if isinstance(op, KernelAddOp):
+        return _emit_kernel_add_stmt(op, ctx)
     if isinstance(op, NnAddOp):
         return _emit_nn_add_stmt(op, ctx)
     if isinstance(op, scf.ForOp):

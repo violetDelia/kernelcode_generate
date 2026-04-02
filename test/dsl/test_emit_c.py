@@ -1,7 +1,7 @@
 """emit_c tests.
 
 创建者: 金铲铲大作战
-最后一次更改: jcc你莫辜负
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 emit_c 节点级源码片段生成与错误路径。
@@ -27,8 +27,8 @@ import sys
 
 import pytest
 from xdsl.dialects import arith, func, scf
-from xdsl.dialects.builtin import ArrayAttr, DenseIntOrFPElementsAttr, FloatAttr, IndexType, IntAttr, IntegerAttr, StringAttr, TensorType, f32, i32
-from xdsl.ir import Block
+from xdsl.dialects.builtin import ArrayAttr, DenseIntOrFPElementsAttr, FloatAttr, FunctionType, IndexType, IntAttr, IntegerAttr, ModuleOp, StringAttr, TensorType, f32, i32
+from xdsl.ir import Block, Region
 from xdsl.irdl import IRDLOperation, irdl_op_definition, result_def
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -36,12 +36,14 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp
-from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaLoadOp, DmaSliceOp, DmaStoreOp, DmaViewOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFillOp, DmaLoadOp, DmaSliceOp, DmaStoreOp, DmaViewOp
+from kernel_gen.dialect.kernel import KernelAddOp
 from kernel_gen.dialect.nn import NnAddOp, NnImg2col2dOp, NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolAddOp, SymbolForOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolAddOp, SymbolForOp, SymbolGetDimOp, SymbolValueType
 from kernel_gen.dsl.ast import BlockAST, ConstAST, ForAST, FunctionAST, Img2ColAST, LoadAST, ScalarArgAST, StoreAST, TensorAST, VarAST
 from kernel_gen.dsl.emit_c import EmitCContext, EmitCError, emit_c_op, emit_c_value
 from kernel_gen.dsl.mlir_gen import build_func_op_from_ast
+from kernel_gen.passes.lowering.nn_to_kernel import LowerNnToKernelPass
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace, NumericType
 
 
@@ -75,6 +77,41 @@ def _make_memory_type(
         element_type,
         NnMemorySpaceAttr.from_name(space),
     )
+
+
+def _lower_single_op_func(
+    input_types: list[object],
+    result_type: object,
+    build_ops,
+) -> Block:
+    """构造单函数 module 并执行 `LowerNnToKernelPass`。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 为 `emit_c` 的 pass-after IR 测试提供最小 lowering 包装。
+    - 返回被 pass 改写后的 entry block，便于按顺序检查 lowered op。
+
+    使用示例:
+    - block = _lower_single_op_func([mem], mem, lambda block: [...])
+
+    关联文件:
+    - spec: spec/dsl/emit_c.md
+    - test: test/dsl/test_emit_c.py
+    - 功能实现: test/dsl/test_emit_c.py
+    """
+
+    block = Block(arg_types=input_types)
+    ops = build_ops(block)
+    for op in ops:
+        block.add_op(op)
+    block.add_op(func.ReturnOp(ops[-1].results[0]))
+    func_type = FunctionType.from_lists(input_types, [result_type])
+    func_op = func.FuncOp("main", func_type, Region(block))
+    module = ModuleOp([func_op])
+    LowerNnToKernelPass().run(module)
+    return block
 
 
 # EC-001
@@ -551,6 +588,113 @@ def test_emit_c_op_keeps_nn_add_unsupported_without_prebound_result_or_on_non_cp
     reverse_symbol_ctx.bind_name(reverse_symbol_op.result, "out")
     with pytest.raises(EmitCError, match="nn.add: unsupported op"):
         emit_c_op(reverse_symbol_op, reverse_symbol_ctx)
+
+
+# EC-I3-001
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-02 20:39:00 +0800
+# 最近一次运行成功时间: 2026-04-02 20:39:00 +0800
+# 功能说明: 验证 emit_c 可消费 pass 后 `symbol.get_dim + dma.alloc + kernel.add` 的 memory+memory lowered IR。
+# 测试目的: 锁定 CPU emitter 不再卡在 `symbol.get_dim: unsupported op`，且 `kernel.add` 会收口为 `cpu::add(...)`。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_op_lowers_passed_memory_add_pipeline
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_op_lowers_passed_memory_add_pipeline() -> None:
+    mem = _make_memory_type([2, 2], [2, 1])
+    space = NnMemorySpaceAttr.from_name("global")
+    block = _lower_single_op_func(
+        [mem, mem],
+        mem,
+        lambda block: [NnAddOp(block.args[0], block.args[1], mem, space)],
+    )
+    ops = list(block.ops)
+    dim0 = next(op for op in ops if isinstance(op, SymbolGetDimOp) and op.axis.data == 0)
+    dim1 = next(op for op in ops if isinstance(op, SymbolGetDimOp) and op.axis.data == 1)
+    alloc = next(op for op in ops if isinstance(op, DmaAllocOp))
+    add = next(op for op in ops if isinstance(op, KernelAddOp))
+
+    ctx = _ctx()
+    ctx.bind_name(block.args[0], "lhs")
+    ctx.bind_name(block.args[1], "rhs")
+
+    assert emit_c_value(dim0.result, ctx) == "lhs.shape()[0]"
+    assert emit_c_value(dim1.result, ctx) == "lhs.shape()[1]"
+    assert emit_c_op(dim0, ctx) == ""
+    assert emit_c_op(dim1, ctx) == ""
+    assert emit_c_op(alloc, ctx) == (
+        "long long v0_shape[2] = {lhs.shape()[0], lhs.shape()[1]};\n"
+        "long long v0_stride[2] = {2, 1};\n"
+        "int32_t v0_buffer[4] = {};\n"
+        "Memory<int32_t> v0(v0_buffer, 2, v0_shape, v0_stride, MemoryFormat::Norm, MemorySpace::GM);"
+    )
+    assert emit_c_op(add, ctx) == "cpu::add(lhs, rhs, v0);"
+
+
+# EC-I3-002
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-02 20:39:00 +0800
+# 最近一次运行成功时间: 2026-04-02 20:39:00 +0800
+# 功能说明: 验证 emit_c 可消费 pass 后 `dma.fill + kernel.add` 的 mixed add lowered IR。
+# 测试目的: 锁定 `memory+const(i32)` 与 `memory+symbol.int` 在 CPU emitter 中都走真实填充后再参与 `cpu::add(...)`。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_op_lowers_passed_mixed_add_pipeline_with_dma_fill
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_op_lowers_passed_mixed_add_pipeline_with_dma_fill() -> None:
+    mem = _make_memory_type([2, 2], [2, 1])
+    space = NnMemorySpaceAttr.from_name("global")
+
+    def _build_const_ops(block: Block) -> list[object]:
+        const_op = arith.ConstantOp(IntegerAttr(1, i32))
+        return [const_op, NnAddOp(block.args[0], const_op.result, mem, space)]
+
+    const_block = _lower_single_op_func(
+        [mem],
+        mem,
+        _build_const_ops,
+    )
+    const_ops = list(const_block.ops)
+    const_fill = next(op for op in const_ops if isinstance(op, DmaFillOp))
+    const_add = next(op for op in const_ops if isinstance(op, KernelAddOp))
+
+    const_ctx = _ctx()
+    const_ctx.bind_name(const_block.args[0], "lhs")
+    const_alloc_names = [emit_c_op(op, const_ctx) for op in const_ops if isinstance(op, DmaAllocOp)]
+    assert len(const_alloc_names) == 2
+    assert "lhs.shape()[0]" in const_alloc_names[0]
+    assert "lhs.shape()[0]" in const_alloc_names[1]
+    assert emit_c_op(const_fill, const_ctx) == (
+        "for (long long fill0_i = 0; fill0_i < v1.element_count(); ++fill0_i) {\n"
+        "    v1.data()[fill0_i] = 1;\n"
+        "}"
+    )
+    assert emit_c_op(const_add, const_ctx) == "cpu::add(lhs, v1, v0);"
+
+    bias_type = SymbolValueType.from_expr("bias")
+    symbol_block = _lower_single_op_func(
+        [mem, bias_type],
+        mem,
+        lambda block: [NnAddOp(block.args[0], block.args[1], mem, space)],
+    )
+    symbol_ops = list(symbol_block.ops)
+    symbol_fill = next(op for op in symbol_ops if isinstance(op, DmaFillOp))
+    symbol_add = next(op for op in symbol_ops if isinstance(op, KernelAddOp))
+
+    symbol_ctx = _ctx()
+    symbol_ctx.bind_name(symbol_block.args[0], "lhs")
+    symbol_ctx.bind_name(symbol_block.args[1], "bias")
+    for op in symbol_ops:
+        if isinstance(op, DmaAllocOp):
+            emit_c_op(op, symbol_ctx)
+    assert emit_c_op(symbol_fill, symbol_ctx) == (
+        "for (long long fill0_i = 0; fill0_i < v1.element_count(); ++fill0_i) {\n"
+        "    v1.data()[fill0_i] = bias;\n"
+        "}"
+    )
+    assert emit_c_op(symbol_add, symbol_ctx) == "cpu::add(lhs, v1, v0);"
 
 
 # EC-009
