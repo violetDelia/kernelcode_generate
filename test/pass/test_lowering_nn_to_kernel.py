@@ -1,7 +1,7 @@
 """nn -> kernel lowering pass tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 nn_to_kernel pass 的 lowering 行为与错误路径。
@@ -29,8 +29,8 @@ from pathlib import Path
 from collections.abc import Callable
 
 import pytest
-from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, StringAttr, f32, i1, i32
+from xdsl.dialects import arith, func
+from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, IntegerAttr, ModuleOp, StringAttr, f32, i1, i32
 from xdsl.irdl import (
     IRDLOperation,
     attr_def,
@@ -46,7 +46,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dialect.dma import DmaAllocOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaFillOp
 from kernel_gen.dialect.kernel import (
     KernelAddOp,
     KernelCastOp,
@@ -424,14 +424,14 @@ def _make_memory_type(
 
 
 def _build_module(
-    arg_types: list[NnMemoryType],
+    arg_types: list[Attribute],
     result_type: NnMemoryType,
     op_builder: Callable[[Block], list[Operation]],
 ) -> tuple[ModuleOp, Block]:
     """构造包含单个 func 的 module。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 按顺序插入 ops 并追加 func.return。
@@ -504,6 +504,97 @@ def test_lower_add_to_kernel() -> None:
 
     ops = _collect_ops(block)
     assert any(isinstance(op, KernelAddOp) for op in ops)
+
+
+# COV-N2K-026
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-02 19:26:12 +0800
+# 最近一次运行成功时间: 2026-04-02 19:26:12 +0800
+# 测试目的: 验证 nn.add(memory, const(i32)) 会通过 dma.alloc + dma.fill + kernel.add 完成真实 rhs 物化。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_add_mixed_const_materializes_rhs_via_dma_fill
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
+def test_lower_add_mixed_const_materializes_rhs_via_dma_fill() -> None:
+    lhs_type = _make_memory_type()
+    result_type = _make_memory_type()
+    space = _make_space("global")
+
+    def _build_ops(block: Block) -> list[Operation]:
+        const_op = arith.ConstantOp(IntegerAttr(1, i32))
+        add_op = NnAddOp(block.args[0], const_op.result, result_type, space)
+        return [const_op, add_op]
+
+    module, block = _build_module([lhs_type], result_type, _build_ops)
+    LowerNnToKernelPass().run(module)
+
+    ops = _collect_ops(block)
+    alloc_ops = [op for op in ops if isinstance(op, DmaAllocOp)]
+    fill_ops = [op for op in ops if isinstance(op, DmaFillOp)]
+    kernel_ops = [op for op in ops if isinstance(op, KernelAddOp)]
+    const_ops = [op for op in ops if isinstance(op, arith.ConstantOp)]
+
+    assert len(alloc_ops) == 2
+    assert len(fill_ops) == 1
+    assert len(kernel_ops) == 1
+    assert len(const_ops) == 1
+
+    fill_op = fill_ops[0]
+    kernel_op = kernel_ops[0]
+    const_op = const_ops[0]
+
+    assert fill_op.value == const_op.result
+    assert any(use.operation is fill_op for use in const_op.result.uses)
+    assert isinstance(fill_op.target.owner, DmaAllocOp)
+    assert fill_op.target.owner is not kernel_op.out.owner
+    assert kernel_op.rhs == fill_op.target
+    assert any(use.operation is kernel_op for use in fill_op.target.uses)
+    assert not any(op.name.startswith("nn.") for op in ops)
+
+
+# COV-N2K-027
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-02 19:26:12 +0800
+# 最近一次运行成功时间: 2026-04-02 19:26:12 +0800
+# 测试目的: 验证 nn.add(memory, !symbol.int) 会通过 dma.alloc + dma.fill + kernel.add 完成真实 rhs 物化。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_add_mixed_symbol_materializes_rhs_via_dma_fill
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
+def test_lower_add_mixed_symbol_materializes_rhs_via_dma_fill() -> None:
+    lhs_type = _make_memory_type()
+    result_type = _make_memory_type()
+    rhs_type = SymbolValueType.from_expr("BIAS")
+    space = _make_space("global")
+
+    module, block = _build_module(
+        [lhs_type, rhs_type],
+        result_type,
+        lambda block: [NnAddOp(block.args[0], block.args[1], result_type, space)],
+    )
+    LowerNnToKernelPass().run(module)
+
+    ops = _collect_ops(block)
+    alloc_ops = [op for op in ops if isinstance(op, DmaAllocOp)]
+    fill_ops = [op for op in ops if isinstance(op, DmaFillOp)]
+    kernel_ops = [op for op in ops if isinstance(op, KernelAddOp)]
+
+    assert len(alloc_ops) == 2
+    assert len(fill_ops) == 1
+    assert len(kernel_ops) == 1
+
+    fill_op = fill_ops[0]
+    kernel_op = kernel_ops[0]
+
+    assert fill_op.value == block.args[1]
+    assert any(use.operation is fill_op for use in block.args[1].uses)
+    assert isinstance(fill_op.target.owner, DmaAllocOp)
+    assert fill_op.target.owner is not kernel_op.out.owner
+    assert kernel_op.rhs == fill_op.target
+    assert any(use.operation is kernel_op for use in fill_op.target.uses)
+    assert not any(op.name.startswith("nn.") for op in ops)
 
 
 # TC-PASS-N2K-002

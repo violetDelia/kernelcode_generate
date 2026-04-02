@@ -1,7 +1,7 @@
 """nn -> kernel lowering pass.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 小李飞刀
 
 功能说明:
 - 将 nn dialect 的逐元素 op lower 为 kernel dialect op。
@@ -22,11 +22,11 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from xdsl.dialects import func
-from xdsl.dialects.builtin import IntAttr, StringAttr
+from xdsl.dialects.builtin import IntAttr, ModuleOp, StringAttr, i32
 from xdsl.ir import Block, Operation, Region, SSAValue
 from xdsl.utils.exceptions import VerifyException
 
-from kernel_gen.dialect.dma import DmaAllocOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaFillOp
 from kernel_gen.dialect.kernel import (
     KernelAddOp,
     KernelCastOp,
@@ -42,7 +42,7 @@ from kernel_gen.dialect.kernel import (
     KernelSubOp,
 )
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolGetDimOp
+from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
 from ..pass_manager import Pass
 
 
@@ -188,15 +188,92 @@ def _build_alloc_dynamic_shape(
     return ops, operands
 
 
+def _select_shape_source(op: Operation) -> SSAValue:
+    """选择用于生成 dynamic_shape 的 memory operand。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 优先返回第一个 `nn.memory` operand。
+    - 为 mixed add 这类包含标量 operand 的路径提供统一 shape 来源。
+
+    使用示例:
+    - shape_source = _select_shape_source(op)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    for operand in op.operands:
+        operand_value = SSAValue.get(operand)
+        if isinstance(operand_value.type, NnMemoryType):
+            return operand_value
+    raise LowerNnToKernelError("nn op must provide at least one nn.memory operand")
+
+
+def _maybe_materialize_mixed_add_rhs(
+    op: Operation,
+    result_type: NnMemoryType,
+    dynamic_shape: list[SSAValue],
+) -> tuple[list[Operation], SSAValue]:
+    """按需把 mixed `nn.add` 的 rhs 标量物化为 temporary memory。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅处理 `nn.add(memory[i32], i32|!symbol.int)`。
+    - 通过 `dma.alloc + dma.fill` 生成可被 `kernel.add` 消费的 rhs memory。
+
+    使用示例:
+    - extra_ops, rhs_value = _maybe_materialize_mixed_add_rhs(op, result_type, dynamic_shape)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    if op.name != "nn.add":
+        if len(op.operands) < 2:
+            return [], SSAValue.get(op.operands[0])
+        return [], SSAValue.get(op.operands[1])
+
+    _ensure_operand_count(op, 2)
+    lhs_value = SSAValue.get(op.operands[0])
+    rhs_value = SSAValue.get(op.operands[1])
+    lhs_type = lhs_value.type
+    rhs_type = rhs_value.type
+
+    if not isinstance(lhs_type, NnMemoryType):
+        return [], rhs_value
+    if isinstance(rhs_type, NnMemoryType):
+        return [], rhs_value
+    if rhs_type != i32 and not isinstance(rhs_type, SymbolValueType):
+        return [], rhs_value
+    if lhs_type.element_type != i32 or result_type.element_type != i32:
+        raise LowerNnToKernelError("mixed nn.add lowering currently requires i32 memory/result")
+
+    rhs_alloc = DmaAllocOp(dynamic_shape, result_type)
+    rhs_fill = DmaFillOp(rhs_alloc.result, rhs_value)
+    return [rhs_alloc, rhs_fill], rhs_alloc.result
+
+
 def _build_kernel_op(
     op: Operation,
     out_value: SSAValue,
     space: NnMemorySpaceAttr,
+    *,
+    lhs_value: SSAValue | None = None,
+    rhs_value: SSAValue | None = None,
 ) -> Operation:
     """构造 kernel dialect op。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 根据 nn op 名称映射 kernel op。
@@ -214,7 +291,9 @@ def _build_kernel_op(
     if op.name in _SUPPORTED_BINARY:
         _ensure_operand_count(op, 2)
         kernel_cls = _SUPPORTED_BINARY[op.name]
-        return kernel_cls(op.operands[0], op.operands[1], out_value, space)
+        lowered_lhs = lhs_value if lhs_value is not None else SSAValue.get(op.operands[0])
+        lowered_rhs = rhs_value if rhs_value is not None else SSAValue.get(op.operands[1])
+        return kernel_cls(lowered_lhs, lowered_rhs, out_value, space)
 
     if op.name == "nn.select":
         _ensure_operand_count(op, 3)
@@ -231,7 +310,7 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
     """将单个 nn op lower 为 kernel op。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 为结果插入 dma.alloc。
@@ -249,17 +328,21 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
     result_type = _ensure_single_result(op)
     space = _ensure_space_attr(op)
 
-    shape_ops, dynamic_shape = _build_alloc_dynamic_shape(op.operands[0], result_type)
+    shape_source = _select_shape_source(op)
+    shape_ops, dynamic_shape = _build_alloc_dynamic_shape(shape_source, result_type)
     alloc = DmaAllocOp(dynamic_shape, result_type)
-    kernel_op = _build_kernel_op(op, alloc.result, space)
+    rhs_ops, lowered_rhs = _maybe_materialize_mixed_add_rhs(op, result_type, dynamic_shape)
+    kernel_op = _build_kernel_op(op, alloc.result, space, rhs_value=lowered_rhs)
 
     try:
         alloc.verify()
+        for rhs_op in rhs_ops:
+            rhs_op.verify()
         kernel_op.verify()
     except VerifyException as exc:
         raise LowerNnToKernelError(str(exc)) from exc
 
-    block.insert_ops_before([*shape_ops, alloc, kernel_op], op)
+    block.insert_ops_before([*shape_ops, alloc, *rhs_ops, kernel_op], op)
     op.results[0].replace_by(alloc.result)
     block.erase_op(op)
 
@@ -410,7 +493,7 @@ class LowerNnToKernelPass(Pass):
         """执行 pass。
 
         创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
+        最后一次更改: 小李飞刀
 
         功能说明:
         - 将 module 内 nn op lower 为 kernel op。
@@ -423,6 +506,13 @@ class LowerNnToKernelPass(Pass):
         - test: test/pass/test_lowering_nn_to_kernel.py
         - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
         """
+
+        if not isinstance(module, ModuleOp):
+            raise LowerNnToKernelError("module must be builtin.module")
+        try:
+            iter(module.ops)
+        except TypeError as exc:
+            raise LowerNnToKernelError("module ops must be iterable") from exc
 
         _lower_module(module)
         _ensure_no_nn_ops(module)
