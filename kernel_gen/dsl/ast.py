@@ -1285,6 +1285,76 @@ def _resolve_call_base_object(
     return None
 
 
+def _resolve_import_bound_helper_call(
+    expr: py_ast.expr,
+    globals_table: dict[str, object],
+    builtins_table: dict[str, object],
+) -> str | None:
+    """按 import 绑定关系解析 DSL helper 调用名。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅当调用目标显式绑定到 `kernel_gen.operation.dma` 或 `kernel_gen.operation.arch` 时，才返回 helper 名。
+    - 支持 module alias/package alias 的 `mod.helper(...)` 调用，以及 direct symbol alias 的 `alias(...)` 调用。
+    - 拒绝未导入的裸 helper 名与来自其他模块的同名对象，避免误把普通名字当作 DSL helper。
+
+    使用示例:
+    - _resolve_import_bound_helper_call(py_ast.parse("cc.slice", mode="eval").body, globals(), __builtins__)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    helper_modules = {
+        "kernel_gen.operation.dma": {
+            "load",
+            "slice",
+            "store",
+            "deslice",
+            "alloc",
+            "copy",
+            "cast",
+            "view",
+            "reshape",
+            "flatten",
+            "free",
+        },
+        "kernel_gen.operation.arch": {
+            "get_block_id",
+            "get_block_num",
+            "get_subthread_id",
+            "get_subthread_num",
+            "get_thread_id",
+            "get_thread_num",
+            "get_dynamic_memory",
+            "launch_kernel",
+        },
+    }
+
+    if isinstance(expr, py_ast.Attribute):
+        base_object = _resolve_call_base_object(expr.value, globals_table, builtins_table)
+        module_name = getattr(base_object, "__name__", None)
+        helper_name = expr.attr
+    elif isinstance(expr, py_ast.Name):
+        helper_object = _lookup_python_name(expr.id, globals_table, builtins_table)
+        module_name = getattr(helper_object, "__module__", None)
+        helper_name = getattr(helper_object, "__name__", None)
+    else:
+        return None
+
+    if module_name not in helper_modules:
+        return None
+    if not isinstance(helper_name, str):
+        return None
+    if helper_name not in helper_modules[module_name]:
+        return None
+    return helper_name
+
+
 def _parse_nn_arithmetic_call(
     expr: py_ast.Call,
     env: dict[str, object],
@@ -1446,6 +1516,7 @@ def _parse_dma_call(
     最后一次更改: 金铲铲大作战
 
     功能说明:
+    - 仅接受当前函数显式导入绑定到 `kernel_gen.operation.dma/arch` 的 helper 调用。
     - 将 `load/slice/store/deslice/...` 解析为对应 AST 节点。
     - 将 `nn.add/sub/mul/truediv/floordiv(...)` 解析为对应的 `BinaryExprAST`。
     - 将 `img2col1d/img2col2d(...)` 解析为对应的 `Img2ColAST`。
@@ -1462,20 +1533,12 @@ def _parse_dma_call(
     - 功能实现: kernel_gen/dsl/ast.py
     """
 
-    call_name: str | None = None
     if isinstance(expr.func, py_ast.Attribute):
         nn_expr = _parse_nn_arithmetic_call(expr, env, globals_table, builtins_table)
         if nn_expr is not None:
             return nn_expr
-        base_object = _resolve_call_base_object(expr.func.value, globals_table, builtins_table)
-        if getattr(base_object, "__name__", None) == "kernel_gen.operation.dma":
-            call_name = expr.func.attr
-        else:
-            _raise_parse_error("Unsupported call expression", expr)
-
-    elif isinstance(expr.func, py_ast.Name):
-        call_name = expr.func.id
-    else:
+    call_name = _resolve_import_bound_helper_call(expr.func, globals_table, builtins_table)
+    if call_name is None:
         _raise_parse_error("Unsupported call expression", expr)
 
     if call_name == "load":

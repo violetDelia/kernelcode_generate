@@ -220,9 +220,15 @@ def _parse_function_from_source(
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_build_func_op_lowers_arch_get_block_id_query() -> None:
+def test_build_func_op_lowers_arch_get_block_id_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.arch import get_block_id
+
     def get_block_id_kernel() -> int:
         return get_block_id()
+
+    monkeypatch.setitem(get_block_id_kernel.__globals__, "get_block_id", get_block_id)
 
     func_ast = parse_function(get_block_id_kernel)
     if len(func_ast.inputs) != 0:
@@ -259,8 +265,8 @@ def test_build_func_op_lowers_arch_get_block_id_query() -> None:
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-25 21:41:29 +0800
 # 最近一次运行成功时间: 2026-03-25 21:41:29 +0800
-# 功能说明: 验证 get_block_id helper 拒绝位置参数与关键字参数。
-# 测试目的: 锁定 get_block_id(1) 与 get_block_id(x=1) 在 AST 解析阶段保持 Unsupported get_block_id arity 诊断。
+# 功能说明: 验证未显式导入的 bare get_block_id 调用会在 AST 入口被统一拒绝。
+# 测试目的: 锁定未导入的 get_block_id(1) 与 get_block_id(x=1) 不再进入 helper 语义校验，而是直接返回 Unsupported call expression。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_invalid_get_block_id_arity_variants
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
@@ -285,8 +291,8 @@ def kernel() -> int:
         diagnostics = exc_info.value.diagnostics
         if not diagnostics:
             raise AssertionError("expected diagnostics for invalid get_block_id arity")
-        if diagnostics[0].message != "Unsupported get_block_id arity":
-            raise AssertionError("expected Unsupported get_block_id arity diagnostic")
+        if diagnostics[0].message != "Unsupported call expression":
+            raise AssertionError("expected Unsupported call expression diagnostic")
 
 
 # EMIT-022
@@ -392,9 +398,15 @@ def test_build_func_op_lowers_symbol_get_stride() -> None:
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_build_func_op_lowers_arch_get_block_num_query() -> None:
+def test_build_func_op_lowers_arch_get_block_num_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.arch import get_block_num
+
     def get_block_num_kernel() -> int:
         return get_block_num()
+
+    monkeypatch.setitem(get_block_num_kernel.__globals__, "get_block_num", get_block_num)
 
     func_ast = parse_function(get_block_num_kernel)
     if len(func_ast.inputs) != 0:
@@ -431,8 +443,8 @@ def test_build_func_op_lowers_arch_get_block_num_query() -> None:
 # 最后一次更改: 咯咯咯
 # 最近一次运行测试时间: 2026-03-26 00:27:39 +0800
 # 最近一次运行成功时间: 2026-03-26 00:27:39 +0800
-# 功能说明: 验证 get_block_num helper 拒绝位置参数与关键字参数。
-# 测试目的: 锁定 get_block_num(1) 与 get_block_num(x=1) 在 AST 解析阶段保持 Unsupported get_block_num arity 诊断。
+# 功能说明: 验证未显式导入的 bare get_block_num 调用会在 AST 入口被统一拒绝。
+# 测试目的: 锁定未导入的 get_block_num(1) 与 get_block_num(x=1) 不再进入 helper 语义校验，而是直接返回 Unsupported call expression。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_invalid_get_block_num_arity_variants
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
@@ -457,8 +469,8 @@ def kernel() -> int:
         diagnostics = exc_info.value.diagnostics
         if not diagnostics:
             raise AssertionError("expected diagnostics for invalid get_block_num arity")
-        if diagnostics[0].message != "Unsupported get_block_num arity":
-            raise AssertionError("expected Unsupported get_block_num arity diagnostic")
+        if diagnostics[0].message != "Unsupported call expression":
+            raise AssertionError("expected Unsupported call expression diagnostic")
 
 
 # EMIT-023
@@ -498,9 +510,15 @@ def test_emit_mlir_lowers_arch_get_block_num_query() -> None:
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_build_func_op_lowers_arch_get_subthread_id_query() -> None:
+def test_build_func_op_lowers_arch_get_subthread_id_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.arch import get_subthread_id
+
     def get_subthread_id_kernel() -> int:
         return get_subthread_id()
+
+    monkeypatch.setitem(get_subthread_id_kernel.__globals__, "get_subthread_id", get_subthread_id)
 
     func_ast = parse_function(get_subthread_id_kernel)
     if len(func_ast.inputs) != 0:
@@ -537,8 +555,8 @@ def test_build_func_op_lowers_arch_get_subthread_id_query() -> None:
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-25 21:41:29 +0800
 # 最近一次运行成功时间: 2026-03-25 21:41:29 +0800
-# 功能说明: 验证 get_subthread_id helper 拒绝位置参数与关键字参数。
-# 测试目的: 锁定 get_subthread_id(1) 与 get_subthread_id(x=1) 在 AST 解析阶段保持 Unsupported get_subthread_id arity 诊断。
+# 功能说明: 验证未显式导入的 bare get_subthread_id 调用会在 AST 入口被统一拒绝。
+# 测试目的: 锁定未导入的 get_subthread_id(1) 与 get_subthread_id(x=1) 不再进入 helper 语义校验，而是直接返回 Unsupported call expression。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_invalid_get_subthread_id_arity_variants
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
@@ -563,8 +581,8 @@ def kernel() -> int:
         diagnostics = exc_info.value.diagnostics
         if not diagnostics:
             raise AssertionError("expected diagnostics for invalid get_subthread_id arity")
-        if diagnostics[0].message != "Unsupported get_subthread_id arity":
-            raise AssertionError("expected Unsupported get_subthread_id arity diagnostic")
+        if diagnostics[0].message != "Unsupported call expression":
+            raise AssertionError("expected Unsupported call expression diagnostic")
 
 
 # EMIT-025
@@ -604,9 +622,15 @@ def test_emit_mlir_lowers_arch_get_subthread_id_query() -> None:
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_build_func_op_lowers_arch_get_thread_id_query() -> None:
+def test_build_func_op_lowers_arch_get_thread_id_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.arch import get_thread_id
+
     def get_thread_id_kernel() -> int:
         return get_thread_id()
+
+    monkeypatch.setitem(get_thread_id_kernel.__globals__, "get_thread_id", get_thread_id)
 
     func_ast = parse_function(get_thread_id_kernel)
     if len(func_ast.inputs) != 0:
@@ -643,8 +667,8 @@ def test_build_func_op_lowers_arch_get_thread_id_query() -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-27 01:38:30 +0800
 # 最近一次运行成功时间: 2026-03-27 01:38:30 +0800
-# 功能说明: 验证 get_thread_id helper 拒绝位置参数与关键字参数。
-# 测试目的: 锁定 get_thread_id(1) 与 get_thread_id(x=1) 在 AST 解析阶段保持 Unsupported get_thread_id arity 诊断。
+# 功能说明: 验证未显式导入的 bare get_thread_id 调用会在 AST 入口被统一拒绝。
+# 测试目的: 锁定未导入的 get_thread_id(1) 与 get_thread_id(x=1) 不再进入 helper 语义校验，而是直接返回 Unsupported call expression。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_invalid_get_thread_id_arity_variants
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
@@ -669,8 +693,8 @@ def kernel() -> int:
         diagnostics = exc_info.value.diagnostics
         if not diagnostics:
             raise AssertionError("expected diagnostics for invalid get_thread_id arity")
-        if diagnostics[0].message != "Unsupported get_thread_id arity":
-            raise AssertionError("expected Unsupported get_thread_id arity diagnostic")
+        if diagnostics[0].message != "Unsupported call expression":
+            raise AssertionError("expected Unsupported call expression diagnostic")
 
 
 # EMIT-026
@@ -704,8 +728,8 @@ def test_emit_mlir_lowers_arch_get_thread_id_query() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-28 13:25:45 +0800
 # 最近一次运行成功时间: 2026-03-28 13:25:45 +0800
-# 功能说明: 验证 get_thread_num helper 拒绝位置参数与关键字参数。
-# 测试目的: 锁定 get_thread_num(1) 与 get_thread_num(x=1) 在 AST 解析阶段保持 Unsupported get_thread_num arity 诊断。
+# 功能说明: 验证未显式导入的 bare get_thread_num 调用会在 AST 入口被统一拒绝。
+# 测试目的: 锁定未导入的 get_thread_num(1) 与 get_thread_num(x=1) 不再进入 helper 语义校验，而是直接返回 Unsupported call expression。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_invalid_get_thread_num_arity_variants
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
@@ -730,8 +754,8 @@ def kernel() -> int:
         diagnostics = exc_info.value.diagnostics
         if not diagnostics:
             raise AssertionError("expected diagnostics for invalid get_thread_num arity")
-        if diagnostics[0].message != "Unsupported get_thread_num arity":
-            raise AssertionError("expected Unsupported get_thread_num arity diagnostic")
+        if diagnostics[0].message != "Unsupported call expression":
+            raise AssertionError("expected Unsupported call expression diagnostic")
 
 
 # AST-014N
@@ -739,8 +763,8 @@ def kernel() -> int:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-28 13:25:45 +0800
 # 最近一次运行成功时间: 2026-03-28 13:25:45 +0800
-# 功能说明: 验证 get_dynamic_memory 的 arity 与 space 约束在 AST 阶段报错。
-# 测试目的: 锁定 get_dynamic_memory 在参数数量、space 类型与片上限定上的诊断口径。
+# 功能说明: 验证未显式导入的 bare get_dynamic_memory 调用会在 AST 入口被统一拒绝。
+# 测试目的: 锁定未导入的 get_dynamic_memory(...) 不再进入 helper 语义校验，而是直接返回 Unsupported call expression。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_invalid_get_dynamic_memory_variants
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
@@ -754,21 +778,21 @@ def test_parse_function_rejects_invalid_get_dynamic_memory_variants(
 def kernel() -> "Tensor[i8, ?]":
     return get_dynamic_memory()
 """,
-            "Unsupported get_dynamic_memory arity",
+            "Unsupported call expression",
         ),
         (
             """\
 def kernel() -> "Tensor[i8, ?]":
     return get_dynamic_memory(1)
 """,
-            "get_dynamic_memory space must be MemorySpace",
+            "Unsupported call expression",
         ),
         (
             """\
 def kernel() -> "Tensor[i8, ?]":
     return get_dynamic_memory(MemorySpace.GM)
 """,
-            "get_dynamic_memory space must be on-chip MemorySpace",
+            "Unsupported call expression",
         ),
     )
 
@@ -812,6 +836,8 @@ def test_emit_mlir_rejects_invalid_arch_get_dynamic_memory_space() -> None:
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_build_func_op_rejects_invalid_arch_get_dynamic_memory_space() -> None:
+    from kernel_gen.operation.arch import get_dynamic_memory
+
     def get_dynamic_memory_kernel() -> "Tensor[i8, ?]":
         return get_dynamic_memory(MemorySpace.GM)
 
@@ -830,9 +856,15 @@ def test_build_func_op_rejects_invalid_arch_get_dynamic_memory_space() -> None:
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_build_func_op_lowers_arch_get_subthread_num_query() -> None:
+def test_build_func_op_lowers_arch_get_subthread_num_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.arch import get_subthread_num
+
     def get_subthread_num_kernel() -> int:
         return get_subthread_num()
+
+    monkeypatch.setitem(get_subthread_num_kernel.__globals__, "get_subthread_num", get_subthread_num)
 
     func_ast = parse_function(get_subthread_num_kernel)
     if len(func_ast.inputs) != 0:
@@ -869,8 +901,8 @@ def test_build_func_op_lowers_arch_get_subthread_num_query() -> None:
 # 最后一次更改: 摸鱼小分队
 # 最近一次运行测试时间: 2026-03-27 02:08:59 +0800
 # 最近一次运行成功时间: 2026-03-27 02:08:59 +0800
-# 功能说明: 验证 get_subthread_num helper 拒绝位置参数与关键字参数。
-# 测试目的: 锁定 get_subthread_num(1) 与 get_subthread_num(x=1) 在 AST 解析阶段保持 Unsupported get_subthread_num arity 诊断。
+# 功能说明: 验证未显式导入的 bare get_subthread_num 调用会在 AST 入口被统一拒绝。
+# 测试目的: 锁定未导入的 get_subthread_num(1) 与 get_subthread_num(x=1) 不再进入 helper 语义校验，而是直接返回 Unsupported call expression。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_invalid_get_subthread_num_arity_variants
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
@@ -895,8 +927,8 @@ def kernel() -> int:
         diagnostics = exc_info.value.diagnostics
         if not diagnostics:
             raise AssertionError("expected diagnostics for invalid get_subthread_num arity")
-        if diagnostics[0].message != "Unsupported get_subthread_num arity":
-            raise AssertionError("expected Unsupported get_subthread_num arity diagnostic")
+        if diagnostics[0].message != "Unsupported call expression":
+            raise AssertionError("expected Unsupported call expression diagnostic")
 
 
 # EMIT-027
@@ -930,8 +962,8 @@ def test_emit_mlir_lowers_arch_get_subthread_num_query() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-28 13:01:00 +0800
 # 最近一次运行成功时间: 2026-03-28 13:01:00 +0800
-# 功能说明: 验证 launch_kernel 的 arity/name/extent 非法输入在 AST 解析阶段返回对应诊断。
-# 测试目的: 锁定 launch_kernel 解析入口对参数数量、名称与 extent 的错误路径诊断口径。
+# 功能说明: 验证未显式导入的 bare launch_kernel 调用会在 AST 入口被统一拒绝。
+# 测试目的: 锁定未导入的 launch_kernel(...) 不再进入 helper 语义校验，而是直接返回 Unsupported call expression。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_invalid_launch_kernel_variants
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
@@ -945,28 +977,28 @@ def test_parse_function_rejects_invalid_launch_kernel_variants(
 def kernel() -> None:
     launch_kernel("k", 1, 2)
 """,
-            "Unsupported launch_kernel arity",
+            "Unsupported call expression",
         ),
         (
             """\
 def kernel() -> None:
     launch_kernel("", 1, 2, 3)
 """,
-            "launch_kernel name must be non-empty str",
+            "Unsupported call expression",
         ),
         (
             """\
 def kernel() -> None:
     launch_kernel("k", 1.0, 2, 3)
 """,
-            "launch_kernel block must be int or SymbolDim",
+            "Unsupported call expression",
         ),
         (
             """\
 def kernel() -> None:
     launch_kernel("k", 0, 2, 3)
 """,
-            "launch_kernel block must be > 0",
+            "Unsupported call expression",
         ),
     )
 
@@ -1032,6 +1064,8 @@ def test_emit_mlir_rejects_invalid_arch_launch_kernel_args() -> None:
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
 def test_build_func_op_rejects_invalid_arch_launch_kernel_args() -> None:
+    from kernel_gen.operation.arch import launch_kernel
+
     def launch_kernel_kernel() -> None:
         launch_kernel("kernel", 1, 2, 3)
 
@@ -3485,7 +3519,11 @@ def test_parse_function_rejects_unsupported_nn_arithmetic_arity_variants() -> No
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_parse_function_rejects_invalid_load_helper_variants() -> None:
+def test_parse_function_rejects_invalid_load_helper_variants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.dma import load
+
     def bad_arity(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
         return load(src, [0, 0])
 
@@ -3494,6 +3532,9 @@ def test_parse_function_rejects_invalid_load_helper_variants() -> None:
 
     def bad_space(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
         return load(src, [0, 0], [2, 2], [1, 1], 1)
+
+    for fn in (bad_arity, bad_source, bad_space):
+        monkeypatch.setitem(fn.__globals__, "load", load)
 
     expected_messages = (
         ("Unsupported load arity", bad_arity),
@@ -3521,7 +3562,11 @@ def test_parse_function_rejects_invalid_load_helper_variants() -> None:
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_parse_function_rejects_invalid_slice_helper_variants() -> None:
+def test_parse_function_rejects_invalid_slice_helper_variants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.dma import slice
+
     def bad_arity(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
         return slice(src, [0, 0], [2, 2], [1, 1], MemorySpace.SM, 1)
 
@@ -3530,6 +3575,9 @@ def test_parse_function_rejects_invalid_slice_helper_variants() -> None:
 
     def bad_space(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
         return slice(src, [0, 0], [2, 2], [1, 1], 1)
+
+    for fn in (bad_arity, bad_source, bad_space):
+        monkeypatch.setitem(fn.__globals__, "slice", slice)
 
     expected_messages = (
         ("Unsupported slice arity", bad_arity),
@@ -3557,12 +3605,19 @@ def test_parse_function_rejects_invalid_slice_helper_variants() -> None:
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_parse_function_rejects_invalid_store_helper_variants() -> None:
+def test_parse_function_rejects_invalid_store_helper_variants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.dma import store
+
     def bad_arity(tile: "Tensor[f32, 2, 2]", dst: "Tensor[f32, 4, 4]"):
         store(tile, dst, [0, 0])
 
     def bad_target(tile: "Tensor[f32, 2, 2]", dst: int):
         store(tile, dst, [0, 0], [2, 2])
+
+    for fn in (bad_arity, bad_target):
+        monkeypatch.setitem(fn.__globals__, "store", store)
 
     expected_messages = (
         ("Unsupported store arity", bad_arity),
@@ -3589,7 +3644,11 @@ def test_parse_function_rejects_invalid_store_helper_variants() -> None:
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
 # 对应测试文件路径: test/dsl/test_ast_visitor.py
-def test_parse_function_rejects_invalid_deslice_helper_variants() -> None:
+def test_parse_function_rejects_invalid_deslice_helper_variants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.dma import deslice
+
     def bad_arity(tile: "Tensor[f32, 2, 2]", dst: "Tensor[f32, 4, 4]"):
         deslice(tile, dst, [0, 0])
 
@@ -3598,6 +3657,9 @@ def test_parse_function_rejects_invalid_deslice_helper_variants() -> None:
 
     def bad_space(tile: "Tensor[f32, 2, 2]", dst: "Tensor[f32, 4, 4]"):
         deslice(tile, dst, [0, 0], [2, 2], [1, 1], 1)
+
+    for fn in (bad_arity, bad_target, bad_space):
+        monkeypatch.setitem(fn.__globals__, "deslice", deslice)
 
     expected_messages = (
         ("Unsupported deslice arity", bad_arity),
