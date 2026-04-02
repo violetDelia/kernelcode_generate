@@ -39,6 +39,7 @@ from xdsl.dialects.builtin import (
     StringAttr,
     f32,
     i1,
+    i8,
     i32,
 )
 from xdsl.ir import Block
@@ -61,6 +62,7 @@ from kernel_gen.dialect.dma import (
     DmaViewOp,
 )
 from kernel_gen.dialect.arch import (
+    ArchGetDynamicMemoryOp,
     ArchGetBlockIdOp,
     ArchGetBlockNumOp,
     ArchGetSubthreadIdOp,
@@ -95,6 +97,7 @@ from kernel_gen.dialect.symbol import (
 )
 from kernel_gen.dsl.ast import (
     AstParseError,
+    ArchGetDynamicMemoryAST,
     ArchQueryAST,
     BlockAST,
     BinaryExprAST,
@@ -324,9 +327,15 @@ def _parse_function_from_source(
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
-def test_build_func_op_lowers_arch_get_block_id_query() -> None:
+def test_build_func_op_lowers_arch_get_block_id_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.arch import get_block_id
+
     def get_block_id_kernel() -> int:
         return get_block_id()
+
+    monkeypatch.setitem(get_block_id_kernel.__globals__, "get_block_id", get_block_id)
 
     func_ast = parse_function(get_block_id_kernel)
     if len(func_ast.inputs) != 0:
@@ -369,9 +378,15 @@ def test_build_func_op_lowers_arch_get_block_id_query() -> None:
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
-def test_build_func_op_lowers_arch_get_block_num_query() -> None:
+def test_build_func_op_lowers_arch_get_block_num_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.arch import get_block_num
+
     def get_block_num_kernel() -> int:
         return get_block_num()
+
+    monkeypatch.setitem(get_block_num_kernel.__globals__, "get_block_num", get_block_num)
 
     func_ast = parse_function(get_block_num_kernel)
     if len(func_ast.inputs) != 0:
@@ -414,9 +429,15 @@ def test_build_func_op_lowers_arch_get_block_num_query() -> None:
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
-def test_build_func_op_lowers_arch_get_subthread_id_query() -> None:
+def test_build_func_op_lowers_arch_get_subthread_id_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.arch import get_subthread_id
+
     def get_subthread_id_kernel() -> int:
         return get_subthread_id()
+
+    monkeypatch.setitem(get_subthread_id_kernel.__globals__, "get_subthread_id", get_subthread_id)
 
     func_ast = parse_function(get_subthread_id_kernel)
     if len(func_ast.inputs) != 0:
@@ -459,9 +480,15 @@ def test_build_func_op_lowers_arch_get_subthread_id_query() -> None:
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
-def test_build_func_op_lowers_arch_get_thread_id_query() -> None:
+def test_build_func_op_lowers_arch_get_thread_id_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.arch import get_thread_id
+
     def get_thread_id_kernel() -> int:
         return get_thread_id()
+
+    monkeypatch.setitem(get_thread_id_kernel.__globals__, "get_thread_id", get_thread_id)
 
     func_ast = parse_function(get_thread_id_kernel)
     if len(func_ast.inputs) != 0:
@@ -570,9 +597,15 @@ def test_build_func_op_lowers_symbol_get_stride() -> None:
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
-def test_build_func_op_lowers_arch_get_thread_num_query() -> None:
+def test_build_func_op_lowers_arch_get_thread_num_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.arch import get_thread_num
+
     def get_thread_num_kernel() -> int:
         return get_thread_num()
+
+    monkeypatch.setitem(get_thread_num_kernel.__globals__, "get_thread_num", get_thread_num)
 
     func_ast = parse_function(get_thread_num_kernel)
     if len(func_ast.inputs) != 0:
@@ -615,9 +648,15 @@ def test_build_func_op_lowers_arch_get_thread_num_query() -> None:
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
-def test_build_func_op_lowers_arch_get_subthread_num_query() -> None:
+def test_build_func_op_lowers_arch_get_subthread_num_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.arch import get_subthread_num
+
     def get_subthread_num_kernel() -> int:
         return get_subthread_num()
+
+    monkeypatch.setitem(get_subthread_num_kernel.__globals__, "get_subthread_num", get_subthread_num)
 
     func_ast = parse_function(get_subthread_num_kernel)
     if len(func_ast.inputs) != 0:
@@ -647,6 +686,69 @@ def test_build_func_op_lowers_arch_get_subthread_num_query() -> None:
             raise AssertionError("expected func.return to carry one value")
         if return_ops[0].arguments[0].type != SymbolValueType.from_expr("subthread_num"):
             raise AssertionError('expected func.return type to stay !symbol.int<"subthread_num">')
+
+
+# MGEN-035A
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-02 14:55:00 +0800
+# 最近一次运行成功时间: 2026-04-02 14:55:00 +0800
+# 功能说明: 验证 get_dynamic_memory 在 import-bound helper 基线下支持 module alias 与 direct symbol alias 两类正向入口。
+# 测试目的: 锁定 `arch_alias.get_dynamic_memory(...)` 与 `gdm(...)` 在 build_func_op / build_func_op_from_ast 集成层都能稳定 lowering 为 arch.get_dynamic_memory。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_arch_get_dynamic_memory_via_import_bound_aliases
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_lowers_arch_get_dynamic_memory_via_import_bound_aliases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import kernel_gen.operation.arch as arch_module
+
+    def module_alias_kernel() -> "Tensor[i8, ?]":
+        return arch_ops.get_dynamic_memory(MemorySpace.TSM)
+
+    def direct_alias_kernel() -> "Tensor[i8, ?]":
+        return gdm(MemorySpace.TLM)
+
+    monkeypatch.setitem(module_alias_kernel.__globals__, "arch_ops", arch_module)
+    monkeypatch.setitem(direct_alias_kernel.__globals__, "gdm", arch_module.get_dynamic_memory)
+
+    cases = (
+        (module_alias_kernel, MemorySpace.TSM, "tsm"),
+        (direct_alias_kernel, MemorySpace.TLM, "tlm"),
+    )
+    for fn, expected_space, expected_space_name in cases:
+        func_ast = parse_function(fn)
+        if len(func_ast.body.statements) != 1:
+            raise AssertionError("expected get_dynamic_memory alias kernel to lower to one AST statement")
+        stmt = func_ast.body.statements[0]
+        if not isinstance(stmt, ArchGetDynamicMemoryAST):
+            raise AssertionError("expected get_dynamic_memory alias kernel to parse into ArchGetDynamicMemoryAST")
+        if stmt.space is not expected_space:
+            raise AssertionError("expected get_dynamic_memory alias to keep MemorySpace binding")
+
+        for func_op in (build_func_op(fn), build_func_op_from_ast(func_ast)):
+            if len(tuple(func_op.body.block.args)) != 0:
+                raise AssertionError("expected zero-argument func.func for get_dynamic_memory alias kernel")
+            body_ops = list(func_op.body.block.ops)
+            query_ops = [op for op in body_ops if isinstance(op, ArchGetDynamicMemoryOp)]
+            return_ops = [op for op in body_ops if isinstance(op, func.ReturnOp)]
+            if len(query_ops) != 1:
+                raise AssertionError("expected exactly one arch.get_dynamic_memory op")
+            if query_ops[0].memory_space.space.data != expected_space_name:
+                raise AssertionError("expected memory_space attr to match helper binding")
+            if query_ops[0].result.type.element_type != i8:
+                raise AssertionError("expected dynamic memory result element type to stay i8")
+            if query_ops[0].result.type.shape.data[0] != StringAttr("?"):
+                raise AssertionError('expected dynamic memory result shape to stay [?]')
+            if query_ops[0].result.type.stride.data[0] != IntAttr(1):
+                raise AssertionError("expected dynamic memory result stride to stay [1]")
+            if query_ops[0].result.type.space.space.data != expected_space_name:
+                raise AssertionError("expected dynamic memory result space to match helper binding")
+            if len(return_ops) != 1 or len(return_ops[0].arguments) != 1:
+                raise AssertionError("expected func.return to carry one dynamic memory value")
+            if return_ops[0].arguments[0].type != query_ops[0].result.type:
+                raise AssertionError("expected func.return type to stay aligned with arch.get_dynamic_memory result")
 
 
 # MGEN-004
@@ -1065,6 +1167,31 @@ def test_build_func_op_supports_dma_helper_calls() -> None:
     assert [attr.data for attr in view_ops[0].result.type.stride.data] == [1, 1]
     assert list(view_func.function_type.outputs) == [view_ops[0].result.type]
     assert return_ops[0].arguments[0].type == view_ops[0].result.type
+
+
+# MGEN-026B
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-02 14:30:00 +0800
+# 最近一次运行成功时间: 2026-04-02 14:30:00 +0800
+# 功能说明: 验证 build_func_op 会拒绝未显式导入的 bare DMA helper 调用。
+# 测试目的: 锁定 AST 入口在 import-bound helper 新边界下，对 `view(...)` / `slice(...)` 的未导入裸名字调用统一报 `Unsupported call expression`。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_rejects_unimported_dma_view_and_slice_helpers
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_rejects_unimported_dma_view_and_slice_helpers() -> None:
+    source = Memory([4, 4], NumericType.Float32, space=MemorySpace.GM)
+
+    def view_kernel(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
+        return view(src, [1, 1], [2, 2], [1, 1])
+
+    def slice_kernel(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
+        return slice(src, [1, 1], [2, 2], [1, 1], MemorySpace.LM)
+
+    for fn in (view_kernel, slice_kernel):
+        with pytest.raises(AstVisitorError, match="Unsupported call expression"):
+            build_func_op(fn, source)
 
 
 # MGEN-036

@@ -1,7 +1,7 @@
 """AST visitor tests.
 
 创建者: 小李飞刀
-最后一次更改: 我不是牛马
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 AST 前端、nn dialect IR 与 MLIR 文本入口的回归测试。
@@ -39,6 +39,7 @@ from xdsl.dialects.builtin import (
     StringAttr,
     f32,
     i1,
+    i8,
     i32,
 )
 from xdsl.ir import Block
@@ -61,6 +62,7 @@ from kernel_gen.dialect.dma import (
     DmaViewOp,
 )
 from kernel_gen.dialect.arch import (
+    ArchGetDynamicMemoryOp,
     ArchGetBlockIdOp,
     ArchGetBlockNumOp,
     ArchGetSubthreadIdOp,
@@ -843,6 +845,69 @@ def test_build_func_op_rejects_invalid_arch_get_dynamic_memory_space() -> None:
 
     with pytest.raises(AstVisitorError, match="get_dynamic_memory space must be on-chip MemorySpace"):
         build_func_op(get_dynamic_memory_kernel)
+
+
+# AST-014NA / MGEN-036A
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-02 14:55:00 +0800
+# 最近一次运行成功时间: 2026-04-02 14:55:00 +0800
+# 功能说明: 验证 get_dynamic_memory 在 import-bound helper 基线下支持 module alias 与 direct symbol alias 两类正向入口。
+# 测试目的: 锁定 `arch_alias.get_dynamic_memory(...)` 与 `gdm(...)` 在 AST / build_func_op / build_func_op_from_ast 链路中都能稳定 lowering 为 arch.get_dynamic_memory。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_lowers_arch_get_dynamic_memory_via_import_bound_aliases
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_lowers_arch_get_dynamic_memory_via_import_bound_aliases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import kernel_gen.operation.arch as arch_module
+
+    def module_alias_kernel() -> "Tensor[i8, ?]":
+        return arch_ops.get_dynamic_memory(MemorySpace.TSM)
+
+    def direct_alias_kernel() -> "Tensor[i8, ?]":
+        return gdm(MemorySpace.TLM)
+
+    monkeypatch.setitem(module_alias_kernel.__globals__, "arch_ops", arch_module)
+    monkeypatch.setitem(direct_alias_kernel.__globals__, "gdm", arch_module.get_dynamic_memory)
+
+    cases = (
+        (module_alias_kernel, "get_dynamic_memory", MemorySpace.TSM, "tsm"),
+        (direct_alias_kernel, "gdm", MemorySpace.TLM, "tlm"),
+    )
+    for fn, helper_name, expected_space, expected_space_name in cases:
+        func_ast = parse_function(fn)
+        if len(func_ast.body.statements) != 1:
+            raise AssertionError("expected get_dynamic_memory alias kernel to lower to one AST statement")
+        stmt = func_ast.body.statements[0]
+        if not isinstance(stmt, ArchGetDynamicMemoryAST):
+            raise AssertionError("expected get_dynamic_memory alias kernel to parse into ArchGetDynamicMemoryAST")
+        if stmt.space is not expected_space:
+            raise AssertionError(f"expected {helper_name} to keep MemorySpace binding")
+
+        for func_op in (build_func_op(fn), build_func_op_from_ast(func_ast)):
+            if len(tuple(func_op.body.block.args)) != 0:
+                raise AssertionError("expected zero-argument func.func for get_dynamic_memory alias kernel")
+            body_ops = list(func_op.body.block.ops)
+            query_ops = [op for op in body_ops if isinstance(op, ArchGetDynamicMemoryOp)]
+            return_ops = [op for op in body_ops if isinstance(op, func.ReturnOp)]
+            if len(query_ops) != 1:
+                raise AssertionError("expected exactly one arch.get_dynamic_memory op")
+            if query_ops[0].memory_space.space.data != expected_space_name:
+                raise AssertionError("expected memory_space attr to match helper binding")
+            if query_ops[0].result.type.element_type != i8:
+                raise AssertionError("expected dynamic memory result element type to stay i8")
+            if query_ops[0].result.type.shape.data[0] != StringAttr("?"):
+                raise AssertionError('expected dynamic memory result shape to stay [?]')
+            if query_ops[0].result.type.stride.data[0] != IntAttr(1):
+                raise AssertionError("expected dynamic memory result stride to stay [1]")
+            if query_ops[0].result.type.space.space.data != expected_space_name:
+                raise AssertionError("expected dynamic memory result space to match helper binding")
+            if len(return_ops) != 1 or len(return_ops[0].arguments) != 1:
+                raise AssertionError("expected func.return to carry one dynamic memory value")
+            if return_ops[0].arguments[0].type != query_ops[0].result.type:
+                raise AssertionError("expected func.return type to stay aligned with arch.get_dynamic_memory result")
 
 
 # AST-014I / MGEN-033
@@ -3549,6 +3614,41 @@ def test_parse_function_rejects_invalid_load_helper_variants(
             raise AssertionError(f"expected diagnostics for load variant: {expected_message}")
         if diagnostics[0].message != expected_message:
             raise AssertionError(f"expected load diagnostic {expected_message!r}, got {diagnostics[0].message!r}")
+
+
+# AST-013A
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-02 14:30:00 +0800
+# 最近一次运行成功时间: 2026-04-02 14:30:00 +0800
+# 功能说明: 验证未显式导入的 bare dma helper 调用会在 AST 入口被统一拒绝。
+# 测试目的: 锁定未导入的 `view(...)` / `slice(...)` 不再进入 DMA helper 语义校验，而是直接返回 `Unsupported call expression`。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_unimported_dma_view_and_slice_helpers
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_parse_function_rejects_unimported_dma_view_and_slice_helpers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    invalid_sources = (
+        """\
+def kernel(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
+    return view(src, [1, 1], [2, 2], [1, 1])
+""",
+        """\
+def kernel(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
+    return slice(src, [1, 1], [2, 2], [1, 1], MemorySpace.LM)
+""",
+    )
+
+    for source in invalid_sources:
+        with pytest.raises(AstParseError) as exc_info:
+            _parse_function_from_source(monkeypatch, source)
+        diagnostics = exc_info.value.diagnostics
+        if not diagnostics:
+            raise AssertionError("expected diagnostics for unimported dma helper")
+        if diagnostics[0].message != "Unsupported call expression":
+            raise AssertionError("expected Unsupported call expression diagnostic")
 
 
 # AST-014
