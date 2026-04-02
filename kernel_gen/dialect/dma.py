@@ -4,7 +4,7 @@
 最后一次更改: 小李飞刀
 
 功能说明:
-- 定义 dma dialect 的 alloc/copy/load/store/slice/deslice/view/reshape/cast op 与 verifier 规则。
+- 定义 dma dialect 的 alloc/fill/copy/load/store/slice/deslice/view/reshape/cast op 与 verifier 规则。
 - 复用 nn dialect 的 NnMemoryType 与 NnMemorySpaceAttr。
 
 使用示例:
@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from xdsl.dialects.builtin import ArrayAttr, IntAttr, StringAttr
+from xdsl.dialects.builtin import ArrayAttr, IntAttr, StringAttr, i32
 from xdsl.ir import Attribute, Dialect, Operation, SSAValue
 from xdsl.irdl import (
     AttrSizedOperandSegments,
@@ -80,6 +80,33 @@ def _verify_memory_operand(value: SSAValue, field_name: str) -> NnMemoryType:
     """
 
     return _verify_memory_type(value.type, field_name)
+
+
+def _verify_fill_value_operand(value: SSAValue, field_name: str) -> SSAValue:
+    """校验 `dma.fill` 的整数标量 operand。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 当前仅接受 builtin `i32` 或 `!symbol.int<"expr">`。
+    - 若为 `!symbol.int<"expr">`，同步触发其类型校验。
+
+    使用示例:
+    - _verify_fill_value_operand(op.value, "value")
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma_dialect.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    if value.type == i32:
+        return value
+    if isinstance(value.type, SymbolValueType):
+        value.type.verify()
+        return value
+    raise VerifyException(f"{field_name} must be builtin i32 or !symbol.int")
 
 
 def _operand_int_value(value: SSAValue) -> int | None:
@@ -448,6 +475,60 @@ class DmaAllocOp(IRDLOperation):
         _verify_rank_match(dynamic_shape, len(result_type.shape.data), "dynamic_shape")
         _verify_operands_match_layout(dynamic_shape, result_type.shape, "dynamic_shape must match result shape")
         _verify_default_contiguous_stride(result_type, "dma.alloc requires contiguous result stride")
+
+
+@irdl_op_definition
+class DmaFillOp(IRDLOperation):
+    """dma.fill。"""
+
+    name = "dma.fill"
+
+    target = operand_def(NnMemoryType)
+    value = operand_def(Attribute)
+
+    def __init__(self, target: SSAValue | Operation, value: SSAValue | Operation) -> None:
+        """初始化 dma.fill。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 设置被写入的 `target` memory 与标量 `value` operand。
+
+        使用示例:
+        - DmaFillOp(target, value)
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma_dialect.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        super().__init__(operands=[target, value])
+
+    def verify_(self) -> None:
+        """校验 dma.fill。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - `target` 必须为 `!nn.memory<..., i32, ...>`。
+        - `value` 当前仅允许 builtin `i32` 或 `!symbol.int<"expr">`。
+
+        使用示例:
+        - DmaFillOp(...).verify_()
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma_dialect.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        target_type = _verify_memory_operand(self.target, "target")
+        if target_type.element_type != i32:
+            raise VerifyException("dma.fill target element_type must be i32")
+        _verify_fill_value_operand(self.value, "value")
 
 
 @irdl_op_definition
@@ -1123,6 +1204,7 @@ class Dma(Dialect):
     name = "dma"
     operations = [
         DmaAllocOp,
+        DmaFillOp,
         DmaFreeOp,
         DmaCopyOp,
         DmaLoadOp,
@@ -1139,6 +1221,7 @@ class Dma(Dialect):
 __all__ = [
     "Dma",
     "DmaAllocOp",
+    "DmaFillOp",
     "DmaFreeOp",
     "DmaCopyOp",
     "DmaLoadOp",

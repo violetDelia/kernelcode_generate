@@ -1,11 +1,12 @@
 """dma dialect tests.
 
 创建者: 小李飞刀
-最后一次更改: OpenAI
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 dma dialect 的 op verifier 与类型复用约束。
 - 覆盖 SSA `!symbol.int<"expr">` operand 动态布局、parse/print round-trip 与默认连续 stride 约束。
+- 覆盖 `dma.fill` 的 `i32 | !symbol.int<"expr"> -> i32 memory` 最小 verifier 闭环。
 
 使用示例:
 - pytest -q test/dialect/test_dma_dialect.py
@@ -46,6 +47,7 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.dialect.dma import (
     Dma,
     DmaAllocOp,
+    DmaFillOp,
     DmaFreeOp,
     DmaCastOp,
     DmaCopyOp,
@@ -798,10 +800,10 @@ def test_dma_alloc_dynamic_symbol_int_shape_operands_valid() -> None:
 
 # TC-DMA-021
 # 创建者: 朽木露琪亚
-# 最后一次更改: OpenAI
-# 最近一次运行测试时间: 2026-03-22 22:00:45 +0800
-# 最近一次运行成功时间: 2026-03-22 22:00:45 +0800
-# 功能说明: 验证 SSA `!symbol.int<"expr">` operand 版本的 dma op 支持 generic parse/print round-trip。
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-02 16:18:58 +0800
+# 最近一次运行成功时间: 2026-04-02 16:18:58 +0800
+# 功能说明: 验证 SSA `!symbol.int<"expr">` operand 版本的 dma.alloc/fill/view/load/store/slice/deslice/reshape/cast 支持 generic parse/print round-trip。
 # 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_dynamic_symbol_int_parse_print_round_trip
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
@@ -825,6 +827,7 @@ def test_dma_dynamic_symbol_int_parse_print_round_trip() -> None:
     load_type = _make_memory_type(space="shared")
 
     alloc = DmaAllocOp([c0.results[0], c1.results[0]], alloc_type)
+    fill = DmaFillOp(alloc.result, c0.results[0])
     view = DmaViewOp(
         alloc.result,
         [c2.results[0], c2.results[0]],
@@ -865,7 +868,7 @@ def test_dma_dynamic_symbol_int_parse_print_round_trip() -> None:
     reshape = DmaReshapeOp(alloc.result, [c1.results[0], c0.results[0]], reshape_type)
     cast = DmaCastOp(alloc.result, NnMemoryType(alloc_type.shape, alloc_type.stride, i1, alloc_type.space))
 
-    module = ModuleOp([c0, c1, c2, c3, alloc, view, load, store, slice_op, deslice, reshape, cast])
+    module = ModuleOp([c0, c1, c2, c3, alloc, fill, view, load, store, slice_op, deslice, reshape, cast])
     printed = _print_ir(module).rstrip()
     reparsed = Parser(ctx, printed).parse_module()
     reparsed.verify()
@@ -918,6 +921,67 @@ def test_dma_rejects_non_symbol_int_scalar_operands() -> None:
             [index_operand, index_operand],
             source_type,
         ).verify()
+
+    with pytest.raises(VerifyException, match="value must be builtin i32 or !symbol.int"):
+        DmaFillOp(target, index_operand).verify()
+
+
+# TC-DMA-024
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-02 15:27:34 +0800
+# 最近一次运行成功时间: 2026-04-02 15:27:34 +0800
+# 功能说明: 验证 dma.fill 接受 builtin i32 SSA value 并通过 verifier。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_fill_accepts_builtin_i32_scalar_operand
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_fill_accepts_builtin_i32_scalar_operand() -> None:
+    target = _TestOp(result_types=[_make_memory_type()]).results[0]
+    value = _TestOp(result_types=[i32]).results[0]
+
+    DmaFillOp(target, value).verify()
+
+
+# TC-DMA-025
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-02 15:27:34 +0800
+# 最近一次运行成功时间: 2026-04-02 15:27:34 +0800
+# 功能说明: 验证 dma.fill 接受 !symbol.int SSA value 并通过 verifier。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_fill_accepts_symbol_int_scalar_operand
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_fill_accepts_symbol_int_scalar_operand() -> None:
+    target = _TestOp(result_types=[_make_memory_type()]).results[0]
+    value = _make_symbol_operands(["N"])[0]
+
+    DmaFillOp(target, value).verify()
+
+
+# TC-DMA-026
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-02 15:27:34 +0800
+# 最近一次运行成功时间: 2026-04-02 15:27:34 +0800
+# 功能说明: 验证 dma.fill 会拒绝非 i32 target memory 与未允许的 scalar family。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_fill_rejects_non_i32_target_or_unsupported_scalar
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_fill_rejects_non_i32_target_or_unsupported_scalar() -> None:
+    bad_target_type = NnMemoryType(
+        ArrayAttr([IntAttr(2), IntAttr(4)]),
+        ArrayAttr([IntAttr(4), IntAttr(1)]),
+        i1,
+        _make_space("global"),
+    )
+    bad_target = _TestOp(result_types=[bad_target_type]).results[0]
+    value = _TestOp(result_types=[i32]).results[0]
+
+    with pytest.raises(VerifyException, match="dma.fill target element_type must be i32"):
+        DmaFillOp(bad_target, value).verify()
 
 
 # 创建者: OpenAI
