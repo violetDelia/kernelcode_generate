@@ -275,6 +275,138 @@ def _validate_cpu_conv2d_img2col2d_tiled_body(func_op: func.FuncOp, ctx: EmitCCo
     raise _error(ctx, func_op.sym_name.data, f"unsupported conv2d_img2col2d_tiled body op {first_op.name}")
 
 
+def _is_npu_demo_body_level_kernel(func_op: func.FuncOp, ctx: EmitCContext) -> bool:
+    """判断当前 `func.func` 是否命中 `npu_demo` 的固定 body-level kernel 子集。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 仅当 `target=npu_demo` 时返回真。
+    - 用于把 `npu_demo` 当前冻结的函数级骨架与通用 `emit_c` 拼装路径隔离。
+
+    使用示例:
+    - _is_npu_demo_body_level_kernel(func_op, EmitCContext(target="npu_demo"))
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: kernel_gen/dsl/gen_kernel.py
+    """
+
+    return ctx.target == "npu_demo"
+
+
+def _get_npu_demo_body_level_kernel_types(func_op: func.FuncOp, ctx: EmitCContext) -> tuple[NnMemoryType, NnMemoryType]:
+    """校验并提取 `npu_demo` body-level kernel 需要的 Memory 参数类型。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 要求签名形态固定为 `ctx + source -> out`。
+    - 要求首个参数名显式为 `ctx`，第二个参数和唯一结果都必须是 `NnMemoryType`。
+    - 要求输入 `source` 与输出 `out` 的 `element_type` 保持一致。
+
+    使用示例:
+    - source_type, out_type = _get_npu_demo_body_level_kernel_types(func_op, EmitCContext(target="npu_demo"))
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: kernel_gen/dsl/gen_kernel.py
+    """
+
+    func_name = func_op.sym_name.data
+    input_types = list(func_op.function_type.inputs.data)
+    result_types = list(func_op.function_type.outputs.data)
+    arg_names = _extract_arg_names(func_op)
+    if len(input_types) != 2 or len(result_types) != 1:
+        raise _error(ctx, func_name, "unsupported npu_demo body-level kernel signature")
+    if not arg_names or arg_names[0] != "ctx":
+        raise _error(ctx, func_name, "npu_demo body-level kernel requires leading ctx argument")
+    source_type = input_types[1]
+    out_type = result_types[0]
+    if not isinstance(source_type, NnMemoryType) or not isinstance(out_type, NnMemoryType):
+        raise _error(ctx, func_name, "unsupported npu_demo body-level kernel signature")
+    if source_type.element_type != out_type.element_type:
+        raise _error(ctx, func_name, "npu_demo body-level kernel requires matching element types")
+    return source_type, out_type
+
+
+def _emit_npu_demo_body_level_kernel_body(func_op: func.FuncOp, ctx: EmitCContext) -> str:
+    """生成 `target=npu_demo` 的固定 body-level kernel 骨架。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 固定生成 `ctx.thread_id()/ctx.thread_num()` 查询。
+    - 固定生成 `ctx.get_dynamic_memory<T>(MemorySpace::TSM/TLM)`、`view/slice/deslice/add` 管线。
+    - 不回退到 `.view<`、`load/store`、`launch/barrier` 或 `arch.launch_kernel`。
+
+    使用示例:
+    - body = _emit_npu_demo_body_level_kernel_body(func_op, EmitCContext(target="npu_demo"))
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: kernel_gen/dsl/gen_kernel.py
+    """
+
+    _, out_type = _get_npu_demo_body_level_kernel_types(func_op, ctx)
+    arg_names = _extract_arg_names(func_op)
+    for arg_name, arg_value in zip(arg_names, func_op.args, strict=True):
+        if ctx.lookup_name(arg_value) is None:
+            ctx.bind_name(arg_value, arg_name)
+    source_name = ctx.lookup_name(func_op.args[1]) or arg_names[1]
+    element_type = _type_to_c(out_type.element_type)
+    lines = [
+        f"{ctx.current_indent}long long tid = ctx.thread_id();",
+        f"{ctx.current_indent}long long tnum = ctx.thread_num();",
+        "",
+        f"{ctx.current_indent}Memory<{element_type}> tsm = ctx.get_dynamic_memory<{element_type}>(MemorySpace::TSM);",
+        f"{ctx.current_indent}Memory<{element_type}> tlm = ctx.get_dynamic_memory<{element_type}>(MemorySpace::TLM);",
+        "",
+        f"{ctx.current_indent}auto src_view = view({source_name}, tid * 16, 16, 1);",
+        f"{ctx.current_indent}auto work_tile = view(tsm, 0, 16, 1);",
+        f"{ctx.current_indent}auto out_tile = view(tlm, 0, 16, 1);",
+        "",
+        f"{ctx.current_indent}slice(work_tile, src_view, 0, 16, 1);",
+        f"{ctx.current_indent}add(work_tile, work_tile, out_tile);",
+        f"{ctx.current_indent}deslice(out_tile, out, tid * 16, 16, 1);",
+    ]
+    return "\n".join(lines)
+
+
+def _validate_npu_demo_body_level_kernel_body(func_op: func.FuncOp, ctx: EmitCContext) -> None:
+    """校验 `npu_demo` 固定 body-level kernel 子集当前仍只接受空 body。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 当前函数级骨架直接由 `gen_kernel` 生成，因此只接受空 body。
+    - 若 body 中出现任何真实 op，必须继续报错，避免固定骨架静默吞掉非法 IR。
+
+    使用示例:
+    - _validate_npu_demo_body_level_kernel_body(func_op, EmitCContext(target="npu_demo"))
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: kernel_gen/dsl/gen_kernel.py
+    """
+
+    ops = list(func_op.body.block.ops)
+    if not ops:
+        return
+    first_op = ops[0]
+    if isinstance(first_op, func.ReturnOp):
+        raise _error(ctx, func_op.sym_name.data, "npu_demo body-level kernel body must match frozen subset")
+    raise _error(ctx, func_op.sym_name.data, f"unsupported npu_demo body-level kernel body op {first_op.name}")
+
+
 def gen_signature(func_op: func.FuncOp, ctx: EmitCContext) -> str:
     """Generate a target signature for a single lowered `func.func`.
 
@@ -299,6 +431,17 @@ def gen_signature(func_op: func.FuncOp, ctx: EmitCContext) -> str:
         raise _error(ctx, func_name, "unsupported return form")
     if result_types and isinstance(result_types[0], SymbolValueType) and ctx.target != "cpu":
         raise _error(ctx, func_name, "symbol scalar return is cpu-only")
+
+    if _is_npu_demo_body_level_kernel(func_op, ctx):
+        source_type, out_type = _get_npu_demo_body_level_kernel_types(func_op, ctx)
+        arg_names = _extract_arg_names(func_op)
+        for arg_name, arg_value in zip(arg_names, func_op.args, strict=True):
+            ctx.bind_name(arg_value, arg_name)
+        source_name = ctx.lookup_name(func_op.args[1]) or arg_names[1]
+        return (
+            f"void {func_name}(npu_demo::KernelContext& ctx, "
+            f"const {_type_to_c(source_type)}& {source_name}, {_type_to_c(out_type)}& out)"
+        )
 
     arg_names = _extract_arg_names(func_op)
     params: list[str] = []
@@ -336,6 +479,10 @@ def gen_body(func_op: func.FuncOp, ctx: EmitCContext) -> str:
     if _is_cpu_conv2d_img2col2d_tiled(func_op, ctx):
         _validate_cpu_conv2d_img2col2d_tiled_body(func_op, ctx)
         return _emit_cpu_conv2d_img2col2d_tiled_body(func_op, ctx)
+    if _is_npu_demo_body_level_kernel(func_op, ctx):
+        _get_npu_demo_body_level_kernel_types(func_op, ctx)
+        _validate_npu_demo_body_level_kernel_body(func_op, ctx)
+        return _emit_npu_demo_body_level_kernel_body(func_op, ctx)
 
     def _is_direct_return_nn_add(return_op: func.ReturnOp) -> bool:
         if ctx.target != "cpu":

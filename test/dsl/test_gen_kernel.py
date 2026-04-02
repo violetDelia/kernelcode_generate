@@ -1,7 +1,7 @@
 """gen_kernel tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 func.func 到目标函数源码的组装行为。
@@ -57,6 +57,10 @@ class UnsupportedOp(IRDLOperation):
 
 def _ctx() -> EmitCContext:
     return EmitCContext(target="cpu")
+
+
+def _npu_ctx() -> EmitCContext:
+    return EmitCContext(target="npu_demo")
 
 
 def _make_memory_type(shape: list[int], stride: list[int], element_type: object = i32, space: str = "global") -> NnMemoryType:
@@ -634,6 +638,209 @@ def test_gen_kernel_rejects_nn_add_specialization_on_multi_use() -> None:
 
     with pytest.raises(ValueError, match="target=cpu: nn.add: unsupported op"):
         gen_kernel(func_op, _ctx())
+
+
+# GK-017
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-02 21:00:00 +0800
+# 最近一次运行成功时间: 2026-04-02 21:00:00 +0800
+# 功能说明: 验证 npu_demo target 可生成包含 KernelContext 与 thread 查询的 body-level kernel 骨架。
+# 测试目的: 锁定签名首参为 `npu_demo::KernelContext& ctx`，并显式生成 `ctx.thread_id()` / `ctx.thread_num()`。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_body_level_kernel
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_emits_npu_demo_body_level_kernel() -> None:
+    mem = _make_memory_type([64], [1], element_type=f32)
+    block = Block(arg_types=[IndexType(), mem])
+    func_op = _func("demo_kernel", [IndexType(), mem], [mem], block, ("ctx", "source"))
+
+    source = gen_kernel(func_op, _npu_ctx())
+
+    assert source.startswith(
+        "void demo_kernel(npu_demo::KernelContext& ctx, const Memory<float>& source, Memory<float>& out)"
+    )
+    assert "long long tid = ctx.thread_id();" in source
+    assert "long long tnum = ctx.thread_num();" in source
+    assert "npu_demo::KernelContext& ctx" in source
+    assert "launch" not in source
+    assert "barrier" not in source
+    assert "arch.launch_kernel" not in source
+
+
+# GK-018
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-02 21:00:00 +0800
+# 最近一次运行成功时间: 2026-04-02 21:00:00 +0800
+# 功能说明: 验证 npu_demo target 可生成固定的 dynamic memory/view/slice/deslice/add 管线。
+# 测试目的: 锁定 `TSM/TLM`、`view/slice/deslice/add` 固定顺序，并防止回退到 `.view/load/store` 风格。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_memory_pipeline
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_emits_npu_demo_memory_pipeline() -> None:
+    mem = _make_memory_type([64], [1], element_type=f32)
+    block = Block(arg_types=[IndexType(), mem])
+    func_op = _func("demo_kernel", [IndexType(), mem], [mem], block, ("ctx", "source"))
+
+    source = gen_kernel(func_op, _npu_ctx())
+
+    tsm_idx = source.index("Memory<float> tsm = ctx.get_dynamic_memory<float>(MemorySpace::TSM);")
+    tlm_idx = source.index("Memory<float> tlm = ctx.get_dynamic_memory<float>(MemorySpace::TLM);")
+    src_view_idx = source.index("auto src_view = view(source, tid * 16, 16, 1);")
+    work_view_idx = source.index("auto work_tile = view(tsm, 0, 16, 1);")
+    out_view_idx = source.index("auto out_tile = view(tlm, 0, 16, 1);")
+    slice_idx = source.index("slice(work_tile, src_view, 0, 16, 1);")
+    add_idx = source.index("add(work_tile, work_tile, out_tile);")
+    deslice_idx = source.index("deslice(out_tile, out, tid * 16, 16, 1);")
+
+    assert tsm_idx < tlm_idx < src_view_idx < work_view_idx < out_view_idx < slice_idx < add_idx < deslice_idx
+    assert ".view<" not in source
+    assert "load<" not in source
+    assert "store<" not in source
+    assert "slice(source" not in source
+    assert "arch.launch_kernel" not in source
+
+
+# GK-019
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-02 21:25:00 +0800
+# 最近一次运行成功时间: 2026-04-02 21:25:00 +0800
+# 功能说明: 验证 npu_demo body-level kernel 若 body 含未知 op，必须继续报错。
+# 测试目的: 防止固定骨架静默吞掉非法 body 中的未知 op。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_rejects_npu_demo_body_level_kernel_with_unknown_body_op
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_rejects_npu_demo_body_level_kernel_with_unknown_body_op() -> None:
+    mem = _make_memory_type([64], [1], element_type=f32)
+    block = Block(arg_types=[IndexType(), mem])
+    block.add_op(UnsupportedOp())
+    func_op = _func("demo_kernel", [IndexType(), mem], [mem], block, ("ctx", "source"))
+
+    with pytest.raises(GenKernelError) as exc_info:
+        gen_kernel(func_op, _npu_ctx())
+
+    assert "test.unsupported" in str(exc_info.value)
+
+
+# GK-020
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-02 21:25:00 +0800
+# 最近一次运行成功时间: 2026-04-02 21:25:00 +0800
+# 功能说明: 验证 npu_demo body-level kernel 若 body 非空但不含未知 op，仍必须报错。
+# 测试目的: 锁定当前冻结子集只接受空 body，避免非法 return 等结构被固定骨架吞掉。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_rejects_npu_demo_body_level_kernel_with_nonempty_body
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_rejects_npu_demo_body_level_kernel_with_nonempty_body() -> None:
+    mem = _make_memory_type([64], [1], element_type=f32)
+    block = Block(arg_types=[IndexType(), mem])
+    block.add_op(func.ReturnOp())
+    func_op = _func("demo_kernel", [IndexType(), mem], [mem], block, ("ctx", "source"))
+
+    with pytest.raises(GenKernelError, match="body must match frozen subset"):
+        gen_kernel(func_op, _npu_ctx())
+
+
+# GK-I2-001
+# 创建者: 大闸蟹
+# 最后一次更改: 大闸蟹
+# 功能说明: 验证 direct-return nn.add 的三条 CPU 路径可生成源码并完成编译执行。
+# 测试目的: 锁定 memory+memory、memory+const(i32)、memory+symbol.int 不仅能生成 `cpu::add(..., out);`，而且能连同 include/cpu/Nn.h 编译并跑通。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_compiles_and_runs_direct_return_nn_add_variants_on_cpu
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_compiles_and_runs_direct_return_nn_add_variants_on_cpu() -> None:
+    mem = _make_memory_type([2, 2], [2, 1])
+    space = NnMemorySpaceAttr.from_name("global")
+
+    pair_block = Block(arg_types=[mem, mem])
+    pair_add = NnAddOp(pair_block.args[0], pair_block.args[1], mem, space)
+    pair_block.add_op(pair_add)
+    pair_block.add_op(func.ReturnOp(pair_add.result))
+    pair_func = _func("add_direct", [mem, mem], [mem], pair_block, ("lhs", "rhs"))
+    pair_source = gen_kernel(pair_func, _ctx())
+
+    const_block = Block(arg_types=[mem])
+    const_value = arith.ConstantOp(IntegerAttr(1, i32))
+    const_add = NnAddOp(const_block.args[0], const_value.result, mem, space)
+    const_block.add_op(const_value)
+    const_block.add_op(const_add)
+    const_block.add_op(func.ReturnOp(const_add.result))
+    const_func = _func("add_const_direct", [mem], [mem], const_block, ("lhs",))
+    const_source = gen_kernel(const_func, _ctx())
+
+    symbol_type = SymbolValueType.from_expr("bias")
+    symbol_block = Block(arg_types=[mem, symbol_type])
+    symbol_add = NnAddOp(symbol_block.args[0], symbol_block.args[1], mem, space)
+    symbol_block.add_op(symbol_add)
+    symbol_block.add_op(func.ReturnOp(symbol_add.result))
+    symbol_func = _func("add_symbol_direct", [mem, symbol_type], [mem], symbol_block, ("lhs", "bias"))
+    symbol_source = gen_kernel(symbol_func, _ctx())
+
+    assert "cpu::add(lhs, rhs, out);" in pair_source
+    assert "cpu::add(lhs, 1, out);" in const_source
+    assert "cpu::add(lhs, bias, out);" in symbol_source
+
+    cpp_source = f"""\
+#include <cstdint>
+#include "include/cpu/Memory.h"
+#include "include/cpu/Nn.h"
+
+using cpu::Memory;
+
+{pair_source}
+
+{const_source}
+
+{symbol_source}
+
+static int fail(int code) {{ return code; }}
+
+int main() {{
+    int32_t lhs_data[4] = {{1, 2, 3, 4}};
+    int32_t rhs_data[4] = {{10, 20, 30, 40}};
+    int32_t out_pair_data[4] = {{0, 0, 0, 0}};
+    int32_t out_const_data[4] = {{0, 0, 0, 0}};
+    int32_t out_symbol_data[4] = {{0, 0, 0, 0}};
+    long long shape[2] = {{2, 2}};
+    long long stride[2] = {{2, 1}};
+
+    Memory<int32_t> lhs(lhs_data, 2, shape, stride);
+    Memory<int32_t> rhs(rhs_data, 2, shape, stride);
+    Memory<int32_t> out_pair(out_pair_data, 2, shape, stride);
+    Memory<int32_t> out_const(out_const_data, 2, shape, stride);
+    Memory<int32_t> out_symbol(out_symbol_data, 2, shape, stride);
+
+    add_direct(lhs, rhs, out_pair);
+    add_const_direct(lhs, out_const);
+    add_symbol_direct(lhs, 7, out_symbol);
+
+    int32_t expected_pair[4] = {{11, 22, 33, 44}};
+    int32_t expected_const[4] = {{2, 3, 4, 5}};
+    int32_t expected_symbol[4] = {{8, 9, 10, 11}};
+    for (int i = 0; i < 4; ++i) {{
+        if (out_pair_data[i] != expected_pair[i]) {{
+            return fail(1);
+        }}
+        if (out_const_data[i] != expected_const[i]) {{
+            return fail(2);
+        }}
+        if (out_symbol_data[i] != expected_symbol[i]) {{
+            return fail(3);
+        }}
+    }}
+    return 0;
+}}
+"""
+    _compile_and_run(cpp_source)
 
 
 # GK-C2-001
