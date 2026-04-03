@@ -556,6 +556,30 @@ class CompareExprAST:
 
 
 @dataclass(frozen=True)
+class SymbolToFloatAST:
+    """`float(symbol.int)` 转换节点。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 表示 DSL 中 `float(value)` 的最小公开入口。
+    - 当前仅服务于 `symbol.int -> f32` 的 `symbol.to_float` lowering 链路。
+
+    使用示例:
+    - SymbolToFloatAST(source=ScalarArgAST(name="n", value_type=int))
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    source: object
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
 class TensorAxisAccessAST:
     """张量 shape/stride 访问节点。
 
@@ -1009,7 +1033,8 @@ def _annotation_from_text(
     最后一次更改: OpenAI
 
     功能说明:
-    - 支持 `int`、`bool` 与 `Tensor[...]` 三类公开注解文本。
+    - 支持 `int`、`bool`、`Tensor[...]` 与返回位 `float` 四类公开注解文本。
+    - `float` 当前只允许用于返回注解，不扩展到输入参数注解。
 
     使用示例:
     - _annotation_from_text("Tensor[f32, 4]", "A", node)
@@ -1025,6 +1050,8 @@ def _annotation_from_text(
         return ScalarArgAST(name=arg_name or "ret0", value_type=int, location=location)
     if text.strip() == "bool":
         return ScalarArgAST(name=arg_name or "ret0", value_type=bool, location=location)
+    if text.strip() == "float" and arg_name is None:
+        return ScalarArgAST(name="ret0", value_type=float, location=location)
     dtype, dims = _split_tensor_annotation(text, node)
     memory = Memory(dims, dtype)
     return TensorAST(name=arg_name or "ret0", memory=memory, location=location)
@@ -1098,7 +1125,7 @@ def _parse_annotation_node(
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 支持 `int/bool/SymbolDim`、`Tensor[...]` 与 `Ptr(dtype)` 注解解析。
+    - 支持 `int/bool/SymbolDim`、返回位 `float`、`Tensor[...]` 与 `Ptr(dtype)` 注解解析。
     - 对 `Ptr()` / `Ptr(f32, f32)` 等非法参数数量给出固定诊断。
 
     使用示例:
@@ -1154,6 +1181,8 @@ def _parse_annotation_node(
             return ScalarArgAST(name=arg_name or "ret0", value_type=int, location=_location_from_node(node))
         if node.id == "bool":
             return ScalarArgAST(name=arg_name or "ret0", value_type=bool, location=_location_from_node(node))
+        if node.id == "float" and arg_name is None:
+            return ScalarArgAST(name="ret0", value_type=float, location=_location_from_node(node))
         if node.id == "SymbolDim":
             return ScalarArgAST(
                 name=arg_name or "ret0",
@@ -1296,7 +1325,7 @@ def _resolve_import_bound_helper_call(
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 仅当调用目标显式绑定到 `kernel_gen.operation.dma` 或 `kernel_gen.operation.arch` 时，才返回 helper 名。
+    - 仅当调用目标显式绑定到 `kernel_gen.operation.dma`、`kernel_gen.operation.arch` 或 `kernel_gen.operation.nn` 时，才返回 helper 名。
     - 支持 module alias/package alias 的 `mod.helper(...)` 调用，以及 direct symbol alias 的 `alias(...)` 调用。
     - 拒绝未导入的裸 helper 名与来自其他模块的同名对象，避免误把普通名字当作 DSL helper。
 
@@ -1333,6 +1362,10 @@ def _resolve_import_bound_helper_call(
             "get_dynamic_memory",
             "launch_kernel",
         },
+        "kernel_gen.operation.nn": {
+            "img2col1d",
+            "img2col2d",
+        },
     }
 
     if isinstance(expr, py_ast.Attribute):
@@ -1353,6 +1386,40 @@ def _resolve_import_bound_helper_call(
     if helper_name not in helper_modules[module_name]:
         return None
     return helper_name
+
+
+def _parse_symbol_to_float_call(
+    expr: py_ast.Call,
+    env: dict[str, object],
+    globals_table: dict[str, object],
+    builtins_table: dict[str, object],
+) -> SymbolToFloatAST | None:
+    """解析 `float(symbol.int)` 的最小 AST 入口。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅识别 builtin `float(...)` 的单参数调用。
+    - 将参数表达式保留为 AST，具体 `symbol.int -> f32` 约束交由 lowering 阶段校验。
+
+    使用示例:
+    - _parse_symbol_to_float_call(expr, env, globals(), __builtins__)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    if not isinstance(expr.func, py_ast.Name) or expr.func.id != "float":
+        return None
+    if _lookup_python_name("float", globals_table, builtins_table) is not float:
+        return None
+    if len(expr.args) != 1 or expr.keywords:
+        _raise_parse_error("Unsupported float arity", expr)
+    source = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+    return SymbolToFloatAST(source=source, location=_location_from_node(expr))
 
 
 def _parse_nn_arithmetic_call(
@@ -1516,7 +1583,7 @@ def _parse_dma_call(
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 仅接受当前函数显式导入绑定到 `kernel_gen.operation.dma/arch` 的 helper 调用。
+    - 仅接受当前函数显式导入绑定到 `kernel_gen.operation.dma/arch/nn` 的 helper 调用。
     - 将 `load/slice/store/deslice/...` 解析为对应 AST 节点。
     - 将 `nn.add/sub/mul/truediv/floordiv(...)` 解析为对应的 `BinaryExprAST`。
     - 将 `img2col1d/img2col2d(...)` 解析为对应的 `Img2ColAST`。
@@ -1771,6 +1838,7 @@ def _parse_expr(
     功能说明:
     - 解析 Name/Constant/List/Tuple/Attribute/Call/Subscript/UnaryOp/BinOp/Compare 等表达式节点。
     - 支持 `img2col1d/img2col2d` helper 与 `get_shape/get_stride` 轴访问入口解析。
+    - 支持 `float(symbol.int)` 的最小 AST 入口解析。
     - 当开启外部值拒绝时，限定索引表达式仅可使用允许的常量。
 
     使用示例:
@@ -1818,6 +1886,9 @@ def _parse_expr(
         return value
 
     if isinstance(expr, py_ast.Call):
+        symbol_to_float_expr = _parse_symbol_to_float_call(expr, env, globals_table, builtins_table)
+        if symbol_to_float_expr is not None:
+            return symbol_to_float_expr
         return _parse_dma_call(expr, env, globals_table, builtins_table)
 
     if isinstance(expr, py_ast.Subscript):
@@ -2081,6 +2152,12 @@ def _parse_function_impl(
         raise AstParseError("Missing return statement", [Diagnostic("Missing return statement", _location_from_node(func_def))])
     if has_return and not isinstance(func_def.body[-1], py_ast.Return):
         raise AstParseError("Return statement must be last", [Diagnostic("Return statement must be last", _location_from_node(func_def.body[-1]))])
+    if outputs and isinstance(outputs[0], ScalarArgAST) and outputs[0].value_type is float:
+        if not statements or not isinstance(statements[-1], SymbolToFloatAST):
+            raise AstParseError(
+                "Unsupported return annotation",
+                [Diagnostic("Unsupported return annotation", _location_from_node(func_def.returns))],
+            )
 
     body_location = _location_from_node(func_def.body[0]) if func_def.body else _location_from_node(func_def)
     return FunctionAST(

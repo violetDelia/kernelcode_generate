@@ -90,6 +90,7 @@ from kernel_gen.dialect.symbol import (
     SymbolGetStrideOp,
     SymbolMulOp,
     SymbolSubOp,
+    SymbolToFloatOp,
     SymbolValueType,
 )
 from kernel_gen.dsl.ast import (
@@ -111,6 +112,7 @@ from kernel_gen.dsl.ast import (
     Img2ColAST,
     LoadAST,
     SourceLocation,
+    SymbolToFloatAST,
     StoreAST,
     TensorAST,
     TensorAxisAccessAST,
@@ -261,6 +263,51 @@ def test_emit_mlir_lowers_arch_get_block_num_query() -> None:
         raise AssertionError("expected emitted op to be ArchGetBlockNumOp")
     if result.type != SymbolValueType.from_expr("block_num"):
         raise AssertionError('expected emitted result type to be !symbol.int<"block_num">')
+
+
+# EMIT-036
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 `float(symbol.int)` lowering 为 `symbol.to_float`。
+# 测试目的: 锁定 emit_mlir 会把 `SymbolToFloatAST` 下沉为 `SymbolToFloatOp`，并固定返回 `f32`。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_lowers_symbol_to_float
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_emit_mlir_lowers_symbol_to_float() -> None:
+    source = ScalarArgAST("n", int)
+    block = Block(arg_types=[SymbolValueType.from_expr("N")])
+    ctx = EmitContext(builder=block, symbols={"n": block.args[0]}, types={_expr_key(source): block.args[0].type})
+    ctx._set_cache(_expr_key(source), block.args[0])
+
+    result = emit_node_mlir(SymbolToFloatAST(source=source), ctx)
+
+    body_ops = list(block.ops)
+    if len(body_ops) != 1:
+        raise AssertionError("expected one emitted op for symbol.to_float")
+    if not isinstance(body_ops[0], SymbolToFloatOp):
+        raise AssertionError("expected emitted op to be SymbolToFloatOp")
+    if result.type != f32:
+        raise AssertionError("expected emitted symbol.to_float result type to be f32")
+
+
+# EMIT-036A
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 `symbol.to_float` 会拒绝非 `symbol.int` source。
+# 测试目的: 锁定 lowering 错误会返回具体 source 类型诊断，而不是泛化 unsupported。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_rejects_non_symbol_source_for_symbol_to_float
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_emit_mlir_rejects_non_symbol_source_for_symbol_to_float() -> None:
+    source = ScalarArgAST("n", int)
+    block = Block(arg_types=[i32])
+    ctx = EmitContext(builder=block, symbols={"n": block.args[0]}, types={_expr_key(source): block.args[0].type})
+    ctx._set_cache(_expr_key(source), block.args[0])
+
+    with pytest.raises(_LoweringError, match='symbol.to_float source must have type !symbol.int<"expr">'):
+        emit_node_mlir(SymbolToFloatAST(source=source), ctx)
 
 
 # EMIT-025

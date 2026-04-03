@@ -25,7 +25,7 @@ from typing import Callable
 
 import sympy as sp
 from xdsl.dialects import func
-from xdsl.dialects.builtin import FunctionType, IntAttr, StringAttr, i1, i32
+from xdsl.dialects.builtin import FunctionType, IntAttr, StringAttr, f32, i1, i32
 from xdsl.ir import Block, Region
 
 from kernel_gen.dialect.nn import NnMemoryType
@@ -45,6 +45,7 @@ from .ast import (
     Diagnostic,
     FunctionAST,
     ScalarArgAST,
+    SymbolToFloatAST,
     TensorAST,
     TensorAxisAccessAST,
     _ParseFailure,
@@ -68,7 +69,7 @@ def _is_symbol_scalar_function(func_ast: FunctionAST) -> bool:
         return False
     if not func_ast.outputs:
         return True
-    return all(isinstance(item, ScalarArgAST) and item.value_type in {int, bool} for item in func_ast.outputs)
+    return all(isinstance(item, ScalarArgAST) and item.value_type in {int, bool, float} for item in func_ast.outputs)
 
 
 def _is_symbol_scalar_arg(item: ScalarArgAST, *, is_symbol_scalar_function: bool) -> bool:
@@ -338,6 +339,7 @@ def _validate_return_type(
     - 检查 Tensor 返回的 shape 与 element_type 是否匹配注解。
     - mixed dtype 场景下允许返回注解 element_type 与实际结果不同，但仅限二元算术。
     - 允许 `Memory.get_shape/get_stride()[axis]` 在 `-> int` 注解下返回 `!symbol.int`。
+    - 允许 `return float(symbol.int)` 在 `-> float` 注解下返回 `f32`。
 
     使用示例:
     - _validate_return_type(func_ast, result_type, return_expr, type_map)
@@ -382,6 +384,11 @@ def _validate_return_type(
                 expected_type = SymbolValueType.from_expr(output.name)
             else:
                 expected_type = i32
+        elif output.value_type is float:
+            if isinstance(return_expr, SymbolToFloatAST):
+                expected_type = f32
+            else:
+                raise _LoweringError("Unsupported scalar return type", location=output.location)
         else:
             raise _LoweringError("Unsupported scalar return type", location=output.location)
     else:

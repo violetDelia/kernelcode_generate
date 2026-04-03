@@ -93,6 +93,7 @@ from kernel_gen.dialect.symbol import (
     SymbolGetStrideOp,
     SymbolMulOp,
     SymbolSubOp,
+    SymbolToFloatOp,
     SymbolValueType,
 )
 from kernel_gen.dsl.ast import (
@@ -114,6 +115,7 @@ from kernel_gen.dsl.ast import (
     ForAST,
     LoadAST,
     SourceLocation,
+    SymbolToFloatAST,
     StoreAST,
     TensorAST,
     TensorAxisAccessAST,
@@ -1793,6 +1795,80 @@ def test_mlir_gen_validate_return_type_errors() -> None:
     func_symbol = FunctionAST("sym", [scalar_out], [scalar_out], BlockAST([]))
     with pytest.raises(_LoweringError, match="Return type does not match annotation"):
         _validate_return_type(func_symbol, i32)
+
+
+# MGEN-040
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 `build_func_op` 在 `float(symbol.int)` 场景下返回 `f32` 并生成 `symbol.to_float`。
+# 测试目的: 锁定函数级返回装配会直接使用 `symbol.to_float` 的 `f32` 结果。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_symbol_to_float
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_lowers_symbol_to_float() -> None:
+    def to_float_func(value: int) -> float:
+        return float(value)
+
+    for runtime_arg in (3, SymbolDim("N")):
+        func_op = build_func_op(to_float_func, runtime_arg)
+        expected_arg_type = (
+            SymbolValueType.from_expr(str(runtime_arg.get_symbol()))
+            if isinstance(runtime_arg, SymbolDim)
+            else SymbolValueType.from_expr(str(runtime_arg))
+        )
+        if [arg.type for arg in func_op.args] != [expected_arg_type]:
+            raise AssertionError("expected symbol.to_float input to stay !symbol.int")
+        to_float_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolToFloatOp)]
+        if len(to_float_ops) != 1:
+            raise AssertionError("expected exactly one SymbolToFloatOp")
+        if to_float_ops[0].result.type != f32:
+            raise AssertionError("expected symbol.to_float result type to be f32")
+        return_op = next(op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp))
+        if return_op.arguments[0].type != f32:
+            raise AssertionError("expected func.return type to stay f32")
+        if list(func_op.function_type.outputs) != [f32]:
+            raise AssertionError("expected function output type list to stay [f32]")
+
+
+# MGEN-040A
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 `build_func_op_from_ast` 在 `symbol.to_float` 场景下按 I2 合同返回 `f32`。
+# 测试目的: 锁定手工构造的 `FunctionAST` 也会经由 `SymbolToFloatAST` 路径装配 `func.return f32`。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_from_ast_lowers_symbol_to_float
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_from_ast_lowers_symbol_to_float() -> None:
+    input_arg = ScalarArgAST("n", int)
+    output_arg = ScalarArgAST("ret0", float)
+    func_ast = FunctionAST(
+        "to_float_ast",
+        [input_arg],
+        [output_arg],
+        BlockAST([SymbolToFloatAST(source=input_arg)]),
+    )
+
+    for runtime_arg in (3, SymbolDim("N")):
+        func_op = build_func_op_from_ast(func_ast, runtime_args=[runtime_arg])
+        expected_arg_type = (
+            SymbolValueType.from_expr(str(runtime_arg.get_symbol()))
+            if isinstance(runtime_arg, SymbolDim)
+            else SymbolValueType.from_expr(str(runtime_arg))
+        )
+        if [arg.type for arg in func_op.args] != [expected_arg_type]:
+            raise AssertionError("expected build_func_op_from_ast input to stay !symbol.int")
+        to_float_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolToFloatOp)]
+        if len(to_float_ops) != 1:
+            raise AssertionError("expected exactly one SymbolToFloatOp from FunctionAST")
+        if to_float_ops[0].result.type != f32:
+            raise AssertionError("expected SymbolToFloatOp result type to be f32")
+        return_op = next(op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp))
+        if return_op.arguments[0].type != f32:
+            raise AssertionError("expected func.return type to stay f32")
+        if list(func_op.function_type.outputs) != [f32]:
+            raise AssertionError("expected function output type list to stay [f32]")
 
 
 # MGEN-006

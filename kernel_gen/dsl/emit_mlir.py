@@ -90,6 +90,7 @@ from kernel_gen.dialect.symbol import (
     SymbolGetStrideOp,
     SymbolMulOp,
     SymbolSubOp,
+    SymbolToFloatOp,
     SymbolValueType,
     build_public_symbol_expr,
 )
@@ -118,6 +119,7 @@ from .ast import (
     Img2ColAST,
     LoadAST,
     ScalarArgAST,
+    SymbolToFloatAST,
     SourceLocation,
     StoreAST,
     TensorAST,
@@ -1729,6 +1731,7 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
                 ArchGetDynamicMemoryAST,
                 ArchLaunchKernelAST,
                 ArchQueryAST,
+                SymbolToFloatAST,
                 TensorAxisAccessAST,
             ),
         ):
@@ -1791,7 +1794,7 @@ def _infer_expr_type(
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 统一处理常量、DMA、arch query、symbol 与 nn 二元表达式的类型推导。
+    - 统一处理常量、DMA、arch query、`symbol.to_float`、symbol 与 nn 二元表达式的类型推导。
     - 对 `nn.add` mixed memory+const/symbol 路径执行 promotion，并在纯 scalar/symbol 输入时给出显式诊断。
 
     使用示例:
@@ -2060,6 +2063,12 @@ def _infer_expr_type(
         result_type = _infer_tensor_axis_access_type(expr, type_map, runtime_values=runtime_values)
         type_map[expr_key] = result_type
         return result_type
+    if isinstance(expr, SymbolToFloatAST):
+        source_type = _infer_expr_type(expr.source, type_map, runtime_values=runtime_values)
+        if not isinstance(source_type, SymbolValueType):
+            raise _LoweringError('symbol.to_float source must have type !symbol.int<"expr">', location=expr.location)
+        type_map[expr_key] = f32
+        return f32
 
     if isinstance(expr, BinaryExprAST):
         lhs_type = _infer_expr_type(expr.lhs, type_map, runtime_values=runtime_values)
@@ -2255,7 +2264,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 递归处理常量、内存操作与算术/比较表达式，生成对应的 MLIR op。
+    - 递归处理常量、内存操作、`symbol.to_float` 与算术/比较表达式，生成对应的 MLIR op。
     - 通过 `EmitContext` 缓存表达式结果，避免重复发射。
 
     参数说明:
@@ -2489,6 +2498,15 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         ctx._set_cache(expr_key, op.result)
         ctx.types[expr_key] = op.result.type
         return op.result
+    if isinstance(expr, SymbolToFloatAST):
+        source = _lower_expr(expr.source, ctx)
+        if not isinstance(getattr(source, "type", None), SymbolValueType):
+            raise _LoweringError('symbol.to_float source must have type !symbol.int<"expr">', location=expr.location)
+        op = SymbolToFloatOp(source, f32)
+        ctx.builder.add_op(op)
+        ctx._set_cache(expr_key, op.result)
+        ctx.types[expr_key] = op.result.type
+        return op.result
 
     if isinstance(expr, BinaryExprAST):
         lhs = _lower_expr(expr.lhs, ctx)
@@ -2679,6 +2697,7 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
             Img2ColAST,
             ArchGetDynamicMemoryAST,
             ArchQueryAST,
+            SymbolToFloatAST,
             TensorAxisAccessAST,
         ),
     ):

@@ -106,6 +106,7 @@ from kernel_gen.dsl.ast import (
     ForAST,
     LoadAST,
     SourceLocation,
+    SymbolToFloatAST,
     StoreAST,
     TensorAST,
     TensorAxisAccessAST,
@@ -939,6 +940,59 @@ def test_ast_parse_function_supports_symbol_scalar_and_joinedstr_annotations() -
         raise AssertionError("expected ScalarArgAST output annotation for kernel")
     if func_ast.outputs[0].value_type is not bool:
         raise AssertionError("expected bool return annotation to parse as ScalarArgAST")
+
+
+# AST-013B
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 `-> float` 返回注解与 `float(symbol.int)` 可进入 AST 主链。
+# 测试目的: 锁定 `return float(n)` 在 AST 层会解析为 `SymbolToFloatAST`，且返回注解保留为 `float`。
+# 使用示例: pytest -q test/dsl/test_ast.py -k test_ast_accepts_float_return_annotation_for_symbol_to_float
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast.py
+def test_ast_accepts_float_return_annotation_for_symbol_to_float() -> None:
+    def cast_dim(n: int) -> float:
+        return float(n)
+
+    func_ast = parse_function(cast_dim)
+    if len(func_ast.outputs) != 1:
+        raise AssertionError("expected one float return annotation")
+    if not isinstance(func_ast.outputs[0], ScalarArgAST):
+        raise AssertionError("expected float return annotation to parse as ScalarArgAST")
+    if func_ast.outputs[0].value_type is not float:
+        raise AssertionError("expected return annotation type to stay float")
+    if len(func_ast.body.statements) != 1:
+        raise AssertionError("expected one AST statement for symbol.to_float")
+    stmt = func_ast.body.statements[0]
+    if not isinstance(stmt, SymbolToFloatAST):
+        raise AssertionError("expected float(n) to parse into SymbolToFloatAST")
+    if not isinstance(stmt.source, ScalarArgAST):
+        raise AssertionError("expected symbol.to_float source to stay ScalarArgAST")
+    if stmt.source.name != "n" or stmt.source.value_type is not int:
+        raise AssertionError("expected symbol.to_float source to keep int parameter identity")
+
+
+# AST-013C
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 `-> float` 返回注解不会放宽到非 `symbol.to_float` 返回形态。
+# 测试目的: 锁定 `-> float` 当前只服务于 `return float(symbol.int)` 入口，其他返回形态仍固定报 `Unsupported return annotation`。
+# 使用示例: pytest -q test/dsl/test_ast.py -k test_ast_rejects_non_float_annotation_for_symbol_to_float
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast.py
+def test_ast_rejects_non_float_annotation_for_symbol_to_float() -> None:
+    def cast_dim(n: int) -> float:
+        return n
+
+    with pytest.raises(AstParseError) as exc_info:
+        parse_function(cast_dim)
+    diagnostics = exc_info.value.diagnostics
+    if not diagnostics:
+        raise AssertionError("expected diagnostics for unsupported return annotation")
+    if diagnostics[0].message != "Unsupported return annotation":
+        raise AssertionError("expected Unsupported return annotation diagnostic")
 
 
 # AST-013A
