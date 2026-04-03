@@ -1,7 +1,7 @@
 """symbol_shape tests.
 
 创建者: 小李飞刀
-最后一次更改: 我不是牛马
+最后一次更改: 大闸蟹
 
 功能说明:
 - 覆盖 SymbolShape 构造、访问、序列化与异常分支。
@@ -175,7 +175,7 @@ def test_slice_assign_non_iterable() -> None:
 
 # SS-009
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 大闸蟹
 # 最近一次运行测试时间: 2026-03-22 13:41:04 +0800
 # 最近一次运行成功时间: 2026-03-22 13:41:04 +0800
 # 功能说明: 验证 slice 赋值元素不可转换触发明确异常。
@@ -186,7 +186,21 @@ def test_slice_assign_non_iterable() -> None:
 def test_slice_assign_invalid_item() -> None:
     shape = SymbolShape([1, 2, 3])
     with pytest.raises(TypeError, match="切片赋值元素无法转换为 SymbolDim"):
-        shape[0:2] = [1, 1.0]
+        shape[0:2] = [1, object()]
+
+
+# SS-018
+# 创建者: 大闸蟹
+# 最后一次更改: 大闸蟹
+# 功能说明: 验证 slice 赋值中的浮点元素沿用 SymbolDim 的浮点输入失败边界。
+# 使用示例: pytest -q test/symbol_variable/test_symbol_shape.py -k test_slice_assign_float_item_reuses_symbol_dim_error
+# 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_shape.py
+# 对应 spec 文件路径: spec/symbol_variable/symbol_shape.md
+# 对应测试文件路径: test/symbol_variable/test_symbol_shape.py
+def test_slice_assign_float_item_reuses_symbol_dim_error() -> None:
+    shape = SymbolShape([1, 2, 3])
+    with pytest.raises(NotImplementedError, match="Float input is not supported"):
+        shape[0:1] = [1.0]
 
 
 # SS-010

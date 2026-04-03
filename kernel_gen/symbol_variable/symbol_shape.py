@@ -73,6 +73,45 @@ class _SymbolList:
                 return SymbolDim(int(normalized))
         return SymbolDim(value)
 
+    @staticmethod
+    def _render_items(items: Iterable[SymbolDim]) -> str:
+        """统一渲染 SymbolDim 序列。"""
+        return ", ".join(str(item.get_symbol()) for item in items)
+
+    def _normalize_slice_values(self, value: object) -> List[SymbolDim]:
+        """规范化切片赋值输入。
+
+        创建者: 大闸蟹
+        最后一次更改: 大闸蟹
+
+        功能说明:
+        - 校验切片赋值必须为可迭代对象。
+        - 逐项规整为 SymbolDim。
+        - `TypeError/ValueError` 统一收敛为切片赋值错误；`NotImplementedError` 继续透传。
+
+        使用示例:
+        - shape._normalize_slice_values([1, "N"])
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_shape.md
+        - test: test/symbol_variable/test_symbol_shape.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
+        """
+        if isinstance(value, (str, bytes)) or not isinstance(value, Iterable):
+            raise TypeError("切片赋值必须为可迭代对象")
+        normalized: List[SymbolDim] = []
+        for item in value:
+            try:
+                normalized.append(self._normalize_value(item))
+            except (TypeError, ValueError) as exc:
+                raise TypeError("切片赋值元素无法转换为 SymbolDim") from exc
+        return normalized
+
+    def _validate_int_index(self, key: int) -> None:
+        """统一校验 int 索引范围。"""
+        if key < -len(self.shape) or key >= len(self.shape):
+            raise IndexError("下标超出范围")
+
     def __repr__(self) -> str:
         """返回列表字符串表示。
 
@@ -90,7 +129,7 @@ class _SymbolList:
         - test: test/symbol_variable/test_symbol_shape.py
         - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
         """
-        return f"List({', '.join(str(item.get_symbol()) for item in self.shape)})"
+        return f"List({self._render_items(self.shape)})"
 
     def __len__(self) -> int:
         """返回维度数量。
@@ -169,8 +208,7 @@ class _SymbolList:
         - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
         """
         if isinstance(key, int):
-            if key < -len(self.shape) or key >= len(self.shape):
-                raise IndexError("下标超出范围")
+            self._validate_int_index(key)
             return self.shape[key]
         if isinstance(key, slice):
             return self.shape[key]
@@ -197,20 +235,11 @@ class _SymbolList:
         - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
         """
         if isinstance(key, int):
-            if key < -len(self.shape) or key >= len(self.shape):
-                raise IndexError("下标超出范围")
+            self._validate_int_index(key)
             self.shape[key] = self._normalize_value(value)
             return
         if isinstance(key, slice):
-            if isinstance(value, (str, bytes)) or not isinstance(value, Iterable):
-                raise TypeError("切片赋值必须为可迭代对象")
-            normalized: List[SymbolDim] = []
-            for item in value:
-                try:
-                    normalized.append(self._normalize_value(item))
-                except (TypeError, ValueError) as exc:
-                    raise TypeError("切片赋值元素无法转换为 SymbolDim") from exc
-            self.shape[key] = normalized
+            self.shape[key] = self._normalize_slice_values(value)
             return
         raise TypeError("索引类型错误")
 
@@ -332,4 +361,4 @@ class SymbolShape(SymbolList):
         - test: test/symbol_variable/test_symbol_shape.py
         - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
         """
-        return f"Shape({', '.join(str(item.get_symbol()) for item in self.shape)})"
+        return f"Shape({self._render_items(self.shape)})"

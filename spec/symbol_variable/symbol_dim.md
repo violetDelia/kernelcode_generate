@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`我不是牛马`
+- 最后一次更改：`大闸蟹`
 - `spec`：[`spec/symbol_variable/symbol_dim.md`](../../spec/symbol_variable/symbol_dim.md)
 - `功能实现`：[`kernel_gen/symbol_variable/symbol_dim.py`](../../kernel_gen/symbol_variable/symbol_dim.py)
 - `test`：[`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py)
@@ -17,6 +17,7 @@
 - `sympy`：负责整数符号、静态整数与混合表达式的底层表示。
 - [`expectation/symbol_variable/symbol_dim.py`](../../expectation/symbol_variable/symbol_dim.py)：本链路的只读 acceptance 定义来源。
 - [`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py)：当前单元测试承载文件；后续实现阶段需按本 spec 补齐 expectation 闭环。
+- [`spec/symbol_variable/package_api.md`](../../spec/symbol_variable/package_api.md)：包级导入/导出与 legacy 路径边界来源。
 
 ## 目标
 
@@ -24,6 +25,13 @@
 - 明确 `+`、`-`、`*`、`/`、`//` 的公开语义、动态性传播与错误路径。
 - 明确 `get_symbol()`、`get_value()`、`is_dynamic()` 的公开行为，支撑 [`expectation/symbol_variable/symbol_dim.py`](../../expectation/symbol_variable/symbol_dim.py) 最终运行成功。
 - 以 [`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py) 承载单元测试，以 `python expectation/symbol_variable/symbol_dim.py` 作为只读 acceptance gate。
+
+## 相邻边界
+
+- `package_api.md` 负责包级导入边界；本文件只负责 `SymbolDim` 对象本身的构造、算术、比较与动态性语义。
+- `symbol_shape.md` 负责多个 `SymbolDim` 的容器行为；本文件不定义切片、索引赋值或列表序列化。
+- `memory.md` 负责 `Memory` 如何消费 `SymbolDim` 组成的 `shape/stride`；本文件不定义 `Memory` 的 dtype、space、format 或默认 stride 生成。
+- `dialect/symbol.md` 负责 IR 层的整数 symbol type/attr 与查询接口；本文件不定义 IR 文本与 lowering。
 
 ## 限制与边界
 
@@ -365,7 +373,8 @@ assert (SymbolDim(8) + SymbolDim("N")).is_dynamic() is True
 
 ## 测试
 
-- 测试文件：[`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py)
+- 主测试文件：[`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py)
+- acceptance：[`expectation/symbol_variable/symbol_dim.py`](../../expectation/symbol_variable/symbol_dim.py)
 - 执行命令：
   - `pytest -q test/symbol_variable/test_symbol_dim.py`
   - `python expectation/symbol_variable/symbol_dim.py`

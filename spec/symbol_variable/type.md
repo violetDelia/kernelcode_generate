@@ -7,7 +7,7 @@
 ## [immutable]文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`榕`
+- 最后一次更改：`大闸蟹`
 - `spec`：[`spec/symbol_variable/type.md`](../../spec/symbol_variable/type.md)
 - `test`：[`test/symbol_variable/test_type.py`](../../test/symbol_variable/test_type.py)
 - `功能实现`：[`kernel_gen/symbol_variable/type.py`](../../kernel_gen/symbol_variable/type.py)
@@ -15,7 +15,7 @@
 ## 依赖
 
 - `enum.Enum`：用于定义枚举。
-- `kernel_gen.symbol_variable.type`：作为 `NumericType` 与 `Farmat` 的唯一有效导入入口。
+- [`spec/symbol_variable/package_api.md`](../../spec/symbol_variable/package_api.md)：包级重导出与 legacy 路径边界来源。
 
 ## 目标
 
@@ -30,8 +30,15 @@
 - [immutable]不负责内存对象、张量对象或其他模块的运行时语义。
 - [immutable]不提供工厂函数、转换函数或其他辅助 API。
 - 不定义 dtype 推导、类型提升、布局转换或字符串解析逻辑。
-- 不提供旧路径 `symbol_variable.type` 的兼容入口。
+- 当前支持从 `kernel_gen.symbol_variable.type` 直接导入，也支持通过 `kernel_gen.symbol_variable` 包入口重导出导入；包级入口边界由 [`spec/symbol_variable/package_api.md`](../../spec/symbol_variable/package_api.md) 负责。
+- 不提供旧路径 `symbol_variable.type` 的兼容入口；该规则与包级 legacy 路径禁用保持一致。
 - 不扩展到量化类型、复数类型、稀疏布局或其他未公开的枚举成员。
+
+## 相邻边界
+
+- `package_api.md` 负责包级导出集合、`kernel_gen.symbol_variable` 的 `__all__` 与 `import *`；本文件只定义 `type.py` 模块本身的枚举语义与模块级导出边界。
+- `memory.md` 负责 `NumericType` / `Farmat` 在 `Memory` 中如何被消费，本文件不定义内存对象行为。
+- `operation/nn` 相关测试只把 `NumericType.Bool` 当作公开成员消费，不在本文件重复定义比较算子语义。
 
 ## 公开接口
 
@@ -120,6 +127,11 @@ assert Farmat.CLast.name == "CLast"
 
 - 测试文件：[`test/symbol_variable/test_type.py`](../../test/symbol_variable/test_type.py)
 - 执行命令：`pytest -q test/symbol_variable/test_type.py`；`pytest -q test/operation/test_operation_nn.py -k 'test_nn_compare_predicate or test_nn_compare_alias or test_nn_compare_implicit_broadcast'`
+
+### 测试分层
+
+- 主测试：[`test/symbol_variable/test_type.py`](../../test/symbol_variable/test_type.py) 负责枚举成员、模块级 `__all__`、模块级 `import *` 与 legacy 子模块路径。
+- 交叉验证：[`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py) 只验证 `NumericType.Bool` 被上游比较接口稳定消费。
 
 ### 测试目标
 

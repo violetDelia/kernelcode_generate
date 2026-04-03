@@ -541,6 +541,8 @@ void add(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out) {
 
 使用示例:
 - cpu::add(lhs, 3.0f, out);
+- long long bias = 7;
+- cpu::add(lhs, bias, out);
 
 创建者: 金铲铲大作战
 最后修改人: 金铲铲大作战
@@ -550,9 +552,9 @@ void add(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out) {
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T>
-void add(const Memory<T>& lhs, T rhs_scalar, Memory<T>& out) {
-    detail::apply_binary_scalar_rhs(lhs, rhs_scalar, out, [](T a, T b) { return a + b; });
+template <typename T, typename ScalarT>
+void add(const Memory<T>& lhs, ScalarT rhs_scalar, Memory<T>& out) {
+    detail::apply_binary_scalar_rhs(lhs, static_cast<T>(rhs_scalar), out, [](T a, T b) { return a + b; });
 }
 
 /*

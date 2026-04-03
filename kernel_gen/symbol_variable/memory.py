@@ -198,6 +198,31 @@ class Memory:
         return normalized
 
     @staticmethod
+    def _promote_ranked_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
+        """按固定优先级选择顺序更靠后的 dtype。"""
+        if lhs not in _ARITHMETIC_DTYPE_RANK or rhs not in _ARITHMETIC_DTYPE_RANK:
+            raise TypeError("Memory dtype mismatch")
+        return lhs if _ARITHMETIC_DTYPE_RANK[lhs] >= _ARITHMETIC_DTYPE_RANK[rhs] else rhs
+
+    @staticmethod
+    def _clone_shape_like(value: SymbolShape | None) -> SymbolShape | None:
+        """克隆 SymbolShape，避免元数据别名共享。"""
+        if value is None:
+            return None
+        return SymbolShape(value.get_values())
+
+    def _tensor_repr(self: "Memory") -> str:
+        """统一生成 Tensor(...) 文本片段。"""
+        return (
+            "Tensor("
+            f"shape={self.shape}, "
+            f"dtype={self.dtype}, "
+            f"stride={self.stride}, "
+            f"format={self.format}"
+            ")"
+        )
+
+    @staticmethod
     def _default_stride(shape: SymbolShape) -> SymbolShape:
         """按连续行主序生成默认 stride。
 
@@ -341,15 +366,7 @@ class Memory:
         - test: test/symbol_variable/test_memory.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
-        tensor_repr = (
-            "Tensor("
-            f"shape={self.shape}, "
-            f"dtype={self.dtype}, "
-            f"stride={self.stride}, "
-            f"format={self.format}"
-            ")"
-        )
-        return f"Memory({self.space.name},{tensor_repr})"
+        return f"Memory({self.space.name},{self._tensor_repr()})"
 
     def __str__(self: "Memory") -> str:
         """返回 Memory 的字符串表示。
@@ -458,71 +475,6 @@ class Memory:
             return NumericType.Int32
         raise TypeError("Unsupported scalar type for Memory operation")
 
-    @staticmethod
-    def _promote_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
-        """根据固定优先级选择顺序更靠后的 dtype。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 依据 `_ARITHMETIC_DTYPE_ORDER` 返回参与运算中顺序更靠后的类型。
-
-        使用示例:
-        - Memory._promote_dtype(NumericType.Int32, NumericType.Float32)
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        if lhs not in _ARITHMETIC_DTYPE_RANK or rhs not in _ARITHMETIC_DTYPE_RANK:
-            raise TypeError("Memory dtype mismatch")
-        return lhs if _ARITHMETIC_DTYPE_RANK[lhs] >= _ARITHMETIC_DTYPE_RANK[rhs] else rhs
-
-    @staticmethod
-    def _promote_scalar_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
-        """根据固定优先级选择顺序更靠后的 dtype。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 小李飞刀
-
-        功能说明:
-        - 标量参与运算时，按 `_ARITHMETIC_DTYPE_ORDER` 选择顺序更靠后类型。
-
-        使用示例:
-        - Memory._promote_scalar_dtype(NumericType.Int8, NumericType.Int32)
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        if lhs not in _ARITHMETIC_DTYPE_RANK or rhs not in _ARITHMETIC_DTYPE_RANK:
-            raise TypeError("Memory dtype mismatch")
-        return lhs if _ARITHMETIC_DTYPE_RANK[lhs] >= _ARITHMETIC_DTYPE_RANK[rhs] else rhs
-
-    def _clone_symbol_list(self: "Memory", value: SymbolShape | None) -> "SymbolShape | None":
-        """克隆符号列表对象。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 复制 SymbolShape 容器，避免别名共享。
-
-        使用示例:
-        - mem._clone_symbol_list(mem.shape)
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        if value is None:
-            return None
-        return SymbolShape(value.get_values())
-
     def _clone_with_dtype(self: "Memory", dtype: NumericType) -> "Memory":
         """按指定 dtype 克隆 Memory。
 
@@ -540,8 +492,8 @@ class Memory:
         - test: test/operation/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
-        shape = self._clone_symbol_list(self.shape)
-        stride = self._clone_symbol_list(self.stride)
+        shape = self._clone_shape_like(self.shape)
+        stride = self._clone_shape_like(self.stride)
         return Memory(shape, dtype, space=self.space, stride=stride, format=self.format)
 
     def _binary_arithmetic(self: "Memory", other: object) -> "Memory":
@@ -563,11 +515,11 @@ class Memory:
         """
         if isinstance(other, Memory):
             self._ensure_same_shape(other)
-            result_dtype = self._promote_dtype(self.dtype, other.dtype)
+            result_dtype = self._promote_ranked_dtype(self.dtype, other.dtype)
             return self._clone_with_dtype(result_dtype)
         self._ensure_scalar_compatible(other)
         scalar_dtype = self._scalar_dtype(other)
-        result_dtype = self._promote_scalar_dtype(self.dtype, scalar_dtype)
+        result_dtype = self._promote_ranked_dtype(self.dtype, scalar_dtype)
         return self._clone_with_dtype(result_dtype)
 
     def _binary_compare(self: "Memory", other: object) -> "Memory":

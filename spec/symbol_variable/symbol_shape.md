@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`大闸蟹`
 - `spec`：[`spec/symbol_variable/symbol_shape.md`](../../spec/symbol_variable/symbol_shape.md)
 - `test`：[`test/symbol_variable/test_symbol_shape.py`](../../test/symbol_variable/test_symbol_shape.py)
 - `功能实现`：[`kernel_gen/symbol_variable/symbol_shape.py`](../../kernel_gen/symbol_variable/symbol_shape.py)
@@ -16,6 +16,7 @@
 
 - `kernel_gen/symbol_variable/symbol_dim.py`：[`SymbolDim`](../../kernel_gen/symbol_variable/symbol_dim.py) 的定义与校验规则来源。
 - `spec/symbol_variable/symbol_dim.md`：[`SymbolDim`](../../spec/symbol_variable/symbol_dim.md) 语义约束。
+- [`spec/symbol_variable/package_api.md`](../../spec/symbol_variable/package_api.md)：包级导入/导出边界来源。
 
 ## 限制与边界
 
@@ -26,8 +27,17 @@
 - `__getitem__` 支持 `int` 与 `slice`；`__setitem__` 对 `slice` 赋值需逐项规范化。
 - `int` 索引越界统一抛 `IndexError("下标超出范围")`。
 - `int` 索引赋值越界统一抛 `IndexError("下标超出范围")`。
-- `slice` 赋值若传入不可迭代对象或包含无法转换的元素，抛 `TypeError`。
+- `slice` 赋值若传入不可迭代对象，抛 `TypeError`。
+- `slice` 赋值元素的异常边界复用 `SymbolDim(...)`：
+  - 不可转换对象收敛为 `TypeError("切片赋值元素无法转换为 SymbolDim")`。
+  - 浮点输入保持 `SymbolDim` 的 `NotImplementedError`，不在本层改写异常类型。
 - 若实现需要复用输入规整逻辑，应使用 `_normalize_*` 私有命名。
+
+## 相邻边界
+
+- `symbol_dim.md` 负责单个分量的构造与合法性；本文件只负责把这些分量组织成容器，并定义访问、赋值与序列化。
+- `memory.md` 负责 `shape/stride` 作为 `Memory` 元信息被消费时的额外约束；本文件不定义 `Memory` 构造或逐元素算术行为。
+- `package_api.md` 负责包级导入边界；本文件不重复定义 `kernel_gen.symbol_variable` 的导出集合。
 
 ## 公开接口
 
@@ -306,7 +316,8 @@ symbols = SymbolList(["N", 32]).to_symbols()
 
 ## 测试
 
-- 测试文件：[`test/symbol_variable/test_symbol_shape.py`](../../test/symbol_variable/test_symbol_shape.py)
+- 主测试文件：[`test/symbol_variable/test_symbol_shape.py`](../../test/symbol_variable/test_symbol_shape.py)
+- 交叉验证：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py) 负责验证 `Memory` 对 `SymbolShape` 的消费不回退。
 - 执行命令：`pytest -q test/symbol_variable/test_symbol_shape.py`
 
 ### 测试目标
@@ -317,7 +328,8 @@ symbols = SymbolList(["N", 32]).to_symbols()
 - 索引访问：`int` 索引越界错误信息一致。
 - 赋值：`int` 索引赋值会转换为 `SymbolDim`，越界时错误信息一致；`slice` 赋值会逐项转换为 `SymbolDim`。
 - `slice` 赋值不可迭代对象触发 `TypeError`。
-- `slice` 赋值存在元素无法转换触发 `TypeError`。
+- `slice` 赋值存在不可转换对象触发 `TypeError`。
+- `slice` 赋值出现浮点元素时，继续透传 `SymbolDim` 的 `NotImplementedError`。
 - `get_shape()` 返回拷贝，外部修改不影响内部。
 - 序列化：动态维度输出 `str`，静态维度输出 `int`。
 - `SymbolList.to_symbols()` 复用 `get_values()` 的序列化规则。
@@ -335,7 +347,7 @@ symbols = SymbolList(["N", 32]).to_symbols()
 | SS-006 | 访问 | get_shape 拷贝 | N/A | `get_shape()` | 修改返回值不影响内部 | `test_get_shape_copy` |
 | SS-007 | 异常 | 非法索引类型 | N/A | `shape["x"]` | 抛 `TypeError` | `test_invalid_index_type` |
 | SS-008 | 异常 | slice 不可迭代 | N/A | `shape[0:1] = 1` | 抛 `TypeError`（不可迭代对象） | `test_slice_assign_non_iterable` |
-| SS-009 | 异常 | slice 元素非法 | N/A | `shape[0:1] = [object()]` | 抛 `TypeError`（元素类型不合法） | `test_slice_assign_invalid_item` |
+| SS-009 | 异常 | slice 元素非法对象 | N/A | `shape[0:1] = [object()]` | 抛 `TypeError`（元素类型不合法） | `test_slice_assign_invalid_item` |
 | SS-010 | 赋值 | slice 元素为数字字符串 | N/A | `shape[0:1] = ["1"]` | 维度解析为静态数字 | `test_slice_assign_digit_string` |
 | SS-011 | 序列化 | SymbolList.to_symbols | N/A | `SymbolList(["N", 32]).to_symbols()` | 返回 `["N", 32]` | `test_to_symbols` |
 | SS-012 | 赋值 | int 索引 | N/A | `shape[0] = 64` | 转为 `SymbolDim` | `test_setitem_converts` |
@@ -344,3 +356,4 @@ symbols = SymbolList(["N", 32]).to_symbols()
 | SS-015 | 构造 | 由已有 SymbolShape 创建 | N/A | `SymbolShape(SymbolShape([1, 2]))` | 构造等价的新对象 | `test_construct_from_existing_shape` |
 | SS-016 | 迭代 | for-in 迭代 | N/A | `for dim in shape:` | 可遍历 `SymbolDim` | `test_iteration` |
 | SS-017 | 异常 | int 索引赋值越界 | N/A | `shape[99] = 1` | 抛 `IndexError("下标超出范围")` | `test_setitem_out_of_range` |
+| SS-018 | 异常 | slice 元素为浮点 | N/A | `shape[0:1] = [1.0]` | 抛 `NotImplementedError`（沿用 `SymbolDim` 浮点输入边界） | `test_slice_assign_float_item_reuses_symbol_dim_error` |

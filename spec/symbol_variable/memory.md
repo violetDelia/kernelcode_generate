@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`大闸蟹`
 - `spec`：[`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)
 - `test`：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)、[`test/operation/test_memory_operation.py`](../../test/operation/test_memory_operation.py)、[`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)
 - `功能实现`：[`kernel_gen/symbol_variable/memory.py`](../../kernel_gen/symbol_variable/memory.py)
@@ -17,10 +17,19 @@
 - [`kernel_gen/symbol_variable/symbol_shape.py`](../../kernel_gen/symbol_variable/symbol_shape.py)：`SymbolShape` 定义与构造。
 - [`kernel_gen/symbol_variable/symbol_dim.py`](../../kernel_gen/symbol_variable/symbol_dim.py)：`SymbolDim` 维度元素类型。
 - [`kernel_gen/symbol_variable/type.py`](../../kernel_gen/symbol_variable/type.py)：`NumericType`/`Farmat` 类型与格式枚举。
+- [`spec/symbol_variable/package_api.md`](../../spec/symbol_variable/package_api.md)：包级导入/导出与 legacy 路径边界来源。
 - [`spec/dialect/symbol.md`](../../spec/dialect/symbol.md)：memory 相关单值整数 symbol 语义归属。
 - [`spec/symbol_variable/symbol_shape.md`](../../spec/symbol_variable/symbol_shape.md)：`SymbolShape` 语义。
 - [`spec/symbol_variable/type.md`](../../spec/symbol_variable/type.md)：`NumericType`/`Farmat` 语义。
 - [`spec/operation/nn.md`](../../spec/operation/nn.md)：逐元素算术与比较规则来源（`Memory` 仅复用语义）。
+
+## 相邻边界
+
+- `symbol_shape.md` 负责 `shape/stride` 容器的归一化与访问；本文件只负责这些容器在 `Memory` 中如何组合成统一元信息。
+- `symbol_dim.md` 负责单个整数分量与表达式语义；本文件不重复定义 `SymbolDim` 的算术规则。
+- `type.md` 负责 `NumericType` / `Farmat` 的枚举稳定性；本文件只定义这些枚举在 `Memory` 中如何被记录和消费。
+- `package_api.md` 负责包级导入边界；本文件不重复定义 `kernel_gen.symbol_variable` 的导出集合。
+- `operation/nn.md` 负责逐元素算子语义来源；本文件仅定义 Python 侧 `Memory` 元信息的继承与合成规则。
 
 ## 限制与边界
 
@@ -516,14 +525,20 @@ cmp_mem = lhs < 0
 
 ## 测试
 
-- 测试文件：
-  - [`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)
-  - [`test/operation/test_memory_operation.py`](../../test/operation/test_memory_operation.py)
-  - [`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)
+- 主测试文件：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)
+- 交叉验证：
+  - [`test/operation/test_memory_operation.py`](../../test/operation/test_memory_operation.py)：验证 `Memory` 元信息被 operation 层稳定消费。
+  - [`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)：验证 memory 相关整数 symbol 分量进入 dialect 后仍符合边界约定。
 - 执行命令：
   - `pytest -q test/symbol_variable/test_memory.py`
   - `pytest -q test/operation/test_memory_operation.py`
   - `pytest -q test/dialect/test_symbol_dialect.py`
+
+### 测试分层
+
+- `test/symbol_variable/test_memory.py` 负责 `Memory` / `MemorySpace` / `LocalSpaceMeta` 的主语义。
+- `test/operation/test_memory_operation.py` 只验证上游 operation 复用 `Memory` 元信息时不回退，不重复定义 `Memory` 主语义。
+- `test/dialect/test_symbol_dialect.py` 只验证单个整数分量进入 dialect 后的兼容性，不替代 `Memory` 主测试。
 
 ### 测试目标
 

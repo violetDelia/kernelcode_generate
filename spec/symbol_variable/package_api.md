@@ -2,12 +2,12 @@
 
 ## 功能简介
 
-用于描述 `kernel_gen.symbol_variable.__init__.py` 的包入口导出策略，以单文件 spec 方式约束公开导入 API、`__all__` 与 `import *` 语义。
+用于描述 `kernel_gen.symbol_variable.__init__.py` 的包入口导出策略，并给出 `spec/symbol_variable` 的模块职责与测试分层总览。本文档只收口“从哪里导入、包入口暴露什么、哪些边界归包层负责”，不重复定义各对象内部语义。
 
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`大闸蟹`
 - `spec`：[`spec/symbol_variable/package_api.md`](../../spec/symbol_variable/package_api.md)
 - `test`：[`test/symbol_variable/test_package_api.py`](../../test/symbol_variable/test_package_api.py)
 - `功能实现`：[`kernel_gen/symbol_variable/__init__.py`](../../kernel_gen/symbol_variable/__init__.py)
@@ -25,12 +25,23 @@
 - [`spec/symbol_variable/ptr.md`](../../spec/symbol_variable/ptr.md)：`Ptr` 语义。
 - [`spec/symbol_variable/type.md`](../../spec/symbol_variable/type.md)：`NumericType`/`Farmat` 语义。
 
+## 模块职责总览
+
+| 模块 | 当前稳定入口 | 本层负责内容 | 主测试 | 交叉验证 |
+|---|---|---|---|---|
+| `package_api.md` | `kernel_gen.symbol_variable` | 包入口导入/导出、`__all__`、`import *`、legacy 路径禁用 | [`test/symbol_variable/test_package_api.py`](../../test/symbol_variable/test_package_api.py) | N/A |
+| `type.md` | `kernel_gen.symbol_variable.type` 与 `kernel_gen.symbol_variable` 重导出 | `NumericType` / `Farmat` 枚举语义与模块级导出边界 | [`test/symbol_variable/test_type.py`](../../test/symbol_variable/test_type.py) | [`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py) |
+| `symbol_dim.md` | `kernel_gen.symbol_variable.symbol_dim` | 单个整数维度/符号表达与基础算术语义 | [`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py) | [`expectation/symbol_variable/symbol_dim`](../../expectation/symbol_variable/symbol_dim) |
+| `symbol_shape.md` | `kernel_gen.symbol_variable.symbol_shape` | 形状容器规整、访问、切片赋值与序列化 | [`test/symbol_variable/test_symbol_shape.py`](../../test/symbol_variable/test_symbol_shape.py) | [`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py) |
+| `memory.md` | `kernel_gen.symbol_variable.memory` 与 `kernel_gen.symbol_variable` 重导出 | `Memory` / `MemorySpace` / `LocalSpaceMeta` 元信息容器与逐元素元信息规则 | [`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py) | [`test/operation/test_memory_operation.py`](../../test/operation/test_memory_operation.py)、[`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py) |
+| `ptr.md` | `kernel_gen.symbol_variable.ptr` | `Ptr(dtype)` 的 submodule 公开语义 | [`test/symbol_variable/test_ptr.py`](../../test/symbol_variable/test_ptr.py) | N/A |
+
 ## 限制与边界
 
 - 仅定义 `kernel_gen.symbol_variable` 包入口的公开导入与导出边界。
 - 仅约束包入口直接暴露哪些对象、`__all__` 包含哪些符号，以及 `import *` 应暴露什么。
 - 不定义 `Ptr`、`SymbolDim`、`SymbolShape`、`Memory`、`NumericType`、`Farmat` 的内部行为；这些语义由各自模块 spec 描述。
-- 仅在包入口层冻结 `Ptr` 导出与职责边界，不在本文件中定义 IR 类型、DSL lowering 或运行时行为。
+- 当前包入口不导出 `Ptr`；`Ptr` 的公开语义与导入路径由 [`spec/symbol_variable/ptr.md`](../../spec/symbol_variable/ptr.md) 独立负责。
 - 不为旧路径 `symbol_variable` 或其旧子模块提供兼容入口。
 
 ## 公开接口
@@ -43,7 +54,6 @@
   - `LocalSpaceMeta`
   - `Memory`
   - `MemorySpace`
-  - `Ptr`
   - `NumericType`
   - `Farmat`
   - `SymbolDim`
@@ -57,11 +67,10 @@
 使用示例：
 
 ```python
-from kernel_gen.symbol_variable import Memory, NumericType, Ptr, SymbolDim
+from kernel_gen.symbol_variable import Memory, NumericType, SymbolDim
 
 dim = SymbolDim("N")
 mem = Memory([dim, 32], NumericType.Float32)
-ptr = Ptr(NumericType.Float32)
 ```
 
 注意事项：
@@ -69,7 +78,7 @@ ptr = Ptr(NumericType.Float32)
 - `__all__` 必须严格等于上述集合。
 - `from kernel_gen.symbol_variable import *` 的暴露结果必须严格等于 `__all__`。
 - 包入口不得额外暴露实现细节或未约定名称。
-- `Ptr` 与 `Memory`、`SymbolDim` 必须保持不同公开语义，不得混写成同一对象或别名。
+- `Ptr` 当前不是包入口导出成员；若调用方需要 `Ptr`，应走 [`kernel_gen.symbol_variable.ptr`](../../kernel_gen/symbol_variable/ptr.py)。
 
 返回与限制：
 
@@ -94,7 +103,6 @@ from kernel_gen.symbol_variable import (
     Memory,
     MemorySpace,
     NumericType,
-    Ptr,
     SymbolDim,
     SymbolList,
     SymbolShape,
@@ -123,12 +131,9 @@ from kernel_gen.symbol_variable import (
 
 ```python
 from kernel_gen.symbol_variable import Memory as PackageMemory
-from kernel_gen.symbol_variable import Ptr as PackagePtr
 from kernel_gen.symbol_variable.memory import Memory as ModuleMemory
-from kernel_gen.symbol_variable.ptr import Ptr as ModulePtr
 
 assert PackageMemory is ModuleMemory
-assert PackagePtr is ModulePtr
 ```
 
 注意事项：
@@ -140,11 +145,12 @@ assert PackagePtr is ModulePtr
 
 - `is` 比较结果为 `True`。
 
-### `Ptr` 与 `Memory` / `SymbolDim` 职责边界
+### 子模块保留接口
 
 功能说明：
 
-- 包入口公开 `Ptr`，并与 `Memory`、`SymbolDim` 保持明确职责分离。
+- 某些对象当前只保留 submodule 入口，不属于包入口导出集合。
+- 当前最明确的例子是 `Ptr`：语义由 [`spec/symbol_variable/ptr.md`](../../spec/symbol_variable/ptr.md) 定义，但不经 `kernel_gen.symbol_variable` 重导出。
 
 参数说明：
 
@@ -153,23 +159,21 @@ assert PackagePtr is ModulePtr
 使用示例：
 
 ```python
-from kernel_gen.symbol_variable import Memory, NumericType, Ptr, SymbolDim
+from kernel_gen.symbol_variable.ptr import Ptr
+from xdsl.dialects.builtin import f32
 
-ptr = Ptr(NumericType.Float32)
-mem = Memory([SymbolDim("N"), 32], NumericType.Float32)
-dim = SymbolDim("N")
+ptr = Ptr(f32)
 ```
 
 注意事项：
 
-- `Ptr` 仅表示“指向某个 dtype 的指针类型对象”。
-- `Memory` 负责 shape/stride/dtype/space/format 的内存元信息表达。
-- `SymbolDim` 负责整数符号维度表达。
-- `Ptr` 不是 `Memory`，也不是 `SymbolDim`；三者不得互作别名或同类对象。
+- 包入口公开集合以 `__all__` 为准，不因为子模块存在就自动导出。
+- `Ptr` 的对象职责边界在 [`spec/symbol_variable/ptr.md`](../../spec/symbol_variable/ptr.md) 中定义。
+- 包级 spec 不重复承诺 `Ptr` 与 `Memory` / `SymbolDim` 的对象行为。
 
 返回与限制：
 
-- 包入口必须保持三类对象的公开语义不同，不得混写。
+- 包入口必须明确区分“已重导出对象”和“仅子模块可用对象”。
 
 ### __all__
 
@@ -192,7 +196,6 @@ assert package_module.__all__ == [
     "Memory",
     "MemorySpace",
     "NumericType",
-    "Ptr",
     "SymbolDim",
     "SymbolList",
     "SymbolShape",
@@ -270,8 +273,6 @@ importlib.import_module("kernel_gen.symbol_variable")
 - 验证顶层导出的类型可直接参与 `Memory` 构造。
 - 验证 `kernel_gen.symbol_variable.__all__` 与公开导出集合一致。
 - 验证 `from kernel_gen.symbol_variable import *` 仅暴露约定公开符号。
-- 验证包入口导出 `Ptr` 且可直接导入。
-- 验证 `Ptr` 与 `Memory`、`SymbolDim` 的公开职责边界保持分离。
 - 验证旧路径 `symbol_variable` 不可导入。
 - 验证旧子模块路径 `symbol_variable.symbol_dim`、`symbol_variable.symbol_shape`、`symbol_variable.memory`、`symbol_variable.type` 不可导入。
 
@@ -286,5 +287,3 @@ importlib.import_module("kernel_gen.symbol_variable")
 | PM-005 | 构造 | 顶层导出参与构造 | N/A | `Memory([1, 2], NumericType.Float32, format=Farmat.Norm)` | 构造成功 | `test_package_type_construct_memory` |
 | PM-006 | 导出 | `__all__` 边界 | N/A | 读取 `kernel_gen.symbol_variable.__all__` | 严格等于公开导出集合 | `test_python_package_all_boundary` |
 | PM-007 | 导出 | `import *` 边界 | N/A | 执行 `from kernel_gen.symbol_variable import *` | 仅暴露公开导出集合 | `test_python_package_import_star_exports_only_public_names` |
-| PM-008 | 导出 | 包入口导出 Ptr | N/A | `from kernel_gen.symbol_variable import Ptr` | 导入成功，`Ptr(f32)` 可构造 | `test_symbol_variable_package_exports_ptr` |
-| PM-009 | 边界 | Ptr/Memory/SymbolDim 职责分离 | N/A | 同时检查 `Ptr(f32)`、`Memory(...)`、`SymbolDim("N")` | 文档与导出边界明确三者公开语义不同 | `test_symbol_variable_package_keeps_ptr_memory_symbol_dim_distinct` |
