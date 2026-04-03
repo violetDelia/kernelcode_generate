@@ -1,7 +1,7 @@
 """Function-level C-like kernel generation helpers.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 按 `emit_c` 的节点级规则，组装 `func.func` 的完整函数源码。
@@ -61,7 +61,7 @@ def _type_to_c(attr: Any) -> str:
     最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 用于 `gen_signature` 生成函数签名时，将 IR 类型属性转换为 C/C++ 侧可用类型名。
+    - 用于 `gen_kernel(...)` 的函数级签名拼装，将 IR 类型属性转换为 C/C++ 侧可用类型名。
     - 支持的类型映射清单：
       - `IntegerType(1)` -> `bool`
       - `IntegerType(N)` -> `int{N}_t`
@@ -408,21 +408,23 @@ def _validate_npu_demo_body_level_kernel_body(func_op: func.FuncOp, ctx: EmitCCo
     raise _error(ctx, func_op.sym_name.data, f"unsupported npu_demo body-level kernel body op {first_op.name}")
 
 
-def gen_signature(func_op: func.FuncOp, ctx: EmitCContext) -> str:
-    """Generate a target signature for a single lowered `func.func`.
+def _gen_signature(func_op: func.FuncOp, ctx: EmitCContext) -> str:
+    """生成单个 `func.func` 的函数级签名文本。
 
-    Internal helper only. The stable public entry remains `gen_kernel(...)`.
+    创建者: 朽木露琪亚
+    最后一次更改: jcc你莫辜负
 
-    Parameters:
-        func_op: MLIR `func.func` operation to analyze.
-        ctx: Shared emit context used to bind stable argument names.
+    功能说明:
+    - 仅服务于 `gen_kernel(...)` 的函数级主流程，不构成公开稳定接口。
+    - 负责绑定参数名、把 `Memory` 结果降为显式 `out` 参数，并处理 cpu-only 的 `!symbol.int` 返回。
 
-    Returns:
-        A function signature string without the function body.
+    使用示例:
+    - source = gen_kernel(func_op, EmitCContext(target="cpu"))
 
-    Raises:
-        GenKernelError: If the function return form is unsupported.
-        TypeError: If an input or output type cannot be mapped to the target.
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: kernel_gen/dsl/gen_kernel.py
     """
 
     func_name = func_op.sym_name.data
@@ -464,21 +466,24 @@ def gen_signature(func_op: func.FuncOp, ctx: EmitCContext) -> str:
     return f"{return_type} {func_name}({', '.join(params)})"
 
 
-def gen_body(func_op: func.FuncOp, ctx: EmitCContext) -> str:
-    """Generate the function body in IR order.
+def _emit_function_body(func_op: func.FuncOp, ctx: EmitCContext) -> str:
+    """按 IR 顺序生成 `func.func` 的函数体文本。
 
-    Internal helper only. The stable public entry remains `gen_kernel(...)`.
+    创建者: 朽木露琪亚
+    最后一次更改: jcc你莫辜负
 
-    Parameters:
-        func_op: MLIR `func.func` operation whose entry block will be emitted.
-        ctx: Shared emit context reused by `gen_signature` and `emit_c`.
+    功能说明:
+    - 仅服务于 `gen_kernel(...)` 的函数级主流程，不构成公开稳定接口。
+    - 非 `func.return` 的普通 op 逐个委托 `emit_c_op(...)` 发射。
+    - `func.return` / `out` 绑定留在本层收尾处理，不透传为普通 `emit_c_op` 公开职责。
 
-    Returns:
-        The emitted function body text without the signature wrapper.
+    使用示例:
+    - source = gen_kernel(func_op, EmitCContext(target="cpu"))
 
-    Raises:
-        GenKernelError: If the function return form is unsupported.
-        ValueError: Propagated from `emit_c` when an op cannot be emitted.
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: kernel_gen/dsl/gen_kernel.py
     """
 
     if _is_cpu_conv2d_img2col2d_tiled(func_op, ctx):
@@ -561,32 +566,39 @@ def gen_body(func_op: func.FuncOp, ctx: EmitCContext) -> str:
     return "\n".join(lines)
 
 
-def gen_kernel(op_or_func: func.FuncOp, ctx: EmitCContext) -> str:
-    """Generate the full target function source for one lowered `func.func`.
+def gen_kernel(op_or_func: Any, ctx: EmitCContext) -> str:
+    """把单个 MLIR op 或 `func.func` 生成为目标源码文本。
 
-    This is the only stable public entry exported by `kernel_gen.dsl.gen_kernel`.
+    创建者: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
-    Parameters:
-        op_or_func: MLIR `func.func` operation to emit.
-        ctx: Shared emit context carrying target and naming state.
+    功能说明:
+    - 这是 `kernel_gen.dsl.gen_kernel` 唯一稳定公开入口。
+    - 输入为单个普通 op 时，直接委托 `emit_c_op(...)` 的公开节点级接口生成源码片段。
+    - 输入为 `func.func` 时，先生成函数签名，再按 IR 顺序遍历 block.ops；普通 op 逐个委托 `emit_c_op(...)`，
+      `func.return` / `out` 绑定由函数级主遍历流程统一收尾。
 
-    Returns:
-        Complete target function source text including signature and body.
+    使用示例:
+    - source = gen_kernel(func_op, EmitCContext(target="cpu"))
+    - stmt = gen_kernel(single_op, EmitCContext(target="cpu"))
 
-    Raises:
-        GenKernelError: If the function return contract is unsupported.
-        ValueError: Propagated from `emit_c` for unsupported IR constructs.
-        TypeError: If a type cannot be lowered to the target.
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: kernel_gen/dsl/gen_kernel.py
     """
 
-    func_op = op_or_func
-    signature = gen_signature(func_op, ctx)
-    ctx.push_indent()
-    body = gen_body(func_op, ctx)
-    ctx.pop_indent()
-    if body:
-        return f"{signature} {{\n{body}\n}}"
-    return f"{signature} {{\n}}"
+    if isinstance(op_or_func, func.FuncOp):
+        signature = _gen_signature(op_or_func, ctx)
+        ctx.push_indent()
+        body = _emit_function_body(op_or_func, ctx)
+        ctx.pop_indent()
+        if body:
+            return f"{signature} {{\n{body}\n}}"
+        return f"{signature} {{\n}}"
+    if isinstance(op_or_func, func.ReturnOp):
+        raise GenKernelError(f"target={ctx.target}: func.return/out binding must be emitted in function main flow")
+    return emit_c_op(op_or_func, ctx)
 
 
 __all__ = ["GenKernelError", "gen_kernel"]

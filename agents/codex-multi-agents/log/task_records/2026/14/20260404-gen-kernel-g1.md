@@ -66,3 +66,102 @@
 - 结论：
   - `T-20260404-f2974ea2` 已完成并封板。
   - 后续链路已按当前规则衔接到合并阶段，等待管理员核对并分发 `T-20260404-6ca1bd10`。
+
+- 时间：`2026-04-04 03:18:32 +0800`
+- 经办人：`jcc你莫辜负`
+- 任务：`T-20260404-b11dedf4`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/gen_kernel_op_driven_refactor_plan.md` 的 `G2` 收口 `gen_kernel` 的正式规则：输入单个 op / `func.func`，按 IR 顺序遍历，并逐个委托 `emit_c` 对应公开发射接口产出源码；明确 `func.return/out` 绑定属于函数级主遍历流程，不属于普通 `emit_c_op` 公开职责。
+- 改动：
+  - 更新 `spec/dsl/gen_kernel.md`：
+    - 将公开合同收口为“单个 op / `func.func`”入口，写清普通 op 直接复用 `emit_c_op(...)`，`func.func` 走函数级签名 + IR 主遍历。
+    - 删除把 `gen_signature(...)` / `gen_body(...)` 当作文档主结构的写法，改成“函数签名拼装 / IR 顺序遍历与收尾绑定”两段内部规则。
+    - 明确 `func.return` / `out` 绑定只能在函数级主遍历中处理；同步补齐 `single op`、`emit_c` 委托、`func.return/out` 主流程收尾的测试映射。
+  - 更新 `kernel_gen/dsl/gen_kernel.py`：
+    - 将 `gen_signature(...)` / `gen_body(...)` 改为私有 `_gen_signature(...)` / `_emit_function_body(...)`，保持其只服务 `gen_kernel(...)` 主流程。
+    - 扩展 `gen_kernel(op_or_func, ctx)` 的正式实现：`func.func` 继续生成完整源码；普通 op 直接委托 `emit_c_op(...)`；单独输入 `func.return` 时固定报 `func.return/out binding must be emitted in function main flow`。
+    - 在实现说明里写死“普通 op 委托 emit_c，`func.return/out` 留在函数级主遍历收尾”的边界。
+  - 更新 `test/dsl/test_gen_kernel.py`：
+    - 将原来依赖 `_gen_signature/_gen_body` 的主口径测试改为完整 `gen_kernel(...)` 输出断言。
+    - 新增 `test_gen_kernel_delegates_single_op_input_to_emit_c`，锁定单个普通 op 输入直接复用 `emit_c_op(...)`。
+    - 新增 `test_gen_kernel_emits_ops_in_order`、`test_gen_kernel_delegates_to_emit_c_for_non_return_ops`、`test_gen_kernel_handles_func_return_and_out_binding_in_main_flow`，分别锁定 IR 顺序、普通 op 委托和 `func.return/out` 不走节点级公开接口。
+  - 验证：
+    - `pytest -q test/dsl/test_gen_kernel.py -k 'emits_ops_in_order or delegates_to_emit_c or default_arg_names or single_op_input or handles_func_return_and_out_binding_in_main_flow'` -> `5 passed, 24 deselected`
+    - `pytest -q test/dsl/test_gen_kernel.py` -> `29 passed`
+    - `git diff --check -- spec/dsl/gen_kernel.md kernel_gen/dsl/gen_kernel.py test/dsl/test_gen_kernel.py` -> `0`
+  - 自检：
+    - 目标收口：通过。`gen_kernel(...)` 现在明确接受单个 op / `func.func`；普通 op 走 `emit_c_op(...)`，`func.return/out` 绑定留在函数级主遍历。
+    - 边界检查：通过。未改 `emit_c/spec` 之外的目标语义，也未扩新 target / 新 op 语义；只改了任务允许的 `spec/实现/测试/记录` 文件。
+    - 证据覆盖：通过。关键 gate 覆盖 `single op`、IR 顺序、普通 op 委托、默认参数名和 `func.return/out` 主流程收尾；整份 `test_gen_kernel.py` 全量回归通过。
+- 结论：
+  - `G2` 已按边界完成，无阻塞。
+  - 当前 `gen_kernel` 的公开路线已经收口为“单个 op / `func.func` -> 统一源码产出”，且 `func.return/out` 边界不再漂移到普通 `emit_c_op(...)` 公开职责。
+
+- 时间：`2026-04-04 03:21:41 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-bc032aeb`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/gen_kernel_op_driven_refactor_plan.md` 的 `G2` 审查边界，只读复核 `spec/dsl/gen_kernel.md`、`kernel_gen/dsl/gen_kernel.py`、`test/dsl/test_gen_kernel.py` 与同链路记录文件是否和 `G2` 的目标、边界、验证命令、验收标准一致。
+- 审查前自检：
+  - 已核对 `G2` 计划 gate、全量 `test_gen_kernel.py`、以及 `func.return` 单独输入的拒绝路径，证据充分。
+  - 已检查普通 op 委托、函数级主遍历、默认参数名、`func.return/out` 主流程收尾等边界是否由测试直接锁住。
+  - 已核对 `spec / 实现 / 测试 / 记录` 是否存在 helper 回流为公开稳定接口或 `func.return` 落到 `emit_c_op(...)` 的灰区。
+- 审查结论：
+  - `通过`。
+- 审查结果：
+  - [gen_kernel.md](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/spec/dsl/gen_kernel.md#L55) 到 [gen_kernel.md](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/spec/dsl/gen_kernel.md#L57) 已把 `gen_kernel(op_or_func, ctx)` 收口为唯一稳定公开入口，并明确普通 op 直接委托 `emit_c_op(...)`、函数级签名拼装与 `func.return/out` 收尾只属于函数级主遍历。
+  - [gen_kernel.py](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/kernel_gen/dsl/gen_kernel.py#L569) 到 [gen_kernel.py](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/kernel_gen/dsl/gen_kernel.py#L601) 已按 `G2` 收口：`func.func` 走 `_gen_signature(...) + _emit_function_body(...)` 的函数级主流程；普通 op 直接 `return emit_c_op(op_or_func, ctx)`；单独输入 `func.return` 时固定抛 `GenKernelError("func.return/out binding must be emitted in function main flow")`。
+  - [test_gen_kernel.py](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/test/dsl/test_gen_kernel.py#L253) 的 `test_gen_kernel_delegates_single_op_input_to_emit_c`、[test_gen_kernel.py](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/test/dsl/test_gen_kernel.py#L367) 的 `test_gen_kernel_emits_ops_in_order`、[test_gen_kernel.py](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/test/dsl/test_gen_kernel.py#L394) 的 `test_gen_kernel_delegates_to_emit_c_for_non_return_ops`、以及 [test_gen_kernel.py](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/test/dsl/test_gen_kernel.py#L430) 的 `test_gen_kernel_handles_func_return_and_out_binding_in_main_flow` 已把 `G2` 的主合同逐项锁住。
+- 漏洞与边界排查：
+  - 功能正确性：通过，普通 op 和 `func.func` 两条公开路径都符合 `G2` 合同。
+  - 边界条件：通过，`func.return/out` 绑定没有泄露成普通 `emit_c_op(...)` 公开职责；默认参数名回退仍可用。
+  - 异常路径：通过，单独输入 `func.return` 会稳定报 `target=cpu: func.return/out binding must be emitted in function main flow`。
+  - 潜在漏洞/歧义：当前 `G2` 范围内未发现新的双口径或 helper 公开回流问题。
+- 验证：
+  - `python -m pytest -q test/dsl/test_gen_kernel.py -k 'emits_ops_in_order or delegates_to_emit_c or default_arg_names or single_op_input or handles_func_return_and_out_binding_in_main_flow'` -> `5 passed, 24 deselected`
+  - `python -m pytest -q test/dsl/test_gen_kernel.py` -> `29 passed`
+  - 只读复现：`gen_kernel(func.ReturnOp(), EmitCContext(target='cpu'))` -> `GenKernelError: target=cpu: func.return/out binding must be emitted in function main flow`
+- 下一步建议：
+  - 进入同链合并阶段；合并范围必须覆盖当前已完成的 `G1 + G2` 全部 `spec / 实现 / 测试 / 记录文件`，不能只带 `G2` 增量。
+
+- 时间：`2026-04-04 03:21:41 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-bc032aeb`
+- 任务目标：
+  - 完成当前审查任务流转，并按同链路补建唯一后续合并任务。
+- 改动：
+  - 已执行：
+    - `codex-multi-agents-task.sh -done -task_id T-20260404-bc032aeb ...`
+    - 结果：当前审查任务已标记完成，`agents-lists.md` 中 `提莫炖蘑菇` 状态同步成功。
+  - 已新建后续合并任务：
+    - `T-20260404-86c2e58e`
+    - 目标：在同一 `worktree` 中按整条已完成的 `G1 + G2` 链路合入 `spec / 实现 / 测试 / 记录文件`。
+  - 合并范围确认：
+    - `wt-20260404-gen-kernel-g1/spec/dsl/gen_kernel.md`
+    - `wt-20260404-gen-kernel-g1/kernel_gen/dsl/gen_kernel.py`
+    - `wt-20260404-gen-kernel-g1/test/dsl/test_gen_kernel.py`
+    - `agents/codex-multi-agents/log/task_records/2026/14/20260404-gen-kernel-g1.md`
+- 结论：
+  - `T-20260404-bc032aeb` 已完成并封板。
+  - 后续链路已按当前规则衔接到合并阶段，等待管理员核对并分发 `T-20260404-86c2e58e`。
+
+- 时间：`2026-04-04 03:18:32 +0800`
+- 经办人：`jcc你莫辜负`
+- 任务：`T-20260404-b11dedf4`
+- 任务目标：
+  - 完成当前 `G2` 任务流转，并按同链路补建唯一后续审查任务。
+- 改动：
+  - 已执行：
+    - `codex-multi-agents-task.sh -file /home/lfr/kernelcode_generate/TODO.md -done -task_id T-20260404-b11dedf4 -log /home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-gen-kernel-g1.md -agents-list /home/lfr/kernelcode_generate/agents/codex-multi-agents/agents-lists.md`
+    - 结果：当前任务已标记完成，`agents-lists.md` 中 `jcc你莫辜负` 状态同步成功。
+  - 已新建后续审查任务：
+    - `T-20260404-bc032aeb`
+    - 目标：在同一 `worktree` 中只读复核 `G2` 的 `spec / 实现 / 测试 / 记录文件` 是否和计划、边界、验证命令、验收标准一致。
+  - 审查范围确认：
+    - `wt-20260404-gen-kernel-g1/spec/dsl/gen_kernel.md`
+    - `wt-20260404-gen-kernel-g1/kernel_gen/dsl/gen_kernel.py`
+    - `wt-20260404-gen-kernel-g1/test/dsl/test_gen_kernel.py`
+    - `agents/codex-multi-agents/log/task_records/2026/14/20260404-gen-kernel-g1.md`
+- 结论：
+  - `T-20260404-b11dedf4` 已完成并封板。
+  - 后续链路已按当前规则衔接到 `G2` 审查阶段，等待管理员核对并分发 `T-20260404-bc032aeb`。

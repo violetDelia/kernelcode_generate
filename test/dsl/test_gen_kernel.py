@@ -1,7 +1,7 @@
 """gen_kernel tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 覆盖 func.func 到目标函数源码的组装行为。
@@ -49,8 +49,6 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
 gen_kernel_module = importlib.import_module("kernel_gen.dsl.gen_kernel")
-_gen_body = gen_kernel_module.gen_body
-_gen_signature = gen_kernel_module.gen_signature
 
 
 @irdl_op_definition
@@ -177,7 +175,7 @@ def _compile_and_run(source: str) -> None:
 
 # GK-001
 # 创建者: 金铲铲大作战
-# 最后一次更改: 小李飞刀
+# 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
 # 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
 # 功能说明: 验证 func.func 可生成完整后端源码。
@@ -240,72 +238,99 @@ def test_gen_kernel_is_the_only_public_entry() -> None:
     assert "gen_body" not in public_names
 
 
-# GK-002
-# 创建者: 金铲铲大作战
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
-# 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
-# 功能说明: 验证输入 Memory 参数使用只读签名。
-# 测试目的: 验证 gen_signature 对 Memory 输入生成 const 引用。
-# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_signature_uses_readonly_memory_inputs
+# GK-001A
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 功能说明: 验证单个普通 op 输入会直接委托给 emit_c。
+# 测试目的: 锁定 gen_kernel(op_or_func, ctx) 对单个非 func op 复用 emit_c_op 的公开合同。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_delegates_single_op_input_to_emit_c
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
 # 对应测试文件路径: test/dsl/test_gen_kernel.py
 
-def test_gen_signature_uses_readonly_memory_inputs() -> None:
+def test_gen_kernel_delegates_single_op_input_to_emit_c(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[str] = []
+
+    def _fake_emit(op: object, _ctx: EmitCContext) -> str:
+        seen.append(op.name)
+        return "// single-op"
+
+    monkeypatch.setattr(gen_kernel_module, "emit_c_op", _fake_emit)
+
+    source = gen_kernel(UnsupportedOp(), _ctx())
+
+    assert source == "// single-op"
+    assert seen == ["test.unsupported"]
+
+
+# GK-002
+# 创建者: 金铲铲大作战
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
+# 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
+# 功能说明: 验证输入 Memory 参数使用只读签名。
+# 测试目的: 验证 gen_kernel 生成的完整源码对 Memory 输入使用 const 引用。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_uses_readonly_memory_inputs
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+
+def test_gen_kernel_uses_readonly_memory_inputs() -> None:
     mem = _make_memory_type([2, 2], [2, 1])
     block = Block(arg_types=[mem])
     block.add_op(func.ReturnOp())
     func_op = _func("read_only", [mem], [], block, ("input",))
 
-    signature = _gen_signature(func_op, _ctx())
+    source = gen_kernel(func_op, _ctx())
 
-    assert signature == "void read_only(const Memory<int32_t>& input)"
+    assert source.startswith("void read_only(const Memory<int32_t>& input)")
 
 
 # GK-003
 # 创建者: 金铲铲大作战
-# 最后一次更改: 小李飞刀
+# 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
 # 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
 # 功能说明: 验证 Memory 结果降为输出参数。
-# 测试目的: 验证 gen_signature 对 Memory 返回值生成 out 参数。
-# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_signature_lowers_memory_result_to_out_param
+# 测试目的: 验证 gen_kernel 生成的完整源码对 Memory 返回值生成 out 参数。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_lowers_memory_result_to_out_param
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
 # 对应测试文件路径: test/dsl/test_gen_kernel.py
 
-def test_gen_signature_lowers_memory_result_to_out_param() -> None:
+def test_gen_kernel_lowers_memory_result_to_out_param() -> None:
     mem = _make_memory_type([2, 2], [2, 1])
     block = Block(arg_types=[mem])
     block.add_op(func.ReturnOp(block.args[0]))
     func_op = _func("produce", [mem], [mem], block, ("input",))
 
-    signature = _gen_signature(func_op, _ctx())
+    source = gen_kernel(func_op, _ctx())
 
-    assert signature == "void produce(const Memory<int32_t>& input, Memory<int32_t>& out)"
+    assert source.startswith("void produce(const Memory<int32_t>& input, Memory<int32_t>& out)")
 
 
 # GK-004
 # 创建者: 金铲铲大作战
-# 最后一次更改: 小李飞刀
+# 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
 # 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
-# 功能说明: 验证标量参数顺序与 IR 一致。
-# 测试目的: 验证 gen_signature 保持标量参数顺序和命名。
-# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_signature_preserves_scalar_arg_order
+# 功能说明: 验证缺失参数名时仍生成稳定默认命名。
+# 测试目的: 验证 gen_kernel 在完整源码中保持标量参数顺序，并在缺失 `arg_attrs.name` 时使用 `arg{index}`。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_uses_default_arg_names_when_missing_attrs
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
 # 对应测试文件路径: test/dsl/test_gen_kernel.py
 
-def test_gen_signature_preserves_scalar_arg_order() -> None:
+def test_gen_kernel_uses_default_arg_names_when_missing_attrs() -> None:
     block = Block(arg_types=[i32, IndexType(), i32])
     block.add_op(func.ReturnOp())
     func_op = _func("ordered", [i32, IndexType(), i32], [], block, ("lhs", "index", "rhs"))
 
-    signature = _gen_signature(func_op, _ctx())
+    source = gen_kernel(func_op, _ctx())
 
-    assert signature == "void ordered(int32_t lhs, long long index, int32_t rhs)"
+    assert source.startswith("void ordered(int32_t lhs, long long index, int32_t rhs)")
 
     unnamed_block = Block(arg_types=[i32])
     unnamed_block.add_op(func.ReturnOp())
@@ -316,28 +341,57 @@ def test_gen_signature_preserves_scalar_arg_order() -> None:
         Region(unnamed_block),
         arg_attrs=ArrayAttr([DictionaryAttr({})]),
     )
-    assert _gen_signature(unnamed_func, _ctx()) == "void unnamed(int32_t arg0)"
+    unnamed_source = gen_kernel(unnamed_func, _ctx())
+    assert unnamed_source.startswith("void unnamed(int32_t arg0)")
 
     default_block = Block(arg_types=[i1])
     default_block.add_op(func.ReturnOp())
     default_type = FunctionType.from_lists([i1], [])
     default_func = func.FuncOp("default_names", default_type, Region(default_block))
-    assert _gen_signature(default_func, _ctx()) == "void default_names(bool arg0)"
+    default_source = gen_kernel(default_func, _ctx())
+    assert default_source.startswith("void default_names(bool arg0)")
 
 
 # GK-005
 # 创建者: 金铲铲大作战
-# 最后一次更改: 小李飞刀
+# 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
 # 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
-# 功能说明: 验证函数体按 op 顺序调用 emit_c。
-# 测试目的: 验证 gen_body 不改变 IR 中的 op 顺序。
-# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_body_emits_ops_in_order
+# 功能说明: 验证完整源码中的普通 op 顺序与 IR 一致。
+# 测试目的: 验证 gen_kernel 的函数级主遍历不改变 IR 中的 op 顺序。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_emits_ops_in_order
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
 # 对应测试文件路径: test/dsl/test_gen_kernel.py
 
-def test_gen_body_emits_ops_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gen_kernel_emits_ops_in_order() -> None:
+    block = Block(arg_types=[i32, i32])
+    first = arith.AddiOp(block.args[0], block.args[1])
+    second = arith.SubiOp(block.args[0], block.args[1])
+    block.add_op(first)
+    block.add_op(second)
+    block.add_op(func.ReturnOp())
+    func_op = _func("ordered_body", [i32, i32], [], block, ("lhs", "rhs"))
+    source = gen_kernel(func_op, _ctx())
+
+    add_idx = source.index("int32_t v0 = (lhs + rhs);")
+    sub_idx = source.index("int32_t v1 = (lhs - rhs);")
+    assert add_idx < sub_idx
+
+
+# GK-005A
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 功能说明: 验证普通 op 逐个委托到 emit_c。
+# 测试目的: 锁定 gen_kernel 的函数级主遍历只把非 return op 委托给 emit_c_op。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_delegates_to_emit_c_for_non_return_ops
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+
+def test_gen_kernel_delegates_to_emit_c_for_non_return_ops(monkeypatch: pytest.MonkeyPatch) -> None:
     block = Block(arg_types=[i32, i32])
     first = arith.AddiOp(block.args[0], block.args[1])
     second = arith.SubiOp(block.args[0], block.args[1])
@@ -349,30 +403,50 @@ def test_gen_body_emits_ops_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def _fake_emit(op: object, _ctx: EmitCContext) -> str:
         seen.append(op.name)
-        return f"// {op.name}"
+        return f"{_ctx.current_indent}// {op.name}"
 
     monkeypatch.setattr(gen_kernel_module, "emit_c_op", _fake_emit)
 
-    body = _gen_body(func_op, _ctx())
+    source = gen_kernel(func_op, _ctx())
 
     assert seen == ["arith.addi", "arith.subi"]
-    assert body.splitlines() == ["// arith.addi", "// arith.subi"]
+    assert "// arith.addi" in source
+    assert "// arith.subi" in source
+    assert "func.return" not in seen
 
+
+# GK-005B
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 功能说明: 验证 func.return/out 绑定由函数级主遍历流程处理。
+# 测试目的: 锁定 return 收尾不走普通 emit_c_op 公开职责，避免 `func.return` 回流为节点级公开接口。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_handles_func_return_and_out_binding_in_main_flow
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+
+def test_gen_kernel_handles_func_return_and_out_binding_in_main_flow(monkeypatch: pytest.MonkeyPatch) -> None:
     mem = _make_memory_type([2, 2], [2, 1])
-    return_block = Block(arg_types=[mem])
-    return_block.add_op(func.ReturnOp(return_block.args[0]))
-    return_func = _func("return_body", [mem], [mem], return_block, ("input",))
-    assert _gen_body(return_func, _ctx()) == "out = arg0;"
-
     second_block = Block(arg_types=[mem, mem])
     second_block.add_op(func.ReturnOp(second_block.args[1]))
     second_func = _func("return_second", [mem, mem], [mem], second_block, ("lhs", "rhs"))
-    assert _gen_body(second_func, _ctx()) == "out = arg1;"
+
+    def _unexpected_emit(op: object, _ctx: EmitCContext) -> str:
+        raise AssertionError(f"emit_c_op should not see {op}")
+
+    monkeypatch.setattr(gen_kernel_module, "emit_c_op", _unexpected_emit)
+
+    source = gen_kernel(second_func, _ctx())
+
+    assert source.startswith("void return_second(const Memory<int32_t>& lhs, const Memory<int32_t>& rhs, Memory<int32_t>& out)")
+    assert "out = rhs;" in source
 
 
 # GK-006
 # 创建者: 金铲铲大作战
-# 最后一次更改: 小李飞刀
+# 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
 # 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
 # 功能说明: 验证 loop 片段可拼装到完整函数中。
@@ -432,19 +506,19 @@ def test_gen_kernel_propagates_emit_c_error() -> None:
 # 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
 # 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
 # 功能说明: 验证不合法返回形式时报错。
-# 测试目的: 验证 gen_signature 拒绝标量返回值。
-# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_signature_rejects_unsupported_return_form
+# 测试目的: 验证 gen_kernel 拒绝不支持的返回形式与输入类型。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_rejects_unsupported_return_form
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
 # 对应测试文件路径: test/dsl/test_gen_kernel.py
 
-def test_gen_signature_rejects_unsupported_return_form() -> None:
+def test_gen_kernel_rejects_unsupported_return_form() -> None:
     block = Block(arg_types=[i32])
     block.add_op(func.ReturnOp(block.args[0]))
     func_op = _func("scalar_return", [i32], [i32], block, ("value",))
 
     with pytest.raises(GenKernelError) as exc_info:
-        _gen_signature(func_op, _ctx())
+        gen_kernel(func_op, _ctx())
 
     assert "unsupported return form" in str(exc_info.value)
 
@@ -453,7 +527,7 @@ def test_gen_signature_rejects_unsupported_return_form() -> None:
     tuple_type = FunctionType.from_lists([], [i32, i32])
     tuple_func = func.FuncOp("tuple_return", tuple_type, Region(tuple_block), arg_attrs=ArrayAttr([]))
     with pytest.raises(GenKernelError) as exc_info:
-        _gen_signature(tuple_func, _ctx())
+        gen_kernel(tuple_func, _ctx())
     assert "unsupported return form" in str(exc_info.value)
 
     float_block = Block(arg_types=[f16])
@@ -461,7 +535,7 @@ def test_gen_signature_rejects_unsupported_return_form() -> None:
     float_type = FunctionType.from_lists([f16], [])
     float_func = func.FuncOp("f16_arg", float_type, Region(float_block))
     with pytest.raises(TypeError) as exc_info:
-        _gen_signature(float_func, _ctx())
+        gen_kernel(float_func, _ctx())
     assert "unsupported type" in str(exc_info.value)
 
     bad_body_block = Block(arg_types=[i32])
@@ -469,7 +543,7 @@ def test_gen_signature_rejects_unsupported_return_form() -> None:
     bad_body_type = FunctionType.from_lists([i32], [i32])
     bad_body_func = func.FuncOp("bad_body", bad_body_type, Region(bad_body_block), arg_attrs=_arg_attrs("value"))
     with pytest.raises(GenKernelError) as exc_info:
-        _gen_body(bad_body_func, _ctx())
+        gen_kernel(bad_body_func, _ctx())
     assert "unsupported return form" in str(exc_info.value)
 
 
@@ -479,30 +553,30 @@ def test_gen_signature_rejects_unsupported_return_form() -> None:
 # 最近一次运行测试时间: 2026-04-01 15:07:50 +0800
 # 最近一次运行成功时间: 2026-04-01 15:07:50 +0800
 # 功能说明: 验证 f32/f64 标量与 Memory<f32/f64> 可生成 float/double 与 Memory<float>/Memory<double> 形式签名。
-# 测试目的: 锁定 gen_signature 对 f32/f64 的类型映射，避免 conv2d 链路在函数签名阶段被 TypeError 阻断或类型退化。
-# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_signature_supports_float32_scalar_and_memory
+# 测试目的: 锁定 gen_kernel 在完整源码签名中的 f32/f64 类型映射，避免 conv2d 链路在函数级入口阶段被 TypeError 阻断或类型退化。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_supports_float32_scalar_and_memory
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
 # 对应测试文件路径: test/dsl/test_gen_kernel.py
 
-def test_gen_signature_supports_float32_scalar_and_memory() -> None:
+def test_gen_kernel_supports_float32_scalar_and_memory() -> None:
     mem_f32 = _make_memory_type([2, 2], [2, 1], element_type=f32)
     block_f32 = Block(arg_types=[mem_f32, f32])
     block_f32.add_op(func.ReturnOp(block_f32.args[0]))
     func_op_f32 = _func("float_kernel", [mem_f32, f32], [mem_f32], block_f32, ("input", "alpha"))
 
-    signature_f32 = _gen_signature(func_op_f32, _ctx())
+    source_f32 = gen_kernel(func_op_f32, _ctx())
 
-    assert signature_f32 == "void float_kernel(const Memory<float>& input, float alpha, Memory<float>& out)"
+    assert source_f32.startswith("void float_kernel(const Memory<float>& input, float alpha, Memory<float>& out)")
 
     mem_f64 = _make_memory_type([2, 2], [2, 1], element_type=f64)
     block_f64 = Block(arg_types=[mem_f64, f64])
     block_f64.add_op(func.ReturnOp(block_f64.args[0]))
     func_op_f64 = _func("double_kernel", [mem_f64, f64], [mem_f64], block_f64, ("input", "alpha"))
 
-    signature_f64 = _gen_signature(func_op_f64, _ctx())
+    source_f64 = gen_kernel(func_op_f64, _ctx())
 
-    assert signature_f64 == "void double_kernel(const Memory<double>& input, double alpha, Memory<double>& out)"
+    assert source_f64.startswith("void double_kernel(const Memory<double>& input, double alpha, Memory<double>& out)")
 
 
 # GK-009
@@ -549,7 +623,7 @@ def test_gen_kernel_preserves_function_and_arg_names() -> None:
 # 最近一次运行测试时间: 2026-03-28 07:20:00 +0800
 # 最近一次运行成功时间: 2026-03-28 07:20:00 +0800
 # 功能说明: 验证 !symbol.int 返回在 cpu target 下可生成函数返回值。
-# 测试目的: 锁定 gen_signature/gen_kernel 对 symbol 标量返回的契约，避免退化为 unsupported return form。
+# 测试目的: 锁定 gen_kernel 对 symbol 标量返回的契约，避免退化为 unsupported return form。
 # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_supports_symbol_scalar_return
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
@@ -564,10 +638,8 @@ def test_gen_kernel_supports_symbol_scalar_return() -> None:
     block.add_op(func.ReturnOp(add.result))
     func_op = _func("symbol_sum", [lhs_type, rhs_type], [out_type], block, ("lhs", "rhs"))
 
-    signature = _gen_signature(func_op, _ctx())
     source = gen_kernel(func_op, _ctx())
 
-    assert signature == "long long symbol_sum(long long lhs, long long rhs)"
     assert source.startswith("long long symbol_sum(long long lhs, long long rhs)")
     assert "long long v0 = (lhs + rhs);" in source
     assert "return v0;" in source
