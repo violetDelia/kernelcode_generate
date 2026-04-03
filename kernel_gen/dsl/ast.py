@@ -735,6 +735,9 @@ class FunctionAST:
     source: str | None = None
     py_ast: object | None = None
     diagnostics: list[Diagnostic] = field(default_factory=list)
+    has_explicit_return: bool = False
+    has_return_annotation: bool = False
+    returns_none: bool = False
 
     def iter_inputs(self: FunctionAST) -> Iterable[TensorAST | ScalarArgAST | PtrArgAST]:
         """迭代输入参数。
@@ -2130,27 +2133,28 @@ def _parse_function_impl(
             _raise_parse_error("Unsupported argument annotation", arg)
 
     outputs: list[TensorAST | ScalarArgAST] = []
-    return_allows_empty = False
-    if func_def.returns is not None:
+    has_return_annotation = func_def.returns is not None
+    returns_none = False
+    if has_return_annotation:
         parsed = _parse_annotation_node(func_def.returns, None, globals_table, builtins_table, runtime_table)
         if parsed is None:
-            return_allows_empty = True
+            returns_none = True
         elif isinstance(parsed, (TensorAST, ScalarArgAST)):
             outputs.append(parsed)
         else:
             _raise_parse_error("Unsupported return annotation", func_def.returns)
 
     statements: list[object] = []
-    has_return = False
+    has_explicit_return = False
     for stmt in func_def.body:
         parsed_stmt = _parse_stmt(stmt, env, globals_table, builtins_table)
         statements.append(parsed_stmt)
         if isinstance(stmt, py_ast.Return):
-            has_return = True
+            has_explicit_return = True
 
-    if func_def.returns is not None and not has_return and not return_allows_empty:
+    if has_return_annotation and not has_explicit_return and not returns_none:
         raise AstParseError("Missing return statement", [Diagnostic("Missing return statement", _location_from_node(func_def))])
-    if has_return and not isinstance(func_def.body[-1], py_ast.Return):
+    if has_explicit_return and not isinstance(func_def.body[-1], py_ast.Return):
         raise AstParseError("Return statement must be last", [Diagnostic("Return statement must be last", _location_from_node(func_def.body[-1]))])
     if outputs and isinstance(outputs[0], ScalarArgAST) and outputs[0].value_type is float:
         if not statements or not isinstance(statements[-1], SymbolToFloatAST):
@@ -2169,6 +2173,9 @@ def _parse_function_impl(
         source=source,
         py_ast=func_def,
         diagnostics=[],
+        has_explicit_return=has_explicit_return,
+        has_return_annotation=has_return_annotation,
+        returns_none=returns_none,
     )
 
 

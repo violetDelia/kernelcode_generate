@@ -614,6 +614,32 @@ def test_parse_function_entry() -> None:
     assert [arg.name for arg in func_ast.iter_inputs()] == ["x", "y"]
 
 
+# AST-R1
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 功能说明: 验证无返回注解但有显式 return 的函数会保留函数级返回语法元信息。
+# 测试目的: 锁定 `FunctionAST.outputs == []` 时，AST 仍能区分“显式 return 存在、未写返回注解、也不是 -> None”。
+# 使用示例: pytest -q test/dsl/test_ast.py -k test_parse_function_preserves_explicit_return_without_return_annotation
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast.py
+def test_parse_function_preserves_explicit_return_without_return_annotation() -> None:
+    def add_memory(
+        lhs: "Tensor[i32, 2, 3]",
+        rhs: "Tensor[i32, 2, 3]",
+    ):
+        out = lhs + rhs
+        return out
+
+    func_ast = parse_function(add_memory)
+    assert func_ast.outputs == []
+    assert func_ast.has_explicit_return is True
+    assert func_ast.has_return_annotation is False
+    assert func_ast.returns_none is False
+
+
 # AST-001B
 # 创建者: ChatGPT
 # 最后一次更改: 金铲铲大作战

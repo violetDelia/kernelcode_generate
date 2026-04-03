@@ -1,0 +1,71 @@
+# 20260404-dsl-mlir-gen-r1
+
+- 时间：2026-04-04 00:33:54 +0800
+- 经办人：`朽木露琪亚`
+- 任务：`T-20260404-a03779c8`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/dsl_mlir_gen_return_from_body_plan.md` 的 `R1` 收口 AST 返回语法元信息保留功能，明确并落地“无返回注解但有显式 return”可解析，且 AST 保留函数级返回语法元信息。
+- 改动：
+  - 更新 `kernel_gen/dsl/ast.py`：
+    - 为 `FunctionAST` 新增 `has_explicit_return`、`has_return_annotation`、`returns_none` 三个函数级返回语法元信息字段。
+    - 在 `_parse_function_impl(...)` 中把返回注解存在性、显式 `return` 存在性、显式 `-> None` 三类信息稳定写入 `FunctionAST`。
+    - 保持原边界不变：无返回注解但有显式 `return expr` 时，`outputs` 继续保持为空，不触碰 `func.func` 返回类型装配逻辑。
+  - 更新 `spec/dsl/ast.md`：
+    - 写清 `FunctionAST.outputs` 只表示显式返回注解解析结果，不等价于函数体是否显式返回值。
+    - 写清 `has_explicit_return` / `has_return_annotation` / `returns_none` 三个元信息字段及“无返回注解但有显式 return”口径。
+    - 新增 `AST-R1` 测试映射。
+  - 更新 `test/dsl/test_ast.py`：
+    - 新增 `test_parse_function_preserves_explicit_return_without_return_annotation`，锁定 `outputs == []`、`has_explicit_return == True`、`has_return_annotation == False`、`returns_none == False`。
+- 结论：
+  - `R1` 已按边界完成，仅修改：
+    - `spec/dsl/ast.md`
+    - `kernel_gen/dsl/ast.py`
+    - `test/dsl/test_ast.py`
+  - 验证结果：
+    - `pytest -q test/dsl/test_ast.py -k test_parse_function_preserves_explicit_return_without_return_annotation` -> `1 passed`
+    - `git diff --check -- spec/dsl/ast.md kernel_gen/dsl/ast.py test/dsl/test_ast.py` -> 通过
+  - 当前无阻塞。
+  - 建议下一步进入同链 `R2` 或其审查任务，重点检查下游 `mlir_gen` 是否真正消费新的 AST 返回语法元信息，而不是继续把 `FunctionAST.outputs` 当作函数返回唯一真值。
+
+- 时间：2026-04-04 00:39:50 +0800
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-7331ab22`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/dsl_mlir_gen_return_from_body_plan.md` 的 `R1` 审查边界，只读复核 `spec/dsl/ast.md`、`kernel_gen/dsl/ast.py`、`test/dsl/test_ast.py` 与同链路记录文件是否和 `R1` 的目标、边界、验证命令、验收标准一致。
+- 审查结论：
+  - `通过`。
+- 审查结果：
+  - [ast.py](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/kernel_gen/dsl/ast.py#L2135) 到 [ast.py](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/kernel_gen/dsl/ast.py#L2178) 已按 `R1` 边界实现：无返回注解但有显式 `return expr` 时，`outputs` 继续保持为空，同时稳定保留 `has_explicit_return`、`has_return_annotation`、`returns_none` 三个元信息；没有越界触碰 `func.func` 返回类型装配。
+  - [FunctionAST](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/kernel_gen/dsl/ast.py#L712) 已新增 `has_explicit_return`、`has_return_annotation`、`returns_none` 字段，与 [ast.md](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/spec/dsl/ast.md#L46) 到 [ast.md](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/spec/dsl/ast.md#L47) 和 [ast.md](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/spec/dsl/ast.md#L83) 到 [ast.md](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/spec/dsl/ast.md#L86) 的合同一致。
+  - [test_ast.py](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/test/dsl/test_ast.py#L628) 的 `test_parse_function_preserves_explicit_return_without_return_annotation` 已精确锁定 `FunctionAST.outputs == []`、`has_explicit_return == True`、`has_return_annotation == False`、`returns_none == False`，与 `R1` 验收标准一致。
+- 漏洞与边界排查：
+  - 功能正确性：通过，R1 要求的四个 AST 状态字段和 `outputs=[]` 口径已闭环。
+  - 边界条件：通过，显式 `-> None`、缺少 `return`、`return` 非最后语句等既有边界仍由现有逻辑和测试保留，没有被本轮破坏。
+  - 异常路径：通过，`Missing return statement`、`Return statement must be last`、`Unsupported return annotation` 等既有错误口径仍在。
+  - 潜在漏洞/歧义：未发现。本轮实现没有偷改下游 `mlir_gen`/`func.func` 输出装配逻辑。
+- 验证：
+  - `python -m pytest -q test/dsl/test_ast.py -k 'test_parse_function_preserves_explicit_return_without_return_annotation'` -> `1 passed, 32 deselected`
+  - `python -m pytest -q test/dsl/test_ast.py` -> `33 passed`
+- 下一步建议：
+  - 进入同链合并阶段；合并范围应覆盖 `spec/dsl/ast.md`、`kernel_gen/dsl/ast.py`、`test/dsl/test_ast.py` 与同链路记录文件。
+
+- 时间：2026-04-04 00:39:50 +0800
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-7331ab22`
+- 任务目标：
+  - 完成当前审查任务流转，并按同链路补建唯一后续合并任务。
+- 改动：
+  - 已执行：
+    - `codex-multi-agents-task.sh -done -task_id T-20260404-7331ab22 ...`
+    - 结果：当前审查任务已标记完成，`agents-lists.md` 中 `提莫炖蘑菇` 状态同步成功。
+  - 已新建后续合并任务：
+    - `T-20260404-bf981678`
+    - 目标：在同一 `worktree` 中按整条 `R1` 链路合入 `spec / 实现 / 测试 / 记录文件`。
+  - 合并范围确认：
+    - `wt-20260404-dsl-mlir-gen-r1/spec/dsl/ast.md`
+    - `wt-20260404-dsl-mlir-gen-r1/kernel_gen/dsl/ast.py`
+    - `wt-20260404-dsl-mlir-gen-r1/test/dsl/test_ast.py`
+    - `agents/codex-multi-agents/log/task_records/2026/14/20260404-dsl-mlir-gen-r1.md`
+- 结论：
+  - `T-20260404-7331ab22` 已完成并封板。
+  - 后续链路已按当前规则衔接到合并阶段，等待管理员核对并分发 `T-20260404-bf981678`。

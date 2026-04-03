@@ -43,6 +43,8 @@
 - `for` 循环仅支持 `range(...)`、`LoopRange(...)` 或 `loop(...)` 的 1~3 参数形式，并解析为 `ForAST` 的 `start/end/step` 字段。
 - `for` 循环体内不允许出现 `return`；出现即视为语法不支持并报错。
 - 显式 `-> None` 返回注解表示函数无公开返回值；该场景允许函数体只包含语句且省略 `return`。
+- AST 必须保留函数级返回语法元信息：`has_explicit_return`、`has_return_annotation`、`returns_none`。
+- 无返回注解但有显式 `return expr` 时，`parse_function(...)` 必须解析成功；此时 `FunctionAST.outputs` 保持为空，但必须通过函数级元信息保留“显式 return 存在、未写返回注解、也不是 `-> None`”这一事实。
 - DSL 解析入口必须覆盖 `arch` helper：无参 `get_block_id()` / `get_block_num()` / `get_subthread_id()` / `get_subthread_num()` / `get_thread_id()` / `get_thread_num()` 解析为 `ArchQueryAST`；`get_dynamic_memory(space)` 解析为 `ArchGetDynamicMemoryAST`；`launch_kernel(name, block, thread, subthread)` 解析为 `ArchLaunchKernelAST`。
 - 比较表达式入口采用 Python 比较语法；`lhs != rhs` 必须解析为 `CompareExprAST(op="ne")`，以供下游 `nn.ne` lowering 复用同一 AST 语义。
 - 二元乘法入口采用 Python `lhs * rhs` 与 `nn.mul(lhs, rhs)` 双入口；两者都必须解析为 `BinaryExprAST(op="mul")`，以复用后续统一 lowering 语义。
@@ -78,6 +80,10 @@ func_ast = parse_function(add)
 - 标量注解最小支持 `int`、`bool`、`float`；张量注解最小支持字符串形式 `Tensor[...]` 与 `JoinedStr` 形式 `f"Tensor[...]"`。
 - 若参数未写注解，但在 `globals`/`builtins` 中存在同名 `SymbolDim` 或 `Memory` 对象，可按标量参数或张量参数推断。
 - 若函数显式标注 `-> None`，则返回列表必须为空，且函数体可只包含语句并省略 `return`。
+- 若函数没有返回注解但存在显式 `return expr`，则 `FunctionAST.outputs` 必须保持为空，且：
+  - `has_explicit_return == True`
+  - `has_return_annotation == False`
+  - `returns_none == False`
 - `float(value)`、`tensor.get_shape()[axis]` 与 `tensor.get_stride()[axis]` 等最小 DSL 表达式必须可解析为明确 AST 节点。
 - `nn.add/sub/mul/truediv/floordiv` helper 仅允许 2 个位置参数且禁止关键字参数；参数个数或形态不匹配时必须返回 `Unsupported nn arithmetic arity` 诊断。
 - `slice(...)` helper 仅允许 3~5 个位置参数；超出范围必须返回 `Unsupported slice arity` 诊断。
@@ -146,6 +152,9 @@ Diagnostic(message="Unsupported syntax", location=SourceLocation(3, 4))
 - `source` (`str|None`)：可选源码文本。
 - `py_ast` (`object|None`)：可选 Python AST。
 - `diagnostics` (`list[Diagnostic]`)：诊断信息。
+- `has_explicit_return` (`bool`)：是否存在显式 `return expr`。
+- `has_return_annotation` (`bool`)：是否显式写了返回注解。
+- `returns_none` (`bool`)：是否显式写了 `-> None`。
 
 使用示例：
 
@@ -153,7 +162,11 @@ Diagnostic(message="Unsupported syntax", location=SourceLocation(3, 4))
 FunctionAST(name="kernel", inputs=[], outputs=[], body=BlockAST([]))
 ```
 
-注意事项：`diagnostics` 仅用于记录解析阶段问题。
+注意事项：
+
+- `diagnostics` 仅用于记录解析阶段问题。
+- `outputs` 只表示显式返回注解解析结果，不等价于“函数体是否显式返回值”。
+- `returns_none=True` 仅表示函数显式写了 `-> None`；不能把“无返回注解”误判成 `returns_none=True`。
 
 返回与限制：返回不可变的数据结构实例。
 
@@ -524,6 +537,7 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
   - AST-010：不支持语法返回诊断。（`test_unsupported_syntax_reports_diagnostics`）
   - AST-011：未注解的 float runtime 参数仍视为缺失注解并返回 `Missing annotation` 诊断。（`test_parse_function_rejects_float_runtime_arguments_without_annotations`）
   - AST-011A：`Tensor[i1, ...]` 返回注解可被解析为 `NumericType.Bool` 且保持 shape 不变。（`test_parse_function_supports_tensor_i1_return_annotation`）
+  - AST-R1：无返回注解但有显式 `return` 的函数必须保留函数级返回语法元信息，且 `outputs` 保持为空。（`test_parse_function_preserves_explicit_return_without_return_annotation`）
   - AST-012：`nn` 算术 helper 的非法参数个数必须返回 `Unsupported nn arithmetic arity` 诊断。（`test_parse_function_rejects_unsupported_nn_arithmetic_arity_variants`）
   - AST-013：支持 `bool` 返回注解与可静态归一化的 `JoinedStr` 张量注解。（`test_ast_parse_function_supports_symbol_scalar_and_joinedstr_annotations`）
   - AST-013A：`load` helper 的非法参数个数、非法 source 与非法 space 必须返回对应诊断。（`test_parse_function_rejects_invalid_load_helper_variants`）
