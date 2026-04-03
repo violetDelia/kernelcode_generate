@@ -84,11 +84,15 @@ from kernel_gen.dialect.symbol import (
     SymbolDivOp,
     SymbolEqOp,
     SymbolGeOp,
+    SymbolGtOp,
     SymbolFloorDivOp,
     SymbolForOp,
     SymbolGetDimOp,
     SymbolGetStrideOp,
+    SymbolLeOp,
+    SymbolLtOp,
     SymbolMulOp,
+    SymbolNeOp,
     SymbolSubOp,
     SymbolToFloatOp,
     SymbolValueType,
@@ -2121,7 +2125,7 @@ def _infer_expr_type(
         lhs_type = _infer_expr_type(expr.lhs, type_map, runtime_values=runtime_values)
         rhs_type = _infer_expr_type(expr.rhs, type_map, runtime_values=runtime_values)
         if isinstance(lhs_type, SymbolValueType) and isinstance(rhs_type, SymbolValueType):
-            if expr.op not in {"eq", "ge"}:
+            if expr.op not in {"eq", "ge", "gt", "le", "lt", "ne"}:
                 raise _LoweringError("Unsupported symbol compare op", location=expr.location)
             type_map[expr_key] = i1
             return i1
@@ -2586,9 +2590,16 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         lhs_attr = getattr(lhs, "type", None)
         rhs_attr = getattr(rhs, "type", None)
         if isinstance(lhs_attr, SymbolValueType) and isinstance(rhs_attr, SymbolValueType):
-            if expr.op not in {"eq", "ge"}:
+            if expr.op not in {"eq", "ge", "gt", "le", "lt", "ne"}:
                 raise _LoweringError("Unsupported symbol compare op", location=expr.location)
-            op_map = {"eq": SymbolEqOp, "ge": SymbolGeOp}
+            op_map = {
+                "eq": SymbolEqOp,
+                "ge": SymbolGeOp,
+                "gt": SymbolGtOp,
+                "le": SymbolLeOp,
+                "lt": SymbolLtOp,
+                "ne": SymbolNeOp,
+            }
             op = op_map[expr.op](lhs, rhs, i1)
             ctx.builder.add_op(op)
             ctx._set_cache(expr_key, op.result)
