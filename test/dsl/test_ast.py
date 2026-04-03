@@ -614,6 +614,62 @@ def test_parse_function_entry() -> None:
     assert [arg.name for arg in func_ast.iter_inputs()] == ["x", "y"]
 
 
+def _assert_parse_function_supports_symbol_compare(op_name: str, source_token: str) -> None:
+    """断言 parse_function 支持符号 compare family 语法。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 复用同一断言逻辑检查 `gt/le/lt/ne` 的 AST 解析结果。
+
+    使用示例:
+    - _assert_parse_function_supports_symbol_compare("gt", ">")
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    if source_token == ">":
+        def kernel(a: int, b: int) -> bool:
+            return a > b
+    elif source_token == "<=":
+        def kernel(a: int, b: int) -> bool:
+            return a <= b
+    elif source_token == "<":
+        def kernel(a: int, b: int) -> bool:
+            return a < b
+    elif source_token == "!=":
+        def kernel(a: int, b: int) -> bool:
+            return a != b
+    else:  # pragma: no cover
+        raise AssertionError(f"unsupported compare token: {source_token}")
+
+    func_ast = parse_function(kernel)
+    assert isinstance(func_ast.body.statements[-1], CompareExprAST)
+    assert func_ast.body.statements[-1].op == op_name
+    assert isinstance(func_ast.outputs[0], ScalarArgAST)
+    assert func_ast.outputs[0].value_type is bool
+
+
+def test_parse_function_supports_symbol_gt() -> None:
+    _assert_parse_function_supports_symbol_compare("gt", ">")
+
+
+def test_parse_function_supports_symbol_le() -> None:
+    _assert_parse_function_supports_symbol_compare("le", "<=")
+
+
+def test_parse_function_supports_symbol_lt() -> None:
+    _assert_parse_function_supports_symbol_compare("lt", "<")
+
+
+def test_parse_function_supports_symbol_ne() -> None:
+    _assert_parse_function_supports_symbol_compare("ne", "!=")
+
+
 # AST-R1
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚

@@ -1,0 +1,108 @@
+# 20260404-expectation-i5
+
+- 时间：2026-04-04 02:23:52 +0800
+- 经办人：`朽木露琪亚`
+- 任务：`T-20260404-7eedb923`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/expectation_dsl_mlir_dma_symbol_closure_plan.md` 收口命名 pytest gate，让 `dma.view` 与 `symbol compare family` 的正向测试能被现有 `-k` 命令命中，并清理把 `Unsupported symbol compare op` 当成正确结果的旧负向测试。
+- 改动：
+  - 已进入 `worktree=/home/lfr/kernelcode_generate/wt-20260404-expectation-i5`，核对计划、任务边界、现有测试命名与 smoke gate。
+  - 已复现当前 gate 现状：
+    - `PYTHONPATH=. pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_supports_dma_view_helper` -> `0` 命中，`exit 5`
+    - `PYTHONPATH=. pytest -q test/dsl/test_ast.py test/dsl/test_emit_mlir.py test/dsl/test_mlir_gen.py -k 'symbol_gt or symbol_le or symbol_lt or symbol_ne'` -> `0` 命中，`exit 5`
+  - 已确认 `wt-20260404-expectation-i5` 中不存在 `expectation/` 目录，而主工作目录 `/home/lfr/kernelcode_generate/expectation/` 存在。
+  - 当前阻塞前未修改任何业务测试文件。
+- 结论：
+  - 当前存在任务级阻塞，已停止继续实现：
+    - 管理员给定的第 3 条验证命令在授权 `worktree` 内无法执行，因为 `wt-20260404-expectation-i5/expectation/...` 路径不存在。
+    - 该问题属于 `worktree / 环境 / 验证口径` 类问题，按规则必须先询问管理员，不得自行假设是改用主工作目录 expectation 路径还是补镜像目录。
+  - 待管理员确认后再继续。
+
+- 时间：2026-04-04 02:34:07 +0800
+- 经办人：`朽木露琪亚`
+- 任务：`T-20260404-7eedb923`
+- 任务目标：
+  - 按 `expectation_dsl_mlir_dma_symbol_closure_plan.md` 收口命名 pytest gate，让 `dma.view` 与 `symbol compare family` 的正向测试能被现有 `-k` 命令命中，并改写仍把 `Unsupported symbol compare op` 当作正确结果的旧伪负向测试。
+- 改动：
+  - 更新 `test/dsl/test_ast.py`：
+    - 新增 `test_parse_function_supports_symbol_gt/le/lt/ne`
+    - 让 `test_ast.py` 中也存在可被 `-k 'symbol_gt or symbol_le or symbol_lt or symbol_ne'` 命中的正向 parse gate
+  - 更新 `test/dsl/test_ast_visitor.py`：
+    - 新增精确命名的 `test_build_func_op_supports_dma_view_helper`
+    - 新增 `test_emit_mlir_lowers_symbol_gt/le/lt/ne`
+    - 将旧的 `gt -> Unsupported symbol compare op` 伪负向改成真正未支持的 compare op（`cmp`）
+  - 更新 `test/dsl/test_emit_mlir.py`：
+    - 新增 `test_emit_mlir_lowers_symbol_gt/le/lt/ne`
+    - 将旧的 `gt -> Unsupported symbol compare op` 伪负向改成真正未支持的 compare op（`cmp`）
+  - 更新 `test/dsl/test_mlir_gen.py`：
+    - 新增 `test_build_func_op_lowers_symbol_gt/le/lt/ne`
+  - 本轮未修改任何 tracked `expectation` 文件；expectation smoke 直接使用主工作目录 `/home/lfr/kernelcode_generate/expectation/` 下的忽略目录脚本作为只读验收参考，不属于 `wt-20260404-expectation-i5` 的 tracked 文件。
+- 结论：
+  - `I5` 已按边界完成，仅修改：
+    - `test/dsl/test_ast.py`
+    - `test/dsl/test_ast_visitor.py`
+    - `test/dsl/test_emit_mlir.py`
+    - `test/dsl/test_mlir_gen.py`
+  - 验证结果：
+    - `PYTHONPATH=. pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_supports_dma_view_helper` -> `1 passed`
+    - `PYTHONPATH=. pytest -q test/dsl/test_ast.py test/dsl/test_emit_mlir.py test/dsl/test_mlir_gen.py -k 'symbol_gt or symbol_le or symbol_lt or symbol_ne'` -> `12 passed`
+    - root expectation smoke（主工作目录忽略目录，只读验收参考）：
+      - `/home/lfr/kernelcode_generate/expectation/dsl/mlir_gen/dialect/dma/view`
+      - `/home/lfr/kernelcode_generate/expectation/dsl/mlir_gen/dialect/symbol/gt.py`
+      - `/home/lfr/kernelcode_generate/expectation/dsl/mlir_gen/dialect/symbol/le.py`
+      - `/home/lfr/kernelcode_generate/expectation/dsl/mlir_gen/dialect/symbol/lt.py`
+      - `/home/lfr/kernelcode_generate/expectation/dsl/mlir_gen/dialect/symbol/ne.py`
+      - `/home/lfr/kernelcode_generate/expectation/dsl/mlir_gen/dialect/symbol/to_float.py`
+      - 结果：六个脚本均通过
+    - `git diff --check -- test/dsl/test_ast.py test/dsl/test_ast_visitor.py test/dsl/test_emit_mlir.py test/dsl/test_mlir_gen.py` -> 通过
+  - 自检：
+    - 目标收口：通过。`dma.view` 精确命名 gate 与 `symbol_gt/le/lt/ne` 命名 gate 都已命中真实正向测试。
+    - 旧负向测试：通过。仍保留 `Unsupported symbol compare op` 的只剩真正未支持的 compare op（`cmp`）负例，不再把 `gt` 当成正确失败结果。
+    - 记录一致性：通过。已明确写清 expectation smoke 使用的是主工作目录忽略目录，不属于 worktree tracked 文件。
+  - 当前无阻塞。
+  - 建议下一步进入同链审查阶段，重点核对：
+    - gate 是否真实命中正向行为而不是仅靠重命名空壳测试
+    - `gt/le/lt/ne` 的旧伪负向是否已彻底移除
+    - 记录里关于主工作目录 expectation smoke 的说明是否与管理员确认口径一致
+
+- 时间：2026-04-04 02:39:04 +0800
+- 经办人：`不要啊教练`
+- 任务：`T-20260404-39f313fb`
+- 任务目标：
+  - 只读审查 `I5` expectation 命名 pytest gate 收口，核对 [`test/dsl/test_ast.py`](/home/lfr/kernelcode_generate/wt-20260404-expectation-i5/test/dsl/test_ast.py)、[`test/dsl/test_ast_visitor.py`](/home/lfr/kernelcode_generate/wt-20260404-expectation-i5/test/dsl/test_ast_visitor.py)、[`test/dsl/test_emit_mlir.py`](/home/lfr/kernelcode_generate/wt-20260404-expectation-i5/test/dsl/test_emit_mlir.py)、[`test/dsl/test_mlir_gen.py`](/home/lfr/kernelcode_generate/wt-20260404-expectation-i5/test/dsl/test_mlir_gen.py) 与 [`expectation_dsl_mlir_dma_symbol_closure_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/expectation_dsl_mlir_dma_symbol_closure_plan.md) 的 `I5` 目标、边界、验证命令、验收标准是否一致，并确认主工作目录 expectation smoke 的记录口径与管理员确认一致。
+- 改动：
+  - 只读复核计划 `I5` 条目、四个测试文件、同链路记录文件与管理员确认口径；未修改实现、测试或 expectation 文件。
+  - 自检结果：
+    - 证据充分性：已覆盖计划 `I5` 正文、四个新增 gate 的测试体、旧伪负向改写点、主工作目录 expectation smoke 记录口径、以及三类实际复测命令。
+    - 功能正确性：
+      - [`test_ast_visitor.py`](/home/lfr/kernelcode_generate/wt-20260404-expectation-i5/test/dsl/test_ast_visitor.py#L1694) 的 `test_build_func_op_supports_dma_view_helper` 真实断言 `build_func_op(...)` 产生 `DmaViewOp`，且 `func.return` 类型与 `dma.view.result.type` 一致，不是空壳重命名。
+      - [`test_ast.py`](/home/lfr/kernelcode_generate/wt-20260404-expectation-i5/test/dsl/test_ast.py#L657) 到 [`test_ast.py`](/home/lfr/kernelcode_generate/wt-20260404-expectation-i5/test/dsl/test_ast.py#L669) 已把 `symbol_gt/le/lt/ne` 命中到真实 AST parse 正向测试。
+      - [`test_emit_mlir.py`](/home/lfr/kernelcode_generate/wt-20260404-expectation-i5/test/dsl/test_emit_mlir.py#L1896) 到 [`test_emit_mlir.py`](/home/lfr/kernelcode_generate/wt-20260404-expectation-i5/test/dsl/test_emit_mlir.py#L1909) 与 [`test_mlir_gen.py`](/home/lfr/kernelcode_generate/wt-20260404-expectation-i5/test/dsl/test_mlir_gen.py#L2433) 到 [`test_mlir_gen.py`](/home/lfr/kernelcode_generate/wt-20260404-expectation-i5/test/dsl/test_mlir_gen.py#L2499) 已把 `gt/le/lt/ne` 命中到真实 lowering/build_func_op 正向测试，而不是只改测试名。
+    - 边界条件：计划 `I5` 只要求补命名 gate 和收走旧伪负向，不扩新 DSL 能力；当前改动范围也仅在四个测试文件，`git diff --stat` 显示无实现、spec、tracked expectation 文件被带入。
+    - 异常路径：
+      - [`test_ast_visitor.py`](/home/lfr/kernelcode_generate/wt-20260404-expectation-i5/test/dsl/test_ast_visitor.py#L4440) 到 [`test_ast_visitor.py`](/home/lfr/kernelcode_generate/wt-20260404-expectation-i5/test/dsl/test_ast_visitor.py#L4443) 与 [`test_emit_mlir.py`](/home/lfr/kernelcode_generate/wt-20260404-expectation-i5/test/dsl/test_emit_mlir.py#L1421) 到 [`test_emit_mlir.py`](/home/lfr/kernelcode_generate/wt-20260404-expectation-i5/test/dsl/test_emit_mlir.py#L1424) 仍保留 `Unsupported symbol compare op` 负例，但已收口到真正未支持的 `cmp`，不再把 `gt/le/lt/ne` 当正确失败结果。
+    - 潜在漏洞排查：
+      - 输入校验绕过：未见仅靠重命名测试名制造假命中。
+      - 类型/形状绕过：`dma.view` gate 继续断言 return/result type 一致，compare gate 继续断言结果为 `i1`。
+      - 边界越界：未见把本计划范围外的 `nn.add mixed dtype` 问题混入 `I5`。
+      - 错误处理缺失：旧 compare 失败口径未被删除，而是收口到真正未支持的 `cmp` 负例。
+      - 状态污染：主工作目录 expectation smoke 作为只读验收参考的口径与管理员确认一致。
+      - 资源释放问题：本轮仅改测试和记录，不涉及新资源生命周期语义。
+  - 复测：
+    - `cd /home/lfr/kernelcode_generate/wt-20260404-expectation-i5 && PYTHONPATH=. pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_supports_dma_view_helper`
+      - 结果：`1 passed, 194 deselected`
+      - 退出码：`0`
+    - `cd /home/lfr/kernelcode_generate/wt-20260404-expectation-i5 && PYTHONPATH=. pytest -q test/dsl/test_ast.py test/dsl/test_emit_mlir.py test/dsl/test_mlir_gen.py -k 'symbol_gt or symbol_le or symbol_lt or symbol_ne'`
+      - 结果：`12 passed, 212 deselected`
+      - 退出码：`0`
+    - `cd /home/lfr/kernelcode_generate && for f in expectation/dsl/mlir_gen/dialect/dma/view expectation/dsl/mlir_gen/dialect/symbol/gt.py expectation/dsl/mlir_gen/dialect/symbol/le.py expectation/dsl/mlir_gen/dialect/symbol/lt.py expectation/dsl/mlir_gen/dialect/symbol/ne.py expectation/dsl/mlir_gen/dialect/symbol/to_float.py; do PYTHONPATH=. python "$f"; done`
+      - 结果：六个脚本均通过
+      - 退出码：`0`
+    - `git -C /home/lfr/kernelcode_generate/wt-20260404-expectation-i5 diff --check -- test/dsl/test_ast.py test/dsl/test_ast_visitor.py test/dsl/test_emit_mlir.py test/dsl/test_mlir_gen.py`
+      - 退出码：`0`
+    - `git -C /home/lfr/kernelcode_generate diff --check -- agents/codex-multi-agents/log/task_records/2026/14/20260404-expectation-i5.md`
+      - 退出码：`0`
+- 结论：
+  - `通过`
+  - 未发现额外改进点。
+  - 计划 `I5`、四个测试文件、主工作目录 expectation smoke 记录口径与管理员确认已闭环一致，可进入同链路合并阶段。

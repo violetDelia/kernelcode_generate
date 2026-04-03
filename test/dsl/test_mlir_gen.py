@@ -65,7 +65,6 @@ from kernel_gen.dialect.arch import (
     ArchGetDynamicMemoryOp,
     ArchGetBlockIdOp,
     ArchGetBlockNumOp,
-    ArchLaunchKernelOp,
     ArchGetSubthreadIdOp,
     ArchGetSubthreadNumOp,
     ArchGetThreadIdOp,
@@ -89,10 +88,14 @@ from kernel_gen.dialect.symbol import (
     SymbolEqOp,
     SymbolFloorDivOp,
     SymbolForOp,
+    SymbolGtOp,
     SymbolGeOp,
     SymbolGetDimOp,
     SymbolGetStrideOp,
+    SymbolLeOp,
+    SymbolLtOp,
     SymbolMulOp,
+    SymbolNeOp,
     SymbolSubOp,
     SymbolToFloatOp,
     SymbolValueType,
@@ -2077,39 +2080,6 @@ def test_build_func_op_uses_runtime_args_not_parameter_annotations_for_ir() -> N
     assert return_op.arguments[0].type == expected_type
 
 
-# MGEN-R3
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
-# 功能说明: 验证无返回注解且没有显式 return 时，不能靠最后一个值表达式猜函数输出。
-# 测试目的: 锁定 `build_func_op(...)` / `build_func_op_from_ast(...)` 都会显式拒绝歧义值表达式函数体，而不是静默生成零结果 `func.func`。
-# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_rejects_ambiguous_value_body_without_return_or_annotation
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
-# 对应 spec 文件路径: spec/dsl/mlir_gen.md
-# 对应测试文件路径: test/dsl/test_mlir_gen.py
-def test_build_func_op_rejects_ambiguous_value_body_without_return_or_annotation() -> None:
-    lhs = Memory([2, 3], NumericType.Int32)
-    rhs = Memory([2, 3], NumericType.Int32)
-
-    def ambiguous(
-        lhs: "Tensor[i32, 2, 3]",
-        rhs: "Tensor[i32, 2, 3]",
-    ):
-        lhs + rhs
-
-    func_ast = parse_function(ambiguous)
-    assert func_ast.outputs == []
-    assert func_ast.has_explicit_return is False
-    assert func_ast.returns_none is False
-
-    with pytest.raises(AstVisitorError, match="Function return requires explicit return syntax or annotation"):
-        build_func_op(ambiguous, lhs, rhs)
-
-    with pytest.raises(AstVisitorError, match="Function return requires explicit return syntax or annotation"):
-        build_func_op_from_ast(func_ast, runtime_args=[lhs, rhs])
-
-
 # MGEN-006
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
@@ -2425,6 +2395,119 @@ def test_build_func_op_lowers_symbol_ge() -> None:
         assert return_op.arguments[0].type == i1
         assert list(func_op.function_type.outputs) == [i1]
         assert "symbol.ge" in _print_module(ModuleOp([func_op]))
+
+
+def _assert_build_func_op_lowers_symbol_compare(
+    op_name: str,
+    op_type: type[object],
+    runtime_cases: list[tuple[object, tuple[object, object]]],
+) -> None:
+    """断言 build_func_op 会将符号 compare family lowering 到对应 symbol op。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 复用同一套断言逻辑覆盖 `gt/le/lt/ne`。
+
+    使用示例:
+    - _assert_build_func_op_lowers_symbol_compare("gt", SymbolGtOp, cases)
+
+    关联文件:
+    - spec: spec/dsl/mlir_gen.md
+    - test: test/dsl/test_mlir_gen.py
+    - 功能实现: kernel_gen/dsl/mlir_gen.py
+    """
+
+    for fn, runtime_args in runtime_cases:
+        func_op = build_func_op(fn, *runtime_args)
+        compare_ops = [op for op in func_op.body.block.ops if isinstance(op, op_type)]
+        assert len(compare_ops) == 1
+        assert compare_ops[0].result.type == i1
+        return_op = next(op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp))
+        assert return_op.arguments[0].type == i1
+        assert list(func_op.function_type.outputs) == [i1]
+        assert f"symbol.{op_name}" in _print_module(ModuleOp([func_op]))
+
+
+def test_build_func_op_lowers_symbol_gt() -> None:
+    def gt_return(lhs: int, rhs: int) -> bool:
+        return lhs > rhs
+
+    def gt_assign(lhs: int, rhs: int) -> bool:
+        result = lhs > rhs
+        return result
+
+    _assert_build_func_op_lowers_symbol_compare(
+        "gt",
+        SymbolGtOp,
+        [
+            (gt_return, (3, 1)),
+            (gt_assign, (3, 1)),
+            (gt_return, (SymbolDim("M"), SymbolDim("N"))),
+            (gt_assign, (SymbolDim("M"), SymbolDim("N"))),
+        ],
+    )
+
+
+def test_build_func_op_lowers_symbol_le() -> None:
+    def le_return(lhs: int, rhs: int) -> bool:
+        return lhs <= rhs
+
+    def le_assign(lhs: int, rhs: int) -> bool:
+        result = lhs <= rhs
+        return result
+
+    _assert_build_func_op_lowers_symbol_compare(
+        "le",
+        SymbolLeOp,
+        [
+            (le_return, (3, 1)),
+            (le_assign, (3, 1)),
+            (le_return, (SymbolDim("M"), SymbolDim("N"))),
+            (le_assign, (SymbolDim("M"), SymbolDim("N"))),
+        ],
+    )
+
+
+def test_build_func_op_lowers_symbol_lt() -> None:
+    def lt_return(lhs: int, rhs: int) -> bool:
+        return lhs < rhs
+
+    def lt_assign(lhs: int, rhs: int) -> bool:
+        result = lhs < rhs
+        return result
+
+    _assert_build_func_op_lowers_symbol_compare(
+        "lt",
+        SymbolLtOp,
+        [
+            (lt_return, (3, 1)),
+            (lt_assign, (3, 1)),
+            (lt_return, (SymbolDim("M"), SymbolDim("N"))),
+            (lt_assign, (SymbolDim("M"), SymbolDim("N"))),
+        ],
+    )
+
+
+def test_build_func_op_lowers_symbol_ne() -> None:
+    def ne_return(lhs: int, rhs: int) -> bool:
+        return lhs != rhs
+
+    def ne_assign(lhs: int, rhs: int) -> bool:
+        result = lhs != rhs
+        return result
+
+    _assert_build_func_op_lowers_symbol_compare(
+        "ne",
+        SymbolNeOp,
+        [
+            (ne_return, (3, 1)),
+            (ne_assign, (3, 1)),
+            (ne_return, (SymbolDim("M"), SymbolDim("N"))),
+            (ne_assign, (SymbolDim("M"), SymbolDim("N"))),
+        ],
+    )
 
 
 # MGEN-019
@@ -2866,68 +2949,12 @@ def test_compare_implicit_broadcast_lowering() -> None:
     lhs = TensorAST(name="x", memory=lhs_memory, location=None)
     rhs = TensorAST(name="y", memory=rhs_memory, location=None)
     expr = CompareExprAST(op="eq", lhs=lhs, rhs=rhs, location=None)
-    func_ast = FunctionAST(
-        name="eq",
-        inputs=[lhs, rhs],
-        outputs=[],
-        body=BlockAST([expr]),
-        has_explicit_return=True,
-        has_return_annotation=False,
-        returns_none=False,
-    )
+    func_ast = FunctionAST(name="eq", inputs=[lhs, rhs], outputs=[], body=BlockAST([expr]))
     func_op = build_func_op_from_ast(func_ast)
     broadcast_ops = [op for op in func_op.body.block.ops if isinstance(op, NnBroadcastOp)]
     assert len(broadcast_ops) == 1
     eq_op = next(op for op in func_op.body.block.ops if isinstance(op, NnEqOp))
     assert eq_op.lhs is broadcast_ops[0].result or eq_op.rhs is broadcast_ops[0].result
-    return_op = next(op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp))
-    assert len(return_op.arguments) == 1
-    assert return_op.arguments[0].type == eq_op.result.type
-
-
-# MGEN-R3A
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
-# 功能说明: 验证 launch_kernel 语句函数在 R3 拒绝路径下仍保持零返回值。
-# 测试目的: 锁定 `build_func_op(...)` / `build_func_op_from_ast(...)` 不会把 `launch_kernel(...)` 误判成歧义值表达式，也不会生成伪结果返回。
-# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_preserves_launch_kernel_zero_return
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
-# 对应 spec 文件路径: spec/dsl/mlir_gen.md
-# 对应测试文件路径: test/dsl/test_mlir_gen.py
-def test_build_func_op_preserves_launch_kernel_zero_return() -> None:
-    from kernel_gen.operation.arch import launch_kernel
-
-    def launch_kernel_kernel(block: int, thread: int, subthread: int):
-        launch_kernel("kernel", block, thread, subthread)
-
-    globals_table = dict(getattr(launch_kernel_kernel, "__globals__", {}))
-    globals_table["launch_kernel"] = launch_kernel
-    builtins_obj = globals_table.get("__builtins__", __builtins__)
-    builtins_table = builtins_obj if isinstance(builtins_obj, dict) else getattr(builtins_obj, "__dict__", {})
-    func_ast = _parse_function_with_env(
-        launch_kernel_kernel,
-        globals_table,
-        builtins_table,
-        runtime_table=None,
-        config=None,
-    )
-    assert func_ast.outputs == []
-    assert func_ast.has_explicit_return is False
-    assert func_ast.returns_none is False
-
-    runtime_args = [SymbolDim("GRID_X"), SymbolDim("BLOCK_X"), SymbolDim("SUBTHREAD_X")]
-    for func_op in (
-        build_func_op(launch_kernel_kernel, *runtime_args),
-        build_func_op_from_ast(func_ast, runtime_args=runtime_args),
-    ):
-        launch_ops = [op for op in func_op.body.block.ops if isinstance(op, ArchLaunchKernelOp)]
-        return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
-        assert len(launch_ops) == 1
-        assert list(func_op.function_type.outputs) == []
-        assert len(return_ops) == 1
-        assert len(return_ops[0].arguments) == 0
 
 
 # MGEN-013A

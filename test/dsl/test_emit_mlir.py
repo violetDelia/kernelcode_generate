@@ -85,10 +85,14 @@ from kernel_gen.dialect.symbol import (
     SymbolDivOp,
     SymbolFloorDivOp,
     SymbolForOp,
+    SymbolGtOp,
     SymbolGeOp,
     SymbolGetDimOp,
     SymbolGetStrideOp,
+    SymbolLeOp,
+    SymbolLtOp,
     SymbolMulOp,
+    SymbolNeOp,
     SymbolSubOp,
     SymbolToFloatOp,
     SymbolValueType,
@@ -1414,10 +1418,10 @@ def test_emit_mlir_infer_expr_type_branches() -> None:
     with pytest.raises(_LoweringError, match="Unsupported symbol binary op"):
         _infer_expr_type(BinaryExprAST(op="mod", lhs=sym_lhs, rhs=sym_rhs), type_map)
 
-    assert _infer_expr_type(CompareExprAST(op="eq", lhs=sym_lhs, rhs=sym_rhs), type_map) == i1
-    assert _infer_expr_type(CompareExprAST(op="ge", lhs=sym_lhs, rhs=sym_rhs), type_map) == i1
+    for compare_op in ("eq", "ge", "gt", "le", "lt", "ne"):
+        assert _infer_expr_type(CompareExprAST(op=compare_op, lhs=sym_lhs, rhs=sym_rhs), type_map) == i1
     with pytest.raises(_LoweringError, match="Unsupported symbol compare op"):
-        _infer_expr_type(CompareExprAST(op="gt", lhs=sym_lhs, rhs=sym_rhs), type_map)
+        _infer_expr_type(CompareExprAST(op="cmp", lhs=sym_lhs, rhs=sym_rhs), type_map)
 
     mixed_type_map = {
         _expr_key(int_tensor): int_tensor_type,
@@ -1821,7 +1825,7 @@ def test_emit_mlir_lower_expr_unknown_and_symbol_errors() -> None:
         assert isinstance(lowered.owner, op_type)
 
     with pytest.raises(_LoweringError, match="Unsupported symbol compare op"):
-        _lower_expr(CompareExprAST(lhs=lhs, rhs=rhs, op="gt", location=None), symbol_ctx)
+        _lower_expr(CompareExprAST(lhs=lhs, rhs=rhs, op="cmp", location=None), symbol_ctx)
 
     with pytest.raises(_LoweringError, match="Unsupported symbol binary op"):
         _lower_expr(BinaryExprAST(lhs=lhs, rhs=rhs, op="mod", location=None), symbol_ctx)
@@ -1855,6 +1859,54 @@ def test_emit_mlir_lowers_symbol_ge() -> None:
     result = _lower_expr(expr, ctx)
     assert isinstance(result.owner, SymbolGeOp)
     assert result.type == i1
+
+
+def _assert_emit_mlir_lowers_symbol_compare(op_name: str, op_type: type[object]) -> None:
+    """断言 emit 阶段会将符号 compare family lowering 到对应 symbol op。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 复用同一套 block/context 初始化逻辑覆盖 `gt/le/lt/ne`。
+
+    使用示例:
+    - _assert_emit_mlir_lowers_symbol_compare("gt", SymbolGtOp)
+
+    关联文件:
+    - spec: spec/dsl/emit_mlir.md
+    - test: test/dsl/test_emit_mlir.py
+    - 功能实现: kernel_gen/dsl/emit_mlir.py
+    """
+
+    block = Block(arg_types=[SymbolValueType.from_expr("A"), SymbolValueType.from_expr("B")])
+    ctx = EmitContext(builder=block, symbols={"a": block.args[0], "b": block.args[1]}, types={})
+    lhs = ScalarArgAST(name="a", value_type=int, is_symbolic=True)
+    rhs = ScalarArgAST(name="b", value_type=int, is_symbolic=True)
+    ctx._set_cache(_expr_key(lhs), block.args[0])
+    ctx._set_cache(_expr_key(rhs), block.args[1])
+    ctx.types[_expr_key(lhs)] = block.args[0].type
+    ctx.types[_expr_key(rhs)] = block.args[1].type
+
+    result = _lower_expr(CompareExprAST(op=op_name, lhs=lhs, rhs=rhs, location=None), ctx)
+    assert isinstance(result.owner, op_type)
+    assert result.type == i1
+
+
+def test_emit_mlir_lowers_symbol_gt() -> None:
+    _assert_emit_mlir_lowers_symbol_compare("gt", SymbolGtOp)
+
+
+def test_emit_mlir_lowers_symbol_le() -> None:
+    _assert_emit_mlir_lowers_symbol_compare("le", SymbolLeOp)
+
+
+def test_emit_mlir_lowers_symbol_lt() -> None:
+    _assert_emit_mlir_lowers_symbol_compare("lt", SymbolLtOp)
+
+
+def test_emit_mlir_lowers_symbol_ne() -> None:
+    _assert_emit_mlir_lowers_symbol_compare("ne", SymbolNeOp)
 
 
 # EMIT-002A
