@@ -1923,6 +1923,159 @@ def test_build_func_op_from_ast_lowers_symbol_to_float() -> None:
             raise AssertionError("expected function output type list to stay [f32]")
 
 
+# MGEN-R2A
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 功能说明: 验证无返回注解但有显式 return 时，build_func_op 会按实际 return lowering 结果装配单结果 func.func。
+# 测试目的: 锁定 add_memory / gt / cast_dim / view_kernel 四类函数都不再因为 outputs=[] 而退回零结果。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_infers_return_type_from_body_without_return_annotation
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_infers_return_type_from_body_without_return_annotation() -> None:
+    from kernel_gen.operation.dma import view
+
+    lhs = Memory([2, 3], NumericType.Int32)
+    rhs = Memory([2, 3], NumericType.Int32)
+    src = Memory([4, 4], NumericType.Float32, space=MemorySpace.GM)
+
+    def add_memory(
+        lhs: "Tensor[i32, 2, 3]",
+        rhs: "Tensor[i32, 2, 3]",
+    ):
+        out = lhs + rhs
+        return out
+
+    def gt(lhs: int, rhs: int):
+        return lhs > rhs
+
+    def cast_dim(n: int):
+        return float(n)
+
+    def view_kernel(src: "Tensor[f32, 4, 4]"):
+        return view(src, [1, 1], [2, 2], [1, 1])
+
+    add_func = build_func_op(add_memory, lhs, rhs)
+    add_ops = [op for op in add_func.body.block.ops if isinstance(op, NnAddOp)]
+    add_return = next(op for op in add_func.body.block.ops if isinstance(op, func.ReturnOp))
+    assert len(add_ops) == 1
+    assert list(add_func.function_type.outputs) == [add_ops[0].result.type]
+    assert add_return.arguments[0].type == add_ops[0].result.type
+
+    gt_func = build_func_op(gt, SymbolDim("M"), SymbolDim("N"))
+    gt_return = next(op for op in gt_func.body.block.ops if isinstance(op, func.ReturnOp))
+    assert len(gt_return.arguments) == 1
+    assert gt_return.arguments[0].type == i1
+    assert list(gt_func.function_type.outputs) == [i1]
+
+    cast_func = build_func_op(cast_dim, SymbolDim("K"))
+    cast_ops = [op for op in cast_func.body.block.ops if isinstance(op, SymbolToFloatOp)]
+    cast_return = next(op for op in cast_func.body.block.ops if isinstance(op, func.ReturnOp))
+    assert len(cast_ops) == 1
+    assert cast_ops[0].result.type == f32
+    assert cast_return.arguments[0].type == f32
+    assert list(cast_func.function_type.outputs) == [f32]
+
+    view_func = build_func_op(view_kernel, src)
+    view_ops = [op for op in view_func.body.block.ops if isinstance(op, DmaViewOp)]
+    view_return = next(op for op in view_func.body.block.ops if isinstance(op, func.ReturnOp))
+    assert len(view_ops) == 1
+    assert list(view_func.function_type.outputs) == [view_ops[0].result.type]
+    assert view_return.arguments[0].type == view_ops[0].result.type
+
+
+# MGEN-R2B
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 功能说明: 验证来自 parse_function(...) 的无返回注解 AST，会通过 has_explicit_return 元信息驱动 build_func_op_from_ast 的返回装配。
+# 测试目的: 锁定 build_func_op_from_ast(...) 不再把 outputs=[] 直接解释成零结果。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_from_ast_infers_return_type_from_return_syntax_metadata
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_from_ast_infers_return_type_from_return_syntax_metadata() -> None:
+    lhs = Memory([2, 3], NumericType.Int32)
+    rhs = Memory([2, 3], NumericType.Int32)
+
+    def add_memory(
+        lhs: "Tensor[i32, 2, 3]",
+        rhs: "Tensor[i32, 2, 3]",
+    ):
+        out = lhs + rhs
+        return out
+
+    def gt(lhs: int, rhs: int):
+        return lhs > rhs
+
+    def cast_dim(n: int):
+        return float(n)
+
+    add_ast = parse_function(add_memory)
+    gt_ast = parse_function(gt)
+    cast_ast = parse_function(cast_dim)
+
+    assert add_ast.outputs == []
+    assert add_ast.has_explicit_return is True
+    assert gt_ast.outputs == []
+    assert gt_ast.has_explicit_return is True
+    assert cast_ast.outputs == []
+    assert cast_ast.has_explicit_return is True
+
+    add_func = build_func_op_from_ast(add_ast, runtime_args=[lhs, rhs])
+    add_ops = [op for op in add_func.body.block.ops if isinstance(op, NnAddOp)]
+    add_return = next(op for op in add_func.body.block.ops if isinstance(op, func.ReturnOp))
+    assert len(add_ops) == 1
+    assert list(add_func.function_type.outputs) == [add_ops[0].result.type]
+    assert add_return.arguments[0].type == add_ops[0].result.type
+
+    gt_func = build_func_op_from_ast(gt_ast, runtime_args=[SymbolDim("M"), SymbolDim("N")])
+    gt_return = next(op for op in gt_func.body.block.ops if isinstance(op, func.ReturnOp))
+    assert list(gt_func.function_type.outputs) == [i1]
+    assert gt_return.arguments[0].type == i1
+
+    cast_func = build_func_op_from_ast(cast_ast, runtime_args=[SymbolDim("K")])
+    cast_return = next(op for op in cast_func.body.block.ops if isinstance(op, func.ReturnOp))
+    assert list(cast_func.function_type.outputs) == [f32]
+    assert cast_return.arguments[0].type == f32
+
+
+# MGEN-R2C
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 功能说明: 验证参数注解不会覆盖 runtime_args 决定的输入/输出 IR。
+# 测试目的: 锁定参数注解写成 f16 时，若 runtime_args 传入 i32 memory，func.func 与 nn.add 结果都保持 i32 memory。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_uses_runtime_args_not_parameter_annotations_for_ir
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_uses_runtime_args_not_parameter_annotations_for_ir() -> None:
+    lhs = Memory([2, 3], NumericType.Int32)
+    rhs = Memory([2, 3], NumericType.Int32)
+    expected_type = _memory_to_nn_type(lhs)
+
+    def add_memory_param_hint(
+        lhs: "Tensor[f16, 2, 3]",
+        rhs: "Tensor[f16, 2, 3]",
+    ):
+        out = lhs + rhs
+        return out
+
+    func_op = build_func_op(add_memory_param_hint, lhs, rhs)
+    add_ops = [op for op in func_op.body.block.ops if isinstance(op, NnAddOp)]
+    return_op = next(op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp))
+    assert [arg.type for arg in func_op.args] == [expected_type, expected_type]
+    assert len(add_ops) == 1
+    assert add_ops[0].result.type == expected_type
+    assert list(func_op.function_type.outputs) == [expected_type]
+    assert return_op.arguments[0].type == expected_type
+
+
 # MGEN-006
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀

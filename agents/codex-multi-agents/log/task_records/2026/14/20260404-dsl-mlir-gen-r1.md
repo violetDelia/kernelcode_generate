@@ -69,3 +69,91 @@
 - 结论：
   - `T-20260404-7331ab22` 已完成并封板。
   - 后续链路已按当前规则衔接到合并阶段，等待管理员核对并分发 `T-20260404-bf981678`。
+
+- 时间：2026-04-04 01:10:59 +0800
+- 经办人：`朽木露琪亚`
+- 任务：`T-20260404-f7f3e21a`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/dsl_mlir_gen_return_from_body_plan.md` 的 `R2` 收口函数级返回推导：`func.func` 输入跟随 `runtime_args`，输出跟随实际 `return` 表达式 lowering 结果。
+- 改动：
+  - 更新 `kernel_gen/dsl/mlir_gen.py`：
+    - 新增 `_function_has_value_return(...)`，统一收口“显式返回注解 / 显式 return 语法元信息 / 显式 `-> None`”三者对函数返回装配的判定。
+    - 调整 `_build_func_op_from_ast_impl(...)`：当 `FunctionAST.has_explicit_return == True` 且 `outputs == []` 时，直接按最后一条显式 `return expr` 的 lowering 结果推导 `result_types`，不再退回零结果。
+    - 保持原边界：仍只改函数级返回推导与返回装配；未改 `emit_mlir` 节点级发射规则。
+  - 更新 `spec/dsl/mlir_gen.md`：
+    - 写清 `func.func inputs` 跟随 `runtime_args`，`func.func outputs` 跟随实际 `return` lowering 结果。
+    - 写清无返回注解但有显式 `return` 时，`build_func_op(...) / build_func_op_from_ast(...)` 仍必须生成单结果 `func.func`。
+    - 新增 `MGEN-R2A / MGEN-R2B / MGEN-R2C` 测试映射。
+  - 更新 `test/dsl/test_mlir_gen.py`：
+    - 新增 `test_build_func_op_infers_return_type_from_body_without_return_annotation`
+    - 新增 `test_build_func_op_from_ast_infers_return_type_from_return_syntax_metadata`
+    - 新增 `test_build_func_op_uses_runtime_args_not_parameter_annotations_for_ir`
+    - 覆盖 `add_memory / gt / cast_dim / view_kernel` 无返回注解正向路径，以及参数注解 `f16` 与 `runtime_args=i32 memory` 冲突时的输入/输出 IR 口径。
+- 结论：
+  - `R2` 已按边界完成，仅修改：
+    - `spec/dsl/mlir_gen.md`
+    - `kernel_gen/dsl/mlir_gen.py`
+    - `test/dsl/test_mlir_gen.py`
+  - 验证结果：
+    - `pytest -q test/dsl/test_mlir_gen.py -k 'test_build_func_op_infers_return_type_from_body_without_return_annotation or test_build_func_op_from_ast_infers_return_type_from_return_syntax_metadata or test_build_func_op_uses_runtime_args_not_parameter_annotations_for_ir'` -> `3 passed`
+    - `pytest -q test/dsl/test_mlir_gen.py -k 'test_build_func_op_supports_dma_helper_calls or test_build_func_op_lowers_symbol_to_float or test_build_func_op_from_ast_lowers_symbol_to_float or test_build_func_op_lowers_symbol_eq or test_build_func_op_lowers_symbol_ge'` -> `7 passed`
+    - `git diff --check -- spec/dsl/mlir_gen.md kernel_gen/dsl/mlir_gen.py test/dsl/test_mlir_gen.py` -> 通过
+  - 当前无阻塞。
+  - 建议下一步进入同链审查阶段，重点核对：
+    - 无返回注解但有显式 `return` 时 `outputs=[]` 与单结果 `func.func` 是否同时成立；
+    - `runtime_args` 是否仍是输入/输出 IR 的最终真值；
+    - `build_func_op_from_ast(...)` 是否确实消费了 `has_explicit_return` 元信息，而不是继续依赖 `FunctionAST.outputs`。
+
+- 时间：2026-04-04 01:20:26 +0800
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-00dc3206`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/dsl_mlir_gen_return_from_body_plan.md` 的 `R2` 审查边界，只读复核 `spec/dsl/mlir_gen.md`、`kernel_gen/dsl/mlir_gen.py`、`test/dsl/test_mlir_gen.py` 与同链路记录文件是否和 `R2` 的目标、边界、验证命令、验收标准一致。
+- 审查前自检：
+  - 已核对计划、`spec`、实现、测试与记录是否一致。
+  - 已核查功能正确性、边界条件与异常路径。
+  - 已补充计划外证据：对无返回注解 `view_kernel` 的 `parse_function(...) -> build_func_op_from_ast(...)` 路径做了只读复现，确认 `func.func outputs == dma.view.result.type` 且 `func.return` operand.type 一致。
+  - 结论前没有发现需要补问管理员的环境、`worktree`、边界或计划口径阻塞。
+- 审查结论：
+  - `通过`。
+- 审查结果：
+  - [mlir_gen.py](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/kernel_gen/dsl/mlir_gen.py#L567) 到 [mlir_gen.py](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/kernel_gen/dsl/mlir_gen.py#L580) 已按 `R2` 收口：只要 `_function_has_value_return(func_ast)` 判定为真，即使 `FunctionAST.outputs == []`，也会按最后一条显式 `return expr` 的 lowering 结果推导 `result_types`，不再退回零结果。
+  - [mlir_gen.py](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/kernel_gen/dsl/mlir_gen.py#L433) 到 [mlir_gen.py](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/kernel_gen/dsl/mlir_gen.py#L457) 的 `_function_has_value_return(...)` 确实消费了 `returns_none`、`outputs`、`has_explicit_return` 三者，不再把 `FunctionAST.outputs` 当作唯一真值。
+  - [mlir_gen.py](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/spec/dsl/mlir_gen.md#L45) 到 [mlir_gen.py](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/spec/dsl/mlir_gen.md#L46) 的 `spec` 已和实现一致：输入跟随 `runtime_args`，输出跟随实际 `return` lowering 结果，参数注解不得覆盖 `runtime_args` 决定的 IR。
+  - [test_mlir_gen.py](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/test/dsl/test_mlir_gen.py#L1937) 的 `MGEN-R2A` 覆盖 `add_memory / gt / cast_dim / view_kernel` 四类无返回注解正向路径；[test_mlir_gen.py](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/test/dsl/test_mlir_gen.py#L2000) 的 `MGEN-R2B` 覆盖 `build_func_op_from_ast(...)` 对无返回注解 AST 的返回装配；[test_mlir_gen.py](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/test/dsl/test_mlir_gen.py#L2057) 的 `MGEN-R2C` 覆盖参数注解不覆盖 `runtime_args` 的输入/输出 IR。
+- 漏洞与边界排查：
+  - 功能正确性：通过。无返回注解但有显式 `return` 时，`func.func outputs` 与 `func.return` operand.type 都跟随实际 `return` lowering。
+  - 边界条件：通过。参数注解与 `runtime_args` 冲突时，IR 仍跟随 `runtime_args`；`build_func_op_from_ast(...)` 路径也消费了 `has_explicit_return` 元信息。
+  - 异常路径：通过。`runtime_args must align with func_ast inputs`、`Return type does not match annotation` 等既有错误边界仍在；本轮没有把歧义路径静默降成零结果。
+  - 潜在漏洞/歧义：未发现当前 `R2` 边界内的新双口径问题。
+- 验证：
+  - `python -m pytest -q test/dsl/test_mlir_gen.py -k 'test_build_func_op_infers_return_type_from_body_without_return_annotation or test_build_func_op_from_ast_infers_return_type_from_return_syntax_metadata or test_build_func_op_uses_runtime_args_not_parameter_annotations_for_ir'` -> `3 passed, 115 deselected`
+  - 只读复现：`view_kernel` 的 `parse_function(...) -> build_func_op_from_ast(...)` 路径输出 `AST_OUTPUTS []`，并满足 `func.func outputs == dma.view.result.type`、`func.return operand.type == dma.view.result.type`
+  - `python -m pytest -q test/dsl/test_mlir_gen.py` -> `115 passed, 3 failed`
+  - 额外说明：全量失败项仍是既有 mixed dtype promotion 基线问题，错误集中在 `emit_mlir.py` 侧 `Memory._promote_dtype` 缺失，与本轮 `R2` 返回装配改动无直接关系，不作为本次结论问题。
+- 下一步建议：
+  - 进入同链合并阶段；合并范围必须覆盖当前链路已完成的 `R1 + R2` 全部 `spec / 实现 / 测试 / 记录文件`，不能只带 `R2` 增量。
+
+- 时间：2026-04-04 01:20:26 +0800
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-00dc3206`
+- 任务目标：
+  - 完成当前审查任务流转，并按同链路补建唯一后续合并任务。
+- 改动：
+  - 已执行：
+    - `codex-multi-agents-task.sh -done -task_id T-20260404-00dc3206 ...`
+    - 结果：当前审查任务已标记完成，`agents-lists.md` 中 `提莫炖蘑菇` 状态同步成功。
+  - 已新建后续合并任务：
+    - `T-20260404-ea7e3cf4`
+    - 目标：在同一 `worktree` 中按整条已完成的 `R1 + R2` 链路合入 `spec / 实现 / 测试 / 记录文件`。
+  - 合并范围确认：
+    - `wt-20260404-dsl-mlir-gen-r1/spec/dsl/ast.md`
+    - `wt-20260404-dsl-mlir-gen-r1/kernel_gen/dsl/ast.py`
+    - `wt-20260404-dsl-mlir-gen-r1/test/dsl/test_ast.py`
+    - `wt-20260404-dsl-mlir-gen-r1/spec/dsl/mlir_gen.md`
+    - `wt-20260404-dsl-mlir-gen-r1/kernel_gen/dsl/mlir_gen.py`
+    - `wt-20260404-dsl-mlir-gen-r1/test/dsl/test_mlir_gen.py`
+    - `agents/codex-multi-agents/log/task_records/2026/14/20260404-dsl-mlir-gen-r1.md`
+- 结论：
+  - `T-20260404-00dc3206` 已完成并封板。
+  - 后续链路已按当前规则衔接到合并阶段，等待管理员核对并分发 `T-20260404-ea7e3cf4`。

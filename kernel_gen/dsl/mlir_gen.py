@@ -430,6 +430,33 @@ def _validate_return_type(
         raise _LoweringError("Return type does not match annotation", location=func_ast.location)
 
 
+def _function_has_value_return(func_ast: FunctionAST) -> bool:
+    """判断函数是否应装配单返回值。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 显式返回注解始终视为值返回。
+    - 无返回注解时，仅当 AST 标记存在显式 `return expr` 时才视为值返回。
+    - 显式 `-> None` 不属于值返回。
+
+    使用示例:
+    - if _function_has_value_return(func_ast): ...
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+    """
+
+    if func_ast.returns_none:
+        return False
+    if func_ast.outputs:
+        return True
+    return func_ast.has_explicit_return
+
+
 def build_func_op(
     fn: Callable[..., object],
     *runtime_args: object,
@@ -537,8 +564,9 @@ def _build_func_op_from_ast_impl(
         }
     statements = _ensure_supported_statements(func_ast)
     result_types: list[object] = []
+    has_value_return = _function_has_value_return(func_ast)
     infer_scalar_return = False
-    if func_ast.outputs:
+    if has_value_return:
         return_expr = statements[-1]
         if is_dma_alloc_only:
             if not isinstance(return_expr, DmaAllocAST):
@@ -546,7 +574,8 @@ def _build_func_op_from_ast_impl(
             result_type = _build_dma_alloc_only_result_type(func_ast, return_expr, runtime_args)
         else:
             result_type = _infer_expr_type(return_expr, dict(type_map), runtime_values=runtime_values)
-        _validate_return_type(func_ast, result_type, return_expr, dict(type_map))
+        if func_ast.outputs:
+            _validate_return_type(func_ast, result_type, return_expr, dict(type_map))
         type_map[_expr_key(return_expr)] = result_type
         result_types = [result_type]
     elif _is_symbol_scalar_function(func_ast):
@@ -571,7 +600,7 @@ def _build_func_op_from_ast_impl(
     _seed_input_symbol_aliases(ctx, func_ast, block)
     visitor = AstVisitor(config=config)
     return_value = visitor.visit_function(func_ast, ctx)
-    if func_ast.outputs or infer_scalar_return:
+    if has_value_return or infer_scalar_return:
         if return_value is None:
             raise _LoweringError("Function body is empty", location=func_ast.location)
         block.add_op(func.ReturnOp(return_value))
