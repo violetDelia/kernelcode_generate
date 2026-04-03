@@ -197,6 +197,39 @@ def _build_signature_types(
     return arg_types, type_map
 
 
+def _seed_input_symbol_aliases(
+    ctx: EmitContext,
+    func_ast: FunctionAST,
+    block: Block,
+) -> None:
+    """为函数输入预灌参数名与 symbol expr 的双向别名。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 让 `ScalarArgAST` 在 `build_func_op_from_ast(...)` 路径中同时按参数名和 `!symbol.int<expr>` 文本被查到。
+    - 为动态 `dma.slice/view/alloc` 这类通过结果 shape 反查 symbol 名称的 lowering 提供稳定绑定。
+
+    使用示例:
+    - _seed_input_symbol_aliases(ctx, func_ast, block)
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+    """
+
+    block_args = tuple(block.args)
+    for index, item in enumerate(func_ast.inputs):
+        if index >= len(block_args):
+            break
+        block_arg = block_args[index]
+        ctx.symbols.setdefault(item.name, block_arg)
+        if isinstance(item, ScalarArgAST) and isinstance(block_arg.type, SymbolValueType):
+            ctx.symbols.setdefault(block_arg.type.expr.expr.data, block_arg)
+
+
 def _parse_function_with_env(
     fn: Callable[..., object],
     globals_table: dict[str, object] | None,
@@ -535,6 +568,7 @@ def _build_func_op_from_ast_impl(
     func_op = func.FuncOp(func_ast.name, func_type, Region(block))
 
     ctx = EmitContext(builder=block, symbols={}, types=dict(type_map), config=config)
+    _seed_input_symbol_aliases(ctx, func_ast, block)
     visitor = AstVisitor(config=config)
     return_value = visitor.visit_function(func_ast, ctx)
     if func_ast.outputs or infer_scalar_return:

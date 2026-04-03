@@ -2121,6 +2121,57 @@ def test_build_func_op_supports_dma_slice_helper() -> None:
     assert return_ops[0].operands[0] is alloc_ops[0].result
 
 
+# MGEN-026C
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-03 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-03 00:00:00 +0800
+# 功能说明: 验证 dynamic symbol slice helper 在 build_func_op 链路中可直接 lowering。
+# 测试目的: 锁定 `slice(..., [size_row, size_col], ...)` 不再因结果 shape 反查符号失败而报 `Unknown index symbol`。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_supports_dynamic_symbol_dma_slice_helper
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_supports_dynamic_symbol_dma_slice_helper() -> None:
+    from kernel_gen.operation.dma import slice
+
+    row_symbol = SymbolDim("TILE_M")
+    col_symbol = SymbolDim("TILE_N")
+    row_expr = str(row_symbol.get_symbol())
+    col_expr = str(col_symbol.get_symbol())
+    source = Memory([SymbolDim("SRC_M"), SymbolDim("SRC_N")], NumericType.Float32, space=MemorySpace.GM)
+
+    def slice_symbol_kernel(
+        src: f"Tensor[f32, SRC_M, SRC_N]",
+        size_row: SymbolDim,
+        size_col: SymbolDim,
+    ) -> f"Tensor[f32, {row_expr}, {col_expr}]":
+        return slice(src, [0, 0], [size_row, size_col], [1, 1], MemorySpace.LM)
+
+    func_op = build_func_op(
+        slice_symbol_kernel,
+        source,
+        row_symbol,
+        col_symbol,
+        globals={"row_expr": row_expr, "col_expr": col_expr},
+    )
+    alloc_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaAllocOp)]
+    slice_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaSliceOp)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
+
+    assert len(alloc_ops) == 1
+    assert len(slice_ops) == 1
+    assert len(return_ops) == 1
+    assert list(func_op.function_type.inputs) == [
+        _memory_to_nn_type(source),
+        SymbolValueType.from_expr(row_expr),
+        SymbolValueType.from_expr(col_expr),
+    ]
+    assert [attr.data for attr in alloc_ops[0].result.type.shape.data] == [row_expr, col_expr]
+    assert slice_ops[0].target is alloc_ops[0].result
+    assert return_ops[0].operands[0] is alloc_ops[0].result
+
+
 # MGEN-026
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚

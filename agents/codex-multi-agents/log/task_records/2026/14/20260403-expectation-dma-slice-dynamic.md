@@ -1,0 +1,131 @@
+- 时间：2026-04-03 22:38:20 +0800
+- 经办人：`金铲铲大作战`
+- 任务：`T-20260403-7e7a8950`
+- 任务目标：
+  - 以 `/home/lfr/kernelcode_generate/expectation/dsl/mlir_gen/dialect/dma/slice` 为直接验收参考，在 `wt-20260403-expectation-dma-slice-dynamic` 修复 dynamic symbol slice 的 `Case-2 Unknown index symbol` 缺口。
+  - 保持静态 `slice helper` 主线不回退，尤其是 `test_build_func_op_supports_dma_slice_helper` 继续通过。
+  - 不通过放宽 expectation 或降级错误口径关闭问题。
+- 改动：
+  - 修改 [`kernel_gen/dsl/emit_mlir.py`](/home/lfr/kernelcode_generate/wt-20260403-expectation-dma-slice-dynamic/kernel_gen/dsl/emit_mlir.py)
+    - 新增 `_materialize_index_symbol_from_symbol_alias(...)`，允许 `_resolve_index_symbol(...)` 在 `ctx.symbols` 仅按参数名缓存时，回查已绑定 `!symbol.int<expr>` 的 expr 名别名。
+    - 让 dynamic `dma.slice` / `dma.view` / `alloc_shape` 这类按结果类型 shape 反查 symbol 名称的 lowering，不再只能依赖参数名命中。
+  - 修改 [`kernel_gen/dsl/mlir_gen.py`](/home/lfr/kernelcode_generate/wt-20260403-expectation-dma-slice-dynamic/kernel_gen/dsl/mlir_gen.py)
+    - 新增 `_seed_input_symbol_aliases(...)`，在 `build_func_op_from_ast(...)` 组装阶段为函数输入预灌参数名与 `!symbol.int<expr>` 的双向别名。
+    - 保持 `build_func_op(...)` / `build_func_op_from_ast(...)` 入口都走同一条 alias 绑定逻辑。
+  - 修改 [`test/dsl/test_ast_visitor.py`](/home/lfr/kernelcode_generate/wt-20260403-expectation-dma-slice-dynamic/test/dsl/test_ast_visitor.py)
+    - 新增 `test_build_func_op_supports_dynamic_symbol_dma_slice_helper`，锁定 dynamic symbol slice 在 `build_func_op(...)` 链路中不再报 `Unknown index symbol`，并检查输入符号类型、`dma.alloc` 结果 shape 和 `func.return` 结果绑定。
+  - 修改 [`test/dsl/test_mlir_gen.py`](/home/lfr/kernelcode_generate/wt-20260403-expectation-dma-slice-dynamic/test/dsl/test_mlir_gen.py)
+    - 新增同名 dynamic symbol slice 集成回归，锁定 `func.function_type.inputs`、`func.function_type.outputs` 与 `dma.alloc` 结果类型保持符号表达式一致。
+- 验证：
+  - 原始 expectation 只读复现：
+    - `python /home/lfr/kernelcode_generate/expectation/dsl/mlir_gen/dialect/dma/slice`
+    - 结果：在主仓当前代码口径下，`Case-2` 稳定复现 `AstVisitorError: Unknown index symbol`。
+  - worktree 代码口径 expectation 验证：
+    - 由于 expectation 脚本内部固定把 `REPO_ROOT` 指向主仓 `/home/lfr/kernelcode_generate`，不会直接加载 worktree 中的 `kernel_gen`。
+    - 本轮采用“expectation 内容不变 + 临时镜像 runner”方式验证：复制原 expectation 脚本与 `expectation/utils` 到临时目录，并把该临时目录下的 `kernel_gen` 软链到 [`wt-20260403-expectation-dma-slice-dynamic/kernel_gen`](/home/lfr/kernelcode_generate/wt-20260403-expectation-dma-slice-dynamic/kernel_gen)。
+    - 结果：`Case-1..5` 全部通过，`Case-2` 已不再报 `Unknown index symbol`，并能正确生成 `dma.alloc(%1, %2)` 与动态 `dma.slice`。
+  - 定向回归：
+    - `python -m pytest -q test/dsl/test_ast_visitor.py -k 'test_build_func_op_supports_dma_slice_helper or test_build_func_op_supports_dynamic_symbol_dma_slice_helper'`
+    - 结果：`2 passed, 188 deselected`
+    - `python -m pytest -q test/dsl/test_mlir_gen.py -k 'test_build_func_op_supports_dma_slice_helper or test_build_func_op_supports_dynamic_symbol_dma_slice_helper'`
+    - 结果：`2 passed, 113 deselected`
+  - 范围内全量抽查：
+    - `python -m pytest -q test/dsl/test_ast_visitor.py`
+    - 结果：`5 failed, 185 passed`
+    - 失败项为现有无关基线问题：`Memory._promote_dtype` 缺失导致 mixed dtype promotion 相关 case 失败，以及旧 compare 负向断言仍期待 `Unsupported symbol compare op`。
+    - `python -m pytest -q test/dsl/test_mlir_gen.py`
+    - 结果：`3 failed, 112 passed`
+    - 同样失败在现有 mixed dtype promotion 基线问题，和本轮 dynamic symbol slice 修复无直接关系。
+- 结论：
+  - dynamic symbol slice 的核心缺口已修复：在 worktree 代码口径下，expectation `dma/slice` 的 `Case-2` 可通过，且静态 `slice helper` 回归保持通过。
+  - 本轮没有通过放宽 expectation 口径规避问题，而是补齐了 symbol alias 绑定，使返回注解中的动态 shape 符号能正确回指到函数输入的 `!symbol.int` SSAValue。
+  - 后续审查/合并需显式注意：原始 expectation 脚本在未合并前仍会导向主仓代码；验收时应以同内容镜像到 worktree 代码口径后的结果为准，或待链路合并后再直接回跑主仓 expectation。
+
+- 时间：2026-04-03 22:39:38 +0800
+- 经办人：`金铲铲大作战`
+- 任务流转：
+  - 已执行 `-done`：
+    - `T-20260403-7e7a8950`
+  - 已新建同链路后续复审任务：
+    - `T-20260403-d687d5f8`
+- 后续复审范围建议：
+  - [`kernel_gen/dsl/emit_mlir.py`](/home/lfr/kernelcode_generate/wt-20260403-expectation-dma-slice-dynamic/kernel_gen/dsl/emit_mlir.py)
+  - [`kernel_gen/dsl/mlir_gen.py`](/home/lfr/kernelcode_generate/wt-20260403-expectation-dma-slice-dynamic/kernel_gen/dsl/mlir_gen.py)
+  - [`test/dsl/test_ast_visitor.py`](/home/lfr/kernelcode_generate/wt-20260403-expectation-dma-slice-dynamic/test/dsl/test_ast_visitor.py)
+  - [`test/dsl/test_mlir_gen.py`](/home/lfr/kernelcode_generate/wt-20260403-expectation-dma-slice-dynamic/test/dsl/test_mlir_gen.py)
+  - [`20260403-expectation-dma-slice-dynamic.md`](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260403-expectation-dma-slice-dynamic.md)
+
+- 时间：2026-04-03 22:46:28 +0800
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260403-d687d5f8`
+- 任务目标：
+  - 只读复核独立 expectation 修复链路，确认 dynamic symbol `dma.slice` expectation 的 `Case-2` 不再报 `Unknown index symbol`，`Case-1..5` 全通过，静态 `slice helper` 回归继续通过，且本轮未通过降级 expectation 口径关闭问题。
+- 复审结论：
+  - `通过`。
+- 复审结果：
+  - [emit_mlir.py](/home/lfr/kernelcode_generate/wt-20260403-expectation-dma-slice-dynamic/kernel_gen/dsl/emit_mlir.py#L609) 到 [emit_mlir.py](/home/lfr/kernelcode_generate/wt-20260403-expectation-dma-slice-dynamic/kernel_gen/dsl/emit_mlir.py#L670) 新增的 `_materialize_index_symbol_from_symbol_alias(...)` 是在 `_resolve_index_symbol(...)` 内补一层 `!symbol.int<expr>` 别名回查；旧的 `Unknown index symbol` 负向分支仍保留，未被吞掉。
+  - [mlir_gen.py](/home/lfr/kernelcode_generate/wt-20260403-expectation-dma-slice-dynamic/kernel_gen/dsl/mlir_gen.py#L200) 到 [mlir_gen.py](/home/lfr/kernelcode_generate/wt-20260403-expectation-dma-slice-dynamic/kernel_gen/dsl/mlir_gen.py#L230) 通过 `_seed_input_symbol_aliases(...)` 为 `build_func_op_from_ast(...)` 预灌参数名和 `!symbol.int<expr>` 双向别名，和 `emit_mlir` 的 alias 回查逻辑是配套修复，不是 expectation 降级。
+  - [test_ast_visitor.py](/home/lfr/kernelcode_generate/wt-20260403-expectation-dma-slice-dynamic/test/dsl/test_ast_visitor.py#L2104) 的 `test_build_func_op_supports_dma_slice_helper` 继续通过；[test_ast_visitor.py](/home/lfr/kernelcode_generate/wt-20260403-expectation-dma-slice-dynamic/test/dsl/test_ast_visitor.py#L2135) 的 dynamic symbol slice 新回归已锁住 `Unknown index symbol` 缺口。
+  - [test_mlir_gen.py](/home/lfr/kernelcode_generate/wt-20260403-expectation-dma-slice-dynamic/test/dsl/test_mlir_gen.py#L1694) 的静态 `slice helper` 继续通过；[test_mlir_gen.py](/home/lfr/kernelcode_generate/wt-20260403-expectation-dma-slice-dynamic/test/dsl/test_mlir_gen.py#L1725) 的 dynamic symbol slice 新回归已锁住 `func.function_type.outputs == dma.alloc.result.type`。
+  - `git status --short` 显示本轮 tracked 改动只落在 `kernel_gen/dsl/emit_mlir.py`、`kernel_gen/dsl/mlir_gen.py`、`test/dsl/test_ast_visitor.py`、`test/dsl/test_mlir_gen.py`；未发现 expectation 文件被改动，说明不是通过改 expectation 口径关闭问题。
+- 漏洞与边界排查：
+  - 功能正确性：通过。dynamic symbol `dma.slice` 的 `Case-2` 已能正确绑定 `!symbol.int` 输入，不再报 `Unknown index symbol`。
+  - 边界条件：通过。`Case-1..5` 全通过，静态 `slice helper` 回归保持通过。
+  - 异常路径：通过。现有 [test_ast_visitor.py](/home/lfr/kernelcode_generate/wt-20260403-expectation-dma-slice-dynamic/test/dsl/test_ast_visitor.py#L4336) `test_emit_mlir_index_resolution_helpers` 仍能对缺失 symbol 触发 `Unknown index symbol`，未出现全局吞错。
+  - 潜在漏洞/歧义：未发现 expectation 降级或关闭问题的迹象；修复点收敛在 alias 绑定。
+- 验证：
+  - `python -m pytest -q test/dsl/test_ast_visitor.py -k 'test_build_func_op_supports_dma_slice_helper or test_build_func_op_supports_dynamic_symbol_dma_slice_helper'` -> `2 passed, 188 deselected`
+  - `python -m pytest -q test/dsl/test_mlir_gen.py -k 'test_build_func_op_supports_dma_slice_helper or test_build_func_op_supports_dynamic_symbol_dma_slice_helper'` -> `2 passed, 113 deselected`
+  - `python -m pytest -q test/dsl/test_ast_visitor.py -k 'test_emit_mlir_index_resolution_helpers'` -> `1 passed, 189 deselected`
+  - expectation 镜像 runner：
+    - 复制主仓 `expectation/dsl/mlir_gen/dialect/dma/slice` 与 `expectation/utils` 到临时目录，并把临时目录 `kernel_gen` 软链到 [`wt-20260403-expectation-dma-slice-dynamic/kernel_gen`](/home/lfr/kernelcode_generate/wt-20260403-expectation-dma-slice-dynamic/kernel_gen)。
+    - 结果：`Case-1..5` 全通过，`Case-2` 输出中已能正确生成 `dma.alloc(%1, %2)` 与动态 `dma.slice`，不再报 `Unknown index symbol`。
+- 下一步建议：
+  - 进入同链路合并阶段；合并范围应覆盖本独立链路的实现、测试与记录文件，不带 expectation 文件。
+
+- 时间：2026-04-03 22:46:28 +0800
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260403-d687d5f8`
+- 任务目标：
+  - 完成当前复审任务流转，并按同链路补建唯一后续合并任务。
+- 改动：
+  - 已执行：
+    - `codex-multi-agents-task.sh -done -task_id T-20260403-d687d5f8 ...`
+    - 结果：当前复审任务已标记完成，`agents-lists.md` 中 `提莫炖蘑菇` 状态同步成功。
+  - 已新建后续合并任务：
+    - `T-20260403-5f522b81`
+    - 目标：在同一 `worktree` 中按本独立修复链路合入实现、测试与记录文件。
+  - 合并范围确认：
+    - `wt-20260403-expectation-dma-slice-dynamic/kernel_gen/dsl/emit_mlir.py`
+    - `wt-20260403-expectation-dma-slice-dynamic/kernel_gen/dsl/mlir_gen.py`
+    - `wt-20260403-expectation-dma-slice-dynamic/test/dsl/test_ast_visitor.py`
+    - `wt-20260403-expectation-dma-slice-dynamic/test/dsl/test_mlir_gen.py`
+    - `agents/codex-multi-agents/log/task_records/2026/14/20260403-expectation-dma-slice-dynamic.md`
+  - 非合并范围确认：
+    - 不带 `expectation/dsl/mlir_gen/dialect/dma/slice` 文件本身。
+- 结论：
+  - `T-20260403-d687d5f8` 已完成并封板。
+  - 后续链路已按当前规则衔接到合并阶段，等待管理员核对并分发 `T-20260403-5f522b81`。
+
+- 时间：2026-04-03 23:10:00 +0800
+- 经办人：`李白`
+- 任务：`T-20260403-5f522b81`
+- 任务目标：
+  - 在主仓按独立 `expectation dma.slice dynamic` 修复链路合入实现、测试与记录文件，保持 `expectation/dsl/mlir_gen/dialect/dma/slice` 的 `Case-1..5` 在 worktree 代码口径下全通过，`Case-2` 不再报 `Unknown index symbol`，静态 `test_build_func_op_supports_dma_slice_helper` 继续通过，且不带 `expectation` 文件本身。
+- 合并范围：
+  - [`kernel_gen/dsl/emit_mlir.py`](/home/lfr/kernelcode_generate/kernel_gen/dsl/emit_mlir.py)
+  - [`kernel_gen/dsl/mlir_gen.py`](/home/lfr/kernelcode_generate/kernel_gen/dsl/mlir_gen.py)
+  - [`test/dsl/test_ast_visitor.py`](/home/lfr/kernelcode_generate/test/dsl/test_ast_visitor.py)
+  - [`test/dsl/test_mlir_gen.py`](/home/lfr/kernelcode_generate/test/dsl/test_mlir_gen.py)
+  - [`20260403-expectation-dma-slice-dynamic.md`](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260403-expectation-dma-slice-dynamic.md)
+- 处理说明：
+  - 主仓当前在 [`kernel_gen/dsl/mlir_gen.py`](/home/lfr/kernelcode_generate/kernel_gen/dsl/mlir_gen.py)、[`test/dsl/test_ast_visitor.py`](/home/lfr/kernelcode_generate/test/dsl/test_ast_visitor.py)、[`test/dsl/test_mlir_gen.py`](/home/lfr/kernelcode_generate/test/dsl/test_mlir_gen.py) 存在更晚的未提交本地改动。
+  - 本轮按“最新改动时间优先”保留主仓较新的无关变更，再最小补入本链路的 `dma.slice dynamic` alias 修复和两条 dynamic helper 回归，未覆盖主仓较新的其他测试/返回语义改动。
+  - 本轮未带入任何 `expectation/dsl/mlir_gen/dialect/dma/slice` 文件本身。
+- 验证：
+  - `python -m pytest -q test/dsl/test_ast_visitor.py -k 'test_build_func_op_supports_dma_slice_helper or test_build_func_op_supports_dynamic_symbol_dma_slice_helper or test_emit_mlir_index_resolution_helpers'`
+  - `python -m pytest -q test/dsl/test_mlir_gen.py -k 'test_build_func_op_supports_dma_slice_helper or test_build_func_op_supports_dynamic_symbol_dma_slice_helper'`
+  - expectation 镜像 runner：复制主仓 `expectation/dsl/mlir_gen/dialect/dma/slice` 与 `expectation/utils` 到临时目录，并把临时目录 `kernel_gen` 软链到 [`wt-20260403-expectation-dma-slice-dynamic/kernel_gen`](/home/lfr/kernelcode_generate/wt-20260403-expectation-dma-slice-dynamic/kernel_gen)
+  - `git diff --check -- kernel_gen/dsl/emit_mlir.py kernel_gen/dsl/mlir_gen.py test/dsl/test_ast_visitor.py test/dsl/test_mlir_gen.py`
+- 结论：
+  - 独立 `expectation dma.slice dynamic` 链路已满足合并条件；下一步执行仅包含本链路补丁的提交、推送、cleanup 与 `-done`。

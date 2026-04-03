@@ -606,6 +606,43 @@ def _materialize_index_symbol_from_memory(
     return None
 
 
+def _materialize_index_symbol_from_symbol_alias(
+    name: str,
+    ctx: EmitContext,
+    location: SourceLocation | None,
+) -> SSAValue | None:
+    """从已绑定的 `!symbol.int` 参数中回查符号别名。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 当 `ctx.symbols` 只按参数名缓存符号 SSAValue 时，补做一次按 `!symbol.int<expr>` 的 expr 名匹配。
+    - 命中后把 `name -> SSAValue` 写回 `ctx.symbols`，供后续动态 shape/stride lowering 直接复用。
+
+    使用示例:
+    - _materialize_index_symbol_from_symbol_alias("TILE_M", ctx, location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    del location
+    for candidate in ctx.symbols.values():
+        if not isinstance(candidate, SSAValue):
+            continue
+        candidate_type = candidate.type
+        if not isinstance(candidate_type, SymbolValueType):
+            continue
+        if candidate_type.expr.expr.data != name:
+            continue
+        ctx.symbols[name] = candidate
+        return candidate
+    return None
+
+
 def _resolve_index_symbol(name: str, ctx: EmitContext, location: SourceLocation | None) -> SSAValue:
     """解析索引表达式中的符号名引用。
 
@@ -625,6 +662,9 @@ def _resolve_index_symbol(name: str, ctx: EmitContext, location: SourceLocation 
     - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
     """
     if name not in ctx.symbols:
+        aliased = _materialize_index_symbol_from_symbol_alias(name, ctx, location)
+        if aliased is not None:
+            return aliased
         materialized = _materialize_index_symbol_from_memory(name, ctx, location)
         if materialized is None:
             raise _LoweringError("Unknown index symbol", location=location)
