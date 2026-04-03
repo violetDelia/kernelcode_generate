@@ -47,15 +47,17 @@
 
 ## 公开接口
 
-### `gen_kernel(func_op, ctx)`
+### `gen_kernel(op_or_func, ctx)`
 
 功能说明：
 
 - 将单个优化后的 MLIR `func.func` 生成为完整的目标后端函数源码文本。
+- 这是 `kernel_gen.dsl.gen_kernel` 唯一稳定公开入口；下游和测试主口径只允许稳定依赖 `gen_kernel(...)` 与错误类型 `GenKernelError`。
+- `gen_signature(...)`、`gen_body(...)` 仅可作为模块内部实现拆分继续存在，不再属于公开稳定接口。
 
 参数说明：
 
-- `func_op`（`object`）：待生成的 MLIR `func.func`。
+- `op_or_func`（`object`）：待生成的 MLIR `func.func`。
 - `ctx`（`EmitCContext`）：由 `emit_c` 定义并复用的源码生成上下文。
 
 使用示例：
@@ -78,11 +80,14 @@ source = gen_kernel(func_op, EmitCContext(target="cpu"))
 - 返回语义：完整目标后端函数源码文本。
 - 限制条件：仅支持当前 target 下可映射的 IR 子集。
 
+## 内部实现拆分（非公开稳定接口）
+
 ### `gen_signature(func_op, ctx)`
 
 功能说明：
 
 - 根据 `func.func` 的输入输出类型生成目标后端函数签名。
+- 该 helper 仅服务于 `gen_kernel(...)` 的内部拼装与单测覆盖，不构成下游稳定公开接口。
 
 参数说明：
 
@@ -92,9 +97,9 @@ source = gen_kernel(func_op, EmitCContext(target="cpu"))
 使用示例：
 
 ```python
-from kernel_gen.dsl.gen_kernel import gen_signature
+import kernel_gen.dsl.gen_kernel as gen_kernel_module
 
-signature = gen_signature(func_op, ctx)
+signature = gen_kernel_module.gen_signature(func_op, ctx)
 ```
 
 注意事项：
@@ -130,13 +135,14 @@ void demo_kernel(
 
 - 返回类型：`str`。
 - 返回语义：不含函数体的函数签名文本。
-- 限制条件：签名生成必须与 `gen_kernel(...)`、`gen_body(...)` 的结果保持一致。
+- 限制条件：签名生成必须与 `gen_kernel(...)`、`gen_body(...)` 的结果保持一致，但下游不得将其视为公开稳定入口。
 
 ### `gen_body(func_op, ctx)`
 
 功能说明：
 
 - 按 `func.func` 中 block 与 op 的顺序遍历函数体，并调用 `emit_c` 规则生成函数体文本。
+- 该 helper 仅服务于 `gen_kernel(...)` 的内部拼装与单测覆盖，不构成下游稳定公开接口。
 
 参数说明：
 
@@ -146,9 +152,9 @@ void demo_kernel(
 使用示例：
 
 ```python
-from kernel_gen.dsl.gen_kernel import gen_body
+import kernel_gen.dsl.gen_kernel as gen_kernel_module
 
-body = gen_body(func_op, ctx)
+body = gen_kernel_module.gen_body(func_op, ctx)
 ```
 
 注意事项：
@@ -199,7 +205,7 @@ void demo_kernel(
 
 - 返回类型：`str`。
 - 返回语义：函数体文本，不含函数签名。
-- 限制条件：局部命名与片段生成策略必须与 `EmitCContext` 中状态保持一致。
+- 限制条件：局部命名与片段生成策略必须与 `EmitCContext` 中状态保持一致，但下游不得将其视为公开稳定入口。
 
 ## CPU `conv2d_img2col2d_tiled(...)` 固定骨架
 

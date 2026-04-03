@@ -1,0 +1,68 @@
+# 任务记录
+
+- 时间：`2026-04-04 02:49:31 +0800`
+- 经办人：`朽木露琪亚`
+- 任务：`T-20260404-ccb0decd`
+- 任务目标：`在 wt-20260404-gen-kernel-g1 收口 gen_kernel 的唯一公开入口合同，只保留 gen_kernel(op_or_func, ctx) 作为稳定入口，并同步 spec、实现导出与测试导入。`
+- 改动：
+  - `spec/dsl/gen_kernel.md`：公开接口只保留 `gen_kernel(op_or_func, ctx)`；新增“内部实现拆分（非公开稳定接口）”说明，明确 `gen_signature(...)`、`gen_body(...)` 仅用于内部拼装与单测覆盖，不再属于公开稳定接口。
+  - `kernel_gen/dsl/gen_kernel.py`：将 `gen_kernel(...)` 文档和形参名收口到唯一公开入口口径；把 `gen_signature(...)`、`gen_body(...)` 标记为 internal helper；`__all__` 缩减为 `["GenKernelError", "gen_kernel"]`。
+  - `test/dsl/test_gen_kernel.py`：公开导入改为只导入 `GenKernelError` 与 `gen_kernel`；新增 `test_gen_kernel_is_the_only_public_entry` 锁定 `__all__` 与 `import *` 的公开边界；保留对内部 helper 的覆盖，但改为通过模块别名 `_gen_signature/_gen_body` 调用；`test_gen_kernel_returns_target_source` 额外补了 `memory-return func.func` 的完整源码正向断言。
+  - 验证：
+    - `pytest -q test/dsl/test_gen_kernel.py -k 'returns_target_source or public_entry'` -> `2 passed, 24 deselected`
+    - `pytest -q test/dsl/test_gen_kernel.py` -> `26 passed`
+    - `git diff --check -- spec/dsl/gen_kernel.md kernel_gen/dsl/gen_kernel.py test/dsl/test_gen_kernel.py` -> `0`
+  - 自检：
+    - 目标收口：通过。公开稳定导出与测试主口径都只剩 `gen_kernel`/`GenKernelError`。
+    - 边界检查：通过。未改写函数级发射结构，也未改范围外文件。
+    - 证据覆盖：通过。指定 gate 命中新加 `public_entry` 测试与原 `returns_target_source` 测试；整份 `test_gen_kernel.py` 回归通过，能证明导入收口未破坏既有行为。
+- 结论：`已完成 G1 收口；公开接口边界已单点化为 gen_kernel，gen_signature/gen_body 不再作为公开稳定接口。`
+
+- 时间：`2026-04-04 02:55:45 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-f2974ea2`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/gen_kernel_op_driven_refactor_plan.md` 的 `G1` 审查边界，只读复核 `spec/dsl/gen_kernel.md`、`kernel_gen/dsl/gen_kernel.py`、`test/dsl/test_gen_kernel.py` 与同链路记录文件是否和 `G1` 的目标、边界、验证命令、验收标准一致。
+- 审查前自检：
+  - 已核对公开入口、导出边界、测试导入和计划 gate 是否一致。
+  - 已补充全量 `test/dsl/test_gen_kernel.py` 复跑，确认公开入口收口没有破坏既有行为。
+  - 已检查 `__all__`、公开导入和 helper 级测试是否仍存在“公开稳定接口”灰区。
+- 审查结论：
+  - `通过`。
+- 审查结果：
+  - [gen_kernel.py](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/kernel_gen/dsl/gen_kernel.py#L564) 到 [gen_kernel.py](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/kernel_gen/dsl/gen_kernel.py#L592) 已把 `gen_kernel(op_or_func, ctx)` 收口为唯一稳定公开入口；[gen_kernel.py](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/kernel_gen/dsl/gen_kernel.py#L592) 的 `__all__` 也已缩减为 `["GenKernelError", "gen_kernel"]`。
+  - [spec/dsl/gen_kernel.md](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/spec/dsl/gen_kernel.md#L50) 到 [spec/dsl/gen_kernel.md](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/spec/dsl/gen_kernel.md#L56) 已明确写清 `gen_kernel(...)` 是唯一稳定公开入口；`gen_signature(...)`、`gen_body(...)` 仅保留在 [spec/dsl/gen_kernel.md](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/spec/dsl/gen_kernel.md#L83) 之后的“内部实现拆分（非公开稳定接口）”章节中，不再冒充公开稳定接口。
+  - [test_gen_kernel.py](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/test/dsl/test_gen_kernel.py#L44) 现在公开导入只剩 `GenKernelError` 与 `gen_kernel`；helper 覆盖改为模块别名 `_gen_signature/_gen_body`，与 [test_gen_kernel.py](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/test/dsl/test_gen_kernel.py#L229) 的 `test_gen_kernel_is_the_only_public_entry` 一致，说明 `gen_signature/gen_body` 不再作为公开测试主口径。
+  - [test_gen_kernel.py](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/test/dsl/test_gen_kernel.py#L190) 的 `test_gen_kernel_returns_target_source` 和 [test_gen_kernel.py](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/test/dsl/test_gen_kernel.py#L229) 的 `test_gen_kernel_is_the_only_public_entry` 都通过，计划写死的 `G1` gate 已闭环。
+- 漏洞与边界排查：
+  - 功能正确性：通过，`gen_kernel` 仍能生成完整源码，memory-return 函数正向路径也保持可用。
+  - 边界条件：通过，`gen_signature/gen_body` 虽仍存在于模块内部，但已降为内部 helper，不再作为公开导出或公开测试主口径。
+  - 异常路径：通过，`GenKernelError` 仍作为公开错误类型保留。
+  - 潜在漏洞/歧义：当前 `spec / 实现 / 测试` 在 `G1` 边界内未发现新的双口径问题。
+- 验证：
+  - `python -m pytest -q test/dsl/test_gen_kernel.py -k 'returns_target_source or public_entry'` -> `2 passed, 24 deselected`
+  - `python -m pytest -q test/dsl/test_gen_kernel.py -k 'test_gen_kernel_compiles_and_runs_lowered_nn_add_variants_on_cpu'` -> `1 passed, 25 deselected`
+  - `python -m pytest -q test/dsl/test_gen_kernel.py` -> `26 passed`
+- 下一步建议：
+  - 进入同链合并阶段；合并范围应覆盖 `spec/dsl/gen_kernel.md`、`kernel_gen/dsl/gen_kernel.py`、`test/dsl/test_gen_kernel.py` 与同链路记录文件。
+
+- 时间：`2026-04-04 02:55:45 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-f2974ea2`
+- 任务目标：
+  - 完成当前审查任务流转，并按同链路补建唯一后续合并任务。
+- 改动：
+  - 已执行：
+    - `codex-multi-agents-task.sh -done -task_id T-20260404-f2974ea2 ...`
+    - 结果：当前审查任务已标记完成，`agents-lists.md` 中 `提莫炖蘑菇` 状态同步成功。
+  - 已新建后续合并任务：
+    - `T-20260404-6ca1bd10`
+    - 目标：在同一 `worktree` 中按整条 `G1` 链路合入 `spec / 实现 / 测试 / 记录文件`。
+  - 合并范围确认：
+    - `wt-20260404-gen-kernel-g1/spec/dsl/gen_kernel.md`
+    - `wt-20260404-gen-kernel-g1/kernel_gen/dsl/gen_kernel.py`
+    - `wt-20260404-gen-kernel-g1/test/dsl/test_gen_kernel.py`
+    - `agents/codex-multi-agents/log/task_records/2026/14/20260404-gen-kernel-g1.md`
+- 结论：
+  - `T-20260404-f2974ea2` 已完成并封板。
+  - 后续链路已按当前规则衔接到合并阶段，等待管理员核对并分发 `T-20260404-6ca1bd10`。

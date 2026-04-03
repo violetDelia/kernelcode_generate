@@ -411,6 +411,8 @@ def _validate_npu_demo_body_level_kernel_body(func_op: func.FuncOp, ctx: EmitCCo
 def gen_signature(func_op: func.FuncOp, ctx: EmitCContext) -> str:
     """Generate a target signature for a single lowered `func.func`.
 
+    Internal helper only. The stable public entry remains `gen_kernel(...)`.
+
     Parameters:
         func_op: MLIR `func.func` operation to analyze.
         ctx: Shared emit context used to bind stable argument names.
@@ -464,6 +466,8 @@ def gen_signature(func_op: func.FuncOp, ctx: EmitCContext) -> str:
 
 def gen_body(func_op: func.FuncOp, ctx: EmitCContext) -> str:
     """Generate the function body in IR order.
+
+    Internal helper only. The stable public entry remains `gen_kernel(...)`.
 
     Parameters:
         func_op: MLIR `func.func` operation whose entry block will be emitted.
@@ -557,11 +561,13 @@ def gen_body(func_op: func.FuncOp, ctx: EmitCContext) -> str:
     return "\n".join(lines)
 
 
-def gen_kernel(func_op: func.FuncOp, ctx: EmitCContext) -> str:
+def gen_kernel(op_or_func: func.FuncOp, ctx: EmitCContext) -> str:
     """Generate the full target function source for one lowered `func.func`.
 
+    This is the only stable public entry exported by `kernel_gen.dsl.gen_kernel`.
+
     Parameters:
-        func_op: MLIR `func.func` operation to emit.
+        op_or_func: MLIR `func.func` operation to emit.
         ctx: Shared emit context carrying target and naming state.
 
     Returns:
@@ -573,6 +579,7 @@ def gen_kernel(func_op: func.FuncOp, ctx: EmitCContext) -> str:
         TypeError: If a type cannot be lowered to the target.
     """
 
+    func_op = op_or_func
     signature = gen_signature(func_op, ctx)
     ctx.push_indent()
     body = gen_body(func_op, ctx)
@@ -582,4 +589,4 @@ def gen_kernel(func_op: func.FuncOp, ctx: EmitCContext) -> str:
     return f"{signature} {{\n}}"
 
 
-__all__ = ["GenKernelError", "gen_body", "gen_kernel", "gen_signature"]
+__all__ = ["GenKernelError", "gen_kernel"]

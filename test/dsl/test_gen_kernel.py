@@ -41,7 +41,7 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolValueType
 from kernel_gen.dsl.emit_c import EmitCContext
-from kernel_gen.dsl.gen_kernel import GenKernelError, gen_body, gen_kernel, gen_signature
+from kernel_gen.dsl.gen_kernel import GenKernelError, gen_kernel
 from kernel_gen.dsl.mlir_gen import build_func_op
 from kernel_gen.passes.lowering.nn_to_kernel import LowerNnToKernelPass
 from kernel_gen.symbol_variable.memory import Memory
@@ -49,6 +49,8 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
 gen_kernel_module = importlib.import_module("kernel_gen.dsl.gen_kernel")
+_gen_body = gen_kernel_module.gen_body
+_gen_signature = gen_kernel_module.gen_signature
 
 
 @irdl_op_definition
@@ -203,6 +205,40 @@ def test_gen_kernel_returns_target_source() -> None:
     empty_source = gen_kernel(empty_func, _ctx())
     assert empty_source == "void empty_kernel() {\n}"
 
+    mem = _make_memory_type([2, 2], [2, 1])
+    memory_block = Block(arg_types=[mem])
+    memory_block.add_op(func.ReturnOp(memory_block.args[0]))
+    memory_func = _func("memory_kernel", [mem], [mem], memory_block, ("input",))
+    memory_source = gen_kernel(memory_func, _ctx())
+    assert memory_source.startswith("void memory_kernel(const Memory<int32_t>& input, Memory<int32_t>& out)")
+    assert "out = input;" in memory_source
+
+
+# GK-014
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-04 20:25:00 +0800
+# 最近一次运行成功时间: 2026-04-04 20:25:00 +0800
+# 功能说明: 验证 gen_kernel 模块对外只保留唯一稳定公开入口。
+# 测试目的: 锁定 gen_kernel/__all__ 的公开边界，避免 gen_signature/gen_body 继续作为公开稳定接口回流。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_is_the_only_public_entry
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+
+def test_gen_kernel_is_the_only_public_entry() -> None:
+    assert gen_kernel_module.__all__ == ["GenKernelError", "gen_kernel"]
+
+    namespace: dict[str, object] = {}
+    exec("from kernel_gen.dsl.gen_kernel import *", namespace)
+    public_names = {name for name in namespace if name != "__builtins__"}
+
+    assert public_names == {"GenKernelError", "gen_kernel"}
+    assert namespace["GenKernelError"] is GenKernelError
+    assert namespace["gen_kernel"] is gen_kernel
+    assert "gen_signature" not in public_names
+    assert "gen_body" not in public_names
+
 
 # GK-002
 # 创建者: 金铲铲大作战
@@ -222,7 +258,7 @@ def test_gen_signature_uses_readonly_memory_inputs() -> None:
     block.add_op(func.ReturnOp())
     func_op = _func("read_only", [mem], [], block, ("input",))
 
-    signature = gen_signature(func_op, _ctx())
+    signature = _gen_signature(func_op, _ctx())
 
     assert signature == "void read_only(const Memory<int32_t>& input)"
 
@@ -245,7 +281,7 @@ def test_gen_signature_lowers_memory_result_to_out_param() -> None:
     block.add_op(func.ReturnOp(block.args[0]))
     func_op = _func("produce", [mem], [mem], block, ("input",))
 
-    signature = gen_signature(func_op, _ctx())
+    signature = _gen_signature(func_op, _ctx())
 
     assert signature == "void produce(const Memory<int32_t>& input, Memory<int32_t>& out)"
 
@@ -267,7 +303,7 @@ def test_gen_signature_preserves_scalar_arg_order() -> None:
     block.add_op(func.ReturnOp())
     func_op = _func("ordered", [i32, IndexType(), i32], [], block, ("lhs", "index", "rhs"))
 
-    signature = gen_signature(func_op, _ctx())
+    signature = _gen_signature(func_op, _ctx())
 
     assert signature == "void ordered(int32_t lhs, long long index, int32_t rhs)"
 
@@ -280,13 +316,13 @@ def test_gen_signature_preserves_scalar_arg_order() -> None:
         Region(unnamed_block),
         arg_attrs=ArrayAttr([DictionaryAttr({})]),
     )
-    assert gen_signature(unnamed_func, _ctx()) == "void unnamed(int32_t arg0)"
+    assert _gen_signature(unnamed_func, _ctx()) == "void unnamed(int32_t arg0)"
 
     default_block = Block(arg_types=[i1])
     default_block.add_op(func.ReturnOp())
     default_type = FunctionType.from_lists([i1], [])
     default_func = func.FuncOp("default_names", default_type, Region(default_block))
-    assert gen_signature(default_func, _ctx()) == "void default_names(bool arg0)"
+    assert _gen_signature(default_func, _ctx()) == "void default_names(bool arg0)"
 
 
 # GK-005
@@ -317,7 +353,7 @@ def test_gen_body_emits_ops_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(gen_kernel_module, "emit_c_op", _fake_emit)
 
-    body = gen_body(func_op, _ctx())
+    body = _gen_body(func_op, _ctx())
 
     assert seen == ["arith.addi", "arith.subi"]
     assert body.splitlines() == ["// arith.addi", "// arith.subi"]
@@ -326,12 +362,12 @@ def test_gen_body_emits_ops_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
     return_block = Block(arg_types=[mem])
     return_block.add_op(func.ReturnOp(return_block.args[0]))
     return_func = _func("return_body", [mem], [mem], return_block, ("input",))
-    assert gen_body(return_func, _ctx()) == "out = arg0;"
+    assert _gen_body(return_func, _ctx()) == "out = arg0;"
 
     second_block = Block(arg_types=[mem, mem])
     second_block.add_op(func.ReturnOp(second_block.args[1]))
     second_func = _func("return_second", [mem, mem], [mem], second_block, ("lhs", "rhs"))
-    assert gen_body(second_func, _ctx()) == "out = arg1;"
+    assert _gen_body(second_func, _ctx()) == "out = arg1;"
 
 
 # GK-006
@@ -408,7 +444,7 @@ def test_gen_signature_rejects_unsupported_return_form() -> None:
     func_op = _func("scalar_return", [i32], [i32], block, ("value",))
 
     with pytest.raises(GenKernelError) as exc_info:
-        gen_signature(func_op, _ctx())
+        _gen_signature(func_op, _ctx())
 
     assert "unsupported return form" in str(exc_info.value)
 
@@ -417,7 +453,7 @@ def test_gen_signature_rejects_unsupported_return_form() -> None:
     tuple_type = FunctionType.from_lists([], [i32, i32])
     tuple_func = func.FuncOp("tuple_return", tuple_type, Region(tuple_block), arg_attrs=ArrayAttr([]))
     with pytest.raises(GenKernelError) as exc_info:
-        gen_signature(tuple_func, _ctx())
+        _gen_signature(tuple_func, _ctx())
     assert "unsupported return form" in str(exc_info.value)
 
     float_block = Block(arg_types=[f16])
@@ -425,7 +461,7 @@ def test_gen_signature_rejects_unsupported_return_form() -> None:
     float_type = FunctionType.from_lists([f16], [])
     float_func = func.FuncOp("f16_arg", float_type, Region(float_block))
     with pytest.raises(TypeError) as exc_info:
-        gen_signature(float_func, _ctx())
+        _gen_signature(float_func, _ctx())
     assert "unsupported type" in str(exc_info.value)
 
     bad_body_block = Block(arg_types=[i32])
@@ -433,7 +469,7 @@ def test_gen_signature_rejects_unsupported_return_form() -> None:
     bad_body_type = FunctionType.from_lists([i32], [i32])
     bad_body_func = func.FuncOp("bad_body", bad_body_type, Region(bad_body_block), arg_attrs=_arg_attrs("value"))
     with pytest.raises(GenKernelError) as exc_info:
-        gen_body(bad_body_func, _ctx())
+        _gen_body(bad_body_func, _ctx())
     assert "unsupported return form" in str(exc_info.value)
 
 
@@ -455,7 +491,7 @@ def test_gen_signature_supports_float32_scalar_and_memory() -> None:
     block_f32.add_op(func.ReturnOp(block_f32.args[0]))
     func_op_f32 = _func("float_kernel", [mem_f32, f32], [mem_f32], block_f32, ("input", "alpha"))
 
-    signature_f32 = gen_signature(func_op_f32, _ctx())
+    signature_f32 = _gen_signature(func_op_f32, _ctx())
 
     assert signature_f32 == "void float_kernel(const Memory<float>& input, float alpha, Memory<float>& out)"
 
@@ -464,7 +500,7 @@ def test_gen_signature_supports_float32_scalar_and_memory() -> None:
     block_f64.add_op(func.ReturnOp(block_f64.args[0]))
     func_op_f64 = _func("double_kernel", [mem_f64, f64], [mem_f64], block_f64, ("input", "alpha"))
 
-    signature_f64 = gen_signature(func_op_f64, _ctx())
+    signature_f64 = _gen_signature(func_op_f64, _ctx())
 
     assert signature_f64 == "void double_kernel(const Memory<double>& input, double alpha, Memory<double>& out)"
 
@@ -528,7 +564,7 @@ def test_gen_kernel_supports_symbol_scalar_return() -> None:
     block.add_op(func.ReturnOp(add.result))
     func_op = _func("symbol_sum", [lhs_type, rhs_type], [out_type], block, ("lhs", "rhs"))
 
-    signature = gen_signature(func_op, _ctx())
+    signature = _gen_signature(func_op, _ctx())
     source = gen_kernel(func_op, _ctx())
 
     assert signature == "long long symbol_sum(long long lhs, long long rhs)"
