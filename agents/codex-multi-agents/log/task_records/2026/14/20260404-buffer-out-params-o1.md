@@ -1,0 +1,198 @@
+# 任务记录
+
+- 时间：`2026-04-04 02:17:37 +0800`
+- 经办人：`咯咯咯`
+- 任务：`T-20260404-99d10789`
+- 任务目标：`对齐 O1 合同门禁 spec 口径，在计划与 spec 中把 callsite 半改半留必须失败补成正式硬门禁，并建立同链路记录文件。`
+- 改动：
+  - `ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md`：为 `O1` 补充“模块内 caller/callee 半改半留必须失败”的边界、验证命令与验收标准。
+  - `spec/pass/lowering/buffer_results_to_out_params.md`：新增“未同步改写的 callsite”硬门禁，并把现有 `BROTP-003` 测试映射纳入正式合同。
+  - `agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md`：创建当前链路记录文件。
+- 结论：`已把 O1 的 callsite 半改半留失败口径从泛化描述提升为正式边界、验证命令与验收标准；当前合同不再允许把 caller 留到 O2 再兜底解释。`
+
+- 时间：`2026-04-04 02:18:08 +0800`
+- 经办人：`咯咯咯`
+- 任务：`T-20260404-99d10789`
+- 任务目标：`完成前自检合同是否唯一、自洽、无灰区，并核对验证命令与记录文件一致性。`
+- 改动：
+  - 复核 `ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md` 中 `O1` 的目标、边界、验证命令、验收标准，确认已把 `callsite` 半改半留失败写成正式门禁。
+  - 复核 `spec/pass/lowering/buffer_results_to_out_params.md` 已新增“未同步改写的 callsite”小节，并纳入 `BROTP-003` 与对应验证命令。
+  - 运行 `pytest -q test/pass/test_buffer_results_to_out_params.py -k 'single_memory_result or external_declaration or unrewritten_callsite'`，结果 `3 passed`。
+- 结论：`自检通过：当前 spec 合同唯一，边界清楚，可改文件/验证命令/验收标准完整，记录文件与实际文档改动一致。`
+
+- 时间：`2026-04-04 02:22:47 +0800`
+- 经办人：`不要啊教练`
+- 任务：`T-20260404-91eb7abb`
+- 任务目标：`在 wt-20260404-buffer-out-params-o1 只读复核主目录计划、worktree spec 与同链路记录文件，确认 callsite 半改半留必须失败已被写成 O1 正式硬门禁，且 O1 的目标/边界/验证命令/验收标准与现有 test_rewrite_rejects_unrewritten_callsite 一致。`
+- 改动：
+  - 只读复核 [`ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md)、[`spec/pass/lowering/buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/buffer_results_to_out_params.md)、[`20260404-buffer-out-params-o1.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md) 与现有测试 [`test_buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_buffer_results_to_out_params.py)；未修改实现或测试文件。
+  - 自检结果：
+    - 证据充分性：已同时核对计划 `O1` 条目、spec “未同步改写的 callsite”小节、同链路记录、自检记录，以及现有测试 `test_rewrite_rejects_unrewritten_callsite` 的断言内容。
+    - 功能正确性：[`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md#L336) 到 [`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md#L383) 已把 `arg0` 前置、空 `func.return`、external declaration 失败、callsite 半改半留失败写进 `O1` 正式门禁。
+    - 边界条件：[`buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/buffer_results_to_out_params.md#L127) 到 [`buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/buffer_results_to_out_params.md#L143) 已把“未同步改写的 callsite”写成 `BROTP-003` 正式合同，并把验证命令扩到 `unrewritten_callsite`。
+    - 异常路径：[`test_buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_buffer_results_to_out_params.py#L174) 到 [`test_buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_buffer_results_to_out_params.py#L200) 明确断言半改半留场景抛出 `BufferResultsToOutParamsError`，错误消息包含 `callsite rewrite`。
+    - 潜在漏洞排查：
+      - 输入校验绕过：未见把 caller 留在旧口径的静默放行。
+      - 类型/形状绕过：本轮只核对合同，不存在新增类型/形状处理分支。
+      - 边界越界：未见文档把 O2/O3 范围提前偷渡进 O1。
+      - 错误处理缺失：callsite 半改半留失败已明确要求显式报错。
+      - 状态污染：记录、自检与计划正文对“半改半留必须失败”的实质口径一致。
+      - 资源释放问题：本轮不涉及资源生命周期新语义。
+  - 复测：
+    - `cd /home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1 && pytest -q test/pass/test_buffer_results_to_out_params.py -k 'single_memory_result or external_declaration or unrewritten_callsite'`
+      - 结果：`3 passed`
+      - 退出码：`0`
+    - `cd /home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1 && pytest -q test/pass/test_buffer_results_to_out_params.py -k 'test_rewrite_rejects_unrewritten_callsite'`
+      - 结果：`1 passed, 2 deselected`
+      - 退出码：`0`
+    - `git -C /home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1 diff --check -- spec/pass/lowering/buffer_results_to_out_params.md agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md`
+      - 退出码：`0`
+    - `git -C /home/lfr/kernelcode_generate diff --check -- ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md`
+      - 退出码：`0`
+- 结论：
+  - `需修改`
+  - 最硬断点不是硬门禁正文本身，而是计划/记录状态不一致：[`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md#L7) 的 `O1` 进度仍写着 `spec纠偏进行中（2026-04-04 02:13:47 +0800，T-20260404-99d10789，咯咯咯）`，但同链路记录 [`20260404-buffer-out-params-o1.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md#L3) 到 [`20260404-buffer-out-params-o1.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md#L21) 已明确记录 `T-20260404-99d10789` 完成并自检通过。
+  - 这会让 O1 当前到底是“spec 纠偏已完成，等待本轮复审”还是“spec 纠偏仍在进行中”出现双口径；按当前复审门槛，计划/spec/记录未完全一致，不能判 `通过`。
+  - 修改建议：仅修正计划进度表，把 `O1` 的 `spec纠偏进行中` 更新为与同链路记录一致的完成状态；同时保持当前已写死的 callsite 半改半留硬门禁、验证命令与验收标准不变。
+
+- 时间：`2026-04-04 02:29:34 +0800`
+- 经办人：`不要啊教练`
+- 任务：`T-20260404-ba73c6fe`
+- 任务目标：`在 wt-20260404-buffer-out-params-o1 只读复核 O1 状态同步后，主目录计划进度、worktree spec 与同链路记录是否完全一致，并确认 callsite 半改半留必须失败仍是正式硬门禁。`
+- 改动：
+  - 只读复核 [`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md)、[`buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/buffer_results_to_out_params.md)、同链路记录 [`20260404-buffer-out-params-o1.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md) 与测试 [`test_buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_buffer_results_to_out_params.py)；未修改实现或测试文件。
+  - 自检结果：
+    - 证据充分性：已核对 `O1` 进度表、`O1` 正文门禁、spec 的 `BROTP-003` 条款、同链路历史记录，以及 `test_rewrite_rejects_unrewritten_callsite` 的断言和定向执行结果。
+    - 功能正确性：[`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md#L336) 到 [`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md#L383) 仍明确要求 `arg0` 前置、空 `func.return`、external declaration 失败，以及 callsite 半改半留必须失败。
+    - 边界条件：[`buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/buffer_results_to_out_params.md#L127) 到 [`buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/buffer_results_to_out_params.md#L143) 仍把“未同步改写的 callsite”写成 `O1` 正式硬门禁和 `BROTP-003`。
+    - 异常路径：[`test_buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_buffer_results_to_out_params.py#L174) 到 [`test_buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_buffer_results_to_out_params.py#L200) 继续断言半改半留场景抛出 `BufferResultsToOutParamsError`，错误消息包含 `callsite rewrite`。
+    - 潜在漏洞排查：
+      - 输入校验绕过：未见 caller 留在旧口径的静默放行。
+      - 类型/形状绕过：本轮只核对合同和状态，不存在新增类型/形状处理分支。
+      - 边界越界：未见把 `O2` 及以后范围提前混入 `O1`。
+      - 错误处理缺失：callsite 半改半留失败仍要求显式报错。
+      - 状态污染：这里仍存在一处状态双口径，见结论。
+      - 资源释放问题：本轮不涉及资源生命周期变更。
+  - 复测：
+    - `cd /home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1 && pytest -q test/pass/test_buffer_results_to_out_params.py -k 'single_memory_result or external_declaration or unrewritten_callsite'`
+      - 结果：`3 passed`
+      - 退出码：`0`
+    - `git -C /home/lfr/kernelcode_generate diff --check -- ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md`
+      - 退出码：`0`
+    - `git -C /home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1 diff --check -- spec/pass/lowering/buffer_results_to_out_params.md agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md`
+      - 退出码：`0`
+- 结论：
+  - `需修改`
+  - 当前最硬断点从“spec纠偏进行中”变成了另一条状态残留：[`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md#L7) 虽已改成 `spec纠偏完成（T-20260404-99d10789）`，但同一进度单元仍写着 `复审进行中（2026-04-04 02:20:10 +0800，T-20260404-91eb7abb，不要啊教练）`；而同链路记录已明确 [`T-20260404-91eb7abb`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md#L23) 到 [`T-20260404-91eb7abb`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md#L56) 已完成并给出 `需修改` 结论。
+  - 这意味着计划进度表仍没有和链路记录完全收口：旧复审任务已经结束，但计划还保留“进行中”的口径。按当前复审标准，计划/spec/记录仍未达到“完全一致”，因此不能判 `通过`。
+  - 修改建议：仅继续修正 [`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md#L7) 的 `O1` 进度状态，把旧的 `复审进行中（T-20260404-91eb7abb）` 收口为与记录一致的已完成状态；现有 callsite 半改半留硬门禁、验证命令和验收标准保持不变。
+
+- 时间：`2026-04-04 02:55:04 +0800`
+- 经办人：`咯咯咯`
+- 任务：`T-20260404-16fc9d2a`
+- 任务目标：`仅修正 O1 进度表中仍写成进行中的状态同步复审条目，使其与链路记录一致；保持正文硬门禁、实现和测试不变。`
+- 改动：
+  - 按管理员确认，仅修改 [`ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md) 的 `O1` 进度表，把 `T-20260404-ba73c6fe` 从“状态同步复审进行中”收口为“状态同步复审完成”。
+  - 追加当前记录，说明本轮只修状态一致性，不改 `O1` 正文中的 callsite 半改半留硬门禁、验证命令与验收标准。
+- 结论：`已按管理员口径把 O1 进度状态与记录收口；本轮未触碰正文门禁。`
+
+- 时间：`2026-04-04 02:55:53 +0800`
+- 经办人：`咯咯咯`
+- 任务：`T-20260404-16fc9d2a`
+- 任务目标：`完成前自检只修状态、不误改正文门禁，并确认记录文件与实际改动一致。`
+- 改动：
+  - 复核 [`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md) 的 `O1` 进度表，确认本轮仅把 `T-20260404-ba73c6fe` 收口为完成状态。
+  - 复核正文中 callsite 半改半留硬门禁、验证命令与验收标准仍保持原样。
+  - 执行 `git diff --check` 校验本轮文档改动无格式问题。
+- 结论：`自检通过：本轮只修状态，不改正文门禁；记录文件与实际改动一致。`
+
+- 时间：`2026-04-04 03:00:09 +0800`
+- 经办人：`朽木露琪亚`
+- 任务：`T-20260404-f226d4fe`
+- 任务目标：`只读复核主目录计划、worktree spec 与同链路记录是否完全一致；重点检查 O1 进度表中 T-20260404-99d10789、T-20260404-91eb7abb、T-20260404-ba73c6fe 三个已结束状态是否都已与记录/DONE 收口一致，且正文 callsite 半改半留硬门禁、验证命令与验收标准未被误改。`
+- 改动：
+  - 只读核对 [`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md)、[`buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/buffer_results_to_out_params.md)、同链路记录 [`20260404-buffer-out-params-o1.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md) 与 [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md)；未修改实现、spec 或测试文件。
+  - 证据核对：
+    - [`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md#L7) 的 `O1` 进度表当前写为：`spec纠偏完成（T-20260404-99d10789）`、`复审完成（需修改，T-20260404-91eb7abb）`、`状态同步复审完成（T-20260404-ba73c6fe）`。
+    - [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2165) 到 [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2169) 已登记 `T-20260404-99d10789`、`T-20260404-91eb7abb`、`T-20260404-ba73c6fe` 为已完成；同链路记录中 [`T-20260404-91eb7abb`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md#L23) 与 [`T-20260404-ba73c6fe`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md#L58) 两次复审结论都明确为 `需修改`。
+    - 同链路记录后续还存在 [`T-20260404-16fc9d2a`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md#L91) 的状态修正完成记录，但 `O1` 进度表没有吸收这次后续修正任务。
+    - [`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md#L332) 到 [`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md#L383) 的 `O1` 正文门禁，和 [`buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/buffer_results_to_out_params.md#L127) 到 [`buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/buffer_results_to_out_params.md#L143) 的 `BROTP-003` 仍一致：callsite 半改半留必须显式失败，验证命令仍是 `pytest -q test/pass/test_buffer_results_to_out_params.py -k 'single_memory_result or external_declaration or unrewritten_callsite'`。
+  - 自检结果：
+    - 证据充分性：已同时核对计划进度表、`O1` 正文门禁、worktree spec、同链路历史记录与 `DONE.md` 完成登记。
+    - 正确性与边界：本轮只读检查没有越界到实现/测试；正文硬门禁、验证命令与验收标准未见被误改。
+    - 记录一致性：当前记录中的结论与本轮只读核对结果一致。
+  - 复核命令：
+    - `rg -n "O1|99d10789|91eb7abb|ba73c6fe|callsite|unrewritten_callsite|external declaration|single_memory_result" ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md spec/pass/lowering/buffer_results_to_out_params.md agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md DONE.md`
+    - `git -C /home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1 diff --check`
+- 结论：
+  - `需修改`
+  - 当前最硬断点是 [`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md#L7) 的 `O1` 进度表仍未与同链路记录/DONE 完全收口：`T-20260404-ba73c6fe` 在记录里是一次 `需修改` 的复审，但计划写成了直接“状态同步复审完成”；同时后续真正执行状态修正的 `T-20260404-16fc9d2a` 已写入记录并进入 `DONE.md`，却没有反映到 `O1` 进度表。
+  - `T-20260404-99d10789` 与 `T-20260404-91eb7abb` 的状态语义已基本对齐到“完成 / 需修改”，但 `ba73c6fe -> 16fc9d2a` 这段状态同步链仍断裂，因此本轮不能判“计划 / spec / 记录 / DONE 完全一致”。
+  - 修改建议：仅修正 [`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md#L7) 的 `O1` 进度表，把 `T-20260404-ba73c6fe` 标成与记录一致的 `需修改` 结果，并补入 `T-20260404-16fc9d2a` 的状态修正完成条目；正文 callsite 半改半留硬门禁、验证命令与验收标准保持不变。
+
+- 时间：`2026-04-04 03:04:56 +0800`
+- 经办人：`咯咯咯`
+- 任务：`T-20260404-04ef2843`
+- 任务目标：`仅修正 O1 进度表与记录/DONE 的最终状态口径；重点把 T-20260404-ba73c6fe 收口为需修改，并补齐后续状态修正链。`
+- 改动：
+  - 仅修改 [`ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md) 的 `O1` 进度表，把 `T-20260404-ba73c6fe` 收口为 `完成（需修改）`，保留 `T-20260404-16fc9d2a` 的状态修正完成条目，并把 `T-20260404-f226d4fe` 调整为与 `DONE.md` 一致的 `最终复审完成（需修改）`。
+  - 追加当前记录，说明本轮只做进度状态收口，不改正文 callsite 半改半留硬门禁、验证命令与验收标准。
+- 结论：`已把 O1 进度表与同链路记录/DONE 的状态链收口；正文门禁未改。`
+
+- 时间：`2026-04-04 03:05:58 +0800`
+- 经办人：`咯咯咯`
+- 任务：`T-20260404-04ef2843`
+- 任务目标：`完成前自检 O1 进度表是否已与记录/DONE 完全收口，并确认正文硬门禁未被误改。`
+- 改动：
+  - 复核 `O1` 进度表中 `T-20260404-99d10789`、`T-20260404-91eb7abb`、`T-20260404-ba73c6fe`、`T-20260404-16fc9d2a`、`T-20260404-f226d4fe` 五个已结束状态的时间与结果口径，确认已与 [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md) 一致。
+  - 复核正文中 callsite 半改半留硬门禁、验证命令与验收标准仍保持原样。
+  - 执行 `git diff --check`，结果通过。
+- 结论：`自检通过：当前 O1 进度表已与记录/DONE 收口一致，且本轮未误改正文门禁。`
+
+- 时间：`2026-04-04 03:10:16 +0800`
+- 经办人：`不要啊教练`
+- 任务：`T-20260404-0548ef31`
+- 任务目标：`只读复核主目录计划、同链路记录与 DONE 是否完全一致；重点核对 T-20260404-99d10789、T-20260404-91eb7abb、T-20260404-ba73c6fe、T-20260404-16fc9d2a、T-20260404-f226d4fe 五个已结束状态的时间与结果口径，以及正文 callsite 半改半留硬门禁、验证命令与验收标准保持不变。`
+- 改动：
+  - 只读核对 [`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md)、同链路记录 [`20260404-buffer-out-params-o1.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md)、[`DONE.md`](/home/lfr/kernelcode_generate/DONE.md) 与 worktree 中 [`buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/buffer_results_to_out_params.md)；未修改实现、测试或 `spec` 文件。
+  - 自检结果：
+    - 证据充分性：已逐项核对 `O1` 进度表中的五个已结束状态、`DONE.md` 对应完成登记、同链记录里的任务条目与结论，以及 `O1` 正文门禁与 worktree spec。
+    - 功能正确性：[`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md#L336) 到 [`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md#L383) 的 `O1` 正文仍明确要求 `arg0` 前置、空 `func.return`、external declaration 失败，以及 callsite 半改半留必须失败。
+    - 边界条件：[`buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/buffer_results_to_out_params.md#L127) 到 [`buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/buffer_results_to_out_params.md#L143) 的 `BROTP-003` 仍把“未同步改写的 callsite”写成正式硬门禁，验证命令保持 `single_memory_result or external_declaration or unrewritten_callsite` 不变。
+    - 异常路径：半改半留失败、external declaration 失败与单结果成功路径的验收标准都未被状态修正文档误改。
+    - 潜在漏洞排查：
+      - 输入校验绕过：未见把 caller 留在旧口径的静默放行边界被放松。
+      - 类型/形状绕过：本轮仅核对计划/记录/DONE 状态，不存在新增类型/形状处理分支。
+      - 边界越界：未见将 `O2/O3` 范围提前混入 `O1` 正文。
+      - 错误处理缺失：`callsite rewrite` 与 `external declaration` 显式失败口径保持不变。
+      - 状态污染：`O1` 五个已结束状态与 `DONE.md`、同链记录现已语义一致；记录中的时间是执行/自检时间，计划与 `DONE.md` 中的时间是任务完成时间，未出现相互矛盾的完成口径。
+      - 资源释放问题：本轮不涉及资源生命周期变更。
+  - 证据核对：
+    - [`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md#L7) 当前已按顺序写明：
+      - `spec纠偏完成（2026-04-04 02:19:26 +0800，T-20260404-99d10789，咯咯咯）`
+      - `复审完成（需修改，2026-04-04 02:23:46 +0800，T-20260404-91eb7abb，不要啊教练）`
+      - `状态同步复审完成（需修改，2026-04-04 02:30:36 +0800，T-20260404-ba73c6fe，不要啊教练）`
+      - `状态一致性修正完成（2026-04-04 02:56:20 +0800，T-20260404-16fc9d2a，咯咯咯）`
+      - `最终复审完成（需修改，2026-04-04 03:01:20 +0800，T-20260404-f226d4fe，朽木露琪亚）`
+    - [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2165) 到 [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2182) 已登记上述五个任务的完成时间，与计划进度表一致。
+    - 同链记录中：
+      - [`T-20260404-99d10789`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md#L3) 结论为合同门禁已补齐。
+      - [`T-20260404-91eb7abb`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md#L23) 结论为 `需修改`。
+      - [`T-20260404-ba73c6fe`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md#L58) 结论为 `需修改`。
+      - [`T-20260404-16fc9d2a`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md#L90) 结论为状态一致性已收口。
+      - [`T-20260404-f226d4fe`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md#L109) 结论为 `需修改`，其断点已由后续 [`T-20260404-04ef2843`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md#L133) 修正收口。
+    - 当前待合并链路范围复核：
+      - worktree tracked 业务文件仍包括 `kernel_gen/passes/lowering/__init__.py`、`kernel_gen/passes/lowering/buffer_results_to_out_params.py`、`spec/pass/lowering/buffer_results_to_out_params.md`、`test/pass/test_buffer_results_to_out_params.py` 与同链记录文件；
+      - 主目录还包含本链路计划文件 [`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md) 的状态修正。
+      - 后续若进入合并阶段，必须按整条 `O1` 链路合入上述 `计划 / spec / 实现 / 测试 / 记录` 文件，不能只合状态文档。
+  - 验证：
+    - `rg -n "T-20260404-99d10789|T-20260404-91eb7abb|T-20260404-ba73c6fe|T-20260404-16fc9d2a|T-20260404-f226d4fe" DONE.md TODO.md`
+      - 结果：五个已结束任务均在 `DONE.md`，当前运行中的仅剩本任务 `T-20260404-0548ef31`
+    - `git -C /home/lfr/kernelcode_generate diff --check -- ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md`
+      - 退出码：`0`
+    - `git -C /home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1 diff --check -- spec/pass/lowering/buffer_results_to_out_params.md agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md`
+      - 退出码：`0`
+- 结论：
+  - `通过`
+  - 未发现额外改进点。
+  - 当前 `O1` 的五个已结束状态、主目录计划、同链记录与 `DONE.md` 已完全收口一致，且正文 callsite 半改半留硬门禁、验证命令与验收标准保持不变；后续可进入同链合并阶段，但合并范围必须覆盖整条 `O1` 链路的 `计划 / spec / 实现 / 测试 / 记录` 文件。
