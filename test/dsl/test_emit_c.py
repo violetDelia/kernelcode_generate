@@ -42,9 +42,10 @@ from kernel_gen.dialect.nn import NnAddOp, NnImg2col2dOp, NnMemorySpaceAttr, NnM
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolForOp, SymbolGetDimOp, SymbolValueType
 from kernel_gen.dsl.ast import BlockAST, ConstAST, ForAST, FunctionAST, Img2ColAST, LoadAST, ScalarArgAST, StoreAST, TensorAST, VarAST
 from kernel_gen.dsl.emit_c import EmitCContext, EmitCError, emit_c_op, emit_c_value
-from kernel_gen.dsl.mlir_gen import build_func_op_from_ast
+from kernel_gen.dsl.mlir_gen import build_func_op, build_func_op_from_ast
 from kernel_gen.passes.lowering.nn_to_kernel import LowerNnToKernelPass
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace, NumericType
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 
 @irdl_op_definition
@@ -112,6 +113,31 @@ def _lower_single_op_func(
     module = ModuleOp([func_op])
     LowerNnToKernelPass().run(module)
     return block
+
+
+def _lower_built_func(fn: object, *runtime_args: object) -> Block:
+    """对 `build_func_op(...)` 生成的 `func.func` 执行 pass 并返回 entry block。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 用于 I4 的公开链路 smoke：`build_func_op -> LowerNnToKernelPass -> emit_c`。
+    - 返回被 pass 改写后的 entry block，便于继续按 lowered op 发射节点级代码。
+
+    使用示例:
+    - block = _lower_built_func(add_kernel, Memory([2, 2], NumericType.Int32))
+
+    关联文件:
+    - spec: spec/dsl/emit_c.md
+    - test: test/dsl/test_emit_c.py
+    - 功能实现: test/dsl/test_emit_c.py
+    """
+
+    func_op = build_func_op(fn, *runtime_args)
+    module = ModuleOp([func_op])
+    LowerNnToKernelPass().run(module)
+    return next(op for op in module.ops if isinstance(op, func.FuncOp)).body.block
 
 
 # EC-001
@@ -504,41 +530,72 @@ def test_emit_c_op_rejects_symbol_add_on_non_cpu() -> None:
 # EC-008A
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-02 05:59:07 +0800
-# 最近一次运行成功时间: 2026-04-02 05:59:07 +0800
-# 功能说明: 验证预绑定 result 的 nn.add 可在 cpu target 下生成 cpu::add 调用。
-# 测试目的: 锁定 nn.add 的 memory+memory、memory+const(i32)、memory+symbol.int 三条节点级 emit_c 收口路径，且 const 锚点固定为 `cpu::add(lhs, 1, out);`。
-# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_op_lowers_prebound_nn_add_variants_to_cpu_add
+# 最近一次运行测试时间: 2026-04-02 23:04:42 +0800
+# 最近一次运行成功时间: 2026-04-02 23:04:42 +0800
+# 功能说明: 验证 `build_func_op -> pass -> emit_c` 的 add 三条 CPU 路径可生成 lowered IR 节点片段。
+# 测试目的: 清理 raw `NnAddOp` 节点级直出源码的旧成功口径，锁定公开成功链路来自 pass 后 `kernel.add` / `dma.fill`。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_op_lowers_build_func_op_nn_add_variants_after_pass
 # 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
 # 对应 spec 文件路径: spec/dsl/emit_c.md
 # 对应测试文件路径: test/dsl/test_emit_c.py
-def test_emit_c_op_lowers_prebound_nn_add_variants_to_cpu_add() -> None:
-    memory_type = _make_memory_type([2, 3], [3, 1])
-    space = NnMemorySpaceAttr.from_name("global")
+def test_emit_c_op_lowers_build_func_op_nn_add_variants_after_pass() -> None:
+    def add_direct(lhs: "Tensor[i32, 2, 3]", rhs: "Tensor[i32, 2, 3]") -> "Tensor[i32, 2, 3]":
+        return lhs + rhs
 
-    pair_block = Block(arg_types=[memory_type, memory_type])
+    def add_const_direct(lhs: "Tensor[i32, 2, 3]") -> "Tensor[i32, 2, 3]":
+        return lhs + 1
+
+    def add_symbol_direct(lhs: "Tensor[i32, 2, 3]", bias: int) -> "Tensor[i32, 2, 3]":
+        return lhs + bias
+
+    pair_block = _lower_built_func(
+        add_direct,
+        Memory([2, 3], NumericType.Int32),
+        Memory([2, 3], NumericType.Int32),
+    )
     pair_ctx = _ctx()
     pair_ctx.bind_name(pair_block.args[0], "lhs")
     pair_ctx.bind_name(pair_block.args[1], "rhs")
-    pair_add = NnAddOp(pair_block.args[0], pair_block.args[1], memory_type, space)
-    pair_ctx.bind_name(pair_add.result, "out")
-    assert emit_c_op(pair_add, pair_ctx) == "cpu::add(lhs, rhs, out);"
+    pair_add = next(op for op in pair_block.ops if isinstance(op, KernelAddOp))
+    assert emit_c_op(pair_add, pair_ctx) == "cpu::add(lhs, rhs, v0);"
 
-    const_block = Block(arg_types=[memory_type])
+    const_block = _lower_built_func(
+        add_const_direct,
+        Memory([2, 3], NumericType.Int32),
+    )
     const_ctx = _ctx()
     const_ctx.bind_name(const_block.args[0], "lhs")
-    const_value = arith.ConstantOp(IntegerAttr(1, i32))
-    const_add = NnAddOp(const_block.args[0], const_value.result, memory_type, space)
-    const_ctx.bind_name(const_add.result, "out")
-    assert emit_c_op(const_add, const_ctx) == "cpu::add(lhs, 1, out);"
+    const_fill = next(op for op in const_block.ops if isinstance(op, DmaFillOp))
+    const_add = next(op for op in const_block.ops if isinstance(op, KernelAddOp))
+    for op in const_block.ops:
+        if isinstance(op, DmaAllocOp):
+            emit_c_op(op, const_ctx)
+    assert emit_c_op(const_fill, const_ctx) == (
+        "for (long long fill0_i = 0; fill0_i < v1.element_count(); ++fill0_i) {\n"
+        "    v1.data()[fill0_i] = 1;\n"
+        "}"
+    )
+    assert emit_c_op(const_add, const_ctx) == "cpu::add(lhs, v1, v0);"
 
-    symbol_block = Block(arg_types=[memory_type, SymbolValueType.from_expr("K")])
+    symbol_block = _lower_built_func(
+        add_symbol_direct,
+        Memory([2, 3], NumericType.Int32),
+        SymbolDim("bias"),
+    )
     symbol_ctx = _ctx()
     symbol_ctx.bind_name(symbol_block.args[0], "lhs")
     symbol_ctx.bind_name(symbol_block.args[1], "bias")
-    symbol_add = NnAddOp(symbol_block.args[0], symbol_block.args[1], memory_type, space)
-    symbol_ctx.bind_name(symbol_add.result, "out")
-    assert emit_c_op(symbol_add, symbol_ctx) == "cpu::add(lhs, bias, out);"
+    symbol_fill = next(op for op in symbol_block.ops if isinstance(op, DmaFillOp))
+    symbol_add = next(op for op in symbol_block.ops if isinstance(op, KernelAddOp))
+    for op in symbol_block.ops:
+        if isinstance(op, DmaAllocOp):
+            emit_c_op(op, symbol_ctx)
+    assert emit_c_op(symbol_fill, symbol_ctx) == (
+        "for (long long fill0_i = 0; fill0_i < v1.element_count(); ++fill0_i) {\n"
+        "    v1.data()[fill0_i] = bias;\n"
+        "}"
+    )
+    assert emit_c_op(symbol_add, symbol_ctx) == "cpu::add(lhs, v1, v0);"
 
 
 # EC-008B

@@ -68,6 +68,10 @@ from kernel_gen.dialect.nn import (
     NnTrueDivOp,
 )
 from kernel_gen.dialect.symbol import SymbolValueType
+from kernel_gen.dsl.mlir_gen import build_func_op
+from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.symbol_variable.type import NumericType
 pass_module = importlib.import_module("kernel_gen.passes.lowering.nn_to_kernel")
 LowerNnToKernelError = pass_module.LowerNnToKernelError
 LowerNnToKernelPass = pass_module.LowerNnToKernelPass
@@ -423,6 +427,10 @@ def _make_memory_type(
     return NnMemoryType(shape, stride, element_type, _make_space(space))
 
 
+def _tensor_arg(shape: list[int | str], dtype: NumericType = NumericType.Int32) -> Memory:
+    return Memory(shape, dtype)
+
+
 def _build_module(
     arg_types: list[Attribute],
     result_type: NnMemoryType,
@@ -595,6 +603,56 @@ def test_lower_add_mixed_symbol_materializes_rhs_via_dma_fill() -> None:
     assert kernel_op.rhs == fill_op.target
     assert any(use.operation is kernel_op for use in fill_op.target.uses)
     assert not any(op.name.startswith("nn.") for op in ops)
+
+
+# COV-N2K-028
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-02 23:04:42 +0800
+# 最近一次运行成功时间: 2026-04-02 23:04:42 +0800
+# 测试目的: 验证公开链路 `build_func_op -> LowerNnToKernelPass` 可统一覆盖 add 的三条成功路径。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_build_func_op_nn_add_variants_through_public_chain
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
+def test_lower_build_func_op_nn_add_variants_through_public_chain() -> None:
+    def add_direct(lhs: "Tensor[i32, 2, 2]", rhs: "Tensor[i32, 2, 2]") -> "Tensor[i32, 2, 2]":
+        return lhs + rhs
+
+    def add_const_direct(lhs: "Tensor[i32, 2, 2]") -> "Tensor[i32, 2, 2]":
+        return lhs + 1
+
+    def add_symbol_direct(lhs: "Tensor[i32, 2, 2]", bias: int) -> "Tensor[i32, 2, 2]":
+        return lhs + bias
+
+    pair_module = ModuleOp([build_func_op(add_direct, _tensor_arg([2, 2]), _tensor_arg([2, 2]))])
+    LowerNnToKernelPass().run(pair_module)
+    pair_block = next(op for op in pair_module.ops if isinstance(op, func.FuncOp)).body.block
+    pair_ops = _collect_ops(pair_block)
+    assert not any(op.name.startswith("nn.") for op in pair_ops)
+    assert len([op for op in pair_ops if isinstance(op, DmaAllocOp)]) == 1
+    assert len([op for op in pair_ops if isinstance(op, KernelAddOp)]) == 1
+
+    const_module = ModuleOp([build_func_op(add_const_direct, _tensor_arg([2, 2]))])
+    LowerNnToKernelPass().run(const_module)
+    const_block = next(op for op in const_module.ops if isinstance(op, func.FuncOp)).body.block
+    const_ops = _collect_ops(const_block)
+    const_fill = next(op for op in const_ops if isinstance(op, DmaFillOp))
+    const_add = next(op for op in const_ops if isinstance(op, KernelAddOp))
+    const_literal = next(op for op in const_ops if isinstance(op, arith.ConstantOp))
+    assert const_fill.value == const_literal.result
+    assert const_add.rhs == const_fill.target
+    assert not any(op.name.startswith("nn.") for op in const_ops)
+
+    symbol_module = ModuleOp([build_func_op(add_symbol_direct, _tensor_arg([2, 2]), SymbolDim("bias"))])
+    LowerNnToKernelPass().run(symbol_module)
+    symbol_block = next(op for op in symbol_module.ops if isinstance(op, func.FuncOp)).body.block
+    symbol_ops = _collect_ops(symbol_block)
+    symbol_fill = next(op for op in symbol_ops if isinstance(op, DmaFillOp))
+    symbol_add = next(op for op in symbol_ops if isinstance(op, KernelAddOp))
+    assert symbol_fill.value == symbol_block.args[1]
+    assert symbol_add.rhs == symbol_fill.target
+    assert not any(op.name.startswith("nn.") for op in symbol_ops)
 
 
 # TC-PASS-N2K-002

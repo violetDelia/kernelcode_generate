@@ -42,7 +42,11 @@ from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolValueType
 from kernel_gen.dsl.emit_c import EmitCContext
 from kernel_gen.dsl.gen_kernel import GenKernelError, gen_body, gen_kernel, gen_signature
+from kernel_gen.dsl.mlir_gen import build_func_op
 from kernel_gen.passes.lowering.nn_to_kernel import LowerNnToKernelPass
+from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.symbol_variable.type import NumericType
 
 gen_kernel_module = importlib.import_module("kernel_gen.dsl.gen_kernel")
 
@@ -71,6 +75,10 @@ def _make_memory_type(shape: list[int], stride: list[int], element_type: object 
         element_type,
         NnMemorySpaceAttr.from_name(space),
     )
+
+
+def _tensor_arg(shape: list[int | str], dtype: NumericType = NumericType.Int32) -> Memory:
+    return Memory(shape, dtype)
 
 
 def _arg_attrs(*names: str) -> ArrayAttr[DictionaryAttr]:
@@ -557,85 +565,80 @@ def test_gen_kernel_rejects_symbol_scalar_return_on_non_cpu() -> None:
 
 # GK-013
 # 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-02 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-02 00:00:00 +0800
-# 功能说明: 验证 direct-return nn.add(memory, memory) 在 cpu target 下可直接绑定到 out。
-# 测试目的: 锁定 unique-use + func.return + direct bind to out 的函数级特化输出为 cpu::add(lhs, rhs, out)。
-# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_supports_direct_return_nn_add_memory_memory_on_cpu
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-02 23:04:42 +0800
+# 最近一次运行成功时间: 2026-04-02 23:04:42 +0800
+# 功能说明: 验证 `build_func_op -> pass -> gen_kernel` 的 memory+memory add 在 cpu target 下可生成源码。
+# 测试目的: 清理 raw `nn.add` 直出源码的旧成功口径，锁定 pass 后 `kernel.add` 已被消费为 `cpu::add(lhs, rhs, out)`。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_supports_lowered_nn_add_memory_memory_on_cpu
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
 # 对应测试文件路径: test/dsl/test_gen_kernel.py
-def test_gen_kernel_supports_direct_return_nn_add_memory_memory_on_cpu() -> None:
-    mem = _make_memory_type([2, 2], [2, 1])
-    space = NnMemorySpaceAttr.from_name("global")
-    block = Block(arg_types=[mem, mem])
-    add = NnAddOp(block.args[0], block.args[1], mem, space)
-    block.add_op(add)
-    block.add_op(func.ReturnOp(add.result))
-    func_op = _func("add_direct", [mem, mem], [mem], block, ("lhs", "rhs"))
+def test_gen_kernel_supports_lowered_nn_add_memory_memory_on_cpu() -> None:
+    def add_direct(lhs: "Tensor[i32, 2, 2]", rhs: "Tensor[i32, 2, 2]") -> "Tensor[i32, 2, 2]":
+        return lhs + rhs
 
-    source = gen_kernel(func_op, _ctx())
+    func_op = build_func_op(add_direct, _tensor_arg([2, 2]), _tensor_arg([2, 2]))
+    source = gen_kernel(_lower_func(func_op), _ctx())
 
-    assert source.startswith("void add_direct(const Memory<int32_t>& lhs, const Memory<int32_t>& rhs, Memory<int32_t>& out)")
-    assert "cpu::add(lhs, rhs, out);" in source
+    assert source.startswith("void add_direct(const Memory<int32_t>& arg0, const Memory<int32_t>& arg1, Memory<int32_t>& out)")
+    assert "cpu::add(arg0, arg1, out);" in source
+    assert "kernel.add" not in source
+    assert "nn.add" not in source
     assert "out = " not in source
 
 
 # GK-014
 # 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-02 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-02 00:00:00 +0800
-# 功能说明: 验证 direct-return nn.add(memory, const(i32)) 在 cpu target 下可直接绑定到 out。
-# 测试目的: 锁定 const(i32) 路径函数级特化输出为 cpu::add(lhs, 1, out)。
-# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_supports_direct_return_nn_add_memory_const_on_cpu
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-02 23:04:42 +0800
+# 最近一次运行成功时间: 2026-04-02 23:04:42 +0800
+# 功能说明: 验证 `build_func_op -> pass -> gen_kernel` 的 memory+const(i32) add 会先经 `dma.fill` 再生成源码。
+# 测试目的: 清理 raw mixed `nn.add` 直接出源码的旧成功口径，锁定 pass 后 `dma.fill + cpu::add(lhs, v0, out)` 文本。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_supports_lowered_nn_add_memory_const_on_cpu
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
 # 对应测试文件路径: test/dsl/test_gen_kernel.py
-def test_gen_kernel_supports_direct_return_nn_add_memory_const_on_cpu() -> None:
-    mem = _make_memory_type([2, 2], [2, 1])
-    space = NnMemorySpaceAttr.from_name("global")
-    block = Block(arg_types=[mem])
-    const = arith.ConstantOp(IntegerAttr(1, i32))
-    add = NnAddOp(block.args[0], const.result, mem, space)
-    block.add_op(const)
-    block.add_op(add)
-    block.add_op(func.ReturnOp(add.result))
-    func_op = _func("add_const_direct", [mem], [mem], block, ("lhs",))
+def test_gen_kernel_supports_lowered_nn_add_memory_const_on_cpu() -> None:
+    def add_const_direct(lhs: "Tensor[i32, 2, 2]") -> "Tensor[i32, 2, 2]":
+        return lhs + 1
 
-    source = gen_kernel(func_op, _ctx())
+    func_op = build_func_op(add_const_direct, _tensor_arg([2, 2]))
+    source = gen_kernel(_lower_func(func_op), _ctx())
 
-    assert source.startswith("void add_const_direct(const Memory<int32_t>& lhs, Memory<int32_t>& out)")
-    assert "cpu::add(lhs, 1, out);" in source
+    assert source.startswith("void add_const_direct(const Memory<int32_t>& arg0, Memory<int32_t>& out)")
+    assert "cpu::add(arg0, v0, out);" in source
+    assert "for (long long fill0_i = 0; fill0_i < v0.element_count(); ++fill0_i) {" in source
+    assert "v0.data()[fill0_i] = 1;" in source
+    assert "kernel.add" not in source
+    assert "nn.add" not in source
     assert "out = " not in source
 
 
 # GK-015
 # 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-02 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-02 00:00:00 +0800
-# 功能说明: 验证 direct-return nn.add(memory, symbol.int) 在 cpu target 下可直接绑定到 out。
-# 测试目的: 锁定 symbol.int 路径函数级特化输出为 cpu::add(lhs, bias, out) 且签名暴露 long long bias。
-# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_supports_direct_return_nn_add_memory_symbol_on_cpu
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-02 23:04:42 +0800
+# 最近一次运行成功时间: 2026-04-02 23:04:42 +0800
+# 功能说明: 验证 `build_func_op -> pass -> gen_kernel` 的 memory+symbol.int add 会先经 `dma.fill` 再生成源码。
+# 测试目的: 清理 raw `nn.add(memory, symbol.int)` 直接出源码的旧成功口径，锁定 pass 后 `dma.fill + cpu::add(lhs, v0, out)` 文本与 long long bias 签名。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_supports_lowered_nn_add_memory_symbol_on_cpu
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
 # 对应测试文件路径: test/dsl/test_gen_kernel.py
-def test_gen_kernel_supports_direct_return_nn_add_memory_symbol_on_cpu() -> None:
-    mem = _make_memory_type([2, 2], [2, 1])
-    bias_type = SymbolValueType.from_expr("bias")
-    space = NnMemorySpaceAttr.from_name("global")
-    block = Block(arg_types=[mem, bias_type])
-    add = NnAddOp(block.args[0], block.args[1], mem, space)
-    block.add_op(add)
-    block.add_op(func.ReturnOp(add.result))
-    func_op = _func("add_symbol_direct", [mem, bias_type], [mem], block, ("lhs", "bias"))
+def test_gen_kernel_supports_lowered_nn_add_memory_symbol_on_cpu() -> None:
+    def add_symbol_direct(lhs: "Tensor[i32, 2, 2]", bias: int) -> "Tensor[i32, 2, 2]":
+        return lhs + bias
 
-    source = gen_kernel(func_op, _ctx())
+    func_op = build_func_op(add_symbol_direct, _tensor_arg([2, 2]), SymbolDim("bias"))
+    source = gen_kernel(_lower_func(func_op), _ctx())
 
-    assert source.startswith("void add_symbol_direct(const Memory<int32_t>& lhs, long long bias, Memory<int32_t>& out)")
-    assert "cpu::add(lhs, bias, out);" in source
+    assert source.startswith("void add_symbol_direct(const Memory<int32_t>& arg0, long long arg1, Memory<int32_t>& out)")
+    assert "cpu::add(arg0, v0, out);" in source
+    assert "for (long long fill0_i = 0; fill0_i < v0.element_count(); ++fill0_i) {" in source
+    assert "v0.data()[fill0_i] = arg1;" in source
+    assert "kernel.add" not in source
+    assert "nn.add" not in source
     assert "out = " not in source
 
 
@@ -776,55 +779,50 @@ def test_gen_kernel_rejects_npu_demo_body_level_kernel_with_nonempty_body() -> N
 # GK-I2-001
 # 创建者: 大闸蟹
 # 最后一次更改: 小李飞刀
-# 功能说明: 验证 pass 后 lowered IR 的三条 nn.add CPU 路径可生成源码并完成编译执行。
-# 测试目的: 锁定 `build_func_op -> LowerNnToKernelPass -> gen_kernel` 的 memory+memory、memory+const(i32)、memory+symbol.int 三条成功口径，并确保源码不再出现 `nn.add` / `kernel.add` 文本。
+# 功能说明: 验证 `build_func_op -> pass -> gen_kernel` 的三条 nn.add CPU 路径可生成源码并完成编译执行。
+# 测试目的: 作为 I4 的统一 smoke，确认公开成功链路来自 `build_func_op -> LowerNnToKernelPass -> gen_kernel`，而不是 raw `nn.add` direct-return 特化。
 # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_compiles_and_runs_lowered_nn_add_variants_on_cpu
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
 # 对应测试文件路径: test/dsl/test_gen_kernel.py
 def test_gen_kernel_compiles_and_runs_lowered_nn_add_variants_on_cpu() -> None:
-    mem = _make_memory_type([2, 2], [2, 1])
-    space = NnMemorySpaceAttr.from_name("global")
+    def add_direct(lhs: "Tensor[i32, 2, 2]", rhs: "Tensor[i32, 2, 2]") -> "Tensor[i32, 2, 2]":
+        return lhs + rhs
 
-    pair_block = Block(arg_types=[mem, mem])
-    pair_add = NnAddOp(pair_block.args[0], pair_block.args[1], mem, space)
-    pair_block.add_op(pair_add)
-    pair_block.add_op(func.ReturnOp(pair_add.result))
-    pair_func = _func("add_direct", [mem, mem], [mem], pair_block, ("lhs", "rhs"))
-    pair_source = gen_kernel(_lower_func(pair_func), _ctx())
+    def add_const_direct(lhs: "Tensor[i32, 2, 2]") -> "Tensor[i32, 2, 2]":
+        return lhs + 1
 
-    const_block = Block(arg_types=[mem])
-    const_value = arith.ConstantOp(IntegerAttr(1, i32))
-    const_add = NnAddOp(const_block.args[0], const_value.result, mem, space)
-    const_block.add_op(const_value)
-    const_block.add_op(const_add)
-    const_block.add_op(func.ReturnOp(const_add.result))
-    const_func = _func("add_const_direct", [mem], [mem], const_block, ("lhs",))
-    const_source = gen_kernel(_lower_func(const_func), _ctx())
+    def add_symbol_direct(lhs: "Tensor[i32, 2, 2]", bias: int) -> "Tensor[i32, 2, 2]":
+        return lhs + bias
 
-    symbol_type = SymbolValueType.from_expr("bias")
-    symbol_block = Block(arg_types=[mem, symbol_type])
-    symbol_add = NnAddOp(symbol_block.args[0], symbol_block.args[1], mem, space)
-    symbol_block.add_op(symbol_add)
-    symbol_block.add_op(func.ReturnOp(symbol_add.result))
-    symbol_func = _func("add_symbol_direct", [mem, symbol_type], [mem], symbol_block, ("lhs", "bias"))
-    symbol_source = gen_kernel(_lower_func(symbol_func), _ctx())
+    pair_source = gen_kernel(
+        _lower_func(build_func_op(add_direct, _tensor_arg([2, 2]), _tensor_arg([2, 2]))),
+        _ctx(),
+    )
+    const_source = gen_kernel(
+        _lower_func(build_func_op(add_const_direct, _tensor_arg([2, 2]))),
+        _ctx(),
+    )
+    symbol_source = gen_kernel(
+        _lower_func(build_func_op(add_symbol_direct, _tensor_arg([2, 2]), SymbolDim("bias"))),
+        _ctx(),
+    )
 
-    assert "cpu::add(lhs, rhs, out);" in pair_source
+    assert "cpu::add(arg0, arg1, out);" in pair_source
     assert "kernel.add" not in pair_source
     assert "nn.add" not in pair_source
-    assert "lhs.shape()[0]" in const_source
-    assert "lhs.shape()[1]" in const_source
-    assert "cpu::add(lhs, v0, out);" in const_source
+    assert "arg0.shape()[0]" in const_source
+    assert "arg0.shape()[1]" in const_source
+    assert "cpu::add(arg0, v0, out);" in const_source
     assert "for (long long fill0_i = 0; fill0_i < v0.element_count(); ++fill0_i) {" in const_source
     assert "v0.data()[fill0_i] = 1;" in const_source
     assert "kernel.add" not in const_source
     assert "nn.add" not in const_source
-    assert "lhs.shape()[0]" in symbol_source
-    assert "lhs.shape()[1]" in symbol_source
-    assert "cpu::add(lhs, v0, out);" in symbol_source
+    assert "arg0.shape()[0]" in symbol_source
+    assert "arg0.shape()[1]" in symbol_source
+    assert "cpu::add(arg0, v0, out);" in symbol_source
     assert "for (long long fill0_i = 0; fill0_i < v0.element_count(); ++fill0_i) {" in symbol_source
-    assert "v0.data()[fill0_i] = bias;" in symbol_source
+    assert "v0.data()[fill0_i] = arg1;" in symbol_source
     assert "kernel.add" not in symbol_source
     assert "nn.add" not in symbol_source
 
