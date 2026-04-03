@@ -14,7 +14,7 @@ agents-lists.md
 **.log
 expectation
 经验.md
-main
+main.py
 plan
 *.plan.md
 
