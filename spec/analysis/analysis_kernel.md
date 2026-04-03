@@ -2,12 +2,12 @@
 
 ## 功能简介
 
-定义算子级与函数级的“计算量/搬运量”分析规范。除基于 `Memory` 形状的兼容公式接口外，提供面向 `func.func`（`xdsl.dialects.func.FuncOp`）的唯一公开主入口 `analyze_kernel(...)`：输出逐 op 成本、函数总量与稳定 `value_traffic`，并可选将汇总写回 `func.func` 属性（`analysis.*`）。其中 `analyze_kernel(...)` 只对当前主入口已承接的统计范围产生成本/流量结果；当前已承接并在 `S1` 公开收口范围内的 DMA 分支包括 `dma.load`、`dma.copy`、`dma.store`；`dma.slice`、`dma.deslice`、`dma.alloc`、`dma.free` 当前不在 `S1` 公开收口范围内；基于 `Memory`/`Operation` 的公式接口仍只负责白名单公式算子。
+定义兼容公式接口与 `analyze_kernel(...)` facade 的分析规范。长期主线入口已经迁移到 [`analysis_engine.md`](../../spec/analysis/analysis_engine.md) 中的 `analysis(op, config, otherargs=None)`；本文件只保留两类内容：一是基于 `Memory`/`Operation` 的兼容公式 helper，二是 `func.func` 级 facade `analyze_kernel(...)` 及其旧 summary/`value_traffic` 派生口径。当前已承接并在公开范围内的 DMA 分支仍是 `dma.load`、`dma.copy`、`dma.store`；`dma.slice`、`dma.deslice`、`dma.alloc`、`dma.free` 继续不纳入稳定统计合同。
 
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/analysis/analysis_kernel.md`](../../spec/analysis/analysis_kernel.md)
 - `功能实现`：[`kernel_gen/analysis/analysis.py`](../../kernel_gen/analysis/analysis.py)
 - `test`：[`test/analysis/test_analysis.py`](../../test/analysis/test_analysis.py)
@@ -25,15 +25,16 @@
 
 ## 目标
 
-- 给出逐元素算术、逐元素比较、显式 `broadcast`、`matmul` 的计算量与读写字节口径。
-- 冻结 `analyze_kernel(func_op: func.FuncOp, ...) -> AnalyzeKernelSummary` 为当前唯一公开主入口：面向 `func.func` 统计 compute/read/write 与 `value_traffic`，并支持 `attach_attrs` 回写。
-- 保留基于 `Memory`/`Operation` 的兼容公式接口，供公式复用与兼容场景使用，但不把 `analyze_function(...)` 重新定义为与 `analyze_kernel(...)` 并列的长期主入口。
+- 给出逐元素算术、逐元素比较、显式 `broadcast`、`matmul` 的兼容公式口径。
+- 冻结 `analyze_kernel(func_op: func.FuncOp, ...) -> AnalyzeKernelSummary` 为 `analysis(...)` 的 facade / adapter 与过渡兼容返回，而不是长期主入口或其他 pass 的稳定消费结构。
+- 保留基于 `Memory`/`Operation` 的兼容公式接口，供公式复用与兼容场景使用，但不把 `analyze_function(...)` 重新定义为与统一入口并列的主线。
 - 对形状不匹配、参数非法等情况提供一致的错误边界。
 
 ## 限制与边界
 
 - 基于 `Memory`/`Operation` 的兼容公式接口（包括 `analyze_function(...)` 与各公式 helper）仅覆盖 `add/sub/mul/truediv/eq/ne/lt/le/gt/ge/broadcast/matmul`；在这一路径上传入其它算子必须拒绝。
-- `analyze_kernel(...)` 当前只对主入口已承接的逐元素/`matmul` 成本统计，以及 `dma.load`、`dma.copy`、`dma.store` 的 DMA 分支统计产生结果；`arith.constant` 与 `func.return` 默认忽略。
+- `analyze_kernel(...)` 只允许通过 `analysis(func_op, config, otherargs)` 聚合出 `AnalyzeKernelSummary`；不允许再维护第二套独立公式主线。
+- `analyze_kernel(...)` 当前只对统一入口已承接的逐元素/`matmul` 成本统计，以及 `dma.load`、`dma.copy`、`dma.store` 的 DMA 分支统计产生结果；`arith.constant` 与 `func.return` 默认忽略。
 - 逐元素算术/比较不允许隐式广播，输入与输出 `shape` 必须严格一致。
 - `broadcast` 仅为显式操作，要求输出 rank 不小于输入 rank，尾维对齐且维度相等或输入维为静态 `1`。
 - `matmul` 仅支持二维收缩：`lhs=[M,K]`、`rhs=[K,N]`、`out=[M,N]`。
@@ -42,7 +43,7 @@
 - 形状缺失、规则不满足或参数校验失败必须抛出 `AnalysisError`。
 - `analyze_kernel(...)` 对未知 op 必须执行“skip + warning”，不计入总量；但对已承接公开分支（包括当前 DMA 分支）的前置条件不满足必须抛出 `AnalysisError`。
 - 在当前计划与测试未同步前，`dma.slice`、`dma.deslice`、`dma.alloc`、`dma.free` 不纳入 `S1` 已承接公开合同；本规范当前不为这四类 DMA 分支建立测试映射或稳定统计细节。
-- `analyze_function(...)` 仅作为基于 `Memory`/`Operation` 的兼容公式接口存在，不与 `analyze_kernel(...)` 并列为长期公开主入口。
+- `analyze_function(...)` 仅作为基于 `Memory`/`Operation` 的兼容公式接口存在，不与统一入口并列为长期公开主入口。
 
 ## 公开接口
 
@@ -124,7 +125,7 @@
 
 **AnalyzeKernelSummary**
 
-- 功能说明：`analyze_kernel(...)` 的函数级汇总结果。
+- 功能说明：`analyze_kernel(...)` facade 对统一入口结果的兼容汇总结构。
 - 参数说明：
   - `func_name: str`：函数名（`func.func` 的 `sym_name`）。
   - `op_costs: Sequence[KernelOpCost]`：逐 op 成本列表。
@@ -133,12 +134,14 @@
 - `total_read_bytes: sympy.Basic`：函数总读取字节。
 - `total_write_bytes: sympy.Basic`：函数总写入字节。
 - 使用示例：`summary = analyze_kernel(func_op, dtype_size_overrides={"f32": 4}); summary.op_costs[0].op_name == "nn.add"`
-- 注意事项：`total_*` 必须等于 `op_costs` 中对应字段逐项求和。
-- 返回与限制：用于 `func_cost` 等分析 pass 复用的稳定汇总结构。
+- 注意事项：
+  - `total_*` 必须等于统一入口 `AnalysisResult` derived alias 的对应总量。
+  - `AnalyzeKernelSummary` 仅用于 `analyze_kernel(...)` facade 的兼容返回；`func_cost` 等下游 pass 不得把它视为稳定消费结构。
+- 返回与限制：仅作为 `analyze_kernel(...)` 的兼容汇总返回值；不单独冻结新的 pass 消费合同。
 
 **analyze_kernel**
 
-- 功能说明：分析单个 `func.func`（`xdsl.dialects.func.FuncOp`）的 compute/read/write 与 `value_traffic`。
+- 功能说明：把 `analysis(func_op, config, otherargs)` 的结果适配为旧 `AnalyzeKernelSummary`。
 - 参数说明：
   - `func_op: func.FuncOp`：待分析的函数 op。
   - `args: Iterable[object] | None`：可选运行时参数列表；若提供则必须为 iterable，且长度必须与函数参数位次一致。
@@ -153,11 +156,14 @@ assert summary.op_costs[0].op_name == "nn.add"
 ```
 
 - 注意事项：
+  - 该接口是 facade / adapter，不再是长期主入口；长期主入口见 [`analysis_engine.md`](../../spec/analysis/analysis_engine.md)。
   - 主入口签名固定为 `analyze_kernel(func_op: func.FuncOp, args: Iterable[object] | None = None, predicate_size: int = 1, dtype_size_overrides: dict[str, int] | None = None, attach_attrs: bool = False) -> AnalyzeKernelSummary`。
+  - `func_cost` 若需要 `compute/read_bytes/write_bytes` 兼容字段，必须直接消费统一入口 `AnalysisResult` 的 derived alias，不再经过 `AnalyzeKernelSummary` 建立稳定依赖。
   - 未知 op 必须发出 `UserWarning`，warning 文本需包含 unknown op 信息，并执行 `skip + warning`：不计入 `op_costs`、`total_*` 或对应 `value_traffic`，但分析必须继续完成；当前已承接公开的 `dma.load`、`dma.copy`、`dma.store` 不属于该 warning 分支。
   - 当前公开 DMA 分支中，`dma.load` 作为产生结果 value 的 op，需要把结果写流量登记到对应 `value_traffic`；`dma.copy`、`dma.store` 记录源读/目标写流量。
   - 默认忽略 `arith.constant` 与 `func.return`。
   - 比较输出为 `i1` 时，`KernelOpCost.write_bytes`、对应结果的 `ValueTraffic.write_bytes` 与 `total_write_bytes` 必须统一使用 `predicate_size`，不使用 `dtype_size_overrides["i1"]`。
+  - `attach_attrs=False` 时不得写任何新的 `analysis.*`；`attach_attrs=True` 只是显式开启 facade 层的 func attribute 写回。
 - 返回与限制：返回 `AnalyzeKernelSummary`；参数/前置条件不满足时抛出 `AnalysisError`。
 
 **analyze_elementwise**

@@ -2,14 +2,14 @@
 
 ## 功能简介
 
-- 定义一个面向 `func.func` 的分析 pass：统计函数内计算量（compute）与访存量（read/write bytes）。
+- 定义一个面向 `func.func` 的分析 pass：通过统一入口 `analysis(func_op, AnalysisConfig, otherargs)` 读取函数级 `AnalysisResult`，并向外提供 `compute/read_bytes/write_bytes` 兼容 derived alias。
 - 统计结果支持静态维度与符号维度（如 `A`、`B`），输出符号表达式。
 - pass 只做分析，不改写 op 语义，不做 lowering、优化或代码生成。
 
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`榕`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/pass/analysis/func_cost.md`](../../../spec/pass/analysis/func_cost.md)
 - `功能实现`：[`kernel_gen/passes/analysis/func_cost.py`](../../../kernel_gen/passes/analysis/func_cost.py)
 - `test`：[`test/pass/test_analysis_func_cost.py`](../../../test/pass/test_analysis_func_cost.py)
@@ -24,9 +24,10 @@
 
 ## 目标
 
-- 在函数级给出可落地的成本统计：`compute`、`read_bytes`、`write_bytes`。
-- 支持逐 op 统计与函数总计统计。
+- 在函数级给出可查询的兼容字段：`compute`、`read_bytes`、`write_bytes`。
+- 支持逐 op 统计与函数总计统计，但这些统计都必须来自统一入口结果的机械派生。
 - 支持以符号表达式展示结果，便于后续调度、分块、性能估算使用。
+- 明确 `func_cost` 只消费统一入口 `AnalysisResult` 的 derived alias，而不是单独维护第二套统计公式或支持范围。
 
 ## 限制与边界
 
@@ -34,50 +35,18 @@
   - IR 变换与重写；
   - 跨函数联动分析；
   - 缓存复用、并行度、带宽/延迟等硬件级建模。
-- 默认口径为“理论访存量”，不扣除 cache 命中带来的实际流量减少。
-- 默认只统计白名单 op；非白名单 op 一律跳过并输出告警信息，不中断分析流程。
+- 默认口径为“理论访存量”，不扣除 cache 命中带来的实际流量减少；该口径直接继承统一入口当前主线语义。
+- `func_cost` 的稳定来源是 [`analysis_engine.md`](../../../spec/analysis/analysis_engine.md) 中的 `AnalysisResult`，以及统一入口对已承接 op 的当前公开合同；本文件不再独立冻结第二套 `compute/read_bytes/write_bytes` 公式。
+- `func_cost` 也不单独冻结自己的支持 op 范围；凡是统一入口当前已承接并可生成 `AnalysisResult` 的场景，本 pass 才能消费；未承接 op 的 `skip + warning` 行为直接继承统一入口，不再额外定义第二套白名单。
 
-## 统计口径
+## 消费口径
 
-### 1. 计算量（compute）
-
-- 逐元素算术/比较（`nn.add/sub/mul/truediv/eq/ne/lt/le/gt/ge`，`kernel.add/sub/mul/div/eq/lt/gt`）：
-  - `compute = numel(output)`。
-- `nn.matmul`：
-  - `compute = 2 * M * N * K`（按乘加各 1 次计）。
-- `nn.broadcast` 与纯 DMA 搬运类 op：
-  - `compute = 0`。
-- `dma.cast`：
-  - `compute = numel(output)`（按逐元素类型转换计 1 次）。
-
-### 2. 访存量（read/write bytes）
-
-- 通用公式：
-  - `read_bytes = 读取元素数 * element_size(bytes)`
-  - `write_bytes = 写入元素数 * element_size(bytes)`
-- 对于比较类输出，若结果 element type 为 `i1`，按 `predicate_size`（默认 1 byte）计写回。
-- `rhs` 为标量常量时（如 `A + 1`），标量不计内存读取。
-- 维度为符号时，元素数按符号乘积表示，如 `numel([A, B]) = A * B`。
-
-### 3. 与用户示例对齐
-
-- 场景：`A:[A,B]`，`B:[A,B]`，执行逐元素 `add`，再与常量 `1` 做逐元素 `add`。
-- 结论：
-  - 每个 `add` 的计算量都是 `A * B`。
-  - 第一个 `add` 读 `2 * A * B` 个元素，写 `A * B` 个元素。
-  - 第二个 `add`（`tensor + const`）读 `A * B` 个元素（常量不计读），写 `A * B` 个元素。
-
-## 支持的 op 范围
-
-- `nn`：`add/sub/mul/truediv/eq/ne/lt/le/gt/ge/broadcast/matmul`
-- `kernel`：`add/sub/mul/div/eq/lt/gt/select/cast`
-- `dma`：`copy/load/store/slice/deslice/view/reshape/flatten/cast/alloc/free`
-
-### DMA 口径约定
-
-- `dma.copy/load/store/slice/deslice/view/reshape/flatten`：按数据搬运计读写，`compute=0`。
-- `dma.cast`：按数据转换计 `compute=numel(output)`，同时计读写。
-- `dma.alloc/free`：默认 `compute=0`、`read=0`、`write=0`（仅资源管理，不计数据面流量）。
+- `func_cost` 必须直接消费 `analysis(func_op, AnalysisConfig, otherargs)` 返回的 `AnalysisResult`。
+- `OpCost.compute/read_bytes/write_bytes` 与 `FuncCostSummary.total_compute/total_read_bytes/total_write_bytes` 都只能是 `AnalysisResult` 的 derived alias：
+  - `compute` 来自统一入口已产出的计算总量派生口径；
+  - `read_bytes` / `write_bytes` 来自统一入口已产出的访存项派生口径。
+- 比较结果 `i1` 的 `predicate_size`、`tensor + const` 是否计读、DMA 分支是否纳入统计、未知 op 是否 `skip + warning`，都继承统一入口当前主线行为；本文件不再重写这些规则。
+- 若统一入口未来调整 item schema、derived alias 实现或承接范围，`func_cost` 必须跟随该主线更新；不得在本 pass 内保留旧公式分支以维持第二套稳定口径。
 
 ## 公开接口
 
@@ -127,6 +96,7 @@ OpCost("nn.add", compute=A * B, read_bytes=2 * A * B * 4, write_bytes=A * B * 4)
 注意事项：
 
 - `Expr` 可以是整数或符号表达式。
+- 这些字段只承载从统一入口结果投影出的兼容 alias，不在本类中重新定义独立公式。
 
 返回与限制：
 
@@ -154,7 +124,7 @@ summary = pass_obj.get_summary("my_func")
 
 注意事项：
 
-- `total_*` 必须等于 `ops` 中对应字段逐项求和。
+- `total_*` 必须等于 `ops` 中对应字段逐项求和，且与同一 `func.func` 的 `AnalysisResult` derived alias 保持一致。
 
 返回与限制：
 
@@ -165,6 +135,7 @@ summary = pass_obj.get_summary("my_func")
 功能说明：
 
 - 对 module 中每个 `func.func` 执行计算/访存分析。
+- 内部消费统一入口 `AnalysisResult`，对外仍暴露 `FuncCostSummary.total_compute/read_bytes/write_bytes` derived alias。
 
 参数说明：
 
@@ -189,10 +160,12 @@ summary = cost_pass.get_summary("func_B")
 
 - `run(module)` 返回 `module` 本身（分析 pass，不改写语义）。
 - 分析结果需在 pass 实例内可查询（例如 `get_summary()` / `all_summaries()`）。
+- 支持范围、`skip + warning`、`predicate_size` 与 DMA 纳入口径都直接继承统一入口；本 pass 不再维护第二套统计规则。
 - `attach_attrs=True` 时，建议附加：
   - `analysis.compute`
   - `analysis.read_bytes`
   - `analysis.write_bytes`
+- `attach_attrs=False` 时不得写回 `analysis.*`。
 
 返回与限制：
 
@@ -220,6 +193,7 @@ module = pass_obj.run(module)
 
 - 必须支持符号维度表达式，不得将符号维强制转为具体整数。
 - 函数内 `func.return`、`arith.constant` 等非业务 op 默认不计入成本。
+- 返回的 `compute/read_bytes/write_bytes` 必须来自统一入口 `AnalysisResult` 的 derived alias，而不是重新走本地公式分支。
 
 返回与限制：
 
@@ -242,23 +216,21 @@ module = pass_obj.run(module)
 
 ### 测试目标
 
-- 验证逐元素 op 的计算量口径为输出元素数。
-- 验证 `tensor + const` 时常量不计读流量。
-- 验证 `matmul` 计算量公式与读写公式。
-- 验证 DMA 搬运类 op 的读写统计。
-- 验证未知 op 会被跳过并输出告警，不影响其余 op 统计。
+- 验证 `func_cost` 的 `compute/read_bytes/write_bytes` 来自统一入口 derived alias，而不是本地第二套统计公式。
+- 验证 `tensor + const`、`matmul`、DMA 搬运与 compare `i1` 等场景的 alias 结果与统一入口保持一致。
+- 验证未知 op 的 `skip + warning` 继承统一入口，不影响其余 op 统计。
 - 验证符号维度表达式（如 `A*B`）可正确保留。
-- 验证 compare 输出为 `i1` 时，`write_bytes` 按 `predicate_size` 统计，且优先于 `dtype_size_overrides["i1"]`。
+- 验证 `attach_attrs` 写回开关只控制属性落盘，不改变 derived alias 的来源。
 
 ### 功能与用例清单
 
 | 用例 ID | 场景描述 | 测试文件 | 对应测试 | 状态说明 |
 | --- | --- | --- | --- | --- |
-| `FC-001` | 输入 `shape=[A,B]` 的 `nn.add`，预期 `compute=A*B`。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_nn_add_symbolic_shape` | 已闭环。 |
-| `FC-002` | 输入 `tensor + const`，预期 `compute=A*B` 且常量不计读取流量。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_tensor_plus_const` | 已闭环。 |
-| `FC-003` | 输入同一 `func` 内串联两个逐元素 op，预期函数总量为两 op 逐项求和。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_chain_accumulate` | 已闭环。 |
-| `FC-004` | 输入 `lhs=[M,K], rhs=[K,N]` 的 `nn.matmul`，预期 `compute=2*M*N*K`。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_matmul_formula` | 已闭环。 |
-| `FC-005` | 输入 `dma.copy/load/store`，预期 `compute=0` 且读写字节按元素数统计。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_dma_memory_traffic` | 已闭环。 |
-| `FC-006` | 输入同时含未知 op 与受支持 op 的函数，预期未知 op 被跳过并告警，其余统计保持正常。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_skips_unknown_op_with_warning` | 已闭环。 |
-| `FC-007` | 输入 `attach_attrs=True` 的分析 pass，预期 `func` 回写 `analysis.*` 属性。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_attach_attrs` | 已闭环。 |
-| `FC-008` | 输入 `nn.eq` 输出 `i1`，预期 `write_bytes` 优先按 `predicate_size` 统计（高于 `dtype_size_overrides["i1"]`）。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_compare_i1_uses_predicate_size` | 已闭环。 |
+| `FC-001` | 输入 `shape=[A,B]` 的 `nn.add`，验证 `func_cost` 读取的符号 `compute` alias 与统一入口一致。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_nn_add_symbolic_shape` | 已闭环；不额外定义本地公式。 |
+| `FC-002` | 输入 `tensor + const`，验证常量不计读流量的 alias 结果继承统一入口。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_tensor_plus_const` | 已闭环；口径来自统一入口。 |
+| `FC-003` | 输入同一 `func` 内串联两个逐元素 op，验证函数总量 alias 为逐 op alias 的累加。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_chain_accumulate` | 已闭环。 |
+| `FC-004` | 输入 `lhs=[M,K], rhs=[K,N]` 的 `nn.matmul`，验证 `func_cost` 对 `matmul` 的 alias 结果与统一入口一致。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_matmul_formula` | 已闭环；不单独冻结 `matmul` 公式。 |
+| `FC-005` | 输入 `dma.copy/load/store`，验证 DMA 读写 alias 结果继承统一入口当前公开分支。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_dma_memory_traffic` | 已闭环。 |
+| `FC-006` | 输入同时含未知 op 与已承接 op 的函数，验证未知 op 的 `skip + warning` 继承统一入口。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_skips_unknown_op_with_warning` | 已闭环。 |
+| `FC-007` | 输入 `attach_attrs=True` 的分析 pass，验证 `func` 回写 `analysis.*` 属性，同时不改变 alias 来源。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_attach_attrs` | 已闭环。 |
+| `FC-008` | 输入 `nn.eq` 输出 `i1`，验证 `write_bytes` alias 优先按 `predicate_size` 继承统一入口。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_compare_i1_uses_predicate_size` | 已闭环。 |

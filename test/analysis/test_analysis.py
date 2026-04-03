@@ -51,13 +51,16 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.analysis.analysis import (
+    AnalysisConfig,
     AnalysisError,
+    AnalysisResult,
     AnalysisSummary,
     AnalyzeKernelSummary,
     MemoryRef,
     OpStats,
     Operation,
     ValueTraffic,
+    analysis,
     analyze_add,
     analyze_elementwise,
     analyze_broadcast,
@@ -155,6 +158,40 @@ class UnknownOp(IRDLOperation):
 
     def __init__(self) -> None:
         super().__init__(operands=[], result_types=[])
+
+
+@irdl_op_definition
+class FakeKernelScalarAddOp(IRDLOperation):
+    """测试用标量 kernel.add op。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 为 A1 的单 op 统一入口测试提供 `kernel.add(i32, i32) -> i32` 形态。
+
+    使用示例:
+    - FakeKernelScalarAddOp(i32)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    name = "kernel.add"
+
+    lhs = operand_def(Attribute)
+    rhs = operand_def(Attribute)
+    result = result_def(Attribute)
+
+    def __init__(
+        self,
+        lhs: SSAValue | Operation,
+        rhs: SSAValue | Operation,
+        result_type: Attribute,
+    ) -> None:
+        super().__init__(operands=[lhs, rhs], result_types=[result_type])
 
 
 def _make_space(space_name: str) -> NnMemorySpaceAttr:
@@ -662,6 +699,213 @@ def test_analysis_function_unsupported_op() -> None:
     ops = [Operation("noop", [MemoryRef("A1", inp)], MemoryRef("B1", inp))]
     with pytest.raises(AnalysisError, match="Unsupported op for analysis"):
         analyze_function(ops)
+
+
+# AN-018
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-03 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-03 00:00:00 +0800
+# 测试目的: 验证单 op 统一入口返回新结果结构，且默认不写 analysis.* 属性。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_entry_returns_new_result_for_scalar_kernel_add
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_entry_returns_new_result_for_scalar_kernel_add() -> None:
+    lhs = arith.ConstantOp(IntegerAttr(1, i32))
+    rhs = arith.ConstantOp(IntegerAttr(2, i32))
+    add_op = FakeKernelScalarAddOp(lhs.result, rhs.result, i32)
+
+    result = analysis(
+        add_op,
+        AnalysisConfig(
+            enable_compute=True,
+            enable_memory=False,
+            write_op_attrs=False,
+            write_func_attrs=False,
+        ),
+    )
+
+    assert isinstance(result, AnalysisResult)
+    assert len(result.compute_items) == 1
+    item = result.compute_items[0]
+    assert item.kind == "scalar"
+    _assert_expr_equal(item.amount, sp.Integer(1))
+    assert item.dtype == "i32"
+    assert result.memory_items == ()
+    assert result.compute_totals_by_kind["scalar"] == sp.Integer(1)
+    assert "analysis.compute" not in add_op.attributes
+
+
+# AN-019
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-03 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-03 00:00:00 +0800
+# 测试目的: 验证统一入口只有在 write_op_attrs=True 时才写回 op attributes。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_entry_write_op_attrs_is_explicit
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_entry_write_op_attrs_is_explicit() -> None:
+    lhs = arith.ConstantOp(IntegerAttr(1, i32))
+    rhs = arith.ConstantOp(IntegerAttr(2, i32))
+    add_op = FakeKernelScalarAddOp(lhs.result, rhs.result, i32)
+
+    analysis(
+        add_op,
+        AnalysisConfig(
+            enable_compute=True,
+            enable_memory=False,
+            write_op_attrs=True,
+            write_func_attrs=False,
+        ),
+    )
+
+    assert add_op.attributes["analysis.compute"].data == "1"
+    assert add_op.attributes["analysis.read_bytes"].data == "0"
+    assert add_op.attributes["analysis.write_bytes"].data == "0"
+    assert add_op.attributes["analysis.compute.kind0"].data == "scalar"
+    assert add_op.attributes["analysis.compute.amount0"].data == "1"
+    assert add_op.attributes["analysis.compute.dtype0"].data == "i32"
+
+
+# AN-020
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-03 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-03 00:00:00 +0800
+# 测试目的: 验证 func.func 统一入口默认不写 attrs，显式开启后写 func attrs，且 analyze_kernel 为 derived facade。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_func_write_attrs_is_explicit_and_analyze_kernel_is_facade
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_func_write_attrs_is_explicit_and_analyze_kernel_is_facade() -> None:
+    mem_type = _make_memory_type([IntAttr(2), IntAttr(3)], f32, "global")
+    space = _make_space("global")
+
+    def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
+        add_op = NnAddOp(block.args[0], block.args[1], mem_type, space)
+        return [add_op], add_op.result
+
+    _, func_op, _ = _build_module([mem_type, mem_type], mem_type, _builder)
+    result = analysis(
+        func_op,
+        AnalysisConfig(
+            enable_compute=True,
+            enable_memory=True,
+            write_op_attrs=False,
+            write_func_attrs=False,
+            dtype_size_overrides={"f32": 4},
+        ),
+    )
+
+    assert "analysis.compute" not in func_op.attributes
+    summary = analyze_kernel(func_op, dtype_size_overrides={"f32": 4})
+    assert summary.op_costs == result.op_costs
+    assert summary.value_traffic == result.value_traffic
+    _assert_expr_equal(summary.total_compute, result.total_compute)
+    _assert_expr_equal(summary.total_read_bytes, result.total_read_bytes)
+    _assert_expr_equal(summary.total_write_bytes, result.total_write_bytes)
+
+    analysis(
+        func_op,
+        AnalysisConfig(
+            enable_compute=True,
+            enable_memory=True,
+            write_op_attrs=False,
+            write_func_attrs=True,
+            dtype_size_overrides={"f32": 4},
+        ),
+    )
+    assert func_op.attributes["analysis.compute"].data == "6"
+    assert func_op.attributes["analysis.read_bytes"].data == "48"
+    assert func_op.attributes["analysis.write_bytes"].data == "24"
+
+
+# AN-021
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-03 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-03 00:00:00 +0800
+# 测试目的: 验证 `analysis(func_op, ...)` 的函数级聚合显式逐 op 调用公开入口 `analysis(op, ...)`。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_func_aggregates_via_public_entry
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_func_aggregates_via_public_entry(monkeypatch: pytest.MonkeyPatch) -> None:
+    mem_type = _make_memory_type([IntAttr(2), IntAttr(3)], f32, "global")
+    space = _make_space("global")
+
+    def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
+        add_op = NnAddOp(block.args[0], block.args[1], mem_type, space)
+        return [add_op], add_op.result
+
+    _, func_op, _ = _build_module([mem_type, mem_type], mem_type, _builder)
+    original_analysis = analysis_module.analysis
+    seen_ops: list[str] = []
+
+    def _spy(op: object, config: AnalysisConfig, otherargs: object = None) -> AnalysisResult:
+        if not isinstance(op, func.FuncOp):
+            seen_ops.append(op.name)
+        return original_analysis(op, config, otherargs)
+
+    monkeypatch.setattr(analysis_module, "analysis", _spy)
+    result = analysis_module.analysis(
+        func_op,
+        AnalysisConfig(
+            enable_compute=True,
+            enable_memory=True,
+            write_op_attrs=False,
+            write_func_attrs=False,
+            dtype_size_overrides={"f32": 4},
+        ),
+    )
+
+    expected_ops = [op.name for op in analysis_module._iter_func_ops(func_op)]
+    assert seen_ops == expected_ops
+    assert result.op_costs[0].op_name == "nn.add"
+    _assert_expr_equal(result.total_compute, sp.Integer(6))
+
+
+# AN-022
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-03 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-03 00:00:00 +0800
+# 测试目的: 验证 `analysis(func_op, ...)` 在 `write_op_attrs=True` 时仍通过公开入口写回逐 op attrs，不抛运行时错误。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_func_write_op_attrs_via_public_entry
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_func_write_op_attrs_via_public_entry() -> None:
+    mem_type = _make_memory_type([IntAttr(2), IntAttr(3)], f32, "global")
+    space = _make_space("global")
+    captured_ops: dict[str, Operation] = {}
+
+    def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
+        add_op = NnAddOp(block.args[0], block.args[1], mem_type, space)
+        captured_ops["add"] = add_op
+        return [add_op], add_op.result
+
+    _, func_op, _ = _build_module([mem_type, mem_type], mem_type, _builder)
+    result = analysis(
+        func_op,
+        AnalysisConfig(
+            enable_compute=True,
+            enable_memory=True,
+            write_op_attrs=True,
+            write_func_attrs=False,
+            dtype_size_overrides={"f32": 4},
+        ),
+    )
+
+    add_op = captured_ops["add"]
+    assert add_op.attributes["analysis.compute"].data == "6"
+    assert add_op.attributes["analysis.read_bytes"].data == "48"
+    assert add_op.attributes["analysis.write_bytes"].data == "24"
+    assert "analysis.compute" not in func_op.attributes
+    assert result.op_costs[0].op_name == "nn.add"
 
 
 # AK-001

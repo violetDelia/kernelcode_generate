@@ -4,7 +4,7 @@
 最后一次更改: 金铲铲大作战
 
 功能说明:
-- 复用 `analyze_kernel(...)` 对 module 内每个 `func.func` 统计 compute/read/write。
+- 复用 `analysis(func_op, AnalysisConfig, otherargs)` 对 module 内每个 `func.func` 统计 compute/read/write。
 - 提供 pass 级汇总查询与可选 `analysis.*` 属性回写。
 
 使用示例:
@@ -28,11 +28,12 @@ from xdsl.dialects import func
 from xdsl.dialects.builtin import ModuleOp
 
 from kernel_gen.analysis.analysis import (
+    AnalysisConfig,
     AnalysisError,
-    AnalyzeKernelSummary,
+    AnalysisResult,
     KernelOpCost,
     ValueTraffic,
-    analyze_kernel,
+    analysis,
 )
 from kernel_gen.passes.pass_manager import Pass
 
@@ -44,7 +45,7 @@ class FuncCostAnalysisError(ValueError):
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 包装 `analyze_kernel(...)` 或 pass 入参校验阶段的错误。
+    - 包装统一 analysis 主入口或 pass 入参校验阶段的错误。
 
     使用示例:
     - raise FuncCostAnalysisError("module must be builtin.module")
@@ -154,18 +155,18 @@ def _reemit_kernel_warnings(caught: Sequence[warnings.WarningMessage]) -> None:
         warnings.warn(_rewrite_kernel_warning(str(item.message)), item.category)
 
 
-def _to_func_cost_summary(summary: AnalyzeKernelSummary) -> FuncCostSummary:
-    """将 `AnalyzeKernelSummary` 适配为 pass 侧 summary。
+def _to_func_cost_summary(summary: AnalysisResult) -> FuncCostSummary:
+    """将 `AnalysisResult` 适配为 pass 侧 summary。
 
     创建者: 金铲铲大作战
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 直接复用 `analyze_kernel(...)` 产出的 op_costs/value_traffic 与总量。
+    - 直接复用统一入口产出的 op_costs/value_traffic 与 derived alias 总量。
     - 不重新计算统计公式。
 
     使用示例:
-    - pass_summary = _to_func_cost_summary(kernel_summary)
+    - pass_summary = _to_func_cost_summary(result)
 
     关联文件:
     - spec: spec/pass/analysis/func_cost.md
@@ -174,7 +175,7 @@ def _to_func_cost_summary(summary: AnalyzeKernelSummary) -> FuncCostSummary:
     """
 
     return FuncCostSummary(
-        func_name=summary.func_name,
+        func_name=summary.func_name or "",
         op_costs=summary.op_costs,
         value_traffic=summary.value_traffic,
         total_compute=summary.total_compute,
@@ -190,7 +191,7 @@ class AnalyzeFuncCostPass(Pass):
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 逐函数调用 `analyze_kernel(...)`。
+    - 逐函数调用 `analysis(func_op, AnalysisConfig, otherargs)`。
     - 将结果缓存在 pass 实例内，供 `get_summary()` 查询。
 
     使用示例:
@@ -219,7 +220,7 @@ class AnalyzeFuncCostPass(Pass):
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 保存 `analyze_kernel(...)` 所需的透传参数。
+        - 保存统一入口所需的透传参数。
         - 初始化摘要缓存。
 
         使用示例:
@@ -238,7 +239,7 @@ class AnalyzeFuncCostPass(Pass):
         self._summaries: dict[str, FuncCostSummary] = {}
 
     def _resolve_args(self, func_op: func.FuncOp) -> list[object] | None:
-        """解析当前函数要传给 `analyze_kernel(...)` 的 args。
+        """解析当前函数要传给统一入口的 `otherargs`。
 
         创建者: 金铲铲大作战
         最后一次更改: 金铲铲大作战
@@ -344,17 +345,23 @@ class AnalyzeFuncCostPass(Pass):
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
                 try:
-                    kernel_summary = analyze_kernel(
+                    result = analysis(
                         op,
-                        args=func_args,
-                        predicate_size=self.predicate_size,
-                        dtype_size_overrides=self.dtype_size_overrides,
-                        attach_attrs=self.attach_attrs,
+                        AnalysisConfig(
+                            enable_compute=True,
+                            enable_memory=True,
+                            write_op_attrs=False,
+                            write_func_attrs=self.attach_attrs,
+                            predicate_size=self.predicate_size,
+                            dtype_size_overrides=self.dtype_size_overrides,
+                            otherargs=func_args,
+                        ),
+                        func_args,
                     )
                 except AnalysisError as exc:
                     raise FuncCostAnalysisError(str(exc)) from exc
             _reemit_kernel_warnings(caught)
-            summary = _to_func_cost_summary(kernel_summary)
+            summary = _to_func_cost_summary(result)
             self._summaries[summary.func_name] = summary
         return module
 

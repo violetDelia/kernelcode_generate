@@ -60,7 +60,7 @@ from kernel_gen.dialect.nn import (
     NnMulOp,
 )
 from kernel_gen.dialect.symbol import SymbolValueType
-from kernel_gen.analysis.analysis import analyze_kernel
+from kernel_gen.analysis.analysis import AnalysisConfig, analysis, analyze_kernel
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 pass_module = importlib.import_module("kernel_gen.passes.analysis.func_cost")
@@ -555,6 +555,33 @@ def test_func_cost_attach_attrs() -> None:
     assert func_op.attributes["analysis.write_bytes"].data == "24"
 
 
+# FC-007A
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-03 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-03 00:00:00 +0800
+# 测试目的: 验证 attach_attrs=False 时 func_cost 不写回 analysis.* 属性。
+# 使用示例: pytest -q test/pass/test_analysis_func_cost.py -k test_func_cost_attach_attrs_is_opt_in
+# 对应功能实现文件路径: kernel_gen/passes/analysis/func_cost.py
+# 对应 spec 文件路径: spec/pass/analysis/func_cost.md
+# 对应测试文件路径: test/pass/test_analysis_func_cost.py
+def test_func_cost_attach_attrs_is_opt_in() -> None:
+    mem_type = _make_memory_type([IntAttr(2), IntAttr(3)], f32, "global")
+    space = _make_space("global")
+
+    def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
+        add_op = NnAddOp(block.args[0], block.args[1], mem_type, space)
+        return [add_op], add_op.result
+
+    module, func_op, _ = _build_module([mem_type, mem_type], mem_type, _builder)
+    pass_obj = AnalyzeFuncCostPass(attach_attrs=False)
+    pass_obj.run(module)
+
+    assert "analysis.compute" not in func_op.attributes
+    assert "analysis.read_bytes" not in func_op.attributes
+    assert "analysis.write_bytes" not in func_op.attributes
+
+
 # FC-008
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
@@ -633,3 +660,44 @@ def test_func_cost_matches_analyze_kernel_on_same_func() -> None:
     assert func_op.attributes["analysis.compute"].data == str(kernel_summary.total_compute)
     assert func_op.attributes["analysis.read_bytes"].data == str(kernel_summary.total_read_bytes)
     assert func_op.attributes["analysis.write_bytes"].data == str(kernel_summary.total_write_bytes)
+
+
+# FC-011
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-03 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-03 00:00:00 +0800
+# 测试目的: 验证 func_cost 摘要来自统一入口 AnalysisResult 的 derived alias。
+# 使用示例: pytest -q test/pass/test_analysis_func_cost.py -k test_func_cost_matches_analysis_result_aliases
+# 对应功能实现文件路径: kernel_gen/passes/analysis/func_cost.py
+# 对应 spec 文件路径: spec/pass/analysis/func_cost.md
+# 对应测试文件路径: test/pass/test_analysis_func_cost.py
+def test_func_cost_matches_analysis_result_aliases() -> None:
+    mem_type = _make_memory_type([StringAttr("A"), StringAttr("B")], f32, "global")
+    space = _make_space("global")
+
+    def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
+        add_op = NnAddOp(block.args[0], block.args[1], mem_type, space)
+        return [add_op], add_op.result
+
+    module, func_op, _ = _build_module([mem_type, mem_type], mem_type, _builder)
+    pass_obj = AnalyzeFuncCostPass(dtype_size_overrides={"f32": 4})
+    pass_obj.run(module)
+    summary = pass_obj.get_summary("main")
+
+    result = analysis(
+        func_op,
+        AnalysisConfig(
+            enable_compute=True,
+            enable_memory=True,
+            write_op_attrs=False,
+            write_func_attrs=False,
+            dtype_size_overrides={"f32": 4},
+        ),
+    )
+
+    assert summary.op_costs == result.op_costs
+    assert summary.value_traffic == result.value_traffic
+    _assert_expr_equal(summary.total_compute, result.total_compute)
+    _assert_expr_equal(summary.total_read_bytes, result.total_read_bytes)
+    _assert_expr_equal(summary.total_write_bytes, result.total_write_bytes)

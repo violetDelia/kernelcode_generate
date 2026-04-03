@@ -24,7 +24,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable as IterableABC
+from collections.abc import Iterable as IterableABC, Mapping as MappingABC
 from dataclasses import dataclass
 from typing import Iterable, Sequence
 import warnings
@@ -68,6 +68,185 @@ class AnalysisError(ValueError):
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """
+
+
+@dataclass(frozen=True)
+class AnalysisConfig:
+    """统一分析入口配置。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 定义 `analysis(op, config, otherargs)` 的统一控制开关。
+    - 默认同时启用 compute/memory 分析，但默认不写回 `analysis.*` 属性。
+
+    使用示例:
+    - config = AnalysisConfig(enable_compute=True, enable_memory=False, write_op_attrs=True)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    enable_compute: bool = True
+    enable_memory: bool = True
+    path_bandwidth: MappingABC[str, object] | None = None
+    path_latency_ns: MappingABC[str, object] | None = None
+    theoretical_compute: MappingABC[str, object] | None = None
+    write_op_attrs: bool = False
+    write_func_attrs: bool = False
+    predicate_size: int = 1
+    dtype_size_overrides: dict[str, int] | None = None
+    otherargs: Iterable[object] | None = None
+
+
+@dataclass(frozen=True)
+class ComputeItem:
+    """新分析结果中的单条计算项。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 显式记录计算分类、数量与 dtype。
+
+    使用示例:
+    - ComputeItem(kind="scalar", amount=sp.Integer(1), dtype="i32")
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    kind: str
+    amount: sp.Basic
+    dtype: str
+
+
+@dataclass(frozen=True)
+class MemoryItem:
+    """新分析结果中的单条访存项。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 显式记录 path、访问方向与字节数。
+    - 若配置提供延迟/带宽参数，则补齐理论时间。
+
+    使用示例:
+    - MemoryItem(path="GM->LM", access="read", bytes=sp.Integer(32))
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    path: str
+    access: str
+    bytes: sp.Basic
+    latency_ns: sp.Basic | None = None
+    bandwidth: sp.Basic | None = None
+    time_ns: sp.Basic | None = None
+
+
+@dataclass(frozen=True)
+class AnalysisResult:
+    """统一分析入口结果结构。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 公开 `compute_items / memory_items` 与按 kind/path 聚合的 totals。
+    - 兼容保留 `op_costs/value_traffic` 供 facade/pass 派生旧 summary。
+
+    使用示例:
+    - result = AnalysisResult(compute_items=[], memory_items=[], compute_totals_by_kind={}, memory_totals_by_path={})
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    compute_items: Sequence[ComputeItem]
+    memory_items: Sequence[MemoryItem]
+    compute_totals_by_kind: MappingABC[str, sp.Basic]
+    memory_totals_by_path: MappingABC[str, sp.Basic]
+    op_costs: Sequence["KernelOpCost"] = ()
+    value_traffic: Sequence["ValueTraffic"] = ()
+    func_name: str | None = None
+    _value_reads: Sequence[tuple[SSAValue, sp.Basic]] = ()
+    _direct_writes: Sequence[tuple[SSAValue, sp.Basic]] = ()
+    _result_write_bytes: sp.Basic = sp.Integer(0)
+
+    @property
+    def total_compute(self) -> sp.Basic:
+        """兼容旧 compute 总量查询。
+
+        创建者: 朽木露琪亚
+        最后一次更改: 朽木露琪亚
+
+        功能说明:
+        - 由 `compute_totals_by_kind` 派生总计算量。
+
+        使用示例:
+        - total = result.total_compute
+
+        关联文件:
+        - spec: spec/analysis/analysis_engine.md
+        - test: test/analysis/test_analysis.py
+        - 功能实现: kernel_gen/analysis/analysis.py
+        """
+
+        return _sum_expr(self.compute_totals_by_kind.values())
+
+    @property
+    def total_read_bytes(self) -> sp.Basic:
+        """兼容旧 read_bytes 总量查询。
+
+        创建者: 朽木露琪亚
+        最后一次更改: 朽木露琪亚
+
+        功能说明:
+        - 由 `memory_items` 中 `access=read` 的条目派生。
+
+        使用示例:
+        - total = result.total_read_bytes
+
+        关联文件:
+        - spec: spec/analysis/analysis_engine.md
+        - test: test/analysis/test_analysis.py
+        - 功能实现: kernel_gen/analysis/analysis.py
+        """
+
+        return _sum_expr(item.bytes for item in self.memory_items if item.access == "read")
+
+    @property
+    def total_write_bytes(self) -> sp.Basic:
+        """兼容旧 write_bytes 总量查询。
+
+        创建者: 朽木露琪亚
+        最后一次更改: 朽木露琪亚
+
+        功能说明:
+        - 由 `memory_items` 中 `access=write` 的条目派生。
+
+        使用示例:
+        - total = result.total_write_bytes
+
+        关联文件:
+        - spec: spec/analysis/analysis_engine.md
+        - test: test/analysis/test_analysis.py
+        - 功能实现: kernel_gen/analysis/analysis.py
+        """
+
+        return _sum_expr(item.bytes for item in self.memory_items if item.access == "write")
 
 
 @dataclass(frozen=True)
@@ -265,6 +444,261 @@ class AnalyzeKernelSummary:
     total_compute: sp.Basic
     total_read_bytes: sp.Basic
     total_write_bytes: sp.Basic
+
+
+@dataclass(frozen=True)
+class _AnalyzedOp:
+    """统一入口内部的单 op 统计载体。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 为 `analysis(func.func, ...)` 聚合过程保存单 op 分析结果。
+
+    使用示例:
+    - _AnalyzedOp("nn.add", [], [], sp.Integer(1), sp.Integer(8), sp.Integer(4))
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    op_name: str
+    compute_items: Sequence[ComputeItem]
+    memory_items: Sequence[MemoryItem]
+    compute: sp.Basic
+    read_bytes: sp.Basic
+    write_bytes: sp.Basic
+    value_reads: Sequence[tuple[SSAValue, sp.Basic]] = ()
+    direct_writes: Sequence[tuple[SSAValue, sp.Basic]] = ()
+    result_write_bytes: sp.Basic = sp.Integer(0)
+
+
+_SPACE_TOKENS = {
+    "global": "GM",
+    "shared": "SM",
+    "local": "LM",
+    "tsm": "TSM",
+    "tlm": "TLM",
+}
+
+
+def _expr_from_metric_value(value: object) -> sp.Basic | None:
+    """将配置中的带宽/延迟值转为 sympy 表达式。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 支持 `int/float/sympy.Basic`。
+    - 其它类型返回 `None`，由调用方决定是否忽略。
+
+    使用示例:
+    - expr = _expr_from_metric_value(64)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    if isinstance(value, sp.Basic):
+        return value
+    if isinstance(value, int):
+        return sp.Integer(value)
+    if isinstance(value, float):
+        return sp.Float(value)
+    return None
+
+
+def _space_token_from_mem_type(mem_type: NnMemoryType) -> str:
+    """将 nn.memory space 归一到简写 token。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 将 `global/shared/local/tsm/tlm` 映射为 `GM/SM/LM/TSM/TLM`。
+
+    使用示例:
+    - token = _space_token_from_mem_type(mem_type)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    raw = mem_type.space.space.data
+    return _SPACE_TOKENS.get(raw, raw.upper())
+
+
+def _build_memory_item(
+    path: str,
+    access: str,
+    bytes_expr: sp.Basic,
+    config: AnalysisConfig,
+) -> MemoryItem:
+    """构造单条 MemoryItem。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 若配置中提供 path 对应的带宽/延迟，则补齐 `time_ns`。
+
+    使用示例:
+    - item = _build_memory_item("GM->LM", "read", sp.Integer(32), config)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    latency = None
+    bandwidth = None
+    time_ns = None
+    if config.path_latency_ns is not None:
+        latency = _expr_from_metric_value(config.path_latency_ns.get(path))
+    if config.path_bandwidth is not None:
+        bandwidth = _expr_from_metric_value(config.path_bandwidth.get(path))
+    if latency is not None and bandwidth is not None and bandwidth != 0:
+        time_ns = latency + bytes_expr / bandwidth
+    return MemoryItem(
+        path=path,
+        access=access,
+        bytes=bytes_expr,
+        latency_ns=latency,
+        bandwidth=bandwidth,
+        time_ns=time_ns,
+    )
+
+
+def _totals_by_compute_kind(items: Sequence[ComputeItem]) -> dict[str, sp.Basic]:
+    """按 compute kind 聚合 totals。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 将 `ComputeItem.amount` 按 `kind` 归并求和。
+
+    使用示例:
+    - totals = _totals_by_compute_kind(items)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    totals: dict[str, sp.Basic] = {}
+    for item in items:
+        totals[item.kind] = totals.get(item.kind, sp.Integer(0)) + item.amount
+    return totals
+
+
+def _totals_by_memory_path(items: Sequence[MemoryItem]) -> dict[str, sp.Basic]:
+    """按 memory path 聚合 totals。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 将 `MemoryItem.bytes` 按 `path` 归并求和。
+
+    使用示例:
+    - totals = _totals_by_memory_path(items)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    totals: dict[str, sp.Basic] = {}
+    for item in items:
+        totals[item.path] = totals.get(item.path, sp.Integer(0)) + item.bytes
+    return totals
+
+
+def _write_analysis_attrs(target: Operation, result: AnalysisResult) -> None:
+    """按统一入口结果写回 `analysis.*` 属性。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 写入 derived alias 总量。
+    - 追加首层 `compute_items/memory_items` 索引属性，供后续 pass 机械读取。
+
+    使用示例:
+    - _write_analysis_attrs(op, result)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    target.attributes["analysis.compute"] = StringAttr(str(result.total_compute))
+    target.attributes["analysis.read_bytes"] = StringAttr(str(result.total_read_bytes))
+    target.attributes["analysis.write_bytes"] = StringAttr(str(result.total_write_bytes))
+    for index, item in enumerate(result.compute_items):
+        target.attributes[f"analysis.compute.kind{index}"] = StringAttr(item.kind)
+        target.attributes[f"analysis.compute.amount{index}"] = StringAttr(str(item.amount))
+        target.attributes[f"analysis.compute.dtype{index}"] = StringAttr(item.dtype)
+    for index, item in enumerate(result.memory_items):
+        target.attributes[f"analysis.memory.path{index}"] = StringAttr(item.path)
+        target.attributes[f"analysis.memory.access{index}"] = StringAttr(item.access)
+        target.attributes[f"analysis.memory.bytes{index}"] = StringAttr(str(item.bytes))
+        if item.time_ns is not None:
+            target.attributes[f"analysis.memory.time_ns{index}"] = StringAttr(str(item.time_ns))
+
+
+def _to_analysis_result(
+    compute_items: Sequence[ComputeItem],
+    memory_items: Sequence[MemoryItem],
+    *,
+    op_costs: Sequence[KernelOpCost] = (),
+    value_traffic: Sequence[ValueTraffic] = (),
+    func_name: str | None = None,
+    value_reads: Sequence[tuple[SSAValue, sp.Basic]] = (),
+    direct_writes: Sequence[tuple[SSAValue, sp.Basic]] = (),
+    result_write_bytes: sp.Basic = sp.Integer(0),
+) -> AnalysisResult:
+    """基于 items 构造统一入口结果。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 统一填充 totals 与可选 facade 字段。
+
+    使用示例:
+    - result = _to_analysis_result(compute_items, memory_items)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    return AnalysisResult(
+        compute_items=tuple(compute_items),
+        memory_items=tuple(memory_items),
+        compute_totals_by_kind=_totals_by_compute_kind(compute_items),
+        memory_totals_by_path=_totals_by_memory_path(memory_items),
+        op_costs=list(op_costs),
+        value_traffic=list(value_traffic),
+        func_name=func_name,
+        _value_reads=tuple(value_reads),
+        _direct_writes=tuple(direct_writes),
+        _result_write_bytes=result_write_bytes,
+    )
 
 
 def _to_symbol(value: int | str) -> sp.Basic:
@@ -1023,6 +1457,691 @@ def analyze_matmul(
     return OpStats(compute, read_bytes, write_bytes)
 
 
+def _dtype_string(element_type: Attribute) -> str:
+    """将类型属性转为稳定 dtype 字符串。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 统一复用 `str(element_type)` 作为展示与测试断言口径。
+
+    使用示例:
+    - text = _dtype_string(i32)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    return str(element_type)
+
+
+def _is_scalar_type(attr: Attribute) -> bool:
+    """判断是否为标量数值类型。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 当前支持整数与浮点标量。
+
+    使用示例:
+    - assert _is_scalar_type(i32)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    return isinstance(
+        attr,
+        (IntegerType, Float16Type, BFloat16Type, Float32Type, Float64Type),
+    )
+
+
+def _analyze_scalar_kernel_op(op: Operation, config: AnalysisConfig) -> _AnalyzedOp | None:
+    """分析单个标量 kernel 风格 op。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 为 `kernel.add/sub/mul/div/eq/lt/gt/...` 的单结果标量形态生成新结果结构。
+    - 该入口只服务 A1 的单 op 统一入口基线，不替代后续 A2 的完整分类收口。
+
+    使用示例:
+    - analyzed = _analyze_scalar_kernel_op(fake_kernel_add_op, config)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    scalar_ops = {
+        "kernel.add",
+        "kernel.sub",
+        "kernel.mul",
+        "kernel.div",
+        "kernel.eq",
+        "kernel.ne",
+        "kernel.lt",
+        "kernel.le",
+        "kernel.gt",
+        "kernel.ge",
+    }
+    if op.name not in scalar_ops:
+        return None
+    if len(op.results) != 1:
+        return None
+    result_type = op.results[0].type
+    if isinstance(result_type, NnMemoryType) or not _is_scalar_type(result_type):
+        return None
+    compute_items: list[ComputeItem] = []
+    if config.enable_compute:
+        compute_items.append(
+            ComputeItem(
+                kind="scalar",
+                amount=sp.Integer(1),
+                dtype=_dtype_string(result_type),
+            )
+        )
+    return _AnalyzedOp(
+        op_name=op.name,
+        compute_items=compute_items,
+        memory_items=[],
+        compute=sp.Integer(1) if config.enable_compute else sp.Integer(0),
+        read_bytes=sp.Integer(0),
+        write_bytes=sp.Integer(0),
+    )
+
+
+def _analyze_nn_elementwise_op(op: Operation, config: AnalysisConfig) -> _AnalyzedOp | None:
+    """分析 nn 逐元素算术/比较 op。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 生成 vector 分类 compute item。
+    - 兼容保留旧 read/write alias。
+
+    使用示例:
+    - analyzed = _analyze_nn_elementwise_op(op, config)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    supported = {
+        "nn.add",
+        "nn.sub",
+        "nn.mul",
+        "nn.truediv",
+        "nn.eq",
+        "nn.ne",
+        "nn.lt",
+        "nn.le",
+        "nn.gt",
+        "nn.ge",
+    }
+    if op.name not in supported:
+        return None
+    if len(op.operands) < 2 or len(op.results) != 1:
+        raise AnalysisError("nn elementwise op must have 2 operands and 1 result")
+    lhs = op.operands[0]
+    rhs = op.operands[1]
+    result = op.results[0]
+    if not isinstance(result.type, NnMemoryType):
+        raise AnalysisError("nn op result must be nn.memory")
+    result_type = result.type
+    numel = _numel_from_mem_type(result_type)
+    if numel is None:
+        raise AnalysisError("result shape must be supported")
+
+    lhs_mem = isinstance(lhs.type, NnMemoryType)
+    rhs_mem = isinstance(rhs.type, NnMemoryType)
+    if not lhs_mem and not rhs_mem:
+        raise AnalysisError("at least one nn.memory operand required")
+
+    read_bytes = sp.Integer(0)
+    memory_items: list[MemoryItem] = []
+    value_reads: list[tuple[SSAValue, sp.Basic]] = []
+    if lhs_mem:
+        lhs_type = lhs.type
+        if lhs_type.shape != result_type.shape:
+            raise AnalysisError("result shape must match memory operand")
+        lhs_size = _element_size(lhs_type.element_type, _normalize_dtype_overrides(config.dtype_size_overrides))
+        if lhs_size is None:
+            raise AnalysisError("operand dtype unsupported")
+        lhs_bytes = numel * sp.Integer(lhs_size)
+        read_bytes += lhs_bytes
+        value_reads.append((lhs, lhs_bytes))
+        if config.enable_memory:
+            memory_items.append(
+                _build_memory_item(
+                    f"{_space_token_from_mem_type(lhs_type)}->compute",
+                    "read",
+                    lhs_bytes,
+                    config,
+                )
+            )
+    if rhs_mem:
+        rhs_type = rhs.type
+        if rhs_type.shape != result_type.shape:
+            raise AnalysisError("result shape must match memory operand")
+        rhs_size = _element_size(rhs_type.element_type, _normalize_dtype_overrides(config.dtype_size_overrides))
+        if rhs_size is None:
+            raise AnalysisError("operand dtype unsupported")
+        rhs_bytes = numel * sp.Integer(rhs_size)
+        read_bytes += rhs_bytes
+        value_reads.append((rhs, rhs_bytes))
+        if config.enable_memory:
+            memory_items.append(
+                _build_memory_item(
+                    f"{_space_token_from_mem_type(rhs_type)}->compute",
+                    "read",
+                    rhs_bytes,
+                    config,
+                )
+            )
+
+    if op.name in {"nn.eq", "nn.ne", "nn.lt", "nn.le", "nn.gt", "nn.ge"}:
+        if not _is_predicate_type(result_type.element_type):
+            raise AnalysisError("compare result element_type must be i1")
+        write_bytes = numel * sp.Integer(config.predicate_size)
+    else:
+        out_size = _element_size(result_type.element_type, _normalize_dtype_overrides(config.dtype_size_overrides))
+        if out_size is None:
+            raise AnalysisError("result dtype unsupported")
+        write_bytes = numel * sp.Integer(out_size)
+    if config.enable_memory:
+        memory_items.append(
+            _build_memory_item(
+                f"compute->{_space_token_from_mem_type(result_type)}",
+                "write",
+                write_bytes,
+                config,
+            )
+        )
+    compute_items: list[ComputeItem] = []
+    if config.enable_compute:
+        compute_items.append(
+            ComputeItem(kind="vector", amount=numel, dtype=_dtype_string(result_type.element_type))
+        )
+    return _AnalyzedOp(
+        op_name=op.name,
+        compute_items=compute_items,
+        memory_items=memory_items,
+        compute=numel if config.enable_compute else sp.Integer(0),
+        read_bytes=read_bytes if config.enable_memory else sp.Integer(0),
+        write_bytes=write_bytes if config.enable_memory else sp.Integer(0),
+        value_reads=tuple(value_reads) if config.enable_memory else (),
+        result_write_bytes=write_bytes if config.enable_memory else sp.Integer(0),
+    )
+
+
+def _analyze_nn_matmul_ir_op(op: Operation, config: AnalysisConfig) -> _AnalyzedOp | None:
+    """分析 nn.matmul op。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 生成 tensor 分类 compute item。
+
+    使用示例:
+    - analyzed = _analyze_nn_matmul_ir_op(op, config)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    if op.name != "nn.matmul":
+        return None
+    if len(op.operands) < 2 or len(op.results) != 1:
+        raise AnalysisError("nn.matmul must have 2 operands and 1 result")
+    lhs = op.operands[0]
+    rhs = op.operands[1]
+    result = op.results[0]
+    if not isinstance(lhs.type, NnMemoryType) or not isinstance(rhs.type, NnMemoryType):
+        raise AnalysisError("nn.matmul operands must be nn.memory")
+    if not isinstance(result.type, NnMemoryType):
+        raise AnalysisError("nn.matmul result must be nn.memory")
+    lhs_type = lhs.type
+    rhs_type = rhs.type
+    result_type = result.type
+    if len(lhs_type.shape.data) != 2 or len(rhs_type.shape.data) != 2 or len(result_type.shape.data) != 2:
+        raise AnalysisError("nn.matmul requires rank-2 tensors")
+
+    m_dim = _dim_to_expr(lhs_type.shape.data[0])
+    k_dim = _dim_to_expr(lhs_type.shape.data[1])
+    rhs_k_dim = _dim_to_expr(rhs_type.shape.data[0])
+    n_dim = _dim_to_expr(rhs_type.shape.data[1])
+    out_m_dim = _dim_to_expr(result_type.shape.data[0])
+    out_n_dim = _dim_to_expr(result_type.shape.data[1])
+    if None in {m_dim, k_dim, rhs_k_dim, n_dim, out_m_dim, out_n_dim}:
+        raise AnalysisError("nn.matmul shape unsupported")
+    if k_dim != rhs_k_dim:
+        raise AnalysisError("nn.matmul inner dimension mismatch")
+    if out_m_dim != m_dim or out_n_dim != n_dim:
+        raise AnalysisError("nn.matmul output shape mismatch")
+
+    overrides = _normalize_dtype_overrides(config.dtype_size_overrides)
+    elem_size = _element_size(lhs_type.element_type, overrides)
+    if elem_size is None:
+        raise AnalysisError("nn.matmul operand dtype unsupported")
+    if lhs_type.element_type != rhs_type.element_type or lhs_type.element_type != result_type.element_type:
+        raise AnalysisError("nn.matmul operand/result element_type must match")
+    elem_size_expr = sp.Integer(elem_size)
+    compute = sp.Integer(2) * m_dim * n_dim * k_dim
+    lhs_bytes = m_dim * k_dim * elem_size_expr
+    rhs_bytes = k_dim * n_dim * elem_size_expr
+    read_bytes = lhs_bytes + rhs_bytes
+    write_bytes = m_dim * n_dim * elem_size_expr
+    memory_items: list[MemoryItem] = []
+    if config.enable_memory:
+        memory_items.extend(
+            [
+                _build_memory_item(
+                    f"{_space_token_from_mem_type(lhs_type)}->compute",
+                    "read",
+                    lhs_bytes,
+                    config,
+                ),
+                _build_memory_item(
+                    f"{_space_token_from_mem_type(rhs_type)}->compute",
+                    "read",
+                    rhs_bytes,
+                    config,
+                ),
+                _build_memory_item(
+                    f"compute->{_space_token_from_mem_type(result_type)}",
+                    "write",
+                    write_bytes,
+                    config,
+                ),
+            ]
+        )
+    compute_items: list[ComputeItem] = []
+    if config.enable_compute:
+        compute_items.append(
+            ComputeItem(kind="tensor", amount=compute, dtype=_dtype_string(result_type.element_type))
+        )
+    return _AnalyzedOp(
+        op_name=op.name,
+        compute_items=compute_items,
+        memory_items=memory_items,
+        compute=compute if config.enable_compute else sp.Integer(0),
+        read_bytes=read_bytes if config.enable_memory else sp.Integer(0),
+        write_bytes=write_bytes if config.enable_memory else sp.Integer(0),
+        value_reads=((lhs, lhs_bytes), (rhs, rhs_bytes)) if config.enable_memory else (),
+        result_write_bytes=write_bytes if config.enable_memory else sp.Integer(0),
+    )
+
+
+def _analyze_dma_ir_op(op: Operation, config: AnalysisConfig) -> _AnalyzedOp | None:
+    """分析当前公开 DMA 分支。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 当前仅承接 `dma.load/copy/store`。
+    - 其余 DMA 分支保持 `skip + warning` 口径。
+
+    使用示例:
+    - analyzed = _analyze_dma_ir_op(op, config)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    overrides = _normalize_dtype_overrides(config.dtype_size_overrides)
+    if isinstance(op, DmaCopyOp):
+        _verify_public_dma_op(op)
+        source = op.source
+        target = op.target
+        if not isinstance(source.type, NnMemoryType) or not isinstance(target.type, NnMemoryType):
+            raise AnalysisError("dma.copy source/target must be nn.memory")
+        numel = _numel_from_mem_type(source.type)
+        if numel is None:
+            raise AnalysisError("dma.copy shape unsupported")
+        elem_size = _element_size(source.type.element_type, overrides)
+        if elem_size is None:
+            raise AnalysisError("dma.copy dtype unsupported")
+        bytes_expr = numel * sp.Integer(elem_size)
+        memory_items = []
+        if config.enable_memory:
+            path = f"{_space_token_from_mem_type(source.type)}->{_space_token_from_mem_type(target.type)}"
+            memory_items = [
+                _build_memory_item(path, "read", bytes_expr, config),
+                _build_memory_item(path, "write", bytes_expr, config),
+            ]
+        return _AnalyzedOp(
+            op_name=op.name,
+            compute_items=[],
+            memory_items=memory_items,
+            compute=sp.Integer(0),
+            read_bytes=bytes_expr if config.enable_memory else sp.Integer(0),
+            write_bytes=bytes_expr if config.enable_memory else sp.Integer(0),
+            value_reads=((source, bytes_expr),) if config.enable_memory else (),
+            direct_writes=((target, bytes_expr),) if config.enable_memory else (),
+        )
+    if isinstance(op, DmaLoadOp):
+        _verify_public_dma_op(op)
+        if len(op.operands) < 1 or len(op.results) != 1:
+            raise AnalysisError("dma.load must have 1 result")
+        source = op.operands[0]
+        result = op.results[0]
+        if not isinstance(source.type, NnMemoryType):
+            raise AnalysisError("dma.load source must be nn.memory")
+        if not isinstance(result.type, NnMemoryType):
+            raise AnalysisError("dma.load result must be nn.memory")
+        result_type = result.type
+        numel = _numel_from_mem_type(result_type)
+        if numel is None:
+            raise AnalysisError("dma.load result shape unsupported")
+        elem_size = _element_size(result_type.element_type, overrides)
+        if elem_size is None:
+            raise AnalysisError("dma.load result dtype unsupported")
+        bytes_expr = numel * sp.Integer(elem_size)
+        memory_items = []
+        if config.enable_memory:
+            path = f"{_space_token_from_mem_type(source.type)}->{_space_token_from_mem_type(result_type)}"
+            memory_items = [
+                _build_memory_item(path, "read", bytes_expr, config),
+                _build_memory_item(path, "write", bytes_expr, config),
+            ]
+        return _AnalyzedOp(
+            op_name=op.name,
+            compute_items=[],
+            memory_items=memory_items,
+            compute=sp.Integer(0),
+            read_bytes=bytes_expr if config.enable_memory else sp.Integer(0),
+            write_bytes=bytes_expr if config.enable_memory else sp.Integer(0),
+            value_reads=((source, bytes_expr),) if config.enable_memory else (),
+            result_write_bytes=bytes_expr if config.enable_memory else sp.Integer(0),
+        )
+    if isinstance(op, DmaStoreOp):
+        _verify_public_dma_op(op)
+        source = op.source
+        target = op.target
+        if not isinstance(source.type, NnMemoryType) or not isinstance(target.type, NnMemoryType):
+            raise AnalysisError("dma.store source/target must be nn.memory")
+        numel = _numel_from_symbol_values(op.sizes)
+        if numel is None:
+            numel = _numel_from_mem_type(source.type)
+        if numel is None:
+            raise AnalysisError("dma.store sizes unsupported")
+        elem_size = _element_size(source.type.element_type, overrides)
+        if elem_size is None:
+            raise AnalysisError("dma.store dtype unsupported")
+        bytes_expr = numel * sp.Integer(elem_size)
+        memory_items = []
+        if config.enable_memory:
+            path = f"{_space_token_from_mem_type(source.type)}->{_space_token_from_mem_type(target.type)}"
+            memory_items = [
+                _build_memory_item(path, "read", bytes_expr, config),
+                _build_memory_item(path, "write", bytes_expr, config),
+            ]
+        return _AnalyzedOp(
+            op_name=op.name,
+            compute_items=[],
+            memory_items=memory_items,
+            compute=sp.Integer(0),
+            read_bytes=bytes_expr if config.enable_memory else sp.Integer(0),
+            write_bytes=bytes_expr if config.enable_memory else sp.Integer(0),
+            value_reads=((source, bytes_expr),) if config.enable_memory else (),
+            direct_writes=((target, bytes_expr),) if config.enable_memory else (),
+        )
+    return None
+
+
+def _analyze_ir_op(op: Operation, config: AnalysisConfig) -> _AnalyzedOp | None:
+    """分析单个 IR op。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 统一分发 scalar kernel、nn、公开 DMA 分支。
+    - 未支持 op 返回 `None`，由上层决定是否 warning/skip。
+
+    使用示例:
+    - analyzed = _analyze_ir_op(op, config)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    for analyzer in (
+        _analyze_scalar_kernel_op,
+        _analyze_nn_elementwise_op,
+        _analyze_nn_matmul_ir_op,
+        _analyze_dma_ir_op,
+    ):
+        analyzed = analyzer(op, config)
+        if analyzed is not None:
+            return analyzed
+    return None
+
+
+def _result_from_analyzed_op(op: Operation, analyzed: _AnalyzedOp, config: AnalysisConfig) -> AnalysisResult:
+    """将内部单 op 统计转换为公开 AnalysisResult。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 单 op 返回时附带一条 `KernelOpCost` derived alias。
+    - 按配置决定是否写回 op attrs。
+
+    使用示例:
+    - result = _result_from_analyzed_op(op, analyzed, config)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    result = _to_analysis_result(
+        analyzed.compute_items,
+        analyzed.memory_items,
+        op_costs=(
+            KernelOpCost(
+                op_index=0,
+                op_name=analyzed.op_name,
+                compute=analyzed.compute,
+                read_bytes=analyzed.read_bytes,
+                write_bytes=analyzed.write_bytes,
+            ),
+        ),
+        value_reads=analyzed.value_reads,
+        direct_writes=analyzed.direct_writes,
+        result_write_bytes=analyzed.result_write_bytes,
+    )
+    if config.write_op_attrs:
+        _write_analysis_attrs(op, result)
+    return result
+
+
+def analysis(
+    op: Operation,
+    config: AnalysisConfig,
+    otherargs: Iterable[object] | None = None,
+) -> AnalysisResult:
+    """统一分析入口。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 支持单个 IR op 与 `func.func`。
+    - `func.func` 路径通过逐 op 调用统一入口聚合，不再保留独立主线。
+
+    使用示例:
+    - result = analysis(op, AnalysisConfig(enable_compute=True, enable_memory=False))
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    if not isinstance(config, AnalysisConfig):
+        raise AnalysisError("config must be AnalysisConfig")
+    if not isinstance(config.predicate_size, int) or config.predicate_size <= 0:
+        raise AnalysisError("predicate_size must be positive")
+    if isinstance(op, func.FuncOp):
+        return _analysis_func(op, config, otherargs)
+    if _should_ignore_kernel_op(op):
+        return _to_analysis_result([], [])
+    analyzed = _analyze_ir_op(op, config)
+    if analyzed is None:
+        _warn_skip_kernel_op(op, "unsupported op")
+        return _to_analysis_result([], [])
+    return _result_from_analyzed_op(op, analyzed, config)
+
+
+def _analysis_func(
+    func_op: func.FuncOp,
+    config: AnalysisConfig,
+    otherargs: Iterable[object] | None,
+) -> AnalysisResult:
+    """分析单个 func.func。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 对函数内每个 op 调用 `analysis(op, config, otherargs)` 聚合。
+    - 继续维护稳定 `value_traffic`，供 facade/pass 兼容使用。
+
+    使用示例:
+    - result = _analysis_func(func_op, config, None)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    if not isinstance(func_op, func.FuncOp):
+        raise AnalysisError("func_op must be func.FuncOp")
+    args = otherargs if otherargs is not None else config.otherargs
+    if args is not None and not isinstance(args, IterableABC):
+        raise AnalysisError("args must be iterable")
+    arg_list = list(args) if args is not None else None
+    func_args = list(func_op.body.blocks[0].args)
+    if arg_list is not None and len(arg_list) != len(func_args):
+        raise AnalysisError("args length mismatch")
+
+    value_keys: dict[SSAValue, str] = {}
+    traffic_map: dict[str, list[sp.Basic]] = {}
+    for index, arg in enumerate(func_args):
+        key = f"arg{index}"
+        value_keys[arg] = key
+        traffic_map[key] = [sp.Integer(0), sp.Integer(0)]
+
+    compute_items: list[ComputeItem] = []
+    memory_items: list[MemoryItem] = []
+    op_costs: list[KernelOpCost] = []
+
+    for op in _iter_func_ops(func_op):
+        op_result = analysis(op, config, args)
+        if not op_result.op_costs:
+            continue
+
+        op_index = len(op_costs)
+        op_summary = op_result.op_costs[0]
+        op_costs.append(
+            KernelOpCost(
+                op_index=op_index,
+                op_name=op_summary.op_name,
+                compute=op_summary.compute,
+                read_bytes=op_summary.read_bytes,
+                write_bytes=op_summary.write_bytes,
+            )
+        )
+        compute_items.extend(op_result.compute_items)
+        memory_items.extend(op_result.memory_items)
+
+        if config.enable_memory:
+            for value, amount in op_result._value_reads:
+                _record_value_read(value, amount, value_keys, traffic_map)
+            for value, amount in op_result._direct_writes:
+                _record_value_write(value, amount, value_keys, traffic_map)
+            if op_result._result_write_bytes != 0:
+                _register_op_results(
+                    op,
+                    op_index,
+                    op_result._result_write_bytes,
+                    value_keys,
+                    traffic_map,
+                )
+            elif len(op.results) > 0:
+                _register_op_results(
+                    op,
+                    op_index,
+                    sp.Integer(0),
+                    value_keys,
+                    traffic_map,
+                )
+
+    value_traffic = [ValueTraffic(key, values[0], values[1]) for key, values in traffic_map.items()]
+    result = _to_analysis_result(
+        compute_items,
+        memory_items,
+        op_costs=op_costs,
+        value_traffic=value_traffic,
+        func_name=func_op.sym_name.data,
+    )
+    if config.write_func_attrs:
+        _write_analysis_attrs(func_op, result)
+    return result
+
+
+def _analysis_result_to_kernel_summary(result: AnalysisResult) -> AnalyzeKernelSummary:
+    """将统一入口结果适配为旧 AnalyzeKernelSummary。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 作为 `analyze_kernel(...)` facade 的唯一适配层。
+
+    使用示例:
+    - summary = _analysis_result_to_kernel_summary(result)
+
+    关联文件:
+    - spec: spec/analysis/analysis_kernel.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    return AnalyzeKernelSummary(
+        func_name=result.func_name or "",
+        op_costs=list(result.op_costs),
+        value_traffic=list(result.value_traffic),
+        total_compute=result.total_compute,
+        total_read_bytes=result.total_read_bytes,
+        total_write_bytes=result.total_write_bytes,
+    )
+
+
 def analyze_kernel(
     func_op: func.FuncOp,
     args: Iterable[object] | None = None,
@@ -1050,266 +2169,16 @@ def analyze_kernel(
     """
     if not isinstance(func_op, func.FuncOp):
         raise AnalysisError("func_op must be func.FuncOp")
-    if not isinstance(predicate_size, int) or predicate_size <= 0:
-        raise AnalysisError("predicate_size must be positive")
-
-    overrides = _normalize_dtype_overrides(dtype_size_overrides)
-
-    if args is not None and not isinstance(args, IterableABC):
-        raise AnalysisError("args must be iterable")
-    arg_list = list(args) if args is not None else None
-    func_args = list(func_op.body.blocks[0].args)
-    if arg_list is not None and len(arg_list) != len(func_args):
-        raise AnalysisError("args length mismatch")
-
-    value_keys: dict[SSAValue, str] = {}
-    traffic_map: dict[str, list[sp.Basic]] = {}
-    for index, arg in enumerate(func_args):
-        key = f"arg{index}"
-        value_keys[arg] = key
-        traffic_map[key] = [sp.Integer(0), sp.Integer(0)]
-
-    op_costs: list[KernelOpCost] = []
-
-    for op in _iter_func_ops(func_op):
-        if _should_ignore_kernel_op(op):
-            continue
-
-        op_name = op.name
-        if op_name in {"nn.add", "nn.sub", "nn.mul", "nn.truediv", "nn.eq", "nn.ne", "nn.lt", "nn.le", "nn.gt", "nn.ge"}:
-            if len(op.operands) < 2 or len(op.results) != 1:
-                raise AnalysisError("nn elementwise op must have 2 operands and 1 result")
-            lhs = op.operands[0]
-            rhs = op.operands[1]
-            result = op.results[0]
-            if not isinstance(result.type, NnMemoryType):
-                raise AnalysisError("nn op result must be nn.memory")
-            result_type = result.type
-            numel = _numel_from_mem_type(result_type)
-            if numel is None:
-                raise AnalysisError("result shape must be supported")
-
-            lhs_mem = isinstance(lhs.type, NnMemoryType)
-            rhs_mem = isinstance(rhs.type, NnMemoryType)
-            if not lhs_mem and not rhs_mem:
-                raise AnalysisError("at least one nn.memory operand required")
-
-            read_bytes_list: list[sp.Basic] = []
-            if lhs_mem:
-                lhs_type = lhs.type
-                if lhs_type.shape != result_type.shape:
-                    raise AnalysisError("result shape must match memory operand")
-                lhs_size = _element_size(lhs_type.element_type, overrides)
-                if lhs_size is None:
-                    raise AnalysisError("operand dtype unsupported")
-                lhs_bytes = numel * sp.Integer(lhs_size)
-                read_bytes_list.append(lhs_bytes)
-                _record_value_read(lhs, lhs_bytes, value_keys, traffic_map)
-            if rhs_mem:
-                rhs_type = rhs.type
-                if rhs_type.shape != result_type.shape:
-                    raise AnalysisError("result shape must match memory operand")
-                rhs_size = _element_size(rhs_type.element_type, overrides)
-                if rhs_size is None:
-                    raise AnalysisError("operand dtype unsupported")
-                rhs_bytes = numel * sp.Integer(rhs_size)
-                read_bytes_list.append(rhs_bytes)
-                _record_value_read(rhs, rhs_bytes, value_keys, traffic_map)
-
-            if op_name in {"nn.eq", "nn.ne", "nn.lt", "nn.le", "nn.gt", "nn.ge"}:
-                if not _is_predicate_type(result_type.element_type):
-                    raise AnalysisError("compare result element_type must be i1")
-                write_bytes = numel * sp.Integer(predicate_size)
-            else:
-                out_size = _element_size(result_type.element_type, overrides)
-                if out_size is None:
-                    raise AnalysisError("result dtype unsupported")
-                write_bytes = numel * sp.Integer(out_size)
-
-            op_index = len(op_costs)
-            _register_op_results(op, op_index, write_bytes, value_keys, traffic_map)
-
-            op_costs.append(
-                KernelOpCost(
-                    op_index=op_index,
-                    op_name=op_name,
-                    compute=numel,
-                    read_bytes=_sum_expr(read_bytes_list),
-                    write_bytes=write_bytes,
-                )
-            )
-            continue
-
-        if op_name == "nn.matmul":
-            if len(op.operands) < 2 or len(op.results) != 1:
-                raise AnalysisError("nn.matmul must have 2 operands and 1 result")
-            lhs = op.operands[0]
-            rhs = op.operands[1]
-            result = op.results[0]
-            if not isinstance(lhs.type, NnMemoryType) or not isinstance(rhs.type, NnMemoryType):
-                raise AnalysisError("nn.matmul operands must be nn.memory")
-            if not isinstance(result.type, NnMemoryType):
-                raise AnalysisError("nn.matmul result must be nn.memory")
-            lhs_type = lhs.type
-            rhs_type = rhs.type
-            result_type = result.type
-            if len(lhs_type.shape.data) != 2 or len(rhs_type.shape.data) != 2 or len(result_type.shape.data) != 2:
-                raise AnalysisError("nn.matmul requires rank-2 tensors")
-
-            m_dim = _dim_to_expr(lhs_type.shape.data[0])
-            k_dim = _dim_to_expr(lhs_type.shape.data[1])
-            rhs_k_dim = _dim_to_expr(rhs_type.shape.data[0])
-            n_dim = _dim_to_expr(rhs_type.shape.data[1])
-            out_m_dim = _dim_to_expr(result_type.shape.data[0])
-            out_n_dim = _dim_to_expr(result_type.shape.data[1])
-            if None in {m_dim, k_dim, rhs_k_dim, n_dim, out_m_dim, out_n_dim}:
-                raise AnalysisError("nn.matmul shape unsupported")
-            if k_dim != rhs_k_dim:
-                raise AnalysisError("nn.matmul inner dimension mismatch")
-            if out_m_dim != m_dim or out_n_dim != n_dim:
-                raise AnalysisError("nn.matmul output shape mismatch")
-
-            elem_size = _element_size(lhs_type.element_type, overrides)
-            if elem_size is None:
-                raise AnalysisError("nn.matmul operand dtype unsupported")
-            if lhs_type.element_type != rhs_type.element_type or lhs_type.element_type != result_type.element_type:
-                raise AnalysisError("nn.matmul operand/result element_type must match")
-            elem_size_expr = sp.Integer(elem_size)
-            compute = sp.Integer(2) * m_dim * n_dim * k_dim
-            read_bytes = (m_dim * k_dim + k_dim * n_dim) * elem_size_expr
-            write_bytes = m_dim * n_dim * elem_size_expr
-
-            _record_value_read(lhs, m_dim * k_dim * elem_size_expr, value_keys, traffic_map)
-            _record_value_read(rhs, k_dim * n_dim * elem_size_expr, value_keys, traffic_map)
-
-            op_index = len(op_costs)
-            _register_op_results(op, op_index, write_bytes, value_keys, traffic_map)
-
-            op_costs.append(
-                KernelOpCost(
-                    op_index=op_index,
-                    op_name=op_name,
-                    compute=compute,
-                    read_bytes=read_bytes,
-                    write_bytes=write_bytes,
-                )
-            )
-            continue
-
-        if isinstance(op, DmaCopyOp):
-            _verify_public_dma_op(op)
-            source = op.source
-            target = op.target
-            if not isinstance(source.type, NnMemoryType) or not isinstance(target.type, NnMemoryType):
-                raise AnalysisError("dma.copy source/target must be nn.memory")
-            numel = _numel_from_mem_type(source.type)
-            if numel is None:
-                raise AnalysisError("dma.copy shape unsupported")
-            elem_size = _element_size(source.type.element_type, overrides)
-            if elem_size is None:
-                raise AnalysisError("dma.copy dtype unsupported")
-            bytes_expr = numel * sp.Integer(elem_size)
-
-            _record_value_read(source, bytes_expr, value_keys, traffic_map)
-            _record_value_write(target, bytes_expr, value_keys, traffic_map)
-
-            op_costs.append(
-                KernelOpCost(
-                    op_index=len(op_costs),
-                    op_name=op_name,
-                    compute=sp.Integer(0),
-                    read_bytes=bytes_expr,
-                    write_bytes=bytes_expr,
-                )
-            )
-            continue
-
-        if isinstance(op, DmaLoadOp):
-            _verify_public_dma_op(op)
-            if len(op.operands) < 1 or len(op.results) != 1:
-                raise AnalysisError("dma.load must have 1 result")
-            source = op.operands[0]
-            result = op.results[0]
-            if not isinstance(source.type, NnMemoryType):
-                raise AnalysisError("dma.load source must be nn.memory")
-            if not isinstance(result.type, NnMemoryType):
-                raise AnalysisError("dma.load result must be nn.memory")
-            result_type = result.type
-            numel = _numel_from_mem_type(result_type)
-            if numel is None:
-                raise AnalysisError("dma.load result shape unsupported")
-            elem_size = _element_size(result_type.element_type, overrides)
-            if elem_size is None:
-                raise AnalysisError("dma.load result dtype unsupported")
-            bytes_expr = numel * sp.Integer(elem_size)
-
-            _record_value_read(source, bytes_expr, value_keys, traffic_map)
-            op_index = len(op_costs)
-            _register_op_results(op, op_index, bytes_expr, value_keys, traffic_map)
-
-            op_costs.append(
-                KernelOpCost(
-                    op_index=op_index,
-                    op_name=op_name,
-                    compute=sp.Integer(0),
-                    read_bytes=bytes_expr,
-                    write_bytes=bytes_expr,
-                )
-            )
-            continue
-
-        if isinstance(op, DmaStoreOp):
-            _verify_public_dma_op(op)
-            source = op.source
-            target = op.target
-            if not isinstance(source.type, NnMemoryType) or not isinstance(target.type, NnMemoryType):
-                raise AnalysisError("dma.store source/target must be nn.memory")
-            numel = _numel_from_symbol_values(op.sizes)
-            if numel is None:
-                numel = _numel_from_mem_type(source.type)
-            if numel is None:
-                raise AnalysisError("dma.store sizes unsupported")
-            elem_size = _element_size(source.type.element_type, overrides)
-            if elem_size is None:
-                raise AnalysisError("dma.store dtype unsupported")
-            bytes_expr = numel * sp.Integer(elem_size)
-
-            _record_value_read(source, bytes_expr, value_keys, traffic_map)
-            _record_value_write(target, bytes_expr, value_keys, traffic_map)
-
-            op_costs.append(
-                KernelOpCost(
-                    op_index=len(op_costs),
-                    op_name=op_name,
-                    compute=sp.Integer(0),
-                    read_bytes=bytes_expr,
-                    write_bytes=bytes_expr,
-                )
-            )
-            continue
-
-        _warn_skip_kernel_op(op, "unsupported op")
-
-    total_compute = _sum_expr([item.compute for item in op_costs])
-    total_read_bytes = _sum_expr([item.read_bytes for item in op_costs])
-    total_write_bytes = _sum_expr([item.write_bytes for item in op_costs])
-
-    if attach_attrs:
-        func_op.attributes["analysis.compute"] = StringAttr(str(total_compute))
-        func_op.attributes["analysis.read_bytes"] = StringAttr(str(total_read_bytes))
-        func_op.attributes["analysis.write_bytes"] = StringAttr(str(total_write_bytes))
-
-    value_traffic = [
-        ValueTraffic(key, values[0], values[1]) for key, values in traffic_map.items()
-    ]
-    return AnalyzeKernelSummary(
-        func_name=func_op.sym_name.data,
-        op_costs=op_costs,
-        value_traffic=value_traffic,
-        total_compute=total_compute,
-        total_read_bytes=total_read_bytes,
-        total_write_bytes=total_write_bytes,
+    config = AnalysisConfig(
+        enable_compute=True,
+        enable_memory=True,
+        write_op_attrs=False,
+        write_func_attrs=attach_attrs,
+        predicate_size=predicate_size,
+        dtype_size_overrides=dtype_size_overrides,
+        otherargs=args,
     )
+    return _analysis_result_to_kernel_summary(analysis(func_op, config, args))
 
 
 def analyze_function(

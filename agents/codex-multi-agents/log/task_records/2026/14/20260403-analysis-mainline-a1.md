@@ -1,0 +1,399 @@
+# 20260403-analysis-mainline-a1
+
+- 任务 ID：`T-20260403-8781c519`
+- 计划文件：`/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md`
+- worktree：`/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1`
+- 当前阶段：`A1`
+- 任务名称：`统一入口与新结果结构落地`
+
+## 记录
+
+- 时间：2026-04-03 09:36:00 +0800
+- 当前进展：
+  - 已进入 `worktree=/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1`。
+  - 已核对 `TODO.md` 中 `T-20260403-8781c519` 的任务边界、记录文件与 10 分钟内回报要求；当前我名下仅本任务进行中，无并行冲突。
+  - 已读取计划文件 `ARCHITECTURE/plan/analysis_mainline_refactor_plan.md`，确认 `A1` 目标为统一入口 `analysis(op, config, otherargs)`、`AnalysisConfig`、新结果结构 `AnalysisResult`，且本轮需整链路推进 `spec/实现/测试/记录文件`。
+  - 已核对 A1 允许修改的 7 个目标文件当前在 `worktree` 内均为未改状态：
+    - `spec/analysis/analysis_engine.md`
+    - `spec/analysis/analysis_kernel.md`
+    - `spec/pass/analysis/func_cost.md`
+    - `kernel_gen/analysis/analysis.py`
+    - `kernel_gen/passes/analysis/func_cost.py`
+    - `test/analysis/test_analysis.py`
+    - `test/pass/test_analysis_func_cost.py`
+  - 当前尚未开始业务文件修改，下一步将先读取上述 7 个文件的现状并对照 A1 输入/输出契约拆解实现顺序。
+- 预计完成时间：
+  - 当前估计 `90-120` 分钟可完成首轮实现、测试与记录。
+- 当前阻塞：
+  - 暂无阻塞。
+- 拆分建议：
+  - 目前不需要拆分；若后续发现 `spec/实现/测试` 同时改动超出 2 小时窗口，会再按“统一入口/结果结构”和“func_cost 消费侧适配”两段给出拆分建议。
+
+- 时间：2026-04-03 11:39:13 +0800
+- 当前进展：
+  - 已继续核对 A1 的核心现状文件：
+    - `kernel_gen/analysis/analysis.py`
+    - `kernel_gen/passes/analysis/func_cost.py`
+    - `spec/analysis/analysis_kernel.md`
+    - `ARCHITECTURE/plan/analysis_mainline_refactor_plan.md`
+  - 当前确认到的现状：
+    - `kernel_gen/analysis/analysis.py` 仍以 `analyze_kernel(...)`、`OpStats`、`AnalysisSummary`、`AnalyzeKernelSummary` 等旧主线结构为核心。
+    - `kernel_gen/passes/analysis/func_cost.py` 当前仍直接消费 `AnalyzeKernelSummary`，并以 `total_compute/read_bytes/write_bytes` 为主。
+    - `spec/analysis/analysis_kernel.md` 当前也仍把 `analyze_kernel(...)` 写为唯一公开主入口，和 A1 计划中的“统一入口 `analysis(op, config, otherargs)` + 新结果结构”目标存在明显差距。
+    - `spec/analysis/analysis_engine.md` 在当前 `worktree` 中不存在；结合计划书 A1 任务描述，这更像是本轮需要新建的 spec 文件，不构成硬阻塞。
+  - 截至当前，A1 允许修改的 7 个业务文件在 `worktree` 内仍为未改状态，尚未开始正式代码/文档编辑。
+- 当前阻塞：
+  - 无硬阻塞。
+  - 风险点是 A1 工作量已明显超过最初预估：需要同时新增统一入口与结果结构、新建 engine spec、重写 `analysis_kernel` 主入口口径、适配 `func_cost`、补两侧测试。
+- 拆分建议：
+  - 由于当前已超过 2 小时仍未完成，若管理员允许拆分，建议按以下两段拆：
+    - `A1a`：只收口统一入口 / 新结果结构 / spec 基线
+      - 范围：`spec/analysis/analysis_engine.md`、`spec/analysis/analysis_kernel.md`、`kernel_gen/analysis/analysis.py`、`test/analysis/test_analysis.py`
+      - 目标：先把 `AnalysisConfig`、`AnalysisResult`、`analysis(op, config, otherargs)` 与 `write_op_attrs/write_func_attrs` 开关落地，并补主分析测试。
+    - `A1b`：只收口 `func_cost` 消费侧适配
+      - 范围：`spec/pass/analysis/func_cost.md`、`kernel_gen/passes/analysis/func_cost.py`、`test/pass/test_analysis_func_cost.py`
+      - 目标：让 `func_cost` 明确转为消费新结果结构或 adapter，清理旧 `AnalyzeKernelSummary` 直读口径。
+
+- 时间：2026-04-03 13:45:54 +0800
+- 当前进展：
+  - 再次复核 `wt-20260403-analysis-mainline-a1` 中 A1 允许修改的 7 个业务文件状态，当前仍全部未改。
+  - 这意味着当前仍停留在 A1 基线核对与落点确认阶段，尚未进入正式代码/文档编辑。
+  - 当前可确认的差距没有变化：
+    - `analysis.py` 仍是旧 `analyze_kernel(...) / AnalyzeKernelSummary` 主线。
+    - `func_cost.py` 仍直接消费旧 summary。
+    - `analysis_kernel.md` 仍把 `analyze_kernel(...)` 写成唯一公开主入口。
+    - `analysis_engine.md` 仍需本轮新建。
+- 当前完成度：
+  - 约 `15%`；主要完成了计划阅读、边界核对、旧主线现状摸底与拆分建议准备。
+- 当前阻塞：
+  - 仍无新的硬阻塞。
+- 预计完成时间：
+  - 若继续维持 A1 原边界单任务整链推进，当前仍需约 `90-120` 分钟。
+
+- 时间：2026-04-03 14:49:05 +0800
+- 当前进展：
+  - 再次同步 `worktree` 文件状态：
+    - `spec/analysis/analysis_engine.md` 仍不存在，待本轮新建。
+    - `spec/analysis/analysis_kernel.md`
+    - `spec/pass/analysis/func_cost.md`
+    - `kernel_gen/analysis/analysis.py`
+    - `kernel_gen/passes/analysis/func_cost.py`
+    - `test/analysis/test_analysis.py`
+    - `test/pass/test_analysis_func_cost.py`
+    当前均未开始正式业务修改。
+  - 当前仍在 A1 基线核对与实施落点确认阶段，尚未进入代码/文档实际编辑。
+- 当前完成度：
+  - 维持 `15%`。
+- 当前阻塞：
+  - 无新的硬阻塞。
+- 预计完成时间：
+  - 若继续按 A1 原边界整链推进，仍需约 `90-120` 分钟。
+
+- 时间：2026-04-03 15:07:20 +0800
+- 经办人：`朽木露琪亚`
+- 任务：`T-20260403-8781c519`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/analysis_mainline_refactor_plan.md` 的 `A1` 原边界，落地统一入口 `analysis(op, config, otherargs)`、`AnalysisConfig`、新结果结构 `AnalysisResult`，并把 `analyze_kernel(...)` 收口为 facade / adapter。
+- 改动：
+  - 新增 `spec/analysis/analysis_engine.md`，单独冻结统一入口、配置项、新结果结构与显式写回开关，不再把统一引擎合同和 facade 合同混写。
+  - 更新 `spec/analysis/analysis_kernel.md`，明确 `analysis(...)` 是长期主线，`analyze_kernel(...)` 仅保留为 facade / adapter；保留兼容公式接口与现有 DMA 公开边界。
+  - 更新 `spec/pass/analysis/func_cost.md`，明确 `func_cost` 消费统一入口 `AnalysisResult` 的 derived alias，`attach_attrs=False` 时不得写回 `analysis.*`。
+  - 重写 `kernel_gen/analysis/analysis.py` 主线：新增 `AnalysisConfig`、`ComputeItem`、`MemoryItem`、`AnalysisResult`、统一入口 `analysis(...)`，并让 `analyze_kernel(...)` 改为调用统一入口后的兼容适配层。
+  - 更新 `kernel_gen/passes/analysis/func_cost.py`，改为直接调用 `analysis(func_op, AnalysisConfig, otherargs)`，再将结果适配为 `FuncCostSummary`。
+  - 补 `test/analysis/test_analysis.py`：
+    - 单 op `kernel.add(i32, i32)` 返回 `AnalysisResult`
+    - `write_op_attrs` 显式开关
+    - `write_func_attrs` 显式开关
+    - `analyze_kernel(...)` 与统一入口 derived alias 对齐
+  - 补 `test/pass/test_analysis_func_cost.py`：
+    - `attach_attrs=False` 不写 func attrs
+    - `FuncCostSummary` 与 `AnalysisResult` derived alias 对齐
+- 结论：
+  - `A1` 已按原边界完成，涉及文件：
+    - `spec/analysis/analysis_engine.md`
+    - `spec/analysis/analysis_kernel.md`
+    - `spec/pass/analysis/func_cost.md`
+    - `kernel_gen/analysis/analysis.py`
+    - `kernel_gen/passes/analysis/func_cost.py`
+    - `test/analysis/test_analysis.py`
+    - `test/pass/test_analysis_func_cost.py`
+  - 验证结果：
+    - `pytest -q test/analysis/test_analysis.py` -> `33 passed`
+    - `pytest -q test/pass/test_analysis_func_cost.py` -> `12 passed`
+    - `git diff --check -- spec/analysis/analysis_engine.md spec/analysis/analysis_kernel.md spec/pass/analysis/func_cost.md kernel_gen/analysis/analysis.py kernel_gen/passes/analysis/func_cost.py test/analysis/test_analysis.py test/pass/test_analysis_func_cost.py` -> 通过
+  - 当前无新的硬阻塞。
+  - 建议下一步进入当前链路的 `审查` 阶段，重点核对：
+    - `analysis(...)` 是否已真正成为主线入口
+    - `analyze_kernel(...)` 是否仅剩 facade 语义
+    - `func_cost` 是否只消费统一入口 derived alias 而未残留第二套统计公式
+
+- 时间：2026-04-03 15:23:44 +0800
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260403-739280d7`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/analysis_mainline_refactor_plan.md` 的 `A1` 审查边界，只读复核 `analysis(...)` 是否成为主线入口、`analyze_kernel(...)` 是否仅为 facade、`func_cost` 是否仅消费 `AnalysisResult` derived alias，且不存在第二套统计公式。
+- 审查结论：
+  - `不通过`。
+- 问题列表：
+  - `P1` [kernel_gen/analysis/analysis.py](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/kernel_gen/analysis/analysis.py#L1996) 到 [kernel_gen/analysis/analysis.py](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/kernel_gen/analysis/analysis.py#L2004) 把 `analysis(func_op, ...)` 定义成 `func.func` 主线入口，但真正的函数级聚合在 [kernel_gen/analysis/analysis.py](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/kernel_gen/analysis/analysis.py#L2051) 到 [kernel_gen/analysis/analysis.py](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/kernel_gen/analysis/analysis.py#L2057) 直接调用 `_analyze_ir_op(op, config)`，没有按 plan 和 [spec/analysis/analysis_engine.md](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/spec/analysis/analysis_engine.md#L136) 要求逐 op 调用公开入口 `analysis(op, config, otherargs)`。这仍然保留了一条函数级旁路聚合路径，后续若单 op 入口新增前置校验、skip/warning、attrs 写回或 analyzer 分发逻辑，`func.func` 路径可能无感分叉。建议把 `_analysis_func(...)` 收敛为显式逐 op 调用 `analysis(op, config, otherargs)` 聚合，并补回归测试锁死这一契约。
+  - `P1` [spec/analysis/analysis_kernel.md](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/spec/analysis/analysis_kernel.md#L138) 仍把 `AnalyzeKernelSummary` 定义成“用于 `func_cost` 等分析 pass 复用的稳定汇总结构”，而 [spec/pass/analysis/func_cost.md](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/spec/pass/analysis/func_cost.md#L30) 已要求 `func_cost` 读取 `AnalysisResult` 的 derived alias；同时 [spec/pass/analysis/func_cost.md](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/spec/pass/analysis/func_cost.md#L41) 到 [spec/pass/analysis/func_cost.md](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/spec/pass/analysis/func_cost.md#L82) 继续独立冻结 `compute/read_bytes/write_bytes` 公式、支持 op 范围和 DMA 口径，形成第二套公式合同灰区。按 A1 计划，`func_cost` 应只作为新主线的消费/包装方，不应再保留可独立演化的公式定义。建议把 `analysis_kernel.md` 中 `func_cost` 对 `AnalyzeKernelSummary` 的消费表述删除，并把 `func_cost.md` 的公式/支持范围改成“继承 `analysis(...)` / `AnalysisResult` derived alias 口径”，避免文档层面继续并存两套统计合同。
+- 漏洞与边界排查：
+  - 功能正确性：存在函数级旁路聚合，不满足 “`analysis(...)` 唯一长期内核” 的硬约束。
+  - 边界条件：`analyze_kernel(...)` 实现本身已收敛为 facade；`func_cost.py` 实现也直接消费 `analysis(...)`，但 spec 仍给旧 summary/旧公式留下稳定消费空间。
+  - 异常路径：未知 op `skip + warning`、`attach_attrs=False` 不写回属性、`predicate_size` 边界本轮未见新回退。
+  - 潜在漏洞/歧义：文档层面仍允许“`func_cost` 既可复用旧 summary，又可宣称新结构生效”的灰区，容易导致后续再次引入双主线。
+- 验证：
+  - `pytest -q test/analysis/test_analysis.py` -> `33 passed`
+  - `pytest -q test/pass/test_analysis_func_cost.py` -> `12 passed`
+- 下一步建议：
+  - 进入同链路改进实现任务，统一修正 `analysis.py` 的函数级聚合入口与两份 spec 的消费口径，再补测试锁死“逐 op 调用公开 `analysis(...)` 聚合”和“`func_cost` 只消费 `AnalysisResult` derived alias”。
+
+- 时间：2026-04-03 15:23:44 +0800
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260403-739280d7`
+- 任务目标：
+  - 完成当前审查任务流转，并按同链路补建唯一后续改进实现任务。
+- 改动：
+  - 已执行：
+    - `codex-multi-agents-task.sh -done -task_id T-20260403-739280d7 ...`
+    - 结果：当前审查任务已标记完成，`agents-lists.md` 中 `提莫炖蘑菇` 状态同步成功。
+  - 已新建后续改进实现任务：
+    - `T-20260403-08b93e87`
+    - 目标：在同一 `worktree` 内修正 `analysis(...)` 的函数级聚合主线路径，并收紧 `analysis_kernel.md` / `func_cost.md` 的 derived alias 消费口径与测试闭环。
+  - 后续任务范围：
+    - `wt-20260403-analysis-mainline-a1/kernel_gen/analysis/analysis.py`
+    - `wt-20260403-analysis-mainline-a1/spec/analysis/analysis_kernel.md`
+    - `wt-20260403-analysis-mainline-a1/spec/pass/analysis/func_cost.md`
+    - `wt-20260403-analysis-mainline-a1/test/analysis/test_analysis.py`
+    - `wt-20260403-analysis-mainline-a1/test/pass/test_analysis_func_cost.py`
+    - `agents/codex-multi-agents/log/task_records/2026/14/20260403-analysis-mainline-a1.md`
+- 结论：
+  - `T-20260403-739280d7` 已完成并封板。
+  - 后续链路已按当前规则衔接到同链路改进实现阶段，等待管理员核对并分发 `T-20260403-08b93e87`。
+- 时间：2026-04-03 21:21:10 +0800
+- 经办人：`睡觉小分队`
+- 任务：`T-20260403-138c40c4`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/analysis_mainline_refactor_plan.md` 与 A1 审查意见，只修正 spec 边界：仅修改 `spec/analysis/analysis_kernel.md`、`spec/pass/analysis/func_cost.md` 与当前链路记录文件，收口 `AnalyzeKernelSummary` 不再表述为 `func_cost` 的稳定消费结构，并把 `func_cost.md` 收口为只消费 `AnalysisResult` derived alias，不再独立冻结第二套 `compute/read_bytes/write_bytes` 公式或支持范围。
+- 改动：
+  - 修改 [`spec/analysis/analysis_kernel.md`](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/spec/analysis/analysis_kernel.md)
+    - 将 `analyze_kernel(...) -> AnalyzeKernelSummary` 明确为 `analysis(...)` 的 facade / adapter 与过渡兼容返回，而非长期主入口或下游 pass 的稳定消费结构。
+    - 删除 `AnalyzeKernelSummary` 作为 `func_cost` 稳定消费结构的表述，改为仅用于 `analyze_kernel(...)` 兼容返回。
+    - 明确 `func_cost` 若需要 `compute/read_bytes/write_bytes` 兼容字段，必须直接消费统一入口 `AnalysisResult` derived alias，不再经由 `AnalyzeKernelSummary` 建立稳定依赖。
+  - 修改 [`spec/pass/analysis/func_cost.md`](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/spec/pass/analysis/func_cost.md)
+    - 将文档定位改为“消费 `analysis(func_op, AnalysisConfig, otherargs)` 返回的 `AnalysisResult`，并对外暴露 derived alias”。
+    - 删除原“统计口径 / 支持的 op 范围 / DMA 口径约定”整段独立公式合同，改写为统一入口继承口径。
+    - 将 `OpCost`、`FuncCostSummary`、`AnalyzeFuncCostPass` 和测试目标/用例表述统一收口为“alias 结果与统一入口一致”，不再把 `func_cost` 写成第二套公式来源。
+- 验证：
+  - `rg -n "AnalyzeKernelSummary|func_cost|derived alias|第二套|支持范围|compute/read_bytes/write_bytes" spec/analysis/analysis_kernel.md spec/pass/analysis/func_cost.md`（exit `0`）
+  - `git diff --check -- spec/analysis/analysis_kernel.md spec/pass/analysis/func_cost.md`（exit `0`）
+- 测试：
+  - 未运行 `pytest`；本轮仅做 spec 收口与文本一致性校验。
+- 结论：
+  - 本轮 spec 修正已完成，无新增阻塞。
+  - 建议下一步进入同链路改进实现任务：仅修正 `kernel_gen/analysis/analysis.py` 与相关测试，把 `analysis(func_op, ...)` 的函数级聚合收口为逐 op 调用公开入口 `analysis(op, config, otherargs)`，并依据本轮 spec 维持 `func_cost` 只消费 `AnalysisResult` derived alias 的实现口径。
+@金铲铲大作战向@神秘人发起会话: T-20260403-08b93e87 当前状态：1）已正式修改的文件：暂无，尚未落笔修改业务文件。2）当前完成度：约20%。已完成 worktree/计划/链路记录核对，并定位到需要修正的具体点：analysis.py 中 analysis(func_op, ...) 的函数级聚合仍直接调用 _analyze_ir_op(...)；analysis_kernel.md 仍把 AnalyzeKernelSummary 表述成 func_cost 的稳定消费结构；func_cost.md 仍独立冻结第二套 compute/read_bytes/write_bytes 口径。3）当前存在硬阻塞：任务要求我直接修改 spec/analysis/analysis_kernel.md 和 spec/pass/analysis/func_cost.md，但当前固定角色约束仍是“仅负责实现与测试，不承担 spec”，与任务边界直接冲突；同时 worktree 里还存在范围外脏改 kernel_gen/passes/analysis/func_cost.py 与未跟踪的 spec/analysis/analysis_engine.md，不在本次列出的修正范围内。4）预计完成时间：如果管理员明确授权我本轮可直接修改上述两份 spec，并确认按本次任务描述忽略范围外脏文件、只处理列出的目标文件，我预计还需要45-75分钟完成实现、补测、记录和状态流转。
+时间：2026-04-03 21:48:50 +0800
+经办人：`金铲铲大作战`
+任务：`T-20260403-101a2441`
+任务目标：
+  - 按 `ARCHITECTURE/plan/analysis_mainline_refactor_plan.md` 的分发边界，只修正 A1 审查问题中的实现部分：让 `analysis(func_op, config, otherargs)` 的函数级聚合显式逐 op 调用公开入口 `analysis(op, config, otherargs)`，不再旁路 `_analyze_ir_op(...)`；保持 `func_cost` 继续只消费 `AnalysisResult` derived alias，不改 spec。
+改动：
+  - 修改 [`kernel_gen/analysis/analysis.py`](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/kernel_gen/analysis/analysis.py)
+    - 给 `AnalysisResult` 增加仅供统一入口聚合内部使用的 `_value_reads`、`_direct_writes`、`_result_write_bytes` 字段，用于在不暴露第二套公开结构的前提下，从单 op `analysis(...)` 返回值继续派生 `value_traffic`。
+    - 更新 `_to_analysis_result(...)` 与 `_result_from_analyzed_op(...)`，让单 op 公开入口返回的 `AnalysisResult` 携带上述内部聚合元数据。
+    - 重写 `_analysis_func(...)`：不再直接调用 `_analyze_ir_op(...)`，而是对 `_iter_func_ops(func_op)` 中的每个 op 显式调用公开入口 `analysis(op, config, otherargs)`，再基于返回的 `AnalysisResult` 聚合 `compute_items`、`memory_items`、`op_costs` 与 `value_traffic`。
+  - 修改 [`test/analysis/test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/test/analysis/test_analysis.py)
+    - 新增 `test_analysis_func_aggregates_via_public_entry`，通过 monkeypatch/sp y 锁死 `analysis(func_op, ...)` 会逐 op 调用公开入口 `analysis(op, ...)`，并验证聚合后总量保持不变。
+  - 本轮未修改 [`test/pass/test_analysis_func_cost.py`](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/test/pass/test_analysis_func_cost.py)
+    - 现有 `test_func_cost_matches_analysis_result_aliases` 与 `test_func_cost_attach_attrs_is_opt_in` 已覆盖“`func_cost` 继续只消费 `AnalysisResult` derived alias”这条边界，本轮复测通过，无需新增或调整断言。
+验证：
+  - 定向回归：
+    - `python -m pytest -q test/analysis/test_analysis.py -k 'analysis_func_aggregates_via_public_entry or analysis_func_write_attrs_is_explicit_and_analyze_kernel_is_facade'`
+    - 结果：`2 passed, 32 deselected`
+  - 范围内目标测试：
+    - `python -m pytest -q test/analysis/test_analysis.py test/pass/test_analysis_func_cost.py`
+    - 结果：`46 passed`
+结论：
+  - A1 审查问题中的实现部分已修正：`analysis(func_op, ...)` 现在显式逐 op 调用公开入口 `analysis(op, config, otherargs)` 聚合，不再旁路 `_analyze_ir_op(...)`。
+  - `func_cost` 继续只消费 `AnalysisResult` derived alias 的实现边界保持不变，本轮未引入新的第二套公式主线。
+
+时间：2026-04-03 21:51:17 +0800
+经办人：`金铲铲大作战`
+任务流转：
+  - 已执行 `-done`：
+    - `T-20260403-101a2441`
+  - 已新建同链路后续审查任务：
+    - `T-20260403-c1d9a67a`
+改动范围确认：
+  - 本轮 tracked 变更：
+    - [`kernel_gen/analysis/analysis.py`](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/kernel_gen/analysis/analysis.py)
+    - [`test/analysis/test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/test/analysis/test_analysis.py)
+    - [`20260403-analysis-mainline-a1.md`](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260403-analysis-mainline-a1.md)
+  - 本轮未改动但已复测：
+    - [`test/pass/test_analysis_func_cost.py`](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/test/pass/test_analysis_func_cost.py)
+后续审查建议：
+  - 只读复核 [`kernel_gen/analysis/analysis.py`](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/kernel_gen/analysis/analysis.py)、[`test/analysis/test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/test/analysis/test_analysis.py)、[`test/pass/test_analysis_func_cost.py`](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/test/pass/test_analysis_func_cost.py) 是否与 A1 审查意见和已合入 spec 口径一致。
+@金铲铲大作战向@神秘人发起会话: T-20260403-101a2441 已完成并已 -done。实现范围仅含 /home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/kernel_gen/analysis/analysis.py 与 /home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/test/analysis/test_analysis.py；/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/test/pass/test_analysis_func_cost.py 本轮未改但已复测通过。修正结果：analysis(func_op, config, otherargs) 现在显式逐 op 调用公开入口 analysis(op, config, otherargs)，不再旁路 _analyze_ir_op；func_cost 继续只消费 AnalysisResult derived alias。验证：python -m pytest -q test/analysis/test_analysis.py test/pass/test_analysis_func_cost.py -> 46 passed。已新建同链路审查任务 T-20260403-c1d9a67a，请核对并分发。
+
+- 时间：2026-04-03 21:55:58 +0800
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260403-c1d9a67a`
+- 任务目标：
+  - 按 `analysis_mainline_refactor_plan.md` 的 `A1` 修正实现复审边界，只读复核 `kernel_gen/analysis/analysis.py`、`test/analysis/test_analysis.py`、`test/pass/test_analysis_func_cost.py` 与同链路记录文件，确认 `analysis(func_op, config, otherargs)` 是否显式逐 op 调用公开入口，且 `func_cost` 是否继续只消费 `AnalysisResult` derived alias。
+- 复审结论：
+  - `不通过`。
+- 问题列表：
+  - `P1` [analysis.py](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/kernel_gen/analysis/analysis.py#L2104) 到 [analysis.py](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/kernel_gen/analysis/analysis.py#L2111) 的 `write_op_attrs=True` 函数级聚合分支仍引用未定义变量 `analyzed`。我做了最小只读复现：对一个仅含 `nn.add` 的 `func.func` 调用 `analysis(func_op, AnalysisConfig(enable_compute=True, enable_memory=True, write_op_attrs=True, write_func_attrs=False, dtype_size_overrides={'f32': 4}))`，结果直接抛出 `NameError: name 'analyzed' is not defined`。这说明本轮修正虽然把函数级聚合改成了逐 op 调用公开入口，但显式开启 op attr 写回时主线仍然损坏，不能判通过。
+  - `P2` 当前记录文件对改动范围的描述与实际 diff 不一致。记录在 [20260403-analysis-mainline-a1.md](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260403-analysis-mainline-a1.md) 中写着“`test/pass/test_analysis_func_cost.py` 本轮未改动但已复测”，但 `git diff -- test/pass/test_analysis_func_cost.py` 明确显示该文件新增了 `FC-007A` 与 `FC-011` 两组测试并扩展了导入项。这会让后续链路对实际 merge 范围和测试证据产生误判。
+- 通过项：
+  - [analysis.py](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/kernel_gen/analysis/analysis.py#L2063) 到 [analysis.py](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/kernel_gen/analysis/analysis.py#L2065) 现在确实改成对 `_iter_func_ops(func_op)` 中的每个 op 显式调用公开入口 `analysis(op, config, args)`，不再直接旁路 `_analyze_ir_op(...)`。
+  - [test_analysis.py](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/test/analysis/test_analysis.py#L836) 新增的 `test_analysis_func_aggregates_via_public_entry` 已锁住“函数级聚合通过公开入口”的主线边界。
+  - [test_analysis_func_cost.py](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/test/pass/test_analysis_func_cost.py#L675) 继续验证 `func_cost` 摘要来自统一入口 `AnalysisResult` derived alias，这条边界当前保持正确。
+- 漏洞与边界排查：
+  - 功能正确性：不通过，`write_op_attrs=True` 的函数级聚合路径会直接抛 `NameError`。
+  - 边界条件：`func_cost` derived alias 消费口径仍保持不变；`analysis(func_op, ...)` 逐 op 主线聚合已收口，但显式写回开关的函数级边界未闭环。
+  - 异常路径：当前异常不是受控 `AnalysisError`，而是未定义变量导致的运行时错误。
+  - 潜在漏洞/歧义：记录文件对实际改动范围描述错误，容易导致后续审查/合并漏带文件或误判证据。
+- 验证：
+  - `python -m pytest -q test/analysis/test_analysis.py -k 'analysis_func_aggregates_via_public_entry or analysis_func_write_attrs_is_explicit_and_analyze_kernel_is_facade'` -> `2 passed, 32 deselected`
+  - `python -m pytest -q test/pass/test_analysis_func_cost.py -k 'attach_attrs_is_opt_in or matches_analysis_result_aliases'` -> `2 passed, 10 deselected`
+  - 最小只读复现 `analysis(func_op, AnalysisConfig(..., write_op_attrs=True, ...))` -> `NameError: name 'analyzed' is not defined`
+- 下一步建议：
+  - 进入同链路改进实现任务，只修正 `analysis.py` 的函数级 `write_op_attrs=True` 分支并补一条函数级写回回归，同时把当前记录文件中的实际改动范围纠正为包含 `test/pass/test_analysis_func_cost.py`。
+
+- 时间：2026-04-03 21:55:58 +0800
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260403-c1d9a67a`
+- 任务目标：
+  - 完成当前复审任务流转，并按同链路补建唯一后续改进实现任务。
+- 改动：
+  - 已执行：
+    - `codex-multi-agents-task.sh -done -task_id T-20260403-c1d9a67a ...`
+    - 结果：当前复审任务已标记完成，`agents-lists.md` 中 `提莫炖蘑菇` 状态同步成功。
+  - 已新建后续改进实现任务：
+    - `T-20260403-173e1a19`
+    - 目标：修正 `analysis.py` 的函数级 `write_op_attrs=True` 运行时错误，补函数级写回回归，并纠正当前记录文件对实际改动范围的描述。
+  - 后续任务范围：
+    - `wt-20260403-analysis-mainline-a1/kernel_gen/analysis/analysis.py`
+    - `wt-20260403-analysis-mainline-a1/test/analysis/test_analysis.py`
+    - `agents/codex-multi-agents/log/task_records/2026/14/20260403-analysis-mainline-a1.md`
+  - 约束确认：
+    - 不扩到 `spec`
+    - 保持 `func_cost` 继续只消费 `AnalysisResult` derived alias
+- 结论：
+  - `T-20260403-c1d9a67a` 已完成并封板。
+  - 后续链路已按当前规则衔接到同链路改进实现阶段，等待管理员核对并分发 `T-20260403-173e1a19`。
+
+- 时间：2026-04-03 22:13:46 +0800
+- 经办人：`金铲铲大作战`
+- 任务：`T-20260403-173e1a19`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/analysis_mainline_refactor_plan.md` 的分发边界，只修正 A1 复审问题中的实现部分：修复 `analysis(func_op, AnalysisConfig(..., write_op_attrs=True, ...))` 的 `NameError`，保持函数级聚合继续显式逐 op 调用公开入口 `analysis(op, config, otherargs)`，并澄清记录文件中 [`test/pass/test_analysis_func_cost.py`](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/test/pass/test_analysis_func_cost.py) 的既有改动事实。
+- 改动：
+  - 修改 [`kernel_gen/analysis/analysis.py`](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/kernel_gen/analysis/analysis.py)
+    - 删除 `_analysis_func(...)` 中重复且错误的函数级 `write_op_attrs` 二次写回分支。
+    - 让函数级聚合在 `write_op_attrs=True` 时直接依赖单 op `analysis(op, ...)` 已完成的属性写回，避免引用未定义变量 `analyzed`。
+    - 保持函数级主线仍是对 `_iter_func_ops(func_op)` 显式逐 op 调用公开入口 `analysis(op, config, otherargs)`。
+  - 修改 [`test/analysis/test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/test/analysis/test_analysis.py)
+    - 新增 `test_analysis_func_write_op_attrs_via_public_entry`，锁死 `analysis(func_op, ..., write_op_attrs=True)` 不再抛运行时错误，且逐 op attrs 确实写回。
+  - 记录澄清：
+    - [`test/pass/test_analysis_func_cost.py`](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/test/pass/test_analysis_func_cost.py) 在当前 `worktree` 中存在既有链路改动（例如 `FC-011` 等），这些改动来自前序链路，不是本任务新增；本任务未修改该文件，但链路合并时仍需按整条链路带上其 tracked 改动。
+- 验证：
+  - 定向回归：
+    - `python -m pytest -q test/analysis/test_analysis.py -k 'analysis_func_write_op_attrs_via_public_entry or analysis_func_aggregates_via_public_entry or analysis_func_write_attrs_is_explicit_and_analyze_kernel_is_facade'`
+    - 结果：`3 passed, 32 deselected`
+  - 范围内目标测试：
+    - `python -m pytest -q test/analysis/test_analysis.py test/pass/test_analysis_func_cost.py`
+    - 结果：`47 passed`
+- 结论：
+  - `write_op_attrs=True` 的函数级统一入口已恢复：不再抛 `NameError`，并继续通过公开 `analysis(op, ...)` 主线完成逐 op 属性写回。
+  - 当前链路记录已补充 [`test/pass/test_analysis_func_cost.py`](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/test/pass/test_analysis_func_cost.py) 的既有改动事实，后续审查/合并可据此准确判断 merge 范围。
+
+- 时间：2026-04-03 22:14:51 +0800
+- 经办人：`金铲铲大作战`
+- 任务流转：
+  - 已执行 `-done`：
+    - `T-20260403-173e1a19`
+  - 已新建同链路后续复审任务：
+    - `T-20260403-13191a68`
+- 后续复审范围建议：
+  - [`kernel_gen/analysis/analysis.py`](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/kernel_gen/analysis/analysis.py)
+  - [`test/analysis/test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/test/analysis/test_analysis.py)
+  - [`20260403-analysis-mainline-a1.md`](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260403-analysis-mainline-a1.md)
+
+- 时间：2026-04-03 22:18:38 +0800
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260403-13191a68`
+- 任务目标：
+  - 按 `analysis_mainline_refactor_plan.md` 的 `A1` 改进实现复审边界，只读复核 `kernel_gen/analysis/analysis.py`、`test/analysis/test_analysis.py` 与同链路记录文件，确认 `analysis(func_op, AnalysisConfig(..., write_op_attrs=True, ...))` 不再抛 `NameError`、函数级聚合仍显式逐 op 调用公开入口 `analysis(op, config, otherargs)`，并确认记录已澄清 `test/pass/test_analysis_func_cost.py` 的既有改动事实。
+- 复审结论：
+  - `通过`。
+- 复审结果：
+  - [analysis.py](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/kernel_gen/analysis/analysis.py#L2063) 到 [analysis.py](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/kernel_gen/analysis/analysis.py#L2065) 仍保持对 `_iter_func_ops(func_op)` 中每个 op 显式调用公开入口 `analysis(op, config, args)` 聚合，没有回退到 `_analyze_ir_op(...)` 旁路。
+  - [analysis.py](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/kernel_gen/analysis/analysis.py#L2104) 到 [analysis.py](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/kernel_gen/analysis/analysis.py#L2113) 已移除此前错误的函数级 `write_op_attrs` 二次写回分支；最小只读复现 `analysis(func_op, AnalysisConfig(enable_compute=True, enable_memory=True, write_op_attrs=True, write_func_attrs=False, dtype_size_overrides={'f32': 4}))` 现在返回正常，且逐 op `analysis.*` 属性已写回，`func.func` 本身在 `write_func_attrs=False` 下仍不写回。
+  - [test_analysis.py](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/test/analysis/test_analysis.py#L836) 的 `test_analysis_func_aggregates_via_public_entry` 与 [test_analysis.py](/home/lfr/kernelcode_generate/wt-20260403-analysis-mainline-a1/test/analysis/test_analysis.py#L881) 的 `test_analysis_func_write_op_attrs_via_public_entry` 已把“逐 op 公开入口聚合”和“函数级 `write_op_attrs=True` 不抛运行时错误且逐 op attrs 写回”两条边界锁住。
+  - 记录文件已澄清 `test/pass/test_analysis_func_cost.py` 的既有改动事实，见 [20260403-analysis-mainline-a1.md](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260403-analysis-mainline-a1.md#L300) 到 [20260403-analysis-mainline-a1.md](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260403-analysis-mainline-a1.md#L311)。
+- 漏洞与边界排查：
+  - 功能正确性：通过，`write_op_attrs=True` 的函数级统一入口不再报 `NameError`。
+  - 边界条件：通过，函数级主线仍显式逐 op 调用公开入口；`write_func_attrs=False` 时未误写 `func.func` attrs。
+  - 异常路径：本轮修正后未见新的未定义变量或非受控运行时异常。
+  - 潜在漏洞/歧义：本轮复审范围内未发现新问题；记录中的既有改动范围已明确澄清。
+- 验证：
+  - 最小只读复现：
+    - `analysis(func_op, AnalysisConfig(enable_compute=True, enable_memory=True, write_op_attrs=True, write_func_attrs=False, dtype_size_overrides={'f32': 4}))`
+    - 结果：`RESULT_OK nn.add 6 False`
+  - `python -m pytest -q test/analysis/test_analysis.py -k 'analysis_func_write_op_attrs_via_public_entry or analysis_func_aggregates_via_public_entry or analysis_func_write_attrs_is_explicit_and_analyze_kernel_is_facade'` -> `3 passed, 32 deselected`
+  - `python -m pytest -q test/analysis/test_analysis.py` -> `35 passed`
+  - `python -m pytest -q test/pass/test_analysis_func_cost.py` -> `12 passed`
+- 下一步建议：
+  - 进入同链路合并阶段；合并范围必须覆盖整条 A1 链路的 `spec / 实现 / 测试 / 记录文件`，不能只带本轮增量文件。
+
+- 时间：2026-04-03 22:18:38 +0800
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260403-13191a68`
+- 任务目标：
+  - 完成当前复审任务流转，并按同链路补建唯一后续合并任务。
+- 改动：
+  - 已执行：
+    - `codex-multi-agents-task.sh -done -task_id T-20260403-13191a68 ...`
+    - 结果：当前复审任务已标记完成，`agents-lists.md` 中 `提莫炖蘑菇` 状态同步成功。
+  - 已新建后续合并任务：
+    - `T-20260403-979421f2`
+    - 目标：在同一 `worktree` 中按整条 A1 链路合入 `spec / 实现 / 测试 / 记录文件`。
+  - 合并范围确认：
+    - `wt-20260403-analysis-mainline-a1/spec/analysis/analysis_engine.md`
+    - `wt-20260403-analysis-mainline-a1/spec/analysis/analysis_kernel.md`
+    - `wt-20260403-analysis-mainline-a1/spec/pass/analysis/func_cost.md`
+    - `wt-20260403-analysis-mainline-a1/kernel_gen/analysis/analysis.py`
+    - `wt-20260403-analysis-mainline-a1/kernel_gen/passes/analysis/func_cost.py`
+    - `wt-20260403-analysis-mainline-a1/test/analysis/test_analysis.py`
+    - `wt-20260403-analysis-mainline-a1/test/pass/test_analysis_func_cost.py`
+    - `agents/codex-multi-agents/log/task_records/2026/14/20260403-analysis-mainline-a1.md`
+- 结论：
+  - `T-20260403-13191a68` 已完成并封板。
+  - 后续链路已按当前规则衔接到合并阶段，等待管理员核对并分发 `T-20260403-979421f2`。
+
+- 时间：2026-04-03 22:30:00 +0800
+- 经办人：`李白`
+- 任务：`T-20260403-979421f2`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/analysis_mainline_refactor_plan.md` 与管理员分发边界，在主仓按整条 `A1` 链路合入 `spec / 实现 / 测试 / 记录文件`，保持 `analysis(op, config, otherargs)` 为主线入口、`analyze_kernel(...)` 仅为 facade、`func_cost` 只消费 `AnalysisResult` derived alias，且 merge 不遗漏任何 A1 链路文件。
+- 合并范围：
+  - [`spec/analysis/analysis_engine.md`](/home/lfr/kernelcode_generate/spec/analysis/analysis_engine.md)
+  - [`spec/analysis/analysis_kernel.md`](/home/lfr/kernelcode_generate/spec/analysis/analysis_kernel.md)
+  - [`spec/pass/analysis/func_cost.md`](/home/lfr/kernelcode_generate/spec/pass/analysis/func_cost.md)
+  - [`kernel_gen/analysis/analysis.py`](/home/lfr/kernelcode_generate/kernel_gen/analysis/analysis.py)
+  - [`kernel_gen/passes/analysis/func_cost.py`](/home/lfr/kernelcode_generate/kernel_gen/passes/analysis/func_cost.py)
+  - [`test/analysis/test_analysis.py`](/home/lfr/kernelcode_generate/test/analysis/test_analysis.py)
+  - [`test/pass/test_analysis_func_cost.py`](/home/lfr/kernelcode_generate/test/pass/test_analysis_func_cost.py)
+  - [`20260403-analysis-mainline-a1.md`](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260403-analysis-mainline-a1.md)
+- 改动：
+  - 已从 `wt-20260403-analysis-mainline-a1` 将整条 A1 授权文件同步到主仓，未带入范围外文件。
+  - 已确认 `spec/analysis/analysis_engine.md` 作为 A1 新增 spec 一并纳入本次合并。
+  - 已按链路记录确认最近复审 `T-20260403-13191a68` 结论为 `通过`，满足进入合并阶段的条件。
+- 验证：
+  - `python -m pytest -q test/analysis/test_analysis.py test/pass/test_analysis_func_cost.py`
+  - `git diff --check -- spec/analysis/analysis_engine.md spec/analysis/analysis_kernel.md spec/pass/analysis/func_cost.md kernel_gen/analysis/analysis.py kernel_gen/passes/analysis/func_cost.py test/analysis/test_analysis.py test/pass/test_analysis_func_cost.py`
+- 结论：
+  - A1 整链路已在主仓收口，下一步执行提交、推送、cleanup 与 `-done`。
