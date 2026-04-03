@@ -157,3 +157,219 @@
 - 结论：
   - `T-20260404-00dc3206` 已完成并封板。
   - 后续链路已按当前规则衔接到合并阶段，等待管理员核对并分发 `T-20260404-ea7e3cf4`。
+- 时间：2026-04-04 02:15:26 +0800
+- 经办人：`睡觉小分队`
+- 任务：`T-20260404-6498332a`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/dsl_mlir_gen_return_from_body_plan.md` 的 `R3` 拒绝路径 spec 口径，仅修改 `spec/dsl/mlir_gen.md` 与同链路记录文件，写清“没有返回注解、也没有显式 `return` 时，不能靠最后一个值表达式猜函数输出，必须报 `Function return requires explicit return syntax or annotation`”，不改实现/测试文件。
+- 改动：
+  - 修改 [`spec/dsl/mlir_gen.md`](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/spec/dsl/mlir_gen.md)
+    - 在“限制与边界”中新增统一拒绝门禁：当 `FunctionAST.has_explicit_return == False` 且 `FunctionAST.outputs == []`，若函数体最后停在值表达式上，`build_func_op(...) / build_func_op_from_ast(...)` 必须抛出 `AstVisitorError`，错误消息包含 `Function return requires explicit return syntax or annotation`。
+    - 在 `build_func_op(...)` 与 `build_func_op_from_ast(...)` 的公开接口注意事项中同步写清同一拒绝路径，禁止靠最后一个值表达式猜函数输出。
+    - 将零入参函数的旧表述收紧为“仍遵守统一返回装配规则”，避免被误读成允许末尾值表达式隐式决定函数结果类型。
+    - 在测试目标与用例清单中补齐 `MGEN-R3 -> test_build_func_op_rejects_ambiguous_value_body_without_return_or_annotation` 的映射。
+- 验证：
+  - `rg -n 'Function return requires explicit return syntax or annotation|最后一个值表达式|值表达式函数体|零返回值|显式 -> None' spec/dsl/mlir_gen.md`（exit `0`）
+  - `git diff --check -- spec/dsl/mlir_gen.md`（exit `0`）
+- 自检：
+  - 任务类型正确：本轮只收口 `spec`，未混入实现/测试修改。
+  - 合同唯一且无灰区：当前仅允许两种路径，`显式 return lowering 结果决定输出`，或 `显式 -> None / 语句型零返回函数保持零结果`；“无注解且无显式 return 但靠最后值表达式猜输出”已被明确禁止。
+  - 边界保持清楚：`for/free/store/deslice/launch_kernel` 这类语句型零返回函数未被误伤，文档仍保留其零返回值口径。
+  - 记录、涉及文件与实际改动一致：仅包含 `spec/dsl/mlir_gen.md` 与本记录文件。
+- 测试：
+  - 未运行 `pytest`；本轮仅做 spec 收口与文本一致性校验。
+- 结论：
+  - 本轮 `R3` spec 收口已完成，无阻塞。
+  - 建议下一步进入纯实现任务：仅修改 `kernel_gen/dsl/mlir_gen.py`、`test/dsl/test_mlir_gen.py` 与同链路记录文件，落地并锁死 `Function return requires explicit return syntax or annotation` 的拒绝路径，不再改 `spec`。
+
+- 时间：2026-04-04 02:21:35 +0800
+- 经办人：`金铲铲大作战`
+- 任务：`T-20260404-65c800a8`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/dsl_mlir_gen_return_from_body_plan.md` 的 `R3` 实现边界，只修改 `kernel_gen/dsl/mlir_gen.py`、`test/dsl/test_mlir_gen.py` 与同链路记录文件，落实并锁死“没有返回注解、也没有显式 `return` 时，不能靠最后一个值表达式猜函数输出，必须报 `Function return requires explicit return syntax or annotation`”。
+- 改动：
+  - 修改 [`kernel_gen/dsl/mlir_gen.py`](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/kernel_gen/dsl/mlir_gen.py)
+    - 新增 `_is_zero_return_statement_expr(...)`，只允许 `free/store/deslice/for/launch_kernel` 这类语句型函数体在无返回注解、无显式 `return` 时继续生成零结果 `func.func`。
+    - 收紧 `_build_func_op_from_ast_impl(...)`：当 `FunctionAST.outputs == []`、`has_explicit_return == False`、`returns_none == False` 且最后一条语句不是零返回语句型 AST 时，直接抛 `_LoweringError("Function return requires explicit return syntax or annotation")`。
+    - 删除旧的“symbol scalar 无显式 return 也可按最后表达式推导结果”的隐式兜底，防止继续靠末尾值表达式猜函数输出。
+  - 修改 [`test/dsl/test_mlir_gen.py`](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/test/dsl/test_mlir_gen.py)
+    - 新增 `test_build_func_op_rejects_ambiguous_value_body_without_return_or_annotation`，同一用例同时锁定 `build_func_op(...)` 与 `build_func_op_from_ast(...)` 两条入口都会对歧义值表达式函数体报同一错误。
+- 验证：
+  - 任务要求 gate：
+    - `python -m pytest -q test/dsl/test_mlir_gen.py -k 'test_build_func_op_rejects_ambiguous_value_body_without_return_or_annotation'`
+    - 结果：`1 passed, 118 deselected`
+  - 零返回语句函数回归：
+    - `python -m pytest -q test/dsl/test_mlir_gen.py -k 'test_build_func_op_supports_dma_free_statement or test_build_func_op_supports_dma_store_helper or test_build_func_op_supports_dma_deslice_helper or test_build_func_op_supports_symbolic_for_loop_dma_without_return'`
+    - 结果：`4 passed, 115 deselected`
+  - 补充旁证：
+    - 临时模块脚本构造 `launch_kernel_kernel(block, thread, subthread): launch_kernel("kernel", block, thread, subthread)`，执行 `build_func_op(...)` 后确认 `func.function_type.outputs == []` 且 `func.return` 无参数。
+    - 输出：`launch_kernel_zero_return_ok`
+  - 代码整洁性：
+    - `git diff --check -- kernel_gen/dsl/mlir_gen.py test/dsl/test_mlir_gen.py` -> 通过
+- 自检：
+  - 目标真正收口：本轮不是特判 `ambiguous(lhs, rhs): lhs + rhs`，而是统一拒绝“无返回注解 + 无显式 return + 末尾值表达式”的函数级歧义路径。
+  - 边界未越界：未修改 [`spec/dsl/mlir_gen.md`](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/spec/dsl/mlir_gen.md)；该文件当前虽有既有脏改，但来自前序 `R2/R3 spec` 链路，不属本轮新增。
+  - 验证证据充分：主结论有目标 gate，边界未误伤有 `free/store/deslice/for` 回归和 `launch_kernel` 旁证。
+  - 记录与实际改动一致：本轮仅新增/修改 `kernel_gen/dsl/mlir_gen.py`、`test/dsl/test_mlir_gen.py` 与本记录文件。
+- 结论：
+  - `R3` 的实现拒绝路径已落地：没有返回注解、也没有显式 `return` 时，不再靠最后一个值表达式猜函数输出，而是稳定报 `Function return requires explicit return syntax or annotation`。
+  - `free/store/deslice/for/launch_kernel` 这类本来就应零返回值的语句函数边界保持不变。
+
+- 时间：2026-04-04 02:22:36 +0800
+- 经办人：`金铲铲大作战`
+- 任务流转：
+  - 已执行 `-done`：
+    - `T-20260404-65c800a8`
+  - 已新建同链路后续复审任务：
+    - `T-20260404-e09b2307`
+- 后续复审范围建议：
+  - [`kernel_gen/dsl/mlir_gen.py`](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/kernel_gen/dsl/mlir_gen.py)
+  - [`test/dsl/test_mlir_gen.py`](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/test/dsl/test_mlir_gen.py)
+  - [`20260404-dsl-mlir-gen-r1.md`](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-dsl-mlir-gen-r1.md)
+
+- 时间：2026-04-04 02:27:07 +0800
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-e09b2307`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/dsl_mlir_gen_return_from_body_plan.md` 的 `R3` 复审边界，只读复核 `kernel_gen/dsl/mlir_gen.py`、`test/dsl/test_mlir_gen.py` 与同链路记录文件，确认“无返回注解 + 无显式 return + 末尾值表达式”统一报 `Function return requires explicit return syntax or annotation`，且 `free/store/deslice/for/launch_kernel` 这类零返回语句函数未被误伤。
+- 复审前自检：
+  - 已核对主 gate 证据：`test_build_func_op_rejects_ambiguous_value_body_without_return_or_annotation` 通过。
+  - 已核对边界证据：`dma_free / dma_store / dma_deslice / symbolic_for_loop_dma_without_return` 回归通过，`launch_kernel` 用只读临时脚本确认零返回不被误伤。
+  - 已额外做全量自检，确认同文件内是否存在和 `R3` 新口径冲突的旧测试或旧行为。
+- 复审结论：
+  - `不通过`。
+- 问题列表：
+  - `P1` [test_mlir_gen.py](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/test/dsl/test_mlir_gen.py#L2862) 的 `test_compare_implicit_broadcast_lowering` 仍保留旧口径：它直接构造 `FunctionAST(outputs=[], has_explicit_return=False, returns_none=False, body=[CompareExprAST(...)])`，并断言 `build_func_op_from_ast(...)` 能成功 lowering。`R3` 现在明确禁止“无返回注解 + 无显式 return + 末尾值表达式”靠最后一个值表达式猜函数输出，因此该测试会稳定失败，实跑结果也是 `AstVisitorError: Function return requires explicit return syntax or annotation`。这说明当前实现和测试口径还没完全对齐，不能判通过。
+- 通过项：
+  - [mlir_gen.py](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/kernel_gen/dsl/mlir_gen.py#L462) 到 [mlir_gen.py](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/kernel_gen/dsl/mlir_gen.py#L481) 的 `_is_zero_return_statement_expr(...)` 已把零返回语句函数收敛到 `free/store/deslice/for/launch_kernel`。
+  - [mlir_gen.py](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/kernel_gen/dsl/mlir_gen.py#L605) 到 [mlir_gen.py](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/kernel_gen/dsl/mlir_gen.py#L609) 已把歧义值表达式路径统一改成显式报 `Function return requires explicit return syntax or annotation`。
+  - [test_mlir_gen.py](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/test/dsl/test_mlir_gen.py#L2090) 的 `MGEN-R3` 主 gate 已同时锁住 `build_func_op(...)` 与 `build_func_op_from_ast(...)` 两条拒绝路径。
+  - `free/store/deslice/for` 四条零返回语句函数回归通过；`launch_kernel` 只读临时脚本也确认 `func.function_type.outputs == []` 且 `func.return` 无参数。
+- 漏洞与边界排查：
+  - 功能正确性：主拒绝路径实现正确。
+  - 边界条件：零返回语句函数当前未被误伤，但 `launch_kernel` 仍只靠旁证脚本，没有仓库内正式回归测试。
+  - 异常路径：通过，歧义函数体统一报同一错误。
+  - 潜在漏洞/歧义：同文件残留旧 compare 隐式返回测试，继续维持旧口径，会误导后续回归判断。
+- 验证：
+  - `python -m pytest -q test/dsl/test_mlir_gen.py -k 'test_build_func_op_rejects_ambiguous_value_body_without_return_or_annotation'` -> `1 passed, 118 deselected`
+  - `python -m pytest -q test/dsl/test_mlir_gen.py -k 'test_build_func_op_supports_dma_free_statement or test_build_func_op_supports_dma_store_helper or test_build_func_op_supports_dma_deslice_helper or test_build_func_op_supports_symbolic_for_loop_dma_without_return'` -> `4 passed, 115 deselected`
+  - 只读临时脚本：`launch_kernel_kernel(block, thread, subthread): launch_kernel("kernel", block, thread, subthread)` -> `OUTPUTS []`、`RETURN_EMPTY True`
+  - `python -m pytest -q test/dsl/test_mlir_gen.py -k 'test_compare_implicit_broadcast_lowering'` -> `1 failed`
+  - `python -m pytest -q test/dsl/test_mlir_gen.py` -> `115 passed, 4 failed`
+- 下一步建议：
+  - 进入同链改进实现任务，至少收掉 `test_compare_implicit_broadcast_lowering` 的旧口径，并最好把 `launch_kernel` 零返回保护补成正式自动化回归，避免当前只靠旁证脚本。 
+
+- 时间：2026-04-04 02:27:07 +0800
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-e09b2307`
+- 任务目标：
+  - 完成当前复审任务流转，并按同链路补建唯一后续改进实现任务。
+- 改动：
+  - 已执行：
+    - `codex-multi-agents-task.sh -done -task_id T-20260404-e09b2307 ...`
+    - 结果：当前复审任务已标记完成，`agents-lists.md` 中 `提莫炖蘑菇` 状态同步成功。
+  - 已新建后续改进实现任务：
+    - `T-20260404-139dc351`
+    - 目标：修正 `R3` 链路下残留的旧 compare 隐式返回测试口径，并补 `launch_kernel` 零返回自动化回归。
+  - 后续任务范围：
+    - `wt-20260404-dsl-mlir-gen-r1/kernel_gen/dsl/mlir_gen.py`
+    - `wt-20260404-dsl-mlir-gen-r1/test/dsl/test_mlir_gen.py`
+    - `agents/codex-multi-agents/log/task_records/2026/14/20260404-dsl-mlir-gen-r1.md`
+- 结论：
+  - `T-20260404-e09b2307` 已完成并封板。
+  - 后续链路已按当前规则衔接到同链路改进实现阶段，等待管理员核对并分发 `T-20260404-139dc351`。
+
+- 时间：2026-04-04 02:33:13 +0800
+- 经办人：`金铲铲大作战`
+- 任务：`T-20260404-139dc351`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/dsl_mlir_gen_return_from_body_plan.md` 的改进实现边界，清理 `test_compare_implicit_broadcast_lowering` 的旧隐式返回口径，并补 `launch_kernel` 零返回的正式自动化回归；保持 `R3` 的统一拒绝路径不变，不扩到 `spec`。
+- 改动：
+  - 本轮未进一步修改 [`kernel_gen/dsl/mlir_gen.py`](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/kernel_gen/dsl/mlir_gen.py)
+    - 复用上一轮 `R3` 已落地的实现拒绝路径：`无返回注解 + 无显式 return + 末尾值表达式` 统一报 `Function return requires explicit return syntax or annotation`。
+  - 修改 [`test/dsl/test_mlir_gen.py`](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/test/dsl/test_mlir_gen.py)
+    - 收口 `test_compare_implicit_broadcast_lowering` 的旧隐式返回口径：不再构造 `has_explicit_return=False` 的 `FunctionAST` 去期待成功，而是显式标注 `has_explicit_return=True`，与 `R2/R3` 当前“显式 return 元信息驱动返回装配”的真实口径一致。
+    - 新增 `test_build_func_op_preserves_launch_kernel_zero_return`，把此前只读临时脚本旁证收成仓库内正式自动化回归；同时覆盖 `build_func_op(...)` 与 `build_func_op_from_ast(...)` 两条入口。
+- 验证：
+  - 目标链路 gate：
+    - `python -m pytest -q test/dsl/test_mlir_gen.py -k 'test_build_func_op_rejects_ambiguous_value_body_without_return_or_annotation or test_compare_implicit_broadcast_lowering or test_build_func_op_preserves_launch_kernel_zero_return'`
+    - 结果：`3 passed, 117 deselected`
+  - 零返回语句函数保护回归：
+    - `python -m pytest -q test/dsl/test_mlir_gen.py -k 'test_build_func_op_supports_dma_free_statement or test_build_func_op_supports_dma_store_helper or test_build_func_op_supports_dma_deslice_helper or test_build_func_op_supports_symbolic_for_loop_dma_without_return'`
+    - 结果：`4 passed, 116 deselected`
+  - 代码整洁性：
+    - `git diff --check -- test/dsl/test_mlir_gen.py` -> 通过
+- 自检：
+  - 旧测试口径已清理：`test_compare_implicit_broadcast_lowering` 不再和 `R3` 的拒绝合同冲突。
+  - 零返回语句函数未误伤：`free/store/deslice/for` 回归继续通过，`launch_kernel` 也已变成正式自动化回归而非临时旁证。
+  - 验证证据充分：主结论同时覆盖 `R3` gate、compare 旧口径清理和 `launch_kernel` 自动化零返回。
+  - 边界未越界：未修改 `spec`；本轮业务改动只落在 [`test/dsl/test_mlir_gen.py`](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/test/dsl/test_mlir_gen.py) 与本记录文件。
+  - 记录与实际改动一致：当前 `kernel_gen/dsl/mlir_gen.py`、`spec/dsl/mlir_gen.md` 仍有同链路既有脏改，但不是本轮新增；本轮新增 diff 只来自测试与记录收口。
+- 结论：
+  - `R3` 链路下残留的旧 compare 隐式返回测试口径已清理。
+  - `launch_kernel` 零返回保护已补成正式自动化回归。
+  - 当前 `R3` 拒绝路径与零返回语句函数边界在测试层已经对齐。
+
+- 时间：2026-04-04 02:34:08 +0800
+- 经办人：`金铲铲大作战`
+- 任务流转：
+  - 已执行 `-done`：
+    - `T-20260404-139dc351`
+  - 已新建同链路后续复审任务：
+    - `T-20260404-4b057354`
+- 后续复审范围建议：
+  - [`test/dsl/test_mlir_gen.py`](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/test/dsl/test_mlir_gen.py)
+  - [`20260404-dsl-mlir-gen-r1.md`](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-dsl-mlir-gen-r1.md)
+
+- 时间：2026-04-04 02:36:54 +0800
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-4b057354`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/dsl_mlir_gen_return_from_body_plan.md` 的 `R3` 复审边界，只读复核 `test/dsl/test_mlir_gen.py` 与同链路记录文件，确认旧 compare 隐式返回口径已收掉、`launch_kernel` 零返回已形成正式自动化回归，且 `R3` 拒绝路径与零返回语句函数边界的验证证据一致。
+- 复审前自检：
+  - 已核对主 gate：`test_build_func_op_rejects_ambiguous_value_body_without_return_or_annotation`、`test_compare_implicit_broadcast_lowering`、`test_build_func_op_preserves_launch_kernel_zero_return` 全部通过。
+  - 已核对零返回边界：`free/store/deslice/for` 四条回归通过，`launch_kernel` 正式自动化回归同时覆盖 `build_func_op(...)` 与 `build_func_op_from_ast(...)`。
+  - 已核对全量文件状态：`test/dsl/test_mlir_gen.py` 当前全量仍有 3 个既有 mixed dtype promotion 基线失败，但旧 compare 隐式返回失败已消失，说明本轮测试口径收口没有引入新的同类问题。
+  - 已核对记录与实际改动一致：本轮新增 diff 落在 `test/dsl/test_mlir_gen.py` 与记录文件，没有越界到 `spec`。
+- 复审结论：
+  - `通过`。
+- 复审结果：
+  - [test_mlir_gen.py](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/test/dsl/test_mlir_gen.py#L2863) 的 `test_compare_implicit_broadcast_lowering` 已收掉旧隐式返回口径：不再构造 `has_explicit_return=False` 的 `FunctionAST` 去期待成功，而是显式标注 `has_explicit_return=True`，与 `R2/R3` 当前“显式 return 元信息驱动返回装配”的真实口径一致。
+  - [test_mlir_gen.py](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/test/dsl/test_mlir_gen.py#L2899) 的 `test_build_func_op_preserves_launch_kernel_zero_return` 已形成正式自动化回归，并同时覆盖 `build_func_op(...)` 与 `build_func_op_from_ast(...)` 两条入口。
+  - [test_mlir_gen.py](/home/lfr/kernelcode_generate/wt-20260404-dsl-mlir-gen-r1/test/dsl/test_mlir_gen.py#L2090) 的 `R3` 主 gate 与 `free/store/deslice/for/launch_kernel` 零返回边界证据当前一致，没有新的口径冲突。
+- 漏洞与边界排查：
+  - 功能正确性：通过，旧 compare 隐式返回测试口径已和 `R3` 拒绝合同对齐。
+  - 边界条件：通过，`launch_kernel` 已从旁证脚本升级为正式自动化回归；`free/store/deslice/for` 仍未被误伤。
+  - 异常路径：通过，歧义值表达式仍统一报 `Function return requires explicit return syntax or annotation`。
+  - 潜在漏洞/歧义：本轮复审范围内未发现新的测试灰区；剩余 3 个全量失败仍是 `emit_mlir.py` 侧既有 mixed dtype promotion 基线问题，不是本轮新增。
+- 验证：
+  - `python -m pytest -q test/dsl/test_mlir_gen.py -k 'test_build_func_op_rejects_ambiguous_value_body_without_return_or_annotation or test_compare_implicit_broadcast_lowering or test_build_func_op_preserves_launch_kernel_zero_return'` -> `3 passed, 117 deselected`
+  - `python -m pytest -q test/dsl/test_mlir_gen.py -k 'test_build_func_op_supports_dma_free_statement or test_build_func_op_supports_dma_store_helper or test_build_func_op_supports_dma_deslice_helper or test_build_func_op_supports_symbolic_for_loop_dma_without_return'` -> `4 passed, 116 deselected`
+  - `python -m pytest -q test/dsl/test_mlir_gen.py -k 'test_compare_implicit_broadcast_lowering or test_build_func_op_preserves_launch_kernel_zero_return'` -> `2 passed, 118 deselected`
+  - `python -m pytest -q test/dsl/test_mlir_gen.py` -> `117 passed, 3 failed`
+- 下一步建议：
+  - 进入同链合并阶段；合并范围应覆盖当前已完成的 `R1 + R2 + R3` 全部 `spec / 实现 / 测试 / 记录文件`，不能只带本轮测试增量。
+
+- 时间：2026-04-04 02:36:54 +0800
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-4b057354`
+- 任务目标：
+  - 完成当前复审任务流转，并按同链路补建唯一后续合并任务。
+- 改动：
+  - 已执行：
+    - `codex-multi-agents-task.sh -done -task_id T-20260404-4b057354 ...`
+    - 结果：当前复审任务已标记完成，`agents-lists.md` 中 `提莫炖蘑菇` 状态同步成功。
+  - 已新建后续合并任务：
+    - `T-20260404-5425a55f`
+    - 目标：在同一 `worktree` 中按整条已完成的 `R1 + R2 + R3` 链路合入 `spec / 实现 / 测试 / 记录文件`。
+  - 合并范围确认：
+    - `wt-20260404-dsl-mlir-gen-r1/spec/dsl/ast.md`
+    - `wt-20260404-dsl-mlir-gen-r1/kernel_gen/dsl/ast.py`
+    - `wt-20260404-dsl-mlir-gen-r1/test/dsl/test_ast.py`
+    - `wt-20260404-dsl-mlir-gen-r1/spec/dsl/mlir_gen.md`
+    - `wt-20260404-dsl-mlir-gen-r1/kernel_gen/dsl/mlir_gen.py`
+    - `wt-20260404-dsl-mlir-gen-r1/test/dsl/test_mlir_gen.py`
+    - `agents/codex-multi-agents/log/task_records/2026/14/20260404-dsl-mlir-gen-r1.md`
+- 结论：
+  - `T-20260404-4b057354` 已完成并封板。
+  - 后续链路已按当前规则衔接到合并阶段，等待管理员核对并分发 `T-20260404-5425a55f`。

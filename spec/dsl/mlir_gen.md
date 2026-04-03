@@ -43,6 +43,7 @@
 - 当运行时参数为 `SymbolDim("s")` 这类 symbol 标量时，对应的 `func.func` 输入必须 lowering 为 `!symbol.int<"s">`；若为常量 symbol，例如 `SymbolDim(1)`，则必须 lowering 为 `!symbol.int<"1">`。
 - 当运行时参数是 Python `int` 且函数场景属于 symbol 整型标量运算时，对应的 `func.func` 输入必须 lowering 为携带具体整数值的 `SymbolValueType`，不得退回 `i32`、`index` 或其他 builtin 标量类型；若整数值为负数，对外字符串表示必须直接表现为十进制负数字面量，例如 `symbol.int<-7>`。
 - 只要 `FunctionAST.has_explicit_return == True`，即使没有返回注解且 `FunctionAST.outputs == []`，`build_func_op(...)` / `build_func_op_from_ast(...)` 也必须根据最后一条显式 `return expr` 的 lowering 结果生成单结果 `func.func` 与 `func.return`；不得退回零结果。
+- 当 `FunctionAST.has_explicit_return == False` 且 `FunctionAST.outputs == []` 时，若函数体最后停在值表达式上、必须依赖“最后一个值”才能猜出函数输出，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须抛出 `AstVisitorError`，错误消息包含 `Function return requires explicit return syntax or annotation`；不得靠最后一个值表达式猜函数输出，也不得静默生成零结果 `func.func`。
 - 参数注解只允许作为解析/局部校验信息；当 `runtime_args` 表示的实际输入类型与参数注解不一致时，`func.func inputs`、函数体内由输入推导出的结果类型，以及 `func.func outputs` 都必须跟随 `runtime_args`，不得跟随参数注解漂移。
 - 当函数体仅包含 `for` 循环且没有 `return` 时，输出 `func.func` 允许零返回值。
 - 当 `ForAST` 来源于 `LoopRange(start, end, step)` 且循环边界保持 symbol 整数语义时，lowering 后必须生成 `symbol.for`，不得退回 `scf.for`；其循环块参数 `it` 必须为 `!symbol.int<"expr">`。
@@ -108,8 +109,9 @@ func_op = build_func_op(only_symbol, s)
 - `build_func_op` 不接收 `config`；如需 `config`，应改用 `build_func_op_from_ast(...)`。
 - `runtime_args` 的个数必须与函数形参数量一致。
 - `build_func_op` 仅保证可位置绑定形参按位置顺序接收 `runtime_args`。
-- 若 `fn` 没有可位置绑定形参，则允许以零个 `runtime_args` 调用，并由函数体内受支持的 DSL 表达式直接决定结果类型。
+- 若 `fn` 没有可位置绑定形参，则允许以零个 `runtime_args` 调用；函数结果类型仍必须遵守本文件的统一返回装配规则，即由显式 `return` lowering 结果决定，或在显式 `-> None` / 语句型零返回函数场景下保持零结果，不能靠最后一个值表达式猜输出。
 - 若函数没有返回注解但存在显式 `return expr`，则 `func.func outputs` 与 `func.return` operand 类型必须跟随该 `return expr` 的 lowering 结果，不得因为 `FunctionAST.outputs == []` 而退回零结果。
+- 若函数没有返回注解、也没有显式 `return`，但函数体最后停在值表达式上，则必须抛出 `AstVisitorError`，错误消息包含 `Function return requires explicit return syntax or annotation`；不得靠最后一个值表达式猜函数输出。
 - 张量类运行时参数应按其对应 spec lowering 为项目内的 memory type。
 - `SymbolDim("s")` 这类运行时参数必须 lowering 为 `!symbol.int<"s">`；`SymbolDim(1)` 这类常量 symbol 必须 lowering 为 `!symbol.int<"1">`。
 - 当 `runtime_args` 为普通 Python `int` 且函数场景属于整型标量运算时，输入参数必须 lowering 为携带该整数值的 `SymbolValueType`，而不是 builtin 整数类型；负数实参的对外字符串表示必须保持 `symbol.int<-3>` 这类十进制负数字面量形式。
@@ -178,6 +180,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
 - `config` 只用于 visitor / lowering 配置透传，不得替代 `runtime_args`，也不得改变由 `runtime_args` 决定的输入签名。
 - `func_ast.inputs` 可以为空；若提供 `runtime_args`，长度必须与 `func_ast.inputs` 一致。
 - 当 `func_ast.has_explicit_return == True` 且 `func_ast.outputs == []` 时，`build_func_op_from_ast(...)` 仍必须生成单结果 `func.func`；结果类型与 `func.return` operand 类型都必须由最后一条显式 `return expr` 的 lowering 结果决定。
+- 当 `func_ast.has_explicit_return == False` 且 `func_ast.outputs == []` 时，若函数体最后停在值表达式上、必须依赖末尾值表达式才能推断输出，`build_func_op_from_ast(...)` 必须抛出 `AstVisitorError`，错误消息包含 `Function return requires explicit return syntax or annotation`；不得猜测函数输出类型。
 - 若 AST 输入包含未支持的节点类型、未支持的标量类型，或函数既不属于纯 symbol 标量函数又缺少 tensor 输入，必须报错。
 - 若 `runtime_args` 中存在 `SymbolDim("s")` 这类 symbol 标量，对应输入必须 lowering 为 `!symbol.int<"s">`。
 - 若 AST 仅包含符号标量输入/输出，则生成的 `func.func` 签名必须保持 `!symbol.int<"expr">` 输入与返回，不得改写为 builtin 标量类型。
@@ -238,6 +241,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - 验证 `build_func_op` 在 `view(...)` helper 场景下的 `func.return` 类型与 `dma.view` 结果类型及 expectation 口径一致。
   - 验证 `build_func_op` 在 `float(symbol.int)` 场景下的 `func.return` 类型固定为 `f32`，并与 `symbol.to_float` 结果类型一致。
   - 验证无返回注解但有显式 `return` 的 `add_memory / gt / cast_dim / view_kernel` 仍会生成单结果 `func.func`，且输出类型跟随实际 `return` lowering 结果。
+  - 验证无返回注解、也没有显式 `return` 的值表达式函数体必须报 `Function return requires explicit return syntax or annotation`，不得靠最后一个值表达式猜函数输出，也不得静默退成零结果 `func.func`。
   - 验证参数注解与 `runtime_args` 冲突时，`func.func inputs/outputs` 与函数体结果类型都跟随 `runtime_args`，不跟随参数注解。
 - 功能与用例清单：
   - MGEN-001：`build_func_op(...)` 返回 `func.func`。（`test_build_func_op_returns_func_op`）
@@ -296,3 +300,4 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - MGEN-R2A：无返回注解但有显式 `return` 的 `add_memory / gt / cast_dim / view_kernel` 必须按实际 return lowering 结果生成单结果 `func.func`。（`test_build_func_op_infers_return_type_from_body_without_return_annotation`）
   - MGEN-R2B：来自 `parse_function(...)` 的无返回注解函数 AST，经 `build_func_op_from_ast(...)` 后仍必须按 `has_explicit_return` 元信息装配单结果 `func.func`。（`test_build_func_op_from_ast_infers_return_type_from_return_syntax_metadata`）
   - MGEN-R2C：参数注解写成 `f16` 但 `runtime_args` 传入 `i32 memory` 时，`func.func inputs/outputs` 与 `nn.add` 结果类型都必须保持 `i32 memory`。（`test_build_func_op_uses_runtime_args_not_parameter_annotations_for_ir`）
+  - MGEN-R3：无返回注解且无显式 `return` 的值表达式函数体必须报 `Function return requires explicit return syntax or annotation`；不得靠最后一个值表达式猜函数输出，也不得静默生成零结果 `func.func`。（`test_build_func_op_rejects_ambiguous_value_body_without_return_or_annotation`）

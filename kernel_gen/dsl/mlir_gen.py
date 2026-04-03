@@ -43,8 +43,10 @@ from .ast import (
     DmaFreeAST,
     DmaReshapeAST,
     Diagnostic,
+    ForAST,
     FunctionAST,
     ScalarArgAST,
+    StoreAST,
     SymbolToFloatAST,
     TensorAST,
     TensorAxisAccessAST,
@@ -457,6 +459,28 @@ def _function_has_value_return(func_ast: FunctionAST) -> bool:
     return func_ast.has_explicit_return
 
 
+def _is_zero_return_statement_expr(expr: object) -> bool:
+    """判断表达式是否属于语句型零返回函数体。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅允许 `free/store/deslice/for/launch_kernel` 这类本来就不产生函数返回值的语句函数保持零结果。
+    - 供函数级返回装配阶段拒绝“靠最后一个值表达式猜输出”的歧义路径。
+
+    使用示例:
+    - if _is_zero_return_statement_expr(last_stmt): ...
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+    """
+
+    return isinstance(expr, (DmaFreeAST, StoreAST, ForAST, ArchLaunchKernelAST))
+
+
 def build_func_op(
     fn: Callable[..., object],
     *runtime_args: object,
@@ -563,11 +587,11 @@ def _build_func_op_from_ast_impl(
             if isinstance(input_arg, ScalarArgAST)
         }
     statements = _ensure_supported_statements(func_ast)
+    last_stmt = statements[-1]
     result_types: list[object] = []
     has_value_return = _function_has_value_return(func_ast)
-    infer_scalar_return = False
     if has_value_return:
-        return_expr = statements[-1]
+        return_expr = last_stmt
         if is_dma_alloc_only:
             if not isinstance(return_expr, DmaAllocAST):
                 raise _LoweringError("Return type does not match annotation", location=func_ast.location)
@@ -578,19 +602,11 @@ def _build_func_op_from_ast_impl(
             _validate_return_type(func_ast, result_type, return_expr, dict(type_map))
         type_map[_expr_key(return_expr)] = result_type
         result_types = [result_type]
-    elif _is_symbol_scalar_function(func_ast):
-        return_expr = statements[-1]
-        if isinstance(return_expr, (DmaFreeAST, ArchLaunchKernelAST)):
-            result_types = []
-        else:
-            result_type = _infer_expr_type(return_expr, dict(type_map), runtime_values=runtime_values)
-            if not isinstance(result_type, SymbolValueType):
-                raise _LoweringError(
-                    "Symbol scalar function return must lower to !symbol.int",
-                    location=func_ast.location,
-                )
-            result_types = [result_type]
-            infer_scalar_return = True
+    elif not func_ast.returns_none and not _is_zero_return_statement_expr(last_stmt):
+        raise _LoweringError(
+            "Function return requires explicit return syntax or annotation",
+            location=getattr(last_stmt, "location", None) or func_ast.location,
+        )
 
     func_type = FunctionType.from_lists(arg_types, result_types)
     block = Block(arg_types=arg_types)
@@ -600,7 +616,7 @@ def _build_func_op_from_ast_impl(
     _seed_input_symbol_aliases(ctx, func_ast, block)
     visitor = AstVisitor(config=config)
     return_value = visitor.visit_function(func_ast, ctx)
-    if has_value_return or infer_scalar_return:
+    if has_value_return:
         if return_value is None:
             raise _LoweringError("Function body is empty", location=func_ast.location)
         block.add_op(func.ReturnOp(return_value))
