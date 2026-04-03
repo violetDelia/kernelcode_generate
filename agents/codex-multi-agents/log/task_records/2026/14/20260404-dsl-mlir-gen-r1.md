@@ -373,3 +373,125 @@
 - 结论：
   - `T-20260404-4b057354` 已完成并封板。
   - 后续链路已按当前规则衔接到合并阶段，等待管理员核对并分发 `T-20260404-5425a55f`。
+
+- 时间：2026-04-04 02:55:08 +0800
+- 经办人：`jcc你莫辜负`
+- 任务：`T-20260404-f0f270af`
+- 任务目标：
+  - 按 [`dsl_mlir_gen_return_from_body_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/dsl_mlir_gen_return_from_body_plan.md) 的 `R4`，仅修改主工作目录 [`return_type_from_body_not_signature`](/home/lfr/kernelcode_generate/expectation/dsl/mlir_gen/return_type_from_body_not_signature) 与同链路记录文件，锁定无返回签名的正例/负例 expectation，覆盖 `build_func_op(...)` 与 `build_func_op_from_ast(...)`，并保持 `ambiguous` 报 `Function return requires explicit return syntax or annotation`。
+- 改动：
+  - 只读核对 `R4` 计划与现状：
+    - 当前 expectation 已覆盖 `Case-1/2/3/4/6/7` 的正例，以及 `Case-5` 对 `build_func_op(...)` 的负例。
+    - 缺口在于负例还没有同时锁到 `build_func_op_from_ast(...)` 路径。
+  - 修改 [`return_type_from_body_not_signature`](/home/lfr/kernelcode_generate/expectation/dsl/mlir_gen/return_type_from_body_not_signature)：
+    - 将 `Case-5` 说明收紧为“在 `build_func_op(...)` 与 `build_func_op_from_ast(...)` 两条入口都应显式报错”。
+    - 新增 `_run_case_5_from_ast()`，通过 `parse_function(ambiguous)` -> `build_func_op_from_ast(...)` 复现同一负例。
+    - 新增 `CASE-5B` 的 `expect_ast_failure(...)`，锁定 `build_func_op_from_ast(...)` 也统一报 `Function return requires explicit return syntax or annotation`。
+  - 未修改 `wt-20260404-dsl-mlir-gen-r1` 下任何实现或 `spec` 文件。
+- 验证：
+  - `PYTHONPATH=. python /home/lfr/kernelcode_generate/expectation/dsl/mlir_gen/return_type_from_body_not_signature`（exit `0`）
+  - `git -C /home/lfr/kernelcode_generate diff --check -- expectation/dsl/mlir_gen/return_type_from_body_not_signature agents/codex-multi-agents/log/task_records/2026/14/20260404-dsl-mlir-gen-r1.md`（exit `0`）
+- 自检：
+  - 目标真正收口：正例仍覆盖 `build_func_op(...)` 与 `build_func_op_from_ast(...)`；负例现在也同时覆盖两条入口，不再只锁一条。
+  - 边界未越界：未修改 `kernel_gen/dsl/mlir_gen.py`、`test/dsl/test_mlir_gen.py`、`spec` 或其他 expectation。
+  - 验证足以支撑主结论：expectation 脚本已成功运行，并输出 `CASE-5`、`CASE-5B` 两条统一失败证据。
+  - 记录文件中的结论、涉及文件与实际改动一致。
+- 结论：
+  - `R4` expectation 闭环已完成。
+  - 当前 expectation 现已同时锁定：
+    - 无返回签名正例在 `build_func_op(...)` 的成功路径；
+    - `parse_function(add_memory)` -> `build_func_op_from_ast(...)` 的正向路径；
+    - `ambiguous` 在 `build_func_op(...)` 与 `build_func_op_from_ast(...)` 两条入口上的统一失败路径。
+  - 下一步建议：按当前链路进入审查阶段，只读复核 expectation 文件与 `R4` 计划口径是否完全一致，不扩到实现或 `spec`。
+
+- 时间：2026-04-04 02:39:04 +0800
+- 经办人：`不要啊教练`
+- 任务：`T-20260404-5b8d9b3e`
+- 任务目标：
+  - 按 [`dsl_mlir_gen_return_from_body_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/dsl_mlir_gen_return_from_body_plan.md) 的 `R4` 只读复核主工作目录 expectation [`return_type_from_body_not_signature`](/home/lfr/kernelcode_generate/expectation/dsl/mlir_gen/return_type_from_body_not_signature) 与同链路记录文件，确认无返回签名正例/负例 expectation 已同时覆盖 `build_func_op(...)` 与 `build_func_op_from_ast(...)`，且 `ambiguous` 两条入口统一报 `Function return requires explicit return syntax or annotation`。
+- 改动：
+  - 只读复核 `R4` 计划块、主工作目录 expectation 脚本与同链路记录文件；未修改实现、`spec` 或测试文件。
+  - 自检结果：
+    - 证据充分性：已同时核对 `R4` 验收标准、expectation 脚本正文、`CASE-5/CASE-5B/CASE-6` 的两条入口覆盖、脚本实跑输出以及记录文件中的实现说明。
+    - 功能正确性：
+      - expectation 脚本中的 `Case-1/2/3/4/7` 继续覆盖 `build_func_op(...)` 的无返回签名正例。
+      - `Case-6` 已覆盖 `parse_function(add_memory)` -> `build_func_op_from_ast(...)` 的正向路径。
+      - `Case-5` 与 `Case-5B` 已分别覆盖 `build_func_op(...)` 和 `build_func_op_from_ast(...)` 的 `ambiguous` 负例，并统一断言 `Function return requires explicit return syntax or annotation`。
+    - 边界条件：`R4` 本轮只收口 expectation，不扩到实现或 `spec`；当前 expectation 文件和记录文件都保持该边界。
+    - 异常路径：两条 `ambiguous` 入口都稳定报同一错误，不存在一条失败、一条静默零结果或其他分叉。
+    - 潜在漏洞排查：
+      - 输入校验绕过：未见 `build_func_op_from_ast(...)` 保留旧的隐式返回绕过。
+      - 类型/形状绕过：`dma.view`、`nn.add`、`symbol.gt`、`symbol.to_float` 的正例都继续直接断言 `func.func outputs` / `func.return` operand 跟随真实 lowering 结果。
+      - 边界越界：未见 expectation 越界扩到计划 `R4` 之外的实现或 `spec` 范围。
+      - 错误处理缺失：`ambiguous` 两条入口都显式报同一错误。
+      - 状态污染：同链路记录对 `R4` 的目标、改动和 expectation 只读范围说明一致。
+      - 资源释放问题：本轮 expectation 不涉及资源生命周期新语义。
+  - 验证：
+    - `PYTHONPATH=. python /home/lfr/kernelcode_generate/expectation/dsl/mlir_gen/return_type_from_body_not_signature`
+      - 结果：通过；`CASE-5` 和 `CASE-5B` 都输出 `expected failure: Function return requires explicit return syntax or annotation`
+      - 退出码：`0`
+    - `git -C /home/lfr/kernelcode_generate diff --check -- expectation/dsl/mlir_gen/return_type_from_body_not_signature agents/codex-multi-agents/log/task_records/2026/14/20260404-dsl-mlir-gen-r1.md`
+      - 退出码：`0`
+- 结论：
+  - `通过`
+  - 未发现额外改进点。
+  - `R4` expectation 文件与同链路记录已和计划口径一致，可进入同链复审阶段。
+
+- 时间：2026-04-04 03:04:38 +0800
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-f702bd7a`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/dsl_mlir_gen_return_from_body_plan.md` 的 `R4` 复审边界，只读复核主工作目录 [`return_type_from_body_not_signature`](/home/lfr/kernelcode_generate/expectation/dsl/mlir_gen/return_type_from_body_not_signature) 与同链路记录文件，确认 expectation 与记录口径一致，并确认无返回签名正例/负例 expectation 仍同时覆盖 `build_func_op(...)` 与 `build_func_op_from_ast(...)`。
+- 复审前自检：
+  - 已核对 `R4` 计划验收标准、expectation 脚本正文、同链路记录文件和实跑输出是否一致。
+  - 已核对正例/负例覆盖是否同时触达 `build_func_op(...)` 与 `build_func_op_from_ast(...)` 两条入口，而不是只锁其中一条。
+  - 已补充运行 `PYTHONPATH=. python expectation/dsl/mlir_gen/return_type_from_body_not_signature` 和相关 `pytest` gate，确认 expectation 成功不是记录误写。
+- 复审结论：
+  - `通过`。
+- 复审结果：
+  - expectation 文件 [return_type_from_body_not_signature](/home/lfr/kernelcode_generate/expectation/dsl/mlir_gen/return_type_from_body_not_signature#L21) 到 [return_type_from_body_not_signature](/home/lfr/kernelcode_generate/expectation/dsl/mlir_gen/return_type_from_body_not_signature#L27) 与 `R4` 计划口径一致：`Case-1/2/3/4/7` 是无返回签名正向路径，`Case-5` 与 `Case-5B` 分别锁 `build_func_op(...)` 与 `build_func_op_from_ast(...)` 的统一失败路径，`Case-6` 锁 `parse_function(add_memory)` -> `build_func_op_from_ast(...)` 的正向路径。
+  - 具体入口覆盖一致：
+    - `build_func_op(...)` 正例：`Case-1/2/3/4/7`
+    - `build_func_op(...)` 负例：`Case-5`
+    - `build_func_op_from_ast(...)` 正例：`Case-6`
+    - `build_func_op_from_ast(...)` 负例：`Case-5B`
+  - 同链路记录文件中 `R4` 的实现说明、`不要啊教练` 的审查结论与 expectation 正文一致，没有出现“记录说覆盖了两条入口，脚本实际没锁住”的错位。
+- 漏洞与边界排查：
+  - 功能正确性：通过。主工作目录 expectation 实跑通过，`ambiguous` 两条入口都统一报 `Function return requires explicit return syntax or annotation`。
+  - 边界条件：通过。无返回签名正例继续覆盖 `memory add / symbol gt / symbol.to_float / dma.view / 参数注解不影响 IR`。
+  - 异常路径：通过。`Case-5` 与 `Case-5B` 保持相同错误类型与相同错误消息。
+  - 潜在漏洞/歧义：未发现 expectation 与记录的新灰区；`git diff --check` 也通过。
+- 验证：
+  - `PYTHONPATH=. python expectation/dsl/mlir_gen/return_type_from_body_not_signature` -> 通过
+  - 输出中已明确包含：
+    - `[CASE-5] expected failure: Function return requires explicit return syntax or annotation`
+    - `[CASE-5B] expected failure: Function return requires explicit return syntax or annotation`
+  - `python -m pytest -q test/dsl/test_mlir_gen.py -k 'test_build_func_op_rejects_ambiguous_value_body_without_return_or_annotation or test_build_func_op_infers_return_type_from_body_without_return_annotation or test_build_func_op_from_ast_infers_return_type_from_return_syntax_metadata or test_build_func_op_uses_runtime_args_not_parameter_annotations_for_ir'` -> `3 passed, 119 deselected`
+  - `git diff --check -- expectation/dsl/mlir_gen/return_type_from_body_not_signature agents/codex-multi-agents/log/task_records/2026/14/20260404-dsl-mlir-gen-r1.md` -> 通过
+- 下一步建议：
+  - 进入同链合并阶段；合并范围必须覆盖当前已完成的 `R1 + R2 + R3 + R4` 全部 `spec / 实现 / 测试 / expectation / 记录文件`。
+
+- 时间：2026-04-04 03:04:38 +0800
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-f702bd7a`
+- 任务目标：
+  - 完成当前复审任务流转，并按同链路补建唯一后续合并任务。
+- 改动：
+  - 已执行：
+    - `codex-multi-agents-task.sh -done -task_id T-20260404-f702bd7a ...`
+    - 结果：当前复审任务已标记完成，`agents-lists.md` 中 `提莫炖蘑菇` 状态同步成功。
+  - 已新建后续合并任务：
+    - `T-20260404-07f13423`
+    - 目标：在同一链路中按整条已完成的 `R1 + R2 + R3 + R4` 范围合入 `spec / 实现 / 测试 / expectation / 记录文件`。
+  - 合并范围确认：
+    - `wt-20260404-dsl-mlir-gen-r1/spec/dsl/ast.md`
+    - `wt-20260404-dsl-mlir-gen-r1/kernel_gen/dsl/ast.py`
+    - `wt-20260404-dsl-mlir-gen-r1/test/dsl/test_ast.py`
+    - `wt-20260404-dsl-mlir-gen-r1/spec/dsl/mlir_gen.md`
+    - `wt-20260404-dsl-mlir-gen-r1/kernel_gen/dsl/mlir_gen.py`
+    - `wt-20260404-dsl-mlir-gen-r1/test/dsl/test_mlir_gen.py`
+    - `expectation/dsl/mlir_gen/return_type_from_body_not_signature`
+    - `agents/codex-multi-agents/log/task_records/2026/14/20260404-dsl-mlir-gen-r1.md`
+- 结论：
+  - `T-20260404-f702bd7a` 已完成并封板。
+  - 后续链路已按当前规则衔接到合并阶段，等待管理员核对并分发 `T-20260404-07f13423`。
