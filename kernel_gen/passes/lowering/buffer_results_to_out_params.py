@@ -74,6 +74,66 @@ def _memory_output_indices(func_op: func.FuncOp) -> list[int]:
     ]
 
 
+def _has_leading_out_params(func_op: func.FuncOp, memory_count: int) -> bool:
+    """判断函数签名是否已出现 rewrite 后的前置 out 参数形态。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅当存在 `arg0/arg1/...` 命名的前置参数且类型为 `nn.memory` 时视作 out 参数。
+    - 用于识别“已插入 out 参数但仍保留 memory return”的半改写 ABI。
+
+    使用示例:
+    - if _has_leading_out_params(func_op, 1): ...
+
+    关联文件:
+    - spec: spec/pass/lowering/buffer_results_to_out_params.md
+    - test: test/pass/test_buffer_results_to_out_params.py
+    - 功能实现: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+    """
+
+    if memory_count <= 0:
+        return False
+    input_types = list(func_op.function_type.inputs.data)
+    if len(input_types) < memory_count:
+        return False
+    if any(not isinstance(input_types[index], NnMemoryType) for index in range(memory_count)):
+        return False
+    if func_op.arg_attrs is None:
+        return False
+    attrs = list(func_op.arg_attrs.data)
+    if len(attrs) < memory_count:
+        return False
+    for index in range(memory_count):
+        name_attr = attrs[index].data.get("name")
+        if not isinstance(name_attr, StringAttr) or name_attr.data != f"arg{index}":
+            return False
+    return True
+
+
+def _raise_half_rewritten(detail: str) -> None:
+    """抛出半改写 ABI 的统一错误。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 统一补齐包含 `half-rewritten` 关键字的错误信息。
+    - 避免不同分支在半改写场景下抛出不一致消息。
+
+    使用示例:
+    - _raise_half_rewritten("callsite does not match callee signature")
+
+    关联文件:
+    - spec: spec/pass/lowering/buffer_results_to_out_params.md
+    - test: test/pass/test_buffer_results_to_out_params.py
+    - 功能实现: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+    """
+
+    raise BufferResultsToOutParamsError(f"half-rewritten ABI is not supported: {detail}")
+
+
 def _rebuild_arg_attrs(func_op: func.FuncOp, prepended: int) -> ArrayAttr[DictionaryAttr]:
     """为前置 out 参数重建 `arg_attrs`。
 
@@ -107,7 +167,7 @@ def _validate_candidate(func_op: func.FuncOp) -> None:
     """校验当前最小骨架可安全改写的函数范围。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - external declaration 直接失败。
@@ -126,6 +186,10 @@ def _validate_candidate(func_op: func.FuncOp) -> None:
     memory_indices = _memory_output_indices(func_op)
     if not memory_indices:
         return
+    if _has_leading_out_params(func_op, len(memory_indices)):
+        _raise_half_rewritten(
+            f"function {func_op.sym_name.data} already has leading out params but still returns memory"
+        )
     first_block = func_op.body.blocks.first
     is_external_like = func_op.is_declaration or (
         first_block is not None and tuple(first_block.ops) == ()
@@ -207,7 +271,7 @@ def _rewrite_callsite(call_op: func.CallOp, targets: dict[str, func.FuncOp]) -> 
     """把调用待改写 callee 的 `func.call` 改成显式 out-arg 形式。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 在旧 `func.call` 前为每个 `memory` result 插入 `dma.alloc`，caller 侧显式提供多个 out buffer。
@@ -228,11 +292,10 @@ def _rewrite_callsite(call_op: func.CallOp, targets: dict[str, func.FuncOp]) -> 
     if target_func is None:
         return
     memory_indices = _memory_output_indices(target_func)
+    input_types = list(target_func.function_type.inputs.data)
     output_types = list(target_func.function_type.outputs.data)
-    if len(call_op.results) != len(output_types):
-        raise BufferResultsToOutParamsError(
-            f"callsite rewrite requires result count to match callee outputs for {callee_name}"
-        )
+    if len(call_op.arguments) != len(input_types) or len(call_op.results) != len(output_types):
+        _raise_half_rewritten(f"callsite for {callee_name} does not match callee signature")
     block = call_op.parent
     if not isinstance(block, Block):
         raise BufferResultsToOutParamsError("callsite rewrite requires call op to live in a block")
@@ -241,8 +304,8 @@ def _rewrite_callsite(call_op: func.CallOp, targets: dict[str, func.FuncOp]) -> 
     for result_index in memory_indices:
         result_type = call_op.results[result_index].type
         if not isinstance(result_type, NnMemoryType):
-            raise BufferResultsToOutParamsError(
-                f"callsite rewrite requires memory result for callee {callee_name}"
+            _raise_half_rewritten(
+                f"callsite for {callee_name} expects memory result at index {result_index}"
             )
         out_allocs.append(DmaAllocOp([], result_type))
 
@@ -265,11 +328,11 @@ def _rewrite_callsites(module: ModuleOp, targets: dict[str, func.FuncOp]) -> Non
     """同步改写所有调用待改写函数的 `func.call`。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 统一处理模块内 caller/callee，避免只改 `func.func` 而遗漏调用点。
-    - 当前只覆盖模块内可解析的单结果 `func.call`。
+    - 当前只覆盖模块内可解析的 `func.call`，允许 mixed/multi 返回同步改写。
 
     使用示例:
     - _rewrite_callsites(module, targets)

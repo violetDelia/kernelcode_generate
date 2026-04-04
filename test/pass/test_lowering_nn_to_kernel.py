@@ -749,7 +749,7 @@ def test_buffer_results_to_out_params_rejects_half_rewritten_ir() -> None:
 
     module = ModuleOp([callee, caller])
 
-    with pytest.raises(BufferResultsToOutParamsError, match="result count to match callee outputs"):
+    with pytest.raises(BufferResultsToOutParamsError, match="half-rewritten"):
         BufferResultsToOutParamsPass().run(module)
 
 

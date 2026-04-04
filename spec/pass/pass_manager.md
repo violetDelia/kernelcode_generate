@@ -224,6 +224,8 @@ summary = cost_pass.get_summary("main")
 - 验证显式注册非法 Pass 时触发 `TypeError`。
 - 验证 Pass 异常可向上抛出。
 - 验证 `LowerNnToKernelPass -> BufferResultsToOutParamsPass` 的 lowering 顺序在 `memory-return` 链路上可被门禁测试机械锁定。
+- 验证默认 lowering pipeline 会注册 `LowerNnToKernelPass -> BufferResultsToOutParamsPass`。
+- 验证 `BufferResultsToOutParamsPass` 置于 `LowerNnToKernelPass` 前会被显式拒绝。
 - 当前下游验收标准建议补充 analysis pass 单返回路径验证：`test_pass_manager_runs_analysis_pass_without_second_return` 与 `test_pass_manager_preserves_analysis_side_effects`；在专项测试落地前，不将其写成当前已闭环映射。
 
 ### 功能与用例清单
@@ -235,6 +237,8 @@ summary = cost_pass.get_summary("main")
 | TC-PASS-003 | 空管理器返回原输入 | `test_pass_manager_empty_returns_input` |
 | TC-PASS-004 | 非法 Pass 类型报错 | `test_pass_manager_invalid_pass_type` |
 | TC-PASS-005 | Pass 异常向上抛出 | `test_pass_manager_exception_propagation` |
+| TC-PASS-006 | 默认 lowering pipeline 固定顺序 | `test_pass_manager_builds_default_lowering_pipeline_for_buffer_results_to_out_params` |
+| TC-PASS-007 | 错误 lowering 顺序显式拒绝 | `test_pass_manager_rejects_buffer_results_to_out_params_before_lowering` |
 
 当前下游验收标准：
 
