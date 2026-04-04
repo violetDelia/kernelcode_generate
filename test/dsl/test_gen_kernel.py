@@ -224,6 +224,53 @@ def _compile_and_run(source: str) -> None:
             )
 
 
+def _compile_only(source: str) -> None:
+    """仅编译 `gen_kernel` 生成的 C++ 片段。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 使用 `g++ -std=c++17 -c` 编译临时源码，验证目标 include/签名可通过编译。
+    - 用于 `target="npu_demo"` 的“只编译”门禁验证，不执行链接与运行。
+
+    使用示例:
+    - _compile_only('#include "include/npu_demo/npu_demo.h"\\nvoid demo_kernel(...) {}')
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: test/dsl/test_gen_kernel.py
+    """
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        source_path = Path(tmpdir) / "gen_kernel_npu_demo_test.cpp"
+        object_path = Path(tmpdir) / "gen_kernel_npu_demo_test.o"
+        source_path.write_text(source, encoding="utf-8")
+
+        compile_result = subprocess.run(
+            [
+                "g++",
+                "-std=c++17",
+                "-I",
+                str(REPO_ROOT),
+                "-c",
+                str(source_path),
+                "-o",
+                str(object_path),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if compile_result.returncode != 0:
+            raise AssertionError(
+                "g++ compile failed:\n"
+                f"stdout:\n{compile_result.stdout}\n"
+                f"stderr:\n{compile_result.stderr}"
+            )
+
+
 # GK-001
 # 创建者: 金铲铲大作战
 # 最后一次更改: jcc你莫辜负
@@ -906,15 +953,15 @@ def test_gen_kernel_emits_npu_demo_body_level_kernel() -> None:
 
     source = gen_kernel(func_op, _npu_ctx())
 
-    assert source.startswith(
-        "void demo_kernel(npu_demo::KernelContext& ctx, const Memory<float>& source, Memory<float>& out)"
-    )
+    assert source.startswith('#include "include/npu_demo/npu_demo.h"\n\n')
+    assert "void demo_kernel(npu_demo::KernelContext& ctx, const Memory<float>& source, Memory<float>& out)" in source
     assert "long long tid = ctx.thread_id();" in source
     assert "long long tnum = ctx.thread_num();" in source
     assert "npu_demo::KernelContext& ctx" in source
     assert "launch" not in source
     assert "barrier" not in source
     assert "arch.launch_kernel" not in source
+    _compile_only(source)
 
 
 # GK-018

@@ -31,6 +31,7 @@
 - 后续如有 memory 参数，统一使用 `Memory<T>` 表达内存视图，不引入其他自定义内存类型。
 - `get_dynamic_memory` 的模板参数仅允许元素类型，`space` 必须使用 `MemorySpace` 枚举值；不得把空间作为模板参数或出现空间模板化写法。
 - 不定义 `.view<T>()` 或 `npu_demo::Memory` 等额外内存接口。
+- `include/npu_demo/npu_demo.h` 作为 `npu_demo` 入口头文件，需汇聚 `include/npu_demo/Core.h` / `Memory.h` / `Dma.h` / `Nn.h` 的后端实现；对应 `include/api` 头文件仅提供声明。
 
 ## 公开接口
 

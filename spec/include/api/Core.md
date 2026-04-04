@@ -32,6 +32,7 @@
 - `Vector` 是“调用方提供底层连续缓冲区，Core 仅做轻量视图封装”的基础类型；无模板参数，元素类型固定为 `int64`，不承担所有权，不做动态分配，不引入标准库容器、标准库数组包装或初始化列表依赖。
 - `Vector` 仅用于表达统一的坐标/索引序列；具体业务操作语义由上层 API 与后续规范定义，`Core` 不在此处展开。
 - `Core` 不定义 `slice/deslice/view` 的业务职责。
+- `include/api/Core.h` 仅提供声明与类型边界，不提供函数体实现；具体后端实现需在各自 include 层提供（当前 `npu_demo` 实现头文件为 [`include/npu_demo/Core.h`](../../../include/npu_demo/Core.h)）。
 
 ## 公开接口
 

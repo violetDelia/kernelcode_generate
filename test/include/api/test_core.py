@@ -4,7 +4,7 @@
 最后一次更改: jcc你莫辜负
 
 功能说明:
-- 通过编译并运行 C++ 片段验证 include/api/Core.h 的 Vector 与 Status 语义。
+- 通过编译并运行 C++ 片段验证 include/api/Core.h 的 Vector 与 Status 语义，并使用 include/npu_demo/Core.h 提供实现。
 
 覆盖率信息:
 - 当前覆盖率: `N/A`。该链路为 C++ 头文件，按规则豁免 `pytest-cov` 覆盖率统计。
@@ -19,7 +19,7 @@
 - pytest -q test/include/api/test_core.py
 
 关联文件:
-- 功能实现: include/api/Core.h
+- 功能实现: include/npu_demo/Core.h
 - Spec 文档: spec/include/api/Core.md
 - 测试文件: test/include/api/test_core.py
 """
@@ -98,12 +98,13 @@ def _compile_and_run(source: str) -> None:
 # 最近一次运行成功时间: 2026-03-31 01:09:50 +0800
 # 测试目的: 验证 Vector 固定为 int64 视图，size 与元素访问符合 A0 验收口径。
 # 使用示例: pytest -q test/include/api/test_core.py -k test_api_core_vector_uses_fixed_int64_without_template_parameter
-# 对应功能实现文件路径: include/api/Core.h
+# 对应功能实现文件路径: include/npu_demo/Core.h
 # 对应 spec 文件路径: spec/include/api/Core.md
 # 对应测试文件路径: test/include/api/test_core.py
 def test_api_core_vector_uses_fixed_int64_without_template_parameter() -> None:
     source = r"""
 #include "include/api/Core.h"
+#include "include/npu_demo/Core.h"
 
 static int fail(int code) {
     return code;
