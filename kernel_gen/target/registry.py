@@ -211,6 +211,29 @@ def _validate_target_name(name: str) -> None:
         _raise_value_error(f"target name must match {_TARGET_NAME_PATTERN.pattern}")
 
 
+def _validate_op_set(op_set: set[str], field_name: str, target_name: str) -> None:
+    """校验 op 集合的元素类型。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 保证 op 集合中的元素均为字符串。
+
+    使用示例:
+    - _validate_op_set({"arch.get_block_id"}, "supported_ops", "cpu")
+
+    关联文件:
+    - spec: spec/target/registry.md
+    - test: test/target/test_target_registry.py
+    - 功能实现: kernel_gen/target/registry.py
+    """
+
+    for op_name in op_set:
+        if not isinstance(op_name, str):
+            _raise_value_error(f"{target_name} {field_name} must contain str values")
+
+
 def _validate_arch_ops(spec: TargetSpec) -> None:
     """校验 target 中 arch op 支持矩阵的交集规则。
 
@@ -242,29 +265,6 @@ def _validate_arch_ops(spec: TargetSpec) -> None:
         overlap = supported_ops & spec.arch_unsupported_ops
         if overlap:
             _raise_value_error(f"arch supported/unsupported ops overlap: {sorted(overlap)}")
-
-
-def _validate_op_set(op_set: set[str], field_name: str, target_name: str) -> None:
-    """校验 op 集合的元素类型。
-
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
-
-    功能说明:
-    - 保证 op 集合中的元素均为字符串。
-
-    使用示例:
-    - _validate_op_set({"arch.get_block_id"}, "supported_ops", "cpu")
-
-    关联文件:
-    - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
-    - 功能实现: kernel_gen/target/registry.py
-    """
-
-    for op_name in op_set:
-        if not isinstance(op_name, str):
-            _raise_value_error(f"{target_name} {field_name} must contain str values")
 
 
 def _validate_hardware_map(hardware: dict[str, int], target_name: str) -> None:
@@ -579,6 +579,32 @@ def _parse_target_txt(path: Path) -> TargetSpec:
     return spec
 
 
+def register_target(spec: TargetSpec) -> None:
+    """注册新的 target 规范。
+
+    创建者: 我不是牛马
+    最后一次更改: 我不是牛马
+
+    功能说明:
+    - 校验 target 规范，并写入 registry。
+
+    使用示例:
+    - register_target(TargetSpec("gpu", None, set()))
+
+    关联文件:
+    - spec: spec/target/registry.md
+    - test: test/target/test_target_registry.py
+    - 功能实现: kernel_gen/target/registry.py
+    """
+
+    _validate_target_name(spec.name)
+    _validate_arch_ops(spec)
+    _validate_hardware_map(spec.hardware, spec.name)
+    if spec.name in _TARGET_REGISTRY:
+        _raise_value_error(f"target already registered: {spec.name}")
+    _TARGET_REGISTRY[spec.name] = spec
+
+
 def _ensure_cpu_target() -> None:
     """注册内置 cpu target。
 
@@ -724,32 +750,6 @@ def _register_loaded_target(spec: TargetSpec) -> None:
         _TARGET_REGISTRY[spec.name] = spec
         return
     _raise_value_error(f"target already registered: {spec.name}")
-
-
-def register_target(spec: TargetSpec) -> None:
-    """注册新的 target 规范。
-
-    创建者: 我不是牛马
-    最后一次更改: 我不是牛马
-
-    功能说明:
-    - 校验 target 规范，并写入 registry。
-
-    使用示例:
-    - register_target(TargetSpec("gpu", None, set()))
-
-    关联文件:
-    - spec: spec/target/registry.md
-    - test: test/target/test_target_registry.py
-    - 功能实现: kernel_gen/target/registry.py
-    """
-
-    _validate_target_name(spec.name)
-    _validate_arch_ops(spec)
-    _validate_hardware_map(spec.hardware, spec.name)
-    if spec.name in _TARGET_REGISTRY:
-        _raise_value_error(f"target already registered: {spec.name}")
-    _TARGET_REGISTRY[spec.name] = spec
 
 
 def load_targets(directory: Path) -> dict[str, TargetSpec]:
