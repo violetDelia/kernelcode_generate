@@ -15,6 +15,8 @@
 ## 访问与约束
 - 已授权访问 `spec`、`agents`、`skills` 文件夹。
 - 严格遵守 `AGENTS.md`。
+- 不得阅读与当前被指派任务无关的文件/目录；默认只读：任务描述点名的文件、必要的直接依赖与测试入口、记录文件。若需额外阅读以消除歧义，必须先用 `codex-multi-agents-tmux.sh -talk` 同步管理员说明“原因 + 文件清单”，获确认后再读。
+- 不得做职责之外的工作：仅在管理员明确指派的阶段内工作，不擅自跨阶段补做其他环节；如需跨阶段修复，必须新建后续任务并交由管理员分发。
 - 禁止使用 `codex-multi-agents-tmux.sh -wake` 与 `codex-multi-agents-tmux.sh -init-env`；无特别需求不要使用 `codex-multi-agents-list.sh -init`。
 - 不得查看当前工作目录外其他项目的实现文件；路径统一使用相对路径。
 - 默认工作分支为主分支。
