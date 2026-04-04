@@ -1,7 +1,7 @@
 """DSL AST definitions.
 
 创建者: 小李飞刀
-最后一次更改: 朽木露琪亚
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 定义 DSL 前端使用的 AST 节点数据结构。
@@ -23,7 +23,6 @@ import ast as py_ast
 import inspect
 import re
 import textwrap
-import types
 from dataclasses import dataclass, field
 from typing import Iterable
 
@@ -159,7 +158,7 @@ class PtrArgAST:
     """指针参数节点。
 
     创建者: 金铲铲大作战
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 表示函数签名中的指针输入参数。
@@ -485,7 +484,7 @@ class Img2ColAST:
     """img2col helper 节点。
 
     创建者: 金铲铲大作战
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 表示 `img2col1d/img2col2d` 的 DSL helper 调用。
@@ -503,6 +502,61 @@ class Img2ColAST:
     kind: str
     args: list[object]
     kwargs: dict[str, object]
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class NnUnaryAST:
+    """nn unary helper 节点。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 表示 `relu/sigmoid/tanh/leaky_relu/hard_sigmoid/exp` 的 DSL helper 调用。
+    - 统一保留输入、alpha/beta 参数，供 lowering 阶段解析。
+
+    使用示例:
+    - NnUnaryAST(kind="relu", value=TensorAST("x", memory))
+    - NnUnaryAST(kind="leaky_relu", value=VarAST("x"), alpha=ConstAST(0.1))
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    kind: str
+    value: object
+    alpha: object | None = None
+    beta: object | None = None
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class NnReduceAST:
+    """nn reduce helper 节点。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 表示 `reduce_sum/reduce_min/reduce_max` 的 DSL helper 调用。
+    - 保留 axis/keepdim 表达式，便于 lowering 阶段做静态推导与 verifier 兜底。
+
+    使用示例:
+    - NnReduceAST(kind="reduce_sum", value=VarAST("x"), axis=ConstAST(1), keepdim=ConstAST(True))
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    kind: str
+    value: object
+    axis: object | None = None
+    keepdim: object | None = None
     location: SourceLocation | None = None
 
 
@@ -882,7 +936,104 @@ def _raise_parse_error(message: str, node: object | None) -> None:
     raise _ParseFailure(message, _location_from_node(node))
 
 
+def _eval_symbolic_dim_node(expr: py_ast.AST, node: object | None) -> int | SymbolDim:
+    """求值 tensor 维度表达式 AST 节点。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 仅接受 `int`、标识符与 `+ - * /` 基础算术。
+    - 使用 `SymbolDim` 运算保持与运行时符号表达式一致。
+
+    使用示例:
+    - _eval_symbolic_dim_node(py_ast.parse("N + 1", mode="eval").body, None)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_mlir_gen.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+    if isinstance(expr, py_ast.Constant) and isinstance(expr.value, int):
+        return expr.value
+    if isinstance(expr, py_ast.Name):
+        return SymbolDim(expr.id)
+    if isinstance(expr, py_ast.UnaryOp) and isinstance(expr.op, py_ast.USub):
+        value = _eval_symbolic_dim_node(expr.operand, node)
+        if isinstance(value, SymbolDim):
+            return SymbolDim(0) - value
+        if isinstance(value, int):
+            return -value
+        _raise_parse_error("Unsupported tensor dimension expression", node)
+    if isinstance(expr, py_ast.BinOp):
+        lhs = _eval_symbolic_dim_node(expr.left, node)
+        rhs = _eval_symbolic_dim_node(expr.right, node)
+        if isinstance(expr.op, py_ast.Add):
+            return lhs + rhs
+        if isinstance(expr.op, py_ast.Sub):
+            return lhs - rhs
+        if isinstance(expr.op, py_ast.Mult):
+            return lhs * rhs
+        if isinstance(expr.op, py_ast.Div):
+            if isinstance(lhs, int) and isinstance(rhs, int):
+                if rhs == 0:
+                    _raise_parse_error("Unsupported tensor dimension expression", node)
+                if lhs % rhs != 0:
+                    _raise_parse_error("Unsupported tensor dimension expression", node)
+                return lhs // rhs
+            if isinstance(lhs, int):
+                lhs = SymbolDim(lhs)
+            if isinstance(rhs, int):
+                return lhs / rhs
+            return lhs / rhs
+        _raise_parse_error("Unsupported tensor dimension expression", node)
+    _raise_parse_error("Unsupported tensor dimension expression", node)
+    return 0
+
+
+def _eval_symbolic_dim_expr(expr_text: str, node: object | None) -> int | SymbolDim:
+    """解析 tensor 维度表达式文本为 `int` 或 `SymbolDim`。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 使用 Python AST 解析表达式，避免 `eval` 风险。
+    - 仅支持 `+ - * /` 与 `int/名称` 组成的表达式。
+
+    使用示例:
+    - _eval_symbolic_dim_expr("(N + 1) / 2 + 1", None)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_mlir_gen.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+    try:
+        parsed = py_ast.parse(expr_text, mode="eval").body
+    except SyntaxError as exc:
+        raise _ParseFailure("Unsupported tensor dimension expression", _location_from_node(node)) from exc
+    return _eval_symbolic_dim_node(parsed, node)
+
+
 def _split_tensor_annotation(text: str, node: object | None) -> tuple[NumericType, list[int | str | SymbolDim]]:
+    """拆分 Tensor 注解并解析 dtype 与 shape 维度。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 解析 `Tensor[dtype, dim...]` 注解为 dtype 与维度列表。
+    - 对包含算术表达式的维度使用 `SymbolDim` 运算求值，保持表达式语义。
+
+    使用示例:
+    - _split_tensor_annotation("Tensor[f32, N, (W + 1) / 2 + 1]", None)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_mlir_gen.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
     normalized = text.strip()
     if not normalized.startswith("Tensor[") or not normalized.endswith("]"):
         _raise_parse_error("Unsupported annotation", node)
@@ -899,10 +1050,7 @@ def _split_tensor_annotation(text: str, node: object | None) -> tuple[NumericTyp
         if part.isdigit():
             dims.append(int(part))
         elif any(op in part for op in ("+", "-", "*", "/")):
-            names = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", part))
-            locals_map = {name: sp.Symbol(name) for name in names}
-            expr = sp.sympify(part, locals=locals_map, evaluate=False)
-            dims.append(SymbolDim(expr))
+            dims.append(_eval_symbolic_dim_expr(part, node))
         else:
             dims.append(part)
     return dtype, dims
@@ -1389,7 +1537,7 @@ def _resolve_import_bound_helper_call(
     """按 import 绑定关系解析 DSL helper 调用名。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅当调用目标显式绑定到 `kernel_gen.operation.dma`、`kernel_gen.operation.arch` 或 `kernel_gen.operation.nn` 时，才返回 helper 名。
@@ -1433,6 +1581,15 @@ def _resolve_import_bound_helper_call(
             "img2col1d",
             "img2col2d",
             "matmul",
+            "relu",
+            "sigmoid",
+            "tanh",
+            "leaky_relu",
+            "hard_sigmoid",
+            "exp",
+            "reduce_sum",
+            "reduce_min",
+            "reduce_max",
         },
     }
 
@@ -1533,6 +1690,158 @@ def _parse_nn_arithmetic_call(
         op=symbol_binary_map[expr.func.attr],
         lhs=lhs,
         rhs=rhs,
+        location=_location_from_node(expr),
+    )
+
+
+def _parse_unary_helper_call(
+    call_name: str,
+    expr: py_ast.Call,
+    env: dict[str, object],
+    globals_table: dict[str, object],
+    builtins_table: dict[str, object],
+) -> NnUnaryAST:
+    """解析 nn unary helper 调用。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 解析 relu/sigmoid/tanh/leaky_relu/hard_sigmoid/exp 的调用参数。
+    - 严格约束 arity，缺参或多参统一抛出 `Unsupported <name> arity`。
+
+    使用示例:
+    - _parse_unary_helper_call("relu", expr, env, globals(), __builtins__)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    simple_unary = {"relu", "sigmoid", "tanh", "exp"}
+    if call_name in simple_unary:
+        if len(expr.args) != 1 or expr.keywords:
+            _raise_parse_error(f"Unsupported {call_name} arity", expr)
+        value = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+        return NnUnaryAST(kind=call_name, value=value, location=_location_from_node(expr))
+
+    if call_name == "leaky_relu":
+        if len(expr.args) < 1 or len(expr.args) > 2:
+            _raise_parse_error("Unsupported leaky_relu arity", expr)
+        if len(expr.keywords) > 1:
+            _raise_parse_error("Unsupported leaky_relu arity", expr)
+        value = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+        alpha = _parse_expr(expr.args[1], env, globals_table, builtins_table) if len(expr.args) == 2 else None
+        seen_alpha = alpha is not None
+        for keyword in expr.keywords:
+            if keyword.arg is None or keyword.arg != "alpha" or seen_alpha:
+                _raise_parse_error("Unsupported leaky_relu arity", expr)
+            alpha = _parse_expr(keyword.value, env, globals_table, builtins_table)
+            seen_alpha = True
+        if alpha is None:
+            _raise_parse_error("Unsupported leaky_relu arity", expr)
+        return NnUnaryAST(kind=call_name, value=value, alpha=alpha, location=_location_from_node(expr))
+
+    if call_name == "hard_sigmoid":
+        if len(expr.args) < 1 or len(expr.args) > 3:
+            _raise_parse_error("Unsupported hard_sigmoid arity", expr)
+        if len(expr.keywords) > 2:
+            _raise_parse_error("Unsupported hard_sigmoid arity", expr)
+        value = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+        alpha = _parse_expr(expr.args[1], env, globals_table, builtins_table) if len(expr.args) >= 2 else None
+        beta = _parse_expr(expr.args[2], env, globals_table, builtins_table) if len(expr.args) == 3 else None
+        seen_alpha = alpha is not None
+        seen_beta = beta is not None
+        for keyword in expr.keywords:
+            if keyword.arg is None:
+                _raise_parse_error("Unsupported hard_sigmoid arity", expr)
+            if keyword.arg == "alpha":
+                if seen_alpha:
+                    _raise_parse_error("Unsupported hard_sigmoid arity", expr)
+                alpha = _parse_expr(keyword.value, env, globals_table, builtins_table)
+                seen_alpha = True
+                continue
+            if keyword.arg == "beta":
+                if seen_beta:
+                    _raise_parse_error("Unsupported hard_sigmoid arity", expr)
+                beta = _parse_expr(keyword.value, env, globals_table, builtins_table)
+                seen_beta = True
+                continue
+            _raise_parse_error("Unsupported hard_sigmoid arity", expr)
+        if alpha is None or beta is None:
+            _raise_parse_error("Unsupported hard_sigmoid arity", expr)
+        return NnUnaryAST(kind=call_name, value=value, alpha=alpha, beta=beta, location=_location_from_node(expr))
+
+    _raise_parse_error("Unsupported call expression", expr)
+    return None
+
+
+def _parse_reduce_helper_call(
+    call_name: str,
+    expr: py_ast.Call,
+    env: dict[str, object],
+    globals_table: dict[str, object],
+    builtins_table: dict[str, object],
+) -> NnReduceAST:
+    """解析 nn reduce helper 调用。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 解析 reduce_sum/reduce_min/reduce_max 的 value/axis/keepdim 参数。
+    - 严格约束 arity 与 keyword 名称，避免静默忽略非法参数。
+
+    使用示例:
+    - _parse_reduce_helper_call("reduce_sum", expr, env, globals(), __builtins__)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    if len(expr.args) < 1 or len(expr.args) > 3:
+        _raise_parse_error(f"Unsupported {call_name} arity", expr)
+    if len(expr.keywords) > 2:
+        _raise_parse_error(f"Unsupported {call_name} arity", expr)
+
+    value = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+    axis: object | None = None
+    keepdim: object | None = None
+    seen_axis = False
+    seen_keepdim = False
+
+    if len(expr.args) >= 2:
+        axis = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+        seen_axis = True
+    if len(expr.args) == 3:
+        keepdim = _parse_expr(expr.args[2], env, globals_table, builtins_table)
+        seen_keepdim = True
+
+    for keyword in expr.keywords:
+        if keyword.arg is None:
+            _raise_parse_error(f"Unsupported {call_name} arity", expr)
+        if keyword.arg == "axis":
+            if seen_axis:
+                _raise_parse_error(f"Unsupported {call_name} arity", expr)
+            axis = _parse_expr(keyword.value, env, globals_table, builtins_table)
+            seen_axis = True
+            continue
+        if keyword.arg == "keepdim":
+            if seen_keepdim:
+                _raise_parse_error(f"Unsupported {call_name} arity", expr)
+            keepdim = _parse_expr(keyword.value, env, globals_table, builtins_table)
+            seen_keepdim = True
+            continue
+        _raise_parse_error(f"Unsupported {call_name} arity", expr)
+
+    return NnReduceAST(
+        kind=call_name,
+        value=value,
+        axis=axis,
+        keepdim=keepdim,
         location=_location_from_node(expr),
     )
 
@@ -1648,12 +1957,14 @@ def _parse_dma_call(
     """解析 DSL 中的 DMA/NN helper 调用。
 
     创建者: OpenAI
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅接受当前函数显式导入绑定到 `kernel_gen.operation.dma/arch/nn` 的 helper 调用。
     - 将 `load/slice/store/deslice/...` 解析为对应 AST 节点。
     - 将 `nn.add/sub/mul/truediv/floordiv(...)` 解析为对应的 `BinaryExprAST`。
+    - 将 `relu/sigmoid/tanh/leaky_relu/hard_sigmoid/exp(...)` 解析为 `NnUnaryAST`。
+    - 将 `reduce_sum/reduce_min/reduce_max(...)` 解析为 `NnReduceAST`。
     - 将 `img2col1d/img2col2d(...)` 解析为对应的 `Img2ColAST`。
     - 将 `get_block_id()` / `get_block_num()` / `get_subthread_id()` / `get_subthread_num()` / `get_thread_id()` / `get_thread_num()` 解析为 `ArchQueryAST`。
     - 将 `get_dynamic_memory(space)` 解析为 `ArchGetDynamicMemoryAST`。
@@ -1792,6 +2103,12 @@ def _parse_dma_call(
 
     if call_name == "img2col":
         _raise_parse_error("Unsupported img2col call", expr)
+
+    if call_name in {"relu", "sigmoid", "tanh", "leaky_relu", "hard_sigmoid", "exp"}:
+        return _parse_unary_helper_call(call_name, expr, env, globals_table, builtins_table)
+
+    if call_name in {"reduce_sum", "reduce_min", "reduce_max"}:
+        return _parse_reduce_helper_call(call_name, expr, env, globals_table, builtins_table)
 
     if call_name in {"img2col1d", "img2col2d"}:
         if not expr.args:
@@ -2169,7 +2486,7 @@ def _parse_function_impl(
 
     功能说明:
     - 从源码中定位唯一顶层 FunctionDef，并解析参数/返回注解为 TensorAST/ScalarArgAST。
-    - 解析函数体语句，忽略 Import/ImportFrom 作为 no-op，仅用于 helper 解析，不生成 AST 节点。
+    - 解析函数体语句，收集诊断并执行返回语句位置与缺失校验。
     - 可按配置拒绝外部值，确保 AST 合同与禁用项诊断一致。
 
     使用示例:
@@ -2190,7 +2507,6 @@ def _parse_function_impl(
             builtins_table = builtins_table
         else:
             builtins_table = getattr(builtins_table, "__dict__", {})
-    globals_table = dict(globals_table)
 
     try:
         source = inspect.getsource(fn)
@@ -2237,63 +2553,9 @@ def _parse_function_impl(
         else:
             _raise_parse_error("Unsupported return annotation", func_def.returns)
 
-    body_nodes = [
-        stmt
-        for stmt in func_def.body
-        if not isinstance(stmt, (py_ast.Import, py_ast.ImportFrom))
-    ]
-    helper_modules = {
-        "kernel_gen.operation.dma": {
-            "load",
-            "slice",
-            "store",
-            "deslice",
-            "alloc",
-            "copy",
-            "cast",
-            "view",
-            "reshape",
-            "flatten",
-            "free",
-        },
-        "kernel_gen.operation.arch": {
-            "get_block_id",
-            "get_block_num",
-            "get_subthread_id",
-            "get_subthread_num",
-            "get_thread_id",
-            "get_thread_num",
-            "get_dynamic_memory",
-            "launch_kernel",
-        },
-        "kernel_gen.operation.nn": {
-            "img2col1d",
-            "img2col2d",
-            "matmul",
-        },
-    }
-    for stmt in func_def.body:
-        if isinstance(stmt, py_ast.Import):
-            for alias in stmt.names:
-                module_name = alias.name
-                if module_name in helper_modules:
-                    alias_name = alias.asname or module_name.split(".")[-1]
-                    globals_table.setdefault(alias_name, types.SimpleNamespace(__name__=module_name))
-        elif isinstance(stmt, py_ast.ImportFrom):
-            module_name = stmt.module
-            if module_name in helper_modules and module_name is not None:
-                for alias in stmt.names:
-                    helper_name = alias.name
-                    if helper_name in helper_modules[module_name]:
-                        alias_name = alias.asname or helper_name
-                        globals_table.setdefault(
-                            alias_name,
-                            types.SimpleNamespace(__module__=module_name, __name__=helper_name),
-                        )
-
     statements: list[object] = []
     has_explicit_return = False
-    for stmt in body_nodes:
+    for stmt in func_def.body:
         parsed_stmt = _parse_stmt(stmt, env, globals_table, builtins_table)
         statements.append(parsed_stmt)
         if isinstance(stmt, py_ast.Return):
@@ -2301,9 +2563,8 @@ def _parse_function_impl(
 
     if has_return_annotation and not has_explicit_return and not returns_none:
         raise AstParseError("Missing return statement", [Diagnostic("Missing return statement", _location_from_node(func_def))])
-    if has_explicit_return and (not body_nodes or not isinstance(body_nodes[-1], py_ast.Return)):
-        last_stmt = body_nodes[-1] if body_nodes else func_def
-        raise AstParseError("Return statement must be last", [Diagnostic("Return statement must be last", _location_from_node(last_stmt))])
+    if has_explicit_return and not isinstance(func_def.body[-1], py_ast.Return):
+        raise AstParseError("Return statement must be last", [Diagnostic("Return statement must be last", _location_from_node(func_def.body[-1]))])
     if outputs and isinstance(outputs[0], ScalarArgAST) and outputs[0].value_type is float:
         if not statements or not isinstance(statements[-1], SymbolToFloatAST):
             raise AstParseError(
@@ -2311,7 +2572,7 @@ def _parse_function_impl(
                 [Diagnostic("Unsupported return annotation", _location_from_node(func_def.returns))],
             )
 
-    body_location = _location_from_node(body_nodes[0]) if body_nodes else _location_from_node(func_def)
+    body_location = _location_from_node(func_def.body[0]) if func_def.body else _location_from_node(func_def)
     return FunctionAST(
         name=func_def.name,
         inputs=inputs,
