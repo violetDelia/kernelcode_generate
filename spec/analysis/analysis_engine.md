@@ -11,6 +11,9 @@
 - `spec`：[`spec/analysis/analysis_engine.md`](../../spec/analysis/analysis_engine.md)
 - `功能实现`：
   - [`kernel_gen/analysis/analysis.py`](../../kernel_gen/analysis/analysis.py)
+  - [`kernel_gen/analysis/compute/__init__.py`](../../kernel_gen/analysis/compute/__init__.py)
+  - [`kernel_gen/analysis/compute/kernel.py`](../../kernel_gen/analysis/compute/kernel.py)
+  - [`kernel_gen/analysis/compute/nn.py`](../../kernel_gen/analysis/compute/nn.py)
   - [`kernel_gen/analysis/memory/__init__.py`](../../kernel_gen/analysis/memory/__init__.py)
   - [`kernel_gen/analysis/memory/dma.py`](../../kernel_gen/analysis/memory/dma.py)
 - `test`：[`test/analysis/test_analysis.py`](../../test/analysis/test_analysis.py)
@@ -21,10 +24,14 @@
 - [`spec/pass/analysis/func_cost.md`](../../spec/pass/analysis/func_cost.md)：`func_cost` 对 derived alias 的消费口径。
 - [`spec/dialect/nn.md`](../../spec/dialect/nn.md)：`nn.memory` 与 `nn.*` op 类型约束。
 - [`spec/dialect/dma.md`](../../spec/dialect/dma.md)：公开 DMA 分支语义。
+- [`kernel_gen/analysis/compute/__init__.py`](../../kernel_gen/analysis/compute/__init__.py)：`ComputeKind` 正式枚举。
+- [`kernel_gen/analysis/compute/kernel.py`](../../kernel_gen/analysis/compute/kernel.py)：`kernel.*` 标量计算分类实现。
+- [`kernel_gen/analysis/compute/nn.py`](../../kernel_gen/analysis/compute/nn.py)：`nn.*` 逐元素与 `nn.matmul` 计算分类实现。
 
 ## 目标
 
 - 冻结统一入口：`analysis(op, config, otherargs=None) -> AnalysisResult`。
+- 冻结计算主线目录化入口：`kernel_gen/analysis/compute/__init__.py`、`kernel_gen/analysis/compute/kernel.py`、`kernel_gen/analysis/compute/nn.py`。
 - 冻结访存主线目录化口径：`kernel_gen/analysis/memory/` 负责 `MemoryPath`、`time_ns` 公式与 DMA 分支。
 - 冻结 `AnalysisConfig` 的显式控制字段：
   - `enable_compute`
@@ -45,6 +52,7 @@
   - `memory_items`
   - `compute_totals_by_kind`
   - `memory_totals_by_path`
+- 冻结正式计算分类枚举：`ComputeKind = {SCALAR, VECTOR, TENSOR, MATH}`。
 - 冻结正式 `MemoryPath` 枚举至少包含：
   - `GM_TO_SM`
   - `SM_TO_LM`
@@ -60,9 +68,9 @@
 
 - 本层是长期主线；`analyze_kernel(...)`、`func_cost` 等只能消费本层结果或做 derived alias。
 - 本轮 `compute` 分类只要求至少能产出当前已承接的：
-  - `scalar`
-  - `vector`
-  - `tensor`
+  - `ComputeKind.SCALAR`
+  - `ComputeKind.VECTOR`
+  - `ComputeKind.TENSOR`
 - 本轮 `memory` 分类只要求保证 `memory_items` 与 `memory_totals_by_path` 可机械读取；对 compute op 可使用泛化 path（如 `GM->compute` / `compute->GM`），对当前已公开 DMA 分支应优先使用 source/target space 路径。
 - 当前已公开 DMA 访存分支是 `dma.copy`、`dma.load`、`dma.store`、`dma.slice`；它们的前置条件非法时必须 `hard error`。
 - 当前未公开 DMA 分支（如 `dma.alloc`、`dma.deslice`、`dma.free`）继续执行 `skip + warning`，不计入正式 `memory_items / memory_totals_by_path`。
@@ -95,11 +103,11 @@
 
 - 功能说明：显式记录一条计算分类项。
 - 参数说明：
-  - `kind: str`
+  - `kind: ComputeKind`
   - `amount: sympy.Basic`
   - `dtype: str`
-- 使用示例：`ComputeItem(kind="scalar", amount=1, dtype="i32")`
-- 注意事项：本层先冻结 item schema，不在本文件里扩展 target-specific 吞吐细节。
+- 使用示例：`ComputeItem(kind=ComputeKind.SCALAR, amount=1, dtype="i32")`
+- 注意事项：本层先冻结 item schema，不在本文件里扩展 target-specific 吞吐细节；`kind` 不再接受自由字符串。
 - 返回与限制：作为 `AnalysisResult.compute_items` 元素类型。
 
 ### `class MemoryItem`
@@ -125,7 +133,7 @@
 - 参数说明：
   - `compute_items: Sequence[ComputeItem]`
   - `memory_items: Sequence[MemoryItem]`
-  - `compute_totals_by_kind: Mapping[str, sympy.Basic]`
+  - `compute_totals_by_kind: Mapping[ComputeKind, sympy.Basic]`
   - `memory_totals_by_path: Mapping[MemoryPath, sympy.Basic]`
 - 使用示例：`result = analysis(op, config)`
 - 注意事项：
@@ -168,6 +176,7 @@ result = analysis(
 - 执行命令：`pytest -q test/analysis/test_analysis.py`
 - 重点覆盖：
   - `analysis(...)` 单 op 返回 `AnalysisResult`
+  - `ComputeKind.SCALAR / VECTOR / TENSOR` 分类与 `compute_totals_by_kind`
   - `write_op_attrs` / `write_func_attrs` 显式开关
   - `analyze_kernel(...)` 仅作为 facade / adapter
   - `AnalysisConfig` 默认分析参数来自 `npu_demo target registry`

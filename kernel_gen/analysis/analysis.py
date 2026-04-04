@@ -42,6 +42,7 @@ from xdsl.dialects.builtin import (
     StringAttr,
 )
 from xdsl.ir import Attribute, Operation, SSAValue
+from kernel_gen.analysis.compute import ComputeKind
 from kernel_gen.analysis.memory import (
     MemoryPath,
     metric_value_to_expr,
@@ -148,7 +149,7 @@ class ComputeItem:
     - 显式记录计算分类、数量与 dtype。
 
     使用示例:
-    - ComputeItem(kind="scalar", amount=sp.Integer(1), dtype="i32")
+    - ComputeItem(kind=ComputeKind.SCALAR, amount=sp.Integer(1), dtype="i32")
 
     关联文件:
     - spec: spec/analysis/analysis_engine.md
@@ -156,7 +157,7 @@ class ComputeItem:
     - 功能实现: kernel_gen/analysis/analysis.py
     """
 
-    kind: str
+    kind: ComputeKind
     amount: sp.Basic
     dtype: str
 
@@ -211,7 +212,7 @@ class AnalysisResult:
 
     compute_items: Sequence[ComputeItem]
     memory_items: Sequence[MemoryItem]
-    compute_totals_by_kind: MappingABC[str, sp.Basic]
+    compute_totals_by_kind: MappingABC[ComputeKind, sp.Basic]
     memory_totals_by_path: MappingABC[MemoryPath, sp.Basic]
     op_costs: Sequence["KernelOpCost"] = ()
     value_traffic: Sequence["ValueTraffic"] = ()
@@ -729,7 +730,7 @@ def _build_memory_item(
     )
 
 
-def _totals_by_compute_kind(items: Sequence[ComputeItem]) -> dict[str, sp.Basic]:
+def _totals_by_compute_kind(items: Sequence[ComputeItem]) -> dict[ComputeKind, sp.Basic]:
     """按 compute kind 聚合 totals。
 
     创建者: 朽木露琪亚
@@ -747,7 +748,7 @@ def _totals_by_compute_kind(items: Sequence[ComputeItem]) -> dict[str, sp.Basic]
     - 功能实现: kernel_gen/analysis/analysis.py
     """
 
-    totals: dict[str, sp.Basic] = {}
+    totals: dict[ComputeKind, sp.Basic] = {}
     for item in items:
         totals[item.kind] = totals.get(item.kind, sp.Integer(0)) + item.amount
     return totals
@@ -800,7 +801,7 @@ def _write_analysis_attrs(target: Operation, result: AnalysisResult) -> None:
     target.attributes["analysis.read_bytes"] = StringAttr(str(result.total_read_bytes))
     target.attributes["analysis.write_bytes"] = StringAttr(str(result.total_write_bytes))
     for index, item in enumerate(result.compute_items):
-        target.attributes[f"analysis.compute.kind{index}"] = StringAttr(item.kind)
+        target.attributes[f"analysis.compute.kind{index}"] = StringAttr(item.kind.value)
         target.attributes[f"analysis.compute.amount{index}"] = StringAttr(str(item.amount))
         target.attributes[f"analysis.compute.dtype{index}"] = StringAttr(item.dtype)
     for index, item in enumerate(result.memory_items):
@@ -1649,42 +1650,9 @@ def _analyze_scalar_kernel_op(op: Operation, config: AnalysisConfig) -> _Analyze
     - 功能实现: kernel_gen/analysis/analysis.py
     """
 
-    scalar_ops = {
-        "kernel.add",
-        "kernel.sub",
-        "kernel.mul",
-        "kernel.div",
-        "kernel.eq",
-        "kernel.ne",
-        "kernel.lt",
-        "kernel.le",
-        "kernel.gt",
-        "kernel.ge",
-    }
-    if op.name not in scalar_ops:
-        return None
-    if len(op.results) != 1:
-        return None
-    result_type = op.results[0].type
-    if isinstance(result_type, NnMemoryType) or not _is_scalar_type(result_type):
-        return None
-    compute_items: list[ComputeItem] = []
-    if config.enable_compute:
-        compute_items.append(
-            ComputeItem(
-                kind="scalar",
-                amount=sp.Integer(1),
-                dtype=_dtype_string(result_type),
-            )
-        )
-    return _AnalyzedOp(
-        op_name=op.name,
-        compute_items=compute_items,
-        memory_items=[],
-        compute=sp.Integer(1) if config.enable_compute else sp.Integer(0),
-        read_bytes=sp.Integer(0),
-        write_bytes=sp.Integer(0),
-    )
+    from kernel_gen.analysis.compute.kernel import analyze_scalar_kernel_op
+
+    return analyze_scalar_kernel_op(op, config)
 
 
 def _analyze_nn_elementwise_op(op: Operation, config: AnalysisConfig) -> _AnalyzedOp | None:
@@ -1706,112 +1674,9 @@ def _analyze_nn_elementwise_op(op: Operation, config: AnalysisConfig) -> _Analyz
     - 功能实现: kernel_gen/analysis/analysis.py
     """
 
-    supported = {
-        "nn.add",
-        "nn.sub",
-        "nn.mul",
-        "nn.truediv",
-        "nn.eq",
-        "nn.ne",
-        "nn.lt",
-        "nn.le",
-        "nn.gt",
-        "nn.ge",
-    }
-    if op.name not in supported:
-        return None
-    if len(op.operands) < 2 or len(op.results) != 1:
-        raise AnalysisError("nn elementwise op must have 2 operands and 1 result")
-    lhs = op.operands[0]
-    rhs = op.operands[1]
-    result = op.results[0]
-    if not isinstance(result.type, NnMemoryType):
-        raise AnalysisError("nn op result must be nn.memory")
-    result_type = result.type
-    numel = _numel_from_mem_type(result_type)
-    if numel is None:
-        raise AnalysisError("result shape must be supported")
+    from kernel_gen.analysis.compute.nn import analyze_nn_elementwise_op
 
-    lhs_mem = isinstance(lhs.type, NnMemoryType)
-    rhs_mem = isinstance(rhs.type, NnMemoryType)
-    if not lhs_mem and not rhs_mem:
-        raise AnalysisError("at least one nn.memory operand required")
-
-    read_bytes = sp.Integer(0)
-    memory_items: list[MemoryItem] = []
-    value_reads: list[tuple[SSAValue, sp.Basic]] = []
-    if lhs_mem:
-        lhs_type = lhs.type
-        if lhs_type.shape != result_type.shape:
-            raise AnalysisError("result shape must match memory operand")
-        lhs_size = _element_size(lhs_type.element_type, _normalize_dtype_overrides(config.dtype_size_overrides))
-        if lhs_size is None:
-            raise AnalysisError("operand dtype unsupported")
-        lhs_bytes = numel * sp.Integer(lhs_size)
-        read_bytes += lhs_bytes
-        value_reads.append((lhs, lhs_bytes))
-        if config.enable_memory:
-            memory_items.append(
-                _build_memory_item(
-                    f"{_space_token_from_mem_type(lhs_type)}->compute",
-                    "read",
-                    lhs_bytes,
-                    config,
-                )
-            )
-    if rhs_mem:
-        rhs_type = rhs.type
-        if rhs_type.shape != result_type.shape:
-            raise AnalysisError("result shape must match memory operand")
-        rhs_size = _element_size(rhs_type.element_type, _normalize_dtype_overrides(config.dtype_size_overrides))
-        if rhs_size is None:
-            raise AnalysisError("operand dtype unsupported")
-        rhs_bytes = numel * sp.Integer(rhs_size)
-        read_bytes += rhs_bytes
-        value_reads.append((rhs, rhs_bytes))
-        if config.enable_memory:
-            memory_items.append(
-                _build_memory_item(
-                    f"{_space_token_from_mem_type(rhs_type)}->compute",
-                    "read",
-                    rhs_bytes,
-                    config,
-                )
-            )
-
-    if op.name in {"nn.eq", "nn.ne", "nn.lt", "nn.le", "nn.gt", "nn.ge"}:
-        if not _is_predicate_type(result_type.element_type):
-            raise AnalysisError("compare result element_type must be i1")
-        write_bytes = numel * sp.Integer(config.predicate_size)
-    else:
-        out_size = _element_size(result_type.element_type, _normalize_dtype_overrides(config.dtype_size_overrides))
-        if out_size is None:
-            raise AnalysisError("result dtype unsupported")
-        write_bytes = numel * sp.Integer(out_size)
-    if config.enable_memory:
-        memory_items.append(
-            _build_memory_item(
-                f"compute->{_space_token_from_mem_type(result_type)}",
-                "write",
-                write_bytes,
-                config,
-            )
-        )
-    compute_items: list[ComputeItem] = []
-    if config.enable_compute:
-        compute_items.append(
-            ComputeItem(kind="vector", amount=numel, dtype=_dtype_string(result_type.element_type))
-        )
-    return _AnalyzedOp(
-        op_name=op.name,
-        compute_items=compute_items,
-        memory_items=memory_items,
-        compute=numel if config.enable_compute else sp.Integer(0),
-        read_bytes=read_bytes if config.enable_memory else sp.Integer(0),
-        write_bytes=write_bytes if config.enable_memory else sp.Integer(0),
-        value_reads=tuple(value_reads) if config.enable_memory else (),
-        result_write_bytes=write_bytes if config.enable_memory else sp.Integer(0),
-    )
+    return analyze_nn_elementwise_op(op, config)
 
 
 def _analyze_nn_matmul_ir_op(op: Operation, config: AnalysisConfig) -> _AnalyzedOp | None:
@@ -1832,87 +1697,9 @@ def _analyze_nn_matmul_ir_op(op: Operation, config: AnalysisConfig) -> _Analyzed
     - 功能实现: kernel_gen/analysis/analysis.py
     """
 
-    if op.name != "nn.matmul":
-        return None
-    if len(op.operands) < 2 or len(op.results) != 1:
-        raise AnalysisError("nn.matmul must have 2 operands and 1 result")
-    lhs = op.operands[0]
-    rhs = op.operands[1]
-    result = op.results[0]
-    if not isinstance(lhs.type, NnMemoryType) or not isinstance(rhs.type, NnMemoryType):
-        raise AnalysisError("nn.matmul operands must be nn.memory")
-    if not isinstance(result.type, NnMemoryType):
-        raise AnalysisError("nn.matmul result must be nn.memory")
-    lhs_type = lhs.type
-    rhs_type = rhs.type
-    result_type = result.type
-    if len(lhs_type.shape.data) != 2 or len(rhs_type.shape.data) != 2 or len(result_type.shape.data) != 2:
-        raise AnalysisError("nn.matmul requires rank-2 tensors")
+    from kernel_gen.analysis.compute.nn import analyze_nn_matmul_ir_op
 
-    m_dim = _dim_to_expr(lhs_type.shape.data[0])
-    k_dim = _dim_to_expr(lhs_type.shape.data[1])
-    rhs_k_dim = _dim_to_expr(rhs_type.shape.data[0])
-    n_dim = _dim_to_expr(rhs_type.shape.data[1])
-    out_m_dim = _dim_to_expr(result_type.shape.data[0])
-    out_n_dim = _dim_to_expr(result_type.shape.data[1])
-    if None in {m_dim, k_dim, rhs_k_dim, n_dim, out_m_dim, out_n_dim}:
-        raise AnalysisError("nn.matmul shape unsupported")
-    if k_dim != rhs_k_dim:
-        raise AnalysisError("nn.matmul inner dimension mismatch")
-    if out_m_dim != m_dim or out_n_dim != n_dim:
-        raise AnalysisError("nn.matmul output shape mismatch")
-
-    overrides = _normalize_dtype_overrides(config.dtype_size_overrides)
-    elem_size = _element_size(lhs_type.element_type, overrides)
-    if elem_size is None:
-        raise AnalysisError("nn.matmul operand dtype unsupported")
-    if lhs_type.element_type != rhs_type.element_type or lhs_type.element_type != result_type.element_type:
-        raise AnalysisError("nn.matmul operand/result element_type must match")
-    elem_size_expr = sp.Integer(elem_size)
-    compute = sp.Integer(2) * m_dim * n_dim * k_dim
-    lhs_bytes = m_dim * k_dim * elem_size_expr
-    rhs_bytes = k_dim * n_dim * elem_size_expr
-    read_bytes = lhs_bytes + rhs_bytes
-    write_bytes = m_dim * n_dim * elem_size_expr
-    memory_items: list[MemoryItem] = []
-    if config.enable_memory:
-        memory_items.extend(
-            [
-                _build_memory_item(
-                    f"{_space_token_from_mem_type(lhs_type)}->compute",
-                    "read",
-                    lhs_bytes,
-                    config,
-                ),
-                _build_memory_item(
-                    f"{_space_token_from_mem_type(rhs_type)}->compute",
-                    "read",
-                    rhs_bytes,
-                    config,
-                ),
-                _build_memory_item(
-                    f"compute->{_space_token_from_mem_type(result_type)}",
-                    "write",
-                    write_bytes,
-                    config,
-                ),
-            ]
-        )
-    compute_items: list[ComputeItem] = []
-    if config.enable_compute:
-        compute_items.append(
-            ComputeItem(kind="tensor", amount=compute, dtype=_dtype_string(result_type.element_type))
-        )
-    return _AnalyzedOp(
-        op_name=op.name,
-        compute_items=compute_items,
-        memory_items=memory_items,
-        compute=compute if config.enable_compute else sp.Integer(0),
-        read_bytes=read_bytes if config.enable_memory else sp.Integer(0),
-        write_bytes=write_bytes if config.enable_memory else sp.Integer(0),
-        value_reads=((lhs, lhs_bytes), (rhs, rhs_bytes)) if config.enable_memory else (),
-        result_write_bytes=write_bytes if config.enable_memory else sp.Integer(0),
-    )
+    return analyze_nn_matmul_ir_op(op, config)
 
 
 def _analyze_dma_ir_op(op: Operation, config: AnalysisConfig) -> _AnalyzedOp | None:

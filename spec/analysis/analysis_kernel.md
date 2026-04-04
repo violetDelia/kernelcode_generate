@@ -28,6 +28,7 @@
 - 给出逐元素算术、逐元素比较、显式 `broadcast`、`matmul` 的兼容公式口径。
 - 冻结 `analyze_kernel(func_op: func.FuncOp, ...) -> AnalyzeKernelSummary` 为 `analysis(...)` 的 facade / adapter 与过渡兼容返回，而不是长期主入口或其他 pass 的稳定消费结构。
 - 保留基于 `Memory`/`Operation` 的兼容公式接口，供公式复用与兼容场景使用，但不把 `analyze_function(...)` 重新定义为与统一入口并列的主线。
+- 当前逐元素/`matmul` 进入统一入口后，对应的正式计算分类必须分别落到 `ComputeKind.VECTOR / TENSOR`；标量 `kernel.*` 子集落到 `ComputeKind.SCALAR`。
 - 对形状不匹配、参数非法等情况提供一致的错误边界。
 
 ## 限制与边界
@@ -35,6 +36,7 @@
 - 基于 `Memory`/`Operation` 的兼容公式接口（包括 `analyze_function(...)` 与各公式 helper）仅覆盖 `add/sub/mul/truediv/eq/ne/lt/le/gt/ge/broadcast/matmul`；在这一路径上传入其它算子必须拒绝。
 - `analyze_kernel(...)` 只允许通过 `analysis(func_op, config, otherargs)` 聚合出 `AnalyzeKernelSummary`；不允许再维护第二套独立公式主线。
 - `analyze_kernel(...)` 构造 `AnalysisConfig` 时，默认分析参数必须来自 `target registry` 的 `npu_demo` baseline；不得在 facade 层手写 `path_bandwidth/path_latency_ns/theoretical_compute`。
+- `analyze_kernel(...)` 若需要暴露计算分类相关信息，只能透传统一入口已经产出的 `ComputeKind` 结果或其 derived alias，不得再保留一套字符串分类。
 - `analyze_kernel(...)` 当前只对统一入口已承接的逐元素/`matmul` 成本统计，以及 `dma.load`、`dma.copy`、`dma.store`、`dma.slice` 的 DMA 分支统计产生结果；`arith.constant` 与 `func.return` 默认忽略。
 - 逐元素算术/比较不允许隐式广播，输入与输出 `shape` 必须严格一致。
 - `broadcast` 仅为显式操作，要求输出 rank 不小于输入 rank，尾维对齐且维度相等或输入维为静态 `1`。

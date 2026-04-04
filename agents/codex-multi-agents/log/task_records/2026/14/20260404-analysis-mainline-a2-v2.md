@@ -1,0 +1,281 @@
+# 20260404-analysis-mainline-a2-v2
+
+- 时间：`2026-04-04 10:32:15 +0800`
+- 经办人：`jcc你莫辜负`
+- 任务：`T-20260404-59e984e9`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/analysis_mainline_refactor_plan.md` 的 `A2` 收口 `spec/analysis/analysis_engine.md`、`spec/analysis/analysis_kernel.md`、`kernel_gen/analysis/analysis.py`、`kernel_gen/analysis/compute/__init__.py`、`kernel_gen/analysis/compute/nn.py`、`kernel_gen/analysis/compute/kernel.py`、`test/analysis/test_analysis.py` 与同链记录文件，写死 `ComputeKind` 枚举、计算分类规则和对应测试；不触碰 `A3/A4`。
+- 改动：
+  - 新增 `kernel_gen/analysis/compute/__init__.py`
+    - 定义正式 `ComputeKind` 枚举：`SCALAR / VECTOR / TENSOR / MATH`。
+  - 新增 `kernel_gen/analysis/compute/kernel.py`
+    - 承接标量 `kernel.*` 子集的计算分析，统一返回 `ComputeKind.SCALAR`。
+  - 新增 `kernel_gen/analysis/compute/nn.py`
+    - 承接 `nn.*` 逐元素与 `nn.matmul` 的计算分析，统一返回 `ComputeKind.VECTOR / TENSOR`。
+    - 保持 `tensor + const` 不计常量 memory traffic、`compare(i1)` 继续受 `predicate_size` 控制。
+  - 更新 `kernel_gen/analysis/analysis.py`
+    - `ComputeItem.kind` 与 `AnalysisResult.compute_totals_by_kind` 由自由字符串收口为 `ComputeKind`。
+    - `_write_analysis_attrs(...)` 继续以 `ComputeKind.value` 写回 `analysis.compute.kind{index}`，保持外部属性文本稳定。
+    - 原 `_analyze_scalar_kernel_op / _analyze_nn_elementwise_op / _analyze_nn_matmul_ir_op` 改为委托 `compute/` 分目录实现，`analysis.py` 只保留统一入口和分发。
+  - 更新 `spec/analysis/analysis_engine.md`
+    - 写清 `compute/` 目录化落地与 `ComputeKind` 正式枚举。
+    - 写清 `ComputeItem.kind` 不再接受自由字符串，而是固定为 `ComputeKind`。
+  - 更新 `spec/analysis/analysis_kernel.md`
+    - 写清兼容 facade 的逐元素/`matmul` 计算分类只允许来自统一入口的 `ComputeKind` 结果或其 derived alias。
+  - 更新 `test/analysis/test_analysis.py`
+    - 现有 A1 标量入口测试改为断言 `ComputeKind.SCALAR`。
+    - 新增 `test_analysis_scalar_compute_kind`
+    - 新增 `test_analysis_vector_compute_kind`
+    - 新增 `test_analysis_tensor_compute_kind`
+    - 新增 `test_analysis_tensor_plus_const_preserves_compute_kind_without_const_memory_traffic`
+    - 新增 `test_analysis_compare_i1_keeps_predicate_size_in_new_schema`
+    - 所有新测试都直接断言 `compute_items / compute_totals_by_kind`，不再只看旧 alias。
+- 验证：
+  - 任务要求 gate：
+    - `pytest -q test/analysis/test_analysis.py -k 'scalar or vector or tensor or tensor_plus_const or predicate_size'` -> `8 passed, 35 deselected`
+  - 补充回归：
+    - `pytest -q test/analysis/test_analysis.py` -> `43 passed`
+    - `pytest -q test/pass/test_analysis_func_cost.py` -> `13 passed`
+  - 代码整洁性：
+    - `python -m py_compile kernel_gen/analysis/analysis.py kernel_gen/analysis/compute/__init__.py kernel_gen/analysis/compute/kernel.py kernel_gen/analysis/compute/nn.py test/analysis/test_analysis.py` -> `0`
+    - `git diff --check -- spec/analysis/analysis_engine.md spec/analysis/analysis_kernel.md kernel_gen/analysis/analysis.py kernel_gen/analysis/compute/__init__.py kernel_gen/analysis/compute/kernel.py kernel_gen/analysis/compute/nn.py test/analysis/test_analysis.py` -> `0`
+- 自检：
+  - 目标收口：通过。正式计算分类已由自由字符串收口为 `ComputeKind`，并且 kernel/nn 计算分析已迁入 `compute/` 分目录。
+  - 边界检查：通过。本轮没有触碰 `A3` 访存目录化，也没有推进 `A4` 的函数级聚合/消费闭环。
+  - 证据覆盖：通过。A2 指定 gate 覆盖 `SCALAR / VECTOR / TENSOR / tensor+const / predicate_size`，并且 `test_analysis.py`、`test_analysis_func_cost.py` 全量回归都通过。
+  - 改动范围：通过。只修改了任务允许的 `spec/实现/测试/记录` 文件。
+- 结论：
+  - `A2` 已按边界完成，无阻塞。
+
+- 时间：`2026-04-04 10:33:16 +0800`
+- 经办人：`jcc你莫辜负`
+- 任务：`T-20260404-59e984e9`
+- 任务目标：
+  - 完成当前 `A2` 任务流转，并按同链路补建唯一后续审查任务。
+- 改动：
+  - 已执行：
+    - `codex-multi-agents-task.sh -file /home/lfr/kernelcode_generate/TODO.md -done -task_id T-20260404-59e984e9 -log /home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a2-v2.md -agents-list /home/lfr/kernelcode_generate/agents/codex-multi-agents/agents-lists.md`
+    - 结果：当前任务已标记完成，`agents-lists.md` 中 `jcc你莫辜负` 状态同步成功。
+  - 已新建后续审查任务：
+    - `T-20260404-ed9b6ac9`
+    - 目标：在同一 `worktree` 中只读复核 `A2` 的 `spec / 实现 / 测试 / 记录文件` 是否和计划、边界、验证命令、验收标准一致。
+- 结论：
+  - `T-20260404-59e984e9` 已完成并封板。
+  - 后续链路已按当前规则衔接到 `A2` 审查阶段，等待管理员核对并分发 `T-20260404-ed9b6ac9`。
+
+- 时间：`2026-04-04 10:49:32 +0800`
+- 经办人：`jcc你莫辜负`
+- 任务：`T-20260404-6d8438c9`
+- 任务目标：
+  - 按 A2 改进边界修正当前未闭环点：1）把 `kernel_gen/analysis/compute/__init__.py`、`kernel_gen/analysis/compute/kernel.py`、`kernel_gen/analysis/compute/nn.py` 真正纳入链路可合入范围；2）对齐 `spec/analysis/analysis_engine.md` 中 `AnalysisResult.compute_totals_by_kind` 的公开签名，使其与 `ComputeKind` 枚举和 `test/analysis/test_analysis.py` 的断言口径一致。
+- 改动：
+  - 更新 [`spec/analysis/analysis_engine.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2/spec/analysis/analysis_engine.md)
+    - 在“依赖”中显式补入 `kernel_gen/analysis/compute/__init__.py`、`kernel_gen/analysis/compute/kernel.py`、`kernel_gen/analysis/compute/nn.py`。
+    - 将 `AnalysisResult.compute_totals_by_kind` 的公开签名从 `Mapping[str, sympy.Basic]` 收口为 `Mapping[ComputeKind, sympy.Basic]`，与当前实现和测试断言一致。
+  - 同步链路可合入范围：
+    - 已在 `wt-20260404-analysis-mainline-a2` 中把以下新文件显式加入跟踪范围：
+      - `kernel_gen/analysis/compute/__init__.py`
+      - `kernel_gen/analysis/compute/kernel.py`
+      - `kernel_gen/analysis/compute/nn.py`
+    - 旁证：
+      - `git -C /home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2 status --short --untracked-files=all kernel_gen/analysis/compute`
+      - 结果：三文件均为 `A`，不再是纯未跟踪目录漂浮状态。
+  - 验证：
+    - `pytest -q test/analysis/test_analysis.py -k 'scalar or vector or tensor or tensor_plus_const or predicate_size'` -> `8 passed, 35 deselected`
+    - `pytest -q test/analysis/test_analysis.py` -> `43 passed`
+    - `pytest -q test/pass/test_analysis_func_cost.py` -> `13 passed`
+    - `git diff --check -- wt-20260404-analysis-mainline-a2/spec/analysis/analysis_engine.md wt-20260404-analysis-mainline-a2/spec/analysis/analysis_kernel.md wt-20260404-analysis-mainline-a2/kernel_gen/analysis/analysis.py wt-20260404-analysis-mainline-a2/kernel_gen/analysis/compute/__init__.py wt-20260404-analysis-mainline-a2/kernel_gen/analysis/compute/kernel.py wt-20260404-analysis-mainline-a2/kernel_gen/analysis/compute/nn.py wt-20260404-analysis-mainline-a2/test/analysis/test_analysis.py agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a2-v2.md` -> `0`
+  - 自检：
+    - 目标收口：通过。A2 审查指出的两个未闭环点都已修正。
+    - 边界检查：通过。本轮仍只覆盖 compute 侧，没有扩到 A3/A4。
+    - 阻塞检查：无。
+- 结论：
+  - 本轮 A2 改进已完成，无阻塞。
+
+- 时间：`2026-04-04 10:50:24 +0800`
+- 经办人：`jcc你莫辜负`
+- 任务：`T-20260404-6d8438c9`
+- 任务目标：
+  - 完成当前 A2 改进任务流转，并按同链路补建唯一后续审查任务。
+- 改动：
+  - 已执行：
+    - `codex-multi-agents-task.sh -file /home/lfr/kernelcode_generate/TODO.md -done -task_id T-20260404-6d8438c9 -log /home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a2-v2.md -agents-list /home/lfr/kernelcode_generate/agents/codex-multi-agents/agents-lists.md`
+    - 结果：当前任务已标记完成，`agents-lists.md` 中 `jcc你莫辜负` 状态同步成功。
+  - 已新建后续审查任务：
+    - `T-20260404-1f767c37`
+    - 目标：在同一 `worktree` 中只读复核 A2 改进闭环是否已经修正 `compute/` 三文件可合入范围和 `compute_totals_by_kind` 的公开签名口径。
+- 结论：
+  - `T-20260404-6d8438c9` 已完成并封板。
+  - 后续链路已按当前规则衔接到审查阶段，等待管理员核对并分发 `T-20260404-1f767c37`。
+
+- 时间：`2026-04-04 10:44:32 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-ed9b6ac9`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/analysis_mainline_refactor_plan.md` 的 `A2` 只读复核 `spec / 实现 / 测试 / 记录文件` 是否与 `A2` 目标、边界、验证命令、验收标准一致，重点检查 `ComputeKind` 正式枚举、`compute/` 目录化以及测试是否直接断言 `compute_items / compute_totals_by_kind`。
+- 审查前自检：
+  - 已核对 `A2` 计划 gate、两份 `spec`、`analysis.py`、`compute/` 目录文件、`test/analysis/test_analysis.py` 和记录文件。
+  - 已实跑计划 gate 与补充回归：
+    - `python -m pytest -q test/analysis/test_analysis.py -k 'scalar or vector or tensor or tensor_plus_const or predicate_size'` -> `8 passed, 35 deselected`
+    - `python -m pytest -q test/analysis/test_analysis.py` -> `43 passed`
+    - `python -m pytest -q test/pass/test_analysis_func_cost.py` -> `13 passed`
+  - 已额外核对 `git status` / `git ls-files`，确认 `compute/` 目录化文件是否真实纳入当前链路。
+- 审查结论：
+  - `不通过`
+- 问题列表：
+  - `P1`：`kernel_gen/analysis/compute/` 三个新文件当前仍是未跟踪状态，没有真正纳入本链路可合入范围。证据：
+    - `git -C /home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2 status --short` -> `?? kernel_gen/analysis/compute/`
+    - `git -C /home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2 ls-files kernel_gen/analysis/compute/__init__.py kernel_gen/analysis/compute/kernel.py kernel_gen/analysis/compute/nn.py` -> 空输出
+    这和 `A2` 目标“计算分类已目录化到 compute/”直接冲突。当前测试之所以通过，只是因为 worktree 上文件存在；一旦按 tracked 结果合并，这组三个核心实现文件会直接丢失。
+  - `P2`：[`analysis_engine.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2/spec/analysis/analysis_engine.md#L106) 到 [`analysis_engine.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2/spec/analysis/analysis_engine.md#L113) 仍把 `AnalysisResult.compute_totals_by_kind` 写成 `Mapping[str, sympy.Basic]`，而实现 [`analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2/kernel_gen/analysis/analysis.py#L208) 已收口为 `Mapping[ComputeKind, sympy.Basic]`，测试也直接按 `ComputeKind` key 断言。这说明 `ComputeKind` 虽已在实现里成为正式枚举，但 `spec` 的公开接口签名还没完全同步。
+- 通过项：
+  - [`compute/__init__.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2/kernel_gen/analysis/compute/__init__.py) 已定义正式 `ComputeKind` 枚举。
+  - [`analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2/kernel_gen/analysis/analysis.py#L1653) 到 [`analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2/kernel_gen/analysis/analysis.py#L1705) 已把 scalar/nn/matmul 计算分类分发委托到 `compute/kernel.py` 与 `compute/nn.py`。
+  - [`test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2/test/analysis/test_analysis.py#L948) 到 [`test_analysis.py](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2/test/analysis/test_analysis.py#L1075) 的 `AN-020D`~`AN-020H` 已直接断言 `compute_items / compute_totals_by_kind`，没有退回旧 alias 口径。
+- 漏洞与边界排查：
+  - 功能正确性：实现和测试当前在 worktree 内行为正确。
+  - 边界条件：`tensor + const` 不计常量 memory traffic、`compare(i1)` 继续受 `predicate_size` 控制，这两条均已被测试直接锁住。
+  - 异常路径：未见 `A3/A4` 范围越界；本轮仍停留在计算侧。
+  - 潜在漏洞/歧义：当前最大风险是“本地可运行、合并后缺文件”的假闭环，以及 `spec` 接口类型仍保留旧字符串口径。
+- 下一步建议：
+  - 创建同链改进任务，至少完成两件事：
+    1. 把 `kernel_gen/analysis/compute/__init__.py`、`kernel_gen/analysis/compute/kernel.py`、`kernel_gen/analysis/compute/nn.py` 真正纳入链路可合入范围；
+    2. 修正 `spec/analysis/analysis_engine.md` 中 `AnalysisResult.compute_totals_by_kind` 的公开签名，使其与 `ComputeKind` 枚举口径一致。
+
+- 时间：`2026-04-04 10:45:27 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-ed9b6ac9`
+- 任务目标：
+  - 完成当前 `A2` 审查任务流转，并按同链路补建唯一后续任务。
+- 执行：
+  - 已执行 `-done`：
+    - `bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file TODO.md -done -task_id T-20260404-ed9b6ac9 -log agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a2-v2.md -agents-list agents/codex-multi-agents/agents-lists.md`
+    - 结果：`OK: done T-20260404-ed9b6ac9`
+  - 已新建唯一后续任务：
+    - `T-20260404-6d8438c9`
+    - 任务方向：修正 `A2` 链路未闭环点，纳入 `compute/` 目录文件并对齐 `analysis_engine` 的 `ComputeKind` 类型口径。
+- 结论：
+  - `T-20260404-ed9b6ac9` 已完成并封板。
+  - 后续链路等待管理员核对并分发 `T-20260404-6d8438c9`。
+
+- 时间：`2026-04-04 10:57:58 +0800`
+- 经办人：`不要啊教练`
+- 任务：`T-20260404-1f767c37`
+- 任务目标：
+  - 按 A2 改进闭环复审边界，只读复核 [`spec/analysis/analysis_engine.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2/spec/analysis/analysis_engine.md)、[`kernel_gen/analysis/compute/__init__.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2/kernel_gen/analysis/compute/__init__.py)、[`kernel_gen/analysis/compute/kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2/kernel_gen/analysis/compute/kernel.py)、[`kernel_gen/analysis/compute/nn.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2/kernel_gen/analysis/compute/nn.py)、[`test/analysis/test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2/test/analysis/test_analysis.py) 与同链记录，确认 `compute/` 三文件已进入可合入范围，且 `AnalysisResult.compute_totals_by_kind` 的公开签名已与 `ComputeKind` 枚举和测试断言一致；不扩到 `A3/A4`。
+- 复审前自检：
+  - 已核对当前任务边界、同链记录、`A2` 计划 gate、worktree tracked 状态与关键测试。
+  - 已重点复查功能正确性、边界条件、异常路径、潜在漏洞，以及 `spec / 实现 / 测试 / 记录 / 计划进度` 是否真正一致。
+  - 本轮若存在任何剩余改进建议或状态口径冲突，不给 `通过`。
+- 复审结论：
+  - `需修改`
+- 问题列表：
+  - `P1`：[`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md#L8) 的 `A2` 进度表仍停留在 `已建档；实现完成；复审进行中（T-20260404-ed9b6ac9）`，但 [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2213) 已登记 `T-20260404-ed9b6ac9` 完成，[`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2216) 也已登记 `T-20260404-6d8438c9` 完成；同链记录本身也已追加 `T-20260404-6d8438c9` 的修正结果与当前复审任务。这会让 `A2` 链路在“业务合同已闭环”的情况下，仍保留计划状态双口径，不能判定为真正一致。
+- 已确认通过项：
+  - `compute/` 三文件已进入可合入范围，不再是未跟踪漂浮文件。证据：
+    - `git -C /home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2 status --short` -> `A kernel_gen/analysis/compute/__init__.py`、`A kernel_gen/analysis/compute/kernel.py`、`A kernel_gen/analysis/compute/nn.py`
+    - `git -C /home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2 ls-files kernel_gen/analysis/compute/__init__.py kernel_gen/analysis/compute/kernel.py kernel_gen/analysis/compute/nn.py` -> 三文件均有输出
+  - [`analysis_engine.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2/spec/analysis/analysis_engine.md#L109) 到 [`analysis_engine.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2/spec/analysis/analysis_engine.md#L116) 已把 `AnalysisResult.compute_totals_by_kind` 收口为 `Mapping[ComputeKind, sympy.Basic]`，与 [`ComputeKind`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2/kernel_gen/analysis/compute/__init__.py#L25) 和测试断言一致。
+  - [`test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2/test/analysis/test_analysis.py#L948) 到 [`test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2/test/analysis/test_analysis.py#L1075) 已直接断言 `ComputeKind.SCALAR / VECTOR / TENSOR` 与 `compute_totals_by_kind`，没有回退到旧 alias 口径。
+- 漏洞与边界排查：
+  - 功能正确性：当前 `ComputeKind` 分类、`tensor + const` 不计常量 memory traffic、`compare(i1)` 继续按 `predicate_size` 计写回，都被测试直接锁住。
+  - 边界条件：本轮仍只停留在 `A2` 计算侧，没有混入 `A3/A4` 的访存目录化或函数级消费。
+  - 异常路径：未见 `compute/` 目录化后新增静默 fallback 或错误吞掉问题。
+  - 潜在漏洞/歧义：当前唯一剩余风险是计划进度状态落后于真实链路状态，容易让后续合并/归档误判阶段。
+- 验证：
+  - `git -C /home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2 status --short`：
+    - 结果：`A kernel_gen/analysis/compute/__init__.py`、`A kernel_gen/analysis/compute/kernel.py`、`A kernel_gen/analysis/compute/nn.py`
+  - `git -C /home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2 ls-files kernel_gen/analysis/compute/__init__.py kernel_gen/analysis/compute/kernel.py kernel_gen/analysis/compute/nn.py`：
+    - 结果：三文件均在 tracked 列表中
+  - `python -m pytest -q test/analysis/test_analysis.py -k 'scalar or vector or tensor or const or predicate_size'` -> `8 passed, 35 deselected`
+  - `python -m pytest -q test/analysis/test_analysis.py` -> `43 passed`
+  - `git -C /home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a2 diff --check -- spec/analysis/analysis_engine.md kernel_gen/analysis/compute/__init__.py kernel_gen/analysis/compute/kernel.py kernel_gen/analysis/compute/nn.py test/analysis/test_analysis.py` -> `0`
+- 结论：
+  - A2 指定复审点已经全部收口：`compute/` 三文件已纳入可合入范围，`AnalysisResult.compute_totals_by_kind` 的公开签名也与 `ComputeKind` 枚举和测试断言一致。
+  - 当前不能判 `通过` 的唯一原因是 A2 计划进度表未同步到最新链路状态。
+  - 下一步建议：仅修正 [`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md#L8) 的 `A2` 进度条目，把 `T-20260404-ed9b6ac9` 收口为已完成状态，并补入 `T-20260404-6d8438c9` 的改进闭环完成口径；当前 `spec / compute / test / 记录` 不需要再改。
+
+- 时间：`2026-04-04 11:07:11 +0800`
+- 经办人：`咯咯咯`
+- 任务：`T-20260404-14958da5`
+- 任务目标：
+  - 仅同步 `A2` 进度条目，使 `T-20260404-ed9b6ac9` 与 `T-20260404-6d8438c9` 的状态/时间口径与 `DONE.md` 和同链记录一致；不改 `A2` 的 `spec`、实现、测试，也不扩到 `A3/A4`。
+- 改动：
+  - 复核后确认 `ed9b6ac9 / 6d8438c9` 已按目标口径收口到 `A2` 进度表。
+  - 将当前任务自身的 `A2` 行状态从“状态一致性修正进行中”收口为“状态一致性修正完成”，避免完成后计划仍停留在进行中双口径。
+  - 本轮未改 `A2` 正文、实现、测试，也未扩到 `A3/A4`。
+- 结论：
+  - `已按边界完成 A2 进度状态收口；ed9b6ac9 / 6d8438c9 与 DONE/记录一致，当前任务状态也已同步为完成。`
+
+- 时间：`2026-04-04 11:08:08 +0800`
+- 经办人：`咯咯咯`
+- 任务：`T-20260404-14958da5`
+- 任务目标：
+  - 完成前自检本轮是否只修 `A2` 进度状态，且没有误改 `A2` 正文、实现、测试、`A3/A4` 或三条验收测试名映射。
+- 改动：
+  - 复核 `A2` 进度条目中：
+    - `T-20260404-ed9b6ac9` 仍为 `审查完成（需修改，2026-04-04 10:44:53 +0800）`
+    - `T-20260404-6d8438c9` 仍为 `改进闭环完成（2026-04-04 10:50:46 +0800）`
+    - 当前任务 `T-20260404-14958da5` 已收口为 `状态一致性修正完成（2026-04-04 11:07:11 +0800）`
+  - 复核三条验收测试名映射保持不变：
+    - `test_analysis_entry_returns_new_result_for_scalar_kernel_add`
+    - `test_analysis_entry_reads_defaults_from_npu_demo_target`
+    - `test_analysis_entry_rejects_missing_npu_demo_metric`
+  - 执行 `git diff --check -- ARCHITECTURE/plan/analysis_mainline_refactor_plan.md agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a2-v2.md`，结果通过。
+- 结论：
+  - `自检通过：本轮只修 A2 进度状态，三条验收测试名映射与 A2/A3/A4 正文、实现、测试行为未被误改。`
+
+- 时间：`2026-04-04 11:29:12 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-d51e9741`
+- 任务目标：
+  - 按 `A2` 状态一致性复审边界，只读核对 `ARCHITECTURE/plan/analysis_mainline_refactor_plan.md`、`DONE.md` 与同链记录，确认 `T-20260404-ed9b6ac9 / T-20260404-6d8438c9 / T-20260404-14958da5` 的状态/时间是否一致，并确认 `A2` 验收测试名映射与 `A2/A3/A4` 正文未被误动。
+- 审查前自检：
+  - 已核对 `A2` 进度条目、`DONE.md` 对应完成记录和同链记录三处口径。
+  - 已补看 `A2` 正文与当前计划文件 diff，确认本轮没有误改 `A2/A3/A4` 正文或验收测试名。
+  - 当前无环境、worktree 或记录边界阻塞。
+- 审查结论：
+  - `通过`
+- 审查结果：
+  - [`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md#L8) 的 `A2` 进度条目当前已写明：
+    - `审查完成（需修改，2026-04-04 10:44:53 +0800，T-20260404-ed9b6ac9，提莫炖蘑菇）`
+    - `改进闭环完成（2026-04-04 10:50:46 +0800，T-20260404-6d8438c9，jcc你莫辜负）`
+    - `状态一致性修正完成（2026-04-04 11:07:11 +0800，T-20260404-14958da5，咯咯咯）`
+  - [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2213) 、[`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2216) 与 [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2225) 的三条完成记录与上述任务 ID、状态和完成时间一致。
+  - 同链记录 [`20260404-analysis-mainline-a2-v2.md`](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a2-v2.md) 中对应三条任务的结论也一致：
+    - `ed9b6ac9` 为 `不通过`
+    - `6d8438c9` 为改进闭环完成
+    - `14958da5` 为状态一致性修正完成
+  - [`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md#L370) 到 [`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md#L420) 的 `A2` 正文与验收测试名映射未被误动，仍保持：
+    - `test_analysis_scalar_compute_kind`
+    - `test_analysis_vector_compute_kind`
+    - `test_analysis_tensor_compute_kind`
+    - `test_analysis_tensor_plus_const_preserves_compute_kind_without_const_memory_traffic`
+    - `test_analysis_compare_i1_keeps_predicate_size_in_new_schema`
+  - 主目录计划文件当前 `git diff -- ARCHITECTURE/plan/analysis_mainline_refactor_plan.md` 为空，说明本轮之后没有额外未收口的计划文本改动残留。
+- 漏洞与边界排查：
+  - 功能正确性：本轮只审状态一致性，不涉及实现行为变更。
+  - 边界条件：通过，未扩到 `A3/A4` 的业务合同或实现。
+  - 异常路径：无新增异常路径。
+  - 潜在漏洞/歧义：当前 `plan / DONE / record` 在 `A2` 状态口径上已收口，未见双口径残留。
+- 验证：
+  - `rg -n "T-20260404-ed9b6ac9|T-20260404-6d8438c9|T-20260404-14958da5|test_analysis_scalar_compute_kind|test_analysis_vector_compute_kind|test_analysis_tensor_compute_kind" ARCHITECTURE/plan/analysis_mainline_refactor_plan.md agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a2-v2.md DONE.md`
+  - `git -C /home/lfr/kernelcode_generate diff -- ARCHITECTURE/plan/analysis_mainline_refactor_plan.md`
+- 下一步建议：
+  - 可进入 `A2` 整链合并阶段；合并范围必须覆盖当前已完成的 `A2` 全链 `plan / spec / 实现 / 测试 / 记录文件`。
+
+- 时间：`2026-04-04 11:31:04 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-d51e9741`
+- 任务目标：
+  - 完成当前 `A2` 状态一致性复审任务流转，并按同链路补建唯一后续合并任务。
+- 执行：
+  - 已执行 `-done`：
+    - `bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file TODO.md -done -task_id T-20260404-d51e9741 -log agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a2-v2.md -agents-list agents/codex-multi-agents/agents-lists.md`
+    - 结果：`OK: done T-20260404-d51e9741`
+  - 已新建唯一后续任务：
+    - `T-20260404-464b46e3`
+    - 任务方向：按整条已完成链路合并 `A2` 的 `plan / spec / 实现 / 测试 / 记录文件`。
+- 结论：
+  - `T-20260404-d51e9741` 已完成并封板。
+  - 后续链路等待管理员核对并分发 `T-20260404-464b46e3`。

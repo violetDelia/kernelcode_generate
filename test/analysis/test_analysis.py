@@ -53,6 +53,7 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.analysis.analysis import (
     AnalysisConfig,
     AnalysisError,
+    ComputeItem,
     AnalysisResult,
     AnalysisSummary,
     AnalyzeKernelSummary,
@@ -72,6 +73,7 @@ from kernel_gen.analysis.analysis import (
     analyze_matmul_op,
 )
 import kernel_gen.analysis.analysis as analysis_module
+from kernel_gen.analysis.compute import ComputeKind
 from kernel_gen.analysis.memory import MemoryPath
 from kernel_gen.dialect.dma import (
     DmaAllocOp,
@@ -731,11 +733,11 @@ def test_analysis_entry_returns_new_result_for_scalar_kernel_add() -> None:
     assert isinstance(result, AnalysisResult)
     assert len(result.compute_items) == 1
     item = result.compute_items[0]
-    assert item.kind == "scalar"
+    assert item.kind is ComputeKind.SCALAR
     _assert_expr_equal(item.amount, sp.Integer(1))
     assert item.dtype == "i32"
     assert result.memory_items == ()
-    assert result.compute_totals_by_kind["scalar"] == sp.Integer(1)
+    assert result.compute_totals_by_kind == {ComputeKind.SCALAR: sp.Integer(1)}
     assert "analysis.compute" not in add_op.attributes
 
 
@@ -937,6 +939,147 @@ def test_analysis_memory_missing_target_metric_fails_explicitly(
 
     with pytest.raises(AnalysisError, match="missing analysis metric defaults: theoretical_compute"):
         AnalysisConfig(target="npu_demo")
+
+
+# AN-020D-C
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 测试目的: 验证标量 kernel.add 会落到 ComputeKind.SCALAR。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_scalar_compute_kind
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_scalar_compute_kind() -> None:
+    lhs = arith.ConstantOp(IntegerAttr(1, i32))
+    rhs = arith.ConstantOp(IntegerAttr(2, i32))
+    add_op = FakeKernelScalarAddOp(lhs.result, rhs.result, i32)
+
+    result = analysis(add_op, AnalysisConfig(enable_compute=True, enable_memory=False))
+
+    assert result.compute_items == (ComputeItem(kind=ComputeKind.SCALAR, amount=sp.Integer(1), dtype="i32"),)
+    assert result.compute_totals_by_kind == {ComputeKind.SCALAR: sp.Integer(1)}
+
+
+# AN-020E-C
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 测试目的: 验证逐元素 nn.add 会落到 ComputeKind.VECTOR。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_vector_compute_kind
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_vector_compute_kind() -> None:
+    mem_type = _make_memory_type([StringAttr("A"), StringAttr("B")], f32, "global")
+    space = _make_space("global")
+    block = Block(arg_types=[mem_type, mem_type])
+    add_op = NnAddOp(block.args[0], block.args[1], mem_type, space)
+
+    result = analysis(
+        add_op,
+        AnalysisConfig(enable_compute=True, enable_memory=False, dtype_size_overrides={"f32": 4}),
+    )
+
+    expected_numel = SymbolDim("A").get_symbol() * SymbolDim("B").get_symbol()
+    assert result.compute_items == (
+        ComputeItem(kind=ComputeKind.VECTOR, amount=expected_numel, dtype="f32"),
+    )
+    assert result.compute_totals_by_kind == {ComputeKind.VECTOR: expected_numel}
+
+
+# AN-020F-C
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 测试目的: 验证 nn.matmul 会落到 ComputeKind.TENSOR。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_tensor_compute_kind
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_tensor_compute_kind() -> None:
+    lhs_type = _make_memory_type([StringAttr("M"), StringAttr("K")], f32, "global")
+    rhs_type = _make_memory_type([StringAttr("K"), StringAttr("N")], f32, "global")
+    out_type = _make_memory_type([StringAttr("M"), StringAttr("N")], f32, "global")
+    space = _make_space("global")
+    block = Block(arg_types=[lhs_type, rhs_type])
+    matmul_op = NnMatmulOp(block.args[0], block.args[1], out_type, space)
+
+    result = analysis(
+        matmul_op,
+        AnalysisConfig(enable_compute=True, enable_memory=False, dtype_size_overrides={"f32": 4}),
+    )
+
+    expected = sp.Integer(2) * SymbolDim("M").get_symbol() * SymbolDim("N").get_symbol() * SymbolDim("K").get_symbol()
+    assert result.compute_items == (
+        ComputeItem(kind=ComputeKind.TENSOR, amount=expected, dtype="f32"),
+    )
+    assert result.compute_totals_by_kind == {ComputeKind.TENSOR: expected}
+
+
+# AN-020G-C
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 测试目的: 验证 tensor + const 保留 ComputeKind.VECTOR，且常量不计 memory traffic。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_tensor_plus_const_preserves_compute_kind_without_const_memory_traffic
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_tensor_plus_const_preserves_compute_kind_without_const_memory_traffic() -> None:
+    mem_type = _make_memory_type([StringAttr("A"), StringAttr("B")], f32, "global")
+    space = _make_space("global")
+    block = Block(arg_types=[mem_type])
+    const_op = arith.ConstantOp(IntegerAttr(1, i32))
+    add_op = FakeNnAddOp(block.args[0], const_op.result, mem_type, space)
+
+    result = analysis(
+        add_op,
+        AnalysisConfig(enable_compute=True, enable_memory=True, dtype_size_overrides={"f32": 4}),
+    )
+
+    expected_numel = SymbolDim("A").get_symbol() * SymbolDim("B").get_symbol()
+    assert result.compute_items == (
+        ComputeItem(kind=ComputeKind.VECTOR, amount=expected_numel, dtype="f32"),
+    )
+    assert result.compute_totals_by_kind == {ComputeKind.VECTOR: expected_numel}
+    assert len(result.memory_items) == 2
+    assert [item.access for item in result.memory_items] == ["read", "write"]
+    _assert_expr_equal(result.total_read_bytes, expected_numel * 4)
+    _assert_expr_equal(result.total_write_bytes, expected_numel * 4)
+
+
+# AN-020H-C
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 测试目的: 验证 compare(i1) 在新 schema 下保留 ComputeKind.VECTOR，且 predicate_size 仍生效。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_compare_i1_keeps_predicate_size_in_new_schema
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_compare_i1_keeps_predicate_size_in_new_schema() -> None:
+    lhs_type = _make_memory_type([IntAttr(2), IntAttr(3)], f32, "global")
+    out_type = _make_memory_type([IntAttr(2), IntAttr(3)], i1, "global")
+    space = _make_space("global")
+    block = Block(arg_types=[lhs_type, lhs_type])
+    eq_op = NnEqOp(block.args[0], block.args[1], out_type, space)
+
+    result = analysis(
+        eq_op,
+        AnalysisConfig(enable_compute=True, enable_memory=True, predicate_size=2, dtype_size_overrides={"f32": 4}),
+    )
+
+    assert result.compute_items == (
+        ComputeItem(kind=ComputeKind.VECTOR, amount=sp.Integer(6), dtype="i1"),
+    )
+    assert result.compute_totals_by_kind == {ComputeKind.VECTOR: sp.Integer(6)}
+    _assert_expr_equal(result.total_write_bytes, sp.Integer(12))
 
 
 # AN-020D
