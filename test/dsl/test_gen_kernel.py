@@ -38,11 +38,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.dialect.dma import DmaAllocOp, DmaFillOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolValueType
 from kernel_gen.dsl.emit_c import EmitCContext
 from kernel_gen.dsl.gen_kernel import GenKernelError, gen_kernel
 from kernel_gen.dsl.mlir_gen import build_func_op
+from kernel_gen.passes.lowering.buffer_results_to_out_params import BufferResultsToOutParamsPass
 from kernel_gen.passes.lowering.nn_to_kernel import LowerNnToKernelPass
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -111,6 +113,55 @@ def _lower_func(func_op: func.FuncOp) -> func.FuncOp:
 
     module = ModuleOp([func_op])
     LowerNnToKernelPass().run(module)
+    return next(op for op in module.ops if isinstance(op, func.FuncOp))
+
+
+def _rewrite_func(func_op: func.FuncOp) -> func.FuncOp:
+    """对单个 `func.func` 执行 `BufferResultsToOutParamsPass` 并返回改写后的函数。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 为 O5 的 rewrite-after-IR codegen 测试提供最小包装。
+    - 直接在 module 内原地执行 pass，并返回同一函数实例。
+
+    使用示例:
+    - rewritten = _rewrite_func(func_op)
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: test/dsl/test_gen_kernel.py
+    """
+
+    module = ModuleOp([func_op])
+    BufferResultsToOutParamsPass().run(module)
+    return next(op for op in module.ops if isinstance(op, func.FuncOp))
+
+
+def _lower_and_rewrite_func(func_op: func.FuncOp) -> func.FuncOp:
+    """对单个 `func.func` 先 lowering 再执行 out-param rewrite。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 固定公开成功链路为 `LowerNnToKernelPass -> BufferResultsToOutParamsPass`。
+    - 用于 O5 的 `build_func_op -> pass -> gen_kernel` 黑盒闭环测试。
+
+    使用示例:
+    - lowered = _lower_and_rewrite_func(func_op)
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: test/dsl/test_gen_kernel.py
+    """
+
+    module = ModuleOp([func_op])
+    LowerNnToKernelPass().run(module)
+    BufferResultsToOutParamsPass().run(module)
     return next(op for op in module.ops if isinstance(op, func.FuncOp))
 
 
@@ -207,9 +258,9 @@ def test_gen_kernel_returns_target_source() -> None:
     memory_block = Block(arg_types=[mem])
     memory_block.add_op(func.ReturnOp(memory_block.args[0]))
     memory_func = _func("memory_kernel", [mem], [mem], memory_block, ("input",))
-    memory_source = gen_kernel(memory_func, _ctx())
-    assert memory_source.startswith("void memory_kernel(const Memory<int32_t>& input, Memory<int32_t>& out)")
-    assert "out = input;" in memory_source
+    memory_source = gen_kernel(_rewrite_func(memory_func), _ctx())
+    assert memory_source.startswith("void memory_kernel(Memory<int32_t>& arg0, const Memory<int32_t>& input)")
+    assert "out = input;" not in memory_source
 
 
 # GK-014
@@ -308,27 +359,27 @@ def test_gen_kernel_uses_readonly_memory_inputs() -> None:
     assert source.startswith("void read_only(const Memory<int32_t>& input)")
 
 
-# GK-003
-# 创建者: 金铲铲大作战
+# GK-O5-001
+# 创建者: jcc你莫辜负
 # 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
-# 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
-# 功能说明: 验证 Memory 结果降为输出参数。
-# 测试目的: 验证 gen_kernel 生成的完整源码对 Memory 返回值生成 out 参数。
-# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_lowers_memory_result_to_out_param
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 功能说明: 验证 rewritten 单 output memory 函数可被 gen_kernel 消费。
+# 测试目的: 锁定公开成功链路必须来自 rewrite 后 IR，源码签名使用前置 `arg0`，不再依赖旧 memory return ABI。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_accepts_rewritten_single_output_function
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
 # 对应测试文件路径: test/dsl/test_gen_kernel.py
-
-def test_gen_kernel_lowers_memory_result_to_out_param() -> None:
+def test_gen_kernel_accepts_rewritten_single_output_function() -> None:
     mem = _make_memory_type([2, 2], [2, 1])
     block = Block(arg_types=[mem])
     block.add_op(func.ReturnOp(block.args[0]))
     func_op = _func("produce", [mem], [mem], block, ("input",))
 
-    source = gen_kernel(func_op, _ctx())
+    source = gen_kernel(_rewrite_func(func_op), _ctx())
 
-    assert source.startswith("void produce(const Memory<int32_t>& input, Memory<int32_t>& out)")
+    assert source.startswith("void produce(Memory<int32_t>& arg0, const Memory<int32_t>& input)")
+    assert "out = input;" not in source
 
 
 # GK-004
@@ -451,7 +502,7 @@ def test_gen_kernel_handles_func_return_and_out_binding_in_main_flow(monkeypatch
     mem = _make_memory_type([2, 2], [2, 1])
     second_block = Block(arg_types=[mem, mem])
     second_block.add_op(func.ReturnOp(second_block.args[1]))
-    second_func = _func("return_second", [mem, mem], [mem], second_block, ("lhs", "rhs"))
+    second_func = _rewrite_func(_func("return_second", [mem, mem], [mem], second_block, ("lhs", "rhs")))
 
     def _unexpected_emit(op: object, _ctx: EmitCContext) -> str:
         raise AssertionError(f"emit_c_op should not see {op}")
@@ -460,8 +511,9 @@ def test_gen_kernel_handles_func_return_and_out_binding_in_main_flow(monkeypatch
 
     source = gen_kernel(second_func, _ctx())
 
-    assert source.startswith("void return_second(const Memory<int32_t>& lhs, const Memory<int32_t>& rhs, Memory<int32_t>& out)")
-    assert "out = rhs;" in source
+    assert source.startswith("void return_second(Memory<int32_t>& arg0, const Memory<int32_t>& lhs, const Memory<int32_t>& rhs)")
+    assert "func.return" not in source
+    assert "out = rhs;" not in source
 
 
 # GK-006
@@ -537,10 +589,9 @@ def test_gen_kernel_rejects_unsupported_return_form() -> None:
     block.add_op(func.ReturnOp(block.args[0]))
     func_op = _func("scalar_return", [i32], [i32], block, ("value",))
 
-    with pytest.raises(GenKernelError) as exc_info:
-        gen_kernel(func_op, _ctx())
-
-    assert "unsupported return form" in str(exc_info.value)
+    source = gen_kernel(func_op, _ctx())
+    assert source.startswith("int32_t scalar_return(int32_t value)")
+    assert "return value;" in source
 
     tuple_block = Block(arg_types=[])
     tuple_block.add_op(func.ReturnOp())
@@ -558,15 +609,6 @@ def test_gen_kernel_rejects_unsupported_return_form() -> None:
         gen_kernel(float_func, _ctx())
     assert "unsupported type" in str(exc_info.value)
 
-    bad_body_block = Block(arg_types=[i32])
-    bad_body_block.add_op(func.ReturnOp(bad_body_block.args[0]))
-    bad_body_type = FunctionType.from_lists([i32], [i32])
-    bad_body_func = func.FuncOp("bad_body", bad_body_type, Region(bad_body_block), arg_attrs=_arg_attrs("value"))
-    with pytest.raises(GenKernelError) as exc_info:
-        gen_kernel(bad_body_func, _ctx())
-    assert "unsupported return form" in str(exc_info.value)
-
-
 # GK-012
 # 创建者: jcc你莫辜负
 # 最后一次更改: jcc你莫辜负
@@ -583,20 +625,20 @@ def test_gen_kernel_supports_float32_scalar_and_memory() -> None:
     mem_f32 = _make_memory_type([2, 2], [2, 1], element_type=f32)
     block_f32 = Block(arg_types=[mem_f32, f32])
     block_f32.add_op(func.ReturnOp(block_f32.args[0]))
-    func_op_f32 = _func("float_kernel", [mem_f32, f32], [mem_f32], block_f32, ("input", "alpha"))
+    func_op_f32 = _rewrite_func(_func("float_kernel", [mem_f32, f32], [mem_f32], block_f32, ("input", "alpha")))
 
     source_f32 = gen_kernel(func_op_f32, _ctx())
 
-    assert source_f32.startswith("void float_kernel(const Memory<float>& input, float alpha, Memory<float>& out)")
+    assert source_f32.startswith("void float_kernel(Memory<float>& arg0, const Memory<float>& input, float alpha)")
 
     mem_f64 = _make_memory_type([2, 2], [2, 1], element_type=f64)
     block_f64 = Block(arg_types=[mem_f64, f64])
     block_f64.add_op(func.ReturnOp(block_f64.args[0]))
-    func_op_f64 = _func("double_kernel", [mem_f64, f64], [mem_f64], block_f64, ("input", "alpha"))
+    func_op_f64 = _rewrite_func(_func("double_kernel", [mem_f64, f64], [mem_f64], block_f64, ("input", "alpha")))
 
     source_f64 = gen_kernel(func_op_f64, _ctx())
 
-    assert source_f64.startswith("void double_kernel(const Memory<double>& input, double alpha, Memory<double>& out)")
+    assert source_f64.startswith("void double_kernel(Memory<double>& arg0, const Memory<double>& input, double alpha)")
 
 
 # GK-009
@@ -615,12 +657,12 @@ def test_gen_kernel_preserves_function_and_arg_names() -> None:
     mem = _make_memory_type([2, 2], [2, 1])
     block = Block(arg_types=[mem, i32])
     block.add_op(func.ReturnOp(block.args[0]))
-    func_op = _func("named_kernel", [mem, i32], [mem], block, ("tensor", "scale"))
+    func_op = _rewrite_func(_func("named_kernel", [mem, i32], [mem], block, ("tensor", "scale")))
 
     source = gen_kernel(func_op, _ctx())
 
-    assert source.startswith("void named_kernel(const Memory<int32_t>& tensor, int32_t scale, Memory<int32_t>& out)")
-    assert "out = tensor;" in source
+    assert source.startswith("void named_kernel(Memory<int32_t>& arg0, const Memory<int32_t>& tensor, int32_t scale)")
+    assert "out = tensor;" not in source
 
     unnamed_block = Block(arg_types=[i32])
     unnamed_block.add_op(func.ReturnOp())
@@ -707,10 +749,10 @@ def test_gen_kernel_supports_lowered_nn_add_memory_memory_on_cpu() -> None:
         return lhs + rhs
 
     func_op = build_func_op(add_direct, _tensor_arg([2, 2]), _tensor_arg([2, 2]))
-    source = gen_kernel(_lower_func(func_op), _ctx())
+    source = gen_kernel(_lower_and_rewrite_func(func_op), _ctx())
 
-    assert source.startswith("void add_direct(const Memory<int32_t>& arg0, const Memory<int32_t>& arg1, Memory<int32_t>& out)")
-    assert "cpu::add(arg0, arg1, out);" in source
+    assert source.startswith("void add_direct(Memory<int32_t>& arg0, const Memory<int32_t>& arg1, const Memory<int32_t>& arg2)")
+    assert "cpu::add(arg1, arg2, arg0);" in source
     assert "kernel.add" not in source
     assert "nn.add" not in source
     assert "out = " not in source
@@ -732,10 +774,10 @@ def test_gen_kernel_supports_lowered_nn_add_memory_const_on_cpu() -> None:
         return lhs + 1
 
     func_op = build_func_op(add_const_direct, _tensor_arg([2, 2]))
-    source = gen_kernel(_lower_func(func_op), _ctx())
+    source = gen_kernel(_lower_and_rewrite_func(func_op), _ctx())
 
-    assert source.startswith("void add_const_direct(const Memory<int32_t>& arg0, Memory<int32_t>& out)")
-    assert "cpu::add(arg0, v0, out);" in source
+    assert source.startswith("void add_const_direct(Memory<int32_t>& arg0, const Memory<int32_t>& arg1)")
+    assert "cpu::add(arg1, v0, arg0);" in source
     assert "for (long long fill0_i = 0; fill0_i < v0.element_count(); ++fill0_i) {" in source
     assert "v0.data()[fill0_i] = 1;" in source
     assert "kernel.add" not in source
@@ -759,41 +801,91 @@ def test_gen_kernel_supports_lowered_nn_add_memory_symbol_on_cpu() -> None:
         return lhs + bias
 
     func_op = build_func_op(add_symbol_direct, _tensor_arg([2, 2]), SymbolDim("bias"))
-    source = gen_kernel(_lower_func(func_op), _ctx())
+    source = gen_kernel(_lower_and_rewrite_func(func_op), _ctx())
 
-    assert source.startswith("void add_symbol_direct(const Memory<int32_t>& arg0, long long arg1, Memory<int32_t>& out)")
-    assert "cpu::add(arg0, v0, out);" in source
+    assert source.startswith("void add_symbol_direct(Memory<int32_t>& arg0, const Memory<int32_t>& arg1, long long arg2)")
+    assert "cpu::add(arg1, v0, arg0);" in source
     assert "for (long long fill0_i = 0; fill0_i < v0.element_count(); ++fill0_i) {" in source
-    assert "v0.data()[fill0_i] = arg1;" in source
+    assert "v0.data()[fill0_i] = arg2;" in source
     assert "kernel.add" not in source
     assert "nn.add" not in source
     assert "out = " not in source
 
 
-# GK-016
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-02 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-02 00:00:00 +0800
-# 功能说明: 验证 multi-use 或无法 direct bind 到 out 时，nn.add 特化继续报 unsupported op。
-# 测试目的: 锁定 direct-return nn.add 的硬门禁，避免退化为 out = tmp 或其他 generic fallback。
-# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_rejects_nn_add_specialization_on_multi_use
-# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
-# 对应 spec 文件路径: spec/dsl/gen_kernel.md
-# 对应测试文件路径: test/dsl/test_gen_kernel.py
-def test_gen_kernel_rejects_nn_add_specialization_on_multi_use() -> None:
-    mem = _make_memory_type([2, 2], [2, 1])
-    space = NnMemorySpaceAttr.from_name("global")
-    block = Block(arg_types=[mem, mem, mem])
-    add = NnAddOp(block.args[0], block.args[1], mem, space)
-    use_again = NnAddOp(add.result, block.args[2], mem, space)
-    block.add_op(add)
-    block.add_op(use_again)
-    block.add_op(func.ReturnOp(add.result))
-    func_op = _func("add_multi_use", [mem, mem, mem], [mem], block, ("lhs", "rhs", "extra"))
+class Test_buffer_results_to_out_params_gen_kernel:
+    def test_gen_kernel_accepts_rewritten_single_output_function(self) -> None:
+        test_gen_kernel_accepts_rewritten_single_output_function()
 
-    with pytest.raises(ValueError, match="target=cpu: nn.add: unsupported op"):
-        gen_kernel(func_op, _ctx())
+    # GK-O5-002
+    # 创建者: jcc你莫辜负
+    # 最后一次更改: jcc你莫辜负
+    # 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+    # 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+    # 功能说明: 验证 rewritten mixed output 函数可被 gen_kernel 消费。
+    # 测试目的: 锁定 memory 走前置 out、scalar 继续返回的 rewrite 后 ABI。
+    # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_accepts_rewritten_mixed_output_function
+    # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+    # 对应 spec 文件路径: spec/dsl/gen_kernel.md
+    # 对应测试文件路径: test/dsl/test_gen_kernel.py
+    def test_gen_kernel_accepts_rewritten_mixed_output_function(self) -> None:
+        mem = _make_memory_type([2, 2], [2, 1])
+        block = Block(arg_types=[mem, i1])
+        block.add_op(func.ReturnOp(block.args[0], block.args[1]))
+        func_op = _func("mixed_out", [mem, i1], [mem, i1], block, ("input", "flag"))
+
+        source = gen_kernel(_rewrite_func(func_op), _ctx())
+
+        assert source.startswith("bool mixed_out(Memory<int32_t>& arg0, const Memory<int32_t>& input, bool flag)")
+        assert "return flag;" in source
+        assert "Memory<int32_t>& out" not in source
+
+    # GK-O5-003
+    # 创建者: jcc你莫辜负
+    # 最后一次更改: jcc你莫辜负
+    # 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+    # 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+    # 功能说明: 验证 rewrite 后成功链路不再残留旧 memory return ABI。
+    # 测试目的: 黑盒检查 rewritten IR 与生成源码都不再依赖旧 memory return/out 推导路径。
+    # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_rewritten_pipeline_has_no_memory_return_abi_left
+    # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+    # 对应 spec 文件路径: spec/dsl/gen_kernel.md
+    # 对应测试文件路径: test/dsl/test_gen_kernel.py
+    def test_rewritten_pipeline_has_no_memory_return_abi_left(self) -> None:
+        def add_direct(lhs: "Tensor[i32, 2, 2]", rhs: "Tensor[i32, 2, 2]") -> "Tensor[i32, 2, 2]":
+            return lhs + rhs
+
+        func_op = _lower_and_rewrite_func(build_func_op(add_direct, _tensor_arg([2, 2]), _tensor_arg([2, 2])))
+        source = gen_kernel(func_op, _ctx())
+        ir_text = str(func_op)
+
+        assert "-> (!nn.memory" not in ir_text
+        assert "func.return %" not in ir_text
+        assert "cpu::add(arg1, arg2, arg0);" in source
+        assert "Memory<int32_t>& out" not in source
+        assert "out = " not in source
+
+    # GK-O5-004
+    # 创建者: jcc你莫辜负
+    # 最后一次更改: jcc你莫辜负
+    # 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+    # 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+    # 功能说明: 验证 half-rewritten IR 会被 gen_kernel 显式拒绝。
+    # 测试目的: 防止“函数签名改了，但 outputs/return 仍保留旧 memory return ABI”的假闭环。
+    # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_rewritten_pipeline_fails_on_half_rewritten_ir
+    # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+    # 对应 spec 文件路径: spec/dsl/gen_kernel.md
+    # 对应测试文件路径: test/dsl/test_gen_kernel.py
+    def test_rewritten_pipeline_fails_on_half_rewritten_ir(self) -> None:
+        mem = _make_memory_type([2, 2], [2, 1])
+        block = Block(arg_types=[mem, mem, mem])
+        space = NnMemorySpaceAttr.from_name("global")
+        add = NnAddOp(block.args[1], block.args[2], mem, space)
+        block.add_op(add)
+        block.add_op(func.ReturnOp(block.args[0]))
+        func_op = _func("half_rewritten", [mem, mem, mem], [mem], block, ("arg0", "lhs", "rhs"))
+
+        with pytest.raises(GenKernelError, match="legacy memory return ABI is not supported"):
+            gen_kernel(func_op, _ctx())
 
 
 # GK-017
@@ -916,15 +1008,14 @@ def test_gen_kernel_rejects_npu_demo_body_level_kernel_with_nonempty_body() -> N
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
 # 对应测试文件路径: test/dsl/test_gen_kernel.py
 def test_gen_kernel_black_box_direct_return_nn_add_conv2d_img2col2d_tiled_and_npu_demo_contracts() -> None:
-    mem = _make_memory_type([2, 2], [2, 1])
-    space = NnMemorySpaceAttr.from_name("global")
-    add_block = Block(arg_types=[mem, mem])
-    add_op = NnAddOp(add_block.args[0], add_block.args[1], mem, space)
-    add_block.add_op(add_op)
-    add_block.add_op(func.ReturnOp(add_op.result))
-    add_func = _func("add_direct", [mem, mem], [mem], add_block, ("lhs", "rhs"))
-    add_source = gen_kernel(add_func, _ctx())
-    assert "cpu::add(lhs, rhs, out);" in add_source
+    def add_direct(lhs: "Tensor[i32, 2, 2]", rhs: "Tensor[i32, 2, 2]") -> "Tensor[i32, 2, 2]":
+        return lhs + rhs
+
+    add_source = gen_kernel(
+        _lower_and_rewrite_func(build_func_op(add_direct, _tensor_arg([2, 2]), _tensor_arg([2, 2]))),
+        _ctx(),
+    )
+    assert "cpu::add(arg1, arg2, arg0);" in add_source
     assert "out = " not in add_source
 
     input_type = _make_memory_type([1, 16, 18, 18], [5184, 324, 18, 1], element_type=f32)
@@ -966,33 +1057,33 @@ def test_gen_kernel_compiles_and_runs_lowered_nn_add_variants_on_cpu() -> None:
         return lhs + bias
 
     pair_source = gen_kernel(
-        _lower_func(build_func_op(add_direct, _tensor_arg([2, 2]), _tensor_arg([2, 2]))),
+        _lower_and_rewrite_func(build_func_op(add_direct, _tensor_arg([2, 2]), _tensor_arg([2, 2]))),
         _ctx(),
     )
     const_source = gen_kernel(
-        _lower_func(build_func_op(add_const_direct, _tensor_arg([2, 2]))),
+        _lower_and_rewrite_func(build_func_op(add_const_direct, _tensor_arg([2, 2]))),
         _ctx(),
     )
     symbol_source = gen_kernel(
-        _lower_func(build_func_op(add_symbol_direct, _tensor_arg([2, 2]), SymbolDim("bias"))),
+        _lower_and_rewrite_func(build_func_op(add_symbol_direct, _tensor_arg([2, 2]), SymbolDim("bias"))),
         _ctx(),
     )
 
-    assert "cpu::add(arg0, arg1, out);" in pair_source
+    assert "cpu::add(arg1, arg2, arg0);" in pair_source
     assert "kernel.add" not in pair_source
     assert "nn.add" not in pair_source
-    assert "arg0.shape()[0]" in const_source
-    assert "arg0.shape()[1]" in const_source
-    assert "cpu::add(arg0, v0, out);" in const_source
+    assert "arg1.shape()[0]" in const_source
+    assert "arg1.shape()[1]" in const_source
+    assert "cpu::add(arg1, v0, arg0);" in const_source
     assert "for (long long fill0_i = 0; fill0_i < v0.element_count(); ++fill0_i) {" in const_source
     assert "v0.data()[fill0_i] = 1;" in const_source
     assert "kernel.add" not in const_source
     assert "nn.add" not in const_source
-    assert "arg0.shape()[0]" in symbol_source
-    assert "arg0.shape()[1]" in symbol_source
-    assert "cpu::add(arg0, v0, out);" in symbol_source
+    assert "arg1.shape()[0]" in symbol_source
+    assert "arg1.shape()[1]" in symbol_source
+    assert "cpu::add(arg1, v0, arg0);" in symbol_source
     assert "for (long long fill0_i = 0; fill0_i < v0.element_count(); ++fill0_i) {" in symbol_source
-    assert "v0.data()[fill0_i] = arg1;" in symbol_source
+    assert "v0.data()[fill0_i] = arg2;" in symbol_source
     assert "kernel.add" not in symbol_source
     assert "nn.add" not in symbol_source
 
@@ -1028,9 +1119,9 @@ int main() {{
     Memory<int32_t> out_const(out_const_data, 2, shape, stride);
     Memory<int32_t> out_symbol(out_symbol_data, 2, shape, stride);
 
-    add_direct(lhs, rhs, out_pair);
-    add_const_direct(lhs, out_const);
-    add_symbol_direct(lhs, 7, out_symbol);
+    add_direct(out_pair, lhs, rhs);
+    add_const_direct(out_const, lhs);
+    add_symbol_direct(out_symbol, lhs, 7);
 
     int32_t expected_pair[4] = {{11, 22, 33, 44}};
     int32_t expected_const[4] = {{2, 3, 4, 5}};

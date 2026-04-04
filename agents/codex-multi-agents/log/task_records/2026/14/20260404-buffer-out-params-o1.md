@@ -605,3 +605,206 @@
 - 结论：
   - `T-20260404-4703789f` 已完成并封板。
   - 后续链路等待管理员核对并分发 `T-20260404-6d6c8ac3`。
+
+- 时间：`2026-04-04 12:56:53 +0800`
+- 经办人：`jcc你莫辜负`
+- 任务：`T-20260404-7fcef03d`
+- 任务目标：
+  - 按 `O5` 边界收口 [`kernel_gen/dsl/gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/dsl/gen_kernel.py)、[`spec/dsl/gen_kernel.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/dsl/gen_kernel.md)、[`test/dsl/test_gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/dsl/test_gen_kernel.py)、[`expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py`](/home/lfr/kernelcode_generate/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py) 与同链记录，让 `gen_kernel/expectation/黑盒测试` 只消费 rewrite 后 IR，确保没有旧 `memory return` ABI 残留；不扩 pass 重写范围。
+- 过程与改动：
+  - 开始前已向管理员回报 `T-20260404-7fcef03d` 开工，确认当前无其他进行中任务，沿用 `worktree=wt-20260404-buffer-out-params-o1`。
+  - 核对后发现计划点名的 expectation 路径只存在目录、不存在目标文件；由于本轮允许修改该 expectation 路径，直接在主工作目录新建 [`callsite_rewrite.py`](/home/lfr/kernelcode_generate/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py)，未把它升级成阻塞。
+  - [`gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/dsl/gen_kernel.py)
+    - 新增 `_leading_rewritten_out_param_count(...)`，只把 `arg_attrs` 中显式标记的前置 `arg0/arg1/...` memory 参数识别为 rewrite 后 out 参数。
+    - 默认签名路径不再接受旧 `memory return` ABI；若 `function_type.outputs` 里仍有 `NnMemoryType`，显式报 `legacy memory return ABI is not supported; run BufferResultsToOutParamsPass first`。
+    - 默认 CPU 路径改为只消费 rewrite 后 IR：前置 out 参数生成为非 `const Memory<...>&`，其余 memory 参数继续生成为只读 `const Memory<...>&`。
+    - 放宽单一非 `Memory` 标量返回，支持 mixed output rewrite 后保留的 scalar 返回；`!symbol.int` 仍保持 `cpu-only`。
+    - 为 `conv2d_img2col2d_tiled(...)` 增加独立签名发射，避免它误走 rewrite-only 默认签名逻辑。
+  - [`test_gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/dsl/test_gen_kernel.py)
+    - 新增 `_rewrite_func(...)` 与 `_lower_and_rewrite_func(...)` helper，统一把 O5 的成功链路固定为 `LowerNnToKernelPass -> BufferResultsToOutParamsPass -> gen_kernel(...)`。
+    - 既有 `Memory` 返回相关测试已改成消费 rewrite 后 IR，不再依赖 `gen_kernel` 从旧 `memory return` ABI 隐式补 `out`。
+    - 新增 O5 黑盒门禁类 `Test_buffer_results_to_out_params_gen_kernel`，覆盖：
+      - `test_gen_kernel_accepts_rewritten_single_output_function`
+      - `test_gen_kernel_accepts_rewritten_mixed_output_function`
+      - `test_rewritten_pipeline_has_no_memory_return_abi_left`
+      - `test_rewritten_pipeline_fails_on_half_rewritten_ir`
+    - `build_func_op -> pass -> gen_kernel` 的三条 `nn.add` CPU 路径 smoke 也统一切到 rewrite 后 ABI，并同步修正源码签名与 C++ 调用顺序。
+    - `GK-008` 的旧“标量返回非法”口径已收口为当前真实合同：单一非 `Memory` 标量返回允许成功，真正不支持的仍是 tuple return、不支持类型和旧 `memory return` ABI。
+  - [`gen_kernel.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/dsl/gen_kernel.md)
+    - 把默认 CPU 成功路径明确收口为 rewrite-after-IR 合同：memory 输出必须先经过 `BufferResultsToOutParamsPass` 前移为 `arg0/arg1/...`。
+    - 移除 `direct-return nn.add -> cpu::add(..., out)` 作为默认 CPU 成功路径的表述，改为 rewrite 后 `kernel.add(...)` 的函数级发射合同。
+    - 新增 O5 的四条测试映射，并把 `GK-013~GK-020` 改到 rewrite 后 IR 口径。
+  - [`callsite_rewrite.py`](/home/lfr/kernelcode_generate/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py)
+    - 新建 expectation 基线，锁定四件事：
+      - `build_func_op -> LowerNnToKernelPass -> BufferResultsToOutParamsPass -> gen_kernel`
+      - rewrite 后 `memory + scalar` mixed output
+      - caller/callee `func.call` 改写后零 memory result SSA
+      - half-rewritten IR 的显式失败
+- 自检：
+  - 目标是否真正收口：`是`。默认 CPU codegen、expectation 和 O5 黑盒都已切到 rewrite 后 IR；旧 `memory return` ABI 现在是显式失败而非隐式成功。
+  - 边界是否越界：`否`。只改了指定的 `gen_kernel.py / gen_kernel.md / test_gen_kernel.py / expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py` 与当前记录文件；没有扩到 pass 实现或其他无关目录。
+  - 是否有更小改动：`已评估`。默认签名路径只新增 rewrite 后 out 识别和旧 ABI 拒绝，没有改 `emit_c` 或 pass 本体；conv/npu 既有特化仅做必要兼容。
+  - 记录文件与实际改动是否一致：`是`。
+- 验证：
+  - `python3 -m pytest -q test/dsl/test_gen_kernel.py -k 'buffer_results_to_out_params or rewritten_out_param'` -> `4 passed, 30 deselected`
+  - `for f in expectation/pass/lowing/buffer_results_to_out_params/*.py; do PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1 python3 "$f"; done` -> `0`
+  - `python3 -m pytest -q test/dsl/test_gen_kernel.py` -> `34 passed`
+  - `python3 -m py_compile kernel_gen/dsl/gen_kernel.py test/dsl/test_gen_kernel.py /home/lfr/kernelcode_generate/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py` -> `0`
+  - `git -C /home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1 diff --check -- kernel_gen/dsl/gen_kernel.py spec/dsl/gen_kernel.md test/dsl/test_gen_kernel.py` -> `0`
+  - `git -C /home/lfr/kernelcode_generate diff --check -- expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py` -> `0`
+- 结论：
+  - `T-20260404-7fcef03d` 已按 `O5` 边界完成，自检通过。
+  - 当前无阻塞；下一步应进入同链路审查，并沿整条链继续覆盖 `spec / 实现 / 测试 / expectation / 记录文件`。
+
+- 时间：`2026-04-04 12:58:00 +0800`
+- 经办人：`jcc你莫辜负`
+- 任务：`T-20260404-7fcef03d`
+- 执行：
+  - 已执行 `-done`：
+    - `bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file /home/lfr/kernelcode_generate/TODO.md -done -task_id T-20260404-7fcef03d -log /home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md -agents-list /home/lfr/kernelcode_generate/agents/codex-multi-agents/agents-lists.md`
+    - 结果：`OK: done T-20260404-7fcef03d`
+  - 已新建同链路唯一后续审查任务：
+    - `T-20260404-a3ce0ec0`
+    - 方向：只读复核 `O5` 的 `gen_kernel / spec / test / expectation / 记录` 是否一致闭环。
+- 结论：
+  - `T-20260404-7fcef03d` 已完成并收口。
+  - 后续等待管理员核对并分发 `T-20260404-a3ce0ec0`。
+
+- 时间：`2026-04-04 13:07:58 +0800`
+- 经办人：`jcc你莫辜负`
+- 任务：`T-20260404-bc6c044b`
+- 任务目标：
+  - 按 `O5` 注释/示例合同修正边界，只修改 [`kernel_gen/dsl/gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/dsl/gen_kernel.py)、[`expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py`](/home/lfr/kernelcode_generate/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py) 与同链记录，补齐 O5 新增/修改函数的中文功能说明、使用示例与关联文件链接；保持 rewrite 后 IR 的 codegen/expectation/黑盒闭环语义不变，不扩到 `O4/O6`。
+- 改动：
+  - [`gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/dsl/gen_kernel.py)
+    - 为 O5 变更过但缺说明块的 `_emit_default_signature(...)`、`_emit_return_statement(...)`、`_emit_default_function_body(...)` 补齐中文 docstring。
+    - 说明内容已覆盖：功能说明、使用示例、`spec/test/功能实现` 链接。
+    - 未改任何业务逻辑、签名规则、报错文本或发射行为。
+  - [`callsite_rewrite.py`](/home/lfr/kernelcode_generate/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py)
+    - 为 O5 新增 helper `_make_memory_type(...)`、`_arg_attrs(...)`、`_tensor_arg(...)`、`_func(...)` 补齐中文 docstring。
+    - 对前端样例 `add_direct(...)`，因直接添加 Python docstring 会被 `build_func_op(...)` 当作函数体字符串常量导致 lowering 失败，所以改用函数前注释块补齐“功能说明 / 使用示例 / 关联文件”，保持执行语义不变。
+- 自检：
+  - 边界：通过。只改了本任务允许的两份代码/expectation 文件和同链记录，没有扩到 `spec/dsl/gen_kernel.md`、测试或 pass 实现。
+  - 语义：通过。所有改动均为说明块和注释；唯一的回退修正是把 `add_direct(...)` 的 docstring 改成前置注释，避免破坏 expectation 前端解析。
+  - 记录一致性：通过。记录中的文件、验证和结论与实际改动一致。
+- 验证：
+  - `python3 -m py_compile /home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/dsl/gen_kernel.py /home/lfr/kernelcode_generate/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py` -> `0`
+  - `PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1 python3 /home/lfr/kernelcode_generate/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py` -> `0`
+  - `git -C /home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1 diff --check -- kernel_gen/dsl/gen_kernel.py` -> `0`
+  - `git -C /home/lfr/kernelcode_generate diff --check -- expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py` -> `0`
+- 结论：
+  - `T-20260404-bc6c044b` 已按边界完成，自检通过。
+  - 当前无阻塞；下一步应进入同链路审查。
+
+- 时间：`2026-04-04 13:02:04 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-a3ce0ec0`
+- 任务目标：
+  - 按 `O5` 复审边界只读复核 [`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md)、[`gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/dsl/gen_kernel.py)、[`gen_kernel.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/dsl/gen_kernel.md)、[`test_gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/dsl/test_gen_kernel.py)、[`callsite_rewrite.py`](/home/lfr/kernelcode_generate/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py) 与同链记录，确认 rewrite 后 IR 的 codegen / 黑盒闭环成立，且不扩到 `O4/O6`。
+- 改动：
+  - 审查前自检：
+    - 已核对 `O5` 计划条目、实现 diff、spec、测试、expectation 与同链记录是否一致。
+    - 已覆盖功能正确性、边界条件、异常路径与 6 类漏洞排查，不只依赖记录结论。
+    - 已确认本轮只涉及 `gen_kernel.py / gen_kernel.md / test_gen_kernel.py / expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py` 与记录文件，未越界到 `O4/O6`。
+  - 问题列表：
+    - `P1` [`gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/dsl/gen_kernel.py#L463) 与 [`gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/dsl/gen_kernel.py#L526)：
+      - 现象：`O5` 明确修改了 `_emit_default_signature(...)` 和 `_emit_return_statement(...)` 的公开合同语义，但这两个已修改函数仍缺少中文函数注释，未提供至少包含“功能说明 / 使用示例 / 关联文件”的说明。
+      - 风险：违反 [`审查规范.md`](/home/lfr/kernelcode_generate/agents/standard/审查规范.md) 的“所有新增/修改函数必须补齐中文注释”硬门禁；即使功能闭环已成立，当前提交仍不能判 `通过`。
+      - 建议：在 `kernel_gen/dsl/gen_kernel.py` 为上述两个已修改函数补齐中文注释和示例，并与当前 rewrite-after-IR 合同保持一致。
+    - `P1` [`callsite_rewrite.py`](/home/lfr/kernelcode_generate/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py#L43) 、[`callsite_rewrite.py`](/home/lfr/kernelcode_generate/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py#L52) 、[`callsite_rewrite.py`](/home/lfr/kernelcode_generate/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py#L56) 、[`callsite_rewrite.py`](/home/lfr/kernelcode_generate/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py#L60) 与 [`callsite_rewrite.py`](/home/lfr/kernelcode_generate/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py#L68)：
+      - 现象：`O5` 新建的 expectation 文件中，新增 helper 函数 `_make_memory_type(...)`、`_arg_attrs(...)`、`_tensor_arg(...)`、`_func(...)` 以及样例入口 `add_direct(...)` 都没有中文函数注释与使用示例。
+      - 风险：同样违反函数注释硬门禁，导致 expectation 基线虽然可执行，但不满足本仓库对新增函数的最小文档合同。
+      - 建议：为 expectation 文件中的新增函数补齐中文函数注释；如保留文件头“关联文件”，也应按仓库约定写成可点击链接格式。
+  - 漏洞排查结果：
+    - 输入校验绕过：通过。默认 CPU 路径对旧 `memory return` ABI 有显式拒绝，见 [`gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/dsl/gen_kernel.py#L469) 与 [`gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/dsl/gen_kernel.py#L545)。
+    - 类型/形状绕过：通过。mixed output 只保留单一非 `Memory` 标量返回，`!symbol.int` 仍锁在 `cpu-only`，相关测试见 [`test_gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/dsl/test_gen_kernel.py#L830) 与 [`test_gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/dsl/test_gen_kernel.py#L721)。
+    - 边界越界：通过。worktree 里实际改动只在 `gen_kernel.py / gen_kernel.md / test_gen_kernel.py`，主目录新增 expectation 与记录，未见扩到 pass 实现或 `O6` 代码。
+    - 错误处理缺失：通过。half-rewritten IR 会显式抛 `GenKernelError`，测试与 expectation 都锁定该门禁，见 [`test_gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/dsl/test_gen_kernel.py#L878) 与 [`callsite_rewrite.py`](/home/lfr/kernelcode_generate/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py#L148)。
+    - 状态污染：通过。caller/callee rewrite 后不再保留旧 memory call result SSA，expectation 黑盒输出已复现该口径。
+    - 资源释放问题：通过。当前变更只调整 codegen/expectation 消费合同，未新增新的资源生命周期分支。
+  - 一致性核对：
+    - 计划 / spec / 实现 / 测试 / expectation 的功能口径一致：rewrite 后单 output、mixed output、caller/callee callsite rewrite、half-rewritten 失败、旧 ABI 默认 CPU 路径拒绝都已锁住。
+    - 当前唯一未收口项是新增/修改函数注释与示例合同，不是功能闭环问题。
+  - 验证：
+    - `pytest -q wt-20260404-buffer-out-params-o1/test/dsl/test_gen_kernel.py -k 'buffer_results_to_out_params or rewritten_out_param'` -> `4 passed, 30 deselected`
+    - `PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1 python3 expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py` -> `0`
+    - `pytest -q wt-20260404-buffer-out-params-o1/test/dsl/test_gen_kernel.py` -> `34 passed`
+    - `git -C /home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1 diff --check -- kernel_gen/dsl/gen_kernel.py spec/dsl/gen_kernel.md test/dsl/test_gen_kernel.py` -> `0`
+    - `git -C /home/lfr/kernelcode_generate diff --check -- expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md` -> `0`
+- 结论：
+  - `需修改`
+  - 功能闭环本身已成立：rewrite 后 IR 的 codegen、mixed output、caller/callee rewrite、half-rewritten 失败以及旧 ABI 默认 CPU 路径拒绝都已被实现、测试和 expectation 锁住。
+  - 当前不能判 `通过` 的原因是注释/示例合同未收口；下一步应创建单一改进实现任务，仅补齐 `gen_kernel.py` 与 `callsite_rewrite.py` 中新增/修改函数的中文注释、使用示例与文件链接，然后回到复审链路。
+
+- 时间：`2026-04-04 13:04:17 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-a3ce0ec0`
+- 任务目标：
+  - 完成当前 `O5` 复审任务流转，并按同链路补建唯一后续修复任务。
+- 改动：
+  - 已执行 `-done`：
+    - `bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file /home/lfr/kernelcode_generate/TODO.md -done -task_id T-20260404-a3ce0ec0 -log /home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md -agents-list /home/lfr/kernelcode_generate/agents/codex-multi-agents/agents-lists.md`
+    - 结果：`OK: done T-20260404-a3ce0ec0`
+  - 已新建同链路唯一后续修复任务：
+    - `T-20260404-bc6c044b`
+    - 方向：仅修复 `kernel_gen/dsl/gen_kernel.py` 与 `expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py` 的 O5 注释与示例合同，不改功能语义。
+  - 已按要求直接回报管理员：
+    - `bash skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh -talk -from 提莫炖蘑菇 -to 神秘人 -agents-list agents/codex-multi-agents/agents-lists.md -message "完成 T-20260404-a3ce0ec0，已新建 T-20260404-bc6c044b，请分发 T-20260404-bc6c044b。..." -log agents/codex-multi-agents/log/talk.log`
+    - 结果：`OK: talk 提莫炖蘑菇 -> 神秘人 (神秘人)`
+- 结论：
+  - `T-20260404-a3ce0ec0` 已完成并封板。
+  - 后续等待管理员核对并分发 `T-20260404-bc6c044b`。
+
+- 时间：`2026-04-04 13:02:04 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-1c1dd6ff`
+- 任务目标：
+  - 按 `O5` 复审边界只读复核 [`gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/dsl/gen_kernel.py)、[`callsite_rewrite.py`](/home/lfr/kernelcode_generate/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py) 与同链记录，确认 O5 新增/修改函数的中文功能说明、使用示例和关联文件链接已补齐，且 rewrite 后 IR 的 codegen / expectation / 黑盒闭环语义未变；不扩到 `O4/O6`。
+- 改动：
+  - 审查前自检：
+    - 已核对 `O5` 计划、上一轮审查意见、修复任务记录与当前文件内容是否一致。
+    - 已确认本轮只读复核 `gen_kernel.py / callsite_rewrite.py / 同链记录`，不扩到 `O4/O6` 或其他业务文件。
+    - 已准备最小 gate、expectation smoke 与全量 `test_gen_kernel.py` 回归，避免只凭注释表面变化给通过结论。
+  - 审查结果：
+    - [`gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/dsl/gen_kernel.py#L463) 的 `_emit_default_signature(...)`、[`gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/dsl/gen_kernel.py#L544) 的 `_emit_return_statement(...)`，以及 [`gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/dsl/gen_kernel.py#L593) 的 `_emit_default_function_body(...)` 已补齐中文功能说明、使用示例与 `spec/test/功能实现` 关联信息。
+    - [`callsite_rewrite.py`](/home/lfr/kernelcode_generate/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py#L43)、[`callsite_rewrite.py`](/home/lfr/kernelcode_generate/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py#L69)、[`callsite_rewrite.py`](/home/lfr/kernelcode_generate/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py#L90)、[`callsite_rewrite.py`](/home/lfr/kernelcode_generate/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py#L111) 的 helper 已补齐中文 docstring。
+    - [`callsite_rewrite.py`](/home/lfr/kernelcode_generate/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py#L136) 到 [`callsite_rewrite.py`](/home/lfr/kernelcode_generate/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py#L147) 为 `add_direct(...)` 增补了前置注释块，覆盖“功能说明 / 使用示例 / 关联文件”；该做法避免把 docstring 注入前端函数体而破坏 `build_func_op(...)` 语义。
+    - 记录与实现一致：[`20260404-buffer-out-params-o1.md`](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md#L675) 到 [`20260404-buffer-out-params-o1.md`](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md#L696) 对 `T-20260404-bc6c044b` 的改动、自检与验证描述与当前文件状态一致。
+  - 漏洞排查结果：
+    - 输入校验绕过：通过。旧 `memory return` ABI 仍显式失败，未因注释修复被放松。
+    - 类型/形状绕过：通过。mixed output、symbol scalar 和 out-param 识别逻辑未变化。
+    - 边界越界：通过。worktree 变更仍限定在 `gen_kernel.py`，主工作目录只涉及 expectation 与记录；未触碰 `O4/O6`。
+    - 错误处理缺失：通过。half-rewritten IR 失败路径与报错文本保持不变。
+    - 状态污染：通过。caller/callee rewrite 黑盒 expectation 输出与前一轮一致，没有回流旧 SSA 消费路径。
+    - 资源释放问题：通过。本轮仅补说明，不涉及资源生命周期逻辑。
+  - 改进建议：
+    - 未发现额外改进点。
+  - 验证：
+    - `pytest -q wt-20260404-buffer-out-params-o1/test/dsl/test_gen_kernel.py -k 'buffer_results_to_out_params or rewritten_out_param'` -> `4 passed, 30 deselected`
+    - `PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1 python3 expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py` -> `0`
+    - `python3 -m py_compile wt-20260404-buffer-out-params-o1/kernel_gen/dsl/gen_kernel.py expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py` -> `0`
+    - `pytest -q wt-20260404-buffer-out-params-o1/test/dsl/test_gen_kernel.py` -> `34 passed`
+    - `git -C /home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1 diff --check -- kernel_gen/dsl/gen_kernel.py` -> `0`
+    - `git -C /home/lfr/kernelcode_generate diff --check -- expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md` -> `0`
+- 结论：
+  - `通过`
+  - O5 注释与示例合同已收口，rewrite 后 IR 的 codegen / expectation / 黑盒闭环语义未变，当前没有新增阻塞；下一步应进入同链合并阶段。
+
+- 时间：`2026-04-04 13:13:25 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-1c1dd6ff`
+- 任务目标：
+  - 完成当前 `O5` 复审任务流转，并按同链路补建唯一后续合并任务。
+- 改动：
+  - 已执行 `-done`：
+    - `bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file /home/lfr/kernelcode_generate/TODO.md -done -task_id T-20260404-1c1dd6ff -log /home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md -agents-list /home/lfr/kernelcode_generate/agents/codex-multi-agents/agents-lists.md`
+    - 结果：`OK: done T-20260404-1c1dd6ff`
+  - 已新建同链路唯一后续合并任务：
+    - `T-20260404-2bef2443`
+    - 方向：按当前已完成的 O5 链路合并 `gen_kernel.py / gen_kernel.md / test_gen_kernel.py / callsite_rewrite.py / 同链记录`，不扩到 `O4/O6`。
+  - 已按要求直接回报管理员：
+    - `bash skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh -talk -from 提莫炖蘑菇 -to 神秘人 -agents-list agents/codex-multi-agents/agents-lists.md -message "完成 T-20260404-1c1dd6ff，已新建 T-20260404-2bef2443，请分发 T-20260404-2bef2443。..." -log agents/codex-multi-agents/log/talk.log`
+    - 结果：`OK: talk 提莫炖蘑菇 -> 神秘人 (神秘人)`
+- 结论：
+  - `T-20260404-1c1dd6ff` 已完成并封板。
+  - 后续等待管理员核对并分发 `T-20260404-2bef2443`。

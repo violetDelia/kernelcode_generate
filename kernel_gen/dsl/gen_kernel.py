@@ -56,6 +56,45 @@ def _extract_arg_names(func_op: func.FuncOp) -> list[str]:
     return [f"arg{index}" for index, _ in enumerate(func_op.args)]
 
 
+def _leading_rewritten_out_param_count(func_op: func.FuncOp) -> int:
+    """识别 rewrite 后 IR 的最前置 out 参数个数。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 仅把最前面连续的 `arg0/arg1/...` memory 参数识别为 out 参数。
+    - 这组参数由 `BufferResultsToOutParamsPass` 固定前置，用于让 `gen_kernel(...)` 只消费 rewrite 后 ABI。
+
+    使用示例:
+    - count = _leading_rewritten_out_param_count(func_op)
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: kernel_gen/dsl/gen_kernel.py
+    """
+
+    input_types = list(func_op.function_type.inputs.data)
+    attrs = func_op.arg_attrs
+    count = 0
+    for index, arg_type in enumerate(input_types):
+        if not isinstance(arg_type, NnMemoryType):
+            break
+        if not isinstance(attrs, ArrayAttr):
+            break
+        if index >= len(attrs.data):
+            break
+        attr = attrs.data[index]
+        if not isinstance(attr, DictionaryAttr):
+            break
+        name_attr = attr.data.get("name")
+        if not isinstance(name_attr, StringAttr) or name_attr.data != f"arg{index}":
+            break
+        count += 1
+    return count
+
+
 def _type_to_c(attr: Any) -> str:
     """将 xdsl Attribute 映射为 C 侧类型名。
 
@@ -209,11 +248,7 @@ class _KernelEmitter:
                 "cpu_conv2d_img2col2d_tiled",
                 self._is_cpu_conv2d_img2col2d_tiled,
                 self._emit_cpu_conv2d_img2col2d_tiled_body,
-            ),
-            _FunctionStrategy(
-                "cpu_direct_return_nn_add",
-                self._has_cpu_direct_return_nn_add,
-                self._emit_cpu_direct_return_nn_add_body,
+                self._emit_cpu_conv2d_img2col2d_tiled_signature,
             ),
             _FunctionStrategy("default", lambda _func_op: True, self._emit_default_function_body),
         )
@@ -318,6 +353,46 @@ class _KernelEmitter:
             lines.append(f"{self.ctx.current_indent}}}")
         return "\n".join(lines)
 
+    def _emit_cpu_conv2d_img2col2d_tiled_signature(self, func_op: func.FuncOp) -> str:
+        """生成 `conv2d_img2col2d_tiled(...)` 的固定 CPU 签名。
+
+        创建者: jcc你莫辜负
+        最后一次更改: jcc你莫辜负
+
+        功能说明:
+        - 继续为当前冻结的 `conv2d_img2col2d_tiled(...)` 子集保留固定函数级签名。
+        - 该签名属于既有特化合同，不复用默认的 rewrite-only ABI 收口逻辑。
+
+        使用示例:
+        - signature = self._emit_cpu_conv2d_img2col2d_tiled_signature(func_op)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
+
+        input_types = list(func_op.function_type.inputs.data)
+        result_types = list(func_op.function_type.outputs.data)
+        if len(input_types) != 2 or len(result_types) != 1:
+            raise _error(self.ctx, func_op.sym_name.data, "unsupported conv2d_img2col2d_tiled signature")
+        input_type, weight_type = input_types
+        out_type = result_types[0]
+        if not isinstance(input_type, NnMemoryType) or not isinstance(weight_type, NnMemoryType) or not isinstance(out_type, NnMemoryType):
+            raise _error(self.ctx, func_op.sym_name.data, "unsupported conv2d_img2col2d_tiled signature")
+
+        arg_names = _extract_arg_names(func_op)
+        for arg_name, arg_value in zip(arg_names, func_op.args, strict=True):
+            self.ctx.bind_name(arg_value, arg_name)
+        input_name = self.ctx.lookup_name(func_op.args[0]) or arg_names[0]
+        weight_name = self.ctx.lookup_name(func_op.args[1]) or arg_names[1]
+        return (
+            f"void {func_op.sym_name.data}("
+            f"const {_type_to_c(input_type)}& {input_name}, "
+            f"const {_type_to_c(weight_type)}& {weight_name}, "
+            f"{_type_to_c(out_type)}& out)"
+        )
+
     def _is_npu_demo_body_level_kernel(self, func_op: func.FuncOp) -> bool:
         return self.ctx.target == "npu_demo"
 
@@ -386,30 +461,57 @@ class _KernelEmitter:
         return "\n".join(lines)
 
     def _emit_default_signature(self, func_op: func.FuncOp) -> str:
+        """生成默认 rewrite-after-IR 函数签名。
+
+        创建者: jcc你莫辜负
+        最后一次更改: jcc你莫辜负
+
+        功能说明:
+        - 默认 CPU/通用路径只消费已经过 `BufferResultsToOutParamsPass` 的 IR。
+        - 最前面连续且显式命名为 `arg0/arg1/...` 的 `Memory` 参数生成为 out 参数，其余 `Memory` 参数保持只读输入。
+        - 若函数仍保留旧 `memory return` ABI，则显式报错，阻止后端继续隐式推导 `out`。
+
+        使用示例:
+        - signature = self._emit_default_signature(func_op)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
         func_name = func_op.sym_name.data
         input_types = list(func_op.function_type.inputs.data)
         result_types = list(func_op.function_type.outputs.data)
         if len(result_types) > 1:
             raise _error(self.ctx, func_name, "unsupported return form")
-        if result_types and not isinstance(result_types[0], (NnMemoryType, SymbolValueType)):
-            raise _error(self.ctx, func_name, "unsupported return form")
-        if result_types and isinstance(result_types[0], SymbolValueType) and self.ctx.target != "cpu":
-            raise _error(self.ctx, func_name, "symbol scalar return is cpu-only")
+        if result_types and isinstance(result_types[0], NnMemoryType):
+            raise _error(
+                self.ctx,
+                func_name,
+                "legacy memory return ABI is not supported; run BufferResultsToOutParamsPass first",
+            )
+        if result_types:
+            result_type = result_types[0]
+            if isinstance(result_type, SymbolValueType) and self.ctx.target != "cpu":
+                raise _error(self.ctx, func_name, "symbol scalar return is cpu-only")
+            _type_to_c(result_type)
 
         arg_names = _extract_arg_names(func_op)
+        leading_out_params = _leading_rewritten_out_param_count(func_op)
         params: list[str] = []
-        for arg_name, arg_type, arg_value in zip(arg_names, input_types, func_op.args, strict=True):
+        for index, (arg_name, arg_type, arg_value) in enumerate(zip(arg_names, input_types, func_op.args, strict=True)):
             self.ctx.bind_name(arg_value, arg_name)
             if isinstance(arg_type, NnMemoryType):
-                params.append(f"const {_type_to_c(arg_type)}& {arg_name}")
+                if index < leading_out_params:
+                    params.append(f"{_type_to_c(arg_type)}& {arg_name}")
+                else:
+                    params.append(f"const {_type_to_c(arg_type)}& {arg_name}")
             else:
                 params.append(f"{_type_to_c(arg_type)} {arg_name}")
 
         return_type = "void"
-        if result_types and isinstance(result_types[0], SymbolValueType):
+        if result_types:
             return_type = _type_to_c(result_types[0])
-        elif result_types:
-            params.append(f"{_type_to_c(result_types[0])}& out")
 
         return f"{return_type} {func_name}({', '.join(params)})"
 
@@ -446,6 +548,24 @@ class _KernelEmitter:
         *,
         allow_direct_return_nn_add: bool = False,
     ) -> str | None:
+        """生成默认路径下的 `func.return` 收尾语句。
+
+        创建者: jcc你莫辜负
+        最后一次更改: jcc你莫辜负
+
+        功能说明:
+        - rewrite-after-IR 默认路径只允许无返回或单一非 `Memory` 标量返回。
+        - 若 `func.return` 仍返回 `Memory`，说明 IR 还保留旧 ABI，必须显式失败。
+        - `allow_direct_return_nn_add` 仅为兼容旧调用点保留的内部参数；当前默认路径不会靠它放行旧 `memory return`。
+
+        使用示例:
+        - stmt = self._emit_return_statement(func_op, return_op)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
         result_types = list(func_op.function_type.outputs.data)
         if not result_types:
             if return_op.arguments:
@@ -459,26 +579,37 @@ class _KernelEmitter:
         if return_op.arguments[0].type != result_type:
             raise _error(self.ctx, func_op.sym_name.data, "unsupported return form")
         if isinstance(result_type, NnMemoryType):
-            if allow_direct_return_nn_add and self._is_direct_return_nn_add(return_op):
-                return None
-            value_name = self.ctx.lookup_name(return_op.arguments[0])
-            if value_name is None:
-                from .emit_c import emit_c_value
+            raise _error(
+                self.ctx,
+                func_op.sym_name.data,
+                "legacy memory return ABI is not supported; run BufferResultsToOutParamsPass first",
+            )
+        if isinstance(result_type, SymbolValueType) and self.ctx.target != "cpu":
+            raise _error(self.ctx, func_op.sym_name.data, "symbol scalar return is cpu-only")
+        from .emit_c import emit_c_value
 
-                value_name = emit_c_value(return_op.arguments[0], self.ctx)
-            if value_name == "out":
-                return None
-            return f"{self.ctx.current_indent}out = {value_name};"
-        if isinstance(result_type, SymbolValueType):
-            if self.ctx.target != "cpu":
-                raise _error(self.ctx, func_op.sym_name.data, "symbol scalar return is cpu-only")
-            from .emit_c import emit_c_value
-
-            value_expr = emit_c_value(return_op.arguments[0], self.ctx)
-            return f"{self.ctx.current_indent}return {value_expr};"
-        raise _error(self.ctx, func_op.sym_name.data, "unsupported return form")
+        value_expr = emit_c_value(return_op.arguments[0], self.ctx)
+        return f"{self.ctx.current_indent}return {value_expr};"
 
     def _emit_default_function_body(self, func_op: func.FuncOp) -> str:
+        """生成默认 rewrite-after-IR 函数体。
+
+        创建者: jcc你莫辜负
+        最后一次更改: jcc你莫辜负
+
+        功能说明:
+        - 按 IR 顺序逐个委托普通 op 到 `emit_c_op(...)`。
+        - `func.return` 统一走 `_emit_return_statement(...)` 收尾，不再从旧 `memory return` 形态隐式补 `out`。
+        - 仅保留既有 `dma.alloc`/`out` 绑定清理逻辑，避免对 rewrite 后 ABI 额外引入新的函数级特例。
+
+        使用示例:
+        - body = self._emit_default_function_body(func_op)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
         lines: list[str] = []
         for op in func_op.body.block.ops:
             if isinstance(op, func.ReturnOp):
