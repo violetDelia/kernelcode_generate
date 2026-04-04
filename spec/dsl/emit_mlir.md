@@ -43,7 +43,9 @@
 - 在上述 `LoopRange` 场景中，循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand 必须直接复用 `!symbol.int<"expr">` value，不得插入 `arith.index_cast`；若循环变量 `it` 退化为 `index`、普通整数或浮点类型，应视为 lowering 违规。
 - 当 DSL AST 表达 `alloc`、`copy`、`cast`、`view`、`reshape`、`flatten`、`load`、`store`、`slice`、`deslice` 这组 DMA helper 调用时，`emit_mlir` 必须按对应 memory 语义 lowering；其中 `flatten` 公开上视为一维 `reshape` 语义，不要求生成独立 dialect op。
 - 当 DSL AST 表达 `img2col1d(...)` 或 `img2col2d(...)` helper 调用时，`emit_mlir` 必须直接 lowering 为 `nn.img2col1d` 或 `nn.img2col2d`；不得在 emit 层引入 `kernel_dialect`、`nn_to_kernel` 或 `cpu::img2col2d` 相关语义。
+- 当 DSL AST 表达 `matmul(lhs, rhs, memoryspace=...)` helper 调用时，`emit_mlir` 必须直接 lowering 为 `nn.matmul`；若左右操作数 `element_type` 不一致但 `space` 一致，必须按二元算术 dtype promotion 决议目标 dtype，并仅对非目标侧插入最少 `dma.cast`。
 - `img2col2d` 的 emit 节点级流程允许并要求与循环/切片节点协作：窗口读取通过 `dma.slice`，窗口回写通过 `dma.deslice`，循环结构保持 `ForAST -> symbol.for`；该规则只约束 emit 节点映射，不扩展到 kernel/runtime 责任。
+- `store(...)` / `deslice(...)` 的 target 允许来自前序 `alloc/view/reshape/flatten/cast/copy/img2col/matmul/get_dynamic_memory` 等 memory 表达式；emit 阶段必须对该 target 先求值再执行写回，不得退回只允许函数输入张量的旧口径。
 - 当 `CompareExprAST(op="ne")` 来自 `lhs != rhs` 入口且两侧为 `nn.memory` 时，必须 lowering 为 `nn.ne`；允许按隐式 broadcast 规则插入 `nn.broadcast`，若无法广播必须报错 `Implicit broadcast dimension mismatch`，若 element type 不一致必须报错 `Binary op operands must have the same element_type`。
 - 当 `BinaryExprAST(op="mul")` 来自 `lhs * rhs` 或 `nn.mul(lhs, rhs)` 入口且两侧为 `nn.memory` 时，必须 lowering 为 `nn.mul`；若 shape 不一致但可 broadcast，允许按需插入 `nn.broadcast`，若不可 broadcast 必须报错 `Implicit broadcast dimension mismatch`。当两侧 `element_type` 不一致但 `space` 一致时，必须按二元算术 dtype promotion（`i32 < f16 < f32`）决议目标 element_type，并仅对非目标侧插入 `dma.cast` 再发射 `nn.mul`；若 `space` 不一致必须报错 `Binary op operands must have the same space`。
 - `free` 必须作为语句型 helper 处理，不产生新的 SSA 结果，也不承诺生成独立的 `dma.free` op。
@@ -154,6 +156,10 @@ value = emit_mlir(expr_ast, ctx)
   - `img2col1d(...)`：lowering 为 `nn.img2col1d`，返回 `nn.memory` 结果。
   - `img2col2d(...)`：lowering 为 `nn.img2col2d`，返回 `nn.memory` 结果。
   - 涉及窗口化分块时，`loop + dma.slice/dma.deslice` 仅作为节点级 emit 协同路径；不得在本层引入 kernel dialect 或 `nn_to_kernel` 语义。
+- `matmul(...)` helper 的公开 lowering 约束如下：
+  - `matmul(lhs, rhs)`：lowering 为 `nn.matmul`，返回 `nn.memory` 结果。
+  - 若 `lhs/rhs` 的 `element_type` 不一致但 `space` 一致，emit 层必须先按 promotion 结果插入必要的 `dma.cast` 再发射 `nn.matmul`。
+  - 若 `space` 不一致、rank 不是 `2`、或 contracting dim 不匹配，必须在 emit 入口报具体 lowering 错误。
 
 节点映射示例：
 
@@ -167,6 +173,7 @@ value = emit_mlir(expr_ast, ctx)
 - `CallAST(float(symbol.int))`：生成 `symbol.to_float`，返回 `f32`。
 - `CallAST(free)`：发射单个无返回值 `dma.free` 语句。
 - `CallAST(img2col1d/img2col2d)`：分别生成 `nn.img2col1d/nn.img2col2d` memory 结果。
+- `CallAST(matmul)`：生成 `nn.matmul` memory 结果，必要时伴随最少 `dma.cast`。
 - `ForAST`：当来源于 `LoopRange(start, end, step)` 且边界为 symbol 整数时，生成 `symbol.for`；循环体内若包含 `dma.slice` / `dma.deslice`，其 DMA 标量 operand 直接使用 `!symbol.int<"expr">` value，不生成 `arith.index_cast`。
 - `TensorAxisAccessAST(kind="shape")`：生成 `symbol.get_dim`，返回 `!symbol.int<"...">`。
 - `TensorAxisAccessAST(kind="stride")`：生成 `symbol.get_stride`，返回 `!symbol.int<"...">`。
@@ -196,6 +203,8 @@ value = emit_mlir(expr_ast, ctx)
   - 覆盖 `LoopRange` -> `symbol.for` 与 `it`/DMA operand 直接保持 `symbol.int` 的发射规则。
   - 覆盖 `img2col1d/img2col2d` helper 的 emit 节点级规则：分别 lowering 为 `nn.img2col1d/nn.img2col2d`，且不引入 kernel dialect / `nn_to_kernel` / `cpu::img2col2d` 语义。
   - 覆盖 `img2col2d` 与 `loop + dma.slice/dma.deslice` 的协同 emit 规则，确保窗口读取/回写与循环节点映射保持一致。
+  - 覆盖 `matmul(...)` helper 的 emit 节点级规则：lowering 为 `nn.matmul`，必要时插入最少 `dma.cast`。
+  - 覆盖 `alloc target + deslice` 写回路径，确保 memory 表达式 target 可直接参与 emit，不退回旧的输入张量限定。
   - 覆盖 DMA helper 调用的 lowering 结果与语句/表达式边界：`alloc/copy/cast/view/reshape/flatten` 产生 memory 结果，`free` 为无返回值语句且会发射 `dma.free`。
   - 覆盖 `free` helper 的参数边界：非法参数个数与非法 source 类型分别保持 `Unsupported free arity`、`Operand must be nn.memory` 诊断口径。
   - 覆盖 `ArchQueryAST(query_name="get_block_id")` lowering 为 `arch.get_block_id` 的最小查询路径。
@@ -260,3 +269,5 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-034：`CallAST(img2col1d)` 必须 lowering 为 `nn.img2col1d`，并保持参数到属性/operand 的节点级一一映射；禁止引入 kernel dialect / `nn_to_kernel` / `cpu::img2col2d` 语义。（`test/dsl/test_emit_mlir.py::test_emit_mlir_img2col1d_lowering`）
   - EMIT-035：`CallAST(img2col2d)` 必须 lowering 为 `nn.img2col2d`，并与 `ForAST + dma.slice/dma.deslice` 协同路径保持节点级映射一致，循环迭代与 DMA 标量 operand 继续保持 `!symbol.int` 语义。（`test/dsl/test_emit_mlir.py::test_emit_mlir_img2col2d_with_loop_slice_deslice_lowering`、`test/dsl/test_mlir_gen.py::test_build_func_op_supports_symbolic_for_loop_dma_without_return`、`test/dsl/test_ast_visitor.py::test_build_func_op_supports_symbolic_for_loop_dma_without_return`）
   - EMIT-036：`float(symbol.int)` 必须 lowering 为 `symbol.to_float`，结果类型固定为 `f32`；source 非 `!symbol.int<"...">` 时必须报具体类型错误。（下游待补测试映射：`test_emit_mlir_lowers_symbol_to_float`）
+  - EMIT-C1A：`CallAST(matmul)` 必须 lowering 为 `nn.matmul`，并在 mixed dtype memory 路径按需插入最少 `dma.cast`；不得回退为 `Unsupported call expression`。（`test_emit_mlir_matmul_lowering`、`test_build_func_op_supports_matmul_helper_call`）
+  - EMIT-C1B：`conv2d_img2col2d_tiled_npu_demo(...)` 这类 `loop + slice + img2col2d + reshape + matmul + deslice + return` 前端样例，emit 层必须允许 `alloc` 结果作为 `deslice` target，并生成 raw IR 中的循环、`dma.alloc/slice/reshape/deslice`、`nn.img2col2d`、`nn.matmul` 与 `func.return`。（`test_emit_mlir_supports_conv2d_img2col2d_tiled_npu_demo_chain`、`test_build_func_op_supports_conv2d_img2col2d_tiled_npu_demo`、`test_build_func_op_supports_conv2d_img2col2d_tiled_npu_demo_frontend`）

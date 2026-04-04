@@ -506,6 +506,32 @@ class Img2ColAST:
 
 
 @dataclass(frozen=True)
+class MatmulAST:
+    """matmul helper 节点。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 表示 `matmul(lhs, rhs, memoryspace=...)` 的 DSL helper 调用。
+    - 保留左右操作数与可选 memoryspace，供 raw `func.func` lowering 直接生成 `nn.matmul`。
+
+    使用示例:
+    - MatmulAST(lhs=VarAST("lhs"), rhs=VarAST("rhs"), memoryspace=MemorySpace.GM)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    lhs: object
+    rhs: object
+    memoryspace: MemorySpace | None = None
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
 class BinaryExprAST:
     """二元表达式节点。
 
@@ -1287,6 +1313,43 @@ def _is_allowed_attribute_value(value: object) -> bool:
     return isinstance(value, (MemorySpace, NumericType))
 
 
+def _is_memory_target_ast(node: object) -> bool:
+    """判断 store/deslice 的 target 是否属于可写 memory AST。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 接受函数入参张量与会产生 memory 结果的前端 AST 节点。
+    - 允许 `alloc/view/reshape/flatten/cast/copy` 等结果继续作为 `store/deslice` target。
+    - 继续拒绝纯标量或其他非 memory AST，保持 target 入口的解析边界。
+
+    使用示例:
+    - _is_memory_target_ast(TensorAST(name="out", memory=memory))
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    return isinstance(
+        node,
+        (
+            TensorAST,
+            DmaAllocAST,
+            DmaCopyAST,
+            DmaCastAST,
+            DmaViewAST,
+            DmaReshapeAST,
+            DmaFlattenAST,
+            Img2ColAST,
+            MatmulAST,
+            ArchGetDynamicMemoryAST,
+        ),
+    )
+
+
 def _resolve_call_base_object(
     expr: py_ast.expr,
     globals_table: dict[str, object],
@@ -1368,6 +1431,7 @@ def _resolve_import_bound_helper_call(
         "kernel_gen.operation.nn": {
             "img2col1d",
             "img2col2d",
+            "matmul",
         },
     }
 
@@ -1551,7 +1615,7 @@ def _parse_store_like_call(
         _raise_parse_error(f"Unsupported {call_name} arity", expr)
     value = _parse_expr(expr.args[0], env, globals_table, builtins_table)
     tensor = _parse_expr(expr.args[1], env, globals_table, builtins_table)
-    if not isinstance(tensor, TensorAST):
+    if not _is_memory_target_ast(tensor):
         _raise_parse_error(f"{call_name} target must be TensorAST", expr.args[1])
     index_env = dict(env)
     if bool(index_env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)):
@@ -1741,6 +1805,33 @@ def _parse_dma_call(
             kind=call_name,
             args=args,
             kwargs=kwargs,
+            location=_location_from_node(expr),
+        )
+
+    if call_name == "matmul":
+        if len(expr.args) < 2 or len(expr.args) > 3:
+            _raise_parse_error("Unsupported matmul arity", expr)
+        if len(expr.keywords) > 1:
+            _raise_parse_error("Unsupported matmul arity", expr)
+        lhs = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+        rhs = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+        memoryspace = (
+            _parse_expr(expr.args[2], env, globals_table, builtins_table)
+            if len(expr.args) == 3
+            else None
+        )
+        if expr.keywords:
+            keyword = expr.keywords[0]
+            if keyword.arg != "memoryspace" or len(expr.args) == 3:
+                _raise_parse_error("Unsupported matmul arity", expr)
+            memoryspace = _parse_expr(keyword.value, env, globals_table, builtins_table)
+        if memoryspace is not None and not isinstance(memoryspace, MemorySpace):
+            location_node = expr.args[2] if len(expr.args) == 3 else expr.keywords[0].value
+            _raise_parse_error("matmul memoryspace must be MemorySpace", location_node)
+        return MatmulAST(
+            lhs=lhs,
+            rhs=rhs,
+            memoryspace=memoryspace,
             location=_location_from_node(expr),
         )
 

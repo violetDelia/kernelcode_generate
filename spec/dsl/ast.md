@@ -46,6 +46,7 @@
 - AST 必须保留函数级返回语法元信息：`has_explicit_return`、`has_return_annotation`、`returns_none`。
 - 无返回注解但有显式 `return expr` 时，`parse_function(...)` 必须解析成功；此时 `FunctionAST.outputs` 保持为空，但必须通过函数级元信息保留“显式 return 存在、未写返回注解、也不是 `-> None`”这一事实。
 - DSL 解析入口必须覆盖 `arch` helper：无参 `get_block_id()` / `get_block_num()` / `get_subthread_id()` / `get_subthread_num()` / `get_thread_id()` / `get_thread_num()` 解析为 `ArchQueryAST`；`get_dynamic_memory(space)` 解析为 `ArchGetDynamicMemoryAST`；`launch_kernel(name, block, thread, subthread)` 解析为 `ArchLaunchKernelAST`。
+- 当调用目标显式绑定到 `kernel_gen.operation.nn` 时，DSL 解析入口还必须覆盖 `img2col1d(...)`、`img2col2d(...)` 与 `matmul(...)` helper；其中 `matmul(lhs, rhs, memoryspace=...)` 解析为 `MatmulAST`。
 - 比较表达式入口采用 Python 比较语法；`lhs != rhs` 必须解析为 `CompareExprAST(op="ne")`，以供下游 `nn.ne` lowering 复用同一 AST 语义。
 - 二元乘法入口采用 Python `lhs * rhs` 与 `nn.mul(lhs, rhs)` 双入口；两者都必须解析为 `BinaryExprAST(op="mul")`，以复用后续统一 lowering 语义。
 - 本轮仅为 `symbol.to_float` 链路开放 `-> float` 返回注解与 `float(symbol.int)` 的 AST 语法入口；不得顺手扩展 `double`、`complex` 或其他新注解体系。
@@ -87,8 +88,10 @@ func_ast = parse_function(add)
 - `float(value)`、`tensor.get_shape()[axis]` 与 `tensor.get_stride()[axis]` 等最小 DSL 表达式必须可解析为明确 AST 节点。
 - `nn.add/sub/mul/truediv/floordiv` helper 仅允许 2 个位置参数且禁止关键字参数；参数个数或形态不匹配时必须返回 `Unsupported nn arithmetic arity` 诊断。
 - `slice(...)` helper 仅允许 3~5 个位置参数；超出范围必须返回 `Unsupported slice arity` 诊断。
+- `matmul(...)` helper 仅允许 2 个位置参数，或 `2` 个位置参数加 `memoryspace=`；`memoryspace` 一旦提供必须为 `MemorySpace`，否则必须返回 `Unsupported matmul arity` 或 `matmul memoryspace must be MemorySpace` 诊断。
 - `slice` 的首参必须解析为 `TensorAST`；否则必须返回 `slice source must be TensorAST` 诊断。
 - `slice` 的 `space` 可选，但一旦提供必须为 `MemorySpace`；否则必须返回 `slice space must be MemorySpace` 诊断。
+- `store(...)` / `deslice(...)` 的 target 既可以是函数输入 `TensorAST`，也可以是 `alloc/view/reshape/flatten/cast/copy/img2col/matmul/get_dynamic_memory` 这类会产生 memory 结果的 AST 表达式；对纯标量或其他非 memory 目标，解析阶段继续保持 `store target must be TensorAST` / `deslice target must be TensorAST` 诊断口径。
 - `get_block_id/get_block_num/get_subthread_id/get_subthread_num/get_thread_id/get_thread_num` helper 仅允许 0 个参数且禁止关键字参数；不满足时必须返回 `Unsupported <helper> arity` 诊断。
 - `get_dynamic_memory(...)` helper 仅允许 1 个位置参数且禁止关键字参数；参数必须是 `MemorySpace` 且仅允许片上空间（`SM/LM/TSM/TLM`），否则必须返回 `Unsupported get_dynamic_memory arity`、`get_dynamic_memory space must be MemorySpace` 或 `get_dynamic_memory space must be on-chip MemorySpace` 诊断。
 - `launch_kernel(...)` helper 仅允许 4 个位置参数且禁止关键字参数；`name` 必须是非空字符串，`block/thread/subthread` 仅做 AST 入口语法校验（必须是正整数或 `SymbolDim` 语义），否则必须返回 `Unsupported launch_kernel arity`、`launch_kernel name must be non-empty str`、`launch_kernel <dim> must be int or SymbolDim` 或 `launch_kernel <dim> must be > 0` 诊断；AST 阶段不承诺 extent 已完成 `!symbol.int` 归一化。
@@ -302,7 +305,7 @@ ForAST(
 
 参数说明：
 
-- `tensor` (`TensorAST`)：目标张量。
+- `tensor` (`object`)：目标 memory AST，可为函数输入张量或 memory 结果表达式。
 - `offset` (`object`)：访问偏移。
 - `stride` (`object|None`)：可选步长。
 - `value` (`object`)：写入值。
@@ -314,7 +317,10 @@ ForAST(
 StoreAST(tensor=tensor, offset=offset, stride=None, value=expr)
 ```
 
-注意事项：`stride` 允许为空，具体语义由下游定义。
+注意事项：
+
+- `stride` 允许为空，具体语义由下游定义。
+- `tensor` 字段沿用历史命名，但公开语义已放宽为“可写 memory target”，不再局限于函数输入张量。
 
 返回与限制：返回不可变的数据结构实例。
 
@@ -336,6 +342,52 @@ LoadAST(tensor=tensor, offset=offset, stride=None)
 ```
 
 注意事项：`stride` 允许为空，具体语义由下游定义。
+
+返回与限制：返回不可变的数据结构实例。
+
+### `Img2ColAST`
+
+功能说明：表示 `img2col1d/img2col2d` helper 调用的 AST 节点。
+
+参数说明：
+
+- `kind` (`str`)：helper 名，当前仅允许 `img2col1d` 或 `img2col2d`。
+- `args` (`list[object]`)：位置参数 AST。
+- `kwargs` (`dict[str, object]`)：关键字参数 AST。
+- `location` (`SourceLocation|None`)：可选源码位置。
+
+使用示例：
+
+```python
+Img2ColAST(kind="img2col2d", args=[tile], kwargs={"kh": ConstAST(3)})
+```
+
+注意事项：
+
+- 该节点只保留 helper 语义，不在 AST 层提前决定 lowering 细节。
+
+返回与限制：返回不可变的数据结构实例。
+
+### `MatmulAST`
+
+功能说明：表示 `matmul(lhs, rhs, memoryspace=...)` helper 调用的 AST 节点。
+
+参数说明：
+
+- `lhs` (`object`)：左操作数 AST。
+- `rhs` (`object`)：右操作数 AST。
+- `memoryspace` (`MemorySpace|None`)：可选结果 memoryspace。
+- `location` (`SourceLocation|None`)：可选源码位置。
+
+使用示例：
+
+```python
+MatmulAST(lhs=lhs, rhs=rhs, memoryspace=MemorySpace.GM)
+```
+
+注意事项：
+
+- 该节点仅保留 helper 入口语义；dtype/shape/space 校验与 `nn.matmul` lowering 由下游处理。
 
 返回与限制：返回不可变的数据结构实例。
 
@@ -509,6 +561,7 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
   - 覆盖 AST 节点字段与诊断信息的构造。
   - 覆盖 `lhs != rhs` 解析为 `CompareExprAST(op="ne")` 的入口语义，并确保该语义可被下游 `nn.ne` lowering 直接消费。
   - 覆盖 Python `lhs * rhs` 与 `nn.mul(lhs, rhs)` 共用 `BinaryExprAST(op="mul")` 入口语义，以及 `nn.mul` 非法参数个数诊断。
+  - 覆盖 `img2col2d + reshape + matmul + deslice + return` 这类 conv2d 前端 helper 链可被解析为稳定 AST，并保留 `MatmulAST` 与 alloc target deslice 语义。
   - 覆盖 `get_block_id()` 解析为 `ArchQueryAST` 的最小 arch 查询入口。
   - 覆盖 `get_block_id()` 的非法参数在 AST 解析阶段被拒绝。
   - 覆盖 `get_block_num()` 解析为 `ArchQueryAST` 的最小 arch 查询入口。
@@ -560,4 +613,5 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
   - AST-014P：`launch_kernel` 的参数个数、名称或启动规模非法时，必须在 AST 解析阶段返回约定诊断；合法路径需保留到下游 `arch.launch_kernel` lowering。（`test_parse_function_rejects_invalid_launch_kernel_variants`）
   - AST-015：`lhs != rhs` 必须在 AST 中保持 `CompareExprAST(op="ne")` 语义，并与其他比较表达式共享后续 lowering 入口。（`test_build_func_op_lowers_nn_ne_with_tensor_i1_return_annotation`）
   - AST-018：`nn.mul(lhs, rhs)` 与 `lhs * rhs` 必须共用 `BinaryExprAST(op="mul")` 入口；`nn.mul` 的 arity 负路径继续复用 `Unsupported nn arithmetic arity` 诊断口径。（`test_symbol_scalar_function_lowers_symbol_binary_ops`、`test_parse_function_rejects_unsupported_nn_arithmetic_arity_variants`）
+  - AST-C1：`conv2d_img2col2d_tiled_npu_demo(...)` 这类 `loop + slice + img2col2d + reshape + matmul + deslice + return` 前端样例必须解析成功，innermost body 保留 `Img2ColAST`、`MatmulAST`，且 `deslice` target 允许绑定到前序 `alloc(...)` 结果 AST。（`test_build_func_op_supports_conv2d_img2col2d_tiled_npu_demo_frontend`）
   - E3 下游验收标准：`test_ast_accepts_float_return_annotation_for_symbol_to_float` 的输入应为 `def cast_dim(n: int) -> float: return float(n)`，预期 AST 解析通过；`test_ast_rejects_non_float_annotation_for_symbol_to_float` 的输入应为超出本轮范围的返回注解，预期固定报错。当前 `test/dsl/test_ast.py` 尚未落地这两个专项用例，因此此处仅冻结后续实现/测试链路应满足的验收口径，不将其写成已闭环映射。

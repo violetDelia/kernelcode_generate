@@ -68,6 +68,7 @@ from kernel_gen.dialect.nn import (
     NnEqOp,
     NnGeOp,
     NnGtOp,
+    NnMatmulOp,
     NnLeOp,
     NnLtOp,
     NnImg2col1dOp,
@@ -122,6 +123,7 @@ from .ast import (
     FunctionAST,
     Img2ColAST,
     LoadAST,
+    MatmulAST,
     ScalarArgAST,
     SymbolToFloatAST,
     SourceLocation,
@@ -1540,6 +1542,46 @@ def _infer_binary_memory_type(
     )
 
 
+def _infer_matmul_memory_type(
+    lhs_type: NnMemoryType,
+    rhs_type: NnMemoryType,
+    memoryspace: MemorySpace | None,
+    location: SourceLocation | None,
+) -> NnMemoryType:
+    """推导 `nn.matmul` 的目标 nn.memory 类型。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 仅接受 rank-2 `nn.memory` x `nn.memory`。
+    - 结果 shape 固定为 `[lhs.M, rhs.N]`，stride 为默认连续布局。
+    - element_type 按与 `operation.nn.matmul` 一致的固定 promotion 规则决议。
+
+    使用示例:
+    - _infer_matmul_memory_type(lhs_type, rhs_type, None, location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    if lhs_type.space != rhs_type.space:
+        raise _LoweringError("nn.matmul operands must use the same space", location=location)
+    lhs_shape = list(lhs_type.shape.data)
+    rhs_shape = list(rhs_type.shape.data)
+    if len(lhs_shape) != 2 or len(rhs_shape) != 2:
+        raise _LoweringError("matmul operands must be rank-2 nn.memory", location=location)
+    if not _dims_equal(lhs_shape[1], rhs_shape[0]):
+        raise _LoweringError("matmul contracting dimension mismatch", location=location)
+    target_space = _memory_space_from_ast(memoryspace, lhs_type.space)
+    target_element_type = _resolve_binary_element_type(lhs_type.element_type, rhs_type.element_type, location)
+    out_shape = [lhs_shape[0], rhs_shape[1]]
+    out_stride = _build_default_stride_attrs(out_shape)
+    return _memory_type_from_parts(out_shape, out_stride, target_element_type, target_space)
+
+
 def _memory_to_nn_type(memory: Memory, location: SourceLocation | None = None) -> NnMemoryType:
     """将运行时 `Memory` 描述转换为 `NnMemoryType`。
 
@@ -1770,6 +1812,7 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
                 DmaReshapeAST,
                 DmaFlattenAST,
                 Img2ColAST,
+                MatmulAST,
                 DmaFreeAST,
                 ForAST,
                 ArchGetDynamicMemoryAST,
@@ -2074,6 +2117,14 @@ def _infer_expr_type(
 
         stride_attr = _build_default_stride_attrs(out_shape)
         result_type = _memory_type_from_parts(out_shape, stride_attr, input_type.element_type, input_type.space)
+        type_map[expr_key] = result_type
+        return result_type
+    if isinstance(expr, MatmulAST):
+        lhs_type = _infer_expr_type(expr.lhs, type_map, runtime_values=runtime_values)
+        rhs_type = _infer_expr_type(expr.rhs, type_map, runtime_values=runtime_values)
+        if not isinstance(lhs_type, NnMemoryType) or not isinstance(rhs_type, NnMemoryType):
+            raise _LoweringError("matmul operands must be nn.memory", location=expr.location)
+        result_type = _infer_matmul_memory_type(lhs_type, rhs_type, expr.memoryspace, expr.location)
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, StoreAST):
@@ -2491,6 +2542,38 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
         return op.result
+    if isinstance(expr, MatmulAST):
+        lhs = _lower_expr(expr.lhs, ctx)
+        rhs = _lower_expr(expr.rhs, ctx)
+        lhs_type = _expect_memory_value(lhs, expr.location)
+        rhs_type = _expect_memory_value(rhs, expr.location)
+        result_type = _infer_expr_type(expr, ctx.types)
+        if not isinstance(result_type, NnMemoryType):
+            raise _LoweringError("matmul result must be nn.memory", location=expr.location)
+        if lhs_type.element_type != result_type.element_type:
+            cast_type = _memory_type_from_parts(
+                lhs_type.shape.data,
+                lhs_type.stride.data,
+                result_type.element_type,
+                lhs_type.space,
+            )
+            cast_op = DmaCastOp(lhs, cast_type)
+            ctx.builder.add_op(cast_op)
+            lhs = cast_op.result
+        if rhs_type.element_type != result_type.element_type:
+            cast_type = _memory_type_from_parts(
+                rhs_type.shape.data,
+                rhs_type.stride.data,
+                result_type.element_type,
+                rhs_type.space,
+            )
+            cast_op = DmaCastOp(rhs, cast_type)
+            ctx.builder.add_op(cast_op)
+            rhs = cast_op.result
+        op = NnMatmulOp(lhs, rhs, result_type, result_type.space)
+        ctx.builder.add_op(op)
+        ctx._set_cache(expr_key, op.result)
+        return op.result
     if isinstance(expr, StoreAST):
         raise _LoweringError("StoreAST does not produce a value", location=expr.location)
     if isinstance(expr, DmaFreeAST):
@@ -2746,6 +2829,7 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
             DmaReshapeAST,
             DmaFlattenAST,
             Img2ColAST,
+            MatmulAST,
             ArchGetDynamicMemoryAST,
             ArchQueryAST,
             SymbolToFloatAST,
@@ -2756,7 +2840,7 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
             _infer_expr_type(node, ctx.types)
         return _lower_expr(node, ctx)
     if isinstance(node, StoreAST):
-        target = _lookup_symbol(node.tensor, ctx)
+        target = _lower_expr(node.tensor, ctx)
         target_type = _expect_memory_value(target, node.location)
         value = _lower_expr(node.value, ctx)
         value_type = _expect_memory_value(value, node.location)

@@ -45,6 +45,7 @@ from .ast import (
     Diagnostic,
     ForAST,
     FunctionAST,
+    MatmulAST,
     ScalarArgAST,
     StoreAST,
     SymbolToFloatAST,

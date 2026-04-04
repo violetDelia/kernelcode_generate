@@ -22,10 +22,12 @@
 
 from __future__ import annotations
 
+import ast as py_ast
 import inspect
 from io import StringIO
 import sys
 from pathlib import Path
+import textwrap
 
 import pytest
 from xdsl.dialects import arith, func, scf
@@ -73,6 +75,8 @@ from kernel_gen.dialect.nn import (
     NnAddOp,
     NnBroadcastOp,
     NnEqOp,
+    NnImg2col2dOp,
+    NnMatmulOp,
     NnMemorySpaceAttr,
     NnMemoryType,
     NnNeOp,
@@ -113,7 +117,9 @@ from kernel_gen.dsl.ast import (
     DmaViewAST,
     FunctionAST,
     ForAST,
+    Img2ColAST,
     LoadAST,
+    MatmulAST,
     SourceLocation,
     StoreAST,
     TensorAST,
@@ -3273,7 +3279,8 @@ def test_emit_mlir_symbolic_for_loop_avoids_index_cast() -> None:
         name="symbol_loop",
         inputs=[tensor, start, end, step],
         outputs=[],
-        body=BlockAST([loop, tensor]),
+        body=BlockAST([loop]),
+        returns_none=True,
     )
     func_op = build_func_op_from_ast(func_ast)
     loop_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolForOp)]
@@ -3848,6 +3855,98 @@ def test_parse_function_rejects_invalid_deslice_helper_variants(
             raise AssertionError(f"expected deslice diagnostic {expected_message!r}, got {diagnostics[0].message!r}")
 
 
+# AST-017
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-04 17:09:29 +0800
+# 最近一次运行成功时间: 2026-04-04 17:09:29 +0800
+# 功能说明: 验证 matmul helper 非法参数个数保持 Unsupported matmul arity 报错。
+# 测试目的: 锁定 matmul helper too-few/too-many arity 的解析诊断口径。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_invalid_matmul_arity_variants
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_parse_function_rejects_invalid_matmul_arity_variants() -> None:
+    def too_few(
+        lhs: "Tensor[f32, 2, 2]",
+    ) -> "Tensor[f32, 2, 2]":
+        return nn.matmul(lhs)
+
+    def too_many(
+        lhs: "Tensor[f32, 2, 2]",
+        rhs: "Tensor[f32, 2, 2]",
+    ) -> "Tensor[f32, 2, 2]":
+        return nn.matmul(lhs, rhs, MemorySpace.GM, MemorySpace.GM)
+
+    def _expected_location(fn) -> SourceLocation:
+        source = textwrap.dedent(inspect.getsource(fn))
+        module = py_ast.parse(source)
+        matmul_call = next(
+            node
+            for node in py_ast.walk(module)
+            if isinstance(node, py_ast.Call)
+            and isinstance(node.func, py_ast.Attribute)
+            and node.func.attr == "matmul"
+        )
+        return SourceLocation(matmul_call.lineno, matmul_call.col_offset)
+
+    for fn in (too_few, too_many):
+        with pytest.raises(AstParseError) as exc_info:
+            parse_function(fn)
+        diagnostics = exc_info.value.diagnostics
+        if not diagnostics:
+            raise AssertionError("expected diagnostics for invalid matmul arity")
+        if diagnostics[0].message != "Unsupported matmul arity":
+            raise AssertionError("expected Unsupported matmul arity diagnostic")
+        expected_location = _expected_location(fn)
+        if diagnostics[0].location != expected_location:
+            raise AssertionError(
+                f"expected matmul arity diagnostic location {expected_location}, got {diagnostics[0].location}"
+            )
+
+
+# AST-017A
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-04 16:41:07 +0800
+# 最近一次运行成功时间: 2026-04-04 16:41:07 +0800
+# 功能说明: 验证 matmul memoryspace 类型错误时诊断文案与位置信息稳定。
+# 测试目的: 锁定 matmul memoryspace 类型校验报错与 location 传播。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_matmul_memoryspace_type_reports_location
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_parse_function_rejects_matmul_memoryspace_type_reports_location() -> None:
+    def bad_memoryspace(
+        lhs: "Tensor[f32, 2, 2]",
+        rhs: "Tensor[f32, 2, 2]",
+    ) -> "Tensor[f32, 2, 2]":
+        return nn.matmul(lhs, rhs, memoryspace=1)
+
+    with pytest.raises(AstParseError) as exc_info:
+        parse_function(bad_memoryspace)
+    diagnostics = exc_info.value.diagnostics
+    if not diagnostics:
+        raise AssertionError("expected diagnostics for matmul memoryspace type error")
+    if diagnostics[0].message != "matmul memoryspace must be MemorySpace":
+        raise AssertionError("expected matmul memoryspace must be MemorySpace diagnostic")
+
+    source = textwrap.dedent(inspect.getsource(bad_memoryspace))
+    module = py_ast.parse(source)
+    matmul_call = next(
+        node
+        for node in py_ast.walk(module)
+        if isinstance(node, py_ast.Call)
+        and isinstance(node.func, py_ast.Attribute)
+        and node.func.attr == "matmul"
+    )
+    keyword = next(kw for kw in matmul_call.keywords if kw.arg == "memoryspace")
+    expected_location = SourceLocation(keyword.value.lineno, keyword.value.col_offset)
+    if diagnostics[0].location != expected_location:
+        raise AssertionError(
+            f"expected matmul memoryspace diagnostic location {expected_location}, got {diagnostics[0].location}"
+        )
+
 # MGEN-015
 # 创建者: OpenAI
 # 最后一次更改: 朽木露琪亚
@@ -3918,6 +4017,96 @@ def test_build_func_op_supports_symbolic_for_loop_dma_without_return(monkeypatch
     assert offsets[0] is loop_body.args[0]
     assert sizes[0] is func_op.body.block.args[5]
     assert list(deslice_ops[0].offsets)[0] is loop_body.args[0]
+
+
+# AST-C1 / MGEN-C1 / EMIT-C1
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 功能说明: 验证 conv2d_img2col2d_tiled_npu_demo 前端链可解析到 matmul/deslice 并生成 raw func.func。
+# 测试目的: 锁定 `loop + slice + img2col2d + reshape + matmul + deslice + return` 在 AST/build_func_op/build_func_op_from_ast 链路都能成功命中，不再因 `matmul(...)` 或 alloc target deslice 失败。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_supports_conv2d_img2col2d_tiled_npu_demo_frontend
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md, spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_supports_conv2d_img2col2d_tiled_npu_demo_frontend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.dma import alloc, deslice, reshape, slice
+    from kernel_gen.operation.nn import img2col2d, matmul
+    from kernel_gen.operation.scf import loop
+
+    input_memory = Memory([1, 16, 18, 18], NumericType.Float32, space=MemorySpace.GM)
+    weight_memory = Memory([16, 16, 3, 3], NumericType.Float32, space=MemorySpace.GM)
+
+    def conv2d_img2col2d_tiled_npu_demo(
+        input: "Tensor[f32, 1, 16, 18, 18]",
+        weight: "Tensor[f32, 16, 16, 3, 3]",
+    ) -> "Tensor[f32, 1, 16, 16, 16]":
+        out = alloc([1, 16, 16, 16], NumericType.Float32, MemorySpace.GM)
+        for n0 in loop(0, 1, 1):
+            for c0 in loop(0, 16, 16):
+                for f0 in loop(0, 16, 16):
+                    for ho0 in loop(0, 16, 16):
+                        for wo0 in loop(0, 16, 16):
+                            input_tile = slice(input, [n0, c0, 0, 0], [1, 16, 18, 18], [1, 1, 1, 1], MemorySpace.GM)
+                            weight_tile = slice(weight, [f0, c0, 0, 0], [16, 16, 3, 3], [1, 1, 1, 1], MemorySpace.GM)
+                            col = img2col2d(input_tile, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)
+                            col2 = reshape(col, [144, 256])
+                            weight2 = reshape(weight_tile, [16, 144])
+                            out2 = matmul(weight2, col2)
+                            out_tile = reshape(out2, [1, 16, 16, 16])
+                            deslice(out_tile, out, [n0, f0, ho0, wo0], [1, 16, 16, 16], [1, 1, 1, 1])
+        return out
+
+    for name, value in (
+        ("alloc", alloc),
+        ("deslice", deslice),
+        ("reshape", reshape),
+        ("slice", slice),
+        ("img2col2d", img2col2d),
+        ("matmul", matmul),
+        ("loop", loop),
+        ("NumericType", NumericType),
+        ("MemorySpace", MemorySpace),
+    ):
+        monkeypatch.setitem(conv2d_img2col2d_tiled_npu_demo.__globals__, name, value)
+
+    func_ast = parse_function(conv2d_img2col2d_tiled_npu_demo)
+    outer_loop = func_ast.body.statements[1]
+    if not isinstance(outer_loop, ForAST):
+        raise AssertionError("expected conv2d frontend body to include nested ForAST chain")
+    nested_loop = outer_loop
+    for _ in range(4):
+        nested_loop = nested_loop.body.statements[0]
+        if not isinstance(nested_loop, ForAST):
+            raise AssertionError("expected five nested loops in conv2d frontend sample")
+    inner_body = nested_loop.body.statements
+    if not any(isinstance(stmt, Img2ColAST) for stmt in inner_body):
+        raise AssertionError("expected innermost loop body to include Img2ColAST")
+    if not any(isinstance(stmt, MatmulAST) for stmt in inner_body):
+        raise AssertionError("expected innermost loop body to include MatmulAST")
+    store_stmt = inner_body[-1]
+    if not isinstance(store_stmt, StoreAST):
+        raise AssertionError("expected innermost loop body to end with deslice StoreAST")
+    if not isinstance(store_stmt.tensor, DmaAllocAST):
+        raise AssertionError("expected deslice target to preserve alloc result AST")
+    if not isinstance(store_stmt.value, DmaReshapeAST):
+        raise AssertionError("expected deslice value to preserve reshape(out2, ...) AST")
+
+    for func_op in (
+        build_func_op(conv2d_img2col2d_tiled_npu_demo, input_memory, weight_memory),
+        build_func_op_from_ast(func_ast, runtime_args=(input_memory, weight_memory)),
+    ):
+        module = ModuleOp([func_op])
+        walked_ops = list(module.walk())
+        assert any(isinstance(op, (scf.ForOp, SymbolForOp)) for op in walked_ops)
+        assert any(isinstance(op, DmaAllocOp) for op in walked_ops)
+        assert any(isinstance(op, DmaSliceOp) for op in walked_ops)
+        assert any(isinstance(op, DmaReshapeOp) for op in walked_ops)
+        assert any(isinstance(op, NnImg2col2dOp) for op in walked_ops)
+        assert any(isinstance(op, NnMatmulOp) for op in walked_ops)
+        assert any(isinstance(op, DmaDesliceOp) for op in walked_ops)
+        assert any(isinstance(op, func.ReturnOp) for op in walked_ops)
 
 
 # MGEN-011

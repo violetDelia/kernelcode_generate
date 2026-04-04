@@ -56,9 +56,12 @@
 - Tensor 注解既可使用普通字符串字面量 `"Tensor[...]"`，也可使用在源码层面可归一化为同等文本的 `f"Tensor[...]"`；归一化后的文本必须满足 Tensor 注解语法，若包含无法静态归一化的格式化片段或归一化后仍不符合语法，必须报错。
 - 当函数体使用 `nn.sub` 且左右操作数 element_type 不一致时，必须插入 `dma.cast` 并按二元算术的 dtype promotion 结果生成 `nn.sub` 与 `func.return` 结果类型；当前公开覆盖仅限 `nn.sub` mixed dtype 场景。
 - DSL 函数体内允许出现 `alloc`、`copy`、`cast`、`view`、`reshape`、`flatten`、`free`、`load`、`store`、`slice`、`deslice` 这组 DMA helper 调用；其公开语义由 `emit_mlir` 负责落实到具体 lowering。
+- DSL 函数体内允许出现显式绑定到 `kernel_gen.operation.nn` 的 `img2col1d(...)`、`img2col2d(...)` 与 `matmul(...)` helper；其公开语义由 `emit_mlir` 负责落实到具体 lowering。
 - 当函数体返回 `view(...)` helper 时，`func.return` 类型必须与 `dma.view` 的结果类型一致，并与 expectation 依赖的 `Memory` 口径对齐；不得把 `dma.view` 结果写成“生成 op 即可、return type 可另行决定”。
 - 当函数体返回 `float(symbol.int)` 且返回注解为 `float` 时，`build_func_op(...)` / `build_func_op_from_ast(...)` 的 `func.return` 类型必须固定为 `f32`，并与 `symbol.to_float` 的结果类型保持一致。
 - 当 `build_func_op(...)` / `build_func_op_from_ast(...)` 处理 `slice(...)` 时，必须先生成 `dma.alloc`，再生成 `dma.slice(target, source, ...)`；表达式返回值绑定到 alloc 结果，`func.return` 返回 alloc 结果，`dma.slice` 的结果不得直接作为返回值或局部变量绑定。
+- 当 `store(...)` / `deslice(...)` 的 target 来自前序 `alloc/view/reshape/flatten/cast/copy/img2col/matmul/get_dynamic_memory` 等 memory 表达式时，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须允许该 target 继续参与 raw `func.func` lowering；不得把该场景错误收敛为仅允许函数输入张量的 AST 入口失败。
+- `conv2d_img2col2d_tiled_npu_demo(...)` 这类 `loop + slice + img2col2d + reshape + matmul + deslice + return` 前端样例，在本层唯一完成标志是成功生成 raw `func.func` / raw MLIR IR；本轮不得把 pipeline、lowered IR、gen_kernel 或源码生成当成完成条件。
 - DSL 函数体内允许出现 `arch` helper 调用：`get_thread_num`（查询表达式）、`get_dynamic_memory`（返回 memory 表达式）与 `launch_kernel`（语句型启动描述）；其公开语义由 `emit_mlir` 负责落实到具体 lowering。
 - 当函数体仅返回 `alloc(...)` 且没有 tensor 输入时，允许仅依赖标量 `runtime_args` 构建签名与结果类型；`alloc` 结果类型需由 `shape`/`stride`/`dtype`/`space` 与 `runtime_args` 共同决定，且显式 `stride` 必须与默认连续布局一致，否则必须报错。
 - `flatten(x)` 在 DSL 公开契约中视为一维重排 helper，要求保留元素总数并输出一维 memory 结果；不要求存在独立的 dialect op。
@@ -243,6 +246,8 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - 验证无返回注解但有显式 `return` 的 `add_memory / gt / cast_dim / view_kernel` 仍会生成单结果 `func.func`，且输出类型跟随实际 `return` lowering 结果。
   - 验证无返回注解、也没有显式 `return` 的值表达式函数体必须报 `Function return requires explicit return syntax or annotation`，不得靠最后一个值表达式猜函数输出，也不得静默退成零结果 `func.func`。
   - 验证参数注解与 `runtime_args` 冲突时，`func.func inputs/outputs` 与函数体结果类型都跟随 `runtime_args`，不跟随参数注解。
+  - 验证 `matmul(...)` helper 已纳入公开前端集合，并在 raw `func.func` 中生成 `nn.matmul`。
+  - 验证 `conv2d_img2col2d_tiled_npu_demo(...)` 这类最小 conv2d 前端样例可直接生成 raw `func.func`，其中命中循环、`dma.alloc/slice/reshape/deslice`、`nn.img2col2d`、`nn.matmul` 与 `func.return`。
 - 功能与用例清单：
   - MGEN-001：`build_func_op(...)` 返回 `func.func`。（`test_build_func_op_returns_func_op`）
   - MGEN-001A：`build_func_op(...)` 的输入签名只由 `runtime_args` 决定；即使 `globals` 中存在同名对象且额外传入 `builtins`，成功路径的签名推导也不得被解析环境覆盖。（`test_build_func_op_signature_uses_runtime_args_not_parse_env`）
@@ -301,3 +306,5 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - MGEN-R2B：来自 `parse_function(...)` 的无返回注解函数 AST，经 `build_func_op_from_ast(...)` 后仍必须按 `has_explicit_return` 元信息装配单结果 `func.func`。（`test_build_func_op_from_ast_infers_return_type_from_return_syntax_metadata`）
   - MGEN-R2C：参数注解写成 `f16` 但 `runtime_args` 传入 `i32 memory` 时，`func.func inputs/outputs` 与 `nn.add` 结果类型都必须保持 `i32 memory`。（`test_build_func_op_uses_runtime_args_not_parameter_annotations_for_ir`）
   - MGEN-R3：无返回注解且无显式 `return` 的值表达式函数体必须报 `Function return requires explicit return syntax or annotation`；不得靠最后一个值表达式猜函数输出，也不得静默生成零结果 `func.func`。（`test_build_func_op_rejects_ambiguous_value_body_without_return_or_annotation`）
+  - MGEN-C1A：`matmul(lhs, rhs)` helper 必须在 `build_func_op(...)` 链路中生成单个 `nn.matmul`，返回类型与 `func.return` 对齐。（`test_build_func_op_supports_matmul_helper_call`）
+  - MGEN-C1B：`conv2d_img2col2d_tiled_npu_demo(...)` 这类 `loop + slice + img2col2d + reshape + matmul + deslice + return` 前端样例必须能通过 `build_func_op(...)` / `build_func_op_from_ast(...)` 生成 raw `func.func`，并命中循环、`dma.alloc/slice/reshape/deslice`、`nn.img2col2d`、`nn.matmul` 与 `func.return`。（`test_build_func_op_supports_conv2d_img2col2d_tiled_npu_demo`、`test_build_func_op_supports_conv2d_img2col2d_tiled_npu_demo_frontend`）

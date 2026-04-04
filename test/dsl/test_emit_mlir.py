@@ -74,6 +74,7 @@ from kernel_gen.dialect.nn import (
     NnEqOp,
     NnImg2col1dOp,
     NnImg2col2dOp,
+    NnMatmulOp,
     NnMemorySpaceAttr,
     NnMemoryType,
     NnNeOp,
@@ -115,6 +116,7 @@ from kernel_gen.dsl.ast import (
     ForAST,
     Img2ColAST,
     LoadAST,
+    MatmulAST,
     SourceLocation,
     SymbolToFloatAST,
     StoreAST,
@@ -860,7 +862,8 @@ def test_emit_mlir_symbolic_for_loop_avoids_index_cast() -> None:
         name="symbol_loop",
         inputs=[tensor, start, end, step],
         outputs=[],
-        body=BlockAST([loop, tensor]),
+        body=BlockAST([loop]),
+        returns_none=True,
     )
     func_op = build_func_op_from_ast(func_ast)
     loop_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolForOp)]
@@ -2153,3 +2156,215 @@ def test_emit_mlir_img2col2d_with_loop_slice_deslice_lowering() -> None:
     assert len(img2col_ops) == 1
     assert len(deslice_ops) == 1
     assert list(slice_ops[0].offsets)[0] is loop_body.args[0]
+
+
+# EMIT-C1A
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 功能说明: 验证 MatmulAST 可直接 lowering 为 nn.matmul。
+# 测试目的: 锁定 matmul helper 已纳入 emit 节点级规则，并保持结果类型为 nn.memory。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_matmul_lowering
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_emit_mlir_matmul_lowering() -> None:
+    lhs_memory = Memory([16, 144], NumericType.Float32, space=MemorySpace.GM)
+    rhs_memory = Memory([144, 256], NumericType.Float32, space=MemorySpace.GM)
+    lhs = TensorAST(name="lhs", memory=lhs_memory, location=None)
+    rhs = TensorAST(name="rhs", memory=rhs_memory, location=None)
+    block = Block(arg_types=[_memory_to_nn_type(lhs_memory), _memory_to_nn_type(rhs_memory)])
+    ctx = EmitContext(builder=block, symbols={"lhs": block.args[0], "rhs": block.args[1]}, types={})
+    ctx._set_cache(_expr_key(lhs), block.args[0])
+    ctx._set_cache(_expr_key(rhs), block.args[1])
+    ctx.types[_expr_key(lhs)] = block.args[0].type
+    ctx.types[_expr_key(rhs)] = block.args[1].type
+    expr = MatmulAST(lhs=lhs, rhs=rhs, memoryspace=None, location=None)
+
+    result = emit_node_mlir(expr, ctx)
+
+    assert isinstance(result.owner, NnMatmulOp)
+    assert isinstance(result.type, NnMemoryType)
+    assert [attr.data for attr in result.type.shape.data] == [16, 256]
+
+
+# EMIT-C1A-N1
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-04 16:41:07 +0800
+# 最近一次运行成功时间: 2026-04-04 16:41:07 +0800
+# 功能说明: 验证 matmul lowering 空间不一致时抛出固定诊断并携带位置。
+# 测试目的: 锁定 emit 阶段 matmul operands space mismatch 的报错文案与 location。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_matmul_space_mismatch_reports_location
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_emit_mlir_matmul_space_mismatch_reports_location() -> None:
+    lhs_memory = Memory([2, 2], NumericType.Float32, space=MemorySpace.GM)
+    rhs_memory = Memory([2, 2], NumericType.Float32, space=MemorySpace.SM)
+    lhs = TensorAST(name="lhs", memory=lhs_memory, location=None)
+    rhs = TensorAST(name="rhs", memory=rhs_memory, location=None)
+    block = Block(arg_types=[_memory_to_nn_type(lhs_memory), _memory_to_nn_type(rhs_memory)])
+    ctx = EmitContext(builder=block, symbols={"lhs": block.args[0], "rhs": block.args[1]}, types={})
+    ctx._set_cache(_expr_key(lhs), block.args[0])
+    ctx._set_cache(_expr_key(rhs), block.args[1])
+    ctx.types[_expr_key(lhs)] = block.args[0].type
+    ctx.types[_expr_key(rhs)] = block.args[1].type
+    location = SourceLocation(7, 3)
+    expr = MatmulAST(lhs=lhs, rhs=rhs, memoryspace=None, location=location)
+
+    with pytest.raises(_LoweringError, match="nn.matmul operands must use the same space") as exc_info:
+        emit_node_mlir(expr, ctx)
+    assert exc_info.value.location == location
+
+
+# EMIT-C1A-N2
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-04 16:41:07 +0800
+# 最近一次运行成功时间: 2026-04-04 16:41:07 +0800
+# 功能说明: 验证 matmul lowering 非二维输入时抛出固定诊断并携带位置。
+# 测试目的: 锁定 emit 阶段 matmul rank!=2 的报错文案与 location。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_matmul_rank_mismatch_reports_location
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_emit_mlir_matmul_rank_mismatch_reports_location() -> None:
+    lhs_memory = Memory([2, 2, 2], NumericType.Float32, space=MemorySpace.GM)
+    rhs_memory = Memory([2, 2], NumericType.Float32, space=MemorySpace.GM)
+    lhs = TensorAST(name="lhs", memory=lhs_memory, location=None)
+    rhs = TensorAST(name="rhs", memory=rhs_memory, location=None)
+    block = Block(arg_types=[_memory_to_nn_type(lhs_memory), _memory_to_nn_type(rhs_memory)])
+    ctx = EmitContext(builder=block, symbols={"lhs": block.args[0], "rhs": block.args[1]}, types={})
+    ctx._set_cache(_expr_key(lhs), block.args[0])
+    ctx._set_cache(_expr_key(rhs), block.args[1])
+    ctx.types[_expr_key(lhs)] = block.args[0].type
+    ctx.types[_expr_key(rhs)] = block.args[1].type
+    location = SourceLocation(9, 5)
+    expr = MatmulAST(lhs=lhs, rhs=rhs, memoryspace=None, location=location)
+
+    with pytest.raises(_LoweringError, match="matmul operands must be rank-2 nn.memory") as exc_info:
+        emit_node_mlir(expr, ctx)
+    assert exc_info.value.location == location
+
+
+# EMIT-C1A-N3
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-04 16:41:07 +0800
+# 最近一次运行成功时间: 2026-04-04 16:41:07 +0800
+# 功能说明: 验证 matmul lowering contracting 维度不匹配时抛出固定诊断并携带位置。
+# 测试目的: 锁定 emit 阶段 matmul contracting dim mismatch 的报错文案与 location。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_matmul_contracting_dim_mismatch_reports_location
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_emit_mlir_matmul_contracting_dim_mismatch_reports_location() -> None:
+    lhs_memory = Memory([2, 3], NumericType.Float32, space=MemorySpace.GM)
+    rhs_memory = Memory([4, 5], NumericType.Float32, space=MemorySpace.GM)
+    lhs = TensorAST(name="lhs", memory=lhs_memory, location=None)
+    rhs = TensorAST(name="rhs", memory=rhs_memory, location=None)
+    block = Block(arg_types=[_memory_to_nn_type(lhs_memory), _memory_to_nn_type(rhs_memory)])
+    ctx = EmitContext(builder=block, symbols={"lhs": block.args[0], "rhs": block.args[1]}, types={})
+    ctx._set_cache(_expr_key(lhs), block.args[0])
+    ctx._set_cache(_expr_key(rhs), block.args[1])
+    ctx.types[_expr_key(lhs)] = block.args[0].type
+    ctx.types[_expr_key(rhs)] = block.args[1].type
+    location = SourceLocation(11, 7)
+    expr = MatmulAST(lhs=lhs, rhs=rhs, memoryspace=None, location=location)
+
+    with pytest.raises(_LoweringError, match="matmul contracting dimension mismatch") as exc_info:
+        emit_node_mlir(expr, ctx)
+    assert exc_info.value.location == location
+
+
+# EMIT-C1B
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 功能说明: 覆盖 conv2d_img2col2d_tiled_npu_demo 的 emit 侧最小 raw IR 骨架。
+# 测试目的: 验证 alloc target deslice 与 img2col2d/reshape/matmul 可在同一 raw func.func 链路共存。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_supports_conv2d_img2col2d_tiled_npu_demo_chain
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_emit_mlir_supports_conv2d_img2col2d_tiled_npu_demo_chain() -> None:
+    input_memory = Memory([1, 16, 18, 18], NumericType.Float32, space=MemorySpace.GM)
+    weight_memory = Memory([16, 16, 3, 3], NumericType.Float32, space=MemorySpace.GM)
+    output_memory = Memory([1, 16, 16, 16], NumericType.Float32, space=MemorySpace.GM)
+    input_tensor = TensorAST(name="input", memory=input_memory, location=None)
+    weight_tensor = TensorAST(name="weight", memory=weight_memory, location=None)
+    out_alloc = DmaAllocAST(shape=[ConstAST(1), ConstAST(16), ConstAST(16), ConstAST(16)], dtype=NumericType.Float32, space=MemorySpace.GM, location=None)
+    loop_var = VarAST(name="c0", location=None)
+    start = ScalarArgAST(name="start", value_type=int, is_symbolic=True, location=None)
+    end = ScalarArgAST(name="end", value_type=int, is_symbolic=True, location=None)
+    step = ScalarArgAST(name="step", value_type=int, is_symbolic=True, location=None)
+    input_tile = LoadAST(
+        tensor=input_tensor,
+        offset=[ConstAST(0), loop_var, ConstAST(0), ConstAST(0)],
+        stride=[ConstAST(1), ConstAST(1), ConstAST(1), ConstAST(1)],
+        sizes=[ConstAST(1), ConstAST(16), ConstAST(18), ConstAST(18)],
+        space=MemorySpace.GM,
+        kind="slice",
+        location=None,
+    )
+    weight_tile = LoadAST(
+        tensor=weight_tensor,
+        offset=[ConstAST(0), loop_var, ConstAST(0), ConstAST(0)],
+        stride=[ConstAST(1), ConstAST(1), ConstAST(1), ConstAST(1)],
+        sizes=[ConstAST(16), ConstAST(16), ConstAST(3), ConstAST(3)],
+        space=MemorySpace.GM,
+        kind="slice",
+        location=None,
+    )
+    img2col_expr = Img2ColAST(
+        kind="img2col2d",
+        args=[input_tile],
+        kwargs={
+            "kh": ConstAST(3),
+            "kw": ConstAST(3),
+            "sh": ConstAST(1),
+            "sw": ConstAST(1),
+            "dh": ConstAST(1),
+            "dw": ConstAST(1),
+            "ph": ConstAST(0),
+            "pw": ConstAST(0),
+            "pl": ConstAST(0),
+            "pr": ConstAST(0),
+        },
+        location=None,
+    )
+    col2 = DmaReshapeAST(source=img2col_expr, shape=[ConstAST(144), ConstAST(256)], location=None)
+    weight2 = DmaReshapeAST(source=weight_tile, shape=[ConstAST(16), ConstAST(144)], location=None)
+    out2 = MatmulAST(lhs=weight2, rhs=col2, memoryspace=None, location=None)
+    out_tile = DmaReshapeAST(source=out2, shape=[ConstAST(1), ConstAST(16), ConstAST(16), ConstAST(16)], location=None)
+    store_expr = StoreAST(
+        tensor=out_alloc,
+        offset=[ConstAST(0), ConstAST(0), ConstAST(0), ConstAST(0)],
+        stride=[ConstAST(1), ConstAST(1), ConstAST(1), ConstAST(1)],
+        sizes=[ConstAST(1), ConstAST(16), ConstAST(16), ConstAST(16)],
+        value=out_tile,
+        kind="deslice",
+        location=None,
+    )
+    loop = ForAST(var=loop_var, start=start, end=end, step=step, body=BlockAST([store_expr]), location=None)
+    func_ast = FunctionAST(
+        name="conv2d_img2col2d_tiled_npu_demo",
+        inputs=[input_tensor, weight_tensor, start, end, step],
+        outputs=[TensorAST(name="out", memory=output_memory, location=None)],
+        body=BlockAST([out_alloc, loop, out_alloc]),
+    )
+
+    func_op = build_func_op_from_ast(
+        func_ast,
+        runtime_args=(input_memory, weight_memory, SymbolDim("start"), SymbolDim("end"), SymbolDim("step")),
+    )
+
+    module = ModuleOp([func_op])
+    walked_ops = list(module.walk())
+    assert any(isinstance(op, SymbolForOp) for op in walked_ops)
+    assert any(isinstance(op, DmaAllocOp) for op in walked_ops)
+    assert any(isinstance(op, DmaSliceOp) for op in walked_ops)
+    assert any(isinstance(op, DmaReshapeOp) for op in walked_ops)
+    assert any(isinstance(op, NnImg2col2dOp) for op in walked_ops)
+    assert any(isinstance(op, NnMatmulOp) for op in walked_ops)
+    assert any(isinstance(op, DmaDesliceOp) for op in walked_ops)
+    assert any(isinstance(op, func.ReturnOp) for op in walked_ops)

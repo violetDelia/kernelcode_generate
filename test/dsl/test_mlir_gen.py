@@ -76,6 +76,7 @@ from kernel_gen.dialect.nn import (
     NnEqOp,
     NnImg2col1dOp,
     NnImg2col2dOp,
+    NnMatmulOp,
     NnMemorySpaceAttr,
     NnMemoryType,
     NnNeOp,
@@ -1256,6 +1257,106 @@ def test_build_func_op_supports_img2col2d_helper_call() -> None:
     assert [attr.data for attr in img2col_ops[0].result.type.shape.data] == [1, 27, 9]
     assert list(func_op.function_type.outputs) == [img2col_ops[0].result.type]
     assert return_ops[0].arguments[0].type == img2col_ops[0].result.type
+
+
+# MGEN-C1A
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 功能说明: 验证 build_func_op 支持 nn.matmul helper 并生成单结果 raw func.func。
+# 测试目的: 锁定 matmul helper 已纳入 AST/emit/mlir_gen 前端集合，不再因 Unsupported call expression 失败。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_matmul_helper_call
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md, spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_matmul_helper_call() -> None:
+    from kernel_gen.operation.nn import matmul
+
+    lhs = Memory([16, 144], NumericType.Float32, space=MemorySpace.GM)
+    rhs = Memory([144, 256], NumericType.Float32, space=MemorySpace.GM)
+
+    def matmul_kernel(
+        lhs: "Tensor[f32, 16, 144]",
+        rhs: "Tensor[f32, 144, 256]",
+    ) -> "Tensor[f32, 16, 256]":
+        return matmul(lhs, rhs)
+
+    func_op = build_func_op(matmul_kernel, lhs, rhs)
+    matmul_ops = [op for op in func_op.body.block.ops if isinstance(op, NnMatmulOp)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
+    assert len(matmul_ops) == 1
+    assert len(return_ops) == 1
+    assert [attr.data for attr in matmul_ops[0].result.type.shape.data] == [16, 256]
+    assert list(func_op.function_type.outputs) == [matmul_ops[0].result.type]
+    assert return_ops[0].arguments[0].type == matmul_ops[0].result.type
+
+
+# MGEN-C1B
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 功能说明: 验证 conv2d_img2col2d_tiled_npu_demo 前端函数可直接生成 raw func.func。
+# 测试目的: 锁定 `loop + slice + img2col2d + reshape + matmul + deslice + return` 链路在 build_func_op/build_func_op_from_ast 上完整可用。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_conv2d_img2col2d_tiled_npu_demo
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md, spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_conv2d_img2col2d_tiled_npu_demo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.dma import alloc, deslice, reshape, slice
+    from kernel_gen.operation.nn import img2col2d, matmul
+    from kernel_gen.operation.scf import loop
+
+    input_memory = Memory([1, 16, 18, 18], NumericType.Float32, space=MemorySpace.GM)
+    weight_memory = Memory([16, 16, 3, 3], NumericType.Float32, space=MemorySpace.GM)
+
+    def conv2d_img2col2d_tiled_npu_demo(
+        input: "Tensor[f32, 1, 16, 18, 18]",
+        weight: "Tensor[f32, 16, 16, 3, 3]",
+    ) -> "Tensor[f32, 1, 16, 16, 16]":
+        out = alloc([1, 16, 16, 16], NumericType.Float32, MemorySpace.GM)
+        for n0 in loop(0, 1, 1):
+            for c0 in loop(0, 16, 16):
+                for f0 in loop(0, 16, 16):
+                    for ho0 in loop(0, 16, 16):
+                        for wo0 in loop(0, 16, 16):
+                            input_tile = slice(input, [n0, c0, 0, 0], [1, 16, 18, 18], [1, 1, 1, 1], MemorySpace.GM)
+                            weight_tile = slice(weight, [f0, c0, 0, 0], [16, 16, 3, 3], [1, 1, 1, 1], MemorySpace.GM)
+                            col = img2col2d(input_tile, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)
+                            col2 = reshape(col, [144, 256])
+                            weight2 = reshape(weight_tile, [16, 144])
+                            out2 = matmul(weight2, col2)
+                            out_tile = reshape(out2, [1, 16, 16, 16])
+                            deslice(out_tile, out, [n0, f0, ho0, wo0], [1, 16, 16, 16], [1, 1, 1, 1])
+        return out
+
+    for name, value in (
+        ("alloc", alloc),
+        ("deslice", deslice),
+        ("reshape", reshape),
+        ("slice", slice),
+        ("img2col2d", img2col2d),
+        ("matmul", matmul),
+        ("loop", loop),
+        ("NumericType", NumericType),
+        ("MemorySpace", MemorySpace),
+    ):
+        monkeypatch.setitem(conv2d_img2col2d_tiled_npu_demo.__globals__, name, value)
+
+    func_ast = parse_function(conv2d_img2col2d_tiled_npu_demo)
+    for func_op in (
+        build_func_op(conv2d_img2col2d_tiled_npu_demo, input_memory, weight_memory),
+        build_func_op_from_ast(func_ast, runtime_args=(input_memory, weight_memory)),
+    ):
+        module = ModuleOp([func_op])
+        walked_ops = list(module.walk())
+        assert any(isinstance(op, (scf.ForOp, SymbolForOp)) for op in walked_ops)
+        assert any(isinstance(op, DmaAllocOp) for op in walked_ops)
+        assert any(isinstance(op, DmaSliceOp) for op in walked_ops)
+        assert any(isinstance(op, DmaReshapeOp) for op in walked_ops)
+        assert any(isinstance(op, NnImg2col2dOp) for op in walked_ops)
+        assert any(isinstance(op, NnMatmulOp) for op in walked_ops)
+        assert any(isinstance(op, DmaDesliceOp) for op in walked_ops)
+        assert any(isinstance(op, func.ReturnOp) for op in walked_ops)
 
 
 # MGEN-026A
