@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/operation/dma.md`](../../spec/operation/dma.md)
 - `功能实现`：[`kernel_gen/operation/dma.py`](../../kernel_gen/operation/dma.py)
 - `test`：[`test/operation/test_operation_dma.py`](../../test/operation/test_operation_dma.py)
@@ -50,7 +50,7 @@
 
 ## 公开接口
 
-### alloc(shape, dtype, space=MemorySpace.GM, stride=None)
+### alloc(shape, dtype, space=MemorySpace.GM, stride=None, format=Farmat.Norm)
 
 功能说明：
 
@@ -62,27 +62,35 @@
 - `dtype: NumericType`：元素类型。
 - `space: MemorySpace`：内存空间，默认 `MemorySpace.GM`。
 - `stride: Sequence | SymbolShape | None`：可选步长序列；未传入时生成默认连续 stride。
+- `format: Farmat`：布局格式，默认 `Farmat.Norm`。
 
 使用示例：
 
 ```python
-buf = alloc([32, 32], NumericType.Float32, space=MemorySpace.SM, stride=[1, 1])
+buf = alloc(
+    [SymbolDim("M"), SymbolDim("N")],
+    NumericType.Float16,
+    space=MemorySpace.LM,
+    stride=[1, 1],
+    format=Farmat.CLast,
+)
 ```
 
 注意事项：
 
 - `shape/stride` 必须可被 `SymbolShape` 规范化，且 rank 必须一致。
-- `dtype` 必须为 `NumericType`，`space` 必须为 `MemorySpace`。
+- `dtype` 必须为 `NumericType`，`space` 必须为 `MemorySpace`，`format` 必须为 `Farmat`。
 - 未提供 `stride` 时，按连续布局生成默认 stride。
+- 未提供 `format` 时，必须显式使用默认值 `Farmat.Norm`，不得依赖 `Memory` 默认格式隐式绕过。
 
 非法输入：
 
 - `shape/stride` 无法规范化或 rank 不一致时必须抛出 `ValueError`。
-- `dtype` 非 `NumericType` 或 `space` 非 `MemorySpace` 时必须抛出 `TypeError`。
+- `dtype` 非 `NumericType`、`space` 非 `MemorySpace` 或 `format` 非 `Farmat` 时必须抛出 `TypeError`。
 
 返回与限制：
 
-- 返回新的 `Memory`，`format` 使用 `Memory` 默认格式。
+- 返回新的 `Memory`，`format` 必须等于 `format` 参数。
 - 不隐含数据搬运、初始化填充或跨空间拷贝。
 
 ### free(value)
@@ -130,18 +138,30 @@ free(buf)
 dst = copy(src, MemorySpace.SM)
 ```
 
+```python
+def copy_kernel(src: "Tensor[f32, 8, 8]") -> "Tensor[f32, 8, 8]":
+    from kernel_gen.operation.dma import copy
+    return copy(src, MemorySpace.SM)
+
+# 目标 raw IR：dma.alloc + dma.copy + func.return
+# 非法例：copy(src, "SM") 必须在 helper/build_func_op 边界显式报错
+```
+
 注意事项：
 
 - `source` 必须为 `Memory`，`space` 必须为 `MemorySpace`。
 - 返回结果仅描述搬运意图，不执行实际数据拷贝。
+- 类型校验必须在 helper/build_func_op 边界完成；例如 `copy(src, "SM")` 必须抛出 `TypeError`，错误信息包含 `MemorySpace`。
 
 非法输入：
 
-- `source` 不是 `Memory` 或 `space` 不是 `MemorySpace` 时必须抛出 `TypeError`。
+- `source` 不是 `Memory` 时必须抛出 `TypeError`（错误信息需包含 `Memory` 关键字）。
+- `space` 不是 `MemorySpace` 时必须抛出 `TypeError`（错误信息需包含 `MemorySpace` 关键字）。
 
 返回与限制：
 
 - 返回新的 `Memory`，`shape/stride/dtype/format` 继承 `source`，`space` 由参数决定。
+- lowering 必须显式生成 `dma.alloc + dma.copy`，并返回 alloc 结果。
 
 ### cast(source, dtype, memoryspace=None)
 
@@ -204,13 +224,17 @@ tile = load(src, offsets=[0, 0], sizes=[32, 32], strides=[1, 1], space=MemorySpa
 
 非法输入：
 
-- `source` 不是 `Memory` 或 `space` 非 `MemorySpace|None` 时必须抛出 `TypeError`。
-- `offsets/sizes/strides` 与 `source.rank` 不一致、`sizes` 含非正静态维度、或静态边界校验失败时必须抛出 `ValueError`。
+- `source` 不是 `Memory` 时必须抛出 `TypeError`（错误信息需包含 `Memory` 关键字）。
+- `space` 非 `MemorySpace|None` 时必须抛出 `TypeError`（错误信息需包含 `MemorySpace` 关键字）。
+- `offsets/sizes/strides` 与 `source.rank` 不一致时必须抛出 `ValueError`（错误信息需包含 `rank` 关键字）。
+- `sizes` 含非正静态维度时必须抛出 `ValueError`（错误信息需包含 `size` 关键字）。
+- 静态边界校验失败时必须抛出 `ValueError`（错误信息需包含 `out of bounds` 关键字）。
 
 返回与限制：
 
 - 返回新的 `Memory`，其 `shape == sizes`，`dtype/format` 继承 `source`。
 - 返回结果 `stride` 按连续布局生成，与 `strides` 无关。
+- lowering 必须直接生成 `dma.load`，不得额外分配临时结果。
 
 ### slice(source, offsets, sizes, strides=None, space=None)
 
@@ -243,8 +267,9 @@ sub = slice(src, offsets=[32], sizes=[16], strides=[1], space=MemorySpace.TSM)
 
 非法输入：
 
-- `source` 不是 `Memory` 时必须抛出 `TypeError`。
-- 其余 rank/边界/`sizes` 约束与 `load` 相同，违反时必须抛出 `ValueError`。
+- `source` 不是 `Memory` 时必须抛出 `TypeError`（错误信息需包含 `Memory` 关键字）。
+- `space` 非 `MemorySpace|None` 时必须抛出 `TypeError`（错误信息需包含 `MemorySpace` 关键字）。
+- 其余 rank/边界/`sizes` 约束与 `load` 相同，违反时必须抛出 `ValueError`，并沿用 `load` 的关键短语约定。
 
 返回与限制：
 
@@ -388,13 +413,16 @@ dst = reshape(src, shape=[6, 4])
 
 非法输入：
 
-- `source` 不是 `Memory` 时必须抛出 `TypeError`。
-- `shape` 无法规范化、`source` 非连续布局或静态元素总数不一致时必须抛出 `ValueError`。
+- `source` 不是 `Memory` 时必须抛出 `TypeError`（错误信息需包含 `Memory` 关键字）。
+- `shape` 无法规范化时必须抛出 `ValueError`（错误信息需包含 `shape` 关键字）。
+- `source` 非连续布局时必须抛出 `ValueError`（错误信息需包含 `contiguous` 关键字）。
+- 静态元素总数不一致时必须抛出 `ValueError`（错误信息需包含 `numel` 关键字）。
 
 返回与限制：
 
 - 返回新的 `Memory`，其 `dtype/space/format` 继承 `source`。
 - 返回的 `stride` 按连续行主序生成。
+- lowering 必须生成 `dma.reshape`，返回值绑定其结果。
 
 ### flatten(source)
 
@@ -421,13 +449,14 @@ dst = flatten(src)
 
 非法输入：
 
-- `source` 不是 `Memory` 时必须抛出 `TypeError`。
-- `source` 非连续布局时必须抛出 `ValueError`。
+- `source` 不是 `Memory` 时必须抛出 `TypeError`（错误信息需包含 `Memory` 关键字）。
+- `source` 非连续布局时必须抛出 `ValueError`（错误信息需包含 `contiguous` 关键字）。
 
 返回与限制：
 
 - 返回新的 `Memory`，其 `shape` 为一维，`stride` 为 `[1]`。
 - 返回结果的 `dtype/space/format` 继承 `source`。
+- lowering 必须生成 `dma.reshape`，返回值绑定其结果。
 
 ## 测试
 
