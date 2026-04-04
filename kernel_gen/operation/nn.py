@@ -903,6 +903,78 @@ def _infer_broadcast_shape(lhs: SymbolShape, rhs: SymbolShape) -> SymbolShape:
     return SymbolShape(result)
 
 
+def broadcast(value: object, target: object) -> Memory:
+    """显式广播 Memory 到目标描述。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 按尾维对齐规则扩张 singleton dim。
+    - 返回结果在 shape/dtype/space/stride/format 上与 target 完全一致。
+
+    使用示例:
+    - broadcast(Memory([1, "N"], NumericType.Float32), Memory(["M", "N"], NumericType.Float32))
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    if not isinstance(value, Memory):
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.broadcast 参数校验",
+                expected="broadcast value must be Memory",
+                actual=type(value).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
+    if not isinstance(target, Memory):
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.broadcast 参数校验",
+                expected="broadcast target must be Memory",
+                actual=type(target).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
+    input_values = value.shape.get_values()
+    target_values = target.shape.get_values()
+
+    if len(target_values) < len(input_values):
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.broadcast 参数校验",
+                expected="broadcast target rank must be >= input rank",
+                actual=f"input_rank={len(input_values)} target_rank={len(target_values)}",
+                action=_ERROR_ACTION,
+            )
+        )
+
+    for input_dim, target_dim in zip(reversed(input_values), reversed(target_values), strict=False):
+        if input_dim == target_dim:
+            continue
+        if input_dim == 1:
+            continue
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.broadcast 参数校验",
+                expected="broadcast dimension mismatch",
+                actual=f"input={input_dim} target={target_dim}",
+                action=_ERROR_ACTION,
+            )
+        )
+
+    return Memory(
+        target.shape,
+        target.dtype,
+        space=target.space,
+        stride=target.stride,
+        format=target.format,
+    )
+
+
 def _broadcast_memory_pair(lhs: Memory, rhs: Memory) -> tuple[Memory, Memory]:
     """为逐元素运算执行隐式 broadcast。
 
@@ -2210,40 +2282,6 @@ def img2col1d(
     )
 
 
-def img2col2d(
-    value: object,
-    kh: int | SymbolDim,
-    kw: int | SymbolDim,
-    sh: int | SymbolDim = 1,
-    sw: int | SymbolDim = 1,
-    dh: int | SymbolDim = 1,
-    dw: int | SymbolDim = 1,
-    ph: int | SymbolDim = 0,
-    pw: int | SymbolDim = 0,
-    pl: int | SymbolDim = 0,
-    pr: int | SymbolDim = 0,
-) -> Memory:
-    """二维窗口展开高层语义推导。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 校验输入类型与 rank。
-    - 校验 kernel/stride/dilation/padding 参数。
-    - 返回 img2col2d 展开后的 Memory 描述。
-
-    使用示例:
-    - img2col2d(Memory([1, 3, 5, 5], NumericType.Float32), kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr=1)
-
-    关联文件:
-    - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
-    - 功能实现: kernel_gen/operation/nn.py
-    """
-    return _img2col(value, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr)
-
-
 def _img2col(
     value: object,
     kh: int | SymbolDim,
@@ -2354,76 +2392,38 @@ def _img2col(
     )
 
 
-def broadcast(value: object, target: object) -> Memory:
-    """显式广播 Memory 到目标描述。
+def img2col2d(
+    value: object,
+    kh: int | SymbolDim,
+    kw: int | SymbolDim,
+    sh: int | SymbolDim = 1,
+    sw: int | SymbolDim = 1,
+    dh: int | SymbolDim = 1,
+    dw: int | SymbolDim = 1,
+    ph: int | SymbolDim = 0,
+    pw: int | SymbolDim = 0,
+    pl: int | SymbolDim = 0,
+    pr: int | SymbolDim = 0,
+) -> Memory:
+    """二维窗口展开高层语义推导。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 按尾维对齐规则扩张 singleton dim。
-    - 返回结果在 shape/dtype/space/stride/format 上与 target 完全一致。
+    - 校验输入类型与 rank。
+    - 校验 kernel/stride/dilation/padding 参数。
+    - 返回 img2col2d 展开后的 Memory 描述。
 
     使用示例:
-    - broadcast(Memory([1, "N"], NumericType.Float32), Memory(["M", "N"], NumericType.Float32))
+    - img2col2d(Memory([1, 3, 5, 5], NumericType.Float32), kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr=1)
 
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
     - 功能实现: kernel_gen/operation/nn.py
     """
-    if not isinstance(value, Memory):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
-                scene="nn.broadcast 参数校验",
-                expected="broadcast value must be Memory",
-                actual=type(value).__name__,
-                action=_ERROR_ACTION,
-            )
-        )
-    if not isinstance(target, Memory):
-        raise TypeError(
-            _ERROR_TEMPLATE.format(
-                scene="nn.broadcast 参数校验",
-                expected="broadcast target must be Memory",
-                actual=type(target).__name__,
-                action=_ERROR_ACTION,
-            )
-        )
-    input_values = value.shape.get_values()
-    target_values = target.shape.get_values()
-
-    if len(target_values) < len(input_values):
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
-                scene="nn.broadcast 参数校验",
-                expected="broadcast target rank must be >= input rank",
-                actual=f"input_rank={len(input_values)} target_rank={len(target_values)}",
-                action=_ERROR_ACTION,
-            )
-        )
-
-    for input_dim, target_dim in zip(reversed(input_values), reversed(target_values), strict=False):
-        if input_dim == target_dim:
-            continue
-        if input_dim == 1:
-            continue
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
-                scene="nn.broadcast 参数校验",
-                expected="broadcast dimension mismatch",
-                actual=f"input={input_dim} target={target_dim}",
-                action=_ERROR_ACTION,
-            )
-        )
-
-    return Memory(
-        target.shape,
-        target.dtype,
-        space=target.space,
-        stride=target.stride,
-        format=target.format,
-    )
+    return _img2col(value, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr)
 
 
 def broadcast_to(source: object, target_shape: object, space: object) -> Memory:

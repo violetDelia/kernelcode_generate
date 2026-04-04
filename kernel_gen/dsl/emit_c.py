@@ -509,6 +509,67 @@ def _emit_dma_store_stmt(op: DmaStoreOp, ctx: EmitCContext) -> str:
     return f"{ctx.current_indent}{target_expr}{_format_indices(op.offsets, ctx)} = {source_expr};"
 
 
+def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
+    """把 SSA value 生成为可嵌入右值位置的表达式文本。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 负责把常量、二元算术、比较、unit-tile `dma.load`、`symbol.add`（cpu）以及 `symbol.get_dim` 结果转换为右值表达式。
+    - 若 value 已在 `EmitCContext` 中绑定名称，则直接复用稳定名称。
+
+    使用示例:
+    - expr = emit_c_value(value, EmitCContext(target=\"cpu\"))
+
+    关联文件:
+    - spec: spec/dsl/emit_c.md
+    - test: test/dsl/test_emit_c.py
+    - 功能实现: kernel_gen/dsl/emit_c.py
+    """
+
+    bound = ctx.lookup_name(value)
+    if bound is not None:
+        return bound
+    if isinstance(value, BlockArgument):
+        return ctx.bind_name(value, f"arg{value.index}")
+    owner = value.owner
+    if isinstance(owner, arith.ConstantOp):
+        return _format_literal(owner, ctx)
+    if ctx.target == "npu_demo":
+        if isinstance(owner, ArchGetThreadIdOp):
+            return "ctx.thread_id()"
+        if isinstance(owner, ArchGetThreadNumOp):
+            return "ctx.thread_num()"
+        if isinstance(owner, ArchGetDynamicMemoryOp):
+            element_type = _type_to_c(owner.result.type.element_type, ctx)
+            space_expr = _space_name_to_c(owner.memory_space.space.data, ctx)
+            if space_expr not in {"MemorySpace::TSM", "MemorySpace::TLM"}:
+                raise _emit_error(ctx, owner.name, "unsupported dynamic memory space")
+            return f"ctx.get_dynamic_memory<{element_type}>({space_expr})"
+    if owner.name in _BINARY_SIGILS:
+        if owner.name == "symbol.add" and ctx.target != "cpu":
+            raise _emit_error(ctx, owner.name, "symbol scalar ops are cpu-only")
+        lhs = emit_c_value(owner.operands[0], ctx)
+        rhs = emit_c_value(owner.operands[1], ctx)
+        return f"({lhs} {_BINARY_SIGILS[owner.name]} {rhs})"
+    if isinstance(owner, arith.CmpiOp):
+        predicate = owner.predicate.value.data
+        if predicate not in _CMPI_SIGILS:
+            raise _emit_error(ctx, owner.name, "unsupported comparison predicate")
+        lhs = emit_c_value(owner.lhs, ctx)
+        rhs = emit_c_value(owner.rhs, ctx)
+        return f"({lhs} {_CMPI_SIGILS[predicate]} {rhs})"
+    if isinstance(owner, DmaLoadOp):
+        return _emit_dma_load_expr(owner, ctx)
+    if isinstance(owner, SymbolGetDimOp):
+        if not isinstance(owner.axis, IntAttr):
+            raise _emit_error(ctx, owner.name, "axis must be IntAttr")
+        source_expr = _memory_base_name(owner.source, ctx)
+        return f"{source_expr}.shape()[{owner.axis.data}]"
+    raise _emit_error(ctx, owner.name, f"invalid dependency for value {value}")
+
+
 def _emit_dma_alloc_stmt(op: DmaAllocOp, ctx: EmitCContext) -> str:
     """生成 `dma.alloc` 的 CPU 侧 `Memory<T>` 声明片段。
 
@@ -1055,67 +1116,6 @@ def _emit_npu_add_stmt(op: NnAddOp, ctx: EmitCContext) -> str:
     lhs_expr = _memory_base_name(op.lhs, ctx)
     rhs_expr = _memory_base_name(op.rhs, ctx)
     return f"{ctx.current_indent}add({lhs_expr}, {rhs_expr}, {result_name});"
-
-
-def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
-    """把 SSA value 生成为可嵌入右值位置的表达式文本。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 朽木露琪亚
-
-    功能说明:
-    - 负责把常量、二元算术、比较、unit-tile `dma.load`、`symbol.add`（cpu）以及 `symbol.get_dim` 结果转换为右值表达式。
-    - 若 value 已在 `EmitCContext` 中绑定名称，则直接复用稳定名称。
-
-    使用示例:
-    - expr = emit_c_value(value, EmitCContext(target=\"cpu\"))
-
-    关联文件:
-    - spec: spec/dsl/emit_c.md
-    - test: test/dsl/test_emit_c.py
-    - 功能实现: kernel_gen/dsl/emit_c.py
-    """
-
-    bound = ctx.lookup_name(value)
-    if bound is not None:
-        return bound
-    if isinstance(value, BlockArgument):
-        return ctx.bind_name(value, f"arg{value.index}")
-    owner = value.owner
-    if isinstance(owner, arith.ConstantOp):
-        return _format_literal(owner, ctx)
-    if ctx.target == "npu_demo":
-        if isinstance(owner, ArchGetThreadIdOp):
-            return "ctx.thread_id()"
-        if isinstance(owner, ArchGetThreadNumOp):
-            return "ctx.thread_num()"
-        if isinstance(owner, ArchGetDynamicMemoryOp):
-            element_type = _type_to_c(owner.result.type.element_type, ctx)
-            space_expr = _space_name_to_c(owner.memory_space.space.data, ctx)
-            if space_expr not in {"MemorySpace::TSM", "MemorySpace::TLM"}:
-                raise _emit_error(ctx, owner.name, "unsupported dynamic memory space")
-            return f"ctx.get_dynamic_memory<{element_type}>({space_expr})"
-    if owner.name in _BINARY_SIGILS:
-        if owner.name == "symbol.add" and ctx.target != "cpu":
-            raise _emit_error(ctx, owner.name, "symbol scalar ops are cpu-only")
-        lhs = emit_c_value(owner.operands[0], ctx)
-        rhs = emit_c_value(owner.operands[1], ctx)
-        return f"({lhs} {_BINARY_SIGILS[owner.name]} {rhs})"
-    if isinstance(owner, arith.CmpiOp):
-        predicate = owner.predicate.value.data
-        if predicate not in _CMPI_SIGILS:
-            raise _emit_error(ctx, owner.name, "unsupported comparison predicate")
-        lhs = emit_c_value(owner.lhs, ctx)
-        rhs = emit_c_value(owner.rhs, ctx)
-        return f"({lhs} {_CMPI_SIGILS[predicate]} {rhs})"
-    if isinstance(owner, DmaLoadOp):
-        return _emit_dma_load_expr(owner, ctx)
-    if isinstance(owner, SymbolGetDimOp):
-        if not isinstance(owner.axis, IntAttr):
-            raise _emit_error(ctx, owner.name, "axis must be IntAttr")
-        source_expr = _memory_base_name(owner.source, ctx)
-        return f"{source_expr}.shape()[{owner.axis.data}]"
-    raise _emit_error(ctx, owner.name, f"invalid dependency for value {value}")
 
 
 def _emit_assignment(op: Operation, ctx: EmitCContext) -> str:

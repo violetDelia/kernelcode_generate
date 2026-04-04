@@ -79,34 +79,6 @@ def _is_pass_like(obj: object) -> bool:
     return isinstance(getattr(obj, "name"), str)
 
 
-def build_default_lowering_pass_manager(name: str | None = "lowering") -> "PassManager":
-    """构造默认 lowering pass 链路。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 固定注册 `LowerNnToKernelPass -> BufferResultsToOutParamsPass` 顺序。
-    - 为推荐调用链与黑盒测试提供统一入口，避免各处手工拼装顺序漂移。
-
-    使用示例:
-    - pm = build_default_lowering_pass_manager()
-    - module = pm.run(module)
-
-    关联文件:
-    - spec: spec/pass/pass_manager.md
-    - test: test/pass/test_pass_manager.py
-    - 功能实现: kernel_gen/passes/pass_manager.py
-    """
-
-    from .lowering import BufferResultsToOutParamsPass, LowerNnToKernelPass
-
-    pm = PassManager(name=name)
-    pm.add_pass(LowerNnToKernelPass())
-    pm.add_pass(BufferResultsToOutParamsPass())
-    return pm
-
-
 class PassManager:
     """Pass 管理器。
 
@@ -201,6 +173,34 @@ class PassManager:
             result = item.run(result)
             seen_names.append(item.name)
         return result
+
+
+def build_default_lowering_pass_manager(name: str | None = "lowering") -> "PassManager":
+    """构造默认 lowering pass 链路。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 固定注册 `LowerNnToKernelPass -> BufferResultsToOutParamsPass` 顺序。
+    - 为推荐调用链与黑盒测试提供统一入口，避免各处手工拼装顺序漂移。
+
+    使用示例:
+    - pm = build_default_lowering_pass_manager()
+    - module = pm.run(module)
+
+    关联文件:
+    - spec: spec/pass/pass_manager.md
+    - test: test/pass/test_pass_manager.py
+    - 功能实现: kernel_gen/passes/pass_manager.py
+    """
+
+    from .lowering import BufferResultsToOutParamsPass, LowerNnToKernelPass
+
+    pm = PassManager(name=name)
+    pm.add_pass(LowerNnToKernelPass())
+    pm.add_pass(BufferResultsToOutParamsPass())
+    return pm
 
 
 __all__ = ["Pass", "PassManager", "build_default_lowering_pass_manager"]

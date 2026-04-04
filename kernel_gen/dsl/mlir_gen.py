@@ -482,90 +482,6 @@ def _is_zero_return_statement_expr(expr: object) -> bool:
     return isinstance(expr, (DmaFreeAST, StoreAST, ForAST, ArchLaunchKernelAST))
 
 
-def build_func_op(
-    fn: Callable[..., object],
-    *runtime_args: object,
-    globals: dict[str, object] | None = None,
-    builtins: dict[str, object] | object | None = None,
-) -> func.FuncOp:
-    """从 Python 函数构建 MLIR `func.func`。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 解析 Python 函数为 `FunctionAST`，并生成 `func.FuncOp`。
-    - 校验运行时参数数量，拒绝外部值引用。
-
-    参数说明:
-    - fn: 待解析的 Python 函数。
-    - runtime_args: 与函数位置参数一一对应的运行时参数。
-    - globals: 解析环境追加的全局变量（仅用于解析，不参与签名推导）。
-    - builtins: 解析环境的内建对象覆盖（可为 dict 或内建模块对象）。
-
-    返回说明:
-    - 返回构建完成的 `func.FuncOp`。
-
-    限制与异常:
-    - 运行时参数数量不匹配会抛出 `AstVisitorError`。
-    - 解析或下沉失败会抛出 `AstVisitorError`。
-
-    使用示例:
-    - func_op = build_func_op(fn, *runtime_args)
-
-    关联文件:
-    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
-    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
-    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
-    """
-    from .ast_visitor import AstVisitorError
-
-    signature = inspect.signature(fn)
-    positional_params = [
-        param
-        for param in signature.parameters.values()
-        if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-    ]
-    if len(runtime_args) != len(positional_params):
-        if not runtime_args and (globals is not None or builtins is not None):
-            reason = (
-                "globals/builtins cannot replace function runtime args: "
-                f"expected {len(positional_params)}, got 0"
-            )
-            raise AstVisitorError(reason, location=None)
-        reason = (
-            f"build_func_op requires explicit runtime args for {fn.__name__}: "
-            f"expected {len(positional_params)}, got {len(runtime_args)}"
-        )
-        raise AstVisitorError(reason, location=None)
-
-    runtime_table = {param.name: runtime_args[index] for index, param in enumerate(positional_params)}
-    # globals/builtins 仅作为解析环境，不参与签名推导。
-    globals_table = dict(getattr(fn, "__globals__", {}) or {})
-    globals_table.update(inspect.getclosurevars(fn).nonlocals)
-    if globals is not None:
-        globals_table.update(globals)
-    globals_table.update(runtime_table)
-    builtins_obj = builtins if builtins is not None else globals_table.get("__builtins__", {})
-    if isinstance(builtins_obj, dict):
-        builtins_table = builtins_obj
-    else:
-        builtins_table = getattr(builtins_obj, "__dict__", {})
-
-    try:
-        func_ast = _parse_function_with_env(
-            fn,
-            globals_table,
-            builtins_table,
-            runtime_table,
-            config={"reject_external_values": True},
-        )
-    except AstParseError as exc:
-        location = exc.diagnostics[0].location if exc.diagnostics else None
-        raise AstVisitorError(exc.message, location=location) from exc
-    return build_func_op_from_ast(func_ast, runtime_args=runtime_args)
-
-
 def _build_func_op_from_ast_impl(
     func_ast: FunctionAST,
     runtime_args: tuple[object, ...] | list[object] | None = None,
@@ -665,3 +581,87 @@ def build_func_op_from_ast(
         return _build_func_op_from_ast_impl(func_ast, runtime_args=runtime_args, config=config)
     except _LoweringError as exc:
         raise AstVisitorError(str(exc), location=exc.location) from exc
+
+
+def build_func_op(
+    fn: Callable[..., object],
+    *runtime_args: object,
+    globals: dict[str, object] | None = None,
+    builtins: dict[str, object] | object | None = None,
+) -> func.FuncOp:
+    """从 Python 函数构建 MLIR `func.func`。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 解析 Python 函数为 `FunctionAST`，并生成 `func.FuncOp`。
+    - 校验运行时参数数量，拒绝外部值引用。
+
+    参数说明:
+    - fn: 待解析的 Python 函数。
+    - runtime_args: 与函数位置参数一一对应的运行时参数。
+    - globals: 解析环境追加的全局变量（仅用于解析，不参与签名推导）。
+    - builtins: 解析环境的内建对象覆盖（可为 dict 或内建模块对象）。
+
+    返回说明:
+    - 返回构建完成的 `func.FuncOp`。
+
+    限制与异常:
+    - 运行时参数数量不匹配会抛出 `AstVisitorError`。
+    - 解析或下沉失败会抛出 `AstVisitorError`。
+
+    使用示例:
+    - func_op = build_func_op(fn, *runtime_args)
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+    """
+    from .ast_visitor import AstVisitorError
+
+    signature = inspect.signature(fn)
+    positional_params = [
+        param
+        for param in signature.parameters.values()
+        if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    if len(runtime_args) != len(positional_params):
+        if not runtime_args and (globals is not None or builtins is not None):
+            reason = (
+                "globals/builtins cannot replace function runtime args: "
+                f"expected {len(positional_params)}, got 0"
+            )
+            raise AstVisitorError(reason, location=None)
+        reason = (
+            f"build_func_op requires explicit runtime args for {fn.__name__}: "
+            f"expected {len(positional_params)}, got {len(runtime_args)}"
+        )
+        raise AstVisitorError(reason, location=None)
+
+    runtime_table = {param.name: runtime_args[index] for index, param in enumerate(positional_params)}
+    # globals/builtins 仅作为解析环境，不参与签名推导。
+    globals_table = dict(getattr(fn, "__globals__", {}) or {})
+    globals_table.update(inspect.getclosurevars(fn).nonlocals)
+    if globals is not None:
+        globals_table.update(globals)
+    globals_table.update(runtime_table)
+    builtins_obj = builtins if builtins is not None else globals_table.get("__builtins__", {})
+    if isinstance(builtins_obj, dict):
+        builtins_table = builtins_obj
+    else:
+        builtins_table = getattr(builtins_obj, "__dict__", {})
+
+    try:
+        func_ast = _parse_function_with_env(
+            fn,
+            globals_table,
+            builtins_table,
+            runtime_table,
+            config={"reject_external_values": True},
+        )
+    except AstParseError as exc:
+        location = exc.diagnostics[0].location if exc.diagnostics else None
+        raise AstVisitorError(exc.message, location=location) from exc
+    return build_func_op_from_ast(func_ast, runtime_args=runtime_args)
