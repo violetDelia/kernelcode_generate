@@ -83,28 +83,6 @@ class Diagnostic:
 
 
 @dataclass(frozen=True)
-class ModuleAST:
-    """DSL 模块节点。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 聚合多个 `FunctionAST` 作为 DSL 模块入口。
-
-    使用示例:
-    - ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=BlockAST([]))])
-
-    关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast.py
-    """
-
-    functions: list[FunctionAST]
-
-
-@dataclass(frozen=True)
 class TensorAST:
     """张量参数节点。
 
@@ -179,29 +157,6 @@ class PtrArgAST:
 
 
 @dataclass(frozen=True)
-class VarAST:
-    """变量节点。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 表示循环变量或中间变量。
-
-    使用示例:
-    - VarAST(name="i")
-
-    关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast.py
-    """
-
-    name: str
-    location: SourceLocation | None = None
-
-
-@dataclass(frozen=True)
 class BlockAST:
     """语句块节点。
 
@@ -221,6 +176,103 @@ class BlockAST:
     """
 
     statements: list[object]
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class FunctionAST:
+    """函数节点。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 表示可 lowering 的 DSL 函数入口。
+
+    使用示例:
+    - FunctionAST(name="kernel", inputs=[], outputs=[], body=BlockAST([]))
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    name: str
+    inputs: list[TensorAST | ScalarArgAST | PtrArgAST]
+    outputs: list[TensorAST | ScalarArgAST]
+    body: BlockAST
+    location: SourceLocation | None = None
+    source: str | None = None
+    py_ast: object | None = None
+    diagnostics: list[Diagnostic] = field(default_factory=list)
+    has_explicit_return: bool = False
+    has_return_annotation: bool = False
+    returns_none: bool = False
+
+    def iter_inputs(self: FunctionAST) -> Iterable[TensorAST | ScalarArgAST | PtrArgAST]:
+        """迭代输入参数。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 提供输入参数（Tensor/Scalar/Ptr）的统一迭代入口。
+
+        使用示例:
+        - list(func_ast.iter_inputs())
+
+        关联文件:
+        - spec: spec/dsl/ast.md
+        - test: test/dsl/test_ast_visitor.py
+        - 功能实现: kernel_gen/dsl/ast.py
+        """
+
+        return iter(self.inputs)
+
+
+@dataclass(frozen=True)
+class ModuleAST:
+    """DSL 模块节点。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 聚合多个 `FunctionAST` 作为 DSL 模块入口。
+
+    使用示例:
+    - ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=BlockAST([]))])
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    functions: list[FunctionAST]
+
+
+@dataclass(frozen=True)
+class VarAST:
+    """变量节点。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 表示循环变量或中间变量。
+
+    使用示例:
+    - VarAST(name="i")
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    name: str
     location: SourceLocation | None = None
 
 
@@ -734,58 +786,6 @@ class ConstAST:
     location: SourceLocation | None = None
 
 
-@dataclass(frozen=True)
-class FunctionAST:
-    """函数节点。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 表示可 lowering 的 DSL 函数入口。
-
-    使用示例:
-    - FunctionAST(name="kernel", inputs=[], outputs=[], body=BlockAST([]))
-
-    关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast.py
-    """
-
-    name: str
-    inputs: list[TensorAST | ScalarArgAST | PtrArgAST]
-    outputs: list[TensorAST | ScalarArgAST]
-    body: BlockAST
-    location: SourceLocation | None = None
-    source: str | None = None
-    py_ast: object | None = None
-    diagnostics: list[Diagnostic] = field(default_factory=list)
-    has_explicit_return: bool = False
-    has_return_annotation: bool = False
-    returns_none: bool = False
-
-    def iter_inputs(self: FunctionAST) -> Iterable[TensorAST | ScalarArgAST | PtrArgAST]:
-        """迭代输入参数。
-
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
-
-        功能说明:
-        - 提供输入参数（Tensor/Scalar/Ptr）的统一迭代入口。
-
-        使用示例:
-        - list(func_ast.iter_inputs())
-
-        关联文件:
-        - spec: spec/dsl/ast.md
-        - test: test/dsl/test_ast_visitor.py
-        - 功能实现: kernel_gen/dsl/ast.py
-        """
-
-        return iter(self.inputs)
-
-
 class AstParseError(Exception):
     """DSL AST 解析错误。
 
@@ -905,6 +905,31 @@ def _split_tensor_annotation(text: str, node: object | None) -> tuple[NumericTyp
         else:
             dims.append(part)
     return dtype, dims
+
+
+def _lookup_python_name(name: str, globals_table: dict[str, object], builtins_table: dict[str, object]) -> object | None:
+    """从解析上下文查找 Python 名称。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 依次在 globals 与 builtins 中查找给定名称。
+
+    使用示例:
+    - _lookup_python_name("MemorySpace", globals(), __builtins__)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    if name in globals_table:
+        return globals_table[name]
+    if name in builtins_table:
+        return builtins_table[name]
+    return None
 
 
 def _format_joinedstr_value(
@@ -1228,31 +1253,6 @@ def _parse_annotation_node(
         return _annotation_from_text(_tensor_annotation_text_from_subscript(node), arg_name, node)
 
     _raise_parse_error("Unsupported annotation", node)
-    return None
-
-
-def _lookup_python_name(name: str, globals_table: dict[str, object], builtins_table: dict[str, object]) -> object | None:
-    """从解析上下文查找 Python 名称。
-
-    创建者: OpenAI
-    最后一次更改: OpenAI
-
-    功能说明:
-    - 依次在 globals 与 builtins 中查找给定名称。
-
-    使用示例:
-    - _lookup_python_name("MemorySpace", globals(), __builtins__)
-
-    关联文件:
-    - spec: spec/dsl/ast.md
-    - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast.py
-    """
-
-    if name in globals_table:
-        return globals_table[name]
-    if name in builtins_table:
-        return builtins_table[name]
     return None
 
 
