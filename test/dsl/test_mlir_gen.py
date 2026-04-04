@@ -1359,6 +1359,210 @@ def test_build_func_op_supports_conv2d_img2col2d_tiled_npu_demo(
         assert any(isinstance(op, func.ReturnOp) for op in walked_ops)
 
 
+# MGEN-C2A
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-04 18:08:02 +0800
+# 最近一次运行成功时间: 2026-04-04 18:08:02 +0800
+# 功能说明: 黑盒验证 conv2d_img2col2d_tiled_npu_demo 通过 build_func_op 生成 raw MLIR IR。
+# 测试目的: 锁定最小 conv2d 正例仅走 build_func_op，且 raw IR 中临时 tile 被后续计算与最终 deslice 真实消费。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_conv2d_npu_demo_blackbox_raw_ir
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_conv2d_npu_demo_blackbox_raw_ir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.dma import alloc, deslice, reshape, slice
+    from kernel_gen.operation.nn import img2col2d, matmul
+    from kernel_gen.operation.scf import loop
+
+    input_memory = Memory([1, 16, 18, 18], NumericType.Float32, space=MemorySpace.GM)
+    weight_memory = Memory([16, 16, 3, 3], NumericType.Float32, space=MemorySpace.GM)
+
+    def conv2d_img2col2d_tiled_npu_demo(
+        input: "Tensor[f32, 1, 16, 18, 18]",
+        weight: "Tensor[f32, 16, 16, 3, 3]",
+    ) -> "Tensor[f32, 1, 16, 16, 16]":
+        out = alloc([1, 16, 16, 16], NumericType.Float32, MemorySpace.GM)
+        for n0 in loop(0, 1, 1):
+            input_tile = slice(input, [n0, 0, 0, 0], [1, 16, 18, 18], [1, 1, 1, 1], MemorySpace.GM)
+            weight_tile = slice(weight, [0, 0, 0, 0], [16, 16, 3, 3], [1, 1, 1, 1], MemorySpace.GM)
+            col = img2col2d(input_tile, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)
+            col2 = reshape(col, [144, 256])
+            weight2 = reshape(weight_tile, [16, 144])
+            out2 = matmul(weight2, col2)
+            out_tile = reshape(out2, [1, 16, 16, 16])
+            deslice(out_tile, out, [n0, 0, 0, 0], [1, 16, 16, 16], [1, 1, 1, 1])
+        return out
+
+    for name, value in (
+        ("alloc", alloc),
+        ("deslice", deslice),
+        ("reshape", reshape),
+        ("slice", slice),
+        ("img2col2d", img2col2d),
+        ("matmul", matmul),
+        ("loop", loop),
+        ("NumericType", NumericType),
+        ("MemorySpace", MemorySpace),
+    ):
+        monkeypatch.setitem(conv2d_img2col2d_tiled_npu_demo.__globals__, name, value)
+
+    func_op = build_func_op(conv2d_img2col2d_tiled_npu_demo, input_memory, weight_memory)
+    module = ModuleOp([func_op])
+    buffer = StringIO()
+    Printer(buffer).print(module)
+    raw_ir = buffer.getvalue()
+    for token in (
+        "func.func",
+        "func.return",
+        "dma.alloc",
+        "dma.slice",
+        "dma.reshape",
+        "nn.img2col2d",
+        "nn.matmul",
+        "dma.deslice",
+    ):
+        if token not in raw_ir:
+            raise AssertionError(f"expected {token} in raw MLIR IR")
+    if "scf.for" not in raw_ir and "symbol.for" not in raw_ir:
+        raise AssertionError("expected scf.for or symbol.for in raw MLIR IR")
+
+    walked_ops = list(module.walk())
+    if not any(isinstance(op, (scf.ForOp, SymbolForOp)) for op in walked_ops):
+        raise AssertionError("expected scf.for or symbol.for in module ops")
+    deslice_op = next(op for op in walked_ops if isinstance(op, DmaDesliceOp))
+    matmul_op = next(op for op in walked_ops if isinstance(op, NnMatmulOp))
+    img2col_op = next(op for op in walked_ops if isinstance(op, NnImg2col2dOp))
+    slice_targets = {op.target for op in walked_ops if isinstance(op, DmaSliceOp)}
+    if img2col_op.input not in slice_targets:
+        raise AssertionError("expected img2col2d input to consume slice target")
+    if not isinstance(matmul_op.lhs.owner, DmaReshapeOp):
+        raise AssertionError("expected matmul lhs to come from dma.reshape")
+    if not isinstance(matmul_op.rhs.owner, DmaReshapeOp):
+        raise AssertionError("expected matmul rhs to come from dma.reshape")
+    reshape_from_matmul = next(
+        (
+            op
+            for op in walked_ops
+            if isinstance(op, DmaReshapeOp) and op.source is matmul_op.result
+        ),
+        None,
+    )
+    if reshape_from_matmul is None:
+        raise AssertionError("expected matmul result to be reshaped for deslice")
+    if deslice_op.source is not reshape_from_matmul.result:
+        raise AssertionError("expected deslice source to consume reshape(matmul) result")
+    alloc_op = next(op for op in walked_ops if isinstance(op, DmaAllocOp))
+    if deslice_op.target is not alloc_op.result:
+        raise AssertionError("expected deslice target to consume alloc result")
+
+
+# MGEN-C2B
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-04 18:08:02 +0800
+# 最近一次运行成功时间: 2026-04-04 18:08:02 +0800
+# 功能说明: 黑盒验证 conv2d_npu_demo helper 缺失时 build_func_op 统一报 unsupported。
+# 测试目的: 锁定缺失 img2col2d/matmul 等 helper 时不回退 pipeline，直接抛 Unsupported call expression。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_conv2d_npu_demo_missing_helper_reports_unsupported
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_conv2d_npu_demo_missing_helper_reports_unsupported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.dma import alloc, deslice, reshape, slice
+
+    input_memory = Memory([1, 16, 18, 18], NumericType.Float32, space=MemorySpace.GM)
+    weight_memory = Memory([16, 16, 3, 3], NumericType.Float32, space=MemorySpace.GM)
+
+    def conv2d_img2col2d_tiled_npu_demo(
+        input: "Tensor[f32, 1, 16, 18, 18]",
+        weight: "Tensor[f32, 16, 16, 3, 3]",
+    ) -> "Tensor[f32, 1, 16, 16, 16]":
+        out = alloc([1, 16, 16, 16], NumericType.Float32, MemorySpace.GM)
+        input_tile = slice(input, [0, 0, 0, 0], [1, 16, 18, 18], [1, 1, 1, 1], MemorySpace.GM)
+        weight_tile = slice(weight, [0, 0, 0, 0], [16, 16, 3, 3], [1, 1, 1, 1], MemorySpace.GM)
+        col = img2col2d(input_tile, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)
+        col2 = reshape(col, [144, 256])
+        weight2 = reshape(weight_tile, [16, 144])
+        out2 = matmul(weight2, col2)
+        out_tile = reshape(out2, [1, 16, 16, 16])
+        deslice(out_tile, out, [0, 0, 0, 0], [1, 16, 16, 16], [1, 1, 1, 1])
+        return out
+
+    for name, value in (
+        ("alloc", alloc),
+        ("deslice", deslice),
+        ("reshape", reshape),
+        ("slice", slice),
+        ("NumericType", NumericType),
+        ("MemorySpace", MemorySpace),
+    ):
+        monkeypatch.setitem(conv2d_img2col2d_tiled_npu_demo.__globals__, name, value)
+
+    with pytest.raises(AstVisitorError, match="Unsupported call expression"):
+        build_func_op(conv2d_img2col2d_tiled_npu_demo, input_memory, weight_memory)
+
+
+# MGEN-C2C
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-04 18:08:02 +0800
+# 最近一次运行成功时间: 2026-04-04 18:08:02 +0800
+# 功能说明: 黑盒验证计划外 conv2d helper/op 会触发 build_func_op 的 unsupported 报错。
+# 测试目的: 锁定计划外 img2col3d op 不进入 pipeline/lowered IR，直接收敛 Unsupported call expression。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_conv2d_npu_demo_unplanned_op_reports_unsupported
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_conv2d_npu_demo_unplanned_op_reports_unsupported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.dma import alloc, deslice, reshape, slice
+    from kernel_gen.operation.nn import matmul
+
+    def img2col3d(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("img2col3d should not be executed during parsing")
+
+    img2col3d.__module__ = "kernel_gen.operation.nn"
+
+    input_memory = Memory([1, 16, 18, 18], NumericType.Float32, space=MemorySpace.GM)
+    weight_memory = Memory([16, 16, 3, 3], NumericType.Float32, space=MemorySpace.GM)
+
+    def conv2d_img2col2d_tiled_npu_demo(
+        input: "Tensor[f32, 1, 16, 18, 18]",
+        weight: "Tensor[f32, 16, 16, 3, 3]",
+    ) -> "Tensor[f32, 1, 16, 16, 16]":
+        out = alloc([1, 16, 16, 16], NumericType.Float32, MemorySpace.GM)
+        input_tile = slice(input, [0, 0, 0, 0], [1, 16, 18, 18], [1, 1, 1, 1], MemorySpace.GM)
+        weight_tile = slice(weight, [0, 0, 0, 0], [16, 16, 3, 3], [1, 1, 1, 1], MemorySpace.GM)
+        col = img2col3d(input_tile, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)
+        col2 = reshape(col, [144, 256])
+        weight2 = reshape(weight_tile, [16, 144])
+        out2 = matmul(weight2, col2)
+        out_tile = reshape(out2, [1, 16, 16, 16])
+        deslice(out_tile, out, [0, 0, 0, 0], [1, 16, 16, 16], [1, 1, 1, 1])
+        return out
+
+    for name, value in (
+        ("alloc", alloc),
+        ("deslice", deslice),
+        ("reshape", reshape),
+        ("slice", slice),
+        ("matmul", matmul),
+        ("img2col3d", img2col3d),
+        ("NumericType", NumericType),
+        ("MemorySpace", MemorySpace),
+    ):
+        monkeypatch.setitem(conv2d_img2col2d_tiled_npu_demo.__globals__, name, value)
+
+    with pytest.raises(AstVisitorError, match="Unsupported call expression"):
+        build_func_op(conv2d_img2col2d_tiled_npu_demo, input_memory, weight_memory)
+
+
 # MGEN-026A
 # 创建者: 小李飞刀
 # 最后一次更改: 我不是牛马

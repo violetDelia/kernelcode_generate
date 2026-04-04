@@ -162,6 +162,36 @@
 最终结论：通过
 - 下一步建议：进入“合并”阶段。
 
+时间：2026-04-04 18:11:45 +0800
+经办人：不要啊教练
+任务：T-20260404-453706a6
+任务目标：审查 C2 黑盒门禁 loop/raw IR 证据；确认只锁公开入口 + build_func_op raw IR/错误；负例仍统一 unsupported；不引入 pipeline/lowered IR/gen_kernel/codegen 口径。
+改动：
+- 审查过程与证据补全（只读审查，不修改业务文件）：
+  - 复核 `test/dsl/test_mlir_gen.py` 的 C2 正例：`MGEN-C2A` 引入 `loop(0, 1, 1)`，并在 raw IR 中断言 `scf.for/symbol.for`、`func.return`、`dma.alloc/slice/reshape/deslice`、`nn.img2col2d/matmul`。
+  - 复核 C2 负例：`MGEN-C2B`（helper 缺失）与 `MGEN-C2C`（计划外 op）均保持 `Unsupported call expression`，不回退 pipeline/lowered IR。
+  - 复跑 gate：`PYTHONPATH=. pytest -q test/dsl/test_ast_visitor.py test/dsl/test_mlir_gen.py test/dsl/test_emit_mlir.py -k "conv2d and npu_demo"` -> `6 passed, 1 warning`（exit=0）。
+  - 核对本轮改动仅位于 `test/dsl/test_mlir_gen.py`，未修改实现/spec。
+
+结论：
+
+问题列表：
+- 未发现问题。
+
+漏洞排查结果（6 类风险）：
+- 输入校验绕过：负例保持 unsupported，公开入口未放宽；未见绕过入口。
+- 类型/形状绕过：本轮仅测试变更；未引入新绕过路径。
+- 边界越界：本轮仅测试变更；未引入新增越界风险。
+- 错误处理缺失：负例统一 `Unsupported call expression` 已锁定；未见缺失。
+- 状态污染：测试构造局部化；未见污染风险。
+- 资源释放问题：本轮仅测试变更；未引入新资源路径。
+
+改进建议：
+- 未发现额外改进点。
+
+最终结论：通过
+- 下一步建议：进入“合并”阶段。
+
 时间：2026-04-04 17:09:09 +0800
 经办人：金铲铲大作战
 任务：T-20260404-c63eb4f5
@@ -193,3 +223,87 @@
 - 已完成合并收口；合并范围仅限上述 9 个业务文件与当前链路记录文件。
 - 阻塞点：无。
 - 下一步建议：若需 origin/main 同步确认，单独进入同步确认任务并使用独立记录文件。
+
+时间：2026-04-04 17:49:59 +0800
+经办人：金铲铲大作战
+任务：T-20260404-014fc6c4
+任务目标：实现 conv2d_npu_demo build_func_op 黑盒门禁，锁定 raw MLIR IR 正例与 unsupported 负例边界。
+改动：
+- `test/dsl/test_mlir_gen.py`：新增 C2 黑盒门禁三测（正例 raw IR、helper 缺失、计划外 op），仅覆盖 `build_func_op(...)` 与最终 raw MLIR IR/错误；补充临时 tile/最终 deslice 真实消费链路断言。
+- 回归：`pytest -q test/dsl/test_ast_visitor.py test/dsl/test_mlir_gen.py test/dsl/test_emit_mlir.py -k "conv2d and npu_demo"` -> `6 passed, 389 deselected, 1 warning`（exit=0；warning: Printer.print DeprecationWarning）。
+
+结论：完成
+- 正例可生成完整 raw MLIR IR 骨架，临时 tile 与最终 deslice 消费链路已锁定。
+- 负例（helper 缺失/计划外 op）统一报 Unsupported call expression；未触发 pipeline/lowered IR 兜底。
+- 下一步建议：进入“审查/复审”阶段复核口径与门禁。
+
+时间：2026-04-04 17:57:52 +0800
+经办人：提莫炖蘑菇
+任务：T-20260404-99e19e6b
+任务目标：审查 conv2d npu_demo 黑盒门禁与 unsupported 口径（对齐 [`ARCHITECTURE/plan/conv2d_npu_demo_codegen_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/conv2d_npu_demo_codegen_plan.md) `C2` 验收标准）：黑盒仅锁公开入口 + `build_func_op(...)` 的 raw MLIR IR/错误；正例命中 raw IR 骨架；负例 helper 缺失或计划外 shape/op 统一 unsupported 且不得 fallback；temporary memory/tile 在 raw IR 中被后续计算与最终写回真实消费。
+改动：
+- 审查证据（只读）：
+  - 变更范围核对：`git diff --name-only` 仅包含：
+    - `test/dsl/test_mlir_gen.py`
+    - `agents/codex-multi-agents/log/task_records/2026/14/20260404-conv2d-npu-demo-c1.md`
+  - 复测 gate（按计划书 C2 命令）：
+    - `cd wt-20260404-conv2d-npu-demo-c1 && PYTHONPATH=. pytest -q test/dsl/test_ast_visitor.py test/dsl/test_mlir_gen.py test/dsl/test_emit_mlir.py -k "conv2d and npu_demo"`
+    - 结果：`6 passed, 389 deselected, 1 warning`（exit=0；warning 为 `Printer.print` DeprecationWarning）
+  - C2 门禁核对（基于 `test/dsl/test_mlir_gen.py` 新增的 `MGEN-C2A/B/C`）：
+    - 黑盒范围：3 个用例均只调用 `build_func_op(...)` 并以最终 raw MLIR IR/抛错作为断言依据，未引入 pipeline/lowered IR/gen_kernel/codegen 流程。
+    - 负例 unsupported：helper 缺失与计划外 `img2col3d` 均以 `AstVisitorError(match=\"Unsupported call expression\")` 收敛，符合“不得静默 fallback”要求。
+    - 真实消费：正例用例通过 walk IR 的 dataflow 断言，锁定 `slice`/`reshape` 的中间 tile 被 `img2col2d/matmul/deslice` 链路真实消费。
+
+结论：
+
+问题列表：
+- `test/dsl/test_mlir_gen.py`：`test_build_func_op_conv2d_npu_demo_blackbox_raw_ir`（MGEN-C2A）
+  - 现象：正例函数体未包含 `loop(...)`，用例也未断言 raw IR 命中 `scf.for/symbol.for`；同时未显式断言 `func.return`，也未在 raw IR token 集合中覆盖 `dma.alloc/slice/reshape/return` 的“机械骨架”检查（目前 token 仅覆盖 `func.func/nn.img2col2d/nn.matmul/dma.deslice`，其余依赖间接 `next(...)` 断言）。
+  - 风险：与计划书“统一验收口径”中“raw MLIR IR 命中循环 + ... + func.return”的表述存在偏差；在后续重构中可能出现“循环或 return 行为回退但黑盒门禁仍误判通过”的证据缺口。
+  - 建议：将 C2 正例调整为包含至少一层 `loop(...)`（可单次迭代），并补齐机械断言：`scf.for/symbol.for`、`dma.alloc`、`dma.slice`、`dma.reshape`、`nn.img2col2d`、`nn.matmul`、`dma.deslice`、`func.return`（token + walk 双保险）；保持断言仍只基于 raw MLIR IR/错误，不引入 pipeline/lowered IR/codegen。
+  - 优先级：P1（验收口径/证据缺口）。
+
+漏洞排查结果（6 类风险）：
+- 输入校验绕过：本次仅测试变更；未引入新入口。负例通过 `Unsupported call expression` 明确收敛，未见绕过。
+- 类型/形状绕过：本次仅测试变更；未引入新绕过入口。计划外 op 已覆盖，但“计划外 shape”未在本轮黑盒门禁中独立覆盖。
+- 边界越界：本次仅测试变更；未引入新增越界风险。
+- 错误处理缺失：负例统一错误口径已锁定；但正例对循环/return 骨架的证据不足（见问题列表）。
+- 状态污染：本次仅测试变更；未引入污染风险。
+- 资源释放问题：本次仅测试变更；未引入新资源路径。
+
+改进建议：
+- 无（除上述必须修改项外）。
+
+最终结论：需修改
+- 不通过原因：C2 正例黑盒门禁未覆盖/未断言循环与 `func.return` 的 raw IR 骨架要求，存在验收证据缺口；需补齐后方可进入合并。
+- 下一步建议：新建唯一“改进实现（补 C2 门禁证据）”任务，修改 `test/dsl/test_mlir_gen.py` 的 C2 正例以包含 `loop` 并补齐机械断言；完成后进入复审/合并。
+- 已新建后续任务：`T-20260404-11083b08`（改进实现：补 C2 黑盒门禁证据）。
+
+时间：2026-04-04 18:08:02 +0800
+经办人：金铲铲大作战
+任务：T-20260404-11083b08
+任务目标：补齐 C2 正例 loop/raw IR 骨架证据，覆盖 scf.for/symbol.for 与 func.return 等门禁。
+改动：
+- `test/dsl/test_mlir_gen.py`：C2 正例加入 `loop(...)`（单次迭代）并新增 raw IR 骨架断言（scf.for/symbol.for、dma.alloc/slice/reshape、nn.img2col2d/matmul、dma.deslice、func.return）；补充 loop op walk 断言。
+- 回归：`PYTHONPATH=. pytest -q test/dsl/test_ast_visitor.py test/dsl/test_mlir_gen.py test/dsl/test_emit_mlir.py -k "conv2d and npu_demo"` -> `6 passed, 389 deselected, 1 warning`（exit=0；warning: Printer.print DeprecationWarning）。
+
+结论：完成
+- C2 正例 raw IR 骨架与 loop 证据已补齐；负例保持 unsupported 口径。
+- 下一步建议：进入“审查/复审”阶段复核门禁口径。
+
+时间：2026-04-04 18:14:31 +0800
+经办人：李白
+任务：T-20260404-4146779b
+任务目标：将 `wt-20260404-conv2d-npu-demo-c1` 的 C2 变更合入主分支；合并范围仅限 `test/dsl/test_mlir_gen.py` 与同链记录文件；保持 raw func.func/MLIR IR 口径，不引入 pipeline/lowered IR/gen_kernel/codegen；合并后清理 worktree。
+改动：
+- 合并范围确认：
+  - `git -C wt-20260404-conv2d-npu-demo-c1 status --short` 仅包含 `test/dsl/test_mlir_gen.py` 与当前链路记录文件，无其他越界改动。
+- 合入主仓内容（C2）：
+  - `test/dsl/test_mlir_gen.py` 追加 C2 黑盒门禁：正例覆盖 `loop(...)` 与 raw IR 骨架（`scf.for/symbol.for`、`func.return`、`dma.alloc/slice/reshape/deslice`、`nn.img2col2d/matmul`），负例保持 `Unsupported call expression`。
+- 验证：
+  - 未新增测试；沿用链路内已通过的 C2 gate 结果。
+  - `git diff --check -- test/dsl/test_mlir_gen.py`（exit 0）。
+结论：
+- 已完成合并收口；合并范围仅限 `test/dsl/test_mlir_gen.py` 与当前链路记录文件。
+- 阻塞点：无。
+- 下一步建议：无。
