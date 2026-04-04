@@ -2172,7 +2172,19 @@ def img2col1d(
     pl_dim = _normalize_img2col_param("pl", pl, allow_zero=True)
     pr_dim = _normalize_img2col_param("pr", pr, allow_zero=True)
 
-    n_dim, c_dim, w_dim = value.shape.get_shape()
+    if value.format is Farmat.Norm:
+        n_dim, c_dim, w_dim = value.shape.get_shape()
+    elif value.format is Farmat.CLast:
+        n_dim, w_dim, c_dim = value.shape.get_shape()
+    else:
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.img2col1d 参数校验",
+                expected="img2col1d value format must be Norm or CLast",
+                actual=str(value.format),
+                action=_ERROR_ACTION,
+            )
+        )
     w_out = _img2col_output_dim(w_dim, kw_dim, sw_dim, dw_dim, pl_dim, pr_dim)
 
     w_out_value = w_out.get_value()
@@ -2186,12 +2198,14 @@ def img2col1d(
             )
         )
 
-    out_shape = SymbolShape([n_dim, c_dim * kw_dim, w_out])
+    if value.format is Farmat.Norm:
+        out_shape = SymbolShape([n_dim, c_dim, kw_dim, w_out])
+    else:
+        out_shape = SymbolShape([n_dim, w_out, kw_dim, c_dim])
     return Memory(
         out_shape,
         value.dtype,
         space=value.space,
-        stride=_build_add_stride(out_shape),
         format=Farmat.Norm,
     )
 
@@ -2291,7 +2305,19 @@ def _img2col(
     pl_dim = _normalize_img2col_param("pl", pl, allow_zero=True)
     pr_dim = _normalize_img2col_param("pr", pr, allow_zero=True)
 
-    n_dim, c_dim, h_dim, w_dim = value.shape.get_shape()
+    if value.format is Farmat.Norm:
+        n_dim, c_dim, h_dim, w_dim = value.shape.get_shape()
+    elif value.format is Farmat.CLast:
+        n_dim, h_dim, w_dim, c_dim = value.shape.get_shape()
+    else:
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.img2col 参数校验",
+                expected="img2col value format must be Norm or CLast",
+                actual=str(value.format),
+                action=_ERROR_ACTION,
+            )
+        )
     h_out = _img2col_output_dim(h_dim, kh_dim, sh_dim, dh_dim, ph_dim, pw_dim)
     w_out = _img2col_output_dim(w_dim, kw_dim, sw_dim, dw_dim, pl_dim, pr_dim)
 
@@ -2316,12 +2342,14 @@ def _img2col(
             )
         )
 
-    out_shape = SymbolShape([n_dim, c_dim * kh_dim * kw_dim, h_out * w_out])
+    if value.format is Farmat.Norm:
+        out_shape = SymbolShape([n_dim, c_dim, kh_dim, kw_dim, h_out, w_out])
+    else:
+        out_shape = SymbolShape([n_dim, h_out, w_out, kh_dim, kw_dim, c_dim])
     return Memory(
         out_shape,
         value.dtype,
         space=value.space,
-        stride=_build_add_stride(out_shape),
         format=Farmat.Norm,
     )
 
@@ -2398,24 +2426,89 @@ def broadcast(value: object, target: object) -> Memory:
     )
 
 
-def broadcast_to(value: object, target: object) -> Memory:
-    """broadcast 的别名接口。
+def broadcast_to(source: object, target_shape: object, space: object) -> Memory:
+    """显式广播 Memory 到目标 shape + space。
 
     创建者: 金铲铲大作战
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 复用 broadcast 语义。
+    - 复用 broadcast 的维度对齐规则。
+    - 仅提供目标 shape 列表与空间，不再要求传入 Memory 目标。
 
     使用示例:
-    - broadcast_to(mem, target)
+    - broadcast_to(mem, ["M", "N"], MemorySpace.GM)
 
     关联文件:
     - spec: spec/operation/nn.md
     - test: test/operation/test_operation_nn.py
     - 功能实现: kernel_gen/operation/nn.py
     """
-    return broadcast(value, target)
+    if not isinstance(source, Memory):
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.broadcast_to 参数校验",
+                expected="broadcast_to source must be Memory",
+                actual=type(source).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
+    if not isinstance(space, MemorySpace):
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.broadcast_to 参数校验",
+                expected="broadcast_to space must be MemorySpace",
+                actual=type(space).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
+    if isinstance(target_shape, SymbolShape):
+        normalized_shape = target_shape
+    elif isinstance(target_shape, Sequence) and not isinstance(target_shape, (str, bytes)):
+        normalized_shape = SymbolShape(list(target_shape))
+    else:
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.broadcast_to 参数校验",
+                expected="broadcast_to target_shape must be iterable shape",
+                actual=type(target_shape).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
+
+    input_values = source.shape.get_values()
+    target_values = normalized_shape.get_values()
+
+    if len(target_values) < len(input_values):
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.broadcast_to 参数校验",
+                expected="broadcast_to target rank must be >= input rank",
+                actual=f"input_rank={len(input_values)} target_rank={len(target_values)}",
+                action=_ERROR_ACTION,
+            )
+        )
+
+    for input_dim, target_dim in zip(reversed(input_values), reversed(target_values), strict=False):
+        if input_dim == target_dim:
+            continue
+        if input_dim == 1:
+            continue
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.broadcast_to 参数校验",
+                expected="broadcast_to dimension mismatch",
+                actual=f"input={input_dim} target={target_dim}",
+                action=_ERROR_ACTION,
+            )
+        )
+
+    return Memory(
+        normalized_shape,
+        source.dtype,
+        space=space,
+        format=Farmat.Norm,
+    )
 
 
 __all__ = [
