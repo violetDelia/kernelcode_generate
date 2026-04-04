@@ -398,6 +398,29 @@ def _mul_symbol(dim: int | str, running: int | str) -> int | str:
     return f"{dim}*{running}"
 
 
+def _dim_to_attr(value: int | str) -> object:
+    """将静态或符号维度值转换为 xDSL 属性。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - `int` 转为 `IntAttr`。
+    - `str` 转为 `StringAttr`，用于符号维与动态占位。
+
+    使用示例:
+    - _dim_to_attr("M")
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+    if isinstance(value, int):
+        return IntAttr(value)
+    return StringAttr(value)
+
+
 def _build_default_stride_attrs(shape: Sequence[Attribute]) -> list[Attribute]:
     """从 shape 属性列表生成默认 stride 属性列表。
 
@@ -428,29 +451,6 @@ def _build_default_stride_attrs(shape: Sequence[Attribute]) -> list[Attribute]:
             running = "?"
     stride_values.reverse()
     return [_dim_to_attr(value) for value in stride_values]
-
-
-def _dim_to_attr(value: int | str) -> object:
-    """将静态或符号维度值转换为 xDSL 属性。
-
-    创建者: OpenAI
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - `int` 转为 `IntAttr`。
-    - `str` 转为 `StringAttr`，用于符号维与动态占位。
-
-    使用示例:
-    - _dim_to_attr("M")
-
-    关联文件:
-    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
-    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
-    """
-    if isinstance(value, int):
-        return IntAttr(value)
-    return StringAttr(value)
 
 
 def _const_index(value: int, ctx: EmitContext) -> SSAValue:
@@ -744,6 +744,66 @@ def _resolve_index_symbol_product(expr: str, ctx: EmitContext, location: SourceL
     return current
 
 
+def _expr_key(expr: object) -> int:
+    """为 AST 节点生成缓存键。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 当前直接使用 Python 对象 `id(expr)` 作为缓存键。
+    - 供 `ctx.cache` 与 `ctx.types` 在单次 lowering 流程中复用。
+
+    使用示例:
+    - key = _expr_key(expr)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+    return id(expr)
+
+
+def _lookup_symbol(node: TensorAST | ScalarArgAST | VarAST, ctx: EmitContext) -> object:
+    """查询并缓存符号引用对应的 SSA value。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 从上下文符号表读取输入 value，并写入表达式缓存。
+    - 同步更新 `ctx.types` 中的类型映射。
+
+    参数说明:
+    - node: 输入引用节点（TensorAST/ScalarArgAST/VarAST）。
+    - ctx: 发射上下文，包含 symbols/types/cache。
+
+    返回说明:
+    - 返回已缓存的 SSAValue。
+
+    限制与异常:
+    - 符号不存在时抛出 `_LoweringError`。
+
+    使用示例:
+    - value = _lookup_symbol(node, ctx)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+    expr_key = _expr_key(node)
+    if ctx._has_cache(expr_key):
+        return ctx._get_cache(expr_key)
+    if node.name not in ctx.symbols:
+        raise _LoweringError("Unknown input reference", location=getattr(node, "location", None))
+    value = ctx.symbols[node.name]
+    ctx._set_cache(expr_key, value)
+    ctx.types.setdefault(expr_key, value.type)
+    return value
+
+
 def _resolve_index_operand(expr: object, ctx: EmitContext, location: SourceLocation | None) -> SSAValue:
     """将索引表达式 lowering 为 SSA operand。
 
@@ -912,6 +972,50 @@ def _build_index_operands_from_layout(
     return [_resolve_index_operand(item, ctx, location) for item in values]
 
 
+def _shape_numel_attr(shape: Sequence[Attribute]) -> Attribute:
+    """根据 shape 计算 flatten 后的一维元素总数属性。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 全静态 shape 返回 `IntAttr(numel)`。
+    - 含符号维时返回折叠后的 `StringAttr` 符号表达式，动态未知时返回 `?`。
+
+    使用示例:
+    - _shape_numel_attr([IntAttr(2), StringAttr("N")])
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    total_static = 1
+    total_symbol: SymbolDim | None = None
+    for dim in shape:
+        if isinstance(dim, IntAttr):
+            if total_symbol is None:
+                total_static *= dim.data
+            else:
+                total_symbol = total_symbol * dim.data
+            continue
+        if isinstance(dim, StringAttr):
+            if dim.data == "?":
+                return StringAttr("?")
+            if total_symbol is None:
+                total_symbol = SymbolDim(total_static) * dim.data
+            else:
+                total_symbol = total_symbol * dim.data
+            continue
+        return StringAttr("?")
+    if total_symbol is None:
+        return IntAttr(total_static)
+    if not total_symbol.is_dynamic():
+        return IntAttr(int(total_symbol.get_symbol()))
+    return StringAttr(str(total_symbol.get_symbol()))
+
+
 def _build_flatten_shape_operands(
     source: SSAValue,
     source_type: NnMemoryType,
@@ -959,31 +1063,6 @@ def _build_flatten_shape_operands(
         ctx.builder.add_op(op)
         total = op.result
     return [total]
-
-
-def _lower_loop_bound(expr: object, ctx: EmitContext) -> object:
-    """将 `for` 上下界表达式 lowering 为 SSA 值。
-
-    创建者: OpenAI
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 支持常量、标量参数与循环变量引用。
-    - 不支持的表达式维持统一的 loop bound 诊断。
-
-    使用示例:
-    - _lower_loop_bound(ConstAST(8), ctx)
-
-    关联文件:
-    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
-    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
-    """
-    if isinstance(expr, ConstAST):
-        return _lower_expr(expr, ctx)
-    if isinstance(expr, (ScalarArgAST, VarAST)):
-        return _lookup_symbol(expr, ctx)
-    raise _LoweringError("Unsupported loop bound expression", location=getattr(expr, "location", None))
 
 
 def _build_stride_attrs(
@@ -1187,50 +1266,6 @@ def _memory_type_from_parts(
     """
 
     return NnMemoryType(ArrayAttr(list(shape)), ArrayAttr(list(stride)), element_type, space)
-
-
-def _shape_numel_attr(shape: Sequence[Attribute]) -> Attribute:
-    """根据 shape 计算 flatten 后的一维元素总数属性。
-
-    创建者: OpenAI
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 全静态 shape 返回 `IntAttr(numel)`。
-    - 含符号维时返回折叠后的 `StringAttr` 符号表达式，动态未知时返回 `?`。
-
-    使用示例:
-    - _shape_numel_attr([IntAttr(2), StringAttr("N")])
-
-    关联文件:
-    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
-    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
-    """
-
-    total_static = 1
-    total_symbol: SymbolDim | None = None
-    for dim in shape:
-        if isinstance(dim, IntAttr):
-            if total_symbol is None:
-                total_static *= dim.data
-            else:
-                total_symbol = total_symbol * dim.data
-            continue
-        if isinstance(dim, StringAttr):
-            if dim.data == "?":
-                return StringAttr("?")
-            if total_symbol is None:
-                total_symbol = SymbolDim(total_static) * dim.data
-            else:
-                total_symbol = total_symbol * dim.data
-            continue
-        return StringAttr("?")
-    if total_symbol is None:
-        return IntAttr(total_static)
-    if not total_symbol.is_dynamic():
-        return IntAttr(int(total_symbol.get_symbol()))
-    return StringAttr(str(total_symbol.get_symbol()))
 
 
 def _memory_space_from_ast(space: MemorySpace | None, fallback: NnMemorySpaceAttr) -> NnMemorySpaceAttr:
@@ -1507,41 +1542,6 @@ def _infer_add_mixed_memory_type(
     )
 
 
-def _infer_binary_memory_type(
-    lhs_type: NnMemoryType,
-    rhs_type: NnMemoryType,
-    location: SourceLocation | None,
-) -> NnMemoryType:
-    """推导 nn 二元算术的目标 nn.memory 类型。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 允许隐式 broadcast 推导共同目标 shape。
-    - element_type 按 nn 二元算术固定优先级决议。
-
-    使用示例:
-    - _infer_binary_memory_type(lhs_type, rhs_type, location=None)
-
-    关联文件:
-    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
-    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
-    """
-    if lhs_type.space != rhs_type.space:
-        raise _LoweringError("Binary op operands must have the same space", location=location)
-    target_shape = _infer_broadcast_shape(lhs_type.shape.data, rhs_type.shape.data, location)
-    target_stride = _build_broadcast_stride(target_shape)
-    target_element_type = _resolve_binary_element_type(lhs_type.element_type, rhs_type.element_type, location)
-    return NnMemoryType(
-        ArrayAttr(list(target_shape)),
-        ArrayAttr(list(target_stride)),
-        target_element_type,
-        lhs_type.space,
-    )
-
-
 def _infer_matmul_memory_type(
     lhs_type: NnMemoryType,
     rhs_type: NnMemoryType,
@@ -1580,34 +1580,6 @@ def _infer_matmul_memory_type(
     out_shape = [lhs_shape[0], rhs_shape[1]]
     out_stride = _build_default_stride_attrs(out_shape)
     return _memory_type_from_parts(out_shape, out_stride, target_element_type, target_space)
-
-
-def _memory_to_nn_type(memory: Memory, location: SourceLocation | None = None) -> NnMemoryType:
-    """将运行时 `Memory` 描述转换为 `NnMemoryType`。
-
-    创建者: OpenAI
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 读取 `Memory` 的 shape/stride/dtype/space，并映射到 nn dialect 类型。
-    - 未显式提供 stride 时自动按连续布局补齐。
-
-    使用示例:
-    - _memory_to_nn_type(Memory([2, 2], NumericType.Float32))
-
-    关联文件:
-    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
-    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
-    """
-    shape = memory.shape.get_values()
-    stride_values = memory.stride.get_values() if memory.stride is not None else _build_stride(shape)
-    shape_attr = ArrayAttr([_dim_to_attr(dim) for dim in shape])
-    stride_attr = ArrayAttr([_dim_to_attr(dim) for dim in stride_values])
-    element_type = _dtype_to_xdsl(memory.dtype, location=location)
-    space_name = _MEMORY_SPACE_MAP.get(memory.space, "global")
-    space = NnMemorySpaceAttr.from_name(space_name)
-    return NnMemoryType(shape_attr, stride_attr, element_type, space)
 
 
 def _build_dynamic_memory_type(
@@ -1772,60 +1744,6 @@ def _parse_img2col_helper(expr: Img2ColAST) -> tuple[object, dict[str, int]]:
     return input_expr, resolved
 
 
-def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
-    """校验函数体中的 AST 语句是否属于当前 lowering 支持范围。
-
-    创建者: OpenAI
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 拒绝空函数体。
-    - 遍历并检查每条语句的 AST 类型，提前在发射前给出统一诊断。
-
-    使用示例:
-    - _ensure_supported_statements(function_ast)
-
-    关联文件:
-    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
-    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
-    """
-    statements = function_ast.body.statements
-    if not statements:
-        raise _LoweringError("Function body is empty", location=function_ast.location)
-    for expr in statements:
-        if not isinstance(
-            expr,
-            (
-                BinaryExprAST,
-                CompareExprAST,
-                ConstAST,
-                TensorAST,
-                ScalarArgAST,
-                VarAST,
-                LoadAST,
-                StoreAST,
-                DmaAllocAST,
-                DmaCopyAST,
-                DmaCastAST,
-                DmaViewAST,
-                DmaReshapeAST,
-                DmaFlattenAST,
-                Img2ColAST,
-                MatmulAST,
-                DmaFreeAST,
-                ForAST,
-                ArchGetDynamicMemoryAST,
-                ArchLaunchKernelAST,
-                ArchQueryAST,
-                SymbolToFloatAST,
-                TensorAxisAccessAST,
-            ),
-        ):
-            raise _LoweringError("Unsupported AST expression for lowering", location=getattr(expr, "location", None))
-    return statements
-
-
 def _expect_memory_value(value: object, location: SourceLocation | None) -> NnMemoryType:
     """断言 operand/result 的类型为 `nn.memory`。
 
@@ -1847,27 +1765,6 @@ def _expect_memory_value(value: object, location: SourceLocation | None) -> NnMe
     if not isinstance(value.type, NnMemoryType):
         raise _LoweringError("Operand must be nn.memory", location=location)
     return value.type
-
-
-def _expr_key(expr: object) -> int:
-    """为 AST 节点生成缓存键。
-
-    创建者: OpenAI
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 当前直接使用 Python 对象 `id(expr)` 作为缓存键。
-    - 供 `ctx.cache` 与 `ctx.types` 在单次 lowering 流程中复用。
-
-    使用示例:
-    - key = _expr_key(expr)
-
-    关联文件:
-    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
-    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
-    """
-    return id(expr)
 
 
 def _infer_expr_type(
@@ -2752,43 +2649,146 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     raise _LoweringError("Unsupported expression for lowering", location=getattr(expr, "location", None))
 
 
-def _lookup_symbol(node: TensorAST | ScalarArgAST | VarAST, ctx: EmitContext) -> object:
-    """查询并缓存符号引用对应的 SSA value。
+def _lower_loop_bound(expr: object, ctx: EmitContext) -> object:
+    """将 `for` 上下界表达式 lowering 为 SSA 值。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
 
     功能说明:
-    - 从上下文符号表读取输入 value，并写入表达式缓存。
-    - 同步更新 `ctx.types` 中的类型映射。
-
-    参数说明:
-    - node: 输入引用节点（TensorAST/ScalarArgAST/VarAST）。
-    - ctx: 发射上下文，包含 symbols/types/cache。
-
-    返回说明:
-    - 返回已缓存的 SSAValue。
-
-    限制与异常:
-    - 符号不存在时抛出 `_LoweringError`。
+    - 支持常量、标量参数与循环变量引用。
+    - 不支持的表达式维持统一的 loop bound 诊断。
 
     使用示例:
-    - value = _lookup_symbol(node, ctx)
+    - _lower_loop_bound(ConstAST(8), ctx)
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
     - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
     - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
     """
-    expr_key = _expr_key(node)
-    if ctx._has_cache(expr_key):
-        return ctx._get_cache(expr_key)
-    if node.name not in ctx.symbols:
-        raise _LoweringError("Unknown input reference", location=getattr(node, "location", None))
-    value = ctx.symbols[node.name]
-    ctx._set_cache(expr_key, value)
-    ctx.types.setdefault(expr_key, value.type)
-    return value
+    if isinstance(expr, ConstAST):
+        return _lower_expr(expr, ctx)
+    if isinstance(expr, (ScalarArgAST, VarAST)):
+        return _lookup_symbol(expr, ctx)
+    raise _LoweringError("Unsupported loop bound expression", location=getattr(expr, "location", None))
+
+
+def _infer_binary_memory_type(
+    lhs_type: NnMemoryType,
+    rhs_type: NnMemoryType,
+    location: SourceLocation | None,
+) -> NnMemoryType:
+    """推导 nn 二元算术的目标 nn.memory 类型。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 允许隐式 broadcast 推导共同目标 shape。
+    - element_type 按 nn 二元算术固定优先级决议。
+
+    使用示例:
+    - _infer_binary_memory_type(lhs_type, rhs_type, location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+    if lhs_type.space != rhs_type.space:
+        raise _LoweringError("Binary op operands must have the same space", location=location)
+    target_shape = _infer_broadcast_shape(lhs_type.shape.data, rhs_type.shape.data, location)
+    target_stride = _build_broadcast_stride(target_shape)
+    target_element_type = _resolve_binary_element_type(lhs_type.element_type, rhs_type.element_type, location)
+    return NnMemoryType(
+        ArrayAttr(list(target_shape)),
+        ArrayAttr(list(target_stride)),
+        target_element_type,
+        lhs_type.space,
+    )
+
+
+def _memory_to_nn_type(memory: Memory, location: SourceLocation | None = None) -> NnMemoryType:
+    """将运行时 `Memory` 描述转换为 `NnMemoryType`。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 读取 `Memory` 的 shape/stride/dtype/space，并映射到 nn dialect 类型。
+    - 未显式提供 stride 时自动按连续布局补齐。
+
+    使用示例:
+    - _memory_to_nn_type(Memory([2, 2], NumericType.Float32))
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+    shape = memory.shape.get_values()
+    stride_values = memory.stride.get_values() if memory.stride is not None else _build_stride(shape)
+    shape_attr = ArrayAttr([_dim_to_attr(dim) for dim in shape])
+    stride_attr = ArrayAttr([_dim_to_attr(dim) for dim in stride_values])
+    element_type = _dtype_to_xdsl(memory.dtype, location=location)
+    space_name = _MEMORY_SPACE_MAP.get(memory.space, "global")
+    space = NnMemorySpaceAttr.from_name(space_name)
+    return NnMemoryType(shape_attr, stride_attr, element_type, space)
+
+
+def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
+    """校验函数体中的 AST 语句是否属于当前 lowering 支持范围。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 拒绝空函数体。
+    - 遍历并检查每条语句的 AST 类型，提前在发射前给出统一诊断。
+
+    使用示例:
+    - _ensure_supported_statements(function_ast)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+    statements = function_ast.body.statements
+    if not statements:
+        raise _LoweringError("Function body is empty", location=function_ast.location)
+    for expr in statements:
+        if not isinstance(
+            expr,
+            (
+                BinaryExprAST,
+                CompareExprAST,
+                ConstAST,
+                TensorAST,
+                ScalarArgAST,
+                VarAST,
+                LoadAST,
+                StoreAST,
+                DmaAllocAST,
+                DmaCopyAST,
+                DmaCastAST,
+                DmaViewAST,
+                DmaReshapeAST,
+                DmaFlattenAST,
+                Img2ColAST,
+                MatmulAST,
+                DmaFreeAST,
+                ForAST,
+                ArchGetDynamicMemoryAST,
+                ArchLaunchKernelAST,
+                ArchQueryAST,
+                SymbolToFloatAST,
+                TensorAxisAccessAST,
+            ),
+        ):
+            raise _LoweringError("Unsupported AST expression for lowering", location=getattr(expr, "location", None))
+    return statements
 
 
 def emit_mlir(node: object, ctx: EmitContext) -> object:
