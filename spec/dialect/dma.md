@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/dialect/dma.md`](../../spec/dialect/dma.md)
 - `test`：[`test/dialect/test_dma_dialect.py`](../../test/dialect/test_dma_dialect.py)
 - `功能实现`：[`kernel_gen/dialect/dma.py`](../../kernel_gen/dialect/dma.py)
@@ -34,6 +34,7 @@
 
 - `dma dialect` 不单独维护 memory type / memory space，所有相关 operand / result 类型统一复用 `NnMemoryType` 与 `NnMemorySpaceAttr`。
 - 本文件只定义方言层的数据搬运、布局转换与显式数据转换语义，不负责真实 DMA 硬件调度、流水线编排、带宽建模、同步原语、事件、barrier 或 async token 设计。
+- analysis 主线当前已公开承接 `dma.copy`、`dma.load`、`dma.store`、`dma.slice` 四类 DMA 访存分支；`dma.deslice`、`dma.alloc`、`dma.free` 仍不属于稳定统计合同。
 - 本文件不负责广播、逐元素算术、比较等张量计算语义，也不负责自动求解 `offsets/sizes/strides` 或自动推导最优搬运策略；`dma.fill` 仅覆盖“单个整数标量写入整块 memory”的初始化语义，不扩展到通用 broadcast 计算。
 - 当前方言范围包含 `dma.alloc`、`dma.fill`、`dma.free`、`dma.copy`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.view`、`dma.reshape`、`dma.cast`。
 - 除 `dma.cast` 与 `dma.fill` 外，其他搬运 op 不改变元素值语义，只改变数据所在的逻辑位置、切片范围、布局表达或空间；同一个 op 不应同时承担计算和搬运语义。
@@ -62,6 +63,7 @@
 - 若实现保留静态维度或静态 stride 在类型中，assembly 中的静态值也应允许通过 `!symbol.int<"1">` 这类 symbol 常量值、或等价 materialize 后的 `!symbol.int<"expr">` SSA value 显式传入 operand，保证“布局参数来源统一为 operand”。
 - `dma.load/store/slice/deslice` 的 `offsets/sizes/strides` 必须为 variadic `!symbol.int<"expr">` operand。
 - `dma.slice` 必须采用目标式 `dma.slice(target, source, offsets, sizes, strides)`：由 `target` 承载切片结果，op 本身不产生 result。
+- 对 analysis A3，`dma.slice` 的稳定访存 path 语义固定为 `source.space -> target.space`；逻辑字节数按 `sizes` 对应的元素数乘以 `element_type` 字节大小计算。
 - `dma.view` 中与动态布局相关的 `offsets/shape/stride` 元信息必须通过 `!symbol.int<"expr">` operand 显式传入；不得仅依赖结果类型里的符号维度推断。
 - `dma.view` 的 `result_type.shape` 必须由 `shape` operand（DSL `view(..., size, ...)`）确定，`result_type.stride` 必须由 `stride` operand（DSL `view(..., stride)`）确定；二者都必须与对应 operand 一一对齐，不得只因“生成了 `dma.view` op”就视为 expectation 对齐成功。
 - 当 `dma.view` 结果直接参与 `func.return` 时，返回的 `!nn.memory<...>` 类型必须与同一份 `result_type` 完全一致；`expectation/dsl/mlir_gen/dialect/dma/view` 中的 `EXPECTED_MEMORY` 比对依赖这一边界。

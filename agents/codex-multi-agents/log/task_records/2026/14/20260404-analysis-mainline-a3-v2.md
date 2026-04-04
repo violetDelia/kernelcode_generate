@@ -1,0 +1,189 @@
+# 任务记录
+
+- 时间：`2026-04-04 10:44:17 +0800`
+- 经办人：`朽木露琪亚`
+- 任务：`T-20260404-d2984dcc`
+- 任务目标：`按 A3 收口访存主线目录化与路径时间功能：在 analysis 主线引入 MemoryPath 枚举、bytes+latency+bandwidth->time_ns 公式、公开 DMA 分支与 unknown/DMA 策略，并把默认 path 参数来源固定到 npu_demo target registry。`
+- 改动：
+  - [`spec/analysis/analysis_engine.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/spec/analysis/analysis_engine.md)：
+    - 明确访存主线目录化落到 `kernel_gen/analysis/memory/`。
+    - 写死 `MemoryPath` 枚举与 `time_ns = latency_ns + bytes / bandwidth` 公式。
+    - 明确公开 DMA 分支当前是 `dma.copy/load/store/slice`，未公开 DMA 分支继续 `skip + warning`。
+  - [`spec/analysis/analysis_kernel.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/spec/analysis/analysis_kernel.md)：
+    - 把 `dma.slice` 从旧的未公开分支改成 A3 已承接公开分支。
+    - 明确 `dma.slice` 的 `path/bytes/time_ns` 口径，以及 `dma.deslice/dma.alloc/dma.free` 继续 `skip + warning`。
+    - 同步新 schema 的 unknown-op 机械验收测试名。
+  - [`spec/dialect/dma.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/spec/dialect/dma.md)：
+    - 写清 analysis 主线当前公开承接 `dma.copy/load/store/slice`。
+    - 明确 `dma.slice` 在 analysis A3 中按 `source.space -> target.space` 建模 path，bytes 来自 `sizes * element_size`。
+  - [`spec/target/registry.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/spec/target/registry.md)：
+    - 明确 `path_bandwidth/path_latency_ns` 的 key 空间必须与正式 `MemoryPath` 文本一致。
+    - 补齐 `npu_demo` 的 `GM->SM / GM->TSM / TSM->TLM` 路径与 `vector` 理论算力示例。
+  - [`kernel_gen/analysis/analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/kernel_gen/analysis/analysis.py)：
+    - 引入 `MemoryPath` 与时间公式辅助。
+    - 将 target registry 读取到的 `path_bandwidth/path_latency_ns` 归一到 `MemoryPath` 键，未知 path 直接 `AnalysisError`。
+    - 将 `_analyze_dma_ir_op(...)` 改为委托 `kernel_gen/analysis/memory/dma.py`；公开 DMA 前置条件非法统一 `hard error`，未公开 DMA 分支继续 `skip + warning`。
+    - `MemoryItem.path` 与 `memory_totals_by_path` 切到 `MemoryPath` 口径，属性写回使用 `.value` 文本。
+  - [`kernel_gen/analysis/memory/__init__.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/kernel_gen/analysis/memory/__init__.py)：
+    - 新增 `MemoryPath` 枚举。
+    - 新增 metric 归一化与 `time_from_memory_metrics(...)` 公式。
+  - [`kernel_gen/analysis/memory/dma.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/kernel_gen/analysis/memory/dma.py)：
+    - 新增公开 DMA 分支分析实现。
+    - 当前承接 `dma.copy/load/store/slice`，统一产出 `MemoryPath/path bytes/latency/bandwidth/time_ns`。
+    - 未公开 DMA 分支返回 `None` 交由上层执行 `skip + warning`。
+  - [`test/analysis/test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/test/analysis/test_analysis.py)：
+    - 新增 `test_analysis_dma_copy_reports_gm_to_lm_path_and_time`
+    - 新增 `test_analysis_dma_slice_reports_gm_to_sm_path_and_bytes`
+    - 新增 `test_analysis_unknown_op_warns_and_skips_in_new_schema`
+    - 新增 `test_analysis_invalid_public_dma_raises`
+    - 将 target registry 单一来源测试收口为 `test_analysis_memory_defaults_track_npu_demo_target_definition` / `test_analysis_memory_missing_target_metric_fails_explicitly`
+    - 同步旧 `dma.slice` warning 测试到 A3 新 schema。
+  - [`test/target/test_target_registry.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/test/target/test_target_registry.py)：
+    - 扩充 `npu_demo` analysis default 测试，锁定 `GM->SM / GM->TSM / TSM->TLM` 路径和 `vector` 理论算力。
+  - 未修改：
+    - `A4` 范围内的函数级聚合 / func_cost 消费逻辑未触碰。
+  - 验证：
+    - `pytest -q test/analysis/test_analysis.py -k 'dma_copy or dma_slice or warning or invalid_public_dma or time_ns'` -> `6 passed, 36 deselected`
+    - `pytest -q test/target/test_target_registry.py -k 'npu_demo and analysis'` -> `1 passed, 17 deselected`
+    - `pytest -q test/analysis/test_analysis.py` -> `42 passed`
+    - `pytest -q test/target/test_target_registry.py` -> `18 passed`
+    - `git diff --check -- spec/analysis/analysis_engine.md spec/analysis/analysis_kernel.md spec/dialect/dma.md spec/target/registry.md kernel_gen/analysis/analysis.py kernel_gen/analysis/memory/__init__.py kernel_gen/analysis/memory/dma.py test/analysis/test_analysis.py test/target/test_target_registry.py` -> `0`
+  - 自检：
+    - 目标收口：通过。`MemoryPath`、`time_ns` 公式、公开 DMA 分支、unknown/DMA 策略和 `npu_demo` 默认参数单一来源都已落地。
+    - 边界检查：通过。未触碰 `A4` 的函数级聚合、写回策略和 `func_cost` 消费面。
+    - 验证覆盖：通过。计划指定 gate 与全量 `analysis/target` 测试都通过；新增测试直接断言 `memory_items / memory_totals_by_path / time_ns`，未回退到只看旧 alias。
+    - 记录一致性：通过。当前记录、涉及文件与实际 diff 一致。
+- 结论：`已完成 A3 首版收口：访存主线已目录化到 kernel_gen/analysis/memory/，MemoryPath 与 path/time 公式已冻结，analysis 默认 path 参数改为单一来源读取 npu_demo target registry，公开 DMA 分支策略收口为 copy/load/store/slice = hard-error-or-record，non-public DMA = skip + warning。`
+
+- 时间：`2026-04-04 10:51:02 +0800`
+- 经办人：`不要啊教练`
+- 任务：`T-20260404-f9760e32`
+- 任务目标：`按 A3 审查边界执行：在 /home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3 只读复核计划、spec、实现、测试与同链记录，重点确认 MemoryPath 枚举、time_ns 公式、dma.slice 公开分支、unknown/DMA 策略和 npu_demo target registry 默认参数单一来源都已收口；不扩到 A4。`
+- 改动：
+  - 只读核对 [`ARCHITECTURE/plan/analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md)、[`spec/analysis/analysis_engine.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/spec/analysis/analysis_engine.md)、[`spec/analysis/analysis_kernel.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/spec/analysis/analysis_kernel.md)、[`spec/dialect/dma.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/spec/dialect/dma.md)、[`spec/target/registry.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/spec/target/registry.md)、[`kernel_gen/analysis/analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/kernel_gen/analysis/analysis.py)、[`kernel_gen/analysis/memory/__init__.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/kernel_gen/analysis/memory/__init__.py)、[`kernel_gen/analysis/memory/dma.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/kernel_gen/analysis/memory/dma.py)、[`kernel_gen/target/registry.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/kernel_gen/target/registry.py)、[`test/analysis/test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/test/analysis/test_analysis.py)、[`test/target/test_target_registry.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/test/target/test_target_registry.py) 与当前记录；未修改实现/spec/测试。
+  - 自检结果：
+    - 证据充分性：已交叉核对 A3 条目、worktree spec、实现、计划指定 gate、全量 `analysis/target` 测试、同链记录与 `DONE.md`。
+    - 功能正确性：`MemoryPath`、`time_ns = latency_ns + bytes / bandwidth`、`dma.slice` 公开分支、unknown/DMA 策略与 `npu_demo` analysis 默认参数单一来源在实现和测试层面都成立。
+    - 边界条件：当前仍停留在 A3 范围，没有扩到 A4 的函数级聚合 / `func_cost` 消费闭环。
+    - 异常路径：未知 op 与未公开 DMA 继续 `skip + warning`；公开 DMA 前置条件非法保持 `AnalysisError`；缺失 `npu_demo` analysis 默认参数显式失败。
+    - 潜在漏洞排查：
+      - 输入校验绕过：未见。`analysis(...)` 与 `AnalysisConfig` 都有显式类型/字段校验。
+      - 类型/形状绕过：未见。公开 DMA 分支在 verifier 与后置检查里都要求 `nn.memory` 和合法 `shape/sizes/dtype`。
+      - 边界越界：未见。A3 未混入 A4 消费路径。
+      - 错误处理缺失：未见。unknown / non-public DMA 走 warning，公开 DMA 非法输入走 hard error。
+      - 状态污染：未见运行时统计状态串扰；`memory_totals_by_path` 与 attrs 写回都由 `AnalysisResult` 派生。
+      - 资源释放问题：本轮不涉及资源生命周期新增风险。
+  - 已确认对齐：
+    - [`analysis_engine.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/spec/analysis/analysis_engine.md#L48) 与 [`memory/__init__.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/kernel_gen/analysis/memory/__init__.py#L28) 已收口 `MemoryPath` 枚举；[`memory/__init__.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/kernel_gen/analysis/memory/__init__.py#L119) 固定 `time_ns = latency_ns + bytes / bandwidth`。
+    - [`analysis_kernel.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/spec/analysis/analysis_kernel.md#L45) 到 [`analysis_kernel.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/spec/analysis/analysis_kernel.md#L47) 与 [`dma.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/kernel_gen/analysis/memory/dma.py#L314) 到 [`dma.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/kernel_gen/analysis/memory/dma.py#L450) 已把 `dma.copy/load/store/slice` 作为公开 DMA 分支，`dma.deslice/alloc/free` 继续 `skip + warning`。
+    - [`analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/kernel_gen/analysis/analysis.py#L560) 到 [`analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/kernel_gen/analysis/analysis.py#L595) 与 [`analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/kernel_gen/analysis/analysis.py#L2235) 到 [`analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/kernel_gen/analysis/analysis.py#L2244) 已把默认 `path_bandwidth/path_latency_ns/theoretical_compute` 收口到 `npu_demo target registry` 单一来源。
+    - [`test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/test/analysis/test_analysis.py#L876) 到 [`test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/test/analysis/test_analysis.py#L939)、[`test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/test/analysis/test_analysis.py#L954) 到 [`test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/test/analysis/test_analysis.py#L1085) 与 [`test_target_registry.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/test/target/test_target_registry.py#L353) 到 [`test_target_registry.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/test/target/test_target_registry.py#L366) 已机械锁住 A3 的主验收面。
+  - 问题列表：
+    - `P1` [`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md#L9) 的 A3 进度表仍写成 `已建档 ...；进行中（T-20260404-d2984dcc，朽木露琪亚）`，并且记录文件路径指向 `/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a3-v2.md`，但该路径实际不存在；真实记录文件在 [`/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a3-v2.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a3-v2.md)。同时 [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2214) 已登记 `T-20260404-d2984dcc` 完成。风险是 A3 计划状态与同链记录 / DONE 不一致，进度表还引用了一个不存在的记录文件，当前不能判定为“计划 / 实现 / 测试 / 记录完全一致”。
+  - 验证：
+    - `python -m pytest -q test/analysis/test_analysis.py -k 'dma_copy or dma_slice or warning or invalid_public_dma or time_ns'` -> 退出码 `0`，`6 passed, 36 deselected`
+    - `python -m pytest -q test/target/test_target_registry.py -k 'npu_demo and analysis'` -> 退出码 `0`，`1 passed, 17 deselected`
+    - `python -m pytest -q test/analysis/test_analysis.py` -> 退出码 `0`，`42 passed`
+    - `python -m pytest -q test/target/test_target_registry.py` -> 退出码 `0`，`18 passed`
+    - `git -C /home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3 diff --check -- spec/analysis/analysis_engine.md spec/analysis/analysis_kernel.md spec/dialect/dma.md spec/target/registry.md kernel_gen/analysis/analysis.py kernel_gen/analysis/memory/__init__.py kernel_gen/analysis/memory/dma.py kernel_gen/target/registry.py test/analysis/test_analysis.py test/target/test_target_registry.py agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a3-v2.md` -> 退出码 `0`
+- 结论：
+  - `需修改`
+  - A3 的业务合同、实现、测试和同链记录本身没有发现新的功能性问题；当前阻塞点是计划进度表未同步，且记录文件路径写错。
+  - 修改建议：仅修正 [`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md#L9) 的 A3 进度条目，把 `T-20260404-d2984dcc` 收口为已完成状态，并把记录文件路径改成实际的 worktree 记录路径；当前 A3 的 spec/实现/测试不需要再改。
+
+- 时间：`2026-04-04 10:57:20 +0800`
+- 经办人：`睡觉小分队`
+- 任务：`T-20260404-101e32e3`
+- 任务目标：`按 A3 状态修正边界执行：仅同步 ARCHITECTURE/plan/analysis_mainline_refactor_plan.md 的 A3 进度条目，使 T-20260404-d2984dcc 的状态与 DONE/同链记录一致，并把记录文件路径改成实际的 worktree 路径；不改 A3 的 spec/实现/测试，也不扩到 A4。`
+- 改动：
+  - 修改 [`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md)：
+    - 将 A3 的记录文件路径从主目录下不存在的 `/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a3-v2.md` 改为实际 worktree 路径 `/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a3-v2.md`。
+    - 将 `T-20260404-d2984dcc` 从“进行中”收口为与 [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2214) 和本记录一致的“实现完成”。
+    - 同步保留同链审查结论 `T-20260404-f9760e32 -> 审查完成（需修改）`，并补记本次 `状态一致性修正完成`。
+- 验证：
+  - `rg -n "A3|T-20260404-d2984dcc|20260404-analysis-mainline-a3-v2.md" ARCHITECTURE/plan/analysis_mainline_refactor_plan.md DONE.md wt-20260404-analysis-mainline-a3/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a3-v2.md`（exit `0`）
+  - `git diff --check -- ARCHITECTURE/plan/analysis_mainline_refactor_plan.md`（exit `0`）
+- 自检：
+  - 合同自洽：通过。本轮只修正计划进度条目，未引入 A4 或新的业务口径。
+  - 边界清楚：通过。仅动计划文件与记录文件，A3 的 spec/实现/测试完全未触碰。
+  - 记录一致：通过。计划条目、DONE、同链记录现在指向同一条 A3 完成事实与同一份实际记录文件路径。
+- 结论：
+  - 已完成当前边界内的 A3 状态同步修正。
+  - 当前无新的阻塞；A3 业务文件无需继续修改。
+
+- 时间：`2026-04-04 11:03:21 +0800`
+- 经办人：`不要啊教练`
+- 任务：`T-20260404-cc79eff5`
+- 任务目标：`按 A3 状态同步复审边界执行：只读复核 A3 进度条目是否已与 DONE 和同链记录一致，且记录文件路径已改为实际 worktree 路径；不改 A3 的 spec、实现、测试，也不扩到 A4。`
+- 复审前自检：
+  - 已核对 `TODO` 任务边界、A3 计划进度表、`DONE.md` 与同链记录。
+  - 已重点检查状态口径、时间戳、记录文件路径是否真正一致，而不是只看“是否补上了一行状态”。
+  - 若仍存在任何时间/路径双口径，不给 `通过`。
+- 复审结论：
+  - `需修改`
+- 问题列表：
+  - `P1`：[`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md#L9) 的 `A3` 进度条目虽然已经把记录文件路径改成了真实 worktree 路径，也补入了 `实现完成 / 审查完成（需修改） / 状态一致性修正完成` 三段状态，但后两段的时间仍与 [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2217) / [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2220) 不一致：
+    - 计划中 `T-20260404-f9760e32` 写为 `2026-04-04 10:51:02 +0800`，而 `DONE.md` 记录的完成时间是 `2026-04-04 10:53:40 +0800`
+    - 计划中 `T-20260404-101e32e3` 写为 `2026-04-04 10:57:20 +0800`，而 `DONE.md` 记录的完成时间是 `2026-04-04 10:58:42 +0800`
+    这两个时间来自同链记录中的记录时间，[`20260404-analysis-mainline-a3-v2.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a3-v2.md#L58) 与 [`20260404-analysis-mainline-a3-v2.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a3-v2.md#L94) 确实如此；但管理员这轮要求的是“与 DONE 和同链记录一致”，当前计划仍未收口到单一完成时间口径。
+- 已确认通过项：
+  - [`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md#L9) 的 A3 记录文件路径已改成实际 worktree 路径 [`20260404-analysis-mainline-a3-v2.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a3-v2.md)。
+  - `T-20260404-d2984dcc` 的 `实现完成` 状态已与 [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2214) 和同链记录一致。
+  - 本轮未改动 A3 的 `spec / 实现 / 测试`，边界没有越到 `A4`。
+- 验证：
+  - `rg -n "T-20260404-d2984dcc|T-20260404-f9760e32|T-20260404-101e32e3" /home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a3-v2.md` -> `0`
+  - `git -C /home/lfr/kernelcode_generate diff --check -- ARCHITECTURE/plan/analysis_mainline_refactor_plan.md wt-20260404-analysis-mainline-a3/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a3-v2.md` -> `0`
+- 结论：
+  - 当前 A3 状态同步仍差最后一步：把 `T-20260404-f9760e32` 和 `T-20260404-101e32e3` 在计划进度表里的时间口径收口到与 `DONE.md` 一致。
+  - 下一步建议：仅修正 [`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md#L9) 的这两处完成时间；A3 的记录路径、spec、实现、测试都不需要再改。
+
+- 时间：`2026-04-04 11:06:14 +0800`
+- 经办人：`睡觉小分队`
+- 任务：`T-20260404-73098027`
+- 任务目标：`按 A3 计划时间口径修正边界执行：仅同步 A3 进度条目中 T-20260404-f9760e32 与 T-20260404-101e32e3 的完成时间，使其与 DONE/同链记录一致；不改记录路径、不改 spec/实现/测试，不扩到 A4。`
+- 改动：
+  - 只读核对 [`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md#L9)、[`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2217) 与 [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2220)，以及本记录文件。
+  - 结论是当前 A3 进度条目里：
+    - `T-20260404-f9760e32` 已写为 `2026-04-04 10:53:40 +0800`
+    - `T-20260404-101e32e3` 已写为 `2026-04-04 10:58:42 +0800`
+    与 `DONE.md` 及同链记录已经一致，因此本轮无需再修改 [`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md)。
+- 验证：
+  - `rg -n "A3|T-20260404-f9760e32|T-20260404-101e32e3|20260404-analysis-mainline-a3-v2.md" /home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md /home/lfr/kernelcode_generate/DONE.md /home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a3-v2.md`（exit `0`）
+  - `git -C /home/lfr/kernelcode_generate diff --check -- ARCHITECTURE/plan/analysis_mainline_refactor_plan.md`（exit `0`）
+- 自检：
+  - 合同自洽：通过。本轮只处理你限定的两处时间口径，没有扩到路径、状态或 A4。
+  - 边界清楚：通过。A3 的 spec/实现/测试完全未触碰。
+  - 结果唯一：通过。当前唯一结论是“这两处时间已一致，因此本轮是 no-op 校验”。
+  - 记录一致：通过。记录中的结论、涉及文件与实际改动一致，本轮仅追加记录，没有业务文件改动。
+- 结论：
+  - `T-20260404-73098027` 已完成。
+  - 当前无阻塞；这两处时间口径不需要继续修正。
+
+- 时间：`2026-04-04 11:10:34 +0800`
+- 经办人：`不要啊教练`
+- 任务：`T-20260404-5fafeda2`
+- 任务目标：`按 A3 时间口径一致性复审边界执行：只读复核 A3 条目中 T-20260404-f9760e32 与 T-20260404-101e32e3 的完成时间是否已与 DONE 和同链记录一致；不改记录路径、不改 spec/实现/测试，也不扩到 A4。`
+- 复审前自检：
+  - 已核对 `TODO` 任务边界、A3 计划进度表、`DONE.md` 与同链记录。
+  - 已重点区分“记录条目的写入时间”和“任务在进度表中的完成时间”，避免把两种时间口径混为一谈。
+  - 若仍存在任何新的时间双口径或记录路径冲突，不给 `通过`。
+- 复审结论：
+  - `通过`
+- 已确认闭环：
+  - [`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md#L9) 中 A3 条目当前已写为：
+    - `T-20260404-f9760e32 -> 2026-04-04 10:53:40 +0800`
+    - `T-20260404-101e32e3 -> 2026-04-04 10:58:42 +0800`
+  - 上述两处时间与 [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2217) 和 [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2220) 完全一致。
+  - 同链记录中已新增 [`T-20260404-73098027`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a3-v2.md#L140) 的时间口径修正说明，明确这两处完成时间现以 `DONE` 为准；历史上的 [`T-20260404-f9760e32`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a3-v2.md#L58) / [`T-20260404-101e32e3`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a3-v2.md#L94) 条目里的 `时间` 字段继续表示“记录写入时间”，不再与进度表完成时间冲突。
+  - A3 记录文件路径仍保持为实际 worktree 路径 [`20260404-analysis-mainline-a3-v2.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a3-v2.md)，本轮未回退。
+- 漏洞与边界排查：
+  - 功能正确性：本轮只复核计划时间口径，不涉及 A3 业务语义变更；未见回退。
+  - 边界条件：未扩到记录路径、spec、实现、测试或 A4。
+  - 异常路径：无新增异常路径；当前只是状态复核。
+  - 潜在漏洞/歧义：历史记录时间与任务完成时间已通过 `T-20260404-73098027` 的说明条目完成解歧，不再构成新的双口径阻塞。
+- 验证：
+  - `rg -n "T-20260404-f9760e32|T-20260404-101e32e3|T-20260404-73098027" /home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md /home/lfr/kernelcode_generate/DONE.md /home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a3/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a3-v2.md` -> `0`
+  - `git -C /home/lfr/kernelcode_generate diff --check -- ARCHITECTURE/plan/analysis_mainline_refactor_plan.md wt-20260404-analysis-mainline-a3/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a3-v2.md` -> `0`
+- 结论：
+  - A3 这两处完成时间口径已收口到与 `DONE` 和同链记录一致。
+  - 当前未发现额外改进点；A3 可进入同链合并阶段，但合并任务仍需按整条 A3 链路纳入 `计划 / spec / 实现 / 测试 / 记录` 文件。

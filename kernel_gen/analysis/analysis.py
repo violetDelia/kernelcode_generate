@@ -1,7 +1,7 @@
 """Analysis utilities for computation and data movement.
 
 创建者: 金铲铲大作战
-最后一次更改: jcc你莫辜负
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 基于 Memory 形状统计逐元素/比较/broadcast/matmul 的计算量与搬运量。
@@ -42,9 +42,13 @@ from xdsl.dialects.builtin import (
     StringAttr,
 )
 from xdsl.ir import Attribute, Operation, SSAValue
-from xdsl.utils.exceptions import VerifyException
-
-from kernel_gen.dialect.dma import DmaCopyOp, DmaLoadOp, DmaStoreOp
+from kernel_gen.analysis.memory import (
+    MemoryPath,
+    metric_value_to_expr,
+    normalize_memory_path,
+    time_from_memory_metrics,
+)
+from kernel_gen.analysis.memory.dma import analyze_dma_op
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.symbol_variable.memory import Memory
@@ -177,7 +181,7 @@ class MemoryItem:
     - 功能实现: kernel_gen/analysis/analysis.py
     """
 
-    path: str
+    path: MemoryPath
     access: str
     bytes: sp.Basic
     latency_ns: sp.Basic | None = None
@@ -208,7 +212,7 @@ class AnalysisResult:
     compute_items: Sequence[ComputeItem]
     memory_items: Sequence[MemoryItem]
     compute_totals_by_kind: MappingABC[str, sp.Basic]
-    memory_totals_by_path: MappingABC[str, sp.Basic]
+    memory_totals_by_path: MappingABC[MemoryPath, sp.Basic]
     op_costs: Sequence["KernelOpCost"] = ()
     value_traffic: Sequence["ValueTraffic"] = ()
     func_name: str | None = None
@@ -517,6 +521,42 @@ _SPACE_TOKENS = {
 _ANALYSIS_METRIC_KEYS = ("path_bandwidth", "path_latency_ns", "theoretical_compute")
 
 
+def _normalize_path_metric_mapping(
+    values: MappingABC[object, object],
+    *,
+    target: str,
+    metric_key: str,
+) -> dict[MemoryPath, object]:
+    """将 path metric 映射归一为 `MemoryPath` 键。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 只接受正式 `MemoryPath` 或其等价值文本。
+    - 一旦出现未知 path，直接报错，避免继续回退到自由字符串口径。
+
+    使用示例:
+    - normalized = _normalize_path_metric_mapping({"GM->LM": 64}, target="npu_demo", metric_key="path_bandwidth")
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    normalized: dict[MemoryPath, object] = {}
+    for raw_key, raw_value in values.items():
+        key_text = raw_key.value if isinstance(raw_key, MemoryPath) else str(raw_key)
+        path = normalize_memory_path(key_text)
+        if path is MemoryPath.UNKNOWN and key_text != MemoryPath.UNKNOWN.value:
+            raise AnalysisError(
+                f"target={target}: analysis metric {metric_key} uses unknown memory path {key_text}"
+            )
+        normalized[path] = raw_value
+    return normalized
+
+
 def _load_target_metric_defaults(target: str) -> dict[str, dict[str, object]]:
     """读取 target registry 中的 analysis 默认参数。
 
@@ -548,7 +588,10 @@ def _load_target_metric_defaults(target: str) -> dict[str, dict[str, object]]:
         value = defaults[key]
         if not isinstance(value, MappingABC):
             raise AnalysisError(f"target={target}: analysis metric {key} must be mapping")
-        normalized[key] = dict(value)
+        if key in {"path_bandwidth", "path_latency_ns"}:
+            normalized[key] = _normalize_path_metric_mapping(value, target=target, metric_key=key)
+        else:
+            normalized[key] = dict(value)
     return normalized
 
 
@@ -584,7 +627,14 @@ def _normalize_metric_overrides(
     for key, value in metric_overrides.items():
         if not isinstance(value, MappingABC):
             raise AnalysisError(f"metric_overrides.{key} must be mapping")
-        normalized[key] = dict(value)
+        if key in {"path_bandwidth", "path_latency_ns"}:
+            normalized[key] = _normalize_path_metric_mapping(
+                value,
+                target="override",
+                metric_key=key,
+            )
+        else:
+            normalized[key] = dict(value)
     return normalized
 
 
@@ -616,34 +666,6 @@ def _merge_metric_defaults(
     return merged
 
 
-def _expr_from_metric_value(value: object) -> sp.Basic | None:
-    """将配置中的带宽/延迟值转为 sympy 表达式。
-
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
-
-    功能说明:
-    - 支持 `int/float/sympy.Basic`。
-    - 其它类型返回 `None`，由调用方决定是否忽略。
-
-    使用示例:
-    - expr = _expr_from_metric_value(64)
-
-    关联文件:
-    - spec: spec/analysis/analysis_engine.md
-    - test: test/analysis/test_analysis.py
-    - 功能实现: kernel_gen/analysis/analysis.py
-    """
-
-    if isinstance(value, sp.Basic):
-        return value
-    if isinstance(value, int):
-        return sp.Integer(value)
-    if isinstance(value, float):
-        return sp.Float(value)
-    return None
-
-
 def _space_token_from_mem_type(mem_type: NnMemoryType) -> str:
     """将 nn.memory space 归一到简写 token。
 
@@ -667,7 +689,7 @@ def _space_token_from_mem_type(mem_type: NnMemoryType) -> str:
 
 
 def _build_memory_item(
-    path: str,
+    path: MemoryPath | str,
     access: str,
     bytes_expr: sp.Basic,
     config: AnalysisConfig,
@@ -689,17 +711,16 @@ def _build_memory_item(
     - 功能实现: kernel_gen/analysis/analysis.py
     """
 
+    normalized_path = normalize_memory_path(path)
     latency = None
     bandwidth = None
-    time_ns = None
     if config.path_latency_ns is not None:
-        latency = _expr_from_metric_value(config.path_latency_ns.get(path))
+        latency = metric_value_to_expr(config.path_latency_ns.get(normalized_path))
     if config.path_bandwidth is not None:
-        bandwidth = _expr_from_metric_value(config.path_bandwidth.get(path))
-    if latency is not None and bandwidth is not None and bandwidth != 0:
-        time_ns = latency + bytes_expr / bandwidth
+        bandwidth = metric_value_to_expr(config.path_bandwidth.get(normalized_path))
+    time_ns = time_from_memory_metrics(bytes_expr, latency, bandwidth)
     return MemoryItem(
-        path=path,
+        path=normalized_path,
         access=access,
         bytes=bytes_expr,
         latency_ns=latency,
@@ -732,7 +753,7 @@ def _totals_by_compute_kind(items: Sequence[ComputeItem]) -> dict[str, sp.Basic]
     return totals
 
 
-def _totals_by_memory_path(items: Sequence[MemoryItem]) -> dict[str, sp.Basic]:
+def _totals_by_memory_path(items: Sequence[MemoryItem]) -> dict[MemoryPath, sp.Basic]:
     """按 memory path 聚合 totals。
 
     创建者: 朽木露琪亚
@@ -750,7 +771,7 @@ def _totals_by_memory_path(items: Sequence[MemoryItem]) -> dict[str, sp.Basic]:
     - 功能实现: kernel_gen/analysis/analysis.py
     """
 
-    totals: dict[str, sp.Basic] = {}
+    totals: dict[MemoryPath, sp.Basic] = {}
     for item in items:
         totals[item.path] = totals.get(item.path, sp.Integer(0)) + item.bytes
     return totals
@@ -783,7 +804,7 @@ def _write_analysis_attrs(target: Operation, result: AnalysisResult) -> None:
         target.attributes[f"analysis.compute.amount{index}"] = StringAttr(str(item.amount))
         target.attributes[f"analysis.compute.dtype{index}"] = StringAttr(item.dtype)
     for index, item in enumerate(result.memory_items):
-        target.attributes[f"analysis.memory.path{index}"] = StringAttr(item.path)
+        target.attributes[f"analysis.memory.path{index}"] = StringAttr(item.path.value)
         target.attributes[f"analysis.memory.access{index}"] = StringAttr(item.access)
         target.attributes[f"analysis.memory.bytes{index}"] = StringAttr(str(item.bytes))
         if item.time_ns is not None:
@@ -1206,30 +1227,6 @@ def _iter_func_ops(func_op: func.FuncOp) -> Iterable[Operation]:
     """
     for block in func_op.body.blocks:
         yield from _iter_block_ops(block.ops)
-
-
-def _verify_public_dma_op(op: Operation) -> None:
-    """校验当前已公开 DMA 分支的前置条件。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 复用 DMA dialect verifier 校验 `dma.load/copy/store` 的公开前置条件。
-    - verifier 失败时统一转为 `AnalysisError`，避免主入口静默接受非法 IR。
-
-    使用示例:
-    - _verify_public_dma_op(op)
-
-    关联文件:
-    - spec: spec/analysis/analysis_kernel.md
-    - test: test/analysis/test_analysis.py
-    - 功能实现: kernel_gen/analysis/analysis.py
-    """
-    try:
-        op.verify()
-    except VerifyException as exc:
-        raise AnalysisError(str(exc)) from exc
 
 
 def _sum_expr(items: Iterable[sp.Basic]) -> sp.Basic:
@@ -1925,8 +1922,8 @@ def _analyze_dma_ir_op(op: Operation, config: AnalysisConfig) -> _AnalyzedOp | N
     最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 当前仅承接 `dma.load/copy/store`。
-    - 其余 DMA 分支保持 `skip + warning` 口径。
+    - 当前承接 `dma.load/copy/store/slice`。
+    - 其余 DMA 分支保持 `skip + warning` 口径；公开 DMA 前置条件非法保持 `hard error`。
 
     使用示例:
     - analyzed = _analyze_dma_ir_op(op, config)
@@ -1936,106 +1933,41 @@ def _analyze_dma_ir_op(op: Operation, config: AnalysisConfig) -> _AnalyzedOp | N
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """
-
-    overrides = _normalize_dtype_overrides(config.dtype_size_overrides)
-    if isinstance(op, DmaCopyOp):
-        _verify_public_dma_op(op)
-        source = op.source
-        target = op.target
-        if not isinstance(source.type, NnMemoryType) or not isinstance(target.type, NnMemoryType):
-            raise AnalysisError("dma.copy source/target must be nn.memory")
-        numel = _numel_from_mem_type(source.type)
-        if numel is None:
-            raise AnalysisError("dma.copy shape unsupported")
-        elem_size = _element_size(source.type.element_type, overrides)
-        if elem_size is None:
-            raise AnalysisError("dma.copy dtype unsupported")
-        bytes_expr = numel * sp.Integer(elem_size)
-        memory_items = []
-        if config.enable_memory:
-            path = f"{_space_token_from_mem_type(source.type)}->{_space_token_from_mem_type(target.type)}"
-            memory_items = [
-                _build_memory_item(path, "read", bytes_expr, config),
-                _build_memory_item(path, "write", bytes_expr, config),
-            ]
-        return _AnalyzedOp(
-            op_name=op.name,
-            compute_items=[],
-            memory_items=memory_items,
-            compute=sp.Integer(0),
-            read_bytes=bytes_expr if config.enable_memory else sp.Integer(0),
-            write_bytes=bytes_expr if config.enable_memory else sp.Integer(0),
-            value_reads=((source, bytes_expr),) if config.enable_memory else (),
-            direct_writes=((target, bytes_expr),) if config.enable_memory else (),
+    try:
+        analyzed = analyze_dma_op(
+            op,
+            path_latency_ns=config.path_latency_ns,
+            path_bandwidth=config.path_bandwidth,
+            dtype_size_overrides=_normalize_dtype_overrides(config.dtype_size_overrides),
         )
-    if isinstance(op, DmaLoadOp):
-        _verify_public_dma_op(op)
-        if len(op.operands) < 1 or len(op.results) != 1:
-            raise AnalysisError("dma.load must have 1 result")
-        source = op.operands[0]
-        result = op.results[0]
-        if not isinstance(source.type, NnMemoryType):
-            raise AnalysisError("dma.load source must be nn.memory")
-        if not isinstance(result.type, NnMemoryType):
-            raise AnalysisError("dma.load result must be nn.memory")
-        result_type = result.type
-        numel = _numel_from_mem_type(result_type)
-        if numel is None:
-            raise AnalysisError("dma.load result shape unsupported")
-        elem_size = _element_size(result_type.element_type, overrides)
-        if elem_size is None:
-            raise AnalysisError("dma.load result dtype unsupported")
-        bytes_expr = numel * sp.Integer(elem_size)
-        memory_items = []
-        if config.enable_memory:
-            path = f"{_space_token_from_mem_type(source.type)}->{_space_token_from_mem_type(result_type)}"
-            memory_items = [
-                _build_memory_item(path, "read", bytes_expr, config),
-                _build_memory_item(path, "write", bytes_expr, config),
-            ]
-        return _AnalyzedOp(
-            op_name=op.name,
-            compute_items=[],
-            memory_items=memory_items,
-            compute=sp.Integer(0),
-            read_bytes=bytes_expr if config.enable_memory else sp.Integer(0),
-            write_bytes=bytes_expr if config.enable_memory else sp.Integer(0),
-            value_reads=((source, bytes_expr),) if config.enable_memory else (),
-            result_write_bytes=bytes_expr if config.enable_memory else sp.Integer(0),
-        )
-    if isinstance(op, DmaStoreOp):
-        _verify_public_dma_op(op)
-        source = op.source
-        target = op.target
-        if not isinstance(source.type, NnMemoryType) or not isinstance(target.type, NnMemoryType):
-            raise AnalysisError("dma.store source/target must be nn.memory")
-        numel = _numel_from_symbol_values(op.sizes)
-        if numel is None:
-            numel = _numel_from_mem_type(source.type)
-        if numel is None:
-            raise AnalysisError("dma.store sizes unsupported")
-        elem_size = _element_size(source.type.element_type, overrides)
-        if elem_size is None:
-            raise AnalysisError("dma.store dtype unsupported")
-        bytes_expr = numel * sp.Integer(elem_size)
-        memory_items = []
-        if config.enable_memory:
-            path = f"{_space_token_from_mem_type(source.type)}->{_space_token_from_mem_type(target.type)}"
-            memory_items = [
-                _build_memory_item(path, "read", bytes_expr, config),
-                _build_memory_item(path, "write", bytes_expr, config),
-            ]
-        return _AnalyzedOp(
-            op_name=op.name,
-            compute_items=[],
-            memory_items=memory_items,
-            compute=sp.Integer(0),
-            read_bytes=bytes_expr if config.enable_memory else sp.Integer(0),
-            write_bytes=bytes_expr if config.enable_memory else sp.Integer(0),
-            value_reads=((source, bytes_expr),) if config.enable_memory else (),
-            direct_writes=((target, bytes_expr),) if config.enable_memory else (),
-        )
-    return None
+    except ValueError as exc:
+        raise AnalysisError(str(exc)) from exc
+    if analyzed is None:
+        return None
+    memory_items = []
+    if config.enable_memory:
+        memory_items = [
+            MemoryItem(
+                path=item[0],
+                access=item[1],
+                bytes=item[2],
+                latency_ns=item[3],
+                bandwidth=item[4],
+                time_ns=item[5],
+            )
+            for item in analyzed.memory_items
+        ]
+    return _AnalyzedOp(
+        op_name=analyzed.op_name,
+        compute_items=[],
+        memory_items=memory_items,
+        compute=sp.Integer(0),
+        read_bytes=analyzed.read_bytes if config.enable_memory else sp.Integer(0),
+        write_bytes=analyzed.write_bytes if config.enable_memory else sp.Integer(0),
+        value_reads=analyzed.value_reads if config.enable_memory else (),
+        direct_writes=analyzed.direct_writes if config.enable_memory else (),
+        result_write_bytes=analyzed.result_write_bytes if config.enable_memory else sp.Integer(0),
+    )
 
 
 def _analyze_ir_op(op: Operation, config: AnalysisConfig) -> _AnalyzedOp | None:

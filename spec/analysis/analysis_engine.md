@@ -7,9 +7,12 @@
 ## 文档信息
 
 - 创建者：`朽木露琪亚`
-- 最后一次更改：`jcc你莫辜负`
+- 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/analysis/analysis_engine.md`](../../spec/analysis/analysis_engine.md)
-- `功能实现`：[`kernel_gen/analysis/analysis.py`](../../kernel_gen/analysis/analysis.py)
+- `功能实现`：
+  - [`kernel_gen/analysis/analysis.py`](../../kernel_gen/analysis/analysis.py)
+  - [`kernel_gen/analysis/memory/__init__.py`](../../kernel_gen/analysis/memory/__init__.py)
+  - [`kernel_gen/analysis/memory/dma.py`](../../kernel_gen/analysis/memory/dma.py)
 - `test`：[`test/analysis/test_analysis.py`](../../test/analysis/test_analysis.py)
 
 ## 依赖
@@ -22,6 +25,7 @@
 ## 目标
 
 - 冻结统一入口：`analysis(op, config, otherargs=None) -> AnalysisResult`。
+- 冻结访存主线目录化口径：`kernel_gen/analysis/memory/` 负责 `MemoryPath`、`time_ns` 公式与 DMA 分支。
 - 冻结 `AnalysisConfig` 的显式控制字段：
   - `enable_compute`
   - `enable_memory`
@@ -41,6 +45,15 @@
   - `memory_items`
   - `compute_totals_by_kind`
   - `memory_totals_by_path`
+- 冻结正式 `MemoryPath` 枚举至少包含：
+  - `GM_TO_SM`
+  - `SM_TO_LM`
+  - `GM_TO_LM`
+  - `GM_TO_TSM`
+  - `TSM_TO_TLM`
+  - `FM_TO_TSM`
+- 冻结访存时间公式：当某条 `memory_items` 同时命中 `bytes`、`latency_ns`、`bandwidth` 时，
+  - `time_ns = latency_ns + bytes / bandwidth`
 - 明确默认不写 `analysis.*` 属性；只有显式开启 `write_op_attrs` / `write_func_attrs` 时才写回。
 
 ## 限制与边界
@@ -51,6 +64,8 @@
   - `vector`
   - `tensor`
 - 本轮 `memory` 分类只要求保证 `memory_items` 与 `memory_totals_by_path` 可机械读取；对 compute op 可使用泛化 path（如 `GM->compute` / `compute->GM`），对当前已公开 DMA 分支应优先使用 source/target space 路径。
+- 当前已公开 DMA 访存分支是 `dma.copy`、`dma.load`、`dma.store`、`dma.slice`；它们的前置条件非法时必须 `hard error`。
+- 当前未公开 DMA 分支（如 `dma.alloc`、`dma.deslice`、`dma.free`）继续执行 `skip + warning`，不计入正式 `memory_items / memory_totals_by_path`。
 - `write_op_attrs=False` / `write_func_attrs=False` 时，不得产生任何新的 `analysis.*` attribute。
 - 旧 `compute/read_bytes/write_bytes` 若仍暴露，只允许是由 `AnalysisResult` 派生的 alias。
 - 一旦 `npu_demo` 的 analysis 默认参数缺字段或读取失败，必须显式报错；不允许静默回退到 analysis 侧手写常量。
@@ -91,14 +106,17 @@
 
 - 功能说明：显式记录一条访存分类项。
 - 参数说明：
-  - `path: str`
+  - `path: MemoryPath`
   - `access: str`
   - `bytes: sympy.Basic`
   - `latency_ns: sympy.Basic | None`
   - `bandwidth: sympy.Basic | None`
   - `time_ns: sympy.Basic | None`
-- 使用示例：`MemoryItem(path="GM->LM", access="read", bytes=32)`
-- 注意事项：若当前 path 没有带宽/延迟配置，则 `time_ns` 可为空。
+- 使用示例：`MemoryItem(path=MemoryPath.GM_TO_LM, access="read", bytes=32)`
+- 注意事项：
+  - `path` 不能再使用自由字符串；必须来自正式 `MemoryPath` 枚举。
+  - 若当前 path 没有带宽/延迟配置，则 `time_ns` 可为空。
+  - 若 `latency_ns` 与 `bandwidth` 同时存在，则 `time_ns` 必须满足 `latency_ns + bytes / bandwidth`。
 - 返回与限制：作为 `AnalysisResult.memory_items` 元素类型。
 
 ### `class AnalysisResult`
@@ -108,11 +126,11 @@
   - `compute_items: Sequence[ComputeItem]`
   - `memory_items: Sequence[MemoryItem]`
   - `compute_totals_by_kind: Mapping[str, sympy.Basic]`
-  - `memory_totals_by_path: Mapping[str, sympy.Basic]`
+  - `memory_totals_by_path: Mapping[MemoryPath, sympy.Basic]`
 - 使用示例：`result = analysis(op, config)`
 - 注意事项：
   - `compute_totals_by_kind` 必须由 `compute_items` 派生。
-  - `memory_totals_by_path` 必须由 `memory_items` 派生。
+  - `memory_totals_by_path` 必须由 `memory_items` 按 `MemoryPath` 派生，不能再主读旧 `read_bytes / write_bytes` 汇总。
   - `total_compute / total_read_bytes / total_write_bytes` 若仍保留，只能作为 derived alias。
 - 返回与限制：作为统一入口稳定返回值。
 
@@ -154,3 +172,6 @@ result = analysis(
   - `analyze_kernel(...)` 仅作为 facade / adapter
   - `AnalysisConfig` 默认分析参数来自 `npu_demo target registry`
   - `npu_demo` 缺失 analysis 默认参数时显式失败
+  - `dma.copy` / `dma.slice` 的 `MemoryPath + bytes + time_ns` 可机械读取
+  - unknown op 为 `skip + warning`
+  - 非法公开 DMA 分支为 `hard error`

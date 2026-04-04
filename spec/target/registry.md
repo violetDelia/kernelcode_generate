@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`jcc你莫辜负`
+- 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/target/registry.md`](../../spec/target/registry.md)
 - `功能实现`：[`kernel_gen/target/registry.py`](../../kernel_gen/target/registry.py)
 - `test`：[`test/target/test_target_registry.py`](../../test/target/test_target_registry.py)
@@ -35,6 +35,7 @@
 - registry 只负责“配置解析与查询”；不负责具体后端驱动初始化、设备探测或运行时调度。
 - 当硬件字段缺失时，调用方必须使用自身回退逻辑（例如返回符号值或动态 shape），registry 不自动补默认业务值。
 - `analysis` 默认参数与硬件参数不同：当前只对 `npu_demo` 暴露正式 analysis baseline；若 `analysis` 侧读取时缺字段，必须显式失败，不允许静默回退到调用点手写常量。
+- `path_bandwidth` 与 `path_latency_ns` 的 key 空间必须与 analysis 主线的正式 `MemoryPath` 文本值一致；不得继续引入自由字符串 path。
 - 对显式白名单 target，白名单外能力查询必须固定判定为未启用；不得把 `arch.launch_kernel` 或其他未列入白名单的 `arch.*` 能力视为默认可用。
 - `is_arch_op_supported(...)` 的稳定输入域是 `arch.*` 能力键；`launch`、`barrier` 仅作为上层能力语义示例，不单独构成 registry 公共查询接口的稳定输入。
 
@@ -148,8 +149,15 @@ TargetSpec(
 - `npu_demo` 的标准注册入口是 registry 的固定内置模板注册流程，而不是外部 `json/txt` 文件；标准查询入口是 `is_arch_op_supported(...)`、`get_target_hardware(...)` 与 `get_current_target_hardware(...)`。
 - `npu_demo` 的 analysis 默认参数也由 registry 固定提供，当前至少包含：
   - `path_bandwidth["GM->LM"] = 64`
+  - `path_bandwidth["GM->SM"] = 96`
+  - `path_bandwidth["GM->TSM"] = 32`
+  - `path_bandwidth["TSM->TLM"] = 16`
   - `path_latency_ns["GM->LM"] = 20`
+  - `path_latency_ns["GM->SM"] = 18`
+  - `path_latency_ns["GM->TSM"] = 24`
+  - `path_latency_ns["TSM->TLM"] = 8`
   - `theoretical_compute["scalar"] = 1`
+  - `theoretical_compute["vector"] = 8`
   - `theoretical_compute["tensor"] = 64`
 - `analysis` 侧读取这些值时，不能再在 `AnalysisConfig(...)` 调用点重复手写同样常量。
 

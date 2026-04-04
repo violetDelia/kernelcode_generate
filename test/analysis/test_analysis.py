@@ -1,7 +1,7 @@
 """Analysis tests.
 
 创建者: 金铲铲大作战
-最后一次更改: jcc你莫辜负
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖逐元素算术/比较、broadcast、matmul 与函数级聚合统计。
@@ -72,6 +72,7 @@ from kernel_gen.analysis.analysis import (
     analyze_matmul_op,
 )
 import kernel_gen.analysis.analysis as analysis_module
+from kernel_gen.analysis.memory import MemoryPath
 from kernel_gen.dialect.dma import (
     DmaAllocOp,
     DmaCopyOp,
@@ -826,7 +827,7 @@ def test_analysis_func_write_attrs_is_explicit_and_analyze_kernel_is_facade() ->
 
 # AN-020A
 # 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
 # 测试目的: 验证 analyze_kernel 只是 AnalysisResult 的 facade，不维护独立公式。
@@ -864,15 +865,17 @@ def test_analyze_kernel_is_facade_over_analysis_result() -> None:
 
 # AN-020B
 # 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
-# 测试目的: 验证 AnalysisConfig 的默认分析参数来自 npu_demo target registry。
-# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_entry_reads_defaults_from_npu_demo_target
+# 测试目的: 验证 npu_demo target 变更后，analysis 默认 path 参数同步变化。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_memory_defaults_track_npu_demo_target_definition
 # 对应功能实现文件路径: kernel_gen/analysis/analysis.py
 # 对应 spec 文件路径: spec/analysis/analysis_engine.md
 # 对应测试文件路径: test/analysis/test_analysis.py
-def test_analysis_entry_reads_defaults_from_npu_demo_target(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_analysis_memory_defaults_track_npu_demo_target_definition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     custom_defaults = {
         "path_bandwidth": {"GM->LM": 96},
         "path_latency_ns": {"GM->LM": 11},
@@ -895,13 +898,14 @@ def test_analysis_entry_reads_defaults_from_npu_demo_target(monkeypatch: pytest.
     assert config.path_bandwidth == custom_defaults["path_bandwidth"]
     assert config.path_latency_ns == custom_defaults["path_latency_ns"]
     assert config.theoretical_compute == custom_defaults["theoretical_compute"]
+    _assert_expr_equal(result.memory_totals_by_path[MemoryPath.GM_TO_LM], sp.Integer(64))
 
     read_item, write_item = result.memory_items
-    assert read_item.path == "GM->LM"
+    assert read_item.path is MemoryPath.GM_TO_LM
     assert read_item.latency_ns == sp.Integer(11)
     assert read_item.bandwidth == sp.Integer(96)
     _assert_expr_equal(read_item.time_ns or sp.Integer(0), sp.Integer(11) + sp.Rational(32, 96))
-    assert write_item.path == "GM->LM"
+    assert write_item.path is MemoryPath.GM_TO_LM
     assert write_item.latency_ns == sp.Integer(11)
     assert write_item.bandwidth == sp.Integer(96)
     _assert_expr_equal(write_item.time_ns or sp.Integer(0), sp.Integer(11) + sp.Rational(32, 96))
@@ -913,11 +917,13 @@ def test_analysis_entry_reads_defaults_from_npu_demo_target(monkeypatch: pytest.
 # 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
 # 测试目的: 验证 npu_demo target 缺少 analysis 默认参数时显式失败，不允许回退到手写常量。
-# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_entry_rejects_missing_npu_demo_metric
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_memory_missing_target_metric_fails_explicitly
 # 对应功能实现文件路径: kernel_gen/analysis/analysis.py
 # 对应 spec 文件路径: spec/analysis/analysis_engine.md
 # 对应测试文件路径: test/analysis/test_analysis.py
-def test_analysis_entry_rejects_missing_npu_demo_metric(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_analysis_memory_missing_target_metric_fails_explicitly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     broken_defaults = {
         "path_bandwidth": {"GM->LM": 64},
         "path_latency_ns": {"GM->LM": 20},
@@ -931,6 +937,156 @@ def test_analysis_entry_rejects_missing_npu_demo_metric(monkeypatch: pytest.Monk
 
     with pytest.raises(AnalysisError, match="missing analysis metric defaults: theoretical_compute"):
         AnalysisConfig(target="npu_demo")
+
+
+# AN-020D
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 测试目的: 验证 dma.copy 在新 schema 中报告固定 GM->LM path 与 time_ns。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_dma_copy_reports_gm_to_lm_path_and_time
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+
+
+def test_analysis_dma_copy_reports_gm_to_lm_path_and_time() -> None:
+    source_type = _make_memory_type([IntAttr(2), IntAttr(2)], f32, "global")
+    target_type = _make_memory_type([IntAttr(2), IntAttr(2)], f32, "local")
+    block = Block(arg_types=[source_type, target_type])
+    copy_op = DmaCopyOp(block.args[0], block.args[1])
+
+    result = analysis(
+        copy_op,
+        AnalysisConfig(
+            target="npu_demo",
+            enable_compute=False,
+            enable_memory=True,
+            dtype_size_overrides={"f32": 4},
+        ),
+    )
+
+    assert len(result.memory_items) == 2
+    read_item, write_item = result.memory_items
+    assert read_item.path is MemoryPath.GM_TO_LM
+    assert write_item.path is MemoryPath.GM_TO_LM
+    _assert_expr_equal(result.memory_totals_by_path[MemoryPath.GM_TO_LM], sp.Integer(32))
+    assert read_item.latency_ns == sp.Integer(20)
+    assert read_item.bandwidth == sp.Integer(64)
+    _assert_expr_equal(read_item.time_ns or sp.Integer(0), sp.Integer(20) + sp.Rational(16, 64))
+    _assert_expr_equal(write_item.time_ns or sp.Integer(0), sp.Integer(20) + sp.Rational(16, 64))
+
+
+# AN-020E
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 测试目的: 验证 dma.slice 在新 schema 中报告固定 GM->SM path 与 bytes。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_dma_slice_reports_gm_to_sm_path_and_bytes
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+
+
+def test_analysis_dma_slice_reports_gm_to_sm_path_and_bytes() -> None:
+    source_type = _make_memory_type([IntAttr(2), IntAttr(4)], f32, "global")
+    target_type = _make_memory_type([IntAttr(1), IntAttr(2)], f32, "shared")
+    symbol_types = [
+        SymbolValueType.from_expr("0"),
+        SymbolValueType.from_expr("0"),
+        SymbolValueType.from_expr("1"),
+        SymbolValueType.from_expr("2"),
+        SymbolValueType.from_expr("1"),
+        SymbolValueType.from_expr("1"),
+    ]
+    block = Block(arg_types=[target_type, source_type, *symbol_types])
+    slice_op = DmaSliceOp(
+        block.args[0],
+        block.args[1],
+        [block.args[2], block.args[3]],
+        [block.args[4], block.args[5]],
+        [block.args[6], block.args[7]],
+    )
+
+    result = analysis(
+        slice_op,
+        AnalysisConfig(
+            target="npu_demo",
+            enable_compute=False,
+            enable_memory=True,
+            dtype_size_overrides={"f32": 4},
+        ),
+    )
+
+    assert len(result.memory_items) == 2
+    read_item, write_item = result.memory_items
+    assert read_item.path is MemoryPath.GM_TO_SM
+    assert write_item.path is MemoryPath.GM_TO_SM
+    _assert_expr_equal(read_item.bytes, sp.Integer(8))
+    _assert_expr_equal(write_item.bytes, sp.Integer(8))
+    _assert_expr_equal(result.memory_totals_by_path[MemoryPath.GM_TO_SM], sp.Integer(16))
+
+
+# AN-020F
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 测试目的: 验证未知 op 在新 schema 中执行 skip + warning，且不写入 compute/memory 桶。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_unknown_op_warns_and_skips_in_new_schema
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+
+
+def test_analysis_unknown_op_warns_and_skips_in_new_schema() -> None:
+    with pytest.warns(UserWarning, match="test.unknown"):
+        result = analysis(
+            UnknownOp(),
+            AnalysisConfig(
+                enable_compute=True,
+                enable_memory=True,
+                write_op_attrs=False,
+                write_func_attrs=False,
+            ),
+        )
+
+    assert result.compute_items == ()
+    assert result.memory_items == ()
+    assert result.compute_totals_by_kind == {}
+    assert result.memory_totals_by_path == {}
+
+
+# AN-020G
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 测试目的: 验证公开 DMA 分支前置条件非法时在新 schema 中显式报错。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_invalid_public_dma_raises
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+
+
+def test_analysis_invalid_public_dma_raises() -> None:
+    source_type = _make_memory_type([IntAttr(2), IntAttr(2)], f32, "global")
+    target_type = _make_memory_type([IntAttr(2), IntAttr(4)], f32, "global")
+    block = Block(arg_types=[source_type, target_type])
+    copy_op = DmaCopyOp(block.args[0], block.args[1])
+
+    with pytest.raises(AnalysisError, match="dma.copy source/target shape mismatch"):
+        analysis(
+            copy_op,
+            AnalysisConfig(
+                target="npu_demo",
+                enable_compute=False,
+                enable_memory=True,
+                dtype_size_overrides={"f32": 4},
+            ),
+        )
 
 
 # AN-021
@@ -1417,13 +1573,15 @@ def test_analyze_kernel_skips_non_public_dma_ops_with_warning() -> None:
 
     assert [str(item.message) for item in records] == [
         "analysis_kernel skip dma.alloc: unsupported op",
-        "analysis_kernel skip dma.slice: unsupported op",
         "analysis_kernel skip dma.deslice: unsupported op",
         "analysis_kernel skip dma.free: unsupported op",
     ]
-    assert summary.op_costs == []
+    assert len(summary.op_costs) == 1
+    assert summary.op_costs[0].op_name == "dma.slice"
+    _assert_expr_equal(summary.op_costs[0].read_bytes, sp.Integer(8))
+    _assert_expr_equal(summary.op_costs[0].write_bytes, sp.Integer(8))
     _assert_expr_equal(summary.total_compute, sp.Integer(0))
-    _assert_expr_equal(summary.total_read_bytes, sp.Integer(0))
-    _assert_expr_equal(summary.total_write_bytes, sp.Integer(0))
+    _assert_expr_equal(summary.total_read_bytes, sp.Integer(8))
+    _assert_expr_equal(summary.total_write_bytes, sp.Integer(8))
     traffic = _value_traffic_map(summary)
     assert set(traffic.keys()) == {f"arg{index}" for index in range(len(arg_types))}

@@ -1,7 +1,7 @@
 """target registry tests.
 
 创建者: 我不是牛马
-最后一次更改: jcc你莫辜负
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 target registry 的 JSON 加载、冲突校验与 arch op 支持矩阵行为。
@@ -354,8 +354,15 @@ def test_target_registry_npu_demo_analysis_defaults() -> None:
     defaults = target_registry.get_target_analysis_defaults("npu_demo")
 
     assert defaults["path_bandwidth"]["GM->LM"] == 64
+    assert defaults["path_bandwidth"]["GM->SM"] == 96
+    assert defaults["path_bandwidth"]["GM->TSM"] == 32
+    assert defaults["path_bandwidth"]["TSM->TLM"] == 16
     assert defaults["path_latency_ns"]["GM->LM"] == 20
+    assert defaults["path_latency_ns"]["GM->SM"] == 18
+    assert defaults["path_latency_ns"]["GM->TSM"] == 24
+    assert defaults["path_latency_ns"]["TSM->TLM"] == 8
     assert defaults["theoretical_compute"]["scalar"] == 1
+    assert defaults["theoretical_compute"]["vector"] == 8
     assert defaults["theoretical_compute"]["tensor"] == 64
 
 
