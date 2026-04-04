@@ -53,6 +53,7 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.analysis.analysis import (
     AnalysisConfig,
     AnalysisError,
+    MemoryItem,
     ComputeItem,
     AnalysisResult,
     AnalysisSummary,
@@ -75,6 +76,7 @@ from kernel_gen.analysis.analysis import (
 import kernel_gen.analysis.analysis as analysis_module
 from kernel_gen.analysis.compute import ComputeKind
 from kernel_gen.analysis.memory import MemoryPath
+from kernel_gen.passes.analysis.func_cost import AnalyzeFuncCostPass
 from kernel_gen.dialect.dma import (
     DmaAllocOp,
     DmaCopyOp,
@@ -322,6 +324,67 @@ def _value_traffic_map(summary: AnalyzeKernelSummary) -> dict[str, ValueTraffic]
     - 功能实现: kernel_gen/analysis/analysis.py
     """
     return {item.value_key: item for item in summary.value_traffic}
+
+
+def _build_mixed_analysis_module(
+    *,
+    include_signature_hints: bool,
+) -> tuple[ModuleOp, func.FuncOp]:
+    """构造 A4 混合函数测试样例。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 生成同时包含 elementwise、tensor+const、compare(i1)、dma.load/copy/store 的 `func.func`。
+    - 可切换是否保留函数级签名提示，用于验证统一入口只依赖 body 内真实 op 链。
+
+    使用示例:
+    - module, func_op = _build_mixed_analysis_module(include_signature_hints=False)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    mem_type = _make_memory_type([IntAttr(2), IntAttr(2)], f32, "global")
+    local_type = _make_memory_type([IntAttr(2), IntAttr(2)], f32, "local")
+    pred_type = _make_memory_type([IntAttr(2), IntAttr(2)], i1, "global")
+    space = _make_space("global")
+    symbol_types = [
+        SymbolValueType.from_expr("0"),
+        SymbolValueType.from_expr("0"),
+        SymbolValueType.from_expr("2"),
+        SymbolValueType.from_expr("2"),
+        SymbolValueType.from_expr("1"),
+        SymbolValueType.from_expr("1"),
+    ]
+    arg_types = [mem_type, mem_type, local_type, *symbol_types]
+    block = Block(arg_types=arg_types)
+
+    offsets = [block.args[3], block.args[4]]
+    sizes = [block.args[5], block.args[6]]
+    strides = [block.args[7], block.args[8]]
+    const_op = arith.ConstantOp(IntegerAttr(1, i32))
+    add_op = NnAddOp(block.args[0], block.args[1], mem_type, space)
+    add_const_op = FakeNnAddOp(add_op.result, const_op.result, mem_type, space)
+    eq_op = NnEqOp(add_const_op.result, block.args[1], pred_type, space)
+    load_op = DmaLoadOp(block.args[0], offsets, sizes, strides, mem_type, space)
+    copy_op = DmaCopyOp(block.args[0], block.args[2])
+    store_op = DmaStoreOp(load_op.result, block.args[2], offsets, sizes, strides)
+
+    for op in (const_op, add_op, add_const_op, eq_op, load_op, copy_op, store_op):
+        block.add_op(op)
+    block.add_op(func.ReturnOp(add_const_op.result))
+
+    if include_signature_hints:
+        func_type = FunctionType.from_lists(arg_types, [mem_type])
+    else:
+        func_type = FunctionType.from_lists([], [])
+    func_op = func.FuncOp("main", func_type, Region(block))
+    module = ModuleOp([func_op])
+    return module, func_op
 
 
 # AN-001
@@ -776,25 +839,32 @@ def test_analysis_entry_write_op_attrs_is_explicit() -> None:
 
 # AN-020
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
+# 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-03 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-03 00:00:00 +0800
-# 测试目的: 验证 func.func 统一入口默认不写 attrs，显式开启后写 func attrs，且 analyze_kernel 为 derived facade。
-# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_func_write_attrs_is_explicit_and_analyze_kernel_is_facade
+# 测试目的: 验证 `write_op_attrs` / `write_func_attrs` 仅在显式开启时受控写回。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_write_attrs_are_explicit_and_controlled
 # 对应功能实现文件路径: kernel_gen/analysis/analysis.py
 # 对应 spec 文件路径: spec/analysis/analysis_engine.md
 # 对应测试文件路径: test/analysis/test_analysis.py
-def test_analysis_func_write_attrs_is_explicit_and_analyze_kernel_is_facade() -> None:
+def test_analysis_write_attrs_are_explicit_and_controlled() -> None:
     mem_type = _make_memory_type([IntAttr(2), IntAttr(3)], f32, "global")
     space = _make_space("global")
 
-    def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
-        add_op = NnAddOp(block.args[0], block.args[1], mem_type, space)
-        return [add_op], add_op.result
+    def _build_case() -> tuple[func.FuncOp, NnAddOp]:
+        captured: dict[str, NnAddOp] = {}
 
-    _, func_op, _ = _build_module([mem_type, mem_type], mem_type, _builder)
-    result = analysis(
-        func_op,
+        def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
+            add_op = NnAddOp(block.args[0], block.args[1], mem_type, space)
+            captured["add"] = add_op
+            return [add_op], add_op.result
+
+        _, func_op, _ = _build_module([mem_type, mem_type], mem_type, _builder)
+        return func_op, captured["add"]
+
+    func_default, add_default = _build_case()
+    analysis(
+        func_default,
         AnalysisConfig(
             enable_compute=True,
             enable_memory=True,
@@ -803,17 +873,26 @@ def test_analysis_func_write_attrs_is_explicit_and_analyze_kernel_is_facade() ->
             dtype_size_overrides={"f32": 4},
         ),
     )
+    assert "analysis.compute" not in add_default.attributes
+    assert "analysis.compute" not in func_default.attributes
 
-    assert "analysis.compute" not in func_op.attributes
-    summary = analyze_kernel(func_op, dtype_size_overrides={"f32": 4})
-    assert summary.op_costs == result.op_costs
-    assert summary.value_traffic == result.value_traffic
-    _assert_expr_equal(summary.total_compute, result.total_compute)
-    _assert_expr_equal(summary.total_read_bytes, result.total_read_bytes)
-    _assert_expr_equal(summary.total_write_bytes, result.total_write_bytes)
-
+    func_op_only, add_op_only = _build_case()
     analysis(
-        func_op,
+        func_op_only,
+        AnalysisConfig(
+            enable_compute=True,
+            enable_memory=True,
+            write_op_attrs=True,
+            write_func_attrs=False,
+            dtype_size_overrides={"f32": 4},
+        ),
+    )
+    assert add_op_only.attributes["analysis.compute"].data == "6"
+    assert "analysis.compute" not in func_op_only.attributes
+
+    func_func_only, add_func_only = _build_case()
+    analysis(
+        func_func_only,
         AnalysisConfig(
             enable_compute=True,
             enable_memory=True,
@@ -822,9 +901,24 @@ def test_analysis_func_write_attrs_is_explicit_and_analyze_kernel_is_facade() ->
             dtype_size_overrides={"f32": 4},
         ),
     )
-    assert func_op.attributes["analysis.compute"].data == "6"
-    assert func_op.attributes["analysis.read_bytes"].data == "48"
-    assert func_op.attributes["analysis.write_bytes"].data == "24"
+    assert "analysis.compute" not in add_func_only.attributes
+    assert func_func_only.attributes["analysis.compute"].data == "6"
+    assert func_func_only.attributes["analysis.read_bytes"].data == "48"
+    assert func_func_only.attributes["analysis.write_bytes"].data == "24"
+
+    func_both, add_both = _build_case()
+    analysis(
+        func_both,
+        AnalysisConfig(
+            enable_compute=True,
+            enable_memory=True,
+            write_op_attrs=True,
+            write_func_attrs=True,
+            dtype_size_overrides={"f32": 4},
+        ),
+    )
+    assert add_both.attributes["analysis.compute"].data == "6"
+    assert func_both.attributes["analysis.compute"].data == "6"
 
 
 # AN-020A
@@ -856,8 +950,8 @@ def test_analyze_kernel_is_facade_over_analysis_result() -> None:
             dtype_size_overrides={"f32": 4},
         ),
     )
-    summary = analyze_kernel(func_op, dtype_size_overrides={"f32": 4})
 
+    summary = analyze_kernel(func_op, dtype_size_overrides={"f32": 4})
     assert summary.op_costs == result.op_costs
     assert summary.value_traffic == result.value_traffic
     _assert_expr_equal(summary.total_compute, result.total_compute)
@@ -867,15 +961,15 @@ def test_analyze_kernel_is_facade_over_analysis_result() -> None:
 
 # AN-020B
 # 创建者: jcc你莫辜负
-# 最后一次更改: 朽木露琪亚
+# 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
-# 测试目的: 验证 npu_demo target 变更后，analysis 默认 path 参数同步变化。
-# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_memory_defaults_track_npu_demo_target_definition
+# 测试目的: 验证 analysis.func 侧默认分析参数只来自 npu_demo target registry 单一来源。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_target_registry_is_single_source_for_analysis_defaults
 # 对应功能实现文件路径: kernel_gen/analysis/analysis.py
 # 对应 spec 文件路径: spec/analysis/analysis_engine.md
 # 对应测试文件路径: test/analysis/test_analysis.py
-def test_analysis_memory_defaults_track_npu_demo_target_definition(
+def test_analysis_target_registry_is_single_source_for_analysis_defaults(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     custom_defaults = {
@@ -892,10 +986,13 @@ def test_analysis_memory_defaults_track_npu_demo_target_definition(
 
     source_type = _make_memory_type([IntAttr(2), IntAttr(4)], f32, "global")
     target_type = _make_memory_type([IntAttr(2), IntAttr(4)], f32, "local")
-    block = Block(arg_types=[source_type, target_type])
-    copy_op = DmaCopyOp(block.args[0], block.args[1])
+    _, func_op, _ = _build_module(
+        [source_type, target_type],
+        target_type,
+        lambda block: ([DmaCopyOp(block.args[0], block.args[1])], block.args[1]),
+    )
     config = AnalysisConfig(target="npu_demo", enable_compute=False, enable_memory=True)
-    result = analysis(copy_op, config)
+    result = analysis(func_op, config)
 
     assert config.path_bandwidth == custom_defaults["path_bandwidth"]
     assert config.path_latency_ns == custom_defaults["path_latency_ns"]
@@ -1315,6 +1412,105 @@ def test_analysis_func_write_op_attrs_via_public_entry() -> None:
     assert add_op.attributes["analysis.write_bytes"].data == "24"
     assert "analysis.compute" not in func_op.attributes
     assert result.op_costs[0].op_name == "nn.add"
+
+
+# AN-023
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 测试目的: 验证 mixed func 的总量等于各桶求和，且 analysis/analyze_kernel/func_cost 三路结果一致。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_mixed_func_totals_equal_bucket_sums
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_mixed_func_totals_equal_bucket_sums() -> None:
+    module, func_op = _build_mixed_analysis_module(include_signature_hints=True)
+    config = AnalysisConfig(
+        target="npu_demo",
+        enable_compute=True,
+        enable_memory=True,
+        predicate_size=2,
+        dtype_size_overrides={"f32": 4},
+    )
+
+    result = analysis(func_op, config)
+    kernel_summary = analyze_kernel(func_op, predicate_size=2, dtype_size_overrides={"f32": 4})
+    pass_obj = AnalyzeFuncCostPass(predicate_size=2, dtype_size_overrides={"f32": 4})
+    pass_obj.run(module)
+    pass_summary = pass_obj.get_summary("main")
+
+    bucket_compute_total = sum(result.compute_totals_by_kind.values(), sp.Integer(0))
+    bucket_memory_total = sum(result.memory_totals_by_path.values(), sp.Integer(0))
+    _assert_expr_equal(result.total_compute, bucket_compute_total)
+    _assert_expr_equal(result.total_read_bytes + result.total_write_bytes, bucket_memory_total)
+    assert result.compute_totals_by_kind == {ComputeKind.VECTOR: sp.Integer(12)}
+    assert MemoryPath.GM_TO_GM in result.memory_totals_by_path
+    assert MemoryPath.GM_TO_LM in result.memory_totals_by_path
+
+    assert kernel_summary.op_costs == result.op_costs
+    assert kernel_summary.value_traffic == result.value_traffic
+    _assert_expr_equal(kernel_summary.total_compute, result.total_compute)
+    _assert_expr_equal(kernel_summary.total_read_bytes, result.total_read_bytes)
+    _assert_expr_equal(kernel_summary.total_write_bytes, result.total_write_bytes)
+
+    assert pass_summary.op_costs == result.op_costs
+    assert pass_summary.value_traffic == result.value_traffic
+    _assert_expr_equal(pass_summary.total_compute, result.total_compute)
+    _assert_expr_equal(pass_summary.total_read_bytes, result.total_read_bytes)
+    _assert_expr_equal(pass_summary.total_write_bytes, result.total_write_bytes)
+
+
+# AN-024
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 测试目的: 验证无函数签名提示时，统一入口与下游结果仍与完整签名版本完全一致。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_no_signature_hint_matches_full_signature_version
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_no_signature_hint_matches_full_signature_version() -> None:
+    full_module, full_func = _build_mixed_analysis_module(include_signature_hints=True)
+    hintless_module, hintless_func = _build_mixed_analysis_module(include_signature_hints=False)
+    config = AnalysisConfig(
+        target="npu_demo",
+        enable_compute=True,
+        enable_memory=True,
+        predicate_size=2,
+        dtype_size_overrides={"f32": 4},
+    )
+
+    full_result = analysis(full_func, config)
+    hintless_result = analysis(hintless_func, config)
+    assert hintless_result.op_costs == full_result.op_costs
+    assert hintless_result.value_traffic == full_result.value_traffic
+    assert hintless_result.compute_totals_by_kind == full_result.compute_totals_by_kind
+    assert hintless_result.memory_totals_by_path == full_result.memory_totals_by_path
+    _assert_expr_equal(hintless_result.total_compute, full_result.total_compute)
+    _assert_expr_equal(hintless_result.total_read_bytes, full_result.total_read_bytes)
+    _assert_expr_equal(hintless_result.total_write_bytes, full_result.total_write_bytes)
+
+    full_summary = analyze_kernel(full_func, predicate_size=2, dtype_size_overrides={"f32": 4})
+    hintless_summary = analyze_kernel(hintless_func, predicate_size=2, dtype_size_overrides={"f32": 4})
+    assert hintless_summary.op_costs == full_summary.op_costs
+    assert hintless_summary.value_traffic == full_summary.value_traffic
+    _assert_expr_equal(hintless_summary.total_compute, full_summary.total_compute)
+    _assert_expr_equal(hintless_summary.total_read_bytes, full_summary.total_read_bytes)
+    _assert_expr_equal(hintless_summary.total_write_bytes, full_summary.total_write_bytes)
+
+    full_pass = AnalyzeFuncCostPass(predicate_size=2, dtype_size_overrides={"f32": 4})
+    full_pass.run(full_module)
+    hintless_pass = AnalyzeFuncCostPass(predicate_size=2, dtype_size_overrides={"f32": 4})
+    hintless_pass.run(hintless_module)
+    full_pass_summary = full_pass.get_summary("main")
+    hintless_pass_summary = hintless_pass.get_summary("main")
+    assert hintless_pass_summary.op_costs == full_pass_summary.op_costs
+    assert hintless_pass_summary.value_traffic == full_pass_summary.value_traffic
+    _assert_expr_equal(hintless_pass_summary.total_compute, full_pass_summary.total_compute)
+    _assert_expr_equal(hintless_pass_summary.total_read_bytes, full_pass_summary.total_read_bytes)
+    _assert_expr_equal(hintless_pass_summary.total_write_bytes, full_pass_summary.total_write_bytes)
 
 
 # AK-001

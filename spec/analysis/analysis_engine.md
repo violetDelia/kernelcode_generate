@@ -176,8 +176,12 @@ result = analysis(
 - 执行命令：`pytest -q test/analysis/test_analysis.py`
 - 重点覆盖：
   - `analysis(...)` 单 op 返回 `AnalysisResult`
+  - mixed `func.func` 的 `total_compute == sum(compute_totals_by_kind.values())`
+  - mixed `func.func` 的 `total_read_bytes + total_write_bytes == sum(memory_totals_by_path.values())`
+  - mixed `func.func` 在 `analysis(...) / analyze_kernel(...) / AnalyzeFuncCostPass` 三路结果一致
   - `ComputeKind.SCALAR / VECTOR / TENSOR` 分类与 `compute_totals_by_kind`
   - `write_op_attrs` / `write_func_attrs` 显式开关
+  - 无函数签名提示版本与完整签名版本的 `op_costs / value_traffic / total_* / bucket totals` 完全一致
   - `analyze_kernel(...)` 仅作为 facade / adapter
   - `AnalysisConfig` 默认分析参数来自 `npu_demo target registry`
   - `npu_demo` 缺失 analysis 默认参数时显式失败

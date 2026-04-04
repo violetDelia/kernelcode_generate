@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`jcc你莫辜负`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/pass/analysis/func_cost.md`](../../../spec/pass/analysis/func_cost.md)
 - `功能实现`：[`kernel_gen/passes/analysis/func_cost.py`](../../../kernel_gen/passes/analysis/func_cost.py)
 - `test`：[`test/pass/test_analysis_func_cost.py`](../../../test/pass/test_analysis_func_cost.py)
@@ -213,15 +213,20 @@ module = pass_obj.run(module)
 
 - 测试文件：[`test/pass/test_analysis_func_cost.py`](../../../test/pass/test_analysis_func_cost.py)
 - 执行命令：`pytest -q test/pass/test_analysis_func_cost.py`
-- 覆盖 `FC-001` ~ `FC-008` 用例。
+- 覆盖 `FC-001` ~ `FC-008`、`FC-010`、`FC-011`、`FC-011A`、`FC-011B` 用例。
 
 ### 测试目标
 
 - 验证 `func_cost` 的 `compute/read_bytes/write_bytes` 来自统一入口 derived alias，而不是本地第二套统计公式。
+- 验证 mixed `func.func` 上 `func_cost` 与 `analysis(...) / analyze_kernel(...)` 的 `op_costs / value_traffic / total_*` 保持一致。
 - 验证 `tensor + const`、`matmul`、DMA 搬运与 compare `i1` 等场景的 alias 结果与统一入口保持一致。
+- 验证 `dma.slice` 已作为公开 DMA 分支被继承消费；未公开 DMA 分支仅剩 `dma.alloc / dma.deslice / dma.free` 继续 `skip + warning`。
 - 验证未知 op 的 `skip + warning` 继承统一入口，不影响其余 op 统计。
 - 验证符号维度表达式（如 `A*B`）可正确保留。
 - 验证 `attach_attrs` 写回开关只控制属性落盘，不改变 derived alias 的来源。
+- 验证 `func_cost` 在相同 `args/predicate_size/dtype_size_overrides` 下与 `analyze_kernel(...)` 的 `op_costs / value_traffic / total_*` 完全一致，且 `attach_attrs` 仍可观察。
+- 验证 `func_cost` 只能消费 `AnalysisResult / derived alias`，不能主读旧 `AnalyzeKernelSummary` 或本地 `summary/op_cost` 第二套公式。
+- 验证 `npu_demo target registry` 缺字段时，`analysis` 与 `func_cost` 都显式失败，不允许 pass 侧兜底手写常量。
 
 ### 功能与用例清单
 
@@ -235,3 +240,7 @@ module = pass_obj.run(module)
 | `FC-006` | 输入同时含未知 op 与已承接 op 的函数，验证未知 op 的 `skip + warning` 继承统一入口。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_skips_unknown_op_with_warning` | 已闭环。 |
 | `FC-007` | 输入 `attach_attrs=True` 的分析 pass，验证 `func` 回写 `analysis.*` 属性，同时不改变 alias 来源。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_attach_attrs` | 已闭环。 |
 | `FC-008` | 输入 `nn.eq` 输出 `i1`，验证 `write_bytes` alias 优先按 `predicate_size` 继承统一入口。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_compare_i1_uses_predicate_size` | 已闭环。 |
+| `FC-010` | 输入同一 `func.func`，验证 `func_cost` 在相同 `args/predicate_size/dtype_size_overrides` 下与 `analyze_kernel(...)` 的 `op_costs / value_traffic / total_*` 完全一致，且 `attach_attrs` 可观察。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_matches_analyze_kernel_on_same_func` | 已闭环；A4 三路一致门禁之一。 |
+| `FC-011` | 输入同一 `func.func`，验证 `func_cost` 的兼容 summary 只来自统一入口 `AnalysisResult` 的 derived alias。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_matches_analysis_result_aliases` | 已闭环；不再允许 `func_cost` 自己维护第二套 alias 公式。 |
+| `FC-011A` | 构造 `AnalysisResult` item totals 与旧 `summary/op_cost` 公式故意冲突，验证 `func_cost` 只能消费 `AnalysisResult / derived alias`，不能主读旧 legacy summary。 | `test/pass/test_analysis_func_cost.py` | `test_func_cost_consumes_analysis_result_not_legacy_summary` | 已闭环；显式防回退门禁。 |
+| `FC-011B` | 输入缺字段的 `npu_demo` analysis baseline，验证 `analysis` 与 `func_cost` 都显式失败，不允许 pass 侧兜底手写常量。 | `test/pass/test_analysis_func_cost.py` | `test_analysis_and_func_cost_fail_when_npu_demo_metric_is_missing` | 已闭环；target registry 单一来源门禁。 |

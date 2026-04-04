@@ -1,0 +1,189 @@
+- 时间：`2026-04-04 12:16:09 +0800`
+- 经办人：`jcc你莫辜负`
+- 任务：`T-20260404-b8cba377`
+- 任务目标：
+  - 按 `A4` 边界收口函数级聚合、受控写回、`analyze_kernel(...)` facade、`AnalyzeFuncCostPass` 消费，以及“无签名提示等价门禁”。
+  - 只改 [`spec/analysis/analysis_engine.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/spec/analysis/analysis_engine.md)、[`spec/analysis/analysis_kernel.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/spec/analysis/analysis_kernel.md)、[`spec/pass/analysis/func_cost.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/spec/pass/analysis/func_cost.md)、[`kernel_gen/analysis/analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/kernel_gen/analysis/analysis.py)、[`kernel_gen/passes/analysis/func_cost.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/kernel_gen/passes/analysis/func_cost.py)、[`test/analysis/test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/test/analysis/test_analysis.py)、[`test/pass/test_analysis_func_cost.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/test/pass/test_analysis_func_cost.py) 与同链记录。
+- 环境排障：
+  - 当前 worktree 初次执行 `pytest -q test/analysis/test_analysis.py test/pass/test_analysis_func_cost.py` 时，收集阶段报 `SystemError: attempting to create PyCFunction with class but no METH_METHOD flag`。
+  - 改用 `python3 -m pytest` 后，又在导入 `kernel_gen/dialect` 时遇到 `ValueError: bad marshal data (invalid reference)`。
+  - 按管理员口径，仅在当前 worktree 内做最小非业务排障，已清理这些缓存目录：
+    - `test/pass/__pycache__`
+    - `test/analysis/__pycache__`
+    - `kernel_gen/__pycache__`
+    - `kernel_gen/dialect/__pycache__`
+    - `kernel_gen/symbol_variable/__pycache__`
+    - `kernel_gen/operation/__pycache__`
+    - `kernel_gen/passes/__pycache__`
+    - `kernel_gen/passes/analysis/__pycache__`
+    - `kernel_gen/target/__pycache__`
+    - `kernel_gen/analysis/__pycache__`
+    - `kernel_gen/analysis/memory/__pycache__`
+    - `kernel_gen/analysis/compute/__pycache__`
+  - 并删除同 worktree 下残留 `*.pyc`。缓存清理后，`python3 -m pytest` 恢复正常收集执行。
+- 改动：
+  - [`test/analysis/test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/test/analysis/test_analysis.py)
+    - 新增 `_build_mixed_analysis_module(...)` helper，构造包含 `elementwise + tensor+const + compare(i1) + dma.load/copy/store` 的 mixed `func.func`。
+    - 把受控写回门禁收口为 `test_analysis_write_attrs_are_explicit_and_controlled`，分别锁定 `write_op_attrs/write_func_attrs` 四种显式组合。
+    - 把 target registry 单一来源门禁收口为 `test_analysis_target_registry_is_single_source_for_analysis_defaults`，并提升到 `func.func` 级验证。
+    - 新增 `test_analysis_mixed_func_totals_equal_bucket_sums`，黑盒锁定 mixed `func.func` 的 bucket sum 与 `analysis/analyze_kernel/func_cost` 三路一致。
+    - 新增 `test_analysis_no_signature_hint_matches_full_signature_version`，用空 `FunctionType([], [])` 的“无签名版本”与完整签名版本对比，锁定 `op_costs / value_traffic / total_* / bucket totals` 完全一致。
+  - [`test/pass/test_analysis_func_cost.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/test/pass/test_analysis_func_cost.py)
+    - 更新 `test_func_cost_dma_sizes_smaller_than_shape` 的旧口径：`dma.slice` 现作为公开 DMA 分支纳入统计，只保留 `dma.alloc / dma.deslice` 的 `skip + warning`。
+    - 把 `test_func_cost_uses_analysis_result_or_derived_alias` 收口并强化为 `test_func_cost_consumes_analysis_result_not_legacy_summary`：构造 `AnalysisResult` item totals 与 `op_costs` 故意冲突的假结果，锁定 pass 只能消费 `AnalysisResult`/derived alias，而不是主读旧 `summary/op_costs` 公式。
+    - 新增 `test_analysis_and_func_cost_fail_when_npu_demo_metric_is_missing`，锁定 `npu_demo` 缺 `theoretical_compute` 时 `analysis` 与 `func_cost` 都显式失败。
+  - [`spec/analysis/analysis_engine.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/spec/analysis/analysis_engine.md)
+    - 补充 A4 验收口径：mixed `func.func` bucket sum、三路结果一致、无签名版本与完整签名版本等价。
+  - [`spec/analysis/analysis_kernel.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/spec/analysis/analysis_kernel.md)
+    - 明确 `analyze_kernel(...)` facade 的 `op_costs / value_traffic / total_*` 必须与统一入口完全一致，且无签名版本不得退回旧 summary/`unknown/0/skip`。
+  - [`spec/pass/analysis/func_cost.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/spec/pass/analysis/func_cost.md)
+    - 明确 mixed `func.func` 三路一致、`dma.slice` 已纳入公开 DMA 分支、缺失 `npu_demo` metric 时 `analysis` 与 `func_cost` 都显式失败。
+  - 本轮未改 [`kernel_gen/analysis/analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/kernel_gen/analysis/analysis.py) 与 [`kernel_gen/passes/analysis/func_cost.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/kernel_gen/passes/analysis/func_cost.py) 的业务逻辑；A4 当前实现已经满足新门禁。
+- 自检：
+  - 目标是否真正收口：`是`。A4 指定的 `func.func` 聚合、受控写回、`analyze_kernel(...)` facade、`func_cost` 消费边界、无签名版本等价、`npu_demo target registry` 单一来源都已有黑盒门禁。
+  - 是否越界：`否`。只改了 3 个 spec 文件、2 个测试文件和记录文件；未扩到其他 `analysis` 子链，也未触碰实现外的无关目录。
+  - 测试/验证是否覆盖主结论：`是`。新增门禁分别覆盖 mixed `func.func`、无签名等价、target registry 单一来源、metric 缺失显式失败，以及 `func_cost` 只能消费 `AnalysisResult/derived alias`。
+- 验证：
+  - `python3 -m pytest -q test/analysis/test_analysis.py -k 'test_analysis_write_attrs_are_explicit_and_controlled or test_analyze_kernel_is_facade_over_analysis_result or test_analysis_target_registry_is_single_source_for_analysis_defaults or test_analysis_mixed_func_totals_equal_bucket_sums or test_analysis_no_signature_hint_matches_full_signature_version or test_analysis_memory_missing_target_metric_fails_explicitly'`
+    - 结果：`6 passed, 43 deselected`
+  - `python3 -m pytest -q test/pass/test_analysis_func_cost.py -k 'test_func_cost_dma_sizes_smaller_than_shape or test_func_cost_consumes_analysis_result_not_legacy_summary or test_analysis_and_func_cost_fail_when_npu_demo_metric_is_missing or test_func_cost_matches_analysis_result_aliases or test_func_cost_attach_attrs'`
+    - 结果：`6 passed, 8 deselected`
+  - `python3 -m pytest -q test/analysis/test_analysis.py test/pass/test_analysis_func_cost.py`
+    - 结果：`63 passed`
+  - `python3 -m py_compile test/analysis/test_analysis.py test/pass/test_analysis_func_cost.py`
+    - 结果：通过
+  - `git -C /home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4 diff --check -- spec/analysis/analysis_engine.md spec/analysis/analysis_kernel.md spec/pass/analysis/func_cost.md test/analysis/test_analysis.py test/pass/test_analysis_func_cost.py`
+    - 结果：通过
+- 结论：
+  - `T-20260404-b8cba377` 已按 `A4` 边界完成，自检通过。
+  - 当前无剩余阻塞；下一步应进入同链路审查。
+
+- 时间：`2026-04-04 12:17:40 +0800`
+- 经办人：`jcc你莫辜负`
+- 任务：`T-20260404-b8cba377`
+- 执行：
+  - 已执行 `-done`：
+    - `bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file /home/lfr/kernelcode_generate/TODO.md -done -task_id T-20260404-b8cba377 -log /home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a4-v2.md -agents-list /home/lfr/kernelcode_generate/agents/codex-multi-agents/agents-lists.md`
+    - 结果：`OK: done T-20260404-b8cba377`
+  - 已新建同链路唯一后续审查任务：
+    - `T-20260404-d3bbe348`
+    - 方向：只读复核 `A4` 的 `spec / 实现 / 测试 / 记录` 是否一致闭环。
+- 结论：
+  - `T-20260404-b8cba377` 已完成并收口。
+  - 后续等待管理员核对并分发 `T-20260404-d3bbe348`。
+
+- 时间：`2026-04-04 12:22:16 +0800`
+- 经办人：`不要啊教练`
+- 任务：`T-20260404-d3bbe348`
+- 任务目标：
+  - 按 `A4` 复审边界只读复核 [`spec/analysis/analysis_engine.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/spec/analysis/analysis_engine.md)、[`spec/analysis/analysis_kernel.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/spec/analysis/analysis_kernel.md)、[`spec/pass/analysis/func_cost.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/spec/pass/analysis/func_cost.md)、[`kernel_gen/analysis/analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/kernel_gen/analysis/analysis.py)、[`kernel_gen/passes/analysis/func_cost.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/kernel_gen/passes/analysis/func_cost.py)、[`test/analysis/test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/test/analysis/test_analysis.py)、[`test/pass/test_analysis_func_cost.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/test/pass/test_analysis_func_cost.py) 与同链记录，确认 mixed func bucket sum、无签名等价、`AnalysisResult/derived alias` 消费边界、`npu_demo target registry` 单一来源与缺 metric 显式失败门禁一致；不扩到其他 analysis 子链。
+- 复审前自检：
+  - 已核对 A4 计划 gate、spec 正文、实现代码、关键黑盒测试、全量 `analysis/func_cost` 测试和同链记录。
+  - 已重点检查功能正确性、边界条件、异常路径、潜在漏洞，以及计划/`spec`/实现/测试/记录是否真正一致。
+  - 只要发现任何 spec-测试映射缺口或新的双口径，不给 `通过`。
+- 复审结论：
+  - `需修改`
+- 问题列表：
+  - `P1`：[`spec/pass/analysis/func_cost.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/spec/pass/analysis/func_cost.md#L212) 到 [`spec/pass/analysis/func_cost.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/spec/pass/analysis/func_cost.md#L240) 的测试章节仍写着“覆盖 `FC-001` ~ `FC-008`”，功能与用例清单也只列到 `FC-008`。但当前 A4 真实闭环已经把 [`test_func_cost_matches_analyze_kernel_on_same_func`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/test/pass/test_analysis_func_cost.py#L637)、[`test_func_cost_consumes_analysis_result_not_legacy_summary`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/test/pass/test_analysis_func_cost.py#L727) 和 [`test_analysis_and_func_cost_fail_when_npu_demo_metric_is_missing`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/test/pass/test_analysis_func_cost.py#L775) 当成正式门禁，且实现记录也明确把它们作为 A4 新增闭环点。风险是 `func_cost` 的公开 spec 仍然漏掉这轮最关键的“只能消费 `AnalysisResult/derived alias`、不能主读旧 summary、缺 metric 必须显式失败”门禁；后续如果有人只按当前 spec 维护，很容易把这几条黑盒保护网删掉而不被文档约束命中。
+- 已确认通过项：
+  - [`analysis_engine.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/spec/analysis/analysis_engine.md#L177) 已把 mixed `func.func` bucket sum、无签名等价、受控写回和 `npu_demo target registry` 单一来源写进测试目标。
+  - [`analysis_kernel.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/spec/analysis/analysis_kernel.md#L165) 到 [`analysis_kernel.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/spec/analysis/analysis_kernel.md#L173) 已把 `analyze_kernel(...)` 的 facade / derived alias / `predicate_size` / unknown-DMA 边界收紧。
+  - [`analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/kernel_gen/analysis/analysis.py#L1810) 到 [`analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/kernel_gen/analysis/analysis.py#L2031) 与 [`func_cost.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/kernel_gen/passes/analysis/func_cost.py#L158) 到 [`func_cost.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/kernel_gen/passes/analysis/func_cost.py#L366) 当前实现确实只消费 `AnalysisResult` 与 derived alias，没有发现偷读旧 `AnalyzeKernelSummary` 主口径的问题。
+  - 关键黑盒测试通过：
+    - mixed func bucket sum 三路一致
+    - 无签名版本与完整签名版本等价
+    - `analyze_kernel(...)` 是 facade
+    - `func_cost` 不主读旧 summary
+    - `npu_demo` 缺 metric 时 `analysis` / `func_cost` 都显式失败
+- 漏洞与边界排查：
+  - 功能正确性：当前实现与测试行为正确；mixed `func.func`、无签名等价、`derived alias` 消费边界都被黑盒锁住。
+  - 边界条件：本轮未扩到 A1/A2/A3 之外的其他 `analysis` 子链。
+  - 异常路径：未知 op 继续 `skip + warning`；缺 `npu_demo` metric 时 `analysis` 与 `func_cost` 均显式失败。
+  - 潜在漏洞/歧义：
+    - 输入校验绕过：未见新增绕过。
+    - 类型/形状绕过：未见新增绕过；测试覆盖了 `compare(i1)`、`tensor+const`、DMA 分支。
+    - 错误处理缺失：未见；当前关键失败路径可诊断。
+    - 状态污染：未见；`write_op_attrs/write_func_attrs` 已有四种组合门禁。
+    - 资源释放问题：本轮不涉及资源生命周期新增风险。
+- 验证：
+  - `python3 -m pytest -q test/analysis/test_analysis.py -k 'test_analysis_write_attrs_are_explicit_and_controlled or test_analyze_kernel_is_facade_over_analysis_result or test_analysis_target_registry_is_single_source_for_analysis_defaults or test_analysis_mixed_func_totals_equal_bucket_sums or test_analysis_no_signature_hint_matches_full_signature_version or test_analysis_memory_missing_target_metric_fails_explicitly'` -> `6 passed, 43 deselected`
+  - `python3 -m pytest -q test/pass/test_analysis_func_cost.py -k 'test_func_cost_dma_sizes_smaller_than_shape or test_func_cost_consumes_analysis_result_not_legacy_summary or test_analysis_and_func_cost_fail_when_npu_demo_metric_is_missing or test_func_cost_matches_analysis_result_aliases or test_func_cost_attach_attrs'` -> `6 passed, 8 deselected`
+  - `python3 -m pytest -q test/analysis/test_analysis.py test/pass/test_analysis_func_cost.py` -> `63 passed`
+  - `git -C /home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4 diff --check -- spec/analysis/analysis_engine.md spec/analysis/analysis_kernel.md spec/pass/analysis/func_cost.md kernel_gen/analysis/analysis.py kernel_gen/passes/analysis/func_cost.py test/analysis/test_analysis.py test/pass/test_analysis_func_cost.py` -> `0`
+  - `git -C /home/lfr/kernelcode_generate diff --check -- agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a4-v2.md` -> `0`
+- 结论：
+  - A4 的实现与测试主线当前未发现新的功能性回退；阻塞点是 [`spec/pass/analysis/func_cost.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/spec/pass/analysis/func_cost.md) 仍未把 A4 新增门禁映射进测试章节和用例表。
+  - 下一步建议：仅修正 [`spec/pass/analysis/func_cost.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/spec/pass/analysis/func_cost.md) 的测试章节/用例清单，把 `FC-010/FC-011/FC-011A/FC-011B` 和对应测试名收口进去；当前 `analysis.py`、`func_cost.py`、`test_analysis.py`、`test_analysis_func_cost.py` 不需要再改。
+
+- 时间：`2026-04-04 12:29:25 +0800`
+- 经办人：`咯咯咯`
+- 任务：`T-20260404-6cb414ec`
+- 任务目标：
+  - 仅修正 [`spec/pass/analysis/func_cost.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/spec/pass/analysis/func_cost.md) 的测试章节与用例映射，使其与 `A4` 当前已落地门禁一致。
+  - 补齐 `FC-010`、`FC-011`、`FC-011A`、`FC-011B` 对应的真实测试名与公开合同；不改实现、测试，不扩到 `A3/A5`。
+- 改动：
+  - [`spec/pass/analysis/func_cost.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/spec/pass/analysis/func_cost.md)
+    - 把测试覆盖范围从仅列 `FC-001` ~ `FC-008` 收口为同时覆盖 `FC-010`、`FC-011`、`FC-011A`、`FC-011B`。
+    - 在测试目标中补齐三路一致、derived alias/legacy summary 边界，以及 `npu_demo` 缺 metric 显式失败的合同说明。
+    - 在功能与用例清单中新增四条正式门禁映射，分别落到 [`test_func_cost_matches_analyze_kernel_on_same_func`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/test/pass/test_analysis_func_cost.py#L637)、[`test_func_cost_matches_analysis_result_aliases`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/test/pass/test_analysis_func_cost.py#L686)、[`test_func_cost_consumes_analysis_result_not_legacy_summary`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/test/pass/test_analysis_func_cost.py#L727)、[`test_analysis_and_func_cost_fail_when_npu_demo_metric_is_missing`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/test/pass/test_analysis_func_cost.py#L775)。
+- 自检：
+  - 合同是否唯一、自洽：`是`。`func_cost` 的公开测试映射现已与 `A4` 真实门禁一致，不再遗漏 derived alias / legacy summary / missing metric 边界。
+  - 是否越界：`否`。本轮只改了 [`spec/pass/analysis/func_cost.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/spec/pass/analysis/func_cost.md) 与同链记录文件。
+  - 验收信息是否完整：`是`。测试范围、测试目标、功能与用例清单都已补齐 `FC-010/011/011A/011B`。
+- 验证：
+  - `python3 -m pytest -q test/pass/test_analysis_func_cost.py -k 'matches_analyze_kernel_on_same_func or matches_analysis_result_aliases or consumes_analysis_result_not_legacy_summary or fail_when_npu_demo_metric_is_missing'`
+    - 结果：`4 passed, 10 deselected in 0.26s`
+  - `git -C /home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4 diff --check -- spec/pass/analysis/func_cost.md`
+    - 结果：通过
+  - `git -C /home/lfr/kernelcode_generate diff --check -- agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a4-v2.md`
+    - 结果：通过
+- 结论：
+  - `T-20260404-6cb414ec` 已按 `A4` 边界完成，`func_cost` 的测试章节与用例映射现已与当前真实门禁一致。
+  - 当前无阻塞；下一步应进入同链路复审。
+
+- 时间：`2026-04-04 12:31:09 +0800`
+- 经办人：`咯咯咯`
+- 任务：`T-20260404-6cb414ec`
+- 执行：
+  - 已执行 `-done`：
+    - `bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file /home/lfr/kernelcode_generate/TODO.md -done -task_id T-20260404-6cb414ec -log /home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a4-v2.md -agents-list /home/lfr/kernelcode_generate/agents/codex-multi-agents/agents-lists.md`
+    - 结果：`OK: done T-20260404-6cb414ec`
+  - 已新建同链路后续复审任务：
+    - `T-20260404-edb927dc`
+    - 方向：只读复核 [`spec/pass/analysis/func_cost.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/spec/pass/analysis/func_cost.md) 的 `FC-010/011/011A/011B` 映射、真实测试名与同链记录是否一致；不改实现、测试，不扩到 `A3/A5`。
+  - 已同步 [`agents/codex-multi-agents/agents-lists.md`](/home/lfr/kernelcode_generate/agents/codex-multi-agents/agents-lists.md) 中 `咯咯咯` 的 `介绍` 字段。
+- 结论：
+  - `T-20260404-6cb414ec` 已完成并完成任务流转。
+  - 后续等待管理员核对并分发 `T-20260404-edb927dc`。
+
+- 时间：`2026-04-04 12:34:21 +0800`
+- 经办人：`不要啊教练`
+- 任务：`T-20260404-edb927dc`
+- 任务目标：
+  - 按 A4 复审边界只读复核 [`spec/pass/analysis/func_cost.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/spec/pass/analysis/func_cost.md) 的测试章节与 `FC-010/FC-011/FC-011A/FC-011B` 映射，确认其与 [`test/pass/test_analysis_func_cost.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/test/pass/test_analysis_func_cost.py) 当前真实测试名和同链记录一致；不改实现、测试，不扩到 `A3/A5`。
+- 复审前自检：
+  - 已核对 `TODO` 任务边界、spec 测试章节、真实测试名、同链记录以及上轮指出的问题是否已经被修正。
+  - 已重点确认不是“记录说补齐了，但 spec 仍漏项”的假闭环。
+  - 证据不足时不报 `通过`。
+- 复审结论：
+  - `通过`
+- 已确认闭环：
+  - [`func_cost.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/spec/pass/analysis/func_cost.md#L216) 已把覆盖范围更新为 `FC-001 ~ FC-008`、`FC-010`、`FC-011`、`FC-011A`、`FC-011B`。
+  - [`func_cost.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/spec/pass/analysis/func_cost.md#L243) 到 [`func_cost.md`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/spec/pass/analysis/func_cost.md#L246) 已把四条新增门禁正式映射到当前真实测试名：
+    - [`test_func_cost_matches_analyze_kernel_on_same_func`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/test/pass/test_analysis_func_cost.py#L637)
+    - [`test_func_cost_matches_analysis_result_aliases`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/test/pass/test_analysis_func_cost.py#L686)
+    - [`test_func_cost_consumes_analysis_result_not_legacy_summary`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/test/pass/test_analysis_func_cost.py#L727)
+    - [`test_analysis_and_func_cost_fail_when_npu_demo_metric_is_missing`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4/test/pass/test_analysis_func_cost.py#L775)
+  - 同链记录 [`20260404-analysis-mainline-a4-v2.md`](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a4-v2.md#L122) 到 [`20260404-analysis-mainline-a4-v2.md`](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a4-v2.md#L142) 也已同步说明这四条映射已补齐。
+- 漏洞与边界排查：
+  - 功能正确性：本轮只复核 spec-测试映射；未发现映射错误或测试名漂移。
+  - 边界条件：未扩到 `A3/A5`，也未改实现、测试。
+  - 异常路径：`missing metric` 与 `legacy summary` 负门禁已在 spec 和测试映射中显式出现，不再是隐含行为。
+  - 潜在漏洞/歧义：未发现新的双口径；上轮阻塞点已收口。
+- 验证：
+  - `python3 -m pytest -q test/pass/test_analysis_func_cost.py -k 'test_func_cost_matches_analyze_kernel_on_same_func or test_func_cost_matches_analysis_result_aliases or test_func_cost_consumes_analysis_result_not_legacy_summary or test_analysis_and_func_cost_fail_when_npu_demo_metric_is_missing'` -> `4 passed, 10 deselected`
+  - `git -C /home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a4 diff --check -- spec/pass/analysis/func_cost.md` -> `0`
+  - `git -C /home/lfr/kernelcode_generate diff --check -- agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a4-v2.md` -> `0`
+- 结论：
+  - 当前 `func_cost.md` 的测试章节与 `FC-010/011/011A/011B` 映射已和真实测试名、同链记录一致。
+  - 未发现额外改进点；A4 可进入同链合并阶段，但合并任务必须覆盖整条 A4 链路的 `计划 / spec / 实现 / 测试 / 记录` 文件。

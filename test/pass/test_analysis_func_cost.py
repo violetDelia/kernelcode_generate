@@ -60,11 +60,24 @@ from kernel_gen.dialect.nn import (
     NnMulOp,
 )
 from kernel_gen.dialect.symbol import SymbolValueType
-from kernel_gen.analysis.analysis import AnalysisConfig, AnalysisResult, KernelOpCost, ValueTraffic, analysis, analyze_kernel
+from kernel_gen.analysis.analysis import (
+    AnalysisConfig,
+    AnalysisError,
+    AnalysisResult,
+    KernelOpCost,
+    ValueTraffic,
+    analysis,
+    analyze_kernel,
+)
+from kernel_gen.analysis.analysis import ComputeItem, MemoryItem
+import kernel_gen.analysis.analysis as analysis_module
+from kernel_gen.analysis.compute import ComputeKind
+from kernel_gen.analysis.memory import MemoryPath
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 pass_module = importlib.import_module("kernel_gen.passes.analysis.func_cost")
 AnalyzeFuncCostPass = pass_module.AnalyzeFuncCostPass
+FuncCostAnalysisError = pass_module.FuncCostAnalysisError
 
 
 @irdl_op_definition
@@ -435,10 +448,10 @@ def test_func_cost_dma_memory_traffic() -> None:
 
 # FC-005 (sizes < shape)
 # 创建者: jcc你莫辜负
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-02 06:18:51 +0800
 # 最近一次运行成功时间: 2026-04-02 06:18:51 +0800
-# 测试目的: sizes 小于 shape 时仅当前公开 DMA 分支参与统计，非公开 DMA 分支执行 skip+warning。
+# 测试目的: sizes 小于 shape 时当前公开 DMA 分支 load/slice/store 都参与统计，非公开 DMA 分支执行 skip+warning。
 # 使用示例: pytest -q test/pass/test_analysis_func_cost.py -k test_func_cost_dma_sizes_smaller_than_shape
 # 对应功能实现文件路径: kernel_gen/passes/analysis/func_cost.py
 # 对应 spec 文件路径: spec/pass/analysis/func_cost.md
@@ -479,16 +492,14 @@ def test_func_cost_dma_sizes_smaller_than_shape() -> None:
 
     expected_bytes = sp.Integer(8)
     _assert_expr_equal(summary.total_compute, sp.Integer(0))
-    _assert_expr_equal(summary.total_read_bytes, expected_bytes * 2)
-    _assert_expr_equal(summary.total_write_bytes, expected_bytes * 2)
+    _assert_expr_equal(summary.total_read_bytes, expected_bytes * 3)
+    _assert_expr_equal(summary.total_write_bytes, expected_bytes * 3)
     assert [str(item.message) for item in records] == [
         "func_cost skip dma.alloc: unsupported op",
-        "func_cost skip dma.slice: unsupported op",
         "func_cost skip dma.deslice: unsupported op",
     ]
     assert [str(item.message) for item in kernel_records] == [
         "analysis_kernel skip dma.alloc: unsupported op",
-        "analysis_kernel skip dma.slice: unsupported op",
         "analysis_kernel skip dma.deslice: unsupported op",
     ]
     assert summary.op_costs == kernel_summary.op_costs
@@ -708,12 +719,12 @@ def test_func_cost_matches_analysis_result_aliases() -> None:
 # 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
-# 测试目的: 验证 func_cost 只消费 AnalysisResult/derived alias，而不维护第二套独立公式。
-# 使用示例: pytest -q test/pass/test_analysis_func_cost.py -k test_func_cost_uses_analysis_result_or_derived_alias
+# 测试目的: 验证 func_cost 只能消费 AnalysisResult/derived alias，而不能主读旧 summary/op_cost 公式。
+# 使用示例: pytest -q test/pass/test_analysis_func_cost.py -k test_func_cost_consumes_analysis_result_not_legacy_summary
 # 对应功能实现文件路径: kernel_gen/passes/analysis/func_cost.py
 # 对应 spec 文件路径: spec/pass/analysis/func_cost.md
 # 对应测试文件路径: test/pass/test_analysis_func_cost.py
-def test_func_cost_uses_analysis_result_or_derived_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_func_cost_consumes_analysis_result_not_legacy_summary(monkeypatch: pytest.MonkeyPatch) -> None:
     mem_type = _make_memory_type([IntAttr(2), IntAttr(2)], f32, "global")
     space = _make_space("global")
 
@@ -723,11 +734,14 @@ def test_func_cost_uses_analysis_result_or_derived_alias(monkeypatch: pytest.Mon
 
     module, _, _ = _build_module([mem_type, mem_type], mem_type, _builder)
     fake_result = AnalysisResult(
-        compute_items=(),
-        memory_items=(),
-        compute_totals_by_kind={"scalar": sp.Integer(7)},
-        memory_totals_by_path={"GM->LM": sp.Integer(24)},
-        op_costs=[KernelOpCost(0, "nn.add", sp.Integer(7), sp.Integer(24), sp.Integer(12))],
+        compute_items=(ComputeItem(kind=ComputeKind.VECTOR, amount=sp.Integer(7), dtype="f32"),),
+        memory_items=(
+            MemoryItem(path=MemoryPath.GM_TO_LM, access="read", bytes=sp.Integer(13)),
+            MemoryItem(path=MemoryPath.GM_TO_LM, access="write", bytes=sp.Integer(17)),
+        ),
+        compute_totals_by_kind={ComputeKind.VECTOR: sp.Integer(7)},
+        memory_totals_by_path={MemoryPath.GM_TO_LM: sp.Integer(30)},
+        op_costs=[KernelOpCost(0, "nn.add", sp.Integer(99), sp.Integer(199), sp.Integer(299))],
         value_traffic=[ValueTraffic("arg0", sp.Integer(24), sp.Integer(0))],
         func_name="main",
     )
@@ -743,3 +757,48 @@ def test_func_cost_uses_analysis_result_or_derived_alias(monkeypatch: pytest.Mon
     _assert_expr_equal(summary.total_compute, fake_result.total_compute)
     _assert_expr_equal(summary.total_read_bytes, fake_result.total_read_bytes)
     _assert_expr_equal(summary.total_write_bytes, fake_result.total_write_bytes)
+    _assert_expr_equal(summary.total_compute, sp.Integer(7))
+    _assert_expr_equal(summary.total_read_bytes, sp.Integer(13))
+    _assert_expr_equal(summary.total_write_bytes, sp.Integer(17))
+
+
+# FC-011B
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 测试目的: 验证 npu_demo 缺少 analysis 默认参数时，analysis 与 func_cost 都显式失败。
+# 使用示例: pytest -q test/pass/test_analysis_func_cost.py -k test_analysis_and_func_cost_fail_when_npu_demo_metric_is_missing
+# 对应功能实现文件路径: kernel_gen/passes/analysis/func_cost.py
+# 对应 spec 文件路径: spec/pass/analysis/func_cost.md
+# 对应测试文件路径: test/pass/test_analysis_func_cost.py
+def test_analysis_and_func_cost_fail_when_npu_demo_metric_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    broken_defaults = {
+        "path_bandwidth": {"GM->LM": 64},
+        "path_latency_ns": {"GM->LM": 20},
+    }
+
+    monkeypatch.setattr(
+        analysis_module.target_registry,
+        "get_target_analysis_defaults",
+        lambda target: broken_defaults,
+    )
+
+    source_type = _make_memory_type([IntAttr(2), IntAttr(2)], f32, "global")
+    target_type = _make_memory_type([IntAttr(2), IntAttr(2)], f32, "local")
+    module, func_op, _ = _build_module(
+        [source_type, target_type],
+        target_type,
+        lambda block: ([DmaCopyOp(block.args[0], block.args[1])], block.args[1]),
+    )
+
+    with pytest.raises(AnalysisError, match="missing analysis metric defaults: theoretical_compute"):
+        analysis(
+            func_op,
+            AnalysisConfig(target="npu_demo", enable_compute=False, enable_memory=True),
+        )
+
+    with pytest.raises(FuncCostAnalysisError, match="missing analysis metric defaults: theoretical_compute"):
+        AnalyzeFuncCostPass().run(module)
