@@ -347,3 +347,207 @@
 - 结论：
   - `T-20260404-fbaa5803` 已完成并封板。
   - 后续链路已按当前规则衔接到整链合并阶段，等待管理员核对并分发 `T-20260404-a4c85703`。
+
+- 时间：`2026-04-04 09:58:13 +0800`
+- 经办人：`金铲铲大作战`
+- 任务：`T-20260404-6df40bd8`
+- 任务目标：
+  - 按 [`gen_kernel_op_driven_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/gen_kernel_op_driven_refactor_plan.md) 的 `G4` 边界，只修改 `kernel_gen/dsl/gen_kernel.py`、`test/dsl/test_gen_kernel.py` 与同链路记录文件，补齐黑盒禁留门禁，确保旧 `gen_signature/gen_body` 不再作为公开稳定入口存在，同时保持完整源码黑盒输出继续正确。
+- 改动：
+  - 修改 [`kernel_gen/dsl/gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/kernel_gen/dsl/gen_kernel.py)
+    - 新增模块级 `__getattr__(...)`，对 legacy 名称 `gen_signature/gen_body` 统一返回 `AttributeError("<name> is no longer a public entry; use gen_kernel(...) instead")`。
+    - 不调整 `_KernelEmitter`、函数级特化选择或任何节点/函数发射语义；本轮只补模块公开访问边界。
+  - 修改 [`test/dsl/test_gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/test/dsl/test_gen_kernel.py)
+    - 新增 `test_gen_kernel_has_no_legacy_double_interface`，锁定：
+      - `hasattr(gen_kernel_module, "gen_signature"/"gen_body")` 为 `False`
+      - `getattr(gen_kernel_module, legacy_name)` 抛 `AttributeError`
+      - `from kernel_gen.dsl.gen_kernel import gen_signature/gen_body` 抛 `ImportError`
+    - 保持测试主口径仍只依赖 `gen_kernel(...)` 黑盒输出；未新增任何对 `gen_signature/gen_body` 的正向依赖。
+- 验证：
+  - `python -m pytest -q test/dsl/test_gen_kernel.py -k 'test_gen_kernel_is_the_only_public_entry or test_gen_kernel_has_no_legacy_double_interface or test_gen_kernel_returns_target_source'`
+    - 结果：`3 passed, 28 deselected`
+  - `python -m pytest -q test/dsl/test_gen_kernel.py -k 'direct_return_nn_add or conv2d_img2col2d_tiled or npu_demo'`
+    - 结果：`8 passed, 23 deselected`
+  - `git diff --check -- kernel_gen/dsl/gen_kernel.py test/dsl/test_gen_kernel.py`
+    - 结果：通过
+- 自检：
+  - 目标收口：通过。本轮确实把 legacy 双接口的公开访问边界锁死，而不是只继续依赖 `__all__` 的弱门禁。
+  - 边界未越界：通过。未修改 `spec/dsl/gen_kernel.md`，也未扩大函数级发射语义；只改了允许的实现/测试/记录文件。
+  - 证据充分：通过。负向门禁有独立测试，黑盒输出正确性有现有 `gen_kernel(...)` 用例复跑支撑。
+  - 记录一致性：通过。本轮实际 diff 仅包含 [`kernel_gen/dsl/gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/kernel_gen/dsl/gen_kernel.py)、[`test/dsl/test_gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/test/dsl/test_gen_kernel.py) 与本记录文件。
+- 结论：
+  - `G4` 的黑盒禁留门禁已补齐：旧 `gen_signature/gen_body` 不再作为公开稳定入口存在。
+  - 现有 `gen_kernel(...)` 黑盒输出合同保持不变，direct-return `nn.add`、`conv2d_img2col2d_tiled(...)`、`npu_demo` 相关用例继续通过。
+
+- 时间：`2026-04-04 09:59:03 +0800`
+- 经办人：`金铲铲大作战`
+- 任务流转：
+  - 已执行 `-done`：
+    - `T-20260404-6df40bd8`
+  - 已新建同链路后续复审任务：
+    - `T-20260404-a5c2227c`
+- 后续复审范围建议：
+  - [`kernel_gen/dsl/gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/kernel_gen/dsl/gen_kernel.py)
+  - [`test/dsl/test_gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/test/dsl/test_gen_kernel.py)
+  - [`20260404-gen-kernel-g1.md`](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-gen-kernel-g1.md)
+
+- 时间：`2026-04-04 10:13:22 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-a5c2227c`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/gen_kernel_op_driven_refactor_plan.md` 的 `G4` 只读复核 `kernel_gen/dsl/gen_kernel.py`、`test/dsl/test_gen_kernel.py` 与同链记录，确认 legacy `gen_signature/gen_body` 已不能再通过 module.attr 或 `from-import` 作为公开稳定入口访问，且 `gen_kernel(...)` 黑盒输出回归仍通过。
+- 审查前自检：
+  - 已核对 `G4` 计划边界、实现中 legacy 入口的公开访问行为、当前测试文件的 gate 与全量回归、以及同链记录对本轮改动范围的说明。
+  - 已补做真实 `hasattr/getattr/from-import` 复现，避免只看测试代码本身。
+  - 已额外核对 `G4` 计划写死的验收测试名和当前测试文件是否可机械映射。
+- 审查结论：
+  - `需修改`
+- 问题列表：
+  - `P1`：[`gen_kernel_op_driven_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/gen_kernel_op_driven_refactor_plan.md#L385) 到 [`gen_kernel_op_driven_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/gen_kernel_op_driven_refactor_plan.md#L388) 的 `G4` 验收标准仍写着
+    - `test_gen_kernel_black_box_pipeline_still_generates_source`
+    - `test_gen_kernel_refactor_fails_if_legacy_entry_is_still_public`
+    但当前 [`test_gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/test/dsl/test_gen_kernel.py#L188) 和 [`test_gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/test/dsl/test_gen_kernel.py#L252) 实际存在的是
+    - `test_gen_kernel_returns_target_source`
+    - `test_gen_kernel_has_no_legacy_double_interface`
+    计划中这两条写死的验收测试名目前无法在测试文件里机械定位。实现和 gate 虽然都通过，但 `plan / test / record` 还没完全闭环，因此不能判通过。
+- 通过项：
+  - [`gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/kernel_gen/dsl/gen_kernel.py#L542) 到 [`gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/kernel_gen/dsl/gen_kernel.py#L566) 已通过模块级 `__getattr__` 把 legacy `gen_signature/gen_body` 收口为公开缺失语义。
+  - 真实复现结果与测试一致：
+    - `hasattr(module, "gen_signature"/"gen_body") == False`
+    - `getattr(...)` 抛 `AttributeError: <name> is no longer a public entry; use gen_kernel(...) instead`
+    - `from kernel_gen.dsl.gen_kernel import gen_signature/gen_body` 抛 `ImportError`
+  - `gen_kernel(...)` 的黑盒输出回归仍通过，包含普通 `func.func`、direct-return `nn.add`、`conv2d_img2col2d_tiled(...)`、`npu_demo` 场景。
+- 漏洞与边界排查：
+  - 功能正确性：通过，legacy 双接口确实不能再被当作公开入口访问。
+  - 边界条件：通过，`__all__` 与 `__getattr__` 两层门禁一致，没有留下 `module.attr` 漏洞口。
+  - 异常路径：通过，legacy 入口访问会给出稳定错误，不是静默回退。
+  - 潜在漏洞/歧义：当前主要问题不在实现，而在计划验收映射未同步更新，管理员无法按计划名直接验收。
+- 验证：
+  - `python -m pytest -q test/dsl/test_gen_kernel.py -k 'only_public_entry or no_legacy_double_interface or returns_target_source'` -> `3 passed, 28 deselected`
+  - `python -m pytest -q test/dsl/test_gen_kernel.py -k 'direct_return_nn_add or conv2d_img2col2d_tiled or npu_demo'` -> `8 passed, 23 deselected`
+  - `python -m pytest -q test/dsl/test_gen_kernel.py` -> `31 passed`
+  - 真实导入复现：
+    - `hasattr(gen_kernel_module, "gen_signature")` -> `False`
+    - `getattr(gen_kernel_module, "gen_signature")` -> `AttributeError`
+    - `from kernel_gen.dsl.gen_kernel import gen_signature` -> `ImportError`
+- 下一步建议：
+  - 创建同链改进任务，仅修正 `G4` 计划中的验收测试名/描述，使其与当前 `test/dsl/test_gen_kernel.py` 真实测试名对齐；实现与测试本身无需改动。
+
+- 时间：`2026-04-04 10:14:18 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-a5c2227c`
+- 任务目标：
+  - 完成当前 `G4` 复审任务流转，并按同链路补建唯一后续任务。
+- 执行：
+  - 已执行 `-done`：
+    - `bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file TODO.md -done -task_id T-20260404-a5c2227c -log agents/codex-multi-agents/log/task_records/2026/14/20260404-gen-kernel-g1.md -agents-list agents/codex-multi-agents/agents-lists.md`
+    - 结果：`OK: done T-20260404-a5c2227c`
+  - 已新建唯一后续任务：
+    - `T-20260404-52963966`
+    - 任务方向：仅修正 `G4` 计划门禁映射，使验收测试名与当前 `test/dsl/test_gen_kernel.py` 保持一致。
+- 结论：
+  - `T-20260404-a5c2227c` 已完成并封板。
+  - 后续链路等待管理员核对并分发 `T-20260404-52963966`。
+
+- 时间：`2026-04-04 10:47:17 +0800`
+- 经办人：`咯咯咯`
+- 任务：`T-20260404-52963966`
+- 任务目标：
+  - 仅修改 `ARCHITECTURE/plan/gen_kernel_op_driven_refactor_plan.md` 与同链路记录文件，把 `G4` 验收标准中的旧测试名收口到当前 `test/dsl/test_gen_kernel.py` 实际测试名；保持 `kernel_gen/dsl/gen_kernel.py` 与 `test/dsl/test_gen_kernel.py` 行为不变。
+- 改动：
+  - 更新 [`gen_kernel_op_driven_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/gen_kernel_op_driven_refactor_plan.md) 的 `G4` 验收标准：
+    - `test_gen_kernel_black_box_pipeline_still_generates_source` -> `test_gen_kernel_black_box_direct_return_nn_add_conv2d_img2col2d_tiled_and_npu_demo_contracts`
+    - `test_gen_kernel_refactor_fails_if_legacy_entry_is_still_public` -> `test_gen_kernel_has_no_legacy_double_interface`
+  - 同步更新 `G4` 验证命令为当前真实 gate：`pytest -q test/dsl/test_gen_kernel.py -k 'no_legacy_double_interface or black_box_direct_return'`。
+  - 追加当前记录，说明本轮只修计划门禁映射，不改 `gen_kernel.py` 或 `test_gen_kernel.py` 行为。
+- 结论：
+  - `已把 G4 验收标准中的旧测试名收口到当前真实测试名；本轮未改实现和测试行为。`
+
+- 时间：`2026-04-04 10:49:07 +0800`
+- 经办人：`咯咯咯`
+- 任务：`T-20260404-52963966`
+- 任务目标：
+  - 完成前自检 `G4` 计划门禁映射是否已与当前真实测试名完全收口，且本轮未误改 `gen_kernel.py` 或 `test_gen_kernel.py` 行为。
+- 改动：
+  - 复核 `gen_kernel_op_driven_refactor_plan.md` 中旧测试名 `test_gen_kernel_black_box_pipeline_still_generates_source` / `test_gen_kernel_refactor_fails_if_legacy_entry_is_still_public` 已被替换为当前真实测试名。
+  - 复核当前 `G4` 验收映射为：
+    - `test_gen_kernel_black_box_direct_return_nn_add_conv2d_img2col2d_tiled_and_npu_demo_contracts`
+    - `test_gen_kernel_has_no_legacy_double_interface`
+  - 运行 `pytest -q test/dsl/test_gen_kernel.py -k 'no_legacy_double_interface or black_box_direct_return'`，结果 `2 passed, 29 deselected`。
+  - 执行 `git diff --check -- ARCHITECTURE/plan/gen_kernel_op_driven_refactor_plan.md agents/codex-multi-agents/log/task_records/2026/14/20260404-gen-kernel-g1.md`，结果通过。
+- 结论：
+  - `自检通过：G4 验收标准中的测试名映射已与当前真实测试名一致，本轮只修计划/记录口径，不改实现和测试行为。`
+
+- 时间：`2026-04-04 10:50:21 +0800`
+- 经办人：`咯咯咯`
+- 任务：`T-20260404-52963966`
+- 任务目标：
+  - 完成当前 `G4` 计划门禁映射修正任务流转，并把 `G4` 进度表中的本任务状态收口为与 `DONE.md` 一致的完成口径。
+- 改动：
+  - 已执行 `-done`：
+    - `bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file TODO.md -done -task_id T-20260404-52963966 -log /home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-gen-kernel-g1.md -agents-list agents/codex-multi-agents/agents-lists.md`
+    - 结果：`OK: done T-20260404-52963966`
+  - 将 [`gen_kernel_op_driven_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/gen_kernel_op_driven_refactor_plan.md) 的 `G4` 进度表状态从“计划门禁映射修正进行中”收口为与 [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2215) 一致的“计划门禁映射修正完成（2026-04-04 10:50:14 +0800）”。
+- 结论：
+  - `T-20260404-52963966` 已完成并封板，当前计划进度与 DONE 已对齐。
+
+- 时间：`2026-04-04 10:51:01 +0800`
+- 经办人：`咯咯咯`
+- 任务：`T-20260404-52963966`
+- 任务目标：
+  - 完成前自检 `G4` 计划门禁映射是否已与当前真实测试名完全收口，且本轮未误改实现或测试行为。
+- 改动：
+  - 复核 `G4` 进度表已更新为 `计划门禁映射修正完成（2026-04-04 10:50:14 +0800，T-20260404-52963966，咯咯咯）`。
+  - 复核旧测试名 `test_gen_kernel_black_box_pipeline_still_generates_source` / `test_gen_kernel_refactor_fails_if_legacy_entry_is_still_public` 已从计划中移除。
+  - 复核新映射 `test_gen_kernel_black_box_direct_return_nn_add_conv2d_img2col2d_tiled_and_npu_demo_contracts` 与 `test_gen_kernel_has_no_legacy_double_interface` 已写入计划并可在当前测试文件中机械命中。
+  - 执行 `git diff --check -- ARCHITECTURE/plan/gen_kernel_op_driven_refactor_plan.md agents/codex-multi-agents/log/task_records/2026/14/20260404-gen-kernel-g1.md`，结果通过。
+- 结论：
+  - `自检通过：G4 验收标准中的测试名映射和进度状态已与当前真实测试名、DONE 口径一致，本轮只修计划/记录，不改实现和测试行为。`
+
+- 时间：`2026-04-04 10:59:32 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-708084ac`
+- 任务目标：
+  - 按 `G4` 计划门禁映射修正复审边界，只读复核主目录 `ARCHITECTURE/plan/gen_kernel_op_driven_refactor_plan.md` 与同链路记录文件，确认黑盒回归与 legacy 入口禁留验收标准已收口到当前 `test/dsl/test_gen_kernel.py` 真实测试名，且本轮未改 `kernel_gen/dsl/gen_kernel.py` 与 `test/dsl/test_gen_kernel.py` 行为。
+- 审查前自检：
+  - 已只读核对 `G4` 计划条目、同链最新记录与 `DONE.md` 进度状态。
+  - 已补跑当前 `G4` gate，确认计划映射到的真实测试名可以直接命中并通过。
+  - 已确认最新记录明确写明“本轮只修计划/记录，不改实现和测试行为”。
+- 审查结论：
+  - `通过`
+- 审查结果：
+  - [`gen_kernel_op_driven_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/gen_kernel_op_driven_refactor_plan.md#L383) 到 [`gen_kernel_op_driven_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/gen_kernel_op_driven_refactor_plan.md#L388) 的 `G4` 当前验证命令与验收标准已收口为：
+    - `pytest -q test/dsl/test_gen_kernel.py -k 'no_legacy_double_interface or black_box_direct_return'`
+    - `test_gen_kernel_has_no_legacy_double_interface`
+    - `test_gen_kernel_black_box_direct_return_nn_add_conv2d_img2col2d_tiled_and_npu_demo_contracts`
+  - 旧测试名 `test_gen_kernel_black_box_pipeline_still_generates_source` / `test_gen_kernel_refactor_fails_if_legacy_entry_is_still_public` 已从当前计划中收回，不再作为现行门禁。
+  - 同链记录 [`20260404-gen-kernel-g1.md`](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-gen-kernel-g1.md#L357) 到 [`20260404-gen-kernel-g1.md`](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-gen-kernel-g1.md#L387) 已明确写明：`T-20260404-52963966` 只修计划/记录口径，不改 `gen_kernel.py` 与 `test_gen_kernel.py` 行为。
+  - 计划进度与 [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2215) 也已对齐：`G4` 进度表包含 `计划门禁映射修正完成（T-20260404-52963966）`。
+- 漏洞与边界排查：
+  - 功能正确性：通过，`G4` gate 仍能命中并通过真实 legacy 入口禁留与黑盒回归测试。
+  - 边界条件：通过，本轮复审未越界到 `spec`、实现或测试行为修改。
+  - 异常路径：通过，计划门禁已能直接覆盖 legacy 入口禁留负向场景。
+  - 潜在漏洞/歧义：当前 `plan / record / DONE` 在 `G4` 映射修正后的口径一致，未再见旧测试名残留。
+- 验证：
+  - `python -m pytest -q test/dsl/test_gen_kernel.py -k 'no_legacy_double_interface or black_box_direct_return'` -> `2 passed, 29 deselected`
+  - `git -C /home/lfr/kernelcode_generate diff --check -- ARCHITECTURE/plan/gen_kernel_op_driven_refactor_plan.md agents/codex-multi-agents/log/task_records/2026/14/20260404-gen-kernel-g1.md` -> `0`
+  - `rg -n "test_gen_kernel_black_box_direct_return_nn_add_conv2d_img2col2d_tiled_and_npu_demo_contracts|test_gen_kernel_has_no_legacy_double_interface|test_gen_kernel_black_box_pipeline_still_generates_source|test_gen_kernel_refactor_fails_if_legacy_entry_is_still_public" ARCHITECTURE/plan/gen_kernel_op_driven_refactor_plan.md wt-20260404-gen-kernel-g1/test/dsl/test_gen_kernel.py`
+    - 结果：计划与当前测试文件只剩真实测试名映射；旧测试名不再出现在当前计划中。
+- 下一步建议：
+  - 进入整链合并阶段；合并范围必须覆盖当前已完成的 `G1 + G2 + G3 + G4` 全部 `plan / 实现 / 测试 / 记录文件`。
+
+- 时间：`2026-04-04 11:00:24 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-708084ac`
+- 任务目标：
+  - 完成当前 `G4` 计划门禁映射修正复审任务流转，并按同链路补建唯一后续合并任务。
+- 执行：
+  - 已执行 `-done`：
+    - `bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file TODO.md -done -task_id T-20260404-708084ac -log agents/codex-multi-agents/log/task_records/2026/14/20260404-gen-kernel-g1.md -agents-list agents/codex-multi-agents/agents-lists.md`
+    - 结果：`OK: done T-20260404-708084ac`
+  - 已新建唯一后续任务：
+    - `T-20260404-de521ec1`
+    - 任务方向：按整条已完成链路合并 `G1 + G2 + G3 + G4` 的 `plan / 实现 / 测试 / 记录文件`。
+- 结论：
+  - `T-20260404-708084ac` 已完成并封板。
+  - 后续链路等待管理员核对并分发 `T-20260404-de521ec1`。

@@ -238,6 +238,26 @@ def test_gen_kernel_is_the_only_public_entry() -> None:
     assert "gen_body" not in public_names
 
 
+# GK-014A
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 功能说明: 验证 legacy `gen_signature/gen_body` 双接口不再作为公开稳定入口存在。
+# 测试目的: 锁定直接 attribute 访问和 `from ... import ...` 都不能再拿到旧双接口，避免“表面只测 gen_kernel，实际 legacy 双接口仍可直接使用”的假闭环。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_has_no_legacy_double_interface
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_has_no_legacy_double_interface() -> None:
+    for legacy_name in ("gen_signature", "gen_body"):
+        assert not hasattr(gen_kernel_module, legacy_name)
+        with pytest.raises(AttributeError, match="no longer a public entry"):
+            getattr(gen_kernel_module, legacy_name)
+        with pytest.raises(ImportError):
+            exec(f"from kernel_gen.dsl.gen_kernel import {legacy_name}", {})
+
+
 # GK-001A
 # 创建者: jcc你莫辜负
 # 最后一次更改: jcc你莫辜负

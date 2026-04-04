@@ -539,4 +539,28 @@ def gen_kernel(op_or_func: Any, ctx: EmitCContext) -> str:
     return _KernelEmitter(ctx).emit(op_or_func)
 
 
+def __getattr__(name: str) -> Any:
+    """拒绝回流的 legacy 双接口公开访问。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 对历史 `gen_signature` / `gen_body` 名称给出统一的缺失语义，避免其被误当成公开稳定入口回流。
+    - 不影响模块内部私有 helper 的实现组织；仅用于模块级公开访问边界。
+
+    使用示例:
+    - getattr(gen_kernel_module, "gen_signature")  # raises AttributeError
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: kernel_gen/dsl/gen_kernel.py
+    """
+
+    if name in {"gen_signature", "gen_body"}:
+        raise AttributeError(f"{name} is no longer a public entry; use gen_kernel(...) instead")
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = ["GenKernelError", "gen_kernel"]
