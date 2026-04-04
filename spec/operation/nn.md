@@ -676,32 +676,44 @@ out = broadcast(value, target)
 - `out.format == target.format`。
 - `out.stride == target.stride`。
 
-### `broadcast_to(value, target)`
+### `broadcast_to(source, target_shape, space)`
 
 功能说明：
 
-- `broadcast` 的等价公开别名，使用相同的显式目标 `Memory` 描述。
+- 将 `source` 显式广播到目标 `target_shape` 并返回指定 `space` 的 `Memory` 结果。
+- `target_shape` 必须是维度列表，不接受 `Memory` 作为目标描述。
 
 参数说明：
 
-- `value` (`Memory`)：待广播输入。
-- `target` (`Memory`)：目标输出描述。
+- `source` (`Memory`)：待广播输入。
+- `target_shape` (`Sequence[int|SymbolDim|str]`)：目标形状维度列表。
+- `space` (`MemorySpace`)：目标内存空间。
 
 使用示例：
 
 ```python
-value = Memory(shape=[1, "N"], dtype=NumericType.Float32)
-target = Memory(shape=["M", "N"], dtype=NumericType.Float32, stride=["N", 1], format=Farmat.Norm)
-out = broadcast_to(value, target)
+source = Memory([1, SymbolDim("N")], NumericType.Float32, space=MemorySpace.GM)
+out = broadcast_to(source, [SymbolDim("M"), "N"], MemorySpace.LM)
+# 目标合同：out.shape == [M, N]，out.dtype == f32，out.space == LM
 ```
 
 注意事项：
 
-- 公开语义、错误路径与返回结果约束与 `broadcast(value, target)` 完全一致。
+- `source` 必须为 `Memory`；`target_shape` 必须为维度列表且每一维为 `int|SymbolDim|str`；`space` 必须为 `MemorySpace`。
+- `str` 维度表示符号维名称/占位，由上游符号环境解析；operation 层不要求推导出具体数值。
+- `target_shape` 为维度列表而非 `Memory`；`broadcast_to(value, target)` 不再作为公开合同。
+- 广播规则：尾维对齐；`target_shape.rank < source.rank` 或任一对齐维不满足 `source_dim == 1` 或 `source_dim == target_dim` 时必须抛出 `ValueError`。
+- 当维度包含 `SymbolDim` 时，输出维度严格等于 `target_shape`；兼容性检查仍按上述对齐规则逐维验证，不得以“由实现推导”替代。
+- 非法例：`broadcast_to(source, [SymbolDim("N")], MemorySpace.LM)` 目标 rank 小于 `source.rank` 时必须显式报错。
 
 返回与限制：
 
-- 返回 `Memory` 语义结果，且完整对齐 `target` 描述。
+- 返回 `Memory` 语义结果。
+- `out.shape == target_shape`。
+- `out.dtype == source.dtype`。
+- `out.space == space`。
+- `out.format == Farmat.Norm`。
+- `out.stride` 等价于 `Memory(target_shape, source.dtype, space=space, format=Farmat.Norm).get_stride()`（连续行主序默认 stride 语义沿用 `Memory` 规范）。
 
 ### `transpose(value, perm)`
 
@@ -901,35 +913,39 @@ out = conv(value, weight, bias=bias, sh=2, sw=2, dh=1, dw=1, ph=0, pw=0, pl=0, p
 
 功能说明：
 
-- 一维窗口展开高层接口语义锚点：把 rank-3 输入 `Memory` 按滑窗重排为 rank-3 列块表示。
+- 一维窗口展开高层接口语义锚点：把 rank-3 输入 `Memory` 按滑窗重排为结构化列块表示。
 
 参数说明：
 
-- `value` (`Memory`)：输入特征图，shape 为 `[N, C, W]`。
-- `kw` (`int|SymbolDim`)：卷积核宽度，必须为正数。
-- `sw` (`int|SymbolDim`)：宽度步长，必须为正数。
-- `dw` (`int|SymbolDim`)：宽度膨胀，必须为正数。
-- `pl`/`pr` (`int|SymbolDim`)：左/右 padding，必须为非负数。
+- `value` (`Memory`)：输入特征图，`Farmat.Norm` 形态为 `[N, C, W]`，`Farmat.CLast` 形态为 `[N, W, C]`。
+- `kw` (`int|SymbolDim`)：卷积核宽度，必须为正数（不建议使用 `bool`）。
+- `sw` (`int|SymbolDim`)：宽度步长，必须为正数（不建议使用 `bool`）。
+- `dw` (`int|SymbolDim`)：宽度膨胀，必须为正数（不建议使用 `bool`）。
+- `pl`/`pr` (`int|SymbolDim`)：左/右 padding，必须为非负数（不建议使用 `bool`）。
 
 使用示例：
 
 ```python
-value = Memory([1, 16, 32], NumericType.Float32)
+value = Memory([1, 16, 32], NumericType.Float32, format=Farmat.Norm)
 cols = img2col1d(value, kw=3, sw=1, dw=1, pl=1, pr=1)
 ```
 
 注意事项：
 
 - `value` 必须为 `Memory` 且 rank=3，否则抛出 `TypeError`/`ValueError`。
-- `kw/sw/dw` 必须为正数，`pl/pr` 必须为非负数，否则抛出 `ValueError`。
-- 输出宽度按 `W_out = floor((W + pl + pr - dw * (kw - 1) - 1) / sw) + 1` 计算。
+- `value.format` 仅支持 `Farmat.Norm`/`Farmat.CLast`；其他格式必须抛出 `ValueError`。
+- `kw/sw/dw` 必须为正数，`pl/pr` 必须为非负数；`bool` 作为参数类型不在支持范围内，实现可选择抛出 `TypeError`。
+- 输出宽度按公式计算：
+  - `W_out = floor((W + pl + pr - dw * (kw - 1) - 1) / sw) + 1`
+  - 当参与维度为 `SymbolDim` 且无法静态取整时，保留符号表达：`W_out = (W + pl + pr - dw * (kw - 1) - 1) / sw + 1`。
 - 当 `W_out` 为确定整数且不为正时，必须抛出 `ValueError`。
 - 与方言合同关系：lowering 后对应 `nn.img2col1d`，IR 结构与 verifier 规则见 [`spec/dialect/nn.md`](../../spec/dialect/nn.md)；方言规范不复写本节高层 shape/错误语义。
 
 返回与限制：
 
 - 返回 `Memory` 语义结果。
-- `out.shape == [N, C * kw, W_out]`。
+- `value.format == Farmat.Norm` 时，`out.shape == [N, C, kw, W_out]`。
+- `value.format == Farmat.CLast` 时，`out.shape == [N, W_out, kw, C]`。
 - `out.dtype == value.dtype`，`out.space == value.space`。
 - `out.format == Farmat.Norm`，`out.stride` 为连续行主序默认步幅。
 
@@ -937,37 +953,40 @@ cols = img2col1d(value, kw=3, sw=1, dw=1, pl=1, pr=1)
 
 功能说明：
 
-- 二维窗口展开高层接口语义锚点：把 rank-4 输入 `Memory` 按滑窗重排为 rank-3 列块表示。
+- 二维窗口展开高层接口语义锚点：把 rank-4 输入 `Memory` 按滑窗重排为结构化列块表示。
 
 参数说明：
 
-- `value` (`Memory`)：输入特征图，shape 为 `[N, C, H, W]`。
-- `kh`/`kw` (`int|SymbolDim`)：卷积核高/宽，必须为正数。
-- `sh`/`sw` (`int|SymbolDim`)：步长高/宽，必须为正数。
-- `dh`/`dw` (`int|SymbolDim`)：膨胀高/宽，必须为正数。
-- `ph`/`pw`/`pl`/`pr` (`int|SymbolDim`)：上/下/左/右 padding，必须为非负数。
+- `value` (`Memory`)：输入特征图，`Farmat.Norm` 形态为 `[N, C, H, W]`，`Farmat.CLast` 形态为 `[N, H, W, C]`。
+- `kh`/`kw` (`int|SymbolDim`)：卷积核高/宽，必须为正数（不建议使用 `bool`）。
+- `sh`/`sw` (`int|SymbolDim`)：步长高/宽，必须为正数（不建议使用 `bool`）。
+- `dh`/`dw` (`int|SymbolDim`)：膨胀高/宽，必须为正数（不建议使用 `bool`）。
+- `ph`/`pw`/`pl`/`pr` (`int|SymbolDim`)：上/下/左/右 padding，必须为非负数（不建议使用 `bool`）。
 
 使用示例：
 
 ```python
-value = Memory([1, 3, 5, 5], NumericType.Float32)
+value = Memory([1, 3, 5, 5], NumericType.Float32, format=Farmat.Norm)
 cols = img2col2d(value, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr=1)
 ```
 
 注意事项：
 
 - `value` 必须为 `Memory` 且 rank=4，否则抛出 `TypeError`/`ValueError`。
-- `kh/kw/sh/sw/dh/dw` 必须为正数，`ph/pw/pl/pr` 必须为非负数，否则抛出 `ValueError`。
+- `value.format` 仅支持 `Farmat.Norm`/`Farmat.CLast`；其他格式必须抛出 `ValueError`。
+- `kh/kw/sh/sw/dh/dw` 必须为正数，`ph/pw/pl/pr` 必须为非负数；`bool` 作为参数类型不在支持范围内，实现可选择抛出 `TypeError`。
 - 输出尺寸按以下公式计算：
   - `H_out = floor((H + ph + pw - dh * (kh - 1) - 1) / sh) + 1`
   - `W_out = floor((W + pl + pr - dw * (kw - 1) - 1) / sw) + 1`
+  - 当参与维度为 `SymbolDim` 且无法静态取整时，保留符号表达：`H_out = (H + ph + pw - dh * (kh - 1) - 1) / sh + 1`，`W_out = (W + pl + pr - dw * (kw - 1) - 1) / sw + 1`。
 - 当 `H_out` 或 `W_out` 为确定整数且不为正时，必须抛出 `ValueError`。
 - 与方言合同关系：lowering 后对应 `nn.img2col2d`，IR 结构与 verifier 规则见 [`spec/dialect/nn.md`](../../spec/dialect/nn.md)；方言规范不复写本节高层 shape/错误语义。
 
 返回与限制：
 
 - 返回 `Memory` 语义结果。
-- `out.shape == [N, C * kh * kw, H_out * W_out]`。
+- `value.format == Farmat.Norm` 时，`out.shape == [N, C, kh, kw, H_out, W_out]`。
+- `value.format == Farmat.CLast` 时，`out.shape == [N, H_out, W_out, kh, kw, C]`。
 - `out.dtype == value.dtype`，`out.space == value.space`。
 - `out.format == Farmat.Norm`，`out.stride` 为连续行主序默认步幅。
 
@@ -983,7 +1002,7 @@ cols = img2col2d(value, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr
 
 - 验证逐元素算术/比较的成功路径、链式表达式、标量参与规则与错误规则。
 - 验证 `nn.add` 在同形状输入时保持原有 `Memory` 描述。
-- 验证显式 `broadcast(value, target)` / `broadcast_to(value, target)` 的尾维对齐、前置维扩张、target 对齐与错误规则。
+- 验证显式 `broadcast(value, target)` 与 `broadcast_to(source, target_shape, space)` 的尾维对齐、前置维扩张、目标对齐与错误规则。
 - 验证逐元素隐式 broadcast 的 singleton dim / 前置维扩张与错误规则。
 - 验证 nn 算术算子（`add/sub/mul/truediv/floordiv/matmul`）遵循统一 OP-TP 类型提升规则。
 - 验证 `Memory/Memory` 路径按固定优先级选择更靠后类型，`Memory/标量` 路径按 `Int32` 参与决议。
@@ -998,8 +1017,8 @@ cols = img2col2d(value, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr
 - 验证 `reduce_min` / `reduce_max` 的空归约域错误路径（静态可判定维度为 `0`）。
 - 验证比较结果使用 `NumericType.Bool` 作为 predicate 载体。
 - 验证 nn 操作不依赖已移除的旧 shape 规范化入口。
-- 验证 `img2col2d` 输出形状与参数校验规则，并保持与 `nn.img2col2d` 方言合同的分层引用关系。
-- 验证 `img2col1d` 的高层语义锚点与 `nn.img2col1d` 方言合同引用关系（本阶段不要求实现与测试闭环）。
+- 验证 `img2col1d` 在 `Farmat.Norm/Farmat.CLast` 形态下的结构化输出形状与参数校验规则（`Norm -> NCHW`，`CLast -> NWC`）。
+- 验证 `img2col2d` 在 `Farmat.Norm/Farmat.CLast` 形态下的结构化输出形状与参数校验规则（`Norm -> NCHW`，`CLast -> NHWC`）。
 - 验证 `conv` 的参数校验、输出形状公式与 bias 可选对齐规则。
 - 验证激活函数的输入输出约束、参数规则与错误路径。
 
@@ -1044,7 +1063,7 @@ cols = img2col2d(value, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr
 | OP-BC-003 | `broadcast` / `broadcast_to` 维度不兼容报错 | `test_nn_broadcast_dimension_mismatch` |
 | OP-BC-004 | `broadcast` / `broadcast_to` 目标 rank 更小时报错 | `test_nn_broadcast_rank_error` |
 | OP-BC-005 | `broadcast` / `broadcast_to` 非 `Memory` 输入报错 | `test_nn_broadcast_non_memory_error` |
-| OP-BC-006 | `broadcast` / `broadcast_to` 非 `Memory` target 报错 | `test_nn_broadcast_target_type_error` |
+| OP-BC-006 | `broadcast` 非 `Memory` target 报错 | `test_nn_broadcast_target_type_error` |
 | OP-IB-001 | 算术支持 singleton dim 隐式 broadcast | `test_nn_add_implicit_broadcast_singleton` |
 | OP-IB-002 | 算术支持前置维隐式 broadcast | `test_nn_add_implicit_broadcast_prepend_dimension` |
 | OP-IB-003 | 比较运算复用隐式 broadcast | `test_nn_compare_implicit_broadcast` |
@@ -1073,6 +1092,6 @@ cols = img2col2d(value, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr
 | OP-SM-004 | `softmax` 的 `axis` 越界时报 `ValueError` | `test_nn_softmax_axis_out_of_range` |
 | OP-SM-005 | `softmax` 非浮点 `dtype` 输入报 `TypeError` | `test_nn_softmax_dtype_error` |
 | OP-SM-006 | `softmax` 限定数值稳定语义为 `exp(x - max(x)) / sum(exp(x - max(x)))` | `test_nn_softmax_numerical_stability_contract` |
-| OP-IMG2COL-001 | `img2col1d` 输出形状与参数校验规则 | `test_nn_img2col1d_contract` |
-| OP-IMG2COL-002 | `img2col2d` 输出形状与参数校验规则 | `test_nn_img2col2d_contract` |
+| OP-IMG2COL-001 | `img2col1d` 在 `Farmat.Norm/CLast` 下输出结构化形状 | `test_nn_img2col1d_contract` |
+| OP-IMG2COL-002 | `img2col2d` 在 `Farmat.Norm/CLast` 下输出结构化形状 | `test_nn_img2col2d_contract` |
 | OP-CONV-001 | `conv` 基础路径与参数校验（含可选 bias 对齐） | `test_nn_conv_basic` |
