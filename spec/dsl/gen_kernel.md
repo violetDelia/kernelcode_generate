@@ -4,6 +4,7 @@
 
 - 定义将单个优化后的 MLIR op / `func.func` 转换为目标源码文本的规则。
 - 对 `func.func` 负责函数签名生成、按 IR 顺序遍历函数体，并逐个调用 [`spec/dsl/emit_c.md`](../../spec/dsl/emit_c.md) 中定义的节点级公开发射接口。
+- 对 `func.func` 的 `direct-return nn.add`、`conv2d_img2col2d_tiled(...)`、`npu_demo` body-level kernel 等函数级特化，必须通过统一 emitter 内部策略选择收口。
 - 对单个普通 op 直接复用 `emit_c` 的节点级公开接口返回源码片段；不负责文件写盘、编译、链接或运行。
 
 ## 文档信息
@@ -126,12 +127,14 @@ void demo_kernel(
 功能说明：
 
 - 当输入为 `func.func` 时，内部流程必须按 `func.func` 中 block 与 op 的顺序遍历函数体。
+- 在进入具体 body 发射前，实现必须先在单一 emitter 内部选择函数级策略，统一承接默认路径与当前已冻结的函数级特化。
 - 非 `func.return` 的普通 op 必须逐个委托 `emit_c_op(...)` 的公开节点级接口发射。
 - `func.return` / `out` 绑定属于函数级主遍历流程的收尾逻辑，不得作为普通 `emit_c_op(...)` 公开职责泄露给下游。
 
 注意事项：
 
 - 必须保持 IR 中 op 的语义顺序。
+- 上述函数级策略只允许作为 emitter 内部实现细节存在；不得再扩成新的公开入口、公开 helper 或测试主口径。
 - `func.return` 在当前恢复范围下仅支持无返回、`Memory` 结果写回 `out`，或 `!symbol.int<"...">` 标量返回。
 - 不得在本层引入未在 `emit_c` 中定义的单 op 生成特例。
 - `target=cpu` 下仅当 `nn.add.result` 的唯一 use 是 `func.return`，且该结果可直接绑定到函数 `out` 时，才允许函数级特化为：
@@ -246,6 +249,7 @@ void conv2d_img2col2d_tiled(
 - 验证 `gen_kernel(...)` 的函数级主遍历与 `emit_c_op(...)` 的节点级职责边界清晰。
 - 验证 `Memory` 输入/输出参数规则、参数顺序、错误传播与名称保持行为。
 - 验证普通非 return op 会逐个委托到 `emit_c_op(...)`，且 `func.return/out` 绑定继续留在函数级主遍历流程中处理。
+- 验证 direct-return `nn.add`、`conv2d_img2col2d_tiled(...)`、`npu_demo` body-level kernel 三类函数级特化，在黑盒 `gen_kernel(...)` 输出上保持统一入口和既有源码形态，不依赖内部 helper 或内部策略名。
 - 验证 direct-return `nn.add` 在 `target=cpu` 下仅对唯一 use 为 `func.return` 的 `Memory` 返回场景特化为 `cpu::add(..., out);`，并覆盖 `memory + memory`、`memory + const(i32)`、`memory + symbol.int` 三条函数体形态。
 - 验证 direct-return `nn.add` 在 multi-use 或无法直接绑定 `out` 时继续报 `unsupported op`，不生成 generic `out = tmp` / `return tmp`。
 - 验证 `target="npu_demo"` 的函数级 body-level kernel 骨架包含 `npu_demo::KernelContext& ctx`、`ctx.thread_id()`、`ctx.thread_num()`、`ctx.get_dynamic_memory<float>(MemorySpace::TSM/TLM)` 与 `view/slice/deslice/add` 的固定顺序。
@@ -279,6 +283,7 @@ void conv2d_img2col2d_tiled(
 - GK-016：当 `nn.add.result` 为 multi-use 或无法 direct bind 到 `out` 时，specialization 必须继续报 `EmitCError target=cpu: nn.add: unsupported op`。（下游待补测试映射：`test_gen_kernel_rejects_nn_add_specialization_on_multi_use`）
 - GK-017：`target="npu_demo"` 的最小 kernel 可生成包含 `npu_demo::KernelContext& ctx`、`ctx.thread_id()` 与 `ctx.thread_num()` 的 body-level 函数骨架。（下游待补测试映射：`test_gen_kernel_emits_npu_demo_body_level_kernel`）
 - GK-018：`target="npu_demo"` 的 `view + slice + add + deslice` 链路可生成 `TSM/TLM` dynamic memory、`view(`、`slice(`、`add(`、`deslice(` 组成的函数体骨架，且不出现 `.view<`、`load<`、`store<`。（下游待补测试映射：`test_gen_kernel_emits_npu_demo_memory_pipeline`）
+- GK-021：`direct-return nn.add`、`conv2d_img2col2d_tiled(...)`、`npu_demo` body-level kernel 三类函数级特化继续只通过黑盒 `gen_kernel(...)` 验证既有源码合同；测试不得直接依赖内部 helper、内部策略函数或内部策略名。（`test_gen_kernel_black_box_direct_return_nn_add_conv2d_img2col2d_tiled_and_npu_demo_contracts`）
 
 ### C2 下游验收标准
 

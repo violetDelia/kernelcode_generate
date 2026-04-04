@@ -884,6 +884,48 @@ def test_gen_kernel_rejects_npu_demo_body_level_kernel_with_nonempty_body() -> N
         gen_kernel(func_op, _npu_ctx())
 
 
+# GK-021
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 功能说明: 验证函数级特化在黑盒 `gen_kernel(...)` 输出上保持既有合同。
+# 测试目的: 锁定 direct-return `nn.add`、`conv2d_img2col2d_tiled`、`npu_demo` 三类特化继续只通过 `gen_kernel(...)` 黑盒验证，不依赖内部 helper、内部策略函数或内部策略名。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_black_box_direct_return_nn_add_conv2d_img2col2d_tiled_and_npu_demo_contracts
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_black_box_direct_return_nn_add_conv2d_img2col2d_tiled_and_npu_demo_contracts() -> None:
+    mem = _make_memory_type([2, 2], [2, 1])
+    space = NnMemorySpaceAttr.from_name("global")
+    add_block = Block(arg_types=[mem, mem])
+    add_op = NnAddOp(add_block.args[0], add_block.args[1], mem, space)
+    add_block.add_op(add_op)
+    add_block.add_op(func.ReturnOp(add_op.result))
+    add_func = _func("add_direct", [mem, mem], [mem], add_block, ("lhs", "rhs"))
+    add_source = gen_kernel(add_func, _ctx())
+    assert "cpu::add(lhs, rhs, out);" in add_source
+    assert "out = " not in add_source
+
+    input_type = _make_memory_type([1, 16, 18, 18], [5184, 324, 18, 1], element_type=f32)
+    weight_type = _make_memory_type([16, 16, 3, 3], [144, 9, 3, 1], element_type=f32)
+    out_type = _make_memory_type([1, 16, 16, 16], [4096, 256, 16, 1], element_type=f32)
+    conv_block = Block(arg_types=[input_type, weight_type])
+    conv_func = _func("conv2d_img2col2d_tiled", [input_type, weight_type], [out_type], conv_block, ("input", "weight"))
+    conv_source = gen_kernel(conv_func, _ctx())
+    assert "cpu::img2col2d(" in conv_source
+    assert "constexpr long long Ntile = 1;" in conv_source
+    assert "out.at(out_indices) = acc_buffer[((fi * Hotile) + hi) * Wotile + wi];" in conv_source
+
+    npu_mem = _make_memory_type([64], [1], element_type=f32)
+    npu_block = Block(arg_types=[IndexType(), npu_mem])
+    npu_func = _func("demo_kernel", [IndexType(), npu_mem], [npu_mem], npu_block, ("ctx", "source"))
+    npu_source = gen_kernel(npu_func, _npu_ctx())
+    assert "ctx.thread_id()" in npu_source
+    assert "ctx.get_dynamic_memory<float>(MemorySpace::TSM)" in npu_source
+    assert "deslice(out_tile, out, tid * 16, 16, 1);" in npu_source
+
+
 # GK-I2-001
 # 创建者: 大闸蟹
 # 最后一次更改: 小李飞刀

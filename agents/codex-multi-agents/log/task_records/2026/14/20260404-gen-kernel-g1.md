@@ -165,3 +165,185 @@
 - 结论：
   - `T-20260404-b11dedf4` 已完成并封板。
   - 后续链路已按当前规则衔接到 `G2` 审查阶段，等待管理员核对并分发 `T-20260404-bc032aeb`。
+
+- 时间：`2026-04-04 03:39:38 +0800`
+- 经办人：`jcc你莫辜负`
+- 任务：`T-20260404-b017245b`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/gen_kernel_op_driven_refactor_plan.md` 的 `G3` 收口函数级特化的内部组织方式：把 CPU direct-return `nn.add`、`conv2d_img2col2d_tiled(...)`、`npu_demo` body-level kernel 等函数级特化统一内聚到同一 emitter 内部策略，而不是继续散落成平行 helper 入口。
+- 改动：
+  - 更新 `kernel_gen/dsl/gen_kernel.py`：
+    - 新增 `_FunctionStrategy` 与 `_KernelEmitter`，把 `gen_kernel(...)` 的 `func.func` 路径改为“统一 emitter -> 选择内部策略 -> 生成签名/body”的单链路。
+    - 在 `_KernelEmitter._function_strategies()` 中固定收口四类内部策略：`default`、`cpu_direct_return_nn_add`、`cpu_conv2d_img2col2d_tiled`、`npu_demo_body_level_kernel`。
+    - 把 `direct-return nn.add` 的 `out` 绑定、`conv2d_img2col2d_tiled(...)` 固定骨架、`npu_demo` body-level kernel 签名/骨架都迁入 `_KernelEmitter` 内部方法；公开入口仍只保留 `gen_kernel(...)`。
+  - 更新 `spec/dsl/gen_kernel.md`：
+    - 写清 `direct-return nn.add`、`conv2d_img2col2d_tiled(...)`、`npu_demo` body-level kernel 必须通过统一 emitter 内部策略选择收口。
+    - 在“IR 顺序遍历与收尾绑定”中明确当前至少存在 `default`、`cpu_direct_return_nn_add`、`cpu_conv2d_img2col2d_tiled`、`npu_demo_body_level_kernel` 四类内部策略，且它们不得扩成新的公开入口或测试主口径。
+    - 在测试目标与用例清单补齐 `GK-021`，锁定三类特化统一经由内部策略选择，黑盒测试主口径仍只看 `gen_kernel(...)`。
+  - 更新 `test/dsl/test_gen_kernel.py`：
+    - 新增 `test_gen_kernel_routes_specialized_funcs_through_internal_strategy_selector`，通过 `gen_kernel(...)` 调用观测 `_KernelEmitter._select_func_strategy(...)` 的选择结果，锁定 raw direct-return `NnAddOp`、`conv2d_img2col2d_tiled(...)`、`npu_demo` 分别命中 `cpu_direct_return_nn_add`、`cpu_conv2d_img2col2d_tiled`、`npu_demo_body_level_kernel`。
+    - 保持现有 `direct_return nn.add`、`conv2d_img2col2d_tiled(...)`、`npu_demo` 黑盒断言全部不变，只验证输出结果与特化入口保持一致。
+  - 验证：
+    - `pytest -q test/dsl/test_gen_kernel.py -k 'direct_return_nn_add or conv2d_img2col2d_tiled or npu_demo'` -> `7 passed, 23 deselected`
+    - `pytest -q test/dsl/test_gen_kernel.py` -> `30 passed`
+    - `python -m py_compile kernel_gen/dsl/gen_kernel.py test/dsl/test_gen_kernel.py` -> `0`
+    - `git diff --check -- spec/dsl/gen_kernel.md kernel_gen/dsl/gen_kernel.py test/dsl/test_gen_kernel.py` -> `0`
+  - 自检：
+    - 目标收口：通过。函数级特化不再靠散落的平行发射流程维持，而是统一进入 `_KernelEmitter` 的内部策略选择。
+    - 边界检查：通过。未扩新的 target / op 语义，只重构了现有 `nn.add / conv / npu_demo` 的组织方式；仅改了任务允许的 `spec/实现/测试/记录` 文件。
+    - 证据覆盖：通过。任务要求的 `direct_return_nn_add / conv2d_img2col2d_tiled / npu_demo` gate 全过；整份 `test_gen_kernel.py` 回归也通过，说明黑盒输出未退化。
+- 结论：
+  - `G3` 已按边界完成，无阻塞。
+  - 当前 `gen_kernel(...)` 已通过统一 emitter 内部策略承接 `direct-return nn.add`、`conv2d_img2col2d_tiled(...)`、`npu_demo` body-level kernel 三类函数级特化，公开测试主口径仍只依赖 `gen_kernel(...)`。
+
+- 时间：`2026-04-04 03:39:38 +0800`
+- 经办人：`jcc你莫辜负`
+- 任务：`T-20260404-b017245b`
+- 任务目标：
+  - 完成当前 `G3` 任务流转，并按同链路补建唯一后续审查任务。
+- 改动：
+  - 已执行：
+    - `codex-multi-agents-task.sh -file /home/lfr/kernelcode_generate/TODO.md -done -task_id T-20260404-b017245b -log /home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-gen-kernel-g1.md -agents-list /home/lfr/kernelcode_generate/agents/codex-multi-agents/agents-lists.md`
+    - 结果：当前任务已标记完成，`agents-lists.md` 中 `jcc你莫辜负` 状态同步成功。
+  - 已新建后续审查任务：
+    - `T-20260404-20a869f2`
+    - 目标：在同一 `worktree` 中只读复核 `G3` 的 `spec / 实现 / 测试 / 记录文件` 是否和计划、边界、验证命令、验收标准一致。
+  - 审查范围确认：
+    - `wt-20260404-gen-kernel-g1/spec/dsl/gen_kernel.md`
+    - `wt-20260404-gen-kernel-g1/kernel_gen/dsl/gen_kernel.py`
+    - `wt-20260404-gen-kernel-g1/test/dsl/test_gen_kernel.py`
+    - `agents/codex-multi-agents/log/task_records/2026/14/20260404-gen-kernel-g1.md`
+- 结论：
+  - `T-20260404-b017245b` 已完成并封板。
+  - 后续链路已按当前规则衔接到 `G3` 审查阶段，等待管理员核对并分发 `T-20260404-20a869f2`。
+
+- 时间：`2026-04-04 03:45:37 +0800`
+- 经办人：`不要啊教练`
+- 任务：`T-20260404-20a869f2`
+- 任务目标：
+  - 按 [`gen_kernel_op_driven_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/gen_kernel_op_driven_refactor_plan.md) 的 `G3` 只读复核 [`spec/dsl/gen_kernel.md`](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/spec/dsl/gen_kernel.md)、[`kernel_gen/dsl/gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/kernel_gen/dsl/gen_kernel.py)、[`test/dsl/test_gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/test/dsl/test_gen_kernel.py) 与同链路记录文件，重点确认 direct-return `nn.add`、`conv2d_img2col2d_tiled`、`npu_demo` body-level kernel 已内聚到统一 emitter 内部策略，且测试主口径仍只依赖 `gen_kernel(...)`。
+- 改动：
+  - 只读复核计划 `G3` 条目、`spec`、实现、测试和同链路记录；未修改实现或测试文件。
+  - 自检结果：
+    - 证据充分性：已核对 `G3` 计划 `测试输出/验收标准`、`spec` 中的公开口径与内部策略说明、实现中的 `_KernelEmitter` / `_FunctionStrategy` 统一路径、`GK-021` 的测试实现，以及定向与全量 `pytest` 结果。
+    - 功能正确性：[`gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/kernel_gen/dsl/gen_kernel.py#L160) 到 [`gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/kernel_gen/dsl/gen_kernel.py#L223) 确实通过 `_KernelEmitter._function_strategies()` / `_select_func_strategy(...)` 把 `cpu_direct_return_nn_add`、`cpu_conv2d_img2col2d_tiled`、`npu_demo_body_level_kernel` 收口进同一内部策略链，相关定向测试也都通过。
+    - 边界条件：计划 [`gen_kernel_op_driven_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/gen_kernel_op_driven_refactor_plan.md#L340) 到 [`gen_kernel_op_driven_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/gen_kernel_op_driven_refactor_plan.md#L347) 写死 `G3` 的测试主口径“只看 `gen_kernel(...)`”；`spec` 也在 [`gen_kernel.md`](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/spec/dsl/gen_kernel.md#L57) 和 [`gen_kernel.md`](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/spec/dsl/gen_kernel.md#L137) 明确“测试主口径只允许稳定依赖 `gen_kernel(...)`”，内部策略不得扩成测试主口径。
+    - 异常路径：direct-return `nn.add` 的 multi-use 负例、`conv` / `npu_demo` 非法 body 负例仍在，未见被 G3 误伤。
+    - 潜在漏洞排查：
+      - 输入校验绕过：未见新增静默回退。
+      - 类型/形状绕过：`conv` / `npu_demo` 的特化校验仍在。
+      - 边界越界：问题集中在测试/合同口径，不在实现功能缺口。
+      - 错误处理缺失：现有错误路径仍存在。
+      - 状态污染：见结论，`spec` 与测试主口径发生内部接口回流。
+      - 资源释放问题：本轮不涉及资源生命周期变更。
+  - 验证：
+    - `cd /home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1 && PYTHONPATH=. pytest -q test/dsl/test_gen_kernel.py -k 'direct_return_nn_add or conv2d_img2col2d_tiled or npu_demo'`
+      - 结果：`7 passed, 23 deselected`
+      - 退出码：`0`
+    - `cd /home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1 && PYTHONPATH=. pytest -q test/dsl/test_gen_kernel.py`
+      - 结果：`30 passed`
+      - 退出码：`0`
+    - `git -C /home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1 diff --check -- spec/dsl/gen_kernel.md kernel_gen/dsl/gen_kernel.py test/dsl/test_gen_kernel.py`
+      - 退出码：`0`
+    - `git -C /home/lfr/kernelcode_generate diff --check -- agents/codex-multi-agents/log/task_records/2026/14/20260404-gen-kernel-g1.md`
+      - 退出码：`0`
+- 结论：
+  - `需修改`
+  - 最硬断点是 `G3` 的黑盒口径被重新打穿：计划 [`gen_kernel_op_driven_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/gen_kernel_op_driven_refactor_plan.md#L340) 到 [`gen_kernel_op_driven_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/gen_kernel_op_driven_refactor_plan.md#L347) 与 `spec` [`gen_kernel.md`](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/spec/dsl/gen_kernel.md#L57) / [`gen_kernel.md`](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/spec/dsl/gen_kernel.md#L137) 都要求“测试主口径只看 `gen_kernel(...)`、内部策略不得成为测试主口径”；但当前 [`test_gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/test/dsl/test_gen_kernel.py#L898) 的 `test_gen_kernel_routes_specialized_funcs_through_internal_strategy_selector` 直接 monkeypatch [`_KernelEmitter._select_func_strategy(...)`](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/kernel_gen/dsl/gen_kernel.py#L221) 并断言内部策略名 `cpu_direct_return_nn_add/cpu_conv2d_img2col2d_tiled/npu_demo_body_level_kernel`，同时 `spec` 还把这条内部 helper 名写进 [`GK-021`](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/spec/dsl/gen_kernel.md#L286)。
+  - 这会把 `_KernelEmitter._select_func_strategy(...)` 和具体策略名重新升格为公开测试合同；后续只要内部策略改名或重构为等价实现，即使 `gen_kernel(...)` 黑盒输出完全不变，测试也会失败。按当前审查口径，这和 `G3` “测试主口径仍只依赖 gen_kernel(...)” 的目标直接冲突，不能判 `通过`。
+  - 修改建议：仅修正 [`spec/dsl/gen_kernel.md`](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/spec/dsl/gen_kernel.md) 与 [`test/dsl/test_gen_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-gen-kernel-g1/test/dsl/test_gen_kernel.py)，删除/降级对 `_KernelEmitter._select_func_strategy(...)` 与策略名的直接依赖，把 `GK-021` 收口为纯黑盒 `gen_kernel(...)` 输出与行为验证；实现文件若当前行为已正确，可不改。
+
+- 时间：`2026-04-04 03:59:28 +0800`
+- 经办人：`jcc你莫辜负`
+- 任务：`T-20260404-4397efbb`
+- 任务目标：
+  - 按 `G3` 审查意见，只修改 `spec/dsl/gen_kernel.md`、`test/dsl/test_gen_kernel.py` 与同链路记录文件，删除/降级对 `_KernelEmitter._select_func_strategy(...)` 和内部策略名的直接依赖，把 G3 的测试主口径收口为只依赖 `gen_kernel(...)` 的黑盒验证。
+- 改动：
+  - 更新 `spec/dsl/gen_kernel.md`：
+    - 删除对具体内部策略名的文档依赖，把“统一 emitter 内部策略选择”收紧为泛化内部实现说明。
+    - 将 `GK-021` 改写为纯黑盒合同：只验证 `gen_kernel(...)` 在 direct-return `nn.add`、`conv2d_img2col2d_tiled(...)`、`npu_demo` 三类函数级特化上的既有公开输出，不依赖内部 helper 或内部策略名。
+  - 更新 `test/dsl/test_gen_kernel.py`：
+    - 删除 `test_gen_kernel_routes_specialized_funcs_through_internal_strategy_selector` 对 `_KernelEmitter._select_func_strategy(...)` 的 monkeypatch 和对策略名的断言。
+    - 改为 `test_gen_kernel_black_box_direct_return_nn_add_conv2d_img2col2d_tiled_and_npu_demo_contracts`，只通过 `gen_kernel(...)` 黑盒输出分别锁定：
+      - raw direct-return `nn.add` 生成 `cpu::add(lhs, rhs, out);` 且不退化为 `out = ...`
+      - `conv2d_img2col2d_tiled(...)` 仍生成固定 tile 常量、`cpu::img2col2d(...)` 与最终写回 `out`
+      - `npu_demo` 仍生成 `ctx.thread_id()`、`ctx.get_dynamic_memory<float>(MemorySpace::TSM)` 与 `deslice(..., out, ...)`
+  - 验证：
+    - `pytest -q test/dsl/test_gen_kernel.py -k 'direct_return_nn_add or conv2d_img2col2d_tiled or npu_demo'` -> `8 passed, 22 deselected`
+    - `pytest -q test/dsl/test_gen_kernel.py` -> `30 passed`
+    - `git diff --check -- spec/dsl/gen_kernel.md test/dsl/test_gen_kernel.py` -> `0`
+    - `rg -n "_KernelEmitter\\._select_func_strategy|cpu_direct_return_nn_add|cpu_conv2d_img2col2d_tiled|npu_demo_body_level_kernel" spec/dsl/gen_kernel.md test/dsl/test_gen_kernel.py` -> 未再出现对内部 helper/策略名的直接合同依赖（仅保留正常公开测试名和 `npu_demo` 用例名）。
+  - 自检：
+    - 目标收口：通过。`G3` 的测试主口径已回到纯黑盒 `gen_kernel(...)` 输出。
+    - 边界检查：通过。本轮未改 `kernel_gen/dsl/gen_kernel.py`；只修正 `spec/test/记录`。
+    - 证据覆盖：通过。`direct_return_nn_add / conv2d_img2col2d_tiled / npu_demo` gate 与整份 `test_gen_kernel.py` 全量回归都通过。
+- 结论：
+  - 本轮按审查意见完成黑盒口径修正，无阻塞。
+
+- 时间：`2026-04-04 04:00:26 +0800`
+- 经办人：`jcc你莫辜负`
+- 任务：`T-20260404-4397efbb`
+- 任务目标：
+  - 完成当前 `G3` 黑盒口径修正任务流转，并按同链路补建唯一后续审查任务。
+- 改动：
+  - 已执行：
+    - `codex-multi-agents-task.sh -file /home/lfr/kernelcode_generate/TODO.md -done -task_id T-20260404-4397efbb -log /home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-gen-kernel-g1.md -agents-list /home/lfr/kernelcode_generate/agents/codex-multi-agents/agents-lists.md`
+    - 结果：当前任务已标记完成，`agents-lists.md` 中 `jcc你莫辜负` 状态同步成功。
+  - 已新建后续审查任务：
+    - `T-20260404-fbaa5803`
+    - 目标：在同一 `worktree` 中只读复核 `G3` 黑盒口径修正是否已经删除/降级对内部策略 helper 与策略名的直接依赖。
+- 结论：
+  - `T-20260404-4397efbb` 已完成并封板。
+  - 后续链路已按当前规则衔接到 `G3` 审查阶段，等待管理员核对并分发 `T-20260404-fbaa5803`。
+
+- 时间：`2026-04-04 04:41:26 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-fbaa5803`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/gen_kernel_op_driven_refactor_plan.md` 的 `G3` 只读复核 `spec/dsl/gen_kernel.md`、`test/dsl/test_gen_kernel.py` 与同链路记录文件，确认测试主口径已收口为只依赖 `gen_kernel(...)` 的黑盒验证，不再直接依赖 `_KernelEmitter._select_func_strategy(...)` 或内部策略名。
+- 审查前自检：
+  - 已核对 `G3` 计划目标/边界/验证命令/验收标准与当前 `spec/test/记录` 的一致性。
+  - 已检查 `spec/test` 中是否仍残留 `_KernelEmitter._select_func_strategy(...)`、`cpu_direct_return_nn_add`、`cpu_conv2d_img2col2d_tiled` 等内部策略合同依赖。
+  - 已补跑 `G3` 指定 gate、全量 `test/dsl/test_gen_kernel.py`，并复核记录中的修正说明是否能被当前文件状态与测试结果复现。
+- 审查结论：
+  - `通过`。
+- 审查结果：
+  - `ARCHITECTURE/plan/gen_kernel_op_driven_refactor_plan.md` 的 `G3` 仍要求“测试主口径只看 gen_kernel(...)”，见计划 `G3` 的 `测试输出` 与 `验收标准`。
+  - `spec/dsl/gen_kernel.md` 已在公开接口与 `GK-021` 中收口为纯黑盒口径：只允许稳定依赖 `gen_kernel(...)`，且明确“测试不得直接依赖内部 helper、内部策略函数或内部策略名”。
+  - `test/dsl/test_gen_kernel.py` 中原先依赖 `_KernelEmitter._select_func_strategy(...)` 的测试已删除，`GK-021` 现为 `test_gen_kernel_black_box_direct_return_nn_add_conv2d_img2col2d_tiled_and_npu_demo_contracts`，只通过 `gen_kernel(...)` 输出断言 direct-return `nn.add`、`conv2d_img2col2d_tiled(...)`、`npu_demo` 三类特化的既有公开合同。
+  - 当前 `spec/test` 中已不存在对 `_KernelEmitter._select_func_strategy(...)`、`cpu_direct_return_nn_add`、`cpu_conv2d_img2col2d_tiled` 的直接合同依赖；`npu_demo_body_level_kernel` 仅以公开场景/测试名片段出现，不再作为内部 selector 或策略名断言。
+  - 记录文件与现状一致：先前 `G3` 不通过点、后续黑盒口径修正内容、以及当前 gate/全量测试结果都能被复现。
+- 漏洞与边界排查：
+  - 功能正确性：通过。`G3` 关注的三类函数级特化仍保持既有黑盒输出合同。
+  - 边界条件：通过。测试主口径已回到 `gen_kernel(...)` 黑盒，未再把内部 selector 重新升格为公开依赖。
+  - 异常路径：通过。`npu_demo` unknown body/nonempty body 负例仍保留，未被本轮黑盒化误伤。
+  - 潜在漏洞/歧义：当前 `G3` 范围内未见新的双口径、内部 helper 回流或计划/测试失配。
+- 验证：
+  - `python -m pytest -q test/dsl/test_gen_kernel.py -k 'direct_return_nn_add or conv2d_img2col2d_tiled or npu_demo'` -> `8 passed, 22 deselected`
+  - `python -m pytest -q test/dsl/test_gen_kernel.py` -> `30 passed`
+  - `git diff --check -- spec/dsl/gen_kernel.md test/dsl/test_gen_kernel.py` -> `0`
+  - `rg -n "_KernelEmitter\\._select_func_strategy|cpu_direct_return_nn_add|cpu_conv2d_img2col2d_tiled|npu_demo_body_level_kernel" spec/dsl/gen_kernel.md test/dsl/test_gen_kernel.py`
+    - 结果：仅剩 `npu_demo_body_level_kernel` 作为公开场景/测试名片段；未再出现对 selector/helper 或内部策略名的直接合同依赖。
+- 下一步建议：
+  - 进入同链合并阶段；合并范围必须覆盖当前已完成的 `G1 + G2 + G3` 全部 `spec / 实现 / 测试 / 记录文件`，不能只带 `G3` 增量。
+
+- 时间：`2026-04-04 04:42:31 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-fbaa5803`
+- 任务目标：
+  - 完成当前 `G3` 复审任务流转，并按同链路补建唯一后续合并任务。
+- 执行：
+  - 已执行 `-done`：
+    - `bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file TODO.md -done -task_id T-20260404-fbaa5803 -log agents/codex-multi-agents/log/task_records/2026/14/20260404-gen-kernel-g1.md -agents-list agents/codex-multi-agents/agents-lists.md`
+    - 结果：`OK: done T-20260404-fbaa5803`
+  - 已新建唯一后续任务：
+    - `T-20260404-a4c85703`
+    - 任务方向：按整条已完成链路合并 `G1 + G2 + G3` 的 `spec / 实现 / 测试 / 记录文件`。
+- 合并范围确认：
+  - `wt-20260404-gen-kernel-g1/spec/dsl/gen_kernel.md`
+  - `wt-20260404-gen-kernel-g1/kernel_gen/dsl/gen_kernel.py`
+  - `wt-20260404-gen-kernel-g1/test/dsl/test_gen_kernel.py`
+  - `agents/codex-multi-agents/log/task_records/2026/14/20260404-gen-kernel-g1.md`
+- 结论：
+  - `T-20260404-fbaa5803` 已完成并封板。
+  - 后续链路已按当前规则衔接到整链合并阶段，等待管理员核对并分发 `T-20260404-a4c85703`。
