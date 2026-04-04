@@ -119,38 +119,6 @@ class Memory:
     - 功能实现: kernel_gen/symbol_variable/memory.py
     """
 
-    def __init__(
-        self: "Memory",
-        shape: ShapeLike,
-        dtype: NumericType | None = None,
-        space: MemorySpace = MemorySpace.GM,
-        stride: ShapeLike | None = None,
-        format: Farmat = Farmat.Norm,
-    ) -> None:
-        """初始化 Memory。
-
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
-
-        功能说明:
-        - 规范化 shape/stride，并记录 space/format/dtype。
-        - dtype 省略时默认使用 NumericType.Float32。
-
-        使用示例:
-        - Memory([1, 2], NumericType.Float32, space=MemorySpace.LM)
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/symbol_variable/test_memory.py
-        - test: test/operation/test_memory_operation.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        self.shape = self._normalize_shape(shape)
-        self.dtype = dtype or NumericType.Float32
-        self.stride = self._default_stride(self.shape) if stride is None else self._normalize_stride(stride)
-        self.format = format
-        self.space = space
-
     @staticmethod
     def _normalize_shape(value: ShapeLike) -> SymbolShape:
         """规范化 shape/stride 输入为 SymbolShape。
@@ -198,31 +166,6 @@ class Memory:
         return normalized
 
     @staticmethod
-    def _promote_ranked_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
-        """按固定优先级选择顺序更靠后的 dtype。"""
-        if lhs not in _ARITHMETIC_DTYPE_RANK or rhs not in _ARITHMETIC_DTYPE_RANK:
-            raise TypeError("Memory dtype mismatch")
-        return lhs if _ARITHMETIC_DTYPE_RANK[lhs] >= _ARITHMETIC_DTYPE_RANK[rhs] else rhs
-
-    @staticmethod
-    def _clone_shape_like(value: SymbolShape | None) -> SymbolShape | None:
-        """克隆 SymbolShape，避免元数据别名共享。"""
-        if value is None:
-            return None
-        return SymbolShape(value.get_values())
-
-    def _tensor_repr(self: "Memory") -> str:
-        """统一生成 Tensor(...) 文本片段。"""
-        return (
-            "Tensor("
-            f"shape={self.shape}, "
-            f"dtype={self.dtype}, "
-            f"stride={self.stride}, "
-            f"format={self.format}"
-            ")"
-        )
-
-    @staticmethod
     def _default_stride(shape: SymbolShape) -> SymbolShape:
         """按连续行主序生成默认 stride。
 
@@ -249,6 +192,63 @@ class Memory:
             running = dim * running
         stride_values.reverse()
         return SymbolShape(stride_values)
+
+    def __init__(
+        self: "Memory",
+        shape: ShapeLike,
+        dtype: NumericType | None = None,
+        space: MemorySpace = MemorySpace.GM,
+        stride: ShapeLike | None = None,
+        format: Farmat = Farmat.Norm,
+    ) -> None:
+        """初始化 Memory。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 规范化 shape/stride，并记录 space/format/dtype。
+        - dtype 省略时默认使用 NumericType.Float32。
+
+        使用示例:
+        - Memory([1, 2], NumericType.Float32, space=MemorySpace.LM)
+
+        关联文件:
+        - spec: spec/symbol_variable/memory.md
+        - test: test/symbol_variable/test_memory.py
+        - test: test/operation/test_memory_operation.py
+        - 功能实现: kernel_gen/symbol_variable/memory.py
+        """
+        self.shape = self._normalize_shape(shape)
+        self.dtype = dtype or NumericType.Float32
+        self.stride = self._default_stride(self.shape) if stride is None else self._normalize_stride(stride)
+        self.format = format
+        self.space = space
+
+    @staticmethod
+    def _promote_ranked_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
+        """按固定优先级选择顺序更靠后的 dtype。"""
+        if lhs not in _ARITHMETIC_DTYPE_RANK or rhs not in _ARITHMETIC_DTYPE_RANK:
+            raise TypeError("Memory dtype mismatch")
+        return lhs if _ARITHMETIC_DTYPE_RANK[lhs] >= _ARITHMETIC_DTYPE_RANK[rhs] else rhs
+
+    @staticmethod
+    def _clone_shape_like(value: SymbolShape | None) -> SymbolShape | None:
+        """克隆 SymbolShape，避免元数据别名共享。"""
+        if value is None:
+            return None
+        return SymbolShape(value.get_values())
+
+    def _tensor_repr(self: "Memory") -> str:
+        """统一生成 Tensor(...) 文本片段。"""
+        return (
+            "Tensor("
+            f"shape={self.shape}, "
+            f"dtype={self.dtype}, "
+            f"stride={self.stride}, "
+            f"format={self.format}"
+            ")"
+        )
 
     def get_shape(self: "Memory") -> list[int | str]:
         """返回序列化后的 shape 列表。
@@ -348,44 +348,6 @@ class Memory:
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         return self.format
-
-    def __repr__(self: "Memory") -> str:
-        """返回 Memory 的字符串表示。
-
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 返回 Memory(<space name>,Tensor(shape=..., dtype=..., stride=..., format=...))。
-
-        使用示例:
-        - repr(Memory([1, 2], NumericType.Float32))
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/symbol_variable/test_memory.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        return f"Memory({self.space.name},{self._tensor_repr()})"
-
-    def __str__(self: "Memory") -> str:
-        """返回 Memory 的字符串表示。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 直接复用 __repr__ 的输出格式。
-
-        使用示例:
-        - str(Memory([1, 2], NumericType.Float32))
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/symbol_variable/test_memory.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        return self.__repr__()
 
     def _ensure_same_shape(self: "Memory", other: "Memory") -> None:
         """校验 Memory 形状一致。
@@ -736,44 +698,6 @@ class Memory:
         """
         return self._binary_arithmetic(other)
 
-    def __eq__(self: "Memory", other: object) -> "Memory":
-        """逐元素相等比较。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 支持 Memory/Memory 与 Memory/int，返回 predicate dtype。
-
-        使用示例:
-        - mem == other
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        return self._binary_compare(other)
-
-    def __ne__(self: "Memory", other: object) -> "Memory":
-        """逐元素不等比较。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 支持 Memory/Memory 与 Memory/int，返回 predicate dtype。
-
-        使用示例:
-        - mem != other
-
-        关联文件:
-        - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
-        - 功能实现: kernel_gen/symbol_variable/memory.py
-        """
-        return self._binary_compare(other)
-
     def __lt__(self: "Memory", other: object) -> "Memory":
         """逐元素小于比较。
 
@@ -804,6 +728,44 @@ class Memory:
 
         使用示例:
         - mem <= other
+
+        关联文件:
+        - spec: spec/symbol_variable/memory.md
+        - test: test/operation/test_memory_operation.py
+        - 功能实现: kernel_gen/symbol_variable/memory.py
+        """
+        return self._binary_compare(other)
+
+    def __eq__(self: "Memory", other: object) -> "Memory":
+        """逐元素相等比较。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 支持 Memory/Memory 与 Memory/int，返回 predicate dtype。
+
+        使用示例:
+        - mem == other
+
+        关联文件:
+        - spec: spec/symbol_variable/memory.md
+        - test: test/operation/test_memory_operation.py
+        - 功能实现: kernel_gen/symbol_variable/memory.py
+        """
+        return self._binary_compare(other)
+
+    def __ne__(self: "Memory", other: object) -> "Memory":
+        """逐元素不等比较。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 支持 Memory/Memory 与 Memory/int，返回 predicate dtype。
+
+        使用示例:
+        - mem != other
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
@@ -849,3 +811,41 @@ class Memory:
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         return self._binary_compare(other)
+
+    def __repr__(self: "Memory") -> str:
+        """返回 Memory 的字符串表示。
+
+        创建者: 小李飞刀
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 返回 Memory(<space name>,Tensor(shape=..., dtype=..., stride=..., format=...))。
+
+        使用示例:
+        - repr(Memory([1, 2], NumericType.Float32))
+
+        关联文件:
+        - spec: spec/symbol_variable/memory.md
+        - test: test/symbol_variable/test_memory.py
+        - 功能实现: kernel_gen/symbol_variable/memory.py
+        """
+        return f"Memory({self.space.name},{self._tensor_repr()})"
+
+    def __str__(self: "Memory") -> str:
+        """返回 Memory 的字符串表示。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 直接复用 __repr__ 的输出格式。
+
+        使用示例:
+        - str(Memory([1, 2], NumericType.Float32))
+
+        关联文件:
+        - spec: spec/symbol_variable/memory.md
+        - test: test/symbol_variable/test_memory.py
+        - 功能实现: kernel_gen/symbol_variable/memory.py
+        """
+        return self.__repr__()
