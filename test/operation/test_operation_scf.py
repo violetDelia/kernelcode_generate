@@ -1,7 +1,7 @@
 """scf operation API tests.
 
 创建者: 摸鱼小分队
-最后一次更改: 朽木露琪亚
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 kernel_gen/operation/scf.py 的 loop 语义。
@@ -119,3 +119,41 @@ def test_loop_invalid_type() -> None:
         loop(0, "4", 1)
     with pytest.raises(TypeError):
         loop(0, 4, "1")
+
+
+# TC-OP-SCF-006
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-04 21:02:42 +0800
+# 最近一次运行成功时间: 2026-04-04 21:02:42 +0800
+# 测试目的: 验证 trip_count <= 0 时抛出 ValueError。
+# 使用示例: pytest -q test/operation/test_operation_scf.py -k test_loop_trip_count_invalid
+# 对应功能实现文件路径: kernel_gen/operation/scf.py
+# 对应 spec 文件路径: spec/operation/scf.md
+# 对应测试文件路径: test/operation/test_operation_scf.py
+def test_loop_trip_count_invalid() -> None:
+    start = SymbolDim("M")
+    end = SymbolDim("N")
+    step = SymbolDim("S")
+    with pytest.raises(ValueError):
+        loop(start, end, step, trip_count=0)
+    with pytest.raises(ValueError):
+        loop(start, end, step, trip_count=-1)
+
+
+# TC-OP-SCF-007
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-04 21:02:42 +0800
+# 最近一次运行成功时间: 2026-04-04 21:02:42 +0800
+# 测试目的: 验证 trip_count=3 时序列语义与 LoopRange 可访问 trip_count。
+# 使用示例: pytest -q test/operation/test_operation_scf.py -k test_loop_trip_count_sequence_semantics
+# 对应功能实现文件路径: kernel_gen/operation/scf.py
+# 对应 spec 文件路径: spec/operation/scf.md
+# 对应测试文件路径: test/operation/test_operation_scf.py
+def test_loop_trip_count_sequence_semantics() -> None:
+    end = SymbolDim("N")
+    loop_range = loop(1, end, 2, trip_count=3)
+    assert isinstance(loop_range, LoopRange)
+    assert loop_range.trip_count == 3
+    assert [loop_range.start + loop_range.step * i for i in range(loop_range.trip_count)] == [1, 3, 5]
