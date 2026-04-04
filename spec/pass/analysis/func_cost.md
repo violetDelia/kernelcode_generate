@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`jcc你莫辜负`
 - `spec`：[`spec/pass/analysis/func_cost.md`](../../../spec/pass/analysis/func_cost.md)
 - `功能实现`：[`kernel_gen/passes/analysis/func_cost.py`](../../../kernel_gen/passes/analysis/func_cost.py)
 - `test`：[`test/pass/test_analysis_func_cost.py`](../../../test/pass/test_analysis_func_cost.py)
@@ -45,6 +45,7 @@
 - `OpCost.compute/read_bytes/write_bytes` 与 `FuncCostSummary.total_compute/total_read_bytes/total_write_bytes` 都只能是 `AnalysisResult` 的 derived alias：
   - `compute` 来自统一入口已产出的计算总量派生口径；
   - `read_bytes` / `write_bytes` 来自统一入口已产出的访存项派生口径。
+- `func_cost` 不得自行手写 `path_bandwidth/path_latency_ns/theoretical_compute` 默认值；这些分析参数的正式 baseline 只能通过 `AnalysisConfig(target="npu_demo", ...)` 从 `target registry` 读取，再由统一入口消费。
 - 比较结果 `i1` 的 `predicate_size`、`tensor + const` 是否计读、DMA 分支是否纳入统计、未知 op 是否 `skip + warning`，都继承统一入口当前主线行为；本文件不再重写这些规则。
 - 若统一入口未来调整 item schema、derived alias 实现或承接范围，`func_cost` 必须跟随该主线更新；不得在本 pass 内保留旧公式分支以维持第二套稳定口径。
 

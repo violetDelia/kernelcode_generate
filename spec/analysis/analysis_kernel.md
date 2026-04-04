@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`jcc你莫辜负`
 - `spec`：[`spec/analysis/analysis_kernel.md`](../../spec/analysis/analysis_kernel.md)
 - `功能实现`：[`kernel_gen/analysis/analysis.py`](../../kernel_gen/analysis/analysis.py)
 - `test`：[`test/analysis/test_analysis.py`](../../test/analysis/test_analysis.py)
@@ -34,6 +34,7 @@
 
 - 基于 `Memory`/`Operation` 的兼容公式接口（包括 `analyze_function(...)` 与各公式 helper）仅覆盖 `add/sub/mul/truediv/eq/ne/lt/le/gt/ge/broadcast/matmul`；在这一路径上传入其它算子必须拒绝。
 - `analyze_kernel(...)` 只允许通过 `analysis(func_op, config, otherargs)` 聚合出 `AnalyzeKernelSummary`；不允许再维护第二套独立公式主线。
+- `analyze_kernel(...)` 构造 `AnalysisConfig` 时，默认分析参数必须来自 `target registry` 的 `npu_demo` baseline；不得在 facade 层手写 `path_bandwidth/path_latency_ns/theoretical_compute`。
 - `analyze_kernel(...)` 当前只对统一入口已承接的逐元素/`matmul` 成本统计，以及 `dma.load`、`dma.copy`、`dma.store` 的 DMA 分支统计产生结果；`arith.constant` 与 `func.return` 默认忽略。
 - 逐元素算术/比较不允许隐式广播，输入与输出 `shape` 必须严格一致。
 - `broadcast` 仅为显式操作，要求输出 rank 不小于输入 rank，尾维对齐且维度相等或输入维为静态 `1`。
@@ -158,6 +159,7 @@ assert summary.op_costs[0].op_name == "nn.add"
 - 注意事项：
   - 该接口是 facade / adapter，不再是长期主入口；长期主入口见 [`analysis_engine.md`](../../spec/analysis/analysis_engine.md)。
   - 主入口签名固定为 `analyze_kernel(func_op: func.FuncOp, args: Iterable[object] | None = None, predicate_size: int = 1, dtype_size_overrides: dict[str, int] | None = None, attach_attrs: bool = False) -> AnalyzeKernelSummary`。
+  - facade 内部必须先构造 `AnalysisConfig(target="npu_demo", metric_overrides=None, ...)` 一类统一入口配置，再消费 `AnalysisResult`；不得在 facade 层重建独立分析参数字典。
   - `func_cost` 若需要 `compute/read_bytes/write_bytes` 兼容字段，必须直接消费统一入口 `AnalysisResult` 的 derived alias，不再经过 `AnalyzeKernelSummary` 建立稳定依赖。
   - 未知 op 必须发出 `UserWarning`，warning 文本需包含 unknown op 信息，并执行 `skip + warning`：不计入 `op_costs`、`total_*` 或对应 `value_traffic`，但分析必须继续完成；当前已承接公开的 `dma.load`、`dma.copy`、`dma.store` 不属于该 warning 分支。
   - 当前公开 DMA 分支中，`dma.load` 作为产生结果 value 的 op，需要把结果写流量登记到对应 `value_traffic`；`dma.copy`、`dma.store` 记录源读/目标写流量。

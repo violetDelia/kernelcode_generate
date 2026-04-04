@@ -1,7 +1,7 @@
 """Analysis tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 覆盖逐元素算术/比较、broadcast、matmul 与函数级聚合统计。
@@ -93,6 +93,7 @@ from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
+from kernel_gen.target import registry as target_registry
 
 
 @irdl_op_definition
@@ -821,6 +822,115 @@ def test_analysis_func_write_attrs_is_explicit_and_analyze_kernel_is_facade() ->
     assert func_op.attributes["analysis.compute"].data == "6"
     assert func_op.attributes["analysis.read_bytes"].data == "48"
     assert func_op.attributes["analysis.write_bytes"].data == "24"
+
+
+# AN-020A
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 测试目的: 验证 analyze_kernel 只是 AnalysisResult 的 facade，不维护独立公式。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analyze_kernel_is_facade_over_analysis_result
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_kernel.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analyze_kernel_is_facade_over_analysis_result() -> None:
+    mem_type = _make_memory_type([IntAttr(2), IntAttr(3)], f32, "global")
+    space = _make_space("global")
+
+    def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
+        add_op = NnAddOp(block.args[0], block.args[1], mem_type, space)
+        return [add_op], add_op.result
+
+    _, func_op, _ = _build_module([mem_type, mem_type], mem_type, _builder)
+    result = analysis(
+        func_op,
+        AnalysisConfig(
+            enable_compute=True,
+            enable_memory=True,
+            write_op_attrs=False,
+            write_func_attrs=False,
+            dtype_size_overrides={"f32": 4},
+        ),
+    )
+    summary = analyze_kernel(func_op, dtype_size_overrides={"f32": 4})
+
+    assert summary.op_costs == result.op_costs
+    assert summary.value_traffic == result.value_traffic
+    _assert_expr_equal(summary.total_compute, result.total_compute)
+    _assert_expr_equal(summary.total_read_bytes, result.total_read_bytes)
+    _assert_expr_equal(summary.total_write_bytes, result.total_write_bytes)
+
+
+# AN-020B
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 测试目的: 验证 AnalysisConfig 的默认分析参数来自 npu_demo target registry。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_entry_reads_defaults_from_npu_demo_target
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_entry_reads_defaults_from_npu_demo_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    custom_defaults = {
+        "path_bandwidth": {"GM->LM": 96},
+        "path_latency_ns": {"GM->LM": 11},
+        "theoretical_compute": {"scalar": 3, "vector": 9, "tensor": 27, "math": 1},
+    }
+
+    def _fake_defaults(target: str) -> dict[str, dict[str, int]]:
+        assert target == "npu_demo"
+        return {key: dict(value) for key, value in custom_defaults.items()}
+
+    monkeypatch.setattr(analysis_module.target_registry, "get_target_analysis_defaults", _fake_defaults)
+
+    source_type = _make_memory_type([IntAttr(2), IntAttr(4)], f32, "global")
+    target_type = _make_memory_type([IntAttr(2), IntAttr(4)], f32, "local")
+    block = Block(arg_types=[source_type, target_type])
+    copy_op = DmaCopyOp(block.args[0], block.args[1])
+    config = AnalysisConfig(target="npu_demo", enable_compute=False, enable_memory=True)
+    result = analysis(copy_op, config)
+
+    assert config.path_bandwidth == custom_defaults["path_bandwidth"]
+    assert config.path_latency_ns == custom_defaults["path_latency_ns"]
+    assert config.theoretical_compute == custom_defaults["theoretical_compute"]
+
+    read_item, write_item = result.memory_items
+    assert read_item.path == "GM->LM"
+    assert read_item.latency_ns == sp.Integer(11)
+    assert read_item.bandwidth == sp.Integer(96)
+    _assert_expr_equal(read_item.time_ns or sp.Integer(0), sp.Integer(11) + sp.Rational(32, 96))
+    assert write_item.path == "GM->LM"
+    assert write_item.latency_ns == sp.Integer(11)
+    assert write_item.bandwidth == sp.Integer(96)
+    _assert_expr_equal(write_item.time_ns or sp.Integer(0), sp.Integer(11) + sp.Rational(32, 96))
+
+
+# AN-020C
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 测试目的: 验证 npu_demo target 缺少 analysis 默认参数时显式失败，不允许回退到手写常量。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_entry_rejects_missing_npu_demo_metric
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_entry_rejects_missing_npu_demo_metric(monkeypatch: pytest.MonkeyPatch) -> None:
+    broken_defaults = {
+        "path_bandwidth": {"GM->LM": 64},
+        "path_latency_ns": {"GM->LM": 20},
+    }
+
+    monkeypatch.setattr(
+        analysis_module.target_registry,
+        "get_target_analysis_defaults",
+        lambda target: broken_defaults,
+    )
+
+    with pytest.raises(AnalysisError, match="missing analysis metric defaults: theoretical_compute"):
+        AnalysisConfig(target="npu_demo")
 
 
 # AN-021

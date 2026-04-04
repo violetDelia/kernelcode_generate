@@ -1,0 +1,304 @@
+# 20260404-analysis-mainline-a1-v2
+
+- 时间：`2026-04-04 03:54:18 +0800`
+- 经办人：`jcc你莫辜负`
+- 任务：`T-20260404-7b79f47c`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/analysis_mainline_refactor_plan.md` 的 `A1` 收口统一入口、结果结构、旧 facade/兼容层责任边界，并同时收口分析参数来自 `npu_demo target registry` 的基线来源。
+- 改动：
+  - 更新 `kernel_gen/analysis/analysis.py`：
+    - 将 `AnalysisConfig` 的稳定公开输入改为 `target="npu_demo"` 与 `metric_overrides`，不再把 `path_bandwidth/path_latency_ns/theoretical_compute` 暴露成调用方长期手写输入。
+    - 新增 `_load_target_metric_defaults(...) / _normalize_metric_overrides(...) / _merge_metric_defaults(...)`，固定由 `target registry` 读取 `npu_demo` analysis baseline，再叠加显式 override hook。
+    - 保持 `analysis(...) -> AnalysisResult` 为唯一长期主线；`analyze_kernel(...)` 继续只作为 facade，消费 `AnalysisResult` 的 `op_costs/value_traffic/total_* derived alias`。
+  - 更新 `kernel_gen/target/registry.py`：
+    - 为 `npu_demo` 新增固定 analysis 默认参数来源：`path_bandwidth`、`path_latency_ns`、`theoretical_compute`。
+    - 新增 `get_target_analysis_defaults(target)` 查询入口，供 `analysis` 主线读取正式 baseline。
+  - 更新 `spec/analysis/analysis_engine.md`：
+    - 写清 `AnalysisConfig` 的稳定字段改为 `target + metric_overrides`，并明确 `path_bandwidth/path_latency_ns/theoretical_compute` 来自 `target registry` 的 `npu_demo` baseline。
+  - 更新 `spec/analysis/analysis_kernel.md`：
+    - 写清 `analyze_kernel(...)` 只是 `AnalysisResult` 的 facade，内部必须通过 `AnalysisConfig(target="npu_demo", ...)` 进入统一主线，不得重建独立分析参数字典。
+  - 更新 `spec/pass/analysis/func_cost.md`：
+    - 写清 `func_cost` 只消费 `AnalysisResult/derived alias`，不得自行手写 `path_bandwidth/path_latency_ns/theoretical_compute` 默认值。
+  - 更新 `spec/target/registry.md`：
+    - 为 `npu_demo` 增补 analysis baseline 说明与 `get_target_analysis_defaults(...)` 查询合同。
+  - 更新测试：
+    - `test/analysis/test_analysis.py`
+      - 新增 `test_analyze_kernel_is_facade_over_analysis_result`
+      - 新增 `test_analysis_entry_reads_defaults_from_npu_demo_target`
+      - 新增 `test_analysis_entry_rejects_missing_npu_demo_metric`
+    - `test/pass/test_analysis_func_cost.py`
+      - 新增 `test_func_cost_uses_analysis_result_or_derived_alias`
+    - `test/target/test_target_registry.py`
+      - 新增 `test_target_registry_npu_demo_analysis_defaults`
+- 验证：
+  - 任务要求 gate：
+    - `pytest -q test/analysis/test_analysis.py -k 'analysis_entry or facade or derived_alias'` -> `6 passed, 32 deselected`
+    - `pytest -q test/pass/test_analysis_func_cost.py -k 'derived_alias or facade'` -> `1 passed, 12 deselected`
+    - `pytest -q test/target/test_target_registry.py -k 'npu_demo'` -> `3 passed, 15 deselected`
+  - 全量回归：
+    - `pytest -q test/analysis/test_analysis.py` -> `38 passed`
+    - `pytest -q test/pass/test_analysis_func_cost.py` -> `13 passed`
+    - `pytest -q test/target/test_target_registry.py` -> `18 passed`
+  - 代码整洁性：
+    - `python -m py_compile kernel_gen/analysis/analysis.py kernel_gen/target/registry.py test/analysis/test_analysis.py test/pass/test_analysis_func_cost.py test/target/test_target_registry.py` -> `0`
+    - `git diff --check -- spec/analysis/analysis_engine.md spec/analysis/analysis_kernel.md spec/pass/analysis/func_cost.md spec/target/registry.md kernel_gen/analysis/analysis.py kernel_gen/target/registry.py test/target/test_target_registry.py test/analysis/test_analysis.py test/pass/test_analysis_func_cost.py` -> `0`
+- 自检：
+  - 目标收口：通过。长期主线仍是 `analysis(...) -> AnalysisResult`；`analyze_kernel(...)` 与 `func_cost` 都只剩 facade/derived alias 责任。
+  - 基线来源：通过。`AnalysisConfig` 默认分析参数不再来自调用点手写常量，而是来自 `npu_demo target registry`；缺字段时显式 `AnalysisError` 失败。
+  - 边界检查：通过。未在本轮落地 `compute/`、`memory/` 分目录，也未推进函数级聚合消费闭环之外的新主线。
+  - 改动范围：通过。只修改了任务允许的 `spec/实现/测试/记录` 文件。
+- 结论：
+  - `A1` 已按边界完成，无阻塞。
+
+- 时间：`2026-04-04 03:55:20 +0800`
+- 经办人：`jcc你莫辜负`
+- 任务：`T-20260404-7b79f47c`
+- 任务目标：
+  - 完成当前 `A1` 任务流转，并按同链路补建唯一后续审查任务。
+- 改动：
+  - 已执行：
+    - `codex-multi-agents-task.sh -file /home/lfr/kernelcode_generate/TODO.md -done -task_id T-20260404-7b79f47c -log /home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a1-v2.md -agents-list /home/lfr/kernelcode_generate/agents/codex-multi-agents/agents-lists.md`
+    - 结果：当前任务已标记完成，`agents-lists.md` 中 `jcc你莫辜负` 状态同步成功。
+  - 已新建后续审查任务：
+    - `T-20260404-bddd2d67`
+    - 目标：在同一 `worktree` 中只读复核 `A1` 的 `spec / 实现 / 测试 / 记录文件` 是否和计划、边界、验证命令、验收标准一致。
+- 结论：
+  - `T-20260404-7b79f47c` 已完成并封板。
+  - 后续链路已按当前规则衔接到 `A1` 审查阶段，等待管理员核对并分发 `T-20260404-bddd2d67`。
+
+- 时间：`2026-04-04 04:31:42 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-bddd2d67`
+- 任务目标：
+  - 按 `ARCHITECTURE/plan/analysis_mainline_refactor_plan.md` 的 `A1` 只读复核计划、`spec`、实现、测试与记录是否一致，重点检查 `analysis(...)` 主线、`AnalysisResult` 消费边界与 `npu_demo target registry` 默认参数来源。
+- 审查范围：
+  - `ARCHITECTURE/plan/analysis_mainline_refactor_plan.md`
+  - `spec/analysis/analysis_engine.md`
+  - `spec/analysis/analysis_kernel.md`
+  - `spec/pass/analysis/func_cost.md`
+  - `spec/target/registry.md`
+  - `kernel_gen/analysis/analysis.py`
+  - `kernel_gen/target/registry.py`
+  - `test/target/test_target_registry.py`
+  - `test/analysis/test_analysis.py`
+  - `test/pass/test_analysis_func_cost.py`
+  - 本记录文件
+- 自检：
+  - 证据充分性：通过。已核对计划、4 份 `spec`、2 份实现、3 份测试与记录，并实跑 gate 与全量测试。
+  - 功能正确性：通过。`analysis(...)` 仍是唯一主线；`analyze_kernel(...)` 与 `func_cost` 只消费 `AnalysisResult`/derived alias；`AnalysisConfig` 默认参数来自 `npu_demo target registry`。
+  - 边界条件：通过。`npu_demo` 缺 analysis defaults 显式失败；`func_cost` 未重建第二套默认参数；`analyze_function(...)` 仍停留在兼容公式接口，没有重新抬成主线。
+  - 异常路径与潜在漏洞：通过。未发现静默回退到手写常量、双公式分叉、未知 target 默认放过等风险。
+  - 计划/`spec`/实现/测试/记录一致性：不通过。计划中的 `A1` 验收测试名与当前实际测试文件不一致。
+- 问题列表：
+  - `P1`：`ARCHITECTURE/plan/analysis_mainline_refactor_plan.md` 的 `A1` 验收标准仍写旧测试名：
+    - `test_analysis_entry_returns_analysis_result`
+    - `test_analysis_config_reads_defaults_from_npu_demo_target`
+    - `test_analysis_config_rejects_missing_npu_demo_metric`
+    但当前实际闭环测试名分别是：
+    - `test_analysis_entry_returns_new_result_for_scalar_kernel_add`
+    - `test_analysis_entry_reads_defaults_from_npu_demo_target`
+    - `test_analysis_entry_rejects_missing_npu_demo_metric`
+    这会导致 `A1` 的计划门禁与当前测试文件不能机械映射，管理员无法按计划文本直接验收。
+- 通过项：
+  - `analysis(func_op, config, otherargs)` 的函数级聚合已经显式逐 op 调用公开入口 `analysis(op, config, otherargs)`。
+  - `analyze_kernel(...)` 只是 `AnalysisResult` facade，没有保留独立公式。
+  - `AnalyzeFuncCostPass` 只消费 `analysis(...)->AnalysisResult` 和 derived alias。
+  - `AnalysisConfig` 的默认 `path_bandwidth/path_latency_ns/theoretical_compute` 来自 `kernel_gen/target/registry.py` 的 `npu_demo` baseline，缺字段显式失败。
+- 验证：
+  - `python -m pytest -q test/analysis/test_analysis.py -k 'analysis_entry or facade or derived_alias'` -> `6 passed, 32 deselected`
+  - `python -m pytest -q test/pass/test_analysis_func_cost.py -k 'derived_alias or facade'` -> `1 passed, 12 deselected`
+  - `python -m pytest -q test/target/test_target_registry.py -k 'npu_demo'` -> `3 passed, 15 deselected`
+  - `python -m pytest -q test/analysis/test_analysis.py` -> `38 passed`
+  - `python -m pytest -q test/pass/test_analysis_func_cost.py` -> `13 passed`
+  - `python -m pytest -q test/target/test_target_registry.py` -> `18 passed`
+- 结论：
+  - `不通过`。
+  - 原因不是实现回退，而是 `A1` 计划门禁仍引用旧测试名，导致计划/测试映射不闭环。
+  - 下一步应创建同链路改进任务，只修正 `A1` 计划中的验收测试名与描述，使其与当前 `test_analysis.py` 实际名称对齐；实现与测试本身无需改动。
+
+- 时间：`2026-04-04 04:04:56 +0800`
+- 经办人：`咯咯咯`
+- 任务：`T-20260404-61a969bc`
+- 任务目标：
+  - 仅修改 `ARCHITECTURE/plan/analysis_mainline_refactor_plan.md` 与同链路记录文件，把 `A1` 验收标准中的旧测试名收口到 `test/analysis/test_analysis.py` 当前真实测试名；保持 `spec`、实现、测试行为不变。
+- 改动：
+  - 更新 [`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md) 的 `A1` 验收标准：
+    - `test_analysis_entry_returns_analysis_result` -> `test_analysis_entry_returns_new_result_for_scalar_kernel_add`
+    - `test_analysis_config_reads_defaults_from_npu_demo_target` -> `test_analysis_entry_reads_defaults_from_npu_demo_target`
+    - `test_analysis_config_rejects_missing_npu_demo_metric` -> `test_analysis_entry_rejects_missing_npu_demo_metric`
+  - 同步把两条带说明的验收文本改成当前真实测试名，避免计划与 `test_analysis.py` 再出现旧映射双口径。
+- 结论：
+  - `已把 A1 验收标准中的旧测试名收口到当前真实测试名；本轮未改 spec/实现/测试行为。`
+
+- 时间：`2026-04-04 04:06:09 +0800`
+- 经办人：`咯咯咯`
+- 任务：`T-20260404-61a969bc`
+- 任务目标：
+  - 完成前自检计划映射是否已与当前真实测试名完全收口，且本轮未误改正文边界或实现/测试行为。
+- 改动：
+  - 复核 `analysis_mainline_refactor_plan.md` 中三个旧测试名已全部移除。
+  - 复核三条新测试名均已同时存在于计划文件与当前 `wt-20260404-analysis-mainline-a1/test/analysis/test_analysis.py`。
+  - 执行 `git diff --check -- ARCHITECTURE/plan/analysis_mainline_refactor_plan.md agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a1-v2.md`，结果通过。
+- 结论：
+  - `自检通过：A1 验收标准中的测试名映射已与当前真实测试名一致，本轮只修计划口径和记录，不改 spec/实现/测试行为。`
+
+- 时间：`2026-04-04 04:28:58 +0800`
+- 经办人：`咯咯咯`
+- 任务：`T-20260404-d5a7d288`
+- 任务目标：
+  - 仅修正 `A1` 进度表中 `T-20260404-61a969bc` 的完成时间/结果口径，使其与 `DONE.md` 和同链路记录一致；不改三条验收测试名映射，不改 `spec/实现/测试` 正文，也不改当前任务自身的进行中状态。
+- 改动：
+  - 仅修改 [`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md) 的 `A1` 进度表，把 `T-20260404-61a969bc` 的完成时间从 `2026-04-04 04:43:16 +0800` 收口为与 [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2197) 一致的 `2026-04-04 04:06:35 +0800`。
+  - 追加当前记录，说明本轮只修 `61a969bc` 的状态时间口径，不动三条验收测试名映射和其他正文内容。
+- 结论：
+  - `已按管理员确认，只收口 T-20260404-61a969bc 的完成时间/结果口径；其余映射和正文行为保持不变。`
+
+- 时间：`2026-04-04 04:29:42 +0800`
+- 经办人：`咯咯咯`
+- 任务：`T-20260404-d5a7d288`
+- 任务目标：
+  - 完成前自检本轮是否只修 `61a969bc` 的状态时间口径，且没有误改三条验收测试名映射或正文行为。
+- 改动：
+  - 复核 `A1` 进度表已包含 `T-20260404-61a969bc` 的完成时间 `2026-04-04 04:06:35 +0800`，旧时间 `2026-04-04 04:43:16 +0800` 已移除。
+  - 复核三条验收测试名映射仍保持：
+    - `test_analysis_entry_returns_new_result_for_scalar_kernel_add`
+    - `test_analysis_entry_reads_defaults_from_npu_demo_target`
+    - `test_analysis_entry_rejects_missing_npu_demo_metric`
+  - 执行 `git diff --check -- ARCHITECTURE/plan/analysis_mainline_refactor_plan.md agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a1-v2.md`，结果通过。
+- 结论：
+  - `自检通过：本轮只修 61a969bc 的状态时间口径，验收测试名映射和正文行为未被误改。`
+
+- 时间：`2026-04-04 04:58:51 +0800`
+- 经办人：`咯咯咯`
+- 任务：`T-20260404-ea4bd803`
+- 任务目标：
+  - 仅修正 `A1` 进度表中 `T-20260404-d5a7d288` 的状态口径，使其与 `DONE.md` 和同链路记录一致；不改 `T-20260404-61a969bc` 的完成时间/结果口径，不改三条验收测试名映射，也不改 `spec/实现/测试` 正文。
+- 改动：
+  - 仅修改 [`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md) 的 `A1` 进度表，把 `T-20260404-d5a7d288` 从“状态一致性修正进行中（2026-04-04 04:53:31 +0800）”收口为与 [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2199) 一致的“状态一致性修正完成（2026-04-04 04:30:09 +0800）”。
+  - 追加当前记录，说明本轮只修 `d5a7d288` 的状态口径，不动三条验收测试名映射和正文内容。
+- 结论：
+  - `已按管理员口径，只收口 T-20260404-d5a7d288 的状态时间/结果口径；61a969bc 映射、三条验收测试名与正文行为保持不变。`
+
+- 时间：`2026-04-04 04:59:44 +0800`
+- 经办人：`咯咯咯`
+- 任务：`T-20260404-ea4bd803`
+- 任务目标：
+  - 完成前自检本轮是否只修 `d5a7d288` 的状态口径，且没有误改 `61a969bc` 的完成时间/结果口径、三条验收测试名映射或正文行为。
+- 改动：
+  - 复核 `A1` 进度表里 `T-20260404-61a969bc` 仍保持 `2026-04-04 04:06:35 +0800` 的完成时间。
+  - 复核 `T-20260404-d5a7d288` 已收口为 `状态一致性修正完成（2026-04-04 04:30:09 +0800）`，旧的“进行中”状态已移除。
+  - 复核三条验收测试名映射仍保持：
+    - `test_analysis_entry_returns_new_result_for_scalar_kernel_add`
+    - `test_analysis_entry_reads_defaults_from_npu_demo_target`
+    - `test_analysis_entry_rejects_missing_npu_demo_metric`
+  - 执行 `git diff --check -- ARCHITECTURE/plan/analysis_mainline_refactor_plan.md agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a1-v2.md`，结果通过。
+- 结论：
+  - `自检通过：本轮只修 d5a7d288 的状态口径，61a969bc 的时间/结果、三条验收测试名映射和正文行为未被误改。`
+
+- 时间：`2026-04-04 04:33:51 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-bddd2d67`
+- 任务目标：
+  - 完成当前 `A1` 审查任务流转，并创建唯一后续任务。
+- 执行：
+  - 已执行 `-done`：
+    - `bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file TODO.md -done -task_id T-20260404-bddd2d67 -log agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a1-v2.md -agents-list agents/codex-multi-agents/agents-lists.md`
+    - 结果：`OK: done T-20260404-bddd2d67`
+  - 已新建唯一后续任务：
+    - `T-20260404-61a969bc`
+    - 任务方向：改进 `A1` 计划门禁映射，仅修正 `analysis_mainline_refactor_plan.md` 中与现有测试名不一致的验收测试名/描述，保持 `spec`、实现、测试行为不变。
+- 结论：
+  - `T-20260404-bddd2d67` 已完成并封板。
+  - 后续链路等待管理员核对并分发 `T-20260404-61a969bc`。
+
+- 时间：`2026-04-04 04:20:45 +0800`
+- 经办人：`不要啊教练`
+- 任务：`T-20260404-802e9d47`
+- 任务目标：
+  - 只读核对主目录 [`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md) 与同链路记录文件，确认 `A1` 验收标准中的三条测试名已收口到 [`test/analysis/test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a1/test/analysis/test_analysis.py) 当前真实测试名，且本轮未改 `spec/实现/测试` 行为。
+- 改动：
+  - 只读复核主目录计划、同链路记录与当前测试文件名；未修改 `spec`、实现或测试文件。
+  - 自检结果：
+    - 证据充分性：已核对 `A1` 计划块、当前真实测试名、同链路记录中的修正说明、`DONE.md` 完成状态以及格式校验结果。
+    - 功能正确性：通过。`A1` 验收标准中的三条测试名已经全部收口到当前真实测试名：
+      - [`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md#L361) `test_analysis_entry_returns_new_result_for_scalar_kernel_add`
+      - [`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md#L364) `test_analysis_entry_reads_defaults_from_npu_demo_target`
+      - [`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md#L365) `test_analysis_entry_rejects_missing_npu_demo_metric`
+      这三条都能在 [`test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a1/test/analysis/test_analysis.py#L715)、[`test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a1/test/analysis/test_analysis.py#L875)、[`test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a1/test/analysis/test_analysis.py#L920) 中机械命中。
+    - 边界条件：通过。同链路记录 [`20260404-analysis-mainline-a1-v2.md`](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a1-v2.md#L119) 到 [`20260404-analysis-mainline-a1-v2.md`](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a1-v2.md#L143) 已明确写清本轮只修计划口径和记录，不改 `spec/实现/测试` 行为。
+    - 异常路径与潜在漏洞：本轮未触碰实现逻辑，不存在新增功能/边界绕过；唯一剩余问题见结论。
+    - 计划/记录一致性：不通过。测试名映射已收口，但进度状态与记录/`DONE` 未完全一致。
+  - 验证：
+    - `rg -n "test_analysis_entry_returns_new_result_for_scalar_kernel_add|test_analysis_entry_reads_defaults_from_npu_demo_target|test_analysis_entry_rejects_missing_npu_demo_metric|test_analysis_entry_returns_analysis_result|test_analysis_config_reads_defaults_from_npu_demo_target|test_analysis_config_rejects_missing_npu_demo_metric" /home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md`
+      - 结果：只命中新测试名；旧测试名无命中
+      - 退出码：`0`
+    - `git -C /home/lfr/kernelcode_generate diff --check -- ARCHITECTURE/plan/analysis_mainline_refactor_plan.md agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a1-v2.md`
+      - 退出码：`0`
+- 结论：
+  - `需修改`
+  - 最硬断点不是测试名映射，而是计划状态仍未与记录/`DONE` 收口：[`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md#L7) 仍写着 `计划门禁映射修正进行中（2026-04-04 04:42:59 +0800，T-20260404-61a969bc，咯咯咯）`，但 [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2197) 已登记 `T-20260404-61a969bc` 完成时间为 `2026-04-04 04:06:35 +0800`，同链路记录也已明确其“已把 A1 验收标准中的旧测试名收口到当前真实测试名”。
+  - 这意味着 `A1` 当前仍存在“测试名已收口，但计划状态还停在进行中”的双口径；按当前审查门槛，计划与记录未完全一致，不能判 `通过`。
+  - 修改建议：仅修正 [`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md#L7) 的 `A1` 进度状态，把 `T-20260404-61a969bc` 从“计划门禁映射修正进行中”收口为与 `DONE.md` / 同链路记录一致的完成状态；保持当前三条测试名映射与 `spec/实现/测试` 行为不变。
+
+- 时间：`2026-04-04 04:20:45 +0800`
+- 经办人：`不要啊教练`
+- 任务：`T-20260404-6b6de994`
+- 任务目标：
+  - 按 `A1` 最终状态复审边界，只读核对主目录 [`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md) 与同链记录，确认 `T-20260404-61a969bc` 的完成时间/结果口径已与 [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md) 和记录一致，且三条验收测试名映射与 `spec/实现/测试` 正文保持不变。
+- 改动：
+  - 只读核对主目录计划、同链记录、[`DONE.md`](/home/lfr/kernelcode_generate/DONE.md) 与当前测试文件；未修改 `spec`、实现或测试文件。
+  - 自检结果：
+    - 证据充分性：已逐项核对 `T-20260404-61a969bc` 的记录条目、`DONE.md` 完成状态、计划进度表状态，以及三条验收测试名在计划和 [`test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a1/test/analysis/test_analysis.py) 中的实际映射。
+    - 功能正确性：通过。`T-20260404-61a969bc` 的完成时间/结果口径当前已与 `DONE.md` 和记录一致：
+      - [`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md#L7) 写为 `计划门禁映射修正完成（2026-04-04 04:06:35 +0800，T-20260404-61a969bc，咯咯咯）`
+      - [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2197) 同样登记 `2026-04-04 04:06:35 +0800`
+      - 同链记录 [`20260404-analysis-mainline-a1-v2.md`](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a1-v2.md#L119) 到 [`20260404-analysis-mainline-a1-v2.md`](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a1-v2.md#L143) 也明确其完成结论。
+    - 边界条件：通过。三条验收测试名映射保持不变，仍为：
+      - `test_analysis_entry_returns_new_result_for_scalar_kernel_add`
+      - `test_analysis_entry_reads_defaults_from_npu_demo_target`
+      - `test_analysis_entry_rejects_missing_npu_demo_metric`
+      计划中的这三条名称与 [`test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a1/test/analysis/test_analysis.py#L715) / [`test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a1/test/analysis/test_analysis.py#L875) / [`test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a1/test/analysis/test_analysis.py#L920) 一致，未被本轮改动。
+    - 异常路径与潜在漏洞：本轮未触碰实现逻辑，不存在新增功能/边界绕过；唯一剩余问题见结论。
+    - 计划/记录一致性：不通过。`61a969bc` 已对齐，但 `A1` 进度表仍残留另一条状态双口径。
+  - 验证：
+    - `rg -n "T-20260404-61a969bc|T-20260404-d5a7d288|状态一致性修正进行中|状态一致性修正完成" /home/lfr/kernelcode_generate/TODO.md /home/lfr/kernelcode_generate/DONE.md /home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a1-v2.md`
+      - 结果：`61a969bc` 已在计划/记录/`DONE` 对齐；`d5a7d288` 仍在计划里显示进行中
+      - 退出码：`0`
+    - `git -C /home/lfr/kernelcode_generate diff --check -- ARCHITECTURE/plan/analysis_mainline_refactor_plan.md agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a1-v2.md`
+      - 退出码：`0`
+- 结论：
+  - `需修改`
+  - 本轮指定核对项本身已经满足：`T-20260404-61a969bc` 的完成时间/结果口径已与 `DONE.md` 和记录一致，三条验收测试名映射也与 `spec/实现/测试` 正文保持不变。
+  - 但按 `A1` 最终状态复审的整体门槛，计划进度表仍未完全收口：[`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md#L7) 还写着 `状态一致性修正进行中（2026-04-04 04:53:31 +0800，T-20260404-d5a7d288，咯咯咯）`，而 [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2199) 已登记 `T-20260404-d5a7d288` 完成为 `2026-04-04 04:30:09 +0800`。这会让 `A1` 最终状态再次出现“记录/DONE 已完成，但计划仍进行中”的双口径，不能判 `通过`。
+  - 修改建议：仅修正 [`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md#L7) 的 `A1` 进度状态，把 `T-20260404-d5a7d288` 从“状态一致性修正进行中”收口为与 `DONE.md` / 同链路记录一致的完成状态；保持当前三条测试名映射与 `spec/实现/测试` 正文不变。
+
+- 时间：`2026-04-04 05:02:27 +0800`
+- 经办人：`不要啊教练`
+- 任务：`T-20260404-24124dc4`
+- 任务目标：
+  - 按 `A1` 最终状态复审边界，只读核对主目录 [`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md) 与同链记录，确认 `T-20260404-d5a7d288` 的状态口径已与 `DONE.md` / 记录一致，且 `T-20260404-61a969bc` 的完成时间/结果口径、三条验收测试名映射与 `spec/实现/测试` 正文保持不变。
+- 改动：
+  - 只读核对主目录计划、同链记录、[`DONE.md`](/home/lfr/kernelcode_generate/DONE.md) 与当前测试文件；未修改 `spec`、实现或测试文件。
+  - 自检结果：
+    - 证据充分性：已逐项核对 `d5a7d288` 与 `61a969bc` 在计划、记录、`DONE` 里的状态/时间，核对三条验收测试名在计划和 [`test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a1/test/analysis/test_analysis.py) 中的实际映射，并检查本轮未改 `spec/实现/测试` 正文。
+    - 功能正确性：通过。当前 [`analysis_mainline_refactor_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/analysis_mainline_refactor_plan.md#L7) 已写为：
+      - `计划门禁映射修正完成（2026-04-04 04:06:35 +0800，T-20260404-61a969bc，咯咯咯）`
+      - `状态一致性修正完成（2026-04-04 04:30:09 +0800，T-20260404-d5a7d288，咯咯咯）`
+      与 [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2197) / [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2199) 以及同链记录 [`20260404-analysis-mainline-a1-v2.md`](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a1-v2.md#L119) 到 [`20260404-analysis-mainline-a1-v2.md`](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a1-v2.md#L169) / [`20260404-analysis-mainline-a1-v2.md`](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a1-v2.md#L171) 到 [`20260404-analysis-mainline-a1-v2.md`](/home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a1-v2.md#L196) 一致。
+    - 边界条件：通过。三条验收测试名映射保持不变，仍为：
+      - `test_analysis_entry_returns_new_result_for_scalar_kernel_add`
+      - `test_analysis_entry_reads_defaults_from_npu_demo_target`
+      - `test_analysis_entry_rejects_missing_npu_demo_metric`
+      它们继续和 [`test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a1/test/analysis/test_analysis.py#L715)、[`test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a1/test/analysis/test_analysis.py#L875)、[`test_analysis.py`](/home/lfr/kernelcode_generate/wt-20260404-analysis-mainline-a1/test/analysis/test_analysis.py#L920) 一致。
+    - 异常路径与潜在漏洞：本轮未触碰实现逻辑，不存在新增功能/边界绕过，也未发现“修状态时顺手改正文”的回归。
+    - 计划/记录一致性：通过。`A1` 当前计划状态、同链记录和 `DONE` 已收口一致。
+  - 验证：
+    - `rg -n "T-20260404-6b6de994|T-20260404-d5a7d288|状态一致性修正进行中|状态一致性修正完成" /home/lfr/kernelcode_generate/TODO.md /home/lfr/kernelcode_generate/DONE.md /home/lfr/kernelcode_generate/agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a1-v2.md`
+      - 结果：`d5a7d288` 已不再显示“进行中”，`DONE` 中完成状态存在，当前进行中任务为本轮 `T-20260404-24124dc4`
+      - 退出码：`0`
+    - `git -C /home/lfr/kernelcode_generate diff --check -- ARCHITECTURE/plan/analysis_mainline_refactor_plan.md agents/codex-multi-agents/log/task_records/2026/14/20260404-analysis-mainline-a1-v2.md`
+      - 退出码：`0`
+- 结论：
+  - `通过`
+  - 未发现额外改进点。
+  - `A1` 的计划状态、三条验收测试名映射与同链记录/`DONE` 当前已闭环一致，可进入整条 `A1` 链路合并阶段。

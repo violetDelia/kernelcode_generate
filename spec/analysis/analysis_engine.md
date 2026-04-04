@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`朽木露琪亚`
-- 最后一次更改：`朽木露琪亚`
+- 最后一次更改：`jcc你莫辜负`
 - `spec`：[`spec/analysis/analysis_engine.md`](../../spec/analysis/analysis_engine.md)
 - `功能实现`：[`kernel_gen/analysis/analysis.py`](../../kernel_gen/analysis/analysis.py)
 - `test`：[`test/analysis/test_analysis.py`](../../test/analysis/test_analysis.py)
@@ -25,14 +25,17 @@
 - 冻结 `AnalysisConfig` 的显式控制字段：
   - `enable_compute`
   - `enable_memory`
-  - `path_bandwidth`
-  - `path_latency_ns`
-  - `theoretical_compute`
+  - `target`
+  - `metric_overrides`
   - `write_op_attrs`
   - `write_func_attrs`
   - `predicate_size`
   - `dtype_size_overrides`
   - `otherargs`
+- 冻结 `path_bandwidth / path_latency_ns / theoretical_compute` 的来源：
+  - 默认必须来自 `target registry` 中当前 target 的 analysis 默认参数。
+  - 当前默认 target 固定为 `npu_demo`。
+  - 调用方只能通过 `metric_overrides` 做显式覆盖，不再把原始指标字典当作长期公开输入。
 - 冻结新结果结构：
   - `compute_items`
   - `memory_items`
@@ -50,6 +53,7 @@
 - 本轮 `memory` 分类只要求保证 `memory_items` 与 `memory_totals_by_path` 可机械读取；对 compute op 可使用泛化 path（如 `GM->compute` / `compute->GM`），对当前已公开 DMA 分支应优先使用 source/target space 路径。
 - `write_op_attrs=False` / `write_func_attrs=False` 时，不得产生任何新的 `analysis.*` attribute。
 - 旧 `compute/read_bytes/write_bytes` 若仍暴露，只允许是由 `AnalysisResult` 派生的 alias。
+- 一旦 `npu_demo` 的 analysis 默认参数缺字段或读取失败，必须显式报错；不允许静默回退到 analysis 侧手写常量。
 
 ## 公开接口
 
@@ -59,16 +63,17 @@
 - 参数说明：
   - `enable_compute: bool`
   - `enable_memory: bool`
-  - `path_bandwidth: Mapping[str, object] | None`
-  - `path_latency_ns: Mapping[str, object] | None`
-  - `theoretical_compute: Mapping[str, object] | None`
+  - `target: str`
+  - `metric_overrides: Mapping[str, Mapping[str, object]] | None`
   - `write_op_attrs: bool`
   - `write_func_attrs: bool`
   - `predicate_size: int`
   - `dtype_size_overrides: dict[str, int] | None`
   - `otherargs: Iterable[object] | None`
-- 使用示例：`AnalysisConfig(enable_compute=True, enable_memory=False, write_op_attrs=True)`
-- 注意事项：默认不写回属性；写回只能由显式开关触发。
+- 使用示例：`AnalysisConfig(enable_compute=True, enable_memory=False, target="npu_demo", write_op_attrs=True)`
+- 注意事项：
+  - 默认不写回属性；写回只能由显式开关触发。
+  - `path_bandwidth/path_latency_ns/theoretical_compute` 是配置对象内部解析出的正式基线结果，不再作为调用方长期手写输入。
 - 返回与限制：作为 `analysis(...)` 的必填配置对象。
 
 ### `class ComputeItem`
@@ -135,6 +140,7 @@ result = analysis(
 - 注意事项：
   - 分析 `func.func` 时，必须建立在逐 op 调用 `analysis(op, config, otherargs)` 的聚合上。
   - 默认不写回 `analysis.*`；只有显式开启时才写。
+  - `AnalysisConfig.target` 的默认分析参数必须来自 `target registry`；当前默认 target 固定为 `npu_demo`。
   - 当前未承接的未知 op 继续执行 `skip + warning`。
 - 返回与限制：返回 `AnalysisResult`；输入非法或前置条件不满足时抛出 `AnalysisError`。
 
@@ -146,3 +152,5 @@ result = analysis(
   - `analysis(...)` 单 op 返回 `AnalysisResult`
   - `write_op_attrs` / `write_func_attrs` 显式开关
   - `analyze_kernel(...)` 仅作为 facade / adapter
+  - `AnalysisConfig` 默认分析参数来自 `npu_demo target registry`
+  - `npu_demo` 缺失 analysis 默认参数时显式失败

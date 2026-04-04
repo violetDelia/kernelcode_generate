@@ -1,7 +1,7 @@
 """target registry tests.
 
 创建者: 我不是牛马
-最后一次更改: 朽木露琪亚
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 覆盖 target registry 的 JSON 加载、冲突校验与 arch op 支持矩阵行为。
@@ -340,6 +340,23 @@ def test_target_registry_npu_demo_template() -> None:
     assert target_registry.get_target_hardware("npu_demo", "lm_memory_size") == 0
     assert target_registry.get_target_hardware("npu_demo", "tsm_memory_size") == 24576
     assert target_registry.get_target_hardware("npu_demo", "tlm_memory_size") == 2048
+
+
+# TC-TGT-011A
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 测试目的: 验证 npu_demo 固定内置模板同时暴露 analysis 默认参数。
+# 对应功能实现文件路径: kernel_gen/target/registry.py
+# 对应 spec 文件路径: spec/target/registry.md
+def test_target_registry_npu_demo_analysis_defaults() -> None:
+    defaults = target_registry.get_target_analysis_defaults("npu_demo")
+
+    assert defaults["path_bandwidth"]["GM->LM"] == 64
+    assert defaults["path_latency_ns"]["GM->LM"] == 20
+    assert defaults["theoretical_compute"]["scalar"] == 1
+    assert defaults["theoretical_compute"]["tensor"] == 64
 
 
 # TC-TGT-012

@@ -1,7 +1,7 @@
 """func_cost analysis pass tests.
 
 创建者: jcc你莫辜负
-最后一次更改: 金铲铲大作战
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 覆盖 func_cost pass 的 compute/read/write 统计与属性回写。
@@ -60,7 +60,7 @@ from kernel_gen.dialect.nn import (
     NnMulOp,
 )
 from kernel_gen.dialect.symbol import SymbolValueType
-from kernel_gen.analysis.analysis import AnalysisConfig, analysis, analyze_kernel
+from kernel_gen.analysis.analysis import AnalysisConfig, AnalysisResult, KernelOpCost, ValueTraffic, analysis, analyze_kernel
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 pass_module = importlib.import_module("kernel_gen.passes.analysis.func_cost")
@@ -701,3 +701,45 @@ def test_func_cost_matches_analysis_result_aliases() -> None:
     _assert_expr_equal(summary.total_compute, result.total_compute)
     _assert_expr_equal(summary.total_read_bytes, result.total_read_bytes)
     _assert_expr_equal(summary.total_write_bytes, result.total_write_bytes)
+
+
+# FC-011A
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 测试目的: 验证 func_cost 只消费 AnalysisResult/derived alias，而不维护第二套独立公式。
+# 使用示例: pytest -q test/pass/test_analysis_func_cost.py -k test_func_cost_uses_analysis_result_or_derived_alias
+# 对应功能实现文件路径: kernel_gen/passes/analysis/func_cost.py
+# 对应 spec 文件路径: spec/pass/analysis/func_cost.md
+# 对应测试文件路径: test/pass/test_analysis_func_cost.py
+def test_func_cost_uses_analysis_result_or_derived_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+    mem_type = _make_memory_type([IntAttr(2), IntAttr(2)], f32, "global")
+    space = _make_space("global")
+
+    def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
+        add_op = NnAddOp(block.args[0], block.args[1], mem_type, space)
+        return [add_op], add_op.result
+
+    module, _, _ = _build_module([mem_type, mem_type], mem_type, _builder)
+    fake_result = AnalysisResult(
+        compute_items=(),
+        memory_items=(),
+        compute_totals_by_kind={"scalar": sp.Integer(7)},
+        memory_totals_by_path={"GM->LM": sp.Integer(24)},
+        op_costs=[KernelOpCost(0, "nn.add", sp.Integer(7), sp.Integer(24), sp.Integer(12))],
+        value_traffic=[ValueTraffic("arg0", sp.Integer(24), sp.Integer(0))],
+        func_name="main",
+    )
+
+    monkeypatch.setattr(pass_module, "analysis", lambda func_op, config, otherargs=None: fake_result)
+
+    pass_obj = AnalyzeFuncCostPass()
+    pass_obj.run(module)
+    summary = pass_obj.get_summary("main")
+
+    assert summary.op_costs == fake_result.op_costs
+    assert summary.value_traffic == fake_result.value_traffic
+    _assert_expr_equal(summary.total_compute, fake_result.total_compute)
+    _assert_expr_equal(summary.total_read_bytes, fake_result.total_read_bytes)
+    _assert_expr_equal(summary.total_write_bytes, fake_result.total_write_bytes)

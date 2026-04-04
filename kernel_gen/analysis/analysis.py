@@ -1,7 +1,7 @@
 """Analysis utilities for computation and data movement.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 基于 Memory 形状统计逐元素/比较/broadcast/matmul 的计算量与搬运量。
@@ -25,7 +25,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable as IterableABC, Mapping as MappingABC
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable, Sequence
 import warnings
 
@@ -49,13 +49,14 @@ from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.target import registry as target_registry
 
 
 class AnalysisError(ValueError):
     """分析阶段错误。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 用于在分析阶段报告 shape 或规则不满足的错误。
@@ -75,14 +76,16 @@ class AnalysisConfig:
     """统一分析入口配置。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 定义 `analysis(op, config, otherargs)` 的统一控制开关。
     - 默认同时启用 compute/memory 分析，但默认不写回 `analysis.*` 属性。
+    - `path_bandwidth/path_latency_ns/theoretical_compute` 的正式来源是 `target registry` 中当前 target 的 analysis 默认参数；
+      当前默认 target 固定为 `npu_demo`，调用方只能通过 `metric_overrides` 做显式覆盖。
 
     使用示例:
-    - config = AnalysisConfig(enable_compute=True, enable_memory=False, write_op_attrs=True)
+    - config = AnalysisConfig(enable_compute=True, enable_memory=False, target="npu_demo", write_op_attrs=True)
 
     关联文件:
     - spec: spec/analysis/analysis_engine.md
@@ -92,14 +95,42 @@ class AnalysisConfig:
 
     enable_compute: bool = True
     enable_memory: bool = True
-    path_bandwidth: MappingABC[str, object] | None = None
-    path_latency_ns: MappingABC[str, object] | None = None
-    theoretical_compute: MappingABC[str, object] | None = None
+    target: str = "npu_demo"
+    metric_overrides: MappingABC[str, MappingABC[str, object]] | None = None
     write_op_attrs: bool = False
     write_func_attrs: bool = False
     predicate_size: int = 1
     dtype_size_overrides: dict[str, int] | None = None
     otherargs: Iterable[object] | None = None
+    path_bandwidth: MappingABC[str, object] = field(init=False, repr=False)
+    path_latency_ns: MappingABC[str, object] = field(init=False, repr=False)
+    theoretical_compute: MappingABC[str, object] = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        """从 target registry 解析 analysis 默认参数。
+
+        创建者: jcc你莫辜负
+        最后一次更改: jcc你莫辜负
+
+        功能说明:
+        - 当前固定从 `target registry` 读取 `path_bandwidth/path_latency_ns/theoretical_compute`。
+        - 只允许在读取到完整 target 基线后，再叠加 `metric_overrides`。
+
+        使用示例:
+        - config = AnalysisConfig(target="npu_demo", metric_overrides={"path_bandwidth": {"GM->LM": 96}})
+
+        关联文件:
+        - spec: spec/analysis/analysis_engine.md
+        - test: test/analysis/test_analysis.py
+        - 功能实现: kernel_gen/analysis/analysis.py
+        """
+
+        defaults = _load_target_metric_defaults(self.target)
+        overrides = _normalize_metric_overrides(self.metric_overrides)
+        merged = _merge_metric_defaults(defaults, overrides)
+        object.__setattr__(self, "path_bandwidth", merged["path_bandwidth"])
+        object.__setattr__(self, "path_latency_ns", merged["path_latency_ns"])
+        object.__setattr__(self, "theoretical_compute", merged["theoretical_compute"])
 
 
 @dataclass(frozen=True)
@@ -483,6 +514,106 @@ _SPACE_TOKENS = {
     "tsm": "TSM",
     "tlm": "TLM",
 }
+_ANALYSIS_METRIC_KEYS = ("path_bandwidth", "path_latency_ns", "theoretical_compute")
+
+
+def _load_target_metric_defaults(target: str) -> dict[str, dict[str, object]]:
+    """读取 target registry 中的 analysis 默认参数。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 当前只接受来自 `target registry` 的正式 baseline。
+    - 若 target 未注册，或缺少 `path_bandwidth/path_latency_ns/theoretical_compute` 中任一类别，必须显式失败。
+
+    使用示例:
+    - defaults = _load_target_metric_defaults("npu_demo")
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    try:
+        defaults = target_registry.get_target_analysis_defaults(target)
+    except ValueError as exc:
+        raise AnalysisError(str(exc)) from exc
+    missing = [key for key in _ANALYSIS_METRIC_KEYS if key not in defaults]
+    if missing:
+        raise AnalysisError(f"target={target}: missing analysis metric defaults: {', '.join(missing)}")
+    normalized: dict[str, dict[str, object]] = {}
+    for key in _ANALYSIS_METRIC_KEYS:
+        value = defaults[key]
+        if not isinstance(value, MappingABC):
+            raise AnalysisError(f"target={target}: analysis metric {key} must be mapping")
+        normalized[key] = dict(value)
+    return normalized
+
+
+def _normalize_metric_overrides(
+    metric_overrides: MappingABC[str, MappingABC[str, object]] | None,
+) -> dict[str, dict[str, object]]:
+    """规范化显式 metric override 配置。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 只允许覆盖 `path_bandwidth/path_latency_ns/theoretical_compute` 三类正式 metric。
+    - 不允许把任意嵌套字典当成公开输入。
+
+    使用示例:
+    - overrides = _normalize_metric_overrides({"path_bandwidth": {"GM->LM": 96}})
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    if metric_overrides is None:
+        return {}
+    if not isinstance(metric_overrides, MappingABC):
+        raise AnalysisError("metric_overrides must be mapping[str, mapping[str, object]]")
+    unknown = set(metric_overrides.keys()) - set(_ANALYSIS_METRIC_KEYS)
+    if unknown:
+        raise AnalysisError(f"metric_overrides has unknown keys: {sorted(unknown)}")
+    normalized: dict[str, dict[str, object]] = {}
+    for key, value in metric_overrides.items():
+        if not isinstance(value, MappingABC):
+            raise AnalysisError(f"metric_overrides.{key} must be mapping")
+        normalized[key] = dict(value)
+    return normalized
+
+
+def _merge_metric_defaults(
+    defaults: dict[str, dict[str, object]],
+    overrides: dict[str, dict[str, object]],
+) -> dict[str, dict[str, object]]:
+    """把显式 override 叠加到 target baseline 上。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 先复制 target registry 的 baseline，再按类别覆盖键值。
+    - 不改变 baseline 的来源边界；override 仅作为显式 hook。
+
+    使用示例:
+    - merged = _merge_metric_defaults(defaults, overrides)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    merged = {key: dict(value) for key, value in defaults.items()}
+    for key, override_map in overrides.items():
+        merged[key].update(override_map)
+    return merged
 
 
 def _expr_from_metric_value(value: object) -> sp.Basic | None:
