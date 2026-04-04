@@ -229,6 +229,260 @@ class FakeKernelScalarAddOp(IRDLOperation):
         super().__init__(operands=[lhs, rhs], result_types=[result_type])
 
 
+@irdl_op_definition
+class FakeKernelSelectOp(IRDLOperation):
+    """测试用 kernel.select op。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 用于验证 kernel.select 计入标量计算。
+
+    使用示例:
+    - FakeKernelSelectOp(cond, lhs, rhs, i32)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/compute/kernel.py
+    """
+
+    name = "kernel.select"
+
+    cond = operand_def(Attribute)
+    lhs = operand_def(Attribute)
+    rhs = operand_def(Attribute)
+    result = result_def(Attribute)
+
+    def __init__(
+        self,
+        cond: SSAValue | Operation,
+        lhs: SSAValue | Operation,
+        rhs: SSAValue | Operation,
+        result_type: Attribute,
+    ) -> None:
+        super().__init__(operands=[cond, lhs, rhs], result_types=[result_type])
+
+
+@irdl_op_definition
+class FakeKernelCastOp(IRDLOperation):
+    """测试用 kernel.cast op。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 用于验证 kernel.cast 计入标量计算。
+
+    使用示例:
+    - FakeKernelCastOp(value, i32)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/compute/kernel.py
+    """
+
+    name = "kernel.cast"
+
+    value = operand_def(Attribute)
+    result = result_def(Attribute)
+
+    def __init__(self, value: SSAValue | Operation, result_type: Attribute) -> None:
+        super().__init__(operands=[value], result_types=[result_type])
+
+
+@irdl_op_definition
+class FakeSymbolAddOp(IRDLOperation):
+    """测试用 symbol.add op。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 用于验证 symbol.* 默认计入标量计算。
+
+    使用示例:
+    - FakeSymbolAddOp(lhs, rhs, symbol_type)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/compute/symbol.py
+    """
+
+    name = "symbol.add"
+
+    lhs = operand_def(Attribute)
+    rhs = operand_def(Attribute)
+    result = result_def(SymbolValueType)
+
+    def __init__(
+        self,
+        lhs: SSAValue | Operation,
+        rhs: SSAValue | Operation,
+        result_type: SymbolValueType,
+    ) -> None:
+        super().__init__(operands=[lhs, rhs], result_types=[result_type])
+
+
+@irdl_op_definition
+class FakeSymbolToIntOp(IRDLOperation):
+    """测试用 symbol.to_int op。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 用于验证 symbol.to_int 仅统计访存。
+
+    使用示例:
+    - FakeSymbolToIntOp(value, i32)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/compute/symbol.py
+    """
+
+    name = "symbol.to_int"
+
+    value = operand_def(Attribute)
+    result = result_def(Attribute)
+
+    def __init__(self, value: SSAValue | Operation, result_type: Attribute) -> None:
+        super().__init__(operands=[value], result_types=[result_type])
+
+
+@irdl_op_definition
+class FakeSymbolToFloatOp(IRDLOperation):
+    """测试用 symbol.to_float op。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 用于验证 symbol.to_float 仅统计访存。
+
+    使用示例:
+    - FakeSymbolToFloatOp(value, f32)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/compute/symbol.py
+    """
+
+    name = "symbol.to_float"
+
+    value = operand_def(Attribute)
+    result = result_def(Attribute)
+
+    def __init__(self, value: SSAValue | Operation, result_type: Attribute) -> None:
+        super().__init__(operands=[value], result_types=[result_type])
+
+
+@irdl_op_definition
+class FakeSymbolGetDimOp(IRDLOperation):
+    """测试用 symbol.get_dim op。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 用于验证 symbol.get_dim 作为元信息 op 忽略。
+
+    使用示例:
+    - FakeSymbolGetDimOp()
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    name = "symbol.get_dim"
+
+    def __init__(self) -> None:
+        super().__init__(operands=[], result_types=[])
+
+
+@irdl_op_definition
+class FakeSymbolGetStrideOp(IRDLOperation):
+    """测试用 symbol.get_stride op。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 用于验证 symbol.get_stride 作为元信息 op 忽略。
+
+    使用示例:
+    - FakeSymbolGetStrideOp()
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    name = "symbol.get_stride"
+
+    def __init__(self) -> None:
+        super().__init__(operands=[], result_types=[])
+
+
+@irdl_op_definition
+class FakeArchOp(IRDLOperation):
+    """测试用 arch.* op。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 用于验证 arch.* 作为元信息 op 忽略。
+
+    使用示例:
+    - FakeArchOp()
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    name = "arch.device"
+
+    def __init__(self) -> None:
+        super().__init__(operands=[], result_types=[])
+
+
+@irdl_op_definition
+class FakeTunerParamOp(IRDLOperation):
+    """测试用 tuner.param op。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 用于验证 tuner.param 作为元信息 op 忽略。
+
+    使用示例:
+    - FakeTunerParamOp()
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    name = "tuner.param"
+
+    def __init__(self) -> None:
+        super().__init__(operands=[], result_types=[])
+
+
 def _make_space(space_name: str) -> NnMemorySpaceAttr:
     """构造 nn.memory 空间属性。
 
@@ -1356,6 +1610,107 @@ def test_analysis_invalid_public_dma_raises() -> None:
                 dtype_size_overrides={"f32": 4},
             ),
         )
+
+
+# AN-020H
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-05 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-05 00:00:00 +0800
+# 测试目的: 验证 kernel.select/cast 计入 SCALAR 计算且无 warning。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_kernel_select_cast_scalar_compute
+# 对应功能实现文件路径: kernel_gen/analysis/compute/kernel.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_kernel_select_cast_scalar_compute(recwarn: pytest.WarningsRecorder) -> None:
+    cond = arith.ConstantOp(IntegerAttr(1, i1))
+    lhs = arith.ConstantOp(IntegerAttr(1, i32))
+    rhs = arith.ConstantOp(IntegerAttr(2, i32))
+
+    select_op = FakeKernelSelectOp(cond, lhs, rhs, i32)
+    cast_op = FakeKernelCastOp(lhs, i32)
+    config = AnalysisConfig(enable_compute=True, enable_memory=True)
+
+    select_result = analysis(select_op, config)
+    cast_result = analysis(cast_op, config)
+
+    assert len(recwarn) == 0
+    assert select_result.compute_totals_by_kind == {ComputeKind.SCALAR: sp.Integer(1)}
+    assert cast_result.compute_totals_by_kind == {ComputeKind.SCALAR: sp.Integer(1)}
+
+
+# AN-020I
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-05 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-05 00:00:00 +0800
+# 测试目的: 验证 symbol.* 默认计入 SCALAR 计算。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_symbol_scalar_compute
+# 对应功能实现文件路径: kernel_gen/analysis/compute/symbol.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_symbol_scalar_compute(recwarn: pytest.WarningsRecorder) -> None:
+    symbol_type = SymbolValueType.from_expr("N")
+    lhs = arith.ConstantOp(IntegerAttr(1, i32))
+    rhs = arith.ConstantOp(IntegerAttr(2, i32))
+    symbol_op = FakeSymbolAddOp(lhs, rhs, symbol_type)
+
+    result = analysis(symbol_op, AnalysisConfig(enable_compute=True, enable_memory=True))
+
+    assert len(recwarn) == 0
+    assert result.compute_totals_by_kind == {ComputeKind.SCALAR: sp.Integer(1)}
+    assert result.memory_items == ()
+
+
+# AN-020J
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-05 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-05 00:00:00 +0800
+# 测试目的: 验证 symbol.to_int/to_float 仅统计 1 字节访存。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_symbol_cast_reads_one_byte
+# 对应功能实现文件路径: kernel_gen/analysis/compute/symbol.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_symbol_cast_reads_one_byte(recwarn: pytest.WarningsRecorder) -> None:
+    value = arith.ConstantOp(IntegerAttr(3, i32))
+    to_int = FakeSymbolToIntOp(value, i32)
+    to_float = FakeSymbolToFloatOp(value, f32)
+    config = AnalysisConfig(enable_compute=True, enable_memory=True)
+
+    int_result = analysis(to_int, config)
+    float_result = analysis(to_float, config)
+
+    assert len(recwarn) == 0
+    _assert_expr_equal(int_result.total_compute, sp.Integer(0))
+    _assert_expr_equal(float_result.total_compute, sp.Integer(0))
+    _assert_expr_equal(int_result.total_read_bytes, sp.Integer(1))
+    _assert_expr_equal(float_result.total_read_bytes, sp.Integer(1))
+    assert int_result.memory_totals_by_path[MemoryPath.GM_TO_GM] == sp.Integer(1)
+    assert float_result.memory_totals_by_path[MemoryPath.GM_TO_GM] == sp.Integer(1)
+
+
+# AN-020K
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-05 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-05 00:00:00 +0800
+# 测试目的: 验证 symbol.get_dim/get_stride、arch.*、tuner.param 为零成本且无 warning。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_metadata_ops_skip_without_warning
+# 对应功能实现文件路径: kernel_gen/analysis/analysis.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_metadata_ops_skip_without_warning(recwarn: pytest.WarningsRecorder) -> None:
+    ops = [FakeSymbolGetDimOp(), FakeSymbolGetStrideOp(), FakeArchOp(), FakeTunerParamOp()]
+    config = AnalysisConfig(enable_compute=True, enable_memory=True)
+
+    for op in ops:
+        result = analysis(op, config)
+        assert result.compute_items == ()
+        assert result.memory_items == ()
+        assert not result.op_costs
+
+    assert len(recwarn) == 0
 
 
 # AN-021

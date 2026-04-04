@@ -36,6 +36,8 @@ _SCALAR_KERNEL_OPS = {
     "kernel.le",
     "kernel.gt",
     "kernel.ge",
+    "kernel.select",
+    "kernel.cast",
 }
 
 
@@ -46,7 +48,7 @@ def analyze_scalar_kernel_op(op: Operation, config: AnalysisConfig) -> _Analyzed
     最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 对 `kernel.add/sub/mul/div/eq/lt/gt/...` 的单结果标量形态生成 `ComputeKind.SCALAR`。
+    - 对 `kernel.add/sub/mul/div/eq/lt/gt/select/cast/...` 的单结果标量形态生成 `ComputeKind.SCALAR`。
     - 不负责访存分类；该类 op 当前只产出 compute item。
 
     使用示例:

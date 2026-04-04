@@ -514,6 +514,9 @@ class _AnalyzedOp:
     result_write_bytes: sp.Basic = sp.Integer(0)
 
 
+from kernel_gen.analysis.compute import symbol as _symbol_compute
+
+
 _SPACE_TOKENS = {
     "global": "GM",
     "shared": "SM",
@@ -1213,6 +1216,7 @@ def _should_ignore_kernel_op(op: Operation) -> bool:
 
     功能说明:
     - func.return 与 arith.constant 默认忽略。
+    - symbol.get_dim/get_stride、arch.*、tuner.param 视为元信息 op 忽略。
 
     使用示例:
     - if _should_ignore_kernel_op(op): ...
@@ -1226,6 +1230,12 @@ def _should_ignore_kernel_op(op: Operation) -> bool:
         return True
     if isinstance(op, arith.ConstantOp):
         return True
+    op_name = getattr(op, "name", None)
+    if isinstance(op_name, str):
+        if op_name in {"symbol.get_dim", "symbol.get_stride", "tuner.param"}:
+            return True
+        if op_name.startswith("arch."):
+            return True
     return False
 
 
