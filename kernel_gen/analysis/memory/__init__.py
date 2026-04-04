@@ -243,6 +243,38 @@ def register_memory(ops: object) -> Callable[[MemoryAnalyzer], MemoryAnalyzer]:
     return decorator
 
 
+def analyze_dma_memory_op(op: "Operation", config: "AnalysisConfig") -> "DmaMemoryAnalysis | None":
+    """适配 DMA memory analyzer。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 将 `analysis` 配置注入 DMA memory analyzer。
+    - 保持 DMA 前置条件非法的硬错误语义。
+
+    使用示例:
+    - analyzed = analyze_dma_memory_op(op, config)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/memory/__init__.py
+    """
+    from kernel_gen.analysis.analysis import AnalysisError, _normalize_dtype_overrides
+    from kernel_gen.analysis.memory.dma import analyze_dma_op
+
+    try:
+        return analyze_dma_op(
+            op,
+            path_latency_ns=config.path_latency_ns,
+            path_bandwidth=config.path_bandwidth,
+            dtype_size_overrides=_normalize_dtype_overrides(config.dtype_size_overrides),
+        )
+    except ValueError as exc:
+        raise AnalysisError(str(exc)) from exc
+
+
 def _ensure_default_analyzers_registered() -> None:
     global _DEFAULT_REGISTERED
     if _DEFAULT_REGISTERED:
@@ -309,38 +341,6 @@ def iter_memory_analyzers_for_op(op: "Operation") -> tuple[MemoryAnalyzer, ...]:
     analyzers.extend(_DEFAULT_MEMORY_ANALYZERS)
     analyzers.extend(_CUSTOM_MEMORY_ANALYZERS)
     return tuple(_iter_unique_analyzers(analyzers))
-
-
-def analyze_dma_memory_op(op: "Operation", config: "AnalysisConfig") -> "DmaMemoryAnalysis | None":
-    """适配 DMA memory analyzer。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 将 `analysis` 配置注入 DMA memory analyzer。
-    - 保持 DMA 前置条件非法的硬错误语义。
-
-    使用示例:
-    - analyzed = analyze_dma_memory_op(op, config)
-
-    关联文件:
-    - spec: spec/analysis/analysis_engine.md
-    - test: test/analysis/test_analysis.py
-    - 功能实现: kernel_gen/analysis/memory/__init__.py
-    """
-    from kernel_gen.analysis.analysis import AnalysisError, _normalize_dtype_overrides
-    from kernel_gen.analysis.memory.dma import analyze_dma_op
-
-    try:
-        return analyze_dma_op(
-            op,
-            path_latency_ns=config.path_latency_ns,
-            path_bandwidth=config.path_bandwidth,
-            dtype_size_overrides=_normalize_dtype_overrides(config.dtype_size_overrides),
-        )
-    except ValueError as exc:
-        raise AnalysisError(str(exc)) from exc
 
 
 __all__ = [
