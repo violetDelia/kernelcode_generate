@@ -33,6 +33,7 @@
 - 上游若允许逐元素隐式 broadcast，进入 `nn dialect` 前必须显式展开为 `nn.broadcast`。
 - `img2col` 在方言层只允许公开 `nn.img2col1d` 与 `nn.img2col2d` 两个稳定 op，禁止新增笼统公开名 `nn.img2col`。
 - `nn.img2col1d/img2col2d` 仅定义 operand/attribute/result/verifier 合同，不在方言层重复上游 `operation/nn` 的 shape/stride 公式与错误边界全文。
+- 上游 `fc/conv` 在方言层不定义独立 op，进入 `nn dialect` 后下沉为 `nn.matmul` / `nn.img2col1d` / `nn.img2col2d` 的组合与约束。
 - `nn.softmax` 在方言层只定义 `input/result/axis/space` 的结构化合同；`axis=-1` 默认值、负轴归一化与数值稳定公式属于上游 `operation/nn` 语义，不在方言层重复展开。
 - `NnMemorySpaceAttr` 仅允许 `global/shared/local/tsm/tlm` 五种取值。
 - `NnMemoryType.space` 与各 op 的 `space` attribute 必须使用同一语义口径。
@@ -390,7 +391,7 @@ op = NnGeOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 返回与限制：
 
 - 返回 `NnExpOp`。
-- verifier 合同关键字：
+- verifier 失败关键短语（必须包含）：
   - `operand-must-be-nn-memory`
   - `operand-element-type-must-be-float`
   - `result-shape-stride-must-match-input`
@@ -435,7 +436,7 @@ op = NnGeOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 返回与限制：
 
 - 返回 `NnReduceSumOp`。
-- verifier 合同关键字：
+- verifier 失败关键短语（必须包含）：
   - `operand-must-be-nn-memory`
   - `axes-must-be-non-empty-unique-and-in-range`
   - `keepdim-must-be-i1-bool-attr`
@@ -472,7 +473,7 @@ op = NnGeOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 返回与限制：
 
 - 返回 `NnReduceMinOp`。
-- verifier 合同关键字：
+- verifier 失败关键短语（必须包含）：
   - `operand-must-be-nn-memory`
   - `axes-must-be-non-empty-unique-and-in-range`
   - `keepdim-must-be-i1-bool-attr`
@@ -510,7 +511,7 @@ op = NnGeOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 返回与限制：
 
 - 返回 `NnReduceMaxOp`。
-- verifier 合同关键字：
+- verifier 失败关键短语（必须包含）：
   - `operand-must-be-nn-memory`
   - `axes-must-be-non-empty-unique-and-in-range`
   - `keepdim-must-be-i1-bool-attr`
@@ -549,6 +550,12 @@ op = NnBroadcastOp(inp, result_type, NnMemorySpaceAttr.from_name("global"))
 返回与限制：
 
 - 返回 `NnBroadcastOp`；广播必须显式建模。
+- verifier 失败关键短语（必须包含）：
+  - `operand-must-be-nn-memory`
+  - `result-rank-must-be-greater-or-equal-to-input`
+  - `result-shape-must-match-broadcast-contract`
+  - `result-element-type-must-match-input`
+  - `result-space-must-match-input-and-attr`
 
 ### nn.transpose
 
@@ -662,7 +669,7 @@ op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 
 功能说明：
 
-- 一维窗口展开方言 op，将 rank-3 输入 memory 显式重排为 rank-3 列块 memory。
+- 一维窗口展开方言 op，将 rank-3 输入 memory 显式重排为 rank-4 结构化列块 memory。
 
 参数说明：
 
@@ -673,7 +680,7 @@ op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 - `pl: i64`：左侧 padding，必须为非负整数。
 - `pr: i64`：右侧 padding，必须为非负整数。
 - `space: #nn.space<...>`：op 的空间属性。
-- `result: !nn.memory<...>`：结果 memory，rank 必须为 3。
+- `result: !nn.memory<...>`：结果 memory，rank 必须为 4。
 
 使用示例：
 
@@ -682,17 +689,18 @@ op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
   kw = 3, sw = 1, dw = 1, pl = 1, pr = 1,
   space = #nn.space<global>
 } : !nn.memory<[1, 16, 32], [512, 32, 1], f32, #nn.space<global>>
- -> !nn.memory<[1, 48, 32], [1536, 32, 1], f32, #nn.space<global>>
+ -> !nn.memory<[1, 16, 3, 32], [1536, 96, 32, 1], f32, #nn.space<global>>
 ```
 
 注意事项：
 
 - operand/result 必须是 `!nn.memory`。
-- operand rank 必须是 3，result rank 必须是 3。
+- operand rank 必须是 3，result rank 必须是 4。
 - `kw/sw/dw` 必须为正整数；`pl/pr` 必须为非负整数。
 - `result.element_type` 必须与 `input.element_type` 一致。
 - `result.space` 必须与 `input.space` 和 `op.space` 一致。
 - `result.shape/stride` 必须满足 `img2col1d` 方言合同；具体高层公式由 `operation/nn` 规范定义。
+- 方言层结果必须保持 rank-4 结构化输出，不得压扁为 rank-3。
 
 返回与限制：
 
@@ -701,7 +709,7 @@ op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
   - `operand-must-be-rank-3-nn-memory`
   - `kw-sw-dw-must-be-positive`
   - `pl-pr-must-be-non-negative`
-  - `result-rank-must-be-3`
+  - `result-rank-must-be-4`
   - `result-element-type-matches-input`
   - `result-space-matches-input`
   - `result-shape-stride-must-match-img2col1d-contract`
@@ -710,7 +718,7 @@ op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 
 功能说明：
 
-- 二维窗口展开方言 op，将 rank-4 输入 memory 显式重排为 rank-3 列块 memory。
+- 二维窗口展开方言 op，将 rank-4 输入 memory 显式重排为 rank-6 结构化列块 memory。
 
 参数说明：
 
@@ -726,7 +734,7 @@ op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 - `pl: i64`：左侧 padding，必须为非负整数。
 - `pr: i64`：右侧 padding，必须为非负整数。
 - `space: #nn.space<...>`：op 的空间属性。
-- `result: !nn.memory<...>`：结果 memory，rank 必须为 3。
+- `result: !nn.memory<...>`：结果 memory，rank 必须为 6。
 
 使用示例：
 
@@ -738,17 +746,18 @@ op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
   ph = 1, pw = 1, pl = 1, pr = 1,
   space = #nn.space<global>
 } : !nn.memory<[1, 3, 5, 5], [75, 25, 5, 1], f32, #nn.space<global>>
- -> !nn.memory<[1, 27, 25], [675, 25, 1], f32, #nn.space<global>>
+ -> !nn.memory<[1, 3, 3, 3, 5, 5], [675, 225, 75, 25, 5, 1], f32, #nn.space<global>>
 ```
 
 注意事项：
 
 - operand/result 必须是 `!nn.memory`。
-- operand rank 必须是 4，result rank 必须是 3。
+- operand rank 必须是 4，result rank 必须是 6。
 - `kh/kw/sh/sw/dh/dw` 必须为正整数；`ph/pw/pl/pr` 必须为非负整数。
 - `result.element_type` 必须与 `input.element_type` 一致。
 - `result.space` 必须与 `input.space` 和 `op.space` 一致。
 - `result.shape/stride` 必须满足 `img2col2d` 方言合同；具体高层公式由 `operation/nn` 规范定义。
+- 方言层结果必须保持 rank-6 结构化输出，不得压扁为 rank-3。
 
 返回与限制：
 
@@ -757,7 +766,7 @@ op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
   - `operand-must-be-rank-4-nn-memory`
   - `kh-kw-sh-sw-dh-dw-must-be-positive`
   - `ph-pw-pl-pr-must-be-non-negative`
-  - `result-rank-must-be-3`
+  - `result-rank-must-be-6`
   - `result-element-type-matches-input`
   - `result-space-matches-input`
   - `result-shape-stride-must-match-img2col2d-contract`
