@@ -1,7 +1,7 @@
 """DMA operation API.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 提供 Memory 的数据搬运、视图变换与显式转换 API，包括 alloc/free/copy/load/store/slice/deslice/view/reshape/flatten/cast。
@@ -24,7 +24,7 @@ from collections.abc import Sequence
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
-from kernel_gen.symbol_variable.type import NumericType
+from kernel_gen.symbol_variable.type import Farmat, NumericType
 
 _FLOAT_DTYPES = {
     NumericType.Float16,
@@ -121,17 +121,18 @@ def alloc(
     dtype: NumericType,
     space: MemorySpace = MemorySpace.GM,
     stride: Sequence[int | str] | SymbolShape | None = None,
+    format: Farmat = Farmat.Norm,
 ) -> Memory:
     """分配新的 Memory 描述对象。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 返回包含 shape/dtype/space/stride 的 Memory 对象。
+    - 返回包含 shape/dtype/space/stride/format 的 Memory 对象。
 
     使用示例:
-    - buf = alloc([32, 32], NumericType.Float32, space=MemorySpace.SM, stride=[1, 1])
+    - buf = alloc([32, 32], NumericType.Float32, space=MemorySpace.SM, stride=[1, 1], format=Farmat.CLast)
 
     关联文件:
     - spec: spec/operation/dma.md
@@ -156,6 +157,15 @@ def alloc(
                 action=_ERROR_ACTION,
             )
         )
+    if not isinstance(format, Farmat):
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="dma.alloc 参数校验",
+                expected="alloc format must be Farmat",
+                actual=type(format).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
     shape_value = _ensure_shape_value(shape, "shape")
     stride_value = None
     if stride is not None:
@@ -169,7 +179,7 @@ def alloc(
                     action=_ERROR_ACTION,
                 )
             )
-    return Memory(shape_value, dtype, space=space, stride=stride_value)
+    return Memory(shape_value, dtype, space=space, stride=stride_value, format=format)
 
 
 def free(value: object) -> None:
@@ -696,7 +706,7 @@ def slice(
     """从 source 抽取切片块。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 返回新的 Memory 块，强调切片语义。
@@ -729,9 +739,7 @@ def slice(
     _ensure_strides_positive(strides_shape)
     _ensure_bounds(src, offsets_shape, sizes_shape, strides_shape)
     target_space = src.space if space is None else space
-    target = alloc(_clone_symbol_list(sizes_shape), src.dtype, space=target_space)
-    target.format = src.format
-    return target
+    return alloc(_clone_symbol_list(sizes_shape), src.dtype, space=target_space, format=src.format)
 
 
 def deslice(

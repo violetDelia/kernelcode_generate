@@ -374,6 +374,49 @@ def test_build_func_op_lowers_arch_get_block_id_query(
             raise AssertionError('expected func.return type to stay !symbol.int<"block_id">')
 
 
+# AST-015A / MGEN-041
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-05 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-05 00:00:00 +0800
+# 功能说明: 验证 DSL 函数体内 Import/ImportFrom 被忽略，不影响 AST 解析与 lowering。
+# 测试目的: 确保 import 不进入 AST 语句列表，build_func_op 仍能生成 arch.get_block_id。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_parse_function_ignores_import_statements
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_parse_function_ignores_import_statements(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.arch import get_block_id
+
+    def get_block_id_kernel() -> int:
+        import kernel_gen.operation.arch as arch
+        from kernel_gen.operation.arch import get_block_id
+
+        return get_block_id()
+
+    monkeypatch.setitem(get_block_id_kernel.__globals__, "get_block_id", get_block_id)
+
+    func_ast = parse_function(get_block_id_kernel)
+    if len(func_ast.body.statements) != 1:
+        raise AssertionError("expected import statements to be skipped from AST body")
+    stmt = func_ast.body.statements[0]
+    if not isinstance(stmt, ArchQueryAST):
+        raise AssertionError("expected get_block_id kernel to parse into ArchQueryAST")
+    if stmt.query_name != "get_block_id":
+        raise AssertionError("expected arch query name to stay get_block_id")
+
+    func_op = build_func_op(get_block_id_kernel)
+    body_ops = list(func_op.body.block.ops)
+    query_ops = [op for op in body_ops if isinstance(op, ArchGetBlockIdOp)]
+    return_ops = [op for op in body_ops if isinstance(op, func.ReturnOp)]
+    if len(query_ops) != 1:
+        raise AssertionError("expected exactly one arch.get_block_id op")
+    if len(return_ops) != 1:
+        raise AssertionError("expected exactly one func.return op")
+
+
 # AST-014C / MGEN-029
 # 创建者: 咯咯咯
 # 最后一次更改: 咯咯咯
