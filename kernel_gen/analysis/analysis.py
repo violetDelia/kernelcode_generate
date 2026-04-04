@@ -75,6 +75,152 @@ class AnalysisError(ValueError):
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """
+_ANALYSIS_METRIC_KEYS = ("path_bandwidth", "path_latency_ns", "theoretical_compute")
+
+
+def _normalize_path_metric_mapping(
+    values: MappingABC[object, object],
+    *,
+    target: str,
+    metric_key: str,
+) -> dict[MemoryPath, object]:
+    """将 path metric 映射归一为 `MemoryPath` 键。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 只接受正式 `MemoryPath` 或其等价值文本。
+    - 一旦出现未知 path，直接报错，避免继续回退到自由字符串口径。
+
+    使用示例:
+    - normalized = _normalize_path_metric_mapping({"GM->LM": 64}, target="npu_demo", metric_key="path_bandwidth")
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    normalized: dict[MemoryPath, object] = {}
+    for raw_key, raw_value in values.items():
+        key_text = raw_key.value if isinstance(raw_key, MemoryPath) else str(raw_key)
+        path = normalize_memory_path(key_text)
+        if path is MemoryPath.UNKNOWN and key_text != MemoryPath.UNKNOWN.value:
+            raise AnalysisError(
+                f"target={target}: analysis metric {metric_key} uses unknown memory path {key_text}"
+            )
+        normalized[path] = raw_value
+    return normalized
+
+
+def _load_target_metric_defaults(target: str) -> dict[str, dict[str, object]]:
+    """读取 target registry 中的 analysis 默认参数。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 当前只接受来自 `target registry` 的正式 baseline。
+    - 若 target 未注册，或缺少 `path_bandwidth/path_latency_ns/theoretical_compute` 中任一类别，必须显式失败。
+
+    使用示例:
+    - defaults = _load_target_metric_defaults("npu_demo")
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    try:
+        defaults = target_registry.get_target_analysis_defaults(target)
+    except ValueError as exc:
+        raise AnalysisError(str(exc)) from exc
+    missing = [key for key in _ANALYSIS_METRIC_KEYS if key not in defaults]
+    if missing:
+        raise AnalysisError(f"target={target}: missing analysis metric defaults: {', '.join(missing)}")
+    normalized: dict[str, dict[str, object]] = {}
+    for key in _ANALYSIS_METRIC_KEYS:
+        value = defaults[key]
+        if not isinstance(value, MappingABC):
+            raise AnalysisError(f"target={target}: analysis metric {key} must be mapping")
+        if key in {"path_bandwidth", "path_latency_ns"}:
+            normalized[key] = _normalize_path_metric_mapping(value, target=target, metric_key=key)
+        else:
+            normalized[key] = dict(value)
+    return normalized
+
+
+def _normalize_metric_overrides(
+    metric_overrides: MappingABC[str, MappingABC[str, object]] | None,
+) -> dict[str, dict[str, object]]:
+    """规范化显式 metric override 配置。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 只允许覆盖 `path_bandwidth/path_latency_ns/theoretical_compute` 三类正式 metric。
+    - 不允许把任意嵌套字典当成公开输入。
+
+    使用示例:
+    - overrides = _normalize_metric_overrides({"path_bandwidth": {"GM->LM": 96}})
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    if metric_overrides is None:
+        return {}
+    if not isinstance(metric_overrides, MappingABC):
+        raise AnalysisError("metric_overrides must be mapping[str, mapping[str, object]]")
+    unknown = set(metric_overrides.keys()) - set(_ANALYSIS_METRIC_KEYS)
+    if unknown:
+        raise AnalysisError(f"metric_overrides has unknown keys: {sorted(unknown)}")
+    normalized: dict[str, dict[str, object]] = {}
+    for key, value in metric_overrides.items():
+        if not isinstance(value, MappingABC):
+            raise AnalysisError(f"metric_overrides.{key} must be mapping")
+        if key in {"path_bandwidth", "path_latency_ns"}:
+            normalized[key] = _normalize_path_metric_mapping(
+                value,
+                target="override",
+                metric_key=key,
+            )
+        else:
+            normalized[key] = dict(value)
+    return normalized
+
+
+def _merge_metric_defaults(
+    defaults: dict[str, dict[str, object]],
+    overrides: dict[str, dict[str, object]],
+) -> dict[str, dict[str, object]]:
+    """把显式 override 叠加到 target baseline 上。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 先复制 target registry 的 baseline，再按类别覆盖键值。
+    - 不改变 baseline 的来源边界；override 仅作为显式 hook。
+
+    使用示例:
+    - merged = _merge_metric_defaults(defaults, overrides)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    merged = {key: dict(value) for key, value in defaults.items()}
+    for key, override_map in overrides.items():
+        merged[key].update(override_map)
+    return merged
 
 
 @dataclass(frozen=True)
@@ -189,6 +335,29 @@ class MemoryItem:
     latency_ns: sp.Basic | None = None
     bandwidth: sp.Basic | None = None
     time_ns: sp.Basic | None = None
+
+
+def _sum_expr(items: Iterable[sp.Basic]) -> sp.Basic:
+    """求和 sympy 表达式列表。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 逐项累加并返回求和结果。
+
+    使用示例:
+    - total = _sum_expr([expr_a, expr_b])
+
+    关联文件:
+    - spec: spec/analysis/analysis_kernel.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+    total = sp.Integer(0)
+    for item in items:
+        total = total + item
+    return total
 
 
 @dataclass(frozen=True)
@@ -520,152 +689,6 @@ _SPACE_TOKENS = {
     "tsm": "TSM",
     "tlm": "TLM",
 }
-_ANALYSIS_METRIC_KEYS = ("path_bandwidth", "path_latency_ns", "theoretical_compute")
-
-
-def _normalize_path_metric_mapping(
-    values: MappingABC[object, object],
-    *,
-    target: str,
-    metric_key: str,
-) -> dict[MemoryPath, object]:
-    """将 path metric 映射归一为 `MemoryPath` 键。
-
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
-
-    功能说明:
-    - 只接受正式 `MemoryPath` 或其等价值文本。
-    - 一旦出现未知 path，直接报错，避免继续回退到自由字符串口径。
-
-    使用示例:
-    - normalized = _normalize_path_metric_mapping({"GM->LM": 64}, target="npu_demo", metric_key="path_bandwidth")
-
-    关联文件:
-    - spec: spec/analysis/analysis_engine.md
-    - test: test/analysis/test_analysis.py
-    - 功能实现: kernel_gen/analysis/analysis.py
-    """
-
-    normalized: dict[MemoryPath, object] = {}
-    for raw_key, raw_value in values.items():
-        key_text = raw_key.value if isinstance(raw_key, MemoryPath) else str(raw_key)
-        path = normalize_memory_path(key_text)
-        if path is MemoryPath.UNKNOWN and key_text != MemoryPath.UNKNOWN.value:
-            raise AnalysisError(
-                f"target={target}: analysis metric {metric_key} uses unknown memory path {key_text}"
-            )
-        normalized[path] = raw_value
-    return normalized
-
-
-def _load_target_metric_defaults(target: str) -> dict[str, dict[str, object]]:
-    """读取 target registry 中的 analysis 默认参数。
-
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 当前只接受来自 `target registry` 的正式 baseline。
-    - 若 target 未注册，或缺少 `path_bandwidth/path_latency_ns/theoretical_compute` 中任一类别，必须显式失败。
-
-    使用示例:
-    - defaults = _load_target_metric_defaults("npu_demo")
-
-    关联文件:
-    - spec: spec/analysis/analysis_engine.md
-    - test: test/analysis/test_analysis.py
-    - 功能实现: kernel_gen/analysis/analysis.py
-    """
-
-    try:
-        defaults = target_registry.get_target_analysis_defaults(target)
-    except ValueError as exc:
-        raise AnalysisError(str(exc)) from exc
-    missing = [key for key in _ANALYSIS_METRIC_KEYS if key not in defaults]
-    if missing:
-        raise AnalysisError(f"target={target}: missing analysis metric defaults: {', '.join(missing)}")
-    normalized: dict[str, dict[str, object]] = {}
-    for key in _ANALYSIS_METRIC_KEYS:
-        value = defaults[key]
-        if not isinstance(value, MappingABC):
-            raise AnalysisError(f"target={target}: analysis metric {key} must be mapping")
-        if key in {"path_bandwidth", "path_latency_ns"}:
-            normalized[key] = _normalize_path_metric_mapping(value, target=target, metric_key=key)
-        else:
-            normalized[key] = dict(value)
-    return normalized
-
-
-def _normalize_metric_overrides(
-    metric_overrides: MappingABC[str, MappingABC[str, object]] | None,
-) -> dict[str, dict[str, object]]:
-    """规范化显式 metric override 配置。
-
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 只允许覆盖 `path_bandwidth/path_latency_ns/theoretical_compute` 三类正式 metric。
-    - 不允许把任意嵌套字典当成公开输入。
-
-    使用示例:
-    - overrides = _normalize_metric_overrides({"path_bandwidth": {"GM->LM": 96}})
-
-    关联文件:
-    - spec: spec/analysis/analysis_engine.md
-    - test: test/analysis/test_analysis.py
-    - 功能实现: kernel_gen/analysis/analysis.py
-    """
-
-    if metric_overrides is None:
-        return {}
-    if not isinstance(metric_overrides, MappingABC):
-        raise AnalysisError("metric_overrides must be mapping[str, mapping[str, object]]")
-    unknown = set(metric_overrides.keys()) - set(_ANALYSIS_METRIC_KEYS)
-    if unknown:
-        raise AnalysisError(f"metric_overrides has unknown keys: {sorted(unknown)}")
-    normalized: dict[str, dict[str, object]] = {}
-    for key, value in metric_overrides.items():
-        if not isinstance(value, MappingABC):
-            raise AnalysisError(f"metric_overrides.{key} must be mapping")
-        if key in {"path_bandwidth", "path_latency_ns"}:
-            normalized[key] = _normalize_path_metric_mapping(
-                value,
-                target="override",
-                metric_key=key,
-            )
-        else:
-            normalized[key] = dict(value)
-    return normalized
-
-
-def _merge_metric_defaults(
-    defaults: dict[str, dict[str, object]],
-    overrides: dict[str, dict[str, object]],
-) -> dict[str, dict[str, object]]:
-    """把显式 override 叠加到 target baseline 上。
-
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 先复制 target registry 的 baseline，再按类别覆盖键值。
-    - 不改变 baseline 的来源边界；override 仅作为显式 hook。
-
-    使用示例:
-    - merged = _merge_metric_defaults(defaults, overrides)
-
-    关联文件:
-    - spec: spec/analysis/analysis_engine.md
-    - test: test/analysis/test_analysis.py
-    - 功能实现: kernel_gen/analysis/analysis.py
-    """
-
-    merged = {key: dict(value) for key, value in defaults.items()}
-    for key, override_map in overrides.items():
-        merged[key].update(override_map)
-    return merged
 
 
 def _space_token_from_mem_type(mem_type: NnMemoryType) -> str:
@@ -1231,29 +1254,6 @@ def _iter_func_ops(func_op: func.FuncOp) -> Iterable[Operation]:
         yield from _iter_block_ops(block.ops)
 
 
-def _sum_expr(items: Iterable[sp.Basic]) -> sp.Basic:
-    """求和 sympy 表达式列表。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 逐项累加并返回求和结果。
-
-    使用示例:
-    - total = _sum_expr([expr_a, expr_b])
-
-    关联文件:
-    - spec: spec/analysis/analysis_kernel.md
-    - test: test/analysis/test_analysis.py
-    - 功能实现: kernel_gen/analysis/analysis.py
-    """
-    total = sp.Integer(0)
-    for item in items:
-        total = total + item
-    return total
-
-
 def _record_value_read(
     value: SSAValue,
     amount: sp.Basic,
@@ -1703,6 +1703,57 @@ def _analyze_nn_matmul_ir_op(op: Operation, config: AnalysisConfig) -> _Analyzed
     return analyze_nn_matmul_ir_op(op, config)
 
 
+def _coerce_memory_analyzer_result(
+    analyzed: DmaMemoryAnalysis | _AnalyzedOp,
+    config: AnalysisConfig,
+) -> _AnalyzedOp:
+    """将 memory analyzer 结果归一为 `_AnalyzedOp`。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 兼容 DMA memory analyzer 现有输出结构。
+    - 允许 memory analyzer 直接返回 `_AnalyzedOp`。
+
+    使用示例:
+    - normalized = _coerce_memory_analyzer_result(analyzed, config)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+    if isinstance(analyzed, _AnalyzedOp):
+        return analyzed
+    if isinstance(analyzed, DmaMemoryAnalysis):
+        memory_items: list[MemoryItem] = []
+        if config.enable_memory:
+            memory_items = [
+                MemoryItem(
+                    path=item[0],
+                    access=item[1],
+                    bytes=item[2],
+                    latency_ns=item[3],
+                    bandwidth=item[4],
+                    time_ns=item[5],
+                )
+                for item in analyzed.memory_items
+            ]
+        return _AnalyzedOp(
+            op_name=analyzed.op_name,
+            compute_items=[],
+            memory_items=memory_items,
+            compute=sp.Integer(0),
+            read_bytes=analyzed.read_bytes if config.enable_memory else sp.Integer(0),
+            write_bytes=analyzed.write_bytes if config.enable_memory else sp.Integer(0),
+            value_reads=analyzed.value_reads if config.enable_memory else (),
+            direct_writes=analyzed.direct_writes if config.enable_memory else (),
+            result_write_bytes=analyzed.result_write_bytes if config.enable_memory else sp.Integer(0),
+        )
+    raise AnalysisError(f"unsupported memory analyzer result: {type(analyzed).__name__}")
+
+
 def _analyze_dma_ir_op(op: Operation, config: AnalysisConfig) -> _AnalyzedOp | None:
     """分析当前公开 DMA 分支。
 
@@ -1777,57 +1828,6 @@ def _merge_analyzed_ops(op: Operation, analyzed_ops: Sequence[_AnalyzedOp]) -> _
         direct_writes=tuple(direct_writes),
         result_write_bytes=result_write_bytes,
     )
-
-
-def _coerce_memory_analyzer_result(
-    analyzed: DmaMemoryAnalysis | _AnalyzedOp,
-    config: AnalysisConfig,
-) -> _AnalyzedOp:
-    """将 memory analyzer 结果归一为 `_AnalyzedOp`。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 兼容 DMA memory analyzer 现有输出结构。
-    - 允许 memory analyzer 直接返回 `_AnalyzedOp`。
-
-    使用示例:
-    - normalized = _coerce_memory_analyzer_result(analyzed, config)
-
-    关联文件:
-    - spec: spec/analysis/analysis_engine.md
-    - test: test/analysis/test_analysis.py
-    - 功能实现: kernel_gen/analysis/analysis.py
-    """
-    if isinstance(analyzed, _AnalyzedOp):
-        return analyzed
-    if isinstance(analyzed, DmaMemoryAnalysis):
-        memory_items: list[MemoryItem] = []
-        if config.enable_memory:
-            memory_items = [
-                MemoryItem(
-                    path=item[0],
-                    access=item[1],
-                    bytes=item[2],
-                    latency_ns=item[3],
-                    bandwidth=item[4],
-                    time_ns=item[5],
-                )
-                for item in analyzed.memory_items
-            ]
-        return _AnalyzedOp(
-            op_name=analyzed.op_name,
-            compute_items=[],
-            memory_items=memory_items,
-            compute=sp.Integer(0),
-            read_bytes=analyzed.read_bytes if config.enable_memory else sp.Integer(0),
-            write_bytes=analyzed.write_bytes if config.enable_memory else sp.Integer(0),
-            value_reads=analyzed.value_reads if config.enable_memory else (),
-            direct_writes=analyzed.direct_writes if config.enable_memory else (),
-            result_write_bytes=analyzed.result_write_bytes if config.enable_memory else sp.Integer(0),
-        )
-    raise AnalysisError(f"unsupported memory analyzer result: {type(analyzed).__name__}")
 
 
 def _analyze_ir_op(op: Operation, config: AnalysisConfig) -> _AnalyzedOp | None:
