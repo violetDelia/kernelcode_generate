@@ -1,7 +1,7 @@
 """buffer-results-to-out-params lowering pass.
 
 创建者: 朽木露琪亚
-最后一次更改: 金铲铲大作战
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 将 `func.func` 中所有 `memory` 返回值改写为最前置 out 参数。
@@ -20,9 +20,11 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ArrayAttr, DictionaryAttr, ModuleOp, StringAttr
-from xdsl.ir import Block, BlockArgument, Operation, SSAValue
+from xdsl.ir import Attribute, Block, BlockArgument, Operation, SSAValue
 
 from kernel_gen.dialect.dma import DmaAllocOp
 from kernel_gen.dialect.nn import NnMemoryType
@@ -48,11 +50,88 @@ class BufferResultsToOutParamsError(ValueError):
     """
 
 
+@dataclass(frozen=True)
+class _OutputSignature:
+    """封装函数输出的 memory/scalar 结果分解信息。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 统一收敛 `memory` 与 `scalar` 输出索引划分。
+    - 便于在校验、callsite 改写与 callee 改写间共享同一拆分逻辑。
+
+    使用示例:
+    - signature = _output_signature(func_op)
+
+    关联文件:
+    - spec: spec/pass/lowering/buffer_results_to_out_params.md
+    - test: test/pass/test_buffer_results_to_out_params.py
+    - 功能实现: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+    """
+
+    output_types: list[Attribute]
+    memory_indices: list[int]
+    scalar_indices: list[int]
+
+
+@dataclass(frozen=True)
+class _RewriteTarget:
+    """记录待改写函数的输入/输出签名信息。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 把 `func.func` 与其输出拆分签名绑定，避免后续重复推导。
+    - 保证 callsite 改写与 callee 改写基于同一套输出索引。
+
+    使用示例:
+    - target = _build_rewrite_target(func_op)
+
+    关联文件:
+    - spec: spec/pass/lowering/buffer_results_to_out_params.md
+    - test: test/pass/test_buffer_results_to_out_params.py
+    - 功能实现: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+    """
+
+    func_op: func.FuncOp
+    input_types: list[Attribute]
+    output_signature: _OutputSignature
+
+
+def _output_signature(func_op: func.FuncOp) -> _OutputSignature:
+    """拆分 `func.func` 的输出类型为 memory/scalar 索引列表。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 固化 `function_type.outputs` 的结构化拆分逻辑。
+    - 供校验、callsite 改写与 callee 改写复用。
+
+    使用示例:
+    - signature = _output_signature(func_op)
+
+    关联文件:
+    - spec: spec/pass/lowering/buffer_results_to_out_params.md
+    - test: test/pass/test_buffer_results_to_out_params.py
+    - 功能实现: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+    """
+
+    output_types = list(func_op.function_type.outputs.data)
+    memory_indices = [
+        index for index, output_type in enumerate(output_types) if isinstance(output_type, NnMemoryType)
+    ]
+    scalar_indices = [index for index in range(len(output_types)) if index not in memory_indices]
+    return _OutputSignature(output_types, memory_indices, scalar_indices)
+
+
 def _memory_output_indices(func_op: func.FuncOp) -> list[int]:
     """收集函数输出中的 memory result 索引。
 
     创建者: 朽木露琪亚
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 逐项检查 `function_type.outputs`。
@@ -67,11 +146,7 @@ def _memory_output_indices(func_op: func.FuncOp) -> list[int]:
     - 功能实现: kernel_gen/passes/lowering/buffer_results_to_out_params.py
     """
 
-    return [
-        index
-        for index, output_type in enumerate(func_op.function_type.outputs.data)
-        if isinstance(output_type, NnMemoryType)
-    ]
+    return _output_signature(func_op).memory_indices
 
 
 def _has_leading_out_params(func_op: func.FuncOp, memory_count: int) -> bool:
@@ -163,11 +238,11 @@ def _rebuild_arg_attrs(func_op: func.FuncOp, prepended: int) -> ArrayAttr[Dictio
     return ArrayAttr([*prepended_attrs, *existing])
 
 
-def _validate_candidate(func_op: func.FuncOp) -> None:
+def _validate_candidate(func_op: func.FuncOp, signature: _OutputSignature) -> None:
     """校验当前最小骨架可安全改写的函数范围。
 
     创建者: 朽木露琪亚
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - external declaration 直接失败。
@@ -175,7 +250,8 @@ def _validate_candidate(func_op: func.FuncOp) -> None:
     - 多个 `memory` 返回与 `memory + scalar` 混合返回都在当前范围内。
 
     使用示例:
-    - _validate_candidate(func_op)
+    - signature = _output_signature(func_op)
+    - _validate_candidate(func_op, signature)
 
     关联文件:
     - spec: spec/pass/lowering/buffer_results_to_out_params.md
@@ -183,7 +259,7 @@ def _validate_candidate(func_op: func.FuncOp) -> None:
     - 功能实现: kernel_gen/passes/lowering/buffer_results_to_out_params.py
     """
 
-    memory_indices = _memory_output_indices(func_op)
+    memory_indices = signature.memory_indices
     if not memory_indices:
         return
     if _has_leading_out_params(func_op, len(memory_indices)):
@@ -205,11 +281,37 @@ def _validate_candidate(func_op: func.FuncOp) -> None:
         )
 
 
-def _collect_rewrite_targets(module: ModuleOp) -> dict[str, func.FuncOp]:
+def _build_rewrite_target(func_op: func.FuncOp) -> _RewriteTarget | None:
+    """构建待改写函数的统一签名信息。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 在生成 target 前完成候选校验，保证后续改写逻辑前置失败。
+    - 仅当函数存在 memory 返回值时返回目标信息。
+
+    使用示例:
+    - target = _build_rewrite_target(func_op)
+
+    关联文件:
+    - spec: spec/pass/lowering/buffer_results_to_out_params.md
+    - test: test/pass/test_buffer_results_to_out_params.py
+    - 功能实现: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+    """
+
+    signature = _output_signature(func_op)
+    if not signature.memory_indices:
+        return None
+    _validate_candidate(func_op, signature)
+    return _RewriteTarget(func_op, list(func_op.function_type.inputs.data), signature)
+
+
+def _collect_rewrite_targets(module: ModuleOp) -> dict[str, _RewriteTarget]:
     """收集需要改写的函数，并提前做边界校验。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 只收集存在 `memory` 返回值的 `func.func`。
@@ -224,22 +326,22 @@ def _collect_rewrite_targets(module: ModuleOp) -> dict[str, func.FuncOp]:
     - 功能实现: kernel_gen/passes/lowering/buffer_results_to_out_params.py
     """
 
-    targets: dict[str, func.FuncOp] = {}
+    targets: dict[str, _RewriteTarget] = {}
     for op in module.ops:
         if not isinstance(op, func.FuncOp):
             continue
-        if not _memory_output_indices(op):
+        target = _build_rewrite_target(op)
+        if target is None:
             continue
-        _validate_candidate(op)
-        targets[op.sym_name.data] = op
+        targets[op.sym_name.data] = target
     return targets
 
 
-def _collect_target_calls(module: ModuleOp, targets: dict[str, func.FuncOp]) -> list[func.CallOp]:
+def _collect_target_calls(module: ModuleOp, targets: dict[str, _RewriteTarget]) -> list[func.CallOp]:
     """收集调用待改写函数的 `func.call`。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 只处理模块内可解析的 `func.call`。
@@ -267,11 +369,11 @@ def _collect_target_calls(module: ModuleOp, targets: dict[str, func.FuncOp]) -> 
     return calls
 
 
-def _rewrite_callsite(call_op: func.CallOp, targets: dict[str, func.FuncOp]) -> None:
+def _rewrite_callsite(call_op: func.CallOp, targets: dict[str, _RewriteTarget]) -> None:
     """把调用待改写 callee 的 `func.call` 改成显式 out-arg 形式。
 
     创建者: 朽木露琪亚
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 在旧 `func.call` 前为每个 `memory` result 插入 `dma.alloc`，caller 侧显式提供多个 out buffer。
@@ -288,13 +390,12 @@ def _rewrite_callsite(call_op: func.CallOp, targets: dict[str, func.FuncOp]) -> 
     """
 
     callee_name = call_op.callee.root_reference.data
-    target_func = targets.get(callee_name)
-    if target_func is None:
+    target = targets.get(callee_name)
+    if target is None:
         return
-    memory_indices = _memory_output_indices(target_func)
-    input_types = list(target_func.function_type.inputs.data)
-    output_types = list(target_func.function_type.outputs.data)
-    if len(call_op.arguments) != len(input_types) or len(call_op.results) != len(output_types):
+    memory_indices = target.output_signature.memory_indices
+    output_types = target.output_signature.output_types
+    if len(call_op.arguments) != len(target.input_types) or len(call_op.results) != len(output_types):
         _raise_half_rewritten(f"callsite for {callee_name} does not match callee signature")
     block = call_op.parent
     if not isinstance(block, Block):
@@ -309,7 +410,7 @@ def _rewrite_callsite(call_op: func.CallOp, targets: dict[str, func.FuncOp]) -> 
             )
         out_allocs.append(DmaAllocOp([], result_type))
 
-    scalar_indices = [index for index in range(len(output_types)) if index not in memory_indices]
+    scalar_indices = target.output_signature.scalar_indices
     new_call = func.CallOp(
         callee_name,
         [*(alloc.result for alloc in out_allocs), *call_op.arguments],
@@ -324,11 +425,11 @@ def _rewrite_callsite(call_op: func.CallOp, targets: dict[str, func.FuncOp]) -> 
     block.erase_op(call_op)
 
 
-def _rewrite_callsites(module: ModuleOp, targets: dict[str, func.FuncOp]) -> None:
+def _rewrite_callsites(module: ModuleOp, targets: dict[str, _RewriteTarget]) -> None:
     """同步改写所有调用待改写函数的 `func.call`。
 
     创建者: 朽木露琪亚
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 统一处理模块内 caller/callee，避免只改 `func.func` 而遗漏调用点。
@@ -373,11 +474,11 @@ def _erase_dead_result_owner(value: SSAValue, block: Block) -> None:
         block.erase_op(owner)
 
 
-def _rewrite_memory_results_to_out_params(func_op: func.FuncOp) -> None:
+def _rewrite_memory_results_to_out_params(target: _RewriteTarget) -> None:
     """将函数返回中的所有 `memory` 结果改写为最前置 out 参数。
 
     创建者: 朽木露琪亚
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 在 block 最前按原 memory result 顺序插入 `arg0 / arg1 / ...`。
@@ -394,11 +495,12 @@ def _rewrite_memory_results_to_out_params(func_op: func.FuncOp) -> None:
     - 功能实现: kernel_gen/passes/lowering/buffer_results_to_out_params.py
     """
 
+    func_op = target.func_op
     block = func_op.body.blocks.first
     if block is None:
         raise BufferResultsToOutParamsError("function body is empty")
-    output_types = list(func_op.function_type.outputs.data)
-    memory_indices = _memory_output_indices(func_op)
+    output_types = target.output_signature.output_types
+    memory_indices = target.output_signature.memory_indices
     return_op = func_op.get_return_op()
     if return_op is None or len(return_op.arguments) != len(output_types):
         raise BufferResultsToOutParamsError(
@@ -414,9 +516,7 @@ def _rewrite_memory_results_to_out_params(func_op: func.FuncOp) -> None:
 
     func_op.properties["arg_attrs"] = _rebuild_arg_attrs(func_op, len(new_out_args))
 
-    scalar_return_values = [
-        return_op.arguments[index] for index in range(len(output_types)) if index not in memory_indices
-    ]
+    scalar_return_values = [return_op.arguments[index] for index in target.output_signature.scalar_indices]
     memory_return_values = [return_op.arguments[index] for index in memory_indices]
     for new_out_arg, return_value in zip(new_out_args, memory_return_values, strict=True):
         return_value.replace_by(new_out_arg)
@@ -431,7 +531,7 @@ class BufferResultsToOutParamsPass(Pass):
     """将 `memory` 返回值改写为最前置 out 参数的 lowering pass。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 在模块级先做候选校验。
@@ -453,7 +553,7 @@ class BufferResultsToOutParamsPass(Pass):
         """执行最小骨架改写。
 
         创建者: 朽木露琪亚
-        最后一次更改: 朽木露琪亚
+        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 先收集并校验候选函数。
@@ -472,8 +572,8 @@ class BufferResultsToOutParamsPass(Pass):
             raise BufferResultsToOutParamsError("module must be builtin.module")
         targets = _collect_rewrite_targets(module)
         _rewrite_callsites(module, targets)
-        for func_op in targets.values():
-            _rewrite_memory_results_to_out_params(func_op)
+        for target in targets.values():
+            _rewrite_memory_results_to_out_params(target)
         return module
 
 
