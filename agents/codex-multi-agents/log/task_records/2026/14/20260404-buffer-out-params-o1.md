@@ -350,3 +350,183 @@
 - 结论：
   - `T-20260404-e27b5d40` 已完成并封板。
   - 后续链路已按当前规则衔接到整链合并阶段，等待管理员核对并分发 `T-20260404-180b9d77`。
+
+- 时间：`2026-04-04 10:50:52 +0800`
+- 经办人：`金铲铲大作战`
+- 任务：`T-20260404-400eca69`
+- 任务目标：
+  - 按 [`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md) 的 `O3` 边界，把 pass 从单 memory return 扩到“多 memory results + mixed returns”，固定多个 output 前置顺序为 `arg0 / arg1 / ...`，并保持 scalar 返回仍留在 `func.return`；不触碰 `O4/O5`。
+- 当前已完成改动：
+  - 修改 [`kernel_gen/passes/lowering/buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/passes/lowering/buffer_results_to_out_params.py)
+    - 放宽候选校验：允许多个 `memory` 返回和 `memory + scalar` 混合返回，只继续要求 `single-block` 且 `func.return` 参数个数与 `function_type.outputs` 一致。
+    - 扩展 `func.call` 同步改写：为每个 `memory` result caller 侧前插一个 `dma.alloc`，新 `func.call` 参数顺序固定为所有 out 实参在前、原输入参数整体后移；非 memory result 继续保留为新的 `func.call` 返回值。
+    - 把 callee 改写收口到 `_rewrite_memory_results_to_out_params(...)`：按原 memory result 顺序前置 `arg0 / arg1 / ...`，`func.return` 只保留原 scalar 返回。
+  - 修改 [`test/pass/test_buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_buffer_results_to_out_params.py)
+    - 新增 `test_rewrite_multiple_memory_results_to_arg0_arg1`，锁定双 memory return 会固定前置为 `arg0 / arg1`，caller 侧 `func.call` 改写为零 result 且按顺序显式传 out buffer。
+    - 新增 `test_rewrite_mixed_memory_and_scalar_results_preserves_scalar_return`，锁定 mixed returns 改写后 memory 前置为 `arg0`，scalar 仍保留在 `function_type.outputs` 与 `func.return`，caller 侧 `func.call` 只保留 scalar result。
+- 验证：
+  - `python -m pytest -q test/pass/test_buffer_results_to_out_params.py -k 'multiple or mixed'`
+    - 结果：`2 passed, 5 deselected`
+  - `python -m pytest -q test/pass/test_buffer_results_to_out_params.py`
+    - 结果：`7 passed`
+  - `git diff --check -- kernel_gen/passes/lowering/buffer_results_to_out_params.py test/pass/test_buffer_results_to_out_params.py`
+    - 结果：通过
+- 自检：
+  - 目标收口：通过。当前实现和新增单测已经覆盖 `O3` 计划要求的“多 memory results 顺序固定 + mixed returns 保留 scalar return”主逻辑，不是只绕过单一用例。
+  - 边界未越界：通过。未触碰 `O4/O5`，也未改 `gen_kernel` 或其他 pass。
+  - 证据充分：部分通过。实现主线与 tracked 单测证据已齐，但任务原文要求的 expectation 文件与 expectation 验证命令当前无法执行。
+- 当前阻塞：
+  - 已解除。管理员已明确允许本轮在同一 `worktree` 新建 `expectation/pass/lowing/buffer_results_to_out_params/multi_output.py` 与 `mixed_output.py` 作为 `O3` smoke 证据。
+
+- 时间：`2026-04-04 10:55:45 +0800`
+- 经办人：`金铲铲大作战`
+- 任务目标：
+  - 按 `O3` 边界继续收口多 `memory results` 与 `mixed returns` 改写，并补齐对应 expectation smoke 证据；不触碰 `O4/O5`。
+- 完成改动：
+  - 修改 [`kernel_gen/passes/lowering/buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/passes/lowering/buffer_results_to_out_params.py)
+    - 将候选校验从“单 `memory` 返回”扩到“多 `memory` 返回 + mixed returns”，要求 `func.return` 参数个数与 `function_type.outputs` 一致。
+    - 扩展 `func.call` 同步改写：为每个 `memory` result 前插一个 `dma.alloc`，新 `func.call` 参数顺序固定为所有 out 实参在前，原始输入参数整体后移；非 `memory` result 继续作为新 `func.call` 返回值保留。
+    - 将 callee 改写统一到 `_rewrite_memory_results_to_out_params(...)`：按原 `memory` 输出顺序前置 `arg0 / arg1 / ...`，`func.return` 仅保留原 scalar 返回。
+    - 更新模块/类/函数文档头，显式写明当前已覆盖多 output 与 mixed returns。
+  - 修改 [`test/pass/test_buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_buffer_results_to_out_params.py)
+    - 新增 `test_rewrite_multiple_memory_results_to_arg0_arg1`，锁定双 `memory` return 会固定重排为最前置 `arg0/arg1`，caller 侧 `func.call` 清空 memory results 并按顺序显式传 out 实参。
+    - 新增 `test_rewrite_mixed_memory_and_scalar_results_preserves_scalar_return`，锁定 mixed returns 改写后只前置 `memory` out，scalar 继续留在 `function_type.outputs` 与 `func.return`。
+    - 新增 `_make_memory_type_with_shape(...)` 供多 output 顺序测试复用。
+  - 新增 expectation smoke 文件（当前位于 worktree ignored 路径，不属于 tracked 合并范围）：
+    - [`expectation/pass/lowing/buffer_results_to_out_params/multi_output.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/expectation/pass/lowing/buffer_results_to_out_params/multi_output.py)
+    - [`expectation/pass/lowing/buffer_results_to_out_params/mixed_output.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/expectation/pass/lowing/buffer_results_to_out_params/mixed_output.py)
+    - 两个脚本分别锁定“多 `memory` 返回 -> `arg0/arg1`”与“`memory + scalar` mixed returns 保留 scalar return”的 smoke 证据。
+- 验证：
+  - `python -m pytest -q test/pass/test_buffer_results_to_out_params.py -k 'multiple or mixed'`
+    - 结果：`2 passed, 5 deselected`
+  - `python -m pytest -q test/pass/test_buffer_results_to_out_params.py`
+    - 结果：`7 passed`
+  - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/multi_output.py`
+    - 结果：通过
+  - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/mixed_output.py`
+    - 结果：通过
+  - `git diff --check -- kernel_gen/passes/lowering/buffer_results_to_out_params.py test/pass/test_buffer_results_to_out_params.py expectation/pass/lowing/buffer_results_to_out_params/multi_output.py expectation/pass/lowing/buffer_results_to_out_params/mixed_output.py`
+    - 结果：通过
+- 自检：
+  - 任务目标真正收口：通过。本轮已覆盖 `O3` 计划要求的两条核心门禁：
+    - 多 `memory results` 固定前置为 `arg0/arg1/...`
+    - mixed returns 仅前置 `memory` out，scalar 继续留在返回值中
+  - 边界未越界：通过。未触碰 `O4/O5`，也未改 `pass_manager`、`gen_kernel` 或其他链路文件。
+  - 验证证据充分：通过。tracked 单测和 expectation smoke 都已通过，且全量 `test/pass/test_buffer_results_to_out_params.py` 没有回退。
+  - 记录与实际改动一致：通过。tracked 变更是 `pass`、`test` 和本记录文件；两份 expectation 为 ignored smoke 证据，已在记录中显式标注。
+- 结论：
+  - `O3` 已按边界完成：pass 现在支持多 `memory results` 与 `mixed returns` 改写，多个 output 的前置顺序固定为 `arg0 / arg1 / ...`，scalar 返回仍留在 `func.return`。
+  - 现有 `O1/O2` 单测未回退，`O3` 对应 expectation smoke 已补齐并通过。
+
+- 时间：`2026-04-04 10:57:10 +0800`
+- 经办人：`金铲铲大作战`
+- 任务流转：
+  - 已执行 `-done`：
+    - `T-20260404-400eca69`
+  - 已新建同链路后续复审任务：
+    - `T-20260404-3cf80da5`
+- 后续复审范围建议：
+  - [`kernel_gen/passes/lowering/buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/passes/lowering/buffer_results_to_out_params.py)
+  - [`test/pass/test_buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_buffer_results_to_out_params.py)
+  - [`20260404-buffer-out-params-o1.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md)
+  - ignored smoke 证据：
+    - [`expectation/pass/lowing/buffer_results_to_out_params/multi_output.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/expectation/pass/lowing/buffer_results_to_out_params/multi_output.py)
+    - [`expectation/pass/lowing/buffer_results_to_out_params/mixed_output.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/expectation/pass/lowing/buffer_results_to_out_params/mixed_output.py)
+
+- 时间：`2026-04-04 11:20:34 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-3cf80da5`
+- 任务目标：
+  - 按 `O3` 复审边界只读核对 `kernel_gen/passes/lowering/buffer_results_to_out_params.py`、`test/pass/test_buffer_results_to_out_params.py` 与同链记录，并核对 ignored expectation `multi_output.py / mixed_output.py` smoke 证据。
+- 审查前自检：
+  - 已核对 `O3` 计划条目、实现、测试、ignored smoke 和同链记录是否一致。
+  - 已实跑 `O3` gate、两份 smoke 和整份 `test_buffer_results_to_out_params.py`，确保不只覆盖新增路径，也覆盖 `O1/O2` 既有能力未回退。
+  - 已检查当前 diff 和同链记录，确认本轮没有越界到 `O4/O5`。
+- 审查结论：
+  - `通过`
+- 审查结果：
+  - [`buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/passes/lowering/buffer_results_to_out_params.py#L195) 到 [`buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/passes/lowering/buffer_results_to_out_params.py#L244) 已支持多 `memory` 返回的 callsite 同步改写：caller 为每个 `memory` result 按原顺序插入 `dma.alloc`，新 `func.call` 参数顺序固定为 out 实参在前、原输入参数后移，旧 memory call result SSA 被逐个替换。
+  - [`buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/passes/lowering/buffer_results_to_out_params.py#L282) 到 [`buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/passes/lowering/buffer_results_to_out_params.py#L321) 已支持 mixed returns：所有 `memory` 输出前置为 `arg0 / arg1 / ...`，`func.return` 与 `function_type.outputs` 只保留非 memory 的 scalar 返回。
+  - [`test_buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_buffer_results_to_out_params.py#L319) 的 `BROTP-006` 锁住双 memory returns 的固定前置顺序 `arg0 / arg1`，以及 caller 侧 `func.call` 零 result + out 实参顺序稳定。
+  - [`test_buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_buffer_results_to_out_params.py#L387) 的 `BROTP-007` 锁住 mixed returns 只前置 memory out，scalar 继续保留在 callee `func.return`、`function_type.outputs` 和 caller `func.call` result 中。
+  - ignored expectation [`multi_output.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/expectation/pass/lowing/buffer_results_to_out_params/multi_output.py) 与 [`mixed_output.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/expectation/pass/lowing/buffer_results_to_out_params/mixed_output.py) 的 smoke 输出和实现/测试口径一致。
+  - 整份 [`test_buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_buffer_results_to_out_params.py) 全量 `7 passed`，说明 `O1/O2` 的 single memory、external declaration、callsite rewrite 和 pipeline 顺序能力没有回退。
+- 漏洞与边界排查：
+  - 功能正确性：通过，多 output 顺序固定、mixed scalar 保留、旧 SSA 清理都被直接锁住。
+  - 边界条件：通过，当前仍限定在 `O3` 的多 memory results / mixed returns，不越界到 `O4/O5`。
+  - 异常路径：通过，external declaration 等既有显式失败边界未被误伤。
+  - 潜在漏洞/歧义：未见 output 顺序漂移、mixed scalar 丢失或 `O1/O2` 旧合同回退。
+- 验证：
+  - `python -m pytest -q test/pass/test_buffer_results_to_out_params.py -k 'multiple or mixed'` -> `2 passed, 5 deselected`
+  - `python -m pytest -q test/pass/test_buffer_results_to_out_params.py` -> `7 passed`
+  - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/multi_output.py` -> `0`
+  - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/mixed_output.py` -> `0`
+  - `git -C /home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1 diff --check -- kernel_gen/passes/lowering/buffer_results_to_out_params.py test/pass/test_buffer_results_to_out_params.py agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md` -> `0`
+- 下一步建议：
+  - 进入 `O3` 同链合并阶段；合并范围至少应覆盖 `kernel_gen/passes/lowering/buffer_results_to_out_params.py`、`test/pass/test_buffer_results_to_out_params.py` 与同链记录文件。`multi_output.py / mixed_output.py` 如仍处于 ignored 状态，应在合并任务里明确只作为 smoke 证据处理。
+
+- 时间：`2026-04-04 11:21:03 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-3cf80da5`
+- 任务目标：
+  - 完成当前 `O3` 复审任务流转，并按同链路补建唯一后续合并任务。
+- 执行：
+  - 已执行 `-done`：
+    - `bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file TODO.md -done -task_id T-20260404-3cf80da5 -log wt-20260404-buffer-out-params-o1/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md -agents-list agents/codex-multi-agents/agents-lists.md`
+    - 结果：`OK: done T-20260404-3cf80da5`
+  - 已新建唯一后续任务：
+    - `T-20260404-3b6618d5`
+    - 任务方向：按当前已完成链路合并 `O3` 的实现、测试与记录文件。
+- 结论：
+  - `T-20260404-3cf80da5` 已完成并封板。
+  - 后续链路等待管理员核对并分发 `T-20260404-3b6618d5`。
+
+- 时间：`2026-04-04 11:11:52 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-3cf80da5`
+- 任务目标：`按 O3 复审边界只读复核 buffer_results_to_out_params.py、test/pass/test_buffer_results_to_out_params.py 与同链记录，重点检查 multiple outputs 固定前置顺序 arg0/arg1/...、mixed returns 保留 scalar func.return、O1/O2 既有能力未回退，并核对 ignored expectation multi_output.py / mixed_output.py smoke 证据。`
+- 审查前自检：
+  - 已核对 `O3` 计划条目、实现、测试、ignored expectation smoke 与同链记录。
+  - 已实跑：
+    - `python -m pytest -q test/pass/test_buffer_results_to_out_params.py -k 'multiple or mixed'`
+    - `python -m pytest -q test/pass/test_buffer_results_to_out_params.py`
+    - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/multi_output.py`
+    - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/mixed_output.py`
+  - 已确认 `O1/O2` 既有单测随全量回归一起通过，没有被本轮新增功能回退。
+- 审查结论：
+  - `通过`
+- 审查结果：
+  - [`buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/passes/lowering/buffer_results_to_out_params.py#L195) 到 [`buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/passes/lowering/buffer_results_to_out_params.py#L244) 的 callsite 改写已支持多 `memory` 返回：caller 侧为每个 `memory` result 按原顺序插入 `dma.alloc`，新 `func.call` 参数顺序固定为 out 实参在前、原输入参数后移，旧 memory call result SSA 被逐个替换。
+  - [`buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/passes/lowering/buffer_results_to_out_params.py#L282) 到 [`buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/passes/lowering/buffer_results_to_out_params.py#L321) 的 callee 改写已支持 mixed returns：所有 `memory` 输出前置为 `arg0 / arg1 / ...`，`func.return` 与 `function_type.outputs` 只保留非 memory 的 scalar 返回。
+  - [`test_buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_buffer_results_to_out_params.py#L319) 的 `BROTP-006` 直接锁定双 memory returns 的固定前置顺序 `arg0 / arg1`，以及 caller 侧 `func.call` 零 result + out 实参顺序稳定。
+  - [`test_buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_buffer_results_to_out_params.py#L387) 的 `BROTP-007` 直接锁定 mixed returns 只前置 memory out，scalar 继续留在 callee `func.return`、`function_type.outputs` 和 caller `func.call` result 中。
+  - ignored expectation [`multi_output.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/expectation/pass/lowing/buffer_results_to_out_params/multi_output.py) 与 [`mixed_output.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/expectation/pass/lowing/buffer_results_to_out_params/mixed_output.py) 的 smoke 输出都与实现/测试口径一致。
+  - 整份 [`test_buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_buffer_results_to_out_params.py) 全量 `7 passed`，说明 `O1/O2` 的 single memory、external declaration、caller/callee callsite rewrite 和 pipeline 顺序能力没有回退。
+- 漏洞与边界排查：
+  - 功能正确性：通过，多 output 顺序固定、mixed scalar 保留、旧 SSA 清理都被直接锁住。
+  - 边界条件：通过，当前仍限定在 `O3` 的多 memory results / mixed returns，不越界到 `O4/O5`。
+  - 异常路径：通过，external declaration 等既有显式失败边界未被误伤。
+  - 潜在漏洞/歧义：未见 output 顺序漂移、mixed scalar 丢失或 `O1/O2` 旧合同回退。
+- 验证：
+  - `python -m pytest -q test/pass/test_buffer_results_to_out_params.py -k 'multiple or mixed'` -> `2 passed, 5 deselected`
+  - `python -m pytest -q test/pass/test_buffer_results_to_out_params.py` -> `7 passed`
+  - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/multi_output.py` -> `0`
+  - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/mixed_output.py` -> `0`
+  - `git -C /home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1 diff --check -- kernel_gen/passes/lowering/buffer_results_to_out_params.py test/pass/test_buffer_results_to_out_params.py agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md` -> `0`
+- 下一步建议：
+  - 进入 `O3` 同链合并阶段；合并范围至少应覆盖 `kernel_gen/passes/lowering/buffer_results_to_out_params.py`、`test/pass/test_buffer_results_to_out_params.py` 与同链记录文件。`multi_output.py` / `mixed_output.py` 如仍处于 ignored 状态，应在合并任务里明确只作为 smoke 证据处理。
+
+- 时间：`2026-04-04 11:13:02 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-3cf80da5`
+- 任务目标：`完成当前 O3 复审任务流转，并按同链路补建唯一后续合并任务。`
+- 执行：
+  - 已执行 `-done`：
+    - `bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file TODO.md -done -task_id T-20260404-3cf80da5 -log wt-20260404-buffer-out-params-o1/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md -agents-list agents/codex-multi-agents/agents-lists.md`
+    - 结果：`OK: done T-20260404-3cf80da5`
+  - 已新建唯一后续任务：
+    - `T-20260404-3b6618d5`
+    - 任务方向：按当前已完成链路合并 `O3` 的实现、测试与记录文件。
+- 结论：
+  - `T-20260404-3cf80da5` 已完成并封板。
+  - 后续链路等待管理员核对并分发 `T-20260404-3b6618d5`。

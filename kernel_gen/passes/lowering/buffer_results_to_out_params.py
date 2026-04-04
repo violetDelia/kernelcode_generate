@@ -1,12 +1,12 @@
 """buffer-results-to-out-params lowering pass.
 
 创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
+最后一次更改: 金铲铲大作战
 
 功能说明:
-- 将 `func.func` 中单个 `memory` 返回值改写为最前置 out 参数。
+- 将 `func.func` 中所有 `memory` 返回值改写为最前置 out 参数。
 - 同步改写模块内可解析 `func.call`，把 caller 侧旧 memory result SSA 收口为显式 out 实参。
-- 为当前首版范围明确写死 external declaration 与多结果/混合返回的失败边界。
+- 当前覆盖单个 `memory` 返回、多 `memory` 返回和 `memory + scalar` 混合返回；external declaration 仍显式失败。
 
 使用示例:
 - from kernel_gen.passes.lowering.buffer_results_to_out_params import BufferResultsToOutParamsPass
@@ -33,7 +33,7 @@ class BufferResultsToOutParamsError(ValueError):
     """buffer-results-to-out-params pass 的显式错误。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 统一承载 external declaration、半改半留和当前骨架未覆盖场景的错误。
@@ -52,7 +52,7 @@ def _memory_output_indices(func_op: func.FuncOp) -> list[int]:
     """收集函数输出中的 memory result 索引。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 逐项检查 `function_type.outputs`。
@@ -78,7 +78,7 @@ def _rebuild_arg_attrs(func_op: func.FuncOp, prepended: int) -> ArrayAttr[Dictio
     """为前置 out 参数重建 `arg_attrs`。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 新前置参数名固定为 `arg0`、`arg1`。
@@ -111,7 +111,8 @@ def _validate_candidate(func_op: func.FuncOp) -> None:
 
     功能说明:
     - external declaration 直接失败。
-    - 本轮只接受单 block、单 `memory` 返回、且无混合返回。
+    - 本轮只接受单 block，且 `func.return` 参数个数必须与 `function_type.outputs` 一致。
+    - 多个 `memory` 返回与 `memory + scalar` 混合返回都在当前范围内。
 
     使用示例:
     - _validate_candidate(func_op)
@@ -131,16 +132,12 @@ def _validate_candidate(func_op: func.FuncOp) -> None:
     )
     if is_external_like:
         raise BufferResultsToOutParamsError("external declaration is not supported")
-    if len(memory_indices) != 1 or len(func_op.function_type.outputs.data) != 1:
-        raise BufferResultsToOutParamsError(
-            "multiple or mixed memory results are not supported in the minimal skeleton"
-        )
     if len(tuple(func_op.body.blocks)) != 1:
         raise BufferResultsToOutParamsError("only single-block functions are supported")
     return_op = func_op.get_return_op()
-    if return_op is None or len(return_op.arguments) != 1:
+    if return_op is None or len(return_op.arguments) != len(func_op.function_type.outputs.data):
         raise BufferResultsToOutParamsError(
-            "single memory result rewrite requires exactly one return operand"
+            "return operand count must match function outputs for buffer-results-to-out-params"
         )
 
 
@@ -213,9 +210,9 @@ def _rewrite_callsite(call_op: func.CallOp, targets: dict[str, func.FuncOp]) -> 
     最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 在旧 `func.call` 前插入 `dma.alloc` 作为 caller 侧输出 buffer。
-    - 新 `func.call` 第一个实参固定传入该 out buffer。
-    - 旧 memory call result SSA 全量替换为 caller 侧显式 out buffer，并移除旧 call result。
+    - 在旧 `func.call` 前为每个 `memory` result 插入 `dma.alloc`，caller 侧显式提供多个 out buffer。
+    - 新 `func.call` 的参数顺序固定为：所有 out 实参在前，原始输入参数整体后移。
+    - 旧 memory call result SSA 全量替换为 caller 侧显式 out buffer；非 memory result 继续作为新的 `func.call` 返回值保留。
 
     使用示例:
     - _rewrite_callsite(call_op, targets)
@@ -230,23 +227,37 @@ def _rewrite_callsite(call_op: func.CallOp, targets: dict[str, func.FuncOp]) -> 
     target_func = targets.get(callee_name)
     if target_func is None:
         return
-    if len(call_op.results) != 1:
+    memory_indices = _memory_output_indices(target_func)
+    output_types = list(target_func.function_type.outputs.data)
+    if len(call_op.results) != len(output_types):
         raise BufferResultsToOutParamsError(
-            f"callsite rewrite requires exactly one memory result for callee {callee_name}"
-        )
-    result_type = call_op.results[0].type
-    if not isinstance(result_type, NnMemoryType):
-        raise BufferResultsToOutParamsError(
-            f"callsite rewrite requires memory result for callee {callee_name}"
+            f"callsite rewrite requires result count to match callee outputs for {callee_name}"
         )
     block = call_op.parent
     if not isinstance(block, Block):
         raise BufferResultsToOutParamsError("callsite rewrite requires call op to live in a block")
 
-    out_alloc = DmaAllocOp([], result_type)
-    new_call = func.CallOp(callee_name, [out_alloc.result, *call_op.arguments], [])
-    block.insert_ops_before([out_alloc, new_call], call_op)
-    call_op.results[0].replace_by(out_alloc.result)
+    out_allocs: list[DmaAllocOp] = []
+    for result_index in memory_indices:
+        result_type = call_op.results[result_index].type
+        if not isinstance(result_type, NnMemoryType):
+            raise BufferResultsToOutParamsError(
+                f"callsite rewrite requires memory result for callee {callee_name}"
+            )
+        out_allocs.append(DmaAllocOp([], result_type))
+
+    scalar_indices = [index for index in range(len(output_types)) if index not in memory_indices]
+    new_call = func.CallOp(
+        callee_name,
+        [*(alloc.result for alloc in out_allocs), *call_op.arguments],
+        [call_op.results[index].type for index in scalar_indices],
+    )
+    block.insert_ops_before([*out_allocs, new_call], call_op)
+
+    for alloc, result_index in zip(out_allocs, memory_indices, strict=True):
+        call_op.results[result_index].replace_by(alloc.result)
+    for new_result, result_index in zip(new_call.results, scalar_indices, strict=True):
+        call_op.results[result_index].replace_by(new_result)
     block.erase_op(call_op)
 
 
@@ -299,19 +310,20 @@ def _erase_dead_result_owner(value: SSAValue, block: Block) -> None:
         block.erase_op(owner)
 
 
-def _rewrite_single_memory_result(func_op: func.FuncOp) -> None:
-    """将单个 `memory` 返回值改写为最前置 out 参数。
+def _rewrite_memory_results_to_out_params(func_op: func.FuncOp) -> None:
+    """将函数返回中的所有 `memory` 结果改写为最前置 out 参数。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 在 block 最前插入新参数 `arg0`。
-    - 将原返回值在函数体内的使用替换为新 out 参数。
-    - 清空 `func.return`，并刷新函数签名。
+    - 在 block 最前按原 memory result 顺序插入 `arg0 / arg1 / ...`。
+    - 将原 memory 返回值在函数体内的使用替换为新 out 参数。
+    - `func.return` 仅保留非 memory 返回值；若无 scalar 返回则改为空 return。
+    - 刷新函数签名，使 `function_type.outputs` 只保留原 scalar 返回。
 
     使用示例:
-    - _rewrite_single_memory_result(func_op)
+    - _rewrite_memory_results_to_out_params(func_op)
 
     关联文件:
     - spec: spec/pass/lowering/buffer_results_to_out_params.md
@@ -322,22 +334,33 @@ def _rewrite_single_memory_result(func_op: func.FuncOp) -> None:
     block = func_op.body.blocks.first
     if block is None:
         raise BufferResultsToOutParamsError("function body is empty")
+    output_types = list(func_op.function_type.outputs.data)
+    memory_indices = _memory_output_indices(func_op)
     return_op = func_op.get_return_op()
-    if return_op is None or len(return_op.arguments) != 1:
+    if return_op is None or len(return_op.arguments) != len(output_types):
         raise BufferResultsToOutParamsError(
-            "single memory result rewrite requires exactly one return operand"
+            "return operand count must match function outputs for buffer-results-to-out-params"
         )
-    return_value = return_op.arguments[0]
-    result_type = return_value.type
-    if not isinstance(result_type, NnMemoryType):
-        raise BufferResultsToOutParamsError("single result must be memory")
 
-    new_out_arg: BlockArgument = block.insert_arg(result_type, 0)
-    func_op.properties["arg_attrs"] = _rebuild_arg_attrs(func_op, 1)
-    return_value.replace_by(new_out_arg)
+    new_out_args: list[BlockArgument] = []
+    for insert_index, memory_output_index in enumerate(memory_indices):
+        memory_type = output_types[memory_output_index]
+        if not isinstance(memory_type, NnMemoryType):
+            raise BufferResultsToOutParamsError("memory output index must point to nn.memory")
+        new_out_args.append(block.insert_arg(memory_type, insert_index))
+
+    func_op.properties["arg_attrs"] = _rebuild_arg_attrs(func_op, len(new_out_args))
+
+    scalar_return_values = [
+        return_op.arguments[index] for index in range(len(output_types)) if index not in memory_indices
+    ]
+    memory_return_values = [return_op.arguments[index] for index in memory_indices]
+    for new_out_arg, return_value in zip(new_out_args, memory_return_values, strict=True):
+        return_value.replace_by(new_out_arg)
     block.erase_op(return_op)
-    block.add_op(func.ReturnOp())
-    _erase_dead_result_owner(return_value, block)
+    block.add_op(func.ReturnOp(*scalar_return_values))
+    for return_value in memory_return_values:
+        _erase_dead_result_owner(return_value, block)
     func_op.update_function_type()
 
 
@@ -349,7 +372,8 @@ class BufferResultsToOutParamsPass(Pass):
 
     功能说明:
     - 在模块级先做候选校验。
-    - 当前首版实现执行“模块内可解析 callsite 同步改写 + 单个 memory 返回值 -> arg0”改写。
+    - 当前实现执行“模块内可解析 callsite 同步改写 + 多 memory results / mixed returns -> 前置 out 参数”改写。
+    - memory 返回会按原顺序前置为 `arg0 / arg1 / ...`，scalar 返回继续保留在 `func.return`。
 
     使用示例:
     - module = BufferResultsToOutParamsPass().run(module)
@@ -386,7 +410,7 @@ class BufferResultsToOutParamsPass(Pass):
         targets = _collect_rewrite_targets(module)
         _rewrite_callsites(module, targets)
         for func_op in targets.values():
-            _rewrite_single_memory_result(func_op)
+            _rewrite_memory_results_to_out_params(func_op)
         return module
 
 
