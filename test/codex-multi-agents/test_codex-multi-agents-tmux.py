@@ -137,8 +137,8 @@ def run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.Comp
 # TC-001
 # 创建者: 榕
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-04 19:16:39 +0800
-# 最近一次运行成功时间: 2026-04-04 19:16:39 +0800
+# 最近一次运行测试时间: 2026-04-04 21:34:59 +0800
+# 最近一次运行成功时间: 2026-04-04 21:34:59 +0800
 # 测试目的: 验证 `-talk` 能通过 agents list 解析目标会话并发送格式化消息，同时向日志追加一行记录。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
@@ -179,7 +179,7 @@ def test_talk_send_and_append_log_success(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert "OK: talk scheduler -> worker-a (worker-a)" in result.stdout
     assert calls.count("send:worker-a:@scheduler向@worker-a发起会话: 请处理任务 T1:") == 1
-    assert calls.count("send:worker-a:ENTER:") == 2
+    assert calls.count("send:worker-a:ENTER:") == 5
     assert "@scheduler向@worker-a发起会话: 请处理任务 T1" in log_text
 
 
