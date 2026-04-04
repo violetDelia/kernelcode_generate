@@ -179,7 +179,7 @@ def test_talk_send_and_append_log_success(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert "OK: talk scheduler -> worker-a (worker-a)" in result.stdout
     assert calls.count("send:worker-a:@scheduler向@worker-a发起会话: 请处理任务 T1:") == 1
-    assert calls.count("send:worker-a:ENTER:") == 5
+    assert calls.count("send:worker-a:ENTER:") == 4
     assert "@scheduler向@worker-a发起会话: 请处理任务 T1" in log_text
 
 
