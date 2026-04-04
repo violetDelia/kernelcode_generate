@@ -40,6 +40,8 @@
 - 不生成 MLIR 文本；文本输出由上游调用方负责。
 - 发射阶段仅消费 AST 与上下文，不向 AST 注入 `target`/`hardware` 字段；相关信息只能通过 `EmitContext` 或外部上下文传入。
 - 当 `ForAST` 来自 `LoopRange(start, end, step)` 且边界与循环变量保持 symbol 整数语义时，必须 lowering 为 `symbol.for`，不得回退为 `scf.for`；其循环块参数 `it` 必须为 `!symbol.int<"expr">`。
+- 当 `ForAST` 进入 `scf.for/index` 或 `symbol.for` 分支且 `start/end/step` 无法静态推导迭代次数时，隐式 `trip_count` 由上游决定并通过 `end = start + step * trip_count` 规范化承载；emit 仅消费规范化后的边界，不计算 `trip_count`，也不推导 `step` 符号或真实迭代次数。
+- 若在 emit 阶段可静态判定 `step == 0` 或 `trip_count <= 0`，必须报错或视为 unsupported；不得 silent fallback、不得默认当作 `1`。
 - 在上述 `LoopRange` 场景中，循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand 必须直接复用 `!symbol.int<"expr">` value，不得插入 `arith.index_cast`；若循环变量 `it` 退化为 `index`、普通整数或浮点类型，应视为 lowering 违规。
 - 当 DSL AST 表达 `alloc`、`copy`、`cast`、`view`、`reshape`、`flatten`、`load`、`store`、`slice`、`deslice` 这组 DMA helper 调用时，`emit_mlir` 必须按对应 memory 语义 lowering；其中 `flatten` 公开上视为一维 `reshape` 语义，不要求生成独立 dialect op。
 - 当 DSL AST 表达 `img2col1d(...)` 或 `img2col2d(...)` helper 调用时，`emit_mlir` 必须直接 lowering 为 `nn.img2col1d` 或 `nn.img2col2d`；不得在 emit 层引入 `kernel_dialect`、`nn_to_kernel` 或 `cpu::img2col2d` 相关语义。
@@ -58,6 +60,14 @@
 - `ArchGetDynamicMemoryAST(space=...)` 必须 lowering 为单个 `arch.get_dynamic_memory`，结果类型固定为 `!nn.memory<[?], [1], i8, #nn.space<space>>`；`space` 非 `SM/LM/TSM/TLM` 时必须报错。
 - `ArchLaunchKernelAST(name, block, thread, subthread)` 必须 lowering 为单个无返回值 `arch.launch_kernel`；extent 公开语义统一为 `!symbol.int` 启动规模：AST 虽允许 `int | SymbolDim` 入口，但 emit 阶段若 extent 不是 `!symbol.int<"...">`（或可静态判定为 `<= 0`）必须报错。
 - `TensorAxisAccessAST(tensor, kind, axis)` 必须按节点语义降级为 symbol 方言查询：`kind="shape"` lowering 为 `symbol.get_dim`，`kind="stride"` lowering 为 `symbol.get_stride`。其中 `tensor` 必须为 `nn.memory` 值，`axis` 必须为静态非负整数且落在 rank 范围内；不满足约束时必须报错（例如 `get_shape source must be nn.memory`、`get_shape axis must be static int`、`get_shape axis out of range`、`Unsupported tensor axis access kind`）。
+
+### 隐式 `trip_count` 最小示例（emit 视角）
+
+```text
+// 上游已规范化 end = start + step * trip_count
+// emit 仅按既有 symbol.for 结构发射
+symbol.for %i = %start to %end step %step : !symbol.int<"S">, !symbol.int<"S + K">, !symbol.int<"K"> { ... }
+```
 
 ## 公开接口
 
@@ -201,6 +211,8 @@ value = emit_mlir(expr_ast, ctx)
   - 覆盖 `lhs != rhs` 到 `CompareExprAST(op="ne")` 的 memory lowering：`nn.ne` 结果为 `i1`，并支持 implicit broadcast。
   - 覆盖 `CompareExprAST(op="ne")` memory 路径在不可 broadcast 与 element type 不一致时的错误分支与诊断文案。
   - 覆盖 `LoopRange` -> `symbol.for` 与 `it`/DMA operand 直接保持 `symbol.int` 的发射规则。
+  - 覆盖无法静态推导迭代次数时的隐式 `trip_count` 语义（默认 1、`it = start + step * i`、`end` 规范化），emit 仅消费规范化结果。
+  - 覆盖 `step==0` 或 `trip_count<=0` 的错误路径，emit 必须报错或视为 unsupported。
   - 覆盖 `img2col1d/img2col2d` helper 的 emit 节点级规则：分别 lowering 为 `nn.img2col1d/nn.img2col2d`，且不引入 kernel dialect / `nn_to_kernel` / `cpu::img2col2d` 语义。
   - 覆盖 `img2col2d` 与 `loop + dma.slice/dma.deslice` 的协同 emit 规则，确保窗口读取/回写与循环节点映射保持一致。
   - 覆盖 `matmul(...)` helper 的 emit 节点级规则：lowering 为 `nn.matmul`，必要时插入最少 `dma.cast`。
@@ -232,6 +244,8 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-008：索引 rank mismatch 抛出可定位错误。（`test_load_ast_index_rank_mismatch_reports_location`）
   - EMIT-009：`StoreAST` 输入非 memory 抛出错误。（`test_store_ast_lowering_raises_lowering_error`）
   - EMIT-010：`ForAST` 在 `LoopRange` 场景下 lowering 为 `symbol.for`，循环块参数 `it` 与循环体内相关 DMA operand 直接复用 `!symbol.int<"...">`，不生成 `arith.index_cast`。（`test_emit_mlir_symbolic_for_loop_avoids_index_cast`）
+  - EMIT-010A：无法静态推导迭代次数时遵循隐式 `trip_count` 语义，通过 `end = start + step * trip_count` 规范化承载；emit 不计算 `trip_count`。（下游待补测试映射：`test_emit_mlir_supports_implicit_trip_count_via_end_normalization`）
+  - EMIT-010B：`step==0` 或 `trip_count<=0` 必须报错或视为 unsupported，不得 silent fallback。（下游待补测试映射：`test_emit_mlir_rejects_zero_step`、`test_emit_mlir_rejects_non_positive_trip_count`）
   - EMIT-011：循环变量表初始化与非法配置报错路径。（`test_emit_mlir_loop_vars_validation`）
   - EMIT-011B：`EmitContext` 校验 `config.target` 命名约束的错误路径。（`test_emit_context_rejects_invalid_target_name`）
   - EMIT-011C：`EmitContext` 校验 `config.hardware` 字段约束的错误路径。（`test_emit_context_rejects_invalid_hardware_field`）

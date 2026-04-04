@@ -47,6 +47,9 @@
 - 参数注解只允许作为解析/局部校验信息；当 `runtime_args` 表示的实际输入类型与参数注解不一致时，`func.func inputs`、函数体内由输入推导出的结果类型，以及 `func.func outputs` 都必须跟随 `runtime_args`，不得跟随参数注解漂移。
 - 当函数体仅包含 `for` 循环且没有 `return` 时，输出 `func.func` 允许零返回值。
 - 当 `ForAST` 来源于 `LoopRange(start, end, step)` 且循环边界保持 symbol 整数语义时，lowering 后必须生成 `symbol.for`，不得退回 `scf.for`；其循环块参数 `it` 必须为 `!symbol.int<"expr">`。
+- 当 `ForAST` 进入 `scf.for/index` 或 `symbol.for` 分支且 `start/end/step` 含 symbol/动态值导致无法在 spec 层静态推导迭代次数时，必须引入隐式 `trip_count` 语义：默认 `trip_count = 1`（`scf.for/index` 路径用 `index` 常量 `1`，`symbol.for` 路径用 `!symbol.int<"1">`）；迭代序列定义为 `it = start + step * i`，`i = 0..trip_count-1`。
+- 隐式 `trip_count` 通过规范化 `end = start + step * trip_count` 承载；半开区间语义仍成立，但本层不要求证明 `step` 符号/单调性或推导真实迭代次数；未遵循规范化约束的情形不在本 spec 覆盖范围内。
+- 若 `step` 可静态判定为 `0`，或 `trip_count` 可静态判定为 `<= 0`（含上游显式提供的 `trip_count`），必须报错；不得 silent fallback、不得默认当作 `1`。
 - `LoopRange` 场景中的循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand，必须直接保持 `!symbol.int<"expr">` 语义传递，不得额外生成 `arith.index_cast`。
 - 对于纯 symbol 标量算术函数（仅符号标量入参/返回且返回为整型标量），函数签名中的输入与输出必须统一使用 `!symbol.int<"expr">`，不得降级为 `i32`、`index` 或其他 builtin 标量类型。
 - 对于纯 symbol 标量 compare family（`==` / `!=` / `<` / `<=` / `>` / `>=`）函数，函数签名中的输入必须保持 `!symbol.int<"expr">`，返回类型必须统一为 `i1`，不得退回 `!symbol.int<"expr">` 或其他 builtin 标量类型。
@@ -76,6 +79,22 @@
 - 当函数体包含 `launch_kernel(name, block, thread, subthread)` 语句时，lowering 必须生成无返回值 `arch.launch_kernel`；`name` 非空字符串约束与 extent 约束必须在链路中被校验：AST 入口要求 `block/thread/subthread` 为正整数或 `SymbolDim` 语义，emit 阶段进一步要求三者可归一化为正整数 `!symbol.int`，违规时必须报错。
 - 当函数体包含 `tensor.get_shape()[axis]` 或 `tensor.get_stride()[axis]` 轴访问表达式时，必须复用 `TensorAxisAccessAST` 链路：`get_shape` 降级为 `symbol.get_dim`、`get_stride` 降级为 `symbol.get_stride`，并保持返回 `!symbol.int<"...">`；`tensor` 非 `nn.memory`、`axis` 非静态整数、负轴或越界必须报错。
 - 如需 `builtin.module` 封装，由调用方完成。
+
+### 隐式 `trip_count` 最小示例
+
+```python
+# 静态边界：trip_count = 3
+for i in LoopRange(0, 3, 1):
+    pass
+```
+
+```python
+# 含 symbol 且无法静态推导次数：上游显式提供 trip_count = 2
+# 语义序列：it = start + step * i, i = 0..1
+# 规范化 end = start + step * trip_count
+for i in LoopRange(s, s + 2 * k, k):
+    pass
+```
 
 ## 公开接口
 
@@ -218,6 +237,8 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - 验证函数签名与返回值类型与 AST 一致。
   - 通过测试辅助封装验证 `func.func` 的结构输出（不改变本模块的边界）。
   - 覆盖无返回 `for` 循环与 `slice/deslice` 的生成能力，并要求 `LoopRange` lowering 为 `symbol.for`，且循环迭代变量 `it` 保持 `!symbol.int<"...">`。
+  - 覆盖无法静态推导迭代次数时的隐式 `trip_count` 语义（默认 1、`it = start + step * i`、`end` 规范化），并保持半开区间语义边界。
+  - 覆盖 `step==0` 或 `trip_count<=0` 的错误路径，必须报错且不得默认回退为 `1`。
   - 验证纯 symbol 函数场景会生成 `!symbol.int<"...">` 输入与 `!symbol.int<"...">` 返回。
   - 验证纯 symbol 标量算术在 lowering 后生成 `symbol.add/sub/mul/div/floordiv`，不退回 builtin 算术或其他 dialect op；直接 Python 二元运算与 `kernel_gen.operation.nn` 对应包装必须共享同一 lowering 结果。
   - 验证 tensor 二元算术在 `build_func_op(...)` / `build_func_op_from_ast(...)` 链路中复用 implicit broadcast 路径。
@@ -270,6 +291,8 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - MGEN-014：不可 broadcast 报错与定位。（`test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics`）
   - MGEN-013A：tensor `!=` 比较必须走 `CompareExprAST(op="ne")` lowering，生成 `nn.ne` 并保持 memory 返回 element type 为 `i1`。（`test_build_func_op_lowers_nn_ne_with_tensor_i1_return_annotation`）
   - MGEN-015：`LoopRange + slice/deslice + 无 return` 场景生成 `symbol.for + dma.slice/dma.deslice`，且循环迭代变量 `it` 与 DMA operand 直接保持 `!symbol.int<"...">`，不生成 `arith.index_cast`。（`test_build_func_op_supports_symbolic_for_loop_dma_without_return`）
+  - MGEN-015A：无法静态推导迭代次数时引入隐式 `trip_count` 语义（默认 1，`it = start + step * i`，`end = start + step * trip_count` 规范化）；半开区间语义不变。（下游待补测试映射：`test_build_func_op_uses_implicit_trip_count_for_dynamic_loop_bounds`）
+  - MGEN-015B：`step==0` 或 `trip_count<=0` 必须报错，不得 silent fallback。（下游待补测试映射：`test_build_func_op_rejects_zero_step`、`test_build_func_op_rejects_non_positive_trip_count`）
   - MGEN-016：纯 symbol 函数参数 lowering 为 `func.func` 的 `!symbol.int<"...">` 输入。（`test_symbol_scalar_function_uses_symbol_value_type_signature`）
   - MGEN-017：纯 symbol 函数返回 lowering 为 `func.func` 的 `!symbol.int<"...">` 输出。（`test_symbol_scalar_function_uses_symbol_value_type_signature`）
   - MGEN-018：纯 symbol 标量加法 lowering 为 `symbol.add`；直接 Python `+` 与 `nn.add(...)` 包装在 `const/const`、`symbol/symbol`、`const/symbol`、`symbol/const` 四类输入下必须保持一致；比较公开结果时以 `SymbolValueType.get_value()` 与对应 Python/SymbolDim 运行时结果一致为准。（`test_symbol_scalar_function_lowers_symbol_binary_ops`）
