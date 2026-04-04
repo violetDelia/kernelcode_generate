@@ -5,9 +5,9 @@
 | 编号 | 依赖 | worktree | 记录文件 | 进度 |
 | --- | --- | --- | --- | --- |
 | `S1` | `无` | `/home/lfr/kernelcode_generate/wt-20260404-exp-frontend-semantic-s1` | `agents/codex-multi-agents/log/task_records/2026/14/20260404-exp-frontend-semantic-s1.md` | `spec 草案已建档（T-20260404-6f6042a9，睡觉小分队）；实现+补测完成（T-20260404-99bf6dc7，金铲铲大作战）；复审通过（T-20260404-3f7e38fb，提莫炖蘑菇）；已合并（commit 8784af5，T-20260404-5db48f7e，李白）。注意：spec/operation/nn.md 仍为 broadcast_to(value, target) 旧口径，已派生 spec 对齐任务 T-20260404-bf8b2d33（进行中）。` |
-| `S2` | `S1` |  |  | `未开始` |
-| `S3` | `S1` |  |  | `未开始` |
-| `S4` | `S1` |  |  | `未开始` |
+| `S2` | `S1` |  |  | `spec完成（已合并）。` |
+| `S3` | `S1` |  |  | `spec完成（已合并）。` |
+| `S4` | `S1` |  |  | `spec完成（已合并，commit 816a972）。` |
 | `S5` | `S2、S3、S4` |  |  | `未开始` |
 | `S6` | `S5` |  |  | `未开始` |
 | `S7` | `S6` |  |  | `未开始` |
@@ -28,4 +28,3 @@
 - 最后一次更改：`神秘人`
 - `文档`：[`ARCHITECTURE/plan/expectation_frontend_semantic_green_plan.md`](../../../../../ARCHITECTURE/plan/expectation_frontend_semantic_green_plan.md)
 - `记录`：[`agents/codex-multi-agents/log/task_records/2026/14/20260404-exp-frontend-semantic-s1.md`](../../../../log/task_records/2026/14/20260404-exp-frontend-semantic-s1.md)
-
