@@ -495,14 +495,18 @@ def test_nn_broadcast_success() -> None:
     value = Memory([1, "N"], NumericType.Float32)
     target = Memory(["M", "N"], NumericType.Float32, space=MemorySpace.LM, stride=["N", 1], format=Farmat.CLast)
     result = broadcast(value, target)
-    alias_result = broadcast_to(value, target)
+    alias_result = broadcast_to(value, ["M", "N"], MemorySpace.LM)
+    alias_expected = Memory(["M", "N"], NumericType.Float32, space=MemorySpace.LM, format=Farmat.Norm)
     assert result.get_shape() == target.get_shape()
     assert result.get_type() is target.get_type()
     assert result.get_space() is target.get_space()
     assert result.get_format() is target.get_format()
     assert result.get_stride() == target.get_stride()
-    assert alias_result.get_shape() == target.get_shape()
-    assert alias_result.get_type() is target.get_type()
+    assert alias_result.get_shape() == alias_expected.get_shape()
+    assert alias_result.get_type() is alias_expected.get_type()
+    assert alias_result.get_space() is alias_expected.get_space()
+    assert alias_result.get_format() is alias_expected.get_format()
+    assert alias_result.get_stride() == alias_expected.get_stride()
 
 
 # OP-BC-002
@@ -983,11 +987,21 @@ def test_nn_matmul_space_mismatch() -> None:
 def test_nn_img2col1d_contract() -> None:
     value = Memory([1, 16, 32], NumericType.Float32, space=MemorySpace.GM)
     result = img2col1d(value, kw=3, sw=1, dw=1, pl=1, pr=1)
-    assert result.shape.get_values() == [1, 48, 32]
-    assert result.dtype is NumericType.Float32
-    assert result.space is MemorySpace.GM
-    assert result.format is Farmat.Norm
-    assert result.get_stride() == [1536, 32, 1]
+    expected = Memory([1, 16, 3, 32], NumericType.Float32, space=MemorySpace.GM, format=Farmat.Norm)
+    assert result.shape.get_values() == expected.shape.get_values()
+    assert result.dtype is expected.dtype
+    assert result.space is expected.space
+    assert result.format is expected.format
+    assert result.get_stride() == expected.get_stride()
+
+    clast_value = Memory([1, 32, 16], NumericType.Float32, space=MemorySpace.GM, format=Farmat.CLast)
+    clast_result = img2col1d(clast_value, kw=3, sw=1, dw=1, pl=1, pr=1)
+    clast_expected = Memory([1, 32, 3, 16], NumericType.Float32, space=MemorySpace.GM, format=Farmat.Norm)
+    assert clast_result.shape.get_values() == clast_expected.shape.get_values()
+    assert clast_result.dtype is clast_expected.dtype
+    assert clast_result.space is clast_expected.space
+    assert clast_result.format is clast_expected.format
+    assert clast_result.get_stride() == clast_expected.get_stride()
 
     with pytest.raises(TypeError):
         _ = img2col1d("bad", kw=3, sw=1, dw=1, pl=0, pr=0)
@@ -1024,11 +1038,21 @@ def test_nn_img2col1d_contract() -> None:
 def test_nn_img2col2d_contract() -> None:
     value = Memory([1, 3, 5, 5], NumericType.Float32, space=MemorySpace.GM)
     result = img2col2d(value, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr=1)
-    assert result.shape.get_values() == [1, 27, 25]
-    assert result.dtype is NumericType.Float32
-    assert result.space is MemorySpace.GM
-    assert result.format is Farmat.Norm
-    assert result.get_stride() == [675, 25, 1]
+    expected = Memory([1, 3, 3, 3, 5, 5], NumericType.Float32, space=MemorySpace.GM, format=Farmat.Norm)
+    assert result.shape.get_values() == expected.shape.get_values()
+    assert result.dtype is expected.dtype
+    assert result.space is expected.space
+    assert result.format is expected.format
+    assert result.get_stride() == expected.get_stride()
+
+    clast_value = Memory([1, 5, 5, 3], NumericType.Float32, space=MemorySpace.GM, format=Farmat.CLast)
+    clast_result = img2col2d(clast_value, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr=1)
+    clast_expected = Memory([1, 5, 5, 3, 3, 3], NumericType.Float32, space=MemorySpace.GM, format=Farmat.Norm)
+    assert clast_result.shape.get_values() == clast_expected.shape.get_values()
+    assert clast_result.dtype is clast_expected.dtype
+    assert clast_result.space is clast_expected.space
+    assert clast_result.format is clast_expected.format
+    assert clast_result.get_stride() == clast_expected.get_stride()
 
     with pytest.raises(TypeError):
         _ = img2col2d("bad", kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0)
