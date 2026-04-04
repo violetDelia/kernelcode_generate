@@ -41,6 +41,17 @@ class _SymbolList:
     - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
     """
 
+    @staticmethod
+    def _normalize_value(value: object) -> SymbolDim:
+        """将输入值规范化为 SymbolDim。"""
+        if isinstance(value, SymbolDim):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip()
+            if normalized.isdigit():
+                return SymbolDim(int(normalized))
+        return SymbolDim(value)
+
     def __init__(self, shapes: Iterable[object]) -> None:
         """初始化符号形状列表。
 
@@ -61,17 +72,6 @@ class _SymbolList:
         self.shape: List[SymbolDim] = []
         for value in shapes:
             self.shape.append(self._normalize_value(value))
-
-    @staticmethod
-    def _normalize_value(value: object) -> SymbolDim:
-        """将输入值规范化为 SymbolDim。"""
-        if isinstance(value, SymbolDim):
-            return value
-        if isinstance(value, str):
-            normalized = value.strip()
-            if normalized.isdigit():
-                return SymbolDim(int(normalized))
-        return SymbolDim(value)
 
     @staticmethod
     def _render_items(items: Iterable[SymbolDim]) -> str:
@@ -112,81 +112,49 @@ class _SymbolList:
         if key < -len(self.shape) or key >= len(self.shape):
             raise IndexError("下标超出范围")
 
-    def __repr__(self) -> str:
-        """返回列表字符串表示。
+    def get_shape(self) -> List[SymbolDim]:
+        """返回内部形状列表。
 
         创建者: 小李飞刀
         最后一次更改: 小李飞刀
 
         功能说明:
-        - 以 List(d0, d1, ...) 格式返回。
+        - 返回内部保存的 SymbolDim 列表。
 
         使用示例:
-        - repr(SymbolShape([1, 2]))
+        - SymbolShape([1, 2]).get_shape()
 
         关联文件:
         - spec: spec/symbol_variable/symbol_shape.md
         - test: test/symbol_variable/test_symbol_shape.py
         - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
         """
-        return f"List({self._render_items(self.shape)})"
+        return list(self.shape)
 
-    def __len__(self) -> int:
-        """返回维度数量。
+    def get_values(self) -> List[int | str]:
+        """序列化为 int/str 列表。
 
         创建者: 小李飞刀
         最后一次更改: 小李飞刀
 
         功能说明:
-        - 返回维度列表长度。
+        - 动态维度输出字符串，静态维度输出整数。
 
         使用示例:
-        - len(SymbolShape([1, 2]))
+        - SymbolShape([\"N\", 32]).get_values()
 
         关联文件:
         - spec: spec/symbol_variable/symbol_shape.md
         - test: test/symbol_variable/test_symbol_shape.py
         - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
         """
-        return len(self.shape)
-
-    def __iter__(self) -> Iterator[SymbolDim]:
-        """迭代维度元素。
-
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
-
-        功能说明:
-        - 返回内部 shape 的迭代器。
-
-        使用示例:
-        - [dim for dim in SymbolShape([1, 2])]
-
-        关联文件:
-        - spec: spec/symbol_variable/symbol_shape.md
-        - test: test/symbol_variable/test_symbol_shape.py
-        - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
-        """
-        return iter(self.shape)
-
-    def __reversed__(self) -> Iterator[SymbolDim]:
-        """反向迭代维度元素。
-
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
-
-        功能说明:
-        - 返回反向迭代器。
-
-        使用示例:
-        - list(reversed(SymbolShape([1, 2])))
-
-        关联文件:
-        - spec: spec/symbol_variable/symbol_shape.md
-        - test: test/symbol_variable/test_symbol_shape.py
-        - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
-        """
-        return reversed(self.shape)
+        values: List[int | str] = []
+        for dim in self.shape:
+            if dim.is_dynamic():
+                values.append(str(dim.get_symbol()))
+            else:
+                values.append(int(dim.get_symbol()))
+        return values
 
     def __getitem__(self, key: int | slice) -> SymbolDim | List[SymbolDim]:
         """索引访问维度元素。
@@ -243,49 +211,81 @@ class _SymbolList:
             return
         raise TypeError("索引类型错误")
 
-    def get_shape(self) -> List[SymbolDim]:
-        """返回内部形状列表。
+    def __iter__(self) -> Iterator[SymbolDim]:
+        """迭代维度元素。
 
         创建者: 小李飞刀
         最后一次更改: 小李飞刀
 
         功能说明:
-        - 返回内部保存的 SymbolDim 列表。
+        - 返回内部 shape 的迭代器。
 
         使用示例:
-        - SymbolShape([1, 2]).get_shape()
+        - [dim for dim in SymbolShape([1, 2])]
 
         关联文件:
         - spec: spec/symbol_variable/symbol_shape.md
         - test: test/symbol_variable/test_symbol_shape.py
         - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
         """
-        return list(self.shape)
+        return iter(self.shape)
 
-    def get_values(self) -> List[int | str]:
-        """序列化为 int/str 列表。
+    def __reversed__(self) -> Iterator[SymbolDim]:
+        """反向迭代维度元素。
 
         创建者: 小李飞刀
         最后一次更改: 小李飞刀
 
         功能说明:
-        - 动态维度输出字符串，静态维度输出整数。
+        - 返回反向迭代器。
 
         使用示例:
-        - SymbolShape([\"N\", 32]).get_values()
+        - list(reversed(SymbolShape([1, 2])))
 
         关联文件:
         - spec: spec/symbol_variable/symbol_shape.md
         - test: test/symbol_variable/test_symbol_shape.py
         - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
         """
-        values: List[int | str] = []
-        for dim in self.shape:
-            if dim.is_dynamic():
-                values.append(str(dim.get_symbol()))
-            else:
-                values.append(int(dim.get_symbol()))
-        return values
+        return reversed(self.shape)
+
+    def __len__(self) -> int:
+        """返回维度数量。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 返回维度列表长度。
+
+        使用示例:
+        - len(SymbolShape([1, 2]))
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_shape.md
+        - test: test/symbol_variable/test_symbol_shape.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
+        """
+        return len(self.shape)
+
+    def __repr__(self) -> str:
+        """返回列表字符串表示。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 以 List(d0, d1, ...) 格式返回。
+
+        使用示例:
+        - repr(SymbolShape([1, 2]))
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_shape.md
+        - test: test/symbol_variable/test_symbol_shape.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
+        """
+        return f"List({self._render_items(self.shape)})"
 
 
 class SymbolList(_SymbolList):
