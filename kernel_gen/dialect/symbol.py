@@ -110,29 +110,6 @@ def _normalize_symbol_dim_name(name: str) -> str:
     return normalized
 
 
-def _normalize_expr(expr: str) -> str:
-    """标准化符号表达字符串。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 去除首尾空白，供 verifier 与打印使用。
-
-    使用示例:
-    - _normalize_expr("  N + 1  ")
-
-    关联文件:
-    - spec: spec/dialect/symbol.md
-    - test: test/dialect/test_symbol_dialect.py
-    - 功能实现: kernel_gen/dialect/symbol.py
-    """
-
-    normalized = expr.strip()
-    concrete_value = _evaluate_concrete_expr(normalized)
-    return str(concrete_value) if concrete_value is not None else normalized
-
-
 def _evaluate_concrete_expr(expr: str) -> int | None:
     """尝试计算不含符号名的整数表达式。
 
@@ -188,6 +165,29 @@ def _evaluate_concrete_expr(expr: str) -> int | None:
         return _eval(parsed)
     except ValueError:
         return None
+
+
+def _normalize_expr(expr: str) -> str:
+    """标准化符号表达字符串。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 去除首尾空白，供 verifier 与打印使用。
+
+    使用示例:
+    - _normalize_expr("  N + 1  ")
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/dialect/test_symbol_dialect.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    normalized = expr.strip()
+    concrete_value = _evaluate_concrete_expr(normalized)
+    return str(concrete_value) if concrete_value is not None else normalized
 
 
 def _make_symbol_runtime_value(expr: str) -> int | SymbolDim:
@@ -416,6 +416,161 @@ def _entry_to_expr(entry: Attribute, op_name: str, field_name: str) -> str:
     _raise_verify_error(f"{op_name} does not support unknown {field_name} entry '?'")
 
 
+@irdl_attr_definition
+class SymbolExprAttr(ParametrizedAttribute):
+    """承载单个整数符号表达。"""
+
+    name = "symbol.expr"
+
+    expr: StringAttr = param_def(StringAttr)
+
+    @classmethod
+    def parse_parameters(cls: type["SymbolExprAttr"], parser: AttrParser) -> Sequence[Attribute]:
+        """解析符号表达参数。"""
+
+        parser.parse_punctuation("<", "Expected '<' for symbol expr attribute.")
+        expr = parser.parse_str_literal("Expected quoted symbol expression.")
+        parser.parse_punctuation(">", "Expected '>' for symbol expr attribute.")
+        return (StringAttr(expr),)
+
+    def print_parameters(self: "SymbolExprAttr", printer: Printer) -> None:
+        """打印符号表达参数。"""
+
+        printer.print_string("<")
+        printer.print_string_literal(_normalize_expr(self.expr.data))
+        printer.print_string(">")
+
+    def verify(self: "SymbolExprAttr") -> None:
+        """校验符号表达。"""
+
+        expr = _normalize_expr(self.expr.data)
+        if not expr:
+            _raise_verify_error("symbol expr must not be empty")
+        if not _is_supported_symbol_expr(expr):
+            _raise_verify_error("symbol expr must contain identifiers, integers, +, -, *, /, // or floor(...)")
+
+    @classmethod
+    def from_expr(cls: type["SymbolExprAttr"], expr: str) -> "SymbolExprAttr":
+        """从字符串构造符号表达 attribute。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 为测试与实现提供统一的构造入口。
+
+        使用示例:
+        - SymbolExprAttr.from_expr("N")
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        return cls(StringAttr(_normalize_expr(expr)))
+
+
+@irdl_attr_definition
+class SymbolValueType(ParametrizedAttribute, TypeAttribute):
+    """仅表示整数符号值语义的类型。"""
+
+    name = "symbol.int"
+
+    expr: SymbolExprAttr = param_def(SymbolExprAttr)
+
+    @classmethod
+    def parse_parameters(cls: type["SymbolValueType"], parser: AttrParser) -> Sequence[Attribute]:
+        """解析整数符号值类型参数。"""
+
+        parser.parse_punctuation("<", "Expected '<' for symbol int type.")
+        expr = parser.parse_str_literal("Expected quoted symbol expression.")
+        parser.parse_punctuation(">", "Expected '>' for symbol int type.")
+        return (SymbolExprAttr.from_expr(expr),)
+
+    def print_parameters(self: "SymbolValueType", printer: Printer) -> None:
+        """打印整数符号值类型参数。"""
+
+        printer.print_string("<")
+        printer.print_string_literal(_normalize_expr(self.expr.expr.data))
+        printer.print_string(">")
+
+    def verify(self: "SymbolValueType") -> None:
+        """校验整数符号值类型。"""
+
+        self.expr.verify()
+
+    def get_value(self: "SymbolValueType") -> int | str:
+        """返回 symbol.int 的公开值。
+
+        创建者: 我不是牛马
+        最后一次更改: 我不是牛马
+
+        功能说明:
+        - 对常量表达返回 `int`。
+        - 对符号表达返回标准化后的字符串。
+
+        使用示例:
+        - SymbolValueType.from_expr("N").get_value()
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        expr = _normalize_expr(self.expr.expr.data)
+        concrete_value = _evaluate_concrete_expr(expr)
+        return concrete_value if concrete_value is not None else _canonicalize_symbolic_expr(expr)
+
+    def is_symbol(self: "SymbolValueType") -> bool:
+        """判断当前值是否为非字面量符号表达。
+
+        创建者: 我不是牛马
+        最后一次更改: 我不是牛马
+
+        功能说明:
+        - 纯数字常量返回 `False`。
+        - 其他 symbol 表达返回 `True`。
+
+        使用示例:
+        - SymbolValueType.from_expr("1").is_symbol()
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        return _evaluate_concrete_expr(self.expr.expr.data) is None
+
+    @classmethod
+    def from_expr(cls: type["SymbolValueType"], expr: str) -> "SymbolValueType":
+        """从字符串构造整数符号值类型。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 统一创建只表示整数类型的 symbol value type。
+
+        使用示例:
+        - SymbolValueType.from_expr("N")
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        return cls(SymbolExprAttr.from_expr(expr))
+
+    def __str__(self: "SymbolValueType") -> str:
+        """返回公开的 symbol.int 文本表示。"""
+
+        return f"symbol.int<{_normalize_expr(self.expr.expr.data)}>"
+
+
 def _infer_result_type(
     source: SSAValue | Operation,
     axis: Attribute,
@@ -472,61 +627,6 @@ def _is_symbol_int_type(attr: Attribute) -> bool:
     """
 
     return isinstance(attr, SymbolValueType)
-
-
-@irdl_attr_definition
-class SymbolExprAttr(ParametrizedAttribute):
-    """承载单个整数符号表达。"""
-
-    name = "symbol.expr"
-
-    expr: StringAttr = param_def(StringAttr)
-
-    @classmethod
-    def parse_parameters(cls: type["SymbolExprAttr"], parser: AttrParser) -> Sequence[Attribute]:
-        """解析符号表达参数。"""
-
-        parser.parse_punctuation("<", "Expected '<' for symbol expr attribute.")
-        expr = parser.parse_str_literal("Expected quoted symbol expression.")
-        parser.parse_punctuation(">", "Expected '>' for symbol expr attribute.")
-        return (StringAttr(expr),)
-
-    def print_parameters(self: "SymbolExprAttr", printer: Printer) -> None:
-        """打印符号表达参数。"""
-
-        printer.print_string("<")
-        printer.print_string_literal(_normalize_expr(self.expr.data))
-        printer.print_string(">")
-
-    def verify(self: "SymbolExprAttr") -> None:
-        """校验符号表达。"""
-
-        expr = _normalize_expr(self.expr.data)
-        if not expr:
-            _raise_verify_error("symbol expr must not be empty")
-        if not _is_supported_symbol_expr(expr):
-            _raise_verify_error("symbol expr must contain identifiers, integers, +, -, *, /, // or floor(...)")
-
-    @classmethod
-    def from_expr(cls: type["SymbolExprAttr"], expr: str) -> "SymbolExprAttr":
-        """从字符串构造符号表达 attribute。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 为测试与实现提供统一的构造入口。
-
-        使用示例:
-        - SymbolExprAttr.from_expr("N")
-
-        关联文件:
-        - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
-        - 功能实现: kernel_gen/dialect/symbol.py
-        """
-
-        return cls(StringAttr(_normalize_expr(expr)))
 
 
 @irdl_attr_definition
@@ -625,26 +725,6 @@ class SymbolDimType(ParametrizedAttribute, TypeAttribute):
 
         _normalize_symbol_dim_name(self.dim.data)
 
-    def __str__(self: "SymbolDimType") -> str:
-        """返回公开的 symbol.dim 文本表示。
-
-        创建者: 我不是牛马
-        最后一次更改: 我不是牛马
-
-        功能说明:
-        - 生成 `symbol.dim<name>` 形式的字符串表示。
-
-        使用示例:
-        - str(SymbolDimType.from_name("BLOCK_M"))
-
-        关联文件:
-        - spec: spec/dialect/tuner.md
-        - test: test/dialect/test_tuner_dialect.py
-        - 功能实现: kernel_gen/dialect/symbol.py
-        """
-
-        return f"symbol.dim<{self.dim.data}>"
-
     @classmethod
     def from_name(cls: type["SymbolDimType"], name: str) -> "SymbolDimType":
         """从名称构造 symbol.dim 类型。
@@ -666,105 +746,25 @@ class SymbolDimType(ParametrizedAttribute, TypeAttribute):
 
         return cls(StringAttr(_normalize_symbol_dim_name(name)))
 
-
-@irdl_attr_definition
-class SymbolValueType(ParametrizedAttribute, TypeAttribute):
-    """仅表示整数符号值语义的类型。"""
-
-    name = "symbol.int"
-
-    expr: SymbolExprAttr = param_def(SymbolExprAttr)
-
-    @classmethod
-    def parse_parameters(cls: type["SymbolValueType"], parser: AttrParser) -> Sequence[Attribute]:
-        """解析整数符号值类型参数。"""
-
-        parser.parse_punctuation("<", "Expected '<' for symbol int type.")
-        expr = parser.parse_str_literal("Expected quoted symbol expression.")
-        parser.parse_punctuation(">", "Expected '>' for symbol int type.")
-        return (SymbolExprAttr.from_expr(expr),)
-
-    def print_parameters(self: "SymbolValueType", printer: Printer) -> None:
-        """打印整数符号值类型参数。"""
-
-        printer.print_string("<")
-        printer.print_string_literal(_normalize_expr(self.expr.expr.data))
-        printer.print_string(">")
-
-    def verify(self: "SymbolValueType") -> None:
-        """校验整数符号值类型。"""
-
-        self.expr.verify()
-
-    def __str__(self: "SymbolValueType") -> str:
-        """返回公开的 symbol.int 文本表示。"""
-
-        return f"symbol.int<{_normalize_expr(self.expr.expr.data)}>"
-
-    def get_value(self: "SymbolValueType") -> int | str:
-        """返回 symbol.int 的公开值。
+    def __str__(self: "SymbolDimType") -> str:
+        """返回公开的 symbol.dim 文本表示。
 
         创建者: 我不是牛马
         最后一次更改: 我不是牛马
 
         功能说明:
-        - 对常量表达返回 `int`。
-        - 对符号表达返回标准化后的字符串。
+        - 生成 `symbol.dim<name>` 形式的字符串表示。
 
         使用示例:
-        - SymbolValueType.from_expr("N").get_value()
+        - str(SymbolDimType.from_name("BLOCK_M"))
 
         关联文件:
-        - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
+        - spec: spec/dialect/tuner.md
+        - test: test/dialect/test_tuner_dialect.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
-        expr = _normalize_expr(self.expr.expr.data)
-        concrete_value = _evaluate_concrete_expr(expr)
-        return concrete_value if concrete_value is not None else _canonicalize_symbolic_expr(expr)
-
-    def is_symbol(self: "SymbolValueType") -> bool:
-        """判断当前值是否为非字面量符号表达。
-
-        创建者: 我不是牛马
-        最后一次更改: 我不是牛马
-
-        功能说明:
-        - 纯数字常量返回 `False`。
-        - 其他 symbol 表达返回 `True`。
-
-        使用示例:
-        - SymbolValueType.from_expr("1").is_symbol()
-
-        关联文件:
-        - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
-        - 功能实现: kernel_gen/dialect/symbol.py
-        """
-
-        return _evaluate_concrete_expr(self.expr.expr.data) is None
-
-    @classmethod
-    def from_expr(cls: type["SymbolValueType"], expr: str) -> "SymbolValueType":
-        """从字符串构造整数符号值类型。
-
-        创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 统一创建只表示整数类型的 symbol value type。
-
-        使用示例:
-        - SymbolValueType.from_expr("N")
-
-        关联文件:
-        - spec: spec/dialect/symbol.md
-        - test: test/dialect/test_symbol_dialect.py
-        - 功能实现: kernel_gen/dialect/symbol.py
-        """
-
-        return cls(SymbolExprAttr.from_expr(expr))
+        return f"symbol.dim<{self.dim.data}>"
 
 
 @irdl_attr_definition
