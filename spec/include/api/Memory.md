@@ -36,6 +36,7 @@
 - `MemoryFormat` 仅公开 `Norm` 与 `CLast`，不定义字符串别名或额外布局成员。
 - `MemorySpace` 仅公开 `GM`、`SM`、`LM`、`TSM`、`TLM`，只表达空间分类，不表达容量、对齐或同步规则。
 - 本规范只覆盖 API 级别的视图语义，不定义算子级搬运、广播或计算行为。
+- `include/api/Memory.h` 仅提供声明与类型边界，不提供函数体实现；具体后端实现需在各自 include 层提供（当前 `npu_demo` 实现头文件为 [`include/npu_demo/Memory.h`](../../../include/npu_demo/Memory.h)）。
 
 ## 公开接口
 

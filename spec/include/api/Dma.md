@@ -42,6 +42,7 @@
 - `view` 与 `slice` 都不改变元素类型；若实现侧需要类型变换，应通过其他明确接口处理，而不是把类型变换偷渡进 `view/slice`。
 - `deslice` 负责写回，不再公开 `store(...)` 作为 include/api 层稳定接口名。
 - `slice` 是“目标式”接口：调用方必须先准备好 `target`；include/api 层不为 `slice` 隐式分配结果内存。
+- `include/api/Dma.h` 仅提供声明与类型边界，不提供函数体实现；具体后端实现需在各自 include 层提供（当前 `npu_demo` 实现头文件为 [`include/npu_demo/Dma.h`](../../../include/npu_demo/Dma.h)）。
 
 ## 公开接口
 

@@ -39,6 +39,7 @@
   - `data` 指向有效连续内存区（实现可扩展为其他存储形式，但需保持语义一致）。
   - `shape`/`stride` 为长度 `rank` 的维度与步长描述，维度为正数；`Memory<T>` 的 `rank` 为运行期属性，不固定为编译期模板参数。
   - 输入与输出视图的类型与后端一致性由实现侧保证。
+- `include/api/Nn.h` 仅提供声明与类型边界，不提供函数体实现；具体后端实现需在各自 include 层提供（当前 `npu_demo` 实现头文件为 [`include/npu_demo/Nn.h`](../../../include/npu_demo/Nn.h)）。
 
 ## 公开接口
 

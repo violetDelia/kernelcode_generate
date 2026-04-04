@@ -60,7 +60,7 @@ def _leading_rewritten_out_param_count(func_op: func.FuncOp) -> int:
     """识别 rewrite 后 IR 的最前置 out 参数个数。
 
     创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 仅把最前面连续的 `arg0/arg1/...` memory 参数识别为 out 参数。
@@ -667,7 +667,10 @@ def gen_kernel(op_or_func: Any, ctx: EmitCContext) -> str:
     - 功能实现: kernel_gen/dsl/gen_kernel.py
     """
 
-    return _KernelEmitter(ctx).emit(op_or_func)
+    source = _KernelEmitter(ctx).emit(op_or_func)
+    if ctx.target == "npu_demo":
+        return '#include "include/npu_demo/npu_demo.h"\n\n' + source
+    return source
 
 
 def __getattr__(name: str) -> Any:

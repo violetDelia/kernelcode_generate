@@ -9,7 +9,7 @@
 - auto tsm = ctx.get_dynamic_memory<float>(npu_demo::MemorySpace::TSM);
 
 创建者: 朽木露琪亚
-最后修改人: 朽木露琪亚
+最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
@@ -22,13 +22,12 @@
 
 #include <stdexcept>
 
-#include "include/cpu/Memory.h"
+#include "include/npu_demo/Core.h"
+#include "include/npu_demo/Dma.h"
+#include "include/npu_demo/Memory.h"
+#include "include/npu_demo/Nn.h"
 
 namespace npu_demo {
-
-using cpu::Memory;
-using cpu::MemoryFormat;
-using cpu::MemorySpace;
 
 namespace detail {
 
@@ -51,7 +50,7 @@ static constexpr long long kTlmMemorySize = 2048;
 - auto mem = npu_demo::detail::make_linear_memory<float>(24576, npu_demo::MemorySpace::TSM);
 
 创建者: 朽木露琪亚
-最后修改人: 朽木露琪亚
+最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
@@ -62,7 +61,7 @@ template <typename T>
 inline Memory<T> make_linear_memory(long long size, MemorySpace space) {
     long long shape[1] = {size};
     long long stride[1] = {1};
-    return Memory<T>(static_cast<T*>(nullptr), 1, shape, stride, MemoryFormat::Norm, space);
+    return Memory<T>(static_cast<T*>(nullptr), shape, stride, 1, MemoryFormat::Norm, space);
 }
 
 /*
@@ -73,7 +72,7 @@ inline Memory<T> make_linear_memory(long long size, MemorySpace space) {
 - npu_demo::detail::throw_zero_sized_memory("sm_memory_size=0");
 
 创建者: 朽木露琪亚
-最后修改人: 朽木露琪亚
+最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
@@ -96,7 +95,7 @@ inline void throw_zero_sized_memory(const char* message) {
 - auto tlm = ctx.get_dynamic_memory<float>(npu_demo::MemorySpace::TLM);
 
 创建者: 朽木露琪亚
-最后修改人: 朽木露琪亚
+最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
@@ -113,7 +112,7 @@ public:
     - long long bid = ctx.block_id();
 
     创建者: 朽木露琪亚
-    最后修改人: 朽木露琪亚
+    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
@@ -132,7 +131,7 @@ public:
     - long long bnum = ctx.block_num();
 
     创建者: 朽木露琪亚
-    最后修改人: 朽木露琪亚
+    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
@@ -151,7 +150,7 @@ public:
     - long long tid = ctx.thread_id();
 
     创建者: 朽木露琪亚
-    最后修改人: 朽木露琪亚
+    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
@@ -170,7 +169,7 @@ public:
     - long long tnum = ctx.thread_num();
 
     创建者: 朽木露琪亚
-    最后修改人: 朽木露琪亚
+    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
@@ -189,7 +188,7 @@ public:
     - long long sid = ctx.subthread_id();
 
     创建者: 朽木露琪亚
-    最后修改人: 朽木露琪亚
+    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
@@ -208,7 +207,7 @@ public:
     - long long snum = ctx.subthread_num();
 
     创建者: 朽木露琪亚
-    最后修改人: 朽木露琪亚
+    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
@@ -227,7 +226,7 @@ public:
     - auto tsm = ctx.get_dynamic_memory<float>(npu_demo::MemorySpace::TSM);
 
     创建者: 朽木露琪亚
-    最后修改人: 朽木露琪亚
+    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)

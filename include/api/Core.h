@@ -1,6 +1,6 @@
 /*
 功能说明:
-- 定义 include/api/Core.h 的统一状态码/状态类型与基础 Vector 视图。
+- 定义 include/api/Core.h 的统一状态码/状态类型与基础 Vector 视图声明。
 
 使用示例:
 - #include "include/api/Core.h"
@@ -9,12 +9,12 @@
 - Status status = StatusCode::kOk;
 
 创建者: jcc你莫辜负
-最后修改人: jcc你莫辜负
+最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Core.md
 - test: test/include/api/test_core.py
-- 功能实现: include/api/Core.h
+- 功能实现: include/npu_demo/Core.h
 */
 
 #ifndef KERNELCODE_GENERATE_INCLUDE_API_CORE_H_
@@ -28,12 +28,12 @@
 - StatusCode code = StatusCode::kOk;
 
 创建者: jcc你莫辜负
-最后修改人: jcc你莫辜负
+最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Core.md
 - test: test/include/api/test_core.py
-- 功能实现: include/api/Core.h
+- 功能实现: include/npu_demo/Core.h
 */
 enum StatusCode {
     kOk = 0,
@@ -48,12 +48,12 @@ enum StatusCode {
 - Status status = StatusCode::kOk;
 
 创建者: jcc你莫辜负
-最后修改人: jcc你莫辜负
+最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Core.md
 - test: test/include/api/test_core.py
-- 功能实现: include/api/Core.h
+- 功能实现: include/npu_demo/Core.h
 */
 using Status = StatusCode;
 
@@ -66,12 +66,12 @@ using Status = StatusCode;
 - Vector coords(coords_buf, 3);
 
 创建者: jcc你莫辜负
-最后修改人: jcc你莫辜负
+最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Core.md
 - test: test/include/api/test_core.py
-- 功能实现: include/api/Core.h
+- 功能实现: include/npu_demo/Core.h
 */
 class Vector {
 public:
@@ -84,14 +84,14 @@ public:
     - Vector coords(coords_buf, 3);
 
     创建者: jcc你莫辜负
-    最后修改人: jcc你莫辜负
+    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Core.md
     - test: test/include/api/test_core.py
-    - 功能实现: include/api/Core.h
+    - 功能实现: include/npu_demo/Core.h
     */
-    Vector(long long* data, unsigned long long size) : data_(data), size_(size) {}
+    Vector(long long* data, unsigned long long size);
 
     /*
     功能说明:
@@ -102,14 +102,14 @@ public:
     - Vector coords(coords_buf, 3);
 
     创建者: jcc你莫辜负
-    最后修改人: jcc你莫辜负
+    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Core.md
     - test: test/include/api/test_core.py
-    - 功能实现: include/api/Core.h
+    - 功能实现: include/npu_demo/Core.h
     */
-    Vector(const long long* data, unsigned long long size) : data_(data), size_(size) {}
+    Vector(const long long* data, unsigned long long size);
 
     /*
     功能说明:
@@ -119,16 +119,14 @@ public:
     - unsigned long long n = coords.size();
 
     创建者: jcc你莫辜负
-    最后修改人: jcc你莫辜负
+    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Core.md
     - test: test/include/api/test_core.py
-    - 功能实现: include/api/Core.h
+    - 功能实现: include/npu_demo/Core.h
     */
-    unsigned long long size() const {
-        return size_;
-    }
+    unsigned long long size() const;
 
     /*
     功能说明:
@@ -138,16 +136,14 @@ public:
     - long long* raw = coords.data();
 
     创建者: jcc你莫辜负
-    最后修改人: jcc你莫辜负
+    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Core.md
     - test: test/include/api/test_core.py
-    - 功能实现: include/api/Core.h
+    - 功能实现: include/npu_demo/Core.h
     */
-    long long* data() {
-        return const_cast<long long*>(data_);
-    }
+    long long* data();
 
     /*
     功能说明:
@@ -157,16 +153,14 @@ public:
     - const long long* raw = coords.data();
 
     创建者: jcc你莫辜负
-    最后修改人: jcc你莫辜负
+    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Core.md
     - test: test/include/api/test_core.py
-    - 功能实现: include/api/Core.h
+    - 功能实现: include/npu_demo/Core.h
     */
-    const long long* data() const {
-        return data_;
-    }
+    const long long* data() const;
 
     /*
     功能说明:
@@ -176,16 +170,14 @@ public:
     - long long axis0 = coords[0];
 
     创建者: jcc你莫辜负
-    最后修改人: jcc你莫辜负
+    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Core.md
     - test: test/include/api/test_core.py
-    - 功能实现: include/api/Core.h
+    - 功能实现: include/npu_demo/Core.h
     */
-    long long& operator[](unsigned long long index) {
-        return const_cast<long long&>(data_[index]);
-    }
+    long long& operator[](unsigned long long index);
 
     /*
     功能说明:
@@ -195,16 +187,14 @@ public:
     - long long axis0 = coords[0];
 
     创建者: jcc你莫辜负
-    最后修改人: jcc你莫辜负
+    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/api/Core.md
     - test: test/include/api/test_core.py
-    - 功能实现: include/api/Core.h
+    - 功能实现: include/npu_demo/Core.h
     */
-    const long long& operator[](unsigned long long index) const {
-        return data_[index];
-    }
+    const long long& operator[](unsigned long long index) const;
 
 private:
     const long long* data_;
