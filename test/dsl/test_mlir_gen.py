@@ -1,7 +1,7 @@
 """MLIR gen integration tests.
 
 创建者: 小李飞刀
-最后一次更改: 朽木露琪亚
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 覆盖 build_func_op/build_func_op_from_ast 及相关 lowering 集成回归。
@@ -44,6 +44,7 @@ from xdsl.dialects.builtin import (
 )
 from xdsl.ir import Block
 from xdsl.printer import Printer
+from xdsl.utils.exceptions import VerifyException
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -74,12 +75,16 @@ from kernel_gen.dialect.nn import (
     NnAddOp,
     NnBroadcastOp,
     NnEqOp,
+    NnExpOp,
     NnImg2col1dOp,
     NnImg2col2dOp,
     NnMatmulOp,
     NnMemorySpaceAttr,
     NnMemoryType,
     NnNeOp,
+    NnReduceMaxOp,
+    NnReduceMinOp,
+    NnReduceSumOp,
     NnSubOp,
     NnTrueDivOp,
 )
@@ -1203,9 +1208,9 @@ def test_build_func_op_rejects_unimported_dma_view_and_slice_helpers() -> None:
 
 # MGEN-036
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-01 13:15:49 +0800
-# 最近一次运行成功时间: 2026-04-01 13:15:49 +0800
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-05 03:15:23 +0800
+# 最近一次运行成功时间: 2026-04-05 03:15:23 +0800
 # 功能说明: 验证 build_func_op 支持 img2col1d helper 并可被 -k 'img2col' 稳定选中。
 # 测试目的: 验证 img2col1d 会 lowering 为 nn.img2col1d，且返回类型与注解一致，避免 img2col gate 过滤命令 exit 5。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_img2col1d_helper_call
@@ -1217,7 +1222,7 @@ def test_build_func_op_supports_img2col1d_helper_call() -> None:
 
     source = Memory([1, 4, 8], NumericType.Float32, space=MemorySpace.GM)
 
-    def img2col1d_kernel(src: "Tensor[f32, 1, 4, 8]") -> "Tensor[f32, 1, 12, 8]":
+    def img2col1d_kernel(src: "Tensor[f32, 1, 4, 8]") -> "Tensor[f32, 1, 4, 3, 8]":
         return img2col1d(src, kw=3, sw=1, dw=1, pl=1, pr=1)
 
     func_op = build_func_op(img2col1d_kernel, source)
@@ -1225,16 +1230,51 @@ def test_build_func_op_supports_img2col1d_helper_call() -> None:
     return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
     assert len(img2col_ops) == 1
     assert len(return_ops) == 1
-    assert [attr.data for attr in img2col_ops[0].result.type.shape.data] == [1, 12, 8]
+    assert [attr.data for attr in img2col_ops[0].result.type.shape.data] == [1, 4, 3, 8]
+    assert list(func_op.function_type.outputs) == [img2col_ops[0].result.type]
+    assert return_ops[0].arguments[0].type == img2col_ops[0].result.type
+
+
+# MGEN-036D
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-05 03:15:23 +0800
+# 最近一次运行成功时间: 2026-04-05 03:15:23 +0800
+# 功能说明: 验证 Tensor 注解中的符号表达式按 SymbolDim 语义解析。
+# 测试目的: 锁定 img2col1d 动态维表达式可同时匹配注解与返回类型，避免动态表达式回退。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_img2col1d_symbolic_annotation
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_img2col1d_symbolic_annotation() -> None:
+    from kernel_gen.operation.nn import img2col1d
+
+    w_symbol = SymbolDim("W")
+    expected_expr = (w_symbol + 1 + 1 - 1 * (3 - 1) - 1) / 1 + 1
+    source = Memory([1, w_symbol, 4], NumericType.Float32, space=MemorySpace.GM)
+
+    def img2col1d_kernel(
+        src: "Tensor[f32, 1, W, 4]",
+    ) -> "Tensor[f32, 1, (W + 1 + 1 - 1*(3 - 1) - 1) / 1 + 1, 3, 4]":
+        return img2col1d(src, kw=3, sw=1, dw=1, pl=1, pr=1)
+
+    func_op = build_func_op(img2col1d_kernel, source)
+    img2col_ops = [op for op in func_op.body.block.ops if isinstance(op, NnImg2col1dOp)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
+    assert len(img2col_ops) == 1
+    assert len(return_ops) == 1
+    shape = img2col_ops[0].result.type.shape.data
+    assert isinstance(shape[1], StringAttr)
+    assert shape[1].data == expected_expr.get_value()
     assert list(func_op.function_type.outputs) == [img2col_ops[0].result.type]
     assert return_ops[0].arguments[0].type == img2col_ops[0].result.type
 
 
 # MGEN-036A
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-01 13:15:49 +0800
-# 最近一次运行成功时间: 2026-04-01 13:15:49 +0800
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-05 03:15:23 +0800
+# 最近一次运行成功时间: 2026-04-05 03:15:23 +0800
 # 功能说明: 验证 build_func_op 支持 img2col2d helper 并可被 -k 'img2col' 稳定选中。
 # 测试目的: 验证 img2col2d 会 lowering 为 nn.img2col2d，且返回类型与注解一致，避免 img2col gate 过滤命令 exit 5。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_img2col2d_helper_call
@@ -1246,7 +1286,7 @@ def test_build_func_op_supports_img2col2d_helper_call() -> None:
 
     source = Memory([1, 3, 5, 5], NumericType.Float32, space=MemorySpace.GM)
 
-    def img2col2d_kernel(src: "Tensor[f32, 1, 3, 5, 5]") -> "Tensor[f32, 1, 27, 9]":
+    def img2col2d_kernel(src: "Tensor[f32, 1, 3, 5, 5]") -> "Tensor[f32, 1, 3, 3, 3, 3, 3]":
         return img2col2d(src, kh=3, kw=3)
 
     func_op = build_func_op(img2col2d_kernel, source)
@@ -1254,9 +1294,131 @@ def test_build_func_op_supports_img2col2d_helper_call() -> None:
     return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
     assert len(img2col_ops) == 1
     assert len(return_ops) == 1
-    assert [attr.data for attr in img2col_ops[0].result.type.shape.data] == [1, 27, 9]
+    assert [attr.data for attr in img2col_ops[0].result.type.shape.data] == [1, 3, 3, 3, 3, 3]
     assert list(func_op.function_type.outputs) == [img2col_ops[0].result.type]
     assert return_ops[0].arguments[0].type == img2col_ops[0].result.type
+
+
+# MGEN-036B
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-05 03:15:23 +0800
+# 最近一次运行成功时间: 2026-04-05 03:15:23 +0800
+# 功能说明: 验证 build_func_op 支持 exp helper 并下沉为 nn.exp。
+# 测试目的: 锁定 exp lowering 生成 NnExpOp 且返回类型匹配，避免 element_unary expectation 回退。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_exp_helper_call
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dialect/nn.md, spec/operation/nn.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_exp_helper_call() -> None:
+    from kernel_gen.operation.nn import exp
+
+    source = Memory([2, 3], NumericType.Float32, space=MemorySpace.GM)
+
+    def exp_kernel(src: "Tensor[f32, 2, 3]") -> "Tensor[f32, 2, 3]":
+        return exp(src)
+
+    func_op = build_func_op(exp_kernel, source)
+    exp_ops = [op for op in func_op.body.block.ops if isinstance(op, NnExpOp)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
+    assert len(exp_ops) == 1
+    assert len(return_ops) == 1
+    assert list(func_op.function_type.outputs) == [exp_ops[0].result.type]
+    assert return_ops[0].arguments[0].type == exp_ops[0].result.type
+
+
+# MGEN-036C
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-05 03:15:23 +0800
+# 最近一次运行成功时间: 2026-04-05 03:15:23 +0800
+# 功能说明: 验证 build_func_op 支持 reduce_sum/min/max helper 并生成结构化输出类型。
+# 测试目的: 锁定 reduce lowering 覆盖三类 helper 且返回类型匹配，避免 reduce expectation 回退。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_reduce_helper_calls
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dialect/nn.md, spec/operation/nn.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_reduce_helper_calls() -> None:
+    from kernel_gen.operation.nn import reduce_max, reduce_min, reduce_sum
+
+    source = Memory([2, 3, 4], NumericType.Float32, space=MemorySpace.GM)
+
+    def reduce_sum_kernel(src: "Tensor[f32, 2, 3, 4]") -> "Tensor[f32, 1]":
+        return reduce_sum(src)
+
+    def reduce_sum_axis_kernel(src: "Tensor[f32, 2, 3, 4]") -> "Tensor[f32, 2, 1, 4]":
+        return reduce_sum(src, axis=1, keepdim=True)
+
+    def reduce_min_kernel(src: "Tensor[f32, 2, 3, 4]") -> "Tensor[f32, 2, 3, 1]":
+        return reduce_min(src, axis=[2], keepdim=True)
+
+    def reduce_max_kernel(src: "Tensor[f32, 2, 3, 4]") -> "Tensor[f32, 3, 4]":
+        return reduce_max(src, axis=0, keepdim=False)
+
+    sum_op = build_func_op(reduce_sum_kernel, source)
+    sum_ops = [op for op in sum_op.body.block.ops if isinstance(op, NnReduceSumOp)]
+    sum_returns = [op for op in sum_op.body.block.ops if isinstance(op, func.ReturnOp)]
+    assert len(sum_ops) == 1
+    assert len(sum_returns) == 1
+    assert [attr.data for attr in sum_ops[0].result.type.shape.data] == [1]
+    assert sum_returns[0].arguments[0].type == sum_ops[0].result.type
+
+    sum_axis_op = build_func_op(reduce_sum_axis_kernel, source)
+    sum_axis_ops = [op for op in sum_axis_op.body.block.ops if isinstance(op, NnReduceSumOp)]
+    sum_axis_returns = [op for op in sum_axis_op.body.block.ops if isinstance(op, func.ReturnOp)]
+    assert len(sum_axis_ops) == 1
+    assert len(sum_axis_returns) == 1
+    assert [attr.data for attr in sum_axis_ops[0].result.type.shape.data] == [2, 1, 4]
+    assert sum_axis_returns[0].arguments[0].type == sum_axis_ops[0].result.type
+
+    min_op = build_func_op(reduce_min_kernel, source)
+    min_ops = [op for op in min_op.body.block.ops if isinstance(op, NnReduceMinOp)]
+    min_returns = [op for op in min_op.body.block.ops if isinstance(op, func.ReturnOp)]
+    assert len(min_ops) == 1
+    assert len(min_returns) == 1
+    assert [attr.data for attr in min_ops[0].result.type.shape.data] == [2, 3, 1]
+    assert min_returns[0].arguments[0].type == min_ops[0].result.type
+
+    max_op = build_func_op(reduce_max_kernel, source)
+    max_ops = [op for op in max_op.body.block.ops if isinstance(op, NnReduceMaxOp)]
+    max_returns = [op for op in max_op.body.block.ops if isinstance(op, func.ReturnOp)]
+    assert len(max_ops) == 1
+    assert len(max_returns) == 1
+    assert [attr.data for attr in max_ops[0].result.type.shape.data] == [3, 4]
+    assert max_returns[0].arguments[0].type == max_ops[0].result.type
+
+
+# MGEN-036D
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-05 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-05 00:00:00 +0800
+# 功能说明: 验证 reduce_* 在 axes/keepdim 非法时触发 verifier 失败短语。
+# 测试目的: 锁定 reduce verifier 关键短语，避免静默通过或错误信息回退。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_reduce_verifier_failures
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py, kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_reduce_verifier_failures() -> None:
+    from kernel_gen.operation.nn import reduce_sum
+
+    source = Memory([2, 3, 4], NumericType.Float32, space=MemorySpace.GM)
+
+    def reduce_axes_oob_kernel(src: "Tensor[f32, 2, 3, 4]") -> "Tensor[f32, 2, 3, 4]":
+        return reduce_sum(src, axis=3)
+
+    def reduce_axes_empty_kernel(src: "Tensor[f32, 2, 3, 4]") -> "Tensor[f32, 2, 3, 4]":
+        return reduce_sum(src, axis=[])
+
+    def reduce_keepdim_invalid_kernel(src: "Tensor[f32, 2, 3, 4]") -> "Tensor[f32, 2, 3, 4]":
+        return reduce_sum(src, axis=1, keepdim=2)
+
+    with pytest.raises(VerifyException, match="axes-must-be-non-empty-unique-and-in-range"):
+        build_func_op(reduce_axes_oob_kernel, source)
+    with pytest.raises(VerifyException, match="axes-must-be-non-empty-unique-and-in-range"):
+        build_func_op(reduce_axes_empty_kernel, source)
+    with pytest.raises(VerifyException, match="keepdim-must-be-i1-bool-attr"):
+        build_func_op(reduce_keepdim_invalid_kernel, source)
 
 
 # MGEN-C1A

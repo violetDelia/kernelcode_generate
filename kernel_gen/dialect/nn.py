@@ -567,14 +567,14 @@ def _verify_broadcast_compat(input_type: NnMemoryType, result_type: NnMemoryType
     input_dims = input_type.shape.data
     result_dims = result_type.shape.data
     if len(result_dims) < len(input_dims):
-        _raise_verify_error("nn.broadcast result rank must be >= input rank")
+        _raise_verify_error("result-rank-must-be-greater-or-equal-to-input")
 
     for input_dim, result_dim in zip(reversed(input_dims), reversed(result_dims), strict=False):
         if _dims_equal(input_dim, result_dim):
             continue
         if isinstance(input_dim, IntAttr) and input_dim.data == 1:
             continue
-        _raise_verify_error("nn.broadcast shape mismatch")
+        _raise_verify_error("result-shape-must-match-broadcast-contract")
 
 
 def _verify_transpose_perm(perm: ArrayAttr, rank: int) -> list[int]:
@@ -701,6 +701,48 @@ def _verify_i64_attr_value(attr: IntegerAttr, field_name: str, *, allow_zero: bo
     elif value <= 0:
         _raise_verify_error(f"{field_name} must be positive")
     return value
+
+
+def _verify_i64_attr_group(
+    attrs: Sequence[IntegerAttr],
+    *,
+    allow_zero: bool,
+    error_phrase: str,
+) -> list[int]:
+    """校验一组 i64 属性值并返回整数列表。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 校验属性类型为 i64，且满足正数/非负数约束。
+    - 任一属性不满足约束时，统一抛出 error_phrase。
+
+    使用示例:
+    - _verify_i64_attr_group([kw, sw, dw], allow_zero=False, error_phrase="kw-sw-dw-must-be-positive")
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    values: list[int] = []
+    for attr in attrs:
+        if not isinstance(attr.type, IntegerType):
+            _raise_verify_error(error_phrase)
+        width_attr = attr.type.width
+        width_value = width_attr.data if isinstance(width_attr, IntAttr) else width_attr
+        if width_value != 64:
+            _raise_verify_error(error_phrase)
+        value = attr.value.data
+        if allow_zero:
+            if value < 0:
+                _raise_verify_error(error_phrase)
+        elif value <= 0:
+            _raise_verify_error(error_phrase)
+        values.append(value)
+    return values
 
 
 def _verify_i64_attr(attr: IntegerAttr, field_name: str) -> int:
@@ -1494,16 +1536,20 @@ class NnBroadcastOp(IRDLOperation):
         )
 
     def verify_(self) -> None:
-        input_type = _verify_memory_type(self.input.type, "input")
-        result_type = _verify_memory_type(self.result.type, "result")
+        input_type = self.input.type
+        result_type = self.result.type
+        if not isinstance(input_type, NnMemoryType) or not isinstance(result_type, NnMemoryType):
+            _raise_verify_error("operand-must-be-nn-memory")
+        input_type.verify()
+        result_type.verify()
 
         self.space.verify()
         if input_type.space.space.data != result_type.space.space.data:
-            _raise_verify_error("nn.broadcast input/result must use the same space")
+            _raise_verify_error("result-space-must-match-input-and-attr")
         if input_type.space.space.data != self.space.space.data:
-            _raise_verify_error("nn.broadcast attribute space must match type space")
+            _raise_verify_error("result-space-must-match-input-and-attr")
         if input_type.element_type != result_type.element_type:
-            _raise_verify_error("nn.broadcast element_type must match")
+            _raise_verify_error("result-element-type-must-match-input")
 
         _verify_broadcast_compat(input_type, result_type)
 
@@ -1948,7 +1994,7 @@ class NnImg2col1dOp(IRDLOperation):
         """初始化 img2col1d op。
 
         创建者: jcc你莫辜负
-        最后一次更改: jcc你莫辜负
+        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 绑定输入 operand、结果类型、窗口属性与 space 属性。
@@ -1993,27 +2039,38 @@ class NnImg2col1dOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/nn.py
         """
 
-        input_type = _verify_memory_type(self.input.type, "input")
-        result_type = _verify_memory_type(self.result.type, "result")
+        input_type = self.input.type
+        result_type = self.result.type
+        if not isinstance(input_type, NnMemoryType):
+            _raise_verify_error("operand-must-be-rank-3-nn-memory")
+        if not isinstance(result_type, NnMemoryType):
+            _raise_verify_error("result-rank-must-be-4")
+        input_type.verify()
+        result_type.verify()
 
         if len(input_type.shape.data) != 3:
-            _raise_verify_error("nn.img2col1d input must be rank-3 nn.memory")
-        if len(result_type.shape.data) != 3:
-            _raise_verify_error("nn.img2col1d result rank must be 3")
+            _raise_verify_error("operand-must-be-rank-3-nn-memory")
+        if len(result_type.shape.data) != 4:
+            _raise_verify_error("result-rank-must-be-4")
 
-        kw_value = _verify_i64_attr_value(self.kw, "kw", allow_zero=False)
-        sw_value = _verify_i64_attr_value(self.sw, "sw", allow_zero=False)
-        dw_value = _verify_i64_attr_value(self.dw, "dw", allow_zero=False)
-        pl_value = _verify_i64_attr_value(self.pl, "pl", allow_zero=True)
-        pr_value = _verify_i64_attr_value(self.pr, "pr", allow_zero=True)
+        kw_value, sw_value, dw_value = _verify_i64_attr_group(
+            [self.kw, self.sw, self.dw],
+            allow_zero=False,
+            error_phrase="kw-sw-dw-must-be-positive",
+        )
+        pl_value, pr_value = _verify_i64_attr_group(
+            [self.pl, self.pr],
+            allow_zero=True,
+            error_phrase="pl-pr-must-be-non-negative",
+        )
 
         self.space.verify()
         if input_type.space.space.data != self.space.space.data:
-            _raise_verify_error("nn.img2col1d attribute space must match input space")
+            _raise_verify_error("result-space-matches-input")
         if result_type.space.space.data != input_type.space.space.data:
-            _raise_verify_error("nn.img2col1d result space must match input")
+            _raise_verify_error("result-space-matches-input")
         if result_type.element_type != input_type.element_type:
-            _raise_verify_error("nn.img2col1d result element_type must match input")
+            _raise_verify_error("result-element-type-matches-input")
 
         input_dims = _collect_int_dims(input_type.shape.data)
         result_dims = _collect_int_dims(result_type.shape.data)
@@ -2023,18 +2080,18 @@ class NnImg2col1dOp(IRDLOperation):
         n_dim, c_dim, w_dim = input_dims
         w_out = _img2col_output_dim(w_dim, kw_value, sw_value, dw_value, pl_value, pr_value)
         if w_out <= 0:
-            _raise_verify_error("nn.img2col1d output width must be positive")
+            _raise_verify_error("result-shape-stride-must-match-img2col1d-contract")
 
-        expected_shape = [n_dim, c_dim * kw_value, w_out]
+        expected_shape = [n_dim, c_dim, kw_value, w_out]
         if result_dims != expected_shape:
-            _raise_verify_error("nn.img2col1d result shape must match img2col1d contract")
+            _raise_verify_error("result-shape-stride-must-match-img2col1d-contract")
 
         result_strides = _collect_int_dims(result_type.stride.data)
         if result_strides is None:
-            _raise_verify_error("nn.img2col1d result stride must match img2col1d contract")
+            _raise_verify_error("result-shape-stride-must-match-img2col1d-contract")
         expected_stride = _build_contiguous_stride(expected_shape)
         if result_strides != expected_stride:
-            _raise_verify_error("nn.img2col1d result stride must match img2col1d contract")
+            _raise_verify_error("result-shape-stride-must-match-img2col1d-contract")
 
 
 @irdl_op_definition
@@ -2091,7 +2148,7 @@ class NnImg2col2dOp(IRDLOperation):
         """初始化 img2col2d op。
 
         创建者: jcc你莫辜负
-        最后一次更改: jcc你莫辜负
+        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 绑定输入 operand、结果类型、窗口属性与 space 属性。
@@ -2141,32 +2198,38 @@ class NnImg2col2dOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/nn.py
         """
 
-        input_type = _verify_memory_type(self.input.type, "input")
-        result_type = _verify_memory_type(self.result.type, "result")
+        input_type = self.input.type
+        result_type = self.result.type
+        if not isinstance(input_type, NnMemoryType):
+            _raise_verify_error("operand-must-be-rank-4-nn-memory")
+        if not isinstance(result_type, NnMemoryType):
+            _raise_verify_error("result-rank-must-be-6")
+        input_type.verify()
+        result_type.verify()
 
         if len(input_type.shape.data) != 4:
-            _raise_verify_error("nn.img2col2d input must be rank-4 nn.memory")
-        if len(result_type.shape.data) != 3:
-            _raise_verify_error("nn.img2col2d result rank must be 3")
+            _raise_verify_error("operand-must-be-rank-4-nn-memory")
+        if len(result_type.shape.data) != 6:
+            _raise_verify_error("result-rank-must-be-6")
 
-        kh_value = _verify_i64_attr_value(self.kh, "kh", allow_zero=False)
-        kw_value = _verify_i64_attr_value(self.kw, "kw", allow_zero=False)
-        sh_value = _verify_i64_attr_value(self.sh, "sh", allow_zero=False)
-        sw_value = _verify_i64_attr_value(self.sw, "sw", allow_zero=False)
-        dh_value = _verify_i64_attr_value(self.dh, "dh", allow_zero=False)
-        dw_value = _verify_i64_attr_value(self.dw, "dw", allow_zero=False)
-        ph_value = _verify_i64_attr_value(self.ph, "ph", allow_zero=True)
-        pw_value = _verify_i64_attr_value(self.pw, "pw", allow_zero=True)
-        pl_value = _verify_i64_attr_value(self.pl, "pl", allow_zero=True)
-        pr_value = _verify_i64_attr_value(self.pr, "pr", allow_zero=True)
+        kh_value, kw_value, sh_value, sw_value, dh_value, dw_value = _verify_i64_attr_group(
+            [self.kh, self.kw, self.sh, self.sw, self.dh, self.dw],
+            allow_zero=False,
+            error_phrase="kh-kw-sh-sw-dh-dw-must-be-positive",
+        )
+        ph_value, pw_value, pl_value, pr_value = _verify_i64_attr_group(
+            [self.ph, self.pw, self.pl, self.pr],
+            allow_zero=True,
+            error_phrase="ph-pw-pl-pr-must-be-non-negative",
+        )
 
         self.space.verify()
         if input_type.space.space.data != self.space.space.data:
-            _raise_verify_error("nn.img2col2d attribute space must match input space")
+            _raise_verify_error("result-space-matches-input")
         if result_type.space.space.data != input_type.space.space.data:
-            _raise_verify_error("nn.img2col2d result space must match input")
+            _raise_verify_error("result-space-matches-input")
         if result_type.element_type != input_type.element_type:
-            _raise_verify_error("nn.img2col2d result element_type must match input")
+            _raise_verify_error("result-element-type-matches-input")
 
         input_dims = _collect_int_dims(input_type.shape.data)
         result_dims = _collect_int_dims(result_type.shape.data)
@@ -2177,20 +2240,20 @@ class NnImg2col2dOp(IRDLOperation):
         h_out = _img2col_output_dim(h_dim, kh_value, sh_value, dh_value, ph_value, pw_value)
         w_out = _img2col_output_dim(w_dim, kw_value, sw_value, dw_value, pl_value, pr_value)
         if h_out <= 0:
-            _raise_verify_error("nn.img2col2d output height must be positive")
+            _raise_verify_error("result-shape-stride-must-match-img2col2d-contract")
         if w_out <= 0:
-            _raise_verify_error("nn.img2col2d output width must be positive")
+            _raise_verify_error("result-shape-stride-must-match-img2col2d-contract")
 
-        expected_shape = [n_dim, c_dim * kh_value * kw_value, h_out * w_out]
+        expected_shape = [n_dim, c_dim, kh_value, kw_value, h_out, w_out]
         if result_dims != expected_shape:
-            _raise_verify_error("nn.img2col2d result shape must match img2col2d contract")
+            _raise_verify_error("result-shape-stride-must-match-img2col2d-contract")
 
         result_strides = _collect_int_dims(result_type.stride.data)
         if result_strides is None:
-            _raise_verify_error("nn.img2col2d result stride must match img2col2d contract")
+            _raise_verify_error("result-shape-stride-must-match-img2col2d-contract")
         expected_stride = _build_contiguous_stride(expected_shape)
         if result_strides != expected_stride:
-            _raise_verify_error("nn.img2col2d result stride must match img2col2d contract")
+            _raise_verify_error("result-shape-stride-must-match-img2col2d-contract")
 
 
 @irdl_op_definition

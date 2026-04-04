@@ -1,7 +1,7 @@
 """AST emit utilities for DSL nodes.
 
 创建者: 小李飞刀
-最后一次更改: 我不是牛马
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 提供 AST 节点到 MLIR SSA value/op 的发射入口。
@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import ast as py_ast
 from typing import Sequence
 
 from xdsl.dialects import arith, func, scf
@@ -66,6 +67,7 @@ from kernel_gen.dialect.nn import (
     NnAddOp,
     NnBroadcastOp,
     NnEqOp,
+    NnExpOp,
     NnGeOp,
     NnGtOp,
     NnMatmulOp,
@@ -77,6 +79,9 @@ from kernel_gen.dialect.nn import (
     NnMemoryType,
     NnMulOp,
     NnNeOp,
+    NnReduceMaxOp,
+    NnReduceMinOp,
+    NnReduceSumOp,
     NnSubOp,
     NnTrueDivOp,
 )
@@ -124,6 +129,8 @@ from .ast import (
     Img2ColAST,
     LoadAST,
     MatmulAST,
+    NnReduceAST,
+    NnUnaryAST,
     ScalarArgAST,
     SymbolToFloatAST,
     SourceLocation,
@@ -426,6 +433,149 @@ def _build_default_stride_attrs(shape: Sequence[Attribute]) -> list[Attribute]:
             running = _mul_symbol(dim.data, running)
         else:
             running = "?"
+    stride_values.reverse()
+    return [_dim_to_attr(value) for value in stride_values]
+
+
+def _eval_symbolic_dim_node(expr: py_ast.AST, location: SourceLocation | None) -> int | SymbolDim:
+    """求值符号维表达式 AST 节点为 `int` 或 `SymbolDim`。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 仅接受 `int`、标识符与 `+ - * /` 基础算术。
+    - 使用 `SymbolDim` 运算保持与运行时符号表达式一致。
+
+    使用示例:
+    - _eval_symbolic_dim_node(py_ast.parse("N + 1", mode="eval").body, None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+    if isinstance(expr, py_ast.Constant) and isinstance(expr.value, int):
+        return expr.value
+    if isinstance(expr, py_ast.Name):
+        return SymbolDim(expr.id)
+    if isinstance(expr, py_ast.UnaryOp) and isinstance(expr.op, py_ast.USub):
+        value = _eval_symbolic_dim_node(expr.operand, location)
+        if isinstance(value, SymbolDim):
+            return SymbolDim(0) - value
+        if isinstance(value, int):
+            return -value
+        raise _LoweringError("Unsupported symbolic dim expression", location=location)
+    if isinstance(expr, py_ast.BinOp):
+        lhs = _eval_symbolic_dim_node(expr.left, location)
+        rhs = _eval_symbolic_dim_node(expr.right, location)
+        if isinstance(expr.op, py_ast.Add):
+            return lhs + rhs
+        if isinstance(expr.op, py_ast.Sub):
+            return lhs - rhs
+        if isinstance(expr.op, py_ast.Mult):
+            return lhs * rhs
+        if isinstance(expr.op, py_ast.Div):
+            if isinstance(lhs, int) and isinstance(rhs, int):
+                if rhs == 0 or lhs % rhs != 0:
+                    raise _LoweringError("Unsupported symbolic dim expression", location=location)
+                return lhs // rhs
+            if isinstance(lhs, int):
+                lhs = SymbolDim(lhs)
+            if isinstance(rhs, int):
+                return lhs / rhs
+            return lhs / rhs
+        raise _LoweringError("Unsupported symbolic dim expression", location=location)
+    raise _LoweringError("Unsupported symbolic dim expression", location=location)
+
+
+def _eval_symbolic_dim_expr(expr_text: str, location: SourceLocation | None) -> SymbolDim:
+    """解析符号维表达式文本为 `SymbolDim`。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 通过 Python AST 安全解析表达式，并使用 `SymbolDim` 运算求值。
+    - 统一为 `SymbolDim` 返回，便于后续 stride/shape 推导。
+
+    使用示例:
+    - _eval_symbolic_dim_expr("(N + 1) / 2 + 1", location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+    try:
+        parsed = py_ast.parse(expr_text, mode="eval").body
+    except SyntaxError as exc:
+        raise _LoweringError("Unsupported symbolic dim expression", location=location) from exc
+    value = _eval_symbolic_dim_node(parsed, location)
+    if isinstance(value, int):
+        return SymbolDim(value)
+    if isinstance(value, SymbolDim):
+        return value
+    raise _LoweringError("Unsupported symbolic dim expression", location=location)
+
+
+def _shape_attr_to_symbol_dim(attr: Attribute, location: SourceLocation | None) -> SymbolDim | None:
+    """将 shape Attribute 规整为 SymbolDim，支持未知维度兜底。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - IntAttr 转为静态 SymbolDim。
+    - StringAttr 转为符号表达式 SymbolDim；若为 "?" 则返回 None 表示未知。
+
+    使用示例:
+    - _shape_attr_to_symbol_dim(IntAttr(4), location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+    if isinstance(attr, IntAttr):
+        return SymbolDim(attr.data)
+    if isinstance(attr, StringAttr):
+        if attr.data == "?":
+            return None
+        return _eval_symbolic_dim_expr(attr.data, location)
+    raise _LoweringError("Unsupported shape attribute", location=location)
+
+
+def _build_symbolic_stride_attrs(shape: Sequence[Attribute], location: SourceLocation | None) -> list[Attribute]:
+    """基于 SymbolDim 语义生成 stride 属性。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 使用 `SymbolDim` 的算术语义构造 stride，确保与 Memory 的默认 stride 表达式一致。
+    - 若存在未知维度（"?"），其自身及更高维 stride 统一记为 "?"。
+
+    使用示例:
+    - _build_symbolic_stride_attrs([IntAttr(2), StringAttr("N")], location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+    stride_values: list[int | str] = []
+    running: SymbolDim | None = SymbolDim(1)
+    for dim_attr in reversed(shape):
+        if running is None:
+            stride_values.append("?")
+            continue
+        stride_values.append(running.get_value())
+        dim_symbol = _shape_attr_to_symbol_dim(dim_attr, location)
+        if dim_symbol is None:
+            running = None
+        else:
+            running = dim_symbol * running
     stride_values.reverse()
     return [_dim_to_attr(value) for value in stride_values]
 
@@ -1772,11 +1922,258 @@ def _parse_img2col_helper(expr: Img2ColAST) -> tuple[object, dict[str, int]]:
     return input_expr, resolved
 
 
+def _img2col_out_dim_value(
+    dim: Attribute,
+    k: int,
+    s: int,
+    d: int,
+    p1: int,
+    p2: int,
+    location: SourceLocation | None,
+) -> int | str:
+    """计算 img2col 输出维度表达式。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 静态维度返回整数结果。
+    - 符号维度返回保持注解语义的字符串表达式。
+
+    使用示例:
+    - _img2col_out_dim_value(IntAttr(8), 3, 1, 1, 1, 1, location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+    if isinstance(dim, IntAttr):
+        return (dim.data + p1 + p2 - d * (k - 1) - 1) // s + 1
+    if isinstance(dim, StringAttr):
+        dim_symbol = SymbolDim(dim.data)
+        expr = (dim_symbol + p1 + p2 - d * (k - 1) - 1) / s + 1
+        return expr.get_value()
+    raise _LoweringError("img2col dim must be int or symbol", location=location)
+
+
+def _infer_img2col_output_shape_attrs(
+    expr: Img2ColAST,
+    input_type: NnMemoryType,
+    params: dict[str, int],
+) -> list[Attribute]:
+    """推导 img2col 输出 shape 属性列表。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 支持 img2col1d/img2col2d 的结构化输出维度合同。
+    - 通过输入 shape 的符号分布粗略区分 NCHW/NWC、NCHW/NHWC。
+
+    使用示例:
+    - _infer_img2col_output_shape_attrs(expr, input_type, params)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+    shape = list(input_type.shape.data)
+    if expr.kind == "img2col1d":
+        if len(shape) != 3:
+            raise _LoweringError("img2col1d input must be rank-3 nn.memory", location=expr.location)
+        n_dim, c_dim, w_dim = shape
+        kw = params["kw"]
+        sw = params["sw"]
+        dw = params["dw"]
+        pl = params["pl"]
+        pr = params["pr"]
+        is_nwc = isinstance(shape[1], StringAttr) and not isinstance(shape[2], StringAttr)
+        if is_nwc:
+            n_dim, w_dim, c_dim = shape
+            w_out = _img2col_out_dim_value(w_dim, kw, sw, dw, pl, pr, expr.location)
+            return [n_dim, _dim_to_attr(w_out), IntAttr(kw), c_dim]
+        w_out = _img2col_out_dim_value(w_dim, kw, sw, dw, pl, pr, expr.location)
+        return [n_dim, c_dim, IntAttr(kw), _dim_to_attr(w_out)]
+
+    if expr.kind == "img2col2d":
+        if len(shape) != 4:
+            raise _LoweringError("img2col2d input must be rank-4 nn.memory", location=expr.location)
+        n_dim, c_dim, h_dim, w_dim = shape
+        kh = params["kh"]
+        kw = params["kw"]
+        sh = params["sh"]
+        sw = params["sw"]
+        dh = params["dh"]
+        dw = params["dw"]
+        ph = params["ph"]
+        pw = params["pw"]
+        pl = params["pl"]
+        pr = params["pr"]
+        is_nhwc = isinstance(shape[3], IntAttr) and (
+            isinstance(shape[1], StringAttr) or isinstance(shape[2], StringAttr)
+        )
+        if is_nhwc:
+            n_dim, h_dim, w_dim, c_dim = shape
+            h_out = _img2col_out_dim_value(h_dim, kh, sh, dh, ph, pw, expr.location)
+            w_out = _img2col_out_dim_value(w_dim, kw, sw, dw, pl, pr, expr.location)
+            return [n_dim, _dim_to_attr(h_out), _dim_to_attr(w_out), IntAttr(kh), IntAttr(kw), c_dim]
+        h_out = _img2col_out_dim_value(h_dim, kh, sh, dh, ph, pw, expr.location)
+        w_out = _img2col_out_dim_value(w_dim, kw, sw, dw, pl, pr, expr.location)
+        return [n_dim, c_dim, IntAttr(kh), IntAttr(kw), _dim_to_attr(h_out), _dim_to_attr(w_out)]
+
+    raise _LoweringError("Unsupported img2col helper", location=expr.location)
+
+
+def _parse_reduce_axis_expr(axis_expr: object | None, location: SourceLocation | None) -> list[int] | None:
+    """解析 reduce 的 axis 表达式为轴列表。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 允许 int / ConstAST[int] / list/tuple 的轴值解析。
+    - 未提供 axis 时返回 None，表示“reduce all axes”。
+
+    使用示例:
+    - _parse_reduce_axis_expr(ConstAST(1), location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+    if axis_expr is None:
+        return None
+    if isinstance(axis_expr, ConstAST):
+        if isinstance(axis_expr.value, int):
+            return [axis_expr.value]
+        raise _LoweringError("reduce axis must be int", location=axis_expr.location)
+    if isinstance(axis_expr, int):
+        return [axis_expr]
+    if isinstance(axis_expr, (list, tuple)):
+        axes: list[int] = []
+        for entry in axis_expr:
+            if isinstance(entry, ConstAST) and isinstance(entry.value, int):
+                axes.append(entry.value)
+                continue
+            if isinstance(entry, int):
+                axes.append(entry)
+                continue
+            raise _LoweringError("reduce axis must be int", location=getattr(entry, "location", None) or location)
+        return axes
+    raise _LoweringError("reduce axis must be int or list of int", location=location)
+
+
+def _parse_reduce_keepdim_expr(
+    keepdim_expr: object | None,
+    location: SourceLocation | None,
+) -> tuple[bool | int, bool]:
+    """解析 reduce keepdim 表达式并返回值与合法性标记。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 支持 bool/int/ConstAST(bool|int) 的 keepdim 输入。
+    - 返回 keepdim 值以及是否满足布尔语义（0/1/True/False）。
+
+    使用示例:
+    - _parse_reduce_keepdim_expr(ConstAST(True), location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+    if keepdim_expr is None:
+        return False, True
+    value: object
+    if isinstance(keepdim_expr, ConstAST):
+        value = keepdim_expr.value
+    else:
+        value = keepdim_expr
+    if isinstance(value, bool):
+        return value, True
+    if isinstance(value, int):
+        return value, value in (0, 1)
+    raise _LoweringError("reduce keepdim must be bool or int", location=location)
+
+
+def _build_reduce_result_shape_attrs(
+    input_shape: Sequence[Attribute],
+    axes: set[int],
+    keepdim: bool,
+) -> list[Attribute]:
+    """基于 axes/keepdim 推导 reduce 结果 shape。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - keepdim=true 时将归约轴替换为 1。
+    - keepdim=false 时移除归约轴；若结果为空则返回 [1]。
+
+    使用示例:
+    - _build_reduce_result_shape_attrs([IntAttr(2), IntAttr(3)], {0}, keepdim=False)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+    if keepdim:
+        return [IntAttr(1) if index in axes else dim for index, dim in enumerate(input_shape)]
+    reduced = [dim for index, dim in enumerate(input_shape) if index not in axes]
+    if not reduced:
+        return [IntAttr(1)]
+    return reduced
+
+
+def _infer_reduce_output_shape_attrs(expr: NnReduceAST, input_type: NnMemoryType) -> list[Attribute]:
+    """推导 reduce_* 的输出 shape 属性列表。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - axes/keepdim 合法时按合同推导结果 shape。
+    - axes/keepdim 非法时返回输入 shape 兜底，以便 verifier 报错。
+
+    使用示例:
+    - _infer_reduce_output_shape_attrs(expr, input_type)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+    shape = list(input_type.shape.data)
+    rank = len(shape)
+    axes = _parse_reduce_axis_expr(expr.axis, expr.location)
+    keepdim_value, keepdim_valid = _parse_reduce_keepdim_expr(expr.keepdim, expr.location)
+    if axes is None:
+        axes_list = list(range(rank))
+    else:
+        axes_list = axes
+
+    axes_valid = bool(axes_list) and len(set(axes_list)) == len(axes_list)
+    if axes_valid and any(axis < 0 or axis >= rank for axis in axes_list):
+        axes_valid = False
+
+    if not axes_valid or not keepdim_valid:
+        return shape
+
+    keepdim = keepdim_value if isinstance(keepdim_value, bool) else bool(keepdim_value)
+    return _build_reduce_result_shape_attrs(shape, set(axes_list), keepdim)
+
+
 def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
     """校验函数体中的 AST 语句是否属于当前 lowering 支持范围。
 
     创建者: OpenAI
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 拒绝空函数体。
@@ -1813,6 +2210,8 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
                 DmaFlattenAST,
                 Img2ColAST,
                 MatmulAST,
+                NnReduceAST,
+                NnUnaryAST,
                 DmaFreeAST,
                 ForAST,
                 ArchGetDynamicMemoryAST,
@@ -1878,7 +2277,7 @@ def _infer_expr_type(
     """推导表达式在 lowering 前的结果类型。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 统一处理常量、DMA、arch query、`symbol.to_float`、symbol 与 nn 二元表达式的类型推导。
@@ -2006,116 +2405,33 @@ def _infer_expr_type(
         result_type = _memory_type_from_parts(shape_attr, [IntAttr(1)], source_type.element_type, source_type.space)
         type_map[expr_key] = result_type
         return result_type
+    if isinstance(expr, NnUnaryAST):
+        value_type = _infer_expr_type(expr.value, type_map, runtime_values=runtime_values)
+        if not isinstance(value_type, NnMemoryType):
+            raise _LoweringError("Unary op operand must be nn.memory", location=expr.location)
+        type_map[expr_key] = value_type
+        return value_type
+    if isinstance(expr, NnReduceAST):
+        input_type = _infer_expr_type(expr.value, type_map, runtime_values=runtime_values)
+        if not isinstance(input_type, NnMemoryType):
+            raise _LoweringError("reduce input must be nn.memory", location=expr.location)
+        output_shape = _infer_reduce_output_shape_attrs(expr, input_type)
+        stride_attr = _build_symbolic_stride_attrs(output_shape, expr.location)
+        result_type = _memory_type_from_parts(
+            output_shape,
+            stride_attr,
+            input_type.element_type,
+            input_type.space,
+        )
+        type_map[expr_key] = result_type
+        return result_type
     if isinstance(expr, Img2ColAST):
         input_expr, params = _parse_img2col_helper(expr)
         input_type = _infer_expr_type(input_expr, type_map, runtime_values=runtime_values)
         if not isinstance(input_type, NnMemoryType):
             raise _LoweringError(f"{expr.kind} input must be nn.memory", location=expr.location)
-
-        def _dim_value(attr: Attribute) -> int | str:
-            """解析维度属性为 Python 值。
-
-            功能说明：
-            - 支持 `IntAttr` / `StringAttr`，分别返回整数或字符串；其他类型返回 `"?"`。
-
-            使用示例：
-            - `_dim_value(IntAttr(3)) -> 3`
-            - `_dim_value(StringAttr("K")) -> "K"`
-
-            创建者：朽木露琪亚
-            最后修改人：朽木露琪亚
-
-            关联文件：
-            - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-            - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
-            - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
-            """
-            if isinstance(attr, IntAttr):
-                return attr.data
-            if isinstance(attr, StringAttr):
-                return attr.data
-            return "?"
-
-        def _mul_dim(lhs: int | str, rhs: int | str) -> int | str:
-            """执行维度乘法合并。
-
-            功能说明：
-            - 当任一输入为 `"?"` 时返回 `"?"`；否则返回 `_mul_symbol` 的合并结果。
-
-            使用示例：
-            - `_mul_dim(2, 3) -> 6`
-            - `_mul_dim("?", 4) -> "?"`
-
-            创建者：朽木露琪亚
-            最后修改人：朽木露琪亚
-
-            关联文件：
-            - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-            - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
-            - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
-            """
-            if lhs == "?" or rhs == "?":
-                return "?"
-            return _mul_symbol(lhs, rhs)
-
-        def _img2col_out_dim(dim: int | str, k: int, s: int, d: int, p1: int, p2: int) -> int | str:
-            """计算 img2col 输出维度。
-
-            功能说明：
-            - 输入维度为整数且 `s != 0` 时计算输出尺寸；否则返回 `"?"`。
-
-            使用示例：
-            - `_img2col_out_dim(32, 3, 1, 1, 1, 1) -> 32`
-            - `_img2col_out_dim("?", 3, 1, 1, 0, 0) -> "?"`
-
-            创建者：朽木露琪亚
-            最后修改人：朽木露琪亚
-
-            关联文件：
-            - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-            - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
-            - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
-            """
-            if not isinstance(dim, int) or s == 0:
-                return "?"
-            return (dim + p1 + p2 - d * (k - 1) - 1) // s + 1
-
-        shape = list(input_type.shape.data)
-        if expr.kind == "img2col1d":
-            if len(shape) != 3:
-                raise _LoweringError("img2col1d input must be rank-3 nn.memory", location=expr.location)
-            n_dim, c_dim, w_dim = (_dim_value(item) for item in shape)
-            kw = params["kw"]
-            sw = params["sw"]
-            dw = params["dw"]
-            pl = params["pl"]
-            pr = params["pr"]
-            w_out = _img2col_out_dim(w_dim, kw, sw, dw, pl, pr)
-            out_channels = _mul_dim(c_dim, kw)
-            out_shape = [_dim_to_attr(n_dim), _dim_to_attr(out_channels), _dim_to_attr(w_out)]
-        elif expr.kind == "img2col2d":
-            if len(shape) != 4:
-                raise _LoweringError("img2col2d input must be rank-4 nn.memory", location=expr.location)
-            n_dim, c_dim, h_dim, w_dim = (_dim_value(item) for item in shape)
-            kh = params["kh"]
-            kw = params["kw"]
-            sh = params["sh"]
-            sw = params["sw"]
-            dh = params["dh"]
-            dw = params["dw"]
-            ph = params["ph"]
-            pw = params["pw"]
-            pl = params["pl"]
-            pr = params["pr"]
-            h_out = _img2col_out_dim(h_dim, kh, sh, dh, ph, pw)
-            w_out = _img2col_out_dim(w_dim, kw, sw, dw, pl, pr)
-            out_channels = _mul_dim(_mul_dim(c_dim, kh), kw)
-            out_hw = _mul_dim(h_out, w_out)
-            out_shape = [_dim_to_attr(n_dim), _dim_to_attr(out_channels), _dim_to_attr(out_hw)]
-        else:
-            raise _LoweringError("Unsupported img2col helper", location=expr.location)
-
-        stride_attr = _build_default_stride_attrs(out_shape)
+        out_shape = _infer_img2col_output_shape_attrs(expr, input_type, params)
+        stride_attr = _build_symbolic_stride_attrs(out_shape, expr.location)
         result_type = _memory_type_from_parts(out_shape, stride_attr, input_type.element_type, input_type.space)
         type_map[expr_key] = result_type
         return result_type
@@ -2356,7 +2672,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     """将表达式 AST 递归下沉为 MLIR SSA value。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 递归处理常量、内存操作、`symbol.to_float` 与算术/比较表达式，生成对应的 MLIR op。
@@ -2500,6 +2816,46 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
             raise _LoweringError("flatten result must be nn.memory", location=expr.location)
         shape_operand = _build_flatten_shape_operands(source, source_type, ctx, location=expr.location)
         op = DmaReshapeOp(source, shape_operand, result_type)
+        ctx.builder.add_op(op)
+        ctx._set_cache(expr_key, op.result)
+        return op.result
+    if isinstance(expr, NnUnaryAST):
+        input_value = _lower_expr(expr.value, ctx)
+        input_type = _expect_memory_value(input_value, expr.location)
+        result_type = _infer_expr_type(expr, ctx.types)
+        if not isinstance(result_type, NnMemoryType):
+            raise _LoweringError("Unary op result must be nn.memory", location=expr.location)
+        if expr.kind == "exp":
+            op = NnExpOp(input_value, result_type, input_type.space)
+            op.verify()
+            ctx.builder.add_op(op)
+            ctx._set_cache(expr_key, op.result)
+            return op.result
+        ctx._set_cache(expr_key, input_value)
+        ctx.types[expr_key] = result_type
+        return input_value
+    if isinstance(expr, NnReduceAST):
+        input_value = _lower_expr(expr.value, ctx)
+        input_type = _expect_memory_value(input_value, expr.location)
+        result_type = _infer_expr_type(expr, ctx.types)
+        if not isinstance(result_type, NnMemoryType):
+            raise _LoweringError("reduce result must be nn.memory", location=expr.location)
+        axes = _parse_reduce_axis_expr(expr.axis, expr.location)
+        if axes is None:
+            axes = list(range(len(input_type.shape.data)))
+        keepdim_value, keepdim_valid = _parse_reduce_keepdim_expr(expr.keepdim, expr.location)
+        keepdim_arg: object = keepdim_value
+        if not keepdim_valid and isinstance(keepdim_value, int):
+            keepdim_arg = IntegerAttr(int(keepdim_value), IntegerType(64))
+        op_map = {
+            "reduce_sum": NnReduceSumOp,
+            "reduce_min": NnReduceMinOp,
+            "reduce_max": NnReduceMaxOp,
+        }
+        if expr.kind not in op_map:
+            raise _LoweringError("Unsupported reduce helper", location=expr.location)
+        op = op_map[expr.kind](input_value, result_type, axes=axes, keepdim=keepdim_arg, space=input_type.space)
+        op.verify()
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
         return op.result
@@ -2795,7 +3151,7 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
     """将单个 AST 节点发射为 MLIR value 或 op。
 
     创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 统一处理 expression 与 statement 节点的 lowering 入口。
@@ -2830,6 +3186,8 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
             DmaFlattenAST,
             Img2ColAST,
             MatmulAST,
+            NnReduceAST,
+            NnUnaryAST,
             ArchGetDynamicMemoryAST,
             ArchQueryAST,
             SymbolToFloatAST,

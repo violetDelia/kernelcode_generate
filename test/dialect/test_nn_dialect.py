@@ -250,7 +250,7 @@ def test_space_attr_round_trip() -> None:
 
 # TY-002A
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-19 01:01:56 +0800
 # 最近一次运行成功时间: 2026-03-19 01:01:56 +0800
 # 功能说明: 验证非法 space attribute 会触发 verifier。
@@ -737,13 +737,13 @@ def test_broadcast_op_space_mismatch() -> None:
     result_type = _make_memory_type("shared", i32)
     inp = _TestOp(result_types=[input_type]).results[0]
     op = NnBroadcastOp(inp, result_type, _make_space("global"))
-    with pytest.raises(VerifyException, match="space"):
+    with pytest.raises(VerifyException, match="result-space-must-match-input-and-attr"):
         op.verify()
 
 
 # TC-NN-BC-003
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-19 02:14:10 +0800
 # 最近一次运行成功时间: 2026-03-19 02:14:10 +0800
 # 功能说明: 验证 nn.broadcast 在 element_type 不一致时报错。
@@ -756,7 +756,7 @@ def test_broadcast_op_element_type_mismatch() -> None:
     result_type = _make_memory_type("global", IntegerType(1))
     inp = _TestOp(result_types=[input_type]).results[0]
     op = NnBroadcastOp(inp, result_type, _make_space("global"))
-    with pytest.raises(VerifyException, match="element_type"):
+    with pytest.raises(VerifyException, match="result-element-type-must-match-input"):
         op.verify()
 
 
@@ -777,19 +777,19 @@ def test_broadcast_op_element_type_mismatch() -> None:
             _make_simple_memory_type([IntAttr(1)], [IntAttr(1)], space="global"),
             _make_simple_memory_type([IntAttr(1)], [IntAttr(1)], space="global"),
             "shared",
-            "attribute space",
+            "result-space-must-match-input-and-attr",
         ),
         (
             _make_simple_memory_type([IntAttr(1), StringAttr("N")], [IntAttr(1), IntAttr(1)], space="global"),
             _make_simple_memory_type([StringAttr("N")], [IntAttr(1)], space="global"),
             "global",
-            "result rank",
+            "result-rank-must-be-greater-or-equal-to-input",
         ),
         (
             _make_simple_memory_type([IntAttr(2), StringAttr("N")], [IntAttr(1), IntAttr(1)], space="global"),
             _make_simple_memory_type([StringAttr("M"), StringAttr("N")], [IntAttr(1), IntAttr(1)], space="global"),
             "global",
-            "shape mismatch",
+            "result-shape-must-match-broadcast-contract",
         ),
     ],
 )
@@ -1368,7 +1368,7 @@ def test_explicit_broadcast_then_add_verify_success() -> None:
 
 # NN-DIA-040
 # 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
+# 最后一次更改: 金铲铲大作战
 # 功能说明: 验证 nn.img2col1d 合同的正向与负向约束。
 # 测试目的: 覆盖 operand/attrs/result/space 一致性以及形状/步幅合同校验。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_nn_dialect_img2col1d_contract_v1
@@ -1382,8 +1382,8 @@ def test_nn_dialect_img2col1d_contract_v1() -> None:
         space="global",
     )
     result_type = _make_simple_memory_type(
-        [IntAttr(1), IntAttr(6), IntAttr(8)],
-        [IntAttr(48), IntAttr(8), IntAttr(1)],
+        [IntAttr(1), IntAttr(2), IntAttr(3), IntAttr(8)],
+        [IntAttr(48), IntAttr(24), IntAttr(8), IntAttr(1)],
         space="global",
     )
     inp = _TestOp(result_types=[input_type]).results[0]
@@ -1396,73 +1396,77 @@ def test_nn_dialect_img2col1d_contract_v1() -> None:
             result_type,
             {"kw": 3, "sw": 1, "dw": 1, "pl": 1, "pr": 1},
             "global",
-            "input must be rank-3",
+            "operand-must-be-rank-3-nn-memory",
         ),
         (
             input_type,
             result_type,
             {"kw": 0, "sw": 1, "dw": 1, "pl": 1, "pr": 1},
             "global",
-            "kw must be positive",
-        ),
-        (
-            input_type,
-            _make_simple_memory_type([IntAttr(1), IntAttr(6)], [IntAttr(6), IntAttr(1)], space="global"),
-            {"kw": 3, "sw": 1, "dw": 1, "pl": 1, "pr": 1},
-            "global",
-            "result rank must be 3",
+            "kw-sw-dw-must-be-positive",
         ),
         (
             input_type,
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(6), IntAttr(8)],
-                [IntAttr(48), IntAttr(8), IntAttr(1)],
-                space="shared",
-            ),
-            {"kw": 3, "sw": 1, "dw": 1, "pl": 1, "pr": 1},
-            "global",
-            "result space must match input",
-        ),
-        (
-            input_type,
-            _make_simple_memory_type(
-                [IntAttr(1), IntAttr(7), IntAttr(8)],
-                [IntAttr(56), IntAttr(8), IntAttr(1)],
+                [IntAttr(1), IntAttr(2), IntAttr(3)],
+                [IntAttr(6), IntAttr(3), IntAttr(1)],
                 space="global",
             ),
             {"kw": 3, "sw": 1, "dw": 1, "pl": 1, "pr": 1},
             "global",
-            "result shape must match img2col1d contract",
+            "result-rank-must-be-4",
+        ),
+        (
+            input_type,
+            _make_simple_memory_type(
+                [IntAttr(1), IntAttr(2), IntAttr(3), IntAttr(8)],
+                [IntAttr(48), IntAttr(24), IntAttr(8), IntAttr(1)],
+                space="shared",
+            ),
+            {"kw": 3, "sw": 1, "dw": 1, "pl": 1, "pr": 1},
+            "global",
+            "result-space-matches-input",
+        ),
+        (
+            input_type,
+            _make_simple_memory_type(
+                [IntAttr(1), IntAttr(2), IntAttr(4), IntAttr(8)],
+                [IntAttr(64), IntAttr(32), IntAttr(8), IntAttr(1)],
+                space="global",
+            ),
+            {"kw": 3, "sw": 1, "dw": 1, "pl": 1, "pr": 1},
+            "global",
+            "result-shape-stride-must-match-img2col1d-contract",
         ),
         (
             input_type,
             result_type,
             {"kw": 3, "sw": 1, "dw": 1, "pl": 1, "pr": 1},
             "shared",
-            "attribute space must match input space",
+            "result-space-matches-input",
         ),
         (
             input_type,
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(6), IntAttr(8)],
-                [IntAttr(48), IntAttr(8), IntAttr(1)],
+                [IntAttr(1), IntAttr(2), IntAttr(3), IntAttr(8)],
+                [IntAttr(48), IntAttr(24), IntAttr(8), IntAttr(1)],
                 space="global",
                 element_type=IntegerType(16),
             ),
             {"kw": 3, "sw": 1, "dw": 1, "pl": 1, "pr": 1},
             "global",
-            "result element_type must match input",
+            "result-element-type-matches-input",
         ),
         (
             input_type,
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(6), IntAttr(8)],
-                [IntAttr(48), IntAttr(8), IntAttr(2)],
+                [IntAttr(1), IntAttr(2), IntAttr(3), IntAttr(8)],
+                [IntAttr(48), IntAttr(24), IntAttr(8), IntAttr(2)],
                 space="global",
             ),
             {"kw": 3, "sw": 1, "dw": 1, "pl": 1, "pr": 1},
             "global",
-            "result stride must match img2col1d contract",
+            "result-shape-stride-must-match-img2col1d-contract",
         ),
         (
             _make_simple_memory_type(
@@ -1471,13 +1475,13 @@ def test_nn_dialect_img2col1d_contract_v1() -> None:
                 space="global",
             ),
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(6), IntAttr(1)],
-                [IntAttr(6), IntAttr(1), IntAttr(1)],
+                [IntAttr(1), IntAttr(2), IntAttr(3), IntAttr(1)],
+                [IntAttr(6), IntAttr(3), IntAttr(1), IntAttr(1)],
                 space="global",
             ),
             {"kw": 3, "sw": 1, "dw": 1, "pl": 0, "pr": 0},
             "global",
-            "output width must be positive",
+            "result-shape-stride-must-match-img2col1d-contract",
         ),
     ]
     for case_input, case_result, attrs, space, message in cases:
@@ -1498,7 +1502,7 @@ def test_nn_dialect_img2col1d_contract_v1() -> None:
 
 # NN-DIA-041
 # 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
+# 最后一次更改: 金铲铲大作战
 # 功能说明: 验证 nn.img2col2d 合同的正向与负向约束。
 # 测试目的: 覆盖 operand/attrs/result/space 一致性以及形状/步幅合同校验。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_nn_dialect_img2col2d_contract_v1
@@ -1512,8 +1516,8 @@ def test_nn_dialect_img2col2d_contract_v1() -> None:
         space="global",
     )
     result_type = _make_simple_memory_type(
-        [IntAttr(1), IntAttr(27), IntAttr(25)],
-        [IntAttr(675), IntAttr(25), IntAttr(1)],
+        [IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(5), IntAttr(5)],
+        [IntAttr(675), IntAttr(225), IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)],
         space="global",
     )
     inp = _TestOp(result_types=[input_type]).results[0]
@@ -1544,77 +1548,77 @@ def test_nn_dialect_img2col2d_contract_v1() -> None:
             result_type,
             {"kh": 3, "kw": 3, "sh": 1, "sw": 1, "dh": 1, "dw": 1, "ph": 1, "pw": 1, "pl": 1, "pr": 1},
             "global",
-            "input must be rank-4",
+            "operand-must-be-rank-4-nn-memory",
         ),
         (
             input_type,
             result_type,
             {"kh": 0, "kw": 3, "sh": 1, "sw": 1, "dh": 1, "dw": 1, "ph": 1, "pw": 1, "pl": 1, "pr": 1},
             "global",
-            "kh must be positive",
+            "kh-kw-sh-sw-dh-dw-must-be-positive",
         ),
         (
             input_type,
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(27)],
-                [IntAttr(27), IntAttr(1)],
+                [IntAttr(1), IntAttr(3), IntAttr(3)],
+                [IntAttr(9), IntAttr(3), IntAttr(1)],
                 space="global",
             ),
             {"kh": 3, "kw": 3, "sh": 1, "sw": 1, "dh": 1, "dw": 1, "ph": 1, "pw": 1, "pl": 1, "pr": 1},
             "global",
-            "result rank must be 3",
+            "result-rank-must-be-6",
         ),
         (
             input_type,
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(27), IntAttr(25)],
-                [IntAttr(675), IntAttr(25), IntAttr(1)],
+                [IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(5), IntAttr(5)],
+                [IntAttr(675), IntAttr(225), IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)],
                 space="shared",
             ),
             {"kh": 3, "kw": 3, "sh": 1, "sw": 1, "dh": 1, "dw": 1, "ph": 1, "pw": 1, "pl": 1, "pr": 1},
             "global",
-            "result space must match input",
+            "result-space-matches-input",
         ),
         (
             input_type,
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(28), IntAttr(25)],
-                [IntAttr(700), IntAttr(25), IntAttr(1)],
+                [IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(4), IntAttr(5), IntAttr(5)],
+                [IntAttr(900), IntAttr(300), IntAttr(100), IntAttr(25), IntAttr(5), IntAttr(1)],
                 space="global",
             ),
             {"kh": 3, "kw": 3, "sh": 1, "sw": 1, "dh": 1, "dw": 1, "ph": 1, "pw": 1, "pl": 1, "pr": 1},
             "global",
-            "result shape must match img2col2d contract",
+            "result-shape-stride-must-match-img2col2d-contract",
         ),
         (
             input_type,
             result_type,
             {"kh": 3, "kw": 3, "sh": 1, "sw": 1, "dh": 1, "dw": 1, "ph": 1, "pw": 1, "pl": 1, "pr": 1},
             "shared",
-            "attribute space must match input space",
+            "result-space-matches-input",
         ),
         (
             input_type,
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(27), IntAttr(25)],
-                [IntAttr(675), IntAttr(25), IntAttr(1)],
+                [IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(5), IntAttr(5)],
+                [IntAttr(675), IntAttr(225), IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)],
                 space="global",
                 element_type=IntegerType(16),
             ),
             {"kh": 3, "kw": 3, "sh": 1, "sw": 1, "dh": 1, "dw": 1, "ph": 1, "pw": 1, "pl": 1, "pr": 1},
             "global",
-            "result element_type must match input",
+            "result-element-type-matches-input",
         ),
         (
             input_type,
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(27), IntAttr(25)],
-                [IntAttr(675), IntAttr(25), IntAttr(2)],
+                [IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(5), IntAttr(5)],
+                [IntAttr(675), IntAttr(225), IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(2)],
                 space="global",
             ),
             {"kh": 3, "kw": 3, "sh": 1, "sw": 1, "dh": 1, "dw": 1, "ph": 1, "pw": 1, "pl": 1, "pr": 1},
             "global",
-            "result stride must match img2col2d contract",
+            "result-shape-stride-must-match-img2col2d-contract",
         ),
         (
             _make_simple_memory_type(
@@ -1623,13 +1627,13 @@ def test_nn_dialect_img2col2d_contract_v1() -> None:
                 space="global",
             ),
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(27), IntAttr(3)],
-                [IntAttr(81), IntAttr(3), IntAttr(1)],
+                [IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(1), IntAttr(3)],
+                [IntAttr(81), IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(3), IntAttr(1)],
                 space="global",
             ),
             {"kh": 3, "kw": 3, "sh": 1, "sw": 1, "dh": 1, "dw": 1, "ph": 0, "pw": 0, "pl": 0, "pr": 0},
             "global",
-            "output height must be positive",
+            "result-shape-stride-must-match-img2col2d-contract",
         ),
         (
             _make_simple_memory_type(
@@ -1638,13 +1642,13 @@ def test_nn_dialect_img2col2d_contract_v1() -> None:
                 space="global",
             ),
             _make_simple_memory_type(
-                [IntAttr(1), IntAttr(27), IntAttr(3)],
-                [IntAttr(81), IntAttr(3), IntAttr(1)],
+                [IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(5), IntAttr(1)],
+                [IntAttr(135), IntAttr(45), IntAttr(15), IntAttr(5), IntAttr(1), IntAttr(1)],
                 space="global",
             ),
             {"kh": 3, "kw": 3, "sh": 1, "sw": 1, "dh": 1, "dw": 1, "ph": 0, "pw": 0, "pl": 0, "pr": 0},
             "global",
-            "output width must be positive",
+            "result-shape-stride-must-match-img2col2d-contract",
         ),
     ]
     for case_input, case_result, attrs, space, message in cases:
