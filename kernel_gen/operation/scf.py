@@ -1,7 +1,7 @@
 """SCF operation API.
 
 创建者: 摸鱼小分队
-最后一次更改: 摸鱼小分队
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 提供 operation 层的 loop 语义入口，支持整数或符号范围的迭代描述。
@@ -28,13 +28,14 @@ class LoopRange:
     """符号范围迭代对象。
 
     创建者: 摸鱼小分队
-    最后一次更改: 摸鱼小分队
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 保存 start/end/step 的符号范围表达，供 DSL 侧读取。
+    - 在无法推导真实迭代次数时，保留 trip_count 供上层约束迭代次数。
 
     使用示例:
-    - loop_range = LoopRange(SymbolDim("M"), SymbolDim("N"), SymbolDim("S"))
+    - loop_range = LoopRange(SymbolDim("M"), SymbolDim("N"), SymbolDim("S"), trip_count=3)
 
     关联文件:
     - spec: spec/operation/scf.md
@@ -42,10 +43,17 @@ class LoopRange:
     - 功能实现: kernel_gen/operation/scf.py
     """
 
-    def __init__(self, start: int | SymbolDim, end: int | SymbolDim, step: int | SymbolDim) -> None:
+    def __init__(
+        self,
+        start: int | SymbolDim,
+        end: int | SymbolDim,
+        step: int | SymbolDim,
+        trip_count: int | SymbolDim = 1,
+    ) -> None:
         self._start = start
         self._end = end
         self._step = step
+        self._trip_count = trip_count
 
     @property
     def start(self) -> int | SymbolDim:
@@ -107,6 +115,26 @@ class LoopRange:
         """
         return self._step
 
+    @property
+    def trip_count(self) -> int | SymbolDim:
+        """返回符号范围的迭代次数约束。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 只读访问 trip_count。
+
+        使用示例:
+        - loop_range.trip_count
+
+        关联文件:
+        - spec: spec/operation/scf.md
+        - test: test/operation/test_operation_scf.py
+        - 功能实现: kernel_gen/operation/scf.py
+        """
+        return self._trip_count
+
     def __iter__(self):
         """提供迭代接口。
 
@@ -156,6 +184,47 @@ def _ensure_loop_operand(value: object, name: str) -> int | SymbolDim:
     return value
 
 
+def _normalize_trip_count(value: object) -> int | SymbolDim:
+    """校验并归一化 trip_count。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 允许 int 或 SymbolDim；None 会归一化为 1。
+    - 若为 int，必须 > 0。
+
+    使用示例:
+    - _normalize_trip_count(3)
+
+    关联文件:
+    - spec: spec/operation/scf.md
+    - test: test/operation/test_operation_scf.py
+    - 功能实现: kernel_gen/operation/scf.py
+    """
+    if value is None:
+        value = 1
+    if not isinstance(value, (int, SymbolDim)):
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="scf.loop 参数校验",
+                expected="trip_count must be int or SymbolDim",
+                actual=type(value).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
+    if isinstance(value, int) and value <= 0:
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="scf.loop 参数校验",
+                expected="trip_count must be > 0",
+                actual=str(value),
+                action=_ERROR_ACTION,
+            )
+        )
+    return value
+
+
 def _is_symbolic(value: int | SymbolDim) -> bool:
     """判断输入是否为 SymbolDim。
 
@@ -176,18 +245,20 @@ def _is_symbolic(value: int | SymbolDim) -> bool:
     return isinstance(value, SymbolDim)
 
 
-def loop(start: object, end: object, step: object):
+def loop(start: object, end: object, step: object, trip_count: object = 1):
     """创建 loop 迭代范围。
 
     创建者: 摸鱼小分队
-    最后一次更改: 摸鱼小分队
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 纯整数输入时返回 range(start, end, step)。
-    - 含 SymbolDim 输入时返回 LoopRange，保留 start/end/step。
+    - 含 SymbolDim 输入时返回 LoopRange，保留 start/end/step/trip_count。
 
     使用示例:
     - for i in loop(0, 4, 1):
+        pass
+    - for i in loop(SymbolDim("M"), SymbolDim("N"), SymbolDim("S"), trip_count=3):
         pass
 
     关联文件:
@@ -198,6 +269,7 @@ def loop(start: object, end: object, step: object):
     start_value = _ensure_loop_operand(start, "start")
     end_value = _ensure_loop_operand(end, "end")
     step_value = _ensure_loop_operand(step, "step")
+    trip_count_value = _normalize_trip_count(trip_count)
     if step_value == 0:
         raise ValueError(
             _ERROR_TEMPLATE.format(
@@ -209,7 +281,7 @@ def loop(start: object, end: object, step: object):
         )
     if not (_is_symbolic(start_value) or _is_symbolic(end_value) or _is_symbolic(step_value)):
         return range(start_value, end_value, step_value)
-    return LoopRange(start_value, end_value, step_value)
+    return LoopRange(start_value, end_value, step_value, trip_count_value)
 
 
 __all__ = ["LoopRange", "loop"]
