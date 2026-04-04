@@ -43,7 +43,7 @@ from xdsl.dialects.builtin import (
     i1,
     i32,
 )
-from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def, result_def
+from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def, region_def, result_def
 from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -164,6 +164,35 @@ class UnknownOp(IRDLOperation):
 
     def __init__(self) -> None:
         super().__init__(operands=[], result_types=[])
+
+
+@irdl_op_definition
+class FakeRegionOp(IRDLOperation):
+    """测试用 region op。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 用于验证 region metadata + trip_count 的分析行为。
+
+    使用示例:
+    - FakeRegionOp(region, IntAttr(3))
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    name = "test.region"
+    body = region_def()
+
+    def __init__(self, region: Region, trip_count: Attribute | None = None) -> None:
+        attributes: dict[str, Attribute] = {}
+        if trip_count is not None:
+            attributes["trip_count"] = trip_count
+        super().__init__(operands=[], result_types=[], attributes=attributes, regions=[region])
 
 
 @irdl_op_definition
@@ -1334,30 +1363,29 @@ def test_analysis_invalid_public_dma_raises() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-03 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-03 00:00:00 +0800
-# 测试目的: 验证 `analysis(func_op, ...)` 的函数级聚合显式逐 op 调用公开入口 `analysis(op, ...)`。
-# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_func_aggregates_via_public_entry
+# 测试目的: 验证 region trip_count 放大 body 成本，且元信息 op 不产生 warning。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_func_trip_count_scales_region_body
 # 对应功能实现文件路径: kernel_gen/analysis/analysis.py
 # 对应 spec 文件路径: spec/analysis/analysis_engine.md
 # 对应测试文件路径: test/analysis/test_analysis.py
-def test_analysis_func_aggregates_via_public_entry(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_analysis_func_trip_count_scales_region_body(recwarn: pytest.WarningsRecorder) -> None:
     mem_type = _make_memory_type([IntAttr(2), IntAttr(3)], f32, "global")
     space = _make_space("global")
+    region_block = Block(arg_types=[mem_type, mem_type])
+    region_add = NnAddOp(region_block.args[0], region_block.args[1], mem_type, space)
+    region_block.add_op(region_add)
+    region = Region(region_block)
+    region_op = FakeRegionOp(region, IntAttr(3))
 
-    def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
-        add_op = NnAddOp(block.args[0], block.args[1], mem_type, space)
-        return [add_op], add_op.result
+    block = Block(arg_types=[])
+    block.add_op(region_op)
+    const_op = arith.ConstantOp(IntegerAttr(0, i32))
+    block.add_op(const_op)
+    block.add_op(func.ReturnOp(const_op.result))
+    func_type = FunctionType.from_lists([], [i32])
+    func_op = func.FuncOp("main", func_type, Region(block))
 
-    _, func_op, _ = _build_module([mem_type, mem_type], mem_type, _builder)
-    original_analysis = analysis_module.analysis
-    seen_ops: list[str] = []
-
-    def _spy(op: object, config: AnalysisConfig, otherargs: object = None) -> AnalysisResult:
-        if not isinstance(op, func.FuncOp):
-            seen_ops.append(op.name)
-        return original_analysis(op, config, otherargs)
-
-    monkeypatch.setattr(analysis_module, "analysis", _spy)
-    result = analysis_module.analysis(
+    result = analysis(
         func_op,
         AnalysisConfig(
             enable_compute=True,
@@ -1368,10 +1396,10 @@ def test_analysis_func_aggregates_via_public_entry(monkeypatch: pytest.MonkeyPat
         ),
     )
 
-    expected_ops = [op.name for op in analysis_module._iter_func_ops(func_op)]
-    assert seen_ops == expected_ops
+    assert len(recwarn) == 0
+    assert len(result.op_costs) == 1
     assert result.op_costs[0].op_name == "nn.add"
-    _assert_expr_equal(result.total_compute, sp.Integer(6))
+    _assert_expr_equal(result.total_compute, sp.Integer(18))
 
 
 # AN-022
@@ -1379,7 +1407,7 @@ def test_analysis_func_aggregates_via_public_entry(monkeypatch: pytest.MonkeyPat
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-03 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-03 00:00:00 +0800
-# 测试目的: 验证 `analysis(func_op, ...)` 在 `write_op_attrs=True` 时仍通过公开入口写回逐 op attrs，不抛运行时错误。
+# 测试目的: 验证 `analysis(func_op, ...)` 在 `write_op_attrs=True` 时写回逐 op attrs，不抛运行时错误。
 # 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_func_write_op_attrs_via_public_entry
 # 对应功能实现文件路径: kernel_gen/analysis/analysis.py
 # 对应 spec 文件路径: spec/analysis/analysis_engine.md

@@ -38,6 +38,7 @@ from xdsl.dialects.builtin import (
     Float32Type,
     Float64Type,
     IntAttr,
+    IntegerAttr,
     IntegerType,
     StringAttr,
 )
@@ -1022,7 +1023,7 @@ def _dim_to_expr(dim: Attribute) -> sp.Basic | None:
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - IntAttr 转 Integer。
+    - IntAttr/IntegerAttr 转 Integer。
     - StringAttr 数字转 Integer，其它转 SymbolDim。
     - 空字符串或 '?' 返回 None。
 
@@ -1036,6 +1037,8 @@ def _dim_to_expr(dim: Attribute) -> sp.Basic | None:
     """
     if isinstance(dim, IntAttr):
         return sp.Integer(dim.data)
+    if isinstance(dim, IntegerAttr):
+        return sp.Integer(dim.value.data)
     if isinstance(dim, StringAttr):
         raw = dim.data.strip()
         if raw == "" or raw == "?":
@@ -1044,6 +1047,66 @@ def _dim_to_expr(dim: Attribute) -> sp.Basic | None:
             return sp.Integer(int(raw))
         return SymbolDim(raw).get_symbol()
     return None
+
+
+def _trip_count_attr_to_expr(attr: Attribute) -> sp.Basic | None:
+    """将 trip_count attribute 转为 sympy 表达式。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 支持 IntAttr/IntegerAttr/StringAttr。
+    - StringAttr 数字转 Integer，其它转 SymbolDim。
+    - 空字符串或 '?' 返回 None。
+
+    使用示例:
+    - expr = _trip_count_attr_to_expr(StringAttr("N"))
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+    if isinstance(attr, IntAttr):
+        return sp.Integer(attr.data)
+    if isinstance(attr, IntegerAttr):
+        return sp.Integer(attr.value.data)
+    if isinstance(attr, StringAttr):
+        raw = attr.data.strip()
+        if raw == "" or raw == "?":
+            return None
+        if raw.isdigit():
+            return sp.Integer(int(raw))
+        return SymbolDim(raw).get_symbol()
+    return None
+
+
+def _trip_count_from_op(op: Operation) -> sp.Basic:
+    """解析 op.trip_count 属性。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 未配置 trip_count 时返回 1。
+    - trip_count 需为整数或符号表达式。
+
+    使用示例:
+    - count = _trip_count_from_op(loop_op)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+    attr = op.attributes.get("trip_count")
+    if attr is None:
+        return sp.Integer(1)
+    expr = _trip_count_attr_to_expr(attr)
+    if expr is None:
+        raise AnalysisError("trip_count must be integer or symbol")
+    return expr
 
 
 def _numel_from_shape(shape: ArrayAttr) -> sp.Basic | None:
@@ -1863,6 +1926,72 @@ def _analyze_ir_op(op: Operation, config: AnalysisConfig) -> _AnalyzedOp | None:
     return _merge_analyzed_ops(op, analyzed_ops)
 
 
+def _scale_memory_item(item: MemoryItem, multiplier: sp.Basic) -> MemoryItem:
+    """按倍数缩放 MemoryItem 的字节与时间指标。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - bytes/latency/time 按倍率缩放，bandwidth 保持不变。
+
+    使用示例:
+    - scaled = _scale_memory_item(item, sp.Integer(4))
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+    if multiplier == 1:
+        return item
+    latency = item.latency_ns * multiplier if item.latency_ns is not None else None
+    time_ns = item.time_ns * multiplier if item.time_ns is not None else None
+    return MemoryItem(
+        path=item.path,
+        access=item.access,
+        bytes=item.bytes * multiplier,
+        latency_ns=latency,
+        bandwidth=item.bandwidth,
+        time_ns=time_ns,
+    )
+
+
+def _scale_analyzed_op(analyzed: _AnalyzedOp, multiplier: sp.Basic) -> _AnalyzedOp:
+    """按倍数缩放 `_AnalyzedOp` 的统计量。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 统一缩放 compute/read/write 及 value traffic。
+
+    使用示例:
+    - scaled = _scale_analyzed_op(analyzed, sp.Integer(2))
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+    if multiplier == 1:
+        return analyzed
+    return _AnalyzedOp(
+        op_name=analyzed.op_name,
+        compute_items=[
+            ComputeItem(item.kind, item.amount * multiplier, item.dtype)
+            for item in analyzed.compute_items
+        ],
+        memory_items=[_scale_memory_item(item, multiplier) for item in analyzed.memory_items],
+        compute=analyzed.compute * multiplier,
+        read_bytes=analyzed.read_bytes * multiplier,
+        write_bytes=analyzed.write_bytes * multiplier,
+        value_reads=tuple((value, amount * multiplier) for value, amount in analyzed.value_reads),
+        direct_writes=tuple((value, amount * multiplier) for value, amount in analyzed.direct_writes),
+        result_write_bytes=analyzed.result_write_bytes * multiplier,
+    )
+
+
 def _result_from_analyzed_op(op: Operation, analyzed: _AnalyzedOp, config: AnalysisConfig) -> AnalysisResult:
     """将内部单 op 统计转换为公开 AnalysisResult。
 
@@ -1952,7 +2081,7 @@ def _analysis_func(
     最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 对函数内每个 op 调用 `analysis(op, config, otherargs)` 聚合。
+    - 按 func body 递归遍历 ops，支持 loop/region trip_count 乘算。
     - 继续维护稳定 `value_traffic`，供 facade/pass 兼容使用。
 
     使用示例:
@@ -1985,46 +2114,72 @@ def _analysis_func(
     memory_items: list[MemoryItem] = []
     op_costs: list[KernelOpCost] = []
 
-    for op in _iter_func_ops(func_op):
-        op_result = analysis(op, config, args)
-        if not op_result.op_costs:
-            continue
+    def _walk_ops(ops: Iterable[Operation], multiplier: sp.Basic) -> None:
+        for op in ops:
+            trip_count = _trip_count_from_op(op)
+            self_multiplier = multiplier
+            child_multiplier = multiplier
+            if op.regions:
+                child_multiplier = multiplier * trip_count
+            else:
+                self_multiplier = multiplier * trip_count
 
-        op_index = len(op_costs)
-        op_summary = op_result.op_costs[0]
-        op_costs.append(
-            KernelOpCost(
-                op_index=op_index,
-                op_name=op_summary.op_name,
-                compute=op_summary.compute,
-                read_bytes=op_summary.read_bytes,
-                write_bytes=op_summary.write_bytes,
-            )
-        )
-        compute_items.extend(op_result.compute_items)
-        memory_items.extend(op_result.memory_items)
+            analyzed: _AnalyzedOp | None = None
+            if not _should_ignore_kernel_op(op):
+                analyzed = _analyze_ir_op(op, config)
 
-        if config.enable_memory:
-            for value, amount in op_result._value_reads:
-                _record_value_read(value, amount, value_keys, traffic_map)
-            for value, amount in op_result._direct_writes:
-                _record_value_write(value, amount, value_keys, traffic_map)
-            if op_result._result_write_bytes != 0:
-                _register_op_results(
+            if analyzed is None:
+                if not _should_ignore_kernel_op(op) and not op.regions:
+                    _warn_skip_kernel_op(op, "unsupported op")
+            else:
+                op_result = _result_from_analyzed_op(
                     op,
-                    op_index,
-                    op_result._result_write_bytes,
-                    value_keys,
-                    traffic_map,
+                    _scale_analyzed_op(analyzed, self_multiplier),
+                    config,
                 )
-            elif len(op.results) > 0:
-                _register_op_results(
-                    op,
-                    op_index,
-                    sp.Integer(0),
-                    value_keys,
-                    traffic_map,
-                )
+                if op_result.op_costs:
+                    op_index = len(op_costs)
+                    op_summary = op_result.op_costs[0]
+                    op_costs.append(
+                        KernelOpCost(
+                            op_index=op_index,
+                            op_name=op_summary.op_name,
+                            compute=op_summary.compute,
+                            read_bytes=op_summary.read_bytes,
+                            write_bytes=op_summary.write_bytes,
+                        )
+                    )
+                    compute_items.extend(op_result.compute_items)
+                    memory_items.extend(op_result.memory_items)
+
+                    if config.enable_memory:
+                        for value, amount in op_result._value_reads:
+                            _record_value_read(value, amount, value_keys, traffic_map)
+                        for value, amount in op_result._direct_writes:
+                            _record_value_write(value, amount, value_keys, traffic_map)
+                        if op_result._result_write_bytes != 0:
+                            _register_op_results(
+                                op,
+                                op_index,
+                                op_result._result_write_bytes,
+                                value_keys,
+                                traffic_map,
+                            )
+                        elif len(op.results) > 0:
+                            _register_op_results(
+                                op,
+                                op_index,
+                                sp.Integer(0),
+                                value_keys,
+                                traffic_map,
+                            )
+
+            for region in op.regions:
+                for block in region.blocks:
+                    _walk_ops(block.ops, child_multiplier)
+
+    for block in func_op.body.blocks:
+        _walk_ops(block.ops, sp.Integer(1))
 
     value_traffic = [ValueTraffic(key, values[0], values[1]) for key, values in traffic_map.items()]
     result = _to_analysis_result(
