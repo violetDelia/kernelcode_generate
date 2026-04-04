@@ -27,6 +27,7 @@
 - 为优化后的单个 MLIR op / `func.func` 提供稳定的目标源码生成能力。
 - 对 `func.func` 统一约束签名、参数顺序、输出参数风格、IR 顺序遍历与函数体拼装规则。
 - 明确支持：只读 `Memory` 输入、rewrite 后前置 `arg0/arg1/...` memory 参数作为显式输出参数、标量参数顺序与默认命名保持、`emit_c` 错误向上抛出。
+- 明确支持：mixed `memory + scalar` returns 经 rewrite 后，`memory` 作为前置 out 参数、`scalar` 继续保留为函数返回值。
 - 明确支持：`f32/f64` 类型在 `target=cpu` 下映射为 `float/double`，用于 `Memory<float>/Memory<double>` 与 `float/double` 标量参数生成。
 - 冻结 `target=cpu` 的 rewrite-after-IR 合同：`gen_kernel(...)` 只接受已经经过 `BufferResultsToOutParamsPass` 的 lowered IR；默认 CPU 路径不再从旧 `memory return` ABI 隐式推导 `out`。
 - 冻结 `target="npu_demo"` 的函数级 body-level kernel 骨架：签名包含 `npu_demo::KernelContext& ctx`，函数体按 `thread_id/thread_num -> TSM/TLM dynamic memory -> view -> slice -> add -> deslice` 的顺序组织。
@@ -43,6 +44,7 @@
 - 对于不支持的返回形式、未知 op 或无法映射到目标后端源码的 IR，必须明确报错。
 - `func.return` / `out` 绑定不属于普通 `emit_c_op(...)` 的公开职责；`func.return` 只能在 `func.func` 的函数级主遍历流程中收尾处理。
 - 默认路径下，旧 `memory return` ABI 必须显式失败并提示先运行 `BufferResultsToOutParamsPass`；不允许继续从 `func.return %mem` 或函数返回类型里偷推 `out`。
+- 若 IR 已含前置 out 参数但仍保留 `memory return`（half-rewritten ABI），必须抛出 `GenKernelError` 且错误消息包含 `legacy memory return ABI is not supported`。
 - rewrite 后 IR 中，只有最前面连续且由 `arg_attrs.name` 显式标记为 `arg0/arg1/...` 的 `Memory` 参数才视为 out 参数；其余 `Memory` 参数仍视为只读输入。
 - `target="npu_demo"` 当前只冻结 body-level kernel 骨架，不定义 host wrapper、`launch`、`arch.launch_kernel`、`barrier` 或其他运行时调度骨架。
 - `target="npu_demo"` 的目标终态不得回退到 `.view<T>()`、`load<...>`、`store<...>` 或表达式式 `auto tile = slice(source, ...)`。
@@ -98,6 +100,8 @@ source = gen_kernel(func_op, EmitCContext(target="cpu"))
 
 - rewrite 后 IR 中，最前面连续的显式 `arg0/arg1/...` memory 参数必须生成为非 `const` 的 `Memory<...>&` 输出参数；其余 `Memory` 输入参数保持 `const Memory<...>&`。
 - 默认 CPU 路径不再接受 `-> (!nn.memory<...>)` 这类旧返回 ABI；memory 输出必须已经在 IR 中前移成参数。
+- 若函数已有前置 out 参数但仍声明 `memory` 作为返回类型，视为 half-rewritten ABI，必须抛出 `GenKernelError` 且错误消息包含 `legacy memory return ABI is not supported`。
+- 当 rewrite 后函数返回类型仅包含 `scalar` 结果时（mixed returns 场景），函数应生成前置 out 参数与单一标量返回值并存的签名。
 - rewrite 后 `kernel.add` 的完整目标源码形态可接近以下形式：
 
 ```cpp
@@ -135,7 +139,7 @@ void demo_kernel(
 
 - 必须保持 IR 中 op 的语义顺序。
 - 上述函数级策略只允许作为 emitter 内部实现细节存在；不得再扩成新的公开入口、公开 helper 或测试主口径。
-- `func.return` 在默认 rewrite-after-IR 路径下仅支持无返回或单一非 `Memory` 标量返回；若仍返回 `Memory`，必须显式报错。
+- `func.return` 在默认 rewrite-after-IR 路径下仅支持无返回或单一非 `Memory` 标量返回；若仍返回 `Memory`，必须显式报错并包含 `legacy memory return ABI is not supported` 关键字。
 - 不得在本层引入未在 `emit_c` 中定义的单 op 生成特例。
 - `target=cpu` 下的 lowered add 成功链路必须来自 `LowerNnToKernelPass -> BufferResultsToOutParamsPass` 之后的 rewrite 后 IR，例如：
 
