@@ -14,7 +14,7 @@
 - 最后一次更改：`大闸蟹`
 - `spec`：[`spec/include/api/Memory.md`](../../../spec/include/api/Memory.md)
 - `功能实现`：无（API 规范不绑定实现）
-- `test`：无（API 规范不提供测试）
+- `test`：[`test/include/api/test_memory.py`](../../../test/include/api/test_memory.py)
 
 ## 依赖
 
@@ -263,7 +263,7 @@ long long c_stride = mem.get_stride(1);
 
 ## 测试
 
-- 测试文件：无（API 规范不提供测试实现）
-- 执行命令：无（API 规范不提供测试实现）
-- 测试目标：无（API 规范不提供测试范围）
-- 功能与用例清单：无（API 规范不绑定测试用例）
+- 测试文件：[`test/include/api/test_memory.py`](../../../test/include/api/test_memory.py)
+- 执行命令：`pytest -q test/include/api/test_memory.py`
+- 测试目标：验证 include/api/Memory.h 声明可配合 include/npu_demo/Memory.h 实现编译运行。
+- 功能与用例清单：`API-MEMORY-001`
