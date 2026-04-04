@@ -1,7 +1,7 @@
 """DSL AST definitions.
 
 创建者: 小李飞刀
-最后一次更改: 咯咯咯
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 定义 DSL 前端使用的 AST 节点数据结构。
@@ -23,6 +23,7 @@ import ast as py_ast
 import inspect
 import re
 import textwrap
+import types
 from dataclasses import dataclass, field
 from typing import Iterable
 
@@ -158,7 +159,7 @@ class PtrArgAST:
     """指针参数节点。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 表示函数签名中的指针输入参数。
@@ -484,7 +485,7 @@ class Img2ColAST:
     """img2col helper 节点。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 表示 `img2col1d/img2col2d` 的 DSL helper 调用。
@@ -2168,7 +2169,7 @@ def _parse_function_impl(
 
     功能说明:
     - 从源码中定位唯一顶层 FunctionDef，并解析参数/返回注解为 TensorAST/ScalarArgAST。
-    - 解析函数体语句，收集诊断并执行返回语句位置与缺失校验。
+    - 解析函数体语句，忽略 Import/ImportFrom 作为 no-op，仅用于 helper 解析，不生成 AST 节点。
     - 可按配置拒绝外部值，确保 AST 合同与禁用项诊断一致。
 
     使用示例:
@@ -2189,6 +2190,7 @@ def _parse_function_impl(
             builtins_table = builtins_table
         else:
             builtins_table = getattr(builtins_table, "__dict__", {})
+    globals_table = dict(globals_table)
 
     try:
         source = inspect.getsource(fn)
@@ -2235,9 +2237,63 @@ def _parse_function_impl(
         else:
             _raise_parse_error("Unsupported return annotation", func_def.returns)
 
+    body_nodes = [
+        stmt
+        for stmt in func_def.body
+        if not isinstance(stmt, (py_ast.Import, py_ast.ImportFrom))
+    ]
+    helper_modules = {
+        "kernel_gen.operation.dma": {
+            "load",
+            "slice",
+            "store",
+            "deslice",
+            "alloc",
+            "copy",
+            "cast",
+            "view",
+            "reshape",
+            "flatten",
+            "free",
+        },
+        "kernel_gen.operation.arch": {
+            "get_block_id",
+            "get_block_num",
+            "get_subthread_id",
+            "get_subthread_num",
+            "get_thread_id",
+            "get_thread_num",
+            "get_dynamic_memory",
+            "launch_kernel",
+        },
+        "kernel_gen.operation.nn": {
+            "img2col1d",
+            "img2col2d",
+            "matmul",
+        },
+    }
+    for stmt in func_def.body:
+        if isinstance(stmt, py_ast.Import):
+            for alias in stmt.names:
+                module_name = alias.name
+                if module_name in helper_modules:
+                    alias_name = alias.asname or module_name.split(".")[-1]
+                    globals_table.setdefault(alias_name, types.SimpleNamespace(__name__=module_name))
+        elif isinstance(stmt, py_ast.ImportFrom):
+            module_name = stmt.module
+            if module_name in helper_modules and module_name is not None:
+                for alias in stmt.names:
+                    helper_name = alias.name
+                    if helper_name in helper_modules[module_name]:
+                        alias_name = alias.asname or helper_name
+                        globals_table.setdefault(
+                            alias_name,
+                            types.SimpleNamespace(__module__=module_name, __name__=helper_name),
+                        )
+
     statements: list[object] = []
     has_explicit_return = False
-    for stmt in func_def.body:
+    for stmt in body_nodes:
         parsed_stmt = _parse_stmt(stmt, env, globals_table, builtins_table)
         statements.append(parsed_stmt)
         if isinstance(stmt, py_ast.Return):
@@ -2245,8 +2301,9 @@ def _parse_function_impl(
 
     if has_return_annotation and not has_explicit_return and not returns_none:
         raise AstParseError("Missing return statement", [Diagnostic("Missing return statement", _location_from_node(func_def))])
-    if has_explicit_return and not isinstance(func_def.body[-1], py_ast.Return):
-        raise AstParseError("Return statement must be last", [Diagnostic("Return statement must be last", _location_from_node(func_def.body[-1]))])
+    if has_explicit_return and (not body_nodes or not isinstance(body_nodes[-1], py_ast.Return)):
+        last_stmt = body_nodes[-1] if body_nodes else func_def
+        raise AstParseError("Return statement must be last", [Diagnostic("Return statement must be last", _location_from_node(last_stmt))])
     if outputs and isinstance(outputs[0], ScalarArgAST) and outputs[0].value_type is float:
         if not statements or not isinstance(statements[-1], SymbolToFloatAST):
             raise AstParseError(
@@ -2254,7 +2311,7 @@ def _parse_function_impl(
                 [Diagnostic("Unsupported return annotation", _location_from_node(func_def.returns))],
             )
 
-    body_location = _location_from_node(func_def.body[0]) if func_def.body else _location_from_node(func_def)
+    body_location = _location_from_node(body_nodes[0]) if body_nodes else _location_from_node(func_def)
     return FunctionAST(
         name=func_def.name,
         inputs=inputs,

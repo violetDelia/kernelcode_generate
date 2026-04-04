@@ -1,7 +1,7 @@
 """dma operation API tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 摸鱼小分队
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 kernel_gen/operation/dma.py 的搬运 API。
@@ -43,7 +43,7 @@ from kernel_gen.symbol_variable.type import Farmat, NumericType
 
 # TC-OP-DMA-AF-001
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
 # 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 alloc 返回指定 shape/dtype/space 的 Memory。
@@ -81,9 +81,26 @@ def test_alloc_default_stride_for_symbolic_shape() -> None:
     assert static_buf.get_stride() == [4, 1]
 
 
+# TC-OP-DMA-AF-008
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-05 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-05 00:00:00 +0800
+# 测试目的: 验证 alloc 支持显式 format 并保留默认值。
+# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_alloc_preserves_format
+# 对应功能实现文件路径: kernel_gen/operation/dma.py
+# 对应 spec 文件路径: spec/operation/dma.md
+# 对应测试文件路径: test/operation/test_operation_dma.py
+def test_alloc_preserves_format() -> None:
+    buf = alloc([2, 2], NumericType.Float32, format=Farmat.CLast)
+    assert buf.format is Farmat.CLast
+    default_buf = alloc([2, 2], NumericType.Float32)
+    assert default_buf.format is Farmat.Norm
+
+
 # TC-OP-DMA-AF-002
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
 # 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 alloc 显式 stride 被保留。
@@ -121,7 +138,7 @@ def test_alloc_invalid_shape_or_stride() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
 # 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
-# 测试目的: 验证 alloc 的 dtype/space 类型错误。
+# 测试目的: 验证 alloc 的 dtype/space/format 类型错误。
 # 使用示例: pytest -q test/operation/test_operation_dma.py -k test_alloc_invalid_dtype_or_space
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -131,6 +148,8 @@ def test_alloc_invalid_dtype_or_space() -> None:
         alloc([1, 2], "float32")
     with pytest.raises(TypeError):
         alloc([1, 2], NumericType.Float32, space="GM")
+    with pytest.raises(TypeError):
+        alloc([1, 2], NumericType.Float32, format="Norm")
 
 
 # TC-OP-DMA-AF-004
@@ -198,9 +217,9 @@ def test_copy_success() -> None:
 # 对应测试文件路径: test/operation/test_operation_dma.py
 def test_copy_type_error() -> None:
     src = Memory(["M", "N"], NumericType.Float32)
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="Memory"):
         copy("source", MemorySpace.SM)
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="MemorySpace"):
         copy(src, "SM")
 
 
@@ -234,18 +253,19 @@ def test_copy_preserves_spec() -> None:
 # 对应 spec 文件路径: spec/operation/dma.md
 # 对应测试文件路径: test/operation/test_operation_dma.py
 def test_load_result_space() -> None:
-    src = Memory(["M", "N"], NumericType.Float32, space=MemorySpace.GM)
+    src = Memory(["M", "N"], NumericType.Float32, space=MemorySpace.GM, format=Farmat.CLast)
     tile = load(src, offsets=SymbolShape([0, 0]), sizes=SymbolShape([32, 32]), space=MemorySpace.SM)
     assert tile.shape.get_values() == [32, 32]
     assert tile.dtype is NumericType.Float32
     assert tile.space is MemorySpace.SM
     assert tile.stride is not None
     assert tile.stride.get_values() == [32, 1]
+    assert tile.format is Farmat.CLast
 
 
 # TC-OP-DMA-023
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
 # 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
 # 测试目的: 验证 load 的 space 类型错误触发 TypeError。
@@ -255,7 +275,7 @@ def test_load_result_space() -> None:
 # 对应测试文件路径: test/operation/test_operation_dma.py
 def test_load_invalid_space_type() -> None:
     src = Memory(["M", "N"], NumericType.Float32, space=MemorySpace.GM)
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="MemorySpace"):
         load(src, offsets=[0, 0], sizes=[1, 1], strides=[1, 1], space="SM")
 
 
@@ -270,11 +290,12 @@ def test_load_invalid_space_type() -> None:
 # 对应 spec 文件路径: spec/operation/dma.md
 # 对应测试文件路径: test/operation/test_operation_dma.py
 def test_slice_result_shape() -> None:
-    src = Memory(["M", "N"], NumericType.Float32)
+    src = Memory(["M", "N"], NumericType.Float32, format=Farmat.CLast)
     sub = slice(src, offsets=[0, 16], sizes=[8, 8], strides=[1, 1], space=MemorySpace.LM)
     assert sub.shape.get_values() == [8, 8]
     assert sub.stride is not None
     assert sub.stride.get_values() == [8, 1]
+    assert sub.format is Farmat.CLast
 
 
 # TC-OP-DMA-005
@@ -359,9 +380,9 @@ def test_deslice_size_mismatch() -> None:
 # 对应测试文件路径: test/operation/test_operation_dma.py
 def test_dma_index_rank_mismatch() -> None:
     src = Memory(["M", "N"], NumericType.Float32)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="rank"):
         load(src, offsets=[0], sizes=[1, 2], strides=[1, 1])
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="rank"):
         load(src, offsets=[0, 0], sizes=[1, 1], strides=[1])
 
 
@@ -377,7 +398,7 @@ def test_dma_index_rank_mismatch() -> None:
 # 对应测试文件路径: test/operation/test_operation_dma.py
 def test_dma_invalid_sizes() -> None:
     src = Memory(["M", "N"], NumericType.Float32)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="size"):
         load(src, offsets=[0, 0], sizes=[0, 1], strides=[1, 1])
 
 
@@ -395,7 +416,7 @@ def test_dma_non_unit_stride_checked() -> None:
     src = Memory([8, 16], NumericType.Float32)
     tile = load(src, offsets=[0, 0], sizes=[2, 4], strides=[1, 2])
     assert tile.shape.get_values() == [2, 4]
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="out of bounds"):
         load(src, offsets=[0, 12], sizes=[2, 4], strides=[1, 2])
 
 
@@ -411,9 +432,9 @@ def test_dma_non_unit_stride_checked() -> None:
 # 对应测试文件路径: test/operation/test_operation_dma.py
 def test_dma_type_error() -> None:
     dst = Memory(["M", "N"], NumericType.Float32)
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="Memory"):
         load("source", offsets=[0, 0], sizes=[1, 1], strides=[1, 1])
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="Memory"):
         store(dst, "target", offsets=[0, 0], sizes=[1, 1], strides=[1, 1])
 
 
@@ -649,12 +670,12 @@ def test_reshape_default_stride_contiguous() -> None:
 # 对应测试文件路径: test/operation/test_operation_dma.py
 def test_reshape_invalid_shape_or_stride() -> None:
     src = Memory([2, 3, 4], NumericType.Float32)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="shape"):
         reshape(src, shape="24")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="numel"):
         reshape(src, shape=[5, 5])
     non_contiguous = Memory([2, 3, 4], NumericType.Float32, stride=[100, 4, 1])
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="contiguous"):
         reshape(non_contiguous, shape=[6, 4])
 
 
@@ -691,5 +712,5 @@ def test_flatten_contiguous() -> None:
 # 对应测试文件路径: test/operation/test_operation_dma.py
 def test_flatten_non_contiguous_rejected() -> None:
     src = Memory([2, 3, 4], NumericType.Float32, stride=[100, 4, 1])
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="contiguous"):
         flatten(src)
