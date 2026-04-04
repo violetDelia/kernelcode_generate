@@ -34,6 +34,7 @@
 - `nn.truediv` 与 `nn.div` 在 pass 层统一 lower 为 `kernel.div`。
 - 不处理 broadcast、reduce、matmul、conv、control-flow 等高阶或结构性 op。
 - 不改写函数签名或返回语义，不引入新的返回约束；仅在函数体内替换 op。
+- 若模块内还存在跨函数 `memory-return func.call`，本 pass 只负责把函数体里的 `nn` op lower 到 `kernel/dma`；函数签名、caller out 实参补齐与旧 call result SSA 清理必须由后续 `BufferResultsToOutParamsPass` 统一处理。
 - 当 `nn` op 结果需要输出 Memory 时，必须插入 `dma.alloc`；不允许隐式创建其他分配方式。
 - 遇到不支持的 `nn` op、结果类型非法、缺失 `nn.space`、operand 数量不匹配或 kernel 校验失败时，必须抛出 `LowerNnToKernelError` 并中止 pass。
 
@@ -54,10 +55,12 @@
 
 ```python
 from kernel_gen.passes.pass_manager import PassManager
+from kernel_gen.passes.lowering.buffer_results_to_out_params import BufferResultsToOutParamsPass
 from kernel_gen.passes.lowering.nn_to_kernel import LowerNnToKernelPass
 
 pm = PassManager(name="lowering")
 pm.add_pass(LowerNnToKernelPass())
+pm.add_pass(BufferResultsToOutParamsPass())
 module = pm.run(module)
 ```
 
@@ -65,6 +68,7 @@ module = pm.run(module)
 
 - pass 只对 `func.func` 中的 `nn` op 生效。
 - 输出 Memory 由 `dma.alloc` 创建，并作为 kernel op 的 `outs` operand。
+- 当前固定 lowering 链顺序是 `LowerNnToKernelPass -> BufferResultsToOutParamsPass`；若模块内存在 `memory-return func.call`，不得跳过后者直接进入 codegen。
 
 前置条件：
 
@@ -75,6 +79,7 @@ module = pm.run(module)
 
 - 输出 module 不得包含任何 `nn` op；所有支持的 `nn` op 必须替换为对应 `kernel` op。
 - `dma.alloc` 的 `shape/space/dtype` 与原 `nn` 结果保持一致。
+- 若原 module 含跨函数 `memory-return func.call`，本 pass 完成后仍允许暂时保留旧函数 ABI；调用点同步改写不是本 pass 的职责，必须交由下游 `BufferResultsToOutParamsPass` 收口。
 
 返回与限制：
 

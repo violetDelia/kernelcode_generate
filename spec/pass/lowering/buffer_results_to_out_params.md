@@ -4,7 +4,7 @@
 
 - 定义 `buffer-results-to-out-params` pass 的公开合同。
 - 该 pass 在 IR 层把 `func.func` 中作为函数返回值返回的 `memory` 结果，改写成函数最前置的输入 out 参数。
-- 首版只收口 pass 自身合同与最小骨架，不在本轮完成 `func.call` 全量同步改写或 `gen_kernel` 最终闭环。
+- 当前公开口径已经收口到：模块内可解析的 `func.call` 会同步改写成“caller 显式 out 实参 + 零 result `func.call`”；但仍不在本轮完成多结果/mixed returns 或 `gen_kernel` 最终闭环。
 
 ## 文档信息
 
@@ -35,24 +35,22 @@
 ## 限制与边界
 
 - 本轮只收口 pass 自身合同和最小实现骨架。
-- 本轮最小骨架只要求支持：
+- 当前公开范围要求支持：
   - 单个 `memory` 返回值
-  - 无外部声明
-  - 无需要同步改写的 `func.call`
-- 本轮不要求支持：
+  - 模块内可解析的单结果 `func.call` 同步改写
+- 当前仍不要求支持：
   - 多个 `memory` 返回值的完整重写
   - `memory + scalar` 混合返回
-  - 模块内 `func.call` 全量同步改写
   - 下游 `gen_kernel` 闭环
-- 对于本轮未覆盖但会导致“半改半留”的场景，必须显式报错，不允许静默保留双口径。
+- 对于当前未覆盖而又无法安全同步改写的场景，必须显式报错，不允许静默保留双口径。
 
 ## 必须禁止的旧口径
 
 - 不允许只改 `func.func` 输入/输出签名，不改 `func.return`
 - 不允许把前置 out 参数和同一个 `memory` 返回值同时保留在函数合同里
 - 不允许对 external declaration 做半改写
-- 不允许在 callsite 尚未同步改写时，先改单个 `func.func` 形成半改半留
-- 不允许先改 callee 签名和 `func.return`，再把 caller 继续留在旧 `func.call -> memory result` 口径
+- 不允许把已经可同步改写成功的模块内 caller/callee 继续写成必须失败
+- 不允许先改 callee 签名和 `func.return`，再把 caller 静默留在旧 `func.call -> memory result` 口径
 
 ## 公开接口
 
@@ -79,7 +77,7 @@ module = BufferResultsToOutParamsPass().run(module)
 
 - 注意事项：
   - pass 以 `ModuleOp` 为输入。
-  - 本轮最小骨架若遇到 external declaration、未完成 callsite 同步的目标函数、模块内未同步改写的 `func.call`、多个或混合返回等未覆盖场景，必须显式报错。
+  - 当前公开范围若遇到 external declaration、无法安全同步改写的 callsite、多个或混合返回等未覆盖场景，必须显式报错。
 - 返回与限制：返回改写后的同一 `ModuleOp`。
 
 ## 最小改写合同
@@ -124,20 +122,44 @@ func.func @single(%arg0: !nn.memory<...>, %src: !nn.memory<...>) {
 - 若函数是 external declaration 且返回值中包含 `memory`，pass 必须显式失败。
 - 错误消息必须包含 `external declaration` 或等价关键字。
 
-### 未同步改写的 callsite
+### 模块内 callsite 同步改写
 
-- 若模块内存在 `func.call` / `call-like` 仍消费“待改写 callee 的旧 memory result SSA”，而本轮又未实现 callsite 同步改写，pass 必须显式失败。
-- 该失败是 `O1` 的正式硬门禁，不允许解释为“先改 callee，caller 留给后续任务处理”。
-- 错误消息必须包含 `callsite rewrite` 或等价关键字。
+- 若模块内存在可解析的 `caller + callee`，且 callee 命中单个 `memory` 返回值改写，pass 必须同步把 caller 侧旧 `func.call` 改写成“显式 out 实参 + 零 result `func.call`”。
+- caller 侧必须先补 out buffer，并把旧 memory call result SSA 全量替换为 caller 显式 out buffer。
+- 当前公开成功口径下，不再把这类模块内可解析 callsite 写成必须失败。
+
+改写前：
+
+```text
+%0 = func.call @add(%lhs, %rhs) : (...) -> (!nn.memory<...>)
+use %0
+```
+
+改写后：
+
+```text
+%out = dma.alloc ...
+func.call @add(%out, %lhs, %rhs) : (...) -> ()
+use %out
+```
+
+必须满足：
+
+- 新 `func.call` 第一个实参固定传 caller 侧显式 out buffer
+- 旧 memory call result SSA 不再存在
+- caller 对旧 result 的后续使用必须改绑到 caller 侧 out buffer
 
 ## 测试
 
 - 测试文件：[`test/pass/test_buffer_results_to_out_params.py`](../../../test/pass/test_buffer_results_to_out_params.py)
 - 验证命令：
-  - `pytest -q test/pass/test_buffer_results_to_out_params.py -k 'single_memory_result or external_declaration or unrewritten_callsite'`
+  - `pytest -q test/pass/test_buffer_results_to_out_params.py -k 'single_memory_result or external_declaration or callsite or pipeline_position'`
+  - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py`
 
 ## 功能与用例清单
 
 - `BROTP-001`：单个 `memory` 返回值会被改写为最前置 `arg0`，并清空 `func.return`。（`test_rewrite_single_memory_result_to_front_out_param`）
 - `BROTP-002`：external declaration 不允许半改写，必须显式报错。（`test_rewrite_rejects_external_declaration`）
-- `BROTP-003`：模块内存在未同步改写的 `func.call` 时，pass 不允许只改 callee；必须显式报 `callsite rewrite` 错误。（`test_rewrite_rejects_unrewritten_callsite`）
+- `BROTP-003`：模块内 caller/callee 会同步改写成“caller 显式 out 实参 + 零 result `func.call`”，旧 memory call result SSA 不再可被消费。（`test_rewrite_callsite_replaces_old_memory_result_ssa`）
+- `BROTP-004`：在 lowering pipeline 中，`BufferResultsToOutParamsPass` 固定运行在 `LowerNnToKernelPass` 之后。（`test_pass_manager_runs_lower_then_buffer_results_to_out_params`、`test_pipeline_position_pass_manager_runs_lower_then_buffer_results_to_out_params`）
+- `BROTP-005`：ignored expectation smoke `callsite_rewrite.py` 锁死“callee 的 memory result -> 前置 arg0；caller 补 out 实参；`func.call` 零 memory result”的 `O2` 公开口径。（`expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py`）

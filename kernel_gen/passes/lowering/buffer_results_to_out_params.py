@@ -5,7 +5,8 @@
 
 功能说明:
 - 将 `func.func` 中单个 `memory` 返回值改写为最前置 out 参数。
-- 为当前最小骨架明确写死 external declaration 与未同步 callsite 的失败边界。
+- 同步改写模块内可解析 `func.call`，把 caller 侧旧 memory result SSA 收口为显式 out 实参。
+- 为当前首版范围明确写死 external declaration 与多结果/混合返回的失败边界。
 
 使用示例:
 - from kernel_gen.passes.lowering.buffer_results_to_out_params import BufferResultsToOutParamsPass
@@ -173,18 +174,18 @@ def _collect_rewrite_targets(module: ModuleOp) -> dict[str, func.FuncOp]:
     return targets
 
 
-def _ensure_no_unsupported_calls(module: ModuleOp, targets: dict[str, func.FuncOp]) -> None:
-    """在未实现 callsite 同步改写前，拒绝半改半留场景。
+def _collect_target_calls(module: ModuleOp, targets: dict[str, func.FuncOp]) -> list[func.CallOp]:
+    """收集调用待改写函数的 `func.call`。
 
     创建者: 朽木露琪亚
     最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 若模块内存在调用待改写函数的 `func.call`，直接失败。
-    - 保证当前最小骨架不会只改 `func.func` 签名而遗漏调用点。
+    - 只处理模块内可解析的 `func.call`。
+    - 返回所有调用待改写 callee 的调用点，交由后续统一同步改写。
 
     使用示例:
-    - _ensure_no_unsupported_calls(module, targets)
+    - calls = _collect_target_calls(module, targets)
 
     关联文件:
     - spec: spec/pass/lowering/buffer_results_to_out_params.md
@@ -193,16 +194,83 @@ def _ensure_no_unsupported_calls(module: ModuleOp, targets: dict[str, func.FuncO
     """
 
     if not targets:
-        return
+        return []
     target_names = set(targets)
+    calls: list[func.CallOp] = []
     for op in module.walk():
         if not isinstance(op, func.CallOp):
             continue
         callee = op.callee.root_reference.data
         if callee in target_names:
-            raise BufferResultsToOutParamsError(
-                f"callsite rewrite is not implemented yet for callee {callee}"
-            )
+            calls.append(op)
+    return calls
+
+
+def _rewrite_callsite(call_op: func.CallOp, targets: dict[str, func.FuncOp]) -> None:
+    """把调用待改写 callee 的 `func.call` 改成显式 out-arg 形式。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 在旧 `func.call` 前插入 `dma.alloc` 作为 caller 侧输出 buffer。
+    - 新 `func.call` 第一个实参固定传入该 out buffer。
+    - 旧 memory call result SSA 全量替换为 caller 侧显式 out buffer，并移除旧 call result。
+
+    使用示例:
+    - _rewrite_callsite(call_op, targets)
+
+    关联文件:
+    - spec: spec/pass/lowering/buffer_results_to_out_params.md
+    - test: test/pass/test_buffer_results_to_out_params.py
+    - 功能实现: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+    """
+
+    callee_name = call_op.callee.root_reference.data
+    target_func = targets.get(callee_name)
+    if target_func is None:
+        return
+    if len(call_op.results) != 1:
+        raise BufferResultsToOutParamsError(
+            f"callsite rewrite requires exactly one memory result for callee {callee_name}"
+        )
+    result_type = call_op.results[0].type
+    if not isinstance(result_type, NnMemoryType):
+        raise BufferResultsToOutParamsError(
+            f"callsite rewrite requires memory result for callee {callee_name}"
+        )
+    block = call_op.parent
+    if not isinstance(block, Block):
+        raise BufferResultsToOutParamsError("callsite rewrite requires call op to live in a block")
+
+    out_alloc = DmaAllocOp([], result_type)
+    new_call = func.CallOp(callee_name, [out_alloc.result, *call_op.arguments], [])
+    block.insert_ops_before([out_alloc, new_call], call_op)
+    call_op.results[0].replace_by(out_alloc.result)
+    block.erase_op(call_op)
+
+
+def _rewrite_callsites(module: ModuleOp, targets: dict[str, func.FuncOp]) -> None:
+    """同步改写所有调用待改写函数的 `func.call`。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 统一处理模块内 caller/callee，避免只改 `func.func` 而遗漏调用点。
+    - 当前只覆盖模块内可解析的单结果 `func.call`。
+
+    使用示例:
+    - _rewrite_callsites(module, targets)
+
+    关联文件:
+    - spec: spec/pass/lowering/buffer_results_to_out_params.md
+    - test: test/pass/test_buffer_results_to_out_params.py
+    - 功能实现: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+    """
+
+    for call_op in list(_collect_target_calls(module, targets)):
+        _rewrite_callsite(call_op, targets)
 
 
 def _erase_dead_result_owner(value: SSAValue, block: Block) -> None:
@@ -280,8 +348,8 @@ class BufferResultsToOutParamsPass(Pass):
     最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 在模块级先做候选校验与 callsite 边界检查。
-    - 当前最小骨架只执行“单个 memory 返回值 -> arg0”改写。
+    - 在模块级先做候选校验。
+    - 当前首版实现执行“模块内可解析 callsite 同步改写 + 单个 memory 返回值 -> arg0”改写。
 
     使用示例:
     - module = BufferResultsToOutParamsPass().run(module)
@@ -302,7 +370,7 @@ class BufferResultsToOutParamsPass(Pass):
 
         功能说明:
         - 先收集并校验候选函数。
-        - 在确认没有 callsite 半改半留风险后再改写。
+        - 先同步改写 caller 侧 `func.call`，再改写 callee 返回合同。
 
         使用示例:
         - module = BufferResultsToOutParamsPass().run(module)
@@ -316,7 +384,7 @@ class BufferResultsToOutParamsPass(Pass):
         if not isinstance(module, ModuleOp):
             raise BufferResultsToOutParamsError("module must be builtin.module")
         targets = _collect_rewrite_targets(module)
-        _ensure_no_unsupported_calls(module, targets)
+        _rewrite_callsites(module, targets)
         for func_op in targets.values():
             _rewrite_single_memory_result(func_op)
         return module

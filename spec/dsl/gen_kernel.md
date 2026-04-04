@@ -2,15 +2,14 @@
 
 ## 功能简介
 
-- 定义将单个优化后的 MLIR op / `func.func` 转换为目标源码文本的规则。
-- 对 `func.func` 负责函数签名生成、按 IR 顺序遍历函数体，并逐个调用 [`spec/dsl/emit_c.md`](../../spec/dsl/emit_c.md) 中定义的节点级公开发射接口。
-- 对 `func.func` 的 `direct-return nn.add`、`conv2d_img2col2d_tiled(...)`、`npu_demo` body-level kernel 等函数级特化，必须通过统一 emitter 内部策略选择收口。
-- 对单个普通 op 直接复用 `emit_c` 的节点级公开接口返回源码片段；不负责文件写盘、编译、链接或运行。
+- 定义将优化后的 MLIR `func.func` 转换为目标后端完整函数源码的规则。
+- 负责函数签名生成、函数体遍历，以及调用 [`spec/dsl/emit_c.md`](../../spec/dsl/emit_c.md) 中定义的节点级生成规则。
+- 输出完整函数源码文本，但不负责文件写盘、编译、链接或运行。
 
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`jcc你莫辜负`
+- 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/dsl/gen_kernel.md`](../../spec/dsl/gen_kernel.md)
 - `功能实现`：[`kernel_gen/dsl/gen_kernel.py`](../../kernel_gen/dsl/gen_kernel.py)
 - `test`：[`test/dsl/test_gen_kernel.py`](../../test/dsl/test_gen_kernel.py)
@@ -19,13 +18,15 @@
 
 - [`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)：优化后 `func.func` 的来源。
 - [`spec/dsl/emit_c.md`](../../spec/dsl/emit_c.md)：单个 op/value 的源码片段生成规则。
+- [`spec/pass/lowering/nn_to_kernel.md`](../../spec/pass/lowering/nn_to_kernel.md)：`nn -> kernel/dma` 的函数体 lowering。
+- [`spec/pass/lowering/buffer_results_to_out_params.md`](../../spec/pass/lowering/buffer_results_to_out_params.md)：跨函数 `memory-return` ABI 改写与 caller out 实参合同。
 - [`kernel_gen/dsl/gen_kernel.py`](../../kernel_gen/dsl/gen_kernel.py)：函数级源码生成实现。
 - [`test/dsl/test_gen_kernel.py`](../../test/dsl/test_gen_kernel.py)：函数级源码生成测试。
 
 ## 目标
 
-- 为优化后的单个 MLIR op / `func.func` 提供稳定的目标源码生成能力。
-- 对 `func.func` 统一约束签名、参数顺序、输出参数风格、IR 顺序遍历与函数体拼装规则。
+- 为优化后的单个 MLIR `func.func` 提供稳定的函数级后端源码生成能力。
+- 统一约束签名、参数顺序、输出参数风格与函数体拼装规则。
 - 明确支持：只读 `Memory` 输入、`Memory` 结果降为显式输出参数、标量参数顺序与默认命名保持、`emit_c` 错误向上抛出。
 - 明确支持：`f32/f64` 类型在 `target=cpu` 下映射为 `float/double`，用于 `Memory<float>/Memory<double>` 与 `float/double` 标量参数生成。
 - 冻结 direct-return `nn.add -> cpu::add(..., out)` 的函数级 CPU 合同：仅当 `nn.add.result` 的唯一 use 为 `func.return` 且结果可直接绑定到函数 `out` 时，允许生成 `cpu::add(..., out);`。
@@ -35,13 +36,13 @@
 
 ## 限制与边界
 
-- 输入必须是单个优化后的 MLIR `func.func`，或单个当前 target 下可发射的普通 op；不负责 `builtin.module` 级组织。
+- 输入必须是单个优化后的 MLIR `func.func`；不负责 `builtin.module` 级组织。
 - 不负责 AST 解析、MLIR 构造、优化 pass、文件写盘、编译、链接、运行或性能调优。
 - 不负责定义单个 op/value 的代码生成细节；这些由 [`spec/dsl/emit_c.md`](../../spec/dsl/emit_c.md) 负责。
 - 输出源码必须保持函数名、参数名与 IR 定义一致，不能引入额外公开接口。
 - 对于不支持的返回形式、未知 op 或无法映射到目标后端源码的 IR，必须明确报错。
-- `func.return` / `out` 绑定不属于普通 `emit_c_op(...)` 的公开职责；`func.return` 只能在 `func.func` 的函数级主遍历流程中收尾处理。
 - 除 `Memory` 结果外，仅允许单一 `!symbol.int<"...">` 标量结果生成返回值；其他非 `Memory` 结果仍需报错。
+- 若输入函数来自跨函数 `memory-return` 链路，`gen_kernel` 只消费已经过 `LowerNnToKernelPass -> BufferResultsToOutParamsPass` 收口后的 ABI：callee 的 `memory` 返回必须已改成前置 out 参数，caller 侧旧 `func.call` memory result SSA 不得再存在。
 - direct-return `nn.add` 的函数级特化当前只覆盖 `func.return` 唯一使用 `nn.add.result` 的 `Memory` 返回场景；multi-use、无法直接绑定到函数 `out` 或需要 generic `out = tmp` 的路径都必须继续报 `unsupported op`。
 - `target="npu_demo"` 当前只冻结 body-level kernel 骨架，不定义 host wrapper、`launch`、`arch.launch_kernel`、`barrier` 或其他运行时调度骨架。
 - `target="npu_demo"` 的目标终态不得回退到 `.view<T>()`、`load<...>`、`store<...>` 或表达式式 `auto tile = slice(source, ...)`。
@@ -53,13 +54,13 @@
 
 功能说明：
 
-- 将单个优化后的 MLIR `func.func` 生成为完整的目标后端函数源码文本，或将单个普通 op 生成为节点级源码片段。
+- 将单个优化后的 MLIR `func.func` 生成为完整的目标后端函数源码文本。
 - 这是 `kernel_gen.dsl.gen_kernel` 唯一稳定公开入口；下游和测试主口径只允许稳定依赖 `gen_kernel(...)` 与错误类型 `GenKernelError`。
-- 函数级签名拼装、IR 主遍历与 `func.return` 收尾仅可作为模块内部实现拆分继续存在，不再属于公开稳定接口。
+- `gen_signature(...)`、`gen_body(...)` 仅可作为模块内部实现拆分继续存在，不再属于公开稳定接口。
 
 参数说明：
 
-- `op_or_func`（`object`）：待生成的 MLIR `func.func` 或单个普通 op。
+- `op_or_func`（`object`）：待生成的 MLIR `func.func`。
 - `ctx`（`EmitCContext`）：由 `emit_c` 定义并复用的源码生成上下文。
 
 使用示例：
@@ -73,25 +74,37 @@ source = gen_kernel(func_op, EmitCContext(target="cpu"))
 
 注意事项：
 
-- `func.func` 输入必须已经完成本仓库要求的合法化。
-- 若输入为普通 op，则直接委托 `emit_c_op(...)` 的公开节点级接口发射，不补额外函数级前后文。
-- `func.return` 不允许作为单独普通 op 走这条公开接口；它的 `out` 绑定与返回语义必须留在 `func.func` 的主遍历流程中处理。
+- `func_op` 必须已经完成本仓库要求的合法化。
 - 若 IR 中仍含未支持 op，必须向上抛出对应失败原因。
+- 对跨函数 `memory-return` 链路，调用方必须先经过 `BufferResultsToOutParamsPass` 把 caller/callee ABI 收口；`gen_kernel(...)` 不负责再从旧 `func.call` result 推断隐藏 out 参数。
 
 返回与限制：
 
 - 返回类型：`str`。
-- 返回语义：输入为 `func.func` 时返回完整目标后端函数源码文本；输入为普通 op 时返回该 op 的节点级源码片段。
-- 限制条件：仅支持当前 target 下可映射的 IR 子集；`func.return` 只允许在函数级主遍历路径中处理。
+- 返回语义：完整目标后端函数源码文本。
+- 限制条件：仅支持当前 target 下可映射的 IR 子集。
 
-## 函数级主遍历规则（非公开稳定接口）
+## 内部实现拆分（非公开稳定接口）
 
-### 函数签名拼装
+### `gen_signature(func_op, ctx)`
 
 功能说明：
 
-- 当输入为 `func.func` 时，内部流程必须先根据输入输出类型拼装目标函数签名。
-- 这一步只服务于 `gen_kernel(...)` 的函数级主流程；实现可使用 `_gen_signature(...)` 一类私有 helper，但不得把它们暴露成公开稳定接口。
+- 根据 `func.func` 的输入输出类型生成目标后端函数签名。
+- 该 helper 仅服务于 `gen_kernel(...)` 的内部拼装与单测覆盖，不构成下游稳定公开接口。
+
+参数说明：
+
+- `func_op`（`object`）：待分析的 MLIR `func.func`。
+- `ctx`（`EmitCContext`）：源码生成上下文。
+
+使用示例：
+
+```python
+import kernel_gen.dsl.gen_kernel as gen_kernel_module
+
+signature = gen_kernel_module.gen_signature(func_op, ctx)
+```
 
 注意事项：
 
@@ -122,19 +135,35 @@ void demo_kernel(
 - 不支持的返回形式必须明确报错。
 - 参数名来自 `func.func` 的 `arg_attrs.name`；缺失或为空时必须使用 `arg{index}` 默认命名，保持与 `func.func` 参数顺序一致。
 
-### IR 顺序遍历与收尾绑定
+返回与限制：
+
+- 返回类型：`str`。
+- 返回语义：不含函数体的函数签名文本。
+- 限制条件：签名生成必须与 `gen_kernel(...)`、`gen_body(...)` 的结果保持一致，但下游不得将其视为公开稳定入口。
+
+### `gen_body(func_op, ctx)`
 
 功能说明：
 
-- 当输入为 `func.func` 时，内部流程必须按 `func.func` 中 block 与 op 的顺序遍历函数体。
-- 在进入具体 body 发射前，实现必须先在单一 emitter 内部选择函数级策略，统一承接默认路径与当前已冻结的函数级特化。
-- 非 `func.return` 的普通 op 必须逐个委托 `emit_c_op(...)` 的公开节点级接口发射。
-- `func.return` / `out` 绑定属于函数级主遍历流程的收尾逻辑，不得作为普通 `emit_c_op(...)` 公开职责泄露给下游。
+- 按 `func.func` 中 block 与 op 的顺序遍历函数体，并调用 `emit_c` 规则生成函数体文本。
+- 该 helper 仅服务于 `gen_kernel(...)` 的内部拼装与单测覆盖，不构成下游稳定公开接口。
+
+参数说明：
+
+- `func_op`（`object`）：待遍历的 MLIR `func.func`。
+- `ctx`（`EmitCContext`）：源码生成上下文。
+
+使用示例：
+
+```python
+import kernel_gen.dsl.gen_kernel as gen_kernel_module
+
+body = gen_kernel_module.gen_body(func_op, ctx)
+```
 
 注意事项：
 
 - 必须保持 IR 中 op 的语义顺序。
-- 上述函数级策略只允许作为 emitter 内部实现细节存在；不得再扩成新的公开入口、公开 helper 或测试主口径。
 - `func.return` 在当前恢复范围下仅支持无返回、`Memory` 结果写回 `out`，或 `!symbol.int<"...">` 标量返回。
 - 不得在本层引入未在 `emit_c` 中定义的单 op 生成特例。
 - `target=cpu` 下仅当 `nn.add.result` 的唯一 use 是 `func.return`，且该结果可直接绑定到函数 `out` 时，才允许函数级特化为：
@@ -172,9 +201,15 @@ void demo_kernel(
 ```
 
 - 上述骨架顺序是 `thread_id/thread_num -> get_dynamic_memory(TSM/TLM) -> view -> slice -> add -> deslice`；不得插入 `launch(`、`arch.launch_kernel`、`barrier`、`.view<`、`load<`、`store<` 或表达式式 `slice(source, ...)`。
-- 当 `func.return` 回写 `out` 的值未在 `EmitCContext` 中绑定名称，且该值为 `BlockArgument` 时，必须回退为 `arg{index}` 默认命名以保持与函数级签名一致。
+- 当 `func.return` 回写 `out` 的值未在 `EmitCContext` 中绑定名称，且该值为 `BlockArgument` 时，必须回退为 `arg{index}` 默认命名以保持与 `gen_signature` 一致。
 - 当 `func.return` 返回 `!symbol.int<"...">` 时，必须生成 `return <expr>;` 并复用 `emit_c` 的命名/表达式规则。
 - 对 `conv_cpu_tiled_v1` 子集，函数体骨架必须固定包含：`constexpr Ntile/Ctile/Ftile/Hotile/Wotile`、tile-local `col_buffer/acc_buffer`、`n -> f -> ho -> wo` 分块循环、循环体内的 `cpu::img2col2d(...)` 与 `c` 方向 tiled compute、以及最终写回 `out` 的显式循环或等价机械可判定写回语句。
+
+返回与限制：
+
+- 返回类型：`str`。
+- 返回语义：函数体文本，不含函数签名。
+- 限制条件：局部命名与片段生成策略必须与 `EmitCContext` 中状态保持一致，但下游不得将其视为公开稳定入口。
 
 ## CPU `conv2d_img2col2d_tiled(...)` 固定骨架
 
@@ -244,12 +279,9 @@ void conv2d_img2col2d_tiled(
 
 ### 测试目标
 
-- 验证单个普通 op 输入会直接复用 `emit_c_op(...)` 节点级公开接口。
 - 验证 `func.func` 到完整目标后端函数源码的生成能力。
-- 验证 `gen_kernel(...)` 的函数级主遍历与 `emit_c_op(...)` 的节点级职责边界清晰。
+- 验证签名生成与函数体拼装的职责边界清晰。
 - 验证 `Memory` 输入/输出参数规则、参数顺序、错误传播与名称保持行为。
-- 验证普通非 return op 会逐个委托到 `emit_c_op(...)`，且 `func.return/out` 绑定继续留在函数级主遍历流程中处理。
-- 验证 direct-return `nn.add`、`conv2d_img2col2d_tiled(...)`、`npu_demo` body-level kernel 三类函数级特化，在黑盒 `gen_kernel(...)` 输出上保持统一入口和既有源码形态，不依赖内部 helper 或内部策略名。
 - 验证 direct-return `nn.add` 在 `target=cpu` 下仅对唯一 use 为 `func.return` 的 `Memory` 返回场景特化为 `cpu::add(..., out);`，并覆盖 `memory + memory`、`memory + const(i32)`、`memory + symbol.int` 三条函数体形态。
 - 验证 direct-return `nn.add` 在 multi-use 或无法直接绑定 `out` 时继续报 `unsupported op`，不生成 generic `out = tmp` / `return tmp`。
 - 验证 `target="npu_demo"` 的函数级 body-level kernel 骨架包含 `npu_demo::KernelContext& ctx`、`ctx.thread_id()`、`ctx.thread_num()`、`ctx.get_dynamic_memory<float>(MemorySpace::TSM/TLM)` 与 `view/slice/deslice/add` 的固定顺序。
@@ -262,28 +294,24 @@ void conv2d_img2col2d_tiled(
 
 ### 功能与用例清单
 
-- GK-001A：单个普通 op 输入可直接复用 `emit_c` 节点级公开接口生成源码片段。（`test_gen_kernel_delegates_single_op_input_to_emit_c`）
 - GK-001：可将单个优化后的 `func.func` 生成为完整后端函数源码。（`test_gen_kernel_returns_target_source`）
-- GK-002：输入 `Memory` 参数生成只读输入参数。（`test_gen_kernel_uses_readonly_memory_inputs`）
-- GK-003：`Memory` 结果生成为显式输出参数。（`test_gen_kernel_lowers_memory_result_to_out_param`）
-- GK-004：标量参数顺序与 IR 参数顺序一致，缺失命名时使用 `arg{index}` 默认命名。（`test_gen_kernel_uses_default_arg_names_when_missing_attrs`）
-- GK-005：函数级主遍历按 IR 顺序发射普通 op。（`test_gen_kernel_emits_ops_in_order`）
-- GK-005A：普通非 `func.return` 的 op 逐个委托到 `emit_c_op(...)`。（`test_gen_kernel_delegates_to_emit_c_for_non_return_ops`）
-- GK-005B：`func.return/out` 绑定由函数级主遍历流程收尾，不走普通 `emit_c_op(...)` 公开职责。（`test_gen_kernel_handles_func_return_and_out_binding_in_main_flow`）
+- GK-002：输入 `Memory` 参数生成只读输入参数。（`test_gen_signature_uses_readonly_memory_inputs`）
+- GK-003：`Memory` 结果生成为显式输出参数。（`test_gen_signature_lowers_memory_result_to_out_param`）
+- GK-004：标量参数顺序与 IR 参数顺序一致，缺失命名时使用 `arg{index}` 默认命名。（`test_gen_signature_preserves_scalar_arg_order`）
+- GK-005：函数体按 op 顺序调用 `emit_c` 规则，回写 `out` 时保持 `gen_signature` 的默认命名规则。（`test_gen_body_emits_ops_in_order`）
 - GK-006：循环片段可正确拼装到完整函数中。（`test_gen_kernel_assembles_loop_body`）
 - GK-007：`emit_c` 错误向上抛出并保留失败原因。（`test_gen_kernel_propagates_emit_c_error`）
-- GK-008：不支持的返回形式或输入类型明确报错。（`test_gen_kernel_rejects_unsupported_return_form`）
-- GK-009：生成源码保留函数名与已命名参数名；当函数级签名拼装观察到输入参数缺失 `arg_attrs.name` 时，生成源码沿用 `arg{index}` 默认名。（`test_gen_kernel_preserves_function_and_arg_names`）
+- GK-008：不支持的返回形式或输入类型明确报错。（`test_gen_signature_rejects_unsupported_return_form`）
+- GK-009：生成源码保留函数名与已命名参数名；当 `gen_signature` 可观察到输入参数缺失 `arg_attrs.name` 时，生成源码沿用 `arg{index}` 默认名。（`test_gen_kernel_preserves_function_and_arg_names`）
 - GK-010：`!symbol.int<"...">` 标量返回可生成函数返回值。（`test_gen_kernel_supports_symbol_scalar_return`）
 - GK-011：非 cpu target 下 `!symbol.int<"...">` 标量返回必须报错，防止跨 target 误生成返回签名/函数体。（`test_gen_kernel_rejects_symbol_scalar_return_on_non_cpu`）
-- GK-012：`f32/f64` 标量与 `Memory<f32/f64>` 可生成 `float/double` 与 `Memory<float>/Memory<double>` 形式签名。（`test_gen_kernel_supports_float32_scalar_and_memory`）
+- GK-012：`f32/f64` 标量与 `Memory<f32/f64>` 可生成 `float/double` 与 `Memory<float>/Memory<double>` 形式签名。（`test_gen_signature_supports_float32_scalar_and_memory`）
 - GK-013：direct-return `nn.add(memory, memory)` 在 cpu target 下可生成 `Memory<int32_t>& out` 签名与 `cpu::add(lhs, rhs, out);` 函数体。（下游待补测试映射：`test_gen_kernel_supports_direct_return_nn_add_memory_memory_on_cpu`）
 - GK-014：direct-return `nn.add(memory, const(i32))` 在 cpu target 下可生成 `cpu::add(lhs, 1, out);` 函数体。（下游待补测试映射：`test_gen_kernel_supports_direct_return_nn_add_memory_const_on_cpu`）
 - GK-015：direct-return `nn.add(memory, symbol.int)` 在 cpu target 下可生成 `long long bias` 标量参数与 `cpu::add(lhs, bias, out);` 函数体。（下游待补测试映射：`test_gen_kernel_supports_direct_return_nn_add_memory_symbol_on_cpu`）
 - GK-016：当 `nn.add.result` 为 multi-use 或无法 direct bind 到 `out` 时，specialization 必须继续报 `EmitCError target=cpu: nn.add: unsupported op`。（下游待补测试映射：`test_gen_kernel_rejects_nn_add_specialization_on_multi_use`）
 - GK-017：`target="npu_demo"` 的最小 kernel 可生成包含 `npu_demo::KernelContext& ctx`、`ctx.thread_id()` 与 `ctx.thread_num()` 的 body-level 函数骨架。（下游待补测试映射：`test_gen_kernel_emits_npu_demo_body_level_kernel`）
 - GK-018：`target="npu_demo"` 的 `view + slice + add + deslice` 链路可生成 `TSM/TLM` dynamic memory、`view(`、`slice(`、`add(`、`deslice(` 组成的函数体骨架，且不出现 `.view<`、`load<`、`store<`。（下游待补测试映射：`test_gen_kernel_emits_npu_demo_memory_pipeline`）
-- GK-021：`direct-return nn.add`、`conv2d_img2col2d_tiled(...)`、`npu_demo` body-level kernel 三类函数级特化继续只通过黑盒 `gen_kernel(...)` 验证既有源码合同；测试不得直接依赖内部 helper、内部策略函数或内部策略名。（`test_gen_kernel_black_box_direct_return_nn_add_conv2d_img2col2d_tiled_and_npu_demo_contracts`）
 
 ### C2 下游验收标准
 

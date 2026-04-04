@@ -130,6 +130,40 @@
   - `T-20260404-99d10789` 与 `T-20260404-91eb7abb` 的状态语义已基本对齐到“完成 / 需修改”，但 `ba73c6fe -> 16fc9d2a` 这段状态同步链仍断裂，因此本轮不能判“计划 / spec / 记录 / DONE 完全一致”。
   - 修改建议：仅修正 [`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md#L7) 的 `O1` 进度表，把 `T-20260404-ba73c6fe` 标成与记录一致的 `需修改` 结果，并补入 `T-20260404-16fc9d2a` 的状态修正完成条目；正文 callsite 半改半留硬门禁、验证命令与验收标准保持不变。
 
+- 时间：`2026-04-04 06:07:37 +0800`
+- 经办人：`朽木露琪亚`
+- 任务：`T-20260404-29d2982e`
+- 任务目标：`按 O2 落地 pass 链路位置与调用点同步改写：更新 pass_manager/nn_to_kernel/gen_kernel 的公开合同，并实现模块内 func.func + func.call 的首版同步改写，固定 pass 顺序为 LowerNnToKernelPass -> BufferResultsToOutParamsPass。`
+- 改动：
+  - [`spec/pass/pass_manager.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/pass_manager.md)：
+    - 增补 lowering 链固定顺序示例，明确 `memory-return` 链路必须按 `LowerNnToKernelPass -> BufferResultsToOutParamsPass` 执行。
+    - 把顺序门禁补进测试目标。
+  - [`spec/pass/lowering/nn_to_kernel.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/nn_to_kernel.md)：
+    - 明确 `nn_to_kernel` 只负责函数体内 `nn -> kernel/dma` lowering，不负责跨函数 `memory-return func.call` 的 ABI 收口。
+    - 写清下游必须继续运行 `BufferResultsToOutParamsPass` 处理 caller out 实参和旧 call result SSA 清理。
+  - [`spec/dsl/gen_kernel.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/dsl/gen_kernel.md)：
+    - 增补 `gen_kernel` 对 O2 后 IR 的消费边界：跨函数 `memory-return` 链路必须先经过 `LowerNnToKernelPass -> BufferResultsToOutParamsPass` 收口，`gen_kernel(...)` 不再从旧 `func.call` result 推断隐藏 out 参数。
+  - [`kernel_gen/passes/lowering/buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/passes/lowering/buffer_results_to_out_params.py)：
+    - 移除 O1 的“发现 callsite 直接失败”路径，新增 `_collect_target_calls(...)`、`_rewrite_callsite(...)`、`_rewrite_callsites(...)`。
+    - 当前首版逻辑变为：先同步改写模块内可解析的单结果 `func.call`，在 caller 侧插入 `dma.alloc` 作为 out buffer，新 `func.call` 第一实参固定传入该 out buffer，旧 memory call result SSA 全量替换为 caller 显式 out buffer，再改写 callee 的单 memory return -> `arg0`。
+  - [`test/pass/test_buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_buffer_results_to_out_params.py)：
+    - 将 O1 的旧负向 `test_rewrite_rejects_unrewritten_callsite` 收口为 O2 正向 `test_rewrite_callsite_replaces_old_memory_result_ssa`，锁死 caller + callee 会同步改写成“显式 out 实参 + 零 result `func.call`”。
+    - 新增 `test_pass_manager_runs_lower_then_buffer_results_to_out_params` 及 `test_pipeline_position_pass_manager_runs_lower_then_buffer_results_to_out_params`，锁定验证命令 `-k 'callsite or pipeline_position'` 能命中真实正向门禁。
+  - [`expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py)：
+    - 新增 worktree 下的 ignored expectation smoke，锁死“callee memory result -> arg0；caller 补 out 实参；`func.call` 零 result”的首版闭环。
+    - 本文件位于 worktree 的 ignored `expectation/` 目录，不出现在 `git status` 的 tracked diff 中；本轮 smoke 直接从 worktree 路径执行。
+  - 验证：
+    - `pytest -q test/pass/test_buffer_results_to_out_params.py -k 'callsite or pipeline_position'` -> `2 passed, 3 deselected`
+    - `pytest -q test/pass/test_buffer_results_to_out_params.py` -> `5 passed`
+    - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py` -> `0`
+    - `git diff --check -- spec/pass/pass_manager.md spec/pass/lowering/nn_to_kernel.md spec/dsl/gen_kernel.md kernel_gen/passes/lowering/buffer_results_to_out_params.py test/pass/test_buffer_results_to_out_params.py` -> `0`
+  - 自检：
+    - 目标收口：通过。O2 要求的 pass 顺序、caller out 实参补齐、旧 call result SSA 清理和 expectation smoke 已全部落地。
+    - 边界检查：通过。本轮只覆盖模块内可解析单结果 `func.call`，未扩到多 memory results 或 mixed returns。
+    - 验证覆盖：通过。计划指定 `-k` gate、整份测试文件和 worktree expectation smoke 均通过；未再依赖 O1 的“callsite 必须失败”旧口径。
+    - 记录一致性：通过。当前记录中的涉及文件、验证命令与实际改动一致。
+- 结论：`已完成 O2 首版收口：模块内 caller/callee 的 memory-return ABI 已能同步改写为显式 out 实参 + 零 result func.call，固定 pass 顺序为 LowerNnToKernelPass -> BufferResultsToOutParamsPass。`
+
 - 时间：`2026-04-04 03:04:56 +0800`
 - 经办人：`咯咯咯`
 - 任务：`T-20260404-04ef2843`
@@ -196,3 +230,123 @@
   - `通过`
   - 未发现额外改进点。
   - 当前 `O1` 的五个已结束状态、主目录计划、同链记录与 `DONE.md` 已完全收口一致，且正文 callsite 半改半留硬门禁、验证命令与验收标准保持不变；后续可进入同链合并阶段，但合并范围必须覆盖整条 `O1` 链路的 `计划 / spec / 实现 / 测试 / 记录` 文件。
+
+- 时间：`2026-04-04 06:16:38 +0800`
+- 经办人：`不要啊教练`
+- 任务：`T-20260404-1d3d4848`
+- 任务目标：`按 O2 审查边界执行：只读复核 O2 条目、spec/pass/pass_manager.md、spec/pass/lowering/nn_to_kernel.md、spec/dsl/gen_kernel.md、kernel_gen/passes/lowering/buffer_results_to_out_params.py、test/pass/test_buffer_results_to_out_params.py、worktree ignored expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py 与同链记录，确认 pass 顺序、caller 显式 out 实参、旧 memory call result SSA 清理与 smoke 口径。`
+- 改动：
+  - 只读核对 [`ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md)、[`spec/pass/pass_manager.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/pass_manager.md)、[`spec/pass/lowering/nn_to_kernel.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/nn_to_kernel.md)、[`spec/dsl/gen_kernel.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/dsl/gen_kernel.md)、[`kernel_gen/passes/lowering/buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/passes/lowering/buffer_results_to_out_params.py)、[`test/pass/test_buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_buffer_results_to_out_params.py)、ignored expectation [`expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py) 与当前记录；未修改实现/spec/测试。
+  - 为核对公开合同是否真正一致，补读 [`spec/pass/lowering/buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/buffer_results_to_out_params.md)，发现其仍停留在 `O1` 旧口径。
+  - 自检结果：
+    - 证据充分性：已交叉核对计划 `O2` 条目、上游三个 spec、pass 实现、单测、ignored expectation、同链记录，并实际复测计划指定 gate 与 expectation smoke。
+    - 功能正确性：实现与测试证据表明当前 pass 的确按 `LowerNnToKernelPass -> BufferResultsToOutParamsPass` 收口，caller 显式先提供 out 实参，旧 memory call result SSA 被替换并移除。
+    - 边界条件：当前实现只覆盖模块内可解析的单结果 `func.call`，未扩到多 memory results；这一点与 `O2` 计划一致。
+    - 异常路径：`_rewrite_callsite(...)` 对非单结果、非 `memory` 结果、`call_op` 不在 block 内等场景都显式抛 `BufferResultsToOutParamsError`，没有静默吞错。
+    - 潜在漏洞排查：
+      - 输入校验绕过：未见。`run(...)` 拒绝非 `builtin.module`；`_rewrite_callsite(...)` 对结果个数、结果类型、父 block 都有显式校验。
+      - 类型/形状绕过：未见新增风险。caller 侧 `dma.alloc` 直接复用旧 `func.call` result 的 `NnMemoryType`，没有额外推断或降级。
+      - 边界越界：未见。实现和 expectation 都仍限定在模块内可解析单结果 `func.call`。
+      - 错误处理缺失：未见。异常路径可诊断，错误消息包含 `callsite rewrite` / `memory result` / `builtin.module` 等关键字。
+      - 状态污染：实现通过 `replace_by(...)` + `erase_op(...)` 清理旧 call result SSA，正向测试和 smoke 都证明 caller 不再消费旧 SSA。
+      - 资源释放问题：未见新增泄漏语义。caller 新增的 `dma.alloc` 被后续 `func.call`/`dma.fill` 实际消费，不是空占位。
+  - 问题列表：
+    - `P1` [`spec/pass/lowering/buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/buffer_results_to_out_params.md#L37) 到 [`spec/pass/lowering/buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/buffer_results_to_out_params.md#L47)、[`spec/pass/lowering/buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/buffer_results_to_out_params.md#L80) 到 [`spec/pass/lowering/buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/buffer_results_to_out_params.md#L83)、[`spec/pass/lowering/buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/buffer_results_to_out_params.md#L127) 到 [`spec/pass/lowering/buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/buffer_results_to_out_params.md#L143) 仍写着“无需要同步改写的 `func.call`”“模块内未同步改写的 `func.call` 必须显式失败”“`BROTP-003 = test_rewrite_rejects_unrewritten_callsite`”。这与 [`O2` 计划](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md#L388)、[`buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/passes/lowering/buffer_results_to_out_params.py#L209)、[`test_buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_buffer_results_to_out_params.py#L176) 和 ignored expectation [`callsite_rewrite.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py#L82) 的正向 callsite 同步改写合同直接冲突。风险是 `O2` 公开语义继续保持双口径：计划/实现/测试已经允许 caller+callee 同步改写成功，而公开 pass spec 仍把同一场景定义为必须失败。
+  - 验证：
+    - `python -m pytest -q test/pass/test_buffer_results_to_out_params.py -k 'callsite or pipeline_position'` -> 退出码 `0`，`2 passed, 3 deselected`
+    - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py` -> 退出码 `0`
+    - `git -C /home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1 diff --check -- spec/pass/pass_manager.md spec/pass/lowering/nn_to_kernel.md spec/dsl/gen_kernel.md spec/pass/lowering/buffer_results_to_out_params.md kernel_gen/passes/lowering/buffer_results_to_out_params.py test/pass/test_buffer_results_to_out_params.py agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md` -> 退出码 `0`
+- 结论：
+  - `需修改`
+  - 当前最硬断点不是实现，而是公开合同未同步：[`spec/pass/lowering/buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/buffer_results_to_out_params.md) 仍保留 `O1` 的“callsite 必须失败”旧口径，导致 `计划 / spec / 实现 / 测试 / expectation / 记录` 不能判定完全一致。
+  - 修改建议：仅修正 [`spec/pass/lowering/buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/buffer_results_to_out_params.md)，把 `O2` 已落地的 caller/callee 同步改写合同、验证命令和用例映射收口进去；当前 `pass_manager / nn_to_kernel / gen_kernel / 实现 / 测试 / ignored expectation` 不需要再改。
+
+- 时间：`2026-04-04 09:46:41 +0800`
+- 经办人：`咯咯咯`
+- 任务：`T-20260404-af25a1a7`
+- 任务目标：`仅修改 O2 的计划/spec/记录口径，把 callsite 同步改写成功合同与当前实现、测试和 ignored expectation smoke 对齐，并收回 O1 旧的 callsite 必须失败表述。`
+- 改动：
+  - 更新 [`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md)：
+    - `O2` 进度补记本次 `spec` 口径纠偏完成。
+    - 在 `O2` 条目中明确“模块内 caller/callee 同步改写成功”是当前长期合同。
+    - 补齐当前真实验收映射：`test_rewrite_callsite_replaces_old_memory_result_ssa`、`test_pass_manager_runs_lower_then_buffer_results_to_out_params`、`test_pipeline_position_pass_manager_runs_lower_then_buffer_results_to_out_params` 与 ignored smoke `callsite_rewrite.py`。
+    - 从 `O1` 条目中收回“模块内未同步 callsite 必须失败”的旧测试映射与验证命令。
+  - 更新 [`spec/pass/lowering/buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/buffer_results_to_out_params.md)：
+    - 把“未同步改写的 callsite 必须失败”改成“模块内可解析 callsite 必须同步改写成功”。
+    - 把 `BROTP-003` 从旧的失败用例收口到当前真实正向用例 `test_rewrite_callsite_replaces_old_memory_result_ssa`。
+    - 新增 `BROTP-004/BROTP-005`，分别映射 pipeline 固定顺序和 ignored expectation smoke。
+    - 更新验证命令为 `single_memory_result or external_declaration or callsite or pipeline_position`，并加入 ignored expectation smoke 命令。
+  - 追加当前记录，说明本轮只修 `O2` 的计划/spec/记录口径，不改实现和测试。
+- 结论：
+  - `已把 O2 的 callsite 同步改写合同收口到当前实现/测试/ignored smoke 口径，并收回 O1 旧的 callsite 必须失败表述；本轮未改实现和测试。`
+
+- 时间：`2026-04-04 09:50:28 +0800`
+- 经办人：`咯咯咯`
+- 任务：`T-20260404-af25a1a7`
+- 任务目标：`完成前自检 O2 的计划/spec/记录口径是否已与当前实现、测试和 ignored expectation smoke 完全一致，并确认本轮未越界修改实现或测试。`
+- 改动：
+  - 复核计划与 `spec` 中旧的 `unrewritten_callsite` / `test_rewrite_rejects_unrewritten_callsite` 映射已收回，当前口径统一改为 `test_rewrite_callsite_replaces_old_memory_result_ssa`、`test_pass_manager_runs_lower_then_buffer_results_to_out_params`、`test_pipeline_position_pass_manager_runs_lower_then_buffer_results_to_out_params` 与 ignored smoke `callsite_rewrite.py`。
+  - 执行 `pytest -q test/pass/test_buffer_results_to_out_params.py -k 'single_memory_result or external_declaration or callsite or pipeline_position'`，结果 `4 passed, 1 deselected`。
+  - 执行 `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py`，结果通过。
+  - 执行 `git diff --check -- ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md` 与 `git diff --check -- spec/pass/lowering/buffer_results_to_out_params.md agents/.../20260404-buffer-out-params-o1.md`，结果均通过。
+- 结论：
+  - `自检通过：O2 的计划/spec/记录口径已与当前实现、测试和 ignored smoke 一致；本轮未修改实现和测试。`
+
+- 时间：`2026-04-04 10:02:14 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-e27b5d40`
+- 任务目标：`按 O2 复审边界只读核对主目录计划、worktree spec 与同链记录，确认 caller/callee 同步改写成功口径、验证命令与 BROTP-003/004/005 映射已和当前实现、test/pass/test_buffer_results_to_out_params.py 与 ignored expectation smoke 一致，并确认 O1 旧 callsite 必须失败表述已收回。`
+- 审查前自检：
+  - 证据充分性：已核对 `O2` 计划条目、当前 `spec/pass/lowering/buffer_results_to_out_params.md`、同链最新记录、`test/pass/test_buffer_results_to_out_params.py`、ignored expectation `expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py`，并实跑 `O2` gate、全量测试和 smoke。
+  - 功能正确性：当前 caller/callee 同步改写成功口径、pass 固定顺序、旧 SSA 清理与 expectation 输出一致。
+  - 边界条件：确认 `O1` 正文已收口回最小骨架边界，不再把模块内可解析 callsite 失败当作现行长期合同。
+  - 异常路径与潜在漏洞：未见实现/测试/计划之间仍保留双口径；external declaration 显式失败边界仍在；ignored expectation 仅作为 smoke 证据，不冒充 tracked 业务合同。
+  - 计划/`spec`/实现/测试/记录一致性：通过。
+- 审查结论：
+  - `通过`
+- 审查结果：
+  - [`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md#L382) 到 [`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md#L433) 的 `O2` 条目已明确把长期合同收口为“模块内 caller/callee 同步改写成功”，并把验收标准锁到 `test_rewrite_callsite_replaces_old_memory_result_ssa`、`test_pass_manager_runs_lower_then_buffer_results_to_out_params`、`test_pipeline_position_pass_manager_runs_lower_then_buffer_results_to_out_params` 与 ignored smoke `callsite_rewrite.py`。
+  - [`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md#L332) 到 [`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md#L381) 的 `O1` 当前正文已收回旧 callsite-fail 口径；现行 `O1` 验证命令只剩 `single_memory_result or external_declaration`，没有再把模块内可解析 callsite 失败当作持续门禁。
+  - [`buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/buffer_results_to_out_params.md#L127) 到 [`buffer_results_to_out_params.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/spec/pass/lowering/buffer_results_to_out_params.md#L165) 已和 `O2` 对齐：模块内可解析 `caller + callee` 必须同步改写成功，`BROTP-003/004/005` 分别映射 callsite 成功改写、pipeline 固定顺序和 ignored expectation smoke。
+  - [`test_buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_buffer_results_to_out_params.py#L165) 到 [`test_buffer_results_to_out_params.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_buffer_results_to_out_params.py#L280) 与 ignored expectation [`callsite_rewrite.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py#L1) 当前都在锁定同一口径：callee 的 memory result -> 前置 `arg0`，caller 显式补 out 实参，`func.call` 零 memory result，pass 顺序固定为 `LowerNnToKernelPass -> BufferResultsToOutParamsPass`。
+  - 同链最新记录 [`20260404-buffer-out-params-o1.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md#L267) 到 [`20260404-buffer-out-params-o1.md`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md#L289) 已明确写明：`O2` 计划/`spec` 已改成成功口径，旧 `unrewritten_callsite` 映射已收回。
+- 漏洞与边界排查：
+  - 输入校验绕过：未见 caller 留在旧 SSA 口径的静默放行合同残留。
+  - 类型/形状绕过：本轮只读复审未见新的类型/形状歧义；caller 新 out buffer 继续复用原 memory type。
+  - 错误处理缺失：external declaration 失败边界仍保留，且 `O2` 未把它误删。
+  - 状态污染：未见 `O1`/`O2` 双口径并存；旧失败口径仅存在于历史记录条目，不再是当前合同。
+  - 资源释放问题：ignored smoke 和单测都证明 caller 新 out buffer 被实际消费，不是空占位。
+- 验证：
+  - `python -m pytest -q test/pass/test_buffer_results_to_out_params.py -k 'callsite or pipeline_position'` -> `2 passed, 3 deselected`
+  - `python -m pytest -q test/pass/test_buffer_results_to_out_params.py` -> `5 passed`
+  - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py` -> `0`
+  - `git -C /home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1 diff --check -- spec/pass/lowering/buffer_results_to_out_params.md agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md` -> `0`
+  - `git -C /home/lfr/kernelcode_generate diff --check -- ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md` -> `0`
+- 下一步建议：
+  - 进入同链合并阶段；合并范围必须覆盖当前已完成的 `O1 + O2` 全部 `计划 / spec / 实现 / 测试 / 记录文件`。ignored expectation `callsite_rewrite.py` 用作 smoke 证据，但若仍处于 ignored 状态，应在合并任务里明确说明不属于 tracked 合并范围。
+
+- 时间：`2026-04-04 10:03:27 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-e27b5d40`
+- 任务目标：`完成当前 O2 复审任务流转，并按同链路补建唯一后续合并任务。`
+- 执行：
+  - 已执行 `-done`：
+    - `bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file TODO.md -done -task_id T-20260404-e27b5d40 -log wt-20260404-buffer-out-params-o1/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md -agents-list agents/codex-multi-agents/agents-lists.md`
+    - 结果：`OK: done T-20260404-e27b5d40`
+  - 已新建唯一后续任务：
+    - `T-20260404-180b9d77`
+    - 任务方向：按整条已完成链路合并 `O1 + O2` 的 `计划 / spec / 实现 / 测试 / 记录文件`。
+- 合并范围确认：
+  - `ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md`
+  - `wt-20260404-buffer-out-params-o1/spec/pass/lowering/buffer_results_to_out_params.md`
+  - `wt-20260404-buffer-out-params-o1/spec/pass/pass_manager.md`
+  - `wt-20260404-buffer-out-params-o1/spec/pass/lowering/nn_to_kernel.md`
+  - `wt-20260404-buffer-out-params-o1/spec/dsl/gen_kernel.md`
+  - `wt-20260404-buffer-out-params-o1/kernel_gen/passes/lowering/__init__.py`
+  - `wt-20260404-buffer-out-params-o1/kernel_gen/passes/lowering/buffer_results_to_out_params.py`
+  - `wt-20260404-buffer-out-params-o1/test/pass/test_buffer_results_to_out_params.py`
+  - `wt-20260404-buffer-out-params-o1/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md`
+  - ignored smoke 证据：`wt-20260404-buffer-out-params-o1/expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py` 仅用于验证，不默认视为 tracked 合并范围。
+- 结论：
+  - `T-20260404-e27b5d40` 已完成并封板。
+  - 后续链路已按当前规则衔接到整链合并阶段，等待管理员核对并分发 `T-20260404-180b9d77`。

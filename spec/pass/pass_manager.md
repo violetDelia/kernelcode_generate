@@ -23,6 +23,7 @@
 - 提供可组合的 Pass 管理器，支持按顺序执行多个 Pass。
 - 统一 Pass 的注册、执行与错误传播规则，便于后续实现与测试闭环。
 - 冻结 analysis pass 在 manager 中的承接方式：`run(module)` 继续返回单一 `module`，不追加 summary 或第二返回值。
+- 对 lowering 链固定公开一个可验证顺序示例：当模块内存在 `memory-return func.func + func.call` 链路时，`BufferResultsToOutParamsPass` 必须运行在 `LowerNnToKernelPass` 之后，避免 caller/callee ABI 停留在双口径。
 
 ## 限制与边界
 
@@ -101,6 +102,14 @@ summary = cost_pass.get_summary("main")
 
 - Pass 执行顺序与添加顺序一致。
 - 当列表中包含 analysis pass 时，manager 仍只负责串联 `run(target)` 的单返回值流，不新增 `(module, summary)` 一类包装协议。
+- 对 `memory-return` lowering 链，当前固定示例顺序是：
+
+```python
+pm = PassManager(name="lowering")
+pm.add_pass(LowerNnToKernelPass())
+pm.add_pass(BufferResultsToOutParamsPass())
+module = pm.run(module)
+```
 
 前置条件：
 
@@ -214,6 +223,7 @@ summary = cost_pass.get_summary("main")
 - 验证空管理器执行返回原输入。
 - 验证显式注册非法 Pass 时触发 `TypeError`。
 - 验证 Pass 异常可向上抛出。
+- 验证 `LowerNnToKernelPass -> BufferResultsToOutParamsPass` 的 lowering 顺序在 `memory-return` 链路上可被门禁测试机械锁定。
 - 当前下游验收标准建议补充 analysis pass 单返回路径验证：`test_pass_manager_runs_analysis_pass_without_second_return` 与 `test_pass_manager_preserves_analysis_side_effects`；在专项测试落地前，不将其写成当前已闭环映射。
 
 ### 功能与用例清单
