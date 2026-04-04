@@ -48,7 +48,7 @@
 - `store(...)` / `deslice(...)` 的 target 允许来自前序 `alloc/view/reshape/flatten/cast/copy/img2col/matmul/get_dynamic_memory` 等 memory 表达式；emit 阶段必须对该 target 先求值再执行写回，不得退回只允许函数输入张量的旧口径。
 - 当 `CompareExprAST(op="ne")` 来自 `lhs != rhs` 入口且两侧为 `nn.memory` 时，必须 lowering 为 `nn.ne`；允许按隐式 broadcast 规则插入 `nn.broadcast`，若无法广播必须报错 `Implicit broadcast dimension mismatch`，若 element type 不一致必须报错 `Binary op operands must have the same element_type`。
 - 当 `BinaryExprAST(op="mul")` 来自 `lhs * rhs` 或 `nn.mul(lhs, rhs)` 入口且两侧为 `nn.memory` 时，必须 lowering 为 `nn.mul`；若 shape 不一致但可 broadcast，允许按需插入 `nn.broadcast`，若不可 broadcast 必须报错 `Implicit broadcast dimension mismatch`。当两侧 `element_type` 不一致但 `space` 一致时，必须按二元算术 dtype promotion（`i32 < f16 < f32`）决议目标 element_type，并仅对非目标侧插入 `dma.cast` 再发射 `nn.mul`；若 `space` 不一致必须报错 `Binary op operands must have the same space`。
-- `free` 必须作为语句型 helper 处理，不产生新的 SSA 结果，也不承诺生成独立的 `dma.free` op。
+- `free` 必须作为语句型 helper 处理，不产生新的 SSA 结果，并在 emit 阶段生成单个 `dma.free`。
 - `ArchQueryAST(query_name="get_block_id")` 必须 lowering 为单个 `arch.get_block_id`，并保持结果类型为 `!symbol.int<"block_id">`。
 - `ArchQueryAST(query_name="get_block_num")` 必须 lowering 为单个 `arch.get_block_num`，并保持结果类型为 `!symbol.int<"block_num">`。
 - `ArchQueryAST(query_name="get_subthread_id")` 必须 lowering 为单个 `arch.get_subthread_id`，并保持结果类型为 `!symbol.int<"subthread_id">`。
@@ -141,16 +141,35 @@ value = emit_mlir(expr_ast, ctx)
 - 当二元算术 mixed dtype 需要插入显式 cast 时（由上游判定并生成 `DmaCastAST`），`emit_mlir` 必须发射 `dma.cast` 并保证 `nn.sub` 的结果类型与 dtype promotion 结果一致；当前公开覆盖仅限 `nn.sub` 的 mixed dtype 场景。
 - 当 `BinaryExprAST(op="mul")` 走 memory 路径时，`emit_mlir` 必须负责 `dtype promotion + dma.cast + broadcast` 的完整对齐流程：`element_type` 不一致时按 `i32 < f16 < f32` 决议目标类型并插入最少 `dma.cast`，shape 不一致时按 implicit broadcast 对齐；若 `space` 不一致必须报错 `Binary op operands must have the same space`，若 dtype 组合不受支持则报错 `Binary op operands must have the same element_type`。
 - 当 `CallAST(name="img2col1d"| "img2col2d")` 进入 emit 阶段时，helper 参数必须一一映射到 `nn.img2col1d/nn.img2col2d` 属性与 operand；若参数个数或类型不匹配，必须在 emit 入口报错并保留位置。
-- DMA helper 的公开 lowering 约束如下：
-  - `alloc(...)`：lowering 为 `dma.alloc`，返回新的 memory value。
-  - `copy(...)`：lowering 为 `dma.copy`，返回目标 memory value。
-  - `cast(...)`：lowering 为 `dma.cast`，返回转换后 memory value。
-  - `view(...)`：lowering 为 `dma.view`，返回视图 memory value；`view(...) -> dma.view` 是一一映射，不得回退为 generic unsupported。若 source 不是 `nn.memory`，或 offset/size/stride 参数不满足 DMA helper 约束，必须报具体的 `view(...)` lowering 错误。
-  - `reshape(...)`：lowering 为 `dma.reshape`，返回重排后的 memory value。
-  - `flatten(...)`：按一维 `reshape` 语义 lowering，返回一维 memory value。
-  - `load(...)` / `slice(...)`：lowering 为读取类 DMA op，返回读取结果。
-  - `store(...)` / `deslice(...)`：lowering 为写回类 DMA op，作为语句执行。
-  - `free(...)`：lowering 为单个 `dma.free` 语句，不产生新的 SSA 返回值。
+- DMA/NN helper lowering 矩阵与失败边界如下（emit 阶段必须在入口校验并保留错误位置）：
+
+  **DMA helper lowering**
+
+  | helper | lowering | 结果 | 非法输入失败边界 |
+  | --- | --- | --- | --- |
+  | `alloc(...)` | `dma.alloc` | memory value | 参数个数/类型不匹配、`shape/stride/format` 不可规范化时必须报错。 |
+  | `copy(...)` | `dma.alloc + dma.copy` | memory value（返回 alloc 结果） | `source` 不是 `nn.memory` 或目标空间参数非法时必须报错。 |
+  | `cast(...)` | `dma.cast` | memory value | `source` 不是 `nn.memory` 或 `dtype` 非法时必须报错。 |
+  | `view(...)` | `dma.view` | memory value | `source` 非 `nn.memory` 或 `offset/size/stride` 不满足 DMA helper 约束时必须报具体的 `view(...)` lowering 错误。 |
+  | `reshape(...)` | `dma.reshape` | memory value | `source` 非 `nn.memory`、非连续布局或 `numel` 不一致时必须报错。 |
+  | `flatten(...)` | `dma.reshape`（一维） | memory value | `source` 非 `nn.memory` 或非连续布局时必须报错。 |
+  | `load(...)` | `dma.load` | memory value | `source` 非 `nn.memory` 或索引/space 参数非法时必须报错。 |
+  | `slice(...)` | `dma.alloc + dma.slice` | memory value（返回 alloc 结果） | `source` 非 `nn.memory` 或索引/space 参数非法时必须报错。 |
+  | `store(...)` | `dma.store` | 语句 | `source/target` 非 `nn.memory` 或索引参数非法时必须报错。 |
+  | `deslice(...)` | `dma.deslice` | 语句 | 与 `store(...)` 相同。 |
+  | `free(...)` | `dma.free` | 语句 | 见下方固定诊断约定。 |
+
+  **NN helper lowering**
+
+  | helper | lowering | 结果 | 非法输入失败边界 |
+  | --- | --- | --- | --- |
+  | `img2col1d(...)` | `nn.img2col1d` | memory value | 参数个数或类型不匹配时必须在 emit 入口报错并保留位置。 |
+  | `img2col2d(...)` | `nn.img2col2d` | memory value | 参数个数或类型不匹配时必须在 emit 入口报错并保留位置；窗口化协同仅使用 `dma.slice/dma.deslice`。 |
+  | `matmul(...)` | `nn.matmul`（必要时插入 `dma.cast`） | memory value | `space` 不一致、rank 不是 `2` 或 contracting dim 不匹配时必须在 emit 入口报具体 lowering 错误。 |
+
+  **固定诊断约定**
+  - `free` 参数个数非法必须报错 `Unsupported free arity`。
+  - `free` source 非 `nn.memory` 必须报错 `Operand must be nn.memory`。
 - 当 AST 表达 `float(symbol.int)` 转换入口时，`emit_mlir` 必须 lowering 为 `symbol.to_float`，返回 `f32` 结果；`float(n) -> symbol.to_float` 是当前公开合同。若 source 不是 `!symbol.int<"expr">`，则必须报具体的 source 类型错误，而不是继续使用笼统 `Unsupported annotation` 或 generic unsupported 失败边界。
 - img2col helper 的公开 lowering 约束如下：
   - `img2col1d(...)`：lowering 为 `nn.img2col1d`，返回 `nn.memory` 结果。
