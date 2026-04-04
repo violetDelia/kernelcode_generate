@@ -42,14 +42,15 @@ from xdsl.dialects.builtin import (
     StringAttr,
 )
 from xdsl.ir import Attribute, Operation, SSAValue
-from kernel_gen.analysis.compute import ComputeKind
+from kernel_gen.analysis.compute import ComputeKind, iter_compute_analyzers_for_op
 from kernel_gen.analysis.memory import (
     MemoryPath,
+    iter_memory_analyzers_for_op,
     metric_value_to_expr,
     normalize_memory_path,
     time_from_memory_metrics,
 )
-from kernel_gen.analysis.memory.dma import analyze_dma_op
+from kernel_gen.analysis.memory.dma import DmaMemoryAnalysis
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.symbol_variable.memory import Memory
@@ -1720,52 +1721,125 @@ def _analyze_dma_ir_op(op: Operation, config: AnalysisConfig) -> _AnalyzedOp | N
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """
-    try:
-        analyzed = analyze_dma_op(
-            op,
-            path_latency_ns=config.path_latency_ns,
-            path_bandwidth=config.path_bandwidth,
-            dtype_size_overrides=_normalize_dtype_overrides(config.dtype_size_overrides),
-        )
-    except ValueError as exc:
-        raise AnalysisError(str(exc)) from exc
+    from kernel_gen.analysis.memory import analyze_dma_memory_op
+
+    analyzed = analyze_dma_memory_op(op, config)
     if analyzed is None:
         return None
-    memory_items = []
-    if config.enable_memory:
-        memory_items = [
-            MemoryItem(
-                path=item[0],
-                access=item[1],
-                bytes=item[2],
-                latency_ns=item[3],
-                bandwidth=item[4],
-                time_ns=item[5],
-            )
-            for item in analyzed.memory_items
-        ]
+    return _coerce_memory_analyzer_result(analyzed, config)
+
+
+def _merge_analyzed_ops(op: Operation, analyzed_ops: Sequence[_AnalyzedOp]) -> _AnalyzedOp:
+    """合并多个 analyzer 的单 op 统计。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 汇总 compute/memory 的统计项。
+    - 允许同一 op 同时命中 compute 与 memory analyzer。
+
+    使用示例:
+    - merged = _merge_analyzed_ops(op, [analyzed_compute, analyzed_memory])
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+    compute_items: list[ComputeItem] = []
+    memory_items: list[MemoryItem] = []
+    compute_total = sp.Integer(0)
+    read_bytes_total = sp.Integer(0)
+    write_bytes_total = sp.Integer(0)
+    value_reads: list[tuple[SSAValue, sp.Basic]] = []
+    direct_writes: list[tuple[SSAValue, sp.Basic]] = []
+    result_write_bytes = sp.Integer(0)
+
+    for analyzed in analyzed_ops:
+        compute_items.extend(analyzed.compute_items)
+        memory_items.extend(analyzed.memory_items)
+        compute_total += analyzed.compute
+        read_bytes_total += analyzed.read_bytes
+        write_bytes_total += analyzed.write_bytes
+        value_reads.extend(analyzed.value_reads)
+        direct_writes.extend(analyzed.direct_writes)
+        result_write_bytes += analyzed.result_write_bytes
+
     return _AnalyzedOp(
-        op_name=analyzed.op_name,
-        compute_items=[],
+        op_name=op.name,
+        compute_items=compute_items,
         memory_items=memory_items,
-        compute=sp.Integer(0),
-        read_bytes=analyzed.read_bytes if config.enable_memory else sp.Integer(0),
-        write_bytes=analyzed.write_bytes if config.enable_memory else sp.Integer(0),
-        value_reads=analyzed.value_reads if config.enable_memory else (),
-        direct_writes=analyzed.direct_writes if config.enable_memory else (),
-        result_write_bytes=analyzed.result_write_bytes if config.enable_memory else sp.Integer(0),
+        compute=compute_total,
+        read_bytes=read_bytes_total,
+        write_bytes=write_bytes_total,
+        value_reads=tuple(value_reads),
+        direct_writes=tuple(direct_writes),
+        result_write_bytes=result_write_bytes,
     )
+
+
+def _coerce_memory_analyzer_result(
+    analyzed: DmaMemoryAnalysis | _AnalyzedOp,
+    config: AnalysisConfig,
+) -> _AnalyzedOp:
+    """将 memory analyzer 结果归一为 `_AnalyzedOp`。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 兼容 DMA memory analyzer 现有输出结构。
+    - 允许 memory analyzer 直接返回 `_AnalyzedOp`。
+
+    使用示例:
+    - normalized = _coerce_memory_analyzer_result(analyzed, config)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+    if isinstance(analyzed, _AnalyzedOp):
+        return analyzed
+    if isinstance(analyzed, DmaMemoryAnalysis):
+        memory_items: list[MemoryItem] = []
+        if config.enable_memory:
+            memory_items = [
+                MemoryItem(
+                    path=item[0],
+                    access=item[1],
+                    bytes=item[2],
+                    latency_ns=item[3],
+                    bandwidth=item[4],
+                    time_ns=item[5],
+                )
+                for item in analyzed.memory_items
+            ]
+        return _AnalyzedOp(
+            op_name=analyzed.op_name,
+            compute_items=[],
+            memory_items=memory_items,
+            compute=sp.Integer(0),
+            read_bytes=analyzed.read_bytes if config.enable_memory else sp.Integer(0),
+            write_bytes=analyzed.write_bytes if config.enable_memory else sp.Integer(0),
+            value_reads=analyzed.value_reads if config.enable_memory else (),
+            direct_writes=analyzed.direct_writes if config.enable_memory else (),
+            result_write_bytes=analyzed.result_write_bytes if config.enable_memory else sp.Integer(0),
+        )
+    raise AnalysisError(f"unsupported memory analyzer result: {type(analyzed).__name__}")
 
 
 def _analyze_ir_op(op: Operation, config: AnalysisConfig) -> _AnalyzedOp | None:
     """分析单个 IR op。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 统一分发 scalar kernel、nn、公开 DMA 分支。
+    - 统一分发 compute/memory registry。
     - 未支持 op 返回 `None`，由上层决定是否 warning/skip。
+    - 允许同一 op 同时命中 compute 与 memory analyzer。
 
     使用示例:
     - analyzed = _analyze_ir_op(op, config)
@@ -1775,17 +1849,18 @@ def _analyze_ir_op(op: Operation, config: AnalysisConfig) -> _AnalyzedOp | None:
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """
-
-    for analyzer in (
-        _analyze_scalar_kernel_op,
-        _analyze_nn_elementwise_op,
-        _analyze_nn_matmul_ir_op,
-        _analyze_dma_ir_op,
-    ):
+    analyzed_ops: list[_AnalyzedOp] = []
+    for analyzer in iter_compute_analyzers_for_op(op):
         analyzed = analyzer(op, config)
         if analyzed is not None:
-            return analyzed
-    return None
+            analyzed_ops.append(analyzed)
+    for analyzer in iter_memory_analyzers_for_op(op):
+        analyzed = analyzer(op, config)
+        if analyzed is not None:
+            analyzed_ops.append(_coerce_memory_analyzer_result(analyzed, config))
+    if not analyzed_ops:
+        return None
+    return _merge_analyzed_ops(op, analyzed_ops)
 
 
 def _result_from_analyzed_op(op: Operation, analyzed: _AnalyzedOp, config: AnalysisConfig) -> AnalysisResult:
