@@ -219,46 +219,6 @@ class _KernelEmitter:
     def __init__(self, ctx: EmitCContext) -> None:
         self.ctx = ctx
 
-    def emit(self, op_or_func: Any) -> str:
-        if isinstance(op_or_func, func.FuncOp):
-            return self._emit_func(op_or_func)
-        if isinstance(op_or_func, func.ReturnOp):
-            raise GenKernelError(f"target={self.ctx.target}: func.return/out binding must be emitted in function main flow")
-        return emit_c_op(op_or_func, self.ctx)
-
-    def _emit_func(self, func_op: func.FuncOp) -> str:
-        strategy = self._select_func_strategy(func_op)
-        signature = strategy.build_signature(func_op, self._emit_default_signature)
-        self.ctx.push_indent()
-        body = strategy.emit_body(func_op)
-        self.ctx.pop_indent()
-        if body:
-            return f"{signature} {{\n{body}\n}}"
-        return f"{signature} {{\n}}"
-
-    def _function_strategies(self) -> tuple[_FunctionStrategy, ...]:
-        return (
-            _FunctionStrategy(
-                "npu_demo_body_level_kernel",
-                self._is_npu_demo_body_level_kernel,
-                self._emit_npu_demo_body_level_kernel_body,
-                self._emit_npu_demo_body_level_kernel_signature,
-            ),
-            _FunctionStrategy(
-                "cpu_conv2d_img2col2d_tiled",
-                self._is_cpu_conv2d_img2col2d_tiled,
-                self._emit_cpu_conv2d_img2col2d_tiled_body,
-                self._emit_cpu_conv2d_img2col2d_tiled_signature,
-            ),
-            _FunctionStrategy("default", lambda _func_op: True, self._emit_default_function_body),
-        )
-
-    def _select_func_strategy(self, func_op: func.FuncOp) -> _FunctionStrategy:
-        for strategy in self._function_strategies():
-            if strategy.matches(func_op):
-                return strategy
-        raise _error(self.ctx, func_op.sym_name.data, "no function emission strategy")
-
     def _is_cpu_conv2d_img2col2d_tiled(self, func_op: func.FuncOp) -> bool:
         return self.ctx.target == "cpu" and func_op.sym_name.data == "conv2d_img2col2d_tiled"
 
@@ -460,61 +420,6 @@ class _KernelEmitter:
         ]
         return "\n".join(lines)
 
-    def _emit_default_signature(self, func_op: func.FuncOp) -> str:
-        """生成默认 rewrite-after-IR 函数签名。
-
-        创建者: jcc你莫辜负
-        最后一次更改: jcc你莫辜负
-
-        功能说明:
-        - 默认 CPU/通用路径只消费已经过 `BufferResultsToOutParamsPass` 的 IR。
-        - 最前面连续且显式命名为 `arg0/arg1/...` 的 `Memory` 参数生成为 out 参数，其余 `Memory` 参数保持只读输入。
-        - 若函数仍保留旧 `memory return` ABI，则显式报错，阻止后端继续隐式推导 `out`。
-
-        使用示例:
-        - signature = self._emit_default_signature(func_op)
-
-        关联文件:
-        - spec: spec/dsl/gen_kernel.md
-        - test: test/dsl/test_gen_kernel.py
-        - 功能实现: kernel_gen/dsl/gen_kernel.py
-        """
-        func_name = func_op.sym_name.data
-        input_types = list(func_op.function_type.inputs.data)
-        result_types = list(func_op.function_type.outputs.data)
-        if len(result_types) > 1:
-            raise _error(self.ctx, func_name, "unsupported return form")
-        if result_types and isinstance(result_types[0], NnMemoryType):
-            raise _error(
-                self.ctx,
-                func_name,
-                "legacy memory return ABI is not supported; run BufferResultsToOutParamsPass first",
-            )
-        if result_types:
-            result_type = result_types[0]
-            if isinstance(result_type, SymbolValueType) and self.ctx.target != "cpu":
-                raise _error(self.ctx, func_name, "symbol scalar return is cpu-only")
-            _type_to_c(result_type)
-
-        arg_names = _extract_arg_names(func_op)
-        leading_out_params = _leading_rewritten_out_param_count(func_op)
-        params: list[str] = []
-        for index, (arg_name, arg_type, arg_value) in enumerate(zip(arg_names, input_types, func_op.args, strict=True)):
-            self.ctx.bind_name(arg_value, arg_name)
-            if isinstance(arg_type, NnMemoryType):
-                if index < leading_out_params:
-                    params.append(f"{_type_to_c(arg_type)}& {arg_name}")
-                else:
-                    params.append(f"const {_type_to_c(arg_type)}& {arg_name}")
-            else:
-                params.append(f"{_type_to_c(arg_type)} {arg_name}")
-
-        return_type = "void"
-        if result_types:
-            return_type = _type_to_c(result_types[0])
-
-        return f"{return_type} {func_name}({', '.join(params)})"
-
     def _is_returned_output_alloc(self, func_op: func.FuncOp, op: DmaAllocOp) -> bool:
         if self.ctx.target != "cpu":
             return False
@@ -522,24 +427,6 @@ class _KernelEmitter:
         if len(result_types) != 1 or not isinstance(result_types[0], NnMemoryType):
             return False
         return any(isinstance(use.operation, func.ReturnOp) for use in op.result.uses)
-
-    def _is_direct_return_nn_add(self, return_op: func.ReturnOp) -> bool:
-        if self.ctx.target != "cpu":
-            return False
-        if len(return_op.arguments) != 1:
-            return False
-        returned = return_op.arguments[0]
-        owner = getattr(returned, "owner", None)
-        if not isinstance(owner, NnAddOp):
-            return False
-        if not owner.result.has_one_use():
-            return False
-        return owner.result.get_user_of_unique_use() is return_op
-
-    def _has_cpu_direct_return_nn_add(self, func_op: func.FuncOp) -> bool:
-        if self.ctx.target != "cpu":
-            return False
-        return any(isinstance(op, func.ReturnOp) and self._is_direct_return_nn_add(op) for op in func_op.body.block.ops)
 
     def _emit_return_statement(
         self,
@@ -624,6 +511,119 @@ class _KernelEmitter:
             if stmt:
                 lines.append(stmt)
         return "\n".join(lines)
+
+    def _function_strategies(self) -> tuple[_FunctionStrategy, ...]:
+        return (
+            _FunctionStrategy(
+                "npu_demo_body_level_kernel",
+                self._is_npu_demo_body_level_kernel,
+                self._emit_npu_demo_body_level_kernel_body,
+                self._emit_npu_demo_body_level_kernel_signature,
+            ),
+            _FunctionStrategy(
+                "cpu_conv2d_img2col2d_tiled",
+                self._is_cpu_conv2d_img2col2d_tiled,
+                self._emit_cpu_conv2d_img2col2d_tiled_body,
+                self._emit_cpu_conv2d_img2col2d_tiled_signature,
+            ),
+            _FunctionStrategy("default", lambda _func_op: True, self._emit_default_function_body),
+        )
+
+    def _select_func_strategy(self, func_op: func.FuncOp) -> _FunctionStrategy:
+        for strategy in self._function_strategies():
+            if strategy.matches(func_op):
+                return strategy
+        raise _error(self.ctx, func_op.sym_name.data, "no function emission strategy")
+
+    def _emit_default_signature(self, func_op: func.FuncOp) -> str:
+        """生成默认 rewrite-after-IR 函数签名。
+
+        创建者: jcc你莫辜负
+        最后一次更改: jcc你莫辜负
+
+        功能说明:
+        - 默认 CPU/通用路径只消费已经过 `BufferResultsToOutParamsPass` 的 IR。
+        - 最前面连续且显式命名为 `arg0/arg1/...` 的 `Memory` 参数生成为 out 参数，其余 `Memory` 参数保持只读输入。
+        - 若函数仍保留旧 `memory return` ABI，则显式报错，阻止后端继续隐式推导 `out`。
+
+        使用示例:
+        - signature = self._emit_default_signature(func_op)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
+        func_name = func_op.sym_name.data
+        input_types = list(func_op.function_type.inputs.data)
+        result_types = list(func_op.function_type.outputs.data)
+        if len(result_types) > 1:
+            raise _error(self.ctx, func_name, "unsupported return form")
+        if result_types and isinstance(result_types[0], NnMemoryType):
+            raise _error(
+                self.ctx,
+                func_name,
+                "legacy memory return ABI is not supported; run BufferResultsToOutParamsPass first",
+            )
+        if result_types:
+            result_type = result_types[0]
+            if isinstance(result_type, SymbolValueType) and self.ctx.target != "cpu":
+                raise _error(self.ctx, func_name, "symbol scalar return is cpu-only")
+            _type_to_c(result_type)
+
+        arg_names = _extract_arg_names(func_op)
+        leading_out_params = _leading_rewritten_out_param_count(func_op)
+        params: list[str] = []
+        for index, (arg_name, arg_type, arg_value) in enumerate(zip(arg_names, input_types, func_op.args, strict=True)):
+            self.ctx.bind_name(arg_value, arg_name)
+            if isinstance(arg_type, NnMemoryType):
+                if index < leading_out_params:
+                    params.append(f"{_type_to_c(arg_type)}& {arg_name}")
+                else:
+                    params.append(f"const {_type_to_c(arg_type)}& {arg_name}")
+            else:
+                params.append(f"{_type_to_c(arg_type)} {arg_name}")
+
+        return_type = "void"
+        if result_types:
+            return_type = _type_to_c(result_types[0])
+
+        return f"{return_type} {func_name}({', '.join(params)})"
+
+    def _emit_func(self, func_op: func.FuncOp) -> str:
+        strategy = self._select_func_strategy(func_op)
+        signature = strategy.build_signature(func_op, self._emit_default_signature)
+        self.ctx.push_indent()
+        body = strategy.emit_body(func_op)
+        self.ctx.pop_indent()
+        if body:
+            return f"{signature} {{\n{body}\n}}"
+        return f"{signature} {{\n}}"
+
+    def emit(self, op_or_func: Any) -> str:
+        if isinstance(op_or_func, func.FuncOp):
+            return self._emit_func(op_or_func)
+        if isinstance(op_or_func, func.ReturnOp):
+            raise GenKernelError(f"target={self.ctx.target}: func.return/out binding must be emitted in function main flow")
+        return emit_c_op(op_or_func, self.ctx)
+
+    def _is_direct_return_nn_add(self, return_op: func.ReturnOp) -> bool:
+        if self.ctx.target != "cpu":
+            return False
+        if len(return_op.arguments) != 1:
+            return False
+        returned = return_op.arguments[0]
+        owner = getattr(returned, "owner", None)
+        if not isinstance(owner, NnAddOp):
+            return False
+        if not owner.result.has_one_use():
+            return False
+        return owner.result.get_user_of_unique_use() is return_op
+
+    def _has_cpu_direct_return_nn_add(self, func_op: func.FuncOp) -> bool:
+        if self.ctx.target != "cpu":
+            return False
+        return any(isinstance(op, func.ReturnOp) and self._is_direct_return_nn_add(op) for op in func_op.body.block.ops)
 
     def _emit_cpu_direct_return_nn_add_body(self, func_op: func.FuncOp) -> str:
         lines: list[str] = []
