@@ -41,6 +41,71 @@ class _SymbolDim:
     """
 
     @staticmethod
+    def _coerce_symbol_expr(
+        value: int | str | sp.Basic | "_SymbolDim" | float | object,
+        *,
+        float_error: str,
+        type_error_prefix: str,
+    ) -> sp.Basic:
+        """统一将输入规整为内部 sympy 表达式。
+
+        创建者: 大闸蟹
+        最后一次更改: 大闸蟹
+
+        功能说明:
+        - 统一处理 `_SymbolDim`、`int`、`str`、`sympy.Basic` 的规整逻辑。
+        - 通过参数保留构造路径与操作数路径各自的错误消息。
+
+        使用示例:
+        - _SymbolDim._coerce_symbol_expr("N", float_error="...", type_error_prefix="...")
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+        if isinstance(value, _SymbolDim):
+            return value.get_symbol()
+        if isinstance(value, float):
+            raise NotImplementedError(float_error)
+        if isinstance(value, int):
+            return sp.Integer(value)
+        if isinstance(value, str):
+            return _SymbolDim._symbol_from_str(value)
+        if isinstance(value, sp.Basic):
+            return _SymbolDim._normalize_symbol(value)
+        raise TypeError(f"{type_error_prefix}: {type(value)!r}")
+
+    def __init__(self, sym: int | str | sp.Basic) -> None:
+        """初始化符号维度。
+
+        创建者: 小李飞刀
+        最后一次更改: 我不是牛马
+
+        功能说明:
+        - int 转为 sympy.Integer。
+        - str 必须为非纯数字且非空白字符串，转为 sympy.symbols(..., integer=True, real=True)。
+        - sympy.Basic 默认直接保存；若为未设定假设的 Symbol，则统一为 integer=True, real=True。
+        - 纯数字字符串或空白字符串抛 ValueError。
+        - 其他类型抛 TypeError。
+
+        使用示例:
+        - SymbolDim(16)
+        - SymbolDim("N")
+        - SymbolDim(sp.symbols("M"))
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+        self.sym = self._coerce_symbol_expr(
+            sym,
+            float_error="Float input is not supported",
+            type_error_prefix="Unsupported SymbolDim type",
+        )
+
+    @staticmethod
     def _normalize_str(value: str) -> str:
         """统一规范化字符串输入并校验。
 
@@ -109,71 +174,6 @@ class _SymbolDim:
         if isinstance(sym, sp.Symbol) and sym.is_integer is None and sym.is_real is None:
             return _SymbolDim._symbol_from_str(sym.name)
         return sym
-
-    @staticmethod
-    def _coerce_symbol_expr(
-        value: int | str | sp.Basic | "_SymbolDim" | float | object,
-        *,
-        float_error: str,
-        type_error_prefix: str,
-    ) -> sp.Basic:
-        """统一将输入规整为内部 sympy 表达式。
-
-        创建者: 大闸蟹
-        最后一次更改: 大闸蟹
-
-        功能说明:
-        - 统一处理 `_SymbolDim`、`int`、`str`、`sympy.Basic` 的规整逻辑。
-        - 通过参数保留构造路径与操作数路径各自的错误消息。
-
-        使用示例:
-        - _SymbolDim._coerce_symbol_expr("N", float_error="...", type_error_prefix="...")
-
-        关联文件:
-        - spec: spec/symbol_variable/symbol_dim.md
-        - test: test/symbol_variable/test_symbol_dim.py
-        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
-        """
-        if isinstance(value, _SymbolDim):
-            return value.get_symbol()
-        if isinstance(value, float):
-            raise NotImplementedError(float_error)
-        if isinstance(value, int):
-            return sp.Integer(value)
-        if isinstance(value, str):
-            return _SymbolDim._symbol_from_str(value)
-        if isinstance(value, sp.Basic):
-            return _SymbolDim._normalize_symbol(value)
-        raise TypeError(f"{type_error_prefix}: {type(value)!r}")
-
-    def __init__(self, sym: int | str | sp.Basic) -> None:
-        """初始化符号维度。
-
-        创建者: 小李飞刀
-        最后一次更改: 我不是牛马
-
-        功能说明:
-        - int 转为 sympy.Integer。
-        - str 必须为非纯数字且非空白字符串，转为 sympy.symbols(..., integer=True, real=True)。
-        - sympy.Basic 默认直接保存；若为未设定假设的 Symbol，则统一为 integer=True, real=True。
-        - 纯数字字符串或空白字符串抛 ValueError。
-        - 其他类型抛 TypeError。
-
-        使用示例:
-        - SymbolDim(16)
-        - SymbolDim("N")
-        - SymbolDim(sp.symbols("M"))
-
-        关联文件:
-        - spec: spec/symbol_variable/symbol_dim.md
-        - test: test/symbol_variable/test_symbol_dim.py
-        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
-        """
-        self.sym = self._coerce_symbol_expr(
-            sym,
-            float_error="Float input is not supported",
-            type_error_prefix="Unsupported SymbolDim type",
-        )
 
     @staticmethod
     def _normalize_operand(value: int | str | sp.Basic | "_SymbolDim") -> sp.Basic:
@@ -250,25 +250,6 @@ class _SymbolDim:
                 return int(simplified)
             return float(simplified)
         return simplified
-
-    def __repr__(self) -> str:
-        """返回符号维度的字符串表示。
-
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
-
-        功能说明:
-        - 返回 str(get_symbol())。
-
-        使用示例:
-        - repr(SymbolDim("N"))
-
-        关联文件:
-        - spec: spec/symbol_variable/symbol_dim.md
-        - test: test/symbol_variable/test_symbol_dim.py
-        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
-        """
-        return str(self.get_symbol())
 
     def __add__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度加法。
@@ -494,6 +475,25 @@ class _SymbolDim:
         if not isinstance(other, (_SymbolDim, int, str, sp.Basic)):
             raise TypeError(f"Unsupported comparison type: {type(other)!r}")
         return self.get_symbol() == self._normalize_operand(other)
+
+    def __repr__(self) -> str:
+        """返回符号维度的字符串表示。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 返回 str(get_symbol())。
+
+        使用示例:
+        - repr(SymbolDim("N"))
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+        return str(self.get_symbol())
 
 
 class SymbolDim(_SymbolDim):
