@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # codex-multi-agents-tmux.sh
 #
+# 创建者: 榕
+# 最后一次更改: 金铲铲大作战
+#
 # 功能:
 # - 发送标准格式对话到目标会话并写入日志。
 # - 按名单初始化角色 tmux 运行环境。
@@ -10,6 +13,11 @@
 # - spec: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
 # - test: test/codex-multi-agents/test_codex-multi-agents-tmux.py
 # - impl: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
+#
+# 使用示例:
+# - 发送对话: codex-multi-agents-tmux.sh -talk -from scheduler -to worker-a -agents-list ./agents/codex-multi-agents/agents-lists.md -message "请处理任务 T1" -log ./agents/codex-multi-agents/log/talk.log
+# - 初始化: codex-multi-agents-tmux.sh -init-env -file ./agents/codex-multi-agents/agents-lists.md -name 小明
+# - 唤醒: codex-multi-agents-tmux.sh -wake -file ./agents/codex-multi-agents/agents-lists.md -name 小明
 
 set -u
 set -o pipefail
@@ -264,6 +272,7 @@ send_tmux_command_once() {
   local command_text="$2"
   tmux send-keys -t "$session" "$command_text" || err "$RC_INTERNAL" "tmux send-keys failed: $session"
   sleep 3 || err "$RC_INTERNAL" "sleep failed during command confirm: $command_text"
+  tmux send-keys -t "$session" ENTER || err "$RC_INTERNAL" "tmux send-keys failed: $session"
   tmux send-keys -t "$session" ENTER || err "$RC_INTERNAL" "tmux send-keys failed: $session"
 }
 

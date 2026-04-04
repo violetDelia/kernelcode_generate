@@ -45,7 +45,7 @@ codex-multi-agents-tmux.sh -talk -from "scheduler" -to "worker-a" -agents-list "
 
 - [immutable]发送文本格式固定为：`@<from>向@<to>发起会话: <message>`。
 - 使用 `-agents-list` 中目标角色 `-to` 对应的 `会话` 字段解析 tmux 目标会话名。
-- [immutable]使用命令 `tmux send-keys -t <session-id> "<formatted_message>"` 向目标会话发送消息，等待一秒后，使用 `tmux send-keys -t <session-id> ENTER` 确保消息被收到。
+- [immutable]使用命令 `tmux send-keys -t <session-id> "<formatted_message>"` 向目标会话发送消息，等待 3 秒后，使用 `tmux send-keys -t <session-id> ENTER` 连发 2 次，确保消息被收到。
 - 同步向 `-log` 文件追加一行同内容消息。
 - 若日志目录不存在，脚本会自动创建后再写入。
 

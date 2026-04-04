@@ -1,7 +1,7 @@
 """codex-multi-agents-tmux.sh tests.
 
 创建者: 榕
-最后一次更改: 神秘人
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 tmux 脚本的 talk / init-env / wake 主流程与错误返回码路径。
@@ -136,9 +136,9 @@ def run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.Comp
 
 # TC-001
 # 创建者: 榕
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-22 13:11:42 +0800
-# 最近一次运行成功时间: 2026-03-22 13:11:42 +0800
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-04 19:16:39 +0800
+# 最近一次运行成功时间: 2026-04-04 19:16:39 +0800
 # 测试目的: 验证 `-talk` 能通过 agents list 解析目标会话并发送格式化消息，同时向日志追加一行记录。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
@@ -179,7 +179,7 @@ def test_talk_send_and_append_log_success(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert "OK: talk scheduler -> worker-a (worker-a)" in result.stdout
     assert calls.count("send:worker-a:@scheduler向@worker-a发起会话: 请处理任务 T1:") == 1
-    assert calls.count("send:worker-a:ENTER:") == 1
+    assert calls.count("send:worker-a:ENTER:") == 2
     assert "@scheduler向@worker-a发起会话: 请处理任务 T1" in log_text
 
 
@@ -360,10 +360,10 @@ def test_talk_lock_conflict_returns_rc4(tmp_path: Path) -> None:
 
 # TC-006
 # 创建者: 榕
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-22 13:11:42 +0800
-# 最近一次运行成功时间: 2026-03-22 13:11:42 +0800
-# 测试目的: 验证 `-init-env` 能创建 codex 会话并发送 `/resume` 初始化命令。
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-04 19:16:39 +0800
+# 最近一次运行成功时间: 2026-04-04 19:16:39 +0800
+# 测试目的: 验证 `-init-env` 能创建 codex 会话并发送 `codex` 与 `/rename` 初始化命令。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
 def test_init_env_codex_creates_session_and_bootstraps(tmp_path: Path) -> None:
@@ -390,10 +390,10 @@ def test_init_env_codex_creates_session_and_bootstraps(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert "OK: init-env 小明 (xiaoming)" in result.stdout
     assert "new-session:xiaoming" in calls
-    assert calls.count("send:xiaoming:codex /resume agent-xiaoming:") == 1
-    assert calls.count("send:xiaoming:codex:") == 0
-    assert calls.count("send:xiaoming:/rename agent-xiaoming:") == 0
-    assert calls.count("send:xiaoming:ENTER:") == 1
+    assert calls.count("send:xiaoming:codex resume agent-xiaoming:") == 0
+    assert calls.count("send:xiaoming:codex:") == 1
+    assert calls.count("send:xiaoming:/rename agent-xiaoming:") == 1
+    assert calls.count("send:xiaoming:ENTER:") == 2
 
 
 # TC-007
@@ -430,10 +430,10 @@ def test_init_env_missing_agent_returns_rc3(tmp_path: Path) -> None:
 
 # TC-008
 # 创建者: 榕
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-22 13:11:42 +0800
-# 最近一次运行成功时间: 2026-03-22 13:11:42 +0800
-# 测试目的: 验证 `-wake` 能创建 codex 会话并发送 `codex` 与 `/rename` 命令。
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-04 19:16:39 +0800
+# 最近一次运行成功时间: 2026-04-04 19:16:39 +0800
+# 测试目的: 验证 `-wake` 能创建 codex 会话并发送 `codex resume` 命令。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-tmux.md
 def test_wake_codex_creates_session_and_resumes(tmp_path: Path) -> None:
@@ -460,11 +460,11 @@ def test_wake_codex_creates_session_and_resumes(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert "OK: wake 小明 (xiaoming)" in result.stdout
     assert "new-session:xiaoming" in calls
-    assert calls.count("send:xiaoming:codex:") == 1
-    assert calls.count("send:xiaoming:/rename agent-xiaoming:") == 1
-    assert calls.count("send:xiaoming:codex /resume agent-xiaoming:") == 0
+    assert calls.count("send:xiaoming:codex:") == 0
+    assert calls.count("send:xiaoming:/rename agent-xiaoming:") == 0
+    assert calls.count("send:xiaoming:codex resume agent-xiaoming:") == 1
     assert calls.count("send:xiaoming:/resume agent-xiaoming:") == 0
-    assert calls.count("send:xiaoming:ENTER:") == 2
+    assert calls.count("send:xiaoming:ENTER:") == 1
 
 
 # TC-009
