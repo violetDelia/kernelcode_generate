@@ -433,6 +433,44 @@
     - [`expectation/pass/lowing/buffer_results_to_out_params/multi_output.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/expectation/pass/lowing/buffer_results_to_out_params/multi_output.py)
     - [`expectation/pass/lowing/buffer_results_to_out_params/mixed_output.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/expectation/pass/lowing/buffer_results_to_out_params/mixed_output.py)
 
+- 时间：`2026-04-04 12:08:09 +0800`
+- 经办人：`金铲铲大作战`
+- 任务：`T-20260404-058c7123`
+- 任务目标：
+  - 按 [`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md) 的 `O4` 边界，只修改 `kernel_gen/passes/pass_manager.py`、`test/pass/test_pass_manager.py`、`test/pass/test_lowering_nn_to_kernel.py` 与同链记录，固定 `LowerNnToKernelPass -> BufferResultsToOutParamsPass` 顺序，并补齐 pre-lowered `nn` function / 半改半留 IR 的负门禁；不扩到 `O5`。
+- 改动：
+  - 修改 [`kernel_gen/passes/pass_manager.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/passes/pass_manager.py)
+    - 新增 `build_default_lowering_pass_manager(...)`，固定构造 `LowerNnToKernelPass -> BufferResultsToOutParamsPass` 的推荐调用链。
+    - 在 `PassManager.run(...)` 中加入显式顺序校验：若 `buffer-results-to-out-params` 出现在 `lower-nn-to-kernel` 之前，直接报 `ValueError("buffer-results-to-out-params requires lowered IR after lower-nn-to-kernel")`。
+    - 更新导出列表为 `Pass / PassManager / build_default_lowering_pass_manager`。
+  - 修改 [`test/pass/test_pass_manager.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_pass_manager.py)
+    - 新增 `test_pass_manager_builds_default_lowering_pipeline_for_buffer_results_to_out_params`，锁定推荐 helper 真实按 `Lower -> Buffer` 顺序执行。
+    - 新增 `test_pass_manager_rejects_buffer_results_to_out_params_before_lowering`，锁定 illegal placement 会在 `PassManager.run(...)` 入口被显式拒绝。
+  - 修改 [`test/pass/test_lowering_nn_to_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_lowering_nn_to_kernel.py)
+    - 新增 `test_pass_manager_buffer_results_to_out_params_rewrites_lowered_memory_return`，锁定推荐调用链会把 raw `nn` memory-return 函数先 lower，再 rewrite 成前置 `arg0`。
+    - 新增 `test_buffer_results_to_out_params_rejects_pre_lowered_nn_function`，锁定 raw `nn` function 不能跳过 `LowerNnToKernelPass` 直接进入 out-param pass 链路。
+    - 新增 `test_buffer_results_to_out_params_rejects_half_rewritten_ir`，锁定半改半留 IR 会被 `BufferResultsToOutParamsPass` 显式拒绝。
+- 验证：
+  - 计划要求 gate：
+    - `python -m pytest -q test/pass/test_pass_manager.py test/pass/test_lowering_nn_to_kernel.py -k 'buffer_results_to_out_params or pass_manager'`
+    - 结果：`10 passed, 26 deselected`
+  - 补充回归：
+    - `python -m pytest -q test/pass/test_pass_manager.py`
+    - 结果：`7 passed`
+    - `python -m pytest -q test/pass/test_lowering_nn_to_kernel.py -k 'buffer_results_to_out_params or pass_manager'`
+    - 结果：`3 passed, 26 deselected`
+  - 代码整洁性：
+    - `git diff --check -- kernel_gen/passes/pass_manager.py test/pass/test_pass_manager.py test/pass/test_lowering_nn_to_kernel.py`
+    - 结果：通过
+- 自检：
+  - 目标真正收口：通过。当前推荐调用链、非法放置位置和两条负门禁都已落到 `pass_manager`/测试合同，而不是只在记录中声明。
+  - 边界未越界：通过。本轮未修改 `buffer_results_to_out_params.py`、`gen_kernel.py` 或 `O5` 相关文件。
+  - 验证证据充分：通过。计划 gate、helper 顺序、pre-lowered 负门禁、half-rewritten 负门禁和正向 rewrite 链路均有自动化证据。
+  - 记录与实际改动一致：通过。本轮 tracked 变更仅为 `pass_manager.py`、`test_pass_manager.py`、`test_lowering_nn_to_kernel.py` 与本记录文件。
+- 结论：
+  - `O4` 已按边界完成：推荐调用链固定为 `LowerNnToKernelPass -> BufferResultsToOutParamsPass`，pre-lowered `nn` function 不得越位运行，半改半留 IR 也会显式失败。
+  - 当前没有新增阻塞，可进入同链复审阶段。
+
 - 时间：`2026-04-04 11:20:34 +0800`
 - 经办人：`提莫炖蘑菇`
 - 任务：`T-20260404-3cf80da5`
@@ -480,6 +518,7 @@
 - 结论：
   - `T-20260404-3cf80da5` 已完成并封板。
   - 后续链路等待管理员核对并分发 `T-20260404-3b6618d5`。
+
 
 - 时间：`2026-04-04 11:11:52 +0800`
 - 经办人：`提莫炖蘑菇`
@@ -530,3 +569,39 @@
 - 结论：
   - `T-20260404-3cf80da5` 已完成并封板。
   - 后续链路等待管理员核对并分发 `T-20260404-3b6618d5`。
+
+- 时间：`2026-04-04 12:22:51 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-4703789f`
+- 任务目标：
+  - 按 `O4` 复审边界只读核对 [`buffer_results_to_out_params_pass_plan.md`](/home/lfr/kernelcode_generate/ARCHITECTURE/plan/buffer_results_to_out_params_pass_plan.md)、[`pass_manager.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/passes/pass_manager.py)、[`test_pass_manager.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_pass_manager.py)、[`test_lowering_nn_to_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_lowering_nn_to_kernel.py) 与同链记录，确认推荐调用链固定为 `LowerNnToKernelPass -> BufferResultsToOutParamsPass`，pre-lowered `nn` function / half-rewritten IR 负门禁成立，且 `O1/O2/O3` 既有能力未回退。
+- 改动：
+  - 只读核对计划 `O4` 条目、实现 diff、测试增量与同链记录；未修改实现或测试文件。
+  - 逐项确认 [`pass_manager.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/passes/pass_manager.py#L82) 到 [`pass_manager.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/passes/pass_manager.py#L107) 的推荐 helper 固定构造 `LowerNnToKernelPass -> BufferResultsToOutParamsPass`，以及 [`pass_manager.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/passes/pass_manager.py#L194) 到 [`pass_manager.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/kernel_gen/passes/pass_manager.py#L202) 的非法放置位置显式拒绝。
+  - 逐项确认 [`test_pass_manager.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_pass_manager.py#L178) 到 [`test_pass_manager.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_pass_manager.py#L223) 锁定默认顺序与非法顺序失败；[`test_lowering_nn_to_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_lowering_nn_to_kernel.py#L675) 到 [`test_lowering_nn_to_kernel.py`](/home/lfr/kernelcode_generate/wt-20260404-buffer-out-params-o1/test/pass/test_lowering_nn_to_kernel.py#L753) 锁定正向 rewrite、pre-lowered `nn` function 拒绝和 half-rewritten IR 拒绝。
+  - 实跑验证：
+    - `pytest -q test/pass/test_pass_manager.py test/pass/test_lowering_nn_to_kernel.py -k 'buffer_results_to_out_params or pass_manager'` -> `10 passed, 26 deselected`
+    - `pytest -q test/pass/test_buffer_results_to_out_params.py test/pass/test_pass_manager.py test/pass/test_lowering_nn_to_kernel.py -k 'buffer_results_to_out_params or pass_manager'` -> `17 passed, 26 deselected`
+    - `git diff --check -- kernel_gen/passes/pass_manager.py test/pass/test_pass_manager.py test/pass/test_lowering_nn_to_kernel.py agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md` -> `0`
+- 结论：
+  - `通过`
+  - 当前 `O4` 已按边界完成：推荐调用链固定为 `LowerNnToKernelPass -> BufferResultsToOutParamsPass`，pre-lowered `nn` function 会被拒绝，half-rewritten IR 会被显式拒绝，且 `O1/O2/O3` 既有能力未见回退。
+
+- 时间：`2026-04-04 12:24:10 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260404-4703789f`
+- 任务目标：
+  - 完成当前 `O4` 复审任务流转，并按同链路补建唯一后续合并任务。
+- 改动：
+  - 已执行 `-done`：
+    - `bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file TODO.md -done -task_id T-20260404-4703789f -log wt-20260404-buffer-out-params-o1/agents/codex-multi-agents/log/task_records/2026/14/20260404-buffer-out-params-o1.md -agents-list agents/codex-multi-agents/agents-lists.md`
+    - 结果：`OK: done T-20260404-4703789f`
+  - 已新建唯一后续任务：
+    - `T-20260404-6d6c8ac3`
+    - 任务方向：按当前已完成链路合并 `O4` 的 `pass_manager` 实现、测试与同链记录文件，不扩到 `O5`。
+  - 已核对任务看板：
+    - [`DONE.md`](/home/lfr/kernelcode_generate/DONE.md#L2234) 已登记 `T-20260404-4703789f` 为 `已完成`
+    - [`TODO.md`](/home/lfr/kernelcode_generate/TODO.md#L10) 已新增 `T-20260404-6d6c8ac3`
+- 结论：
+  - `T-20260404-4703789f` 已完成并封板。
+  - 后续链路等待管理员核对并分发 `T-20260404-6d6c8ac3`。

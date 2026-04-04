@@ -1,7 +1,7 @@
 """nn -> kernel lowering pass tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 nn_to_kernel pass 的 lowering 行为与错误路径。
@@ -69,12 +69,19 @@ from kernel_gen.dialect.nn import (
 )
 from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.dsl.mlir_gen import build_func_op
+from kernel_gen.passes.lowering.buffer_results_to_out_params import (
+    BufferResultsToOutParamsError,
+    BufferResultsToOutParamsPass,
+)
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 pass_module = importlib.import_module("kernel_gen.passes.lowering.nn_to_kernel")
 LowerNnToKernelError = pass_module.LowerNnToKernelError
 LowerNnToKernelPass = pass_module.LowerNnToKernelPass
+pass_manager_module = importlib.import_module("kernel_gen.passes.pass_manager")
+PassManager = pass_manager_module.PassManager
+build_default_lowering_pass_manager = pass_manager_module.build_default_lowering_pass_manager
 
 
 @irdl_op_definition
@@ -653,6 +660,97 @@ def test_lower_build_func_op_nn_add_variants_through_public_chain() -> None:
     assert symbol_fill.value == symbol_block.args[1]
     assert symbol_add.rhs == symbol_fill.target
     assert not any(op.name.startswith("nn.") for op in symbol_ops)
+
+
+# TC-PASS-N2K-029
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 测试目的: 验证推荐调用链 `LowerNnToKernelPass -> BufferResultsToOutParamsPass` 可把 raw nn memory-return 函数稳定改写成前置 out 参数。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_pass_manager_buffer_results_to_out_params_rewrites_lowered_memory_return
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
+# 对应 spec 文件路径: spec/pass/pass_manager.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
+def test_pass_manager_buffer_results_to_out_params_rewrites_lowered_memory_return() -> None:
+    def add_direct(lhs: "Tensor[i32, 2, 2]", rhs: "Tensor[i32, 2, 2]") -> "Tensor[i32, 2, 2]":
+        return lhs + rhs
+
+    module = ModuleOp([build_func_op(add_direct, _tensor_arg([2, 2]), _tensor_arg([2, 2]))])
+
+    pm = build_default_lowering_pass_manager()
+    pm.run(module)
+
+    func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
+    body_ops = list(func_op.body.block.ops)
+    kernel_add = next(op for op in body_ops if isinstance(op, KernelAddOp))
+    return_op = next(op for op in body_ops if isinstance(op, func.ReturnOp))
+
+    assert len(list(func_op.function_type.inputs)) == 3
+    assert list(func_op.function_type.outputs) == []
+    assert func_op.arg_attrs.data[0].data["name"] == StringAttr("arg0")
+    assert kernel_add.out == func_op.args[0]
+    assert len(return_op.arguments) == 0
+
+
+# TC-PASS-N2K-030
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 测试目的: 验证 raw nn memory-return 函数不能跳过 `LowerNnToKernelPass` 直接进入 out-param pass 链路。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_buffer_results_to_out_params_rejects_pre_lowered_nn_function
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
+# 对应 spec 文件路径: spec/pass/pass_manager.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
+def test_buffer_results_to_out_params_rejects_pre_lowered_nn_function() -> None:
+    def add_direct(lhs: "Tensor[i32, 2, 2]", rhs: "Tensor[i32, 2, 2]") -> "Tensor[i32, 2, 2]":
+        return lhs + rhs
+
+    module = ModuleOp([build_func_op(add_direct, _tensor_arg([2, 2]), _tensor_arg([2, 2]))])
+
+    pm = PassManager(name="lowering")
+    pm.add_pass(BufferResultsToOutParamsPass())
+
+    with pytest.raises(ValueError, match="lowered IR"):
+        pm.run(module)
+
+
+# TC-PASS-N2K-031
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 测试目的: 验证半改半留 IR 会被 `BufferResultsToOutParamsPass` 显式拒绝，不能假装 rewrite 完成。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_buffer_results_to_out_params_rejects_half_rewritten_ir
+# 对应功能实现文件路径: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+# 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
+def test_buffer_results_to_out_params_rejects_half_rewritten_ir() -> None:
+    mem_type = _make_memory_type()
+
+    callee_block = Block(arg_types=[mem_type])
+    callee_block.add_op(func.ReturnOp(callee_block.args[0]))
+    callee = func.FuncOp(
+        "callee",
+        FunctionType.from_lists([mem_type], [mem_type]),
+        Region(callee_block),
+    )
+
+    caller_block = Block(arg_types=[mem_type])
+    out_alloc = DmaAllocOp([], mem_type)
+    half_rewritten_call = func.CallOp("callee", [out_alloc.result, caller_block.args[0]], [])
+    caller_block.add_ops([out_alloc, half_rewritten_call, func.ReturnOp()])
+    caller = func.FuncOp(
+        "caller",
+        FunctionType.from_lists([mem_type], []),
+        Region(caller_block),
+    )
+
+    module = ModuleOp([callee, caller])
+
+    with pytest.raises(BufferResultsToOutParamsError, match="result count to match callee outputs"):
+        BufferResultsToOutParamsPass().run(module)
 
 
 # TC-PASS-N2K-002

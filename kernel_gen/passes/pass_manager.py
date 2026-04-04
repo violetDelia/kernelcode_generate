@@ -1,10 +1,11 @@
 """Pass manager API.
 
 创建者: 李白
-最后一次更改: 李白
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 定义 Pass 与 PassManager 的基础行为。
+- 为 lowering 场景提供推荐的 pass 链路构造入口。
 
 使用示例:
 - import importlib
@@ -13,6 +14,8 @@
 - pm = PassManager(name="opt")
 - pm.add_pass(MyPass())
 - result = pm.run(ir)
+- lowering_pm = build_default_lowering_pass_manager()
+- lowered = lowering_pm.run(module)
 
 关联文件:
 - spec: spec/pass/pass_manager.md
@@ -76,11 +79,39 @@ def _is_pass_like(obj: object) -> bool:
     return isinstance(getattr(obj, "name"), str)
 
 
+def build_default_lowering_pass_manager(name: str | None = "lowering") -> "PassManager":
+    """构造默认 lowering pass 链路。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 固定注册 `LowerNnToKernelPass -> BufferResultsToOutParamsPass` 顺序。
+    - 为推荐调用链与黑盒测试提供统一入口，避免各处手工拼装顺序漂移。
+
+    使用示例:
+    - pm = build_default_lowering_pass_manager()
+    - module = pm.run(module)
+
+    关联文件:
+    - spec: spec/pass/pass_manager.md
+    - test: test/pass/test_pass_manager.py
+    - 功能实现: kernel_gen/passes/pass_manager.py
+    """
+
+    from .lowering import BufferResultsToOutParamsPass, LowerNnToKernelPass
+
+    pm = PassManager(name=name)
+    pm.add_pass(LowerNnToKernelPass())
+    pm.add_pass(BufferResultsToOutParamsPass())
+    return pm
+
+
 class PassManager:
     """Pass 管理器。
 
     创建者: 李白
-    最后一次更改: 李白
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 按顺序执行 Pass 列表。
@@ -147,7 +178,7 @@ class PassManager:
         """依序执行 Pass。
 
         创建者: 李白
-        最后一次更改: 李白
+        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 逐个调用 Pass.run。
@@ -161,9 +192,15 @@ class PassManager:
         - 功能实现: kernel_gen/passes/pass_manager.py
         """
         result = target
+        seen_names: list[str] = []
         for item in self._passes:
+            if item.name == "buffer-results-to-out-params" and "lower-nn-to-kernel" not in seen_names:
+                raise ValueError(
+                    "buffer-results-to-out-params requires lowered IR after lower-nn-to-kernel"
+                )
             result = item.run(result)
+            seen_names.append(item.name)
         return result
 
 
-__all__ = ["Pass", "PassManager"]
+__all__ = ["Pass", "PassManager", "build_default_lowering_pass_manager"]

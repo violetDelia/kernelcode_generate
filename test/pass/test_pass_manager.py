@@ -1,7 +1,7 @@
 """pass_manager tests.
 
 创建者: 李白
-最后一次更改: 我不是牛马
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 kernel_gen/passes/pass_manager.py 的 Pass 管理行为。
@@ -38,6 +38,7 @@ if str(REPO_ROOT) not in sys.path:
 pass_module = importlib.import_module("kernel_gen.passes.pass_manager")
 Pass = pass_module.Pass
 PassManager = pass_module.PassManager
+build_default_lowering_pass_manager = pass_module.build_default_lowering_pass_manager
 
 
 # TC-PASS-001
@@ -162,3 +163,61 @@ def test_pass_manager_exception_propagation() -> None:
     pm.add_pass(FailPass())
     with pytest.raises(ValueError):
         _ = pm.run(1)
+
+
+# TC-PASS-006
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 功能说明: 验证默认 lowering pipeline 会固定注册 `LowerNnToKernelPass -> BufferResultsToOutParamsPass`。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_builds_default_lowering_pipeline_for_buffer_results_to_out_params
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
+# 对应 spec 文件路径: spec/pass/pass_manager.md
+# 对应测试文件路径: test/pass/test_pass_manager.py
+def test_pass_manager_builds_default_lowering_pipeline_for_buffer_results_to_out_params(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lowering_module = importlib.import_module("kernel_gen.passes.lowering")
+    LowerNnToKernelPass = lowering_module.LowerNnToKernelPass
+    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
+    order: list[str] = []
+
+    def _record_lower(self: object, target: object) -> object:
+        order.append("lower-nn-to-kernel")
+        return target
+
+    def _record_buffer(self: object, target: object) -> object:
+        order.append("buffer-results-to-out-params")
+        return target
+
+    monkeypatch.setattr(LowerNnToKernelPass, "run", _record_lower)
+    monkeypatch.setattr(BufferResultsToOutParamsPass, "run", _record_buffer)
+
+    pm = build_default_lowering_pass_manager()
+    sentinel = object()
+    assert pm.run(sentinel) is sentinel
+    assert order == ["lower-nn-to-kernel", "buffer-results-to-out-params"]
+
+
+# TC-PASS-007
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
+# 功能说明: 验证 `buffer-results-to-out-params` 放在 `lower-nn-to-kernel` 之前会被显式拒绝。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_rejects_buffer_results_to_out_params_before_lowering
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
+# 对应 spec 文件路径: spec/pass/pass_manager.md
+# 对应测试文件路径: test/pass/test_pass_manager.py
+def test_pass_manager_rejects_buffer_results_to_out_params_before_lowering() -> None:
+    lowering_module = importlib.import_module("kernel_gen.passes.lowering")
+    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
+    LowerNnToKernelPass = lowering_module.LowerNnToKernelPass
+
+    pm = PassManager(name="lowering")
+    pm.add_pass(BufferResultsToOutParamsPass())
+    pm.add_pass(LowerNnToKernelPass())
+
+    with pytest.raises(ValueError, match="lowered IR"):
+        pm.run(object())
