@@ -7,7 +7,8 @@
 最近一次运行成功时间: 2026-04-05 16:05:57 +0800
 
 功能说明:
-- 通过编译并运行 C++ 片段验证 `include/npu_demo/npu_demo.h` 的 `KernelContext` accessor 与动态内存查询契约。
+- 通过编译并运行 C++ 片段验证 `include/npu_demo/npu_demo.h` 的 `KernelContext` 运行时视图、
+  barrier 合同与动态内存查询契约。
 
 覆盖率信息:
 - 当前覆盖率: `N/A`。该链路的功能实现为 C++ 头文件，按当前规则豁免 `pytest-cov` 覆盖率统计。
@@ -68,6 +69,7 @@ def _compile_and_run(source: str) -> None:
                 [
                     "g++",
                     "-std=c++17",
+                    "-pthread",
                     "-Wl,--no-keep-memory",
                     "-I",
                     str(REPO_ROOT),
@@ -117,41 +119,222 @@ def _compile_and_run(source: str) -> None:
 
 # NPU-DEMO-KC-001
 # 创建者: 朽木露琪亚
-# 最后一次更改: 金铲铲大作战
-# 最后修改人: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-05 10:44:47 +0800
-# 最近一次运行成功时间: 2026-04-05 10:44:47 +0800
-# 测试目的: 验证 KernelContext 的 block/thread/subthread id 与 count accessor 返回固定模板值。
-# 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_exposes_id_and_count_accessors
+# 最后一次更改: 小李飞刀
+# 最后修改人: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 06:05:00 +0800
+# 最近一次运行成功时间: 2026-04-06 06:05:00 +0800
+# 测试目的: 验证 launched body 中的 KernelContext 查询返回本次 launch 的运行时 extent 与索引。
+# 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_runtime_view_tracks_launch_extent
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
 # 对应 spec 文件链接: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
 # 对应测试文件链接: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
-def test_npu_demo_kernel_context_exposes_id_and_count_accessors() -> None:
+def test_npu_demo_kernel_context_runtime_view_tracks_launch_extent() -> None:
     source = r"""
 #include "include/npu_demo/npu_demo.h"
 
 static int fail(int code) { return code; }
 
-int main() {
-    npu_demo::KernelContext ctx;
+static void kernel_body(
+    npu_demo::KernelContext& ctx,
+    long long* block_ids,
+    long long* block_nums,
+    long long* thread_ids,
+    long long* thread_nums,
+    long long* subthread_ids,
+    long long* subthread_nums) {
+    const long long tid = ctx.thread_id();
+    block_ids[tid] = ctx.block_id();
+    block_nums[tid] = ctx.block_num();
+    thread_ids[tid] = ctx.thread_id();
+    thread_nums[tid] = ctx.thread_num();
+    subthread_ids[tid] = ctx.subthread_id();
+    subthread_nums[tid] = ctx.subthread_num();
+}
 
-    if (ctx.block_id() != 1) {
+int main() {
+    long long block_ids[4] = {-1, -1, -1, -1};
+    long long block_nums[4] = {0, 0, 0, 0};
+    long long thread_ids[4] = {-1, -1, -1, -1};
+    long long thread_nums[4] = {0, 0, 0, 0};
+    long long subthread_ids[4] = {-1, -1, -1, -1};
+    long long subthread_nums[4] = {0, 0, 0, 0};
+
+    if (npu_demo::launch<1, 4, 1>(
+            kernel_body,
+            block_ids,
+            block_nums,
+            thread_ids,
+            thread_nums,
+            subthread_ids,
+            subthread_nums)
+        != StatusCode::kOk) {
         return fail(1);
     }
-    if (ctx.block_num() != 6) {
+
+    for (long long i = 0; i < 4; ++i) {
+        if (block_ids[i] != 0) {
+            return fail(2);
+        }
+        if (block_nums[i] != 1) {
+            return fail(3);
+        }
+        if (thread_ids[i] != i) {
+            return fail(4);
+        }
+        if (thread_nums[i] != 4) {
+            return fail(5);
+        }
+        if (subthread_ids[i] != 0) {
+            return fail(6);
+        }
+        if (subthread_nums[i] != 1) {
+            return fail(7);
+        }
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
+# NPU-DEMO-KC-001A
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最后修改人: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 06:05:00 +0800
+# 最近一次运行成功时间: 2026-04-06 06:05:00 +0800
+# 测试目的: 验证 KernelContext::barrier 需要显式 visibility / scope，且只接受 {TSM, TLM} + BLOCK。
+# 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_barrier_requires_visibility_and_block_scope
+# 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
+# 对应 spec 文件链接: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
+# 对应测试文件链接: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
+def test_npu_demo_kernel_context_barrier_requires_visibility_and_block_scope() -> None:
+    source = r"""
+#include <stdexcept>
+#include <string>
+
+#include "include/npu_demo/npu_demo.h"
+
+static int fail(int code) { return code; }
+
+static bool contains(const std::string& value, const char* needle) {
+    return value.find(needle) != std::string::npos;
+}
+
+static void kernel_body(npu_demo::KernelContext& ctx, int* result_code) {
+    ctx.barrier({MemorySpace::TLM, MemorySpace::TSM}, BarrierScope::BLOCK);
+    if (ctx.thread_id() != 0) {
+        return;
+    }
+
+    try {
+        ctx.barrier({}, BarrierScope::BLOCK);
+        *result_code = 1;
+        return;
+    } catch (const std::invalid_argument& err) {
+        if (!contains(err.what(), "visibility")) {
+            *result_code = 2;
+            return;
+        }
+    }
+
+    try {
+        ctx.barrier({MemorySpace::TSM}, BarrierScope::BLOCK);
+        *result_code = 3;
+        return;
+    } catch (const std::invalid_argument& err) {
+        if (!contains(err.what(), "TSM") || !contains(err.what(), "TLM")) {
+            *result_code = 4;
+            return;
+        }
+    }
+
+    try {
+        ctx.barrier({MemorySpace::TSM, MemorySpace::TSM}, BarrierScope::BLOCK);
+        *result_code = 5;
+        return;
+    } catch (const std::invalid_argument& err) {
+        if (!contains(err.what(), "exactly once")) {
+            *result_code = 6;
+            return;
+        }
+    }
+
+    try {
+        ctx.barrier({MemorySpace::TSM, MemorySpace::GM}, BarrierScope::BLOCK);
+        *result_code = 7;
+        return;
+    } catch (const std::invalid_argument& err) {
+        if (!contains(err.what(), "visibility")) {
+            *result_code = 8;
+            return;
+        }
+    }
+
+    try {
+        ctx.barrier({MemorySpace::TSM, MemorySpace::TLM}, BarrierScope::THREAD);
+        *result_code = 9;
+        return;
+    } catch (const std::invalid_argument& err) {
+        if (!contains(err.what(), "scope")) {
+            *result_code = 10;
+            return;
+        }
+    }
+
+    *result_code = 0;
+}
+
+int main() {
+    int result_code = 99;
+    if (npu_demo::launch<1, 2, 1>(kernel_body, &result_code) != StatusCode::kOk) {
+        return fail(11);
+    }
+    if (result_code != 0) {
+        return fail(12 + result_code);
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
+# NPU-DEMO-KC-001B
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最后修改人: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 06:05:00 +0800
+# 最近一次运行成功时间: 2026-04-06 06:05:00 +0800
+# 测试目的: 验证 npu_demo::launch 对不受支持的 extent 显式返回失败而不是静默回退。
+# 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_launch_rejects_unsupported_extent_without_fallback
+# 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
+# 对应 spec 文件链接: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
+# 对应测试文件链接: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
+def test_npu_demo_launch_rejects_unsupported_extent_without_fallback() -> None:
+    source = r"""
+#include "include/npu_demo/npu_demo.h"
+
+static int fail(int code) { return code; }
+
+static void noop(npu_demo::KernelContext& ctx) {
+    (void)ctx;
+}
+
+int main() {
+    if (npu_demo::launch<1, 2, 1>(noop) != StatusCode::kOk) {
+        return fail(1);
+    }
+    if (npu_demo::launch<2, 2, 1>(noop) != StatusCode::kError) {
         return fail(2);
     }
-    if (ctx.thread_id() != 3) {
+    if (npu_demo::launch<1, 1, 1>(noop) != StatusCode::kError) {
         return fail(3);
     }
-    if (ctx.thread_num() != 8) {
+    if (npu_demo::launch<1, 9, 1>(noop) != StatusCode::kError) {
         return fail(4);
     }
-    if (ctx.subthread_id() != 0) {
+    if (npu_demo::launch<1, 2, 2>(noop) != StatusCode::kError) {
         return fail(5);
-    }
-    if (ctx.subthread_num() != 1) {
-        return fail(6);
     }
     return 0;
 }

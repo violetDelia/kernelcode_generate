@@ -4,12 +4,12 @@
 
 - 定义 target 注册中心的规范，负责提供固定内置模板与目录 target 的统一注册/查询入口。
 - 支持三类来源：固定内置模板、`json` 与 `txt`；其中 `json/txt` 可混用。
-- target 信息用于驱动 `arch` 相关 operation/dialect 的“能力检查”和“硬件参数读取”，例如 `thread_num`、`sm_memory_size`。
+- target 信息用于驱动 `arch` 相关 operation/dialect/include-runtime 的“能力检查”和“硬件参数读取”，例如 `thread_num`、`sm_memory_size`、`arch.launch`、`arch.barrier`。
 
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`朽木露琪亚`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/target/registry.md`](../../spec/target/registry.md)
 - `功能实现`：[`kernel_gen/target/registry.py`](../../kernel_gen/target/registry.py)
 - `test`：[`test/target/test_target_registry.py`](../../test/target/test_target_registry.py)
@@ -24,7 +24,7 @@
 - 统一 target 配置加载流程，避免硬编码后端差异。
 - 让 operation/dialect 在不绑定具体后端实现的前提下，读取标准硬件参数。
 - 保持配置文件可读、可扩展、可校验。
-- 为约定 target 冻结固定模板与能力矩阵，避免下游 codegen 再次推断硬件值或误放开未支持能力。
+- 为约定 target 冻结固定模板、launch 能力上限与能力矩阵，避免下游 codegen/runtime 再次推断硬件值或误放开未支持能力。
 - 为 `analysis` 主线提供正式 baseline 来源；当前需要由 registry 对 `npu_demo` 暴露 `path_bandwidth / path_latency_ns / theoretical_compute` 三类默认参数。
 
 ## 限制与边界
@@ -36,8 +36,8 @@
 - 当硬件字段缺失时，调用方必须使用自身回退逻辑（例如返回符号值或动态 shape），registry 不自动补默认业务值。
 - `analysis` 默认参数与硬件参数不同：当前只对 `npu_demo` 暴露正式 analysis baseline；若 `analysis` 侧读取时缺字段，必须显式失败，不允许静默回退到调用点手写常量。
 - `path_bandwidth` 与 `path_latency_ns` 的 key 空间必须与 analysis 主线的正式 `MemoryPath` 文本值一致；不得继续引入自由字符串 path。
-- 对显式白名单 target，白名单外能力查询必须固定判定为未启用；不得把 `arch.launch_kernel` 或其他未列入白名单的 `arch.*` 能力视为默认可用。
-- `is_arch_op_supported(...)` 的稳定输入域是 `arch.*` 能力键；`launch`、`barrier` 仅作为上层能力语义示例，不单独构成 registry 公共查询接口的稳定输入。
+- 对显式白名单 target，白名单外能力查询必须固定判定为未启用；不得把未列入白名单的 `arch.*` 能力视为默认可用。
+- `is_arch_op_supported(...)` 的稳定输入域是 `arch.*` 能力键；`launch`、`barrier` 这类未带 `arch.` 前缀的字符串不属于 registry 公共查询接口的稳定输入。
 
 ## 配置格式
 
@@ -126,10 +126,12 @@ TargetSpec(
         "arch.get_subthread_id",
         "arch.get_subthread_num",
         "arch.get_dynamic_memory",
+        "arch.barrier",
+        "arch.launch",
     },
-    arch_unsupported_ops={"arch.launch_kernel"},
+    arch_unsupported_ops=set(),
     hardware={
-        "block_num": 6,
+        "block_num": 1,
         "thread_num": 8,
         "subthread_num": 1,
         "sm_memory_size": 0,
@@ -142,9 +144,10 @@ TargetSpec(
 
 语义说明：
 
-- `npu_demo` 使用显式白名单；除上述 `arch.get_*` 查询与 `arch.get_dynamic_memory` 外，其他能力查询固定判定为未启用。
-- `arch.launch_kernel` 不在 `npu_demo` 已启用能力内；通过 `is_arch_op_supported("npu_demo", "arch.launch_kernel")` 查询时结果必须为未启用。
-- `launch` 与 `barrier` 属于上层能力语义，不单独进入 registry 的稳定查询接口输入域；对 `npu_demo` 而言，它们也不进入已启用能力矩阵，下游若做能力投影，最终结果仍必须收敛为未启用。
+- `npu_demo` 使用显式白名单；除上述 `arch.get_*` 查询、`arch.get_dynamic_memory`、`arch.barrier` 与 `arch.launch` 外，其他能力查询固定判定为未启用。
+- `arch.launch` / `arch.barrier` 是 `npu_demo` P0 真实并行 + 同步路径的正式能力键；旧名 `arch.launch_kernel` 不再进入 `npu_demo` 已启用能力矩阵。
+- `launch` 与 `barrier` 这类未带 `arch.` 前缀的字符串不属于 registry 的稳定输入域；若上层错误传入此类字符串，结果必须仍然收敛为未启用。
+- `block_num=1`、`thread_num=8`、`subthread_num=1` 表示 `npu_demo` P0 launch 能力上限：`block` 固定为 `1`、`subthread` 固定为 `1`、`thread` 允许到 `8`；这些字段不再直接表示 launched body 中当前可见的运行时 extent。
 - `sm_memory_size=0` 与 `lm_memory_size=0` 表示 `npu_demo` 不提供 `SM/LM` 动态内存容量；`tsm_memory_size=24576`、`tlm_memory_size=2048` 为固定片上容量。
 - `npu_demo` 的标准注册入口是 registry 的固定内置模板注册流程，而不是外部 `json/txt` 文件；标准查询入口是 `is_arch_op_supported(...)`、`get_target_hardware(...)` 与 `get_current_target_hardware(...)`。
 - `npu_demo` 的 analysis 默认参数也由 registry 固定提供，当前至少包含：
@@ -242,12 +245,13 @@ loaded = registry.load_targets(Path("kernel_gen/target/targets"))
 
 ## 与 arch 层的联动约束
 
-- `operation/arch` 查询数量类 helper（如 `get_thread_num`）可优先读取 `hardware` 静态值；无值时回退符号语义。
+- `operation/arch` 与 include/runtime 需要区分“能力上限”和“当前 launch 值”：registry 只提供能力上限与静态容量，不直接承诺 launched body 中的当前 extent。
+- 在无 launch 上下文时，`operation/arch` 查询数量类 helper（如 `get_thread_num`）可读取 `hardware` 作为能力上限或静态回退值；一旦进入 launched body，当前值必须由 runtime 上下文提供。
 - `operation/arch.get_dynamic_memory(space)` 可读取 `*_memory_size` 作为静态 shape；无值时回退动态 shape。
 - `dialect/arch` 在 verifier 阶段可根据“当前 target”校验 op 支持性。
-- 当 `target="npu_demo"` 时，`block_num=6`、`thread_num=8`、`subthread_num=1` 必须作为固定硬件值读取；`SM/LM` 动态内存容量固定为 `0`，`TSM/TLM` 动态内存容量固定为 `24576/2048`。
+- 当 `target="npu_demo"` 时，`block_num=1`、`thread_num=8`、`subthread_num=1` 必须作为 P0 能力上限读取；`SM/LM` 动态内存容量固定为 `0`，`TSM/TLM` 动态内存容量固定为 `24576/2048`。
 - 当 `target="npu_demo"` 时，`analysis` 侧的 `path_bandwidth / path_latency_ns / theoretical_compute` 默认参数也必须由 registry 提供；当前不允许 `analysis` 在调用点长期手写这些常量。
-- 当 `target="npu_demo"` 时，`arch.launch_kernel` 通过 `is_arch_op_supported(...)` 查询必须固定返回未启用；`launch`、`barrier` 仅作为上层能力语义，不单独构成 registry 查询接口输入，但其能力结论也必须收敛为未启用。
+- 当 `target="npu_demo"` 时，`arch.launch` 与 `arch.barrier` 通过 `is_arch_op_supported(...)` 查询必须返回已启用；旧名 `arch.launch_kernel` 必须保持未启用。
 
 ## CPU TXT 示例
 
@@ -282,13 +286,12 @@ hw.tlm_memory_size=0
 - `json` 与 `txt` 混合目录可同时加载。
 - 默认目录 `kernel_gen/target/targets` 加载后，`cpu.txt` 的 `arch.supported_ops=` 空值应归一化为 `None`，并保持 `arch.get_block_num` 可用、`arch.get_thread_id` 受黑名单限制。
 - 默认目录重复加载应保持幂等，不得因内置 `cpu` 与 `cpu.txt` 冲突而失败。
-- `npu_demo` 固定模板应通过标准查询入口满足以下硬件值：`block_num=6`、`thread_num=8`、`subthread_num=1`、`sm_memory_size=0`、`lm_memory_size=0`、`tsm_memory_size=24576`、`tlm_memory_size=2048`。
+- `npu_demo` 固定模板应通过标准查询入口满足以下能力/容量值：`block_num=1`、`thread_num=8`、`subthread_num=1`、`sm_memory_size=0`、`lm_memory_size=0`、`tsm_memory_size=24576`、`tlm_memory_size=2048`。
 - `npu_demo` 固定模板应通过 `get_target_analysis_defaults("npu_demo")` 暴露 analysis 默认参数；至少覆盖 `path_bandwidth["GM->LM"]`、`path_latency_ns["GM->LM"]` 与 `theoretical_compute["scalar"/"tensor"]`。
-- `npu_demo` 的 `arch.launch_kernel` 查询必须固定判定为未启用；`launch`、`barrier` 仅作为上层能力语义说明，不单独列为 registry 标准查询输入。
+- `npu_demo` 的 `arch.launch` / `arch.barrier` 查询必须固定判定为已启用；旧名 `arch.launch_kernel` 与未带 `arch.` 前缀的 `launch` / `barrier` 不属于已启用能力。
 - `name` 缺失、格式非法、与文件名不一致时报错。
 - `arch.supported_ops` 与 `arch.unsupported_ops` 冲突时报错。
 - `hw.*` 非整数时报错。
 - 未知 key 报错。
 - `get_target_hardware` 与 `get_current_target_hardware` 在“存在/缺失/未设置当前 target”三类场景行为正确。
-- 下游待补验收标准建议使用 `test_target_registry_npu_demo_template`：输入 `target="npu_demo"`；预期通过 `get_target_hardware(...)` / `get_current_target_hardware(...)` 读到 `block_num=6`、`thread_num=8`、`subthread_num=1`、`sm_memory_size=0`、`lm_memory_size=0`、`tsm_memory_size=24576`、`tlm_memory_size=2048`。当前 `test/target/test_target_registry.py` 尚未落地该用例，因此此处不视为已映射的现有测试清单。
-- 下游待补验收标准建议使用 `test_target_registry_npu_demo_rejects_unsupported_ops`：输入 `is_arch_op_supported("npu_demo", "arch.launch_kernel")`，以及对 `launch/barrier` 的上层能力语义探测；预期能力结论固定为未启用。当前 `test/target/test_target_registry.py` 尚未落地该用例，因此此处不视为已映射的现有测试清单。
+- 下游待补验收标准建议使用 `test_target_registry_npu_demo_supports_launch_and_barrier_caps`：输入 `target="npu_demo"`；预期通过 `is_arch_op_supported(...)` 读取到 `arch.launch=True`、`arch.barrier=True`、`arch.launch_kernel=False`，并通过 `get_target_hardware(...)` / `get_current_target_hardware(...)` 读到 `block_num=1`、`thread_num=8`、`subthread_num=1`、`sm_memory_size=0`、`lm_memory_size=0`、`tsm_memory_size=24576`、`tlm_memory_size=2048`。

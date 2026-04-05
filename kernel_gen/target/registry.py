@@ -55,10 +55,12 @@ _DEFAULT_NPU_DEMO_SUPPORTED_OPS = {
     "arch.get_subthread_id",
     "arch.get_subthread_num",
     "arch.get_dynamic_memory",
+    "arch.barrier",
+    "arch.launch",
 }
 _DEFAULT_NPU_DEMO_UNSUPPORTED_OPS = {"arch.launch_kernel"}
 _DEFAULT_NPU_DEMO_HARDWARE = {
-    "block_num": 6,
+    "block_num": 1,
     "thread_num": 8,
     "subthread_num": 1,
     "sm_memory_size": 0,

@@ -333,7 +333,7 @@ def test_target_registry_npu_demo_template() -> None:
     assert target_registry.is_arch_op_supported("npu_demo", "arch.get_thread_num") is True
     assert target_registry.is_arch_op_supported("npu_demo", "arch.get_dynamic_memory") is True
 
-    assert target_registry.get_target_hardware("npu_demo", "block_num") == 6
+    assert target_registry.get_target_hardware("npu_demo", "block_num") == 1
     assert target_registry.get_target_hardware("npu_demo", "thread_num") == 8
     assert target_registry.get_target_hardware("npu_demo", "subthread_num") == 1
     assert target_registry.get_target_hardware("npu_demo", "sm_memory_size") == 0
@@ -379,3 +379,27 @@ def test_target_registry_npu_demo_rejects_unsupported_ops() -> None:
     assert target_registry.is_arch_op_supported("npu_demo", "arch.unknown") is False
     assert target_registry.is_arch_op_supported("npu_demo", "launch") is False
     assert target_registry.is_arch_op_supported("npu_demo", "barrier") is False
+
+
+# TC-TGT-013
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 06:05:00 +0800
+# 最近一次运行成功时间: 2026-04-06 06:05:00 +0800
+# 测试目的: 验证 npu_demo 内置模板收口为 launch/barrier 已启用且硬件数值表示 capability upper bound。
+# 对应功能实现文件路径: kernel_gen/target/registry.py
+# 对应 spec 文件路径: spec/target/registry.md
+def test_target_registry_npu_demo_supports_launch_and_barrier_caps() -> None:
+    assert target_registry.is_arch_op_supported("npu_demo", "arch.launch") is True
+    assert target_registry.is_arch_op_supported("npu_demo", "arch.barrier") is True
+    assert target_registry.is_arch_op_supported("npu_demo", "arch.launch_kernel") is False
+    assert target_registry.is_arch_op_supported("npu_demo", "launch") is False
+    assert target_registry.is_arch_op_supported("npu_demo", "barrier") is False
+
+    assert target_registry.get_target_hardware("npu_demo", "block_num") == 1
+    assert target_registry.get_target_hardware("npu_demo", "thread_num") == 8
+    assert target_registry.get_target_hardware("npu_demo", "subthread_num") == 1
+    assert target_registry.get_target_hardware("npu_demo", "sm_memory_size") == 0
+    assert target_registry.get_target_hardware("npu_demo", "lm_memory_size") == 0
+    assert target_registry.get_target_hardware("npu_demo", "tsm_memory_size") == 24576
+    assert target_registry.get_target_hardware("npu_demo", "tlm_memory_size") == 2048
