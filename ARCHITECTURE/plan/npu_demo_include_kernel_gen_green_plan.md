@@ -8,7 +8,7 @@
 | `S2` | `S1` | `wt-20260405-npu-demo-include-s2` | `20260405-npu-demo-include-s2.md` | `实现+补测完成（T-20260405-2c0148f6，小李飞刀）；复审需修改（T-20260405-7c061dcf，不要啊教练：diff 为空且 test/include/api/test_memory.py 未追踪，spec/include/api/Memory.md test 条目未更新）；修复完成（T-20260405-0e954375，小李飞刀：补 spec test 条目并纳入追踪，pytest exit=0）；复审需修改（T-20260405-ad19ee48，不要啊教练：diff 仅 spec/include/api/Memory.md，test/include/api/test_memory.py 与记录仍未追踪）；修复完成（T-20260405-ad19ee48，小李飞刀）；复审通过（T-20260405-3792c441，不要啊教练；gate exit=0）；已合并（commit f8b5bbe，T-20260405-92ad86c3，李白；gate exit=0）。` |
 | `S3` | `S1` | `wt-20260405-npu-demo-include-s3` | `20260405-npu-demo-include-s3.md` | `实现+补测完成（T-20260405-77b08592，金铲铲大作战；pytest exit=0）；复审需修改（T-20260405-f8efb199，不要啊教练：view(标量/Vector) 缺 1-D 边界校验/失败机制与负例门禁）；修复完成（T-20260405-382d7490，金铲铲大作战：补齐 1-D rank/向量长度/非法 offset-size-stride/越界校验，失败机制统一为 runtime_error(dma.view: ...)，并新增 KC-008 负例门禁；pytest exit=0）；待复审（T-20260405-5940bfee，不要啊教练）。` |
 | `S4` | `S2、S3` | `wt-20260405-npu-demo-include-s4` | `20260405-npu-demo-include-s4.md` | `已合并（commit d46343c，T-20260405-149e00f9，李白；gate exit=0）。` |
-| `S5` | `S4` | `/home/lfr/kernelcode_generate` | `不要求` | `未开始` |
+| `S5` | `S4` | `wt-20260405-npu-demo-include-s5` | `20260405-npu-demo-include-s5.md` | `已合并（commit 8b51d3e，T-20260405-4689e197，李白；gate exit=0）。` |
 | `S6` | `S5` | `/home/lfr/kernelcode_generate` | `不要求` | `未开始` |
 | `S7` | `S6` | `/home/lfr/kernelcode_generate` | `不要求` | `未开始` |
 
