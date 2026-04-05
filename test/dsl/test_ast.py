@@ -479,6 +479,131 @@ def kernel(tile: "Tensor[f32, 2, 2]", dst: "Tensor[f32, 4, 4]") -> None:
             raise AssertionError("expected Unsupported call expression diagnostic")
 
 
+# AST-014JB
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 helper allowlist 仅允许 alias.helper(...) 形式的 import-bound 调用。
+# 测试目的: 锁定 `kernel_gen.operation.dma.slice(...)` 这类链式属性访问不会绕过 helper 绑定检查。
+# 使用示例: pytest -q test/dsl/test_ast.py -k test_parse_function_rejects_dma_helper_call_via_attribute_chain
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast.py
+def test_parse_function_rejects_dma_helper_call_via_attribute_chain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import kernel_gen as kernel_gen_pkg
+
+    def kernel(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
+        return kernel_gen.operation.dma.slice(src, [0, 0], [2, 2], [1, 1], MemorySpace.LM)
+
+    monkeypatch.setitem(kernel.__globals__, "kernel_gen", kernel_gen_pkg)
+
+    with pytest.raises(AstParseError) as exc_info:
+        parse_function(kernel)
+
+    diagnostics = exc_info.value.diagnostics
+    if not diagnostics:
+        raise AssertionError("expected diagnostics for helper call via attribute chain")
+    if diagnostics[0].message != "Unsupported call expression":
+        raise AssertionError("expected Unsupported call expression diagnostic")
+
+
+# AST-014JC
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 direct symbol alias helper 必须匹配真实模块导出对象。
+# 测试目的: 拒绝伪造 `__module__/__name__` 的同名 callable 通过 helper allowlist。
+# 使用示例: pytest -q test/dsl/test_ast.py -k test_parse_function_rejects_spoofed_import_bound_helper_object
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast.py
+def test_parse_function_rejects_spoofed_import_bound_helper_object(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_slice(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("fake slice should not execute during parsing")
+
+    fake_slice.__module__ = "kernel_gen.operation.dma"
+    fake_slice.__name__ = "slice"
+
+    monkeypatch.setitem(globals(), "slice", fake_slice)
+
+    source = """\
+def kernel(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
+    return slice(src, [0, 0], [2, 2], [1, 1], MemorySpace.LM)
+"""
+
+    with pytest.raises(AstParseError) as exc_info:
+        _parse_function_from_source(monkeypatch, source)
+    diagnostics = exc_info.value.diagnostics
+    if not diagnostics:
+        raise AssertionError("expected diagnostics for spoofed helper object")
+    if diagnostics[0].message != "Unsupported call expression":
+        raise AssertionError("expected Unsupported call expression diagnostic")
+
+
+# AST-014JD
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证函数体内非白名单 ImportFrom 不会触发动态导入副作用。
+# 测试目的: 锁定 `from definitely_missing_package import load` 仅遮蔽局部名字并返回 Unsupported call expression，而非抛出 ModuleNotFoundError。
+# 使用示例: pytest -q test/dsl/test_ast.py -k test_parse_function_rejects_non_whitelisted_local_import_without_side_effect
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast.py
+def test_parse_function_rejects_non_whitelisted_local_import_without_side_effect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = """\
+def kernel(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
+    from definitely_missing_package import load
+    return load(src, [0, 0], [2, 2], [1, 1], MemorySpace.LM)
+"""
+
+    with pytest.raises(AstParseError) as exc_info:
+        _parse_function_from_source(monkeypatch, source)
+    diagnostics = exc_info.value.diagnostics
+    if not diagnostics:
+        raise AssertionError("expected diagnostics for non-whitelisted local import")
+    if diagnostics[0].message != "Unsupported call expression":
+        raise AssertionError("expected Unsupported call expression diagnostic")
+
+
+# AST-014K
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-05 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-05 00:00:00 +0800
+# 功能说明: 验证 return 之后的 local import 仍触发末尾 return 约束。
+# 测试目的: 锁定 return 后出现 Import/ImportFrom 触发 "Return statement must be last" 诊断。
+# 使用示例: pytest -q test/dsl/test_ast.py -k test_parse_function_rejects_import_after_return
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast.py
+def test_parse_function_rejects_import_after_return(monkeypatch: pytest.MonkeyPatch) -> None:
+    sources = (
+        """\
+def kernel(src: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+    return src
+    import kernel_gen.operation.dma as dma
+""",
+        """\
+def kernel(src: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+    return src
+    from kernel_gen.operation.dma import load
+""",
+    )
+
+    for source in sources:
+        with pytest.raises(AstParseError) as exc_info:
+            _parse_function_from_source(monkeypatch, source)
+        diagnostics = exc_info.value.diagnostics
+        if not diagnostics:
+            raise AssertionError("expected diagnostics for import after return")
+        if diagnostics[0].message != "Return statement must be last":
+            raise AssertionError("expected Return statement must be last diagnostic")
+
+
 # AST-001
 # 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战

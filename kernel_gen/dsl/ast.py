@@ -23,17 +23,76 @@ import ast as py_ast
 import inspect
 import re
 import textwrap
+import types
 from dataclasses import dataclass, field
 from typing import Iterable
 
 import sympy as sp
 
+from kernel_gen.operation import arch as _KG_OPERATION_ARCH
+from kernel_gen.operation import dma as _KG_OPERATION_DMA
+from kernel_gen.operation import nn as _KG_OPERATION_NN
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
 _REJECT_EXTERNAL_VALUES_ENV_KEY = "__dsl_reject_external_values__"
 _ALLOW_EXTERNAL_CONSTANTS_ENV_KEY = "__dsl_allow_external_constants__"
+_LOCAL_IMPORT_SHADOW = object()
+_ALLOWED_IMPORT_BOUND_HELPERS: dict[str, tuple[types.ModuleType, frozenset[str]]] = {
+    "kernel_gen.operation.dma": (
+        _KG_OPERATION_DMA,
+        frozenset(
+            {
+                "load",
+                "slice",
+                "store",
+                "deslice",
+                "alloc",
+                "copy",
+                "cast",
+                "view",
+                "reshape",
+                "flatten",
+                "free",
+            }
+        ),
+    ),
+    "kernel_gen.operation.arch": (
+        _KG_OPERATION_ARCH,
+        frozenset(
+            {
+                "get_block_id",
+                "get_block_num",
+                "get_subthread_id",
+                "get_subthread_num",
+                "get_thread_id",
+                "get_thread_num",
+                "get_dynamic_memory",
+                "launch_kernel",
+            }
+        ),
+    ),
+    "kernel_gen.operation.nn": (
+        _KG_OPERATION_NN,
+        frozenset(
+            {
+                "img2col1d",
+                "img2col2d",
+                "matmul",
+                "relu",
+                "sigmoid",
+                "tanh",
+                "leaky_relu",
+                "hard_sigmoid",
+                "exp",
+                "reduce_sum",
+                "reduce_min",
+                "reduce_max",
+            }
+        ),
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -158,7 +217,7 @@ class PtrArgAST:
     """指针参数节点。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 表示函数签名中的指针输入参数。
@@ -1537,12 +1596,14 @@ def _resolve_import_bound_helper_call(
     """按 import 绑定关系解析 DSL helper 调用名。
 
     创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 仅当调用目标显式绑定到 `kernel_gen.operation.dma`、`kernel_gen.operation.arch` 或 `kernel_gen.operation.nn` 时，才返回 helper 名。
     - 支持 module alias/package alias 的 `mod.helper(...)` 调用，以及 direct symbol alias 的 `alias(...)` 调用。
     - 拒绝未导入的裸 helper 名与来自其他模块的同名对象，避免误把普通名字当作 DSL helper。
+    - 仅允许 `alias.helper(...)` 形式的 module 调用；拒绝 `kernel_gen.operation.dma.slice(...)` 这类链式属性访问绕过 import 绑定。
+    - direct symbol alias 必须与真实模块导出的 helper 对象一致，拒绝伪造 `__module__`/`__name__` 的同名 callable。
 
     使用示例:
     - _resolve_import_bound_helper_call(py_ast.parse("cc.slice", mode="eval").body, globals(), __builtins__)
@@ -1553,50 +1614,19 @@ def _resolve_import_bound_helper_call(
     - 功能实现: kernel_gen/dsl/ast.py
     """
 
-    helper_modules = {
-        "kernel_gen.operation.dma": {
-            "load",
-            "slice",
-            "store",
-            "deslice",
-            "alloc",
-            "copy",
-            "cast",
-            "view",
-            "reshape",
-            "flatten",
-            "free",
-        },
-        "kernel_gen.operation.arch": {
-            "get_block_id",
-            "get_block_num",
-            "get_subthread_id",
-            "get_subthread_num",
-            "get_thread_id",
-            "get_thread_num",
-            "get_dynamic_memory",
-            "launch_kernel",
-        },
-        "kernel_gen.operation.nn": {
-            "img2col1d",
-            "img2col2d",
-            "matmul",
-            "relu",
-            "sigmoid",
-            "tanh",
-            "leaky_relu",
-            "hard_sigmoid",
-            "exp",
-            "reduce_sum",
-            "reduce_min",
-            "reduce_max",
-        },
-    }
-
     if isinstance(expr, py_ast.Attribute):
-        base_object = _resolve_call_base_object(expr.value, globals_table, builtins_table)
-        module_name = getattr(base_object, "__name__", None)
+        if not isinstance(expr.value, py_ast.Name):
+            return None
+        base_object = _lookup_python_name(expr.value.id, globals_table, builtins_table)
+        if not isinstance(base_object, types.ModuleType):
+            return None
+        module_name = base_object.__name__
         helper_name = expr.attr
+        module_info = _ALLOWED_IMPORT_BOUND_HELPERS.get(module_name)
+        if module_info is None:
+            return None
+        if base_object is not module_info[0]:
+            return None
     elif isinstance(expr, py_ast.Name):
         helper_object = _lookup_python_name(expr.id, globals_table, builtins_table)
         module_name = getattr(helper_object, "__module__", None)
@@ -1604,13 +1634,58 @@ def _resolve_import_bound_helper_call(
     else:
         return None
 
-    if module_name not in helper_modules:
+    module_info = _ALLOWED_IMPORT_BOUND_HELPERS.get(module_name)
+    if module_info is None:
         return None
     if not isinstance(helper_name, str):
         return None
-    if helper_name not in helper_modules[module_name]:
+    if helper_name not in module_info[1]:
+        return None
+    if isinstance(expr, py_ast.Name) and getattr(module_info[0], helper_name, None) is not helper_object:
         return None
     return helper_name
+
+
+def _bind_safe_local_import(stmt: py_ast.Import | py_ast.ImportFrom, globals_table: dict[str, object]) -> None:
+    """按白名单绑定函数体内 import，避免解析阶段触发任意模块导入。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅对白名单中的 `kernel_gen.operation.{dma,arch,nn}` 建立安全绑定。
+    - `import mod as alias` 仅在 `alias` 存在时绑定到白名单模块对象。
+    - `from mod import helper` 仅在 helper 位于白名单时绑定到真实 helper 对象。
+    - 其他导入一律绑定为本地遮蔽哨兵，防止回退命中全局同名对象，也不触发动态导入副作用。
+
+    使用示例:
+    - _bind_safe_local_import(py_ast.parse("from kernel_gen.operation.dma import load").body[0], globals())
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    if isinstance(stmt, py_ast.Import):
+        for alias in stmt.names:
+            binding_name = alias.asname or alias.name.split(".", 1)[0]
+            module_info = _ALLOWED_IMPORT_BOUND_HELPERS.get(alias.name)
+            if alias.asname and module_info is not None:
+                globals_table[binding_name] = module_info[0]
+                continue
+            globals_table[binding_name] = _LOCAL_IMPORT_SHADOW
+        return
+
+    module_info = _ALLOWED_IMPORT_BOUND_HELPERS.get(stmt.module or "")
+    for alias in stmt.names:
+        if alias.name == "*":
+            continue
+        binding_name = alias.asname or alias.name
+        if module_info is not None and alias.name in module_info[1]:
+            globals_table[binding_name] = getattr(module_info[0], alias.name)
+            continue
+        globals_table[binding_name] = _LOCAL_IMPORT_SHADOW
 
 
 def _parse_symbol_to_float_call(
@@ -2501,6 +2576,7 @@ def _parse_function_impl(
     reject_external_values = bool((config or {}).get("reject_external_values", False))
     if globals_table is None:
         globals_table = getattr(fn, "__globals__", {}) or {}
+    globals_table = dict(globals_table)
     if builtins_table is None:
         builtins_table = globals_table.get("__builtins__", {}) if globals_table else {}
         if isinstance(builtins_table, dict):
@@ -2554,17 +2630,30 @@ def _parse_function_impl(
             _raise_parse_error("Unsupported return annotation", func_def.returns)
 
     statements: list[object] = []
+    parsed_body_statements: list[py_ast.stmt] = []
     has_explicit_return = False
     for stmt in func_def.body:
+        if isinstance(stmt, (py_ast.Import, py_ast.ImportFrom)):
+            if has_explicit_return:
+                raise AstParseError(
+                    "Return statement must be last",
+                    [Diagnostic("Return statement must be last", _location_from_node(stmt))],
+                )
+            _bind_safe_local_import(stmt, globals_table)
+            continue
         parsed_stmt = _parse_stmt(stmt, env, globals_table, builtins_table)
         statements.append(parsed_stmt)
+        parsed_body_statements.append(stmt)
         if isinstance(stmt, py_ast.Return):
             has_explicit_return = True
 
     if has_return_annotation and not has_explicit_return and not returns_none:
         raise AstParseError("Missing return statement", [Diagnostic("Missing return statement", _location_from_node(func_def))])
-    if has_explicit_return and not isinstance(func_def.body[-1], py_ast.Return):
-        raise AstParseError("Return statement must be last", [Diagnostic("Return statement must be last", _location_from_node(func_def.body[-1]))])
+    if has_explicit_return and func_def.body and not isinstance(func_def.body[-1], py_ast.Return):
+        raise AstParseError(
+            "Return statement must be last",
+            [Diagnostic("Return statement must be last", _location_from_node(func_def.body[-1]))],
+        )
     if outputs and isinstance(outputs[0], ScalarArgAST) and outputs[0].value_type is float:
         if not statements or not isinstance(statements[-1], SymbolToFloatAST):
             raise AstParseError(
@@ -2572,7 +2661,9 @@ def _parse_function_impl(
                 [Diagnostic("Unsupported return annotation", _location_from_node(func_def.returns))],
             )
 
-    body_location = _location_from_node(func_def.body[0]) if func_def.body else _location_from_node(func_def)
+    body_location = (
+        _location_from_node(parsed_body_statements[0]) if parsed_body_statements else _location_from_node(func_def)
+    )
     return FunctionAST(
         name=func_def.name,
         inputs=inputs,
