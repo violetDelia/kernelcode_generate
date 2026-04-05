@@ -1,7 +1,7 @@
 """Analysis tests.
 
 创建者: 金铲铲大作战
-最后修改人: 金铲铲大作战
+最后修改人: 朽木露琪亚
 
 功能说明:
 - 覆盖逐元素算术/比较、unary/reduce、broadcast/transpose、matmul 与函数级聚合统计。
@@ -89,10 +89,13 @@ from kernel_gen.dialect.dma import (
 from kernel_gen.dialect.nn import (
     NnAddOp,
     NnEqOp,
+    NnImg2col1dOp,
+    NnImg2col2dOp,
     NnMatmulOp,
     NnMemorySpaceAttr,
     NnMemoryType,
     NnMulOp,
+    NnSoftmaxOp,
 )
 from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.symbol_variable.memory import Memory
@@ -1777,6 +1780,225 @@ def test_analysis_reduce_vector_compute_kind(reduce_cls: type[IRDLOperation]) ->
         ComputeItem(kind=ComputeKind.VECTOR, amount=expected, dtype="f32"),
     )
     assert result.compute_totals_by_kind == {ComputeKind.VECTOR: expected}
+
+
+# AN-025
+# 创建者: 朽木露琪亚
+# 最后修改人: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-05 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-05 00:00:00 +0800
+# 测试目的: 验证 nn.softmax 同时产生 VECTOR/MATH compute 与对应读写量。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_softmax_compute_and_memory
+# 对应功能实现文件路径: kernel_gen/analysis/compute/nn.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_softmax_compute_and_memory() -> None:
+    mem_type = _make_memory_type([IntAttr(2), IntAttr(3), IntAttr(4)], f32, "global")
+    space = _make_space("global")
+    block = Block(arg_types=[mem_type])
+    softmax_op = NnSoftmaxOp(block.args[0], mem_type, axis=-1, space=space)
+
+    result = analysis(
+        softmax_op,
+        AnalysisConfig(enable_compute=True, enable_memory=True, dtype_size_overrides={"f32": 4}),
+    )
+
+    numel = sp.Integer(24)
+    groups = sp.Integer(6)
+    vector_compute = sp.Integer(4) * numel - sp.Integer(2) * groups
+    math_compute = numel
+    assert result.compute_items == (
+        ComputeItem(kind=ComputeKind.VECTOR, amount=vector_compute, dtype="f32"),
+        ComputeItem(kind=ComputeKind.MATH, amount=math_compute, dtype="f32"),
+    )
+    assert result.compute_totals_by_kind == {
+        ComputeKind.VECTOR: vector_compute,
+        ComputeKind.MATH: math_compute,
+    }
+    _assert_expr_equal(result.total_compute, vector_compute + math_compute)
+    _assert_expr_equal(result.total_read_bytes, numel * 4)
+    _assert_expr_equal(result.total_write_bytes, numel * 4)
+    assert len(result.memory_items) == 2
+    assert all(item.path is not MemoryPath.UNKNOWN for item in result.memory_items)
+
+
+# AN-026
+# 创建者: 朽木露琪亚
+# 最后修改人: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-05 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-05 00:00:00 +0800
+# 测试目的: 验证 nn.img2col1d 不产生 compute 且读写按结构化输出 numel 统计。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_img2col1d_direct_memory_only
+# 对应功能实现文件路径: kernel_gen/analysis/memory/nn.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_img2col1d_direct_memory_only() -> None:
+    input_type = _make_memory_type([IntAttr(1), IntAttr(2), IntAttr(8)], f32, "global")
+    result_type = _make_memory_type([IntAttr(1), IntAttr(2), IntAttr(3), IntAttr(8)], f32, "global")
+    space = _make_space("global")
+    block = Block(arg_types=[input_type])
+    img2col_op = NnImg2col1dOp(block.args[0], result_type, kw=3, sw=1, dw=1, pl=1, pr=1, space=space)
+
+    result = analysis(
+        img2col_op,
+        AnalysisConfig(enable_compute=True, enable_memory=True, dtype_size_overrides={"f32": 4}),
+    )
+
+    expected_numel = sp.Integer(48)
+    expected_bytes = expected_numel * 4
+    assert result.compute_items == ()
+    assert result.compute_totals_by_kind == {}
+    _assert_expr_equal(result.total_compute, sp.Integer(0))
+    _assert_expr_equal(result.total_read_bytes, expected_bytes)
+    _assert_expr_equal(result.total_write_bytes, expected_bytes)
+    assert len(result.memory_items) == 2
+    assert all(item.path is not MemoryPath.UNKNOWN for item in result.memory_items)
+
+
+# AN-026B
+# 创建者: 金铲铲大作战
+# 最后修改人: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-05 15:40:00 +0800
+# 最近一次运行成功时间: 2026-04-05 15:40:00 +0800
+# 测试目的: 验证 symbolic img2col1d 结果形状不匹配时必须抛 AnalysisError（compute/memory 均需拒绝）。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_img2col1d_symbolic_shape_mismatch_rejected
+# 对应功能实现文件路径: kernel_gen/analysis/compute/nn.py, kernel_gen/analysis/memory/nn.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_img2col1d_symbolic_shape_mismatch_rejected() -> None:
+    input_type = _make_memory_type(
+        [StringAttr("N"), StringAttr("C"), StringAttr("W")],
+        f32,
+        "global",
+    )
+    result_type = _make_memory_type(
+        [StringAttr("N"), StringAttr("C"), IntAttr(3), StringAttr("BAD")],
+        f32,
+        "global",
+    )
+    space = _make_space("global")
+    block = Block(arg_types=[input_type])
+    img2col_op = NnImg2col1dOp(block.args[0], result_type, kw=3, sw=1, dw=1, pl=1, pr=1, space=space)
+
+    with pytest.raises(AnalysisError, match="nn.img2col1d output shape mismatch"):
+        analysis(
+            img2col_op,
+            AnalysisConfig(enable_compute=True, enable_memory=False, dtype_size_overrides={"f32": 4}),
+        )
+    with pytest.raises(AnalysisError, match="nn.img2col1d output shape mismatch"):
+        analysis(
+            img2col_op,
+            AnalysisConfig(enable_compute=False, enable_memory=True, dtype_size_overrides={"f32": 4}),
+        )
+
+
+# AN-027
+# 创建者: 朽木露琪亚
+# 最后修改人: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-05 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-05 00:00:00 +0800
+# 测试目的: 验证 nn.img2col2d 不产生 compute 且读写按结构化输出 numel 统计。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_img2col2d_direct_memory_only
+# 对应功能实现文件路径: kernel_gen/analysis/memory/nn.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_img2col2d_direct_memory_only() -> None:
+    input_type = _make_memory_type([IntAttr(1), IntAttr(2), IntAttr(5), IntAttr(5)], f32, "global")
+    result_type = _make_memory_type(
+        [IntAttr(1), IntAttr(2), IntAttr(3), IntAttr(3), IntAttr(5), IntAttr(5)],
+        f32,
+        "global",
+    )
+    space = _make_space("global")
+    block = Block(arg_types=[input_type])
+    img2col_op = NnImg2col2dOp(
+        block.args[0],
+        result_type,
+        kh=3,
+        kw=3,
+        sh=1,
+        sw=1,
+        dh=1,
+        dw=1,
+        ph=1,
+        pw=1,
+        pl=1,
+        pr=1,
+        space=space,
+    )
+
+    result = analysis(
+        img2col_op,
+        AnalysisConfig(enable_compute=True, enable_memory=True, dtype_size_overrides={"f32": 4}),
+    )
+
+    expected_numel = sp.Integer(450)
+    expected_bytes = expected_numel * 4
+    assert result.compute_items == ()
+    assert result.compute_totals_by_kind == {}
+    _assert_expr_equal(result.total_compute, sp.Integer(0))
+    _assert_expr_equal(result.total_read_bytes, expected_bytes)
+    _assert_expr_equal(result.total_write_bytes, expected_bytes)
+    assert len(result.memory_items) == 2
+    assert all(item.path is not MemoryPath.UNKNOWN for item in result.memory_items)
+
+
+# AN-027B
+# 创建者: 金铲铲大作战
+# 最后修改人: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-05 15:40:00 +0800
+# 最近一次运行成功时间: 2026-04-05 15:40:00 +0800
+# 测试目的: 验证 symbolic img2col2d 结果形状不匹配时必须抛 AnalysisError（compute/memory 均需拒绝）。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_img2col2d_symbolic_shape_mismatch_rejected
+# 对应功能实现文件路径: kernel_gen/analysis/compute/nn.py, kernel_gen/analysis/memory/nn.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_img2col2d_symbolic_shape_mismatch_rejected() -> None:
+    input_type = _make_memory_type(
+        [StringAttr("N"), StringAttr("C"), StringAttr("H"), StringAttr("W")],
+        f32,
+        "global",
+    )
+    result_type = _make_memory_type(
+        [
+            StringAttr("N"),
+            StringAttr("C"),
+            IntAttr(3),
+            IntAttr(3),
+            StringAttr("BADH"),
+            StringAttr("BADW"),
+        ],
+        f32,
+        "global",
+    )
+    space = _make_space("global")
+    block = Block(arg_types=[input_type])
+    img2col_op = NnImg2col2dOp(
+        block.args[0],
+        result_type,
+        kh=3,
+        kw=3,
+        sh=1,
+        sw=1,
+        dh=1,
+        dw=1,
+        ph=1,
+        pw=1,
+        pl=1,
+        pr=1,
+        space=space,
+    )
+
+    with pytest.raises(AnalysisError, match="nn.img2col2d output shape mismatch"):
+        analysis(
+            img2col_op,
+            AnalysisConfig(enable_compute=True, enable_memory=False, dtype_size_overrides={"f32": 4}),
+        )
+    with pytest.raises(AnalysisError, match="nn.img2col2d output shape mismatch"):
+        analysis(
+            img2col_op,
+            AnalysisConfig(enable_compute=False, enable_memory=True, dtype_size_overrides={"f32": 4}),
+        )
 
 
 # AN-020N-C

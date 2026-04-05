@@ -1,10 +1,10 @@
 """NN dialect memory-path analysis helpers.
 
 创建者: 金铲铲大作战
-最后修改人: 金铲铲大作战
+最后修改人: 朽木露琪亚
 
 功能说明:
-- 承接 `nn.*` elementwise/unary/reduce/broadcast/transpose/matmul 的访存统计。
+- 承接 `nn.*` elementwise/unary/reduce/softmax/img2col/broadcast/transpose/matmul 的访存统计。
 - 仅生成 memory item 与读写字节统计，不负责 ComputeKind 分类。
 
 使用示例:
@@ -21,6 +21,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import sympy as sp
+from xdsl.dialects.builtin import BFloat16Type, Float16Type, Float32Type, Float64Type, IntAttr, IntegerAttr
 from xdsl.ir import Operation, SSAValue
 
 from kernel_gen.analysis.analysis import (
@@ -55,14 +56,83 @@ _NN_UNARY_OPS = ("nn.exp",)
 _NN_REDUCE_OPS = ("nn.reduce_sum", "nn.reduce_min", "nn.reduce_max")
 _NN_DIRECT_OPS = ("nn.broadcast", "nn.transpose")
 _NN_MATMUL_OPS = ("nn.matmul",)
-_NN_MEMORY_OPS = _NN_ELEMENTWISE_OPS + _NN_UNARY_OPS + _NN_REDUCE_OPS + _NN_DIRECT_OPS + _NN_MATMUL_OPS
+_NN_SOFTMAX_OPS = ("nn.softmax",)
+_NN_IMG2COL_OPS = ("nn.img2col1d", "nn.img2col2d")
+_NN_MEMORY_OPS = (
+    _NN_ELEMENTWISE_OPS
+    + _NN_UNARY_OPS
+    + _NN_REDUCE_OPS
+    + _NN_SOFTMAX_OPS
+    + _NN_IMG2COL_OPS
+    + _NN_DIRECT_OPS
+    + _NN_MATMUL_OPS
+)
+
+
+def _get_i64_attr(op: Operation, name: str) -> int:
+    """读取 op 的 i64 整数属性。
+
+    创建者: 朽木露琪亚
+    最后修改人: 朽木露琪亚
+
+    功能说明:
+    - 仅接受 IntAttr/IntegerAttr。
+    - 缺失或类型不匹配时抛 AnalysisError。
+
+    使用示例:
+    - axis = _get_i64_attr(op, "axis")
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/memory/nn.py
+    """
+    attr = op.attributes.get(name)
+    if isinstance(attr, IntAttr):
+        return int(attr.data)
+    if isinstance(attr, IntegerAttr):
+        return int(attr.value.data)
+    raise AnalysisError(f"{op.name} {name} must be integer")
+
+
+def _img2col_output_dim(
+    input_dim: sp.Basic,
+    kernel: int,
+    stride: int,
+    dilation: int,
+    pad_before: int,
+    pad_after: int,
+) -> sp.Basic:
+    """计算 img2col 输出维度表达式。
+
+    创建者: 朽木露琪亚
+    最后修改人: 朽木露琪亚
+
+    功能说明:
+    - 复用卷积输出维度公式，返回 floor(...) + 1 的表达式。
+
+    使用示例:
+    - out = _img2col_output_dim(sp.Integer(8), 3, 1, 1, 1, 1)
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/memory/nn.py
+    """
+    kernel_expr = sp.Integer(kernel)
+    stride_expr = sp.Integer(stride)
+    dilation_expr = sp.Integer(dilation)
+    pad_before_expr = sp.Integer(pad_before)
+    pad_after_expr = sp.Integer(pad_after)
+    numerator = input_dim + pad_before_expr + pad_after_expr - dilation_expr * (kernel_expr - 1) - 1
+    return numerator // stride_expr + 1
 
 
 def _compute_path(space_token: str, access: str) -> str:
     """构造 compute 读写路径文本。
 
     创建者: 金铲铲大作战
-    最后修改人: 金铲铲大作战
+    最后修改人: 朽木露琪亚
 
     功能说明:
     - 读路径固定为 `<space_token>->compute`。
@@ -96,7 +166,7 @@ def _finalize_memory_analysis(
     """规范化 memory analyzer 输出。
 
     创建者: 金铲铲大作战
-    最后修改人: 金铲铲大作战
+    最后修改人: 朽木露琪亚
 
     功能说明:
     - 当 `enable_memory=False` 时清空所有访存统计。
@@ -141,7 +211,7 @@ def analyze_nn_memory_op(op: Operation, config: AnalysisConfig) -> _AnalyzedOp |
     最后修改人: 金铲铲大作战
 
     功能说明:
-    - 覆盖 elementwise/unary/reduce/broadcast/transpose/matmul 的访存统计。
+    - 覆盖 elementwise/unary/reduce/softmax/img2col/broadcast/transpose/matmul 的访存统计。
     - direct op 仅统计读写 bytes，不产出 compute item。
 
     使用示例:
@@ -330,6 +400,170 @@ def analyze_nn_memory_op(op: Operation, config: AnalysisConfig) -> _AnalyzedOp |
                     config,
                 )
             )
+        return _finalize_memory_analysis(
+            op_name=op.name,
+            read_bytes=read_bytes,
+            write_bytes=write_bytes,
+            memory_items=memory_items,
+            value_reads=[(operand, read_bytes)],
+            result_write_bytes=write_bytes,
+            config=config,
+        )
+
+    if name in _NN_SOFTMAX_OPS:
+        if len(op.operands) != 1 or len(op.results) != 1:
+            raise AnalysisError("nn.softmax must have 1 operand and 1 result")
+        operand = op.operands[0]
+        result = op.results[0]
+        if not isinstance(operand.type, NnMemoryType):
+            raise AnalysisError("nn.softmax operand must be nn.memory")
+        if not isinstance(result.type, NnMemoryType):
+            raise AnalysisError("nn.softmax result must be nn.memory")
+        input_type = operand.type
+        result_type = result.type
+        if input_type.shape != result_type.shape:
+            raise AnalysisError("nn.softmax input/result shape mismatch")
+        if input_type.element_type != result_type.element_type:
+            raise AnalysisError("nn.softmax input/result element_type mismatch")
+        if not isinstance(input_type.element_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
+            raise AnalysisError("nn.softmax element_type must be float")
+        rank = len(input_type.shape.data)
+        if rank <= 0:
+            raise AnalysisError("nn.softmax input rank must be positive")
+        axis_value = _get_i64_attr(op, "axis")
+        if axis_value < -rank or axis_value >= rank:
+            raise AnalysisError("nn.softmax axis out of range")
+        numel = _numel_from_mem_type(result_type)
+        if numel is None:
+            raise AnalysisError("nn.softmax shape unsupported")
+        elem_size = _element_size(result_type.element_type, overrides)
+        if elem_size is None:
+            raise AnalysisError("nn.softmax dtype unsupported")
+        bytes_expr = numel * sp.Integer(elem_size)
+        read_bytes = bytes_expr
+        write_bytes = bytes_expr
+        memory_items: list[object] = []
+        if config.enable_memory:
+            memory_items.append(
+                _build_memory_item(
+                    _compute_path(_space_token_from_mem_type(input_type), "read"),
+                    "read",
+                    read_bytes,
+                    config,
+                )
+            )
+            memory_items.append(
+                _build_memory_item(
+                    _compute_path(_space_token_from_mem_type(result_type), "write"),
+                    "write",
+                    write_bytes,
+                    config,
+                )
+            )
+        return _finalize_memory_analysis(
+            op_name=op.name,
+            read_bytes=read_bytes,
+            write_bytes=write_bytes,
+            memory_items=memory_items,
+            value_reads=[(operand, read_bytes)],
+            result_write_bytes=write_bytes,
+            config=config,
+        )
+
+    if name in _NN_IMG2COL_OPS:
+        if len(op.operands) != 1 or len(op.results) != 1:
+            raise AnalysisError("nn.img2col must have 1 operand and 1 result")
+        operand = op.operands[0]
+        result = op.results[0]
+        if not isinstance(operand.type, NnMemoryType):
+            raise AnalysisError("nn.img2col operand must be nn.memory")
+        if not isinstance(result.type, NnMemoryType):
+            raise AnalysisError("nn.img2col result must be nn.memory")
+        input_type = operand.type
+        result_type = result.type
+        if input_type.element_type != result_type.element_type:
+            raise AnalysisError("nn.img2col element_type mismatch")
+
+        input_dims: list[sp.Basic] = []
+        for dim in input_type.shape.data:
+            dim_expr = _dim_to_expr(dim)
+            if dim_expr is None:
+                raise AnalysisError("nn.img2col shape unsupported")
+            input_dims.append(dim_expr)
+        result_dims: list[sp.Basic] = []
+        for dim in result_type.shape.data:
+            dim_expr = _dim_to_expr(dim)
+            if dim_expr is None:
+                raise AnalysisError("nn.img2col shape unsupported")
+            result_dims.append(dim_expr)
+
+        if op.name == "nn.img2col1d":
+            if len(input_dims) != 3:
+                raise AnalysisError("nn.img2col1d requires rank-3 input")
+            if len(result_dims) != 4:
+                raise AnalysisError("nn.img2col1d requires rank-4 result")
+            kw = _get_i64_attr(op, "kw")
+            sw = _get_i64_attr(op, "sw")
+            dw = _get_i64_attr(op, "dw")
+            pl = _get_i64_attr(op, "pl")
+            pr = _get_i64_attr(op, "pr")
+            if kw <= 0 or sw <= 0 or dw <= 0:
+                raise AnalysisError("nn.img2col1d kw/sw/dw must be positive")
+            if pl < 0 or pr < 0:
+                raise AnalysisError("nn.img2col1d pl/pr must be non-negative")
+            n_dim, c_dim, w_dim = input_dims
+            w_out = _img2col_output_dim(w_dim, kw, sw, dw, pl, pr)
+            if isinstance(w_out, sp.Integer) and int(w_out) <= 0:
+                raise AnalysisError("nn.img2col1d output shape invalid")
+            expected_shape = [n_dim, c_dim, sp.Integer(kw), w_out]
+            if result_dims != expected_shape:
+                raise AnalysisError("nn.img2col1d output shape mismatch")
+        else:
+            if len(input_dims) != 4:
+                raise AnalysisError("nn.img2col2d requires rank-4 input")
+            if len(result_dims) != 6:
+                raise AnalysisError("nn.img2col2d requires rank-6 result")
+            kh = _get_i64_attr(op, "kh")
+            kw = _get_i64_attr(op, "kw")
+            sh = _get_i64_attr(op, "sh")
+            sw = _get_i64_attr(op, "sw")
+            dh = _get_i64_attr(op, "dh")
+            dw = _get_i64_attr(op, "dw")
+            ph = _get_i64_attr(op, "ph")
+            pw = _get_i64_attr(op, "pw")
+            pl = _get_i64_attr(op, "pl")
+            pr = _get_i64_attr(op, "pr")
+            if kh <= 0 or kw <= 0 or sh <= 0 or sw <= 0 or dh <= 0 or dw <= 0:
+                raise AnalysisError("nn.img2col2d kh/kw/sh/sw/dh/dw must be positive")
+            if ph < 0 or pw < 0 or pl < 0 or pr < 0:
+                raise AnalysisError("nn.img2col2d ph/pw/pl/pr must be non-negative")
+            n_dim, c_dim, h_dim, w_dim = input_dims
+            h_out = _img2col_output_dim(h_dim, kh, sh, dh, ph, pw)
+            w_out = _img2col_output_dim(w_dim, kw, sw, dw, pl, pr)
+            if isinstance(h_out, sp.Integer) and int(h_out) <= 0:
+                raise AnalysisError("nn.img2col2d output shape invalid")
+            if isinstance(w_out, sp.Integer) and int(w_out) <= 0:
+                raise AnalysisError("nn.img2col2d output shape invalid")
+            expected_shape = [n_dim, c_dim, sp.Integer(kh), sp.Integer(kw), h_out, w_out]
+            if result_dims != expected_shape:
+                raise AnalysisError("nn.img2col2d output shape mismatch")
+
+        result_numel = _numel_from_mem_type(result_type)
+        if result_numel is None:
+            raise AnalysisError("nn.img2col shape unsupported")
+        elem_size = _element_size(result_type.element_type, overrides)
+        if elem_size is None:
+            raise AnalysisError("nn.img2col dtype unsupported")
+        bytes_expr = result_numel * sp.Integer(elem_size)
+        read_bytes = bytes_expr
+        write_bytes = bytes_expr
+        src_token = _space_token_from_mem_type(input_type)
+        dst_token = _space_token_from_mem_type(result_type)
+        path = f"{src_token}->{dst_token}"
+        memory_items: list[object] = []
+        if config.enable_memory:
+            memory_items.append(_build_memory_item(path, "read", read_bytes, config))
+            memory_items.append(_build_memory_item(path, "write", write_bytes, config))
         return _finalize_memory_analysis(
             op_name=op.name,
             read_bytes=read_bytes,
