@@ -24,6 +24,7 @@
 - 统一 Pass 的注册、执行与错误传播规则，便于后续实现与测试闭环。
 - 冻结 analysis pass 在 manager 中的承接方式：`run(module)` 继续返回单一 `module`，不追加 summary 或第二返回值。
 - 对 lowering 链固定公开一个可验证顺序示例：当模块内存在 `memory-return func.func + func.call` 链路时，`BufferResultsToOutParamsPass` 必须运行在 `LowerNnToKernelPass` 之后，避免 caller/callee ABI 停留在双口径。
+- 对显式 memory hierarchy lowering 链固定公开一个扩展顺序边界：当调用方注册 `LowerDmaMemoryHierarchyPass` 时，其位置必须在 `LowerNnToKernelPass` 与 `BufferResultsToOutParamsPass` 之后。
 
 ## 限制与边界
 
@@ -32,6 +33,7 @@
 - 不要求 Pass 修改输入的方式（可返回新对象或就地修改），以 `run` 返回值为准。
 - 当管理器中无 Pass 时，执行结果必须等于输入（无副作用的空操作）。
 - 对 analysis pass，manager 不负责聚合第二份分析结果对象；若需观察分析结果，只能经由 pass 实例侧接口或 `attrs` 等副作用读取。
+- 当 lowering 链包含 `LowerDmaMemoryHierarchyPass` 时，manager 只冻结其排序边界；是否注册该 pass 仍由调用方决定。
 
 ## 公开接口
 
@@ -108,6 +110,16 @@ summary = cost_pass.get_summary("main")
 pm = PassManager(name="lowering")
 pm.add_pass(LowerNnToKernelPass())
 pm.add_pass(BufferResultsToOutParamsPass())
+module = pm.run(module)
+```
+
+- 当需要显式插入 DMA memory hierarchy lowering 时，顺序固定扩展为：
+
+```python
+pm = PassManager(name="lowering")
+pm.add_pass(LowerNnToKernelPass())
+pm.add_pass(BufferResultsToOutParamsPass())
+pm.add_pass(LowerDmaMemoryHierarchyPass())
 module = pm.run(module)
 ```
 
@@ -198,6 +210,7 @@ summary = cost_pass.get_summary("main")
 - Pass 的输出必须作为下一个 Pass 的输入。
 - 任何 Pass 抛出的异常应原样传播。
 - 若执行的是 analysis pass，分析结果不作为 `run(...)` 的第二返回值传出；调用方应通过 pass 实例或 `analysis.*` attrs 读取。
+- 若调用方注册 `LowerDmaMemoryHierarchyPass`，不得把它前移到 `LowerNnToKernelPass` 或 `BufferResultsToOutParamsPass` 之前。
 
 前置条件：
 
