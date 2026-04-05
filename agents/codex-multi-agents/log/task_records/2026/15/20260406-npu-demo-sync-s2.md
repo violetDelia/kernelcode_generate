@@ -56,3 +56,19 @@
 - 2 passed, 10 deselected in 0.61s
 - 1 passed, 18 deselected in 0.36s
 下一步建议：派生合并任务，交由李白执行合并收口。
+
+时间：2026-04-06 05:45:55 +0800
+经办人：李白
+任务：T-20260406-06e60898（npu_demo_parallel_add_sync_green_plan-S2-合并收口）
+任务目标：复跑 S2 gate（include/api、npu_demo KernelContext、target registry），合并审查通过的 spec/实现/测试到 main 并 push，清理 worktree/branch。
+改动：
+- 合入文件（业务）：`include/api/Arch.h`、`include/npu_demo/Arch.h`、`include/npu_demo/npu_demo.h`、`kernel_gen/target/registry.py`、`spec/include/api/Arch.md`、`spec/include/npu_demo/npu_demo.md`、`spec/target/registry.md`、`test/include/api/test_arch.py`、`test/include/npu_demo/test_kernel_context.py`、`test/target/test_target_registry.py`。
+- 合入文件（记录）：`agents/codex-multi-agents/log/task_records/2026/15/20260406-npu-demo-sync-s2.md`。
+- gate（复跑，均 exit=0）：
+  - `pytest -q test/include/api/test_arch.py` -> `3 passed in 0.53s`
+  - `pytest -q test/include/npu_demo/test_kernel_context.py -k "runtime or barrier"` -> `2 passed, 10 deselected in 0.67s`
+  - `pytest -q test/target/test_target_registry.py -k "npu_demo and launch"` -> `1 passed, 18 deselected in 0.36s`
+- merge_commit：`b8df926eb8c7091c3b33e7fac15c26d6e53d4535`。
+- push(main)：`timeout 60 git push origin main`（exit=0）。
+- cleanup：`git worktree remove wt-20260406-npu-demo-sync-s2 --force`；`git branch -D T-20260406-d234a944`。
+结论：S2 变更已合入并推送主分支，gate 全绿，worktree/分支已清理；无后续任务。
