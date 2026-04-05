@@ -9,7 +9,7 @@
 | `S3` | `S1、S2` | `wt-20260405-analysis-engine-refactor-s3` | `20260405-analysis-engine-refactor-s3.md` | `实现完成（T-20260405-e3ff6a4b，朽木露琪亚）；复审通过（T-20260405-20803047，提莫炖蘑菇）；已合并（commit aa7055e，T-20260405-70830a39，李白）。` |
 | `S4` | `S3` | `wt-20260405-analysis-engine-refactor-s4` | `20260405-analysis-engine-refactor-s4.md` | `实现+补测完成（T-20260405-b12c6530，金铲铲大作战；pytest gate exit=0，84 passed）；复审不通过（T-20260405-5653dd9a，提莫炖蘑菇：发现未追踪文件合并风险）；修复完成（T-20260405-bd8250cd，jcc你莫辜负；gate exit=0，84 passed）；复审通过（T-20260405-15344c9c，提莫炖蘑菇）；已合并（commit b530c6d，T-20260405-ab62bd23，李白；gate exit=0）。` |
 | `S5` | `S4` | `wt-20260405-analysis-engine-refactor-s5` | `20260405-analysis-engine-refactor-s5.md` | `实现完成（T-20260405-a11cfab8，金铲铲大作战；gate exit=0）；复审通过（T-20260405-e71a9ff7，不要啊教练；gate exit=0）；已合并（commit e69d456，T-20260405-48bb68d6，李白；gate exit=0）。` |
-| `S6` | `S5` |  |  | `未开始` |
+| `S6` | `S5` | `wt-20260405-analysis-engine-refactor-s6` | `20260405-analysis-engine-refactor-s6.md` | `实现完成（T-20260405-6c9ecda4，朽木露琪亚；gate exit=0）；复审通过（T-20260405-be9099a7，提莫炖蘑菇；gate exit=0）；已合并（commit ab2b853，T-20260405-64e9b2e6，李白；gate exit=0）。` |
 | `S7` | `S6` |  |  | `未开始` |
 
 ## 功能说明
