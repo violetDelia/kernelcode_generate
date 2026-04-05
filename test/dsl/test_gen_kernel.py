@@ -980,6 +980,28 @@ def test_gen_kernel_emits_npu_demo_body_level_kernel() -> None:
     assert "launch" not in source
     assert "barrier" not in source
     assert "arch.launch_kernel" not in source
+
+
+# GK-017A
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-05 16:36:25 +0800
+# 最近一次运行成功时间: 2026-04-05 16:36:25 +0800
+# 功能说明: 验证 npu_demo target 的 gen_kernel 源码仅依赖 npu_demo.h 即可编译。
+# 测试目的: 补齐 compile smoke，确保只包含 `include/npu_demo/npu_demo.h` 也可通过编译。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_compiles_npu_demo_source_with_single_include
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_compiles_npu_demo_source_with_single_include() -> None:
+    mem = _make_memory_type([64], [1], element_type=f32)
+    block = Block(arg_types=[IndexType(), mem])
+    func_op = _func("demo_kernel", [IndexType(), mem], [mem], block, ("ctx", "source"))
+
+    source = gen_kernel(func_op, _npu_ctx())
+
+    include_lines = [line for line in source.splitlines() if line.startswith("#include ")]
+    assert include_lines == ['#include "include/npu_demo/npu_demo.h"']
     _compile_only(source)
 
 
