@@ -32,7 +32,7 @@ from xdsl.dialects.builtin import (
 )
 from xdsl.ir import Block, Operation, SSAValue
 
-from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaSliceOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaSliceOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
 from kernel_gen.passes.pass_manager import Pass
@@ -201,6 +201,45 @@ def _build_full_window_operands(
     return ops, offsets, sizes, strides
 
 
+def _resolve_window_operands(
+    value: SSAValue,
+    *,
+    rank: int,
+    zero: SSAValue,
+    one: SSAValue,
+) -> tuple[list[Operation], SSAValue, list[SSAValue], list[SSAValue], list[SSAValue]]:
+    """解析 GM 侧窗口参数与基准 source/target。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 若 operand 来自 `dma.view`，保留其 offsets/shape 作为 window 参数，并将 base 设为 view.source。
+    - `dma.slice/dma.deslice` 当前仅支持单位 stride，因此 window stride 始终使用 unit stride。
+    - 非 window 情况下回退为 full window：offsets=0、sizes=shape、strides=1。
+
+    使用示例:
+    - ops, base, offsets, sizes, strides = _resolve_window_operands(gm, rank=2, zero=zero, one=one)
+
+    关联文件:
+    - spec: spec/pass/lowering/dma_memory_hierarchy.md
+    - test: test/pass/test_dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+    """
+
+    owner = getattr(value, "owner", None)
+    if isinstance(owner, DmaViewOp):
+        offsets = list(owner.offsets)
+        sizes = list(owner.shape)
+        if len(offsets) != rank or len(sizes) != rank:
+            raise LowerDmaMemoryHierarchyError("dma.view window rank mismatch for lower-dma-memory-hierarchy")
+        return [], SSAValue.get(owner.source), offsets, sizes, [one] * rank
+    ops, offsets, sizes, strides = _build_full_window_operands(
+        value, rank=rank, zero=zero, one=one
+    )
+    return ops, value, offsets, sizes, strides
+
+
 def _ensure_static_rank(memory_type: NnMemoryType, context: str) -> int:
     """确保 nn.memory 的 rank 可确定，返回 rank。
 
@@ -259,11 +298,11 @@ def _lower_gm_operand_to_lm(
     """将单个 GM operand 改写为 GM->SM->LM 并返回 LM buffer。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 为 operand 分配 SM/LM staging buffer，并插入两段 `dma.slice`：
-      `GM -> SM` 与 `SM -> LM`。
+      `GM -> SM`（保留 full/window 参数）与 `SM -> LM`（zero offsets + unit strides）。
     - 返回需要插入到 `anchor_op` 之前的 ops 列表与最终 LM buffer SSA value。
 
     使用示例:
@@ -279,15 +318,18 @@ def _lower_gm_operand_to_lm(
     rank = _ensure_static_rank(operand_type, "kernel operand")
     sm_type = _with_space(operand_type, "shared")
     lm_type = _with_space(operand_type, "local")
-    dim_ops, offsets, sizes, strides = _build_full_window_operands(
+    window_ops, window_source, window_offsets, window_sizes, window_strides = _resolve_window_operands(
         operand, rank=rank, zero=zero, one=one
     )
-    dim_values = [op.result for op in dim_ops]  # type: ignore[attr-defined]
-    alloc_sm = DmaAllocOp(dim_values, sm_type)
-    alloc_lm = DmaAllocOp(dim_values, lm_type)
-    slice_gm_to_sm = DmaSliceOp(alloc_sm.result, operand, offsets, sizes, strides)
-    slice_sm_to_lm = DmaSliceOp(alloc_lm.result, alloc_sm.result, offsets, sizes, strides)
-    ops: list[Operation] = [*dim_ops, alloc_sm, alloc_lm, slice_gm_to_sm, slice_sm_to_lm]
+    alloc_sm = DmaAllocOp(window_sizes, sm_type)
+    alloc_lm = DmaAllocOp(window_sizes, lm_type)
+    slice_gm_to_sm = DmaSliceOp(
+        alloc_sm.result, window_source, window_offsets, window_sizes, window_strides
+    )
+    zero_offsets = [zero] * rank
+    unit_strides = [one] * rank
+    slice_sm_to_lm = DmaSliceOp(alloc_lm.result, alloc_sm.result, zero_offsets, window_sizes, unit_strides)
+    ops: list[Operation] = [*window_ops, alloc_sm, alloc_lm, slice_gm_to_sm, slice_sm_to_lm]
     return ops, alloc_lm.result
 
 
@@ -303,12 +345,13 @@ def _lower_gm_out_to_lm_with_writeback(
     """将 GM out operand 改写为 LM out，并构造 LM->SM->GM 写回链路。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 在 `anchor_op` 前插入 SM/LM alloc（out staging）。
     - 在 `anchor_op` 后插入两段 `dma.deslice`：`LM -> SM` 与 `SM -> GM`。
       第二段 deslice 的 source 使用第一段 deslice 的 result，匹配 `dma.deslice` 返回“更新后 target”的语义。
+    - `LM -> SM` 使用 zero offsets + unit strides；`SM -> GM` 保留 full/window offsets/sizes。
     - 返回：需插入到 `anchor_op` 前的 ops、需插入到 `anchor_op` 后的 ops、以及 LM out SSA value。
 
     使用示例:
@@ -325,35 +368,34 @@ def _lower_gm_out_to_lm_with_writeback(
     rank = _ensure_static_rank(out_type, "kernel out")
     sm_type = _with_space(out_type, "shared")
     lm_type = _with_space(out_type, "local")
-    dim_ops, offsets, sizes, strides = _build_full_window_operands(
+    window_ops, window_target, window_offsets, window_sizes, window_strides = _resolve_window_operands(
         out, rank=rank, zero=zero, one=one
     )
-    dim_values = [op.result for op in dim_ops]  # type: ignore[attr-defined]
-    alloc_sm = DmaAllocOp(dim_values, sm_type)
-    alloc_lm = DmaAllocOp(dim_values, lm_type)
-    pre_ops: list[Operation] = [*dim_ops, alloc_sm, alloc_lm]
+    if not isinstance(window_target.type, NnMemoryType):
+        raise LowerDmaMemoryHierarchyError("window target must be nn.memory")
+    alloc_sm = DmaAllocOp(window_sizes, sm_type)
+    alloc_lm = DmaAllocOp(window_sizes, lm_type)
+    pre_ops: list[Operation] = [*window_ops, alloc_sm, alloc_lm]
 
-    # 写回链路 sizes 应与 source（LM/SM）shape 对齐，这里直接基于 LM out 构造窗口。
-    post_dim_ops, post_offsets, post_sizes, post_strides = _build_full_window_operands(
-        alloc_lm.result, rank=rank, zero=zero, one=one
-    )
+    zero_offsets = [zero] * rank
+    unit_strides = [one] * rank
     deslice_lm_to_sm = DmaDesliceOp(
         alloc_lm.result,
         alloc_sm.result,
-        post_offsets,
-        post_sizes,
-        post_strides,
+        zero_offsets,
+        window_sizes,
+        unit_strides,
         sm_type,
     )
     deslice_sm_to_gm = DmaDesliceOp(
         deslice_lm_to_sm.result,
-        out,
-        post_offsets,
-        post_sizes,
-        post_strides,
-        out_type,
+        window_target,
+        window_offsets,
+        window_sizes,
+        window_strides,
+        window_target.type,
     )
-    post_ops: list[Operation] = [*post_dim_ops, deslice_lm_to_sm, deslice_sm_to_gm]
+    post_ops: list[Operation] = [deslice_lm_to_sm, deslice_sm_to_gm]
     return pre_ops, post_ops, alloc_lm.result
 
 

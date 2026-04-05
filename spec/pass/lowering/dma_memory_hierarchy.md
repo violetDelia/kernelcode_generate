@@ -33,6 +33,7 @@
 - 冻结 pass 名称与顺序边界：`LowerNnToKernelPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass`。
 - 强制 `kernel.*` 计算仅在 `LM` 上发生，读写路径显式拆成 `GM -> SM -> LM` 与 `LM -> SM -> GM`。
 - 新增 hierarchy 搬运统一用 `dma.slice / dma.deslice`，整块搬运只是 `slice/deslice` 的全量窗口特例。
+- 冻结窗口链路口径：`GM -> SM` 与 `SM -> GM` 必须保留原窗口 `offsets/sizes/strides`，`SM -> LM` 与 `LM -> SM` 必须改写为 `zero offsets + unit strides`。
 
 ## 限制与边界
 
@@ -40,6 +41,7 @@
 - 不改写函数 ABI；caller/callee 的 out-param 合同仍由 `BufferResultsToOutParamsPass` 负责。
 - 本 pass 新增的 hierarchy 搬运不得使用 `dma.copy` / `dma.load` / `dma.store`；若输入中已有这些 op，本 pass 不要求重写，但也不得用它们表达新增的层级主语义。
 - 读路径必须是 `GM -> SM -> LM`，写路径必须是 `LM -> SM -> GM`；不允许直连 `GM -> LM` 或 `LM -> GM`。
+- 若输入/输出使用窗口视图，`GM -> SM` 读入与 `SM -> GM` 写回必须保留该窗口的原始 `offsets/sizes/strides`；只有 `SM -> LM` 与 `LM -> SM` 两段允许正规化为 `zero offsets + unit strides`。
 - 处理后的 `kernel.*` operand/out 只允许 `LM` memory；不得保留 `GM/SM` 作为计算或写回空间。
 - 目标不支持 `SM` 或 `LM` 时必须显式失败，禁止静默降级。
 
@@ -129,6 +131,9 @@ dma.deslice(%lm, %sm, zero_offsets, full_sizes, unit_strides)
 dma.deslice(%sm, %gm, zero_offsets, full_sizes, unit_strides)
 ```
 
+- 窗口读路径中，`GM -> SM` 的 `dma.slice` 必须保留输入窗口的原始 `offsets/sizes/strides`；后续 `SM -> LM` 的 `dma.slice` 必须使用 `zero_offsets + window_sizes + unit_strides`。
+- 窗口写路径中，`LM -> SM` 的 `dma.deslice` 必须使用 `zero_offsets + result_sizes + unit_strides`；最终 `SM -> GM` 的 `dma.deslice` 必须保留输出窗口的原始 `offsets/sizes/strides`。
+
 前置条件：
 
 - `module` 必须是可遍历的 `builtin.module`；无法遍历或不满足输入合同必须失败。
@@ -152,6 +157,7 @@ dma.deslice(%sm, %gm, zero_offsets, full_sizes, unit_strides)
   - 验证新增 hierarchy 搬运不引入 `dma.copy/load/store`。
   - 验证目标缺失 `SM/LM` 时显式失败。
   - 验证输入残留 `nn.*` 时显式失败。
+  - 验证窗口链路中 `GM -> SM` / `SM -> GM` 保留原窗口 `offsets/sizes/strides`，而 `SM -> LM` / `LM -> SM` 固定为 `zero offsets + unit strides`。
 - 功能与用例清单：
 
 | 用例 ID | 约束点 | 对应测试 |
@@ -163,3 +169,4 @@ dma.deslice(%sm, %gm, zero_offsets, full_sizes, unit_strides)
 | COV-DMH-005 | 目标缺失 `SM/LM` 必须失败 | `test_dma_memory_hierarchy_requires_sm_lm` |
 | COV-DMH-006 | LM-only 输入不插入 staging（no-op） | `test_dma_memory_hierarchy_lm_only_is_noop` |
 | COV-DMH-007 | 输入残留 `nn.*` 必须显式失败 | `test_dma_memory_hierarchy_rejects_nn_ops_in_input` |
+| COV-DMH-008 | 窗口链路中 `GM -> SM` / `SM -> GM` 保留原窗口 `offsets/sizes/strides`，`SM -> LM` / `LM -> SM` 使用 `zero offsets + unit strides` | `test_dma_memory_hierarchy_window_offsets_and_unit_strides` |
