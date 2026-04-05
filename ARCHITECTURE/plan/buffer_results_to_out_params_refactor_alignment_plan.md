@@ -9,7 +9,7 @@
 | `S3` | `S1` | `wt-20260405-buffer-outparams-s3` | `20260405-buffer-outparams-s3.md` | `实现+补测完成（T-20260405-facb8a3a，jcc你莫辜负；gate exit=0）；复审通过（T-20260405-067b8e28，提莫炖蘑菇；gate exit=0）；已合并（commit 286f731，T-20260405-2051b5f2，李白；gate exit=0）。` |
 | `S4` | `S2、S3` | `wt-20260405-buffer-outparams-s4` | `20260405-buffer-outparams-s4.md` | `已建任务并分发（T-20260405-6d72d4aa，jcc你莫辜负）：补齐 external declaration / multi-block / return arity / callsite mismatch / half-rewritten 的正式 expectation 合同与下游门禁。` |
 | `S5` | `S4` | `wt-20260405-buffer-outparams-s5` | `20260405-buffer-outparams-s5.md` | `已合并（commit c9c0f8b，T-20260405-e4108848，李白；gate exit=0）。` |
-| `S6` | `S5` | `.` | `不要求` | `未开始` |
+| `S6` | `S5` | `.` | `不要求` | `已合并（commit 8f621ba，T-20260405-19d6ac20，李白；gate exit=0）。` |
 
 ## 功能说明
 
