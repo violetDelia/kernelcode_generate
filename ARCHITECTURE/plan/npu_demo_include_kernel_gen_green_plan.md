@@ -9,7 +9,7 @@
 | `S3` | `S1` | `wt-20260405-npu-demo-include-s3` | `20260405-npu-demo-include-s3.md` | `实现+补测完成（T-20260405-77b08592，金铲铲大作战；pytest exit=0）；复审需修改（T-20260405-f8efb199，不要啊教练：view(标量/Vector) 缺 1-D 边界校验/失败机制与负例门禁）；修复完成（T-20260405-382d7490，金铲铲大作战：补齐 1-D rank/向量长度/非法 offset-size-stride/越界校验，失败机制统一为 runtime_error(dma.view: ...)，并新增 KC-008 负例门禁；pytest exit=0）；待复审（T-20260405-5940bfee，不要啊教练）。` |
 | `S4` | `S2、S3` | `wt-20260405-npu-demo-include-s4` | `20260405-npu-demo-include-s4.md` | `已合并（commit d46343c，T-20260405-149e00f9，李白；gate exit=0）。` |
 | `S5` | `S4` | `wt-20260405-npu-demo-include-s5` | `20260405-npu-demo-include-s5.md` | `已合并（commit 8b51d3e，T-20260405-4689e197，李白；gate exit=0）。` |
-| `S6` | `S5` | `/home/lfr/kernelcode_generate` | `不要求` | `未开始` |
+| `S6` | `S5` | `wt-20260405-npu-demo-include-s6` | `20260405-npu-demo-include-s6.md` | `已合并（commit c5d969d，T-20260405-51533617，李白；gate exit=0）。` |
 | `S7` | `S6` | `/home/lfr/kernelcode_generate` | `不要求` | `未开始` |
 
 ## 功能说明
