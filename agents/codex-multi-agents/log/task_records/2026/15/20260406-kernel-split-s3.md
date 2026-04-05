@@ -198,6 +198,21 @@
 - 类型/形状绕过：未发现；tuner.param 与 tile bridge 类型约束在实现与错误短语中固定。
 - 边界越界：未发现；缺失 symbol.for / tile bridge / tuner.param 均显式失败。
 - 错误处理缺失：未发现；KernelSplitMalformed / KernelSplitUnexpectedHelperFunction 均覆盖。
+
+---
+
+时间：2026-04-06 04:15:48 +0800
+经办人：李白
+任务：T-20260406-18a68e9e（kernel_split_pass_green_plan-S3-合并收口）
+任务目标：合并 split-after-IR 单函数 codegen 合同 + GK-S3-001~GK-S3-005 映射，以及对应实现/测试；复跑 gate 并推送 main；清理 worktree/branch。
+改动：
+- 合入文件（业务）：`spec/dsl/gen_kernel.md`、`kernel_gen/dsl/gen_kernel.py`、`test/dsl/test_gen_kernel.py`。
+- 合入文件（记录）：`agents/codex-multi-agents/log/task_records/2026/15/20260406-kernel-split-s3.md`。
+- gate（复跑）：`cd wt-20260406-kernel-split-s3 && pytest -q test/dsl/test_gen_kernel.py` -> `41 passed`（exit=0）。
+- merge_commit：`39fa1a01850f597d935476b6994a1544da81adca`。
+- push(main)：`timeout 60 git push origin main`（exit=0）。
+- cleanup：`git worktree remove wt-20260406-kernel-split-s3 --force`；`git branch -D T-20260406-65dc21cd`。
+结论：S3 变更已合入并推送主分支，gate 全绿，worktree/分支已清理；无后续任务。
 - 状态污染：未发现。
 - 资源释放问题：未发现。
 改进建议：未发现额外改进点。
