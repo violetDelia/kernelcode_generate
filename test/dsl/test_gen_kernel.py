@@ -911,6 +911,25 @@ class Test_buffer_results_to_out_params_gen_kernel:
         assert "Memory<int32_t>& out" not in source
         assert "out = " not in source
 
+    # GK-O5-005
+    # 创建者: 小李飞刀
+    # 最后一次更改: 小李飞刀
+    # 最近一次运行测试时间: 2026-04-05 00:00:00 +0800
+    # 最近一次运行成功时间: 2026-04-05 00:00:00 +0800
+    # 功能说明: 验证仅 lowering 的 IR 仍会触发 gen_kernel 的 legacy ABI 拒绝。
+    # 测试目的: 锁定下游合同：未执行 BufferResultsToOutParamsPass 时，gen_kernel 必须显式报错。
+    # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_rejects_lowered_ir_without_buffer_results_to_out_params
+    # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+    # 对应 spec 文件路径: spec/dsl/gen_kernel.md
+    # 对应测试文件路径: test/dsl/test_gen_kernel.py
+    def test_gen_kernel_rejects_lowered_ir_without_buffer_results_to_out_params(self) -> None:
+        def add_direct(lhs: "Tensor[i32, 2, 2]", rhs: "Tensor[i32, 2, 2]") -> "Tensor[i32, 2, 2]":
+            return lhs + rhs
+
+        func_op = _lower_func(build_func_op(add_direct, _tensor_arg([2, 2]), _tensor_arg([2, 2])))
+        with pytest.raises(GenKernelError, match="legacy memory return ABI is not supported"):
+            gen_kernel(func_op, _ctx())
+
     # GK-O5-004
     # 创建者: jcc你莫辜负
     # 最后一次更改: jcc你莫辜负

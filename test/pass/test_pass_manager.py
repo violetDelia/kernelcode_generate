@@ -221,3 +221,50 @@ def test_pass_manager_rejects_buffer_results_to_out_params_before_lowering() -> 
 
     with pytest.raises(ValueError, match="lowered IR"):
         pm.run(object())
+
+
+# TC-PASS-008
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-05 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-05 00:00:00 +0800
+# 功能说明: 验证 buffer-results-to-out-params 可在 lowering 之后、其他 pass 之前/之后运行。
+# 测试目的: 锁定顺序约束仅要求 `lower-nn-to-kernel` 先于 `buffer-results-to-out-params`，允许中间插入其他 pass。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_allows_buffer_results_to_out_params_after_lowering_with_intermediate_pass
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
+# 对应 spec 文件路径: spec/pass/pass_manager.md
+# 对应测试文件路径: test/pass/test_pass_manager.py
+def test_pass_manager_allows_buffer_results_to_out_params_after_lowering_with_intermediate_pass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lowering_module = importlib.import_module("kernel_gen.passes.lowering")
+    LowerNnToKernelPass = lowering_module.LowerNnToKernelPass
+    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
+    order: list[str] = []
+
+    class NoopPass(Pass):
+        name = "noop"
+
+        def run(self: "NoopPass", target: object) -> object:
+            order.append("noop")
+            return target
+
+    def _record_lower(self: object, target: object) -> object:
+        order.append("lower-nn-to-kernel")
+        return target
+
+    def _record_buffer(self: object, target: object) -> object:
+        order.append("buffer-results-to-out-params")
+        return target
+
+    monkeypatch.setattr(LowerNnToKernelPass, "run", _record_lower)
+    monkeypatch.setattr(BufferResultsToOutParamsPass, "run", _record_buffer)
+
+    pm = PassManager(name="lowering")
+    pm.add_pass(LowerNnToKernelPass())
+    pm.add_pass(NoopPass())
+    pm.add_pass(BufferResultsToOutParamsPass())
+
+    sentinel = object()
+    assert pm.run(sentinel) is sentinel
+    assert order == ["lower-nn-to-kernel", "noop", "buffer-results-to-out-params"]

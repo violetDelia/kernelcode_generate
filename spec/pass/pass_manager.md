@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`李白`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/pass/pass_manager.md`](../../spec/pass/pass_manager.md)
 - `功能实现`：[`kernel_gen/passes/pass_manager.py`](../../kernel_gen/passes/pass_manager.py)
 - `test`：[`test/pass/test_pass_manager.py`](../../test/pass/test_pass_manager.py)
@@ -24,6 +24,7 @@
 - 统一 Pass 的注册、执行与错误传播规则，便于后续实现与测试闭环。
 - 冻结 analysis pass 在 manager 中的承接方式：`run(module)` 继续返回单一 `module`，不追加 summary 或第二返回值。
 - 对 lowering 链固定公开一个可验证顺序示例：当模块内存在 `memory-return func.func + func.call` 链路时，`BufferResultsToOutParamsPass` 必须运行在 `LowerNnToKernelPass` 之后，避免 caller/callee ABI 停留在双口径。
+- 对下游 `gen_kernel` 合同固定明确：`gen_kernel` 仅接受已执行 `BufferResultsToOutParamsPass` 的 rewrite 后 ABI；若仍保留旧 `memory return` ABI，必须显式失败。
 - 对显式 memory hierarchy lowering 链固定公开一个扩展顺序边界：当调用方注册 `LowerDmaMemoryHierarchyPass` 时，其位置必须在 `LowerNnToKernelPass` 与 `BufferResultsToOutParamsPass` 之后。
 
 ## 限制与边界
