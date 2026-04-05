@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`大闸蟹`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)
 - `test`：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)、[`test/operation/test_memory_operation.py`](../../test/operation/test_memory_operation.py)、[`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)
 - `功能实现`：[`kernel_gen/symbol_variable/memory.py`](../../kernel_gen/symbol_variable/memory.py)
@@ -42,6 +42,10 @@
 - 本文件中的 `Memory` 指 Python 侧高层复合元信息容器，聚合 `shape`、`stride`、`dtype`、`format`、`space`；其中 `shape`、`stride`、`offset`、`size` 的单个整型分量若需进入 IR，则统一复用 `symbol dialect` 的整数-only 语义。
 - 若 IR 侧需要从 memory type 读取单个真实 dim/stride 并返回 value，统一使用 [`spec/dialect/symbol.md`](../../spec/dialect/symbol.md) 中定义的 `symbol.get_dim` / `symbol.get_stride`，本文件不重复定义查询接口。
 - 对外公开的创建入口为 `Memory(shape, dtype, space=..., stride=..., format=...)`。
+- `shape/stride` 的默认公开比较口径是“公开值语义等价”，不是“内部表达式结构完全一致”。
+- 静态分量按整数值比较；动态分量按公开返回值比较：`shape` 以 `get_shape()` 返回的稳定字符串/整数为准，`stride` 以 `get_stride()` 返回分量的公开值为准，动态 `SymbolDim` 分量默认比较 `get_value()` 结果。
+- 若两个动态表达式的公开值一致（例如稳定公开值同为 `8*N`），即使底层 sympy 节点类型、树形结构或对象身份不同，也视为同一 `shape/stride` 公开语义。
+- 只有当某条 spec/expectation 显式声明 `exact` 或“内部表达式结构完全一致”口径时，调用方才可要求比较底层表达式结构；未显式声明时，默认不得把结构级比较视为 `Memory` 长期公开合同。
 
 ## 公开接口
 
@@ -392,10 +396,48 @@ assert values == [SymbolDim("N"), 1]
 
 - 未显式传入 `stride` 时，默认连续布局生成的动态步幅分量仍通过 `SymbolDim` 返回。
 - `__repr__` / `__str__` 中的 `Shape(K*N, N, 1)` 属于字符串序列化口径，不改变 `get_stride()` 的公开返回类型。
+- 需要比较动态步幅是否等价时，默认应比较 `SymbolDim.get_value()` 的公开值，而不是比较底层 sympy 节点结构。
 
 返回与限制：
 
 - 返回 `list[int | SymbolDim]`。
+
+#### shape/stride 公开比较语义
+
+功能说明：
+
+- 定义 `Memory` 在公开合同层面对 `shape/stride` 的默认比较规则，以及元信息继承场景的稳定口径。
+
+参数说明：
+
+- 无参数。
+
+使用示例：
+
+```python
+from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.symbol_variable.type import NumericType
+
+lhs = Memory(["M", "N"], NumericType.Float32, stride=["8*N", 1])
+rhs = Memory(["M", "N"], NumericType.Float32, stride=[8 * SymbolDim("N"), 1])
+
+assert lhs.get_stride()[0].get_value() == rhs.get_stride()[0].get_value() == "8*N"
+```
+
+注意事项：
+
+- 默认公开比较口径是“公开值语义等价”；静态分量按整数值比较，动态分量按稳定公开值比较。
+- `shape` 的公开比较基于 `get_shape()` 返回值；动态维度使用稳定字符串表达，不要求暴露或保留底层 sympy 结构。
+- `stride` 的公开比较基于 `get_stride()` 返回值；动态 `SymbolDim` 分量默认以 `get_value()` 结果作为比较基准。
+- 若消费方只持有 `__repr__()` / `__str__()` 的结果，则以其稳定字符串序列化作为外部比较口径；不得要求调用方感知底层 sympy 节点类型、对象身份或树形结构。
+- 因此，像 `"8*N"` 与另一条规范化后公开值同为 `"8*N"` 的动态表达式，即使底层结构不同，也不得被误判为不同 `stride`。
+- `element_unary`、`broadcast`、`softmax` 等继承输入元信息的 helper，默认只锁继承后 `shape/stride` 的公开值语义与稳定序列化；除非对应 spec 显式声明 `exact` 口径，否则不要求逐项保留底层 sympy 结构。
+- 若某条 spec / expectation 必须比较“内部表达式结构完全一致”，必须在该条合同中显式写明 `exact`；未声明时不得从本文件推导出结构级强约束。
+
+返回与限制：
+
+- 本小节只定义 `Memory` 的公开比较合同，不新增任何 `Memory` 公开 API。
 
 #### get_type()
 
@@ -514,7 +556,7 @@ cmp_mem = lhs < 0
 - 算术运算不支持 `NumericType.Bool` 参与提升；遇到不支持的 dtype 或标量类型抛 `TypeError`。
 - 比较结果的 `dtype` 统一为 `NumericType.Int32`。
 - 比较运算要求 `Memory`/`Memory` 的 `dtype` 完全一致，不做 dtype 提升。
-- 输出继承 `lhs` 的 `space`、`format` 与 `stride` 语义。
+- 输出继承 `lhs` 的 `space`、`format` 与 `stride` 公开语义；对动态 `stride` 默认锁定 `get_value()` / 稳定序列化口径，不要求保留底层 sympy 结构。
 - 本小节只定义 Python 侧 `Memory` 运算结果的高层元数据继承规则，不新增 dialect 层 memory type 或 symbol type。
 
 返回与限制：
@@ -547,6 +589,7 @@ cmp_mem = lhs < 0
 - 验证 `Memory` 默认空间、显式空间、显式步幅和动态形状构造行为。
 - 验证未显式提供 `stride` 时默认步幅生成（包含符号维度与字符串输入）。
 - 验证 `get_stride()` 对动态步幅分量返回 `SymbolDim`，`__repr__` / `__str__` 继续使用 `Shape(...)` 文本序列化。
+- 验证 `shape/stride` 的公开比较默认锁定公开值语义与稳定序列化，而不是底层 sympy 结构。
 - 验证 `shape` 与 `stride` 可直接接收 `SymbolShape` 或普通可迭代输入。
 - 验证 `tensor-like` 字段直入能够通过公开构造入口完成。
 - 验证 `__repr__` 包含空间与张量元信息。

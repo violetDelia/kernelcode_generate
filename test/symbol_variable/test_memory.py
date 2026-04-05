@@ -1,7 +1,7 @@
 """memory tests.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 覆盖 Memory/MemorySpace/LocalSpaceMeta 构造、表示与转换行为。
@@ -281,3 +281,27 @@ def test_default_stride_symbolic_expression_from_strings() -> None:
         "Memory(GM,Tensor(shape=Shape(M, K, N), dtype=NumericType.Float32, "
         "stride=Shape(K*N, N, 1), format=Farmat.Norm))"
     )
+
+
+# ME-020
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-06 00:19 +0800
+# 最近一次运行成功时间: 2026-04-06 00:19 +0800
+# 测试目的: 验证 clone 过程保留 stride 中的符号表达式结构。
+# 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_clone_with_dtype_preserves_symbolic_stride_expression
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
+# 对应 spec 文件路径: spec/symbol_variable/memory.md
+# 对应测试文件路径: test/symbol_variable/test_memory.py
+def test_clone_with_dtype_preserves_symbolic_stride_expression() -> None:
+    h = SymbolDim("H")
+    w = SymbolDim("W")
+    stride_expr = h * 5
+    mem = Memory([h, w], NumericType.Float32, stride=[stride_expr, 1])
+    cloned = mem._clone_with_dtype(NumericType.Int32)
+    assert cloned.stride is not None
+    assert mem.stride is not None
+    original_dim = mem.stride.get_shape()[0]
+    cloned_dim = cloned.stride.get_shape()[0]
+    assert cloned_dim is not original_dim
+    assert cloned_dim == original_dim

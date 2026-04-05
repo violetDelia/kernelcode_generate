@@ -1,7 +1,7 @@
 """Memory implementation.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 定义内存空间枚举与 Memory 对象，描述 shape/dtype/stride/format/space 元信息。
@@ -104,7 +104,7 @@ class Memory:
     """内存对象，独立描述形状与空间信息。
 
     创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 记录所在空间，并保存 shape/dtype/stride/format 元信息。
@@ -206,10 +206,26 @@ class Memory:
 
     @staticmethod
     def _clone_shape_like(value: SymbolShape | None) -> SymbolShape | None:
-        """克隆 SymbolShape，避免元数据别名共享。"""
+        """克隆 SymbolShape，避免元数据别名共享。
+
+        创建者: 金铲铲大作战
+        最后一次更改: jcc你莫辜负
+
+        功能说明:
+        - 逐维复制 SymbolDim，保留 sympy 表达式结构。
+        - 返回新的 SymbolShape 实例避免共享。
+
+        使用示例:
+        - Memory._clone_shape_like(SymbolShape([SymbolDim(\"N\") * 4, 1]))
+
+        关联文件:
+        - spec: spec/symbol_variable/memory.md
+        - test: test/symbol_variable/test_memory.py
+        - 功能实现: kernel_gen/symbol_variable/memory.py
+        """
         if value is None:
             return None
-        return SymbolShape(value.get_values())
+        return SymbolShape([SymbolDim(dim.get_symbol()) for dim in value.get_shape()])
 
     def _tensor_repr(self: "Memory") -> str:
         """统一生成 Tensor(...) 文本片段。"""
