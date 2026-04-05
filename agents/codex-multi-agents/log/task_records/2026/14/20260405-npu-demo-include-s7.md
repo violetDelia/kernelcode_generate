@@ -90,4 +90,4 @@
   - gate1：`pytest -q test/include/api/test_core.py test/include/api/test_memory.py test/include/api/test_dma.py test/include/api/test_nn.py` → `6 passed in 0.86s`（exit=0）
   - gate2：`pytest -q test/include/npu_demo/test_kernel_context.py` → `10 passed in 2.15s`（exit=0）
   - gate3：`pytest -q test/dsl/test_gen_kernel.py -k 'npu_demo'` → `6 passed, 30 deselected in 0.48s`（exit=0）
-结论：gate 复跑通过，可执行合并收口（合并提交/push/cleanup/远端确认信息由合并执行结果补齐）。
+结论：gate 复跑通过，已完成合并收口并推送；合并提交=6cbfe05（main）；push=exit=0；cleanup=git worktree remove wt-20260405-npu-demo-include-s7 --force；git branch -D T-20260405-1877daf5。
