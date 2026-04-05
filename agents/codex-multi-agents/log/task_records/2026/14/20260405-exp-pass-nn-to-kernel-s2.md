@@ -186,4 +186,4 @@
    - 结果：`2 passed, 130 deselected in 0.30s`
    - exit code：0
 
-结论：gate 复跑通过，可合并收口；合并提交号与 cleanup 结果由合并执行记录补齐。
+结论：gate 复跑通过，已完成合并收口并推送；合并提交=9ca6508（main）；cleanup=git worktree remove wt-20260405-exp-pass-nn-to-kernel-s2 --force；git branch -D T-20260405-f3fe9102。
