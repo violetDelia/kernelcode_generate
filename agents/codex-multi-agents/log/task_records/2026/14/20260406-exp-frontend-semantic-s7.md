@@ -204,3 +204,8 @@ gate（复跑）：
 - `PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260406-exp-frontend-semantic-s7:/home/lfr/kernelcode_generate python /home/lfr/kernelcode_generate/expectation/symbol_variable/symbol_dim`
   - 关键输出：CASE-1~CASE-9 全部打印完成；exit=0
 结论：gate 通过，可合并收口；合并提交/push/cleanup 证据由合并执行补齐。
+合并提交：a11a6f6
+push(main)：`timeout 60 git push origin main`；exit=0
+cleanup：
+- `git worktree remove wt-20260406-exp-frontend-semantic-s7 --force`（成功）
+- `git branch -D T-20260406-3d3a19a9`（成功）
