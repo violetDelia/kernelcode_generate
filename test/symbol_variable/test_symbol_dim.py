@@ -1,7 +1,7 @@
 """symbol_dim tests.
 
 创建者: 小李飞刀
-最后一次更改: 我不是牛马
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 SymbolDim 构造、运算、比较、动态性判断与错误分支。
@@ -14,7 +14,7 @@
 - Spec 文档: spec/symbol_variable/symbol_dim.md
 - 测试文件: test/symbol_variable/test_symbol_dim.py
 
-当前覆盖率信息: 98%（2026-03-23 22:27:41 +0800）
+当前覆盖率信息: 99%（2026-04-06 03:02:30 +0800）
 覆盖率命令: pytest -q --cov=kernel_gen.symbol_variable.symbol_dim --cov-report=term-missing test/symbol_variable/test_symbol_dim.py
 """
 
@@ -36,8 +36,8 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 # SD-001
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-23 22:10:59 +0800
-# 最近一次运行成功时间: 2026-03-23 22:10:59 +0800
+# 最近一次运行测试时间: 2026-04-06 02:19:46 +0800
+# 最近一次运行成功时间: 2026-04-06 02:19:46 +0800
 # 测试目的: 验证 int 输入可构造 SymbolDim。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_init_accepts_int
 # 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
@@ -45,15 +45,18 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 # 对应测试文件路径: test/symbol_variable/test_symbol_dim.py
 def test_init_accepts_int() -> None:
     dim = SymbolDim(8)
+    assert dim.is_dynamic() is False
+    assert isinstance(dim.get_value(), int)
+    assert dim.get_value() == 8
     assert dim.get_symbol() == sp.Integer(8)
     assert repr(dim) == "8"
 
 
 # SD-002
 # 创建者: 小李飞刀
-# 最后一次更改: 咯咯咯
-# 最近一次运行测试时间: 2026-03-23 22:10:59 +0800
-# 最近一次运行成功时间: 2026-03-23 22:10:59 +0800
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 02:19:46 +0800
+# 最近一次运行成功时间: 2026-04-06 02:19:46 +0800
 # 测试目的: 验证 str 符号输入可构造 SymbolDim，非纯数字字符串按符号名处理。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_init_accepts_symbol_string
 # 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
@@ -63,16 +66,18 @@ def test_init_accepts_symbol_string() -> None:
     dim = SymbolDim("N")
     plus_dim = SymbolDim("+1")
     float_dim = SymbolDim("3.14")
+    assert dim.is_dynamic() is True
     assert dim.get_symbol() == sp.symbols("N", integer=True, real=True)
+    assert dim.get_value() == "N"
     assert plus_dim.get_symbol() == sp.symbols("+1", integer=True, real=True)
     assert float_dim.get_symbol() == sp.symbols("3.14", integer=True, real=True)
 
 
 # SD-003
 # 创建者: 小李飞刀
-# 最后一次更改: 咯咯咯
-# 最近一次运行测试时间: 2026-03-23 22:10:59 +0800
-# 最近一次运行成功时间: 2026-03-23 22:10:59 +0800
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 02:19:46 +0800
+# 最近一次运行成功时间: 2026-04-06 02:19:46 +0800
 # 测试目的: 验证 sympy.Basic 输入可构造 SymbolDim。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_init_accepts_sympy_basic
 # 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
@@ -84,7 +89,8 @@ def test_init_accepts_sympy_basic() -> None:
     expr_dim = SymbolDim(sp.Symbol("K") + 1)
     assert sym_dim.get_symbol() == sp.symbols("M", integer=True, real=True)
     assert normalized.get_symbol() == sp.symbols("P", integer=True, real=True)
-    assert expr_dim.get_symbol() == sp.Symbol("K") + 1
+    assert expr_dim.get_symbol() == sp.symbols("K", integer=True, real=True) + 1
+    assert expr_dim.get_symbol().free_symbols == {sp.symbols("K", integer=True, real=True)}
 
 
 # SD-004
@@ -243,9 +249,9 @@ def test_blank_string_rejected() -> None:
 
 # SD-009
 # 创建者: 小李飞刀
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-23 22:27:41 +0800
-# 最近一次运行成功时间: 2026-03-23 22:27:41 +0800
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 02:19:46 +0800
+# 最近一次运行成功时间: 2026-04-06 02:19:46 +0800
 # 测试目的: 验证非浮点非法类型输入、操作数与比较抛 TypeError。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_invalid_type_rejected
 # 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
@@ -265,9 +271,9 @@ def test_invalid_type_rejected() -> None:
 
 # SD-010
 # 创建者: 我不是牛马
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-23 22:27:41 +0800
-# 最近一次运行成功时间: 2026-03-23 22:27:41 +0800
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 02:19:46 +0800
+# 最近一次运行成功时间: 2026-04-06 02:19:46 +0800
 # 测试目的: 验证静态整数之间的加减乘结果保持非动态，且 get_value 可直接与 Python 结果比较。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_static_arithmetic_get_value_semantics
 # 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
@@ -277,13 +283,19 @@ def test_static_arithmetic_get_value_semantics() -> None:
     add_expr = SymbolDim(3) + SymbolDim(4)
     sub_expr = SymbolDim(9) - SymbolDim(4)
     mul_expr = SymbolDim(3) * SymbolDim(5)
+    div_expr = SymbolDim(9) / SymbolDim(4)
+    floordiv_expr = SymbolDim(9) // SymbolDim(4)
 
     assert add_expr.is_dynamic() is False
     assert sub_expr.is_dynamic() is False
     assert mul_expr.is_dynamic() is False
+    assert div_expr.is_dynamic() is False
+    assert floordiv_expr.is_dynamic() is False
     assert add_expr.get_value() == 3 + 4
     assert sub_expr.get_value() == 9 - 4
     assert mul_expr.get_value() == 3 * 5
+    assert div_expr.get_value() == 9 / 4
+    assert floordiv_expr.get_value() == 9 // 4
 
 
 # SD-011
@@ -305,11 +317,16 @@ def test_dynamic_mixed_add_sub_mul_semantics() -> None:
     assert add_expr.is_dynamic() is True
     assert sub_expr.is_dynamic() is True
     assert mul_expr.is_dynamic() is True
-    assert add_expr.get_value() == (SymbolDim(2) + SymbolDim("N")).get_value()
-    assert sub_expr.get_value() == (SymbolDim("N") + SymbolDim(4)).get_value()
-    assert mul_expr.get_value() == (SymbolDim("N") * SymbolDim(3)).get_value()
+    assert add_expr.get_value() == str(sp.Integer(2) + sp.symbols("N", integer=True, real=True))
+    assert sub_expr.get_value() == str(sp.Integer(4) - sp.symbols("N", integer=True, real=True))
+    assert mul_expr.get_value() == str(sp.Integer(3) * sp.symbols("N", integer=True, real=True))
     assert chain_expr == SymbolDim("A") - SymbolDim("B") - SymbolDim("C")
     assert repr(chain_expr) == "A - B - C"
+    assert chain_expr.get_value() == str(
+        sp.symbols("A", integer=True, real=True)
+        - sp.symbols("B", integer=True, real=True)
+        - sp.symbols("C", integer=True, real=True)
+    )
 
 
 # SD-012
@@ -384,34 +401,36 @@ def test_mixed_expression_get_value_semantics() -> None:
 
 # SD-015
 # 创建者: 我不是牛马
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-23 22:27:41 +0800
-# 最近一次运行成功时间: 2026-03-23 22:27:41 +0800
-# 测试目的: 验证浮点构造输入抛出 NotImplementedError。
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 03:02:30 +0800
+# 最近一次运行成功时间: 2026-04-06 03:02:30 +0800
+# 测试目的: 验证 Python float、sympy.Float 与含浮点表达式的构造输入均抛出 NotImplementedError。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_float_constructor_rejected
 # 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_dim.py
 def test_float_constructor_rejected() -> None:
-    for value in [1.5, -2.25, 0.5]:
+    float_expr = sp.symbols("F", integer=True, real=True) + sp.Float(0.5)
+    for value in [1.5, -2.25, 0.5, sp.Float(1.5), float_expr]:
         with pytest.raises(NotImplementedError):
             SymbolDim(value)
 
 
 # SD-016
 # 创建者: 我不是牛马
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-23 22:27:41 +0800
-# 最近一次运行成功时间: 2026-03-23 22:27:41 +0800
-# 测试目的: 验证浮点算术操作数在正向与反向加减乘除整除中抛出 NotImplementedError。
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 03:02:30 +0800
+# 最近一次运行成功时间: 2026-04-06 03:02:30 +0800
+# 测试目的: 验证 Python float、sympy.Float 与含浮点表达式在正向与反向加减乘除整除中均抛出 NotImplementedError。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_float_operands_rejected
 # 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_dim.py
 def test_float_operands_rejected() -> None:
     dim = SymbolDim(3)
+    float_expr = sp.symbols("K", integer=True, real=True) + sp.Float(0.5)
 
-    for operand in [1.5, -2.25, 0.5]:
+    for operand in [1.5, -2.25, 0.5, sp.Float(1.5), float_expr]:
         with pytest.raises(NotImplementedError):
             _ = dim + operand
         with pytest.raises(NotImplementedError):

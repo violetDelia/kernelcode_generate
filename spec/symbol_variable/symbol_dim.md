@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`大闸蟹`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/symbol_variable/symbol_dim.md`](../../spec/symbol_variable/symbol_dim.md)
 - `功能实现`：[`kernel_gen/symbol_variable/symbol_dim.py`](../../kernel_gen/symbol_variable/symbol_dim.py)
 - `test`：[`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py)
@@ -15,7 +15,7 @@
 ## 依赖
 
 - `sympy`：负责整数符号、静态整数与混合表达式的底层表示。
-- [`expectation/symbol_variable/symbol_dim.py`](../../expectation/symbol_variable/symbol_dim.py)：本链路的只读 acceptance 定义来源。
+- [`expectation/symbol_variable/symbol_dim`](../../expectation/symbol_variable/symbol_dim)：本链路的只读 acceptance 定义来源。
 - [`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py)：当前单元测试承载文件；后续实现阶段需按本 spec 补齐 expectation 闭环。
 - [`spec/symbol_variable/package_api.md`](../../spec/symbol_variable/package_api.md)：包级导入/导出与 legacy 路径边界来源。
 
@@ -23,8 +23,8 @@
 
 - 提供统一的 `SymbolDim` 公开入口，覆盖静态整数、动态符号与整数混合表达式。
 - 明确 `+`、`-`、`*`、`/`、`//` 的公开语义、动态性传播与错误路径。
-- 明确 `get_symbol()`、`get_value()`、`is_dynamic()` 的公开行为，支撑 [`expectation/symbol_variable/symbol_dim.py`](../../expectation/symbol_variable/symbol_dim.py) 最终运行成功。
-- 以 [`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py) 承载单元测试，以 `python expectation/symbol_variable/symbol_dim.py` 作为只读 acceptance gate。
+- 明确 `get_symbol()`、`get_value()`、`is_dynamic()` 的公开行为，支撑 [`expectation/symbol_variable/symbol_dim`](../../expectation/symbol_variable/symbol_dim) 最终运行成功。
+- 以 [`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py) 承载单元测试，以 `python expectation/symbol_variable/symbol_dim` 作为只读 acceptance gate。
 
 ## 相邻边界
 
@@ -51,7 +51,11 @@
 - `get_value()` 的公开返回语义必须满足 expectation：
   - 静态整数、静态加减乘与静态整除结果返回可直接与 Python 对应结果比较的具体值。
   - 静态真除法结果返回可直接与 Python `/` 结果比较的具体值。
-  - 动态符号或混合表达式返回可稳定比较的符号表达值。
+  - 动态符号或混合表达式返回稳定、可机械比较的字符串序列化结果。
+- `get_value()` 的动态返回值只承诺 `str`，不暴露 `sympy.Basic` 子类、`srepr(...)` 文本或其他 `sympy` 内部对象类型。
+- 混合静动态表达式的字符串序列化必须具备确定性：
+  - `+`、`*` 允许采用规整后的交换律规范序。
+  - `-`、`/`、`//` 必须保留公开运算符的方向与左结合结构，不得把 `lhs - rhs` 重写成改变方向的其它字符串。
 - 不额外承诺异常消息文本；兼容性只要求异常类型与公开行为稳定。
 
 ## 公开接口
@@ -134,17 +138,46 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 assert SymbolDim(8).get_value() == 8
 assert (SymbolDim(9) // SymbolDim(4)).get_value() == 2
 assert (SymbolDim(9) / SymbolDim(4)).get_value() == 9 / 4
+assert (SymbolDim(8) - SymbolDim("N")).get_value() == "8 - N"
+assert (SymbolDim("A") / SymbolDim("B") / SymbolDim(3)).get_value() == "(A/B)/3"
 ```
 
 注意事项：
 
 - 静态整数、静态加减乘与静态整除结果必须返回可与 Python 对应结果直接比较的具体值。
 - 静态真除法结果必须返回可与 Python `/` 结果直接比较的具体值。
-- 动态表达式可返回规整后的符号表达值，但必须保证 expectation 中的相等/不等比较稳定。
+- 动态表达式必须返回 `str`，作为公开机械比较口径；调用方不得依赖 `sympy` 内部对象类型。
+- 序列化规则以公开运算顺序为准：交换律运算可按规整后的规范序输出，非交换律运算必须保持方向与左结合结构。
 
 返回与限制：
 
-- 返回具体值或规整后的符号表达值。
+- 返回 `int | float | str`；动态表达式不返回 `sympy.Basic`。
+
+### 机械比较与表达式序列化
+
+功能说明：
+
+- 冻结动态 `SymbolDim` 表达式的公开比较口径，保证 expectation 与下游测试可直接按字符串进行机械比较。
+
+规则说明：
+
+- 比较入口：
+  - 静态表达式通过 `get_value()` 返回的 `int | float` 与 Python 结果直接比较。
+  - 动态表达式通过 `get_value()` 返回的 `str` 进行逐字符比较；该字符串是唯一公开合同。
+- 不暴露实现细节：
+  - `get_symbol()` 仍可返回 `sympy.Basic` 供实现/测试读取。
+  - `get_value()` 不暴露 `sympy.Symbol`、`sympy.Add`、`sympy.Mul`、`sympy.Floor` 等内部类型名，也不把这些类型写成公开合同。
+- 交换律运算：
+  - `static + symbol`、`static * symbol` 允许采用规整后的规范序列化。
+  - 例如：`SymbolDim(8) + SymbolDim("N")` 的 `get_value()` 必须是 `"N + 8"`；`SymbolDim(8) * SymbolDim("N")` 的 `get_value()` 必须是 `"8*N"`。
+- 非交换律运算：
+  - `-`、`/`、`//` 的公开语义以左结合求值形成的表达式树为准；实现不得把 `lhs - rhs`、`(lhs / mid) / rhs`、`(lhs // mid) // rhs` 改写成改变方向或结合顺序的其它字符串。
+  - 最小可复现示例：
+    - `SymbolDim(8) - SymbolDim("N")` 的 `get_value()` 必须是 `"8 - N"`，不得返回 `"N + 8"`。
+    - `SymbolDim("A") - SymbolDim("B") - SymbolDim("C")` 的 `get_value()` 必须稳定等于 `str(Symbol("A") - Symbol("B") - Symbol("C"))`，当前规范化输出为 `"-B - C + A"`。
+    - `SymbolDim("A") / SymbolDim("B") / SymbolDim(3)` 的 `get_value()` 必须是 `"(A/B)/3"`，并且必须与 `(SymbolDim("A") / SymbolDim(3) / SymbolDim("B")).get_value()` 区分开。
+    - `SymbolDim("A") // SymbolDim("B") // SymbolDim(3)` 的 `get_value()` 必须稳定区分 `floor(floor(A/B)/3)` 与 `floor(floor(A/3)/B)`。
+- 该序列化口径只服务于公开比较与 acceptance；本文件不要求公开暴露新的 AST、helper 或 `SymbolDim` 新方法。
 
 ### `__repr__()`
 
@@ -337,6 +370,7 @@ assert SymbolDim("N") == SymbolDim("N")
 注意事项：
 
 - 比较规则必须基于规整后的整数符号表达。
+- `__eq__()` 的对外语义是表达式等价比较，不替代 `get_value()` 的机械字符串比较合同。
 - 非法类型比较继续抛出 `TypeError`；本接口不负责浮点算术语义。
 
 返回与限制：
@@ -374,18 +408,18 @@ assert (SymbolDim(8) + SymbolDim("N")).is_dynamic() is True
 ## 测试
 
 - 主测试文件：[`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py)
-- acceptance：[`expectation/symbol_variable/symbol_dim.py`](../../expectation/symbol_variable/symbol_dim.py)
+- acceptance：[`expectation/symbol_variable/symbol_dim`](../../expectation/symbol_variable/symbol_dim)
 - 执行命令：
   - `pytest -q test/symbol_variable/test_symbol_dim.py`
-  - `python expectation/symbol_variable/symbol_dim.py`
+  - `python expectation/symbol_variable/symbol_dim`
 
 ### 测试目标
 
 - 保持现有构造、比较、动态性判断与错误分支的回归覆盖。
 - 补齐静态整数、动态符号与混合表达式在 `+`、`-`、`*`、`/`、`//` 下的目标行为。
 - 补齐浮点构造与浮点算术操作数必须抛出 `NotImplementedError` 的错误路径。
-- 验证 `get_value()` 的公开返回语义满足 expectation：静态值可与 Python 结果直接比较，动态表达式可稳定比较。
-- 明确 [`expectation/symbol_variable/symbol_dim.py`](../../expectation/symbol_variable/symbol_dim.py) 保持只读；后续实现阶段以该脚本运行成功作为 acceptance gate。
+- 验证 `get_value()` 的公开返回语义满足 expectation：静态值可与 Python 结果直接比较，动态表达式按冻结后的机械字符串比较。
+- 明确 [`expectation/symbol_variable/symbol_dim`](../../expectation/symbol_variable/symbol_dim) 保持只读；后续实现阶段以该脚本运行成功作为 acceptance gate。
 
 ### 功能与用例清单
 
@@ -402,6 +436,6 @@ assert (SymbolDim(8) + SymbolDim("N")).is_dynamic() is True
 - SD-011：静态整数与动态符号混合参与 `+/-/*` 时，结果保持动态，链式运算顺序可稳定比较。（`test_dynamic_mixed_add_sub_mul_semantics`）
 - SD-012：静态整数真除法 `a / b` 的结果可由 `get_value()` 直接与 Python `/` 结果比较；含符号真除法保持动态并保留结合顺序。（`test_truediv_get_value_and_order_semantics`）
 - SD-013：静态整数整除 `a // b` 的结果可由 `get_value()` 直接与 Python `//` 结果比较；含符号整除保持动态并保留结合顺序。（`test_floordiv_get_value_and_order_semantics`）
-- SD-014：混合表达式 `static + symbol - static * symbol / static` 的动态性传播与 `get_value()` 表达式比较稳定。（`test_mixed_expression_get_value_semantics`）
+- SD-014：混合表达式 `static + symbol`、`static - symbol`、`static * symbol` 与链式减法/除法/整除的 `get_value()` 序列化结果满足冻结后的机械比较口径。（`test_mixed_expression_get_value_semantics`）
 - SD-015：浮点构造输入必须抛出 `NotImplementedError`。（`test_float_constructor_rejected`）
 - SD-016：浮点算术操作数在 `+`、`-`、`*`、`/`、`//` 中必须抛出 `NotImplementedError`。（`test_float_operands_rejected`）

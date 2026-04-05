@@ -108,6 +108,14 @@ class _SymbolDim:
         """
         if isinstance(sym, sp.Symbol) and sym.is_integer is None and sym.is_real is None:
             return _SymbolDim._symbol_from_str(sym.name)
+        if isinstance(sym, sp.Basic) and sym.free_symbols:
+            replacements = {
+                symbol: _SymbolDim._symbol_from_str(symbol.name)
+                for symbol in sym.free_symbols
+                if symbol.is_integer is None and symbol.is_real is None
+            }
+            if replacements:
+                return sym.xreplace(replacements)
         return sym
 
     @staticmethod
@@ -120,11 +128,12 @@ class _SymbolDim:
         """统一将输入规整为内部 sympy 表达式。
 
         创建者: 大闸蟹
-        最后一次更改: 大闸蟹
+        最后一次更改: 小李飞刀
 
         功能说明:
         - 统一处理 `_SymbolDim`、`int`、`str`、`sympy.Basic` 的规整逻辑。
         - 通过参数保留构造路径与操作数路径各自的错误消息。
+        - `sympy.Float` 与含浮点字面量的 `sympy.Basic` 表达式统一按浮点输入拒绝。
 
         使用示例:
         - _SymbolDim._coerce_symbol_expr("N", float_error="...", type_error_prefix="...")
@@ -143,6 +152,8 @@ class _SymbolDim:
         if isinstance(value, str):
             return _SymbolDim._symbol_from_str(value)
         if isinstance(value, sp.Basic):
+            if value.has(sp.Float):
+                raise NotImplementedError(float_error)
             return _SymbolDim._normalize_symbol(value)
         raise TypeError(f"{type_error_prefix}: {type(value)!r}")
 
@@ -325,10 +336,7 @@ class _SymbolDim:
         - test: test/symbol_variable/test_symbol_dim.py
         - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
         """
-        other_sym = self._normalize_operand(other)
-        if not self.get_symbol().free_symbols and other_sym.free_symbols:
-            return SymbolDim(other_sym + self.get_symbol())
-        return SymbolDim(self.get_symbol() - other_sym)
+        return SymbolDim(self.get_symbol() - self._normalize_operand(other))
 
     def __rsub__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度反向减法。
