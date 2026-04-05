@@ -1,7 +1,7 @@
 """DMA memory-path analysis helpers.
 
 创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
+最后一次更改: jcc你莫辜负 (2026-04-06)
 
 功能说明:
 - 收口公开 DMA 分支的访存分析逻辑。
@@ -29,7 +29,6 @@ import sympy as sp
 from xdsl.ir import Attribute, Operation, SSAValue
 from xdsl.utils.exceptions import VerifyException
 
-from kernel_gen.analysis.compute import dma as _dma_compute
 from kernel_gen.dialect.dma import (
     DmaAllocOp,
     DmaCastOp,

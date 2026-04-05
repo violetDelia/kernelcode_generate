@@ -1,7 +1,7 @@
 """Analysis utilities for computation and data movement.
 
 创建者: 金铲铲大作战
-最后一次更改: 朽木露琪亚
+最后一次更改: jcc你莫辜负 (2026-04-06)
 
 功能说明:
 - 基于 Memory 形状统计逐元素/比较/broadcast/matmul 的计算量与搬运量。
@@ -1780,7 +1780,7 @@ def _analyze_dma_ir_op(op: Operation, config: AnalysisConfig) -> _AnalyzedOp | N
     """分析当前公开 DMA 分支。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 当前承接 `dma.load/copy/store/slice`。
@@ -1799,7 +1799,7 @@ def _analyze_dma_ir_op(op: Operation, config: AnalysisConfig) -> _AnalyzedOp | N
     analyzed = analyze_dma_memory_op(op, config)
     if analyzed is None:
         return None
-    return _coerce_memory_analyzer_result(analyzed, config)
+    return _coerce_memory_analyzer_result(op, analyzed, config)
 
 
 def _merge_analyzed_ops(op: Operation, analyzed_ops: Sequence[_AnalyzedOp]) -> _AnalyzedOp:
@@ -1810,6 +1810,7 @@ def _merge_analyzed_ops(op: Operation, analyzed_ops: Sequence[_AnalyzedOp]) -> _
 
     功能说明:
     - 汇总 compute/memory 的统计项。
+    - compute/read/write 只作为 derived alias，由 items 求和得到。
     - 允许同一 op 同时命中 compute 与 memory analyzer。
 
     使用示例:
@@ -1822,9 +1823,6 @@ def _merge_analyzed_ops(op: Operation, analyzed_ops: Sequence[_AnalyzedOp]) -> _
     """
     compute_items: list[ComputeItem] = []
     memory_items: list[MemoryItem] = []
-    compute_total = sp.Integer(0)
-    read_bytes_total = sp.Integer(0)
-    write_bytes_total = sp.Integer(0)
     value_reads: list[tuple[SSAValue, sp.Basic]] = []
     direct_writes: list[tuple[SSAValue, sp.Basic]] = []
     result_write_bytes = sp.Integer(0)
@@ -1832,12 +1830,13 @@ def _merge_analyzed_ops(op: Operation, analyzed_ops: Sequence[_AnalyzedOp]) -> _
     for analyzed in analyzed_ops:
         compute_items.extend(analyzed.compute_items)
         memory_items.extend(analyzed.memory_items)
-        compute_total += analyzed.compute
-        read_bytes_total += analyzed.read_bytes
-        write_bytes_total += analyzed.write_bytes
         value_reads.extend(analyzed.value_reads)
         direct_writes.extend(analyzed.direct_writes)
         result_write_bytes += analyzed.result_write_bytes
+
+    compute_total = _sum_expr(item.amount for item in compute_items)
+    read_bytes_total = _sum_expr(item.bytes for item in memory_items if item.access == "read")
+    write_bytes_total = _sum_expr(item.bytes for item in memory_items if item.access == "write")
 
     return _AnalyzedOp(
         op_name=op.name,
@@ -1853,6 +1852,7 @@ def _merge_analyzed_ops(op: Operation, analyzed_ops: Sequence[_AnalyzedOp]) -> _
 
 
 def _coerce_memory_analyzer_result(
+    op: Operation,
     analyzed: DmaMemoryAnalysis | _AnalyzedOp,
     config: AnalysisConfig,
 ) -> _AnalyzedOp:
@@ -1863,10 +1863,12 @@ def _coerce_memory_analyzer_result(
 
     功能说明:
     - 兼容 DMA memory analyzer 现有输出结构。
+    - read/write 作为 derived alias，来自 memory_items 求和。
     - 允许 memory analyzer 直接返回 `_AnalyzedOp`。
+    - 对 `dma.cast` 追加 vector compute item，数量按结果 numel 计算。
 
     使用示例:
-    - normalized = _coerce_memory_analyzer_result(analyzed, config)
+    - normalized = _coerce_memory_analyzer_result(op, analyzed, config)
 
     关联文件:
     - spec: spec/analysis/analysis_engine.md
@@ -1889,13 +1891,29 @@ def _coerce_memory_analyzer_result(
                 )
                 for item in analyzed.memory_items
             ]
+        compute_items: list[ComputeItem] = []
+        if config.enable_compute and op.name == "dma.cast" and op.results:
+            result_type = op.results[0].type
+            if isinstance(result_type, NnMemoryType):
+                numel = _numel_from_mem_type(result_type)
+                if numel is not None:
+                    compute_items.append(
+                        ComputeItem(
+                            kind=ComputeKind.VECTOR,
+                            amount=numel,
+                            dtype=_dtype_string(result_type.element_type),
+                        )
+                    )
+        compute_total = _sum_expr(item.amount for item in compute_items)
+        read_bytes = _sum_expr(item.bytes for item in memory_items if item.access == "read")
+        write_bytes = _sum_expr(item.bytes for item in memory_items if item.access == "write")
         return _AnalyzedOp(
             op_name=analyzed.op_name,
-            compute_items=[],
+            compute_items=compute_items,
             memory_items=memory_items,
-            compute=sp.Integer(0),
-            read_bytes=analyzed.read_bytes if config.enable_memory else sp.Integer(0),
-            write_bytes=analyzed.write_bytes if config.enable_memory else sp.Integer(0),
+            compute=compute_total,
+            read_bytes=read_bytes,
+            write_bytes=write_bytes,
             value_reads=analyzed.value_reads if config.enable_memory else (),
             direct_writes=analyzed.direct_writes if config.enable_memory else (),
             result_write_bytes=analyzed.result_write_bytes if config.enable_memory else sp.Integer(0),
@@ -1930,7 +1948,7 @@ def _analyze_ir_op(op: Operation, config: AnalysisConfig) -> _AnalyzedOp | None:
     for analyzer in iter_memory_analyzers_for_op(op):
         analyzed = analyzer(op, config)
         if analyzed is not None:
-            analyzed_ops.append(_coerce_memory_analyzer_result(analyzed, config))
+            analyzed_ops.append(_coerce_memory_analyzer_result(op, analyzed, config))
     if not analyzed_ops:
         return None
     return _merge_analyzed_ops(op, analyzed_ops)
