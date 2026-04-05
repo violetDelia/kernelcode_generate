@@ -31,6 +31,7 @@ from xdsl.dialects.builtin import (
     IntegerAttr,
     ModuleOp,
     StringAttr,
+    i1,
     i32,
 )
 from xdsl.ir import Block, Region
@@ -534,6 +535,85 @@ def test_rewrite_rejects_callsite_signature_mismatch() -> None:
     caller_block = Block(arg_types=[mem_type])
     call_op = func.CallOp("callee", [caller_block.args[0]], [])
     caller_block.add_ops([call_op, func.ReturnOp()])
+    caller = func.FuncOp(
+        "caller",
+        FunctionType.from_lists([mem_type], []),
+        Region(caller_block),
+        arg_attrs=_arg_attrs("src"),
+    )
+
+    module = ModuleOp([callee, caller])
+
+    with pytest.raises(BufferResultsToOutParamsError, match="half-rewritten"):
+        BufferResultsToOutParamsPass().run(module)
+
+
+# BROTP-011
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-05 14:10:00 +0800
+# 最近一次运行成功时间: 2026-04-05 14:10:00 +0800
+# 功能说明: 验证已改写 callee 遇到旧 memory-result caller 会显式拒绝。
+# 测试目的: 锁定“callee 已是 out-param ABI，但 caller 仍消费旧 memory result”不会被静默放过。
+# 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_rejects_old_memory_callsite_against_rewritten_callee
+# 对应功能实现文件路径: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+# 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
+# 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
+def test_rewrite_rejects_old_memory_callsite_against_rewritten_callee() -> None:
+    mem_type = _make_memory_type()
+
+    callee_block = Block(arg_types=[mem_type, mem_type])
+    callee_block.add_op(func.ReturnOp())
+    callee = func.FuncOp(
+        "rewritten_callee",
+        FunctionType.from_lists([mem_type, mem_type], []),
+        Region(callee_block),
+        arg_attrs=_arg_attrs("arg0", "src"),
+    )
+
+    caller_block = Block(arg_types=[mem_type])
+    stale_call = func.CallOp("rewritten_callee", [caller_block.args[0]], [mem_type])
+    caller_block.add_ops([stale_call, func.ReturnOp()])
+    caller = func.FuncOp(
+        "caller",
+        FunctionType.from_lists([mem_type], []),
+        Region(caller_block),
+        arg_attrs=_arg_attrs("src"),
+    )
+
+    module = ModuleOp([callee, caller])
+
+    with pytest.raises(BufferResultsToOutParamsError, match="half-rewritten"):
+        BufferResultsToOutParamsPass().run(module)
+
+
+# BROTP-012
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-05 14:18:00 +0800
+# 最近一次运行成功时间: 2026-04-05 14:18:00 +0800
+# 功能说明: 验证 local callsite 与 callee 同 arity 但结果类型不一致时会显式拒绝。
+# 测试目的: 锁定 ABI 校验不只比较参数/结果个数，还要比较 caller/callee 的结果类型。
+# 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_rejects_callsite_result_type_mismatch_with_same_arity
+# 对应功能实现文件路径: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+# 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
+# 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
+def test_rewrite_rejects_callsite_result_type_mismatch_with_same_arity() -> None:
+    mem_type = _make_memory_type()
+
+    callee_block = Block(arg_types=[mem_type])
+    flag_value = arith.ConstantOp(IntegerAttr(1, i32))
+    callee_block.add_ops([flag_value, func.ReturnOp(callee_block.args[0], flag_value.result)])
+    callee = func.FuncOp(
+        "reduce",
+        FunctionType.from_lists([mem_type], [mem_type, i32]),
+        Region(callee_block),
+        arg_attrs=_arg_attrs("src"),
+    )
+
+    caller_block = Block(arg_types=[mem_type])
+    stale_call = func.CallOp("reduce", [caller_block.args[0]], [mem_type, i1])
+    caller_block.add_ops([stale_call, func.ReturnOp()])
     caller = func.FuncOp(
         "caller",
         FunctionType.from_lists([mem_type], []),

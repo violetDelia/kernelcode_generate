@@ -168,23 +168,43 @@ def _has_leading_out_params(func_op: func.FuncOp, memory_count: int) -> bool:
     - 功能实现: kernel_gen/passes/lowering/buffer_results_to_out_params.py
     """
 
-    if memory_count <= 0:
-        return False
-    input_types = list(func_op.function_type.inputs.data)
-    if len(input_types) < memory_count:
-        return False
-    if any(not isinstance(input_types[index], NnMemoryType) for index in range(memory_count)):
-        return False
+    return memory_count > 0 and _leading_out_param_count(func_op) >= memory_count
+
+
+def _leading_out_param_count(func_op: func.FuncOp) -> int:
+    """统计函数签名前缀中连续的 out 参数个数。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 识别形如 `arg0/arg1/...` 的连续前置 `nn.memory` 参数前缀。
+    - 供半改写 ABI 检测与 callsite 校验共享，避免重复解析参数名规则。
+
+    使用示例:
+    - leading_count = _leading_out_param_count(func_op)
+
+    关联文件:
+    - spec: spec/pass/lowering/buffer_results_to_out_params.md
+    - test: test/pass/test_buffer_results_to_out_params.py
+    - 功能实现: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+    """
+
     if func_op.arg_attrs is None:
-        return False
+        return 0
+    input_types = list(func_op.function_type.inputs.data)
     attrs = list(func_op.arg_attrs.data)
-    if len(attrs) < memory_count:
-        return False
-    for index in range(memory_count):
+    if len(attrs) < len(input_types):
+        return 0
+    leading_count = 0
+    for index, input_type in enumerate(input_types):
         name_attr = attrs[index].data.get("name")
+        if not isinstance(input_type, NnMemoryType):
+            break
         if not isinstance(name_attr, StringAttr) or name_attr.data != f"arg{index}":
-            return False
-    return True
+            break
+        leading_count += 1
+    return leading_count
 
 
 def _raise_half_rewritten(detail: str) -> None:
@@ -369,6 +389,85 @@ def _collect_target_calls(module: ModuleOp, targets: dict[str, _RewriteTarget]) 
     return calls
 
 
+def _callsite_involves_memory_rewrite(call_op: func.CallOp, callee: func.FuncOp) -> bool:
+    """判断 local callsite 是否落在 memory-return 改写责任范围内。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 把“caller/callee 是否涉及旧 memory-return ABI 或新 out-param ABI”收口成统一判定。
+    - 仅对与本 pass 责任相关的 callsite mismatch 抛出 `half-rewritten`，避免越界拒绝纯标量调用。
+
+    使用示例:
+    - if _callsite_involves_memory_rewrite(call_op, callee): ...
+
+    关联文件:
+    - spec: spec/pass/lowering/buffer_results_to_out_params.md
+    - test: test/pass/test_buffer_results_to_out_params.py
+    - 功能实现: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+    """
+
+    callsite_has_memory_results = any(
+        isinstance(result.type, NnMemoryType) for result in call_op.results
+    )
+    callee_signature = _output_signature(callee)
+    return (
+        callsite_has_memory_results
+        or bool(callee_signature.memory_indices)
+        or _leading_out_param_count(callee) > 0
+    )
+
+
+def _validate_local_callsites(
+    module: ModuleOp,
+    targets: dict[str, _RewriteTarget],
+) -> None:
+    """在改写前校验模块内 local callsite 不存在半改写 ABI。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 对模块内可解析 `func.call` 统一校验 caller/callee 的参数个数与返回个数。
+    - 若 callsite 已落入本 pass 的 memory-return/out-param 责任范围，但 caller/callee 口径不一致，则显式抛出 `half-rewritten`。
+
+    使用示例:
+    - _validate_local_callsites(module, targets)
+
+    关联文件:
+    - spec: spec/pass/lowering/buffer_results_to_out_params.md
+    - test: test/pass/test_buffer_results_to_out_params.py
+    - 功能实现: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+    """
+
+    local_funcs = {
+        op.sym_name.data: op for op in module.ops if isinstance(op, func.FuncOp)
+    }
+    for op in module.walk():
+        if not isinstance(op, func.CallOp):
+            continue
+        callee_name = op.callee.root_reference.data
+        callee = local_funcs.get(callee_name)
+        if callee is None:
+            continue
+        target = targets.get(callee_name)
+        expected_inputs = (
+            target.input_types if target is not None else list(callee.function_type.inputs.data)
+        )
+        expected_outputs = (
+            target.output_signature.output_types
+            if target is not None
+            else list(callee.function_type.outputs.data)
+        )
+        actual_inputs = [argument.type for argument in op.arguments]
+        actual_outputs = [result.type for result in op.results]
+        if actual_inputs == expected_inputs and actual_outputs == expected_outputs:
+            continue
+        if target is not None or _callsite_involves_memory_rewrite(op, callee):
+            _raise_half_rewritten(f"callsite for {callee_name} does not match callee signature")
+
+
 def _rewrite_callsite(call_op: func.CallOp, targets: dict[str, _RewriteTarget]) -> None:
     """把调用待改写 callee 的 `func.call` 改成显式 out-arg 形式。
 
@@ -414,7 +513,7 @@ def _rewrite_callsite(call_op: func.CallOp, targets: dict[str, _RewriteTarget]) 
     new_call = func.CallOp(
         callee_name,
         [*(alloc.result for alloc in out_allocs), *call_op.arguments],
-        [call_op.results[index].type for index in scalar_indices],
+        [output_types[index] for index in scalar_indices],
     )
     block.insert_ops_before([*out_allocs, new_call], call_op)
 
@@ -571,6 +670,7 @@ class BufferResultsToOutParamsPass(Pass):
         if not isinstance(module, ModuleOp):
             raise BufferResultsToOutParamsError("module must be builtin.module")
         targets = _collect_rewrite_targets(module)
+        _validate_local_callsites(module, targets)
         _rewrite_callsites(module, targets)
         for target in targets.values():
             _rewrite_memory_results_to_out_params(target)

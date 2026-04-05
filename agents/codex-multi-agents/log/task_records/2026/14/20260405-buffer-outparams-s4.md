@@ -1,0 +1,132 @@
+- 时间：`2026-04-05 13:58:19 +0800`
+- 经办人：`jcc你莫辜负`
+- 任务：`T-20260405-bb352129`
+- 任务目标：按 `buffer_results_to_out_params_refactor_alignment_plan S4` 推进实现+补测，补强 local callsite 半改写 ABI 拒绝，并复跑 pytest/expectation gate。
+- 改动：
+  - `kernel_gen/passes/lowering/buffer_results_to_out_params.py`：新增 `_leading_out_param_count`、`_callsite_involves_memory_rewrite`、`_validate_local_callsites`，在 pass 改写前统一校验模块内 local `func.call` 与 callee 签名；补齐“callee 已改写为 out-param ABI，但 caller 仍保留旧 memory-result 口径”时的 `half-rewritten` 显式拒绝，禁止静默 fallback。
+  - `test/pass/test_buffer_results_to_out_params.py`：新增 `test_rewrite_rejects_old_memory_callsite_against_rewritten_callee`，锁定“已改写 callee + 旧 caller”失败边界与 `half-rewritten` 诊断短语。
+  - expectation 同步：`../expectation/pass/lowing/buffer_results_to_out_params/{callsite_rewrite.py,mixed_output.py,multi_output.py}` -> `expectation/pass/lowing/buffer_results_to_out_params/`（命令：`mkdir -p expectation/pass/lowing/buffer_results_to_out_params && cp -a ../expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py && cp -a ../expectation/pass/lowing/buffer_results_to_out_params/mixed_output.py expectation/pass/lowing/buffer_results_to_out_params/mixed_output.py && cp -a ../expectation/pass/lowing/buffer_results_to_out_params/multi_output.py expectation/pass/lowing/buffer_results_to_out_params/multi_output.py`）。
+- 结论：
+  - gate 复跑：
+    - `pytest -q test/pass/test_buffer_results_to_out_params.py -k 'callsite_signature_mismatch or old_memory_callsite_against_rewritten_callee'`（exit=0；`2 passed, 9 deselected`）
+    - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py`（exit=0；输出覆盖 direct/mixed/callsite rewrite 与 half-rewritten reject 摘要）
+    - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/mixed_output.py`（exit=0；输出 `[CASE-1] mixed output 重写后，memory 走 arg0，scalar 保留 return。`）
+    - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/multi_output.py`（exit=0；输出 `[CASE-1] 多个 memory outputs 固定重写成前置 arg0/arg1，caller 同步改写。`）
+    - `pytest -q test/pass/test_buffer_results_to_out_params.py`（exit=0；`11 passed in 0.31s`）
+    - `pytest -q test/pass/test_pass_manager.py -k 'buffer_results_to_out_params'`（exit=0；`2 passed, 5 deselected in 0.29s`）
+  - 结论：已补齐“rewritten callee + stale caller”半改写 ABI 拒绝与最小回归测试；本阶段 gate 全部通过，可进入复审。
+
+- 时间：`2026-04-05 14:08:11 +0800`
+- 经办人：`jcc你莫辜负`
+- 任务：`T-20260405-6c49731e`
+- 任务目标：修复 `buffer_outparams S4` 中 local callsite ABI 校验仅看 arity、不看类型的问题；补齐同 arity 错型回归，并复跑 expectation/pytest gate。
+- 改动：
+  - `kernel_gen/passes/lowering/buffer_results_to_out_params.py`：将 `_validate_local_callsites(...)` 从“仅比较参数/结果个数”收紧为“比较参数类型列表 + 结果类型列表”；对落入本 pass 责任范围的 local callsite，一旦 caller/callee ABI 类型不一致即统一抛 `half-rewritten`。同时 `_rewrite_callsite(...)` 改为使用 callee 期望的 scalar output type 构造 rewritten `func.call`，不再复用旧 callsite 上的错误结果类型。
+  - `test/pass/test_buffer_results_to_out_params.py`：新增 `test_rewrite_rejects_callsite_result_type_mismatch_with_same_arity`，锁定 `callee: ([mem]) -> [mem, i32]`、`caller: func.CallOp(..., [mem, i1])` 时必须显式失败。
+- 结论：
+  - 关键证据：
+    - `kernel_gen/passes/lowering/buffer_results_to_out_params.py:463` 开始按 `actual_inputs/actual_outputs` 与 `expected_inputs/expected_outputs` 做类型级比较。
+    - `kernel_gen/passes/lowering/buffer_results_to_out_params.py:516` rewritten `func.call` 的 scalar 结果类型改为取 `output_types[index]`。
+    - `test/pass/test_buffer_results_to_out_params.py:601` 新增同 arity 错型回归。
+  - gate 复跑：
+    - `pytest -q test/pass/test_buffer_results_to_out_params.py -k 'callsite_result_type_mismatch_with_same_arity or callsite_signature_mismatch or old_memory_callsite_against_rewritten_callee'`（exit=0；`3 passed, 9 deselected in 0.25s`）
+    - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py`（exit=0；输出仍覆盖 direct/mixed/callsite rewrite 与 half-rewritten reject 摘要）
+    - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/mixed_output.py`（exit=0；输出 `[CASE-1] mixed output 重写后，memory 走 arg0，scalar 保留 return。`）
+    - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/multi_output.py`（exit=0；输出 `[CASE-1] 多个 memory outputs 固定重写成前置 arg0/arg1，caller 同步改写。`）
+    - `pytest -q test/pass/test_buffer_results_to_out_params.py`（exit=0；`12 passed in 0.27s`）
+    - `pytest -q test/pass/test_pass_manager.py -k 'buffer_results_to_out_params'`（exit=0；`2 passed, 5 deselected in 0.25s`）
+  - 结论：local callsite ABI 校验已补齐到类型级，same-arity wrong-type 不再静默放过；本轮 gate 全部通过，可进入复审。
+
+- 时间：`2026-04-05 14:03:30 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260405-0371762a`
+- 任务目标：复审 `buffer_outparams S4`：核对 diff 范围、复跑 expectation/pytest gate，并重点审查 `half-rewritten/ABI` 诊断短语稳定性。
+- 复核结论：**不通过**
+- 通过项：
+  - diff 范围符合要求：`git diff --name-only` 仅含 `kernel_gen/passes/lowering/buffer_results_to_out_params.py`、`test/pass/test_buffer_results_to_out_params.py`；记录文件位于 worktree 对应路径。
+  - gate 复跑均 `exit=0`：
+    - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py`
+    - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/mixed_output.py`
+    - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/multi_output.py`
+    - `pytest -q test/pass/test_buffer_results_to_out_params.py`（`11 passed in 0.22s`）
+    - `pytest -q test/pass/test_pass_manager.py -k buffer_results_to_out_params`（`2 passed, 5 deselected in 0.20s`）
+  - 诊断短语现状：
+    - 半改写场景仍统一走 `half-rewritten ABI is not supported: ...`
+    - expectation 中 `gen_kernel` 旧 ABI 拒绝仍保留 `legacy memory return ABI is not supported`
+
+- 不通过点（唯一硬问题）：
+  1. **local callsite ABI 校验仅比对“参数/结果个数”，未比对结果类型；同 arity 错型 callsite 会被静默放过并被错误改写。**
+     - 代码位置：`kernel_gen/passes/lowering/buffer_results_to_out_params.py`
+       - `_validate_local_callsites(...)` 仅检查 `len(op.arguments) == len(expected_inputs)` 与 `len(op.results) == len(expected_outputs)`。
+       - `_rewrite_callsite(...)` 为 scalar 结果直接复用 `call_op.results[index].type`，未核对是否与 callee/target 的 scalar output type 一致。
+     - 我方复现证据（在当前 worktree 直接执行）：
+       - 构造 `callee: ([mem]) -> [mem, i32]`
+       - 构造 `caller` 旧 callsite：`func.CallOp("reduce", [mem], [mem, i1])`
+       - 执行 `BufferResultsToOutParamsPass().run(module)` 后，输出：
+         - `rewritten_call_results ['i1']`
+         - `callee_outputs ['i32']`
+     - 风险：
+       - callsite 与 callee ABI 实际不一致，但 pass 未报 `half-rewritten`，反而生成错误的 rewritten call result type。
+       - 这属于“半改写/ABI 诊断短语未覆盖到真实 mismatch”的证据缺口，后续可能把错误 IR 带到更下游。
+
+- 审查判断：
+  - 现有新增测试仅覆盖“个数不一致”的 callsite mismatch 与“旧 memory-result caller 对 rewritten callee”的半改写拒绝；
+  - **未覆盖“同 arity 但类型不一致”的 ABI mismatch**，因此本轮不能通过。
+
+- 唯一下一步建议：
+  - 派生修复任务：补齐 local callsite ABI 的**类型级**校验（至少 inputs/outputs 尤其 scalar outputs 不得只看 arity），确保 mismatch 统一报 `half-rewritten` 或等价稳定诊断；并新增回归测试锁定“`callee` 期望 `i32`、caller 仍声明 `i1` result”必须失败。允许修改文件仍限定：
+    - `kernel_gen/passes/lowering/buffer_results_to_out_params.py`
+    - `test/pass/test_buffer_results_to_out_params.py`
+    - `agents/codex-multi-agents/log/task_records/2026/14/20260405-buffer-outparams-s4.md`
+
+- 时间：`2026-04-05 14:20:40 +0800`
+- 经办人：`提莫炖蘑菇`
+- 任务：`T-20260405-e742772a`
+- 任务目标：复审 `buffer_outparams S4` 类型校验修复：核对 diff 范围，复跑 expectation/pytest gate，并确认 same-arity wrong-type 拒绝与 `half-rewritten` 诊断短语稳定。
+- 复核结论：**通过**
+- 复核证据：
+  - diff 范围：
+    - `git diff --name-only` 仅含：
+      - `kernel_gen/passes/lowering/buffer_results_to_out_params.py`
+      - `test/pass/test_buffer_results_to_out_params.py`
+    - `git diff --name-only --cached` 为空
+    - 记录文件位于当前 worktree 对应路径，未见越界文件混入。
+  - 实现核对：
+    - `kernel_gen/passes/lowering/buffer_results_to_out_params.py:463-468` 已改为比较 `actual_inputs/actual_outputs` 与 `expected_inputs/expected_outputs` 的**类型列表**，不再只看 arity。
+    - `kernel_gen/passes/lowering/buffer_results_to_out_params.py:513-517` rewritten `func.call` 的 scalar result type 已改为取 callee 期望的 `output_types[index]`，不再复用旧 callsite 的错误类型。
+  - 测试核对：
+    - `test/pass/test_buffer_results_to_out_params.py:601-627` 新增 `test_rewrite_rejects_callsite_result_type_mismatch_with_same_arity`，锁定 `callee: ([mem]) -> [mem, i32]`、`caller: func.CallOp(..., [mem, i1])` 时必须失败。
+  - 定向复现：
+    - 我方在当前 worktree 复现 same-arity wrong-type 场景，`BufferResultsToOutParamsPass().run(module)` 抛出：
+      - `BufferResultsToOutParamsError`
+      - `half-rewritten ABI is not supported: callsite for reduce does not match callee signature`
+    - 结论：wrong-type mismatch 已被显式拒绝，且 `half-rewritten` 诊断短语稳定。
+  - gate 复跑（均 `exit=0`）：
+    - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py`
+    - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/mixed_output.py`
+    - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/multi_output.py`
+    - `pytest -q test/pass/test_buffer_results_to_out_params.py`（`12 passed in 0.21s`）
+    - `pytest -q test/pass/test_pass_manager.py -k buffer_results_to_out_params`（`2 passed, 5 deselected in 0.20s`）
+
+- 风险复核：
+  - 未见 same-arity wrong-type 被静默改写的残留路径。
+  - `half-rewritten` 与 expectation 中 `legacy memory return ABI is not supported` 两类诊断口径未回退。
+  - 本轮未发现新的越界 diff、fallback 或合并漏文件风险。
+
+- 唯一下一步建议：
+  - 进入同链路“合并收口”任务，限定合并当前 worktree 的业务文件与本记录文件。
+
+- 时间：`2026-04-05 14:12:57 +0800`
+- 经办人：`李白`
+- 任务：`T-20260405-7b0a0d0c`（合并收口）
+- 任务目标：按要求复跑 gate 并在记录中写入证据；确认 diff 范围仅 buffer_results_to_out_params.py、test_buffer_results_to_out_params.py + 记录；合并并清理。
+- 改动：
+  - 复跑 expectation gate：
+    - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py`（exit=0）
+    - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/mixed_output.py`（exit=0）
+    - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/multi_output.py`（exit=0）
+  - 复跑 pytest：
+    - `PYTHONPATH=. pytest -q test/pass/test_buffer_results_to_out_params.py`（exit=0；`12 passed`）
+    - `PYTHONPATH=. pytest -q test/pass/test_pass_manager.py -k buffer_results_to_out_params`（exit=0；`2 passed, 5 deselected`）
+  - 范围核对：`git diff --name-only` 与 `git diff --name-only --cached` 仅包含 `kernel_gen/passes/lowering/buffer_results_to_out_params.py`、`test/pass/test_buffer_results_to_out_params.py`（记录文件为新增）。
+- 结论：gate 通过，范围符合要求，可进入合并收口。
