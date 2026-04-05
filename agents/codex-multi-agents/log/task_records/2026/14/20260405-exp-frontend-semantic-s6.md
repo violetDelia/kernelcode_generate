@@ -73,4 +73,4 @@
      - 结果：输出 CASE-1~3（exit=0）
   3) `cd /home/lfr/kernelcode_generate && PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260405-exp-frontend-semantic-s6:/home/lfr/kernelcode_generate python expectation/symbol_variable/memory`
      - 结果：输出 CASE-1~7（exit=0）
-结论：gate 复跑通过，可执行合并收口（合并提交/push/cleanup/远端确认信息由合并执行结果补齐）。
+结论：gate 复跑通过，已完成合并收口并推送；合并提交=319caad（main）；push=exit=0；cleanup=git worktree remove wt-20260405-exp-frontend-semantic-s6 --force；git branch -D T-20260405-7437ba59。
