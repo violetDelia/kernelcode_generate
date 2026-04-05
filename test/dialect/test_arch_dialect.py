@@ -1,7 +1,7 @@
 """arch dialect tests.
 
 创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 arch dialect 的固定结果类型查询、动态 memory 入口与 kernel 启动描述的 parse/print 与 verifier。
@@ -29,12 +29,12 @@ from pathlib import Path
 
 import pytest
 from xdsl.context import Context
-from xdsl.dialects.builtin import ArrayAttr, Builtin, IntAttr, StringAttr, i8, i32
+from xdsl.dialects.builtin import ArrayAttr, Builtin, IntAttr, StringAttr, SymbolRefAttr, i8, i32
 from xdsl.dialects.test import Test, TestOp as _TestOp
 from xdsl.ir import Attribute, Operation, SSAValue
 from xdsl.parser import Parser
 from xdsl.printer import Printer
-from xdsl.utils.exceptions import ParseError, VerifyException
+from xdsl.utils.exceptions import VerifyException
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -42,6 +42,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.arch import (
     Arch,
+    ArchBarrierOp,
     ArchGetBlockIdOp,
     ArchGetBlockNumOp,
     ArchGetDynamicMemoryOp,
@@ -49,7 +50,9 @@ from kernel_gen.dialect.arch import (
     ArchGetSubthreadNumOp,
     ArchGetThreadIdOp,
     ArchGetThreadNumOp,
+    ArchLaunchOp,
     ArchLaunchKernelOp,
+    ArchScopeAttr,
 )
 from kernel_gen.dialect import (
     Arch as ArchFromPackage,
@@ -145,6 +148,27 @@ def _make_space(name: str) -> NnMemorySpaceAttr:
     return NnMemorySpaceAttr(StringAttr(name))
 
 
+def _make_barrier_visibility() -> ArrayAttr[Attribute]:
+    """构造 `arch.barrier` 需要的 visibility 列表。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 统一生成 `[#nn.space<tsm>, #nn.space<tlm>]` 供 barrier 成功路径与 round-trip 复用。
+
+    使用示例:
+    - _make_barrier_visibility()
+
+    关联文件:
+    - spec: spec/dialect/arch.md
+    - test: test/dialect/test_arch_dialect.py
+    - 功能实现: kernel_gen/dialect/arch.py
+    """
+
+    return ArrayAttr([_make_space("tsm"), _make_space("tlm")])
+
+
 def _make_dynamic_memory_type(
     space: str = "shared",
     *,
@@ -184,7 +208,7 @@ def _make_symbol_value(expr: str) -> SSAValue:
     最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 为 `arch.launch_kernel` 测试复用统一的 symbol.int operand 构造。
+    - 为 `arch.launch` 测试复用统一的 symbol.int operand 构造。
 
     使用示例:
     - _make_symbol_value("8")
@@ -350,53 +374,115 @@ def test_arch_get_dynamic_memory_verify_errors() -> None:
 
 
 # TC-ARCH-009
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-25 04:30:00 +0800
-# 最近一次运行成功时间: 2026-03-25 04:30:00 +0800
-# 测试目的: 验证 arch.launch_kernel 在非空名称与合法 symbol.int 启动规模下可通过 verifier。
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 05:03:11 +0800
+# 最近一次运行成功时间: 2026-04-06 05:03:11 +0800
+# 测试目的: 验证 arch.barrier 在 block scope + [tsm, tlm] visibility 下通过 verifier 与 print。
+# 使用示例: PYTHONPATH=. pytest -q test/dialect/test_arch_dialect.py -k test_arch_barrier_success
 # 对应功能实现文件路径: kernel_gen/dialect/arch.py
 # 对应 spec 文件路径: spec/dialect/arch.md
-def test_arch_launch_kernel_success() -> None:
-    op = ArchLaunchKernelOp("my_kernel", _make_symbol_value("grid_x"), _make_symbol_value("8"), _make_symbol_value("1"))
+# 对应测试文件路径: test/dialect/test_arch_dialect.py
+def test_arch_barrier_success() -> None:
+    op = ArchBarrierOp(ArchScopeAttr.from_name("block"), _make_barrier_visibility())
+
     op.verify()
-    assert _print_ir(op) == (
-        'arch.launch_kernel "my_kernel", %0, %1, %2 : '
-        '!symbol.int<"grid_x">, !symbol.int<"8">, !symbol.int<"1">'
-    )
+    assert _print_ir(op) == "arch.barrier {scope = #arch.scope<block>, visibility = [#nn.space<tsm>, #nn.space<tlm>]}"
 
 
 # TC-ARCH-010
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-25 04:30:00 +0800
-# 最近一次运行成功时间: 2026-03-25 04:30:00 +0800
-# 测试目的: 验证 arch.launch_kernel 会拒绝空名称、非 symbol.int operand 与静态非法规模。
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 05:03:11 +0800
+# 最近一次运行成功时间: 2026-04-06 05:03:11 +0800
+# 测试目的: 验证 arch.barrier 会拒绝非法 scope、空 visibility、重复 visibility 与非法 space。
+# 使用示例: PYTHONPATH=. pytest -q test/dialect/test_arch_dialect.py -k test_arch_barrier_verify_errors
 # 对应功能实现文件路径: kernel_gen/dialect/arch.py
 # 对应 spec 文件路径: spec/dialect/arch.md
-def test_arch_launch_kernel_verify_errors() -> None:
-    with pytest.raises(VerifyException, match="kernel name must not be empty"):
-        ArchLaunchKernelOp("", _make_symbol_value("1"), _make_symbol_value("1"), _make_symbol_value("1")).verify()
+# 对应测试文件路径: test/dialect/test_arch_dialect.py
+def test_arch_barrier_verify_errors() -> None:
+    with pytest.raises(VerifyException, match="scope must be #arch.scope<block>"):
+        ArchBarrierOp(ArchScopeAttr.from_name("thread"), _make_barrier_visibility()).verify()
 
-    non_symbol_value = _TestOp(result_types=[i32]).results[0]
-    with pytest.raises(VerifyException, match='block must have type !symbol.int<"expr">'):
-        ArchLaunchKernelOp("my_kernel", non_symbol_value, _make_symbol_value("1"), _make_symbol_value("1")).verify()
+    with pytest.raises(VerifyException, match="visibility must not be empty"):
+        ArchBarrierOp(ArchScopeAttr.from_name("block"), ArrayAttr([])).verify()
 
-    with pytest.raises(VerifyException, match="thread must be > 0 when statically known"):
-        ArchLaunchKernelOp("my_kernel", _make_symbol_value("1"), _make_symbol_value("0"), _make_symbol_value("1")).verify()
+    with pytest.raises(VerifyException, match="visibility must not contain duplicates"):
+        ArchBarrierOp(
+            ArchScopeAttr.from_name("block"),
+            ArrayAttr([_make_space("tsm"), _make_space("tsm")]),
+        ).verify()
 
-    with pytest.raises(VerifyException, match="subthread must be > 0 when statically known"):
-        ArchLaunchKernelOp("my_kernel", _make_symbol_value("1"), _make_symbol_value("1"), _make_symbol_value("-1")).verify()
+    with pytest.raises(VerifyException, match="visibility must contain only #nn.space<tsm>/#nn.space<tlm>"):
+        ArchBarrierOp(
+            ArchScopeAttr.from_name("block"),
+            ArrayAttr([_make_space("tsm"), _make_space("shared")]),
+        ).verify()
 
 
 # TC-ARCH-011
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-03-25 04:30:00 +0800
-# 最近一次运行成功时间: 2026-03-25 04:30:00 +0800
-# 测试目的: 验证 arch dialect 文本可完成 parse/print round-trip，并对不完整 launch 签名给出 parse 错误。
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 05:03:11 +0800
+# 最近一次运行成功时间: 2026-04-06 05:03:11 +0800
+# 测试目的: 验证 arch.launch 使用 `arch.launch<...>(@callee, args...)` 文本与合法 verifier 边界。
+# 使用示例: PYTHONPATH=. pytest -q test/dialect/test_arch_dialect.py -k test_arch_launch_success
 # 对应功能实现文件路径: kernel_gen/dialect/arch.py
 # 对应 spec 文件路径: spec/dialect/arch.md
+# 对应测试文件路径: test/dialect/test_arch_dialect.py
+def test_arch_launch_success() -> None:
+    block = _make_symbol_value("grid_x")
+    thread = _make_symbol_value("8")
+    subthread = _make_symbol_value("1")
+    arg = _make_symbol_value("arg_n")
+    op = ArchLaunchOp("my_kernel", block, thread, subthread, (arg,))
+
+    op.verify()
+    assert _print_ir(op) == (
+        'arch.launch<%0, %1, %2>(@my_kernel, %3) : (!symbol.int<"arg_n">) -> ()'
+    )
+
+
+# TC-ARCH-012
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 05:03:11 +0800
+# 最近一次运行成功时间: 2026-04-06 05:03:11 +0800
+# 测试目的: 验证 arch.launch 会拒绝非法 callee 形态、非 symbol.int operand 与静态非法规模。
+# 使用示例: PYTHONPATH=. pytest -q test/dialect/test_arch_dialect.py -k test_arch_launch_verify_errors
+# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 对应 spec 文件路径: spec/dialect/arch.md
+# 对应测试文件路径: test/dialect/test_arch_dialect.py
+def test_arch_launch_verify_errors() -> None:
+    non_symbol_value = _TestOp(result_types=[i32]).results[0]
+    with pytest.raises(VerifyException, match="callee must be flat @symbol"):
+        ArchLaunchOp(
+            SymbolRefAttr("my_kernel", ["nested"]),
+            _make_symbol_value("1"),
+            _make_symbol_value("1"),
+            _make_symbol_value("1"),
+        ).verify()
+
+    with pytest.raises(VerifyException, match='block must have type !symbol.int<"expr">'):
+        ArchLaunchOp("my_kernel", non_symbol_value, _make_symbol_value("1"), _make_symbol_value("1")).verify()
+
+    with pytest.raises(VerifyException, match="thread must be > 0 when statically known"):
+        ArchLaunchOp("my_kernel", _make_symbol_value("1"), _make_symbol_value("0"), _make_symbol_value("1")).verify()
+
+    with pytest.raises(VerifyException, match="subthread must be > 0 when statically known"):
+        ArchLaunchOp("my_kernel", _make_symbol_value("1"), _make_symbol_value("1"), _make_symbol_value("-1")).verify()
+
+
+# TC-ARCH-013
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 05:03:11 +0800
+# 最近一次运行成功时间: 2026-04-06 05:03:11 +0800
+# 测试目的: 验证 arch dialect 文本可完成包含 barrier/launch 的 parse/print round-trip，并拒绝字符串 callee。
+# 使用示例: PYTHONPATH=. pytest -q test/dialect/test_arch_dialect.py -k test_arch_parse_print_round_trip
+# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 对应 spec 文件路径: spec/dialect/arch.md
+# 对应测试文件路径: test/dialect/test_arch_dialect.py
 def test_arch_parse_print_round_trip() -> None:
     ctx = _build_context()
     module = Parser(
@@ -406,6 +492,7 @@ builtin.module {
   %block = "test.op"() : () -> !symbol.int<"grid_x">
   %thread = "test.op"() : () -> !symbol.int<"block_x">
   %subthread = "test.op"() : () -> !symbol.int<"subthread_x">
+  %arg = "test.op"() : () -> !symbol.int<"arg_n">
   %bid = arch.get_block_id : !symbol.int<"block_id">
   %bnum = arch.get_block_num : !symbol.int<"block_num">
   %tid = arch.get_thread_id : !symbol.int<"thread_id">
@@ -413,7 +500,8 @@ builtin.module {
   %stid = arch.get_subthread_id : !symbol.int<"subthread_id">
   %stnum = arch.get_subthread_num : !symbol.int<"subthread_num">
   %smem = arch.get_dynamic_memory #nn.space<shared> : !nn.memory<[?], [1], i8, #nn.space<shared>>
-  arch.launch_kernel "my_kernel", %block, %thread, %subthread : !symbol.int<"grid_x">, !symbol.int<"block_x">, !symbol.int<"subthread_x">
+  arch.barrier {scope = #arch.scope<block>, visibility = [#nn.space<tsm>, #nn.space<tlm>]}
+  arch.launch<%block, %thread, %subthread>(@my_kernel, %arg) : (!symbol.int<"arg_n">) -> ()
 }
 """,
     ).parse_module()
@@ -424,17 +512,19 @@ builtin.module {
     reparsed.verify()
     assert _print_ir(reparsed).rstrip() == printed
 
-    with pytest.raises(ParseError, match="arch.launch_kernel"):
-        Parser(
-            ctx,
-            """
+    invalid_module = Parser(
+        ctx,
+        """
 builtin.module {
   %block = "test.op"() : () -> !symbol.int<"grid_x">
   %thread = "test.op"() : () -> !symbol.int<"block_x">
-  arch.launch_kernel "my_kernel", %block, %thread : !symbol.int<"grid_x">, !symbol.int<"block_x">
+  %subthread = "test.op"() : () -> !symbol.int<"subthread_x">
+  arch.launch<%block, %thread, %subthread>("my_kernel") : () -> ()
 }
 """,
-        ).parse_module()
+    ).parse_module()
+    with pytest.raises(VerifyException, match="symbol_ref|callee must be @symbol"):
+        invalid_module.verify()
 
 
 # TC-ARCH-012

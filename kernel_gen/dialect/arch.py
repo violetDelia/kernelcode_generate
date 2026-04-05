@@ -1,14 +1,14 @@
 """Arch dialect definitions.
 
 创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
+最后一次更改: 小李飞刀
 
 功能说明:
-- 定义 arch dialect 的执行维度查询、动态片上内存入口与 kernel 启动描述 op。
+- 定义 arch dialect 的执行维度查询、动态片上内存入口、barrier 与 launch op。
 - 复用 symbol dialect 的 `!symbol.int<"expr">` 与 nn dialect 的 `nn.memory/#nn.space`。
 
 使用示例:
-- from kernel_gen.dialect.arch import Arch, ArchGetBlockIdOp, ArchLaunchKernelOp
+- from kernel_gen.dialect.arch import Arch, ArchBarrierOp, ArchGetBlockIdOp, ArchLaunchOp
 
 关联文件:
 - spec: spec/dialect/arch.md
@@ -21,9 +21,19 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import ClassVar
 
-from xdsl.dialects.builtin import ArrayAttr, IntAttr, StringAttr, i8
-from xdsl.ir import Attribute, Dialect, Operation, SSAValue
-from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def, result_def
+from xdsl.dialects.builtin import ArrayAttr, IntAttr, StringAttr, SymbolRefAttr, i8
+from xdsl.ir import Attribute, Dialect, Operation, ParametrizedAttribute, SSAValue
+from xdsl.irdl import (
+    AttrSizedOperandSegments,
+    IRDLOperation,
+    attr_def,
+    irdl_attr_definition,
+    irdl_op_definition,
+    operand_def,
+    param_def,
+    result_def,
+    var_operand_def,
+)
 from xdsl.parser import AttrParser
 from xdsl.printer import Printer
 from xdsl.utils.exceptions import VerifyException
@@ -37,6 +47,36 @@ _ERROR_TEMPLATE = "场景: {scene}; 期望: {expected}; 实际: {actual}; 建议
 _ERROR_ACTION = "请按接口约束传参"
 _ERROR_ACTUAL = "不满足期望"
 _ERROR_SCENE = "dialect.arch verifier"
+_BARRIER_SCOPE_VALUES = {"block", "thread", "subthread"}
+_BARRIER_VISIBLE_SPACES = {"tsm", "tlm"}
+
+
+def _raise_verify_error(expected: str, *, actual: str = _ERROR_ACTUAL) -> None:
+    """统一抛出 arch dialect verifier 错误。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 复用统一错误模板，保持 barrier/launch 边界短语稳定。
+
+    使用示例:
+    - _raise_verify_error("arch.launch callee must be @symbol")
+
+    关联文件:
+    - spec: spec/dialect/arch.md
+    - test: test/dialect/test_arch_dialect.py
+    - 功能实现: kernel_gen/dialect/arch.py
+    """
+
+    raise VerifyException(
+        _ERROR_TEMPLATE.format(
+            scene=_ERROR_SCENE,
+            expected=expected,
+            actual=actual,
+            action=_ERROR_ACTION,
+        )
+    )
 
 
 def _verify_symbol_int_operand(value: SSAValue, field_name: str, op_name: str) -> SymbolValueType:
@@ -99,6 +139,138 @@ def _verify_positive_static_symbol(operand_type: SymbolValueType, field_name: st
                 action=_ERROR_ACTION,
             )
         )
+
+
+def _verify_launch_callee_attr(callee: Attribute) -> SymbolRefAttr:
+    """校验 launch 的 `@callee` symbol ref 属性。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅接受无嵌套的 `@callee` 形式 `SymbolRefAttr`。
+
+    使用示例:
+    - _verify_launch_callee_attr(SymbolRefAttr("kernel_body"))
+
+    关联文件:
+    - spec: spec/dialect/arch.md
+    - test: test/dialect/test_arch_dialect.py
+    - 功能实现: kernel_gen/dialect/arch.py
+    """
+
+    if not isinstance(callee, SymbolRefAttr):
+        _raise_verify_error("arch.launch callee must be @symbol")
+    if not callee.root_reference.data:
+        _raise_verify_error("arch.launch callee must not be empty")
+    if len(callee.nested_references.data) != 0:
+        _raise_verify_error("arch.launch callee must be flat @symbol")
+    return callee
+
+
+def _verify_barrier_visibility_attr(visibility: Attribute) -> ArrayAttr[Attribute]:
+    """校验 barrier visibility 列表。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - visibility 必须是非空 `ArrayAttr`。
+    - 元素必须唯一，且必须且只能包含 `#nn.space<tsm>` 与 `#nn.space<tlm>`。
+
+    使用示例:
+    - _verify_barrier_visibility_attr(ArrayAttr([...]))
+
+    关联文件:
+    - spec: spec/dialect/arch.md
+    - test: test/dialect/test_arch_dialect.py
+    - 功能实现: kernel_gen/dialect/arch.py
+    """
+
+    if not isinstance(visibility, ArrayAttr):
+        _raise_verify_error("arch.barrier visibility must be ArrayAttr")
+    if not visibility.data:
+        _raise_verify_error("arch.barrier visibility must not be empty")
+    seen: set[str] = set()
+    for entry in visibility.data:
+        if not isinstance(entry, NnMemorySpaceAttr):
+            _raise_verify_error("arch.barrier visibility items must be #nn.space<...>")
+        space_name = entry.space.data
+        if space_name in seen:
+            _raise_verify_error("arch.barrier visibility must not contain duplicates")
+        seen.add(space_name)
+        if space_name not in _BARRIER_VISIBLE_SPACES:
+            _raise_verify_error("arch.barrier visibility must contain only #nn.space<tsm>/#nn.space<tlm>")
+    if seen != _BARRIER_VISIBLE_SPACES:
+        _raise_verify_error("arch.barrier visibility must contain both #nn.space<tsm> and #nn.space<tlm>")
+    return visibility
+
+
+@irdl_attr_definition
+class ArchScopeAttr(ParametrizedAttribute):
+    """表示 `arch.barrier` 的 scope 属性。"""
+
+    name = "arch.scope"
+
+    scope: StringAttr = param_def(StringAttr)
+
+    @classmethod
+    def parse_parameters(cls: type["ArchScopeAttr"], parser: AttrParser) -> Sequence[Attribute]:
+        """解析 arch.scope 参数。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 支持 `#arch.scope<block>` / `thread` / `subthread>` 的文本。
+
+        使用示例:
+        - ArchScopeAttr.parse_parameters(parser)
+
+        关联文件:
+        - spec: spec/dialect/arch.md
+        - test: test/dialect/test_arch_dialect.py
+        - 功能实现: kernel_gen/dialect/arch.py
+        """
+
+        parser.parse_punctuation("<", "Expected '<' for arch.scope.")
+        scope_name = parser.parse_identifier("Expected arch scope name.")
+        parser.parse_punctuation(">", "Expected '>' for arch.scope.")
+        return (StringAttr(scope_name),)
+
+    def print_parameters(self: "ArchScopeAttr", printer: Printer) -> None:
+        """打印 arch.scope 参数。"""
+
+        printer.print_string("<")
+        printer.print_string(self.scope.data)
+        printer.print_string(">")
+
+    def verify(self: "ArchScopeAttr") -> None:
+        """校验 arch.scope 参数。"""
+
+        if self.scope.data not in _BARRIER_SCOPE_VALUES:
+            _raise_verify_error("arch.scope must be block/thread/subthread")
+
+    @classmethod
+    def from_name(cls: type["ArchScopeAttr"], name: str) -> "ArchScopeAttr":
+        """按名称构造 arch.scope 属性。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 为测试与实现提供统一的构造入口。
+
+        使用示例:
+        - ArchScopeAttr.from_name("block")
+
+        关联文件:
+        - spec: spec/dialect/arch.md
+        - test: test/dialect/test_arch_dialect.py
+        - 功能实现: kernel_gen/dialect/arch.py
+        """
+
+        return cls(StringAttr(name))
 
 
 def _dynamic_memory_result_type(space: NnMemorySpaceAttr) -> NnMemoryType:
@@ -453,33 +625,29 @@ class ArchGetDynamicMemoryOp(IRDLOperation):
 
 
 @irdl_op_definition
-class ArchLaunchKernelOp(IRDLOperation):
-    """描述一次三层执行维度的 kernel 启动请求。"""
+class ArchBarrierOp(IRDLOperation):
+    """描述一次 block 级 barrier。"""
 
-    name = "arch.launch_kernel"
+    name = "arch.barrier"
 
-    block = operand_def(Attribute)
-    thread = operand_def(Attribute)
-    subthread = operand_def(Attribute)
-    kernel_name = attr_def(StringAttr)
+    scope = attr_def(ArchScopeAttr)
+    visibility = attr_def(ArrayAttr)
 
     def __init__(
-        self: "ArchLaunchKernelOp",
-        kernel_name: str | StringAttr,
-        block: SSAValue | Operation,
-        thread: SSAValue | Operation,
-        subthread: SSAValue | Operation,
+        self: "ArchBarrierOp",
+        scope: ArchScopeAttr,
+        visibility: ArrayAttr[Attribute],
     ) -> None:
-        """初始化 arch.launch_kernel。
+        """初始化 arch.barrier。
 
-        创建者: 朽木露琪亚
-        最后一次更改: 朽木露琪亚
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
 
         功能说明:
-        - 记录 kernel 名称与 block/thread/subthread 三层启动维度。
+        - 记录 barrier 的 scope 与 visibility。
 
         使用示例:
-        - ArchLaunchKernelOp("my_kernel", block, thread, subthread)
+        - ArchBarrierOp(ArchScopeAttr.from_name("block"), ArrayAttr([...]))
 
         关联文件:
         - spec: spec/dialect/arch.md
@@ -487,23 +655,20 @@ class ArchLaunchKernelOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/arch.py
         """
 
-        name_attr = kernel_name if isinstance(kernel_name, StringAttr) else StringAttr(kernel_name)
-        super().__init__(
-            operands=[block, thread, subthread],
-            attributes={"kernel_name": name_attr},
-        )
+        super().__init__(attributes={"scope": scope, "visibility": visibility})
 
-    def verify_(self: "ArchLaunchKernelOp") -> None:
-        """校验 arch.launch_kernel 输入约束。
+    def verify_(self: "ArchBarrierOp") -> None:
+        """校验 arch.barrier 输入约束。
 
-        创建者: 朽木露琪亚
-        最后一次更改: 我不是牛马
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
 
         功能说明:
-        - 校验 kernel 名称与启动维度，并在启用 target registry 时执行支持性检查。
+        - 校验 scope 固定为 `#arch.scope<block>`。
+        - 校验 visibility 为唯一且完整的 `[tsm, tlm]`。
 
         使用示例:
-        - ArchLaunchKernelOp("kernel", block, thread, subthread).verify()
+        - ArchBarrierOp(...).verify()
 
         关联文件:
         - spec: spec/dialect/arch.md
@@ -512,60 +677,165 @@ class ArchLaunchKernelOp(IRDLOperation):
         """
 
         _verify_target_registry_support(self.name)
-        if not self.kernel_name.data:
-            raise VerifyException(
-                _ERROR_TEMPLATE.format(
-                    scene=_ERROR_SCENE,
-                    expected="arch.launch_kernel kernel name must not be empty",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
-                )
-            )
+        self.scope.verify()
+        if self.scope.scope.data != "block":
+            _raise_verify_error("arch.barrier scope must be #arch.scope<block>")
+        _verify_barrier_visibility_attr(self.visibility)
+
+    def print(self: "ArchBarrierOp", printer: Printer) -> None:
+        """打印 arch.barrier 自定义文本语法。"""
+
+        printer.print_string(" {scope = ")
+        printer.print_attribute(self.scope)
+        printer.print_string(", visibility = ")
+        printer.print_attribute(self.visibility)
+        printer.print_string("}")
+
+    @classmethod
+    def parse(cls: type["ArchBarrierOp"], parser: AttrParser) -> "ArchBarrierOp":
+        """解析 arch.barrier 自定义文本语法。"""
+
+        parser.parse_punctuation("{", "Expected '{' in arch.barrier.")
+        if parser.parse_identifier("Expected `scope` in arch.barrier.") != "scope":
+            _raise_verify_error("arch.barrier must print scope before visibility")
+        parser.parse_punctuation("=", "Expected '=' after scope.")
+        scope = parser.parse_attribute()
+        parser.parse_punctuation(",", "Expected ',' between scope and visibility.")
+        if parser.parse_identifier("Expected `visibility` in arch.barrier.") != "visibility":
+            _raise_verify_error("arch.barrier must contain visibility attribute")
+        parser.parse_punctuation("=", "Expected '=' after visibility.")
+        visibility = parser.parse_attribute()
+        parser.parse_punctuation("}", "Expected '}' at end of arch.barrier.")
+        return cls(scope, visibility)
+
+
+@irdl_op_definition
+class ArchLaunchOp(IRDLOperation):
+    """描述一次三层执行维度的 kernel 启动请求。"""
+
+    name = "arch.launch"
+
+    block = operand_def(Attribute)
+    thread = operand_def(Attribute)
+    subthread = operand_def(Attribute)
+    args = var_operand_def(Attribute)
+    callee = attr_def(SymbolRefAttr)
+
+    irdl_options = [AttrSizedOperandSegments(as_property=True)]
+
+    def __init__(
+        self: "ArchLaunchOp",
+        callee: str | Attribute,
+        block: SSAValue | Operation,
+        thread: SSAValue | Operation,
+        subthread: SSAValue | Operation,
+        args: Sequence[SSAValue | Operation] = (),
+    ) -> None:
+        """初始化 arch.launch。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 记录 `@callee`、block/thread/subthread 与尾部 args。
+
+        使用示例:
+        - ArchLaunchOp("my_kernel", block, thread, subthread, (lhs, rhs, out))
+
+        关联文件:
+        - spec: spec/dialect/arch.md
+        - test: test/dialect/test_arch_dialect.py
+        - 功能实现: kernel_gen/dialect/arch.py
+        """
+
+        callee_attr = SymbolRefAttr(callee) if isinstance(callee, str) else callee
+        super().__init__(
+            operands=[block, thread, subthread, list(args)],
+            attributes={"callee": callee_attr},
+        )
+
+    def verify_(self: "ArchLaunchOp") -> None:
+        """校验 arch.launch 输入约束。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 校验 `@callee` 与三层 extent。
+        - extent 必须是 `!symbol.int<...>` 且静态已知时必须 `> 0`。
+
+        使用示例:
+        - ArchLaunchOp("kernel", block, thread, subthread).verify()
+
+        关联文件:
+        - spec: spec/dialect/arch.md
+        - test: test/dialect/test_arch_dialect.py
+        - 功能实现: kernel_gen/dialect/arch.py
+        """
+
+        _verify_target_registry_support(self.name)
+        _verify_launch_callee_attr(self.callee)
 
         for field_name in ("block", "thread", "subthread"):
             operand_value = SSAValue.get(getattr(self, field_name))
             operand_type = _verify_symbol_int_operand(operand_value, field_name, self.name)
             _verify_positive_static_symbol(operand_type, field_name, self.name)
 
-    def print(self: "ArchLaunchKernelOp", printer: Printer) -> None:
-        """打印 arch.launch_kernel 自定义文本语法。"""
+    def print(self: "ArchLaunchOp", printer: Printer) -> None:
+        """打印 arch.launch 自定义文本语法。"""
 
-        printer.print_string(" ")
-        printer.print_string_literal(self.kernel_name.data)
-        printer.print_string(", ")
+        printer.print_string("<")
         printer.print_ssa_value(self.block)
         printer.print_string(", ")
         printer.print_ssa_value(self.thread)
         printer.print_string(", ")
         printer.print_ssa_value(self.subthread)
-        printer.print_string(" : ")
-        printer.print_attribute(SSAValue.get(self.block).type)
-        printer.print_string(", ")
-        printer.print_attribute(SSAValue.get(self.thread).type)
-        printer.print_string(", ")
-        printer.print_attribute(SSAValue.get(self.subthread).type)
+        printer.print_string(">(")
+        printer.print_attribute(self.callee)
+        for operand in self.args:
+            printer.print_string(", ")
+            printer.print_ssa_value(SSAValue.get(operand))
+        printer.print_string(") : (")
+        for index, operand in enumerate(self.args):
+            if index:
+                printer.print_string(", ")
+            printer.print_attribute(SSAValue.get(operand).type)
+        printer.print_string(") -> ()")
 
     @classmethod
-    def parse(cls: type["ArchLaunchKernelOp"], parser: AttrParser) -> "ArchLaunchKernelOp":
-        """解析 arch.launch_kernel 自定义文本语法。"""
+    def parse(cls: type["ArchLaunchOp"], parser: AttrParser) -> "ArchLaunchOp":
+        """解析 arch.launch 自定义文本语法。"""
 
-        kernel_name = parser.parse_str_literal("Expected launch kernel name.")
-        parser.parse_characters(",", f" in {cls.name}")
-        unresolved_block = parser.parse_unresolved_operand()
-        parser.parse_characters(",", f" in {cls.name}")
-        unresolved_thread = parser.parse_unresolved_operand()
-        parser.parse_characters(",", f" in {cls.name}")
-        unresolved_subthread = parser.parse_unresolved_operand()
-        parser.parse_characters(":", f" in {cls.name}")
-        block_type = parser.parse_type()
-        parser.parse_characters(",", f" in {cls.name} type list")
-        thread_type = parser.parse_type()
-        parser.parse_characters(",", f" in {cls.name} type list")
-        subthread_type = parser.parse_type()
-        block = parser.resolve_operand(unresolved_block, block_type)
-        thread = parser.resolve_operand(unresolved_thread, thread_type)
-        subthread = parser.resolve_operand(unresolved_subthread, subthread_type)
-        return cls(kernel_name, block, thread, subthread)
+        parser.parse_punctuation("<", f"Expected '<' in {cls.name}.")
+        block = parser.parse_operand("Expected block extent operand.")
+        parser.parse_punctuation(",", f"Expected ',' after block extent in {cls.name}.")
+        thread = parser.parse_operand("Expected thread extent operand.")
+        parser.parse_punctuation(",", f"Expected ',' after thread extent in {cls.name}.")
+        subthread = parser.parse_operand("Expected subthread extent operand.")
+        parser.parse_punctuation(">", f"Expected '>' after extents in {cls.name}.")
+        parser.parse_punctuation("(", f"Expected '(' before callee in {cls.name}.")
+        callee = parser.parse_attribute()
+        args: list[SSAValue] = []
+        if parser.parse_optional_punctuation(",") is not None:
+            args.append(parser.parse_operand("Expected launch argument operand."))
+            while parser.parse_optional_punctuation(",") is not None:
+                args.append(parser.parse_operand("Expected launch argument operand."))
+        parser.parse_punctuation(")", f"Expected ')' after callee/args in {cls.name}.")
+        parser.parse_punctuation(":", f"Expected ':' before function type in {cls.name}.")
+        arg_types = parser.parse_comma_separated_list(parser.Delimiter.PAREN, parser.parse_type)
+        parser.parse_punctuation("->", f"Expected '-> ()' in {cls.name}.")
+        result_types = parser.parse_comma_separated_list(parser.Delimiter.PAREN, parser.parse_type)
+        if result_types:
+            _raise_verify_error("arch.launch result types must be ()")
+        if len(arg_types) != len(args):
+            _raise_verify_error("arch.launch arg type list must match operand count")
+        for operand, operand_type in zip(args, arg_types, strict=True):
+            if SSAValue.get(operand).type != operand_type:
+                _raise_verify_error("arch.launch arg types must match operand types")
+        return cls(callee, block, thread, subthread, args)
+
+
+ArchLaunchKernelOp = ArchLaunchOp
 
 
 Arch = Dialect(
@@ -578,13 +848,15 @@ Arch = Dialect(
         ArchGetSubthreadIdOp,
         ArchGetSubthreadNumOp,
         ArchGetDynamicMemoryOp,
-        ArchLaunchKernelOp,
+        ArchBarrierOp,
+        ArchLaunchOp,
     ],
-    [],
+    [ArchScopeAttr],
 )
 
 __all__ = [
     "Arch",
+    "ArchScopeAttr",
     "ArchGetBlockIdOp",
     "ArchGetBlockNumOp",
     "ArchGetThreadIdOp",
@@ -592,5 +864,7 @@ __all__ = [
     "ArchGetSubthreadIdOp",
     "ArchGetSubthreadNumOp",
     "ArchGetDynamicMemoryOp",
+    "ArchBarrierOp",
+    "ArchLaunchOp",
     "ArchLaunchKernelOp",
 ]
