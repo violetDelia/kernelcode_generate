@@ -293,4 +293,9 @@
 - gate：
   - `PYTHONPATH=. pytest -q test/pass/test_dma_memory_hierarchy.py test/pass/test_pass_manager.py`
   - 关键输出：`12 passed in 0.35s`；exit=0
-结论：gate 通过，可合并收口；合并提交/push/cleanup 证据由合并执行补齐。
+结论：已合并收口。
+合并提交：27871e8
+push(main)：`timeout 60 git push origin main`；exit=0
+cleanup：
+- `git worktree remove wt-20260405-dma-memory-hierarchy-s1 --force`（成功）
+- `git branch -D T-20260405-8336ef1f`（成功）
