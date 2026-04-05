@@ -5,7 +5,9 @@
 
 功能说明:
 - 收口公开 DMA 分支的访存分析逻辑。
-- 为 `dma.copy/load/store/slice` 统一生成 `MemoryPath`、`bytes`、`latency_ns`、`bandwidth` 与 `time_ns`。
+- 为 `dma.copy/load/store/slice/deslice/cast` 统一生成 `MemoryPath`、`bytes`、`latency_ns`、`bandwidth` 与 `time_ns`。
+- `dma.alloc/free/view/reshape` 视为零成本元数据或生命周期 op。
+- `dma.fill` 仅统计 target 写入，标量来源不记 memory item。
 - 写死 unknown / DMA 分支策略：公开 DMA 前置条件非法时报 `hard error`，未公开 DMA 分支返回 `None` 交由上层 `skip + warning`。
 
 使用示例:
@@ -27,7 +29,21 @@ import sympy as sp
 from xdsl.ir import Attribute, Operation, SSAValue
 from xdsl.utils.exceptions import VerifyException
 
-from kernel_gen.dialect.dma import DmaCopyOp, DmaLoadOp, DmaSliceOp, DmaStoreOp
+from kernel_gen.analysis.compute import dma as _dma_compute
+from kernel_gen.dialect.dma import (
+    DmaAllocOp,
+    DmaCastOp,
+    DmaCopyOp,
+    DmaDesliceOp,
+    DmaFillOp,
+    DmaFreeOp,
+    DmaLoadOp,
+    DmaReshapeOp,
+    DmaSliceOp,
+    DmaStoreOp,
+    DmaViewOp,
+    _is_contiguous,
+)
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolValueType
 
@@ -41,7 +57,19 @@ _SPACE_TOKENS = {
     "tlm": "TLM",
 }
 
-PUBLIC_DMA_OPS = (DmaCopyOp, DmaLoadOp, DmaStoreOp, DmaSliceOp)
+PUBLIC_DMA_OPS = (
+    DmaAllocOp,
+    DmaFreeOp,
+    DmaFillOp,
+    DmaCopyOp,
+    DmaLoadOp,
+    DmaStoreOp,
+    DmaSliceOp,
+    DmaDesliceOp,
+    DmaViewOp,
+    DmaReshapeOp,
+    DmaCastOp,
+)
 
 
 @dataclass(frozen=True)
@@ -324,7 +352,7 @@ def analyze_dma_op(
     最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 当前公开并承接：`dma.copy`、`dma.load`、`dma.store`、`dma.slice`。
+    - 当前公开并承接：`dma.alloc/free/fill/copy/load/store/slice/deslice/view/reshape/cast`。
     - 当前未公开 DMA 分支返回 `None`，由上层按 `skip + warning` 处理。
     - 公开 DMA 前置条件非法时，直接抛出异常作为 `hard error`。
 
@@ -337,6 +365,81 @@ def analyze_dma_op(
     - 功能实现: kernel_gen/analysis/memory/dma.py
     """
 
+    if isinstance(op, DmaAllocOp):
+        result = op.result
+        if not isinstance(result.type, NnMemoryType):
+            raise ValueError("dma.alloc result must be nn.memory")
+        if not _is_contiguous(result.type):
+            return None
+        _verify_public_dma_op(op)
+        return DmaMemoryAnalysis(
+            op_name=op.name,
+            memory_items=(),
+            read_bytes=sp.Integer(0),
+            write_bytes=sp.Integer(0),
+        )
+    if isinstance(op, DmaFreeOp):
+        _verify_public_dma_op(op)
+        return DmaMemoryAnalysis(
+            op_name=op.name,
+            memory_items=(),
+            read_bytes=sp.Integer(0),
+            write_bytes=sp.Integer(0),
+        )
+    if isinstance(op, DmaViewOp):
+        _verify_public_dma_op(op)
+        source = op.source
+        result = op.result
+        if not isinstance(source.type, NnMemoryType) or not isinstance(result.type, NnMemoryType):
+            raise ValueError("dma.view source/result must be nn.memory")
+        return DmaMemoryAnalysis(
+            op_name=op.name,
+            memory_items=(),
+            read_bytes=sp.Integer(0),
+            write_bytes=sp.Integer(0),
+        )
+    if isinstance(op, DmaReshapeOp):
+        _verify_public_dma_op(op)
+        source = op.source
+        result = op.result
+        if not isinstance(source.type, NnMemoryType) or not isinstance(result.type, NnMemoryType):
+            raise ValueError("dma.reshape source/result must be nn.memory")
+        return DmaMemoryAnalysis(
+            op_name=op.name,
+            memory_items=(),
+            read_bytes=sp.Integer(0),
+            write_bytes=sp.Integer(0),
+        )
+    if isinstance(op, DmaFillOp):
+        _verify_public_dma_op(op)
+        target = op.target
+        if not isinstance(target.type, NnMemoryType):
+            raise ValueError("dma.fill target must be nn.memory")
+        numel = _numel_from_mem_type(target.type)
+        if numel is None:
+            raise ValueError("dma.fill shape unsupported")
+        elem_size = _element_size(target.type.element_type, dtype_size_overrides)
+        if elem_size is None:
+            raise ValueError("dma.fill dtype unsupported")
+        bytes_expr = numel * sp.Integer(elem_size)
+        path_text = f"compute->{_space_token_from_mem_type(target.type)}"
+        path = normalize_memory_path(path_text)
+        items = (
+            _build_memory_item_tuple(
+                path,
+                "write",
+                bytes_expr,
+                path_latency_ns=path_latency_ns,
+                path_bandwidth=path_bandwidth,
+            ),
+        )
+        return DmaMemoryAnalysis(
+            op_name=op.name,
+            memory_items=items,
+            read_bytes=sp.Integer(0),
+            write_bytes=bytes_expr,
+            direct_writes=((target, bytes_expr),),
+        )
     if isinstance(op, DmaCopyOp):
         _verify_public_dma_op(op)
         source = op.source
@@ -446,6 +549,66 @@ def analyze_dma_op(
             write_bytes=bytes_expr,
             value_reads=((source, bytes_expr),),
             direct_writes=((target, bytes_expr),),
+        )
+    if isinstance(op, DmaDesliceOp):
+        source = op.source
+        target = op.target
+        if not isinstance(source.type, NnMemoryType) or not isinstance(target.type, NnMemoryType):
+            raise ValueError("dma.deslice source/target must be nn.memory")
+        if not _is_contiguous(target.type):
+            return None
+        _verify_public_dma_op(op)
+        numel = _numel_from_symbol_values(op.sizes)
+        if numel is None:
+            numel = _numel_from_mem_type(source.type)
+        if numel is None:
+            raise ValueError("dma.deslice sizes unsupported")
+        elem_size = _element_size(source.type.element_type, dtype_size_overrides)
+        if elem_size is None:
+            raise ValueError("dma.deslice dtype unsupported")
+        bytes_expr = numel * sp.Integer(elem_size)
+        path = _memory_path_from_types(source.type, target.type)
+        items = (
+            _build_memory_item_tuple(path, "read", bytes_expr, path_latency_ns=path_latency_ns, path_bandwidth=path_bandwidth),
+            _build_memory_item_tuple(path, "write", bytes_expr, path_latency_ns=path_latency_ns, path_bandwidth=path_bandwidth),
+        )
+        return DmaMemoryAnalysis(
+            op_name=op.name,
+            memory_items=items,
+            read_bytes=bytes_expr,
+            write_bytes=bytes_expr,
+            value_reads=((source, bytes_expr),),
+            direct_writes=((target, bytes_expr),),
+        )
+    if isinstance(op, DmaCastOp):
+        _verify_public_dma_op(op)
+        source = op.source
+        result = op.result
+        if not isinstance(source.type, NnMemoryType) or not isinstance(result.type, NnMemoryType):
+            raise ValueError("dma.cast source/result must be nn.memory")
+        numel = _numel_from_mem_type(result.type)
+        if numel is None:
+            raise ValueError("dma.cast result shape unsupported")
+        source_elem_size = _element_size(source.type.element_type, dtype_size_overrides)
+        if source_elem_size is None:
+            raise ValueError("dma.cast source dtype unsupported")
+        result_elem_size = _element_size(result.type.element_type, dtype_size_overrides)
+        if result_elem_size is None:
+            raise ValueError("dma.cast result dtype unsupported")
+        read_bytes = numel * sp.Integer(source_elem_size)
+        write_bytes = numel * sp.Integer(result_elem_size)
+        path = _memory_path_from_types(source.type, result.type)
+        items = (
+            _build_memory_item_tuple(path, "read", read_bytes, path_latency_ns=path_latency_ns, path_bandwidth=path_bandwidth),
+            _build_memory_item_tuple(path, "write", write_bytes, path_latency_ns=path_latency_ns, path_bandwidth=path_bandwidth),
+        )
+        return DmaMemoryAnalysis(
+            op_name=op.name,
+            memory_items=items,
+            read_bytes=read_bytes,
+            write_bytes=write_bytes,
+            value_reads=((source, read_bytes),),
+            result_write_bytes=write_bytes,
         )
     return None
 
