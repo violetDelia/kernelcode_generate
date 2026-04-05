@@ -1,7 +1,7 @@
 """buffer-results-to-out-params pass tests.
 
 创建者: 朽木露琪亚
-最后一次更改: 金铲铲大作战
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 覆盖 buffer-results-to-out-params pass 的最小骨架行为与失败边界。
@@ -451,3 +451,97 @@ def test_rewrite_mixed_memory_and_scalar_results_preserves_scalar_return() -> No
     assert rewritten_call.results[0].type == i32
     assert rewritten_fill.target == alloc_op.result
     assert rewritten_return.arguments[0] == rewritten_call.results[0]
+
+
+# BROTP-008
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-05 03:56:00 +0800
+# 最近一次运行成功时间: 2026-04-05 03:56:00 +0800
+# 功能说明: 验证 multi-block function 会被显式拒绝。
+# 测试目的: 锁定仅支持单 block 的边界，避免 CFG/分支场景被误改写。
+# 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_rejects_multi_block_function
+# 对应功能实现文件路径: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+# 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
+# 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
+def test_rewrite_rejects_multi_block_function() -> None:
+    mem_type = _make_memory_type()
+    block0 = Block(arg_types=[mem_type])
+    block0.add_op(func.ReturnOp(block0.args[0]))
+    block1 = Block()
+    func_op = func.FuncOp(
+        "multi_block",
+        FunctionType.from_lists([mem_type], [mem_type]),
+        Region([block0, block1]),
+        arg_attrs=_arg_attrs("src"),
+    )
+    module = ModuleOp([func_op])
+
+    with pytest.raises(BufferResultsToOutParamsError, match="single-block"):
+        BufferResultsToOutParamsPass().run(module)
+
+
+# BROTP-009
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-05 03:56:00 +0800
+# 最近一次运行成功时间: 2026-04-05 03:56:00 +0800
+# 功能说明: 验证 return operand 个数与 outputs 不一致会被显式拒绝。
+# 测试目的: 锁定 return/output arity mismatch 的边界诊断。
+# 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_rejects_return_arity_mismatch
+# 对应功能实现文件路径: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+# 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
+# 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
+def test_rewrite_rejects_return_arity_mismatch() -> None:
+    mem_type = _make_memory_type()
+    block = Block(arg_types=[mem_type])
+    block.add_op(func.ReturnOp())
+    func_op = func.FuncOp(
+        "return_mismatch",
+        FunctionType.from_lists([mem_type], [mem_type]),
+        Region(block),
+        arg_attrs=_arg_attrs("src"),
+    )
+    module = ModuleOp([func_op])
+
+    with pytest.raises(BufferResultsToOutParamsError, match="return operand count"):
+        BufferResultsToOutParamsPass().run(module)
+
+
+# BROTP-010
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-05 03:56:00 +0800
+# 最近一次运行成功时间: 2026-04-05 03:56:00 +0800
+# 功能说明: 验证 callsite 与 callee 签名不一致会显式失败。
+# 测试目的: 锁定 callsite mismatch 不允许静默通过或部分改写。
+# 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_rejects_callsite_signature_mismatch
+# 对应功能实现文件路径: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+# 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
+# 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
+def test_rewrite_rejects_callsite_signature_mismatch() -> None:
+    mem_type = _make_memory_type()
+
+    callee_block = Block(arg_types=[mem_type])
+    callee_block.add_op(func.ReturnOp(callee_block.args[0]))
+    callee = func.FuncOp(
+        "callee",
+        FunctionType.from_lists([mem_type], [mem_type]),
+        Region(callee_block),
+        arg_attrs=_arg_attrs("src"),
+    )
+
+    caller_block = Block(arg_types=[mem_type])
+    call_op = func.CallOp("callee", [caller_block.args[0]], [])
+    caller_block.add_ops([call_op, func.ReturnOp()])
+    caller = func.FuncOp(
+        "caller",
+        FunctionType.from_lists([mem_type], []),
+        Region(caller_block),
+        arg_attrs=_arg_attrs("src"),
+    )
+
+    module = ModuleOp([callee, caller])
+
+    with pytest.raises(BufferResultsToOutParamsError, match="half-rewritten"):
+        BufferResultsToOutParamsPass().run(module)
