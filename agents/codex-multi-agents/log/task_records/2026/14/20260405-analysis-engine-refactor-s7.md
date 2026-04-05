@@ -98,4 +98,4 @@
 - 复跑 gate（证据）：
   - `PYTHONPATH=. pytest -q test/analysis/test_analysis.py test/pass/test_analysis_func_cost.py test/pass/test_pass_manager.py`
   - 结果：`93 passed in 0.60s`（exit=0）
-结论：gate 复跑通过，可执行合并收口（合并提交/push/cleanup/远端确认信息由合并执行结果补齐）。
+结论：gate 复跑通过，已完成合并收口并推送；合并提交=3178086（main）；push=exit=0；cleanup=git worktree remove wt-20260405-analysis-engine-refactor-s7 --force；git branch -D T-20260405-847a0700。
