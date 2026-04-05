@@ -1,20 +1,22 @@
 """NN operation API.
 
 创建者: 金铲铲大作战
-最后一次更改: 我不是牛马
+最后一次更改: 小李飞刀
 
 功能说明:
 - 提供 Memory 的逐元素算术、比较与显式 broadcast 运算 API。
 - 提供常用激活函数（relu/leaky_relu/sigmoid/tanh/hard_sigmoid/exp）API。
 - 提供 reduce_sum/reduce_min/reduce_max 的高层归约 API。
+- 提供 transpose 的轴重排 API。
 
 使用示例:
-- from kernel_gen.operation.nn import add, broadcast, eq, relu, exp, reduce_sum
+- from kernel_gen.operation.nn import add, broadcast, eq, relu, exp, reduce_sum, transpose
 - result = add(mem, 1)
 - activated = relu(mem)
 - exponent = exp(mem)
 - reduced = reduce_sum(mem, axis=1, keepdim=True)
 - expanded = broadcast(mem, Memory(["M", "N"], NumericType.Float32))
+- transposed = transpose(mem, perm=[1, 0])
 
 关联文件:
 - spec: spec/operation/nn.md
@@ -2511,6 +2513,112 @@ def broadcast_to(source: object, target_shape: object, space: object) -> Memory:
     )
 
 
+def _normalize_transpose_perm(perm: object, rank: int) -> list[int]:
+    """规范化 transpose 的 perm 参数。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 要求 perm 为非字符串序列，且元素必须是 int 但不能是 bool。
+    - 要求 perm 长度与输入 rank 一致，并且是 `0..rank-1` 的排列。
+
+    使用示例:
+    - _normalize_transpose_perm([1, 0], rank=2)
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    if isinstance(perm, (str, bytes)) or not isinstance(perm, Sequence):
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.transpose 参数校验",
+                expected="transpose perm must be a sequence of int",
+                actual=type(perm).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
+
+    normalized_perm = list(perm)
+    if len(normalized_perm) != rank:
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.transpose 参数校验",
+                expected="transpose perm length must equal input rank",
+                actual=f"perm_len={len(normalized_perm)} rank={rank}",
+                action=_ERROR_ACTION,
+            )
+        )
+
+    for index, axis in enumerate(normalized_perm):
+        if isinstance(axis, bool) or not isinstance(axis, int):
+            raise TypeError(
+                _ERROR_TEMPLATE.format(
+                    scene="nn.transpose 参数校验",
+                    expected="transpose perm element must be int",
+                    actual=f"index={index} type={type(axis).__name__}",
+                    action=_ERROR_ACTION,
+                )
+            )
+
+    if sorted(normalized_perm) != list(range(rank)):
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.transpose 参数校验",
+                expected="transpose perm must be a permutation of input axes",
+                actual=f"perm={normalized_perm} rank={rank}",
+                action=_ERROR_ACTION,
+            )
+        )
+
+    return normalized_perm
+
+
+def transpose(value: object, perm: object) -> Memory:
+    """按指定 perm 重排 Memory 的轴顺序。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅接受 Memory 输入，输出保留输入的 dtype/space/format。
+    - 按 perm 同步重排 shape 与 stride。
+    - 对非法 perm 长度、元素类型或非排列情形直接报错。
+
+    使用示例:
+    - transpose(Memory([2, 3], NumericType.Float32), perm=[1, 0])
+
+    关联文件:
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn.py
+    - 功能实现: kernel_gen/operation/nn.py
+    """
+    if not isinstance(value, Memory):
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.transpose 参数校验",
+                expected="transpose value must be Memory",
+                actual=type(value).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
+
+    perm_values = _normalize_transpose_perm(perm, rank=len(value.shape))
+    shape_dims = value.shape.get_shape()
+    stride_dims = value.stride.get_shape()
+    transposed_shape = SymbolShape([shape_dims[index] for index in perm_values])
+    transposed_stride = SymbolShape([stride_dims[index] for index in perm_values])
+    return Memory(
+        transposed_shape,
+        value.dtype,
+        space=value.space,
+        stride=transposed_stride,
+        format=value.format,
+    )
+
+
 __all__ = [
     "add",
     "sub",
@@ -2537,4 +2645,5 @@ __all__ = [
     "img2col2d",
     "broadcast",
     "broadcast_to",
+    "transpose",
 ]

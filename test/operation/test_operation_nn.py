@@ -1,11 +1,12 @@
 """nn operation API tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 kernel_gen/operation/nn.py 的逐元素算术、比较、激活与归约 API。
 - 覆盖显式广播、矩阵乘与卷积等操作的主要约束与错误路径。
+- 覆盖 transpose helper 的轴重排与参数校验。
 
 使用示例:
 - pytest -q test/operation/test_operation_nn.py
@@ -65,6 +66,7 @@ from kernel_gen.operation.nn import (
     softmax,
     sub,
     tanh,
+    transpose,
     truediv,
 )
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
@@ -1505,3 +1507,73 @@ def test_nn_reduce_min_max_empty_extent_error() -> None:
         _ = reduce_min(empty_axis, axis=0)
     with pytest.raises(ValueError):
         _ = reduce_max(empty_axis, axis=None)
+
+
+# OP-TP-001
+# 创建者: jcc你莫辜负
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-05 16:19:19 +0800
+# 最近一次运行成功时间: 2026-04-05 16:19:19 +0800
+# 测试目的: 验证 transpose 正例可按 perm 重排 shape/stride 并保留 dtype/space/format。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_transpose_success
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_transpose_success() -> None:
+    value = Memory([2, 3, 4], NumericType.Float16, space=MemorySpace.LM, stride=[12, 4, 1], format=Farmat.CLast)
+    result = transpose(value, perm=[2, 0, 1])
+    assert result.shape.get_values() == [4, 2, 3]
+    assert result.get_stride() == [1, 12, 4]
+    assert result.dtype is NumericType.Float16
+    assert result.space is MemorySpace.LM
+    assert result.format is Farmat.CLast
+
+
+# OP-TP-002
+# 创建者: jcc你莫辜负
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-05 16:19:19 +0800
+# 最近一次运行成功时间: 2026-04-05 16:19:19 +0800
+# 测试目的: 验证 transpose perm 长度不匹配或非排列时抛 ValueError。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_transpose_invalid_perm_values
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_transpose_invalid_perm_values() -> None:
+    value = Memory([2, 3], NumericType.Float32)
+    with pytest.raises(ValueError):
+        _ = transpose(value, perm=[0, 1, 2])
+    with pytest.raises(ValueError):
+        _ = transpose(value, perm=[0, 0])
+
+
+# OP-TP-003
+# 创建者: jcc你莫辜负
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-05 16:19:19 +0800
+# 最近一次运行成功时间: 2026-04-05 16:19:19 +0800
+# 测试目的: 验证 transpose perm 元素类型非法时抛 TypeError。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_transpose_invalid_perm_type
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_transpose_invalid_perm_type() -> None:
+    value = Memory([2, 3], NumericType.Float32)
+    with pytest.raises(TypeError):
+        _ = transpose(value, perm=[0, "1"])
+    with pytest.raises(TypeError):
+        _ = transpose(value, perm=[0, True])
+
+
+# OP-TP-004
+# 创建者: jcc你莫辜负
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-05 16:19:19 +0800
+# 最近一次运行成功时间: 2026-04-05 16:19:19 +0800
+# 测试目的: 验证 transpose 通过 __all__ 导出。
+# 使用示例: pytest -q test/operation/test_operation_nn.py -k test_nn_transpose_exported_in_all
+# 对应功能实现文件路径: kernel_gen/operation/nn.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn.py
+def test_nn_transpose_exported_in_all() -> None:
+    assert "transpose" in operation_nn.__all__
