@@ -1,6 +1,7 @@
 /*
 功能说明:
 - 定义 npu_demo 后端私有 KernelContext 头文件接口，提供固定硬件模板下的 id/count 查询与动态片上内存查询。
+- 作为 npu_demo 单入口 include，透传 include/api/Memory.h、Dma.h、Nn.h 并汇聚后端实现。
 
 使用示例:
 - #include "include/npu_demo/npu_demo.h"
@@ -9,7 +10,7 @@
 - auto tsm = ctx.get_dynamic_memory<float>(npu_demo::MemorySpace::TSM);
 
 创建者: 朽木露琪亚
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
@@ -23,9 +24,12 @@
 #include <stdexcept>
 
 #include "include/api/Memory.h"
+#include "include/api/Dma.h"
+#include "include/api/Nn.h"
 #include "include/npu_demo/Core.h"
-#include "include/npu_demo/Dma.h"
 #include "include/npu_demo/Memory.h"
+#include "include/npu_demo/Dma.h"
+#include "include/npu_demo/Nn.h"
 
 namespace npu_demo {
 
@@ -84,48 +88,6 @@ inline void throw_zero_sized_memory(const char* message) {
 }
 
 }  // namespace detail
-
-/*
-功能说明:
-- 对两个内存视图执行逐元素加法，结果写入输出视图，当前优先覆盖 1-D 子集。
-
-使用示例:
-- Status status = npu_demo::add(lhs, rhs, out);
-
-创建者: 金铲铲大作战
-最后修改人: 金铲铲大作战
-
-关联文件:
-- spec: [spec/include/api/Nn.md](spec/include/api/Nn.md)
-- test: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
-- 功能实现: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
-*/
-template <typename T>
-inline Status add(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out) {
-    if (lhs.rank() != 1 || rhs.rank() != 1 || out.rank() != 1) {
-        return StatusCode::kError;
-    }
-    const long long size = lhs.get_shape(0);
-    if (size <= 0 || rhs.get_shape(0) != size || out.get_shape(0) != size) {
-        return StatusCode::kError;
-    }
-    if (lhs.get_stride(0) <= 0 || rhs.get_stride(0) <= 0 || out.get_stride(0) <= 0) {
-        return StatusCode::kError;
-    }
-    const T* lhs_data = lhs.data();
-    const T* rhs_data = rhs.data();
-    T* out_data = out.data();
-    if (lhs_data == nullptr || rhs_data == nullptr || out_data == nullptr) {
-        return StatusCode::kError;
-    }
-    const long long lhs_stride = lhs.get_stride(0);
-    const long long rhs_stride = rhs.get_stride(0);
-    const long long out_stride = out.get_stride(0);
-    for (long long i = 0; i < size; ++i) {
-        out_data[i * out_stride] = lhs_data[i * lhs_stride] + rhs_data[i * rhs_stride];
-    }
-    return StatusCode::kOk;
-}
 
 /*
 功能说明:

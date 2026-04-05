@@ -1,10 +1,10 @@
 """NPU demo KernelContext include tests.
 
 创建者: 朽木露琪亚
-最后一次更改: 金铲铲大作战
-最后修改人: 金铲铲大作战
-最近一次运行测试时间: 2026-04-05 15:20:00 +0800
-最近一次运行成功时间: 2026-04-05 15:20:00 +0800
+最后一次更改: jcc你莫辜负
+最后修改人: jcc你莫辜负
+最近一次运行测试时间: 2026-04-05 16:05:57 +0800
+最近一次运行成功时间: 2026-04-05 16:05:57 +0800
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 `include/npu_demo/npu_demo.h` 的 `KernelContext` accessor 与动态内存查询契约。
@@ -699,18 +699,18 @@ int main() {
 
 # NPU-DEMO-KC-007
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最后修改人: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-05 16:05:00 +0800
-# 最近一次运行成功时间: 2026-04-05 16:05:00 +0800
+# 最后一次更改: jcc你莫辜负
+# 最后修改人: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-05 16:05:57 +0800
+# 最近一次运行成功时间: 2026-04-05 16:05:57 +0800
 # 测试目的: 验证 add 在 1-D 子集下执行逐元素加法，并对 shape 不一致与任一 operand 的 rank!=1 返回失败。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_add_supports_1d_subset
-# 对应功能实现文件链接: [include/npu_demo/Nn.h](include/npu_demo/Nn.h)
+# 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
 # 对应 spec 文件链接: [spec/include/api/Nn.md](spec/include/api/Nn.md)
 # 对应测试文件链接: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
 def test_npu_demo_add_supports_1d_subset() -> None:
     source = r"""
-#include "include/npu_demo/Nn.h"
+#include "include/npu_demo/npu_demo.h"
 
 static int fail(int code) { return code; }
 
