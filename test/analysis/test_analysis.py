@@ -1,10 +1,10 @@
 """Analysis tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 朽木露琪亚
+最后修改人: 金铲铲大作战
 
 功能说明:
-- 覆盖逐元素算术/比较、broadcast、matmul 与函数级聚合统计。
+- 覆盖逐元素算术/比较、unary/reduce、broadcast/transpose、matmul 与函数级聚合统计。
 
 使用示例:
 - pytest -q test/analysis/test_analysis.py
@@ -106,7 +106,7 @@ class FakeNnAddOp(IRDLOperation):
     """测试用 nn.add op，允许常量 operand。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后修改人: 金铲铲大作战
 
     功能说明:
     - 用于构造 memory + const 的测试输入。
@@ -136,6 +136,234 @@ class FakeNnAddOp(IRDLOperation):
     ) -> None:
         super().__init__(
             operands=[lhs, rhs],
+            result_types=[result_type],
+            attributes={"space": space},
+        )
+
+
+@irdl_op_definition
+class FakeNnExpOp(IRDLOperation):
+    """测试用 nn.exp op。
+
+    创建者: 金铲铲大作战
+    最后修改人: 金铲铲大作战
+
+    功能说明:
+    - 用于构造 nn.exp 的计算/访存测试输入。
+
+    使用示例:
+    - FakeNnExpOp(inp, result_type, space)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    name = "nn.exp"
+
+    operand = operand_def(Attribute)
+    result = result_def(NnMemoryType)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        operand: SSAValue | Operation,
+        result_type: NnMemoryType,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        super().__init__(
+            operands=[operand],
+            result_types=[result_type],
+            attributes={"space": space},
+        )
+
+
+@irdl_op_definition
+class FakeNnReduceSumOp(IRDLOperation):
+    """测试用 nn.reduce_sum op。
+
+    创建者: 金铲铲大作战
+    最后修改人: 金铲铲大作战
+
+    功能说明:
+    - 用于构造 nn.reduce_sum 的计算/访存测试输入。
+
+    使用示例:
+    - FakeNnReduceSumOp(inp, result_type, space)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    name = "nn.reduce_sum"
+
+    operand = operand_def(Attribute)
+    result = result_def(NnMemoryType)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        operand: SSAValue | Operation,
+        result_type: NnMemoryType,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        super().__init__(
+            operands=[operand],
+            result_types=[result_type],
+            attributes={"space": space},
+        )
+
+
+@irdl_op_definition
+class FakeNnReduceMinOp(IRDLOperation):
+    """测试用 nn.reduce_min op。
+
+    创建者: 金铲铲大作战
+    最后修改人: 金铲铲大作战
+
+    功能说明:
+    - 用于构造 nn.reduce_min 的计算/访存测试输入。
+
+    使用示例:
+    - FakeNnReduceMinOp(inp, result_type, space)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    name = "nn.reduce_min"
+
+    operand = operand_def(Attribute)
+    result = result_def(NnMemoryType)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        operand: SSAValue | Operation,
+        result_type: NnMemoryType,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        super().__init__(
+            operands=[operand],
+            result_types=[result_type],
+            attributes={"space": space},
+        )
+
+
+@irdl_op_definition
+class FakeNnReduceMaxOp(IRDLOperation):
+    """测试用 nn.reduce_max op。
+
+    创建者: 金铲铲大作战
+    最后修改人: 金铲铲大作战
+
+    功能说明:
+    - 用于构造 nn.reduce_max 的计算/访存测试输入。
+
+    使用示例:
+    - FakeNnReduceMaxOp(inp, result_type, space)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    name = "nn.reduce_max"
+
+    operand = operand_def(Attribute)
+    result = result_def(NnMemoryType)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        operand: SSAValue | Operation,
+        result_type: NnMemoryType,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        super().__init__(
+            operands=[operand],
+            result_types=[result_type],
+            attributes={"space": space},
+        )
+
+
+@irdl_op_definition
+class FakeNnBroadcastOp(IRDLOperation):
+    """测试用 nn.broadcast op。
+
+    创建者: 金铲铲大作战
+    最后修改人: 金铲铲大作战
+
+    功能说明:
+    - 用于构造 nn.broadcast 的访存测试输入。
+
+    使用示例:
+    - FakeNnBroadcastOp(inp, result_type, space)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    name = "nn.broadcast"
+
+    operand = operand_def(Attribute)
+    result = result_def(NnMemoryType)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        operand: SSAValue | Operation,
+        result_type: NnMemoryType,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        super().__init__(
+            operands=[operand],
+            result_types=[result_type],
+            attributes={"space": space},
+        )
+
+
+@irdl_op_definition
+class FakeNnTransposeOp(IRDLOperation):
+    """测试用 nn.transpose op。
+
+    创建者: 金铲铲大作战
+    最后修改人: 金铲铲大作战
+
+    功能说明:
+    - 用于构造 nn.transpose 的访存测试输入。
+
+    使用示例:
+    - FakeNnTransposeOp(inp, result_type, space)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/analysis.py
+    """
+
+    name = "nn.transpose"
+
+    operand = operand_def(Attribute)
+    result = result_def(NnMemoryType)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        operand: SSAValue | Operation,
+        result_type: NnMemoryType,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        super().__init__(
+            operands=[operand],
             result_types=[result_type],
             attributes={"space": space},
         )
@@ -1460,6 +1688,227 @@ def test_analysis_compare_i1_keeps_predicate_size_in_new_schema() -> None:
     )
     assert result.compute_totals_by_kind == {ComputeKind.VECTOR: sp.Integer(6)}
     _assert_expr_equal(result.total_write_bytes, sp.Integer(12))
+
+
+# AN-020L-C
+# 创建者: 金铲铲大作战
+# 最后修改人: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-05 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-05 00:00:00 +0800
+# 测试目的: 验证 nn.exp 产出 ComputeKind.MATH。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_exp_math_compute_kind
+# 对应功能实现文件路径: kernel_gen/analysis/compute/nn.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_exp_math_compute_kind() -> None:
+    """创建者: 金铲铲大作战
+    最后修改人: 金铲铲大作战
+
+    功能说明:
+    - 验证 nn.exp 产出 ComputeKind.MATH。
+
+    使用示例:
+    - pytest -q test/analysis/test_analysis.py -k test_analysis_exp_math_compute_kind
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/compute/nn.py
+    """
+    mem_type = _make_memory_type([StringAttr("M"), StringAttr("N")], f32, "global")
+    space = _make_space("global")
+    block = Block(arg_types=[mem_type])
+    exp_op = FakeNnExpOp(block.args[0], mem_type, space)
+
+    result = analysis(
+        exp_op,
+        AnalysisConfig(enable_compute=True, enable_memory=False, dtype_size_overrides={"f32": 4}),
+    )
+
+    expected_numel = SymbolDim("M").get_symbol() * SymbolDim("N").get_symbol()
+    assert result.compute_items == (
+        ComputeItem(kind=ComputeKind.MATH, amount=expected_numel, dtype="f32"),
+    )
+    assert result.compute_totals_by_kind == {ComputeKind.MATH: expected_numel}
+
+
+# AN-020M-C
+# 创建者: 金铲铲大作战
+# 最后修改人: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-05 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-05 00:00:00 +0800
+# 测试目的: 验证 nn.reduce_* 产出 ComputeKind.VECTOR。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_reduce_vector_compute_kind
+# 对应功能实现文件路径: kernel_gen/analysis/compute/nn.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+@pytest.mark.parametrize(
+    "reduce_cls",
+    [FakeNnReduceSumOp, FakeNnReduceMinOp, FakeNnReduceMaxOp],
+)
+def test_analysis_reduce_vector_compute_kind(reduce_cls: type[IRDLOperation]) -> None:
+    """创建者: 金铲铲大作战
+    最后修改人: 金铲铲大作战
+
+    功能说明:
+    - 验证 nn.reduce_* 产出 ComputeKind.VECTOR。
+
+    使用示例:
+    - pytest -q test/analysis/test_analysis.py -k test_analysis_reduce_vector_compute_kind
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/compute/nn.py
+    """
+    in_type = _make_memory_type([StringAttr("M"), StringAttr("N")], f32, "global")
+    out_type = _make_memory_type([StringAttr("M"), IntAttr(1)], f32, "global")
+    space = _make_space("global")
+    block = Block(arg_types=[in_type])
+    reduce_op = reduce_cls(block.args[0], out_type, space)
+
+    result = analysis(
+        reduce_op,
+        AnalysisConfig(enable_compute=True, enable_memory=False, dtype_size_overrides={"f32": 4}),
+    )
+
+    expected = SymbolDim("M").get_symbol() * SymbolDim("N").get_symbol() - SymbolDim("M").get_symbol()
+    assert result.compute_items == (
+        ComputeItem(kind=ComputeKind.VECTOR, amount=expected, dtype="f32"),
+    )
+    assert result.compute_totals_by_kind == {ComputeKind.VECTOR: expected}
+
+
+# AN-020N-C
+# 创建者: 金铲铲大作战
+# 最后修改人: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-05 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-05 00:00:00 +0800
+# 测试目的: 验证 nn.broadcast 只产出 direct memory item。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_broadcast_direct_memory_only
+# 对应功能实现文件路径: kernel_gen/analysis/memory/nn.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_broadcast_direct_memory_only() -> None:
+    """创建者: 金铲铲大作战
+    最后修改人: 金铲铲大作战
+
+    功能说明:
+    - 验证 nn.broadcast 仅产出 direct memory item。
+
+    使用示例:
+    - pytest -q test/analysis/test_analysis.py -k test_analysis_broadcast_direct_memory_only
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/memory/nn.py
+    """
+    inp_type = _make_memory_type([IntAttr(1), StringAttr("N")], f32, "shared")
+    out_type = _make_memory_type([StringAttr("M"), StringAttr("N")], f32, "shared")
+    space = _make_space("shared")
+    block = Block(arg_types=[inp_type])
+    broadcast_op = FakeNnBroadcastOp(block.args[0], out_type, space)
+
+    result = analysis(
+        broadcast_op,
+        AnalysisConfig(enable_compute=True, enable_memory=True, dtype_size_overrides={"f32": 4}),
+    )
+
+    expected_read = SymbolDim("N").get_symbol() * 4
+    expected_write = SymbolDim("M").get_symbol() * SymbolDim("N").get_symbol() * 4
+    assert result.compute_items == ()
+    assert result.compute_totals_by_kind == {}
+    _assert_expr_equal(result.total_read_bytes, expected_read)
+    _assert_expr_equal(result.total_write_bytes, expected_write)
+    assert len(result.memory_items) == 2
+    assert all(item.path is not MemoryPath.UNKNOWN for item in result.memory_items)
+
+
+# AN-020O-C
+# 创建者: 金铲铲大作战
+# 最后修改人: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-05 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-05 00:00:00 +0800
+# 测试目的: 验证 nn.transpose 只产出 direct memory item。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_transpose_direct_memory_only
+# 对应功能实现文件路径: kernel_gen/analysis/memory/nn.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+def test_analysis_transpose_direct_memory_only() -> None:
+    """创建者: 金铲铲大作战
+    最后修改人: 金铲铲大作战
+
+    功能说明:
+    - 验证 nn.transpose 仅产出 direct memory item。
+
+    使用示例:
+    - pytest -q test/analysis/test_analysis.py -k test_analysis_transpose_direct_memory_only
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/memory/nn.py
+    """
+    inp_type = _make_memory_type([StringAttr("M"), StringAttr("N")], f32, "global")
+    out_type = _make_memory_type([StringAttr("N"), StringAttr("M")], f32, "global")
+    space = _make_space("global")
+    block = Block(arg_types=[inp_type])
+    transpose_op = FakeNnTransposeOp(block.args[0], out_type, space)
+
+    result = analysis(
+        transpose_op,
+        AnalysisConfig(enable_compute=True, enable_memory=True, dtype_size_overrides={"f32": 4}),
+    )
+
+    expected_numel = SymbolDim("M").get_symbol() * SymbolDim("N").get_symbol()
+    expected_bytes = expected_numel * 4
+    assert result.compute_items == ()
+    assert result.compute_totals_by_kind == {}
+    _assert_expr_equal(result.total_read_bytes, expected_bytes)
+    _assert_expr_equal(result.total_write_bytes, expected_bytes)
+    assert len(result.memory_items) == 2
+    assert all(item.path is not MemoryPath.UNKNOWN for item in result.memory_items)
+
+
+# AN-020P-C
+# 创建者: 金铲铲大作战
+# 最后修改人: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-05 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-05 00:00:00 +0800
+# 测试目的: 验证 shared/local/tsm/tlm 的 nn.* 不落到 UNKNOWN path。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_nn_memory_paths_not_unknown_for_non_global_spaces
+# 对应功能实现文件路径: kernel_gen/analysis/memory/nn.py
+# 对应 spec 文件路径: spec/analysis/analysis_engine.md
+# 对应测试文件路径: test/analysis/test_analysis.py
+@pytest.mark.parametrize("space_name", ["shared", "local", "tsm", "tlm"])
+def test_analysis_nn_memory_paths_not_unknown_for_non_global_spaces(space_name: str) -> None:
+    """创建者: 金铲铲大作战
+    最后修改人: 金铲铲大作战
+
+    功能说明:
+    - 验证 shared/local/tsm/tlm 空间的 nn.* 不落到 UNKNOWN path。
+
+    使用示例:
+    - pytest -q test/analysis/test_analysis.py -k test_analysis_nn_memory_paths_not_unknown_for_non_global_spaces
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/memory/nn.py
+    """
+    mem_type = _make_memory_type([IntAttr(2), IntAttr(2)], f32, space_name)
+    space = _make_space(space_name)
+    block = Block(arg_types=[mem_type, mem_type])
+    add_op = NnAddOp(block.args[0], block.args[1], mem_type, space)
+
+    result = analysis(
+        add_op,
+        AnalysisConfig(enable_compute=True, enable_memory=True, dtype_size_overrides={"f32": 4}),
+    )
+
+    assert len(result.memory_items) == 3
+    assert all(item.path is not MemoryPath.UNKNOWN for item in result.memory_items)
 
 
 # AN-020D

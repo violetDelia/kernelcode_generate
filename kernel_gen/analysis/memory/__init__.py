@@ -1,7 +1,7 @@
 """Memory-path analysis helpers.
 
 创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
+最后修改人: 金铲铲大作战
 
 功能说明:
 - 定义访存主线公开使用的 `MemoryPath` 枚举。
@@ -38,7 +38,7 @@ class MemoryPath(str, Enum):
     """访存路径枚举。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后修改人: 朽木露琪亚
 
     功能说明:
     - 冻结 analysis 侧访存 path 的正式口径。
@@ -63,9 +63,19 @@ class MemoryPath(str, Enum):
     TSM_TO_TLM = "TSM->TLM"
     FM_TO_TSM = "FM->TSM"
     GM_TO_COMPUTE = "GM->compute"
+    SM_TO_COMPUTE = "SM->compute"
     LM_TO_COMPUTE = "LM->compute"
+    TSM_TO_COMPUTE = "TSM->compute"
+    TLM_TO_COMPUTE = "TLM->compute"
     COMPUTE_TO_GM = "compute->GM"
+    COMPUTE_TO_SM = "compute->SM"
     COMPUTE_TO_LM = "compute->LM"
+    COMPUTE_TO_TSM = "compute->TSM"
+    COMPUTE_TO_TLM = "compute->TLM"
+    SM_TO_SM = "SM->SM"
+    LM_TO_LM = "LM->LM"
+    TSM_TO_TSM = "TSM->TSM"
+    TLM_TO_TLM = "TLM->TLM"
     UNKNOWN = "unknown"
 
 
@@ -73,7 +83,7 @@ def normalize_memory_path(path: str | MemoryPath) -> MemoryPath:
     """把 path 文本归一到 `MemoryPath`。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后修改人: 朽木露琪亚
 
     功能说明:
     - 已知路径统一返回对应 `MemoryPath`。
@@ -101,7 +111,7 @@ def metric_value_to_expr(value: object) -> sp.Basic | None:
     """将 metric 值归一为 sympy 表达式。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后修改人: 朽木露琪亚
 
     功能说明:
     - 支持 `int/float/sympy.Basic` 三类正式 metric 值。
@@ -133,7 +143,7 @@ def time_from_memory_metrics(
     """计算访存理论时间。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后修改人: 朽木露琪亚
 
     功能说明:
     - A3 正式公式固定为 `bytes + latency + bandwidth -> time_ns`，即：
@@ -162,6 +172,23 @@ _DEFAULT_REGISTERED = False
 
 
 def _register_analyzer(func: MemoryAnalyzer, registry: list[MemoryAnalyzer]) -> MemoryAnalyzer:
+    """追加 analyzer 到指定 registry。
+
+    创建者: 金铲铲大作战
+    最后修改人: 金铲铲大作战
+
+    功能说明:
+    - 确保同一 analyzer 不会重复登记。
+    - 返回原函数以保持装饰器语义。
+
+    使用示例:
+    - _register_analyzer(analyze_dma_memory_op, _DEFAULT_MEMORY_ANALYZERS)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/memory/__init__.py
+    """
     if func not in registry:
         registry.append(func)
     return func
@@ -171,7 +198,7 @@ def register_memory_analyzer(func: MemoryAnalyzer) -> MemoryAnalyzer:
     """注册 memory analyzer。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后修改人: 金铲铲大作战
 
     功能说明:
     - 将 analyzer 追加到 memory registry。
@@ -190,6 +217,24 @@ def register_memory_analyzer(func: MemoryAnalyzer) -> MemoryAnalyzer:
 
 
 def _normalize_op_keys(ops: object) -> tuple[str, ...]:
+    """标准化 register_memory/register_compute 的 op key 集合。
+
+    创建者: 金铲铲大作战
+    最后修改人: 金铲铲大作战
+
+    功能说明:
+    - 支持单 op 与 tuple/list/set 形式的注册入口。
+    - 统一输出 op.name 字符串列表。
+
+    使用示例:
+    - _normalize_op_keys(nn.add) == ("nn.add",)
+    - _normalize_op_keys((nn.add, nn.sub)) == ("nn.add", "nn.sub")
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/memory/__init__.py
+    """
     if isinstance(ops, (tuple, list, set)):
         items: Iterable[object] = ops
     else:
@@ -213,7 +258,7 @@ def register_memory(ops: object) -> Callable[[MemoryAnalyzer], MemoryAnalyzer]:
     """按 op 名称注册 memory analyzer。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后修改人: 金铲铲大作战
 
     功能说明:
     - 支持单 op 与 tuple/list/set 形式的 op 注册。
@@ -244,14 +289,51 @@ def register_memory(ops: object) -> Callable[[MemoryAnalyzer], MemoryAnalyzer]:
 
 
 def _ensure_default_analyzers_registered() -> None:
+    """确保默认 memory analyzers 已注册。
+
+    创建者: 金铲铲大作战
+    最后修改人: 金铲铲大作战
+
+    功能说明:
+    - 延迟导入避免 analysis/memory 循环依赖。
+    - 确保 dma/nn memory analyzer 默认可用。
+
+    使用示例:
+    - _ensure_default_analyzers_registered()
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/memory/__init__.py
+    """
     global _DEFAULT_REGISTERED
     if _DEFAULT_REGISTERED:
         return
     _register_analyzer(analyze_dma_memory_op, _DEFAULT_MEMORY_ANALYZERS)
+    from kernel_gen.analysis.memory.nn import analyze_nn_memory_op
+
+    _register_analyzer(analyze_nn_memory_op, _DEFAULT_MEMORY_ANALYZERS)
+    globals()["analyze_nn_memory_op"] = analyze_nn_memory_op
     _DEFAULT_REGISTERED = True
 
 
 def _iter_unique_analyzers(analyzers: Iterable[MemoryAnalyzer]) -> Iterator[MemoryAnalyzer]:
+    """去重并保持顺序的 analyzer 迭代器。
+
+    创建者: 金铲铲大作战
+    最后修改人: 金铲铲大作战
+
+    功能说明:
+    - 保留注册顺序，同时过滤重复 analyzer。
+
+    使用示例:
+    - tuple(_iter_unique_analyzers([a, a, b])) == (a, b)
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/memory/__init__.py
+    """
     seen: set[MemoryAnalyzer] = set()
     for analyzer in analyzers:
         if analyzer in seen:
@@ -264,7 +346,7 @@ def iter_memory_analyzers() -> tuple[MemoryAnalyzer, ...]:
     """获取当前注册的 memory analyzers。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后修改人: 金铲铲大作战
 
     功能说明:
     - 返回 registry 中的 analyzer 列表副本。
@@ -285,7 +367,7 @@ def iter_memory_analyzers_for_op(op: "Operation") -> tuple[MemoryAnalyzer, ...]:
     """按 op 返回适用的 memory analyzers。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后修改人: 金铲铲大作战
 
     功能说明:
     - 优先返回 op 定向注册的 analyzer。
@@ -315,7 +397,7 @@ def analyze_dma_memory_op(op: "Operation", config: "AnalysisConfig") -> "DmaMemo
     """适配 DMA memory analyzer。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后修改人: 金铲铲大作战
 
     功能说明:
     - 将 `analysis` 配置注入 DMA memory analyzer。
@@ -354,4 +436,5 @@ __all__ = [
     "iter_memory_analyzers",
     "iter_memory_analyzers_for_op",
     "analyze_dma_memory_op",
+    "analyze_nn_memory_op",
 ]
