@@ -85,3 +85,16 @@
 - `4 passed, 11 deselected in 0.19s`
 下一步建议：
 - 进入合并阶段。
+
+时间：2026-04-06 04:45:56 +0800
+经办人：李白
+任务：T-20260406-f4985eca（npu_demo_parallel_add_sync_green_plan-S1-合并收口）
+任务目标：合并 barrier/launch 合同实现+补测与 TC-ARCH-009~013 注释字段修复；复跑 gate 并推送 main；清理 worktree/branch。
+改动：
+- 合入文件（业务）：`kernel_gen/operation/arch.py`、`kernel_gen/dialect/arch.py`、`test/operation/test_operation_arch.py`、`test/dialect/test_arch_dialect.py`。
+- 合入文件（记录）：`agents/codex-multi-agents/log/task_records/2026/15/20260406-npu-demo-sync-s1.md`。
+- gate（复跑）：`PYTHONPATH=. pytest -q test/operation/test_operation_arch.py -k 'barrier or launch'` -> `8 passed, 8 deselected`（exit=0）；`PYTHONPATH=. pytest -q test/dialect/test_arch_dialect.py -k 'barrier or launch'` -> `4 passed, 11 deselected`（exit=0）。
+- merge_commit：`c989b473cd7c9ee59fc728053655926ff6c1fa4a`。
+- push(main)：`timeout 60 git push origin main`（exit=0）。
+- cleanup：`git worktree remove wt-20260406-npu-demo-sync-s1 --force`；`git branch -D T-20260406-639fa39f`。
+结论：S1 barrier/launch 合同实现+补测与注释字段修复已合入并推送主分支，gate 全绿，worktree/分支已清理；无后续任务。
