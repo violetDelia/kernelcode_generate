@@ -94,3 +94,16 @@
 关键输出：
 - 5 passed in 0.23s
 下一步建议：派生唯一“合并”任务给李白（已建 T-20260406-7fd13d77）。
+
+时间：2026-04-06 04:11:30 +0800
+经办人：李白
+任务：T-20260406-7fd13d77（dma_memory_hierarchy_lowering_green_plan-S2-合并收口）
+任务目标：合并 S2 审查通过变更（窗口链路合同 + COV-DMH-008 映射 + 对齐实现/补测），复跑 gate 并推送 main，清理 worktree/branch。
+改动：
+- 合入文件（业务）：`kernel_gen/passes/lowering/dma_memory_hierarchy.py`、`spec/pass/lowering/dma_memory_hierarchy.md`、`test/pass/test_dma_memory_hierarchy.py`。
+- 合入文件（记录）：`agents/codex-multi-agents/log/task_records/2026/14/20260405-dma-hierarchy-s2.md`。
+- gate（复跑）：`PYTHONPATH=. pytest -q test/pass/test_dma_memory_hierarchy.py` -> `5 passed in 0.24s`（exit=0）。
+- merge_commit：`bfb208ce8be64c1b22ad66c5f84b3eca7601f2b3`。
+- push(main)：`timeout 60 git push origin main`（exit=0）。
+- cleanup：`git worktree remove wt-20260405-dma-hierarchy-s2 --force`；`git branch -D T-20260406-276192de`。
+结论：S2 变更已合入并推送主分支，gate 全绿，worktree/分支已清理；无后续任务。
