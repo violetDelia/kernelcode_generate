@@ -3,8 +3,8 @@
 创建者: 朽木露琪亚
 最后一次更改: 金铲铲大作战
 最后修改人: 金铲铲大作战
-最近一次运行测试时间: 2026-04-05 13:48:51 +0800
-最近一次运行成功时间: 2026-04-05 13:48:51 +0800
+最近一次运行测试时间: 2026-04-05 15:20:00 +0800
+最近一次运行成功时间: 2026-04-05 15:20:00 +0800
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 `include/npu_demo/npu_demo.h` 的 `KernelContext` accessor 与动态内存查询契约。
@@ -701,16 +701,16 @@ int main() {
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
 # 最后修改人: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-05 10:44:47 +0800
-# 最近一次运行成功时间: 2026-04-05 10:44:47 +0800
-# 测试目的: 验证 add 在 1-D 子集下执行逐元素加法并对 shape 不一致返回失败。
+# 最近一次运行测试时间: 2026-04-05 16:05:00 +0800
+# 最近一次运行成功时间: 2026-04-05 16:05:00 +0800
+# 测试目的: 验证 add 在 1-D 子集下执行逐元素加法，并对 shape 不一致与任一 operand 的 rank!=1 返回失败。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_add_supports_1d_subset
-# 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
+# 对应功能实现文件链接: [include/npu_demo/Nn.h](include/npu_demo/Nn.h)
 # 对应 spec 文件链接: [spec/include/api/Nn.md](spec/include/api/Nn.md)
 # 对应测试文件链接: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
 def test_npu_demo_add_supports_1d_subset() -> None:
     source = r"""
-#include "include/npu_demo/npu_demo.h"
+#include "include/npu_demo/Nn.h"
 
 static int fail(int code) { return code; }
 
@@ -724,9 +724,9 @@ int main() {
     Memory<float> rhs(rhs_data, shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
     Memory<float> out(out_data, shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
 
-        if (npu_demo::add(lhs, rhs, out) != StatusCode::kOk) {
-            return fail(1);
-        }
+    if (add(lhs, rhs, out) != StatusCode::kOk) {
+        return fail(1);
+    }
     if (out_data[0] != 11.0f || out_data[1] != 22.0f || out_data[2] != 33.0f ||
         out_data[3] != 44.0f) {
         return fail(2);
@@ -734,9 +734,24 @@ int main() {
 
     long long bad_shape[1] = {3};
     Memory<float> bad(lhs_data, bad_shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
-        if (npu_demo::add(bad, rhs, out) == StatusCode::kOk) {
-            return fail(3);
-        }
+    if (add(bad, rhs, out) == StatusCode::kOk) {
+        return fail(3);
+    }
+
+    long long rank2_shape[2] = {2, 2};
+    long long rank2_stride[2] = {2, 1};
+    Memory<float> bad_rank(lhs_data, rank2_shape, rank2_stride, 2, MemoryFormat::Norm, MemorySpace::GM);
+    if (add(bad_rank, rhs, out) == StatusCode::kOk) {
+        return fail(4);
+    }
+    Memory<float> bad_rhs(rhs_data, rank2_shape, rank2_stride, 2, MemoryFormat::Norm, MemorySpace::GM);
+    if (add(lhs, bad_rhs, out) == StatusCode::kOk) {
+        return fail(5);
+    }
+    Memory<float> bad_out(out_data, rank2_shape, rank2_stride, 2, MemoryFormat::Norm, MemorySpace::GM);
+    if (add(lhs, rhs, bad_out) == StatusCode::kOk) {
+        return fail(6);
+    }
     return 0;
 }
 """

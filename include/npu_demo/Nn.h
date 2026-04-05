@@ -38,9 +38,24 @@
 */
 template <typename T>
 inline Status add(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out) {
-    (void)lhs;
-    (void)rhs;
-    (void)out;
+    if (lhs.rank() != 1 || rhs.rank() != 1 || out.rank() != 1) {
+        return StatusCode::kError;
+    }
+    const long long lhs_size = lhs.shape()[0];
+    const long long rhs_size = rhs.shape()[0];
+    const long long out_size = out.shape()[0];
+    if (lhs_size <= 0 || rhs_size <= 0 || out_size <= 0) {
+        return StatusCode::kError;
+    }
+    if (lhs_size != rhs_size || lhs_size != out_size) {
+        return StatusCode::kError;
+    }
+    const long long lhs_stride = lhs.stride()[0];
+    const long long rhs_stride = rhs.stride()[0];
+    const long long out_stride = out.stride()[0];
+    for (long long i = 0; i < lhs_size; ++i) {
+        out.data()[i * out_stride] = lhs.data()[i * lhs_stride] + rhs.data()[i * rhs_stride];
+    }
     return StatusCode::kOk;
 }
 
