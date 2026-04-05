@@ -87,3 +87,8 @@ gate（复跑）：
 - `PYTHONPATH=. pytest -q test/pass/test_pass_manager.py`
   - 关键输出：`13 passed in 0.34s`；exit=0
 结论：gate 通过，可合并收口；合并提交/push/cleanup 证据由合并执行补齐。
+合并提交：cf02845
+push(main)：`timeout 60 git push origin main`；exit=0
+cleanup：
+- `git worktree remove wt-20260406-kernel-split-s2 --force`（成功）
+- `git branch -D T-20260406-f564f671`（成功）
