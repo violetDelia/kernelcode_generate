@@ -1,7 +1,7 @@
 """Pass manager API.
 
 创建者: 李白
-最后一次更改: 金铲铲大作战
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 定义 Pass 与 PassManager 的基础行为。
@@ -111,7 +111,7 @@ class PassManager:
     """Pass 管理器。
 
     创建者: 李白
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 按顺序执行 Pass 列表。
@@ -178,7 +178,7 @@ class PassManager:
         """依序执行 Pass。
 
         创建者: 李白
-        最后一次更改: 金铲铲大作战
+        最后一次更改: 朽木露琪亚
 
         功能说明:
         - 逐个调用 Pass.run。
@@ -191,6 +191,22 @@ class PassManager:
         - test: test/pass/test_pass_manager.py
         - 功能实现: kernel_gen/passes/pass_manager.py
         """
+        pass_names = [item.name for item in self._passes]
+        if "kernel-split" in pass_names:
+            kernel_split_index = pass_names.index("kernel-split")
+            if "buffer-results-to-out-params" in pass_names:
+                buffer_index = pass_names.index("buffer-results-to-out-params")
+                if kernel_split_index < buffer_index:
+                    raise ValueError(
+                        "KernelSplitOrderError: kernel-split must run after buffer-results-to-out-params"
+                    )
+            if "lower-dma-memory-hierarchy" in pass_names:
+                dma_hierarchy_index = pass_names.index("lower-dma-memory-hierarchy")
+                if kernel_split_index > dma_hierarchy_index:
+                    raise ValueError(
+                        "KernelSplitOrderError: kernel-split must run before lower-dma-memory-hierarchy"
+                    )
+
         result = target
         seen_names: list[str] = []
         for item in self._passes:

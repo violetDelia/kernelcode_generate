@@ -1,7 +1,7 @@
 """pass_manager tests.
 
 创建者: 李白
-最后一次更改: 金铲铲大作战
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 kernel_gen/passes/pass_manager.py 的 Pass 管理行为。
@@ -9,7 +9,7 @@
 当前覆盖率信息:
 - 当前覆盖率: `100%`（语句覆盖 `100%`，分支覆盖 `100%`）。
 - 达标判定: 已达到 `95%` 覆盖率达标线。
-- 本文件覆盖 `TC-PASS-001..005`，并补充 `Pass` 缺少 `name` 属性的非法输入分支。
+- 本文件覆盖 `TC-PASS-001..013`，并补充 `Pass` 缺少 `name` 属性的非法输入分支。
 
 覆盖率命令:
 - `pytest -q --cov=kernel_gen.passes.pass_manager --cov-branch --cov-report=term-missing test/pass/test_pass_manager.py`
@@ -268,3 +268,164 @@ def test_pass_manager_allows_buffer_results_to_out_params_after_lowering_with_in
     sentinel = object()
     assert pm.run(sentinel) is sentinel
     assert order == ["lower-nn-to-kernel", "noop", "buffer-results-to-out-params"]
+
+
+# TC-PASS-009
+# 创建者: 金铲铲大作战
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-06 03:17:31 +0800
+# 最近一次运行成功时间: 2026-04-06 03:17:31 +0800
+# 功能说明: 验证 `KernelSplitPass` 为显式开启 pass，默认 lowering builder 不会自动插入。
+# 测试目的: 锁定默认 `build_default_lowering_pass_manager()` 的 pass 集合只包含 lowering + out-params 收口。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_kernel_split_pipeline_requires_explicit_enable
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
+# 对应 spec 文件路径: spec/pass/pass_manager.md
+# 对应测试文件路径: test/pass/test_pass_manager.py
+def test_kernel_split_pipeline_requires_explicit_enable() -> None:
+    pm = build_default_lowering_pass_manager()
+    pass_names = [item.name for item in pm._passes]  # noqa: SLF001 - test asserts pipeline boundary
+    assert pass_names == ["lower-nn-to-kernel", "buffer-results-to-out-params"]
+    assert "kernel-split" not in pass_names
+
+
+# TC-PASS-010
+# 创建者: 金铲铲大作战
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-06 03:17:31 +0800
+# 最近一次运行成功时间: 2026-04-06 03:17:31 +0800
+# 功能说明: 验证显式开启 `KernelSplitPass` 时，其顺序必须位于 `BufferResultsToOutParamsPass` 之后。
+# 测试目的: 机械锁定推荐 pipeline：`LowerNnToKernelPass -> BufferResultsToOutParamsPass -> KernelSplitPass`。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_default_lowering_pipeline_orders_kernel_split_after_out_params
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
+# 对应 spec 文件路径: spec/pass/pass_manager.md
+# 对应测试文件路径: test/pass/test_pass_manager.py
+def test_default_lowering_pipeline_orders_kernel_split_after_out_params(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lowering_module = importlib.import_module("kernel_gen.passes.lowering")
+    LowerNnToKernelPass = lowering_module.LowerNnToKernelPass
+    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
+    kernel_split_module = importlib.import_module("kernel_gen.passes.lowering.kernel_split")
+    KernelSplitPass = kernel_split_module.KernelSplitPass
+    order: list[str] = []
+
+    def _record_lower(self: object, target: object) -> object:
+        order.append("lower-nn-to-kernel")
+        return target
+
+    def _record_buffer(self: object, target: object) -> object:
+        order.append("buffer-results-to-out-params")
+        return target
+
+    def _record_kernel_split(self: object, target: object) -> object:
+        order.append("kernel-split")
+        return target
+
+    monkeypatch.setattr(LowerNnToKernelPass, "run", _record_lower)
+    monkeypatch.setattr(BufferResultsToOutParamsPass, "run", _record_buffer)
+    monkeypatch.setattr(KernelSplitPass, "run", _record_kernel_split)
+
+    pm = build_default_lowering_pass_manager(name="split-lowering")
+    pm.add_pass(KernelSplitPass())
+
+    sentinel = object()
+    assert pm.run(sentinel) is sentinel
+    assert order == ["lower-nn-to-kernel", "buffer-results-to-out-params", "kernel-split"]
+
+
+# TC-PASS-011
+# 创建者: 金铲铲大作战
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-06 03:17:31 +0800
+# 最近一次运行成功时间: 2026-04-06 03:17:31 +0800
+# 功能说明: 验证 split pipeline 的 `tuner.param` 来源口径为“由 split pass 在函数体内插入/复用”。
+# 测试目的: 锁定 PassManager 端不引入额外前置合同：split 所需的 `tuner.param` 由 `KernelSplitPass.run` 负责物化。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_kernel_split_pipeline_materializes_tuner_params_before_codegen
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
+# 对应 spec 文件路径: spec/pass/pass_manager.md
+# 对应测试文件路径: test/pass/test_pass_manager.py
+def test_kernel_split_pipeline_materializes_tuner_params_before_codegen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lowering_module = importlib.import_module("kernel_gen.passes.lowering")
+    LowerNnToKernelPass = lowering_module.LowerNnToKernelPass
+    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
+    kernel_split_module = importlib.import_module("kernel_gen.passes.lowering.kernel_split")
+    KernelSplitPass = kernel_split_module.KernelSplitPass
+
+    def _noop(self: object, target: object) -> object:
+        return target
+
+    def _materialize_tuner_param(self: object, target: object) -> object:
+        assert isinstance(target, dict)
+        target["tuner.param"] = True
+        return target
+
+    monkeypatch.setattr(LowerNnToKernelPass, "run", _noop)
+    monkeypatch.setattr(BufferResultsToOutParamsPass, "run", _noop)
+    monkeypatch.setattr(KernelSplitPass, "run", _materialize_tuner_param)
+
+    pm = build_default_lowering_pass_manager(name="split-lowering")
+    pm.add_pass(KernelSplitPass())
+
+    module = {"tuner.param": False}
+    result = pm.run(module)
+    assert result is module
+    assert module["tuner.param"] is True
+
+
+# TC-PASS-012
+# 创建者: 金铲铲大作战
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-06 03:17:31 +0800
+# 最近一次运行成功时间: 2026-04-06 03:17:31 +0800
+# 功能说明: 验证错误 split 顺序会被显式拒绝，并包含固定错误关键字 `KernelSplitOrderError`。
+# 测试目的: 机械锁定 split 顺序边界，避免错误 pipeline 导致 ABI 双重改写或 DMA hierarchy 口径漂移。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_kernel_split_pipeline_rejects_wrong_order
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
+# 对应 spec 文件路径: spec/pass/pass_manager.md
+# 对应测试文件路径: test/pass/test_pass_manager.py
+def test_kernel_split_pipeline_rejects_wrong_order() -> None:
+    lowering_module = importlib.import_module("kernel_gen.passes.lowering")
+    LowerNnToKernelPass = lowering_module.LowerNnToKernelPass
+    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
+    kernel_split_module = importlib.import_module("kernel_gen.passes.lowering.kernel_split")
+    KernelSplitPass = kernel_split_module.KernelSplitPass
+    dma_hierarchy_module = importlib.import_module("kernel_gen.passes.lowering.dma_memory_hierarchy")
+    LowerDmaMemoryHierarchyPass = dma_hierarchy_module.LowerDmaMemoryHierarchyPass
+
+    pm = PassManager(name="bad-split-order")
+    pm.add_pass(LowerNnToKernelPass())
+    pm.add_pass(KernelSplitPass())
+    pm.add_pass(BufferResultsToOutParamsPass())
+    with pytest.raises(ValueError, match="KernelSplitOrderError"):
+        pm.run(object())
+
+    pm = PassManager(name="bad-split-dma-order")
+    pm.add_pass(LowerNnToKernelPass())
+    pm.add_pass(BufferResultsToOutParamsPass())
+    pm.add_pass(LowerDmaMemoryHierarchyPass())
+    pm.add_pass(KernelSplitPass())
+    with pytest.raises(ValueError, match="KernelSplitOrderError"):
+        pm.run(object())
+
+
+# TC-PASS-013
+# 创建者: 金铲铲大作战
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-06 03:17:31 +0800
+# 最近一次运行成功时间: 2026-04-06 03:17:31 +0800
+# 功能说明: 验证显式 split pipeline 不会隐式引入新的“函数抽取阶段”pass，保持单函数合同的 pipeline 组成可审计。
+# 测试目的: 锁定 pass_manager 默认 builder 的职责边界：只构造 lowering + out-params 收口，不夹带额外 pass。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_kernel_split_pipeline_keeps_single_function_contract
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
+# 对应 spec 文件路径: spec/pass/pass_manager.md
+# 对应测试文件路径: test/pass/test_pass_manager.py
+def test_kernel_split_pipeline_keeps_single_function_contract() -> None:
+    kernel_split_module = importlib.import_module("kernel_gen.passes.lowering.kernel_split")
+    KernelSplitPass = kernel_split_module.KernelSplitPass
+
+    pm = build_default_lowering_pass_manager(name="split-lowering")
+    pm.add_pass(KernelSplitPass())
+    pass_names = [item.name for item in pm._passes]  # noqa: SLF001 - test asserts pipeline boundary
+    assert pass_names == ["lower-nn-to-kernel", "buffer-results-to-out-params", "kernel-split"]
