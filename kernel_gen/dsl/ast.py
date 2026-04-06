@@ -100,6 +100,8 @@ _ALLOWED_IMPORT_BOUND_HELPERS: dict[str, tuple[types.ModuleType, frozenset[str]]
                 "leaky_relu",
                 "hard_sigmoid",
                 "exp",
+                "broadcast",
+                "broadcast_to",
                 "reduce_sum",
                 "reduce_min",
                 "reduce_max",
@@ -575,6 +577,57 @@ class Img2ColAST:
     kind: str
     args: list[object]
     kwargs: dict[str, object]
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class NnBroadcastAST:
+    """nn.broadcast helper 节点。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 表示 `broadcast(value, target)` 的 DSL helper 调用。
+    - 保留输入与目标表达式，交由 lowering 阶段验证形状/类型。
+
+    使用示例:
+    - NnBroadcastAST(value=VarAST("x"), target=VarAST("y"))
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    value: object
+    target: object
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class NnBroadcastToAST:
+    """nn.broadcast_to helper 节点。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 表示 `broadcast_to(source, target_shape, space)` 的 DSL helper 调用。
+    - 记录源张量、目标 shape 表达式与 MemorySpace。
+
+    使用示例:
+    - NnBroadcastToAST(source=VarAST("x"), target_shape=[ConstAST(2)], space=MemorySpace.GM)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    source: object
+    target_shape: object
+    space: object
     location: SourceLocation | None = None
 
 
@@ -1592,6 +1645,8 @@ def _is_memory_target_ast(node: object) -> bool:
             DmaReshapeAST,
             DmaFlattenAST,
             Img2ColAST,
+            NnBroadcastAST,
+            NnBroadcastToAST,
             MatmulAST,
             ArchGetDynamicMemoryAST,
         ),
@@ -2072,7 +2127,7 @@ def _parse_dma_call(
     """解析 DSL 中的 DMA/NN helper 调用。
 
     创建者: OpenAI
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 仅接受当前函数显式导入绑定到 `kernel_gen.operation.dma/arch/nn` 的 helper 调用。
@@ -2081,6 +2136,7 @@ def _parse_dma_call(
     - 将 `relu/sigmoid/tanh/leaky_relu/hard_sigmoid/exp(...)` 解析为 `NnUnaryAST`。
     - 将 `reduce_sum/reduce_min/reduce_max(...)` 解析为 `NnReduceAST`。
     - 将 `img2col1d/img2col2d(...)` 解析为对应的 `Img2ColAST`。
+    - 将 `broadcast/broadcast_to(...)` 解析为对应的 `NnBroadcastAST/NnBroadcastToAST`。
     - 将 `get_block_id()` / `get_block_num()` / `get_subthread_id()` / `get_subthread_num()` / `get_thread_id()` / `get_thread_num()` 解析为 `ArchQueryAST`。
     - 将 `get_dynamic_memory(space)` 解析为 `ArchGetDynamicMemoryAST`。
     - 将 `barrier(visibility=[...], scope=BarrierScope.BLOCK)` 解析为 `ArchBarrierAST`。
@@ -2239,6 +2295,47 @@ def _parse_dma_call(
             kind=call_name,
             args=args,
             kwargs=kwargs,
+            location=_location_from_node(expr),
+        )
+
+    if call_name == "broadcast":
+        if len(expr.args) != 2 or expr.keywords:
+            _raise_parse_error("Unsupported broadcast arity", expr)
+        value = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+        target = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+        return NnBroadcastAST(value=value, target=target, location=_location_from_node(expr))
+
+    if call_name == "broadcast_to":
+        if not expr.args or len(expr.args) > 3:
+            _raise_parse_error("Unsupported broadcast_to arity", expr)
+        source = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+        shape_env = dict(env)
+        if bool(shape_env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)):
+            shape_env[_ALLOW_EXTERNAL_CONSTANTS_ENV_KEY] = True
+        target_shape = (
+            _parse_expr(expr.args[1], shape_env, globals_table, builtins_table) if len(expr.args) >= 2 else None
+        )
+        space = _parse_expr(expr.args[2], env, globals_table, builtins_table) if len(expr.args) >= 3 else None
+        for keyword in expr.keywords:
+            if keyword.arg is None:
+                _raise_parse_error("Unsupported broadcast_to arity", expr)
+            if keyword.arg == "target_shape":
+                if target_shape is not None:
+                    _raise_parse_error("Unsupported broadcast_to arity", expr)
+                target_shape = _parse_expr(keyword.value, shape_env, globals_table, builtins_table)
+                continue
+            if keyword.arg == "space":
+                if space is not None:
+                    _raise_parse_error("Unsupported broadcast_to arity", expr)
+                space = _parse_expr(keyword.value, env, globals_table, builtins_table)
+                continue
+            _raise_parse_error("Unsupported broadcast_to arity", expr)
+        if target_shape is None or space is None:
+            _raise_parse_error("Unsupported broadcast_to arity", expr)
+        return NnBroadcastToAST(
+            source=source,
+            target_shape=target_shape,
+            space=space,
             location=_location_from_node(expr),
         )
 

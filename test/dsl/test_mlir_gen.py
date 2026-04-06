@@ -3371,8 +3371,8 @@ def test_build_func_op_supports_symbolic_for_loop_dma_without_return(monkeypatch
 # MGEN-011 / MGEN-022A
 # 创建者: 金铲铲大作战
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-19 03:24:32 +0800
-# 最近一次运行成功时间: 2026-03-19 03:24:32 +0800
+# 最近一次运行测试时间: 2026-04-06 22:22:19 +0800
+# 最近一次运行成功时间: 2026-04-06 22:22:19 +0800
 # 功能说明: 验证 singleton dim 隐式 broadcast lowering 为 nn.broadcast + nn.add。
 # 测试目的: 验证 singleton dim 隐式 broadcast lowering 为 nn.broadcast + nn.add。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_tensor_binary_implicit_broadcast_lowering
@@ -3465,7 +3465,13 @@ def test_compare_implicit_broadcast_lowering() -> None:
     lhs = TensorAST(name="x", memory=lhs_memory, location=None)
     rhs = TensorAST(name="y", memory=rhs_memory, location=None)
     expr = CompareExprAST(op="eq", lhs=lhs, rhs=rhs, location=None)
-    func_ast = FunctionAST(name="eq", inputs=[lhs, rhs], outputs=[], body=BlockAST([expr]), returns_none=True)
+    func_ast = FunctionAST(
+        name="eq",
+        inputs=[lhs, rhs],
+        outputs=[],
+        body=BlockAST([expr]),
+        has_explicit_return=True,
+    )
     func_op = build_func_op_from_ast(func_ast)
     broadcast_ops = [op for op in func_op.body.block.ops if isinstance(op, NnBroadcastOp)]
     assert len(broadcast_ops) == 1

@@ -111,6 +111,7 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 from kernel_gen.target import registry
 from kernel_gen.operation import arch as _KG_OPERATION_ARCH
+from kernel_gen.operation import nn as _KG_OPERATION_NN
 
 from .ast import (
     ArchBarrierAST,
@@ -133,6 +134,8 @@ from .ast import (
     Img2ColAST,
     LoadAST,
     MatmulAST,
+    NnBroadcastAST,
+    NnBroadcastToAST,
     NnReduceAST,
     NnUnaryAST,
     ScalarArgAST,
@@ -1871,6 +1874,54 @@ def _memory_to_nn_type(memory: Memory, location: SourceLocation | None = None) -
     return NnMemoryType(shape_attr, stride_attr, element_type, space)
 
 
+def _nn_memory_type_to_memory(
+    memory_type: NnMemoryType,
+    location: SourceLocation | None = None,
+) -> Memory:
+    """将 `NnMemoryType` 转换为运行时 `Memory` 描述。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 读取 `nn.memory` 的 shape/stride/element_type/space 并规整为 `Memory` 描述。
+    - 拒绝包含未知维度的 shape/stride，避免在 broadcast 类路径中生成不完整的空间信息。
+
+    使用示例:
+    - _nn_memory_type_to_memory(memory_type, location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+    shape: list[SymbolDim] = []
+    for dim_attr in memory_type.shape.data:
+        dim_symbol = _shape_attr_to_symbol_dim(dim_attr, location)
+        if dim_symbol is None:
+            raise _LoweringError("nn.memory shape contains unknown dimension", location=location)
+        shape.append(dim_symbol)
+    stride: list[SymbolDim] = []
+    for dim_attr in memory_type.stride.data:
+        dim_symbol = _shape_attr_to_symbol_dim(dim_attr, location)
+        if dim_symbol is None:
+            raise _LoweringError("nn.memory stride contains unknown dimension", location=location)
+        stride.append(dim_symbol)
+    dtype = _xdsl_to_dtype(memory_type.element_type, location)
+    space_name = memory_type.space.space.data
+    space_map = {
+        "global": MemorySpace.GM,
+        "shared": MemorySpace.SM,
+        "local": MemorySpace.LM,
+        "tsm": MemorySpace.TSM,
+        "tlm": MemorySpace.TLM,
+    }
+    space = space_map.get(space_name)
+    if space is None:
+        raise _LoweringError("Unsupported nn.memory space", location=location)
+    return Memory(shape, dtype, space=space, stride=stride)
+
+
 def _build_dynamic_memory_type(
     space: MemorySpace,
     location: SourceLocation | None = None,
@@ -2321,6 +2372,8 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
                 DmaFlattenAST,
                 Img2ColAST,
                 MatmulAST,
+                NnBroadcastAST,
+                NnBroadcastToAST,
                 NnReduceAST,
                 NnUnaryAST,
                 DmaFreeAST,
@@ -2515,6 +2568,39 @@ def _infer_expr_type(
             raise _LoweringError("flatten source must have nn.memory type", location=expr.location)
         shape_attr = [_shape_numel_attr(source_type.shape.data)]
         result_type = _memory_type_from_parts(shape_attr, [IntAttr(1)], source_type.element_type, source_type.space)
+        type_map[expr_key] = result_type
+        return result_type
+    if isinstance(expr, NnBroadcastAST):
+        value_type = _infer_expr_type(expr.value, type_map, runtime_values=runtime_values)
+        target_type = _infer_expr_type(expr.target, type_map, runtime_values=runtime_values)
+        if not isinstance(value_type, NnMemoryType) or not isinstance(target_type, NnMemoryType):
+            raise _LoweringError("broadcast operands must be nn.memory", location=expr.location)
+        source_memory = _nn_memory_type_to_memory(value_type, location=expr.location)
+        target_memory = _nn_memory_type_to_memory(target_type, location=expr.location)
+        output_memory = _KG_OPERATION_NN.broadcast(source_memory, target_memory)
+        result_type = _memory_to_nn_type(output_memory, location=expr.location)
+        type_map[expr_key] = result_type
+        return result_type
+    if isinstance(expr, NnBroadcastToAST):
+        source_type = _infer_expr_type(expr.source, type_map, runtime_values=runtime_values)
+        if not isinstance(source_type, NnMemoryType):
+            raise _LoweringError("broadcast_to source must be nn.memory", location=expr.location)
+        source_memory = _nn_memory_type_to_memory(source_type, location=expr.location)
+        target_attrs = _build_static_index_attrs_exact(
+            expr.target_shape,
+            location=expr.location,
+            runtime_values=runtime_values,
+        )
+        target_dims: list[SymbolDim] = []
+        for attr in target_attrs:
+            dim_symbol = _shape_attr_to_symbol_dim(attr, expr.location)
+            if dim_symbol is None:
+                raise _LoweringError("broadcast_to target_shape contains unknown dimension", location=expr.location)
+            target_dims.append(dim_symbol)
+        if not isinstance(expr.space, MemorySpace):
+            raise _LoweringError("broadcast_to space must be MemorySpace", location=expr.location)
+        output_memory = _KG_OPERATION_NN.broadcast_to(source_memory, target_dims, expr.space)
+        result_type = _memory_to_nn_type(output_memory, location=expr.location)
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, NnUnaryAST):
@@ -2948,6 +3034,30 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         ctx._set_cache(expr_key, input_value)
         ctx.types[expr_key] = result_type
         return input_value
+    if isinstance(expr, NnBroadcastAST):
+        value = _lower_expr(expr.value, ctx)
+        target = _lower_expr(expr.target, ctx)
+        _expect_memory_value(value, expr.location)
+        target_type = _expect_memory_value(target, expr.location)
+        result_type = _infer_expr_type(expr, ctx.types)
+        if not isinstance(result_type, NnMemoryType):
+            raise _LoweringError("broadcast result must be nn.memory", location=expr.location)
+        if result_type != target_type:
+            raise _LoweringError("broadcast result must match target type", location=expr.location)
+        op = NnBroadcastOp(value, result_type, result_type.space)
+        ctx.builder.add_op(op)
+        ctx._set_cache(expr_key, op.result)
+        return op.result
+    if isinstance(expr, NnBroadcastToAST):
+        source = _lower_expr(expr.source, ctx)
+        _expect_memory_value(source, expr.location)
+        result_type = _infer_expr_type(expr, ctx.types)
+        if not isinstance(result_type, NnMemoryType):
+            raise _LoweringError("broadcast_to result must be nn.memory", location=expr.location)
+        op = NnBroadcastOp(source, result_type, result_type.space)
+        ctx.builder.add_op(op)
+        ctx._set_cache(expr_key, op.result)
+        return op.result
     if isinstance(expr, NnReduceAST):
         input_value = _lower_expr(expr.value, ctx)
         input_type = _expect_memory_value(input_value, expr.location)
@@ -3300,6 +3410,8 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
             DmaFlattenAST,
             Img2ColAST,
             MatmulAST,
+            NnBroadcastAST,
+            NnBroadcastToAST,
             NnReduceAST,
             NnUnaryAST,
             ArchGetDynamicMemoryAST,
