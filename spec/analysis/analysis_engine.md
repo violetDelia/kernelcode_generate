@@ -55,8 +55,10 @@
 - 冻结正式计算分类枚举：`ComputeKind = {SCALAR, VECTOR, TENSOR, MATH}`。
 - 冻结正式 `MemoryPath` 枚举至少包含：
   - `GM_TO_SM`
+  - `SM_TO_GM`
   - `SM_TO_LM`
   - `GM_TO_LM`
+  - `LM_TO_SM`
   - `GM_TO_TSM`
   - `TSM_TO_TLM`
   - `FM_TO_TSM`
@@ -72,8 +74,9 @@
   - `ComputeKind.VECTOR`
   - `ComputeKind.TENSOR`
 - 本轮 `memory` 分类只要求保证 `memory_items` 与 `memory_totals_by_path` 可机械读取；对 compute op 可使用泛化 path（如 `GM->compute` / `compute->GM`），对当前已公开 DMA 分支应优先使用 source/target space 路径。
-- 当前已公开 DMA 访存分支是 `dma.copy`、`dma.load`、`dma.store`、`dma.slice`；它们的前置条件非法时必须 `hard error`。
-- 当前未公开 DMA 分支（如 `dma.alloc`、`dma.deslice`、`dma.free`）继续执行 `skip + warning`，不计入正式 `memory_items / memory_totals_by_path`。
+- 当前已公开 DMA 访存分支至少包含 `dma.copy`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`；它们的前置条件非法时必须 `hard error`。
+- `dma.deslice` 的 `memory_items.path` 必须按 `source.space -> target.space` 归一（例如 `LM->SM`、`SM->GM`），以支持 writeback 路径按层级聚合统计。
+- 当前未覆盖/未公开的 DMA 分支（未知 `dma.*` op）继续执行 `skip + warning`，不计入正式 `memory_items / memory_totals_by_path`。
 - `write_op_attrs=False` / `write_func_attrs=False` 时，不得产生任何新的 `analysis.*` attribute。
 - 旧 `compute/read_bytes/write_bytes` 若仍暴露，只允许是由 `AnalysisResult` 派生的 alias。
 - 一旦 `npu_demo` 的 analysis 默认参数缺字段或读取失败，必须显式报错；不允许静默回退到 analysis 侧手写常量。
