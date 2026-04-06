@@ -27,6 +27,7 @@ from xdsl.dialects.builtin import (
     IntAttr,
     IntegerAttr,
     ModuleOp,
+    StringAttr,
     UnrealizedConversionCastOp,
     i32,
 )
@@ -179,7 +180,7 @@ def _build_full_window_operands(
     - offsets: 全 0
     - strides: 全 1
     - sizes: 通过 `symbol.get_dim(source, axis)` 从 source 的 shape 中读取，保证与静态 shape 对齐，
-      且当 source 存在匿名动态值 `?` 时 verifier 会显式失败。
+      且当 source 存在匿名动态值 `?` 且没有可恢复的显式 symbol 来源时，pass 必须显式失败。
 
     使用示例:
     - ops, offsets, sizes, strides = _build_full_window_operands(gm, rank=2, zero=zero, one=one)
@@ -190,9 +191,18 @@ def _build_full_window_operands(
     - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
     """
 
+    source_type = source.type
+    if not isinstance(source_type, NnMemoryType):
+        raise LowerDmaMemoryHierarchyError("dynamic_shape source must be nn.memory")
+
     ops: list[Operation] = []
     sizes: list[SSAValue] = []
     for axis in range(rank):
+        shape_dim = source_type.shape.data[axis]
+        if isinstance(shape_dim, StringAttr) and shape_dim.data == "?":
+            raise LowerDmaMemoryHierarchyError(
+                "dynamic_shape must come from explicit symbol source; anonymous '?' dimension is unsupported in lower-dma-memory-hierarchy"
+            )
         get_dim = SymbolGetDimOp(source, IntAttr(axis))
         ops.append(get_dim)
         sizes.append(get_dim.result)

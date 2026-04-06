@@ -31,14 +31,14 @@ from pathlib import Path
 
 import pytest
 from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, i32
+from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, StringAttr, i32
 from xdsl.ir import Block, Operation, Region, SSAValue
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dialect.dma import DmaDesliceOp, DmaSliceOp, DmaViewOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaSliceOp, DmaViewOp
 from kernel_gen.dialect.kernel import KernelAddOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolValueType
@@ -76,6 +76,93 @@ def _make_memory_type(space: str) -> NnMemoryType:
     )
 
 
+def _make_symbolic_memory_type(space: str) -> NnMemoryType:
+    """构造包含显式 symbol 维度的测试用 `nn.memory` 类型。
+
+    创建者: 咯咯咯
+    最后一次更改: 咯咯咯
+
+    功能说明:
+    - 统一生成 `[N, 3]`、`i32`、紧致 stride 的 memory 类型。
+    - 用于验证 pass 能把显式 symbol shape 透传给 staging `dma.alloc`。
+
+    使用示例:
+    - gm = _make_symbolic_memory_type("global")
+
+    关联文件:
+    - spec: spec/pass/lowering/dma_memory_hierarchy.md
+    - test: test/pass/test_dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+    """
+
+    return NnMemoryType(
+        ArrayAttr([StringAttr("N"), IntAttr(3)]),
+        ArrayAttr([IntAttr(3), IntAttr(1)]),
+        i32,
+        NnMemorySpaceAttr.from_name(space),
+    )
+
+
+def _make_anonymous_dynamic_memory_type(space: str) -> NnMemoryType:
+    """构造包含匿名动态维度 `?` 的测试用 `nn.memory` 类型。
+
+    创建者: 咯咯咯
+    最后一次更改: 咯咯咯
+
+    功能说明:
+    - 统一生成 `[?, 3]`、`i32`、紧致 stride 的 memory 类型。
+    - 用于验证 pass 在没有显式 symbol 来源时必须以 `dynamic_shape` 失败。
+
+    使用示例:
+    - gm = _make_anonymous_dynamic_memory_type("global")
+
+    关联文件:
+    - spec: spec/pass/lowering/dma_memory_hierarchy.md
+    - test: test/pass/test_dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+    """
+
+    return NnMemoryType(
+        ArrayAttr([StringAttr("?"), IntAttr(3)]),
+        ArrayAttr([IntAttr(3), IntAttr(1)]),
+        i32,
+        NnMemorySpaceAttr.from_name(space),
+    )
+
+
+def _build_kernel_add_module_with_type(mem_type: NnMemoryType) -> tuple[ModuleOp, Block, KernelAddOp]:
+    """构造使用指定 `nn.memory` 类型的单个 kernel.add module。
+
+    创建者: 咯咯咯
+    最后一次更改: 咯咯咯
+
+    功能说明:
+    - func 签名包含 2 个输入与 1 个 out operand（均为给定 `nn.memory` 类型）。
+    - func 内插入 `kernel.add(lhs, rhs, out)` 与空 return。
+
+    使用示例:
+    - module, block, kernel_op = _build_kernel_add_module_with_type(_make_symbolic_memory_type("global"))
+
+    关联文件:
+    - spec: spec/pass/lowering/dma_memory_hierarchy.md
+    - test: test/pass/test_dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+    """
+
+    func_type = FunctionType.from_lists([mem_type, mem_type, mem_type], [])
+    block = Block(arg_types=[mem_type, mem_type, mem_type])
+    kernel_op = KernelAddOp(
+        block.args[0],
+        block.args[1],
+        block.args[2],
+        NnMemorySpaceAttr.from_name(mem_type.space.space.data),
+    )
+    block.add_ops([kernel_op, func.ReturnOp()])
+    func_op = func.FuncOp("main", func_type, Region(block))
+    module = ModuleOp([func_op])
+    return module, block, kernel_op
+
+
 def _build_kernel_add_module(space: str) -> tuple[ModuleOp, Block, KernelAddOp]:
     """构造包含单个 kernel.add 的 module。
 
@@ -96,18 +183,7 @@ def _build_kernel_add_module(space: str) -> tuple[ModuleOp, Block, KernelAddOp]:
     """
 
     mem_type = _make_memory_type(space)
-    func_type = FunctionType.from_lists([mem_type, mem_type, mem_type], [])
-    block = Block(arg_types=[mem_type, mem_type, mem_type])
-    kernel_op = KernelAddOp(
-        block.args[0],
-        block.args[1],
-        block.args[2],
-        NnMemorySpaceAttr.from_name(space),
-    )
-    block.add_ops([kernel_op, func.ReturnOp()])
-    func_op = func.FuncOp("main", func_type, Region(block))
-    module = ModuleOp([func_op])
-    return module, block, kernel_op
+    return _build_kernel_add_module_with_type(mem_type)
 
 
 def _build_kernel_add_module_with_window() -> tuple[ModuleOp, Block, KernelAddOp]:
@@ -441,6 +517,31 @@ def test_dma_memory_hierarchy_window_offsets_and_unit_strides() -> None:
         assert operand_type.space.space.data == "local"
 
 
+# COV-DMH-009
+# 创建者: 咯咯咯
+# 最后一次更改: 咯咯咯
+# 最近一次运行测试时间: 2026-04-06 09:39:15 +0800
+# 最近一次运行成功时间: 2026-04-06 09:39:15 +0800
+# 测试目的: 验证显式 symbol shape 可透传到 staging dma.alloc(dynamic_shape=...)。
+# 使用示例: pytest -q test/pass/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_symbol_shape_passthrough
+# 对应功能实现文件路径: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+# 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy.md
+# 对应测试文件路径: test/pass/test_dma_memory_hierarchy.py
+def test_dma_memory_hierarchy_symbol_shape_passthrough() -> None:
+    module, block, _ = _build_kernel_add_module_with_type(_make_symbolic_memory_type("global"))
+    target_name = _ensure_sm_lm_target_registered()
+    target_registry._set_current_target(target_name)
+    try:
+        LowerDmaMemoryHierarchyPass().run(module)
+    finally:
+        target_registry._set_current_target(None)
+
+    allocs = [op for op in _collect_ops(block) if isinstance(op, DmaAllocOp)]
+    assert len(allocs) == 6
+    for alloc in allocs:
+        assert _symbol_int_values(list(alloc.dynamic_shape)) == ["N", 3]
+
+
 # COV-DMH-005
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚
@@ -456,6 +557,27 @@ def test_dma_memory_hierarchy_requires_sm_lm() -> None:
     target_registry._set_current_target("cpu")
     try:
         with pytest.raises(LowerDmaMemoryHierarchyError, match="SM/LM"):
+            LowerDmaMemoryHierarchyPass().run(module)
+    finally:
+        target_registry._set_current_target(None)
+
+
+# COV-DMH-010
+# 创建者: 咯咯咯
+# 最后一次更改: 咯咯咯
+# 最近一次运行测试时间: 2026-04-06 09:39:15 +0800
+# 最近一次运行成功时间: 2026-04-06 09:39:15 +0800
+# 测试目的: 验证匿名 ? 且无可恢复 symbol 来源时 pass 必须以 dynamic_shape 显式失败。
+# 使用示例: pytest -q test/pass/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_rejects_anonymous_dynamic_shape
+# 对应功能实现文件路径: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+# 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy.md
+# 对应测试文件路径: test/pass/test_dma_memory_hierarchy.py
+def test_dma_memory_hierarchy_rejects_anonymous_dynamic_shape() -> None:
+    module, _, _ = _build_kernel_add_module_with_type(_make_anonymous_dynamic_memory_type("global"))
+    target_name = _ensure_sm_lm_target_registered()
+    target_registry._set_current_target(target_name)
+    try:
+        with pytest.raises(LowerDmaMemoryHierarchyError, match="dynamic_shape"):
             LowerDmaMemoryHierarchyPass().run(module)
     finally:
         target_registry._set_current_target(None)
