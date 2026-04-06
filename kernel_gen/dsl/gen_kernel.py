@@ -1,7 +1,7 @@
 """Function-level C-like kernel generation helpers.
 
 创建者: 金铲铲大作战
-最后一次更改: 朽木露琪亚
+最后一次更改: 小李飞刀
 
 功能说明:
 - 按 `emit_c` 的节点级规则，组装 `func.func` 的完整函数源码。
@@ -24,9 +24,20 @@ from typing import Callable
 from typing import Any
 
 from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, DictionaryAttr, Float32Type, Float64Type, IntegerType, IndexType, StringAttr
+from xdsl.dialects.builtin import (
+    ArrayAttr,
+    DictionaryAttr,
+    Float32Type,
+    Float64Type,
+    IntegerType,
+    IndexType,
+    ModuleOp,
+    StringAttr,
+    SymbolRefAttr,
+)
 from xdsl.ir import Operation
 
+from kernel_gen.dialect.arch import ArchBarrierOp, ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp, ArchLaunchOp
 from kernel_gen.dialect.dma import DmaAllocOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolDimType, SymbolValueType
@@ -296,11 +307,49 @@ class _KernelEmitter:
         self.ctx = ctx
 
     def emit(self, op_or_func: Any) -> str:
+        if isinstance(op_or_func, ModuleOp):
+            return self._emit_module(op_or_func)
         if isinstance(op_or_func, func.FuncOp):
             return self._emit_func(op_or_func)
         if isinstance(op_or_func, func.ReturnOp):
             raise GenKernelError(f"target={self.ctx.target}: func.return/out binding must be emitted in function main flow")
         return emit_c_op(op_or_func, self.ctx)
+
+    def _emit_module(self, module_op: ModuleOp) -> str:
+        """发射 `target=npu_demo` 的受控 `builtin.module` 双函数源码。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 仅对 `target="npu_demo"` 放行受控 `builtin.module` 子集。
+        - 要求 module 严格包含一个 body 函数与一个 wrapper 函数，并按 module 中的出现顺序输出源码。
+
+        使用示例:
+        - source = _KernelEmitter(EmitCContext(target="npu_demo")).emit(module_op)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
+
+        if self.ctx.target != "npu_demo":
+            raise GenKernelError(f"target={self.ctx.target}: func <module>: builtin.module is only supported for target=npu_demo")
+
+        body_func, wrapper_func = self._classify_npu_demo_launch_module(module_op)
+        emitted: list[str] = []
+        for top_op in module_op.ops:
+            if not isinstance(top_op, func.FuncOp):
+                raise _error(self.ctx, "<module>", "npu_demo launch module must contain only func.func")
+            if top_op is body_func:
+                emitted.append(self._emit_npu_demo_launch_body_function(body_func))
+                continue
+            if top_op is wrapper_func:
+                emitted.append(self._emit_npu_demo_launch_wrapper_function(wrapper_func, body_func))
+                continue
+            raise _error(self.ctx, "<module>", "npu_demo launch module must contain exactly one body func and one wrapper func")
+        return "\n\n".join(emitted)
 
     def _emit_func(self, func_op: func.FuncOp) -> str:
         strategy = self._select_func_strategy(func_op)
@@ -471,6 +520,453 @@ class _KernelEmitter:
 
     def _is_npu_demo_body_level_kernel(self, func_op: func.FuncOp) -> bool:
         return self.ctx.target == "npu_demo"
+
+    def _npu_demo_module_funcs(self, module_op: ModuleOp) -> list[func.FuncOp]:
+        """提取并校验 npu_demo module 的顶层 `func.func` 列表。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - `target="npu_demo"` 的 module 子集只允许顶层 `func.func`。
+        - 额外顶层 op 或函数数量不为 2 时必须 fail-fast。
+
+        使用示例:
+        - func_ops = self._npu_demo_module_funcs(module_op)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
+
+        top_ops = list(module_op.ops)
+        if any(not isinstance(top_op, func.FuncOp) for top_op in top_ops):
+            raise _error(self.ctx, "<module>", "npu_demo launch module must contain only func.func")
+        if len(top_ops) != 2:
+            raise _error(self.ctx, "<module>", "npu_demo launch module must contain exactly one body func and one wrapper func")
+        return [top_op for top_op in top_ops if isinstance(top_op, func.FuncOp)]
+
+    def _is_npu_demo_launch_helper_op(self, op: Operation) -> bool:
+        """判断 body/wrapper 中可忽略的符号辅助 op。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 允许测试/expectation 为 view/launch 维度准备辅助 `!symbol.int` 值。
+        - 这些 op 不参与 `gen_kernel(target="npu_demo")` 的固定骨架输出与序列判定。
+
+        使用示例:
+        - if self._is_npu_demo_launch_helper_op(op): ...
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
+
+        return op.name == "test.fake_symbol_value"
+
+    def _filtered_npu_demo_launch_ops(self, func_op: func.FuncOp) -> list[Operation]:
+        """返回 npu_demo launch 子集的有效语义 op 序列。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 过滤辅助 `!symbol.int` 产生 op，仅保留 wrapper/body 的冻结语义骨架。
+        - 供 module 分类与固定序列校验复用。
+
+        使用示例:
+        - ops = self._filtered_npu_demo_launch_ops(func_op)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
+
+        return [op for op in func_op.body.block.ops if not self._is_npu_demo_launch_helper_op(op)]
+
+    def _launch_callee_name(self, launch_op: ArchLaunchOp, wrapper_name: str) -> str:
+        """解析 wrapper `arch.launch` 的 body callee 名称。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 仅接受扁平 `@symbol` 形式的 callee。
+        - 出错时复用稳定短语，便于后续审查与 expectation 机械判断。
+
+        使用示例:
+        - callee_name = self._launch_callee_name(launch_op, wrapper_func.sym_name.data)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
+
+        callee = launch_op.callee
+        if not isinstance(callee, SymbolRefAttr):
+            raise _error(self.ctx, wrapper_name, "npu_demo launch wrapper must use flat @callee")
+        if len(callee.nested_references.data) != 0 or not callee.root_reference.data:
+            raise _error(self.ctx, wrapper_name, "npu_demo launch wrapper must use flat @callee")
+        return callee.root_reference.data
+
+    def _static_launch_extent(self, launch_op: ArchLaunchOp, field_name: str, wrapper_name: str) -> int:
+        """读取 launch 的静态 extent，并显式拒绝非静态或非法值。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - `S4` 冻结的 npu_demo wrapper 只接受静态 `1/4/1` 规模。
+        - 非 `!symbol.int` 或无法求值为整数时必须 fail-fast。
+
+        使用示例:
+        - thread_extent = self._static_launch_extent(launch_op, "thread", wrapper_name)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
+
+        operand = getattr(launch_op, field_name)
+        operand_type = operand.type
+        if not isinstance(operand_type, SymbolValueType):
+            raise _error(self.ctx, wrapper_name, f"npu_demo launch wrapper {field_name} must be !symbol.int")
+        value = operand_type.get_value()
+        if not isinstance(value, int):
+            raise _error(self.ctx, wrapper_name, f"npu_demo launch wrapper {field_name} must be static integer")
+        return value
+
+    def _classify_npu_demo_launch_module(self, module_op: ModuleOp) -> tuple[func.FuncOp, func.FuncOp]:
+        """识别受控 module 中的 body / wrapper 函数。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 要求 module 严格包含两个 `func.func`。
+        - 以唯一 `arch.launch` 所在函数识别 wrapper，并校验其 callee 对应唯一 body。
+
+        使用示例:
+        - body_func, wrapper_func = self._classify_npu_demo_launch_module(module_op)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
+
+        func_ops = self._npu_demo_module_funcs(module_op)
+        wrapper_candidates = [
+            func_op
+            for func_op in func_ops
+            if any(isinstance(op, ArchLaunchOp) for op in self._filtered_npu_demo_launch_ops(func_op))
+        ]
+        if len(wrapper_candidates) != 1:
+            raise _error(self.ctx, "<module>", "npu_demo launch module must contain exactly one body func and one wrapper func")
+
+        wrapper_func = wrapper_candidates[0]
+        wrapper_ops = self._filtered_npu_demo_launch_ops(wrapper_func)
+        if len(wrapper_ops) != 2 or not isinstance(wrapper_ops[0], ArchLaunchOp) or not isinstance(wrapper_ops[1], func.ReturnOp):
+            raise _error(self.ctx, wrapper_func.sym_name.data, "npu_demo launch wrapper must contain arch.launch followed by func.return")
+
+        callee_name = self._launch_callee_name(wrapper_ops[0], wrapper_func.sym_name.data)
+        body_func = next((func_op for func_op in func_ops if func_op.sym_name.data == callee_name), None)
+        if body_func is None or body_func is wrapper_func:
+            raise _error(self.ctx, wrapper_func.sym_name.data, f"npu_demo launch wrapper references missing body {callee_name}")
+        return body_func, wrapper_func
+
+    def _validate_npu_demo_launch_body_signature(self, func_op: func.FuncOp) -> tuple[NnMemoryType, NnMemoryType, NnMemoryType]:
+        """校验 body 函数签名。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - body 必须是 `ctx + lhs + rhs + out` 的四参数、零返回形式。
+        - 三个 memory 参数必须 element type 一致。
+
+        使用示例:
+        - lhs_type, rhs_type, out_type = self._validate_npu_demo_launch_body_signature(body_func)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
+
+        func_name = func_op.sym_name.data
+        input_types = list(func_op.function_type.inputs.data)
+        result_types = list(func_op.function_type.outputs.data)
+        arg_names = _extract_arg_names(func_op)
+        if len(input_types) != 4 or result_types:
+            raise _error(self.ctx, func_name, "unsupported npu_demo launch body signature")
+        if not arg_names or arg_names[0] != "ctx":
+            raise _error(self.ctx, func_name, "npu_demo launch body requires leading ctx argument")
+        lhs_type, rhs_type, out_type = input_types[1], input_types[2], input_types[3]
+        if not isinstance(lhs_type, NnMemoryType) or not isinstance(rhs_type, NnMemoryType) or not isinstance(out_type, NnMemoryType):
+            raise _error(self.ctx, func_name, "unsupported npu_demo launch body signature")
+        if lhs_type.element_type != rhs_type.element_type or lhs_type.element_type != out_type.element_type:
+            raise _error(self.ctx, func_name, "npu_demo launch body requires matching element types")
+        return lhs_type, rhs_type, out_type
+
+    def _validate_npu_demo_launch_wrapper_signature(
+        self,
+        wrapper_func: func.FuncOp,
+        body_func: func.FuncOp,
+    ) -> tuple[NnMemoryType, NnMemoryType, NnMemoryType]:
+        """校验 wrapper 函数签名与 launch 参数透传关系。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - wrapper 必须是 `lhs + rhs + out` 的三参数、零返回形式。
+        - `arch.launch<1, 4, 1>(@body, ...)` 的 args 必须按原顺序透传 wrapper 参数。
+
+        使用示例:
+        - lhs_type, rhs_type, out_type = self._validate_npu_demo_launch_wrapper_signature(wrapper, body)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
+
+        body_lhs_type, body_rhs_type, body_out_type = self._validate_npu_demo_launch_body_signature(body_func)
+        func_name = wrapper_func.sym_name.data
+        input_types = list(wrapper_func.function_type.inputs.data)
+        result_types = list(wrapper_func.function_type.outputs.data)
+        wrapper_ops = self._filtered_npu_demo_launch_ops(wrapper_func)
+        launch_op = wrapper_ops[0]
+        if len(input_types) != 3 or result_types:
+            raise _error(self.ctx, func_name, "unsupported npu_demo launch wrapper signature")
+        if input_types != [body_lhs_type, body_rhs_type, body_out_type]:
+            raise _error(self.ctx, func_name, "npu_demo launch wrapper signature must match body inputs")
+
+        expected_extents = {"block": 1, "thread": 4, "subthread": 1}
+        for field_name, expected_value in expected_extents.items():
+            actual_value = self._static_launch_extent(launch_op, field_name, func_name)
+            if actual_value != expected_value:
+                raise _error(
+                    self.ctx,
+                    func_name,
+                    f"npu_demo launch wrapper must use npu_demo::launch<1, 4, 1>; got {field_name}={actual_value}",
+                )
+
+        if len(launch_op.args) != len(wrapper_func.args):
+            raise _error(self.ctx, func_name, "npu_demo launch wrapper args must forward wrapper signature")
+        for wrapper_arg, launch_arg in zip(wrapper_func.args, launch_op.args, strict=True):
+            if wrapper_arg is not launch_arg:
+                raise _error(self.ctx, func_name, "npu_demo launch wrapper args must forward wrapper signature")
+        return body_lhs_type, body_rhs_type, body_out_type
+
+    def _validate_npu_demo_launch_body_ops(self, func_op: func.FuncOp) -> tuple[ArchBarrierOp, ArchBarrierOp]:
+        """校验 body 函数是否匹配冻结的 add+barrier 骨架。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 允许辅助 `!symbol.int` 产生 op，但过滤后必须严格匹配固定序列。
+        - barrier 本身仍使用 IR 上的 scope/visibility，避免静默回退到旧接口。
+
+        使用示例:
+        - barrier0, barrier1 = self._validate_npu_demo_launch_body_ops(body_func)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
+
+        func_name = func_op.sym_name.data
+        ops = self._filtered_npu_demo_launch_ops(func_op)
+        expected_types = (
+            ArchGetThreadIdOp,
+            ArchGetThreadNumOp,
+            ArchGetDynamicMemoryOp,
+            ArchGetDynamicMemoryOp,
+            Operation,
+            Operation,
+            Operation,
+            Operation,
+            Operation,
+            Operation,
+            Operation,
+            ArchBarrierOp,
+            NnAddOp,
+            ArchBarrierOp,
+            Operation,
+            func.ReturnOp,
+        )
+        if len(ops) != len(expected_types):
+            raise _error(self.ctx, func_name, "npu_demo launch body must match frozen add+barrier subset")
+
+        concrete_expected = (
+            ArchGetThreadIdOp,
+            ArchGetThreadNumOp,
+            ArchGetDynamicMemoryOp,
+            ArchGetDynamicMemoryOp,
+            "dma.view",
+            "dma.view",
+            "dma.view",
+            "dma.view",
+            "dma.view",
+            "dma.slice",
+            "dma.slice",
+            ArchBarrierOp,
+            NnAddOp,
+            ArchBarrierOp,
+            "dma.deslice",
+            func.ReturnOp,
+        )
+        for op, expected in zip(ops, concrete_expected, strict=True):
+            if isinstance(expected, str):
+                if op.name != expected:
+                    raise _error(self.ctx, func_name, "npu_demo launch body must match frozen add+barrier subset")
+                continue
+            if not isinstance(op, expected):
+                raise _error(self.ctx, func_name, "npu_demo launch body must match frozen add+barrier subset")
+
+        barrier0 = ops[11]
+        barrier1 = ops[13]
+        assert isinstance(barrier0, ArchBarrierOp)
+        assert isinstance(barrier1, ArchBarrierOp)
+        return barrier0, barrier1
+
+    def _format_npu_demo_barrier_stmt(self, barrier_op: ArchBarrierOp, func_name: str) -> str:
+        """把 `arch.barrier` 格式化为 `KernelContext::barrier(...)` 语句。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 显式收口为 `ctx.barrier({MemorySpace::TSM, MemorySpace::TLM}, BarrierScope::BLOCK);`
+        - 非 block 或缺失 `[tsm, tlm]` 时稳定失败，防止回退到旧接口。
+
+        使用示例:
+        - stmt = self._format_npu_demo_barrier_stmt(barrier_op, "add_barrier_body")
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
+
+        if barrier_op.scope.scope.data != "block":
+            raise _error(self.ctx, func_name, "npu_demo barrier scope must be block")
+        spaces = [getattr(entry, "space", None).data for entry in barrier_op.visibility.data]
+        if spaces != ["tsm", "tlm"]:
+            raise _error(self.ctx, func_name, "npu_demo barrier visibility must be [tsm, tlm]")
+        return f"{self.ctx.current_indent}ctx.barrier({{MemorySpace::TSM, MemorySpace::TLM}}, BarrierScope::BLOCK);"
+
+    def _emit_npu_demo_launch_body_function(self, func_op: func.FuncOp) -> str:
+        """生成 npu_demo `add+barrier` body 函数源码。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 输出 `static` body 签名，以及固定的 `thread/view/slice/barrier/add/deslice` 管线。
+        - 仅消费 `S4` 冻结的 add+barrier 受控子集。
+
+        使用示例:
+        - source = self._emit_npu_demo_launch_body_function(body_func)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
+
+        lhs_type, rhs_type, out_type = self._validate_npu_demo_launch_body_signature(func_op)
+        barrier0, barrier1 = self._validate_npu_demo_launch_body_ops(func_op)
+        arg_names = _extract_arg_names(func_op)
+        element_type = _type_to_c(out_type.element_type)
+        lhs_name, rhs_name, out_name = arg_names[1], arg_names[2], arg_names[3]
+
+        signature = (
+            f"static void {func_op.sym_name.data}(npu_demo::KernelContext& ctx, "
+            f"const {_type_to_c(lhs_type)}& {lhs_name}, "
+            f"const {_type_to_c(rhs_type)}& {rhs_name}, "
+            f"{_type_to_c(out_type)}& {out_name})"
+        )
+        self.ctx.push_indent()
+        indent = self.ctx.current_indent
+        lines = [
+            f"{indent}long long tid = ctx.thread_id();",
+            f"{indent}long long tnum = ctx.thread_num();",
+            "",
+            f"{indent}Memory<{element_type}> tsm = ctx.get_dynamic_memory<{element_type}>(MemorySpace::TSM);",
+            f"{indent}Memory<{element_type}> tlm = ctx.get_dynamic_memory<{element_type}>(MemorySpace::TLM);",
+            "",
+            f"{indent}auto {lhs_name}_gm = view({lhs_name}, tid * 16, 16, 1);",
+            f"{indent}auto {rhs_name}_gm = view({rhs_name}, tid * 16, 16, 1);",
+            "",
+            f"{indent}auto {lhs_name}_tsm = view(tsm, tid * 16, 16, 1);",
+            f"{indent}auto {rhs_name}_tsm = view(tsm, 64 + tid * 16, 16, 1);",
+            f"{indent}auto {out_name}_tlm = view(tlm, tid * 16, 16, 1);",
+            "",
+            f"{indent}slice({lhs_name}_tsm, {lhs_name}_gm, 0, 16, 1);",
+            f"{indent}slice({rhs_name}_tsm, {rhs_name}_gm, 0, 16, 1);",
+            self._format_npu_demo_barrier_stmt(barrier0, func_op.sym_name.data),
+            "",
+            f"{indent}add({lhs_name}_tsm, {rhs_name}_tsm, {out_name}_tlm);",
+            self._format_npu_demo_barrier_stmt(barrier1, func_op.sym_name.data),
+            "",
+            f"{indent}deslice({out_name}_tlm, {out_name}, tid * 16, 16, 1);",
+        ]
+        body = "\n".join(lines)
+        self.ctx.pop_indent()
+        if body:
+            return f"{signature} {{\n{body}\n}}"
+        return f"{signature} {{\n}}"
+
+    def _emit_npu_demo_launch_wrapper_function(self, wrapper_func: func.FuncOp, body_func: func.FuncOp) -> str:
+        """生成 npu_demo wrapper 函数源码。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - wrapper 负责把 `lhs/rhs/out` 原样透传给 `npu_demo::launch<1, 4, 1>(body, ...)`。
+        - 不生成 `KernelContext` 参数，也不引入旧同步接口。
+
+        使用示例:
+        - source = self._emit_npu_demo_launch_wrapper_function(wrapper_func, body_func)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
+
+        self._validate_npu_demo_launch_wrapper_signature(wrapper_func, body_func)
+        arg_names = _extract_arg_names(wrapper_func)
+        params = []
+        for index, (arg_name, arg_type) in enumerate(zip(arg_names, wrapper_func.function_type.inputs.data, strict=True)):
+            if not isinstance(arg_type, NnMemoryType):
+                raise _error(self.ctx, wrapper_func.sym_name.data, "unsupported npu_demo launch wrapper signature")
+            qualifier = "" if index == len(arg_names) - 1 else "const "
+            ref = "&"
+            params.append(f"{qualifier}{_type_to_c(arg_type)}{ref} {arg_name}")
+        signature = f"void {wrapper_func.sym_name.data}({', '.join(params)})"
+        self.ctx.push_indent()
+        call_args = ", ".join(arg_names)
+        body = (
+            f"{self.ctx.current_indent}npu_demo::launch<1, 4, 1>({body_func.sym_name.data}, {call_args});"
+            if call_args
+            else f"{self.ctx.current_indent}npu_demo::launch<1, 4, 1>({body_func.sym_name.data});"
+        )
+        self.ctx.pop_indent()
+        return f"{signature} {{\n{body}\n}}"
 
     def _get_npu_demo_body_level_kernel_types(self, func_op: func.FuncOp) -> tuple[NnMemoryType, NnMemoryType]:
         func_name = func_op.sym_name.data
@@ -790,7 +1286,7 @@ class _KernelEmitter:
 
 
 def gen_kernel(op_or_func: Any, ctx: EmitCContext) -> str:
-    """把单个 MLIR op 或 `func.func` 生成为目标源码文本。
+    """把单个 MLIR op、`func.func` 或受控 `builtin.module` 生成为目标源码文本。
 
     创建者: 金铲铲大作战
     最后一次更改: jcc你莫辜负
@@ -799,6 +1295,7 @@ def gen_kernel(op_or_func: Any, ctx: EmitCContext) -> str:
     - 这是 `kernel_gen.dsl.gen_kernel` 唯一稳定公开入口。
     - 输入为单个普通 op 时，直接委托 `emit_c_op(...)` 的公开节点级接口生成源码片段。
     - 输入为 `func.func` 时，统一交给 `_KernelEmitter` 在一条内部策略链中完成签名、函数级特化选择、IR 遍历和 `func.return/out` 收尾。
+    - 当 `target="npu_demo"` 且输入为受控 `builtin.module` 子集时，输出双函数源码（body + wrapper）。
 
     使用示例:
     - source = gen_kernel(func_op, EmitCContext(target="cpu"))

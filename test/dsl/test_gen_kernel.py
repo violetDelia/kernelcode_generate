@@ -1,7 +1,7 @@
 """gen_kernel tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 朽木露琪亚
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 func.func 到目标函数源码的组装行为。
@@ -30,15 +30,38 @@ import tempfile
 
 import pytest
 from xdsl.dialects import arith, func, scf
-from xdsl.dialects.builtin import ArrayAttr, DictionaryAttr, FunctionType, IndexType, IntAttr, IntegerAttr, ModuleOp, StringAttr, f16, f32, f64, i1, i32
-from xdsl.ir import Block, Region
+from xdsl.dialects.builtin import (
+    ArrayAttr,
+    DictionaryAttr,
+    FunctionType,
+    IndexType,
+    IntAttr,
+    IntegerAttr,
+    ModuleOp,
+    StringAttr,
+    SymbolRefAttr,
+    f16,
+    f32,
+    f64,
+    i1,
+    i32,
+)
+from xdsl.ir import Block, Operation, Region
 from xdsl.irdl import IRDLOperation, irdl_op_definition, result_def
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dialect.dma import DmaAllocOp, DmaFillOp
+from kernel_gen.dialect.arch import (
+    ArchBarrierOp,
+    ArchGetDynamicMemoryOp,
+    ArchGetThreadIdOp,
+    ArchGetThreadNumOp,
+    ArchLaunchOp,
+    ArchScopeAttr,
+)
+from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFillOp, DmaSliceOp, DmaViewOp
 from kernel_gen.dialect.kernel import KernelAddOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolDimType, SymbolForOp, SymbolGetDimOp, SymbolValueType
@@ -74,6 +97,17 @@ class FakeSymbolDimOp(IRDLOperation):
 
     def __init__(self: "FakeSymbolDimOp", name: str) -> None:
         super().__init__(result_types=[SymbolDimType.from_name(name)])
+
+
+@irdl_op_definition
+class FakeSymbolValueOp(IRDLOperation):
+    """测试用的 `!symbol.int<"...">` 产生 op。"""
+
+    name = "test.fake_symbol_value"
+    result = result_def(SymbolValueType)
+
+    def __init__(self: "FakeSymbolValueOp", expr: str) -> None:
+        super().__init__(result_types=[SymbolValueType.from_expr(expr)])
 
 
 def _ctx() -> EmitCContext:
@@ -142,6 +176,121 @@ def _make_marked_kernel_split_module(*, axis: int = 1, tile: str = "TILE_M") -> 
 
     module = ModuleOp([func_op])
     return module, func_op
+
+
+def _make_npu_demo_add_barrier_module(
+    *,
+    body_name: str = "add_barrier_body",
+    wrapper_name: str = "add_barrier",
+    callee_name: str | None = None,
+    callee_attr: SymbolRefAttr | None = None,
+    block_extent_expr: str = "1",
+    thread_extent_expr: str = "4",
+    subthread_extent_expr: str = "1",
+    barrier_scope: str = "block",
+    barrier_visibility_names: tuple[str, ...] = ("tsm", "tlm"),
+    emit_wrapper_return: bool = True,
+    include_body: bool = True,
+    include_wrapper: bool = True,
+    top_level_extra_ops: tuple[Operation, ...] = (),
+) -> ModuleOp:
+    """构造 `npu_demo` add+barrier 受控 module。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 生成 `body + wrapper` 双函数 module，覆盖 `gen_kernel(target="npu_demo")` 的受控 `builtin.module` 子集。
+    - body 固定包含 `thread/view/slice/barrier/add/deslice` 骨架，wrapper 固定包含 `arch.launch + func.return`。
+
+    使用示例:
+    - module = _make_npu_demo_add_barrier_module()
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: test/dsl/test_gen_kernel.py
+    """
+
+    gm_type = _make_memory_type([64], [1], element_type=f32)
+    tsm_buffer_type = _make_memory_type([128], [1], element_type=f32, space="tsm")
+    tlm_buffer_type = _make_memory_type([64], [1], element_type=f32, space="tlm")
+    tsm_tile_type = _make_memory_type([16], [1], element_type=f32, space="tsm")
+    tlm_tile_type = _make_memory_type([16], [1], element_type=f32, space="tlm")
+    gm_tile_type = _make_memory_type([16], [1], element_type=f32, space="global")
+    barrier_visibility = ArrayAttr([NnMemorySpaceAttr.from_name(space_name) for space_name in barrier_visibility_names])
+
+    body_block = Block(arg_types=[IndexType(), gm_type, gm_type, gm_type])
+    thread_offset = FakeSymbolValueOp("thread_id * 16")
+    rhs_offset = FakeSymbolValueOp("64 + thread_id * 16")
+    zero = FakeSymbolValueOp("0")
+    size = FakeSymbolValueOp("16")
+    stride = FakeSymbolValueOp("1")
+    tid = ArchGetThreadIdOp()
+    tnum = ArchGetThreadNumOp()
+    tsm = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("tsm"), tsm_buffer_type)
+    tlm = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("tlm"), tlm_buffer_type)
+    lhs_gm = DmaViewOp(body_block.args[1], [thread_offset.result], [size.result], [stride.result], gm_tile_type)
+    rhs_gm = DmaViewOp(body_block.args[2], [thread_offset.result], [size.result], [stride.result], gm_tile_type)
+    lhs_tsm = DmaViewOp(tsm.result, [thread_offset.result], [size.result], [stride.result], tsm_tile_type)
+    rhs_tsm = DmaViewOp(tsm.result, [rhs_offset.result], [size.result], [stride.result], tsm_tile_type)
+    out_tlm = DmaViewOp(tlm.result, [thread_offset.result], [size.result], [stride.result], tlm_tile_type)
+    lhs_slice = DmaSliceOp(lhs_tsm.result, lhs_gm.result, [zero.result], [size.result], [stride.result])
+    rhs_slice = DmaSliceOp(rhs_tsm.result, rhs_gm.result, [zero.result], [size.result], [stride.result])
+    barrier0 = ArchBarrierOp(ArchScopeAttr.from_name(barrier_scope), barrier_visibility)
+    add = NnAddOp(lhs_tsm.result, rhs_tsm.result, tlm_tile_type, NnMemorySpaceAttr.from_name("tlm"))
+    barrier1 = ArchBarrierOp(ArchScopeAttr.from_name(barrier_scope), barrier_visibility)
+    deslice = DmaDesliceOp(add.result, body_block.args[3], [thread_offset.result], [size.result], [stride.result], gm_type)
+    body_block.add_ops(
+        [
+            thread_offset,
+            rhs_offset,
+            zero,
+            size,
+            stride,
+            tid,
+            tnum,
+            tsm,
+            tlm,
+            lhs_gm,
+            rhs_gm,
+            lhs_tsm,
+            rhs_tsm,
+            out_tlm,
+            lhs_slice,
+            rhs_slice,
+            barrier0,
+            add,
+            barrier1,
+            deslice,
+            func.ReturnOp(),
+        ]
+    )
+    body_func = _func(body_name, [IndexType(), gm_type, gm_type, gm_type], [], body_block, ("ctx", "lhs", "rhs", "out"))
+
+    wrapper_block = Block(arg_types=[gm_type, gm_type, gm_type])
+    block_extent = FakeSymbolValueOp(block_extent_expr)
+    thread_extent = FakeSymbolValueOp(thread_extent_expr)
+    subthread_extent = FakeSymbolValueOp(subthread_extent_expr)
+    launch = ArchLaunchOp(
+        callee_attr or SymbolRefAttr(callee_name or body_name),
+        block_extent.result,
+        thread_extent.result,
+        subthread_extent.result,
+        (wrapper_block.args[0], wrapper_block.args[1], wrapper_block.args[2]),
+    )
+    wrapper_ops: list[Operation] = [block_extent, thread_extent, subthread_extent, launch]
+    if emit_wrapper_return:
+        wrapper_ops.append(func.ReturnOp())
+    wrapper_block.add_ops(wrapper_ops)
+    wrapper_func = _func(wrapper_name, [gm_type, gm_type, gm_type], [], wrapper_block, ("lhs", "rhs", "out"))
+    top_level_ops: list[Operation] = []
+    if include_body:
+        top_level_ops.append(body_func)
+    if include_wrapper:
+        top_level_ops.append(wrapper_func)
+    top_level_ops.extend(top_level_extra_ops)
+    return ModuleOp(top_level_ops)
 
 
 def _lower_func(func_op: func.FuncOp) -> func.FuncOp:
@@ -1554,3 +1703,148 @@ def test_gen_kernel_rejects_kernel_split_missing_tile_bridge() -> None:
 
     with pytest.raises(GenKernelError, match="KernelSplitMalformed"):
         gen_kernel(func_op, _ctx())
+
+
+# GK-S4-001
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 12:40:00 +0800
+# 最近一次运行成功时间: 2026-04-06 12:40:00 +0800
+# 功能说明: 验证 `target=\"npu_demo\"` 的受控 module 输入可生成 wrapper + body 双函数源码，并保留 barrier 管线。
+# 测试目的: 让 gate `-k 'npu_demo and barrier'` 命中真实正例，锁定 `launch<1, 4, 1>`、双 barrier 与固定 body 顺序。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body() -> None:
+    module = _make_npu_demo_add_barrier_module()
+
+    source = gen_kernel(module, _npu_ctx())
+
+    assert source.startswith('#include "include/npu_demo/npu_demo.h"\n\n')
+    assert "static void add_barrier_body(npu_demo::KernelContext& ctx, const Memory<float>& lhs, const Memory<float>& rhs, Memory<float>& out)" in source
+    assert "void add_barrier(const Memory<float>& lhs, const Memory<float>& rhs, Memory<float>& out)" in source
+    assert "npu_demo::launch<1, 4, 1>(add_barrier_body, lhs, rhs, out);" in source
+    assert source.count("ctx.barrier({MemorySpace::TSM, MemorySpace::TLM}, BarrierScope::BLOCK);") == 2
+    assert source.index("long long tid = ctx.thread_id();") < source.index("Memory<float> tsm = ctx.get_dynamic_memory<float>(MemorySpace::TSM);")
+    assert source.index("slice(lhs_tsm, lhs_gm, 0, 16, 1);") < source.index("add(lhs_tsm, rhs_tsm, out_tlm);") < source.index("deslice(out_tlm, out, tid * 16, 16, 1);")
+    assert "arch.launch_kernel" not in source
+    assert "ctx.sync_threads" not in source
+
+
+# GK-S4-002
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 12:40:00 +0800
+# 最近一次运行成功时间: 2026-04-06 12:40:00 +0800
+# 功能说明: 验证 `npu_demo add+barrier` 双函数源码可仅依赖 `include/npu_demo/npu_demo.h` 通过编译。
+# 测试目的: 防止 body/wrapper 输出在 include、签名、barrier 或 launch 模板参数上产生不可编译回退。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_compiles_npu_demo_launch_wrapper_and_barrier_body
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_compiles_npu_demo_launch_wrapper_and_barrier_body() -> None:
+    module = _make_npu_demo_add_barrier_module()
+
+    source = gen_kernel(module, _npu_ctx())
+
+    include_lines = [line for line in source.splitlines() if line.startswith("#include ")]
+    assert include_lines == ['#include "include/npu_demo/npu_demo.h"']
+    _compile_only(source)
+
+
+# GK-S4-003
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 12:40:00 +0800
+# 最近一次运行成功时间: 2026-04-06 12:40:00 +0800
+# 功能说明: 验证 wrapper 若引用缺失 body symbol，`gen_kernel` 必须显式失败且错误包含缺失 callee。
+# 测试目的: 锁定受控 module 的 fail-fast 边界，避免 silent fallback 到单函数 npu_demo body-level 生成。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_rejects_npu_demo_barrier_wrapper_missing_body_symbol
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_rejects_npu_demo_barrier_wrapper_missing_body_symbol() -> None:
+    module = _make_npu_demo_add_barrier_module(callee_name="missing_body")
+
+    with pytest.raises(GenKernelError, match="missing body missing_body"):
+        gen_kernel(module, _npu_ctx())
+
+
+# GK-S4-004
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 10:52:00 +0800
+# 最近一次运行成功时间: 2026-04-06 10:52:00 +0800
+# 功能说明: 验证 `npu_demo` 受控 module 的关键 fail-fast 门禁与错误短语保持稳定。
+# 测试目的: 锁定 module 顶层、wrapper 形态、callee、launch extent、barrier 属性与 target 边界，避免 silent fallback。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_rejects_npu_demo_barrier_fail_fast_boundaries
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+@pytest.mark.parametrize(
+    ("module", "ctx", "pattern"),
+    [
+        pytest.param(
+            _make_npu_demo_add_barrier_module(top_level_extra_ops=(FakeSymbolValueOp("9"),)),
+            _npu_ctx(),
+            r"must contain only func\.func",
+            id="top-level-non-func",
+        ),
+        pytest.param(
+            _make_npu_demo_add_barrier_module(include_wrapper=False),
+            _npu_ctx(),
+            r"must contain exactly one body func and one wrapper func",
+            id="func-count-not-two",
+        ),
+        pytest.param(
+            _make_npu_demo_add_barrier_module(emit_wrapper_return=False),
+            _npu_ctx(),
+            r"must contain arch\.launch followed by func\.return",
+            id="wrapper-not-launch-return",
+        ),
+        pytest.param(
+            _make_npu_demo_add_barrier_module(callee_attr=SymbolRefAttr("add_barrier_body", ["nested"])),
+            _npu_ctx(),
+            r"must use flat @callee",
+            id="callee-not-flat",
+        ),
+        pytest.param(
+            _make_npu_demo_add_barrier_module(thread_extent_expr="THREADS"),
+            _npu_ctx(),
+            r"thread must be static integer",
+            id="extent-not-static",
+        ),
+        pytest.param(
+            _make_npu_demo_add_barrier_module(thread_extent_expr="8"),
+            _npu_ctx(),
+            r"must use npu_demo::launch<1, 4, 1>; got thread=8",
+            id="extent-not-1-4-1",
+        ),
+        pytest.param(
+            _make_npu_demo_add_barrier_module(barrier_scope="thread"),
+            _npu_ctx(),
+            r"barrier scope must be block",
+            id="barrier-scope-invalid",
+        ),
+        pytest.param(
+            _make_npu_demo_add_barrier_module(barrier_visibility_names=("tlm", "tsm")),
+            _npu_ctx(),
+            r"barrier visibility must be \[tsm, tlm\]",
+            id="barrier-visibility-invalid",
+        ),
+        pytest.param(
+            _make_npu_demo_add_barrier_module(),
+            _ctx(),
+            r"builtin\.module is only supported for target=npu_demo",
+            id="module-input-rejected-on-cpu",
+        ),
+    ],
+)
+def test_gen_kernel_rejects_npu_demo_barrier_fail_fast_boundaries(
+    module: ModuleOp,
+    ctx: EmitCContext,
+    pattern: str,
+) -> None:
+    with pytest.raises(GenKernelError, match=pattern):
+        gen_kernel(module, ctx)
