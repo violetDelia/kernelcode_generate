@@ -1,7 +1,7 @@
 """AST emit utilities for DSL nodes.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 小李飞刀
 
 功能说明:
 - 提供 AST 节点到 MLIR SSA value/op 的发射入口。
@@ -84,6 +84,7 @@ from kernel_gen.dialect.nn import (
     NnReduceMaxOp,
     NnReduceMinOp,
     NnReduceSumOp,
+    NnSoftmaxOp,
     NnSubOp,
     NnTrueDivOp,
 )
@@ -137,6 +138,7 @@ from .ast import (
     NnBroadcastAST,
     NnBroadcastToAST,
     NnReduceAST,
+    NnSoftmaxAST,
     NnUnaryAST,
     ScalarArgAST,
     SymbolToFloatAST,
@@ -2228,6 +2230,37 @@ def _parse_reduce_axis_expr(axis_expr: object | None, location: SourceLocation |
     raise _LoweringError("reduce axis must be int or list of int", location=location)
 
 
+def _parse_softmax_axis_expr(axis_expr: object | None, location: SourceLocation | None) -> int:
+    """解析 softmax axis 表达式为整数。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 支持 int / ConstAST[int] 的 axis。
+    - 未提供 axis 时默认返回 -1。
+
+    使用示例:
+    - _parse_softmax_axis_expr(ConstAST(1), location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+    if axis_expr is None:
+        return -1
+    value: object
+    if isinstance(axis_expr, ConstAST):
+        value = axis_expr.value
+        location = axis_expr.location or location
+    else:
+        value = axis_expr
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise _LoweringError("softmax axis must be int", location=location)
+    return value
+
+
 def _parse_reduce_keepdim_expr(
     keepdim_expr: object | None,
     location: SourceLocation | None,
@@ -2335,7 +2368,7 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
     """校验函数体中的 AST 语句是否属于当前 lowering 支持范围。
 
     创建者: OpenAI
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 拒绝空函数体。
@@ -2375,6 +2408,7 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
                 NnBroadcastAST,
                 NnBroadcastToAST,
                 NnReduceAST,
+                NnSoftmaxAST,
                 NnUnaryAST,
                 DmaFreeAST,
                 ForAST,
@@ -2442,7 +2476,7 @@ def _infer_expr_type(
     """推导表达式在 lowering 前的结果类型。
 
     创建者: 小李飞刀
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 统一处理常量、DMA、arch query、`symbol.to_float`、symbol 与 nn 二元表达式的类型推导。
@@ -2621,6 +2655,13 @@ def _infer_expr_type(
             input_type.element_type,
             input_type.space,
         )
+        type_map[expr_key] = result_type
+        return result_type
+    if isinstance(expr, NnSoftmaxAST):
+        input_type = _infer_expr_type(expr.value, type_map, runtime_values=runtime_values)
+        if not isinstance(input_type, NnMemoryType):
+            raise _LoweringError("softmax input must be nn.memory", location=expr.location)
+        result_type = input_type
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, Img2ColAST):
@@ -2872,7 +2913,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     """将表达式 AST 递归下沉为 MLIR SSA value。
 
     创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 递归处理常量、内存操作、`symbol.to_float` 与算术/比较表达式，生成对应的 MLIR op。
@@ -3079,6 +3120,18 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         if expr.kind not in op_map:
             raise _LoweringError("Unsupported reduce helper", location=expr.location)
         op = op_map[expr.kind](input_value, result_type, axes=axes, keepdim=keepdim_arg, space=input_type.space)
+        op.verify()
+        ctx.builder.add_op(op)
+        ctx._set_cache(expr_key, op.result)
+        return op.result
+    if isinstance(expr, NnSoftmaxAST):
+        input_value = _lower_expr(expr.value, ctx)
+        input_type = _expect_memory_value(input_value, expr.location)
+        result_type = _infer_expr_type(expr, ctx.types)
+        if not isinstance(result_type, NnMemoryType):
+            raise _LoweringError("softmax result must be nn.memory", location=expr.location)
+        axis_value = _parse_softmax_axis_expr(expr.axis, expr.location)
+        op = NnSoftmaxOp(input_value, result_type, axis=axis_value, space=input_type.space)
         op.verify()
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
@@ -3375,7 +3428,7 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
     """将单个 AST 节点发射为 MLIR value 或 op。
 
     创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 统一处理 expression 与 statement 节点的 lowering 入口。
@@ -3413,6 +3466,7 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
             NnBroadcastAST,
             NnBroadcastToAST,
             NnReduceAST,
+            NnSoftmaxAST,
             NnUnaryAST,
             ArchGetDynamicMemoryAST,
             ArchQueryAST,

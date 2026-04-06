@@ -1,7 +1,7 @@
 """MLIR gen integration tests.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 build_func_op/build_func_op_from_ast 及相关 lowering 集成回归。
@@ -89,6 +89,7 @@ from kernel_gen.dialect.nn import (
     NnReduceMaxOp,
     NnReduceMinOp,
     NnReduceSumOp,
+    NnSoftmaxOp,
     NnSubOp,
     NnTrueDivOp,
 )
@@ -1374,6 +1375,35 @@ def test_build_func_op_supports_exp_helper_call() -> None:
     assert len(return_ops) == 1
     assert list(func_op.function_type.outputs) == [exp_ops[0].result.type]
     assert return_ops[0].arguments[0].type == exp_ops[0].result.type
+
+
+# MGEN-036E
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 23:36:32 +0800
+# 最近一次运行成功时间: 2026-04-06 23:36:32 +0800
+# 功能说明: 验证 build_func_op 支持 softmax helper 并下沉为 nn.softmax。
+# 测试目的: 锁定 softmax 生成 NnSoftmaxOp 且 axis 属性稳定传递，避免 expectation 回退。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_softmax_helper_call
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dialect/nn.md, spec/operation/nn.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_softmax_helper_call() -> None:
+    from kernel_gen.operation.nn import softmax
+
+    source = Memory([2, 3], NumericType.Float32, space=MemorySpace.GM)
+
+    def softmax_kernel(src: "Tensor[f32, 2, 3]") -> "Tensor[f32, 2, 3]":
+        return softmax(src, axis=1)
+
+    func_op = build_func_op(softmax_kernel, source)
+    softmax_ops = [op for op in func_op.body.block.ops if isinstance(op, NnSoftmaxOp)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
+    assert len(softmax_ops) == 1
+    assert len(return_ops) == 1
+    assert softmax_ops[0].axis.value.data == 1
+    assert list(func_op.function_type.outputs) == [softmax_ops[0].result.type]
+    assert return_ops[0].arguments[0].type == softmax_ops[0].result.type
 
 
 # MGEN-036C

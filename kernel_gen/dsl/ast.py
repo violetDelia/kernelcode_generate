@@ -1,7 +1,7 @@
 """DSL AST definitions.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 小李飞刀
 
 功能说明:
 - 定义 DSL 前端使用的 AST 节点数据结构。
@@ -100,6 +100,7 @@ _ALLOWED_IMPORT_BOUND_HELPERS: dict[str, tuple[types.ModuleType, frozenset[str]]
                 "leaky_relu",
                 "hard_sigmoid",
                 "exp",
+                "softmax",
                 "broadcast",
                 "broadcast_to",
                 "reduce_sum",
@@ -636,7 +637,7 @@ class NnUnaryAST:
     """nn unary helper 节点。
 
     创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 表示 `relu/sigmoid/tanh/leaky_relu/hard_sigmoid/exp` 的 DSL helper 调用。
@@ -683,6 +684,31 @@ class NnReduceAST:
     value: object
     axis: object | None = None
     keepdim: object | None = None
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class NnSoftmaxAST:
+    """nn.softmax helper 节点。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 表示 `softmax(value, axis=...)` 的 DSL helper 调用。
+    - 记录输入与 axis 表达式，交由 lowering 阶段解析 axis。
+
+    使用示例:
+    - NnSoftmaxAST(value=VarAST("x"), axis=ConstAST(1))
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    value: object
+    axis: object | None = None
     location: SourceLocation | None = None
 
 
@@ -1199,12 +1225,19 @@ def _split_tensor_annotation(text: str, node: object | None) -> tuple[NumericTyp
     dtype = _DTYPE_MAP[dtype_key]
     dims: list[int | str | SymbolDim] = []
     for part in parts[1:]:
-        if part.isdigit():
-            dims.append(int(part))
-        elif any(op in part for op in ("+", "-", "*", "/")):
-            dims.append(_eval_symbolic_dim_expr(part, node))
+        normalized = part
+        if (
+            len(normalized) >= 2
+            and normalized[0] == normalized[-1]
+            and normalized[0] in ("'", '"')
+        ):
+            normalized = normalized[1:-1].strip()
+        if normalized.isdigit():
+            dims.append(int(normalized))
+        elif any(op in normalized for op in ("+", "-", "*", "/")):
+            dims.append(_eval_symbolic_dim_expr(normalized, node))
         else:
-            dims.append(part)
+            dims.append(normalized)
     return dtype, dims
 
 
@@ -1618,7 +1651,7 @@ def _is_memory_target_ast(node: object) -> bool:
     """判断 store/deslice 的 target 是否属于可写 memory AST。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 接受函数入参张量与会产生 memory 结果的前端 AST 节点。
@@ -1647,6 +1680,7 @@ def _is_memory_target_ast(node: object) -> bool:
             Img2ColAST,
             NnBroadcastAST,
             NnBroadcastToAST,
+            NnSoftmaxAST,
             MatmulAST,
             ArchGetDynamicMemoryAST,
         ),
@@ -1947,6 +1981,48 @@ def _parse_unary_helper_call(
     return None
 
 
+def _parse_softmax_helper_call(
+    expr: py_ast.Call,
+    env: dict[str, object],
+    globals_table: dict[str, object],
+    builtins_table: dict[str, object],
+) -> NnSoftmaxAST:
+    """解析 nn softmax helper 调用。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 解析 softmax 的 value/axis 参数。
+    - 允许 axis 作为位置参数或关键字参数。
+
+    使用示例:
+    - _parse_softmax_helper_call(expr, env, globals(), __builtins__)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    if len(expr.args) < 1 or len(expr.args) > 2:
+        _raise_parse_error("Unsupported softmax arity", expr)
+    if len(expr.keywords) > 1:
+        _raise_parse_error("Unsupported softmax arity", expr)
+    value = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+    axis: object | None = None
+    seen_axis = False
+    if len(expr.args) == 2:
+        axis = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+        seen_axis = True
+    for keyword in expr.keywords:
+        if keyword.arg is None or keyword.arg != "axis" or seen_axis:
+            _raise_parse_error("Unsupported softmax arity", expr)
+        axis = _parse_expr(keyword.value, env, globals_table, builtins_table)
+        seen_axis = True
+    return NnSoftmaxAST(value=value, axis=axis, location=_location_from_node(expr))
+
+
 def _parse_reduce_helper_call(
     call_name: str,
     expr: py_ast.Call,
@@ -2135,6 +2211,7 @@ def _parse_dma_call(
     - 将 `nn.add/sub/mul/truediv/floordiv(...)` 解析为对应的 `BinaryExprAST`。
     - 将 `relu/sigmoid/tanh/leaky_relu/hard_sigmoid/exp(...)` 解析为 `NnUnaryAST`。
     - 将 `reduce_sum/reduce_min/reduce_max(...)` 解析为 `NnReduceAST`。
+    - 将 `softmax(...)` 解析为 `NnSoftmaxAST`。
     - 将 `img2col1d/img2col2d(...)` 解析为对应的 `Img2ColAST`。
     - 将 `broadcast/broadcast_to(...)` 解析为对应的 `NnBroadcastAST/NnBroadcastToAST`。
     - 将 `get_block_id()` / `get_block_num()` / `get_subthread_id()` / `get_subthread_num()` / `get_thread_id()` / `get_thread_num()` 解析为 `ArchQueryAST`。
@@ -2281,6 +2358,9 @@ def _parse_dma_call(
 
     if call_name in {"reduce_sum", "reduce_min", "reduce_max"}:
         return _parse_reduce_helper_call(call_name, expr, env, globals_table, builtins_table)
+
+    if call_name == "softmax":
+        return _parse_softmax_helper_call(expr, env, globals_table, builtins_table)
 
     if call_name in {"img2col1d", "img2col2d"}:
         if not expr.args:
