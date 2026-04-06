@@ -2,11 +2,14 @@
 # notify-admin.sh
 #
 # 创建者: Codex
-# 最后修改人: 榕
+# 最后修改人: 小李飞刀
+# 最后修改日期: 2026-04-06
 #
 # 功能说明:
 # - 按脚本顶部配置定时向管理员发送会话消息。
 # - 定时频率、管理员信息、日志路径和消息内容都直接维护在本文件顶部。
+# - 循环模式下按 `1/3` 概率补做一次管理员初始化，降低会话缺失导致的通知失败概率。
+# - 支持通过 `NOTIFY_ADMIN_RANDOM_ROLL` 固定初始化分支，便于测试命中/未命中行为。
 # - 修改本文件后，重新启动脚本即可生效。
 #
 # 使用示例:
@@ -35,7 +38,7 @@ LIST_SCRIPT="$REPO_ROOT/skills/codex-multi-agents/scripts/codex-multi-agents-lis
 # 可直接修改的配置区
 # -----------------------------
 # 每隔多久发送一次，单位秒。
-INTERVAL_SECONDS=1800
+INTERVAL_SECONDS=3600
 
 # 会话发送信息。
 FROM_NAME="榕"
@@ -47,7 +50,8 @@ LOG_FILE="agents/codex-multi-agents/log/talk.log"
 
 # 多行消息直接写在 MESSAGE 变量里。
 read -r -d '' MESSAGE <<'EOF' || true
-询问正在执行的任务并推进，分发任务列表给合适的人。更新6个计划书状态，有序推进所有任务（含计划书），注意不要再前置任务完成前开始后置任务，最快速度完成所有任务。
+询问正在运行任务的人，要求回报并继续。
+逐个更新任务书，推动任务有序完成。
 EOF
 
 MODE="loop"
@@ -137,12 +141,23 @@ run_init() {
   validate_init_config
   bash "$LIST_SCRIPT" \
     -file "$(log_path "$AGENTS_LIST_FILE")" \
+    -init \
     -name "$TO_NAME"
+}
+
+maybe_init_admin() {
+  local roll
+  roll="${NOTIFY_ADMIN_RANDOM_ROLL:-$((RANDOM % 3))}"
+  [[ "$roll" =~ ^[0-2]$ ]] || err "$RC_DATA" "NOTIFY_ADMIN_RANDOM_ROLL must be 0, 1, or 2"
+  if [[ "$roll" -eq 0 ]]; then
+    run_init
+  fi
 }
 
 main_loop() {
   while true; do
     validate_loop_config
+    maybe_init_admin
     send_once
     sleep "$INTERVAL_SECONDS" || err "$RC_INTERNAL" "sleep failed"
   done
