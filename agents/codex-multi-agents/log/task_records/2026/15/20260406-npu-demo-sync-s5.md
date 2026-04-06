@@ -113,3 +113,195 @@ npu_demo_parallel_add_sync_green_plan-S5-实现/测试（计划书：ARCHITECTUR
   - 输出：
     - `agents/codex-multi-agents/log/task_records/2026/15/20260406-npu-demo-sync-s5.md`
     - `test/include/npu_demo/test_runtime_launch.py`
+
+时间：
+2026-04-06 12:00:04 +0800
+
+经办人：
+提莫炖蘑菇
+
+任务：
+T-20260406-457dd425（npu_demo_parallel_add_sync_green_plan#S5-复审）
+
+任务目标：
+- 核对上一轮“未追踪新增文件”证据缺口已补齐（记录含 git status/ls-files 证据，新增文件已纳入变更集）。
+- 必要时复跑 S5 gate（三条 pytest）确认 exit=0。
+
+改动：
+- 未改代码；复核记录中 git 证据；复跑 gate 并记录输出。
+
+结论：
+- 需修改（gate 不稳定：`test_gen_kernel.py -k 'npu_demo and barrier'` 首次运行出现 Python 断言崩溃）。
+
+问题清单：
+- P1｜gate 不稳定：`pytest -q test/dsl/test_gen_kernel.py -k 'npu_demo and barrier'` 首次运行触发 Python 断言崩溃（type_traverse on non-heap type 'USub'），第二次运行才通过。需定位并消除不稳定性，否则无法证明稳定通过。
+
+风险：
+- 质量风险：存在测试偶发崩溃的迹象，可能掩盖并发/运行时问题或环境不兼容，合并后难以回归。
+
+验证命令：
+- PYTHONPATH=. pytest -q test/include/api/test_arch.py
+- PYTHONPATH=. pytest -q test/include/npu_demo/test_runtime_launch.py
+- PYTHONPATH=. pytest -q test/dsl/test_gen_kernel.py -k 'npu_demo and barrier'（首次崩溃）
+- PYTHONPATH=. pytest -q test/dsl/test_gen_kernel.py -k 'npu_demo and barrier'（重试通过）
+
+关键输出：
+- test/include/api/test_arch.py：3 passed in 0.45s
+- test/include/npu_demo/test_runtime_launch.py：1 passed in 1.75s
+- test/dsl/test_gen_kernel.py -k 'npu_demo and barrier'（首次）：
+  - `type_traverse: Assertion failed: type_traverse() called on non-heap type 'USub'`
+  - `Fatal Python error: _PyObject_AssertFailed`
+- test/dsl/test_gen_kernel.py -k 'npu_demo and barrier'（重试）：12 passed, 41 deselected in 0.50s
+
+下一步建议：
+- 派生修复任务：定位并修复/规避 `test_gen_kernel.py -k 'npu_demo and barrier'` 的不稳定崩溃；修复后复跑三条 gate 并提供稳定证据，再行复审。
+
+---
+
+时间：
+2026-04-06 13:05 +0800
+
+经办人：
+朽木露琪亚
+
+任务：
+T-20260406-fbec7073（npu_demo_parallel_add_sync_green_plan#S5-实现/测试-稳定性修复）
+
+任务目标：
+- 定位并消除 `pytest -q test/dsl/test_gen_kernel.py -k 'npu_demo and barrier'` 首次运行触发的 Python 断言崩溃：
+  - `type_traverse: Assertion failed: type_traverse() called on non-heap type 'USub'`
+  - `Fatal Python error: _PyObject_AssertFailed`
+- 三条 gate 稳定 `exit=0`：
+  - `pytest -q test/include/api/test_arch.py`
+  - `pytest -q test/include/npu_demo/test_runtime_launch.py`
+  - `pytest -q test/dsl/test_gen_kernel.py -k 'npu_demo and barrier'`
+
+改动：
+- `kernel_gen/dsl/ast.py`
+  - 规避策略：在 import `ast`（`_ast` 类型初始化）期间临时 `gc.disable()`，待 import 完成后按原状态恢复 GC。
+  - 目的：降低 GC 在 `_ast` 类型初始化窗口触发 `type_traverse` 断言的概率，消除“首次运行崩溃、重试通过”的不稳定性。
+
+结论：
+- 通过在 DSL 前端引入“import ast 期间禁用 GC”的最小隔离策略，`test_gen_kernel.py -k 'npu_demo and barrier'` 连续多次运行稳定通过；三条 gate 均稳定 `exit=0`。
+
+证据：
+- 变更文件（`git diff --name-only`）：
+  - `agents/codex-multi-agents/log/task_records/2026/15/20260406-npu-demo-sync-s5.md`
+  - `kernel_gen/dsl/ast.py`
+- 稳定性回归（10 次连续）：
+  - `pytest -q test/dsl/test_gen_kernel.py -k 'npu_demo and barrier'`
+    - 每次均：`12 passed, 41 deselected`
+- gate（均 exit=0）：
+  - `pytest -q test/include/api/test_arch.py`：`3 passed`
+  - `pytest -q test/include/npu_demo/test_runtime_launch.py`：`1 passed`
+  - `pytest -q test/dsl/test_gen_kernel.py -k 'npu_demo and barrier'`：`12 passed, 41 deselected`
+
+---
+
+时间：
+2026-04-06 12:13 +0800
+
+经办人：
+朽木露琪亚
+
+任务：
+T-20260406-8c741630（npu_demo_parallel_add_sync_green_plan#S5-实现/测试-GC 隔离修复）
+
+任务目标：
+- 修复 `kernel_gen/dsl/ast.py` 的 GC 隔离逻辑：`gc.disable()` 后 import `ast` 必须用 `try/finally`，确保异常时也恢复原 GC 状态（仅原本 enabled 才恢复），避免全局 GC 状态泄漏。
+- 复跑三条 gate 并确保稳定 `exit=0`：
+  - `pytest -q test/include/api/test_arch.py`
+  - `pytest -q test/include/npu_demo/test_runtime_launch.py`
+  - `pytest -q test/dsl/test_gen_kernel.py -k 'npu_demo and barrier'`
+
+改动：
+- `kernel_gen/dsl/ast.py`
+  - 将“禁用 GC + import ast + 恢复 GC”改为 `try/finally` 结构，保证 import 异常时也不会遗留全局 GC 状态被禁用。
+
+结论：
+- `kernel_gen/dsl/ast.py` 的 GC 隔离逻辑已按要求改为 `try/finally`，避免 GC 状态泄漏；三条 gate 均 `exit=0`。
+
+证据：
+- 变更文件（`git diff --name-only`）：
+  - `agents/codex-multi-agents/log/task_records/2026/15/20260406-npu-demo-sync-s5.md`
+  - `kernel_gen/dsl/ast.py`
+- gate（均 exit=0）：
+  - `pytest -q test/include/api/test_arch.py`：`3 passed`
+  - `pytest -q test/include/npu_demo/test_runtime_launch.py`：`1 passed`
+  - `pytest -q test/dsl/test_gen_kernel.py -k 'npu_demo and barrier'`：`12 passed, 41 deselected`
+
+时间：
+2026-04-06 12:10:24 +0800
+
+经办人：
+提莫炖蘑菇
+
+任务：
+T-20260406-9cf4c369（npu_demo_parallel_add_sync_green_plan#S5-稳定性复审）
+
+任务目标：
+- 复核 kernel_gen/dsl/ast.py 的 GC 隔离策略（import ast 期间临时 gc.disable()，导入后恢复）是否必要且无副作用/无全局 GC 状态泄漏。
+- 复核三条 gate 稳定 exit=0。
+
+改动：
+- 未改代码；阅读 kernel_gen/dsl/ast.py 并复跑三条 gate。
+
+结论：
+- 需修改（GC 恢复缺少 try/finally，异常路径存在全局 GC 状态泄漏风险）。
+
+问题清单：
+- P1｜GC 状态泄漏风险：`kernel_gen/dsl/ast.py` 在模块导入时 `gc.disable()` 后直接 `import ast`，仅在成功路径执行 `gc.enable()`，缺少 try/finally；若 import 过程中抛异常，可能导致全局 GC 保持禁用，影响后续模块与测试。
+
+风险：
+- 全局副作用风险：GC 状态泄漏会影响其他模块/测试的资源回收与稳定性，属于不可接受的隐性全局状态污染。
+
+验证命令：
+- PYTHONPATH=. pytest -q test/include/api/test_arch.py
+- PYTHONPATH=. pytest -q test/include/npu_demo/test_runtime_launch.py
+- PYTHONPATH=. pytest -q test/dsl/test_gen_kernel.py -k 'npu_demo and barrier'
+
+关键输出：
+- test/include/api/test_arch.py：3 passed in 0.42s
+- test/include/npu_demo/test_runtime_launch.py：1 passed in 0.43s
+- test/dsl/test_gen_kernel.py -k 'npu_demo and barrier'：12 passed, 41 deselected in 0.51s
+
+下一步建议：
+- 派生修复任务：为 GC 隔离加入 try/finally 恢复逻辑（仅在原本 enabled 时恢复），并复跑三条 gate；必要时补充说明为何该隔离策略不可避免。
+
+时间：
+2026-04-06 12:15:06 +0800
+
+经办人：
+提莫炖蘑菇
+
+任务：
+T-20260406-e8af66f0（npu_demo_parallel_add_sync_green_plan#S5-复审）
+
+任务目标：
+- 复核 kernel_gen/dsl/ast.py 的 GC try/finally 是否满足“仅原本 enabled 才恢复”且无全局 GC 状态泄漏。
+- 复核三条 gate 均 exit=0。
+
+改动：
+- 未改代码；阅读 kernel_gen/dsl/ast.py 并复跑三条 gate。
+
+结论：
+- 通过（GC try/finally 修复满足仅原本 enabled 才恢复，未见状态泄漏；三条 gate 均 exit=0）。
+
+问题清单：
+- 无。
+
+风险：
+- 未发现新增风险。
+
+验证命令：
+- PYTHONPATH=. pytest -q test/include/api/test_arch.py
+- PYTHONPATH=. pytest -q test/include/npu_demo/test_runtime_launch.py
+- PYTHONPATH=. pytest -q test/dsl/test_gen_kernel.py -k 'npu_demo and barrier'
+
+关键输出：
+- test/include/api/test_arch.py：3 passed in 0.42s
+- test/include/npu_demo/test_runtime_launch.py：1 passed in 0.48s
+- test/dsl/test_gen_kernel.py -k 'npu_demo and barrier'：12 passed, 41 deselected in 0.52s
+
+下一步建议：
+- 派生合并任务：由李白合入 worktree 变更并清理。
