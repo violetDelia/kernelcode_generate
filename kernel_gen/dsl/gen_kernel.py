@@ -1,7 +1,7 @@
 """Function-level C-like kernel generation helpers.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 按 `emit_c` 的节点级规则，组装 `func.func` 的完整函数源码。
@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Callable
 from typing import Any
 
@@ -39,7 +40,7 @@ from xdsl.ir import Operation
 
 from kernel_gen.dialect.arch import ArchBarrierOp, ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp, ArchLaunchOp
 from kernel_gen.dialect.dma import DmaAllocOp
-from kernel_gen.dialect.nn import NnAddOp, NnMemoryType
+from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolDimType, SymbolValueType
 
 from .emit_c import EmitCContext, emit_c_op
@@ -182,11 +183,44 @@ def _leading_rewritten_out_param_count(func_op: func.FuncOp) -> int:
     return count
 
 
+def _memory_space_to_c(space_attr: NnMemorySpaceAttr) -> str:
+    """将 `nn.space` 映射为 `MemorySpace::<space>` 模板参数文本。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 为 `Memory<Space, T>` 类型生成固定的 space 模板参数。
+    - 仅接受 `global/shared/local/tsm/tlm`，其余值显式失败。
+
+    使用示例:
+    - space = _memory_space_to_c(NnMemorySpaceAttr.from_name("global"))
+    - assert space == "MemorySpace::GM"
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: kernel_gen/dsl/gen_kernel.py
+    """
+
+    space = space_attr.space.data
+    mapping = {
+        "global": "MemorySpace::GM",
+        "shared": "MemorySpace::SM",
+        "local": "MemorySpace::LM",
+        "tsm": "MemorySpace::TSM",
+        "tlm": "MemorySpace::TLM",
+    }
+    if space not in mapping:
+        raise TypeError(f"unsupported nn memory space: {space}")
+    return mapping[space]
+
+
 def _type_to_c(attr: Any) -> str:
     """将 xdsl Attribute 映射为 C 侧类型名。
 
     创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 用于 `gen_kernel(...)` 的函数级签名拼装，将 IR 类型属性转换为 C/C++ 侧可用类型名。
@@ -196,7 +230,7 @@ def _type_to_c(attr: Any) -> str:
       - `Float32Type` -> `float`
       - `Float64Type` -> `double`
       - `IndexType` -> `long long`
-      - `NnMemoryType<T>` -> `Memory<...>`（递归映射 `element_type`）
+      - `NnMemoryType<T>` -> `Memory<Space, T>`（递归映射 `element_type`）
       - `SymbolValueType` -> `long long`
     - 若遇到不支持类型，将抛出 `TypeError("unsupported type: ...")`。
 
@@ -206,7 +240,7 @@ def _type_to_c(attr: Any) -> str:
     - assert _type_to_c(f32) == "float"
     - assert _type_to_c(f64) == "double"
     - mem_f64 = NnMemoryType(ArrayAttr([IntAttr(2)]), ArrayAttr([IntAttr(1)]), f64, NnMemorySpaceAttr.from_name("global"))
-    - assert _type_to_c(mem_f64) == "Memory<double>"
+    - assert _type_to_c(mem_f64) == "Memory<MemorySpace::GM, double>"
 
     关联文件:
     - spec: spec/dsl/gen_kernel.md
@@ -224,7 +258,7 @@ def _type_to_c(attr: Any) -> str:
     if isinstance(attr, IndexType):
         return "long long"
     if isinstance(attr, NnMemoryType):
-        return f"Memory<{_type_to_c(attr.element_type)}>"
+        return f"Memory<{_memory_space_to_c(attr.space)}, {_type_to_c(attr.element_type)}>"
     if isinstance(attr, SymbolValueType):
         return "long long"
     raise TypeError(f"unsupported type: {attr}")
@@ -305,6 +339,31 @@ class _KernelEmitter:
 
     def __init__(self, ctx: EmitCContext) -> None:
         self.ctx = ctx
+
+    def _normalize_cpu_memory_stmt(self, stmt: str) -> str:
+        """规范化 CPU 侧 `Memory<T>` 生成语句为模板化 `Memory<MemorySpace::GM, T>` 形式。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 把 `emit_c` 输出的 `Memory<T>` 类型声明改写为 `Memory<MemorySpace::GM, T>`。
+        - 清理 `Memory(..., MemorySpace::GM)` 的构造参数尾项，避免冗余实参导致编译失败。
+
+        使用示例:
+        - stmt = self._normalize_cpu_memory_stmt(stmt)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
+
+        if not stmt or "Memory<" not in stmt:
+            return stmt
+        normalized = re.sub(r"Memory<\s*(?!MemorySpace::)([^>]+)\s*>", r"Memory<MemorySpace::GM, \1>", stmt)
+        normalized = re.sub(r",\s*MemorySpace::GM\s*\)", ")", normalized)
+        return normalized
 
     def emit(self, op_or_func: Any) -> str:
         if isinstance(op_or_func, ModuleOp):
@@ -397,6 +456,24 @@ class _KernelEmitter:
         raise _error(self.ctx, func_op.sym_name.data, f"unsupported conv2d_img2col2d_tiled body op {first_op.name}")
 
     def _emit_cpu_conv2d_img2col2d_tiled_body(self, func_op: func.FuncOp) -> str:
+        """生成 `conv2d_img2col2d_tiled(...)` 的固定 CPU 函数体骨架。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 输出冻结的 tile 常量、局部 `col_buffer/acc_buffer`、`cpu::img2col2d(...)` 以及写回 `out` 的固定循环骨架。
+        - 仅允许 rank-4 memory 输入/输出，且 element type 必须一致。
+
+        使用示例:
+        - body = self._emit_cpu_conv2d_img2col2d_tiled_body(func_op)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
+
         self._validate_cpu_conv2d_img2col2d_tiled_body(func_op)
 
         input_types = list(func_op.function_type.inputs.data)
@@ -419,6 +496,7 @@ class _KernelEmitter:
         input_name = self.ctx.lookup_name(func_op.args[0]) or arg_names[0]
         weight_name = self.ctx.lookup_name(func_op.args[1]) or arg_names[1]
         element_type = _type_to_c(out_type.element_type)
+        input_c_type = _type_to_c(input_type)
 
         lines = [
             f"{self.ctx.current_indent}constexpr long long Ntile = 1;",
@@ -433,10 +511,10 @@ class _KernelEmitter:
             f"{self.ctx.current_indent}{element_type} col_buffer[Ntile * ColChannels * ColPixels] = {{}};",
             f"{self.ctx.current_indent}{element_type} acc_buffer[Ftile * Hotile * Wotile] = {{}};",
             (
-                f"{self.ctx.current_indent}Memory<{element_type}> col_tile("
-                "col_buffer, 3, col_shape, col_stride, MemoryFormat::Norm, MemorySpace::LM);"
+                f"{self.ctx.current_indent}Memory<MemorySpace::GM, {element_type}> col_tile("
+                "col_buffer, 3, col_shape, col_stride, MemoryFormat::Norm);"
             ),
-            f"{self.ctx.current_indent}const Memory<{element_type}>& input_tile = {input_name};",
+            f"{self.ctx.current_indent}const {input_c_type}& input_tile = {input_name};",
             f"{self.ctx.current_indent}for (long long n0 = 0; n0 < out.shape()[0]; n0 += Ntile) {{",
         ]
         self.ctx.push_indent()
@@ -871,7 +949,7 @@ class _KernelEmitter:
         """生成 npu_demo `add+barrier` body 函数源码。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 输出 `static` body 签名，以及固定的 `thread/view/slice/barrier/add/deslice` 管线。
@@ -904,24 +982,30 @@ class _KernelEmitter:
             f"{indent}long long tid = ctx.thread_id();",
             f"{indent}long long tnum = ctx.thread_num();",
             "",
-            f"{indent}Memory<{element_type}> tsm = ctx.get_dynamic_memory<{element_type}>(MemorySpace::TSM);",
-            f"{indent}Memory<{element_type}> tlm = ctx.get_dynamic_memory<{element_type}>(MemorySpace::TLM);",
+            (
+                f"{indent}Memory<MemorySpace::TSM, {element_type}> tsm = "
+                f"ctx.get_dynamic_memory<MemorySpace::TSM, {element_type}>();"
+            ),
+            (
+                f"{indent}Memory<MemorySpace::TLM, {element_type}> tlm = "
+                f"ctx.get_dynamic_memory<MemorySpace::TLM, {element_type}>();"
+            ),
             "",
             f"{indent}auto {lhs_name}_gm = view({lhs_name}, tid * 16, 16, 1);",
             f"{indent}auto {rhs_name}_gm = view({rhs_name}, tid * 16, 16, 1);",
             "",
             f"{indent}auto {lhs_name}_tsm = view(tsm, tid * 16, 16, 1);",
             f"{indent}auto {rhs_name}_tsm = view(tsm, 64 + tid * 16, 16, 1);",
-            f"{indent}auto {out_name}_tlm = view(tlm, tid * 16, 16, 1);",
+            f"{indent}auto {out_name}_tsm = view(tsm, tid * 16, 16, 1);",
             "",
             f"{indent}slice({lhs_name}_tsm, {lhs_name}_gm, 0, 16, 1);",
             f"{indent}slice({rhs_name}_tsm, {rhs_name}_gm, 0, 16, 1);",
             self._format_npu_demo_barrier_stmt(barrier0, func_op.sym_name.data),
             "",
-            f"{indent}add({lhs_name}_tsm, {rhs_name}_tsm, {out_name}_tlm);",
+            f"{indent}add({lhs_name}_tsm, {rhs_name}_tsm, {out_name}_tsm);",
             self._format_npu_demo_barrier_stmt(barrier1, func_op.sym_name.data),
             "",
-            f"{indent}deslice({out_name}_tlm, {out_name}, tid * 16, 16, 1);",
+            f"{indent}deslice({out_name}_tsm, {out_name}, tid * 16, 16, 1);",
         ]
         body = "\n".join(lines)
         self.ctx.pop_indent()
@@ -1006,6 +1090,24 @@ class _KernelEmitter:
         )
 
     def _emit_npu_demo_body_level_kernel_body(self, func_op: func.FuncOp) -> str:
+        """生成 npu_demo body-level kernel 的固定函数体骨架。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 输出 `thread_id/thread_num -> get_dynamic_memory -> view/slice/add/deslice` 的受控顺序。
+        - 仅接受冻结子集，遇到非法 body 结构时必须显式失败。
+
+        使用示例:
+        - body = self._emit_npu_demo_body_level_kernel_body(func_op)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
+
         self._get_npu_demo_body_level_kernel_types(func_op)
         self._validate_npu_demo_body_level_kernel_body(func_op)
         _, out_type = self._get_npu_demo_body_level_kernel_types(func_op)
@@ -1019,12 +1121,18 @@ class _KernelEmitter:
             f"{self.ctx.current_indent}long long tid = ctx.thread_id();",
             f"{self.ctx.current_indent}long long tnum = ctx.thread_num();",
             "",
-            f"{self.ctx.current_indent}Memory<{element_type}> tsm = ctx.get_dynamic_memory<{element_type}>(MemorySpace::TSM);",
-            f"{self.ctx.current_indent}Memory<{element_type}> tlm = ctx.get_dynamic_memory<{element_type}>(MemorySpace::TLM);",
+            (
+                f"{self.ctx.current_indent}Memory<MemorySpace::TSM, {element_type}> tsm = "
+                f"ctx.get_dynamic_memory<MemorySpace::TSM, {element_type}>();"
+            ),
+            (
+                f"{self.ctx.current_indent}Memory<MemorySpace::TLM, {element_type}> tlm = "
+                f"ctx.get_dynamic_memory<MemorySpace::TLM, {element_type}>();"
+            ),
             "",
             f"{self.ctx.current_indent}auto src_view = view({source_name}, tid * 16, 16, 1);",
             f"{self.ctx.current_indent}auto work_tile = view(tsm, 0, 16, 1);",
-            f"{self.ctx.current_indent}auto out_tile = view(tlm, 0, 16, 1);",
+            f"{self.ctx.current_indent}auto out_tile = view(tsm, 0, 16, 1);",
             "",
             f"{self.ctx.current_indent}slice(work_tile, src_view, 0, 16, 1);",
             f"{self.ctx.current_indent}add(work_tile, work_tile, out_tile);",
@@ -1260,6 +1368,8 @@ class _KernelEmitter:
                 self.ctx.bind_name(op.result, "out")
                 continue
             stmt = emit_c_op(op, self.ctx)
+            if stmt and self.ctx.target == "cpu":
+                stmt = self._normalize_cpu_memory_stmt(stmt)
             if stmt:
                 lines.append(stmt)
         return "\n".join(lines)
@@ -1280,6 +1390,8 @@ class _KernelEmitter:
                 if isinstance(unique_user, func.ReturnOp) and self._is_direct_return_nn_add(unique_user):
                     self.ctx.bind_name(op.result, "out")
             stmt = emit_c_op(op, self.ctx)
+            if stmt and self.ctx.target == "cpu":
+                stmt = self._normalize_cpu_memory_stmt(stmt)
             if stmt:
                 lines.append(stmt)
         return "\n".join(lines)

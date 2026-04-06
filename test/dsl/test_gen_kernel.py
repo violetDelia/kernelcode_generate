@@ -1,7 +1,7 @@
 """gen_kernel tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 func.func 到目标函数源码的组装行为。
@@ -197,7 +197,7 @@ def _make_npu_demo_add_barrier_module(
     """构造 `npu_demo` add+barrier 受控 module。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 生成 `body + wrapper` 双函数 module，覆盖 `gen_kernel(target="npu_demo")` 的受控 `builtin.module` 子集。
@@ -216,7 +216,6 @@ def _make_npu_demo_add_barrier_module(
     tsm_buffer_type = _make_memory_type([128], [1], element_type=f32, space="tsm")
     tlm_buffer_type = _make_memory_type([64], [1], element_type=f32, space="tlm")
     tsm_tile_type = _make_memory_type([16], [1], element_type=f32, space="tsm")
-    tlm_tile_type = _make_memory_type([16], [1], element_type=f32, space="tlm")
     gm_tile_type = _make_memory_type([16], [1], element_type=f32, space="global")
     barrier_visibility = ArrayAttr([NnMemorySpaceAttr.from_name(space_name) for space_name in barrier_visibility_names])
 
@@ -234,11 +233,11 @@ def _make_npu_demo_add_barrier_module(
     rhs_gm = DmaViewOp(body_block.args[2], [thread_offset.result], [size.result], [stride.result], gm_tile_type)
     lhs_tsm = DmaViewOp(tsm.result, [thread_offset.result], [size.result], [stride.result], tsm_tile_type)
     rhs_tsm = DmaViewOp(tsm.result, [rhs_offset.result], [size.result], [stride.result], tsm_tile_type)
-    out_tlm = DmaViewOp(tlm.result, [thread_offset.result], [size.result], [stride.result], tlm_tile_type)
+    out_tsm = DmaViewOp(tsm.result, [thread_offset.result], [size.result], [stride.result], tsm_tile_type)
     lhs_slice = DmaSliceOp(lhs_tsm.result, lhs_gm.result, [zero.result], [size.result], [stride.result])
     rhs_slice = DmaSliceOp(rhs_tsm.result, rhs_gm.result, [zero.result], [size.result], [stride.result])
     barrier0 = ArchBarrierOp(ArchScopeAttr.from_name(barrier_scope), barrier_visibility)
-    add = NnAddOp(lhs_tsm.result, rhs_tsm.result, tlm_tile_type, NnMemorySpaceAttr.from_name("tlm"))
+    add = NnAddOp(lhs_tsm.result, rhs_tsm.result, tsm_tile_type, NnMemorySpaceAttr.from_name("tsm"))
     barrier1 = ArchBarrierOp(ArchScopeAttr.from_name(barrier_scope), barrier_visibility)
     deslice = DmaDesliceOp(add.result, body_block.args[3], [thread_offset.result], [size.result], [stride.result], gm_type)
     body_block.add_ops(
@@ -256,7 +255,7 @@ def _make_npu_demo_add_barrier_module(
             rhs_gm,
             lhs_tsm,
             rhs_tsm,
-            out_tlm,
+            out_tsm,
             lhs_slice,
             rhs_slice,
             barrier0,
@@ -543,9 +542,9 @@ int main() {{
         rhs_data[i] = static_cast<float>(100 + i);
     }}
 
-    Memory<float> lhs(lhs_data, shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
-    Memory<float> rhs(rhs_data, shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
-    Memory<float> out(out_data, shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
+    Memory<MemorySpace::GM, float> lhs(lhs_data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<MemorySpace::GM, float> rhs(rhs_data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<MemorySpace::GM, float> out(out_data, shape, stride, 1, MemoryFormat::Norm);
     auto generated_entry = &add_barrier;
     auto generated_body = &add_barrier_body;
     if (generated_entry == nullptr || generated_body == nullptr) {{
@@ -605,7 +604,7 @@ int main() {{
 
 # GK-001
 # 创建者: 金铲铲大作战
-# 最后一次更改: jcc你莫辜负
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
 # 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
 # 功能说明: 验证 func.func 可生成完整后端源码。
@@ -638,7 +637,9 @@ def test_gen_kernel_returns_target_source() -> None:
     memory_block.add_op(func.ReturnOp(memory_block.args[0]))
     memory_func = _func("memory_kernel", [mem], [mem], memory_block, ("input",))
     memory_source = gen_kernel(_rewrite_func(memory_func), _ctx())
-    assert memory_source.startswith("void memory_kernel(Memory<int32_t>& arg0, const Memory<int32_t>& input)")
+    assert memory_source.startswith(
+        "void memory_kernel(Memory<MemorySpace::GM, int32_t>& arg0, const Memory<MemorySpace::GM, int32_t>& input)"
+    )
     assert "out = input;" not in memory_source
 
 
@@ -690,7 +691,7 @@ def test_gen_kernel_has_no_legacy_double_interface() -> None:
 
 # GK-001A
 # 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
 # 功能说明: 验证单个普通 op 输入会直接委托给 emit_c。
@@ -717,7 +718,7 @@ def test_gen_kernel_delegates_single_op_input_to_emit_c(monkeypatch: pytest.Monk
 
 # GK-002
 # 创建者: 金铲铲大作战
-# 最后一次更改: jcc你莫辜负
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
 # 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
 # 功能说明: 验证输入 Memory 参数使用只读签名。
@@ -735,12 +736,12 @@ def test_gen_kernel_uses_readonly_memory_inputs() -> None:
 
     source = gen_kernel(func_op, _ctx())
 
-    assert source.startswith("void read_only(const Memory<int32_t>& input)")
+    assert source.startswith("void read_only(const Memory<MemorySpace::GM, int32_t>& input)")
 
 
 # GK-O5-001
 # 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
 # 功能说明: 验证 rewritten 单 output memory 函数可被 gen_kernel 消费。
@@ -757,7 +758,9 @@ def test_gen_kernel_accepts_rewritten_single_output_function() -> None:
 
     source = gen_kernel(_rewrite_func(func_op), _ctx())
 
-    assert source.startswith("void produce(Memory<int32_t>& arg0, const Memory<int32_t>& input)")
+    assert source.startswith(
+        "void produce(Memory<MemorySpace::GM, int32_t>& arg0, const Memory<MemorySpace::GM, int32_t>& input)"
+    )
     assert "out = input;" not in source
 
 
@@ -890,14 +893,17 @@ def test_gen_kernel_handles_func_return_and_out_binding_in_main_flow(monkeypatch
 
     source = gen_kernel(second_func, _ctx())
 
-    assert source.startswith("void return_second(Memory<int32_t>& arg0, const Memory<int32_t>& lhs, const Memory<int32_t>& rhs)")
+    assert source.startswith(
+        "void return_second(Memory<MemorySpace::GM, int32_t>& arg0, "
+        "const Memory<MemorySpace::GM, int32_t>& lhs, const Memory<MemorySpace::GM, int32_t>& rhs)"
+    )
     assert "func.return" not in source
     assert "out = rhs;" not in source
 
 
 # GK-006
 # 创建者: 金铲铲大作战
-# 最后一次更改: jcc你莫辜负
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
 # 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
 # 功能说明: 验证 loop 片段可拼装到完整函数中。
@@ -990,10 +996,10 @@ def test_gen_kernel_rejects_unsupported_return_form() -> None:
 
 # GK-012
 # 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-01 15:07:50 +0800
 # 最近一次运行成功时间: 2026-04-01 15:07:50 +0800
-# 功能说明: 验证 f32/f64 标量与 Memory<f32/f64> 可生成 float/double 与 Memory<float>/Memory<double> 形式签名。
+# 功能说明: 验证 f32/f64 标量与 Memory<Space, f32/f64> 可生成 float/double 与 Memory<MemorySpace::GM, float>/Memory<MemorySpace::GM, double> 形式签名。
 # 测试目的: 锁定 gen_kernel 在完整源码签名中的 f32/f64 类型映射，避免 conv2d 链路在函数级入口阶段被 TypeError 阻断或类型退化。
 # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_supports_float32_scalar_and_memory
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
@@ -1008,7 +1014,9 @@ def test_gen_kernel_supports_float32_scalar_and_memory() -> None:
 
     source_f32 = gen_kernel(func_op_f32, _ctx())
 
-    assert source_f32.startswith("void float_kernel(Memory<float>& arg0, const Memory<float>& input, float alpha)")
+    assert source_f32.startswith(
+        "void float_kernel(Memory<MemorySpace::GM, float>& arg0, const Memory<MemorySpace::GM, float>& input, float alpha)"
+    )
 
     mem_f64 = _make_memory_type([2, 2], [2, 1], element_type=f64)
     block_f64 = Block(arg_types=[mem_f64, f64])
@@ -1017,12 +1025,14 @@ def test_gen_kernel_supports_float32_scalar_and_memory() -> None:
 
     source_f64 = gen_kernel(func_op_f64, _ctx())
 
-    assert source_f64.startswith("void double_kernel(Memory<double>& arg0, const Memory<double>& input, double alpha)")
+    assert source_f64.startswith(
+        "void double_kernel(Memory<MemorySpace::GM, double>& arg0, const Memory<MemorySpace::GM, double>& input, double alpha)"
+    )
 
 
 # GK-009
 # 创建者: 金铲铲大作战
-# 最后一次更改: 朽木露琪亚
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-25 17:10:00 +0800
 # 最近一次运行成功时间: 2026-03-25 17:10:00 +0800
 # 功能说明: 验证生成源码保留函数名与参数名，并在缺失参数名时沿用默认命名。
@@ -1040,7 +1050,9 @@ def test_gen_kernel_preserves_function_and_arg_names() -> None:
 
     source = gen_kernel(func_op, _ctx())
 
-    assert source.startswith("void named_kernel(Memory<int32_t>& arg0, const Memory<int32_t>& tensor, int32_t scale)")
+    assert source.startswith(
+        "void named_kernel(Memory<MemorySpace::GM, int32_t>& arg0, const Memory<MemorySpace::GM, int32_t>& tensor, int32_t scale)"
+    )
     assert "out = tensor;" not in source
 
     unnamed_block = Block(arg_types=[i32])
@@ -1114,7 +1126,7 @@ def test_gen_kernel_rejects_symbol_scalar_return_on_non_cpu() -> None:
 
 # GK-013
 # 创建者: jcc你莫辜负
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-02 23:04:42 +0800
 # 最近一次运行成功时间: 2026-04-02 23:04:42 +0800
 # 功能说明: 验证 `build_func_op -> pass -> gen_kernel` 的 memory+memory add 在 cpu target 下可生成源码。
@@ -1130,7 +1142,9 @@ def test_gen_kernel_supports_lowered_nn_add_memory_memory_on_cpu() -> None:
     func_op = build_func_op(add_direct, _tensor_arg([2, 2]), _tensor_arg([2, 2]))
     source = gen_kernel(_lower_and_rewrite_func(func_op), _ctx())
 
-    assert source.startswith("void add_direct(Memory<int32_t>& arg0, const Memory<int32_t>& arg1, const Memory<int32_t>& arg2)")
+    assert source.startswith(
+        "void add_direct(Memory<MemorySpace::GM, int32_t>& arg0, const Memory<MemorySpace::GM, int32_t>& arg1, const Memory<MemorySpace::GM, int32_t>& arg2)"
+    )
     assert "cpu::add(arg1, arg2, arg0);" in source
     assert "kernel.add" not in source
     assert "nn.add" not in source
@@ -1139,7 +1153,7 @@ def test_gen_kernel_supports_lowered_nn_add_memory_memory_on_cpu() -> None:
 
 # GK-014
 # 创建者: jcc你莫辜负
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-02 23:04:42 +0800
 # 最近一次运行成功时间: 2026-04-02 23:04:42 +0800
 # 功能说明: 验证 `build_func_op -> pass -> gen_kernel` 的 memory+const(i32) add 会先经 `dma.fill` 再生成源码。
@@ -1155,7 +1169,9 @@ def test_gen_kernel_supports_lowered_nn_add_memory_const_on_cpu() -> None:
     func_op = build_func_op(add_const_direct, _tensor_arg([2, 2]))
     source = gen_kernel(_lower_and_rewrite_func(func_op), _ctx())
 
-    assert source.startswith("void add_const_direct(Memory<int32_t>& arg0, const Memory<int32_t>& arg1)")
+    assert source.startswith(
+        "void add_const_direct(Memory<MemorySpace::GM, int32_t>& arg0, const Memory<MemorySpace::GM, int32_t>& arg1)"
+    )
     assert "cpu::add(arg1, v0, arg0);" in source
     assert "for (long long fill0_i = 0; fill0_i < v0.element_count(); ++fill0_i) {" in source
     assert "v0.data()[fill0_i] = 1;" in source
@@ -1166,7 +1182,7 @@ def test_gen_kernel_supports_lowered_nn_add_memory_const_on_cpu() -> None:
 
 # GK-015
 # 创建者: jcc你莫辜负
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-02 23:04:42 +0800
 # 最近一次运行成功时间: 2026-04-02 23:04:42 +0800
 # 功能说明: 验证 `build_func_op -> pass -> gen_kernel` 的 memory+symbol.int add 会先经 `dma.fill` 再生成源码。
@@ -1182,7 +1198,9 @@ def test_gen_kernel_supports_lowered_nn_add_memory_symbol_on_cpu() -> None:
     func_op = build_func_op(add_symbol_direct, _tensor_arg([2, 2]), SymbolDim("bias"))
     source = gen_kernel(_lower_and_rewrite_func(func_op), _ctx())
 
-    assert source.startswith("void add_symbol_direct(Memory<int32_t>& arg0, const Memory<int32_t>& arg1, long long arg2)")
+    assert source.startswith(
+        "void add_symbol_direct(Memory<MemorySpace::GM, int32_t>& arg0, const Memory<MemorySpace::GM, int32_t>& arg1, long long arg2)"
+    )
     assert "cpu::add(arg1, v0, arg0);" in source
     assert "for (long long fill0_i = 0; fill0_i < v0.element_count(); ++fill0_i) {" in source
     assert "v0.data()[fill0_i] = arg2;" in source
@@ -1197,7 +1215,7 @@ class Test_buffer_results_to_out_params_gen_kernel:
 
     # GK-O5-002
     # 创建者: jcc你莫辜负
-    # 最后一次更改: jcc你莫辜负
+    # 最后一次更改: 金铲铲大作战
     # 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
     # 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
     # 功能说明: 验证 rewritten mixed output 函数可被 gen_kernel 消费。
@@ -1214,13 +1232,15 @@ class Test_buffer_results_to_out_params_gen_kernel:
 
         source = gen_kernel(_rewrite_func(func_op), _ctx())
 
-        assert source.startswith("bool mixed_out(Memory<int32_t>& arg0, const Memory<int32_t>& input, bool flag)")
+        assert source.startswith(
+            "bool mixed_out(Memory<MemorySpace::GM, int32_t>& arg0, const Memory<MemorySpace::GM, int32_t>& input, bool flag)"
+        )
         assert "return flag;" in source
-        assert "Memory<int32_t>& out" not in source
+        assert "Memory<MemorySpace::GM, int32_t>& out" not in source
 
     # GK-O5-003
     # 创建者: jcc你莫辜负
-    # 最后一次更改: jcc你莫辜负
+    # 最后一次更改: 金铲铲大作战
     # 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
     # 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
     # 功能说明: 验证 rewrite 后成功链路不再残留旧 memory return ABI。
@@ -1240,7 +1260,7 @@ class Test_buffer_results_to_out_params_gen_kernel:
         assert "-> (!nn.memory" not in ir_text
         assert "func.return %" not in ir_text
         assert "cpu::add(arg1, arg2, arg0);" in source
-        assert "Memory<int32_t>& out" not in source
+        assert "Memory<MemorySpace::GM, int32_t>& out" not in source
         assert "out = " not in source
 
     # GK-O5-005
@@ -1288,7 +1308,7 @@ class Test_buffer_results_to_out_params_gen_kernel:
 
 # GK-017
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-02 21:00:00 +0800
 # 最近一次运行成功时间: 2026-04-02 21:00:00 +0800
 # 功能说明: 验证 npu_demo target 可生成包含 KernelContext 与 thread 查询的 body-level kernel 骨架。
@@ -1305,7 +1325,10 @@ def test_gen_kernel_emits_npu_demo_body_level_kernel() -> None:
     source = gen_kernel(func_op, _npu_ctx())
 
     assert source.startswith('#include "include/npu_demo/npu_demo.h"\n\n')
-    assert "void demo_kernel(npu_demo::KernelContext& ctx, const Memory<float>& source, Memory<float>& out)" in source
+    assert (
+        "void demo_kernel(npu_demo::KernelContext& ctx, const Memory<MemorySpace::GM, float>& source, Memory<MemorySpace::GM, float>& out)"
+        in source
+    )
     assert "long long tid = ctx.thread_id();" in source
     assert "long long tnum = ctx.thread_num();" in source
     assert "npu_demo::KernelContext& ctx" in source
@@ -1339,7 +1362,7 @@ def test_gen_kernel_compiles_npu_demo_source_with_single_include() -> None:
 
 # GK-018
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-02 21:00:00 +0800
 # 最近一次运行成功时间: 2026-04-02 21:00:00 +0800
 # 功能说明: 验证 npu_demo target 可生成固定的 dynamic memory/view/slice/deslice/add 管线。
@@ -1355,11 +1378,11 @@ def test_gen_kernel_emits_npu_demo_memory_pipeline() -> None:
 
     source = gen_kernel(func_op, _npu_ctx())
 
-    tsm_idx = source.index("Memory<float> tsm = ctx.get_dynamic_memory<float>(MemorySpace::TSM);")
-    tlm_idx = source.index("Memory<float> tlm = ctx.get_dynamic_memory<float>(MemorySpace::TLM);")
+    tsm_idx = source.index("Memory<MemorySpace::TSM, float> tsm = ctx.get_dynamic_memory<MemorySpace::TSM, float>();")
+    tlm_idx = source.index("Memory<MemorySpace::TLM, float> tlm = ctx.get_dynamic_memory<MemorySpace::TLM, float>();")
     src_view_idx = source.index("auto src_view = view(source, tid * 16, 16, 1);")
     work_view_idx = source.index("auto work_tile = view(tsm, 0, 16, 1);")
-    out_view_idx = source.index("auto out_tile = view(tlm, 0, 16, 1);")
+    out_view_idx = source.index("auto out_tile = view(tsm, 0, 16, 1);")
     slice_idx = source.index("slice(work_tile, src_view, 0, 16, 1);")
     add_idx = source.index("add(work_tile, work_tile, out_tile);")
     deslice_idx = source.index("deslice(out_tile, out, tid * 16, 16, 1);")
@@ -1418,7 +1441,7 @@ def test_gen_kernel_rejects_npu_demo_body_level_kernel_with_nonempty_body() -> N
 
 # GK-021
 # 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
 # 功能说明: 验证函数级特化在黑盒 `gen_kernel(...)` 输出上保持既有合同。
@@ -1453,13 +1476,13 @@ def test_gen_kernel_black_box_direct_return_nn_add_conv2d_img2col2d_tiled_and_np
     npu_func = _func("demo_kernel", [IndexType(), npu_mem], [npu_mem], npu_block, ("ctx", "source"))
     npu_source = gen_kernel(npu_func, _npu_ctx())
     assert "ctx.thread_id()" in npu_source
-    assert "ctx.get_dynamic_memory<float>(MemorySpace::TSM)" in npu_source
+    assert "ctx.get_dynamic_memory<MemorySpace::TSM, float>()" in npu_source
     assert "deslice(out_tile, out, tid * 16, 16, 1);" in npu_source
 
 
 # GK-I2-001
 # 创建者: 大闸蟹
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 金铲铲大作战
 # 功能说明: 验证 `build_func_op -> pass -> gen_kernel` 的三条 nn.add CPU 路径可生成源码并完成编译执行。
 # 测试目的: 作为 I4 的统一 smoke，确认公开成功链路来自 `build_func_op -> LowerNnToKernelPass -> gen_kernel`，而不是 raw `nn.add` direct-return 特化。
 # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_compiles_and_runs_lowered_nn_add_variants_on_cpu
@@ -1533,11 +1556,11 @@ int main() {{
     long long shape[2] = {{2, 2}};
     long long stride[2] = {{2, 1}};
 
-    Memory<int32_t> lhs(lhs_data, 2, shape, stride);
-    Memory<int32_t> rhs(rhs_data, 2, shape, stride);
-    Memory<int32_t> out_pair(out_pair_data, 2, shape, stride);
-    Memory<int32_t> out_const(out_const_data, 2, shape, stride);
-    Memory<int32_t> out_symbol(out_symbol_data, 2, shape, stride);
+    Memory<MemorySpace::GM, int32_t> lhs(lhs_data, 2, shape, stride);
+    Memory<MemorySpace::GM, int32_t> rhs(rhs_data, 2, shape, stride);
+    Memory<MemorySpace::GM, int32_t> out_pair(out_pair_data, 2, shape, stride);
+    Memory<MemorySpace::GM, int32_t> out_const(out_const_data, 2, shape, stride);
+    Memory<MemorySpace::GM, int32_t> out_symbol(out_symbol_data, 2, shape, stride);
 
     add_direct(out_pair, lhs, rhs);
     add_const_direct(out_const, lhs);
@@ -1565,7 +1588,7 @@ int main() {{
 
 # GK-C2-001
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-02 06:21:14 +0800
 # 最近一次运行成功时间: 2026-04-02 06:21:14 +0800
 # 功能说明: 验证 conv2d_img2col2d_tiled(...) 可生成固定 CPU 骨架并编译运行。
@@ -1619,9 +1642,9 @@ int main() {{
     long long out_shape[4] = {{1, 16, 16, 16}};
     long long out_stride[4] = {{4096, 256, 16, 1}};
 
-    Memory<float> input(input_data, 4, input_shape, input_stride);
-    Memory<float> weight(weight_data, 4, weight_shape, weight_stride);
-    Memory<float> out(out_data, 4, out_shape, out_stride);
+    Memory<MemorySpace::GM, float> input(input_data, 4, input_shape, input_stride);
+    Memory<MemorySpace::GM, float> weight(weight_data, 4, weight_shape, weight_stride);
+    Memory<MemorySpace::GM, float> out(out_data, 4, out_shape, out_stride);
 
     conv2d_img2col2d_tiled(input, weight, out);
 
@@ -1838,7 +1861,7 @@ def test_gen_kernel_rejects_kernel_split_missing_tile_bridge() -> None:
 
 # GK-S4-001
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-06 12:40:00 +0800
 # 最近一次运行成功时间: 2026-04-06 12:40:00 +0800
 # 功能说明: 验证 `target=\"npu_demo\"` 的受控 module 输入可生成 wrapper + body 双函数源码，并保留 barrier 管线。
@@ -1853,12 +1876,22 @@ def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body() -> None:
     source = gen_kernel(module, _npu_ctx())
 
     assert source.startswith('#include "include/npu_demo/npu_demo.h"\n\n')
-    assert "static void add_barrier_body(npu_demo::KernelContext& ctx, const Memory<float>& lhs, const Memory<float>& rhs, Memory<float>& out)" in source
-    assert "void add_barrier(const Memory<float>& lhs, const Memory<float>& rhs, Memory<float>& out)" in source
+    assert (
+        "static void add_barrier_body(npu_demo::KernelContext& ctx, const Memory<MemorySpace::GM, float>& lhs, "
+        "const Memory<MemorySpace::GM, float>& rhs, Memory<MemorySpace::GM, float>& out)"
+        in source
+    )
+    assert (
+        "void add_barrier(const Memory<MemorySpace::GM, float>& lhs, "
+        "const Memory<MemorySpace::GM, float>& rhs, Memory<MemorySpace::GM, float>& out)"
+        in source
+    )
     assert "npu_demo::launch<1, 4, 1>(add_barrier_body, lhs, rhs, out);" in source
     assert source.count("ctx.barrier({MemorySpace::TSM, MemorySpace::TLM}, BarrierScope::BLOCK);") == 2
-    assert source.index("long long tid = ctx.thread_id();") < source.index("Memory<float> tsm = ctx.get_dynamic_memory<float>(MemorySpace::TSM);")
-    assert source.index("slice(lhs_tsm, lhs_gm, 0, 16, 1);") < source.index("add(lhs_tsm, rhs_tsm, out_tlm);") < source.index("deslice(out_tlm, out, tid * 16, 16, 1);")
+    assert source.index("long long tid = ctx.thread_id();") < source.index(
+        "Memory<MemorySpace::TSM, float> tsm = ctx.get_dynamic_memory<MemorySpace::TSM, float>();"
+    )
+    assert source.index("slice(lhs_tsm, lhs_gm, 0, 16, 1);") < source.index("add(lhs_tsm, rhs_tsm, out_tsm);") < source.index("deslice(out_tsm, out, tid * 16, 16, 1);")
     assert "arch.launch_kernel" not in source
     assert "ctx.sync_threads" not in source
 

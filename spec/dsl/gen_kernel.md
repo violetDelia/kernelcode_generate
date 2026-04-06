@@ -11,7 +11,7 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/dsl/gen_kernel.md`](../../spec/dsl/gen_kernel.md)
 - `功能实现`：[`kernel_gen/dsl/gen_kernel.py`](../../kernel_gen/dsl/gen_kernel.py)
 - `test`：[`test/dsl/test_gen_kernel.py`](../../test/dsl/test_gen_kernel.py)
@@ -29,7 +29,7 @@
 - 对 `func.func` 统一约束签名、参数顺序、输出参数风格、IR 顺序遍历与函数体拼装规则。
 - 明确支持：只读 `Memory` 输入、rewrite 后前置 `arg0/arg1/...` memory 参数作为显式输出参数、标量参数顺序与默认命名保持、`emit_c` 错误向上抛出。
 - 明确支持：mixed `memory + scalar` returns 经 rewrite 后，`memory` 作为前置 out 参数、`scalar` 继续保留为函数返回值。
-- 明确支持：`f32/f64` 类型在 `target=cpu` 下映射为 `float/double`，用于 `Memory<float>/Memory<double>` 与 `float/double` 标量参数生成。
+- 明确支持：`f32/f64` 类型在 `target=cpu` 下映射为 `float/double`，用于 `Memory<MemorySpace::GM, float>/Memory<MemorySpace::GM, double>` 与 `float/double` 标量参数生成。
 - 冻结 `target=cpu` 的 rewrite-after-IR 合同：`gen_kernel(...)` 只接受已经经过 `BufferResultsToOutParamsPass` 的 lowered IR；默认 CPU 路径不再从旧 `memory return` ABI 隐式推导 `out`。
 - 冻结 split-after-IR 的单函数 codegen 合同：目标源码仍为单个函数定义，tile 相关表达必须由 `tuner.param` / `kernel_split.tile_value` 承接，显式分块结构必须对应 `symbol.for`。
 - 冻结 `target="npu_demo"` 的完整源码合同：`gen_kernel(target="npu_demo")` 必须支持“launch wrapper + body kernel”的受控 `builtin.module` 子集，并生成包含 **body 函数 + launch wrapper 函数** 的双函数源码；body 函数内必须生成 `ctx.barrier(...)`，wrapper 函数必须生成 `npu_demo::launch<1, 4, 1>(...)`。
@@ -105,14 +105,14 @@ source = gen_kernel(func_op, EmitCContext(target="cpu"))
 
 注意事项：
 
-- rewrite 后 IR 中，最前面连续的显式 `arg0/arg1/...` memory 参数必须生成为非 `const` 的 `Memory<...>&` 输出参数；其余 `Memory` 输入参数保持 `const Memory<...>&`。
+- rewrite 后 IR 中，最前面连续的显式 `arg0/arg1/...` memory 参数必须生成为非 `const` 的 `Memory<Space, T>&` 输出参数；其余 `Memory` 输入参数保持 `const Memory<Space, T>&`。
 - 默认 CPU 路径不再接受 `-> (!nn.memory<...>)` 这类旧返回 ABI；memory 输出必须已经在 IR 中前移成参数。
 - 若函数已有前置 out 参数但仍声明 `memory` 作为返回类型，视为 half-rewritten ABI，必须抛出 `GenKernelError` 且错误消息包含 `legacy memory return ABI is not supported`。
 - 当 rewrite 后函数返回类型仅包含 `scalar` 结果时（mixed returns 场景），函数应生成前置 out 参数与单一标量返回值并存的签名。
 - rewrite 后 `kernel.add` 的完整目标源码形态可接近以下形式：
 
 ```cpp
-void add(Memory<int32_t>& arg0, const Memory<int32_t>& arg1, const Memory<int32_t>& arg2) {
+void add(Memory<MemorySpace::GM, int32_t>& arg0, const Memory<MemorySpace::GM, int32_t>& arg1, const Memory<MemorySpace::GM, int32_t>& arg2) {
     cpu::add(arg1, arg2, arg0);
 }
 ```
@@ -126,16 +126,16 @@ void add(Memory<int32_t>& arg0, const Memory<int32_t>& arg1, const Memory<int32_
 ```cpp
 static void add_barrier_body(
     npu_demo::KernelContext& ctx,
-    const Memory<float>& lhs,
-    const Memory<float>& rhs,
-    Memory<float>& out) {
+    const Memory<MemorySpace::GM, float>& lhs,
+    const Memory<MemorySpace::GM, float>& rhs,
+    Memory<MemorySpace::GM, float>& out) {
     /* barrier + memory pipeline */
 }
 
 void add_barrier(
-    const Memory<float>& lhs,
-    const Memory<float>& rhs,
-    Memory<float>& out) {
+    const Memory<MemorySpace::GM, float>& lhs,
+    const Memory<MemorySpace::GM, float>& rhs,
+    Memory<MemorySpace::GM, float>& out) {
     npu_demo::launch<1, 4, 1>(add_barrier_body, lhs, rhs, out);
 }
 ```
@@ -183,34 +183,34 @@ arch.launch<%b, %t, %s>(@missing_body, %lhs, %rhs, %out) : (...) -> ()
 ```cpp
 static void add_barrier_body(
     npu_demo::KernelContext& ctx,
-    const Memory<float>& lhs,
-    const Memory<float>& rhs,
-    Memory<float>& out) {
+    const Memory<MemorySpace::GM, float>& lhs,
+    const Memory<MemorySpace::GM, float>& rhs,
+    Memory<MemorySpace::GM, float>& out) {
     long long tid = ctx.thread_id();
     long long tnum = ctx.thread_num();
 
-    auto tsm = ctx.get_dynamic_memory<float>(MemorySpace::TSM);
-    auto tlm = ctx.get_dynamic_memory<float>(MemorySpace::TLM);
+    auto tsm = ctx.get_dynamic_memory<MemorySpace::TSM, float>();
+    auto tlm = ctx.get_dynamic_memory<MemorySpace::TLM, float>();
 
     auto lhs_gm = view(lhs, tid * 16, 16, 1);
     auto rhs_gm = view(rhs, tid * 16, 16, 1);
 
     auto lhs_tsm = view(tsm, tid * 16, 16, 1);
     auto rhs_tsm = view(tsm, 64 + tid * 16, 16, 1);
-    auto out_tlm = view(tlm, tid * 16, 16, 1);
+    auto out_tsm = view(tsm, tid * 16, 16, 1);
 
     slice(lhs_tsm, lhs_gm, 0, 16, 1);
     slice(rhs_tsm, rhs_gm, 0, 16, 1);
     ctx.barrier(/* visibility=[TSM, TLM], scope=BLOCK */);
 
-    add(lhs_tsm, rhs_tsm, out_tlm);
+    add(lhs_tsm, rhs_tsm, out_tsm);
     ctx.barrier(/* visibility=[TSM, TLM], scope=BLOCK */);
 
-    deslice(out_tlm, out, tid * 16, 16, 1);
+    deslice(out_tsm, out, tid * 16, 16, 1);
 }
 ```
 
-- 上述骨架顺序是 `thread_id/thread_num -> get_dynamic_memory(TSM/TLM) -> view -> slice -> barrier -> add -> barrier -> deslice`；不得回退到 `.view<`、`load<`、`store<` 或表达式式 `auto tile = slice(source, ...)`。
+- 上述骨架顺序是 `thread_id/thread_num -> get_dynamic_memory<MemorySpace::TSM/TLM, T>() -> view -> slice -> barrier -> add -> barrier -> deslice`；不得回退到 `.view<`、`load<`、`store<` 或表达式式 `auto tile = slice(source, ...)`。
 - 当 `func.return` 回写 `out` 的值未在 `EmitCContext` 中绑定名称，且该值为 `BlockArgument` 时，必须回退为 `arg{index}` 默认命名以保持与函数级签名一致。
 - 当 `func.return` 返回 `!symbol.int<"...">` 时，必须生成 `return <expr>;` 并复用 `emit_c` 的命名/表达式规则。
 - 对 `conv_cpu_tiled_v1` 子集，函数体骨架必须固定包含：`constexpr Ntile/Ctile/Ftile/Hotile/Wotile`、tile-local `col_buffer/acc_buffer`、`n -> f -> ho -> wo` 分块循环、循环体内的 `cpu::img2col2d(...)` 与 `c` 方向 tiled compute、以及最终写回 `out` 的显式循环或等价机械可判定写回语句。
@@ -234,9 +234,9 @@ static void add_barrier_body(
 
 ```cpp
 void vec_add_exp(
-    const Memory<float>& arg0,
-    const Memory<float>& arg1,
-    Memory<float>& arg2) {
+    const Memory<MemorySpace::GM, float>& arg0,
+    const Memory<MemorySpace::GM, float>& arg1,
+    Memory<MemorySpace::GM, float>& arg2) {
     long long tile_m = tuner_param("TILE_M");
     auto carry = alloc(...);
     for (long long i = 0; i < M; i += tile_m) {
@@ -306,9 +306,9 @@ void vec_add_exp(...) {
 
 ```cpp
 void conv2d_img2col2d_tiled(
-    const Memory<float>& input,
-    const Memory<float>& weight,
-    Memory<float>& out) {
+    const Memory<MemorySpace::GM, float>& input,
+    const Memory<MemorySpace::GM, float>& weight,
+    Memory<MemorySpace::GM, float>& out) {
     constexpr long long Ntile = 1;
     constexpr long long Ctile = 16;
     constexpr long long Ftile = 16;
@@ -366,7 +366,7 @@ void conv2d_img2col2d_tiled(
 - 验证 half-rewritten IR 会被 `gen_kernel(...)` 显式拒绝。
 - 验证 rewrite 后的 lowered add 只通过黑盒 `gen_kernel(...)` 输出验证，不依赖内部 helper 或内部策略名。
 - 验证 `target="npu_demo"` 支持受控 `builtin.module` 子集输入，并生成 **body + wrapper** 两个函数定义；wrapper 必须包含 `npu_demo::launch<1, 4, 1>(...)`，body 必须包含 `npu_demo::KernelContext& ctx` 与 `ctx.barrier(...)`。
-- 验证 `target="npu_demo"` 的 body 函数骨架必须包含 `ctx.thread_id()`、`ctx.thread_num()`、`ctx.get_dynamic_memory<...>(MemorySpace::TSM/TLM)`，并保持 `view/slice/barrier/add/barrier/deslice` 的固定顺序；不得回退到 `.view<`、`load<`、`store<` 或表达式式 `auto tile = slice(source, ...)`，且不得生成旧接口 `ctx.sync_threads()`。
+- 验证 `target="npu_demo"` 的 body 函数骨架必须包含 `ctx.thread_id()`、`ctx.thread_num()`、`ctx.get_dynamic_memory<MemorySpace::TSM/TLM, T>()`，并保持 `view/slice/barrier/add/barrier/deslice` 的固定顺序；不得回退到 `.view<`、`load<`、`store<` 或表达式式 `auto tile = slice(source, ...)`，且不得生成旧接口 `ctx.sync_threads()`。
 - 验证非 `Memory` 标量返回的签名与函数体生成规则；其中 `!symbol.int<"...">` 仅允许 `target=cpu`。
 - 对 `conv_cpu_tiled_v1` 下游实现阶段，验证 `conv2d_img2col2d_tiled(...)` 生成源码包含固定 tile 常量、`cpu::img2col2d(...)`、局部 `col_buffer/acc_buffer`、`n/f/ho/wo` 分块循环与最终写回 `out`。
 - 注：本次 `KernelSplitPass` 相关验收当前先冻结为本 spec 的下游测试映射；`test/dsl/test_gen_kernel.py` 已收口相应用例，后续修改不得绕过这些黑盒约束。
@@ -388,8 +388,8 @@ void conv2d_img2col2d_tiled(
 - GK-009：生成源码保留函数名与已命名参数名；当函数级签名拼装观察到输入参数缺失 `arg_attrs.name` 时，生成源码沿用 `arg{index}` 默认名。（`test_gen_kernel_preserves_function_and_arg_names`）
 - GK-010：`!symbol.int<"...">` 标量返回可生成函数返回值。（`test_gen_kernel_supports_symbol_scalar_return`）
 - GK-011：非 cpu target 下 `!symbol.int<"...">` 标量返回必须报错，防止跨 target 误生成返回签名/函数体。（`test_gen_kernel_rejects_symbol_scalar_return_on_non_cpu`）
-- GK-012：`f32/f64` 标量与 `Memory<f32/f64>` 可生成 `float/double` 与 `Memory<float>/Memory<double>` 形式签名。（`test_gen_kernel_supports_float32_scalar_and_memory`）
-- GK-013：rewrite 后 `kernel.add(memory, memory)` 在 cpu target 下可生成 `Memory<int32_t>& arg0` 签名与 `cpu::add(arg1, arg2, arg0);` 函数体。（`test_gen_kernel_supports_lowered_nn_add_memory_memory_on_cpu`）
+- GK-012：`f32/f64` 标量与 `Memory<Space, f32/f64>` 可生成 `float/double` 与 `Memory<MemorySpace::GM, float>/Memory<MemorySpace::GM, double>` 形式签名。（`test_gen_kernel_supports_float32_scalar_and_memory`）
+- GK-013：rewrite 后 `kernel.add(memory, memory)` 在 cpu target 下可生成 `Memory<MemorySpace::GM, int32_t>& arg0` 签名与 `cpu::add(arg1, arg2, arg0);` 函数体。（`test_gen_kernel_supports_lowered_nn_add_memory_memory_on_cpu`）
 - GK-014：rewrite 后 `kernel.add(memory, const(i32))` 在 cpu target 下可生成 `cpu::add(arg1, v0, arg0);` 函数体。（`test_gen_kernel_supports_lowered_nn_add_memory_const_on_cpu`）
 - GK-015：rewrite 后 `kernel.add(memory, symbol.int)` 在 cpu target 下可生成 `cpu::add(arg1, v0, arg0);` 函数体，并保留 `long long` 标量参数。（`test_gen_kernel_supports_lowered_nn_add_memory_symbol_on_cpu`）
 - GK-016：rewrite 后 `memory + scalar` mixed output 函数中，memory 走前置 `arg0`，scalar 继续返回。（`test_gen_kernel_accepts_rewritten_mixed_output_function`）
