@@ -1,6 +1,7 @@
 tmp
 **pytest_cache**
 agents/codex-multi-agents/config
+agents/codex-multi-agents/agents/*/memory.md
 **__pycache__**
 main
 temp
