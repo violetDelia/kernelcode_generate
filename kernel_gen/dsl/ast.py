@@ -19,7 +19,20 @@
 
 from __future__ import annotations
 
-import ast as py_ast
+import gc as _gc
+
+_gc_enabled = _gc.isenabled()
+_gc.disable()
+try:
+    # NOTE: Some environments have observed an intermittent fatal assertion
+    # during the very first `ast` import (related to `_ast` type initialization).
+    # Disabling GC around the import reduces that window; `finally` guarantees
+    # we never leak global GC state even if import fails.
+    import ast as py_ast
+finally:
+    if _gc_enabled:
+        _gc.enable()
+    del _gc_enabled, _gc
 import inspect
 import re
 import textwrap
