@@ -347,7 +347,7 @@ def _resolve_nn_arith_element_type(
     try:
         lhs_dtype = _xdsl_to_dtype(lhs_type.element_type, location)
         rhs_dtype = _xdsl_to_dtype(rhs_type.element_type, location)
-        target_dtype = Memory._promote_dtype(lhs_dtype, rhs_dtype)
+        target_dtype = Memory._promote_ranked_dtype(lhs_dtype, rhs_dtype)
     except TypeError as exc:
         raise _LoweringError("Binary op operands must have compatible element_type", location=location) from exc
     return _dtype_to_xdsl(target_dtype, location)

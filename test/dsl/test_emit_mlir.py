@@ -511,7 +511,7 @@ def test_emit_context_reuses_cached_value() -> None:
     lhs = TensorAST(name="x", memory=memory, location=None)
     rhs = TensorAST(name="y", memory=memory, location=None)
     expr = BinaryExprAST(op="add", lhs=lhs, rhs=rhs, location=None)
-    func_op = build_func_op_from_ast(FunctionAST("tmp", [lhs, rhs], [], BlockAST([expr])))
+    func_op = build_func_op_from_ast(FunctionAST("tmp", [lhs, rhs], [], BlockAST([expr]), returns_none=True))
     arg_types = list(func_op.function_type.inputs)
     block = Block(arg_types=arg_types)
     ctx = EmitContext(builder=block, symbols={"x": block.args[0], "y": block.args[1]}, types={})
@@ -540,7 +540,7 @@ def test_emit_mlir_tensor_uses_symbol_table() -> None:
     memory = Memory([2, 2], NumericType.Float32)
     lhs = TensorAST(name="x", memory=memory, location=None)
     rhs = TensorAST(name="y", memory=memory, location=None)
-    func_op = build_func_op_from_ast(FunctionAST("tmp", [lhs, rhs], [], BlockAST([lhs])))
+    func_op = build_func_op_from_ast(FunctionAST("tmp", [lhs, rhs], [], BlockAST([lhs]), returns_none=True))
     block = Block(arg_types=list(func_op.function_type.inputs))
     ctx = EmitContext(builder=block, symbols={"x": block.args[0], "y": block.args[1]}, types={})
 
@@ -565,7 +565,7 @@ def test_emit_mlir_compare_expr_emits_eq() -> None:
     lhs = TensorAST(name="x", memory=memory, location=None)
     rhs = TensorAST(name="y", memory=memory, location=None)
     expr = CompareExprAST(op="eq", lhs=lhs, rhs=rhs, location=None)
-    func_op = build_func_op_from_ast(FunctionAST("tmp", [lhs, rhs], [], BlockAST([expr])))
+    func_op = build_func_op_from_ast(FunctionAST("tmp", [lhs, rhs], [], BlockAST([expr]), returns_none=True))
     block = Block(arg_types=list(func_op.function_type.inputs))
     ctx = EmitContext(builder=block, symbols={"x": block.args[0], "y": block.args[1]}, types={})
     emit_node_mlir(lhs, ctx)
@@ -651,7 +651,7 @@ def test_ast_visitor_reuses_expression_value() -> None:
     lhs = TensorAST(name="x", memory=memory, location=None)
     rhs = TensorAST(name="y", memory=memory, location=None)
     expr = BinaryExprAST(op="add", lhs=lhs, rhs=rhs, location=None)
-    func_ast = FunctionAST(name="reuse", inputs=[lhs, rhs], outputs=[], body=BlockAST([expr, expr]))
+    func_ast = FunctionAST(name="reuse", inputs=[lhs, rhs], outputs=[], body=BlockAST([expr, expr]), returns_none=True)
 
     func_op = build_func_op_from_ast(func_ast)
     ops = [op for op in func_op.body.block.ops if isinstance(op, NnAddOp)]
@@ -693,7 +693,7 @@ def test_load_ast_lowering_rejected() -> None:
     memory = Memory([2, 2], NumericType.Float32)
     tensor = TensorAST(name="x", memory=memory, location=None)
     load = LoadAST(tensor=tensor, offset=[ConstAST(0), ConstAST(0)], stride=None, location=None)
-    func_ast = FunctionAST(name="load", inputs=[tensor], outputs=[], body=BlockAST([load]))
+    func_ast = FunctionAST(name="load", inputs=[tensor], outputs=[], body=BlockAST([load]), returns_none=True)
     func_op = build_func_op_from_ast(func_ast)
     ops = [op for op in func_op.body.block.ops if isinstance(op, DmaLoadOp)]
     assert len(ops) == 1
@@ -714,7 +714,7 @@ def test_store_ast_lowering_rejected() -> None:
     memory = Memory([2, 2], NumericType.Float32)
     tensor = TensorAST(name="x", memory=memory, location=None)
     store = StoreAST(tensor=tensor, offset=[ConstAST(0), ConstAST(0)], stride=None, value=tensor, location=None)
-    func_ast = FunctionAST(name="store", inputs=[tensor], outputs=[], body=BlockAST([store, tensor]))
+    func_ast = FunctionAST(name="store", inputs=[tensor], outputs=[], body=BlockAST([store, tensor]), returns_none=True)
     func_op = build_func_op_from_ast(func_ast)
     ops = [op for op in func_op.body.block.ops if isinstance(op, DmaStoreOp)]
     assert len(ops) == 1
@@ -740,7 +740,7 @@ def test_load_ast_lowering_raises_lowering_error() -> None:
         stride=ConstAST(2, location=SourceLocation(2, 9)),
         location=SourceLocation(2, 0),
     )
-    func_ast = FunctionAST(name="load", inputs=[tensor], outputs=[], body=BlockAST([load]))
+    func_ast = FunctionAST(name="load", inputs=[tensor], outputs=[], body=BlockAST([load]), returns_none=True)
     with pytest.raises(AstVisitorError, match="Only unit stride is supported") as exc_info:
         build_func_op_from_ast(func_ast)
     assert exc_info.value.location is not None
@@ -766,7 +766,7 @@ def test_load_ast_index_rank_mismatch_reports_location() -> None:
         stride=None,
         location=SourceLocation(2, 0),
     )
-    func_ast = FunctionAST(name="load", inputs=[tensor], outputs=[], body=BlockAST([load]))
+    func_ast = FunctionAST(name="load", inputs=[tensor], outputs=[], body=BlockAST([load]), returns_none=True)
     with pytest.raises(AstVisitorError, match="Index rank mismatch") as exc_info:
         build_func_op_from_ast(func_ast)
     assert exc_info.value.location is not None
@@ -787,7 +787,7 @@ def test_store_ast_lowering_raises_lowering_error() -> None:
     memory = Memory([2, 2], NumericType.Float32)
     tensor = TensorAST(name="x", memory=memory, location=None)
     store = StoreAST(tensor=tensor, offset=[ConstAST(0), ConstAST(0)], stride=None, value=ConstAST(1), location=None)
-    func_ast = FunctionAST(name="store", inputs=[tensor], outputs=[], body=BlockAST([store, tensor]))
+    func_ast = FunctionAST(name="store", inputs=[tensor], outputs=[], body=BlockAST([store, tensor]), returns_none=True)
     with pytest.raises(AstVisitorError, match="Operand must be nn.memory"):
         build_func_op_from_ast(func_ast)
 
@@ -818,7 +818,7 @@ def test_for_ast_lowering_emits_loads() -> None:
         ]
     )
     loop = ForAST(var=loop_var, start=ConstAST(0), end=ConstAST(2), body=body, location=None)
-    func_ast = FunctionAST(name="loop", inputs=[tensor], outputs=[], body=BlockAST([loop, tensor]))
+    func_ast = FunctionAST(name="loop", inputs=[tensor], outputs=[], body=BlockAST([loop, tensor]), returns_none=True)
     func_op = build_func_op_from_ast(func_ast)
     loop_ops = [op for op in func_op.body.block.ops if isinstance(op, scf.ForOp)]
     assert len(loop_ops) == 1
@@ -2087,8 +2087,8 @@ def test_emit_mlir_img2col1d_lowering() -> None:
 
     assert isinstance(result.owner, NnImg2col1dOp)
     assert isinstance(result.type, NnMemoryType)
-    assert list(result.type.shape.data) == [IntAttr(1), IntAttr(6), IntAttr(6)]
-    assert list(result.type.stride.data) == [IntAttr(36), IntAttr(6), IntAttr(1)]
+    assert list(result.type.shape.data) == [IntAttr(1), IntAttr(2), IntAttr(3), IntAttr(6)]
+    assert list(result.type.stride.data) == [IntAttr(36), IntAttr(18), IntAttr(6), IntAttr(1)]
     assert result.type.space.space.data == "global"
 
 
@@ -2103,7 +2103,7 @@ def test_emit_mlir_img2col1d_lowering() -> None:
 # 对应测试文件路径: test/dsl/test_emit_mlir.py
 def test_emit_mlir_img2col2d_with_loop_slice_deslice_lowering() -> None:
     input_memory = Memory([1, 1, 4, 4], NumericType.Float32, space=MemorySpace.GM)
-    output_memory = Memory([1, 4, 9], NumericType.Float32, space=MemorySpace.GM)
+    output_memory = Memory([1, 1, 2, 2, 3, 3], NumericType.Float32, space=MemorySpace.GM)
     input_tensor = TensorAST(name="x", memory=input_memory, location=None)
     output_tensor = TensorAST(name="y", memory=output_memory, location=None)
     start = ScalarArgAST(name="start", value_type=int, is_symbolic=True, location=None)
@@ -2127,7 +2127,7 @@ def test_emit_mlir_img2col2d_with_loop_slice_deslice_lowering() -> None:
     )
     store_expr = StoreAST(
         tensor=output_tensor,
-        offset=[loop_var, ConstAST(0), ConstAST(0)],
+        offset=[loop_var, ConstAST(0), ConstAST(0), ConstAST(0), ConstAST(0), ConstAST(0)],
         stride=None,
         value=img2col_expr,
         kind="deslice",

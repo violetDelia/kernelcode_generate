@@ -3465,7 +3465,7 @@ def test_compare_implicit_broadcast_lowering() -> None:
     lhs = TensorAST(name="x", memory=lhs_memory, location=None)
     rhs = TensorAST(name="y", memory=rhs_memory, location=None)
     expr = CompareExprAST(op="eq", lhs=lhs, rhs=rhs, location=None)
-    func_ast = FunctionAST(name="eq", inputs=[lhs, rhs], outputs=[], body=BlockAST([expr]))
+    func_ast = FunctionAST(name="eq", inputs=[lhs, rhs], outputs=[], body=BlockAST([expr]), returns_none=True)
     func_op = build_func_op_from_ast(func_ast)
     broadcast_ops = [op for op in func_op.body.block.ops if isinstance(op, NnBroadcastOp)]
     assert len(broadcast_ops) == 1
