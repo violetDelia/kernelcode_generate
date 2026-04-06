@@ -10,11 +10,11 @@
 - auto tile = view(source, offset, size, stride);
 
 创建者: 大闸蟹
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/include/api/test_dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 
@@ -32,16 +32,16 @@
 - auto sub = view(source, offset, size, stride);
 
 创建者: 大闸蟹
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/include/api/test_dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
-template <typename T>
-Memory<T> view(
-    const Memory<T>& source,
+template <MemorySpace Space, typename T>
+Memory<Space, T> view(
+    const Memory<Space, T>& source,
     const Vector& offset,
     const Vector& size,
     const Vector& stride);
@@ -54,17 +54,17 @@ Memory<T> view(
 - Status status = slice(tile, source, offset, size, stride);
 
 创建者: 大闸蟹
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/include/api/test_dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
-template <typename T>
+template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T>
 Status slice(
-    Memory<T>& target,
-    const Memory<T>& source,
+    Memory<TargetSpace, T>& target,
+    const Memory<SourceSpace, T>& source,
     const Vector& offset,
     const Vector& size,
     const Vector& stride);
@@ -77,17 +77,17 @@ Status slice(
 - Status status = deslice(tile, target, offset, size, stride);
 
 创建者: 大闸蟹
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/include/api/test_dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
-template <typename T>
+template <MemorySpace SourceSpace, MemorySpace TargetSpace, typename T>
 Status deslice(
-    const Memory<T>& source,
-    Memory<T>& target,
+    const Memory<SourceSpace, T>& source,
+    Memory<TargetSpace, T>& target,
     const Vector& offset,
     const Vector& size,
     const Vector& stride);

@@ -1,8 +1,8 @@
 """NPU demo KernelContext include tests.
 
 创建者: 朽木露琪亚
-最后一次更改: jcc你莫辜负
-最后修改人: jcc你莫辜负
+最后一次更改: 金铲铲大作战
+最后修改人: 金铲铲大作战
 最近一次运行测试时间: 2026-04-05 16:05:57 +0800
 最近一次运行成功时间: 2026-04-05 16:05:57 +0800
 
@@ -348,7 +348,7 @@ int main() {
 # 最后修改人: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-05 10:44:47 +0800
 # 最近一次运行成功时间: 2026-04-05 10:44:47 +0800
-# 测试目的: 验证 get_dynamic_memory<float>(TSM) 返回固定 shape/stride/space 的 Memory 视图。
+# 测试目的: 验证 get_dynamic_memory<TSM, float>() 返回固定 shape/stride/space 的 Memory 视图。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_returns_typed_tsm_memory
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
 # 对应 spec 文件链接: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
@@ -361,7 +361,7 @@ static int fail(int code) { return code; }
 
 int main() {
     npu_demo::KernelContext ctx;
-    auto mem = ctx.get_dynamic_memory<float>(MemorySpace::TSM);
+    auto mem = ctx.get_dynamic_memory<TSM, float>();
 
     if (mem.rank() != 1) {
         return fail(1);
@@ -387,7 +387,7 @@ int main() {
 # 最后修改人: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-05 10:44:47 +0800
 # 最近一次运行成功时间: 2026-04-05 10:44:47 +0800
-# 测试目的: 验证 get_dynamic_memory<float>(TLM) 返回固定 shape/stride/space 的 Memory 视图。
+# 测试目的: 验证 get_dynamic_memory<TLM, float>() 返回固定 shape/stride/space 的 Memory 视图。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_returns_typed_tlm_memory
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
 # 对应 spec 文件链接: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
@@ -400,7 +400,7 @@ static int fail(int code) { return code; }
 
 int main() {
     npu_demo::KernelContext ctx;
-    auto mem = ctx.get_dynamic_memory<float>(MemorySpace::TLM);
+    auto mem = ctx.get_dynamic_memory<TLM, float>();
 
     if (mem.rank() != 1) {
         return fail(1);
@@ -426,7 +426,7 @@ int main() {
 # 最后修改人: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-05 10:44:47 +0800
 # 最近一次运行成功时间: 2026-04-05 10:44:47 +0800
-# 测试目的: 验证 get_dynamic_memory<float>(SM) 在 sm_memory_size=0 时抛出带关键字的运行期错误。
+# 测试目的: 验证 get_dynamic_memory<SM, float>() 在 sm_memory_size=0 时抛出带关键字的运行期错误。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_rejects_sm_when_size_zero
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
 # 对应 spec 文件链接: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
@@ -443,7 +443,7 @@ static int fail(int code) { return code; }
 int main() {
     npu_demo::KernelContext ctx;
     try {
-        auto mem = ctx.get_dynamic_memory<float>(MemorySpace::SM);
+        auto mem = ctx.get_dynamic_memory<SM, float>();
         (void)mem;
         return fail(1);
     } catch (const std::runtime_error& err) {
@@ -466,7 +466,7 @@ int main() {
 # 最后修改人: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-05 10:44:47 +0800
 # 最近一次运行成功时间: 2026-04-05 10:44:47 +0800
-# 测试目的: 验证 get_dynamic_memory<float>(LM) 在 lm_memory_size=0 时抛出带关键字的运行期错误。
+# 测试目的: 验证 get_dynamic_memory<LM, float>() 在 lm_memory_size=0 时抛出带关键字的运行期错误。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_rejects_lm_when_size_zero
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
 # 对应 spec 文件链接: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
@@ -483,7 +483,7 @@ static int fail(int code) { return code; }
 int main() {
     npu_demo::KernelContext ctx;
     try {
-        auto mem = ctx.get_dynamic_memory<float>(MemorySpace::LM);
+        auto mem = ctx.get_dynamic_memory<LM, float>();
         (void)mem;
         return fail(1);
     } catch (const std::runtime_error& err) {
@@ -495,6 +495,71 @@ int main() {
     } catch (...) {
         return fail(3);
     }
+}
+"""
+    _compile_and_run(source)
+
+
+# NPU-DEMO-KC-005B
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最后修改人: 金铲铲大作战
+# 最近一次运行测试时间: N/A
+# 最近一次运行成功时间: N/A
+# 测试目的: 验证 get_dynamic_memory 模板空间入口的成功与失败路径可编译并返回稳定结果。
+# 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_get_dynamic_memory_template_space_contract
+# 对应功能实现文件链接: [include/npu_demo/Arch.h](include/npu_demo/Arch.h)
+# 对应 spec 文件链接: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
+# 对应测试文件链接: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
+def test_get_dynamic_memory_template_space_contract() -> None:
+    source = r"""
+#include <stdexcept>
+#include <string>
+
+#include "include/npu_demo/npu_demo.h"
+
+static int fail(int code) { return code; }
+
+static bool contains(const std::string& value, const char* needle) {
+    return value.find(needle) != std::string::npos;
+}
+
+int main() {
+    npu_demo::KernelContext ctx;
+    auto tsm = ctx.get_dynamic_memory<TSM, float>();
+    if (tsm.rank() != 1 || tsm.shape()[0] != 24576 || tsm.stride()[0] != 1 || tsm.space() != MemorySpace::TSM) {
+        return fail(1);
+    }
+
+    auto tlm = ctx.get_dynamic_memory<TLM, float>();
+    if (tlm.rank() != 1 || tlm.shape()[0] != 2048 || tlm.stride()[0] != 1 || tlm.space() != MemorySpace::TLM) {
+        return fail(2);
+    }
+
+    try {
+        auto sm = ctx.get_dynamic_memory<SM, float>();
+        (void)sm;
+        return fail(3);
+    } catch (const std::runtime_error& err) {
+        if (!contains(err.what(), "sm_memory_size=0")) {
+            return fail(4);
+        }
+    } catch (...) {
+        return fail(5);
+    }
+
+    try {
+        auto lm = ctx.get_dynamic_memory<LM, float>();
+        (void)lm;
+        return fail(6);
+    } catch (const std::runtime_error& err) {
+        if (!contains(err.what(), "lm_memory_size=0")) {
+            return fail(7);
+        }
+    } catch (...) {
+        return fail(8);
+    }
+    return 0;
 }
 """
     _compile_and_run(source)

@@ -7,7 +7,7 @@
 - cpu::add(A, B, C);
 
 创建者: 神秘人
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
@@ -33,7 +33,7 @@ namespace detail {
 - cpu::detail::init_indices(3, indices);
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
@@ -54,7 +54,7 @@ inline void init_indices(unsigned long long rank, long long* indices) {
 - cpu::detail::advance_indices(rank, shape, indices);
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
@@ -80,7 +80,7 @@ inline void advance_indices(unsigned long long rank, const long long* shape, lon
 - cpu::detail::contract_or_trap(rank == 3);
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
@@ -105,15 +105,15 @@ inline void contract_or_trap(bool condition) {
 - bool ok = cpu::detail::has_contiguous_rank(mem, 3);
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T>
-bool has_contiguous_rank(const Memory<T>& mem, unsigned long long expected_rank) {
+template <MemorySpace Space, typename T>
+bool has_contiguous_rank(const Memory<Space, T>& mem, unsigned long long expected_rank) {
     return mem.rank() == expected_rank && mem.is_contiguous();
 }
 
@@ -125,7 +125,7 @@ bool has_contiguous_rank(const Memory<T>& mem, unsigned long long expected_rank)
 - long long wo = cpu::detail::compute_img2col1d_output_width(width, 3, 1, 1, 1, 1);
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
@@ -157,10 +157,10 @@ inline long long compute_img2col1d_output_width(
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T>
+template <MemorySpace Space, typename T>
 void verify_img2col1d_contract(
-    const Memory<T>& value,
-    const Memory<T>& out,
+    const Memory<Space, T>& value,
+    const Memory<Space, T>& out,
     long long kw,
     long long sw,
     long long dw,
@@ -225,10 +225,10 @@ inline long long compute_img2col2d_output_extent(
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T>
+template <MemorySpace Space, typename T>
 void verify_img2col2d_contract(
-    const Memory<T>& value,
-    const Memory<T>& out,
+    const Memory<Space, T>& value,
+    const Memory<Space, T>& out,
     long long kh,
     long long kw,
     long long sh,
@@ -281,8 +281,8 @@ void verify_img2col2d_contract(
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T, typename Op>
-void apply_binary(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out, Op op) {
+template <MemorySpace Space, typename T, typename Op>
+void apply_binary(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, T>& out, Op op) {
     long long indices[MAX_DIM];
     init_indices(out.rank(), indices);
     const long long total = out.element_count();
@@ -300,15 +300,15 @@ void apply_binary(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out, Op
 - cpu::detail::apply_binary_scalar_rhs(lhs, 3.0f, out, [](float a, float b) { return a + b; });
 
 创建者: 金铲铲大作战
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T, typename Op>
-void apply_binary_scalar_rhs(const Memory<T>& lhs, T rhs_scalar, Memory<T>& out, Op op) {
+template <MemorySpace Space, typename T, typename Op>
+void apply_binary_scalar_rhs(const Memory<Space, T>& lhs, T rhs_scalar, Memory<Space, T>& out, Op op) {
     long long indices[MAX_DIM];
     init_indices(out.rank(), indices);
     const long long total = out.element_count();
@@ -326,15 +326,15 @@ void apply_binary_scalar_rhs(const Memory<T>& lhs, T rhs_scalar, Memory<T>& out,
 - cpu::detail::apply_binary_scalar_lhs(3.0f, rhs, out, [](float a, float b) { return a + b; });
 
 创建者: 金铲铲大作战
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T, typename Op>
-void apply_binary_scalar_lhs(T lhs_scalar, const Memory<T>& rhs, Memory<T>& out, Op op) {
+template <MemorySpace Space, typename T, typename Op>
+void apply_binary_scalar_lhs(T lhs_scalar, const Memory<Space, T>& rhs, Memory<Space, T>& out, Op op) {
     long long indices[MAX_DIM];
     init_indices(out.rank(), indices);
     const long long total = out.element_count();
@@ -352,15 +352,19 @@ void apply_binary_scalar_lhs(T lhs_scalar, const Memory<T>& rhs, Memory<T>& out,
 - cpu::detail::apply_compare(lhs, rhs, out, [](float a, float b) { return a < b; });
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T, typename PredT, typename Op>
-void apply_compare(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out, Op op) {
+template <MemorySpace Space, typename T, typename PredT, typename Op>
+void apply_compare(
+    const Memory<Space, T>& lhs,
+    const Memory<Space, T>& rhs,
+    Memory<Space, PredT>& out,
+    Op op) {
     long long indices[MAX_DIM];
     init_indices(out.rank(), indices);
     const long long total = out.element_count();
@@ -380,17 +384,17 @@ void apply_compare(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& ou
   [](float a, float b) { return a + b; }, 0.0f, false, false);
 
 创建者: 金铲铲大作战
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename Op>
+template <MemorySpace Space, typename Op>
 void reduce_impl(
-    const Memory<float>& value,
-    Memory<float>& out,
+    const Memory<Space, float>& value,
+    Memory<Space, float>& out,
     const long long* axes,
     unsigned long long axes_rank,
     bool keepdim,
@@ -523,15 +527,15 @@ void reduce_impl(
 - cpu::add(lhs, rhs, out);
 
 创建者: 神秘人
-最后修改人: 朽木露琪亚
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T>
-void add(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out) {
+template <MemorySpace Space, typename T>
+void add(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, T>& out) {
     detail::apply_binary(lhs, rhs, out, [](T a, T b) { return a + b; });
 }
 
@@ -545,15 +549,15 @@ void add(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out) {
 - cpu::add(lhs, bias, out);
 
 创建者: 金铲铲大作战
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T, typename ScalarT>
-void add(const Memory<T>& lhs, ScalarT rhs_scalar, Memory<T>& out) {
+template <MemorySpace Space, typename T, typename ScalarT>
+void add(const Memory<Space, T>& lhs, ScalarT rhs_scalar, Memory<Space, T>& out) {
     detail::apply_binary_scalar_rhs(lhs, static_cast<T>(rhs_scalar), out, [](T a, T b) { return a + b; });
 }
 
@@ -565,15 +569,15 @@ void add(const Memory<T>& lhs, ScalarT rhs_scalar, Memory<T>& out) {
 - cpu::add(3.0f, rhs, out);
 
 创建者: 金铲铲大作战
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T>
-void add(T lhs_scalar, const Memory<T>& rhs, Memory<T>& out) {
+template <MemorySpace Space, typename T>
+void add(T lhs_scalar, const Memory<Space, T>& rhs, Memory<Space, T>& out) {
     detail::apply_binary_scalar_lhs(lhs_scalar, rhs, out, [](T a, T b) { return a + b; });
 }
 
@@ -585,15 +589,15 @@ void add(T lhs_scalar, const Memory<T>& rhs, Memory<T>& out) {
 - cpu::sub(lhs, rhs, out);
 
 创建者: 神秘人
-最后修改人: 朽木露琪亚
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T>
-void sub(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out) {
+template <MemorySpace Space, typename T>
+void sub(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, T>& out) {
     detail::apply_binary(lhs, rhs, out, [](T a, T b) { return a - b; });
 }
 
@@ -605,15 +609,15 @@ void sub(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out) {
 - cpu::mul(lhs, rhs, out);
 
 创建者: 神秘人
-最后修改人: 朽木露琪亚
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T>
-void mul(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out) {
+template <MemorySpace Space, typename T>
+void mul(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, T>& out) {
     detail::apply_binary(lhs, rhs, out, [](T a, T b) { return a * b; });
 }
 
@@ -625,15 +629,15 @@ void mul(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out) {
 - cpu::truediv(lhs, rhs, out);
 
 创建者: 神秘人
-最后修改人: 朽木露琪亚
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T>
-void truediv(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out) {
+template <MemorySpace Space, typename T>
+void truediv(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, T>& out) {
     detail::apply_binary(lhs, rhs, out, [](T a, T b) { return a / b; });
 }
 
@@ -645,14 +649,15 @@ void truediv(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out) {
 - cpu::exp(value, out);
 
 创建者: 金铲铲大作战
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-void exp(const Memory<float>& value, Memory<float>& out) {
+template <MemorySpace Space>
+void exp(const Memory<Space, float>& value, Memory<Space, float>& out) {
     detail::contract_or_trap(value.rank() == out.rank());
     for (unsigned long long i = 0; i < value.rank(); ++i) {
         detail::contract_or_trap(value.shape()[i] == out.shape()[i]);
@@ -687,16 +692,17 @@ void exp(const Memory<float>& value, Memory<float>& out) {
 - cpu::reduce_sum(value, out, axes, 2, false);
 
 创建者: 金铲铲大作战
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
+template <MemorySpace Space>
 void reduce_sum(
-    const Memory<float>& value,
-    Memory<float>& out,
+    const Memory<Space, float>& value,
+    Memory<Space, float>& out,
     const long long* axes,
     unsigned long long axes_rank,
     bool keepdim) {
@@ -720,16 +726,17 @@ void reduce_sum(
 - cpu::reduce_min(value, out, axes, 1, false);
 
 创建者: 金铲铲大作战
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
+template <MemorySpace Space>
 void reduce_min(
-    const Memory<float>& value,
-    Memory<float>& out,
+    const Memory<Space, float>& value,
+    Memory<Space, float>& out,
     const long long* axes,
     unsigned long long axes_rank,
     bool keepdim) {
@@ -753,16 +760,17 @@ void reduce_min(
 - cpu::reduce_max(value, out, axes, 1, true);
 
 创建者: 金铲铲大作战
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
+template <MemorySpace Space>
 void reduce_max(
-    const Memory<float>& value,
-    Memory<float>& out,
+    const Memory<Space, float>& value,
+    Memory<Space, float>& out,
     const long long* axes,
     unsigned long long axes_rank,
     bool keepdim) {
@@ -786,15 +794,15 @@ void reduce_max(
 - cpu::eq(lhs, rhs, out);
 
 创建者: 神秘人
-最后修改人: 朽木露琪亚
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T, typename PredT>
-void eq(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out) {
+template <MemorySpace Space, typename T, typename PredT>
+void eq(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, PredT>& out) {
     detail::apply_compare(lhs, rhs, out, [](T a, T b) { return a == b; });
 }
 
@@ -806,15 +814,15 @@ void eq(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out) {
 - cpu::ne(lhs, rhs, out);
 
 创建者: 神秘人
-最后修改人: 朽木露琪亚
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T, typename PredT>
-void ne(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out) {
+template <MemorySpace Space, typename T, typename PredT>
+void ne(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, PredT>& out) {
     detail::apply_compare(lhs, rhs, out, [](T a, T b) { return a != b; });
 }
 
@@ -826,15 +834,15 @@ void ne(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out) {
 - cpu::lt(lhs, rhs, out);
 
 创建者: 神秘人
-最后修改人: 朽木露琪亚
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T, typename PredT>
-void lt(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out) {
+template <MemorySpace Space, typename T, typename PredT>
+void lt(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, PredT>& out) {
     detail::apply_compare(lhs, rhs, out, [](T a, T b) { return a < b; });
 }
 
@@ -846,15 +854,15 @@ void lt(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out) {
 - cpu::le(lhs, rhs, out);
 
 创建者: 神秘人
-最后修改人: 朽木露琪亚
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T, typename PredT>
-void le(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out) {
+template <MemorySpace Space, typename T, typename PredT>
+void le(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, PredT>& out) {
     detail::apply_compare(lhs, rhs, out, [](T a, T b) { return a <= b; });
 }
 
@@ -866,15 +874,15 @@ void le(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out) {
 - cpu::gt(lhs, rhs, out);
 
 创建者: 神秘人
-最后修改人: 朽木露琪亚
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T, typename PredT>
-void gt(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out) {
+template <MemorySpace Space, typename T, typename PredT>
+void gt(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, PredT>& out) {
     detail::apply_compare(lhs, rhs, out, [](T a, T b) { return a > b; });
 }
 
@@ -886,15 +894,15 @@ void gt(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out) {
 - cpu::ge(lhs, rhs, out);
 
 创建者: 神秘人
-最后修改人: 朽木露琪亚
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T, typename PredT>
-void ge(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out) {
+template <MemorySpace Space, typename T, typename PredT>
+void ge(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, PredT>& out) {
     detail::apply_compare(lhs, rhs, out, [](T a, T b) { return a >= b; });
 }
 
@@ -906,15 +914,15 @@ void ge(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out) {
 - cpu::broadcast(input, out);
 
 创建者: 神秘人
-最后修改人: 朽木露琪亚
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
-template <typename T>
-void broadcast(const Memory<T>& input, Memory<T>& out) {
+template <MemorySpace Space, typename T>
+void broadcast(const Memory<Space, T>& input, Memory<Space, T>& out) {
     long long out_indices[MAX_DIM];
     detail::init_indices(out.rank(), out_indices);
     const long long total = out.element_count();
@@ -951,9 +959,10 @@ void broadcast(const Memory<T>& input, Memory<T>& out) {
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
+template <MemorySpace Space>
 void img2col1d(
-    const Memory<float>& value,
-    Memory<float>& out,
+    const Memory<Space, float>& value,
+    Memory<Space, float>& out,
     long long kw,
     long long sw,
     long long dw,
@@ -1000,16 +1009,17 @@ void img2col1d(
 - cpu::img2col2d(value, out, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr);
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
 - test: test/include/cpu/test_nn.py
 - 功能实现: include/cpu/Nn.h
 */
+template <MemorySpace Space>
 void img2col2d(
-    const Memory<float>& value,
-    Memory<float>& out,
+    const Memory<Space, float>& value,
+    Memory<Space, float>& out,
     long long kh,
     long long kw,
     long long sh,

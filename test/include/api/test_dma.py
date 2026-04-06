@@ -1,7 +1,7 @@
 """API DMA compile tests.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 `include/api/Dma.h` 的 `view/slice/deslice` 声明，
@@ -94,16 +94,16 @@ def _compile_and_run(source: str) -> None:
 
 # API-DMA-001
 # 创建者: 小李飞刀
-# 最后一次更改: jcc你莫辜负
+# 最后一次更改: 金铲铲大作战
 # 功能说明: 验证 DMA view/slice/deslice 的基础调用链可编译并正确运行。
 # 最近一次运行测试时间: 2026-04-05 23:44:24 +0800
 # 最近一次运行成功时间: 2026-04-05 23:44:24 +0800
 # 测试目的: 验证 `include/api/Dma.h` 声明可配合 `npu_demo` 后端完成 1-D `view/slice/deslice` 基础路径。
-# 使用示例: `pytest -q test/include/api/test_dma.py -k test_api_dma_compile_and_basic_vector_usage`
+# 使用示例: `pytest -q test/include/api/test_dma.py -k test_dma_view_returns_same_space_template`
 # 对应功能实现文件路径: `include/npu_demo/Dma.h`
 # 对应 spec 文件路径: `spec/include/api/Dma.md`
 # 对应测试文件路径: `test/include/api/test_dma.py`
-def test_api_dma_compile_and_basic_vector_usage() -> None:
+def test_dma_view_returns_same_space_template() -> None:
     source = r"""
 #include "include/api/Dma.h"
 #include "include/npu_demo/Dma.h"
@@ -117,7 +117,7 @@ int main() {
     }
     long long shape[1] = {10};
     long long stride[1] = {1};
-    Memory<float> source(source_data, shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
+    Memory<GM, float> source(source_data, shape, stride, 1, MemoryFormat::Norm);
 
     long long offset_buf[1] = {1};
     long long size_buf[1] = {4};
@@ -126,7 +126,7 @@ int main() {
     Vector size(size_buf, 1);
     Vector stride_vec(stride_buf, 1);
 
-    Memory<float> sub = view(source, offset, size, stride_vec);
+    Memory<GM, float> sub = view(source, offset, size, stride_vec);
     if (sub.rank() != 1 || sub.shape()[0] != 4) {
         return fail(1);
     }
@@ -140,13 +140,12 @@ int main() {
     float tile_data[4] = {0};
     long long tile_shape[1] = {4};
     long long tile_stride[1] = {1};
-    Memory<float> tile(
+    Memory<TSM, float> tile(
         tile_data,
         tile_shape,
         tile_stride,
         1,
-        MemoryFormat::Norm,
-        MemorySpace::TSM);
+        MemoryFormat::Norm);
     if (slice(tile, source, offset, size, stride_vec) != StatusCode::kOk) {
         return fail(4);
     }
@@ -155,13 +154,12 @@ int main() {
     }
 
     float target_data[10] = {0};
-    Memory<float> target(
+    Memory<GM, float> target(
         target_data,
         shape,
         stride,
         1,
-        MemoryFormat::Norm,
-        MemorySpace::GM);
+        MemoryFormat::Norm);
     if (deslice(tile, target, offset, size, stride_vec) != StatusCode::kOk) {
         return fail(6);
     }
@@ -177,16 +175,16 @@ int main() {
 
 # API-DMA-002
 # 创建者: 小李飞刀
-# 最后一次更改: jcc你莫辜负
+# 最后一次更改: 金铲铲大作战
 # 功能说明: 验证 DMA 入口在非法 vector rank 下返回稳定错误边界。
 # 最近一次运行测试时间: 2026-04-05 23:44:24 +0800
 # 最近一次运行成功时间: 2026-04-05 23:44:24 +0800
 # 测试目的: 验证 `include/api/Dma.h` 入口在非法 vector rank 下保持后端约定的错误边界。
-# 使用示例: `pytest -q test/include/api/test_dma.py -k test_api_dma_rejects_invalid_vector_rank`
+# 使用示例: `pytest -q test/include/api/test_dma.py -k test_dma_cross_space_templates_rejects_invalid_vector_rank`
 # 对应功能实现文件路径: `include/npu_demo/Dma.h`
 # 对应 spec 文件路径: `spec/include/api/Dma.md`
 # 对应测试文件路径: `test/include/api/test_dma.py`
-def test_api_dma_rejects_invalid_vector_rank() -> None:
+def test_dma_cross_space_templates_rejects_invalid_vector_rank() -> None:
     source = r"""
 #include <stdexcept>
 #include <string>
@@ -204,7 +202,7 @@ int main() {
     float source_data[10] = {0};
     long long shape[1] = {10};
     long long stride[1] = {1};
-    Memory<float> source(source_data, shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
+    Memory<GM, float> source(source_data, shape, stride, 1, MemoryFormat::Norm);
 
     long long offset_buf[2] = {0, 0};
     long long size_buf[2] = {1, 1};
@@ -226,27 +224,83 @@ int main() {
     float tile_data[1] = {0};
     long long tile_shape[1] = {1};
     long long tile_stride[1] = {1};
-    Memory<float> tile(
+    Memory<TSM, float> tile(
         tile_data,
         tile_shape,
         tile_stride,
         1,
-        MemoryFormat::Norm,
-        MemorySpace::TSM);
+        MemoryFormat::Norm);
     if (slice(tile, source, offset, size, stride_vec) != StatusCode::kError) {
         return fail(3);
     }
 
     float target_data[10] = {0};
-    Memory<float> target(
+    Memory<GM, float> target(
         target_data,
         shape,
         stride,
         1,
-        MemoryFormat::Norm,
-        MemorySpace::GM);
+        MemoryFormat::Norm);
     if (deslice(tile, target, offset, size, stride_vec) != StatusCode::kError) {
         return fail(4);
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
+# API-DMA-003
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 deslice 在跨空间模板参数下可编译并返回成功。
+# 最近一次运行测试时间: N/A
+# 最近一次运行成功时间: N/A
+# 测试目的: 验证 `deslice` 接口允许 `SourceSpace/TargetSpace` 跨空间模板组合。
+# 使用示例: `pytest -q test/include/api/test_dma.py -k test_dma_deslice_supports_cross_space_templates`
+# 对应功能实现文件路径: `include/npu_demo/Dma.h`
+# 对应 spec 文件路径: `spec/include/api/Dma.md`
+# 对应测试文件路径: `test/include/api/test_dma.py`
+def test_dma_deslice_supports_cross_space_templates() -> None:
+    source = r"""
+#include "include/api/Dma.h"
+#include "include/npu_demo/Dma.h"
+
+static int fail(int code) { return code; }
+
+int main() {
+    float source_data[8];
+    for (int i = 0; i < 8; ++i) {
+        source_data[i] = static_cast<float>(i);
+    }
+    long long shape[1] = {8};
+    long long stride[1] = {1};
+    Memory<GM, float> source(source_data, shape, stride, 1, MemoryFormat::Norm);
+
+    long long offset_buf[1] = {2};
+    long long size_buf[1] = {4};
+    long long stride_buf[1] = {1};
+    Vector offset(offset_buf, 1);
+    Vector size(size_buf, 1);
+    Vector stride_vec(stride_buf, 1);
+
+    float tile_data[4] = {0};
+    long long tile_shape[1] = {4};
+    long long tile_stride[1] = {1};
+    Memory<TSM, float> tile(tile_data, tile_shape, tile_stride, 1, MemoryFormat::Norm);
+
+    if (slice(tile, source, offset, size, stride_vec) != StatusCode::kOk) {
+        return fail(1);
+    }
+
+    float target_data[8] = {0};
+    Memory<GM, float> target(target_data, shape, stride, 1, MemoryFormat::Norm);
+    if (deslice(tile, target, offset, size, stride_vec) != StatusCode::kOk) {
+        return fail(2);
+    }
+    if (target_data[2] != 2.0f || target_data[3] != 3.0f || target_data[4] != 4.0f ||
+        target_data[5] != 5.0f) {
+        return fail(3);
     }
     return 0;
 }

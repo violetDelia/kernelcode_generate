@@ -7,11 +7,11 @@
 - Status status = add(lhs, rhs, out);
 
 创建者: 摸鱼小分队
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Nn.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/include/api/test_nn.py
 - 功能实现: include/npu_demo/Nn.h
 */
 
@@ -29,15 +29,15 @@
 - Status status = add(lhs, rhs, out);
 
 创建者: 摸鱼小分队
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Nn.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/include/api/test_nn.py
 - 功能实现: include/npu_demo/Nn.h
 */
-template <typename T>
-Status add(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out);
+template <MemorySpace Space, typename T>
+Status add(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, T>& out);
 
 /*
 功能说明:
@@ -47,15 +47,15 @@ Status add(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out);
 - Status status = sub(lhs, rhs, out);
 
 创建者: 摸鱼小分队
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Nn.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/include/api/test_nn.py
 - 功能实现: include/npu_demo/Nn.h
 */
-template <typename T>
-Status sub(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out);
+template <MemorySpace Space, typename T>
+Status sub(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, T>& out);
 
 /*
 功能说明:
@@ -65,15 +65,15 @@ Status sub(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out);
 - Status status = mul(lhs, rhs, out);
 
 创建者: 摸鱼小分队
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Nn.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/include/api/test_nn.py
 - 功能实现: include/npu_demo/Nn.h
 */
-template <typename T>
-Status mul(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out);
+template <MemorySpace Space, typename T>
+Status mul(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, T>& out);
 
 /*
 功能说明:
@@ -83,15 +83,15 @@ Status mul(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out);
 - Status status = truediv(lhs, rhs, out);
 
 创建者: 摸鱼小分队
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Nn.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/include/api/test_nn.py
 - 功能实现: include/npu_demo/Nn.h
 */
-template <typename T>
-Status truediv(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out);
+template <MemorySpace Space, typename T>
+Status truediv(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, T>& out);
 
 /*
 功能说明:
@@ -101,15 +101,15 @@ Status truediv(const Memory<T>& lhs, const Memory<T>& rhs, Memory<T>& out);
 - Status status = eq(lhs, rhs, out);
 
 创建者: 摸鱼小分队
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Nn.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/include/api/test_nn.py
 - 功能实现: include/npu_demo/Nn.h
 */
-template <typename T, typename PredT>
-Status eq(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out);
+template <MemorySpace Space, typename T, typename PredT>
+Status eq(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, PredT>& out);
 
 /*
 功能说明:
@@ -119,15 +119,15 @@ Status eq(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out);
 - Status status = ne(lhs, rhs, out);
 
 创建者: 摸鱼小分队
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Nn.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/include/api/test_nn.py
 - 功能实现: include/npu_demo/Nn.h
 */
-template <typename T, typename PredT>
-Status ne(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out);
+template <MemorySpace Space, typename T, typename PredT>
+Status ne(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, PredT>& out);
 
 /*
 功能说明:
@@ -137,15 +137,15 @@ Status ne(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out);
 - Status status = lt(lhs, rhs, out);
 
 创建者: 摸鱼小分队
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Nn.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/include/api/test_nn.py
 - 功能实现: include/npu_demo/Nn.h
 */
-template <typename T, typename PredT>
-Status lt(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out);
+template <MemorySpace Space, typename T, typename PredT>
+Status lt(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, PredT>& out);
 
 /*
 功能说明:
@@ -155,15 +155,15 @@ Status lt(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out);
 - Status status = le(lhs, rhs, out);
 
 创建者: 摸鱼小分队
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Nn.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/include/api/test_nn.py
 - 功能实现: include/npu_demo/Nn.h
 */
-template <typename T, typename PredT>
-Status le(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out);
+template <MemorySpace Space, typename T, typename PredT>
+Status le(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, PredT>& out);
 
 /*
 功能说明:
@@ -173,15 +173,15 @@ Status le(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out);
 - Status status = gt(lhs, rhs, out);
 
 创建者: 摸鱼小分队
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Nn.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/include/api/test_nn.py
 - 功能实现: include/npu_demo/Nn.h
 */
-template <typename T, typename PredT>
-Status gt(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out);
+template <MemorySpace Space, typename T, typename PredT>
+Status gt(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, PredT>& out);
 
 /*
 功能说明:
@@ -191,15 +191,15 @@ Status gt(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out);
 - Status status = ge(lhs, rhs, out);
 
 创建者: 摸鱼小分队
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Nn.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/include/api/test_nn.py
 - 功能实现: include/npu_demo/Nn.h
 */
-template <typename T, typename PredT>
-Status ge(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out);
+template <MemorySpace Space, typename T, typename PredT>
+Status ge(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, PredT>& out);
 
 /*
 功能说明:
@@ -209,14 +209,14 @@ Status ge(const Memory<T>& lhs, const Memory<T>& rhs, Memory<PredT>& out);
 - Status status = broadcast(input, out);
 
 创建者: 摸鱼小分队
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Nn.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/include/api/test_nn.py
 - 功能实现: include/npu_demo/Nn.h
 */
-template <typename T>
-Status broadcast(const Memory<T>& input, Memory<T>& out);
+template <MemorySpace Space, typename T>
+Status broadcast(const Memory<Space, T>& input, Memory<Space, T>& out);
 
 #endif  // KERNELCODE_GENERATE_INCLUDE_API_NN_H_

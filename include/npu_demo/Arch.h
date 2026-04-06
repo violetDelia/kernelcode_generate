@@ -7,7 +7,7 @@
 - Status status = npu_demo::launch<1, 4, 1>(kernel_body, output);
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/npu_demo/npu_demo.md
@@ -50,21 +50,21 @@ static constexpr long long kTlmMemorySize = 2048;
 - 构造固定一维连续布局的 Memory 视图，供动态片上内存入口复用。
 
 使用示例:
-- auto tsm = npu_demo::detail::make_linear_memory<float>(24576, MemorySpace::TSM);
+- auto tsm = npu_demo::detail::make_linear_memory<TSM, float>(24576);
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/npu_demo/npu_demo.md
 - test: test/include/npu_demo/test_kernel_context.py
 - 功能实现: include/npu_demo/Arch.h
 */
-template <typename T>
-inline Memory<T> make_linear_memory(long long size, MemorySpace space) {
+template <MemorySpace Space, typename T>
+inline Memory<Space, T> make_linear_memory(long long size) {
     long long shape[1] = {size};
     long long stride[1] = {1};
-    return Memory<T>(static_cast<T*>(nullptr), shape, stride, 1, MemoryFormat::Norm, space);
+    return Memory<Space, T>(static_cast<T*>(nullptr), shape, stride, 1, MemoryFormat::Norm);
 }
 
 /*
@@ -415,34 +415,35 @@ public:
     - 返回指定片上空间的动态内存视图。
 
     使用示例:
-    - auto tsm = ctx.get_dynamic_memory<float>(MemorySpace::TSM);
+    - auto tsm = ctx.get_dynamic_memory<TSM, float>();
 
     创建者: 小李飞刀
-    最后修改人: 小李飞刀
+    最后修改人: jcc你莫辜负
 
     关联文件:
     - spec: spec/include/npu_demo/npu_demo.md
     - test: test/include/npu_demo/test_kernel_context.py
     - 功能实现: include/npu_demo/Arch.h
     */
-    template <typename T>
-    Memory<T> get_dynamic_memory(MemorySpace space) const {
-        switch (space) {
-            case MemorySpace::TSM:
-                return detail::make_linear_memory<T>(detail::kTsmMemorySize, MemorySpace::TSM);
-            case MemorySpace::TLM:
-                return detail::make_linear_memory<T>(detail::kTlmMemorySize, MemorySpace::TLM);
-            case MemorySpace::SM:
-                detail::throw_zero_sized_memory(
-                    "npu_demo::KernelContext::get_dynamic_memory rejected MemorySpace::SM because "
-                    "sm_memory_size=0");
-            case MemorySpace::LM:
-                detail::throw_zero_sized_memory(
-                    "npu_demo::KernelContext::get_dynamic_memory rejected MemorySpace::LM because "
-                    "lm_memory_size=0");
-            default:
-                throw std::invalid_argument(
-                    "npu_demo::KernelContext::get_dynamic_memory requires on-chip MemorySpace");
+    template <MemorySpace Space, typename T>
+    Memory<Space, T> get_dynamic_memory() const {
+        if constexpr (Space == MemorySpace::TSM) {
+            return detail::make_linear_memory<MemorySpace::TSM, T>(detail::kTsmMemorySize);
+        } else if constexpr (Space == MemorySpace::TLM) {
+            return detail::make_linear_memory<MemorySpace::TLM, T>(detail::kTlmMemorySize);
+        } else if constexpr (Space == MemorySpace::SM) {
+            detail::throw_zero_sized_memory(
+                "npu_demo::KernelContext::get_dynamic_memory rejected MemorySpace::SM because "
+                "sm_memory_size=0");
+            return detail::make_linear_memory<MemorySpace::SM, T>(0);
+        } else if constexpr (Space == MemorySpace::LM) {
+            detail::throw_zero_sized_memory(
+                "npu_demo::KernelContext::get_dynamic_memory rejected MemorySpace::LM because "
+                "lm_memory_size=0");
+            return detail::make_linear_memory<MemorySpace::LM, T>(0);
+        } else {
+            throw std::invalid_argument(
+                "npu_demo::KernelContext::get_dynamic_memory requires on-chip MemorySpace");
         }
     }
 

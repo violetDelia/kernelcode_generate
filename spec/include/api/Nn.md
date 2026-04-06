@@ -7,11 +7,11 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`jcc你莫辜负`
 - `spec`：[`spec/include/api/Nn.md`](../../../spec/include/api/Nn.md)
 - `统一头文件`：`include/api/Nn.h` / `include/api/Memory.h` / `include/api/Core.h`
-- `功能实现`：无（API 规范暂不绑定实现）
-- `test`：无（API 规范暂不提供测试）
+- `功能实现`：[`include/npu_demo/Nn.h`](../../../include/npu_demo/Nn.h)
+- `test`：[`test/include/api/test_nn.py`](../../../test/include/api/test_nn.py)
 
 ## 依赖
 
@@ -34,10 +34,11 @@
 - 统一对外头文件仅暴露接口签名与最小类型要求，不包含任何后端特有结构体或实现细节。
 - API 仅定义合法输入语义；非法形状或不满足约束的调用必须通过返回失败状态值表达。
 - 所有 NN API 必须由调用方显式提供输出视图，接口返回状态值，不通过函数返回输出对象。
+- NN 接口要求输入与输出共享同一 `MemorySpace` 模板参数；逐元素比较仅允许改变元素类型，不改变 `Space`。
 - 返回状态遵循 `spec/include/api/Core.md` 中的 `Status` 与 `StatusCode` 语义。
 - 内存视图抽象需满足以下最小要求：
   - `data` 指向有效连续内存区（实现可扩展为其他存储形式，但需保持语义一致）。
-  - `shape`/`stride` 为长度 `rank` 的维度与步长描述，维度为正数；`Memory<T>` 的 `rank` 为运行期属性，不固定为编译期模板参数。
+- `shape`/`stride` 为长度 `rank` 的维度与步长描述，维度为正数；`Memory<Space, T>` 的 `rank` 为运行期属性，不固定为编译期模板参数。
   - 输入与输出视图的类型与后端一致性由实现侧保证。
 - `include/api/Nn.h` 仅提供声明与类型边界，不提供函数体实现；具体后端实现需在各自 include 层提供（当前 `npu_demo` 实现头文件为 [`include/npu_demo/Nn.h`](../../../include/npu_demo/Nn.h)）。
 
@@ -51,9 +52,9 @@
 
 参数说明：
 
-- `lhs (Memory<T>)`：左操作数视图。
-- `rhs (Memory<T>)`：右操作数视图。
-- `out (Memory<T>)`：输出视图。
+- `lhs (Memory<Space, T>)`：左操作数视图。
+- `rhs (Memory<Space, T>)`：右操作数视图。
+- `out (Memory<Space, T>)`：输出视图。
 
 使用示例：
 
@@ -78,9 +79,9 @@ Status status = add(lhs, rhs, out);
 
 参数说明：
 
-- `lhs (Memory<T>)`：左操作数视图。
-- `rhs (Memory<T>)`：右操作数视图。
-- `out (Memory<T>)`：输出视图。
+- `lhs (Memory<Space, T>)`：左操作数视图。
+- `rhs (Memory<Space, T>)`：右操作数视图。
+- `out (Memory<Space, T>)`：输出视图。
 
 使用示例：
 
@@ -104,9 +105,9 @@ Status status = sub(lhs, rhs, out);
 
 参数说明：
 
-- `lhs (Memory<T>)`：左操作数视图。
-- `rhs (Memory<T>)`：右操作数视图。
-- `out (Memory<T>)`：输出视图。
+- `lhs (Memory<Space, T>)`：左操作数视图。
+- `rhs (Memory<Space, T>)`：右操作数视图。
+- `out (Memory<Space, T>)`：输出视图。
 
 使用示例：
 
@@ -130,9 +131,9 @@ Status status = mul(lhs, rhs, out);
 
 参数说明：
 
-- `lhs (Memory<T>)`：左操作数视图。
-- `rhs (Memory<T>)`：右操作数视图。
-- `out (Memory<T>)`：输出视图。
+- `lhs (Memory<Space, T>)`：左操作数视图。
+- `rhs (Memory<Space, T>)`：右操作数视图。
+- `out (Memory<Space, T>)`：输出视图。
 
 使用示例：
 
@@ -156,9 +157,9 @@ Status status = truediv(lhs, rhs, out);
 
 参数说明：
 
-- `lhs (Memory<T>)`：左操作数视图。
-- `rhs (Memory<T>)`：右操作数视图。
-- `out (Memory<PredT>)`：输出视图，元素类型用于表示 predicate 结果。
+- `lhs (Memory<Space, T>)`：左操作数视图。
+- `rhs (Memory<Space, T>)`：右操作数视图。
+- `out (Memory<Space, PredT>)`：输出视图，元素类型用于表示 predicate 结果。
 
 使用示例：
 
@@ -183,9 +184,9 @@ Status status = eq(lhs, rhs, out);
 
 参数说明：
 
-- `lhs (Memory<T>)`：左操作数视图。
-- `rhs (Memory<T>)`：右操作数视图。
-- `out (Memory<PredT>)`：输出视图，元素类型用于表示 predicate 结果。
+- `lhs (Memory<Space, T>)`：左操作数视图。
+- `rhs (Memory<Space, T>)`：右操作数视图。
+- `out (Memory<Space, PredT>)`：输出视图，元素类型用于表示 predicate 结果。
 
 使用示例：
 
@@ -210,9 +211,9 @@ Status status = ne(lhs, rhs, out);
 
 参数说明：
 
-- `lhs (Memory<T>)`：左操作数视图。
-- `rhs (Memory<T>)`：右操作数视图。
-- `out (Memory<PredT>)`：输出视图，元素类型用于表示 predicate 结果。
+- `lhs (Memory<Space, T>)`：左操作数视图。
+- `rhs (Memory<Space, T>)`：右操作数视图。
+- `out (Memory<Space, PredT>)`：输出视图，元素类型用于表示 predicate 结果。
 
 使用示例：
 
@@ -237,9 +238,9 @@ Status status = lt(lhs, rhs, out);
 
 参数说明：
 
-- `lhs (Memory<T>)`：左操作数视图。
-- `rhs (Memory<T>)`：右操作数视图。
-- `out (Memory<PredT>)`：输出视图，元素类型用于表示 predicate 结果。
+- `lhs (Memory<Space, T>)`：左操作数视图。
+- `rhs (Memory<Space, T>)`：右操作数视图。
+- `out (Memory<Space, PredT>)`：输出视图，元素类型用于表示 predicate 结果。
 
 使用示例：
 
@@ -264,9 +265,9 @@ Status status = le(lhs, rhs, out);
 
 参数说明：
 
-- `lhs (Memory<T>)`：左操作数视图。
-- `rhs (Memory<T>)`：右操作数视图。
-- `out (Memory<PredT>)`：输出视图，元素类型用于表示 predicate 结果。
+- `lhs (Memory<Space, T>)`：左操作数视图。
+- `rhs (Memory<Space, T>)`：右操作数视图。
+- `out (Memory<Space, PredT>)`：输出视图，元素类型用于表示 predicate 结果。
 
 使用示例：
 
@@ -291,9 +292,9 @@ Status status = gt(lhs, rhs, out);
 
 参数说明：
 
-- `lhs (Memory<T>)`：左操作数视图。
-- `rhs (Memory<T>)`：右操作数视图。
-- `out (Memory<PredT>)`：输出视图，元素类型用于表示 predicate 结果。
+- `lhs (Memory<Space, T>)`：左操作数视图。
+- `rhs (Memory<Space, T>)`：右操作数视图。
+- `out (Memory<Space, PredT>)`：输出视图，元素类型用于表示 predicate 结果。
 
 使用示例：
 
@@ -318,8 +319,8 @@ Status status = ge(lhs, rhs, out);
 
 参数说明：
 
-- `input (Memory<T>)`：输入视图。
-- `out (Memory<T>)`：输出视图。
+- `input (Memory<Space, T>)`：输入视图。
+- `out (Memory<Space, T>)`：输出视图。
 
 使用示例：
 

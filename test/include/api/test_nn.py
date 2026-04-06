@@ -1,7 +1,7 @@
 """API NN compile tests.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 `include/api/Nn.h` 的逐元素运算声明，
@@ -94,16 +94,16 @@ def _compile_and_run(source: str) -> None:
 
 # API-NN-001
 # 创建者: 小李飞刀
-# 最后一次更改: jcc你莫辜负
+# 最后一次更改: 金铲铲大作战
 # 功能说明: 验证 NN 逐元素算子声明可编译并在基础数据上运行通过。
 # 最近一次运行测试时间: 2026-04-05 23:44:24 +0800
 # 最近一次运行成功时间: 2026-04-05 23:44:24 +0800
 # 测试目的: 验证 `include/api/Nn.h` 公开声明可配合 `npu_demo` 后端实例化，并覆盖 `add` 基础路径。
-# 使用示例: `pytest -q test/include/api/test_nn.py -k test_api_nn_compile_and_basic_usage`
+# 使用示例: `pytest -q test/include/api/test_nn.py -k test_nn_compare_ops_keep_same_space_template`
 # 对应功能实现文件路径: `include/npu_demo/Nn.h`
 # 对应 spec 文件路径: `spec/include/api/Nn.md`
 # 对应测试文件路径: `test/include/api/test_nn.py`
-def test_api_nn_compile_and_basic_usage() -> None:
+def test_nn_compare_ops_keep_same_space_template() -> None:
     source = r"""
 #include "include/api/Nn.h"
 #include "include/npu_demo/Nn.h"
@@ -118,10 +118,10 @@ int main() {
     long long shape[1] = {4};
     long long stride[1] = {1};
 
-    Memory<float> lhs(lhs_data, shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
-    Memory<float> rhs(rhs_data, shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
-    Memory<float> out(out_data, shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
-    Memory<int> pred(pred_data, shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
+    Memory<GM, float> lhs(lhs_data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<GM, float> rhs(rhs_data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<GM, float> out(out_data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<GM, int> pred(pred_data, shape, stride, 1, MemoryFormat::Norm);
 
     if (add(lhs, rhs, out) != StatusCode::kOk) {
         return fail(1);
@@ -168,16 +168,16 @@ int main() {
 
 # API-NN-002
 # 创建者: 小李飞刀
-# 最后一次更改: jcc你莫辜负
+# 最后一次更改: 金铲铲大作战
 # 功能说明: 验证 add 在 shape/rank 不满足时返回失败而非静默成功。
 # 最近一次运行测试时间: 2026-04-05 23:44:24 +0800
 # 最近一次运行成功时间: 2026-04-05 23:44:24 +0800
 # 测试目的: 验证 `add` 在 shape 或 rank 不满足公开约束时返回失败状态，而不是静默成功。
-# 使用示例: `pytest -q test/include/api/test_nn.py -k test_api_nn_add_rejects_invalid_shape_or_rank`
+# 使用示例: `pytest -q test/include/api/test_nn.py -k test_nn_same_space_template_rejects_invalid_shape_or_rank`
 # 对应功能实现文件路径: `include/npu_demo/Nn.h`
 # 对应 spec 文件路径: `spec/include/api/Nn.md`
 # 对应测试文件路径: `test/include/api/test_nn.py`
-def test_api_nn_add_rejects_invalid_shape_or_rank() -> None:
+def test_nn_same_space_template_rejects_invalid_shape_or_rank() -> None:
     source = r"""
 #include "include/api/Nn.h"
 #include "include/npu_demo/Nn.h"
@@ -194,11 +194,11 @@ int main() {
     long long rank2_shape[2] = {2, 2};
     long long rank2_stride[2] = {2, 1};
 
-    Memory<float> lhs(lhs_data, shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
-    Memory<float> rhs(rhs_data, shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
-    Memory<float> out(out_data, shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
-    Memory<float> bad_shape(lhs_data, short_shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
-    Memory<float> bad_rank(lhs_data, rank2_shape, rank2_stride, 2, MemoryFormat::Norm, MemorySpace::GM);
+    Memory<GM, float> lhs(lhs_data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<GM, float> rhs(rhs_data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<GM, float> out(out_data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<GM, float> bad_shape(lhs_data, short_shape, stride, 1, MemoryFormat::Norm);
+    Memory<GM, float> bad_rank(lhs_data, rank2_shape, rank2_stride, 2, MemoryFormat::Norm);
 
     if (add(bad_shape, rhs, out) == StatusCode::kOk) {
         return fail(1);
@@ -217,6 +217,42 @@ int main() {
     }
     if (add(lhs, rhs, bad_rank) == StatusCode::kOk) {
         return fail(6);
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
+# API-NN-003
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 broadcast 在同一空间模板参数下可编译并返回成功。
+# 最近一次运行测试时间: N/A
+# 最近一次运行成功时间: N/A
+# 测试目的: 验证 `broadcast` 在 `Memory<Space, T>` 口径下保持公开调用形态。
+# 使用示例: `pytest -q test/include/api/test_nn.py -k test_nn_broadcast_keeps_space_template`
+# 对应功能实现文件路径: `include/npu_demo/Nn.h`
+# 对应 spec 文件路径: `spec/include/api/Nn.md`
+# 对应测试文件路径: `test/include/api/test_nn.py`
+def test_nn_broadcast_keeps_space_template() -> None:
+    source = r"""
+#include "include/api/Nn.h"
+#include "include/npu_demo/Nn.h"
+
+static int fail(int code) { return code; }
+
+int main() {
+    float input_data[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+    float out_data[4] = {0};
+    long long shape[1] = {4};
+    long long stride[1] = {1};
+
+    Memory<GM, float> input(input_data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<GM, float> out(out_data, shape, stride, 1, MemoryFormat::Norm);
+
+    if (broadcast(input, out) != StatusCode::kOk) {
+        return fail(1);
     }
     return 0;
 }

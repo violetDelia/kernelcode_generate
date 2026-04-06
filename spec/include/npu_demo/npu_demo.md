@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-定义 `npu_demo` 后端私有 include/runtime 规范，冻结 `KernelContext` 的运行时视图语义、`KernelContext::barrier(visibility, scope)` 的同步契约、`npu_demo::launch<block, thread, subthread>(callee, args...)` 的后端承接位置，以及 `get_dynamic_memory<T>(space)` 的片上内存入口行为。
+定义 `npu_demo` 后端私有 include/runtime 规范，明确 `KernelContext` 的运行时视图语义、`KernelContext::barrier(visibility, scope)` 的同步契约、`npu_demo::launch<block, thread, subthread>(callee, args...)` 的后端承接位置，以及 `get_dynamic_memory<Space, T>()` 的片上内存入口行为。
 
 - `KernelContext` 是由 `launch` 注入到 kernel body 的运行时上下文视图，不再是固定常量容器。
 - `thread_num()` / `block_num()` / `subthread_num()` 返回本次 launch 的 extent，而不是 target registry 的固定模板值。
@@ -11,7 +11,7 @@
 ## 文档信息
 
 - 创建者：`jcc你莫辜负`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/include/npu_demo/npu_demo.md`](../../../spec/include/npu_demo/npu_demo.md)
 - `功能实现`：[`include/npu_demo/npu_demo.h`](../../../include/npu_demo/npu_demo.h)、[`include/npu_demo/Arch.h`](../../../include/npu_demo/Arch.h)
 - `test`：[`test/include/npu_demo/test_kernel_context.py`](../../../test/include/npu_demo/test_kernel_context.py)、[`test/include/api/test_arch.py`](../../../test/include/api/test_arch.py)、[`test/target/test_target_registry.py`](../../../test/target/test_target_registry.py)
@@ -20,8 +20,8 @@
 
 - [`spec/include/api/Arch.md`](../../../spec/include/api/Arch.md)：统一 `launch` / `BarrierScope` / `barrier(visibility, scope)` 公开合同。
 - [`spec/include/api/Core.md`](../../../spec/include/api/Core.md)：统一 `Status` / `StatusCode` 语义。
-- [`spec/include/api/Memory.md`](../../../spec/include/api/Memory.md)：统一 `Memory<T>`、`MemorySpace`、`MemoryFormat` 语义。
-- [`spec/include/api/Dma.md`](../../../spec/include/api/Dma.md)：统一 `view/slice/deslice` 对 `Memory<T>` 的公开职责。
+- [`spec/include/api/Memory.md`](../../../spec/include/api/Memory.md)：统一 `Memory<Space, T>`、`MemorySpace`、`MemoryFormat` 语义。
+- [`spec/include/api/Dma.md`](../../../spec/include/api/Dma.md)：统一 `view/slice/deslice` 对 `Memory<Space, T>` 的公开职责。
 - [`spec/include/api/Nn.md`](../../../spec/include/api/Nn.md)：统一 `add` 等逐元素接口职责。
 - [`spec/target/registry.md`](../../../spec/target/registry.md)：定义 `npu_demo` 的 launch 能力上限与片上空间容量来源。
 
@@ -39,7 +39,7 @@
 - P0 launch 子集固定为：`block=1`、`subthread=1`、`2 <= thread <= registry.hardware.thread_num`；不支持的 extent 必须显式失败，禁止静默回退到单线程或忽略部分 extent。
 - `block_num()` / `thread_num()` / `subthread_num()` 的公开语义是“当前 launch 值”；`target.registry` 中的 `block_num/thread_num/subthread_num` 只作为能力上限与容量校验基线，不再直接等于 launched body 中可见的当前值。
 - `KernelContext::barrier(visibility, scope)` 在 `npu_demo` P0 仅支持 `visibility={MemorySpace::TSM, MemorySpace::TLM}` 且两者各出现一次，并要求 `scope=BarrierScope::BLOCK`；其他组合必须显式失败。
-- `get_dynamic_memory<T>(space)` 只覆盖当前 `npu_demo` 片上空间入口：`TSM/TLM` 返回运行时视图，`SM/LM` 因容量为 `0` 必须显式失败，`GM` 不属于该接口输入域。
+- `get_dynamic_memory<Space, T>()` 只覆盖当前 `npu_demo` 片上空间入口：`TSM/TLM` 返回运行时视图，`SM/LM` 因容量为 `0` 必须显式失败，`GM` 不属于该接口输入域。
 - 本文件不定义 DSL/front-end、MLIR lowering、codegen 细节，也不承诺超出 P0 launch 子集的多 block / 多 subthread runtime 行为。
 
 ## 公开接口
@@ -66,9 +66,9 @@
 
 static void add_barrier_body(
     npu_demo::KernelContext& ctx,
-    const Memory<float>& lhs,
-    const Memory<float>& rhs,
-    Memory<float>& out) {
+    const Memory<GM, float>& lhs,
+    const Memory<GM, float>& rhs,
+    Memory<GM, float>& out) {
     long long tid = ctx.thread_id();
     (void)tid;
     ctx.barrier({MemorySpace::TSM, MemorySpace::TLM}, BarrierScope::BLOCK);
@@ -184,34 +184,34 @@ ctx.barrier({MemorySpace::TSM, MemorySpace::TLM}, BarrierScope::BLOCK);
 - 返回语义：对当前 block 的参与线程执行一次同步。
 - 限制条件：不得把非法参数静默当作“无 barrier”或“自动修正后的 barrier”。
 
-#### `get_dynamic_memory<T>(MemorySpace space)`
+#### `get_dynamic_memory<Space, T>()`
 
 功能说明：
 
-- 返回指定片上空间的运行时动态内存视图，元素类型由模板参数 `T` 指定。
+- 返回指定片上空间的运行时动态内存视图，`Space` 与 `T` 均由模板参数指定。
 
 参数说明：
 
+- `Space`：目标片上空间模板参数。
 - `T`：元素类型模板参数。
-- `space (MemorySpace)`：目标片上空间。
 
 使用示例：
 
 ```cpp
-Memory<float> tsm = ctx.get_dynamic_memory<float>(MemorySpace::TSM);
-Memory<float> tlm = ctx.get_dynamic_memory<float>(MemorySpace::TLM);
+Memory<TSM, float> tsm = ctx.get_dynamic_memory<TSM, float>();
+Memory<TLM, float> tlm = ctx.get_dynamic_memory<TLM, float>();
 ```
 
 注意事项：
 
-- 模板参数只表达元素类型；`space` 必须显式通过 `MemorySpace` 枚举值传入。
-- P0 下 `MemorySpace::TSM` 与 `MemorySpace::TLM` 分别返回 `shape=[24576]`、`shape=[2048]`，`stride=[1]`，`format=MemoryFormat::Norm`，`space` 与输入一致的 `Memory<T>`。
-- `MemorySpace::SM` / `MemorySpace::LM` 因容量为 `0` 必须显式失败；错误消息或诊断至少需要指向对应的 `*_memory_size=0` 约束。
-- `MemorySpace::GM` 不属于该接口输入域。
+- `Space` 通过模板参数显式传入。
+- P0 下 `TSM` 与 `TLM` 分别返回 `shape=[24576]`、`shape=[2048]`、`stride=[1]`、`format=MemoryFormat::Norm`，`space` 与模板参数一致的 `Memory<Space, T>`。
+- `SM` / `LM` 因容量为 `0` 必须显式失败；错误消息或诊断至少需要指向对应的 `*_memory_size=0` 约束。
+- `GM` 不属于该接口输入域。
 
 返回与限制：
 
-- 返回类型：`Memory<T>`。
+- 返回类型：`Memory<Space, T>`。
 - 返回语义：返回当前 launch 可见的片上空间视图。
 - 限制条件：本规范不要求公开底层分配地址、所有权或跨 launch 复用策略。
 
@@ -227,7 +227,7 @@ Memory<float> tlm = ctx.get_dynamic_memory<float>(MemorySpace::TLM);
   - 验证 `KernelContext` 查询返回当前 launch 值，而非旧的固定模板常量。
   - 验证 `ctx.barrier({TSM, TLM}, BarrierScope::BLOCK)` 的参数合同与显式失败边界。
   - 验证 `npu_demo::launch<1, thread, 1>(...)` 的函数对象 callee、launch extent 校验与 `thread_num()` 运行时视图。
-  - 验证 `get_dynamic_memory<T>(TSM/TLM)` 返回固定容量视图，`SM/LM` 因零容量显式失败。
+- 验证 `get_dynamic_memory<TSM, float>()` 与 `get_dynamic_memory<TLM, float>()` 返回固定容量视图，`SM/LM` 因零容量显式失败。
 - 功能与用例清单：
   - `test_include_api_arch_exports_public_launch_and_scope_contract`：锁定 `include/api/Arch.h` 的公开 launch/barrier 接口面。
   - `test_npu_demo_kernel_context_runtime_view_tracks_launch_extent`：锁定 `KernelContext` 的 `block/thread/subthread` 查询返回当前 launch 值。

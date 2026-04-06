@@ -7,11 +7,11 @@
 - auto tile = view(source, 0, 16, 1);
 
 创建者: 大闸蟹
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/include/api/test_dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
 
@@ -77,16 +77,16 @@ inline bool checked_add_non_negative(long long lhs, long long rhs, long long* ou
 - auto sub = view(source, offset, size, stride);
 
 创建者: 大闸蟹
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/include/api/test_dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
-template <typename T>
-inline Memory<T> view(
-    const Memory<T>& source,
+template <MemorySpace Space, typename T>
+inline Memory<Space, T> view(
+    const Memory<Space, T>& source,
     const Vector& offset,
     const Vector& size,
     const Vector& stride) {
@@ -144,7 +144,7 @@ inline Memory<T> view(
     if (data != nullptr) {
         data += linear_offset;
     }
-    return Memory<T>(data, shape_buf, stride_buf, rank, source.format(), source.space());
+    return Memory<Space, T>(data, shape_buf, stride_buf, rank, source.format());
 }
 
 /*
@@ -155,17 +155,17 @@ inline Memory<T> view(
 - Status status = slice(tile, source, offset, size, stride);
 
 创建者: 大闸蟹
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/include/api/test_dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
-template <typename T>
+template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T>
 inline Status slice(
-    Memory<T>& target,
-    const Memory<T>& source,
+    Memory<TargetSpace, T>& target,
+    const Memory<SourceSpace, T>& source,
     const Vector& offset,
     const Vector& size,
     const Vector& stride) {
@@ -183,17 +183,17 @@ inline Status slice(
 - Status status = deslice(tile, target, offset, size, stride);
 
 创建者: 大闸蟹
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/include/api/test_dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
-template <typename T>
+template <MemorySpace SourceSpace, MemorySpace TargetSpace, typename T>
 inline Status deslice(
-    const Memory<T>& source,
-    Memory<T>& target,
+    const Memory<SourceSpace, T>& source,
+    Memory<TargetSpace, T>& target,
     const Vector& offset,
     const Vector& size,
     const Vector& stride) {
@@ -211,16 +211,16 @@ inline Status deslice(
 - auto sub = view(source, 0, 16, 1);
 
 创建者: 大闸蟹
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/include/api/test_dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
-template <typename T>
-inline Memory<T> view(
-    const Memory<T>& source,
+template <MemorySpace Space, typename T>
+inline Memory<Space, T> view(
+    const Memory<Space, T>& source,
     long long offset,
     long long size,
     long long stride) {
@@ -251,7 +251,7 @@ inline Memory<T> view(
         );
         data += linear_offset;
     }
-    return Memory<T>(data, shape, strides, 1, source.format(), source.space());
+    return Memory<Space, T>(data, shape, strides, 1, source.format());
 }
 
 /*
@@ -262,17 +262,17 @@ inline Memory<T> view(
 - Status status = slice(tile, source, 0, 16, 1);
 
 创建者: 大闸蟹
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/include/api/test_dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
-template <typename T>
+template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T>
 inline Status slice(
-    Memory<T>& target,
-    const Memory<T>& source,
+    Memory<TargetSpace, T>& target,
+    const Memory<SourceSpace, T>& source,
     long long offset,
     long long size,
     long long stride) {
@@ -343,17 +343,17 @@ inline Status slice(
 - Status status = deslice(tile, target, 0, 16, 1);
 
 创建者: 大闸蟹
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Dma.md
-- test: test/dsl/test_gen_kernel.py
+- test: test/include/api/test_dma.py
 - 功能实现: include/npu_demo/Dma.h
 */
-template <typename T>
+template <MemorySpace SourceSpace, MemorySpace TargetSpace, typename T>
 inline Status deslice(
-    const Memory<T>& source,
-    Memory<T>& target,
+    const Memory<SourceSpace, T>& source,
+    Memory<TargetSpace, T>& target,
     long long offset,
     long long size,
     long long stride) {

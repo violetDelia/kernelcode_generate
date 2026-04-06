@@ -2,12 +2,12 @@
 
 ## 功能简介
 
-定义 CPU 后端 include/cpu 头文件规范，覆盖 `include/cpu/Memory.h` 与 `include/cpu/Nn.h` 的公开接口、行为与约束。当前基线要求 `cpu::Memory<T>` 使用运行期 `rank`，并以 `MAX_DIM=8` 作为内部固定上限；逐元素/显式 broadcast、`add` 的 scalar overload（`Memory+scalar` / `scalar+Memory`，其中 `memory + const(i32)` 的目标源码保持 CPU 整数实参直传，`memory + symbol.int` 的 CPU 终点整数标量口径固定为 `long long`）、`exp`、`reduce_sum/reduce_min/reduce_max` 与 `img2col1d/img2col2d` CPU 叶子接口语义仍由 CPU include 层实现负责承接。
+定义 CPU 后端 include/cpu 头文件规范，覆盖 `include/cpu/Memory.h` 与 `include/cpu/Nn.h` 的公开接口、行为与约束。当前基线要求 `cpu::Memory<Space, T>` 使用运行期 `rank`，并以 `MAX_DIM=8` 作为内部固定上限；逐元素/显式 broadcast、`add` 的 scalar overload（`Memory+scalar` / `scalar+Memory`，其中 `memory + const(i32)` 的目标源码保持 CPU 整数实参直传，`memory + symbol.int` 的 CPU 终点整数标量口径固定为 `long long`）、`exp`、`reduce_sum/reduce_min/reduce_max` 与 `img2col1d/img2col2d` CPU 叶子接口语义仍由 CPU include 层实现负责承接。
 
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/include/cpu/cpu.md`](../../../spec/include/cpu/cpu.md)
 - `功能实现`：[`include/cpu/Memory.h`](../../../include/cpu/Memory.h)、[`include/cpu/Nn.h`](../../../include/cpu/Nn.h)
 - `test`：[`test/include/cpu/test_memory.py`](../../../test/include/cpu/test_memory.py)、[`test/include/cpu/test_nn.py`](../../../test/include/cpu/test_nn.py)
@@ -29,7 +29,7 @@
 
 ## 限制与边界
 
-- `cpu::Memory<T>` 以运行期 `rank` 描述维度，并在内部以 `MAX_DIM=8` 保存 `shape/stride`；调用方必须满足前置条件 `0 < rank <= 8`，实现不得对 `rank > 8` 做静默截断。
+- `cpu::Memory<Space, T>` 以运行期 `rank` 描述维度，并在内部以 `MAX_DIM=8` 保存 `shape/stride`；调用方必须满足前置条件 `0 < rank <= 8`，实现不得对 `rank > 8` 做静默截断。
 - 公开接口均为纯头文件模板与内联实现，不提供动态分配、异常或运行时边界检查。
 - 逐元素与比较算子要求输入与输出形状一致，广播仅支持显式 `broadcast`，不提供隐式广播；仅 `cpu::add` 允许 `Memory+scalar` / `scalar+Memory` 两个公开 overload。
 - `img2col1d/img2col2d` 只定义 CPU include 层叶子接口，不反向规定 AST 节点类型、`nn dialect` 运行时类型、`build_func_op(...)` 结构或 pass 名称。
@@ -101,7 +101,7 @@ cpu::MemorySpace space = cpu::MemorySpace::SM;
 - 返回语义：供 `cpu::Memory` 构造与查询时记录内存空间。
 - 限制条件：不定义其他空间成员。
 
-### `cpu::Memory<T>`
+### `cpu::Memory<Space, T>`
 
 功能说明：
 
@@ -109,6 +109,7 @@ cpu::MemorySpace space = cpu::MemorySpace::SM;
 
 参数说明：
 
+- `Space`：内存空间模板参数。
 - `T`：元素类型。
 - `rank`：运行期维度数，必须大于 `0` 且不超过 `MAX_DIM=8`。
 
@@ -121,7 +122,7 @@ int data[6] = {0, 1, 2, 3, 4, 5};
 long long shape[2] = {2, 3};
 long long stride[2] = {3, 1};
 
-cpu::Memory<int> mem(data, 2, shape, stride, cpu::MemoryFormat::Norm, cpu::MemorySpace::GM);
+cpu::Memory<cpu::GM, int> mem(data, 2, shape, stride, cpu::MemoryFormat::Norm);
 ```
 
 注意事项：
@@ -133,11 +134,11 @@ cpu::Memory<int> mem(data, 2, shape, stride, cpu::MemoryFormat::Norm, cpu::Memor
 
 返回与限制：
 
-- 返回类型：`cpu::Memory<T>`。
+- 返回类型：`cpu::Memory<Space, T>`。
 - 返回语义：构造并记录内存视图元信息。
 - 限制条件：`rank == 0` 或 `rank > MAX_DIM` 不在支持范围内；实现可通过显式断言/契约式检查终止，不能静默截断；非法指针或维度值属于未定义行为。
 
-#### `Memory(data, rank, shape, stride, format, space)`
+#### `Memory(data, rank, shape, stride, format)`
 
 功能说明：
 
@@ -150,12 +151,11 @@ cpu::Memory<int> mem(data, 2, shape, stride, cpu::MemoryFormat::Norm, cpu::Memor
 - `shape (const long long*)`：长度至少为 `rank` 的维度数组。
 - `stride (const long long*)`：长度至少为 `rank` 的步幅数组。
 - `format (cpu::MemoryFormat)`：布局格式，默认 `Norm`。
-- `space (cpu::MemorySpace)`：内存空间，默认 `GM`。
 
 使用示例：
 
 ```cpp
-cpu::Memory<int> mem(data, 2, shape, stride, cpu::MemoryFormat::CLast, cpu::MemorySpace::SM);
+cpu::Memory<cpu::SM, int> mem(data, 2, shape, stride, cpu::MemoryFormat::CLast);
 ```
 
 注意事项：
@@ -165,11 +165,11 @@ cpu::Memory<int> mem(data, 2, shape, stride, cpu::MemoryFormat::CLast, cpu::Memo
 
 返回与限制：
 
-- 返回类型：`cpu::Memory<T>`。
+- 返回类型：`cpu::Memory<Space, T>`。
 - 返回语义：构造并保存显式步幅。
 - 限制条件：调用方需保证 `rank/shape/stride` 合法。
 
-#### `Memory(data, rank, shape, format, space)`
+#### `Memory(data, rank, shape, format)`
 
 功能说明：
 
@@ -181,12 +181,11 @@ cpu::Memory<int> mem(data, 2, shape, stride, cpu::MemoryFormat::CLast, cpu::Memo
 - `rank (unsigned long long)`：运行期维度数。
 - `shape (const long long*)`：长度至少为 `rank` 的维度数组。
 - `format (cpu::MemoryFormat)`：布局格式，默认 `Norm`。
-- `space (cpu::MemorySpace)`：内存空间，默认 `GM`。
 
 使用示例：
 
 ```cpp
-cpu::Memory<float> mem(data, 2, shape);
+cpu::Memory<cpu::GM, float> mem(data, 2, shape);
 ```
 
 注意事项：
@@ -196,7 +195,7 @@ cpu::Memory<float> mem(data, 2, shape);
 
 返回与限制：
 
-- 返回类型：`cpu::Memory<T>`。
+- 返回类型：`cpu::Memory<Space, T>`。
 - 返回语义：构造并填充连续步幅。
 - 限制条件：调用方需保证 `rank/shape` 合法。
 
@@ -467,13 +466,13 @@ int& value = mem.at(index);
 
 功能说明：
 
-- 对两个 `cpu::Memory<T>` 视图执行逐元素加法。
+- 对两个 `cpu::Memory<Space, T>` 视图执行逐元素加法。
 
 参数说明：
 
-- `lhs (const cpu::Memory<T>&)`：左操作数视图。
-- `rhs (const cpu::Memory<T>&)`：右操作数视图。
-- `out (cpu::Memory<T>&)`：输出视图。
+- `lhs (const cpu::Memory<Space, T>&)`：左操作数视图。
+- `rhs (const cpu::Memory<Space, T>&)`：右操作数视图。
+- `out (cpu::Memory<Space, T>&)`：输出视图。
 
 使用示例：
 
@@ -496,13 +495,13 @@ cpu::add(lhs, rhs, out);
 
 功能说明：
 
-- 对 `cpu::Memory<T>` 与标量执行逐元素加法（`Memory+scalar` overload）。
+- 对 `cpu::Memory<Space, T>` 与标量执行逐元素加法（`Memory+scalar` overload）。
 
 参数说明：
 
-- `lhs (const cpu::Memory<T>&)`：左操作数视图。
+- `lhs (const cpu::Memory<Space, T>&)`：左操作数视图。
 - `rhs_scalar (T 或 long long)`：右操作数标量；其中 `memory + const(i32)` 在 `target=cpu` 下保持整数实参直传，`memory + symbol.int` 的稳定公开形态为 `long long`。
-- `out (cpu::Memory<T>&)`：输出视图。
+- `out (cpu::Memory<Space, T>&)`：输出视图。
 
 使用示例：
 
@@ -538,13 +537,13 @@ cpu::add(lhs, bias, out);
 
 功能说明：
 
-- 对标量 `T` 与 `cpu::Memory<T>` 执行逐元素加法（`scalar+Memory` overload）。
+- 对标量 `T` 与 `cpu::Memory<Space, T>` 执行逐元素加法（`scalar+Memory` overload）。
 
 参数说明：
 
 - `lhs_scalar (T)`：左操作数标量。
-- `rhs (const cpu::Memory<T>&)`：右操作数视图。
-- `out (cpu::Memory<T>&)`：输出视图。
+- `rhs (const cpu::Memory<Space, T>&)`：右操作数视图。
+- `out (cpu::Memory<Space, T>&)`：输出视图。
 
 使用示例：
 
@@ -570,13 +569,13 @@ cpu::add(3.0f, rhs, out);
 
 功能说明：
 
-- 对两个 `cpu::Memory` 视图执行逐元素减法。
+- 对两个 `cpu::Memory<Space, T>` 视图执行逐元素减法。
 
 参数说明：
 
-- `lhs (const cpu::Memory<T>&)`：左操作数视图。
-- `rhs (const cpu::Memory<T>&)`：右操作数视图。
-- `out (cpu::Memory<T>&)`：输出视图。
+- `lhs (const cpu::Memory<Space, T>&)`：左操作数视图。
+- `rhs (const cpu::Memory<Space, T>&)`：右操作数视图。
+- `out (cpu::Memory<Space, T>&)`：输出视图。
 
 使用示例：
 
@@ -598,13 +597,13 @@ cpu::sub(lhs, rhs, out);
 
 功能说明：
 
-- 对两个 `cpu::Memory` 视图执行逐元素乘法。
+- 对两个 `cpu::Memory<Space, T>` 视图执行逐元素乘法。
 
 参数说明：
 
-- `lhs (const cpu::Memory<T>&)`：左操作数视图。
-- `rhs (const cpu::Memory<T>&)`：右操作数视图。
-- `out (cpu::Memory<T>&)`：输出视图。
+- `lhs (const cpu::Memory<Space, T>&)`：左操作数视图。
+- `rhs (const cpu::Memory<Space, T>&)`：右操作数视图。
+- `out (cpu::Memory<Space, T>&)`：输出视图。
 
 使用示例：
 
@@ -626,13 +625,13 @@ cpu::mul(lhs, rhs, out);
 
 功能说明：
 
-- 对两个 `cpu::Memory` 视图执行逐元素真除法。
+- 对两个 `cpu::Memory<Space, T>` 视图执行逐元素真除法。
 
 参数说明：
 
-- `lhs (const cpu::Memory<T>&)`：左操作数视图。
-- `rhs (const cpu::Memory<T>&)`：右操作数视图。
-- `out (cpu::Memory<T>&)`：输出视图。
+- `lhs (const cpu::Memory<Space, T>&)`：左操作数视图。
+- `rhs (const cpu::Memory<Space, T>&)`：右操作数视图。
+- `out (cpu::Memory<Space, T>&)`：输出视图。
 
 使用示例：
 
@@ -654,12 +653,12 @@ cpu::truediv(lhs, rhs, out);
 
 功能说明：
 
-- 对输入 `cpu::Memory<float>` 视图执行逐元素指数运算，并把结果写入输出视图。
+- 对输入 `cpu::Memory<Space, float>` 视图执行逐元素指数运算，并把结果写入输出视图。
 
 参数说明：
 
-- `value (const cpu::Memory<float>&)`：输入视图。
-- `out (cpu::Memory<float>&)`：输出视图。
+- `value (const cpu::Memory<Space, float>&)`：输入视图。
+- `out (cpu::Memory<Space, float>&)`：输出视图。
 
 使用示例：
 
@@ -669,14 +668,14 @@ float out_data[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 long long shape[2] = {2, 2};
 long long stride[2] = {2, 1};
 
-cpu::Memory<float> value(in_data, 2, shape, stride);
-cpu::Memory<float> out(out_data, 2, shape, stride);
+cpu::Memory<cpu::GM, float> value(in_data, 2, shape, stride);
+cpu::Memory<cpu::GM, float> out(out_data, 2, shape, stride);
 cpu::exp(value, out);
 ```
 
 注意事项：
 
-- 公开签名固定为：`void cpu::exp(const cpu::Memory<float>& value, cpu::Memory<float>& out)`。
+- 公开签名固定为：`void cpu::exp(const cpu::Memory<Space, float>& value, cpu::Memory<Space, float>& out)`。
 - `value.rank()` 与 `out.rank()` 必须一致，`value.shape()/stride()` 与 `out.shape()/stride()` 必须逐维一致。
 - 不提供隐式广播、自动类型提升或 `float` 之外的公开重载。
 - 若调用方违反任一前置条件，应视为契约不满足：`value-out-rank-mismatch`、`value-out-shape-mismatch`、`value-out-stride-mismatch`。
@@ -691,12 +690,12 @@ cpu::exp(value, out);
 
 功能说明：
 
-- 对输入 `cpu::Memory<float>` 按给定轴集合执行求和归约，并把结果写入输出视图。
+- 对输入 `cpu::Memory<Space, float>` 按给定轴集合执行求和归约，并把结果写入输出视图。
 
 参数说明：
 
-- `value (const cpu::Memory<float>&)`：输入视图。
-- `out (cpu::Memory<float>&)`：输出视图。
+- `value (const cpu::Memory<Space, float>&)`：输入视图。
+- `out (cpu::Memory<Space, float>&)`：输出视图。
 - `axes (const long long*)`：归约轴数组首地址。
 - `axes_rank (unsigned long long)`：`axes` 长度，必须大于 `0`。
 - `keepdim (bool)`：是否保留归约轴。
@@ -712,15 +711,15 @@ long long out_shape[1] = {2};
 long long out_stride[1] = {1};
 long long axes[2] = {1, 2};
 
-cpu::Memory<float> value(in_data, 3, in_shape, in_stride);
-cpu::Memory<float> out(out_data, 1, out_shape, out_stride);
+cpu::Memory<cpu::GM, float> value(in_data, 3, in_shape, in_stride);
+cpu::Memory<cpu::GM, float> out(out_data, 1, out_shape, out_stride);
 cpu::reduce_sum(value, out, axes, 2, false);
 ```
 
 注意事项：
 
 - 公开签名固定为：
-  `void cpu::reduce_sum(const cpu::Memory<float>& value, cpu::Memory<float>& out, const long long* axes, unsigned long long axes_rank, bool keepdim)`。
+  `void cpu::reduce_sum(const cpu::Memory<Space, float>& value, cpu::Memory<Space, float>& out, const long long* axes, unsigned long long axes_rank, bool keepdim)`。
 - `axes_rank > 0`，`axes` 必须非空，且每个轴满足 `0 <= axis < value.rank()`。
 - `axes` 必须由调用方预先规范化（去重、非负、升序）；include 层不负责 `axis=None` 语义解析。
 - `keepdim=true` 时，`out.rank() == value.rank()` 且归约轴维度必须为 `1`。
@@ -738,7 +737,7 @@ cpu::reduce_sum(value, out, axes, 2, false);
 
 功能说明：
 
-- 对输入 `cpu::Memory<float>` 按给定轴集合执行最小值归约，并把结果写入输出视图。
+- 对输入 `cpu::Memory<Space, float>` 按给定轴集合执行最小值归约，并把结果写入输出视图。
 
 参数说明：
 
@@ -755,15 +754,15 @@ long long out_shape[2] = {2, 3};
 long long out_stride[2] = {3, 1};
 long long axes[1] = {2};
 
-cpu::Memory<float> value(in_data, 3, in_shape, in_stride);
-cpu::Memory<float> out(out_data, 2, out_shape, out_stride);
+cpu::Memory<cpu::GM, float> value(in_data, 3, in_shape, in_stride);
+cpu::Memory<cpu::GM, float> out(out_data, 2, out_shape, out_stride);
 cpu::reduce_min(value, out, axes, 1, false);
 ```
 
 注意事项：
 
 - 公开签名固定为：
-  `void cpu::reduce_min(const cpu::Memory<float>& value, cpu::Memory<float>& out, const long long* axes, unsigned long long axes_rank, bool keepdim)`。
+  `void cpu::reduce_min(const cpu::Memory<Space, float>& value, cpu::Memory<Space, float>& out, const long long* axes, unsigned long long axes_rank, bool keepdim)`。
 - `axes/keepdim/out.shape/out.stride` 合同与 `cpu::reduce_sum` 一致。
 - 静态可判定时，任一归约轴维度为 `0` 应视为契约不满足：`empty-reduction-extent`。
 
@@ -777,7 +776,7 @@ cpu::reduce_min(value, out, axes, 1, false);
 
 功能说明：
 
-- 对输入 `cpu::Memory<float>` 按给定轴集合执行最大值归约，并把结果写入输出视图。
+- 对输入 `cpu::Memory<Space, float>` 按给定轴集合执行最大值归约，并把结果写入输出视图。
 
 参数说明：
 
@@ -794,15 +793,15 @@ long long out_shape[3] = {1, 3, 4};
 long long out_stride[3] = {12, 4, 1};
 long long axes[1] = {0};
 
-cpu::Memory<float> value(in_data, 3, in_shape, in_stride);
-cpu::Memory<float> out(out_data, 3, out_shape, out_stride);
+cpu::Memory<cpu::GM, float> value(in_data, 3, in_shape, in_stride);
+cpu::Memory<cpu::GM, float> out(out_data, 3, out_shape, out_stride);
 cpu::reduce_max(value, out, axes, 1, true);
 ```
 
 注意事项：
 
 - 公开签名固定为：
-  `void cpu::reduce_max(const cpu::Memory<float>& value, cpu::Memory<float>& out, const long long* axes, unsigned long long axes_rank, bool keepdim)`。
+  `void cpu::reduce_max(const cpu::Memory<Space, float>& value, cpu::Memory<Space, float>& out, const long long* axes, unsigned long long axes_rank, bool keepdim)`。
 - `axes/keepdim/out.shape/out.stride` 合同与 `cpu::reduce_sum` 一致。
 - 静态可判定时，任一归约轴维度为 `0` 应视为契约不满足：`empty-reduction-extent`。
 
@@ -816,13 +815,13 @@ cpu::reduce_max(value, out, axes, 1, true);
 
 功能说明：
 
-- 对两个 `cpu::Memory` 视图执行逐元素相等比较。
+- 对两个 `cpu::Memory<Space, T>` 视图执行逐元素相等比较。
 
 参数说明：
 
-- `lhs (const cpu::Memory<T>&)`：左操作数视图。
-- `rhs (const cpu::Memory<T>&)`：右操作数视图。
-- `out (cpu::Memory<PredT>&)`：输出视图，元素类型用于表示 predicate。
+- `lhs (const cpu::Memory<Space, T>&)`：左操作数视图。
+- `rhs (const cpu::Memory<Space, T>&)`：右操作数视图。
+- `out (cpu::Memory<Space, PredT>&)`：输出视图，元素类型用于表示 predicate。
 
 使用示例：
 
@@ -845,13 +844,13 @@ cpu::eq(lhs, rhs, out);
 
 功能说明：
 
-- 对两个 `cpu::Memory` 视图执行逐元素不等比较。
+- 对两个 `cpu::Memory<Space, T>` 视图执行逐元素不等比较。
 
 参数说明：
 
-- `lhs (const cpu::Memory<T>&)`：左操作数视图。
-- `rhs (const cpu::Memory<T>&)`：右操作数视图。
-- `out (cpu::Memory<PredT>&)`：输出视图。
+- `lhs (const cpu::Memory<Space, T>&)`：左操作数视图。
+- `rhs (const cpu::Memory<Space, T>&)`：右操作数视图。
+- `out (cpu::Memory<Space, PredT>&)`：输出视图。
 
 使用示例：
 
@@ -873,13 +872,13 @@ cpu::ne(lhs, rhs, out);
 
 功能说明：
 
-- 对两个 `cpu::Memory` 视图执行逐元素小于比较。
+- 对两个 `cpu::Memory<Space, T>` 视图执行逐元素小于比较。
 
 参数说明：
 
-- `lhs (const cpu::Memory<T>&)`：左操作数视图。
-- `rhs (const cpu::Memory<T>&)`：右操作数视图。
-- `out (cpu::Memory<PredT>&)`：输出视图。
+- `lhs (const cpu::Memory<Space, T>&)`：左操作数视图。
+- `rhs (const cpu::Memory<Space, T>&)`：右操作数视图。
+- `out (cpu::Memory<Space, PredT>&)`：输出视图。
 
 使用示例：
 
@@ -901,13 +900,13 @@ cpu::lt(lhs, rhs, out);
 
 功能说明：
 
-- 对两个 `cpu::Memory` 视图执行逐元素小于等于比较。
+- 对两个 `cpu::Memory<Space, T>` 视图执行逐元素小于等于比较。
 
 参数说明：
 
-- `lhs (const cpu::Memory<T>&)`：左操作数视图。
-- `rhs (const cpu::Memory<T>&)`：右操作数视图。
-- `out (cpu::Memory<PredT>&)`：输出视图。
+- `lhs (const cpu::Memory<Space, T>&)`：左操作数视图。
+- `rhs (const cpu::Memory<Space, T>&)`：右操作数视图。
+- `out (cpu::Memory<Space, PredT>&)`：输出视图。
 
 使用示例：
 
@@ -929,13 +928,13 @@ cpu::le(lhs, rhs, out);
 
 功能说明：
 
-- 对两个 `cpu::Memory` 视图执行逐元素大于比较。
+- 对两个 `cpu::Memory<Space, T>` 视图执行逐元素大于比较。
 
 参数说明：
 
-- `lhs (const cpu::Memory<T>&)`：左操作数视图。
-- `rhs (const cpu::Memory<T>&)`：右操作数视图。
-- `out (cpu::Memory<PredT>&)`：输出视图。
+- `lhs (const cpu::Memory<Space, T>&)`：左操作数视图。
+- `rhs (const cpu::Memory<Space, T>&)`：右操作数视图。
+- `out (cpu::Memory<Space, PredT>&)`：输出视图。
 
 使用示例：
 
@@ -957,13 +956,13 @@ cpu::gt(lhs, rhs, out);
 
 功能说明：
 
-- 对两个 `cpu::Memory` 视图执行逐元素大于等于比较。
+- 对两个 `cpu::Memory<Space, T>` 视图执行逐元素大于等于比较。
 
 参数说明：
 
-- `lhs (const cpu::Memory<T>&)`：左操作数视图。
-- `rhs (const cpu::Memory<T>&)`：右操作数视图。
-- `out (cpu::Memory<PredT>&)`：输出视图。
+- `lhs (const cpu::Memory<Space, T>&)`：左操作数视图。
+- `rhs (const cpu::Memory<Space, T>&)`：右操作数视图。
+- `out (cpu::Memory<Space, PredT>&)`：输出视图。
 
 使用示例：
 
@@ -989,8 +988,8 @@ cpu::ge(lhs, rhs, out);
 
 参数说明：
 
-- `input (const cpu::Memory<T>&)`：输入视图。
-- `out (cpu::Memory<T>&)`：输出视图。
+- `input (const cpu::Memory<Space, T>&)`：输入视图。
+- `out (cpu::Memory<Space, T>&)`：输出视图。
 
 使用示例：
 
@@ -1015,12 +1014,12 @@ cpu::broadcast(input, out);
 功能说明：
 
 - 将 rank-3 输入视图 `value[N, C, W]` 按 1D `img2col` 规则展开到 rank-3 输出视图 `out[N, C*Kw, Wo]`。
-- 该接口是 CPU emitter 的稳定叶子调用目标，只依赖 `cpu::Memory<T>` 与普通整型标量参数。
+- 该接口是 CPU emitter 的稳定叶子调用目标，只依赖 `cpu::Memory<Space, T>` 与普通整型标量参数。
 
 参数说明：
 
-- `value (const cpu::Memory<T>&)`：输入视图，运行期 `rank` 必须为 `3`。
-- `out (cpu::Memory<T>&)`：输出视图，运行期 `rank` 必须为 `3`，并由调用方预先分配。
+- `value (const cpu::Memory<Space, T>&)`：输入视图，运行期 `rank` 必须为 `3`。
+- `out (cpu::Memory<Space, T>&)`：输出视图，运行期 `rank` 必须为 `3`，并由调用方预先分配。
 - `kw (long long)`：kernel width，必须为正整数。
 - `sw (long long)`：stride width，必须为正整数。
 - `dw (long long)`：dilation width，必须为正整数。
@@ -1036,12 +1035,12 @@ cpu::img2col1d(value_1d, out_1d, 3, 1, 1, 1, 1);
 注意事项：
 
 - 该接口的公开签名固定为：
-  `void cpu::img2col1d(const cpu::Memory<float>& value, cpu::Memory<float>& out, long long kw, long long sw, long long dw, long long pl, long long pr)`。
+  `void cpu::img2col1d(const cpu::Memory<Space, float>& value, cpu::Memory<Space, float>& out, long long kw, long long sw, long long dw, long long pl, long long pr)`。
 - `value` 必须解释为 `shape=[N, C, W]`；`out` 必须解释为 `shape=[N, C * kw, Wo]`，其中
   `Wo = (W + pl + pr - dw * (kw - 1) - 1) / sw + 1`，按整除下取整口径理解。
 - `shape-formula-check` 的含义是：调用方必须保证 `out.shape()` 与上式完全一致。
 - `stride-consistency-check` 的含义是：调用方必须保证 `value` 的 `shape/stride` 与其运行期 `rank` 自洽，且 `out` 采用与 `[N, C * kw, Wo]` 一致的密集行主序布局，等价 stride 为 `[(C * kw) * Wo, Wo, 1]`。
-- 本接口只依赖 `cpu::Memory`、`long long`、rank 检查、shape 公式检查与 stride 一致性检查；不得依赖 AST 节点类型、`nn dialect` 运行时类型、`build_func_op(...)` 结构或 pass 名称。
+- 本接口只依赖 `cpu::Memory<Space, T>`、`long long`、rank 检查、shape 公式检查与 stride 一致性检查；不得依赖 AST 节点类型、`nn dialect` 运行时类型、`build_func_op(...)` 结构或 pass 名称。
 - 若调用方违反以下任一前置条件，应视为契约不满足：`value-rank-not-3`、`out-rank-not-3`、`shape-stride-mismatch-with-img2col1d-formula`、`kw-sw-dw-not-positive`、`pl-pr-negative`。
 - 禁止继续新增或暴露笼统 `cpu::img2col(...)` 公开接口名。
 
@@ -1056,13 +1055,13 @@ cpu::img2col1d(value_1d, out_1d, 3, 1, 1, 1, 1);
 功能说明：
 
 - 将 rank-4 输入视图 `value[N, C, H, W]` 按 2D `img2col` 规则展开到 rank-3 输出视图 `out[N, C*Kh*Kw, Ho*Wo]`。
-- 该接口是 CPU emitter 的稳定叶子调用目标，只依赖 `cpu::Memory<T>` 与普通整型标量参数。
+- 该接口是 CPU emitter 的稳定叶子调用目标，只依赖 `cpu::Memory<Space, T>` 与普通整型标量参数。
 
 参数说明：
 
 - 除 `value/out` 外，固定签名必须包含且仅包含 10 个 `long long` 标量参数：`kh/kw/sh/sw/dh/dw/ph/pw/pl/pr`。
-- `value (const cpu::Memory<T>&)`：输入视图，运行期 `rank` 必须为 `4`。
-- `out (cpu::Memory<T>&)`：输出视图，运行期 `rank` 必须为 `3`，并由调用方预先分配。
+- `value (const cpu::Memory<Space, T>&)`：输入视图，运行期 `rank` 必须为 `4`。
+- `out (cpu::Memory<Space, T>&)`：输出视图，运行期 `rank` 必须为 `3`，并由调用方预先分配。
 - `kh (long long)`：kernel height，必须为正整数。
 - `kw (long long)`：kernel width，必须为正整数。
 - `sh (long long)`：stride height，必须为正整数。
@@ -1084,7 +1083,7 @@ cpu::img2col2d(value_2d, out_2d, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1);
 注意事项：
 
 - 该接口的公开签名固定为：
-  `void cpu::img2col2d(const cpu::Memory<float>& value, cpu::Memory<float>& out, long long kh, long long kw, long long sh, long long sw, long long dh, long long dw, long long ph, long long pw, long long pl, long long pr)`。
+  `void cpu::img2col2d(const cpu::Memory<Space, float>& value, cpu::Memory<Space, float>& out, long long kh, long long kw, long long sh, long long sw, long long dh, long long dw, long long ph, long long pw, long long pl, long long pr)`。
 - 调用示例必须与固定签名保持一致：`value/out` 之后只允许 10 个标量参数，不能扩展为其他参数个数。
 - `value` 必须解释为 `shape=[N, C, H, W]`；`out` 必须解释为 `shape=[N, C * kh * kw, Ho * Wo]`，其中
   `Ho = (H + ph + pw - dh * (kh - 1) - 1) / sh + 1`，
@@ -1092,7 +1091,7 @@ cpu::img2col2d(value_2d, out_2d, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1);
   按整除下取整口径理解。
 - `shape-formula-check` 的含义是：调用方必须保证 `out.shape()` 与上述二维公式完全一致。
 - `stride-consistency-check` 的含义是：调用方必须保证 `value` 的 `shape/stride` 与其运行期 `rank` 自洽，且 `out` 采用与 `[N, C * kh * kw, Ho * Wo]` 一致的密集行主序布局，等价 stride 为 `[(C * kh * kw) * (Ho * Wo), Ho * Wo, 1]`。
-- 本接口只依赖 `cpu::Memory`、`long long`、rank 检查、shape 公式检查与 stride 一致性检查；不得依赖 AST 节点类型、`nn dialect` 运行时类型、`build_func_op(...)` 结构或 pass 名称。
+- 本接口只依赖 `cpu::Memory<Space, T>`、`long long`、rank 检查、shape 公式检查与 stride 一致性检查；不得依赖 AST 节点类型、`nn dialect` 运行时类型、`build_func_op(...)` 结构或 pass 名称。
 - 若调用方违反以下任一前置条件，应视为契约不满足：`value-rank-not-4`、`out-rank-not-3`、`shape-stride-mismatch-with-img2col2d-formula`、`kh-kw-sh-sw-dh-dw-not-positive`、`ph-pw-pl-pr-negative`。
 - 禁止继续新增或暴露笼统 `cpu::img2col(...)` 公开接口名。
 
@@ -1117,7 +1116,7 @@ cpu::img2col2d(value_2d, out_2d, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1);
 
 注意事项：
 
-- CPU runtime 只依赖 `cpu::Memory`、普通标量参数和本层运行时契约，不依赖 AST 节点类型、`nn dialect` 运行时类型、`build_func_op(...)` 结构或 pass 名称。
+- CPU runtime 只依赖 `cpu::Memory<Space, T>`、普通标量参数和本层运行时契约，不依赖 AST 节点类型、`nn dialect` 运行时类型、`build_func_op(...)` 结构或 pass 名称。
 - `cpu::img2col1d(...)` 与 `cpu::img2col2d(...)` 是稳定公开名；不得继续新增 `cpu::img2col(...)` 笼统接口。
 - 下文中的 `describe_cpu_api_contract(...)` 仅是验收辅助伪名，不是产品接口，不能在 `include/cpu` 中实现为公开 API。
 
@@ -1143,9 +1142,9 @@ def test_cpu_img2col_api_contract_v1():
     expected = {
         "apis": {
             "cpu::img2col1d": {
-                "signature": "void cpu::img2col1d(const cpu::Memory<float>& value, cpu::Memory<float>& out, long long kw, long long sw, long long dw, long long pl, long long pr)",
+                "signature": "void cpu::img2col1d(const cpu::Memory<Space, float>& value, cpu::Memory<Space, float>& out, long long kw, long long sw, long long dw, long long pl, long long pr)",
                 "depends_only_on": [
-                    "cpu::Memory",
+                    "cpu::Memory<Space, T>",
                     "long long",
                     "rank-check",
                     "shape-formula-check",
@@ -1162,9 +1161,9 @@ def test_cpu_img2col_api_contract_v1():
                 ],
             },
             "cpu::img2col2d": {
-                "signature": "void cpu::img2col2d(const cpu::Memory<float>& value, cpu::Memory<float>& out, long long kh, long long kw, long long sh, long long sw, long long dh, long long dw, long long ph, long long pw, long long pl, long long pr)",
+                "signature": "void cpu::img2col2d(const cpu::Memory<Space, float>& value, cpu::Memory<Space, float>& out, long long kh, long long kw, long long sh, long long sw, long long dh, long long dw, long long ph, long long pw, long long pl, long long pr)",
                 "depends_only_on": [
-                    "cpu::Memory",
+                    "cpu::Memory<Space, T>",
                     "long long",
                     "rank-check",
                     "shape-formula-check",

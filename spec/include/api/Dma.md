@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-定义 include/api 层统一对外 DMA/视图操作 API 头文件规范（`include/api/Dma.h`），提供 `view`、`slice`、`deslice` 三个公开接口，面向后端无关的 `Memory<T>` 与 `Vector` 抽象。
+定义 include/api 层统一对外 DMA/视图操作 API 头文件规范（`include/api/Dma.h`），提供 `view`、`slice`、`deslice` 三个公开接口，面向后端无关的 `Memory<Space, T>` 与 `Vector` 抽象。
 
 - `view(source, offset, size, stride)`：定义逻辑子视图，不承诺发生数据搬运。
 - `slice(target, source, offset, size, stride)`：定义把源区域切片读取到预分配 `target` 的公开接口。
@@ -12,16 +12,16 @@
 ## 文档信息
 
 - 创建者：`大闸蟹`
-- 最后一次更改：`大闸蟹`
+- 最后一次更改：`jcc你莫辜负`
 - `spec`：[`spec/include/api/Dma.md`](../../../spec/include/api/Dma.md)
 - `统一头文件`：`include/api/Dma.h` / `include/api/Memory.h` / `include/api/Core.h`
-- `功能实现`：无（API 规范暂不绑定实现）
-- `test`：无（API 规范暂不提供测试）
+- `功能实现`：[`include/npu_demo/Dma.h`](../../../include/npu_demo/Dma.h)
+- `test`：[`test/include/api/test_dma.py`](../../../test/include/api/test_dma.py)
 
 ## 依赖
 
 - [`spec/include/api/Core.md`](../../../spec/include/api/Core.md)：`Vector`、`Status`、`StatusCode` 统一基础契约。
-- [`spec/include/api/Memory.md`](../../../spec/include/api/Memory.md)：`Memory<T>`、`MemorySpace`、`get_shape/get_stride` 统一语义。
+- [`spec/include/api/Memory.md`](../../../spec/include/api/Memory.md)：`Memory<Space, T>`、`MemorySpace`、`get_shape/get_stride` 统一语义。
 - [`spec/operation/dma.md`](../../../spec/operation/dma.md)：用户侧高层 DMA 规范；同名概念需保持职责一致，但允许因分层不同而使用不同签名。
 
 ## 目标
@@ -38,7 +38,8 @@
 - 本规范不定义 DMA 硬件调度、异步执行、带宽模型、barrier、launch、host wrapper 或后端私有运行时。
 - 本规范不定义 `alloc/free/copy/cast/reshape/flatten`；这些语义仍以各自规范为准。
 - `offset/size/stride` 的公开参数类型统一为 `Vector`；不得把 `std::vector<long long>`、`std::array<long long, N>`、裸 `long long[N]` 直接暴露成稳定公开签名。
-- `view/slice/deslice` 的接口面向 `Memory<T>`；不使用 `memory<rank, type>`、`memory<float>` 之类模板占位语言作为公开契约描述。
+- `view/slice/deslice` 的接口面向 `Memory<Space, T>`；不使用 `memory<rank, type>`、`memory<float>` 之类模板占位语言作为公开契约描述。
+- `view` 仅允许同一 `Space` 的视图派生；`slice/deslice` 显式区分 `SourceSpace` 与 `TargetSpace`，不得把跨空间语义混入 `view`。
 - `view` 与 `slice` 都不改变元素类型；若实现侧需要类型变换，应通过其他明确接口处理，而不是把类型变换偷渡进 `view/slice`。
 - `deslice` 负责写回，不再公开 `store(...)` 作为 include/api 层稳定接口名。
 - `slice` 是“目标式”接口：调用方必须先准备好 `target`；include/api 层不为 `slice` 隐式分配结果内存。
@@ -57,7 +58,7 @@
 
 参数说明：
 
-- `source (Memory<T>)`：源内存视图。
+- `source (Memory<Space, T>)`：源内存视图。
 - `offset (Vector)`：起始偏移向量，长度必须与 `source.rank()` 一致。
 - `size (Vector)`：子视图逻辑大小，长度必须与 `source.rank()` 一致。
 - `stride (Vector)`：子视图步进，长度必须与 `source.rank()` 一致。
@@ -85,7 +86,7 @@ auto sub = view(source, offset, size, stride);
 
 返回与限制：
 
-- 返回类型：`Memory<T>`。
+- 返回类型：`Memory<Space, T>`。
 - 返回语义：返回一个逻辑子视图，其 `shape == size`，元素类型继承 `source`。
 - 限制条件：静态越界、负 offset、非正 size/stride 均属于调用方违约；实现侧应通过失败状态或文档约定的错误机制表达。
 
@@ -98,8 +99,8 @@ auto sub = view(source, offset, size, stride);
 
 参数说明：
 
-- `target (Memory<T>)`：预分配结果块，承接切片读取结果。
-- `source (Memory<T>)`：源内存视图。
+- `target (Memory<TargetSpace, T>)`：预分配结果块，承接切片读取结果。
+- `source (Memory<SourceSpace, T>)`：源内存视图。
 - `offset (Vector)`：起始偏移向量，长度必须与 `source.rank()` 一致。
 - `size (Vector)`：结果块逻辑大小，长度必须与 `source.rank()` 一致，且必须与 `target.shape` 对齐。
 - `stride (Vector)`：访问步进向量，长度必须与 `source.rank()` 一致。
@@ -114,13 +115,12 @@ long long offset_buf[1] = {32};
 long long size_buf[1] = {16};
 long long stride_buf[1] = {1};
 
-Memory<float> tile(
+Memory<TSM, float> tile(
     tile_buf,
     tile_shape_buf,
     tile_stride_buf,
     1,
-    MemoryFormat::Norm,
-    MemorySpace::TSM);
+    MemoryFormat::Norm);
 Vector offset(offset_buf, 1);
 Vector size(size_buf, 1);
 Vector stride(stride_buf, 1);
@@ -151,8 +151,8 @@ Status status = slice(tile, source, offset, size, stride);
 
 参数说明：
 
-- `source (Memory<T>)`：源块。
-- `target (Memory<T>)`：目标内存视图。
+- `source (Memory<SourceSpace, T>)`：源块。
+- `target (Memory<TargetSpace, T>)`：目标内存视图。
 - `offset (Vector)`：目标区域起始偏移向量，长度必须与 `target.rank()` 一致。
 - `size (Vector)`：目标区域逻辑大小，长度必须与 `target.rank()` 一致，且必须与 `source.shape` 对齐。
 - `stride (Vector)`：访问步进向量，长度必须与 `target.rank()` 一致。
