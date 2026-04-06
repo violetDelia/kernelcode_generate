@@ -28,7 +28,8 @@
 
 ## 限制与边界
 
-- 逐元素算术/比较支持隐式广播，仅允许尾维对齐与 singleton dim 扩张。
+- 逐元素算术支持隐式广播，仅允许尾维对齐与 singleton dim 扩张。
+- 逐元素比较在 operation 层允许复用相同的隐式广播语义；但进入 `nn/dma/kernel` 方言链路前必须显式化广播（见“额外补充/职责矩阵与 lowering 目标面”），禁止在 `kernel` 层保留“隐式 broadcast 的 compare”。
 - `transpose` 仅支持 `Memory` 输入与显式轴置换，不支持标量或隐式转置。
 - `fc` 仅定义“输入末维 × 权重输入特征维”的全连接语义；`bias` 为可选参数。
 - `matmul` 仅定义二维矩阵乘，不支持 batch、广播或隐式转置。
@@ -235,7 +236,8 @@ CMP = eq(A, B)
 
 - 比较结果语义为 predicate。
 - 比较结果 `dtype` 固定为 `NumericType.Bool`。
-- 复用 `add` 的隐式 broadcast 规则；与标量比较时，结果 `shape` 保持 `Memory` 的目标 `shape`。
+- 复用 `add` 的隐式 broadcast 规则；与标量比较时，标量按目标 `shape` 逐元素广播。
+- lowering 约束（机械写死）：若本层语义触发了 broadcast，则 `dsl/mlir_gen` 必须在进入方言前显式生成 `broadcast/broadcast_to`（memory+memory）或在 pass 中插入 `dma.broadcast`（memory+symbol/const）；`kernel.compare family` 不允许隐式 broadcast，也不允许直接接收非 memory operand。
 
 返回与限制：
 
@@ -262,6 +264,8 @@ CMP = ne(A, B)
 
 - 结果语义为 predicate。
 - 结果 `dtype` 固定为 `NumericType.Bool`。
+- 规则同 `eq`（含隐式 broadcast 的语义与 lowering 显式化约束）。
+- 规则同 `eq`（含隐式 broadcast 的语义与 lowering 显式化约束）。
 
 返回与限制：
 
@@ -288,6 +292,8 @@ CMP = lt(A, 0)
 
 - 结果语义为 predicate。
 - 结果 `dtype` 固定为 `NumericType.Bool`。
+- 规则同 `eq`（含隐式 broadcast 的语义与 lowering 显式化约束）。
+- 规则同 `eq`（含隐式 broadcast 的语义与 lowering 显式化约束）。
 
 返回与限制：
 
@@ -314,6 +320,7 @@ CMP = le(A, 0)
 
 - 结果语义为 predicate。
 - 结果 `dtype` 固定为 `NumericType.Bool`。
+- 规则同 `eq`（含隐式 broadcast 的语义与 lowering 显式化约束）。
 
 返回与限制：
 
@@ -816,6 +823,7 @@ out_with_bias = fc(value, weight, bias=bias)
 - `dtype` 决议沿用 `add` 的固定优先级规则（低精度 -> 高精度，整浮混合取浮点）；`bias` 提供时其 `dtype` 必须与结果 `dtype` 兼容，否则抛出 `TypeError`。
 - 批维处理规则：除末维外，`value` 的前缀维度按原顺序保留到输出。
 - 与现有 nn 算子兼容：`fc` 输出仍为 `Memory`，可直接作为逐元素算术、比较、`matmul` 等算子的输入。
+- decomposition（机械写死）：`dsl/mlir_gen` 不得生成独立的 `fc` 方言 op；必须将 `fc` 分解为 raw `nn.matmul`（以及可选的 bias add）后再进入后续 lowering 链路。
 
 返回与限制：
 
@@ -901,6 +909,7 @@ out = conv(value, weight, bias=bias, sh=2, sw=2, dh=1, dw=1, ph=0, pw=0, pl=0, p
   - `H_out = floor((H + ph + pw - dh * (K_h - 1) - 1) / sh) + 1`
   - `W_out = floor((W + pl + pr - dw * (K_w - 1) - 1) / sw) + 1`
 - 当 `H_out` 或 `W_out` 为确定整数且不为正时，必须抛出 `ValueError`。
+- decomposition（机械写死）：`dsl/mlir_gen` 不得生成独立的 `conv` 方言 op；必须将 `conv` 分解为 raw `nn.img2col2d + nn.matmul`（以及必要 attrs）后再进入后续 lowering 链路。
 
 返回与限制：
 
@@ -989,6 +998,31 @@ cols = img2col2d(value, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr
 - `value.format == Farmat.CLast` 时，`out.shape == [N, H_out, W_out, kh, kw, C]`。
 - `out.dtype == value.dtype`，`out.space == value.space`。
 - `out.format == Farmat.Norm`，`out.stride` 为连续行主序默认步幅。
+
+## 额外补充
+
+### 职责矩阵与 lowering 目标面（机械写死）
+
+- 本文件定义 “用户可调用语义合同”：shape/axis/参数校验、输出 `Memory` 元信息与错误边界。
+- `operation/nn` 允许表述“隐式 broadcast”的高层语义，但不得把该隐式语义转嫁给 `kernel` 层兜底；进入方言链路前必须显式化 broadcast/transpose/structured op 的目标面。
+
+| 高层语义入口 | 进入方言后的最小承载 | pass lowering 目标面 |
+| --- | --- | --- |
+| 逐元素算术/比较（含隐式 broadcast 语义） | `nn.*` 逐元素 op + 必要时显式 `nn.broadcast` | `kernel.*`（compare/mixed compare 见下） |
+| `broadcast(value, target)` / `broadcast_to(source, target_shape, space)` | `nn.broadcast`（目标 shape 由 result type 承载） | `dma.broadcast` |
+| `transpose(value, perm)` | `nn.transpose` | `dma.transpose` |
+| `exp` | `nn.exp` | `kernel.exp` |
+| `reduce_sum/min/max` | `nn.reduce_*` | `kernel.reduce_*` |
+| `softmax` | `nn.softmax` | `kernel.softmax` |
+| `matmul` | `nn.matmul` | `kernel.matmul` |
+| `img2col1d/img2col2d` | `nn.img2col1d/nn.img2col2d` | `kernel.img2col1d/kernel.img2col2d` |
+| `conv` | raw `nn.img2col2d + nn.matmul (+ attrs)` | 继续落入 `img2col/matmul` 的 lowering 主链 |
+| `fc` | raw `nn.matmul`（+ 可选 bias add） | 继续落入 `matmul` 的 lowering 主链 |
+
+### mixed compare 的显式化要求
+
+- `memory + memory` compare：若本层语义需要 broadcast，则必须在进入方言前插入显式 `broadcast/broadcast_to`，保证 compare 发生时两侧均为同 shape 的 memory。
+- `memory + symbol/const` compare：必须在 pass 中使用 `dma.alloc + dma.broadcast` 先物化 scalar/symbol 到 temporary memory，然后再进入 `kernel.compare family`；禁止 `kernel` compare 直接接收非 memory operand。
 
 ## 测试
 

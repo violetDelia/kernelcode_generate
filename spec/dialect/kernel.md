@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-- 定义 `kernel` dialect 的执行步骤层运算语义，用于描述逐元素计算、比较、选择、类型转换，以及 `broadcast / exp / softmax / reduce_* / matmul / transpose / img2col*` 等 lower 后目标 op 的稳定合同。
+- 定义 `kernel` dialect 的执行步骤层运算语义，用于描述逐元素计算、比较、选择、类型转换，以及 `exp / softmax / reduce_* / matmul / img2col*` 等 lower 后目标 op 的稳定合同。
 - 所有结果通过显式 `outs(...)` 写回，不产生 SSA result。
 - 复用 `nn` dialect 的 memory type 与 space attribute，不新增独立 memory 类型体系。
 
@@ -22,18 +22,18 @@
 
 - 提供可解析、可校验的逐元素、结构化张量变换与 reduction/matmul 类 `kernel.*` op 集合。
 - 明确 `ins(...)` / `outs(...)` 形式下的类型、shape、stride、space 与关键 attrs 一致性校验规则。
-- 冻结 `LowerNnToKernelPass` 面向 `kernel.broadcast`、`kernel.exp`、`kernel.softmax`、`kernel.reduce_sum`、`kernel.reduce_min`、`kernel.reduce_max`、`kernel.matmul`、`kernel.transpose`、`kernel.img2col1d`、`kernel.img2col2d` 的目标 op 名字与输出消费链路。
+- 冻结 `LowerNnToKernelPass` 面向 `kernel.compare family`、`kernel.exp`、`kernel.softmax`、`kernel.reduce_sum`、`kernel.reduce_min`、`kernel.reduce_max`、`kernel.matmul`、`kernel.img2col1d`、`kernel.img2col2d` 的目标 op 名字与输出消费链路。
 - 明确 expectation 所要求的 `dma.alloc -> kernel.* -> func.return` 是真实消费链路：`out` operand 必须被目标 op 实际写入，不允许只命中 op 名称而缺失输出写回语义。
 
 ## 限制与边界
 
 - 本文件只定义 `kernel dialect` 的 op 合同，不负责函数输出 ABI、module 组织、调度策略或 pass 内部重写细节。
-- 不允许使用“万能 kernel op”兜底 `broadcast / exp / softmax / reduce_* / matmul / transpose / img2col*`；上述能力必须以各自具名 `kernel.*` op 公开。
+- 不允许使用“万能 kernel op”兜底 `exp / softmax / reduce_* / matmul / img2col*`；上述能力必须以各自具名 `kernel.*` op 公开。
 - 所有 op 不产生 SSA result，结果必须写入 `outs(...)`；不得把 `out` 写回链路写成“实现自定”或“可选消费”。
 - 本版仅支持 memory operand，不支持标量 operand；标量扩展留待后续版本。
-- 对逐元素算术、比较、选择与类型转换，输入 operand 默认要求 shape 一致；`broadcast` 是唯一稳定公开的形状扩展入口。
+- 对逐元素算术、比较、选择与类型转换，输入 operand 默认要求 `shape/stride/space/element_type` 一致；`kernel` 层不提供 broadcast/transpose 形状变换入口（它们必须在 `dma` 层显式物化）。
 - `reduce_sum`、`reduce_min`、`reduce_max` 可以共用一组 expectation，但 dialect 层必须保持 op 名字与 verifier 语义区分，不能折叠为同一个无差别 op。
-- `matmul`、`transpose`、`img2col1d`、`img2col2d` 的结构性变换必须在 verifier 阶段完成 rank / shape / attrs 的机械校验。
+- `matmul`、`img2col1d`、`img2col2d` 的结构性变换必须在 verifier 阶段完成 rank / shape / attrs 的机械校验。
 - memory operand 的 `shape/stride/space` 必须在 verifier 阶段完成一致性校验。
 
 ## 公开接口
@@ -336,38 +336,6 @@ op = KernelCastOp(input_value, out, NnMemorySpaceAttr.from_name("global"))
 - 返回 `KernelCastOp`。
 - 结果写入 `out`。
 
-### kernel.broadcast
-
-功能说明：
-
-- 将输入 memory 按目标 shape 扩展后写入输出 operand。
-
-参数说明：
-
-- `input(!nn.memory<...>)`：广播源 operand。
-- `shape(!nn.memory<...> | shape-like operand)`：目标 shape 描述 operand；用于表达 expectation 中要求的显式 broadcast 目标。
-- `out(!nn.memory<...>)`：输出 operand。
-- `space(#nn.space<...>)`：op 的空间属性。
-
-使用示例：
-
-```mlir
-%out = dma.alloc ... : !nn.memory<...>
-kernel.broadcast %src, %shape, %out : ...
-func.return %out : !nn.memory<...>
-```
-
-注意事项：
-
-- `kernel.broadcast` 是唯一允许 shape 扩展的稳定公开 `kernel` op；其他逐元素 op 不允许隐式 broadcast。
-- `input.element_type` 必须等于 `out.element_type`。
-- `shape` 必须与 `out.shape` 对齐；无法从 `input.shape` 广播到 `out.shape` 时必须 verifier 失败。
-
-返回与限制：
-
-- 返回 `KernelBroadcastOp`。
-- 结果写入 `out`。
-
 ### kernel.exp
 
 功能说明：
@@ -550,37 +518,6 @@ func.return %out : !nn.memory<f32, [M, N], GM>
 - 返回 `KernelMatmulOp`。
 - 结果写入 `out`。
 
-### kernel.transpose
-
-功能说明：
-
-- 按 `perm` 对输入 operand 做维度换序，并把结果写入输出 operand。
-
-参数说明：
-
-- `input(!nn.memory<...>)`：输入 operand。
-- `out(!nn.memory<...>)`：输出 operand。
-- `perm(ArrayAttr[i64])`：维度换序。
-- `space(#nn.space<...>)`：op 的空间属性。
-
-使用示例：
-
-```mlir
-%out = dma.alloc ... : !nn.memory<f32, [C, B], GM>
-kernel.transpose %src, %out {perm = [1, 0]} : ...
-func.return %out : !nn.memory<f32, [C, B], GM>
-```
-
-注意事项：
-
-- `perm` 长度必须等于 `input.rank`，且必须是合法排列。
-- `out.shape` 必须与 `input.shape` 按 `perm` 重排后的结果一致。
-
-返回与限制：
-
-- 返回 `KernelTransposeOp`。
-- 结果写入 `out`。
-
 ### kernel.img2col1d
 
 功能说明：
@@ -672,7 +609,7 @@ func.return %out : !nn.memory<f16, [N, C, KH, KW, OH, OW], GM>
 
 - 验证 `NnMemorySpaceAttr` 与 `NnMemoryType` 在 `kernel` 方言中的复用与校验行为。
 - 验证基础逐元素算术、比较、选择与类型转换 op 的 verifier 约束。
-- 验证 `kernel.broadcast / kernel.exp / kernel.softmax / kernel.reduce_* / kernel.matmul / kernel.transpose / kernel.img2col*` 的 op 名字、关键 attrs 与 `out` 消费链路合同。
+- 验证 `kernel.exp / kernel.softmax / kernel.reduce_* / kernel.matmul / kernel.img2col*` 的 op 名字、关键 attrs 与 `out` 消费链路合同。
 - 验证 `kernel.matmul` 对非二维 operand、`[M,K] x [K,N] -> [M,N]` 形状不匹配的 verifier 拒绝路径已被机械锁定。
 - 验证 `kernel.img2col1d/img2col2d` 的输入 rank/layout 合同与结构化输出合同已被机械锁定。
 - 验证 `kernel.img2col1d` 的 `input.shape + attrs -> W_out`、`kernel.img2col2d` 的 `input.shape + attrs -> OH/OW` 公式与拒绝路径已被机械锁定。
@@ -692,12 +629,10 @@ func.return %out : !nn.memory<f16, [N, C, KH, KW, OH, OW], GM>
 | TC-KRN-008 | `kernel.select` 条件类型非法 | `test_kernel_select_cond_type_error` |
 | TC-KRN-009 | `kernel.cast` 类型非法 | `test_kernel_cast_type_error` |
 | TC-KRN-010 | op 不产生 SSA result | `test_kernel_ops_no_result` |
-| TC-KRN-011 | `kernel.broadcast` 的目标 shape 与 `out` 对齐 | `test_kernel_broadcast_shape_contract` |
 | TC-KRN-012 | `kernel.softmax` 的 `axis` 非法触发 verifier 失败 | `test_kernel_softmax_axis_error` |
 | TC-KRN-013 | `kernel.reduce_sum/min/max` 保持具名区分且校验 `axis/keepdim` | `test_kernel_reduce_ops_contract` |
 | TC-KRN-014 | `kernel.matmul` 拒绝 dtype mismatch | `test_kernel_matmul_dtype_mismatch` |
 | TC-KRN-015 | `kernel.matmul` 拒绝非二维 operand 与 `[M,K] x [K,N] -> [M,N]` shape 失配 | `test_kernel_matmul_rank_shape_contract` |
-| TC-KRN-016 | `kernel.transpose` 的 `perm` 必须为合法排列 | `test_kernel_transpose_perm_error` |
 | TC-KRN-017 | `kernel.img2col1d/img2col2d` 保持结构化输出与显式窗口 attrs | `test_kernel_img2col_structured_contract` |
 | TC-KRN-018 | `kernel.img2col1d/img2col2d` 拒绝非法输入 rank 或 layout | `test_kernel_img2col_input_rank_layout_contract` |
 | TC-KRN-019 | `kernel.img2col1d/img2col2d` 拒绝 `input.shape + attrs` 推导出的 `W_out/OH/OW` 与 `out.shape` 不一致、公式结果 `< 1` 或窗口轴不等于 `k/[kh,kw]` | `test_kernel_img2col_output_extent_contract` |

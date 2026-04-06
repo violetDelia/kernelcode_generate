@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-用于定义 `dma dialect` 的稳定方言语义，描述 `dma.alloc`、`dma.fill`、`dma.free`、`dma.copy`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.view`、`dma.reshape`、`dma.cast` 如何表示内存对象之间的数据搬运、标量物化与布局转换，包括整块搬运、切片读取、切片回写、跨空间迁移、标量写入临时 memory、视图变换与显式数据转换，并支持动态 shape 的表达。该方言不单独定义 memory type / memory space，而是统一复用 `nn dialect` 中的 `NnMemoryType` 与 `NnMemorySpaceAttr`。
+用于定义 `dma dialect` 的稳定方言语义，描述 `dma.alloc`、`dma.fill`、`dma.free`、`dma.copy`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.view`、`dma.reshape`、`dma.cast` 以及作为 lowering 目标面的 `dma.broadcast`、`dma.transpose`，用于表示内存对象之间的数据搬运、标量物化与布局转换，包括整块搬运、切片读取、切片回写、跨空间迁移、标量写入临时 memory、显式广播物化、显式转置物化、视图变换与显式数据转换，并支持动态 shape 的表达。该方言不单独定义 memory type / memory space，而是统一复用 `nn dialect` 中的 `NnMemoryType` 与 `NnMemorySpaceAttr`。
 
 ## 文档信息
 
@@ -26,6 +26,7 @@
 - 为项目提供统一的数据搬运、布局转换与显式数据转换方言层表示。
 - 让整块拷贝、切片读取、切片回写、跨空间搬运与显式数据转换在 IR 中有明确 op 语义。
 - 为 `const(i32)` / `!symbol.int<"expr">` 到临时 memory 的真实物化提供稳定方言层原语，避免只生成空 `dma.alloc` 占位。
+- 为 `nn.broadcast/transpose` 与 mixed compare 桥接提供稳定 lowering 目标面：`dma.broadcast` / `dma.transpose`。
 - 保留 `shape/stride/offsets/sizes/strides` 等搬运元信息，覆盖静态与动态场景，并统一将这些运行期标量输入建模为 `!symbol.int<"expr">` SSA value。
 - 为后续 lowering 到 `tensor.extract_slice`、`tensor.insert_slice`、`memref.copy`、后端 DMA 指令或 runtime API 提供稳定中间层。
 - 参考 `memref.subview` / `memref.reinterpret_cast` 的设计习惯，将动态布局信息建模为显式 SSA 标量操作数，而不是仅放在 attribute 中；当前项目统一使用 `!symbol.int<"expr">` 承载这些整数标量输入。
@@ -34,9 +35,11 @@
 
 - `dma dialect` 不单独维护 memory type / memory space，所有相关 operand / result 类型统一复用 `NnMemoryType` 与 `NnMemorySpaceAttr`。
 - 本文件只定义方言层的数据搬运、布局转换与显式数据转换语义，不负责真实 DMA 硬件调度、流水线编排、带宽建模、同步原语、事件、barrier 或 async token 设计。
-- analysis 主线当前已公开承接 `dma.copy`、`dma.load`、`dma.store`、`dma.slice` 四类 DMA 访存分支；`dma.deslice`、`dma.alloc`、`dma.free` 仍不属于稳定统计合同。
-- 本文件不负责广播、逐元素算术、比较等张量计算语义，也不负责自动求解 `offsets/sizes/strides` 或自动推导最优搬运策略；`dma.fill` 仅覆盖“单个整数标量写入整块 memory”的初始化语义，不扩展到通用 broadcast 计算。
-- 当前方言范围包含 `dma.alloc`、`dma.fill`、`dma.free`、`dma.copy`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.view`、`dma.reshape`、`dma.cast`。
+- analysis 主线的“公开 DMA 分支列表”与覆盖范围以 [`spec/analysis/analysis_engine.md`](../../spec/analysis/analysis_engine.md) 为准；本文件不定义或冻结 analysis 的分支覆盖口径，避免在 dialect 规范中重复维护统计类合同。
+- 本文件不负责逐元素算术、比较、归约、matmul 等张量计算语义，也不负责自动求解 `offsets/sizes/strides` 或自动推导最优搬运策略；但它提供与“数据物化/布局变换”一致的两类稳定原语：
+  - `dma.broadcast`：把 scalar 或较低 rank memory 按广播规则物化写入目标 memory（用于显式广播与 mixed compare 桥接）
+  - `dma.transpose`：把 source 按 perm 置换物化写入目标 memory（作为 `nn.transpose` 的 lowering 目标）
+- 当前方言范围包含 `dma.alloc`、`dma.fill`、`dma.free`、`dma.copy`、`dma.broadcast`、`dma.transpose`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.view`、`dma.reshape`、`dma.cast`。
 - 除 `dma.cast` 与 `dma.fill` 外，其他搬运 op 不改变元素值语义，只改变数据所在的逻辑位置、切片范围、布局表达或空间；同一个 op 不应同时承担计算和搬运语义。
 - 本文件中的“转换”包含三类：布局、切片视图或空间层面的转换，通过 `dma.cast` 表达的显式元素类型转换，以及通过 `dma.fill` 表达的标量到 memory 物化；不包括 memory-memory 广播、归约或通用数值计算。
 
@@ -139,7 +142,7 @@
 
 - `dma dialect` 的公开构件由两部分组成：
   - 复用 `nn dialect` 的 `NnMemoryType` 与 `NnMemorySpaceAttr`
-  - 提供 `dma.alloc`、`dma.fill`、`dma.free`、`dma.copy`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.view`、`dma.reshape`、`dma.cast` 十一个公开 op
+  - 提供 `dma.alloc`、`dma.fill`、`dma.free`、`dma.copy`、`dma.broadcast`、`dma.transpose`、`dma.load`、`dma.store`、`dma.slice`、`dma.deslice`、`dma.view`、`dma.reshape`、`dma.cast` 十三个公开 op
 
 参数说明：
 
@@ -150,6 +153,7 @@
 ```python
 from kernel_gen.dialect.dma import (
     DmaAllocOp,
+    DmaBroadcastOp,
     DmaCastOp,
     DmaCopyOp,
     DmaDesliceOp,
@@ -159,6 +163,7 @@ from kernel_gen.dialect.dma import (
     DmaReshapeOp,
     DmaSliceOp,
     DmaStoreOp,
+    DmaTransposeOp,
     DmaViewOp,
 )
 from kernel_gen.dialect.nn import NnMemorySpaceAttr
@@ -366,6 +371,77 @@ op = DmaCopyOp(source, target)
 
 - 返回类型为无返回值；当前 op result 数量固定为 `0`。
 - 语义上通过 side effect 表达对 `target` 的整块写入，不返回新的 `!nn.memory<...>`。
+
+### `dma.broadcast`
+
+功能说明：
+
+- 将 `source` 按广播规则物化写入 `target`，作为显式广播与 mixed compare 桥接的统一 lowering 目标面。
+- `dma.broadcast` 不返回新的 memory；被写入的结果由 `target` 承载。
+
+参数说明：
+
+- `target`：写入目标内存，类型为 `!nn.memory<...>`。
+- `source`：广播源，可为：
+  - `!nn.memory<...>`（memory-to-memory 广播物化）
+  - builtin 标量（如 `i32/f16/f32` 等）
+  - `!symbol.int<"expr">`（整数标量）
+
+使用示例：
+
+```mlir
+%rhs_b = dma.alloc ... : !nn.memory<[M, N], i32, #nn.space<LM>>
+%c7 = arith.constant 7 : i32
+dma.broadcast(%rhs_b, %c7) : (!nn.memory<[M, N], i32, #nn.space<LM>>, i32) -> ()
+```
+
+注意事项：
+
+- `target` 必须为 `!nn.memory<...>`，且 `target.shape/stride/space/element_type` 必须完整可校验。
+- 当 `source` 为 `!nn.memory<...>` 时：
+  - `source.element_type` 必须等于 `target.element_type`。
+  - `source.space` 必须等于 `target.space`（跨空间广播不在本轮公开合同范围内）。
+  - 广播规则固定为尾维对齐：对齐后任一维若两侧均为静态整数且既不相等也不包含 `1`，verifier 必须失败；否则视为兼容（不做数值求解）。
+- 当 `source` 为标量时：
+  - 标量类型必须与 `target.element_type` 一致；`!symbol.int<"expr">` 仅用于整数 element_type 的标量输入。
+- 禁止 silent fallback：不允许把不兼容的广播或类型失配默认为“成功但不写入”，verifier 必须失败或在 pass 层显式报错。
+
+返回与限制：
+
+- 返回类型为无返回值；当前 op result 数量固定为 `0`。
+- 语义上通过 side effect 表达对 `target` 的整块写入，不返回新的 `!nn.memory<...>`。
+
+### `dma.transpose`
+
+功能说明：
+
+- 按 `perm` 对 `source` 做维度置换，并将结果物化写入 `target`。
+- 作为 `nn.transpose` 的 lowering 目标面，禁止在 `kernel` 层保留 `transpose` 的隐式语义。
+
+参数说明：
+
+- `source`：转置输入内存，类型为 `!nn.memory<...>`。
+- `target`：写入目标内存，类型为 `!nn.memory<...>`。
+- `perm`：轴置换 attribute，必须为 `0..rank-1` 的排列。
+
+使用示例：
+
+```mlir
+%out = dma.alloc ... : !nn.memory<[N, M], f16, #nn.space<LM>>
+dma.transpose(%src, %out) {perm = [1, 0]} : (!nn.memory<[M, N], f16, #nn.space<LM>>, !nn.memory<[N, M], f16, #nn.space<LM>>) -> ()
+```
+
+注意事项：
+
+- `source/target` 必须为 `!nn.memory<...>`，且 `element_type/space` 必须一致。
+- `perm` 必须为合法排列且长度等于 `source.rank`；存在重复索引或越界时 verifier 必须失败。
+- `target.shape` 必须与按 `perm` 重排的 `source.shape` 机械一致；当相关维度为静态整数或可直接比较的符号时必须执行一致性校验，不做数值求解。
+- 禁止 silent fallback：perm 非排列、rank 不一致、shape 不一致时不得退化为 “copy/view”，必须显式失败。
+
+返回与限制：
+
+- 返回类型为无返回值；当前 op result 数量固定为 `0`。
+- 语义上通过 side effect 表达对 `target` 的写入，不返回新的 `!nn.memory<...>`。
 
 ### `dma.load`
 

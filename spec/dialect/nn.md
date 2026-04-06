@@ -25,12 +25,14 @@
 - 提供可解析、可打印、可校验的 `!nn.memory<...>` 类型表示。
 - 为 `nn.add/sub/mul/truediv/eq/ne/lt/le/gt/ge/exp/reduce_sum/reduce_min/reduce_max/broadcast/transpose/softmax/img2col1d/img2col2d/matmul` 提供稳定的方言层接口。
 - 明确 `nn dialect` 不支持逐元素隐式 broadcast，所有广播必须显式使用 `nn.broadcast`。
+- 承接上游 `operation.broadcast_to(...)` 的 canonical lowering：进入方言时以 `nn.broadcast` 表达目标 shape（由结果类型承载），不在 `nn dialect` 额外新增 `nn.broadcast_to` 独立 op。
 - 保证合法文本 IR 可以 round-trip，非法输入在 parse 或 verifier 阶段被拒绝。
 
 ## 限制与边界
 
 - 本文件只定义 `kernel_gen/dialect/nn.py` 的方言层接口，不重复上游 `operation/nn` 的高层 API 语义。
 - 上游若允许逐元素隐式 broadcast，进入 `nn dialect` 前必须显式展开为 `nn.broadcast`。
+- 上游 `broadcast_to(source, target_shape, space)` 进入方言时必须归一化为 `nn.broadcast`：目标 `target_shape` 仅通过 `result_type.shape` 体现，`nn dialect` 不承诺提供独立的 `nn.broadcast_to` op。
 - `img2col` 在方言层只允许公开 `nn.img2col1d` 与 `nn.img2col2d` 两个稳定 op，禁止新增笼统公开名 `nn.img2col`。
 - `nn.img2col1d/img2col2d` 仅定义 operand/attribute/result/verifier 合同，不在方言层重复上游 `operation/nn` 的 shape/stride 公式与错误边界全文。
 - 上游 `fc/conv` 在方言层不定义独立 op，进入 `nn dialect` 后下沉为 `nn.matmul` / `nn.img2col1d` / `nn.img2col2d` 的组合与约束。
