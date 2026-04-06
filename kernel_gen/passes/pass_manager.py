@@ -1,7 +1,7 @@
 """Pass manager API.
 
 创建者: 李白
-最后一次更改: 朽木露琪亚
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 定义 Pass 与 PassManager 的基础行为。
@@ -83,10 +83,10 @@ def build_default_lowering_pass_manager(name: str | None = "lowering") -> "PassM
     """构造默认 lowering pass 链路。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 固定注册 `LowerNnToKernelPass -> BufferResultsToOutParamsPass` 顺序。
+    - 固定注册 `LowerNnToKernelPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass` 顺序。
     - 为推荐调用链与黑盒测试提供统一入口，避免各处手工拼装顺序漂移。
 
     使用示例:
@@ -99,11 +99,16 @@ def build_default_lowering_pass_manager(name: str | None = "lowering") -> "PassM
     - 功能实现: kernel_gen/passes/pass_manager.py
     """
 
-    from .lowering import BufferResultsToOutParamsPass, LowerNnToKernelPass
+    from .lowering import (
+        BufferResultsToOutParamsPass,
+        LowerDmaMemoryHierarchyPass,
+        LowerNnToKernelPass,
+    )
 
     pm = PassManager(name=name)
     pm.add_pass(LowerNnToKernelPass())
     pm.add_pass(BufferResultsToOutParamsPass())
+    pm.add_pass(LowerDmaMemoryHierarchyPass())
     return pm
 
 
@@ -178,7 +183,7 @@ class PassManager:
         """依序执行 Pass。
 
         创建者: 李白
-        最后一次更改: 朽木露琪亚
+        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 逐个调用 Pass.run。
@@ -192,6 +197,17 @@ class PassManager:
         - 功能实现: kernel_gen/passes/pass_manager.py
         """
         pass_names = [item.name for item in self._passes]
+        if "lower-dma-memory-hierarchy" in pass_names:
+            dma_index = pass_names.index("lower-dma-memory-hierarchy")
+            if "buffer-results-to-out-params" not in pass_names:
+                raise ValueError(
+                    "DmaMemoryHierarchyOrderError: lower-dma-memory-hierarchy requires buffer-results-to-out-params"
+                )
+            buffer_index = pass_names.index("buffer-results-to-out-params")
+            if dma_index < buffer_index:
+                raise ValueError(
+                    "DmaMemoryHierarchyOrderError: lower-dma-memory-hierarchy must run after buffer-results-to-out-params"
+                )
         if "kernel-split" in pass_names:
             kernel_split_index = pass_names.index("kernel-split")
             if "buffer-results-to-out-params" in pass_names:
