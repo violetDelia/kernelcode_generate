@@ -215,7 +215,7 @@ def _resolve_window_operands(
 
     功能说明:
     - 若 operand 来自 `dma.view`，保留其 offsets/shape 作为 window 参数，并将 base 设为 view.source。
-    - `dma.slice/dma.deslice` 当前仅支持单位 stride，因此 window stride 始终使用 unit stride。
+    - `dma.slice/dma.deslice` 当前仅支持单位 stride；因此即使 `dma.view` 自身记录了非单位窗口 stride，hierarchy 新路径也只继承原窗口的 offsets/shape，并统一把 stride 规范化为 unit stride。
     - 非 window 情况下回退为 full window：offsets=0、sizes=shape、strides=1。
 
     使用示例:
@@ -302,7 +302,8 @@ def _lower_gm_operand_to_lm(
 
     功能说明:
     - 为 operand 分配 SM/LM staging buffer，并插入两段 `dma.slice`：
-      `GM -> SM`（保留 full/window 参数）与 `SM -> LM`（zero offsets + unit strides）。
+      `GM -> SM`（保留 full/window offsets/sizes，strides 仍为 unit stride）与
+      `SM -> LM`（zero offsets + unit strides）。
     - 返回需要插入到 `anchor_op` 之前的 ops 列表与最终 LM buffer SSA value。
 
     使用示例:
@@ -351,7 +352,8 @@ def _lower_gm_out_to_lm_with_writeback(
     - 在 `anchor_op` 前插入 SM/LM alloc（out staging）。
     - 在 `anchor_op` 后插入两段 `dma.deslice`：`LM -> SM` 与 `SM -> GM`。
       第二段 deslice 的 source 使用第一段 deslice 的 result，匹配 `dma.deslice` 返回“更新后 target”的语义。
-    - `LM -> SM` 使用 zero offsets + unit strides；`SM -> GM` 保留 full/window offsets/sizes。
+    - `LM -> SM` 使用 zero offsets + unit strides；`SM -> GM` 保留 full/window offsets/sizes，
+      但回写 strides 仍统一使用 unit stride。
     - 返回：需插入到 `anchor_op` 前的 ops、需插入到 `anchor_op` 后的 ops、以及 LM out SSA value。
 
     使用示例:

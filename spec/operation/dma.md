@@ -263,6 +263,7 @@ sub = slice(src, offsets=[32], sizes=[16], strides=[1], space=MemorySpace.TSM)
 - operation 层签名固定为 `slice(source, offsets, sizes, strides, space)`，不向用户暴露 include/api 的目标式 `target` 参数。
 - lowering 必须显式桥接到目标式链路：先创建 `target = alloc(shape=sizes, dtype=source.dtype, space=space)`，再发射 `dma.slice(target, source, offsets, sizes, strides)`。
 - `slice(...)` 的表达式返回值必须绑定到上述自动分配 `target`；不得把 `dma.slice` 误写为“自身返回新 memory result”。
+- 若某个 lowering pass 需要把整块搬运收口到 `slice(...)`，必须使用 full-window 特例：`offsets=0`、`sizes=source.shape`、`strides=1`；若输入来自窗口 `view(...)`，lowering 只能保留原窗口的 `offsets/sizes`，生成到 `dma.slice` 的 `strides` 仍必须规范化为单位步长。
 - 例如 `offsets=[32]`、`sizes=[16]`、`strides=[1]`、`space=MemorySpace.TSM` 时，返回值语义必须是 `shape=[16]`、`space=TSM` 的 `Memory<float>`（`dtype` 继承 `source`）。
 
 非法输入：
@@ -336,6 +337,7 @@ deslice(sub, dst, offsets=[0, 16], sizes=[32, 32], strides=[1, 1])
 注意事项：
 
 - 校验规则与 `store` 一致。
+- 若某个 lowering pass 需要把整块写回收口到 `deslice(...)`，必须使用 full-window 特例：`offsets=0`、`sizes=target.shape`、`strides=1`；若目标来自窗口 `view(...)`，lowering 只能保留原窗口的 `offsets/sizes`，生成到 `dma.deslice` 的 `strides` 仍必须规范化为单位步长。
 
 非法输入：
 

@@ -119,6 +119,8 @@ def _build_kernel_add_module_with_window() -> tuple[ModuleOp, Block, KernelAddOp
     功能说明:
     - 通过 dma.view 构造 GM window 视图，并作为 kernel.add 的输入与输出。
     - window 形状与 stride 固定为 `[2, 3]` / `[3, 1]`，offsets 使用非零常量。
+    - 该 helper 仅负责构造原始 window 元信息；hierarchy lowering 生成的 `dma.slice/dma.deslice`
+      必须保留 offsets/sizes，并把新路径 strides 规范化为 unit stride。
 
     使用示例:
     - module, block, kernel_op = _build_kernel_add_module_with_window()
@@ -360,7 +362,7 @@ def test_dma_memory_hierarchy_lm_only_is_noop() -> None:
 # 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-06 03:20:13 +0800
 # 最近一次运行成功时间: 2026-04-06 03:20:13 +0800
-# 测试目的: 验证 GM->SM 保留窗口 offsets/sizes，SM->LM 与 LM->SM 使用 zero offsets + unit strides，且 SM->GM 写回保留窗口 offsets。
+# 测试目的: 验证 hierarchy window 路径保留原窗口 offsets/sizes，并统一把 GM->SM、SM->LM、LM->SM、SM->GM 的新插入 strides 规范化为 unit stride。
 # 使用示例: pytest -q test/pass/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_window_offsets_and_unit_strides
 # 对应功能实现文件路径: kernel_gen/passes/lowering/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy.md

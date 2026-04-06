@@ -73,6 +73,7 @@
 - 对 mixed add 等需要 `scalar -> memory` 合法化的链路，当前唯一公开合法原语是 `dma.alloc + dma.fill(target, value)`：`dma.alloc` 负责生成 temporary memory，`dma.fill` 负责把 `const(i32)` / `!symbol.int<"expr">` 真实写入该 memory 的每个逻辑元素。仅生成空 `dma.alloc` 占位，或生成 `dma.fill` 后其 `target` 在下游 IR 中 `users=[]`，都不属于当前链路的通过口径。
 - `strides` 当前每一维仍限制为单位步长语义，但该约束应体现在 operand 校验阶段，而不是要求使用 `IntAttr(1)` attribute。
 - operation 层允许非单位 `strides` 作为切片步进，但本方言仅实现单位步长语义；因此含非单位 `strides` 的 `dma.load/store/slice/deslice` 必须在 lowering/verifier 阶段拒绝。原因：现有 lowering 目标与 verifier 规则仅覆盖单位步长切片。
+- 若上层 pass 需要把窗口化 hierarchy 搬运收口到 `dma.slice/dma.deslice`，只能复用原窗口的 `offsets/sizes`；新插入的 hierarchy 路径 `strides` 必须继续物化为全 `1`，不得借此扩展本方言到非单位或符号 stride 语义。
 - `sizes` 中每一维必须具有正整数语义，不允许负值；若 `!symbol.int<"expr">` 不能静态证明为正值，则至少要拒绝 `!symbol.int<"0">` 与可静态判定的负值。
 - 若 op 带有目标空间 attribute，则其值必须与结果 type 或目标 type 的 `space` 一致。
 
@@ -466,6 +467,7 @@ op = DmaSliceOp(target, source, offsets, sizes, strides)
 - `target.shape` 必须与 `sizes` 描述的切片形状一致。
 - `target.element_type` 必须与 `source.element_type` 一致。
 - 当前阶段必须限制 `strides` 为全 1；出现其他值时 verifier 必须报错。
+- 若某个 lowering pass 用 `dma.slice` 表达整块 hierarchy 搬运，必须把整块路径编码为 full-window 特例：`offsets=0`、`sizes=source.shape`、`strides=1`；若输入来自 `dma.view`，仅允许继承该窗口的 `offsets/sizes`，不得继承非单位 `stride`。
 - `offsets/sizes/strides` 必须全部通过 `!symbol.int<"expr">` operand 提供。
 - `target` 与 `source` 必须是同 rank 且兼容布局的 `!nn.memory<...>`；该约束用于保证切片写入合法。
 - `dma.slice` 不负责返回新内存，若上层 API 需要切片表达式返回值，必须通过 `dma.alloc` 先构造 `target` 并返回该 `target`。
@@ -502,6 +504,7 @@ op = DmaDesliceOp(source, target, offsets, sizes, strides, result_type)
 - `source.shape` 必须与 `sizes` 对应的切片形状一致。
 - `source.element_type` 必须与 `target.element_type` 一致。
 - 当前阶段必须限制 `strides` 为全 1；出现其他值时 verifier 必须报错。
+- 若某个 lowering pass 用 `dma.deslice` 表达整块 hierarchy 写回，必须把整块路径编码为 full-window 特例：`offsets=0`、`sizes=target.shape`、`strides=1`；若写回目标来自 `dma.view`，仅允许继承该窗口的 `offsets/sizes`，回写 `strides` 仍必须保持单位步长。
 - `offsets/sizes/strides` 必须全部通过 `!symbol.int<"expr">` operand 提供。
 
 返回与限制：
