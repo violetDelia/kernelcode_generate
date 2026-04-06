@@ -589,7 +589,7 @@ int main() {
     }
     long long shape[1] = {10};
     long long stride[1] = {1};
-    Memory<float> source(data, shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
+    Memory<MemorySpace::GM, float> source(data, shape, stride, 1, MemoryFormat::Norm);
 
     long long offset_buf[1] = {1};
     long long size_buf[1] = {4};
@@ -612,7 +612,7 @@ int main() {
     float tile_data[4] = {0};
     long long tile_shape[1] = {4};
     long long tile_stride[1] = {1};
-    Memory<float> tile(tile_data, tile_shape, tile_stride, 1, MemoryFormat::Norm, MemorySpace::TSM);
+    Memory<MemorySpace::TSM, float> tile(tile_data, tile_shape, tile_stride, 1, MemoryFormat::Norm);
     if (slice(tile, source, offset, size, stride_vec) != StatusCode::kOk) {
         return fail(4);
     }
@@ -621,7 +621,7 @@ int main() {
     }
 
     float target_data[10] = {0};
-    Memory<float> target(target_data, shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
+    Memory<MemorySpace::GM, float> target(target_data, shape, stride, 1, MemoryFormat::Norm);
     if (deslice(tile, target, offset, size, stride_vec) != StatusCode::kOk) {
         return fail(6);
     }
@@ -672,7 +672,7 @@ int main() {
     }
     long long shape[1] = {10};
     long long stride[1] = {1};
-    Memory<float> source(data, shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
+    Memory<MemorySpace::GM, float> source(data, shape, stride, 1, MemoryFormat::Norm);
 
     // 标量参数：非法 offset/size/stride 与越界。
     try {
@@ -776,7 +776,7 @@ int main() {
     float data2[6] = {0};
     long long shape2[2] = {2, 3};
     long long stride2[2] = {3, 1};
-    Memory<float> source2(data2, shape2, stride2, 2, MemoryFormat::Norm, MemorySpace::GM);
+    Memory<MemorySpace::GM, float> source2(data2, shape2, stride2, 2, MemoryFormat::Norm);
 
     try {
         auto bad = view(source2, 0, 1, 1);
@@ -842,7 +842,7 @@ int main() {
 
     long long huge_shape[1] = {kMax};
     long long unit_stride[1] = {1};
-    Memory<float> huge_source(data, huge_shape, unit_stride, 1, MemoryFormat::Norm, MemorySpace::GM);
+    Memory<MemorySpace::GM, float> huge_source(data, huge_shape, unit_stride, 1, MemoryFormat::Norm);
 
     try {
         auto bad = view(huge_source, 1, kMax, 2);
@@ -856,7 +856,7 @@ int main() {
     }
 
     long long huge_stride[1] = {kMax};
-    Memory<float> huge_stride_source(data, huge_shape, huge_stride, 1, MemoryFormat::Norm, MemorySpace::GM);
+    Memory<MemorySpace::GM, float> huge_stride_source(data, huge_shape, huge_stride, 1, MemoryFormat::Norm);
 
     try {
         auto bad = view(huge_stride_source, 2, 1, 1);
@@ -916,16 +916,16 @@ int main() {
 
     long long huge_shape[1] = {kMax};
     long long huge_stride[1] = {kMax};
-    Memory<float> huge_source(data, huge_shape, huge_stride, 1, MemoryFormat::Norm, MemorySpace::GM);
-    Memory<float> huge_target(data, huge_shape, huge_stride, 1, MemoryFormat::Norm, MemorySpace::GM);
+    Memory<MemorySpace::GM, float> huge_source(data, huge_shape, huge_stride, 1, MemoryFormat::Norm);
+    Memory<MemorySpace::GM, float> huge_target(data, huge_shape, huge_stride, 1, MemoryFormat::Norm);
 
     long long tile_small_shape[1] = {1};
     long long tile_small_stride[1] = {1};
-    Memory<float> tile_small(data, tile_small_shape, tile_small_stride, 1, MemoryFormat::Norm, MemorySpace::GM);
+    Memory<MemorySpace::GM, float> tile_small(data, tile_small_shape, tile_small_stride, 1, MemoryFormat::Norm);
 
     long long tile_big_shape[1] = {kMax};
     long long tile_big_stride[1] = {1};
-    Memory<float> tile_big(data, tile_big_shape, tile_big_stride, 1, MemoryFormat::Norm, MemorySpace::GM);
+    Memory<MemorySpace::GM, float> tile_big(data, tile_big_shape, tile_big_stride, 1, MemoryFormat::Norm);
 
     if (slice(tile_small, huge_source, 2, 1, 1) != StatusCode::kError) {
         return fail(1);
@@ -968,9 +968,9 @@ int main() {
     float out_data[4] = {0};
     long long shape[1] = {4};
     long long stride[1] = {1};
-    Memory<float> lhs(lhs_data, shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
-    Memory<float> rhs(rhs_data, shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
-    Memory<float> out(out_data, shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
+    Memory<MemorySpace::GM, float> lhs(lhs_data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<MemorySpace::GM, float> rhs(rhs_data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<MemorySpace::GM, float> out(out_data, shape, stride, 1, MemoryFormat::Norm);
 
     if (add(lhs, rhs, out) != StatusCode::kOk) {
         return fail(1);
@@ -981,22 +981,22 @@ int main() {
     }
 
     long long bad_shape[1] = {3};
-    Memory<float> bad(lhs_data, bad_shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
+    Memory<MemorySpace::GM, float> bad(lhs_data, bad_shape, stride, 1, MemoryFormat::Norm);
     if (add(bad, rhs, out) == StatusCode::kOk) {
         return fail(3);
     }
 
     long long rank2_shape[2] = {2, 2};
     long long rank2_stride[2] = {2, 1};
-    Memory<float> bad_rank(lhs_data, rank2_shape, rank2_stride, 2, MemoryFormat::Norm, MemorySpace::GM);
+    Memory<MemorySpace::GM, float> bad_rank(lhs_data, rank2_shape, rank2_stride, 2, MemoryFormat::Norm);
     if (add(bad_rank, rhs, out) == StatusCode::kOk) {
         return fail(4);
     }
-    Memory<float> bad_rhs(rhs_data, rank2_shape, rank2_stride, 2, MemoryFormat::Norm, MemorySpace::GM);
+    Memory<MemorySpace::GM, float> bad_rhs(rhs_data, rank2_shape, rank2_stride, 2, MemoryFormat::Norm);
     if (add(lhs, bad_rhs, out) == StatusCode::kOk) {
         return fail(5);
     }
-    Memory<float> bad_out(out_data, rank2_shape, rank2_stride, 2, MemoryFormat::Norm, MemorySpace::GM);
+    Memory<MemorySpace::GM, float> bad_out(out_data, rank2_shape, rank2_stride, 2, MemoryFormat::Norm);
     if (add(lhs, rhs, bad_out) == StatusCode::kOk) {
         return fail(6);
     }

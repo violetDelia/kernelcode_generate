@@ -219,9 +219,9 @@ int main() {
     long long shape[2] = {2, 3};
     long long stride[2] = {3, 1};
 
-    cpu::Memory<float> lhs(lhs_data, 2, shape, stride);
-    cpu::Memory<float> rhs(rhs_data, 2, shape, stride);
-    cpu::Memory<float> out(out_data, 2, shape, stride);
+    cpu::Memory<cpu::GM, float> lhs(lhs_data, 2, shape, stride);
+    cpu::Memory<cpu::GM, float> rhs(rhs_data, 2, shape, stride);
+    cpu::Memory<cpu::GM, float> out(out_data, 2, shape, stride);
 
     cpu::add(lhs, rhs, out);
 
@@ -258,9 +258,9 @@ int main() {
     long long shape[2] = {2, 3};
     long long stride[2] = {3, 1};
 
-    cpu::Memory<float> lhs(lhs_data, 2, shape, stride);
-    cpu::Memory<float> rhs(rhs_data, 2, shape, stride);
-    cpu::Memory<int> out(out_data, 2, shape, stride);
+    cpu::Memory<cpu::GM, float> lhs(lhs_data, 2, shape, stride);
+    cpu::Memory<cpu::GM, float> rhs(rhs_data, 2, shape, stride);
+    cpu::Memory<cpu::GM, int> out(out_data, 2, shape, stride);
 
     cpu::eq(lhs, rhs, out);
 
@@ -301,8 +301,8 @@ int main() {
     long long in_stride[2] = {4, 1};
     long long out_stride[2] = {4, 1};
 
-    cpu::Memory<float> input(in_data, 2, in_shape, in_stride);
-    cpu::Memory<float> out(out_data, 2, out_shape, out_stride);
+    cpu::Memory<cpu::GM, float> input(in_data, 2, in_shape, in_stride);
+    cpu::Memory<cpu::GM, float> out(out_data, 2, out_shape, out_stride);
 
     cpu::broadcast(input, out);
 
@@ -344,8 +344,8 @@ int main() {
     long long in_stride[1] = {1};
     long long out_stride[2] = {4, 1};
 
-    cpu::Memory<float> input(in_data, 1, in_shape, in_stride);
-    cpu::Memory<float> out(out_data, 2, out_shape, out_stride);
+    cpu::Memory<cpu::GM, float> input(in_data, 1, in_shape, in_stride);
+    cpu::Memory<cpu::GM, float> out(out_data, 2, out_shape, out_stride);
 
     cpu::broadcast(input, out);
 
@@ -386,9 +386,9 @@ int main() {
     long long shape[2] = {2, 3};
     long long stride[2] = {3, 1};
 
-    cpu::Memory<int> lhs(lhs_data, 2, shape, stride);
-    cpu::Memory<int> rhs(rhs_data, 2, shape, stride);
-    cpu::Memory<int> out(out_data, 2, shape, stride);
+    cpu::Memory<cpu::GM, int> lhs(lhs_data, 2, shape, stride);
+    cpu::Memory<cpu::GM, int> rhs(rhs_data, 2, shape, stride);
+    cpu::Memory<cpu::GM, int> out(out_data, 2, shape, stride);
 
     cpu::mul(lhs, rhs, out);
 
@@ -425,9 +425,9 @@ int main() {
     long long shape[1] = {4};
     long long stride[1] = {1};
 
-    cpu::Memory<int> lhs(lhs_data, 1, shape, stride);
-    cpu::Memory<int> rhs(rhs_data, 1, shape, stride);
-    cpu::Memory<int> out(out_data, 1, shape, stride);
+    cpu::Memory<cpu::GM, int> lhs(lhs_data, 1, shape, stride);
+    cpu::Memory<cpu::GM, int> rhs(rhs_data, 1, shape, stride);
+    cpu::Memory<cpu::GM, int> out(out_data, 1, shape, stride);
 
     cpu::sub(lhs, rhs, out);
 
@@ -464,9 +464,9 @@ int main() {
     long long shape[1] = {4};
     long long stride[1] = {1};
 
-    cpu::Memory<float> lhs(lhs_data, 1, shape, stride);
-    cpu::Memory<float> rhs(rhs_data, 1, shape, stride);
-    cpu::Memory<float> out(out_data, 1, shape, stride);
+    cpu::Memory<cpu::GM, float> lhs(lhs_data, 1, shape, stride);
+    cpu::Memory<cpu::GM, float> rhs(rhs_data, 1, shape, stride);
+    cpu::Memory<cpu::GM, float> out(out_data, 1, shape, stride);
 
     cpu::truediv(lhs, rhs, out);
 
@@ -503,9 +503,9 @@ int main() {
     long long shape[1] = {4};
     long long stride[1] = {1};
 
-    cpu::Memory<float> lhs(lhs_data, 1, shape, stride);
-    cpu::Memory<float> rhs(rhs_data, 1, shape, stride);
-    cpu::Memory<int> out(out_data, 1, shape, stride);
+    cpu::Memory<cpu::GM, float> lhs(lhs_data, 1, shape, stride);
+    cpu::Memory<cpu::GM, float> rhs(rhs_data, 1, shape, stride);
+    cpu::Memory<cpu::GM, int> out(out_data, 1, shape, stride);
 
     cpu::ne(lhs, rhs, out);
 
@@ -542,9 +542,9 @@ int main() {
     long long shape[1] = {3};
     long long stride[1] = {1};
 
-    cpu::Memory<float> lhs(lhs_data, 1, shape, stride);
-    cpu::Memory<float> rhs(rhs_data, 1, shape, stride);
-    cpu::Memory<int> out(out_data, 1, shape, stride);
+    cpu::Memory<cpu::GM, float> lhs(lhs_data, 1, shape, stride);
+    cpu::Memory<cpu::GM, float> rhs(rhs_data, 1, shape, stride);
+    cpu::Memory<cpu::GM, int> out(out_data, 1, shape, stride);
 
     cpu::lt(lhs, rhs, out);
 
@@ -581,9 +581,9 @@ int main() {
     long long shape[1] = {3};
     long long stride[1] = {1};
 
-    cpu::Memory<float> lhs(lhs_data, 1, shape, stride);
-    cpu::Memory<float> rhs(rhs_data, 1, shape, stride);
-    cpu::Memory<int> out(out_data, 1, shape, stride);
+    cpu::Memory<cpu::GM, float> lhs(lhs_data, 1, shape, stride);
+    cpu::Memory<cpu::GM, float> rhs(rhs_data, 1, shape, stride);
+    cpu::Memory<cpu::GM, int> out(out_data, 1, shape, stride);
 
     cpu::le(lhs, rhs, out);
 
@@ -620,9 +620,9 @@ int main() {
     long long shape[1] = {3};
     long long stride[1] = {1};
 
-    cpu::Memory<float> lhs(lhs_data, 1, shape, stride);
-    cpu::Memory<float> rhs(rhs_data, 1, shape, stride);
-    cpu::Memory<int> out(out_data, 1, shape, stride);
+    cpu::Memory<cpu::GM, float> lhs(lhs_data, 1, shape, stride);
+    cpu::Memory<cpu::GM, float> rhs(rhs_data, 1, shape, stride);
+    cpu::Memory<cpu::GM, int> out(out_data, 1, shape, stride);
 
     cpu::gt(lhs, rhs, out);
 
@@ -659,9 +659,9 @@ int main() {
     long long shape[1] = {3};
     long long stride[1] = {1};
 
-    cpu::Memory<float> lhs(lhs_data, 1, shape, stride);
-    cpu::Memory<float> rhs(rhs_data, 1, shape, stride);
-    cpu::Memory<int> out(out_data, 1, shape, stride);
+    cpu::Memory<cpu::GM, float> lhs(lhs_data, 1, shape, stride);
+    cpu::Memory<cpu::GM, float> rhs(rhs_data, 1, shape, stride);
+    cpu::Memory<cpu::GM, int> out(out_data, 1, shape, stride);
 
     cpu::ge(lhs, rhs, out);
 
@@ -690,8 +690,8 @@ def test_cpu_nn_img2col1d_success_and_signature() -> None:
 #include "include/cpu/Nn.h"
 
 using Img2Col1dFn = void (*)(
-    const cpu::Memory<float>&,
-    cpu::Memory<float>&,
+    const cpu::Memory<cpu::GM, float>&,
+    cpu::Memory<cpu::GM, float>&,
     long long,
     long long,
     long long,
@@ -711,8 +711,8 @@ int main() {
     long long out_shape[3] = {1, 3, 4};
     long long out_stride[3] = {12, 4, 1};
 
-    cpu::Memory<float> value(value_data, 3, value_shape, value_stride);
-    cpu::Memory<float> out(out_data, 3, out_shape, out_stride);
+    cpu::Memory<cpu::GM, float> value(value_data, 3, value_shape, value_stride);
+    cpu::Memory<cpu::GM, float> out(out_data, 3, out_shape, out_stride);
 
     cpu::img2col1d(value, out, 3, 1, 1, 1, 1);
 
@@ -744,8 +744,8 @@ def test_cpu_nn_img2col2d_success_and_signature() -> None:
 #include "include/cpu/Nn.h"
 
 using Img2Col2dFn = void (*)(
-    const cpu::Memory<float>&,
-    cpu::Memory<float>&,
+    const cpu::Memory<cpu::GM, float>&,
+    cpu::Memory<cpu::GM, float>&,
     long long,
     long long,
     long long,
@@ -770,8 +770,8 @@ int main() {
     long long out_shape[3] = {1, 4, 2};
     long long out_stride[3] = {8, 2, 1};
 
-    cpu::Memory<float> value(value_data, 4, value_shape, value_stride);
-    cpu::Memory<float> out(out_data, 3, out_shape, out_stride);
+    cpu::Memory<cpu::GM, float> value(value_data, 4, value_shape, value_stride);
+    cpu::Memory<cpu::GM, float> out(out_data, 3, out_shape, out_stride);
 
     cpu::img2col2d(value, out, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0);
 
@@ -810,8 +810,8 @@ int main() {
     long long out_shape[3] = {1, 3, 4};
     long long out_stride[3] = {12, 4, 1};
 
-    cpu::Memory<float> value(value_data, 2, value_shape, value_stride);
-    cpu::Memory<float> out(out_data, 3, out_shape, out_stride);
+    cpu::Memory<cpu::GM, float> value(value_data, 2, value_shape, value_stride);
+    cpu::Memory<cpu::GM, float> out(out_data, 3, out_shape, out_stride);
 
     cpu::img2col1d(value, out, 3, 1, 1, 1, 1);
     return 0;
@@ -843,8 +843,8 @@ int main() {
     long long out_shape[3] = {1, 4, 3};
     long long out_stride[3] = {12, 3, 1};
 
-    cpu::Memory<float> value(value_data, 4, value_shape, value_stride);
-    cpu::Memory<float> out(out_data, 3, out_shape, out_stride);
+    cpu::Memory<cpu::GM, float> value(value_data, 4, value_shape, value_stride);
+    cpu::Memory<cpu::GM, float> out(out_data, 3, out_shape, out_stride);
 
     cpu::img2col2d(value, out, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0);
     return 0;
@@ -876,8 +876,8 @@ int main() {
     long long out_shape[3] = {1, 3, 4};
     long long out_stride[3] = {99, 4, 1};
 
-    cpu::Memory<float> value(value_data, 3, value_shape, value_stride);
-    cpu::Memory<float> out(out_data, 3, out_shape, out_stride);
+    cpu::Memory<cpu::GM, float> value(value_data, 3, value_shape, value_stride);
+    cpu::Memory<cpu::GM, float> out(out_data, 3, out_shape, out_stride);
 
     cpu::img2col1d(value, out, 3, 1, 1, 1, 1);
     return 0;
@@ -935,8 +935,8 @@ int main() {
     long long shape[2] = {2, 2};
     long long stride[2] = {2, 1};
 
-    cpu::Memory<float> value(in_data, 2, shape, stride);
-    cpu::Memory<float> out(out_data, 2, shape, stride);
+    cpu::Memory<cpu::GM, float> value(in_data, 2, shape, stride);
+    cpu::Memory<cpu::GM, float> out(out_data, 2, shape, stride);
     cpu::exp(value, out);
 
     if (out.rank() != 2 || out.shape()[0] != 2 || out.shape()[1] != 2) {
@@ -980,8 +980,8 @@ int main() {
     long long in_stride[2] = {2, 1};
     long long out_stride[2] = {3, 1};
 
-    cpu::Memory<float> value(in_data, 2, shape, in_stride);
-    cpu::Memory<float> out(out_data, 2, shape, out_stride);
+    cpu::Memory<cpu::GM, float> value(in_data, 2, shape, in_stride);
+    cpu::Memory<cpu::GM, float> out(out_data, 2, shape, out_stride);
     cpu::exp(value, out);
     return 0;
 }
@@ -1022,8 +1022,8 @@ int main() {
     long long out_stride[1] = {1};
     long long axes[2] = {1, 2};
 
-    cpu::Memory<float> value(in_data, 3, in_shape, in_stride);
-    cpu::Memory<float> out(out_data, 1, out_shape, out_stride);
+    cpu::Memory<cpu::GM, float> value(in_data, 3, in_shape, in_stride);
+    cpu::Memory<cpu::GM, float> out(out_data, 1, out_shape, out_stride);
     cpu::reduce_sum(value, out, axes, 2, false);
 
     if (out_data[0] != 78.0f || out_data[1] != 222.0f) {
@@ -1059,8 +1059,8 @@ int main() {
     long long out_stride[1] = {1};
     long long axes[2] = {2, 1};
 
-    cpu::Memory<float> value(in_data, 3, in_shape, in_stride);
-    cpu::Memory<float> out(out_data, 1, out_shape, out_stride);
+    cpu::Memory<cpu::GM, float> value(in_data, 3, in_shape, in_stride);
+    cpu::Memory<cpu::GM, float> out(out_data, 1, out_shape, out_stride);
     cpu::reduce_sum(value, out, axes, 2, false);
     return 0;
 }
@@ -1101,8 +1101,8 @@ int main() {
     long long out_stride[2] = {3, 1};
     long long axes[1] = {2};
 
-    cpu::Memory<float> value(in_data, 3, in_shape, in_stride);
-    cpu::Memory<float> out(out_data, 2, out_shape, out_stride);
+    cpu::Memory<cpu::GM, float> value(in_data, 3, in_shape, in_stride);
+    cpu::Memory<cpu::GM, float> out(out_data, 2, out_shape, out_stride);
     cpu::reduce_min(value, out, axes, 1, false);
 
     float expected[6] = {1.0f, 0.0f, -1.0f, 5.0f, -2.0f, 8.0f};
@@ -1141,8 +1141,8 @@ int main() {
     long long out_stride[2] = {3, 1};
     long long axes[1] = {1};
 
-    cpu::Memory<float> value(in_data, 3, in_shape, in_stride);
-    cpu::Memory<float> out(out_data, 2, out_shape, out_stride);
+    cpu::Memory<cpu::GM, float> value(in_data, 3, in_shape, in_stride);
+    cpu::Memory<cpu::GM, float> out(out_data, 2, out_shape, out_stride);
     cpu::reduce_min(value, out, axes, 1, false);
     return 0;
 }
@@ -1176,8 +1176,8 @@ int main() {
     long long out_stride[2] = {2, 1};
     long long axes[1] = {0};
 
-    cpu::Memory<float> value(in_data, 2, in_shape, in_stride);
-    cpu::Memory<float> out(out_data, 2, out_shape, out_stride);
+    cpu::Memory<cpu::GM, float> value(in_data, 2, in_shape, in_stride);
+    cpu::Memory<cpu::GM, float> out(out_data, 2, out_shape, out_stride);
     cpu::reduce_max(value, out, axes, 1, true);
 
     if (out_data[0] != 3.0f || out_data[1] != 5.0f) {
@@ -1213,8 +1213,8 @@ int main() {
     long long out_stride[2] = {2, 1};
     long long axes[1] = {0};
 
-    cpu::Memory<float> value(in_data, 2, in_shape, in_stride);
-    cpu::Memory<float> out(out_data, 2, out_shape, out_stride);
+    cpu::Memory<cpu::GM, float> value(in_data, 2, in_shape, in_stride);
+    cpu::Memory<cpu::GM, float> out(out_data, 2, out_shape, out_stride);
     cpu::reduce_max(value, out, axes, 1, true);
     return 0;
 }
@@ -1244,8 +1244,8 @@ int main() {
     long long shape[2] = {2, 3};
     long long stride[2] = {3, 1};
 
-    cpu::Memory<float> lhs(lhs_data, 2, shape, stride);
-    cpu::Memory<float> out(out_data, 2, shape, stride);
+    cpu::Memory<cpu::GM, float> lhs(lhs_data, 2, shape, stride);
+    cpu::Memory<cpu::GM, float> out(out_data, 2, shape, stride);
 
     cpu::add(lhs, 3.0f, out);
 
@@ -1281,8 +1281,8 @@ int main() {
     long long stride[2] = {2, 1};
     long long bias = 7;
 
-    cpu::Memory<int32_t> lhs(lhs_data, 2, shape, stride);
-    cpu::Memory<int32_t> out(out_data, 2, shape, stride);
+    cpu::Memory<cpu::GM, int32_t> lhs(lhs_data, 2, shape, stride);
+    cpu::Memory<cpu::GM, int32_t> out(out_data, 2, shape, stride);
 
     cpu::add(lhs, bias, out);
 
@@ -1318,8 +1318,8 @@ int main() {
     long long shape[2] = {2, 3};
     long long stride[2] = {3, 1};
 
-    cpu::Memory<float> rhs(rhs_data, 2, shape, stride);
-    cpu::Memory<float> out(out_data, 2, shape, stride);
+    cpu::Memory<cpu::GM, float> rhs(rhs_data, 2, shape, stride);
+    cpu::Memory<cpu::GM, float> out(out_data, 2, shape, stride);
 
     cpu::add(2.0f, rhs, out);
 

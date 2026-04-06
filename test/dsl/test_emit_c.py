@@ -833,7 +833,7 @@ def test_emit_c_op_lowers_dma_alloc_and_view() -> None:
 # 对应测试文件路径: test/dsl/test_emit_c.py
 def test_emit_c_op_lowers_img2col2d_dma_loop_pipeline() -> None:
     input_memory = Memory([1, 1, 4, 4], NumericType.Float32, space=MemorySpace.GM)
-    output_memory = Memory([1, 4, 9], NumericType.Float32, space=MemorySpace.GM)
+    output_memory = Memory([1, 1, 2, 2, 3, 3], NumericType.Float32, space=MemorySpace.GM)
     input_tensor = TensorAST(name="x", memory=input_memory, location=None)
     output_tensor = TensorAST(name="y", memory=output_memory, location=None)
     start = ScalarArgAST(name="start", value_type=int, is_symbolic=True, location=None)
@@ -857,7 +857,14 @@ def test_emit_c_op_lowers_img2col2d_dma_loop_pipeline() -> None:
     )
     store_expr = StoreAST(
         tensor=output_tensor,
-        offset=[loop_var, ConstAST(0), ConstAST(0)],
+        offset=[
+            loop_var,
+            ConstAST(0),
+            ConstAST(0),
+            ConstAST(0),
+            ConstAST(0),
+            ConstAST(0),
+        ],
         stride=None,
         value=img2col_expr,
         kind="deslice",
@@ -887,7 +894,7 @@ def test_emit_c_op_lowers_img2col2d_dma_loop_pipeline() -> None:
     assert "Memory<LM, float> v1(v1_buffer, 4, v1_shape, v1_stride, MemoryFormat::Norm);" in stmt
     assert "v1.at(dma0_dst_indices) = input.at(dma0_src_indices);" in stmt
     assert "float v2_buffer[36] = {};" in stmt
-    assert "Memory<LM, float> v2(v2_buffer, 3, v2_shape, v2_stride, MemoryFormat::Norm);" in stmt
+    assert "Memory<LM, float> v2(v2_buffer, 6, v2_shape, v2_stride, MemoryFormat::Norm);" in stmt
     assert "cpu::img2col2d(v1, v2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0);" in stmt
     assert "output.at(dma1_dst_indices) = v2.at(dma1_src_indices);" in stmt
     assert "slice(" not in stmt

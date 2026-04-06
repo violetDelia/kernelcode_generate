@@ -361,7 +361,18 @@ class _KernelEmitter:
 
         if not stmt or "Memory<" not in stmt:
             return stmt
-        normalized = re.sub(r"Memory<\s*(?!MemorySpace::)([^>]+)\s*>", r"Memory<MemorySpace::GM, \1>", stmt)
+        normalized = stmt
+        normalized = re.sub(
+            r"Memory<\s*MemorySpace::(\w+)\s*,\s*(?:cpu::)?\1\s*,",
+            r"Memory<MemorySpace::\1,",
+            normalized,
+        )
+        normalized = re.sub(
+            r"Memory<\s*(?:cpu::)?(GM|TSM|TLM|LM|SM)\s*,",
+            r"Memory<MemorySpace::\1,",
+            normalized,
+        )
+        normalized = re.sub(r"Memory<\s*(?!MemorySpace::)([^>]+)\s*>", r"Memory<MemorySpace::GM, \1>", normalized)
         normalized = re.sub(r",\s*MemorySpace::GM\s*\)", ")", normalized)
         return normalized
 
