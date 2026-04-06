@@ -1,7 +1,7 @@
 """C-like fragment emission helpers for DSL lowering.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 提供单个 MLIR op/value 到 C 风格源码片段的最小生成规则。
@@ -144,11 +144,11 @@ def _type_to_c(attr: Any, ctx: EmitCContext) -> str:
     """将 xdsl/DSL 类型映射为 C 侧类型文本。
 
     创建者: 金铲铲大作战
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 在未提供 `ctx.type_converter` 时，按最小覆盖集把常用类型映射为 C/C++ 类型字符串。
-    - 当前覆盖：`i1/bool`、`i32/int32_t`、`index/long long`、`f32/float`、`!nn.memory/Memory<T>`、`!symbol.int/long long`。
+    - 当前覆盖：`i1/bool`、`i32/int32_t`、`index/long long`、`f32/float`、`!nn.memory/Memory<Space, T>`、`!symbol.int/long long`。
     - 对于未知类型必须抛错，避免静默生成不可编译或语义错误的代码。
 
     使用示例:
@@ -176,7 +176,8 @@ def _type_to_c(attr: Any, ctx: EmitCContext) -> str:
     if isinstance(attr, IndexType):
         return "long long"
     if isinstance(attr, NnMemoryType):
-        return f"Memory<{_type_to_c(attr.element_type, ctx)}>"
+        space_param = _space_to_c(attr, ctx)
+        return f"Memory<{space_param}, {_type_to_c(attr.element_type, ctx)}>"
     if isinstance(attr, SymbolValueType):
         return "long long"
     raise _emit_error(ctx, f"type {attr}", "unsupported type")
@@ -228,17 +229,17 @@ def _format_indices(indices: tuple[SSAValue, ...], ctx: EmitCContext) -> str:
 
 
 def _space_to_c(memory_type: NnMemoryType, ctx: EmitCContext) -> str:
-    """把 nn.memory 的 space 映射为 CPU `MemorySpace::...` 枚举。
+    """把 nn.memory 的 space 映射为 `Memory<Space, T>` 模板参数。
 
     创建者: 小李飞刀
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 将 `#nn.space<global/shared/local/tsm/tlm>` 映射为对应的 `MemorySpace::GM/SM/LM/TSM/TLM`。
-    - 用于 `dma.alloc`/`dma.view`/`nn.img2col2d` 等内存视图声明时的 space 生成。
+    - 将 `#nn.space<global/shared/local/tsm/tlm>` 映射为对应的模板参数 `GM/SM/LM/TSM/TLM`。
+    - 用于 `dma.alloc`/`dma.view`/`nn.img2col2d` 等内存视图声明时的模板参数生成。
 
     使用示例:
-    - _space_to_c(memory_type, EmitCContext(target=\"cpu\")) == \"MemorySpace::GM\"
+    - _space_to_c(memory_type, EmitCContext(target=\"cpu\")) == \"GM\"
 
     关联文件:
     - spec: spec/dsl/emit_c.md
@@ -247,11 +248,11 @@ def _space_to_c(memory_type: NnMemoryType, ctx: EmitCContext) -> str:
     """
 
     mapping = {
-        "global": "MemorySpace::GM",
-        "shared": "MemorySpace::SM",
-        "local": "MemorySpace::LM",
-        "tsm": "MemorySpace::TSM",
-        "tlm": "MemorySpace::TLM",
+        "global": "GM",
+        "shared": "SM",
+        "local": "LM",
+        "tsm": "TSM",
+        "tlm": "TLM",
     }
     space_name = memory_type.space.space.data
     mapped = mapping.get(space_name)
@@ -261,17 +262,17 @@ def _space_to_c(memory_type: NnMemoryType, ctx: EmitCContext) -> str:
 
 
 def _space_name_to_c(space_name: str, ctx: EmitCContext) -> str:
-    """把 space 名称映射为 C 侧 `MemorySpace::...` 文本。
+    """把 space 名称映射为模板参数 `GM/SM/LM/TSM/TLM` 文本。
 
     创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 统一处理 `global/shared/local/tsm/tlm` 到 `MemorySpace::GM/SM/LM/TSM/TLM` 的映射。
-    - 供 `npu_demo` 的 `arch.get_dynamic_memory` 文本发射复用。
+    - 统一处理 `global/shared/local/tsm/tlm` 到 `GM/SM/LM/TSM/TLM` 的映射。
+    - 供 `npu_demo` 的 `arch.get_dynamic_memory` 模板参数发射复用。
 
     使用示例:
-    - _space_name_to_c("tsm", EmitCContext(target="npu_demo")) == "MemorySpace::TSM"
+    - _space_name_to_c("tsm", EmitCContext(target="npu_demo")) == "TSM"
 
     关联文件:
     - spec: spec/dsl/emit_c.md
@@ -280,11 +281,11 @@ def _space_name_to_c(space_name: str, ctx: EmitCContext) -> str:
     """
 
     mapping = {
-        "global": "MemorySpace::GM",
-        "shared": "MemorySpace::SM",
-        "local": "MemorySpace::LM",
-        "tsm": "MemorySpace::TSM",
-        "tlm": "MemorySpace::TLM",
+        "global": "GM",
+        "shared": "SM",
+        "local": "LM",
+        "tsm": "TSM",
+        "tlm": "TLM",
     }
     mapped = mapping.get(space_name)
     if mapped is None:
@@ -400,10 +401,10 @@ def _emit_backing_storage_decl(
     memory_type: NnMemoryType,
     ctx: EmitCContext,
 ) -> tuple[list[str], str]:
-    """为 `Memory<T>` 声明生成 backing storage（buffer）声明语句。
+    """为 `Memory<Space, T>` 声明生成 backing storage（buffer）声明语句。
 
     创建者: 小李飞刀
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 当前阶段仅支持静态 shape（type.shape 全为 `IntAttr`）：
@@ -439,14 +440,14 @@ def _emit_memory_decl(
     space_expr: str | None = None,
     with_backing_storage: bool = False,
 ) -> str:
-    """发射 `Memory<T>` 声明语句（含 shape/stride 缓冲区与可选 backing）。
+    """发射 `Memory<Space, T>` 声明语句（含 shape/stride 缓冲区与可选 backing）。
 
     创建者: 小李飞刀
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 生成 `shape/stride` 的 `long long[]` 声明。
-    - 生成 `Memory<T> name(data, rank, shape, stride, format, space);` 声明。
+    - 生成 `Memory<Space, T> name(data, rank, shape, stride, format);` 声明。
     - 当 `with_backing_storage=True` 时，为静态 shape 生成 `name_buffer[numel]` 作为 backing，并把 `data` 指向该 buffer。
 
     使用示例:
@@ -478,9 +479,9 @@ def _emit_memory_decl(
         _emit_long_long_buffer(f"{name}_stride", stride_values, ctx),
         *storage_lines,
         (
-            f"{ctx.current_indent}Memory<{element_type}> {name}"
+            f"{ctx.current_indent}Memory<{space_expr}, {element_type}> {name}"
             f"({data_expr}, {len(shape_values)}, {name}_shape, {name}_stride, "
-            f"{format_expr}, {space_expr});"
+            f"{format_expr});"
         ),
     ]
     return "\n".join(lines)
@@ -510,13 +511,13 @@ def _emit_dma_store_stmt(op: DmaStoreOp, ctx: EmitCContext) -> str:
 
 
 def _emit_dma_alloc_stmt(op: DmaAllocOp, ctx: EmitCContext) -> str:
-    """生成 `dma.alloc` 的 CPU 侧 `Memory<T>` 声明片段。
+    """生成 `dma.alloc` 的 CPU 侧 `Memory<Space, T>` 声明片段。
 
     创建者: 小李飞刀
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 在 `target=cpu` 下为 `dma.alloc` 结果发射 `shape/stride` 缓冲区与 `Memory<T>` 声明。
+    - 在 `target=cpu` 下为 `dma.alloc` 结果发射 `shape/stride` 缓冲区与 `Memory<Space, T>` 声明。
     - 当前阶段必须生成有效 backing storage（静态 shape 为栈上数组）。
     - 若结果 type.shape 包含符号维度，必须报错（避免 dynamic backing 生命周期不明确）。
 
@@ -545,11 +546,11 @@ def _emit_dma_fill_stmt(op: DmaFillOp, ctx: EmitCContext) -> str:
     """生成 `dma.fill` 的 CPU 侧填充循环片段。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 在 `target=cpu` 下把 `dma.fill(target, value)` 发射为对 backing storage 的显式线性填充循环。
-    - 当前按 `Memory<T>::element_count()` 与 `data()` 遍历，覆盖 pass 生成的 contiguous temporary memory 子集。
+    - 当前按 `Memory<Space, T>::element_count()` 与 `data()` 遍历，覆盖 pass 生成的 contiguous temporary memory 子集。
 
     使用示例:
     - stmt = emit_c_op(fill_op, EmitCContext(target=\"cpu\"))
@@ -577,13 +578,13 @@ def _emit_dma_view_stmt(op: DmaViewOp, ctx: EmitCContext) -> str:
     """生成 `dma.view` 的 CPU 侧 memory 视图声明片段。
 
     创建者: 小李飞刀
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 在 `target=cpu` 下基于源 `Memory<T>` 生成子视图：
+    - 在 `target=cpu` 下基于源 `Memory<Space, T>` 生成子视图：
       - 发射 offset 计算（以源 stride 为单位）。
-      - 发射目标 `shape/stride` 缓冲区与 `Memory<T>` 视图声明。
-    - 目标视图复用源 memory 的 `format/space`。
+      - 发射目标 `shape/stride` 缓冲区与 `Memory<Space, T>` 视图声明。
+    - 目标视图复用源 memory 的 `format`。
 
     使用示例:
     - stmt = emit_c_op(view_op, EmitCContext(target=\"cpu\"))
@@ -614,7 +615,6 @@ def _emit_dma_view_stmt(op: DmaViewOp, ctx: EmitCContext) -> str:
         stride_values=stride_values,
         data_expr=f"const_cast<{_type_to_c(result_type.element_type, ctx)}*>({source_expr}.data()) + {base_offset_name}",
         format_expr=f"{source_expr}.format()",
-        space_expr=f"{source_expr}.space()",
     )
     return f"{ctx.current_indent}long long {base_offset_name} = {base_offset_expr};\n{decl}"
 
@@ -757,11 +757,11 @@ def _emit_img2col2d_stmt(op: NnImg2col2dOp, ctx: EmitCContext) -> str:
     """生成 `nn.img2col2d` 的 CPU 侧调用片段。
 
     创建者: 小李飞刀
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 在 `target=cpu` 下生成：
-      1) 输出 `Memory<float>` 的声明（含 backing storage）。
+      1) 输出 `Memory<Space, float>` 的声明（含 backing storage）。
       2) `cpu::img2col2d(input, out, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr);` 调用。
 
     使用示例:
@@ -937,10 +937,10 @@ def _emit_npu_dynamic_memory_stmt(op: ArchGetDynamicMemoryOp, ctx: EmitCContext)
     """生成 `target=npu_demo` 下 dynamic memory 查询的赋值语句。
 
     创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 把 `arch.get_dynamic_memory` 发射为 `ctx.get_dynamic_memory<T>(MemorySpace::TSM/TLM)`。
+    - 把 `arch.get_dynamic_memory` 发射为 `ctx.get_dynamic_memory<TSM/TLM, T>()`。
     - 结果名可预绑定，但右值必须始终来自真实 helper 调用。
 
     使用示例:
@@ -955,11 +955,11 @@ def _emit_npu_dynamic_memory_stmt(op: ArchGetDynamicMemoryOp, ctx: EmitCContext)
     result_name = ctx.allocate_name(op.result)
     element_type = _type_to_c(op.result.type.element_type, ctx)
     space_expr = _space_name_to_c(op.memory_space.space.data, ctx)
-    if space_expr not in {"MemorySpace::TSM", "MemorySpace::TLM"}:
+    if space_expr not in {"TSM", "TLM"}:
         raise _emit_error(ctx, op.name, "unsupported dynamic memory space")
     return (
-        f"{ctx.current_indent}Memory<{element_type}> {result_name} = "
-        f"ctx.get_dynamic_memory<{element_type}>({space_expr});"
+        f"{ctx.current_indent}Memory<{space_expr}, {element_type}> {result_name} = "
+        f"ctx.get_dynamic_memory<{space_expr}, {element_type}>();"
     )
 
 
@@ -1061,7 +1061,7 @@ def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
     """把 SSA value 生成为可嵌入右值位置的表达式文本。
 
     创建者: 金铲铲大作战
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 负责把常量、二元算术、比较、unit-tile `dma.load`、`symbol.add`（cpu）以及 `symbol.get_dim` 结果转换为右值表达式。
@@ -1092,9 +1092,9 @@ def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
         if isinstance(owner, ArchGetDynamicMemoryOp):
             element_type = _type_to_c(owner.result.type.element_type, ctx)
             space_expr = _space_name_to_c(owner.memory_space.space.data, ctx)
-            if space_expr not in {"MemorySpace::TSM", "MemorySpace::TLM"}:
+            if space_expr not in {"TSM", "TLM"}:
                 raise _emit_error(ctx, owner.name, "unsupported dynamic memory space")
-            return f"ctx.get_dynamic_memory<{element_type}>({space_expr})"
+            return f"ctx.get_dynamic_memory<{space_expr}, {element_type}>()"
     if owner.name in _BINARY_SIGILS:
         if owner.name == "symbol.add" and ctx.target != "cpu":
             raise _emit_error(ctx, owner.name, "symbol scalar ops are cpu-only")

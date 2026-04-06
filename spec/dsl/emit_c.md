@@ -10,7 +10,7 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`jcc你莫辜负`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/dsl/emit_c.md`](../../spec/dsl/emit_c.md)
 - `功能实现`：[`kernel_gen/dsl/emit_c.py`](../../kernel_gen/dsl/emit_c.py)
 - `test`：[`test/dsl/test_emit_c.py`](../../test/dsl/test_emit_c.py)
@@ -120,8 +120,8 @@ cpu::add(lhs, bias, out);
 
 - `target=cpu` 下 `nn.add` 不得在本层偷偷声明临时 `Memory v0` 承接结果，也不得生成 `out = v0` 之类的二次收口语句。
 - `non-cpu target` 下 `nn.add` 必须报错 `unsupported op`。
-- `target=cpu` 下 `dma.alloc` 必须生成 `shape/stride` 数组与 `Memory<T>` 声明；并为静态 shape 生成 backing buffer。
-- `target=cpu` 下 `dma.view` 必须生成 `offset` 计算，并生成基于源 memory 的视图声明（复用 format/space）。
+- `target=cpu` 下 `dma.alloc` 必须生成 `shape/stride` 数组与 `Memory<Space, T>` 声明；并为静态 shape 生成 backing buffer。
+- `target=cpu` 下 `dma.view` 必须生成 `offset` 计算，并生成基于源 memory 的视图声明（复用 format）。
 - `target=cpu` 下 `dma.slice`/`dma.deslice` 必须发射显式 loop nest copy，避免依赖外部 helper。
 - `target=cpu` 下 `nn.img2col2d` 必须声明输出 memory（含 backing storage）并发射 `cpu::img2col2d(...)` 调用。
 
@@ -170,7 +170,7 @@ expr = emit_c_value(value, EmitCContext(target="cpu"))
 ### 适用范围
 
 - 以下规则仅适用于 `target=cpu`，且只定义单个 op 在函数体中的节点级语句/语句块形态。
-- 本层只负责 tile-local `Memory<T>` 声明、memory 视图重解释、显式 copy loop、`cpu::img2col2d(...)` 调用与局部计算节点本身。
+- 本层只负责 tile-local `Memory<Space, T>` 声明、memory 视图重解释、显式 copy loop、`cpu::img2col2d(...)` 调用与局部计算节点本身。
 - 本层不负责固定 tile 常量、外层分块循环、完整函数签名或最终写回 `out` 的整体骨架；这些由 [`spec/dsl/gen_kernel.md`](../../spec/dsl/gen_kernel.md) 负责。
 - 本层不得通过 `kernel dialect` / `nn_to_kernel` 中转补语义，也不得引入新的 `slice(...)` / `deslice(...)` helper API。
 
@@ -178,7 +178,7 @@ expr = emit_c_value(value, EmitCContext(target="cpu"))
 
 功能说明：
 
-- 为 tile-local buffer 或其他局部 `nn.memory` 结果生成独立的 `shape/stride` 数组、backing storage 与 `Memory<T>` 声明。
+- 为 tile-local buffer 或其他局部 `nn.memory` 结果生成独立的 `shape/stride` 数组、backing storage 与 `Memory<Space, T>` 声明。
 
 使用示例：
 
@@ -186,20 +186,20 @@ expr = emit_c_value(value, EmitCContext(target="cpu"))
 long long col_tile_shape[3] = {1, 4, 9};
 long long col_tile_stride[3] = {36, 9, 1};
 float col_tile_buffer[36] = {};
-Memory<float> col_tile(col_tile_buffer, 3, col_tile_shape, col_tile_stride, MemoryFormat::Norm, MemorySpace::LM);
+Memory<LM, float> col_tile(col_tile_buffer, 3, col_tile_shape, col_tile_stride, MemoryFormat::Norm);
 ```
 
 注意事项：
 
 - 发射结果必须是可直接被后续 `nn.img2col2d`、局部计算或 `dma.deslice` 消费的节点级语句，不能把 `alloc` 延后到 `gen_kernel` 再决定。
 - 静态 shape 必须生成有效 backing storage；当前不支持动态 shape backing，遇到动态 shape 必须报错。
-- `Memory<T>` 的 `format/space` 取自结果 type，不在本层额外发明 CPU 专用旁路对象。
+- `Memory<Space, T>` 的 `format` 取自结果 type，`Space` 来自 `nn.space` 模板参数，不在本层额外发明 CPU 专用旁路对象。
 
 ### `dma.view`
 
 功能说明：
 
-- 基于源 `Memory<T>` 发射偏移计算与子视图声明，用于把已有 memory 重新解释为新的 shape/stride 视图。
+- 基于源 `Memory<Space, T>` 发射偏移计算与子视图声明，用于把已有 memory 重新解释为新的 shape/stride 视图。
 
 使用示例：
 
@@ -207,12 +207,12 @@ Memory<float> col_tile(col_tile_buffer, 3, col_tile_shape, col_tile_stride, Memo
 long long view_offset0 = (0 * source.stride()[0]) + (0 * source.stride()[1]);
 long long v0_shape[2] = {2, 2};
 long long v0_stride[2] = {1, 1};
-Memory<float> v0(const_cast<float*>(source.data()) + view_offset0, 2, v0_shape, v0_stride, source.format(), source.space());
+Memory<GM, float> v0(const_cast<float*>(source.data()) + view_offset0, 2, v0_shape, v0_stride, source.format());
 ```
 
 注意事项：
 
-- `offset` 必须按源 memory 的 `stride()` 计算；目标视图复用源 memory 的 `format()` 与 `space()`。
+- `offset` 必须按源 memory 的 `stride()` 计算；目标视图复用源 memory 的 `format()`。
 - `dma.view` 只负责节点级视图表达，不额外分配 backing storage，也不决定该视图是否最终对应 `out` 或 tile-local buffer。
 
 ### `dma.slice` / `dma.deslice`
@@ -243,7 +243,7 @@ for (long long dma0_i0 = 0; dma0_i0 < 1; ++dma0_i0) {
 
 功能说明：
 
-- 发射 `nn.img2col2d` 的 CPU 节点级文本：先声明结果 `Memory<T>`（含 backing storage），再发出 `cpu::img2col2d(...)` 调用。
+- 发射 `nn.img2col2d` 的 CPU 节点级文本：先声明结果 `Memory<Space, T>`（含 backing storage），再发出 `cpu::img2col2d(...)` 调用。
 
 使用示例：
 
@@ -251,14 +251,14 @@ for (long long dma0_i0 = 0; dma0_i0 < 1; ++dma0_i0) {
 long long col_tile_shape[3] = {1, 4, 9};
 long long col_tile_stride[3] = {36, 9, 1};
 float col_tile_buffer[36] = {};
-Memory<float> col_tile(col_tile_buffer, 3, col_tile_shape, col_tile_stride, MemoryFormat::Norm, MemorySpace::LM);
+Memory<LM, float> col_tile(col_tile_buffer, 3, col_tile_shape, col_tile_stride, MemoryFormat::Norm);
 cpu::img2col2d(input_tile, col_tile, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr);
 ```
 
 注意事项：
 
 - 目标调用语句必须收敛为接近 `cpu::img2col2d(input_tile, col_tile, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr);` 的形态。
-- `input_tile` 与 `col_tile` 都是节点级 `Memory<T>` 引用；`col_tile` 可来自前序 `dma.alloc`，不得在本层改写为其他 helper 或 `kernel dialect` 中转。
+- `input_tile` 与 `col_tile` 都是节点级 `Memory<Space, T>` 引用；`col_tile` 可来自前序 `dma.alloc`，不得在本层改写为其他 helper 或 `kernel dialect` 中转。
 - `nn.img2col2d` 只负责当前节点的 tile-local 展开语句，不负责固定 tile 常量、外层分块循环或最终 `out` 写回。
 
 ## npu_demo 节点级发射规则
@@ -266,7 +266,7 @@ cpu::img2col2d(input_tile, col_tile, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr);
 ### 适用范围
 
 - 以下规则仅适用于 `target=npu_demo`，且只定义单个查询/访存/算子节点如何发成 body-level kernel 内部的局部文本片段。
-- 本层不声明 `npu_demo::KernelContext` 局部变量，也不定义完整函数签名；上层 `gen_kernel` 必须提供已绑定的上下文变量名 `ctx`，本层只负责引用 `ctx.thread_id()`、`ctx.thread_num()` 与 `ctx.get_dynamic_memory<T>(...)`。
+- 本层不声明 `npu_demo::KernelContext` 局部变量，也不定义完整函数签名；上层 `gen_kernel` 必须提供已绑定的上下文变量名 `ctx`，本层只负责引用 `ctx.thread_id()`、`ctx.thread_num()` 与 `ctx.get_dynamic_memory<Space, T>()`。
 - 本层当前只收口 `thread_id/thread_num` 查询、`TSM/TLM` dynamic memory、`view`、目标式 `slice`、`deslice` 与 `add`。
 - 本层不得回退到 CPU 风格 `.view<T>()`、`load<...>`、`store<...>`、显式 loop nest copy、`launch`、`barrier` 或 `arch.launch_kernel`。
 
@@ -292,19 +292,19 @@ long long tnum = ctx.thread_num();
 
 功能说明：
 
-- 当节点表示 `npu_demo` 的 dynamic memory 查询时，必须发射为 `ctx.get_dynamic_memory<T>(MemorySpace::<space>)`。
+- 当节点表示 `npu_demo` 的 dynamic memory 查询时，必须发射为 `ctx.get_dynamic_memory<Space, T>()`。
 
 使用示例：
 
 ```cpp
-auto tsm = ctx.get_dynamic_memory<float>(MemorySpace::TSM);
-auto tlm = ctx.get_dynamic_memory<float>(MemorySpace::TLM);
+auto tsm = ctx.get_dynamic_memory<TSM, float>();
+auto tlm = ctx.get_dynamic_memory<TLM, float>();
 ```
 
 注意事项：
 
-- 当前 `npu_demo` 成功路径只承认 `MemorySpace::TSM` 与 `MemorySpace::TLM`。
-- 元素类型模板参数 `T` 取自结果 `Memory<T>` 的 element type，不得退回到字节级 `load/store` 组合。
+- 当前 `npu_demo` 成功路径只承认 `TSM` 与 `TLM`。
+- 元素类型模板参数 `T` 取自结果 `Memory<Space, T>` 的 element type，不得退回到字节级 `load/store` 组合。
 - 不得把 `TSM/TLM` dynamic memory 发射成 `malloc(...)`、`load<...>`、`store<...>` 或其他 CPU 旁路文本。
 
 ### `dma.view`
@@ -323,7 +323,7 @@ auto work_tile = view(tsm, 0, 16, 1);
 注意事项：
 
 - `view(...)` 的参数顺序必须保持 `source -> offset -> size -> stride`。
-- 不得发射为 `source.view<float>(...)`、手写 `Memory<T>` 构造旁路或 `load/store` 组合。
+- 不得发射为 `source.view<float>(...)`、手写 `Memory<Space, T>` 构造旁路或 `load/store` 组合。
 
 ### `dma.slice`
 

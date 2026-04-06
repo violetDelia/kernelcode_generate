@@ -1,7 +1,7 @@
 """emit_c tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 emit_c 节点级源码片段生成与错误路径。
@@ -221,7 +221,7 @@ def test_emit_c_op_lowers_arith_add() -> None:
 
 # EC-002
 # 创建者: 金铲铲大作战
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-01 10:43:06 +0800
 # 最近一次运行成功时间: 2026-04-01 10:43:06 +0800
 # 功能说明: 验证比较 value 可生成比较表达式。
@@ -288,7 +288,7 @@ def test_emit_c_value_unbound_block_argument_uses_index() -> None:
 
 # EC-003
 # 创建者: 金铲铲大作战
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-23 22:45:14 +0800
 # 最近一次运行成功时间: 2026-03-23 22:45:14 +0800
 # 功能说明: 验证 scf.for 可生成目标循环结构。
@@ -476,7 +476,7 @@ def test_emit_c_value_rejects_invalid_dependency() -> None:
 
 # EC-007
 # 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-28 07:20:00 +0800
 # 最近一次运行成功时间: 2026-03-28 07:20:00 +0800
 # 功能说明: 验证 symbol.add 在 cpu target 下可生成标量表达式与赋值语句。
@@ -649,16 +649,16 @@ def test_emit_c_op_keeps_nn_add_unsupported_without_prebound_result_or_on_non_cp
 
 # EC-I3-001
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-02 20:39:00 +0800
 # 最近一次运行成功时间: 2026-04-02 20:39:00 +0800
 # 功能说明: 验证 emit_c 可消费 pass 后 `symbol.get_dim + dma.alloc + kernel.add` 的 memory+memory lowered IR。
 # 测试目的: 锁定 CPU emitter 不再卡在 `symbol.get_dim: unsupported op`，且 `kernel.add` 会收口为 `cpu::add(...)`。
-# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_op_lowers_passed_memory_add_pipeline
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_memory_space_template_alloc
 # 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
 # 对应 spec 文件路径: spec/dsl/emit_c.md
 # 对应测试文件路径: test/dsl/test_emit_c.py
-def test_emit_c_op_lowers_passed_memory_add_pipeline() -> None:
+def test_emit_c_memory_space_template_alloc() -> None:
     mem = _make_memory_type([2, 2], [2, 1])
     space = NnMemorySpaceAttr.from_name("global")
     block = _lower_single_op_func(
@@ -684,7 +684,7 @@ def test_emit_c_op_lowers_passed_memory_add_pipeline() -> None:
         "long long v0_shape[2] = {lhs.shape()[0], lhs.shape()[1]};\n"
         "long long v0_stride[2] = {2, 1};\n"
         "int32_t v0_buffer[4] = {};\n"
-        "Memory<int32_t> v0(v0_buffer, 2, v0_shape, v0_stride, MemoryFormat::Norm, MemorySpace::GM);"
+        "Memory<GM, int32_t> v0(v0_buffer, 2, v0_shape, v0_stride, MemoryFormat::Norm);"
     )
     assert emit_c_op(add, ctx) == "cpu::add(lhs, rhs, v0);"
 
@@ -756,7 +756,7 @@ def test_emit_c_op_lowers_passed_mixed_add_pipeline_with_dma_fill() -> None:
 
 # EC-009
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-01 10:43:06 +0800
 # 最近一次运行成功时间: 2026-04-01 10:43:06 +0800
 # 功能说明: 验证 emit_c 可生成 dma.alloc/dma.view 的最小 CPU 文本片段。
@@ -775,7 +775,7 @@ def test_emit_c_op_lowers_dma_alloc_and_view() -> None:
         "long long v0_shape[2] = {2, 3};\n"
         "long long v0_stride[2] = {3, 1};\n"
         "float v0_buffer[6] = {};\n"
-        "Memory<float> v0(v0_buffer, 2, v0_shape, v0_stride, MemoryFormat::Norm, MemorySpace::SM);"
+        "Memory<SM, float> v0(v0_buffer, 2, v0_shape, v0_stride, MemoryFormat::Norm);"
     )
 
     dyn_shape0 = SymbolValueType.from_expr("N")
@@ -816,13 +816,13 @@ def test_emit_c_op_lowers_dma_alloc_and_view() -> None:
         "long long view_offset0 = (0 * source.stride()[0]) + (0 * source.stride()[1]);\n"
         "long long v0_shape[2] = {2, 2};\n"
         "long long v0_stride[2] = {1, 1};\n"
-        "Memory<float> v0(const_cast<float*>(source.data()) + view_offset0, 2, v0_shape, v0_stride, source.format(), source.space());"
+        "Memory<GM, float> v0(const_cast<float*>(source.data()) + view_offset0, 2, v0_shape, v0_stride, source.format());"
     )
 
 
 # EC-010
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-01 10:43:06 +0800
 # 最近一次运行成功时间: 2026-04-01 10:43:06 +0800
 # 功能说明: 验证 emit_c 可生成 symbol.for + dma.alloc + dma.slice + nn.img2col2d + dma.deslice 的真实链路片段。
@@ -884,10 +884,10 @@ def test_emit_c_op_lowers_img2col2d_dma_loop_pipeline() -> None:
 
     assert "for (long long i0 = start; i0 < end; i0 += step) {" in stmt
     assert "float v1_buffer[16] = {};" in stmt
-    assert "Memory<float> v1(v1_buffer, 4, v1_shape, v1_stride, MemoryFormat::Norm, MemorySpace::LM);" in stmt
+    assert "Memory<LM, float> v1(v1_buffer, 4, v1_shape, v1_stride, MemoryFormat::Norm);" in stmt
     assert "v1.at(dma0_dst_indices) = input.at(dma0_src_indices);" in stmt
     assert "float v2_buffer[36] = {};" in stmt
-    assert "Memory<float> v2(v2_buffer, 3, v2_shape, v2_stride, MemoryFormat::Norm, MemorySpace::LM);" in stmt
+    assert "Memory<LM, float> v2(v2_buffer, 3, v2_shape, v2_stride, MemoryFormat::Norm);" in stmt
     assert "cpu::img2col2d(v1, v2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0);" in stmt
     assert "output.at(dma1_dst_indices) = v2.at(dma1_src_indices);" in stmt
     assert "slice(" not in stmt
@@ -961,7 +961,7 @@ def test_emit_c_op_assigns_unique_helper_names_for_repeated_dma_slice_and_deslic
 
 # EC-017
 # 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-02 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-02 00:00:00 +0800
 # 功能说明: 验证 npu_demo 下 thread 查询节点发射为 ctx.thread_id/thread_num。
@@ -988,16 +988,16 @@ def test_emit_c_lowers_npu_demo_kernel_context_queries() -> None:
 
 # EC-018
 # 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-02 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-02 00:00:00 +0800
-# 功能说明: 验证 npu_demo 下 dynamic memory 查询发射为 ctx.get_dynamic_memory<T>(MemorySpace::TSM/TLM)。
+# 功能说明: 验证 npu_demo 下 dynamic memory 查询发射为 ctx.get_dynamic_memory<TSM/TLM, T>()。
 # 测试目的: 锁定 target=npu_demo 的 TSM/TLM 动态片上内存入口文本，避免回退到 load/store/malloc。
-# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_lowers_npu_demo_dynamic_memory_access
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_maps_nn_space_to_template_param
 # 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
 # 对应 spec 文件路径: spec/dsl/emit_c.md
 # 对应测试文件路径: test/dsl/test_emit_c.py
-def test_emit_c_lowers_npu_demo_dynamic_memory_access() -> None:
+def test_emit_c_maps_nn_space_to_template_param() -> None:
     ctx = _npu_ctx()
     tsm_type = _make_memory_type([16], [1], space="tsm", element_type=f32)
     tlm_type = _make_memory_type([16], [1], space="tlm", element_type=f32)
@@ -1009,15 +1009,15 @@ def test_emit_c_lowers_npu_demo_dynamic_memory_access() -> None:
     tsm_stmt = emit_c_op(tsm, ctx)
     tlm_stmt = emit_c_op(tlm, ctx)
 
-    assert tsm_stmt == "Memory<float> tsm = ctx.get_dynamic_memory<float>(MemorySpace::TSM);"
-    assert tlm_stmt == "Memory<float> tlm = ctx.get_dynamic_memory<float>(MemorySpace::TLM);"
+    assert tsm_stmt == "Memory<TSM, float> tsm = ctx.get_dynamic_memory<TSM, float>();"
+    assert tlm_stmt == "Memory<TLM, float> tlm = ctx.get_dynamic_memory<TLM, float>();"
     assert "load<" not in tsm_stmt
     assert "store<" not in tlm_stmt
 
 
 # EC-019
 # 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-02 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-02 00:00:00 +0800
 # 功能说明: 验证 npu_demo 下 view/slice/deslice/add 管线可发射稳定节点级文本。
@@ -1075,8 +1075,8 @@ def test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline() -> None:
 
     assert "long long tid = ctx.thread_id();" in stmt
     assert "long long tnum = ctx.thread_num();" in stmt
-    assert "Memory<float> tsm = ctx.get_dynamic_memory<float>(MemorySpace::TSM);" in stmt
-    assert "Memory<float> tlm = ctx.get_dynamic_memory<float>(MemorySpace::TLM);" in stmt
+    assert "Memory<TSM, float> tsm = ctx.get_dynamic_memory<TSM, float>();" in stmt
+    assert "Memory<TLM, float> tlm = ctx.get_dynamic_memory<TLM, float>();" in stmt
     assert "auto src_view = view(source, tid, 16, 1);" in stmt
     assert "auto work_tile = view(tsm, 0, 16, 1);" in stmt
     assert "auto out_tile = view(tlm, 0, 16, 1);" in stmt
