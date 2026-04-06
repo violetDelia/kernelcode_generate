@@ -530,7 +530,7 @@ def _emit_dma_alloc_stmt(op: DmaAllocOp, ctx: EmitCContext) -> str:
     - 功能实现: kernel_gen/dsl/emit_c.py
     """
 
-    if ctx.target != "cpu":
+    if ctx.target not in {"cpu", "npu_demo"}:
         raise _emit_error(ctx, op.name, "dma ops are cpu-only")
     result_name = ctx.allocate_name(op.result)
     result_type = op.result.type
@@ -561,7 +561,7 @@ def _emit_dma_fill_stmt(op: DmaFillOp, ctx: EmitCContext) -> str:
     - 功能实现: kernel_gen/dsl/emit_c.py
     """
 
-    if ctx.target != "cpu":
+    if ctx.target not in {"cpu", "npu_demo"}:
         raise _emit_error(ctx, op.name, "dma ops are cpu-only")
     target_expr = _memory_base_name(op.target, ctx)
     value_expr = emit_c_value(op.value, ctx)
@@ -875,6 +875,35 @@ def _emit_kernel_add_stmt(op: KernelAddOp, ctx: EmitCContext) -> str:
     rhs_expr = _memory_base_name(op.rhs, ctx)
     out_expr = _memory_base_name(op.out, ctx)
     return f"{ctx.current_indent}cpu::add({lhs_expr}, {rhs_expr}, {out_expr});"
+
+
+def _emit_npu_kernel_add_stmt(op: KernelAddOp, ctx: EmitCContext) -> str:
+    """生成 `target=npu_demo` 下 `kernel.add` 的 `npu_demo::add(...)` 调用片段。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 把 lowered `kernel.add(lhs, rhs, out)` 发射为 `npu_demo::add(lhs, rhs, out);`。
+    - 仅接受 memory-to-memory 形式。
+
+    使用示例:
+    - stmt = emit_c_op(kernel_add_op, EmitCContext(target="npu_demo"))
+
+    关联文件:
+    - spec: spec/dsl/emit_c.md
+    - test: test/dsl/test_emit_c.py
+    - 功能实现: kernel_gen/dsl/emit_c.py
+    """
+
+    if ctx.target != "npu_demo":
+        raise _emit_error(ctx, op.name, "unsupported op")
+    if not isinstance(op.lhs.type, NnMemoryType) or not isinstance(op.rhs.type, NnMemoryType) or not isinstance(op.out.type, NnMemoryType):
+        raise _emit_error(ctx, op.name, "unsupported op")
+    lhs_expr = _memory_base_name(op.lhs, ctx)
+    rhs_expr = _memory_base_name(op.rhs, ctx)
+    out_expr = _memory_base_name(op.out, ctx)
+    return f"{ctx.current_indent}npu_demo::add({lhs_expr}, {rhs_expr}, {out_expr});"
 
 
 def _emit_npu_view_stmt(op: DmaViewOp, ctx: EmitCContext) -> str:
@@ -1228,12 +1257,20 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
             return _emit_npu_query_stmt(op, ctx)
         if isinstance(op, ArchGetDynamicMemoryOp):
             return _emit_npu_dynamic_memory_stmt(op, ctx)
+        if isinstance(op, SymbolGetDimOp):
+            return ""
+        if isinstance(op, DmaAllocOp):
+            return _emit_dma_alloc_stmt(op, ctx)
+        if isinstance(op, DmaFillOp):
+            return _emit_dma_fill_stmt(op, ctx)
         if isinstance(op, DmaViewOp):
             return _emit_npu_view_stmt(op, ctx)
         if isinstance(op, DmaSliceOp):
             return _emit_npu_slice_stmt(op, ctx)
         if isinstance(op, DmaDesliceOp):
             return _emit_npu_deslice_stmt(op, ctx)
+        if isinstance(op, KernelAddOp):
+            return _emit_npu_kernel_add_stmt(op, ctx)
         if isinstance(op, NnAddOp):
             return _emit_npu_add_stmt(op, ctx)
         raise _emit_error(ctx, op.name, "unsupported op")

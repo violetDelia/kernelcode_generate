@@ -216,6 +216,48 @@ def _memory_space_to_c(space_attr: NnMemorySpaceAttr) -> str:
     return mapping[space]
 
 
+def _memory_space_to_c_for_target(space_attr: NnMemorySpaceAttr, target: str) -> str:
+    """将 `nn.space` 映射为目标侧的模板参数文本。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - `target=npu_demo` 时输出 `GM/SM/LM/TSM/TLM`，匹配 npu_demo helper 口径。
+    - 其他 target 维持 `MemorySpace::GM/SM/LM/TSM/TLM` 形式。
+    - 非法 space 必须显式失败。
+
+    使用示例:
+    - _memory_space_to_c_for_target(NnMemorySpaceAttr.from_name("global"), "npu_demo") == "GM"
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: kernel_gen/dsl/gen_kernel.py
+    """
+
+    space = space_attr.space.data
+    if target == "npu_demo":
+        mapping = {
+            "global": "GM",
+            "shared": "SM",
+            "local": "LM",
+            "tsm": "TSM",
+            "tlm": "TLM",
+        }
+    else:
+        mapping = {
+            "global": "MemorySpace::GM",
+            "shared": "MemorySpace::SM",
+            "local": "MemorySpace::LM",
+            "tsm": "MemorySpace::TSM",
+            "tlm": "MemorySpace::TLM",
+        }
+    if space not in mapping:
+        raise TypeError(f"unsupported nn memory space: {space}")
+    return mapping[space]
+
+
 def _type_to_c(attr: Any) -> str:
     """将 xdsl Attribute 映射为 C 侧类型名。
 
@@ -263,6 +305,44 @@ def _type_to_c(attr: Any) -> str:
         return "long long"
     raise TypeError(f"unsupported type: {attr}")
 
+
+def _type_to_c_for_target(attr: Any, target: str) -> str:
+    """将 xdsl Attribute 映射为目标侧的 C 类型名。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 与 `_type_to_c` 保持同样的覆盖范围，但根据 `target` 切换 memory space 文本形式。
+    - `target=npu_demo` 时输出 `Memory<GM, T>` 风格。
+    - 其他 target 保持 `Memory<MemorySpace::GM, T>` 风格。
+
+    使用示例:
+    - _type_to_c_for_target(f32, "cpu") == "float"
+    - _type_to_c_for_target(NnMemoryType(...), "npu_demo")  # -> "Memory<GM, ...>"
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: kernel_gen/dsl/gen_kernel.py
+    """
+
+    if isinstance(attr, IntegerType):
+        if attr.width.data == 1:
+            return "bool"
+        return f"int{attr.width.data}_t"
+    if isinstance(attr, Float32Type):
+        return "float"
+    if isinstance(attr, Float64Type):
+        return "double"
+    if isinstance(attr, IndexType):
+        return "long long"
+    if isinstance(attr, NnMemoryType):
+        space = _memory_space_to_c_for_target(attr.space, target)
+        return f"Memory<{space}, {_type_to_c_for_target(attr.element_type, target)}>"
+    if isinstance(attr, SymbolValueType):
+        return "long long"
+    raise TypeError(f"unsupported type: {attr}")
 
 def _memory_rank(memory_type: NnMemoryType) -> int:
     """返回 `nn.memory` 的静态 rank。
@@ -339,6 +419,27 @@ class _KernelEmitter:
 
     def __init__(self, ctx: EmitCContext) -> None:
         self.ctx = ctx
+
+    def _type_to_c(self, attr: Any) -> str:
+        """按当前 target 生成类型名。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 统一收口 `_type_to_c_for_target`，避免在多处重复判断 target。
+        - 仅影响 `gen_kernel` 的函数级签名与辅助输出。
+
+        使用示例:
+        - c_type = self._type_to_c(mem_type)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
+
+        return _type_to_c_for_target(attr, self.ctx.target)
 
     def _normalize_cpu_memory_stmt(self, stmt: str) -> str:
         """规范化 CPU 侧 `Memory<T>` 生成语句为模板化 `Memory<MemorySpace::GM, T>` 形式。
@@ -506,8 +607,8 @@ class _KernelEmitter:
                 self.ctx.bind_name(arg_value, arg_name)
         input_name = self.ctx.lookup_name(func_op.args[0]) or arg_names[0]
         weight_name = self.ctx.lookup_name(func_op.args[1]) or arg_names[1]
-        element_type = _type_to_c(out_type.element_type)
-        input_c_type = _type_to_c(input_type)
+        element_type = self._type_to_c(out_type.element_type)
+        input_c_type = self._type_to_c(input_type)
 
         lines = [
             f"{self.ctx.current_indent}constexpr long long Ntile = 1;",
@@ -602,13 +703,26 @@ class _KernelEmitter:
         weight_name = self.ctx.lookup_name(func_op.args[1]) or arg_names[1]
         return (
             f"void {func_op.sym_name.data}("
-            f"const {_type_to_c(input_type)}& {input_name}, "
-            f"const {_type_to_c(weight_type)}& {weight_name}, "
-            f"{_type_to_c(out_type)}& out)"
+            f"const {self._type_to_c(input_type)}& {input_name}, "
+            f"const {self._type_to_c(weight_type)}& {weight_name}, "
+            f"{self._type_to_c(out_type)}& out)"
         )
 
     def _is_npu_demo_body_level_kernel(self, func_op: func.FuncOp) -> bool:
-        return self.ctx.target == "npu_demo"
+        if self.ctx.target != "npu_demo":
+            return False
+        arg_names = _extract_arg_names(func_op)
+        input_types = list(func_op.function_type.inputs.data)
+        result_types = list(func_op.function_type.outputs.data)
+        if len(input_types) != 2 or len(result_types) != 1:
+            return False
+        if not arg_names or arg_names[0] != "ctx":
+            return False
+        if not isinstance(input_types[1], NnMemoryType) or not isinstance(result_types[0], NnMemoryType):
+            return False
+        if input_types[1].element_type != result_types[0].element_type:
+            return False
+        return True
 
     def _npu_demo_module_funcs(self, module_op: ModuleOp) -> list[func.FuncOp]:
         """提取并校验 npu_demo module 的顶层 `func.func` 列表。
@@ -978,7 +1092,7 @@ class _KernelEmitter:
         lhs_type, rhs_type, out_type = self._validate_npu_demo_launch_body_signature(func_op)
         barrier0, barrier1 = self._validate_npu_demo_launch_body_ops(func_op)
         arg_names = _extract_arg_names(func_op)
-        element_type = _type_to_c(out_type.element_type)
+        element_type = self._type_to_c(out_type.element_type)
         lhs_name, rhs_name, out_name = arg_names[1], arg_names[2], arg_names[3]
 
         signature = (
@@ -1127,7 +1241,7 @@ class _KernelEmitter:
             if self.ctx.lookup_name(arg_value) is None:
                 self.ctx.bind_name(arg_value, arg_name)
         source_name = self.ctx.lookup_name(func_op.args[1]) or arg_names[1]
-        element_type = _type_to_c(out_type.element_type)
+        element_type = self._type_to_c(out_type.element_type)
         lines = [
             f"{self.ctx.current_indent}long long tid = ctx.thread_id();",
             f"{self.ctx.current_indent}long long tnum = ctx.thread_num();",
@@ -1185,7 +1299,7 @@ class _KernelEmitter:
             result_type = result_types[0]
             if isinstance(result_type, SymbolValueType) and self.ctx.target != "cpu":
                 raise _error(self.ctx, func_name, "symbol scalar return is cpu-only")
-            _type_to_c(result_type)
+            self._type_to_c(result_type)
 
         arg_names = _extract_arg_names(func_op)
         leading_out_params = _leading_rewritten_out_param_count(func_op)
@@ -1194,15 +1308,15 @@ class _KernelEmitter:
             self.ctx.bind_name(arg_value, arg_name)
             if isinstance(arg_type, NnMemoryType):
                 if index < leading_out_params:
-                    params.append(f"{_type_to_c(arg_type)}& {arg_name}")
+                    params.append(f"{self._type_to_c(arg_type)}& {arg_name}")
                 else:
-                    params.append(f"const {_type_to_c(arg_type)}& {arg_name}")
+                    params.append(f"const {self._type_to_c(arg_type)}& {arg_name}")
             else:
-                params.append(f"{_type_to_c(arg_type)} {arg_name}")
+                params.append(f"{self._type_to_c(arg_type)} {arg_name}")
 
         return_type = "void"
         if result_types:
-            return_type = _type_to_c(result_types[0])
+            return_type = self._type_to_c(result_types[0])
 
         return f"{return_type} {func_name}({', '.join(params)})"
 
