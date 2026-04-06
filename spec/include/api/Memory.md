@@ -2,18 +2,19 @@
 
 ## 功能简介
 
-定义统一对外 `Memory<T>` API 规范，描述多维内存视图的元信息与访问接口，`rank` 为运行期维度。该规范不绑定具体后端实现，也不负责内存分配、释放、拷贝或运行时边界检查。
+定义统一对外 `Memory<Space, T>` API 规范，描述多维内存视图的元信息与访问接口，`rank` 为运行期维度。该规范不绑定具体后端实现，也不负责内存分配、释放、拷贝或运行时边界检查。
 
-- `Memory<T>` 是视图类型，仅保存 `data`、`shape`、`stride`、`rank`、`format`、`space` 元信息，不拥有底层存储。
+- `Memory<Space, T>` 是视图类型，仅保存 `data`、`shape`、`stride`、`rank`、`format` 元信息，`space` 通过模板参数固定，不拥有底层存储。
+- 主合同入口为 `Memory<Space, T>`，允许使用 `Memory<GM, T>` 与 `Memory<MemorySpace::GM, T>` 等价写法。
 - `get_shape(axis)` 与 `get_stride(axis)` 是 include/api 层统一公开的按轴查询接口；后端 spec 不得重新发明同义查询名称。
 - 连续布局指 `stride` 等于按 `shape` 自后向前推导出的行主序步幅；若需要连续步幅，由调用方提供可写缓冲并显式生成。
 
 ## 文档信息
 
 - 创建者：`神秘人`
-- 最后一次更改：`大闸蟹`
+- 最后一次更改：`jcc你莫辜负`
 - `spec`：[`spec/include/api/Memory.md`](../../../spec/include/api/Memory.md)
-- `功能实现`：无（API 规范不绑定实现）
+- `功能实现`：[`include/api/Memory.h`](../../../include/api/Memory.h)
 - `test`：[`test/include/api/test_memory.py`](../../../test/include/api/test_memory.py)
 
 ## 依赖
@@ -29,7 +30,8 @@
 
 ## 限制与边界
 
-- `Memory<T>` 是视图类型，不分配、释放或拥有底层数据。
+- `Memory<Space, T>` 是视图类型，不分配、释放或拥有底层数据。
+- `space()` 返回模板参数 `Space` 对应的常量，不提供运行期可变 `space` 成员。
 - 本规范不承诺运行时边界检查，不对空指针、越界索引、非法 `shape/stride` 提供保护。
 - 调用方需要保证 `rank > 0`、`shape[i] > 0`、`stride[i] > 0`，并确保 `indices[i]` 位于合法范围内。
 - 本规范不引入标准库容器、异常或动态分配依赖；实现需避免这些能力。
@@ -44,7 +46,7 @@
 
 功能说明：
 
-- 表示 `Memory<T>` 记录的布局格式枚举。
+- 表示 `Memory<Space, T>` 记录的布局格式枚举。
 
 参数说明：
 
@@ -66,14 +68,14 @@ MemoryFormat format = MemoryFormat::CLast;
 返回与限制：
 
 - 返回类型：`MemoryFormat` 枚举值。
-- 返回语义：供 `Memory<T>` 构造与查询时记录布局格式。
+- 返回语义：供 `Memory<Space, T>` 构造与查询时记录布局格式。
 - 限制条件：本文档不定义除 `Norm`、`CLast` 之外的其他公开成员。
 
 ### `MemorySpace`
 
 功能说明：
 
-- 表示 `Memory<T>` 所在的逻辑内存空间。
+- 表示 `Memory<Space, T>` 所在的逻辑内存空间。
 
 参数说明：
 
@@ -90,12 +92,13 @@ MemorySpace space = MemorySpace::SM;
 注意事项：
 
 - 当前公开成员仅包含 `MemorySpace::GM`、`MemorySpace::SM`、`MemorySpace::LM`、`MemorySpace::TSM`、`MemorySpace::TLM`。
+- 为便于模板参数书写，提供 `GM/SM/LM/TSM/TLM` 作为 `MemorySpace::...` 等价常量，可直接用于 `Memory<GM, T>`。
 - 该枚举只负责空间分类，不承诺容量、带宽、地址合法性或跨空间访问规则。
 
 返回与限制：
 
 - 返回类型：`MemorySpace` 枚举值。
-- 返回语义：供 `Memory<T>` 构造与查询时记录内存空间。
+- 返回语义：供 `Memory<Space, T>` 构造与查询时记录内存空间。
 - 限制条件：本文档不定义额外空间成员，也不把空间语义扩展为分配器或 runtime 句柄。
 
 ### `build_contiguous_stride(shape, rank, out_stride)`
@@ -131,22 +134,22 @@ build_contiguous_stride(shape, 2, stride);
 - 返回语义：填充 `out_stride`。
 - 限制条件：`rank == 0` 或指针非法属于未定义行为。
 
-### `Memory<T>`
+### `Memory<Space, T>`
 
 功能说明：
 
-- 表示一个带 `data`、`shape`、`stride`、`rank`、`format`、`space` 元信息的多维内存视图。
+- 表示一个带 `data`、`shape`、`stride`、`rank`、`format` 元信息的多维内存视图，`space` 由模板参数固定。
 - 通过运行期 `rank` 与数组指针描述维度与步幅。
 
 参数说明：
 
+- `Space(MemorySpace)`：内存空间模板参数。
 - `T(type)`：元素类型。
 - `data(T*)`：底层数据指针。
 - `shape(const long long*)`：长度为 `rank` 的维度数组。
 - `stride(const long long*)`：长度为 `rank` 的步幅数组。
 - `rank(unsigned long long)`：运行期维度数，必须大于 `0`。
 - `format(MemoryFormat)`：布局格式，默认 `MemoryFormat::Norm`。
-- `space(MemorySpace)`：内存空间，默认 `MemorySpace::GM`。
 
 使用示例：
 
@@ -160,13 +163,12 @@ long long index[2] = {1, 2};
 
 build_contiguous_stride(shape, 2, stride);
 
-Memory<int> mem(
+Memory<SM, int> mem(
     data,
     shape,
     stride,
     2,
-    MemoryFormat::CLast,
-    MemorySpace::SM);
+    MemoryFormat::CLast);
 
 long long offset = mem.linear_offset(index);
 int value = mem.at(index);
@@ -179,18 +181,19 @@ int value = mem.at(index);
 - `shape()`、`stride()` 返回内部指针；调用方需自行保证后续访问合法。
 - `get_shape(axis)` 与 `get_stride(axis)` 为统一公开查询接口；调用方需保证 `0 <= axis < rank()`。
 - `linear_offset()` 与 `at()` 不做运行时范围检查。
+- `Memory<GM, T>` 与 `Memory<MemorySpace::GM, T>` 视为等价写法。
 
 返回与限制：
 
-- 返回类型：`Memory<T>` 对象，以及其公开方法返回的裸指针、枚举值、整型偏移或元素引用。
+- 返回类型：`Memory<Space, T>` 对象，以及其公开方法返回的裸指针、枚举值、整型偏移或元素引用。
 - 返回语义：
-  - 构造时记录 `data/shape/stride/rank/format/space`。
+  - 构造时记录 `data/shape/stride/rank/format`。
   - `data()` 返回底层数据指针。
   - `shape()` 与 `stride()` 返回数组指针。
   - `get_shape(axis)` 返回 `shape[axis]`。
   - `get_stride(axis)` 返回 `stride[axis]`。
   - `rank()` 返回运行期维度数。
-  - `format()` 与 `space()` 返回当前记录的布局格式与内存空间。
+  - `format()` 返回当前记录的布局格式；`space()` 返回模板参数指定的内存空间。
   - `element_count()` 返回全部维度长度乘积。
   - `is_contiguous()` 返回当前 `stride` 是否等于连续行主序步幅。
   - `linear_offset()` 返回多维索引按 `stride` 计算出的线性偏移。

@@ -1,7 +1,7 @@
 """CPU Memory compile tests.
 
 创建者: 神秘人
-最后一次更改: 我不是牛马
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 include/cpu/Memory.h 的公开接口与核心语义。
@@ -148,9 +148,9 @@ def _compile_and_run_expect_failure(source: str) -> None:
 
 # CPU-MEM-001 / CPU-MEM-002 / CPU-MEM-003 / CPU-MEM-004 / CPU-MEM-005
 # 创建者: 神秘人
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 13:46:21 +0800
-# 最近一次运行成功时间: 2026-03-22 13:46:21 +0800
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-06 19:05:00 +0800
+# 最近一次运行成功时间: 2026-04-06 19:05:00 +0800
 # 测试目的: 验证运行期 rank 的显式 stride、自动连续 stride、element_count、linear_offset、at 与 is_contiguous 语义。
 # 使用示例: pytest -q test/include/cpu/test_memory.py -k test_cpu_memory_header_compiles_and_runs
 # 对应功能实现文件路径: include/cpu/Memory.h
@@ -169,13 +169,12 @@ int main() {
     long long shape[2] = {2, 3};
     long long explicit_stride[2] = {3, 1};
 
-    cpu::Memory<int> explicit_mem(
+    cpu::Memory<cpu::SM, int> explicit_mem(
         data,
         2,
         shape,
         explicit_stride,
-        cpu::MemoryFormat::CLast,
-        cpu::MemorySpace::SM);
+        cpu::MemoryFormat::CLast);
 
     if (explicit_mem.rank() != 2) {
         return fail(1);
@@ -208,7 +207,7 @@ int main() {
     }
 
     long long padded_stride[2] = {4, 1};
-    cpu::Memory<int> padded_mem(data, 2, shape, padded_stride);
+    cpu::Memory<cpu::SM, int> padded_mem(data, 2, shape, padded_stride);
     if (padded_mem.is_contiguous()) {
         return fail(10);
     }
@@ -217,7 +216,7 @@ int main() {
         return fail(11);
     }
 
-    cpu::Memory<int> auto_mem(data, 2, shape);
+    cpu::Memory<cpu::SM, int> auto_mem(data, 2, shape);
     if (auto_mem.stride()[0] != 3 || auto_mem.stride()[1] != 1) {
         return fail(12);
     }
@@ -235,11 +234,49 @@ int main() {
     _compile_and_run(source)
 
 
+# CPU-MEM-SPACE-TEMPLATE-001
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-06 19:05:00 +0800
+# 最近一次运行成功时间: 2026-04-06 19:05:00 +0800
+# 测试目的: 验证 cpu::Memory<Space, T> 模板签名可用，cpu::Memory<GM, T> 与 cpu::Memory<MemorySpace::GM, T> 等价口径可编译运行。
+# 使用示例: pytest -q test/include/cpu/test_memory.py -k space_template_contract
+# 对应功能实现文件路径: include/cpu/Memory.h
+# 对应 spec 文件路径: spec/include/cpu/cpu.md
+# 对应测试文件路径: test/include/cpu/test_memory.py
+def test_cpu_memory_space_template_contract() -> None:
+    source = r"""
+#include "include/cpu/Memory.h"
+
+static int fail(int code) {
+    return code;
+}
+
+int main() {
+    float data[2] = {1.0f, 2.0f};
+    long long shape[1] = {2};
+    long long stride[1] = {1};
+
+    cpu::Memory<cpu::GM, float> gm_mem(data, 1, shape, stride);
+    cpu::Memory<cpu::MemorySpace::GM, float> gm_mem2(data, 1, shape, stride);
+
+    if (gm_mem.space() != cpu::MemorySpace::GM) {
+        return fail(1);
+    }
+    if (gm_mem2.space() != cpu::MemorySpace::GM) {
+        return fail(2);
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
 # CPU-MEM-005
 # 创建者: 神秘人
-# 最后一次更改: 我不是牛马
-# 最近一次运行测试时间: 2026-03-22 13:46:21 +0800
-# 最近一次运行成功时间: 2026-03-22 13:46:21 +0800
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-06 19:05:00 +0800
+# 最近一次运行成功时间: 2026-04-06 19:05:00 +0800
 # 测试目的: 验证头文件自身不依赖标准库头文件即可被最小程序编译。
 # 使用示例: pytest -q test/include/cpu/test_memory.py -k test_cpu_memory_header_without_std_headers
 # 对应功能实现文件路径: include/cpu/Memory.h
@@ -252,7 +289,7 @@ def test_cpu_memory_header_without_std_headers() -> None:
 int main() {
     float data[4] = {1.0f, 2.0f, 3.0f, 4.0f};
     long long shape[2] = {2, 2};
-    cpu::Memory<float> mem(data, 2, shape, cpu::MemoryFormat::Norm, cpu::MemorySpace::GM);
+    cpu::Memory<cpu::GM, float> mem(data, 2, shape, cpu::MemoryFormat::Norm);
     return mem.element_count() == 4 ? 0 : 1;
 }
 """
@@ -261,9 +298,9 @@ int main() {
 
 # CPU-MEM-006
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:46:21 +0800
-# 最近一次运行成功时间: 2026-03-22 13:46:21 +0800
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-06 19:05:00 +0800
+# 最近一次运行成功时间: 2026-04-06 19:05:00 +0800
 # 测试目的: 验证运行期 rank 支持 MAX_DIM=8 的默认 stride 推导与索引访问。
 # 使用示例: pytest -q test/include/cpu/test_memory.py -k test_cpu_memory_runtime_rank_max_dim
 # 对应功能实现文件路径: include/cpu/Memory.h
@@ -280,7 +317,7 @@ static int fail(int code) {
 int main() {
     int data[256] = {0};
     long long shape[8] = {1, 1, 1, 1, 1, 1, 2, 3};
-    cpu::Memory<int> mem(data, 8, shape);
+    cpu::Memory<cpu::GM, int> mem(data, 8, shape);
 
     if (cpu::MAX_DIM != 8) {
         return fail(1);
@@ -312,9 +349,9 @@ int main() {
 
 # CPU-MEM-007
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-03-22 13:46:21 +0800
-# 最近一次运行成功时间: 2026-03-22 13:46:21 +0800
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-06 19:05:00 +0800
+# 最近一次运行成功时间: 2026-04-06 19:05:00 +0800
 # 测试目的: 验证 rank>MAX_DIM=8 违反前置条件时触发显式失败，不做静默截断。
 # 使用示例: pytest -q test/include/cpu/test_memory.py -k test_cpu_memory_runtime_rank_over_max_dim_fails
 # 对应功能实现文件路径: include/cpu/Memory.h
@@ -327,7 +364,7 @@ def test_cpu_memory_runtime_rank_over_max_dim_fails() -> None:
 int main() {
     int data[9] = {0};
     long long shape[9] = {1, 1, 1, 1, 1, 1, 1, 1, 1};
-    cpu::Memory<int> mem(data, 9, shape);
+    cpu::Memory<cpu::GM, int> mem(data, 9, shape);
     return static_cast<int>(mem.rank());
 }
 """

@@ -1,6 +1,6 @@
 /*
 功能说明:
-- 定义 include/api/Memory.h 的统一 Memory 视图类型与 MemoryFormat/MemorySpace 声明。
+- 定义 include/api/Memory.h 的统一 Memory<Space, T> 视图类型与 MemoryFormat/MemorySpace 声明。
 
 使用示例:
 - #include "include/api/Memory.h"
@@ -8,14 +8,14 @@
 - long long shape[2] = {2, 3};
 - long long stride[2] = {0, 0};
 - build_contiguous_stride(shape, 2, stride);
-- Memory<int> mem(data, shape, stride, 2, MemoryFormat::CLast, MemorySpace::SM);
+- Memory<SM, int> mem(data, shape, stride, 2, MemoryFormat::CLast);
 
 创建者: 神秘人
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 
@@ -34,7 +34,7 @@
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 enum class MemoryFormat {
@@ -54,7 +54,7 @@ enum class MemoryFormat {
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 enum class MemorySpace {
@@ -64,6 +64,28 @@ enum class MemorySpace {
     TSM,
     TLM,
 };
+
+/*
+功能说明:
+- 提供 MemorySpace 的模板参数简写常量，便于使用 Memory<GM, T> 形式。
+
+使用示例:
+- Memory<GM, float> gm_mem(data, shape, stride, 2);
+- Memory<MemorySpace::GM, float> gm_mem2(data, shape, stride, 2);
+
+创建者: 神秘人
+最后修改人: jcc你莫辜负
+
+关联文件:
+- spec: spec/include/api/Memory.md
+- test: test/include/api/test_memory.py
+- 功能实现: include/api/Memory.h
+*/
+inline constexpr MemorySpace GM = MemorySpace::GM;
+inline constexpr MemorySpace SM = MemorySpace::SM;
+inline constexpr MemorySpace LM = MemorySpace::LM;
+inline constexpr MemorySpace TSM = MemorySpace::TSM;
+inline constexpr MemorySpace TLM = MemorySpace::TLM;
 
 /*
 功能说明:
@@ -79,31 +101,31 @@ enum class MemorySpace {
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
 void build_contiguous_stride(const long long* shape, unsigned long long rank, long long* out_stride);
 
 /*
 功能说明:
-- 定义统一 Memory 视图模板，记录 data/shape/stride/rank/format/space 元信息。
+- 定义统一 Memory<Space, T> 视图模板，记录 data/shape/stride/rank/format 元信息，space 作为模板参数固定。
 
 使用示例:
 - int data[6] = {0, 1, 2, 3, 4, 5};
 - long long shape[2] = {2, 3};
 - long long stride[2] = {0, 0};
 - build_contiguous_stride(shape, 2, stride);
-- Memory<int> mem(data, shape, stride, 2);
+- Memory<GM, int> mem(data, shape, stride, 2);
 
 创建者: 神秘人
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Memory.md
-- test: test/include/npu_demo/test_kernel_context.py
+- test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
-template <typename T>
+template <MemorySpace Space, typename T>
 class Memory {
 public:
     /*
@@ -113,14 +135,14 @@ public:
     使用示例:
     - long long shape[2] = {2, 3};
     - long long stride[2] = {3, 1};
-    - Memory<int> mem(data, shape, stride, 2);
+    - Memory<GM, int> mem(data, shape, stride, 2);
 
     创建者: 神秘人
-    最后修改人: 金铲铲大作战
+    最后修改人: jcc你莫辜负
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/api/test_memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     Memory(
@@ -128,8 +150,7 @@ public:
         const long long* shape,
         const long long* stride,
         unsigned long long rank,
-        MemoryFormat format = MemoryFormat::Norm,
-        MemorySpace space = MemorySpace::GM);
+        MemoryFormat format = MemoryFormat::Norm);
 
     /*
     功能说明:
@@ -137,22 +158,21 @@ public:
 
     使用示例:
     - long long shape[2] = {2, 3};
-    - Memory<int> mem(data, shape, 2);
+    - Memory<GM, int> mem(data, shape, 2);
 
     创建者: 神秘人
-    最后修改人: 金铲铲大作战
+    最后修改人: jcc你莫辜负
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/api/test_memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     Memory(
         T* data,
         const long long* shape,
         unsigned long long rank,
-        MemoryFormat format = MemoryFormat::Norm,
-        MemorySpace space = MemorySpace::GM);
+        MemoryFormat format = MemoryFormat::Norm);
 
     /*
     功能说明:
@@ -166,7 +186,7 @@ public:
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/api/test_memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     T* data();
@@ -183,7 +203,7 @@ public:
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/api/test_memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     const T* data() const;
@@ -200,7 +220,7 @@ public:
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/api/test_memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     const long long* shape() const;
@@ -217,7 +237,7 @@ public:
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/api/test_memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     const long long* stride() const;
@@ -234,7 +254,7 @@ public:
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/api/test_memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     unsigned long long rank() const;
@@ -251,24 +271,24 @@ public:
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/api/test_memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     MemoryFormat format() const;
 
     /*
     功能说明:
-    - 返回内存空间。
+    - 返回模板参数指定的内存空间。
 
     使用示例:
     - MemorySpace space = mem.space();
 
     创建者: 神秘人
-    最后修改人: 金铲铲大作战
+    最后修改人: jcc你莫辜负
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/api/test_memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     MemorySpace space() const;
@@ -285,7 +305,7 @@ public:
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/api/test_memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     long long get_shape(unsigned long long axis) const;
@@ -302,7 +322,7 @@ public:
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/api/test_memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     long long get_stride(unsigned long long axis) const;
@@ -319,7 +339,7 @@ public:
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/api/test_memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     long long element_count() const;
@@ -336,7 +356,7 @@ public:
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/api/test_memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     bool is_contiguous() const;
@@ -354,7 +374,7 @@ public:
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/api/test_memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     long long linear_offset(const long long* indices) const;
@@ -372,7 +392,7 @@ public:
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/api/test_memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     T& at(const long long* indices);
@@ -390,7 +410,7 @@ public:
 
     关联文件:
     - spec: spec/include/api/Memory.md
-    - test: test/include/npu_demo/test_kernel_context.py
+    - test: test/include/api/test_memory.py
     - 功能实现: include/npu_demo/Memory.h
     */
     const T& at(const long long* indices) const;
@@ -412,7 +432,6 @@ private:
     long long shape_[kMaxDim];
     long long stride_[kMaxDim];
     MemoryFormat format_;
-    MemorySpace space_;
 };
 
 #endif  // KERNELCODE_GENERATE_INCLUDE_API_MEMORY_H_

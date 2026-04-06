@@ -1,15 +1,15 @@
 /*
 功能说明:
-- 定义 cpu::Memory 纯头文件张量视图模板，记录 data/shape/stride/rank/format/space 元信息。
+- 定义 cpu::Memory<Space, T> 纯头文件张量视图模板，记录 data/shape/stride/rank/format 元信息，space 作为模板参数固定。
 
 使用示例:
 - #include "include/cpu/Memory.h"
 - int data[6] = {0, 1, 2, 3, 4, 5};
 - long long shape[2] = {2, 3};
-- cpu::Memory<int> mem(data, 2, shape);
+- cpu::Memory<GM, int> mem(data, 2, shape);
 
 创建者: 神秘人
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/cpu/cpu.md
@@ -35,9 +35,31 @@ enum class MemorySpace {
     TLM,
 };
 
+/*
+功能说明:
+- 提供 cpu::MemorySpace 的模板参数简写常量，便于使用 cpu::Memory<GM, T> 形式。
+
+使用示例:
+- cpu::Memory<GM, float> gm_mem(data, 2, shape);
+- cpu::Memory<MemorySpace::GM, float> gm_mem2(data, 2, shape);
+
+创建者: 神秘人
+最后修改人: jcc你莫辜负
+
+关联文件:
+- spec: spec/include/cpu/cpu.md
+- test: test/include/cpu/test_memory.py
+- 功能实现: include/cpu/Memory.h
+*/
+inline constexpr MemorySpace GM = MemorySpace::GM;
+inline constexpr MemorySpace SM = MemorySpace::SM;
+inline constexpr MemorySpace LM = MemorySpace::LM;
+inline constexpr MemorySpace TSM = MemorySpace::TSM;
+inline constexpr MemorySpace TLM = MemorySpace::TLM;
+
 static constexpr unsigned long long MAX_DIM = 8;
 
-template <typename T>
+template <MemorySpace Space, typename T>
 class Memory {
 public:
     /*
@@ -47,10 +69,10 @@ public:
     使用示例:
     - long long shape[2] = {2, 3};
     - long long stride[2] = {3, 1};
-    - cpu::Memory<int> mem(data, 2, shape, stride);
+    - cpu::Memory<SM, int> mem(data, 2, shape, stride);
 
     创建者: 神秘人
-    最后修改人: 金铲铲大作战
+    最后修改人: jcc你莫辜负
 
     关联文件:
     - spec: spec/include/cpu/cpu.md
@@ -62,9 +84,8 @@ public:
         unsigned long long rank,
         const long long* shape,
         const long long* stride,
-        MemoryFormat format = MemoryFormat::Norm,
-        MemorySpace space = MemorySpace::GM)
-        : data_(data), rank_(0), format_(format), space_(space) {
+        MemoryFormat format = MemoryFormat::Norm)
+        : data_(data), rank_(0), format_(format) {
         init_shape_and_stride(rank, shape, stride);
     }
 
@@ -74,10 +95,10 @@ public:
 
     使用示例:
     - long long shape[2] = {2, 3};
-    - cpu::Memory<int> mem(data, 2, shape);
+    - cpu::Memory<GM, int> mem(data, 2, shape);
 
     创建者: 神秘人
-    最后修改人: 金铲铲大作战
+    最后修改人: jcc你莫辜负
 
     关联文件:
     - spec: spec/include/cpu/cpu.md
@@ -88,9 +109,8 @@ public:
         T* data,
         unsigned long long rank,
         const long long* shape,
-        MemoryFormat format = MemoryFormat::Norm,
-        MemorySpace space = MemorySpace::GM)
-        : data_(data), rank_(0), format_(format), space_(space) {
+        MemoryFormat format = MemoryFormat::Norm)
+        : data_(data), rank_(0), format_(format) {
         init_shape_and_stride(rank, shape, 0);
     }
 
@@ -210,13 +230,13 @@ public:
 
     /*
     功能说明:
-    - 返回内存空间。
+    - 返回模板参数指定的内存空间。
 
     使用示例:
     - cpu::MemorySpace space = mem.space();
 
     创建者: 神秘人
-    最后修改人: 金铲铲大作战
+    最后修改人: jcc你莫辜负
 
     关联文件:
     - spec: spec/include/cpu/cpu.md
@@ -224,7 +244,7 @@ public:
     - 功能实现: include/cpu/Memory.h
     */
     MemorySpace space() const {
-        return space_;
+        return Space;
     }
 
     /*
@@ -400,7 +420,6 @@ private:
     long long shape_[MAX_DIM];
     long long stride_[MAX_DIM];
     MemoryFormat format_;
-    MemorySpace space_;
 };
 
 }  // namespace cpu

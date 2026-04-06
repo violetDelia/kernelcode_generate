@@ -1,7 +1,7 @@
 """API Memory compile tests.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 include/api/Memory.h 的 Memory 视图声明，
@@ -94,9 +94,9 @@ def _compile_and_run(source: str) -> None:
 
 # API-MEMORY-001
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-05 03:47:00 +0800
-# 最近一次运行成功时间: 2026-04-05 03:47:00 +0800
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-06 19:05:00 +0800
+# 最近一次运行成功时间: 2026-04-06 19:05:00 +0800
 # 测试目的: 验证 Memory API 声明可配合 npu_demo 实现编译运行，基础访问语义符合规范。
 # 对应功能实现文件路径: include/npu_demo/Memory.h
 # 对应 spec 文件路径: spec/include/api/Memory.md
@@ -116,7 +116,7 @@ int main() {
     long long stride[2] = {0, 0};
     build_contiguous_stride(shape, 2, stride);
 
-    Memory<int> mem(data, shape, stride, 2, MemoryFormat::CLast, MemorySpace::SM);
+    Memory<SM, int> mem(data, shape, stride, 2, MemoryFormat::CLast);
     if (mem.rank() != 2) {
         return fail(1);
     }
@@ -149,9 +149,48 @@ int main() {
     if (mem.space() != MemorySpace::SM) {
         return fail(10);
     }
-    Memory<int> mem2(data, shape, 2);
+    Memory<GM, int> mem2(data, shape, 2);
     if (!mem2.is_contiguous()) {
         return fail(11);
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
+# API-MEMORY-SPACE-TEMPLATE-001
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-06 19:05:00 +0800
+# 最近一次运行成功时间: 2026-04-06 19:05:00 +0800
+# 测试目的: 验证 Memory<Space, T> 模板签名可用，Memory<GM, T> 与 Memory<MemorySpace::GM, T> 等价口径可编译运行。
+# 使用示例: pytest -q test/include/api/test_memory.py -k space_template_contract
+# 对应功能实现文件路径: include/api/Memory.h
+# 对应 spec 文件路径: spec/include/api/Memory.md
+# 对应测试文件路径: test/include/api/test_memory.py
+def test_memory_space_template_contract() -> None:
+    source = r"""
+#include "include/api/Memory.h"
+#include "include/npu_demo/Memory.h"
+
+static int fail(int code) {
+    return code;
+}
+
+int main() {
+    float data[4] = {0.0f, 1.0f, 2.0f, 3.0f};
+    long long shape[1] = {4};
+    long long stride[1] = {1};
+
+    Memory<GM, float> gm_mem(data, shape, stride, 1);
+    Memory<MemorySpace::GM, float> gm_mem2(data, shape, stride, 1, MemoryFormat::Norm);
+
+    if (gm_mem.space() != MemorySpace::GM) {
+        return fail(1);
+    }
+    if (gm_mem2.space() != MemorySpace::GM) {
+        return fail(2);
     }
     return 0;
 }

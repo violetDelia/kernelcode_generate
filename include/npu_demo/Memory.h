@@ -1,6 +1,6 @@
 /*
 功能说明:
-- 提供 include/api/Memory.h 的 npu_demo 实现，补全 Memory 视图方法与 stride 构造逻辑。
+- 提供 include/api/Memory.h 的 npu_demo 实现，补全 Memory<Space, T> 视图方法与 stride 构造逻辑。
 
 使用示例:
 - #include "include/npu_demo/Memory.h"
@@ -8,10 +8,10 @@
 - long long shape[2] = {2, 3};
 - long long stride[2] = {0, 0};
 - build_contiguous_stride(shape, 2, stride);
-- Memory<int> mem(data, shape, stride, 2);
+- Memory<GM, int> mem(data, shape, stride, 2);
 
 创建者: 神秘人
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Memory.md
@@ -57,25 +57,24 @@ inline void build_contiguous_stride(const long long* shape, unsigned long long r
 使用示例:
 - long long shape[2] = {2, 3};
 - long long stride[2] = {3, 1};
-- Memory<int> mem(data, shape, stride, 2);
+- Memory<GM, int> mem(data, shape, stride, 2);
 
 创建者: 神秘人
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Memory.md
 - test: test/include/npu_demo/test_kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
-template <typename T>
-inline Memory<T>::Memory(
+template <MemorySpace Space, typename T>
+inline Memory<Space, T>::Memory(
     T* data,
     const long long* shape,
     const long long* stride,
     unsigned long long rank,
-    MemoryFormat format,
-    MemorySpace space)
-    : data_(data), rank_(0), format_(format), space_(space) {
+    MemoryFormat format)
+    : data_(data), rank_(0), format_(format) {
     init_shape_and_stride(rank, shape, stride);
 }
 
@@ -85,24 +84,23 @@ inline Memory<T>::Memory(
 
 使用示例:
 - long long shape[2] = {2, 3};
-- Memory<int> mem(data, shape, 2);
+- Memory<GM, int> mem(data, shape, 2);
 
 创建者: 神秘人
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Memory.md
 - test: test/include/npu_demo/test_kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
-template <typename T>
-inline Memory<T>::Memory(
+template <MemorySpace Space, typename T>
+inline Memory<Space, T>::Memory(
     T* data,
     const long long* shape,
     unsigned long long rank,
-    MemoryFormat format,
-    MemorySpace space)
-    : data_(data), rank_(0), format_(format), space_(space) {
+    MemoryFormat format)
+    : data_(data), rank_(0), format_(format) {
     init_shape_and_stride(rank, shape, 0);
 }
 
@@ -121,8 +119,8 @@ inline Memory<T>::Memory(
 - test: test/include/npu_demo/test_kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
-template <typename T>
-inline T* Memory<T>::data() {
+template <MemorySpace Space, typename T>
+inline T* Memory<Space, T>::data() {
     return data_;
 }
 
@@ -141,8 +139,8 @@ inline T* Memory<T>::data() {
 - test: test/include/npu_demo/test_kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
-template <typename T>
-inline const T* Memory<T>::data() const {
+template <MemorySpace Space, typename T>
+inline const T* Memory<Space, T>::data() const {
     return data_;
 }
 
@@ -161,8 +159,8 @@ inline const T* Memory<T>::data() const {
 - test: test/include/npu_demo/test_kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
-template <typename T>
-inline const long long* Memory<T>::shape() const {
+template <MemorySpace Space, typename T>
+inline const long long* Memory<Space, T>::shape() const {
     return shape_;
 }
 
@@ -181,8 +179,8 @@ inline const long long* Memory<T>::shape() const {
 - test: test/include/npu_demo/test_kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
-template <typename T>
-inline const long long* Memory<T>::stride() const {
+template <MemorySpace Space, typename T>
+inline const long long* Memory<Space, T>::stride() const {
     return stride_;
 }
 
@@ -201,8 +199,8 @@ inline const long long* Memory<T>::stride() const {
 - test: test/include/npu_demo/test_kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
-template <typename T>
-inline unsigned long long Memory<T>::rank() const {
+template <MemorySpace Space, typename T>
+inline unsigned long long Memory<Space, T>::rank() const {
     return rank_;
 }
 
@@ -221,29 +219,29 @@ inline unsigned long long Memory<T>::rank() const {
 - test: test/include/npu_demo/test_kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
-template <typename T>
-inline MemoryFormat Memory<T>::format() const {
+template <MemorySpace Space, typename T>
+inline MemoryFormat Memory<Space, T>::format() const {
     return format_;
 }
 
 /*
 功能说明:
-- 返回内存空间。
+- 返回模板参数指定的内存空间。
 
 使用示例:
 - MemorySpace space = mem.space();
 
 创建者: 神秘人
-最后修改人: 金铲铲大作战
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Memory.md
 - test: test/include/npu_demo/test_kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
-template <typename T>
-inline MemorySpace Memory<T>::space() const {
-    return space_;
+template <MemorySpace Space, typename T>
+inline MemorySpace Memory<Space, T>::space() const {
+    return Space;
 }
 
 /*
@@ -261,8 +259,8 @@ inline MemorySpace Memory<T>::space() const {
 - test: test/include/npu_demo/test_kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
-template <typename T>
-inline long long Memory<T>::get_shape(unsigned long long axis) const {
+template <MemorySpace Space, typename T>
+inline long long Memory<Space, T>::get_shape(unsigned long long axis) const {
     return shape_[axis];
 }
 
@@ -281,8 +279,8 @@ inline long long Memory<T>::get_shape(unsigned long long axis) const {
 - test: test/include/npu_demo/test_kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
-template <typename T>
-inline long long Memory<T>::get_stride(unsigned long long axis) const {
+template <MemorySpace Space, typename T>
+inline long long Memory<Space, T>::get_stride(unsigned long long axis) const {
     return stride_[axis];
 }
 
@@ -301,8 +299,8 @@ inline long long Memory<T>::get_stride(unsigned long long axis) const {
 - test: test/include/npu_demo/test_kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
-template <typename T>
-inline long long Memory<T>::element_count() const {
+template <MemorySpace Space, typename T>
+inline long long Memory<Space, T>::element_count() const {
     long long count = 1;
     for (unsigned long long i = 0; i < rank_; ++i) {
         count *= shape_[i];
@@ -325,8 +323,8 @@ inline long long Memory<T>::element_count() const {
 - test: test/include/npu_demo/test_kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
-template <typename T>
-inline bool Memory<T>::is_contiguous() const {
+template <MemorySpace Space, typename T>
+inline bool Memory<Space, T>::is_contiguous() const {
     long long expected = 1;
     for (unsigned long long reverse_index = 0; reverse_index < rank_; ++reverse_index) {
         const unsigned long long i = rank_ - 1 - reverse_index;
@@ -354,8 +352,8 @@ inline bool Memory<T>::is_contiguous() const {
 - test: test/include/npu_demo/test_kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
-template <typename T>
-inline long long Memory<T>::linear_offset(const long long* indices) const {
+template <MemorySpace Space, typename T>
+inline long long Memory<Space, T>::linear_offset(const long long* indices) const {
     long long offset = 0;
     for (unsigned long long i = 0; i < rank_; ++i) {
         offset += indices[i] * stride_[i];
@@ -379,8 +377,8 @@ inline long long Memory<T>::linear_offset(const long long* indices) const {
 - test: test/include/npu_demo/test_kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
-template <typename T>
-inline T& Memory<T>::at(const long long* indices) {
+template <MemorySpace Space, typename T>
+inline T& Memory<Space, T>::at(const long long* indices) {
     return data_[linear_offset(indices)];
 }
 
@@ -400,13 +398,13 @@ inline T& Memory<T>::at(const long long* indices) {
 - test: test/include/npu_demo/test_kernel_context.py
 - 功能实现: include/npu_demo/Memory.h
 */
-template <typename T>
-inline const T& Memory<T>::at(const long long* indices) const {
+template <MemorySpace Space, typename T>
+inline const T& Memory<Space, T>::at(const long long* indices) const {
     return data_[linear_offset(indices)];
 }
 
-template <typename T>
-inline void Memory<T>::contract_or_trap(bool condition) {
+template <MemorySpace Space, typename T>
+inline void Memory<Space, T>::contract_or_trap(bool condition) {
     if (!condition) {
 #if defined(__clang__) || defined(__GNUC__)
         __builtin_trap();
@@ -416,8 +414,8 @@ inline void Memory<T>::contract_or_trap(bool condition) {
     }
 }
 
-template <typename T>
-inline void Memory<T>::init_shape_and_stride(
+template <MemorySpace Space, typename T>
+inline void Memory<Space, T>::init_shape_and_stride(
     unsigned long long rank,
     const long long* shape,
     const long long* stride) {
@@ -436,8 +434,8 @@ inline void Memory<T>::init_shape_and_stride(
     fill_contiguous_stride();
 }
 
-template <typename T>
-inline void Memory<T>::fill_contiguous_stride() {
+template <MemorySpace Space, typename T>
+inline void Memory<Space, T>::fill_contiguous_stride() {
     long long current = 1;
     for (unsigned long long reverse_index = 0; reverse_index < rank_; ++reverse_index) {
         const unsigned long long i = rank_ - 1 - reverse_index;
