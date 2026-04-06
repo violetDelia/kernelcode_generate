@@ -18,6 +18,7 @@
 
 - AST 节点定义：[`spec/dsl/ast.md`](../../spec/dsl/ast.md)
 - AST 访问器：[`spec/dsl/ast_visitor.md`](../../spec/dsl/ast_visitor.md)
+- Arch DSL helper 公开入口：[`spec/include/api/Arch.md`](../../spec/include/api/Arch.md)
 - arch 查询结果类型：[`spec/dialect/arch.md`](../../spec/dialect/arch.md)
 
 ## 术语
@@ -56,7 +57,8 @@
 - `ArchQueryAST(query_name="get_thread_id")` 必须 lowering 为单个 `arch.get_thread_id`，并保持结果类型为 `!symbol.int<"thread_id">`。
 - `ArchQueryAST(query_name="get_thread_num")` 必须 lowering 为单个 `arch.get_thread_num`，并保持结果类型为 `!symbol.int<"thread_num">`。
 - `ArchGetDynamicMemoryAST(space=...)` 必须 lowering 为单个 `arch.get_dynamic_memory`，结果类型固定为 `!nn.memory<[?], [1], i8, #nn.space<space>>`；`space` 非 `SM/LM/TSM/TLM` 时必须报错。
-- `ArchLaunchKernelAST(name, block, thread, subthread)` 必须 lowering 为单个无返回值 `arch.launch_kernel`；extent 公开语义统一为 `!symbol.int` 启动规模：AST 虽允许 `int | SymbolDim` 入口，但 emit 阶段若 extent 不是 `!symbol.int<"...">`（或可静态判定为 `<= 0`）必须报错。
+- `ArchBarrierAST(visibility, scope)` 必须 lowering 为单个无返回值 `arch.barrier {scope = #arch.scope<...>, visibility = [#nn.space<...>, ...]}`；`visibility` 必须保持源码顺序且非空，元素必须全为可 lowering 的 `MemorySpace`，`scope` 必须可 lowering 为 `#arch.scope<...>`。若 AST 形状违规，emit 必须报固定关键短语 `barrier visibility must be non-empty MemorySpace list` 或 `barrier scope must be BarrierScope`，不得退回 generic unsupported。
+- `ArchLaunchKernelAST(callee, block, thread, subthread, args)` 必须 lowering 为单个无返回值 `arch.launch<%block, %thread, %subthread>(@callee, %arg0, %arg1, ...) : ... -> ()`；`callee` 必须是函数对象 / symbol ref，对外不得接受字符串字面量、属性访问、lambda、调用表达式或其他 runtime callable 结果。extent 公开语义统一为 `!symbol.int` 启动规模：AST 虽允许 `int | SymbolDim` 入口，但 emit 阶段若 extent 不是正整数 `!symbol.int<"...">` 必须报错；同时 launched body 内 `arch.get_thread_num` / `arch.get_block_num` / `arch.get_subthread_num` 的结果类型虽保持 `!symbol.int<"...">`，其数值语义由当前 `arch.launch` 的 extent 决定。
 - `TensorAxisAccessAST(tensor, kind, axis)` 必须按节点语义降级为 symbol 方言查询：`kind="shape"` lowering 为 `symbol.get_dim`，`kind="stride"` lowering 为 `symbol.get_stride`。其中 `tensor` 必须为 `nn.memory` 值，`axis` 必须为静态非负整数且落在 rank 范围内；不满足约束时必须报错（例如 `get_shape source must be nn.memory`、`get_shape axis must be static int`、`get_shape axis out of range`、`Unsupported tensor axis access kind`）。
 
 ## 公开接口
@@ -203,7 +205,8 @@ value = emit_mlir(expr_ast, ctx)
 - `ArchQueryAST(query_name="get_thread_id")`：生成 `arch.get_thread_id`，返回 `!symbol.int<"thread_id">`。
 - `ArchQueryAST(query_name="get_thread_num")`：生成 `arch.get_thread_num`，返回 `!symbol.int<"thread_num">`。
 - `ArchGetDynamicMemoryAST(space=...)`：生成 `arch.get_dynamic_memory`，返回 `!nn.memory<[?], [1], i8, #nn.space<space>>`。
-- `ArchLaunchKernelAST(name, block, thread, subthread)`：生成无返回值 `arch.launch_kernel`。
+- `ArchBarrierAST(visibility, scope)`：生成无返回值 `arch.barrier {scope = #arch.scope<...>, visibility = [#nn.space<...>, ...]}`。
+- `ArchLaunchKernelAST(callee, block, thread, subthread, args)`：生成无返回值 `arch.launch<%block, %thread, %subthread>(@callee, %arg0, %arg1, ...) : ... -> ()`。
 
 ## 测试
 
@@ -213,7 +216,7 @@ value = emit_mlir(expr_ast, ctx)
 - 执行命令（emit 单测）：`pytest -q test/dsl/test_emit_mlir.py`
 - 执行命令（emit 端到端回归）：`pytest -q test/dsl/test_mlir_gen.py`
 - 执行命令（ast_visitor 负路径）：`pytest -q test/dsl/test_ast_visitor.py`
-- 拆分归属：EMIT-001~EMIT-028、EMIT-033~EMIT-035 默认归属 `test_emit_mlir.py`；EMIT-029 默认归属 `test_mlir_gen.py`；EMIT-031/EMIT-032 归属 `test_ast_visitor.py`。其中 EMIT-012A/012B/012C/012D/013/024 在 `test_ast_visitor.py` 有边界回归覆盖；若条目显式标注跨文件映射，以条目为准。
+- 拆分归属：EMIT-001~EMIT-028、EMIT-033~EMIT-035 默认归属 `test_emit_mlir.py`；EMIT-029 默认归属 `test_mlir_gen.py`；EMIT-031/031A/032 归属 `test_ast_visitor.py`、`test_mlir_gen.py` 与 `expectation/dsl/mlir_gen/dialect/arch/*` 的联合回归。当前 `barrier/launch` expectation 与 dedicated 测试缺口在下游实现+补测阶段补齐。
 - 编号口径：EMIT-001A/EMIT-001B/EMIT-030/EMIT-030A 为有效拆分编号，纳入本清单映射；其中 EMIT-030 绑定 `get_thread_num` helper 参数约束用例，EMIT-030A 绑定 `arch.get_thread_num` 正向 lowering 用例。
 - 测试目标：
   - 覆盖常见表达式与语句节点的发射结果。
@@ -234,7 +237,8 @@ value = emit_mlir(expr_ast, ctx)
   - 覆盖 `ArchQueryAST(query_name="get_thread_num")` lowering 为 `arch.get_thread_num` 的最小查询路径。
   - 覆盖 `get_thread_num` helper 的参数约束错误路径，确保 `ArchQueryAST(query_name="get_thread_num")` 的入口边界稳定。
   - 覆盖 `ArchGetDynamicMemoryAST(space=...)` lowering 为 `arch.get_dynamic_memory` 的结果类型与 `space` 约束错误路径。
-  - 覆盖 `ArchLaunchKernelAST(name, block, thread, subthread)` lowering 为 `arch.launch_kernel` 的语句语义与参数错误路径。
+  - 覆盖 `ArchBarrierAST(visibility, scope)` lowering 为 `arch.barrier` 的语句语义与固定错误短语，确保 `barrier(...)` 不会被静默当成未知 helper。
+  - 覆盖 `ArchLaunchKernelAST(callee, block, thread, subthread, args)` lowering 为 `arch.launch<...>(@callee, args...)` 的语句语义与参数错误路径，确保 `callee` 为函数对象 / symbol ref 而不是字符串。
   - 覆盖 `TensorAxisAccessAST(kind="shape")` lowering 为 `symbol.get_dim`，并校验 `axis` 与 `nn.memory` 前置约束。
   - 覆盖 `TensorAxisAccessAST(kind="stride")` lowering 为 `symbol.get_stride`，并校验 `axis` 与 `nn.memory` 前置约束。
   - 覆盖不支持节点的错误路径。
@@ -278,7 +282,8 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-030：`get_thread_num` helper 仅允许零参数调用；非零参数必须报错 `Unsupported get_thread_num arity`，以保证 `ArchQueryAST(query_name="get_thread_num")` 的入口约束稳定。（`test_ast_visitor.py::test_parse_function_rejects_invalid_get_thread_num_arity_variants`）
   - EMIT-029：tensor `truediv` mixed dtype promotion 需插入 `dma.cast`，且 `nn.truediv` 结果类型与决议 dtype 一致。（`test_mlir_gen.py::test_tensor_truediv_dtype_promotion_lowering`、`test_ast_visitor.py::test_tensor_truediv_dtype_promotion_lowering`）
   - EMIT-031：`ArchGetDynamicMemoryAST(space=...)` lowering 为 `arch.get_dynamic_memory`，并固定返回 `!nn.memory<[?], [1], i8, #nn.space<space>>`；非法 `space` 必须报错。（`test_ast_visitor.py::test_emit_mlir_rejects_invalid_arch_get_dynamic_memory_space`）
-  - EMIT-032：`ArchLaunchKernelAST(name, block, thread, subthread)` lowering 为单个无返回值 `arch.launch_kernel`；extent 必须为正整数 `!symbol.int`，非法 `name`/extent 必须报错。（`test_ast_visitor.py::test_emit_mlir_rejects_invalid_arch_launch_kernel_args`）
+  - EMIT-031A：`ArchBarrierAST(visibility=[MemorySpace.TSM, MemorySpace.TLM], scope=BarrierScope.BLOCK)` 必须 lowering 为单个无返回值 `arch.barrier {scope = #arch.scope<block>, visibility = [#nn.space<tsm>, #nn.space<tlm>]}`；空 visibility、非法元素类型或非法 scope 必须分别报 `barrier visibility must be non-empty MemorySpace list`、`barrier scope must be BarrierScope`。（下游待补测试映射：`test_emit_mlir_lowers_arch_barrier`、`expectation/dsl/mlir_gen/dialect/arch/barrier`）
+  - EMIT-032：`ArchLaunchKernelAST(callee="add_barrier_body", block, thread, subthread, args=[lhs, rhs, out])` lowering 为单个无返回值 `arch.launch<%block, %thread, %subthread>(@add_barrier_body, %lhs, %rhs, %out) : ... -> ()`；extent 必须为正整数 `!symbol.int`，非法 `callee`/keyword args/extent 必须报错，并保持 launched body 的 `get_thread_num()` 语义来自当前 launch extent。（下游待补测试映射：`test_emit_mlir_lowers_arch_launch_with_callee`、`expectation/dsl/mlir_gen/dialect/arch/launch_with_callee`）
   - EMIT-033：`TensorAxisAccessAST(kind="shape")` 必须 lowering 为 `symbol.get_dim`，并保持 `axis` 为静态非负整数且未越界；非 `nn.memory` 来源或非法 `axis` 必须报错。（`expectation/dsl/mlir_gen/dialect/symbol/get_dim.py`）
   - EMIT-034：`TensorAxisAccessAST(kind="stride")` 必须 lowering 为 `symbol.get_stride`，并保持 `axis` 为静态非负整数且未越界；非 `nn.memory` 来源或非法 `axis` 必须报错。（`expectation/dsl/mlir_gen/dialect/symbol/get_stride.py`）
   - EMIT-002A：`CompareExprAST(op="ne")` 在 memory 路径必须生成 compare op（必要时带 `nn.broadcast`），结果 element type 为 `i1`。（`test_emit_mlir_binary_compare_broadcast_rhs`）

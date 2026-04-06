@@ -19,6 +19,7 @@
 - AST 节点与解析入口：[`spec/dsl/ast.md`](../../spec/dsl/ast.md)
 - AST 遍历访问器：[`spec/dsl/ast_visitor.md`](../../spec/dsl/ast_visitor.md)
 - 节点发射规则：[`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)
+- Arch DSL helper 公开入口：[`spec/include/api/Arch.md`](../../spec/include/api/Arch.md)
 - arch dialect 结果类型与查询 op：[`spec/dialect/arch.md`](../../spec/dialect/arch.md)
 - 符号值类型语义：[`spec/dialect/symbol.md`](../../spec/dialect/symbol.md)
 
@@ -62,7 +63,7 @@
 - 当 `build_func_op(...)` / `build_func_op_from_ast(...)` 处理 `slice(...)` 时，必须先生成 `dma.alloc`，再生成 `dma.slice(target, source, ...)`；表达式返回值绑定到 alloc 结果，`func.return` 返回 alloc 结果，`dma.slice` 的结果不得直接作为返回值或局部变量绑定。
 - 当 `store(...)` / `deslice(...)` 的 target 来自前序 `alloc/view/reshape/flatten/cast/copy/img2col/matmul/get_dynamic_memory` 等 memory 表达式时，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须允许该 target 继续参与 raw `func.func` lowering；不得把该场景错误收敛为仅允许函数输入张量的 AST 入口失败。
 - `conv2d_img2col2d_tiled_npu_demo(...)` 这类 `loop + slice + img2col2d + reshape + matmul + deslice + return` 前端样例，在本层唯一完成标志是成功生成 raw `func.func` / raw MLIR IR；本轮不得把 pipeline、lowered IR、gen_kernel 或源码生成当成完成条件。
-- DSL 函数体内允许出现 `arch` helper 调用：`get_thread_num`（查询表达式）、`get_dynamic_memory`（返回 memory 表达式）与 `launch_kernel`（语句型启动描述）；其公开语义由 `emit_mlir` 负责落实到具体 lowering。
+- DSL 函数体内允许出现 `arch` helper 调用：`get_thread_num`（查询表达式）、`get_dynamic_memory`（返回 memory 表达式）、`barrier`（同步语句）与 `launch_kernel`（语句型启动描述）；其公开语义由 `emit_mlir` 负责落实到具体 lowering。
 - 当函数体仅返回 `alloc(...)` 且没有 tensor 输入时，允许仅依赖标量 `runtime_args` 构建签名与结果类型；`alloc` 结果类型需由 `shape`/`stride`/`dtype`/`space` 与 `runtime_args` 共同决定，且显式 `stride` 必须与默认连续布局一致，否则必须报错。
 - `flatten(x)` 在 DSL 公开契约中视为一维重排 helper，要求保留元素总数并输出一维 memory 结果；不要求存在独立的 dialect op。
 - `free(x)` 在 DSL 公开契约中是语句型 helper，不产生新的 SSA 返回值，也不能作为函数返回值直接 lowering 为独立结果。
@@ -73,7 +74,8 @@
 - 零入参 DSL 函数允许通过 `build_func_op` / `build_func_op_from_ast` 构建 `func.func`；当函数体返回 `get_thread_id()` 查询结果时，lowering 必须生成 `arch.get_thread_id`，并保持返回类型为 `!symbol.int<"thread_id">`。
 - 零入参 DSL 函数允许通过 `build_func_op` / `build_func_op_from_ast` 构建 `func.func`；当函数体返回 `get_thread_num()` 查询结果时，lowering 必须生成 `arch.get_thread_num`，并保持返回类型为 `!symbol.int<"thread_num">`。
 - 当函数体返回 `get_dynamic_memory(space)` 时，lowering 必须生成 `arch.get_dynamic_memory`，返回类型固定为 `!nn.memory<[?], [1], i8, #nn.space<space>>`；`space` 非片上空间（`SM/LM/TSM/TLM`）时必须报错。
-- 当函数体包含 `launch_kernel(name, block, thread, subthread)` 语句时，lowering 必须生成无返回值 `arch.launch_kernel`；`name` 非空字符串约束与 extent 约束必须在链路中被校验：AST 入口要求 `block/thread/subthread` 为正整数或 `SymbolDim` 语义，emit 阶段进一步要求三者可归一化为正整数 `!symbol.int`，违规时必须报错。
+- 当函数体包含 `barrier(visibility=[...], scope=BarrierScope.BLOCK)` 语句时，lowering 必须生成无返回值 `arch.barrier`；`visibility` 必须是按源码顺序保留的非空 `MemorySpace` 列表，`scope` 必须可 lowering 为 `#arch.scope<...>`，缺项、多余参数、空列表或非法元素类型都必须报固定错误，且不得把 `barrier(...)` 静默当成未知 helper。
+- 当函数体包含 `launch_kernel(callee, block, thread, subthread, *args)` 语句时，lowering 必须生成无返回值 `arch.launch<block, thread, subthread>(@callee, args...)`；`callee` 必须是函数对象 / symbol ref，对外不得接受字符串字面量、属性访问、lambda、调用表达式或 keyword args。`block/thread/subthread` 在 AST 入口要求为正整数或 `SymbolDim` 语义，emit 阶段进一步要求三者可归一化为正整数 `!symbol.int`，违规时必须报错；launched body 中 `get_thread_num()` / `get_block_num()` / `get_subthread_num()` 的返回类型仍分别为 `!symbol.int<"thread_num">` / `!symbol.int<"block_num">` / `!symbol.int<"subthread_num">`，其数值语义来自当前 `launch` extent，而不是 target capability upper bound。
 - 当函数体包含 `tensor.get_shape()[axis]` 或 `tensor.get_stride()[axis]` 轴访问表达式时，必须复用 `TensorAxisAccessAST` 链路：`get_shape` 降级为 `symbol.get_dim`、`get_stride` 降级为 `symbol.get_stride`，并保持返回 `!symbol.int<"...">`；`tensor` 非 `nn.memory`、`axis` 非静态整数、负轴或越界必须报错。
 - 如需 `builtin.module` 封装，由调用方完成。
 
@@ -142,7 +144,8 @@ func_op = build_func_op(only_symbol, s)
 - 当零入参函数直接返回 `get_thread_id()` 时，结果必须通过 `arch.get_thread_id` 生成，并在 `func.func` 返回值中保持 `!symbol.int<"thread_id">`。
 - 当零入参函数直接返回 `get_thread_num()` 时，结果必须通过 `arch.get_thread_num` 生成，并在 `func.func` 返回值中保持 `!symbol.int<"thread_num">`。
 - 当函数体直接返回 `get_dynamic_memory(space)` 时，结果必须通过 `arch.get_dynamic_memory` 生成，并在 `func.func` 返回值中保持 `!nn.memory<[?], [1], i8, #nn.space<space>>`。
-- 当函数体包含 `launch_kernel(name, block, thread, subthread)` 语句时，必须生成单个 `arch.launch_kernel` 且函数本身不引入额外返回值（除显式 `return` 以外）。
+- 当函数体包含 `barrier(visibility=[...], scope=...)` 语句时，必须生成单个无返回值 `arch.barrier`，并保持 `visibility` 列表顺序与 `scope` 语义不变。
+- 当函数体包含 `launch_kernel(callee, block, thread, subthread, *args)` 语句时，必须生成单个 `arch.launch<block, thread, subthread>(@callee, args...)` 且函数本身不引入额外返回值（除显式 `return` 以外）；`callee` 不得退回字符串 SSA 常量，也不得丢失额外 `*args` 的顺序。
 - 当函数体返回 `tensor.get_shape()[axis]` / `tensor.get_stride()[axis]` 时，`func.func` 的返回类型必须保持 `!symbol.int<"...">`，并分别通过 `symbol.get_dim` / `symbol.get_stride` 生成返回值。
 
 返回与限制：
@@ -206,7 +209,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
 - 执行命令（mlir_gen 集成）：`pytest -q test/dsl/test_mlir_gen.py`
 - 执行命令（依赖子链路）：`pytest -q test/dsl/test_ast.py && pytest -q test/dsl/test_emit_mlir.py`
 - 执行命令（ast_visitor 负路径）：`pytest -q test/dsl/test_ast_visitor.py`
-- 拆分归属：MGEN-001~MGEN-035 归属 `test_mlir_gen.py`；其中 AST/emit 的前置语义分别由 `test_ast.py` 与 `test_emit_mlir.py` 单测保证；MGEN-036/037 与 arch helper 负路径补充由 `test_ast_visitor.py` 覆盖。
+- 拆分归属：MGEN-001~MGEN-035 归属 `test_mlir_gen.py`；其中 AST/emit 的前置语义分别由 `test_ast.py` 与 `test_emit_mlir.py` 单测保证；MGEN-036/037/037A 与 arch helper 正反路径由 `test_ast.py`、`test_mlir_gen.py`、`expectation/dsl/mlir_gen/dialect/arch/*` 共同覆盖，当前缺口在下游实现/补测阶段补齐。
 - 测试目标：
   - 验证 `build_func_op(...)` 生成 `func.func`。
   - 验证 `build_func_op(fn, *runtime_args, globals=None, builtins=None)` 的输入签名仅由运行时参数决定。
@@ -237,7 +240,8 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - 验证零入参 DSL 函数可通过 `build_func_op(...)` / `build_func_op_from_ast(...)` 生成 `func.func`，并在返回 `get_thread_id()` 时 lowering 为 `arch.get_thread_id` 与 `!symbol.int<"thread_id">` 返回类型。
   - 验证零入参 DSL 函数可通过 `build_func_op(...)` / `build_func_op_from_ast(...)` 生成 `func.func`，并在返回 `get_thread_num()` 时 lowering 为 `arch.get_thread_num` 与 `!symbol.int<"thread_num">` 返回类型。
   - 验证 `get_dynamic_memory(space)` 在 `build_func_op(...)` / `build_func_op_from_ast(...)` 链路中 lowering 为 `arch.get_dynamic_memory`，并固定返回 `!nn.memory<[?], [1], i8, #nn.space<space>>`。
-  - 验证 `launch_kernel(name, block, thread, subthread)` 在 `build_func_op(...)` / `build_func_op_from_ast(...)` 链路中 lowering 为无返回值 `arch.launch_kernel`，并覆盖名称/extent 非法输入错误路径。
+  - 验证 `barrier(visibility=[...], scope=...)` 在 `build_func_op(...)` / `build_func_op_from_ast(...)` 链路中 lowering 为无返回值 `arch.barrier`，并覆盖缺失 `scope/visibility`、空 visibility、错误元素类型与“不能被静默吃掉”的错误路径。
+  - 验证 `launch_kernel(callee, block, thread, subthread, *args)` 在 `build_func_op(...)` / `build_func_op_from_ast(...)` 链路中 lowering 为无返回值 `arch.launch<block, thread, subthread>(@callee, args...)`，并覆盖非法 callee（字符串/属性/调用表达式）、keyword args、extent 非法输入与 launched body `get_thread_num()` 语义来自 launch extent 的路径。
   - 验证 `get_shape/get_stride` 轴访问在 `build_func_op(...)` / `build_func_op_from_ast(...)` 链路中分别 lowering 为 `symbol.get_dim/symbol.get_stride`，并覆盖非 memory 来源、负轴、越界轴与非静态轴错误路径。
   - 验证纯 symbol 标量 compare family（`==` / `!=` / `<` / `<=` / `>` / `>=`）会生成对应 `symbol.*` 比较 op，且返回类型统一为 `i1`。
   - 验证 `build_func_op` 对 `slice(...)` 表达式先生成 `dma.alloc` 再生成 `dma.slice(target, source, ...)`，并确保 `func.return` 返回 alloc 结果。
@@ -297,7 +301,8 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - MGEN-034：`nn.sub` mixed dtype promotion 需插入 `dma.cast`，并保持 `nn.sub` 与 `func.return` 的结果类型为 promotion 结果。（`test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast`）
   - MGEN-035：零入参函数直接返回 `get_thread_num()` 时，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须生成零参数 `func.func`、单个 `arch.get_thread_num`，并返回 `!symbol.int<"thread_num">`。（`test_build_func_op_lowers_arch_get_thread_num_query`）
   - MGEN-036：返回 `get_dynamic_memory(space)` 的 DSL 函数必须 lowering 为 `arch.get_dynamic_memory`，并固定返回 `!nn.memory<[?], [1], i8, #nn.space<space>>`；非法 `space` 必须报错。（`test_build_func_op_rejects_invalid_arch_get_dynamic_memory_space`）
-  - MGEN-037：包含 `launch_kernel(name, block, thread, subthread)` 语句的 DSL 函数必须 lowering 为单个无返回值 `arch.launch_kernel`；非法 `name`/extent（含非 `!symbol.int` 或静态 `<= 0`）必须报错。（`test_build_func_op_rejects_invalid_arch_launch_kernel_args`）
+  - MGEN-037：包含 `barrier(visibility=[MemorySpace.TSM, MemorySpace.TLM], scope=BarrierScope.BLOCK)` 语句的 DSL 函数必须 lowering 为单个无返回值 `arch.barrier`；缺失 `scope/visibility`、空 visibility、非法元素类型或把 `barrier(...)` 静默当成未知 helper 都必须报错并保留固定关键短语。（下游待补测试映射：`test_parse_function_supports_arch_barrier_helper`、`test_build_func_op_lowers_arch_barrier`、`expectation/dsl/mlir_gen/dialect/arch/barrier`）
+  - MGEN-037A：包含 `launch_kernel(add_barrier_body, block, thread, subthread, lhs, rhs, out)` 语句的 DSL 函数必须 lowering 为单个无返回值 `arch.launch<block, thread, subthread>(@add_barrier_body, %lhs, %rhs, %out)`；`callee` 必须是函数对象 / symbol ref，字符串字面量、attribute/call expr、keyword args 与非法 extent（含非 `!symbol.int` 或静态 `<= 0`）必须报错。（下游待补测试映射：`test_parse_function_supports_arch_launch_with_callee`、`test_build_func_op_lowers_arch_launch_with_callee`、`expectation/dsl/mlir_gen/dialect/arch/launch_with_callee`）
   - MGEN-038：`build_func_op(...)` 处理 `slice(...)` 表达式时必须先生成 `dma.alloc`，再生成 `dma.slice(target, source, ...)`；表达式与 `func.return` 返回值绑定到 alloc 结果，`dma.slice` 结果不得直接作为返回值。（`test_build_func_op_slice_expression_lowers_to_alloc_then_target_slice`）
   - MGEN-039：纯 symbol 标量 compare family 在函数级返回装配中统一返回 `i1`；`eq/ge` 已有回归测试，`ne/lt/le/gt` 当前冻结为下游待补测试映射。（现有映射：`test_build_func_op_lowers_symbol_eq`、`test_build_func_op_lowers_symbol_ge`；下游待补测试映射：`test_build_func_op_lowers_symbol_ne`、`test_build_func_op_lowers_symbol_lt`、`test_build_func_op_lowers_symbol_le`、`test_build_func_op_lowers_symbol_gt`）
   - MGEN-040：`return float(symbol.int)` 在函数级返回装配中必须返回 `f32`，并与 `symbol.to_float` 结果类型一致。（下游待补测试映射：`test_build_func_op_lowers_symbol_to_float`）

@@ -35,8 +35,10 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 from .ast import (
     AstParseError,
+    ArchBarrierAST,
     ArchLaunchKernelAST,
     BinaryExprAST,
+    ArchQueryAST,
     ConstAST,
     DmaAllocAST,
     DmaFlattenAST,
@@ -412,6 +414,8 @@ def _validate_return_type(
         elif output.value_type is int:
             if isinstance(return_expr, TensorAxisAccessAST) and isinstance(result_type, SymbolValueType):
                 return
+            if isinstance(return_expr, ArchQueryAST) and isinstance(result_type, SymbolValueType):
+                return
             if not func_ast.inputs and isinstance(result_type, SymbolValueType):
                 return
             if _is_symbol_scalar_function(func_ast):
@@ -479,7 +483,7 @@ def _is_zero_return_statement_expr(expr: object) -> bool:
     - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
     """
 
-    return isinstance(expr, (DmaFreeAST, StoreAST, ForAST, ArchLaunchKernelAST))
+    return isinstance(expr, (DmaFreeAST, StoreAST, ForAST, ArchBarrierAST, ArchLaunchKernelAST))
 
 
 def build_func_op(

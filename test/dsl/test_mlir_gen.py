@@ -37,6 +37,7 @@ from xdsl.dialects.builtin import (
     IntegerType,
     ModuleOp,
     StringAttr,
+    SymbolRefAttr,
     f32,
     i1,
     i8,
@@ -63,6 +64,7 @@ from kernel_gen.dialect.dma import (
     DmaViewOp,
 )
 from kernel_gen.dialect.arch import (
+    ArchBarrierOp,
     ArchGetDynamicMemoryOp,
     ArchGetBlockIdOp,
     ArchGetBlockNumOp,
@@ -70,6 +72,8 @@ from kernel_gen.dialect.arch import (
     ArchGetSubthreadNumOp,
     ArchGetThreadIdOp,
     ArchGetThreadNumOp,
+    ArchLaunchKernelOp,
+    ArchScopeAttr,
 )
 from kernel_gen.dialect.nn import (
     NnAddOp,
@@ -108,7 +112,9 @@ from kernel_gen.dialect.symbol import (
 )
 from kernel_gen.dsl.ast import (
     AstParseError,
+    ArchBarrierAST,
     ArchGetDynamicMemoryAST,
+    ArchLaunchKernelAST,
     ArchQueryAST,
     BlockAST,
     BinaryExprAST,
@@ -3613,3 +3619,136 @@ def test_mlir_gen_build_func_op_builtins_and_parse_error() -> None:
 
     with pytest.raises(AstVisitorError, match="Tensor annotation missing dimensions"):
         build_func_op(bad, _tensor_arg([2]))
+
+
+# MGEN-042
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 08:10:00 +0800
+# 最近一次运行成功时间: 2026-04-06 08:10:00 +0800
+# 功能说明: 验证 `barrier(visibility, scope)` 可沿 build_func_op / build_func_op_from_ast lowering 为 `arch.barrier`。
+# 测试目的: 锁定 barrier 在 DSL 链路中保持 `scope=#arch.scope<block>` 与 `[tsm, tlm]` visibility 顺序，并作为零返回语句 helper 发射。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_arch_barrier
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_lowers_arch_barrier(monkeypatch: pytest.MonkeyPatch) -> None:
+    from kernel_gen.operation.arch import BarrierScope, barrier
+
+    def barrier_kernel() -> None:
+        barrier(visibility=[MemorySpace.TSM, MemorySpace.TLM], scope=BarrierScope.BLOCK)
+
+    monkeypatch.setitem(barrier_kernel.__globals__, "barrier", barrier)
+    monkeypatch.setitem(barrier_kernel.__globals__, "MemorySpace", MemorySpace)
+    monkeypatch.setitem(barrier_kernel.__globals__, "BarrierScope", BarrierScope)
+
+    func_ast = parse_function(barrier_kernel)
+    if not isinstance(func_ast.body.statements[0], ArchBarrierAST):
+        raise AssertionError("expected barrier kernel to parse into ArchBarrierAST")
+
+    for func_op in (build_func_op(barrier_kernel), build_func_op_from_ast(func_ast)):
+        body_ops = list(func_op.body.block.ops)
+        barrier_ops = [op for op in body_ops if isinstance(op, ArchBarrierOp)]
+        return_ops = [op for op in body_ops if isinstance(op, func.ReturnOp)]
+        if len(barrier_ops) != 1:
+            raise AssertionError("expected exactly one arch.barrier op")
+        if barrier_ops[0].scope != ArchScopeAttr.from_name("block"):
+            raise AssertionError("expected barrier scope to lower as #arch.scope<block>")
+        if list(barrier_ops[0].visibility.data) != [
+            NnMemorySpaceAttr.from_name("tsm"),
+            NnMemorySpaceAttr.from_name("tlm"),
+        ]:
+            raise AssertionError("expected barrier visibility to lower as [#nn.space<tsm>, #nn.space<tlm>]")
+        if len(return_ops) != 1 or len(return_ops[0].arguments) != 0:
+            raise AssertionError("expected barrier kernel to end with empty func.return")
+        printed = _print_module(ModuleOp([func_op]))
+        if "arch.barrier {scope = #arch.scope<block>, visibility = [#nn.space<tsm>, #nn.space<tlm>]}" not in printed:
+            raise AssertionError("expected printed MLIR to contain arch.barrier custom syntax")
+
+
+# MGEN-043
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 08:10:00 +0800
+# 最近一次运行成功时间: 2026-04-06 08:10:00 +0800
+# 功能说明: 验证 `launch_kernel(callee, block, thread, subthread, *args)` 可沿 DSL 链路 lowering 为 `arch.launch<...>(@callee, args...)`。
+# 测试目的: 锁定 callee 以 symbol ref 进入 IR，尾部 args 保持透传，且 launched body 内 `get_thread_num()` 仍返回 `!symbol.int<\"thread_num\">`。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_arch_launch_with_callee
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_lowers_arch_launch_with_callee(monkeypatch: pytest.MonkeyPatch) -> None:
+    from kernel_gen.operation.arch import BarrierScope, barrier, get_thread_num, launch_kernel
+
+    tensor_args = [_tensor_arg([2, 2]), _tensor_arg([2, 2]), _tensor_arg([2, 2])]
+
+    def add_barrier_body(
+        lhs: "Tensor[f32, 2, 2]",
+        rhs: "Tensor[f32, 2, 2]",
+        out: "Tensor[f32, 2, 2]",
+    ) -> int:
+        barrier(visibility=[MemorySpace.TSM, MemorySpace.TLM], scope=BarrierScope.BLOCK)
+        return get_thread_num()
+
+    def launch_entry(
+        lhs: "Tensor[f32, 2, 2]",
+        rhs: "Tensor[f32, 2, 2]",
+        out: "Tensor[f32, 2, 2]",
+    ) -> None:
+        launch_kernel(add_barrier_body, 1, 4, 1, lhs, rhs, out)
+
+    for fn in (add_barrier_body, launch_entry):
+        monkeypatch.setitem(fn.__globals__, "MemorySpace", MemorySpace)
+        monkeypatch.setitem(fn.__globals__, "BarrierScope", BarrierScope)
+        monkeypatch.setitem(fn.__globals__, "barrier", barrier)
+        monkeypatch.setitem(fn.__globals__, "get_thread_num", get_thread_num)
+        monkeypatch.setitem(fn.__globals__, "launch_kernel", launch_kernel)
+        monkeypatch.setitem(fn.__globals__, "add_barrier_body", add_barrier_body)
+
+    launcher_ast = parse_function(launch_entry)
+    if not isinstance(launcher_ast.body.statements[0], ArchLaunchKernelAST):
+        raise AssertionError("expected launch entry to parse into ArchLaunchKernelAST")
+
+    for func_op in (
+        build_func_op(launch_entry, *tensor_args),
+        build_func_op_from_ast(launcher_ast, runtime_args=tensor_args),
+    ):
+        body_ops = list(func_op.body.block.ops)
+        launch_ops = [op for op in body_ops if isinstance(op, ArchLaunchKernelOp)]
+        return_ops = [op for op in body_ops if isinstance(op, func.ReturnOp)]
+        if len(launch_ops) != 1:
+            raise AssertionError("expected exactly one arch.launch op")
+        launch_op = launch_ops[0]
+        if launch_op.callee != SymbolRefAttr("add_barrier_body"):
+            raise AssertionError("expected launch callee to lower as flat @add_barrier_body symbol ref")
+        if len(tuple(launch_op.args)) != 3:
+            raise AssertionError("expected launch op to forward three kernel args")
+        if launch_op.block.type != SymbolValueType.from_expr("1"):
+            raise AssertionError('expected block extent to lower as !symbol.int<"1">')
+        if launch_op.thread.type != SymbolValueType.from_expr("4"):
+            raise AssertionError('expected thread extent to lower as !symbol.int<"4">')
+        if launch_op.subthread.type != SymbolValueType.from_expr("1"):
+            raise AssertionError('expected subthread extent to lower as !symbol.int<"1">')
+        if len(return_ops) != 1 or len(return_ops[0].arguments) != 0:
+            raise AssertionError("expected launch entry to end with empty func.return")
+        printed = _print_module(ModuleOp([func_op]))
+        if "arch.launch<" not in printed or "@add_barrier_body" not in printed:
+            raise AssertionError("expected printed MLIR to contain arch.launch custom syntax with @callee")
+
+    callee_ast = parse_function(add_barrier_body)
+    for func_op in (
+        build_func_op(add_barrier_body, *tensor_args),
+        build_func_op_from_ast(callee_ast, runtime_args=tensor_args),
+    ):
+        body_ops = list(func_op.body.block.ops)
+        barrier_ops = [op for op in body_ops if isinstance(op, ArchBarrierOp)]
+        query_ops = [op for op in body_ops if isinstance(op, ArchGetThreadNumOp)]
+        return_ops = [op for op in body_ops if isinstance(op, func.ReturnOp)]
+        if len(barrier_ops) != 1:
+            raise AssertionError("expected launched body to lower one arch.barrier op")
+        if len(query_ops) != 1:
+            raise AssertionError("expected launched body to lower one arch.get_thread_num op")
+        if query_ops[0].result.type != SymbolValueType.from_expr("thread_num"):
+            raise AssertionError('expected launched body query type to stay !symbol.int<"thread_num">')
+        if len(return_ops) != 1 or return_ops[0].arguments[0].type != SymbolValueType.from_expr("thread_num"):
+            raise AssertionError("expected launched body return to keep thread_num symbol type")

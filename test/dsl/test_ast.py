@@ -90,6 +90,8 @@ from kernel_gen.dialect.symbol import (
 )
 from kernel_gen.dsl.ast import (
     AstParseError,
+    ArchBarrierAST,
+    ArchLaunchKernelAST,
     ArchQueryAST,
     BlockAST,
     BinaryExprAST,
@@ -1392,3 +1394,190 @@ def test_unsupported_syntax_reports_diagnostics() -> None:
     diagnostics = exc_info.value.diagnostics
     assert diagnostics
     assert diagnostics[0].location is not None
+
+
+# AST-014I
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 08:10:00 +0800
+# 最近一次运行成功时间: 2026-04-06 08:10:00 +0800
+# 功能说明: 验证 `barrier(visibility, scope)` 可解析为 `ArchBarrierAST`。
+# 测试目的: 锁定 barrier 只接受关键字形态，且 visibility / scope 字段在 AST 中按 spec 保留。
+# 使用示例: pytest -q test/dsl/test_ast.py -k test_parse_function_parses_arch_barrier_statement
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast.py
+def test_parse_function_parses_arch_barrier_statement(monkeypatch: pytest.MonkeyPatch) -> None:
+    from kernel_gen.operation.arch import BarrierScope, barrier
+
+    def barrier_kernel() -> None:
+        barrier(visibility=[MemorySpace.TSM, MemorySpace.TLM], scope=BarrierScope.BLOCK)
+
+    monkeypatch.setitem(barrier_kernel.__globals__, "barrier", barrier)
+    monkeypatch.setitem(barrier_kernel.__globals__, "MemorySpace", MemorySpace)
+    monkeypatch.setitem(barrier_kernel.__globals__, "BarrierScope", BarrierScope)
+
+    func_ast = parse_function(barrier_kernel)
+    if len(func_ast.body.statements) != 1:
+        raise AssertionError("expected barrier kernel to lower to one AST statement")
+    stmt = func_ast.body.statements[0]
+    if not isinstance(stmt, ArchBarrierAST):
+        raise AssertionError("expected barrier kernel to parse into ArchBarrierAST")
+    if stmt.visibility != [MemorySpace.TSM, MemorySpace.TLM]:
+        raise AssertionError("expected barrier visibility to preserve MemorySpace order")
+    if stmt.scope is not BarrierScope.BLOCK:
+        raise AssertionError("expected barrier scope to stay BarrierScope.BLOCK")
+
+
+# AST-014J
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 08:10:00 +0800
+# 最近一次运行成功时间: 2026-04-06 08:10:00 +0800
+# 功能说明: 验证 barrier 对非法 arity / visibility / scope 返回固定诊断。
+# 测试目的: 锁定 `Unsupported barrier arity`、`barrier visibility must be non-empty MemorySpace list` 与 `barrier scope must be BarrierScope` 三类错误口径。
+# 使用示例: pytest -q test/dsl/test_ast.py -k test_parse_function_rejects_invalid_arch_barrier_variants
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast.py
+def test_parse_function_rejects_invalid_arch_barrier_variants(monkeypatch: pytest.MonkeyPatch) -> None:
+    from kernel_gen.operation.arch import BarrierScope, barrier
+
+    def bad_positional() -> None:
+        barrier([MemorySpace.TSM, MemorySpace.TLM], scope=BarrierScope.BLOCK)
+
+    def bad_visibility_type() -> None:
+        barrier(visibility=(MemorySpace.TSM, MemorySpace.TLM), scope=BarrierScope.BLOCK)
+
+    def bad_visibility_empty() -> None:
+        barrier(visibility=[], scope=BarrierScope.BLOCK)
+
+    def bad_scope_type() -> None:
+        barrier(visibility=[MemorySpace.TSM, MemorySpace.TLM], scope="block")
+
+    for fn in (bad_positional, bad_visibility_type, bad_visibility_empty, bad_scope_type):
+        monkeypatch.setitem(fn.__globals__, "barrier", barrier)
+        monkeypatch.setitem(fn.__globals__, "MemorySpace", MemorySpace)
+        monkeypatch.setitem(fn.__globals__, "BarrierScope", BarrierScope)
+
+    expected_messages = (
+        ("Unsupported barrier arity", bad_positional),
+        ("barrier visibility must be non-empty MemorySpace list", bad_visibility_type),
+        ("barrier visibility must be non-empty MemorySpace list", bad_visibility_empty),
+        ("barrier scope must be BarrierScope", bad_scope_type),
+    )
+    for expected_message, fn in expected_messages:
+        with pytest.raises(AstParseError) as exc_info:
+            parse_function(fn)
+        diagnostics = exc_info.value.diagnostics
+        if not diagnostics:
+            raise AssertionError(f"expected diagnostics for barrier variant: {expected_message}")
+        if diagnostics[0].message != expected_message:
+            raise AssertionError(f"expected barrier diagnostic {expected_message!r}, got {diagnostics[0].message!r}")
+
+
+# AST-014K
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 08:10:00 +0800
+# 最近一次运行成功时间: 2026-04-06 08:10:00 +0800
+# 功能说明: 验证 `launch_kernel(callee, block, thread, subthread, *args)` 可解析为新版 `ArchLaunchKernelAST`。
+# 测试目的: 锁定 callee 从函数对象规整为 symbol ref 名称，且尾部 args 顺序在 AST 中保留。
+# 使用示例: pytest -q test/dsl/test_ast.py -k test_parse_function_parses_arch_launch_kernel_with_callee
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast.py
+def test_parse_function_parses_arch_launch_kernel_with_callee(monkeypatch: pytest.MonkeyPatch) -> None:
+    from kernel_gen.operation.arch import launch_kernel
+
+    def add_barrier_body(
+        lhs: "Tensor[f32, 2, 2]",
+        rhs: "Tensor[f32, 2, 2]",
+        out: "Tensor[f32, 2, 2]",
+    ) -> None:
+        return None
+
+    def launch_entry(
+        lhs: "Tensor[f32, 2, 2]",
+        rhs: "Tensor[f32, 2, 2]",
+        out: "Tensor[f32, 2, 2]",
+        thread_extent: int,
+    ) -> None:
+        launch_kernel(add_barrier_body, 1, thread_extent, 2, lhs, rhs, out)
+
+    monkeypatch.setitem(launch_entry.__globals__, "launch_kernel", launch_kernel)
+    monkeypatch.setitem(launch_entry.__globals__, "add_barrier_body", add_barrier_body)
+
+    func_ast = parse_function(launch_entry)
+    if len(func_ast.body.statements) != 1:
+        raise AssertionError("expected launch entry to lower to one AST statement")
+    stmt = func_ast.body.statements[0]
+    if not isinstance(stmt, ArchLaunchKernelAST):
+        raise AssertionError("expected launch entry to parse into ArchLaunchKernelAST")
+    if stmt.callee != "add_barrier_body":
+        raise AssertionError("expected launch callee to normalize to function symbol name")
+    if not isinstance(stmt.block, ConstAST) or stmt.block.value != 1:
+        raise AssertionError("expected block extent to stay constant 1")
+    if not isinstance(stmt.thread, ScalarArgAST) or stmt.thread.name != "thread_extent":
+        raise AssertionError("expected thread extent to stay scalar arg reference")
+    if not isinstance(stmt.subthread, ConstAST) or stmt.subthread.value != 2:
+        raise AssertionError("expected subthread extent to stay constant 2")
+    if [getattr(arg, "name", None) for arg in stmt.args] != ["lhs", "rhs", "out"]:
+        raise AssertionError("expected launch args to preserve positional order")
+
+
+# AST-014L
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 08:10:00 +0800
+# 最近一次运行成功时间: 2026-04-06 08:10:00 +0800
+# 功能说明: 验证 launch_kernel 对非法 callee / arity / extent 返回固定诊断。
+# 测试目的: 锁定字符串/属性 callee 禁止、关键字调用禁用与静态 extent 正数约束。
+# 使用示例: pytest -q test/dsl/test_ast.py -k test_parse_function_rejects_invalid_arch_launch_kernel_variants
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast.py
+def test_parse_function_rejects_invalid_arch_launch_kernel_variants(monkeypatch: pytest.MonkeyPatch) -> None:
+    from kernel_gen.operation.arch import launch_kernel
+
+    def launched_body() -> None:
+        return None
+
+    class Holder:
+        add_barrier_body = launched_body
+
+    holder = Holder()
+
+    def bad_string_callee() -> None:
+        launch_kernel("add_barrier_body", 1, 2, 1)
+
+    def bad_attribute_callee() -> None:
+        launch_kernel(holder.add_barrier_body, 1, 2, 1)
+
+    def bad_keyword_call() -> None:
+        launch_kernel(launched_body, block=1, thread=2, subthread=1)
+
+    def bad_zero_extent() -> None:
+        launch_kernel(launched_body, 0, 2, 1)
+
+    for fn in (bad_string_callee, bad_attribute_callee, bad_keyword_call, bad_zero_extent):
+        monkeypatch.setitem(fn.__globals__, "launch_kernel", launch_kernel)
+        monkeypatch.setitem(fn.__globals__, "launched_body", launched_body)
+        monkeypatch.setitem(fn.__globals__, "holder", holder)
+
+    expected_messages = (
+        ("launch_kernel callee must be function symbol reference", bad_string_callee),
+        ("launch_kernel callee must be function symbol reference", bad_attribute_callee),
+        ("Unsupported launch_kernel arity", bad_keyword_call),
+        ("launch_kernel block must be > 0", bad_zero_extent),
+    )
+    for expected_message, fn in expected_messages:
+        with pytest.raises(AstParseError) as exc_info:
+            parse_function(fn)
+        diagnostics = exc_info.value.diagnostics
+        if not diagnostics:
+            raise AssertionError(f"expected diagnostics for launch_kernel variant: {expected_message}")
+        if diagnostics[0].message != expected_message:
+            raise AssertionError(
+                f"expected launch_kernel diagnostic {expected_message!r}, got {diagnostics[0].message!r}"
+            )

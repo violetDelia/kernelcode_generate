@@ -42,14 +42,16 @@ from xdsl.ir import Attribute, Block, SSAValue
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.arch import (
+    ArchBarrierOp,
     ArchGetBlockIdOp,
     ArchGetBlockNumOp,
     ArchGetDynamicMemoryOp,
     ArchGetSubthreadIdOp,
     ArchGetSubthreadNumOp,
+    ArchLaunchKernelOp,
+    ArchScopeAttr,
     ArchGetThreadIdOp,
     ArchGetThreadNumOp,
-    ArchLaunchKernelOp,
 )
 from kernel_gen.dialect.dma import (
     DmaAllocOp,
@@ -108,8 +110,10 @@ from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 from kernel_gen.target import registry
+from kernel_gen.operation import arch as _KG_OPERATION_ARCH
 
 from .ast import (
+    ArchBarrierAST,
     ArchGetDynamicMemoryAST,
     ArchLaunchKernelAST,
     ArchQueryAST,
@@ -683,6 +687,113 @@ def _const_symbol_int(value: int, ctx: EmitContext, location: SourceLocation | N
     op = arith.ConstantOp(attr)
     ctx.builder.add_op(op)
     return _cast_to_symbol_int(op.result, ctx, str(value), location)
+
+
+def _build_arch_barrier_visibility_attr(
+    visibility: object,
+    location: SourceLocation | None,
+) -> ArrayAttr[Attribute]:
+    """将 barrier visibility AST 值转换为 arch.barrier 属性。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅接受非空 `list[MemorySpace]`。
+    - 将 `MemorySpace.TSM/TLM` 映射为 `#nn.space<tsm/tlm>`，保持原有顺序。
+
+    使用示例:
+    - _build_arch_barrier_visibility_attr([MemorySpace.TSM, MemorySpace.TLM], location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    if not isinstance(visibility, list) or not visibility or not all(isinstance(space, MemorySpace) for space in visibility):
+        raise _LoweringError("barrier visibility must be non-empty MemorySpace list", location=location)
+    space_map = {
+        MemorySpace.TSM: "tsm",
+        MemorySpace.TLM: "tlm",
+    }
+    attrs: list[Attribute] = []
+    for space in visibility:
+        space_name = space_map.get(space)
+        if space_name is None:
+            raise _LoweringError("barrier visibility must be non-empty MemorySpace list", location=location)
+        attrs.append(NnMemorySpaceAttr.from_name(space_name))
+    return ArrayAttr(attrs)
+
+
+def _build_arch_barrier_scope_attr(
+    scope: object,
+    location: SourceLocation | None,
+) -> ArchScopeAttr:
+    """将 barrier scope AST 值转换为 `#arch.scope<...>`。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅接受 operation 层 `BarrierScope` 枚举。
+    - 统一复用 `ArchScopeAttr.from_name(...)` 构造 IR 属性。
+
+    使用示例:
+    - _build_arch_barrier_scope_attr(_KG_OPERATION_ARCH.BarrierScope.BLOCK, location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    if not isinstance(scope, _KG_OPERATION_ARCH.BarrierScope):
+        raise _LoweringError("barrier scope must be BarrierScope", location=location)
+    return ArchScopeAttr.from_name(scope.value)
+
+
+def _lower_launch_extent_symbol(
+    extent: object,
+    dim_name: str,
+    ctx: EmitContext,
+    location: SourceLocation | None,
+) -> SSAValue:
+    """将 launch extent 归一化为 `!symbol.int<...>`。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 支持 `ConstAST(int)` 与 `ScalarArgAST(int)` 两类 DSL extent 入口。
+    - 对静态已知值保持 `> 0` 约束，并统一返回 `!symbol.int` SSAValue。
+
+    使用示例:
+    - _lower_launch_extent_symbol(ConstAST(8), "thread", ctx, location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    if isinstance(extent, ConstAST):
+        if not isinstance(extent.value, int):
+            raise _LoweringError(f"launch_kernel {dim_name} must be !symbol.int", location=location)
+        if extent.value <= 0:
+            raise _LoweringError(f"launch_kernel {dim_name} must be > 0", location=location)
+        return _const_symbol_int(extent.value, ctx, location)
+
+    value = _lower_expr(extent, ctx)
+    if isinstance(value.type, SymbolValueType):
+        expr_text = value.type.expr.expr.data
+        if isinstance(expr_text, str) and expr_text.lstrip("-").isdigit() and int(expr_text) <= 0:
+            raise _LoweringError(f"launch_kernel {dim_name} must be > 0", location=location)
+        return value
+
+    if isinstance(extent, ScalarArgAST):
+        return _cast_to_symbol_int(value, ctx, extent.name, location)
+    raise _LoweringError(f"launch_kernel {dim_name} must be !symbol.int", location=location)
 
 
 def _ensure_index_value(value: SSAValue, ctx: EmitContext, location: SourceLocation | None) -> SSAValue:
@@ -2214,6 +2325,7 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
                 NnUnaryAST,
                 DmaFreeAST,
                 ForAST,
+                ArchBarrierAST,
                 ArchGetDynamicMemoryAST,
                 ArchLaunchKernelAST,
                 ArchQueryAST,
@@ -2449,6 +2561,8 @@ def _infer_expr_type(
         raise _LoweringError("free does not produce a value", location=expr.location)
     if isinstance(expr, ForAST):
         raise _LoweringError("ForAST does not produce a value", location=expr.location)
+    if isinstance(expr, ArchBarrierAST):
+        raise _LoweringError("barrier does not produce a value", location=expr.location)
     if isinstance(expr, ArchLaunchKernelAST):
         raise _LoweringError("launch_kernel does not produce a value", location=expr.location)
     if isinstance(expr, ArchGetDynamicMemoryAST):
@@ -3224,25 +3338,29 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
         free_op = DmaFreeOp(value)
         ctx.builder.add_op(free_op)
         return free_op
+    if isinstance(node, ArchBarrierAST):
+        barrier_op = ArchBarrierOp(
+            _build_arch_barrier_scope_attr(node.scope, node.location),
+            _build_arch_barrier_visibility_attr(node.visibility, node.location),
+        )
+        try:
+            barrier_op.verify()
+        except VerifyException as exc:
+            raise _LoweringError(str(exc), location=node.location) from exc
+        ctx.builder.add_op(barrier_op)
+        return barrier_op
     if isinstance(node, ArchLaunchKernelAST):
-        if not isinstance(node.name, str) or node.name == "":
-            raise _LoweringError("launch_kernel name must be non-empty str", location=node.location)
-        block = _lower_expr(node.block, ctx)
-        thread = _lower_expr(node.thread, ctx)
-        subthread = _lower_expr(node.subthread, ctx)
-
-        def _ensure_symbol_extent(value: SSAValue, dim_name: str) -> None:
-            if not isinstance(value.type, SymbolValueType):
-                raise _LoweringError(f"launch_kernel {dim_name} must be !symbol.int", location=node.location)
-            expr_text = value.type.expr.expr.data
-            if isinstance(expr_text, str) and expr_text.lstrip("-").isdigit():
-                if int(expr_text) <= 0:
-                    raise _LoweringError(f"launch_kernel {dim_name} must be > 0", location=node.location)
-
-        _ensure_symbol_extent(block, "block")
-        _ensure_symbol_extent(thread, "thread")
-        _ensure_symbol_extent(subthread, "subthread")
-        op = ArchLaunchKernelOp(node.name, block, thread, subthread)
+        if not isinstance(node.callee, str) or node.callee == "":
+            raise _LoweringError("launch_kernel callee must be function symbol reference", location=node.location)
+        block = _lower_launch_extent_symbol(node.block, "block", ctx, node.location)
+        thread = _lower_launch_extent_symbol(node.thread, "thread", ctx, node.location)
+        subthread = _lower_launch_extent_symbol(node.subthread, "subthread", ctx, node.location)
+        args = [SSAValue.get(_lower_expr(arg, ctx)) for arg in node.args]
+        op = ArchLaunchKernelOp(node.callee, block, thread, subthread, args)
+        try:
+            op.verify()
+        except VerifyException as exc:
+            raise _LoweringError(str(exc), location=node.location) from exc
         ctx.builder.add_op(op)
         return op
     if isinstance(node, ForAST):
