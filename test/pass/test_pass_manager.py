@@ -9,7 +9,7 @@
 当前覆盖率信息:
 - 当前覆盖率: `100%`（语句覆盖 `100%`，分支覆盖 `100%`）。
 - 达标判定: 已达到 `95%` 覆盖率达标线。
-- 本文件覆盖 `TC-PASS-001..013`，并补充 `Pass` 缺少 `name` 属性的非法输入分支。
+- 本文件覆盖 `TC-PASS-001..017`，并补充 `Pass` 缺少 `name` 属性的非法输入分支。
 
 覆盖率命令:
 - `pytest -q --cov=kernel_gen.passes.pass_manager --cov-branch --cov-report=term-missing test/pass/test_pass_manager.py`
@@ -504,4 +504,105 @@ def test_pass_manager_rejects_dma_memory_hierarchy_before_out_params() -> None:
     pm.add_pass(LowerNnToKernelPass())
     pm.add_pass(LowerDmaMemoryHierarchyPass())
     with pytest.raises(ValueError, match="DmaMemoryHierarchyOrderError"):
+        pm.run(object())
+
+
+# TC-PASS-015
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-07 09:10:00 +0800
+# 最近一次运行成功时间: 2026-04-07 09:10:00 +0800
+# 功能说明: 验证显式启用 symbol-loop-hoist 但缺少 kernel-split 时会被拒绝，并包含固定错误短语。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_rejects_symbol_loop_hoist_without_kernel_split
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
+# 对应 spec 文件路径: spec/pass/pass_manager.md
+# 对应测试文件路径: test/pass/test_pass_manager.py
+def test_pass_manager_rejects_symbol_loop_hoist_without_kernel_split() -> None:
+    lowering_module = importlib.import_module("kernel_gen.passes.lowering")
+    LowerNnToKernelPass = lowering_module.LowerNnToKernelPass
+    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
+    LowerDmaMemoryHierarchyPass = lowering_module.LowerDmaMemoryHierarchyPass
+
+    class SymbolLoopHoistPass(Pass):
+        name = "symbol-loop-hoist"
+
+        def run(self: "SymbolLoopHoistPass", target: object) -> object:
+            return target
+
+    pm = PassManager(name="missing-kernel-split")
+    pm.add_pass(LowerNnToKernelPass())
+    pm.add_pass(BufferResultsToOutParamsPass())
+    pm.add_pass(SymbolLoopHoistPass())
+    pm.add_pass(LowerDmaMemoryHierarchyPass())
+    with pytest.raises(ValueError, match="SymbolLoopHoistRequiresSymbolFor"):
+        pm.run(object())
+
+
+# TC-PASS-016
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-07 09:10:00 +0800
+# 最近一次运行成功时间: 2026-04-07 09:10:00 +0800
+# 功能说明: 验证 symbol-loop-hoist 必须位于 kernel-split 之后，否则显式失败。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_rejects_symbol_loop_hoist_before_kernel_split
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
+# 对应 spec 文件路径: spec/pass/pass_manager.md
+# 对应测试文件路径: test/pass/test_pass_manager.py
+def test_pass_manager_rejects_symbol_loop_hoist_before_kernel_split() -> None:
+    lowering_module = importlib.import_module("kernel_gen.passes.lowering")
+    LowerNnToKernelPass = lowering_module.LowerNnToKernelPass
+    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
+    dma_hierarchy_module = importlib.import_module("kernel_gen.passes.lowering.dma_memory_hierarchy")
+    LowerDmaMemoryHierarchyPass = dma_hierarchy_module.LowerDmaMemoryHierarchyPass
+    kernel_split_module = importlib.import_module("kernel_gen.passes.lowering.kernel_split")
+    KernelSplitPass = kernel_split_module.KernelSplitPass
+
+    class SymbolLoopHoistPass(Pass):
+        name = "symbol-loop-hoist"
+
+        def run(self: "SymbolLoopHoistPass", target: object) -> object:
+            return target
+
+    pm = PassManager(name="bad-symbol-loop-hoist-order")
+    pm.add_pass(LowerNnToKernelPass())
+    pm.add_pass(BufferResultsToOutParamsPass())
+    pm.add_pass(SymbolLoopHoistPass())
+    pm.add_pass(KernelSplitPass())
+    pm.add_pass(LowerDmaMemoryHierarchyPass())
+    with pytest.raises(ValueError, match="SymbolLoopHoistRequiresSymbolFor"):
+        pm.run(object())
+
+
+# TC-PASS-017
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-07 09:10:00 +0800
+# 最近一次运行成功时间: 2026-04-07 09:10:00 +0800
+# 功能说明: 验证 symbol-loop-hoist 必须位于 lower-dma-memory-hierarchy 之前，否则显式失败。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_rejects_symbol_loop_hoist_after_dma_memory_hierarchy
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
+# 对应 spec 文件路径: spec/pass/pass_manager.md
+# 对应测试文件路径: test/pass/test_pass_manager.py
+def test_pass_manager_rejects_symbol_loop_hoist_after_dma_memory_hierarchy() -> None:
+    lowering_module = importlib.import_module("kernel_gen.passes.lowering")
+    LowerNnToKernelPass = lowering_module.LowerNnToKernelPass
+    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
+    dma_hierarchy_module = importlib.import_module("kernel_gen.passes.lowering.dma_memory_hierarchy")
+    LowerDmaMemoryHierarchyPass = dma_hierarchy_module.LowerDmaMemoryHierarchyPass
+    kernel_split_module = importlib.import_module("kernel_gen.passes.lowering.kernel_split")
+    KernelSplitPass = kernel_split_module.KernelSplitPass
+
+    class SymbolLoopHoistPass(Pass):
+        name = "symbol-loop-hoist"
+
+        def run(self: "SymbolLoopHoistPass", target: object) -> object:
+            return target
+
+    pm = PassManager(name="bad-symbol-loop-hoist-dma-order")
+    pm.add_pass(LowerNnToKernelPass())
+    pm.add_pass(BufferResultsToOutParamsPass())
+    pm.add_pass(KernelSplitPass())
+    pm.add_pass(LowerDmaMemoryHierarchyPass())
+    pm.add_pass(SymbolLoopHoistPass())
+    with pytest.raises(ValueError, match="SymbolLoopHoistRequiresSymbolFor"):
         pm.run(object())

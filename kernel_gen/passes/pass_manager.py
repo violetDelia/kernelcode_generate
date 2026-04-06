@@ -197,6 +197,23 @@ class PassManager:
         - 功能实现: kernel_gen/passes/pass_manager.py
         """
         pass_names = [item.name for item in self._passes]
+        if "symbol-loop-hoist" in pass_names:
+            hoist_index = pass_names.index("symbol-loop-hoist")
+            if "kernel-split" not in pass_names:
+                raise ValueError(
+                    "SymbolLoopHoistRequiresSymbolFor: symbol-loop-hoist requires kernel-split to materialize symbol.for"
+                )
+            kernel_split_index = pass_names.index("kernel-split")
+            if hoist_index < kernel_split_index:
+                raise ValueError(
+                    "SymbolLoopHoistRequiresSymbolFor: symbol-loop-hoist must run after kernel-split"
+                )
+            if "lower-dma-memory-hierarchy" in pass_names:
+                dma_index = pass_names.index("lower-dma-memory-hierarchy")
+                if hoist_index > dma_index:
+                    raise ValueError(
+                        "SymbolLoopHoistRequiresSymbolFor: symbol-loop-hoist must run before lower-dma-memory-hierarchy"
+                    )
         if "lower-dma-memory-hierarchy" in pass_names:
             dma_index = pass_names.index("lower-dma-memory-hierarchy")
             if "buffer-results-to-out-params" not in pass_names:
