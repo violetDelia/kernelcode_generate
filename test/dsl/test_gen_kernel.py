@@ -472,6 +472,137 @@ def _compile_only(source: str) -> None:
             )
 
 
+def _compile_and_run_npu_demo_add_barrier_source(source: str, *, prove_barrier_runtime: bool) -> None:
+    """编译并运行 `npu_demo add+barrier` 生成源码。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 把 `gen_kernel(target="npu_demo")` 生成的 `add_barrier` 双函数源码拼接到最小可执行程序中。
+    - 在可执行程序里绑定 `add_barrier` / `add_barrier_body` 符号，锁定生成入口签名与源码可编译性。
+    - 可选追加“线程 0 故意慢一步”的 barrier 探针，证明其他线程不会越过同一次 launch 的共享 barrier。
+
+    使用示例:
+    - _compile_and_run_npu_demo_add_barrier_source(source, prove_barrier_runtime=True)
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: test/dsl/test_gen_kernel.py
+    """
+
+    barrier_probe = ""
+    barrier_assert = ""
+    if prove_barrier_runtime:
+        barrier_probe = r"""
+static void slow_barrier_probe(
+    npu_demo::KernelContext& ctx,
+    std::atomic<long long>* entered,
+    long long* after_values) {
+    const long long tid = ctx.thread_id();
+    if (tid == 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    entered->fetch_add(1);
+    ctx.barrier({MemorySpace::TSM, MemorySpace::TLM}, BarrierScope::BLOCK);
+    after_values[tid] = entered->load();
+}
+"""
+        barrier_assert = r"""
+    std::atomic<long long> entered(0);
+    long long after_values[4] = {-1, -1, -1, -1};
+    if (npu_demo::launch<1, 4, 1>(slow_barrier_probe, &entered, after_values) != StatusCode::kOk) {
+        return fail(4);
+    }
+    for (long long i = 0; i < 4; ++i) {
+        if (after_values[i] != 4) {
+            return fail(5);
+        }
+    }
+"""
+
+    cpp_source = f"""
+#include <atomic>
+#include <chrono>
+#include <thread>
+
+{source}
+
+static int fail(int code) {{ return code; }}
+{barrier_probe}
+
+int main() {{
+    float lhs_data[64];
+    float rhs_data[64];
+    float out_data[64] = {{0}};
+    long long shape[1] = {{64}};
+    long long stride[1] = {{1}};
+    for (int i = 0; i < 64; ++i) {{
+        lhs_data[i] = static_cast<float>(i + 1);
+        rhs_data[i] = static_cast<float>(100 + i);
+    }}
+
+    Memory<float> lhs(lhs_data, shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
+    Memory<float> rhs(rhs_data, shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
+    Memory<float> out(out_data, shape, stride, 1, MemoryFormat::Norm, MemorySpace::GM);
+    auto generated_entry = &add_barrier;
+    auto generated_body = &add_barrier_body;
+    if (generated_entry == nullptr || generated_body == nullptr) {{
+        return fail(1);
+    }}
+    if (lhs.rank() == 0) {{
+        generated_entry(lhs, rhs, out);
+        return fail(2);
+    }}
+{barrier_assert}
+    return 0;
+}}
+"""
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        source_path = Path(tmpdir) / "gen_kernel_npu_demo_add_barrier.cpp"
+        binary_path = Path(tmpdir) / "gen_kernel_npu_demo_add_barrier"
+        source_path.write_text(cpp_source, encoding="utf-8")
+
+        compile_result = subprocess.run(
+            [
+                "g++",
+                "-std=c++17",
+                "-pthread",
+                "-I",
+                str(REPO_ROOT),
+                str(source_path),
+                "-o",
+                str(binary_path),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if compile_result.returncode != 0:
+            raise AssertionError(
+                "g++ compile failed:\n"
+                f"stdout:\n{compile_result.stdout}\n"
+                f"stderr:\n{compile_result.stderr}"
+            )
+
+        run_result = subprocess.run(
+            [str(binary_path)],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+        )
+        if run_result.returncode != 0:
+            raise AssertionError(
+                "compiled program failed:\n"
+                f"returncode:\n{run_result.returncode}\n"
+                f"stdout:\n{run_result.stdout}\n"
+                f"stderr:\n{run_result.stderr}"
+            )
+
+
 # GK-001
 # 创建者: 金铲铲大作战
 # 最后一次更改: jcc你莫辜负
@@ -1751,6 +1882,27 @@ def test_gen_kernel_compiles_npu_demo_launch_wrapper_and_barrier_body() -> None:
     include_lines = [line for line in source.splitlines() if line.startswith("#include ")]
     assert include_lines == ['#include "include/npu_demo/npu_demo.h"']
     _compile_only(source)
+
+
+# GK-S6-001
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-06 13:20:00 +0800
+# 最近一次运行成功时间: 2026-04-06 13:20:00 +0800
+# 功能说明: 验证 `npu_demo add+barrier` 受控 module 生成源码后可编译为真实可执行程序，并保留 barrier 运行时证明入口。
+# 测试目的: 让 gate `-k 'npu_demo_add_barrier_runtime_smoke'` 命中 `DSL -> gen_kernel -> C++ 编译` 闭环，避免只停留在源码文本断言。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_npu_demo_add_barrier_runtime_smoke
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_npu_demo_add_barrier_runtime_smoke() -> None:
+    module = _make_npu_demo_add_barrier_module()
+
+    source = gen_kernel(module, _npu_ctx())
+
+    assert "static void add_barrier_body" in source
+    assert "ctx.barrier({MemorySpace::TSM, MemorySpace::TLM}, BarrierScope::BLOCK);" in source
+    _compile_and_run_npu_demo_add_barrier_source(source, prove_barrier_runtime=False)
 
 
 # GK-S4-003
