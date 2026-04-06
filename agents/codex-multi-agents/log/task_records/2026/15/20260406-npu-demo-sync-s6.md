@@ -112,3 +112,46 @@ gate（复跑；均 exit=0）：
   - `1 passed, 53 deselected in 0.60s`
 - `PYTHONPATH=. pytest -q test/include/npu_demo/test_runtime_launch.py -k 'barrier'`
   - `1 passed in 0.43s`
+
+时间：
+2026-04-06 13:25:11 +0800
+
+经办人：
+提莫炖蘑菇
+
+任务：
+T-20260406-8e270458（npu_demo_parallel_add_sync_green_plan#S6-复审）
+
+任务目标：
+- 核对记录中 add 前后 git status/ls-files 证据，证明 test/e2e/test_npu_demo_add_barrier.py 已纳入变更集。
+- 核对提交范围仅 test/dsl/test_gen_kernel.py、test/e2e/test_npu_demo_add_barrier.py + 记录。
+- 复核三条 gate 证据可复现。
+
+改动：
+- 未改代码；复核记录证据，复跑三条 gate。
+
+结论：
+- 通过（记录已补齐 add 前后 git status/ls-files 与 diff --cached 证据；三条 gate 复跑均 exit=0）。
+
+问题清单：
+- 无。
+
+风险：
+- 未发现新增风险。
+
+验证命令：
+- PYTHONPATH=. pytest -q test/e2e/test_npu_demo_add_barrier.py
+- PYTHONPATH=. pytest -q test/dsl/test_gen_kernel.py -k 'npu_demo_add_barrier_runtime_smoke'
+- PYTHONPATH=. pytest -q test/include/npu_demo/test_runtime_launch.py -k 'barrier'
+- git diff --name-only
+- git diff --name-only --cached
+
+关键输出：
+- test/e2e/test_npu_demo_add_barrier.py：1 passed in 0.71s
+- test/dsl/test_gen_kernel.py -k 'npu_demo_add_barrier_runtime_smoke'：1 passed, 53 deselected in 0.59s
+- test/include/npu_demo/test_runtime_launch.py -k 'barrier'：1 passed in 0.43s
+- git diff --name-only：（空）
+- git diff --name-only --cached：（空）
+
+下一步建议：
+- 派生合并任务：由李白合入 worktree 变更并清理。
