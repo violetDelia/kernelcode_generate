@@ -5,12 +5,13 @@
 - 定义将 `nn` dialect IR lower 到 `dma/kernel` dialect IR 的 pass 规范。
 - 当需要为结果分配输出 Memory 时，使用 `dma.alloc`。
 - `nn.broadcast` / `nn.transpose` 必须 lower 为 `dma.broadcast` / `dma.transpose`，而不是 `kernel` 计算 op。
+- `nn.softmax` 不在本 pass 内直接 lower；残留 `nn.softmax` 必须在进入本 pass 前完成分解。
 - 不负责高层语义推导、跨函数优化或后端代码生成。
 
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/pass/lowering/nn_to_kernel.md`](../../../spec/pass/lowering/nn_to_kernel.md)
 - `功能实现`：[`kernel_gen/passes/lowering/nn_to_kernel.py`](../../../kernel_gen/passes/lowering/nn_to_kernel.py)
 - `test`：[`test/pass/test_lowering_nn_to_kernel.py`](../../../test/pass/test_lowering_nn_to_kernel.py)
@@ -26,7 +27,7 @@
 
 - 将 `nn` dialect 的逐元素算术/比较/select/cast lower 为 `kernel` dialect 对应 op。
 - 将 `nn.broadcast` / `nn.transpose` lower 为 `dma.broadcast` / `dma.transpose`。
-- 将 `nn.exp` / `nn.reduce_*` / `nn.softmax` / `nn.matmul` / `nn.img2col*` lower 为具名 `kernel.*` op。
+- 将 `nn.exp` / `nn.reduce_*` / `nn.matmul` / `nn.img2col*` lower 为具名 `kernel.*` op。
 - 保证 Memory 类型与空间在 lowering 前后保持一致，输出 Memory 由 `dma.alloc` 创建并交给 kernel op 使用。
 - 当结果类型包含符号或静态维度时，`dma.alloc` 必须保留对应 `shape` 的维度值。
 - 产出仅包含 `kernel`/`dma`/`func`/`builtin` 等必要 op，不再保留 `nn` op。
@@ -35,9 +36,10 @@
 
 - 仅支持以下 `nn` op lowering：
   - 逐元素：`nn.add`/`nn.sub`/`nn.mul`/`nn.div`/`nn.truediv`、`nn.eq`/`nn.ne`/`nn.lt`/`nn.le`/`nn.gt`/`nn.ge`、`nn.select`、`nn.cast`
-  - 结构化：`nn.broadcast`、`nn.transpose`、`nn.exp`、`nn.reduce_sum`/`nn.reduce_min`/`nn.reduce_max`、`nn.softmax`、`nn.matmul`、`nn.img2col1d`/`nn.img2col2d`
+  - 结构化：`nn.broadcast`、`nn.transpose`、`nn.exp`、`nn.reduce_sum`/`nn.reduce_min`/`nn.reduce_max`、`nn.matmul`、`nn.img2col1d`/`nn.img2col2d`
 - `nn.truediv` 与 `nn.div` 在 pass 层统一 lower 为 `kernel.div`。
 - 本 pass 不负责把高层 helper 分解成方言 op（例如 `conv/fc` 的 `img2col/matmul` 分解）；它只处理已进入 `nn dialect` 的 op。
+- `nn.softmax` 只能作为上游 `DecomposeNnSoftmaxPass` 的输入锚点存在；若仍有残留 `nn.softmax` 进入本 pass，必须报错 `nn.softmax must be decomposed before LowerNnToKernelPass`，禁止 silent fallback 或直降 `kernel.softmax`。
 - 不改写函数签名或返回语义，不引入新的返回约束；仅在函数体内替换 op。
 - 若模块内还存在跨函数 `memory-return func.call`，本 pass 只负责把函数体里的 `nn` op lower 到 `kernel/dma`；函数签名、caller out 实参补齐与旧 call result SSA 清理必须由后续 `BufferResultsToOutParamsPass` 统一处理。
 - 当 `nn` op 结果需要输出 Memory 时，必须插入 `dma.alloc`；不允许隐式创建其他分配方式。
@@ -137,7 +139,6 @@ module = pass_obj.run(module)
     - `nn.reduce_sum -> kernel.reduce_sum`
     - `nn.reduce_min -> kernel.reduce_min`
     - `nn.reduce_max -> kernel.reduce_max`
-    - `nn.softmax -> kernel.softmax`
     - `nn.matmul -> kernel.matmul`
     - `nn.img2col1d -> kernel.img2col1d`
     - `nn.img2col2d -> kernel.img2col2d`
@@ -176,7 +177,7 @@ module = pass_obj.run(module)
 | `nn.eq/ne/lt/le/gt/ge`（memory+symbol/const） | `dma.broadcast -> kernel.compare family` | 必须先物化 scalar/symbol 到 temporary memory，再 compare |
 | `nn.exp` | `kernel.exp` | 仅浮点；输入/输出 shape/space 一致 |
 | `nn.reduce_*` | `kernel.reduce_*` | `axis/keepdim` 与 out.shape 必须机械一致 |
-| `nn.softmax` | `kernel.softmax` | `axis` 合法；输入/输出 shape/space 一致 |
+| `nn.softmax` | 上游先分解为 `nn.reduce_max -> nn.broadcast -> nn.sub -> nn.exp -> nn.reduce_sum -> nn.broadcast -> nn.truediv` | 本 pass 遇到 residual `nn.softmax` 必须报 `nn.softmax must be decomposed before LowerNnToKernelPass` |
 | `nn.matmul` | `kernel.matmul` | 仅二维；`[M,K] x [K,N] -> [M,N]` 机械一致 |
 | `nn.img2col1d/nn.img2col2d` | `kernel.img2col1d/kernel.img2col2d` | 保持结构化输出维度，不允许压扁 |
 
@@ -188,6 +189,7 @@ module = pass_obj.run(module)
 - 测试目标：
   - 验证支持的 `nn` op 被替换为 `kernel/dma` op，且 `nn.truediv`/`nn.div` 统一映射到 `kernel.div`。
   - 验证 `nn.broadcast/nn.transpose` 分别 lower 到 `dma.broadcast/dma.transpose`。
+  - 验证 residual `nn.softmax` 不会被直降 `kernel.softmax`，而是抛出固定失败短语 `nn.softmax must be decomposed before LowerNnToKernelPass`。
   - 验证 mixed compare 触发 `dma.alloc + dma.broadcast -> kernel.compare` 桥接路径，且 `kernel.compare` 不直接接收非 memory operand。
   - 验证输出 Memory 由 `dma.alloc` 创建，且类型/空间与原结果一致。
   - 验证 `dma.alloc` 结果类型中的 `shape` 维度值与原 `nn` 结果保持一致。
@@ -222,6 +224,8 @@ module = pass_obj.run(module)
 | COV-N2K-023 | `nn.truediv -> kernel.div` 单测映射（实现阶段新增） | `test_lower_truediv_to_kernel_div` |
 | COV-N2K-024 | `run(module)` 拒绝非 `builtin.module` 输入并统一归因为 `LowerNnToKernelError` | `test_run_rejects_non_module_input` |
 | COV-N2K-025 | `run(module)` 拒绝 `module.ops` 不可遍历输入并统一归因为 `LowerNnToKernelError` | `test_run_rejects_non_iterable_module_ops` |
+| COV-N2K-026 | residual `nn.softmax` 直接进入 pass 时抛固定失败短语 | `test_lower_softmax_direct_dialect_op_requires_decompose_pass` |
+| COV-N2K-027 | 公开链路 `build_func_op -> LowerNnToKernelPass` 遇到 `softmax` helper 时保持 raw `nn.softmax` 输出合同并抛固定失败短语 | `test_lower_softmax_public_chain_requires_decompose_pass` |
 
 ## 失败归因
 

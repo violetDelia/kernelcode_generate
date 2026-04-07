@@ -1,11 +1,12 @@
 """nn -> kernel lowering pass.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 将 nn dialect 的逐元素 op lower 为 kernel dialect op。
 - 当结果无法复用已有输出时，为结果插入 dma.alloc。
+- 若 residual `nn.softmax` 直接进入本 pass，则给出固定失败短语并中止。
 
 使用示例:
 - from kernel_gen.passes.lowering.nn_to_kernel import LowerNnToKernelPass
@@ -86,6 +87,8 @@ _SUPPORTED_BINARY = {
     "nn.gt": KernelGtOp,
     "nn.ge": KernelGeOp,
 }
+
+_SOFTMAX_DECOMPOSE_ERROR = "nn.softmax must be decomposed before LowerNnToKernelPass"
 
 
 def _ensure_space_attr(op: Operation) -> NnMemorySpaceAttr:
@@ -478,6 +481,9 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
     - test: test/pass/test_lowering_nn_to_kernel.py
     - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
     """
+
+    if op.name == "nn.softmax":
+        raise LowerNnToKernelError(_SOFTMAX_DECOMPOSE_ERROR)
 
     if op.name == "nn.transpose":
         _ensure_operand_count(op, 1)

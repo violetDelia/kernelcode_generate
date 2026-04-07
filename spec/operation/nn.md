@@ -8,7 +8,7 @@
 
 - 创建者：`榕`
 - 最后一次更改：`摸鱼小分队`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/operation/nn.md`](../../spec/operation/nn.md)
 - `功能实现`：[`kernel_gen/operation/nn.py`](../../kernel_gen/operation/nn.py)
 - `test`：[`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py)
@@ -780,6 +780,7 @@ out_last_dim = softmax(value, axis=1)
 - 数值稳定性要求：实现必须采用“减去该轴最大值后再指数化”的等价语义，即 `exp(x - max(x)) / sum(exp(x - max(x)))`，避免直接对原值指数化。
 - 与现有 nn 算子兼容：`softmax` 输出仍为 `Memory`，可直接作为 `add/sub/mul/truediv/floordiv/compare` 的输入。
 - 与 `nn dialect` 的映射边界：operation 层冻结高层语义与异常口径；dialect 层只冻结结构化字段与 verifier，见 [`spec/dialect/nn.md`](../../spec/dialect/nn.md) 的 `nn.softmax` 小节。
+- 与 lowering 链路的机械边界：`softmax` 的高层输出合同保持不变，但 `nn.softmax` 不允许由 `LowerNnToKernelPass` 直降 `kernel.softmax`；进入该 pass 前必须先分解为 `nn.reduce_max -> nn.broadcast -> nn.sub -> nn.exp -> nn.reduce_sum -> nn.broadcast -> nn.truediv`。
 
 返回与限制：
 
@@ -1013,7 +1014,7 @@ cols = img2col2d(value, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr
 | `transpose(value, perm)` | `nn.transpose` | `dma.transpose` |
 | `exp` | `nn.exp` | `kernel.exp` |
 | `reduce_sum/min/max` | `nn.reduce_*` | `kernel.reduce_*` |
-| `softmax` | `nn.softmax` | `kernel.softmax` |
+| `softmax` | `nn.softmax` | 先分解为 `nn.reduce_max -> nn.broadcast -> nn.sub -> nn.exp -> nn.reduce_sum -> nn.broadcast -> nn.truediv`，再分别 lower 到 `dma/kernel` |
 | `matmul` | `nn.matmul` | `kernel.matmul` |
 | `img2col1d/img2col2d` | `nn.img2col1d/nn.img2col2d` | `kernel.img2col1d/kernel.img2col2d` |
 | `conv` | raw `nn.img2col2d + nn.matmul (+ attrs)` | 继续落入 `img2col/matmul` 的 lowering 主链 |
