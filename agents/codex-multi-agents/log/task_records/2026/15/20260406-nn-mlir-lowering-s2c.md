@@ -46,3 +46,76 @@
 口径复核（conv 分解输出）:
 - `test_build_func_op_supports_conv_helper_call` 断言 `nn.img2col2d`/`nn.matmul` 出现且 `nn.conv` 不出现，符合 S2C-1 “conv -> raw nn.img2col2d + nn.matmul”目标。
 - expectation CASE-1/2 的 func.func 文本同样符合：出现 `nn.img2col2d` 与 `nn.matmul`；中间 `dma.reshape` 仅用于矩阵乘法 shape 对齐，不构成 `nn.conv` 输出。
+
+时间: 2026-04-07 14:45:17 +0800
+经办人: 小李飞刀
+任务: T-20260407-141d537d（nn_mlir S2C-2 收口：fc -> nn.matmul）
+任务目标: build_func_op 可识别 fc helper，输出 raw nn.transpose + nn.matmul；fc 失败边界按 expectation 触发显式错误。
+改动:
+- kernel_gen/dsl/ast.py：新增 fc helper 解析与 FCAST 节点，纳入允许的 nn helper 列表。
+- kernel_gen/dsl/emit_mlir.py：补齐 FCAST 类型推导与 lowering，生成 nn.transpose + nn.matmul，并纳入支持集合。
+- expectation 资源同步：从 /home/lfr/kernelcode_generate/expectation/ 拷贝 expectation/dsl/mlir_gen/dialect/nn/fc.py 与 expectation/utils/{case_runner.py, compare.py} 以补齐 worktree 缺失文件。
+结论: 验收命令通过，fc helper 生成 nn.transpose + nn.matmul，失败边界按 expectation 报错。
+改动文件:
+- kernel_gen/dsl/ast.py
+- kernel_gen/dsl/emit_mlir.py
+- expectation/dsl/mlir_gen/dialect/nn/fc.py
+- expectation/utils/case_runner.py
+- expectation/utils/compare.py
+验证命令:
+- pytest -q test/dsl/test_mlir_gen.py -k "fc or matmul"
+- PYTHONPATH=. python expectation/dsl/mlir_gen/dialect/nn/fc.py
+退出码:
+- 0
+- 0
+关键输出:
+- 1 passed, 138 deselected in 0.53s
+- CASE-1~CASE-3 通过；IR 含 nn.transpose 与 nn.matmul
+已知风险: 无
+下一步建议: 创建 S2C-2 审查任务，复核 fc lowering 与验证命令可复现。
+
+时间: 2026-04-07 14:57:37 +0800
+经办人: 小李飞刀
+任务: T-20260407-0c7f4314（nn_mlir S2C-2 fc 收口）
+任务目标: 仅收口 fc helper 前端分解，输出 raw nn.matmul；复核 expectation/dsl/mlir_gen/dialect/nn/fc.py 通过。
+改动:
+- 无新增实现改动；复跑验收命令并确认 fc helper lowering 为 nn.transpose + nn.matmul，未出现 nn.fc 与 Unsupported call expression。
+结论: 验收命令通过，收口完成。
+改动文件:
+- kernel_gen/dsl/ast.py
+- kernel_gen/dsl/emit_mlir.py
+- agents/codex-multi-agents/log/task_records/2026/15/20260406-nn-mlir-lowering-s2c.md
+范围说明:
+- git diff --name-only：agents/codex-multi-agents/log/task_records/2026/15/20260406-nn-mlir-lowering-s2c.md、kernel_gen/dsl/ast.py、kernel_gen/dsl/emit_mlir.py
+验证命令:
+- pytest -q test/dsl/test_mlir_gen.py -k "fc or matmul"
+- PYTHONPATH=. python expectation/dsl/mlir_gen/dialect/nn/fc.py
+退出码:
+- 0
+- 0
+关键输出:
+- 1 passed, 138 deselected in 0.26s
+- CASE-1~CASE-3 通过；IR 含 nn.transpose 与 nn.matmul
+已知风险: 无
+下一步建议: 新建 S2C-2 审查任务，复核 fc lowering 与命令可复现。
+
+时间: 2026-04-07 16:17:45 +0800
+经办人: 提莫炖蘑菇
+任务: T-20260407-009053a4（nn_mlir_gen_lowering_expectation_green_plan-S2C-2-审查）
+任务目标:
+- 复核 fc helper 不生成 nn.fc，分解为 nn.transpose + nn.matmul。
+- 复核变更范围与记录一致。
+- 复核两条验收命令可复现。
+改动:
+- 范围核对：git diff --name-only = agents/codex-multi-agents/log/task_records/2026/15/20260406-nn-mlir-lowering-s2c.md、kernel_gen/dsl/ast.py、kernel_gen/dsl/emit_mlir.py。
+- 仅复跑验收命令并核对输出；未修改 spec/实现/测试。
+结论: 通过
+问题清单: 无
+风险: 未发现明显风险与异常路径缺口。
+验证命令:
+- pytest -q test/dsl/test_mlir_gen.py -k "fc or matmul"（exit=0）
+- PYTHONPATH=. python expectation/dsl/mlir_gen/dialect/nn/fc.py（exit=0）
+关键输出:
+- 1 passed, 138 deselected in 0.44s
+- CASE-1~CASE-3 通过；IR 含 nn.transpose 与 nn.matmul，未出现 nn.fc
+下一步建议: 新建合并任务给李白。

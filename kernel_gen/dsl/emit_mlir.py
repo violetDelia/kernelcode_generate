@@ -88,6 +88,7 @@ from kernel_gen.dialect.nn import (
     NnSoftmaxOp,
     NnSubOp,
     NnTrueDivOp,
+    NnTransposeOp,
 )
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
@@ -132,6 +133,7 @@ from .ast import (
     DmaFreeAST,
     DmaReshapeAST,
     DmaViewAST,
+    FCAST,
     ForAST,
     FunctionAST,
     Img2ColAST,
@@ -2727,6 +2729,7 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
                 DmaFlattenAST,
                 ConvAST,
                 Img2ColAST,
+                FCAST,
                 MatmulAST,
                 NnBroadcastAST,
                 NnBroadcastToAST,
@@ -3003,6 +3006,20 @@ def _infer_expr_type(
         out_shape = _infer_img2col_output_shape_attrs(expr, input_type, params)
         stride_attr = _build_symbolic_stride_attrs(out_shape, expr.location)
         result_type = _memory_type_from_parts(out_shape, stride_attr, input_type.element_type, input_type.space)
+        type_map[expr_key] = result_type
+        return result_type
+    if isinstance(expr, FCAST):
+        value_type = _infer_expr_type(expr.value, type_map, runtime_values=runtime_values)
+        weight_type = _infer_expr_type(expr.weight, type_map, runtime_values=runtime_values)
+        if not isinstance(value_type, NnMemoryType) or not isinstance(weight_type, NnMemoryType):
+            raise _LoweringError("fc operands must be nn.memory", location=expr.location)
+        value_shape = list(value_type.shape.data)
+        weight_shape = list(weight_type.shape.data)
+        if len(value_shape) != 2 or len(weight_shape) != 2:
+            raise _LoweringError("fc operands must be rank-2 nn.memory", location=expr.location)
+        out_shape = [value_shape[0], weight_shape[0]]
+        out_stride = _build_default_stride_attrs(out_shape)
+        result_type = _memory_type_from_parts(out_shape, out_stride, value_type.element_type, value_type.space)
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, MatmulAST):
@@ -3618,6 +3635,32 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
         return op.result
+    if isinstance(expr, FCAST):
+        value = _lower_expr(expr.value, ctx)
+        weight = _lower_expr(expr.weight, ctx)
+        value_type = _expect_memory_value(value, expr.location)
+        weight_type = _expect_memory_value(weight, expr.location)
+        if len(value_type.shape.data) != 2 or len(weight_type.shape.data) != 2:
+            raise _LoweringError("fc operands must be rank-2 nn.memory", location=expr.location)
+        transposed_shape = [weight_type.shape.data[1], weight_type.shape.data[0]]
+        transposed_stride = [weight_type.stride.data[1], weight_type.stride.data[0]]
+        transpose_type = NnMemoryType(
+            ArrayAttr(list(transposed_shape)),
+            ArrayAttr(list(transposed_stride)),
+            weight_type.element_type,
+            weight_type.space,
+        )
+        transpose_op = NnTransposeOp(weight, transpose_type, perm=[1, 0], space=weight_type.space)
+        transpose_op.verify()
+        ctx.builder.add_op(transpose_op)
+        result_type = _infer_expr_type(expr, ctx.types)
+        if not isinstance(result_type, NnMemoryType):
+            raise _LoweringError("fc result must be nn.memory", location=expr.location)
+        matmul_op = NnMatmulOp(value, transpose_op.result, result_type, result_type.space)
+        matmul_op.verify()
+        ctx.builder.add_op(matmul_op)
+        ctx._set_cache(expr_key, matmul_op.result)
+        return matmul_op.result
     if isinstance(expr, MatmulAST):
         lhs = _lower_expr(expr.lhs, ctx)
         rhs = _lower_expr(expr.rhs, ctx)
@@ -3906,6 +3949,7 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
             DmaFlattenAST,
             ConvAST,
             Img2ColAST,
+            FCAST,
             MatmulAST,
             NnBroadcastAST,
             NnBroadcastToAST,
