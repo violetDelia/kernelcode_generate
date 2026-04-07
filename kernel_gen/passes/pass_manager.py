@@ -1,7 +1,7 @@
 """Pass manager API.
 
 创建者: 李白
-最后一次更改: jcc你莫辜负
+最后一次更改: 小李飞刀
 
 功能说明:
 - 定义 Pass 与 PassManager 的基础行为。
@@ -18,9 +18,9 @@
 - lowered = lowering_pm.run(module)
 
 关联文件:
-- spec: spec/pass/pass_manager.md
-- test: test/pass/test_pass_manager.py
-- 功能实现: kernel_gen/passes/pass_manager.py
+- spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
+- test: [test/pass/test_pass_manager.py](test/pass/test_pass_manager.py)
+- 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
 """
 
 from __future__ import annotations
@@ -44,9 +44,9 @@ class Pass:
               return target
 
     关联文件:
-    - spec: spec/pass/pass_manager.md
-    - test: test/pass/test_pass_manager.py
-    - 功能实现: kernel_gen/passes/pass_manager.py
+    - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
+    - test: [test/pass/test_pass_manager.py](test/pass/test_pass_manager.py)
+    - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
     """
 
     name = "pass"
@@ -64,14 +64,32 @@ class Pass:
         - return target
 
         关联文件:
-        - spec: spec/pass/pass_manager.md
-        - test: test/pass/test_pass_manager.py
-        - 功能实现: kernel_gen/passes/pass_manager.py
+        - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
+        - test: [test/pass/test_pass_manager.py](test/pass/test_pass_manager.py)
+        - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
         """
         raise NotImplementedError("Pass.run must be implemented")
 
 
 def _is_pass_like(obj: object) -> bool:
+    """判断对象是否满足 Pass 最小协议。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 必须包含 `run` 可调用属性。
+    - 必须包含字符串类型的 `name` 属性。
+
+    使用示例:
+    - if _is_pass_like(pass_obj): pm.add_pass(pass_obj)
+
+    关联文件:
+    - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
+    - test: [test/pass/test_pass_manager.py](test/pass/test_pass_manager.py)
+    - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
+    """
+
     if not hasattr(obj, "run") or not callable(getattr(obj, "run")):
         return False
     if not hasattr(obj, "name"):
@@ -83,20 +101,20 @@ def build_default_lowering_pass_manager(name: str | None = "lowering") -> "PassM
     """构造默认 lowering pass 链路。
 
     创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 固定注册 `LowerNnToKernelPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass` 顺序。
-    - 为推荐调用链与黑盒测试提供统一入口，避免各处手工拼装顺序漂移。
+    - 为推荐调用链与黑盒测试提供统一入口，避免各处手工拼装顺序不一致。
 
     使用示例:
     - pm = build_default_lowering_pass_manager()
     - module = pm.run(module)
 
     关联文件:
-    - spec: spec/pass/pass_manager.md
-    - test: test/pass/test_pass_manager.py
-    - 功能实现: kernel_gen/passes/pass_manager.py
+    - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
+    - test: [test/pass/test_pass_manager.py](test/pass/test_pass_manager.py)
+    - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
     """
 
     from .lowering import (
@@ -127,12 +145,29 @@ class PassManager:
     - result = pm.run(ir)
 
     关联文件:
-    - spec: spec/pass/pass_manager.md
-    - test: test/pass/test_pass_manager.py
-    - 功能实现: kernel_gen/passes/pass_manager.py
+    - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
+    - test: [test/pass/test_pass_manager.py](test/pass/test_pass_manager.py)
+    - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
     """
 
     def __init__(self: "PassManager", name: str | None = None) -> None:
+        """初始化 PassManager。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 设置管理器名称并初始化 Pass 列表。
+
+        使用示例:
+        - pm = PassManager(name="opt")
+
+        关联文件:
+        - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
+        - test: [test/pass/test_pass_manager.py](test/pass/test_pass_manager.py)
+        - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
+        """
+
         self.name = name
         self._passes: list[Pass] = []
 
@@ -149,9 +184,9 @@ class PassManager:
         - pm.add_pass(MyPass())
 
         关联文件:
-        - spec: spec/pass/pass_manager.md
-        - test: test/pass/test_pass_manager.py
-        - 功能实现: kernel_gen/passes/pass_manager.py
+        - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
+        - test: [test/pass/test_pass_manager.py](test/pass/test_pass_manager.py)
+        - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
         """
         if not _is_pass_like(pass_obj):
             raise TypeError("pass_obj must provide name(str) and run(target)")
@@ -170,9 +205,9 @@ class PassManager:
         - pm.extend([PassA(), PassB()])
 
         关联文件:
-        - spec: spec/pass/pass_manager.md
-        - test: test/pass/test_pass_manager.py
-        - 功能实现: kernel_gen/passes/pass_manager.py
+        - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
+        - test: [test/pass/test_pass_manager.py](test/pass/test_pass_manager.py)
+        - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
         """
         for item in passes:
             if not _is_pass_like(item):
@@ -183,7 +218,7 @@ class PassManager:
         """依序执行 Pass。
 
         创建者: 李白
-        最后一次更改: jcc你莫辜负
+        最后一次更改: 小李飞刀
 
         功能说明:
         - 逐个调用 Pass.run。
@@ -192,21 +227,21 @@ class PassManager:
         - result = pm.run(ir)
 
         关联文件:
-        - spec: spec/pass/pass_manager.md
-        - test: test/pass/test_pass_manager.py
-        - 功能实现: kernel_gen/passes/pass_manager.py
+        - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
+        - test: [test/pass/test_pass_manager.py](test/pass/test_pass_manager.py)
+        - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
         """
         pass_names = [item.name for item in self._passes]
         if "symbol-loop-hoist" in pass_names:
             hoist_index = pass_names.index("symbol-loop-hoist")
-            if "kernel-split" not in pass_names:
+            if "tile" not in pass_names:
                 raise ValueError(
-                    "SymbolLoopHoistRequiresSymbolFor: symbol-loop-hoist requires kernel-split to materialize symbol.for"
+                    "SymbolLoopHoistRequiresSymbolFor: symbol-loop-hoist requires tile to materialize symbol.for"
                 )
-            kernel_split_index = pass_names.index("kernel-split")
-            if hoist_index < kernel_split_index:
+            tile_index = pass_names.index("tile")
+            if hoist_index < tile_index:
                 raise ValueError(
-                    "SymbolLoopHoistRequiresSymbolFor: symbol-loop-hoist must run after kernel-split"
+                    "SymbolLoopHoistRequiresSymbolFor: symbol-loop-hoist must run after tile"
                 )
             if "lower-dma-memory-hierarchy" in pass_names:
                 dma_index = pass_names.index("lower-dma-memory-hierarchy")
@@ -225,19 +260,19 @@ class PassManager:
                 raise ValueError(
                     "DmaMemoryHierarchyOrderError: lower-dma-memory-hierarchy must run after buffer-results-to-out-params"
                 )
-        if "kernel-split" in pass_names:
-            kernel_split_index = pass_names.index("kernel-split")
+        if "tile" in pass_names:
+            tile_index = pass_names.index("tile")
             if "buffer-results-to-out-params" in pass_names:
                 buffer_index = pass_names.index("buffer-results-to-out-params")
-                if kernel_split_index < buffer_index:
+                if tile_index < buffer_index:
                     raise ValueError(
-                        "KernelSplitOrderError: kernel-split must run after buffer-results-to-out-params"
+                        "TilePassOrderError: tile must run after buffer-results-to-out-params"
                     )
             if "lower-dma-memory-hierarchy" in pass_names:
                 dma_hierarchy_index = pass_names.index("lower-dma-memory-hierarchy")
-                if kernel_split_index > dma_hierarchy_index:
+                if tile_index > dma_hierarchy_index:
                     raise ValueError(
-                        "KernelSplitOrderError: kernel-split must run before lower-dma-memory-hierarchy"
+                        "TilePassOrderError: tile must run before lower-dma-memory-hierarchy"
                     )
 
         result = target

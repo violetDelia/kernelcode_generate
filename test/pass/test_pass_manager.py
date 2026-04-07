@@ -1,7 +1,7 @@
 """pass_manager tests.
 
 创建者: 李白
-最后一次更改: jcc你莫辜负
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 kernel_gen/passes/pass_manager.py 的 Pass 管理行为。
@@ -282,16 +282,16 @@ def test_pass_manager_allows_buffer_results_to_out_params_after_lowering_with_in
 
 # TC-PASS-009
 # 创建者: 金铲铲大作战
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-06 09:53:59 +0800
-# 最近一次运行成功时间: 2026-04-06 09:53:59 +0800
-# 功能说明: 验证 `KernelSplitPass` 为显式开启 pass，默认 lowering builder 不会自动插入。
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-07 13:50:00 +0800
+# 最近一次运行成功时间: 2026-04-07 13:50:00 +0800
+# 功能说明: 验证 `TilePass` 为显式开启 pass，默认 lowering builder 不会自动插入。
 # 测试目的: 锁定默认 `build_default_lowering_pass_manager()` 的 pass 集合只包含 lowering + out-params + dma hierarchy。
-# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_kernel_split_pipeline_requires_explicit_enable
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_tile_pipeline_requires_explicit_enable
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
-def test_kernel_split_pipeline_requires_explicit_enable() -> None:
+def test_tile_pipeline_requires_explicit_enable() -> None:
     pm = build_default_lowering_pass_manager()
     pass_names = [item.name for item in pm._passes]  # noqa: SLF001 - test asserts pipeline boundary
     assert pass_names == [
@@ -299,29 +299,29 @@ def test_kernel_split_pipeline_requires_explicit_enable() -> None:
         "buffer-results-to-out-params",
         "lower-dma-memory-hierarchy",
     ]
-    assert "kernel-split" not in pass_names
+    assert "tile" not in pass_names
 
 
 # TC-PASS-010
 # 创建者: 金铲铲大作战
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-06 09:53:59 +0800
-# 最近一次运行成功时间: 2026-04-06 09:53:59 +0800
-# 功能说明: 验证显式开启 `KernelSplitPass` 时，其顺序必须位于 `LowerDmaMemoryHierarchyPass` 之前。
-# 测试目的: 机械锁定推荐 pipeline：`LowerNnToKernelPass -> BufferResultsToOutParamsPass -> KernelSplitPass -> LowerDmaMemoryHierarchyPass`。
-# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_default_lowering_pipeline_orders_kernel_split_after_out_params
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-07 13:50:00 +0800
+# 最近一次运行成功时间: 2026-04-07 13:50:00 +0800
+# 功能说明: 验证显式开启 `TilePass` 时，其顺序必须位于 `LowerDmaMemoryHierarchyPass` 之前。
+# 测试目的: 机械锁定推荐 pipeline：`LowerNnToKernelPass -> BufferResultsToOutParamsPass -> TilePass -> LowerDmaMemoryHierarchyPass`。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_default_lowering_pipeline_orders_tile_after_out_params
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
-def test_default_lowering_pipeline_orders_kernel_split_after_out_params(
+def test_default_lowering_pipeline_orders_tile_after_out_params(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     LowerNnToKernelPass = lowering_module.LowerNnToKernelPass
     BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     LowerDmaMemoryHierarchyPass = lowering_module.LowerDmaMemoryHierarchyPass
-    kernel_split_module = importlib.import_module("kernel_gen.passes.lowering.kernel_split")
-    KernelSplitPass = kernel_split_module.KernelSplitPass
+    tile_module = importlib.import_module("kernel_gen.passes.lowering.tile")
+    TilePass = tile_module.TilePass
     order: list[str] = []
 
     def _record_lower(self: object, target: object) -> object:
@@ -336,19 +336,19 @@ def test_default_lowering_pipeline_orders_kernel_split_after_out_params(
         order.append("lower-dma-memory-hierarchy")
         return target
 
-    def _record_kernel_split(self: object, target: object) -> object:
-        order.append("kernel-split")
+    def _record_tile(self: object, target: object) -> object:
+        order.append("tile")
         return target
 
     monkeypatch.setattr(LowerNnToKernelPass, "run", _record_lower)
     monkeypatch.setattr(BufferResultsToOutParamsPass, "run", _record_buffer)
     monkeypatch.setattr(LowerDmaMemoryHierarchyPass, "run", _record_dma)
-    monkeypatch.setattr(KernelSplitPass, "run", _record_kernel_split)
+    monkeypatch.setattr(TilePass, "run", _record_tile)
 
-    pm = PassManager(name="split-lowering")
+    pm = PassManager(name="tile-lowering")
     pm.add_pass(LowerNnToKernelPass())
     pm.add_pass(BufferResultsToOutParamsPass())
-    pm.add_pass(KernelSplitPass())
+    pm.add_pass(TilePass())
     pm.add_pass(LowerDmaMemoryHierarchyPass())
 
     sentinel = object()
@@ -356,31 +356,31 @@ def test_default_lowering_pipeline_orders_kernel_split_after_out_params(
     assert order == [
         "lower-nn-to-kernel",
         "buffer-results-to-out-params",
-        "kernel-split",
+        "tile",
         "lower-dma-memory-hierarchy",
     ]
 
 
 # TC-PASS-011
 # 创建者: 金铲铲大作战
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-06 09:53:59 +0800
-# 最近一次运行成功时间: 2026-04-06 09:53:59 +0800
-# 功能说明: 验证 split pipeline 的 `tuner.param` 来源口径为“由 split pass 在函数体内插入/复用”。
-# 测试目的: 锁定 PassManager 端不引入额外前置合同：split 所需的 `tuner.param` 由 `KernelSplitPass.run` 负责物化。
-# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_kernel_split_pipeline_materializes_tuner_params_before_codegen
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-07 13:50:00 +0800
+# 最近一次运行成功时间: 2026-04-07 13:50:00 +0800
+# 功能说明: 验证 tile pipeline 的 `tuner.param` 来源口径为“由 tile pass 在函数体内插入/复用”。
+# 测试目的: 锁定 PassManager 端不引入额外前置合同：tile 所需的 `tuner.param` 由 `TilePass.run` 负责物化。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_tile_pipeline_materializes_tuner_params_before_codegen
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
-def test_kernel_split_pipeline_materializes_tuner_params_before_codegen(
+def test_tile_pipeline_materializes_tuner_params_before_codegen(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     LowerNnToKernelPass = lowering_module.LowerNnToKernelPass
     BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     LowerDmaMemoryHierarchyPass = lowering_module.LowerDmaMemoryHierarchyPass
-    kernel_split_module = importlib.import_module("kernel_gen.passes.lowering.kernel_split")
-    KernelSplitPass = kernel_split_module.KernelSplitPass
+    tile_module = importlib.import_module("kernel_gen.passes.lowering.tile")
+    TilePass = tile_module.TilePass
 
     def _noop(self: object, target: object) -> object:
         return target
@@ -392,13 +392,13 @@ def test_kernel_split_pipeline_materializes_tuner_params_before_codegen(
 
     monkeypatch.setattr(LowerNnToKernelPass, "run", _noop)
     monkeypatch.setattr(BufferResultsToOutParamsPass, "run", _noop)
-    monkeypatch.setattr(KernelSplitPass, "run", _materialize_tuner_param)
+    monkeypatch.setattr(TilePass, "run", _materialize_tuner_param)
     monkeypatch.setattr(LowerDmaMemoryHierarchyPass, "run", _noop)
 
-    pm = PassManager(name="split-lowering")
+    pm = PassManager(name="tile-lowering")
     pm.add_pass(LowerNnToKernelPass())
     pm.add_pass(BufferResultsToOutParamsPass())
-    pm.add_pass(KernelSplitPass())
+    pm.add_pass(TilePass())
     pm.add_pass(LowerDmaMemoryHierarchyPass())
 
     module = {"tuner.param": False}
@@ -409,69 +409,69 @@ def test_kernel_split_pipeline_materializes_tuner_params_before_codegen(
 
 # TC-PASS-012
 # 创建者: 金铲铲大作战
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-06 03:17:31 +0800
-# 最近一次运行成功时间: 2026-04-06 03:17:31 +0800
-# 功能说明: 验证错误 split 顺序会被显式拒绝，并包含固定错误关键字 `KernelSplitOrderError`。
-# 测试目的: 机械锁定 split 顺序边界，避免错误 pipeline 导致 ABI 双重改写或 DMA hierarchy 口径漂移。
-# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_kernel_split_pipeline_rejects_wrong_order
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-07 13:50:00 +0800
+# 最近一次运行成功时间: 2026-04-07 13:50:00 +0800
+# 功能说明: 验证错误 tile 顺序会被显式拒绝，并包含固定错误关键字 `TilePassOrderError`。
+# 测试目的: 机械锁定 tile 顺序边界，避免错误 pipeline 导致 ABI 双重改写或 DMA hierarchy 口径偏差。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_tile_pipeline_rejects_wrong_order
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
-def test_kernel_split_pipeline_rejects_wrong_order() -> None:
+def test_tile_pipeline_rejects_wrong_order() -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     LowerNnToKernelPass = lowering_module.LowerNnToKernelPass
     BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
-    kernel_split_module = importlib.import_module("kernel_gen.passes.lowering.kernel_split")
-    KernelSplitPass = kernel_split_module.KernelSplitPass
+    tile_module = importlib.import_module("kernel_gen.passes.lowering.tile")
+    TilePass = tile_module.TilePass
     dma_hierarchy_module = importlib.import_module("kernel_gen.passes.lowering.dma_memory_hierarchy")
     LowerDmaMemoryHierarchyPass = dma_hierarchy_module.LowerDmaMemoryHierarchyPass
 
-    pm = PassManager(name="bad-split-order")
+    pm = PassManager(name="bad-tile-order")
     pm.add_pass(LowerNnToKernelPass())
-    pm.add_pass(KernelSplitPass())
+    pm.add_pass(TilePass())
     pm.add_pass(BufferResultsToOutParamsPass())
-    with pytest.raises(ValueError, match="KernelSplitOrderError"):
+    with pytest.raises(ValueError, match="TilePassOrderError"):
         pm.run(object())
 
-    pm = PassManager(name="bad-split-dma-order")
+    pm = PassManager(name="bad-tile-dma-order")
     pm.add_pass(LowerNnToKernelPass())
     pm.add_pass(BufferResultsToOutParamsPass())
     pm.add_pass(LowerDmaMemoryHierarchyPass())
-    pm.add_pass(KernelSplitPass())
-    with pytest.raises(ValueError, match="KernelSplitOrderError"):
+    pm.add_pass(TilePass())
+    with pytest.raises(ValueError, match="TilePassOrderError"):
         pm.run(object())
 
 
 # TC-PASS-013
 # 创建者: 金铲铲大作战
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-06 09:53:59 +0800
-# 最近一次运行成功时间: 2026-04-06 09:53:59 +0800
-# 功能说明: 验证显式 split pipeline 不会隐式引入新的“函数抽取阶段”pass，保持单函数合同的 pipeline 组成可审计。
-# 测试目的: 锁定显式 split pipeline 只包含 lowering + out-params + kernel-split + dma hierarchy，不夹带额外 pass。
-# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_kernel_split_pipeline_keeps_single_function_contract
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-07 13:50:00 +0800
+# 最近一次运行成功时间: 2026-04-07 13:50:00 +0800
+# 功能说明: 验证显式 tile pipeline 不会隐式引入新的“函数抽取阶段”pass，保持单函数合同的 pipeline 组成可审计。
+# 测试目的: 锁定显式 tile pipeline 只包含 lowering + out-params + tile + dma hierarchy，不夹带额外 pass。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_tile_pipeline_keeps_single_function_contract
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
-def test_kernel_split_pipeline_keeps_single_function_contract() -> None:
-    kernel_split_module = importlib.import_module("kernel_gen.passes.lowering.kernel_split")
-    KernelSplitPass = kernel_split_module.KernelSplitPass
+def test_tile_pipeline_keeps_single_function_contract() -> None:
+    tile_module = importlib.import_module("kernel_gen.passes.lowering.tile")
+    TilePass = tile_module.TilePass
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     LowerNnToKernelPass = lowering_module.LowerNnToKernelPass
     BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     LowerDmaMemoryHierarchyPass = lowering_module.LowerDmaMemoryHierarchyPass
 
-    pm = PassManager(name="split-lowering")
+    pm = PassManager(name="tile-lowering")
     pm.add_pass(LowerNnToKernelPass())
     pm.add_pass(BufferResultsToOutParamsPass())
-    pm.add_pass(KernelSplitPass())
+    pm.add_pass(TilePass())
     pm.add_pass(LowerDmaMemoryHierarchyPass())
     pass_names = [item.name for item in pm._passes]  # noqa: SLF001 - test asserts pipeline boundary
     assert pass_names == [
         "lower-nn-to-kernel",
         "buffer-results-to-out-params",
-        "kernel-split",
+        "tile",
         "lower-dma-memory-hierarchy",
     ]
 
@@ -482,7 +482,7 @@ def test_kernel_split_pipeline_keeps_single_function_contract() -> None:
 # 最近一次运行测试时间: 2026-04-06 09:53:59 +0800
 # 最近一次运行成功时间: 2026-04-06 09:53:59 +0800
 # 功能说明: 验证 lower-dma-memory-hierarchy 必须位于 buffer-results-to-out-params 之后，否则显式失败。
-# 测试目的: 锁定 dma hierarchy 顺序门禁，避免 out-params 合同尚未建立即开始层级搬运。
+# 测试目的: 锁定 dma hierarchy 顺序约束，避免 out-params 合同尚未建立即开始层级搬运。
 # 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_rejects_dma_memory_hierarchy_before_out_params
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
@@ -509,15 +509,15 @@ def test_pass_manager_rejects_dma_memory_hierarchy_before_out_params() -> None:
 
 # TC-PASS-015
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-07 09:10:00 +0800
-# 最近一次运行成功时间: 2026-04-07 09:10:00 +0800
-# 功能说明: 验证显式启用 symbol-loop-hoist 但缺少 kernel-split 时会被拒绝，并包含固定错误短语。
-# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_rejects_symbol_loop_hoist_without_kernel_split
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-07 13:50:00 +0800
+# 最近一次运行成功时间: 2026-04-07 13:50:00 +0800
+# 功能说明: 验证显式启用 symbol-loop-hoist 但缺少 tile 时会被拒绝，并包含固定错误短语。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_rejects_symbol_loop_hoist_without_tile
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
-def test_pass_manager_rejects_symbol_loop_hoist_without_kernel_split() -> None:
+def test_pass_manager_rejects_symbol_loop_hoist_without_tile() -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     LowerNnToKernelPass = lowering_module.LowerNnToKernelPass
     BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
@@ -529,7 +529,7 @@ def test_pass_manager_rejects_symbol_loop_hoist_without_kernel_split() -> None:
         def run(self: "SymbolLoopHoistPass", target: object) -> object:
             return target
 
-    pm = PassManager(name="missing-kernel-split")
+    pm = PassManager(name="missing-tile")
     pm.add_pass(LowerNnToKernelPass())
     pm.add_pass(BufferResultsToOutParamsPass())
     pm.add_pass(SymbolLoopHoistPass())
@@ -540,22 +540,22 @@ def test_pass_manager_rejects_symbol_loop_hoist_without_kernel_split() -> None:
 
 # TC-PASS-016
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-07 09:10:00 +0800
-# 最近一次运行成功时间: 2026-04-07 09:10:00 +0800
-# 功能说明: 验证 symbol-loop-hoist 必须位于 kernel-split 之后，否则显式失败。
-# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_rejects_symbol_loop_hoist_before_kernel_split
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-07 13:50:00 +0800
+# 最近一次运行成功时间: 2026-04-07 13:50:00 +0800
+# 功能说明: 验证 symbol-loop-hoist 必须位于 tile 之后，否则显式失败。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_rejects_symbol_loop_hoist_before_tile
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
-def test_pass_manager_rejects_symbol_loop_hoist_before_kernel_split() -> None:
+def test_pass_manager_rejects_symbol_loop_hoist_before_tile() -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     LowerNnToKernelPass = lowering_module.LowerNnToKernelPass
     BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     dma_hierarchy_module = importlib.import_module("kernel_gen.passes.lowering.dma_memory_hierarchy")
     LowerDmaMemoryHierarchyPass = dma_hierarchy_module.LowerDmaMemoryHierarchyPass
-    kernel_split_module = importlib.import_module("kernel_gen.passes.lowering.kernel_split")
-    KernelSplitPass = kernel_split_module.KernelSplitPass
+    tile_module = importlib.import_module("kernel_gen.passes.lowering.tile")
+    TilePass = tile_module.TilePass
 
     class SymbolLoopHoistPass(Pass):
         name = "symbol-loop-hoist"
@@ -567,7 +567,7 @@ def test_pass_manager_rejects_symbol_loop_hoist_before_kernel_split() -> None:
     pm.add_pass(LowerNnToKernelPass())
     pm.add_pass(BufferResultsToOutParamsPass())
     pm.add_pass(SymbolLoopHoistPass())
-    pm.add_pass(KernelSplitPass())
+    pm.add_pass(TilePass())
     pm.add_pass(LowerDmaMemoryHierarchyPass())
     with pytest.raises(ValueError, match="SymbolLoopHoistRequiresSymbolFor"):
         pm.run(object())
@@ -575,9 +575,9 @@ def test_pass_manager_rejects_symbol_loop_hoist_before_kernel_split() -> None:
 
 # TC-PASS-017
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-07 09:10:00 +0800
-# 最近一次运行成功时间: 2026-04-07 09:10:00 +0800
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-07 13:50:00 +0800
+# 最近一次运行成功时间: 2026-04-07 13:50:00 +0800
 # 功能说明: 验证 symbol-loop-hoist 必须位于 lower-dma-memory-hierarchy 之前，否则显式失败。
 # 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_rejects_symbol_loop_hoist_after_dma_memory_hierarchy
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
@@ -589,8 +589,8 @@ def test_pass_manager_rejects_symbol_loop_hoist_after_dma_memory_hierarchy() -> 
     BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     dma_hierarchy_module = importlib.import_module("kernel_gen.passes.lowering.dma_memory_hierarchy")
     LowerDmaMemoryHierarchyPass = dma_hierarchy_module.LowerDmaMemoryHierarchyPass
-    kernel_split_module = importlib.import_module("kernel_gen.passes.lowering.kernel_split")
-    KernelSplitPass = kernel_split_module.KernelSplitPass
+    tile_module = importlib.import_module("kernel_gen.passes.lowering.tile")
+    TilePass = tile_module.TilePass
 
     class SymbolLoopHoistPass(Pass):
         name = "symbol-loop-hoist"
@@ -601,7 +601,7 @@ def test_pass_manager_rejects_symbol_loop_hoist_after_dma_memory_hierarchy() -> 
     pm = PassManager(name="bad-symbol-loop-hoist-dma-order")
     pm.add_pass(LowerNnToKernelPass())
     pm.add_pass(BufferResultsToOutParamsPass())
-    pm.add_pass(KernelSplitPass())
+    pm.add_pass(TilePass())
     pm.add_pass(LowerDmaMemoryHierarchyPass())
     pm.add_pass(SymbolLoopHoistPass())
     with pytest.raises(ValueError, match="SymbolLoopHoistRequiresSymbolFor"):
