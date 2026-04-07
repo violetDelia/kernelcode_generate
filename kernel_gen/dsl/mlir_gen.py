@@ -362,6 +362,47 @@ def _flatten_numel_annotation_matches(result_type: NnMemoryType, expected_type: 
     return False
 
 
+def _shape_annotation_matches(result_type: NnMemoryType, expected_type: NnMemoryType) -> bool:
+    """校验 tensor 返回 shape 是否在符号语义上等价。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 对 `IntAttr` 维度执行精确数值比较。
+    - 对 `StringAttr` 维度先比较字面量；若不同，再执行 sympy 语义化简比较。
+    - 用于返回注解校验，避免仅按字符串字面量比较符号维表达式。
+
+    使用示例:
+    - _shape_annotation_matches(result_type, expected_type)
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+    """
+
+    result_shape = result_type.shape.data
+    expected_shape = expected_type.shape.data
+    if len(result_shape) != len(expected_shape):
+        return False
+    for lhs, rhs in zip(result_shape, expected_shape, strict=True):
+        if isinstance(lhs, IntAttr) and isinstance(rhs, IntAttr):
+            if lhs.data != rhs.data:
+                return False
+            continue
+        if isinstance(lhs, StringAttr) and isinstance(rhs, StringAttr):
+            if lhs.data == rhs.data:
+                continue
+            lhs_expr = _parse_symbolic_dim_expr(lhs.data)
+            rhs_expr = _parse_symbolic_dim_expr(rhs.data)
+            if lhs_expr is None or rhs_expr is None or sp.simplify(lhs_expr - rhs_expr) != 0:
+                return False
+            continue
+        return False
+    return True
+
+
 def _validate_return_type(
     func_ast: FunctionAST,
     result_type: object,
@@ -397,7 +438,7 @@ def _validate_return_type(
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("Return type does not match annotation", location=func_ast.location)
         # Tensor 注解只公开约束 shape 与 element_type；DMA helper 允许返回不同的 space/stride。
-        shape_matches = result_type.shape == expected_type.shape
+        shape_matches = _shape_annotation_matches(result_type, expected_type)
         if not shape_matches and isinstance(return_expr, DmaFlattenAST):
             shape_matches = _flatten_numel_annotation_matches(result_type, expected_type)
         if not shape_matches:

@@ -91,6 +91,7 @@ _ALLOWED_IMPORT_BOUND_HELPERS: dict[str, tuple[types.ModuleType, frozenset[str]]
         _KG_OPERATION_NN,
         frozenset(
             {
+                "conv",
                 "img2col1d",
                 "img2col2d",
                 "matmul",
@@ -735,6 +736,32 @@ class MatmulAST:
     lhs: object
     rhs: object
     memoryspace: MemorySpace | None = None
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class ConvAST:
+    """conv helper 节点。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 表示 `conv(value, weight, sh=..., sw=..., ...)` 的 DSL helper 调用。
+    - 当前仅承接前端分解路径，供 lowering 阶段展开为 `nn.img2col2d + dma.reshape + nn.matmul + dma.reshape`。
+
+    使用示例:
+    - ConvAST(value=VarAST("x"), weight=VarAST("w"), kwargs={"sh": ConstAST(1)})
+
+    关联文件:
+    - spec: spec/dsl/mlir_gen.md
+    - test: test/dsl/test_mlir_gen.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    value: object
+    weight: object
+    kwargs: dict[str, object]
     location: SourceLocation | None = None
 
 
@@ -2208,6 +2235,7 @@ def _parse_dma_call(
     功能说明:
     - 仅接受当前函数显式导入绑定到 `kernel_gen.operation.dma/arch/nn` 的 helper 调用。
     - 将 `load/slice/store/deslice/...` 解析为对应 AST 节点。
+    - 将 `conv(...)` 解析为 `ConvAST`，交由 lowering 阶段做前端分解。
     - 将 `nn.add/sub/mul/truediv/floordiv(...)` 解析为对应的 `BinaryExprAST`。
     - 将 `relu/sigmoid/tanh/leaky_relu/hard_sigmoid/exp(...)` 解析为 `NnUnaryAST`。
     - 将 `reduce_sum/reduce_min/reduce_max(...)` 解析为 `NnReduceAST`。
@@ -2374,6 +2402,24 @@ def _parse_dma_call(
         return Img2ColAST(
             kind=call_name,
             args=args,
+            kwargs=kwargs,
+            location=_location_from_node(expr),
+        )
+
+    if call_name == "conv":
+        if len(expr.args) != 2:
+            _raise_parse_error("Unsupported conv arity", expr)
+        allowed_keywords = {"sh", "sw", "dh", "dw", "ph", "pw", "pl", "pr"}
+        value = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+        weight = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+        kwargs: dict[str, object] = {}
+        for keyword in expr.keywords:
+            if keyword.arg is None or keyword.arg not in allowed_keywords or keyword.arg in kwargs:
+                _raise_parse_error("Unsupported conv arity", expr)
+            kwargs[keyword.arg] = _parse_expr(keyword.value, env, globals_table, builtins_table)
+        return ConvAST(
+            value=value,
+            weight=weight,
             kwargs=kwargs,
             location=_location_from_node(expr),
         )

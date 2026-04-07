@@ -57,7 +57,9 @@
 - Tensor 注解既可使用普通字符串字面量 `"Tensor[...]"`，也可使用在源码层面可归一化为同等文本的 `f"Tensor[...]"`；归一化后的文本必须满足 Tensor 注解语法，若包含无法静态归一化的格式化片段或归一化后仍不符合语法，必须报错。
 - 当函数体使用 `nn.sub` 且左右操作数 element_type 不一致时，必须插入 `dma.cast` 并按二元算术的 dtype promotion 结果生成 `nn.sub` 与 `func.return` 结果类型；当前公开覆盖仅限 `nn.sub` mixed dtype 场景。
 - DSL 函数体内允许出现 `alloc`、`copy`、`cast`、`view`、`reshape`、`flatten`、`free`、`load`、`store`、`slice`、`deslice` 这组 DMA helper 调用；其公开语义由 `emit_mlir` 负责落实到具体 lowering。
-- DSL 函数体内允许出现显式绑定到 `kernel_gen.operation.nn` 的 `img2col1d(...)`、`img2col2d(...)` 与 `matmul(...)` helper；其公开语义由 `emit_mlir` 负责落实到具体 lowering。
+- DSL 函数体内允许出现显式绑定到 `kernel_gen.operation.nn` 的 `conv(...)`、`img2col1d(...)`、`img2col2d(...)` 与 `matmul(...)` helper；其公开语义由 `emit_mlir` 负责落实到具体 lowering。
+- 当函数体返回 `conv(value, weight, sh=..., sw=..., dh=..., dw=..., ph=..., pw=..., pl=..., pr=...)` 时，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须接受该 helper，并在前端分解后输出 raw `nn.img2col2d + nn.matmul` 链路；不得报 `Unsupported call expression`，也不得生成 `nn.conv`。
+- Tensor 返回注解的 shape 校验必须按符号表达式语义比较；像 `H` 与 `(H - 1)/1 + 1` 这类数学上等价的维度表达式必须视为一致，不得仅按字符串字面量比较。
 - 当函数体返回 `view(...)` helper 时，`func.return` 类型必须与 `dma.view` 的结果类型一致，并与 expectation 依赖的 `Memory` 口径对齐；不得把 `dma.view` 结果写成“生成 op 即可、return type 可另行决定”。
 - 当函数体返回 `float(symbol.int)` 且返回注解为 `float` 时，`build_func_op(...)` / `build_func_op_from_ast(...)` 的 `func.return` 类型必须固定为 `f32`，并与 `symbol.to_float` 的结果类型保持一致。
 - 当 `build_func_op(...)` / `build_func_op_from_ast(...)` 处理 `slice(...)` 时，必须先生成 `dma.alloc`，再生成 `dma.slice(target, source, ...)`；表达式返回值绑定到 alloc 结果，`func.return` 返回 alloc 结果，`dma.slice` 的结果不得直接作为返回值或局部变量绑定。
@@ -251,6 +253,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - 验证无返回注解、也没有显式 `return` 的值表达式函数体必须报 `Function return requires explicit return syntax or annotation`，不得靠最后一个值表达式猜函数输出，也不得静默退成零结果 `func.func`。
   - 验证参数注解与 `runtime_args` 冲突时，`func.func inputs/outputs` 与函数体结果类型都跟随 `runtime_args`，不跟随参数注解。
   - 验证 `matmul(...)` helper 已纳入公开前端集合，并在 raw `func.func` 中生成 `nn.matmul`。
+  - 验证 `conv(...)` helper 已纳入公开前端集合，并在 raw `func.func` 中分解为 `nn.img2col2d + nn.matmul`；符号返回注解按表达式语义比较。
   - 验证 `conv2d_img2col2d_tiled_npu_demo(...)` 这类最小 conv2d 前端样例可直接生成 raw `func.func`，其中命中循环、`dma.alloc/slice/reshape/deslice`、`nn.img2col2d`、`nn.matmul` 与 `func.return`。
 - 功能与用例清单：
   - MGEN-001：`build_func_op(...)` 返回 `func.func`。（`test_build_func_op_returns_func_op`）
@@ -312,4 +315,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - MGEN-R2C：参数注解写成 `f16` 但 `runtime_args` 传入 `i32 memory` 时，`func.func inputs/outputs` 与 `nn.add` 结果类型都必须保持 `i32 memory`。（`test_build_func_op_uses_runtime_args_not_parameter_annotations_for_ir`）
   - MGEN-R3：无返回注解且无显式 `return` 的值表达式函数体必须报 `Function return requires explicit return syntax or annotation`；不得靠最后一个值表达式猜函数输出，也不得静默生成零结果 `func.func`。（`test_build_func_op_rejects_ambiguous_value_body_without_return_or_annotation`）
   - MGEN-C1A：`matmul(lhs, rhs)` helper 必须在 `build_func_op(...)` 链路中生成单个 `nn.matmul`，返回类型与 `func.return` 对齐。（`test_build_func_op_supports_matmul_helper_call`）
+  - MGEN-C1C：`conv(value, weight, ...)` helper 必须在 `build_func_op(...)` 链路中分解为 raw `nn.img2col2d + nn.matmul`，不得生成 `nn.conv` 或回退为 `Unsupported call expression`。（`test_build_func_op_supports_conv_helper_call`）
+  - MGEN-C1D：`conv(...)` helper 的符号输出维度必须允许与等价返回注解对齐；`H` 与 `(H - 1)/1 + 1` 这类等价表达式不得误判为返回类型不一致。（`test_build_func_op_supports_symbolic_conv_helper_call`）
+  - MGEN-C1E：`conv(...)` helper 的非法 stride/padding 与参数个数错误必须显式失败，并保持固定关键短语。（`test_build_func_op_conv_helper_rejects_invalid_stride`、`test_build_func_op_conv_helper_rejects_invalid_arity`）
   - MGEN-C1B：`conv2d_img2col2d_tiled_npu_demo(...)` 这类 `loop + slice + img2col2d + reshape + matmul + deslice + return` 前端样例必须能通过 `build_func_op(...)` / `build_func_op_from_ast(...)` 生成 raw `func.func`，并命中循环、`dma.alloc/slice/reshape/deslice`、`nn.img2col2d`、`nn.matmul` 与 `func.return`。（`test_build_func_op_supports_conv2d_img2col2d_tiled_npu_demo`、`test_build_func_op_supports_conv2d_img2col2d_tiled_npu_demo_frontend`）

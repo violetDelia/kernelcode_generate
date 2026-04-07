@@ -1531,6 +1531,116 @@ def test_build_func_op_supports_matmul_helper_call() -> None:
     assert return_ops[0].arguments[0].type == matmul_ops[0].result.type
 
 
+# MGEN-C1C
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 功能说明: 验证 conv helper 会前端分解为 nn.img2col2d + nn.matmul，而不是生成 nn.conv。
+# 测试目的: 锁定 conv 进入 AST/emit/mlir_gen 公开集合，并输出 raw nn.img2col2d/nn.matmul 链路。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_conv_helper_call
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_conv_helper_call() -> None:
+    from kernel_gen.operation.nn import conv
+
+    value = Memory([1, 3, 5, 5], NumericType.Float32, space=MemorySpace.GM)
+    weight = Memory([8, 3, 3, 3], NumericType.Float32, space=MemorySpace.GM)
+
+    def conv_kernel(
+        value: "Tensor[f32, 1, 3, 5, 5]",
+        weight: "Tensor[f32, 8, 3, 3, 3]",
+    ) -> "Tensor[f32, 1, 8, 5, 5]":
+        return conv(value, weight, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr=1)
+
+    module = _module_from_func(conv_kernel, value, weight)
+    mlir_text = _print_module(module)
+    func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
+    assert "nn.img2col2d" in mlir_text
+    assert "nn.matmul" in mlir_text
+    assert "nn.conv" not in mlir_text
+    assert len([op for op in func_op.body.block.ops if isinstance(op, NnImg2col2dOp)]) == 1
+    assert len([op for op in func_op.body.block.ops if isinstance(op, NnMatmulOp)]) == 1
+    assert len(return_ops) == 1
+    assert [attr.data for attr in return_ops[0].arguments[0].type.shape.data] == [1, 8, 5, 5]
+
+
+# MGEN-C1D
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 功能说明: 验证 conv helper 的符号输出维度可与等价返回注解对齐。
+# 测试目的: 锁定 `(H - 1)/1 + 1` 与 `H` 这类等价符号维不会被错误判定为返回注解不一致。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_symbolic_conv_helper_call
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_symbolic_conv_helper_call() -> None:
+    from kernel_gen.operation.nn import conv
+
+    value = Memory(["B", 3, "H", "W"], NumericType.Float32, space=MemorySpace.GM)
+    weight = Memory([8, 3, 3, 3], NumericType.Float32, space=MemorySpace.GM)
+    expected = conv(value, weight, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr=1)
+
+    def conv_kernel(
+        value: 'Tensor[f32, "B", 3, "H", "W"]',
+        weight: "Tensor[f32, 8, 3, 3, 3]",
+    ) -> 'Tensor[f32, "B", 8, "H", "W"]':
+        return conv(value, weight, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr=1)
+
+    func_op = build_func_op(conv_kernel, value, weight)
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
+    assert len([op for op in func_op.body.block.ops if isinstance(op, NnImg2col2dOp)]) == 1
+    assert len([op for op in func_op.body.block.ops if isinstance(op, NnMatmulOp)]) == 1
+    assert len(return_ops) == 1
+    assert return_ops[0].arguments[0].type == _memory_to_nn_type(expected)
+
+
+# MGEN-C1E
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 功能说明: 验证 conv helper 的非法 stride 参数会显式失败。
+# 测试目的: 锁定 conv verifier 关键短语，避免非法参数静默通过。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_conv_helper_rejects_invalid_stride
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_conv_helper_rejects_invalid_stride() -> None:
+    from kernel_gen.operation.nn import conv
+
+    value = Memory([1, 3, 5, 5], NumericType.Float32, space=MemorySpace.GM)
+    weight = Memory([8, 3, 3, 3], NumericType.Float32, space=MemorySpace.GM)
+
+    def conv_kernel(
+        value: "Tensor[f32, 1, 3, 5, 5]",
+        weight: "Tensor[f32, 8, 3, 3, 3]",
+    ) -> "Tensor[f32, 1, 8, 5, 5]":
+        return conv(value, weight, sh=0, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr=1)
+
+    with pytest.raises(VerifyException, match="sh must be positive|output height must be positive"):
+        build_func_op(conv_kernel, value, weight)
+
+
+# MGEN-C1F
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 功能说明: 验证 conv helper 的参数个数错误在 build_func_op 阶段显式失败。
+# 测试目的: 锁定 conv arity 错误路径不会回退为 generic unsupported 或静默通过。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_conv_helper_rejects_invalid_arity
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_conv_helper_rejects_invalid_arity() -> None:
+    from kernel_gen.operation.nn import conv
+
+    value = Memory([1, 3, 5, 5], NumericType.Float32, space=MemorySpace.GM)
+
+    def conv_kernel(value: "Tensor[f32, 1, 3, 5, 5]") -> "Tensor[f32, 1, 8, 5, 5]":
+        return conv(value)
+
+    with pytest.raises(AstVisitorError, match="Unsupported conv arity"):
+        build_func_op(conv_kernel, value)
+
+
 # MGEN-C1B
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚

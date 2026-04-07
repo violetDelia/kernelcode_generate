@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import ast as py_ast
+import re
 from typing import Sequence
 
 from xdsl.dialects import arith, func, scf
@@ -123,6 +124,7 @@ from .ast import (
     BlockAST,
     CompareExprAST,
     ConstAST,
+    ConvAST,
     DmaAllocAST,
     DmaCastAST,
     DmaCopyAST,
@@ -174,6 +176,17 @@ _IMG2COL_PARAM_TABLE: dict[str, tuple[tuple[str, ...], dict[str, int]]] = {
         ("value", "kh", "kw", "sh", "sw", "dh", "dw", "ph", "pw", "pl", "pr"),
         {"sh": 1, "sw": 1, "dh": 1, "dw": 1, "ph": 0, "pw": 0, "pl": 0, "pr": 0},
     ),
+}
+
+_CONV_PARAM_DEFAULTS: dict[str, int] = {
+    "sh": 1,
+    "sw": 1,
+    "dh": 1,
+    "dw": 1,
+    "ph": 0,
+    "pw": 0,
+    "pl": 0,
+    "pr": 0,
 }
 
 
@@ -1475,28 +1488,137 @@ def _shape_numel_attr(shape: Sequence[Attribute]) -> Attribute:
     """
 
     total_static = 1
-    total_symbol: SymbolDim | None = None
+    symbol_parts: list[str] = []
     for dim in shape:
         if isinstance(dim, IntAttr):
-            if total_symbol is None:
-                total_static *= dim.data
-            else:
-                total_symbol = total_symbol * dim.data
+            total_static *= dim.data
             continue
         if isinstance(dim, StringAttr):
             if dim.data == "?":
                 return StringAttr("?")
-            if total_symbol is None:
-                total_symbol = SymbolDim(total_static) * dim.data
-            else:
-                total_symbol = total_symbol * dim.data
+            symbol_parts.append(dim.data)
             continue
         return StringAttr("?")
-    if total_symbol is None:
+    if not symbol_parts:
         return IntAttr(total_static)
-    if not total_symbol.is_dynamic():
-        return IntAttr(int(total_symbol.get_symbol()))
-    return StringAttr(str(total_symbol.get_symbol()))
+    expr_parts: list[str] = []
+    if total_static != 1:
+        expr_parts.append(str(total_static))
+    for part in symbol_parts:
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", part):
+            expr_parts.append(part)
+            continue
+        expr_parts.append(f"({part})")
+    if not expr_parts:
+        return IntAttr(1)
+    if len(expr_parts) == 1:
+        return StringAttr(expr_parts[0])
+    return StringAttr("*".join(expr_parts))
+
+
+def _shape_attr_to_symbol_operand(
+    attr: Attribute,
+    ctx: EmitContext,
+    *,
+    location: SourceLocation | None = None,
+) -> SSAValue:
+    """将 shape 条目转换为 `!symbol.int` SSA operand。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - `IntAttr` 直接物化为 `!symbol.int<"n">` 常量。
+    - `StringAttr` 复用索引解析路径，并在需要时转换为 `!symbol.int<"expr">`。
+    - 供 conv helper 分解生成 `dma.reshape` 的 shape operand 复用。
+
+    使用示例:
+    - _shape_attr_to_symbol_operand(IntAttr(4), ctx, location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    if isinstance(attr, IntAttr):
+        return _const_symbol_int(attr.data, ctx, location)
+    if isinstance(attr, StringAttr):
+        if attr.data == "?":
+            raise _LoweringError("Unsupported layout attribute", location=location)
+        value = _resolve_index_operand(attr.data, ctx, location)
+        if isinstance(value.type, SymbolValueType):
+            return value
+        return _cast_to_symbol_int(value, ctx, attr.data, location)
+    raise _LoweringError("Unsupported layout attribute", location=location)
+
+
+def _build_symbol_product_operand(
+    values: Sequence[SSAValue],
+    ctx: EmitContext,
+    *,
+    location: SourceLocation | None = None,
+) -> SSAValue:
+    """将多个 `!symbol.int` 值串成乘法表达式。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 复用 `symbol.mul` 组合多个符号维度。
+    - 用于 conv helper 中 `B * OH * OW` 这类 image_dim 形状构造。
+
+    使用示例:
+    - _build_symbol_product_operand([lhs, rhs], ctx, location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    if not values:
+        raise _LoweringError("Symbol product requires at least one operand", location=location)
+    current = values[0]
+    for value in values[1:]:
+        result_type = SymbolValueType.from_expr(
+            build_public_symbol_expr(f"({current.type.expr.expr.data})", f"({value.type.expr.expr.data})", "*")
+        )
+        op = SymbolMulOp(current, value, result_type)
+        ctx.builder.add_op(op)
+        current = op.result
+    return current
+
+
+def _build_img2col2d_output_dim_operands(
+    source: SSAValue,
+    ctx: EmitContext,
+) -> tuple[SSAValue, SSAValue, SSAValue]:
+    """读取 `nn.img2col2d` 结果中的 `N/OH/OW` 维度 operand。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 约定 `img2col2d` 结果布局为 `[N, C, KH, KW, OH, OW]`。
+    - 输出 `N`、`OH`、`OW` 对应的 `!symbol.int` 值，供后续 reshape 复用。
+
+    使用示例:
+    - batch_dim, out_h_dim, out_w_dim = _build_img2col2d_output_dim_operands(img2col.result, ctx)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    batch_op = SymbolGetDimOp(source, IntAttr(0))
+    out_h_op = SymbolGetDimOp(source, IntAttr(4))
+    out_w_op = SymbolGetDimOp(source, IntAttr(5))
+    ctx.builder.add_op(batch_op)
+    ctx.builder.add_op(out_h_op)
+    ctx.builder.add_op(out_w_op)
+    return batch_op.result, out_h_op.result, out_w_op.result
 
 
 def _memory_space_from_ast(space: MemorySpace | None, fallback: NnMemorySpaceAttr) -> NnMemorySpaceAttr:
@@ -2086,6 +2208,206 @@ def _parse_img2col_helper(expr: Img2ColAST) -> tuple[object, dict[str, int]]:
     return input_expr, resolved
 
 
+def _parse_conv_helper(expr: ConvAST) -> tuple[object, object, dict[str, int]]:
+    """解析 conv helper 调用参数。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 统一解析 `conv(value, weight, sh=..., sw=..., ...)` 的参数。
+    - 当前仅承接不带 bias 的前端分解路径，并为 emit/type 推导输出数值化属性。
+
+    使用示例:
+    - value_expr, weight_expr, params = _parse_conv_helper(conv_ast)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    params: dict[str, object] = dict(expr.kwargs)
+    resolved: dict[str, int] = {}
+    for name, default_value in _CONV_PARAM_DEFAULTS.items():
+        value = params.pop(name, default_value)
+        if isinstance(value, ConstAST):
+            if isinstance(value.value, int):
+                resolved[name] = value.value
+                continue
+            raise _LoweringError(f"conv {name} must be int", location=value.location)
+        if isinstance(value, int):
+            resolved[name] = value
+            continue
+        raise _LoweringError(f"conv {name} must be int", location=getattr(value, "location", None))
+    if params:
+        unexpected = next(iter(params))
+        raise _LoweringError(f"conv got unexpected keyword '{unexpected}'", location=expr.location)
+    return expr.value, expr.weight, resolved
+
+
+def _validate_conv_helper_params(params: dict[str, int], location: SourceLocation | None) -> None:
+    """校验 conv helper 的静态参数约束。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 要求 `sh/sw/dh/dw` 为正整数。
+    - 要求 `ph/pw/pl/pr` 为非负整数。
+    - 失败时抛出 `VerifyException`，保持 expectation 依赖的显式失败口径。
+
+    使用示例:
+    - _validate_conv_helper_params({"sh": 1, "sw": 1, "dh": 1, "dw": 1, "ph": 0, "pw": 0, "pl": 0, "pr": 0}, None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    for name in ("sh", "sw", "dh", "dw"):
+        if params[name] <= 0:
+            raise VerifyException(f"{name} must be positive")
+    for name in ("ph", "pw", "pl", "pr"):
+        if params[name] < 0:
+            raise VerifyException(f"{name} must be non-negative")
+
+
+def _static_kernel_dim(attr: Attribute, name: str, location: SourceLocation | None) -> int:
+    """读取 conv 权重中的静态 kernel 维度。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 当前前端分解仅支持静态 `kh/kw`。
+    - 非 `IntAttr` 时在 emit/type 推导入口报错，避免构造不合法的 `nn.img2col2d` 属性。
+
+    使用示例:
+    - kh = _static_kernel_dim(IntAttr(3), "kh", None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    if not isinstance(attr, IntAttr):
+        raise _LoweringError(f"conv {name} must be static int", location=location)
+    if attr.data <= 0:
+        raise VerifyException(f"{name} must be positive")
+    return attr.data
+
+
+def _conv_out_dim_value(
+    dim: Attribute,
+    *,
+    axis_name: str,
+    kernel: int,
+    stride: int,
+    dilation: int,
+    pad_before: int,
+    pad_after: int,
+    location: SourceLocation | None,
+) -> int | str:
+    """计算 conv 输出维度表达式。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 静态维度返回整数结果，并在结果 `<= 0` 时抛出 `VerifyException`。
+    - 符号维度返回保持对外字符串语义的表达式。
+
+    使用示例:
+    - _conv_out_dim_value(IntAttr(5), axis_name="height", kernel=3, stride=1, dilation=1, pad_before=1, pad_after=1, location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    if isinstance(dim, IntAttr):
+        out_dim = (dim.data + pad_before + pad_after - dilation * (kernel - 1) - 1) // stride + 1
+        if out_dim <= 0:
+            raise VerifyException(f"output {axis_name} must be positive")
+        return out_dim
+    if isinstance(dim, StringAttr):
+        dim_symbol = SymbolDim(dim.data)
+        expr = (dim_symbol + pad_before + pad_after - dilation * (kernel - 1) - 1) / stride + 1
+        return expr.get_value()
+    raise _LoweringError("conv dim must be int or symbol", location=location)
+
+
+def _infer_conv_memory_type(
+    expr: ConvAST,
+    value_type: NnMemoryType,
+    weight_type: NnMemoryType,
+) -> NnMemoryType:
+    """推导 conv helper 的结果类型。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 仅接受 `rank-4 value` 与 `rank-4 weight`。
+    - 复用前端分解所需的 `sh/sw/dh/dw/ph/pw/pl/pr` 参数，并保持输出 shape/stride 与公开 `conv` 合同一致。
+
+    使用示例:
+    - result_type = _infer_conv_memory_type(expr, value_type, weight_type)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    if len(value_type.shape.data) != 4:
+        raise _LoweringError("conv value must be rank-4 nn.memory", location=expr.location)
+    if len(weight_type.shape.data) != 4:
+        raise _LoweringError("conv weight must be rank-4 nn.memory", location=expr.location)
+    if value_type.element_type != weight_type.element_type:
+        raise _LoweringError("conv dtype mismatch", location=expr.location)
+    if value_type.space != weight_type.space:
+        raise _LoweringError("conv space mismatch", location=expr.location)
+
+    _, _, params = _parse_conv_helper(expr)
+    _validate_conv_helper_params(params, expr.location)
+
+    n_dim, c_in_dim, h_dim, w_dim = value_type.shape.data
+    c_out_dim, c_in_weight_dim, kh_attr, kw_attr = weight_type.shape.data
+    if not _dims_equal(c_in_dim, c_in_weight_dim):
+        raise _LoweringError("conv input channel mismatch", location=expr.location)
+
+    kh = _static_kernel_dim(kh_attr, "kh", expr.location)
+    kw = _static_kernel_dim(kw_attr, "kw", expr.location)
+    h_out = _conv_out_dim_value(
+        h_dim,
+        axis_name="height",
+        kernel=kh,
+        stride=params["sh"],
+        dilation=params["dh"],
+        pad_before=params["ph"],
+        pad_after=params["pw"],
+        location=expr.location,
+    )
+    w_out = _conv_out_dim_value(
+        w_dim,
+        axis_name="width",
+        kernel=kw,
+        stride=params["sw"],
+        dilation=params["dw"],
+        pad_before=params["pl"],
+        pad_after=params["pr"],
+        location=expr.location,
+    )
+    result_shape = [n_dim, c_out_dim, _dim_to_attr(h_out), _dim_to_attr(w_out)]
+    result_stride = _build_symbolic_stride_attrs(result_shape, expr.location)
+    return _memory_type_from_parts(result_shape, result_stride, value_type.element_type, value_type.space)
+
+
 def _img2col_out_dim_value(
     dim: Attribute,
     k: int,
@@ -2403,6 +2725,7 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
                 DmaViewAST,
                 DmaReshapeAST,
                 DmaFlattenAST,
+                ConvAST,
                 Img2ColAST,
                 MatmulAST,
                 NnBroadcastAST,
@@ -2662,6 +2985,14 @@ def _infer_expr_type(
         if not isinstance(input_type, NnMemoryType):
             raise _LoweringError("softmax input must be nn.memory", location=expr.location)
         result_type = input_type
+        type_map[expr_key] = result_type
+        return result_type
+    if isinstance(expr, ConvAST):
+        value_type = _infer_expr_type(expr.value, type_map, runtime_values=runtime_values)
+        weight_type = _infer_expr_type(expr.weight, type_map, runtime_values=runtime_values)
+        if not isinstance(value_type, NnMemoryType) or not isinstance(weight_type, NnMemoryType):
+            raise _LoweringError("conv operands must be nn.memory", location=expr.location)
+        result_type = _infer_conv_memory_type(expr, value_type, weight_type)
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, Img2ColAST):
@@ -3136,6 +3467,118 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
         return op.result
+    if isinstance(expr, ConvAST):
+        value = _lower_expr(expr.value, ctx)
+        weight = _lower_expr(expr.weight, ctx)
+        value_type = _expect_memory_value(value, expr.location)
+        weight_type = _expect_memory_value(weight, expr.location)
+        result_type = _infer_expr_type(expr, ctx.types)
+        if not isinstance(result_type, NnMemoryType):
+            raise _LoweringError("conv result must be nn.memory", location=expr.location)
+
+        _, _, params = _parse_conv_helper(expr)
+        _validate_conv_helper_params(params, expr.location)
+        c_out_dim, _, kh_attr, kw_attr = weight_type.shape.data
+        kh = _static_kernel_dim(kh_attr, "kh", expr.location)
+        kw = _static_kernel_dim(kw_attr, "kw", expr.location)
+        img2col_expr = Img2ColAST(
+            kind="img2col2d",
+            args=[expr.value],
+            kwargs={
+                "kh": kh,
+                "kw": kw,
+                "sh": params["sh"],
+                "sw": params["sw"],
+                "dh": params["dh"],
+                "dw": params["dw"],
+                "ph": params["ph"],
+                "pw": params["pw"],
+                "pl": params["pl"],
+                "pr": params["pr"],
+            },
+            location=expr.location,
+        )
+        img2col_shape = _infer_img2col_output_shape_attrs(img2col_expr, value_type, {**params, "kh": kh, "kw": kw})
+        img2col_type = _memory_type_from_parts(
+            img2col_shape,
+            _build_symbolic_stride_attrs(img2col_shape, expr.location),
+            value_type.element_type,
+            value_type.space,
+        )
+        img2col_op = NnImg2col2dOp(
+            value,
+            img2col_type,
+            kh=kh,
+            kw=kw,
+            sh=params["sh"],
+            sw=params["sw"],
+            dh=params["dh"],
+            dw=params["dw"],
+            ph=params["ph"],
+            pw=params["pw"],
+            pl=params["pl"],
+            pr=params["pr"],
+            space=value_type.space,
+        )
+        img2col_op.verify()
+        ctx.builder.add_op(img2col_op)
+
+        batch_dim, out_h_dim, out_w_dim = _build_img2col2d_output_dim_operands(img2col_op.result, ctx)
+        contract_dim = _shape_numel_attr(weight_type.shape.data[1:])
+        image_dim = _shape_numel_attr([img2col_type.shape.data[0], img2col_type.shape.data[4], img2col_type.shape.data[5]])
+        weight_matrix_shape = [c_out_dim, contract_dim]
+        weight_matrix_type = _memory_type_from_parts(
+            weight_matrix_shape,
+            _build_symbolic_stride_attrs(weight_matrix_shape, expr.location),
+            weight_type.element_type,
+            weight_type.space,
+        )
+        weight_reshape = DmaReshapeOp(
+            weight,
+            [
+                _shape_attr_to_symbol_operand(c_out_dim, ctx, location=expr.location),
+                _shape_attr_to_symbol_operand(contract_dim, ctx, location=expr.location),
+            ],
+            weight_matrix_type,
+        )
+        weight_reshape.verify()
+        ctx.builder.add_op(weight_reshape)
+
+        col_matrix_shape = [contract_dim, image_dim]
+        col_matrix_type = _memory_type_from_parts(
+            col_matrix_shape,
+            _build_symbolic_stride_attrs(col_matrix_shape, expr.location),
+            img2col_type.element_type,
+            img2col_type.space,
+        )
+        col_reshape = DmaReshapeOp(
+            img2col_op.result,
+            [
+                _shape_attr_to_symbol_operand(contract_dim, ctx, location=expr.location),
+                _build_symbol_product_operand([batch_dim, out_h_dim, out_w_dim], ctx, location=expr.location),
+            ],
+            col_matrix_type,
+        )
+        ctx.builder.add_op(col_reshape)
+
+        matmul_result_type = _infer_matmul_memory_type(weight_matrix_type, col_matrix_type, None, expr.location)
+        matmul_op = NnMatmulOp(weight_reshape.result, col_reshape.result, matmul_result_type, weight_matrix_type.space)
+        matmul_op.verify()
+        ctx.builder.add_op(matmul_op)
+
+        result_reshape = DmaReshapeOp(
+            matmul_op.result,
+            [
+                batch_dim,
+                _shape_attr_to_symbol_operand(c_out_dim, ctx, location=expr.location),
+                out_h_dim,
+                out_w_dim,
+            ],
+            result_type,
+        )
+        ctx.builder.add_op(result_reshape)
+        ctx._set_cache(expr_key, result_reshape.result)
+        return result_reshape.result
     if isinstance(expr, Img2ColAST):
         input_expr, params = _parse_img2col_helper(expr)
         input_value = _lower_expr(input_expr, ctx)
@@ -3461,6 +3904,7 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
             DmaViewAST,
             DmaReshapeAST,
             DmaFlattenAST,
+            ConvAST,
             Img2ColAST,
             MatmulAST,
             NnBroadcastAST,
