@@ -525,8 +525,8 @@ def test_lower_add_to_kernel() -> None:
 # TC-PASS-N2K-002
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-07 17:05:47 +0800
-# 最近一次运行成功时间: 2026-04-07 17:05:47 +0800
+# 最近一次运行测试时间: 2026-04-07 17:41:56 +0800
+# 最近一次运行成功时间: 2026-04-07 17:41:56 +0800
 # 测试目的: 验证 nn.broadcast lower 为 dma.broadcast。
 # 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_broadcast_to_dma_broadcast
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py

@@ -1182,8 +1182,8 @@ def test_dma_reshape_rejects_element_or_space_mismatch() -> None:
 # TC-DMA-027
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-07 17:05:47 +0800
-# 最近一次运行成功时间: 2026-04-07 17:05:47 +0800
+# 最近一次运行测试时间: 2026-04-07 17:41:56 +0800
+# 最近一次运行成功时间: 2026-04-07 17:41:56 +0800
 # 测试目的: 验证 dma.broadcast 接受 memory source 的尾维对齐广播。
 # 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_broadcast_accepts_memory_source
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
@@ -1207,8 +1207,8 @@ def test_dma_broadcast_accepts_memory_source() -> None:
 # TC-DMA-028
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-07 17:05:47 +0800
-# 最近一次运行成功时间: 2026-04-07 17:05:47 +0800
+# 最近一次运行测试时间: 2026-04-07 17:41:56 +0800
+# 最近一次运行成功时间: 2026-04-07 17:41:56 +0800
 # 测试目的: 验证 dma.broadcast 接受整数 symbol 标量广播。
 # 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_broadcast_accepts_symbol_int_scalar
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
@@ -1224,8 +1224,8 @@ def test_dma_broadcast_accepts_symbol_int_scalar() -> None:
 # TC-DMA-029
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-07 17:05:47 +0800
-# 最近一次运行成功时间: 2026-04-07 17:05:47 +0800
+# 最近一次运行测试时间: 2026-04-07 17:41:56 +0800
+# 最近一次运行成功时间: 2026-04-07 17:41:56 +0800
 # 测试目的: 验证 dma.broadcast 在静态 shape 不兼容时失败。
 # 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_broadcast_rejects_static_shape_mismatch
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
@@ -1250,8 +1250,8 @@ def test_dma_broadcast_rejects_static_shape_mismatch() -> None:
 # TC-DMA-030
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-07 17:05:47 +0800
-# 最近一次运行成功时间: 2026-04-07 17:05:47 +0800
+# 最近一次运行测试时间: 2026-04-07 17:41:56 +0800
+# 最近一次运行成功时间: 2026-04-07 17:41:56 +0800
 # 测试目的: 验证 dma.broadcast 拒绝标量类型与目标元素类型不一致的情况。
 # 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_broadcast_rejects_scalar_type_mismatch
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py

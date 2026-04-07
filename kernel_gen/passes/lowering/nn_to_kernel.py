@@ -33,7 +33,7 @@ from xdsl.dialects.builtin import (
 from xdsl.ir import Block, Operation, Region, SSAValue
 from xdsl.utils.exceptions import VerifyException
 
-from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaFillOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCopyOp, DmaFillOp
 from kernel_gen.dialect.kernel import (
     KernelAddOp,
     KernelCastOp,
@@ -389,6 +389,7 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
     功能说明:
     - 为结果插入 dma.alloc。
     - 用 kernel op 替换 nn op，并替换所有使用者。
+    - nn.broadcast 在 source/结果空间不一致时先插入 dma.alloc + dma.copy。
 
     使用示例:
     - _lower_nn_op(op, block)
@@ -404,20 +405,43 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
         result_type = _ensure_single_result(op)
         _ensure_space_attr(op)
         source = SSAValue.get(op.operands[0])
-        if not isinstance(source.type, NnMemoryType):
+        source_type = source.type
+        if not isinstance(source_type, NnMemoryType):
             raise LowerNnToKernelError("nn.broadcast operand must be nn.memory")
 
         shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_result(result_type)
         alloc = DmaAllocOp(dynamic_shape, result_type)
-        broadcast = DmaBroadcastOp(alloc.result, source)
+        broadcast_source = source
+        extra_ops: list[Operation] = []
+        extra_alloc: DmaAllocOp | None = None
+        extra_copy: DmaCopyOp | None = None
+        if source_type.space.space.data != result_type.space.space.data:
+            temp_type = NnMemoryType(
+                source_type.shape,
+                source_type.stride,
+                source_type.element_type,
+                result_type.space,
+            )
+            temp_shape_ops, temp_dynamic_shape = _build_alloc_dynamic_shape_from_result(temp_type)
+            extra_alloc = DmaAllocOp(temp_dynamic_shape, temp_type)
+            extra_copy = DmaCopyOp(source, extra_alloc.result)
+            extra_ops.extend(temp_shape_ops)
+            extra_ops.extend([extra_alloc, extra_copy])
+            broadcast_source = extra_alloc.result
+
+        broadcast = DmaBroadcastOp(alloc.result, broadcast_source)
 
         try:
             alloc.verify()
+            if extra_alloc is not None and extra_copy is not None:
+                extra_alloc.verify()
+                extra_copy.verify()
             broadcast.verify()
         except VerifyException as exc:
             raise LowerNnToKernelError(str(exc)) from exc
 
-        block.insert_ops_before([*shape_ops, alloc, broadcast], op)
+        ops_to_insert = [*shape_ops, *extra_ops, alloc, broadcast]
+        block.insert_ops_before(ops_to_insert, op)
         op.results[0].replace_by(alloc.result)
         block.erase_op(op)
         return
