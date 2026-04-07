@@ -6,7 +6,7 @@
 功能说明:
 - 提供 `memory-pool` pass 的生命周期摘要分析接口。
 - 汇总 `dma.alloc/dma.free` 的生命周期区间与 peak 统计。
-- 第一版仅输出 summary，不进行 IR 改写。
+- 支持直线路径的 pool 改写：`dma.alloc -> i8 byte pool + dma.view`。
 
 使用示例:
 - from kernel_gen.passes.lowering.memory_pool import MemoryPoolPass
@@ -24,21 +24,27 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import sympy as sp
-from xdsl.dialects import func
+from xdsl.dialects import arith, func
 from xdsl.dialects.builtin import (
+    ArrayAttr,
     BFloat16Type,
     Float16Type,
     Float32Type,
     Float64Type,
     IntAttr,
+    IntegerAttr,
     IntegerType,
     ModuleOp,
     StringAttr,
+    UnrealizedConversionCastOp,
+    i8,
+    i32,
 )
 from xdsl.ir import Attribute, Block, Operation, SSAValue
 
-from kernel_gen.dialect.dma import DmaAllocOp, DmaFreeOp, _is_contiguous
+from kernel_gen.dialect.dma import DmaAllocOp, DmaFreeOp, DmaViewOp, _is_contiguous
 from kernel_gen.dialect.nn import NnMemoryType
+from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.passes.pass_manager import Pass
 
 
@@ -69,10 +75,10 @@ class MemoryPoolInterval:
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 记录 alloc 的 bucket、大小表达式、词法起止索引与复用 offset。
+    - 记录 alloc 的 bucket、字节大小表达式、词法起止索引与复用 offset。
 
     使用示例:
-    - interval = MemoryPoolInterval("alloc1", ("#GM", "f32", "contiguous"), sp.Symbol("A"), 0, 2, sp.Integer(0))
+    - interval = MemoryPoolInterval("alloc1", ("#GM",), sp.Symbol("A"), 0, 2, sp.Integer(0))
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
@@ -81,11 +87,38 @@ class MemoryPoolInterval:
     """
 
     name: str
-    bucket_key: tuple[str, str, str]
-    size_expr: sp.Basic
+    bucket_key: tuple[str]
+    size_bytes_expr: sp.Basic
     begin_index: int
     end_index: int
-    offset_expr: sp.Basic
+    offset_bytes_expr: sp.Basic
+
+
+@dataclass(frozen=True)
+class _AllocInfo:
+    """改写阶段使用的 alloc 生命周期信息。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 记录 alloc/free 对、bucket、字节大小表达式与词法区间，供直线路径改写使用。
+
+    使用示例:
+    - info = _AllocInfo(alloc_op, free_op, sp.Integer(8), ("#GM",), 0, 1)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/pass/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    """
+
+    alloc_op: DmaAllocOp
+    free_op: DmaFreeOp
+    size_bytes_expr: sp.Basic
+    bucket_key: tuple[str]
+    begin_index: int
+    end_index: int
 
 
 @dataclass(frozen=True)
@@ -99,7 +132,7 @@ class MemoryPoolSummary:
     - 汇总单个 func 的区间列表、peak 统计与 bucket 数量。
 
     使用示例:
-    - summary = MemoryPoolSummary("main", intervals, peak_numel_by_bucket, peak_bytes_by_bucket, pool_count=1)
+    - summary = MemoryPoolSummary("main", intervals, peak_bytes_by_bucket, pool_count=1)
     - print(summary.to_text())
 
     关联文件:
@@ -110,8 +143,7 @@ class MemoryPoolSummary:
 
     func_name: str
     intervals: tuple[MemoryPoolInterval, ...]
-    peak_numel_by_bucket: dict[tuple[str, str, str], sp.Basic]
-    peak_bytes_by_bucket: dict[tuple[str, str, str], sp.Basic]
+    peak_bytes_by_bucket: dict[tuple[str], sp.Basic]
     pool_count: int
 
     def to_text(self) -> str:
@@ -138,18 +170,12 @@ class MemoryPoolSummary:
             for interval in self.intervals:
                 lines.append(
                     "  - "
-                    + f"{interval.name} | size={_expr_text(interval.size_expr)}"
+                    + f"{interval.name} | size_bytes={_expr_text(interval.size_bytes_expr)}"
                     + f" | begin={interval.begin_index} | end={interval.end_index}"
-                    + f" | offset={_expr_text(interval.offset_expr)}"
+                    + f" | offset_bytes={_expr_text(interval.offset_bytes_expr)}"
                 )
         else:
             lines.append("  - <empty>")
-
-        lines.append("peak_numel_by_bucket:")
-        for bucket in sorted(self.peak_numel_by_bucket):
-            lines.append(
-                f"  - {_bucket_text(bucket)} -> {_expr_text(self.peak_numel_by_bucket[bucket])}"
-            )
 
         lines.append("peak_bytes_by_bucket:")
         for bucket in sorted(self.peak_bytes_by_bucket):
@@ -169,7 +195,7 @@ class MemoryPoolPass(Pass):
 
     功能说明:
     - 统计 `dma.alloc/dma.free` 生命周期并生成 summary。
-    - `rewrite=True` 时当前阶段直接显式失败。
+    - `rewrite=True` 时对直线路径执行 pool 改写。
 
     使用示例:
     - summary = MemoryPoolPass(rewrite=False).run(module)
@@ -248,8 +274,6 @@ class MemoryPoolPass(Pass):
 
         if not isinstance(module, ModuleOp):
             raise MemoryPoolError("MemoryPoolInvalidModule: module must be builtin.module")
-        if self.rewrite:
-            raise MemoryPoolError("MemoryPoolRewriteNotImplemented: rewrite=True is not supported in v1")
 
         self._summaries = {}
         for op in module.ops:
@@ -257,6 +281,8 @@ class MemoryPoolPass(Pass):
                 continue
             summary = _summarize_func(op)
             self._summaries[summary.func_name] = summary
+            if self.rewrite:
+                _rewrite_func(op)
         return module
 
 
@@ -290,7 +316,7 @@ def _expr_text(expr: sp.Basic) -> str:
     return str(expr)
 
 
-def _bucket_text(bucket: tuple[str, str, str]) -> str:
+def _bucket_text(bucket: tuple[str]) -> str:
     """格式化 bucket 输出。
 
     创建者: 金铲铲大作战
@@ -300,7 +326,7 @@ def _bucket_text(bucket: tuple[str, str, str]) -> str:
     - 用于 summary 文本输出。
 
     使用示例:
-    - text = _bucket_text(("#GM", "f32", "contiguous"))
+    - text = _bucket_text(("#GM",))
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
@@ -308,7 +334,9 @@ def _bucket_text(bucket: tuple[str, str, str]) -> str:
     - 功能实现: kernel_gen/passes/lowering/memory_pool.py
     """
 
-    return f"({bucket[0]}, {bucket[1]}, {bucket[2]})"
+    if len(bucket) == 1:
+        return f"({bucket[0]})"
+    return f"({', '.join(bucket)})"
 
 
 def _space_token(mem_type: NnMemoryType) -> str:
@@ -469,14 +497,148 @@ def _shape_product(mem_type: NnMemoryType) -> sp.Basic:
     return result
 
 
-def _bucket_key(mem_type: NnMemoryType) -> tuple[str, str, str]:
+def _const_symbol_int(value: int) -> tuple[arith.ConstantOp, UnrealizedConversionCastOp]:
+    """构造 `!symbol.int<"value">` 常量的 IR op 对。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 先创建 i32 常量，再用 `builtin.unrealized_conversion_cast` 转成 `!symbol.int<"expr">`。
+    - 返回两条 op，调用者决定插入到 block 中的位置。
+
+    使用示例:
+    - const_i32, cast = _const_symbol_int(1)
+    - block.insert_ops_before([const_i32, cast], anchor_op)
+    - one = cast.results[0]
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/pass/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    """
+
+    const = arith.ConstantOp(IntegerAttr(value, i32))
+    result_type = SymbolValueType.from_expr(str(value))
+    cast = UnrealizedConversionCastOp(operands=[const.result], result_types=[result_type])
+    return const, cast
+
+
+def _symbol_value_expr(expr: str) -> tuple[list[Operation], SSAValue]:
+    """构造 `!symbol.int<"expr">` 的 SSA value。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 当 expr 可解析为整数时，使用 `_const_symbol_int` 生成常量。
+    - 否则使用 `builtin.unrealized_conversion_cast` 生成指定 expr 的 symbol 值。
+
+    使用示例:
+    - ops, value = _symbol_value_expr("M*N")
+    - block.insert_ops_before(ops, anchor_op)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/pass/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    """
+
+    try:
+        int_value = int(expr)
+    except ValueError:
+        int_value = None
+    if int_value is not None:
+        const, cast = _const_symbol_int(int_value)
+        return [const, cast], cast.results[0]
+
+    const = arith.ConstantOp(IntegerAttr(0, i32))
+    result_type = SymbolValueType.from_expr(expr)
+    cast = UnrealizedConversionCastOp(operands=[const.result], result_types=[result_type])
+    return [const, cast], cast.results[0]
+
+
+def _symbol_expr(expr: sp.Basic) -> tuple[list[Operation], SSAValue]:
+    """将 sympy 表达式转换为 `!symbol.int<"expr">` SSA value。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 统一通过 `_symbol_value_expr` 生成可插入的 IR op 列表。
+
+    使用示例:
+    - ops, value = _symbol_expr(sp.Symbol("M") * sp.Integer(2))
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/pass/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    """
+
+    return _symbol_value_expr(_expr_text(expr))
+
+
+def _shape_dim_attr(expr: sp.Basic) -> Attribute:
+    """将 size 表达式转换为 shape 维度 attribute。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 整数表达式转为 `IntAttr`。
+    - 其他表达式转为 `StringAttr`。
+
+    使用示例:
+    - dim_attr = _shape_dim_attr(sp.Symbol("M"))
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/pass/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    """
+
+    if isinstance(expr, sp.Integer):
+        return IntAttr(int(expr))
+    return StringAttr(_expr_text(expr))
+
+
+def _layout_operands(layout: ArrayAttr[Attribute]) -> tuple[list[Operation], list[SSAValue]]:
+    """将 layout 属性转换为 `!symbol.int<"expr">` operand 列表。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - IntAttr 转为常量 `!symbol.int<"n">`。
+    - StringAttr 转为符号 `!symbol.int<"expr">`。
+
+    使用示例:
+    - ops, values = _layout_operands(result_type.stride)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/pass/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    """
+
+    ops: list[Operation] = []
+    values: list[SSAValue] = []
+    for attr in layout.data:
+        expr_ops, expr_value = _symbol_expr(_dim_expr(attr))
+        ops.extend(expr_ops)
+        values.append(expr_value)
+    return ops, values
+
+
+def _bucket_key(mem_type: NnMemoryType) -> tuple[str]:
     """生成 bucket key。
 
     创建者: 金铲铲大作战
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 规则: (space, element_type, layout_family)。
+    - 规则: (space,)；layout 仅用于校验。
 
     使用示例:
     - key = _bucket_key(mem_type)
@@ -487,7 +649,8 @@ def _bucket_key(mem_type: NnMemoryType) -> tuple[str, str, str]:
     - 功能实现: kernel_gen/passes/lowering/memory_pool.py
     """
 
-    return (_space_token(mem_type), _dtype_string(mem_type.element_type), _layout_family(mem_type))
+    _layout_family(mem_type)
+    return (_space_token(mem_type),)
 
 
 def _collect_ops(block: Block) -> list[Operation]:
@@ -517,6 +680,35 @@ def _collect_ops(block: Block) -> list[Operation]:
     return ops
 
 
+def _collect_straight_line_ops(func_op: func.FuncOp) -> tuple[Block, list[Operation]]:
+    """收集直线路径的 op 列表。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅允许单 block 且无嵌套 region。
+    - 用于改写阶段的安全约束。
+
+    使用示例:
+    - block, ops = _collect_straight_line_ops(func_op)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/pass/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    """
+
+    if len(func_op.body.blocks) != 1:
+        raise MemoryPoolError("MemoryPoolRewriteUnsupported: function must have single block")
+    block = func_op.body.blocks[0]
+    ops = list(block.ops)
+    for op in ops:
+        if op.regions:
+            raise MemoryPoolError("MemoryPoolRewriteUnsupported: nested regions are not supported")
+    return block, ops
+
+
 def _alloc_name(value: SSAValue, index: int) -> str:
     """生成 alloc 的稳定名称。
 
@@ -541,8 +733,8 @@ def _alloc_name(value: SSAValue, index: int) -> str:
     return f"alloc{index}"
 
 
-def _peak_numel(intervals: list[MemoryPoolInterval]) -> sp.Basic:
-    """计算 bucket 内的 peak 元素数量。
+def _peak_bytes(intervals: list[MemoryPoolInterval]) -> sp.Basic:
+    """计算 bucket 内的 peak 字节数量。
 
     创建者: 金铲铲大作战
     最后一次更改: 金铲铲大作战
@@ -551,7 +743,7 @@ def _peak_numel(intervals: list[MemoryPoolInterval]) -> sp.Basic:
     - 按 begin/end 索引构造事件流，取最大并发表达式。
 
     使用示例:
-    - peak = _peak_numel(intervals)
+    - peak = _peak_bytes(intervals)
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
@@ -563,8 +755,8 @@ def _peak_numel(intervals: list[MemoryPoolInterval]) -> sp.Basic:
         return sp.Integer(0)
     events: dict[int, list[sp.Basic]] = {}
     for interval in intervals:
-        events.setdefault(interval.begin_index, []).append(interval.size_expr)
-        events.setdefault(interval.end_index + 1, []).append(-interval.size_expr)
+        events.setdefault(interval.begin_index, []).append(interval.size_bytes_expr)
+        events.setdefault(interval.end_index + 1, []).append(-interval.size_bytes_expr)
 
     current = sp.Integer(0)
     candidates: list[sp.Basic] = []
@@ -606,7 +798,6 @@ def _summarize_func(func_op: func.FuncOp) -> MemoryPoolSummary:
             free_indices.setdefault(op.source, []).append(index)
 
     intervals: list[MemoryPoolInterval] = []
-    bucket_sizes: dict[tuple[str, str, str], int] = {}
     alloc_index = 0
     for index, op in enumerate(ops):
         if not isinstance(op, DmaAllocOp):
@@ -617,15 +808,13 @@ def _summarize_func(func_op: func.FuncOp) -> MemoryPoolSummary:
             raise MemoryPoolError("MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory")
 
         bucket = _bucket_key(result_type)
-        size_expr = _shape_product(result_type)
+        size_numel_expr = _shape_product(result_type)
         dtype_size = _element_size(result_type.element_type)
         if dtype_size is None:
             raise MemoryPoolError(
                 f"MemoryPoolUnsupportedDtype: {result_type.element_type} is not supported"
             )
-        if bucket in bucket_sizes and bucket_sizes[bucket] != dtype_size:
-            raise MemoryPoolError("MemoryPoolUnsupportedPoolBucket: dtype size mismatch")
-        bucket_sizes[bucket] = dtype_size
+        size_bytes_expr = size_numel_expr * sp.Integer(dtype_size)
 
         free_list = free_indices.get(op.result, [])
         free_after = [value for value in free_list if value >= index]
@@ -641,7 +830,7 @@ def _summarize_func(func_op: func.FuncOp) -> MemoryPoolSummary:
             MemoryPoolInterval(
                 _alloc_name(op.result, alloc_index),
                 bucket,
-                size_expr,
+                size_bytes_expr,
                 index,
                 free_index,
                 sp.Integer(0),
@@ -649,21 +838,141 @@ def _summarize_func(func_op: func.FuncOp) -> MemoryPoolSummary:
         )
 
     intervals_tuple = tuple(intervals)
-    peak_numel_by_bucket: dict[tuple[str, str, str], sp.Basic] = {}
-    peak_bytes_by_bucket: dict[tuple[str, str, str], sp.Basic] = {}
-    for bucket, dtype_size in bucket_sizes.items():
+    peak_bytes_by_bucket: dict[tuple[str], sp.Basic] = {}
+    for bucket in {interval.bucket_key for interval in intervals}:
         bucket_intervals = [interval for interval in intervals if interval.bucket_key == bucket]
-        peak_numel = _peak_numel(bucket_intervals)
-        peak_numel_by_bucket[bucket] = peak_numel
-        peak_bytes_by_bucket[bucket] = peak_numel * sp.Integer(dtype_size)
+        peak_bytes_by_bucket[bucket] = _peak_bytes(bucket_intervals)
 
     return MemoryPoolSummary(
         func_op.sym_name.data,
         intervals_tuple,
-        peak_numel_by_bucket,
         peak_bytes_by_bucket,
-        pool_count=len(peak_numel_by_bucket),
+        pool_count=len(peak_bytes_by_bucket),
     )
+
+
+def _rewrite_func(func_op: func.FuncOp) -> None:
+    """对直线路径执行 pool 改写。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅支持单 block、无嵌套 region 的直线路径。
+    - 仅改写同 bucket、相同 size 表达式且生命周期不重叠的 alloc/free。
+
+    使用示例:
+    - _rewrite_func(func_op)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/pass/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    """
+
+    block, ops = _collect_straight_line_ops(func_op)
+    if not ops:
+        return
+
+    free_indices: dict[SSAValue, list[int]] = {}
+    for index, op in enumerate(ops):
+        if isinstance(op, DmaFreeOp):
+            free_indices.setdefault(op.source, []).append(index)
+
+    alloc_infos: list[_AllocInfo] = []
+    for index, op in enumerate(ops):
+        if not isinstance(op, DmaAllocOp):
+            continue
+        result_type = op.result.type
+        if not isinstance(result_type, NnMemoryType):
+            raise MemoryPoolError("MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory")
+        free_list = free_indices.get(op.result, [])
+        free_after = [value for value in free_list if value >= index]
+        if not free_after:
+            raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free not found for alloc")
+        if len(free_after) > 1:
+            raise MemoryPoolError("MemoryPoolInvalidLifetime: multiple dma.free for alloc")
+        free_index = free_after[0]
+        if free_index < index:
+            raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free before alloc")
+        free_op = ops[free_index]
+        if not isinstance(free_op, DmaFreeOp):
+            raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free op mismatch")
+
+        dtype_size = _element_size(result_type.element_type)
+        if dtype_size is None:
+            raise MemoryPoolError(
+                f"MemoryPoolUnsupportedDtype: {result_type.element_type} is not supported"
+            )
+        size_bytes_expr = _shape_product(result_type) * sp.Integer(dtype_size)
+
+        alloc_infos.append(
+            _AllocInfo(
+                op,
+                free_op,
+                size_bytes_expr,
+                _bucket_key(result_type),
+                index,
+                free_index,
+            )
+        )
+
+    if not alloc_infos:
+        return
+
+    ref_bucket = alloc_infos[0].bucket_key
+    ref_size = alloc_infos[0].size_bytes_expr
+    for info in alloc_infos:
+        if info.bucket_key != ref_bucket:
+            raise MemoryPoolError("MemoryPoolRewriteUnsupported: multiple buckets are not supported")
+        if info.size_bytes_expr != ref_size:
+            raise MemoryPoolError("MemoryPoolRewriteUnsupported: size mismatch")
+
+    ordered = sorted(alloc_infos, key=lambda item: item.begin_index)
+    for prev, curr in zip(ordered, ordered[1:]):
+        if curr.begin_index <= prev.end_index:
+            raise MemoryPoolError("MemoryPoolRewriteUnsupported: overlapping lifetimes are not supported")
+
+    first_type = ordered[0].alloc_op.result.type
+    assert isinstance(first_type, NnMemoryType)
+    pool_shape_attr = _shape_dim_attr(ref_size)
+    pool_type = NnMemoryType(
+        ArrayAttr([pool_shape_attr]),
+        ArrayAttr([IntAttr(1)]),
+        i8,
+        first_type.space,
+    )
+
+    pool_shape_ops, pool_shape_value = _symbol_expr(ref_size)
+    zero_ops, zero_value = _symbol_value_expr("0")
+    pool_alloc = DmaAllocOp([pool_shape_value], pool_type)
+
+    anchor_op = ops[0]
+    block.insert_ops_before([*pool_shape_ops, *zero_ops, pool_alloc], anchor_op)
+
+    for info in ordered:
+        result_type = info.alloc_op.result.type
+        assert isinstance(result_type, NnMemoryType)
+        stride_ops, stride_values = _layout_operands(result_type.stride)
+        rank = len(result_type.shape.data)
+        view_op = DmaViewOp(
+            pool_alloc.result,
+            [zero_value] * rank,
+            list(info.alloc_op.dynamic_shape),
+            stride_values,
+            result_type,
+        )
+        block.insert_ops_before([*stride_ops, view_op], info.alloc_op)
+        info.alloc_op.result.replace_by(view_op.result)
+        block.erase_op(info.alloc_op)
+        block.erase_op(info.free_op)
+
+    pool_free = DmaFreeOp(pool_alloc.result)
+    terminator = list(block.ops)[-1]
+    if isinstance(terminator, func.ReturnOp):
+        block.insert_ops_before([pool_free], terminator)
+    else:
+        block.add_ops([pool_free])
 
 
 __all__ = [

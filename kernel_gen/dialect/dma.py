@@ -20,7 +20,17 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from xdsl.dialects.builtin import ArrayAttr, IntAttr, StringAttr, i32
+from xdsl.dialects.builtin import (
+    ArrayAttr,
+    BFloat16Type,
+    Float16Type,
+    Float32Type,
+    Float64Type,
+    IntAttr,
+    IntegerType,
+    StringAttr,
+    i32,
+)
 from xdsl.ir import Attribute, Dialect, Operation, SSAValue
 from xdsl.irdl import (
     AttrSizedOperandSegments,
@@ -243,6 +253,101 @@ def _verify_unit_stride_operands(strides: Sequence[SSAValue]) -> None:
         if _operand_int_value(value) != 1:
             raise VerifyException("dma stride must be 1 in current implementation")
 
+
+def _element_byte_size(element_type: Attribute) -> int | None:
+    """解析 element_type 的字节大小。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 支持 i1/i8/i16/i32/i64 与 f16/bf16/f32/f64。
+
+    使用示例:
+    - size = _element_byte_size(Float32Type())
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma_dialect.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    if isinstance(element_type, IntegerType):
+        width = int(element_type.width.data)
+        if width in {1, 8}:
+            return 1
+        if width == 16:
+            return 2
+        if width == 32:
+            return 4
+        if width == 64:
+            return 8
+        return None
+    if isinstance(element_type, (Float16Type, BFloat16Type)):
+        return 2
+    if isinstance(element_type, Float32Type):
+        return 4
+    if isinstance(element_type, Float64Type):
+        return 8
+    return None
+
+
+def _is_i8_byte_pool(memory_type: NnMemoryType) -> bool:
+    """判断是否为 i8 一维 byte pool。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 要求 element_type 为 i8，且 rank 为 1。
+
+    使用示例:
+    - if _is_i8_byte_pool(mem_type): ...
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma_dialect.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    if len(memory_type.shape.data) != 1:
+        return False
+    element_type = memory_type.element_type
+    return isinstance(element_type, IntegerType) and int(element_type.width.data) == 8
+
+
+def _linear_max_index(
+    offsets: Sequence[SSAValue],
+    shape: Sequence[SSAValue],
+    stride: Sequence[SSAValue],
+) -> int | None:
+    """计算 view 的静态最大线性索引（元素单位）。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 当 offsets/shape/stride 都可静态还原时，返回最大线性索引。
+    - 任一值无法静态还原则返回 None。
+
+    使用示例:
+    - max_index = _linear_max_index(op.offsets, op.shape, op.stride)
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma_dialect.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    total = 0
+    for offset_value, size_value, stride_value in zip(offsets, shape, stride, strict=True):
+        offset_int = _operand_int_value(offset_value)
+        size_int = _operand_int_value(size_value)
+        stride_int = _operand_int_value(stride_value)
+        if offset_int is None or size_int is None or stride_int is None:
+            return None
+        total += (offset_int + size_int - 1) * stride_int
+    return total
 
 def _maybe_numel(shape: ArrayAttr[Attribute]) -> int | None:
     """尝试计算 shape 的元素总数。
@@ -983,7 +1088,7 @@ class DmaViewOp(IRDLOperation):
         """初始化 dma.view。
 
         创建者: 金铲铲大作战
-        最后一次更改: OpenAI
+        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 设置 source、动态 offsets/shape/stride operand 与结果类型。
@@ -1009,10 +1114,11 @@ class DmaViewOp(IRDLOperation):
         最后一次更改: OpenAI
 
         功能说明:
-        - element_type/space 必须一致。
-        - `offsets`/`shape`/`stride` 必须是 `!symbol.int<"expr">` 且长度与 rank 一致。
+        - `space` 必须一致；`element_type` 必须一致（i8 byte pool 允许不同 element_type）。
+        - 非 byte pool 场景下 source/result rank 必须一致；byte pool 允许 rank 不一致。
+        - `offsets`/`shape`/`stride` 必须是 `!symbol.int<"expr">` 且长度与结果 rank 一致。
         - 当边界可静态判定时，必须满足 `offset + (size - 1) * stride < dim`。
-        - 可判定 numel 不一致必须报错。
+        - 非 byte pool 场景下可判定 numel 不一致必须报错；byte pool 需满足字节数一致与字节边界可达。
 
         使用示例:
         - DmaViewOp(...).verify_()
@@ -1029,23 +1135,36 @@ class DmaViewOp(IRDLOperation):
         shape = _verify_symbol_int_operands(self.shape, "shape", min_value=1)
         stride = _verify_symbol_int_operands(self.stride, "stride", min_value=1)
         rank = len(result_type.shape.data)
-        if len(source_type.shape.data) != rank:
+        if len(source_type.shape.data) != rank and not _is_i8_byte_pool(source_type):
             raise VerifyException("dma.view source/result rank mismatch")
         _verify_rank_match(offsets, rank, "offsets")
         _verify_rank_match(shape, rank, "shape")
         _verify_rank_match(stride, rank, "stride")
         _verify_operands_match_layout(shape, result_type.shape, "shape must match result shape")
         _verify_operands_match_layout(stride, result_type.stride, "stride must match result stride")
-        if source_type.element_type != result_type.element_type:
-            raise VerifyException("dma.view element_type mismatch")
         if source_type.space.space.data != result_type.space.space.data:
             raise VerifyException("dma.view space mismatch")
 
         source_numel = _maybe_numel(source_type.shape)
         result_numel = _maybe_numel(result_type.shape)
-        if source_numel is not None and result_numel is not None and source_numel != result_numel:
-            raise VerifyException("dma.view numel mismatch")
-        _verify_static_view_bounds(source_type.shape, offsets, shape, stride)
+        if _is_i8_byte_pool(source_type):
+            result_elem_size = _element_byte_size(result_type.element_type)
+            if result_elem_size is None:
+                raise VerifyException("dma.view element_type unsupported for byte pool")
+            if source_numel is not None and result_numel is not None:
+                if source_numel != result_numel * result_elem_size:
+                    raise VerifyException("dma.view byte length mismatch")
+            max_index = _linear_max_index(offsets, shape, stride)
+            if max_index is not None and source_numel is not None:
+                byte_end = (max_index + 1) * result_elem_size
+                if byte_end > source_numel:
+                    raise VerifyException("dma.view byte bounds mismatch")
+        else:
+            if source_type.element_type != result_type.element_type:
+                raise VerifyException("dma.view element_type mismatch")
+            if source_numel is not None and result_numel is not None and source_numel != result_numel:
+                raise VerifyException("dma.view numel mismatch")
+            _verify_static_view_bounds(source_type.shape, offsets, shape, stride)
 
 
 @irdl_op_definition

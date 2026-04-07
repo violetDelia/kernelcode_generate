@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`朽木露琪亚`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/dialect/dma.md`](../../spec/dialect/dma.md)
 - `test`：[`test/dialect/test_dma_dialect.py`](../../test/dialect/test_dma_dialect.py)
 - `功能实现`：[`kernel_gen/dialect/dma.py`](../../kernel_gen/dialect/dma.py)
@@ -55,7 +55,7 @@
 - `dma.alloc` 仅产生结果内存，结果类型必须为 `!nn.memory<...>`。
 - `dma.fill` 仅把单个整数标量真实写入目标内存，不分配新内存，也不返回新的 memory result。
 - `dma.free` 仅接受待释放的内存 operand，不产生结果。
-- `dma.view/reshape` 必须保证 `result.element_type` 与 `source.element_type` 一致，`result.space` 与 `source.space` 一致。
+- `dma.view/reshape` 必须保证 `result.space` 与 `source.space` 一致；`result.element_type` 必须与 `source.element_type` 一致（仅当 `source` 是一维 `i8` byte pool 时允许不同 element_type，且允许 `source` 与 `result` 的 rank 不一致）。
 - 对 `dma.copy/load/store/slice/deslice`，相关 `element_type` 必须一致，不允许隐式类型转换。
 - 对 `dma.cast`，只允许 `element_type` 发生显式变化；`shape/stride/space` 必须保持一致。
 - `shape/stride` 的 rank 必须与相关 `offsets/sizes/strides` 列表长度一致。
@@ -70,7 +70,7 @@
 - `dma.view` 中与动态布局相关的 `offsets/shape/stride` 元信息必须通过 `!symbol.int<"expr">` operand 显式传入；不得仅依赖结果类型里的符号维度推断。
 - `dma.view` 的 `result_type.shape` 必须由 `shape` operand（DSL `view(..., size, ...)`）确定，`result_type.stride` 必须由 `stride` operand（DSL `view(..., stride)`）确定；二者都必须与对应 operand 一一对齐，不得只因“生成了 `dma.view` op”就视为 expectation 对齐成功。
 - 当 `dma.view` 结果直接参与 `func.return` 时，返回的 `!nn.memory<...>` 类型必须与同一份 `result_type` 完全一致；`expectation/dsl/mlir_gen/dialect/dma/view` 中的 `EXPECTED_MEMORY` 比对依赖这一边界。
-- 静态可判定时 `dma.view` 的 `source/result` `numel` 必须一致。
+- 静态可判定时 `dma.view` 的 `source/result` `numel` 必须一致；若 `source` 为一维 `i8` byte pool，则要求字节数一致且静态边界不越界。
 - `dma.reshape` 仅接受动态 `shape` operand，且这些 operand 必须为 `!symbol.int<"expr">`；结果 `stride` 按 `shape` 的默认连续布局语义生成。
 - `dma.alloc` 仅接受动态 `shape` operand，且这些 operand 必须为 `!symbol.int<"expr">`；`stride` 不作为输入，而是按默认连续布局语义生成。
 - 对 mixed add 等需要 `scalar -> memory` 合法化的链路，当前唯一公开合法原语是 `dma.alloc + dma.fill(target, value)`：`dma.alloc` 负责生成 temporary memory，`dma.fill` 负责把 `const(i32)` / `!symbol.int<"expr">` 真实写入该 memory 的每个逻辑元素。仅生成空 `dma.alloc` 占位，或生成 `dma.fill` 后其 `target` 在下游 IR 中 `users=[]`，都不属于当前链路的通过口径。
@@ -98,7 +98,7 @@
 - `dma.free` 的 operand 不是 `!nn.memory<...>` 时必须报错。
 - `dma.load/slice` 中 `offsets/sizes/strides` 长度与输入 rank 不一致必须报错；任一相关 operand 不是 `!symbol.int<"expr">` 时必须报错。
 - `dma.store/deslice` 中 `source.shape` 与切片目标大小不一致必须报错。
-- `dma.view/reshape` 中 `source/result` 的 `element_type/space` 不一致必须报错；可判定的 `numel` 不一致必须报错。
+- `dma.view/reshape` 中 `source/result` 的 `space` 不一致必须报错；`element_type` 不一致仅在 `source` 为一维 `i8` byte pool 时允许；`source/result` rank 不一致仅在 byte pool 场景允许；可判定的 `numel` 不一致必须报错（byte pool 场景按字节数判断）。
 - `dma.view` 的动态 `offsets/shape/stride` operand 数量与 rank 不一致必须报错；任一相关 operand 不是 `!symbol.int<"expr">` 时必须报错；`dma.reshape` 的动态 `shape` operand 数量与 rank 不一致必须报错，且其 operand 必须为 `!symbol.int<"expr">`。
 - `dma.view` 的 `offsets` 必须为非负整数；当 `source.shape/offsets/shape/stride` 可静态判定时，必须进行边界校验并在越界时报错。
 - `dma.view` 的 `result.stride` rank 与 `result.shape` 不一致必须报错；`dma.reshape` 的 `result.stride` 非连续行主序必须报错。
@@ -325,15 +325,15 @@ op = DmaViewOp(source, offsets, shape, stride, result_type)
 
 注意事项：
 
-- `result.element_type` 必须与 `source.element_type` 一致。
 - `result.space` 必须与 `source.space` 一致。
-- 若 `source.shape` 与 `result.shape` 的元素总数可判定不一致，必须报错。
+- `result.element_type` 必须与 `source.element_type` 一致；若 `source` 为一维 `i8` byte pool，则允许 `result.element_type` 不同。
+- 若 `source.shape` 与 `result.shape` 的元素总数可判定不一致，必须报错；byte pool 场景需满足字节数一致。
 - `dma.view` 不要求 `source` 为连续布局，但 `result.stride` 必须与 `result.shape` rank 一致。
 - `offsets/shape/stride` operand 数量必须与结果 rank 一致，且每个 operand 都必须是 `!symbol.int<"expr">`。
 - `shape` operand 必须与 `result_type.shape` 对齐，`stride` operand 必须与 `result_type.stride` 对齐。
 - 对 DSL `view(source, offset, size, stride)` lowering，`result_type.shape` 必须来自 `size`，`result_type.stride` 必须来自 `stride`；不得回退为复用 `source.shape/source.stride` 或其他既有 `Memory` 元信息。
 - `offsets` 必须为非负整数；若可静态判定为负值，必须报错。
-- 若 `source.shape`、`offsets`、`shape`、`stride` 都可静态判定，则必须执行边界校验：`offset + (size - 1) * stride` 不得超出对应维度的 `source.shape`。
+- 若 `source.shape`、`offsets`、`shape`、`stride` 都可静态判定，则必须执行边界校验：`offset + (size - 1) * stride` 不得超出对应维度的 `source.shape`；byte pool 场景按字节数校验。
 - 动态视图信息通过 operand 传入；结果类型中的动态维度只用于描述结果布局的动态性，不替代运行期值来源。
 - expectation 场景下不能只检查“生成了 `dma.view`”；若该结果直接作为函数返回值，则 `func.return` 与函数输出类型必须与 `dma.view.result_type` 完全一致，才能与 `EXPECTED_MEMORY` 比对对齐。
 
@@ -667,6 +667,7 @@ op = DmaCastOp(source, result_type)
 | TC-DMA-019 | 视图 | `dma.view` 动态布局输入 | `shape/stride` 由 SSA `!symbol.int<"expr">` operand 提供，且分别与 `result_type.shape/stride` 对齐，结果 rank 匹配 | 构造并校验 `dma.view` | verifier 通过 | `test_dma_view_dynamic_symbol_int_layout_operands_valid` |
 | TC-DMA-019A | 视图 | `dma.view` offsets 边界 | `offsets` 长度不匹配、负值或静态越界 | 构造并校验 `dma.view` | verifier 报错 | `test_dma_view_rejects_invalid_offsets_or_bounds` |
 | TC-DMA-019B | 视图 | `dma.view` 显式 stride 布局 | 在 `source/result` `numel` 一致前提下，允许 `result_type.stride` 与 `source.stride` 不同，只要求与 `stride` operand 对齐 | 构造并校验 `dma.view` | verifier 通过 | `test_dma_view_accepts_matching_numel_subset_with_explicit_stride` |
+| TC-DMA-019D | 视图 | `dma.view` byte pool typed view | `source` 为一维 `i8` byte pool，`result` 为任意 element_type，静态字节数与边界匹配 | 构造并校验 `dma.view` | verifier 通过/失败按字节校验 | `test_dma_view_byte_pool_typed_view` |
 | TC-DMA-019C | 视图 | `dma.view` expectation 返回类型对齐 | DSL `view(...)` 结果直接参与函数返回，且 `result_type.shape == size`、`result_type.stride == stride` | 执行 expectation 比对 | `func.return` 类型与 `dma.view.result_type` 一致，`EXPECTED_MEMORY` 比对成功 | `expectation/dsl/mlir_gen/dialect/dma/view` |
 | TC-DMA-020 | 分配 | `dma.alloc` 动态形状输入 | `dynamic_shape` 由 SSA `!symbol.int<"expr">` operand 提供，长度与 rank 一致，符号维度默认 stride 规则（如 `N`/`M*N`/`?`）生效 | 构造并校验 `dma.alloc` | verifier 通过 | `test_dma_alloc_dynamic_symbol_int_shape_operands_valid` |
 | TC-DMA-021 | 解析/打印 | 动态 shape round-trip | 包含 `dma.alloc/fill/view/load/store/slice/deslice/reshape/cast` 的 SSA `!symbol.int<"expr">` operand 文本 | parse/print | 与输入文本一致 | `test_dma_dynamic_symbol_int_parse_print_round_trip` |

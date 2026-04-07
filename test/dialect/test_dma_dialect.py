@@ -1,7 +1,7 @@
 """dma dialect tests.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 dma dialect 的 op verifier 与类型复用约束。
@@ -32,7 +32,7 @@ from pathlib import Path
 import pytest
 from xdsl.context import Context
 from xdsl.dialects.arith import Arith
-from xdsl.dialects.builtin import ArrayAttr, Builtin, IndexType, IntAttr, StringAttr, i1, i32
+from xdsl.dialects.builtin import ArrayAttr, Builtin, IndexType, IntAttr, StringAttr, i1, i8, i32
 from xdsl.dialects.builtin import ModuleOp
 from xdsl.dialects.test import Test, TestOp as _TestOp
 from xdsl.ir import Attribute, Operation, SSAValue
@@ -144,17 +144,20 @@ def _make_memory_type(
     shape: ArrayAttr | None = None,
     stride: ArrayAttr | None = None,
     space: str = "global",
+    element_type: Attribute | None = None,
 ) -> NnMemoryType:
     """构造 nn.memory type。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 提供默认可通过 verifier 的 memory type。
+    - 允许显式指定 element_type，默认使用 i32。
 
     使用示例:
     - _make_memory_type()
+    - _make_memory_type(element_type=i8)
 
     关联文件:
     - spec: spec/dialect/dma.md
@@ -166,7 +169,9 @@ def _make_memory_type(
         shape = ArrayAttr([IntAttr(2), IntAttr(4)])
     if stride is None:
         stride = ArrayAttr([IntAttr(4), IntAttr(1)])
-    return NnMemoryType(shape, stride, i32, _make_space(space))
+    if element_type is None:
+        element_type = i32
+    return NnMemoryType(shape, stride, element_type, _make_space(space))
 
 
 def _make_symbol_operands(values: list[int | str | None]) -> list[SSAValue]:
@@ -716,6 +721,73 @@ def test_dma_view_accepts_matching_numel_subset_with_explicit_stride() -> None:
         result_type,
     )
     op.verify()
+
+
+# TC-DMA-019D
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-07 23:00:00 +0800
+# 最近一次运行成功时间: 2026-04-07 23:00:00 +0800
+# 功能说明: 验证 dma.view 支持 i8 byte pool typed view 的字节数与边界校验。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_view_byte_pool_typed_view
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_view_byte_pool_typed_view() -> None:
+    source_type = NnMemoryType(
+        ArrayAttr([IntAttr(16)]),
+        ArrayAttr([IntAttr(1)]),
+        i8,
+        _make_space("global"),
+    )
+    source = _TestOp(result_types=[source_type]).results[0]
+
+    result_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(2)]),
+        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+        element_type=i32,
+        space="global",
+    )
+    op = DmaViewOp(
+        source,
+        _make_symbol_operands([0, 0]),
+        _make_symbol_operands([2, 2]),
+        _make_symbol_operands([2, 1]),
+        result_type,
+    )
+    op.verify()
+
+    bad_length_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(3), IntAttr(2)]),
+        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+        element_type=i32,
+        space="global",
+    )
+    op = DmaViewOp(
+        source,
+        _make_symbol_operands([0, 0]),
+        _make_symbol_operands([3, 2]),
+        _make_symbol_operands([2, 1]),
+        bad_length_type,
+    )
+    with pytest.raises(VerifyException, match="byte length mismatch"):
+        op.verify()
+
+    bad_stride_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(2)]),
+        stride=ArrayAttr([IntAttr(3), IntAttr(1)]),
+        element_type=i32,
+        space="global",
+    )
+    op = DmaViewOp(
+        source,
+        _make_symbol_operands([2, 0]),
+        _make_symbol_operands([2, 2]),
+        _make_symbol_operands([3, 1]),
+        bad_stride_type,
+    )
+    with pytest.raises(VerifyException, match="byte bounds mismatch"):
+        op.verify()
 
 
 # 创建者: OpenAI

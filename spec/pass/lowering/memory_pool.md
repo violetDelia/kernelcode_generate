@@ -4,7 +4,7 @@
 
 - 定义 `MemoryPoolPass` 的公开合同：基于 `dma.alloc/dma.free` 生成内存生命周期摘要结构。
 - 提供 `MemoryPoolSummary/MemoryPoolInterval` 稳定接口，用于后续统计与验证。
-- 当前阶段仅输出摘要信息，不执行 IR 改写。
+- 支持直线路径的 pool 改写：将符合约束的 `dma.alloc/dma.free` 改写为 `i8` byte pool + `dma.view`。
 
 ## 文档信息
 
@@ -24,13 +24,14 @@
 ## 术语
 
 - `interval`：单个 `dma.alloc` 对应的生命周期区间。
-- `bucket`：按 `(space, element_type, layout)` 聚合的分桶键。
-- `peak`：同一 bucket 在词法序列上的最大并发元素数量。
+- `bucket`：按 `(space)` 聚合的分桶键。
+- `peak`：同一 bucket 在词法序列上的最大并发字节数量。
 
 ## 目标
 
 - 提供稳定的摘要结构用于统计与验证。
 - 保持摘要输出稳定文本格式，便于直接比对。
+- 在直线路径内完成同 bucket、非重叠生命周期的 pool 改写。
 
 ## 限制与边界
 
@@ -38,7 +39,9 @@
 - 仅支持 `dma.alloc` 结果为 `nn.memory` 且布局为 contiguous。
 - `dma.alloc` 必须存在且仅存在一个对应的 `dma.free`，且顺序合法。
 - 动态维度仅允许 `IntAttr` 或具名 `StringAttr`，不接受匿名 `?`。
-- `rewrite=True` 直接报错，本阶段不执行 IR 改写。
+- `rewrite=True` 仅支持单 block、无嵌套 region 的直线路径。
+- 参与改写的 alloc 必须同 bucket、相同字节 size 表达式且生命周期不重叠。
+- pool 采用 1-D `i8` byte pool，并通过 `dma.view` 恢复原始类型。
 
 ## 公开接口
 
@@ -51,7 +54,7 @@
 
 参数说明：
 
-- `rewrite (bool)`：是否执行 IR 改写；当前仅支持 `False`。
+- `rewrite (bool)`：是否执行 IR 改写；`True` 仅在直线路径与同 bucket 条件满足时生效。
 
 使用示例：
 
@@ -65,7 +68,7 @@ summary = pass_obj.get_summary("main")
 
 注意事项：
 
-- `rewrite=True` 会触发显式失败。
+- `rewrite=True` 会对符合条件的 alloc/free 进行 pool 改写。
 - 仅对 `func.func` 统计，其余 op 会被跳过。
 
 返回与限制：
@@ -93,6 +96,7 @@ module = pass_obj.run(module)
 注意事项：
 
 - 输入必须是 `builtin.module`，否则报错。
+- `rewrite=True` 时 summary 先于 IR 改写生成。
 
 返回与限制：
 
@@ -156,8 +160,7 @@ summaries = pass_obj.all_summaries()
 
 - `func_name (str)`：函数名。
 - `intervals (tuple[MemoryPoolInterval, ...])`：生命周期区间列表。
-- `peak_numel_by_bucket (dict[tuple[str, str, str], sympy.Basic])`：按 bucket 汇总的 peak 元素数。
-- `peak_bytes_by_bucket (dict[tuple[str, str, str], sympy.Basic])`：按 bucket 汇总的 peak 字节数。
+- `peak_bytes_by_bucket (dict[tuple[str], sympy.Basic])`：按 bucket 汇总的 peak 字节数。
 - `pool_count (int)`：bucket 数量。
 
 使用示例：
@@ -184,11 +187,11 @@ text = summary.to_text()
 参数说明：
 
 - `name (str)`：alloc 名称。
-- `bucket_key (tuple[str, str, str])`：分桶键。
-- `size_expr (sympy.Basic)`：元素数量表达式。
+- `bucket_key (tuple[str])`：分桶键。
+- `size_bytes_expr (sympy.Basic)`：字节数量表达式。
 - `begin_index (int)`：开始索引。
 - `end_index (int)`：结束索引。
-- `offset_expr (sympy.Basic)`：偏移表达式。
+- `offset_bytes_expr (sympy.Basic)`：字节偏移表达式。
 
 使用示例：
 
@@ -198,7 +201,7 @@ interval = summary.intervals[0]
 
 注意事项：
 
-- 目前 `offset_expr` 固定为 `0`。
+- 目前 `offset_bytes_expr` 固定为 `0`。
 
 返回与限制：
 
@@ -231,12 +234,26 @@ raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free not found for alloc")
 ## 测试
 
 - 测试文件：[`test/pass/test_memory_pool.py`](../../../test/pass/test_memory_pool.py)
-- 执行命令：`pytest -q test/pass/test_memory_pool.py -k "summary or interval or peak"`
+- 执行命令：
+  - `pytest -q test/pass/test_memory_pool.py`
+  - `PYTHONPATH=. python expectation/pass/lowing/memory_pool/summary.py`
 - 测试目标：
   - 验证摘要生成与文本输出稳定。
   - 验证区间索引与 bucket 统计正确。
   - 验证 peak 统计在重叠区间时正确。
+  - 验证直线路径改写生成 pool/view。
+  - 验证直线路径改写的拒绝路径短语稳定。
 - 功能与用例清单：
   - `test_memory_pool_summary_basic`
   - `test_memory_pool_interval_indices`
   - `test_memory_pool_peak_overlap`
+  - `test_memory_pool_rewrite_straight_line_pool_reuse`
+  - `test_memory_pool_rewrite_multiple_buckets`
+  - `test_memory_pool_rewrite_size_mismatch`
+  - `test_memory_pool_rewrite_overlap`
+  - `test_memory_pool_rewrite_multiple_blocks`
+  - `test_memory_pool_invalid_module`
+  - `test_memory_pool_non_contiguous_layout`
+  - `test_memory_pool_unpaired_alloc`
+  - `test_memory_pool_anonymous_dim`
+  - `test_memory_pool_alloc_non_memory`

@@ -5,7 +5,7 @@
 
 功能说明:
 - 覆盖 MemoryPoolPass 的 summary/interval/peak 统计。
-- 覆盖 summary 文本输出稳定性。
+- 覆盖 summary 文本输出稳定性与直线路径改写。
 
 使用示例:
 - pytest -q test/pass/test_memory_pool.py -k "summary or interval or peak"
@@ -29,7 +29,7 @@ from pathlib import Path
 
 import sympy as sp
 from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, StringAttr, i32
+from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, StringAttr, i8, i32
 from xdsl.dialects.test import TestOp as _TestOp
 from xdsl.ir import Block, Operation, Region, SSAValue
 
@@ -37,7 +37,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dialect.dma import DmaAllocOp, DmaFreeOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaFreeOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.passes.lowering.memory_pool import MemoryPoolError, MemoryPoolPass
@@ -169,8 +169,8 @@ def test_memory_pool_summary_basic() -> None:
     assert len(summary.intervals) == 1
     interval = summary.intervals[0]
     assert interval.name == "alloc1"
-    assert interval.bucket_key == ("#GM", "i32", "contiguous")
-    assert str(interval.size_expr) == "8"
+    assert interval.bucket_key == ("#GM",)
+    assert str(interval.size_bytes_expr) == "32"
     text = summary.to_text()
     assert "func_name = main" in text
     assert "pool_count = 1" in text
@@ -222,9 +222,8 @@ def test_memory_pool_peak_overlap() -> None:
     pass_obj = MemoryPoolPass(rewrite=False)
     pass_obj.run(module)
     summary = pass_obj.get_summary("main")
-    bucket = ("#GM", "i32", "contiguous")
+    bucket = ("#GM",)
     assert summary.pool_count == 1
-    assert str(summary.peak_numel_by_bucket[bucket]) == "8"
     assert str(summary.peak_bytes_by_bucket[bucket]) == str(sp.Integer(32))
 
 
@@ -233,23 +232,151 @@ def test_memory_pool_peak_overlap() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-07 10:30:00 +0800
 # 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
-# 功能说明: 验证 rewrite=True 时显式报错。
-# 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_rewrite_not_supported
+# 功能说明: 验证直线路径改写生成 pool + view。
+# 使用示例: pytest -q test/pass/test_memory_pool.py -k "rewrite and straight_line"
 # 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
 # 对应测试文件路径: test/pass/test_memory_pool.py
-def test_memory_pool_rewrite_not_supported() -> None:
+def test_memory_pool_rewrite_straight_line_pool_reuse() -> None:
     mem_type = _make_memory_type()
-    alloc = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type)
-    free = DmaFreeOp(alloc.result)
-    module = _build_module("main", [alloc, free])
+    alloc_a = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type)
+    free_a = DmaFreeOp(alloc_a.result)
+    alloc_b = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type)
+    free_b = DmaFreeOp(alloc_b.result)
+    module = _build_module("main", [alloc_a, free_a, alloc_b, free_b])
+
+    pass_obj = MemoryPoolPass(rewrite=True)
+    pass_obj.run(module)
+
+    func_ops = [op for op in module.ops if isinstance(op, func.FuncOp)]
+    assert len(func_ops) == 1
+    block = func_ops[0].body.blocks[0]
+    alloc_ops = [op for op in block.ops if isinstance(op, DmaAllocOp)]
+    free_ops = [op for op in block.ops if isinstance(op, DmaFreeOp)]
+    view_ops = [op for op in block.ops if isinstance(op, DmaViewOp)]
+
+    assert len(alloc_ops) == 1
+    assert len(free_ops) == 1
+    assert len(view_ops) == 2
+
+    pool_type = alloc_ops[0].result.type
+    assert isinstance(pool_type, NnMemoryType)
+    assert len(pool_type.shape.data) == 1
+    assert pool_type.element_type == i8
+    for view_op in view_ops:
+        assert view_op.result.type == mem_type
+
+
+# TC-MP-010
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-07 10:30:00 +0800
+# 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
+# 功能说明: 验证直线路径多 bucket 会报错。
+# 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_rewrite_multiple_buckets
+# 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/pass/test_memory_pool.py
+def test_memory_pool_rewrite_multiple_buckets() -> None:
+    mem_type_gm = _make_memory_type(space="global")
+    mem_type_sm = _make_memory_type(space="shared")
+    alloc_a = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type_gm)
+    free_a = DmaFreeOp(alloc_a.result)
+    alloc_b = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type_sm)
+    free_b = DmaFreeOp(alloc_b.result)
+    module = _build_module("main", [alloc_a, free_a, alloc_b, free_b])
+
     pass_obj = MemoryPoolPass(rewrite=True)
     try:
         pass_obj.run(module)
     except MemoryPoolError as exc:
-        assert "MemoryPoolRewriteNotImplemented" in str(exc)
+        assert "MemoryPoolRewriteUnsupported: multiple buckets are not supported" in str(exc)
     else:
-        raise AssertionError("expected MemoryPoolError for rewrite=True")
+        raise AssertionError("expected MemoryPoolError for multiple buckets")
+
+
+# TC-MP-011
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-07 10:30:00 +0800
+# 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
+# 功能说明: 验证直线路径 size 不一致会报错。
+# 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_rewrite_size_mismatch
+# 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/pass/test_memory_pool.py
+def test_memory_pool_rewrite_size_mismatch() -> None:
+    mem_type = _make_memory_type()
+    alloc_a = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type)
+    free_a = DmaFreeOp(alloc_a.result)
+    alloc_b = DmaAllocOp(_make_symbol_operands([2, 5]), mem_type)
+    free_b = DmaFreeOp(alloc_b.result)
+    module = _build_module("main", [alloc_a, free_a, alloc_b, free_b])
+
+    pass_obj = MemoryPoolPass(rewrite=True)
+    try:
+        pass_obj.run(module)
+    except MemoryPoolError as exc:
+        assert "MemoryPoolRewriteUnsupported: size mismatch" in str(exc)
+    else:
+        raise AssertionError("expected MemoryPoolError for size mismatch")
+
+
+# TC-MP-012
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-07 10:30:00 +0800
+# 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
+# 功能说明: 验证直线路径生命周期重叠会报错。
+# 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_rewrite_overlap
+# 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/pass/test_memory_pool.py
+def test_memory_pool_rewrite_overlap() -> None:
+    mem_type = _make_memory_type()
+    alloc_a = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type)
+    alloc_b = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type)
+    free_a = DmaFreeOp(alloc_a.result)
+    free_b = DmaFreeOp(alloc_b.result)
+    module = _build_module("main", [alloc_a, alloc_b, free_a, free_b])
+
+    pass_obj = MemoryPoolPass(rewrite=True)
+    try:
+        pass_obj.run(module)
+    except MemoryPoolError as exc:
+        assert "MemoryPoolRewriteUnsupported: overlapping lifetimes are not supported" in str(exc)
+    else:
+        raise AssertionError("expected MemoryPoolError for overlapping lifetimes")
+
+
+# TC-MP-013
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-07 10:30:00 +0800
+# 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
+# 功能说明: 验证多 block 直线路径改写会报错。
+# 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_rewrite_multiple_blocks
+# 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/pass/test_memory_pool.py
+def test_memory_pool_rewrite_multiple_blocks() -> None:
+    mem_type = _make_memory_type()
+    alloc = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type)
+    free = DmaFreeOp(alloc.result)
+    block0 = Block()
+    block0.add_ops([alloc, free, func.ReturnOp()])
+    block1 = Block()
+    block1.add_ops([func.ReturnOp()])
+    func_op = func.FuncOp("main", FunctionType.from_lists([], []), Region([block0, block1]))
+    module = ModuleOp([func_op])
+
+    pass_obj = MemoryPoolPass(rewrite=True)
+    try:
+        pass_obj.run(module)
+    except MemoryPoolError as exc:
+        assert "MemoryPoolRewriteUnsupported: function must have single block" in str(exc)
+    else:
+        raise AssertionError("expected MemoryPoolError for multiple blocks")
 
 
 # TC-MP-005
