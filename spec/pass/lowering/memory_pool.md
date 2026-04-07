@@ -39,8 +39,9 @@
 - 仅支持 `dma.alloc` 结果为 `nn.memory` 且布局为 contiguous。
 - `dma.alloc` 必须存在且仅存在一个对应的 `dma.free`，且顺序合法。
 - 动态维度仅允许 `IntAttr` 或具名 `StringAttr`，不接受匿名 `?`。
-- `rewrite=True` 仅支持单 block、无嵌套 region 的直线路径。
-- 参与改写的 alloc 必须同 bucket、相同字节 size 表达式且生命周期不重叠。
+- `rewrite=True` 仅支持单 block，允许 `symbol.for`，其余 region 直接拒绝。
+- `symbol.for` 内 alloc 的生命周期按 region 进入/退出索引统计。
+- 参与改写的 alloc 必须同 bucket、相同字节 size 表达式；生命周期重叠会分配不同 offset。
 - pool 采用 1-D `i8` byte pool，并通过 `dma.view` 恢复原始类型。
 
 ## 公开接口
@@ -201,7 +202,7 @@ interval = summary.intervals[0]
 
 注意事项：
 
-- 目前 `offset_bytes_expr` 固定为 `0`。
+- `offset_bytes_expr` 由 slot 分配，等于 `size_bytes_expr * slot_index`。
 
 返回与限制：
 
@@ -231,18 +232,36 @@ raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free not found for alloc")
 
 - 继承 `ValueError`。
 
+## 拒绝路径
+
+- `MemoryPoolEscapingAlloc`
+  - alloc 结果被 return、或跨出所在 `symbol.for` 的词法范围。
+- `MemoryPoolUnsupportedNonLinearAlloc`
+  - 非 contiguous 布局或需要 custom stride 解释的 alloc。
+- `MemoryPoolUnsupportedRegionEscape`
+  - 出现非 `symbol.for` 的 region/control-flow 结构。
+- `MemoryPoolInvalidLifetime`
+  - alloc/free 顺序异常，或 loop 内 alloc/free 不成对。
+- `MemoryPoolUnsupportedPoolBucket`
+  - 该 alloc 无法归入当前按 `space` 分桶的 byte pool。
+- `MemoryPoolTypedViewOutOfBounds`
+  - typed `dma.view` 的字节区间越界或与 dtype 字节宽度不匹配。
+
 ## 测试
 
 - 测试文件：[`test/pass/test_memory_pool.py`](../../../test/pass/test_memory_pool.py)
 - 执行命令：
   - `pytest -q test/pass/test_memory_pool.py`
+  - `pytest -q test/pass/test_memory_pool.py -k "symbol_for or escape or layout or invalid_lifetime"`
   - `PYTHONPATH=. python expectation/pass/lowing/memory_pool/summary.py`
+  - `PYTHONPATH=. python expectation/pass/lowing/memory_pool/loop_reuse.py`
 - 测试目标：
   - 验证摘要生成与文本输出稳定。
   - 验证区间索引与 bucket 统计正确。
   - 验证 peak 统计在重叠区间时正确。
   - 验证直线路径改写生成 pool/view。
-  - 验证直线路径改写的拒绝路径短语稳定。
+  - 验证 `symbol.for` 的 lifecycle 计算与 offset 复用。
+  - 验证拒绝路径短语稳定。
 - 功能与用例清单：
   - `test_memory_pool_summary_basic`
   - `test_memory_pool_interval_indices`
@@ -257,3 +276,7 @@ raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free not found for alloc")
   - `test_memory_pool_unpaired_alloc`
   - `test_memory_pool_anonymous_dim`
   - `test_memory_pool_alloc_non_memory`
+  - `test_memory_pool_symbol_for_reuse`
+  - `test_memory_pool_escape_return`
+  - `test_memory_pool_invalid_lifetime_loop`
+  - `test_memory_pool_unsupported_region_escape`

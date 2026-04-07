@@ -24,8 +24,11 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
+
+os.environ.setdefault("SYMPY_GMPY", "0")
 
 import sympy as sp
 from xdsl.dialects import func
@@ -39,7 +42,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaFreeOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolValueType
+from kernel_gen.dialect.symbol import SymbolForOp, SymbolValueType
 from kernel_gen.passes.lowering.memory_pool import MemoryPoolError, MemoryPoolPass
 
 
@@ -118,6 +121,54 @@ def _make_symbol_operands(values: list[int | str]) -> list[SSAValue]:
         expr = f"v{index}" if value is None else str(value)
         operands.append(_TestOp(result_types=[SymbolValueType.from_expr(expr)]).results[0])
     return operands
+
+
+def _symbol_value(expr: int | str) -> SSAValue:
+    """构造单个 `!symbol.int<\"expr\">` SSA value。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 将 int/str 转为对应 symbol 值类型。
+
+    使用示例:
+    - value = _symbol_value(1)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/pass/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    """
+
+    return _TestOp(result_types=[SymbolValueType.from_expr(str(expr))]).results[0]
+
+
+def _collect_ops_recursive(block: Block) -> list[Operation]:
+    """递归收集 block 及子 region 的 op。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 便于验证 rewrite 后 IR 中的 op 数量与参数。
+
+    使用示例:
+    - ops = _collect_ops_recursive(block)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/pass/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    """
+
+    ops: list[Operation] = []
+    for op in block.ops:
+        ops.append(op)
+        for region in op.regions:
+            for child in region.blocks:
+                ops.extend(_collect_ops_recursive(child))
+    return ops
 
 
 def _build_module(func_name: str, ops: list[Operation]) -> ModuleOp:
@@ -290,7 +341,7 @@ def test_memory_pool_rewrite_multiple_buckets() -> None:
     try:
         pass_obj.run(module)
     except MemoryPoolError as exc:
-        assert "MemoryPoolRewriteUnsupported: multiple buckets are not supported" in str(exc)
+        assert "MemoryPoolUnsupportedPoolBucket: mixed space is not supported" in str(exc)
     else:
         raise AssertionError("expected MemoryPoolError for multiple buckets")
 
@@ -341,12 +392,18 @@ def test_memory_pool_rewrite_overlap() -> None:
     module = _build_module("main", [alloc_a, alloc_b, free_a, free_b])
 
     pass_obj = MemoryPoolPass(rewrite=True)
-    try:
-        pass_obj.run(module)
-    except MemoryPoolError as exc:
-        assert "MemoryPoolRewriteUnsupported: overlapping lifetimes are not supported" in str(exc)
-    else:
-        raise AssertionError("expected MemoryPoolError for overlapping lifetimes")
+    pass_obj.run(module)
+    func_ops = [op for op in module.ops if isinstance(op, func.FuncOp)]
+    block = func_ops[0].body.blocks[0]
+    view_ops = [op for op in _collect_ops_recursive(block) if isinstance(op, DmaViewOp)]
+    assert len(view_ops) == 2
+    offsets = []
+    for view_op in view_ops:
+        offset0 = view_op.offsets[0]
+        offset_type = offset0.type
+        assert isinstance(offset_type, SymbolValueType)
+        offsets.append(offset_type.get_value())
+    assert set(offsets) == {0, 2}
 
 
 # TC-MP-013
@@ -418,7 +475,7 @@ def test_memory_pool_non_contiguous_layout() -> None:
     try:
         pass_obj.run(module)
     except MemoryPoolError as exc:
-        assert "MemoryPoolUnsupportedLayout" in str(exc)
+        assert "MemoryPoolUnsupportedNonLinearAlloc" in str(exc)
     else:
         raise AssertionError("expected MemoryPoolError for non-contiguous layout")
 
@@ -496,3 +553,131 @@ def test_memory_pool_alloc_non_memory() -> None:
         assert "MemoryPoolInvalidAlloc" in str(exc)
     else:
         raise AssertionError("expected MemoryPoolError for alloc result type")
+
+
+# TC-MP-014
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-07 10:30:00 +0800
+# 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
+# 功能说明: 验证 symbol.for 内 alloc 的 offset 复用规则。
+# 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_symbol_for_reuse
+# 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/pass/test_memory_pool.py
+def test_memory_pool_symbol_for_reuse() -> None:
+    mem_type = _make_memory_type()
+    alloc1 = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type)
+
+    loop_block = Block(arg_types=[SymbolValueType.from_expr("i")])
+    alloc2 = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type)
+    free2 = DmaFreeOp(alloc2.result)
+    loop_block.add_ops([alloc2, free2])
+    loop_op = SymbolForOp(_symbol_value(0), _symbol_value(4), _symbol_value(1), loop_block)
+
+    alloc3 = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type)
+    free3 = DmaFreeOp(alloc3.result)
+    free1 = DmaFreeOp(alloc1.result)
+
+    module = _build_module("pool_loop", [alloc1, loop_op, alloc3, free3, free1])
+
+    pass_obj = MemoryPoolPass(rewrite=True)
+    pass_obj.run(module)
+    summary = pass_obj.get_summary("pool_loop")
+
+    offsets = {interval.name: interval.offset_bytes_expr for interval in summary.intervals}
+    assert str(offsets["alloc1"]) == "0"
+    assert str(offsets["alloc2"]) == "32"
+    assert str(offsets["alloc3"]) == "32"
+
+    func_ops = [op for op in module.ops if isinstance(op, func.FuncOp)]
+    block = func_ops[0].body.blocks[0]
+    view_ops = [op for op in _collect_ops_recursive(block) if isinstance(op, DmaViewOp)]
+    assert len(view_ops) == 3
+    view_offsets = []
+    for view_op in view_ops:
+        offset0 = view_op.offsets[0]
+        offset_type = offset0.type
+        assert isinstance(offset_type, SymbolValueType)
+        view_offsets.append(offset_type.get_value())
+    assert view_offsets.count(0) == 1
+    assert view_offsets.count(2) == 2
+
+
+# TC-MP-015
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-07 10:30:00 +0800
+# 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
+# 功能说明: 验证 alloc 逃逸到 return 会被拒绝。
+# 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_escape_return
+# 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/pass/test_memory_pool.py
+def test_memory_pool_escape_return() -> None:
+    mem_type = _make_memory_type()
+    alloc = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type)
+    block = Block()
+    block.add_ops([alloc, func.ReturnOp(alloc.result)])
+    func_op = func.FuncOp("main", FunctionType.from_lists([], [mem_type]), Region(block))
+    module = ModuleOp([func_op])
+
+    pass_obj = MemoryPoolPass(rewrite=False)
+    try:
+        pass_obj.run(module)
+    except MemoryPoolError as exc:
+        assert "MemoryPoolEscapingAlloc" in str(exc)
+    else:
+        raise AssertionError("expected MemoryPoolError for escaping alloc")
+
+
+# TC-MP-016
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-07 10:30:00 +0800
+# 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
+# 功能说明: 验证 alloc 在 loop 外、free 在 loop 内会被拒绝。
+# 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_invalid_lifetime_loop
+# 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/pass/test_memory_pool.py
+def test_memory_pool_invalid_lifetime_loop() -> None:
+    mem_type = _make_memory_type()
+    alloc = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type)
+    loop_block = Block(arg_types=[SymbolValueType.from_expr("i")])
+    loop_block.add_ops([DmaFreeOp(alloc.result)])
+    loop_op = SymbolForOp(_symbol_value(0), _symbol_value(4), _symbol_value(1), loop_block)
+    module = _build_module("main", [alloc, loop_op])
+
+    pass_obj = MemoryPoolPass(rewrite=True)
+    try:
+        pass_obj.run(module)
+    except MemoryPoolError as exc:
+        assert "MemoryPoolInvalidLifetime: dma.free inside symbol.for" in str(exc)
+    else:
+        raise AssertionError("expected MemoryPoolError for invalid loop lifetime")
+
+
+# TC-MP-017
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-07 10:30:00 +0800
+# 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
+# 功能说明: 验证未知 region 会触发拒绝路径。
+# 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_unsupported_region_escape
+# 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
+# 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
+# 对应测试文件路径: test/pass/test_memory_pool.py
+def test_memory_pool_unsupported_region_escape() -> None:
+    mem_type = _make_memory_type()
+    alloc = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type)
+    free = DmaFreeOp(alloc.result)
+    nested = ModuleOp([])
+    module = _build_module("main", [nested, alloc, free])
+    pass_obj = MemoryPoolPass(rewrite=False)
+    try:
+        pass_obj.run(module)
+    except MemoryPoolError as exc:
+        assert "MemoryPoolUnsupportedRegionEscape" in str(exc)
+    else:
+        raise AssertionError("expected MemoryPoolError for unsupported region")

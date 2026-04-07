@@ -44,7 +44,7 @@ from xdsl.ir import Attribute, Block, Operation, SSAValue
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaFreeOp, DmaViewOp, _is_contiguous
 from kernel_gen.dialect.nn import NnMemoryType
-from kernel_gen.dialect.symbol import SymbolValueType
+from kernel_gen.dialect.symbol import SymbolForOp, SymbolValueType
 from kernel_gen.passes.pass_manager import Pass
 
 
@@ -440,7 +440,7 @@ def _layout_family(mem_type: NnMemoryType) -> str:
 
     if not _is_contiguous(mem_type):
         raise MemoryPoolError(
-            "MemoryPoolUnsupportedLayout: function only supports contiguous dma.alloc in v1"
+            "MemoryPoolUnsupportedNonLinearAlloc: custom stride is not supported in v1"
         )
     return "contiguous"
 
@@ -495,6 +495,34 @@ def _shape_product(mem_type: NnMemoryType) -> sp.Basic:
     for dim in mem_type.shape.data:
         result *= _dim_expr(dim)
     return result
+
+
+def _maybe_int(expr: sp.Basic) -> int | None:
+    """尝试将 sympy 表达式转换为整数。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 当表达式为可解析的整数时返回 int，否则返回 None。
+
+    使用示例:
+    - value = _maybe_int(sp.Integer(4))
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/pass/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    """
+
+    if isinstance(expr, sp.Integer):
+        return int(expr)
+    if expr.is_number and expr.is_integer:
+        try:
+            return int(expr)
+        except (TypeError, ValueError):
+            return None
+    return None
 
 
 def _const_symbol_int(value: int) -> tuple[arith.ConstantOp, UnrealizedConversionCastOp]:
@@ -680,18 +708,103 @@ def _collect_ops(block: Block) -> list[Operation]:
     return ops
 
 
-def _collect_straight_line_ops(func_op: func.FuncOp) -> tuple[Block, list[Operation]]:
-    """收集直线路径的 op 列表。
+def _parent_block(op: Operation) -> Block | None:
+    """安全获取 op 的 parent block。
 
     创建者: 金铲铲大作战
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 仅允许单 block 且无嵌套 region。
-    - 用于改写阶段的安全约束。
+    - 在不同版本的 xdsl 上兼容 parent_block API。
 
     使用示例:
-    - block, ops = _collect_straight_line_ops(func_op)
+    - block = _parent_block(op)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/pass/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    """
+
+    return getattr(op, "parent_block", lambda: None)()
+
+
+def _collect_ops_with_loops(
+    blocks: list[Block],
+    *,
+    reject_other_regions: bool,
+) -> tuple[list[Operation], dict[SymbolForOp, tuple[int, int]], dict[Operation, SymbolForOp | None]]:
+    """收集 op 列表并记录 symbol.for 的词法范围。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 按词法顺序收集 op，并为每个 op 记录所在的最内层 symbol.for。
+    - 当 `reject_other_regions=True` 时，遇到非 symbol.for 的 region 会直接报错。
+
+    使用示例:
+    - ops, loop_bounds, op_loop = _collect_ops_with_loops(blocks, reject_other_regions=True)
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/pass/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    """
+
+    ops: list[Operation] = []
+    loop_bounds: dict[SymbolForOp, tuple[int, int]] = {}
+    op_loop: dict[Operation, SymbolForOp | None] = {}
+    index = 0
+
+    def visit(ops_list: list[Operation], current_loop: SymbolForOp | None) -> None:
+        nonlocal index
+        for op in ops_list:
+            ops.append(op)
+            op_loop[op] = current_loop
+            index += 1
+            if not op.regions:
+                continue
+            if isinstance(op, SymbolForOp):
+                blocks = list(op.body.blocks)
+                if len(blocks) != 1:
+                    raise MemoryPoolError(
+                        "MemoryPoolUnsupportedRegionEscape: symbol.for must have single block"
+                    )
+                loop_start = index
+                visit(list(blocks[0].ops), op)
+                loop_end = index - 1
+                loop_bounds[op] = (loop_start, loop_end)
+                continue
+            if reject_other_regions:
+                raise MemoryPoolError(
+                    "MemoryPoolUnsupportedRegionEscape: nested regions are not supported"
+                )
+            for region in op.regions:
+                for block in region.blocks:
+                    visit(list(block.ops), current_loop)
+
+    for block in blocks:
+        visit(list(block.ops), None)
+
+    return ops, loop_bounds, op_loop
+
+
+def _collect_straight_line_ops(
+    func_op: func.FuncOp,
+) -> tuple[Block, list[Operation], dict[Operation, int], dict[SymbolForOp, tuple[int, int]], dict[Operation, SymbolForOp | None]]:
+    """收集可改写路径的 op 列表。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅允许单 block。
+    - 允许 symbol.for，其余 region 直接报错。
+    - 返回 op 索引与 loop 词法范围，供生命周期分析使用。
+
+    使用示例:
+    - block, ops, op_index, loop_bounds, op_loop = _collect_straight_line_ops(func_op)
 
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
@@ -702,11 +815,90 @@ def _collect_straight_line_ops(func_op: func.FuncOp) -> tuple[Block, list[Operat
     if len(func_op.body.blocks) != 1:
         raise MemoryPoolError("MemoryPoolRewriteUnsupported: function must have single block")
     block = func_op.body.blocks[0]
-    ops = list(block.ops)
-    for op in ops:
-        if op.regions:
-            raise MemoryPoolError("MemoryPoolRewriteUnsupported: nested regions are not supported")
-    return block, ops
+    ops, loop_bounds, op_loop = _collect_ops_with_loops(
+        [block],
+        reject_other_regions=True,
+    )
+    op_index = {op: idx for idx, op in enumerate(ops)}
+    return block, ops, op_index, loop_bounds, op_loop
+
+
+def _has_escaping_use(
+    alloc_op: DmaAllocOp,
+    op_loop: dict[Operation, SymbolForOp | None],
+) -> bool:
+    """判断 alloc 是否存在 escaping use。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 返回 True 表示 alloc 结果逃逸到 loop 外或被直接 return。
+
+    使用示例:
+    - if _has_escaping_use(alloc_op, op_loop): ...
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/pass/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    """
+
+    alloc_loop = op_loop.get(alloc_op)
+    for use in alloc_op.result.uses:
+        user = use.operation
+        if isinstance(user, func.ReturnOp):
+            return True
+        if alloc_loop is not None and op_loop.get(user) is not alloc_loop:
+            return True
+    return False
+
+
+def _assign_slots(
+    items: list[tuple[int, int, object]],
+) -> tuple[dict[object, int], int]:
+    """基于词法区间为条目分配 slot。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 输入 (begin, end, key) 列表，输出每个 key 的 slot 以及最大 slot 数。
+    - 仅当区间不重叠时才会复用已有 slot。
+
+    使用示例:
+    - slots, max_slots = _assign_slots([(0, 2, alloc_a), (3, 5, alloc_b)])
+
+    关联文件:
+    - spec: spec/pass/lowering/memory_pool.md
+    - test: test/pass/test_memory_pool.py
+    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    """
+
+    ordered = sorted(items, key=lambda item: (item[0], item[1]))
+    active: list[tuple[int, int]] = []
+    free_slots: list[int] = []
+    slot_map: dict[object, int] = {}
+    next_slot = 0
+
+    for begin, end, key in ordered:
+        still_active: list[tuple[int, int]] = []
+        for active_end, slot in active:
+            if active_end < begin:
+                free_slots.append(slot)
+            else:
+                still_active.append((active_end, slot))
+        active = still_active
+        if free_slots:
+            free_slots.sort()
+            slot = free_slots.pop(0)
+        else:
+            slot = next_slot
+            next_slot += 1
+        slot_map[key] = slot
+        active.append((end, slot))
+
+    return slot_map, next_slot
 
 
 def _alloc_name(value: SSAValue, index: int) -> str:
@@ -788,24 +980,28 @@ def _summarize_func(func_op: func.FuncOp) -> MemoryPoolSummary:
     - 功能实现: kernel_gen/passes/lowering/memory_pool.py
     """
 
-    ops: list[Operation] = []
-    for block in func_op.body.blocks:
-        ops.extend(_collect_ops(block))
+    ops, loop_bounds, op_loop = _collect_ops_with_loops(
+        list(func_op.body.blocks),
+        reject_other_regions=True,
+    )
+    op_index = {op: idx for idx, op in enumerate(ops)}
 
     free_indices: dict[SSAValue, list[int]] = {}
-    for index, op in enumerate(ops):
+    for op in ops:
         if isinstance(op, DmaFreeOp):
-            free_indices.setdefault(op.source, []).append(index)
+            free_indices.setdefault(op.source, []).append(op_index[op])
 
     intervals: list[MemoryPoolInterval] = []
     alloc_index = 0
-    for index, op in enumerate(ops):
+    for op in ops:
         if not isinstance(op, DmaAllocOp):
             continue
         alloc_index += 1
         result_type = op.result.type
         if not isinstance(result_type, NnMemoryType):
             raise MemoryPoolError("MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory")
+        if _has_escaping_use(op, op_loop):
+            raise MemoryPoolError("MemoryPoolEscapingAlloc: alloc escapes current region")
 
         bucket = _bucket_key(result_type)
         size_numel_expr = _shape_product(result_type)
@@ -816,31 +1012,74 @@ def _summarize_func(func_op: func.FuncOp) -> MemoryPoolSummary:
             )
         size_bytes_expr = size_numel_expr * sp.Integer(dtype_size)
 
+        alloc_idx = op_index[op]
         free_list = free_indices.get(op.result, [])
-        free_after = [value for value in free_list if value >= index]
+        free_after = [value for value in free_list if value >= alloc_idx]
         if not free_after:
             raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free not found for alloc")
         if len(free_after) > 1:
             raise MemoryPoolError("MemoryPoolInvalidLifetime: multiple dma.free for alloc")
         free_index = free_after[0]
-        if free_index < index:
+        if free_index < alloc_idx:
             raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free before alloc")
+        free_op = ops[free_index]
+        if not isinstance(free_op, DmaFreeOp):
+            raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free op mismatch")
+
+        alloc_loop = op_loop.get(op)
+        free_loop = op_loop.get(free_op)
+        if alloc_loop is None:
+            if free_loop is not None:
+                raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free inside symbol.for")
+            begin_index = alloc_idx
+            end_index = free_index
+        else:
+            if free_loop is not alloc_loop:
+                raise MemoryPoolError("MemoryPoolInvalidLifetime: loop alloc/free mismatch")
+            begin_index, end_index = loop_bounds[alloc_loop]
 
         intervals.append(
             MemoryPoolInterval(
                 _alloc_name(op.result, alloc_index),
                 bucket,
                 size_bytes_expr,
-                index,
-                free_index,
+                begin_index,
+                end_index,
                 sp.Integer(0),
             )
         )
 
-    intervals_tuple = tuple(intervals)
+    slot_map: dict[MemoryPoolInterval, int] = {}
+    groups: dict[tuple[tuple[str], sp.Basic], list[MemoryPoolInterval]] = {}
+    for interval in intervals:
+        group_key = (interval.bucket_key, interval.size_bytes_expr)
+        groups.setdefault(group_key, []).append(interval)
+    for group in groups.values():
+        group_items = [(item.begin_index, item.end_index, item) for item in group]
+        group_slots, _ = _assign_slots(group_items)
+        slot_map.update(group_slots)
+
+    intervals_with_offset: list[MemoryPoolInterval] = []
+    for interval in intervals:
+        slot = slot_map.get(interval, 0)
+        offset_expr = interval.size_bytes_expr * sp.Integer(slot)
+        intervals_with_offset.append(
+            MemoryPoolInterval(
+                interval.name,
+                interval.bucket_key,
+                interval.size_bytes_expr,
+                interval.begin_index,
+                interval.end_index,
+                offset_expr,
+            )
+        )
+
+    intervals_tuple = tuple(intervals_with_offset)
     peak_bytes_by_bucket: dict[tuple[str], sp.Basic] = {}
-    for bucket in {interval.bucket_key for interval in intervals}:
-        bucket_intervals = [interval for interval in intervals if interval.bucket_key == bucket]
+    for bucket in {interval.bucket_key for interval in intervals_with_offset}:
+        bucket_intervals = [
+            interval for interval in intervals_with_offset if interval.bucket_key == bucket
+        ]
         peak_bytes_by_bucket[bucket] = _peak_bytes(bucket_intervals)
 
     return MemoryPoolSummary(
@@ -858,8 +1097,8 @@ def _rewrite_func(func_op: func.FuncOp) -> None:
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 仅支持单 block、无嵌套 region 的直线路径。
-    - 仅改写同 bucket、相同 size 表达式且生命周期不重叠的 alloc/free。
+    - 仅支持单 block，允许 `symbol.for`，其余 region 直接报错。
+    - 仅改写同 bucket、相同 size 表达式的 alloc/free，并按 slot 分配 offset。
 
     使用示例:
     - _rewrite_func(func_op)
@@ -870,34 +1109,50 @@ def _rewrite_func(func_op: func.FuncOp) -> None:
     - 功能实现: kernel_gen/passes/lowering/memory_pool.py
     """
 
-    block, ops = _collect_straight_line_ops(func_op)
+    block, ops, op_index, loop_bounds, op_loop = _collect_straight_line_ops(func_op)
     if not ops:
         return
 
     free_indices: dict[SSAValue, list[int]] = {}
-    for index, op in enumerate(ops):
+    for op in ops:
         if isinstance(op, DmaFreeOp):
-            free_indices.setdefault(op.source, []).append(index)
+            free_indices.setdefault(op.source, []).append(op_index[op])
 
     alloc_infos: list[_AllocInfo] = []
-    for index, op in enumerate(ops):
+    for op in ops:
         if not isinstance(op, DmaAllocOp):
             continue
         result_type = op.result.type
         if not isinstance(result_type, NnMemoryType):
             raise MemoryPoolError("MemoryPoolInvalidAlloc: dma.alloc result must be nn.memory")
+        if _has_escaping_use(op, op_loop):
+            raise MemoryPoolError("MemoryPoolEscapingAlloc: alloc escapes current region")
+
+        alloc_idx = op_index[op]
         free_list = free_indices.get(op.result, [])
-        free_after = [value for value in free_list if value >= index]
+        free_after = [value for value in free_list if value >= alloc_idx]
         if not free_after:
             raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free not found for alloc")
         if len(free_after) > 1:
             raise MemoryPoolError("MemoryPoolInvalidLifetime: multiple dma.free for alloc")
         free_index = free_after[0]
-        if free_index < index:
+        if free_index < alloc_idx:
             raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free before alloc")
         free_op = ops[free_index]
         if not isinstance(free_op, DmaFreeOp):
             raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free op mismatch")
+
+        alloc_loop = op_loop.get(op)
+        free_loop = op_loop.get(free_op)
+        if alloc_loop is None:
+            if free_loop is not None:
+                raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free inside symbol.for")
+            begin_index = alloc_idx
+            end_index = free_index
+        else:
+            if free_loop is not alloc_loop:
+                raise MemoryPoolError("MemoryPoolInvalidLifetime: loop alloc/free mismatch")
+            begin_index, end_index = loop_bounds[alloc_loop]
 
         dtype_size = _element_size(result_type.element_type)
         if dtype_size is None:
@@ -912,8 +1167,8 @@ def _rewrite_func(func_op: func.FuncOp) -> None:
                 free_op,
                 size_bytes_expr,
                 _bucket_key(result_type),
-                index,
-                free_index,
+                begin_index,
+                end_index,
             )
         )
 
@@ -924,18 +1179,20 @@ def _rewrite_func(func_op: func.FuncOp) -> None:
     ref_size = alloc_infos[0].size_bytes_expr
     for info in alloc_infos:
         if info.bucket_key != ref_bucket:
-            raise MemoryPoolError("MemoryPoolRewriteUnsupported: multiple buckets are not supported")
+            raise MemoryPoolError("MemoryPoolUnsupportedPoolBucket: mixed space is not supported")
         if info.size_bytes_expr != ref_size:
-            raise MemoryPoolError("MemoryPoolRewriteUnsupported: size mismatch")
+            raise MemoryPoolError("MemoryPoolUnsupportedPoolBucket: size mismatch")
 
-    ordered = sorted(alloc_infos, key=lambda item: item.begin_index)
-    for prev, curr in zip(ordered, ordered[1:]):
-        if curr.begin_index <= prev.end_index:
-            raise MemoryPoolError("MemoryPoolRewriteUnsupported: overlapping lifetimes are not supported")
+    slot_map, max_slots = _assign_slots(
+        [(info.begin_index, info.end_index, info) for info in alloc_infos]
+    )
+    if max_slots <= 0:
+        return
 
-    first_type = ordered[0].alloc_op.result.type
+    first_type = alloc_infos[0].alloc_op.result.type
     assert isinstance(first_type, NnMemoryType)
-    pool_shape_attr = _shape_dim_attr(ref_size)
+    pool_size_expr = ref_size * sp.Integer(max_slots)
+    pool_shape_attr = _shape_dim_attr(pool_size_expr)
     pool_type = NnMemoryType(
         ArrayAttr([pool_shape_attr]),
         ArrayAttr([IntAttr(1)]),
@@ -943,29 +1200,54 @@ def _rewrite_func(func_op: func.FuncOp) -> None:
         first_type.space,
     )
 
-    pool_shape_ops, pool_shape_value = _symbol_expr(ref_size)
+    pool_shape_ops, pool_shape_value = _symbol_expr(pool_size_expr)
     zero_ops, zero_value = _symbol_value_expr("0")
     pool_alloc = DmaAllocOp([pool_shape_value], pool_type)
 
     anchor_op = ops[0]
     block.insert_ops_before([*pool_shape_ops, *zero_ops, pool_alloc], anchor_op)
 
-    for info in ordered:
+    pool_size_value = _maybe_int(pool_size_expr)
+    for info in alloc_infos:
+        slot = slot_map.get(info, 0)
         result_type = info.alloc_op.result.type
         assert isinstance(result_type, NnMemoryType)
         stride_ops, stride_values = _layout_operands(result_type.stride)
         rank = len(result_type.shape.data)
+
+        shape0_expr = _dim_expr(result_type.shape.data[0])
+        offset0_expr = sp.Integer(slot) * shape0_expr
+        offset_ops, offset0_value = _symbol_expr(offset0_expr)
+        offset_values = [offset0_value] + [zero_value] * (rank - 1)
+
+        if pool_size_value is not None:
+            size_value = _maybe_int(info.size_bytes_expr)
+            offset_value = _maybe_int(info.size_bytes_expr * sp.Integer(slot))
+            if size_value is not None and offset_value is not None:
+                if offset_value + size_value > pool_size_value:
+                    raise MemoryPoolError(
+                        "MemoryPoolTypedViewOutOfBounds: typed view exceeds pool"
+                    )
+
         view_op = DmaViewOp(
             pool_alloc.result,
-            [zero_value] * rank,
+            offset_values,
             list(info.alloc_op.dynamic_shape),
             stride_values,
             result_type,
         )
-        block.insert_ops_before([*stride_ops, view_op], info.alloc_op)
+
+        alloc_block = _parent_block(info.alloc_op)
+        if alloc_block is None:
+            raise MemoryPoolError("MemoryPoolInvalidLifetime: alloc parent block not found")
+        alloc_block.insert_ops_before([*offset_ops, *stride_ops, view_op], info.alloc_op)
         info.alloc_op.result.replace_by(view_op.result)
-        block.erase_op(info.alloc_op)
-        block.erase_op(info.free_op)
+        alloc_block.erase_op(info.alloc_op)
+
+        free_block = _parent_block(info.free_op)
+        if free_block is None:
+            raise MemoryPoolError("MemoryPoolInvalidLifetime: free parent block not found")
+        free_block.erase_op(info.free_op)
 
     pool_free = DmaFreeOp(pool_alloc.result)
     terminator = list(block.ops)[-1]
