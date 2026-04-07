@@ -53,6 +53,7 @@ from kernel_gen.dialect.kernel import (
     KernelDivOp,
     KernelEqOp,
     KernelGeOp,
+    KernelGtOp,
     KernelLeOp,
     KernelNeOp,
     KernelSelectOp,
@@ -62,6 +63,7 @@ from kernel_gen.dialect.nn import (
     NnBroadcastOp,
     NnEqOp,
     NnGeOp,
+    NnGtOp,
     NnLeOp,
     NnMemorySpaceAttr,
     NnMemoryType,
@@ -939,6 +941,32 @@ def test_lower_ge_to_kernel() -> None:
     LowerNnToKernelPass().run(module)
     ops = _collect_ops(block)
     assert any(isinstance(op, KernelGeOp) for op in ops)
+
+
+# TC-PASS-N2K-025
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-08 02:57:02 +0800
+# 最近一次运行成功时间: 2026-04-08 02:57:02 +0800
+# 测试目的: 验证 nn.gt lower 为 kernel.gt。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_gt_to_kernel
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
+def test_lower_gt_to_kernel() -> None:
+    lhs_type = _make_memory_type()
+    rhs_type = _make_memory_type()
+    result_type = _make_memory_type(element_type=i1)
+    space = _make_space("global")
+
+    module, block = _build_module(
+        [lhs_type, rhs_type],
+        result_type,
+        lambda block: [NnGtOp(block.args[0], block.args[1], result_type, space)],
+    )
+    LowerNnToKernelPass().run(module)
+    ops = _collect_ops(block)
+    assert any(isinstance(op, KernelGtOp) for op in ops)
 
 
 # TC-PASS-N2K-023
