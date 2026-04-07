@@ -437,3 +437,116 @@
   - `SYMPY_GMPY=0 PYTHONPATH=. python expectation/pass/lowing/memory_pool/loop_reuse.py`
     - 退出码：0
     - 关键输出摘要：脚本打印 after IR（包含 1 个 pool alloc 与若干 dma.view/dma.free），且未报错退出。
+
+时间：2026-04-08 00:32:44 +0800
+经办人：不要啊教练
+任务：T-20260408-15535361（memory_pool_pass_green_plan-S3-复审）
+任务目标：
+- 复核 S3 改动（spec/实现/测试/记录）一致性与稳定性证据。
+- 确认 expectation 不进入可合入差异；loop_reuse.py 在工作区存在且可执行（exit=0），且记录 T-20260408-c7eb9fce 的证据可复现。
+改动：
+- 范围核对（worktree 内）：
+  - `git diff --name-only origin/main...HEAD` 输出仅包含：
+    - agents/codex-multi-agents/log/task_records/2026/15/20260407-memory-pool-s1.md
+    - kernel_gen/passes/lowering/memory_pool.py
+    - spec/pass/lowering/memory_pool.md
+    - test/pass/test_memory_pool.py
+  - 输出不包含 expectation/**，与“expectation 不进入可合入差异”的口径一致。
+- 复跑验证命令（为减少 __pycache__ 干扰，统一加 PYTHONDONTWRITEBYTECODE=1；并按记录使用 SYMPY_GMPY=0）：
+  - `SYMPY_GMPY=0 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/pass/test_memory_pool.py -k "symbol_for or escape or layout or invalid_lifetime"`（连续 3 次）
+    - 退出码：0
+    - 关键输出：5 passed, 12 deselected in 0.24~0.25s
+  - `SYMPY_GMPY=0 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/pass/test_memory_pool.py`
+    - 退出码：1
+    - 关键输出：失败用例 `test_memory_pool_rewrite_size_mismatch`
+  - `SYMPY_GMPY=0 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python expectation/pass/lowing/memory_pool/loop_reuse.py`
+    - 退出码：0
+    - 关键输出摘要：打印 SUMMARY（pool_count = 1；(#GM)->64；alloc2/alloc3 offset_bytes=32）与 AFTER（1 个 pool alloc + 3 个 dma.view + dma.free）。
+结论：需修改
+问题列表：
+1) 文件/接口：test/pass/test_memory_pool.py::test_memory_pool_rewrite_size_mismatch
+   - 现象：全量运行 `pytest -q test/pass/test_memory_pool.py` 时该用例失败（期望捕获 MemoryPoolError，但实际未抛出）。
+   - 定位：用例构造的两个 alloc 使用相同的 result type（同一 mem_type），pass 的 size_bytes_expr 基于 result type 计算，因此不会触发“size mismatch”分支；导致用例断言与被测逻辑不匹配。
+   - 风险：本文件无法全绿，S3 无法进入后续合入；同时该用例无法提供“不同字节 size 的改写拒绝路径”的可复现证据链。
+   - 建议：修复该用例的构造方式（让第二个 alloc 的 NnMemoryType 形状/字节大小确实不同），并对齐稳定失败短语断言；修复后需再次复跑 `pytest -q test/pass/test_memory_pool.py` 确认全绿。
+   - 优先级：P1
+漏洞排查结果（基于本次可见范围：spec/实现/测试）：
+- 输入校验绕过：存在显式错误短语与拒绝路径覆盖（如 InvalidModule/EscapingAlloc/UnsupportedRegionEscape），未见直接绕过路径。
+- 类型/形状绕过：匿名维度与非 nn.memory 类型均有拒绝路径测试与短语断言；但“size mismatch”拒绝路径当前用例未命中目标分支。
+- 边界越界：typed view 生成前有 pool_size_value 的常量化越界检查；本次未见新增越界路径，但需以修复后用例补齐覆盖。
+- 错误处理缺失：主要失败路径使用 MemoryPoolError，短语集中；需修复用例以覆盖该类错误短语的稳定性。
+- 状态污染：未见全局状态写入；sympy gmpy 通过环境变量控制。
+- 资源释放问题：改写后仅保留 pool alloc/free；本次未见资源释放缺失证据。
+下一步建议：
+- 派生唯一修复任务：修复 `test_memory_pool_rewrite_size_mismatch`（允许文件清单严格限制），复跑全量 `pytest -q test/pass/test_memory_pool.py` 直至 exit=0；必要时补充/对齐 spec 中该拒绝路径的短语描述。
+
+时间：2026-04-08 00:43:36 +0800
+经办人：不要啊教练
+任务：T-20260408-03e2f43a（memory_pool_pass_green_plan-S3-审查）
+任务目标：
+- 复核 size mismatch 用例与错误短语一致性，并复跑 pytest 取证。
+改动：
+- 范围核对（worktree 内）：`git diff --name-only origin/main...HEAD` 仅包含：
+  - agents/codex-multi-agents/log/task_records/2026/15/20260407-memory-pool-s1.md
+  - kernel_gen/passes/lowering/memory_pool.py
+  - spec/pass/lowering/memory_pool.md
+  - test/pass/test_memory_pool.py
+- 一致性核对要点（size mismatch）：
+  - 实现：`kernel_gen/passes/lowering/memory_pool.py` 的拒绝短语为 `MemoryPoolUnsupportedPoolBucket: size mismatch`。
+  - 测试：`test/pass/test_memory_pool.py::test_memory_pool_rewrite_size_mismatch` 构造第二个 alloc 为不同 shape 的 `NnMemoryType`，可稳定命中上述拒绝短语断言。
+验证命令：
+- `SYMPY_GMPY=0 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/pass/test_memory_pool.py`
+  - 退出码：0
+  - 关键输出：17 passed in 0.27s
+- `SYMPY_GMPY=0 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/pass/test_memory_pool.py -k test_memory_pool_rewrite_size_mismatch`
+  - 退出码：0
+  - 关键输出：1 passed, 16 deselected in 0.24s
+结论：需修改
+问题列表：
+1) 文件/接口：test/pass/test_memory_pool.py（TC-MP-012 的用例说明注释）
+   - 现象：`test_memory_pool_rewrite_overlap` 当前测试行为是“重叠生命周期会分配不同 offset 并成功改写”，但其注释仍写为“生命周期重叠会报错”，与当前 spec（重叠会分配不同 offset）及测试断言不一致。
+   - 风险：测试说明与实际语义不一致，降低可读性与可维护性，后续回归时不利于快速定位预期行为。
+   - 建议：仅更新该注释的“功能说明”描述，使其与 spec/断言一致（例如改为“生命周期重叠会分配不同 offset”）；修复后复跑 `pytest -q test/pass/test_memory_pool.py` 需 exit=0。
+   - 优先级：P2
+漏洞排查结果（基于本次可见范围：spec/实现/测试）：
+- 输入校验绕过：未发现直接绕过路径；拒绝短语集中且测试覆盖关键拒绝路径。
+- 类型/形状绕过：size mismatch 与 mixed space 均有拒绝短语断言；匿名维度等拒绝路径覆盖存在。
+- 边界越界：typed view 越界检查存在；本次未发现新增越界风险点。
+- 错误处理缺失：主要异常路径通过 MemoryPoolError 显式抛出；本次未见静默吞错证据。
+- 状态污染：sympy gmpy 通过环境变量控制；未见写全局状态的新增行为。
+- 资源释放问题：改写后 pool alloc/free 配对；本次未见资源释放缺失证据。
+下一步建议：
+- 派生唯一修复任务：仅修订上述注释不一致问题（允许文件清单收敛），修复后走一次复审再进入合入。
+
+时间: 2026-04-08 01:20:00 +0800
+经办人: 金铲铲大作战
+任务: T-20260408-c84c3376（memory_pool_pass_green_plan-S3-实现）
+任务目标: 修复 test_memory_pool_rewrite_size_mismatch 失败并确保全量 pytest 通过。
+改动:
+- test/pass/test_memory_pool.py：为 size mismatch 用例使用不同的 mem_type_b（shape=(2,5), stride=(5,1)），确保触发 size mismatch 报错。
+改动文件:
+- test/pass/test_memory_pool.py
+验证命令:
+- SYMPY_GMPY=0 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/pass/test_memory_pool.py
+  退出码：0
+  关键输出：17 passed in 0.26s
+结论:
+- 用例可稳定触发 size mismatch 报错，全量测试通过。
+已知风险:
+- 暂无。
+下一步建议:
+- 进入审查，重点确认 size mismatch 用例与错误短语一致性。
+
+时间: 2026-04-08 00:50:20 +0800
+经办人: 李白
+任务: T-20260408-b4573d6a（memory_pool_pass_green_plan-S3-修复）
+任务目标:
+- 修复 `test/pass/test_memory_pool.py` 中 TC-MP-012 的用例说明注释与当前 spec/断言不一致问题（仅改注释，不改语义）。
+改动:
+- `test/pass/test_memory_pool.py`：将 TC-MP-012 的“功能说明”从“生命周期重叠会报错”更新为“生命周期重叠会分配不同 offset 并成功改写”。
+验证命令:
+- `SYMPY_GMPY=0 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/pass/test_memory_pool.py`
+  - 退出码：0
+  - 关键输出：17 passed in 0.26s
+结论:
+- 注释已与 spec（生命周期重叠会分配不同 offset）及测试断言对齐；全量测试通过（exit=0）。

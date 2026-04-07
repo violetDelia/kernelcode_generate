@@ -358,9 +358,10 @@ def test_memory_pool_rewrite_multiple_buckets() -> None:
 # 对应测试文件路径: test/pass/test_memory_pool.py
 def test_memory_pool_rewrite_size_mismatch() -> None:
     mem_type = _make_memory_type()
+    mem_type_b = _make_memory_type(shape=(2, 5), stride=(5, 1))
     alloc_a = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type)
     free_a = DmaFreeOp(alloc_a.result)
-    alloc_b = DmaAllocOp(_make_symbol_operands([2, 5]), mem_type)
+    alloc_b = DmaAllocOp(_make_symbol_operands([2, 5]), mem_type_b)
     free_b = DmaFreeOp(alloc_b.result)
     module = _build_module("main", [alloc_a, free_a, alloc_b, free_b])
 
@@ -368,7 +369,7 @@ def test_memory_pool_rewrite_size_mismatch() -> None:
     try:
         pass_obj.run(module)
     except MemoryPoolError as exc:
-        assert "MemoryPoolRewriteUnsupported: size mismatch" in str(exc)
+        assert "MemoryPoolUnsupportedPoolBucket: size mismatch" in str(exc)
     else:
         raise AssertionError("expected MemoryPoolError for size mismatch")
 
@@ -378,7 +379,7 @@ def test_memory_pool_rewrite_size_mismatch() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-07 10:30:00 +0800
 # 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
-# 功能说明: 验证直线路径生命周期重叠会报错。
+# 功能说明: 验证直线路径生命周期重叠会分配不同 offset 并成功改写。
 # 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_rewrite_overlap
 # 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
