@@ -105,6 +105,7 @@ _ALLOWED_IMPORT_BOUND_HELPERS: dict[str, tuple[types.ModuleType, frozenset[str]]
                 "softmax",
                 "broadcast",
                 "broadcast_to",
+                "transpose",
                 "reduce_sum",
                 "reduce_min",
                 "reduce_max",
@@ -631,6 +632,31 @@ class NnBroadcastToAST:
     source: object
     target_shape: object
     space: object
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class NnTransposeAST:
+    """nn.transpose helper 节点。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 表示 `transpose(value, perm)` 的 DSL helper 调用。
+    - 记录输入与 perm 表达式，交由 lowering 阶段校验。
+
+    使用示例:
+    - NnTransposeAST(value=VarAST("x"), perm=[ConstAST(1), ConstAST(0)])
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    value: object
+    perm: object
     location: SourceLocation | None = None
 
 
@@ -2268,6 +2294,7 @@ def _parse_dma_call(
     - 将 `softmax(...)` 解析为 `NnSoftmaxAST`。
     - 将 `img2col1d/img2col2d(...)` 解析为对应的 `Img2ColAST`。
     - 将 `broadcast/broadcast_to(...)` 解析为对应的 `NnBroadcastAST/NnBroadcastToAST`。
+    - 将 `transpose(...)` 解析为 `NnTransposeAST`。
     - 将 `fc(...)` 解析为 `FCAST`，交由 lowering 阶段生成 `nn.matmul`。
     - 将 `get_block_id()` / `get_block_num()` / `get_subthread_id()` / `get_subthread_num()` / `get_thread_id()` / `get_thread_num()` 解析为 `ArchQueryAST`。
     - 将 `get_dynamic_memory(space)` 解析为 `ArchGetDynamicMemoryAST`。
@@ -2491,6 +2518,27 @@ def _parse_dma_call(
             space=space,
             location=_location_from_node(expr),
         )
+
+    if call_name == "transpose":
+        if not expr.args or len(expr.args) > 2:
+            _raise_parse_error("Unsupported transpose arity", expr)
+        value = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+        perm_env = dict(env)
+        if bool(perm_env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)):
+            perm_env[_ALLOW_EXTERNAL_CONSTANTS_ENV_KEY] = True
+        perm = _parse_expr(expr.args[1], perm_env, globals_table, builtins_table) if len(expr.args) >= 2 else None
+        for keyword in expr.keywords:
+            if keyword.arg is None:
+                _raise_parse_error("Unsupported transpose arity", expr)
+            if keyword.arg == "perm":
+                if perm is not None:
+                    _raise_parse_error("Unsupported transpose arity", expr)
+                perm = _parse_expr(keyword.value, perm_env, globals_table, builtins_table)
+                continue
+            _raise_parse_error("Unsupported transpose arity", expr)
+        if perm is None:
+            _raise_parse_error("transpose perm is required", expr)
+        return NnTransposeAST(value=value, perm=perm, location=_location_from_node(expr))
 
     if call_name == "fc":
         if len(expr.args) != 2 or expr.keywords:

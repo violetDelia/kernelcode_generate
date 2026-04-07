@@ -1,7 +1,7 @@
 """dma dialect tests.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 dma dialect 的 op verifier 与类型复用约束。
@@ -58,6 +58,7 @@ from kernel_gen.dialect.dma import (
     Dma,
     DmaAllocOp,
     DmaBroadcastOp,
+    DmaTransposeOp,
     DmaFillOp,
     DmaFreeOp,
     DmaCastOp,
@@ -856,10 +857,10 @@ def test_dma_view_rejects_invalid_offsets_or_bounds() -> None:
 
 # TC-DMA-020
 # 创建者: 朽木露琪亚
-# 最后一次更改: OpenAI
-# 最近一次运行测试时间: 2026-03-22 22:00:45 +0800
-# 最近一次运行成功时间: 2026-03-22 22:00:45 +0800
-# 功能说明: 验证 dma.alloc 支持通过 SSA dynamic_shape operand 表达动态形状，且结果 stride 必须满足默认连续布局。
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-07 19:01:20 +0800
+# 最近一次运行成功时间: 2026-04-07 19:01:20 +0800
+# 功能说明: 验证 dma.alloc 支持通过 SSA dynamic_shape operand 表达动态形状，且结果 stride 可按显式值通过校验。
 # 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_alloc_dynamic_symbol_int_shape_operands_valid
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
@@ -872,13 +873,12 @@ def test_dma_alloc_dynamic_symbol_int_shape_operands_valid() -> None:
     op = DmaAllocOp(_make_symbol_operands(["M", "N"]), result_type)
     op.verify()
 
-    bad_result_type = _make_memory_type(
+    non_contiguous_result_type = _make_memory_type(
         shape=ArrayAttr([StringAttr("M"), StringAttr("N")]),
-        stride=ArrayAttr([StringAttr("M"), IntAttr(1)]),
+        stride=ArrayAttr([IntAttr(1), StringAttr("M")]),
     )
-    op = DmaAllocOp(_make_symbol_operands(["M", "N"]), bad_result_type)
-    with pytest.raises(VerifyException, match="dma.alloc requires contiguous result stride"):
-        op.verify()
+    op = DmaAllocOp(_make_symbol_operands(["M", "N"]), non_contiguous_result_type)
+    op.verify()
 
 
 # TC-DMA-021
@@ -1263,3 +1263,54 @@ def test_dma_broadcast_rejects_scalar_type_mismatch() -> None:
 
     with pytest.raises(VerifyException, match="dma.broadcast scalar type mismatch"):
         DmaBroadcastOp(target, scalar).verify()
+
+
+# TC-DMA-031
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-07 19:01:20 +0800
+# 最近一次运行成功时间: 2026-04-07 19:01:20 +0800
+# 测试目的: 验证 dma.transpose 接受合法 perm 并通过校验。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_transpose_accepts_valid_perm
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_transpose_accepts_valid_perm() -> None:
+    source_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(3)]),
+        stride=ArrayAttr([IntAttr(3), IntAttr(1)]),
+    )
+    target_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(3), IntAttr(2)]),
+        stride=ArrayAttr([IntAttr(1), IntAttr(3)]),
+    )
+    source = _TestOp(result_types=[source_type]).results[0]
+    target = _TestOp(result_types=[target_type]).results[0]
+
+    DmaTransposeOp(target, source, perm=[1, 0]).verify()
+
+
+# TC-DMA-032
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-07 19:01:20 +0800
+# 最近一次运行成功时间: 2026-04-07 19:01:20 +0800
+# 测试目的: 验证 dma.transpose 在 perm 非排列时失败。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_transpose_rejects_invalid_perm
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_transpose_rejects_invalid_perm() -> None:
+    source_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(3)]),
+        stride=ArrayAttr([IntAttr(3), IntAttr(1)]),
+    )
+    target_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(3), IntAttr(2)]),
+        stride=ArrayAttr([IntAttr(1), IntAttr(3)]),
+    )
+    source = _TestOp(result_types=[source_type]).results[0]
+    target = _TestOp(result_types=[target_type]).results[0]
+
+    with pytest.raises(VerifyException, match="dma.transpose perm"):
+        DmaTransposeOp(target, source, perm=[1, 1]).verify()

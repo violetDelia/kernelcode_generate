@@ -23,6 +23,7 @@ from collections.abc import Iterable
 
 from xdsl.dialects import arith, func
 from xdsl.dialects.builtin import (
+    ArrayAttr,
     IntAttr,
     IntegerAttr,
     ModuleOp,
@@ -33,7 +34,7 @@ from xdsl.dialects.builtin import (
 from xdsl.ir import Block, Operation, Region, SSAValue
 from xdsl.utils.exceptions import VerifyException
 
-from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCopyOp, DmaFillOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCopyOp, DmaFillOp, DmaTransposeOp
 from kernel_gen.dialect.kernel import (
     KernelAddOp,
     KernelCastOp,
@@ -160,6 +161,41 @@ def _ensure_operand_count(op: Operation, expected: int) -> None:
         raise LowerNnToKernelError(
             f"nn op {op.name} expects {expected} operands, got {len(op.operands)}"
         )
+
+
+def _parse_transpose_perm_attr(attr: object, rank: int) -> ArrayAttr:
+    """解析 nn.transpose 的 perm attribute。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 校验 perm 为 ArrayAttr。
+    - 校验 perm 为 0..rank-1 的排列。
+
+    使用示例:
+    - perm_attr = _parse_transpose_perm_attr(op.attributes["perm"], rank=2)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    if not isinstance(attr, ArrayAttr):
+        raise LowerNnToKernelError("nn.transpose perm must be ArrayAttr")
+    perm_values: list[int] = []
+    for entry in attr.data:
+        if isinstance(entry, IntAttr):
+            perm_values.append(entry.data)
+            continue
+        if isinstance(entry, IntegerAttr) and isinstance(entry.value, IntAttr):
+            perm_values.append(entry.value.data)
+            continue
+        raise LowerNnToKernelError("nn.transpose perm must be a permutation of 0..rank-1")
+    if len(perm_values) != rank or sorted(perm_values) != list(range(rank)):
+        raise LowerNnToKernelError("nn.transpose perm must be a permutation of 0..rank-1")
+    return attr
 
 
 def _build_alloc_dynamic_shape(
@@ -390,6 +426,7 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
     - 为结果插入 dma.alloc。
     - 用 kernel op 替换 nn op，并替换所有使用者。
     - nn.broadcast 在 source/结果空间不一致时先插入 dma.alloc + dma.copy。
+    - nn.transpose lower 为 dma.transpose。
 
     使用示例:
     - _lower_nn_op(op, block)
@@ -399,6 +436,30 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
     - test: test/pass/test_lowering_nn_to_kernel.py
     - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
     """
+
+    if op.name == "nn.transpose":
+        _ensure_operand_count(op, 1)
+        result_type = _ensure_single_result(op)
+        _ensure_space_attr(op)
+        source = SSAValue.get(op.operands[0])
+        source_type = source.type
+        if not isinstance(source_type, NnMemoryType):
+            raise LowerNnToKernelError("nn.transpose operand must be nn.memory")
+        perm_attr = _parse_transpose_perm_attr(op.attributes.get("perm"), len(source_type.shape.data))
+        shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_result(result_type)
+        alloc = DmaAllocOp(dynamic_shape, result_type)
+        transpose = DmaTransposeOp(alloc.result, source, perm_attr)
+
+        try:
+            alloc.verify()
+            transpose.verify()
+        except VerifyException as exc:
+            raise LowerNnToKernelError(str(exc)) from exc
+
+        block.insert_ops_before([*shape_ops, alloc, transpose], op)
+        op.results[0].replace_by(alloc.result)
+        block.erase_op(op)
+        return
 
     if op.name == "nn.broadcast":
         _ensure_operand_count(op, 1)

@@ -27,6 +27,7 @@ from xdsl.dialects.builtin import (
     Float32Type,
     Float64Type,
     IntAttr,
+    IntegerAttr,
     IntegerType,
     StringAttr,
     i32,
@@ -267,6 +268,102 @@ def _verify_broadcast_compat(
                 and target_dim.data != 1
             ):
                 raise VerifyException("dma.broadcast shape mismatch")
+
+
+def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
+    """判断 shape/stride 维度是否一致。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 支持 IntAttr 与 StringAttr 的值一致性判断。
+    - 其他类型统一视为不一致。
+
+    使用示例:
+    - _dims_equal(IntAttr(2), IntAttr(2))
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma_dialect.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    if isinstance(lhs, IntAttr) and isinstance(rhs, IntAttr):
+        return lhs.data == rhs.data
+    if isinstance(lhs, StringAttr) and isinstance(rhs, StringAttr):
+        return lhs.data == rhs.data
+    return False
+
+
+def _verify_transpose_perm(perm: ArrayAttr, rank: int) -> list[int]:
+    """校验 dma.transpose 的 perm 合法性并返回序列。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 校验 perm 长度与 rank 一致。
+    - 校验 perm 为 0..rank-1 的排列。
+
+    使用示例:
+    - _verify_transpose_perm(ArrayAttr([IntAttr(1), IntAttr(0)]), rank=2)
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma_dialect.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    if len(perm.data) != rank:
+        raise VerifyException("dma.transpose perm must match source rank")
+    perm_values: list[int] = []
+    for entry in perm.data:
+        if isinstance(entry, IntAttr):
+            perm_values.append(entry.data)
+            continue
+        if isinstance(entry, IntegerAttr) and isinstance(entry.value, IntAttr):
+            perm_values.append(entry.value.data)
+            continue
+        raise VerifyException("dma.transpose perm must be a permutation of 0..rank-1")
+    if sorted(perm_values) != list(range(rank)):
+        raise VerifyException("dma.transpose perm must be a permutation of 0..rank-1")
+    return perm_values
+
+
+def _verify_transpose_layout(
+    source_type: NnMemoryType,
+    target_type: NnMemoryType,
+    perm_values: Sequence[int],
+) -> None:
+    """校验 dma.transpose 的 shape/stride 是否按 perm 重排。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 按 perm 重排 source shape/stride，并与 target 对齐校验。
+
+    使用示例:
+    - _verify_transpose_layout(source_type, target_type, [1, 0])
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma_dialect.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    if len(target_type.shape.data) != len(perm_values):
+        raise VerifyException("dma.transpose target rank mismatch")
+    expected_shape = [source_type.shape.data[index] for index in perm_values]
+    for expected_dim, actual_dim in zip(expected_shape, target_type.shape.data, strict=True):
+        if not _dims_equal(expected_dim, actual_dim):
+            raise VerifyException("dma.transpose target shape mismatch")
+
+    expected_stride = [source_type.stride.data[index] for index in perm_values]
+    for expected_dim, actual_dim in zip(expected_stride, target_type.stride.data, strict=True):
+        if not _dims_equal(expected_dim, actual_dim):
+            raise VerifyException("dma.transpose target stride mismatch")
 
 
 def _verify_unit_stride_operands(strides: Sequence[SSAValue]) -> None:
@@ -600,10 +697,12 @@ class DmaAllocOp(IRDLOperation):
         """校验 dma.alloc。
 
         创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
+        最后一次更改: 小李飞刀
 
         功能说明:
         - 结果类型必须为 nn.memory。
+        - dynamic_shape 需与 result shape 对齐。
+        - stride 按结果类型显式指定，不再额外限制布局。
 
         使用示例:
         - DmaAllocOp(...).verify_()
@@ -618,7 +717,6 @@ class DmaAllocOp(IRDLOperation):
         dynamic_shape = _verify_symbol_int_operands(self.dynamic_shape, "dynamic_shape", min_value=1)
         _verify_rank_match(dynamic_shape, len(result_type.shape.data), "dynamic_shape")
         _verify_operands_match_layout(dynamic_shape, result_type.shape, "dynamic_shape must match result shape")
-        _verify_default_contiguous_stride(result_type, "dma.alloc requires contiguous result stride")
 
 
 @irdl_op_definition
@@ -850,6 +948,72 @@ class DmaBroadcastOp(IRDLOperation):
 
         if source_type != target_type.element_type:
             raise VerifyException("dma.broadcast scalar type mismatch")
+
+
+@irdl_op_definition
+class DmaTransposeOp(IRDLOperation):
+    """dma.transpose。"""
+
+    name = "dma.transpose"
+
+    target = operand_def(NnMemoryType)
+    source = operand_def(NnMemoryType)
+    perm = attr_def(ArrayAttr)
+
+    def __init__(
+        self,
+        target: SSAValue | Operation,
+        source: SSAValue | Operation,
+        perm: Sequence[int] | ArrayAttr,
+    ) -> None:
+        """初始化 dma.transpose。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 设置 target/source operand 与 perm 属性。
+
+        使用示例:
+        - DmaTransposeOp(target, source, perm=[1, 0])
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma_dialect.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        perm_attr = perm if isinstance(perm, ArrayAttr) else ArrayAttr([IntAttr(value) for value in perm])
+        super().__init__(operands=[target, source], attributes={"perm": perm_attr})
+
+    def verify_(self) -> None:
+        """校验 dma.transpose。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - target/source 必须为 nn.memory。
+        - element_type 与 space 必须一致。
+        - perm 必须是 0..rank-1 的排列，且 target shape/stride 为 source 的重排。
+
+        使用示例:
+        - DmaTransposeOp(...).verify_()
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma_dialect.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        target_type = _verify_memory_type(self.target.type, "target")
+        source_type = _verify_memory_type(self.source.type, "source")
+        if target_type.element_type != source_type.element_type:
+            raise VerifyException("dma.transpose element_type mismatch")
+        if target_type.space.space.data != source_type.space.space.data:
+            raise VerifyException("dma.transpose space mismatch")
+        perm_values = _verify_transpose_perm(self.perm, len(source_type.shape.data))
+        _verify_transpose_layout(source_type, target_type, perm_values)
 
 
 @irdl_op_definition
@@ -1437,6 +1601,7 @@ class Dma(Dialect):
         DmaFreeOp,
         DmaCopyOp,
         DmaBroadcastOp,
+        DmaTransposeOp,
         DmaLoadOp,
         DmaStoreOp,
         DmaSliceOp,
@@ -1455,6 +1620,7 @@ __all__ = [
     "DmaFreeOp",
     "DmaCopyOp",
     "DmaBroadcastOp",
+    "DmaTransposeOp",
     "DmaLoadOp",
     "DmaStoreOp",
     "DmaSliceOp",

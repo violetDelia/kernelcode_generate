@@ -1,7 +1,7 @@
 """nn -> kernel lowering pass tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 nn_to_kernel pass 的 lowering 行为与错误路径。
@@ -46,7 +46,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaFillOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaFillOp, DmaTransposeOp
 from kernel_gen.dialect.kernel import (
     KernelAddOp,
     KernelCastOp,
@@ -66,6 +66,7 @@ from kernel_gen.dialect.nn import (
     NnMemorySpaceAttr,
     NnMemoryType,
     NnNeOp,
+    NnTransposeOp,
     NnTrueDivOp,
 )
 from kernel_gen.dialect.symbol import SymbolValueType
@@ -552,6 +553,38 @@ def test_lower_broadcast_to_dma_broadcast() -> None:
 
     ops = _collect_ops(block)
     assert any(isinstance(op, DmaBroadcastOp) for op in ops)
+
+
+# TC-PASS-N2K-024
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-07 19:01:20 +0800
+# 最近一次运行成功时间: 2026-04-07 19:01:20 +0800
+# 测试目的: 验证 nn.transpose lower 为 dma.transpose。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_transpose_to_dma_transpose
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
+def test_lower_transpose_to_dma_transpose() -> None:
+    source_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(3)]),
+        stride=ArrayAttr([IntAttr(1), IntAttr(2)]),
+    )
+    result_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(3), IntAttr(2)]),
+        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+    )
+    space = _make_space("global")
+
+    module, block = _build_module(
+        [source_type],
+        result_type,
+        lambda block: [NnTransposeOp(block.args[0], result_type, perm=[1, 0], space=space)],
+    )
+    LowerNnToKernelPass().run(module)
+
+    ops = _collect_ops(block)
+    assert any(isinstance(op, DmaTransposeOp) for op in ops)
 # COV-N2K-026
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀

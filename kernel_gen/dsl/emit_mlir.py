@@ -143,6 +143,7 @@ from .ast import (
     NnBroadcastToAST,
     NnReduceAST,
     NnSoftmaxAST,
+    NnTransposeAST,
     NnUnaryAST,
     ScalarArgAST,
     SymbolToFloatAST,
@@ -2585,6 +2586,50 @@ def _parse_softmax_axis_expr(axis_expr: object | None, location: SourceLocation 
     return value
 
 
+def _parse_transpose_perm_expr(perm_expr: object | None, location: SourceLocation | None) -> list[int]:
+    """解析 transpose perm 表达式为轴列表。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 支持 list/tuple/int/ConstAST[int] 的 perm 解析。
+    - 仅做基础类型校验，排列合法性由后续 verifier 处理。
+
+    使用示例:
+    - _parse_transpose_perm_expr([ConstAST(1), ConstAST(0)], location=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    if perm_expr is None:
+        raise _LoweringError("transpose perm must be list of int", location=location)
+    if isinstance(perm_expr, ConstAST):
+        if isinstance(perm_expr.value, int):
+            return [perm_expr.value]
+        raise _LoweringError("transpose perm entries must be int", location=perm_expr.location or location)
+    if isinstance(perm_expr, int):
+        return [perm_expr]
+    if isinstance(perm_expr, (list, tuple)):
+        perm_values: list[int] = []
+        for entry in perm_expr:
+            if isinstance(entry, ConstAST) and isinstance(entry.value, int):
+                perm_values.append(entry.value)
+                continue
+            if isinstance(entry, int):
+                perm_values.append(entry)
+                continue
+            raise _LoweringError(
+                "transpose perm entries must be int",
+                location=getattr(entry, "location", None) or location,
+            )
+        return perm_values
+    raise _LoweringError("transpose perm must be list of int", location=location)
+
+
 def _parse_reduce_keepdim_expr(
     keepdim_expr: object | None,
     location: SourceLocation | None,
@@ -2735,6 +2780,7 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
                 NnBroadcastToAST,
                 NnReduceAST,
                 NnSoftmaxAST,
+                NnTransposeAST,
                 NnUnaryAST,
                 DmaFreeAST,
                 ForAST,
@@ -2960,6 +3006,16 @@ def _infer_expr_type(
         if not isinstance(expr.space, MemorySpace):
             raise _LoweringError("broadcast_to space must be MemorySpace", location=expr.location)
         output_memory = _KG_OPERATION_NN.broadcast_to(source_memory, target_dims, expr.space)
+        result_type = _memory_to_nn_type(output_memory, location=expr.location)
+        type_map[expr_key] = result_type
+        return result_type
+    if isinstance(expr, NnTransposeAST):
+        value_type = _infer_expr_type(expr.value, type_map, runtime_values=runtime_values)
+        if not isinstance(value_type, NnMemoryType):
+            raise _LoweringError("transpose input must be nn.memory", location=expr.location)
+        perm_values = _parse_transpose_perm_expr(expr.perm, expr.location)
+        input_memory = _nn_memory_type_to_memory(value_type, location=expr.location)
+        output_memory = _KG_OPERATION_NN.transpose(input_memory, perm_values)
         result_type = _memory_to_nn_type(output_memory, location=expr.location)
         type_map[expr_key] = result_type
         return result_type
@@ -3444,6 +3500,18 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("broadcast_to result must be nn.memory", location=expr.location)
         op = NnBroadcastOp(source, result_type, result_type.space)
+        ctx.builder.add_op(op)
+        ctx._set_cache(expr_key, op.result)
+        return op.result
+    if isinstance(expr, NnTransposeAST):
+        value = _lower_expr(expr.value, ctx)
+        input_type = _expect_memory_value(value, expr.location)
+        result_type = _infer_expr_type(expr, ctx.types)
+        if not isinstance(result_type, NnMemoryType):
+            raise _LoweringError("transpose result must be nn.memory", location=expr.location)
+        perm_values = _parse_transpose_perm_expr(expr.perm, expr.location)
+        op = NnTransposeOp(value, result_type, perm=perm_values, space=input_type.space)
+        op.verify()
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)
         return op.result
@@ -3955,6 +4023,7 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
             NnBroadcastToAST,
             NnReduceAST,
             NnSoftmaxAST,
+            NnTransposeAST,
             NnUnaryAST,
             ArchGetDynamicMemoryAST,
             ArchQueryAST,
