@@ -85,6 +85,25 @@
 - `git ls-files --others --exclude-standard`：
   - `agents/codex-multi-agents/log/task_records/2026/15/20260407-nn-mlir-lowering-s3a2.md`
 - `git diff --name-only`：
+- `kernel_gen/passes/lowering/nn_to_kernel.py`
+- `test/dialect/test_dma_dialect.py`
+- `test/pass/test_lowering_nn_to_kernel.py`
+
+---
+
+时间：2026-04-07 18:06:30 +0800
+经办人：李白
+任务：T-20260407-5d5e31c0（S3A-2 记录纳入证据补齐：commit 级 diff）
+任务目标：
+- 通过 commit 级 diff 证据，证明记录文件已纳入变更集；
+- 将该证据与 commit hash 写入记录，便于复审/合并核对。
+结论：已补齐证据。
+
+纳入证据（commit 级 diff）：
+- commit：`af6c718`
+- 命令：`git diff af6c718^ af6c718 --name-only`
+- 输出：
+  - `agents/codex-multi-agents/log/task_records/2026/15/20260407-nn-mlir-lowering-s3a2.md`
   - `kernel_gen/passes/lowering/nn_to_kernel.py`
   - `test/dialect/test_dma_dialect.py`
   - `test/pass/test_lowering_nn_to_kernel.py`
