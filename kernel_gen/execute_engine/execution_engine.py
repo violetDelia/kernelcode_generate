@@ -1,7 +1,7 @@
 """ExecutionEngine skeleton (P0).
 
 创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 提供 `ExecutionEngine.compile(...).execute(...)` 的最小壳层，以便在不实现真实编译/调用的前提下固定：
@@ -27,7 +27,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal, TypeAlias
+
+from kernel_gen.execute_engine.compiler import (
+    build_compile_unit,
+    compile_source,
+    default_compiler,
+)
+from kernel_gen.execute_engine.entry_shim_builder import (
+    build_entry_shim_source,
+    needs_entry_shim,
+)
+from kernel_gen.execute_engine.target_registry import target_includes
 
 FAILURE_TARGET_HEADER_MISMATCH = "target_header_mismatch"
 FAILURE_SOURCE_EMPTY_OR_INVALID = "source_empty_or_invalid"
@@ -80,6 +92,62 @@ def _source_include_family(source: str) -> str | None:
     if has_npu:
         return "npu_demo"
     return None
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _ensure_compiler_flags(flags: tuple[str, ...]) -> tuple[str, ...]:
+    """确保编译 flags 包含 -std=c++17 基线。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 若调用方未提供 `-std=c++17`，则按基线规则补齐。
+    - 其余 flags 保持原有顺序。
+
+    使用示例:
+    - assert _ensure_compiler_flags(("-O2",)) == ("-std=c++17", "-O2")
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_target.md
+    - test: test/execute_engine/test_execute_engine_compile.py
+    - 功能实现: kernel_gen/execute_engine/execution_engine.py
+    """
+
+    if "-std=c++17" in flags:
+        return flags
+    return ("-std=c++17", *flags)
+
+
+def _resolve_compiler_name(compiler: str | None) -> str:
+    """解析编译器名称（P0/S2）。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 当 compiler 为空时回退到默认编译器。
+    - 若 compiler 为空字符串或非字符串，则视为无效输入。
+
+    使用示例:
+    - assert _resolve_compiler_name(None) == "g++"
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_target.md
+    - test: test/execute_engine/test_execute_engine_compile.py
+    - 功能实现: kernel_gen/execute_engine/execution_engine.py
+    """
+
+    if compiler is None:
+        return default_compiler()
+    if not isinstance(compiler, str) or not compiler.strip():
+        raise ExecutionEngineError(
+            FAILURE_COMPILE_FAILED,
+            "compiler is empty",
+        )
+    return compiler
 
 
 class ExecutionEngineError(RuntimeError):
@@ -283,10 +351,12 @@ class ExecutionEngine:
         """编译 C++ 源码并返回 `CompiledKernel`（骨架版本）。
 
         创建者: 朽木露琪亚
-        最后一次更改: 朽木露琪亚
+        最后一次更改: jcc你莫辜负
 
         功能说明:
-        - 本阶段不要求真实编译，仅固定输入校验与公共失败短语：
+        - S2 阶段固定编译路径拼装：target include 选择 -> entry shim -> 编译命令生成 -> CompiledKernel。
+        - S2 默认以 dry-run 方式生成编译命令与占位产物，不执行真实编译。
+        - 保持公共失败短语：
           - `target_header_mismatch`
           - `source_empty_or_invalid`
           - `compile_failed`
@@ -297,7 +367,8 @@ class ExecutionEngine:
 
         关联文件:
         - spec: spec/execute_engine/execute_engine.md
-        - test: test/execute_engine/test_execute_engine_contract.py
+        - spec: spec/execute_engine/execute_engine_target.md
+        - test: test/execute_engine/test_execute_engine_compile.py
         - 功能实现: kernel_gen/execute_engine/execution_engine.py
         """
 
@@ -306,8 +377,14 @@ class ExecutionEngine:
             function = request.function
             entry_point = request.entry_point
             target = request.target
+            compiler = _resolve_compiler_name(request.compiler)
+            compiler_flags = _ensure_compiler_flags(request.compiler_flags)
+            link_flags = request.link_flags
         else:
             target = self.target
+            compiler = _resolve_compiler_name(self.compiler)
+            compiler_flags = _ensure_compiler_flags(self.compiler_flags)
+            link_flags = self.link_flags
 
         if target not in ("cpu", "npu_demo"):
             raise ExecutionEngineError(
@@ -346,13 +423,49 @@ class ExecutionEngine:
                 "entry_point is empty",
             )
 
+        target_headers = target_includes(target)
+        if not target_headers:
+            raise ExecutionEngineError(
+                FAILURE_TARGET_HEADER_MISMATCH,
+                f"unsupported target: {target}",
+            )
+        shim_source = ""
+        if needs_entry_shim(source, entry_point):
+            shim_source = build_entry_shim_source(
+                function=function,
+                entry_point=entry_point,
+            )
+        compile_unit = build_compile_unit(
+            source=source,
+            target_includes=target_headers,
+            entry_shim_source=shim_source,
+        )
+        artifacts = compile_source(
+            source=compile_unit,
+            compiler=compiler,
+            compiler_flags=compiler_flags,
+            link_flags=link_flags,
+            include_dirs=(str(REPO_ROOT),),
+            dry_run=True,
+        )
+        if artifacts.return_code != 0:
+            raise ExecutionEngineError(
+                FAILURE_COMPILE_FAILED,
+                f"compiler returned non-zero ({artifacts.return_code})",
+            )
+        if not Path(artifacts.soname_path).exists():
+            raise ExecutionEngineError(
+                FAILURE_COMPILE_FAILED,
+                "compile output is missing",
+            )
+
         return CompiledKernel(
             target=target,
-            soname_path="",
+            soname_path=artifacts.soname_path,
             function=function,
             entry_point=entry_point,
-            compile_stdout="",
-            compile_stderr="",
+            compile_stdout=artifacts.stdout,
+            compile_stderr=artifacts.stderr,
         )
 
 
