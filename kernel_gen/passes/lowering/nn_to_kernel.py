@@ -21,12 +21,19 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from xdsl.dialects import func
-from xdsl.dialects.builtin import IntAttr, ModuleOp, StringAttr, i32
+from xdsl.dialects import arith, func
+from xdsl.dialects.builtin import (
+    IntAttr,
+    IntegerAttr,
+    ModuleOp,
+    StringAttr,
+    UnrealizedConversionCastOp,
+    i32,
+)
 from xdsl.ir import Block, Operation, Region, SSAValue
 from xdsl.utils.exceptions import VerifyException
 
-from kernel_gen.dialect.dma import DmaAllocOp, DmaFillOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaFillOp
 from kernel_gen.dialect.kernel import (
     KernelAddOp,
     KernelCastOp,
@@ -188,6 +195,73 @@ def _build_alloc_dynamic_shape(
     return ops, operands
 
 
+def _const_symbol_value(expr: str, literal: int) -> tuple[list[Operation], SSAValue]:
+    """构造 !symbol.int<"expr"> SSA value。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 先创建 i32 常量，再通过 UnrealizedConversionCastOp 转为 symbol.int。
+    - expr 用于约束 symbol.int 的公开表达式。
+
+    使用示例:
+    - ops, value = _const_symbol_value("N", 0)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    const = arith.ConstantOp(IntegerAttr(literal, i32))
+    cast = UnrealizedConversionCastOp(
+        operands=[const.result], result_types=[SymbolValueType.from_expr(expr)]
+    )
+    return [const, cast], cast.results[0]
+
+
+def _build_alloc_dynamic_shape_from_result(
+    result_type: NnMemoryType,
+) -> tuple[list[Operation], list[SSAValue]]:
+    """基于结果类型构造 dma.alloc 的 dynamic_shape operands。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 静态整数维度使用对应数值的 symbol.int。
+    - 符号维度使用同名 symbol.int。
+    - 匿名动态维度不允许。
+
+    使用示例:
+    - ops, operands = _build_alloc_dynamic_shape_from_result(result_type)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    ops: list[Operation] = []
+    operands: list[SSAValue] = []
+    for dim in result_type.shape.data:
+        if isinstance(dim, IntAttr):
+            new_ops, value = _const_symbol_value(str(dim.data), dim.data)
+            ops.extend(new_ops)
+            operands.append(value)
+            continue
+        if isinstance(dim, StringAttr):
+            if dim.data == "?":
+                raise LowerNnToKernelError("nn op result shape must not contain '?'")
+            new_ops, value = _const_symbol_value(dim.data, 0)
+            ops.extend(new_ops)
+            operands.append(value)
+            continue
+        raise LowerNnToKernelError("nn op result shape entry must be IntAttr or StringAttr")
+    return ops, operands
+
+
 def _select_shape_source(op: Operation) -> SSAValue:
     """选择用于生成 dynamic_shape 的 memory operand。
 
@@ -324,6 +398,29 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
     - test: test/pass/test_lowering_nn_to_kernel.py
     - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
     """
+
+    if op.name == "nn.broadcast":
+        _ensure_operand_count(op, 1)
+        result_type = _ensure_single_result(op)
+        _ensure_space_attr(op)
+        source = SSAValue.get(op.operands[0])
+        if not isinstance(source.type, NnMemoryType):
+            raise LowerNnToKernelError("nn.broadcast operand must be nn.memory")
+
+        shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_result(result_type)
+        alloc = DmaAllocOp(dynamic_shape, result_type)
+        broadcast = DmaBroadcastOp(alloc.result, source)
+
+        try:
+            alloc.verify()
+            broadcast.verify()
+        except VerifyException as exc:
+            raise LowerNnToKernelError(str(exc)) from exc
+
+        block.insert_ops_before([*shape_ops, alloc, broadcast], op)
+        op.results[0].replace_by(alloc.result)
+        block.erase_op(op)
+        return
 
     result_type = _ensure_single_result(op)
     space = _ensure_space_attr(op)

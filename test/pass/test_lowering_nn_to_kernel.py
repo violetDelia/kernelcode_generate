@@ -46,7 +46,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dialect.dma import DmaAllocOp, DmaFillOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaFillOp
 from kernel_gen.dialect.kernel import (
     KernelAddOp,
     KernelCastOp,
@@ -59,6 +59,7 @@ from kernel_gen.dialect.kernel import (
 )
 from kernel_gen.dialect.nn import (
     NnAddOp,
+    NnBroadcastOp,
     NnEqOp,
     NnGeOp,
     NnLeOp,
@@ -521,6 +522,36 @@ def test_lower_add_to_kernel() -> None:
     assert any(isinstance(op, KernelAddOp) for op in ops)
 
 
+# TC-PASS-N2K-002
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-07 17:05:47 +0800
+# 最近一次运行成功时间: 2026-04-07 17:05:47 +0800
+# 测试目的: 验证 nn.broadcast lower 为 dma.broadcast。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_broadcast_to_dma_broadcast
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
+def test_lower_broadcast_to_dma_broadcast() -> None:
+    source_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1), IntAttr(4)]),
+        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+    )
+    result_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
+        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+    )
+    space = _make_space("global")
+
+    module, block = _build_module(
+        [source_type],
+        result_type,
+        lambda block: [NnBroadcastOp(block.args[0], result_type, space)],
+    )
+    LowerNnToKernelPass().run(module)
+
+    ops = _collect_ops(block)
+    assert any(isinstance(op, DmaBroadcastOp) for op in ops)
 # COV-N2K-026
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀

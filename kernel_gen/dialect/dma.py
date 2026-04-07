@@ -4,7 +4,7 @@
 最后一次更改: 小李飞刀
 
 功能说明:
-- 定义 dma dialect 的 alloc/fill/copy/load/store/slice/deslice/view/reshape/cast op 与 verifier 规则。
+- 定义 dma dialect 的 alloc/fill/copy/load/store/slice/deslice/view/reshape/cast/broadcast op 与 verifier 规则。
 - 复用 nn dialect 的 NnMemoryType 与 NnMemorySpaceAttr。
 
 使用示例:
@@ -228,6 +228,45 @@ def _verify_operands_match_layout(
             static_value = _operand_int_value(value)
             if static_value != expected.data:
                 raise VerifyException(mismatch_message)
+
+
+def _verify_broadcast_compat(
+    source_shape: ArrayAttr[Attribute],
+    target_shape: ArrayAttr[Attribute],
+) -> None:
+    """校验 dma.broadcast 的 shape 兼容性。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 按尾维对齐规则检查 source/target shape。
+    - 仅在静态整数维度冲突时失败，符号维度不做数值求解。
+
+    使用示例:
+    - _verify_broadcast_compat(source_type.shape, target_type.shape)
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma_dialect.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    source_dims = source_shape.data
+    target_dims = target_shape.data
+    if len(source_dims) > len(target_dims):
+        raise VerifyException("dma.broadcast source rank must be <= target rank")
+
+    for offset in range(1, len(target_dims) + 1):
+        target_dim = target_dims[-offset]
+        source_dim = source_dims[-offset] if offset <= len(source_dims) else IntAttr(1)
+        if isinstance(source_dim, IntAttr) and isinstance(target_dim, IntAttr):
+            if (
+                source_dim.data != target_dim.data
+                and source_dim.data != 1
+                and target_dim.data != 1
+            ):
+                raise VerifyException("dma.broadcast shape mismatch")
 
 
 def _verify_unit_stride_operands(strides: Sequence[SSAValue]) -> None:
@@ -740,6 +779,77 @@ class DmaCopyOp(IRDLOperation):
             raise VerifyException("dma.copy source/target stride mismatch")
         if source_type.element_type != target_type.element_type:
             raise VerifyException("dma.copy source/target element_type mismatch")
+
+
+@irdl_op_definition
+class DmaBroadcastOp(IRDLOperation):
+    """dma.broadcast。"""
+
+    name = "dma.broadcast"
+
+    target = operand_def(NnMemoryType)
+    source = operand_def(Attribute)
+
+    def __init__(self, target: SSAValue | Operation, source: SSAValue | Operation) -> None:
+        """初始化 dma.broadcast。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 设置 target 与 source operand。
+
+        使用示例:
+        - DmaBroadcastOp(target, source)
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma_dialect.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        super().__init__(operands=[target, source])
+
+    def verify_(self) -> None:
+        """校验 dma.broadcast。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - target 必须为 nn.memory。
+        - memory source 需满足 element_type/space 与 broadcast 规则。
+        - scalar source 必须与 target.element_type 类型一致，或为整数场景的 symbol.int。
+
+        使用示例:
+        - DmaBroadcastOp(...).verify_()
+
+        关联文件:
+        - spec: spec/dialect/dma.md
+        - test: test/dialect/test_dma_dialect.py
+        - 功能实现: kernel_gen/dialect/dma.py
+        """
+
+        target_type = _verify_memory_type(self.target.type, "target")
+        source_value = SSAValue.get(self.source)
+        source_type = source_value.type
+
+        if isinstance(source_type, NnMemoryType):
+            source_type = _verify_memory_type(source_type, "source")
+            if source_type.element_type != target_type.element_type:
+                raise VerifyException("dma.broadcast element_type mismatch")
+            if source_type.space.space.data != target_type.space.space.data:
+                raise VerifyException("dma.broadcast space mismatch")
+            _verify_broadcast_compat(source_type.shape, target_type.shape)
+            return
+
+        if isinstance(source_type, SymbolValueType):
+            if not isinstance(target_type.element_type, IntegerType):
+                raise VerifyException("dma.broadcast symbol.int target must be integer element_type")
+            return
+
+        if source_type != target_type.element_type:
+            raise VerifyException("dma.broadcast scalar type mismatch")
 
 
 @irdl_op_definition
@@ -1326,6 +1436,7 @@ class Dma(Dialect):
         DmaFillOp,
         DmaFreeOp,
         DmaCopyOp,
+        DmaBroadcastOp,
         DmaLoadOp,
         DmaStoreOp,
         DmaSliceOp,
@@ -1343,6 +1454,7 @@ __all__ = [
     "DmaFillOp",
     "DmaFreeOp",
     "DmaCopyOp",
+    "DmaBroadcastOp",
     "DmaLoadOp",
     "DmaStoreOp",
     "DmaSliceOp",

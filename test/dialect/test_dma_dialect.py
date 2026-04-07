@@ -32,7 +32,17 @@ from pathlib import Path
 import pytest
 from xdsl.context import Context
 from xdsl.dialects.arith import Arith
-from xdsl.dialects.builtin import ArrayAttr, Builtin, IndexType, IntAttr, StringAttr, i1, i8, i32
+from xdsl.dialects.builtin import (
+    ArrayAttr,
+    Builtin,
+    IndexType,
+    IntAttr,
+    StringAttr,
+    f32,
+    i1,
+    i8,
+    i32,
+)
 from xdsl.dialects.builtin import ModuleOp
 from xdsl.dialects.test import Test, TestOp as _TestOp
 from xdsl.ir import Attribute, Operation, SSAValue
@@ -47,6 +57,7 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.dialect.dma import (
     Dma,
     DmaAllocOp,
+    DmaBroadcastOp,
     DmaFillOp,
     DmaFreeOp,
     DmaCastOp,
@@ -1166,3 +1177,89 @@ def test_dma_reshape_rejects_element_or_space_mismatch() -> None:
     op = DmaReshapeOp(source, shape, bad_space_type)
     with pytest.raises(VerifyException, match="dma.reshape space mismatch"):
         op.verify()
+
+
+# TC-DMA-027
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-07 17:05:47 +0800
+# 最近一次运行成功时间: 2026-04-07 17:05:47 +0800
+# 测试目的: 验证 dma.broadcast 接受 memory source 的尾维对齐广播。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_broadcast_accepts_memory_source
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_broadcast_accepts_memory_source() -> None:
+    source_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1), IntAttr(4)]),
+        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+    )
+    target_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
+        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+    )
+    source = _TestOp(result_types=[source_type]).results[0]
+    target = _TestOp(result_types=[target_type]).results[0]
+
+    DmaBroadcastOp(target, source).verify()
+
+
+# TC-DMA-028
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-07 17:05:47 +0800
+# 最近一次运行成功时间: 2026-04-07 17:05:47 +0800
+# 测试目的: 验证 dma.broadcast 接受整数 symbol 标量广播。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_broadcast_accepts_symbol_int_scalar
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_broadcast_accepts_symbol_int_scalar() -> None:
+    target = _TestOp(result_types=[_make_memory_type()]).results[0]
+    scalar = _make_symbol_operands(["N"])[0]
+
+    DmaBroadcastOp(target, scalar).verify()
+
+
+# TC-DMA-029
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-07 17:05:47 +0800
+# 最近一次运行成功时间: 2026-04-07 17:05:47 +0800
+# 测试目的: 验证 dma.broadcast 在静态 shape 不兼容时失败。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_broadcast_rejects_static_shape_mismatch
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_broadcast_rejects_static_shape_mismatch() -> None:
+    source_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
+        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+    )
+    target_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(3), IntAttr(4)]),
+        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+    )
+    source = _TestOp(result_types=[source_type]).results[0]
+    target = _TestOp(result_types=[target_type]).results[0]
+
+    with pytest.raises(VerifyException, match="dma.broadcast shape mismatch"):
+        DmaBroadcastOp(target, source).verify()
+
+
+# TC-DMA-030
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-07 17:05:47 +0800
+# 最近一次运行成功时间: 2026-04-07 17:05:47 +0800
+# 测试目的: 验证 dma.broadcast 拒绝标量类型与目标元素类型不一致的情况。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_broadcast_rejects_scalar_type_mismatch
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_broadcast_rejects_scalar_type_mismatch() -> None:
+    target = _TestOp(result_types=[_make_memory_type()]).results[0]
+    scalar = _TestOp(result_types=[f32]).results[0]
+
+    with pytest.raises(VerifyException, match="dma.broadcast scalar type mismatch"):
+        DmaBroadcastOp(target, scalar).verify()

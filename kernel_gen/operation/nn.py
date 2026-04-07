@@ -2392,6 +2392,15 @@ def broadcast(value: object, target: object) -> Memory:
                 action=_ERROR_ACTION,
             )
         )
+    if value.dtype != target.dtype:
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="nn.broadcast 参数校验",
+                expected="broadcast dtype must match target dtype",
+                actual=f"input_dtype={value.dtype} target_dtype={target.dtype}",
+                action=_ERROR_ACTION,
+            )
+        )
     input_values = value.shape.get_values()
     target_values = target.shape.get_values()
 
