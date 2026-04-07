@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, TypeAlias
+from typing import Callable, Literal, TypeAlias
 
 from kernel_gen.execute_engine.compiler import (
     build_compile_unit,
@@ -235,6 +235,297 @@ ArgSpec: TypeAlias = MemoryArg | IntArg | FloatArg
 
 
 @dataclass(frozen=True)
+class KgArgSlot:
+    """entry shim 绑定槽位（P0/S3）。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 承载 entry shim 的按位参数信息，用于在 Python 侧完成 P0/S3 的顺序绑定校验。
+    - 仅用于参数绑定与校验，不承担执行结果与内存拷贝。
+
+    使用示例:
+    - slot = KgArgSlot(position=0, kind="memory", dtype="float32", shape=(2, 2), stride=None, value=tensor)
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_api.md
+    - test: test/execute_engine/test_execute_engine_invoke.py
+    - 功能实现: kernel_gen/execute_engine/execution_engine.py
+    """
+
+    position: int
+    kind: Literal["memory", "int", "float"]
+    dtype: str
+    shape: tuple[int, ...] | None
+    stride: tuple[int, ...] | None
+    value: object
+
+
+def _normalize_dtype(value: object) -> str | None:
+    """规范化 dtype 表达。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 统一 dtype 的字符串格式，支持 str、numpy/torch 的 dtype 对象。
+    - 仅做最小规范化（去除 torch. 前缀），不做类型映射。
+
+    使用示例:
+    - assert _normalize_dtype("float32") == "float32"
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_api.md
+    - test: test/execute_engine/test_execute_engine_invoke.py
+    - 功能实现: kernel_gen/execute_engine/execution_engine.py
+    """
+
+    if value is None:
+        return None
+    if isinstance(value, str):
+        dtype_str = value
+    else:
+        dtype_str = str(value)
+    dtype_str = dtype_str.strip()
+    if not dtype_str:
+        return None
+    if dtype_str.startswith("torch."):
+        dtype_str = dtype_str.split(".", 1)[1]
+    return dtype_str
+
+
+def _normalize_shape(value: object) -> tuple[int, ...] | None:
+    """规范化 shape 表达。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 统一 shape 为 tuple[int, ...]，用于 MemoryArg 校验。
+    - shape 不可解析时返回 None。
+
+    使用示例:
+    - assert _normalize_shape(type("T", (), {"shape": (2, 3)})()) == (2, 3)
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_api.md
+    - test: test/execute_engine/test_execute_engine_invoke.py
+    - 功能实现: kernel_gen/execute_engine/execution_engine.py
+    """
+
+    if value is None or not hasattr(value, "shape"):
+        return None
+    try:
+        return tuple(int(dim) for dim in getattr(value, "shape"))
+    except TypeError:
+        return None
+
+
+def _normalize_stride(value: object) -> tuple[int, ...] | None:
+    """规范化 stride 表达。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 统一 stride 为 tuple[int, ...]，用于 MemoryArg.stride 校验。
+    - stride 不可解析时返回 None。
+
+    使用示例:
+    - assert _normalize_stride(type("T", (), {"stride": lambda self: (1, 2)})()) == (1, 2)
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_api.md
+    - test: test/execute_engine/test_execute_engine_invoke.py
+    - 功能实现: kernel_gen/execute_engine/execution_engine.py
+    """
+
+    if value is None:
+        return None
+    if hasattr(value, "stride"):
+        stride_attr = getattr(value, "stride")
+        stride = stride_attr() if callable(stride_attr) else stride_attr
+        try:
+            return tuple(int(dim) for dim in stride)
+        except TypeError:
+            return None
+    if hasattr(value, "strides"):
+        stride = getattr(value, "strides")
+        try:
+            return tuple(int(dim) for dim in stride)
+        except TypeError:
+            return None
+    return None
+
+
+def _dtype_kind(dtype: str) -> str | None:
+    """解析 dtype 对应的基础类型类别。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 将 dtype 字符串归类为 int/float，用于 IntArg/FloatArg 的最小校验。
+    - 不识别的 dtype 返回 None。
+
+    使用示例:
+    - assert _dtype_kind("int32") == "int"
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_api.md
+    - test: test/execute_engine/test_execute_engine_invoke.py
+    - 功能实现: kernel_gen/execute_engine/execution_engine.py
+    """
+
+    normalized = _normalize_dtype(dtype)
+    if normalized is None:
+        return None
+    lowered = normalized.lower()
+    if lowered.startswith("int") or lowered.startswith("uint"):
+        return "int"
+    if lowered.startswith("float") or lowered.startswith("bf") or lowered.startswith("fp"):
+        return "float"
+    return None
+
+
+def _build_arg_slots(args: tuple[ArgSpec, ...]) -> tuple[KgArgSlot, ...]:
+    """按顺序构建 entry shim 参数槽位。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 校验 args 的顺序、类型、position 与 dtype/shape/stride 一致性。
+    - 失败时抛出 runtime_throw_or_abort，保证失败短语稳定。
+
+    使用示例:
+    - slots = _build_arg_slots((MemoryArg(...), IntArg(...)))
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_api.md
+    - test: test/execute_engine/test_execute_engine_invoke.py
+    - 功能实现: kernel_gen/execute_engine/execution_engine.py
+    """
+
+    slots: list[KgArgSlot] = []
+    for idx, arg in enumerate(args):
+        if not isinstance(arg, (MemoryArg, IntArg, FloatArg)):
+            raise ExecutionEngineError(
+                FAILURE_RUNTIME_THROW_OR_ABORT,
+                f"unsupported ArgSpec at position {idx}",
+            )
+        if arg.position != idx:
+            raise ExecutionEngineError(
+                FAILURE_RUNTIME_THROW_OR_ABORT,
+                f"arg position mismatch at {idx}",
+            )
+        if isinstance(arg, MemoryArg):
+            arg_dtype = _normalize_dtype(arg.dtype)
+            value_dtype = _normalize_dtype(getattr(arg.value, "dtype", None))
+            if arg_dtype is None or value_dtype is None or arg_dtype != value_dtype:
+                raise ExecutionEngineError(
+                    FAILURE_RUNTIME_THROW_OR_ABORT,
+                    f"memory dtype mismatch at position {idx}",
+                )
+            arg_shape = tuple(int(dim) for dim in arg.shape)
+            value_shape = _normalize_shape(arg.value)
+            if value_shape is None or arg_shape != value_shape:
+                raise ExecutionEngineError(
+                    FAILURE_RUNTIME_THROW_OR_ABORT,
+                    f"memory shape mismatch at position {idx}",
+                )
+            if arg.stride is not None:
+                value_stride = _normalize_stride(arg.value)
+                if value_stride is None or tuple(arg.stride) != value_stride:
+                    raise ExecutionEngineError(
+                        FAILURE_RUNTIME_THROW_OR_ABORT,
+                        f"memory stride mismatch at position {idx}",
+                    )
+            slots.append(
+                KgArgSlot(
+                    position=idx,
+                    kind="memory",
+                    dtype=arg.dtype,
+                    shape=arg_shape,
+                    stride=arg.stride,
+                    value=arg.value,
+                )
+            )
+            continue
+        if isinstance(arg, IntArg):
+            if _dtype_kind(arg.dtype) != "int" or not isinstance(arg.value, int) or isinstance(arg.value, bool):
+                raise ExecutionEngineError(
+                    FAILURE_RUNTIME_THROW_OR_ABORT,
+                    f"int arg mismatch at position {idx}",
+                )
+            slots.append(
+                KgArgSlot(
+                    position=idx,
+                    kind="int",
+                    dtype=arg.dtype,
+                    shape=None,
+                    stride=None,
+                    value=arg.value,
+                )
+            )
+            continue
+        if _dtype_kind(arg.dtype) != "float" or not isinstance(arg.value, float) or isinstance(arg.value, bool):
+            raise ExecutionEngineError(
+                FAILURE_RUNTIME_THROW_OR_ABORT,
+                f"float arg mismatch at position {idx}",
+            )
+        slots.append(
+            KgArgSlot(
+                position=idx,
+                kind="float",
+                dtype=arg.dtype,
+                shape=None,
+                stride=None,
+                value=arg.value,
+            )
+        )
+    return tuple(slots)
+
+
+def _load_entry_point(soname_path: str, entry_point: str) -> Callable[[tuple[KgArgSlot, ...]], int]:
+    """加载 entry point 并返回可调用对象（P0/S3 占位）。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 以 soname_path + entry_point 的最小约束模拟动态加载。
+    - 当前仅验证 soname_path 存在，返回固定成功占位函数。
+
+    使用示例:
+    - invoke = _load_entry_point("libkernel.so", "kg_execute_entry")
+    - assert invoke(()) == 0
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine.md
+    - test: test/execute_engine/test_execute_engine_invoke.py
+    - 功能实现: kernel_gen/execute_engine/execution_engine.py
+    """
+
+    if not isinstance(soname_path, str) or not soname_path:
+        raise ExecutionEngineError(
+            FAILURE_RUNTIME_THROW_OR_ABORT,
+            "soname_path is empty",
+        )
+    if not Path(soname_path).is_file():
+        raise ExecutionEngineError(
+            FAILURE_RUNTIME_THROW_OR_ABORT,
+            "soname_path is missing",
+        )
+
+    def _invoke(_slots: tuple[KgArgSlot, ...]) -> int:
+        return 0
+
+    return _invoke
+
+
+@dataclass(frozen=True)
 class ExecuteResult:
     """执行引擎对外结果模型（P0）。"""
 
@@ -271,15 +562,15 @@ class CompiledKernel:
         """执行已编译 kernel（骨架版本）。
 
         创建者: 朽木露琪亚
-        最后一次更改: 朽木露琪亚
+        最后一次更改: jcc你莫辜负
 
         功能说明:
-        - 本阶段不要求真实运行，仅固定：
-          - `stream` / `capture_function_output` 的禁用行为与失败短语；
-          - `ExecuteResult` 的成功判定口径。
+        - S3 补齐调用路径：参数绑定、entry shim 协议、动态加载与执行返回。
+        - 保持 `stream` / `capture_function_output` 的禁用行为与失败短语。
+        - 成功时返回 `ok=True/status_code=0/failure_phrase=None` 并带回编译 stdout/stderr。
 
         使用示例:
-        - result = kernel.execute(args=())
+        - result = kernel.execute(args=(MemoryArg(...), IntArg(...), FloatArg(...)))
 
         关联文件:
         - spec: spec/execute_engine/execute_engine.md
@@ -314,12 +605,7 @@ class CompiledKernel:
                 FAILURE_RUNTIME_THROW_OR_ABORT,
                 "args must be a tuple",
             )
-        for idx, arg in enumerate(args):
-            if not isinstance(arg, (MemoryArg, IntArg, FloatArg)):
-                raise ExecutionEngineError(
-                    FAILURE_RUNTIME_THROW_OR_ABORT,
-                    f"unsupported ArgSpec at position {idx}",
-                )
+        ordered_slots = _build_arg_slots(args)
 
         resolved_entry = self.entry_point if entry_point is None else entry_point
         if not isinstance(resolved_entry, str) or not resolved_entry.strip():
@@ -327,8 +613,27 @@ class CompiledKernel:
                 FAILURE_SYMBOL_RESOLVE_FAILED,
                 "entry_point is empty",
             )
+        if resolved_entry != self.entry_point:
+            raise ExecutionEngineError(
+                FAILURE_SYMBOL_RESOLVE_FAILED,
+                "entry_point mismatch",
+            )
 
-        return ExecuteResult(ok=True, status_code=0, failure_phrase=None)
+        invoke_entry = _load_entry_point(self.soname_path, resolved_entry)
+        status_code = invoke_entry(ordered_slots)
+        if status_code != 0:
+            raise ExecutionEngineError(
+                FAILURE_RUNTIME_THROW_OR_ABORT,
+                f"entry_point returned non-zero ({status_code})",
+            )
+
+        return ExecuteResult(
+            ok=True,
+            status_code=0,
+            failure_phrase=None,
+            compile_stdout=self.compile_stdout,
+            compile_stderr=self.compile_stderr,
+        )
 
 
 @dataclass(frozen=True)
