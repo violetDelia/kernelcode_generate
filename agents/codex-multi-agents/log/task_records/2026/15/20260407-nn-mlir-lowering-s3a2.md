@@ -123,3 +123,44 @@
   - `kernel_gen/passes/lowering/nn_to_kernel.py`
   - `test/dialect/test_dma_dialect.py`
   - `test/pass/test_lowering_nn_to_kernel.py`
+
+时间：2026-04-07 18:05:46 +0800
+经办人：提莫炖蘑菇
+任务：T-20260407-edd56e4e（nn_mlir_gen_lowering_expectation_green_plan-S3A-2-复审）
+任务目标：
+- 复核记录纳入证据（commit 级 diff 可复现）。
+- 复跑必要验证命令并核对一致性。
+改动：
+- 复现 commit 级 diff 证据：git diff af6c718^ af6c718 --name-only；git diff 2daa943^ 2daa943 --name-only。
+- 复跑 broadcast_to 子集与 expectation 验证命令；未修改代码与文档。
+结论：通过
+问题清单：无。
+风险：未发现明显风险与异常路径缺口。
+验证命令：
+- cd /home/lfr/kernelcode_generate/wt-20260407-nn-mlir-lowering-s3a2 && pytest -q test/pass/test_lowering_nn_to_kernel.py -k "broadcast_to"（exit=0）
+- cd /home/lfr/kernelcode_generate/wt-20260407-nn-mlir-lowering-s3a2 && pytest -q test/dialect/test_dma_dialect.py -k "broadcast"（exit=0）
+- cd /home/lfr/kernelcode_generate && PYTHONPATH=wt-20260407-nn-mlir-lowering-s3a2:. python expectation/pass/lowing/nn_to_kernel/broadcast_to.py（exit=0）
+关键输出：
+- 1 passed, 29 deselected in 0.41s
+- 4 passed, 32 deselected in 0.22s
+- CASE-1/CASE-2 通过并生成 dma.copy + dma.broadcast；CASE-3/CASE-4 失败边界符合预期
+记录纳入证据（复现）：
+- git diff af6c718^ af6c718 --name-only 输出包含：
+  - agents/codex-multi-agents/log/task_records/2026/15/20260407-nn-mlir-lowering-s3a2.md
+  - kernel_gen/passes/lowering/nn_to_kernel.py
+  - test/dialect/test_dma_dialect.py
+  - test/pass/test_lowering_nn_to_kernel.py
+- git diff 2daa943^ 2daa943 --name-only 输出包含：
+  - agents/codex-multi-agents/log/task_records/2026/15/20260407-nn-mlir-lowering-s3a2.md
+一致性核对要点：
+- nn.broadcast_to 归一化为 nn.broadcast 的 lowering 走 dma.alloc + dma.copy + dma.broadcast，期望输出与 expectation 对齐。
+- dialect/test 与 pass/test 均覆盖 broadcast 相关校验与链路，验证结果一致。
+漏洞排查结果：
+- 输入校验绕过：未发现（shape/space/type 校验可达）。
+- 类型/形状绕过：未发现（DmaBroadcastOp 校验 element_type/space/shape）。
+- 边界越界：未发现（rank 与维度不兼容直接报错）。
+- 错误处理缺失：未发现（verify 失败转 LowerNnToKernelError）。
+- 状态污染：未发现（仅局部插入 alloc/copy/broadcast）。
+- 资源释放问题：未发现（IR 构造阶段无持久资源分配）。
+改进建议：未发现额外改进点。
+下一步建议：新建合并任务给李白。
