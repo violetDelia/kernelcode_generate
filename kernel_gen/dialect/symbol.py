@@ -1,14 +1,14 @@
 """Symbol dialect definitions.
 
 创建者: 金铲铲大作战
-最后一次更改: 我不是牛马
+最后一次更改: 小李飞刀
 
 功能说明:
 - 定义仅表示整数符号值语义的 symbol dialect。
 - 提供 `SymbolExprAttr`、`SymbolValueType`、`SymbolDimType`、`symbol.add/sub/mul/div/floordiv`、`symbol.eq/ne/lt/le/gt/ge`、`symbol.to_int/symbol.to_float` 与 `symbol.get_dim/get_stride` 查询 op，不区分 `int8/int64` 等整型宽度。
 
 使用示例:
-- from kernel_gen.dialect.symbol import Symbol, SymbolAddOp, SymbolDivOp, SymbolEqOp, SymbolFloorDivOp, SymbolSubOp, SymbolMulOp, SymbolToIntOp, SymbolExprAttr, SymbolGetDimOp, SymbolGetStrideOp, SymbolValueType
+- from kernel_gen.dialect.symbol import Symbol, SymbolAddOp, SymbolConstOp, SymbolDivOp, SymbolEqOp, SymbolFloorDivOp, SymbolSubOp, SymbolMulOp, SymbolToIntOp, SymbolExprAttr, SymbolGetDimOp, SymbolGetStrideOp, SymbolValueType
 
 关联文件:
 - spec: spec/dialect/symbol.md
@@ -1044,6 +1044,116 @@ class _BaseSymbolCompareOp(IRDLOperation):
 
 
 @irdl_op_definition
+class SymbolConstOp(IRDLOperation):
+    """创建 symbol.int 常量。"""
+
+    name = "symbol.const"
+
+    value = attr_def(IntAttr)
+    result = result_def(SymbolValueType)
+
+    def __init__(
+        self: "SymbolConstOp",
+        value: int | IntAttr,
+        result_type: SymbolValueType | None = None,
+    ) -> None:
+        """初始化 symbol.const。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 记录整数常量 attribute，并生成对应的 `!symbol.int<"...">` 结果类型。
+
+        使用示例:
+        - SymbolConstOp(3)
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        value_attr = value if isinstance(value, IntAttr) else IntAttr(value)
+        inferred_type = result_type or SymbolValueType.from_expr(str(value_attr.data))
+        super().__init__(result_types=[inferred_type], attributes={"value": value_attr})
+
+    def verify_(self: "SymbolConstOp") -> None:
+        """校验 symbol.const 的类型约束。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 校验 value 必须为整型 attribute。
+        - 校验 result 必须是 `!symbol.int<"...">`，且表达式与常量值一致。
+
+        使用示例:
+        - SymbolConstOp(3).verify_()
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        if not isinstance(self.value, IntAttr):
+            _raise_verify_error(f"{self.name} value must be integer attribute")
+        if not isinstance(self.result.type, SymbolValueType):
+            _raise_verify_error(f"{self.name} result type must be !symbol.int<\"expr\">")
+        expected_type = SymbolValueType.from_expr(str(self.value.data))
+        if self.result.type != expected_type:
+            _raise_verify_error(f"{self.name} result type must match value")
+
+    def print(self: "SymbolConstOp", printer: Printer) -> None:
+        """打印 symbol.const 自定义文本语法。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 输出 `symbol.const <value> : !symbol.int<"...">` 的文本形式。
+
+        使用示例:
+        - SymbolConstOp(3)
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        printer.print_string(" ")
+        printer.print_string(str(self.value.data))
+        printer.print_string(" : ")
+        printer.print_attribute(self.result.type)
+
+    @classmethod
+    def parse(cls: type["SymbolConstOp"], parser: AttrParser) -> "SymbolConstOp":
+        """解析 symbol.const 自定义文本语法。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 解析整数常量与 `!symbol.int<"...">` 结果类型。
+
+        使用示例:
+        - SymbolConstOp.parse(parser)
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        value = parser.parse_integer(allow_boolean=False, allow_negative=True, context_msg=f" in {cls.name}")
+        parser.parse_characters(":", f" in {cls.name}")
+        result_type = parser.parse_type()
+        return cls(value, result_type)
+
+
+@irdl_op_definition
 class SymbolAddOp(_BaseSymbolBinaryArithOp):
     """两个 symbol.int 值的整数加法。"""
 
@@ -1511,6 +1621,7 @@ class SymbolForOp(IRDLOperation):
 Symbol = Dialect(
     "symbol",
     [
+        SymbolConstOp,
         SymbolAddOp,
         SymbolSubOp,
         SymbolMulOp,
@@ -1539,6 +1650,7 @@ Symbol = Dialect(
 __all__ = [
     "Symbol",
     "SymbolAddOp",
+    "SymbolConstOp",
     "SymbolDivOp",
     "SymbolDimType",
     "SymbolEqOp",

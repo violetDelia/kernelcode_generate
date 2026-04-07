@@ -1,7 +1,7 @@
 """symbol dialect tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 symbol dialect 的整数符号 attribute/type、verifier、parse/print 与错误路径。
@@ -42,6 +42,7 @@ from kernel_gen.dialect.nn import Nn, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import (
     Symbol,
     SymbolAddOp,
+    SymbolConstOp,
     SymbolDivOp,
     SymbolEqOp,
     SymbolExprAttr,
@@ -238,6 +239,61 @@ def test_symbol_value_type_round_trip_for_integer_only_semantics() -> None:
         assert isinstance(ty, SymbolValueType)
         ty.verify()
         assert _print_attr(ty) == text
+
+
+# TC-SYM-049
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-07 23:59:00 +0800
+# 最近一次运行成功时间: 2026-04-07 23:59:00 +0800
+# 测试目的: 验证 symbol.const 生成匹配常量的 symbol.int 类型。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_const_op_verify_success() -> None:
+    op = SymbolConstOp(3)
+    op.verify()
+    assert _print_attr(op.result.type) == '!symbol.int<"3">'
+
+
+# TC-SYM-050
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-07 23:59:00 +0800
+# 最近一次运行成功时间: 2026-04-07 23:59:00 +0800
+# 测试目的: 验证 symbol.const 的 parse/print round-trip 稳定。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_const_op_round_trip() -> None:
+    ctx = _build_context()
+    module = Parser(
+        ctx,
+        """
+builtin.module {
+  %c0 = symbol.const 0 : !symbol.int<"0">
+  %c1 = symbol.const -4 : !symbol.int<"-4">
+}
+""",
+    ).parse_module()
+
+    module.verify()
+    printed = _print_op(module)
+    assert 'symbol.const 0 : !symbol.int<"0">' in printed
+    assert 'symbol.const -4 : !symbol.int<"-4">' in printed
+
+
+# TC-SYM-051
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-07 23:59:00 +0800
+# 最近一次运行成功时间: 2026-04-07 23:59:00 +0800
+# 测试目的: 验证 symbol.const 会拒绝不匹配的结果类型。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_const_op_rejects_mismatched_type() -> None:
+    with pytest.raises(VerifyException, match="result type must match value"):
+        SymbolConstOp(3, SymbolValueType.from_expr("4")).verify()
+    with pytest.raises(VerifyException, match="base attribute symbol.int"):
+        SymbolConstOp(3, i32).verify()
 
 
 # TC-SYM-013 / TC-SYM-014

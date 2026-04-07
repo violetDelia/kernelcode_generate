@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/dialect/symbol.md`](../../spec/dialect/symbol.md)
 - `test`：[`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)
 - `功能实现`：[`kernel_gen/dialect/symbol.py`](../../kernel_gen/dialect/symbol.py)
@@ -56,6 +56,7 @@
 - 当前仅定义 `symbol.to_int` 与 `symbol.to_float` 两类转换：`symbol.to_int` 将 `!symbol.int<"...">` 转为普通整型（覆盖各整型变体），`symbol.to_float` 将 `!symbol.int<"...">` 转为 `f32`；不定义反向转换或其他跨类型规则。
 - `symbol.ne` / `symbol.lt` / `symbol.le` / `symbol.gt` 属于同一 compare family：统一采用二元 `!symbol.int<"...">, !symbol.int<"..."> -> i1` 签名、统一 verifier 约束与统一 parse/print 规则，不能拆成互不一致的四套合同。
 - 当前不在 `symbol dialect` 中定义 `ptr.load`、`ptr.store`、pointer arithmetic、pointer compare、address cast 或任何基于 `symbol.ptr` 的 body-level 计算 op。
+- `symbol.const` 只用于生成整数常量的 `!symbol.int<"...">`，不承载其他类型或宽度。
 
 ## 公开接口
 
@@ -277,6 +278,36 @@ SymbolPtrType(f32)
 
 - 返回类型：归属规则定义。
 - 限制：只定义 memory 元信息中的单值整型 symbol 语义，不定义 memory 容器、memory type 或 memory space。
+
+### `symbol.const`
+
+功能说明：
+
+- 定义整数常量进入 `symbol dialect` 的最小 op。
+- 以整数 attribute 记录常量值，并输出对应的 `!symbol.int<"...">` 结果类型。
+
+参数说明：
+
+- `value(integer)`：整数常量。
+- `result_type(type)`：结果类型，必须为 `!symbol.int<"...">`。
+
+使用示例：
+
+```text
+%one = symbol.const 1 : !symbol.int<"1">
+%neg = symbol.const -4 : !symbol.int<"-4">
+```
+
+注意事项：
+
+- `value` 必须是整数 attribute；不接受布尔值或浮点值。
+- 结果类型必须为 `!symbol.int<"...">`，且表达式内容必须与常量值一致。
+- parse/print 必须稳定遵循 `symbol.const <value> : !symbol.int<"...">` 的公开文本形式。
+
+返回与限制：
+
+- 返回类型：`!symbol.int<"value">`
+- 限制：仅用于生成整数常量，不承载其他类型或宽度。
 
 ### `symbol.add` / `symbol.sub` / `symbol.mul` / `symbol.div` / `symbol.floordiv`
 
@@ -561,6 +592,7 @@ symbol.for %i = %start to %end step %step
 - 验证 `symbol.get_dim` / `symbol.get_stride` 的错误路径，包括非 memory type、轴号越界、匿名动态条目 `?` 与非法轴号。
 - 验证 `symbol.for` 的半开区间循环语义、`!symbol.int<"...">` 类型约束、parse/print 稳定性与 verifier 错误路径。
 - 验证 `symbol.for` 的迭代变量 `it` 必须为 `SymbolValueType`，不能是浮点、builtin 整数或其他非 `!symbol.int<"...">` 类型。
+- 验证 `symbol.const` 生成常量的 `!symbol.int<"...">` 结果类型、parse/print 稳定性与结果类型一致性错误路径。
 
 ### 功能与用例清单
 
@@ -614,3 +646,6 @@ symbol.for %i = %start to %end step %step
 | TC-SYM-046 | `SymbolPtrType` | parse/print 稳定 | 已实现 `!symbol.ptr<dtype>` 文本语法 | parse 后再 print | pointer type 文本稳定 round-trip | `test_symbol_ptr_type_round_trip` |
 | TC-SYM-047 | `SymbolPtrType` | symbol.int 作为 dtype 非法 | `dtype` 为 `!symbol.int<"...">` | 构造并校验 `SymbolPtrType(SymbolValueType.from_expr("N"))` | verifier 报错 | `test_symbol_ptr_type_rejects_symbol_value_dtype` |
 | TC-SYM-048 | `SymbolPtrType` | 非 type attribute 非法 | `dtype` 不是 `TypeAttribute` | 构造并校验 `SymbolPtrType` | verifier 报错 | `test_symbol_ptr_type_rejects_non_type_dtype` |
+| TC-SYM-049 | `symbol.const` | 基础常量合法路径 | 无 | 构造 `symbol.const` | verifier 通过；返回 `!symbol.int<"...">` | `test_symbol_const_op_verify_success` |
+| TC-SYM-050 | `symbol.const` | parse/print 稳定 | 已实现公开文本语法 | parse 后再 print | 文本与结果类型稳定 | `test_symbol_const_op_round_trip` |
+| TC-SYM-051 | `symbol.const` | 结果类型不匹配 | 结果类型不是或不匹配 `!symbol.int<"...">` | 构造并校验 op | verifier 报错 | `test_symbol_const_op_rejects_mismatched_type` |
