@@ -298,6 +298,48 @@ def _build_alloc_dynamic_shape_from_result(
     return ops, operands
 
 
+def _ensure_contiguous_result_stride(result_type: NnMemoryType) -> None:
+    """校验结果 stride 在静态形状下满足连续布局。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅在 shape/stride 均为静态整数时进行连续性校验。
+    - 若 stride 不满足行主序连续布局，抛出明确错误。
+
+    使用示例:
+    - _ensure_contiguous_result_stride(result_type)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    shape_dims: list[int] = []
+    for dim in result_type.shape.data:
+        if not isinstance(dim, IntAttr):
+            return
+        shape_dims.append(dim.data)
+
+    stride_dims: list[int] = []
+    for dim in result_type.stride.data:
+        if not isinstance(dim, IntAttr):
+            return
+        stride_dims.append(dim.data)
+
+    expected: list[int] = []
+    running = 1
+    for dim in reversed(shape_dims):
+        expected.append(running)
+        running *= dim
+    expected.reverse()
+
+    if stride_dims != expected:
+        raise LowerNnToKernelError("dma.alloc requires contiguous result stride")
+
+
 def _select_shape_source(op: Operation) -> SSAValue:
     """选择用于生成 dynamic_shape 的 memory operand。
 
@@ -510,6 +552,7 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
     result_type = _ensure_single_result(op)
     space = _ensure_space_attr(op)
 
+    _ensure_contiguous_result_stride(result_type)
     shape_source = _select_shape_source(op)
     shape_ops, dynamic_shape = _build_alloc_dynamic_shape(shape_source, result_type)
     alloc = DmaAllocOp(dynamic_shape, result_type)

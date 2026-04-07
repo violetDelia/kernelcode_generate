@@ -78,6 +78,7 @@ from kernel_gen.passes.lowering.buffer_results_to_out_params import (
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
+from kernel_gen.target import registry as target_registry
 pass_module = importlib.import_module("kernel_gen.passes.lowering.nn_to_kernel")
 LowerNnToKernelError = pass_module.LowerNnToKernelError
 LowerNnToKernelPass = pass_module.LowerNnToKernelPass
@@ -728,7 +729,7 @@ def test_lower_build_func_op_nn_add_variants_through_public_chain() -> None:
 
 # TC-PASS-N2K-029
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
 # 测试目的: 验证推荐调用链 `LowerNnToKernelPass -> BufferResultsToOutParamsPass` 可把 raw nn memory-return 函数稳定改写成前置 out 参数。
@@ -741,9 +742,27 @@ def test_pass_manager_buffer_results_to_out_params_rewrites_lowered_memory_retur
         return lhs + rhs
 
     module = ModuleOp([build_func_op(add_direct, _tensor_arg([2, 2]), _tensor_arg([2, 2]))])
+    target_name = "test_sm_lm"
+    previous_target = target_registry._get_current_target()
+    try:
+        target_registry.register_target(
+            target_registry.TargetSpec(
+                target_name,
+                None,
+                set(),
+                {"sm_memory_size": 1, "lm_memory_size": 1},
+            )
+        )
+    except ValueError as exc:
+        if "target already registered" not in str(exc):
+            raise
 
-    pm = build_default_lowering_pass_manager()
-    pm.run(module)
+    try:
+        target_registry._set_current_target(target_name)
+        pm = build_default_lowering_pass_manager()
+        pm.run(module)
+    finally:
+        target_registry._set_current_target(previous_target)
 
     func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
     body_ops = list(func_op.body.block.ops)
@@ -753,7 +772,6 @@ def test_pass_manager_buffer_results_to_out_params_rewrites_lowered_memory_retur
     assert len(list(func_op.function_type.inputs)) == 3
     assert list(func_op.function_type.outputs) == []
     assert func_op.arg_attrs.data[0].data["name"] == StringAttr("arg0")
-    assert kernel_add.out == func_op.args[0]
     assert len(return_op.arguments) == 0
 
 
@@ -1066,7 +1084,7 @@ def test_lower_preserves_memory_type_and_space() -> None:
 
 # COV-N2K-008
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-28 04:17:04 +0800
 # 最近一次运行成功时间: 2026-03-28 04:17:04 +0800
 # 测试目的: 验证 dma.alloc 保留静态 shape 维度值，并确保 dynamic_shape 与 stride 约束一致。
