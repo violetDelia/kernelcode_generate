@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`摸鱼小分队`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/dialect/nn.md`](../../spec/dialect/nn.md)
 - `功能实现`：[`kernel_gen/dialect/nn.py`](../../kernel_gen/dialect/nn.py)
 - `test`：[`test/dialect/test_nn_dialect.py`](../../test/dialect/test_nn_dialect.py)
@@ -37,6 +37,7 @@
 - `nn.img2col1d/img2col2d` 仅定义 operand/attribute/result/verifier 合同，不在方言层重复上游 `operation/nn` 的 shape/stride 公式与错误边界全文。
 - 上游 `fc/conv` 在方言层不定义独立 op，进入 `nn dialect` 后下沉为 `nn.matmul` / `nn.img2col1d` / `nn.img2col2d` 的组合与约束。
 - `nn.softmax` 在方言层只定义 `input/result/axis/space` 的结构化合同；`axis=-1` 默认值、负轴归一化与数值稳定公式属于上游 `operation/nn` 语义，不在方言层重复展开。
+- `nn.softmax` 仍然是合法输入 op；默认 lowering 链通过 `DecomposeNnSoftmaxPass`（见 [`spec/pass/lowering/decompose_nn_softmax.md`](../../spec/pass/lowering/decompose_nn_softmax.md)）把 `nn.softmax` 分解成可继续 lowering 的 `nn` 链路，方言层不负责自动分解。
 - `NnMemorySpaceAttr` 仅允许 `global/shared/local/tsm/tlm` 五种取值。
 - `NnMemoryType.space` 与各 op 的 `space` attribute 必须使用同一语义口径。
 - `NnMemoryType` 中 `shape` 与 `stride` 的 rank 必须一致；每一维支持静态整数、符号或 `?`。

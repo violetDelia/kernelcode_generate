@@ -104,7 +104,7 @@ def build_default_lowering_pass_manager(name: str | None = "lowering") -> "PassM
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 固定注册 `LowerNnToKernelPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass` 顺序。
+    - 固定注册 `DecomposeNnSoftmaxPass -> LowerNnToKernelPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass` 顺序。
     - 为推荐调用链与黑盒测试提供统一入口，避免各处手工拼装顺序不一致。
 
     使用示例:
@@ -122,8 +122,10 @@ def build_default_lowering_pass_manager(name: str | None = "lowering") -> "PassM
         LowerDmaMemoryHierarchyPass,
         LowerNnToKernelPass,
     )
+    from .lowering.decompose_nn_softmax import DecomposeNnSoftmaxPass
 
     pm = PassManager(name=name)
+    pm.add_pass(DecomposeNnSoftmaxPass())
     pm.add_pass(LowerNnToKernelPass())
     pm.add_pass(BufferResultsToOutParamsPass())
     pm.add_pass(LowerDmaMemoryHierarchyPass())
