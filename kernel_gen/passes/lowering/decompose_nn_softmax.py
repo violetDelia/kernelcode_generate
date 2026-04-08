@@ -1,7 +1,7 @@
 """nn.softmax decompose pass。
 
 创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 将 `func.func` 内的 `nn.softmax` 固定展开为 `nn.reduce_max -> nn.broadcast -> nn.sub -> nn.exp -> nn.reduce_sum -> nn.broadcast -> nn.truediv`。
@@ -41,11 +41,41 @@ from ..pass_manager import Pass
 
 
 class DecomposeNnSoftmaxError(ValueError):
-    """`decompose-nn-softmax` pass 的显式错误。"""
+    """`decompose-nn-softmax` pass 的显式错误。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 用于输出可机械匹配的错误短语，避免吞掉具体错误入口。
+
+    使用示例:
+    - raise DecomposeNnSoftmaxError("DecomposeNnSoftmaxError: normalized axis out of range")
+
+    关联文件:
+    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - test: test/pass/test_decompose_nn_softmax.py
+    - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
+    """
 
 
 def _attr_product(factors: Sequence[Attribute]) -> Attribute:
-    """把一组 shape 因子规整为 stride attribute。"""
+    """把一组 shape 因子规整为 stride attribute。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 支持 IntAttr 与 StringAttr 组合，确保 stride 构造过程可处理符号维度。
+
+    使用示例:
+    - _ = _attr_product([IntAttr(2), StringAttr("B")])
+
+    关联文件:
+    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - test: test/pass/test_decompose_nn_softmax.py
+    - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
+    """
 
     int_product = 1
     expr_parts: list[str] = []
@@ -73,7 +103,22 @@ def _attr_product(factors: Sequence[Attribute]) -> Attribute:
 
 
 def _build_contiguous_stride(shape: Sequence[Attribute]) -> ArrayAttr[Attribute]:
-    """按 shape 生成连续布局 stride。"""
+    """按 shape 生成连续布局 stride。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 以紧致布局规则生成 stride，满足 keepdim=true 的 reduce 输出要求。
+
+    使用示例:
+    - _ = _build_contiguous_stride([IntAttr(2), IntAttr(3)])
+
+    关联文件:
+    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - test: test/pass/test_decompose_nn_softmax.py
+    - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
+    """
 
     suffix_factors: list[Attribute] = []
     strides: list[Attribute] = []
@@ -85,7 +130,22 @@ def _build_contiguous_stride(shape: Sequence[Attribute]) -> ArrayAttr[Attribute]
 
 
 def _build_reduce_result_type(input_type: NnMemoryType, axis: int) -> NnMemoryType:
-    """构造 keepdim=true 的 reduce 结果类型。"""
+    """构造 keepdim=true 的 reduce 结果类型。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 把指定 axis 的 shape 维度改成 1，并生成对应连续布局 stride。
+
+    使用示例:
+    - _ = _build_reduce_result_type(input_type, axis=1)
+
+    关联文件:
+    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - test: test/pass/test_decompose_nn_softmax.py
+    - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
+    """
 
     result_shape = list(input_type.shape.data)
     result_shape[axis] = IntAttr(1)
@@ -98,7 +158,22 @@ def _build_reduce_result_type(input_type: NnMemoryType, axis: int) -> NnMemoryTy
 
 
 def _normalize_axis(axis: int, rank: int) -> int:
-    """把 softmax axis 规整为非负下标。"""
+    """把 softmax axis 规整为非负下标。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 对负轴执行 rank + axis 规整，并在越界时抛出固定错误短语。
+
+    使用示例:
+    - assert _normalize_axis(-1, 3) == 2
+
+    关联文件:
+    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - test: test/pass/test_decompose_nn_softmax.py
+    - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
+    """
 
     normalized = axis if axis >= 0 else rank + axis
     if normalized < 0 or normalized >= rank:
@@ -107,7 +182,22 @@ def _normalize_axis(axis: int, rank: int) -> int:
 
 
 def _ensure_operand_and_result_types(op: NnSoftmaxOp) -> tuple[NnMemoryType, NnMemoryType]:
-    """校验 softmax operand/result 基础类型。"""
+    """校验 softmax operand/result 基础类型。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 确保 operand/result 都为 nn.memory，避免对非法类型继续生成分解链。
+
+    使用示例:
+    - _ = _ensure_operand_and_result_types(softmax_op)
+
+    关联文件:
+    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - test: test/pass/test_decompose_nn_softmax.py
+    - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
+    """
 
     input_type = op.input.type
     result_type = op.result.type
@@ -119,7 +209,22 @@ def _ensure_operand_and_result_types(op: NnSoftmaxOp) -> tuple[NnMemoryType, NnM
 
 
 def _ensure_softmax_result_matches_input(op: NnSoftmaxOp) -> tuple[NnMemoryType, NnMemoryType]:
-    """校验 softmax 结果类型与输入 shape/stride 一致。"""
+    """校验 softmax 结果类型与输入 shape/stride 一致。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 软约束 softmax 输出类型与输入一致，避免产生半合法 IR。
+
+    使用示例:
+    - _ = _ensure_softmax_result_matches_input(softmax_op)
+
+    关联文件:
+    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - test: test/pass/test_decompose_nn_softmax.py
+    - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
+    """
 
     input_type, result_type = _ensure_operand_and_result_types(op)
     if input_type.shape != result_type.shape or input_type.stride != result_type.stride:
@@ -130,7 +235,22 @@ def _ensure_softmax_result_matches_input(op: NnSoftmaxOp) -> tuple[NnMemoryType,
 
 
 def _verify_new_ops(ops: Sequence[Operation]) -> None:
-    """逐个验证新生成的分解 op。"""
+    """逐个验证新生成的分解 op。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 使用方言 verifier 校验新 op，失败时转为 DecomposeNnSoftmaxError。
+
+    使用示例:
+    - _verify_new_ops([max_op, exp_op])
+
+    关联文件:
+    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - test: test/pass/test_decompose_nn_softmax.py
+    - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
+    """
 
     for op in ops:
         try:
@@ -140,7 +260,23 @@ def _verify_new_ops(ops: Sequence[Operation]) -> None:
 
 
 def _decompose_softmax_op(op: NnSoftmaxOp, block: Block) -> None:
-    """把单个 `nn.softmax` 展开为固定 7 段链。"""
+    """把单个 `nn.softmax` 展开为固定 7 段链。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 按固定顺序生成 reduce_max/broadcast/sub/exp/reduce_sum/broadcast/truediv。
+    - 替换原 softmax 结果并移除原 op。
+
+    使用示例:
+    - _decompose_softmax_op(softmax_op, block)
+
+    关联文件:
+    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - test: test/pass/test_decompose_nn_softmax.py
+    - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
+    """
 
     input_type, result_type = _ensure_softmax_result_matches_input(op)
     rank = len(input_type.shape.data)
@@ -163,7 +299,22 @@ def _decompose_softmax_op(op: NnSoftmaxOp, block: Block) -> None:
 
 
 def _decompose_block(block: Block) -> None:
-    """递归处理 block 内部全部 softmax。"""
+    """递归处理 block 内部全部 softmax。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 对 block 内 op 递归处理 region，并替换命中的 softmax。
+
+    使用示例:
+    - _decompose_block(block)
+
+    关联文件:
+    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - test: test/pass/test_decompose_nn_softmax.py
+    - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
+    """
 
     for op in list(block.ops):
         for region in op.regions:
@@ -173,14 +324,44 @@ def _decompose_block(block: Block) -> None:
 
 
 def _decompose_region(region: Region) -> None:
-    """递归处理 region。"""
+    """递归处理 region。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 遍历 region 内 block，调用 block 级分解。
+
+    使用示例:
+    - _decompose_region(region)
+
+    关联文件:
+    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - test: test/pass/test_decompose_nn_softmax.py
+    - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
+    """
 
     for block in region.blocks:
         _decompose_block(block)
 
 
 def _decompose_module(module: ModuleOp) -> None:
-    """仅在 `func.func` 内执行 softmax 分解。"""
+    """仅在 `func.func` 内执行 softmax 分解。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 限定 pass 只处理 func.func 内的 softmax，避免影响其他方言结构。
+
+    使用示例:
+    - _decompose_module(module)
+
+    关联文件:
+    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - test: test/pass/test_decompose_nn_softmax.py
+    - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
+    """
 
     for op in module.ops:
         if isinstance(op, func.FuncOp):
@@ -188,12 +369,42 @@ def _decompose_module(module: ModuleOp) -> None:
 
 
 class DecomposeNnSoftmaxPass(Pass):
-    """把 `nn.softmax` 分解为固定 7 段 `nn` 方言链。"""
+    """把 `nn.softmax` 分解为固定 7 段 `nn` 方言链。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 在 ModuleOp 的 func.func 内识别 nn.softmax，并替换为固定分解链。
+
+    使用示例:
+    - module = DecomposeNnSoftmaxPass().run(module)
+
+    关联文件:
+    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - test: test/pass/test_decompose_nn_softmax.py
+    - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
+    """
 
     name = "decompose-nn-softmax"
 
     def run(self: "DecomposeNnSoftmaxPass", module: Operation) -> Operation:
-        """执行 `decompose-nn-softmax` pass。"""
+        """执行 `decompose-nn-softmax` pass。
+
+        创建者: jcc你莫辜负
+        最后一次更改: jcc你莫辜负
+
+        功能说明:
+        - 校验 module 类型，随后执行 softmax 分解。
+
+        使用示例:
+        - _ = DecomposeNnSoftmaxPass().run(module)
+
+        关联文件:
+        - spec: spec/pass/lowering/decompose_nn_softmax.md
+        - test: test/pass/test_decompose_nn_softmax.py
+        - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
+        """
 
         if not isinstance(module, ModuleOp):
             raise DecomposeNnSoftmaxError("DecomposeNnSoftmaxError: module must be builtin.module")

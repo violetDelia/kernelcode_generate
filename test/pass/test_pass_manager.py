@@ -1,7 +1,7 @@
 """pass_manager tests.
 
 创建者: 李白
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 覆盖 kernel_gen/passes/pass_manager.py 的 Pass 管理行为。
@@ -606,3 +606,51 @@ def test_pass_manager_rejects_symbol_loop_hoist_after_dma_memory_hierarchy() -> 
     pm.add_pass(SymbolLoopHoistPass())
     with pytest.raises(ValueError, match="SymbolLoopHoistRequiresSymbolFor"):
         pm.run(object())
+
+
+# TC-PASS-018
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-08 10:19:36 +0800
+# 最近一次运行成功时间: 2026-04-08 10:19:36 +0800
+# 功能说明: 验证 lowering 管理器可前置 decompose-nn-softmax，并与后续 pass 顺序协同。
+# 测试目的: 保障 decompose-nn-softmax 能与 lower-nn-to-kernel 与 buffer-results-to-out-params 正常串联。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_allows_decompose_nn_softmax_before_lowering
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
+# 对应 spec 文件路径: spec/pass/pass_manager.md
+# 对应测试文件路径: test/pass/test_pass_manager.py
+def test_pass_manager_allows_decompose_nn_softmax_before_lowering() -> None:
+    class DecomposeSoftmaxPass(Pass):
+        name = "decompose-nn-softmax"
+
+        def run(self: "DecomposeSoftmaxPass", target: object) -> object:
+            order.append("decompose-nn-softmax")
+            return target
+
+    class LowerNnToKernelPass(Pass):
+        name = "lower-nn-to-kernel"
+
+        def run(self: "LowerNnToKernelPass", target: object) -> object:
+            order.append("lower-nn-to-kernel")
+            return target
+
+    class BufferResultsToOutParamsPass(Pass):
+        name = "buffer-results-to-out-params"
+
+        def run(self: "BufferResultsToOutParamsPass", target: object) -> object:
+            order.append("buffer-results-to-out-params")
+            return target
+
+    order: list[str] = []
+    pm = PassManager(name="lowering-with-softmax")
+    pm.add_pass(DecomposeSoftmaxPass())
+    pm.add_pass(LowerNnToKernelPass())
+    pm.add_pass(BufferResultsToOutParamsPass())
+
+    sentinel = object()
+    assert pm.run(sentinel) is sentinel
+    assert order == [
+        "decompose-nn-softmax",
+        "lower-nn-to-kernel",
+        "buffer-results-to-out-params",
+    ]
