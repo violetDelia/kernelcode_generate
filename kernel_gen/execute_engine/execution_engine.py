@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Any, Callable, Literal, TypeAlias
 
 from kernel_gen.execute_engine.compiler import (
@@ -93,6 +94,38 @@ def _source_include_family(source: str) -> str | None:
     if has_npu:
         return "npu_demo"
     return None
+
+
+def _inject_npu_demo_namespace_aliases(source: str) -> str:
+    """为 `npu_demo::foo` 生成最小命名空间别名，兼容全局实现。
+
+    创建者: 守护最好的爱莉希雅
+    最后一次更改: 守护最好的爱莉希雅
+
+    功能说明:
+    - 识别源码中的 `npu_demo::` 调用，并注入 `namespace npu_demo { using ::foo; }` 别名。
+    - 解决 `emit_c` 使用命名空间调用、但头文件只提供全局符号时的真实编译失败。
+
+    使用示例:
+    - _inject_npu_demo_namespace_aliases('#include "include/npu_demo/npu_demo.h"\\nvoid f(){ npu_demo::add(a,b,c); }')
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_target.md
+    - test: test/execute_engine/test_execute_engine_compile.py
+    - 功能实现: kernel_gen/execute_engine/execution_engine.py
+    """
+
+    symbols = sorted(set(re.findall(r"npu_demo::([A-Za-z_]\w*)\s*\(", source)))
+    if not symbols:
+        return source
+    alias_lines = ["namespace npu_demo {"]
+    alias_lines.extend(f"using ::{symbol};" for symbol in symbols)
+    alias_lines.append("}")
+    alias_block = "\n".join(alias_lines) + "\n"
+    include_match = re.match(r"((?:\s*#include[^\n]*\n)+)", source)
+    if include_match is not None:
+        return f"{source[:include_match.end()]}\n{alias_block}{source[include_match.end():]}"
+    return f"{alias_block}\n{source}"
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -321,9 +354,17 @@ def _normalize_stride(value: object) -> tuple[int, ...] | None:
     if hasattr(value, "strides"):
         stride = getattr(value, "strides")
         try:
-            return tuple(int(dim) for dim in stride)
+            stride_tuple = tuple(int(dim) for dim in stride)
         except TypeError:
             return None
+        if _is_numpy_array(value):
+            itemsize = getattr(value, "itemsize", None)
+            if not isinstance(itemsize, int) or itemsize <= 0:
+                return None
+            if any(dim % itemsize != 0 for dim in stride_tuple):
+                return None
+            return tuple(int(dim // itemsize) for dim in stride_tuple)
+        return stride_tuple
     return None
 
 
@@ -576,15 +617,174 @@ def _build_arg_slots(args: tuple[RuntimeArg, ...]) -> tuple[KgArgSlot, ...]:
     return tuple(slots)
 
 
+def _contiguous_stride(shape: tuple[int, ...]) -> tuple[int, ...]:
+    """按 shape 生成连续布局 stride（元素步长）。
+
+    创建者: 守护最好的爱莉希雅
+    最后一次更改: 守护最好的爱莉希雅
+
+    功能说明:
+    - 当运行时参数未显式提供 stride 时，生成行主序连续 stride。
+    - 用于 memory 参数 ABI 封送前的兜底补全。
+
+    使用示例:
+    - _contiguous_stride((2, 3)) == (3, 1)
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_api.md
+    - test: test/execute_engine/test_execute_engine_invoke.py
+    - 功能实现: kernel_gen/execute_engine/execution_engine.py
+    """
+
+    if not shape:
+        return ()
+    stride = [1 for _ in shape]
+    for idx in range(len(shape) - 2, -1, -1):
+        stride[idx] = stride[idx + 1] * int(shape[idx + 1])
+    return tuple(stride)
+
+
+def _runtime_data_pointer(value: object) -> int:
+    """读取 RuntimeArg 底层数据指针地址。
+
+    创建者: 守护最好的爱莉希雅
+    最后一次更改: 守护最好的爱莉希雅
+
+    功能说明:
+    - 对 `torch.Tensor` 使用 `data_ptr()`，对 `numpy.ndarray` 使用 `ctypes.data`。
+    - 不支持的对象触发 `runtime_throw_or_abort`。
+
+    使用示例:
+    - _runtime_data_pointer(torch.zeros((2,), dtype=torch.int32))
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_api.md
+    - test: test/execute_engine/test_execute_engine_invoke.py
+    - 功能实现: kernel_gen/execute_engine/execution_engine.py
+    """
+
+    if _is_torch_tensor(value) and hasattr(value, "data_ptr"):
+        data_ptr = value.data_ptr()
+        return int(data_ptr)
+    if _is_numpy_array(value) and hasattr(value, "ctypes"):
+        return int(value.ctypes.data)
+    raise ExecutionEngineError(
+        FAILURE_RUNTIME_THROW_OR_ABORT,
+        "memory arg data pointer is unavailable",
+    )
+
+
+def _marshal_slots_for_abi(
+    ordered_slots: tuple[KgArgSlot, ...],
+) -> tuple[object, type[object], tuple[object, ...]]:
+    """把 Python `KgArgSlot` 转为 C ABI 可调用结构。
+
+    创建者: 守护最好的爱莉希雅
+    最后一次更改: 守护最好的爱莉希雅
+
+    功能说明:
+    - 将 memory/int/float 三类运行参数封送为 `KgArgSlot` C 结构数组。
+    - 返回 keepalive 对象集合，保证 shape/stride 缓冲区在调用期间有效。
+
+    使用示例:
+    - _marshal_slots_for_abi(_build_arg_slots((1, 2.0)))
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_api.md
+    - test: test/execute_engine/test_execute_engine_invoke.py
+    - 功能实现: kernel_gen/execute_engine/execution_engine.py
+    """
+
+    import ctypes
+
+    class _CKgArgSlot(ctypes.Structure):
+        _fields_ = [
+            ("kind", ctypes.c_int),
+            ("data", ctypes.c_void_p),
+            ("shape", ctypes.POINTER(ctypes.c_longlong)),
+            ("stride", ctypes.POINTER(ctypes.c_longlong)),
+            ("rank", ctypes.c_ulonglong),
+            ("int_value", ctypes.c_longlong),
+            ("float_value", ctypes.c_double),
+        ]
+
+    c_slots: list[_CKgArgSlot] = []
+    keepalive: list[object] = []
+    for slot in ordered_slots:
+        if slot.kind == "memory":
+            if slot.shape is None:
+                raise ExecutionEngineError(
+                    FAILURE_RUNTIME_THROW_OR_ABORT,
+                    f"memory shape missing at position {slot.position}",
+                )
+            stride = slot.stride if slot.stride is not None else _contiguous_stride(slot.shape)
+            if len(stride) != len(slot.shape):
+                raise ExecutionEngineError(
+                    FAILURE_RUNTIME_THROW_OR_ABORT,
+                    f"memory stride rank mismatch at position {slot.position}",
+                )
+            shape_buffer_type = ctypes.c_longlong * len(slot.shape)
+            stride_buffer_type = ctypes.c_longlong * len(stride)
+            shape_buffer = shape_buffer_type(*slot.shape)
+            stride_buffer = stride_buffer_type(*stride)
+            keepalive.extend([shape_buffer, stride_buffer])
+            c_slots.append(
+                _CKgArgSlot(
+                    kind=1,
+                    data=ctypes.c_void_p(_runtime_data_pointer(slot.value)),
+                    shape=ctypes.cast(shape_buffer, ctypes.POINTER(ctypes.c_longlong)),
+                    stride=ctypes.cast(stride_buffer, ctypes.POINTER(ctypes.c_longlong)),
+                    rank=ctypes.c_ulonglong(len(slot.shape)),
+                    int_value=ctypes.c_longlong(0),
+                    float_value=ctypes.c_double(0.0),
+                )
+            )
+            continue
+        if slot.kind == "int":
+            c_slots.append(
+                _CKgArgSlot(
+                    kind=2,
+                    data=ctypes.c_void_p(0),
+                    shape=ctypes.POINTER(ctypes.c_longlong)(),
+                    stride=ctypes.POINTER(ctypes.c_longlong)(),
+                    rank=ctypes.c_ulonglong(0),
+                    int_value=ctypes.c_longlong(int(slot.value)),
+                    float_value=ctypes.c_double(0.0),
+                )
+            )
+            continue
+        if slot.kind == "float":
+            c_slots.append(
+                _CKgArgSlot(
+                    kind=3,
+                    data=ctypes.c_void_p(0),
+                    shape=ctypes.POINTER(ctypes.c_longlong)(),
+                    stride=ctypes.POINTER(ctypes.c_longlong)(),
+                    rank=ctypes.c_ulonglong(0),
+                    int_value=ctypes.c_longlong(0),
+                    float_value=ctypes.c_double(float(slot.value)),
+                )
+            )
+            continue
+        raise ExecutionEngineError(
+            FAILURE_RUNTIME_THROW_OR_ABORT,
+            f"unsupported slot kind at position {slot.position}",
+        )
+    slot_array_type = _CKgArgSlot * len(c_slots)
+    slot_array = slot_array_type(*c_slots)
+    keepalive.append(slot_array)
+    return (slot_array, _CKgArgSlot, tuple(keepalive))
+
+
 def _load_entry_point(soname_path: str, entry_point: str) -> Callable[[tuple[KgArgSlot, ...]], int]:
-    """加载 entry point 并返回可调用对象（P0/S3 占位）。
+    """加载 entry point 并返回可调用对象（P0/S3）。
 
     创建者: jcc你莫辜负
     最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 以 soname_path + entry_point 的最小约束模拟动态加载。
-    - 当前仅验证 soname_path 存在，返回固定成功占位函数。
+    - 对真实 `.so` 执行动态加载，并把 Python 槽位转换为 C ABI 参数后调用入口。
+    - 对 dry-run 生成的空产物，保留历史占位成功行为，避免破坏骨架测试。
 
     使用示例:
     - invoke = _load_entry_point("libkernel.so", "kg_execute_entry")
@@ -601,14 +801,41 @@ def _load_entry_point(soname_path: str, entry_point: str) -> Callable[[tuple[KgA
             FAILURE_RUNTIME_THROW_OR_ABORT,
             "soname_path is empty",
         )
-    if not Path(soname_path).is_file():
+    soname = Path(soname_path)
+    if not soname.is_file():
         raise ExecutionEngineError(
             FAILURE_RUNTIME_THROW_OR_ABORT,
             "soname_path is missing",
         )
+    if soname.stat().st_size == 0:
+        def _invoke_placeholder(_slots: tuple[KgArgSlot, ...]) -> int:
+            return 0
 
-    def _invoke(_slots: tuple[KgArgSlot, ...]) -> int:
-        return 0
+        return _invoke_placeholder
+
+    import ctypes
+    try:
+        library = ctypes.CDLL(str(soname))
+    except OSError as exc:
+        raise ExecutionEngineError(
+            FAILURE_SYMBOL_RESOLVE_FAILED,
+            f"unable to load shared object: {exc}",
+        ) from exc
+    try:
+        symbol = getattr(library, entry_point)
+    except AttributeError as exc:
+        raise ExecutionEngineError(
+            FAILURE_SYMBOL_RESOLVE_FAILED,
+            f"entry_point '{entry_point}' is missing",
+        ) from exc
+
+    def _invoke(ordered_slots: tuple[KgArgSlot, ...]) -> int:
+        slot_array, slot_struct, keepalive = _marshal_slots_for_abi(ordered_slots)
+        symbol.argtypes = [ctypes.POINTER(slot_struct), ctypes.c_ulonglong]
+        symbol.restype = ctypes.c_int
+        result = int(symbol(slot_array, ctypes.c_ulonglong(len(ordered_slots))))
+        _ = keepalive
+        return result
 
     return _invoke
 
@@ -748,7 +975,7 @@ class ExecutionEngine:
 
         功能说明:
         - S2 阶段固定编译路径拼装：target include 选择 -> entry shim -> 编译命令生成 -> CompiledKernel。
-        - S2 默认以 dry-run 方式生成编译命令与占位产物，不执行真实编译。
+        - `target=cpu` 保持 dry-run；`target=npu_demo` 走真实编译，支持 expectation 真执行。
         - 保持公共失败短语：
           - `target_header_mismatch`
           - `source_empty_or_invalid`
@@ -827,19 +1054,22 @@ class ExecutionEngine:
             shim_source = build_entry_shim_source(
                 function=function,
                 entry_point=entry_point,
+                source=source,
             )
         compile_unit = build_compile_unit(
             source=source,
             target_includes=target_headers,
             entry_shim_source=shim_source,
         )
+        if target == "npu_demo":
+            compile_unit = _inject_npu_demo_namespace_aliases(compile_unit)
         artifacts = compile_source(
             source=compile_unit,
             compiler=compiler,
             compiler_flags=compiler_flags,
             link_flags=link_flags,
             include_dirs=(str(REPO_ROOT),),
-            dry_run=True,
+            dry_run=(target == "cpu"),
         )
         if artifacts.return_code != 0:
             raise ExecutionEngineError(
