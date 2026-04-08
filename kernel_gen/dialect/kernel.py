@@ -1,7 +1,7 @@
 """Kernel dialect definitions.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 定义 kernel dialect 的逐元素算术、比较、选择、指数与类型转换 op。
@@ -21,7 +21,16 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
-from xdsl.dialects.builtin import BFloat16Type, Float16Type, Float32Type, Float64Type, IntegerType, i1
+from xdsl.dialects.builtin import (
+    BFloat16Type,
+    Float16Type,
+    Float32Type,
+    Float64Type,
+    IntAttr,
+    IntegerAttr,
+    IntegerType,
+    i1,
+)
 from xdsl.ir import Attribute, Dialect, Operation, SSAValue
 from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def
 from xdsl.utils.exceptions import VerifyException
@@ -237,6 +246,86 @@ def _is_cast_element_type(value: Attribute) -> bool:
     if isinstance(value, IntegerType):
         return value.width.data != 1
     return isinstance(value, (Float16Type, Float32Type, Float64Type))
+
+
+def _normalize_i64_attr(value: int | IntegerAttr | IntAttr, field_name: str) -> IntegerAttr:
+    """将数值规整为 i64 IntegerAttr。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 支持传入 int/IntAttr/IntegerAttr，统一为 i64 IntegerAttr。
+    - 用于 kernel.softmax axis 等属性构造入口。
+
+    使用示例:
+    - _normalize_i64_attr(1, "axis")
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel_dialect.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    if isinstance(value, IntegerAttr):
+        attr = value
+    elif isinstance(value, IntAttr):
+        attr = IntegerAttr(value.data, IntegerType(64))
+    else:
+        attr = IntegerAttr(int(value), IntegerType(64))
+    return attr
+
+
+def _verify_i64_attr_range(attr: IntegerAttr, field_name: str, *, min_value: int, max_value: int) -> int:
+    """校验 i64 属性并返回整数值。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 校验属性类型为 i64。
+    - 校验数值落在指定闭区间。
+
+    使用示例:
+    - axis = _verify_i64_attr_range(attr, "axis", min_value=-2, max_value=1)
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel_dialect.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    if not isinstance(attr.type, IntegerType):
+        raise VerifyException(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected=f"{field_name} must be i64",
+                actual=_ERROR_ACTUAL,
+                action=_ERROR_ACTION,
+            )
+        )
+    width_attr = attr.type.width
+    width_value = width_attr.data if isinstance(width_attr, IntAttr) else width_attr
+    if width_value != 64:
+        raise VerifyException(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected=f"{field_name} must be i64",
+                actual=_ERROR_ACTUAL,
+                action=_ERROR_ACTION,
+            )
+        )
+    value = attr.value.data
+    if value < min_value or value > max_value:
+        raise VerifyException(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected=f"{field_name} must be within [{min_value}, {max_value}]",
+                actual=_ERROR_ACTUAL,
+                action=_ERROR_ACTION,
+            )
+        )
+    return value
 
 
 class _BaseKernelBinaryOp(IRDLOperation):
@@ -641,6 +730,99 @@ class KernelExpOp(IRDLOperation):
             )
 
 
+@irdl_op_definition
+class KernelSoftmaxOp(IRDLOperation):
+    """kernel.softmax。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 定义 kernel.softmax op 与 verifier 约束。
+
+    使用示例:
+    - KernelSoftmaxOp(inp, out, axis=1, space=NnMemorySpaceAttr.from_name("global"))
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel_dialect.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    name = "kernel.softmax"
+
+    input = operand_def(NnMemoryType)
+    out = operand_def(NnMemoryType)
+    axis = attr_def(IntegerAttr)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        input_value: SSAValue | Operation,
+        out: SSAValue | Operation,
+        axis: int | IntegerAttr | IntAttr,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        """初始化 softmax op。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 绑定输入/输出 operand。
+        - axis 规整为 i64 IntegerAttr 以便 verifier 校验。
+
+        使用示例:
+        - KernelSoftmaxOp(inp, out, axis=1, space=NnMemorySpaceAttr.from_name("global"))
+
+        关联文件:
+        - spec: spec/dialect/kernel.md
+        - test: test/dialect/test_kernel_dialect.py
+        - 功能实现: kernel_gen/dialect/kernel.py
+        """
+
+        axis_attr = _normalize_i64_attr(axis, "axis")
+        super().__init__(operands=[input_value, out], attributes={"axis": axis_attr, "space": space})
+
+    def verify_(self) -> None:
+        """校验 kernel.softmax 的 verifier 合同。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 校验 layout/element_type/axis 约束。
+
+        使用示例:
+        - KernelSoftmaxOp(inp, out, axis=1, space=NnMemorySpaceAttr.from_name("global")).verify_()
+
+        关联文件:
+        - spec: spec/dialect/kernel.md
+        - test: test/dialect/test_kernel_dialect.py
+        - 功能实现: kernel_gen/dialect/kernel.py
+        """
+
+        input_type = _verify_memory_type(self.input.type, "input")
+        out_type = _verify_memory_type(self.out.type, "out")
+        _verify_same_layout([input_type, out_type], self.space)
+        _verify_element_type_match(
+            [input_type, out_type],
+            "kernel.softmax element_type must match across operands",
+        )
+        if not isinstance(input_type.element_type, (BFloat16Type, Float16Type, Float32Type, Float64Type)):
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.softmax element_type must be float",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+        axis_attr = _normalize_i64_attr(self.axis, "axis")
+        rank = len(input_type.shape.data)
+        _verify_i64_attr_range(axis_attr, "axis", min_value=-rank, max_value=rank - 1)
+
+
 Kernel = Dialect(
     "kernel",
     [
@@ -658,6 +840,7 @@ Kernel = Dialect(
         KernelSelectOp,
         KernelCastOp,
         KernelExpOp,
+        KernelSoftmaxOp,
     ],
     [],
 )
@@ -678,4 +861,5 @@ __all__ = [
     "KernelSelectOp",
     "KernelCastOp",
     "KernelExpOp",
+    "KernelSoftmaxOp",
 ]

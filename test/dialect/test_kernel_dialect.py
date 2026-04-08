@@ -1,7 +1,7 @@
 """kernel dialect tests.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 kernel dialect 的 verifier 约束与 memory type 复用规则。
@@ -55,6 +55,7 @@ from kernel_gen.dialect.kernel import (
     KernelLtOp,
     KernelMatmulOp,
     KernelMulOp,
+    KernelSoftmaxOp,
     KernelSelectOp,
     KernelSubOp,
 )
@@ -382,7 +383,22 @@ def test_kernel_ops_no_result() -> None:
     exp_input = _make_value(_make_memory_type(element_type=Float32Type()))
     exp_output = _make_value(_make_memory_type(element_type=Float32Type()))
     exp_op = KernelExpOp(exp_input, exp_output, _make_space("global"))
-    for op in (add_op, sub_op, mul_op, div_op, eq_op, gt_op, lt_op, select_op, cast_op, exp_op):
+    softmax_input = _make_value(_make_memory_type(element_type=Float32Type()))
+    softmax_output = _make_value(_make_memory_type(element_type=Float32Type()))
+    softmax_op = KernelSoftmaxOp(softmax_input, softmax_output, axis=1, space=_make_space("global"))
+    for op in (
+        add_op,
+        sub_op,
+        mul_op,
+        div_op,
+        eq_op,
+        gt_op,
+        lt_op,
+        select_op,
+        cast_op,
+        exp_op,
+        softmax_op,
+    ):
         op.verify()
         assert len(op.results) == 0
 
@@ -509,4 +525,57 @@ def test_kernel_matmul_rank_shape_contract() -> None:
         _make_space("global"),
     )
     with pytest.raises(VerifyException, match="kernel.matmul contracting dimensions"):
+        op.verify()
+
+
+# TC-KRN-016
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-08 21:12:06 +0800
+# 最近一次运行成功时间: 2026-04-08 21:12:06 +0800
+# 功能说明: 验证 kernel.softmax 正常路径可通过。
+# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_softmax_success
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel_dialect.py
+def test_kernel_softmax_success() -> None:
+    input_type = _make_memory_type(element_type=Float32Type())
+    out_type = _make_memory_type(element_type=Float32Type())
+    op = KernelSoftmaxOp(_make_value(input_type), _make_value(out_type), axis=1, space=_make_space("global"))
+    op.verify()
+
+
+# TC-KRN-017
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-08 21:12:06 +0800
+# 最近一次运行成功时间: 2026-04-08 21:12:06 +0800
+# 功能说明: 验证 kernel.softmax axis 越界会报错。
+# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_softmax_axis_error
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel_dialect.py
+def test_kernel_softmax_axis_error() -> None:
+    input_type = _make_memory_type(element_type=Float32Type())
+    out_type = _make_memory_type(element_type=Float32Type())
+    op = KernelSoftmaxOp(_make_value(input_type), _make_value(out_type), axis=2, space=_make_space("global"))
+    with pytest.raises(VerifyException, match="axis must be within"):
+        op.verify()
+
+
+# TC-KRN-018
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-08 21:12:06 +0800
+# 最近一次运行成功时间: 2026-04-08 21:12:06 +0800
+# 功能说明: 验证 kernel.softmax 拒绝非浮点 element_type。
+# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_softmax_requires_float
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel_dialect.py
+def test_kernel_softmax_requires_float() -> None:
+    input_type = _make_memory_type(element_type=i32)
+    out_type = _make_memory_type(element_type=i32)
+    op = KernelSoftmaxOp(_make_value(input_type), _make_value(out_type), axis=1, space=_make_space("global"))
+    with pytest.raises(VerifyException, match="kernel.softmax element_type must be float"):
         op.verify()

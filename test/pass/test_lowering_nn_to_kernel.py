@@ -1324,15 +1324,15 @@ def test_lower_unsupported_nn_op_raises() -> None:
 
 # TC-PASS-N2K-030
 # 创建者: 朽木露琪亚
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-08 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-08 00:00:00 +0800
-# 测试目的: 验证 residual nn.softmax 直接进入 pass 时会报固定失败短语。
-# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_softmax_direct_dialect_op_requires_decompose_pass
+# 测试目的: 验证 nn.softmax 被 lower 为 kernel.softmax 并保留 axis。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_softmax_direct_dialect_op_to_kernel_softmax
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
 # 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
 # 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
-def test_lower_softmax_direct_dialect_op_requires_decompose_pass() -> None:
+def test_lower_softmax_direct_dialect_op_to_kernel_softmax() -> None:
     input_type = _make_memory_type(element_type=f32)
     result_type = _make_memory_type(element_type=f32)
     space = _make_space("global")
@@ -1343,26 +1343,27 @@ def test_lower_softmax_direct_dialect_op_requires_decompose_pass() -> None:
         lambda block: [NnSoftmaxOp(block.args[0], result_type, axis=1, space=space)],
     )
 
-    with pytest.raises(
-        LowerNnToKernelError,
-        match="residual nn.softmax must be decomposed before lower-nn-to-kernel",
-    ):
-        LowerNnToKernelPass().run(module)
+    LowerNnToKernelPass().run(module)
+    after_ir = str(module)
+    assert "kernel.softmax" in after_ir
+    assert "axis = 1" in after_ir
+    assert "nn.softmax" not in after_ir
+    assert "Unsupported call expression" not in after_ir
 
 
 # TC-PASS-N2K-031
 # 创建者: 朽木露琪亚
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-08 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-08 00:00:00 +0800
-# 测试目的: 验证公开链路 softmax helper 仍生成 raw nn.softmax，随后由 LowerNnToKernelPass 以固定失败短语拒绝。
-# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_softmax_public_chain_requires_decompose_pass
+# 测试目的: 验证公开链路 softmax helper lower 为 kernel.softmax 并保留 axis。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_softmax_public_chain_to_kernel_softmax
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
 # 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
 # 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
-def test_lower_softmax_public_chain_requires_decompose_pass() -> None:
+def test_lower_softmax_public_chain_to_kernel_softmax() -> None:
     def softmax_direct(value: "Tensor[f32, 2, 3]") -> "Tensor[f32, 2, 3]":
-        return softmax(value)
+        return softmax(value, axis=1)
 
     module = ModuleOp([build_func_op(softmax_direct, _tensor_arg([2, 3], NumericType.Float32))])
     raw_ir = str(module)
@@ -1370,11 +1371,12 @@ def test_lower_softmax_public_chain_requires_decompose_pass() -> None:
     assert "nn.softmax" in raw_ir
     assert "-> !nn.memory<[2, 3], [3, 1], f32, #nn.space<global>>" in raw_ir
 
-    with pytest.raises(
-        LowerNnToKernelError,
-        match="residual nn.softmax must be decomposed before lower-nn-to-kernel",
-    ):
-        LowerNnToKernelPass().run(module)
+    LowerNnToKernelPass().run(module)
+    after_ir = str(module)
+    assert "kernel.softmax" in after_ir
+    assert "axis = 1" in after_ir
+    assert "nn.softmax" not in after_ir
+    assert "Unsupported call expression" not in after_ir
 
 
 # TC-PASS-N2K-008

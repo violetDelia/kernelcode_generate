@@ -1,12 +1,12 @@
 """nn -> kernel lowering pass.
 
 创建者: 金铲铲大作战
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 将 nn dialect 的逐元素 op lower 为 kernel dialect op。
 - 当结果无法复用已有输出时，为结果插入 dma.alloc。
-- 若 residual `nn.softmax` 直接进入本 pass，则给出固定失败短语并中止。
+- `nn.softmax` lower 为 `kernel.softmax` 并保留 `axis`。
 
 使用示例:
 - from kernel_gen.passes.lowering.nn_to_kernel import LowerNnToKernelPass
@@ -27,6 +27,7 @@ from xdsl.dialects.builtin import (
     ArrayAttr,
     IntAttr,
     IntegerAttr,
+    IntegerType,
     ModuleOp,
     StringAttr,
     UnrealizedConversionCastOp,
@@ -50,6 +51,7 @@ from kernel_gen.dialect.kernel import (
     KernelMulOp,
     KernelNeOp,
     KernelSelectOp,
+    KernelSoftmaxOp,
     KernelSubOp,
 )
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
@@ -91,7 +93,6 @@ _SUPPORTED_BINARY = {
     "nn.matmul": KernelMatmulOp,
 }
 
-_SOFTMAX_DECOMPOSE_ERROR = "residual nn.softmax must be decomposed before lower-nn-to-kernel"
 
 
 def _ensure_space_attr(op: Operation) -> NnMemorySpaceAttr:
@@ -202,6 +203,41 @@ def _parse_transpose_perm_attr(attr: object, rank: int) -> ArrayAttr:
     if len(perm_values) != rank or sorted(perm_values) != list(range(rank)):
         raise LowerNnToKernelError("nn.transpose perm must be a permutation of 0..rank-1")
     return attr
+
+
+def _parse_softmax_axis_attr(attr: object) -> IntegerAttr:
+    """解析 nn.softmax 的 axis attribute。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 接收 IntegerAttr 或 IntAttr，并规整为 i64 IntegerAttr。
+    - 统一校验 axis 的 i64 类型约束。
+
+    使用示例:
+    - axis_attr = _parse_softmax_axis_attr(op.attributes.get("axis"))
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    if isinstance(attr, IntegerAttr):
+        axis_attr = attr
+    elif isinstance(attr, IntAttr):
+        axis_attr = IntegerAttr(attr.data, IntegerType(64))
+    else:
+        raise LowerNnToKernelError("nn.softmax axis must be i64 IntegerAttr")
+
+    if not isinstance(axis_attr.type, IntegerType):
+        raise LowerNnToKernelError("nn.softmax axis must be i64 IntegerAttr")
+    width_attr = axis_attr.type.width
+    width_value = width_attr.data if isinstance(width_attr, IntAttr) else width_attr
+    if width_value != 64:
+        raise LowerNnToKernelError("nn.softmax axis must be i64 IntegerAttr")
+    return axis_attr
 
 
 def _build_alloc_dynamic_shape(
@@ -431,11 +467,11 @@ def _build_kernel_op(
     """构造 kernel dialect op。
 
     创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 根据 nn op 名称映射 kernel op。
-    - 处理二元/选择/类型转换三类 op。
+    - 处理二元/选择/类型转换/单 operand 结构化 op。
 
     使用示例:
     - kernel_op = _build_kernel_op(op, alloc.results[0], space)
@@ -465,6 +501,11 @@ def _build_kernel_op(
         _ensure_operand_count(op, 1)
         return KernelExpOp(op.operands[0], out_value, space)
 
+    if op.name == "nn.softmax":
+        _ensure_operand_count(op, 1)
+        axis_attr = _parse_softmax_axis_attr(op.attributes.get("axis"))
+        return KernelSoftmaxOp(op.operands[0], out_value, axis_attr, space)
+
     raise LowerNnToKernelError(f"Unsupported nn op: {op.name}")
 
 
@@ -472,7 +513,7 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
     """将单个 nn op lower 为 kernel op。
 
     创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 为结果插入 dma.alloc。
@@ -488,9 +529,6 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
     - test: test/pass/test_lowering_nn_to_kernel.py
     - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
     """
-
-    if op.name == "nn.softmax":
-        raise LowerNnToKernelError(_SOFTMAX_DECOMPOSE_ERROR)
 
     if op.name == "nn.transpose":
         _ensure_operand_count(op, 1)
