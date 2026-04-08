@@ -1,7 +1,7 @@
 """nn -> kernel lowering pass.
 
 创建者: 金铲铲大作战
-最后一次更改: 朽木露琪亚
+最后一次更改: 小李飞刀
 
 功能说明:
 - 将 nn dialect 的逐元素 op lower 为 kernel dialect op。
@@ -89,7 +89,7 @@ _SUPPORTED_BINARY = {
     "nn.ge": KernelGeOp,
 }
 
-_SOFTMAX_DECOMPOSE_ERROR = "nn.softmax must be decomposed before LowerNnToKernelPass"
+_SOFTMAX_DECOMPOSE_ERROR = "residual nn.softmax must be decomposed before lower-nn-to-kernel"
 
 
 def _ensure_space_attr(op: Operation) -> NnMemorySpaceAttr:

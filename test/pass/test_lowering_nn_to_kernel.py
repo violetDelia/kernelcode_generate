@@ -1,7 +1,7 @@
 """nn -> kernel lowering pass tests.
 
 创建者: 金铲铲大作战
-最后一次更改: jcc你莫辜负
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 nn_to_kernel pass 的 lowering 行为与错误路径。
@@ -1296,7 +1296,7 @@ def test_lower_unsupported_nn_op_raises() -> None:
 
 # TC-PASS-N2K-030
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
+# 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-08 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-08 00:00:00 +0800
 # 测试目的: 验证 residual nn.softmax 直接进入 pass 时会报固定失败短语。
@@ -1317,14 +1317,14 @@ def test_lower_softmax_direct_dialect_op_requires_decompose_pass() -> None:
 
     with pytest.raises(
         LowerNnToKernelError,
-        match="nn.softmax must be decomposed before LowerNnToKernelPass",
+        match="residual nn.softmax must be decomposed before lower-nn-to-kernel",
     ):
         LowerNnToKernelPass().run(module)
 
 
 # TC-PASS-N2K-031
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
+# 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-08 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-08 00:00:00 +0800
 # 测试目的: 验证公开链路 softmax helper 仍生成 raw nn.softmax，随后由 LowerNnToKernelPass 以固定失败短语拒绝。
@@ -1344,7 +1344,7 @@ def test_lower_softmax_public_chain_requires_decompose_pass() -> None:
 
     with pytest.raises(
         LowerNnToKernelError,
-        match="nn.softmax must be decomposed before LowerNnToKernelPass",
+        match="residual nn.softmax must be decomposed before lower-nn-to-kernel",
     ):
         LowerNnToKernelPass().run(module)
 
