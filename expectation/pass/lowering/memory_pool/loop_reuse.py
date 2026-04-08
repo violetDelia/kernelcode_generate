@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 """memory_pool loop_reuse expectation。
 
 创建者: 朽木露琪亚
@@ -11,36 +10,16 @@
 - 默认设置 `SYMPY_GMPY=0`，避免 sympy/gmpy 在部分环境下触发 `SystemError`，不改变语义。
 
 使用示例:
-- `PYTHONPATH=. python expectation/pass/lowing/memory_pool/loop_reuse.py`
+- `PYTHONPATH=. python expectation/pass/lowering/memory_pool/loop_reuse.py`
 
 关联文件:
 - spec: [`spec/pass/lowering/memory_pool.md`](spec/pass/lowering/memory_pool.md)
 - test: [`test/pass/test_memory_pool.py`](test/pass/test_memory_pool.py)
 - 功能实现: [`kernel_gen/passes/lowering/memory_pool.py`](kernel_gen/passes/lowering/memory_pool.py)
-=======
-"""Legacy expectation entry (lowing -> lowering).
-
-创建者: 小李飞刀
-最后一次更改: 小李飞刀
-
-功能说明:
-- 兼容旧路径 `expectation/pass/lowing/memory_pool/loop_reuse.py`。
-- 转发执行到 `expectation/pass/lowering/memory_pool/loop_reuse.py`。
-
-使用示例:
-- `PYTHONPATH=. python expectation/pass/lowing/memory_pool/loop_reuse.py`
-- `PYTHONPATH=. python expectation/pass/lowering/memory_pool/loop_reuse.py`
-
-关联文件:
-- spec: `spec/pass/lowering/memory_pool.md`
-- test: `test/pass/test_memory_pool.py`
-- 功能实现: `expectation/pass/lowering/memory_pool/loop_reuse.py`
->>>>>>> c92d9f3 (T-20260408-cffe95b5-passes-lowing-to-lowering)
 """
 
 from __future__ import annotations
 
-<<<<<<< HEAD
 import os
 import sys
 from pathlib import Path
@@ -417,14 +396,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-=======
-import runpy
-from pathlib import Path
-
-REPO_ROOT = Path(__file__).resolve().parents[4]
-runpy.run_path(
-    str(REPO_ROOT / "expectation" / "pass" / "lowering" / "memory_pool" / "loop_reuse.py"),
-    run_name="__main__",
-)
-
->>>>>>> c92d9f3 (T-20260408-cffe95b5-passes-lowing-to-lowering)

@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`朽木露琪亚`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/pass/lowering/buffer_results_to_out_params.md`](../../../spec/pass/lowering/buffer_results_to_out_params.md)
 - `功能实现`：
   - [`kernel_gen/passes/lowering/buffer_results_to_out_params.py`](../../../kernel_gen/passes/lowering/buffer_results_to_out_params.py)
@@ -235,7 +235,7 @@ use %out
 - 验证命令：
   - `pytest -q test/pass/test_buffer_results_to_out_params.py -k 'single_memory_result or external_declaration or callsite or pipeline_position or multiple_memory_results or mixed_memory_and_scalar_results'`
   - `pytest -q test/dsl/test_gen_kernel.py -k 'buffer_results_to_out_params or half_rewritten'`
-  - `PYTHONPATH=. python expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py`
+  - `PYTHONPATH=. python expectation/pass/lowering/buffer_results_to_out_params/callsite_rewrite.py`
 
 ## 功能与用例清单
 
@@ -243,6 +243,6 @@ use %out
 - `BROTP-002`：external declaration 不允许半改写，必须显式报错。（`test_rewrite_rejects_external_declaration`）
 - `BROTP-003`：模块内 caller/callee 会同步改写成“caller 显式 out 实参 + 零 result `func.call`”，旧 memory call result SSA 不再可被消费。（`test_rewrite_callsite_replaces_old_memory_result_ssa`）
 - `BROTP-004`：在 lowering pipeline 中，`BufferResultsToOutParamsPass` 固定运行在 `LowerNnToKernelPass` 之后。（`test_pass_manager_runs_lower_then_buffer_results_to_out_params`、`test_pipeline_position_pass_manager_runs_lower_then_buffer_results_to_out_params`）
-- `BROTP-005`：ignored expectation smoke `callsite_rewrite.py` 锁死“callee 的 memory result -> 前置 arg0；caller 补 out 实参；`func.call` 零 memory result”的 `O2` 公开口径。（`expectation/pass/lowing/buffer_results_to_out_params/callsite_rewrite.py`）
+- `BROTP-005`：ignored expectation smoke `callsite_rewrite.py` 锁死“callee 的 memory result -> 前置 arg0；caller 补 out 实参；`func.call` 零 memory result”的 `O2` 公开口径。（`expectation/pass/lowering/buffer_results_to_out_params/callsite_rewrite.py`）
 - `BROTP-006`：多个 `memory` results 固定改写为 `arg0/arg1/...`，caller 侧 `func.call` 同步替换为显式 out 实参。（`test_rewrite_multiple_memory_results_to_arg0_arg1`）
 - `BROTP-007`：mixed `memory + scalar` returns 改写后，caller 侧 `func.call` 仅保留 scalar result，旧 memory result SSA 被替换。（`test_rewrite_mixed_memory_and_scalar_results_preserves_scalar_return`）

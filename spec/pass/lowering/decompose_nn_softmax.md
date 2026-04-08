@@ -9,11 +9,11 @@
 ## 文档信息
 
 - 创建者：`朽木露琪亚`
-- 最后一次更改：`朽木露琪亚`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/pass/lowering/decompose_nn_softmax.md`](../../../spec/pass/lowering/decompose_nn_softmax.md)
 - `功能实现`：[`kernel_gen/passes/lowering/decompose_nn_softmax.py`](../../../kernel_gen/passes/lowering/decompose_nn_softmax.py)
 - `test`：[`test/pass/test_decompose_nn_softmax.py`](../../../test/pass/test_decompose_nn_softmax.py)
-- `expectation`：[`expectation/pass/lowing/decompose_nn_softmax.py`](../../../expectation/pass/lowing/decompose_nn_softmax.py)
+- `expectation`：[`expectation/pass/lowering/decompose_nn_softmax.py`](../../../expectation/pass/lowering/decompose_nn_softmax.py)
 
 ## 依赖
 
@@ -124,7 +124,7 @@ DecomposeNnSoftmaxError: result type must match input shape and stride
 ## 验证要求
 
 - `pytest -q test/pass/test_decompose_nn_softmax.py`
-- `PYTHONPATH=. python expectation/pass/lowing/decompose_nn_softmax.py`
+- `PYTHONPATH=. python expectation/pass/lowering/decompose_nn_softmax.py`
 
 ## 使用示例
 

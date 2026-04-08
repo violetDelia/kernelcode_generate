@@ -30,7 +30,7 @@
   - [`kernel_gen/operation/arch.py`](../kernel_gen/operation/arch.py)
   - [`kernel_gen/dialect/kernel.py`](../kernel_gen/dialect/kernel.py)
   - [`kernel_gen/passes/pass_manager.py`](../kernel_gen/passes/pass_manager.py)
-  - [`kernel_gen/passes/lowing/nn_to_kernel.py`](../kernel_gen/passes/lowing/nn_to_kernel.py)
+  - [`kernel_gen/passes/lowering/nn_to_kernel.py`](../kernel_gen/passes/lowering/nn_to_kernel.py)
   - [`kernel_gen/dsl/ast.py`](../kernel_gen/dsl/ast.py)
   - [`kernel_gen/dsl/ast_visitor.py`](../kernel_gen/dsl/ast_visitor.py)
   - [`kernel_gen/dsl/emit_mlir.py`](../kernel_gen/dsl/emit_mlir.py)
@@ -46,7 +46,7 @@
   - [`test/operation/test_operation_arch.py`](../test/operation/test_operation_arch.py)
   - [`test/dialect/test_kernel_dialect.py`](../test/dialect/test_kernel_dialect.py)
   - [`test/pass/test_pass_manager.py`](../test/pass/test_pass_manager.py)
-  - [`test/pass/test_lowing_nn_to_kernel.py`](../test/pass/test_lowing_nn_to_kernel.py)
+  - [`test/pass/test_lowering_nn_to_kernel.py`](../test/pass/test_lowering_nn_to_kernel.py)
   - [`test/dsl/test_ast.py`](../test/dsl/test_ast.py)
   - [`test/dsl/test_ast_visitor.py`](../test/dsl/test_ast_visitor.py)
   - [`test/dsl/test_emit_mlir.py`](../test/dsl/test_emit_mlir.py)
@@ -65,7 +65,7 @@
 - [`spec/dialect/kernel.md`](../spec/dialect/kernel.md)：执行步骤级 IR 的职责边界。
 - [`spec/dialect/arch.md`](../spec/dialect/arch.md)：`arch` 方言 IR 语义与 verifier 规则。
 - [`spec/pass/pass_manager.md`](../spec/pass/pass_manager.md)：pass 容器与执行顺序约束。
-- [`spec/pass/lowing/nn_to_kernel.md`](../spec/pass/lowing/nn_to_kernel.md)：当前 `nn -> kernel` lowering 的公开范围。
+- [`spec/pass/lowering/nn_to_kernel.md`](../spec/pass/lowering/nn_to_kernel.md)：当前 `nn -> kernel` lowering 的公开范围。
 - [`spec/dsl/ast.md`](../spec/dsl/ast.md)：DSL AST 节点语义。
 - [`spec/dsl/ast_visitor.md`](../spec/dsl/ast_visitor.md)：Python AST 到 DSL AST 的访问规则。
 - [`spec/dsl/emit_mlir.md`](../spec/dsl/emit_mlir.md)：DSL AST 到 MLIR 片段的发射规则。
@@ -175,7 +175,7 @@ kernel_gen/target/targets/*.json|*.txt
 
 - 当前仓库不存在 canonical 的统一主流水线：`DSL -> dialect -> passes -> emit_c/gen_kernel -> runtime`。
 - DSL 前端会直接产出一部分 `func/dma/arch/symbol/...` 相关 op；这些 op 并不天然要求先经过 `passes` 才能进入 `emit_c/gen_kernel`。
-- `passes` 当前只消费受限的 IR 子集，例如 [`spec/pass/lowing/nn_to_kernel.md`](../spec/pass/lowing/nn_to_kernel.md) 中列出的少量 `nn` op；它不是“所有 dialect 的统一中转站”。
+- `passes` 当前只消费受限的 IR 子集，例如 [`spec/pass/lowering/nn_to_kernel.md`](../spec/pass/lowering/nn_to_kernel.md) 中列出的少量 `nn` op；它不是“所有 dialect 的统一中转站”。
 - `emit_c/gen_kernel` 当前也只接受受控的 IR 子集，不等于“任何 dialect IR 都能自动生成 CPU C/C++”。
 - 因此，看到 `dialect/`、`passes/`、`dsl/`、`include/` 同时存在时，不能推断它们已经自然串通成完整后端流水线。
 
@@ -209,7 +209,7 @@ kernel_gen/target/targets/*.json|*.txt
 | 路径 / 专题 | 起点 | 当前终点 | 当前状态 | 断点 / 备注 |
 | --- | --- | --- | --- | --- |
 | DSL 算术/比较/`scf.for`/unit-tile `dma.load/store`/`symbol.add(cpu)` | DSL/Python 函数 | CPU C/C++ 源码字符串 | 已有受控子集的代码生成链路 | 支持范围以 [`spec/dsl/emit_c.md`](../spec/dsl/emit_c.md) 与 [`spec/dsl/gen_kernel.md`](../spec/dsl/gen_kernel.md) 为准 |
-| `nn` 逐元素算术/比较/`select`/`cast` lowering | `nn` dialect IR 或可构造的 `nn` op | `kernel/dma/func` IR | 已有 IR lowering | 由 [`kernel_gen/passes/lowing/nn_to_kernel.py`](../kernel_gen/passes/lowing/nn_to_kernel.py) 负责；不自动衔接源码生成 |
+| `nn` 逐元素算术/比较/`select`/`cast` lowering | `nn` dialect IR 或可构造的 `nn` op | `kernel/dma/func` IR | 已有 IR lowering | 由 [`kernel_gen/passes/lowering/nn_to_kernel.py`](../kernel_gen/passes/lowering/nn_to_kernel.py) 负责；不自动衔接源码生成 |
 | 高层 `operation` 的 `broadcast` / `softmax` / `fc` / `matmul` | `Memory` 语义调用 | 高层语义结果或局部 IR 设计入口 | 以语义层为主 | 是否进入 dialect/pass/codegen 需按专题单独推进 |
 | 高层 `operation` 的 `conv` / `img2col` | `Memory` 语义调用 | 高层语义结果 | 当前仅语义层收敛 | 尚无通用 lowering 或 `emit_c/gen_kernel` 直出代码路径 |
 | `arch` helper + target 查询 | `operation/arch` / `dialect/arch` | 符号语义、动态内存入口或 verifier 决策 | 已分层存在 | 硬件值来源是 `target/registry`；业务回退由调用层承担 |
