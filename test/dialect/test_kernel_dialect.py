@@ -53,6 +53,7 @@ from kernel_gen.dialect.kernel import (
     KernelExpOp,
     KernelGtOp,
     KernelLtOp,
+    KernelMatmulOp,
     KernelMulOp,
     KernelSelectOp,
     KernelSubOp,
@@ -438,4 +439,74 @@ def test_kernel_exp_requires_float() -> None:
     out_type = _make_memory_type(element_type=i32)
     op = KernelExpOp(_make_value(input_type), _make_value(out_type), _make_space("global"))
     with pytest.raises(VerifyException, match="kernel.exp element_type must be float"):
+        op.verify()
+
+
+# TC-KRN-014
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-08 13:13:24 +0800
+# 最近一次运行成功时间: 2026-04-08 13:13:24 +0800
+# 功能说明: 验证 kernel.matmul dtype mismatch 被拒绝。
+# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_matmul_dtype_mismatch
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel_dialect.py
+def test_kernel_matmul_dtype_mismatch() -> None:
+    lhs_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(3)]),
+        element_type=Float32Type(),
+    )
+    rhs_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(3), IntAttr(4)]),
+        element_type=Float16Type(),
+    )
+    out_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
+        element_type=Float32Type(),
+    )
+    op = KernelMatmulOp(
+        _make_value(lhs_type),
+        _make_value(rhs_type),
+        _make_value(out_type),
+        _make_space("global"),
+    )
+    with pytest.raises(VerifyException, match="kernel.matmul element_type"):
+        op.verify()
+
+
+# TC-KRN-015
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-08 13:13:24 +0800
+# 最近一次运行成功时间: 2026-04-08 13:13:24 +0800
+# 功能说明: 验证 kernel.matmul 拒绝非二维 operand 与形状不匹配。
+# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_matmul_rank_shape_contract
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel_dialect.py
+def test_kernel_matmul_rank_shape_contract() -> None:
+    lhs_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(3)]))
+    rhs_rank3_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(3), IntAttr(4)]),
+        stride=ArrayAttr([IntAttr(12), IntAttr(4), IntAttr(1)]),
+    )
+    out_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(4)]))
+    op = KernelMatmulOp(
+        _make_value(lhs_type),
+        _make_value(rhs_rank3_type),
+        _make_value(out_type),
+        _make_space("global"),
+    )
+    with pytest.raises(VerifyException, match="kernel.matmul requires rank-2"):
+        op.verify()
+
+    rhs_mismatch_type = _make_memory_type(shape=ArrayAttr([IntAttr(5), IntAttr(4)]))
+    op = KernelMatmulOp(
+        _make_value(lhs_type),
+        _make_value(rhs_mismatch_type),
+        _make_value(out_type),
+        _make_space("global"),
+    )
+    with pytest.raises(VerifyException, match="kernel.matmul contracting dimensions"):
         op.verify()

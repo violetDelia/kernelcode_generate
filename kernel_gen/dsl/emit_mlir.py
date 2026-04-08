@@ -1,7 +1,7 @@
 """AST emit utilities for DSL nodes.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 提供 AST 节点到 MLIR SSA value/op 的发射入口。
@@ -1528,7 +1528,7 @@ def _shape_attr_to_symbol_operand(
     """将 shape 条目转换为 `!symbol.int` SSA operand。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - `IntAttr` 直接物化为 `!symbol.int<"n">` 常量。
@@ -1565,7 +1565,7 @@ def _build_symbol_product_operand(
     """将多个 `!symbol.int` 值串成乘法表达式。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 复用 `symbol.mul` 组合多个符号维度。
@@ -1600,7 +1600,7 @@ def _build_img2col2d_output_dim_operands(
     """读取 `nn.img2col2d` 结果中的 `N/OH/OW` 维度 operand。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 约定 `img2col2d` 结果布局为 `[N, C, KH, KW, OH, OW]`。
@@ -1942,12 +1942,12 @@ def _infer_matmul_memory_type(
     """推导 `nn.matmul` 的目标 nn.memory 类型。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅接受 rank-2 `nn.memory` x `nn.memory`。
     - 结果 shape 固定为 `[lhs.M, rhs.N]`，stride 为默认连续布局。
-    - element_type 按与 `operation.nn.matmul` 一致的固定 promotion 规则决议。
+    - 要求 lhs/rhs element_type 一致，不接受 mixed dtype。
 
     使用示例:
     - _infer_matmul_memory_type(lhs_type, rhs_type, None, location=None)
@@ -1966,8 +1966,10 @@ def _infer_matmul_memory_type(
         raise _LoweringError("matmul operands must be rank-2 nn.memory", location=location)
     if not _dims_equal(lhs_shape[1], rhs_shape[0]):
         raise _LoweringError("matmul contracting dimension mismatch", location=location)
+    if lhs_type.element_type != rhs_type.element_type:
+        raise _LoweringError("matmul element_type must match", location=location)
     target_space = _memory_space_from_ast(memoryspace, lhs_type.space)
-    target_element_type = _resolve_binary_element_type(lhs_type.element_type, rhs_type.element_type, location)
+    target_element_type = lhs_type.element_type
     out_shape = [lhs_shape[0], rhs_shape[1]]
     out_stride = _build_default_stride_attrs(out_shape)
     return _memory_type_from_parts(out_shape, out_stride, target_element_type, target_space)

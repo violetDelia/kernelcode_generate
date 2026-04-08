@@ -1,7 +1,7 @@
 """nn -> kernel lowering pass.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 将 nn dialect 的逐元素 op lower 为 kernel dialect op。
@@ -46,6 +46,7 @@ from kernel_gen.dialect.kernel import (
     KernelGtOp,
     KernelLeOp,
     KernelLtOp,
+    KernelMatmulOp,
     KernelMulOp,
     KernelNeOp,
     KernelSelectOp,
@@ -87,6 +88,7 @@ _SUPPORTED_BINARY = {
     "nn.le": KernelLeOp,
     "nn.gt": KernelGtOp,
     "nn.ge": KernelGeOp,
+    "nn.matmul": KernelMatmulOp,
 }
 
 _SOFTMAX_DECOMPOSE_ERROR = "residual nn.softmax must be decomposed before lower-nn-to-kernel"
@@ -564,8 +566,11 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
     space = _ensure_space_attr(op)
 
     _ensure_contiguous_result_stride(result_type)
-    shape_source = _select_shape_source(op)
-    shape_ops, dynamic_shape = _build_alloc_dynamic_shape(shape_source, result_type)
+    if op.name == "nn.matmul":
+        shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_result(result_type)
+    else:
+        shape_source = _select_shape_source(op)
+        shape_ops, dynamic_shape = _build_alloc_dynamic_shape(shape_source, result_type)
     alloc = DmaAllocOp(dynamic_shape, result_type)
     rhs_ops, lowered_rhs = _maybe_materialize_mixed_add_rhs(op, result_type, dynamic_shape)
     kernel_op = _build_kernel_op(op, alloc.result, space, rhs_value=lowered_rhs)

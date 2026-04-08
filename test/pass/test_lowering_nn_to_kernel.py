@@ -1,7 +1,7 @@
 """nn -> kernel lowering pass tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 覆盖 nn_to_kernel pass 的 lowering 行为与错误路径。
@@ -68,6 +68,7 @@ from kernel_gen.dialect.kernel import (
     KernelGtOp,
     KernelLeOp,
     KernelNeOp,
+    KernelMatmulOp,
     KernelSelectOp,
 )
 from kernel_gen.dialect.nn import (
@@ -78,6 +79,7 @@ from kernel_gen.dialect.nn import (
     NnGeOp,
     NnGtOp,
     NnLeOp,
+    NnMatmulOp,
     NnMemorySpaceAttr,
     NnMemoryType,
     NnNeOp,
@@ -980,6 +982,32 @@ def test_lower_gt_to_kernel() -> None:
     LowerNnToKernelPass().run(module)
     ops = _collect_ops(block)
     assert any(isinstance(op, KernelGtOp) for op in ops)
+
+
+# TC-PASS-N2K-026
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-08 13:13:24 +0800
+# 最近一次运行成功时间: 2026-04-08 13:13:24 +0800
+# 测试目的: 验证 nn.matmul lower 为 kernel.matmul。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_matmul_to_kernel
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
+def test_lower_matmul_to_kernel() -> None:
+    lhs_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(3)]))
+    rhs_type = _make_memory_type(shape=ArrayAttr([IntAttr(3), IntAttr(4)]))
+    result_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(4)]))
+    space = _make_space("global")
+
+    module, block = _build_module(
+        [lhs_type, rhs_type],
+        result_type,
+        lambda block: [NnMatmulOp(block.args[0], block.args[1], result_type, space)],
+    )
+    LowerNnToKernelPass().run(module)
+    ops = _collect_ops(block)
+    assert any(isinstance(op, KernelMatmulOp) for op in ops)
 
 
 # TC-PASS-N2K-023

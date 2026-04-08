@@ -19,7 +19,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
 from xdsl.dialects.builtin import BFloat16Type, Float16Type, Float32Type, Float64Type, IntegerType, i1
 from xdsl.ir import Attribute, Dialect, Operation, SSAValue
@@ -159,6 +159,61 @@ def _verify_element_type_match(types: Iterable[NnMemoryType], message: str) -> N
                     action=_ERROR_ACTION,
                 )
             )
+
+
+def _verify_matmul_shape(
+    lhs_shape: Sequence[Attribute],
+    rhs_shape: Sequence[Attribute],
+    out_shape: Sequence[Attribute],
+) -> None:
+    """校验 kernel.matmul 的形状约束。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 要求 lhs/rhs/out 皆为 rank-2。
+    - 要求 `lhs=[M, K]`、`rhs=[K, N]`、`out=[M, N]` 机械一致。
+
+    使用示例:
+    - _verify_matmul_shape(lhs.shape.data, rhs.shape.data, out.shape.data)
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel_dialect.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    lhs_shape = list(lhs_shape)
+    rhs_shape = list(rhs_shape)
+    out_shape = list(out_shape)
+    if len(lhs_shape) != 2 or len(rhs_shape) != 2 or len(out_shape) != 2:
+        raise VerifyException(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected="kernel.matmul requires rank-2 memory types",
+                actual=_ERROR_ACTUAL,
+                action=_ERROR_ACTION,
+            )
+        )
+    if lhs_shape[1] != rhs_shape[0]:
+        raise VerifyException(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected="kernel.matmul contracting dimensions must match",
+                actual=_ERROR_ACTUAL,
+                action=_ERROR_ACTION,
+            )
+        )
+    if out_shape[0] != lhs_shape[0] or out_shape[1] != rhs_shape[1]:
+        raise VerifyException(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected="kernel.matmul result shape must match lhs/rhs",
+                actual=_ERROR_ACTUAL,
+                action=_ERROR_ACTION,
+            )
+        )
 
 
 def _is_cast_element_type(value: Attribute) -> bool:
@@ -405,6 +460,67 @@ class KernelGeOp(_BaseKernelBinaryOp):
 
 
 @irdl_op_definition
+class KernelMatmulOp(_BaseKernelBinaryOp):
+    """kernel.matmul。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 结构化矩阵乘 op，输入输出均为 nn.memory。
+    - verifier 强制二维输入、shape 机械一致及 element_type/space 对齐。
+
+    使用示例:
+    - KernelMatmulOp(lhs, rhs, out, _make_space("global"))
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel_dialect.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    name = "kernel.matmul"
+
+    def verify_(self) -> None:
+        lhs_type = _verify_memory_type(self.lhs.type, "lhs")
+        rhs_type = _verify_memory_type(self.rhs.type, "rhs")
+        out_type = _verify_memory_type(self.out.type, "out")
+        self.space.verify()
+        if lhs_type.space.space.data != rhs_type.space.space.data:
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.matmul operands must use the same space",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+        if lhs_type.space.space.data != self.space.space.data:
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.matmul attribute space must match operand space",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+        if out_type.space.space.data != self.space.space.data:
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.matmul attribute space must match result space",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+        _verify_matmul_shape(lhs_type.shape.data, rhs_type.shape.data, out_type.shape.data)
+        _verify_element_type_match(
+            [lhs_type, rhs_type, out_type],
+            "kernel.matmul element_type must match across operands",
+        )
+
+
+@irdl_op_definition
 class KernelSelectOp(IRDLOperation):
     """kernel.select。"""
 
@@ -538,6 +654,7 @@ Kernel = Dialect(
         KernelLeOp,
         KernelGtOp,
         KernelGeOp,
+        KernelMatmulOp,
         KernelSelectOp,
         KernelCastOp,
         KernelExpOp,
@@ -557,6 +674,7 @@ __all__ = [
     "KernelLeOp",
     "KernelGtOp",
     "KernelGeOp",
+    "KernelMatmulOp",
     "KernelSelectOp",
     "KernelCastOp",
     "KernelExpOp",
