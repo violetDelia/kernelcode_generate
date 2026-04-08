@@ -1,7 +1,7 @@
 """DSL AST definitions.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 定义 DSL 前端使用的 AST 节点数据结构。
@@ -1320,6 +1320,89 @@ def _split_tensor_annotation(text: str, node: object | None) -> tuple[NumericTyp
     return dtype, dims
 
 
+def _eval_formatted_annotation_expr(
+    expr: py_ast.AST,
+    globals_table: dict[str, object],
+    builtins_table: dict[str, object],
+    runtime_table: dict[str, object] | None,
+) -> int | str | SymbolDim:
+    """求值 f-string 注解表达式节点。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 解析 f-string `FormattedValue` 内的表达式。
+    - 支持 `int/str/SymbolDim` 与 `+ - * / //` 组合。
+    - 优先使用 runtime_table，其次 globals/builtins 查找名称。
+
+    使用示例:
+    - _eval_formatted_annotation_expr(py_ast.parse("W + 1", mode="eval").body, globals(), __builtins__, {"W": 4})
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast_visitor.py
+    - 功能实现: kernel_gen/dsl/ast.py
+    """
+
+    if isinstance(expr, py_ast.Name):
+        if runtime_table is not None and expr.id in runtime_table:
+            value = runtime_table[expr.id]
+        else:
+            value = _lookup_python_name(expr.id, globals_table, builtins_table)
+        if isinstance(value, SymbolDim):
+            return value
+        if isinstance(value, sp.Basic):
+            return SymbolDim(value)
+        if isinstance(value, (int, str)):
+            return value
+        _raise_parse_error("Unsupported formatted annotation", expr)
+
+    if isinstance(expr, py_ast.Constant) and isinstance(expr.value, (int, str)):
+        return expr.value
+
+    if isinstance(expr, py_ast.UnaryOp) and isinstance(expr.op, py_ast.USub):
+        value = _eval_formatted_annotation_expr(expr.operand, globals_table, builtins_table, runtime_table)
+        if isinstance(value, SymbolDim):
+            return SymbolDim(0) - value
+        if isinstance(value, int):
+            return -value
+        _raise_parse_error("Unsupported formatted annotation", expr)
+
+    if isinstance(expr, py_ast.BinOp):
+        lhs = _eval_formatted_annotation_expr(expr.left, globals_table, builtins_table, runtime_table)
+        rhs = _eval_formatted_annotation_expr(expr.right, globals_table, builtins_table, runtime_table)
+        if isinstance(expr.op, py_ast.Add):
+            if isinstance(lhs, (int, SymbolDim)) and isinstance(rhs, (int, SymbolDim)):
+                return lhs + rhs
+        if isinstance(expr.op, py_ast.Sub):
+            if isinstance(lhs, (int, SymbolDim)) and isinstance(rhs, (int, SymbolDim)):
+                return lhs - rhs
+        if isinstance(expr.op, py_ast.Mult):
+            if isinstance(lhs, (int, SymbolDim)) and isinstance(rhs, (int, SymbolDim)):
+                return lhs * rhs
+        if isinstance(expr.op, py_ast.Div):
+            if isinstance(lhs, int) and isinstance(rhs, int):
+                if rhs == 0 or lhs % rhs != 0:
+                    _raise_parse_error("Unsupported formatted annotation", expr)
+                return lhs // rhs
+            if isinstance(lhs, int):
+                lhs = SymbolDim(lhs)
+            if isinstance(rhs, int):
+                return lhs / rhs
+            if isinstance(lhs, SymbolDim) and isinstance(rhs, SymbolDim):
+                return lhs / rhs
+        if isinstance(expr.op, py_ast.FloorDiv):
+            if isinstance(lhs, int) and isinstance(rhs, int):
+                if rhs == 0:
+                    _raise_parse_error("Unsupported formatted annotation", expr)
+                return lhs // rhs
+        _raise_parse_error("Unsupported formatted annotation", expr)
+
+    _raise_parse_error("Unsupported formatted annotation", expr)
+    return 0
+
+
 def _format_joinedstr_value(
     node: py_ast.FormattedValue,
     globals_table: dict[str, object],
@@ -1329,10 +1412,11 @@ def _format_joinedstr_value(
     """静态归一化 f-string 中的表达式片段。
 
     创建者: OpenAI
-    最后一次更改: 咯咯咯
+    最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 仅接受可静态求值为 `int/str/SymbolDim` 的表达式。
+    - 接受可静态求值为 `int/str/SymbolDim` 的表达式片段。
+    - 支持 `+ - * / //` 组合的整数计算或符号表达式。
 
     使用示例:
     - _format_joinedstr_value(node, globals(), __builtins__, {"N": 4})
@@ -1347,22 +1431,7 @@ def _format_joinedstr_value(
         _raise_parse_error("Unsupported formatted annotation", node)
 
     value_node = node.value
-    if isinstance(value_node, py_ast.Name):
-        if runtime_table is not None and value_node.id in runtime_table:
-            value = runtime_table[value_node.id]
-        else:
-            value = _lookup_python_name(value_node.id, globals_table, builtins_table)
-    elif isinstance(value_node, py_ast.Constant) and isinstance(value_node.value, (int, str)):
-        value = value_node.value
-    elif isinstance(value_node, py_ast.UnaryOp) and isinstance(value_node.op, py_ast.USub):
-        operand = value_node.operand
-        if isinstance(operand, py_ast.Constant) and isinstance(operand.value, int):
-            value = -operand.value
-        else:
-            _raise_parse_error("Unsupported formatted annotation", value_node)
-    else:
-        _raise_parse_error("Unsupported formatted annotation", value_node)
-
+    value = _eval_formatted_annotation_expr(value_node, globals_table, builtins_table, runtime_table)
     if isinstance(value, SymbolDim):
         return str(value.get_symbol())
     if isinstance(value, (int, str)):
@@ -2447,12 +2516,15 @@ def _parse_dma_call(
     if call_name in {"img2col1d", "img2col2d"}:
         if not expr.args:
             _raise_parse_error(f"Unsupported {call_name} arity", expr)
-        args = [_parse_expr(arg, env, globals_table, builtins_table) for arg in expr.args]
+        call_env = dict(env)
+        if bool(call_env.get(_REJECT_EXTERNAL_VALUES_ENV_KEY, False)):
+            call_env[_ALLOW_EXTERNAL_CONSTANTS_ENV_KEY] = True
+        args = [_parse_expr(arg, call_env, globals_table, builtins_table) for arg in expr.args]
         kwargs: dict[str, object] = {}
         for keyword in expr.keywords:
             if keyword.arg is None:
                 _raise_parse_error(f"Unsupported {call_name} arity", expr)
-            kwargs[keyword.arg] = _parse_expr(keyword.value, env, globals_table, builtins_table)
+            kwargs[keyword.arg] = _parse_expr(keyword.value, call_env, globals_table, builtins_table)
         return Img2ColAST(
             kind=call_name,
             args=args,

@@ -1,7 +1,7 @@
 """nn -> kernel lowering pass.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 将 nn dialect 的逐元素 op lower 为 kernel dialect op。
@@ -45,6 +45,7 @@ from kernel_gen.dialect.kernel import (
     KernelExpOp,
     KernelGeOp,
     KernelGtOp,
+    KernelImg2col1dOp,
     KernelLeOp,
     KernelLtOp,
     KernelMatmulOp,
@@ -238,6 +239,41 @@ def _parse_softmax_axis_attr(attr: object) -> IntegerAttr:
     if width_value != 64:
         raise LowerNnToKernelError("nn.softmax axis must be i64 IntegerAttr")
     return axis_attr
+
+
+def _parse_i64_attr(attr: object, field_name: str) -> IntegerAttr:
+    """解析 i64 attribute。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 接收 IntegerAttr 或 IntAttr，并规整为 i64 IntegerAttr。
+    - 统一校验 i64 宽度约束并返回 i64 属性。
+
+    使用示例:
+    - kw_attr = _parse_i64_attr(op.attributes.get("kw"), "kw")
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    if isinstance(attr, IntegerAttr):
+        value_attr = attr
+    elif isinstance(attr, IntAttr):
+        value_attr = IntegerAttr(attr.data, IntegerType(64))
+    else:
+        raise LowerNnToKernelError(f"nn.img2col1d {field_name} must be i64 IntegerAttr")
+
+    if not isinstance(value_attr.type, IntegerType):
+        raise LowerNnToKernelError(f"nn.img2col1d {field_name} must be i64 IntegerAttr")
+    width_attr = value_attr.type.width
+    width_value = width_attr.data if isinstance(width_attr, IntAttr) else width_attr
+    if width_value != 64:
+        raise LowerNnToKernelError(f"nn.img2col1d {field_name} must be i64 IntegerAttr")
+    return value_attr
 
 
 def _build_alloc_dynamic_shape(
@@ -467,7 +503,7 @@ def _build_kernel_op(
     """构造 kernel dialect op。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 根据 nn op 名称映射 kernel op。
@@ -506,6 +542,24 @@ def _build_kernel_op(
         axis_attr = _parse_softmax_axis_attr(op.attributes.get("axis"))
         return KernelSoftmaxOp(op.operands[0], out_value, axis_attr, space)
 
+    if op.name == "nn.img2col1d":
+        _ensure_operand_count(op, 1)
+        kw_attr = _parse_i64_attr(op.attributes.get("kw"), "kw")
+        sw_attr = _parse_i64_attr(op.attributes.get("sw"), "sw")
+        dw_attr = _parse_i64_attr(op.attributes.get("dw"), "dw")
+        pl_attr = _parse_i64_attr(op.attributes.get("pl"), "pl")
+        pr_attr = _parse_i64_attr(op.attributes.get("pr"), "pr")
+        return KernelImg2col1dOp(
+            op.operands[0],
+            out_value,
+            k=kw_attr,
+            s=sw_attr,
+            d=dw_attr,
+            p_left=pl_attr,
+            p_right=pr_attr,
+            space=space,
+        )
+
     raise LowerNnToKernelError(f"Unsupported nn op: {op.name}")
 
 
@@ -513,7 +567,7 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
     """将单个 nn op lower 为 kernel op。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 为结果插入 dma.alloc。
@@ -604,7 +658,7 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
     space = _ensure_space_attr(op)
 
     _ensure_contiguous_result_stride(result_type)
-    if op.name == "nn.matmul":
+    if op.name in {"nn.matmul", "nn.img2col1d"}:
         shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_result(result_type)
     else:
         shape_source = _select_shape_source(op)

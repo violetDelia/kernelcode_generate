@@ -66,6 +66,7 @@ from kernel_gen.dialect.kernel import (
     KernelExpOp,
     KernelGeOp,
     KernelGtOp,
+    KernelImg2col1dOp,
     KernelLeOp,
     KernelNeOp,
     KernelMatmulOp,
@@ -78,6 +79,7 @@ from kernel_gen.dialect.nn import (
     NnExpOp,
     NnGeOp,
     NnGtOp,
+    NnImg2col1dOp,
     NnLeOp,
     NnMatmulOp,
     NnMemorySpaceAttr,
@@ -89,7 +91,7 @@ from kernel_gen.dialect.nn import (
 )
 from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.dsl.mlir_gen import build_func_op
-from kernel_gen.operation.nn import softmax
+from kernel_gen.operation.nn import img2col1d, softmax
 from kernel_gen.passes.lowering.buffer_results_to_out_params import (
     BufferResultsToOutParamsError,
     BufferResultsToOutParamsPass,
@@ -1376,6 +1378,71 @@ def test_lower_softmax_public_chain_to_kernel_softmax() -> None:
     assert "kernel.softmax" in after_ir
     assert "axis = 1" in after_ir
     assert "nn.softmax" not in after_ir
+    assert "Unsupported call expression" not in after_ir
+
+
+# TC-PASS-N2K-032
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-09 03:38:06 +0800
+# 最近一次运行成功时间: 2026-04-09 03:38:06 +0800
+# 测试目的: 验证 nn.img2col1d 被 lower 为 kernel.img2col1d。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_img2col1d_direct_dialect_op_to_kernel_img2col1d
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
+def test_lower_img2col1d_direct_dialect_op_to_kernel_img2col1d() -> None:
+    input_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1), IntAttr(2), IntAttr(8)]),
+        stride=ArrayAttr([IntAttr(16), IntAttr(8), IntAttr(1)]),
+        element_type=f32,
+    )
+    result_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1), IntAttr(2), IntAttr(3), IntAttr(8)]),
+        stride=ArrayAttr([IntAttr(48), IntAttr(24), IntAttr(8), IntAttr(1)]),
+        element_type=f32,
+    )
+    space = _make_space("global")
+
+    module, block = _build_module(
+        [input_type],
+        result_type,
+        lambda block: [
+            NnImg2col1dOp(block.args[0], result_type, kw=3, sw=1, dw=1, pl=1, pr=1, space=space)
+        ],
+    )
+
+    LowerNnToKernelPass().run(module)
+    ops = _collect_ops(block)
+    assert any(isinstance(op, KernelImg2col1dOp) for op in ops)
+    after_ir = str(module)
+    assert "kernel.img2col1d" in after_ir
+    assert "nn.img2col1d" not in after_ir
+    assert "Unsupported call expression" not in after_ir
+
+
+# TC-PASS-N2K-033
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-09 03:38:06 +0800
+# 最近一次运行成功时间: 2026-04-09 03:38:06 +0800
+# 测试目的: 验证公开链路 img2col1d helper lower 为 kernel.img2col1d。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_img2col1d_public_chain_to_kernel_img2col1d
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
+def test_lower_img2col1d_public_chain_to_kernel_img2col1d() -> None:
+    def img2col1d_direct(value: "Tensor[f32, 1, 2, 8]") -> "Tensor[f32, 1, 2, 3, 8]":
+        return img2col1d(value, kw=3, sw=1, dw=1, pl=1, pr=1)
+
+    module = ModuleOp([build_func_op(img2col1d_direct, _tensor_arg([1, 2, 8], NumericType.Float32))])
+    raw_ir = str(module)
+
+    assert "nn.img2col1d" in raw_ir
+    LowerNnToKernelPass().run(module)
+    after_ir = str(module)
+    assert "kernel.img2col1d" in after_ir
+    assert "nn.img2col1d" not in after_ir
     assert "Unsupported call expression" not in after_ir
 
 

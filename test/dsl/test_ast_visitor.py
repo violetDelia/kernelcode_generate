@@ -1,7 +1,7 @@
 """AST visitor tests.
 
 创建者: 小李飞刀
-最后一次更改: 朽木露琪亚
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 覆盖 AST 前端、nn dialect IR 与 MLIR 文本入口的回归测试。
@@ -1625,6 +1625,38 @@ def test_build_func_op_accepts_joinedstr_tensor_annotation(monkeypatch: pytest.M
     assert list(func_op.function_type.inputs) == [_memory_to_nn_type(Memory([rows, cols], NumericType.Float32))]
     assert list(func_op.function_type.outputs) == [_memory_to_nn_type(Memory([rows, cols], NumericType.Float32))]
 
+
+# MGEN-040
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-09 03:38:06 +0800
+# 最近一次运行成功时间: 2026-04-09 03:38:06 +0800
+# 功能说明: 验证 build_func_op 支持包含算术表达式的 JoinedStr Tensor 注解。
+# 测试目的: 锁定 f-string 注解中算术表达式可被归一化并参与返回类型校验。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_accepts_joinedstr_tensor_annotation_with_expr
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_accepts_joinedstr_tensor_annotation_with_expr(monkeypatch: pytest.MonkeyPatch) -> None:
+    w = 8
+    kw = 1
+    sw = 1
+    dw = 1
+    pl = 0
+    pr = 0
+    expected = (w + pl + pr - dw * (kw - 1) - 1) // sw + 1
+
+    def identity(src: f"Tensor[f32, {W}]") -> f"Tensor[f32, {(W + PL + PR - DW * (KW - 1) - 1) // SW + 1}]":
+        return src
+
+    monkeypatch.setitem(identity.__globals__, "W", w)
+    monkeypatch.setitem(identity.__globals__, "KW", kw)
+    monkeypatch.setitem(identity.__globals__, "SW", sw)
+    monkeypatch.setitem(identity.__globals__, "DW", dw)
+    monkeypatch.setitem(identity.__globals__, "PL", pl)
+    monkeypatch.setitem(identity.__globals__, "PR", pr)
+    func_op = build_func_op(identity, _tensor_arg([w]))
+    assert list(func_op.function_type.outputs) == [_memory_to_nn_type(Memory([expected], NumericType.Float32))]
 
 # MGEN-025
 # 创建者: 朽木露琪亚
