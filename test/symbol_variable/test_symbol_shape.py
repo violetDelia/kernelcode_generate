@@ -10,12 +10,12 @@
 - pytest -q test/symbol_variable/test_symbol_shape.py
 
 覆盖率信息:
-- 当前覆盖率: `100%`（2026-03-22 13:41:04 +0800）。
+- 当前覆盖率: `100%`（2026-04-09 +0800）。
 - 达标判定: 已达到 `95%` 覆盖率达标线。
 - 覆盖范围: `kernel_gen/symbol_variable/symbol_shape.py` 当前行覆盖率为 `100%`。
 
 覆盖率命令:
-- pytest -q --cov=kernel_gen.symbol_variable.symbol_shape --cov-report=term-missing test/symbol_variable/test_symbol_shape.py
+- `pytest -q --cov=kernel_gen.symbol_variable.symbol_shape --cov-report=term-missing --cov-fail-under=95 test/symbol_variable/test_symbol_shape.py`
 
 关联文件:
 - 功能实现: kernel_gen/symbol_variable/symbol_shape.py
@@ -25,14 +25,7 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pytest
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolList, SymbolShape

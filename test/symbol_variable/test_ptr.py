@@ -7,6 +7,13 @@
 - 覆盖 `kernel_gen.symbol_variable.ptr` 的 P1 最小公开语义。
 - 锁定 `Ptr(dtype)`、`ptr.dtype`、`repr(ptr)` 以及缺参/多参失败边界。
 
+覆盖率信息:
+- 当前覆盖率: `100%`（`kernel_gen.symbol_variable.ptr`，2026-04-09 +0800）
+- 达标判定: 已达到 `95%` 覆盖率达标线。
+
+覆盖率命令:
+- `pytest -q --cov=kernel_gen.symbol_variable.ptr --cov-report=term-missing --cov-fail-under=95 test/symbol_variable/test_ptr.py`
+
 使用示例:
 - pytest -q test/symbol_variable/test_ptr.py
 
@@ -18,15 +25,8 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pytest
 from xdsl.dialects.builtin import f32
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
 
 # PTR-001

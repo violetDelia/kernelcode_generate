@@ -14,21 +14,18 @@
 - Spec 文档: spec/symbol_variable/symbol_dim.md
 - 测试文件: test/symbol_variable/test_symbol_dim.py
 
-当前覆盖率信息: 99%（2026-04-06 03:02:30 +0800）
-覆盖率命令: pytest -q --cov=kernel_gen.symbol_variable.symbol_dim --cov-report=term-missing test/symbol_variable/test_symbol_dim.py
+覆盖率信息:
+- 当前覆盖率: `99%`（`kernel_gen.symbol_variable.symbol_dim`，2026-04-09 +0800）
+- 达标判定: 已达到 `95%` 覆盖率达标线。
+
+覆盖率命令:
+- `pytest -q --cov=kernel_gen.symbol_variable.symbol_dim --cov-report=term-missing --cov-fail-under=95 test/symbol_variable/test_symbol_dim.py`
 """
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import sympy as sp
 import pytest
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 

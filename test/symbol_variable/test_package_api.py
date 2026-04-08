@@ -15,23 +15,17 @@
 - 测试文件: test/symbol_variable/test_package_api.py
 
 覆盖率信息:
-- 当前覆盖率: `100%` (`kernel_gen.symbol_variable.__init__`)
+- 当前覆盖率: `98.86%`（`kernel_gen.symbol_variable`，全量用例，2026-04-09 +0800）
 - 达标判定: 已达到 `95%` 覆盖率达标线。
+- 说明: 本文件聚焦包入口边界；单文件运行的包级覆盖率不作为达标口径。
 
 覆盖率命令:
-- `pytest --cov=kernel_gen.symbol_variable --cov-report=term-missing test/symbol_variable/test_package_api.py`
+- `pytest --cov=kernel_gen.symbol_variable --cov-report=term-missing --cov-fail-under=95 -q test/symbol_variable`
 """
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pytest
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
 
 # PM-001

@@ -9,8 +9,12 @@
 使用示例:
 - pytest -q test/symbol_variable/test_type.py
 
-当前覆盖率信息: 100%（kernel_gen/symbol_variable/type.py，2026-03-22 14:28:43 +0800）
-覆盖率命令: pytest -q --cov=kernel_gen.symbol_variable.type --cov-report=term-missing test/symbol_variable/test_type.py
+覆盖率信息:
+- 当前覆盖率: `100%`（`kernel_gen.symbol_variable.type`，2026-04-09 +0800）
+- 达标判定: 已达到 `95%` 覆盖率达标线。
+
+覆盖率命令:
+- `pytest -q --cov=kernel_gen.symbol_variable.type --cov-report=term-missing --cov-fail-under=95 test/symbol_variable/test_type.py`
 
 关联文件:
 - 功能实现: kernel_gen/symbol_variable/type.py
@@ -20,14 +24,7 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pytest
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
 
 # TY-001

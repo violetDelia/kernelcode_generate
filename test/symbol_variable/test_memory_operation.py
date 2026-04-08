@@ -6,6 +6,13 @@
 功能说明:
 - 覆盖 Memory 的逐元素算术与比较运算约束。
 
+覆盖率信息:
+- 当前覆盖率: `98%`（`kernel_gen.symbol_variable.memory`；`test_memory.py` + `test_memory_operation.py`，2026-04-09 +0800）
+- 达标判定: 已达到 `95%` 覆盖率达标线。
+
+覆盖率命令:
+- `pytest -q --cov=kernel_gen.symbol_variable.memory --cov-report=term-missing --cov-fail-under=95 test/symbol_variable/test_memory.py test/symbol_variable/test_memory_operation.py`
+
 使用示例:
 - pytest -q test/symbol_variable/test_memory_operation.py
 
@@ -17,14 +24,7 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pytest
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.type import Farmat, NumericType
