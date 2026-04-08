@@ -1,7 +1,7 @@
 """kernel dialect tests.
 
 创建者: 小李飞刀
-最后一次更改: 咯咯咯
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 覆盖 kernel dialect 的 verifier 约束与 memory type 复用规则。
@@ -24,7 +24,16 @@ import sys
 from pathlib import Path
 
 import pytest
-from xdsl.dialects.builtin import ArrayAttr, Float16Type, Float32Type, IntAttr, StringAttr, i1, i32
+from xdsl.dialects.builtin import (
+    ArrayAttr,
+    BFloat16Type,
+    Float16Type,
+    Float32Type,
+    IntAttr,
+    StringAttr,
+    i1,
+    i32,
+)
 from xdsl.dialects.test import TestOp as _TestOp
 from xdsl.ir import Attribute
 from xdsl.utils.exceptions import VerifyException
@@ -41,6 +50,7 @@ from kernel_gen.dialect.kernel import (
     KernelCastOp,
     KernelDivOp,
     KernelEqOp,
+    KernelExpOp,
     KernelGtOp,
     KernelLtOp,
     KernelMulOp,
@@ -368,9 +378,64 @@ def test_kernel_ops_no_result() -> None:
     cast_input = _make_value(_make_memory_type(element_type=Float32Type()))
     cast_output = _make_value(_make_memory_type(element_type=Float16Type()))
     cast_op = KernelCastOp(cast_input, cast_output, _make_space("global"))
-    for op in (add_op, sub_op, mul_op, div_op, eq_op, gt_op, lt_op, select_op, cast_op):
+    exp_input = _make_value(_make_memory_type(element_type=Float32Type()))
+    exp_output = _make_value(_make_memory_type(element_type=Float32Type()))
+    exp_op = KernelExpOp(exp_input, exp_output, _make_space("global"))
+    for op in (add_op, sub_op, mul_op, div_op, eq_op, gt_op, lt_op, select_op, cast_op, exp_op):
         op.verify()
         assert len(op.results) == 0
 
     _verify_same_layout([], _make_space("global"))
     _verify_element_type_match([], "unused")
+
+
+# TC-KRN-011
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-08 10:20:49 +0800
+# 最近一次运行成功时间: 2026-04-08 10:20:49 +0800
+# 功能说明: 验证 kernel.exp 正常路径可通过。
+# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_exp_success
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel_dialect.py
+def test_kernel_exp_success() -> None:
+    input_type = _make_memory_type(element_type=Float32Type())
+    out_type = _make_memory_type(element_type=Float32Type())
+    op = KernelExpOp(_make_value(input_type), _make_value(out_type), _make_space("global"))
+    op.verify()
+
+
+# TC-KRN-013
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-08 10:51:30 +0800
+# 最近一次运行成功时间: 2026-04-08 10:51:30 +0800
+# 功能说明: 验证 kernel.exp 支持 bf16 element_type。
+# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_exp_supports_bf16
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel_dialect.py
+def test_kernel_exp_supports_bf16() -> None:
+    input_type = _make_memory_type(element_type=BFloat16Type())
+    out_type = _make_memory_type(element_type=BFloat16Type())
+    op = KernelExpOp(_make_value(input_type), _make_value(out_type), _make_space("global"))
+    op.verify()
+
+
+# TC-KRN-012
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-08 10:20:49 +0800
+# 最近一次运行成功时间: 2026-04-08 10:20:49 +0800
+# 功能说明: 验证 kernel.exp 拒绝非浮点 element_type。
+# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_exp_requires_float
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel_dialect.py
+def test_kernel_exp_requires_float() -> None:
+    input_type = _make_memory_type(element_type=i32)
+    out_type = _make_memory_type(element_type=i32)
+    op = KernelExpOp(_make_value(input_type), _make_value(out_type), _make_space("global"))
+    with pytest.raises(VerifyException, match="kernel.exp element_type must be float"):
+        op.verify()

@@ -1,10 +1,10 @@
 """Kernel dialect definitions.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
-- 定义 kernel dialect 的逐元素算术、比较、选择与类型转换 op。
+- 定义 kernel dialect 的逐元素算术、比较、选择、指数与类型转换 op。
 - 复用 nn dialect 的 NnMemoryType 与 NnMemorySpaceAttr。
 - 所有结果通过 outs(...) 写回，不产生 SSA result。
 
@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from xdsl.dialects.builtin import Float16Type, Float32Type, Float64Type, IntegerType, i1
+from xdsl.dialects.builtin import BFloat16Type, Float16Type, Float32Type, Float64Type, IntegerType, i1
 from xdsl.ir import Attribute, Dialect, Operation, SSAValue
 from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def
 from xdsl.utils.exceptions import VerifyException
@@ -486,6 +486,45 @@ class KernelCastOp(IRDLOperation):
             )
 
 
+@irdl_op_definition
+class KernelExpOp(IRDLOperation):
+    """kernel.exp。"""
+
+    name = "kernel.exp"
+
+    input = operand_def(NnMemoryType)
+    out = operand_def(NnMemoryType)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        input_value: SSAValue | Operation,
+        out: SSAValue | Operation,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        """初始化 exp op。"""
+
+        super().__init__(operands=[input_value, out], attributes={"space": space})
+
+    def verify_(self) -> None:
+        input_type = _verify_memory_type(self.input.type, "input")
+        out_type = _verify_memory_type(self.out.type, "out")
+        _verify_same_layout([input_type, out_type], self.space)
+        _verify_element_type_match(
+            [input_type, out_type],
+            "kernel.exp element_type must match across operands",
+        )
+        if not isinstance(input_type.element_type, (BFloat16Type, Float16Type, Float32Type, Float64Type)):
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.exp element_type must be float",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+
+
 Kernel = Dialect(
     "kernel",
     [
@@ -501,6 +540,7 @@ Kernel = Dialect(
         KernelGeOp,
         KernelSelectOp,
         KernelCastOp,
+        KernelExpOp,
     ],
     [],
 )
@@ -519,4 +559,5 @@ __all__ = [
     "KernelGeOp",
     "KernelSelectOp",
     "KernelCastOp",
+    "KernelExpOp",
 ]

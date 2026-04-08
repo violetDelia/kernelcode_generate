@@ -41,6 +41,7 @@ from kernel_gen.dialect.kernel import (
     KernelCastOp,
     KernelDivOp,
     KernelEqOp,
+    KernelExpOp,
     KernelGeOp,
     KernelGtOp,
     KernelLeOp,
@@ -457,6 +458,10 @@ def _build_kernel_op(
     if op.name == "nn.cast":
         _ensure_operand_count(op, 1)
         return KernelCastOp(op.operands[0], out_value, space)
+
+    if op.name == "nn.exp":
+        _ensure_operand_count(op, 1)
+        return KernelExpOp(op.operands[0], out_value, space)
 
     raise LowerNnToKernelError(f"Unsupported nn op: {op.name}")
 
