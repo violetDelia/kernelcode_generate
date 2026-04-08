@@ -30,7 +30,6 @@ from xdsl.dialects.builtin import (
     Float16Type,
     Float32Type,
     IntAttr,
-    IntegerAttr,
     StringAttr,
     i1,
     i32,
@@ -53,12 +52,10 @@ from kernel_gen.dialect.kernel import (
     KernelEqOp,
     KernelExpOp,
     KernelGtOp,
+    KernelImg2col2dOp,
     KernelLtOp,
     KernelMatmulOp,
     KernelMulOp,
-    KernelReduceMaxOp,
-    KernelReduceMinOp,
-    KernelReduceSumOp,
     KernelSoftmaxOp,
     KernelSelectOp,
     KernelSubOp,
@@ -390,25 +387,29 @@ def test_kernel_ops_no_result() -> None:
     softmax_input = _make_value(_make_memory_type(element_type=Float32Type()))
     softmax_output = _make_value(_make_memory_type(element_type=Float32Type()))
     softmax_op = KernelSoftmaxOp(softmax_input, softmax_output, axis=1, space=_make_space("global"))
-    reduce_input = _make_value(
-        _make_memory_type(
-            shape=ArrayAttr([IntAttr(2), IntAttr(3), IntAttr(4)]),
-            stride=ArrayAttr([IntAttr(12), IntAttr(4), IntAttr(1)]),
-            element_type=Float32Type(),
-        )
+    img2col_input_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5), IntAttr(5)]),
+        stride=ArrayAttr([IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)]),
+        element_type=Float32Type(),
     )
-    reduce_output = _make_value(
-        _make_memory_type(
-            shape=ArrayAttr([IntAttr(2), IntAttr(1), IntAttr(4)]),
-            stride=ArrayAttr([IntAttr(4), IntAttr(4), IntAttr(1)]),
-            element_type=Float32Type(),
-        )
+    img2col_output_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3)]),
+        stride=ArrayAttr([IntAttr(243), IntAttr(81), IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(1)]),
+        element_type=Float32Type(),
     )
-    reduce_max_op = KernelReduceMaxOp(
-        reduce_input,
-        reduce_output,
-        axis=1,
-        keepdim=True,
+    img2col_op = KernelImg2col2dOp(
+        _make_value(img2col_input_type),
+        _make_value(img2col_output_type),
+        kh=3,
+        kw=3,
+        sh=1,
+        sw=1,
+        dh=1,
+        dw=1,
+        ph=0,
+        pw=0,
+        pl=0,
+        pr=0,
         space=_make_space("global"),
     )
     for op in (
@@ -423,7 +424,7 @@ def test_kernel_ops_no_result() -> None:
         cast_op,
         exp_op,
         softmax_op,
-        reduce_max_op,
+        img2col_op,
     ):
         op.verify()
         assert len(op.results) == 0
@@ -554,6 +555,199 @@ def test_kernel_matmul_rank_shape_contract() -> None:
         op.verify()
 
 
+# TC-KRN-017
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-09 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-09 00:00:00 +0800
+# 功能说明: 验证 kernel.img2col2d 保持结构化输出与显式窗口属性。
+# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_img2col2d_structured_contract
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel_dialect.py
+def test_kernel_img2col2d_structured_contract() -> None:
+    input_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5), IntAttr(5)]),
+        stride=ArrayAttr([IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)]),
+        element_type=Float32Type(),
+    )
+    output_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3)]),
+        stride=ArrayAttr([IntAttr(243), IntAttr(81), IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(1)]),
+        element_type=Float32Type(),
+    )
+    op = KernelImg2col2dOp(
+        _make_value(input_type),
+        _make_value(output_type),
+        kh=3,
+        kw=3,
+        sh=1,
+        sw=1,
+        dh=1,
+        dw=1,
+        ph=0,
+        pw=0,
+        pl=0,
+        pr=0,
+        space=_make_space("global"),
+    )
+    op.verify()
+
+
+# TC-KRN-018
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-09 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-09 00:00:00 +0800
+# 功能说明: 验证 kernel.img2col2d 拒绝非法输入 rank、非法输入 layout 与非法输出 rank。
+# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_img2col2d_input_rank_layout_contract
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel_dialect.py
+def test_kernel_img2col2d_input_rank_layout_contract() -> None:
+    rank3_input = _make_memory_type(
+        shape=ArrayAttr([IntAttr(3), IntAttr(5), IntAttr(5)]),
+        stride=ArrayAttr([IntAttr(25), IntAttr(5), IntAttr(1)]),
+        element_type=Float32Type(),
+    )
+    output_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3)]),
+        stride=ArrayAttr([IntAttr(243), IntAttr(81), IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(1)]),
+        element_type=Float32Type(),
+    )
+    op = KernelImg2col2dOp(
+        _make_value(rank3_input),
+        _make_value(output_type),
+        kh=3,
+        kw=3,
+        sh=1,
+        sw=1,
+        dh=1,
+        dw=1,
+        ph=0,
+        pw=0,
+        pl=0,
+        pr=0,
+        space=_make_space("global"),
+    )
+    with pytest.raises(VerifyException, match="kernel.img2col2d requires rank-4 input"):
+        op.verify()
+
+    non_contiguous_input = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5), IntAttr(5)]),
+        stride=ArrayAttr([IntAttr(75), IntAttr(1), IntAttr(15), IntAttr(3)]),
+        element_type=Float32Type(),
+    )
+    op = KernelImg2col2dOp(
+        _make_value(non_contiguous_input),
+        _make_value(output_type),
+        kh=3,
+        kw=3,
+        sh=1,
+        sw=1,
+        dh=1,
+        dw=1,
+        ph=0,
+        pw=0,
+        pl=0,
+        pr=0,
+        space=_make_space("global"),
+    )
+    with pytest.raises(VerifyException, match="kernel.img2col2d input layout must be contiguous"):
+        op.verify()
+
+    input_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5), IntAttr(5)]),
+        stride=ArrayAttr([IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)]),
+        element_type=Float32Type(),
+    )
+    rank5_output = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3)]),
+        stride=ArrayAttr([IntAttr(81), IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(1)]),
+        element_type=Float32Type(),
+    )
+    op = KernelImg2col2dOp(
+        _make_value(input_type),
+        _make_value(rank5_output),
+        kh=3,
+        kw=3,
+        sh=1,
+        sw=1,
+        dh=1,
+        dw=1,
+        ph=0,
+        pw=0,
+        pl=0,
+        pr=0,
+        space=_make_space("global"),
+    )
+    with pytest.raises(VerifyException, match="kernel.img2col2d requires rank-6 result"):
+        op.verify()
+
+
+# TC-KRN-019
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-09 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-09 00:00:00 +0800
+# 功能说明: 验证 kernel.img2col2d 拒绝结构化输出 shape 或 stride 不满足合同。
+# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_img2col2d_output_extent_contract
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel_dialect.py
+def test_kernel_img2col2d_output_extent_contract() -> None:
+    input_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5), IntAttr(5)]),
+        stride=ArrayAttr([IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)]),
+        element_type=Float32Type(),
+    )
+    bad_shape_output = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(2), IntAttr(3), IntAttr(3), IntAttr(3)]),
+        stride=ArrayAttr([IntAttr(162), IntAttr(54), IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(1)]),
+        element_type=Float32Type(),
+    )
+    op = KernelImg2col2dOp(
+        _make_value(input_type),
+        _make_value(bad_shape_output),
+        kh=3,
+        kw=3,
+        sh=1,
+        sw=1,
+        dh=1,
+        dw=1,
+        ph=0,
+        pw=0,
+        pl=0,
+        pr=0,
+        space=_make_space("global"),
+    )
+    with pytest.raises(VerifyException, match="kernel.img2col2d result shape/stride must match img2col2d contract"):
+        op.verify()
+
+    bad_stride_output = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3), IntAttr(3)]),
+        stride=ArrayAttr([IntAttr(200), IntAttr(80), IntAttr(27), IntAttr(9), IntAttr(3), IntAttr(1)]),
+        element_type=Float32Type(),
+    )
+    op = KernelImg2col2dOp(
+        _make_value(input_type),
+        _make_value(bad_stride_output),
+        kh=3,
+        kw=3,
+        sh=1,
+        sw=1,
+        dh=1,
+        dw=1,
+        ph=0,
+        pw=0,
+        pl=0,
+        pr=0,
+        space=_make_space("global"),
+    )
+    with pytest.raises(VerifyException, match="kernel.img2col2d result shape/stride must match img2col2d contract"):
+        op.verify()
+
+
 # TC-KRN-016
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
@@ -571,7 +765,7 @@ def test_kernel_softmax_success() -> None:
     op.verify()
 
 
-# TC-KRN-017
+# TC-KRN-020
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-08 21:12:06 +0800
@@ -589,7 +783,7 @@ def test_kernel_softmax_axis_error() -> None:
         op.verify()
 
 
-# TC-KRN-018
+# TC-KRN-021
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-08 21:12:06 +0800
@@ -605,97 +799,3 @@ def test_kernel_softmax_requires_float() -> None:
     op = KernelSoftmaxOp(_make_value(input_type), _make_value(out_type), axis=1, space=_make_space("global"))
     with pytest.raises(VerifyException, match="kernel.softmax element_type must be float"):
         op.verify()
-
-
-# TC-KRN-013
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-09 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-09 00:00:00 +0800
-# 功能说明: 验证 kernel.reduce_sum/min/max 保持具名区分并锁定 axis/keepdim 形状合同。
-# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_reduce_max_family_contract
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
-# 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel_dialect.py
-def test_kernel_reduce_max_family_contract() -> None:
-    input_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(3), IntAttr(4)]),
-        stride=ArrayAttr([IntAttr(12), IntAttr(4), IntAttr(1)]),
-        element_type=Float32Type(),
-    )
-    keepdim_out = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(1), IntAttr(4)]),
-        stride=ArrayAttr([IntAttr(4), IntAttr(4), IntAttr(1)]),
-        element_type=Float32Type(),
-    )
-    for op_cls, expected_name in (
-        (KernelReduceSumOp, "kernel.reduce_sum"),
-        (KernelReduceMinOp, "kernel.reduce_min"),
-        (KernelReduceMaxOp, "kernel.reduce_max"),
-    ):
-        op = op_cls(
-            _make_value(input_type),
-            _make_value(keepdim_out),
-            axis=1,
-            keepdim=True,
-            space=_make_space("global"),
-        )
-        op.verify()
-        assert op.name == expected_name
-
-    bad_out = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
-        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
-        element_type=Float32Type(),
-    )
-    bad_shape_op = KernelReduceMaxOp(
-        _make_value(input_type),
-        _make_value(bad_out),
-        axis=1,
-        keepdim=True,
-        space=_make_space("global"),
-    )
-    with pytest.raises(VerifyException, match="kernel.reduce_max result shape must match axis/keepdim"):
-        bad_shape_op.verify()
-
-
-# TC-KRN-020
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-09 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-09 00:00:00 +0800
-# 功能说明: 验证 kernel.reduce_max 拒绝越界 axis 与非法 keepdim。
-# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_reduce_max_axis_and_keepdim_error
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
-# 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel_dialect.py
-def test_kernel_reduce_max_axis_and_keepdim_error() -> None:
-    input_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(3), IntAttr(4)]),
-        stride=ArrayAttr([IntAttr(12), IntAttr(4), IntAttr(1)]),
-        element_type=Float32Type(),
-    )
-    out_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(2), IntAttr(1), IntAttr(4)]),
-        stride=ArrayAttr([IntAttr(4), IntAttr(4), IntAttr(1)]),
-        element_type=Float32Type(),
-    )
-    axis_error_op = KernelReduceMaxOp(
-        _make_value(input_type),
-        _make_value(out_type),
-        axis=3,
-        keepdim=True,
-        space=_make_space("global"),
-    )
-    with pytest.raises(VerifyException, match="axis must be within"):
-        axis_error_op.verify()
-
-    keepdim_error_op = KernelReduceMaxOp(
-        _make_value(input_type),
-        _make_value(out_type),
-        axis=1,
-        keepdim=IntegerAttr(2, i32),
-        space=_make_space("global"),
-    )
-    with pytest.raises(VerifyException, match="keepdim must be i1"):
-        keepdim_error_op.verify()

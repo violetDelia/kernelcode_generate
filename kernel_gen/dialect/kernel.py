@@ -276,34 +276,6 @@ def _normalize_i64_attr(value: int | IntegerAttr | IntAttr, field_name: str) -> 
     return attr
 
 
-def _normalize_i1_attr(value: bool | int | IntegerAttr | IntAttr, field_name: str) -> IntegerAttr:
-    """将布尔语义规整为 i1 IntegerAttr。
-
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
-
-    功能说明:
-    - 支持 bool/int/IntAttr/IntegerAttr 输入，统一为 i1 IntegerAttr。
-    - 用于 kernel.reduce_* keepdim 属性构造入口。
-
-    使用示例:
-    - _normalize_i1_attr(True, "keepdim")
-
-    关联文件:
-    - spec: spec/dialect/kernel.md
-    - test: test/dialect/test_kernel_dialect.py
-    - 功能实现: kernel_gen/dialect/kernel.py
-    """
-
-    if isinstance(value, IntegerAttr):
-        return value
-    if isinstance(value, IntAttr):
-        value = value.data
-    if isinstance(value, bool):
-        value = 1 if value else 0
-    return IntegerAttr(int(value), IntegerType(1))
-
-
 def _verify_i64_attr_range(attr: IntegerAttr, field_name: str, *, min_value: int, max_value: int) -> int:
     """校验 i64 属性并返回整数值。
 
@@ -356,18 +328,18 @@ def _verify_i64_attr_range(attr: IntegerAttr, field_name: str, *, min_value: int
     return value
 
 
-def _verify_i1_bool_attr(attr: IntegerAttr, field_name: str) -> bool:
-    """校验 i1 布尔属性并返回布尔值。
+def _collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None:
+    """提取静态整数维度列表。
 
     创建者: 朽木露琪亚
     最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 仅接受 i1 IntegerAttr。
-    - 允许 0/1/-1 三种底层编码。
+    - 当所有维度均为 `IntAttr` 时返回整数列表。
+    - 任一维度非静态整数时返回 `None`，交由后续阶段处理。
 
     使用示例:
-    - _verify_i1_bool_attr(IntegerAttr(1, IntegerType(1)), "keepdim")
+    - _collect_int_dims(memory_type.shape.data)
 
     关联文件:
     - spec: spec/dialect/kernel.md
@@ -375,51 +347,26 @@ def _verify_i1_bool_attr(attr: IntegerAttr, field_name: str) -> bool:
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
-    if not isinstance(attr.type, IntegerType):
-        raise VerifyException(
-            _ERROR_TEMPLATE.format(
-                scene=_ERROR_SCENE,
-                expected=f"{field_name} must be i1",
-                actual=_ERROR_ACTUAL,
-                action=_ERROR_ACTION,
-            )
-        )
-    width_attr = attr.type.width
-    width_value = width_attr.data if isinstance(width_attr, IntAttr) else width_attr
-    if width_value != 1:
-        raise VerifyException(
-            _ERROR_TEMPLATE.format(
-                scene=_ERROR_SCENE,
-                expected=f"{field_name} must be i1",
-                actual=_ERROR_ACTUAL,
-                action=_ERROR_ACTION,
-            )
-        )
-    value = attr.value.data
-    if value not in (0, 1, -1):
-        raise VerifyException(
-            _ERROR_TEMPLATE.format(
-                scene=_ERROR_SCENE,
-                expected=f"{field_name} must be bool",
-                actual=_ERROR_ACTUAL,
-                action=_ERROR_ACTION,
-            )
-        )
-    return value != 0
+    values: list[int] = []
+    for dim in dims:
+        if not isinstance(dim, IntAttr):
+            return None
+        values.append(dim.data)
+    return values
 
 
-def _normalize_axis(axis: int, rank: int, op_name: str) -> int:
-    """将可能为负值的 axis 规整到非负下标。
+def _build_contiguous_stride(shape: Sequence[int]) -> list[int]:
+    """根据静态 shape 构造连续布局 stride。
 
     创建者: 朽木露琪亚
     最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 接收通过区间校验的 axis。
-    - 统一返回 `[0, rank)` 内的非负轴值。
+    - 采用行主序布局，从尾轴向前累计 stride。
+    - 用于 `kernel.img2col2d` 输出布局校验。
 
     使用示例:
-    - _normalize_axis(-1, 3, "kernel.reduce_max")
+    - _build_contiguous_stride([1, 3, 3, 3, 3, 3])
 
     关联文件:
     - spec: spec/dialect/kernel.md
@@ -427,26 +374,27 @@ def _normalize_axis(axis: int, rank: int, op_name: str) -> int:
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
-    _ = op_name
-    return axis + rank if axis < 0 else axis
+    running = 1
+    strides: list[int] = []
+    for dim in reversed(shape):
+        strides.append(running)
+        running *= dim
+    strides.reverse()
+    return strides
 
 
-def _build_reduce_result_shape(
-    input_dims: Sequence[Attribute],
-    axis: int,
-    keepdim: bool,
-) -> list[Attribute]:
-    """根据输入 shape 与 `axis/keepdim` 推导 reduction 输出 shape。
+def _img2col_output_dim(size: int, kernel: int, stride: int, dilation: int, pad_before: int, pad_after: int) -> int:
+    """根据 img2col 参数计算单轴输出尺寸。
 
     创建者: 朽木露琪亚
     最后一次更改: 朽木露琪亚
 
     功能说明:
-    - keepdim=true 时，将归约轴替换为 `1`。
-    - keepdim=false 时移除归约轴；若结果 rank 为 `0` 则规整为 `[1]`。
+    - 计算 `floor((size + pad_before + pad_after - dilation * (kernel - 1) - 1) / stride) + 1`。
+    - 由 `kernel.img2col2d` 的 verifier 复用。
 
     使用示例:
-    - _build_reduce_result_shape([IntAttr(2), IntAttr(3)], 1, True)
+    - _img2col_output_dim(5, 3, 1, 1, 0, 0)
 
     关联文件:
     - spec: spec/dialect/kernel.md
@@ -454,14 +402,7 @@ def _build_reduce_result_shape(
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
-    result_dims: list[Attribute] = []
-    for idx, dim in enumerate(input_dims):
-        if idx == axis:
-            if keepdim:
-                result_dims.append(IntAttr(1))
-            continue
-        result_dims.append(dim)
-    return result_dims or [IntAttr(1)]
+    return ((size + pad_before + pad_after - dilation * (kernel - 1) - 1) // stride) + 1
 
 
 class _BaseKernelBinaryOp(IRDLOperation):
@@ -746,6 +687,227 @@ class KernelMatmulOp(_BaseKernelBinaryOp):
 
 
 @irdl_op_definition
+class KernelImg2col2dOp(IRDLOperation):
+    """kernel.img2col2d。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 定义二维 img2col 的 kernel 目标 op。
+    - verifier 校验输入输出 rank、窗口属性、结构化结果 shape/stride 与空间一致性。
+
+    使用示例:
+    - KernelImg2col2dOp(inp, out, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0, space=_make_space("global"))
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel_dialect.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    name = "kernel.img2col2d"
+
+    input = operand_def(NnMemoryType)
+    out = operand_def(NnMemoryType)
+    kh = attr_def(IntegerAttr)
+    kw = attr_def(IntegerAttr)
+    sh = attr_def(IntegerAttr)
+    sw = attr_def(IntegerAttr)
+    dh = attr_def(IntegerAttr)
+    dw = attr_def(IntegerAttr)
+    ph = attr_def(IntegerAttr)
+    pw = attr_def(IntegerAttr)
+    pl = attr_def(IntegerAttr)
+    pr = attr_def(IntegerAttr)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        input_value: SSAValue | Operation,
+        out: SSAValue | Operation,
+        kh: int | IntegerAttr | IntAttr,
+        kw: int | IntegerAttr | IntAttr,
+        sh: int | IntegerAttr | IntAttr,
+        sw: int | IntegerAttr | IntAttr,
+        dh: int | IntegerAttr | IntAttr,
+        dw: int | IntegerAttr | IntAttr,
+        ph: int | IntegerAttr | IntAttr,
+        pw: int | IntegerAttr | IntAttr,
+        pl: int | IntegerAttr | IntAttr,
+        pr: int | IntegerAttr | IntAttr,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        """初始化 img2col2d op。
+
+        创建者: 朽木露琪亚
+        最后一次更改: 朽木露琪亚
+
+        功能说明:
+        - 绑定输入/输出 operand。
+        - 统一规整窗口参数为 i64 IntegerAttr。
+
+        使用示例:
+        - KernelImg2col2dOp(inp, out, 3, 3, 1, 1, 1, 1, 0, 0, 0, 0, _make_space("global"))
+
+        关联文件:
+        - spec: spec/dialect/kernel.md
+        - test: test/dialect/test_kernel_dialect.py
+        - 功能实现: kernel_gen/dialect/kernel.py
+        """
+
+        super().__init__(
+            operands=[input_value, out],
+            attributes={
+                "kh": _normalize_i64_attr(kh, "kh"),
+                "kw": _normalize_i64_attr(kw, "kw"),
+                "sh": _normalize_i64_attr(sh, "sh"),
+                "sw": _normalize_i64_attr(sw, "sw"),
+                "dh": _normalize_i64_attr(dh, "dh"),
+                "dw": _normalize_i64_attr(dw, "dw"),
+                "ph": _normalize_i64_attr(ph, "ph"),
+                "pw": _normalize_i64_attr(pw, "pw"),
+                "pl": _normalize_i64_attr(pl, "pl"),
+                "pr": _normalize_i64_attr(pr, "pr"),
+                "space": space,
+            },
+        )
+
+    def verify_(self) -> None:
+        """校验 kernel.img2col2d 合同。
+
+        创建者: 朽木露琪亚
+        最后一次更改: 朽木露琪亚
+
+        功能说明:
+        - 校验输入输出 rank、元素类型、空间、窗口参数与结构化结果布局。
+
+        使用示例:
+        - KernelImg2col2dOp(...).verify_()
+
+        关联文件:
+        - spec: spec/dialect/kernel.md
+        - test: test/dialect/test_kernel_dialect.py
+        - 功能实现: kernel_gen/dialect/kernel.py
+        """
+
+        input_type = _verify_memory_type(self.input.type, "input")
+        out_type = _verify_memory_type(self.out.type, "out")
+        self.space.verify()
+
+        if len(input_type.shape.data) != 4:
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.img2col2d requires rank-4 input",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+        if len(out_type.shape.data) != 6:
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.img2col2d requires rank-6 result",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+        if input_type.space.space.data != self.space.space.data:
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.img2col2d attribute space must match input space",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+        if out_type.space.space.data != self.space.space.data:
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.img2col2d attribute space must match result space",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+        if out_type.element_type != input_type.element_type:
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.img2col2d result element_type must match input",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+
+        kh_value = _verify_i64_attr_range(self.kh, "kh", min_value=1, max_value=2**63 - 1)
+        kw_value = _verify_i64_attr_range(self.kw, "kw", min_value=1, max_value=2**63 - 1)
+        sh_value = _verify_i64_attr_range(self.sh, "sh", min_value=1, max_value=2**63 - 1)
+        sw_value = _verify_i64_attr_range(self.sw, "sw", min_value=1, max_value=2**63 - 1)
+        dh_value = _verify_i64_attr_range(self.dh, "dh", min_value=1, max_value=2**63 - 1)
+        dw_value = _verify_i64_attr_range(self.dw, "dw", min_value=1, max_value=2**63 - 1)
+        ph_value = _verify_i64_attr_range(self.ph, "ph", min_value=0, max_value=2**63 - 1)
+        pw_value = _verify_i64_attr_range(self.pw, "pw", min_value=0, max_value=2**63 - 1)
+        pl_value = _verify_i64_attr_range(self.pl, "pl", min_value=0, max_value=2**63 - 1)
+        pr_value = _verify_i64_attr_range(self.pr, "pr", min_value=0, max_value=2**63 - 1)
+
+        input_shape = list(input_type.shape.data)
+        out_shape = list(out_type.shape.data)
+        if not isinstance(out_shape[2], IntAttr) or out_shape[2].data != kh_value:
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.img2col2d result shape/stride must match img2col2d contract",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+        if not isinstance(out_shape[3], IntAttr) or out_shape[3].data != kw_value:
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.img2col2d result shape/stride must match img2col2d contract",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+
+        input_dims = _collect_int_dims(input_shape)
+        input_strides = _collect_int_dims(input_type.stride.data)
+        if input_dims is not None and input_strides is not None:
+            if input_strides != _build_contiguous_stride(input_dims):
+                raise VerifyException(
+                    _ERROR_TEMPLATE.format(
+                        scene=_ERROR_SCENE,
+                        expected="kernel.img2col2d input layout must be contiguous",
+                        actual=_ERROR_ACTUAL,
+                        action=_ERROR_ACTION,
+                    )
+                )
+
+        out_dims = _collect_int_dims(out_shape)
+        out_strides = _collect_int_dims(out_type.stride.data)
+        if input_dims is None or out_dims is None or out_strides is None:
+            return
+
+        n_dim, c_dim, h_dim, w_dim = input_dims
+        oh_dim = _img2col_output_dim(h_dim, kh_value, sh_value, dh_value, ph_value, pw_value)
+        ow_dim = _img2col_output_dim(w_dim, kw_value, sw_value, dw_value, pl_value, pr_value)
+        expected_shape = [n_dim, c_dim, kh_value, kw_value, oh_dim, ow_dim]
+        expected_stride = _build_contiguous_stride(expected_shape)
+        if oh_dim < 1 or ow_dim < 1 or out_dims != expected_shape or out_strides != expected_stride:
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.img2col2d result shape/stride must match img2col2d contract",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+
+
+@irdl_op_definition
 class KernelSelectOp(IRDLOperation):
     """kernel.select。"""
 
@@ -959,103 +1121,6 @@ class KernelSoftmaxOp(IRDLOperation):
         _verify_i64_attr_range(axis_attr, "axis", min_value=-rank, max_value=rank - 1)
 
 
-class _BaseKernelReduceOp(IRDLOperation):
-    """kernel reduction op 基类。"""
-
-    input = operand_def(NnMemoryType)
-    out = operand_def(NnMemoryType)
-    axis = attr_def(IntegerAttr)
-    keepdim = attr_def(IntegerAttr)
-    space = attr_def(NnMemorySpaceAttr)
-
-    def __init__(
-        self,
-        input_value: SSAValue | Operation,
-        out: SSAValue | Operation,
-        axis: int | IntegerAttr | IntAttr,
-        keepdim: bool | int | IntegerAttr | IntAttr,
-        space: NnMemorySpaceAttr,
-    ) -> None:
-        axis_attr = _normalize_i64_attr(axis, "axis")
-        keepdim_attr = _normalize_i1_attr(keepdim, "keepdim")
-        super().__init__(
-            operands=[input_value, out],
-            attributes={"axis": axis_attr, "keepdim": keepdim_attr, "space": space},
-        )
-
-    def _verify_reduce_contract(self, op_name: str) -> None:
-        input_type = _verify_memory_type(self.input.type, "input")
-        out_type = _verify_memory_type(self.out.type, "out")
-
-        self.space.verify()
-        if input_type.space.space.data != out_type.space.space.data:
-            raise VerifyException(
-                _ERROR_TEMPLATE.format(
-                    scene=_ERROR_SCENE,
-                    expected=f"{op_name} input/out space must match",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
-                )
-            )
-        if input_type.space.space.data != self.space.space.data:
-            raise VerifyException(
-                _ERROR_TEMPLATE.format(
-                    scene=_ERROR_SCENE,
-                    expected=f"{op_name} attribute space must match operand space",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
-                )
-            )
-        _verify_element_type_match(
-            [input_type, out_type],
-            f"{op_name} element_type must match across operands",
-        )
-        rank = len(input_type.shape.data)
-        axis_value = _verify_i64_attr_range(self.axis, "axis", min_value=-rank, max_value=rank - 1)
-        keepdim = _verify_i1_bool_attr(self.keepdim, "keepdim")
-        normalized_axis = _normalize_axis(axis_value, rank, op_name)
-        expected_shape = _build_reduce_result_shape(input_type.shape.data, normalized_axis, keepdim)
-        if list(out_type.shape.data) != expected_shape:
-            raise VerifyException(
-                _ERROR_TEMPLATE.format(
-                    scene=_ERROR_SCENE,
-                    expected=f"{op_name} result shape must match axis/keepdim",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
-                )
-            )
-
-
-@irdl_op_definition
-class KernelReduceSumOp(_BaseKernelReduceOp):
-    """kernel.reduce_sum。"""
-
-    name = "kernel.reduce_sum"
-
-    def verify_(self) -> None:
-        self._verify_reduce_contract("kernel.reduce_sum")
-
-
-@irdl_op_definition
-class KernelReduceMinOp(_BaseKernelReduceOp):
-    """kernel.reduce_min。"""
-
-    name = "kernel.reduce_min"
-
-    def verify_(self) -> None:
-        self._verify_reduce_contract("kernel.reduce_min")
-
-
-@irdl_op_definition
-class KernelReduceMaxOp(_BaseKernelReduceOp):
-    """kernel.reduce_max。"""
-
-    name = "kernel.reduce_max"
-
-    def verify_(self) -> None:
-        self._verify_reduce_contract("kernel.reduce_max")
-
-
 Kernel = Dialect(
     "kernel",
     [
@@ -1070,13 +1135,11 @@ Kernel = Dialect(
         KernelGtOp,
         KernelGeOp,
         KernelMatmulOp,
+        KernelImg2col2dOp,
         KernelSelectOp,
         KernelCastOp,
         KernelExpOp,
         KernelSoftmaxOp,
-        KernelReduceSumOp,
-        KernelReduceMinOp,
-        KernelReduceMaxOp,
     ],
     [],
 )
@@ -1094,11 +1157,9 @@ __all__ = [
     "KernelGtOp",
     "KernelGeOp",
     "KernelMatmulOp",
+    "KernelImg2col2dOp",
     "KernelSelectOp",
     "KernelCastOp",
     "KernelExpOp",
     "KernelSoftmaxOp",
-    "KernelReduceSumOp",
-    "KernelReduceMinOp",
-    "KernelReduceMaxOp",
 ]

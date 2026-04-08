@@ -7,7 +7,6 @@
 - 将 nn dialect 的逐元素 op lower 为 kernel dialect op。
 - 当结果无法复用已有输出时，为结果插入 dma.alloc。
 - `nn.softmax` lower 为 `kernel.softmax` 并保留 `axis`。
-- `nn.reduce_*` lower 为具名 `kernel.reduce_*` 并保留 `axis/keepdim`。
 
 使用示例:
 - from kernel_gen.passes.lowering.nn_to_kernel import LowerNnToKernelPass
@@ -46,14 +45,12 @@ from kernel_gen.dialect.kernel import (
     KernelExpOp,
     KernelGeOp,
     KernelGtOp,
+    KernelImg2col2dOp,
     KernelLeOp,
     KernelLtOp,
     KernelMatmulOp,
     KernelMulOp,
     KernelNeOp,
-    KernelReduceMaxOp,
-    KernelReduceMinOp,
-    KernelReduceSumOp,
     KernelSelectOp,
     KernelSoftmaxOp,
     KernelSubOp,
@@ -97,13 +94,7 @@ _SUPPORTED_BINARY = {
     "nn.matmul": KernelMatmulOp,
 }
 
-_SUPPORTED_REDUCE = {
-    "nn.reduce_sum": KernelReduceSumOp,
-    "nn.reduce_min": KernelReduceMinOp,
-    "nn.reduce_max": KernelReduceMaxOp,
-}
-
-_RESULT_TYPED_ALLOC_OPS = {"nn.matmul", *tuple(_SUPPORTED_REDUCE.keys())}
+_RESULT_TYPED_ALLOC_OPS = {"nn.matmul", "nn.img2col2d"}
 
 
 
@@ -250,71 +241,6 @@ def _parse_softmax_axis_attr(attr: object) -> IntegerAttr:
     if width_value != 64:
         raise LowerNnToKernelError("nn.softmax axis must be i64 IntegerAttr")
     return axis_attr
-
-
-def _parse_reduce_axis_attr(op: Operation) -> IntegerAttr:
-    """解析 reduction op 的单轴 `axes` 属性。
-
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
-
-    功能说明:
-    - 要求 `axes` 为仅包含一个 i64 IntegerAttr 的 ArrayAttr。
-    - 返回该单轴属性，用于构造 `kernel.reduce_*`。
-
-    使用示例:
-    - axis_attr = _parse_reduce_axis_attr(op)
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_to_kernel.md
-    - test: test/pass/test_lowering_nn_to_kernel.py
-    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
-    """
-
-    axes_attr = op.attributes.get("axes")
-    if not isinstance(axes_attr, ArrayAttr) or len(axes_attr.data) != 1:
-        raise LowerNnToKernelError(f"{op.name} expects exactly one axis for kernel lowering")
-    axis_attr = axes_attr.data[0]
-    if not isinstance(axis_attr, IntegerAttr):
-        raise LowerNnToKernelError(f"{op.name} expects exactly one axis for kernel lowering")
-    if not isinstance(axis_attr.type, IntegerType):
-        raise LowerNnToKernelError(f"{op.name} expects exactly one axis for kernel lowering")
-    width_attr = axis_attr.type.width
-    width_value = width_attr.data if isinstance(width_attr, IntAttr) else width_attr
-    if width_value != 64:
-        raise LowerNnToKernelError(f"{op.name} expects exactly one axis for kernel lowering")
-    return axis_attr
-
-
-def _parse_reduce_keepdim_attr(op: Operation) -> IntegerAttr:
-    """解析 reduction op 的 `keepdim` 属性。
-
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
-
-    功能说明:
-    - 要求 `keepdim` 为 i1 IntegerAttr。
-    - 允许 0/1/-1 三种底层编码。
-
-    使用示例:
-    - keepdim_attr = _parse_reduce_keepdim_attr(op)
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_to_kernel.md
-    - test: test/pass/test_lowering_nn_to_kernel.py
-    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
-    """
-
-    keepdim_attr = op.attributes.get("keepdim")
-    if not isinstance(keepdim_attr, IntegerAttr):
-        raise LowerNnToKernelError(f"{op.name} keepdim must be i1 IntegerAttr")
-    if not isinstance(keepdim_attr.type, IntegerType):
-        raise LowerNnToKernelError(f"{op.name} keepdim must be i1 IntegerAttr")
-    width_attr = keepdim_attr.type.width
-    width_value = width_attr.data if isinstance(width_attr, IntAttr) else width_attr
-    if width_value != 1 or keepdim_attr.value.data not in (0, 1, -1):
-        raise LowerNnToKernelError(f"{op.name} keepdim must be i1 IntegerAttr")
-    return keepdim_attr
 
 
 def _build_alloc_dynamic_shape(
@@ -583,12 +509,23 @@ def _build_kernel_op(
         axis_attr = _parse_softmax_axis_attr(op.attributes.get("axis"))
         return KernelSoftmaxOp(op.operands[0], out_value, axis_attr, space)
 
-    if op.name in _SUPPORTED_REDUCE:
+    if op.name == "nn.img2col2d":
         _ensure_operand_count(op, 1)
-        axis_attr = _parse_reduce_axis_attr(op)
-        keepdim_attr = _parse_reduce_keepdim_attr(op)
-        kernel_cls = _SUPPORTED_REDUCE[op.name]
-        return kernel_cls(op.operands[0], out_value, axis_attr, keepdim_attr, space)
+        return KernelImg2col2dOp(
+            op.operands[0],
+            out_value,
+            kh=op.attributes.get("kh"),
+            kw=op.attributes.get("kw"),
+            sh=op.attributes.get("sh"),
+            sw=op.attributes.get("sw"),
+            dh=op.attributes.get("dh"),
+            dw=op.attributes.get("dw"),
+            ph=op.attributes.get("ph"),
+            pw=op.attributes.get("pw"),
+            pl=op.attributes.get("pl"),
+            pr=op.attributes.get("pr"),
+            space=space,
+        )
 
     raise LowerNnToKernelError(f"Unsupported nn op: {op.name}")
 
