@@ -252,6 +252,24 @@
 - test_memory_pool_rewrite_straight_line_pool_reuse 断言 pool 为 i8、view 结果类型一致，与实现一致。
 下一步建议: 新建合并任务给李白。
 
+时间：2026-04-08 09:35:00 +0800
+经办人：金铲铲大作战
+任务：T-20260408-10381940
+任务目标：补齐 symbol.for 生命周期复用与拒绝路径，并完成对应验证。
+改动：
+- expectation/pass/lowing/memory_pool/loop_reuse.py：新增 loop reuse expectation。
+验证命令：
+- pytest -q test/pass/test_memory_pool.py -k "symbol_for or escape or layout or invalid_lifetime"
+  退出码：0
+  关键输出：5 passed, 12 deselected in 0.30s
+- PYTHONPATH=. python expectation/pass/lowing/memory_pool/loop_reuse.py
+  退出码：0
+  关键输出：func_name = pool_loop；offset_bytes=0/32/32；pool_count = 1
+结论：
+- symbol.for 生命周期复用与拒绝路径覆盖已验证，loop_reuse expectation 输出稳定。
+- 已知风险：无。
+- 下一步建议：进入审查流程核对输出与规格一致性。
+
 时间: 2026-04-07 23:54:00 +0800
 经办人: 金铲铲大作战
 任务: T-20260407-24528b6d（memory_pool_pass_green_plan-S3-实现）
@@ -550,3 +568,32 @@
   - 关键输出：17 passed in 0.26s
 结论:
 - 注释已与 spec（生命周期重叠会分配不同 offset）及测试断言对齐；全量测试通过（exit=0）。
+
+时间：2026-04-08 09:33:39 +0800
+经办人：金铲铲大作战
+任务：T-20260408-10381940
+任务目标：补齐 symbol.for 生命周期复用与拒绝路径，并完成对应验证。
+改动：
+- expectation/pass/lowing/memory_pool/loop_reuse.py：补齐文件与函数级说明中的链接与“最后修改人”字段。
+验证命令：
+- pytest -q test/pass/test_memory_pool.py -k "symbol_for or escape or layout or invalid_lifetime"
+  退出码：0
+  关键输出：5 passed, 12 deselected in 0.24s
+- PYTHONPATH=. python expectation/pass/lowing/memory_pool/loop_reuse.py
+  退出码：0
+  关键输出：offset_bytes=0/32/32；pool_count = 1
+结论：
+- 说明与链接补齐完成，验证通过。
+已知风险：无。
+下一步建议：进入审查流程核对输出与规格一致性。
+
+时间：2026-04-08 09:36:47 +0800
+经办人：提莫炖蘑菇
+任务：T-20260408-10381940
+任务目标：复核 symbol.for 生命周期复用与拒绝路径输出一致性，并确认验证命令可复现。
+改动：
+- 执行 `cd wt-20260407-memory-pool-s1 && PYTHONPATH=. pytest -q test/pass/test_memory_pool.py -k "symbol_for or escape or layout or invalid_lifetime"`，结果 `5 passed, 12 deselected in 0.24s`。
+- 执行 `cd wt-20260407-memory-pool-s1 && PYTHONPATH=. python expectation/pass/lowing/memory_pool/loop_reuse.py`，输出包含 `alloc2/alloc3 offset_bytes=32` 与 `pool_count = 1`。
+- `git diff --name-only` 仅记录文件。
+结论：
+- 依据测试与 expectation 输出，symbol.for 生命周期复用与拒绝路径输出与计划书一致；未见明显风险。
