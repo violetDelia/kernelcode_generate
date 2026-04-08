@@ -190,6 +190,7 @@ module = pass_obj.run(module)
   - 验证支持的 `nn` op 被替换为 `kernel/dma` op，且 `nn.truediv`/`nn.div` 统一映射到 `kernel.div`。
   - 验证 `nn.broadcast/nn.transpose` 分别 lower 到 `dma.broadcast/dma.transpose`。
   - 验证 `nn.softmax` 被改写为 `kernel.softmax`，并保留 `axis` 属性。
+  - 验证 `nn.reduce_max` 被改写为 `kernel.reduce_max`，并保留 `axis/keepdim` 与符号维 `dynamic_shape`。
   - 验证 mixed compare 触发 `dma.alloc + dma.broadcast -> kernel.compare` 桥接路径，且 `kernel.compare` 不直接接收非 memory operand。
   - 验证输出 Memory 由 `dma.alloc` 创建，且类型/空间与原结果一致。
   - 验证 `dma.alloc` 结果类型中的 `shape` 维度值与原 `nn` 结果保持一致。
@@ -226,6 +227,8 @@ module = pass_obj.run(module)
 | COV-N2K-025 | `run(module)` 拒绝 `module.ops` 不可遍历输入并统一归因为 `LowerNnToKernelError` | `test_run_rejects_non_iterable_module_ops` |
 | COV-N2K-026 | `nn.softmax` 直接 lower 为 `kernel.softmax` 并保留 `axis` | `test_lower_softmax_direct_dialect_op_to_kernel_softmax` |
 | COV-N2K-027 | 公开链路 `build_func_op -> LowerNnToKernelPass` 的 `softmax` helper lower 为 `kernel.softmax` | `test_lower_softmax_public_chain_to_kernel_softmax` |
+| COV-N2K-028 | `nn.reduce_max` 直接 lower 为 `kernel.reduce_max` 并保留 `axis/keepdim` | `test_lower_reduce_max_direct_dialect_op_to_kernel_reduce_max` |
+| COV-N2K-029 | 公开链路 `build_func_op -> LowerNnToKernelPass` 的 `reduce_max` helper lower 为 `kernel.reduce_max`，并保留符号维 `dynamic_shape` | `test_lower_reduce_max_public_chain_to_kernel_reduce_max` |
 
 ## 失败归因
 

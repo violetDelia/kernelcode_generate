@@ -630,7 +630,8 @@ func.return %out : !nn.memory<f16, [N, C, KH, KW, OH, OW], GM>
 | TC-KRN-009 | `kernel.cast` 类型非法 | `test_kernel_cast_type_error` |
 | TC-KRN-010 | op 不产生 SSA result | `test_kernel_ops_no_result` |
 | TC-KRN-012 | `kernel.softmax` 的 `axis` 非法触发 verifier 失败 | `test_kernel_softmax_axis_error` |
-| TC-KRN-013 | `kernel.reduce_sum/min/max` 保持具名区分且校验 `axis/keepdim` | `test_kernel_reduce_ops_contract` |
+| TC-KRN-013 | `kernel.reduce_sum/min/max` 保持具名区分且校验 `axis/keepdim` | `test_kernel_reduce_max_family_contract` |
+| TC-KRN-020 | `kernel.reduce_max` 拒绝越界 `axis` 与非法 `keepdim` | `test_kernel_reduce_max_axis_and_keepdim_error` |
 | TC-KRN-014 | `kernel.matmul` 拒绝 dtype mismatch | `test_kernel_matmul_dtype_mismatch` |
 | TC-KRN-015 | `kernel.matmul` 拒绝非二维 operand 与 `[M,K] x [K,N] -> [M,N]` shape 失配 | `test_kernel_matmul_rank_shape_contract` |
 | TC-KRN-017 | `kernel.img2col1d/img2col2d` 保持结构化输出与显式窗口 attrs | `test_kernel_img2col_structured_contract` |

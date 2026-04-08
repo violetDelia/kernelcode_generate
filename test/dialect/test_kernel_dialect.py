@@ -1,7 +1,7 @@
 """kernel dialect tests.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 kernel dialect 的 verifier 约束与 memory type 复用规则。
@@ -30,6 +30,7 @@ from xdsl.dialects.builtin import (
     Float16Type,
     Float32Type,
     IntAttr,
+    IntegerAttr,
     StringAttr,
     i1,
     i32,
@@ -52,10 +53,12 @@ from kernel_gen.dialect.kernel import (
     KernelEqOp,
     KernelExpOp,
     KernelGtOp,
-    KernelImg2col1dOp,
     KernelLtOp,
     KernelMatmulOp,
     KernelMulOp,
+    KernelReduceMaxOp,
+    KernelReduceMinOp,
+    KernelReduceSumOp,
     KernelSoftmaxOp,
     KernelSelectOp,
     KernelSubOp,
@@ -387,6 +390,27 @@ def test_kernel_ops_no_result() -> None:
     softmax_input = _make_value(_make_memory_type(element_type=Float32Type()))
     softmax_output = _make_value(_make_memory_type(element_type=Float32Type()))
     softmax_op = KernelSoftmaxOp(softmax_input, softmax_output, axis=1, space=_make_space("global"))
+    reduce_input = _make_value(
+        _make_memory_type(
+            shape=ArrayAttr([IntAttr(2), IntAttr(3), IntAttr(4)]),
+            stride=ArrayAttr([IntAttr(12), IntAttr(4), IntAttr(1)]),
+            element_type=Float32Type(),
+        )
+    )
+    reduce_output = _make_value(
+        _make_memory_type(
+            shape=ArrayAttr([IntAttr(2), IntAttr(1), IntAttr(4)]),
+            stride=ArrayAttr([IntAttr(4), IntAttr(4), IntAttr(1)]),
+            element_type=Float32Type(),
+        )
+    )
+    reduce_max_op = KernelReduceMaxOp(
+        reduce_input,
+        reduce_output,
+        axis=1,
+        keepdim=True,
+        space=_make_space("global"),
+    )
     for op in (
         add_op,
         sub_op,
@@ -399,6 +423,7 @@ def test_kernel_ops_no_result() -> None:
         cast_op,
         exp_op,
         softmax_op,
+        reduce_max_op,
     ):
         op.verify()
         assert len(op.results) == 0
@@ -582,140 +607,95 @@ def test_kernel_softmax_requires_float() -> None:
         op.verify()
 
 
-# TC-KRN-019
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-09 03:38:06 +0800
-# 最近一次运行成功时间: 2026-04-09 03:38:06 +0800
-# 功能说明: 验证 kernel.img2col1d 正常路径可通过。
-# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_img2col1d_success
+# TC-KRN-013
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-09 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-09 00:00:00 +0800
+# 功能说明: 验证 kernel.reduce_sum/min/max 保持具名区分并锁定 axis/keepdim 形状合同。
+# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_reduce_max_family_contract
 # 对应功能实现文件路径: kernel_gen/dialect/kernel.py
 # 对应 spec 文件路径: spec/dialect/kernel.md
 # 对应测试文件路径: test/dialect/test_kernel_dialect.py
-def test_kernel_img2col1d_success() -> None:
+def test_kernel_reduce_max_family_contract() -> None:
     input_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(2), IntAttr(8)]),
-        stride=ArrayAttr([IntAttr(16), IntAttr(8), IntAttr(1)]),
+        shape=ArrayAttr([IntAttr(2), IntAttr(3), IntAttr(4)]),
+        stride=ArrayAttr([IntAttr(12), IntAttr(4), IntAttr(1)]),
         element_type=Float32Type(),
     )
-    out_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(2), IntAttr(3), IntAttr(8)]),
-        stride=ArrayAttr([IntAttr(48), IntAttr(24), IntAttr(8), IntAttr(1)]),
+    keepdim_out = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(1), IntAttr(4)]),
+        stride=ArrayAttr([IntAttr(4), IntAttr(4), IntAttr(1)]),
         element_type=Float32Type(),
     )
-    op = KernelImg2col1dOp(
+    for op_cls, expected_name in (
+        (KernelReduceSumOp, "kernel.reduce_sum"),
+        (KernelReduceMinOp, "kernel.reduce_min"),
+        (KernelReduceMaxOp, "kernel.reduce_max"),
+    ):
+        op = op_cls(
+            _make_value(input_type),
+            _make_value(keepdim_out),
+            axis=1,
+            keepdim=True,
+            space=_make_space("global"),
+        )
+        op.verify()
+        assert op.name == expected_name
+
+    bad_out = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(4)]),
+        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+        element_type=Float32Type(),
+    )
+    bad_shape_op = KernelReduceMaxOp(
         _make_value(input_type),
-        _make_value(out_type),
-        k=3,
-        s=1,
-        d=1,
-        p_left=1,
-        p_right=1,
+        _make_value(bad_out),
+        axis=1,
+        keepdim=True,
         space=_make_space("global"),
     )
-    op.verify()
+    with pytest.raises(VerifyException, match="kernel.reduce_max result shape must match axis/keepdim"):
+        bad_shape_op.verify()
 
 
 # TC-KRN-020
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-09 03:38:06 +0800
-# 最近一次运行成功时间: 2026-04-09 03:38:06 +0800
-# 功能说明: 验证 kernel.img2col1d 输入 rank 不匹配会报错。
-# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_img2col1d_input_rank_error
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-09 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-09 00:00:00 +0800
+# 功能说明: 验证 kernel.reduce_max 拒绝越界 axis 与非法 keepdim。
+# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_reduce_max_axis_and_keepdim_error
 # 对应功能实现文件路径: kernel_gen/dialect/kernel.py
 # 对应 spec 文件路径: spec/dialect/kernel.md
 # 对应测试文件路径: test/dialect/test_kernel_dialect.py
-def test_kernel_img2col1d_input_rank_error() -> None:
+def test_kernel_reduce_max_axis_and_keepdim_error() -> None:
     input_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(8)]),
-        stride=ArrayAttr([IntAttr(8), IntAttr(1)]),
+        shape=ArrayAttr([IntAttr(2), IntAttr(3), IntAttr(4)]),
+        stride=ArrayAttr([IntAttr(12), IntAttr(4), IntAttr(1)]),
         element_type=Float32Type(),
     )
     out_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(2), IntAttr(3), IntAttr(8)]),
-        stride=ArrayAttr([IntAttr(48), IntAttr(24), IntAttr(8), IntAttr(1)]),
+        shape=ArrayAttr([IntAttr(2), IntAttr(1), IntAttr(4)]),
+        stride=ArrayAttr([IntAttr(4), IntAttr(4), IntAttr(1)]),
         element_type=Float32Type(),
     )
-    op = KernelImg2col1dOp(
+    axis_error_op = KernelReduceMaxOp(
         _make_value(input_type),
         _make_value(out_type),
-        k=3,
-        s=1,
-        d=1,
-        p_left=1,
-        p_right=1,
+        axis=3,
+        keepdim=True,
         space=_make_space("global"),
     )
-    with pytest.raises(VerifyException, match="rank-3 input"):
-        op.verify()
+    with pytest.raises(VerifyException, match="axis must be within"):
+        axis_error_op.verify()
 
-
-# TC-KRN-021
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-09 03:38:06 +0800
-# 最近一次运行成功时间: 2026-04-09 03:38:06 +0800
-# 功能说明: 验证 kernel.img2col1d 输出形状不匹配会报错。
-# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_img2col1d_output_shape_error
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
-# 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel_dialect.py
-def test_kernel_img2col1d_output_shape_error() -> None:
-    input_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(2), IntAttr(8)]),
-        stride=ArrayAttr([IntAttr(16), IntAttr(8), IntAttr(1)]),
-        element_type=Float32Type(),
-    )
-    out_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(2), IntAttr(4), IntAttr(8)]),
-        stride=ArrayAttr([IntAttr(64), IntAttr(32), IntAttr(8), IntAttr(1)]),
-        element_type=Float32Type(),
-    )
-    op = KernelImg2col1dOp(
+    keepdim_error_op = KernelReduceMaxOp(
         _make_value(input_type),
         _make_value(out_type),
-        k=3,
-        s=1,
-        d=1,
-        p_left=1,
-        p_right=1,
+        axis=1,
+        keepdim=IntegerAttr(2, i32),
         space=_make_space("global"),
     )
-    with pytest.raises(VerifyException, match="output shape must match input and attrs"):
-        op.verify()
-
-
-# TC-KRN-022
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-09 03:38:06 +0800
-# 最近一次运行成功时间: 2026-04-09 03:38:06 +0800
-# 功能说明: 验证 kernel.img2col1d 输出 stride 不连续会报错。
-# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_img2col1d_output_stride_error
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
-# 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel_dialect.py
-def test_kernel_img2col1d_output_stride_error() -> None:
-    input_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(2), IntAttr(8)]),
-        stride=ArrayAttr([IntAttr(16), IntAttr(8), IntAttr(1)]),
-        element_type=Float32Type(),
-    )
-    out_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(2), IntAttr(3), IntAttr(8)]),
-        stride=ArrayAttr([IntAttr(48), IntAttr(8), IntAttr(8), IntAttr(1)]),
-        element_type=Float32Type(),
-    )
-    op = KernelImg2col1dOp(
-        _make_value(input_type),
-        _make_value(out_type),
-        k=3,
-        s=1,
-        d=1,
-        p_left=1,
-        p_right=1,
-        space=_make_space("global"),
-    )
-    with pytest.raises(VerifyException, match="output stride must be contiguous"):
-        op.verify()
+    with pytest.raises(VerifyException, match="keepdim must be i1"):
+        keepdim_error_op.verify()

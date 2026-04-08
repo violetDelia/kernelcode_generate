@@ -540,7 +540,7 @@ def _ensure_reduce_memory(value: object, op_name: str) -> Memory:
     """校验归约算子的 Memory 输入。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 仅接受 Memory 输入。
@@ -637,7 +637,7 @@ def _normalize_reduce_axes(axis: object, rank: int, op_name: str) -> tuple[int, 
             raise ValueError(
                 _ERROR_TEMPLATE.format(
                     scene=f"nn.{op_name} 参数校验",
-                    expected=f"{op_name} axis out of range",
+                    expected=f"{op_name} axis must be within [-{rank}, {rank - 1}]",
                     actual=f"axis={axis_value} rank={rank}",
                     action=_ERROR_ACTION,
                 )

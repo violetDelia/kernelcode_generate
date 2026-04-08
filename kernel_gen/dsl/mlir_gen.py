@@ -1,7 +1,7 @@
 """MLIR function assembly entrypoints for DSL.
 
 创建者: 小李飞刀
-最后一次更改: 我不是牛马
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 负责将 `FunctionAST` 组装为 `func.func`。
@@ -48,6 +48,7 @@ from .ast import (
     ForAST,
     FunctionAST,
     MatmulAST,
+    NnReduceAST,
     ScalarArgAST,
     StoreAST,
     SymbolToFloatAST,
@@ -64,6 +65,7 @@ from .emit_mlir import (
     _infer_binary_memory_type,
     _infer_expr_type,
     _memory_to_nn_type,
+    _parse_reduce_axis_expr,
 )
 
 
@@ -643,6 +645,18 @@ def _build_func_op_from_ast_impl(
                 raise _LoweringError("Return type does not match annotation", location=func_ast.location)
             result_type = _build_dma_alloc_only_result_type(func_ast, return_expr, runtime_args)
         else:
+            if isinstance(return_expr, NnReduceAST) and return_expr.kind == "reduce_max":
+                input_type = _infer_expr_type(return_expr.value, dict(type_map), runtime_values=runtime_values)
+                if isinstance(input_type, NnMemoryType):
+                    axes = _parse_reduce_axis_expr(return_expr.axis, return_expr.location)
+                    if axes is not None:
+                        rank = len(input_type.shape.data)
+                        for axis_value in axes:
+                            if axis_value < -rank or axis_value >= rank:
+                                raise _LoweringError(
+                                    f"{return_expr.kind} axis must be within [-{rank}, {rank - 1}]",
+                                    location=return_expr.location,
+                                )
             result_type = _infer_expr_type(return_expr, dict(type_map), runtime_values=runtime_values)
         if func_ast.outputs:
             _validate_return_type(func_ast, result_type, return_expr, dict(type_map))

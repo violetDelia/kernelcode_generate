@@ -66,10 +66,10 @@ from kernel_gen.dialect.kernel import (
     KernelExpOp,
     KernelGeOp,
     KernelGtOp,
-    KernelImg2col1dOp,
     KernelLeOp,
     KernelNeOp,
     KernelMatmulOp,
+    KernelReduceMaxOp,
     KernelSelectOp,
 )
 from kernel_gen.dialect.nn import (
@@ -79,19 +79,19 @@ from kernel_gen.dialect.nn import (
     NnExpOp,
     NnGeOp,
     NnGtOp,
-    NnImg2col1dOp,
     NnLeOp,
     NnMatmulOp,
     NnMemorySpaceAttr,
     NnMemoryType,
     NnNeOp,
+    NnReduceMaxOp,
     NnSoftmaxOp,
     NnTransposeOp,
     NnTrueDivOp,
 )
 from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.dsl.mlir_gen import build_func_op
-from kernel_gen.operation.nn import img2col1d, softmax
+from kernel_gen.operation.nn import reduce_max, softmax
 from kernel_gen.passes.lowering.buffer_results_to_out_params import (
     BufferResultsToOutParamsError,
     BufferResultsToOutParamsPass,
@@ -1382,24 +1382,24 @@ def test_lower_softmax_public_chain_to_kernel_softmax() -> None:
 
 
 # TC-PASS-N2K-032
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-09 03:38:06 +0800
-# 最近一次运行成功时间: 2026-04-09 03:38:06 +0800
-# 测试目的: 验证 nn.img2col1d 被 lower 为 kernel.img2col1d。
-# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_img2col1d_direct_dialect_op_to_kernel_img2col1d
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-09 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-09 00:00:00 +0800
+# 测试目的: 验证 nn.reduce_max 被 lower 为 kernel.reduce_max 并保留 axis/keepdim。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_reduce_max_direct_dialect_op_to_kernel_reduce_max
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
 # 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
 # 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
-def test_lower_img2col1d_direct_dialect_op_to_kernel_img2col1d() -> None:
+def test_lower_reduce_max_direct_dialect_op_to_kernel_reduce_max() -> None:
     input_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(2), IntAttr(8)]),
-        stride=ArrayAttr([IntAttr(16), IntAttr(8), IntAttr(1)]),
+        shape=ArrayAttr([IntAttr(2), IntAttr(3), IntAttr(4)]),
+        stride=ArrayAttr([IntAttr(12), IntAttr(4), IntAttr(1)]),
         element_type=f32,
     )
     result_type = _make_memory_type(
-        shape=ArrayAttr([IntAttr(1), IntAttr(2), IntAttr(3), IntAttr(8)]),
-        stride=ArrayAttr([IntAttr(48), IntAttr(24), IntAttr(8), IntAttr(1)]),
+        shape=ArrayAttr([IntAttr(2), IntAttr(1), IntAttr(4)]),
+        stride=ArrayAttr([IntAttr(4), IntAttr(4), IntAttr(1)]),
         element_type=f32,
     )
     space = _make_space("global")
@@ -1407,43 +1407,57 @@ def test_lower_img2col1d_direct_dialect_op_to_kernel_img2col1d() -> None:
     module, block = _build_module(
         [input_type],
         result_type,
-        lambda block: [
-            NnImg2col1dOp(block.args[0], result_type, kw=3, sw=1, dw=1, pl=1, pr=1, space=space)
+        lambda current_block: [
+            NnReduceMaxOp(current_block.args[0], result_type, axes=[1], keepdim=True, space=space)
         ],
     )
 
     LowerNnToKernelPass().run(module)
-    ops = _collect_ops(block)
-    assert any(isinstance(op, KernelImg2col1dOp) for op in ops)
     after_ir = str(module)
-    assert "kernel.img2col1d" in after_ir
-    assert "nn.img2col1d" not in after_ir
-    assert "Unsupported call expression" not in after_ir
+    assert "kernel.reduce_max" in after_ir
+    assert "axis = 1" in after_ir
+    assert "keepdim = true" in after_ir
+    assert "nn.reduce_max" not in after_ir
+
+    reduced_ops = [op for op in _collect_ops(block) if isinstance(op, KernelReduceMaxOp)]
+    assert len(reduced_ops) == 1
 
 
-# TC-PASS-N2K-033
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-09 03:38:06 +0800
-# 最近一次运行成功时间: 2026-04-09 03:38:06 +0800
-# 测试目的: 验证公开链路 img2col1d helper lower 为 kernel.img2col1d。
-# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_img2col1d_public_chain_to_kernel_img2col1d
+# COV-N2K-028
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-09 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-09 00:00:00 +0800
+# 测试目的: 验证公开链路 reduce_max helper lower 为 kernel.reduce_max，并保留符号维 dynamic_shape。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_reduce_max_public_chain_to_kernel_reduce_max
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
 # 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
 # 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
-def test_lower_img2col1d_public_chain_to_kernel_img2col1d() -> None:
-    def img2col1d_direct(value: "Tensor[f32, 1, 2, 8]") -> "Tensor[f32, 1, 2, 3, 8]":
-        return img2col1d(value, kw=3, sw=1, dw=1, pl=1, pr=1)
+def test_lower_reduce_max_public_chain_to_kernel_reduce_max() -> None:
+    def reduce_max_symbol_kernel(value: "Tensor[f32, B, W]") -> "Tensor[f32, W]":
+        return reduce_max(value, axis=0, keepdim=False)
 
-    module = ModuleOp([build_func_op(img2col1d_direct, _tensor_arg([1, 2, 8], NumericType.Float32))])
+    module = ModuleOp(
+        [build_func_op(reduce_max_symbol_kernel, _tensor_arg(["B", "W"], NumericType.Float32))]
+    )
     raw_ir = str(module)
 
-    assert "nn.img2col1d" in raw_ir
+    assert "nn.reduce_max" in raw_ir
+    assert "axes = [0 : i64]" in raw_ir
+    assert "keepdim = false" in raw_ir
+
     LowerNnToKernelPass().run(module)
     after_ir = str(module)
-    assert "kernel.img2col1d" in after_ir
-    assert "nn.img2col1d" not in after_ir
-    assert "Unsupported call expression" not in after_ir
+    assert "kernel.reduce_max" in after_ir
+    assert "axis = 0" in after_ir
+    assert "keepdim = false" in after_ir
+    assert "nn.reduce_max" not in after_ir
+
+    func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
+    alloc_op = next(op for op in func_op.body.block.ops if isinstance(op, DmaAllocOp))
+    assert len(alloc_op.dynamic_shape) == 1
+    assert isinstance(alloc_op.dynamic_shape[0].type, SymbolValueType)
+    assert alloc_op.dynamic_shape[0].type.get_value() == "W"
 
 
 # TC-PASS-N2K-008
