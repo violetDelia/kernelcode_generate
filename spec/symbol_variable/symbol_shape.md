@@ -33,7 +33,7 @@
   - 浮点输入保持 `SymbolDim` 的 `NotImplementedError`，不在本层改写异常类型。
 - 若实现需要复用输入规整逻辑，应使用 `_normalize_*` 私有命名。
 
-## 相邻边界
+### 相邻边界
 
 - `symbol_dim.md` 负责单个分量的构造与合法性；本文件只负责把这些分量组织成容器，并定义访问、赋值与序列化。
 - `memory.md` 负责 `shape/stride` 作为 `Memory` 元信息被消费时的额外约束；本文件不定义 `Memory` 构造或逐元素算术行为。
@@ -348,7 +348,7 @@ symbols = SymbolList(["N", 32]).to_symbols()
 | SS-007 | 异常 | 非法索引类型 | N/A | `shape["x"]` | 抛 `TypeError` | `test_invalid_index_type` |
 | SS-008 | 异常 | slice 不可迭代 | N/A | `shape[0:1] = 1` | 抛 `TypeError`（不可迭代对象） | `test_slice_assign_non_iterable` |
 | SS-009 | 异常 | slice 元素非法对象 | N/A | `shape[0:1] = [object()]` | 抛 `TypeError`（元素类型不合法） | `test_slice_assign_invalid_item` |
-| SS-010 | 赋值 | slice 元素为数字字符串 | N/A | `shape[0:1] = ["1"]` | 维度解析为静态数字 | `test_slice_assign_digit_string` |
+| SS-010 | 异常 | slice 元素为纯数字字符串 | N/A | `shape[0:1] = ["1"]` | 抛 `TypeError("切片赋值元素无法转换为 SymbolDim")` | `test_slice_assign_digit_string` |
 | SS-011 | 序列化 | SymbolList.to_symbols | N/A | `SymbolList(["N", 32]).to_symbols()` | 返回 `["N", 32]` | `test_to_symbols` |
 | SS-012 | 赋值 | int 索引 | N/A | `shape[0] = 64` | 转为 `SymbolDim` | `test_setitem_converts` |
 | SS-013 | 表现 | Shape repr | N/A | `repr(SymbolShape([1, 2]))` | 返回 `Shape(1, 2)` | `test_repr` |
