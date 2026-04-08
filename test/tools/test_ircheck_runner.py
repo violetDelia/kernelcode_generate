@@ -101,6 +101,28 @@ def test_run_ircheck_text_unsupported_compile_args() -> None:
     assert result.message.startswith("IrcheckCompileArgsError: unsupported compile args")
 
 
+# TC-IRCHECK-RUN-007
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-09 03:00:50 +0800
+# 最近一次运行成功时间: 2026-04-09 03:00:50 +0800
+# 功能说明: 验证解析期约束（如首条 positive check 为 CHECK-NEXT）会映射为 exit_code=2。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_parse_error_maps_to_exit_code_2
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+def test_run_ircheck_text_parse_error_maps_to_exit_code_2() -> None:
+    text = f"""// COMPILE_ARGS: --pass no-op
+// CHECK-NEXT: func.return
+
+{_SIMPLE_IR}"""
+    result = run_ircheck_text(text, source_path="inline.ircheck")
+    assert result.ok is False
+    assert result.exit_code == 2
+    assert result.message is not None
+    assert result.message.startswith("IrcheckParseError: invalid ircheck header")
+
+
 # TC-IRCHECK-RUN-003
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀

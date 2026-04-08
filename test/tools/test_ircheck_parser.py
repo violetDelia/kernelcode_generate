@@ -39,8 +39,8 @@ from kernel_gen.tools.ircheck import IrcheckParseError, parse_ircheck_file
 # TC-IRCHECK-PARSE-001
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-08 22:56:24 +0800
-# 最近一次运行成功时间: 2026-04-08 22:56:24 +0800
+# 最近一次运行测试时间: 2026-04-08 21:47:00 +0800
+# 最近一次运行成功时间: 2026-04-08 21:47:00 +0800
 # 功能说明: 验证可稳定解析 COMPILE_ARGS/CHECK 指令并提取输入 IR 正文。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_basic
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -73,8 +73,8 @@ builtin.module {
 # TC-IRCHECK-PARSE-002
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-08 22:56:24 +0800
-# 最近一次运行成功时间: 2026-04-08 22:56:24 +0800
+# 最近一次运行测试时间: 2026-04-08 21:47:00 +0800
+# 最近一次运行成功时间: 2026-04-08 21:47:00 +0800
 # 功能说明: 验证缺失 COMPILE_ARGS 会报告稳定错误短语。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_missing_compile_args_fails
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -94,8 +94,8 @@ builtin.module {}
 # TC-IRCHECK-PARSE-003
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-08 22:56:24 +0800
-# 最近一次运行成功时间: 2026-04-08 22:56:24 +0800
+# 最近一次运行测试时间: 2026-04-08 21:47:00 +0800
+# 最近一次运行成功时间: 2026-04-08 21:47:00 +0800
 # 功能说明: 验证重复 COMPILE_ARGS 会报告稳定错误短语。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_duplicate_compile_args_fails
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -116,8 +116,8 @@ builtin.module {}
 # TC-IRCHECK-PARSE-004
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-08 22:56:24 +0800
-# 最近一次运行成功时间: 2026-04-08 22:56:24 +0800
+# 最近一次运行测试时间: 2026-04-08 21:47:00 +0800
+# 最近一次运行成功时间: 2026-04-08 21:47:00 +0800
 # 功能说明: 验证缺失输入 IR 正文会报告稳定错误短语。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_missing_input_ir_fails
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -136,20 +136,20 @@ def test_parse_ircheck_file_missing_input_ir_fails(tmp_path: Path) -> None:
 # TC-IRCHECK-PARSE-005
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-08 22:56:24 +0800
-# 最近一次运行成功时间: 2026-04-08 22:56:24 +0800
-# 功能说明: 验证未知 CHECK 头会在解析期被拒绝并报告稳定错误短语。
-# 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_unknown_check_header_fails
+# 最近一次运行测试时间: 2026-04-09 03:00:50 +0800
+# 最近一次运行成功时间: 2026-04-09 03:00:50 +0800
+# 功能说明: 验证 COMPILE_ARGS 冒号后文本为空时必须解析失败并报告稳定错误短语。
+# 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_empty_compile_args_fails
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_parser.py
-def test_parse_ircheck_file_unknown_check_header_fails(tmp_path: Path) -> None:
-    content = """// COMPILE_ARGS: --pass no-op
-// CHECKX: builtin.module
+def test_parse_ircheck_file_empty_compile_args_fails(tmp_path: Path) -> None:
+    content = """// COMPILE_ARGS:
+// CHECK: builtin.module
 
 builtin.module {}
 """
-    path = tmp_path / "unknown_check_header.ircheck"
+    path = tmp_path / "empty_compile_args.ircheck"
     path.write_text(content, encoding="utf-8")
     with pytest.raises(IrcheckParseError, match=r"^IrcheckParseError: invalid ircheck header$"):
         _ = parse_ircheck_file(str(path))
@@ -158,35 +158,31 @@ builtin.module {}
 # TC-IRCHECK-PARSE-006
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-08 22:56:24 +0800
-# 最近一次运行成功时间: 2026-04-08 22:56:24 +0800
-# 功能说明: 验证 CHECK/CHECK-NEXT/CHECK-NOT 的空文本会在解析期被拒绝并报告稳定错误短语。
+# 最近一次运行测试时间: 2026-04-09 03:00:50 +0800
+# 最近一次运行成功时间: 2026-04-09 03:00:50 +0800
+# 功能说明: 验证 CHECK/CHECK-NOT/CHECK-NEXT 冒号后文本为空时必须解析失败并报告稳定错误短语。
 # 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_empty_check_text_fails
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_parser.py
 @pytest.mark.parametrize(
-    "content",
+    "header",
     [
-        """// COMPILE_ARGS: --pass no-op
-// CHECK:
-
-builtin.module {}
-""",
-        """// COMPILE_ARGS: --pass no-op
-// CHECK-NOT:   
-
-builtin.module {}
-""",
-        """// COMPILE_ARGS: --pass no-op
-// CHECK: builtin.module
-// CHECK-NEXT:
-
-builtin.module {}
-""",
+        "// CHECK:",
+        "// CHECK-NOT:",
+        "// CHECK: func.func @main\n// CHECK-NEXT:",
     ],
 )
-def test_parse_ircheck_file_empty_check_text_fails(tmp_path: Path, content: str) -> None:
+def test_parse_ircheck_file_empty_check_text_fails(tmp_path: Path, header: str) -> None:
+    content = f"""// COMPILE_ARGS: --pass no-op
+{header}
+
+builtin.module {{
+  func.func @main() {{
+    func.return
+  }}
+}}
+"""
     path = tmp_path / "empty_check_text.ircheck"
     path.write_text(content, encoding="utf-8")
     with pytest.raises(IrcheckParseError, match=r"^IrcheckParseError: invalid ircheck header$"):
@@ -196,16 +192,17 @@ def test_parse_ircheck_file_empty_check_text_fails(tmp_path: Path, content: str)
 # TC-IRCHECK-PARSE-007
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-08 22:56:24 +0800
-# 最近一次运行成功时间: 2026-04-08 22:56:24 +0800
-# 功能说明: 验证首条 CHECK-NEXT 会在解析期被拒绝并报告稳定错误短语。
-# 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_check_next_as_first_check_fails
+# 最近一次运行测试时间: 2026-04-09 03:00:50 +0800
+# 最近一次运行成功时间: 2026-04-09 03:00:50 +0800
+# 功能说明: 验证 CHECK-NEXT 不得作为第一条 positive check；否则必须解析失败。
+# 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_check_next_first_positive_fails
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_parser.py
-def test_parse_ircheck_file_check_next_as_first_check_fails(tmp_path: Path) -> None:
+def test_parse_ircheck_file_check_next_first_positive_fails(tmp_path: Path) -> None:
     content = """// COMPILE_ARGS: --pass no-op
-// CHECK-NEXT: func.func @main
+// CHECK-NOT: func.call
+// CHECK-NEXT: func.return
 
 builtin.module {
   func.func @main() {
@@ -213,7 +210,7 @@ builtin.module {
   }
 }
 """
-    path = tmp_path / "check_next_as_first_check.ircheck"
+    path = tmp_path / "check_next_first_positive.ircheck"
     path.write_text(content, encoding="utf-8")
     with pytest.raises(IrcheckParseError, match=r"^IrcheckParseError: invalid ircheck header$"):
         _ = parse_ircheck_file(str(path))

@@ -36,6 +36,8 @@
 - 注册表不接收用户输入的任意 import path；也不负责扫描文件系统自动发现。
 - 注册发生在 Python import 时；因此对“内置 pass/pipeline”必须提供一个显式加载入口（见 `load_builtin_passes`）。
 - 重复注册同名 pass 或 pipeline 必须立即失败，不得覆盖旧项。
+- 为便于工具与测试编写最小用例，仓库内置 pass 至少应包含：
+  - `no-op`：恒等 pass（对输入 module 不做任何改写），且必须满足“可构造”要求（`pass_cls()` 可成功执行）。
 
 ## 公开接口
 

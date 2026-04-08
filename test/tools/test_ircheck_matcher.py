@@ -4,8 +4,8 @@
 最后一次更改: 小李飞刀
 
 功能说明:
-- 覆盖 `kernel_gen/tools/ircheck.py` 的 matcher 语义：`CHECK:` / `CHECK-NEXT:` / `CHECK-NOT:` 的子串匹配行为与失败口径。
-- matcher 测试仅针对“规范化后的 IR 文本”进行 line-based 匹配，不依赖 xdsl 解析与 pass 执行链。
+- 覆盖 kernel_gen/tools/ircheck.py 的检查语义实现：`CHECK:` / `CHECK-NEXT:` / `CHECK-NOT:`
+  在 line-based 子串匹配下的“顺序/相邻/区间”约束。
 
 当前覆盖率信息:
 - 当前覆盖率: 未统计（本任务验证未启用 coverage 统计）。
@@ -35,56 +35,30 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.tools.ircheck import CheckDirective, _match_checks
 
 
-def _d(kind: str, text: str, line_no: int) -> CheckDirective:
-    return CheckDirective(kind=kind, text=text, line_no=line_no)  # type: ignore[arg-type]
-
-
 # TC-IRCHECK-MATCH-001
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-08 22:29:47 +0800
-# 最近一次运行成功时间: 2026-04-08 22:29:47 +0800
-# 功能说明: 验证 `CHECK:` 会从上一次 positive check 命中行之后继续查找。
-# 使用示例: pytest -q test/tools/test_ircheck_matcher.py -k test_match_check_advances_search_position
+# 最近一次运行测试时间: 2026-04-09 03:00:50 +0800
+# 最近一次运行成功时间: 2026-04-09 03:00:50 +0800
+# 功能说明: 验证 CHECK 按“上一条 positive check 命中行之后”继续顺序匹配。
+# 使用示例: pytest -q test/tools/test_ircheck_matcher.py -k test_match_checks_sequential_check_search
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_matcher.py
-def test_match_check_advances_search_position() -> None:
+def test_match_checks_sequential_check_search() -> None:
     actual_ir = "\n".join(
         [
-            "foo",
-            "bar foo",
-            "foo baz",
+            "alpha",
+            "beta",
         ]
     )
     ok, failed, message = _match_checks(
         actual_ir,
         [
-            _d("CHECK", "foo", 1),
-            _d("CHECK", "foo baz", 2),
+            CheckDirective(kind="CHECK", text="beta", line_no=1),
+            CheckDirective(kind="CHECK", text="alpha", line_no=2),
         ],
-        source_path="inline.ir",
-    )
-    assert ok is True
-    assert failed is None
-    assert message is None
-
-
-# TC-IRCHECK-MATCH-002
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-08 22:29:47 +0800
-# 最近一次运行成功时间: 2026-04-08 22:29:47 +0800
-# 功能说明: 验证 `CHECK:` 找不到时返回稳定错误短语前缀并指向失败指令。
-# 使用示例: pytest -q test/tools/test_ircheck_matcher.py -k test_match_check_not_found
-# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
-# 对应 spec 文件路径: spec/tools/ircheck.md
-# 对应测试文件路径: test/tools/test_ircheck_matcher.py
-def test_match_check_not_found() -> None:
-    ok, failed, message = _match_checks(
-        "a\nb\nc",
-        [_d("CHECK", "does.not.exist", 1)],
-        source_path="inline.ir",
+        source_path="inline.ircheck",
     )
     assert ok is False
     assert failed is not None
@@ -93,24 +67,31 @@ def test_match_check_not_found() -> None:
     assert message.startswith("IrcheckMatchError: CHECK not found")
 
 
-# TC-IRCHECK-MATCH-003
+# TC-IRCHECK-MATCH-002
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-08 22:29:47 +0800
-# 最近一次运行成功时间: 2026-04-08 22:29:47 +0800
-# 功能说明: 验证 `CHECK-NEXT:` 必须命中上一条 positive check 的下一行，否则失败并给出稳定错误短语。
-# 使用示例: pytest -q test/tools/test_ircheck_matcher.py -k test_match_check_next_requires_next_line
+# 最近一次运行测试时间: 2026-04-09 03:00:50 +0800
+# 最近一次运行成功时间: 2026-04-09 03:00:50 +0800
+# 功能说明: 验证 CHECK-NEXT 只能在“下一行”命中，否则必须返回稳定错误短语前缀。
+# 使用示例: pytest -q test/tools/test_ircheck_matcher.py -k test_match_checks_check_next_failure
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_matcher.py
-def test_match_check_next_requires_next_line() -> None:
-    ok, failed, message = _match_checks(
-        "a\nb\nc",
+def test_match_checks_check_next_failure() -> None:
+    actual_ir = "\n".join(
         [
-            _d("CHECK", "a", 1),
-            _d("CHECK-NEXT", "c", 2),
+            "foo",
+            "bar",
+            "baz",
+        ]
+    )
+    ok, failed, message = _match_checks(
+        actual_ir,
+        [
+            CheckDirective(kind="CHECK", text="foo", line_no=1),
+            CheckDirective(kind="CHECK-NEXT", text="baz", line_no=2),
         ],
-        source_path="inline.ir",
+        source_path="inline.ircheck",
     )
     assert ok is False
     assert failed is not None
@@ -119,24 +100,64 @@ def test_match_check_next_requires_next_line() -> None:
     assert message.startswith("IrcheckMatchError: CHECK-NEXT not found on next line")
 
 
-# TC-IRCHECK-MATCH-004
+# TC-IRCHECK-MATCH-003
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-08 22:29:47 +0800
-# 最近一次运行成功时间: 2026-04-08 22:29:47 +0800
-# 功能说明: 验证 `CHECK-NOT:` 出现在第一条 positive check 之前时，禁止文本不得出现在文件开头到命中行之前。
-# 使用示例: pytest -q test/tools/test_ircheck_matcher.py -k test_match_check_not_before_first_positive
+# 最近一次运行测试时间: 2026-04-09 03:00:50 +0800
+# 最近一次运行成功时间: 2026-04-09 03:00:50 +0800
+# 功能说明: 验证 CHECK-NOT 在相邻 positive check 命中行之间命中会失败并报告稳定错误短语前缀。
+# 使用示例: pytest -q test/tools/test_ircheck_matcher.py -k test_match_checks_check_not_between_positives_fails
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_matcher.py
-def test_match_check_not_before_first_positive() -> None:
-    ok, failed, message = _match_checks(
-        "forbid\nok",
+def test_match_checks_check_not_between_positives_fails() -> None:
+    actual_ir = "\n".join(
         [
-            _d("CHECK-NOT", "forbid", 1),
-            _d("CHECK", "ok", 2),
+            "anchor1",
+            "forbidden",
+            "anchor2",
+        ]
+    )
+    ok, failed, message = _match_checks(
+        actual_ir,
+        [
+            CheckDirective(kind="CHECK", text="anchor1", line_no=1),
+            CheckDirective(kind="CHECK-NOT", text="forbidden", line_no=2),
+            CheckDirective(kind="CHECK", text="anchor2", line_no=3),
         ],
-        source_path="inline.ir",
+        source_path="inline.ircheck",
+    )
+    assert ok is False
+    assert failed is not None
+    assert failed.kind == "CHECK-NOT"
+    assert message is not None
+    assert message.startswith("IrcheckMatchError: CHECK-NOT matched forbidden text")
+
+
+# TC-IRCHECK-MATCH-004
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-09 03:00:50 +0800
+# 最近一次运行成功时间: 2026-04-09 03:00:50 +0800
+# 功能说明: 验证首条 positive check 之前的 CHECK-NOT 会约束起始区间（从第 0 行到首次命中行之前）。
+# 使用示例: pytest -q test/tools/test_ircheck_matcher.py -k test_match_checks_check_not_before_first_positive_fails
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_matcher.py
+def test_match_checks_check_not_before_first_positive_fails() -> None:
+    actual_ir = "\n".join(
+        [
+            "forbidden",
+            "anchor",
+        ]
+    )
+    ok, failed, message = _match_checks(
+        actual_ir,
+        [
+            CheckDirective(kind="CHECK-NOT", text="forbidden", line_no=1),
+            CheckDirective(kind="CHECK", text="anchor", line_no=2),
+        ],
+        source_path="inline.ircheck",
     )
     assert ok is False
     assert failed is not None
@@ -148,50 +169,31 @@ def test_match_check_not_before_first_positive() -> None:
 # TC-IRCHECK-MATCH-005
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-08 22:29:47 +0800
-# 最近一次运行成功时间: 2026-04-08 22:29:47 +0800
-# 功能说明: 验证 `CHECK-NOT:` 位于最后一条 positive check 之后时，禁止文本不得出现在命中行之后。
-# 使用示例: pytest -q test/tools/test_ircheck_matcher.py -k test_match_check_not_after_last_positive
+# 最近一次运行测试时间: 2026-04-09 03:00:50 +0800
+# 最近一次运行成功时间: 2026-04-09 03:00:50 +0800
+# 功能说明: 验证末尾 CHECK-NOT 会约束“最后一条 positive check 命中行之后到文件末尾”的区间。
+# 使用示例: pytest -q test/tools/test_ircheck_matcher.py -k test_match_checks_check_not_after_last_positive_fails
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_matcher.py
-def test_match_check_not_after_last_positive() -> None:
-    ok, failed, message = _match_checks(
-        "ok\nforbid",
+def test_match_checks_check_not_after_last_positive_fails() -> None:
+    actual_ir = "\n".join(
         [
-            _d("CHECK", "ok", 1),
-            _d("CHECK-NOT", "forbid", 2),
+            "anchor",
+            "forbidden",
+        ]
+    )
+    ok, failed, message = _match_checks(
+        actual_ir,
+        [
+            CheckDirective(kind="CHECK", text="anchor", line_no=1),
+            CheckDirective(kind="CHECK-NOT", text="forbidden", line_no=2),
         ],
-        source_path="inline.ir",
+        source_path="inline.ircheck",
     )
     assert ok is False
     assert failed is not None
     assert failed.kind == "CHECK-NOT"
     assert message is not None
     assert message.startswith("IrcheckMatchError: CHECK-NOT matched forbidden text")
-
-
-# TC-IRCHECK-MATCH-006
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-08 22:29:47 +0800
-# 最近一次运行成功时间: 2026-04-08 22:29:47 +0800
-# 功能说明: 验证 `CHECK-NOT:` 在相邻 positive check 的命中行边界上不触发（区间语义不含边界行）。
-# 使用示例: pytest -q test/tools/test_ircheck_matcher.py -k test_match_check_not_excludes_boundary_lines
-# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
-# 对应 spec 文件路径: spec/tools/ircheck.md
-# 对应测试文件路径: test/tools/test_ircheck_matcher.py
-def test_match_check_not_excludes_boundary_lines() -> None:
-    ok, failed, message = _match_checks(
-        "A forbid\nB",
-        [
-            _d("CHECK", "A", 1),
-            _d("CHECK-NOT", "forbid", 2),
-            _d("CHECK", "B", 3),
-        ],
-        source_path="inline.ir",
-    )
-    assert ok is True
-    assert failed is None
-    assert message is None
 

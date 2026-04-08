@@ -1,7 +1,7 @@
 """ircheck: IR transform check tool.
 
 创建者: 睡觉小分队
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 提供轻量的 IR 变换验证工具：读取单文件 case，按 `COMPILE_ARGS` 运行 pass / pipeline，
@@ -33,12 +33,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
+import os
 import shlex
 import sys
 from typing import Literal, Sequence
 
+os.environ.setdefault("SYMPY_GMPY", "0")
+
 from xdsl.context import Context
-from xdsl.dialects.arith import Arith
 from xdsl.dialects.builtin import Builtin
 from xdsl.dialects.func import Func
 from xdsl.ir import Operation
@@ -144,7 +146,7 @@ class IrcheckResult:
 
     关联文件:
     - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
-    - test: [test/tools/test_ircheck_cli.py](test/tools/test_ircheck_cli.py)
+    - test: [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
     - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
     """
 
@@ -282,19 +284,21 @@ def _parse_ircheck_text(text: str, *, source_path: str | None) -> IrcheckCase:
 
     compile_args: str | None = None
     checks: list[CheckDirective] = []
-    has_seen_positive_check = False
+    saw_check = False
     for line_no, raw in header_lines:
         content = raw[2:].lstrip()
         if content.startswith("COMPILE_ARGS:"):
             if compile_args is not None:
                 raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
             compile_args = content[len("COMPILE_ARGS:") :].strip()
+            if not compile_args:
+                raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
             continue
         if content.startswith("CHECK-NEXT:"):
-            if not has_seen_positive_check:
-                raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
             check_text = content[len("CHECK-NEXT:") :].strip()
             if not check_text:
+                raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
+            if not saw_check:
                 raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
             checks.append(
                 CheckDirective(
@@ -303,7 +307,6 @@ def _parse_ircheck_text(text: str, *, source_path: str | None) -> IrcheckCase:
                     line_no=line_no,
                 )
             )
-            has_seen_positive_check = True
             continue
         if content.startswith("CHECK-NOT:"):
             check_text = content[len("CHECK-NOT:") :].strip()
@@ -328,10 +331,8 @@ def _parse_ircheck_text(text: str, *, source_path: str | None) -> IrcheckCase:
                     line_no=line_no,
                 )
             )
-            has_seen_positive_check = True
+            saw_check = True
             continue
-        if content.startswith("CHECK") and ":" in content:
-            raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
 
     if compile_args is None:
         raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
@@ -465,7 +466,7 @@ def _build_default_context() -> Context:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 加载 `builtin` / `func` / `arith` 与仓库内 dialect（`nn` / `kernel`）。
+    - 加载 `builtin` / `func` 与仓库内不依赖额外重依赖的 dialect（`nn` / `kernel`）。
 
     使用示例:
     - ctx = _build_default_context()
@@ -478,7 +479,6 @@ def _build_default_context() -> Context:
     """
 
     ctx = Context()
-    ctx.load_dialect(Arith)
     ctx.load_dialect(Builtin)
     ctx.load_dialect(Func)
     ctx.load_dialect(Nn)
@@ -696,9 +696,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(result.message)
     if result.failed_check is not None:
         print(f"failed_check: {result.failed_check.kind} {result.failed_check.text!r}")
-    if result.actual_ir:
-        print("actual_ir:")
-        print(result.actual_ir)
     return result.exit_code
 
 
