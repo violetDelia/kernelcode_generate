@@ -7,13 +7,14 @@
 - 提供 `ExecutionEngine.compile(...).execute(...)` 的最小壳层，以便在不实现真实编译/调用的前提下固定：
   - 公开 API 的命名与字段形态；
   - 7 个公共失败短语（failure_phrase）的固定集合；
-  - `stream` 与 `capture_function_output` 在 P0 的禁用行为。
+  - `stream` 与 `capture_function_output` 在 P0 的禁用行为；
+  - 直接使用 RuntimeArg（torch/numpy/int/float）输入的调用路径。
 
 使用示例:
 - from kernel_gen.execute_engine import ExecutionEngine, ExecuteRequest
 - engine = ExecutionEngine(target="cpu")
 - kernel = engine.compile(source="int main(){}", function="cpu::add")
-- result = kernel.execute(request=ExecuteRequest(args=()))
+- result = kernel.execute(request=ExecuteRequest(args=(1, 2.0)))
 - assert result.ok is True
 
 关联文件:
@@ -28,7 +29,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Literal, TypeAlias
+from typing import Any, Callable, Literal, TypeAlias
 
 from kernel_gen.execute_engine.compiler import (
     build_compile_unit,
@@ -192,46 +193,13 @@ class CompileRequest:
 class ExecuteRequest:
     """执行请求模型（P0）。"""
 
-    args: tuple["ArgSpec", ...]
+    args: tuple["RuntimeArg", ...]
     entry_point: str | None = None
     capture_function_output: bool = False
     stream: object | None = None
 
 
-@dataclass(frozen=True)
-class MemoryArg:
-    """内存参数模型（P0）。"""
-
-    position: int
-    param_name: str | None
-    space: str
-    dtype: str
-    shape: tuple[int, ...]
-    stride: tuple[int, ...] | None
-    value: object
-
-
-@dataclass(frozen=True)
-class IntArg:
-    """整数参数模型（P0）。"""
-
-    position: int
-    param_name: str | None
-    dtype: str
-    value: int
-
-
-@dataclass(frozen=True)
-class FloatArg:
-    """浮点参数模型（P0）。"""
-
-    position: int
-    param_name: str | None
-    dtype: str
-    value: float
-
-
-ArgSpec: TypeAlias = MemoryArg | IntArg | FloatArg
+RuntimeArg: TypeAlias = Any
 
 
 @dataclass(frozen=True)
@@ -256,7 +224,7 @@ class KgArgSlot:
 
     position: int
     kind: Literal["memory", "int", "float"]
-    dtype: str
+    dtype: str | None
     shape: tuple[int, ...] | None
     stride: tuple[int, ...] | None
     value: object
@@ -302,7 +270,7 @@ def _normalize_shape(value: object) -> tuple[int, ...] | None:
     最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 统一 shape 为 tuple[int, ...]，用于 MemoryArg 校验。
+    - 统一 shape 为 tuple[int, ...]，用于 RuntimeArg 的 memory 校验。
     - shape 不可解析时返回 None。
 
     使用示例:
@@ -329,7 +297,7 @@ def _normalize_stride(value: object) -> tuple[int, ...] | None:
     最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 统一 stride 为 tuple[int, ...]，用于 MemoryArg.stride 校验。
+    - 统一 stride 为 tuple[int, ...]，用于 RuntimeArg 的 memory 校验与记录。
     - stride 不可解析时返回 None。
 
     使用示例:
@@ -359,18 +327,18 @@ def _normalize_stride(value: object) -> tuple[int, ...] | None:
     return None
 
 
-def _dtype_kind(dtype: str) -> str | None:
-    """解析 dtype 对应的基础类型类别。
+def _runtime_module_name(value: object) -> str:
+    """提取 RuntimeArg 的模块前缀。
 
     创建者: jcc你莫辜负
     最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 将 dtype 字符串归类为 int/float，用于 IntArg/FloatArg 的最小校验。
-    - 不识别的 dtype 返回 None。
+    - 为 torch/numpy 类型识别提供最小、无需导入依赖的判断依据。
+    - 返回空字符串表示无法识别模块信息。
 
     使用示例:
-    - assert _dtype_kind("int32") == "int"
+    - assert _runtime_module_name(type("T", (), {"__module__": "torch"})()) == "torch"
 
     关联文件:
     - spec: spec/execute_engine/execute_engine_api.md
@@ -378,29 +346,172 @@ def _dtype_kind(dtype: str) -> str | None:
     - 功能实现: kernel_gen/execute_engine/execution_engine.py
     """
 
-    normalized = _normalize_dtype(dtype)
-    if normalized is None:
-        return None
-    lowered = normalized.lower()
-    if lowered.startswith("int") or lowered.startswith("uint"):
-        return "int"
-    if lowered.startswith("float") or lowered.startswith("bf") or lowered.startswith("fp"):
-        return "float"
-    return None
+    module_name = getattr(value.__class__, "__module__", "")
+    return module_name or ""
 
 
-def _build_arg_slots(args: tuple[ArgSpec, ...]) -> tuple[KgArgSlot, ...]:
+def _is_torch_tensor(value: object) -> bool:
+    """判断是否为 torch 张量类 RuntimeArg。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 基于 __module__ 前缀做轻量识别，避免直接导入 torch 依赖。
+    - 仅用于 RuntimeArg 类型判定，不做数据合法性校验。
+
+    使用示例:
+    - assert _is_torch_tensor(type("T", (), {"__module__": "torch"})()) is True
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_api.md
+    - test: test/execute_engine/test_execute_engine_invoke.py
+    - 功能实现: kernel_gen/execute_engine/execution_engine.py
+    """
+
+    return _runtime_module_name(value).startswith("torch")
+
+
+def _is_numpy_array(value: object) -> bool:
+    """判断是否为 numpy 数组类 RuntimeArg。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 基于 __module__ 前缀做轻量识别，避免直接导入 numpy 依赖。
+    - 仅用于 RuntimeArg 类型判定，不做数据合法性校验。
+
+    使用示例:
+    - assert _is_numpy_array(type("T", (), {"__module__": "numpy"})()) is True
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_api.md
+    - test: test/execute_engine/test_execute_engine_invoke.py
+    - 功能实现: kernel_gen/execute_engine/execution_engine.py
+    """
+
+    return _runtime_module_name(value).startswith("numpy")
+
+
+def _is_runtime_int(value: object) -> bool:
+    """判断是否为合法 int RuntimeArg（排除 bool）。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 允许 int 作为 RuntimeArg 的标量输入。
+    - 显式排除 bool，避免把布尔值误判为整数。
+
+    使用示例:
+    - assert _is_runtime_int(3) is True
+    - assert _is_runtime_int(True) is False
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_api.md
+    - test: test/execute_engine/test_execute_engine_invoke.py
+    - 功能实现: kernel_gen/execute_engine/execution_engine.py
+    """
+
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_runtime_float(value: object) -> bool:
+    """判断是否为合法 float RuntimeArg（排除 bool）。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 允许 float 作为 RuntimeArg 的标量输入。
+    - 显式排除 bool，确保失败路径可控。
+
+    使用示例:
+    - assert _is_runtime_float(1.25) is True
+    - assert _is_runtime_float(False) is False
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_api.md
+    - test: test/execute_engine/test_execute_engine_invoke.py
+    - 功能实现: kernel_gen/execute_engine/execution_engine.py
+    """
+
+    return isinstance(value, float) and not isinstance(value, bool)
+
+
+def _is_memory_runtime_arg(value: object) -> bool:
+    """判断是否为 memory RuntimeArg（torch/numpy）。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 仅当对象符合 torch/numpy 模块前缀且包含 shape/dtype 字段时视为 memory 参数。
+    - 不对 shape/dtype 的合法性做复杂推断，留给后续校验逻辑处理。
+
+    使用示例:
+    - value = type("T", (), {"__module__": "torch", "shape": (1,), "dtype": "float32"})()
+    - assert _is_memory_runtime_arg(value) is True
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_api.md
+    - test: test/execute_engine/test_execute_engine_invoke.py
+    - 功能实现: kernel_gen/execute_engine/execution_engine.py
+    """
+
+    if not (_is_torch_tensor(value) or _is_numpy_array(value)):
+        return False
+    return hasattr(value, "shape") and hasattr(value, "dtype")
+
+
+def _is_contiguous_memory(value: object) -> bool:
+    """判断 memory RuntimeArg 是否为连续布局。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - torch 路径优先使用 is_contiguous() 结果。
+    - numpy 路径优先读取 flags["C_CONTIGUOUS"] 或 flags.c_contiguous。
+    - 缺少相关信息时默认视为连续布局。
+
+    使用示例:
+    - value = type("T", (), {"__module__": "torch", "shape": (1,), "dtype": "float32", "is_contiguous": lambda self: True})()
+    - assert _is_contiguous_memory(value) is True
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine_api.md
+    - test: test/execute_engine/test_execute_engine_invoke.py
+    - 功能实现: kernel_gen/execute_engine/execution_engine.py
+    """
+
+    if hasattr(value, "is_contiguous"):
+        try:
+            return bool(value.is_contiguous())
+        except Exception:
+            return False
+    if hasattr(value, "flags"):
+        flags = value.flags
+        if isinstance(flags, dict) and "C_CONTIGUOUS" in flags:
+            return bool(flags["C_CONTIGUOUS"])
+        if hasattr(flags, "c_contiguous"):
+            return bool(flags.c_contiguous)
+    return True
+
+
+def _build_arg_slots(args: tuple[RuntimeArg, ...]) -> tuple[KgArgSlot, ...]:
     """按顺序构建 entry shim 参数槽位。
 
     创建者: jcc你莫辜负
     最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 校验 args 的顺序、类型、position 与 dtype/shape/stride 一致性。
+    - 校验 RuntimeArg 的类型与最小 memory 约束（shape/dtype/连续性）。
     - 失败时抛出 runtime_throw_or_abort，保证失败短语稳定。
 
     使用示例:
-    - slots = _build_arg_slots((MemoryArg(...), IntArg(...)))
+    - slots = _build_arg_slots((1, 2.0))
 
     关联文件:
     - spec: spec/execute_engine/execute_engine_api.md
@@ -410,80 +521,57 @@ def _build_arg_slots(args: tuple[ArgSpec, ...]) -> tuple[KgArgSlot, ...]:
 
     slots: list[KgArgSlot] = []
     for idx, arg in enumerate(args):
-        if not isinstance(arg, (MemoryArg, IntArg, FloatArg)):
-            raise ExecutionEngineError(
-                FAILURE_RUNTIME_THROW_OR_ABORT,
-                f"unsupported ArgSpec at position {idx}",
-            )
-        if arg.position != idx:
-            raise ExecutionEngineError(
-                FAILURE_RUNTIME_THROW_OR_ABORT,
-                f"arg position mismatch at {idx}",
-            )
-        if isinstance(arg, MemoryArg):
-            arg_dtype = _normalize_dtype(arg.dtype)
-            value_dtype = _normalize_dtype(getattr(arg.value, "dtype", None))
-            if arg_dtype is None or value_dtype is None or arg_dtype != value_dtype:
-                raise ExecutionEngineError(
-                    FAILURE_RUNTIME_THROW_OR_ABORT,
-                    f"memory dtype mismatch at position {idx}",
-                )
-            arg_shape = tuple(int(dim) for dim in arg.shape)
-            value_shape = _normalize_shape(arg.value)
-            if value_shape is None or arg_shape != value_shape:
-                raise ExecutionEngineError(
-                    FAILURE_RUNTIME_THROW_OR_ABORT,
-                    f"memory shape mismatch at position {idx}",
-                )
-            if arg.stride is not None:
-                value_stride = _normalize_stride(arg.value)
-                if value_stride is None or tuple(arg.stride) != value_stride:
-                    raise ExecutionEngineError(
-                        FAILURE_RUNTIME_THROW_OR_ABORT,
-                        f"memory stride mismatch at position {idx}",
-                    )
-            slots.append(
-                KgArgSlot(
-                    position=idx,
-                    kind="memory",
-                    dtype=arg.dtype,
-                    shape=arg_shape,
-                    stride=arg.stride,
-                    value=arg.value,
-                )
-            )
-            continue
-        if isinstance(arg, IntArg):
-            if _dtype_kind(arg.dtype) != "int" or not isinstance(arg.value, int) or isinstance(arg.value, bool):
-                raise ExecutionEngineError(
-                    FAILURE_RUNTIME_THROW_OR_ABORT,
-                    f"int arg mismatch at position {idx}",
-                )
+        if _is_runtime_int(arg):
             slots.append(
                 KgArgSlot(
                     position=idx,
                     kind="int",
-                    dtype=arg.dtype,
+                    dtype="int",
                     shape=None,
                     stride=None,
-                    value=arg.value,
+                    value=arg,
                 )
             )
             continue
-        if _dtype_kind(arg.dtype) != "float" or not isinstance(arg.value, float) or isinstance(arg.value, bool):
-            raise ExecutionEngineError(
-                FAILURE_RUNTIME_THROW_OR_ABORT,
-                f"float arg mismatch at position {idx}",
+        if _is_runtime_float(arg):
+            slots.append(
+                KgArgSlot(
+                    position=idx,
+                    kind="float",
+                    dtype="float",
+                    shape=None,
+                    stride=None,
+                    value=arg,
+                )
             )
-        slots.append(
-            KgArgSlot(
-                position=idx,
-                kind="float",
-                dtype=arg.dtype,
-                shape=None,
-                stride=None,
-                value=arg.value,
+            continue
+        if _is_memory_runtime_arg(arg):
+            if not _is_contiguous_memory(arg):
+                raise ExecutionEngineError(
+                    FAILURE_RUNTIME_THROW_OR_ABORT,
+                    f"memory arg is not contiguous at position {idx}",
+                )
+            dtype = _normalize_dtype(getattr(arg, "dtype", None))
+            shape = _normalize_shape(arg)
+            if dtype is None or shape is None:
+                raise ExecutionEngineError(
+                    FAILURE_RUNTIME_THROW_OR_ABORT,
+                    f"memory arg missing dtype/shape at position {idx}",
+                )
+            slots.append(
+                KgArgSlot(
+                    position=idx,
+                    kind="memory",
+                    dtype=dtype,
+                    shape=shape,
+                    stride=_normalize_stride(arg),
+                    value=arg,
+                )
             )
+            continue
+        raise ExecutionEngineError(
+            FAILURE_RUNTIME_THROW_OR_ABORT,
+            f"unsupported RuntimeArg at position {idx}",
         )
     return tuple(slots)
 
@@ -552,7 +640,7 @@ class CompiledKernel:
 
     def execute(
         self,
-        args: tuple[ArgSpec, ...] | None = None,
+        args: tuple[RuntimeArg, ...] | None = None,
         *,
         request: ExecuteRequest | None = None,
         entry_point: str | None = None,
@@ -570,7 +658,7 @@ class CompiledKernel:
         - 成功时返回 `ok=True/status_code=0/failure_phrase=None` 并带回编译 stdout/stderr。
 
         使用示例:
-        - result = kernel.execute(args=(MemoryArg(...), IntArg(...), FloatArg(...)))
+        - result = kernel.execute(args=(1, 2.0))
 
         关联文件:
         - spec: spec/execute_engine/execute_engine.md
@@ -783,14 +871,11 @@ __all__ = [
     "FAILURE_STREAM_NOT_SUPPORTED",
     "FAILURE_FUNCTION_OUTPUT_CAPTURE_NOT_SUPPORTED",
     "FAILURE_PHRASES",
-    "ArgSpec",
+    "RuntimeArg",
     "CompiledKernel",
     "CompileRequest",
     "ExecuteRequest",
     "ExecuteResult",
     "ExecutionEngine",
     "ExecutionEngineError",
-    "FloatArg",
-    "IntArg",
-    "MemoryArg",
 ]

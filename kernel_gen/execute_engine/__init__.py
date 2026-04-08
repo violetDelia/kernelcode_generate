@@ -1,17 +1,17 @@
 """execute_engine package.
 
 创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 提供执行引擎 `P0` 的最小骨架与公共失败短语常量。
-- 本阶段仅冻结接口形态与失败短语，不要求真实编译/运行能力。
+- 本阶段仅固定接口形态与失败短语，不要求真实编译/运行能力。
 
 使用示例:
 - from kernel_gen.execute_engine import ExecutionEngine, ExecuteRequest
 - engine = ExecutionEngine(target="cpu")
 - kernel = engine.compile(source="int main(){}", function="cpu::add")
-- result = kernel.execute(args=())
+- result = kernel.execute(args=(1, 2.0))
 
 关联文件:
 - spec: spec/execute_engine/execute_engine.md
@@ -30,16 +30,13 @@ from .execution_engine import (
     FAILURE_SYMBOL_RESOLVE_FAILED,
     FAILURE_TARGET_HEADER_MISMATCH,
     FAILURE_PHRASES,
-    ArgSpec,
     CompiledKernel,
     CompileRequest,
     ExecuteRequest,
     ExecuteResult,
     ExecutionEngine,
     ExecutionEngineError,
-    FloatArg,
-    IntArg,
-    MemoryArg,
+    RuntimeArg,
 )
 
 __all__ = [
@@ -51,15 +48,11 @@ __all__ = [
     "FAILURE_SYMBOL_RESOLVE_FAILED",
     "FAILURE_TARGET_HEADER_MISMATCH",
     "FAILURE_PHRASES",
-    "ArgSpec",
     "CompiledKernel",
     "CompileRequest",
     "ExecuteRequest",
     "ExecuteResult",
     "ExecutionEngine",
     "ExecutionEngineError",
-    "FloatArg",
-    "IntArg",
-    "MemoryArg",
+    "RuntimeArg",
 ]
-
