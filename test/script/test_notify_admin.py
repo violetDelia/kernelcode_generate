@@ -30,12 +30,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_SCRIPT = REPO_ROOT / "script/notify-admin.sh"
-DEFAULT_MESSAGE = "\n".join(
-    [
-        "询问正在运行任务的人，要求回报并继续。",
-        "逐个更新任务书，推动任务有序完成。",
-    ]
-)
+DEFAULT_ADMIN_MESSAGE = "请推进“正在执行的任务”并分发“任务列表”中可分发任务。"
+DEFAULT_BUSY_MESSAGE = "继续当前任务，完成后使用 -next 并回报管理员。"
 
 
 def write_executable(path: Path, content: str) -> None:
@@ -58,7 +54,19 @@ def build_fake_repo(tmp_path: Path) -> tuple[Path, Path]:
 
     (repo_root / "agents/codex-multi-agents/log").mkdir(parents=True, exist_ok=True)
     (repo_root / "agents/codex-multi-agents/agents-lists.md").write_text(
-        "# agents\n",
+        "\n".join(
+            [
+                "# agents",
+                "",
+                "| 姓名 | 状态 | 介绍 | 职责 |",
+                "| --- | --- | --- | --- |",
+                "| 神秘人 | busy | 管理员 | 负责分发与协调 |",
+                "| 大闸蟹 | busy | 架构师：推进/拆解/标准边界 | 负责项目推进、架构拆解与标准边界；不承担管理员分发的任务 |",
+                "| 小李飞刀 | busy | 擅长脚本调整 | 仅负责实现与测试 |",
+                "| 小明 | ready | 跟进实现 | 仅负责实现与测试 |",
+                "",
+            ]
+        ),
         encoding="utf-8",
     )
 
@@ -67,7 +75,14 @@ def build_fake_repo(tmp_path: Path) -> tuple[Path, Path]:
         """#!/usr/bin/env bash
 set -euo pipefail
 state_dir="${FAKE_NOTIFY_STATE_DIR:?}"
-printf '%s\\0' "$@" > "$state_dir/tmux_args.bin"
+count_file="$state_dir/tmux_count.txt"
+count=0
+if [[ -f "$count_file" ]]; then
+  count="$(cat "$count_file")"
+fi
+count="$((count + 1))"
+printf '%s' "$count" > "$count_file"
+printf '%s\\0' "$@" > "$state_dir/tmux_args_${count}.bin"
 exit 0
 """,
     )
@@ -100,6 +115,18 @@ def read_null_separated_args(path: Path) -> list[str]:
     return data.decode("utf-8").split("\0")[:-1]
 
 
+def read_tmux_calls(state_dir: Path) -> list[list[str]]:
+    """按调用顺序读取 fake tmux 脚本记录的参数。"""
+    count_path = state_dir / "tmux_count.txt"
+    if not count_path.exists():
+        return []
+    count = int(count_path.read_text(encoding="utf-8").strip())
+    calls: list[list[str]] = []
+    for idx in range(1, count + 1):
+        calls.append(read_null_separated_args(state_dir / f"tmux_args_{idx}.bin"))
+    return calls
+
+
 def run_script(repo_root: Path, *args: str, random_roll: str | None = None) -> subprocess.CompletedProcess[str]:
     """在最小仓库副本里执行 `notify-admin.sh`。"""
     env = os.environ.copy()
@@ -122,19 +149,20 @@ def run_script(repo_root: Path, *args: str, random_roll: str | None = None) -> s
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-06 11:24:00 +0800
 # 最近一次运行成功时间: 2026-04-06 11:24:00 +0800
-# 测试目的: 验证循环模式默认使用 3600 秒间隔，并把两句默认消息透传给管理员通知脚本。
+# 测试目的: 验证循环模式默认使用 1800 秒间隔，先提醒管理员推进任务，再逐个提醒 busy 执行人。
 # 对应功能实现文件路径: script/notify-admin.sh
 # 对应 spec 文件路径: spec/script/notify-admin.md
 def test_notify_admin_loop_uses_default_interval_and_message(tmp_path: Path) -> None:
     repo_root, state_dir = build_fake_repo(tmp_path)
 
     result = run_script(repo_root, random_roll="1")
-    tmux_args = read_null_separated_args(state_dir / "tmux_args.bin")
+    tmux_calls = read_tmux_calls(state_dir)
 
     assert result.returncode == 5
     assert "sleep failed" in result.stderr
-    assert (state_dir / "sleep_arg.txt").read_text(encoding="utf-8").strip() == "3600"
-    assert tmux_args == [
+    assert (state_dir / "sleep_arg.txt").read_text(encoding="utf-8").strip() == "1800"
+    assert len(tmux_calls) == 2
+    assert tmux_calls[0] == [
         "-talk",
         "-from",
         "榕",
@@ -143,7 +171,20 @@ def test_notify_admin_loop_uses_default_interval_and_message(tmp_path: Path) -> 
         "-agents-list",
         str(repo_root / "agents/codex-multi-agents/agents-lists.md"),
         "-message",
-        DEFAULT_MESSAGE,
+        DEFAULT_ADMIN_MESSAGE,
+        "-log",
+        str(repo_root / "agents/codex-multi-agents/log/talk.log"),
+    ]
+    assert tmux_calls[1] == [
+        "-talk",
+        "-from",
+        "榕",
+        "-to",
+        "小李飞刀",
+        "-agents-list",
+        str(repo_root / "agents/codex-multi-agents/agents-lists.md"),
+        "-message",
+        DEFAULT_BUSY_MESSAGE,
         "-log",
         str(repo_root / "agents/codex-multi-agents/log/talk.log"),
     ]
@@ -163,7 +204,7 @@ def test_notify_admin_loop_may_trigger_admin_init(tmp_path: Path) -> None:
 
     result = run_script(repo_root, random_roll="0")
     list_args = read_null_separated_args(state_dir / "list_args.bin")
-    tmux_args = read_null_separated_args(state_dir / "tmux_args.bin")
+    tmux_calls = read_tmux_calls(state_dir)
 
     assert result.returncode == 5
     assert list_args == [
@@ -173,7 +214,8 @@ def test_notify_admin_loop_may_trigger_admin_init(tmp_path: Path) -> None:
         "-name",
         "神秘人",
     ]
-    assert tmux_args[0:2] == ["-talk", "-from"]
+    assert tmux_calls
+    assert tmux_calls[0][0:2] == ["-talk", "-from"]
 
 
 # TC-NA-003
@@ -188,13 +230,20 @@ def test_notify_admin_loop_skips_admin_init_when_roll_misses(tmp_path: Path) -> 
     repo_root, state_dir = build_fake_repo(tmp_path)
 
     result = run_script(repo_root, random_roll="2")
-    tmux_args = read_null_separated_args(state_dir / "tmux_args.bin")
+    tmux_calls = read_tmux_calls(state_dir)
 
     assert result.returncode == 5
     assert not (state_dir / "list_args.bin").exists()
-    assert tmux_args[-4:] == [
+    assert len(tmux_calls) == 2
+    assert tmux_calls[0][-4:] == [
         "-message",
-        DEFAULT_MESSAGE,
+        DEFAULT_ADMIN_MESSAGE,
+        "-log",
+        str(repo_root / "agents/codex-multi-agents/log/talk.log"),
+    ]
+    assert tmux_calls[1][-4:] == [
+        "-message",
+        DEFAULT_BUSY_MESSAGE,
         "-log",
         str(repo_root / "agents/codex-multi-agents/log/talk.log"),
     ]
@@ -240,7 +289,7 @@ def test_notify_admin_rejects_invalid_random_roll(tmp_path: Path) -> None:
     assert result.returncode == 3
     assert "NOTIFY_ADMIN_RANDOM_ROLL must be 0, 1, or 2" in result.stderr
     assert not (state_dir / "list_args.bin").exists()
-    assert not (state_dir / "tmux_args.bin").exists()
+    assert not (state_dir / "tmux_count.txt").exists()
 
 
 # TC-NA-006
@@ -259,7 +308,7 @@ def test_notify_admin_rejects_non_numeric_random_roll(tmp_path: Path) -> None:
     assert result.returncode == 3
     assert "NOTIFY_ADMIN_RANDOM_ROLL must be 0, 1, or 2" in result.stderr
     assert not (state_dir / "list_args.bin").exists()
-    assert not (state_dir / "tmux_args.bin").exists()
+    assert not (state_dir / "tmux_count.txt").exists()
 
 
 # TC-NA-007
