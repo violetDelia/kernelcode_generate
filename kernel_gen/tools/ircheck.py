@@ -24,6 +24,7 @@ builtin.module {}
 - test:
   - [test/tools/test_ircheck_parser.py](test/tools/test_ircheck_parser.py)
   - [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
+  - [test/tools/test_ircheck_matcher.py](test/tools/test_ircheck_matcher.py)
 - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
 """
 
@@ -37,6 +38,7 @@ import sys
 from typing import Literal, Sequence
 
 from xdsl.context import Context
+from xdsl.dialects.arith import Arith
 from xdsl.dialects.builtin import Builtin
 from xdsl.dialects.func import Func
 from xdsl.ir import Operation
@@ -142,7 +144,7 @@ class IrcheckResult:
 
     关联文件:
     - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
-    - test: [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
+    - test: [test/tools/test_ircheck_cli.py](test/tools/test_ircheck_cli.py)
     - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
     """
 
@@ -280,6 +282,7 @@ def _parse_ircheck_text(text: str, *, source_path: str | None) -> IrcheckCase:
 
     compile_args: str | None = None
     checks: list[CheckDirective] = []
+    has_seen_positive_check = False
     for line_no, raw in header_lines:
         content = raw[2:].lstrip()
         if content.startswith("COMPILE_ARGS:"):
@@ -288,32 +291,47 @@ def _parse_ircheck_text(text: str, *, source_path: str | None) -> IrcheckCase:
             compile_args = content[len("COMPILE_ARGS:") :].strip()
             continue
         if content.startswith("CHECK-NEXT:"):
+            if not has_seen_positive_check:
+                raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
+            check_text = content[len("CHECK-NEXT:") :].strip()
+            if not check_text:
+                raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
             checks.append(
                 CheckDirective(
                     kind="CHECK-NEXT",
-                    text=content[len("CHECK-NEXT:") :].strip(),
+                    text=check_text,
                     line_no=line_no,
                 )
             )
+            has_seen_positive_check = True
             continue
         if content.startswith("CHECK-NOT:"):
+            check_text = content[len("CHECK-NOT:") :].strip()
+            if not check_text:
+                raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
             checks.append(
                 CheckDirective(
                     kind="CHECK-NOT",
-                    text=content[len("CHECK-NOT:") :].strip(),
+                    text=check_text,
                     line_no=line_no,
                 )
             )
             continue
         if content.startswith("CHECK:"):
+            check_text = content[len("CHECK:") :].strip()
+            if not check_text:
+                raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
             checks.append(
                 CheckDirective(
                     kind="CHECK",
-                    text=content[len("CHECK:") :].strip(),
+                    text=check_text,
                     line_no=line_no,
                 )
             )
+            has_seen_positive_check = True
             continue
+        if content.startswith("CHECK") and ":" in content:
+            raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
 
     if compile_args is None:
         raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
@@ -447,7 +465,7 @@ def _build_default_context() -> Context:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 加载 `builtin` / `func` 与仓库内不依赖额外重依赖的 dialect（`nn` / `kernel`）。
+    - 加载 `builtin` / `func` / `arith` 与仓库内 dialect（`nn` / `kernel`）。
 
     使用示例:
     - ctx = _build_default_context()
@@ -460,6 +478,7 @@ def _build_default_context() -> Context:
     """
 
     ctx = Context()
+    ctx.load_dialect(Arith)
     ctx.load_dialect(Builtin)
     ctx.load_dialect(Func)
     ctx.load_dialect(Nn)
@@ -677,6 +696,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(result.message)
     if result.failed_check is not None:
         print(f"failed_check: {result.failed_check.kind} {result.failed_check.text!r}")
+    if result.actual_ir:
+        print("actual_ir:")
+        print(result.actual_ir)
     return result.exit_code
 
 
@@ -693,4 +715,3 @@ __all__ = [
     "run_ircheck_file",
     "run_ircheck_text",
 ]
-

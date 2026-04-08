@@ -14,6 +14,7 @@
 - `test`：
   - [`test/tools/test_ircheck_parser.py`](../../test/tools/test_ircheck_parser.py)
   - [`test/tools/test_ircheck_runner.py`](../../test/tools/test_ircheck_runner.py)
+  - [`test/tools/test_ircheck_matcher.py`](../../test/tools/test_ircheck_matcher.py)
 
 ## 依赖
 
@@ -33,6 +34,7 @@
 - `directive`：头部注释中的指令行，包括 `COMPILE_ARGS:` 与 `CHECK*:`。
 - `positive check`：`CHECK:` 与 `CHECK-NEXT:`，用于定义“顺序/相邻”的命中锚点。
 - `compile args`：`COMPILE_ARGS:` 指令后的一段参数串，仅承接 `--pass <name>` 或 `--pipeline <name>` 两种形式。
+- `match line`：一次 positive check 命中的“规范化 IR 文本”所在行。
 
 ## 目标
 
@@ -46,10 +48,13 @@
 - `COMPILE_ARGS:` 只支持两种写法：
   - `--pass <pass-name>`
   - `--pipeline <pipeline-name>`
+- `COMPILE_ARGS:` 必须且只能出现一次；缺失或重复都必须视为解析失败。
+- `CHECK-NEXT:` 不得出现在任何 positive check 之前；否则必须视为解析失败。
+- 每条 `CHECK*:` 指令的 `<text>` 不得为空串；否则必须视为解析失败。
 - `ircheck` 不维护自己的 pass 名称表；它只通过 [`spec/pass/registry.md`](../../spec/pass/registry.md) 定义的注册接口解析名字。
 - 输出文本：
   - 成功：标准输出仅打印 `true`
-  - 失败：标准输出第一行打印 `false`，后续打印最小失败说明（至少包含错误短语与触发原因）
+  - 失败：标准输出第一行打印 `false`，后续打印最小失败说明（至少包含错误短语与触发原因，并包含失败指令与规范化后的实际 IR）
 - 错误短语要求：
   - 本文件列出的错误短语是稳定前缀；实现可以在前缀后追加上下文，但不得替换前缀本身。
 
@@ -106,11 +111,18 @@ assert case.compile_args.startswith("--pass ")
 - 文件结构由两部分组成：
   1. 文件起始处的“头部注释区”：连续的 `// ...` 行
   2. 输入 IR 正文：从第一行“非 `//` 开头的行”起，到文件结束
-- 头部注释区内：
-  - `COMPILE_ARGS:` 允许出现一次且必须出现一次
-  - `CHECK:` / `CHECK-NOT:` / `CHECK-NEXT:` 可出现零次或多次，按出现顺序保存
-  - 非上述指令的注释行允许存在，解析时忽略
-- 若输入 IR 正文为空，必须返回解析失败。
+- 头部注释区内支持的指令：
+  - `// COMPILE_ARGS: <args>`
+  - `// CHECK: <text>`
+  - `// CHECK-NEXT: <text>`
+  - `// CHECK-NOT: <text>`
+- 头部注释区内允许出现其他注释行：解析时忽略。
+- 解析期必须做的合法性检查（任一失败都视为解析失败）：
+  - `COMPILE_ARGS:` 缺失或重复
+  - 出现未知指令头（例如拼写错误的 `CHECKX:`）
+  - 任一 `CHECK*:` 的 `<text>` 为空串
+  - 任一 `CHECK-NEXT:` 出现在任何 positive check 之前
+- 若输入 IR 正文为空，必须视为解析失败。
 
 返回与限制：
 
@@ -151,7 +163,7 @@ assert result.ok is True
 
 - 若 `COMPILE_ARGS` 不支持，返回 `ok=False`，`exit_code=2`，且 `message` 前缀为：
   - `IrcheckCompileArgsError: unsupported compile args`
-- 若 pass/pipeline 执行抛错或返回不可打印的对象，返回 `ok=False`，`exit_code=2`，且 `message` 前缀为：
+- 若 pass/pipeline 执行抛错或无法输出规范化 IR，返回 `ok=False`，`exit_code=2`，且 `message` 前缀为：
   - `IrcheckRunError: pass execution failed`
 - 若匹配失败，返回 `ok=False`，`exit_code=1`，且 `message` 前缀为：
   - `IrcheckMatchError: CHECK not found`
@@ -185,6 +197,10 @@ builtin.module { func.func @main() { func.return } }
 assert result.ok is True
 ```
 
+注意事项：
+
+- `no-op` 是建议的内置 pass 名称：其语义为“返回输入不变”，用于 matcher 的最小验证链。
+
 返回与限制：
 
 - 返回行为与 `run_ircheck_file` 相同；仅输入源不同。
@@ -205,7 +221,7 @@ assert result.ok is True
   - `input_ir (str)`
   - `source_path (str|None)`
 - `CheckDirective` 建议字段：
-  - `kind (Literal["CHECK", "CHECK-NEXT", "CHECK-NOT"])`
+  - `kind (Literal[\"CHECK\", \"CHECK-NEXT\", \"CHECK-NOT\"])`
   - `text (str)`
   - `line_no (int)`：原始行号（从 1 开始）
 - `IrcheckResult` 建议字段：
@@ -245,30 +261,37 @@ assert result.exit_code == 0
 
 - 匹配规则为“子串匹配”，不做正则解释。
 - 匹配对象为 pass/pipeline 执行后的规范化 IR 文本 `actual_ir`，不匹配原始输入文本。
+- 建议实现以 `actual_ir.splitlines()` 得到行数组，并以“match line”为核心承载 `CHECK-NEXT` 与 `CHECK-NOT` 的区间语义。
 
 返回与限制：
 
 - `CHECK:`：
-  - 从“上一次 positive check 命中位置之后”继续查找；
-  - 找不到则失败，错误短语为 `IrcheckMatchError: CHECK not found`。
+  - 从上一次 positive check 命中位置之后继续查找；
+  - 找不到则失败，错误短语为 `IrcheckMatchError: CHECK not found`；
+  - 命中时需要确定其 `match line`（命中子串所在行）。
 - `CHECK-NEXT:`：
-  - 只能出现在至少一条 positive check 之后；
-  - 其目标文本必须出现在“上一条 positive check 命中行”的下一行；
-  - 若下一行不命中则失败，错误短语为 `IrcheckMatchError: CHECK-NEXT not found on next line`。
+  - 必须出现在至少一条 positive check 之后（解析期已检查该约束）；
+  - 其目标文本必须出现在上一条 positive check 命中行的下一行；
+  - 若下一行不命中则失败，错误短语为 `IrcheckMatchError: CHECK-NEXT not found on next line`；
+  - 命中时 `match line` 等于该下一行。
 - `CHECK-NOT:`：
-  - 禁止目标文本出现在“相邻两条 positive check 的命中行之间”；
-  - 若位于第一条 positive check 之前，则禁止出现在文件起始到第一条命中行之间；
-  - 若位于最后一条 positive check 之后，则禁止出现在最后一条命中行之后；
-  - 若违反则失败，错误短语为 `IrcheckMatchError: CHECK-NOT matched forbidden text`。
+  - 其语义依赖于 directive 顺序中的相邻 positive check（不依赖于“按文本再次搜索得到的其他潜在命中”）；
+  - 若位于两条 positive check 之间，则禁止文本出现在这两条命中行之间（不含边界行）；
+  - 若位于文件开头到第一条 positive check 之前，则禁止文本出现在文件起始到第一条命中行之前；
+  - 若位于最后一条 positive check 之后，则禁止文本出现在最后一条命中行之后；
+  - 若违反则失败，错误短语为 `IrcheckMatchError: CHECK-NOT matched forbidden text`，并在 `failed_check` 指向触发失败的 `CHECK-NOT` 指令。
 
 ## 测试
 
 - 测试文件：
   - [`test/tools/test_ircheck_parser.py`](../../test/tools/test_ircheck_parser.py)
   - [`test/tools/test_ircheck_runner.py`](../../test/tools/test_ircheck_runner.py)
+  - [`test/tools/test_ircheck_matcher.py`](../../test/tools/test_ircheck_matcher.py)
 - 执行命令：
   - `pytest -q test/tools/test_ircheck_parser.py`
   - `pytest -q test/tools/test_ircheck_runner.py`
+  - `pytest -q test/tools/test_ircheck_matcher.py`
 - 测试目标：
-  - parser：能稳定解析头部注释区、提取 compile_args 与检查指令，并对缺失/重复指令返回稳定错误短语。
+  - parser：能稳定解析头部注释区、提取 compile_args 与检查指令，并对缺失/重复/顺序非法返回稳定错误短语。
+  - matcher：`CHECK:` 顺序匹配、`CHECK-NEXT:` 严格相邻、`CHECK-NOT:` 区间禁止语义与错误短语可机械比对。
   - runner：能通过 pass registry 解析 `--pass/--pipeline` 并执行，输出 `IrcheckResult` 的 `ok/exit_code/message` 行为与本文件一致。
