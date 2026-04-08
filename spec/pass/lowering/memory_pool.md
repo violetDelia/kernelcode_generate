@@ -40,9 +40,12 @@
 - `dma.alloc` 必须存在且仅存在一个对应的 `dma.free`，且顺序合法。
 - 动态维度仅允许 `IntAttr` 或具名 `StringAttr`，不接受匿名 `?`。
 - `rewrite=True` 仅支持单 block，允许 `symbol.for`，其余 region 直接拒绝。
-- `symbol.for` 内 alloc 的生命周期按 region 进入/退出索引统计。
+- `symbol.for` 内 alloc 的生命周期按 region 进入/退出索引统计；分析不按迭代次数展开为多份 interval。
+- 当 interval 在上述索引模型中可证明不重叠时，允许它们共享同一个 `offset_bytes_expr`（体现 byte pool 的复用）。
 - 参与改写的 alloc 必须同 bucket、相同字节 size 表达式；生命周期重叠会分配不同 offset。
 - pool 采用 1-D `i8` byte pool，并通过 `dma.view` 恢复原始类型。
+- 当 lowering pipeline 同时包含 `TilePass`、`SymbolLoopHoistPass`、`LowerDmaMemoryHierarchyPass` 时，`MemoryPoolPass` 的相对顺序要求为：
+  - `TilePass -> SymbolLoopHoistPass -> MemoryPoolPass -> LowerDmaMemoryHierarchyPass`
 
 ## 公开接口
 
@@ -121,7 +124,7 @@ summary = pass_obj.get_summary("main")
 
 注意事项：
 
-- 不存在时抛出 `MemoryPoolError`。
+- 不存在时抛出 `MemoryPoolError`，错误短语必须为 `MemoryPoolSummaryNotFound`。
 
 返回与限制：
 
@@ -232,20 +235,42 @@ raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free not found for alloc")
 
 - 继承 `ValueError`。
 
-## 拒绝路径
+## 额外补充
 
+### 失败短语
+
+范围说明：
+
+- 下列短语是 `MemoryPoolError(message)` 的公开前缀集合；实现必须保证错误信息以 `<短语>: ` 开头，其后可追加上下文细节。
+- 本清单覆盖 `MemoryPoolPass.run(module)` 的摘要分析与（可选）IR 改写阶段，以及 `MemoryPoolPass.get_summary(func_name)` 的摘要查询阶段。
+- 本清单不覆盖 `dma/nn/symbol` dialect verifier 的报错文本，也不覆盖其它 pass 的错误短语。
+
+短语清单：
+
+- `MemoryPoolInvalidModule`
+  - 输入不是 `builtin.module`，或 module 结构无法被本 pass 处理（例如缺少可枚举的 `func.func`）。
+- `MemoryPoolInvalidAlloc`
+  - `dma.alloc` 本体或其结果类型不满足本 pass 的输入域约束（例如 alloc 结果不是 `nn.memory`），导致无法进入后续的生命周期分析与改写。
 - `MemoryPoolEscapingAlloc`
-  - alloc 结果被 return、或跨出所在 `symbol.for` 的词法范围。
-- `MemoryPoolUnsupportedNonLinearAlloc`
-  - 非 contiguous 布局或需要 custom stride 解释的 alloc。
-- `MemoryPoolUnsupportedRegionEscape`
-  - 出现非 `symbol.for` 的 region/control-flow 结构。
+  - alloc 结果逃逸出本 pass 可分析范围，例如被 return、被写入容器后跨出所在 `symbol.for` 的词法范围。
 - `MemoryPoolInvalidLifetime`
-  - alloc/free 顺序异常，或 loop 内 alloc/free 不成对。
+  - `dma.alloc/dma.free` 的配对关系或词法生命周期不合法（例如找不到 free、重复 free、free 出现在 alloc 之前、或 loop 内不成对），导致无法构建稳定 interval。
+- `MemoryPoolUnsupportedShape`
+  - `nn.memory` 的 `shape/stride` 含本 pass 不支持的维度表示（例如匿名动态维 `?`，或动态维分量不属于约定的 `IntAttr` / 具名 `StringAttr`），导致无法形成稳定的字节数量表达式。
+- `MemoryPoolUnsupportedDtype`
+  - `nn.memory` 的 `dtype` 无法映射到稳定的字节宽度（例如缺少 element byte size 的定义），导致无法形成 `size_bytes_expr`。
+- `MemoryPoolUnsupportedNonLinearAlloc`
+  - alloc 对应的 memory 不是 contiguous 布局，或需要 custom stride 解释，导致无法按本 pass 的字节池模型计算 size/offset。
+- `MemoryPoolRewriteUnsupported`
+  - `rewrite=True` 时输入 IR 不满足改写前提（例如非单 block、出现除 `symbol.for` 以外的 region/control-flow 结构、同 bucket 区间无法证明不重叠、或字节 size 表达式不一致），因此只能拒绝改写而不是静默跳过。
+- `MemoryPoolUnsupportedRegionEscape`
+  - 出现非 `symbol.for` 的 region/control-flow 结构，或出现会导致 interval 归属与索引模型失效的 region 逃逸场景。
 - `MemoryPoolUnsupportedPoolBucket`
-  - 该 alloc 无法归入当前按 `space` 分桶的 byte pool。
+  - alloc 无法归入当前按 bucket（例如按 `space`）聚合的 byte pool，例如 space 不受支持或 bucket key 无法稳定构造。
 - `MemoryPoolTypedViewOutOfBounds`
-  - typed `dma.view` 的字节区间越界或与 dtype 字节宽度不匹配。
+  - typed `dma.view` 的字节区间越界，或与 dtype 字节宽度不匹配。
+- `MemoryPoolSummaryNotFound`
+  - `get_summary(func_name)` 查询不到对应的摘要。
 
 ## 测试
 
@@ -253,8 +278,9 @@ raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free not found for alloc")
 - 执行命令：
   - `pytest -q test/pass/test_memory_pool.py`
   - `pytest -q test/pass/test_memory_pool.py -k "symbol_for or escape or layout or invalid_lifetime"`
-  - `PYTHONPATH=. python expectation/pass/lowering/memory_pool/summary.py`
-  - `PYTHONPATH=. python expectation/pass/lowering/memory_pool/loop_reuse.py`
+  - `PYTHONPATH=. python -m expectation.pass.lowing.memory_pool`
+  - `PYTHONPATH=. python expectation/pass/lowing/memory_pool/summary.py`
+  - `PYTHONPATH=. python expectation/pass/lowing/memory_pool/loop_reuse.py`
 - 测试目标：
   - 验证摘要生成与文本输出稳定。
   - 验证区间索引与 bucket 统计正确。
