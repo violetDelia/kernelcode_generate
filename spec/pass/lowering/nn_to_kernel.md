@@ -11,7 +11,7 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`金铲铲大作战`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/pass/lowering/nn_to_kernel.md`](../../../spec/pass/lowering/nn_to_kernel.md)
 - `功能实现`：[`kernel_gen/passes/lowering/nn_to_kernel.py`](../../../kernel_gen/passes/lowering/nn_to_kernel.py)
 - `test`：[`test/pass/test_lowering_nn_to_kernel.py`](../../../test/pass/test_lowering_nn_to_kernel.py)
@@ -42,6 +42,11 @@
 - 不改写函数签名或返回语义，不引入新的返回约束；仅在函数体内替换 op。
 - 若模块内还存在跨函数 `memory-return func.call`，本 pass 只负责把函数体里的 `nn` op lower 到 `kernel/dma`；函数签名、caller out 实参补齐与旧 call result SSA 清理必须由后续 `BufferResultsToOutParamsPass` 统一处理。
 - 当 `nn` op 结果需要输出 Memory 时，必须插入 `dma.alloc`；不允许隐式创建其他分配方式。
+- `nn.broadcast` 的动态形状约束（本 pass 额外要求；不改变 `nn.broadcast` verifier 合同）：
+  - 定义：`symbol dim` 指 `nn.memory.shape` 中的“符号维度项”（例如 `N`）；不包含静态整数维与 `?`。
+  - `result.shape` 中出现的每个 `symbol dim` 都必须在 `input.shape` 中出现（以维度名相等为准）；否则本 pass 不支持，必须失败。
+  - 特别地，当尾维对齐后某一维满足 `input_dim == 1` 且 `result_dim` 为 `symbol dim` 时，仅当该 `symbol dim` 也出现在 `input.shape`（可为其他维）才支持；不支持把 singleton 维扩张为“新引入的符号维”。
+  - 违反上述约束时必须抛出 `LowerNnToKernelError`，且错误信息必须包含关键短语：`LowerNnToKernelBroadcastSymbolDimNotFromSource`。
 - mixed compare 桥接规则必须写死：
   - `memory + memory` compare：lower 目标为 `kernel.compare family`，且两侧 `shape/stride/space/element_type` 必须已经一致；不得在 `kernel` 层做隐式 broadcast。
   - `memory + symbol/const` compare：必须先使用 `dma.alloc + dma.broadcast` 把 `symbol/const` 物化成与 memory operand 完全一致的 temporary memory，然后再 lower 为 `kernel.compare family`；禁止 `kernel.compare` 直接接收非 memory operand。
@@ -163,7 +168,7 @@ module = pass_obj.run(module)
 
 - `spec/operation/nn.md`：定义高层 helper 的 shape/axis/参数语义与错误边界；允许“隐式 broadcast”的语义表述，但不得把“隐式 broadcast”推给 `kernel` 层兜底。
 - `spec/dialect/nn.md`：定义 `nn` 方言字段与 verifier；不支持逐元素隐式 broadcast（广播必须显式使用 `nn.broadcast`）。
-- `spec/dialect/dma.md`：定义纯物化/搬运/布局变换原语；本计划冻结 `dma.broadcast` 与 `dma.transpose` 作为 lowering 目标面（不承担计算语义）。
+- `spec/dialect/dma.md`：定义纯物化/搬运/布局变换原语；本计划规定 `dma.broadcast` 与 `dma.transpose` 为 lowering 目标面（不承担计算语义）。
 - `spec/dialect/kernel.md`：定义纯计算原语；不允许隐式 broadcast；compare 只接受 memory operand。
 - `LowerNnToKernelPass`（本文件）：负责把 `nn` 方言 rewrite 到 `dma/kernel` 方言，并补齐 mixed compare 桥接与输出分配；不得 silent fallback。
 
@@ -171,7 +176,7 @@ module = pass_obj.run(module)
 
 | nn 侧输入 | 目标面 | 关键约束 |
 | --- | --- | --- |
-| `nn.broadcast`（含由 `operation.broadcast_to` 归一化而来） | `dma.broadcast` | 必须显式物化，不允许在 `kernel` 层保留隐式 broadcast |
+| `nn.broadcast`（含由 `operation.broadcast_to` 归一化而来） | `dma.broadcast` | 必须显式物化，不允许在 `kernel` 层保留隐式 broadcast；若 `result.shape` 含 `symbol dim`，则该 `symbol dim` 必须可从 `input.shape` 读取（否则本 pass 必须失败） |
 | `nn.transpose` | `dma.transpose` | `perm` 必须为合法排列，目标 shape 必须机械一致 |
 | `nn.eq/ne/lt/le/gt/ge`（memory+memory） | `kernel.compare family` | operand 必须同 shape；禁止 kernel 层隐式 broadcast |
 | `nn.eq/ne/lt/le/gt/ge`（memory+symbol/const） | `dma.broadcast -> kernel.compare family` | 必须先物化 scalar/symbol 到 temporary memory，再 compare |
@@ -195,7 +200,7 @@ module = pass_obj.run(module)
   - 验证输出 Memory 由 `dma.alloc` 创建，且类型/空间与原结果一致。
   - 验证 `dma.alloc` 结果类型中的 `shape` 维度值与原 `nn` 结果保持一致。
   - 验证不支持 op、结果类型非法、缺失 `nn.space`、operand 数量不匹配或 kernel 校验失败时抛出明确错误。
-  - 目录级黑盒 gate（expectation）作为门禁证据写入任务记录，不在 spec 文件内绑定具体 expectation 文件路径。
+  - 目录级黑盒验证的证据写入任务记录；spec 文件内不绑定具体验证脚本路径。
 - 功能与用例清单：
 
 | 用例 ID | 约束点 | 对应测试 |
@@ -209,16 +214,16 @@ module = pass_obj.run(module)
 | COV-N2K-007 | module 内残留 `nn` op 抛错 | `test_ensure_no_nn_ops_raises` |
 | COV-N2K-008 | 静态维度 `shape` 在 `dma.alloc` 中保持一致 | `test_lower_preserves_static_shape_in_alloc` |
 | COV-N2K-009 | 符号维度 `shape` 在 `dma.alloc` 中保持一致 | `test_lower_preserves_symbol_shape_in_alloc` |
-| COV-N2K-010 | `nn.add -> kernel.add` 目录级黑盒 gate 覆盖（门禁证据见任务记录） | `-` |
-| COV-N2K-011 | `nn.sub -> kernel.sub` 目录级黑盒 gate 覆盖（门禁证据见任务记录） | `-` |
-| COV-N2K-012 | `nn.mul -> kernel.mul` 目录级黑盒 gate 覆盖（门禁证据见任务记录） | `-` |
-| COV-N2K-013 | `nn.eq -> kernel.eq` 目录级黑盒 gate 覆盖（门禁证据见任务记录） | `-` |
-| COV-N2K-014 | `nn.lt -> kernel.lt` 目录级黑盒 gate 覆盖（门禁证据见任务记录） | `-` |
-| COV-N2K-015 | `nn.gt -> kernel.gt` 目录级黑盒 gate 覆盖（门禁证据见任务记录） | `-` |
-| COV-N2K-016 | `nn.ne -> kernel.ne` 目录级黑盒 gate 覆盖（门禁证据见任务记录） | `-` |
-| COV-N2K-017 | `nn.le -> kernel.le` 目录级黑盒 gate 覆盖（门禁证据见任务记录） | `-` |
-| COV-N2K-018 | `nn.ge -> kernel.ge` 目录级黑盒 gate 覆盖（门禁证据见任务记录） | `-` |
-| COV-N2K-019 | `nn.truediv -> kernel.div` 目录级黑盒 gate 覆盖（门禁证据见任务记录） | `-` |
+| COV-N2K-010 | `nn.add -> kernel.add` 目录级黑盒验证覆盖（证据见任务记录） | `-` |
+| COV-N2K-011 | `nn.sub -> kernel.sub` 目录级黑盒验证覆盖（证据见任务记录） | `-` |
+| COV-N2K-012 | `nn.mul -> kernel.mul` 目录级黑盒验证覆盖（证据见任务记录） | `-` |
+| COV-N2K-013 | `nn.eq -> kernel.eq` 目录级黑盒验证覆盖（证据见任务记录） | `-` |
+| COV-N2K-014 | `nn.lt -> kernel.lt` 目录级黑盒验证覆盖（证据见任务记录） | `-` |
+| COV-N2K-015 | `nn.gt -> kernel.gt` 目录级黑盒验证覆盖（证据见任务记录） | `-` |
+| COV-N2K-016 | `nn.ne -> kernel.ne` 目录级黑盒验证覆盖（证据见任务记录） | `-` |
+| COV-N2K-017 | `nn.le -> kernel.le` 目录级黑盒验证覆盖（证据见任务记录） | `-` |
+| COV-N2K-018 | `nn.ge -> kernel.ge` 目录级黑盒验证覆盖（证据见任务记录） | `-` |
+| COV-N2K-019 | `nn.truediv -> kernel.div` 目录级黑盒验证覆盖（证据见任务记录） | `-` |
 | COV-N2K-020 | `nn.ne -> kernel.ne` 单测映射（实现阶段新增） | `test_lower_ne_to_kernel` |
 | COV-N2K-021 | `nn.le -> kernel.le` 单测映射（实现阶段新增） | `test_lower_le_to_kernel` |
 | COV-N2K-022 | `nn.ge -> kernel.ge` 单测映射（实现阶段新增） | `test_lower_ge_to_kernel` |
@@ -235,3 +240,4 @@ module = pass_obj.run(module)
 - AST 发射失败：`module` 非 `builtin.module`、无法遍历或缺失必要结构，lowering 进入前即无法执行。
 - Dialect verify 失败：`kernel` 或 `dma` op verifier 抛错（类型/space/operand 约束不满足）时，必须包装为 `LowerNnToKernelError` 并中止。
 - Lowering 失败：不支持的 `nn` op、结果类型非法、缺失 `nn.space`、operand 数量不匹配或 `dma.alloc` 构造失败导致的错误均归类为 lowering 失败。
+- Lowering 失败（`nn.broadcast` 动态形状）：当 `result.shape` 含 `symbol dim` 且存在“`symbol dim` 不可从 `input.shape` 读取”情形时，必须归类为 lowering 失败并抛出 `LowerNnToKernelError`；错误信息必须包含关键短语 `LowerNnToKernelBroadcastSymbolDimNotFromSource`。

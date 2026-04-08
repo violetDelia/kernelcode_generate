@@ -89,7 +89,7 @@ from kernel_gen.dialect.nn import (
     NnTransposeOp,
     NnTrueDivOp,
 )
-from kernel_gen.dialect.symbol import SymbolValueType
+from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
 from kernel_gen.dsl.mlir_gen import build_func_op
 from kernel_gen.operation.nn import img2col2d, softmax
 from kernel_gen.passes.lowering.buffer_results_to_out_params import (
@@ -575,6 +575,109 @@ def test_lower_broadcast_to_dma_broadcast() -> None:
 
     ops = _collect_ops(block)
     assert any(isinstance(op, DmaBroadcastOp) for op in ops)
+
+
+# COV-N2K-027
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-09 05:20:14 +0800
+# 最近一次运行成功时间: 2026-04-09 05:20:14 +0800
+# 测试目的: 验证 nn.broadcast lowering 时，输出 alloc 的符号维度来自 symbol.get_dim，而非 placeholder 常量。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_broadcast_dynamic_shape_reads_symbol_dim_from_source
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
+def test_lower_broadcast_dynamic_shape_reads_symbol_dim_from_source() -> None:
+    source_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1), StringAttr("N")]),
+        stride=ArrayAttr([StringAttr("N"), IntAttr(1)]),
+    )
+    result_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(4), StringAttr("N")]),
+        stride=ArrayAttr([StringAttr("N"), IntAttr(1)]),
+    )
+    space = _make_space("global")
+
+    module, block = _build_module(
+        [source_type],
+        result_type,
+        lambda block: [NnBroadcastOp(block.args[0], result_type, space)],
+    )
+    LowerNnToKernelPass().run(module)
+
+    alloc_ops = [op for op in _collect_ops(block) if isinstance(op, DmaAllocOp)]
+    assert len(alloc_ops) == 1
+    alloc_dynamic_shape = alloc_ops[0].dynamic_shape
+    assert len(alloc_dynamic_shape) == 2
+    assert alloc_dynamic_shape[0].type.get_value() == 4
+    assert alloc_dynamic_shape[1].type.get_value() == "N"
+    assert isinstance(alloc_dynamic_shape[1].owner, SymbolGetDimOp)
+
+
+# COV-N2K-028
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-09 05:20:14 +0800
+# 最近一次运行成功时间: 2026-04-09 05:20:14 +0800
+# 测试目的: 验证 singleton 扩张为符号维度会在 lowering 阶段拒绝，避免引入无法从 source 获得的符号维。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_broadcast_rejects_singleton_expand_to_symbol_dim
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
+def test_lower_broadcast_rejects_singleton_expand_to_symbol_dim() -> None:
+    source_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1), StringAttr("N")]),
+        stride=ArrayAttr([StringAttr("N"), IntAttr(1)]),
+    )
+    result_type = _make_memory_type(
+        shape=ArrayAttr([StringAttr("M"), StringAttr("N")]),
+        stride=ArrayAttr([StringAttr("N"), IntAttr(1)]),
+    )
+    space = _make_space("global")
+
+    module, _ = _build_module(
+        [source_type],
+        result_type,
+        lambda block: [NnBroadcastOp(block.args[0], result_type, space)],
+    )
+    with pytest.raises(
+        LowerNnToKernelError,
+        match=r"LowerNnToKernelBroadcastSymbolDimNotFromSource.*cannot expand singleton dim to symbol dim 'M'",
+    ):
+        LowerNnToKernelPass().run(module)
+
+
+# COV-N2K-029
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-09 05:20:14 +0800
+# 最近一次运行成功时间: 2026-04-09 05:20:14 +0800
+# 测试目的: 验证 implicit singleton 扩张为符号维度会在 lowering 阶段拒绝，避免引入无法从 source 获得的符号维。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_broadcast_rejects_implicit_singleton_expand_to_symbol_dim
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
+def test_lower_broadcast_rejects_implicit_singleton_expand_to_symbol_dim() -> None:
+    source_type = _make_memory_type(
+        shape=ArrayAttr([StringAttr("N")]),
+        stride=ArrayAttr([IntAttr(1)]),
+    )
+    result_type = _make_memory_type(
+        shape=ArrayAttr([StringAttr("M"), StringAttr("N")]),
+        stride=ArrayAttr([StringAttr("N"), IntAttr(1)]),
+    )
+    space = _make_space("global")
+
+    module, _ = _build_module(
+        [source_type],
+        result_type,
+        lambda block: [NnBroadcastOp(block.args[0], result_type, space)],
+    )
+    with pytest.raises(
+        LowerNnToKernelError,
+        match=r"LowerNnToKernelBroadcastSymbolDimNotFromSource.*cannot expand implicit singleton dim to symbol dim 'M'",
+    ):
+        LowerNnToKernelPass().run(module)
 
 
 # TC-PASS-N2K-024

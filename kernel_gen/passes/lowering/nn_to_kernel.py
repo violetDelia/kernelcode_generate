@@ -343,6 +343,96 @@ def _build_alloc_dynamic_shape_from_result(
     return ops, operands
 
 
+def _build_broadcast_alloc_dynamic_shape(
+    source: SSAValue,
+    result_type: NnMemoryType,
+) -> tuple[list[Operation], list[SSAValue]]:
+    """构造 nn.broadcast 结果 dma.alloc 的 dynamic_shape operands。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 按尾维对齐规则，将 result 的每一维映射回 source 对应维度。
+    - 对于可从 source 直接读取的维度（逐维相等），使用 symbol.get_dim 获取实际维度。
+    - 对于由 singleton 扩张得到的静态整数维度，使用常量 symbol.int。
+    - 禁止把 singleton 扩张为符号维度，避免引入无法从 source 获得的符号维。
+
+    使用示例:
+    - ops, operands = _build_broadcast_alloc_dynamic_shape(op.operands[0], result_type)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    source_type = source.type
+    if not isinstance(source_type, NnMemoryType):
+        raise LowerNnToKernelError("nn.broadcast operand must be nn.memory")
+
+    source_rank = len(source_type.shape.data)
+    result_rank = len(result_type.shape.data)
+    if result_rank < source_rank:
+        raise LowerNnToKernelError("nn.broadcast result rank must be >= operand rank")
+    prefix_rank = result_rank - source_rank
+
+    ops: list[Operation] = []
+    operands: list[SSAValue] = []
+    for result_axis, result_dim in enumerate(result_type.shape.data):
+        if isinstance(result_dim, StringAttr) and result_dim.data == "?":
+            raise LowerNnToKernelError("nn op result shape must not contain '?'")
+
+        source_axis = result_axis - prefix_rank
+        if source_axis < 0:
+            if isinstance(result_dim, IntAttr):
+                new_ops, value = _const_symbol_value(str(result_dim.data), result_dim.data)
+                ops.extend(new_ops)
+                operands.append(value)
+                continue
+            if isinstance(result_dim, StringAttr):
+                raise LowerNnToKernelError(
+                    "LowerNnToKernelBroadcastSymbolDimNotFromSource: "
+                    f"nn.broadcast cannot expand implicit singleton dim to symbol dim '{result_dim.data}'"
+                )
+            raise LowerNnToKernelError("nn op result shape entry must be IntAttr or StringAttr")
+
+        source_dim = source_type.shape.data[source_axis]
+
+        if isinstance(source_dim, IntAttr) and isinstance(result_dim, IntAttr):
+            if source_dim.data == result_dim.data:
+                get_dim = SymbolGetDimOp(source, IntAttr(source_axis))
+                ops.append(get_dim)
+                operands.append(get_dim.result)
+                continue
+            if source_dim.data == 1:
+                new_ops, value = _const_symbol_value(str(result_dim.data), result_dim.data)
+                ops.extend(new_ops)
+                operands.append(value)
+                continue
+            raise LowerNnToKernelError("nn.broadcast result shape is not compatible with operand shape")
+
+        if isinstance(source_dim, StringAttr) and isinstance(result_dim, StringAttr):
+            if source_dim.data == "?":
+                raise LowerNnToKernelError("nn.broadcast operand shape must not contain '?'")
+            if source_dim.data == result_dim.data:
+                get_dim = SymbolGetDimOp(source, IntAttr(source_axis))
+                ops.append(get_dim)
+                operands.append(get_dim.result)
+                continue
+            raise LowerNnToKernelError("nn.broadcast result shape is not compatible with operand shape")
+
+        if isinstance(source_dim, IntAttr) and source_dim.data == 1 and isinstance(result_dim, StringAttr):
+            raise LowerNnToKernelError(
+                "LowerNnToKernelBroadcastSymbolDimNotFromSource: "
+                f"nn.broadcast cannot expand singleton dim to symbol dim '{result_dim.data}'"
+            )
+
+        raise LowerNnToKernelError("nn.broadcast result shape is not compatible with operand shape")
+
+    return ops, operands
+
+
 def _ensure_contiguous_result_stride(result_type: NnMemoryType) -> None:
     """校验结果 stride 在静态形状下满足连续布局。
 
@@ -584,7 +674,7 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
         if not isinstance(source_type, NnMemoryType):
             raise LowerNnToKernelError("nn.broadcast operand must be nn.memory")
 
-        shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_result(result_type)
+        shape_ops, dynamic_shape = _build_broadcast_alloc_dynamic_shape(source, result_type)
         alloc = DmaAllocOp(dynamic_shape, result_type)
         broadcast_source = source
         extra_ops: list[Operation] = []
@@ -597,7 +687,7 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
                 source_type.element_type,
                 result_type.space,
             )
-            temp_shape_ops, temp_dynamic_shape = _build_alloc_dynamic_shape_from_result(temp_type)
+            temp_shape_ops, temp_dynamic_shape = _build_alloc_dynamic_shape(source, temp_type)
             extra_alloc = DmaAllocOp(temp_dynamic_shape, temp_type)
             extra_copy = DmaCopyOp(source, extra_alloc.result)
             extra_ops.extend(temp_shape_ops)
