@@ -39,7 +39,8 @@
 - `-dispatch/-done/-pause/-continue/-reassign/-next` 必须提供 `-agents-list <path>`，用于同步角色状态。
 - `-next` 必填参数：`-task_id`、`-message` 与 `-agents-list`。
 - `-next` 用于任务接力：将运行中任务移回任务列表，仅替换“描述”为 `-message`，其余字段保持不变。
-- `-new` 必须提供 `-worktree`；当 `-worktree None` 时表示“无 worktree”（写入空值）。
+- `-new` 必须提供 `-worktree` 且取值必须为非空、非 `None` 的路径字符串。
+- `-new` 的 `worktree` 在 `正在执行的任务` 与 `任务列表` 中必须唯一；重复时返回 `3`。
 - `-new` 必须提供 `-depends <task_ids|None>` 与 `-plan <plan_doc|None>`，用于写入“依赖任务”“计划书”列；传 `None` 时写入空值。
 - `-new` 的 `-depends` 若非 `None`，每个依赖任务 ID 必须已存在于 `正在执行的任务` 或 `任务列表`；不存在时返回 `3`。
 - 权限限制：`-new` 仅允许管理员或架构师执行；`-dispatch/-done/-done-plan` 仅允许管理员执行。
@@ -126,7 +127,7 @@
 - `-agents-list <path>`：`agents-lists.md` 文件路径；`-dispatch/-done/-pause/-continue/-reassign/-next` 时必填。
 - `-message <text>`：`-dispatch` 与 `-next` 使用。
 - `-next`：任务接力操作，要求 `-task_id` 与 `-message`。
-- `-worktree <path|None>`：仅 `-new` 使用，必填；`None` 表示写入空 worktree。
+- `-worktree <path>`：仅 `-new` 使用，必填；必须为非空、非 `None` 的路径字符串。
 - `-depends <task_ids|None>`：仅 `-new` 使用，必填；写入“依赖任务”列，`None` 写空值。
 - `-plan <plan_doc|None>`：仅 `-new` 使用，必填；写入“计划书”列，`None` 写空值。
 - `-delete`：删除任务列表中的任务，仅与 `-task_id` 搭配使用。
@@ -397,7 +398,7 @@ codex-multi-agents-task.sh -file "./skills/codex-multi-agents/examples/TODO.md" 
 
 - `-new`：执行新建操作。
 - `-info <desc>`：任务描述（必填）。
-- `-worktree <path|None>`：工作树（必填）；传 `None` 时写入空值。
+- `-worktree <path>`：工作树（必填）；必须为非空、非 `None` 的路径字符串。
 - `-to <name>`：指派对象（可选）。
 - `-from <name>`：发起人（可选）。
 - `-log <path>`：记录文件（可选，写入“记录文件”列）。
@@ -413,7 +414,8 @@ codex-multi-agents-task.sh -file "./skills/codex-multi-agents/examples/TODO.md" 
 注意事项：
 
 - 任务 ID 按“日期-hash”规则生成，推荐格式 `T-YYYYMMDD-<8位hash>`。
-- `-worktree` 为必填；传 `None` 表示该任务无 worktree（写入空值）。
+- `-worktree` 为必填，且必须为非空、非 `None` 的路径字符串。
+- `-worktree` 在 `正在执行的任务` 与 `任务列表` 中必须唯一；重复值会返回 `3`。
 - `-depends` 与 `-plan` 为必填；传 `None` 表示对应列写空值。
 - `-depends` 非 `None` 时，依赖任务 ID 必须存在于当前 `正在执行的任务` 或 `任务列表`。
 - 新建时若 `-plan` 非 `None`，会同步更新 `## 计划书` 进度表。
@@ -490,10 +492,10 @@ codex-multi-agents-task.sh -file "./skills/codex-multi-agents/examples/TODO.md" 
 | TC-005 | `-pause` | 暂停成功 | 任务位于正在执行 | `-file F -pause -task_id EX-2 -agents-list G` | 返回码 `0`；状态变为 `暂停`；若目标角色无其他进行中任务则状态=`free` |
 | TC-006 | `-pause` | 任务不存在 | 正在执行不存在该 ID | `-file F -pause -task_id BAD -agents-list G` | 返回码 `3`；报错 task not found |
 | TC-007 | `-new` | 新建成功（带指派） | TODO 结构合法 | `-file F -new -info "desc" -worktree repo-x -depends EX-2 -plan P -to worker-b` | 返回码 `0`；任务列表新增记录且指派=worker-b，`创建时间`写入成功 |
-| TC-008 | `-new` | 新建成功（不带指派） | TODO 结构合法 | `-file F -new -info "desc" -worktree None -depends None -plan None` | 返回码 `0`；任务列表新增记录且指派为空，`worktree` 写空值，`创建时间`写入成功 |
+| TC-008 | `-new` | 新建成功（不带指派） | TODO 结构合法 | `-file F -new -info "desc" -worktree repo-y -depends None -plan None` | 返回码 `0`；任务列表新增记录且指派为空，`worktree=repo-y`，`创建时间`写入成功 |
 | TC-009 | 参数校验 | 缺少必填参数 | TODO 存在 | `-file F -done -task_id EX-1` | 返回码 `1`；报错缺少 `-log` |
-| TC-010 | 文件校验 | TODO 文件不存在 | 路径不存在 | `-file missing -new -info "desc" -worktree None -depends None -plan None` | 返回码 `2`；报错 file not found |
-| TC-011 | 表结构校验 | 缺少任务段落或表头 | TODO 非法 | `-file F -new -info "desc" -worktree None -depends None -plan None` | 返回码 `2`；报错 invalid table format |
+| TC-010 | 文件校验 | TODO 文件不存在 | 路径不存在 | `-file missing -new -info "desc" -worktree repo-missing -depends None -plan None` | 返回码 `2`；报错 file not found |
+| TC-011 | 表结构校验 | 缺少任务段落或表头 | TODO 非法 | `-file F -new -info "desc" -worktree repo-invalid -depends None -plan None` | 返回码 `2`；报错 invalid table format |
 | TC-012 | 并发锁 | 锁冲突 | 另一个进程持有 TODO 锁 | `-file F -dispatch -task_id EX-3 -to worker-a -agents-list G` | 返回码 `4`；报错 cannot acquire lock |
 | TC-013 | `-status` | 输出正在执行任务 | TODO 结构合法 | `-file F -status -doing` | 返回码 `0`；输出包含运行中任务表 |
 | TC-014 | `-status` | 输出任务列表 | TODO 结构合法 | `-file F -status -task-list` | 返回码 `0`；输出包含任务列表表 |
@@ -514,16 +516,16 @@ codex-multi-agents-task.sh -file "./skills/codex-multi-agents/examples/TODO.md" 
 | TC-029 | `-delete` | 删除暂停任务 | 任务位于正在执行且状态=`暂停` | `-file F -delete -task_id EX-2` | 返回码 `0`；任务从正在执行列表移除 |
 | TC-030 | `-next` | 接力成功 | 任务位于正在执行，且提供新描述 | `-file F -next -task_id EX-2 -message M -agents-list G` | 返回码 `0`；任务移至任务列表；描述更新；指派/worktree/记录文件保持不变 |
 | TC-031 | 参数校验 | 缺少接力描述 | TODO 存在 | `-file F -next -task_id EX-2 -agents-list G` | 返回码 `1`；报错缺少 `-message` |
-| TC-032 | 权限校验 | 普通执行人新建任务被拒绝 | 操作者非管理员/架构师 | `-file F -new -info "desc" -worktree None -depends None -plan None` | 返回码 `3`；报错 restricted to 架构师或管理员 |
+| TC-032 | 权限校验 | 普通执行人新建任务被拒绝 | 操作者非管理员/架构师 | `-file F -new -info "desc" -worktree repo-auth -depends None -plan None` | 返回码 `3`；报错 restricted to 架构师或管理员 |
 | TC-033 | 权限校验 | 非管理员完成任务被拒绝 | 操作者非管理员 | `-file F -done -task_id EX-1 -log L -agents-list G` | 返回码 `3`；报错 restricted to 管理员 |
 | TC-034 | 参数校验 | 新建缺少 worktree | TODO 存在 | `-file F -new -info "desc"` | 返回码 `1`；报错 `-new requires -worktree` |
 | TC-035 | `-dispatch` | 依赖阻断 | 待分发任务依赖 EX-1/EX-4，其中任一仍在任务表中 | `-file F -dispatch -task_id EX-3 -to worker-a -agents-list G` | 返回码 `3`；报错 `task has unresolved dependency: <id>` |
 | TC-036 | `-dispatch` | 指派角色 busy | 目标角色在 agents 表中状态=busy | `-file F -dispatch -task_id EX-3 -to worker-b -agents-list G` | 返回码 `3`；报错 `agent is busy, cannot dispatch: worker-b` |
 | TC-037 | 参数校验 | 接力缺少角色名单参数 | TODO 存在 | `-file F -next -task_id EX-2 -message M` | 返回码 `1`；报错缺少 `-agents-list` |
-| TC-038 | 参数校验 | 新建缺少 depends/plan | TODO 存在 | `-file F -new -info "desc" -worktree None`（分别缺 `-depends` 或 `-plan`） | 返回码 `1`；报错 `-new requires -depends/-plan` |
+| TC-038 | 参数校验 | 新建缺少 depends/plan | TODO 存在 | `-file F -new -info "desc" -worktree repo-required`（分别缺 `-depends` 或 `-plan`） | 返回码 `1`；报错 `-new requires -depends/-plan` |
 | TC-039 | `-status` | 输出计划书进度表 | TODO 结构合法 | `-file F -status -plan-list` | 返回码 `0`；输出包含计划书进度表 |
-| TC-040 | `-new` | 依赖不存在阻断 | 依赖任务 ID 不存在于任务表 | `-file F -new -info "desc" -worktree None -depends EX-404 -plan P` | 返回码 `3`；报错 `dependency task not found: EX-404` |
-| TC-041 | `-new` | 新建任务更新计划表 | 提供非空 `-plan` 且依赖存在 | `-file F -new -info "desc" -worktree None -depends EX-3 -plan P` | 返回码 `0`；计划表对应行计数更新为 `总=1/已完成=0/待完成=1` |
+| TC-040 | `-new` | 依赖不存在阻断 | 依赖任务 ID 不存在于任务表 | `-file F -new -info "desc" -worktree repo-dep-check -depends EX-404 -plan P` | 返回码 `3`；报错 `dependency task not found: EX-404` |
+| TC-041 | `-new` | 新建任务更新计划表 | 提供非空 `-plan` 且依赖存在 | `-file F -new -info "desc" -worktree repo-plan-1 -depends EX-3 -plan P` | 返回码 `0`；计划表对应行计数更新为 `总=1/已完成=0/待完成=1` |
 | TC-042 | `-done` | 最后任务完成更新计划状态 | 运行中任务绑定计划书，且为最后待完成项 | `-file F -done -task_id EX-1 -log L -agents-list G` | 返回码 `0`；计划状态更新为 `完成待检查` |
 | TC-043 | `-done-plan` | 归档已完成计划 | 计划表中 `状态=完成待检查` 且 `待完成=0` | `-file F -done-plan -plan P` | 返回码 `0`；计划表移除该计划行 |
 | TC-044 | `-done-plan` | 非完成待检查阻断 | 计划表中目标计划仍为 `进行中` | `-file F -done-plan -plan P` | 返回码 `3`；报错 `plan is not ready for done-plan` |

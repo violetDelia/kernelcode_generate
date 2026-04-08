@@ -108,7 +108,7 @@ Usage:
   codex-multi-agents-task.sh -file <TODO.md> -continue -task_id <id> -agents-list <agents-lists.md>
   codex-multi-agents-task.sh -file <TODO.md> -reassign -task_id <id> -to <worker> -agents-list <agents-lists.md>
   codex-multi-agents-task.sh -file <TODO.md> -next -task_id <id> -message <text> -agents-list <agents-lists.md>
-  codex-multi-agents-task.sh -file <TODO.md> -new -info <desc> -worktree <path|None> -depends <task_ids|None> -plan <plan_doc|None> [-to <worker>] [-from <owner>] [-log <record_path>]
+  codex-multi-agents-task.sh -file <TODO.md> -new -info <desc> -worktree <path> -depends <task_ids|None> -plan <plan_doc|None> [-to <worker>] [-from <owner>] [-log <record_path>]
   codex-multi-agents-task.sh -file <TODO.md> -status -doing
   codex-multi-agents-task.sh -file <TODO.md> -status -task-list
   codex-multi-agents-task.sh -file <TODO.md> -status -plan-list
@@ -413,6 +413,7 @@ parse_args() {
     [[ "$HAS_PLAN" -eq 1 ]] || err "$RC_ARG" "-new requires -plan"
     [[ -n "$(trim "$INFO")" ]] || err "$RC_ARG" "empty value for -info"
     [[ -n "$(trim "$WORKTREE")" ]] || err "$RC_ARG" "empty value for -worktree"
+    [[ "$(trim "$WORKTREE" | tr '[:upper:]' '[:lower:]')" != "none" ]] || err "$RC_ARG" "-new requires non-None value for -worktree"
     if [[ "$HAS_TO" -eq 1 ]]; then
       [[ -n "$(trim "$TO")" ]] || err "$RC_ARG" "empty value for -to"
     fi
@@ -1485,7 +1486,16 @@ def main() -> int:
         new_id = generate_task_id(info, to, existing_ids)
         created_at = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
         from_val = from_user or ""
-        worktree_val = "" if worktree.strip().lower() == "none" else worktree
+        worktree_val = worktree.strip()
+        if not worktree_val:
+            fail(RC_ARG, "empty value for -worktree")
+        if worktree_val.lower() == "none":
+            fail(RC_ARG, "-new requires non-None value for -worktree")
+        for row in (exec_rows + list_rows):
+            if is_empty_row(row):
+                continue
+            if row[3].strip() == worktree_val:
+                fail(RC_DATA, f"duplicate worktree found: {worktree_val} (task: {row[0].strip()})")
         depends_val = "" if depends.strip().lower() == "none" else depends
         plan_doc_val = "" if plan_doc.strip().lower() == "none" else plan_doc
         for dependency in parse_dependencies(depends_val):

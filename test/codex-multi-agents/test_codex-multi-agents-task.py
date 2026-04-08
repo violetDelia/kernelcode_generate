@@ -454,7 +454,7 @@ def test_new_task_without_assignee_success(tmp_path: Path) -> None:
         "-info",
         "补充单元测试",
         "-worktree",
-        "None",
+        "repo-y",
         "-depends",
         "None",
         "-plan",
@@ -469,7 +469,7 @@ def test_new_task_without_assignee_success(tmp_path: Path) -> None:
         r[4] == "补充单元测试"
         and r[7] == ""
         and r[1] == ""
-        and r[3] == ""
+        and r[3] == "repo-y"
         and r[8] == ""
         and re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{4}", r[2] or "")
         for r in list_rows
@@ -512,7 +512,7 @@ def test_file_not_found_returns_rc2(tmp_path: Path) -> None:
         "-info",
         "desc",
         "-worktree",
-        "None",
+        "repo-missing",
         "-depends",
         "None",
         "-plan",
@@ -554,7 +554,7 @@ def test_invalid_todo_structure_returns_rc2(tmp_path: Path) -> None:
         "-info",
         "desc",
         "-worktree",
-        "None",
+        "repo-invalid",
         "-depends",
         "None",
         "-plan",
@@ -1290,7 +1290,7 @@ def test_new_restricted_for_non_privileged_operator(tmp_path: Path) -> None:
         "-info",
         "补充单元测试",
         "-worktree",
-        "None",
+        "repo-auth",
         "-depends",
         "None",
         "-plan",
@@ -1343,6 +1343,11 @@ def test_new_requires_worktree(tmp_path: Path) -> None:
 
     assert result.returncode == 1
     assert "-new requires -worktree" in result.stderr
+
+    result = run_script("-file", str(todo), "-new", "-info", "补充单元测试", "-worktree", "None", "-depends", "None", "-plan", "None")
+
+    assert result.returncode == 1
+    assert "-new requires non-None value for -worktree" in result.stderr
 
 
 # TC-035
@@ -1441,11 +1446,11 @@ def test_new_requires_depends_and_plan(tmp_path: Path) -> None:
     todo = tmp_path / "TODO.md"
     write_todo_file(todo)
 
-    result = run_script("-file", str(todo), "-new", "-info", "补充单元测试", "-worktree", "None", "-plan", "None")
+    result = run_script("-file", str(todo), "-new", "-info", "补充单元测试", "-worktree", "repo-required", "-plan", "None")
     assert result.returncode == 1
     assert "-new requires -depends" in result.stderr
 
-    result = run_script("-file", str(todo), "-new", "-info", "补充单元测试", "-worktree", "None", "-depends", "None")
+    result = run_script("-file", str(todo), "-new", "-info", "补充单元测试", "-worktree", "repo-required", "-depends", "None")
     assert result.returncode == 1
     assert "-new requires -plan" in result.stderr
 
@@ -1480,7 +1485,10 @@ def test_status_plan_list_outputs_plan_table(tmp_path: Path) -> None:
 def test_new_requires_existing_dependencies(tmp_path: Path) -> None:
     todo = tmp_path / "TODO.md"
     agents = tmp_path / "agents-lists.md"
-    write_todo_file(todo)
+    write_todo_file(
+        todo,
+        list_rows=[row_list("EX-3", "苏轼", "2026-03-08 16:30:00 +0800", "wt-ex3", "删除 tmp/demo.txt", "", "", "", "./log/ex3.md")],
+    )
     write_agents_file(agents, rows=[agent_row("神秘人", "free"), agent_row("worker-a", "free")])
 
     env = os.environ.copy()
@@ -1493,7 +1501,7 @@ def test_new_requires_existing_dependencies(tmp_path: Path) -> None:
         "-info",
         "需要依赖的任务",
         "-worktree",
-        "None",
+        "repo-dep-check",
         "-depends",
         "EX-404",
         "-plan",
@@ -1505,6 +1513,24 @@ def test_new_requires_existing_dependencies(tmp_path: Path) -> None:
     assert "dependency task not found: EX-404" in result.stderr
     list_rows = parse_section_rows(todo.read_text(encoding="utf-8"), "## 任务列表")
     assert not any(r[4] == "需要依赖的任务" for r in list_rows)
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-new",
+        "-info",
+        "重复 worktree 校验",
+        "-worktree",
+        "wt-ex3",
+        "-depends",
+        "EX-3",
+        "-plan",
+        "ARCHITECTURE/plan/a.md",
+        env=env,
+    )
+
+    assert result.returncode == 3
+    assert "duplicate worktree found: wt-ex3 (task: EX-3)" in result.stderr
 
 
 # TC-041
@@ -1531,7 +1557,7 @@ def test_new_updates_plan_progress_table(tmp_path: Path) -> None:
         "-info",
         "计划任务-1",
         "-worktree",
-        "None",
+        "repo-plan-1",
         "-depends",
         "EX-3",
         "-plan",
