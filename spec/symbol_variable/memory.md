@@ -9,7 +9,7 @@
 - 创建者：`摸鱼小分队`
 - 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)
-- `test`：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)、[`test/operation/test_memory_operation.py`](../../test/operation/test_memory_operation.py)、[`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)
+- `test`：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)、[`test/symbol_variable/test_memory_operation.py`](../../test/symbol_variable/test_memory_operation.py)、[`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)
 - `功能实现`：[`kernel_gen/symbol_variable/memory.py`](../../kernel_gen/symbol_variable/memory.py)
 
 ## 依赖
@@ -569,17 +569,17 @@ cmp_mem = lhs < 0
 
 - 主测试文件：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)
 - 交叉验证：
-  - [`test/operation/test_memory_operation.py`](../../test/operation/test_memory_operation.py)：验证 `Memory` 元信息被 operation 层稳定消费。
+  - [`test/symbol_variable/test_memory_operation.py`](../../test/symbol_variable/test_memory_operation.py)：验证 `Memory` 元信息被 operation 层稳定消费。
   - [`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)：验证 memory 相关整数 symbol 分量进入 dialect 后仍符合边界约定。
 - 执行命令：
   - `pytest -q test/symbol_variable/test_memory.py`
-  - `pytest -q test/operation/test_memory_operation.py`
+  - `pytest -q test/symbol_variable/test_memory_operation.py`
   - `pytest -q test/dialect/test_symbol_dialect.py`
 
 ### 测试分层
 
 - `test/symbol_variable/test_memory.py` 负责 `Memory` / `MemorySpace` / `LocalSpaceMeta` 的主语义。
-- `test/operation/test_memory_operation.py` 只验证上游 operation 复用 `Memory` 元信息时不回退，不重复定义 `Memory` 主语义。
+- `test/symbol_variable/test_memory_operation.py` 只验证上游 operation 复用 `Memory` 元信息时不回退，不重复定义 `Memory` 主语义。
 - `test/dialect/test_symbol_dialect.py` 只验证单个整数分量进入 dialect 后的兼容性，不替代 `Memory` 主测试。
 
 ### 测试目标

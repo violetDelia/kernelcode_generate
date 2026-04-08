@@ -13,7 +13,7 @@
 关联文件:
 - spec: spec/symbol_variable/memory.md
 - test: test/symbol_variable/test_memory.py
-- test: test/operation/test_memory_operation.py
+- test: test/symbol_variable/test_memory_operation.py
 - 功能实现: kernel_gen/symbol_variable/memory.py
 """
 
@@ -65,7 +65,7 @@ class LocalSpaceMeta:
     关联文件:
     - spec: spec/symbol_variable/memory.md
     - test: test/symbol_variable/test_memory.py
-    - test: test/operation/test_memory_operation.py
+    - test: test/symbol_variable/test_memory_operation.py
     - 功能实现: kernel_gen/symbol_variable/memory.py
     """
 
@@ -89,7 +89,7 @@ class MemorySpace(Enum):
     关联文件:
     - spec: spec/symbol_variable/memory.md
     - test: test/symbol_variable/test_memory.py
-    - test: test/operation/test_memory_operation.py
+    - test: test/symbol_variable/test_memory_operation.py
     - 功能实现: kernel_gen/symbol_variable/memory.py
     """
 
@@ -115,7 +115,7 @@ class Memory:
     关联文件:
     - spec: spec/symbol_variable/memory.md
     - test: test/symbol_variable/test_memory.py
-    - test: test/operation/test_memory_operation.py
+    - test: test/symbol_variable/test_memory_operation.py
     - 功能实现: kernel_gen/symbol_variable/memory.py
     """
 
@@ -142,7 +142,7 @@ class Memory:
         关联文件:
         - spec: spec/symbol_variable/memory.md
         - test: test/symbol_variable/test_memory.py
-        - test: test/operation/test_memory_operation.py
+        - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         self.shape = self._normalize_shape(shape)
@@ -417,7 +417,7 @@ class Memory:
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
+        - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         if self.shape.get_values() != other.shape.get_values():
@@ -437,7 +437,7 @@ class Memory:
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
+        - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         if self.dtype is not other.dtype:
@@ -457,7 +457,7 @@ class Memory:
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
+        - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         if isinstance(value, bool):
@@ -482,7 +482,7 @@ class Memory:
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
+        - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         if isinstance(value, bool):
@@ -505,7 +505,7 @@ class Memory:
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
+        - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         shape = self._clone_shape_like(self.shape)
@@ -526,7 +526,7 @@ class Memory:
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
+        - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         if isinstance(other, Memory):
@@ -552,7 +552,7 @@ class Memory:
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
+        - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         if isinstance(other, Memory):
@@ -576,7 +576,7 @@ class Memory:
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
+        - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         return self._binary_arithmetic(other)
@@ -595,7 +595,7 @@ class Memory:
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
+        - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         return self._binary_arithmetic(other)
@@ -614,7 +614,7 @@ class Memory:
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
+        - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         return self._binary_arithmetic(other)
@@ -633,7 +633,7 @@ class Memory:
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
+        - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         return self._binary_arithmetic(other)
@@ -652,7 +652,7 @@ class Memory:
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
+        - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         return self._binary_arithmetic(other)
@@ -671,7 +671,7 @@ class Memory:
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
+        - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         return self._binary_arithmetic(other)
@@ -690,7 +690,7 @@ class Memory:
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
+        - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         return self._binary_arithmetic(other)
@@ -709,7 +709,7 @@ class Memory:
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
+        - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         return self._binary_arithmetic(other)
@@ -728,7 +728,7 @@ class Memory:
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
+        - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         return self._binary_arithmetic(other)
@@ -747,7 +747,7 @@ class Memory:
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
+        - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         return self._binary_arithmetic(other)
@@ -766,7 +766,7 @@ class Memory:
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
+        - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         return self._binary_compare(other)
@@ -785,7 +785,7 @@ class Memory:
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
+        - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         return self._binary_compare(other)
@@ -804,7 +804,7 @@ class Memory:
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
+        - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         return self._binary_compare(other)
@@ -823,7 +823,7 @@ class Memory:
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
+        - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         return self._binary_compare(other)
@@ -842,7 +842,7 @@ class Memory:
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
+        - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         return self._binary_compare(other)
@@ -861,7 +861,7 @@ class Memory:
 
         关联文件:
         - spec: spec/symbol_variable/memory.md
-        - test: test/operation/test_memory_operation.py
+        - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
         return self._binary_compare(other)
