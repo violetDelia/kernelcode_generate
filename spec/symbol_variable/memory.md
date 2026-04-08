@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)
 - `test`：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)、[`test/symbol_variable/test_memory_operation.py`](../../test/symbol_variable/test_memory_operation.py)、[`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)
 - `功能实现`：[`kernel_gen/symbol_variable/memory.py`](../../kernel_gen/symbol_variable/memory.py)
@@ -554,7 +554,7 @@ cmp_mem = lhs < 0
 
 - 当前阶段不支持广播，`shape` 不一致抛 `ValueError`。
 - 算术运算不支持 `NumericType.Bool` 参与提升；遇到不支持的 dtype 或标量类型抛 `TypeError`。
-- 比较结果的 `dtype` 统一为 `NumericType.Int32`。
+- 比较结果的 `dtype` 统一为 `NumericType.Bool`。
 - 比较运算要求 `Memory`/`Memory` 的 `dtype` 完全一致，不做 dtype 提升。
 - 输出继承 `lhs` 的 `space`、`format` 与 `stride` 公开语义；对动态 `stride` 默认锁定 `get_value()` / 稳定序列化口径，不要求保留底层 sympy 结构。
 - 本小节只定义 Python 侧 `Memory` 运算结果的高层元数据继承规则，不新增 dialect 层 memory type 或 symbol type。
@@ -567,9 +567,10 @@ cmp_mem = lhs < 0
 
 ## 测试
 
-- 主测试文件：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)
+- 主测试文件：
+  - [`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)
+  - [`test/symbol_variable/test_memory_operation.py`](../../test/symbol_variable/test_memory_operation.py)：验证 `Memory` 运算符重载（逐元素算术/比较）与错误路径。
 - 交叉验证：
-  - [`test/symbol_variable/test_memory_operation.py`](../../test/symbol_variable/test_memory_operation.py)：验证 `Memory` 元信息被 operation 层稳定消费。
   - [`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)：验证 memory 相关整数 symbol 分量进入 dialect 后仍符合边界约定。
 - 执行命令：
   - `pytest -q test/symbol_variable/test_memory.py`
@@ -578,8 +579,8 @@ cmp_mem = lhs < 0
 
 ### 测试分层
 
-- `test/symbol_variable/test_memory.py` 负责 `Memory` / `MemorySpace` / `LocalSpaceMeta` 的主语义。
-- `test/symbol_variable/test_memory_operation.py` 只验证上游 operation 复用 `Memory` 元信息时不回退，不重复定义 `Memory` 主语义。
+- `test/symbol_variable/test_memory.py` 负责 `Memory` / `MemorySpace` / `LocalSpaceMeta` 的构造、表示与公开访问接口。
+- `test/symbol_variable/test_memory_operation.py` 负责 `Memory` 运算符重载（逐元素算术/比较）的 dtype 规则、元数据继承与错误路径，不重复覆盖构造与表示语义。
 - `test/dialect/test_symbol_dialect.py` 只验证单个整数分量进入 dialect 后的兼容性，不替代 `Memory` 主测试。
 
 ### 测试目标

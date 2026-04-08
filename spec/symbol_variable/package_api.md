@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`大闸蟹`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/symbol_variable/package_api.md`](../../spec/symbol_variable/package_api.md)
 - `test`：[`test/symbol_variable/test_package_api.py`](../../test/symbol_variable/test_package_api.py)
 - `功能实现`：[`kernel_gen/symbol_variable/__init__.py`](../../kernel_gen/symbol_variable/__init__.py)
@@ -33,7 +33,7 @@
 | `type.md` | `kernel_gen.symbol_variable.type` 与 `kernel_gen.symbol_variable` 重导出 | `NumericType` / `Farmat` 枚举语义与模块级导出边界 | [`test/symbol_variable/test_type.py`](../../test/symbol_variable/test_type.py) | [`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py) |
 | `symbol_dim.md` | `kernel_gen.symbol_variable.symbol_dim` | 单个整数维度/符号表达与基础算术语义 | [`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py) | [`expectation/symbol_variable/symbol_dim`](../../expectation/symbol_variable/symbol_dim) |
 | `symbol_shape.md` | `kernel_gen.symbol_variable.symbol_shape` | 形状容器规整、访问、切片赋值与序列化 | [`test/symbol_variable/test_symbol_shape.py`](../../test/symbol_variable/test_symbol_shape.py) | [`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py) |
-| `memory.md` | `kernel_gen.symbol_variable.memory` 与 `kernel_gen.symbol_variable` 重导出 | `Memory` / `MemorySpace` / `LocalSpaceMeta` 元信息容器与逐元素元信息规则 | [`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py) | [`test/symbol_variable/test_memory_operation.py`](../../test/symbol_variable/test_memory_operation.py)、[`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py) |
+| `memory.md` | `kernel_gen.symbol_variable.memory` 与 `kernel_gen.symbol_variable` 重导出 | `Memory` / `MemorySpace` / `LocalSpaceMeta` 元信息容器与逐元素算术/比较元数据规则 | [`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)、[`test/symbol_variable/test_memory_operation.py`](../../test/symbol_variable/test_memory_operation.py) | [`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py) |
 | `ptr.md` | `kernel_gen.symbol_variable.ptr` | `Ptr(dtype)` 的 submodule 公开语义 | [`test/symbol_variable/test_ptr.py`](../../test/symbol_variable/test_ptr.py) | N/A |
 
 ## 限制与边界
