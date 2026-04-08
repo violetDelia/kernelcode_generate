@@ -5,9 +5,10 @@
 # 最后一次更改: 神秘人
 #
 # 功能:
-# - 管理 TODO.md 任务流转: 分发、完成、暂停、继续、改派、新建、删除。
+# - 管理 TODO.md 任务流转: 分发、完成、暂停、继续、改派、续接、新建、删除、计划归档。
 # - 支持 DONE.md 自动创建与完成记录追加。
-# - 在分发、完成、暂停、继续时同步更新 agents-lists.md 角色状态。
+# - 在分发、完成、暂停、继续、改派、续接时同步更新 agents-lists.md 角色状态。
+# - 在 TODO.md 维护计划书进度表，支持 -status -plan-list 与 -done-plan 收口归档。
 # - 在分发时可选调用 tmux 对话脚本，向目标角色发送任务消息。
 # - 在每次分发前固定调用 list 的 -init，更新目标角色信息并提醒其同步自身提示词信息。
 # - 写操作统一使用 flock 文件锁。
@@ -27,14 +28,20 @@ readonly RC_DATA=3
 readonly RC_LOCK=4
 readonly RC_INTERNAL=5
 
+# 并行执行人数上限（可通过环境变量覆盖）
+# 示例：CODEX_MULTI_AGENTS_MAX_PARALLEL=10 codex-multi-agents-task.sh ...
+MAX_PARALLEL_AGENTS="${CODEX_MULTI_AGENTS_MAX_PARALLEL:-8}"
+
 OP_DISPATCH=0
 OP_DONE=0
 OP_PAUSE=0
 OP_CONTINUE=0
 OP_REASSIGN=0
 OP_NEW=0
+OP_NEXT=0
 OP_STATUS=0
 OP_DELETE=0
+OP_DONE_PLAN=0
 
 FILE=""
 AGENTS_LIST=""
@@ -45,6 +52,8 @@ INFO=""
 LOG_FILE=""
 WORKTREE=""
 MESSAGE=""
+DEPENDS=""
+PLAN_DOC=""
 
 HAS_FILE=0
 HAS_AGENTS_LIST=0
@@ -55,14 +64,26 @@ HAS_INFO=0
 HAS_LOG=0
 HAS_WORKTREE=0
 HAS_MESSAGE=0
+HAS_DEPENDS=0
+HAS_PLAN=0
 HAS_DOING=0
 HAS_TASK_LIST=0
+HAS_PLAN_LIST=0
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 LIST_SCRIPT="${SCRIPT_DIR}/codex-multi-agents-list.sh"
 TMUX_SCRIPT="${SCRIPT_DIR}/codex-multi-agents-tmux.sh"
 DEFAULT_CONFIG_FILE="${REPO_ROOT}/agents/codex-multi-agents/config/config.txt"
+
+validate_parallel_limit() {
+  if [[ ! "$MAX_PARALLEL_AGENTS" =~ ^[0-9]+$ ]]; then
+    err "$RC_ARG" "invalid CODEX_MULTI_AGENTS_MAX_PARALLEL: ${MAX_PARALLEL_AGENTS}"
+  fi
+  if [[ "$MAX_PARALLEL_AGENTS" -le 0 ]]; then
+    err "$RC_ARG" "CODEX_MULTI_AGENTS_MAX_PARALLEL must be greater than 0"
+  fi
+}
 
 trim() {
   local s="${1-}"
@@ -86,10 +107,13 @@ Usage:
   codex-multi-agents-task.sh -file <TODO.md> -pause -task_id <id> -agents-list <agents-lists.md>
   codex-multi-agents-task.sh -file <TODO.md> -continue -task_id <id> -agents-list <agents-lists.md>
   codex-multi-agents-task.sh -file <TODO.md> -reassign -task_id <id> -to <worker> -agents-list <agents-lists.md>
-  codex-multi-agents-task.sh -file <TODO.md> -new -info <desc> [-to <worker>] [-from <owner>] [-worktree <path>] [-log <record_path>]
+  codex-multi-agents-task.sh -file <TODO.md> -next -task_id <id> -message <text> -agents-list <agents-lists.md>
+  codex-multi-agents-task.sh -file <TODO.md> -new -info <desc> -worktree <path|None> -depends <task_ids|None> -plan <plan_doc|None> [-to <worker>] [-from <owner>] [-log <record_path>]
   codex-multi-agents-task.sh -file <TODO.md> -status -doing
   codex-multi-agents-task.sh -file <TODO.md> -status -task-list
+  codex-multi-agents-task.sh -file <TODO.md> -status -plan-list
   codex-multi-agents-task.sh -file <TODO.md> -delete -task_id <id>
+  codex-multi-agents-task.sh -file <TODO.md> -done-plan -plan <plan_doc>
 
 Examples:
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -dispatch -task_id EX-3 -to worker-a -agents-list ./agents/codex-multi-agents/agents-lists.md -message "请处理任务 EX-3"
@@ -97,10 +121,13 @@ Examples:
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -pause -task_id EX-2 -agents-list ./agents/codex-multi-agents/agents-lists.md
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -continue -task_id EX-2 -agents-list ./agents/codex-multi-agents/agents-lists.md
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -reassign -task_id EX-2 -to worker-c -agents-list ./agents/codex-multi-agents/agents-lists.md
-  codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -new -info "补充单元测试" -to worker-b -from 李白 -worktree repo-x -log ./log/record.md
+  codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -next -task_id EX-2 -message "下一阶段：补齐边界测试" -agents-list ./agents/codex-multi-agents/agents-lists.md
+  codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -new -info "补充单元测试" -worktree repo-x -depends "EX-2,EX-5" -plan "ARCHITECTURE/plan/x.md" -to worker-b -from 李白 -log ./log/record.md
   codex-multi-agents-task.sh ./skills/codex-multi-agents/examples/TODO.md -file -status -doing
   codex-multi-agents-task.sh ./skills/codex-multi-agents/examples/TODO.md -file -status -task-list
+  codex-multi-agents-task.sh ./skills/codex-multi-agents/examples/TODO.md -file -status -plan-list
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -delete -task_id EX-4
+  codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -done-plan -plan "ARCHITECTURE/plan/x.md"
 
 Return codes:
   0 success
@@ -140,12 +167,20 @@ parse_args() {
         OP_REASSIGN=1
         shift
         ;;
+      -next)
+        OP_NEXT=1
+        shift
+        ;;
       -new)
         OP_NEW=1
         shift
         ;;
       -delete)
         OP_DELETE=1
+        shift
+        ;;
+      -done-plan)
+        OP_DONE_PLAN=1
         shift
         ;;
       -status)
@@ -244,12 +279,38 @@ parse_args() {
         HAS_MESSAGE=1
         shift 2
         ;;
+      -depends=*)
+        DEPENDS="${1#*=}"
+        HAS_DEPENDS=1
+        shift
+        ;;
+      -depends)
+        [[ $# -ge 2 ]] || err "$RC_ARG" "missing value for -depends"
+        DEPENDS="$2"
+        HAS_DEPENDS=1
+        shift 2
+        ;;
+      -plan=*)
+        PLAN_DOC="${1#*=}"
+        HAS_PLAN=1
+        shift
+        ;;
+      -plan)
+        [[ $# -ge 2 ]] || err "$RC_ARG" "missing value for -plan"
+        PLAN_DOC="$2"
+        HAS_PLAN=1
+        shift 2
+        ;;
       -doing)
         HAS_DOING=1
         shift
         ;;
       -task-list)
         HAS_TASK_LIST=1
+        shift
+        ;;
+      -plan-list)
+        HAS_PLAN_LIST=1
         shift
         ;;
       -log=*)
@@ -282,9 +343,9 @@ parse_args() {
   [[ "$HAS_FILE" -eq 1 ]] || err "$RC_ARG" "missing required argument: -file"
   [[ -n "$(trim "$FILE")" ]] || err "$RC_ARG" "empty value for -file"
 
-  local op_count=$((OP_DISPATCH + OP_DONE + OP_PAUSE + OP_CONTINUE + OP_REASSIGN + OP_NEW + OP_STATUS))
-  op_count=$((op_count + OP_DELETE))
-  [[ "$op_count" -eq 1 ]] || err "$RC_ARG" "exactly one operation is required: -dispatch|-done|-pause|-continue|-reassign|-new|-status|-delete"
+  local op_count=$((OP_DISPATCH + OP_DONE + OP_PAUSE + OP_CONTINUE + OP_REASSIGN + OP_NEXT + OP_NEW + OP_STATUS))
+  op_count=$((op_count + OP_DELETE + OP_DONE_PLAN))
+  [[ "$op_count" -eq 1 ]] || err "$RC_ARG" "exactly one operation is required: -dispatch|-done|-pause|-continue|-reassign|-next|-new|-status|-delete|-done-plan"
 
   if [[ "$OP_DISPATCH" -eq 1 ]]; then
     [[ "$HAS_TASK_ID" -eq 1 ]] || err "$RC_ARG" "-dispatch requires -task_id"
@@ -296,7 +357,7 @@ parse_args() {
     if [[ "$HAS_MESSAGE" -eq 1 ]]; then
       [[ -n "$(trim "$MESSAGE")" ]] || err "$RC_ARG" "empty value for -message"
     fi
-    [[ "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 ]] || err "$RC_ARG" "-dispatch does not accept -info/-log/-from/-worktree"
+    [[ "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_DEPENDS" -eq 0 && "$HAS_PLAN" -eq 0 ]] || err "$RC_ARG" "-dispatch does not accept -info/-log/-from/-worktree/-depends/-plan"
   fi
 
   if [[ "$OP_DONE" -eq 1 ]]; then
@@ -306,7 +367,7 @@ parse_args() {
     [[ -n "$(trim "$TASK_ID")" ]] || err "$RC_ARG" "empty value for -task_id"
     [[ -n "$(trim "$LOG_FILE")" ]] || err "$RC_ARG" "empty value for -log"
     [[ -n "$(trim "$AGENTS_LIST")" ]] || err "$RC_ARG" "empty value for -agents-list"
-    [[ "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 ]] || err "$RC_ARG" "-done does not accept -to/-info/-from/-worktree/-message"
+    [[ "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_DEPENDS" -eq 0 && "$HAS_PLAN" -eq 0 ]] || err "$RC_ARG" "-done does not accept -to/-info/-from/-worktree/-message/-depends/-plan"
   fi
 
   if [[ "$OP_PAUSE" -eq 1 ]]; then
@@ -314,7 +375,7 @@ parse_args() {
     [[ "$HAS_AGENTS_LIST" -eq 1 ]] || err "$RC_ARG" "-pause requires -agents-list"
     [[ -n "$(trim "$TASK_ID")" ]] || err "$RC_ARG" "empty value for -task_id"
     [[ -n "$(trim "$AGENTS_LIST")" ]] || err "$RC_ARG" "empty value for -agents-list"
-    [[ "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 ]] || err "$RC_ARG" "-pause does not accept -to/-info/-log/-from/-worktree/-message"
+    [[ "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_DEPENDS" -eq 0 && "$HAS_PLAN" -eq 0 ]] || err "$RC_ARG" "-pause does not accept -to/-info/-log/-from/-worktree/-message/-depends/-plan"
   fi
 
   if [[ "$OP_CONTINUE" -eq 1 ]]; then
@@ -322,7 +383,7 @@ parse_args() {
     [[ "$HAS_AGENTS_LIST" -eq 1 ]] || err "$RC_ARG" "-continue requires -agents-list"
     [[ -n "$(trim "$TASK_ID")" ]] || err "$RC_ARG" "empty value for -task_id"
     [[ -n "$(trim "$AGENTS_LIST")" ]] || err "$RC_ARG" "empty value for -agents-list"
-    [[ "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 ]] || err "$RC_ARG" "-continue does not accept -to/-info/-log/-from/-worktree/-message"
+    [[ "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_DEPENDS" -eq 0 && "$HAS_PLAN" -eq 0 ]] || err "$RC_ARG" "-continue does not accept -to/-info/-log/-from/-worktree/-message/-depends/-plan"
   fi
 
   if [[ "$OP_REASSIGN" -eq 1 ]]; then
@@ -332,35 +393,55 @@ parse_args() {
     [[ -n "$(trim "$TASK_ID")" ]] || err "$RC_ARG" "empty value for -task_id"
     [[ -n "$(trim "$TO")" ]] || err "$RC_ARG" "empty value for -to"
     [[ -n "$(trim "$AGENTS_LIST")" ]] || err "$RC_ARG" "empty value for -agents-list"
-    [[ "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 ]] || err "$RC_ARG" "-reassign does not accept -info/-log/-from/-worktree/-message"
+    [[ "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_DEPENDS" -eq 0 && "$HAS_PLAN" -eq 0 ]] || err "$RC_ARG" "-reassign does not accept -info/-log/-from/-worktree/-message/-depends/-plan"
+  fi
+
+  if [[ "$OP_NEXT" -eq 1 ]]; then
+    [[ "$HAS_TASK_ID" -eq 1 ]] || err "$RC_ARG" "-next requires -task_id"
+    [[ "$HAS_MESSAGE" -eq 1 ]] || err "$RC_ARG" "-next requires -message"
+    [[ "$HAS_AGENTS_LIST" -eq 1 ]] || err "$RC_ARG" "-next requires -agents-list"
+    [[ -n "$(trim "$TASK_ID")" ]] || err "$RC_ARG" "empty value for -task_id"
+    [[ -n "$(trim "$MESSAGE")" ]] || err "$RC_ARG" "empty value for -message"
+    [[ -n "$(trim "$AGENTS_LIST")" ]] || err "$RC_ARG" "empty value for -agents-list"
+    [[ "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_DOING" -eq 0 && "$HAS_TASK_LIST" -eq 0 && "$HAS_PLAN_LIST" -eq 0 && "$HAS_DEPENDS" -eq 0 && "$HAS_PLAN" -eq 0 ]] || err "$RC_ARG" "-next does not accept -to/-info/-log/-from/-worktree/-doing/-task-list/-plan-list/-depends/-plan"
   fi
 
   if [[ "$OP_NEW" -eq 1 ]]; then
     [[ "$HAS_INFO" -eq 1 ]] || err "$RC_ARG" "-new requires -info"
+    [[ "$HAS_WORKTREE" -eq 1 ]] || err "$RC_ARG" "-new requires -worktree"
+    [[ "$HAS_DEPENDS" -eq 1 ]] || err "$RC_ARG" "-new requires -depends"
+    [[ "$HAS_PLAN" -eq 1 ]] || err "$RC_ARG" "-new requires -plan"
     [[ -n "$(trim "$INFO")" ]] || err "$RC_ARG" "empty value for -info"
+    [[ -n "$(trim "$WORKTREE")" ]] || err "$RC_ARG" "empty value for -worktree"
     if [[ "$HAS_TO" -eq 1 ]]; then
       [[ -n "$(trim "$TO")" ]] || err "$RC_ARG" "empty value for -to"
     fi
     if [[ "$HAS_FROM" -eq 1 ]]; then
       [[ -n "$(trim "$FROM")" ]] || err "$RC_ARG" "empty value for -from"
     fi
-    if [[ "$HAS_WORKTREE" -eq 1 ]]; then
-      [[ -n "$(trim "$WORKTREE")" ]] || err "$RC_ARG" "empty value for -worktree"
-    fi
+    [[ -n "$(trim "$DEPENDS")" ]] || err "$RC_ARG" "empty value for -depends"
+    [[ -n "$(trim "$PLAN_DOC")" ]] || err "$RC_ARG" "empty value for -plan"
     [[ "$HAS_TASK_ID" -eq 0 ]] || err "$RC_ARG" "-new does not accept -task_id"
     [[ "$HAS_MESSAGE" -eq 0 ]] || err "$RC_ARG" "-new does not accept -message"
+    [[ "$HAS_DOING" -eq 0 && "$HAS_TASK_LIST" -eq 0 && "$HAS_PLAN_LIST" -eq 0 ]] || err "$RC_ARG" "-new does not accept -doing/-task-list/-plan-list"
   fi
 
   if [[ "$OP_STATUS" -eq 1 ]]; then
-    [[ "$HAS_TASK_ID" -eq 0 && "$HAS_TO" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_AGENTS_LIST" -eq 0 && "$HAS_MESSAGE" -eq 0 ]] || err "$RC_ARG" "-status does not accept -task_id/-to/-from/-info/-log/-worktree/-agents-list/-message"
-    local status_count=$((HAS_DOING + HAS_TASK_LIST))
-    [[ "$status_count" -eq 1 ]] || err "$RC_ARG" "-status requires exactly one of -doing/-task-list"
+    [[ "$HAS_TASK_ID" -eq 0 && "$HAS_TO" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_AGENTS_LIST" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_DEPENDS" -eq 0 && "$HAS_PLAN" -eq 0 ]] || err "$RC_ARG" "-status does not accept -task_id/-to/-from/-info/-log/-worktree/-agents-list/-message/-depends/-plan"
+    local status_count=$((HAS_DOING + HAS_TASK_LIST + HAS_PLAN_LIST))
+    [[ "$status_count" -eq 1 ]] || err "$RC_ARG" "-status requires exactly one of -doing/-task-list/-plan-list"
   fi
 
   if [[ "$OP_DELETE" -eq 1 ]]; then
     [[ "$HAS_TASK_ID" -eq 1 ]] || err "$RC_ARG" "-delete requires -task_id"
     [[ -n "$(trim "$TASK_ID")" ]] || err "$RC_ARG" "empty value for -task_id"
-    [[ "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_AGENTS_LIST" -eq 0 ]] || err "$RC_ARG" "-delete does not accept -to/-info/-log/-from/-worktree/-message/-agents-list"
+    [[ "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_AGENTS_LIST" -eq 0 && "$HAS_DOING" -eq 0 && "$HAS_TASK_LIST" -eq 0 && "$HAS_PLAN_LIST" -eq 0 && "$HAS_DEPENDS" -eq 0 && "$HAS_PLAN" -eq 0 ]] || err "$RC_ARG" "-delete does not accept -to/-info/-log/-from/-worktree/-message/-agents-list/-doing/-task-list/-plan-list/-depends/-plan"
+  fi
+
+  if [[ "$OP_DONE_PLAN" -eq 1 ]]; then
+    [[ "$HAS_PLAN" -eq 1 ]] || err "$RC_ARG" "-done-plan requires -plan"
+    [[ -n "$(trim "$PLAN_DOC")" ]] || err "$RC_ARG" "empty value for -plan"
+    [[ "$HAS_TASK_ID" -eq 0 && "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_AGENTS_LIST" -eq 0 && "$HAS_DOING" -eq 0 && "$HAS_TASK_LIST" -eq 0 && "$HAS_PLAN_LIST" -eq 0 && "$HAS_DEPENDS" -eq 0 ]] || err "$RC_ARG" "-done-plan does not accept -task_id/-to/-info/-log/-from/-worktree/-message/-agents-list/-doing/-task-list/-plan-list/-depends"
   fi
 }
 
@@ -421,6 +502,57 @@ resolve_dispatch_talk_log() {
   printf "%s/log/talk.log" "$(dirname "$AGENTS_LIST")"
 }
 
+resolve_operator_name() {
+  local operator_name="${CODEX_MULTI_AGENTS_ROOT_NAME-}"
+  if [[ -n "$(trim "$operator_name")" ]]; then
+    printf "%s" "$operator_name"
+    return 0
+  fi
+
+  operator_name="$(read_config_value "${CODEX_MULTI_AGENTS_CONFIG:-$DEFAULT_CONFIG_FILE}" "ROOT_NAME" || true)"
+  printf "%s" "$operator_name"
+}
+
+resolve_default_agents_file() {
+  local from_env="${CODEX_MULTI_AGENTS_AGENTS_FILE-}"
+  if [[ -n "$(trim "$from_env")" ]]; then
+    printf "%s" "$from_env"
+    return 0
+  fi
+
+  local from_cfg=""
+  from_cfg="$(read_config_value "${CODEX_MULTI_AGENTS_CONFIG:-$DEFAULT_CONFIG_FILE}" "AGENTS_FILE" || true)"
+  if [[ -n "$(trim "$from_cfg")" ]]; then
+    printf "%s" "$from_cfg"
+    return 0
+  fi
+
+  local fallback="${REPO_ROOT}/agents/codex-multi-agents/agents-lists.md"
+  if [[ -f "$fallback" ]]; then
+    printf "%s" "$fallback"
+    return 0
+  fi
+
+  printf ""
+}
+
+resolve_permission_agents_file() {
+  local from_env="${CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE-}"
+  if [[ -n "$(trim "$from_env")" ]]; then
+    printf "%s" "$from_env"
+    return 0
+  fi
+
+  local from_default=""
+  from_default="$(resolve_default_agents_file)"
+  if [[ -n "$(trim "$from_default")" ]]; then
+    printf "%s" "$from_default"
+    return 0
+  fi
+
+  printf "%s" "${1-}"
+}
+
 send_dispatch_init() {
   if [[ ! -f "$LIST_SCRIPT" ]]; then
     printf "WARN: list script not found, skip dispatch init: %s\n" "$LIST_SCRIPT" >&2
@@ -434,28 +566,116 @@ send_dispatch_init() {
     printf "WARN: dispatch init failed for %s: %s\n" "$TO" "$output" >&2
     return 0
   fi
+}
 
-  [[ -z "$output" ]] || printf "%s\n" "$output"
+build_dispatch_message() {
+  if [[ "$HAS_MESSAGE" -eq 1 ]]; then
+    printf "%s" "$MESSAGE"
+    return 0
+  fi
+
+  python3 - "$FILE" "$TASK_ID" "$REPO_ROOT" <<'PY'
+import sys
+
+todo_file = sys.argv[1]
+task_id = sys.argv[2]
+repo_root = sys.argv[3]
+
+
+def is_pipe_row(text: str) -> bool:
+    stripped = text.strip()
+    return stripped.startswith("|") and stripped.endswith("|")
+
+
+def split_row(text: str) -> list[str]:
+    stripped = text.strip()
+    return [cell.strip() for cell in stripped[1:-1].split("|")]
+
+
+with open(todo_file, "r", encoding="utf-8") as file_handle:
+    lines = file_handle.read().splitlines()
+
+section_start = -1
+for index, line in enumerate(lines):
+    if line.strip() == "## 正在执行的任务":
+        section_start = index
+        break
+
+if section_start < 0:
+    print(
+        f"请处理任务 {task_id}。完成后按 {repo_root}/agents/standard/任务记录约定.md 记录并回报管理员；流程不清楚请询问管理员；实现/架构问题请询问架构师。"
+    )
+    raise SystemExit(0)
+
+section_end = len(lines)
+for index in range(section_start + 1, len(lines)):
+    if lines[index].startswith("## "):
+        section_end = index
+        break
+
+row_cells: list[str] | None = None
+for index in range(section_start + 1, section_end):
+    line = lines[index]
+    if not is_pipe_row(line):
+        continue
+    cells = split_row(line)
+    if cells and cells[0] == task_id:
+        row_cells = cells
+        break
+
+if row_cells is None or len(row_cells) < 8:
+    print(
+        f"请处理任务 {task_id}。完成后按 {repo_root}/agents/standard/任务记录约定.md 记录并回报管理员；流程不清楚请询问管理员；实现/架构问题请询问架构师。"
+    )
+    raise SystemExit(0)
+
+worktree = row_cells[3] if row_cells[3] else ""
+desc = row_cells[4] if row_cells[4] else task_id
+plan_doc = row_cells[6] if row_cells[6] else ""
+record_spec = f"{repo_root}/agents/standard/任务记录约定.md"
+
+parts: list[str] = []
+if worktree:
+    parts.append(f"worktree={worktree}")
+if plan_doc:
+    parts.append(f"计划书={plan_doc}")
+prefix = "；".join(parts)
+if prefix:
+    prefix = prefix + "；"
+
+print(
+    f"请处理任务 {task_id}（{desc}）。{prefix}完成后按 {record_spec} 记录并回报管理员；流程不清楚请询问管理员；实现/架构问题请询问架构师。"
+)
+PY
 }
 
 send_dispatch_message() {
-  [[ "$HAS_MESSAGE" -eq 1 ]] || return 0
   if [[ ! -f "$TMUX_SCRIPT" ]]; then
-    printf "ERROR(%s): tmux script not found: %s\n" "$RC_FILE" "$TMUX_SCRIPT" >&2
-    return "$RC_FILE"
+    if [[ "$HAS_MESSAGE" -eq 1 ]]; then
+      printf "ERROR(%s): tmux script not found: %s\n" "$RC_FILE" "$TMUX_SCRIPT" >&2
+      return "$RC_FILE"
+    fi
+    printf "WARN: skip auto dispatch talk, tmux script not found: %s\n" "$TMUX_SCRIPT" >&2
+    return 0
   fi
 
   local from_name=""
   local talk_log=""
+  local dispatch_message=""
   local output=""
   local rc=0
 
   from_name="$(resolve_dispatch_sender)"
   talk_log="$(resolve_dispatch_talk_log)"
-  output="$(bash "$TMUX_SCRIPT" -talk -from "$from_name" -to "$TO" -agents-list "$AGENTS_LIST" -message "$MESSAGE" -log "$talk_log" 2>&1)" || rc=$?
+  dispatch_message="$(build_dispatch_message)"
+  output="$(bash "$TMUX_SCRIPT" -talk -from "$from_name" -to "$TO" -agents-list "$AGENTS_LIST" -message "$dispatch_message" -log "$talk_log" 2>&1)" || rc=$?
   if [[ "$rc" -ne 0 ]]; then
-    printf "%s\n" "$output" >&2
-    return "$rc"
+    if [[ "$HAS_MESSAGE" -eq 1 ]]; then
+      printf "%s\n" "$output" >&2
+      return "$rc"
+    fi
+    printf "WARN: auto dispatch talk failed for task %s: %s\n" "$TASK_ID" "$output" >&2
+    return 0
   fi
 
   [[ -z "$output" ]] || printf "%s\n" "$output"
@@ -496,10 +716,16 @@ run_python_core() {
   local log_file="$6"
   local from="$7"
   local worktree="$8"
-  local done_file="$9"
-  local agents_file="${10}"
+  local message="$9"
+  local depends="${10}"
+  local plan_doc="${11}"
+  local done_file="${12}"
+  local agents_file="${13}"
+  local operator_name="${14}"
+  local permission_agents_file="${15}"
+  local max_parallel_agents="${16}"
 
-  python3 - "$op" "$todo_file" "$task_id" "$to" "$info" "$log_file" "$from" "$worktree" "$done_file" "$agents_file" <<'PY'
+  python3 - "$op" "$todo_file" "$task_id" "$to" "$info" "$log_file" "$from" "$worktree" "$message" "$depends" "$plan_doc" "$done_file" "$agents_file" "$operator_name" "$permission_agents_file" "$max_parallel_agents" <<'PY'
 import hashlib
 import os
 import random
@@ -515,8 +741,9 @@ RC_DATA = 3
 RC_LOCK = 4
 RC_INTERNAL = 5
 
-RUN_TABLE_HEADER = ["任务 ID", "发起人", "创建时间", "worktree", "描述", "指派", "状态", "用户指导", "记录文件"]
-LIST_TABLE_HEADER = ["任务 ID", "发起人", "创建时间", "worktree", "描述", "指派", "记录文件"]
+RUN_TABLE_HEADER = ["任务 ID", "发起人", "创建时间", "worktree", "描述", "依赖任务", "计划书", "指派", "状态", "用户指导", "记录文件"]
+LIST_TABLE_HEADER = ["任务 ID", "发起人", "创建时间", "worktree", "描述", "依赖任务", "计划书", "指派", "记录文件"]
+PLAN_TABLE_HEADER = ["计划书", "总任务数", "已完成任务", "待完成任务", "完成状态"]
 DONE_TABLE_HEADER = ["任务 ID", "描述", "指派", "完成状态", "完成时间", "日志文件", "备注"]
 AGENTS_REQUIRED_COLUMNS = ["姓名", "状态"]
 
@@ -642,6 +869,29 @@ def parse_table_in_section(lines: list[str], section_title: str, expected_header
     }
 
 
+def ensure_plan_table(lines: list[str]) -> tuple[list[str], dict]:
+    if any((line.strip() == "## 计划书" for line in lines)):
+        return lines, parse_table_in_section(lines, "## 计划书", PLAN_TABLE_HEADER)
+
+    task_list_idx = -1
+    for i, line in enumerate(lines):
+        if line.strip() == "## 任务列表":
+            task_list_idx = i
+            break
+    if task_list_idx < 0:
+        fail(RC_FILE, "invalid table format: section not found: ## 任务列表")
+
+    insert_block = [
+        "## 计划书",
+        "",
+        render_row(PLAN_TABLE_HEADER),
+        render_sep(len(PLAN_TABLE_HEADER)),
+        "",
+    ]
+    new_lines = lines[:task_list_idx] + insert_block + lines[task_list_idx:]
+    return new_lines, parse_table_in_section(new_lines, "## 计划书", PLAN_TABLE_HEADER)
+
+
 def replace_table(lines: list[str], table: dict, new_rows: list[list[str]], keep_original_head: bool = True) -> list[str]:
     if keep_original_head:
         header_line = lines[table["header_idx"]]
@@ -676,6 +926,104 @@ def find_row_index(rows: list[list[str]], task_id: str) -> int:
         if row[0].strip() == task_id:
             return idx
     return -1
+
+
+def find_plan_row_index(plan_rows: list[list[str]], plan_doc: str) -> int:
+    target = plan_doc.strip()
+    for idx, row in enumerate(plan_rows):
+        if row[0].strip() == target:
+            return idx
+    return -1
+
+
+def parse_plan_int(value: str, field_name: str, plan_doc: str) -> int:
+    text = value.strip()
+    if not text:
+        return 0
+    try:
+        parsed = int(text)
+    except ValueError:
+        fail(RC_FILE, f"invalid plan table value: {plan_doc} {field_name}={value}")
+    if parsed < 0:
+        fail(RC_FILE, f"invalid plan table value: {plan_doc} {field_name}={value}")
+    return parsed
+
+
+def normalize_plan_row(plan_rows: list[list[str]], idx: int) -> None:
+    row = plan_rows[idx]
+    plan_doc = row[0].strip()
+    if not plan_doc:
+        fail(RC_FILE, "invalid plan table format: empty plan doc")
+    total = parse_plan_int(row[1], "总任务数", plan_doc)
+    done = parse_plan_int(row[2], "已完成任务", plan_doc)
+    pending = parse_plan_int(row[3], "待完成任务", plan_doc)
+    total = max(total, done + pending)
+    if total == 0:
+        plan_rows.pop(idx)
+        return
+    status = "完成待检查" if pending == 0 else "进行中"
+    row[1] = str(total)
+    row[2] = str(done)
+    row[3] = str(pending)
+    row[4] = status
+
+
+def update_plan_on_new(plan_rows: list[list[str]], plan_doc: str) -> None:
+    if not plan_doc.strip():
+        return
+    idx = find_plan_row_index(plan_rows, plan_doc)
+    if idx < 0:
+        plan_rows.append([plan_doc, "1", "0", "1", "进行中"])
+        return
+    row = plan_rows[idx]
+    total = parse_plan_int(row[1], "总任务数", plan_doc) + 1
+    done = parse_plan_int(row[2], "已完成任务", plan_doc)
+    pending = parse_plan_int(row[3], "待完成任务", plan_doc) + 1
+    row[1] = str(max(total, done + pending))
+    row[2] = str(done)
+    row[3] = str(pending)
+    row[4] = "进行中"
+
+
+def update_plan_on_done(plan_rows: list[list[str]], plan_doc: str) -> None:
+    if not plan_doc.strip():
+        return
+    idx = find_plan_row_index(plan_rows, plan_doc)
+    if idx < 0:
+        plan_rows.append([plan_doc, "1", "1", "0", "完成待检查"])
+        return
+    row = plan_rows[idx]
+    total = parse_plan_int(row[1], "总任务数", plan_doc)
+    done = parse_plan_int(row[2], "已完成任务", plan_doc) + 1
+    pending = parse_plan_int(row[3], "待完成任务", plan_doc)
+    if pending > 0:
+        pending -= 1
+    total = max(total, done + pending)
+    row[1] = str(total)
+    row[2] = str(done)
+    row[3] = str(pending)
+    row[4] = "完成待检查" if pending == 0 else "进行中"
+
+
+def update_plan_on_remove_not_done(plan_rows: list[list[str]], plan_doc: str) -> None:
+    if not plan_doc.strip():
+        return
+    idx = find_plan_row_index(plan_rows, plan_doc)
+    if idx < 0:
+        return
+    row = plan_rows[idx]
+    done = parse_plan_int(row[2], "已完成任务", plan_doc)
+    pending = parse_plan_int(row[3], "待完成任务", plan_doc)
+    if pending > 0:
+        pending -= 1
+    total = done + pending
+    if total == 0:
+        plan_rows.pop(idx)
+        return
+    row[1] = str(total)
+    row[2] = str(done)
+    row[3] = str(pending)
+    row[4] = "完成待检查" if pending == 0 else "进行中"
 
 
 def parse_done_table(done_file: str) -> tuple[list[str], dict]:
@@ -782,9 +1130,109 @@ def find_agent_row_index(rows: list[list[str]], name_idx: int, name: str) -> int
 def count_doing_tasks(exec_rows: list[list[str]], assignee: str) -> int:
     count = 0
     for row in exec_rows:
-        if row[5].strip() == assignee and row[6].strip() == "进行中":
+        if row[7].strip() == assignee and row[8].strip() == "进行中":
             count += 1
     return count
+
+
+def parse_dependencies(raw: str) -> list[str]:
+    text = raw.strip()
+    if not text or text.lower() == "none":
+        return []
+    items = [item.strip() for item in re.split(r"[,\s，、]+", text) if item.strip()]
+    dedup: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        dedup.append(item)
+    return dedup
+
+
+def parse_csv_names(raw: str) -> set[str]:
+    names: set[str] = set()
+    for item in raw.split(","):
+        value = item.strip()
+        if value:
+            names.add(value)
+    return names
+
+
+def ensure_operator_permission(
+    op: str,
+    operator_name: str,
+    permission_agents_file: str,
+) -> None:
+    if op not in {"new", "dispatch", "done", "done-plan"}:
+        return
+
+    caller = operator_name.strip()
+    if not caller:
+        fail(
+            RC_ARG,
+            f"-{op} requires operator identity; set CODEX_MULTI_AGENTS_ROOT_NAME or ROOT_NAME in config",
+        )
+
+    if not permission_agents_file.strip():
+        fail(
+            RC_ARG,
+            f"-{op} requires permission agents list; set CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE or AGENTS_FILE",
+        )
+
+    _, permission_table = parse_agents_table(permission_agents_file)
+    permission_rows = [r[:] for r in permission_table["rows"]]
+    row_idx = find_agent_row_index(permission_rows, permission_table["name_idx"], caller)
+    if row_idx < 0:
+        fail(RC_DATA, f"operator not found in permission agents list: {caller}")
+
+    row = permission_rows[row_idx]
+    intro = ""
+    duty = ""
+    if "介绍" in permission_table["header"]:
+        intro = row[permission_table["header"].index("介绍")].strip()
+    if "职责" in permission_table["header"]:
+        duty = row[permission_table["header"].index("职责")].strip()
+
+    role_text = f"{intro} {duty}"
+    admin_names = parse_csv_names(
+        os.environ.get("CODEX_MULTI_AGENTS_ADMIN_USERS", "神秘人")
+    )
+    arch_names = parse_csv_names(
+        os.environ.get("CODEX_MULTI_AGENTS_ARCH_USERS", "大闸蟹,守护最好的爱莉希雅")
+    )
+    is_admin = ("管理员" in role_text) or (caller in admin_names)
+    is_arch = ("架构师" in role_text) or (caller in arch_names)
+
+    if op == "new":
+        if not (is_admin or is_arch):
+            fail(RC_DATA, f"operation -{op} is restricted to 架构师或管理员: {caller}")
+        return
+
+    if not is_admin:
+        fail(RC_DATA, f"operation -{op} is restricted to 管理员: {caller}")
+
+
+def parse_max_parallel(raw: str) -> int:
+    text = raw.strip()
+    if not text:
+        fail(RC_ARG, "empty max parallel value")
+    if not text.isdigit():
+        fail(RC_ARG, f"invalid max parallel value: {text}")
+    value = int(text)
+    if value <= 0:
+        fail(RC_ARG, "max parallel value must be greater than 0")
+    return value
+
+
+def count_active_assignees(exec_rows: list[list[str]]) -> int:
+    active: set[str] = set()
+    for row in exec_rows:
+        assignee = row[7].strip()
+        status = row[8].strip()
+        if assignee and status == "进行中":
+            active.add(assignee)
+    return len(active)
 
 
 def generate_task_id(info: str, to: str, existing_ids: set[str]) -> str:
@@ -807,16 +1255,32 @@ def main() -> int:
     log_file = sys.argv[6]
     from_user = sys.argv[7]
     worktree = sys.argv[8]
-    done_file = sys.argv[9]
-    agents_file = sys.argv[10]
+    message = sys.argv[9]
+    depends = sys.argv[10]
+    plan_doc = sys.argv[11]
+    done_file = sys.argv[12]
+    agents_file = sys.argv[13]
+    operator_name = sys.argv[14]
+    permission_agents_file = sys.argv[15]
+    max_parallel = parse_max_parallel(sys.argv[16])
+
+    ensure_operator_permission(op, operator_name, permission_agents_file)
 
     todo_lines = read_lines(todo_file)
+    todo_lines, plan_table = ensure_plan_table(todo_lines)
     exec_table = parse_table_in_section(todo_lines, "## 正在执行的任务", RUN_TABLE_HEADER)
     list_table = parse_table_in_section(todo_lines, "## 任务列表", LIST_TABLE_HEADER)
 
     exec_rows = [r[:] for r in exec_table["rows"]]
     list_rows = [r[:] for r in list_table["rows"]]
+    plan_rows = [r[:] for r in plan_table["rows"]]
     validate_unique_task_ids(exec_rows, list_rows)
+    idx = 0
+    while idx < len(plan_rows):
+        before_len = len(plan_rows)
+        normalize_plan_row(plan_rows, idx)
+        if len(plan_rows) == before_len:
+            idx += 1
 
     done_lines = None
     done_table = None
@@ -825,7 +1289,7 @@ def main() -> int:
     agents_rows = None
     message_lines: list[str] = []
 
-    if op in {"dispatch", "done", "pause", "continue", "reassign"}:
+    if op in {"dispatch", "done", "pause", "continue", "reassign", "next"}:
         agents_lines, agents_table = parse_agents_table(agents_file)
         agents_rows = [r[:] for r in agents_table["rows"]]
 
@@ -843,6 +1307,13 @@ def main() -> int:
             print(render_row(row))
         return RC_OK
 
+    if op == "status-plan-list":
+        print(render_row(plan_table["header"]))
+        print(render_sep(len(plan_table["header"])))
+        for row in plan_rows:
+            print(render_row(row))
+        return RC_OK
+
     if op == "dispatch":
         if find_row_index(exec_rows, task_id) >= 0:
             fail(RC_DATA, f"task already exists in running list: {task_id}")
@@ -854,14 +1325,26 @@ def main() -> int:
         agent_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], to)
         if agent_idx < 0:
             fail(RC_DATA, f"agent not found in agents list: {to}")
+        if agents_rows[agent_idx][agents_table["status_idx"]].strip().lower() == "busy":
+            fail(RC_DATA, f"agent is busy, cannot dispatch: {to}")
+        active_assignees = count_active_assignees(exec_rows)
+        if active_assignees >= max_parallel:
+            fail(RC_DATA, f"parallel assignee limit reached: {active_assignees}/{max_parallel}")
+
+        row = list_rows[idx]
+        for dependency in parse_dependencies(row[5]):
+            if find_row_index(exec_rows, dependency) >= 0 or find_row_index(list_rows, dependency) >= 0:
+                fail(RC_DATA, f"task has unresolved dependency: {dependency}")
 
         row = list_rows.pop(idx)
         from_val = row[1]
         created_at = row[2]
         worktree_val = row[3]
         desc = row[4]
-        record_file = row[6]
-        exec_rows.append([row[0], from_val, created_at, worktree_val, desc, to, "进行中", "", record_file])
+        depends_val = row[5]
+        plan_doc_val = row[6]
+        record_file = row[8]
+        exec_rows.append([row[0], from_val, created_at, worktree_val, desc, depends_val, plan_doc_val, to, "进行中", "", record_file])
         agents_rows[agent_idx][agents_table["status_idx"]] = "busy"
         message_lines.append(f"OK: dispatch {task_id} -> {to}")
         message_lines.append(f"OK: replace {to} 状态")
@@ -872,7 +1355,8 @@ def main() -> int:
             fail(RC_DATA, f"task not found in running list: {task_id}")
 
         row = exec_rows.pop(idx)
-        assignee = row[5].strip()
+        update_plan_on_done(plan_rows, row[6].strip())
+        assignee = row[7].strip()
         if assignee:
             assert agents_table is not None
             assert agents_rows is not None
@@ -882,7 +1366,7 @@ def main() -> int:
         done_lines, done_table = parse_done_table(done_file)
         done_rows = [r[:] for r in done_table["rows"]]
         finished_at = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
-        done_rows.append([row[0], row[4], row[5], "已完成", finished_at, log_file, ""])
+        done_rows.append([row[0], row[4], row[7], "已完成", finished_at, log_file, ""])
         done_lines = replace_table(done_lines, done_table, done_rows, keep_original_head=False)
         message_lines.append(f"OK: done {task_id}")
         if assignee:
@@ -897,14 +1381,14 @@ def main() -> int:
         if idx < 0:
             fail(RC_DATA, f"task not found in running list: {task_id}")
 
-        assignee = exec_rows[idx][5].strip()
+        assignee = exec_rows[idx][7].strip()
         if assignee:
             assert agents_table is not None
             assert agents_rows is not None
             agent_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], assignee)
             if agent_idx < 0:
                 fail(RC_DATA, f"agent not found in agents list: {assignee}")
-        exec_rows[idx][6] = "暂停"
+        exec_rows[idx][8] = "暂停"
         message_lines.append(f"OK: pause {task_id}")
         if assignee:
             if count_doing_tasks(exec_rows, assignee) == 0:
@@ -918,10 +1402,10 @@ def main() -> int:
         if idx < 0:
             fail(RC_DATA, f"task not found in running list: {task_id}")
 
-        if exec_rows[idx][6].strip() != "暂停":
+        if exec_rows[idx][8].strip() != "暂停":
             fail(RC_DATA, f"task status is not paused: {task_id}")
 
-        assignee = exec_rows[idx][5].strip()
+        assignee = exec_rows[idx][7].strip()
         if assignee:
             assert agents_table is not None
             assert agents_rows is not None
@@ -929,7 +1413,7 @@ def main() -> int:
             if agent_idx < 0:
                 fail(RC_DATA, f"agent not found in agents list: {assignee}")
 
-        exec_rows[idx][6] = "进行中"
+        exec_rows[idx][8] = "进行中"
         message_lines.append(f"OK: continue {task_id}")
         if assignee:
             agents_rows[agent_idx][agents_table["status_idx"]] = "busy"
@@ -949,14 +1433,14 @@ def main() -> int:
         if new_idx < 0:
             fail(RC_DATA, f"agent not found in agents list: {new_assignee}")
 
-        old_assignee = exec_rows[idx][5].strip()
+        old_assignee = exec_rows[idx][7].strip()
         old_idx = None
         if old_assignee:
             old_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], old_assignee)
             if old_idx < 0:
                 fail(RC_DATA, f"agent not found in agents list: {old_assignee}")
 
-        exec_rows[idx][5] = new_assignee
+        exec_rows[idx][7] = new_assignee
         message_lines.append(f"OK: reassign {task_id} -> {new_assignee}")
 
         updated: set[str] = set()
@@ -972,30 +1456,80 @@ def main() -> int:
         update_agent(old_assignee, old_idx)
         update_agent(new_assignee, new_idx)
 
+    elif op == "next":
+        idx = find_row_index(exec_rows, task_id)
+        if idx < 0:
+            fail(RC_DATA, f"task not found in running list: {task_id}")
+        if not message.strip():
+            fail(RC_ARG, "empty value for -message")
+
+        row = exec_rows.pop(idx)
+        assignee = row[7].strip()
+        list_rows.append([row[0], row[1], row[2], row[3], message.strip(), row[5], row[6], row[7], row[10]])
+        message_lines.append(f"OK: next {task_id}")
+
+        if assignee:
+            assert agents_table is not None
+            assert agents_rows is not None
+            agent_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], assignee)
+            if agent_idx < 0:
+                fail(RC_DATA, f"agent not found in agents list: {assignee}")
+            if count_doing_tasks(exec_rows, assignee) == 0:
+                agents_rows[agent_idx][agents_table["status_idx"]] = "free"
+            else:
+                agents_rows[agent_idx][agents_table["status_idx"]] = "busy"
+            message_lines.append(f"OK: replace {assignee} 状态")
+
     elif op == "new":
         existing_ids = {r[0].strip() for r in (exec_rows + list_rows) if not is_empty_row(r)}
         new_id = generate_task_id(info, to, existing_ids)
         created_at = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
         from_val = from_user or ""
-        worktree_val = worktree or ""
+        worktree_val = "" if worktree.strip().lower() == "none" else worktree
+        depends_val = "" if depends.strip().lower() == "none" else depends
+        plan_doc_val = "" if plan_doc.strip().lower() == "none" else plan_doc
+        for dependency in parse_dependencies(depends_val):
+            if find_row_index(exec_rows, dependency) < 0 and find_row_index(list_rows, dependency) < 0:
+                fail(RC_DATA, f"dependency task not found: {dependency}")
         record_file = log_file or ""
-        list_rows.append([new_id, from_val, created_at, worktree_val, info, to, record_file])
+        list_rows.append([new_id, from_val, created_at, worktree_val, info, depends_val, plan_doc_val, to, record_file])
+        update_plan_on_new(plan_rows, plan_doc_val)
         message_lines.append(f"OK: new {new_id}")
 
     elif op == "delete":
         exec_idx = find_row_index(exec_rows, task_id)
         if exec_idx >= 0:
             # 允许直接删除暂停任务，避免“待命/占位”任务长期滞留在正在执行列表。
-            if exec_rows[exec_idx][6].strip() != "暂停":
+            if exec_rows[exec_idx][8].strip() != "暂停":
                 fail(RC_DATA, f"task already exists in running list: {task_id}")
-            exec_rows.pop(exec_idx)
+            removed = exec_rows.pop(exec_idx)
+            update_plan_on_remove_not_done(plan_rows, removed[6].strip())
             message_lines.append(f"OK: delete {task_id}")
         else:
             idx = find_row_index(list_rows, task_id)
             if idx < 0:
                 fail(RC_DATA, f"task not found in task list: {task_id}")
-            list_rows.pop(idx)
+            removed = list_rows.pop(idx)
+            update_plan_on_remove_not_done(plan_rows, removed[6].strip())
             message_lines.append(f"OK: delete {task_id}")
+
+    elif op == "done-plan":
+        normalized_plan_doc = plan_doc.strip()
+        idx = find_plan_row_index(plan_rows, normalized_plan_doc)
+        if idx < 0:
+            fail(RC_DATA, f"plan not found in plan table: {normalized_plan_doc}")
+
+        row = plan_rows[idx]
+        status = row[4].strip()
+        pending = parse_plan_int(row[3], "待完成任务", normalized_plan_doc)
+        if status != "完成待检查" or pending != 0:
+            fail(RC_DATA, f"plan is not ready for done-plan: {normalized_plan_doc}")
+
+        if any((r[6].strip() == normalized_plan_doc for r in exec_rows + list_rows)):
+            fail(RC_DATA, f"plan still has pending tasks: {normalized_plan_doc}")
+
+        plan_rows.pop(idx)
+        message_lines.append(f"OK: done-plan {normalized_plan_doc}")
 
     else:
         fail(RC_INTERNAL, f"unsupported operation: {op}")
@@ -1009,6 +1543,7 @@ def main() -> int:
         write_atomic(agents_file, agents_lines)
 
     tables = [
+        (plan_table, plan_rows),
         (exec_table, exec_rows),
         (list_table, list_rows),
     ]
@@ -1038,11 +1573,14 @@ PY
 main() {
   parse_args "$@"
   validate_todo_file
+  validate_parallel_limit
 
   local op=""
   local done_file=""
   local done_lock_fd=""
   local agents_lock_fd=""
+  local operator_name=""
+  local permission_agents_file=""
 
   if [[ "$OP_DISPATCH" -eq 1 ]]; then
     op="dispatch"
@@ -1054,23 +1592,37 @@ main() {
     op="continue"
   elif [[ "$OP_REASSIGN" -eq 1 ]]; then
     op="reassign"
+  elif [[ "$OP_NEXT" -eq 1 ]]; then
+    op="next"
   elif [[ "$OP_NEW" -eq 1 ]]; then
     op="new"
   elif [[ "$OP_STATUS" -eq 1 ]]; then
     if [[ "$HAS_DOING" -eq 1 ]]; then
       op="status-doing"
-    else
+    elif [[ "$HAS_TASK_LIST" -eq 1 ]]; then
       op="status-task-list"
+    else
+      op="status-plan-list"
     fi
   elif [[ "$OP_DELETE" -eq 1 ]]; then
     op="delete"
+  elif [[ "$OP_DONE_PLAN" -eq 1 ]]; then
+    op="done-plan"
   else
     err "$RC_INTERNAL" "unexpected operation state"
   fi
 
-  if [[ "$op" == "status-doing" || "$op" == "status-task-list" ]]; then
-    run_python_core "$op" "$FILE" "" "" "" "" "" "" "" ""
-    exit "$RC_OK"
+  if [[ "$op" == "status-doing" || "$op" == "status-task-list" || "$op" == "status-plan-list" ]]; then
+    run_python_core "$op" "$FILE" "" "" "" "" "" "" "" "" "" "" "" "" "" "$MAX_PARALLEL_AGENTS"
+    local rc=$?
+    exit "$rc"
+  fi
+
+  if [[ "$op" == "new" || "$op" == "dispatch" || "$op" == "done" || "$op" == "done-plan" ]]; then
+    operator_name="$(resolve_operator_name)"
+    [[ -n "$(trim "$operator_name")" ]] || err "$RC_ARG" "cannot resolve operator identity; set CODEX_MULTI_AGENTS_ROOT_NAME or ROOT_NAME in config"
+    permission_agents_file="$(resolve_permission_agents_file "$AGENTS_LIST")"
+    [[ -n "$(trim "$permission_agents_file")" ]] || err "$RC_ARG" "cannot resolve permission agents list; set CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE or AGENTS_FILE"
   fi
 
   local todo_lock_fd=""
@@ -1084,7 +1636,7 @@ main() {
     acquire_lock_on_file "$done_file" done_lock_fd
   fi
 
-  if [[ "$op" == "dispatch" || "$op" == "done" || "$op" == "pause" || "$op" == "continue" || "$op" == "reassign" ]]; then
+  if [[ "$op" == "dispatch" || "$op" == "done" || "$op" == "pause" || "$op" == "continue" || "$op" == "reassign" || "$op" == "next" ]]; then
     acquire_lock_on_file "$AGENTS_LIST" agents_lock_fd
   fi
 
@@ -1096,13 +1648,13 @@ main() {
     acquire_lock_on_file "$AGENTS_LIST" agents_lock_fd
   fi
 
-  run_python_core "$op" "$FILE" "$TASK_ID" "$TO" "$INFO" "$LOG_FILE" "$FROM" "$WORKTREE" "$done_file" "$AGENTS_LIST"
+  run_python_core "$op" "$FILE" "$TASK_ID" "$TO" "$INFO" "$LOG_FILE" "$FROM" "$WORKTREE" "$MESSAGE" "$DEPENDS" "$PLAN_DOC" "$done_file" "$AGENTS_LIST" "$operator_name" "$permission_agents_file" "$MAX_PARALLEL_AGENTS"
   local rc=$?
   if [[ "$rc" -ne 0 ]]; then
     exit "$rc"
   fi
 
-  if [[ "$op" == "dispatch" && "$HAS_MESSAGE" -eq 1 ]]; then
+  if [[ "$op" == "dispatch" ]]; then
     release_lock_fd "$agents_lock_fd"
     release_lock_fd "$todo_lock_fd"
     send_dispatch_message
@@ -1111,9 +1663,6 @@ main() {
       printf "ERROR(%s): dispatch succeeded but message delivery failed for task %s; retry codex-multi-agents-tmux.sh -talk only\n" "$talk_rc" "$TASK_ID" >&2
       exit "$talk_rc"
     fi
-  elif [[ "$op" == "dispatch" ]]; then
-    release_lock_fd "$agents_lock_fd"
-    release_lock_fd "$todo_lock_fd"
   fi
 }
 

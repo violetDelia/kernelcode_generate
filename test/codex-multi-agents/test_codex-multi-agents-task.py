@@ -9,7 +9,7 @@
 覆盖率信息:
 - 当前覆盖率: `N/A`。该链路的功能实现为 shell 脚本 `skills/codex-multi-agents/scripts/codex-multi-agents-task.sh`，`pytest-cov` 无法直接采集脚本覆盖率，执行覆盖率命令会得到 `no-data-collected`。
 - 达标判定: shell 实现按规则豁免 `95%` 覆盖率达标线。
-- 当前以 `TC-001..029` 共 29 条测试用例作为覆盖基线，覆盖分发、分发前初始化、分发消息发送、完成、暂停、继续、改派、新建、删除、状态查询、文件错误、结构错误与锁冲突路径。
+- 当前以 `TC-001..049` 共 49 条测试用例作为覆盖基线，覆盖分发、分发前初始化、分发消息发送、完成、暂停、继续、改派、续接、新建、删除、状态查询、计划书进度、权限校验、并行上限、文件错误、结构错误与锁冲突路径。
 
 覆盖率命令:
 - `pytest -q --cov=skills/codex-multi-agents/scripts/codex-multi-agents-task.sh --cov-branch --cov-report=term-missing test/codex-multi-agents/test_codex-multi-agents-task.py`
@@ -53,12 +53,14 @@ def row_running(
     created_at: str,
     worktree: str,
     desc: str,
+    depends: str,
+    plan_doc: str,
     assignee: str,
     status: str,
     guide: str = "",
     record: str = "",
 ) -> str:
-    return f"| {task_id} | {owner} | {created_at} | {worktree} | {desc} | {assignee} | {status} | {guide} | {record} |"
+    return f"| {task_id} | {owner} | {created_at} | {worktree} | {desc} | {depends} | {plan_doc} | {assignee} | {status} | {guide} | {record} |"
 
 
 def row_list(
@@ -67,10 +69,12 @@ def row_list(
     created_at: str,
     worktree: str,
     desc: str,
+    depends: str = "",
+    plan_doc: str = "",
     assignee: str = "",
     record: str = "",
 ) -> str:
-    return f"| {task_id} | {owner} | {created_at} | {worktree} | {desc} | {assignee} | {record} |"
+    return f"| {task_id} | {owner} | {created_at} | {worktree} | {desc} | {depends} | {plan_doc} | {assignee} | {record} |"
 
 
 def agent_row(name: str, status: str = "free") -> str:
@@ -148,20 +152,20 @@ def write_todo_file(path: Path, running_rows: list[str] | None = None, list_rows
     """写入标准 TODO.md 测试文件。"""
     if running_rows is None:
         running_rows = [
-            row_running("EX-1", "李白", "2026-03-08 16:10:00 +0800", ".", "创建 src", "worker-a", "进行中", "xxx", "./log/ex1.md"),
-            row_running("EX-2", "杜甫", "2026-03-08 16:20:00 +0800", ".", "创建 test", "worker-b", "进行中", "xxx", "./log/ex2.md"),
+            row_running("EX-1", "李白", "2026-03-08 16:10:00 +0800", ".", "创建 src", "", "", "worker-a", "进行中", "xxx", "./log/ex1.md"),
+            row_running("EX-2", "杜甫", "2026-03-08 16:20:00 +0800", ".", "创建 test", "", "", "worker-b", "进行中", "xxx", "./log/ex2.md"),
         ]
     if list_rows is None:
         list_rows = [
-            row_list("EX-3", "苏轼", "2026-03-08 16:30:00 +0800", "", "删除 tmp/demo.txt", "", "./log/ex3.md"),
+            row_list("EX-3", "苏轼", "2026-03-08 16:30:00 +0800", "", "删除 tmp/demo.txt", "", "", "", "./log/ex3.md"),
         ]
 
     text = "\n".join(
         [
             "## 正在执行的任务",
             "",
-            "| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 指派 | 状态 | 用户指导 | 记录文件 |",
-            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+            "| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 依赖任务 | 计划书 | 指派 | 状态 | 用户指导 | 记录文件 |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
             *running_rows,
             "",
             "## 需要用户确认的事项",
@@ -172,8 +176,8 @@ def write_todo_file(path: Path, running_rows: list[str] | None = None, list_rows
             "",
             "## 任务列表",
             "",
-            "| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 指派 | 记录文件 |",
-            "| --- | --- | --- | --- | --- | --- | --- |",
+            "| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 依赖任务 | 计划书 | 指派 | 记录文件 |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
             *list_rows,
             "",
         ]
@@ -253,9 +257,9 @@ def test_dispatch_task_success(tmp_path: Path) -> None:
     assert any(
         r[0] == "EX-3"
         and r[1] == "苏轼"
-        and r[5] == "worker-a"
-        and r[6] == "进行中"
-        and r[8] == "./log/ex3.md"
+        and r[7] == "worker-a"
+        and r[8] == "进行中"
+        and r[10] == "./log/ex3.md"
         and r[3] == ""
         and r[2] != ""
         for r in running_rows
@@ -360,7 +364,7 @@ def test_pause_task_success(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert "OK: pause EX-2" in result.stdout
     assert "OK: replace worker-b 状态" in result.stdout
-    assert any(r[0] == "EX-2" and r[6] == "暂停" for r in running_rows)
+    assert any(r[0] == "EX-2" and r[8] == "暂停" for r in running_rows)
     assert get_agent_status(agents, "worker-b") == "free"
 
 
@@ -408,6 +412,10 @@ def test_new_task_with_assignee_success(tmp_path: Path) -> None:
         "李白",
         "-worktree",
         "repo-x",
+        "-depends",
+        "EX-2 EX-3",
+        "-plan",
+        "ARCHITECTURE/plan/x.md",
         "-log",
         "./log/record-1.log",
     )
@@ -418,10 +426,10 @@ def test_new_task_with_assignee_success(tmp_path: Path) -> None:
     assert re.search(r"OK: new T-\d{8}-[0-9a-f]{8}", result.stdout)
     assert any(
         r[4] == "实现任务调度器告警"
-        and r[5] == "worker-b"
+        and r[7] == "worker-b"
         and r[1] == "李白"
         and r[3] == "repo-x"
-        and r[6] == "./log/record-1.log"
+        and r[8] == "./log/record-1.log"
         and re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{4}", r[2] or "")
         for r in list_rows
     )
@@ -439,7 +447,19 @@ def test_new_task_without_assignee_success(tmp_path: Path) -> None:
     todo = tmp_path / "TODO.md"
     write_todo_file(todo)
 
-    result = run_script("-file", str(todo), "-new", "-info", "补充单元测试")
+    result = run_script(
+        "-file",
+        str(todo),
+        "-new",
+        "-info",
+        "补充单元测试",
+        "-worktree",
+        "None",
+        "-depends",
+        "None",
+        "-plan",
+        "None",
+    )
     content = todo.read_text(encoding="utf-8")
     list_rows = parse_section_rows(content, "## 任务列表")
 
@@ -447,10 +467,10 @@ def test_new_task_without_assignee_success(tmp_path: Path) -> None:
     assert re.search(r"OK: new T-\d{8}-[0-9a-f]{8}", result.stdout)
     assert any(
         r[4] == "补充单元测试"
-        and r[5] == ""
+        and r[7] == ""
         and r[1] == ""
         and r[3] == ""
-        and r[6] == ""
+        and r[8] == ""
         and re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{4}", r[2] or "")
         for r in list_rows
     )
@@ -485,7 +505,19 @@ def test_argument_error_returns_rc1(tmp_path: Path) -> None:
 def test_file_not_found_returns_rc2(tmp_path: Path) -> None:
     missing = tmp_path / "missing.md"
 
-    result = run_script("-file", str(missing), "-new", "-info", "desc")
+    result = run_script(
+        "-file",
+        str(missing),
+        "-new",
+        "-info",
+        "desc",
+        "-worktree",
+        "None",
+        "-depends",
+        "None",
+        "-plan",
+        "None",
+    )
 
     assert result.returncode == 2
     assert "file not found" in result.stderr
@@ -515,7 +547,19 @@ def test_invalid_todo_structure_returns_rc2(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    result = run_script("-file", str(todo), "-new", "-info", "desc")
+    result = run_script(
+        "-file",
+        str(todo),
+        "-new",
+        "-info",
+        "desc",
+        "-worktree",
+        "None",
+        "-depends",
+        "None",
+        "-plan",
+        "None",
+    )
 
     assert result.returncode == 2
     assert "invalid table format" in result.stderr
@@ -599,11 +643,44 @@ def test_status_requires_exactly_one_mode(tmp_path: Path) -> None:
 
     result = run_script(str(todo), "-file", "-status")
     assert result.returncode == 1
-    assert "-status requires exactly one of -doing/-task-list" in result.stderr
+    assert "-status requires exactly one of -doing/-task-list/-plan-list" in result.stderr
 
     result = run_script(str(todo), "-file", "-status", "-doing", "-task-list")
     assert result.returncode == 1
-    assert "-status requires exactly one of -doing/-task-list" in result.stderr
+    assert "-status requires exactly one of -doing/-task-list/-plan-list" in result.stderr
+
+
+# TC-015A
+# 创建者: 榕
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-08 06:47:00 +0800
+# 最近一次运行成功时间: 2026-04-08 06:47:00 +0800
+# 测试目的: 验证 -status 在 TODO 表头不匹配时返回 RC=2（不应误返回 RC=0）。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_status_invalid_table_returns_rc2(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    todo.write_text(
+        "\n".join(
+            [
+                "## 正在执行的任务",
+                "",
+                "| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 指派 | 状态 | 用户指导 | 记录文件 |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+                "",
+                "## 任务列表",
+                "",
+                "| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 指派 | 记录文件 |",
+                "| --- | --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = run_script("-file", str(todo), "-status", "-task-list")
+    assert result.returncode == 2
+    assert "invalid table format" in result.stderr
 
 
 # TC-016
@@ -611,7 +688,7 @@ def test_status_requires_exactly_one_mode(tmp_path: Path) -> None:
 # 最后一次更改: 神秘人
 # 最近一次运行测试时间: 2026-03-25 03:41:48 +0800
 # 最近一次运行成功时间: 2026-03-25 03:41:48 +0800
-# 测试目的: 验证 -dispatch 携带 -message 时，仍会先执行一次 -init，再调用 tmux 对话脚本向目标会话发消息。
+# 测试目的: 验证 -dispatch 携带 -message 时，会先执行一次 -init，再调用 tmux 对话脚本向目标会话发消息。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
 def test_dispatch_with_message_sends_talk_success(tmp_path: Path) -> None:
@@ -656,9 +733,7 @@ def test_dispatch_with_message_sends_talk_success(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0
-    assert "OK: init worker-a" in result.stdout
     assert "OK: dispatch EX-3 -> worker-a" in result.stdout
-    assert result.stdout.index("OK: init worker-a") < result.stdout.index("OK: dispatch EX-3 -> worker-a")
     assert "OK: talk 神秘人 -> worker-a (worker-a-session)" in result.stdout
     calls_text = calls_file.read_text(encoding="utf-8")
     assert "你的名字叫做worker-a" in calls_text
@@ -713,7 +788,7 @@ def test_dispatch_with_message_failure_keeps_dispatch_result(tmp_path: Path) -> 
     assert "WARN: dispatch init failed for worker-a:" in result.stderr
     assert "target session not found: worker-a-session" in result.stderr
     assert "dispatch succeeded but message delivery failed for task EX-3" in result.stderr
-    assert any(r[0] == "EX-3" and r[5] == "worker-a" and r[6] == "进行中" for r in running_rows)
+    assert any(r[0] == "EX-3" and r[7] == "worker-a" and r[8] == "进行中" for r in running_rows)
     assert not any(r[0] == "EX-3" for r in list_rows)
     assert get_agent_status(agents, "worker-a") == "busy"
 
@@ -723,7 +798,7 @@ def test_dispatch_with_message_failure_keeps_dispatch_result(tmp_path: Path) -> 
 # 最后一次更改: 神秘人
 # 最近一次运行测试时间: 2026-03-25 03:41:48 +0800
 # 最近一次运行成功时间: 2026-03-25 03:41:48 +0800
-# 测试目的: 验证 -dispatch 在真正分发前会固定调用一次 list -init 向目标会话发送角色信息提醒。
+# 测试目的: 验证 -dispatch 在真正分发前会固定调用一次 list -init，并在未提供 -message 时发送默认模板消息。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
 def test_dispatch_runs_init_before_dispatch(tmp_path: Path) -> None:
@@ -753,10 +828,124 @@ def test_dispatch_runs_init_before_dispatch(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0
-    assert "OK: init worker-a" in result.stdout
-    assert result.stdout.index("OK: init worker-a") < result.stdout.index("OK: dispatch EX-3 -> worker-a")
-    assert "你的名字叫做worker-a" in calls_file.read_text(encoding="utf-8")
+    assert "OK: dispatch EX-3 -> worker-a" in result.stdout
+    assert "OK: talk 神秘人 -> worker-a (worker-a-session)" in result.stdout
+    calls_text = calls_file.read_text(encoding="utf-8")
+    assert "你的名字叫做worker-a" in calls_text
+    expected_message = (
+        "@神秘人向@worker-a发起会话: 请处理任务 EX-3（删除 tmp/demo.txt）。"
+        f"完成后按 {REPO_ROOT}/agents/standard/任务记录约定.md 记录并回报管理员；"
+        "流程不清楚请询问管理员；实现/架构问题请询问架构师。"
+    )
+    assert expected_message in calls_text
+    assert calls_text.index("你的名字叫做worker-a") < calls_text.index(expected_message)
     assert get_agent_status(agents, "worker-a") == "busy"
+
+
+# TC-046
+# 创建者: 榕
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-08 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-08 00:00:00 +0800
+# 测试目的: 验证 -dispatch 未提供 -message 时，若默认消息发送失败仅告警且不回滚分发结果。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_dispatch_without_message_talk_failure_is_warning(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    bin_dir = tmp_path / "bin"
+    state_dir = tmp_path / "state"
+    write_fake_tmux(bin_dir, state_dir, sessions=[])
+    write_todo_file(todo)
+    write_agents_file(agents)
+
+    env = os.environ.copy()
+    env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["CODEX_MULTI_AGENTS_DISPATCH_INIT_ROLL"] = "0"
+    result = run_script(
+        "-file",
+        str(todo),
+        "-dispatch",
+        "-task_id",
+        "EX-3",
+        "-to",
+        "worker-a",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+    list_rows = parse_section_rows(content, "## 任务列表")
+    assert result.returncode == 0
+    assert "OK: dispatch EX-3 -> worker-a" in result.stdout
+    assert "WARN: auto dispatch talk failed for task EX-3:" in result.stderr
+    assert any(r[0] == "EX-3" and r[7] == "worker-a" and r[8] == "进行中" for r in running_rows)
+    assert not any(r[0] == "EX-3" for r in list_rows)
+    assert get_agent_status(agents, "worker-a") == "busy"
+
+
+# TC-047
+# 创建者: 榕
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-08 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-08 00:00:00 +0800
+# 测试目的: 验证 -dispatch 未提供 -message 时，默认模板消息会按实际存在的 worktree/计划书拼接字段。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_dispatch_without_message_template_includes_worktree_and_plan(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    bin_dir = tmp_path / "bin"
+    state_dir = tmp_path / "state"
+    calls_file = write_fake_tmux(bin_dir, state_dir, sessions=["worker-a-session"])
+    write_todo_file(
+        todo,
+        list_rows=[
+            row_list(
+                "EX-3",
+                "苏轼",
+                "2026-03-08 16:30:00 +0800",
+                "/tmp/wt-ex3",
+                "删除 tmp/demo.txt",
+                "None",
+                "ARCHITECTURE/plan/demo.md",
+                "",
+                "./log/ex3.md",
+            )
+        ],
+    )
+    write_agents_file(agents)
+
+    env = os.environ.copy()
+    env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["CODEX_MULTI_AGENTS_DISPATCH_INIT_ROLL"] = "0"
+    result = run_script(
+        "-file",
+        str(todo),
+        "-dispatch",
+        "-task_id",
+        "EX-3",
+        "-to",
+        "worker-a",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    assert result.returncode == 0
+    assert "OK: dispatch EX-3 -> worker-a" in result.stdout
+    calls_text = calls_file.read_text(encoding="utf-8")
+    expected_message = (
+        "@神秘人向@worker-a发起会话: 请处理任务 EX-3（删除 tmp/demo.txt）。"
+        "worktree=/tmp/wt-ex3；计划书=ARCHITECTURE/plan/demo.md；"
+        f"完成后按 {REPO_ROOT}/agents/standard/任务记录约定.md 记录并回报管理员；"
+        "流程不清楚请询问管理员；实现/架构问题请询问架构师。"
+    )
+    assert expected_message in calls_text
 
 
 # TC-019
@@ -773,8 +962,8 @@ def test_continue_task_success(tmp_path: Path) -> None:
     write_todo_file(
         todo,
         running_rows=[
-            row_running("EX-1", "李白", "2026-03-08 16:10:00 +0800", ".", "创建 src", "worker-a", "进行中", "xxx", "./log/ex1.md"),
-            row_running("EX-2", "杜甫", "2026-03-08 16:20:00 +0800", ".", "创建 test", "worker-b", "暂停", "xxx", "./log/ex2.md"),
+            row_running("EX-1", "李白", "2026-03-08 16:10:00 +0800", ".", "创建 src", "", "", "worker-a", "进行中", "xxx", "./log/ex1.md"),
+            row_running("EX-2", "杜甫", "2026-03-08 16:20:00 +0800", ".", "创建 test", "", "", "worker-b", "暂停", "xxx", "./log/ex2.md"),
         ],
     )
     write_agents_file(agents, [agent_row("worker-a", "busy"), agent_row("worker-b", "free")])
@@ -786,7 +975,7 @@ def test_continue_task_success(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert "OK: continue EX-2" in result.stdout
     assert "OK: replace worker-b 状态" in result.stdout
-    assert any(r[0] == "EX-2" and r[6] == "进行中" for r in running_rows)
+    assert any(r[0] == "EX-2" and r[8] == "进行中" for r in running_rows)
     assert get_agent_status(agents, "worker-b") == "busy"
 
 
@@ -862,8 +1051,8 @@ def test_reassign_task_success(tmp_path: Path) -> None:
     write_todo_file(
         todo,
         running_rows=[
-            row_running("EX-1", "李白", "2026-03-08 16:10:00 +0800", ".", "创建 src", "worker-a", "进行中", "xxx", "./log/ex1.md"),
-            row_running("EX-2", "杜甫", "2026-03-08 16:20:00 +0800", ".", "创建 test", "worker-b", "进行中", "xxx", "./log/ex2.md"),
+            row_running("EX-1", "李白", "2026-03-08 16:10:00 +0800", ".", "创建 src", "", "", "worker-a", "进行中", "xxx", "./log/ex1.md"),
+            row_running("EX-2", "杜甫", "2026-03-08 16:20:00 +0800", ".", "创建 test", "", "", "worker-b", "进行中", "xxx", "./log/ex2.md"),
         ],
     )
     write_agents_file(agents, [agent_row("worker-a", "busy"), agent_row("worker-b", "busy"), agent_row("worker-c", "free")])
@@ -874,7 +1063,7 @@ def test_reassign_task_success(tmp_path: Path) -> None:
 
     assert result.returncode == 0
     assert "OK: reassign EX-2 -> worker-c" in result.stdout
-    assert any(r[0] == "EX-2" and r[5] == "worker-c" for r in running_rows)
+    assert any(r[0] == "EX-2" and r[7] == "worker-c" for r in running_rows)
     assert get_agent_status(agents, "worker-a") == "busy"
     assert get_agent_status(agents, "worker-b") == "free"
     assert get_agent_status(agents, "worker-c") == "busy"
@@ -994,8 +1183,8 @@ def test_delete_paused_running_task_success(tmp_path: Path) -> None:
     write_todo_file(
         todo,
         running_rows=[
-            row_running("EX-1", "李白", "2026-03-08 16:10:00 +0800", ".", "创建 src", "worker-a", "进行中", "xxx", "./log/ex1.md"),
-            row_running("EX-2", "杜甫", "2026-03-08 16:20:00 +0800", ".", "创建 test", "worker-b", "暂停", "xxx", "./log/ex2.md"),
+            row_running("EX-1", "李白", "2026-03-08 16:10:00 +0800", ".", "创建 src", "", "", "worker-a", "进行中", "xxx", "./log/ex1.md"),
+            row_running("EX-2", "杜甫", "2026-03-08 16:20:00 +0800", ".", "创建 test", "", "", "worker-b", "暂停", "xxx", "./log/ex2.md"),
         ],
     )
     write_agents_file(agents, rows=[agent_row("worker-a", "busy"), agent_row("worker-b", "free")])
@@ -1010,3 +1199,594 @@ def test_delete_paused_running_task_success(tmp_path: Path) -> None:
     assert any(r[0] == "EX-1" for r in running_rows)
     assert not any(r[0] == "EX-2" for r in running_rows)
     assert not any(r[0] == "EX-2" for r in list_rows)
+
+
+# TC-030
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-08 13:40:00 +0800
+# 最近一次运行成功时间: 2026-04-08 13:40:00 +0800
+# 测试目的: 验证 -next 成功将运行中任务回退到任务列表并更新描述。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_next_task_moves_running_to_task_list_success(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file(todo)
+    write_agents_file(agents, rows=[agent_row("worker-a", "busy"), agent_row("worker-b", "busy")])
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-next",
+        "-task_id",
+        "EX-2",
+        "-message",
+        "下一阶段：补齐边界用例",
+        "-agents-list",
+        str(agents),
+    )
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+    list_rows = parse_section_rows(content, "## 任务列表")
+
+    assert result.returncode == 0
+    assert "OK: next EX-2" in result.stdout
+    assert "OK: replace worker-b 状态" in result.stdout
+    assert not any(r[0] == "EX-2" for r in running_rows)
+    assert any(
+        r[0] == "EX-2"
+        and r[1] == "杜甫"
+        and r[3] == "."
+        and r[4] == "下一阶段：补齐边界用例"
+        and r[7] == "worker-b"
+        and r[8] == "./log/ex2.md"
+        for r in list_rows
+    )
+    assert get_agent_status(agents, "worker-b") == "free"
+
+
+# TC-031
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-08 13:40:00 +0800
+# 最近一次运行成功时间: 2026-04-08 13:40:00 +0800
+# 测试目的: 验证 -next 缺少 -message 返回 RC=1。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_next_requires_message(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file(todo)
+    write_agents_file(agents)
+
+    result = run_script("-file", str(todo), "-next", "-task_id", "EX-2", "-agents-list", str(agents))
+
+    assert result.returncode == 1
+    assert "-next requires -message" in result.stderr
+
+
+# TC-032
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-08 13:40:00 +0800
+# 最近一次运行成功时间: 2026-04-08 13:40:00 +0800
+# 测试目的: 验证 非架构师/管理员 调用 -new 被拒绝。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_new_restricted_for_non_privileged_operator(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file(todo)
+    write_agents_file(agents, rows=[agent_row("worker-a", "free")])
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-a"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script(
+        "-file",
+        str(todo),
+        "-new",
+        "-info",
+        "补充单元测试",
+        "-worktree",
+        "None",
+        "-depends",
+        "None",
+        "-plan",
+        "None",
+        env=env,
+    )
+
+    assert result.returncode == 3
+    assert "operation -new is restricted to 架构师或管理员: worker-a" in result.stderr
+
+
+# TC-033
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-08 13:40:00 +0800
+# 最近一次运行成功时间: 2026-04-08 13:40:00 +0800
+# 测试目的: 验证 非管理员 调用 -done 被拒绝。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_done_restricted_for_non_privileged_operator(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file(todo)
+    write_agents_file(agents, rows=[agent_row("worker-a", "busy"), agent_row("worker-b", "busy")])
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-a"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script("-file", str(todo), "-done", "-task_id", "EX-1", "-log", "./log/record.md", "-agents-list", str(agents), env=env)
+
+    running_rows = parse_section_rows(todo.read_text(encoding="utf-8"), "## 正在执行的任务")
+    assert result.returncode == 3
+    assert "operation -done is restricted to 管理员: worker-a" in result.stderr
+    assert any(r[0] == "EX-1" for r in running_rows)
+
+
+# TC-034
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-08 14:25:00 +0800
+# 最近一次运行成功时间: 2026-04-08 14:25:00 +0800
+# 测试目的: 验证 -new 缺少 -worktree 返回 RC=1。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_new_requires_worktree(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file(todo)
+
+    result = run_script("-file", str(todo), "-new", "-info", "补充单元测试")
+
+    assert result.returncode == 1
+    assert "-new requires -worktree" in result.stderr
+
+
+# TC-035
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-08 14:25:00 +0800
+# 最近一次运行成功时间: 2026-04-08 14:25:00 +0800
+# 测试目的: 验证 -dispatch 在依赖任务未完成时返回 RC=3。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_dispatch_blocked_by_unresolved_dependency(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file(
+        todo,
+        list_rows=[
+            row_list("EX-3", "苏轼", "2026-03-08 16:30:00 +0800", "", "删除 tmp/demo.txt", "EX-1", "ARCHITECTURE/plan/p.md", "", "./log/ex3.md"),
+        ],
+    )
+    write_agents_file(agents)
+
+    result = run_script("-file", str(todo), "-dispatch", "-task_id", "EX-3", "-to", "worker-a", "-agents-list", str(agents))
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+    list_rows = parse_section_rows(content, "## 任务列表")
+
+    assert result.returncode == 3
+    assert "task has unresolved dependency: EX-1" in result.stderr
+    assert not any(r[0] == "EX-3" and r[7] == "worker-a" for r in running_rows)
+    assert any(r[0] == "EX-3" for r in list_rows)
+
+    write_todo_file(
+        todo,
+        list_rows=[
+            row_list("EX-3", "苏轼", "2026-03-08 16:30:00 +0800", "", "删除 tmp/demo.txt", "DONE-0、EX-4", "ARCHITECTURE/plan/p.md", "", "./log/ex3.md"),
+            row_list("EX-4", "辛弃疾", "2026-03-08 16:40:00 +0800", "", "补充验收", "", "", "", "./log/ex4.md"),
+        ],
+    )
+    result = run_script("-file", str(todo), "-dispatch", "-task_id", "EX-3", "-to", "worker-a", "-agents-list", str(agents))
+    assert result.returncode == 3
+    assert "task has unresolved dependency: EX-4" in result.stderr
+
+
+# TC-036
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-08 15:30:00 +0800
+# 最近一次运行成功时间: 2026-04-08 15:30:00 +0800
+# 测试目的: 验证 -dispatch 指派给 busy 角色时返回 RC=3。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_dispatch_rejects_busy_agent(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file(todo)
+    write_agents_file(agents, rows=[agent_row("worker-a", "free"), agent_row("worker-b", "busy")])
+
+    result = run_script("-file", str(todo), "-dispatch", "-task_id", "EX-3", "-to", "worker-b", "-agents-list", str(agents))
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+    list_rows = parse_section_rows(content, "## 任务列表")
+
+    assert result.returncode == 3
+    assert "agent is busy, cannot dispatch: worker-b" in result.stderr
+    assert not any(r[0] == "EX-3" and r[7] == "worker-b" for r in running_rows)
+    assert any(r[0] == "EX-3" for r in list_rows)
+
+
+# TC-037
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-08 15:30:00 +0800
+# 最近一次运行成功时间: 2026-04-08 15:30:00 +0800
+# 测试目的: 验证 -next 缺少 -agents-list 返回 RC=1。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_next_requires_agents_list(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file(todo)
+
+    result = run_script("-file", str(todo), "-next", "-task_id", "EX-2", "-message", "下一阶段：补齐边界用例")
+
+    assert result.returncode == 1
+    assert "-next requires -agents-list" in result.stderr
+
+
+# TC-038
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-08 15:30:00 +0800
+# 最近一次运行成功时间: 2026-04-08 15:30:00 +0800
+# 测试目的: 验证 -new 缺少 -depends 或 -plan 返回 RC=1。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_new_requires_depends_and_plan(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file(todo)
+
+    result = run_script("-file", str(todo), "-new", "-info", "补充单元测试", "-worktree", "None", "-plan", "None")
+    assert result.returncode == 1
+    assert "-new requires -depends" in result.stderr
+
+    result = run_script("-file", str(todo), "-new", "-info", "补充单元测试", "-worktree", "None", "-depends", "None")
+    assert result.returncode == 1
+    assert "-new requires -plan" in result.stderr
+
+
+# TC-039
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-08 22:20:00 +0800
+# 最近一次运行成功时间: 2026-04-08 22:20:00 +0800
+# 测试目的: 验证 -status -plan-list 输出计划书进度表。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_status_plan_list_outputs_plan_table(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file(todo)
+
+    result = run_script(str(todo), "-file", "-status", "-plan-list")
+
+    assert result.returncode == 0
+    assert "计划书" in result.stdout
+    assert "完成状态" in result.stdout
+
+
+# TC-040
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-08 22:20:00 +0800
+# 最近一次运行成功时间: 2026-04-08 22:20:00 +0800
+# 测试目的: 验证 -new 的 -depends 任务不存在时返回 RC=3。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_new_requires_existing_dependencies(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file(todo)
+    write_agents_file(agents, rows=[agent_row("神秘人", "free"), agent_row("worker-a", "free")])
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script(
+        "-file",
+        str(todo),
+        "-new",
+        "-info",
+        "需要依赖的任务",
+        "-worktree",
+        "None",
+        "-depends",
+        "EX-404",
+        "-plan",
+        "ARCHITECTURE/plan/a.md",
+        env=env,
+    )
+
+    assert result.returncode == 3
+    assert "dependency task not found: EX-404" in result.stderr
+    list_rows = parse_section_rows(todo.read_text(encoding="utf-8"), "## 任务列表")
+    assert not any(r[4] == "需要依赖的任务" for r in list_rows)
+
+
+# TC-041
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-08 22:20:00 +0800
+# 最近一次运行成功时间: 2026-04-08 22:20:00 +0800
+# 测试目的: 验证 -new 会创建并更新计划书进度表。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_new_updates_plan_progress_table(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file(todo)
+    write_agents_file(agents, rows=[agent_row("神秘人", "free"), agent_row("worker-a", "free")])
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script(
+        "-file",
+        str(todo),
+        "-new",
+        "-info",
+        "计划任务-1",
+        "-worktree",
+        "None",
+        "-depends",
+        "EX-3",
+        "-plan",
+        "ARCHITECTURE/plan/plan-a.md",
+        env=env,
+    )
+
+    assert result.returncode == 0
+    plan_rows = parse_section_rows(todo.read_text(encoding="utf-8"), "## 计划书")
+    assert any(r[0] == "ARCHITECTURE/plan/plan-a.md" and r[1] == "1" and r[2] == "0" and r[3] == "1" and r[4] == "进行中" for r in plan_rows)
+
+
+# TC-042
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-08 22:20:00 +0800
+# 最近一次运行成功时间: 2026-04-08 22:20:00 +0800
+# 测试目的: 验证最后一个计划任务 -done 后计划状态变为完成待检查。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_done_last_plan_task_marks_plan_waiting_review(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file(
+        todo,
+        running_rows=[
+            row_running(
+                "EX-1",
+                "李白",
+                "2026-03-08 16:10:00 +0800",
+                ".",
+                "创建 src",
+                "",
+                "ARCHITECTURE/plan/plan-a.md",
+                "worker-a",
+                "进行中",
+                "xxx",
+                "./log/ex1.md",
+            ),
+        ],
+        list_rows=[],
+    )
+    write_agents_file(agents, rows=[agent_row("神秘人", "free"), agent_row("worker-a", "busy")])
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script("-file", str(todo), "-done", "-task_id", "EX-1", "-log", "./log/done.md", "-agents-list", str(agents), env=env)
+
+    assert result.returncode == 0
+    plan_rows = parse_section_rows(todo.read_text(encoding="utf-8"), "## 计划书")
+    assert any(r[0] == "ARCHITECTURE/plan/plan-a.md" and r[1] == "1" and r[2] == "1" and r[3] == "0" and r[4] == "完成待检查" for r in plan_rows)
+
+
+# TC-043
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-08 22:20:00 +0800
+# 最近一次运行成功时间: 2026-04-08 22:20:00 +0800
+# 测试目的: 验证 -done-plan 会移除已完成待检查的计划。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_done_plan_removes_review_ready_plan(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    todo.write_text(
+        "\n".join(
+            [
+                "## 正在执行的任务",
+                "",
+                "| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 依赖任务 | 计划书 | 指派 | 状态 | 用户指导 | 记录文件 |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+                "",
+                "## 计划书",
+                "",
+                "| 计划书 | 总任务数 | 已完成任务 | 待完成任务 | 完成状态 |",
+                "| --- | --- | --- | --- | --- |",
+                "| ARCHITECTURE/plan/plan-a.md | 1 | 1 | 0 | 完成待检查 |",
+                "",
+                "## 任务列表",
+                "",
+                "| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 依赖任务 | 计划书 | 指派 | 记录文件 |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+                "",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    write_agents_file(agents, rows=[agent_row("神秘人", "free")])
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script("-file", str(todo), "-done-plan", "-plan", "ARCHITECTURE/plan/plan-a.md", env=env)
+
+    assert result.returncode == 0
+    assert "OK: done-plan ARCHITECTURE/plan/plan-a.md" in result.stdout
+    plan_rows = parse_section_rows(todo.read_text(encoding="utf-8"), "## 计划书")
+    assert not any(r[0] == "ARCHITECTURE/plan/plan-a.md" for r in plan_rows)
+
+
+# TC-044
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-08 22:20:00 +0800
+# 最近一次运行成功时间: 2026-04-08 22:20:00 +0800
+# 测试目的: 验证 -done-plan 仅接受完成待检查的计划。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_done_plan_requires_review_ready_status(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    todo.write_text(
+        "\n".join(
+            [
+                "## 正在执行的任务",
+                "",
+                "| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 依赖任务 | 计划书 | 指派 | 状态 | 用户指导 | 记录文件 |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+                "",
+                "## 计划书",
+                "",
+                "| 计划书 | 总任务数 | 已完成任务 | 待完成任务 | 完成状态 |",
+                "| --- | --- | --- | --- | --- |",
+                "| ARCHITECTURE/plan/plan-a.md | 2 | 1 | 1 | 进行中 |",
+                "",
+                "## 任务列表",
+                "",
+                "| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 依赖任务 | 计划书 | 指派 | 记录文件 |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+                "| EX-9 | 李白 | 2026-03-08 16:30:00 +0800 | . | 未完成任务 |  | ARCHITECTURE/plan/plan-a.md | worker-a | ./log/ex9.md |",
+                "",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    write_agents_file(agents, rows=[agent_row("神秘人", "free")])
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script("-file", str(todo), "-done-plan", "-plan", "ARCHITECTURE/plan/plan-a.md", env=env)
+
+    assert result.returncode == 3
+    assert "plan is not ready for done-plan: ARCHITECTURE/plan/plan-a.md" in result.stderr
+
+
+# TC-045
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-08 22:20:00 +0800
+# 最近一次运行成功时间: 2026-04-08 22:20:00 +0800
+# 测试目的: 验证 非管理员 调用 -done-plan 被拒绝。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_done_plan_restricted_for_non_privileged_operator(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    todo.write_text(
+        "\n".join(
+            [
+                "## 正在执行的任务",
+                "",
+                "| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 依赖任务 | 计划书 | 指派 | 状态 | 用户指导 | 记录文件 |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+                "",
+                "## 计划书",
+                "",
+                "| 计划书 | 总任务数 | 已完成任务 | 待完成任务 | 完成状态 |",
+                "| --- | --- | --- | --- | --- |",
+                "| ARCHITECTURE/plan/plan-a.md | 1 | 1 | 0 | 完成待检查 |",
+                "",
+                "## 任务列表",
+                "",
+                "| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 依赖任务 | 计划书 | 指派 | 记录文件 |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+                "",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    write_agents_file(agents, rows=[agent_row("worker-a", "free")])
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-a"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script("-file", str(todo), "-done-plan", "-plan", "ARCHITECTURE/plan/plan-a.md", env=env)
+
+    assert result.returncode == 3
+    assert "operation -done-plan is restricted to 管理员: worker-a" in result.stderr
+
+
+# TC-048
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-08 23:15:00 +0800
+# 最近一次运行成功时间: 2026-04-08 23:15:00 +0800
+# 测试目的: 验证 -dispatch 在达到并行人数上限时返回 RC=3。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_dispatch_rejects_when_parallel_limit_reached(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file(
+        todo,
+        running_rows=[
+            row_running("EX-1", "李白", "2026-03-08 16:10:00 +0800", ".", "创建 src", "", "", "worker-a", "进行中", "xxx", "./log/ex1.md"),
+        ],
+        list_rows=[
+            row_list("EX-3", "苏轼", "2026-03-08 16:30:00 +0800", "", "删除 tmp/demo.txt", "", "", "", "./log/ex3.md"),
+        ],
+    )
+    write_agents_file(agents, rows=[agent_row("神秘人", "free"), agent_row("worker-a", "busy"), agent_row("worker-b", "free")])
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_MAX_PARALLEL"] = "1"
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script("-file", str(todo), "-dispatch", "-task_id", "EX-3", "-to", "worker-b", "-agents-list", str(agents), env=env)
+
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+    list_rows = parse_section_rows(content, "## 任务列表")
+    assert result.returncode == 3
+    assert "parallel assignee limit reached: 1/1" in result.stderr
+    assert not any(r[0] == "EX-3" and r[7] == "worker-b" for r in running_rows)
+    assert any(r[0] == "EX-3" for r in list_rows)
+
+
+# TC-049
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-08 23:15:00 +0800
+# 最近一次运行成功时间: 2026-04-08 23:15:00 +0800
+# 测试目的: 验证 非管理员 调用 -dispatch 被拒绝。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_dispatch_restricted_for_non_admin_operator(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file(todo)
+    write_agents_file(agents, rows=[agent_row("worker-a", "free"), agent_row("worker-b", "free")])
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-a"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script("-file", str(todo), "-dispatch", "-task_id", "EX-3", "-to", "worker-b", "-agents-list", str(agents), env=env)
+
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+    list_rows = parse_section_rows(content, "## 任务列表")
+    assert result.returncode == 3
+    assert "operation -dispatch is restricted to 管理员: worker-a" in result.stderr
+    assert not any(r[0] == "EX-3" and r[7] == "worker-b" for r in running_rows)
+    assert any(r[0] == "EX-3" for r in list_rows)
