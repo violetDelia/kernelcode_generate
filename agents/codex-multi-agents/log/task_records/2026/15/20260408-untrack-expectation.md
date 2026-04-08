@@ -18,3 +18,17 @@
 - 工作区文件仍存在：`test -f expectation/execute_engine/add.py` -> `yes`。
 结论：
 - expectation/ 已从 git index 移除；工作区文件保留，并由 `/.gitignore` 的 `/expectation/` 规则忽略，避免后续被重新收录。
+
+时间：2026-04-09 02:45:00 +0800
+经办人：李白
+任务：T-20260408-8d57f372（untrack expectation 收口执行）
+说明：
+- 由于后续链路合并新增了 `expectation/tools/ircheck/*.py` 的追踪文件，需要在最新 `origin/main` 基线再次执行“取消追踪 expectation/”收口，以满足“expectation/ 不再被 git 追踪”的仓库约束。
+执行证据：
+- 基线对齐：`git reset --hard origin/main`（HEAD=5a3f57d）。
+- 执行前追踪数：`git ls-files expectation | wc -l` -> `3`。
+- 执行：`git rm -r --cached expectation`（仅移除索引，不删除工作区文件内容）。
+- 执行后追踪数：`git ls-files expectation | wc -l` -> `0`。
+- 工作区文件仍存在：`test -f expectation/tools/ircheck/basic_true.py` -> `yes`。
+结论：
+- expectation/ 已从 git index 移除；工作区文件保留，并由 `/.gitignore` 的 `/expectation/` 规则忽略，避免后续被重新收录。
