@@ -85,3 +85,33 @@ def test_ircheck_cli_match_failure_outputs_actual_ir(tmp_path: Path, capsys: pyt
     assert "failed_check: CHECK" in captured.out
     assert "actual_ir:" in captured.out
     assert "func.func @main" in captured.out
+
+
+# TC-IRCHECK-CLI-002
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-10 13:10:00 +0800
+# 最近一次运行成功时间: 2026-04-10 13:10:00 +0800
+# 功能说明: 验证 CLI 支持 `// -----` 分隔的多 case；全部通过时退出码为 0 且仅输出 true。
+# 使用示例: pytest -q test/tools/test_ircheck_cli.py -k test_ircheck_cli_multi_case_success
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_cli.py
+def test_ircheck_cli_multi_case_success(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    content = f"""// COMPILE_ARGS: --pass no-op
+// CHECK: builtin.module
+
+{_SIMPLE_IR}
+// -----
+// COMPILE_ARGS: --pipeline no-op-pipeline
+// CHECK: func.func @main
+
+{_SIMPLE_IR}"""
+    case_path = tmp_path / "multi_case.ircheck"
+    case_path.write_text(content, encoding="utf-8")
+
+    exit_code = main([str(case_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert captured.out.strip() == "true"

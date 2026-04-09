@@ -216,3 +216,58 @@ def test_run_ircheck_text_pipeline_ok() -> None:
     result = run_ircheck_text(text, source_path="inline.ircheck")
     assert result.ok is True
     assert result.exit_code == 0
+
+
+# TC-IRCHECK-RUN-008
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-10 13:10:00 +0800
+# 最近一次运行成功时间: 2026-04-10 13:10:00 +0800
+# 功能说明: 验证 run_ircheck_text 支持 `// -----` 分隔的多 case 顺序执行；全部通过时返回成功。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_multi_case_ok
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+def test_run_ircheck_text_multi_case_ok() -> None:
+    text = f"""// COMPILE_ARGS: --pass no-op
+// CHECK: func.func @main
+
+{_SIMPLE_IR}
+// -----
+// COMPILE_ARGS: --pipeline no-op-pipeline
+// CHECK: builtin.module
+// CHECK: func.return
+
+{_SIMPLE_IR}"""
+    result = run_ircheck_text(text, source_path="inline.ircheck")
+    assert result.ok is True
+    assert result.exit_code == 0
+    assert "func.return" in result.actual_ir
+
+
+# TC-IRCHECK-RUN-009
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-10 13:10:00 +0800
+# 最近一次运行成功时间: 2026-04-10 13:10:00 +0800
+# 功能说明: 验证多 case 场景下失败时 fail-fast，并在 message 中标识失败 case 序号。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_multi_case_failfast_marks_case_index
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+def test_run_ircheck_text_multi_case_failfast_marks_case_index() -> None:
+    text = f"""// COMPILE_ARGS: --pass no-op
+// CHECK: builtin.module
+
+{_SIMPLE_IR}
+// -----
+// COMPILE_ARGS: --pass no-op
+// CHECK: does.not.exist
+
+{_SIMPLE_IR}"""
+    result = run_ircheck_text(text, source_path="inline.ircheck")
+    assert result.ok is False
+    assert result.exit_code == 1
+    assert result.message is not None
+    assert result.message.startswith("IrcheckMatchError: CHECK not found")
+    assert result.message.endswith("[case 2]")

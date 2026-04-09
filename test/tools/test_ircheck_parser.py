@@ -214,3 +214,30 @@ builtin.module {
     path.write_text(content, encoding="utf-8")
     with pytest.raises(IrcheckParseError, match=r"^IrcheckParseError: invalid ircheck header$"):
         _ = parse_ircheck_file(str(path))
+
+
+# TC-IRCHECK-PARSE-008
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-10 13:10:00 +0800
+# 最近一次运行成功时间: 2026-04-10 13:10:00 +0800
+# 功能说明: 验证 parse_ircheck_file 仅支持单 case；出现 `// -----` 多 case 分隔符时必须解析失败。
+# 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_rejects_multi_case_separator
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_parser.py
+def test_parse_ircheck_file_rejects_multi_case_separator(tmp_path: Path) -> None:
+    content = """// COMPILE_ARGS: --pass no-op
+// CHECK: builtin.module
+
+builtin.module {}
+// -----
+// COMPILE_ARGS: --pass no-op
+// CHECK: builtin.module
+
+builtin.module {}
+"""
+    path = tmp_path / "multi_case.ircheck"
+    path.write_text(content, encoding="utf-8")
+    with pytest.raises(IrcheckParseError, match=r"^IrcheckParseError: invalid ircheck header$"):
+        _ = parse_ircheck_file(str(path))

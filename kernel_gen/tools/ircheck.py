@@ -60,6 +60,7 @@ from kernel_gen.passes.registry import (
 from kernel_gen.passes.pass_manager import Pass, PassManager
 
 CheckKind = Literal["CHECK", "CHECK-NEXT", "CHECK-NOT"]
+CASE_SEPARATOR = "// -----"
 
 
 class IrcheckParseError(ValueError):
@@ -80,6 +81,31 @@ class IrcheckParseError(ValueError):
     - test: [test/tools/test_ircheck_parser.py](test/tools/test_ircheck_parser.py)
     - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
     """
+
+
+@dataclass(frozen=True)
+class IrcheckCaseBlock:
+    """由分隔符切分得到的原始 case 文本块。
+
+    创建者: 守护最好的爱莉希雅
+    最后一次更改: 守护最好的爱莉希雅
+
+    功能说明:
+    - 表示一个尚未解析的 case 文本块及其在原始文本中的起始行号。
+    - 用于支持“单文件多 case（lit 风格分隔符）”的顺序执行语义。
+
+    使用示例:
+    - blocks = _split_ircheck_text_into_case_blocks(text)
+    - assert blocks[0].start_line == 1
+
+    关联文件:
+    - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
+    - test: [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
+    - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
+    """
+
+    text: str
+    start_line: int
 
 
 @dataclass(frozen=True)
@@ -179,6 +205,9 @@ def parse_ircheck_file(path: str) -> IrcheckCase:
     """
 
     text = Path(path).read_text(encoding="utf-8")
+    blocks = _split_ircheck_text_into_case_blocks(text)
+    if len(blocks) != 1:
+        raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
     return _parse_ircheck_text(text, source_path=path)
 
 
@@ -203,7 +232,8 @@ def run_ircheck_file(path: str) -> IrcheckResult:
     """
 
     try:
-        case = parse_ircheck_file(path)
+        text = Path(path).read_text(encoding="utf-8")
+        cases = _parse_ircheck_cases(text, source_path=path)
     except Exception as exc:
         return IrcheckResult(
             ok=False,
@@ -212,7 +242,7 @@ def run_ircheck_file(path: str) -> IrcheckResult:
             failed_check=None,
             message=str(exc),
         )
-    return _run_ircheck_case(case)
+    return _run_ircheck_cases(cases)
 
 
 def run_ircheck_text(text: str, source_path: str | None = None) -> IrcheckResult:
@@ -239,7 +269,7 @@ builtin.module {}
     """
 
     try:
-        case = _parse_ircheck_text(text, source_path=source_path)
+        cases = _parse_ircheck_cases(text, source_path=source_path)
     except Exception as exc:
         return IrcheckResult(
             ok=False,
@@ -248,10 +278,147 @@ builtin.module {}
             failed_check=None,
             message=str(exc),
         )
-    return _run_ircheck_case(case)
+    return _run_ircheck_cases(cases)
 
 
-def _parse_ircheck_text(text: str, *, source_path: str | None) -> IrcheckCase:
+def _split_ircheck_text_into_case_blocks(text: str) -> list[IrcheckCaseBlock]:
+    """按 lit 风格分隔符把文本切成多个 case 文本块。
+
+    创建者: 守护最好的爱莉希雅
+    最后一次更改: 守护最好的爱莉希雅
+
+    功能说明:
+    - 支持使用 `// -----` 作为 case 分隔符。
+    - 返回值保留每个文本块在原始文本中的起始行号，便于错误定位。
+    - 若包含分隔符但某个文本块为空，按解析失败处理。
+
+    使用示例:
+    - blocks = _split_ircheck_text_into_case_blocks(text)
+    - assert len(blocks) >= 1
+
+    关联文件:
+    - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
+    - test: [test/tools/test_ircheck_parser.py](test/tools/test_ircheck_parser.py)
+    - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
+    """
+
+    lines = text.splitlines()
+    if not lines:
+        return [IrcheckCaseBlock(text=text, start_line=1)]
+
+    blocks: list[IrcheckCaseBlock] = []
+    current_lines: list[str] = []
+    current_start_line = 1
+    saw_separator = False
+
+    for line_no, line in enumerate(lines, start=1):
+        if line.strip() == CASE_SEPARATOR:
+            saw_separator = True
+            block_text = "\n".join(current_lines).strip("\n")
+            if not block_text.strip():
+                raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
+            blocks.append(IrcheckCaseBlock(text=block_text, start_line=current_start_line))
+            current_lines = []
+            current_start_line = line_no + 1
+            continue
+        current_lines.append(line)
+
+    tail_text = "\n".join(current_lines).strip("\n")
+    if saw_separator and not tail_text.strip():
+        raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
+    if tail_text.strip():
+        blocks.append(IrcheckCaseBlock(text=tail_text, start_line=current_start_line))
+
+    if not blocks:
+        blocks.append(IrcheckCaseBlock(text=text, start_line=1))
+    return blocks
+
+
+def _parse_ircheck_cases(text: str, *, source_path: str | None) -> list[IrcheckCase]:
+    """解析文本中的一个或多个 case。
+
+    创建者: 守护最好的爱莉希雅
+    最后一次更改: 守护最好的爱莉希雅
+
+    功能说明:
+    - 单 case：行为与 `_parse_ircheck_text` 完全一致。
+    - 多 case：按 `// -----` 分隔，逐块解析并保留全局行号。
+
+    使用示例:
+    - cases = _parse_ircheck_cases(text, source_path="suite.ircheck")
+    - assert len(cases) >= 1
+
+    关联文件:
+    - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
+    - test: [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
+    - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
+    """
+
+    blocks = _split_ircheck_text_into_case_blocks(text)
+    if len(blocks) == 1:
+        return [_parse_ircheck_text(blocks[0].text, source_path=source_path, line_offset=blocks[0].start_line - 1)]
+
+    cases: list[IrcheckCase] = []
+    for index, block in enumerate(blocks, start=1):
+        case_source = source_path
+        if source_path is not None:
+            case_source = f"{source_path}#case-{index}"
+        case = _parse_ircheck_text(block.text, source_path=case_source, line_offset=block.start_line - 1)
+        cases.append(case)
+    return cases
+
+
+def _run_ircheck_cases(cases: Sequence[IrcheckCase]) -> IrcheckResult:
+    """顺序执行多个 case，并按 fail-fast 返回结果。
+
+    创建者: 守护最好的爱莉希雅
+    最后一次更改: 守护最好的爱莉希雅
+
+    功能说明:
+    - 顺序执行每个 case。
+    - 多 case 下任一失败立即返回，并在 message 追加失败 case 序号。
+    - 全部通过时返回最后一个 case 的结果。
+
+    使用示例:
+    - result = _run_ircheck_cases(cases)
+    - assert result.exit_code in (0, 1, 2)
+
+    关联文件:
+    - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
+    - test: [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
+    - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
+    """
+
+    if not cases:
+        return IrcheckResult(
+            ok=False,
+            exit_code=2,
+            actual_ir="",
+            failed_check=None,
+            message="IrcheckParseError: invalid ircheck header",
+        )
+
+    last_success: IrcheckResult | None = None
+    multi_case = len(cases) > 1
+    for index, case in enumerate(cases, start=1):
+        result = _run_ircheck_case(case)
+        if not result.ok:
+            if multi_case and result.message:
+                return IrcheckResult(
+                    ok=False,
+                    exit_code=result.exit_code,
+                    actual_ir=result.actual_ir,
+                    failed_check=result.failed_check,
+                    message=f"{result.message} [case {index}]",
+                )
+            return result
+        last_success = result
+
+    assert last_success is not None  # pragma: no cover - guarded by empty check
+    return last_success
+
+
+def _parse_ircheck_text(text: str, *, source_path: str | None, line_offset: int = 0) -> IrcheckCase:
     """解析 case 文本为结构化对象。
 
     创建者: 小李飞刀
@@ -275,7 +442,7 @@ def _parse_ircheck_text(text: str, *, source_path: str | None) -> IrcheckCase:
     body_start = len(lines)
     for idx, line in enumerate(lines):
         if line.startswith("//"):
-            header_lines.append((idx + 1, line))
+            header_lines.append((idx + 1 + line_offset, line))
             continue
         body_start = idx
         break
@@ -672,6 +839,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     功能说明:
     - 运行单个 case 文件并在标准输出打印 `true/false`。
+    - 若文件中包含 `// -----` 分隔符，会按顺序执行多个 case（fail-fast）。
     - 退出码约束见 `spec/tools/ircheck.md`。
 
     使用示例:
@@ -699,6 +867,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(result.message)
     if result.failed_check is not None:
         print(f"failed_check: {result.failed_check.kind} {result.failed_check.text!r}")
+    if result.actual_ir:
+        print("actual_ir:")
+        print(result.actual_ir)
     return result.exit_code
 
 

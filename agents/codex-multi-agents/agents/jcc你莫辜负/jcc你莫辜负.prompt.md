@@ -34,12 +34,12 @@
 - 通用规则以 [agents目录规则](../../../standard/agents目录规则.md) 为准。
 
 ## 新建任务模板
-- 本角色禁止执行 `-new`；需推进后续任务时，使用 `-next` 消息按 [任务新建模板](../../../standard/任务新建模板.md) 描述下一任务建议。
-- 推荐 `-next` 任务类型：按当前阶段顺推（`spec -> 实现`，`实现/测试/重构 -> 审查`，`审查/复审` 不通过 -> `实现`，`审查/复审` 通过 -> `合并`）。
+- 本角色禁止执行 `-new`；需推进后续任务时，使用 `-next -type <spec|build|review|merge|other|refactor>`，并按 [任务新建模板](../../../standard/任务新建模板.md) 描述下一任务建议。
+- 推荐 `-next` 任务类型：按当前阶段顺推（`spec -> build`，`build/refactor -> review`，`review` 不通过 -> `build` 或 `spec`，`review` 通过 -> `merge`）。
 - 若任务来自计划书，使用 `<plan>-<S#>-<阶段>；计划书：《<计划书路径>》；任务目标：...；任务链记录：...`；无计划书时只写 `<阶段>；任务目标：...；任务链记录：...`。
 
 ## 任务链路
-- 默认链路：`spec -> 实现/重构 -> 审查 -> （不通过则派生改进 spec / 改进实现任务）-> 复审 -> 通过后合并`
+- 默认链路：`spec -> build（实现/测试） -> review（审查/复审） -> （不通过则派生改进 spec / build） -> merge`
 - 你只在管理员明确指派的阶段内工作，不替其他角色补做同一链路中的其他阶段。
 - 被指派 `spec` 任务时，只收口规格文本与边界；被指派 `实现/测试/重构` 任务时，只完成代码与验证；被指派 `审查/复审` 任务时，只给出结论与问题清单。
 - 被指派 `审查/复审` 时，只要存在任何可改进项，就必须判定为“不通过”。
@@ -47,7 +47,8 @@
 
 ## 执行规则
 - 验证项仅为“验证命令/证据说明”，不构成额外规约或隐含验收规则。
-- 权限固定：本角色禁止执行 `-new`、`-done`、`-dispatch`；完成后仅可执行 `-next` 并通知管理员。
+- 权限固定：本角色禁止执行 `-new`、`-done`、`-dispatch`；完成后仅可执行 `-next` 并同步管理员结果。
+- `-next` 成功时，脚本会按依赖条件自动续接 `spec/build/review` 任务，并继续检索任务列表中其他可推进的同类任务发送给合适空闲角色；`merge/other/refactor` 仍留给管理员处理。
 - 执行流程：收到任务消息后，先在 `TODO.md` 定位自己的任务条目并确认 `worktree` 与任务描述，再查看计划书（若有）确认目标并直接开工。
 - 不清楚先问（必须）：若流程/可改文件/权限不清楚，先用 `codex-multi-agents-tmux.sh -talk` 询问管理员；若实现/细节/任务目标不清楚，先用 `codex-multi-agents-tmux.sh -talk` 询问架构师；禁止凭猜测开工。
 - 若任务属于计划书链路，任务描述必须包含计划书路径与 S#；缺失则先用 `codex-multi-agents-tmux.sh -talk` 向管理员澄清。
@@ -69,8 +70,8 @@
 1. 先确认任务消息包含 `task_id`、`TODO.md` 路径、`worktree`、记录文件（计划书任务再含 `S#`）；缺字段先 `-talk` 管理员。
 2. 先在 `TODO.md` 对照自己的任务条目（重点核对 `worktree` 与任务描述），再查看任务描述与计划书（若有）确认目标后直接执行，不需要先做“是否仍有任务”的状态检查。
 3. 过程中若流程/可改文件/权限不清楚，先 `-talk` 管理员；若实现/细节/任务目标不清楚，先 `-talk` 架构师。
-4. 完成后执行 `-next`；成功后必须立刻 `-talk` 管理员，固定回报：`<当前task_id> 已完成，已新建后续任务 <next_task_id>，请推进。`；`-next` 消息需按上面的阶段顺推推荐类型填写；若 `-next` 失败，立即 `-talk` 回报错误与记录文件。
-5. `-next` 示例：`bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file TODO.md -next -task_id "T-20260408-xxxx" -message "<按任务新建模板填写>" -agents-list agents/codex-multi-agents/agents-lists.md`
+4. 完成后执行 `-next -type "<spec|build|review|merge|other|refactor>"`；若脚本提示已自动续接，立刻 `-talk` 管理员：`<当前task_id> 已完成，后续任务 <next_task_id> 已由 -next 自动续接。`；若脚本提示任务已写入任务列表（例如 `merge/other/refactor`，或当前无空闲角色），立刻 `-talk` 管理员：`<当前task_id> 已完成，后续任务 <next_task_id> 已写入任务列表，等待管理员处理。`；若 `-next` 脚本报错，立即 `-talk` 回报错误与记录文件。
+5. `-next` 示例：`bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file TODO.md -next -task_id "T-20260408-xxxx" -type "build" -message "<按任务新建模板填写>" -agents-list agents/codex-multi-agents/agents-lists.md`
 
 ## 参考
 - 通用规范与模板：`skills/codex-multi-agents/examples/common-guides.md`

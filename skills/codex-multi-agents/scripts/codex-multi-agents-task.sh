@@ -52,6 +52,7 @@ INFO=""
 LOG_FILE=""
 WORKTREE=""
 MESSAGE=""
+TYPE_KIND=""
 DEPENDS=""
 PLAN_DOC=""
 
@@ -64,6 +65,7 @@ HAS_INFO=0
 HAS_LOG=0
 HAS_WORKTREE=0
 HAS_MESSAGE=0
+HAS_TYPE=0
 HAS_DEPENDS=0
 HAS_PLAN=0
 HAS_DOING=0
@@ -92,6 +94,21 @@ trim() {
   printf "%s" "$s"
 }
 
+validate_type_kind() {
+  local raw="${1-}"
+  local text
+  text="$(trim "$raw" | tr '[:upper:]' '[:lower:]')"
+  case "$text" in
+    spec|build|review|merge|other|refactor)
+      printf "%s" "$text"
+      return 0
+      ;;
+    *)
+      err "$RC_ARG" "invalid value for -type: ${raw}"
+      ;;
+  esac
+}
+
 err() {
   local code="$1"
   shift
@@ -102,13 +119,13 @@ err() {
 usage() {
   cat <<'USAGE'
 Usage:
-  codex-multi-agents-task.sh -file <TODO.md> -dispatch -task_id <id> -to <worker> -agents-list <agents-lists.md> [-message <text>]
+  codex-multi-agents-task.sh -file <TODO.md> -dispatch -task_id <id> -type <spec|build|review|merge|other|refactor> [-to <worker>] -agents-list <agents-lists.md> [-message <text>]
   codex-multi-agents-task.sh -file <TODO.md> -done -task_id <id> -log <log_path> -agents-list <agents-lists.md>
   codex-multi-agents-task.sh -file <TODO.md> -pause -task_id <id> -agents-list <agents-lists.md>
   codex-multi-agents-task.sh -file <TODO.md> -continue -task_id <id> -agents-list <agents-lists.md>
   codex-multi-agents-task.sh -file <TODO.md> -reassign -task_id <id> -to <worker> -agents-list <agents-lists.md>
-  codex-multi-agents-task.sh -file <TODO.md> -next -task_id <id> -message <text> -agents-list <agents-lists.md>
-  codex-multi-agents-task.sh -file <TODO.md> -new -info <desc> -worktree <path> -depends <task_ids|None> -plan <plan_doc|None> [-to <worker>] [-from <owner>] [-log <record_path>]
+  codex-multi-agents-task.sh -file <TODO.md> -next -task_id <id> -type <spec|build|review|merge|other|refactor> -message <text> -agents-list <agents-lists.md>
+  codex-multi-agents-task.sh -file <TODO.md> -new -info <desc> -type <spec|build|review|merge|other|refactor> -worktree <path> -depends <task_ids|None> -plan <plan_doc|None> [-to <worker>] [-from <owner>] [-log <record_path>]
   codex-multi-agents-task.sh -file <TODO.md> -status -doing
   codex-multi-agents-task.sh -file <TODO.md> -status -task-list
   codex-multi-agents-task.sh -file <TODO.md> -status -plan-list
@@ -116,13 +133,13 @@ Usage:
   codex-multi-agents-task.sh -file <TODO.md> -done-plan -plan <plan_doc>
 
 Examples:
-  codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -dispatch -task_id EX-3 -to worker-a -agents-list ./agents/codex-multi-agents/agents-lists.md -message "请处理任务 EX-3"
+  codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -dispatch -task_id EX-3 -type build -to worker-a -agents-list ./agents/codex-multi-agents/agents-lists.md -message "请处理任务 EX-3"
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -done -task_id EX-1 -log ./agents/codex-multi-agents/log/task-EX-1.log -agents-list ./agents/codex-multi-agents/agents-lists.md
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -pause -task_id EX-2 -agents-list ./agents/codex-multi-agents/agents-lists.md
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -continue -task_id EX-2 -agents-list ./agents/codex-multi-agents/agents-lists.md
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -reassign -task_id EX-2 -to worker-c -agents-list ./agents/codex-multi-agents/agents-lists.md
-  codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -next -task_id EX-2 -message "下一阶段：补齐边界测试" -agents-list ./agents/codex-multi-agents/agents-lists.md
-  codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -new -info "补充单元测试" -worktree repo-x -depends "EX-2,EX-5" -plan "ARCHITECTURE/plan/x.md" -to worker-b -from 李白 -log ./log/record.md
+  codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -next -task_id EX-2 -type review -message "下一阶段：补齐边界测试" -agents-list ./agents/codex-multi-agents/agents-lists.md
+  codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -new -info "补充单元测试" -type build -worktree repo-x -depends "EX-2,EX-5" -plan "ARCHITECTURE/plan/x.md" -to worker-b -from 李白 -log ./log/record.md
   codex-multi-agents-task.sh ./skills/codex-multi-agents/examples/TODO.md -file -status -doing
   codex-multi-agents-task.sh ./skills/codex-multi-agents/examples/TODO.md -file -status -task-list
   codex-multi-agents-task.sh ./skills/codex-multi-agents/examples/TODO.md -file -status -plan-list
@@ -279,6 +296,17 @@ parse_args() {
         HAS_MESSAGE=1
         shift 2
         ;;
+      -type=*)
+        TYPE_KIND="${1#*=}"
+        HAS_TYPE=1
+        shift
+        ;;
+      -type)
+        [[ $# -ge 2 ]] || err "$RC_ARG" "missing value for -type"
+        TYPE_KIND="$2"
+        HAS_TYPE=1
+        shift 2
+        ;;
       -depends=*)
         DEPENDS="${1#*=}"
         HAS_DEPENDS=1
@@ -349,10 +377,17 @@ parse_args() {
 
   if [[ "$OP_DISPATCH" -eq 1 ]]; then
     [[ "$HAS_TASK_ID" -eq 1 ]] || err "$RC_ARG" "-dispatch requires -task_id"
-    [[ "$HAS_TO" -eq 1 ]] || err "$RC_ARG" "-dispatch requires -to"
+    [[ "$HAS_TYPE" -eq 1 ]] || err "$RC_ARG" "-dispatch requires -type"
     [[ "$HAS_AGENTS_LIST" -eq 1 ]] || err "$RC_ARG" "-dispatch requires -agents-list"
     [[ -n "$(trim "$TASK_ID")" ]] || err "$RC_ARG" "empty value for -task_id"
-    [[ -n "$(trim "$TO")" ]] || err "$RC_ARG" "empty value for -to"
+    [[ -n "$(trim "$TYPE_KIND")" ]] || err "$RC_ARG" "empty value for -type"
+    TYPE_KIND="$(validate_type_kind "$TYPE_KIND")"
+    if [[ "$HAS_TO" -eq 1 ]]; then
+      [[ -n "$(trim "$TO")" ]] || err "$RC_ARG" "empty value for -to"
+    fi
+    if [[ "$TYPE_KIND" == "other" && "$HAS_TO" -eq 0 ]]; then
+      err "$RC_ARG" "-dispatch with -type other requires -to"
+    fi
     [[ -n "$(trim "$AGENTS_LIST")" ]] || err "$RC_ARG" "empty value for -agents-list"
     if [[ "$HAS_MESSAGE" -eq 1 ]]; then
       [[ -n "$(trim "$MESSAGE")" ]] || err "$RC_ARG" "empty value for -message"
@@ -367,7 +402,7 @@ parse_args() {
     [[ -n "$(trim "$TASK_ID")" ]] || err "$RC_ARG" "empty value for -task_id"
     [[ -n "$(trim "$LOG_FILE")" ]] || err "$RC_ARG" "empty value for -log"
     [[ -n "$(trim "$AGENTS_LIST")" ]] || err "$RC_ARG" "empty value for -agents-list"
-    [[ "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_DEPENDS" -eq 0 && "$HAS_PLAN" -eq 0 ]] || err "$RC_ARG" "-done does not accept -to/-info/-from/-worktree/-message/-depends/-plan"
+    [[ "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_TYPE" -eq 0 && "$HAS_DEPENDS" -eq 0 && "$HAS_PLAN" -eq 0 ]] || err "$RC_ARG" "-done does not accept -to/-info/-from/-worktree/-message/-type/-depends/-plan"
   fi
 
   if [[ "$OP_PAUSE" -eq 1 ]]; then
@@ -375,7 +410,7 @@ parse_args() {
     [[ "$HAS_AGENTS_LIST" -eq 1 ]] || err "$RC_ARG" "-pause requires -agents-list"
     [[ -n "$(trim "$TASK_ID")" ]] || err "$RC_ARG" "empty value for -task_id"
     [[ -n "$(trim "$AGENTS_LIST")" ]] || err "$RC_ARG" "empty value for -agents-list"
-    [[ "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_DEPENDS" -eq 0 && "$HAS_PLAN" -eq 0 ]] || err "$RC_ARG" "-pause does not accept -to/-info/-log/-from/-worktree/-message/-depends/-plan"
+    [[ "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_TYPE" -eq 0 && "$HAS_DEPENDS" -eq 0 && "$HAS_PLAN" -eq 0 ]] || err "$RC_ARG" "-pause does not accept -to/-info/-log/-from/-worktree/-message/-type/-depends/-plan"
   fi
 
   if [[ "$OP_CONTINUE" -eq 1 ]]; then
@@ -383,7 +418,7 @@ parse_args() {
     [[ "$HAS_AGENTS_LIST" -eq 1 ]] || err "$RC_ARG" "-continue requires -agents-list"
     [[ -n "$(trim "$TASK_ID")" ]] || err "$RC_ARG" "empty value for -task_id"
     [[ -n "$(trim "$AGENTS_LIST")" ]] || err "$RC_ARG" "empty value for -agents-list"
-    [[ "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_DEPENDS" -eq 0 && "$HAS_PLAN" -eq 0 ]] || err "$RC_ARG" "-continue does not accept -to/-info/-log/-from/-worktree/-message/-depends/-plan"
+    [[ "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_TYPE" -eq 0 && "$HAS_DEPENDS" -eq 0 && "$HAS_PLAN" -eq 0 ]] || err "$RC_ARG" "-continue does not accept -to/-info/-log/-from/-worktree/-message/-type/-depends/-plan"
   fi
 
   if [[ "$OP_REASSIGN" -eq 1 ]]; then
@@ -393,14 +428,17 @@ parse_args() {
     [[ -n "$(trim "$TASK_ID")" ]] || err "$RC_ARG" "empty value for -task_id"
     [[ -n "$(trim "$TO")" ]] || err "$RC_ARG" "empty value for -to"
     [[ -n "$(trim "$AGENTS_LIST")" ]] || err "$RC_ARG" "empty value for -agents-list"
-    [[ "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_DEPENDS" -eq 0 && "$HAS_PLAN" -eq 0 ]] || err "$RC_ARG" "-reassign does not accept -info/-log/-from/-worktree/-message/-depends/-plan"
+    [[ "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_TYPE" -eq 0 && "$HAS_DEPENDS" -eq 0 && "$HAS_PLAN" -eq 0 ]] || err "$RC_ARG" "-reassign does not accept -info/-log/-from/-worktree/-message/-type/-depends/-plan"
   fi
 
   if [[ "$OP_NEXT" -eq 1 ]]; then
     [[ "$HAS_TASK_ID" -eq 1 ]] || err "$RC_ARG" "-next requires -task_id"
+    [[ "$HAS_TYPE" -eq 1 ]] || err "$RC_ARG" "-next requires -type"
     [[ "$HAS_MESSAGE" -eq 1 ]] || err "$RC_ARG" "-next requires -message"
     [[ "$HAS_AGENTS_LIST" -eq 1 ]] || err "$RC_ARG" "-next requires -agents-list"
     [[ -n "$(trim "$TASK_ID")" ]] || err "$RC_ARG" "empty value for -task_id"
+    [[ -n "$(trim "$TYPE_KIND")" ]] || err "$RC_ARG" "empty value for -type"
+    TYPE_KIND="$(validate_type_kind "$TYPE_KIND")"
     [[ -n "$(trim "$MESSAGE")" ]] || err "$RC_ARG" "empty value for -message"
     [[ -n "$(trim "$AGENTS_LIST")" ]] || err "$RC_ARG" "empty value for -agents-list"
     [[ "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_DOING" -eq 0 && "$HAS_TASK_LIST" -eq 0 && "$HAS_PLAN_LIST" -eq 0 && "$HAS_DEPENDS" -eq 0 && "$HAS_PLAN" -eq 0 ]] || err "$RC_ARG" "-next does not accept -to/-info/-log/-from/-worktree/-doing/-task-list/-plan-list/-depends/-plan"
@@ -408,10 +446,13 @@ parse_args() {
 
   if [[ "$OP_NEW" -eq 1 ]]; then
     [[ "$HAS_INFO" -eq 1 ]] || err "$RC_ARG" "-new requires -info"
+    [[ "$HAS_TYPE" -eq 1 ]] || err "$RC_ARG" "-new requires -type"
     [[ "$HAS_WORKTREE" -eq 1 ]] || err "$RC_ARG" "-new requires -worktree"
     [[ "$HAS_DEPENDS" -eq 1 ]] || err "$RC_ARG" "-new requires -depends"
     [[ "$HAS_PLAN" -eq 1 ]] || err "$RC_ARG" "-new requires -plan"
     [[ -n "$(trim "$INFO")" ]] || err "$RC_ARG" "empty value for -info"
+    [[ -n "$(trim "$TYPE_KIND")" ]] || err "$RC_ARG" "empty value for -type"
+    TYPE_KIND="$(validate_type_kind "$TYPE_KIND")"
     [[ -n "$(trim "$WORKTREE")" ]] || err "$RC_ARG" "empty value for -worktree"
     [[ "$(trim "$WORKTREE" | tr '[:upper:]' '[:lower:]')" != "none" ]] || err "$RC_ARG" "-new requires non-None value for -worktree"
     if [[ "$HAS_TO" -eq 1 ]]; then
@@ -424,11 +465,12 @@ parse_args() {
     [[ -n "$(trim "$PLAN_DOC")" ]] || err "$RC_ARG" "empty value for -plan"
     [[ "$HAS_TASK_ID" -eq 0 ]] || err "$RC_ARG" "-new does not accept -task_id"
     [[ "$HAS_MESSAGE" -eq 0 ]] || err "$RC_ARG" "-new does not accept -message"
+    [[ "$HAS_AGENTS_LIST" -eq 0 ]] || err "$RC_ARG" "-new does not accept -agents-list"
     [[ "$HAS_DOING" -eq 0 && "$HAS_TASK_LIST" -eq 0 && "$HAS_PLAN_LIST" -eq 0 ]] || err "$RC_ARG" "-new does not accept -doing/-task-list/-plan-list"
   fi
 
   if [[ "$OP_STATUS" -eq 1 ]]; then
-    [[ "$HAS_TASK_ID" -eq 0 && "$HAS_TO" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_AGENTS_LIST" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_DEPENDS" -eq 0 && "$HAS_PLAN" -eq 0 ]] || err "$RC_ARG" "-status does not accept -task_id/-to/-from/-info/-log/-worktree/-agents-list/-message/-depends/-plan"
+    [[ "$HAS_TASK_ID" -eq 0 && "$HAS_TO" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_AGENTS_LIST" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_TYPE" -eq 0 && "$HAS_DEPENDS" -eq 0 && "$HAS_PLAN" -eq 0 ]] || err "$RC_ARG" "-status does not accept -task_id/-to/-from/-info/-log/-worktree/-agents-list/-message/-type/-depends/-plan"
     local status_count=$((HAS_DOING + HAS_TASK_LIST + HAS_PLAN_LIST))
     [[ "$status_count" -eq 1 ]] || err "$RC_ARG" "-status requires exactly one of -doing/-task-list/-plan-list"
   fi
@@ -436,13 +478,13 @@ parse_args() {
   if [[ "$OP_DELETE" -eq 1 ]]; then
     [[ "$HAS_TASK_ID" -eq 1 ]] || err "$RC_ARG" "-delete requires -task_id"
     [[ -n "$(trim "$TASK_ID")" ]] || err "$RC_ARG" "empty value for -task_id"
-    [[ "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_AGENTS_LIST" -eq 0 && "$HAS_DOING" -eq 0 && "$HAS_TASK_LIST" -eq 0 && "$HAS_PLAN_LIST" -eq 0 && "$HAS_DEPENDS" -eq 0 && "$HAS_PLAN" -eq 0 ]] || err "$RC_ARG" "-delete does not accept -to/-info/-log/-from/-worktree/-message/-agents-list/-doing/-task-list/-plan-list/-depends/-plan"
+    [[ "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_AGENTS_LIST" -eq 0 && "$HAS_DOING" -eq 0 && "$HAS_TASK_LIST" -eq 0 && "$HAS_PLAN_LIST" -eq 0 && "$HAS_TYPE" -eq 0 && "$HAS_DEPENDS" -eq 0 && "$HAS_PLAN" -eq 0 ]] || err "$RC_ARG" "-delete does not accept -to/-info/-log/-from/-worktree/-message/-agents-list/-doing/-task-list/-plan-list/-type/-depends/-plan"
   fi
 
   if [[ "$OP_DONE_PLAN" -eq 1 ]]; then
     [[ "$HAS_PLAN" -eq 1 ]] || err "$RC_ARG" "-done-plan requires -plan"
     [[ -n "$(trim "$PLAN_DOC")" ]] || err "$RC_ARG" "empty value for -plan"
-    [[ "$HAS_TASK_ID" -eq 0 && "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_AGENTS_LIST" -eq 0 && "$HAS_DOING" -eq 0 && "$HAS_TASK_LIST" -eq 0 && "$HAS_PLAN_LIST" -eq 0 && "$HAS_DEPENDS" -eq 0 ]] || err "$RC_ARG" "-done-plan does not accept -task_id/-to/-info/-log/-from/-worktree/-message/-agents-list/-doing/-task-list/-plan-list/-depends"
+    [[ "$HAS_TASK_ID" -eq 0 && "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_FROM" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_MESSAGE" -eq 0 && "$HAS_AGENTS_LIST" -eq 0 && "$HAS_DOING" -eq 0 && "$HAS_TASK_LIST" -eq 0 && "$HAS_PLAN_LIST" -eq 0 && "$HAS_TYPE" -eq 0 && "$HAS_DEPENDS" -eq 0 ]] || err "$RC_ARG" "-done-plan does not accept -task_id/-to/-info/-log/-from/-worktree/-message/-agents-list/-doing/-task-list/-plan-list/-type/-depends"
   fi
 }
 
@@ -718,15 +760,16 @@ run_python_core() {
   local from="$7"
   local worktree="$8"
   local message="$9"
-  local depends="${10}"
-  local plan_doc="${11}"
-  local done_file="${12}"
-  local agents_file="${13}"
-  local operator_name="${14}"
-  local permission_agents_file="${15}"
-  local max_parallel_agents="${16}"
+  local type_kind="${10}"
+  local depends="${11}"
+  local plan_doc="${12}"
+  local done_file="${13}"
+  local agents_file="${14}"
+  local operator_name="${15}"
+  local permission_agents_file="${16}"
+  local max_parallel_agents="${17}"
 
-  python3 - "$op" "$todo_file" "$task_id" "$to" "$info" "$log_file" "$from" "$worktree" "$message" "$depends" "$plan_doc" "$done_file" "$agents_file" "$operator_name" "$permission_agents_file" "$max_parallel_agents" <<'PY'
+  python3 - "$op" "$todo_file" "$task_id" "$to" "$info" "$log_file" "$from" "$worktree" "$message" "$type_kind" "$depends" "$plan_doc" "$done_file" "$agents_file" "$operator_name" "$permission_agents_file" "$max_parallel_agents" <<'PY'
 import hashlib
 import os
 import random
@@ -742,8 +785,8 @@ RC_DATA = 3
 RC_LOCK = 4
 RC_INTERNAL = 5
 
-RUN_TABLE_HEADER = ["任务 ID", "发起人", "创建时间", "worktree", "描述", "依赖任务", "计划书", "指派", "状态", "用户指导", "记录文件"]
-LIST_TABLE_HEADER = ["任务 ID", "发起人", "创建时间", "worktree", "描述", "依赖任务", "计划书", "指派", "记录文件"]
+RUN_TABLE_HEADER = ["任务 ID", "发起人", "创建时间", "worktree", "描述", "任务类型", "依赖任务", "计划书", "指派", "状态", "用户指导", "记录文件"]
+LIST_TABLE_HEADER = ["任务 ID", "发起人", "创建时间", "worktree", "描述", "任务类型", "依赖任务", "计划书", "指派", "记录文件"]
 PLAN_TABLE_HEADER = ["计划书", "总任务数", "已完成任务", "待完成任务", "完成状态"]
 DONE_TABLE_HEADER = ["任务 ID", "描述", "指派", "完成状态", "完成时间", "日志文件", "备注"]
 AGENTS_REQUIRED_COLUMNS = ["姓名", "状态"]
@@ -1131,7 +1174,7 @@ def find_agent_row_index(rows: list[list[str]], name_idx: int, name: str) -> int
 def count_doing_tasks(exec_rows: list[list[str]], assignee: str) -> int:
     count = 0
     for row in exec_rows:
-        if row[7].strip() == assignee and row[8].strip() == "进行中":
+        if row[8].strip() == assignee and row[9].strip() == "进行中":
             count += 1
     return count
 
@@ -1158,6 +1201,72 @@ def parse_csv_names(raw: str) -> set[str]:
         if value:
             names.add(value)
     return names
+
+
+ALLOWED_TASK_TYPES: set[str] = {"spec", "build", "review", "merge", "other", "refactor"}
+
+
+def normalize_task_type(raw: str, code: int, context: str) -> str:
+    text = raw.strip().lower()
+    if not text:
+        fail(code, f"empty task type: {context}")
+    if text not in ALLOWED_TASK_TYPES:
+        fail(code, f"invalid task type: {context}={raw}")
+    return text
+
+
+def type_duty_keywords(kind: str) -> list[str]:
+    if kind == "spec":
+        return ["spec"]
+    if kind == "build":
+        return ["实现", "开发", "测试", "全能替补"]
+    if kind == "review":
+        return ["审查", "复审"]
+    if kind == "merge":
+        return ["合并"]
+    if kind == "refactor":
+        return ["实现", "开发", "测试", "重构", "全能替补"]
+    if kind == "other":
+        return []
+    return []
+
+
+def agent_matches_type(kind: str, duty: str) -> bool:
+    if kind == "other":
+        return True
+    keywords = type_duty_keywords(kind)
+    duty_text = duty.strip()
+    return any((kw in duty_text for kw in keywords))
+
+
+def pick_free_agent(
+    kind: str,
+    agents_rows: list[list[str]],
+    agents_table: dict,
+    operator_name: str,
+) -> str | None:
+    if kind == "other":
+        return None
+
+    name_idx = agents_table["name_idx"]
+    status_idx = agents_table["status_idx"]
+    header: list[str] = agents_table["header"]
+    duty_idx = header.index("职责") if "职责" in header else -1
+    operator = operator_name.strip()
+
+    for row in agents_rows:
+        name = row[name_idx].strip()
+        status = row[status_idx].strip().lower()
+        duty = row[duty_idx].strip() if duty_idx >= 0 else ""
+        if status != "free":
+            continue
+        if operator and name == operator:
+            continue
+        if "不承担管理员分发的任务" in duty:
+            continue
+        if agent_matches_type(kind, duty):
+            return name
+    return None
 
 
 def ensure_operator_permission(
@@ -1229,8 +1338,8 @@ def parse_max_parallel(raw: str) -> int:
 def count_active_assignees(exec_rows: list[list[str]]) -> int:
     active: set[str] = set()
     for row in exec_rows:
-        assignee = row[7].strip()
-        status = row[8].strip()
+        assignee = row[8].strip()
+        status = row[9].strip()
         if assignee and status == "进行中":
             active.add(assignee)
     return len(active)
@@ -1257,13 +1366,14 @@ def main() -> int:
     from_user = sys.argv[7]
     worktree = sys.argv[8]
     message = sys.argv[9]
-    depends = sys.argv[10]
-    plan_doc = sys.argv[11]
-    done_file = sys.argv[12]
-    agents_file = sys.argv[13]
-    operator_name = sys.argv[14]
-    permission_agents_file = sys.argv[15]
-    max_parallel = parse_max_parallel(sys.argv[16])
+    type_kind = sys.argv[10]
+    depends = sys.argv[11]
+    plan_doc = sys.argv[12]
+    done_file = sys.argv[13]
+    agents_file = sys.argv[14]
+    operator_name = sys.argv[15]
+    permission_agents_file = sys.argv[16]
+    max_parallel = parse_max_parallel(sys.argv[17])
 
     ensure_operator_permission(op, operator_name, permission_agents_file)
 
@@ -1623,7 +1733,7 @@ main() {
   fi
 
   if [[ "$op" == "status-doing" || "$op" == "status-task-list" || "$op" == "status-plan-list" ]]; then
-    run_python_core "$op" "$FILE" "" "" "" "" "" "" "" "" "" "" "" "" "" "$MAX_PARALLEL_AGENTS"
+    run_python_core "$op" "$FILE" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "$MAX_PARALLEL_AGENTS"
     local rc=$?
     exit "$rc"
   fi
@@ -1658,7 +1768,7 @@ main() {
     acquire_lock_on_file "$AGENTS_LIST" agents_lock_fd
   fi
 
-  run_python_core "$op" "$FILE" "$TASK_ID" "$TO" "$INFO" "$LOG_FILE" "$FROM" "$WORKTREE" "$MESSAGE" "$DEPENDS" "$PLAN_DOC" "$done_file" "$AGENTS_LIST" "$operator_name" "$permission_agents_file" "$MAX_PARALLEL_AGENTS"
+  run_python_core "$op" "$FILE" "$TASK_ID" "$TO" "$INFO" "$LOG_FILE" "$FROM" "$WORKTREE" "$MESSAGE" "$TYPE_KIND" "$DEPENDS" "$PLAN_DOC" "$done_file" "$AGENTS_LIST" "$operator_name" "$permission_agents_file" "$MAX_PARALLEL_AGENTS"
   local rc=$?
   if [[ "$rc" -ne 0 ]]; then
     exit "$rc"

@@ -2,7 +2,8 @@
 
 ## 功能简介
 
-- 定义一个面向 IR 变换验证的轻量工具 `ircheck`：读取单文件 case，按 `COMPILE_ARGS` 运行 pass / pipeline，对规范化后的 IR 执行 `CHECK:` / `CHECK-NOT:` / `CHECK-NEXT:` 子串匹配，最终输出 `true/false`。
+- 定义一个面向 IR 变换验证的轻量工具 `ircheck`：读取 case 文本，按 `COMPILE_ARGS` 运行 pass / pipeline，对规范化后的 IR 执行 `CHECK:` / `CHECK-NOT:` / `CHECK-NEXT:` 子串匹配，最终输出 `true/false`。
+- 支持使用 `// -----` 在同一文件/文本中分隔多个 case（lit 风格），按顺序执行并在首个失败处停止。
 - 该工具用于“验证你关心的片段是否出现/不出现/是否相邻”，而不是做全量文本 diff。
 
 ## 文档信息
@@ -34,6 +35,7 @@
 ## 术语
 
 - `case file`：包含头部注释指令与输入 IR 的单个文本文件（推荐扩展名 `.mlir` 或 `.ircheck`）。
+- `case block`：被 `// -----` 分隔出来的一个独立 case 单元。
 - `directive`：头部注释中的指令行，包括 `COMPILE_ARGS:` 与 `CHECK*:`。
 - `positive check`：`CHECK:` 与 `CHECK-NEXT:`，用于定义“顺序/相邻”的命中锚点。
 - `compile args`：`COMPILE_ARGS:` 指令后的一段参数串，仅承接 `--pass <name>` 或 `--pipeline <name>` 两种形式。
@@ -47,7 +49,7 @@
 ## 样例目录
 
 - `expectation/tools/ircheck/README.md`：样例说明与统一写法。
-- `expectation/tools/ircheck/basic_true.py` 等脚本提供最小黑盒验证入口。
+- `expectation/tools/ircheck/basic_true.py`、`multi_case_true.py` 等脚本提供黑盒验证入口。
 
 ## 迁移建议
 
@@ -56,7 +58,8 @@
 
 ## 限制与边界
 
-- 指令集只支持三条检查指令：`CHECK:`、`CHECK-NOT:`、`CHECK-NEXT:`；不支持正则、变量捕获、`CHECK-LABEL`、多 case 文件合并。
+- 指令集只支持三条检查指令：`CHECK:`、`CHECK-NOT:`、`CHECK-NEXT:`；不支持正则、变量捕获、`CHECK-LABEL`。
+- 多 case 仅支持固定分隔符 `// -----`；不支持 case 命名、标签跳转或条件执行。
 - `COMPILE_ARGS:` 只支持两种写法：
   - `--pass <pass-name>`
   - `--pipeline <pipeline-name>`
@@ -73,7 +76,8 @@
 
 功能说明：
 
-- 运行单个 case 文件并在标准输出打印 `true/false`。
+- 运行一个 case 文件并在标准输出打印 `true/false`。
+- 当文件包含 `// -----` 时，按 case block 顺序执行（fail-fast）。
 
 参数说明：
 
@@ -130,6 +134,7 @@ assert case.compile_args.startswith("--pass ")
   - 在所有 `CHECK:` / `CHECK-NEXT:` 中，第一条必须为 `CHECK:`；
   - 若第一条 positive check 为 `CHECK-NEXT:`，必须返回解析失败。
 - 若输入 IR 正文在去掉空白后为空，必须返回解析失败。
+- `parse_ircheck_file` 只处理单 case；若文本包含 `// -----` 多 case 分隔符，必须返回 `IrcheckParseError: invalid ircheck header`。
 
 返回与限制：
 
@@ -142,6 +147,7 @@ assert case.compile_args.startswith("--pass ")
 功能说明：
 
 - 读取文件、执行 pass/pipeline、打印规范化 IR，并对规范化 IR 执行检查指令。
+- 若文件中存在 `// -----` 分隔符，按 case block 顺序执行。
 
 参数说明：
 
@@ -165,6 +171,10 @@ assert result.ok is True
   1. 调用 `load_builtin_passes()`
   2. `--pass <name>`：调用 `build_registered_pass(name)` 得到 `Pass` 实例并执行
   3. `--pipeline <name>`：调用 `build_registered_pipeline(name)` 得到 `PassManager` 并执行
+- 多 case 执行语义：
+  1. 按文件中的 case block 顺序逐个执行；
+  2. 任一 case 失败则立即返回（fail-fast）；
+  3. 全部通过时返回最后一个 case 的成功结果。
 
 返回与限制：
 
@@ -185,6 +195,7 @@ assert result.ok is True
 功能说明：
 
 - 直接运行一段 case 文本（无需写入文件），其语义与 `run_ircheck_file` 一致。
+- 支持 `// -----` 多 case 分隔，执行语义与 `run_ircheck_file` 完全一致。
 
 参数说明：
 
@@ -305,6 +316,10 @@ assert result.exit_code == 0
 - 一个 case file 由两部分组成：
   - 头部注释区：文件起始处连续的 `// ...` 行，包含恰好一条 `COMPILE_ARGS:` 与零到多条 `CHECK*:` 指令；
   - 输入 IR 正文：从第一行“非 `//` 开头的行”起，到文件结束。
+- 单文件多 case 写法：
+  - 使用独占一行的 `// -----` 分隔相邻 case block；
+  - 每个 block 都必须包含自己的 `COMPILE_ARGS:` 与输入 IR；
+  - 分隔符前后不允许出现空 block（否则视为解析失败）。
 - 推荐写法：
   - 先用 `CHECK:` 选择一个稳定锚点（例如 `func.func @main`），再用 `CHECK:` / `CHECK-NEXT:` 逐步收紧局部相邻关系；
   - 用 `CHECK-NOT:` 表达“在两条 positive check 之间不得出现”的否定约束。
@@ -339,11 +354,13 @@ builtin.module { /* ... */ }
   - [`test/tools/test_ircheck_parser.py`](../../test/tools/test_ircheck_parser.py)
   - [`test/tools/test_ircheck_runner.py`](../../test/tools/test_ircheck_runner.py)
   - [`test/tools/test_ircheck_matcher.py`](../../test/tools/test_ircheck_matcher.py)
+  - [`test/tools/test_ircheck_cli.py`](../../test/tools/test_ircheck_cli.py)
 - 执行命令：
   - `pytest -q test/tools/test_ircheck_parser.py`
   - `pytest -q test/tools/test_ircheck_runner.py`
   - `pytest -q test/tools/test_ircheck_matcher.py`
+  - `pytest -q test/tools/test_ircheck_cli.py`
 - 测试目标：
-  - parser：能稳定解析头部注释区、提取 compile_args 与检查指令，并对缺失/重复指令返回稳定错误短语。
-  - runner：能通过 pass registry 解析 `--pass/--pipeline` 并执行，输出 `IrcheckResult` 的 `ok/exit_code/message` 行为与本文件一致。
+  - parser：能稳定解析头部注释区、提取 compile_args 与检查指令，并对缺失/重复指令返回稳定错误短语；`parse_ircheck_file` 对多 case 分隔符稳定拒绝。
+  - runner：能通过 pass registry 解析 `--pass/--pipeline` 并执行，输出 `IrcheckResult` 的 `ok/exit_code/message` 行为与本文件一致；支持多 case 顺序执行与 fail-fast。
   - matcher：能按本文件“检查语义”规则稳定处理 `CHECK/CHECK-NEXT/CHECK-NOT` 的顺序、相邻与区间约束，并在失败时返回稳定错误短语。
