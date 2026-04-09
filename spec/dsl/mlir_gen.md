@@ -38,9 +38,10 @@
 - 不做优化或自动修复非法 IR。
 - `build_func_op` 的公开入口接收目标函数、运行时参数，以及仅用于补充源码解析环境的可选 `globals` / `builtins`；这些额外参数不得改变由 `runtime_args` 决定的函数输入签名，也不能代替必填的运行时参数。
 - `build_func_op` 的公开契约仅覆盖可位置绑定的形参；`runtime_args` 必须按这些形参的顺序传入。
+- `build_func_op` / `build_func_op_from_ast` 的参数绑定与输入签名推导只允许基于 `parse_function(...)` 得到的 AST 输入列表与显式传入的 `runtime_args`；不得使用 `inspect.signature` 或函数注解参与任何输入类型/参数绑定决策。
 - 运行时参数必须按目标函数形参顺序传入；数量不一致、顺序不一致或类型无法映射时必须报错。
 - 运行时参数的类型 lowering 必须基于“实际传入的参数对象”决定，而不是基于额外配置推断。
-- `build_func_op_from_ast` 允许 `func_ast.inputs` 为空；若提供 `runtime_args`，其长度必须与 `func_ast.inputs` 一致；若输入包含未支持的 AST 类型、未支持的标量类型，或带输入函数既不属于纯 symbol 标量函数又缺少 tensor 输入时，必须报错。
+- `build_func_op_from_ast` 允许 `func_ast.inputs` 为空；当 `func_ast.inputs` 非空时，`runtime_args` 必须显式提供，且长度必须与 `func_ast.inputs` 一致；若输入包含未支持的 AST 类型、未支持的标量类型，或带输入函数既不属于纯 symbol 标量函数又缺少 tensor 输入时，必须报错。
 - 当运行时参数为 `SymbolDim("s")` 这类 symbol 标量时，对应的 `func.func` 输入必须 lowering 为 `!symbol.int<"s">`；若为常量 symbol，例如 `SymbolDim(1)`，则必须 lowering 为 `!symbol.int<"1">`。
 - 当运行时参数是 Python `int` 且函数场景属于 symbol 整型标量运算时，对应的 `func.func` 输入必须 lowering 为携带具体整数值的 `SymbolValueType`，不得退回 `i32`、`index` 或其他 builtin 标量类型；若整数值为负数，对外字符串表示必须直接表现为十进制负数字面量，例如 `symbol.int<-7>`。
 - 只要 `FunctionAST.has_explicit_return == True`，即使没有返回注解且 `FunctionAST.outputs == []`，`build_func_op(...)` / `build_func_op_from_ast(...)` 也必须根据最后一条显式 `return expr` 的 lowering 结果生成单结果 `func.func` 与 `func.return`；不得退回零结果。
@@ -166,7 +167,7 @@ func_op = build_func_op(only_symbol, s)
 参数说明：
 
 - `func_ast` (`FunctionAST`)：函数 AST。
-- `runtime_args` (`tuple[object, ...] | list[object] | None`)：目标函数实际传入的运行时参数；若提供，则顺序必须与 `func_ast.inputs` 一致，并用于驱动 `func.func` 输入签名的 lowering。
+- `runtime_args` (`tuple[object, ...] | list[object] | None`)：目标函数实际传入的运行时参数；当 `func_ast.inputs` 非空时必填。其顺序必须与 `func_ast.inputs` 一致，并用于驱动 `func.func` 输入签名的 lowering。
 - `config` (`dict[str, object] | None`)：可选的 visitor / lowering 配置，会透传给 `AstVisitor(config=...)` 与 `EmitContext(..., config=...)`，但不得改变 `runtime_args` 驱动签名的公开契约。
 
 使用示例：
@@ -184,9 +185,9 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
 注意事项：
 
 - 输入 AST 必须满足 `ast.md` 的结构约束。
-- `runtime_args` 省略时，输入签名按 AST 注解 lowering；提供时，必须与 `func_ast.inputs` 一一对应，并以实际运行时参数语义驱动签名 lowering。
+- 当 `func_ast.inputs` 非空时，`runtime_args` 必须显式提供；其长度与顺序必须与 `func_ast.inputs` 一一对应，并以实际运行时参数语义驱动签名 lowering。
+- 当 `func_ast.inputs` 为空时，`runtime_args` 可省略；若提供，长度必须为 0。
 - `config` 只用于 visitor / lowering 配置透传，不得替代 `runtime_args`，也不得改变由 `runtime_args` 决定的输入签名。
-- `func_ast.inputs` 可以为空；若提供 `runtime_args`，长度必须与 `func_ast.inputs` 一致。
 - 当 `func_ast.has_explicit_return == True` 且 `func_ast.outputs == []` 时，`build_func_op_from_ast(...)` 仍必须生成单结果 `func.func`；结果类型与 `func.return` operand 类型都必须由最后一条显式 `return expr` 的 lowering 结果决定。
 - 当 `func_ast.has_explicit_return == False` 且 `func_ast.outputs == []` 时，若函数体最后停在值表达式上、必须依赖末尾值表达式才能推断输出，`build_func_op_from_ast(...)` 必须抛出 `AstVisitorError`，错误消息包含 `Function return requires explicit return syntax or annotation`；不得猜测函数输出类型。
 - 若 AST 输入包含未支持的节点类型、未支持的标量类型，或函数既不属于纯 symbol 标量函数又缺少 tensor 输入，必须报错。
@@ -216,7 +217,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - 验证 `build_func_op(...)` 生成 `func.func`。
   - 验证 `build_func_op(fn, *runtime_args, globals=None, builtins=None)` 的输入签名仅由运行时参数决定。
   - 验证 `build_func_op(...)` 仅支持按位置参数传入运行时参数；缺少运行时参数、数量不匹配或试图以 `globals/builtins` 替代时必须报错。
-  - 验证 `build_func_op_from_ast(func_ast, runtime_args=None, config=None)` 的公开接口与实现签名一致，且 `runtime_args` / `config` 成功路径可由测试直接观察。
+  - 验证 `build_func_op_from_ast(func_ast, runtime_args=..., config=None)` 的公开接口与实现签名一致；当 `func_ast.inputs` 非空时缺失 `runtime_args` 必须报错；当 `runtime_args` 提供但长度不匹配时必须报错。
   - 验证 `build_func_op_from_ast(...)` 的输入校验错误路径，包括空输入、`runtime_args` 长度不匹配、未支持的标量类型、未支持的输入节点类型，以及非纯 symbol 标量函数缺少 tensor 输入时报错。
   - 验证 `globals/builtins` 只补充解析环境，不替代运行时参数；缺少运行时参数、运行时实参数量不匹配或误用 `globals/builtins` 时必须报错。
   - 验证非 `dict` 的 `builtins` 实参可作为解析环境输入成功构建 `func.func`。

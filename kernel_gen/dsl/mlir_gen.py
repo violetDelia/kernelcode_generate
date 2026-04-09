@@ -19,8 +19,10 @@
 
 from __future__ import annotations
 
+import ast as py_ast
 import inspect
 import re
+import textwrap
 from typing import Callable
 
 import sympy as sp
@@ -160,6 +162,8 @@ def _build_signature_types(
     allow_dma_alloc_only: bool = False,
 ) -> tuple[list[object], dict[int, object]]:
     is_symbol_scalar_function = _is_symbol_scalar_function(func_ast)
+    if func_ast.inputs and runtime_args is None:
+        raise _LoweringError("runtime_args is required when func_ast has inputs", location=func_ast.location)
     if runtime_args is not None and len(runtime_args) != len(func_ast.inputs):
         raise _LoweringError("runtime_args must align with func_ast inputs", location=func_ast.location)
 
@@ -169,8 +173,10 @@ def _build_signature_types(
     for index, item in enumerate(func_ast.inputs):
         runtime_arg = None if runtime_args is None else runtime_args[index]
         if isinstance(item, TensorAST):
-            runtime_memory = runtime_arg if isinstance(runtime_arg, Memory) else None
-            arg_type = _memory_to_nn_type(runtime_memory or item.memory, location=item.location)
+            if runtime_args is not None and not isinstance(runtime_arg, Memory):
+                raise _LoweringError("Unsupported input type", location=item.location)
+            runtime_memory = runtime_arg if isinstance(runtime_arg, Memory) else item.memory
+            arg_type = _memory_to_nn_type(runtime_memory, location=item.location)
             tensor_input_count += 1
         elif isinstance(item, ScalarArgAST):
             if item.value_type is not int:
@@ -529,6 +535,49 @@ def _is_zero_return_statement_expr(expr: object) -> bool:
     return isinstance(expr, (DmaFreeAST, StoreAST, ForAST, ArchBarrierAST, ArchLaunchKernelAST))
 
 
+def _parse_function_positional_arg_names(fn: Callable[..., object]) -> list[str]:
+    """提取 Python 函数的可位置绑定形参名列表。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅依赖 `inspect.getsource(...)` + Python AST 解析提取形参名。
+    - 与 `parse_function(...)`/`_parse_function_impl(...)` 保持一致：只收集 `func_def.args.args`。
+
+    使用示例:
+    - names = _parse_function_positional_arg_names(fn)
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+    """
+
+    try:
+        source = inspect.getsource(fn)
+    except OSError as exc:
+        raise AstParseError("Unable to get source", [Diagnostic(str(exc), location=None)]) from exc
+
+    source = textwrap.dedent(source)
+    module = py_ast.parse(source)
+    function_defs = [node for node in module.body if isinstance(node, py_ast.FunctionDef)]
+    if len(function_defs) != 1:
+        message = "Multiple top-level function definitions are not supported"
+        raise AstParseError(message, [Diagnostic(message, location=None)])
+
+    func_def = None
+    for node in module.body:
+        if isinstance(node, py_ast.FunctionDef) and node.name == getattr(fn, "__name__", ""):
+            func_def = node
+            break
+    if func_def is None:
+        message = "Function definition not found"
+        raise AstParseError(message, [Diagnostic(message, location=None)])
+
+    return [arg.arg for arg in func_def.args.args]
+
+
 def build_func_op(
     fn: Callable[..., object],
     *runtime_args: object,
@@ -567,26 +616,26 @@ def build_func_op(
     """
     from .ast_visitor import AstVisitorError
 
-    signature = inspect.signature(fn)
-    positional_params = [
-        param
-        for param in signature.parameters.values()
-        if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-    ]
-    if len(runtime_args) != len(positional_params):
+    try:
+        positional_arg_names = _parse_function_positional_arg_names(fn)
+    except AstParseError as exc:
+        location = exc.diagnostics[0].location if exc.diagnostics else None
+        raise AstVisitorError(exc.message, location=location) from exc
+
+    if len(runtime_args) != len(positional_arg_names):
         if not runtime_args and (globals is not None or builtins is not None):
             reason = (
                 "globals/builtins cannot replace function runtime args: "
-                f"expected {len(positional_params)}, got 0"
+                f"expected {len(positional_arg_names)}, got 0"
             )
             raise AstVisitorError(reason, location=None)
         reason = (
             f"build_func_op requires explicit runtime args for {fn.__name__}: "
-            f"expected {len(positional_params)}, got {len(runtime_args)}"
+            f"expected {len(positional_arg_names)}, got {len(runtime_args)}"
         )
         raise AstVisitorError(reason, location=None)
 
-    runtime_table = {param.name: runtime_args[index] for index, param in enumerate(positional_params)}
+    runtime_table = {name: runtime_args[index] for index, name in enumerate(positional_arg_names)}
     # globals/builtins 仅作为解析环境，不参与签名推导。
     globals_table = dict(getattr(fn, "__globals__", {}) or {})
     globals_table.update(inspect.getclosurevars(fn).nonlocals)

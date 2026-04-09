@@ -919,6 +919,30 @@ def test_build_func_op_signature_uses_runtime_args_not_parse_env() -> None:
     assert outputs == [SymbolValueType.from_expr("runtime")]
 
 
+# MGEN-001B
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-09 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-09 00:00:00 +0800
+# 功能说明: 验证 build_func_op 不会通过 inspect.signature 获取形参信息。
+# 测试目的: 锁定 build_func_op 的绑定仅依赖 parse_function AST + runtime_args，而不是 Python 函数签名推导。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_does_not_use_inspect_signature
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_does_not_use_inspect_signature(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _disabled_signature(*args: object, **kwargs: object) -> object:
+        raise AssertionError("inspect.signature should not be called")
+
+    monkeypatch.setattr(mlir_gen_module.inspect, "signature", _disabled_signature)
+
+    def identity(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+        return x
+
+    func_op = build_func_op(identity, _tensor_arg([2, 2]))
+    assert isinstance(func_op, func.FuncOp)
+
+
 # MGEN-002
 # 创建者: 朽木露琪亚
 # 最后一次更改: 金铲铲大作战
@@ -939,7 +963,10 @@ def test_build_func_op_from_ast_preserves_arg_order() -> None:
         return x + y
 
     func_ast = parse_function(add)
-    func_op = build_func_op_from_ast(func_ast)
+    func_op = build_func_op_from_ast(
+        func_ast,
+        runtime_args=[_tensor_arg([2, 2]), _tensor_arg([2, 2]), 1],
+    )
     assert isinstance(func_op, func.FuncOp)
     inputs = list(func_op.function_type.inputs)
     assert len(inputs) == 3
@@ -974,8 +1001,8 @@ def test_build_func_op_from_ast_uses_runtime_args_for_symbol_signature() -> None
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-28 14:20:00 +0800
 # 最近一次运行成功时间: 2026-03-28 14:20:00 +0800
-# 功能说明: 验证 build_func_op_from_ast 在 runtime_args 省略时按 AST 注解生成签名。
-# 测试目的: 证明 runtime_args 缺失时仍可通过 AST 注解构建 symbol 标量签名。
+# 功能说明: 验证 build_func_op_from_ast 在 inputs 非空时拒绝缺失 runtime_args。
+# 测试目的: 锁定 func_ast.inputs 非空时 runtime_args 必填；长度不匹配时仍按固定短语报错。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_from_ast_rejects_symbol_scalar_missing_runtime_args
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -985,11 +1012,8 @@ def test_build_func_op_from_ast_rejects_symbol_scalar_missing_runtime_args() -> 
         return expr
 
     func_ast = parse_function(only_symbol)
-    func_op = build_func_op_from_ast(func_ast)
-    inputs = list(func_op.function_type.inputs)
-    outputs = list(func_op.function_type.outputs)
-    assert inputs == [SymbolValueType.from_expr("expr")]
-    assert outputs == [SymbolValueType.from_expr("expr")]
+    with pytest.raises(AstVisitorError, match="runtime_args is required"):
+        build_func_op_from_ast(func_ast)
     with pytest.raises(AstVisitorError, match="runtime_args must align"):
         build_func_op_from_ast(func_ast, runtime_args=[])
 
@@ -1025,7 +1049,7 @@ def test_build_func_op_from_ast_forwards_config_to_visitor_and_context(
     monkeypatch.setattr(ast_visitor_module, "AstVisitor", RecordingVisitor)
     func_ast = parse_function(identity)
     config: dict[str, object] = {"loop_vars": {"i": "outer"}}
-    func_op = build_func_op_from_ast(func_ast, config=config)
+    func_op = build_func_op_from_ast(func_ast, runtime_args=[_tensor_arg([2, 2])], config=config)
 
     assert isinstance(func_op, func.FuncOp)
     assert captured["visitor_config"] == config
@@ -1111,10 +1135,10 @@ def test_mlir_gen_signature_validation_errors() -> None:
         build_func_op_from_ast(single_tensor, runtime_args=[])
 
     with pytest.raises(AstVisitorError, match="Unsupported scalar argument type"):
-        build_func_op_from_ast(FunctionAST("bad", [ScalarArgAST("n", float)], [], BlockAST([])))
+        build_func_op_from_ast(FunctionAST("bad", [ScalarArgAST("n", float)], [], BlockAST([])), runtime_args=[0])
 
     with pytest.raises(AstVisitorError, match="Unsupported input type"):
-        build_func_op_from_ast(FunctionAST("bad", [VarAST("x")], [], BlockAST([])))
+        build_func_op_from_ast(FunctionAST("bad", [VarAST("x")], [], BlockAST([])), runtime_args=[0])
 
     outputs_tensor = FunctionAST(
         "no_tensor",
@@ -1123,7 +1147,7 @@ def test_mlir_gen_signature_validation_errors() -> None:
         BlockAST([]),
     )
     with pytest.raises(AstVisitorError, match="At least one tensor input is required"):
-        build_func_op_from_ast(outputs_tensor)
+        build_func_op_from_ast(outputs_tensor, runtime_args=[1])
 
 
 # MGEN-025
@@ -3612,7 +3636,7 @@ def test_compare_implicit_broadcast_lowering() -> None:
         body=BlockAST([expr]),
         has_explicit_return=True,
     )
-    func_op = build_func_op_from_ast(func_ast)
+    func_op = build_func_op_from_ast(func_ast, runtime_args=[lhs_memory, rhs_memory])
     broadcast_ops = [op for op in func_op.body.block.ops if isinstance(op, NnBroadcastOp)]
     assert len(broadcast_ops) == 1
     eq_op = next(op for op in func_op.body.block.ops if isinstance(op, NnEqOp))
