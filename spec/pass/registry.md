@@ -8,7 +8,7 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/pass/registry.md`](../../spec/pass/registry.md)
 - `功能实现`：[`kernel_gen/passes/registry.py`](../../kernel_gen/passes/registry.py)
 - `test`：[`test/pass/test_pass_registry.py`](../../test/pass/test_pass_registry.py)
@@ -31,10 +31,16 @@
 - 支持通过装饰器完成注册，降低新增 pass/pipeline 的接入成本。
 - 为 `ircheck` 的 `COMPILE_ARGS: --pass/--pipeline` 提供唯一的名字解析来源。
 
+## 与 ircheck 的衔接
+
+- `ircheck` 仅通过 `load_builtin_passes` + `build_registered_pass/build_registered_pipeline` 解析名字。
+- 样例与统一写法见 [`spec/tools/ircheck.md`](../../spec/tools/ircheck.md) 与 [`expectation/tools/ircheck/README.md`](../../expectation/tools/ircheck/README.md)。
+
 ## 限制与边界
 
 - 注册表不接收用户输入的任意 import path；也不负责扫描文件系统自动发现。
 - 注册发生在 Python import 时；因此对“内置 pass/pipeline”必须提供一个显式加载入口（见 `load_builtin_passes`）。
+- `build_registered_pass/build_registered_pipeline` 不得隐式调用 `load_builtin_passes()`；加载时机由调用方控制，以保持工具入口行为可预测。
 - 重复注册同名 pass 或 pipeline 必须立即失败，不得覆盖旧项。
 - 为便于工具与测试编写最小用例，仓库内置 pass 至少应包含：
   - `no-op`：恒等 pass（对输入 module 不做任何改写），且必须满足“可构造”要求（`pass_cls()` 可成功执行）。

@@ -6,7 +6,7 @@
 功能说明:
 - 提供轻量的 IR 变换验证工具：读取单文件 case，按 `COMPILE_ARGS` 运行 pass / pipeline，
   对规范化后的 IR 执行 `CHECK:` / `CHECK-NEXT:` / `CHECK-NOT:` 子串匹配，输出 `true/false`。
-- 对外只暴露三条稳定 Python API：`parse_ircheck_file`、`run_ircheck_file`、`run_ircheck_text`，
+- 对外仅三条公开 API 作为稳定合同：`parse_ircheck_file`、`run_ircheck_file`、`run_ircheck_text`，
   便于 CLI / pytest / 脚本复用。
 
 使用示例:
@@ -21,6 +21,7 @@ builtin.module {}
 
 关联文件:
 - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
+- 文档: [expectation/tools/ircheck/README.md](expectation/tools/ircheck/README.md)
 - test:
   - [test/tools/test_ircheck_parser.py](test/tools/test_ircheck_parser.py)
   - [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
@@ -41,6 +42,7 @@ from typing import Literal, Sequence
 os.environ.setdefault("SYMPY_GMPY", "0")
 
 from xdsl.context import Context
+from xdsl.dialects.arith import Arith
 from xdsl.dialects.builtin import Builtin
 from xdsl.dialects.func import Func
 from xdsl.ir import Operation
@@ -466,7 +468,7 @@ def _build_default_context() -> Context:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 加载 `builtin` / `func` 与仓库内不依赖额外重依赖的 dialect（`nn` / `kernel`）。
+    - 加载 `builtin` / `func` / `arith` 与仓库内不依赖额外重依赖的 dialect（`nn` / `kernel`）。
 
     使用示例:
     - ctx = _build_default_context()
@@ -481,6 +483,7 @@ def _build_default_context() -> Context:
     ctx = Context()
     ctx.load_dialect(Builtin)
     ctx.load_dialect(Func)
+    ctx.load_dialect(Arith)
     ctx.load_dialect(Nn)
     ctx.load_dialect(Kernel)
     return ctx

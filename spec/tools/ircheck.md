@@ -8,7 +8,7 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/tools/ircheck.md`](../../spec/tools/ircheck.md)
 - `功能实现`：[`kernel_gen/tools/ircheck.py`](../../kernel_gen/tools/ircheck.py)
 - `test`：
@@ -27,6 +27,9 @@
 - IR 解析与打印（用于“规范化后的 IR”文本）：
   - [`kernel_gen/context.py`](../../kernel_gen/context.py)
   - [`kernel_gen/dialect`](../../kernel_gen/dialect)
+- 默认解析上下文加载的 dialect：
+  - `xdsl.dialects.builtin` / `xdsl.dialects.func` / `xdsl.dialects.arith`
+  - `kernel_gen.dialect.nn` / `kernel_gen.dialect.kernel`
 
 ## 术语
 
@@ -40,6 +43,16 @@
 - 公开一个可被 CLI / pytest 复用的最小执行链：`解析 -> 执行 pass/pipeline -> 打印 -> 匹配 -> 返回结果`。
 - 把外部依赖稳定收口到三条公开 Python API：`parse_ircheck_file`、`run_ircheck_file`、`run_ircheck_text`。
 - 让下游验证用例可以只写“关心的几行”，而不必在测试里拼接大量断言样板。
+
+## 样例目录
+
+- `expectation/tools/ircheck/README.md`：样例说明与统一写法。
+- `expectation/tools/ircheck/basic_true.py` 等脚本提供最小黑盒验证入口。
+
+## 迁移建议
+
+- 旧测试中若手写字符串断言，可迁移为单文件 case + `ircheck` 检查指令。
+- expectation 文档统一写法：仅 `parse_ircheck_file`、`run_ircheck_file`、`run_ircheck_text` 为稳定合同，其他符号视为内部细节。
 
 ## 限制与边界
 
@@ -284,6 +297,41 @@ assert result.exit_code == 0
        - `forbid_start = 0`（当不存在任何 positive check）或 `forbid_start = last_positive_line + 1`
        - `forbid_end = len(lines) - 1`
   - 若 `CHECK-NOT` 违反禁止区间，则失败，错误短语为 `IrcheckMatchError: CHECK-NOT matched forbidden text`。
+
+## 额外补充
+
+### 用户文档（case file 编写）
+
+- 一个 case file 由两部分组成：
+  - 头部注释区：文件起始处连续的 `// ...` 行，包含恰好一条 `COMPILE_ARGS:` 与零到多条 `CHECK*:` 指令；
+  - 输入 IR 正文：从第一行“非 `//` 开头的行”起，到文件结束。
+- 推荐写法：
+  - 先用 `CHECK:` 选择一个稳定锚点（例如 `func.func @main`），再用 `CHECK:` / `CHECK-NEXT:` 逐步收紧局部相邻关系；
+  - 用 `CHECK-NOT:` 表达“在两条 positive check 之间不得出现”的否定约束。
+- 最小示例：
+
+```mlir
+// COMPILE_ARGS: --pass lower-nn-to-kernel
+// CHECK: kernel.add
+// CHECK-NOT: nn.add
+
+builtin.module { /* ... */ }
+```
+
+### 迁移建议（从字符串断言到 ircheck）
+
+- `assert "X" in actual_ir` -> `// CHECK: X`
+- `assert "X" not in actual_ir` -> `// CHECK-NOT: X`
+  - 建议把 `CHECK-NOT` 放在两个 positive check 之间（或文件末尾），以明确其禁止区间，避免歧义。
+- “相邻行”断言 -> `// CHECK: <anchor>` + `// CHECK-NEXT: <next>`
+
+### 稳定接口范围（可复用表述）
+
+- 对外可复用且承诺长期兼容的 Python 接口仅包含：
+  - `parse_ircheck_file`
+  - `run_ircheck_file`
+  - `run_ircheck_text`
+- 本文件中提到的 `IrcheckCase` / `CheckDirective` / `IrcheckResult` 的字段名、以及 `kernel_gen.tools.ircheck` 内部实现细节，均不作为稳定承诺；下游应以“公开接口”一节描述的入参与返回语义（如 `ok/exit_code/message`）为对齐依据。
 
 ## 测试
 
