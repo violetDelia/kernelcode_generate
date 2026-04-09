@@ -24,7 +24,7 @@
 - 统一 Pass 的注册、执行与错误传播规则，便于后续实现与测试闭环。
 - 冻结 analysis pass 在 manager 中的承接方式：`run(module)` 继续返回单一 `module`，不追加 summary 或第二返回值。
 - 对 lowering 链固定公开一个可验证顺序示例：当模块内存在 `memory-return func.func + func.call` 链路时，`BufferResultsToOutParamsPass` 必须运行在 `LowerNnToKernelPass` 之后，避免 caller/callee ABI 停留在双口径。
-- 对 softmax lowering 链固定公开一个顺序边界：`DecomposeNnSoftmaxPass` 必须运行在 `LowerNnToKernelPass` 之前，确保默认 lowering 链路不让 residual `nn.softmax` 落入 `nn_to_kernel`。
+- 对 nn 分解 lowering 链固定公开一个顺序边界：`DecompassPass` 必须运行在 `LowerNnToKernelPass` 之前，确保默认 lowering 链路不让 residual `nn.*` 落入 `nn_to_kernel`。
 - 对下游 `gen_kernel` 合同固定明确：`gen_kernel` 仅接受已执行 `BufferResultsToOutParamsPass` 的 rewrite 后 ABI；若仍保留旧 `memory return` ABI，必须显式失败。
 - 对显式 memory hierarchy lowering 链固定公开一个扩展顺序边界：当调用方注册 `LowerDmaMemoryHierarchyPass` 时，其位置必须在 `LowerNnToKernelPass` 与 `BufferResultsToOutParamsPass` 之后。
 
@@ -110,7 +110,7 @@ summary = cost_pass.get_summary("main")
 
 ```python
 pm = PassManager(name="lowering")
-pm.add_pass(DecomposeNnSoftmaxPass())
+pm.add_pass(DecompassPass())
 pm.add_pass(LowerNnToKernelPass())
 pm.add_pass(BufferResultsToOutParamsPass())
 module = pm.run(module)
@@ -120,7 +120,7 @@ module = pm.run(module)
 
 ```python
 pm = PassManager(name="lowering")
-pm.add_pass(DecomposeNnSoftmaxPass())
+pm.add_pass(DecompassPass())
 pm.add_pass(LowerNnToKernelPass())
 pm.add_pass(BufferResultsToOutParamsPass())
 pm.add_pass(LowerDmaMemoryHierarchyPass())
@@ -241,7 +241,7 @@ summary = cost_pass.get_summary("main")
 - 验证显式注册非法 Pass 时触发 `TypeError`。
 - 验证 Pass 异常可向上抛出。
 - 验证 `LowerNnToKernelPass -> BufferResultsToOutParamsPass` 的 lowering 顺序在 `memory-return` 链路上可被门禁测试机械锁定。
-- 验证默认 lowering pipeline 会注册 `DecomposeNnSoftmaxPass -> LowerNnToKernelPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass`。
+- 验证默认 lowering pipeline 会注册 `DecompassPass -> LowerNnToKernelPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass`。
 - 验证 `BufferResultsToOutParamsPass` 置于 `LowerNnToKernelPass` 前会被显式拒绝。
 - 当前下游验收标准建议补充 analysis pass 单返回路径验证：`test_pass_manager_runs_analysis_pass_without_second_return` 与 `test_pass_manager_preserves_analysis_side_effects`；在专项测试落地前，不将其写成当前已闭环映射。
 

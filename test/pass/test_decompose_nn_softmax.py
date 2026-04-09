@@ -1,17 +1,17 @@
-"""decompose-nn-softmax pass tests.
+"""decompass pass tests.
 
 创建者: 朽木露琪亚
 最后一次更改: 朽木露琪亚
 
 功能说明:
-- 覆盖 `DecomposeNnSoftmaxPass` 的固定分解链、负轴规整与失败边界。
+- 覆盖 `DecompassPass` 的固定分解链、负轴规整与失败边界。
 
 使用示例:
 - pytest -q test/pass/test_decompose_nn_softmax.py
 
 关联文件:
 - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
-- Spec 文档: spec/pass/lowering/decompose_nn_softmax.md
+- Spec 文档: spec/pass/lowering/decompass.md
 - 测试文件: test/pass/test_decompose_nn_softmax.py
 """
 
@@ -40,9 +40,11 @@ from kernel_gen.dialect.nn import (
     NnSubOp,
     NnTrueDivOp,
 )
-from kernel_gen.passes.lowering.decompose_nn_softmax import (
-    DecomposeNnSoftmaxError,
-    DecomposeNnSoftmaxPass,
+import kernel_gen.passes.lowering.decompose_nn_softmax as decompass_impl
+from kernel_gen.passes.lowering.decompass import (
+    DecompassError,
+    DecompassPass,
+    register_decompass_rewrite,
 )
 
 
@@ -116,22 +118,37 @@ def _entry_ops(func_op: func.FuncOp) -> list[object]:
     return list(func_op.body.blocks.first.ops)
 
 
+def _make_exp_module(input_type: NnMemoryType) -> tuple[ModuleOp, func.FuncOp]:
+    """构造只包含一个 `nn.exp` 的测试 module。"""
+
+    block = Block(arg_types=[input_type])
+    exp_op = NnExpOp(block.args[0], input_type, input_type.space)
+    return_op = func.ReturnOp(exp_op.result)
+    block.add_ops([exp_op, return_op])
+    func_op = func.FuncOp(
+        "exp_kernel",
+        FunctionType.from_lists([input_type], [input_type]),
+        Region(block),
+    )
+    return ModuleOp([func_op]), func_op
+
+
 # DNS-001
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-07 16:00:00 +0800
 # 最近一次运行成功时间: 2026-04-07 16:00:00 +0800
-# 功能说明: 验证 decompose-nn-softmax 会把 nn.softmax 固定改写为 7 段链。
+# 功能说明: 验证 decompass 会把 nn.softmax 固定改写为 7 段链。
 # 测试目的: 锁定 reduce_max -> broadcast -> sub -> exp -> reduce_sum -> broadcast -> truediv 的顺序与结果替换合同。
 # 使用示例: pytest -q test/pass/test_decompose_nn_softmax.py -k test_decompose_softmax_into_fixed_nn_chain
 # 对应功能实现文件路径: kernel_gen/passes/lowering/decompose_nn_softmax.py
-# 对应 spec 文件路径: spec/pass/lowering/decompose_nn_softmax.md
+# 对应 spec 文件路径: spec/pass/lowering/decompass.md
 # 对应测试文件路径: test/pass/test_decompose_nn_softmax.py
 def test_decompose_softmax_into_fixed_nn_chain() -> None:
     mem_type = _make_memory_type((2, 3))
     module, func_op = _make_softmax_module(input_type=mem_type, axis=1)
 
-    DecomposeNnSoftmaxPass().run(module)
+    DecompassPass().run(module)
     module.verify()
 
     body_ops = _entry_ops(func_op)
@@ -176,13 +193,13 @@ def test_decompose_softmax_into_fixed_nn_chain() -> None:
 # 测试目的: 锁定 axis=-1 在 rank=3 时会落到 axes=[2]。
 # 使用示例: pytest -q test/pass/test_decompose_nn_softmax.py -k test_decompose_softmax_normalizes_negative_axis
 # 对应功能实现文件路径: kernel_gen/passes/lowering/decompose_nn_softmax.py
-# 对应 spec 文件路径: spec/pass/lowering/decompose_nn_softmax.md
+# 对应 spec 文件路径: spec/pass/lowering/decompass.md
 # 对应测试文件路径: test/pass/test_decompose_nn_softmax.py
 def test_decompose_softmax_normalizes_negative_axis() -> None:
     mem_type = _make_memory_type((2, 3, 4))
     module, func_op = _make_softmax_module(input_type=mem_type, axis=-1)
 
-    DecomposeNnSoftmaxPass().run(module)
+    DecompassPass().run(module)
     module.verify()
 
     reduce_max = next(op for op in _entry_ops(func_op) if isinstance(op, NnReduceMaxOp))
@@ -202,17 +219,17 @@ def test_decompose_softmax_normalizes_negative_axis() -> None:
 # 测试目的: 锁定 pass 不依赖方言 verifier 的通用错误，而是显式给出 normalized axis out of range。
 # 使用示例: pytest -q test/pass/test_decompose_nn_softmax.py -k test_decompose_softmax_rejects_normalized_axis_out_of_range
 # 对应功能实现文件路径: kernel_gen/passes/lowering/decompose_nn_softmax.py
-# 对应 spec 文件路径: spec/pass/lowering/decompose_nn_softmax.md
+# 对应 spec 文件路径: spec/pass/lowering/decompass.md
 # 对应测试文件路径: test/pass/test_decompose_nn_softmax.py
 def test_decompose_softmax_rejects_normalized_axis_out_of_range() -> None:
     mem_type = _make_memory_type((2, 3))
     module, _func_op = _make_softmax_module(input_type=mem_type, axis=3)
 
     with pytest.raises(
-        DecomposeNnSoftmaxError,
-        match="DecomposeNnSoftmaxError: normalized axis out of range",
+        DecompassError,
+        match="DecompassError: normalized axis out of range",
     ):
-        DecomposeNnSoftmaxPass().run(module)
+        DecompassPass().run(module)
 
 
 # DNS-004
@@ -224,7 +241,7 @@ def test_decompose_softmax_rejects_normalized_axis_out_of_range() -> None:
 # 测试目的: 锁定 pass 在 malformed softmax 上给出固定失败短语，避免产生半合法分解链。
 # 使用示例: pytest -q test/pass/test_decompose_nn_softmax.py -k test_decompose_softmax_rejects_result_type_mismatch
 # 对应功能实现文件路径: kernel_gen/passes/lowering/decompose_nn_softmax.py
-# 对应 spec 文件路径: spec/pass/lowering/decompose_nn_softmax.md
+# 对应 spec 文件路径: spec/pass/lowering/decompass.md
 # 对应测试文件路径: test/pass/test_decompose_nn_softmax.py
 def test_decompose_softmax_rejects_result_type_mismatch() -> None:
     input_type = _make_memory_type((2, 3))
@@ -241,7 +258,34 @@ def test_decompose_softmax_rejects_result_type_mismatch() -> None:
     )
 
     with pytest.raises(
-        DecomposeNnSoftmaxError,
-        match="DecomposeNnSoftmaxError: result type must match input shape and stride",
+        DecompassError,
+        match="DecompassError: result type must match input shape and stride",
     ):
-        DecomposeNnSoftmaxPass().run(module)
+        DecompassPass().run(module)
+
+
+def test_decompass_supports_registering_rewrite_for_other_nn_op() -> None:
+    mem_type = _make_memory_type((4,))
+    module, func_op = _make_exp_module(mem_type)
+
+    def _rewrite_exp_to_identity(op: object, block: Block) -> None:
+        if not isinstance(op, NnExpOp):
+            raise AssertionError("expected nn.exp op")
+        op.result.replace_by(op.input)
+        block.erase_op(op)
+
+    register_decompass_rewrite("nn.exp", _rewrite_exp_to_identity)
+    try:
+        DecompassPass().run(module)
+        module.verify()
+        body_ops = _entry_ops(func_op)
+        assert [op.name for op in body_ops] == ["func.return"]
+        return_op = next(op for op in body_ops if isinstance(op, func.ReturnOp))
+        assert return_op.arguments[0] == func_op.body.blocks.first.args[0]
+    finally:
+        decompass_impl._DECOMPASS_REWRITES.pop("nn.exp", None)
+
+
+def test_decompass_rejects_empty_registered_op_name() -> None:
+    with pytest.raises(DecompassError, match="DecompassError: op name must be non-empty"):
+        register_decompass_rewrite("   ", lambda op, block: None)

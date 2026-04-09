@@ -170,7 +170,7 @@ def test_pass_manager_exception_propagation() -> None:
 # 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-06 09:53:59 +0800
 # 最近一次运行成功时间: 2026-04-06 09:53:59 +0800
-# 功能说明: 验证默认 lowering pipeline 会固定注册 `DecomposeNnSoftmaxPass -> LowerNnToKernelPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass`。
+# 功能说明: 验证默认 lowering pipeline 会固定注册 `DecompassPass -> LowerNnToKernelPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass`。
 # 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_builds_default_lowering_pipeline_for_buffer_results_to_out_params
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
@@ -179,15 +179,15 @@ def test_pass_manager_builds_default_lowering_pipeline_for_buffer_results_to_out
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
-    decompose_module = importlib.import_module("kernel_gen.passes.lowering.decompose_nn_softmax")
-    DecomposeNnSoftmaxPass = decompose_module.DecomposeNnSoftmaxPass
+    decompose_module = importlib.import_module("kernel_gen.passes.lowering.decompass")
+    DecompassPass = decompose_module.DecompassPass
     LowerNnToKernelPass = lowering_module.LowerNnToKernelPass
     BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     LowerDmaMemoryHierarchyPass = lowering_module.LowerDmaMemoryHierarchyPass
     order: list[str] = []
 
     def _record_decompose(self: object, target: object) -> object:
-        order.append("decompose-nn-softmax")
+        order.append("decompass")
         return target
 
     def _record_lower(self: object, target: object) -> object:
@@ -202,7 +202,7 @@ def test_pass_manager_builds_default_lowering_pipeline_for_buffer_results_to_out
         order.append("lower-dma-memory-hierarchy")
         return target
 
-    monkeypatch.setattr(DecomposeNnSoftmaxPass, "run", _record_decompose)
+    monkeypatch.setattr(DecompassPass, "run", _record_decompose)
     monkeypatch.setattr(LowerNnToKernelPass, "run", _record_lower)
     monkeypatch.setattr(BufferResultsToOutParamsPass, "run", _record_buffer)
     monkeypatch.setattr(LowerDmaMemoryHierarchyPass, "run", _record_dma)
@@ -211,7 +211,7 @@ def test_pass_manager_builds_default_lowering_pipeline_for_buffer_results_to_out
     sentinel = object()
     assert pm.run(sentinel) is sentinel
     assert order == [
-        "decompose-nn-softmax",
+        "decompass",
         "lower-nn-to-kernel",
         "buffer-results-to-out-params",
         "lower-dma-memory-hierarchy",
@@ -303,7 +303,7 @@ def test_tile_pipeline_requires_explicit_enable() -> None:
     pm = build_default_lowering_pass_manager()
     pass_names = [item.name for item in pm._passes]  # noqa: SLF001 - test asserts pipeline boundary
     assert pass_names == [
-        "decompose-nn-softmax",
+        "decompass",
         "lower-nn-to-kernel",
         "buffer-results-to-out-params",
         "lower-dma-memory-hierarchy",
@@ -622,18 +622,18 @@ def test_pass_manager_rejects_symbol_loop_hoist_after_dma_memory_hierarchy() -> 
 # 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-08 10:19:36 +0800
 # 最近一次运行成功时间: 2026-04-08 10:19:36 +0800
-# 功能说明: 验证 lowering 管理器可前置 decompose-nn-softmax，并与后续 pass 顺序协同。
-# 测试目的: 保障 decompose-nn-softmax 能与 lower-nn-to-kernel 与 buffer-results-to-out-params 正常串联。
-# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_allows_decompose_nn_softmax_before_lowering
+# 功能说明: 验证 lowering 管理器可前置 decompass，并与后续 pass 顺序协同。
+# 测试目的: 保障 decompass 能与 lower-nn-to-kernel 与 buffer-results-to-out-params 正常串联。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_allows_decompass_before_lowering
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
-def test_pass_manager_allows_decompose_nn_softmax_before_lowering() -> None:
+def test_pass_manager_allows_decompass_before_lowering() -> None:
     class DecomposeSoftmaxPass(Pass):
-        name = "decompose-nn-softmax"
+        name = "decompass"
 
         def run(self: "DecomposeSoftmaxPass", target: object) -> object:
-            order.append("decompose-nn-softmax")
+            order.append("decompass")
             return target
 
     class LowerNnToKernelPass(Pass):
@@ -658,8 +658,4 @@ def test_pass_manager_allows_decompose_nn_softmax_before_lowering() -> None:
 
     sentinel = object()
     assert pm.run(sentinel) is sentinel
-    assert order == [
-        "decompose-nn-softmax",
-        "lower-nn-to-kernel",
-        "buffer-results-to-out-params",
-    ]
+    assert order == ["decompass", "lower-nn-to-kernel", "buffer-results-to-out-params"]

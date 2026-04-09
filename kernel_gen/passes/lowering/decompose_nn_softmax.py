@@ -1,26 +1,27 @@
-"""nn.softmax decompose pass。
+"""decompass pass。
 
 创建者: 朽木露琪亚
 最后一次更改: jcc你莫辜负
 
 功能说明:
-- 将 `func.func` 内的 `nn.softmax` 固定展开为 `nn.reduce_max -> nn.broadcast -> nn.sub -> nn.exp -> nn.reduce_sum -> nn.broadcast -> nn.truediv`。
+- 将 `func.func` 内已注册的 `nn.*` op 按 decompass 规则分解。
+- 内置 `nn.softmax` 固定展开为 `nn.reduce_max -> nn.broadcast -> nn.sub -> nn.exp -> nn.reduce_sum -> nn.broadcast -> nn.truediv`。
 - 在 pass 内把 `axis` 规整为非负下标，并显式拒绝越界 axis。
 - 仅停留在 `nn` 方言层，不承担 `nn -> kernel` lowering。
 
 使用示例:
-- from kernel_gen.passes.lowering.decompose_nn_softmax import DecomposeNnSoftmaxPass
-- module = DecomposeNnSoftmaxPass().run(module)
+- from kernel_gen.passes.lowering.decompose_nn_softmax import DecompassPass
+- module = DecompassPass().run(module)
 
 关联文件:
-- spec: spec/pass/lowering/decompose_nn_softmax.md
+- spec: spec/pass/lowering/decompass.md
 - test: test/pass/test_decompose_nn_softmax.py
 - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ArrayAttr, IntAttr, ModuleOp, StringAttr
@@ -39,9 +40,11 @@ from kernel_gen.dialect.nn import (
 )
 from ..pass_manager import Pass
 
+DecompassRewrite = Callable[[Operation, Block], None]
 
-class DecomposeNnSoftmaxError(ValueError):
-    """`decompose-nn-softmax` pass 的显式错误。
+
+class DecompassError(ValueError):
+    """`decompass` pass 的显式错误。
 
     创建者: jcc你莫辜负
     最后一次更改: jcc你莫辜负
@@ -50,10 +53,10 @@ class DecomposeNnSoftmaxError(ValueError):
     - 用于输出可机械匹配的错误短语，避免吞掉具体错误入口。
 
     使用示例:
-    - raise DecomposeNnSoftmaxError("DecomposeNnSoftmaxError: normalized axis out of range")
+    - raise DecompassError("DecompassError: normalized axis out of range")
 
     关联文件:
-    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - spec: spec/pass/lowering/decompass.md
     - test: test/pass/test_decompose_nn_softmax.py
     - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
     """
@@ -72,7 +75,7 @@ def _attr_product(factors: Sequence[Attribute]) -> Attribute:
     - _ = _attr_product([IntAttr(2), StringAttr("B")])
 
     关联文件:
-    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - spec: spec/pass/lowering/decompass.md
     - test: test/pass/test_decompose_nn_softmax.py
     - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
     """
@@ -86,8 +89,8 @@ def _attr_product(factors: Sequence[Attribute]) -> Attribute:
         if isinstance(factor, StringAttr):
             expr_parts.append(factor.data)
             continue
-        raise DecomposeNnSoftmaxError(
-            "DecomposeNnSoftmaxError: shape entries must be IntAttr or StringAttr"
+        raise DecompassError(
+            "DecompassError: shape entries must be IntAttr or StringAttr"
         )
 
     if not expr_parts:
@@ -115,7 +118,7 @@ def _build_contiguous_stride(shape: Sequence[Attribute]) -> ArrayAttr[Attribute]
     - _ = _build_contiguous_stride([IntAttr(2), IntAttr(3)])
 
     关联文件:
-    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - spec: spec/pass/lowering/decompass.md
     - test: test/pass/test_decompose_nn_softmax.py
     - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
     """
@@ -142,7 +145,7 @@ def _build_reduce_result_type(input_type: NnMemoryType, axis: int) -> NnMemoryTy
     - _ = _build_reduce_result_type(input_type, axis=1)
 
     关联文件:
-    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - spec: spec/pass/lowering/decompass.md
     - test: test/pass/test_decompose_nn_softmax.py
     - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
     """
@@ -170,14 +173,14 @@ def _normalize_axis(axis: int, rank: int) -> int:
     - assert _normalize_axis(-1, 3) == 2
 
     关联文件:
-    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - spec: spec/pass/lowering/decompass.md
     - test: test/pass/test_decompose_nn_softmax.py
     - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
     """
 
     normalized = axis if axis >= 0 else rank + axis
     if normalized < 0 or normalized >= rank:
-        raise DecomposeNnSoftmaxError("DecomposeNnSoftmaxError: normalized axis out of range")
+        raise DecompassError("DecompassError: normalized axis out of range")
     return normalized
 
 
@@ -194,7 +197,7 @@ def _ensure_operand_and_result_types(op: NnSoftmaxOp) -> tuple[NnMemoryType, NnM
     - _ = _ensure_operand_and_result_types(softmax_op)
 
     关联文件:
-    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - spec: spec/pass/lowering/decompass.md
     - test: test/pass/test_decompose_nn_softmax.py
     - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
     """
@@ -202,8 +205,8 @@ def _ensure_operand_and_result_types(op: NnSoftmaxOp) -> tuple[NnMemoryType, NnM
     input_type = op.input.type
     result_type = op.result.type
     if not isinstance(input_type, NnMemoryType) or not isinstance(result_type, NnMemoryType):
-        raise DecomposeNnSoftmaxError(
-            "DecomposeNnSoftmaxError: operand and result must be nn.memory"
+        raise DecompassError(
+            "DecompassError: operand and result must be nn.memory"
         )
     return input_type, result_type
 
@@ -221,15 +224,15 @@ def _ensure_softmax_result_matches_input(op: NnSoftmaxOp) -> tuple[NnMemoryType,
     - _ = _ensure_softmax_result_matches_input(softmax_op)
 
     关联文件:
-    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - spec: spec/pass/lowering/decompass.md
     - test: test/pass/test_decompose_nn_softmax.py
     - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
     """
 
     input_type, result_type = _ensure_operand_and_result_types(op)
     if input_type.shape != result_type.shape or input_type.stride != result_type.stride:
-        raise DecomposeNnSoftmaxError(
-            "DecomposeNnSoftmaxError: result type must match input shape and stride"
+        raise DecompassError(
+            "DecompassError: result type must match input shape and stride"
         )
     return input_type, result_type
 
@@ -241,13 +244,13 @@ def _verify_new_ops(ops: Sequence[Operation]) -> None:
     最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 使用方言 verifier 校验新 op，失败时转为 DecomposeNnSoftmaxError。
+    - 使用方言 verifier 校验新 op，失败时转为 DecompassError。
 
     使用示例:
     - _verify_new_ops([max_op, exp_op])
 
     关联文件:
-    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - spec: spec/pass/lowering/decompass.md
     - test: test/pass/test_decompose_nn_softmax.py
     - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
     """
@@ -256,7 +259,7 @@ def _verify_new_ops(ops: Sequence[Operation]) -> None:
         try:
             op.verify()
         except VerifyException as exc:
-            raise DecomposeNnSoftmaxError(f"DecomposeNnSoftmaxError: {exc}") from exc
+            raise DecompassError(f"DecompassError: {exc}") from exc
 
 
 def _decompose_softmax_op(op: NnSoftmaxOp, block: Block) -> None:
@@ -273,7 +276,7 @@ def _decompose_softmax_op(op: NnSoftmaxOp, block: Block) -> None:
     - _decompose_softmax_op(softmax_op, block)
 
     关联文件:
-    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - spec: spec/pass/lowering/decompass.md
     - test: test/pass/test_decompose_nn_softmax.py
     - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
     """
@@ -298,20 +301,96 @@ def _decompose_softmax_op(op: NnSoftmaxOp, block: Block) -> None:
     block.erase_op(op)
 
 
+def _rewrite_softmax_op(op: Operation, block: Block) -> None:
+    """按 decompass 合同分解 `nn.softmax`。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 统一 decompass 注册重写入口，确保按 op 名称分发后仍能做类型校验。
+
+    使用示例:
+    - _rewrite_softmax_op(softmax_op, block)
+
+    关联文件:
+    - spec: spec/pass/lowering/decompass.md
+    - test: test/pass/test_decompose_nn_softmax.py
+    - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
+    """
+
+    if not isinstance(op, NnSoftmaxOp):
+        raise DecompassError("DecompassError: nn.softmax rewrite expects NnSoftmaxOp")
+    _decompose_softmax_op(op, block)
+
+
+_DECOMPASS_REWRITES: dict[str, DecompassRewrite] = {"nn.softmax": _rewrite_softmax_op}
+
+
+def register_decompass_rewrite(op_name: str, rewrite: DecompassRewrite) -> None:
+    """注册 decompass 重写规则。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 支持为其它 op 追加分解重写逻辑。
+    - 已存在同名规则时按最新规则覆盖。
+
+    使用示例:
+    - register_decompass_rewrite("nn.some_op", rewrite_fn)
+
+    关联文件:
+    - spec: spec/pass/lowering/decompass.md
+    - test: test/pass/test_decompose_nn_softmax.py
+    - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
+    """
+
+    op_name_trimmed = op_name.strip()
+    if not op_name_trimmed:
+        raise DecompassError("DecompassError: op name must be non-empty")
+    _DECOMPASS_REWRITES[op_name_trimmed] = rewrite
+
+
+def _try_rewrite_registered_op(op: Operation, block: Block) -> None:
+    """尝试按注册表分解 op。
+
+    创建者: jcc你莫辜负
+    最后修改人: 金铲铲大作战
+
+    功能说明:
+    - 按 op.name 查找已注册的分解规则并执行。
+    - 未命中注册表时保持原样返回。
+
+    使用示例:
+    - _try_rewrite_registered_op(op, block)
+
+    关联文件:
+    - spec: spec/pass/lowering/decompass.md
+    - test: test/pass/test_decompose_nn_softmax.py
+    - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
+    """
+
+    rewrite = _DECOMPASS_REWRITES.get(op.name)
+    if rewrite is None:
+        return
+    rewrite(op, block)
+
+
 def _decompose_block(block: Block) -> None:
-    """递归处理 block 内部全部 softmax。
+    """递归处理 block 内部全部已注册分解 op。
 
     创建者: jcc你莫辜负
     最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 对 block 内 op 递归处理 region，并替换命中的 softmax。
+    - 对 block 内 op 递归处理 region，并替换命中的已注册分解 op。
 
     使用示例:
     - _decompose_block(block)
 
     关联文件:
-    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - spec: spec/pass/lowering/decompass.md
     - test: test/pass/test_decompose_nn_softmax.py
     - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
     """
@@ -319,8 +398,7 @@ def _decompose_block(block: Block) -> None:
     for op in list(block.ops):
         for region in op.regions:
             _decompose_region(region)
-        if isinstance(op, NnSoftmaxOp):
-            _decompose_softmax_op(op, block)
+        _try_rewrite_registered_op(op, block)
 
 
 def _decompose_region(region: Region) -> None:
@@ -336,7 +414,7 @@ def _decompose_region(region: Region) -> None:
     - _decompose_region(region)
 
     关联文件:
-    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - spec: spec/pass/lowering/decompass.md
     - test: test/pass/test_decompose_nn_softmax.py
     - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
     """
@@ -346,19 +424,19 @@ def _decompose_region(region: Region) -> None:
 
 
 def _decompose_module(module: ModuleOp) -> None:
-    """仅在 `func.func` 内执行 softmax 分解。
+    """仅在 `func.func` 内执行 decompass 分解。
 
     创建者: jcc你莫辜负
     最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 限定 pass 只处理 func.func 内的 softmax，避免影响其他方言结构。
+    - 限定 pass 只处理 func.func 内的已注册分解 op，避免影响其他方言结构。
 
     使用示例:
     - _decompose_module(module)
 
     关联文件:
-    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - spec: spec/pass/lowering/decompass.md
     - test: test/pass/test_decompose_nn_softmax.py
     - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
     """
@@ -368,48 +446,57 @@ def _decompose_module(module: ModuleOp) -> None:
             _decompose_region(op.body)
 
 
-class DecomposeNnSoftmaxPass(Pass):
-    """把 `nn.softmax` 分解为固定 7 段 `nn` 方言链。
+class DecompassPass(Pass):
+    """执行 decompass 分解链。
 
     创建者: jcc你莫辜负
     最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 在 ModuleOp 的 func.func 内识别 nn.softmax，并替换为固定分解链。
+    - 在 ModuleOp 的 func.func 内识别已注册 op，并替换为对应分解链。
 
     使用示例:
-    - module = DecomposeNnSoftmaxPass().run(module)
+    - module = DecompassPass().run(module)
 
     关联文件:
-    - spec: spec/pass/lowering/decompose_nn_softmax.md
+    - spec: spec/pass/lowering/decompass.md
     - test: test/pass/test_decompose_nn_softmax.py
     - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
     """
 
-    name = "decompose-nn-softmax"
+    name = "decompass"
 
-    def run(self: "DecomposeNnSoftmaxPass", module: Operation) -> Operation:
-        """执行 `decompose-nn-softmax` pass。
+    def run(self: "DecompassPass", module: Operation) -> Operation:
+        """执行 `decompass` pass。
 
         创建者: jcc你莫辜负
         最后一次更改: jcc你莫辜负
 
         功能说明:
-        - 校验 module 类型，随后执行 softmax 分解。
+        - 校验 module 类型，随后执行 decompass 分解。
 
         使用示例:
-        - _ = DecomposeNnSoftmaxPass().run(module)
+        - _ = DecompassPass().run(module)
 
         关联文件:
-        - spec: spec/pass/lowering/decompose_nn_softmax.md
+        - spec: spec/pass/lowering/decompass.md
         - test: test/pass/test_decompose_nn_softmax.py
         - 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
         """
 
         if not isinstance(module, ModuleOp):
-            raise DecomposeNnSoftmaxError("DecomposeNnSoftmaxError: module must be builtin.module")
+            raise DecompassError("DecompassError: module must be builtin.module")
         _decompose_module(module)
         return module
 
 
-__all__ = ["DecomposeNnSoftmaxPass", "DecomposeNnSoftmaxError"]
+DecomposeNnSoftmaxPass = DecompassPass
+DecomposeNnSoftmaxError = DecompassError
+
+__all__ = [
+    "DecompassPass",
+    "DecompassError",
+    "register_decompass_rewrite",
+    "DecomposeNnSoftmaxPass",
+    "DecomposeNnSoftmaxError",
+]
