@@ -1,7 +1,7 @@
 """Pass registry API.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 提供 pass / pipeline 的进程内注册表，统一“名字 -> 构造器”的解析入口。
@@ -188,7 +188,7 @@ def load_builtin_passes() -> None:
     """加载仓库内置 pass / pipeline。
 
     创建者: 睡觉小分队
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 主动加载仓库内置 pass / pipeline，使装饰器注册与显式注册生效。
@@ -220,6 +220,52 @@ def load_builtin_passes() -> None:
         pm = PassManager(name="no-op-pipeline")
         pm.add_pass(NoOpPass())
         return pm
+
+    from kernel_gen.passes.analysis.func_cost import AnalyzeFuncCostPass
+    from kernel_gen.passes.lowering.buffer_results_to_out_params import (
+        BufferResultsToOutParamsPass,
+    )
+    from kernel_gen.passes.lowering.decompose_nn_softmax import DecomposeNnSoftmaxPass
+    from kernel_gen.passes.lowering.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
+    from kernel_gen.passes.lowering.memory_pool import MemoryPoolPass
+    from kernel_gen.passes.lowering.nn_to_kernel import LowerNnToKernelPass
+    from kernel_gen.passes.lowering.symbol_loop_hoist import SymbolLoopHoistPass
+    from kernel_gen.passes.lowering.tile import TilePass
+
+    for pass_cls in (
+        AnalyzeFuncCostPass,
+        DecomposeNnSoftmaxPass,
+        LowerNnToKernelPass,
+        BufferResultsToOutParamsPass,
+        LowerDmaMemoryHierarchyPass,
+        TilePass,
+        SymbolLoopHoistPass,
+        MemoryPoolPass,
+    ):
+        register_pass(pass_cls)
+
+    @register_pipeline("default-lowering")
+    def _build_default_lowering_pipeline() -> PassManager:
+        """构造默认 lowering pipeline。
+
+        创建者: 睡觉小分队
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 返回默认 lowering 链路的 PassManager。
+
+        使用示例:
+        - pm = build_registered_pipeline("default-lowering")
+
+        关联文件:
+        - spec: [spec/pass/registry.md](spec/pass/registry.md)
+        - test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
+        - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
+        """
+
+        from .pass_manager import build_default_lowering_pass_manager
+
+        return build_default_lowering_pass_manager()
 
     _BUILTINS_LOADED = True
 
