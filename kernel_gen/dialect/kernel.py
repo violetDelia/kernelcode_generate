@@ -1,7 +1,7 @@
 """Kernel dialect definitions.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: 小李飞刀
 
 功能说明:
 - 定义 kernel dialect 的逐元素算术、比较、选择、指数、归约与类型转换 op。
@@ -392,7 +392,7 @@ def _img2col_output_dim(size: int, kernel: int, stride: int, dilation: int, pad_
 
     功能说明:
     - 计算 `floor((size + pad_before + pad_after - dilation * (kernel - 1) - 1) / stride) + 1`。
-    - 由 `kernel.img2col2d` 的 verifier 复用。
+    - 由 `kernel.img2col1d/img2col2d` 的 verifier 复用。
 
     使用示例:
     - _img2col_output_dim(5, 3, 1, 1, 0, 0)
@@ -868,6 +868,197 @@ class KernelMatmulOp(_BaseKernelBinaryOp):
             [lhs_type, rhs_type, out_type],
             "kernel.matmul element_type must match across operands",
         )
+
+
+@irdl_op_definition
+class KernelImg2col1dOp(IRDLOperation):
+    """kernel.img2col1d。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 定义一维 img2col 的 kernel 目标 op。
+    - verifier 校验输入输出 rank、窗口属性、结构化结果 shape/stride 与空间一致性。
+
+    使用示例:
+    - KernelImg2col1dOp(inp, out, k=3, s=1, d=1, p_left=0, p_right=0, space=_make_space("global"))
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel_dialect.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    name = "kernel.img2col1d"
+
+    input = operand_def(NnMemoryType)
+    out = operand_def(NnMemoryType)
+    k = attr_def(IntegerAttr)
+    s = attr_def(IntegerAttr)
+    d = attr_def(IntegerAttr)
+    p_left = attr_def(IntegerAttr)
+    p_right = attr_def(IntegerAttr)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        input_value: SSAValue | Operation,
+        out: SSAValue | Operation,
+        k: int | IntegerAttr | IntAttr,
+        s: int | IntegerAttr | IntAttr,
+        d: int | IntegerAttr | IntAttr,
+        p_left: int | IntegerAttr | IntAttr,
+        p_right: int | IntegerAttr | IntAttr,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        """初始化 img2col1d op。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 绑定输入/输出 operand。
+        - 统一规整窗口参数为 i64 IntegerAttr。
+
+        使用示例:
+        - KernelImg2col1dOp(inp, out, 3, 1, 1, 0, 0, _make_space("global"))
+
+        关联文件:
+        - spec: spec/dialect/kernel.md
+        - test: test/dialect/test_kernel_dialect.py
+        - 功能实现: kernel_gen/dialect/kernel.py
+        """
+
+        super().__init__(
+            operands=[input_value, out],
+            attributes={
+                "k": _normalize_i64_attr(k, "k"),
+                "s": _normalize_i64_attr(s, "s"),
+                "d": _normalize_i64_attr(d, "d"),
+                "p_left": _normalize_i64_attr(p_left, "p_left"),
+                "p_right": _normalize_i64_attr(p_right, "p_right"),
+                "space": space,
+            },
+        )
+
+    def verify_(self) -> None:
+        """校验 kernel.img2col1d 合同。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 校验输入输出 rank、元素类型、空间、窗口参数与结构化结果布局。
+
+        使用示例:
+        - KernelImg2col1dOp(...).verify_()
+
+        关联文件:
+        - spec: spec/dialect/kernel.md
+        - test: test/dialect/test_kernel_dialect.py
+        - 功能实现: kernel_gen/dialect/kernel.py
+        """
+
+        input_type = _verify_memory_type(self.input.type, "input")
+        out_type = _verify_memory_type(self.out.type, "out")
+        self.space.verify()
+
+        if len(input_type.shape.data) != 3:
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.img2col1d requires rank-3 input",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+        if len(out_type.shape.data) != 4:
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.img2col1d requires rank-4 result",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+        if input_type.space.space.data != self.space.space.data:
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.img2col1d attribute space must match input space",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+        if out_type.space.space.data != self.space.space.data:
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.img2col1d attribute space must match result space",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+        if out_type.element_type != input_type.element_type:
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.img2col1d result element_type must match input",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+
+        k_value = _verify_i64_attr_range(self.k, "k", min_value=1, max_value=2**63 - 1)
+        s_value = _verify_i64_attr_range(self.s, "s", min_value=1, max_value=2**63 - 1)
+        d_value = _verify_i64_attr_range(self.d, "d", min_value=1, max_value=2**63 - 1)
+        p_left_value = _verify_i64_attr_range(self.p_left, "p_left", min_value=0, max_value=2**63 - 1)
+        p_right_value = _verify_i64_attr_range(self.p_right, "p_right", min_value=0, max_value=2**63 - 1)
+
+        input_shape = list(input_type.shape.data)
+        out_shape = list(out_type.shape.data)
+        if not isinstance(out_shape[2], IntAttr) or out_shape[2].data != k_value:
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.img2col1d result shape/stride must match img2col1d contract",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+
+        input_dims = _collect_int_dims(input_shape)
+        input_strides = _collect_int_dims(input_type.stride.data)
+        if input_dims is not None and input_strides is not None:
+            if input_strides != _build_contiguous_stride(input_dims):
+                raise VerifyException(
+                    _ERROR_TEMPLATE.format(
+                        scene=_ERROR_SCENE,
+                        expected="kernel.img2col1d input layout must be contiguous",
+                        actual=_ERROR_ACTUAL,
+                        action=_ERROR_ACTION,
+                    )
+                )
+
+        out_dims = _collect_int_dims(out_shape)
+        out_strides = _collect_int_dims(out_type.stride.data)
+        if input_dims is None or out_dims is None or out_strides is None:
+            return
+
+        n_dim, c_dim, w_dim = input_dims
+        w_out_dim = _img2col_output_dim(w_dim, k_value, s_value, d_value, p_left_value, p_right_value)
+        expected_shape = [n_dim, c_dim, k_value, w_out_dim]
+        expected_stride = _build_contiguous_stride(expected_shape)
+        if w_out_dim < 1 or out_dims != expected_shape or out_strides != expected_stride:
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.img2col1d result shape/stride must match img2col1d contract",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
 
 
 @irdl_op_definition
@@ -1438,6 +1629,7 @@ Kernel = Dialect(
         KernelGtOp,
         KernelGeOp,
         KernelMatmulOp,
+        KernelImg2col1dOp,
         KernelImg2col2dOp,
         KernelSelectOp,
         KernelCastOp,
@@ -1461,6 +1653,7 @@ __all__ = [
     "KernelGtOp",
     "KernelGeOp",
     "KernelMatmulOp",
+    "KernelImg2col1dOp",
     "KernelImg2col2dOp",
     "KernelSelectOp",
     "KernelCastOp",

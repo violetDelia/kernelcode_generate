@@ -45,6 +45,7 @@ from kernel_gen.dialect.kernel import (
     KernelExpOp,
     KernelGeOp,
     KernelGtOp,
+    KernelImg2col1dOp,
     KernelImg2col2dOp,
     KernelLeOp,
     KernelLtOp,
@@ -95,7 +96,7 @@ _SUPPORTED_BINARY = {
     "nn.matmul": KernelMatmulOp,
 }
 
-_RESULT_TYPED_ALLOC_OPS = {"nn.matmul", "nn.img2col2d"}
+_RESULT_TYPED_ALLOC_OPS = {"nn.matmul", "nn.img2col1d", "nn.img2col2d"}
 
 
 
@@ -680,6 +681,19 @@ def _build_kernel_op(
         _ensure_operand_count(op, 1)
         axis_attr = _parse_softmax_axis_attr(op.attributes.get("axis"))
         return KernelSoftmaxOp(op.operands[0], out_value, axis_attr, space)
+
+    if op.name == "nn.img2col1d":
+        _ensure_operand_count(op, 1)
+        return KernelImg2col1dOp(
+            op.operands[0],
+            out_value,
+            k=op.attributes.get("kw"),
+            s=op.attributes.get("sw"),
+            d=op.attributes.get("dw"),
+            p_left=op.attributes.get("pl"),
+            p_right=op.attributes.get("pr"),
+            space=space,
+        )
 
     if op.name == "nn.img2col2d":
         _ensure_operand_count(op, 1)
