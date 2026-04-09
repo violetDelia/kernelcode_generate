@@ -51,6 +51,7 @@ from kernel_gen.dialect.kernel import (
     KernelMatmulOp,
     KernelMulOp,
     KernelNeOp,
+    KernelReduceMinOp,
     KernelSelectOp,
     KernelSoftmaxOp,
     KernelSubOp,
@@ -243,6 +244,81 @@ def _parse_softmax_axis_attr(attr: object) -> IntegerAttr:
     return axis_attr
 
 
+def _parse_reduce_axis_attr(attr: object, op_name: str) -> IntegerAttr:
+    """解析 nn.reduce_* 的 axes attribute。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 校验 axes 为 ArrayAttr 且仅包含单轴。
+    - 统一输出 i64 IntegerAttr。
+
+    使用示例:
+    - axis_attr = _parse_reduce_axis_attr(op.attributes["axes"], "nn.reduce_min")
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    if not isinstance(attr, ArrayAttr):
+        raise LowerNnToKernelError(f"{op_name} axes must be ArrayAttr")
+    if len(attr.data) != 1:
+        raise LowerNnToKernelError(f"{op_name} axes must contain exactly one axis")
+    entry = attr.data[0]
+    if isinstance(entry, IntAttr):
+        axis_attr = IntegerAttr(entry.data, IntegerType(64))
+    elif isinstance(entry, IntegerAttr):
+        axis_attr = entry
+    else:
+        raise LowerNnToKernelError(f"{op_name} axes must be i64 IntegerAttr")
+    if not isinstance(axis_attr.type, IntegerType):
+        raise LowerNnToKernelError(f"{op_name} axes must be i64 IntegerAttr")
+    width_attr = axis_attr.type.width
+    width_value = width_attr.data if isinstance(width_attr, IntAttr) else width_attr
+    if width_value != 64:
+        raise LowerNnToKernelError(f"{op_name} axes must be i64 IntegerAttr")
+    return axis_attr
+
+
+def _parse_reduce_keepdim_attr(attr: object, op_name: str) -> IntegerAttr:
+    """解析 nn.reduce_* 的 keepdim attribute。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 校验 keepdim 为 i1 IntegerAttr。
+
+    使用示例:
+    - keepdim_attr = _parse_reduce_keepdim_attr(op.attributes["keepdim"], "nn.reduce_min")
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    if isinstance(attr, IntAttr):
+        attr = IntegerAttr(attr.data, IntegerType(1))
+    if not isinstance(attr, IntegerAttr):
+        raise LowerNnToKernelError(f"{op_name} keepdim must be i1 IntegerAttr")
+    if not isinstance(attr.type, IntegerType):
+        raise LowerNnToKernelError(f"{op_name} keepdim must be i1 IntegerAttr")
+    width_attr = attr.type.width
+    width_value = width_attr.data if isinstance(width_attr, IntAttr) else width_attr
+    if width_value != 1:
+        raise LowerNnToKernelError(f"{op_name} keepdim must be i1 IntegerAttr")
+    raw_value = attr.value.data
+    if raw_value in (0, 1):
+        return IntegerAttr(raw_value, IntegerType(1))
+    if raw_value == -1:
+        return IntegerAttr(1, IntegerType(1))
+    raise LowerNnToKernelError(f"{op_name} keepdim must be bool")
+
+
 def _build_alloc_dynamic_shape(
     source: SSAValue,
     result_type: NnMemoryType,
@@ -304,6 +380,8 @@ def _const_symbol_value(expr: str, literal: int) -> tuple[list[Operation], SSAVa
 
 def _build_alloc_dynamic_shape_from_result(
     result_type: NnMemoryType,
+    *,
+    include_static: bool = True,
 ) -> tuple[list[Operation], list[SSAValue]]:
     """基于结果类型构造 dma.alloc 的 dynamic_shape operands。
 
@@ -311,12 +389,14 @@ def _build_alloc_dynamic_shape_from_result(
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 静态整数维度使用对应数值的 symbol.int。
+    - include_static=True 时，静态整数维度使用对应数值的 symbol.int。
+    - include_static=False 时仅输出符号维度。
     - 符号维度使用同名 symbol.int。
     - 匿名动态维度不允许。
 
     使用示例:
     - ops, operands = _build_alloc_dynamic_shape_from_result(result_type)
+    - ops, operands = _build_alloc_dynamic_shape_from_result(result_type, include_static=False)
 
     关联文件:
     - spec: spec/pass/lowering/nn_to_kernel.md
@@ -328,6 +408,8 @@ def _build_alloc_dynamic_shape_from_result(
     operands: list[SSAValue] = []
     for dim in result_type.shape.data:
         if isinstance(dim, IntAttr):
+            if not include_static:
+                continue
             new_ops, value = _const_symbol_value(str(dim.data), dim.data)
             ops.extend(new_ops)
             operands.append(value)
@@ -617,6 +699,12 @@ def _build_kernel_op(
             space=space,
         )
 
+    if op.name == "nn.reduce_min":
+        _ensure_operand_count(op, 1)
+        axis_attr = _parse_reduce_axis_attr(op.attributes.get("axes"), "nn.reduce_min")
+        keepdim_attr = _parse_reduce_keepdim_attr(op.attributes.get("keepdim"), "nn.reduce_min")
+        return KernelReduceMinOp(op.operands[0], out_value, axis_attr, keepdim_attr, space)
+
     raise LowerNnToKernelError(f"Unsupported nn op: {op.name}")
 
 
@@ -715,7 +803,12 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
     space = _ensure_space_attr(op)
 
     _ensure_contiguous_result_stride(result_type)
-    if op.name in _RESULT_TYPED_ALLOC_OPS:
+    if op.name == "nn.reduce_min":
+        shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_result(
+            result_type,
+            include_static=False,
+        )
+    elif op.name in _RESULT_TYPED_ALLOC_OPS:
         shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_result(result_type)
     else:
         shape_source = _select_shape_source(op)

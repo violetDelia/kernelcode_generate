@@ -1,7 +1,7 @@
 """nn -> kernel lowering pass tests.
 
 创建者: 金铲铲大作战
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 nn_to_kernel pass 的 lowering 行为与错误路径。
@@ -70,6 +70,7 @@ from kernel_gen.dialect.kernel import (
     KernelLeOp,
     KernelNeOp,
     KernelMatmulOp,
+    KernelReduceMinOp,
     KernelSelectOp,
 )
 from kernel_gen.dialect.nn import (
@@ -85,13 +86,14 @@ from kernel_gen.dialect.nn import (
     NnMemorySpaceAttr,
     NnMemoryType,
     NnNeOp,
+    NnReduceMinOp,
     NnSoftmaxOp,
     NnTransposeOp,
     NnTrueDivOp,
 )
 from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
 from kernel_gen.dsl.mlir_gen import build_func_op
-from kernel_gen.operation.nn import img2col2d, softmax
+from kernel_gen.operation.nn import img2col2d, reduce_min, softmax
 from kernel_gen.passes.lowering.buffer_results_to_out_params import (
     BufferResultsToOutParamsError,
     BufferResultsToOutParamsPass,
@@ -1564,6 +1566,69 @@ def test_lower_img2col2d_public_chain_to_kernel_img2col2d() -> None:
     assert "kernel.img2col2d" in after_ir
     assert "nn.img2col2d" not in after_ir
     assert "Unsupported formatted annotation" not in after_ir
+
+
+# TC-PASS-N2K-032
+# 创建者: 金铲铲大作战
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-09 05:31:18 +0800
+# 最近一次运行成功时间: 2026-04-09 05:31:18 +0800
+# 测试目的: 验证 nn.reduce_min 被 lower 为 kernel.reduce_min。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_reduce_min_direct_dialect_op_to_kernel_reduce_min
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
+def test_lower_reduce_min_direct_dialect_op_to_kernel_reduce_min() -> None:
+    input_type = _make_memory_type(element_type=f32)
+    result_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(1)]),
+        stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+        element_type=f32,
+    )
+    space = _make_space("global")
+
+    module, block = _build_module(
+        [input_type],
+        result_type,
+        lambda block: [NnReduceMinOp(block.args[0], result_type, axes=[1], keepdim=True, space=space)],
+    )
+
+    LowerNnToKernelPass().run(module)
+    after_ir = str(module)
+    assert "kernel.reduce_min" in after_ir
+    assert "axis = 1 : i64" in after_ir
+    assert "keepdim = true" in after_ir
+    assert "nn.reduce_min" not in after_ir
+
+    ops = _collect_ops(block)
+    assert any(isinstance(op, KernelReduceMinOp) for op in ops)
+
+
+# TC-PASS-N2K-033
+# 创建者: 金铲铲大作战
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-09 05:31:18 +0800
+# 最近一次运行成功时间: 2026-04-09 05:31:18 +0800
+# 测试目的: 验证公开链路 reduce_min helper lower 为 kernel.reduce_min 并保留 axis。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_reduce_min_public_chain_to_kernel_reduce_min
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
+def test_lower_reduce_min_public_chain_to_kernel_reduce_min() -> None:
+    def reduce_min_direct(value: "Tensor[f32, 2, 4]") -> "Tensor[f32, 2, 1]":
+        return reduce_min(value, axis=1, keepdim=True)
+
+    module = ModuleOp([build_func_op(reduce_min_direct, _tensor_arg([2, 4], NumericType.Float32))])
+    raw_ir = str(module)
+    assert "nn.reduce_min" in raw_ir
+
+    LowerNnToKernelPass().run(module)
+    after_ir = str(module)
+    assert "kernel.reduce_min" in after_ir
+    assert "axis = 1" in after_ir
+    assert "keepdim = true" in after_ir
+    assert "nn.reduce_min" not in after_ir
+    assert "Unsupported call expression" not in after_ir
 
 
 # TC-PASS-N2K-008

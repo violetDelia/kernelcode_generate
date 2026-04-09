@@ -4,7 +4,7 @@
 最后一次更改: 金铲铲大作战
 
 功能说明:
-- 定义 kernel dialect 的逐元素算术、比较、选择、指数与类型转换 op。
+- 定义 kernel dialect 的逐元素算术、比较、选择、指数、归约与类型转换 op。
 - 复用 nn dialect 的 NnMemoryType 与 NnMemorySpaceAttr。
 - 所有结果通过 outs(...) 写回，不产生 SSA result。
 
@@ -29,6 +29,7 @@ from xdsl.dialects.builtin import (
     IntAttr,
     IntegerAttr,
     IntegerType,
+    StringAttr,
     i1,
 )
 from xdsl.ir import Attribute, Dialect, Operation, SSAValue
@@ -403,6 +404,189 @@ def _img2col_output_dim(size: int, kernel: int, stride: int, dilation: int, pad_
     """
 
     return ((size + pad_before + pad_after - dilation * (kernel - 1) - 1) // stride) + 1
+
+
+def _normalize_bool_attr(value: bool | int | IntegerAttr | IntAttr, field_name: str) -> IntegerAttr:
+    """将布尔语义规整为 i1 IntegerAttr。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 支持 bool/int/IntAttr/IntegerAttr 输入，统一为 i1 IntegerAttr。
+    - 用于 kernel.reduce_min keepdim 等属性构造入口。
+
+    使用示例:
+    - _normalize_bool_attr(True, "keepdim")
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel_dialect.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    if isinstance(value, IntegerAttr):
+        return value
+    if isinstance(value, IntAttr):
+        value = value.data
+    if isinstance(value, bool):
+        value = 1 if value else 0
+    return IntegerAttr(int(value), IntegerType(1))
+
+
+def _verify_bool_attr(attr: IntegerAttr, field_name: str) -> bool:
+    """校验 i1 bool attr 并返回布尔值。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 要求类型为 i1 IntegerAttr。
+    - 要求取值为 0/1，接受 i1 语义下的 -1(true)。
+
+    使用示例:
+    - keepdim = _verify_bool_attr(op.keepdim, "keepdim")
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel_dialect.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    if not isinstance(attr.type, IntegerType):
+        raise VerifyException(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected=f"{field_name} must be i1",
+                actual=_ERROR_ACTUAL,
+                action=_ERROR_ACTION,
+            )
+        )
+    width_attr = attr.type.width
+    width_value = width_attr.data if isinstance(width_attr, IntAttr) else width_attr
+    if width_value != 1:
+        raise VerifyException(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected=f"{field_name} must be i1",
+                actual=_ERROR_ACTUAL,
+                action=_ERROR_ACTION,
+            )
+        )
+    value = attr.value.data
+    if value == -1:
+        return True
+    if value not in (0, 1):
+        raise VerifyException(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected=f"{field_name} must be bool",
+                actual=_ERROR_ACTUAL,
+                action=_ERROR_ACTION,
+            )
+        )
+    return value == 1
+
+
+def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
+    """判断两个维度是否语义一致。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅在同类型且内容相等时认为一致。
+
+    使用示例:
+    - _dims_equal(IntAttr(1), IntAttr(1))
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel_dialect.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    if isinstance(lhs, IntAttr) and isinstance(rhs, IntAttr):
+        return lhs.data == rhs.data
+    if isinstance(lhs, StringAttr) and isinstance(rhs, StringAttr):
+        return lhs.data == rhs.data
+    return False
+
+
+def _build_reduce_result_shape(
+    input_dims: Sequence[Attribute],
+    axis: int,
+    keepdim: bool,
+) -> list[Attribute]:
+    """构造 reduce 结果的 shape 维度列表。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - keepdim=true 时将归约轴替换为 1。
+    - keepdim=false 时移除归约轴；若结果 rank 为 0 则规范为 [1]。
+
+    使用示例:
+    - _build_reduce_result_shape([IntAttr(2), IntAttr(3)], axis=0, keepdim=False)
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel_dialect.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    if keepdim:
+        return [IntAttr(1) if index == axis else dim for index, dim in enumerate(input_dims)]
+
+    result_dims = [dim for index, dim in enumerate(input_dims) if index != axis]
+    if not result_dims:
+        return [IntAttr(1)]
+    return result_dims
+
+
+def _verify_reduce_result_shape(
+    result_type: NnMemoryType,
+    expected_shape: Sequence[Attribute],
+    op_name: str,
+) -> None:
+    """校验 reduce 结果 shape 合同。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 比较结果 shape 与期望 shape 的长度与逐维一致性。
+
+    使用示例:
+    - _verify_reduce_result_shape(out_type, expected_shape, "kernel.reduce_min")
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel_dialect.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    if len(result_type.shape.data) != len(expected_shape):
+        raise VerifyException(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected=f"{op_name} out shape must match reduce contract",
+                actual=_ERROR_ACTUAL,
+                action=_ERROR_ACTION,
+            )
+        )
+
+    for expected_dim, actual_dim in zip(expected_shape, result_type.shape.data, strict=True):
+        if not _dims_equal(expected_dim, actual_dim):
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected=f"{op_name} out shape must match reduce contract",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
 
 
 class _BaseKernelBinaryOp(IRDLOperation):
@@ -1121,6 +1305,125 @@ class KernelSoftmaxOp(IRDLOperation):
         _verify_i64_attr_range(axis_attr, "axis", min_value=-rank, max_value=rank - 1)
 
 
+@irdl_op_definition
+class KernelReduceMinOp(IRDLOperation):
+    """kernel.reduce_min。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 定义 kernel.reduce_min op 与 verifier 约束。
+
+    使用示例:
+    - KernelReduceMinOp(inp, out, axis=1, keepdim=False, space=NnMemorySpaceAttr.from_name("global"))
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel_dialect.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    name = "kernel.reduce_min"
+
+    input = operand_def(NnMemoryType)
+    out = operand_def(NnMemoryType)
+    axis = attr_def(IntegerAttr)
+    keepdim = attr_def(IntegerAttr)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        input_value: SSAValue | Operation,
+        out: SSAValue | Operation,
+        axis: int | IntegerAttr | IntAttr,
+        keepdim: bool | int | IntegerAttr | IntAttr,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        """初始化 reduce_min op。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 绑定输入/输出 operand。
+        - axis 规整为 i64 IntegerAttr，keepdim 规整为 i1。
+
+        使用示例:
+        - KernelReduceMinOp(inp, out, axis=1, keepdim=False, space=NnMemorySpaceAttr.from_name("global"))
+
+        关联文件:
+        - spec: spec/dialect/kernel.md
+        - test: test/dialect/test_kernel_dialect.py
+        - 功能实现: kernel_gen/dialect/kernel.py
+        """
+
+        axis_attr = _normalize_i64_attr(axis, "axis")
+        keepdim_attr = _normalize_bool_attr(keepdim, "keepdim")
+        super().__init__(
+            operands=[input_value, out],
+            attributes={"axis": axis_attr, "keepdim": keepdim_attr, "space": space},
+        )
+
+    def verify_(self) -> None:
+        """校验 kernel.reduce_min 的 verifier 合同。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 校验 axis/keepdim/out.shape 约束。
+        - 校验 element_type 与 space 一致性。
+
+        使用示例:
+        - KernelReduceMinOp(inp, out, axis=1, keepdim=False, space=NnMemorySpaceAttr.from_name("global")).verify_()
+
+        关联文件:
+        - spec: spec/dialect/kernel.md
+        - test: test/dialect/test_kernel_dialect.py
+        - 功能实现: kernel_gen/dialect/kernel.py
+        """
+
+        input_type = _verify_memory_type(self.input.type, "input")
+        out_type = _verify_memory_type(self.out.type, "out")
+        axis_value = _verify_i64_attr_range(
+            self.axis, "axis", min_value=0, max_value=len(input_type.shape.data) - 1
+        )
+        keepdim_value = _verify_bool_attr(self.keepdim, "keepdim")
+        if input_type.element_type != out_type.element_type:
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.reduce_min element_type must match across operands",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+        self.space.verify()
+        if input_type.space.space.data != out_type.space.space.data:
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.reduce_min out space must match input",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+        if input_type.space.space.data != self.space.space.data:
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.reduce_min attribute space must match input",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+        expected_shape = _build_reduce_result_shape(
+            list(input_type.shape.data), axis_value, keepdim_value
+        )
+        _verify_reduce_result_shape(out_type, expected_shape, "kernel.reduce_min")
+
+
 Kernel = Dialect(
     "kernel",
     [
@@ -1140,6 +1443,7 @@ Kernel = Dialect(
         KernelCastOp,
         KernelExpOp,
         KernelSoftmaxOp,
+        KernelReduceMinOp,
     ],
     [],
 )
@@ -1162,4 +1466,5 @@ __all__ = [
     "KernelCastOp",
     "KernelExpOp",
     "KernelSoftmaxOp",
+    "KernelReduceMinOp",
 ]

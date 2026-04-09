@@ -72,7 +72,7 @@
 - 当 `dma.view` 结果直接参与 `func.return` 时，返回的 `!nn.memory<...>` 类型必须与同一份 `result_type` 完全一致；`expectation/dsl/mlir_gen/dialect/dma/view` 中的 `EXPECTED_MEMORY` 比对依赖这一边界。
 - 静态可判定时 `dma.view` 的 `source/result` `numel` 必须一致；若 `source` 为一维 `i8` byte pool，则要求字节数一致且静态边界不越界。
 - `dma.reshape` 仅接受动态 `shape` operand，且这些 operand 必须为 `!symbol.int<"expr">`；结果 `stride` 按 `shape` 的默认连续布局语义生成。
-- `dma.alloc` 仅接受动态 `shape` operand，且这些 operand 必须为 `!symbol.int<"expr">`；`stride` 不作为输入，而是按默认连续布局语义生成。
+- `dma.alloc` 仅接受动态 `shape` operand，且这些 operand 必须为 `!symbol.int<"expr">`；允许两种形态：与结果 rank 等长的全量列表，或仅包含结果 `shape` 中符号维度的列表（按出现顺序）；`stride` 不作为输入，而是按默认连续布局语义生成。
 - 对 mixed add 等需要 `scalar -> memory` 合法化的链路，当前唯一公开合法原语是 `dma.alloc + dma.fill(target, value)`：`dma.alloc` 负责生成 temporary memory，`dma.fill` 负责把 `const(i32)` / `!symbol.int<"expr">` 真实写入该 memory 的每个逻辑元素。仅生成空 `dma.alloc` 占位，或生成 `dma.fill` 后其 `target` 在下游 IR 中 `users=[]`，都不属于当前链路的通过口径。
 - `strides` 当前每一维仍限制为单位步长语义，但该约束应体现在 operand 校验阶段，而不是要求使用 `IntAttr(1)` attribute。
 - operation 层允许非单位 `strides` 作为切片步进，但本方言仅实现单位步长语义；因此含非单位 `strides` 的 `dma.load/store/slice/deslice` 必须在 lowering/verifier 阶段拒绝。原因：现有 lowering 目标与 verifier 规则仅覆盖单位步长切片。
@@ -93,7 +93,7 @@
 - assembly 缺失必要字段时，必须在 parse 阶段失败。
 - `NnMemorySpaceAttr` 非法值、`NnMemoryType.shape` 与 `stride` rank 不一致等类型错误，必须按 `nn dialect` 规则报错。
 - `dma.copy` 中 `source/target` 的 `shape/stride/element_type` 不一致必须报错。
-- `dma.alloc` 的动态 `shape` operand 与结果 rank 不匹配时必须报错；任一 `shape` operand 不是 `!symbol.int<"expr">` 时必须报错；结果类型非法必须报错。
+- `dma.alloc` 的动态 `shape` operand 必须与结果 rank 等长，或仅覆盖结果 `shape` 中符号维度（按出现顺序）；任一 `shape` operand 不是 `!symbol.int<"expr">` 时必须报错；结果类型非法必须报错。
 - `dma.fill` 中 `target` 不是 `!nn.memory<...>`、`target.element_type != i32`、或 `value` 既不是 builtin `i32` 也不是 `!symbol.int<"expr">` 时必须报错。
 - `dma.free` 的 operand 不是 `!nn.memory<...>` 时必须报错。
 - `dma.load/slice` 中 `offsets/sizes/strides` 长度与输入 rank 不一致必须报错；任一相关 operand 不是 `!symbol.int<"expr">` 时必须报错。
@@ -201,8 +201,8 @@ op = DmaAllocOp(dynamic_shape, result_type)
 注意事项：
 
 - `result_type` 中的 `shape/stride/element_type/space` 必须完整且合法。
-- 若结果布局含运行期 shape 信息，则对应值必须由 `dynamic_shape` operand 提供，且每个 operand 都必须是 `!symbol.int<"expr">`。
-- `dynamic_shape` 的长度必须与结果 rank 一致。
+- 若结果布局含运行期 shape 信息，则对应符号维必须由 `dynamic_shape` operand 提供，静态维可省略；每个 operand 都必须是 `!symbol.int<"expr">`。
+- `dynamic_shape` 支持两种形态：与结果 rank 等长的全量列表，或仅包含结果 `shape` 中符号维度的列表（按出现顺序）。
 - 结果 `stride` 不作为输入，由 `result_type.shape` 与默认连续布局规则共同确定。
 - 当前版本不额外定义 base offset；`dma.alloc` 只负责产生新的 memory 对象。
 
@@ -669,7 +669,7 @@ op = DmaCastOp(source, result_type)
 | TC-DMA-019B | 视图 | `dma.view` 显式 stride 布局 | 在 `source/result` `numel` 一致前提下，允许 `result_type.stride` 与 `source.stride` 不同，只要求与 `stride` operand 对齐 | 构造并校验 `dma.view` | verifier 通过 | `test_dma_view_accepts_matching_numel_subset_with_explicit_stride` |
 | TC-DMA-019D | 视图 | `dma.view` byte pool typed view | `source` 为一维 `i8` byte pool，`result` 为任意 element_type，静态字节数与边界匹配 | 构造并校验 `dma.view` | verifier 通过/失败按字节校验 | `test_dma_view_byte_pool_typed_view` |
 | TC-DMA-019C | 视图 | `dma.view` expectation 返回类型对齐 | DSL `view(...)` 结果直接参与函数返回，且 `result_type.shape == size`、`result_type.stride == stride` | 执行 expectation 比对 | `func.return` 类型与 `dma.view.result_type` 一致，`EXPECTED_MEMORY` 比对成功 | `expectation/dsl/mlir_gen/dialect/dma/view` |
-| TC-DMA-020 | 分配 | `dma.alloc` 动态形状输入 | `dynamic_shape` 由 SSA `!symbol.int<"expr">` operand 提供，长度与 rank 一致，符号维度默认 stride 规则（如 `N`/`M*N`/`?`）生效 | 构造并校验 `dma.alloc` | verifier 通过 | `test_dma_alloc_dynamic_symbol_int_shape_operands_valid` |
+| TC-DMA-020 | 分配 | `dma.alloc` 动态形状输入 | `dynamic_shape` 由 SSA `!symbol.int<"expr">` operand 提供，长度与 rank 一致或仅覆盖符号维度，符号维度默认 stride 规则（如 `N`/`M*N`/`?`）生效 | 构造并校验 `dma.alloc` | verifier 通过 | `test_dma_alloc_dynamic_symbol_int_shape_operands_valid` |
 | TC-DMA-021 | 解析/打印 | 动态 shape round-trip | 包含 `dma.alloc/fill/view/load/store/slice/deslice/reshape/cast` 的 SSA `!symbol.int<"expr">` operand 文本 | parse/print | 与输入文本一致 | `test_dma_dynamic_symbol_int_parse_print_round_trip` |
 | TC-DMA-022 | 标量输入 | 非法标量类型拒绝 | 任一布局/索引类标量输入为 builtin `index` 或其他非 symbol 标量类型，或 `dma.fill.value` 为未允许的其他 scalar 类型 | 构造并校验 `dma` op | verifier 报错 | `test_dma_rejects_non_symbol_int_scalar_operands` |
 | TC-DMA-023 | 生命周期 | `dma.free` 释放内存 | `source` 为 `!nn.memory<...>` 或非该类型 | 构造并校验 `dma.free` | 非内存类型报错 | `test_dma_free_requires_nn_memory_type` |

@@ -30,6 +30,8 @@ from xdsl.dialects.builtin import (
     Float16Type,
     Float32Type,
     IntAttr,
+    IntegerAttr,
+    IntegerType,
     StringAttr,
     i1,
     i32,
@@ -56,6 +58,7 @@ from kernel_gen.dialect.kernel import (
     KernelLtOp,
     KernelMatmulOp,
     KernelMulOp,
+    KernelReduceMinOp,
     KernelSoftmaxOp,
     KernelSelectOp,
     KernelSubOp,
@@ -798,4 +801,115 @@ def test_kernel_softmax_requires_float() -> None:
     out_type = _make_memory_type(element_type=i32)
     op = KernelSoftmaxOp(_make_value(input_type), _make_value(out_type), axis=1, space=_make_space("global"))
     with pytest.raises(VerifyException, match="kernel.softmax element_type must be float"):
+        op.verify()
+
+
+# TC-KRN-019
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-09 04:20:00 +0800
+# 最近一次运行成功时间: 2026-04-09 04:20:00 +0800
+# 功能说明: 验证 kernel.reduce_min 正常路径可通过。
+# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_reduce_min_success
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel_dialect.py
+def test_kernel_reduce_min_success() -> None:
+    input_type = _make_memory_type(element_type=Float32Type())
+    out_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(1)]),
+        stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+        element_type=Float32Type(),
+    )
+    op = KernelReduceMinOp(
+        _make_value(input_type),
+        _make_value(out_type),
+        axis=1,
+        keepdim=True,
+        space=_make_space("global"),
+    )
+    op.verify()
+
+
+# TC-KRN-020
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-09 04:20:00 +0800
+# 最近一次运行成功时间: 2026-04-09 04:20:00 +0800
+# 功能说明: 验证 kernel.reduce_min axis 越界会报错。
+# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_reduce_min_axis_error
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel_dialect.py
+def test_kernel_reduce_min_axis_error() -> None:
+    input_type = _make_memory_type(element_type=Float32Type())
+    out_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(1)]),
+        stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+        element_type=Float32Type(),
+    )
+    op = KernelReduceMinOp(
+        _make_value(input_type),
+        _make_value(out_type),
+        axis=2,
+        keepdim=True,
+        space=_make_space("global"),
+    )
+    with pytest.raises(VerifyException, match="axis must be within"):
+        op.verify()
+
+
+# TC-KRN-022
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-09 05:50:19 +0800
+# 最近一次运行成功时间: 2026-04-09 05:50:19 +0800
+# 功能说明: 验证 kernel.reduce_min 拒绝 out.shape 不一致。
+# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_reduce_min_out_shape_mismatch
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel_dialect.py
+def test_kernel_reduce_min_out_shape_mismatch() -> None:
+    input_type = _make_memory_type(element_type=Float32Type())
+    out_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(2)]),
+        stride=ArrayAttr([IntAttr(2), IntAttr(1)]),
+        element_type=Float32Type(),
+    )
+    op = KernelReduceMinOp(
+        _make_value(input_type),
+        _make_value(out_type),
+        axis=1,
+        keepdim=True,
+        space=_make_space("global"),
+    )
+    with pytest.raises(VerifyException, match="kernel.reduce_min out shape must match reduce contract"):
+        op.verify()
+
+
+# TC-KRN-021
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-09 05:31:18 +0800
+# 最近一次运行成功时间: 2026-04-09 05:31:18 +0800
+# 功能说明: 验证 kernel.reduce_min 拒绝 keepdim 非 i1。
+# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_reduce_min_keepdim_error
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel_dialect.py
+def test_kernel_reduce_min_keepdim_error() -> None:
+    input_type = _make_memory_type(element_type=Float32Type())
+    out_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(2), IntAttr(1)]),
+        stride=ArrayAttr([IntAttr(1), IntAttr(1)]),
+        element_type=Float32Type(),
+    )
+    op = KernelReduceMinOp(
+        _make_value(input_type),
+        _make_value(out_type),
+        axis=1,
+        keepdim=IntegerAttr(2, IntegerType(8)),
+        space=_make_space("global"),
+    )
+    with pytest.raises(VerifyException, match="keepdim must be i1"):
         op.verify()

@@ -880,6 +880,13 @@ def test_dma_alloc_dynamic_symbol_int_shape_operands_valid() -> None:
     op = DmaAllocOp(_make_symbol_operands(["M", "N"]), non_contiguous_result_type)
     op.verify()
 
+    mixed_result_type = _make_memory_type(
+        shape=ArrayAttr([StringAttr("M"), IntAttr(4)]),
+        stride=ArrayAttr([IntAttr(4), IntAttr(1)]),
+    )
+    op = DmaAllocOp(_make_symbol_operands(["M"]), mixed_result_type)
+    op.verify()
+
 
 # TC-DMA-021
 # 创建者: 朽木露琪亚

@@ -231,6 +231,58 @@ def _verify_operands_match_layout(
                 raise VerifyException(mismatch_message)
 
 
+def _verify_dynamic_shape_matches_result(
+    dynamic_shape: Sequence[SSAValue],
+    result_shape: ArrayAttr[Attribute],
+    field_name: str,
+) -> None:
+    """校验 dma.alloc 的 dynamic_shape 与结果 shape 的一致性。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 支持两种形态：
+      1) dynamic_shape 与结果 rank 等长，逐维对齐；
+      2) dynamic_shape 仅包含符号维度，按出现顺序对齐。
+    - 匿名维度 `?` 仍不允许出现在结果 shape。
+
+    使用示例:
+    - _verify_dynamic_shape_matches_result(dynamic_shape, result_type.shape, "dynamic_shape")
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma_dialect.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    rank = len(result_shape.data)
+    if len(dynamic_shape) == rank:
+        _verify_rank_match(dynamic_shape, rank, field_name)
+        _verify_operands_match_layout(dynamic_shape, result_shape, f"{field_name} must match result shape")
+        return
+
+    symbol_dims: list[str] = []
+    for dim in result_shape.data:
+        if isinstance(dim, IntAttr):
+            continue
+        if isinstance(dim, StringAttr):
+            if dim.data == "?":
+                raise VerifyException(f"{field_name} must not contain '?'")
+            symbol_dims.append(dim.data)
+            continue
+        raise VerifyException(f"{field_name} entries must be IntAttr or StringAttr")
+
+    if len(dynamic_shape) != len(symbol_dims):
+        raise VerifyException(f"{field_name} length must match symbol rank")
+
+    for value, expected in zip(dynamic_shape, symbol_dims, strict=True):
+        if not isinstance(value.type, SymbolValueType):
+            raise VerifyException(f"{field_name} entries must be !symbol.int")
+        if value.type.get_value() != expected:
+            raise VerifyException(f"{field_name} symbol must match result shape")
+
+
 def _verify_broadcast_compat(
     source_shape: ArrayAttr[Attribute],
     target_shape: ArrayAttr[Attribute],
@@ -701,7 +753,7 @@ class DmaAllocOp(IRDLOperation):
 
         功能说明:
         - 结果类型必须为 nn.memory。
-        - dynamic_shape 需与 result shape 对齐。
+        - dynamic_shape 支持全量 rank 列表或仅符号维度列表。
         - stride 按结果类型显式指定，不再额外限制布局。
 
         使用示例:
@@ -715,8 +767,7 @@ class DmaAllocOp(IRDLOperation):
 
         result_type = _verify_memory_type(self.result.type, "result")
         dynamic_shape = _verify_symbol_int_operands(self.dynamic_shape, "dynamic_shape", min_value=1)
-        _verify_rank_match(dynamic_shape, len(result_type.shape.data), "dynamic_shape")
-        _verify_operands_match_layout(dynamic_shape, result_type.shape, "dynamic_shape must match result shape")
+        _verify_dynamic_shape_matches_result(dynamic_shape, result_type.shape, "dynamic_shape")
 
 
 @irdl_op_definition
