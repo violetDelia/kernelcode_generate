@@ -4,12 +4,12 @@
 
 - 综合 AST 解析、AST 遍历与节点发射规则，将 Python 函数转换为 MLIR `func.func` op。
 - 统一约束函数签名、参数与返回值的生成规则。
-- 不生成 module，不负责文本打印。
+- 提供函数级入口生成 `func.func`，并提供 module 级入口生成 `builtin.module`；不负责文本打印。
 
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
 - `功能实现`：[`kernel_gen/dsl/mlir_gen.py`](../../kernel_gen/dsl/mlir_gen.py)
 - `test`：[`test/dsl/test_mlir_gen.py`](../../test/dsl/test_mlir_gen.py)
@@ -25,28 +25,28 @@
 
 ## 目标
 
-- 以统一入口生成 `func.func` op。
+- 提供生成 `func.func` 与 `builtin.module` 的统一入口。
 - 保证函数签名跟随 `runtime_args`，函数返回类型跟随实际 `return` 表达式 lowering 结果。
 - 使用函数实际接收的运行时参数推导 `func.func` 输入签名。
-- 为上层打印或封装提供稳定的 func op 结果。
+- 对 module 级入口，按确定性的 callee 收集与排序规则补齐同一调用闭包中的 `func.func`。
+- 为上层封装与工具提供稳定的 IR 结果。
 
 ## 限制与边界
 
-- 不生成 `builtin.module`。
+- `build_func_op(...)` / `build_func_op_from_ast(...)` 只生成 `func.func`，不负责组装 `builtin.module`；`mlir_gen(...)` 负责组装 `builtin.module`。
 - 不负责 MLIR 文本打印或后端代码生成。
 - 不定义节点级发射细节，节点发射规则由 `emit_mlir` 约束。
 - 不做优化或自动修复非法 IR。
 - `build_func_op` 的公开入口接收目标函数、运行时参数，以及仅用于补充源码解析环境的可选 `globals` / `builtins`；这些额外参数不得改变由 `runtime_args` 决定的函数输入签名，也不能代替必填的运行时参数。
 - `build_func_op` 的公开契约仅覆盖可位置绑定的形参；`runtime_args` 必须按这些形参的顺序传入。
-- `build_func_op` / `build_func_op_from_ast` 的参数绑定与输入签名推导只允许基于 `parse_function(...)` 得到的 AST 输入列表与显式传入的 `runtime_args`；不得使用 `inspect.signature` 或函数注解参与任何输入类型/参数绑定决策。
 - 运行时参数必须按目标函数形参顺序传入；数量不一致、顺序不一致或类型无法映射时必须报错。
 - 运行时参数的类型 lowering 必须基于“实际传入的参数对象”决定，而不是基于额外配置推断。
-- `build_func_op_from_ast` 允许 `func_ast.inputs` 为空；当 `func_ast.inputs` 非空时，`runtime_args` 必须显式提供，且长度必须与 `func_ast.inputs` 一致；若输入包含未支持的 AST 类型、未支持的标量类型，或带输入函数既不属于纯 symbol 标量函数又缺少 tensor 输入时，必须报错。
+- `build_func_op_from_ast` 允许 `func_ast.inputs` 为空；若提供 `runtime_args`，其长度必须与 `func_ast.inputs` 一致；若输入包含未支持的 AST 类型、未支持的标量类型，或带输入函数既不属于纯 symbol 标量函数又缺少 tensor 输入时，必须报错。
 - 当运行时参数为 `SymbolDim("s")` 这类 symbol 标量时，对应的 `func.func` 输入必须 lowering 为 `!symbol.int<"s">`；若为常量 symbol，例如 `SymbolDim(1)`，则必须 lowering 为 `!symbol.int<"1">`。
 - 当运行时参数是 Python `int` 且函数场景属于 symbol 整型标量运算时，对应的 `func.func` 输入必须 lowering 为携带具体整数值的 `SymbolValueType`，不得退回 `i32`、`index` 或其他 builtin 标量类型；若整数值为负数，对外字符串表示必须直接表现为十进制负数字面量，例如 `symbol.int<-7>`。
 - 只要 `FunctionAST.has_explicit_return == True`，即使没有返回注解且 `FunctionAST.outputs == []`，`build_func_op(...)` / `build_func_op_from_ast(...)` 也必须根据最后一条显式 `return expr` 的 lowering 结果生成单结果 `func.func` 与 `func.return`；不得退回零结果。
 - 当 `FunctionAST.has_explicit_return == False` 且 `FunctionAST.outputs == []` 时，若函数体最后停在值表达式上、必须依赖“最后一个值”才能猜出函数输出，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须抛出 `AstVisitorError`，错误消息包含 `Function return requires explicit return syntax or annotation`；不得靠最后一个值表达式猜函数输出，也不得静默生成零结果 `func.func`。
-- 参数注解只允许作为解析/局部校验信息；当 `runtime_args` 表示的实际输入类型与参数注解不一致时，`func.func inputs`、函数体内由输入推导出的结果类型，以及 `func.func outputs` 都必须跟随 `runtime_args`，不得跟随参数注解漂移。
+- 参数注解只允许作为解析/局部校验信息；当 `runtime_args` 表示的实际输入类型与参数注解不一致时，`func.func inputs`、函数体内由输入推导出的结果类型，以及 `func.func outputs` 都必须跟随 `runtime_args`，不得跟随参数注解变化。
 - 当函数体仅包含 `for` 循环且没有 `return` 时，输出 `func.func` 允许零返回值。
 - 当 `ForAST` 来源于 `LoopRange(start, end, step)` 且循环边界保持 symbol 整数语义时，lowering 后必须生成 `symbol.for`，不得退回 `scf.for`；其循环块参数 `it` 必须为 `!symbol.int<"expr">`。
 - `LoopRange` 场景中的循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand，必须直接保持 `!symbol.int<"expr">` 语义传递，不得额外生成 `arith.index_cast`。
@@ -80,7 +80,7 @@
 - 当函数体包含 `barrier(visibility=[...], scope=BarrierScope.BLOCK)` 语句时，lowering 必须生成无返回值 `arch.barrier`；`visibility` 必须是按源码顺序保留的非空 `MemorySpace` 列表，`scope` 必须可 lowering 为 `#arch.scope<...>`，缺项、多余参数、空列表或非法元素类型都必须报固定错误，且不得把 `barrier(...)` 静默当成未知 helper。
 - 当函数体包含 `launch_kernel(callee, block, thread, subthread, *args)` 语句时，lowering 必须生成无返回值 `arch.launch<block, thread, subthread>(@callee, args...)`；`callee` 必须是函数对象 / symbol ref，对外不得接受字符串字面量、属性访问、lambda、调用表达式或 keyword args。`block/thread/subthread` 在 AST 入口要求为正整数或 `SymbolDim` 语义，emit 阶段进一步要求三者可归一化为正整数 `!symbol.int`，违规时必须报错；launched body 中 `get_thread_num()` / `get_block_num()` / `get_subthread_num()` 的返回类型仍分别为 `!symbol.int<"thread_num">` / `!symbol.int<"block_num">` / `!symbol.int<"subthread_num">`，其数值语义来自当前 `launch` extent，而不是 target capability upper bound。
 - 当函数体包含 `tensor.get_shape()[axis]` 或 `tensor.get_stride()[axis]` 轴访问表达式时，必须复用 `TensorAxisAccessAST` 链路：`get_shape` 降级为 `symbol.get_dim`、`get_stride` 降级为 `symbol.get_stride`，并保持返回 `!symbol.int<"...">`；`tensor` 非 `nn.memory`、`axis` 非静态整数、负轴或越界必须报错。
-- 如需 `builtin.module` 封装，由调用方完成。
+- 如需 `builtin.module` 结果，应使用 `mlir_gen(...)`；调用方无需手工组装 module。
 
 ## 公开接口
 
@@ -167,7 +167,7 @@ func_op = build_func_op(only_symbol, s)
 参数说明：
 
 - `func_ast` (`FunctionAST`)：函数 AST。
-- `runtime_args` (`tuple[object, ...] | list[object] | None`)：目标函数实际传入的运行时参数；当 `func_ast.inputs` 非空时必填。其顺序必须与 `func_ast.inputs` 一致，并用于驱动 `func.func` 输入签名的 lowering。
+- `runtime_args` (`tuple[object, ...] | list[object] | None`)：目标函数实际传入的运行时参数；若提供，则顺序必须与 `func_ast.inputs` 一致，并用于驱动 `func.func` 输入签名的 lowering。
 - `config` (`dict[str, object] | None`)：可选的 visitor / lowering 配置，会透传给 `AstVisitor(config=...)` 与 `EmitContext(..., config=...)`，但不得改变 `runtime_args` 驱动签名的公开契约。
 
 使用示例：
@@ -185,9 +185,9 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
 注意事项：
 
 - 输入 AST 必须满足 `ast.md` 的结构约束。
-- 当 `func_ast.inputs` 非空时，`runtime_args` 必须显式提供；其长度与顺序必须与 `func_ast.inputs` 一一对应，并以实际运行时参数语义驱动签名 lowering。
-- 当 `func_ast.inputs` 为空时，`runtime_args` 可省略；若提供，长度必须为 0。
+- `runtime_args` 省略时，输入签名按 AST 注解 lowering；提供时，必须与 `func_ast.inputs` 一一对应，并以实际运行时参数语义驱动签名 lowering。
 - `config` 只用于 visitor / lowering 配置透传，不得替代 `runtime_args`，也不得改变由 `runtime_args` 决定的输入签名。
+- `func_ast.inputs` 可以为空；若提供 `runtime_args`，长度必须与 `func_ast.inputs` 一致。
 - 当 `func_ast.has_explicit_return == True` 且 `func_ast.outputs == []` 时，`build_func_op_from_ast(...)` 仍必须生成单结果 `func.func`；结果类型与 `func.return` operand 类型都必须由最后一条显式 `return expr` 的 lowering 结果决定。
 - 当 `func_ast.has_explicit_return == False` 且 `func_ast.outputs == []` 时，若函数体最后停在值表达式上、必须依赖末尾值表达式才能推断输出，`build_func_op_from_ast(...)` 必须抛出 `AstVisitorError`，错误消息包含 `Function return requires explicit return syntax or annotation`；不得猜测函数输出类型。
 - 若 AST 输入包含未支持的节点类型、未支持的标量类型，或函数既不属于纯 symbol 标量函数又缺少 tensor 输入，必须报错。
@@ -204,6 +204,103 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
 
 - 返回 `func.func` op。
 
+### `mlir_gen(fn, *runtime_args, globals=None, builtins=None, config=None)`
+
+功能说明：
+
+- 从 Python 根函数生成 `builtin.module`。
+- module 中至少包含根函数对应的 `func.func`。
+- 若根函数中出现“当前前端已支持、且应当表达为 `func.call` 的 Python 函数调用”，则 module 中必须补齐这些 callee 的 `func.func`。
+- callee 收集范围是从根函数出发的传递闭包，不是只收集一层调用。
+
+参数说明：
+
+- `fn` (`callable`)：根函数。
+- `runtime_args` (`tuple[object, ...]`)：根函数的运行时参数，仅用于根函数签名推导。
+- `globals` (`dict[str, object] | None`)：解析环境补充表，语义与 `build_func_op(...)` 一致。
+- `builtins` (`dict[str, object] | object | None`)：内建名称补充表，语义与 `build_func_op(...)` 一致。
+- `config` (`dict[str, object] | None`)：可选配置；会透传给 visitor / lowering，但不得改变 module 组装顺序与 callee 收集边界。
+
+使用示例：
+
+```python
+from kernel_gen.dsl.mlir_gen import mlir_gen
+from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.type import NumericType
+
+
+def helper(x: "Tensor[i32, 4]") -> "Tensor[i32, 4]":
+    return x + x
+
+
+def main(x: "Tensor[i32, 4]") -> "Tensor[i32, 4]":
+    return helper(x)
+
+
+module = mlir_gen(main, Memory([4], NumericType.Int32))
+```
+
+```python
+from kernel_gen.tools.mlir_gen_compare import compare_mlir_file
+
+ok = compare_mlir_file(
+    fn=main,
+    runtime_args=[Memory([4], NumericType.Int32)],
+    config=None,
+    mlir_file="main_expected.mlir",
+)
+assert ok is True
+```
+
+注意事项：
+
+- 根函数签名推导仅允许基于 `runtime_args + AST`；不得把 Python 函数签名、返回注解或参数注解当作另一套独立推导来源。
+- callee 的 `func.func` 签名必须由其 call-site operand 类型推导；callee 不要求也不接受额外的 `runtime_args`。
+- 同一个 callee 若在多个 call-site 下推导出不一致签名，必须失败，错误消息包含 `MlirGenModuleError: inconsistent callee signature`。
+- 递归调用不支持，必须失败，错误消息包含 `MlirGenModuleError: recursive callee graph is not supported`。
+- 遇到不支持的 callee 形式（例如匿名函数、lambda、本地闭包函数等），必须失败，错误消息包含 `MlirGenModuleError: unsupported callee function`。
+- DSL helper 调用（例如 `softmax(...)`、`broadcast_to(...)`、`matmul(...)`）不属于“应当表达为 `func.call` 的 Python callee”，不得因此向 module 额外增加新的 `func.func`。
+
+module 内函数顺序：
+
+- 根函数在前。
+- callee 按 AST 中首次出现的调用顺序做 DFS 追加。
+- 同一个 callee 只出现一次。
+
+示例（顺序要求）：
+
+```python
+def c(x):
+    return x + x
+
+
+def b(x):
+    return c(x)
+
+
+def a(x):
+    y = b(x)
+    return c(y)
+
+
+module = mlir_gen(a, Memory([4], NumericType.Int32))
+```
+
+预期顺序：
+
+```text
+builtin.module {
+  func.func @a(...)
+  func.func @b(...)
+  func.func @c(...)
+}
+```
+
+返回与限制：
+
+- 返回 `builtin.module` op。
+- 不返回字符串；文本形式由统一 printer 负责。
+
 ## 测试
 
 - 测试文件：[`test/dsl/test_mlir_gen.py`](../../test/dsl/test_mlir_gen.py)
@@ -217,7 +314,7 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - 验证 `build_func_op(...)` 生成 `func.func`。
   - 验证 `build_func_op(fn, *runtime_args, globals=None, builtins=None)` 的输入签名仅由运行时参数决定。
   - 验证 `build_func_op(...)` 仅支持按位置参数传入运行时参数；缺少运行时参数、数量不匹配或试图以 `globals/builtins` 替代时必须报错。
-  - 验证 `build_func_op_from_ast(func_ast, runtime_args=..., config=None)` 的公开接口与实现签名一致；当 `func_ast.inputs` 非空时缺失 `runtime_args` 必须报错；当 `runtime_args` 提供但长度不匹配时必须报错。
+  - 验证 `build_func_op_from_ast(func_ast, runtime_args=None, config=None)` 的公开接口与实现签名一致，且 `runtime_args` / `config` 成功路径可由测试直接观察。
   - 验证 `build_func_op_from_ast(...)` 的输入校验错误路径，包括空输入、`runtime_args` 长度不匹配、未支持的标量类型、未支持的输入节点类型，以及非纯 symbol 标量函数缺少 tensor 输入时报错。
   - 验证 `globals/builtins` 只补充解析环境，不替代运行时参数；缺少运行时参数、运行时实参数量不匹配或误用 `globals/builtins` 时必须报错。
   - 验证非 `dict` 的 `builtins` 实参可作为解析环境输入成功构建 `func.func`。
@@ -308,9 +405,15 @@ func_op = build_func_op_from_ast(func_ast, runtime_args=[A], config={"loop_vars"
   - MGEN-037：包含 `barrier(visibility=[MemorySpace.TSM, MemorySpace.TLM], scope=BarrierScope.BLOCK)` 语句的 DSL 函数必须 lowering 为单个无返回值 `arch.barrier`；缺失 `scope/visibility`、空 visibility、非法元素类型或把 `barrier(...)` 静默当成未知 helper 都必须报错并保留固定关键短语。（下游待补测试映射：`test_parse_function_supports_arch_barrier_helper`、`test_build_func_op_lowers_arch_barrier`、`expectation/dsl/mlir_gen/dialect/arch/barrier`）
   - MGEN-037A：包含 `launch_kernel(add_barrier_body, block, thread, subthread, lhs, rhs, out)` 语句的 DSL 函数必须 lowering 为单个无返回值 `arch.launch<block, thread, subthread>(@add_barrier_body, %lhs, %rhs, %out)`；`callee` 必须是函数对象 / symbol ref，字符串字面量、attribute/call expr、keyword args 与非法 extent（含非 `!symbol.int` 或静态 `<= 0`）必须报错。（下游待补测试映射：`test_parse_function_supports_arch_launch_with_callee`、`test_build_func_op_lowers_arch_launch_with_callee`、`expectation/dsl/mlir_gen/dialect/arch/launch_with_callee`）
   - MGEN-038：`build_func_op(...)` 处理 `slice(...)` 表达式时必须先生成 `dma.alloc`，再生成 `dma.slice(target, source, ...)`；表达式与 `func.return` 返回值绑定到 alloc 结果，`dma.slice` 结果不得直接作为返回值。（`test_build_func_op_slice_expression_lowers_to_alloc_then_target_slice`）
-  - MGEN-039：纯 symbol 标量 compare family 在函数级返回装配中统一返回 `i1`；`eq/ge` 已有回归测试，`ne/lt/le/gt` 当前冻结为下游待补测试映射。（现有映射：`test_build_func_op_lowers_symbol_eq`、`test_build_func_op_lowers_symbol_ge`；下游待补测试映射：`test_build_func_op_lowers_symbol_ne`、`test_build_func_op_lowers_symbol_lt`、`test_build_func_op_lowers_symbol_le`、`test_build_func_op_lowers_symbol_gt`）
+  - MGEN-039：纯 symbol 标量 compare family 在函数级返回装配中统一返回 `i1`；`eq/ge` 已有回归测试，`ne/lt/le/gt` 当前为下游待补测试映射。（现有映射：`test_build_func_op_lowers_symbol_eq`、`test_build_func_op_lowers_symbol_ge`；下游待补测试映射：`test_build_func_op_lowers_symbol_ne`、`test_build_func_op_lowers_symbol_lt`、`test_build_func_op_lowers_symbol_le`、`test_build_func_op_lowers_symbol_gt`）
   - MGEN-040：`return float(symbol.int)` 在函数级返回装配中必须返回 `f32`，并与 `symbol.to_float` 结果类型一致。（下游待补测试映射：`test_build_func_op_lowers_symbol_to_float`）
   - MGEN-041：`return view(...)` 在函数级返回装配中必须直接返回 `dma.view` 结果，`func.return` 类型与 expectation 依赖的 `dma.view` 结果类型一致。（下游待补测试映射：`test_build_func_op_supports_dma_view_helper`）
+  - MGEN-042：`mlir_gen(...)` 必须返回 `builtin.module`，且至少包含根函数对应的 `func.func`。（下游待补测试映射：`test_mlir_gen_returns_builtin_module`）
+  - MGEN-043：`mlir_gen(...)` 遇到根函数调用的可支持 Python callee 时，module 中必须补齐该 callee；收集范围为传递闭包。（下游待补测试映射：`test_mlir_gen_collects_transitive_callees`）
+  - MGEN-044：`mlir_gen(...)` 返回 module 内函数顺序必须确定：根函数在前，callee 按首次出现调用顺序做 DFS 追加。（下游待补测试映射：`test_mlir_gen_module_function_order_is_dfs`）
+  - MGEN-045：`mlir_gen(...)` 遇到不支持的 callee 形式时必须失败，错误消息包含 `MlirGenModuleError: unsupported callee function`。（下游待补测试映射：`test_mlir_gen_rejects_unsupported_callee`）
+  - MGEN-046：`mlir_gen(...)` 遇到递归 callee 图时必须失败，错误消息包含 `MlirGenModuleError: recursive callee graph is not supported`。（下游待补测试映射：`test_mlir_gen_rejects_recursive_callee_graph`）
+  - MGEN-047：`mlir_gen(...)` 同一 callee 在多个 call-site 下推导出不一致签名时必须失败，错误消息包含 `MlirGenModuleError: inconsistent callee signature`。（下游待补测试映射：`test_mlir_gen_rejects_inconsistent_callee_signature`）
   - MGEN-R2A：无返回注解但有显式 `return` 的 `add_memory / gt / cast_dim / view_kernel` 必须按实际 return lowering 结果生成单结果 `func.func`。（`test_build_func_op_infers_return_type_from_body_without_return_annotation`）
   - MGEN-R2B：来自 `parse_function(...)` 的无返回注解函数 AST，经 `build_func_op_from_ast(...)` 后仍必须按 `has_explicit_return` 元信息装配单结果 `func.func`。（`test_build_func_op_from_ast_infers_return_type_from_return_syntax_metadata`）
   - MGEN-R2C：参数注解写成 `f16` 但 `runtime_args` 传入 `i32 memory` 时，`func.func inputs/outputs` 与 `nn.add` 结果类型都必须保持 `i32 memory`。（`test_build_func_op_uses_runtime_args_not_parameter_annotations_for_ir`）

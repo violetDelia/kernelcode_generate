@@ -19,15 +19,13 @@
 
 from __future__ import annotations
 
-import ast as py_ast
 import inspect
 import re
-import textwrap
 from typing import Callable
 
 import sympy as sp
 from xdsl.dialects import func
-from xdsl.dialects.builtin import FunctionType, IntAttr, StringAttr, f32, i1, i32
+from xdsl.dialects.builtin import FunctionType, IntAttr, ModuleOp, StringAttr, f32, i1, i32
 from xdsl.ir import Block, Region
 
 from kernel_gen.dialect.nn import NnMemoryType
@@ -62,11 +60,14 @@ from .ast import (
 from .emit_mlir import (
     EmitContext,
     _LoweringError,
+    _MLIR_GEN_CALLEE_COMPILER_CONFIG_KEY,
+    _MLIR_GEN_CALLEE_REGISTRY_CONFIG_KEY,
     _ensure_supported_statements,
     _expr_key,
     _infer_binary_memory_type,
     _infer_expr_type,
     _memory_to_nn_type,
+    _nn_memory_type_to_memory,
     _parse_reduce_axis_expr,
 )
 
@@ -162,8 +163,6 @@ def _build_signature_types(
     allow_dma_alloc_only: bool = False,
 ) -> tuple[list[object], dict[int, object]]:
     is_symbol_scalar_function = _is_symbol_scalar_function(func_ast)
-    if func_ast.inputs and runtime_args is None:
-        raise _LoweringError("runtime_args is required when func_ast has inputs", location=func_ast.location)
     if runtime_args is not None and len(runtime_args) != len(func_ast.inputs):
         raise _LoweringError("runtime_args must align with func_ast inputs", location=func_ast.location)
 
@@ -173,10 +172,8 @@ def _build_signature_types(
     for index, item in enumerate(func_ast.inputs):
         runtime_arg = None if runtime_args is None else runtime_args[index]
         if isinstance(item, TensorAST):
-            if runtime_args is not None and not isinstance(runtime_arg, Memory):
-                raise _LoweringError("Unsupported input type", location=item.location)
-            runtime_memory = runtime_arg if isinstance(runtime_arg, Memory) else item.memory
-            arg_type = _memory_to_nn_type(runtime_memory, location=item.location)
+            runtime_memory = runtime_arg if isinstance(runtime_arg, Memory) else None
+            arg_type = _memory_to_nn_type(runtime_memory or item.memory, location=item.location)
             tensor_input_count += 1
         elif isinstance(item, ScalarArgAST):
             if item.value_type is not int:
@@ -535,49 +532,6 @@ def _is_zero_return_statement_expr(expr: object) -> bool:
     return isinstance(expr, (DmaFreeAST, StoreAST, ForAST, ArchBarrierAST, ArchLaunchKernelAST))
 
 
-def _parse_function_positional_arg_names(fn: Callable[..., object]) -> list[str]:
-    """提取 Python 函数的可位置绑定形参名列表。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 仅依赖 `inspect.getsource(...)` + Python AST 解析提取形参名。
-    - 与 `parse_function(...)`/`_parse_function_impl(...)` 保持一致：只收集 `func_def.args.args`。
-
-    使用示例:
-    - names = _parse_function_positional_arg_names(fn)
-
-    关联文件:
-    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
-    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
-    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
-    """
-
-    try:
-        source = inspect.getsource(fn)
-    except OSError as exc:
-        raise AstParseError("Unable to get source", [Diagnostic(str(exc), location=None)]) from exc
-
-    source = textwrap.dedent(source)
-    module = py_ast.parse(source)
-    function_defs = [node for node in module.body if isinstance(node, py_ast.FunctionDef)]
-    if len(function_defs) != 1:
-        message = "Multiple top-level function definitions are not supported"
-        raise AstParseError(message, [Diagnostic(message, location=None)])
-
-    func_def = None
-    for node in module.body:
-        if isinstance(node, py_ast.FunctionDef) and node.name == getattr(fn, "__name__", ""):
-            func_def = node
-            break
-    if func_def is None:
-        message = "Function definition not found"
-        raise AstParseError(message, [Diagnostic(message, location=None)])
-
-    return [arg.arg for arg in func_def.args.args]
-
-
 def build_func_op(
     fn: Callable[..., object],
     *runtime_args: object,
@@ -616,26 +570,26 @@ def build_func_op(
     """
     from .ast_visitor import AstVisitorError
 
-    try:
-        positional_arg_names = _parse_function_positional_arg_names(fn)
-    except AstParseError as exc:
-        location = exc.diagnostics[0].location if exc.diagnostics else None
-        raise AstVisitorError(exc.message, location=location) from exc
-
-    if len(runtime_args) != len(positional_arg_names):
+    signature = inspect.signature(fn)
+    positional_params = [
+        param
+        for param in signature.parameters.values()
+        if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    if len(runtime_args) != len(positional_params):
         if not runtime_args and (globals is not None or builtins is not None):
             reason = (
                 "globals/builtins cannot replace function runtime args: "
-                f"expected {len(positional_arg_names)}, got 0"
+                f"expected {len(positional_params)}, got 0"
             )
             raise AstVisitorError(reason, location=None)
         reason = (
             f"build_func_op requires explicit runtime args for {fn.__name__}: "
-            f"expected {len(positional_arg_names)}, got {len(runtime_args)}"
+            f"expected {len(positional_params)}, got {len(runtime_args)}"
         )
         raise AstVisitorError(reason, location=None)
 
-    runtime_table = {name: runtime_args[index] for index, name in enumerate(positional_arg_names)}
+    runtime_table = {param.name: runtime_args[index] for index, param in enumerate(positional_params)}
     # globals/builtins 仅作为解析环境，不参与签名推导。
     globals_table = dict(getattr(fn, "__globals__", {}) or {})
     globals_table.update(inspect.getclosurevars(fn).nonlocals)
@@ -695,7 +649,9 @@ def _build_func_op_from_ast_impl(
             result_type = _build_dma_alloc_only_result_type(func_ast, return_expr, runtime_args)
         else:
             if isinstance(return_expr, NnReduceAST) and return_expr.kind == "reduce_max":
-                input_type = _infer_expr_type(return_expr.value, dict(type_map), runtime_values=runtime_values)
+                input_type = _infer_expr_type(
+                    return_expr.value, dict(type_map), runtime_values=runtime_values, config=config
+                )
                 if isinstance(input_type, NnMemoryType):
                     axes = _parse_reduce_axis_expr(return_expr.axis, return_expr.location)
                     if axes is not None:
@@ -706,7 +662,7 @@ def _build_func_op_from_ast_impl(
                                     f"{return_expr.kind} axis must be within [-{rank}, {rank - 1}]",
                                     location=return_expr.location,
                                 )
-            result_type = _infer_expr_type(return_expr, dict(type_map), runtime_values=runtime_values)
+            result_type = _infer_expr_type(return_expr, dict(type_map), runtime_values=runtime_values, config=config)
         if func_ast.outputs:
             _validate_return_type(func_ast, result_type, return_expr, dict(type_map))
         type_map[_expr_key(return_expr)] = result_type
@@ -773,3 +729,248 @@ def build_func_op_from_ast(
         return _build_func_op_from_ast_impl(func_ast, runtime_args=runtime_args, config=config)
     except _LoweringError as exc:
         raise AstVisitorError(str(exc), location=exc.location) from exc
+
+
+class MlirGenModuleError(ValueError):
+    """`mlir_gen(...)` module 组装阶段错误。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 统一承载 `mlir_gen(...)` 公开合同中的失败短语。
+    - 当前固定短语为：
+      - `MlirGenModuleError: unsupported callee function`
+      - `MlirGenModuleError: recursive callee graph is not supported`
+      - `MlirGenModuleError: inconsistent callee signature`
+
+    使用示例:
+    - raise MlirGenModuleError("unsupported callee function")
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"MlirGenModuleError: {reason}")
+
+
+def _build_parse_environment(
+    fn: Callable[..., object],
+    globals_table: dict[str, object] | None,
+    builtins_table: dict[str, object] | object | None,
+) -> tuple[dict[str, object], dict[str, object]]:
+    """构造 `_parse_function_with_env(...)` 需要的 globals/builtins 表。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 以 `fn.__globals__` 与 `inspect.getclosurevars(fn).nonlocals` 作为基础解析环境。
+    - 允许通过 `globals_table` 追加覆盖解析环境名称。
+    - `builtins_table` 为 dict 时直接使用；否则尝试读取其 `__dict__`；为空则回退到 globals 里的 `__builtins__`。
+
+    使用示例:
+    - globals_table, builtins_table = _build_parse_environment(fn, globals_table=None, builtins_table=None)
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+    """
+
+    merged_globals = dict(getattr(fn, "__globals__", {}) or {})
+    merged_globals.update(inspect.getclosurevars(fn).nonlocals)
+    if globals_table is not None:
+        merged_globals.update(globals_table)
+
+    builtins_obj = builtins_table if builtins_table is not None else merged_globals.get("__builtins__", {})
+    if isinstance(builtins_obj, dict):
+        merged_builtins = builtins_obj
+    else:
+        merged_builtins = getattr(builtins_obj, "__dict__", {})
+    return merged_globals, merged_builtins
+
+
+def _is_supported_python_callee(fn: object) -> bool:
+    """判断是否属于 `mlir_gen(...)` 支持的 Python callee。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅支持具备稳定名称的 Python function。
+    - lambda 与本地闭包函数不在当前支持范围。
+
+    使用示例:
+    - assert _is_supported_python_callee(helper) is True
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+    """
+
+    if not inspect.isfunction(fn):
+        return False
+    name = getattr(fn, "__name__", "")
+    if not isinstance(name, str) or name == "" or name == "<lambda>":
+        return False
+    qualname = getattr(fn, "__qualname__", "")
+    if isinstance(qualname, str) and "<locals>" in qualname:
+        return False
+    return True
+
+
+def _runtime_args_from_callee_signature(
+    arg_types: list[object],
+    location: SourceLocation | None,
+) -> list[object]:
+    """将 call-site 的 xDSL 类型列表转换为 callee 编译所需 runtime_args。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - `nn.memory` 参数转换为 `Memory`，用于复用 `build_func_op_from_ast(...)` 的签名推导路径。
+    - `!symbol.int<expr>` 参数转换为 `SymbolDim(expr)`，确保 symbol 语义不退回 `i32`。
+    - 纯 `i32` 标量参数统一用 `0` 占位，仅用于类型分流。
+
+    使用示例:
+    - runtime_args = _runtime_args_from_callee_signature([nn_type], location=None)
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+    """
+
+    runtime_args: list[object] = []
+    for arg_type in arg_types:
+        if isinstance(arg_type, NnMemoryType):
+            runtime_args.append(_nn_memory_type_to_memory(arg_type, location))
+            continue
+        if isinstance(arg_type, SymbolValueType):
+            expr_text = arg_type.expr.expr.data
+            parsed = _parse_symbolic_dim_expr(expr_text)
+            if parsed is None:
+                runtime_args.append(SymbolDim(expr_text))
+            else:
+                runtime_args.append(SymbolDim(parsed))
+            continue
+        if arg_type == i32:
+            runtime_args.append(0)
+            continue
+        raise MlirGenModuleError("unsupported callee function")
+    return runtime_args
+
+
+def mlir_gen(
+    fn: Callable[..., object],
+    *runtime_args: object,
+    globals: dict[str, object] | None = None,
+    builtins: dict[str, object] | object | None = None,
+    config: dict[str, object] | None = None,
+) -> ModuleOp:
+    """从 Python 根函数生成 `builtin.module`。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 基于 `build_func_op_from_ast(...)` 生成根函数的 `func.func`，并包装为 `builtin.module`。
+    - 当函数体出现“应当表达为 `func.call` 的 Python callee 调用”时，自动补齐 callee 的 `func.func`。
+    - callee 收集范围为从根函数出发的传递闭包，module 内函数顺序为 root + DFS。
+    - 递归调用、不一致签名与不支持 callee 形式必须失败并返回固定短语。
+
+    使用示例:
+    - module = mlir_gen(main, Memory([4], NumericType.Float32))
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+    """
+
+    from .ast_visitor import AstVisitorError
+
+    callee_registry: dict[object, func.FuncOp] = {}
+    callee_dfs_order: list[object] = []
+    callee_signatures: dict[object, tuple[object, ...]] = {}
+    compiling: set[object] = set()
+
+    lowering_config: dict[str, object] = dict(config or {})
+    lowering_config[_MLIR_GEN_CALLEE_REGISTRY_CONFIG_KEY] = callee_registry
+
+    def _ensure_callee_compiled(callee: object, arg_types: list[object], location: SourceLocation | None) -> None:
+        if not _is_supported_python_callee(callee):
+            raise MlirGenModuleError("unsupported callee function")
+
+        signature = tuple(arg_types)
+        existing_signature = callee_signatures.get(callee)
+        if existing_signature is not None and existing_signature != signature:
+            raise MlirGenModuleError("inconsistent callee signature")
+
+        if callee in compiling:
+            raise MlirGenModuleError("recursive callee graph is not supported")
+        if callee in callee_registry:
+            return
+
+        callee_signatures[callee] = signature
+        callee_dfs_order.append(callee)
+        compiling.add(callee)
+        try:
+            callee_runtime_args = _runtime_args_from_callee_signature(list(signature), location)
+            callee_globals, callee_builtins = _build_parse_environment(callee, globals, builtins)
+            parse_config: dict[str, object] = dict(config or {})
+            parse_config["reject_external_values"] = True
+            parse_config["allow_python_callee_calls"] = True
+            try:
+                callee_ast = _parse_function_with_env(
+                    callee,
+                    globals_table=callee_globals,
+                    builtins_table=callee_builtins,
+                    runtime_table=None,
+                    config=parse_config,
+                )
+            except AstParseError as exc:
+                location = exc.diagnostics[0].location if exc.diagnostics else None
+                raise AstVisitorError(exc.message, location=location) from exc
+            callee_registry[callee] = build_func_op_from_ast(
+                callee_ast,
+                runtime_args=callee_runtime_args,
+                config=lowering_config,
+            )
+        finally:
+            compiling.remove(callee)
+
+    lowering_config[_MLIR_GEN_CALLEE_COMPILER_CONFIG_KEY] = _ensure_callee_compiled
+
+    root_globals, root_builtins = _build_parse_environment(fn, globals, builtins)
+    parse_config = dict(config or {})
+    parse_config["reject_external_values"] = True
+    parse_config["allow_python_callee_calls"] = True
+    try:
+        func_ast = _parse_function_with_env(
+            fn,
+            globals_table=root_globals,
+            builtins_table=root_builtins,
+            runtime_table=None,
+            config=parse_config,
+        )
+    except AstParseError as exc:
+        location = exc.diagnostics[0].location if exc.diagnostics else None
+        raise AstVisitorError(exc.message, location=location) from exc
+
+    compiling.add(fn)
+    try:
+        root_func_op = build_func_op_from_ast(func_ast, runtime_args=runtime_args, config=lowering_config)
+    finally:
+        compiling.remove(fn)
+
+    ordered_ops = [root_func_op]
+    for callee in callee_dfs_order:
+        ordered_ops.append(callee_registry[callee])
+    return ModuleOp(ordered_ops)

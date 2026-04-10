@@ -145,6 +145,7 @@ from .ast import (
     NnSoftmaxAST,
     NnTransposeAST,
     NnUnaryAST,
+    PythonCalleeCallAST,
     ScalarArgAST,
     SymbolToFloatAST,
     SourceLocation,
@@ -169,6 +170,9 @@ _DYNAMIC_MEMORY_SPACE_MAP = {
     MemorySpace.TSM: "tsm",
     MemorySpace.TLM: "tlm",
 }
+
+_MLIR_GEN_CALLEE_REGISTRY_CONFIG_KEY = "__mlir_gen_callee_registry__"
+_MLIR_GEN_CALLEE_COMPILER_CONFIG_KEY = "__mlir_gen_callee_compiler__"
 
 _IMG2COL_PARAM_TABLE: dict[str, tuple[tuple[str, ...], dict[str, int]]] = {
     "img2col1d": (
@@ -2790,6 +2794,7 @@ def _ensure_supported_statements(function_ast: FunctionAST) -> list[object]:
                 ArchGetDynamicMemoryAST,
                 ArchLaunchKernelAST,
                 ArchQueryAST,
+                PythonCalleeCallAST,
                 SymbolToFloatAST,
                 TensorAxisAccessAST,
             ),
@@ -2846,6 +2851,7 @@ def _infer_expr_type(
     expr: object,
     type_map: dict[int, object],
     runtime_values: dict[str, object] | None = None,
+    config: dict[str, object] | None = None,
 ) -> object:
     """推导表达式在 lowering 前的结果类型。
 
@@ -2868,6 +2874,32 @@ def _infer_expr_type(
     expr_key = _expr_key(expr)
     if expr_key in type_map:
         return type_map[expr_key]
+
+    if isinstance(expr, PythonCalleeCallAST):
+        registry_value: object = {}
+        compiler_value: object = None
+        if isinstance(config, dict):
+            registry_value = config.get(_MLIR_GEN_CALLEE_REGISTRY_CONFIG_KEY, {})
+            compiler_value = config.get(_MLIR_GEN_CALLEE_COMPILER_CONFIG_KEY)
+        if not isinstance(registry_value, dict):
+            raise _LoweringError("Python callee registry must be dict", location=expr.location)
+
+        arg_types = [
+            _infer_expr_type(arg, type_map, runtime_values=runtime_values, config=config) for arg in expr.args
+        ]
+        if compiler_value is not None:
+            if not callable(compiler_value):
+                raise _LoweringError("Python callee compiler must be callable", location=expr.location)
+            compiler_value(expr.callee, arg_types, expr.location)
+
+        callee_op = registry_value.get(expr.callee)
+        if not isinstance(callee_op, func.FuncOp):
+            raise _LoweringError("Python callee is missing from registry", location=expr.location)
+        output_types = list(callee_op.function_type.outputs.data)
+        if len(output_types) != 1:
+            raise _LoweringError("Python callee must return exactly one value", location=expr.location)
+        type_map[expr_key] = output_types[0]
+        return output_types[0]
 
     if isinstance(expr, ConstAST):
         if isinstance(expr.value, int):
@@ -3824,6 +3856,26 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         ctx.types[expr_key] = op.result.type
         return op.result
 
+    if isinstance(expr, PythonCalleeCallAST):
+        result_type = _infer_expr_type(expr, ctx.types, config=ctx.config)
+        registry_value: object = {}
+        if isinstance(ctx.config, dict):
+            registry_value = ctx.config.get(_MLIR_GEN_CALLEE_REGISTRY_CONFIG_KEY, {})
+        if not isinstance(registry_value, dict):
+            raise _LoweringError("Python callee registry must be dict", location=expr.location)
+        callee_op = registry_value.get(expr.callee)
+        if not isinstance(callee_op, func.FuncOp):
+            raise _LoweringError("Python callee is missing from registry", location=expr.location)
+        callee_name = callee_op.sym_name.data
+        args = [SSAValue.get(_lower_expr(arg, ctx)) for arg in expr.args]
+        call_op = func.CallOp(callee_name, args, [result_type])
+        ctx.builder.add_op(call_op)
+        if len(call_op.results) != 1:
+            raise _LoweringError("Python callee must return exactly one value", location=expr.location)
+        ctx._set_cache(expr_key, call_op.results[0])
+        ctx.types[expr_key] = call_op.results[0].type
+        return call_op.results[0]
+
     if isinstance(expr, BinaryExprAST):
         lhs = _lower_expr(expr.lhs, ctx)
         rhs = _lower_expr(expr.rhs, ctx)
@@ -4029,12 +4081,13 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
             NnUnaryAST,
             ArchGetDynamicMemoryAST,
             ArchQueryAST,
+            PythonCalleeCallAST,
             SymbolToFloatAST,
             TensorAxisAccessAST,
         ),
     ):
         if _expr_key(node) not in ctx.types and not isinstance(node, (TensorAST, ScalarArgAST, VarAST)):
-            _infer_expr_type(node, ctx.types)
+            _infer_expr_type(node, ctx.types, config=ctx.config)
         return _lower_expr(node, ctx)
     if isinstance(node, StoreAST):
         target = _lower_expr(node.tensor, ctx)

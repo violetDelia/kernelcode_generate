@@ -51,6 +51,7 @@ from kernel_gen.symbol_variable.type import NumericType
 
 _REJECT_EXTERNAL_VALUES_ENV_KEY = "__dsl_reject_external_values__"
 _ALLOW_EXTERNAL_CONSTANTS_ENV_KEY = "__dsl_allow_external_constants__"
+_ALLOW_PYTHON_CALLEE_CALL_ENV_KEY = "__dsl_allow_python_callee_calls__"
 _LOCAL_IMPORT_SHADOW = object()
 _ALLOWED_IMPORT_BOUND_HELPERS: dict[str, tuple[types.ModuleType, frozenset[str]]] = {
     "kernel_gen.operation.dma": (
@@ -864,6 +865,31 @@ class CompareExprAST:
     op: str
     lhs: object
     rhs: object
+    location: SourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class PythonCalleeCallAST:
+    """Python callee 调用表达式节点。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 表示 DSL 语义中“应当下沉为 `func.call`”的 Python 函数调用。
+    - 仅用于 `mlir_gen(...)` 组装 module 的 callee 收集与 call lowering；不属于 DMA/NN helper 调用。
+
+    使用示例:
+    - PythonCalleeCallAST(callee=helper, args=[VarAST("x")])
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/ast.py](kernel_gen/dsl/ast.py)
+    """
+
+    callee: object
+    args: list[object]
     location: SourceLocation | None = None
 
 
@@ -2347,7 +2373,7 @@ def _parse_dma_call(
     env: dict[str, object],
     globals_table: dict[str, object],
     builtins_table: dict[str, object],
-) -> object:
+) -> object | None:
     """解析 DSL 中的 DMA/NN helper 调用。
 
     创建者: OpenAI
@@ -2385,7 +2411,7 @@ def _parse_dma_call(
             return nn_expr
     call_name = _resolve_import_bound_helper_call(expr.func, globals_table, builtins_table)
     if call_name is None:
-        _raise_parse_error("Unsupported call expression", expr)
+        return None
 
     if call_name == "load":
         return _parse_load_like_call(expr, call_name, env, globals_table, builtins_table)
@@ -2763,8 +2789,45 @@ def _parse_dma_call(
             location=_location_from_node(expr),
         )
 
-    _raise_parse_error("Unsupported call expression", expr)
-    return expr
+    return None
+
+
+def _parse_python_callee_call(
+    expr: py_ast.Call,
+    env: dict[str, object],
+    globals_table: dict[str, object],
+    builtins_table: dict[str, object],
+) -> PythonCalleeCallAST | None:
+    """解析 `mlir_gen(...)` 支持的 Python callee 调用。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅接受直接 `Name` 调用形式（`helper(x)`），并要求 `helper` 解析为 Python function。
+    - 供 module 级 `mlir_gen(...)` 入口识别并下沉为 `func.call`；不覆盖 DSL helper（由 `_parse_dma_call` 处理）。
+    - keyword 参数暂不支持，保持前端边界最小化。
+
+    使用示例:
+    - _parse_python_callee_call(py_ast.parse(\"helper(x)\").body[0].value, env, globals(), __builtins__)
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/ast.py](kernel_gen/dsl/ast.py)
+    """
+
+    if not isinstance(expr.func, py_ast.Name):
+        return None
+    if expr.keywords:
+        return None
+    callee_value = env.get(expr.func.id)
+    if callee_value is None:
+        callee_value = _lookup_python_name(expr.func.id, globals_table, builtins_table)
+    if not inspect.isfunction(callee_value):
+        return None
+    args = [_parse_expr(arg, env, globals_table, builtins_table) for arg in expr.args]
+    return PythonCalleeCallAST(callee=callee_value, args=args, location=_location_from_node(expr))
 
 
 def _parse_expr(
@@ -2832,7 +2895,14 @@ def _parse_expr(
         symbol_to_float_expr = _parse_symbol_to_float_call(expr, env, globals_table, builtins_table)
         if symbol_to_float_expr is not None:
             return symbol_to_float_expr
-        return _parse_dma_call(expr, env, globals_table, builtins_table)
+        dma_expr = _parse_dma_call(expr, env, globals_table, builtins_table)
+        if dma_expr is not None:
+            return dma_expr
+        if bool(env.get(_ALLOW_PYTHON_CALLEE_CALL_ENV_KEY, False)):
+            callee_expr = _parse_python_callee_call(expr, env, globals_table, builtins_table)
+            if callee_expr is not None:
+                return callee_expr
+        _raise_parse_error("Unsupported call expression", expr)
 
     if isinstance(expr, py_ast.Subscript):
         if isinstance(expr.value, py_ast.Call) and isinstance(expr.value.func, py_ast.Attribute):
@@ -3029,7 +3099,9 @@ def _parse_function_impl(
     - 功能实现: kernel_gen/dsl/ast.py
     """
 
-    reject_external_values = bool((config or {}).get("reject_external_values", False))
+    config = config or {}
+    reject_external_values = bool(config.get("reject_external_values", False))
+    allow_python_callee_calls = bool(config.get("allow_python_callee_calls", False))
     if globals_table is None:
         globals_table = getattr(fn, "__globals__", {}) or {}
     globals_table = dict(globals_table)
@@ -3062,6 +3134,8 @@ def _parse_function_impl(
     env: dict[str, object] = {}
     if reject_external_values:
         env[_REJECT_EXTERNAL_VALUES_ENV_KEY] = True
+    if allow_python_callee_calls:
+        env[_ALLOW_PYTHON_CALLEE_CALL_ENV_KEY] = True
     inputs: list[TensorAST | ScalarArgAST] = []
     for arg in func_def.args.args:
         parsed = _parse_annotation_node(arg.annotation, arg.arg, globals_table, builtins_table, runtime_table)

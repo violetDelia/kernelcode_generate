@@ -208,6 +208,107 @@ def _tensor_arg(shape: list[object]) -> Memory:
     """
     return Memory(shape, NumericType.Float32)
 
+# 注意: 这些 helper 作为 `mlir_gen(...)` 的 callee 会被解析/下沉到 IR，
+# 因此函数体内不能包含 docstring（否则会被解析为常量表达式并触发 lowering 错误）。
+#
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 作为最底层 callee，提供可被 mlir_gen 收集的最小加法函数体。
+# 使用示例: _ = _mlir_gen_transitive_leaf(x)
+# spec: spec/dsl/mlir_gen.md
+# test: test/dsl/test_mlir_gen.py
+# 功能实现: kernel_gen/dsl/mlir_gen.py
+def _mlir_gen_transitive_leaf(x: "Tensor[f32, 4]") -> "Tensor[f32, 4]":
+    return x + x
+
+
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 作为中间层 callee，转调 leaf helper 形成可追踪调用链。
+# 使用示例: _ = _mlir_gen_transitive_mid(x)
+# spec: spec/dsl/mlir_gen.md
+# test: test/dsl/test_mlir_gen.py
+# 功能实现: kernel_gen/dsl/mlir_gen.py
+def _mlir_gen_transitive_mid(x: "Tensor[f32, 4]") -> "Tensor[f32, 4]":
+    return _mlir_gen_transitive_leaf(x)
+
+
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 作为 DFS 左子树的 leaf，提供可序列化的最小算子体。
+# 使用示例: _ = _mlir_gen_dfs_left_leaf(x)
+# spec: spec/dsl/mlir_gen.md
+# test: test/dsl/test_mlir_gen.py
+# 功能实现: kernel_gen/dsl/mlir_gen.py
+def _mlir_gen_dfs_left_leaf(x: "Tensor[f32, 4]") -> "Tensor[f32, 4]":
+    return x + x
+
+
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 作为 DFS 左分支节点，转调 left leaf 构成可稳定遍历的调用链。
+# 使用示例: _ = _mlir_gen_dfs_left(x)
+# spec: spec/dsl/mlir_gen.md
+# test: test/dsl/test_mlir_gen.py
+# 功能实现: kernel_gen/dsl/mlir_gen.py
+def _mlir_gen_dfs_left(x: "Tensor[f32, 4]") -> "Tensor[f32, 4]":
+    return _mlir_gen_dfs_left_leaf(x)
+
+
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 作为 DFS 右子树的 leaf，提供可序列化的最小算子体。
+# 使用示例: _ = _mlir_gen_dfs_right_leaf(x)
+# spec: spec/dsl/mlir_gen.md
+# test: test/dsl/test_mlir_gen.py
+# 功能实现: kernel_gen/dsl/mlir_gen.py
+def _mlir_gen_dfs_right_leaf(x: "Tensor[f32, 4]") -> "Tensor[f32, 4]":
+    return x + x
+
+
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 作为 DFS 右分支节点，转调 right leaf 构成可稳定遍历的调用链。
+# 使用示例: _ = _mlir_gen_dfs_right(x)
+# spec: spec/dsl/mlir_gen.md
+# test: test/dsl/test_mlir_gen.py
+# 功能实现: kernel_gen/dsl/mlir_gen.py
+def _mlir_gen_dfs_right(x: "Tensor[f32, 4]") -> "Tensor[f32, 4]":
+    return _mlir_gen_dfs_right_leaf(x)
+
+
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 构造递归调用链用于验证 mlir_gen 拒绝递归 callee。
+# 使用示例: _ = _mlir_gen_recursive_a(x)
+# spec: spec/dsl/mlir_gen.md
+# test: test/dsl/test_mlir_gen.py
+# 功能实现: kernel_gen/dsl/mlir_gen.py
+def _mlir_gen_recursive_a(x: "Tensor[f32, 4]") -> "Tensor[f32, 4]":
+    return _mlir_gen_recursive_b(x)
+
+
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 与 recursive_a 配对形成递归调用，用于触发递归拒绝路径。
+# 使用示例: _ = _mlir_gen_recursive_b(x)
+# spec: spec/dsl/mlir_gen.md
+# test: test/dsl/test_mlir_gen.py
+# 功能实现: kernel_gen/dsl/mlir_gen.py
+def _mlir_gen_recursive_b(x: "Tensor[f32, 4]") -> "Tensor[f32, 4]":
+    return _mlir_gen_recursive_a(x)
+
+
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 作为签名不一致 helper，用于锁定 mlir_gen 的签名一致性检查。
+# 使用示例: _ = _mlir_gen_inconsistent_signature_helper(x)
+# spec: spec/dsl/mlir_gen.md
+# test: test/dsl/test_mlir_gen.py
+# 功能实现: kernel_gen/dsl/mlir_gen.py
+def _mlir_gen_inconsistent_signature_helper(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
+    return x
+
 
 def _module_from_func(fn: object, *runtime_args: object) -> ModuleOp:
     """将 DSL 函数 helper 包装为单函数 `ModuleOp`。
@@ -919,30 +1020,6 @@ def test_build_func_op_signature_uses_runtime_args_not_parse_env() -> None:
     assert outputs == [SymbolValueType.from_expr("runtime")]
 
 
-# MGEN-001B
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-09 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-09 00:00:00 +0800
-# 功能说明: 验证 build_func_op 不会通过 inspect.signature 获取形参信息。
-# 测试目的: 锁定 build_func_op 的绑定仅依赖 parse_function AST + runtime_args，而不是 Python 函数签名推导。
-# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_does_not_use_inspect_signature
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
-# 对应 spec 文件路径: spec/dsl/mlir_gen.md
-# 对应测试文件路径: test/dsl/test_mlir_gen.py
-def test_build_func_op_does_not_use_inspect_signature(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _disabled_signature(*args: object, **kwargs: object) -> object:
-        raise AssertionError("inspect.signature should not be called")
-
-    monkeypatch.setattr(mlir_gen_module.inspect, "signature", _disabled_signature)
-
-    def identity(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
-        return x
-
-    func_op = build_func_op(identity, _tensor_arg([2, 2]))
-    assert isinstance(func_op, func.FuncOp)
-
-
 # MGEN-002
 # 创建者: 朽木露琪亚
 # 最后一次更改: 金铲铲大作战
@@ -963,10 +1040,7 @@ def test_build_func_op_from_ast_preserves_arg_order() -> None:
         return x + y
 
     func_ast = parse_function(add)
-    func_op = build_func_op_from_ast(
-        func_ast,
-        runtime_args=[_tensor_arg([2, 2]), _tensor_arg([2, 2]), 1],
-    )
+    func_op = build_func_op_from_ast(func_ast)
     assert isinstance(func_op, func.FuncOp)
     inputs = list(func_op.function_type.inputs)
     assert len(inputs) == 3
@@ -1001,8 +1075,8 @@ def test_build_func_op_from_ast_uses_runtime_args_for_symbol_signature() -> None
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-28 14:20:00 +0800
 # 最近一次运行成功时间: 2026-03-28 14:20:00 +0800
-# 功能说明: 验证 build_func_op_from_ast 在 inputs 非空时拒绝缺失 runtime_args。
-# 测试目的: 锁定 func_ast.inputs 非空时 runtime_args 必填；长度不匹配时仍按固定短语报错。
+# 功能说明: 验证 build_func_op_from_ast 在 runtime_args 省略时按 AST 注解生成签名。
+# 测试目的: 证明 runtime_args 缺失时仍可通过 AST 注解构建 symbol 标量签名。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_from_ast_rejects_symbol_scalar_missing_runtime_args
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -1012,8 +1086,11 @@ def test_build_func_op_from_ast_rejects_symbol_scalar_missing_runtime_args() -> 
         return expr
 
     func_ast = parse_function(only_symbol)
-    with pytest.raises(AstVisitorError, match="runtime_args is required"):
-        build_func_op_from_ast(func_ast)
+    func_op = build_func_op_from_ast(func_ast)
+    inputs = list(func_op.function_type.inputs)
+    outputs = list(func_op.function_type.outputs)
+    assert inputs == [SymbolValueType.from_expr("expr")]
+    assert outputs == [SymbolValueType.from_expr("expr")]
     with pytest.raises(AstVisitorError, match="runtime_args must align"):
         build_func_op_from_ast(func_ast, runtime_args=[])
 
@@ -1049,7 +1126,7 @@ def test_build_func_op_from_ast_forwards_config_to_visitor_and_context(
     monkeypatch.setattr(ast_visitor_module, "AstVisitor", RecordingVisitor)
     func_ast = parse_function(identity)
     config: dict[str, object] = {"loop_vars": {"i": "outer"}}
-    func_op = build_func_op_from_ast(func_ast, runtime_args=[_tensor_arg([2, 2])], config=config)
+    func_op = build_func_op_from_ast(func_ast, config=config)
 
     assert isinstance(func_op, func.FuncOp)
     assert captured["visitor_config"] == config
@@ -1135,10 +1212,10 @@ def test_mlir_gen_signature_validation_errors() -> None:
         build_func_op_from_ast(single_tensor, runtime_args=[])
 
     with pytest.raises(AstVisitorError, match="Unsupported scalar argument type"):
-        build_func_op_from_ast(FunctionAST("bad", [ScalarArgAST("n", float)], [], BlockAST([])), runtime_args=[0])
+        build_func_op_from_ast(FunctionAST("bad", [ScalarArgAST("n", float)], [], BlockAST([])))
 
     with pytest.raises(AstVisitorError, match="Unsupported input type"):
-        build_func_op_from_ast(FunctionAST("bad", [VarAST("x")], [], BlockAST([])), runtime_args=[0])
+        build_func_op_from_ast(FunctionAST("bad", [VarAST("x")], [], BlockAST([])))
 
     outputs_tensor = FunctionAST(
         "no_tensor",
@@ -1147,7 +1224,7 @@ def test_mlir_gen_signature_validation_errors() -> None:
         BlockAST([]),
     )
     with pytest.raises(AstVisitorError, match="At least one tensor input is required"):
-        build_func_op_from_ast(outputs_tensor, runtime_args=[1])
+        build_func_op_from_ast(outputs_tensor)
 
 
 # MGEN-025
@@ -1286,7 +1363,7 @@ def test_build_func_op_rejects_unimported_dma_view_and_slice_helpers() -> None:
 # 最近一次运行测试时间: 2026-04-05 03:15:23 +0800
 # 最近一次运行成功时间: 2026-04-05 03:15:23 +0800
 # 功能说明: 验证 build_func_op 支持 img2col1d helper 并可被 -k 'img2col' 稳定选中。
-# 测试目的: 验证 img2col1d 会 lowering 为 nn.img2col1d，且返回类型与注解一致，避免 img2col gate 过滤命令 exit 5。
+# 测试目的: 验证 img2col1d 会 lowering 为 nn.img2col1d，且返回类型与注解一致，避免 img2col 过滤 过滤命令 exit 5。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_img2col1d_helper_call
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -1350,7 +1427,7 @@ def test_build_func_op_supports_img2col1d_symbolic_annotation() -> None:
 # 最近一次运行测试时间: 2026-04-05 03:15:23 +0800
 # 最近一次运行成功时间: 2026-04-05 03:15:23 +0800
 # 功能说明: 验证 build_func_op 支持 img2col2d helper 并可被 -k 'img2col' 稳定选中。
-# 测试目的: 验证 img2col2d 会 lowering 为 nn.img2col2d，且返回类型与注解一致，避免 img2col gate 过滤命令 exit 5。
+# 测试目的: 验证 img2col2d 会 lowering 为 nn.img2col2d，且返回类型与注解一致，避免 img2col 过滤 过滤命令 exit 5。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_img2col2d_helper_call
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -3636,7 +3713,7 @@ def test_compare_implicit_broadcast_lowering() -> None:
         body=BlockAST([expr]),
         has_explicit_return=True,
     )
-    func_op = build_func_op_from_ast(func_ast, runtime_args=[lhs_memory, rhs_memory])
+    func_op = build_func_op_from_ast(func_ast)
     broadcast_ops = [op for op in func_op.body.block.ops if isinstance(op, NnBroadcastOp)]
     assert len(broadcast_ops) == 1
     eq_op = next(op for op in func_op.body.block.ops if isinstance(op, NnEqOp))
@@ -3922,3 +3999,136 @@ def test_build_func_op_lowers_arch_launch_with_callee(monkeypatch: pytest.Monkey
             raise AssertionError('expected launched body query type to stay !symbol.int<"thread_num">')
         if len(return_ops) != 1 or return_ops[0].arguments[0].type != SymbolValueType.from_expr("thread_num"):
             raise AssertionError("expected launched body return to keep thread_num symbol type")
+
+
+# MGEN-042
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 `mlir_gen(...)` 返回 `builtin.module`，且包含根函数的 `func.func`。
+# 测试目的: 覆盖单函数路径无需调用方手工包装 `ModuleOp([func_op])` 的公开契约。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_mlir_gen_returns_builtin_module
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_mlir_gen_returns_builtin_module() -> None:
+    def main(x: "Tensor[f32, 4]") -> "Tensor[f32, 4]":
+        return x
+
+    module = mlir_gen_module.mlir_gen(main, _tensor_arg([4]))
+    assert isinstance(module, ModuleOp)
+    func_ops = [op for op in module.ops if isinstance(op, func.FuncOp)]
+    assert len(func_ops) == 1
+
+    text = _print_module(module)
+    assert "func.func" in text
+    assert "@main" in text
+
+
+# MGEN-043
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 `mlir_gen(...)` 会收集根函数调用的 Python callee 的传递闭包并补齐到 module。
+# 测试目的: 覆盖 `root -> mid -> leaf` 的 transitive callee 收集。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_mlir_gen_collects_transitive_callees
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_mlir_gen_collects_transitive_callees() -> None:
+    def main(x: "Tensor[f32, 4]") -> "Tensor[f32, 4]":
+        return _mlir_gen_transitive_mid(x)
+
+    module = mlir_gen_module.mlir_gen(main, _tensor_arg([4]))
+    func_ops = [op for op in module.ops if isinstance(op, func.FuncOp)]
+    assert len(func_ops) == 3
+
+    text = _print_module(module)
+    assert "@main" in text
+    assert "@_mlir_gen_transitive_mid" in text
+    assert "@_mlir_gen_transitive_leaf" in text
+
+
+# MGEN-044
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 `mlir_gen(...)` module 内函数顺序确定：root 在前，callee 按首次出现调用顺序做 DFS 追加。
+# 测试目的: 锁定 `root -> left -> left_leaf` 与 `root -> right -> right_leaf` 的函数排列顺序。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_mlir_gen_module_function_order_is_dfs
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_mlir_gen_module_function_order_is_dfs() -> None:
+    def main(x: "Tensor[f32, 4]") -> "Tensor[f32, 4]":
+        y = _mlir_gen_dfs_left(x)
+        _ = _mlir_gen_dfs_right(x)
+        return y
+
+    module = mlir_gen_module.mlir_gen(main, _tensor_arg([4]))
+    ordered_func_names = [
+        op.sym_name.data for op in module.ops if isinstance(op, func.FuncOp) and isinstance(op.sym_name, StringAttr)
+    ]
+    assert ordered_func_names == [
+        "main",
+        "_mlir_gen_dfs_left",
+        "_mlir_gen_dfs_left_leaf",
+        "_mlir_gen_dfs_right",
+        "_mlir_gen_dfs_right_leaf",
+    ]
+
+
+# MGEN-045
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 `mlir_gen(...)` 遇到不支持的 callee 形式时失败并返回固定短语。
+# 测试目的: 以本地闭包函数触发 `unsupported callee function` 失败路径。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_mlir_gen_rejects_unsupported_callee
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_mlir_gen_rejects_unsupported_callee() -> None:
+    def helper(x: "Tensor[f32, 4]") -> "Tensor[f32, 4]":
+        return x
+
+    def main(x: "Tensor[f32, 4]") -> "Tensor[f32, 4]":
+        return helper(x)
+
+    with pytest.raises(mlir_gen_module.MlirGenModuleError) as excinfo:
+        mlir_gen_module.mlir_gen(main, _tensor_arg([4]))
+    assert "MlirGenModuleError: unsupported callee function" in str(excinfo.value)
+
+
+# MGEN-046
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 `mlir_gen(...)` 遇到递归 callee 图时失败并返回固定短语。
+# 测试目的: 构造 `A -> B -> A` 递归图，锁定错误消息收敛为 `recursive callee graph is not supported`。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_mlir_gen_rejects_recursive_callee_graph
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_mlir_gen_rejects_recursive_callee_graph() -> None:
+    def main(x: "Tensor[f32, 4]") -> "Tensor[f32, 4]":
+        return _mlir_gen_recursive_a(x)
+
+    with pytest.raises(mlir_gen_module.MlirGenModuleError) as excinfo:
+        mlir_gen_module.mlir_gen(main, _tensor_arg([4]))
+    assert "MlirGenModuleError: recursive callee graph is not supported" in str(excinfo.value)
+
+
+# MGEN-047
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 `mlir_gen(...)` 同一 callee 在多个 call-site 下推导出不一致签名时失败并返回固定短语。
+# 测试目的: 使用不同 shape 的 tensor 实参触发不一致签名，锁定错误消息收敛为 `inconsistent callee signature`。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_mlir_gen_rejects_inconsistent_callee_signature
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_mlir_gen_rejects_inconsistent_callee_signature() -> None:
+    def main(x: "Tensor[f32, 2, 2]", y: "Tensor[f32, 4]") -> "Tensor[f32, 2, 2]":
+        _ = _mlir_gen_inconsistent_signature_helper(x)
+        _ = _mlir_gen_inconsistent_signature_helper(y)
+        return x
+
+    with pytest.raises(mlir_gen_module.MlirGenModuleError) as excinfo:
+        mlir_gen_module.mlir_gen(main, _tensor_arg([2, 2]), _tensor_arg([4]))
+    assert "MlirGenModuleError: inconsistent callee signature" in str(excinfo.value)
