@@ -119,7 +119,7 @@ err() {
 usage() {
   cat <<'USAGE'
 Usage:
-  codex-multi-agents-task.sh -file <TODO.md> -dispatch -task_id <id> -type <spec|build|review|merge|other|refactor> [-to <worker>] -agents-list <agents-lists.md> [-message <text>]
+  codex-multi-agents-task.sh -file <TODO.md> -dispatch -task_id <id> [-to <worker>] -agents-list <agents-lists.md> [-message <text>] [-type <spec|build|review|merge|other|refactor>]
   codex-multi-agents-task.sh -file <TODO.md> -done -task_id <id> -log <log_path> -agents-list <agents-lists.md>
   codex-multi-agents-task.sh -file <TODO.md> -pause -task_id <id> -agents-list <agents-lists.md>
   codex-multi-agents-task.sh -file <TODO.md> -continue -task_id <id> -agents-list <agents-lists.md>
@@ -133,7 +133,7 @@ Usage:
   codex-multi-agents-task.sh -file <TODO.md> -done-plan -plan <plan_doc>
 
 Examples:
-  codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -dispatch -task_id EX-3 -type build -to worker-a -agents-list ./agents/codex-multi-agents/agents-lists.md -message "请处理任务 EX-3"
+  codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -dispatch -task_id EX-3 -to worker-a -agents-list ./agents/codex-multi-agents/agents-lists.md -message "请处理任务 EX-3"
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -done -task_id EX-1 -log ./agents/codex-multi-agents/log/task-EX-1.log -agents-list ./agents/codex-multi-agents/agents-lists.md
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -pause -task_id EX-2 -agents-list ./agents/codex-multi-agents/agents-lists.md
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -continue -task_id EX-2 -agents-list ./agents/codex-multi-agents/agents-lists.md
@@ -377,16 +377,14 @@ parse_args() {
 
   if [[ "$OP_DISPATCH" -eq 1 ]]; then
     [[ "$HAS_TASK_ID" -eq 1 ]] || err "$RC_ARG" "-dispatch requires -task_id"
-    [[ "$HAS_TYPE" -eq 1 ]] || err "$RC_ARG" "-dispatch requires -type"
     [[ "$HAS_AGENTS_LIST" -eq 1 ]] || err "$RC_ARG" "-dispatch requires -agents-list"
     [[ -n "$(trim "$TASK_ID")" ]] || err "$RC_ARG" "empty value for -task_id"
-    [[ -n "$(trim "$TYPE_KIND")" ]] || err "$RC_ARG" "empty value for -type"
-    TYPE_KIND="$(validate_type_kind "$TYPE_KIND")"
+    if [[ "$HAS_TYPE" -eq 1 ]]; then
+      [[ -n "$(trim "$TYPE_KIND")" ]] || err "$RC_ARG" "empty value for -type"
+      TYPE_KIND="$(validate_type_kind "$TYPE_KIND")"
+    fi
     if [[ "$HAS_TO" -eq 1 ]]; then
       [[ -n "$(trim "$TO")" ]] || err "$RC_ARG" "empty value for -to"
-    fi
-    if [[ "$TYPE_KIND" == "other" && "$HAS_TO" -eq 0 ]]; then
-      err "$RC_ARG" "-dispatch with -type other requires -to"
     fi
     [[ -n "$(trim "$AGENTS_LIST")" ]] || err "$RC_ARG" "empty value for -agents-list"
     if [[ "$HAS_MESSAGE" -eq 1 ]]; then
@@ -1433,17 +1431,26 @@ def main() -> int:
             fail(RC_DATA, f"task not found in task list: {task_id}")
         assert agents_table is not None
         assert agents_rows is not None
-        agent_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], to)
+        row = list_rows[idx]
+        table_assignee = row[8].strip()
+        assignee = to.strip() or table_assignee
+        if not assignee:
+            fail(RC_ARG, "empty value for -to")
+        agent_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], assignee)
         if agent_idx < 0:
-            fail(RC_DATA, f"agent not found in agents list: {to}")
+            fail(RC_DATA, f"agent not found in agents list: {assignee}")
         if agents_rows[agent_idx][agents_table["status_idx"]].strip().lower() == "busy":
-            fail(RC_DATA, f"agent is busy, cannot dispatch: {to}")
+            fail(RC_DATA, f"agent is busy, cannot dispatch: {assignee}")
         active_assignees = count_active_assignees(exec_rows)
         if active_assignees >= max_parallel:
             fail(RC_DATA, f"parallel assignee limit reached: {active_assignees}/{max_parallel}")
-
-        row = list_rows[idx]
-        for dependency in parse_dependencies(row[5]):
+        table_type = row[5].strip()
+        if type_kind and table_type and table_type != type_kind:
+            fail(RC_DATA, f"task type mismatch: table={table_type} arg={type_kind}")
+        task_type = table_type or type_kind
+        if not task_type:
+            fail(RC_DATA, f"empty task type in task list: {task_id}")
+        for dependency in parse_dependencies(row[6]):
             if find_row_index(exec_rows, dependency) >= 0 or find_row_index(list_rows, dependency) >= 0:
                 fail(RC_DATA, f"task has unresolved dependency: {dependency}")
 
@@ -1452,13 +1459,28 @@ def main() -> int:
         created_at = row[2]
         worktree_val = row[3]
         desc = row[4]
-        depends_val = row[5]
-        plan_doc_val = row[6]
-        record_file = row[8]
-        exec_rows.append([row[0], from_val, created_at, worktree_val, desc, depends_val, plan_doc_val, to, "进行中", "", record_file])
+        depends_val = row[6]
+        plan_doc_val = row[7]
+        record_file = row[9]
+        exec_rows.append(
+            [
+                row[0],
+                from_val,
+                created_at,
+                worktree_val,
+                desc,
+                task_type,
+                depends_val,
+                plan_doc_val,
+                assignee,
+                "进行中",
+                "",
+                record_file,
+            ]
+        )
         agents_rows[agent_idx][agents_table["status_idx"]] = "busy"
-        message_lines.append(f"OK: dispatch {task_id} -> {to}")
-        message_lines.append(f"OK: replace {to} 状态")
+        message_lines.append(f"OK: dispatch {task_id} -> {assignee}")
+        message_lines.append(f"OK: replace {assignee} 状态")
 
     elif op == "done":
         idx = find_row_index(exec_rows, task_id)
@@ -1466,8 +1488,8 @@ def main() -> int:
             fail(RC_DATA, f"task not found in running list: {task_id}")
 
         row = exec_rows.pop(idx)
-        update_plan_on_done(plan_rows, row[6].strip())
-        assignee = row[7].strip()
+        update_plan_on_done(plan_rows, row[7].strip())
+        assignee = row[8].strip()
         if assignee:
             assert agents_table is not None
             assert agents_rows is not None
@@ -1477,7 +1499,7 @@ def main() -> int:
         done_lines, done_table = parse_done_table(done_file)
         done_rows = [r[:] for r in done_table["rows"]]
         finished_at = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
-        done_rows.append([row[0], row[4], row[7], "已完成", finished_at, log_file, ""])
+        done_rows.append([row[0], row[4], assignee, "已完成", finished_at, log_file, ""])
         done_lines = replace_table(done_lines, done_table, done_rows, keep_original_head=False)
         message_lines.append(f"OK: done {task_id}")
         if assignee:
@@ -1492,14 +1514,14 @@ def main() -> int:
         if idx < 0:
             fail(RC_DATA, f"task not found in running list: {task_id}")
 
-        assignee = exec_rows[idx][7].strip()
+        assignee = exec_rows[idx][8].strip()
         if assignee:
             assert agents_table is not None
             assert agents_rows is not None
             agent_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], assignee)
             if agent_idx < 0:
                 fail(RC_DATA, f"agent not found in agents list: {assignee}")
-        exec_rows[idx][8] = "暂停"
+        exec_rows[idx][9] = "暂停"
         message_lines.append(f"OK: pause {task_id}")
         if assignee:
             if count_doing_tasks(exec_rows, assignee) == 0:
@@ -1513,10 +1535,10 @@ def main() -> int:
         if idx < 0:
             fail(RC_DATA, f"task not found in running list: {task_id}")
 
-        if exec_rows[idx][8].strip() != "暂停":
+        if exec_rows[idx][9].strip() != "暂停":
             fail(RC_DATA, f"task status is not paused: {task_id}")
 
-        assignee = exec_rows[idx][7].strip()
+        assignee = exec_rows[idx][8].strip()
         if assignee:
             assert agents_table is not None
             assert agents_rows is not None
@@ -1524,7 +1546,7 @@ def main() -> int:
             if agent_idx < 0:
                 fail(RC_DATA, f"agent not found in agents list: {assignee}")
 
-        exec_rows[idx][8] = "进行中"
+        exec_rows[idx][9] = "进行中"
         message_lines.append(f"OK: continue {task_id}")
         if assignee:
             agents_rows[agent_idx][agents_table["status_idx"]] = "busy"
@@ -1544,14 +1566,14 @@ def main() -> int:
         if new_idx < 0:
             fail(RC_DATA, f"agent not found in agents list: {new_assignee}")
 
-        old_assignee = exec_rows[idx][7].strip()
+        old_assignee = exec_rows[idx][8].strip()
         old_idx = None
         if old_assignee:
             old_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], old_assignee)
             if old_idx < 0:
                 fail(RC_DATA, f"agent not found in agents list: {old_assignee}")
 
-        exec_rows[idx][7] = new_assignee
+        exec_rows[idx][8] = new_assignee
         message_lines.append(f"OK: reassign {task_id} -> {new_assignee}")
 
         updated: set[str] = set()
@@ -1575,8 +1597,8 @@ def main() -> int:
             fail(RC_ARG, "empty value for -message")
 
         row = exec_rows.pop(idx)
-        assignee = row[7].strip()
-        list_rows.append([row[0], row[1], row[2], row[3], message.strip(), row[5], row[6], row[7], row[10]])
+        assignee = row[8].strip()
+        list_rows.append([row[0], row[1], row[2], row[3], message.strip(), type_kind, row[6], row[7], assignee, row[11]])
         message_lines.append(f"OK: next {task_id}")
 
         if assignee:
@@ -1612,7 +1634,7 @@ def main() -> int:
             if find_row_index(exec_rows, dependency) < 0 and find_row_index(list_rows, dependency) < 0:
                 fail(RC_DATA, f"dependency task not found: {dependency}")
         record_file = log_file or ""
-        list_rows.append([new_id, from_val, created_at, worktree_val, info, depends_val, plan_doc_val, to, record_file])
+        list_rows.append([new_id, from_val, created_at, worktree_val, info, type_kind, depends_val, plan_doc_val, to, record_file])
         update_plan_on_new(plan_rows, plan_doc_val)
         message_lines.append(f"OK: new {new_id}")
 
@@ -1620,17 +1642,17 @@ def main() -> int:
         exec_idx = find_row_index(exec_rows, task_id)
         if exec_idx >= 0:
             # 允许直接删除暂停任务，避免“待命/占位”任务长期滞留在正在执行列表。
-            if exec_rows[exec_idx][8].strip() != "暂停":
+            if exec_rows[exec_idx][9].strip() != "暂停":
                 fail(RC_DATA, f"task already exists in running list: {task_id}")
             removed = exec_rows.pop(exec_idx)
-            update_plan_on_remove_not_done(plan_rows, removed[6].strip())
+            update_plan_on_remove_not_done(plan_rows, removed[7].strip())
             message_lines.append(f"OK: delete {task_id}")
         else:
             idx = find_row_index(list_rows, task_id)
             if idx < 0:
                 fail(RC_DATA, f"task not found in task list: {task_id}")
             removed = list_rows.pop(idx)
-            update_plan_on_remove_not_done(plan_rows, removed[6].strip())
+            update_plan_on_remove_not_done(plan_rows, removed[7].strip())
             message_lines.append(f"OK: delete {task_id}")
 
     elif op == "done-plan":
@@ -1645,7 +1667,7 @@ def main() -> int:
         if status != "完成待检查" or pending != 0:
             fail(RC_DATA, f"plan is not ready for done-plan: {normalized_plan_doc}")
 
-        if any((r[6].strip() == normalized_plan_doc for r in exec_rows + list_rows)):
+        if any((r[7].strip() == normalized_plan_doc for r in exec_rows + list_rows)):
             fail(RC_DATA, f"plan still has pending tasks: {normalized_plan_doc}")
 
         plan_rows.pop(idx)

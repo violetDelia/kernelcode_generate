@@ -48,11 +48,14 @@ codex-multi-agents-tmux.sh -talk -from "scheduler" -to "worker-a" -agents-list "
 - [immutable]使用命令 `tmux send-keys -t <session-id> "<formatted_message>"` 向目标会话发送消息，sleep 3 秒后，使用 `tmux send-keys -t <session-id> ENTER` 连发 2 次，再 sleep 3 秒后再次 `tmux send-keys -t <session-id> ENTER` 连发 2 次，确保消息被收到。
 - 同步向 `-log` 文件追加一行同内容消息。
 - 若日志目录不存在，脚本会自动创建后再写入。
+- `-talk` 既可承载任务通知，也可承载一次性咨询消息；咨询消息仅用于提问、澄清、审查意见同步，不修改 `TODO.md` 中任何任务状态。
 
 注意事项：
 
 - `-from`、`-to`、`-agents-list`、`-message`、`-log` 均为必填参数。
 - `-talk` 不再接受手工传入 `-session-id`；目标会话必须通过 `agents-lists.md` 自动解析。
+- 若只是流程、权限、实现细节或架构口径的单次确认，应直接使用 `-talk`，而不是新建任务。
+- 只有当消息已经转化为明确交付目标，需要进入任务流转时，才使用 `codex-multi-agents-task.sh -new/-dispatch`。
 - 目标会话不存在时返回数据错误（`RC=3`）。
 - 目标角色不在名单中或 `会话` 字段为空时返回数据错误（`RC=3`）。
 - 写日志时使用 `flock` 加锁，锁超时或冲突返回锁错误（`RC=4`）。

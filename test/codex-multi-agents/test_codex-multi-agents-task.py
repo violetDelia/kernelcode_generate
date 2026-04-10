@@ -185,6 +185,34 @@ def write_todo_file(path: Path, running_rows: list[str] | None = None, list_rows
     path.write_text(text, encoding="utf-8")
 
 
+def write_todo_file_with_task_type(path: Path) -> None:
+    """写入带任务类型列的标准 TODO.md 测试文件。"""
+    text = "\n".join(
+        [
+            "## 正在执行的任务",
+            "",
+            "| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 任务类型 | 依赖任务 | 计划书 | 指派 | 状态 | 用户指导 | 记录文件 |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+            "| EX-1 | 李白 | 2026-03-08 16:10:00 +0800 | . | 创建 src | build |  |  | worker-a | 进行中 | xxx | ./log/ex1.md |",
+            "| EX-2 | 杜甫 | 2026-03-08 16:20:00 +0800 | . | 创建 test | build |  |  | worker-b | 进行中 | xxx | ./log/ex2.md |",
+            "",
+            "## 需要用户确认的事项",
+            "",
+            "| 任务 ID | 创建时间 | worktree | 描述 | 用户确认状态 | 记录文件 |",
+            "| --- | --- | --- | --- | --- | --- |",
+            "| U-1 | 2026-03-08 16:00:00 +0800 | . | 描述 | 未确认 | ./log/u1.md |",
+            "",
+            "## 任务列表",
+            "",
+            "| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 任务类型 | 依赖任务 | 计划书 | 指派 | 记录文件 |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+            "| EX-3 | 苏轼 | 2026-03-08 16:30:00 +0800 |  | 删除 tmp/demo.txt | build |  |  |  | ./log/ex3.md |",
+            "",
+        ]
+    )
+    path.write_text(text, encoding="utf-8")
+
+
 def parse_section_rows(text: str, heading: str) -> list[list[str]]:
     """解析指定标题下的首个 markdown 表格数据行。"""
     lines = text.splitlines()
@@ -266,6 +294,30 @@ def test_dispatch_task_success(tmp_path: Path) -> None:
     )
     assert not any(r[0] == "EX-3" for r in list_rows)
     assert get_agent_status(agents, "worker-a") == "busy"
+
+
+# TC-001A
+# 创建者: OpenAI
+# 最后一次更改: OpenAI
+# 测试目的: 验证 -dispatch 不要求显式提供 -type，直接使用任务记录中的任务类型。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_dispatch_does_not_require_type(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file_with_task_type(todo)
+    write_agents_file(agents, [agent_row("神秘人", "free"), agent_row("worker-a", "free"), agent_row("worker-b", "free")])
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script("-file", str(todo), "-dispatch", "-task_id", "EX-3", "-to", "worker-a", "-agents-list", str(agents), env=env)
+
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+
+    assert result.returncode == 0
+    assert any(r[0] == "EX-3" and r[5] == "build" and r[8] == "worker-a" and r[9] == "进行中" for r in running_rows)
 
 
 # TC-002
@@ -1264,6 +1316,34 @@ def test_next_requires_message(tmp_path: Path) -> None:
 
     assert result.returncode == 1
     assert "-next requires -message" in result.stderr
+
+
+# TC-031A
+# 创建者: OpenAI
+# 最后一次更改: OpenAI
+# 测试目的: 验证 -next 必须显式提供 -type。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_next_requires_type(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file_with_task_type(todo)
+    write_agents_file(agents, [agent_row("worker-a", "busy"), agent_row("worker-b", "free")])
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-next",
+        "-task_id",
+        "EX-2",
+        "-message",
+        "下一阶段：补齐边界用例",
+        "-agents-list",
+        str(agents),
+    )
+
+    assert result.returncode == 1
+    assert "-next requires -type" in result.stderr
 
 
 # TC-032

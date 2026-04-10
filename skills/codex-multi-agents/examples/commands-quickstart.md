@@ -1,6 +1,23 @@
 # codex-multi-agents 命令速查
 
-以下内容为使用示例与参数速记，便于快速上手。更完整的行为细节以脚本与规范文档为准。
+## 文档信息
+
+- 创建者：`榕`
+- 最后一次更改：`大闸蟹`
+- `spec`：
+  - [`spec/codex-multi-agents/scripts/codex-multi-agents-list.md`](../../../spec/codex-multi-agents/scripts/codex-multi-agents-list.md)
+  - [`spec/codex-multi-agents/scripts/codex-multi-agents-task.md`](../../../spec/codex-multi-agents/scripts/codex-multi-agents-task.md)
+- `test`：
+  - [`test/codex-multi-agents/test_codex-multi-agents-list.py`](../../../test/codex-multi-agents/test_codex-multi-agents-list.py)
+  - [`test/codex-multi-agents/test_codex-multi-agents-task.py`](../../../test/codex-multi-agents/test_codex-multi-agents-task.py)
+- `功能实现`：
+  - [`skills/codex-multi-agents/scripts/codex-multi-agents-list.sh`](../scripts/codex-multi-agents-list.sh)
+  - [`skills/codex-multi-agents/scripts/codex-multi-agents-task.sh`](../scripts/codex-multi-agents-task.sh)
+  - [`skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh`](../scripts/codex-multi-agents-tmux.sh)
+
+## 文件说明
+
+以下内容为 `codex-multi-agents` 常用命令的速查与示例，便于快速上手。更完整的行为细节以脚本与规范文档为准。
 
 ## 1. 名单管理（codex-multi-agents-list.sh）
 
@@ -72,6 +89,20 @@ bash ./scripts/codex-multi-agents-tmux.sh \
 说明：
 - `-talk` 不再接受手工传入 `-session-id`。
 - 目标 tmux 会话会按 `agents-lists.md` 中目标角色的 `会话` 字段自动解析。
+- 若只是单次咨询，不要新建任务，直接使用 `-talk`。
+
+### 单次咨询示例
+```bash
+bash ./scripts/codex-multi-agents-tmux.sh \
+  -talk -from worker-a -to 守护最好的爱莉希雅 \
+  -agents-list agents/codex-multi-agents/agents-lists.md \
+  -message "这不是任务。请确认 add 接口参数顺序是否固定为 lhs,rhs,out。" \
+  -log agents/codex-multi-agents/log/talk.log
+```
+
+说明：
+- 适用于流程澄清、架构问题、实现细节确认、审查意见同步。
+- 该类消息不修改 `TODO.md`，也不占用任务流转。
 
 ### 按名单初始化角色环境
 ```bash
@@ -90,12 +121,12 @@ bash ./scripts/codex-multi-agents-tmux.sh \
 ### TODO 结构示例
 ```markdown
 ## 正在执行的任务
-| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 依赖任务 | 计划书 | 指派 | 状态 | 用户指导 | 记录文件 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 任务类型 | 依赖任务 | 计划书 | 指派 | 状态 | 用户指导 | 记录文件 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 
 ## 任务列表
-| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 依赖任务 | 计划书 | 指派 | 记录文件 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 任务 ID | 发起人 | 创建时间 | worktree | 描述 | 任务类型 | 依赖任务 | 计划书 | 指派 | 记录文件 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 
 ## 计划书
 | 计划书 | 总任务数 | 已完成任务 | 待完成任务 | 完成状态 |
@@ -111,6 +142,7 @@ bash ./scripts/codex-multi-agents-tmux.sh \
 bash ./scripts/codex-multi-agents-task.sh \
   -file ./TODO.md \
   -new -info "实现任务调度器告警" \
+  -type build \
   -worktree repo-x \
   -depends "T-20260408-aaaa1111,T-20260408-bbbb2222" \
   -plan "ARCHITECTURE/plan/example_green_plan.md" \
@@ -119,8 +151,9 @@ bash ./scripts/codex-multi-agents-task.sh \
 ```
 
 说明：
-- `-new` 必填：`-info/-worktree/-depends/-plan`。
-- `-worktree/-depends/-plan` 支持传 `None`（表示写空值）。
+- `-new` 必填：`-info/-type/-worktree/-depends/-plan`。
+- `-type` 只接受 `spec/build/review/merge/other/refactor`。
+- `-worktree/-depends/-plan` 支持传 `None`，但 `-worktree` 不能为 `None` 或空字符串。
 - 权限：仅架构师与管理员可执行 `-new`。
 
 ### 分发任务
@@ -133,6 +166,7 @@ bash ./scripts/codex-multi-agents-task.sh \
 
 说明：
 - 每次 `-dispatch` 前，脚本都会先执行一次 `codex-multi-agents-list.sh -init`。
+- `-dispatch` 不要求显式传 `-type`，默认读取任务记录中的 `任务类型`；若显式传入，则必须与任务记录一致。
 - 若未提供 `-message`，会自动发送默认模板消息。
 - 若目标角色为 `busy`，分发会被阻断。
 - 若任务存在未完成依赖（依赖任务仍在 TODO），分发会被阻断。
@@ -160,13 +194,40 @@ bash ./scripts/codex-multi-agents-task.sh \
 bash ./scripts/codex-multi-agents-task.sh \
   -file ./TODO.md \
   -next -task_id T-20260308-xxxxxxx1 \
+  -type review \
   -message "审查：复核权限校验与并行上限分发阻断" \
   -agents-list ./agents/codex-multi-agents/agents-lists.md
 ```
 
 说明：
 - `-next` 会把任务从“正在执行的任务”移回“任务列表”。
-- 只替换“描述”，其余字段（worktree/依赖/计划书/指派/记录文件）保持不变。
+- `-next` 必须显式提供下一阶段 `-type`，避免阶段类型误判。
+- 只替换“描述”和“任务类型”，其余字段（worktree/依赖/计划书/指派/记录文件）保持不变。
+
+### 自动续接任务（-next -auto）
+```bash
+bash ./scripts/codex-multi-agents-task.sh \
+  -file ./TODO.md \
+  -next -task_id T-20260308-xxxxxxx1 \
+  -type review \
+  -message "审查：复核权限校验与并行上限分发阻断" \
+  -agents-list ./agents/codex-multi-agents/agents-lists.md \
+  -auto
+```
+
+说明：
+- `-auto` 只能和 `-next` 一起使用。
+- `-next -auto` 会先完成当前任务的续接，再从 `任务列表` 自动挑选一条可推进任务继续分发。
+- 自动挑选顺序固定为：`merge > review > build > spec`。
+- 自动接续时会优先尝试默认指派，其次选择空闲且职责匹配的角色；若仍没有合适角色，任务保留在 `任务列表`。
+- 自动接续成功后，会向接手人发送任务消息，并向管理员发送摘要；若接给当前执行者本人，则只向管理员发送摘要。
+
+实际通知效果：
+- 接给其他角色时，执行人会收到一条固定格式消息，内容至少包含：`任务 ID`、`描述`、`worktree`、`计划书`、`记录文件`、任务记录要求、问题咨询指引；若本次 `-next` 是为了 `merge`，消息会额外提示“完成后直接回报管理员，由管理员执行 -done”。
+- 接给其他角色时，管理员还会收到摘要消息，说明：哪个任务刚执行了 `-next`、新自动分发的是哪个任务、任务类型是什么、当前接手人是谁。
+- 若自动接续落到当前执行者本人，则不会再给本人发消息，只会给管理员发送摘要，避免重复提醒。
+- 若当前没有可继续推进的任务，或有任务但没有合适空闲角色，管理员会收到“仍保留在任务列表”的摘要消息。
+- 若本次 `-next` 自带 `-message`，该内容会写回任务描述；真正发给执行人的通知仍然会保留固定前缀：`请处理任务 <task_id>（<描述>）...`，`-message` 不会替代这些基础字段。
 
 ### 计划书归档（-done-plan）
 ```bash
@@ -200,8 +261,10 @@ bash ./scripts/codex-multi-agents-task.sh \
 - `-new/-dispatch/-pause/-continue/-reassign/-next/-done/-delete/-done-plan` 操作类型
 - `-task_id` 任务 ID
 - `-info` 任务描述
+- `-type` 任务阶段类型（`-next/-new` 必填，`-dispatch` 可选）
 - `-agents-list` 角色名单路径（`-dispatch/-done/-pause/-continue/-reassign/-next` 必填）
 - `-to/-from/-worktree/-depends/-plan/-log` 任务字段
+- `-auto` 自动续接开关，仅用于 `-next`
 - `-status -doing/-task-list/-plan-list` 状态查询
 
 ## 4. 权限速记

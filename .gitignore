@@ -19,4 +19,5 @@ agents-lists.md
 main.py
 plan
 ARCHITECTURE/plan/
+humanize
 *.plan.md

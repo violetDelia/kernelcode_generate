@@ -558,6 +558,12 @@ def _ensure_contiguous_result_stride(result_type: NnMemoryType) -> None:
         raise LowerNnToKernelError("dma.alloc requires contiguous result stride")
 
 
+def _is_static_shape(result_type: NnMemoryType) -> bool:
+    """判断结果 shape 是否全为静态整数维度。"""
+
+    return all(isinstance(dim, IntAttr) for dim in result_type.shape.data)
+
+
 def _select_shape_source(op: Operation) -> SSAValue:
     """选择用于生成 dynamic_shape 的 memory operand。
 
@@ -752,7 +758,11 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
         if not isinstance(source_type, NnMemoryType):
             raise LowerNnToKernelError("nn.transpose operand must be nn.memory")
         perm_attr = _parse_transpose_perm_attr(op.attributes.get("perm"), len(source_type.shape.data))
-        shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_result(result_type)
+        if _is_static_shape(result_type):
+            shape_ops = []
+            dynamic_shape = []
+        else:
+            shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_result(result_type)
         alloc = DmaAllocOp(dynamic_shape, result_type)
         transpose = DmaTransposeOp(alloc.result, source, perm_attr)
 
@@ -776,7 +786,11 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
         if not isinstance(source_type, NnMemoryType):
             raise LowerNnToKernelError("nn.broadcast operand must be nn.memory")
 
-        shape_ops, dynamic_shape = _build_broadcast_alloc_dynamic_shape(source, result_type)
+        if _is_static_shape(result_type):
+            shape_ops = []
+            dynamic_shape = []
+        else:
+            shape_ops, dynamic_shape = _build_broadcast_alloc_dynamic_shape(source, result_type)
         alloc = DmaAllocOp(dynamic_shape, result_type)
         broadcast_source = source
         extra_ops: list[Operation] = []
@@ -789,7 +803,11 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
                 source_type.element_type,
                 result_type.space,
             )
-            temp_shape_ops, temp_dynamic_shape = _build_alloc_dynamic_shape(source, temp_type)
+            if _is_static_shape(temp_type):
+                temp_shape_ops = []
+                temp_dynamic_shape = []
+            else:
+                temp_shape_ops, temp_dynamic_shape = _build_alloc_dynamic_shape(source, temp_type)
             extra_alloc = DmaAllocOp(temp_dynamic_shape, temp_type)
             extra_copy = DmaCopyOp(source, extra_alloc.result)
             extra_ops.extend(temp_shape_ops)
@@ -817,7 +835,10 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
     space = _ensure_space_attr(op)
 
     _ensure_contiguous_result_stride(result_type)
-    if op.name == "nn.reduce_min":
+    if _is_static_shape(result_type):
+        shape_ops: list[Operation] = []
+        dynamic_shape: list[SSAValue] = []
+    elif op.name == "nn.reduce_min":
         shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_result(
             result_type,
             include_static=False,
