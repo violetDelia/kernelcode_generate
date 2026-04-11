@@ -1,7 +1,7 @@
 """mlir_gen 产物比较工具。
 
 创建者: 睡觉小分队
-最后一次更改: 金铲铲大作战
+最后一次更改: 小李飞刀
 
 功能说明:
 - 提供 compare_mlir_file(...)：生成实际 builtin.module，读取预期 .mlir 文件，
@@ -25,23 +25,20 @@ from io import StringIO
 from pathlib import Path
 
 from xdsl.context import Context
-from xdsl.dialects.builtin import Builtin, ModuleOp
-from xdsl.dialects.func import Func
+from xdsl.dialects.builtin import ModuleOp
 from xdsl.parser import Parser
 from xdsl.printer import Printer
-
-from kernel_gen.dialect.kernel import Kernel
-from kernel_gen.dialect.nn import Nn
 
 
 def _build_default_context() -> Context:
     """构造用于解析与打印的默认 xdsl Context。
 
     创建者: 睡觉小分队
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
-    - 加载 builtin/func 及仓库内轻量 dialect（nn/kernel），用于 module 解析与打印。
+    - 通过 kernel_gen/context.py 提供的统一入口加载默认 dialect 集合，确保解析与打印稳定。
+    - 默认包含 builtin/func/arith + 仓库内 nn/kernel/symbol/dma/arch 等常见 dialect。
 
     使用示例:
     - ctx = _build_default_context()
@@ -53,12 +50,9 @@ def _build_default_context() -> Context:
     - 功能实现: [kernel_gen/tools/mlir_gen_compare.py](kernel_gen/tools/mlir_gen_compare.py)
     """
 
-    ctx = Context()
-    ctx.load_dialect(Builtin)
-    ctx.load_dialect(Func)
-    ctx.load_dialect(Nn)
-    ctx.load_dialect(Kernel)
-    return ctx
+    from kernel_gen.context import build_default_context
+
+    return build_default_context()
 
 
 def _normalize_module(module: ModuleOp, ctx: Context) -> str:
@@ -123,11 +117,12 @@ def compare_mlir_file(
     """比较 mlir_gen 结果与预期 mlir 文件。
 
     创建者: 睡觉小分队
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 生成实际 builtin.module，并与预期 mlir_file 做规范化文本比较。
-    - 读取失败、解析失败或非 builtin.module 时返回 False。
+    - 若 mlir_gen(...) 返回值不是 builtin.module，返回 False。
+    - 预期文件读取失败、解析失败、归一化失败，或归一化文本不一致时返回 False。
 
     使用示例:
     - ok = compare_mlir_file(fn=add, runtime_args=[lhs, rhs], config=None, mlir_file="expected.mlir")
@@ -148,7 +143,7 @@ def compare_mlir_file(
 
     actual_module = mlir_gen_fn(fn, *args, config=config)
     if not isinstance(actual_module, ModuleOp):
-        raise TypeError("mlir_gen must return builtin.module")
+        return False
 
     try:
         expected_text = Path(mlir_file).read_text(encoding="utf-8")
@@ -163,6 +158,9 @@ def compare_mlir_file(
     if not isinstance(expected_module, ModuleOp):
         return False
 
-    actual_norm = _normalize_module(actual_module, ctx)
-    expected_norm = _normalize_module(expected_module, ctx)
+    try:
+        actual_norm = _normalize_module(actual_module, ctx)
+        expected_norm = _normalize_module(expected_module, ctx)
+    except Exception:
+        return False
     return actual_norm == expected_norm

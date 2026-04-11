@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`小李飞刀`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
 - `功能实现`：[`kernel_gen/dsl/mlir_gen.py`](../../kernel_gen/dsl/mlir_gen.py)
 - `test`：[`test/dsl/test_mlir_gen.py`](../../test/dsl/test_mlir_gen.py)
@@ -35,6 +35,7 @@
 
 - `build_func_op(...)` / `build_func_op_from_ast(...)` 只生成 `func.func`，不负责组装 `builtin.module`；`mlir_gen(...)` 负责组装 `builtin.module`。
 - 不负责 MLIR 文本打印或后端代码生成。
+- `mlir_gen(...)` 只返回 in-memory `builtin.module`；与磁盘 `.mlir` 文件做归一化比较的规则由 [`spec/tools/mlir_gen_compare.md`](../../spec/tools/mlir_gen_compare.md) 定义，本模块不读取文件、不做文本比较。
 - 不定义节点级发射细节，节点发射规则由 `emit_mlir` 约束。
 - 不做优化或自动修复非法 IR。
 - `build_func_op` 的公开入口接收目标函数、运行时参数，以及仅用于补充源码解析环境的可选 `globals` / `builtins`；这些额外参数不得改变由 `runtime_args` 决定的函数输入签名，也不能代替必填的运行时参数。

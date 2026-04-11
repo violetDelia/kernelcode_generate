@@ -18,6 +18,10 @@
 - module 生成入口（actual）：[`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
 - 依赖的实现模块（actual）：[`kernel_gen/dsl/mlir_gen.py`](../../kernel_gen/dsl/mlir_gen.py)
 - IR 解析与打印（归一化比较）：[`kernel_gen/context.py`](../../kernel_gen/context.py)
+- 默认解析上下文加载的 dialect（至少）：
+  - `xdsl.dialects.builtin` / `xdsl.dialects.func` / `xdsl.dialects.arith`
+  - `kernel_gen.dialect.nn` / `kernel_gen.dialect.kernel` / `kernel_gen.dialect.symbol`
+  - `kernel_gen.dialect.dma` / `kernel_gen.dialect.arch`
 
 ## 目标
 
@@ -92,13 +96,16 @@ assert ok is True
 - 建议将调用入口脚本与对应 `.mlir` 预期文件放在同一目录中，并通过相对路径或 `__file__` 拼出 `mlir_file`。
 - 比较流程必须对两边使用同一套“解析 + 打印”归一化口径；不得直接比较原始文件文本。
 - `mlir_file` 读入失败、解析失败，或解析结果不是 `builtin.module` 时，必须返回 `False`。
+- 若 `mlir_gen(...)` 返回值不是 `builtin.module`，必须返回 `False`。
 - 归一化后的文本不一致时，必须返回 `False`。
+- 归一化过程中的二次解析失败（例如 dialect 未注册导致的解析失败）也必须返回 `False`。
+- 上述返回 `False` 的分支不要求提供稳定的错误短语；若下游需要诊断对象，应通过新增并列接口承载。
 - `mlir_gen(...)` 的失败语义不由本函数重新定义：若 `mlir_gen(...)` 抛错，本函数应直接向上传播。
 
 返回与限制：
 
 - 返回 `True`：actual 与 expected 的归一化文本完全一致。
-- 返回 `False`：`mlir_file` 不可读/不可解析/不是 `builtin.module`，或归一化后的文本不一致。
+- 返回 `False`：`mlir_gen(...)` 返回值不是 `builtin.module`，或 `mlir_file` 不可读/不可解析/不是 `builtin.module`，或归一化后的文本不一致。
 
 ## 测试
 
