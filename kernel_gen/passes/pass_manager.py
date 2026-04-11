@@ -1,11 +1,11 @@
 """Pass manager API.
 
 创建者: 李白
-最后一次更改: 小李飞刀
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 定义 Pass 与 PassManager 的基础行为。
-- 为 lowering 场景提供推荐的 pass 链路构造入口。
+- 提供默认 lowering pipeline 的兼容构造入口（实际调用 pipeline builder）。
 
 使用示例:
 - import importlib
@@ -101,14 +101,15 @@ def build_default_lowering_pass_manager(name: str | None = "lowering") -> "PassM
     """构造默认 lowering pass 链路。
 
     创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
+    最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 固定注册 `DecompassPass -> LowerNnToKernelPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass` 顺序。
-    - 为推荐调用链与黑盒测试提供统一入口，避免各处手工拼装顺序不一致。
+    - 兼容入口：转调 `kernel_gen.passes.pipeline.build_default_lowering_pipeline` 构造 PassManager。
+    - 当 `name` 非空时覆盖返回的 `PassManager.name`，保持旧接口可用。
 
     使用示例:
     - pm = build_default_lowering_pass_manager()
+    - pm = build_default_lowering_pass_manager(name="lowering")
     - module = pm.run(module)
 
     关联文件:
@@ -117,18 +118,11 @@ def build_default_lowering_pass_manager(name: str | None = "lowering") -> "PassM
     - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
     """
 
-    from .lowering import (
-        BufferResultsToOutParamsPass,
-        LowerDmaMemoryHierarchyPass,
-        LowerNnToKernelPass,
-    )
-    from .lowering.decompass import DecompassPass
+    from kernel_gen.passes.pipeline import build_default_lowering_pipeline
 
-    pm = PassManager(name=name)
-    pm.add_pass(DecompassPass())
-    pm.add_pass(LowerNnToKernelPass())
-    pm.add_pass(BufferResultsToOutParamsPass())
-    pm.add_pass(LowerDmaMemoryHierarchyPass())
+    pm = build_default_lowering_pipeline()
+    if name is not None:
+        pm.name = name
     return pm
 
 
