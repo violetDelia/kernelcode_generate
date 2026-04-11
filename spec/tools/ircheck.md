@@ -51,11 +51,12 @@
 - `expectation/tools/ircheck/basic_true.py`：验证 `run_ircheck_text(...)` 成功路径返回 `ok=True`。
 - `expectation/tools/ircheck/basic_false.py`：验证 `run_ircheck_text(...)` 返回 `ok=False` 且错误短语稳定。
 - `expectation/tools/ircheck/check_next_false.py`：验证相邻行匹配失败时返回稳定错误短语。
+- `expectation/tools/ircheck/README.md`：样例入口与迁移写法，强调三条公开 API 为稳定合同。
 
 ## 迁移建议
 
 - 旧测试中若手写字符串断言，可迁移为单文件 case + `ircheck` 检查指令。
-- expectation 文档统一写法：仅 `parse_ircheck_file`、`run_ircheck_file`、`run_ircheck_text` 为稳定合同，其他符号视为内部细节。
+- expectation 文档统一写法：仅 `parse_ircheck_file`、`run_ircheck_file`、`run_ircheck_text` 为稳定合同，其余符号视为内部细节。
 
 ## 限制与边界
 

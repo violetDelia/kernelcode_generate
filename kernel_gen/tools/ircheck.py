@@ -25,6 +25,7 @@ builtin.module {}
   - [expectation/tools/ircheck/basic_true.py](expectation/tools/ircheck/basic_true.py)
   - [expectation/tools/ircheck/basic_false.py](expectation/tools/ircheck/basic_false.py)
   - [expectation/tools/ircheck/check_next_false.py](expectation/tools/ircheck/check_next_false.py)
+  - [expectation/tools/ircheck/README.md](expectation/tools/ircheck/README.md)
 - test:
   - [test/tools/test_ircheck_parser.py](test/tools/test_ircheck_parser.py)
   - [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
