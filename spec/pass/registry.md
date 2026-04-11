@@ -18,6 +18,9 @@
 - pass 抽象与 pass manager：
   - [`spec/pass/pass_manager.md`](../../spec/pass/pass_manager.md)
   - [`kernel_gen/passes/pass_manager.py`](../../kernel_gen/passes/pass_manager.py)
+- pipeline 目录与默认 pipeline：
+  - [`spec/pass/pipeline/README.md`](../../spec/pass/pipeline/README.md)
+  - [`spec/pass/pipeline/default_lowering.md`](../../spec/pass/pipeline/default_lowering.md)
 
 ## 术语
 
@@ -29,22 +32,15 @@
 
 - 对外只暴露“名字 -> 实例/PassManager”的查询能力，避免工具层与测试层散落 import 细节。
 - 支持通过装饰器完成注册，降低新增 pass/pipeline 的接入成本。
-- 为 `ircheck` 的 `COMPILE_ARGS: --pass/--pipeline` 提供唯一的名字解析来源。
-
-## 与 ircheck 的衔接
-
-- `ircheck` 仅通过 `load_builtin_passes` + `build_registered_pass/build_registered_pipeline` 解析名字。
-- 黑盒样例见：
-  - [`expectation/tools/ircheck/basic_true.py`](../../expectation/tools/ircheck/basic_true.py)
-  - [`expectation/tools/ircheck/basic_false.py`](../../expectation/tools/ircheck/basic_false.py)
-  - [`expectation/tools/ircheck/check_next_false.py`](../../expectation/tools/ircheck/check_next_false.py)
-  - [`expectation/tools/ircheck/README.md`](../../expectation/tools/ircheck/README.md)
+- 供工具层（如 ircheck）通过 `load_builtin_passes` + `build_registered_pass/build_registered_pipeline` 完成名字解析。
 
 ## 限制与边界
 
 - 注册表不接收用户输入的任意 import path；也不负责扫描文件系统自动发现。
 - 注册发生在 Python import 时；因此对“内置 pass/pipeline”必须提供一个显式加载入口（见 `load_builtin_passes`）。
 - `build_registered_pass/build_registered_pipeline` 不得隐式调用 `load_builtin_passes()`；加载时机由调用方控制，以保持工具入口行为可预测。
+- 内置 pipeline 模块放在 `kernel_gen/passes/pipeline`；`load_builtin_passes()` 负责导入这些模块以触发注册。
+- registry 只负责注册与查询，不承载具体 pipeline builder 实现。
 - 重复注册同名 pass 或 pipeline 必须立即失败，不得覆盖旧项。
 - 为便于工具与测试编写最小用例，仓库内置 pass 至少应包含：
   - `no-op`：恒等 pass（对输入 module 不做任何改写），且必须满足“可构造”要求（`pass_cls()` 可成功执行）。

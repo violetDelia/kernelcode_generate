@@ -59,6 +59,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaFillOp, DmaTransposeOp
 from kernel_gen.dialect.kernel import (
+    KernelBinaryElewiseOp,
     KernelAddOp,
     KernelCastOp,
     KernelDivOp,
@@ -70,6 +71,7 @@ from kernel_gen.dialect.kernel import (
     KernelLeOp,
     KernelNeOp,
     KernelMatmulOp,
+    KernelReduceOp,
     KernelReduceMinOp,
     KernelSelectOp,
 )
@@ -1966,3 +1968,71 @@ def test_run_rejects_non_iterable_module_ops(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(ModuleOp, "ops", None, raising=False)
     with pytest.raises(LowerNnToKernelError, match="module ops must be iterable"):
         LowerNnToKernelPass().run(module)
+
+
+# TC-PASS-N2K-031
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-11 21:10:00 +0800
+# 最近一次运行成功时间: 2026-04-11 21:10:00 +0800
+# 测试目的: 验证 nn_lowering 新入口可用且旧入口仍保留。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_rename_exposes_nn_lowering_pass
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
+def test_rename_exposes_nn_lowering_pass() -> None:
+    nn_lowering_module = importlib.import_module("kernel_gen.passes.lowering.nn_lowering")
+    assert nn_lowering_module.NnLoweringPass().name == "lower-nn"
+    assert LowerNnToKernelPass().name == "lower-nn-to-kernel"
+    lowering_pkg = importlib.import_module("kernel_gen.passes.lowering")
+    assert hasattr(lowering_pkg, "NnLoweringPass")
+
+
+# TC-PASS-N2K-032
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-11 21:10:00 +0800
+# 最近一次运行成功时间: 2026-04-11 21:10:00 +0800
+# 测试目的: 验证 kernel.binary_elewise 与 kernel.reduce 的公开合同可用。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_public_contract_kernel_binary_elewise_and_reduce
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
+def test_public_contract_kernel_binary_elewise_and_reduce() -> None:
+    space = _make_space("global")
+    lhs_type = _make_memory_type()
+    rhs_type = _make_memory_type()
+    out_type = _make_memory_type()
+    out_compare_type = _make_memory_type(element_type=i1)
+    block = Block(arg_types=[lhs_type, rhs_type, out_type, out_compare_type])
+
+    KernelBinaryElewiseOp(
+        block.args[0],
+        block.args[1],
+        block.args[2],
+        kind="add",
+        space=space,
+    ).verify_()
+    KernelBinaryElewiseOp(
+        block.args[0],
+        block.args[1],
+        block.args[3],
+        kind="eq",
+        space=space,
+    ).verify_()
+
+    input_shape = ArrayAttr([IntAttr(2), IntAttr(4)])
+    input_stride = ArrayAttr([IntAttr(4), IntAttr(1)])
+    output_shape = ArrayAttr([IntAttr(2)])
+    output_stride = ArrayAttr([IntAttr(1)])
+    input_type = _make_memory_type(shape=input_shape, stride=input_stride)
+    output_type = _make_memory_type(shape=output_shape, stride=output_stride)
+    reduce_block = Block(arg_types=[input_type, output_type])
+    KernelReduceOp(
+        reduce_block.args[0],
+        reduce_block.args[1],
+        kind="sum",
+        axis=1,
+        keepdim=False,
+        space=space,
+    ).verify_()

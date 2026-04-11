@@ -32,8 +32,12 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "skills/codex-multi-agents/scripts/codex-multi-agents-task.sh"
+
+pytestmark = pytest.mark.infra
 
 
 def run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
