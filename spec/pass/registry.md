@@ -34,7 +34,10 @@
 ## 与 ircheck 的衔接
 
 - `ircheck` 仅通过 `load_builtin_passes` + `build_registered_pass/build_registered_pipeline` 解析名字。
-- 样例与统一写法见 [`spec/tools/ircheck.md`](../../spec/tools/ircheck.md) 与 [`expectation/tools/ircheck/README.md`](../../expectation/tools/ircheck/README.md)。
+- 黑盒样例见：
+  - [`expectation/tools/ircheck/basic_true.py`](../../expectation/tools/ircheck/basic_true.py)
+  - [`expectation/tools/ircheck/basic_false.py`](../../expectation/tools/ircheck/basic_false.py)
+  - [`expectation/tools/ircheck/check_next_false.py`](../../expectation/tools/ircheck/check_next_false.py)
 
 ## 限制与边界
 

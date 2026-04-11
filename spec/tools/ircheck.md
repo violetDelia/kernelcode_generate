@@ -48,8 +48,9 @@
 
 ## 样例目录
 
-- `expectation/tools/ircheck/README.md`：样例说明与统一写法。
-- `expectation/tools/ircheck/basic_true.py`、`multi_case_true.py` 等脚本提供黑盒验证入口。
+- `expectation/tools/ircheck/basic_true.py`：验证 `run_ircheck_text(...)` 成功路径返回 `ok=True`。
+- `expectation/tools/ircheck/basic_false.py`：验证 `run_ircheck_text(...)` 返回 `ok=False` 且错误短语稳定。
+- `expectation/tools/ircheck/check_next_false.py`：验证相邻行匹配失败时返回稳定错误短语。
 
 ## 迁移建议
 
