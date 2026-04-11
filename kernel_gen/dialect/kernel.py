@@ -42,6 +42,61 @@ _ERROR_TEMPLATE = "场景: {scene}; 期望: {expected}; 实际: {actual}; 建议
 _ERROR_ACTION = "请按接口约束传参"
 _ERROR_ACTUAL = "不满足期望"
 _ERROR_SCENE = "dialect.kernel verifier"
+_BINARY_ELEWISE_ARITH_KINDS = {"add", "sub", "mul", "div", "truediv"}
+_BINARY_ELEWISE_COMPARE_KINDS = {"eq", "ne", "lt", "le", "gt", "ge"}
+_BINARY_ELEWISE_KINDS = _BINARY_ELEWISE_ARITH_KINDS | _BINARY_ELEWISE_COMPARE_KINDS
+_REDUCE_KINDS = {"sum", "min", "max"}
+
+
+def _normalize_kind_attr(
+    kind: str | StringAttr,
+    *,
+    op_name: str,
+    field_name: str,
+    allowed: set[str],
+) -> StringAttr:
+    """规范化并校验 kind attribute。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 支持 str 与 StringAttr 作为 kind 输入。
+    - 校验 kind 是否属于允许集合。
+
+    使用示例:
+    - kind_attr = _normalize_kind_attr("add", op_name="kernel.binary_elewise", field_name="kind", allowed=_BINARY_ELEWISE_KINDS)
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel_dialect.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    if isinstance(kind, StringAttr):
+        kind_attr = kind
+    elif isinstance(kind, str):
+        kind_attr = StringAttr(kind)
+    else:
+        raise VerifyException(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected=f"{op_name} {field_name} must be string",
+                actual=_ERROR_ACTUAL,
+                action=_ERROR_ACTION,
+            )
+        )
+    if kind_attr.data not in allowed:
+        allowed_text = ", ".join(sorted(allowed))
+        raise VerifyException(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected=f"{op_name} {field_name} must be one of [{allowed_text}]",
+                actual=_ERROR_ACTUAL,
+                action=_ERROR_ACTION,
+            )
+        )
+    return kind_attr
 
 def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
     """校验并返回 nn.memory type。
@@ -754,6 +809,111 @@ class _BaseKernelBinaryOp(IRDLOperation):
         """初始化二元 op。"""
 
         super().__init__(operands=[lhs, rhs, out], attributes={"space": space})
+
+
+@irdl_op_definition
+class KernelBinaryElewiseOp(IRDLOperation):
+    """kernel.binary_elewise。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 定义统一的二元逐元素算术/比较 op。
+    - 通过 kind 属性区分 add/sub/eq 等语义。
+
+    使用示例:
+    - KernelBinaryElewiseOp(lhs, rhs, out, kind="add", space=NnMemorySpaceAttr.from_name("global"))
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel_dialect.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    name = "kernel.binary_elewise"
+
+    lhs = operand_def(NnMemoryType)
+    rhs = operand_def(NnMemoryType)
+    out = operand_def(NnMemoryType)
+    kind = attr_def(StringAttr)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        lhs: SSAValue | Operation,
+        rhs: SSAValue | Operation,
+        out: SSAValue | Operation,
+        *,
+        kind: str | StringAttr,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        """初始化 kernel.binary_elewise op。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 绑定输入、输出与 kind/space 属性。
+
+        使用示例:
+        - KernelBinaryElewiseOp(lhs, rhs, out, kind="add", space=NnMemorySpaceAttr.from_name("global"))
+
+        关联文件:
+        - spec: spec/dialect/kernel.md
+        - test: test/dialect/test_kernel_dialect.py
+        - 功能实现: kernel_gen/dialect/kernel.py
+        """
+
+        kind_attr = _normalize_kind_attr(
+            kind, op_name=self.name, field_name="kind", allowed=_BINARY_ELEWISE_KINDS
+        )
+        super().__init__(
+            operands=[lhs, rhs, out],
+            attributes={"kind": kind_attr, "space": space},
+        )
+
+    def verify_(self) -> None:
+        """校验 kernel.binary_elewise 的 verifier 合同。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 校验 layout/space 约束。
+        - 根据 kind 决定 element_type 校验规则。
+
+        使用示例:
+        - KernelBinaryElewiseOp(lhs, rhs, out, kind="add", space=space).verify_()
+
+        关联文件:
+        - spec: spec/dialect/kernel.md
+        - test: test/dialect/test_kernel_dialect.py
+        - 功能实现: kernel_gen/dialect/kernel.py
+        """
+
+        lhs_type = _verify_memory_type(self.lhs.type, "lhs")
+        rhs_type = _verify_memory_type(self.rhs.type, "rhs")
+        out_type = _verify_memory_type(self.out.type, "out")
+        _verify_same_layout([lhs_type, rhs_type, out_type], self.space)
+        kind_value = _normalize_kind_attr(
+            self.kind, op_name=self.name, field_name="kind", allowed=_BINARY_ELEWISE_KINDS
+        ).data
+        if kind_value in _BINARY_ELEWISE_COMPARE_KINDS:
+            if out_type.element_type != i1:
+                raise VerifyException(
+                    _ERROR_TEMPLATE.format(
+                        scene=_ERROR_SCENE,
+                        expected="kernel.binary_elewise compare output element_type must be i1",
+                        actual=_ERROR_ACTUAL,
+                        action=_ERROR_ACTION,
+                    )
+                )
+            return
+        _verify_element_type_match(
+            [lhs_type, rhs_type, out_type],
+            "kernel.binary_elewise element_type must match across operands",
+        )
 
 
 @irdl_op_definition
@@ -1653,6 +1813,139 @@ class KernelSoftmaxOp(IRDLOperation):
 
 
 @irdl_op_definition
+class KernelReduceOp(IRDLOperation):
+    """kernel.reduce。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 定义带 kind 的 reduce op 与 verifier 约束。
+
+    使用示例:
+    - KernelReduceOp(inp, out, kind="sum", axis=1, keepdim=False, space=NnMemorySpaceAttr.from_name("global"))
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel_dialect.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    name = "kernel.reduce"
+
+    input = operand_def(NnMemoryType)
+    out = operand_def(NnMemoryType)
+    kind = attr_def(StringAttr)
+    axis = attr_def(IntegerAttr)
+    keepdim = attr_def(IntegerAttr)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        input_value: SSAValue | Operation,
+        out: SSAValue | Operation,
+        *,
+        kind: str | StringAttr,
+        axis: int | IntegerAttr | IntAttr,
+        keepdim: bool | int | IntegerAttr | IntAttr,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        """初始化 kernel.reduce op。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 绑定输入/输出 operand。
+        - axis 规整为 i64 IntegerAttr，keepdim 规整为 i1。
+
+        使用示例:
+        - KernelReduceOp(inp, out, kind="sum", axis=1, keepdim=False, space=NnMemorySpaceAttr.from_name("global"))
+
+        关联文件:
+        - spec: spec/dialect/kernel.md
+        - test: test/dialect/test_kernel_dialect.py
+        - 功能实现: kernel_gen/dialect/kernel.py
+        """
+
+        kind_attr = _normalize_kind_attr(
+            kind, op_name=self.name, field_name="kind", allowed=_REDUCE_KINDS
+        )
+        axis_attr = _normalize_i64_attr(axis, "axis")
+        keepdim_attr = _normalize_bool_attr(keepdim, "keepdim")
+        super().__init__(
+            operands=[input_value, out],
+            attributes={
+                "kind": kind_attr,
+                "axis": axis_attr,
+                "keepdim": keepdim_attr,
+                "space": space,
+            },
+        )
+
+    def verify_(self) -> None:
+        """校验 kernel.reduce 的 verifier 合同。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 校验 kind/axis/keepdim/out.shape 约束。
+        - 校验 element_type 与 space 一致性。
+
+        使用示例:
+        - KernelReduceOp(inp, out, kind="sum", axis=1, keepdim=False, space=space).verify_()
+
+        关联文件:
+        - spec: spec/dialect/kernel.md
+        - test: test/dialect/test_kernel_dialect.py
+        - 功能实现: kernel_gen/dialect/kernel.py
+        """
+
+        input_type = _verify_memory_type(self.input.type, "input")
+        out_type = _verify_memory_type(self.out.type, "out")
+        _normalize_kind_attr(
+            self.kind, op_name=self.name, field_name="kind", allowed=_REDUCE_KINDS
+        )
+        axis_value = _verify_i64_attr_range(
+            self.axis, "axis", min_value=0, max_value=len(input_type.shape.data) - 1
+        )
+        keepdim_value = _verify_bool_attr(self.keepdim, "keepdim")
+        if input_type.element_type != out_type.element_type:
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.reduce element_type must match across operands",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+        self.space.verify()
+        if input_type.space.space.data != out_type.space.space.data:
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.reduce out space must match input",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+        if input_type.space.space.data != self.space.space.data:
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected="kernel.reduce attribute space must match input",
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+        expected_shape = _build_reduce_result_shape(
+            list(input_type.shape.data), axis_value, keepdim_value
+        )
+        _verify_reduce_result_shape(out_type, expected_shape, "kernel.reduce")
+
+
+@irdl_op_definition
 class KernelReduceMinOp(IRDLOperation):
     """kernel.reduce_min。
 
@@ -1774,6 +2067,7 @@ class KernelReduceMinOp(IRDLOperation):
 Kernel = Dialect(
     "kernel",
     [
+        KernelBinaryElewiseOp,
         KernelAddOp,
         KernelSubOp,
         KernelMulOp,
@@ -1791,6 +2085,7 @@ Kernel = Dialect(
         KernelCastOp,
         KernelExpOp,
         KernelSoftmaxOp,
+        KernelReduceOp,
         KernelReduceMinOp,
     ],
     [],
@@ -1798,6 +2093,7 @@ Kernel = Dialect(
 
 __all__ = [
     "Kernel",
+    "KernelBinaryElewiseOp",
     "KernelAddOp",
     "KernelSubOp",
     "KernelMulOp",
@@ -1815,5 +2111,6 @@ __all__ = [
     "KernelCastOp",
     "KernelExpOp",
     "KernelSoftmaxOp",
+    "KernelReduceOp",
     "KernelReduceMinOp",
 ]

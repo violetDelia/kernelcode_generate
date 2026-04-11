@@ -2,14 +2,14 @@
 
 ## 功能简介
 
-- 定义 `kernel` dialect 的执行步骤层运算语义，用于描述逐元素计算、比较、选择、类型转换，以及 `exp / softmax / reduce_* / matmul / img2col*` 等 lower 后目标 op 的稳定合同。
+- 定义 `kernel` dialect 的执行步骤层运算语义，用于描述逐元素计算、比较、选择、类型转换，以及 `binary_elewise / exp / softmax / reduce(kind=...) / reduce_* / matmul / img2col*` 等 lower 后目标 op 的稳定合同。
 - 所有结果通过显式 `outs(...)` 写回，不产生 SSA result。
 - 复用 `nn` dialect 的 memory type 与 space attribute，不新增独立 memory 类型体系。
 
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/dialect/kernel.md`](../../spec/dialect/kernel.md)
 - `功能实现`：[`kernel_gen/dialect/kernel.py`](../../kernel_gen/dialect/kernel.py)
 - `test`：[`test/dialect/test_kernel_dialect.py`](../../test/dialect/test_kernel_dialect.py)
@@ -22,7 +22,7 @@
 
 - 提供可解析、可校验的逐元素、结构化张量变换与 reduction/matmul 类 `kernel.*` op 集合。
 - 明确 `ins(...)` / `outs(...)` 形式下的类型、shape、stride、space 与关键 attrs 一致性校验规则。
-- 冻结 `LowerNnToKernelPass` 面向 `kernel.compare family`、`kernel.exp`、`kernel.softmax`、`kernel.reduce_sum`、`kernel.reduce_min`、`kernel.reduce_max`、`kernel.matmul`、`kernel.img2col1d`、`kernel.img2col2d` 的目标 op 名字与输出消费链路。
+- 明确 `LowerNnToKernelPass` 面向 `kernel.binary_elewise`、`kernel.compare family`、`kernel.exp`、`kernel.softmax`、`kernel.reduce`、`kernel.reduce_sum`、`kernel.reduce_min`、`kernel.reduce_max`、`kernel.matmul`、`kernel.img2col1d`、`kernel.img2col2d` 的目标 op 名字与输出消费链路。
 - 明确 expectation 所要求的 `dma.alloc -> kernel.* -> func.return` 是真实消费链路：`out` operand 必须被目标 op 实际写入，不允许只命中 op 名称而缺失输出写回语义。
 
 ## 限制与边界
@@ -32,7 +32,7 @@
 - 所有 op 不产生 SSA result，结果必须写入 `outs(...)`；不得把 `out` 写回链路写成“实现自定”或“可选消费”。
 - 本版仅支持 memory operand，不支持标量 operand；标量扩展留待后续版本。
 - 对逐元素算术、比较、选择与类型转换，输入 operand 默认要求 `shape/stride/space/element_type` 一致；`kernel` 层不提供 broadcast/transpose 形状变换入口（它们必须在 `dma` 层显式物化）。
-- `reduce_sum`、`reduce_min`、`reduce_max` 可以共用一组 expectation，但 dialect 层必须保持 op 名字与 verifier 语义区分，不能折叠为同一个无差别 op。
+- `kernel.reduce` 与 `kernel.reduce_sum/min/max` 可以并存，但 dialect 层必须保持 op 名字与 verifier 语义区分，不能折叠为同一个无差别 op。
 - `matmul`、`img2col1d`、`img2col2d` 的结构性变换必须在 verifier 阶段完成 rank / shape / attrs 的机械校验。
 - memory operand 的 `shape/stride/space` 必须在 verifier 阶段完成一致性校验。
 
@@ -91,6 +91,39 @@ mem_ty = NnMemoryType(shape, stride, element_type, space)
 
 - 返回 `NnMemoryType`。
 - `shape/stride/space` 必须满足 rank 与合法空间约束。
+
+### kernel.binary_elewise
+
+功能说明：
+
+- 统一的二元逐元素算术与比较 op，通过 `kind` 指定语义，并把结果写入输出 operand。
+
+参数说明：
+
+- `lhs(!nn.memory<...>)`：左输入 operand。
+- `rhs(!nn.memory<...>)`：右输入 operand。
+- `out(!nn.memory<...>)`：输出 operand。
+- `kind(str)`：语义类型，允许 `add/sub/mul/div/truediv/eq/ne/lt/le/gt/ge`。
+- `space(#nn.space<...>)`：op 的空间属性。
+
+使用示例：
+
+```mlir
+%out = dma.alloc ... : !nn.memory<f32, [N, C], GM>
+kernel.binary_elewise %lhs, %rhs, %out {kind = "add", space = #nn.space<global>} : ...
+func.return %out : !nn.memory<f32, [N, C], GM>
+```
+
+注意事项：
+
+- `lhs/rhs/out` 的 `shape/stride/space` 必须一致，`kernel` 层不负责形状变换。
+- 当 `kind` 为比较类（`eq/ne/lt/le/gt/ge`）时，`out.element_type` 必须是 `i1`。
+- 当 `kind` 为算术类（`add/sub/mul/div/truediv`）时，`lhs/rhs/out` 的 `element_type` 必须一致。
+
+返回与限制：
+
+- 返回 `KernelBinaryElewiseOp`。
+- 结果写入 `out`。
 
 ### kernel.add
 
@@ -430,6 +463,40 @@ func.return %out : !nn.memory<f32, [B], GM>
 - 返回 `KernelReduceSumOp`。
 - 结果写入 `out`。
 
+### kernel.reduce
+
+功能说明：
+
+- 通过 `kind` 指定归约语义，对输入 operand 执行 reduction，并把结果写入输出 operand。
+
+参数说明：
+
+- `input(!nn.memory<...>)`：输入 operand。
+- `out(!nn.memory<...>)`：输出 operand。
+- `kind(str)`：归约类型，允许 `sum/min/max`。
+- `axis(i64)`：reduction 轴。
+- `keepdim(bool)`：是否保留被归约维度。
+- `space(#nn.space<...>)`：op 的空间属性。
+
+使用示例：
+
+```mlir
+%out = dma.alloc ... : !nn.memory<f32, [B], GM>
+kernel.reduce %src, %out {kind = "sum", axis = 1 : i64, keepdim = false, space = #nn.space<global>} : ...
+func.return %out : !nn.memory<f32, [B], GM>
+```
+
+注意事项：
+
+- `kind` 必须命中 `sum/min/max` 集合。
+- `axis` 必须命中合法维度范围；`keepdim` 必须与 `out.rank/out.shape` 机械一致。
+- `input.element_type` 与 `out.element_type` 必须一致，且 `input/out/space` 必须一致。
+
+返回与限制：
+
+- 返回 `KernelReduceOp`。
+- 结果写入 `out`。
+
 ### kernel.reduce_min
 
 功能说明：
@@ -602,14 +669,18 @@ func.return %out : !nn.memory<f16, [N, C, KH, KW, OH, OW], GM>
 
 ## 测试
 
-- 测试文件：[`test/dialect/test_kernel_dialect.py`](../../test/dialect/test_kernel_dialect.py)
-- 执行命令：`pytest -q test/dialect/test_kernel_dialect.py`
+- 测试文件：
+  - [`test/dialect/test_kernel_dialect.py`](../../test/dialect/test_kernel_dialect.py)
+  - [`test/pass/test_lowering_nn_to_kernel.py`](../../test/pass/test_lowering_nn_to_kernel.py)
+- 执行命令：
+  - `pytest -q test/dialect/test_kernel_dialect.py`
+  - `pytest -q test/pass/test_lowering_nn_to_kernel.py -k public_contract_kernel_binary_elewise_and_reduce`
 
 ### 测试目标
 
 - 验证 `NnMemorySpaceAttr` 与 `NnMemoryType` 在 `kernel` 方言中的复用与校验行为。
 - 验证基础逐元素算术、比较、选择与类型转换 op 的 verifier 约束。
-- 验证 `kernel.exp / kernel.softmax / kernel.reduce_* / kernel.matmul / kernel.img2col*` 的 op 名字、关键 attrs 与 `out` 消费链路合同。
+- 验证 `kernel.binary_elewise / kernel.exp / kernel.softmax / kernel.reduce / kernel.reduce_* / kernel.matmul / kernel.img2col*` 的 op 名字、关键 attrs 与 `out` 消费链路合同。
 - 验证 `kernel.matmul` 对非二维 operand、`[M,K] x [K,N] -> [M,N]` 形状不匹配的 verifier 拒绝路径已被机械锁定。
 - 验证 `kernel.img2col1d/img2col2d` 的输入 rank/layout 合同与结构化输出合同已被机械锁定。
 - 验证 `kernel.img2col1d` 的 `input.shape + attrs -> W_out`、`kernel.img2col2d` 的 `input.shape + attrs -> OH/OW` 公式与拒绝路径已被机械锁定。
@@ -632,6 +703,7 @@ func.return %out : !nn.memory<f16, [N, C, KH, KW, OH, OW], GM>
 | TC-KRN-012 | `kernel.softmax` 的 `axis` 非法触发 verifier 失败 | `test_kernel_softmax_axis_error` |
 | TC-KRN-013 | `kernel.reduce_sum/min/max` 保持具名区分且校验 `axis/keepdim` | `test_kernel_reduce_max_family_contract` |
 | TC-KRN-020 | `kernel.reduce_max` 拒绝越界 `axis` 与非法 `keepdim` | `test_kernel_reduce_max_axis_and_keepdim_error` |
+| TC-KRN-021 | `kernel.binary_elewise` 与 `kernel.reduce` 公开合同可用 | `test_public_contract_kernel_binary_elewise_and_reduce` |
 | TC-KRN-014 | `kernel.matmul` 拒绝 dtype mismatch | `test_kernel_matmul_dtype_mismatch` |
 | TC-KRN-015 | `kernel.matmul` 拒绝非二维 operand 与 `[M,K] x [K,N] -> [M,N]` shape 失配 | `test_kernel_matmul_rank_shape_contract` |
 | TC-KRN-017 | `kernel.img2col1d/img2col2d` 保持结构化输出与显式窗口 attrs | `test_kernel_img2col_structured_contract` |
