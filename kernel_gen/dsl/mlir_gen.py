@@ -905,6 +905,25 @@ def mlir_gen(
     lowering_config[_MLIR_GEN_CALLEE_REGISTRY_CONFIG_KEY] = callee_registry
 
     def _ensure_callee_compiled(callee: object, arg_types: list[object], location: SourceLocation | None) -> None:
+        """确保 Python callee 已编译为 `func.func` 并注册到当前 module 构建上下文。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 校验 callee 是否属于当前 `mlir_gen(...)` 支持的普通 Python 函数调用形式。
+        - 基于 call-site 的 `arg_types` 推导并缓存 callee 的稳定签名；若同一 callee 在不同调用点推导出不一致签名则失败。
+        - 维护 DFS 收集顺序与递归检测：避免重复编译，并显式拒绝递归 callee 图。
+        - 将编译产物写入 `callee_registry`，供 `mlir_gen(...)` 最终组装 `builtin.module` 复用。
+
+        使用示例:
+        - _ensure_callee_compiled(helper, [i32], location=None)
+
+        关联文件:
+        - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+        - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+        - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+        """
         if not _is_supported_python_callee(callee):
             raise MlirGenModuleError("unsupported callee function")
 
