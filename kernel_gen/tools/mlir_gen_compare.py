@@ -147,7 +147,7 @@ def compare_mlir_file(
 
     try:
         expected_text = Path(mlir_file).read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeError):
         return False
 
     ctx = _build_default_context()
