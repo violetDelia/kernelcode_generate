@@ -49,12 +49,12 @@ AGENTS_LIST_FILE="agents/codex-multi-agents/agents-lists.md"
 
 # 管理员每轮提醒消息（先发送）。
 read -r -d '' ADMIN_MESSAGE <<'EOF' || true
-请推进“正在执行的任务”并分发“任务列表”中可分发任务。
+请推进“正在执行的任务”并分发“任务列表”中可分发任务,协调正在阻塞的人员。
 EOF
 
 # busy 执行人提醒消息（后发送；同一轮会逐一发送）。
 read -r -d '' BUSY_MESSAGE <<'EOF' || true
-继续当前任务，完成后使用 -next 并回报管理员。
+检查TODO.md的信息,继续当前任务,完成后使用 -next 并回报管理员,有任何阻塞再次询问管理员请求协调,并让管理员回复。
 EOF
 
 MODE="loop"
