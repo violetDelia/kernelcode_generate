@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`小李飞刀`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/pass/lowering/nn_lowering.md`](../../../spec/pass/lowering/nn_lowering.md)
 - `功能实现`：[`kernel_gen/passes/lowering/nn_lowering/nn_lowering.py`](../../../kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
 - `test`：
@@ -30,13 +30,14 @@
 - 将支持的 `nn` op lower 为 `kernel/dma` op，输出 Memory 通过 `dma.alloc` 显式创建。
 - 输出 module 不应再包含 `nn` op。
 - 明确 `kernel.binary_elewise` 与 `kernel.reduce` 的公开合同已就绪，并在测试中验证可用性。
+- `lower-nn` 为公开 pass 名称；`lower-nn-to-kernel` 仅用于历史兼容与命名回归测试，不作为 expectation 执行入口。
 
 ## 限制与边界
 
 - 仅支持以下 `nn` op 的 lowering：
   - 逐元素：`nn.add`/`nn.sub`/`nn.mul`/`nn.div`/`nn.truediv`、`nn.eq`/`nn.ne`/`nn.lt`/`nn.le`/`nn.gt`/`nn.ge`、`nn.select`、`nn.cast`
   - 结构化：`nn.broadcast`、`nn.transpose`、`nn.exp`、`nn.softmax`、`nn.reduce_sum`/`nn.reduce_min`/`nn.reduce_max`、`nn.matmul`、`nn.img2col1d`/`nn.img2col2d`
-- `nn.truediv` 与 `nn.div` 在 pass 层统一 lower 为 `kernel.div`。
+- `nn.truediv` 与 `nn.div` 在 pass 层统一 lower 为 `kernel.binary_elewise(kind="div")`。
 - `nn.broadcast` / `nn.transpose` 必须 lower 为 `dma.broadcast` / `dma.transpose`。
 - `nn.exp` / `nn.softmax` / `nn.reduce_*` / `nn.matmul` / `nn.img2col*` 必须 lower 为具名 `kernel.*` op。
 - `nn` 结果 Memory 必须通过 `dma.alloc` 显式创建；不允许隐式分配或省略输出写入。
@@ -152,20 +153,60 @@ module_op = ensure_module_op(module)
 
 - 返回 `ModuleOp`。
 
+## 额外补充
+
+- S2 可改清单（仅收口 element binary / compare / select / cast family）：
+  - `kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py`
+  - `kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py`
+  - `test/pass/nn_lowering/element_binary_*.py`
+  - `test/pass/nn_lowering/element_compare_*.py`
+  - `test/pass/nn_lowering/select.py`
+  - `test/pass/nn_lowering/cast.py`
+  - `test/pass/nn_lowering/public_name.py`
+  - `test/pass/test_lowering_nn_to_kernel.py`
+- expectation 入口：统一使用 `lower-nn` pass；`lower-nn-to-kernel` 仅用于兼容性验证与命名回归测试。
+
 ## 测试
 
 - 测试文件：
   - [`test/pass/nn_lowering/public_name.py`](../../../test/pass/nn_lowering/public_name.py)
   - [`test/pass/test_lowering_nn_to_kernel.py`](../../../test/pass/test_lowering_nn_to_kernel.py)
+  - [`test/pass/nn_lowering/element_binary_add.py`](../../../test/pass/nn_lowering/element_binary_add.py)
+  - [`test/pass/nn_lowering/element_binary_sub.py`](../../../test/pass/nn_lowering/element_binary_sub.py)
+  - [`test/pass/nn_lowering/element_binary_mul.py`](../../../test/pass/nn_lowering/element_binary_mul.py)
+  - [`test/pass/nn_lowering/element_binary_div.py`](../../../test/pass/nn_lowering/element_binary_div.py)
+  - [`test/pass/nn_lowering/element_binary_truediv.py`](../../../test/pass/nn_lowering/element_binary_truediv.py)
+  - [`test/pass/nn_lowering/element_compare_eq.py`](../../../test/pass/nn_lowering/element_compare_eq.py)
+  - [`test/pass/nn_lowering/element_compare_ne.py`](../../../test/pass/nn_lowering/element_compare_ne.py)
+  - [`test/pass/nn_lowering/element_compare_lt.py`](../../../test/pass/nn_lowering/element_compare_lt.py)
+  - [`test/pass/nn_lowering/element_compare_le.py`](../../../test/pass/nn_lowering/element_compare_le.py)
+  - [`test/pass/nn_lowering/element_compare_gt.py`](../../../test/pass/nn_lowering/element_compare_gt.py)
+  - [`test/pass/nn_lowering/element_compare_ge.py`](../../../test/pass/nn_lowering/element_compare_ge.py)
+  - [`test/pass/nn_lowering/select.py`](../../../test/pass/nn_lowering/select.py)
+  - [`test/pass/nn_lowering/cast.py`](../../../test/pass/nn_lowering/cast.py)
 - 执行命令：
   - `pytest -q test/pass/nn_lowering/public_name.py`
   - `pytest -q test/pass/test_lowering_nn_to_kernel.py -k rename`
   - `pytest -q test/pass/test_lowering_nn_to_kernel.py -k public_contract`
+  - `pytest -q test/pass/nn_lowering/element_binary_add.py`
+  - `pytest -q test/pass/nn_lowering/element_binary_sub.py`
+  - `pytest -q test/pass/nn_lowering/element_binary_mul.py`
+  - `pytest -q test/pass/nn_lowering/element_binary_div.py`
+  - `pytest -q test/pass/nn_lowering/element_binary_truediv.py`
+  - `pytest -q test/pass/nn_lowering/element_compare_eq.py`
+  - `pytest -q test/pass/nn_lowering/element_compare_ne.py`
+  - `pytest -q test/pass/nn_lowering/element_compare_lt.py`
+  - `pytest -q test/pass/nn_lowering/element_compare_le.py`
+  - `pytest -q test/pass/nn_lowering/element_compare_gt.py`
+  - `pytest -q test/pass/nn_lowering/element_compare_ge.py`
+  - `pytest -q test/pass/nn_lowering/select.py`
+  - `pytest -q test/pass/nn_lowering/cast.py`
 - 测试目标：
   - 验证 `NnLoweringPass` 的公开名字与导出路径稳定。
   - 验证 `NnLoweringError` 与 `NnLoweringPass` 的公共导出可用。
   - 验证 `NnLoweringPass` 在公共入口层面可见且可调用。
   - 验证 `kernel.binary_elewise` 与 `kernel.reduce` 的公开合同可解析与可校验。
+  - 验证 element binary/compare/select/cast family 的 lowering 目标一致，且 `nn.div/nn.truediv` 统一使用 `kernel.binary_elewise(kind="div")`。
 - 功能与用例清单：
 
 | 用例 ID | 功能 | 对应测试 |
@@ -173,3 +214,7 @@ module_op = ensure_module_op(module)
 | TC-PASS-NNL-001 | `NnLoweringPass` 公开名称 | `test_nn_lowering_pass_public_name` |
 | TC-PASS-NNL-002 | `NnLoweringError` 导出可用 | `test_nn_lowering_pass_public_exports` |
 | TC-PASS-N2K-031 | `nn_lowering` 入口暴露 | `test_rename_exposes_nn_lowering_pass` |
+| TC-PASS-NNL-S2-001 | element binary add/sub/mul lower 为 `kernel.binary_elewise` | `element_binary_add.py` / `element_binary_sub.py` / `element_binary_mul.py` |
+| TC-PASS-NNL-S2-002 | `nn.div`/`nn.truediv` lower 为 `kernel.binary_elewise(kind="div")` | `element_binary_div.py` / `element_binary_truediv.py` |
+| TC-PASS-NNL-S2-003 | element compare lower 为 `kernel.binary_elewise` | `element_compare_eq.py` / `element_compare_ne.py` / `element_compare_lt.py` / `element_compare_le.py` / `element_compare_gt.py` / `element_compare_ge.py` |
+| TC-PASS-NNL-S2-004 | `nn.select`/`nn.cast` lower 为 `dma.alloc + kernel.select/dma.cast` | `select.py` / `cast.py` |

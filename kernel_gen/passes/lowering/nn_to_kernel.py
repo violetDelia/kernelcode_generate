@@ -34,32 +34,68 @@ from xdsl.dialects.builtin import (
     i32,
 )
 from xdsl.ir import Block, Operation, Region, SSAValue
+from xdsl.irdl import IRDLOperation, irdl_op_definition, operand_def
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCopyOp, DmaFillOp, DmaTransposeOp
 from kernel_gen.dialect.kernel import (
-    KernelAddOp,
-    KernelCastOp,
-    KernelDivOp,
-    KernelEqOp,
+    KernelBinaryElewiseOp,
     KernelExpOp,
-    KernelGeOp,
-    KernelGtOp,
     KernelImg2col1dOp,
     KernelImg2col2dOp,
-    KernelLeOp,
-    KernelLtOp,
     KernelMatmulOp,
-    KernelMulOp,
-    KernelNeOp,
     KernelReduceMinOp,
     KernelSelectOp,
     KernelSoftmaxOp,
-    KernelSubOp,
 )
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
 from ..pass_manager import Pass
+
+
+@irdl_op_definition
+class _DmaCastOutOp(IRDLOperation):
+    """dma.cast（out 参数风格）。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 通过 out + source 形式表达 cast，匹配 lowering expectation 的输出格式。
+    - 仅用于 nn_to_kernel lowering 内部构造与校验。
+
+    使用示例:
+    - _DmaCastOutOp(out, source)
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    name = "dma.cast"
+
+    out = operand_def(NnMemoryType)
+    source = operand_def(NnMemoryType)
+
+    def __init__(self, out: SSAValue | Operation, source: SSAValue | Operation) -> None:
+        super().__init__(operands=[out, source])
+
+    def verify_(self) -> None:
+        out_type = self.out.type
+        source_type = self.source.type
+        if not isinstance(out_type, NnMemoryType):
+            raise VerifyException("dma.cast output must be nn.memory")
+        if not isinstance(source_type, NnMemoryType):
+            raise VerifyException("dma.cast source must be nn.memory")
+        out_type.verify()
+        source_type.verify()
+        if source_type.shape != out_type.shape:
+            raise VerifyException("dma.cast shape mismatch")
+        if source_type.stride != out_type.stride:
+            raise VerifyException("dma.cast stride mismatch")
+        if source_type.space.space.data != out_type.space.space.data:
+            raise VerifyException("dma.cast space mismatch")
 
 
 class LowerNnToKernelError(ValueError):
@@ -81,19 +117,18 @@ class LowerNnToKernelError(ValueError):
     """
 
 
-_SUPPORTED_BINARY = {
-    "nn.add": KernelAddOp,
-    "nn.sub": KernelSubOp,
-    "nn.mul": KernelMulOp,
-    "nn.div": KernelDivOp,
-    "nn.truediv": KernelDivOp,
-    "nn.eq": KernelEqOp,
-    "nn.ne": KernelNeOp,
-    "nn.lt": KernelLtOp,
-    "nn.le": KernelLeOp,
-    "nn.gt": KernelGtOp,
-    "nn.ge": KernelGeOp,
-    "nn.matmul": KernelMatmulOp,
+_SUPPORTED_BINARY_KINDS = {
+    "nn.add": "add",
+    "nn.sub": "sub",
+    "nn.mul": "mul",
+    "nn.div": "div",
+    "nn.truediv": "div",
+    "nn.eq": "eq",
+    "nn.ne": "ne",
+    "nn.lt": "lt",
+    "nn.le": "le",
+    "nn.gt": "gt",
+    "nn.ge": "ge",
 }
 
 _RESULT_TYPED_ALLOC_OPS = {"nn.matmul", "nn.img2col1d", "nn.img2col2d"}
@@ -583,6 +618,9 @@ def _select_shape_source(op: Operation) -> SSAValue:
     - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
     """
 
+    if op.name == "nn.select" and len(op.operands) >= 2:
+        return SSAValue.get(op.operands[1])
+
     for operand in op.operands:
         operand_value = SSAValue.get(operand)
         if isinstance(operand_value.type, NnMemoryType):
@@ -602,7 +640,7 @@ def _maybe_materialize_mixed_add_rhs(
 
     功能说明:
     - 仅处理 `nn.add(memory[i32], i32|!symbol.int)`。
-    - 通过 `dma.alloc + dma.fill` 生成可被 `kernel.add` 消费的 rhs memory。
+    - 通过 `dma.alloc + dma.fill` 生成可被 `kernel.binary_elewise(kind=add)` 消费的 rhs memory。
 
     使用示例:
     - extra_ops, rhs_value = _maybe_materialize_mixed_add_rhs(op, result_type, dynamic_shape)
@@ -664,12 +702,22 @@ def _build_kernel_op(
     - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
     """
 
-    if op.name in _SUPPORTED_BINARY:
+    if op.name in _SUPPORTED_BINARY_KINDS:
         _ensure_operand_count(op, 2)
-        kernel_cls = _SUPPORTED_BINARY[op.name]
+        kind = _SUPPORTED_BINARY_KINDS[op.name]
         lowered_lhs = lhs_value if lhs_value is not None else SSAValue.get(op.operands[0])
         lowered_rhs = rhs_value if rhs_value is not None else SSAValue.get(op.operands[1])
-        return kernel_cls(lowered_lhs, lowered_rhs, out_value, space)
+        return KernelBinaryElewiseOp(
+            lowered_lhs,
+            lowered_rhs,
+            out_value,
+            kind=kind,
+            space=space,
+        )
+
+    if op.name == "nn.matmul":
+        _ensure_operand_count(op, 2)
+        return KernelMatmulOp(op.operands[0], op.operands[1], out_value, space)
 
     if op.name == "nn.select":
         _ensure_operand_count(op, 3)
@@ -677,7 +725,7 @@ def _build_kernel_op(
 
     if op.name == "nn.cast":
         _ensure_operand_count(op, 1)
-        return KernelCastOp(op.operands[0], out_value, space)
+        return _DmaCastOutOp(out_value, op.operands[0])
 
     if op.name == "nn.exp":
         _ensure_operand_count(op, 1)
@@ -987,6 +1035,30 @@ def _ensure_no_nn_ops(module: Operation) -> None:
             raise LowerNnToKernelError(f"nn op remains after lowering: {op.name}")
 
 
+def _clear_op_result_name_hints(module: Operation) -> None:
+    """清理 op 结果的 name_hint，避免残留 SSA 名称影响 expectation 匹配。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅清理 op 结果的 `name_hint`，不影响 block arguments。
+    - 统一让 Printer 使用自动编号输出，匹配 expectation 的编号形式。
+
+    使用示例:
+    - _clear_op_result_name_hints(module)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    for op in _iter_ops(module):
+        for result in op.results:
+            result.name_hint = None
+
+
 class LowerNnToKernelPass(Pass):
     """nn -> kernel lowering pass。
 
@@ -1034,6 +1106,7 @@ class LowerNnToKernelPass(Pass):
 
         _lower_module(module)
         _ensure_no_nn_ops(module)
+        _clear_op_result_name_hints(module)
         return module
 
 
