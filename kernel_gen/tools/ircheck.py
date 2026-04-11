@@ -53,8 +53,11 @@ from xdsl.ir import Operation
 from xdsl.parser import Parser
 from xdsl.printer import Printer
 
+from kernel_gen.dialect.dma import Dma
 from kernel_gen.dialect.kernel import Kernel
 from kernel_gen.dialect.nn import Nn
+from kernel_gen.dialect.symbol import Symbol
+from kernel_gen.dialect.tuner import Tuner
 from kernel_gen.passes.registry import (
     PassRegistryError,
     build_registered_pass,
@@ -639,7 +642,9 @@ def _build_default_context() -> Context:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 加载 `builtin` / `func` / `arith` 与仓库内不依赖额外重依赖的 dialect（`nn` / `kernel`）。
+    - 加载 `builtin` / `func` / `arith` 与仓库内公开 dialect。
+    - 默认支持 `nn` / `kernel` / `dma` / `symbol` / `tuner`，便于直接解析 lowering /
+      pipeline expectation 中常见的 bridge op 与 memory op。
 
     使用示例:
     - ctx = _build_default_context()
@@ -657,6 +662,9 @@ def _build_default_context() -> Context:
     ctx.load_dialect(Arith)
     ctx.load_dialect(Nn)
     ctx.load_dialect(Kernel)
+    ctx.load_dialect(Dma)
+    ctx.load_dialect(Symbol)
+    ctx.load_dialect(Tuner)
     return ctx
 
 
