@@ -28,10 +28,14 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_SCRIPT = REPO_ROOT / "script/notify-admin.sh"
 DEFAULT_ADMIN_MESSAGE = "请推进“正在执行的任务”并分发“任务列表”中可分发任务。"
 DEFAULT_BUSY_MESSAGE = "继续当前任务，完成后使用 -next 并回报管理员。"
+
+pytestmark = pytest.mark.infra
 
 
 def write_executable(path: Path, content: str) -> None:

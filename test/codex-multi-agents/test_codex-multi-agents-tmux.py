@@ -31,8 +31,12 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh"
+
+pytestmark = pytest.mark.infra
 
 
 def write_agents_file(path: Path, rows: list[str] | None = None) -> None:

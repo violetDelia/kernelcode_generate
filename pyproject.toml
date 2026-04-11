@@ -1,0 +1,21 @@
+# pyproject.toml
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+#
+# 功能说明:
+# - 统一 pytest marker 配置，区分基础设施测试与产品测试。
+#
+# 使用示例:
+# - pytest -m "not infra"
+# - pytest -m infra
+#
+# 关联文件:
+# - spec: agents/standard/测试文件约定.md
+# - test: test/codex-multi-agents/test_codex-multi-agents-list.py
+# - 功能实现: pyproject.toml
+# - 计划: ARCHITECTURE/plan/codebase_refactor_baseline_green_plan.md
+
+[tool.pytest.ini_options]
+markers = [
+    "infra: 标记脚本与基础设施测试",
+]
