@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`大闸蟹`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/codex-multi-agents/scripts/codex-multi-agents-task.md`](../../../spec/codex-multi-agents/scripts/codex-multi-agents-task.md)
 - `test`：[`test/codex-multi-agents/test_codex-multi-agents-task.py`](../../../test/codex-multi-agents/test_codex-multi-agents-task.py)
 - `功能实现`：
@@ -87,9 +87,12 @@
 - `-next` 成功后固定向管理员发送摘要：`任务 <task_id> 已完成当前阶段，已回到任务列表；新任务类型=<type>，请管理员推进。`；发送者使用 `-from`。
 - `-next -auto` 仅对 `merge/review/build/spec` 四类任务执行自动续接；`other/refactor` 仍保留在 `任务列表`。
 - `-next -auto` 只尝试自动续接当前刚通过 `-next` 退回 `任务列表` 的同一任务，不扫描其他任务。
-- `-next -auto` 的接手顺序固定为：
-  - 当前执行 `-next -auto` 的角色本人；仅当其在本次 `-next` 后已变为空闲，且职责匹配时成立
-  - 其他当前空闲、职责匹配的角色，按 `agents-lists.md` 出现顺序选择
+- `-next -auto` 的候选人集合规则：
+  - `agents-lists.md` 中状态为 `free` 且职责匹配的角色
+  - `职责` 包含 `不承担管理员分发的任务` 的角色不计入候选
+  - 若当前执行者满足上述条件，则作为候选之一参与选择
+- `-next -auto` 在候选人集合中随机选择接手人。
+- 若设置 `CODEX_MULTI_AGENTS_AUTO_RANDOM_SEED`，自动续接使用该值的 `sha256` 结果作为随机种子；在候选集合与 `agents-lists.md` 顺序不变时可复现选择结果。
 - `-next -auto` 若自动接续到其他角色，会先执行一次 `list -init`，再向接手人发送任务消息，并向管理员发送摘要。
 - `-next -auto` 若自动接续到当前执行者本人，不向本人发消息，只向管理员发送摘要。
 - `-next -auto` 若当前任务类型不支持自动续接、没有合适角色、或当前并发人数已达上限，则当前任务保留在 `任务列表`，并向管理员发送摘要。
@@ -530,3 +533,5 @@ codex-multi-agents-task.sh \
   - `TC-053` `test_next_auto_reassigns_same_task_to_other_agent`：自动续接给其他匹配角色，并发送任务消息
   - `TC-054` `test_next_auto_failure_notifies_admin`：自动续接失败，任务保留在列表并通知管理员推进
   - `TC-055` `test_auto_only_supports_next`：`-auto` 与其他命令组合，返回 `1`
+  - `TC-056` `test_next_auto_random_assignment_with_seed`：设置随机种子时自动续接结果可复现
+  - `TC-057` `test_next_auto_random_assignment_seed_changes`：不同随机种子会触发不同接手人

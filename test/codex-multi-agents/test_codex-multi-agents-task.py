@@ -1896,6 +1896,168 @@ def test_next_auto_reassigns_same_task_to_other_agent(tmp_path: Path) -> None:
     ) in calls_text
 
 
+# TC-056
+# 创建者: OpenAI
+# 最后一次更改: 睡觉小分队
+# 测试目的: 验证 -next -auto 在设置随机种子时可复现自动续接结果。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py -k "next_auto_random_assignment_with_seed"
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_next_auto_random_assignment_with_seed(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    bin_dir = tmp_path / "bin"
+    state_dir = tmp_path / "state"
+    calls_file = write_fake_tmux(
+        bin_dir, state_dir, sessions=["神秘人-session", "worker-d-session"]
+    )
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-2",
+                "杜甫",
+                "2026-03-08 16:20:00 +0800",
+                "/tmp/wt-ex2",
+                "创建 test",
+                "review",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "worker-b",
+                "进行中",
+                "xxx",
+                "./log/ex2.md",
+            ),
+        ],
+        list_rows=[],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row_with_role("神秘人", "free", "管理员", "神秘人-session", "管理员"),
+            agent_row_with_role("worker-b", "busy", "开发"),
+            agent_row_with_role("worker-c", "free", "审查"),
+            agent_row_with_role("worker-d", "free", "审查"),
+            agent_row_with_role("worker-e", "free", "审查"),
+        ],
+    )
+
+    env = os.environ.copy()
+    env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["CODEX_MULTI_AGENTS_ADMIN_USERS"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-b"
+    env["CODEX_MULTI_AGENTS_AUTO_RANDOM_SEED"] = "seed-a"
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-next",
+        "-auto",
+        "-task_id",
+        "EX-2",
+        "-from",
+        "worker-b",
+        "-type",
+        "review",
+        "-message",
+        "下一阶段：补齐边界用例",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    assert result.returncode == 0
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+    assert any(r[0] == "EX-2" and r[8] == "worker-d" and r[9] == "进行中" for r in running_rows)
+    assert get_agent_status(agents, "worker-b") == "free"
+    assert get_agent_status(agents, "worker-d") == "busy"
+    calls_text = calls_file.read_text(encoding="utf-8")
+    assert "你的名字叫做worker-d" in calls_text
+
+
+# TC-057
+# 创建者: OpenAI
+# 最后一次更改: 睡觉小分队
+# 测试目的: 验证更换随机种子会触发不同的自动续接结果。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py -k "next_auto_random_assignment_seed_changes"
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_next_auto_random_assignment_seed_changes(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    bin_dir = tmp_path / "bin"
+    state_dir = tmp_path / "state"
+    calls_file = write_fake_tmux(
+        bin_dir, state_dir, sessions=["神秘人-session", "worker-e-session"]
+    )
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-2",
+                "杜甫",
+                "2026-03-08 16:20:00 +0800",
+                "/tmp/wt-ex2",
+                "创建 test",
+                "review",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "worker-b",
+                "进行中",
+                "xxx",
+                "./log/ex2.md",
+            ),
+        ],
+        list_rows=[],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row_with_role("神秘人", "free", "管理员", "神秘人-session", "管理员"),
+            agent_row_with_role("worker-b", "busy", "开发"),
+            agent_row_with_role("worker-c", "free", "审查"),
+            agent_row_with_role("worker-d", "free", "审查"),
+            agent_row_with_role("worker-e", "free", "审查"),
+        ],
+    )
+
+    env = os.environ.copy()
+    env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["CODEX_MULTI_AGENTS_ADMIN_USERS"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-b"
+    env["CODEX_MULTI_AGENTS_AUTO_RANDOM_SEED"] = "seed-b"
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-next",
+        "-auto",
+        "-task_id",
+        "EX-2",
+        "-from",
+        "worker-b",
+        "-type",
+        "review",
+        "-message",
+        "下一阶段：补齐边界用例",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    assert result.returncode == 0
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+    assert any(r[0] == "EX-2" and r[8] == "worker-e" and r[9] == "进行中" for r in running_rows)
+    assert get_agent_status(agents, "worker-b") == "free"
+    assert get_agent_status(agents, "worker-e") == "busy"
+    calls_text = calls_file.read_text(encoding="utf-8")
+    assert "你的名字叫做worker-e" in calls_text
+
+
 # TC-052
 # 创建者: OpenAI
 # 最后一次更改: OpenAI

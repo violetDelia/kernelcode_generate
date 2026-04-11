@@ -512,26 +512,95 @@ def is_agent_eligible_for_auto(
     return idx
 
 
+def resolve_auto_random_seed() -> int | None:
+    """解析自动续接随机种子。
+
+    创建者: 睡觉小分队
+    最后一次更改: 睡觉小分队
+
+    功能说明:
+    - 读取 CODEX_MULTI_AGENTS_AUTO_RANDOM_SEED，并归一化为整数种子。
+    - 为空或为 "None" 时返回 None。
+
+    使用示例:
+    - seed = resolve_auto_random_seed()
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-task.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+    """
+
+    raw = os.getenv("CODEX_MULTI_AGENTS_AUTO_RANDOM_SEED", "").strip()
+    if not raw or raw.lower() == "none":
+        return None
+    digest = hashlib.sha256(raw.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big")
+
+
+def build_auto_random() -> random.Random:
+    """构造自动续接随机数生成器。
+
+    创建者: 睡觉小分队
+    最后一次更改: 睡觉小分队
+
+    功能说明:
+    - 若存在随机种子则构造可复现的 Random 实例。
+    - 若无种子则使用默认随机源。
+
+    使用示例:
+    - rng = build_auto_random()
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-task.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+    """
+
+    seed = resolve_auto_random_seed()
+    if seed is None:
+        return random.Random()
+    return random.Random(seed)
+
+
 def pick_next_auto_assignee(
     row: list[str],
     agents_rows: list[list[str]],
     agents_table: dict,
     operator_name: str,
 ) -> tuple[str, int] | None:
+    """在候选人集合中选择自动续接接手人。
+
+    创建者: OpenAI
+    最后一次更改: 睡觉小分队
+
+    功能说明:
+    - 从候选人集合中随机选择接手人。
+    - 候选人集合由 agents-lists.md 的顺序决定。
+
+    使用示例:
+    - assignee = pick_next_auto_assignee(row, agents_rows, agents_table, operator_name)
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-task.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+    """
+
     kind = normalize_task_type(row[5], RC_DATA, f"task list row {row[0].strip()}")
     operator = operator_name.strip()
-    operator_idx = is_agent_eligible_for_auto(operator, kind, agents_rows, agents_table)
-    if operator_idx >= 0:
-        return operator, operator_idx
-
+    candidates: list[tuple[str, int]] = []
     for candidate_row in agents_rows:
         name = candidate_row[agents_table["name_idx"]].strip()
-        if not name or name == operator:
+        if not name:
             continue
         candidate_idx = is_agent_eligible_for_auto(name, kind, agents_rows, agents_table)
         if candidate_idx >= 0:
-            return name, candidate_idx
-    return None
+            candidates.append((name, candidate_idx))
+    if not candidates:
+        return None
+    rng = build_auto_random()
+    return rng.choice(candidates)
 
 
 def ensure_operator_permission(
