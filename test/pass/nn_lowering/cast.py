@@ -1,7 +1,7 @@
 """nn_lowering cast tests.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 验证 nn.cast lower 为 dma.alloc + dma.cast。
@@ -23,54 +23,15 @@ from collections.abc import Callable
 
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, f32, i32
-from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def, result_def
-from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
+from xdsl.ir import Attribute, Block, Operation, Region
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.dialect.dma import DmaAllocOp
-from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.nn import NnCastOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.passes.lowering.nn_lowering.select_cast_lowering import LowerNnSelectCastPass
-
-
-@irdl_op_definition
-class NnCastOp(IRDLOperation):
-    """测试用 nn.cast op。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 构造 nn.cast，用于 cast lowering 测试。
-
-    使用示例:
-    - NnCastOp(input_value, result_type, space)
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
-    - test: test/pass/nn_lowering/cast.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
-    """
-
-    name = "nn.cast"
-
-    input = operand_def(NnMemoryType)
-    result = result_def(NnMemoryType)
-    space = attr_def(NnMemorySpaceAttr)
-
-    def __init__(
-        self,
-        input_value: SSAValue | Operation,
-        result_type: NnMemoryType,
-        space: NnMemorySpaceAttr,
-    ) -> None:
-        super().__init__(
-            operands=[input_value],
-            result_types=[result_type],
-            attributes={"space": space},
-        )
 
 
 def _make_memory_type(element_type: Attribute = i32) -> NnMemoryType:
@@ -133,9 +94,9 @@ def _build_module(
 
 # TC-PASS-NNL-S2-013
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-11 23:00:00 +0800
-# 最近一次运行成功时间: 2026-04-11 23:00:00 +0800
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-12 06:47:55 +0800
+# 最近一次运行成功时间: 2026-04-12 06:47:55 +0800
 # 测试目的: 验证 nn.cast lower 为 dma.alloc + dma.cast。
 # 使用示例: pytest -q test/pass/nn_lowering/cast.py -k test_lower_cast_to_kernel_cast
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py

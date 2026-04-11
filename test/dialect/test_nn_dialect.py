@@ -1,7 +1,7 @@
 """nn dialect tests.
 
 创建者: 小李飞刀
-最后一次更改: 大闸蟹
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 覆盖 nn dialect 的 attr/type/op verifier、parse/print 与 round-trip 行为。
@@ -39,6 +39,7 @@ from xdsl.dialects.builtin import (
     IntegerType,
     ModuleOp,
     StringAttr,
+    i1,
     i32,
 )
 from xdsl.dialects.test import Test, TestOp as _TestOp
@@ -71,10 +72,13 @@ from kernel_gen.dialect import (
     NnTrueDivOp,
 )
 from kernel_gen.dialect.nn import (
+    NnCastOp,
+    NnDivOp,
     NnExpOp,
     NnReduceMaxOp,
     NnReduceMinOp,
     NnReduceSumOp,
+    NnSelectOp,
     NnSoftmaxOp,
     NnTransposeOp,
 )
@@ -302,6 +306,48 @@ def test_add_op_verify_success() -> None:
     op.verify()
 
 
+# NN-DIA-043
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-12 11:55:00 +0800
+# 最近一次运行成功时间: 2026-04-12 11:55:00 +0800
+# 功能说明: 验证 nn.div 合法路径可通过 verifier。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_div_op_verify_success
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_div_op_verify_success() -> None:
+    space = _make_space("global")
+    lhs_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i32)
+    rhs_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i32)
+    result_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i32)
+    lhs = _TestOp(result_types=[lhs_type]).results[0]
+    rhs = _TestOp(result_types=[rhs_type]).results[0]
+    NnDivOp(lhs, rhs, result_type, space).verify_()
+
+
+# NN-DIA-046
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-12 06:47:55 +0800
+# 最近一次运行成功时间: 2026-04-12 06:47:55 +0800
+# 功能说明: 验证 nn.div 在形状不一致时触发 verifier。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_div_op_rejects_shape_mismatch
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_div_op_rejects_shape_mismatch() -> None:
+    space = _make_space("global")
+    lhs_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i32)
+    rhs_type = _make_matrix_type([IntAttr(4), IntAttr(7)], [IntAttr(7), IntAttr(1)], element_type=i32)
+    result_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i32)
+    lhs = _TestOp(result_types=[lhs_type]).results[0]
+    rhs = _TestOp(result_types=[rhs_type]).results[0]
+    op = NnDivOp(lhs, rhs, result_type, space)
+    with pytest.raises(VerifyException, match="nn op shape must match across operands and result"):
+        op.verify_()
+
+
 # NN-ADD-A1-001
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
@@ -320,6 +366,88 @@ def test_add_op_accepts_memory_const_rhs() -> None:
     rhs = _TestOp(result_types=[i32]).results[0]
     op = NnAddOp(lhs, rhs, memory_type, _make_space("global"))
     op.verify()
+
+
+# NN-DIA-044
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-12 11:55:00 +0800
+# 最近一次运行成功时间: 2026-04-12 11:55:00 +0800
+# 功能说明: 验证 nn.select 合法路径可通过 verifier。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_select_op_verify_success
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_select_op_verify_success() -> None:
+    space = _make_space("global")
+    cond_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i1)
+    data_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i32)
+    result_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i32)
+    cond = _TestOp(result_types=[cond_type]).results[0]
+    lhs = _TestOp(result_types=[data_type]).results[0]
+    rhs = _TestOp(result_types=[data_type]).results[0]
+    NnSelectOp(cond, lhs, rhs, result_type, space).verify_()
+
+
+# NN-DIA-047
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-12 06:47:55 +0800
+# 最近一次运行成功时间: 2026-04-12 06:47:55 +0800
+# 功能说明: 验证 nn.select 在 cond 非 i1 时触发 verifier。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_select_op_rejects_cond_element_type
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_select_op_rejects_cond_element_type() -> None:
+    space = _make_space("global")
+    cond_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i32)
+    data_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i32)
+    result_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i32)
+    cond = _TestOp(result_types=[cond_type]).results[0]
+    lhs = _TestOp(result_types=[data_type]).results[0]
+    rhs = _TestOp(result_types=[data_type]).results[0]
+    op = NnSelectOp(cond, lhs, rhs, result_type, space)
+    with pytest.raises(VerifyException, match="nn.select cond element_type must be i1"):
+        op.verify_()
+
+
+# NN-DIA-045
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-12 11:55:00 +0800
+# 最近一次运行成功时间: 2026-04-12 11:55:00 +0800
+# 功能说明: 验证 nn.cast 合法路径可通过 verifier。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_cast_op_verify_success
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_cast_op_verify_success() -> None:
+    space = _make_space("global")
+    input_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i32)
+    result_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=IntegerType(16))
+    input_value = _TestOp(result_types=[input_type]).results[0]
+    NnCastOp(input_value, result_type, space).verify_()
+
+
+# NN-DIA-048
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-12 06:47:55 +0800
+# 最近一次运行成功时间: 2026-04-12 06:47:55 +0800
+# 功能说明: 验证 nn.cast 在 shape 不一致时触发 verifier。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_cast_op_rejects_shape_mismatch
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_cast_op_rejects_shape_mismatch() -> None:
+    space = _make_space("global")
+    input_type = _make_matrix_type([IntAttr(4), IntAttr(8)], [IntAttr(8), IntAttr(1)], element_type=i32)
+    result_type = _make_matrix_type([IntAttr(4), IntAttr(7)], [IntAttr(7), IntAttr(1)], element_type=IntegerType(16))
+    input_value = _TestOp(result_types=[input_type]).results[0]
+    op = NnCastOp(input_value, result_type, space)
+    with pytest.raises(VerifyException, match="nn.cast shape must match input"):
+        op.verify_()
 
 
 # NN-ADD-A1-002

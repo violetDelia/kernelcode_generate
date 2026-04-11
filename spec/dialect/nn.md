@@ -23,7 +23,7 @@
 
 - 提供 `global/shared/local/tsm/tlm` 五种 memory space 的统一属性表示。
 - 提供可解析、可打印、可校验的 `!nn.memory<...>` 类型表示。
-- 为 `nn.add/sub/mul/truediv/eq/ne/lt/le/gt/ge/exp/reduce_sum/reduce_min/reduce_max/broadcast/transpose/softmax/img2col1d/img2col2d/matmul` 提供稳定的方言层接口。
+- 为 `nn.add/sub/mul/div/truediv/eq/ne/lt/le/gt/ge/select/cast/exp/reduce_sum/reduce_min/reduce_max/broadcast/transpose/softmax/img2col1d/img2col2d/matmul` 提供稳定的方言层接口。
 - 明确 `nn dialect` 不支持逐元素隐式 broadcast，所有广播必须显式使用 `nn.broadcast`。
 - 承接上游 `operation.broadcast_to(...)` 的 canonical lowering：进入方言时以 `nn.broadcast` 表达目标 shape（由结果类型承载），不在 `nn dialect` 额外新增 `nn.broadcast_to` 独立 op。
 - 保证合法文本 IR 可以 round-trip，非法输入在 parse 或 verifier 阶段被拒绝。
@@ -191,6 +191,36 @@ op = NnMulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 返回与限制：
 
 - 返回 `NnMulOp`；`result.element_type` 必须与 operand 一致。
+
+### nn.div
+
+功能说明：
+
+- 逐元素整除/除法（memory + memory）。
+
+参数说明：
+
+- `lhs: !nn.memory<...>`：左操作数。
+- `rhs: !nn.memory<...>`：右操作数。
+- `result: !nn.memory<...>`：结果类型。
+- `space: #nn.space<...>`：op 的空间属性。
+
+使用示例：
+
+```python
+op = NnDivOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
+```
+
+注意事项：
+
+- `lhs/rhs/result` 必须为 `NnMemoryType`，不支持 scalar/symbol 作为 operand。
+- `lhs/rhs/result` 的 `shape/stride/space` 必须一致。
+- `lhs/rhs` 的 `element_type` 必须一致，`result.element_type` 必须与 operand 一致。
+- 不支持隐式 broadcast。
+
+返回与限制：
+
+- 返回 `NnDivOp`；`result.element_type` 必须与 operand 一致。
 
 ### nn.truediv
 
@@ -361,6 +391,67 @@ op = NnGeOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 返回与限制：
 
 - 返回 `NnGeOp`；结果元素类型固定为 `i1`。
+
+### nn.select
+
+功能说明：
+
+- 逐元素选择 op（按 `cond` 在 `lhs/rhs` 中选值）。
+
+参数说明：
+
+- `cond: !nn.memory<...>`：条件 memory。
+- `lhs: !nn.memory<...>`：左值 memory。
+- `rhs: !nn.memory<...>`：右值 memory。
+- `result: !nn.memory<...>`：结果类型。
+- `space: #nn.space<...>`：op 的空间属性。
+
+使用示例：
+
+```python
+op = NnSelectOp(cond, lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
+```
+
+注意事项：
+
+- `cond/lhs/rhs/result` 必须为 `NnMemoryType`。
+- `cond.element_type` 必须为 `i1`。
+- `lhs/rhs/result` 的 `shape/stride/space` 必须一致。
+- `lhs/rhs/result` 的 `element_type` 必须一致。
+- 不支持隐式 broadcast。
+
+返回与限制：
+
+- 返回 `NnSelectOp`；结果元素类型必须与 `lhs/rhs` 一致。
+
+### nn.cast
+
+功能说明：
+
+- 逐元素类型转换 op（memory -> memory）。
+
+参数说明：
+
+- `input: !nn.memory<...>`：输入 memory。
+- `result: !nn.memory<...>`：结果类型。
+- `space: #nn.space<...>`：op 的空间属性。
+
+使用示例：
+
+```python
+op = NnCastOp(input_value, result_type, NnMemorySpaceAttr.from_name("global"))
+```
+
+注意事项：
+
+- `input/result` 必须为 `NnMemoryType`。
+- `input/result` 的 `shape/stride` 必须一致。
+- `input/result` 的 `space` 必须与 op `space` 一致。
+- `element_type` 允许变化，不支持隐式 broadcast。
+
+返回与限制：
+
+- 返回 `NnCastOp`。
 
 ### nn.exp
 
@@ -783,7 +874,9 @@ op = NnMatmulOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
 
 - 验证 `NnMemorySpaceAttr` 的合法取值、非法输入与文本 round-trip。
 - 验证 `NnMemoryType` 的字段完整性、rank 约束、`shape/stride` 合法性与文本 round-trip。
-- 验证 `nn.add/sub/mul/truediv/eq/ne/lt/le/gt/ge` 的 operand/result/type/space verifier 约束，其中 `nn.add` 覆盖 memory+scalar/symbol 与 dtype promotion 规则。
+- 验证 `nn.add/sub/mul/div/truediv/eq/ne/lt/le/gt/ge` 的 operand/result/type/space verifier 约束，其中 `nn.add` 覆盖 memory+scalar/symbol 与 dtype promotion 规则。
+- 验证 `nn.select` 的 `cond/lhs/rhs/result` 约束与 `cond` 的 `i1` 要求。
+- 验证 `nn.cast` 的 input/result `shape/stride/space` 一致性与 element_type 变更允许性。
 - 验证 `nn.exp` 的浮点输入约束、`shape/stride/element_type/space` 一致性与错误路径。
 - 验证 `nn.reduce_sum/reduce_min/reduce_max` 的 `axes/keepdim` 约束、结果 `shape/stride` 合同、`dtype/space` 一致性、`keepdim` 非 `i1` 拒绝、结果 `stride` 非连续布局拒绝与静态空归约域错误路径。
 - 验证 `nn.broadcast` 的显式广播规则、space 一致性、element type 一致性与文本 round-trip。

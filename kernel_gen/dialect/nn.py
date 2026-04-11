@@ -1364,6 +1364,49 @@ class NnMulOp(_BaseNnBinaryOp):
 
 
 @irdl_op_definition
+class NnDivOp(_BaseNnBinaryOp):
+    """nn.div。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 定义 nn.div 方言 op 与 verifier 约束。
+    - 仅支持 memory + memory 形式，不支持隐式 broadcast。
+
+    使用示例:
+    - NnDivOp(lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    name = "nn.div"
+
+    def verify_(self) -> None:
+        """校验 nn.div 的 verifier 合同。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 复用统一二元 memory verifier。
+
+        使用示例:
+        - NnDivOp(lhs, rhs, result_type, space).verify_()
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/test_nn_dialect.py
+        - 功能实现: kernel_gen/dialect/nn.py
+        """
+
+        _verify_binary_memory_op(self, compare_result=False)
+
+
+@irdl_op_definition
 class NnTrueDivOp(_BaseNnBinaryOp):
     """nn.truediv。"""
 
@@ -1431,6 +1474,240 @@ class NnGeOp(_BaseNnBinaryOp):
 
     def verify_(self) -> None:
         _verify_binary_memory_op(self, compare_result=True)
+
+
+def _verify_select_op(op: "NnSelectOp") -> None:
+    """校验 nn.select 的结构化合同。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 校验 cond/lhs/rhs/result 均为 nn.memory。
+    - cond element_type 必须为 i1。
+    - lhs/rhs/result 的 shape/stride/space 必须一致。
+
+    使用示例:
+    - _verify_select_op(op)
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    cond_type = _verify_memory_type(op.cond.type, "cond")
+    lhs_type = _verify_memory_type(op.lhs.type, "lhs")
+    rhs_type = _verify_memory_type(op.rhs.type, "rhs")
+    result_type = _verify_memory_type(op.result.type, "result")
+
+    if cond_type.element_type != i1:
+        _raise_verify_error("nn.select cond element_type must be i1")
+
+    op.space.verify()
+    if lhs_type.space.space.data != rhs_type.space.space.data:
+        _raise_verify_error("nn.select operands must use the same space")
+    if lhs_type.space.space.data != op.space.space.data:
+        _raise_verify_error("nn.select attribute space must match operand space")
+    if result_type.space.space.data != op.space.space.data:
+        _raise_verify_error("nn.select attribute space must match result space")
+
+    if lhs_type.shape != rhs_type.shape or lhs_type.shape != result_type.shape:
+        _raise_verify_error("nn.select shape must match across operands and result")
+    if lhs_type.stride != rhs_type.stride or lhs_type.stride != result_type.stride:
+        _raise_verify_error("nn.select stride must match across operands and result")
+    if lhs_type.element_type != rhs_type.element_type:
+        _raise_verify_error("nn.select operand element_type must match")
+    if result_type.element_type != lhs_type.element_type:
+        _raise_verify_error("nn.select result element_type must match operand element_type")
+
+
+@irdl_op_definition
+class NnSelectOp(IRDLOperation):
+    """nn.select。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 定义 nn.select 方言 op 与 verifier 约束。
+
+    使用示例:
+    - NnSelectOp(cond, lhs, rhs, result_type, NnMemorySpaceAttr.from_name("global"))
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    name = "nn.select"
+
+    cond = operand_def(NnMemoryType)
+    lhs = operand_def(NnMemoryType)
+    rhs = operand_def(NnMemoryType)
+    result = result_def(NnMemoryType)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        cond: SSAValue | Operation,
+        lhs: SSAValue | Operation,
+        rhs: SSAValue | Operation,
+        result_type: NnMemoryType,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        """初始化 nn.select op。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 绑定 cond/lhs/rhs、结果类型与 space。
+
+        使用示例:
+        - NnSelectOp(cond, lhs, rhs, result_type, space)
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/test_nn_dialect.py
+        - 功能实现: kernel_gen/dialect/nn.py
+        """
+
+        super().__init__(
+            operands=[cond, lhs, rhs],
+            result_types=[result_type],
+            attributes={"space": space},
+        )
+
+    def verify_(self) -> None:
+        """校验 nn.select 的 verifier 合同。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 调用统一 select 校验逻辑。
+
+        使用示例:
+        - NnSelectOp(...).verify_()
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/test_nn_dialect.py
+        - 功能实现: kernel_gen/dialect/nn.py
+        """
+
+        _verify_select_op(self)
+
+
+def _verify_cast_op(op: "NnCastOp") -> None:
+    """校验 nn.cast 的结构化合同。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 校验 input/result 必须为 nn.memory。
+    - shape/stride/space 必须一致，element_type 允许变化。
+
+    使用示例:
+    - _verify_cast_op(op)
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    input_type = _verify_memory_type(op.input.type, "input")
+    result_type = _verify_memory_type(op.result.type, "result")
+
+    op.space.verify()
+    if input_type.space.space.data != op.space.space.data:
+        _raise_verify_error("nn.cast attribute space must match operand space")
+    if result_type.space.space.data != op.space.space.data:
+        _raise_verify_error("nn.cast attribute space must match result space")
+
+    if input_type.shape != result_type.shape:
+        _raise_verify_error("nn.cast shape must match input")
+    if input_type.stride != result_type.stride:
+        _raise_verify_error("nn.cast stride must match input")
+
+
+@irdl_op_definition
+class NnCastOp(IRDLOperation):
+    """nn.cast。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 定义 nn.cast 方言 op 与 verifier 约束。
+
+    使用示例:
+    - NnCastOp(input_value, result_type, NnMemorySpaceAttr.from_name("global"))
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    name = "nn.cast"
+
+    input = operand_def(NnMemoryType)
+    result = result_def(NnMemoryType)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        input_value: SSAValue | Operation,
+        result_type: NnMemoryType,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        """初始化 nn.cast op。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 绑定输入、结果类型与 space。
+
+        使用示例:
+        - NnCastOp(input_value, result_type, space)
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/test_nn_dialect.py
+        - 功能实现: kernel_gen/dialect/nn.py
+        """
+
+        super().__init__(
+            operands=[input_value],
+            result_types=[result_type],
+            attributes={"space": space},
+        )
+
+    def verify_(self) -> None:
+        """校验 nn.cast 的 verifier 合同。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 调用统一 cast 校验逻辑。
+
+        使用示例:
+        - NnCastOp(...).verify_()
+
+        关联文件:
+        - spec: spec/dialect/nn.md
+        - test: test/dialect/test_nn_dialect.py
+        - 功能实现: kernel_gen/dialect/nn.py
+        """
+
+        _verify_cast_op(self)
 
 
 def _verify_matmul_shape(
@@ -2449,6 +2726,7 @@ Nn = Dialect(
         NnAddOp,
         NnSubOp,
         NnMulOp,
+        NnDivOp,
         NnTrueDivOp,
         NnEqOp,
         NnNeOp,
@@ -2456,6 +2734,8 @@ Nn = Dialect(
         NnLeOp,
         NnGtOp,
         NnGeOp,
+        NnSelectOp,
+        NnCastOp,
         NnBroadcastOp,
         NnTransposeOp,
         NnSoftmaxOp,
@@ -2478,6 +2758,7 @@ __all__ = [
     "NnAddOp",
     "NnSubOp",
     "NnMulOp",
+    "NnDivOp",
     "NnTrueDivOp",
     "NnEqOp",
     "NnNeOp",
@@ -2485,6 +2766,8 @@ __all__ = [
     "NnLeOp",
     "NnGtOp",
     "NnGeOp",
+    "NnSelectOp",
+    "NnCastOp",
     "NnBroadcastOp",
     "NnTransposeOp",
     "NnSoftmaxOp",

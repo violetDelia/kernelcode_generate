@@ -1,7 +1,7 @@
 """nn_lowering select tests.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 验证 nn.select lower 为 dma.alloc + kernel.select。
@@ -23,8 +23,7 @@ from collections.abc import Callable
 
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, i1, i32
-from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def, result_def
-from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
+from xdsl.ir import Attribute, Block, Operation, Region
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -32,50 +31,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.dma import DmaAllocOp
 from kernel_gen.dialect.kernel import KernelSelectOp
-from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType, NnSelectOp
 from kernel_gen.passes.lowering.nn_lowering.select_cast_lowering import LowerNnSelectCastPass
-
-
-@irdl_op_definition
-class NnSelectOp(IRDLOperation):
-    """测试用 nn.select op。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 构造 nn.select，用于 select lowering 测试。
-
-    使用示例:
-    - NnSelectOp(cond, lhs, rhs, result_type, space)
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
-    - test: test/pass/nn_lowering/select.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
-    """
-
-    name = "nn.select"
-
-    cond = operand_def(NnMemoryType)
-    lhs = operand_def(NnMemoryType)
-    rhs = operand_def(NnMemoryType)
-    result = result_def(NnMemoryType)
-    space = attr_def(NnMemorySpaceAttr)
-
-    def __init__(
-        self,
-        cond_value: SSAValue | Operation,
-        lhs_value: SSAValue | Operation,
-        rhs_value: SSAValue | Operation,
-        result_type: NnMemoryType,
-        space: NnMemorySpaceAttr,
-    ) -> None:
-        super().__init__(
-            operands=[cond_value, lhs_value, rhs_value],
-            result_types=[result_type],
-            attributes={"space": space},
-        )
 
 
 def _make_memory_type(element_type: Attribute = i32) -> NnMemoryType:
@@ -138,9 +95,9 @@ def _build_module(
 
 # TC-PASS-NNL-S2-012
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-11 23:00:00 +0800
-# 最近一次运行成功时间: 2026-04-11 23:00:00 +0800
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-12 06:47:55 +0800
+# 最近一次运行成功时间: 2026-04-12 06:47:55 +0800
 # 测试目的: 验证 nn.select lower 为 dma.alloc + kernel.select。
 # 使用示例: pytest -q test/pass/nn_lowering/select.py -k test_lower_select_to_kernel_select
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
