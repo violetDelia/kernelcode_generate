@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
+from kernel_gen.common.errors import _ERROR_TEMPLATE
 from xdsl.dialects.builtin import (
     BFloat16Type,
     Float16Type,
@@ -38,7 +39,6 @@ from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 
-_ERROR_TEMPLATE = "场景: {scene}; 期望: {expected}; 实际: {actual}; 建议动作: {action}"
 _ERROR_ACTION = "请按接口约束传参"
 _ERROR_ACTUAL = "不满足期望"
 _ERROR_SCENE = "dialect.kernel verifier"

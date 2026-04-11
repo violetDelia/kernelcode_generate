@@ -25,6 +25,8 @@ from pathlib import Path
 import json
 import re
 
+from kernel_gen.common.errors import _ERROR_TEMPLATE
+
 _ALLOWED_ROOT_FIELDS = {"name", "arch", "hardware"}
 _ALLOWED_ARCH_FIELDS = {"supported_ops", "unsupported_ops"}
 _ALLOWED_HARDWARE_FIELDS = {
@@ -104,7 +106,6 @@ _DEFAULT_NPU_DEMO_ANALYSIS_DEFAULTS = {
         "math": 1,
     },
 }
-_ERROR_TEMPLATE = "场景: {scene}; 期望: {expected}; 实际: {actual}; 建议动作: {action}"
 _ERROR_ACTION = "请按接口约束传参"
 _ERROR_ACTUAL = "不满足期望"
 _ERROR_SCENE = "target registry"

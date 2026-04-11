@@ -19,9 +19,9 @@
 
 from __future__ import annotations
 
+from kernel_gen.common.errors import _ERROR_TEMPLATE
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
-_ERROR_TEMPLATE = "场景: {scene}; 期望: {expected}; 实际: {actual}; 建议动作: {action}"
 _ERROR_ACTION = "请按接口约束传参"
 
 class LoopRange:

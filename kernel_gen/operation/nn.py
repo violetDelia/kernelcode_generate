@@ -29,9 +29,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 import math
 
+from kernel_gen.common.errors import _ERROR_TEMPLATE
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.symbol_variable.dtype_constants import NN_FLOAT_DTYPES
 from kernel_gen.symbol_variable.type import Farmat, NumericType
 
 ScalarArithmeticValue = int | float | SymbolDim
@@ -52,13 +54,6 @@ _NN_ADD_PROMOTION_ORDER = (
     NumericType.Float64,
 )
 _NN_ADD_PROMOTION_RANK = {dtype: index for index, dtype in enumerate(_NN_ADD_PROMOTION_ORDER)}
-_NN_FLOAT_DTYPES = {
-    NumericType.Float16,
-    NumericType.BFloat16,
-    NumericType.Float32,
-    NumericType.Float64,
-}
-_ERROR_TEMPLATE = "场景: {scene}; 期望: {expected}; 实际: {actual}; 建议动作: {action}"
 _ERROR_ACTION = "请按接口约束传参"
 _ERROR_SCENE = "nn operation 参数校验"
 
@@ -477,7 +472,7 @@ def _ensure_float_memory(value: object, op_name: str) -> Memory:
                 action=_ERROR_ACTION,
             )
         )
-    if value.dtype not in _NN_FLOAT_DTYPES:
+    if value.dtype not in NN_FLOAT_DTYPES:
         raise TypeError(
             _ERROR_TEMPLATE.format(
                 scene=f"nn.{op_name} 参数校验",
