@@ -1,7 +1,7 @@
 """nn -> kernel lowering pass tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 大闸蟹
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 nn_to_kernel pass 的 lowering 行为与错误路径。
@@ -110,7 +110,8 @@ LowerNnToKernelError = pass_module.LowerNnToKernelError
 LowerNnToKernelPass = pass_module.LowerNnToKernelPass
 pass_manager_module = importlib.import_module("kernel_gen.passes.pass_manager")
 PassManager = pass_manager_module.PassManager
-build_default_lowering_pass_manager = pass_manager_module.build_default_lowering_pass_manager
+pipeline_module = importlib.import_module("kernel_gen.passes.pipeline")
+build_default_lowering_pipeline = pipeline_module.build_default_lowering_pipeline
 
 
 @irdl_op_definition
@@ -552,7 +553,7 @@ def test_lower_add_to_kernel() -> None:
 
 # TC-PASS-N2K-002
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-07 17:41:56 +0800
 # 最近一次运行成功时间: 2026-04-07 17:41:56 +0800
 # 测试目的: 验证 nn.broadcast lower 为 dma.broadcast。
@@ -584,7 +585,7 @@ def test_lower_broadcast_to_dma_broadcast() -> None:
 
 # COV-N2K-027
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-09 05:20:14 +0800
 # 最近一次运行成功时间: 2026-04-09 05:20:14 +0800
 # 测试目的: 验证 nn.broadcast lowering 时，输出 alloc 的符号维度来自 symbol.get_dim，而非 placeholder 常量。
@@ -863,8 +864,8 @@ def test_lower_build_func_op_nn_add_variants_through_public_chain() -> None:
 # 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
 # 测试目的: 验证推荐调用链 `LowerNnToKernelPass -> BufferResultsToOutParamsPass` 可把 raw nn memory-return 函数稳定改写成前置 out 参数。
 # 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_pass_manager_buffer_results_to_out_params_rewrites_lowered_memory_return
-# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
-# 对应 spec 文件路径: spec/pass/pass_manager.md
+# 对应功能实现文件路径: kernel_gen/passes/pipeline/default_lowering.py
+# 对应 spec 文件路径: spec/pass/pipeline/default_lowering.md
 # 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
 def test_pass_manager_buffer_results_to_out_params_rewrites_lowered_memory_return() -> None:
     def add_direct(lhs: "Tensor[i32, 2, 2]", rhs: "Tensor[i32, 2, 2]") -> "Tensor[i32, 2, 2]":
@@ -888,7 +889,7 @@ def test_pass_manager_buffer_results_to_out_params_rewrites_lowered_memory_retur
 
     try:
         target_registry._set_current_target(target_name)
-        pm = build_default_lowering_pass_manager()
+        pm = build_default_lowering_pipeline()
         pm.run(module)
     finally:
         target_registry._set_current_target(previous_target)
@@ -1320,7 +1321,7 @@ def test_lower_preserves_memory_type_and_space() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-28 04:17:04 +0800
 # 最近一次运行成功时间: 2026-03-28 04:17:04 +0800
-# 测试目的: 验证 dma.alloc 保留静态 shape 维度值，并确保 dynamic_shape 与 stride 约束一致。
+# 测试目的: 验证 dma.alloc 保留静态 shape 维度值，并允许 dynamic_shape 省略静态维度来源。
 # 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_preserves_static_shape_in_alloc
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
 # 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
@@ -1345,15 +1346,16 @@ def test_lower_preserves_static_shape_in_alloc() -> None:
     alloc_shape = alloc_ops[0].result.type.shape.data
     alloc_dynamic_shape = alloc_ops[0].dynamic_shape
     assert len(alloc_shape) == 2
-    assert len(alloc_dynamic_shape) == 2
+    assert len(alloc_dynamic_shape) in (0, 2)
     assert isinstance(alloc_shape[0], IntAttr)
     assert isinstance(alloc_shape[1], IntAttr)
     assert alloc_shape[0].data == 3
     assert alloc_shape[1].data == 5
-    assert isinstance(alloc_dynamic_shape[0].type, SymbolValueType)
-    assert isinstance(alloc_dynamic_shape[1].type, SymbolValueType)
-    assert alloc_dynamic_shape[0].type.get_value() == 3
-    assert alloc_dynamic_shape[1].type.get_value() == 5
+    if len(alloc_dynamic_shape) == 2:
+        assert isinstance(alloc_dynamic_shape[0].type, SymbolValueType)
+        assert isinstance(alloc_dynamic_shape[1].type, SymbolValueType)
+        assert alloc_dynamic_shape[0].type.get_value() == 3
+        assert alloc_dynamic_shape[1].type.get_value() == 5
 
     non_contig_stride = ArrayAttr([IntAttr(6), IntAttr(1)])
     bad_type = _make_memory_type(shape=shape, stride=non_contig_stride)

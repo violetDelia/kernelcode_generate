@@ -5,7 +5,6 @@
 
 功能说明:
 - 定义 Pass 与 PassManager 的基础行为。
-- 提供默认 lowering pipeline 的兼容构造入口（实际调用 pipeline builder）。
 
 使用示例:
 - import importlib
@@ -14,8 +13,6 @@
 - pm = PassManager(name="opt")
 - pm.add_pass(MyPass())
 - result = pm.run(ir)
-- lowering_pm = build_default_lowering_pass_manager()
-- lowered = lowering_pm.run(module)
 
 关联文件:
 - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
@@ -96,34 +93,6 @@ def _is_pass_like(obj: object) -> bool:
         return False
     return isinstance(getattr(obj, "name"), str)
 
-
-def build_default_lowering_pass_manager(name: str | None = "lowering") -> "PassManager":
-    """构造默认 lowering pass 链路。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 朽木露琪亚
-
-    功能说明:
-    - 兼容入口：转调 `kernel_gen.passes.pipeline.build_default_lowering_pipeline` 构造 PassManager。
-    - 当 `name` 非空时覆盖返回的 `PassManager.name`，保持旧接口可用。
-
-    使用示例:
-    - pm = build_default_lowering_pass_manager()
-    - pm = build_default_lowering_pass_manager(name="lowering")
-    - module = pm.run(module)
-
-    关联文件:
-    - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
-    - test: [test/pass/test_pass_manager.py](test/pass/test_pass_manager.py)
-    - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
-    """
-
-    from kernel_gen.passes.pipeline import build_default_lowering_pipeline
-
-    pm = build_default_lowering_pipeline()
-    if name is not None:
-        pm.name = name
-    return pm
 
 
 class PassManager:
@@ -283,4 +252,4 @@ class PassManager:
         return result
 
 
-__all__ = ["Pass", "PassManager", "build_default_lowering_pass_manager"]
+__all__ = ["Pass", "PassManager"]

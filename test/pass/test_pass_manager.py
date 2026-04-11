@@ -38,7 +38,8 @@ if str(REPO_ROOT) not in sys.path:
 pass_module = importlib.import_module("kernel_gen.passes.pass_manager")
 Pass = pass_module.Pass
 PassManager = pass_module.PassManager
-build_default_lowering_pass_manager = pass_module.build_default_lowering_pass_manager
+pipeline_module = importlib.import_module("kernel_gen.passes.pipeline")
+build_default_lowering_pipeline = pipeline_module.build_default_lowering_pipeline
 
 
 # TC-PASS-001
@@ -207,7 +208,7 @@ def test_pass_manager_builds_default_lowering_pipeline_for_buffer_results_to_out
     monkeypatch.setattr(BufferResultsToOutParamsPass, "run", _record_buffer)
     monkeypatch.setattr(LowerDmaMemoryHierarchyPass, "run", _record_dma)
 
-    pm = build_default_lowering_pass_manager()
+    pm = build_default_lowering_pipeline()
     sentinel = object()
     assert pm.run(sentinel) is sentinel
     assert order == [
@@ -294,13 +295,13 @@ def test_pass_manager_allows_buffer_results_to_out_params_after_lowering_with_in
 # 最近一次运行测试时间: 2026-04-07 13:50:00 +0800
 # 最近一次运行成功时间: 2026-04-07 13:50:00 +0800
 # 功能说明: 验证 `TilePass` 为显式开启 pass，默认 lowering builder 不会自动插入。
-# 测试目的: 锁定默认 `build_default_lowering_pass_manager()` 的 pass 集合只包含 decompose + lowering + out-params + dma hierarchy。
+# 测试目的: 锁定默认 `build_default_lowering_pipeline()` 的 pass 集合只包含 decompose + lowering + out-params + dma hierarchy。
 # 使用示例: pytest -q test/pass/test_pass_manager.py -k test_tile_pipeline_requires_explicit_enable
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
 def test_tile_pipeline_requires_explicit_enable() -> None:
-    pm = build_default_lowering_pass_manager()
+    pm = build_default_lowering_pipeline()
     pass_names = [item.name for item in pm._passes]  # noqa: SLF001 - test asserts pipeline boundary
     assert pass_names == [
         "decompass",
