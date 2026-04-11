@@ -2,7 +2,7 @@
 
 ## 约定
 
-- 未经特别授权，不得访问或修改 `.skills`、`.agents` 目录中的任何文件。
+- 未经特别授权，不得修改 `.skills` 目录中的任何文件。
 - 所有函数与文件都需补充完整的功能说明和使用示例，并提供对应的 `创建者`、`最后修改人`、`spec`、`test`、`功能实现` 文件链接。
 - 文件链接示例：
   - `spec`：[`spec/codex-multi-agents/scripts/codex-multi-agents-list.md`](spec/codex-multi-agents/scripts/codex-multi-agents-list.md)
