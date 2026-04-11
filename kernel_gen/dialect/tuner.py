@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+from kernel_gen.common.errors import _ERROR_TEMPLATE
 from xdsl.ir import Attribute, Dialect
 from xdsl.irdl import IRDLOperation, irdl_op_definition, result_def
 from xdsl.parser import AttrParser
@@ -25,7 +26,6 @@ from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.symbol import SymbolDimType
 
-_ERROR_TEMPLATE = "场景: {scene}; 期望: {expected}; 实际: {actual}; 建议动作: {action}"
 _ERROR_ACTION = "请按接口约束传参"
 _ERROR_ACTUAL = "不满足期望"
 _ERROR_SCENE = "dialect.tuner verifier"

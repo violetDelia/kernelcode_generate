@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from enum import Enum
 import inspect
 
+from kernel_gen.common.errors import _ERROR_TEMPLATE
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
@@ -40,7 +41,6 @@ _DYNAMIC_MEMORY_SPACES = (
     MemorySpace.TSM,
     MemorySpace.TLM,
 )
-_ERROR_TEMPLATE = "场景: {scene}; 期望: {expected}; 实际: {actual}; 建议动作: {action}"
 _ERROR_ACTION = "请按接口约束传参"
 _ERROR_ACTUAL = "不满足期望"
 _TARGET_ERROR_SCENE = "arch helper target registry 校验"

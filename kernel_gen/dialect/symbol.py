@@ -23,6 +23,7 @@ import re
 from collections.abc import Sequence
 from typing import ClassVar
 
+from kernel_gen.common.errors import _ERROR_TEMPLATE
 import sympy as sp
 from xdsl.dialects.builtin import IntAttr, IntegerType, StringAttr, f32, i1, i32
 from xdsl.ir import Attribute, Block, Dialect, Operation, ParametrizedAttribute, Region, SSAValue, TypeAttribute
@@ -50,7 +51,6 @@ _SYMBOL_EXPR_PATTERN = re.compile(
     rf"^(?:{_SYMBOL_TOKEN_PATTERN}(?:\s*(?://|[+\-*/])\s*{_SYMBOL_TOKEN_PATTERN})*|floor\(\s*{_SYMBOL_TOKEN_PATTERN}\s*/\s*{_SYMBOL_TOKEN_PATTERN}\s*\))$"
 )
 _SYMBOL_DIM_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_ERROR_TEMPLATE = "场景: {scene}; 期望: {expected}; 实际: {actual}; 建议动作: {action}"
 _ERROR_ACTION = "请按接口约束传参"
 _ERROR_ACTUAL = "不满足期望"
 _ERROR_SCENE = "dialect.symbol"

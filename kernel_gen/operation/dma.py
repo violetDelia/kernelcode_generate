@@ -21,28 +21,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from kernel_gen.common.errors import _ERROR_TEMPLATE
+from kernel_gen.symbol_variable.dtype_constants import FLOAT_DTYPES, INT_DTYPES
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 from kernel_gen.symbol_variable.type import Farmat, NumericType
 
-_FLOAT_DTYPES = {
-    NumericType.Float16,
-    NumericType.BFloat16,
-    NumericType.Float32,
-    NumericType.Float64,
-}
-_INT_DTYPES = {
-    NumericType.Int8,
-    NumericType.Int16,
-    NumericType.Int32,
-    NumericType.Int64,
-    NumericType.Uint8,
-    NumericType.Uint16,
-    NumericType.Uint32,
-    NumericType.Uint64,
-}
-_ERROR_TEMPLATE = "场景: {scene}; 期望: {expected}; 实际: {actual}; 建议动作: {action}"
 _ERROR_ACTION = "请按接口约束传参"
 _ERROR_SCENE = "dma operation 参数校验"
 
@@ -548,9 +533,9 @@ def _is_supported_cast(source: NumericType, target: NumericType) -> bool:
     """
     if source is target:
         return True
-    if source in _FLOAT_DTYPES and target in _FLOAT_DTYPES:
+    if source in FLOAT_DTYPES and target in FLOAT_DTYPES:
         return True
-    if source in _INT_DTYPES and target in _INT_DTYPES:
+    if source in INT_DTYPES and target in INT_DTYPES:
         return True
     return False
 
