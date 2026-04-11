@@ -134,6 +134,11 @@ def run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.Comp
     )
 
 
+def default_talk_log_path(agents_file: Path) -> Path:
+    """返回 `-talk` 默认使用的日志路径。"""
+    return agents_file.parent / "log" / "talk.log"
+
+
 # TC-001
 # 创建者: 榕
 # 最后一次更改: 金铲铲大作战
@@ -153,7 +158,7 @@ def test_talk_send_and_append_log_success(tmp_path: Path) -> None:
             "| worker-a | free | worker-a | codex | agent-worker-a | worktrees/worker-a | intro | prompt.md | archive/ | duty |",
         ],
     )
-    log_file = tmp_path / "talk.log"
+    log_file = default_talk_log_path(agents_file)
 
     env = os.environ.copy()
     env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
@@ -169,8 +174,6 @@ def test_talk_send_and_append_log_success(tmp_path: Path) -> None:
         str(agents_file),
         "-message",
         "请处理任务 T1",
-        "-log",
-        str(log_file),
         env=env,
     )
     calls = calls_file.read_text(encoding="utf-8")
@@ -202,8 +205,6 @@ def test_talk_target_session_not_found_returns_rc3(tmp_path: Path) -> None:
             "| worker-a | free | missing | codex | agent-worker-a | worktrees/worker-a | intro | prompt.md | archive/ | duty |",
         ],
     )
-    log_file = tmp_path / "talk.log"
-
     env = os.environ.copy()
     env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
     env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
@@ -218,8 +219,6 @@ def test_talk_target_session_not_found_returns_rc3(tmp_path: Path) -> None:
         str(agents_file),
         "-message",
         "hello",
-        "-log",
-        str(log_file),
         env=env,
     )
 
@@ -246,8 +245,6 @@ def test_talk_missing_message_returns_rc1(tmp_path: Path) -> None:
             "| worker-a | free | worker-a | codex | agent-worker-a | worktrees/worker-a | intro | prompt.md | archive/ | duty |",
         ],
     )
-    log_file = tmp_path / "talk.log"
-
     env = os.environ.copy()
     env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
     env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
@@ -260,8 +257,6 @@ def test_talk_missing_message_returns_rc1(tmp_path: Path) -> None:
         "worker-a",
         "-agents-list",
         str(agents_file),
-        "-log",
-        str(log_file),
         env=env,
     )
 
@@ -301,8 +296,6 @@ def test_tmux_not_found_returns_rc2(tmp_path: Path) -> None:
         str(agents_file),
         "-message",
         "hello",
-        "-log",
-        str(tmp_path / "talk.log"),
         env=env,
     )
 
@@ -329,8 +322,9 @@ def test_talk_lock_conflict_returns_rc4(tmp_path: Path) -> None:
             "| worker-a | free | worker-a | codex | agent-worker-a | worktrees/worker-a | intro | prompt.md | archive/ | duty |",
         ],
     )
-    log_file = tmp_path / "talk.log"
+    log_file = default_talk_log_path(agents_file)
     lock_path = Path(f"{log_file}.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path.touch()
 
     env = os.environ.copy()
@@ -349,8 +343,6 @@ def test_talk_lock_conflict_returns_rc4(tmp_path: Path) -> None:
             str(agents_file),
             "-message",
             "hello",
-            "-log",
-            str(log_file),
             env=env,
         )
 
@@ -490,7 +482,7 @@ def test_wake_does_not_accept_talk_arguments(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 1
-    assert "-wake does not accept -from/-to/-message/-log" in result.stderr
+    assert "-wake does not accept -from/-to/-message" in result.stderr
 
 
 # TC-010
@@ -512,8 +504,6 @@ def test_talk_missing_target_agent_in_agents_list_returns_rc3(tmp_path: Path) ->
             "| other-worker | free | worker-a | codex | agent-other-worker | worktrees/other-worker | intro | prompt.md | archive/ | duty |",
         ],
     )
-    log_file = tmp_path / "talk.log"
-
     env = os.environ.copy()
     env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
     env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
@@ -528,10 +518,35 @@ def test_talk_missing_target_agent_in_agents_list_returns_rc3(tmp_path: Path) ->
         str(agents_file),
         "-message",
         "hello",
-        "-log",
-        str(log_file),
         env=env,
     )
 
     assert result.returncode == 3
     assert "failed to read field '会话' for agent: worker-a" in result.stderr
+
+
+def test_talk_rejects_removed_log_argument_returns_rc1(tmp_path: Path) -> None:
+    agents_file = tmp_path / "agents-lists.md"
+    write_agents_file(
+        agents_file,
+        rows=[
+            "| worker-a | free | worker-a | codex | agent-worker-a | worktrees/worker-a | intro | prompt.md | archive/ | duty |",
+        ],
+    )
+
+    result = run_script(
+        "-talk",
+        "-from",
+        "scheduler",
+        "-to",
+        "worker-a",
+        "-agents-list",
+        str(agents_file),
+        "-message",
+        "hello",
+        "-log",
+        str(tmp_path / "talk.log"),
+    )
+
+    assert result.returncode == 1
+    assert "-log has been removed; talk log path is derived from -agents-list" in result.stderr

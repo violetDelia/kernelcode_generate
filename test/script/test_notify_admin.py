@@ -172,8 +172,6 @@ def test_notify_admin_loop_uses_default_interval_and_message(tmp_path: Path) -> 
         str(repo_root / "agents/codex-multi-agents/agents-lists.md"),
         "-message",
         DEFAULT_ADMIN_MESSAGE,
-        "-log",
-        str(repo_root / "agents/codex-multi-agents/log/talk.log"),
     ]
     assert tmux_calls[1] == [
         "-talk",
@@ -185,8 +183,6 @@ def test_notify_admin_loop_uses_default_interval_and_message(tmp_path: Path) -> 
         str(repo_root / "agents/codex-multi-agents/agents-lists.md"),
         "-message",
         DEFAULT_BUSY_MESSAGE,
-        "-log",
-        str(repo_root / "agents/codex-multi-agents/log/talk.log"),
     ]
     assert not (state_dir / "list_args.bin").exists()
 
@@ -235,18 +231,8 @@ def test_notify_admin_loop_skips_admin_init_when_roll_misses(tmp_path: Path) -> 
     assert result.returncode == 5
     assert not (state_dir / "list_args.bin").exists()
     assert len(tmux_calls) == 2
-    assert tmux_calls[0][-4:] == [
-        "-message",
-        DEFAULT_ADMIN_MESSAGE,
-        "-log",
-        str(repo_root / "agents/codex-multi-agents/log/talk.log"),
-    ]
-    assert tmux_calls[1][-4:] == [
-        "-message",
-        DEFAULT_BUSY_MESSAGE,
-        "-log",
-        str(repo_root / "agents/codex-multi-agents/log/talk.log"),
-    ]
+    assert tmux_calls[0][-2:] == ["-message", DEFAULT_ADMIN_MESSAGE]
+    assert tmux_calls[1][-2:] == ["-message", DEFAULT_BUSY_MESSAGE]
 
 
 # TC-NA-004

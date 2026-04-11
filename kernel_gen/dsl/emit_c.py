@@ -1,7 +1,7 @@
 """C-like fragment emission helpers for DSL lowering.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 大闸蟹
 
 功能说明:
 - 提供单个 MLIR op/value 到 C 风格源码片段的最小生成规则。
@@ -757,7 +757,7 @@ def _emit_img2col2d_stmt(op: NnImg2col2dOp, ctx: EmitCContext) -> str:
     """生成 `nn.img2col2d` 的 CPU 侧调用片段。
 
     创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 大闸蟹
 
     功能说明:
     - 在 `target=cpu` 下生成：
@@ -781,19 +781,19 @@ def _emit_img2col2d_stmt(op: NnImg2col2dOp, ctx: EmitCContext) -> str:
     if not isinstance(result_type, NnMemoryType):
         raise _emit_error(ctx, op.name, "result must be nn.memory")
     decl = _emit_memory_decl(result_expr, result_type, ctx, with_backing_storage=True)
-    attr_values = [
-        op.kh.value.data,
-        op.kw.value.data,
-        op.sh.value.data,
-        op.sw.value.data,
-        op.dh.value.data,
-        op.dw.value.data,
-        op.ph.value.data,
-        op.pw.value.data,
-        op.pl.value.data,
-        op.pr.value.data,
+    param_values = [
+        emit_c_value(op.kh, ctx),
+        emit_c_value(op.kw, ctx),
+        emit_c_value(op.sh, ctx),
+        emit_c_value(op.sw, ctx),
+        emit_c_value(op.dh, ctx),
+        emit_c_value(op.dw, ctx),
+        emit_c_value(op.ph, ctx),
+        emit_c_value(op.pw, ctx),
+        emit_c_value(op.pl, ctx),
+        emit_c_value(op.pr, ctx),
     ]
-    args = ", ".join([input_expr, result_expr, *(str(value) for value in attr_values)])
+    args = ", ".join([input_expr, result_expr, *param_values])
     return f"{decl}\n{ctx.current_indent}cpu::img2col2d({args});"
 
 

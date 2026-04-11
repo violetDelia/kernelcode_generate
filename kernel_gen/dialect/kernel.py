@@ -1,7 +1,7 @@
 """Kernel dialect definitions.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 大闸蟹
 
 功能说明:
 - 定义 kernel dialect 的逐元素算术、比较、选择、指数、归约与类型转换 op。
@@ -327,6 +327,153 @@ def _verify_i64_attr_range(attr: IntegerAttr, field_name: str, *, min_value: int
             )
         )
     return value
+
+
+def _is_symbol_int_type(attr: Attribute) -> bool:
+    """判断类型是否为 symbol.int。
+
+    创建者: 大闸蟹
+    最后一次更改: 大闸蟹
+
+    功能说明:
+    - 仅通过 name 字段判断是否为 symbol.int，避免 kernel/symbol 循环依赖。
+
+    使用示例:
+    - _is_symbol_int_type(SymbolValueType.from_expr("K"))
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel_dialect.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    return getattr(attr, "name", None) == "symbol.int"
+
+
+def _is_int_or_symbol_type(attr: Attribute) -> bool:
+    """判断类型是否为整数或 symbol.int。
+
+    创建者: 大闸蟹
+    最后一次更改: 大闸蟹
+
+    功能说明:
+    - 允许任意位宽的 IntegerType。
+    - 允许 symbol.int，复用 `_is_symbol_int_type` 规避循环依赖。
+
+    使用示例:
+    - _is_int_or_symbol_type(i32)
+    - _is_int_or_symbol_type(SymbolValueType.from_expr("K"))
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel_dialect.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    return _is_symbol_int_type(attr) or isinstance(attr, IntegerType)
+
+
+def _static_int_from_operand(operand: SSAValue) -> int | None:
+    """尝试从 operand 提取静态整数值。
+
+    创建者: 大闸蟹
+    最后一次更改: 大闸蟹
+
+    功能说明:
+    - 支持 `arith.constant`/`symbol.const` 以及单层 `builtin.unrealized_conversion_cast`。
+    - 无法解析时返回 None。
+
+    使用示例:
+    - value = _static_int_from_operand(op.k)
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel_dialect.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    owner = operand.owner
+    if owner is None:
+        return None
+    owner_name = getattr(owner, "name", None)
+    if owner_name == "arith.constant":
+        value_attr = owner.attributes.get("value")
+        if isinstance(value_attr, IntegerAttr):
+            return int(value_attr.value.data)
+        if isinstance(value_attr, IntAttr):
+            return int(value_attr.data)
+        return None
+    if owner_name == "symbol.const":
+        value_attr = owner.attributes.get("value")
+        if isinstance(value_attr, IntAttr):
+            return int(value_attr.data)
+        return None
+    if owner_name == "builtin.unrealized_conversion_cast":
+        if owner.operands:
+            return _static_int_from_operand(owner.operands[0])
+    return None
+
+
+def _verify_img2col_param_operands(
+    operands: Sequence[SSAValue],
+    *,
+    allow_zero: bool,
+    type_error_phrase: str,
+    value_error_phrase: str,
+) -> list[int | None]:
+    """校验 img2col 参数 operand 类型并提取静态值。
+
+    创建者: 大闸蟹
+    最后一次更改: 大闸蟹
+
+    功能说明:
+    - 要求每个 operand 为 IntegerType 或 symbol.int。
+    - 若可解析出静态整数值，则校验正数/非负数约束。
+    - 解析失败则返回 None，供上层决定是否跳过形状合同校验。
+
+    使用示例:
+    - values = _verify_img2col_param_operands([op.k, op.s], allow_zero=False, type_error_phrase="kernel.img2col1d k/s must be integer or symbol", value_error_phrase="kernel.img2col1d k/s must be positive")
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel_dialect.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    values: list[int | None] = []
+    for operand in operands:
+        if not _is_int_or_symbol_type(operand.type):
+            raise VerifyException(
+                _ERROR_TEMPLATE.format(
+                    scene=_ERROR_SCENE,
+                    expected=type_error_phrase,
+                    actual=_ERROR_ACTUAL,
+                    action=_ERROR_ACTION,
+                )
+            )
+        static_value = _static_int_from_operand(operand)
+        if static_value is not None:
+            if allow_zero:
+                if static_value < 0:
+                    raise VerifyException(
+                        _ERROR_TEMPLATE.format(
+                            scene=_ERROR_SCENE,
+                            expected=value_error_phrase,
+                            actual=_ERROR_ACTUAL,
+                            action=_ERROR_ACTION,
+                        )
+                    )
+            elif static_value <= 0:
+                raise VerifyException(
+                    _ERROR_TEMPLATE.format(
+                        scene=_ERROR_SCENE,
+                        expected=value_error_phrase,
+                        actual=_ERROR_ACTUAL,
+                        action=_ERROR_ACTION,
+                    )
+                )
+        values.append(static_value)
+    return values
 
 
 def _collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None:
@@ -875,14 +1022,14 @@ class KernelImg2col1dOp(IRDLOperation):
     """kernel.img2col1d。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 大闸蟹
 
     功能说明:
     - 定义一维 img2col 的 kernel 目标 op。
-    - verifier 校验输入输出 rank、窗口属性、结构化结果 shape/stride 与空间一致性。
+    - verifier 校验输入输出 rank、窗口参数 operand、结构化结果 shape/stride 与空间一致性。
 
     使用示例:
-    - KernelImg2col1dOp(inp, out, k=3, s=1, d=1, p_left=0, p_right=0, space=_make_space("global"))
+    - KernelImg2col1dOp(inp, out, k_value, s_value, d_value, p_left_value, p_right_value, space=_make_space("global"))
 
     关联文件:
     - spec: spec/dialect/kernel.md
@@ -894,35 +1041,34 @@ class KernelImg2col1dOp(IRDLOperation):
 
     input = operand_def(NnMemoryType)
     out = operand_def(NnMemoryType)
-    k = attr_def(IntegerAttr)
-    s = attr_def(IntegerAttr)
-    d = attr_def(IntegerAttr)
-    p_left = attr_def(IntegerAttr)
-    p_right = attr_def(IntegerAttr)
+    k = operand_def(Attribute)
+    s = operand_def(Attribute)
+    d = operand_def(Attribute)
+    p_left = operand_def(Attribute)
+    p_right = operand_def(Attribute)
     space = attr_def(NnMemorySpaceAttr)
 
     def __init__(
         self,
         input_value: SSAValue | Operation,
         out: SSAValue | Operation,
-        k: int | IntegerAttr | IntAttr,
-        s: int | IntegerAttr | IntAttr,
-        d: int | IntegerAttr | IntAttr,
-        p_left: int | IntegerAttr | IntAttr,
-        p_right: int | IntegerAttr | IntAttr,
+        k: SSAValue | Operation,
+        s: SSAValue | Operation,
+        d: SSAValue | Operation,
+        p_left: SSAValue | Operation,
+        p_right: SSAValue | Operation,
         space: NnMemorySpaceAttr,
     ) -> None:
         """初始化 img2col1d op。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 大闸蟹
 
         功能说明:
-        - 绑定输入/输出 operand。
-        - 统一规整窗口参数为 i64 IntegerAttr。
+        - 绑定输入/输出 operand 与窗口参数 operand。
 
         使用示例:
-        - KernelImg2col1dOp(inp, out, 3, 1, 1, 0, 0, _make_space("global"))
+        - KernelImg2col1dOp(inp, out, k_value, s_value, d_value, p_left_value, p_right_value, _make_space("global"))
 
         关联文件:
         - spec: spec/dialect/kernel.md
@@ -931,25 +1077,18 @@ class KernelImg2col1dOp(IRDLOperation):
         """
 
         super().__init__(
-            operands=[input_value, out],
-            attributes={
-                "k": _normalize_i64_attr(k, "k"),
-                "s": _normalize_i64_attr(s, "s"),
-                "d": _normalize_i64_attr(d, "d"),
-                "p_left": _normalize_i64_attr(p_left, "p_left"),
-                "p_right": _normalize_i64_attr(p_right, "p_right"),
-                "space": space,
-            },
+            operands=[input_value, out, k, s, d, p_left, p_right],
+            attributes={"space": space},
         )
 
     def verify_(self) -> None:
         """校验 kernel.img2col1d 合同。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 大闸蟹
 
         功能说明:
-        - 校验输入输出 rank、元素类型、空间、窗口参数与结构化结果布局。
+        - 校验输入输出 rank、元素类型、空间、窗口参数 operand 与结构化结果布局。
 
         使用示例:
         - KernelImg2col1dOp(...).verify_()
@@ -1010,23 +1149,31 @@ class KernelImg2col1dOp(IRDLOperation):
                 )
             )
 
-        k_value = _verify_i64_attr_range(self.k, "k", min_value=1, max_value=2**63 - 1)
-        s_value = _verify_i64_attr_range(self.s, "s", min_value=1, max_value=2**63 - 1)
-        d_value = _verify_i64_attr_range(self.d, "d", min_value=1, max_value=2**63 - 1)
-        p_left_value = _verify_i64_attr_range(self.p_left, "p_left", min_value=0, max_value=2**63 - 1)
-        p_right_value = _verify_i64_attr_range(self.p_right, "p_right", min_value=0, max_value=2**63 - 1)
+        k_value, s_value, d_value = _verify_img2col_param_operands(
+            [self.k, self.s, self.d],
+            allow_zero=False,
+            type_error_phrase="kernel.img2col1d k/s/d must be integer or symbol",
+            value_error_phrase="kernel.img2col1d k/s/d must be positive",
+        )
+        p_left_value, p_right_value = _verify_img2col_param_operands(
+            [self.p_left, self.p_right],
+            allow_zero=True,
+            type_error_phrase="kernel.img2col1d p_left/p_right must be integer or symbol",
+            value_error_phrase="kernel.img2col1d p_left/p_right must be non-negative",
+        )
 
         input_shape = list(input_type.shape.data)
         out_shape = list(out_type.shape.data)
-        if not isinstance(out_shape[2], IntAttr) or out_shape[2].data != k_value:
-            raise VerifyException(
-                _ERROR_TEMPLATE.format(
-                    scene=_ERROR_SCENE,
-                    expected="kernel.img2col1d result shape/stride must match img2col1d contract",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+        if k_value is not None:
+            if not isinstance(out_shape[2], IntAttr) or out_shape[2].data != k_value:
+                raise VerifyException(
+                    _ERROR_TEMPLATE.format(
+                        scene=_ERROR_SCENE,
+                        expected="kernel.img2col1d result shape/stride must match img2col1d contract",
+                        actual=_ERROR_ACTUAL,
+                        action=_ERROR_ACTION,
+                    )
                 )
-            )
 
         input_dims = _collect_int_dims(input_shape)
         input_strides = _collect_int_dims(input_type.stride.data)
@@ -1044,6 +1191,8 @@ class KernelImg2col1dOp(IRDLOperation):
         out_dims = _collect_int_dims(out_shape)
         out_strides = _collect_int_dims(out_type.stride.data)
         if input_dims is None or out_dims is None or out_strides is None:
+            return
+        if any(value is None for value in (k_value, s_value, d_value, p_left_value, p_right_value)):
             return
 
         n_dim, c_dim, w_dim = input_dims
@@ -1066,14 +1215,14 @@ class KernelImg2col2dOp(IRDLOperation):
     """kernel.img2col2d。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 大闸蟹
 
     功能说明:
     - 定义二维 img2col 的 kernel 目标 op。
-    - verifier 校验输入输出 rank、窗口属性、结构化结果 shape/stride 与空间一致性。
+    - verifier 校验输入输出 rank、窗口参数 operand、结构化结果 shape/stride 与空间一致性。
 
     使用示例:
-    - KernelImg2col2dOp(inp, out, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=0, pw=0, pl=0, pr=0, space=_make_space("global"))
+    - KernelImg2col2dOp(inp, out, kh_value, kw_value, sh_value, sw_value, dh_value, dw_value, ph_value, pw_value, pl_value, pr_value, space=_make_space("global"))
 
     关联文件:
     - spec: spec/dialect/kernel.md
@@ -1085,45 +1234,44 @@ class KernelImg2col2dOp(IRDLOperation):
 
     input = operand_def(NnMemoryType)
     out = operand_def(NnMemoryType)
-    kh = attr_def(IntegerAttr)
-    kw = attr_def(IntegerAttr)
-    sh = attr_def(IntegerAttr)
-    sw = attr_def(IntegerAttr)
-    dh = attr_def(IntegerAttr)
-    dw = attr_def(IntegerAttr)
-    ph = attr_def(IntegerAttr)
-    pw = attr_def(IntegerAttr)
-    pl = attr_def(IntegerAttr)
-    pr = attr_def(IntegerAttr)
+    kh = operand_def(Attribute)
+    kw = operand_def(Attribute)
+    sh = operand_def(Attribute)
+    sw = operand_def(Attribute)
+    dh = operand_def(Attribute)
+    dw = operand_def(Attribute)
+    ph = operand_def(Attribute)
+    pw = operand_def(Attribute)
+    pl = operand_def(Attribute)
+    pr = operand_def(Attribute)
     space = attr_def(NnMemorySpaceAttr)
 
     def __init__(
         self,
         input_value: SSAValue | Operation,
         out: SSAValue | Operation,
-        kh: int | IntegerAttr | IntAttr,
-        kw: int | IntegerAttr | IntAttr,
-        sh: int | IntegerAttr | IntAttr,
-        sw: int | IntegerAttr | IntAttr,
-        dh: int | IntegerAttr | IntAttr,
-        dw: int | IntegerAttr | IntAttr,
-        ph: int | IntegerAttr | IntAttr,
-        pw: int | IntegerAttr | IntAttr,
-        pl: int | IntegerAttr | IntAttr,
-        pr: int | IntegerAttr | IntAttr,
+        kh: SSAValue | Operation,
+        kw: SSAValue | Operation,
+        sh: SSAValue | Operation,
+        sw: SSAValue | Operation,
+        dh: SSAValue | Operation,
+        dw: SSAValue | Operation,
+        ph: SSAValue | Operation,
+        pw: SSAValue | Operation,
+        pl: SSAValue | Operation,
+        pr: SSAValue | Operation,
         space: NnMemorySpaceAttr,
     ) -> None:
         """初始化 img2col2d op。
 
         创建者: 朽木露琪亚
-        最后一次更改: 朽木露琪亚
+        最后一次更改: 大闸蟹
 
         功能说明:
-        - 绑定输入/输出 operand。
-        - 统一规整窗口参数为 i64 IntegerAttr。
+        - 绑定输入/输出 operand 与窗口参数 operand。
 
         使用示例:
-        - KernelImg2col2dOp(inp, out, 3, 3, 1, 1, 1, 1, 0, 0, 0, 0, _make_space("global"))
+        - KernelImg2col2dOp(inp, out, kh_value, kw_value, sh_value, sw_value, dh_value, dw_value, ph_value, pw_value, pl_value, pr_value, _make_space("global"))
 
         关联文件:
         - spec: spec/dialect/kernel.md
@@ -1132,30 +1280,18 @@ class KernelImg2col2dOp(IRDLOperation):
         """
 
         super().__init__(
-            operands=[input_value, out],
-            attributes={
-                "kh": _normalize_i64_attr(kh, "kh"),
-                "kw": _normalize_i64_attr(kw, "kw"),
-                "sh": _normalize_i64_attr(sh, "sh"),
-                "sw": _normalize_i64_attr(sw, "sw"),
-                "dh": _normalize_i64_attr(dh, "dh"),
-                "dw": _normalize_i64_attr(dw, "dw"),
-                "ph": _normalize_i64_attr(ph, "ph"),
-                "pw": _normalize_i64_attr(pw, "pw"),
-                "pl": _normalize_i64_attr(pl, "pl"),
-                "pr": _normalize_i64_attr(pr, "pr"),
-                "space": space,
-            },
+            operands=[input_value, out, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr],
+            attributes={"space": space},
         )
 
     def verify_(self) -> None:
         """校验 kernel.img2col2d 合同。
 
         创建者: 朽木露琪亚
-        最后一次更改: 朽木露琪亚
+        最后一次更改: 大闸蟹
 
         功能说明:
-        - 校验输入输出 rank、元素类型、空间、窗口参数与结构化结果布局。
+        - 校验输入输出 rank、元素类型、空间、窗口参数 operand 与结构化结果布局。
 
         使用示例:
         - KernelImg2col2dOp(...).verify_()
@@ -1216,37 +1352,41 @@ class KernelImg2col2dOp(IRDLOperation):
                 )
             )
 
-        kh_value = _verify_i64_attr_range(self.kh, "kh", min_value=1, max_value=2**63 - 1)
-        kw_value = _verify_i64_attr_range(self.kw, "kw", min_value=1, max_value=2**63 - 1)
-        sh_value = _verify_i64_attr_range(self.sh, "sh", min_value=1, max_value=2**63 - 1)
-        sw_value = _verify_i64_attr_range(self.sw, "sw", min_value=1, max_value=2**63 - 1)
-        dh_value = _verify_i64_attr_range(self.dh, "dh", min_value=1, max_value=2**63 - 1)
-        dw_value = _verify_i64_attr_range(self.dw, "dw", min_value=1, max_value=2**63 - 1)
-        ph_value = _verify_i64_attr_range(self.ph, "ph", min_value=0, max_value=2**63 - 1)
-        pw_value = _verify_i64_attr_range(self.pw, "pw", min_value=0, max_value=2**63 - 1)
-        pl_value = _verify_i64_attr_range(self.pl, "pl", min_value=0, max_value=2**63 - 1)
-        pr_value = _verify_i64_attr_range(self.pr, "pr", min_value=0, max_value=2**63 - 1)
+        kh_value, kw_value, sh_value, sw_value, dh_value, dw_value = _verify_img2col_param_operands(
+            [self.kh, self.kw, self.sh, self.sw, self.dh, self.dw],
+            allow_zero=False,
+            type_error_phrase="kernel.img2col2d kh/kw/sh/sw/dh/dw must be integer or symbol",
+            value_error_phrase="kernel.img2col2d kh/kw/sh/sw/dh/dw must be positive",
+        )
+        ph_value, pw_value, pl_value, pr_value = _verify_img2col_param_operands(
+            [self.ph, self.pw, self.pl, self.pr],
+            allow_zero=True,
+            type_error_phrase="kernel.img2col2d ph/pw/pl/pr must be integer or symbol",
+            value_error_phrase="kernel.img2col2d ph/pw/pl/pr must be non-negative",
+        )
 
         input_shape = list(input_type.shape.data)
         out_shape = list(out_type.shape.data)
-        if not isinstance(out_shape[2], IntAttr) or out_shape[2].data != kh_value:
-            raise VerifyException(
-                _ERROR_TEMPLATE.format(
-                    scene=_ERROR_SCENE,
-                    expected="kernel.img2col2d result shape/stride must match img2col2d contract",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+        if kh_value is not None:
+            if not isinstance(out_shape[2], IntAttr) or out_shape[2].data != kh_value:
+                raise VerifyException(
+                    _ERROR_TEMPLATE.format(
+                        scene=_ERROR_SCENE,
+                        expected="kernel.img2col2d result shape/stride must match img2col2d contract",
+                        actual=_ERROR_ACTUAL,
+                        action=_ERROR_ACTION,
+                    )
                 )
-            )
-        if not isinstance(out_shape[3], IntAttr) or out_shape[3].data != kw_value:
-            raise VerifyException(
-                _ERROR_TEMPLATE.format(
-                    scene=_ERROR_SCENE,
-                    expected="kernel.img2col2d result shape/stride must match img2col2d contract",
-                    actual=_ERROR_ACTUAL,
-                    action=_ERROR_ACTION,
+        if kw_value is not None:
+            if not isinstance(out_shape[3], IntAttr) or out_shape[3].data != kw_value:
+                raise VerifyException(
+                    _ERROR_TEMPLATE.format(
+                        scene=_ERROR_SCENE,
+                        expected="kernel.img2col2d result shape/stride must match img2col2d contract",
+                        actual=_ERROR_ACTUAL,
+                        action=_ERROR_ACTION,
+                    )
                 )
-            )
 
         input_dims = _collect_int_dims(input_shape)
         input_strides = _collect_int_dims(input_type.stride.data)
@@ -1264,6 +1404,22 @@ class KernelImg2col2dOp(IRDLOperation):
         out_dims = _collect_int_dims(out_shape)
         out_strides = _collect_int_dims(out_type.stride.data)
         if input_dims is None or out_dims is None or out_strides is None:
+            return
+        if any(
+            value is None
+            for value in (
+                kh_value,
+                kw_value,
+                sh_value,
+                sw_value,
+                dh_value,
+                dw_value,
+                ph_value,
+                pw_value,
+                pl_value,
+                pr_value,
+            )
+        ):
             return
 
         n_dim, c_dim, h_dim, w_dim = input_dims

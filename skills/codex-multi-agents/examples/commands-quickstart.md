@@ -77,18 +77,18 @@ bash ./scripts/codex-multi-agents-list.sh \
 
 脚本路径：`./scripts/codex-multi-agents-tmux.sh`
 
-### 发送对话并写日志
+### 发送对话
 ```bash
 bash ./scripts/codex-multi-agents-tmux.sh \
   -talk -from scheduler -to worker-a \
   -agents-list agents/codex-multi-agents/agents-lists.md \
-  -message "请处理任务 T1" \
-  -log agents/codex-multi-agents/log/talk.log
+  -message "请处理任务 T1"
 ```
 
 说明：
 - `-talk` 不再接受手工传入 `-session-id`。
 - 目标 tmux 会话会按 `agents-lists.md` 中目标角色的 `会话` 字段自动解析。
+- 对话日志固定写入 `$(dirname <agents-list>)/log/talk.log`。
 - 若只是单次咨询，不要新建任务，直接使用 `-talk`。
 
 ### 单次咨询示例
@@ -96,8 +96,7 @@ bash ./scripts/codex-multi-agents-tmux.sh \
 bash ./scripts/codex-multi-agents-tmux.sh \
   -talk -from worker-a -to 守护最好的爱莉希雅 \
   -agents-list agents/codex-multi-agents/agents-lists.md \
-  -message "这不是任务。请确认 add 接口参数顺序是否固定为 lhs,rhs,out。" \
-  -log agents/codex-multi-agents/log/talk.log
+  -message "这不是任务。请确认 add 接口参数顺序是否固定为 lhs,rhs,out。"
 ```
 
 说明：
@@ -111,7 +110,7 @@ bash ./scripts/codex-multi-agents-tmux.sh \
 ```
 
 参数速记：
-- `-from/-to/-agents-list/-message/-log` 对话参数（仅 `-talk`）
+- `-from/-to/-agents-list/-message` 对话参数（仅 `-talk`）
 - `-file/-name` 名单参数（仅 `-init-env/-wake`）
 
 ## 3. 任务调度（codex-multi-agents-task.sh）
@@ -217,16 +216,16 @@ bash ./scripts/codex-multi-agents-task.sh \
 
 说明：
 - `-auto` 只能和 `-next` 一起使用。
-- `-next -auto` 会先完成当前任务的续接，再从 `任务列表` 自动挑选一条可推进任务继续分发。
-- 自动挑选顺序固定为：`merge > review > build > spec`。
-- 自动接续时会优先尝试默认指派，其次选择空闲且职责匹配的角色；若仍没有合适角色，任务保留在 `任务列表`。
+- `-next -auto` 会先把当前任务退回 `任务列表`，清空 `指派`，再只尝试自动续接这同一条任务。
+- 自动接续顺序固定为：当前执行者本人；若不匹配，再按 `agents-lists.md` 顺序选择其他空闲且职责匹配的角色。
+- 若当前任务类型不支持自动续接、没有合适角色或并发已满，则当前任务保留在 `任务列表`。
 - 自动接续成功后，会向接手人发送任务消息，并向管理员发送摘要；若接给当前执行者本人，则只向管理员发送摘要。
 
 实际通知效果：
 - 接给其他角色时，执行人会收到一条固定格式消息，内容至少包含：`任务 ID`、`描述`、`worktree`、`计划书`、`记录文件`、任务记录要求、问题咨询指引；若本次 `-next` 是为了 `merge`，消息会额外提示“完成后直接回报管理员，由管理员执行 -done”。
-- 接给其他角色时，管理员还会收到摘要消息，说明：哪个任务刚执行了 `-next`、新自动分发的是哪个任务、任务类型是什么、当前接手人是谁。
+- 接给其他角色时，管理员会收到固定摘要：`任务 <task_id> 已完成当前阶段，已回到任务列表；新任务类型=<type>，已经指派给-> <角色名>。`
 - 若自动接续落到当前执行者本人，则不会再给本人发消息，只会给管理员发送摘要，避免重复提醒。
-- 若当前没有可继续推进的任务，或有任务但没有合适空闲角色，管理员会收到“仍保留在任务列表”的摘要消息。
+- 若自动接续失败，管理员会收到固定摘要：`任务 <task_id> 已完成当前阶段，已回到任务列表；新任务类型=<type>，请管理员推进。`
 - 若本次 `-next` 自带 `-message`，该内容会写回任务描述；真正发给执行人的通知仍然会保留固定前缀：`请处理任务 <task_id>（<描述>）...`，`-message` 不会替代这些基础字段。
 
 ### 计划书归档（-done-plan）

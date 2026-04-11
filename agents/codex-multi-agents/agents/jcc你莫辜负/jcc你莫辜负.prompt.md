@@ -37,13 +37,13 @@
 ## 执行规则
 - 通用执行规则与命令权限分别以 [`agents/standard/协作执行通用规则.md`](../../../standard/协作执行通用规则.md) 和 [`agents/standard/角色权限矩阵.md`](../../../standard/角色权限矩阵.md) 为准。
 - 若当前任务是 `spec`，只改 `spec`；若是 `build`，只改实现/测试；若是 `review`，只给结论和问题清单。
-- 完成后必须先按任务记录约定写完任务日志，再使用 `-next -auto -type` 续接后续。
+- 完成后必须先按任务记录约定写完任务日志，再使用完整的 `-next -auto` 命令推进后续；`-task_id`、`-from`、`-type`、`-message`、`-agents-list` 必填。
 - `spec` 默认接 `build`，`build` 默认接 `review`，`review` 视结论接 `build`、`spec` 或 `merge`。
 
 ## 任务链路
 - 通用链路以 [`agents/standard/协作执行通用规则.md`](../../../standard/协作执行通用规则.md) 为准。
 - 领取任务后先确认 `TODO.md` 中的任务类型、目标、`worktree`、计划书与日志路径。
-- 任务完成后：先写任务日志，再执行 `-next -auto -type`，最后用 `-talk` 通知管理员推进。
+- 任务完成后：先写任务日志，再执行完整的 `-next -auto` 命令，最后用 `-talk` 通知管理员推进。
 
 ## 异常处理
 - 通用异常处理以 [`agents/standard/异常处理规范.md`](../../../standard/异常处理规范.md) 为准。
@@ -52,22 +52,23 @@
 ## 新建任务模板
 - 本角色不执行 `-new`。
 - 通用模板以 [`agents/standard/任务新建模板.md`](../../../standard/任务新建模板.md) 为准。
-- 后续任务统一通过 `-next -auto -type "<type>" -message "<type>；任务目标：...；任务链记录：...>"` 创建。
+- 后续任务统一通过下方完整的 `-next -auto` 示例续接；`-from`、`-type` 与 `-message` 必填。
 
 ## 自检
-- 当前执行内容是否与管理员指派的任务类型一致。
-- 当前阶段需要的文档、实现、测试或问题清单是否已经写全。
-- 任务日志是否已写完，且内容足够让后续角色直接接手。
+- 当前实际执行内容是否与管理员指派的任务类型一致；若本轮接的是 `spec/build/review`，是否按对应角色规则在做，而不是混做别的阶段。
+- 如果当前接的是 `spec`，是否已写清公开 `API`、示例和验收要求；如果接的是 `build`，是否已跑命令并记录结果；如果接的是 `review`，是否已给出明确结论和最小修复项。
+- 是否没有越权修改仓库中的 `expectation`、计划书或其他角色专属文件。
+- 任务日志是否已写完，且能让管理员或下游角色直接知道本轮改了什么、验证了什么、下一步做什么。
 
 ## 脚本示例
 - 向管理员确认替补任务类型或范围：
-  `bash skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh -talk -from jcc你莫辜负 -to 神秘人 -agents-list agents/codex-multi-agents/agents-lists.md -message "T-20260410-xxxx 当前以替补身份接单，请确认本轮任务类型与可改文件范围。" -log agents/codex-multi-agents/log/talk.log`
+  `bash skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh -talk -from jcc你莫辜负 -to 神秘人 -agents-list agents/codex-multi-agents/agents-lists.md -message "T-20260410-xxxx 当前以替补身份接单，请确认本轮任务类型与可改文件范围。"`
 - 向架构师确认阶段目标或验收口径：
-  `bash skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh -talk -from jcc你莫辜负 -to 大闸蟹 -agents-list agents/codex-multi-agents/agents-lists.md -message "请确认 T-20260410-xxxx 的阶段目标、接口口径和验收要求。" -log agents/codex-multi-agents/log/talk.log`
+  `bash skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh -talk -from jcc你莫辜负 -to 大闸蟹 -agents-list agents/codex-multi-agents/agents-lists.md -message "请确认 T-20260410-xxxx 的阶段目标、接口口径和验收要求。"`
 - 当前任务完成，自动创建下游 `review` 任务：
-  `bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file TODO.md -next -auto -task_id "T-20260410-xxxx" -type "review" -message "review；任务目标：复核替补链路本轮输出；任务链记录：agents/codex-multi-agents/log/task_records/2026/15/20260410-xxx-review.md" -agents-list agents/codex-multi-agents/agents-lists.md`
+  `bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file TODO.md -next -auto -task_id "T-20260410-xxxx" -from "jcc你莫辜负" -type "review" -message "review；任务目标：复核替补链路本轮输出；任务链记录：agents/codex-multi-agents/log/task_records/2026/15/20260410-xxx-review.md" -agents-list agents/codex-multi-agents/agents-lists.md`
 - `-next` 后通知管理员推进：
-  `bash skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh -talk -from jcc你莫辜负 -to 神秘人 -agents-list agents/codex-multi-agents/agents-lists.md -message "T-20260410-xxxx 已完成，任务日志已写完，后续任务已创建，请按 TODO.md 推进。" -log agents/codex-multi-agents/log/talk.log`
+  `bash skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh -talk -from jcc你莫辜负 -to 神秘人 -agents-list agents/codex-multi-agents/agents-lists.md -message "T-20260410-xxxx 已完成，任务日志已写完，后续任务已创建，请按 TODO.md 推进。"`
 
 ## 参考
 - 角色权限矩阵：[`agents/standard/角色权限矩阵.md`](../../../standard/角色权限矩阵.md)

@@ -1,7 +1,7 @@
 """nn dialect tests.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: 大闸蟹
 
 功能说明:
 - 覆盖 nn dialect 的 attr/type/op verifier、parse/print 与 round-trip 行为。
@@ -27,6 +27,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from xdsl.dialects import arith
 from xdsl.context import Context
 from xdsl.dialects.builtin import (
     ArrayAttr,
@@ -199,7 +200,7 @@ def _make_matrix_type(
 
 # TY-001
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 大闸蟹
 # 最近一次运行测试时间: 2026-03-22 13:09:11 +0800
 # 最近一次运行成功时间: 2026-03-22 13:09:11 +0800
 # 功能说明: 验证 memory type parse/print 可稳定 round-trip。
@@ -1387,7 +1388,12 @@ def test_nn_dialect_img2col1d_contract_v1() -> None:
         space="global",
     )
     inp = _TestOp(result_types=[input_type]).results[0]
-    op = NnImg2col1dOp(inp, result_type, kw=3, sw=1, dw=1, pl=1, pr=1, space=_make_space("global"))
+    kw = arith.ConstantOp(IntegerAttr(3, i32)).result
+    sw = arith.ConstantOp(IntegerAttr(1, i32)).result
+    dw = arith.ConstantOp(IntegerAttr(1, i32)).result
+    pl = arith.ConstantOp(IntegerAttr(1, i32)).result
+    pr = arith.ConstantOp(IntegerAttr(1, i32)).result
+    op = NnImg2col1dOp(inp, result_type, kw=kw, sw=sw, dw=dw, pl=pl, pr=pr, space=_make_space("global"))
     op.verify()
 
     cases = [
@@ -1486,14 +1492,19 @@ def test_nn_dialect_img2col1d_contract_v1() -> None:
     ]
     for case_input, case_result, attrs, space, message in cases:
         case_inp = _TestOp(result_types=[case_input]).results[0]
+        kw = arith.ConstantOp(IntegerAttr(attrs["kw"], i32)).result
+        sw = arith.ConstantOp(IntegerAttr(attrs["sw"], i32)).result
+        dw = arith.ConstantOp(IntegerAttr(attrs["dw"], i32)).result
+        pl = arith.ConstantOp(IntegerAttr(attrs["pl"], i32)).result
+        pr = arith.ConstantOp(IntegerAttr(attrs["pr"], i32)).result
         case_op = NnImg2col1dOp(
             case_inp,
             case_result,
-            kw=attrs["kw"],
-            sw=attrs["sw"],
-            dw=attrs["dw"],
-            pl=attrs["pl"],
-            pr=attrs["pr"],
+            kw=kw,
+            sw=sw,
+            dw=dw,
+            pl=pl,
+            pr=pr,
             space=_make_space(space),
         )
         with pytest.raises(VerifyException, match=message):
@@ -1502,7 +1513,7 @@ def test_nn_dialect_img2col1d_contract_v1() -> None:
 
 # NN-DIA-041
 # 创建者: jcc你莫辜负
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 大闸蟹
 # 功能说明: 验证 nn.img2col2d 合同的正向与负向约束。
 # 测试目的: 覆盖 operand/attrs/result/space 一致性以及形状/步幅合同校验。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_nn_dialect_img2col2d_contract_v1
@@ -1521,19 +1532,29 @@ def test_nn_dialect_img2col2d_contract_v1() -> None:
         space="global",
     )
     inp = _TestOp(result_types=[input_type]).results[0]
+    kh = arith.ConstantOp(IntegerAttr(3, i32)).result
+    kw = arith.ConstantOp(IntegerAttr(3, i32)).result
+    sh = arith.ConstantOp(IntegerAttr(1, i32)).result
+    sw = arith.ConstantOp(IntegerAttr(1, i32)).result
+    dh = arith.ConstantOp(IntegerAttr(1, i32)).result
+    dw = arith.ConstantOp(IntegerAttr(1, i32)).result
+    ph = arith.ConstantOp(IntegerAttr(1, i32)).result
+    pw = arith.ConstantOp(IntegerAttr(1, i32)).result
+    pl = arith.ConstantOp(IntegerAttr(1, i32)).result
+    pr = arith.ConstantOp(IntegerAttr(1, i32)).result
     op = NnImg2col2dOp(
         inp,
         result_type,
-        kh=3,
-        kw=3,
-        sh=1,
-        sw=1,
-        dh=1,
-        dw=1,
-        ph=1,
-        pw=1,
-        pl=1,
-        pr=1,
+        kh=kh,
+        kw=kw,
+        sh=sh,
+        sw=sw,
+        dh=dh,
+        dw=dw,
+        ph=ph,
+        pw=pw,
+        pl=pl,
+        pr=pr,
         space=_make_space("global"),
     )
     op.verify()
@@ -1653,19 +1674,29 @@ def test_nn_dialect_img2col2d_contract_v1() -> None:
     ]
     for case_input, case_result, attrs, space, message in cases:
         case_inp = _TestOp(result_types=[case_input]).results[0]
+        kh = arith.ConstantOp(IntegerAttr(attrs["kh"], i32)).result
+        kw = arith.ConstantOp(IntegerAttr(attrs["kw"], i32)).result
+        sh = arith.ConstantOp(IntegerAttr(attrs["sh"], i32)).result
+        sw = arith.ConstantOp(IntegerAttr(attrs["sw"], i32)).result
+        dh = arith.ConstantOp(IntegerAttr(attrs["dh"], i32)).result
+        dw = arith.ConstantOp(IntegerAttr(attrs["dw"], i32)).result
+        ph = arith.ConstantOp(IntegerAttr(attrs["ph"], i32)).result
+        pw = arith.ConstantOp(IntegerAttr(attrs["pw"], i32)).result
+        pl = arith.ConstantOp(IntegerAttr(attrs["pl"], i32)).result
+        pr = arith.ConstantOp(IntegerAttr(attrs["pr"], i32)).result
         case_op = NnImg2col2dOp(
             case_inp,
             case_result,
-            kh=attrs["kh"],
-            kw=attrs["kw"],
-            sh=attrs["sh"],
-            sw=attrs["sw"],
-            dh=attrs["dh"],
-            dw=attrs["dw"],
-            ph=attrs["ph"],
-            pw=attrs["pw"],
-            pl=attrs["pl"],
-            pr=attrs["pr"],
+            kh=kh,
+            kw=kw,
+            sh=sh,
+            sw=sw,
+            dh=dh,
+            dw=dw,
+            ph=ph,
+            pw=pw,
+            pl=pl,
+            pr=pr,
             space=_make_space(space),
         )
         with pytest.raises(VerifyException, match=message):

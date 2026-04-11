@@ -1,7 +1,7 @@
 """nn -> kernel lowering pass tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 大闸蟹
 
 功能说明:
 - 覆盖 nn_to_kernel pass 的 lowering 行为与错误路径。
@@ -523,7 +523,7 @@ def _collect_ops(block: Block) -> list[Operation]:
 
 # TC-PASS-N2K-001
 # 创建者: 金铲铲大作战
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 大闸蟹
 # 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证 nn.add lower 为 kernel.add。
@@ -1510,29 +1510,32 @@ def test_lower_img2col1d_direct_dialect_op_to_kernel_img2col1d() -> None:
     )
     space = _make_space("global")
 
-    module, _ = _build_module(
-        [input_type],
-        result_type,
-        lambda block: [
-            NnImg2col1dOp(
-                block.args[0],
-                result_type,
-                kw=3,
-                sw=1,
-                dw=1,
-                pl=1,
-                pr=1,
-                space=space,
-            )
-        ],
-    )
+    def build_ops(block: Block) -> list[Operation]:
+        kw = arith.ConstantOp(IntegerAttr(3, i32))
+        sw = arith.ConstantOp(IntegerAttr(1, i32))
+        dw = arith.ConstantOp(IntegerAttr(1, i32))
+        pl = arith.ConstantOp(IntegerAttr(1, i32))
+        pr = arith.ConstantOp(IntegerAttr(1, i32))
+        img2col = NnImg2col1dOp(
+            block.args[0],
+            result_type,
+            kw=kw.result,
+            sw=sw.result,
+            dw=dw.result,
+            pl=pl.result,
+            pr=pr.result,
+            space=space,
+        )
+        return [kw, sw, dw, pl, pr, img2col]
+
+    module, _ = _build_module([input_type], result_type, build_ops)
 
     LowerNnToKernelPass().run(module)
     after_ir = str(module)
     assert "dma.alloc" in after_ir
     assert "kernel.img2col1d" in after_ir
-    assert "k = 3" in after_ir
-    assert "p_left = 1" in after_ir
+    assert "arith.constant 3" in after_ir
+    assert "arith.constant 1" in after_ir
     assert "nn.img2col1d" not in after_ir
 
 
@@ -1566,7 +1569,7 @@ def test_lower_img2col1d_public_chain_to_kernel_img2col1d() -> None:
 
 # COV-N2K-028
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
+# 最后一次更改: 大闸蟹
 # 最近一次运行测试时间: 2026-04-09 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-09 00:00:00 +0800
 # 测试目的: 验证 nn.img2col2d 直接 lower 为 kernel.img2col2d。
@@ -1587,34 +1590,41 @@ def test_lower_img2col2d_direct_dialect_op_to_kernel_img2col2d() -> None:
     )
     space = _make_space("global")
 
-    module, _ = _build_module(
-        [input_type],
-        result_type,
-        lambda block: [
-            NnImg2col2dOp(
-                block.args[0],
-                result_type,
-                kh=3,
-                kw=3,
-                sh=1,
-                sw=1,
-                dh=1,
-                dw=1,
-                ph=0,
-                pw=0,
-                pl=0,
-                pr=0,
-                space=space,
-            )
-        ],
-    )
+    def build_ops(block: Block) -> list[Operation]:
+        kh = arith.ConstantOp(IntegerAttr(3, i32))
+        kw = arith.ConstantOp(IntegerAttr(3, i32))
+        sh = arith.ConstantOp(IntegerAttr(1, i32))
+        sw = arith.ConstantOp(IntegerAttr(1, i32))
+        dh = arith.ConstantOp(IntegerAttr(1, i32))
+        dw = arith.ConstantOp(IntegerAttr(1, i32))
+        ph = arith.ConstantOp(IntegerAttr(0, i32))
+        pw = arith.ConstantOp(IntegerAttr(0, i32))
+        pl = arith.ConstantOp(IntegerAttr(0, i32))
+        pr = arith.ConstantOp(IntegerAttr(0, i32))
+        img2col = NnImg2col2dOp(
+            block.args[0],
+            result_type,
+            kh=kh.result,
+            kw=kw.result,
+            sh=sh.result,
+            sw=sw.result,
+            dh=dh.result,
+            dw=dw.result,
+            ph=ph.result,
+            pw=pw.result,
+            pl=pl.result,
+            pr=pr.result,
+            space=space,
+        )
+        return [kh, kw, sh, sw, dh, dw, ph, pw, pl, pr, img2col]
+
+    module, _ = _build_module([input_type], result_type, build_ops)
 
     LowerNnToKernelPass().run(module)
     after_ir = str(module)
     assert "dma.alloc" in after_ir
     assert "kernel.img2col2d" in after_ir
-    assert "kh = 3" in after_ir
-    assert "kw = 3" in after_ir
+    assert "arith.constant 3" in after_ir
     assert "nn.img2col2d" not in after_ir
 
 

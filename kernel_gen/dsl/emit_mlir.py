@@ -1,7 +1,7 @@
 """AST emit utilities for DSL nodes.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 大闸蟹
 
 功能说明:
 - 提供 AST 节点到 MLIR SSA value/op 的发射入口。
@@ -712,6 +712,30 @@ def _const_symbol_int(value: int, ctx: EmitContext, location: SourceLocation | N
     op = arith.ConstantOp(attr)
     ctx.builder.add_op(op)
     return _cast_to_symbol_int(op.result, ctx, str(value), location)
+
+
+def _const_i32(value: int, ctx: EmitContext, location: SourceLocation | None) -> SSAValue:
+    """构造 i32 常量 SSA value。
+
+    创建者: 大闸蟹
+    最后一次更改: 大闸蟹
+
+    功能说明:
+    - 生成 `arith.constant` i32 常量，供 img2col 等 op 使用。
+
+    使用示例:
+    - value_operand = _const_i32(4, ctx, location)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    attr = IntegerAttr(value, i32)
+    op = arith.ConstantOp(attr)
+    ctx.builder.add_op(op)
+    return op.result
 
 
 def _build_arch_barrier_visibility_attr(
@@ -3351,7 +3375,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     """将表达式 AST 递归下沉为 MLIR SSA value。
 
     创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
+    最后一次更改: 大闸蟹
 
     功能说明:
     - 递归处理常量、内存操作、`symbol.to_float` 与算术/比较表达式，生成对应的 MLIR op。
@@ -3627,16 +3651,16 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         img2col_op = NnImg2col2dOp(
             value,
             img2col_type,
-            kh=kh,
-            kw=kw,
-            sh=params["sh"],
-            sw=params["sw"],
-            dh=params["dh"],
-            dw=params["dw"],
-            ph=params["ph"],
-            pw=params["pw"],
-            pl=params["pl"],
-            pr=params["pr"],
+            kh=_const_i32(kh, ctx, expr.location),
+            kw=_const_i32(kw, ctx, expr.location),
+            sh=_const_i32(params["sh"], ctx, expr.location),
+            sw=_const_i32(params["sw"], ctx, expr.location),
+            dh=_const_i32(params["dh"], ctx, expr.location),
+            dw=_const_i32(params["dw"], ctx, expr.location),
+            ph=_const_i32(params["ph"], ctx, expr.location),
+            pw=_const_i32(params["pw"], ctx, expr.location),
+            pl=_const_i32(params["pl"], ctx, expr.location),
+            pr=_const_i32(params["pr"], ctx, expr.location),
             space=value_type.space,
         )
         img2col_op.verify()
@@ -3709,27 +3733,27 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
             op = NnImg2col1dOp(
                 input_value,
                 result_type,
-                kw=params["kw"],
-                sw=params["sw"],
-                dw=params["dw"],
-                pl=params["pl"],
-                pr=params["pr"],
+                kw=_const_i32(params["kw"], ctx, expr.location),
+                sw=_const_i32(params["sw"], ctx, expr.location),
+                dw=_const_i32(params["dw"], ctx, expr.location),
+                pl=_const_i32(params["pl"], ctx, expr.location),
+                pr=_const_i32(params["pr"], ctx, expr.location),
                 space=input_type.space,
             )
         elif expr.kind == "img2col2d":
             op = NnImg2col2dOp(
                 input_value,
                 result_type,
-                kh=params["kh"],
-                kw=params["kw"],
-                sh=params["sh"],
-                sw=params["sw"],
-                dh=params["dh"],
-                dw=params["dw"],
-                ph=params["ph"],
-                pw=params["pw"],
-                pl=params["pl"],
-                pr=params["pr"],
+                kh=_const_i32(params["kh"], ctx, expr.location),
+                kw=_const_i32(params["kw"], ctx, expr.location),
+                sh=_const_i32(params["sh"], ctx, expr.location),
+                sw=_const_i32(params["sw"], ctx, expr.location),
+                dh=_const_i32(params["dh"], ctx, expr.location),
+                dw=_const_i32(params["dw"], ctx, expr.location),
+                ph=_const_i32(params["ph"], ctx, expr.location),
+                pw=_const_i32(params["pw"], ctx, expr.location),
+                pl=_const_i32(params["pl"], ctx, expr.location),
+                pr=_const_i32(params["pr"], ctx, expr.location),
                 space=input_type.space,
             )
         else:

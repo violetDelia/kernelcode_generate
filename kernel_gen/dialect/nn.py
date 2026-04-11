@@ -1,7 +1,7 @@
 """NN dialect definitions.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: 大闸蟹
 
 功能说明:
 - 定义 nn dialect 的 memory type、space attribute 与逐元素/广播 op。
@@ -372,7 +372,7 @@ def _is_symbol_int_type(attr: Attribute) -> bool:
     """判断 attribute 是否为 symbol.int。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 大闸蟹
 
     功能说明:
     - 仅通过 `name` 字段判断是否为 `symbol.int` 类型，避免 nn/symbol 循环依赖。
@@ -387,6 +387,111 @@ def _is_symbol_int_type(attr: Attribute) -> bool:
     """
 
     return getattr(attr, "name", None) == "symbol.int"
+
+
+def _is_int_or_symbol_type(attr: Attribute) -> bool:
+    """判断类型是否为整数或 symbol.int。
+
+    创建者: 大闸蟹
+    最后一次更改: 大闸蟹
+
+    功能说明:
+    - 允许任意位宽的 IntegerType。
+    - 允许 symbol.int，复用 `_is_symbol_int_type` 规避循环依赖。
+
+    使用示例:
+    - _is_int_or_symbol_type(i32)
+    - _is_int_or_symbol_type(SymbolValueType.from_expr("K"))
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    return _is_symbol_int_type(attr) or isinstance(attr, IntegerType)
+
+
+def _static_int_from_operand(operand: SSAValue) -> int | None:
+    """尝试从 operand 提取静态整数值。
+
+    创建者: 大闸蟹
+    最后一次更改: 大闸蟹
+
+    功能说明:
+    - 支持 `arith.constant`/`symbol.const` 以及单层 `builtin.unrealized_conversion_cast`。
+    - 无法解析时返回 None，交由上层决定是否跳过数值合同校验。
+
+    使用示例:
+    - value = _static_int_from_operand(op.kw)
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    owner = operand.owner
+    if owner is None:
+        return None
+    owner_name = getattr(owner, "name", None)
+    if owner_name == "arith.constant":
+        value_attr = owner.attributes.get("value")
+        if isinstance(value_attr, IntegerAttr):
+            return int(value_attr.value.data)
+        if isinstance(value_attr, IntAttr):
+            return int(value_attr.data)
+        return None
+    if owner_name == "symbol.const":
+        value_attr = owner.attributes.get("value")
+        if isinstance(value_attr, IntAttr):
+            return int(value_attr.data)
+        return None
+    if owner_name == "builtin.unrealized_conversion_cast":
+        if owner.operands:
+            return _static_int_from_operand(owner.operands[0])
+    return None
+
+
+def _verify_img2col_param_operands(
+    operands: Sequence[SSAValue],
+    *,
+    allow_zero: bool,
+    type_error_phrase: str,
+    value_error_phrase: str,
+) -> list[int | None]:
+    """校验 img2col 参数 operand 类型并提取静态值。
+
+    创建者: 大闸蟹
+    最后一次更改: 大闸蟹
+
+    功能说明:
+    - 要求每个 operand 为 IntegerType 或 symbol.int。
+    - 若可解析出静态整数值，则校验正数/非负数约束。
+    - 解析失败则返回 None，供上层决定是否跳过形状合同校验。
+
+    使用示例:
+    - kw, sw = _verify_img2col_param_operands([op.kw, op.sw], allow_zero=False, type_error_phrase="kw-sw-must-be-int-or-symbol", value_error_phrase="kw-sw-must-be-positive")
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    values: list[int | None] = []
+    for operand in operands:
+        if not _is_int_or_symbol_type(operand.type):
+            _raise_verify_error(type_error_phrase)
+        static_value = _static_int_from_operand(operand)
+        if static_value is not None:
+            if allow_zero:
+                if static_value < 0:
+                    _raise_verify_error(value_error_phrase)
+            elif static_value <= 0:
+                _raise_verify_error(value_error_phrase)
+        values.append(static_value)
+    return values
 
 
 def _resolve_add_dtype_key(attr: Attribute) -> str | None:
@@ -1955,13 +2060,13 @@ class NnImg2col1dOp(IRDLOperation):
     """nn.img2col1d。
 
     创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 大闸蟹
 
     功能说明:
     - 定义一维 img2col 方言 op 与 verifier 约束。
 
     使用示例:
-    - NnImg2col1dOp(inp, result_type, kw=3, sw=1, dw=1, pl=1, pr=1, space=NnMemorySpaceAttr.from_name("global"))
+    - NnImg2col1dOp(inp, result_type, kw_value, sw_value, dw_value, pl_value, pr_value, space=NnMemorySpaceAttr.from_name("global"))
 
     关联文件:
     - spec: spec/dialect/nn.md
@@ -1973,34 +2078,34 @@ class NnImg2col1dOp(IRDLOperation):
 
     input = operand_def(NnMemoryType)
     result = result_def(NnMemoryType)
-    kw = attr_def(IntegerAttr)
-    sw = attr_def(IntegerAttr)
-    dw = attr_def(IntegerAttr)
-    pl = attr_def(IntegerAttr)
-    pr = attr_def(IntegerAttr)
+    kw = operand_def(Attribute)
+    sw = operand_def(Attribute)
+    dw = operand_def(Attribute)
+    pl = operand_def(Attribute)
+    pr = operand_def(Attribute)
     space = attr_def(NnMemorySpaceAttr)
 
     def __init__(
         self,
         input_value: SSAValue | Operation,
         result_type: NnMemoryType,
-        kw: int | IntegerAttr | IntAttr,
-        sw: int | IntegerAttr | IntAttr,
-        dw: int | IntegerAttr | IntAttr,
-        pl: int | IntegerAttr | IntAttr,
-        pr: int | IntegerAttr | IntAttr,
+        kw: SSAValue | Operation,
+        sw: SSAValue | Operation,
+        dw: SSAValue | Operation,
+        pl: SSAValue | Operation,
+        pr: SSAValue | Operation,
         space: NnMemorySpaceAttr,
     ) -> None:
         """初始化 img2col1d op。
 
         创建者: jcc你莫辜负
-        最后一次更改: 金铲铲大作战
+        最后一次更改: 大闸蟹
 
         功能说明:
-        - 绑定输入 operand、结果类型、窗口属性与 space 属性。
+        - 绑定输入 operand、结果类型、窗口参数 operand 与 space 属性。
 
         使用示例:
-        - NnImg2col1dOp(inp, result_type, kw=3, sw=1, dw=1, pl=1, pr=1, space=NnMemorySpaceAttr.from_name("global"))
+        - NnImg2col1dOp(inp, result_type, kw_value, sw_value, dw_value, pl_value, pr_value, space=NnMemorySpaceAttr.from_name("global"))
 
         关联文件:
         - spec: spec/dialect/nn.md
@@ -2009,26 +2114,19 @@ class NnImg2col1dOp(IRDLOperation):
         """
 
         super().__init__(
-            operands=[input_value],
+            operands=[input_value, kw, sw, dw, pl, pr],
             result_types=[result_type],
-            attributes={
-                "kw": _normalize_i64_attr(kw, "kw"),
-                "sw": _normalize_i64_attr(sw, "sw"),
-                "dw": _normalize_i64_attr(dw, "dw"),
-                "pl": _normalize_i64_attr(pl, "pl"),
-                "pr": _normalize_i64_attr(pr, "pr"),
-                "space": space,
-            },
+            attributes={"space": space},
         )
 
     def verify_(self) -> None:
         """校验 nn.img2col1d。
 
         创建者: jcc你莫辜负
-        最后一次更改: jcc你莫辜负
+        最后一次更改: 大闸蟹
 
         功能说明:
-        - 校验 operand rank、属性合法性、result rank/type/space 与合同约束。
+        - 校验 operand rank、窗口参数 operand 合法性、result rank/type/space 与合同约束。
 
         使用示例:
         - NnImg2col1dOp(...).verify_()
@@ -2053,15 +2151,17 @@ class NnImg2col1dOp(IRDLOperation):
         if len(result_type.shape.data) != 4:
             _raise_verify_error("result-rank-must-be-4")
 
-        kw_value, sw_value, dw_value = _verify_i64_attr_group(
+        kw_value, sw_value, dw_value = _verify_img2col_param_operands(
             [self.kw, self.sw, self.dw],
             allow_zero=False,
-            error_phrase="kw-sw-dw-must-be-positive",
+            type_error_phrase="kw-sw-dw-must-be-int-or-symbol",
+            value_error_phrase="kw-sw-dw-must-be-positive",
         )
-        pl_value, pr_value = _verify_i64_attr_group(
+        pl_value, pr_value = _verify_img2col_param_operands(
             [self.pl, self.pr],
             allow_zero=True,
-            error_phrase="pl-pr-must-be-non-negative",
+            type_error_phrase="pl-pr-must-be-int-or-symbol",
+            value_error_phrase="pl-pr-must-be-non-negative",
         )
 
         self.space.verify()
@@ -2075,6 +2175,8 @@ class NnImg2col1dOp(IRDLOperation):
         input_dims = _collect_int_dims(input_type.shape.data)
         result_dims = _collect_int_dims(result_type.shape.data)
         if input_dims is None or result_dims is None:
+            return
+        if any(value is None for value in (kw_value, sw_value, dw_value, pl_value, pr_value)):
             return
 
         n_dim, c_dim, w_dim = input_dims
@@ -2099,13 +2201,13 @@ class NnImg2col2dOp(IRDLOperation):
     """nn.img2col2d。
 
     创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 大闸蟹
 
     功能说明:
     - 定义二维 img2col 方言 op 与 verifier 约束。
 
     使用示例:
-    - NnImg2col2dOp(inp, result_type, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr=1, space=NnMemorySpaceAttr.from_name("global"))
+    - NnImg2col2dOp(inp, result_type, kh_value, kw_value, sh_value, sw_value, dh_value, dw_value, ph_value, pw_value, pl_value, pr_value, space=NnMemorySpaceAttr.from_name("global"))
 
     关联文件:
     - spec: spec/dialect/nn.md
@@ -2117,44 +2219,44 @@ class NnImg2col2dOp(IRDLOperation):
 
     input = operand_def(NnMemoryType)
     result = result_def(NnMemoryType)
-    kh = attr_def(IntegerAttr)
-    kw = attr_def(IntegerAttr)
-    sh = attr_def(IntegerAttr)
-    sw = attr_def(IntegerAttr)
-    dh = attr_def(IntegerAttr)
-    dw = attr_def(IntegerAttr)
-    ph = attr_def(IntegerAttr)
-    pw = attr_def(IntegerAttr)
-    pl = attr_def(IntegerAttr)
-    pr = attr_def(IntegerAttr)
+    kh = operand_def(Attribute)
+    kw = operand_def(Attribute)
+    sh = operand_def(Attribute)
+    sw = operand_def(Attribute)
+    dh = operand_def(Attribute)
+    dw = operand_def(Attribute)
+    ph = operand_def(Attribute)
+    pw = operand_def(Attribute)
+    pl = operand_def(Attribute)
+    pr = operand_def(Attribute)
     space = attr_def(NnMemorySpaceAttr)
 
     def __init__(
         self,
         input_value: SSAValue | Operation,
         result_type: NnMemoryType,
-        kh: int | IntegerAttr | IntAttr,
-        kw: int | IntegerAttr | IntAttr,
-        sh: int | IntegerAttr | IntAttr,
-        sw: int | IntegerAttr | IntAttr,
-        dh: int | IntegerAttr | IntAttr,
-        dw: int | IntegerAttr | IntAttr,
-        ph: int | IntegerAttr | IntAttr,
-        pw: int | IntegerAttr | IntAttr,
-        pl: int | IntegerAttr | IntAttr,
-        pr: int | IntegerAttr | IntAttr,
+        kh: SSAValue | Operation,
+        kw: SSAValue | Operation,
+        sh: SSAValue | Operation,
+        sw: SSAValue | Operation,
+        dh: SSAValue | Operation,
+        dw: SSAValue | Operation,
+        ph: SSAValue | Operation,
+        pw: SSAValue | Operation,
+        pl: SSAValue | Operation,
+        pr: SSAValue | Operation,
         space: NnMemorySpaceAttr,
     ) -> None:
         """初始化 img2col2d op。
 
         创建者: jcc你莫辜负
-        最后一次更改: 金铲铲大作战
+        最后一次更改: 大闸蟹
 
         功能说明:
-        - 绑定输入 operand、结果类型、窗口属性与 space 属性。
+        - 绑定输入 operand、结果类型、窗口参数 operand 与 space 属性。
 
         使用示例:
-        - NnImg2col2dOp(inp, result_type, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr=1, space=NnMemorySpaceAttr.from_name("global"))
+        - NnImg2col2dOp(inp, result_type, kh_value, kw_value, sh_value, sw_value, dh_value, dw_value, ph_value, pw_value, pl_value, pr_value, space=NnMemorySpaceAttr.from_name("global"))
 
         关联文件:
         - spec: spec/dialect/nn.md
@@ -2163,31 +2265,19 @@ class NnImg2col2dOp(IRDLOperation):
         """
 
         super().__init__(
-            operands=[input_value],
+            operands=[input_value, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr],
             result_types=[result_type],
-            attributes={
-                "kh": _normalize_i64_attr(kh, "kh"),
-                "kw": _normalize_i64_attr(kw, "kw"),
-                "sh": _normalize_i64_attr(sh, "sh"),
-                "sw": _normalize_i64_attr(sw, "sw"),
-                "dh": _normalize_i64_attr(dh, "dh"),
-                "dw": _normalize_i64_attr(dw, "dw"),
-                "ph": _normalize_i64_attr(ph, "ph"),
-                "pw": _normalize_i64_attr(pw, "pw"),
-                "pl": _normalize_i64_attr(pl, "pl"),
-                "pr": _normalize_i64_attr(pr, "pr"),
-                "space": space,
-            },
+            attributes={"space": space},
         )
 
     def verify_(self) -> None:
         """校验 nn.img2col2d。
 
         创建者: jcc你莫辜负
-        最后一次更改: jcc你莫辜负
+        最后一次更改: 大闸蟹
 
         功能说明:
-        - 校验 operand rank、属性合法性、result rank/type/space 与合同约束。
+        - 校验 operand rank、窗口参数 operand 合法性、result rank/type/space 与合同约束。
 
         使用示例:
         - NnImg2col2dOp(...).verify_()
@@ -2212,15 +2302,17 @@ class NnImg2col2dOp(IRDLOperation):
         if len(result_type.shape.data) != 6:
             _raise_verify_error("result-rank-must-be-6")
 
-        kh_value, kw_value, sh_value, sw_value, dh_value, dw_value = _verify_i64_attr_group(
+        kh_value, kw_value, sh_value, sw_value, dh_value, dw_value = _verify_img2col_param_operands(
             [self.kh, self.kw, self.sh, self.sw, self.dh, self.dw],
             allow_zero=False,
-            error_phrase="kh-kw-sh-sw-dh-dw-must-be-positive",
+            type_error_phrase="kh-kw-sh-sw-dh-dw-must-be-int-or-symbol",
+            value_error_phrase="kh-kw-sh-sw-dh-dw-must-be-positive",
         )
-        ph_value, pw_value, pl_value, pr_value = _verify_i64_attr_group(
+        ph_value, pw_value, pl_value, pr_value = _verify_img2col_param_operands(
             [self.ph, self.pw, self.pl, self.pr],
             allow_zero=True,
-            error_phrase="ph-pw-pl-pr-must-be-non-negative",
+            type_error_phrase="ph-pw-pl-pr-must-be-int-or-symbol",
+            value_error_phrase="ph-pw-pl-pr-must-be-non-negative",
         )
 
         self.space.verify()
@@ -2234,6 +2326,22 @@ class NnImg2col2dOp(IRDLOperation):
         input_dims = _collect_int_dims(input_type.shape.data)
         result_dims = _collect_int_dims(result_type.shape.data)
         if input_dims is None or result_dims is None:
+            return
+        if any(
+            value is None
+            for value in (
+                kh_value,
+                kw_value,
+                sh_value,
+                sw_value,
+                dh_value,
+                dw_value,
+                ph_value,
+                pw_value,
+                pl_value,
+                pr_value,
+            )
+        ):
             return
 
         n_dim, c_dim, h_dim, w_dim = input_dims

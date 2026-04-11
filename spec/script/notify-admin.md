@@ -5,7 +5,7 @@
 - 定义 `script/notify-admin.sh` 的行为约束。
 - 用于按固定间隔向管理员发送会话消息，并在同轮按名单顺序提醒符合条件的 `busy` 执行人。
 - 支持按名单配置一次性初始化管理员角色，并支持通过环境变量固定初始化分支，便于复现测试。
-- 定时频率、发送身份、名单路径、日志路径和提醒文案均在脚本顶部配置区维护。
+- 定时频率、发送身份、名单路径和提醒文案均在脚本顶部配置区维护。
 
 ## 文档信息
 
@@ -69,16 +69,16 @@ NOTIFY_ADMIN_RANDOM_ROLL=0 ./script/notify-admin.sh
 注意事项：
 
 - 默认 `INTERVAL_SECONDS=1800`。
-- 默认发送身份与路径为：`FROM_NAME="榕"`、`TO_NAME="神秘人"`、`AGENTS_LIST_FILE="agents/codex-multi-agents/agents-lists.md"`、`LOG_FILE="agents/codex-multi-agents/log/talk.log"`。
+- 默认发送身份与路径为：`FROM_NAME="榕"`、`TO_NAME="神秘人"`、`AGENTS_LIST_FILE="agents/codex-multi-agents/agents-lists.md"`。
 - 默认提醒文案分为两段：`ADMIN_MESSAGE="请推进“正在执行的任务”并分发“任务列表”中可分发任务。"`，`BUSY_MESSAGE="继续当前任务，完成后使用 -next 并回报管理员。"`。
 - 初始化会调用 `codex-multi-agents-list.sh -file <AGENTS_LIST_FILE> -init -name "$TO_NAME"`。
-- 循环模式发送会调用 `codex-multi-agents-tmux.sh -talk`，且发送顺序固定为：管理员提醒在前，`busy` 提醒在后。
+- 循环模式发送会调用 `codex-multi-agents-tmux.sh -talk`，且发送顺序固定为：管理员提醒在前，`busy` 提醒在后；对话日志由 tmux 脚本自动写入 `$(dirname <AGENTS_LIST_FILE>)/log/talk.log`。
 - `busy` 提醒目标按 `AGENTS_LIST_FILE` 中表格出现顺序遍历，只向 `状态=busy` 的条目发送，并跳过以下条目：`姓名` 为空、`姓名` 等于 `TO_NAME`、`介绍` 包含 `管理员` 或 `架构师`、`职责` 包含 `管理员` 或 `架构`。
 - 若 `AGENTS_LIST_FILE` 中不存在同时包含 `姓名` 与 `状态` 的 Markdown 表格，或本轮不存在符合条件的 `busy` 条目，则本轮只发送管理员提醒。
 - 下游 `tmux` 调用返回非零时，当前脚本不会生成独立的 `ERROR(...)` 短语，也不会因该返回码中断本轮剩余 `busy` 提醒；只要后续 `sleep` 成功，循环仍会继续进入下一轮。
 - `sleep` 调用失败时，脚本输出稳定短语 `ERROR(5): sleep failed` 并退出。
 - `INTERVAL_SECONDS` 必须大于 `0`。
-- 循环通知模式下，`FROM_NAME`、`TO_NAME`、`LOG_FILE`、`ADMIN_MESSAGE`、`BUSY_MESSAGE` 均不能为空。
+- 循环通知模式下，`FROM_NAME`、`TO_NAME`、`ADMIN_MESSAGE`、`BUSY_MESSAGE` 均不能为空。
 - 初始化模式下，`TO_NAME` 与 `AGENTS_LIST_FILE` 均不能为空。
 - `NOTIFY_ADMIN_RANDOM_ROLL` 仅允许 `0`、`1`、`2`；其他值必须报错 `ERROR(3): NOTIFY_ADMIN_RANDOM_ROLL must be 0, 1, or 2`。
 

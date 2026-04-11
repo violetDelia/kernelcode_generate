@@ -20,8 +20,16 @@
 from __future__ import annotations
 
 import sympy as sp
-from xdsl.dialects.builtin import BFloat16Type, Float16Type, Float32Type, Float64Type, IntAttr, IntegerAttr
-from xdsl.ir import Operation
+from xdsl.dialects.builtin import (
+    BFloat16Type,
+    Float16Type,
+    Float32Type,
+    Float64Type,
+    IntAttr,
+    IntegerAttr,
+    IntegerType,
+)
+from xdsl.ir import Attribute, Operation, SSAValue
 
 from kernel_gen.analysis.analysis import (
     AnalysisConfig,
@@ -79,6 +87,132 @@ def _get_i64_attr(op: Operation, name: str) -> int:
     if isinstance(attr, IntegerAttr):
         return int(attr.value.data)
     raise AnalysisError(f"{op.name} {name} must be integer")
+
+
+def _is_symbol_int_type(attr: Attribute) -> bool:
+    """判断类型是否为 symbol.int。
+
+    创建者: 大闸蟹
+    最后修改人: 大闸蟹
+
+    功能说明:
+    - 仅通过 name 字段判断是否为 symbol.int，避免 analysis/symbol 循环依赖。
+
+    使用示例:
+    - _is_symbol_int_type(SymbolValueType.from_expr("K"))
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/compute/nn.py
+    """
+
+    return getattr(attr, "name", None) == "symbol.int"
+
+
+def _is_int_or_symbol_type(attr: Attribute) -> bool:
+    """判断类型是否为整数或 symbol.int。
+
+    创建者: 大闸蟹
+    最后修改人: 大闸蟹
+
+    功能说明:
+    - 允许任意位宽的 IntegerType。
+    - 允许 symbol.int。
+
+    使用示例:
+    - _is_int_or_symbol_type(i32)
+    - _is_int_or_symbol_type(SymbolValueType.from_expr("K"))
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/compute/nn.py
+    """
+
+    return _is_symbol_int_type(attr) or isinstance(attr, IntegerType)
+
+
+def _static_int_from_operand(operand: SSAValue) -> int | None:
+    """尝试从 operand 提取静态整数值。
+
+    创建者: 大闸蟹
+    最后修改人: 大闸蟹
+
+    功能说明:
+    - 支持 `arith.constant`/`symbol.const` 以及单层 `builtin.unrealized_conversion_cast`。
+    - 无法解析时返回 None。
+
+    使用示例:
+    - value = _static_int_from_operand(op.operands[1])
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/compute/nn.py
+    """
+
+    owner = operand.owner
+    if owner is None:
+        return None
+    owner_name = getattr(owner, "name", None)
+    if owner_name == "arith.constant":
+        value_attr = owner.attributes.get("value")
+        if isinstance(value_attr, IntegerAttr):
+            return int(value_attr.value.data)
+        if isinstance(value_attr, IntAttr):
+            return int(value_attr.data)
+        return None
+    if owner_name == "symbol.const":
+        value_attr = owner.attributes.get("value")
+        if isinstance(value_attr, IntAttr):
+            return int(value_attr.data)
+        return None
+    if owner_name == "builtin.unrealized_conversion_cast":
+        if owner.operands:
+            return _static_int_from_operand(owner.operands[0])
+    return None
+
+
+def _verify_img2col_param_operands(
+    operands: Sequence[SSAValue],
+    *,
+    allow_zero: bool,
+    type_error_phrase: str,
+    value_error_phrase: str,
+) -> list[int | None]:
+    """校验 img2col 参数 operand 类型并提取静态值。
+
+    创建者: 大闸蟹
+    最后修改人: 大闸蟹
+
+    功能说明:
+    - 要求每个 operand 为 IntegerType 或 symbol.int。
+    - 若可解析出静态整数值，则校验正数/非负数约束。
+    - 解析失败则返回 None，供上层决定是否跳过形状合同校验。
+
+    使用示例:
+    - values = _verify_img2col_param_operands(op.operands[1:], allow_zero=False, type_error_phrase="nn.img2col params must be integer or symbol", value_error_phrase="nn.img2col params must be positive")
+
+    关联文件:
+    - spec: spec/analysis/analysis_engine.md
+    - test: test/analysis/test_analysis.py
+    - 功能实现: kernel_gen/analysis/compute/nn.py
+    """
+
+    values: list[int | None] = []
+    for operand in operands:
+        if not _is_int_or_symbol_type(operand.type):
+            raise AnalysisError(type_error_phrase)
+        static_value = _static_int_from_operand(operand)
+        if static_value is not None:
+            if allow_zero:
+                if static_value < 0:
+                    raise AnalysisError(value_error_phrase)
+            elif static_value <= 0:
+                raise AnalysisError(value_error_phrase)
+        values.append(static_value)
+    return values
 
 
 def _img2col_output_dim(
@@ -362,9 +496,11 @@ def analyze_nn_img2col_op(op: Operation, config: AnalysisConfig) -> _AnalyzedOp 
 
     if op.name not in _NN_IMG2COL_OPS:
         return None
-    if len(op.operands) != 1 or len(op.results) != 1:
-        raise AnalysisError("nn.img2col must have 1 operand and 1 result")
+    expected_operands = 6 if op.name == "nn.img2col1d" else 11
+    if len(op.operands) != expected_operands or len(op.results) != 1:
+        raise AnalysisError(f"{op.name} must have {expected_operands} operands and 1 result")
     operand = op.operands[0]
+    param_operands = op.operands[1:]
     result = op.results[0]
     if not isinstance(operand.type, NnMemoryType):
         raise AnalysisError("nn.img2col operand must be nn.memory")
@@ -393,51 +529,72 @@ def analyze_nn_img2col_op(op: Operation, config: AnalysisConfig) -> _AnalyzedOp 
             raise AnalysisError("nn.img2col1d requires rank-3 input")
         if len(result_dims) != 4:
             raise AnalysisError("nn.img2col1d requires rank-4 result")
-        kw = _get_i64_attr(op, "kw")
-        sw = _get_i64_attr(op, "sw")
-        dw = _get_i64_attr(op, "dw")
-        pl = _get_i64_attr(op, "pl")
-        pr = _get_i64_attr(op, "pr")
-        if kw <= 0 or sw <= 0 or dw <= 0:
-            raise AnalysisError("nn.img2col1d kw/sw/dw must be positive")
-        if pl < 0 or pr < 0:
-            raise AnalysisError("nn.img2col1d pl/pr must be non-negative")
+        if len(param_operands) != 5:
+            raise AnalysisError("nn.img2col1d must have 5 param operands")
+        kw, sw, dw = _verify_img2col_param_operands(
+            param_operands[:3],
+            allow_zero=False,
+            type_error_phrase="nn.img2col1d kw/sw/dw must be integer or symbol",
+            value_error_phrase="nn.img2col1d kw/sw/dw must be positive",
+        )
+        pl, pr = _verify_img2col_param_operands(
+            param_operands[3:],
+            allow_zero=True,
+            type_error_phrase="nn.img2col1d pl/pr must be integer or symbol",
+            value_error_phrase="nn.img2col1d pl/pr must be non-negative",
+        )
         n_dim, c_dim, w_dim = input_dims
-        w_out = _img2col_output_dim(w_dim, kw, sw, dw, pl, pr)
-        if isinstance(w_out, sp.Integer) and int(w_out) <= 0:
-            raise AnalysisError("nn.img2col1d output shape invalid")
-        expected_shape = [n_dim, c_dim, sp.Integer(kw), w_out]
-        if result_dims != expected_shape:
-            raise AnalysisError("nn.img2col1d output shape mismatch")
+        if all(value is not None for value in (kw, sw, dw, pl, pr)):
+            w_out = _img2col_output_dim(w_dim, kw, sw, dw, pl, pr)
+            if isinstance(w_out, sp.Integer) and int(w_out) <= 0:
+                raise AnalysisError("nn.img2col1d output shape invalid")
+            expected_shape = [n_dim, c_dim, sp.Integer(kw), w_out]
+            if result_dims != expected_shape:
+                raise AnalysisError("nn.img2col1d output shape mismatch")
     else:
         if len(input_dims) != 4:
             raise AnalysisError("nn.img2col2d requires rank-4 input")
         if len(result_dims) != 6:
             raise AnalysisError("nn.img2col2d requires rank-6 result")
-        kh = _get_i64_attr(op, "kh")
-        kw = _get_i64_attr(op, "kw")
-        sh = _get_i64_attr(op, "sh")
-        sw = _get_i64_attr(op, "sw")
-        dh = _get_i64_attr(op, "dh")
-        dw = _get_i64_attr(op, "dw")
-        ph = _get_i64_attr(op, "ph")
-        pw = _get_i64_attr(op, "pw")
-        pl = _get_i64_attr(op, "pl")
-        pr = _get_i64_attr(op, "pr")
-        if kh <= 0 or kw <= 0 or sh <= 0 or sw <= 0 or dh <= 0 or dw <= 0:
-            raise AnalysisError("nn.img2col2d kh/kw/sh/sw/dh/dw must be positive")
-        if ph < 0 or pw < 0 or pl < 0 or pr < 0:
-            raise AnalysisError("nn.img2col2d ph/pw/pl/pr must be non-negative")
+        if len(param_operands) != 10:
+            raise AnalysisError("nn.img2col2d must have 10 param operands")
+        kh, kw, sh, sw, dh, dw = _verify_img2col_param_operands(
+            param_operands[:6],
+            allow_zero=False,
+            type_error_phrase="nn.img2col2d kh/kw/sh/sw/dh/dw must be integer or symbol",
+            value_error_phrase="nn.img2col2d kh/kw/sh/sw/dh/dw must be positive",
+        )
+        ph, pw, pl, pr = _verify_img2col_param_operands(
+            param_operands[6:],
+            allow_zero=True,
+            type_error_phrase="nn.img2col2d ph/pw/pl/pr must be integer or symbol",
+            value_error_phrase="nn.img2col2d ph/pw/pl/pr must be non-negative",
+        )
         n_dim, c_dim, h_dim, w_dim = input_dims
-        h_out = _img2col_output_dim(h_dim, kh, sh, dh, ph, pw)
-        w_out = _img2col_output_dim(w_dim, kw, sw, dw, pl, pr)
-        if isinstance(h_out, sp.Integer) and int(h_out) <= 0:
-            raise AnalysisError("nn.img2col2d output shape invalid")
-        if isinstance(w_out, sp.Integer) and int(w_out) <= 0:
-            raise AnalysisError("nn.img2col2d output shape invalid")
-        expected_shape = [n_dim, c_dim, sp.Integer(kh), sp.Integer(kw), h_out, w_out]
-        if result_dims != expected_shape:
-            raise AnalysisError("nn.img2col2d output shape mismatch")
+        if all(
+            value is not None
+            for value in (
+                kh,
+                kw,
+                sh,
+                sw,
+                dh,
+                dw,
+                ph,
+                pw,
+                pl,
+                pr,
+            )
+        ):
+            h_out = _img2col_output_dim(h_dim, kh, sh, dh, ph, pw)
+            w_out = _img2col_output_dim(w_dim, kw, sw, dw, pl, pr)
+            if isinstance(h_out, sp.Integer) and int(h_out) <= 0:
+                raise AnalysisError("nn.img2col2d output shape invalid")
+            if isinstance(w_out, sp.Integer) and int(w_out) <= 0:
+                raise AnalysisError("nn.img2col2d output shape invalid")
+            expected_shape = [n_dim, c_dim, sp.Integer(kh), sp.Integer(kw), h_out, w_out]
+            if result_dims != expected_shape:
+                raise AnalysisError("nn.img2col2d output shape mismatch")
 
     compute_items: list[ComputeItem] = []
     return _AnalyzedOp(

@@ -7,7 +7,7 @@
 #
 # 功能说明:
 # - 按脚本顶部配置定时向管理员发送会话消息。
-# - 定时频率、管理员信息、日志路径和消息内容都直接维护在本文件顶部。
+# - 定时频率、管理员信息和消息内容都直接维护在本文件顶部。
 # - 循环模式下按 `1/3` 概率补做一次管理员初始化，降低会话缺失导致的通知失败概率。
 # - 每轮会先提醒管理员推进“正在执行的任务”并分发“任务列表”中可分发任务。
 # - 同轮会对 `agents-lists.md` 中状态为 `busy` 的执行人逐一发送提醒（忽略管理员与架构师账号）。
@@ -46,9 +46,6 @@ INTERVAL_SECONDS=1800
 FROM_NAME="榕"
 TO_NAME="神秘人"
 AGENTS_LIST_FILE="agents/codex-multi-agents/agents-lists.md"
-
-# 支持相对路径；相对路径基于仓库根目录。
-LOG_FILE="agents/codex-multi-agents/log/talk.log"
 
 # 管理员每轮提醒消息（先发送）。
 read -r -d '' ADMIN_MESSAGE <<'EOF' || true
@@ -121,13 +118,10 @@ validate_loop_config() {
   [[ "$INTERVAL_SECONDS" =~ ^[0-9]+$ ]] || err "$RC_DATA" "INTERVAL_SECONDS must be a positive integer"
   [[ "$INTERVAL_SECONDS" -gt 0 ]] || err "$RC_DATA" "INTERVAL_SECONDS must be greater than 0"
   [[ -n "$FROM_NAME" ]] || err "$RC_DATA" "FROM_NAME is required"
-  [[ -n "$LOG_FILE" ]] || err "$RC_DATA" "LOG_FILE is required"
   [[ -n "$ADMIN_MESSAGE" ]] || err "$RC_DATA" "ADMIN_MESSAGE is required"
   [[ -n "$BUSY_MESSAGE" ]] || err "$RC_DATA" "BUSY_MESSAGE is required"
 
   [[ -x "$TMUX_SCRIPT" ]] || err "$RC_FILE" "tmux script is not executable: $TMUX_SCRIPT"
-
-  mkdir -p "$(dirname "$(log_path "$LOG_FILE")")" || err "$RC_FILE" "failed to create log directory"
 }
 
 cleanup() {
@@ -272,8 +266,7 @@ send_talk() {
     -from "$from" \
     -to "$to" \
     -agents-list "$(log_path "$AGENTS_LIST_FILE")" \
-    -message "$message" \
-    -log "$(log_path "$LOG_FILE")"
+    -message "$message"
 }
 
 send_round() {

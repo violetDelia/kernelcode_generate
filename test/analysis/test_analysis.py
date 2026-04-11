@@ -1,7 +1,7 @@
 """Analysis tests.
 
 创建者: 金铲铲大作战
-最后修改人: 朽木露琪亚
+最后修改人: 大闸蟹
 
 功能说明:
 - 覆盖逐元素算术/比较、unary/reduce、broadcast/transpose、matmul 与函数级聚合统计。
@@ -1789,7 +1789,7 @@ def test_analysis_reduce_vector_compute_kind(reduce_cls: type[IRDLOperation]) ->
 
 # AN-025
 # 创建者: 朽木露琪亚
-# 最后修改人: 朽木露琪亚
+# 最后修改人: 大闸蟹
 # 最近一次运行测试时间: 2026-04-05 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-05 00:00:00 +0800
 # 测试目的: 验证 nn.softmax 同时产生 VECTOR/MATH compute 与对应读写量。
@@ -1842,7 +1842,12 @@ def test_analysis_img2col1d_direct_memory_only() -> None:
     result_type = _make_memory_type([IntAttr(1), IntAttr(2), IntAttr(3), IntAttr(8)], f32, "global")
     space = _make_space("global")
     block = Block(arg_types=[input_type])
-    img2col_op = NnImg2col1dOp(block.args[0], result_type, kw=3, sw=1, dw=1, pl=1, pr=1, space=space)
+    kw = arith.ConstantOp(IntegerAttr(3, i32)).result
+    sw = arith.ConstantOp(IntegerAttr(1, i32)).result
+    dw = arith.ConstantOp(IntegerAttr(1, i32)).result
+    pl = arith.ConstantOp(IntegerAttr(1, i32)).result
+    pr = arith.ConstantOp(IntegerAttr(1, i32)).result
+    img2col_op = NnImg2col1dOp(block.args[0], result_type, kw=kw, sw=sw, dw=dw, pl=pl, pr=pr, space=space)
 
     result = analysis(
         img2col_op,
@@ -1862,7 +1867,7 @@ def test_analysis_img2col1d_direct_memory_only() -> None:
 
 # AN-026B
 # 创建者: 金铲铲大作战
-# 最后修改人: 金铲铲大作战
+# 最后修改人: 大闸蟹
 # 最近一次运行测试时间: 2026-04-05 15:40:00 +0800
 # 最近一次运行成功时间: 2026-04-05 15:40:00 +0800
 # 测试目的: 验证 symbolic img2col1d 结果形状不匹配时必须抛 AnalysisError（compute/memory 均需拒绝）。
@@ -1883,7 +1888,12 @@ def test_analysis_img2col1d_symbolic_shape_mismatch_rejected() -> None:
     )
     space = _make_space("global")
     block = Block(arg_types=[input_type])
-    img2col_op = NnImg2col1dOp(block.args[0], result_type, kw=3, sw=1, dw=1, pl=1, pr=1, space=space)
+    kw = arith.ConstantOp(IntegerAttr(3, i32)).result
+    sw = arith.ConstantOp(IntegerAttr(1, i32)).result
+    dw = arith.ConstantOp(IntegerAttr(1, i32)).result
+    pl = arith.ConstantOp(IntegerAttr(1, i32)).result
+    pr = arith.ConstantOp(IntegerAttr(1, i32)).result
+    img2col_op = NnImg2col1dOp(block.args[0], result_type, kw=kw, sw=sw, dw=dw, pl=pl, pr=pr, space=space)
 
     with pytest.raises(AnalysisError, match="nn.img2col1d output shape mismatch"):
         analysis(
@@ -1899,7 +1909,7 @@ def test_analysis_img2col1d_symbolic_shape_mismatch_rejected() -> None:
 
 # AN-027
 # 创建者: 朽木露琪亚
-# 最后修改人: 朽木露琪亚
+# 最后修改人: 大闸蟹
 # 最近一次运行测试时间: 2026-04-05 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-05 00:00:00 +0800
 # 测试目的: 验证 nn.img2col2d 不产生 compute 且读写按结构化输出 numel 统计。
@@ -1916,19 +1926,29 @@ def test_analysis_img2col2d_direct_memory_only() -> None:
     )
     space = _make_space("global")
     block = Block(arg_types=[input_type])
+    kh = arith.ConstantOp(IntegerAttr(3, i32)).result
+    kw = arith.ConstantOp(IntegerAttr(3, i32)).result
+    sh = arith.ConstantOp(IntegerAttr(1, i32)).result
+    sw = arith.ConstantOp(IntegerAttr(1, i32)).result
+    dh = arith.ConstantOp(IntegerAttr(1, i32)).result
+    dw = arith.ConstantOp(IntegerAttr(1, i32)).result
+    ph = arith.ConstantOp(IntegerAttr(1, i32)).result
+    pw = arith.ConstantOp(IntegerAttr(1, i32)).result
+    pl = arith.ConstantOp(IntegerAttr(1, i32)).result
+    pr = arith.ConstantOp(IntegerAttr(1, i32)).result
     img2col_op = NnImg2col2dOp(
         block.args[0],
         result_type,
-        kh=3,
-        kw=3,
-        sh=1,
-        sw=1,
-        dh=1,
-        dw=1,
-        ph=1,
-        pw=1,
-        pl=1,
-        pr=1,
+        kh=kh,
+        kw=kw,
+        sh=sh,
+        sw=sw,
+        dh=dh,
+        dw=dw,
+        ph=ph,
+        pw=pw,
+        pl=pl,
+        pr=pr,
         space=space,
     )
 
@@ -1950,7 +1970,7 @@ def test_analysis_img2col2d_direct_memory_only() -> None:
 
 # AN-027B
 # 创建者: 金铲铲大作战
-# 最后修改人: 金铲铲大作战
+# 最后修改人: 大闸蟹
 # 最近一次运行测试时间: 2026-04-05 15:40:00 +0800
 # 最近一次运行成功时间: 2026-04-05 15:40:00 +0800
 # 测试目的: 验证 symbolic img2col2d 结果形状不匹配时必须抛 AnalysisError（compute/memory 均需拒绝）。
@@ -1978,19 +1998,29 @@ def test_analysis_img2col2d_symbolic_shape_mismatch_rejected() -> None:
     )
     space = _make_space("global")
     block = Block(arg_types=[input_type])
+    kh = arith.ConstantOp(IntegerAttr(3, i32)).result
+    kw = arith.ConstantOp(IntegerAttr(3, i32)).result
+    sh = arith.ConstantOp(IntegerAttr(1, i32)).result
+    sw = arith.ConstantOp(IntegerAttr(1, i32)).result
+    dh = arith.ConstantOp(IntegerAttr(1, i32)).result
+    dw = arith.ConstantOp(IntegerAttr(1, i32)).result
+    ph = arith.ConstantOp(IntegerAttr(1, i32)).result
+    pw = arith.ConstantOp(IntegerAttr(1, i32)).result
+    pl = arith.ConstantOp(IntegerAttr(1, i32)).result
+    pr = arith.ConstantOp(IntegerAttr(1, i32)).result
     img2col_op = NnImg2col2dOp(
         block.args[0],
         result_type,
-        kh=3,
-        kw=3,
-        sh=1,
-        sw=1,
-        dh=1,
-        dw=1,
-        ph=1,
-        pw=1,
-        pl=1,
-        pr=1,
+        kh=kh,
+        kw=kw,
+        sh=sh,
+        sw=sw,
+        dh=dh,
+        dw=dw,
+        ph=ph,
+        pw=pw,
+        pl=pl,
+        pr=pr,
         space=space,
     )
 

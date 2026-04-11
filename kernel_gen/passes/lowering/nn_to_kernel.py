@@ -689,33 +689,33 @@ def _build_kernel_op(
         return KernelSoftmaxOp(op.operands[0], out_value, axis_attr, space)
 
     if op.name == "nn.img2col1d":
-        _ensure_operand_count(op, 1)
+        _ensure_operand_count(op, 6)
         return KernelImg2col1dOp(
             op.operands[0],
             out_value,
-            k=op.attributes.get("kw"),
-            s=op.attributes.get("sw"),
-            d=op.attributes.get("dw"),
-            p_left=op.attributes.get("pl"),
-            p_right=op.attributes.get("pr"),
+            op.operands[1],
+            op.operands[2],
+            op.operands[3],
+            op.operands[4],
+            op.operands[5],
             space=space,
         )
 
     if op.name == "nn.img2col2d":
-        _ensure_operand_count(op, 1)
+        _ensure_operand_count(op, 11)
         return KernelImg2col2dOp(
             op.operands[0],
             out_value,
-            kh=op.attributes.get("kh"),
-            kw=op.attributes.get("kw"),
-            sh=op.attributes.get("sh"),
-            sw=op.attributes.get("sw"),
-            dh=op.attributes.get("dh"),
-            dw=op.attributes.get("dw"),
-            ph=op.attributes.get("ph"),
-            pw=op.attributes.get("pw"),
-            pl=op.attributes.get("pl"),
-            pr=op.attributes.get("pr"),
+            op.operands[1],
+            op.operands[2],
+            op.operands[3],
+            op.operands[4],
+            op.operands[5],
+            op.operands[6],
+            op.operands[7],
+            op.operands[8],
+            op.operands[9],
+            op.operands[10],
             space=space,
         )
 

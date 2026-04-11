@@ -1,7 +1,7 @@
 """kernel dialect tests.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 大闸蟹
 
 功能说明:
 - 覆盖 kernel dialect 的 verifier 约束与 memory type 复用规则。
@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from xdsl.dialects import arith
 from xdsl.dialects.builtin import (
     ArrayAttr,
     BFloat16Type,
@@ -37,7 +38,7 @@ from xdsl.dialects.builtin import (
     i32,
 )
 from xdsl.dialects.test import TestOp as _TestOp
-from xdsl.ir import Attribute
+from xdsl.ir import Attribute, SSAValue
 from xdsl.utils.exceptions import VerifyException
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -137,6 +138,27 @@ def _make_value(memory_type: NnMemoryType):
     """
 
     return _TestOp(result_types=[memory_type]).results[0]
+
+
+def _const_i32(value: int) -> SSAValue:
+    """构造 i32 常量 SSA value。
+
+    创建者: 大闸蟹
+    最后一次更改: 大闸蟹
+
+    功能说明:
+    - 生成 `arith.constant` i32 常量，供 kernel img2col 参数 operand 使用。
+
+    使用示例:
+    - k = _const_i32(3)
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel_dialect.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    return arith.ConstantOp(IntegerAttr(value, i32)).result
 
 
 # TC-KRN-001
@@ -404,16 +426,16 @@ def test_kernel_ops_no_result() -> None:
     img2col_op = KernelImg2col2dOp(
         _make_value(img2col_input_type),
         _make_value(img2col_output_type),
-        kh=3,
-        kw=3,
-        sh=1,
-        sw=1,
-        dh=1,
-        dw=1,
-        ph=0,
-        pw=0,
-        pl=0,
-        pr=0,
+        kh=_const_i32(3),
+        kw=_const_i32(3),
+        sh=_const_i32(1),
+        sw=_const_i32(1),
+        dh=_const_i32(1),
+        dw=_const_i32(1),
+        ph=_const_i32(0),
+        pw=_const_i32(0),
+        pl=_const_i32(0),
+        pr=_const_i32(0),
         space=_make_space("global"),
     )
     img2col1d_input_type = _make_memory_type(
@@ -429,11 +451,11 @@ def test_kernel_ops_no_result() -> None:
     img2col1d_op = KernelImg2col1dOp(
         _make_value(img2col1d_input_type),
         _make_value(img2col1d_output_type),
-        k=3,
-        s=1,
-        d=1,
-        p_left=0,
-        p_right=0,
+        k=_const_i32(3),
+        s=_const_i32(1),
+        d=_const_i32(1),
+        p_left=_const_i32(0),
+        p_right=_const_i32(0),
         space=_make_space("global"),
     )
     for op in (
@@ -460,7 +482,7 @@ def test_kernel_ops_no_result() -> None:
 
 # TC-KRN-011
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 大闸蟹
 # 最近一次运行测试时间: 2026-04-08 10:20:49 +0800
 # 最近一次运行成功时间: 2026-04-08 10:20:49 +0800
 # 功能说明: 验证 kernel.exp 正常路径可通过。
@@ -604,11 +626,11 @@ def test_kernel_img2col_structured_contract() -> None:
     KernelImg2col1dOp(
         _make_value(img2col1d_input_type),
         _make_value(img2col1d_output_type),
-        k=3,
-        s=1,
-        d=1,
-        p_left=0,
-        p_right=0,
+        k=_const_i32(3),
+        s=_const_i32(1),
+        d=_const_i32(1),
+        p_left=_const_i32(0),
+        p_right=_const_i32(0),
         space=_make_space("global"),
     ).verify()
 
@@ -625,23 +647,23 @@ def test_kernel_img2col_structured_contract() -> None:
     KernelImg2col2dOp(
         _make_value(img2col2d_input_type),
         _make_value(img2col2d_output_type),
-        kh=3,
-        kw=3,
-        sh=1,
-        sw=1,
-        dh=1,
-        dw=1,
-        ph=0,
-        pw=0,
-        pl=0,
-        pr=0,
+        kh=_const_i32(3),
+        kw=_const_i32(3),
+        sh=_const_i32(1),
+        sw=_const_i32(1),
+        dh=_const_i32(1),
+        dw=_const_i32(1),
+        ph=_const_i32(0),
+        pw=_const_i32(0),
+        pl=_const_i32(0),
+        pr=_const_i32(0),
         space=_make_space("global"),
     ).verify()
 
 
 # TC-KRN-018
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 大闸蟹
 # 最近一次运行测试时间: 2026-04-09 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-09 00:00:00 +0800
 # 功能说明: 验证 kernel.img2col1d/img2col2d 拒绝非法输入 rank 或 layout。
@@ -664,11 +686,11 @@ def test_kernel_img2col_input_rank_layout_contract() -> None:
         KernelImg2col1dOp(
             _make_value(rank2_input),
             _make_value(img2col1d_output_type),
-            k=3,
-            s=1,
-            d=1,
-            p_left=0,
-            p_right=0,
+            k=_const_i32(3),
+            s=_const_i32(1),
+            d=_const_i32(1),
+            p_left=_const_i32(0),
+            p_right=_const_i32(0),
             space=_make_space("global"),
         ).verify()
 
@@ -681,11 +703,11 @@ def test_kernel_img2col_input_rank_layout_contract() -> None:
         KernelImg2col1dOp(
             _make_value(non_contiguous_1d_input),
             _make_value(img2col1d_output_type),
-            k=3,
-            s=1,
-            d=1,
-            p_left=0,
-            p_right=0,
+            k=_const_i32(3),
+            s=_const_i32(1),
+            d=_const_i32(1),
+            p_left=_const_i32(0),
+            p_right=_const_i32(0),
             space=_make_space("global"),
         ).verify()
 
@@ -703,11 +725,11 @@ def test_kernel_img2col_input_rank_layout_contract() -> None:
         KernelImg2col1dOp(
             _make_value(img2col1d_input_type),
             _make_value(rank3_output),
-            k=3,
-            s=1,
-            d=1,
-            p_left=0,
-            p_right=0,
+            k=_const_i32(3),
+            s=_const_i32(1),
+            d=_const_i32(1),
+            p_left=_const_i32(0),
+            p_right=_const_i32(0),
             space=_make_space("global"),
         ).verify()
 
@@ -725,16 +747,16 @@ def test_kernel_img2col_input_rank_layout_contract() -> None:
         KernelImg2col2dOp(
             _make_value(rank3_2d_input),
             _make_value(img2col2d_output_type),
-            kh=3,
-            kw=3,
-            sh=1,
-            sw=1,
-            dh=1,
-            dw=1,
-            ph=0,
-            pw=0,
-            pl=0,
-            pr=0,
+            kh=_const_i32(3),
+            kw=_const_i32(3),
+            sh=_const_i32(1),
+            sw=_const_i32(1),
+            dh=_const_i32(1),
+            dw=_const_i32(1),
+            ph=_const_i32(0),
+            pw=_const_i32(0),
+            pl=_const_i32(0),
+            pr=_const_i32(0),
             space=_make_space("global"),
         ).verify()
 
@@ -747,16 +769,16 @@ def test_kernel_img2col_input_rank_layout_contract() -> None:
         KernelImg2col2dOp(
             _make_value(non_contiguous_2d_input),
             _make_value(img2col2d_output_type),
-            kh=3,
-            kw=3,
-            sh=1,
-            sw=1,
-            dh=1,
-            dw=1,
-            ph=0,
-            pw=0,
-            pl=0,
-            pr=0,
+            kh=_const_i32(3),
+            kw=_const_i32(3),
+            sh=_const_i32(1),
+            sw=_const_i32(1),
+            dh=_const_i32(1),
+            dw=_const_i32(1),
+            ph=_const_i32(0),
+            pw=_const_i32(0),
+            pl=_const_i32(0),
+            pr=_const_i32(0),
             space=_make_space("global"),
         ).verify()
 
@@ -774,23 +796,23 @@ def test_kernel_img2col_input_rank_layout_contract() -> None:
         KernelImg2col2dOp(
             _make_value(img2col2d_input_type),
             _make_value(rank5_output),
-            kh=3,
-            kw=3,
-            sh=1,
-            sw=1,
-            dh=1,
-            dw=1,
-            ph=0,
-            pw=0,
-            pl=0,
-            pr=0,
+            kh=_const_i32(3),
+            kw=_const_i32(3),
+            sh=_const_i32(1),
+            sw=_const_i32(1),
+            dh=_const_i32(1),
+            dw=_const_i32(1),
+            ph=_const_i32(0),
+            pw=_const_i32(0),
+            pl=_const_i32(0),
+            pr=_const_i32(0),
             space=_make_space("global"),
         ).verify()
 
 
 # TC-KRN-019
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 大闸蟹
 # 最近一次运行测试时间: 2026-04-09 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-09 00:00:00 +0800
 # 功能说明: 验证 kernel.img2col1d/img2col2d 拒绝结构化输出形状与推导关系不一致（含公式结果 < 1）。
@@ -813,11 +835,11 @@ def test_kernel_img2col_output_extent_contract() -> None:
         KernelImg2col1dOp(
             _make_value(img2col1d_input_type),
             _make_value(bad_window_axis_1d_output),
-            k=3,
-            s=1,
-            d=1,
-            p_left=0,
-            p_right=0,
+            k=_const_i32(3),
+            s=_const_i32(1),
+            d=_const_i32(1),
+            p_left=_const_i32(0),
+            p_right=_const_i32(0),
             space=_make_space("global"),
         ).verify()
 
@@ -830,11 +852,11 @@ def test_kernel_img2col_output_extent_contract() -> None:
         KernelImg2col1dOp(
             _make_value(img2col1d_input_type),
             _make_value(bad_extent_1d_output),
-            k=3,
-            s=1,
-            d=1,
-            p_left=0,
-            p_right=0,
+            k=_const_i32(3),
+            s=_const_i32(1),
+            d=_const_i32(1),
+            p_left=_const_i32(0),
+            p_right=_const_i32(0),
             space=_make_space("global"),
         ).verify()
 
@@ -847,11 +869,11 @@ def test_kernel_img2col_output_extent_contract() -> None:
         KernelImg2col1dOp(
             _make_value(img2col1d_input_type),
             _make_value(bad_stride_1d_output),
-            k=3,
-            s=1,
-            d=1,
-            p_left=0,
-            p_right=0,
+            k=_const_i32(3),
+            s=_const_i32(1),
+            d=_const_i32(1),
+            p_left=_const_i32(0),
+            p_right=_const_i32(0),
             space=_make_space("global"),
         ).verify()
 
@@ -869,11 +891,11 @@ def test_kernel_img2col_output_extent_contract() -> None:
         KernelImg2col1dOp(
             _make_value(short_1d_input),
             _make_value(short_1d_output),
-            k=3,
-            s=1,
-            d=1,
-            p_left=0,
-            p_right=0,
+            k=_const_i32(3),
+            s=_const_i32(1),
+            d=_const_i32(1),
+            p_left=_const_i32(0),
+            p_right=_const_i32(0),
             space=_make_space("global"),
         ).verify()
 
@@ -891,16 +913,16 @@ def test_kernel_img2col_output_extent_contract() -> None:
         KernelImg2col2dOp(
             _make_value(img2col2d_input_type),
             _make_value(bad_window_axis_2d_output),
-            kh=3,
-            kw=3,
-            sh=1,
-            sw=1,
-            dh=1,
-            dw=1,
-            ph=0,
-            pw=0,
-            pl=0,
-            pr=0,
+            kh=_const_i32(3),
+            kw=_const_i32(3),
+            sh=_const_i32(1),
+            sw=_const_i32(1),
+            dh=_const_i32(1),
+            dw=_const_i32(1),
+            ph=_const_i32(0),
+            pw=_const_i32(0),
+            pl=_const_i32(0),
+            pr=_const_i32(0),
             space=_make_space("global"),
         ).verify()
 
@@ -913,16 +935,16 @@ def test_kernel_img2col_output_extent_contract() -> None:
         KernelImg2col2dOp(
             _make_value(img2col2d_input_type),
             _make_value(bad_extent_2d_output),
-            kh=3,
-            kw=3,
-            sh=1,
-            sw=1,
-            dh=1,
-            dw=1,
-            ph=0,
-            pw=0,
-            pl=0,
-            pr=0,
+            kh=_const_i32(3),
+            kw=_const_i32(3),
+            sh=_const_i32(1),
+            sw=_const_i32(1),
+            dh=_const_i32(1),
+            dw=_const_i32(1),
+            ph=_const_i32(0),
+            pw=_const_i32(0),
+            pl=_const_i32(0),
+            pr=_const_i32(0),
             space=_make_space("global"),
         ).verify()
 
@@ -935,16 +957,16 @@ def test_kernel_img2col_output_extent_contract() -> None:
         KernelImg2col2dOp(
             _make_value(img2col2d_input_type),
             _make_value(bad_stride_2d_output),
-            kh=3,
-            kw=3,
-            sh=1,
-            sw=1,
-            dh=1,
-            dw=1,
-            ph=0,
-            pw=0,
-            pl=0,
-            pr=0,
+            kh=_const_i32(3),
+            kw=_const_i32(3),
+            sh=_const_i32(1),
+            sw=_const_i32(1),
+            dh=_const_i32(1),
+            dw=_const_i32(1),
+            ph=_const_i32(0),
+            pw=_const_i32(0),
+            pl=_const_i32(0),
+            pr=_const_i32(0),
             space=_make_space("global"),
         ).verify()
 
@@ -962,16 +984,16 @@ def test_kernel_img2col_output_extent_contract() -> None:
         KernelImg2col2dOp(
             _make_value(short_2d_input),
             _make_value(short_2d_output),
-            kh=3,
-            kw=3,
-            sh=1,
-            sw=1,
-            dh=1,
-            dw=1,
-            ph=0,
-            pw=0,
-            pl=0,
-            pr=0,
+            kh=_const_i32(3),
+            kw=_const_i32(3),
+            sh=_const_i32(1),
+            sw=_const_i32(1),
+            dh=_const_i32(1),
+            dw=_const_i32(1),
+            ph=_const_i32(0),
+            pw=_const_i32(0),
+            pl=_const_i32(0),
+            pr=_const_i32(0),
             space=_make_space("global"),
         ).verify()
 
