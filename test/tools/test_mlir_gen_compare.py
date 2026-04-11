@@ -4,7 +4,7 @@
 最后一次更改: 小李飞刀
 
 功能说明:
-- 覆盖 compare_mlir_file(...) 的 True/False 路径与非法文本返回 False 的行为。
+- 覆盖 mlir_gen_compare(...) / mlir_gen_compare_text(...) 的 True/False 路径与非法文本返回 False 的行为。
 
 当前覆盖率信息:
 - 当前覆盖率: 未统计（本任务验证未启用 coverage 统计）。
@@ -53,16 +53,16 @@ _ARITH_MODULE_TEXT = """builtin.module {
 
 
 def _dummy_kernel() -> None:
-    """占位 kernel，用于 compare_mlir_file 测试。
+    """占位 kernel，用于 mlir_gen_compare 测试。
 
     创建者: 睡觉小分队
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 作为 compare_mlir_file 的入参占位，便于测试走通比较逻辑。
+    - 作为 mlir_gen_compare 的入参占位，便于测试走通比较逻辑。
 
     使用示例:
-    - compare_mlir_file(_dummy_kernel, None, None, path)
+    - mlir_gen_compare(_dummy_kernel, None, None, path)
 
     关联文件:
     - spec: [spec/tools/mlir_gen_compare.md](spec/tools/mlir_gen_compare.md)
@@ -80,7 +80,7 @@ def _stub_mlir_gen(*_args: object, **_kwargs: object) -> object:
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 返回固定 builtin.module，便于验证 compare_mlir_file 的比较逻辑。
+    - 返回固定 builtin.module，便于验证 mlir_gen_compare 的比较逻辑。
 
     使用示例:
     - module = _stub_mlir_gen(_dummy_kernel)
@@ -102,7 +102,7 @@ def _build_min_context() -> object:
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 仅加载 builtin/func/arith/nn/kernel，满足 compare_mlir_file 的解析/打印路径。
+    - 仅加载 builtin/func/arith/nn/kernel，满足 mlir_gen_compare 的解析/打印路径。
 
     使用示例:
     - monkeypatch.setattr(compare_module, "_build_default_context", _build_min_context)
@@ -137,7 +137,7 @@ def _build_module_with_arith_constant() -> object:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 用于覆盖 compare_mlir_file 在 actual/expected 含 arith dialect op 时的比较路径。
+    - 用于覆盖 mlir_gen_compare 在 actual/expected 含 arith dialect op 时的比较路径。
     - 该 helper 直接用 xdsl op 构造 module，不依赖 Context 解析，便于模拟“Context 未加载 arith”场景。
 
     使用示例:
@@ -166,19 +166,19 @@ def _build_module_with_arith_constant() -> object:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
-# 功能说明: 对齐 compare_mlir_file 的一致性比较路径。
-# 测试目的: 验证 compare_mlir_file 在预期一致时返回 True。
-# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_compare_mlir_file_true
+# 功能说明: 对齐 mlir_gen_compare 的一致性比较路径。
+# 测试目的: 验证 mlir_gen_compare 在预期一致时返回 True。
+# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_true
 # 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
 # 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
 # 对应测试文件路径: test/tools/test_mlir_gen_compare.py
-def test_compare_mlir_file_true(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mlir_gen_compare_true(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     expected_path = tmp_path / "expected.mlir"
     expected_path.write_text(_SIMPLE_MODULE_TEXT, encoding="utf-8")
     monkeypatch.setattr(compare_module, "_load_mlir_gen", lambda: _stub_mlir_gen)
     monkeypatch.setattr(compare_module, "_build_default_context", _build_min_context)
 
-    ok = compare_module.compare_mlir_file(
+    ok = compare_module.mlir_gen_compare(
         fn=_dummy_kernel,
         runtime_args=None,
         config=None,
@@ -193,13 +193,13 @@ def test_compare_mlir_file_true(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
-# 功能说明: 对齐 compare_mlir_file 的不一致返回路径。
-# 测试目的: 验证 compare_mlir_file 在预期不一致时返回 False。
-# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_compare_mlir_file_returns_false_on_mismatch
+# 功能说明: 对齐 mlir_gen_compare 的不一致返回路径。
+# 测试目的: 验证 mlir_gen_compare 在预期不一致时返回 False。
+# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_returns_false_on_mismatch
 # 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
 # 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
 # 对应测试文件路径: test/tools/test_mlir_gen_compare.py
-def test_compare_mlir_file_returns_false_on_mismatch(
+def test_mlir_gen_compare_returns_false_on_mismatch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     expected_path = tmp_path / "expected.mlir"
@@ -209,7 +209,7 @@ def test_compare_mlir_file_returns_false_on_mismatch(
     monkeypatch.setattr(compare_module, "_load_mlir_gen", lambda: _stub_mlir_gen)
     monkeypatch.setattr(compare_module, "_build_default_context", _build_min_context)
 
-    ok = compare_module.compare_mlir_file(
+    ok = compare_module.mlir_gen_compare(
         fn=_dummy_kernel,
         runtime_args=(),
         config=None,
@@ -224,13 +224,13 @@ def test_compare_mlir_file_returns_false_on_mismatch(
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
-# 功能说明: 对齐 compare_mlir_file 的非法文本返回路径。
-# 测试目的: 验证 compare_mlir_file 在非法文本时返回 False。
-# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_compare_mlir_file_returns_false_on_invalid_text
+# 功能说明: 对齐 mlir_gen_compare 的非法文本返回路径。
+# 测试目的: 验证 mlir_gen_compare 在非法文本时返回 False。
+# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_returns_false_on_invalid_text
 # 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
 # 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
 # 对应测试文件路径: test/tools/test_mlir_gen_compare.py
-def test_compare_mlir_file_returns_false_on_invalid_text(
+def test_mlir_gen_compare_returns_false_on_invalid_text(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     expected_path = tmp_path / "invalid.mlir"
@@ -238,7 +238,7 @@ def test_compare_mlir_file_returns_false_on_invalid_text(
     monkeypatch.setattr(compare_module, "_load_mlir_gen", lambda: _stub_mlir_gen)
     monkeypatch.setattr(compare_module, "_build_default_context", _build_min_context)
 
-    ok = compare_module.compare_mlir_file(
+    ok = compare_module.mlir_gen_compare(
         fn=_dummy_kernel,
         runtime_args=None,
         config=None,
@@ -253,13 +253,13 @@ def test_compare_mlir_file_returns_false_on_invalid_text(
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
-# 功能说明: 对齐 compare_mlir_file 读取非 UTF-8 文本时返回 False 的分支。
-# 测试目的: 验证遇到 UnicodeError 时 compare_mlir_file 返回 False（不抛异常）。
-# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_compare_mlir_file_returns_false_on_non_utf8_text
+# 功能说明: 对齐 mlir_gen_compare 读取非 UTF-8 文本时返回 False 的分支。
+# 测试目的: 验证遇到 UnicodeError 时 mlir_gen_compare 返回 False（不抛异常）。
+# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_returns_false_on_non_utf8_text
 # 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
 # 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
 # 对应测试文件路径: test/tools/test_mlir_gen_compare.py
-def test_compare_mlir_file_returns_false_on_non_utf8_text(
+def test_mlir_gen_compare_returns_false_on_non_utf8_text(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     expected_path = tmp_path / "non_utf8.mlir"
@@ -267,7 +267,7 @@ def test_compare_mlir_file_returns_false_on_non_utf8_text(
     monkeypatch.setattr(compare_module, "_load_mlir_gen", lambda: _stub_mlir_gen)
     monkeypatch.setattr(compare_module, "_build_default_context", _build_min_context)
 
-    ok = compare_module.compare_mlir_file(
+    ok = compare_module.mlir_gen_compare(
         fn=_dummy_kernel,
         runtime_args=None,
         config=None,
@@ -282,13 +282,13 @@ def test_compare_mlir_file_returns_false_on_non_utf8_text(
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
-# 功能说明: 对齐 compare_mlir_file 的 arith dialect 场景解析与归一化比较。
-# 测试目的: 验证 compare_mlir_file 在 actual/expected 含 arith.constant 时返回 True（不抛 ParseError）。
-# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_compare_mlir_file_true_with_arith
+# 功能说明: 对齐 mlir_gen_compare 的 arith dialect 场景解析与归一化比较。
+# 测试目的: 验证 mlir_gen_compare 在 actual/expected 含 arith.constant 时返回 True（不抛 ParseError）。
+# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_true_with_arith
 # 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
 # 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
 # 对应测试文件路径: test/tools/test_mlir_gen_compare.py
-def test_compare_mlir_file_true_with_arith(
+def test_mlir_gen_compare_true_with_arith(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     expected_path = tmp_path / "expected_arith.mlir"
@@ -301,7 +301,7 @@ def test_compare_mlir_file_true_with_arith(
     monkeypatch.setattr(compare_module, "_load_mlir_gen", lambda: _stub_mlir_gen_arith)
     monkeypatch.setattr(compare_module, "_build_default_context", _build_min_context)
 
-    ok = compare_module.compare_mlir_file(
+    ok = compare_module.mlir_gen_compare(
         fn=_dummy_kernel,
         runtime_args=None,
         config=None,
@@ -316,13 +316,13 @@ def test_compare_mlir_file_true_with_arith(
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
-# 功能说明: 对齐 compare_mlir_file 的“归一化二次解析失败 -> False”兜底行为。
+# 功能说明: 对齐 mlir_gen_compare 的“归一化二次解析失败 -> False”兜底行为。
 # 测试目的: 验证当默认 Context 未加载 arith 时，normalize 过程解析失败不应抛异常，应返回 False。
-# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_compare_mlir_file_returns_false_on_normalize_parse_error
+# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_returns_false_on_normalize_parse_error
 # 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
 # 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
 # 对应测试文件路径: test/tools/test_mlir_gen_compare.py
-def test_compare_mlir_file_returns_false_on_normalize_parse_error(
+def test_mlir_gen_compare_returns_false_on_normalize_parse_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     expected_path = tmp_path / "expected_simple.mlir"
@@ -348,7 +348,7 @@ def test_compare_mlir_file_returns_false_on_normalize_parse_error(
 
     monkeypatch.setattr(compare_module, "_build_default_context", _ctx_without_arith)
 
-    ok = compare_module.compare_mlir_file(
+    ok = compare_module.mlir_gen_compare(
         fn=_dummy_kernel,
         runtime_args=None,
         config=None,
@@ -384,13 +384,13 @@ def test_default_context_loads_required_dialects() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
-# 功能说明: 对齐 compare_mlir_file 在 actual 非 builtin.module 时的返回语义。
-# 测试目的: 验证当 mlir_gen(...) 返回值不是 builtin.module 时，compare_mlir_file 返回 False（不抛 TypeError）。
-# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_compare_mlir_file_returns_false_when_actual_not_module
+# 功能说明: 对齐 mlir_gen_compare 在 actual 非 builtin.module 时的返回语义。
+# 测试目的: 验证当 mlir_gen(...) 返回值不是 builtin.module 时，mlir_gen_compare 返回 False（不抛 TypeError）。
+# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_returns_false_when_actual_not_module
 # 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
 # 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
 # 对应测试文件路径: test/tools/test_mlir_gen_compare.py
-def test_compare_mlir_file_returns_false_when_actual_not_module(
+def test_mlir_gen_compare_returns_false_when_actual_not_module(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     expected_path = tmp_path / "expected.mlir"
@@ -400,11 +400,63 @@ def test_compare_mlir_file_returns_false_when_actual_not_module(
     )
     monkeypatch.setattr(compare_module, "_build_default_context", _build_min_context)
 
-    ok = compare_module.compare_mlir_file(
+    ok = compare_module.mlir_gen_compare(
         fn=_dummy_kernel,
         runtime_args=None,
         config=None,
         mlir_file=str(expected_path),
+    )
+
+    assert ok is False
+
+
+# TC-MLIR-GEN-COMPARE-009
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 对齐 mlir_gen_compare_text 的一致性比较路径。
+# 测试目的: 验证 mlir_gen_compare_text 在预期一致时返回 True。
+# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_text_true
+# 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
+# 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
+# 对应测试文件路径: test/tools/test_mlir_gen_compare.py
+def test_mlir_gen_compare_text_true(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(compare_module, "_load_mlir_gen", lambda: _stub_mlir_gen)
+    monkeypatch.setattr(compare_module, "_build_default_context", _build_min_context)
+
+    ok = compare_module.mlir_gen_compare_text(
+        fn=_dummy_kernel,
+        runtime_args=None,
+        config=None,
+        mlir_text=_SIMPLE_MODULE_TEXT,
+    )
+
+    assert ok is True
+
+
+# TC-MLIR-GEN-COMPARE-010
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 对齐 mlir_gen_compare_text 的非法文本返回路径。
+# 测试目的: 验证 mlir_gen_compare_text 在非法文本时返回 False（不抛 ParseError）。
+# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_text_returns_false_on_invalid_text
+# 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
+# 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
+# 对应测试文件路径: test/tools/test_mlir_gen_compare.py
+def test_mlir_gen_compare_text_returns_false_on_invalid_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(compare_module, "_load_mlir_gen", lambda: _stub_mlir_gen)
+    monkeypatch.setattr(compare_module, "_build_default_context", _build_min_context)
+
+    ok = compare_module.mlir_gen_compare_text(
+        fn=_dummy_kernel,
+        runtime_args=None,
+        config=None,
+        mlir_text="invalid mlir",
     )
 
     assert ok is False

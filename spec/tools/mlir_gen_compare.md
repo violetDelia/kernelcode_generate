@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-- 定义一个面向 `mlir_gen(...)` 产物的轻量比较工具：对同一 Python 函数生成的 `builtin.module` 与磁盘 `.mlir` 文件进行“解析后再打印”的归一化比较，并返回 `bool`。
+- 定义一个面向 `mlir_gen(...)` 产物的轻量比较工具：对同一 Python 函数生成的 `builtin.module` 与磁盘 `.mlir` 文件或直接给定的 IR 文本进行“解析后再打印”的归一化比较，并返回 `bool`。
 - 该工具用于写可机械判定的期望：一致返回 `True`，不一致返回 `False`；不提供 diff 对象，也不跑 pass。
 
 ## 文档信息
@@ -40,7 +40,7 @@
 
 ## 公开接口
 
-### `compare_mlir_file(fn, runtime_args, config, mlir_file) -> bool`
+### `mlir_gen_compare(fn, runtime_args, config, mlir_file) -> bool`
 
 功能说明：
 
@@ -62,14 +62,14 @@
 ```python
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.type import NumericType
-from kernel_gen.tools.mlir_gen_compare import compare_mlir_file
+from kernel_gen.tools.mlir_gen_compare import mlir_gen_compare
 
 
 def add(lhs: "Tensor[i32, 4]", rhs: "Tensor[i32, 4]") -> "Tensor[i32, 4]":
     return lhs + rhs
 
 
-ok = compare_mlir_file(
+ok = mlir_gen_compare(
     fn=add,
     runtime_args=[Memory([4], NumericType.Int32), Memory([4], NumericType.Int32)],
     config=None,
@@ -82,7 +82,7 @@ assert ok is True
 from pathlib import Path
 
 mlir_file = str(Path(__file__).with_name("add_expected.mlir"))
-ok = compare_mlir_file(
+ok = mlir_gen_compare(
     fn=add,
     runtime_args=[Memory([4], NumericType.Int32), Memory([4], NumericType.Int32)],
     config=None,
@@ -101,11 +101,44 @@ assert ok is True
 - 归一化过程中的二次解析失败（例如 dialect 未注册导致的解析失败）也必须返回 `False`。
 - 上述返回 `False` 的分支不要求提供稳定的错误短语；若下游需要诊断对象，应通过新增并列接口承载。
 - `mlir_gen(...)` 的失败语义不由本函数重新定义：若 `mlir_gen(...)` 抛错，本函数应直接向上传播。
+- 兼容：`compare_mlir_file(...)` 为旧接口名，语义等价于 `mlir_gen_compare(...)`。
 
 返回与限制：
 
 - 返回 `True`：actual 与 expected 的归一化文本完全一致。
 - 返回 `False`：`mlir_gen(...)` 返回值不是 `builtin.module`，或 `mlir_file` 不可读/不可解析/不是 `builtin.module`，或归一化后的文本不一致。
+
+### `mlir_gen_compare_text(fn, runtime_args, config, mlir_text) -> bool`
+
+功能说明：
+
+- 使用 `mlir_gen(...)` 生成 `builtin.module`（actual）。
+- 将 `mlir_text` 解析为 `builtin.module`（expected）。
+- 对 actual 与 expected 分别做“解析后再打印”的归一化，比较两边规范化文本是否完全一致。
+
+参数说明：
+
+- `fn` (`callable`)：待比较的根函数。
+- `runtime_args` (`tuple[object, ...] | list[object] | None`)：语义与 `mlir_gen_compare(...)` 一致。
+- `config` (`dict[str, object] | None`)：透传给 `mlir_gen(...)` 的配置。
+- `mlir_text` (`str`)：预期 module 的完整 IR 文本字符串；内容必须可解析为 `builtin.module`。
+
+使用示例：
+
+```python
+from pathlib import Path
+from kernel_gen.tools.mlir_gen_compare import mlir_gen_compare_text
+
+expected_text = Path("expected/add.mlir").read_text(encoding="utf-8")
+ok = mlir_gen_compare_text(fn=add, runtime_args=[lhs, rhs], config=None, mlir_text=expected_text)
+assert ok is True
+```
+
+注意事项：
+
+- `mlir_text` 解析失败，或解析结果不是 `builtin.module` 时，必须返回 `False`。
+- 若 `mlir_gen(...)` 返回值不是 `builtin.module`，必须返回 `False`。
+- `mlir_gen(...)` 抛错时，本函数应直接向上传播。
 
 ## 测试
 

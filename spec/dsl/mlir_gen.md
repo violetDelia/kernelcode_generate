@@ -242,9 +242,9 @@ module = mlir_gen(main, Memory([4], NumericType.Int32))
 ```
 
 ```python
-from kernel_gen.tools.mlir_gen_compare import compare_mlir_file
+from kernel_gen.tools.mlir_gen_compare import mlir_gen_compare
 
-ok = compare_mlir_file(
+ok = mlir_gen_compare(
     fn=main,
     runtime_args=[Memory([4], NumericType.Int32)],
     config=None,

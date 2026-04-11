@@ -4,13 +4,15 @@
 最后一次更改: 小李飞刀
 
 功能说明:
-- 提供 compare_mlir_file(...)：生成实际 builtin.module，读取预期 .mlir 文件，
+- 提供 mlir_gen_compare(...)：生成实际 builtin.module，读取预期 .mlir 文件，
   对两侧执行统一 parser + printer 归一化比较并返回 bool。
+- 提供 mlir_gen_compare_text(...)：生成实际 builtin.module，接收预期完整 IR 文本，
+  归一化比较并返回 bool。
 - 仅比较 mlir_gen 层的 module 文本，不运行 pass、不做 lowering。
 
 使用示例:
-- from kernel_gen.tools.mlir_gen_compare import compare_mlir_file
-- ok = compare_mlir_file(fn=add, runtime_args=[lhs, rhs], config=None, mlir_file="expected.mlir")
+- from kernel_gen.tools.mlir_gen_compare import mlir_gen_compare
+- ok = mlir_gen_compare(fn=add, runtime_args=[lhs, rhs], config=None, mlir_file="expected.mlir")
 
 关联文件:
 - spec: [spec/tools/mlir_gen_compare.md](spec/tools/mlir_gen_compare.md)
@@ -108,24 +110,25 @@ def _load_mlir_gen() -> Callable[..., ModuleOp]:
     return mlir_gen
 
 
-def compare_mlir_file(
+def _mlir_gen_compare_expected_text(
     fn: Callable[..., object],
     runtime_args: tuple[object, ...] | list[object] | None,
     config: dict[str, object] | None,
-    mlir_file: str,
+    expected_text: str,
 ) -> bool:
-    """比较 mlir_gen 结果与预期 mlir 文件。
+    """比较 mlir_gen(...) 结果与预期 module 文本。
 
-    创建者: 睡觉小分队
+    创建者: 守护最好的爱莉希雅
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 生成实际 builtin.module，并与预期 mlir_file 做规范化文本比较。
+    - 生成实际 builtin.module，并将 expected_text 解析为 builtin.module 后做归一化文本比较。
     - 若 mlir_gen(...) 返回值不是 builtin.module，返回 False。
-    - 预期文件读取失败、解析失败、归一化失败，或归一化文本不一致时返回 False。
+    - expected_text 解析失败、归一化失败，或归一化文本不一致时返回 False。
+    - mlir_gen(...) 抛错时不改变其失败语义，直接向上传播。
 
     使用示例:
-    - ok = compare_mlir_file(fn=add, runtime_args=[lhs, rhs], config=None, mlir_file="expected.mlir")
+    - ok = _mlir_gen_compare_expected_text(fn=add, runtime_args=[lhs, rhs], config=None, expected_text=text)
 
     关联文件:
     - spec: [spec/tools/mlir_gen_compare.md](spec/tools/mlir_gen_compare.md)
@@ -145,11 +148,6 @@ def compare_mlir_file(
     if not isinstance(actual_module, ModuleOp):
         return False
 
-    try:
-        expected_text = Path(mlir_file).read_text(encoding="utf-8")
-    except (OSError, UnicodeError):
-        return False
-
     ctx = _build_default_context()
     try:
         expected_module = Parser(ctx, expected_text).parse_module()
@@ -164,3 +162,107 @@ def compare_mlir_file(
     except Exception:
         return False
     return actual_norm == expected_norm
+
+
+def mlir_gen_compare(
+    fn: Callable[..., object],
+    runtime_args: tuple[object, ...] | list[object] | None,
+    config: dict[str, object] | None,
+    mlir_file: str,
+) -> bool:
+    """比较 mlir_gen 结果与预期 mlir 文件。
+
+    创建者: 睡觉小分队
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 生成实际 builtin.module，并与预期 mlir_file 做规范化文本比较。
+    - 若 mlir_gen(...) 返回值不是 builtin.module，返回 False。
+    - 预期文件读取失败、解析失败、归一化失败，或归一化文本不一致时返回 False。
+
+    使用示例:
+    - ok = mlir_gen_compare(fn=add, runtime_args=[lhs, rhs], config=None, mlir_file="expected.mlir")
+
+    关联文件:
+    - spec: [spec/tools/mlir_gen_compare.md](spec/tools/mlir_gen_compare.md)
+    - test: [test/tools/test_mlir_gen_compare.py](test/tools/test_mlir_gen_compare.py)
+    - 功能实现: [kernel_gen/tools/mlir_gen_compare.py](kernel_gen/tools/mlir_gen_compare.py)
+    """
+
+    try:
+        expected_text = Path(mlir_file).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return False
+
+    return _mlir_gen_compare_expected_text(
+        fn=fn,
+        runtime_args=runtime_args,
+        config=config,
+        expected_text=expected_text,
+    )
+
+
+def mlir_gen_compare_text(
+    fn: Callable[..., object],
+    runtime_args: tuple[object, ...] | list[object] | None,
+    config: dict[str, object] | None,
+    mlir_text: str,
+) -> bool:
+    """比较 mlir_gen 结果与预期 module 文本。
+
+    创建者: 守护最好的爱莉希雅
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 生成实际 builtin.module，并将 mlir_text 解析为 builtin.module 后做归一化文本比较。
+    - 若 mlir_text 解析失败或解析结果不是 builtin.module，返回 False。
+    - 若 mlir_gen(...) 返回值不是 builtin.module，返回 False。
+    - 归一化后的文本不一致时返回 False。
+    - mlir_gen(...) 抛错时不改变其失败语义，直接向上传播。
+
+    使用示例:
+    - ok = mlir_gen_compare_text(fn=add, runtime_args=[lhs, rhs], config=None, mlir_text=text)
+
+    关联文件:
+    - spec: [spec/tools/mlir_gen_compare.md](spec/tools/mlir_gen_compare.md)
+    - test: [test/tools/test_mlir_gen_compare.py](test/tools/test_mlir_gen_compare.py)
+    - 功能实现: [kernel_gen/tools/mlir_gen_compare.py](kernel_gen/tools/mlir_gen_compare.py)
+    """
+
+    return _mlir_gen_compare_expected_text(
+        fn=fn,
+        runtime_args=runtime_args,
+        config=config,
+        expected_text=mlir_text,
+    )
+
+
+def compare_mlir_file(
+    fn: Callable[..., object],
+    runtime_args: tuple[object, ...] | list[object] | None,
+    config: dict[str, object] | None,
+    mlir_file: str,
+) -> bool:
+    """兼容旧接口 compare_mlir_file(...)，等价于 mlir_gen_compare(...)。
+
+    创建者: 睡觉小分队
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 保持旧接口可用，便于下游脚本与测试渐进迁移到 mlir_gen_compare(...)。
+
+    使用示例:
+    - ok = compare_mlir_file(fn=add, runtime_args=[lhs, rhs], config=None, mlir_file="expected.mlir")
+
+    关联文件:
+    - spec: [spec/tools/mlir_gen_compare.md](spec/tools/mlir_gen_compare.md)
+    - test: [test/tools/test_mlir_gen_compare.py](test/tools/test_mlir_gen_compare.py)
+    - 功能实现: [kernel_gen/tools/mlir_gen_compare.py](kernel_gen/tools/mlir_gen_compare.py)
+    """
+
+    return mlir_gen_compare(
+        fn=fn,
+        runtime_args=runtime_args,
+        config=config,
+        mlir_file=mlir_file,
+    )
