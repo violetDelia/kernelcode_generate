@@ -5,6 +5,7 @@
 - 定义 DSL AST 节点与字段语义。
 - 提供解析入口，将 Python 函数解析为 AST 树。
 - 不定义 MLIR 生成或文本输出。
+- 提供 facade 导入路径，保持 `kernel_gen.dsl.ast` 的外部用法不变。
 
 ## 文档信息
 
@@ -19,6 +20,8 @@
 - Python `ast`/`inspect`：用于获取源码并解析语法树。
 - [`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)：提供 `MemorySpace` 枚举语义，供 `get_dynamic_memory(...)` 与 `barrier(...)` helper 校验。
 - [`spec/include/api/Arch.md`](../../spec/include/api/Arch.md)：提供 `BarrierScope` 枚举名与 launch/barrier 的公开源码合同。
+- [`spec/dsl/ast_nodes.md`](../../spec/dsl/ast_nodes.md)：AST 节点定义合同。
+- [`spec/dsl/ast_parser.md`](../../spec/dsl/ast_parser.md)：解析入口合同。
 
 ## 术语
 
@@ -37,6 +40,7 @@
 - 只覆盖 AST 与解析入口，不负责 MLIR 生成与输出。
 - 只支持受限语法子集，具体范围以测试清单为准。
 - 不做优化、融合或后端相关行为。
+- `kernel_gen/dsl/ast.py` 可仅承担 facade 与 re-export；节点定义与解析实现分别归属 `kernel_gen/dsl/ast_nodes.py` 与 `kernel_gen/dsl/ast_parser.py`，对外导入路径仍为 `kernel_gen.dsl.ast`。
 - [immutable]只提供ast节点定义以及将函数翻译为ast树的能力。
 - AST 节点仅表达前端语义，不携带 `target` 或 `hardware` 字段；`target` 为目标后端名称，`hardware` 为硬件参数表（字段范围见 [`spec/target/registry.md`](../../spec/target/registry.md)）。
 - target/硬件相关信息仅允许在后续 lowering 或 emit 阶段通过上下文注入，AST 不解析也不回写这些字段。
@@ -54,6 +58,30 @@
 - 本轮仅为 `symbol.to_float` 链路开放 `-> float` 返回注解与 `float(symbol.int)` 的 AST 语法入口；不得顺手扩展 `double`、`complex` 或其他新注解体系。
 
 ## 公开接口
+
+### `kernel_gen.dsl.ast` facade
+
+功能说明：
+
+- 对外导出 AST 节点类型与 `parse_function(...)`。
+- 保持历史导入路径不变。
+
+参数说明：无。
+
+使用示例：
+
+```python
+from kernel_gen.dsl.ast import FunctionAST, parse_function
+```
+
+注意事项：
+
+- 真实实现分别位于 `kernel_gen/dsl/ast_nodes.py` 与 `kernel_gen/dsl/ast_parser.py`，本模块只做导出。
+- 导出的符号集合应覆盖下游使用的 AST 节点与解析入口。
+
+返回与限制：
+
+- 本模块不新增语义，只提供导出入口。
 
 ### `parse_function(fn)`
 
@@ -597,6 +625,7 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
 - 拆分归属：AST 解析入口、注解解析、诊断负路径与 helper arity 校验归属 `test_ast.py`；依赖 `build_func_op(...)` 观察 AST 语义透传的链路回归归属 `test_mlir_gen.py`；ast_visitor 负路径与 arch helper 入口校验归属 `test_ast_visitor.py`。
 - 测试目标：
   - 覆盖 `parse_function(...)` 的源码解析与 AST 构建。
+  - 覆盖 `kernel_gen.dsl.ast` 作为导入入口仍可导出 `FunctionAST` 与 `parse_function(...)`。
   - 覆盖 AST 节点字段与诊断信息的构造。
   - 覆盖 `lhs != rhs` 解析为 `CompareExprAST(op="ne")` 的入口语义，并确保该语义可被下游 `nn.ne` lowering 直接消费。
   - 覆盖 Python `lhs * rhs` 与 `nn.mul(lhs, rhs)` 共用 `BinaryExprAST(op="mul")` 入口语义，以及 `nn.mul` 非法参数个数诊断。

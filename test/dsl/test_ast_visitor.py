@@ -1034,7 +1034,7 @@ def test_emit_mlir_lowers_arch_get_subthread_num_query() -> None:
 
 # AST-014P
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-28 13:01:00 +0800
 # 最近一次运行成功时间: 2026-03-28 13:01:00 +0800
 # 功能说明: 验证未显式导入的 bare launch_kernel 调用会在 AST 入口被统一拒绝。
@@ -1089,7 +1089,7 @@ def kernel() -> None:
 
 # EMIT-032
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-28 13:01:00 +0800
 # 最近一次运行成功时间: 2026-03-28 13:01:00 +0800
 # 功能说明: 验证 ArchLaunchKernelAST lowering 对非法 name/extent 报错。
@@ -1102,17 +1102,17 @@ def test_emit_mlir_rejects_invalid_arch_launch_kernel_args() -> None:
     invalid_nodes = (
         (
             ArchLaunchKernelAST(
-                name="",
+                callee="",
                 block=ConstAST(1),
                 thread=ConstAST(1),
                 subthread=ConstAST(1),
             ),
-            "launch_kernel name must be non-empty str",
+            "launch_kernel callee must be function symbol reference",
         ),
         (
             ArchLaunchKernelAST(
-                name="kernel",
-                block=ConstAST(1),
+                callee="kernel",
+                block=ConstAST("bad"),
                 thread=ConstAST(1),
                 subthread=ConstAST(1),
             ),
@@ -1129,7 +1129,7 @@ def test_emit_mlir_rejects_invalid_arch_launch_kernel_args() -> None:
 
 # MGEN-037
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-28 13:01:00 +0800
 # 最近一次运行成功时间: 2026-03-28 13:01:00 +0800
 # 功能说明: 验证 build_func_op 链路在 launch_kernel extent 无法归一化时返回错误。
@@ -1144,7 +1144,7 @@ def test_build_func_op_rejects_invalid_arch_launch_kernel_args() -> None:
     def launch_kernel_kernel() -> None:
         launch_kernel("kernel", 1, 2, 3)
 
-    with pytest.raises(AstVisitorError, match="launch_kernel block must be !symbol.int"):
+    with pytest.raises(AstVisitorError, match="launch_kernel callee must be function symbol reference"):
         build_func_op(launch_kernel_kernel)
 
 
@@ -1312,7 +1312,7 @@ def test_emit_mlir_output() -> None:
 
 # AST-001A
 # 创建者: 朽木露琪亚
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-22 15:38:56 +0800
 # 最近一次运行成功时间: 2026-03-22 15:38:56 +0800
 # 功能说明: 验证 parse_function 提供独立 AST 解析入口。
@@ -2333,7 +2333,7 @@ def test_emit_context_reuses_cached_value() -> None:
     lhs = TensorAST(name="x", memory=memory, location=None)
     rhs = TensorAST(name="y", memory=memory, location=None)
     expr = BinaryExprAST(op="add", lhs=lhs, rhs=rhs, location=None)
-    func_op = build_func_op_from_ast(FunctionAST("tmp", [lhs, rhs], [], BlockAST([expr])))
+    func_op = build_func_op_from_ast(FunctionAST("tmp", [lhs, rhs], [], BlockAST([expr]), returns_none=True))
     arg_types = list(func_op.function_type.inputs)
     block = Block(arg_types=arg_types)
     ctx = EmitContext(builder=block, symbols={"x": block.args[0], "y": block.args[1]}, types={})
@@ -2349,7 +2349,7 @@ def test_emit_context_reuses_cached_value() -> None:
 
 # EMIT-004
 # 创建者: ChatGPT
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
 # 最近一次运行成功时间: 2026-03-22 14:59:58 +0800
 # 功能说明: 验证 emit_mlir 可通过符号表直接解析 TensorAST 输入。
@@ -2362,7 +2362,7 @@ def test_emit_mlir_tensor_uses_symbol_table() -> None:
     memory = Memory([2, 2], NumericType.Float32)
     lhs = TensorAST(name="x", memory=memory, location=None)
     rhs = TensorAST(name="y", memory=memory, location=None)
-    func_op = build_func_op_from_ast(FunctionAST("tmp", [lhs, rhs], [], BlockAST([lhs])))
+    func_op = build_func_op_from_ast(FunctionAST("tmp", [lhs, rhs], [], BlockAST([lhs]), returns_none=True))
     block = Block(arg_types=list(func_op.function_type.inputs))
     ctx = EmitContext(builder=block, symbols={"x": block.args[0], "y": block.args[1]}, types={})
 
@@ -2373,7 +2373,7 @@ def test_emit_mlir_tensor_uses_symbol_table() -> None:
 
 # EMIT-002
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
 # 最近一次运行成功时间: 2026-03-22 14:59:58 +0800
 # 功能说明: 验证比较表达式节点生成对应 op/value。
@@ -2387,7 +2387,7 @@ def test_emit_mlir_compare_expr_emits_eq() -> None:
     lhs = TensorAST(name="x", memory=memory, location=None)
     rhs = TensorAST(name="y", memory=memory, location=None)
     expr = CompareExprAST(op="eq", lhs=lhs, rhs=rhs, location=None)
-    func_op = build_func_op_from_ast(FunctionAST("tmp", [lhs, rhs], [], BlockAST([expr])))
+    func_op = build_func_op_from_ast(FunctionAST("tmp", [lhs, rhs], [], BlockAST([expr]), returns_none=True))
     block = Block(arg_types=list(func_op.function_type.inputs))
     ctx = EmitContext(builder=block, symbols={"x": block.args[0], "y": block.args[1]}, types={})
     emit_node_mlir(lhs, ctx)
@@ -2401,7 +2401,7 @@ def test_emit_mlir_compare_expr_emits_eq() -> None:
 
 # EMIT-003
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-22 14:59:58 +0800
 # 最近一次运行成功时间: 2026-03-22 14:59:58 +0800
 # 功能说明: 验证不支持节点抛出错误并携带位置信息。
@@ -2473,7 +2473,7 @@ def test_ast_visitor_reuses_expression_value() -> None:
     lhs = TensorAST(name="x", memory=memory, location=None)
     rhs = TensorAST(name="y", memory=memory, location=None)
     expr = BinaryExprAST(op="add", lhs=lhs, rhs=rhs, location=None)
-    func_ast = FunctionAST(name="reuse", inputs=[lhs, rhs], outputs=[], body=BlockAST([expr, expr]))
+    func_ast = FunctionAST(name="reuse", inputs=[lhs, rhs], outputs=[], body=BlockAST([expr, expr]), returns_none=True)
 
     func_op = build_func_op_from_ast(func_ast)
     ops = [op for op in func_op.body.block.ops if isinstance(op, NnAddOp)]
@@ -3142,7 +3142,7 @@ def test_load_ast_lowering_rejected() -> None:
     memory = Memory([2, 2], NumericType.Float32)
     tensor = TensorAST(name="x", memory=memory, location=None)
     load = LoadAST(tensor=tensor, offset=[ConstAST(0), ConstAST(0)], stride=None, location=None)
-    func_ast = FunctionAST(name="load", inputs=[tensor], outputs=[], body=BlockAST([load]))
+    func_ast = FunctionAST(name="load", inputs=[tensor], outputs=[], body=BlockAST([load]), returns_none=True)
     func_op = build_func_op_from_ast(func_ast)
     ops = [op for op in func_op.body.block.ops if isinstance(op, DmaLoadOp)]
     assert len(ops) == 1
@@ -3150,7 +3150,7 @@ def test_load_ast_lowering_rejected() -> None:
 
 # EMIT-006
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-18 10:56:41 +0800
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证 StoreAST lowering 生成 dma.store。
@@ -3163,7 +3163,7 @@ def test_store_ast_lowering_rejected() -> None:
     memory = Memory([2, 2], NumericType.Float32)
     tensor = TensorAST(name="x", memory=memory, location=None)
     store = StoreAST(tensor=tensor, offset=[ConstAST(0), ConstAST(0)], stride=None, value=tensor, location=None)
-    func_ast = FunctionAST(name="store", inputs=[tensor], outputs=[], body=BlockAST([store, tensor]))
+    func_ast = FunctionAST(name="store", inputs=[tensor], outputs=[], body=BlockAST([store, tensor]), returns_none=True)
     func_op = build_func_op_from_ast(func_ast)
     ops = [op for op in func_op.body.block.ops if isinstance(op, DmaStoreOp)]
     assert len(ops) == 1
@@ -3171,7 +3171,7 @@ def test_store_ast_lowering_rejected() -> None:
 
 # EMIT-007
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-21 21:12:00 +0800
 # 最近一次运行成功时间: 2026-03-21 21:12:00 +0800
 # 功能说明: 验证 LoadAST 非 unit stride 抛出带诊断的错误。
@@ -3189,7 +3189,7 @@ def test_load_ast_lowering_raises_lowering_error() -> None:
         stride=ConstAST(2, location=SourceLocation(2, 9)),
         location=SourceLocation(2, 0),
     )
-    func_ast = FunctionAST(name="load", inputs=[tensor], outputs=[], body=BlockAST([load]))
+    func_ast = FunctionAST(name="load", inputs=[tensor], outputs=[], body=BlockAST([load]), returns_none=True)
     with pytest.raises(AstVisitorError, match="Only unit stride is supported") as exc_info:
         build_func_op_from_ast(func_ast)
     assert exc_info.value.location is not None
@@ -3197,7 +3197,7 @@ def test_load_ast_lowering_raises_lowering_error() -> None:
 
 # EMIT-008
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-21 21:12:00 +0800
 # 最近一次运行成功时间: 2026-03-21 21:12:00 +0800
 # 功能说明: 验证 index rank mismatch 抛错并保留位置信息。
@@ -3215,7 +3215,7 @@ def test_load_ast_index_rank_mismatch_reports_location() -> None:
         stride=None,
         location=SourceLocation(2, 0),
     )
-    func_ast = FunctionAST(name="load", inputs=[tensor], outputs=[], body=BlockAST([load]))
+    func_ast = FunctionAST(name="load", inputs=[tensor], outputs=[], body=BlockAST([load]), returns_none=True)
     with pytest.raises(AstVisitorError, match="Index rank mismatch") as exc_info:
         build_func_op_from_ast(func_ast)
     assert exc_info.value.location is not None
@@ -3223,7 +3223,7 @@ def test_load_ast_index_rank_mismatch_reports_location() -> None:
 
 # EMIT-009
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-18 10:56:41 +0800
 # 最近一次运行成功时间: 2026-03-18 10:56:41 +0800
 # 功能说明: 验证 StoreAST 非 memory value 抛出带诊断的错误。
@@ -3236,14 +3236,14 @@ def test_store_ast_lowering_raises_lowering_error() -> None:
     memory = Memory([2, 2], NumericType.Float32)
     tensor = TensorAST(name="x", memory=memory, location=None)
     store = StoreAST(tensor=tensor, offset=[ConstAST(0), ConstAST(0)], stride=None, value=ConstAST(1), location=None)
-    func_ast = FunctionAST(name="store", inputs=[tensor], outputs=[], body=BlockAST([store, tensor]))
+    func_ast = FunctionAST(name="store", inputs=[tensor], outputs=[], body=BlockAST([store, tensor]), returns_none=True)
     with pytest.raises(AstVisitorError, match="Operand must be nn.memory"):
         build_func_op_from_ast(func_ast)
 
 
 # EMIT-014
 # 创建者: 摸鱼小分队
-# 最后一次更改: 我不是牛马
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-23 02:43:15 +0800
 # 最近一次运行成功时间: 2026-03-23 02:43:15 +0800
 # 功能说明: 验证 ForAST lowering 会保留循环结构并在循环体内生成 dma.load。
@@ -3267,7 +3267,7 @@ def test_for_ast_lowering_emits_loads() -> None:
         ]
     )
     loop = ForAST(var=loop_var, start=ConstAST(0), end=ConstAST(2), body=body, location=None)
-    func_ast = FunctionAST(name="loop", inputs=[tensor], outputs=[], body=BlockAST([loop, tensor]))
+    func_ast = FunctionAST(name="loop", inputs=[tensor], outputs=[], body=BlockAST([loop, tensor]), returns_none=True)
     func_op = build_func_op_from_ast(func_ast)
     loop_ops = [op for op in func_op.body.block.ops if isinstance(op, scf.ForOp)]
     assert len(loop_ops) == 1
@@ -3280,7 +3280,7 @@ def test_for_ast_lowering_emits_loads() -> None:
 
 # EMIT-010
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-26 21:43:31 +0800
 # 最近一次运行成功时间: 2026-03-26 21:43:31 +0800
 # 功能说明: 验证符号边界 ForAST lowering 为 symbol.for 并直接复用 symbol.int 作为 DMA operand。
@@ -4240,7 +4240,7 @@ def test_compare_implicit_broadcast_lowering() -> None:
     lhs = TensorAST(name="x", memory=lhs_memory, location=None)
     rhs = TensorAST(name="y", memory=rhs_memory, location=None)
     expr = CompareExprAST(op="eq", lhs=lhs, rhs=rhs, location=None)
-    func_ast = FunctionAST(name="eq", inputs=[lhs, rhs], outputs=[], body=BlockAST([expr]))
+    func_ast = FunctionAST(name="eq", inputs=[lhs, rhs], outputs=[], body=BlockAST([expr]), returns_none=True)
     func_op = build_func_op_from_ast(func_ast)
     broadcast_ops = [op for op in func_op.body.block.ops if isinstance(op, NnBroadcastOp)]
     assert len(broadcast_ops) == 1

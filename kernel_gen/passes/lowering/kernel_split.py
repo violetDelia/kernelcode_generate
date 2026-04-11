@@ -21,7 +21,12 @@ from __future__ import annotations
 
 from xdsl.dialects.builtin import ModuleOp
 
-from kernel_gen.passes.lowering.tile import TilePass, TilePassError, _TileStepValueOp
+from kernel_gen.passes.lowering.tile import (
+    TilePass,
+    TilePassError,
+    _TileStepValueOp,
+    _TileSymbolLiteralOp,
+)
 
 
 class KernelSplitError(TilePassError):
@@ -86,10 +91,12 @@ class KernelSplitPass(TilePass):
 
 
 _KernelSplitTileValueOp = _TileStepValueOp
+_KernelSplitSymbolLiteralOp = _TileSymbolLiteralOp
 
 
 __all__ = [
     "KernelSplitPass",
     "KernelSplitError",
     "_KernelSplitTileValueOp",
+    "_KernelSplitSymbolLiteralOp",
 ]

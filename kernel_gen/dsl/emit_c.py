@@ -1252,6 +1252,15 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
         return _emit_assignment(op, ctx)
     if isinstance(op, arith.ConstantOp):
         return ""
+    if op.name in {"tile.symbol_literal", "tile.step_value"}:
+        if not op.results:
+            raise _emit_error(ctx, op.name, "missing result")
+        result_type = op.results[0].type
+        if not isinstance(result_type, SymbolValueType):
+            raise _emit_error(ctx, op.name, "result must be !symbol.int")
+        value = result_type.get_value()
+        ctx.bind_name(op.results[0], str(value))
+        return ""
     if ctx.target == "npu_demo":
         if isinstance(op, (ArchGetThreadIdOp, ArchGetThreadNumOp)):
             return _emit_npu_query_stmt(op, ctx)

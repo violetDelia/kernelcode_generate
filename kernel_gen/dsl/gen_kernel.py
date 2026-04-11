@@ -84,7 +84,7 @@ def _walk_ops(op: Operation) -> list[Operation]:
 
 def _is_kernel_split_codegen_function(func_op: func.FuncOp) -> bool:
     ops = list(func_op.body.block.ops)
-    return any(op.name in {"tuner.param", "kernel_split.tile_value"} for op in ops)
+    return any(op.name in {"tuner.param", "kernel_split.tile_value", "tile.step_value"} for op in ops)
 
 
 def _validate_kernel_split_codegen_contract(func_op: func.FuncOp, ctx: EmitCContext) -> None:
@@ -122,7 +122,7 @@ def _validate_kernel_split_codegen_contract(func_op: func.FuncOp, ctx: EmitCCont
         raise _error(ctx, func_name, "KernelSplitMalformed: missing explicit split structure (symbol.for)")
     if not any(op.name == "tuner.param" for op in ops):
         raise _error(ctx, func_name, "KernelSplitMalformed: missing tuner.param")
-    if not any(op.name == "kernel_split.tile_value" for op in ops):
+    if not any(op.name in {"kernel_split.tile_value", "tile.step_value"} for op in ops):
         raise _error(ctx, func_name, "KernelSplitMalformed: missing kernel_split.tile_value")
 
     if any(item.name == "func.call" for item in _walk_ops(func_op)):
@@ -1426,7 +1426,7 @@ class _KernelEmitter:
 
         lines: list[str] = []
         for op in func_op.body.block.ops:
-            if op.name == "kernel_split.symbol_literal":
+            if op.name in {"kernel_split.symbol_literal", "tile.symbol_literal"}:
                 if not op.results:
                     raise _error(
                         self.ctx,
@@ -1458,7 +1458,7 @@ class _KernelEmitter:
                     emitted_tile_dims.add(dim_name)
                 continue
 
-            if op.name == "kernel_split.tile_value":
+            if op.name in {"kernel_split.tile_value", "tile.step_value"}:
                 if not op.operands or not op.results:
                     raise _error(
                         self.ctx,

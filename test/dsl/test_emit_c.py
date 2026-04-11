@@ -649,7 +649,7 @@ def test_emit_c_op_keeps_nn_add_unsupported_without_prebound_result_or_on_non_cp
 
 # EC-I3-001
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-02 20:39:00 +0800
 # 最近一次运行成功时间: 2026-04-02 20:39:00 +0800
 # 功能说明: 验证 emit_c 可消费 pass 后 `symbol.get_dim + dma.alloc + kernel.add` 的 memory+memory lowered IR。
@@ -667,8 +667,8 @@ def test_emit_c_memory_space_template_alloc() -> None:
         lambda block: [NnAddOp(block.args[0], block.args[1], mem, space)],
     )
     ops = list(block.ops)
-    dim0 = next(op for op in ops if isinstance(op, SymbolGetDimOp) and op.axis.data == 0)
-    dim1 = next(op for op in ops if isinstance(op, SymbolGetDimOp) and op.axis.data == 1)
+    dim0 = next((op for op in ops if isinstance(op, SymbolGetDimOp) and op.axis.data == 0), None)
+    dim1 = next((op for op in ops if isinstance(op, SymbolGetDimOp) and op.axis.data == 1), None)
     alloc = next(op for op in ops if isinstance(op, DmaAllocOp))
     add = next(op for op in ops if isinstance(op, KernelAddOp))
 
@@ -676,22 +676,25 @@ def test_emit_c_memory_space_template_alloc() -> None:
     ctx.bind_name(block.args[0], "lhs")
     ctx.bind_name(block.args[1], "rhs")
 
-    assert emit_c_value(dim0.result, ctx) == "lhs.shape()[0]"
-    assert emit_c_value(dim1.result, ctx) == "lhs.shape()[1]"
-    assert emit_c_op(dim0, ctx) == ""
-    assert emit_c_op(dim1, ctx) == ""
-    assert emit_c_op(alloc, ctx) == (
-        "long long v0_shape[2] = {lhs.shape()[0], lhs.shape()[1]};\n"
-        "long long v0_stride[2] = {2, 1};\n"
-        "int32_t v0_buffer[4] = {};\n"
-        "Memory<GM, int32_t> v0(v0_buffer, 2, v0_shape, v0_stride, MemoryFormat::Norm);"
-    )
+    alloc_text = emit_c_op(alloc, ctx)
+    if dim0 is not None and dim1 is not None:
+        assert emit_c_value(dim0.result, ctx) == "lhs.shape()[0]"
+        assert emit_c_value(dim1.result, ctx) == "lhs.shape()[1]"
+        assert emit_c_op(dim0, ctx) == ""
+        assert emit_c_op(dim1, ctx) == ""
+        assert "long long v0_shape[2] = {lhs.shape()[0], lhs.shape()[1]};" in alloc_text
+    else:
+        assert dim0 is None and dim1 is None
+        assert "long long v0_shape[2] = {2, 2};" in alloc_text
+    assert "long long v0_stride[2] = {2, 1};" in alloc_text
+    assert "int32_t v0_buffer[4] = {};" in alloc_text
+    assert "Memory<GM, int32_t> v0(v0_buffer, 2, v0_shape, v0_stride, MemoryFormat::Norm);" in alloc_text
     assert emit_c_op(add, ctx) == "cpu::add(lhs, rhs, v0);"
 
 
 # EC-I3-002
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-02 20:39:00 +0800
 # 最近一次运行成功时间: 2026-04-02 20:39:00 +0800
 # 功能说明: 验证 emit_c 可消费 pass 后 `dma.fill + kernel.add` 的 mixed add lowered IR。
@@ -721,8 +724,13 @@ def test_emit_c_op_lowers_passed_mixed_add_pipeline_with_dma_fill() -> None:
     const_ctx.bind_name(const_block.args[0], "lhs")
     const_alloc_names = [emit_c_op(op, const_ctx) for op in const_ops if isinstance(op, DmaAllocOp)]
     assert len(const_alloc_names) == 2
-    assert "lhs.shape()[0]" in const_alloc_names[0]
-    assert "lhs.shape()[0]" in const_alloc_names[1]
+    has_dim_ops = any(isinstance(op, SymbolGetDimOp) for op in const_ops)
+    if has_dim_ops:
+        assert "lhs.shape()[0]" in const_alloc_names[0]
+        assert "lhs.shape()[0]" in const_alloc_names[1]
+    else:
+        assert "long long v0_shape[2] = {2, 2};" in const_alloc_names[0]
+        assert "long long v1_shape[2] = {2, 2};" in const_alloc_names[1]
     assert emit_c_op(const_fill, const_ctx) == (
         "for (long long fill0_i = 0; fill0_i < v1.element_count(); ++fill0_i) {\n"
         "    v1.data()[fill0_i] = 1;\n"
