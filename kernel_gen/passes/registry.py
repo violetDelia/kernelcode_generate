@@ -244,28 +244,10 @@ def load_builtin_passes() -> None:
     ):
         register_pass(pass_cls)
 
-    @register_pipeline("default-lowering")
-    def _build_default_lowering_pipeline() -> PassManager:
-        """构造默认 lowering pipeline。
+    from kernel_gen.passes.pipeline import default_lowering as _default_lowering_pipeline
 
-        创建者: 睡觉小分队
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 返回默认 lowering 链路的 PassManager。
-
-        使用示例:
-        - pm = build_registered_pipeline("default-lowering")
-
-        关联文件:
-        - spec: [spec/pass/registry.md](spec/pass/registry.md)
-        - test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
-        - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
-        """
-
-        from .pass_manager import build_default_lowering_pass_manager
-
-        return build_default_lowering_pass_manager()
+    if "default-lowering" not in _PIPELINE_REGISTRY:
+        register_pipeline("default-lowering")(_default_lowering_pipeline.build_default_lowering_pipeline)
 
     _BUILTINS_LOADED = True
 

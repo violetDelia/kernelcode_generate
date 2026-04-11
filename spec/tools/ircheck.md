@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`金铲铲大作战`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/tools/ircheck.md`](../../spec/tools/ircheck.md)
 - `功能实现`：[`kernel_gen/tools/ircheck.py`](../../kernel_gen/tools/ircheck.py)
 - `test`：
@@ -65,7 +65,7 @@
 - `COMPILE_ARGS:` 只支持两种写法：
   - `--pass <pass-name>`
   - `--pipeline <pipeline-name>`
-- `ircheck` 不维护自己的 pass 名称表；它只通过 [`spec/pass/registry.md`](../../spec/pass/registry.md) 定义的注册接口解析名字。
+- `ircheck` 不维护自己的 pass/pipeline 名称表；它只通过 [`spec/pass/registry.md`](../../spec/pass/registry.md) 定义的注册接口解析名字。
 - 输出文本：
   - 成功：标准输出仅打印 `true`
   - 失败：标准输出第一行打印 `false`，后续打印最小失败说明（至少包含错误短语与触发原因）
@@ -173,6 +173,7 @@ assert result.ok is True
   1. 调用 `load_builtin_passes()`
   2. `--pass <name>`：调用 `build_registered_pass(name)` 得到 `Pass` 实例并执行
   3. `--pipeline <name>`：调用 `build_registered_pipeline(name)` 得到 `PassManager` 并执行
+- 名称解析仅走 registry 提供的接口，不直接 import pipeline builder。
 - 多 case 执行语义：
   1. 按文件中的 case block 顺序逐个执行；
   2. 任一 case 失败则立即返回（fail-fast）；

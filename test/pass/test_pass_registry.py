@@ -222,10 +222,10 @@ def test_list_registered_are_sorted() -> None:
 
 # TC-REGISTRY-008
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-08 21:47:00 +0800
 # 最近一次运行成功时间: 2026-04-08 21:47:00 +0800
-# 功能说明: 验证 load_builtin_passes 满足幂等性，并提供基础内置 pass/pipeline。
+# 功能说明: 验证 load_builtin_passes 满足幂等性，并提供基础内置 pass/pipeline 与默认 lowering pipeline。
 # 使用示例: pytest -q test/pass/test_pass_registry.py -k test_load_builtin_passes_is_idempotent
 # 对应功能实现文件路径: kernel_gen/passes/registry.py
 # 对应 spec 文件路径: spec/pass/registry.md
@@ -235,3 +235,7 @@ def test_load_builtin_passes_is_idempotent() -> None:
     load_builtin_passes()
     assert "no-op" in list_registered_passes()
     assert "no-op-pipeline" in list_registered_pipelines()
+    assert "default-lowering" in list_registered_pipelines()
+    pm = build_registered_pipeline("default-lowering")
+    assert isinstance(pm, PassManager)
+    assert pm.name == "default-lowering"

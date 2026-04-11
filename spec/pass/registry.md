@@ -8,7 +8,7 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`金铲铲大作战`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/pass/registry.md`](../../spec/pass/registry.md)
 - `功能实现`：[`kernel_gen/passes/registry.py`](../../kernel_gen/passes/registry.py)
 - `test`：[`test/pass/test_pass_registry.py`](../../test/pass/test_pass_registry.py)
@@ -108,8 +108,8 @@ from kernel_gen.passes.pass_manager import PassManager
 from kernel_gen.passes.registry import register_pipeline
 
 @register_pipeline("default-lowering")
-def build_default_lowering() -> PassManager:
-    pm = PassManager(name="lowering")
+def build_default_lowering_pipeline() -> PassManager:
+    pm = PassManager(name="default-lowering")
     # pm.add_pass(...)
     return pm
 ```
@@ -177,6 +177,7 @@ pm = build_registered_pipeline("default-lowering")
 注意事项：
 
 - 调用方应在首次查询前调用 `load_builtin_passes()`。
+- 工具侧（如 ircheck）仅通过该接口解析 pipeline 名称，不直接 import pipeline builder。
 - builder 返回值必须为 `PassManager`；否则必须视为失败。
 
 返回与限制：
