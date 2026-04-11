@@ -6,6 +6,7 @@
 功能说明:
 - 定义仅表示整数符号值语义的 symbol dialect。
 - 提供 `SymbolExprAttr`、`SymbolValueType`、`SymbolDimType`、`symbol.add/sub/mul/div/floordiv`、`symbol.eq/ne/lt/le/gt/ge`、`symbol.to_int/symbol.to_float` 与 `symbol.get_dim/get_stride` 查询 op，不区分 `int8/int64` 等整型宽度。
+- 在导入 sympy 前设置 `SYMPY_GMPY=0`，规避外部 gmpy 引发的 SystemError。
 
 使用示例:
 - from kernel_gen.dialect.symbol import Symbol, SymbolAddOp, SymbolConstOp, SymbolDivOp, SymbolEqOp, SymbolFloorDivOp, SymbolSubOp, SymbolMulOp, SymbolToIntOp, SymbolExprAttr, SymbolGetDimOp, SymbolGetStrideOp, SymbolValueType
@@ -19,11 +20,13 @@
 from __future__ import annotations
 
 import ast as py_ast
+import os
 import re
 from collections.abc import Sequence
 from typing import ClassVar
 
 from kernel_gen.common.errors import _ERROR_TEMPLATE
+os.environ.setdefault("SYMPY_GMPY", "0")
 import sympy as sp
 from xdsl.dialects.builtin import IntAttr, IntegerType, StringAttr, f32, i1, i32
 from xdsl.ir import Attribute, Block, Dialect, Operation, ParametrizedAttribute, Region, SSAValue, TypeAttribute

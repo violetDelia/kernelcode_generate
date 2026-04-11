@@ -1,7 +1,7 @@
 """gen_kernel tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 func.func 到目标函数源码的组装行为。
@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
 import sys
 import importlib
 import subprocess
@@ -481,6 +482,7 @@ def _compile_and_run_npu_demo_add_barrier_source(source: str, *, prove_barrier_r
     - 把 `gen_kernel(target="npu_demo")` 生成的 `add_barrier` 双函数源码拼接到最小可执行程序中。
     - 在可执行程序里绑定 `add_barrier` / `add_barrier_body` 符号，锁定生成入口签名与源码可编译性。
     - 可选追加“线程 0 故意慢一步”的 barrier 探针，证明其他线程不会越过同一次 launch 的共享 barrier。
+    - 编译失败时追加 g++ 版本与命令信息，便于复现链接异常。
 
     使用示例:
     - _compile_and_run_npu_demo_add_barrier_source(source, prove_barrier_runtime=True)
@@ -559,32 +561,59 @@ int main() {{
 }}
 """
 
+    gpp_path = shutil.which("g++")
+    if gpp_path is None:
+        raise AssertionError("g++ not found in PATH; please install g++ to reproduce this test")
+
+    gpp_version = subprocess.run(
+        ["g++", "--version"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    gpp_version_text = gpp_version.stdout.strip() or gpp_version.stderr.strip()
+
     with tempfile.TemporaryDirectory() as tmpdir:
         source_path = Path(tmpdir) / "gen_kernel_npu_demo_add_barrier.cpp"
         binary_path = Path(tmpdir) / "gen_kernel_npu_demo_add_barrier"
         source_path.write_text(cpp_source, encoding="utf-8")
 
+        compile_cmd = [
+            "g++",
+            "-std=c++17",
+            "-pthread",
+            "-I",
+            str(REPO_ROOT),
+            str(source_path),
+            "-o",
+            str(binary_path),
+        ]
+
         compile_result = subprocess.run(
-            [
-                "g++",
-                "-std=c++17",
-                "-pthread",
-                "-I",
-                str(REPO_ROOT),
-                str(source_path),
-                "-o",
-                str(binary_path),
-            ],
+            compile_cmd,
             check=False,
             capture_output=True,
             text=True,
         )
         if compile_result.returncode != 0:
-            raise AssertionError(
-                "g++ compile failed:\n"
-                f"stdout:\n{compile_result.stdout}\n"
-                f"stderr:\n{compile_result.stderr}"
+            fallback_cmd = [*compile_cmd, "-latomic"]
+            fallback_result = subprocess.run(
+                fallback_cmd,
+                check=False,
+                capture_output=True,
+                text=True,
             )
+            if fallback_result.returncode != 0:
+                raise AssertionError(
+                    "g++ compile failed:\n"
+                    f"command:\n{' '.join(compile_cmd)}\n"
+                    f"fallback:\n{' '.join(fallback_cmd)}\n"
+                    f"g++ version:\n{gpp_version_text}\n"
+                    f"stdout:\n{compile_result.stdout}\n"
+                    f"stderr:\n{compile_result.stderr}\n"
+                    f"fallback stdout:\n{fallback_result.stdout}\n"
+                    f"fallback stderr:\n{fallback_result.stderr}"
+                )
 
         run_result = subprocess.run(
             [str(binary_path)],

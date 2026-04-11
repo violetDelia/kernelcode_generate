@@ -1,10 +1,12 @@
 """NN dialect definitions.
 
 创建者: 小李飞刀
-最后一次更改: 大闸蟹
+最后一次更改: 小李飞刀
 
 功能说明:
 - 定义 nn dialect 的 memory type、space attribute 与逐元素/广播 op。
+- 约定 `nn.truediv` 为唯一公开除法 op，`nn.div` alias 已移除。
+- `nn.select` 不在 nn dialect 中提供，相关 lowering 由 pass 层按 op 名称处理。
 
 使用示例:
 - from kernel_gen.dialect.nn import Nn, NnAddOp, NnBroadcastOp, NnMemorySpaceAttr, NnMemoryType
@@ -437,6 +439,8 @@ def _static_int_from_operand(operand: SSAValue) -> int | None:
     owner_name = getattr(owner, "name", None)
     if owner_name == "arith.constant":
         value_attr = owner.attributes.get("value")
+        if value_attr is None:
+            value_attr = getattr(owner, "value", None)
         if isinstance(value_attr, IntegerAttr):
             return int(value_attr.value.data)
         if isinstance(value_attr, IntAttr):
