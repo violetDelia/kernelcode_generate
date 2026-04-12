@@ -38,8 +38,7 @@
 - `case block`：被 `// -----` 分隔出来的一个独立 case 单元。
 - `directive`：头部注释中的指令行，包括 `COMPILE_ARGS:` 与 `CHECK*:`。
 - `positive check`：`CHECK:` 与 `CHECK-NEXT:`，用于定义“顺序/相邻”的命中锚点。
-- `compile args`：`COMPILE_ARGS:` 指令后的一段参数串，支持 `--pass <name>` / `--pipeline <name>` 及其带 `{k=v}` 选项的写法。
-- `options`：由 `{k=v,...}` 解析得到的字典，key/value 均为字符串。
+- `compile args`：`COMPILE_ARGS:` 指令后的一段参数串，支持 `--pass <name>` / `--pipeline <name>`，以及带 `{k=v}` 选项块的 `--pass "<name>{k=v}"` / `--pipeline "<name>{k=v}"`。
 
 ## 目标
 
@@ -63,13 +62,19 @@
 
 - 指令集只支持三条检查指令：`CHECK:`、`CHECK-NOT:`、`CHECK-NEXT:`；不支持正则、变量捕获、`CHECK-LABEL`。
 - 多 case 仅支持固定分隔符 `// -----`；不支持 case 命名、标签跳转或条件执行。
-- `COMPILE_ARGS:` 支持以下写法：
+- `COMPILE_ARGS:` 仅支持以下写法：
   - `--pass <pass-name>`
   - `--pass "<pass-name>{k=v}"`
   - `--pass "<pass-name>{k1=v1,k2=v2}"`
   - `--pipeline <pipeline-name>`
   - `--pipeline "<pipeline-name>{k=v}"`
   - `--pipeline "<pipeline-name>{k1=v1,k2=v2}"`
+- 当 `compile args` 中包含 `{` / `}` 时，必须使用单引号或双引号包住整个 `<name>{k=v}`；未加引号视为不支持的写法。
+- 选项块语法为 `name={k=v[,k=v]}`：
+  - `k` 与 `v` 去掉首尾空白后都不得为空；
+  - `k` 不可重复；
+  - 不支持嵌套 `{}`、不支持列表、不支持再包引号；
+  - 选项值按原始字符串透传给 registry，不在工具层解析为布尔或数字。
 - `ircheck` 不维护自己的 pass/pipeline 名称表，也不判断 option 业务语义；它只通过 [`spec/pass/registry.md`](../../spec/pass/registry.md) 定义的注册接口解析名字与选项。
 - 输出文本：
   - 成功：标准输出仅打印 `true`
@@ -172,11 +177,9 @@ assert result.ok is True
 注意事项：
 
 - `COMPILE_ARGS` 解析规则：
-  - 支持 `--pass <name>` 与 `--pipeline <name>`
-  - 支持 `--pass "<name>{k=v}"` 与 `--pipeline "<name>{k=v}"`
-  - 大括号内为逗号分隔的 `k=v` 列表，`k` 与 `v` 不能为空
-  - 不支持嵌套字典、不支持列表、不支持引号内再套引号
-  - 解析得到的 `options` 仅保留字符串值，交由 registry 决定是否接受
+  - 支持 `--pass <name>` / `--pipeline <name>`
+  - 支持 `--pass "<name>{k=v}"` / `--pipeline "<name>{k=v}"`
+  - 选项块语法非法或未加引号时，必须视为不支持
 - 名称解析与执行顺序要求：
   1. 调用 `load_builtin_passes()`
   2. `--pass <name>`：调用 `build_registered_pass(name, options)` 得到 `Pass` 实例并执行
@@ -193,7 +196,7 @@ assert result.ok is True
 - 若 case 文本解析失败，返回 `ok=False`，`exit_code=2`，且 `message` 前缀为：
   - `IrcheckParseError: invalid ircheck header`
   - `IrcheckParseError: missing input ir`
-- 若 `COMPILE_ARGS` 不支持（含 option 语法不合法），返回 `ok=False`，`exit_code=2`，且 `message` 前缀为：
+- 若 `COMPILE_ARGS` 不支持（含选项块语法非法或未加引号），返回 `ok=False`，`exit_code=2`，且 `message` 前缀为：
   - `IrcheckCompileArgsError: unsupported compile args`
 - 若 pass/pipeline 执行抛错或返回不可打印的对象，返回 `ok=False`，`exit_code=2`，且 `message` 前缀为：
   - `IrcheckRunError: pass execution failed`

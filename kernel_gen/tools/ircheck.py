@@ -430,7 +430,7 @@ def _parse_ircheck_text(text: str, *, source_path: str | None, line_offset: int 
     """解析 case 文本为结构化对象。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 按 `spec/tools/ircheck.md` 解析头部注释区与输入 IR 正文。
@@ -526,7 +526,7 @@ def _run_ircheck_case(case: IrcheckCase) -> IrcheckResult:
     """执行单个解析后的 case。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 解析 compile args 并通过 pass registry 执行 pass/pipeline。
@@ -601,19 +601,20 @@ def _run_ircheck_case(case: IrcheckCase) -> IrcheckResult:
 
 
 def _parse_name_and_options(value: str) -> tuple[str, dict[str, str]] | None:
-    """解析 `<name>{k=v}` 片段为 name 与 options。
+    """解析 name 与可选的 {k=v} 选项块。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 支持 `name` 与 `name={k=v,k2=v2}` 两种形态。
-    - `k` 与 `v` 不能为空，逗号分隔多个条目。
+    - 支持 `name` 与 `name={k=v}` 两种形态。
+    - option 仅接受 `k=v` 形式，逗号分隔，且 key 不可重复。
+    - `k` 与 `v` 去掉首尾空白后均不可为空。
     - 发现花括号但不符合语法时返回 `None`。
 
     使用示例:
-    - parsed = _parse_name_and_options("tile={analysis-only=true}")
-    - assert parsed == ("tile", {"analysis-only": "true"})
+    - _parse_name_and_options("tile") == ("tile", {})
+    - _parse_name_and_options("tile={analysis-only=true}") == ("tile", {"analysis-only": "true"})
 
     关联文件:
     - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
@@ -632,9 +633,7 @@ def _parse_name_and_options(value: str) -> tuple[str, dict[str, str]] | None:
             return None
         options: dict[str, str] = {}
         for item in options_text.split(","):
-            if not item:
-                return None
-            if "=" not in item:
+            if not item or "=" not in item:
                 return None
             key, raw_value = item.split("=", 1)
             key = key.strip()
@@ -654,7 +653,7 @@ def _parse_compile_args(compile_args: str) -> tuple[str, str, dict[str, str]] | 
     """解析 `COMPILE_ARGS:` 字段为执行模式。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 支持以下写法：
@@ -673,7 +672,7 @@ def _parse_compile_args(compile_args: str) -> tuple[str, str, dict[str, str]] | 
     """
 
     if "{" in compile_args or "}" in compile_args:
-        if re.match(r'^\s*(--pass|--pipeline)\s+(".*"|\\\'.*\\\')\s*$', compile_args) is None:
+        if re.match(r'^\s*(--pass|--pipeline)\s+("[^"]*"|\'[^\']*\')\s*$', compile_args) is None:
             return None
     try:
         tokens = shlex.split(compile_args)
@@ -697,7 +696,7 @@ def _build_default_context() -> Context:
     """构造用于解析与打印的默认 xdsl Context。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 加载 `builtin` / `func` / `arith` 与仓库内公开 dialect。
@@ -730,7 +729,7 @@ def _run_compile_mode(module: Operation, compile_mode: tuple[str, str, dict[str,
     """按 compile mode 执行 pass 或 pipeline。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - `("pass", name, options)`：构造并运行单个 pass。

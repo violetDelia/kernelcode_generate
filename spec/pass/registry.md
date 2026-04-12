@@ -27,7 +27,7 @@
 - `pass name`：对外公开的 pass 标识字符串（来自 `Pass.name`）。
 - `pipeline name`：对外公开的 pipeline 标识字符串。
 - `constructible`：对 `build_registered_pass(name)` 来说，表示该 pass 可用无参方式构造为实例；若构造失败则视为不可构造。
-- `options`：传入注册层的 `{k: v}` 字典，key/value 均为字符串。
+- `options`：构造 pass / pipeline 时的键值字典（`dict[str, str]`）；空字典与 `None` 表示不提供选项。
 
 ## 目标
 
@@ -46,6 +46,7 @@
 - 重复注册同名 pass 或 pipeline 必须立即失败，不得覆盖旧项。
 - 为便于工具与测试编写最小用例，仓库内置 pass 至少应包含：
   - `no-op`：恒等 pass（对输入 module 不做任何改写），且必须满足“可构造”要求（`pass_cls()` 可成功执行）。
+- registry 不解析 `options` 的语义；`options` 仅按字典透传给 pass 或 pipeline 构造入口。
 
 ## 公开接口
 
@@ -58,6 +59,11 @@
 注意事项：
 
 - `PassRegistryError` 的 `str(e)` 必须以本文件列出的错误短语之一开头，便于测试做机械匹配。
+- 与 `options` 相关的错误短语：
+  - `PassRegistryError: pass '<name>' does not accept options`
+  - `PassRegistryError: pass '<name>' option error`
+  - `PassRegistryError: pipeline '<name>' does not accept options`
+  - `PassRegistryError: pipeline '<name>' option error`
 
 ### `register_pass(pass_cls)`
 
@@ -119,6 +125,7 @@ def build_default_lowering_pipeline() -> PassManager:
 注意事项：
 
 - 被装饰函数必须返回 `PassManager`。
+- 若 pipeline 需要接收选项，builder 应提供 `builder(options: dict[str, str]) -> PassManager` 形态。
 - 若同名 pipeline 已存在，必须抛出 `PassRegistryError`。
 
 返回与限制：
@@ -134,7 +141,7 @@ def build_default_lowering_pipeline() -> PassManager:
 参数说明：
 
 - `name (str)`：已注册 pass 名称。
-- `options (dict[str, str] | None)`：可选参数字典；为空或 `None` 时视为无参构造。
+- `options (dict[str, str] | None)`：可选选项字典；`None` 或空字典表示不提供选项。
 
 使用示例：
 
@@ -142,6 +149,7 @@ def build_default_lowering_pipeline() -> PassManager:
 from kernel_gen.passes.registry import load_builtin_passes, build_registered_pass
 
 load_builtin_passes()
+pass_obj = build_registered_pass("tile")
 pass_obj = build_registered_pass("tile", {"analysis-only": "true"})
 ```
 
@@ -149,9 +157,10 @@ pass_obj = build_registered_pass("tile", {"analysis-only": "true"})
 
 - 调用方应在首次查询前调用 `load_builtin_passes()`，以保证内置模块已完成 import 与装饰器注册。
 - pass 构造规则：
-  - `options` 为空或 `None`：以无参构造为准（等价于 `pass_cls()` 可成功执行）
-  - `options` 非空：若 pass 类提供 `from_options(options)` 则调用该入口；否则必须报错
-  - 若构造抛错或缺少无参构造路径，必须报告“不可构造”
+  - `options` 为空或 `None`：以无参构造为准（等价于 `pass_cls()` 可成功执行）。
+  - `options` 非空：pass 类必须提供 `from_options(options)` 构造入口。
+  - `from_options` 失败或返回非 `Pass` 实例时，必须报告 `option error`。
+  - 无参构造失败时必须报告“不可构造”。
 
 返回与限制：
 
@@ -159,6 +168,7 @@ pass_obj = build_registered_pass("tile", {"analysis-only": "true"})
   - `PassRegistryError: unknown pass '<name>'`
   - `PassRegistryError: pass '<name>' is not constructible`
   - `PassRegistryError: pass '<name>' does not accept options`
+  - `PassRegistryError: pass '<name>' option error`
 
 ### `build_registered_pipeline(name: str, options: dict[str, str] | None = None) -> PassManager`
 
@@ -169,7 +179,7 @@ pass_obj = build_registered_pass("tile", {"analysis-only": "true"})
 参数说明：
 
 - `name (str)`：已注册 pipeline 名称。
-- `options (dict[str, str] | None)`：可选参数字典；为空或 `None` 时视为无参构造。
+- `options (dict[str, str] | None)`：可选选项字典；`None` 或空字典表示不提供选项。
 
 使用示例：
 
@@ -177,6 +187,7 @@ pass_obj = build_registered_pass("tile", {"analysis-only": "true"})
 from kernel_gen.passes.registry import load_builtin_passes, build_registered_pipeline
 
 load_builtin_passes()
+pm = build_registered_pipeline("default-lowering")
 pm = build_registered_pipeline("default-lowering", {"bufferize": "true"})
 ```
 
@@ -185,7 +196,7 @@ pm = build_registered_pipeline("default-lowering", {"bufferize": "true"})
 - 调用方应在首次查询前调用 `load_builtin_passes()`。
 - 工具侧（如 ircheck）仅通过该接口解析 pipeline 名称，不直接 import pipeline builder。
 - `options` 为空或 `None` 时，调用 builder 的无参路径。
-- `options` 非空时，builder 必须接受 `options` 参数；否则必须报错。
+- `options` 非空时，builder 必须接受 `options` 参数；否则必须报告“不接受选项”。
 - builder 返回值必须为 `PassManager`；否则必须视为失败。
 
 返回与限制：
@@ -194,6 +205,7 @@ pm = build_registered_pipeline("default-lowering", {"bufferize": "true"})
   - `PassRegistryError: unknown pipeline '<name>'`
   - `PassRegistryError: pipeline '<name>' did not return PassManager`
   - `PassRegistryError: pipeline '<name>' does not accept options`
+  - `PassRegistryError: pipeline '<name>' option error`
 
 ### `load_builtin_passes() -> None`
 

@@ -1,7 +1,7 @@
 """ircheck runner tests.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 kernel_gen/tools/ircheck.py 的 run 行为：compile args 解析、pass/pipeline 执行、检查语义与退出码。
@@ -39,11 +39,11 @@ _reset_registry_for_test = registry_module._reset_registry_for_test
 register_pass = registry_module.register_pass
 register_pipeline = registry_module.register_pipeline
 
+from kernel_gen.tools.ircheck import run_ircheck_text
+
 pass_manager_module = importlib.import_module("kernel_gen.passes.pass_manager")
 Pass = pass_manager_module.Pass
 PassManager = pass_manager_module.PassManager
-
-from kernel_gen.tools.ircheck import run_ircheck_text
 
 
 @pytest.fixture(autouse=True)
@@ -202,6 +202,110 @@ def test_run_ircheck_text_check_not_failure_between_positives() -> None:
     assert result.message.startswith("IrcheckMatchError: CHECK-NOT matched forbidden text")
     assert result.failed_check is not None
     assert result.failed_check.kind == "CHECK-NOT"
+
+
+# TC-IRCHECK-RUN-020
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-12 11:20:00 +0800
+# 最近一次运行成功时间: 2026-04-12 11:20:00 +0800
+# 功能说明: 验证带 options 的 pass 可被解析并透传给 from_options。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_pass_with_options
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+def test_run_ircheck_text_pass_with_options() -> None:
+    @register_pass
+    class OptionPass(Pass):
+        name = "option-pass"
+        seen_options: dict[str, str] = {}
+
+        @classmethod
+        def from_options(cls, options: dict[str, str]) -> "OptionPass":
+            cls.seen_options = dict(options)
+            return cls()
+
+        def run(self: "OptionPass", target: object) -> object:
+            return target
+
+    text = f"""// COMPILE_ARGS: --pass "option-pass={{mode=fast}}"
+// CHECK: builtin.module
+
+{_SIMPLE_IR}"""
+    result = run_ircheck_text(text, source_path="inline.ircheck")
+    assert result.ok is True
+    assert OptionPass.seen_options == {"mode": "fast"}
+
+
+# TC-IRCHECK-RUN-021
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-12 11:20:00 +0800
+# 最近一次运行成功时间: 2026-04-12 11:20:00 +0800
+# 功能说明: 验证未加引号的 options 写法会被视为不支持的 compile args。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_unquoted_options_rejected
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+def test_run_ircheck_text_unquoted_options_rejected() -> None:
+    text = f"""// COMPILE_ARGS: --pass option-pass={{mode=fast}}
+// CHECK: builtin.module
+
+{_SIMPLE_IR}"""
+    result = run_ircheck_text(text, source_path="inline.ircheck")
+    assert result.ok is False
+    assert result.exit_code == 2
+    assert result.message is not None
+    assert result.message.startswith("IrcheckCompileArgsError: unsupported compile args")
+
+
+# TC-IRCHECK-RUN-022
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-12 11:20:00 +0800
+# 最近一次运行成功时间: 2026-04-12 11:20:00 +0800
+# 功能说明: 验证非法 options 语法会回落到 compile args 不支持路径。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_invalid_options_syntax
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+def test_run_ircheck_text_invalid_options_syntax() -> None:
+    text = f"""// COMPILE_ARGS: --pass "option-pass={{mode}}"
+// CHECK: builtin.module
+
+{_SIMPLE_IR}"""
+    result = run_ircheck_text(text, source_path="inline.ircheck")
+    assert result.ok is False
+    assert result.exit_code == 2
+    assert result.message is not None
+    assert result.message.startswith("IrcheckCompileArgsError: unsupported compile args")
+
+
+# TC-IRCHECK-RUN-023
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-12 11:20:00 +0800
+# 最近一次运行成功时间: 2026-04-12 11:20:00 +0800
+# 功能说明: 验证带 options 的 pipeline 会透传 options 并正常执行。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_pipeline_with_options
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+def test_run_ircheck_text_pipeline_with_options() -> None:
+    options_seen: dict[str, str] = {}
+
+    @register_pipeline("option-pipeline")
+    def _build_option_pipeline(options: dict[str, str]) -> PassManager:
+        options_seen.update(options)
+        return PassManager(name="option-pipeline")
+
+    text = f"""// COMPILE_ARGS: --pipeline "option-pipeline={{mode=fast}}"
+// CHECK: builtin.module
+
+{_SIMPLE_IR}"""
+    result = run_ircheck_text(text, source_path="inline.ircheck")
+    assert result.ok is True
+    assert options_seen == {"mode": "fast"}
 
 
 # TC-IRCHECK-RUN-006
