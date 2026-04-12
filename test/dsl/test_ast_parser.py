@@ -5,6 +5,7 @@
 
 功能说明:
 - 覆盖 kernel_gen/dsl/ast_parser.py 的解析入口与诊断路径。
+- 覆盖 for range(..., step=0) 的解析期拒绝诊断。
 
 当前覆盖率信息:
 - 当前覆盖率: 未统计（本任务验证未启用 coverage 统计）。
@@ -97,4 +98,24 @@ def test_ast_parser_rejects_invalid_helper_arity() -> None:
         return get_block_id(1)
 
     with pytest.raises(AstParseError, match="Unsupported get_block_id arity"):
+        _ = parse_function(kernel)
+
+
+# AST-P-004
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-13 09:40:00 +0800
+# 最近一次运行成功时间: 2026-04-13 09:40:00 +0800
+# 功能说明: for range(..., step=0) 在解析阶段直接报错。
+# 使用示例: pytest -q test/dsl/test_ast_parser.py -k test_ast_parser_rejects_zero_step
+# 对应功能实现文件路径: kernel_gen/dsl/ast_parser.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast_parser.py
+def test_ast_parser_rejects_zero_step() -> None:
+    def kernel(x: "Tensor[f32, 1]"):
+        for i in range(0, 4, 0):
+            x = x
+        return x
+
+    with pytest.raises(AstParseError, match="step must not be 0"):
         _ = parse_function(kernel)

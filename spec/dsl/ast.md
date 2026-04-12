@@ -47,6 +47,7 @@
 - `MemorySpace` 由 [`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md) 定义；AST 仅在 helper 参数校验中引用该枚举，不定义成员或语义。
 - `ArchQueryAST` 归属 AST 层，仅覆盖无参 arch builtin 查询入口，结果类型与 target/hardware 的解析由下游层负责。
 - `for` 循环仅支持 `range(...)`、`LoopRange(...)` 或 `loop(...)` 的 1~3 参数形式，并解析为 `ForAST` 的 `start/end/step` 字段。
+- `for` 循环的 `step=0` 必须在解析阶段直接报错。
 - `for` 循环体内不允许出现 `return`；出现即视为语法不支持并报错。
 - 显式 `-> None` 返回注解表示函数无公开返回值；该场景允许函数体只包含语句且省略 `return`。
 - AST 必须保留函数级返回语法元信息：`has_explicit_return`、`has_return_annotation`、`returns_none`。
@@ -110,6 +111,7 @@ func_ast = parse_function(add)
 - 注解解析规则以本文件与测试清单为准。
 - 标量注解最小支持 `int`、`bool`、`float`；张量注解最小支持字符串形式 `Tensor[...]` 与 `JoinedStr` 形式 `f"Tensor[...]"`。
 - 若参数未写注解，但在 `globals`/`builtins` 中存在同名 `SymbolDim` 或 `Memory` 对象，可按标量参数或张量参数推断。
+- `for` 循环的 `range/LoopRange/loop` 一旦出现 `step=0`，必须在解析阶段直接报错。
 - 若函数显式标注 `-> None`，则返回列表必须为空，且函数体可只包含语句并省略 `return`。
 - 若函数没有返回注解但存在显式 `return expr`，则 `FunctionAST.outputs` 必须保持为空，且：
   - `has_explicit_return == True`
@@ -326,6 +328,7 @@ ForAST(
 注意事项：
 
 - 解析 `range/LoopRange/loop` 的 1~3 参数时，`start`/`step` 省略值分别默认 `0/1`。
+- 若 `step` 在解析阶段可判定为 `0`（例如 `range(0, 10, 0)`），解析直接报错，不生成 `ForAST`。
 - 循环语义由下游生成阶段解释。
 
 返回与限制：返回不可变的数据结构实例。

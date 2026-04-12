@@ -1,7 +1,7 @@
 """DMA dialect definitions.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 定义 dma dialect 的 alloc/fill/copy/load/store/slice/deslice/view/reshape/cast/broadcast op 与 verifier 规则。
@@ -45,7 +45,7 @@ from xdsl.irdl import (
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolValueType
+from kernel_gen.dialect.symbol import SymbolIterType, SymbolValueType
 
 
 def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
@@ -124,10 +124,10 @@ def _operand_int_value(value: SSAValue) -> int | None:
     """尝试从 `!symbol.int<"expr">` SSA operand 恢复静态整型值。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 仅识别字面量整数表达式，例如 `!symbol.int<"4">`。
+    - 仅识别字面量整数表达式，例如 `!symbol.int<"4">` 或 `!symbol.iter<"4">`。
     - 其他符号表达式统一视为运行期值。
 
     使用示例:
@@ -139,7 +139,7 @@ def _operand_int_value(value: SSAValue) -> int | None:
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
-    if not isinstance(value.type, SymbolValueType):
+    if not isinstance(value.type, (SymbolValueType, SymbolIterType)):
         return None
     expr = value.type.expr.expr.data.strip()
     try:
@@ -172,6 +172,37 @@ def _verify_symbol_int_operands(
     for value in values:
         if not isinstance(value.type, SymbolValueType):
             raise VerifyException(f"{field_name} entries must be !symbol.int")
+        value.type.verify()
+        static_value = _operand_int_value(value)
+        if static_value is not None and static_value < min_value:
+            raise VerifyException(f"{field_name} entries must be >= {min_value}")
+    return values
+
+
+def _verify_symbol_index_operands(
+    values: Sequence[SSAValue], field_name: str, *, min_value: int
+) -> Sequence[SSAValue]:
+    """校验 `!symbol.int` / `!symbol.iter` operand 列表。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 确保 operand 类型为 `!symbol.int` 或 `!symbol.iter`。
+    - 若 operand 可静态恢复为整型常量，则施加最小值约束。
+
+    使用示例:
+    - _verify_symbol_index_operands(op.offsets, "offsets", min_value=0)
+
+    关联文件:
+    - spec: spec/dialect/dma.md
+    - test: test/dialect/test_dma_dialect.py
+    - 功能实现: kernel_gen/dialect/dma.py
+    """
+
+    for value in values:
+        if not isinstance(value.type, (SymbolValueType, SymbolIterType)):
+            raise VerifyException(f"{field_name} entries must be !symbol.int or !symbol.iter")
         value.type.verify()
         static_value = _operand_int_value(value)
         if static_value is not None and static_value < min_value:
@@ -749,11 +780,11 @@ class DmaAllocOp(IRDLOperation):
         """校验 dma.alloc。
 
         创建者: 金铲铲大作战
-        最后一次更改: 小李飞刀
+        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 结果类型必须为 nn.memory。
-        - dynamic_shape 支持全量 rank 列表或仅符号维度列表。
+        - dynamic_shape 支持空列表（全静态 shape）、全量 rank 列表或仅符号维度列表。
         - stride 按结果类型显式指定，不再额外限制布局。
 
         使用示例:
@@ -766,7 +797,7 @@ class DmaAllocOp(IRDLOperation):
         """
 
         result_type = _verify_memory_type(self.result.type, "result")
-        dynamic_shape = _verify_symbol_int_operands(self.dynamic_shape, "dynamic_shape", min_value=1)
+        dynamic_shape = _verify_symbol_int_operands(self.dynamic_shape, "dynamic_shape", min_value=0)
         _verify_dynamic_shape_matches_result(dynamic_shape, result_type.shape, "dynamic_shape")
 
 
@@ -1074,7 +1105,7 @@ class DmaLoadOp(IRDLOperation):
     name = "dma.load"
 
     source = operand_def(NnMemoryType)
-    offsets = var_operand_def(SymbolValueType)
+    offsets = var_operand_def(Attribute)
     sizes = var_operand_def(SymbolValueType)
     strides = var_operand_def(SymbolValueType)
     result = result_def(NnMemoryType)
@@ -1094,10 +1125,11 @@ class DmaLoadOp(IRDLOperation):
         """初始化 dma.load。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 设置 source、索引属性、结果类型与 space attribute。
+        - 设置 source、offsets/sizes/strides、结果类型与 space attribute。
+        - offsets 允许 `!symbol.int` 与 `!symbol.iter`。
 
         使用示例:
         - DmaLoadOp(source, offsets, sizes, strides, result_type, space)
@@ -1118,10 +1150,11 @@ class DmaLoadOp(IRDLOperation):
         """校验 dma.load。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 金铲铲大作战
 
         功能说明:
         - offsets/sizes/strides 长度与 source rank 一致。
+        - offsets 允许 `!symbol.int` 与 `!symbol.iter`。
         - result.shape == sizes 且 element_type/space 一致。
 
         使用示例:
@@ -1135,7 +1168,7 @@ class DmaLoadOp(IRDLOperation):
 
         source_type = _verify_memory_type(self.source.type, "source")
         result_type = _verify_memory_type(self.result.type, "result")
-        offsets = _verify_symbol_int_operands(self.offsets, "offsets", min_value=0)
+        offsets = _verify_symbol_index_operands(self.offsets, "offsets", min_value=0)
         sizes = _verify_symbol_int_operands(self.sizes, "sizes", min_value=1)
         strides = _verify_symbol_int_operands(self.strides, "strides", min_value=1)
         rank = len(source_type.shape.data)
@@ -1159,7 +1192,7 @@ class DmaStoreOp(IRDLOperation):
 
     source = operand_def(NnMemoryType)
     target = operand_def(NnMemoryType)
-    offsets = var_operand_def(SymbolValueType)
+    offsets = var_operand_def(Attribute)
     sizes = var_operand_def(SymbolValueType)
     strides = var_operand_def(SymbolValueType)
 
@@ -1176,10 +1209,11 @@ class DmaStoreOp(IRDLOperation):
         """初始化 dma.store。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 设置 source/target 与索引属性。
+        - 设置 source/target 与 offsets/sizes/strides。
+        - offsets 允许 `!symbol.int` 与 `!symbol.iter`。
 
         使用示例:
         - DmaStoreOp(source, target, offsets, sizes, strides)
@@ -1196,11 +1230,12 @@ class DmaStoreOp(IRDLOperation):
         """校验 dma.store。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 金铲铲大作战
 
         功能说明:
         - source.shape 必须与 sizes 对齐。
         - offsets/sizes/strides 长度与 target rank 一致。
+        - offsets 允许 `!symbol.int` 与 `!symbol.iter`。
 
         使用示例:
         - DmaStoreOp(...).verify_()
@@ -1213,7 +1248,7 @@ class DmaStoreOp(IRDLOperation):
 
         source_type = _verify_memory_type(self.source.type, "source")
         target_type = _verify_memory_type(self.target.type, "target")
-        offsets = _verify_symbol_int_operands(self.offsets, "offsets", min_value=0)
+        offsets = _verify_symbol_index_operands(self.offsets, "offsets", min_value=0)
         sizes = _verify_symbol_int_operands(self.sizes, "sizes", min_value=1)
         strides = _verify_symbol_int_operands(self.strides, "strides", min_value=1)
         rank = len(target_type.shape.data)
@@ -1234,7 +1269,7 @@ class DmaSliceOp(IRDLOperation):
 
     target = operand_def(NnMemoryType)
     source = operand_def(NnMemoryType)
-    offsets = var_operand_def(SymbolValueType)
+    offsets = var_operand_def(Attribute)
     sizes = var_operand_def(SymbolValueType)
     strides = var_operand_def(SymbolValueType)
 
@@ -1254,7 +1289,8 @@ class DmaSliceOp(IRDLOperation):
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 设置 target/source 与索引属性。
+        - 设置 target/source 与 offsets/sizes/strides。
+        - offsets 允许 `!symbol.int` 与 `!symbol.iter`。
 
         使用示例:
         - DmaSliceOp(target, source, offsets, sizes, strides)
@@ -1275,6 +1311,7 @@ class DmaSliceOp(IRDLOperation):
 
         功能说明:
         - offsets/sizes/strides 长度与 source rank 一致。
+        - offsets 允许 `!symbol.int` 与 `!symbol.iter`。
         - target.shape == sizes 且 target/source element_type 一致。
         - 当前阶段 stride 必须为 1。
 
@@ -1289,7 +1326,7 @@ class DmaSliceOp(IRDLOperation):
 
         target_type = _verify_memory_type(self.target.type, "target")
         source_type = _verify_memory_type(self.source.type, "source")
-        offsets = _verify_symbol_int_operands(self.offsets, "offsets", min_value=0)
+        offsets = _verify_symbol_index_operands(self.offsets, "offsets", min_value=0)
         sizes = _verify_symbol_int_operands(self.sizes, "sizes", min_value=1)
         strides = _verify_symbol_int_operands(self.strides, "strides", min_value=1)
         rank = len(source_type.shape.data)
@@ -1312,7 +1349,7 @@ class DmaDesliceOp(IRDLOperation):
 
     source = operand_def(NnMemoryType)
     target = operand_def(NnMemoryType)
-    offsets = var_operand_def(SymbolValueType)
+    offsets = var_operand_def(Attribute)
     sizes = var_operand_def(SymbolValueType)
     strides = var_operand_def(SymbolValueType)
     result = result_def(NnMemoryType)
@@ -1331,10 +1368,11 @@ class DmaDesliceOp(IRDLOperation):
         """初始化 dma.deslice。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 设置 source/target、索引属性与结果类型。
+        - 设置 source/target、offsets/sizes/strides 与结果类型。
+        - offsets 允许 `!symbol.int` 与 `!symbol.iter`。
 
         使用示例:
         - DmaDesliceOp(source, target, offsets, sizes, strides, result_type)
@@ -1354,11 +1392,12 @@ class DmaDesliceOp(IRDLOperation):
         """校验 dma.deslice。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 金铲铲大作战
 
         功能说明:
         - source.shape 必须与 sizes 对齐。
         - offsets/sizes/strides 长度与 target rank 一致。
+        - offsets 允许 `!symbol.int` 与 `!symbol.iter`。
         - result type 必须与 target type 一致。
 
         使用示例:
@@ -1373,7 +1412,7 @@ class DmaDesliceOp(IRDLOperation):
         source_type = _verify_memory_type(self.source.type, "source")
         target_type = _verify_memory_type(self.target.type, "target")
         result_type = _verify_memory_type(self.result.type, "result")
-        offsets = _verify_symbol_int_operands(self.offsets, "offsets", min_value=0)
+        offsets = _verify_symbol_index_operands(self.offsets, "offsets", min_value=0)
         sizes = _verify_symbol_int_operands(self.sizes, "sizes", min_value=1)
         strides = _verify_symbol_int_operands(self.strides, "strides", min_value=1)
         rank = len(target_type.shape.data)
@@ -1395,7 +1434,7 @@ class DmaViewOp(IRDLOperation):
     name = "dma.view"
 
     source = operand_def(NnMemoryType)
-    offsets = var_operand_def(SymbolValueType)
+    offsets = var_operand_def(Attribute)
     shape = var_operand_def(SymbolValueType)
     stride = var_operand_def(SymbolValueType)
     result = result_def(NnMemoryType)
@@ -1417,6 +1456,7 @@ class DmaViewOp(IRDLOperation):
 
         功能说明:
         - 设置 source、动态 offsets/shape/stride operand 与结果类型。
+        - offsets 允许 `!symbol.int` 与 `!symbol.iter`。
 
         使用示例:
         - DmaViewOp(source, offsets, shape, stride, result_type)
@@ -1436,12 +1476,13 @@ class DmaViewOp(IRDLOperation):
         """校验 dma.view。
 
         创建者: 金铲铲大作战
-        最后一次更改: OpenAI
+        最后一次更改: 金铲铲大作战
 
         功能说明:
         - `space` 必须一致；`element_type` 必须一致（i8 byte pool 允许不同 element_type）。
         - 非 byte pool 场景下 source/result rank 必须一致；byte pool 允许 rank 不一致。
-        - `offsets`/`shape`/`stride` 必须是 `!symbol.int<"expr">` 且长度与结果 rank 一致。
+        - `offsets` 允许 `!symbol.int` 与 `!symbol.iter`，`shape`/`stride` 仍需 `!symbol.int`。
+        - `offsets`/`shape`/`stride` 长度与结果 rank 一致。
         - 当边界可静态判定时，必须满足 `offset + (size - 1) * stride < dim`。
         - 非 byte pool 场景下可判定 numel 不一致必须报错；byte pool 需满足字节数一致与字节边界可达。
 
@@ -1456,7 +1497,7 @@ class DmaViewOp(IRDLOperation):
 
         source_type = _verify_memory_type(self.source.type, "source")
         result_type = _verify_memory_type(self.result.type, "result")
-        offsets = _verify_symbol_int_operands(self.offsets, "offsets", min_value=0)
+        offsets = _verify_symbol_index_operands(self.offsets, "offsets", min_value=0)
         shape = _verify_symbol_int_operands(self.shape, "shape", min_value=1)
         stride = _verify_symbol_int_operands(self.stride, "stride", min_value=1)
         rank = len(result_type.shape.data)

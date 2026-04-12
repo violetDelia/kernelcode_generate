@@ -1,7 +1,7 @@
 """Symbol dialect definitions.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 定义仅表示整数符号值语义的 symbol dialect。
@@ -760,6 +760,138 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
 
         使用示例:
         - SymbolValueType.from_expr("N")
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        return cls(SymbolExprAttr.from_expr(expr))
+
+
+@irdl_attr_definition
+class SymbolIterType(ParametrizedAttribute, TypeAttribute):
+    """表示循环迭代变量的 symbol 类型。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 提供 `!symbol.iter<"...">` 类型，用于表达循环迭代变量。
+    - 语义与 `!symbol.int<"...">` 一致，但在类型名上明确迭代语义。
+
+    使用示例:
+    - SymbolIterType.from_expr("index")
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/dialect/test_symbol_dialect.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    name = "symbol.iter"
+
+    expr: SymbolExprAttr = param_def(SymbolExprAttr)
+
+    @classmethod
+    def parse_parameters(cls: type["SymbolIterType"], parser: AttrParser) -> Sequence[Attribute]:
+        """解析循环迭代类型参数。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 解析 `!symbol.iter<"expr">` 中的表达式文本。
+
+        使用示例:
+        - SymbolIterType.parse_parameters(parser)
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        parser.parse_punctuation("<", "Expected '<' for symbol iter type.")
+        expr = parser.parse_str_literal("Expected quoted symbol expression.")
+        parser.parse_punctuation(">", "Expected '>' for symbol iter type.")
+        return (SymbolExprAttr.from_expr(expr),)
+
+    def print_parameters(self: "SymbolIterType", printer: Printer) -> None:
+        """打印循环迭代类型参数。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 输出 `!symbol.iter<"...">` 的表达式参数。
+
+        使用示例:
+        - SymbolIterType.from_expr("index").print_parameters(printer)
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        printer.print_string("<")
+        printer.print_string_literal(_normalize_expr(self.expr.expr.data))
+        printer.print_string(">")
+
+    def verify(self: "SymbolIterType") -> None:
+        """校验循环迭代类型参数。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 复用 symbol.expr 的合法性校验。
+
+        使用示例:
+        - SymbolIterType.from_expr("index").verify()
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        self.expr.verify()
+
+    def __str__(self: "SymbolIterType") -> str:
+        """返回公开的 symbol.iter 文本表示。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 生成 `symbol.iter<expr>` 形式的字符串表示。
+
+        使用示例:
+        - str(SymbolIterType.from_expr("index"))
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        return f"symbol.iter<{_normalize_expr(self.expr.expr.data)}>"
+
+    @classmethod
+    def from_expr(cls: type["SymbolIterType"], expr: str) -> "SymbolIterType":
+        """从字符串构造循环迭代类型。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 统一创建 `!symbol.iter<\"expr\">` 类型实例。
+
+        使用示例:
+        - SymbolIterType.from_expr("index")
 
         关联文件:
         - spec: spec/dialect/symbol.md
@@ -1597,7 +1729,23 @@ class SymbolForOp(IRDLOperation):
 
     @classmethod
     def parse(cls: type["SymbolForOp"], parser: AttrParser) -> "SymbolForOp":
-        """解析 symbol.for 自定义文本语法。"""
+        """解析 symbol.for 自定义文本语法。
+
+        创建者: 我不是牛马
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 解析 `symbol.for %it = %start to %end step %step : start_type, end_type, step_type` 语法。
+        - 迭代变量统一解析为 `!symbol.int<"index">`，确保文本 round-trip 可稳定匹配 loop 体内 `index` 语义。
+
+        使用示例:
+        - SymbolForOp.parse(parser)
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
 
         unresolved_iter = parser.parse_argument(expect_type=False)
         parser.parse_characters("=", " in symbol.for")
@@ -1613,7 +1761,7 @@ class SymbolForOp(IRDLOperation):
         parser.parse_characters(",", " in symbol.for type list")
         step_type = parser.parse_type()
 
-        iter_arg = unresolved_iter.resolve(start_type)
+        iter_arg = unresolved_iter.resolve(SymbolValueType.from_expr("index"))
         body = parser.parse_region((iter_arg,))
         start_value = parser.resolve_operand(start, start_type)
         end_value = parser.resolve_operand(end, end_type)
@@ -1646,6 +1794,7 @@ Symbol = Dialect(
         SymbolExprAttr,
         SymbolDimType,
         SymbolPtrType,
+        SymbolIterType,
         SymbolValueType,
     ],
 )
@@ -1665,6 +1814,7 @@ __all__ = [
     "SymbolLeOp",
     "SymbolLtOp",
     "SymbolNeOp",
+    "SymbolIterType",
     "SymbolToFloatOp",
     "SymbolForOp",
     "SymbolFloorDivOp",

@@ -1,7 +1,7 @@
 """AST emit utilities for DSL nodes.
 
 创建者: 小李飞刀
-最后一次更改: 大闸蟹
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 提供 AST 节点到 MLIR SSA value/op 的发射入口。
@@ -92,6 +92,7 @@ from kernel_gen.dialect.nn import (
 )
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
+    SymbolConstOp,
     SymbolDivOp,
     SymbolEqOp,
     SymbolGeOp,
@@ -694,10 +695,10 @@ def _const_symbol_int(value: int, ctx: EmitContext, location: SourceLocation | N
     """构造 !symbol.int<"expr"> 常量 SSA value。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 先创建 i32 常量，再转换为 !symbol.int<"expr">。
+    - 直接生成 `symbol.const`，保持 !symbol.int<"expr"> 常量形态一致。
 
     使用示例:
     - _const_symbol_int(4, ctx, location)
@@ -708,10 +709,9 @@ def _const_symbol_int(value: int, ctx: EmitContext, location: SourceLocation | N
     - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
     """
 
-    attr = IntegerAttr(value, i32)
-    op = arith.ConstantOp(attr)
+    op = SymbolConstOp(value)
     ctx.builder.add_op(op)
-    return _cast_to_symbol_int(op.result, ctx, str(value), location)
+    return op.result
 
 
 def _const_i32(value: int, ctx: EmitContext, location: SourceLocation | None) -> SSAValue:
@@ -1058,11 +1058,12 @@ def _resolve_index_operand(expr: object, ctx: EmitContext, location: SourceLocat
     """将索引表达式 lowering 为 SSA operand。
 
     创建者: OpenAI
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 支持常量、symbol 名称、循环变量和显式字符串乘法表达式。
     - 对非法输入保持统一的 index 诊断文案。
+    - 常量会直接生成 `symbol.const`，保持 symbol.int 路径一致。
 
     使用示例:
     - _resolve_index_operand(ConstAST(2), ctx, location=None)
@@ -1074,7 +1075,7 @@ def _resolve_index_operand(expr: object, ctx: EmitContext, location: SourceLocat
     """
     if isinstance(expr, ConstAST):
         if isinstance(expr.value, int):
-            return _const_index(expr.value, ctx)
+            return _const_symbol_int(expr.value, ctx, expr.location)
         if isinstance(expr.value, str):
             return _resolve_index_symbol(expr.value, ctx, expr.location)
         raise _LoweringError("Index must be int or str", location=expr.location)
@@ -1084,7 +1085,7 @@ def _resolve_index_operand(expr: object, ctx: EmitContext, location: SourceLocat
             raise _LoweringError("Index operand must be SSA value", location=expr.location)
         return _ensure_index_value(value, ctx, expr.location)
     if isinstance(expr, int):
-        return _const_index(expr, ctx)
+        return _const_symbol_int(expr, ctx, location)
     if isinstance(expr, str):
         if "*" in expr:
             return _resolve_index_symbol_product(expr, ctx, location)
@@ -1275,7 +1276,7 @@ def _lower_loop_bound(expr: object, ctx: EmitContext) -> object:
     """将 `for` 上下界表达式 lowering 为 SSA 值。
 
     创建者: OpenAI
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 支持常量、标量参数与循环变量引用。
@@ -1290,6 +1291,8 @@ def _lower_loop_bound(expr: object, ctx: EmitContext) -> object:
     - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
     """
     if isinstance(expr, ConstAST):
+        if isinstance(expr.value, int):
+            return _const_symbol_int(expr.value, ctx, expr.location)
         return _lower_expr(expr, ctx)
     if isinstance(expr, (ScalarArgAST, VarAST)):
         return _lookup_symbol(expr, ctx)
@@ -3375,7 +3378,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     """将表达式 AST 递归下沉为 MLIR SSA value。
 
     创建者: 金铲铲大作战
-    最后一次更改: 大闸蟹
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 递归处理常量、内存操作、`symbol.to_float` 与算术/比较表达式，生成对应的 MLIR op。
@@ -3436,7 +3439,10 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("LoadAST result must be nn.memory", location=expr.location)
         if expr.kind == "slice":
-            alloc_shape = _build_index_operands_from_layout(result_type.shape, ctx, location=expr.location)
+            if any(isinstance(dim, StringAttr) for dim in result_type.shape.data):
+                alloc_shape = _build_index_operands_from_layout(result_type.shape, ctx, location=expr.location)
+            else:
+                alloc_shape = []
             alloc_op = DmaAllocOp(alloc_shape, result_type)
             ctx.builder.add_op(alloc_op)
             slice_op = DmaSliceOp(alloc_op.result, source, offsets, sizes, strides)
@@ -3458,7 +3464,19 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         result_type = _infer_expr_type(expr, ctx.types)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("alloc result must be nn.memory", location=expr.location)
-        shape = _build_index_operands_exact(expr.shape, ctx, location=expr.location)
+        if isinstance(expr.shape, (list, tuple)):
+            shape_entries = list(expr.shape)
+        else:
+            shape_entries = [expr.shape]
+        is_static_shape = True
+        for entry in shape_entries:
+            if isinstance(entry, ConstAST) and isinstance(entry.value, int):
+                continue
+            if isinstance(entry, int):
+                continue
+            is_static_shape = False
+            break
+        shape = [] if is_static_shape else _build_index_operands_exact(expr.shape, ctx, location=expr.location)
         op = DmaAllocOp(shape, result_type)
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)

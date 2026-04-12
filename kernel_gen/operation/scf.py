@@ -50,6 +50,26 @@ class LoopRange:
         step: int | SymbolDim,
         trip_count: int | SymbolDim = 1,
     ) -> None:
+        """初始化 LoopRange。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 保存 start/end/step/trip_count，供 DSL 循环解析使用。
+        - 当 step 为字面量 0 时立即拒绝，避免生成非法循环。
+
+        使用示例:
+        - LoopRange(0, 8, 2)
+
+        关联文件:
+        - spec: spec/operation/scf.md
+        - test: test/operation/test_operation_scf.py
+        - 功能实现: kernel_gen/operation/scf.py
+        """
+
+        if isinstance(step, int) and step == 0:
+            raise ValueError("step must not be 0")
         self._start = start
         self._end = end
         self._step = step

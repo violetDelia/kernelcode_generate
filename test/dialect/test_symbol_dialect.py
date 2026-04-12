@@ -1,7 +1,7 @@
 """symbol dialect tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 symbol dialect 的整数符号 attribute/type、verifier、parse/print 与错误路径。
@@ -57,6 +57,7 @@ from kernel_gen.dialect.symbol import (
     SymbolMulOp,
     SymbolNeOp,
     SymbolSubOp,
+    SymbolIterType,
     SymbolToIntOp,
     SymbolToFloatOp,
     SymbolPtrType,
@@ -239,6 +240,22 @@ def test_symbol_value_type_round_trip_for_integer_only_semantics() -> None:
         assert isinstance(ty, SymbolValueType)
         ty.verify()
         assert _print_attr(ty) == text
+
+
+# TC-SYM-052
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 symbol.iter 的 parse/print 与 verifier 行为。
+# 使用示例: pytest -q test/dialect/test_symbol_dialect.py -k test_symbol_iter_type_round_trip
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+# 对应测试文件路径: test/dialect/test_symbol_dialect.py
+def test_symbol_iter_type_round_trip() -> None:
+    ctx = _build_context()
+    ty = Parser(ctx, '!symbol.iter<"index">').parse_attribute()
+    assert isinstance(ty, SymbolIterType)
+    ty.verify()
+    assert _print_attr(ty) == '!symbol.iter<"index">'
 
 
 # TC-SYM-049

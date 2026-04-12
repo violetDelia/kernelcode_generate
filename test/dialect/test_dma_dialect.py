@@ -1,7 +1,7 @@
 """dma dialect tests.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 dma dialect 的 op verifier 与类型复用约束。
@@ -71,7 +71,7 @@ from kernel_gen.dialect.dma import (
     DmaViewOp,
 )
 from kernel_gen.dialect.nn import Nn, NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import Symbol, SymbolValueType
+from kernel_gen.dialect.symbol import Symbol, SymbolIterType, SymbolValueType
 
 
 def _build_context() -> Context:
@@ -294,6 +294,27 @@ def test_dma_load_result_space_mismatch() -> None:
     op = DmaLoadOp(source, offsets, sizes, strides, result_type, _make_space("global"))
     with pytest.raises(VerifyException, match="shape must match sizes"):
         op.verify()
+
+
+# TC-DMA-058
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 dma.load 可接受 symbol.iter 作为 offsets 输入。
+# 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_load_accepts_symbol_iter_offset
+# 对应功能实现文件路径: kernel_gen/dialect/dma.py
+# 对应 spec 文件路径: spec/dialect/dma.md
+# 对应测试文件路径: test/dialect/test_dma_dialect.py
+def test_dma_load_accepts_symbol_iter_offset() -> None:
+    source_type = _make_memory_type()
+    result_type = _make_memory_type()
+    source = _TestOp(result_types=[source_type]).results[0]
+    iter_offset = _TestOp(result_types=[SymbolIterType.from_expr("index")]).results[0]
+    zero_offset = _make_symbol_operands([0])[0]
+    offsets = [iter_offset, zero_offset]
+    sizes = _make_symbol_operands([2, 4])
+    strides = _make_symbol_operands([1, 1])
+    op = DmaLoadOp(source, offsets, sizes, strides, result_type, _make_space("global"))
+    op.verify()
 
 
 # TC-DMA-005

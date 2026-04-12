@@ -221,7 +221,7 @@ def _parse_function_from_source(
 
 # EMIT-022A
 # 创建者: 我不是牛马
-# 最后一次更改: 我不是牛马
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-25 21:25:58 +0800
 # 最近一次运行成功时间: 2026-03-25 21:25:58 +0800
 # 功能说明: 验证 ArchQueryAST(query_name=\"get_block_id\") lowering 为 arch.get_block_id。
@@ -820,13 +820,13 @@ def test_for_ast_lowering_emits_loads() -> None:
     loop = ForAST(var=loop_var, start=ConstAST(0), end=ConstAST(2), body=body, location=None)
     func_ast = FunctionAST(name="loop", inputs=[tensor], outputs=[], body=BlockAST([loop, tensor]), returns_none=True)
     func_op = build_func_op_from_ast(func_ast)
-    loop_ops = [op for op in func_op.body.block.ops if isinstance(op, scf.ForOp)]
+    loop_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolForOp)]
     assert len(loop_ops) == 1
     ops = [op for op in loop_ops[0].body.block.ops if isinstance(op, DmaLoadOp)]
     assert len(ops) == 1
     offsets = list(ops[0].offsets)
     assert len(offsets) == 2
-    assert _unwrap_index_cast(offsets[0]) is loop_ops[0].body.block.args[0]
+    assert offsets[0] is loop_ops[0].body.block.args[0]
 
 
 # EMIT-010

@@ -794,6 +794,42 @@ def _build_parse_environment(
     return merged_globals, merged_builtins
 
 
+def _build_runtime_table_for_signature(
+    fn: Callable[..., object],
+    runtime_args: tuple[object, ...] | list[object],
+) -> dict[str, object] | None:
+    """构造 `mlir_gen(...)` 解析阶段使用的 runtime_table。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅在 `runtime_args` 非空且与可位置绑定形参数量一致时返回参数名映射。
+    - `runtime_args` 为空或数量不匹配时返回 None，保持解析阶段行为不被额外篡改。
+    - 仅覆盖可位置绑定形参，忽略仅关键字与可变参数。
+
+    使用示例:
+    - runtime_table = _build_runtime_table_for_signature(fn, runtime_args)
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen.py](kernel_gen/dsl/mlir_gen.py)
+    """
+
+    if not runtime_args:
+        return None
+    signature = inspect.signature(fn)
+    positional_params = [
+        param
+        for param in signature.parameters.values()
+        if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    if len(runtime_args) != len(positional_params):
+        return None
+    return {param.name: runtime_args[index] for index, param in enumerate(positional_params)}
+
+
 def _is_supported_python_callee(fn: object) -> bool:
     """判断是否属于 `mlir_gen(...)` 支持的 Python callee。
 
@@ -908,13 +944,14 @@ def mlir_gen(
         """确保 Python callee 已编译为 `func.func` 并注册到当前 module 构建上下文。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 校验 callee 是否属于当前 `mlir_gen(...)` 支持的普通 Python 函数调用形式。
         - 基于 call-site 的 `arg_types` 推导并缓存 callee 的稳定签名；若同一 callee 在不同调用点推导出不一致签名则失败。
         - 维护 DFS 收集顺序与递归检测：避免重复编译，并显式拒绝递归 callee 图。
         - 将编译产物写入 `callee_registry`，供 `mlir_gen(...)` 最终组装 `builtin.module` 复用。
+        - 调用 `_build_runtime_table_for_signature(...)` 以支持无注解 callee 的解析。
 
         使用示例:
         - _ensure_callee_compiled(helper, [i32], location=None)
@@ -943,6 +980,7 @@ def mlir_gen(
         try:
             callee_runtime_args = _runtime_args_from_callee_signature(list(signature), location)
             callee_globals, callee_builtins = _build_parse_environment(callee, globals, builtins)
+            callee_runtime_table = _build_runtime_table_for_signature(callee, callee_runtime_args)
             parse_config: dict[str, object] = dict(config or {})
             parse_config["reject_external_values"] = True
             parse_config["allow_python_callee_calls"] = True
@@ -951,7 +989,7 @@ def mlir_gen(
                     callee,
                     globals_table=callee_globals,
                     builtins_table=callee_builtins,
-                    runtime_table=None,
+                    runtime_table=callee_runtime_table,
                     config=parse_config,
                 )
             except AstParseError as exc:
@@ -968,6 +1006,7 @@ def mlir_gen(
     lowering_config[_MLIR_GEN_CALLEE_COMPILER_CONFIG_KEY] = _ensure_callee_compiled
 
     root_globals, root_builtins = _build_parse_environment(fn, globals, builtins)
+    root_runtime_table = _build_runtime_table_for_signature(fn, runtime_args)
     parse_config = dict(config or {})
     parse_config["reject_external_values"] = True
     parse_config["allow_python_callee_calls"] = True
@@ -976,7 +1015,7 @@ def mlir_gen(
             fn,
             globals_table=root_globals,
             builtins_table=root_builtins,
-            runtime_table=None,
+            runtime_table=root_runtime_table,
             config=parse_config,
         )
     except AstParseError as exc:

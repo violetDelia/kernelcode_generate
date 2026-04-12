@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-定义 `symbol dialect` 的类型与基础构件，用于在 IR 中显式表示“带符号值语义的整型标量”以及“最小 pointer type 承载”。该方言的核心目标是让类型本身携带一个符号表达，例如 `!symbol.int<"N">` 表示“这是一个整数值，其值语义为符号 `N`”。本方言同时作为 memory 相关符号标量语义的唯一归属：`shape`、`stride`、`offset`、`size`、循环边界等位置只要进入 IR 并需要表达单个整数符号值，就统一落到 `symbol dialect`。在此基础上，本方言允许最小范围的整数符号算术与比较 op，用于在 IR 中显式表达 `symbol.int` 标量之间的加、减、乘、除、整除以及比较计算，并提供 `symbol.to_int`（转为普通整型）与 `symbol.to_float`（转为 `f32`）两类显式类型转换 op；同时提供 `!symbol.ptr<dtype>` 作为 DSL `Ptr(dtype)` 在 IR 类型层的唯一最小载体。该方言不负责张量、内存容器、通用控制流、pointer body op，或超出最小整数符号算术/比较范围的数值计算语义。
+定义 `symbol dialect` 的类型与基础构件，用于在 IR 中显式表示“带符号值语义的整型标量”以及“最小 pointer type 承载”。同时提供 `!symbol.iter<"expr">` 用于表达循环迭代变量语义，与 `!symbol.int<"expr">` 同样承载整数值语义。该方言的核心目标是让类型本身携带一个符号表达，例如 `!symbol.int<"N">` 表示“这是一个整数值，其值语义为符号 `N`”。本方言同时作为 memory 相关符号标量语义的唯一归属：`shape`、`stride`、`offset`、`size`、循环边界等位置只要进入 IR 并需要表达单个整数符号值，就统一落到 `symbol dialect`。在此基础上，本方言允许最小范围的整数符号算术与比较 op，用于在 IR 中显式表达 `symbol.int` 标量之间的加、减、乘、除、整除以及比较计算，并提供 `symbol.to_int`（转为普通整型）与 `symbol.to_float`（转为 `f32`）两类显式类型转换 op；同时提供 `!symbol.ptr<dtype>` 作为 DSL `Ptr(dtype)` 在 IR 类型层的唯一最小载体。该方言不负责张量、内存容器、通用控制流、pointer body op，或超出最小整数符号算术/比较范围的数值计算语义。
 
 ## 文档信息
 
@@ -30,6 +30,7 @@
 - 提供最小整数符号算术与比较接口，使 `!symbol.int<"expr">` 标量可在方言内完成基础加、减、乘、除、整除组合与相等/大小关系判断，而无需回退到其他算术方言。
 - 冻结 `symbol.gt` / `symbol.le` / `symbol.lt` / `symbol.ne` 与 `symbol.to_float` 的 dialect 合同，使上游 `a > b`、`a <= b`、`a < b`、`a != b` 与 `float(n)` 在进入 `symbol dialect` 后拥有稳定目标 op。
 - 提供 `!symbol.ptr<dtype>` 作为 DSL `Ptr(dtype)` 的最小 IR pointer type 载体，使函数签名 lowering 可以稳定表达“指向某个 pointee dtype 的指针输入”。
+- 提供 `SymbolIterType`，用于表达循环迭代变量语义，并支持 `!symbol.iter<"expr">` 文本形式。
 - 保持类型表达尽量简单，优先服务开发者理解和方言间协同，而不是追求复杂的符号推导系统。
 - 本文件中的“符号值”指与 SSA value 绑定的单个整数值语义表达，可以是具名符号、整型表达式或整型常量，如 `N`、`M + 1`、`B * K`、`1`、`2`、`3`。
 
@@ -50,6 +51,7 @@
 - `symbol.get_dim` / `symbol.get_stride` 的轴号当前必须是静态整数索引；越界、负数或非整数轴号必须报错。
 - 本方言暂不定义“未知但无名字”的匿名符号值；若需要动态未知值，应优先使用具名符号或由其他方言以 SSA value 传递。
 - 当前只定义整数语义，不区分 `int/int8/int16/int32/int64` 等具体整型宽度，也不定义 `index`、浮点或其他非整型 symbol 类型。
+- `SymbolIterType` 只用于表达循环迭代变量语义；`symbol.for` 的 `start/end/step/it` 仍要求 `!symbol.int<"expr">`。
 - `symbol.ptr` 只定义 `!symbol.ptr<dtype>` 这一类最小 pointer type；它只承载 pointee dtype，不承载名字、地址值、shape、stride、offset 或 memory space。
 - `!symbol.ptr<dtype>` 中的 `dtype` 必须是合法 `TypeAttribute`，且不得为 `!symbol.int<"...">`；当前不定义 `!symbol.ptr<!symbol.int<"...">>` 这类“指向 symbol.int”的 pointer carrier。
 - 当前最小算术/比较范围仅包含 `symbol.add`、`symbol.sub`、`symbol.mul`、`symbol.div`、`symbol.floordiv`、`symbol.eq`、`symbol.ne`、`symbol.lt`、`symbol.le`、`symbol.gt`、`symbol.ge`；不定义取模、按位运算、布尔逻辑组合、广播或张量级算术。
@@ -68,6 +70,7 @@
   - `SymbolValueType`：带符号值语义的整型标量类型
   - `SymbolExprAttr`：用于承载符号表达的 attribute
   - `SymbolPtrType`：用于承载 `Ptr(dtype)` 的最小 pointer type
+  - `SymbolIterType`：用于承载循环迭代变量语义的 symbol 类型
 
 参数说明：
 
@@ -76,7 +79,7 @@
 使用示例：
 
 ```python
-from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolPtrType, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolIterType, SymbolPtrType, SymbolValueType
 ```
 
 注意事项：
@@ -84,6 +87,7 @@ from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolPtrType, SymbolValue
 - `SymbolValueType` 当前固定表示整数语义的符号值类型。
 - `SymbolExprAttr` 只承载单个标量值对应的整数值语义表达。
 - `SymbolPtrType` 只承载 pointee dtype，用于函数签名等类型位置的最小 pointer carrier。
+- `SymbolIterType` 表示循环迭代变量语义，表达式规则与 `SymbolValueType` 一致。
 
 返回与限制：
 
@@ -148,6 +152,33 @@ const_ty = SymbolValueType.from_expr("3")
 - 返回类型：`SymbolValueType`
 - 限制：只表示单个整型标量值的符号语义，不表示 shape 列表或张量。
 
+### `SymbolIterType`
+
+功能说明：
+
+- 表示循环迭代变量的 symbol 类型。
+- 对应的正式文本形式为 `!symbol.iter<"expr">`，与 `!symbol.int<"expr">` 同样承载整数值语义，但用于标记迭代语义来源。
+
+参数说明：
+
+- `expr(SymbolExprAttr)`：该迭代变量对应的符号表达。
+
+使用示例：
+
+```python
+iter_ty = SymbolIterType.from_expr("index")
+```
+
+注意事项：
+
+- `expr` 必须存在，并遵循 `SymbolExprAttr` 的表达式校验规则。
+- `SymbolIterType` 不替代 `SymbolValueType`；`symbol.for` 仍要求 `!symbol.int<"expr">`。
+
+返回与限制：
+
+- 返回类型：`SymbolIterType`
+- 限制：用于表达迭代变量语义，不表示 pointer 或 memory 布局信息。
+
 ### `SymbolPtrType`
 
 功能说明：
@@ -198,6 +229,7 @@ ptr_ty = SymbolPtrType(f32)
 #symbol.expr<"M + 1">
 !symbol.int<"N">
 !symbol.int<"3">
+!symbol.iter<"index">
 !symbol.ptr<f32>
 !symbol.ptr<i32>
 ```
@@ -206,19 +238,20 @@ ptr_ty = SymbolPtrType(f32)
 
 - `SymbolExprAttr` 使用 `#symbol.expr<"expr">`。
 - `SymbolValueType` 使用 `!symbol.int<"expr">`。
+- `SymbolIterType` 使用 `!symbol.iter<"expr">`。
 - `SymbolPtrType` 使用 `!symbol.ptr<dtype>`。
 - 当前不接受按位宽区分的 legacy 整型文本，或任何非整型文本变体；`symbol.ptr` 也不定义别名文本。
 
 返回与限制：
 
 - 返回类型：文本约定。
-- 限制：当前 spec 只定义上述三种正式语法，不额外定义等价别名。
+- 限制：当前 spec 只定义上述四种正式语法，不额外定义等价别名。
 
 ### 类型校验规则
 
 功能说明：
 
-- 规定 `SymbolValueType` 与 `SymbolPtrType` 的 verifier 行为。
+- 规定 `SymbolValueType`、`SymbolIterType` 与 `SymbolPtrType` 的 verifier 行为。
 
 参数说明：
 
@@ -229,6 +262,7 @@ ptr_ty = SymbolPtrType(f32)
 
 ```python
 SymbolValueType.from_expr("N")
+SymbolIterType.from_expr("index")
 SymbolPtrType(f32)
 ```
 
@@ -237,6 +271,7 @@ SymbolPtrType(f32)
 - `expr` 不能为空。
 - `expr` 中若出现非法字符、空白后为空、或不可解析的表达式，必须报错。
 - `expr` 允许纯整数字面量，`!symbol.int<"1">`、`!symbol.int<"2">`、`!symbol.int<"3">` 都必须视为合法类型表达。
+- `SymbolIterType` 的表达式规则与 `SymbolValueType` 一致，打印后再解析必须得到等价类型对象。
 - 同一个 `SymbolValueType` 的相等性比较只比较整数语义下的 `expr`。
 - 打印后再解析必须能得到等价类型对象。
 - `!symbol.int<"N">` 表示“该 SSA value 的整数值由符号 `N` 表示”，不是变量声明；`!symbol.int<"1">`、`!symbol.int<"2">`、`!symbol.int<"3">` 表示该值已知为对应常量整数。
@@ -579,6 +614,7 @@ symbol.for %i = %start to %end step %step
 
 - 验证 `SymbolExprAttr` 的表达式构造、打印与解析。
 - 验证 `SymbolValueType` 的整数-only 符号表达绑定关系。
+- 验证 `SymbolIterType` 的 parse/print 稳定性与表达式校验规则。
 - 验证 `#symbol.expr<"expr">` 与 `!symbol.int<"expr">` 的 parse/print 稳定性。
 - 验证 legacy 宽度整型文本、空表达式、非法表达式的错误路径。
 - 验证 parse/print 循环稳定。
@@ -606,6 +642,7 @@ symbol.for %i = %start to %end step %step
 | TC-SYM-006 | `SymbolValueType` | 常量值语义 | 无 | 解析 `!symbol.int<"3">` | verifier 通过 | `test_symbol_value_type_round_trip_for_integer_only_semantics` |
 | TC-SYM-007 | `SymbolValueType` | legacy 文本或非法字符非法 | 无 | 解析 `!symbol.int64<"N">`，或构造非法字符表达式 | parse/verifier 报错 | `test_symbol_value_type_rejects_unsupported_legacy_text_forms`、`test_symbol_verifier_rejects_illegal_expression_characters` |
 | TC-SYM-008 | `SymbolValueType` | 缺少表达式 | 无 | 解析 `!symbol.int` | parse 报错 | `test_symbol_value_type_rejects_unsupported_legacy_text_forms` |
+| TC-SYM-052 | `SymbolIterType` | 迭代变量类型 | 无 | 解析 `!symbol.iter<"index">` | verifier 通过；打印结果稳定 | `test_symbol_iter_type_round_trip` |
 | TC-SYM-009 | parse/print | 循环稳定 | 已实现文本语法 | parse 后再 print | attr/type 语义保持一致 | `test_symbol_expr_attr_round_trip`、`test_symbol_value_type_round_trip_for_integer_only_semantics` |
 | TC-SYM-010 | 相等性 | 相同表达式 | 无 | 比较两个 `!symbol.int<"N">` | 相等 | `test_symbol_value_type_equality_depends_on_expr_only` |
 | TC-SYM-011 | 相等性 | 不再区分整型宽度 | 无 | 在整数-only 语义下比较相同表达式类型 | 不因宽度差异产生额外类型分支 | `test_symbol_value_type_equality_depends_on_expr_only` |
