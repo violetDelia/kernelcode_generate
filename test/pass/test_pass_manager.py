@@ -1,7 +1,7 @@
 """pass_manager tests.
 
 创建者: 李白
-最后一次更改: jcc你莫辜负
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 kernel_gen/passes/pass_manager.py 的 Pass 管理行为。
@@ -660,3 +660,42 @@ def test_pass_manager_allows_decompass_before_lowering() -> None:
     sentinel = object()
     assert pm.run(sentinel) is sentinel
     assert order == ["decompass", "lower-nn-to-kernel", "buffer-results-to-out-params"]
+
+
+# TC-PASS-019
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-13 12:00:00 +0800
+# 最近一次运行成功时间: 2026-04-13 12:00:00 +0800
+# 功能说明: 验证 lower-nn 在 buffer-results-to-out-params 前置时可正常执行。
+# 测试目的: 直接锁定 lower-nn -> buffer-results-to-out-params 的可执行顺序。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_allows_buffer_results_to_out_params_after_lower_nn
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
+# 对应 spec 文件路径: spec/pass/pass_manager.md
+# 对应测试文件路径: test/pass/test_pass_manager.py
+def test_pass_manager_allows_buffer_results_to_out_params_after_lower_nn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lowering_module = importlib.import_module("kernel_gen.passes.lowering")
+    NnLoweringPass = lowering_module.NnLoweringPass
+    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
+    order: list[str] = []
+
+    def _record_lower(self: object, target: object) -> object:
+        order.append("lower-nn")
+        return target
+
+    def _record_buffer(self: object, target: object) -> object:
+        order.append("buffer-results-to-out-params")
+        return target
+
+    monkeypatch.setattr(NnLoweringPass, "run", _record_lower)
+    monkeypatch.setattr(BufferResultsToOutParamsPass, "run", _record_buffer)
+
+    pm = PassManager(name="lowering")
+    pm.add_pass(NnLoweringPass())
+    pm.add_pass(BufferResultsToOutParamsPass())
+
+    sentinel = object()
+    assert pm.run(sentinel) is sentinel
+    assert order == ["lower-nn", "buffer-results-to-out-params"]
