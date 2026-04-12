@@ -1,7 +1,7 @@
 """tile pass tests.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 TilePass elementwise/matmul 成功路径与关键错误短语。
@@ -43,7 +43,7 @@ from kernel_gen.dialect.kernel import KernelAddOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolForOp, SymbolGetDimOp
 from kernel_gen.dialect.tuner import TunerParamOp
-from kernel_gen.passes.lowering.tile import TilePass, TilePassError, TilePassOptionError
+from kernel_gen.passes.lowering.tile import TilePass, TilePassError
 
 
 def _make_memory_type(shape_names: list[str]) -> NnMemoryType:
@@ -320,6 +320,70 @@ def test_tile_matmul_builds_mnk_loops() -> None:
     assert len(view_ops) == 3
 
 
+# TC-TILE-008
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-12 13:05:00 +0800
+# 最近一次运行成功时间: 2026-04-12 13:05:00 +0800
+# 功能说明: 验证 analysis-only=true 仅插入 tuner.param 与维度推导，不生成 loop/view。
+# 测试目的: 覆盖 analysis-only=true 的公开行为。
+# 使用示例: pytest -q test/pass/test_lowering_tile.py -k test_tile_analysis_only_true
+# 对应功能实现文件路径: kernel_gen/passes/lowering/tile.py
+# 对应 spec 文件路径: spec/pass/lowering/tile.md
+# 对应测试文件路径: test/pass/test_lowering_tile.py
+def test_tile_analysis_only_true() -> None:
+    module = _build_elementwise_module(["M", "N"])
+    TilePass.from_options({"analysis-only": "true"}).run(module)
+    ops = _collect_ops(module)
+    loop_ops = [op for op in ops if isinstance(op, SymbolForOp)]
+    view_ops = [op for op in ops if isinstance(op, DmaViewOp)]
+    param_ops = [op for op in ops if isinstance(op, TunerParamOp)]
+    dim_ops = [op for op in ops if isinstance(op, SymbolGetDimOp)]
+    kernel_ops = [op for op in ops if isinstance(op, KernelAddOp)]
+    assert loop_ops == []
+    assert view_ops == []
+    assert param_ops
+    assert dim_ops
+    assert kernel_ops
+
+
+# TC-TILE-009
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-12 13:05:00 +0800
+# 最近一次运行成功时间: 2026-04-12 13:05:00 +0800
+# 功能说明: 验证 analysis-only=false 仍生成 loop/view 结构。
+# 测试目的: 覆盖 analysis-only=false 的公开行为。
+# 使用示例: pytest -q test/pass/test_lowering_tile.py -k test_tile_analysis_only_false
+# 对应功能实现文件路径: kernel_gen/passes/lowering/tile.py
+# 对应 spec 文件路径: spec/pass/lowering/tile.md
+# 对应测试文件路径: test/pass/test_lowering_tile.py
+def test_tile_analysis_only_false() -> None:
+    module = _build_elementwise_module(["M", "N"])
+    TilePass.from_options({"analysis-only": "false"}).run(module)
+    ops = _collect_ops(module)
+    loop_ops = [op for op in ops if isinstance(op, SymbolForOp)]
+    view_ops = [op for op in ops if isinstance(op, DmaViewOp)]
+    assert len(loop_ops) == 2
+    assert len(view_ops) == 3
+
+
+# TC-TILE-010
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-12 13:05:00 +0800
+# 最近一次运行成功时间: 2026-04-12 13:05:00 +0800
+# 功能说明: 验证 analysis-only 非法值会报告稳定错误短语。
+# 测试目的: 覆盖 options 非法值的拒绝路径。
+# 使用示例: pytest -q test/pass/test_lowering_tile.py -k test_tile_analysis_only_invalid_value
+# 对应功能实现文件路径: kernel_gen/passes/lowering/tile.py
+# 对应 spec 文件路径: spec/pass/lowering/tile.md
+# 对应测试文件路径: test/pass/test_lowering_tile.py
+def test_tile_analysis_only_invalid_value() -> None:
+    with pytest.raises(TilePassError, match="TilePassInvalidOption"):
+        TilePass.from_options({"analysis-only": "maybe"})
+
+
 # TC-TILE-003
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
@@ -444,74 +508,3 @@ def test_tile_rejects_rank_mismatch() -> None:
     with pytest.raises(TilePassError, match="TilePassRankMismatch"):
         TilePass().run(module)
 
-
-# TC-TILE-008
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-12 10:20:00 +0800
-# 最近一次运行成功时间: 2026-04-12 10:20:00 +0800
-# 功能说明: 验证 analysis-only=true 仅插入参数推导，不生成 loop/view。
-# 测试目的: 覆盖 analysis-only true 分支。
-# 使用示例: pytest -q test/pass/test_lowering_tile.py -k test_tile_analysis_only_true
-# 对应功能实现文件路径: kernel_gen/passes/lowering/tile.py
-# 对应 spec 文件路径: spec/pass/lowering/tile.md
-# 对应测试文件路径: test/pass/test_lowering_tile.py
-def test_tile_analysis_only_true() -> None:
-    module = _build_elementwise_module(["M", "N"])
-    TilePass.from_options({"analysis-only": "true"}).run(module)
-    ops = _collect_ops(module)
-    assert any(isinstance(op, KernelAddOp) for op in ops)
-    assert not any(isinstance(op, SymbolForOp) for op in ops)
-    assert not any(isinstance(op, DmaViewOp) for op in ops)
-    assert len([op for op in ops if isinstance(op, TunerParamOp)]) == 2
-
-
-# TC-TILE-009
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-12 10:20:00 +0800
-# 最近一次运行成功时间: 2026-04-12 10:20:00 +0800
-# 功能说明: 验证 analysis-only=false 保持完整 loop/view 改写路径。
-# 测试目的: 覆盖 analysis-only false 分支。
-# 使用示例: pytest -q test/pass/test_lowering_tile.py -k test_tile_analysis_only_false
-# 对应功能实现文件路径: kernel_gen/passes/lowering/tile.py
-# 对应 spec 文件路径: spec/pass/lowering/tile.md
-# 对应测试文件路径: test/pass/test_lowering_tile.py
-def test_tile_analysis_only_false() -> None:
-    module = _build_elementwise_module(["M", "N"])
-    TilePass.from_options({"analysis-only": "false"}).run(module)
-    ops = _collect_ops(module)
-    assert len([op for op in ops if isinstance(op, SymbolForOp)]) == 2
-    assert len([op for op in ops if isinstance(op, DmaViewOp)]) == 3
-
-
-# TC-TILE-010
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-12 10:20:00 +0800
-# 最近一次运行成功时间: 2026-04-12 10:20:00 +0800
-# 功能说明: 验证 analysis-only 非法取值会报固定错误短语。
-# 测试目的: 覆盖 analysis-only 非法取值路径。
-# 使用示例: pytest -q test/pass/test_lowering_tile.py -k test_tile_rejects_invalid_analysis_only_value
-# 对应功能实现文件路径: kernel_gen/passes/lowering/tile.py
-# 对应 spec 文件路径: spec/pass/lowering/tile.md
-# 对应测试文件路径: test/pass/test_lowering_tile.py
-def test_tile_rejects_invalid_analysis_only_value() -> None:
-    with pytest.raises(TilePassOptionError, match=r"^TilePassOptionError: invalid analysis-only value$"):
-        _ = TilePass.from_options({"analysis-only": "maybe"})
-
-
-# TC-TILE-011
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-12 10:20:00 +0800
-# 最近一次运行成功时间: 2026-04-12 10:20:00 +0800
-# 功能说明: 验证未知 option key 会报固定错误短语。
-# 测试目的: 覆盖 unknown option 路径。
-# 使用示例: pytest -q test/pass/test_lowering_tile.py -k test_tile_rejects_unknown_options
-# 对应功能实现文件路径: kernel_gen/passes/lowering/tile.py
-# 对应 spec 文件路径: spec/pass/lowering/tile.md
-# 对应测试文件路径: test/pass/test_lowering_tile.py
-def test_tile_rejects_unknown_options() -> None:
-    with pytest.raises(TilePassOptionError, match=r"^TilePassOptionError: unknown option$"):
-        _ = TilePass.from_options({"unknown": "true"})

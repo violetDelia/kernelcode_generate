@@ -1,7 +1,7 @@
 """tile lowering pass.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 将已完成 nn -> kernel 与 out-param 收口的单函数 IR，显式改写为 `symbol.for` + `dma.view` 结构。
@@ -912,6 +912,35 @@ def _insert_tile_helpers(
     block.insert_ops_before(helper_ops, return_op)
 
 
+def _insert_analysis_only_helpers(
+    block: Block,
+    specs: list[_TileLoopSpec],
+    return_op: Operation,
+) -> None:
+    """插入 analysis-only 需要的 helper ops。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅插入 start/end/step，不插入 symbol.for。
+    - 保留 tuner.param 与维度推导结果供分析用途。
+
+    使用示例:
+    - _insert_analysis_only_helpers(block, specs, return_op)
+
+    关联文件:
+    - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
+    - test: [test/pass/test_lowering_tile.py](test/pass/test_lowering_tile.py)
+    - 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
+    """
+
+    helper_ops: list[Operation] = []
+    for spec in specs:
+        helper_ops.extend([spec.start, spec.end, spec.step])
+    block.insert_ops_before(helper_ops, return_op)
+
+
 def _nest_loops(specs: list[_TileLoopSpec]) -> Block | None:
     """按顺序嵌套 loop，并返回最内层 block。
 
@@ -1099,15 +1128,15 @@ def _insert_matmul_views_and_ops(
         inner_block.add_op(op)
 
 
-def _rewrite_function(func_op: func.FuncOp, *, analysis_only: bool) -> None:
+def _rewrite_function(func_op: func.FuncOp, analysis_only: bool) -> None:
     """改写单个函数为 tile loop 结构。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 对 elementwise/matmul 分支生成 `tuner.param`、`tile.step_value`、`symbol.for` 与 `dma.view`。
-    - `analysis_only=True` 时仅做分析与参数推导，不插入 loop/view 或重写 kernel op。
+    - analysis_only=true 时仅插入 `tuner.param` 与维度推导 helper，不生成 loop/view。
     - 保持单函数合同，不新增 `func.call`。
 
     使用示例:
@@ -1155,6 +1184,7 @@ def _rewrite_function(func_op: func.FuncOp, *, analysis_only: bool) -> None:
                 )
         specs = _build_elementwise_loop_specs(func_op, block, reference_memory)
         if analysis_only:
+            _insert_analysis_only_helpers(block, specs, return_op)
             return
         inner_block = _nest_loops(specs)
         if inner_block is None:
@@ -1175,6 +1205,7 @@ def _rewrite_function(func_op: func.FuncOp, *, analysis_only: bool) -> None:
         out = SSAValue.get(matmul_op.operands[-1])
         specs = _build_matmul_loop_specs(block, lhs, rhs, out)
         if analysis_only:
+            _insert_analysis_only_helpers(block, specs, return_op)
             return
         inner_block = _nest_loops(specs)
         if inner_block is None:
@@ -1189,15 +1220,16 @@ class TilePass(Pass):
     """tile lowering pass。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 对 module 内满足输入合同的 func.func 执行 tile loop 改写。
     - elementwise 与 matmul 按固定规则插入 loop 与 view。
-    - 支持 `analysis-only` 选项：仅做分析与参数推导。
+    - analysis-only 模式仅插入 `tuner.param` 与维度推导 helper。
 
     使用示例:
     - module = TilePass().run(module)
+    - module = TilePass.from_options({"analysis-only": "true"}).run(module)
 
     关联文件:
     - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
@@ -1207,16 +1239,17 @@ class TilePass(Pass):
 
     name = "tile"
 
-    def __init__(self: "TilePass", *, analysis_only: bool = False) -> None:
-        """初始化 TilePass。
+    def __init__(self: "TilePass", analysis_only: bool = False) -> None:
+        """初始化 tile pass。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 保存 analysis-only 选项，控制是否仅执行分析路径。
+        - analysis_only=true 时只生成维度推导相关 helper。
 
         使用示例:
+        - pass_obj = TilePass()
         - pass_obj = TilePass(analysis_only=True)
 
         关联文件:
@@ -1228,15 +1261,15 @@ class TilePass(Pass):
         self._analysis_only = analysis_only
 
     @classmethod
-    def from_options(cls: type["TilePass"], options: dict[str, str]) -> "TilePass":
-        """根据 options 构造 TilePass。
+    def from_options(cls, options: dict[str, str]) -> "TilePass":
+        """从 options 构造 TilePass。
 
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 仅允许 `analysis-only=true|false`。
-        - 其他 key 或非法 value 均报错。
+        - 仅支持 `analysis-only=true|false`。
+        - 其他 key 或非法值会返回稳定错误短语。
 
         使用示例:
         - pass_obj = TilePass.from_options({"analysis-only": "true"})
@@ -1248,30 +1281,31 @@ class TilePass(Pass):
         """
 
         if not options:
-            return cls(analysis_only=False)
-        allowed_key = "analysis-only"
-        for key in options:
-            if key != allowed_key:
-                raise TilePassOptionError("TilePassOptionError: unknown option")
-        value = options.get(allowed_key, "")
+            return cls()
+        if set(options.keys()) != {"analysis-only"}:
+            _raise_tile_error("TilePassInvalidOption", "unsupported tile options")
+        value = options["analysis-only"]
         if value == "true":
             return cls(analysis_only=True)
         if value == "false":
             return cls(analysis_only=False)
-        raise TilePassOptionError("TilePassOptionError: invalid analysis-only value")
+        _raise_tile_error("TilePassInvalidOption", "analysis-only must be true or false")
+        return cls()
 
     def run(self: "TilePass", module: ModuleOp) -> ModuleOp:
         """执行 tile pass。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 遍历 module 中的 func.func 并执行改写。
         - `module.verify()` 失败时统一转译为 `TilePassRequiresLoweredKernelIR`。
+        - analysis_only=true 时只保留分析所需的 helper。
 
         使用示例:
         - lowered = TilePass().run(module)
+        - lowered = TilePass.from_options({"analysis-only": "true"}).run(module)
 
         关联文件:
         - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
