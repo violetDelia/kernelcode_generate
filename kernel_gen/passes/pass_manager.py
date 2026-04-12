@@ -1,7 +1,7 @@
 """Pass manager API.
 
 创建者: 李白
-最后一次更改: 朽木露琪亚
+最后一次更改: 小李飞刀
 
 功能说明:
 - 定义 Pass 与 PassManager 的基础行为。
@@ -99,7 +99,7 @@ class PassManager:
     """Pass 管理器。
 
     创建者: 李白
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 按顺序执行 Pass 列表。
@@ -242,13 +242,16 @@ class PassManager:
 
         result = target
         seen_names: list[str] = []
+        seen_set: set[str] = set()
+        lowering_names = {"lower-nn", "lower-nn-to-kernel"}
         for item in self._passes:
-            if item.name == "buffer-results-to-out-params" and "lower-nn" not in seen_names:
+            if item.name == "buffer-results-to-out-params" and lowering_names.isdisjoint(seen_set):
                 raise ValueError(
-                    "buffer-results-to-out-params requires lowered IR after lower-nn"
+                    "buffer-results-to-out-params requires lowered IR after lower-nn or lower-nn-to-kernel"
                 )
             result = item.run(result)
             seen_names.append(item.name)
+            seen_set.add(item.name)
         return result
 
 

@@ -1,7 +1,7 @@
 """default lowering pipeline.
 
 创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
+最后一次更改: 小李飞刀
 
 功能说明:
 - 提供 `default-lowering` pipeline 的 builder。
@@ -24,7 +24,7 @@ from __future__ import annotations
 from kernel_gen.passes.lowering import (
     BufferResultsToOutParamsPass,
     LowerDmaMemoryHierarchyPass,
-    NnLoweringPass,
+    LowerNnToKernelPass,
 )
 from kernel_gen.passes.lowering.decompass import DecompassPass
 from kernel_gen.passes.pass_manager import PassManager
@@ -36,11 +36,11 @@ def build_default_lowering_pipeline() -> PassManager:
     """构造 default-lowering pipeline。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 返回 `PassManager(name="default-lowering")`。
-    - 固定 pass 顺序为 `DecompassPass -> NnLoweringPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass`。
+    - 固定 pass 顺序为 `DecompassPass -> LowerNnToKernelPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass`。
 
     使用示例:
     - pm = build_default_lowering_pipeline()
@@ -54,7 +54,7 @@ def build_default_lowering_pipeline() -> PassManager:
 
     pm = PassManager(name="default-lowering")
     pm.add_pass(DecompassPass())
-    pm.add_pass(NnLoweringPass())
+    pm.add_pass(LowerNnToKernelPass())
     pm.add_pass(BufferResultsToOutParamsPass())
     pm.add_pass(LowerDmaMemoryHierarchyPass())
     return pm
