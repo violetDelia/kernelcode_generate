@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/codex-multi-agents/scripts/codex-multi-agents-task.md`](../../../spec/codex-multi-agents/scripts/codex-multi-agents-task.md)
 - `test`：[`test/codex-multi-agents/test_codex-multi-agents-task.py`](../../../test/codex-multi-agents/test_codex-multi-agents-task.py)
 - `功能实现`：
@@ -88,10 +88,18 @@
 - `-next -auto` 仅对 `merge/review/build/spec` 四类任务执行自动续接；`other/refactor` 仍保留在 `任务列表`。
 - `-next -auto` 只尝试自动续接当前刚通过 `-next` 退回 `任务列表` 的同一任务，不扫描其他任务。
 - `-next -auto` 的候选人集合规则：
-  - `agents-lists.md` 中状态为 `free` 且职责匹配的角色
-  - `职责` 包含 `不承担管理员分发的任务` 的角色不计入候选
-  - 若当前执行者满足上述条件，则作为候选之一参与选择
-- `-next -auto` 在候选人集合中随机选择接手人。
+  - 先按任务类型筛出专职池，再按需要启用候补池。
+  - `spec` 专职：职责包含 `spec` 或 `spec 文档编写`，且职责不包含 `全能替补`。
+  - `build` 专职：职责包含 `实现` 或 `测试`，且职责不包含 `全能替补`。
+  - `review` 专职：职责包含 `审查` 或 `复审`，且职责不包含 `全能替补`。
+  - `merge` 专职：职责包含 `合并`。
+  - 候补：职责包含 `全能替补`。
+  - 仅保留 `agents-lists.md` 中状态为 `free` 且职责匹配的角色；职责包含 `不承担管理员分发的任务` 的角色不计入候选。
+  - 若当前执行者满足上述条件，则作为候选之一参与选择。
+- `-next -auto` 的选择规则：
+  - `spec/build/review`：若存在可用专职，只在专职池内随机；专职池为空时才允许候补池参与随机。
+  - `merge`：只在专职池内随机；若无可用专职则自动续接失败，任务保留在 `任务列表` 并通知管理员。
+  - 随机范围仅限当前启用的候选池，不跨层级混合随机。
 - 若设置 `CODEX_MULTI_AGENTS_AUTO_RANDOM_SEED`，自动续接使用该值的 `sha256` 结果作为随机种子；在候选集合与 `agents-lists.md` 顺序不变时可复现选择结果。
 - `-next -auto` 若自动接续到其他角色，会先执行一次 `list -init`，再向接手人发送任务消息，并向管理员发送摘要。
 - `-next -auto` 若自动接续到当前执行者本人，不向本人发消息，只向管理员发送摘要。
@@ -362,6 +370,8 @@ codex-multi-agents-task.sh \
 - `-next -auto` 自动接续成功时，沿用当前任务原 `任务 ID`，不改写为新 ID。
 - `-next -auto` 发给接手执行人的任务消息固定包含：任务 ID、描述，以及当前任务中实际存在的 `worktree`、计划书路径、记录文件、任务记录要求、问题咨询指引。
 - `-next -auto` 无论是否成功自动接续，都会向管理员发送一条摘要消息。
+  - `spec/build/review` 优先专职，只有专职不可用时才启用候补。
+  - `merge` 不启用候补，若无可用专职则自动续接失败并保留在任务列表。
 
 返回与限制：
 
@@ -535,3 +545,8 @@ codex-multi-agents-task.sh \
   - `TC-055` `test_auto_only_supports_next`：`-auto` 与其他命令组合，返回 `1`
   - `TC-056` `test_next_auto_random_assignment_with_seed`：设置随机种子时自动续接结果可复现
   - `TC-057` `test_next_auto_random_assignment_seed_changes`：不同随机种子会触发不同接手人
+  - `TC-058` `test_next_auto_spec_dedicated_first`：`spec` 专职可用时仅从专职池选择
+  - `TC-059` `test_next_auto_build_dedicated_first`：`build` 专职可用时仅从专职池选择
+  - `TC-060` `test_next_auto_build_falls_back_to_substitute`：`build` 专职不可用时回退到候补池
+  - `TC-061` `test_next_auto_review_dedicated_first`：`review` 专职可用时仅从专职池选择
+  - `TC-062` `test_next_auto_merge_rejects_fallback`：`merge` 无专职且仅候补可用时自动续接失败

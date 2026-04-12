@@ -1,7 +1,7 @@
 """codex-multi-agents-task.sh tests.
 
 创建者: 榕
-最后一次更改: 神秘人
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 覆盖 task 脚本的任务分发、完成、暂停、继续、改派、新建、删除、状态查询与错误返回码路径。
@@ -1896,6 +1896,392 @@ def test_next_auto_reassigns_same_task_to_other_agent(tmp_path: Path) -> None:
     ) in calls_text
 
 
+# TC-058
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 测试目的: 验证 spec 自动续接优先选择专职角色。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py -k test_next_auto_spec_dedicated_first
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_next_auto_spec_dedicated_first(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    bin_dir = tmp_path / "bin"
+    state_dir = tmp_path / "state"
+    calls_file = write_fake_tmux(bin_dir, state_dir, sessions=["神秘人-session", "worker-c-session"])
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-2",
+                "杜甫",
+                "2026-03-08 16:20:00 +0800",
+                "/tmp/wt-ex2",
+                "创建 spec",
+                "spec",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "worker-b",
+                "进行中",
+                "xxx",
+                "./log/ex2.md",
+            ),
+        ],
+        list_rows=[],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row_with_role("神秘人", "free", "管理员", "神秘人-session", "管理员"),
+            agent_row_with_role("worker-b", "busy", "审查"),
+            agent_row_with_role("worker-c", "free", "spec 文档编写"),
+            agent_row_with_role("worker-s", "free", "全能替补"),
+        ],
+    )
+
+    env = os.environ.copy()
+    env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["CODEX_MULTI_AGENTS_ADMIN_USERS"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-b"
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-next",
+        "-auto",
+        "-task_id",
+        "EX-2",
+        "-from",
+        "worker-b",
+        "-type",
+        "spec",
+        "-message",
+        "下一阶段：补齐边界用例",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    assert result.returncode == 0
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+    assert any(r[0] == "EX-2" and r[5] == "spec" and r[8] == "worker-c" for r in running_rows)
+    assert get_agent_status(agents, "worker-c") == "busy"
+    assert get_agent_status(agents, "worker-s") == "free"
+    calls_text = calls_file.read_text(encoding="utf-8")
+    assert "你的名字叫做worker-c" in calls_text
+
+
+# TC-059
+# 创建者: jcc你莫辜负
+# 最后一次更改: 朽木露琪亚
+# 测试目的: 验证 build 自动续接优先分配给专职角色。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py -k test_next_auto_build_dedicated_first
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_next_auto_build_dedicated_first(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    bin_dir = tmp_path / "bin"
+    state_dir = tmp_path / "state"
+    calls_file = write_fake_tmux(bin_dir, state_dir, sessions=["神秘人-session", "worker-c-session"])
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-2",
+                "杜甫",
+                "2026-03-08 16:20:00 +0800",
+                "/tmp/wt-ex2",
+                "创建 test",
+                "build",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "worker-b",
+                "进行中",
+                "xxx",
+                "./log/ex2.md",
+            ),
+        ],
+        list_rows=[],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row_with_role("神秘人", "free", "管理员", "神秘人-session", "管理员"),
+            agent_row_with_role("worker-b", "busy", "审查"),
+            agent_row_with_role("worker-c", "free", "实现 测试"),
+            agent_row_with_role("worker-s", "free", "全能替补"),
+        ],
+    )
+
+    env = os.environ.copy()
+    env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["CODEX_MULTI_AGENTS_ADMIN_USERS"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-b"
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-next",
+        "-auto",
+        "-task_id",
+        "EX-2",
+        "-from",
+        "worker-b",
+        "-type",
+        "build",
+        "-message",
+        "下一阶段：补齐边界用例",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    assert result.returncode == 0
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+    assert any(r[0] == "EX-2" and r[5] == "build" and r[8] == "worker-c" for r in running_rows)
+    assert get_agent_status(agents, "worker-c") == "busy"
+    assert get_agent_status(agents, "worker-s") == "free"
+    calls_text = calls_file.read_text(encoding="utf-8")
+    assert "你的名字叫做worker-c" in calls_text
+
+
+# TC-060
+# 创建者: jcc你莫辜负
+# 最后一次更改: 朽木露琪亚
+# 测试目的: 验证 build 专职不可用时自动续接回退到候补角色。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py -k test_next_auto_build_falls_back_to_substitute
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_next_auto_build_falls_back_to_substitute(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    bin_dir = tmp_path / "bin"
+    state_dir = tmp_path / "state"
+    calls_file = write_fake_tmux(bin_dir, state_dir, sessions=["神秘人-session", "worker-s-session"])
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-2",
+                "杜甫",
+                "2026-03-08 16:20:00 +0800",
+                "/tmp/wt-ex2",
+                "创建 test",
+                "build",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "worker-b",
+                "进行中",
+                "xxx",
+                "./log/ex2.md",
+            ),
+        ],
+        list_rows=[],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row_with_role("神秘人", "free", "管理员", "神秘人-session", "管理员"),
+            agent_row_with_role("worker-b", "busy", "审查"),
+            agent_row_with_role("worker-c", "busy", "实现 测试"),
+            agent_row_with_role("worker-s", "free", "全能替补"),
+        ],
+    )
+
+    env = os.environ.copy()
+    env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["CODEX_MULTI_AGENTS_ADMIN_USERS"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-b"
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-next",
+        "-auto",
+        "-task_id",
+        "EX-2",
+        "-from",
+        "worker-b",
+        "-type",
+        "build",
+        "-message",
+        "下一阶段：补齐边界用例",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    assert result.returncode == 0
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+    assert any(r[0] == "EX-2" and r[5] == "build" and r[8] == "worker-s" for r in running_rows)
+    assert get_agent_status(agents, "worker-s") == "busy"
+    calls_text = calls_file.read_text(encoding="utf-8")
+    assert "你的名字叫做worker-s" in calls_text
+
+
+# TC-061
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 测试目的: 验证 review 自动续接优先选择专职角色。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py -k test_next_auto_review_dedicated_first
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_next_auto_review_dedicated_first(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    bin_dir = tmp_path / "bin"
+    state_dir = tmp_path / "state"
+    calls_file = write_fake_tmux(bin_dir, state_dir, sessions=["神秘人-session", "worker-c-session"])
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-2",
+                "杜甫",
+                "2026-03-08 16:20:00 +0800",
+                "/tmp/wt-ex2",
+                "创建 test",
+                "review",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "worker-b",
+                "进行中",
+                "xxx",
+                "./log/ex2.md",
+            ),
+        ],
+        list_rows=[],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row_with_role("神秘人", "free", "管理员", "神秘人-session", "管理员"),
+            agent_row_with_role("worker-b", "busy", "开发"),
+            agent_row_with_role("worker-c", "free", "审查"),
+            agent_row_with_role("worker-s", "free", "全能替补"),
+        ],
+    )
+
+    env = os.environ.copy()
+    env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["CODEX_MULTI_AGENTS_ADMIN_USERS"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-b"
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-next",
+        "-auto",
+        "-task_id",
+        "EX-2",
+        "-from",
+        "worker-b",
+        "-type",
+        "review",
+        "-message",
+        "下一阶段：补齐边界用例",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    assert result.returncode == 0
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+    assert any(r[0] == "EX-2" and r[5] == "review" and r[8] == "worker-c" for r in running_rows)
+    assert get_agent_status(agents, "worker-c") == "busy"
+    assert get_agent_status(agents, "worker-s") == "free"
+    calls_text = calls_file.read_text(encoding="utf-8")
+    assert "你的名字叫做worker-c" in calls_text
+
+
+# TC-062
+# 创建者: jcc你莫辜负
+# 最后一次更改: 朽木露琪亚
+# 测试目的: 验证 merge 只允许专职角色，候补不可接续。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py -k test_next_auto_merge_rejects_fallback
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_next_auto_merge_rejects_fallback(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    bin_dir = tmp_path / "bin"
+    state_dir = tmp_path / "state"
+    calls_file = write_fake_tmux(bin_dir, state_dir, sessions=["神秘人-session"])
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-2",
+                "杜甫",
+                "2026-03-08 16:20:00 +0800",
+                "/tmp/wt-ex2",
+                "创建 test",
+                "merge",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "worker-b",
+                "进行中",
+                "xxx",
+                "./log/ex2.md",
+            ),
+        ],
+        list_rows=[],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row_with_role("神秘人", "free", "管理员", "神秘人-session", "管理员"),
+            agent_row_with_role("worker-b", "busy", "实现 测试"),
+            agent_row_with_role("worker-s", "free", "全能替补"),
+        ],
+    )
+
+    env = os.environ.copy()
+    env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["CODEX_MULTI_AGENTS_ADMIN_USERS"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-b"
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-next",
+        "-auto",
+        "-task_id",
+        "EX-2",
+        "-from",
+        "worker-b",
+        "-type",
+        "merge",
+        "-message",
+        "下一阶段：补齐边界用例",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    assert result.returncode == 0
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+    list_rows = parse_section_rows(content, "## 任务列表")
+    assert not any(r[0] == "EX-2" for r in running_rows)
+    assert any(r[0] == "EX-2" and r[5] == "merge" and r[8] == "" for r in list_rows)
+    calls_text = calls_file.read_text(encoding="utf-8")
+    assert (
+        "send:神秘人-session:@worker-b向@神秘人发起会话: "
+        "任务 EX-2 已完成当前阶段，已回到任务列表；新任务类型=merge，请管理员推进。:"
+    ) in calls_text
+
+
 # TC-056
 # 创建者: OpenAI
 # 最后一次更改: 睡觉小分队
@@ -1939,6 +2325,7 @@ def test_next_auto_random_assignment_with_seed(tmp_path: Path) -> None:
             agent_row_with_role("worker-c", "free", "审查"),
             agent_row_with_role("worker-d", "free", "审查"),
             agent_row_with_role("worker-e", "free", "审查"),
+            agent_row_with_role("worker-s", "free", "全能替补"),
         ],
     )
 
@@ -1973,6 +2360,7 @@ def test_next_auto_random_assignment_with_seed(tmp_path: Path) -> None:
     assert any(r[0] == "EX-2" and r[8] == "worker-d" and r[9] == "进行中" for r in running_rows)
     assert get_agent_status(agents, "worker-b") == "free"
     assert get_agent_status(agents, "worker-d") == "busy"
+    assert get_agent_status(agents, "worker-s") == "free"
     calls_text = calls_file.read_text(encoding="utf-8")
     assert "你的名字叫做worker-d" in calls_text
 

@@ -2,7 +2,7 @@
 """codex-multi-agents-task-core.py.
 
 创建者: OpenAI
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 处理 `codex-multi-agents-task.sh` 的核心数据逻辑。
@@ -464,22 +464,56 @@ def normalize_task_type(raw: str, code: int, context: str) -> str:
 
 
 def type_duty_keywords(kind: str) -> list[str]:
+    """按任务类型返回专职关键词集合。
+
+    创建者: OpenAI
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 为专职匹配提供关键词集合。
+    - 仅描述专职关键词，不包含候补关键词。
+
+    使用示例:
+    - keywords = type_duty_keywords("build")
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-task.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+    """
     if kind == "spec":
-        return ["spec"]
+        return ["spec 文档编写", "spec"]
     if kind == "build":
-        return ["实现", "开发", "测试", "全能替补"]
+        return ["实现", "测试"]
     if kind == "review":
         return ["审查", "复审"]
     if kind == "merge":
         return ["合并"]
     if kind == "refactor":
-        return ["实现", "开发", "测试", "重构", "全能替补"]
+        return ["实现", "开发", "测试", "重构"]
     if kind == "other":
         return []
     return []
 
 
 def agent_matches_type(kind: str, duty: str) -> bool:
+    """判断职责是否满足专职匹配条件。
+
+    创建者: OpenAI
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 按任务类型与关键词判断专职匹配。
+    - 不处理候补职责的兜底判定。
+
+    使用示例:
+    - ok = agent_matches_type("review", "审查")
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-task.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+    """
     if kind == "other":
         return True
     keywords = type_duty_keywords(kind)
@@ -487,12 +521,73 @@ def agent_matches_type(kind: str, duty: str) -> bool:
     return any((kw in duty_text for kw in keywords))
 
 
+def is_substitute_duty(duty: str) -> bool:
+    """判断是否为候补职责。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 识别职责中包含“全能替补”的候补角色。
+
+    使用示例:
+    - is_sub = is_substitute_duty("仅负责全能替补（不含合并）")
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-task.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+    """
+    return "全能替补" in duty
+
+
+def is_specialist_candidate(kind: str, duty: str) -> bool:
+    """判断是否满足专职候选条件。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 使用任务类型关键词判断专职匹配。
+    - 对 spec/build/review 排除候补职责。
+
+    使用示例:
+    - ok = is_specialist_candidate("build", "实现 测试")
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-task.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+    """
+    if not agent_matches_type(kind, duty):
+        return False
+    if kind in {"spec", "build", "review"} and is_substitute_duty(duty):
+        return False
+    return True
+
+
 def is_agent_eligible_for_auto(
     name: str,
-    kind: str,
     agents_rows: list[list[str]],
     agents_table: dict,
 ) -> int:
+    """判断角色是否满足自动续接的基础条件。
+
+    创建者: OpenAI
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 校验角色是否存在且状态为 free。
+    - 排除职责包含“不承担管理员分发的任务”的角色。
+
+    使用示例:
+    - idx = is_agent_eligible_for_auto("worker-a", agents_rows, agents_table)
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-task.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+    """
     if not name.strip():
         return -1
     idx = find_agent_row_index(agents_rows, agents_table["name_idx"], name)
@@ -506,8 +601,6 @@ def is_agent_eligible_for_auto(
     if status != "free":
         return -1
     if "不承担管理员分发的任务" in duty:
-        return -1
-    if not agent_matches_type(kind, duty):
         return -1
     return idx
 
@@ -572,11 +665,12 @@ def pick_next_auto_assignee(
     """在候选人集合中选择自动续接接手人。
 
     创建者: OpenAI
-    最后一次更改: 睡觉小分队
+    最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 从候选人集合中随机选择接手人。
-    - 候选人集合由 agents-lists.md 的顺序决定。
+    - 在专职候选集合中随机选择接手人。
+    - 专职候选为空时，对 spec/build/review 退到候补候选集合。
+    - 候选集合顺序由 agents-lists.md 决定。
 
     使用示例:
     - assignee = pick_next_auto_assignee(row, agents_rows, agents_table, operator_name)
@@ -589,14 +683,28 @@ def pick_next_auto_assignee(
 
     kind = normalize_task_type(row[5], RC_DATA, f"task list row {row[0].strip()}")
     operator = operator_name.strip()
-    candidates: list[tuple[str, int]] = []
+    primary_candidates: list[tuple[str, int]] = []
+    fallback_candidates: list[tuple[str, int]] = []
+    header: list[str] = agents_table["header"]
+    duty_idx = header.index("职责") if "职责" in header else -1
     for candidate_row in agents_rows:
         name = candidate_row[agents_table["name_idx"]].strip()
         if not name:
             continue
-        candidate_idx = is_agent_eligible_for_auto(name, kind, agents_rows, agents_table)
-        if candidate_idx >= 0:
-            candidates.append((name, candidate_idx))
+        candidate_idx = is_agent_eligible_for_auto(name, agents_rows, agents_table)
+        if candidate_idx < 0:
+            continue
+        duty = candidate_row[duty_idx].strip() if duty_idx >= 0 else ""
+        if is_specialist_candidate(kind, duty):
+            primary_candidates.append((name, candidate_idx))
+            continue
+        if kind in {"spec", "build", "review"} and is_substitute_duty(duty):
+            fallback_candidates.append((name, candidate_idx))
+    candidates: list[tuple[str, int]]
+    if kind == "merge":
+        candidates = primary_candidates
+    else:
+        candidates = primary_candidates or fallback_candidates
     if not candidates:
         return None
     rng = build_auto_random()
