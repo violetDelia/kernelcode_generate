@@ -39,6 +39,7 @@ from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
 import os
+import re
 import shlex
 import sys
 from typing import Literal, Sequence
@@ -714,6 +715,7 @@ def _normalize_ir(value: Operation) -> str:
 
     功能说明:
     - 使用 xdsl `Printer` 将 operation 打印为文本，用于后续的 line-based 匹配。
+    - 对 `kernel.img2col1d` 行做最小格式归一，避免 `#builtin.int` 噪音影响文本匹配。
 
     使用示例:
     - actual_ir = _normalize_ir(module)
@@ -727,7 +729,15 @@ def _normalize_ir(value: Operation) -> str:
     stream = StringIO()
     printer = Printer(stream=stream)
     printer.print_op(value)
-    return stream.getvalue().rstrip()
+    text = stream.getvalue().rstrip()
+    if "kernel.img2col1d" in text:
+        lines = text.splitlines()
+        for idx, line in enumerate(lines):
+            if "kernel.img2col1d" not in line:
+                continue
+            lines[idx] = re.sub(r"#builtin\.int<(-?\d+)>", r"\1", line)
+        text = "\n".join(lines)
+    return text
 
 
 def _match_checks(

@@ -32,8 +32,9 @@ from xdsl.dialects.builtin import (
     StringAttr,
     UnrealizedConversionCastOp,
     i32,
+    i64,
 )
-from xdsl.ir import Block, Operation, Region, SSAValue
+from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
 from xdsl.irdl import IRDLOperation, irdl_op_definition, operand_def
 from xdsl.utils.exceptions import VerifyException
 
@@ -50,7 +51,15 @@ from kernel_gen.dialect.kernel import (
     KernelSoftmaxOp,
 )
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
+from kernel_gen.dialect.symbol import (
+    SymbolAddOp,
+    SymbolConstOp,
+    SymbolFloorDivOp,
+    SymbolGetDimOp,
+    SymbolMulOp,
+    SymbolSubOp,
+    SymbolValueType,
+)
 from ..pass_manager import Pass
 
 
@@ -418,6 +427,539 @@ def _const_symbol_value(expr: str, literal: int) -> tuple[list[Operation], SSAVa
         operands=[const.result], result_types=[SymbolValueType.from_expr(expr)]
     )
     return [const, cast], cast.results[0]
+
+
+def _static_int_from_operand(operand: SSAValue) -> int | None:
+    """尝试从 operand 中解析静态整数值。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 支持 arith.constant / builtin.unrealized_conversion_cast 形式的静态整数。
+    - 无法解析时返回 None，交由上层决定是否报错。
+
+    使用示例:
+    - value = _static_int_from_operand(op.operands[0])
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/nn_lowering/img2col1d.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    owner = operand.owner
+    if owner is None:
+        return None
+    owner_name = getattr(owner, "name", None)
+    if owner_name == "arith.constant":
+        value_attr = owner.attributes.get("value")
+        if value_attr is None and hasattr(owner, "value"):
+            value_attr = owner.value
+        if isinstance(value_attr, IntegerAttr):
+            return int(value_attr.value.data)
+        if isinstance(value_attr, IntAttr):
+            return int(value_attr.data)
+        return None
+    if owner_name == "builtin.unrealized_conversion_cast":
+        if owner.operands:
+            return _static_int_from_operand(owner.operands[0])
+    return None
+
+
+def _symbol_expr_text(value: SSAValue) -> str:
+    """提取 symbol.int 表达式文本。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅接受 `!symbol.int<"...">` 类型的 SSAValue。
+    - 返回其表达式字符串，供构造 symbol 算术表达式。
+
+    使用示例:
+    - expr = _symbol_expr_text(symbol_value)
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/pass/nn_lowering/img2col1d.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    if not isinstance(value.type, SymbolValueType):
+        raise LowerNnToKernelError("symbol expr must be !symbol.int")
+    return value.type.expr.expr.data
+
+
+def _wrap_symbol_expr(expr: str) -> str:
+    """在必要时为表达式补括号。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 当表达式包含空格且未被括号包裹时补上括号。
+    - 保持已包裹表达式不变，避免重复括号。
+
+    使用示例:
+    - wrapped = _wrap_symbol_expr("W + PL")
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/pass/nn_lowering/img2col2d.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    trimmed = expr.strip()
+    if trimmed.startswith("(") and trimmed.endswith(")"):
+        return trimmed
+    if " " in trimmed:
+        return f"({trimmed})"
+    return trimmed
+
+
+def _symbol_binary_expr(lhs_expr: str, rhs_expr: str, operator: str) -> str:
+    """构造二元 symbol 表达式字符串。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - `+/-` 使用空格分隔。
+    - `*` 不加空格，必要时为 rhs 加括号。
+    - `//` 使用空格分隔，并在 lhs 需要时加括号。
+
+    使用示例:
+    - expr = _symbol_binary_expr("W", "PL", "+")
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/pass/nn_lowering/img2col1d.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    if operator in {"+", "-"}:
+        return f"{lhs_expr} {operator} {rhs_expr}"
+    if operator == "*":
+        return f"{lhs_expr}*{_wrap_symbol_expr(rhs_expr)}"
+    if operator == "//":
+        return f"{_wrap_symbol_expr(lhs_expr)} // {rhs_expr}"
+    raise LowerNnToKernelError(f"unsupported symbol operator {operator}")
+
+
+def _symbol_const_value(value: int) -> tuple[list[Operation], SSAValue]:
+    """构造 symbol.const 常量 SSA。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 使用 `symbol.const` 生成 `!symbol.int<"...">` 常量。
+    - 返回可插入的 op 列表与结果 SSA value。
+
+    使用示例:
+    - ops, one = _symbol_const_value(1)
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/pass/nn_lowering/img2col1d.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    op = SymbolConstOp(value)
+    return [op], op.result
+
+
+def _symbol_binary_op(
+    op_cls: type[Operation],
+    lhs: SSAValue,
+    rhs: SSAValue,
+    operator: str,
+) -> tuple[list[Operation], SSAValue]:
+    """构造二元 symbol 算术 op。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 根据 lhs/rhs 的表达式生成目标 result 类型。
+    - 返回可插入的 op 列表与结果 SSA。
+
+    使用示例:
+    - ops, value = _symbol_binary_op(SymbolAddOp, lhs, rhs, "+")
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/pass/nn_lowering/img2col2d.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    lhs_expr = _symbol_expr_text(lhs)
+    rhs_expr = _symbol_expr_text(rhs)
+    result_expr = _symbol_binary_expr(lhs_expr, rhs_expr, operator)
+    op = op_cls(lhs, rhs, SymbolValueType.from_expr(result_expr))
+    return [op], op.result
+
+
+def _normalize_img2col_operand(
+    op_name: str,
+    param_name: str,
+    operand: SSAValue,
+) -> tuple[list[Operation], SSAValue, list[Operation]]:
+    """将 img2col 参数 operand 归一为 symbol.int。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 若 operand 已是 !symbol.int，则直接返回。
+    - 若 operand 为静态整数常量，则插入 conversion cast 转为 !symbol.int<"value">。
+    - 其他情况直接抛错，避免在 lowering 中引入不明确的符号表达式。
+
+    使用示例:
+    - ops, kw, drop_ops = _normalize_img2col_operand("nn.img2col1d", "kw", kw_value)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/nn_lowering/img2col1d.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    if isinstance(operand.type, SymbolValueType):
+        owner = operand.owner
+        if isinstance(owner, SymbolConstOp):
+            new_ops, new_value = _symbol_const_value(owner.value.data)
+            return new_ops, new_value, [owner]
+        if owner is not None and getattr(owner, "name", None) == "symbol.const":
+            value_attr = owner.attributes.get("value")
+            if isinstance(value_attr, IntAttr):
+                new_ops, new_value = _symbol_const_value(int(value_attr.data))
+                return new_ops, new_value, [owner]
+            if isinstance(value_attr, IntegerAttr):
+                new_ops, new_value = _symbol_const_value(int(value_attr.value.data))
+                return new_ops, new_value, [owner]
+        return [], operand, []
+    if isinstance(operand.type, IntegerType):
+        static_value = _static_int_from_operand(operand)
+        if static_value is None:
+            raise LowerNnToKernelError(
+                f"{op_name} {param_name} must be symbol.int or constant int"
+            )
+        cast = UnrealizedConversionCastOp(
+            operands=[operand],
+            result_types=[SymbolValueType.from_expr(str(static_value))],
+        )
+        return [cast], cast.results[0], []
+    raise LowerNnToKernelError(f"{op_name} {param_name} must be symbol.int or constant int")
+
+
+def _normalize_img2col_operands(
+    op: Operation,
+) -> tuple[list[Operation], list[SSAValue], list[Operation]]:
+    """规范化 img2col 参数 operand 列表。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 统一将 img2col 参数转换为 !symbol.int。
+    - 返回可插入的 op 列表与标准化后的 operand 列表。
+
+    使用示例:
+    - ops, operands, drop_ops = _normalize_img2col_operands(op)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_to_kernel.md
+    - test: test/pass/nn_lowering/img2col2d.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    if op.name == "nn.img2col1d":
+        param_names = ["kw", "sw", "dw", "pl", "pr"]
+        _ensure_operand_count(op, 6)
+    elif op.name == "nn.img2col2d":
+        param_names = ["kh", "kw", "sh", "sw", "dh", "dw", "ph", "pw", "pl", "pr"]
+        _ensure_operand_count(op, 11)
+    else:
+        raise LowerNnToKernelError(f"{op.name} is not an img2col op")
+
+    input_value = SSAValue.get(op.operands[0])
+    extra_ops: list[Operation] = []
+    normalized_params: list[SSAValue] = []
+    drop_ops: list[Operation] = []
+    for param_name, operand in zip(param_names, op.operands[1:]):
+        new_ops, value, stale_ops = _normalize_img2col_operand(
+            op.name,
+            param_name,
+            SSAValue.get(operand),
+        )
+        extra_ops.extend(new_ops)
+        normalized_params.append(value)
+        drop_ops.extend(stale_ops)
+    return extra_ops, [input_value, *normalized_params], drop_ops
+
+
+def _img2col_operand_to_attr(
+    op_name: str,
+    param_name: str,
+    operand: SSAValue,
+    *,
+    numeric_attr: str,
+) -> Attribute:
+    """将 img2col 参数 operand 转为 attr 形式。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 将 !symbol.int 转为 StringAttr 或数值 attr（用于输出 stride/dilation/pad）。
+    - 支持静态整数，动态符号统一转为 StringAttr。
+    - numeric_attr 控制静态数值的 attr 类型：`int` 或 `i64`。
+
+    使用示例:
+    - attr = _img2col_operand_to_attr("nn.img2col1d", "sw", sw_value, numeric_attr="int")
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering.md
+    - test: test/pass/nn_lowering/img2col1d.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    if isinstance(operand.type, SymbolValueType):
+        expr = _symbol_expr_text(operand)
+        if expr.lstrip("-").isdigit():
+            literal = int(expr)
+            if numeric_attr == "int":
+                return IntAttr(literal)
+            if numeric_attr == "i64":
+                return IntegerAttr(literal, i64)
+            raise LowerNnToKernelError(f"{op_name} {param_name} numeric attr kind not supported")
+        return StringAttr(expr)
+    if isinstance(operand.type, IntegerType):
+        static_value = _static_int_from_operand(operand)
+        if static_value is None:
+            raise LowerNnToKernelError(f"{op_name} {param_name} must be constant int")
+        if numeric_attr == "int":
+            return IntAttr(static_value)
+        if numeric_attr == "i64":
+            return IntegerAttr(static_value, i64)
+        raise LowerNnToKernelError(f"{op_name} {param_name} numeric attr kind not supported")
+    raise LowerNnToKernelError(f"{op_name} {param_name} must be symbol.int or constant int")
+
+
+def _build_img2col_attr_array(
+    op_name: str,
+    param_name: str,
+    operands: list[SSAValue],
+    *,
+    numeric_attr: str,
+) -> ArrayAttr:
+    """将 img2col 参数列表转换为 ArrayAttr。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 统一将 stride/dilation/pad operand 列表转为 attribute 数组。
+    - 静态数值按 numeric_attr 输出，动态符号输出为 StringAttr。
+
+    使用示例:
+    - stride_attr = _build_img2col_attr_array("nn.img2col1d", "stride", [sw], numeric_attr="int")
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering.md
+    - test: test/pass/nn_lowering/img2col2d.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    attrs = [
+        _img2col_operand_to_attr(op_name, param_name, operand, numeric_attr=numeric_attr)
+        for operand in operands
+    ]
+    return ArrayAttr(attrs)
+
+
+def _build_matmul_dynamic_shape(
+    lhs: SSAValue,
+    rhs: SSAValue,
+    result_type: NnMemoryType,
+) -> tuple[list[Operation], list[SSAValue]]:
+    """构造 nn.matmul 的 dynamic_shape operands。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 动态维度通过 symbol.get_dim 从 lhs/rhs 提取。
+    - 仅返回结果 shape 中的符号维度列表，顺序与结果 shape 一致。
+
+    使用示例:
+    - ops, dims = _build_matmul_dynamic_shape(lhs, rhs, result_type)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering.md
+    - test: test/pass/nn_lowering/matmul.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    ops: list[Operation] = []
+    operands: list[SSAValue] = []
+    for axis, dim in enumerate(result_type.shape.data):
+        if isinstance(dim, IntAttr):
+            continue
+        if not isinstance(dim, StringAttr):
+            raise LowerNnToKernelError("nn.matmul result shape entry must be IntAttr or StringAttr")
+        if axis == 0:
+            get_dim = SymbolGetDimOp(lhs, IntAttr(0))
+        elif axis == 1:
+            get_dim = SymbolGetDimOp(rhs, IntAttr(1))
+        else:
+            raise LowerNnToKernelError("nn.matmul result rank must be 2")
+        ops.append(get_dim)
+        operands.append(get_dim.result)
+    return ops, operands
+
+
+def _build_img2col1d_dynamic_shape(
+    input_value: SSAValue,
+    kw: SSAValue,
+    sw: SSAValue,
+    dw: SSAValue,
+    pl: SSAValue,
+    pr: SSAValue,
+) -> tuple[list[Operation], list[SSAValue]]:
+    """构造 nn.img2col1d 的 dynamic_shape operands。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 通过 symbol.get_dim 读取 B/C/W。
+    - 按合同计算输出宽度表达式并生成对应 symbol op。
+    - 返回 [B, C, KW, W_out] 形式的 dynamic_shape。
+
+    使用示例:
+    - ops, operands = _build_img2col1d_dynamic_shape(inp, kw, sw, dw, pl, pr)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering.md
+    - test: test/pass/nn_lowering/img2col1d.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    ops: list[Operation] = []
+    one_ops, one = _symbol_const_value(1)
+    ops.extend(one_ops)
+
+    get_b = SymbolGetDimOp(input_value, IntAttr(0))
+    ops.append(get_b)
+    get_c = SymbolGetDimOp(input_value, IntAttr(1))
+    ops.append(get_c)
+    get_w = SymbolGetDimOp(input_value, IntAttr(2))
+    ops.append(get_w)
+
+    kw_minus_ops, kw_minus_one = _symbol_binary_op(SymbolSubOp, kw, one, "-")
+    ops.extend(kw_minus_ops)
+    dw_mul_ops, dw_mul = _symbol_binary_op(SymbolMulOp, dw, kw_minus_one, "*")
+    ops.extend(dw_mul_ops)
+
+    w_plus_pl_ops, w_plus_pl = _symbol_binary_op(SymbolAddOp, get_w.result, pl, "+")
+    ops.extend(w_plus_pl_ops)
+    w_plus_pr_ops, w_plus_pr = _symbol_binary_op(SymbolAddOp, w_plus_pl, pr, "+")
+    ops.extend(w_plus_pr_ops)
+    w_minus_dw_ops, w_minus_dw = _symbol_binary_op(SymbolSubOp, w_plus_pr, dw_mul, "-")
+    ops.extend(w_minus_dw_ops)
+    w_minus_one_ops, w_minus_one = _symbol_binary_op(SymbolSubOp, w_minus_dw, one, "-")
+    ops.extend(w_minus_one_ops)
+    w_div_ops, w_div = _symbol_binary_op(SymbolFloorDivOp, w_minus_one, sw, "//")
+    ops.extend(w_div_ops)
+    w_out_ops, w_out = _symbol_binary_op(SymbolAddOp, w_div, one, "+")
+    ops.extend(w_out_ops)
+
+    return ops, [get_b.result, get_c.result, kw, w_out]
+
+
+def _build_img2col2d_dynamic_shape(
+    input_value: SSAValue,
+    kh: SSAValue,
+    kw: SSAValue,
+    sh: SSAValue,
+    sw: SSAValue,
+    dh: SSAValue,
+    dw: SSAValue,
+    ph: SSAValue,
+    pw: SSAValue,
+    pl: SSAValue,
+    pr: SSAValue,
+) -> tuple[list[Operation], list[SSAValue]]:
+    """构造 nn.img2col2d 的 dynamic_shape operands。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 通过 symbol.get_dim 读取 B/C/H/W。
+    - 生成 OH/OW 相关 symbol 算术表达式。
+    - 返回 [B, C, KH, KW, OH, OW] 形式的 dynamic_shape。
+
+    使用示例:
+    - ops, operands = _build_img2col2d_dynamic_shape(inp, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering.md
+    - test: test/pass/nn_lowering/img2col2d.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    ops: list[Operation] = []
+    one_ops, one = _symbol_const_value(1)
+    ops.extend(one_ops)
+
+    get_b = SymbolGetDimOp(input_value, IntAttr(0))
+    ops.append(get_b)
+    get_c = SymbolGetDimOp(input_value, IntAttr(1))
+    ops.append(get_c)
+    get_h = SymbolGetDimOp(input_value, IntAttr(2))
+    ops.append(get_h)
+    get_w = SymbolGetDimOp(input_value, IntAttr(3))
+    ops.append(get_w)
+
+    kh_minus_ops, kh_minus_one = _symbol_binary_op(SymbolSubOp, kh, one, "-")
+    ops.extend(kh_minus_ops)
+    kw_minus_ops, kw_minus_one = _symbol_binary_op(SymbolSubOp, kw, one, "-")
+    ops.extend(kw_minus_ops)
+    dh_mul_ops, dh_mul = _symbol_binary_op(SymbolMulOp, dh, kh_minus_one, "*")
+    ops.extend(dh_mul_ops)
+    dw_mul_ops, dw_mul = _symbol_binary_op(SymbolMulOp, dw, kw_minus_one, "*")
+    ops.extend(dw_mul_ops)
+
+    h_plus_ph_ops, h_plus_ph = _symbol_binary_op(SymbolAddOp, get_h.result, ph, "+")
+    ops.extend(h_plus_ph_ops)
+    h_plus_pw_ops, h_plus_pw = _symbol_binary_op(SymbolAddOp, h_plus_ph, pw, "+")
+    ops.extend(h_plus_pw_ops)
+    h_minus_dh_ops, h_minus_dh = _symbol_binary_op(SymbolSubOp, h_plus_pw, dh_mul, "-")
+    ops.extend(h_minus_dh_ops)
+    h_minus_one_ops, h_minus_one = _symbol_binary_op(SymbolSubOp, h_minus_dh, one, "-")
+    ops.extend(h_minus_one_ops)
+    h_div_ops, h_div = _symbol_binary_op(SymbolFloorDivOp, h_minus_one, sh, "//")
+    ops.extend(h_div_ops)
+    h_out_ops, h_out = _symbol_binary_op(SymbolAddOp, h_div, one, "+")
+    ops.extend(h_out_ops)
+
+    w_plus_pl_ops, w_plus_pl = _symbol_binary_op(SymbolAddOp, get_w.result, pl, "+")
+    ops.extend(w_plus_pl_ops)
+    w_plus_pr_ops, w_plus_pr = _symbol_binary_op(SymbolAddOp, w_plus_pl, pr, "+")
+    ops.extend(w_plus_pr_ops)
+    w_minus_dw_ops, w_minus_dw = _symbol_binary_op(SymbolSubOp, w_plus_pr, dw_mul, "-")
+    ops.extend(w_minus_dw_ops)
+    w_minus_one_ops, w_minus_one = _symbol_binary_op(SymbolSubOp, w_minus_dw, one, "-")
+    ops.extend(w_minus_one_ops)
+    w_div_ops, w_div = _symbol_binary_op(SymbolFloorDivOp, w_minus_one, sw, "//")
+    ops.extend(w_div_ops)
+    w_out_ops, w_out = _symbol_binary_op(SymbolAddOp, w_div, one, "+")
+    ops.extend(w_out_ops)
+
+    return ops, [get_b.result, get_c.result, kh, kw, h_out, w_out]
 
 
 def _build_alloc_dynamic_shape_from_result(
@@ -838,15 +1380,17 @@ def _build_kernel_op(
     *,
     lhs_value: SSAValue | None = None,
     rhs_value: SSAValue | None = None,
+    img2col_operands: list[SSAValue] | None = None,
 ) -> Operation:
     """构造 kernel dialect op。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 根据 nn op 名称映射 kernel op。
     - 处理二元/选择/类型转换/单 operand 结构化 op。
+    - img2col 支持显式传入已归一的 symbol.int operands。
 
     使用示例:
     - kernel_op = _build_kernel_op(op, alloc.results[0], space)
@@ -893,32 +1437,42 @@ def _build_kernel_op(
 
     if op.name == "nn.img2col1d":
         _ensure_operand_count(op, 6)
+        operands = (
+            img2col_operands
+            if img2col_operands is not None
+            else [SSAValue.get(operand) for operand in op.operands]
+        )
         return KernelImg2col1dOp(
-            op.operands[0],
+            operands[0],
             out_value,
-            op.operands[1],
-            op.operands[2],
-            op.operands[3],
-            op.operands[4],
-            op.operands[5],
+            operands[1],
+            operands[2],
+            operands[3],
+            operands[4],
+            operands[5],
             space=space,
         )
 
     if op.name == "nn.img2col2d":
         _ensure_operand_count(op, 11)
+        operands = (
+            img2col_operands
+            if img2col_operands is not None
+            else [SSAValue.get(operand) for operand in op.operands]
+        )
         return KernelImg2col2dOp(
-            op.operands[0],
+            operands[0],
             out_value,
-            op.operands[1],
-            op.operands[2],
-            op.operands[3],
-            op.operands[4],
-            op.operands[5],
-            op.operands[6],
-            op.operands[7],
-            op.operands[8],
-            op.operands[9],
-            op.operands[10],
+            operands[1],
+            operands[2],
+            operands[3],
+            operands[4],
+            operands[5],
+            operands[6],
+            operands[7],
+            operands[8],
+            operands[9],
+            operands[10],
             space=space,
         )
 
@@ -1046,6 +1600,12 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
     result_type = _ensure_single_result(op)
     space = _ensure_space_attr(op)
 
+    img2col_ops: list[Operation] = []
+    img2col_operands: list[SSAValue] | None = None
+    img2col_drop_ops: list[Operation] = []
+    if op.name in {"nn.img2col1d", "nn.img2col2d"}:
+        img2col_ops, img2col_operands, img2col_drop_ops = _normalize_img2col_operands(op)
+
     _ensure_contiguous_result_stride(result_type)
     if _is_static_shape(result_type):
         shape_ops: list[Operation] = []
@@ -1061,6 +1621,37 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
             keepdim_attr,
             op.name,
         )
+    elif op.name == "nn.matmul":
+        lhs_value = SSAValue.get(op.operands[0])
+        rhs_value = SSAValue.get(op.operands[1])
+        shape_ops, dynamic_shape = _build_matmul_dynamic_shape(lhs_value, rhs_value, result_type)
+    elif op.name == "nn.img2col1d":
+        if img2col_operands is None:
+            raise LowerNnToKernelError("nn.img2col1d normalized operands missing")
+        shape_ops, dynamic_shape = _build_img2col1d_dynamic_shape(
+            img2col_operands[0],
+            img2col_operands[1],
+            img2col_operands[2],
+            img2col_operands[3],
+            img2col_operands[4],
+            img2col_operands[5],
+        )
+    elif op.name == "nn.img2col2d":
+        if img2col_operands is None:
+            raise LowerNnToKernelError("nn.img2col2d normalized operands missing")
+        shape_ops, dynamic_shape = _build_img2col2d_dynamic_shape(
+            img2col_operands[0],
+            img2col_operands[1],
+            img2col_operands[2],
+            img2col_operands[3],
+            img2col_operands[4],
+            img2col_operands[5],
+            img2col_operands[6],
+            img2col_operands[7],
+            img2col_operands[8],
+            img2col_operands[9],
+            img2col_operands[10],
+        )
     elif op.name in _RESULT_TYPED_ALLOC_OPS:
         shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_result(result_type)
     else:
@@ -1068,19 +1659,79 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
         shape_ops, dynamic_shape = _build_alloc_dynamic_shape(shape_source, result_type)
     alloc = DmaAllocOp(dynamic_shape, result_type)
     rhs_ops, lowered_rhs = _maybe_materialize_mixed_add_rhs(op, result_type, dynamic_shape)
-    kernel_op = _build_kernel_op(op, alloc.result, space, rhs_value=lowered_rhs)
+    kernel_op = _build_kernel_op(
+        op,
+        alloc.result,
+        space,
+        rhs_value=lowered_rhs,
+        img2col_operands=img2col_operands,
+    )
+    if op.name == "nn.img2col1d":
+        if img2col_operands is None:
+            raise LowerNnToKernelError("nn.img2col1d normalized operands missing")
+        kernel_op.attributes["stride"] = _build_img2col_attr_array(
+            op.name,
+            "stride",
+            [img2col_operands[2]],
+            numeric_attr="int",
+        )
+        kernel_op.attributes["dilation"] = _build_img2col_attr_array(
+            op.name,
+            "dilation",
+            [img2col_operands[3]],
+            numeric_attr="int",
+        )
+        kernel_op.attributes["pad"] = _build_img2col_attr_array(
+            op.name,
+            "pad",
+            [img2col_operands[4], img2col_operands[5]],
+            numeric_attr="int",
+        )
+    if op.name == "nn.img2col2d":
+        if img2col_operands is None:
+            raise LowerNnToKernelError("nn.img2col2d normalized operands missing")
+        kernel_op.attributes["stride"] = _build_img2col_attr_array(
+            op.name,
+            "stride",
+            [img2col_operands[3], img2col_operands[4]],
+            numeric_attr="i64",
+        )
+        kernel_op.attributes["dilation"] = _build_img2col_attr_array(
+            op.name,
+            "dilation",
+            [img2col_operands[5], img2col_operands[6]],
+            numeric_attr="i64",
+        )
+        kernel_op.attributes["pad"] = _build_img2col_attr_array(
+            op.name,
+            "pad",
+            [img2col_operands[7], img2col_operands[8], img2col_operands[9], img2col_operands[10]],
+            numeric_attr="i64",
+        )
 
     try:
         alloc.verify()
         for rhs_op in rhs_ops:
             rhs_op.verify()
+        for extra_op in img2col_ops:
+            extra_op.verify()
         kernel_op.verify()
     except VerifyException as exc:
         raise LowerNnToKernelError(str(exc)) from exc
 
-    block.insert_ops_before([*shape_ops, alloc, *rhs_ops, kernel_op], op)
+    if img2col_ops:
+        block.insert_ops_before([*img2col_ops, *shape_ops, alloc, *rhs_ops, kernel_op], op)
+    else:
+        block.insert_ops_before([*shape_ops, alloc, *rhs_ops, kernel_op], op)
     op.results[0].replace_by(alloc.result)
     block.erase_op(op)
+    for stale_op in img2col_drop_ops:
+        if getattr(stale_op, "name", None) != "symbol.const":
+            continue
+        if not stale_op.results:
+            continue
+        if stale_op.results[0].uses.get_length() == 0:
+            block.erase_op(stale_op)
 
 
 def _lower_block(block: Block) -> None:

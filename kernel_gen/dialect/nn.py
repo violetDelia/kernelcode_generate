@@ -76,6 +76,7 @@ def _parse_dim_list(parser: AttrParser) -> ArrayAttr[Attribute]:
 
     功能说明:
     - 支持非负整数、`?` 与符号标识符。
+    - 允许表达式维度（例如 `W + PL` / `(W + PL) // SW`），并按原文本保留。
 
     使用示例:
     - _parse_dim_list(parser)
@@ -99,7 +100,32 @@ def _parse_dim_list(parser: AttrParser) -> ArrayAttr[Attribute]:
             if integer is not None:
                 dims.append(IntAttr(integer))
             else:
-                dims.append(StringAttr(parser.parse_identifier("Expected dimension symbol.")))
+                ident = parser.parse_optional_identifier()
+                if ident is not None:
+                    dims.append(StringAttr(ident))
+                else:
+                    start_pos = parser.pos
+                    input_text = parser.lexer.input.content
+                    depth = 0
+                    end_pos = None
+                    pos = start_pos
+                    while pos < len(input_text):
+                        ch = input_text[pos]
+                        if ch == "(":
+                            depth += 1
+                        elif ch == ")" and depth > 0:
+                            depth -= 1
+                        elif depth == 0 and ch in {",", "]"}:
+                            end_pos = pos
+                            break
+                        pos += 1
+                    if end_pos is None:
+                        parser.raise_error("Expected dimension list terminator.")
+                    expr = input_text[start_pos:end_pos].strip()
+                    if not expr:
+                        parser.raise_error("Expected dimension symbol.")
+                    parser._resume_from(end_pos)
+                    dims.append(StringAttr(expr))
 
         if parser.parse_optional_punctuation(",") is None:
             break
