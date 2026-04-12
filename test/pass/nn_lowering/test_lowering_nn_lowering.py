@@ -1,7 +1,7 @@
 """nn -> kernel lowering pass tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 朽木露琪亚
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 nn_lowering pass 的 lowering 行为与错误路径。
@@ -38,6 +38,7 @@ from xdsl.dialects.builtin import (
     IntegerAttr,
     ModuleOp,
     StringAttr,
+    UnregisteredOp,
     f32,
     i1,
     i32,
@@ -59,7 +60,6 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaTransposeOp
 from kernel_gen.dialect.kernel import (
     KernelBinaryElewiseOp,
-    KernelCastOp,
     KernelExpOp,
     KernelImg2col1dOp,
     KernelImg2col2dOp,
@@ -305,6 +305,36 @@ def _assert_single_op_after_first_alloc(block: Block, op_type: type[Operation]) 
             target_idx = idx + 1
             assert target_idx < len(op_list)
             assert isinstance(op_list[target_idx], op_type)
+            return
+    raise AssertionError("no DmaAllocOp found in block")
+
+
+def _assert_single_dma_cast_after_first_alloc(block: Block) -> None:
+    """断言第一个 dma.alloc 之后紧跟 dma.cast。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 确保 dma.cast 紧跟在第一个 dma.alloc 后。
+
+    使用示例:
+    - _assert_single_dma_cast_after_first_alloc(block)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering.md
+    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
+    """
+
+    op_list = list(block.ops)
+    for idx, op in enumerate(op_list):
+        if isinstance(op, DmaAllocOp):
+            target_idx = idx + 1
+            assert target_idx < len(op_list)
+            target = op_list[target_idx]
+            assert isinstance(target, UnregisteredOp)
+            assert target.op_name.data == "dma.cast"
             return
     raise AssertionError("no DmaAllocOp found in block")
 
@@ -1038,7 +1068,8 @@ def test_lower_cast_to_dma_cast() -> None:
 
     func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
     block = func_op.body.block
-    _assert_single_op(block, KernelCastOp)
+    _assert_single_alloc(block)
+    _assert_single_dma_cast_after_first_alloc(block)
 
 
 # TC-PASS-NNL-018
@@ -1192,7 +1223,8 @@ def test_lower_cast_preserves_symbol_dim() -> None:
 
     func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
     block = func_op.body.block
-    _assert_single_op(block, KernelCastOp)
+    _assert_single_alloc(block)
+    _assert_single_dma_cast_after_first_alloc(block)
 
 
 # TC-PASS-NNL-022
@@ -1439,7 +1471,7 @@ def test_lower_cast_symbol_dim_rejects_mismatch() -> None:
     func_op = func.FuncOp("cast_mismatch", FunctionType.from_lists([operand_type], [result_type]), region)
     module = ModuleOp([func_op])
 
-    with pytest.raises(NnLoweringError, match="cast result must preserve symbol dims"):
+    with pytest.raises(NnLoweringError, match="dma.cast shape mismatch"):
         NnLoweringPass().run(module)
 
 
@@ -1545,7 +1577,8 @@ def test_lower_bfloat16_cast() -> None:
 
     func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
     block = func_op.body.block
-    _assert_single_op(block, KernelCastOp)
+    _assert_single_alloc(block)
+    _assert_single_dma_cast_after_first_alloc(block)
 
 
 # TC-PASS-NNL-031

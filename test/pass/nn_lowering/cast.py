@@ -22,7 +22,16 @@ from pathlib import Path
 from collections.abc import Callable
 
 from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, f32, i32
+from xdsl.dialects.builtin import (
+    ArrayAttr,
+    BFloat16Type,
+    FunctionType,
+    IntAttr,
+    ModuleOp,
+    UnregisteredOp,
+    f32,
+    i32,
+)
 from xdsl.ir import Attribute, Block, Operation, Region
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -31,7 +40,9 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.dma import DmaAllocOp
 from kernel_gen.dialect.nn import NnCastOp, NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.passes.lowering.nn_lowering.select_cast_lowering import LowerNnSelectCastPass
+from kernel_gen.passes.lowering.nn_lowering.select_cast_lowering import (
+    lower_select_cast_family,
+)
 
 
 def _make_memory_type(element_type: Attribute = i32) -> NnMemoryType:
@@ -98,11 +109,11 @@ def _build_module(
 # 最近一次运行测试时间: 2026-04-12 06:47:55 +0800
 # 最近一次运行成功时间: 2026-04-12 06:47:55 +0800
 # 测试目的: 验证 nn.cast lower 为 dma.alloc + dma.cast。
-# 使用示例: pytest -q test/pass/nn_lowering/cast.py -k test_lower_cast_to_kernel_cast
+# 使用示例: pytest -q test/pass/nn_lowering/cast.py -k test_lower_cast_to_dma_cast
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
 # 对应测试文件路径: test/pass/nn_lowering/cast.py
-def test_lower_cast_to_kernel_cast() -> None:
+def test_lower_cast_to_dma_cast() -> None:
     input_type = _make_memory_type(element_type=i32)
     result_type = _make_memory_type(element_type=f32)
     space = NnMemorySpaceAttr.from_name("global")
@@ -112,9 +123,41 @@ def test_lower_cast_to_kernel_cast() -> None:
         result_type,
         lambda block: [NnCastOp(block.args[0], result_type, space)],
     )
-    LowerNnSelectCastPass().run(module)
+    for op in list(block.ops):
+        lower_select_cast_family(block, op)
 
     ops = list(block.ops)
-    assert any(op.name == "dma.cast" for op in ops)
+    assert any(
+        isinstance(op, UnregisteredOp) and op.op_name.data == "dma.cast" for op in ops
+    )
+    assert any(isinstance(op, DmaAllocOp) for op in ops)
+    assert not any(op.name.startswith("nn.") for op in ops)
+
+
+# TC-PASS-NNL-S3-001
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 测试目的: 验证 nn.cast 支持 bfloat16 并 lower 为 dma.cast。
+# 使用示例: pytest -q test/pass/nn_lowering/cast.py -k test_lower_cast_bfloat16_to_dma_cast
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应测试文件路径: test/pass/nn_lowering/cast.py
+def test_lower_cast_bfloat16_to_dma_cast() -> None:
+    input_type = _make_memory_type(element_type=i32)
+    result_type = _make_memory_type(element_type=BFloat16Type())
+    space = NnMemorySpaceAttr.from_name("global")
+
+    module, block = _build_module(
+        [input_type],
+        result_type,
+        lambda block: [NnCastOp(block.args[0], result_type, space)],
+    )
+    for op in list(block.ops):
+        lower_select_cast_family(block, op)
+
+    ops = list(block.ops)
+    assert any(
+        isinstance(op, UnregisteredOp) and op.op_name.data == "dma.cast" for op in ops
+    )
     assert any(isinstance(op, DmaAllocOp) for op in ops)
     assert not any(op.name.startswith("nn.") for op in ops)

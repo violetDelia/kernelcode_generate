@@ -1,15 +1,15 @@
 """select/cast lowering 实现。
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - nn.select -> dma.alloc + kernel.select
 - nn.cast -> dma.alloc + dma.cast
 
 使用示例:
-- from kernel_gen.passes.lowering.nn_lowering.select_cast_lowering import LowerNnSelectCastPass
-- module = LowerNnSelectCastPass().run(module)
+- from kernel_gen.passes.lowering.nn_lowering.select_cast_lowering import lower_select_cast_family
+- lower_select_cast_family(block, op)
 
 关联文件:
 - spec: spec/pass/lowering/nn_lowering.md
@@ -19,69 +19,27 @@
 
 from __future__ import annotations
 
-from xdsl.dialects import func
-from xdsl.dialects.builtin import IntAttr, StringAttr
+from xdsl.dialects.builtin import IntAttr, StringAttr, UnregisteredOp
+from xdsl.dialects.builtin import IntegerType
+from xdsl.dialects.builtin import (
+    BFloat16Type,
+    Float16Type,
+    Float32Type,
+    Float64Type,
+)
 from xdsl.ir import Block, Operation, SSAValue
-from xdsl.irdl import IRDLOperation, irdl_op_definition, operand_def
 from xdsl.utils.exceptions import VerifyException
 
-from kernel_gen.dialect.dma import DmaAllocOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaCastOp
 from kernel_gen.dialect.kernel import KernelSelectOp
 from kernel_gen.dialect.nn import NnMemoryType
-from kernel_gen.dialect.symbol import SymbolGetDimOp
-from kernel_gen.passes.pass_manager import Pass
+from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
 from .nn_lowering_utility import (
     NnLoweringError,
-    ensure_module_op,
     ensure_operand_count,
     ensure_single_result,
     ensure_space_attr,
 )
-
-
-@irdl_op_definition
-class _DmaCastOutOp(IRDLOperation):
-    """dma.cast（out 参数风格）。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 通过 out + source 形式表达 cast，匹配 nn_lowering 的输出约束。
-    - 仅用于 select_cast_lowering 内部构造与校验。
-
-    使用示例:
-    - _DmaCastOutOp(out, source)
-
-    关联文件:
-    - spec: spec/dialect/dma.md
-    - test: test/pass/nn_lowering/cast.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
-    """
-
-    name = "dma.cast"
-
-    out = operand_def(NnMemoryType)
-    source = operand_def(NnMemoryType)
-
-    def __init__(self, out: SSAValue | Operation, source: SSAValue | Operation) -> None:
-        super().__init__(operands=[out, source])
-
-    def verify_(self) -> None:
-        out_type = self.out.type
-        source_type = self.source.type
-        if not isinstance(out_type, NnMemoryType):
-            raise VerifyException("dma.cast output must be nn.memory")
-        if not isinstance(source_type, NnMemoryType):
-            raise VerifyException("dma.cast source must be nn.memory")
-        out_type.verify()
-        source_type.verify()
-        if source_type.shape != out_type.shape:
-            raise VerifyException("dma.cast shape mismatch")
-        if source_type.stride != out_type.stride:
-            raise VerifyException("dma.cast stride mismatch")
-        if source_type.space.space.data != out_type.space.space.data:
-            raise VerifyException("dma.cast space mismatch")
 
 
 def _build_alloc_dynamic_shape_from_source(
@@ -91,10 +49,11 @@ def _build_alloc_dynamic_shape_from_source(
     """基于 memory operand 构造 dma.alloc 的 dynamic_shape。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 逐维使用 symbol.get_dim 读取 shape 对应维度。
+    - 仅对符号维度使用 symbol.get_dim 读取 shape 对应维度。
+    - 全静态 shape 时返回空的 dynamic_shape。
     - 禁止结果 shape 包含匿名维度 '?'。
     - source 与 result rank 不一致时抛出 NnLoweringError。
 
@@ -116,11 +75,16 @@ def _build_alloc_dynamic_shape_from_source(
     ops: list[Operation] = []
     operands: list[SSAValue] = []
     for axis, dim in enumerate(result_type.shape.data):
-        if isinstance(dim, StringAttr) and dim.data == "?":
-            raise NnLoweringError("nn select/cast result shape must not contain '?'")
-        get_dim = SymbolGetDimOp(source, IntAttr(axis))
-        ops.append(get_dim)
-        operands.append(get_dim.result)
+        if isinstance(dim, IntAttr):
+            continue
+        if isinstance(dim, StringAttr):
+            if dim.data == "?":
+                raise NnLoweringError("nn select/cast result shape must not contain '?'")
+            get_dim = SymbolGetDimOp(source, IntAttr(axis))
+            ops.append(get_dim)
+            operands.append(get_dim.result)
+            continue
+        raise NnLoweringError("nn select/cast result shape must be int or symbol")
     return ops, operands
 
 
@@ -176,7 +140,7 @@ def _lower_cast_op(op: Operation, block: Block) -> None:
     """对 nn.cast 执行 lowering。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 输出 memory 通过 dma.alloc 创建。
@@ -191,40 +155,80 @@ def _lower_cast_op(op: Operation, block: Block) -> None:
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
     """
 
-    ensure_operand_count(op, 1)
+    if len(op.operands) == 2:
+        _ensure_symbol_or_int(op, op.operands[1])
+    else:
+        ensure_operand_count(op, 1)
     result_type = ensure_single_result(op)
-    space = ensure_space_attr(op)
 
     input_value = SSAValue.get(op.operands[0])
     if not isinstance(input_value.type, NnMemoryType):
         raise NnLoweringError("nn.cast input must be nn.memory")
+    for elem_type in (input_value.type.element_type, result_type.element_type):
+        if isinstance(elem_type, IntegerType):
+            if elem_type.width.data == 1:
+                raise NnLoweringError("nn.cast element_type must be integer or float and not i1")
+            continue
+        if not isinstance(elem_type, (Float16Type, Float32Type, Float64Type, BFloat16Type)):
+            raise NnLoweringError("nn.cast element_type must be integer or float and not i1")
 
     shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_source(input_value, result_type)
     alloc = DmaAllocOp(dynamic_shape, result_type)
-    cast_op = _DmaCastOutOp(alloc.result, input_value)
+    dma_cast_op = UnregisteredOp.with_name("dma.cast").create(
+        operands=[alloc.result, input_value],
+        result_types=[],
+    )
 
     try:
+        DmaCastOp(input_value, result_type).verify_()
         alloc.verify()
-        cast_op.verify()
     except VerifyException as exc:
         raise NnLoweringError(str(exc)) from exc
 
-    block.insert_ops_before([*shape_ops, alloc, cast_op], op)
+    block.insert_ops_before([*shape_ops, alloc, dma_cast_op], op)
     op.results[0].replace_by(alloc.result)
     block.erase_op(op)
 
 
-def _lower_block(block: Block) -> None:
-    """遍历 block 执行 select/cast lowering。
+def _ensure_symbol_or_int(op: Operation, operand: SSAValue | Operation) -> SSAValue:
+    """确保 operand 为 symbol.int 或整数类型。
 
     创建者: 小李飞刀
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 按顺序处理 block 内的 nn.select 与 nn.cast。
+    - 支持 symbol.int 或 IntegerType。
 
     使用示例:
-    - _lower_block(block)
+    - value = _ensure_symbol_or_int(op, operand)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering.md
+    - test: test/pass/nn_lowering/cast.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
+    """
+
+    if isinstance(operand, Operation):
+        operand = operand.results[0]
+    if isinstance(operand.type, SymbolValueType):
+        return operand
+    if isinstance(operand.type, IntegerType):
+        return operand
+    raise NnLoweringError("nn.cast optional operand must be int or symbol")
+
+
+def lower_select_cast_family(block: Block, op: Operation) -> bool:
+    """执行 select/cast family lowering。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅处理 nn.select 与 nn.cast。
+    - 成功处理返回 True；非本 family op 返回 False。
+
+    使用示例:
+    - handled = lower_select_cast_family(block, op)
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering.md
@@ -232,58 +236,13 @@ def _lower_block(block: Block) -> None:
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
     """
 
-    for op in list(block.ops):
-        if op.name == "nn.select":
-            _lower_select_op(op, block)
-        elif op.name == "nn.cast":
-            _lower_cast_op(op, block)
+    if op.name == "nn.select":
+        _lower_select_op(op, block)
+        return True
+    if op.name == "nn.cast":
+        _lower_cast_op(op, block)
+        return True
+    return False
 
 
-class LowerNnSelectCastPass(Pass):
-    """select/cast lowering pass。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 对 module 中的 nn.select 与 nn.cast 执行 lowering。
-    - 仅处理 func.func 内的 op。
-
-    使用示例:
-    - module = LowerNnSelectCastPass().run(module)
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
-    - test: test/pass/nn_lowering/select.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
-    """
-
-    name = "lower-nn-select-cast"
-
-    def run(self: "LowerNnSelectCastPass", module: Operation) -> Operation:
-        """执行 select/cast lowering。
-
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
-
-        功能说明:
-        - 校验 module 类型并遍历 func.func。
-
-        使用示例:
-        - LowerNnSelectCastPass().run(module)
-
-        关联文件:
-        - spec: spec/pass/lowering/nn_lowering.md
-        - test: test/pass/nn_lowering/select.py
-        - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
-        """
-
-        module_op = ensure_module_op(module)
-        for op in module_op.ops:
-            if isinstance(op, func.FuncOp):
-                for block in op.body.blocks:
-                    _lower_block(block)
-        return module_op
-
-
-__all__ = ["LowerNnSelectCastPass"]
+__all__ = ["lower_select_cast_family"]

@@ -1,7 +1,7 @@
 """Kernel dialect definitions.
 
 创建者: 小李飞刀
-最后一次更改: 大闸蟹
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 定义 kernel dialect 的逐元素算术、比较、选择、指数、归约与类型转换 op。
@@ -285,10 +285,11 @@ def _is_cast_element_type(value: Attribute) -> bool:
     """判断元素类型是否允许用于 kernel.cast。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持整数与浮点类型，但不允许 i1。
+    - 支持 bfloat16。
 
     使用示例:
     - _is_cast_element_type(i1)
@@ -301,7 +302,7 @@ def _is_cast_element_type(value: Attribute) -> bool:
 
     if isinstance(value, IntegerType):
         return value.width.data != 1
-    return isinstance(value, (Float16Type, Float32Type, Float64Type))
+    return isinstance(value, (BFloat16Type, Float16Type, Float32Type, Float64Type))
 
 
 def _normalize_i64_attr(value: int | IntegerAttr | IntAttr, field_name: str) -> IntegerAttr:

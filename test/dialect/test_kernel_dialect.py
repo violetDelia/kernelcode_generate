@@ -1,7 +1,7 @@
 """kernel dialect tests.
 
 创建者: 小李飞刀
-最后一次更改: 大闸蟹
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 覆盖 kernel dialect 的 verifier 约束与 memory type 复用规则。
@@ -373,6 +373,21 @@ def test_kernel_cast_type_error() -> None:
     op = KernelCastOp(_make_value(input_type), _make_value(out_type), _make_space("global"))
     with pytest.raises(VerifyException, match="kernel.cast element_type"):
         op.verify()
+
+
+# TC-KRN-024
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 功能说明: 验证 kernel.cast 支持 bfloat16 类型。
+# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_cast_bfloat16_ok
+# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
+# 对应 spec 文件路径: spec/dialect/kernel.md
+# 对应测试文件路径: test/dialect/test_kernel_dialect.py
+def test_kernel_cast_bfloat16_ok() -> None:
+    input_type = _make_memory_type(element_type=BFloat16Type())
+    out_type = _make_memory_type(element_type=Float16Type())
+    op = KernelCastOp(_make_value(input_type), _make_value(out_type), _make_space("global"))
+    op.verify()
 
 
 # TC-KRN-010

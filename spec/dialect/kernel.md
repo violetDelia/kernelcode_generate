@@ -362,7 +362,7 @@ op = KernelCastOp(input_value, out, NnMemorySpaceAttr.from_name("global"))
 注意事项：
 
 - `input` 与 `out` 的 `shape/stride/space` 必须一致。
-- `input.element_type` 与 `out.element_type` 必须为整数或浮点类型，且不允许 `i1`。
+- `input.element_type` 与 `out.element_type` 必须为整数或浮点类型；允许 `i8/i16/i32/i64` 与 `f16/bf16/f32/f64`，不允许 `i1`。
 
 返回与限制：
 
