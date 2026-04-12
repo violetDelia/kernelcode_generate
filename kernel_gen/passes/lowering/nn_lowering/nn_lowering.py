@@ -1,7 +1,7 @@
 """nn -> kernel lowering pass.
 
 创建者: 金铲铲大作战
-最后一次更改: 朽木露琪亚
+最后一次更改: 小李飞刀
 
 功能说明:
 - 将 nn dialect 的逐元素 op lower 为 kernel dialect op。
@@ -47,7 +47,7 @@ from kernel_gen.dialect.kernel import (
     KernelSoftmaxOp,
 )
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolValueType
+from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
 from ...pass_manager import Pass
 
 
@@ -229,7 +229,7 @@ def _ensure_reduce_axis(op_name: str, axes_attr: ArrayAttr) -> int:
     """校验 reduce 轴参数。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 确保 axes_attr 为 ArrayAttr 且仅包含一个 IntegerAttr。
@@ -250,16 +250,18 @@ def _ensure_reduce_axis(op_name: str, axes_attr: ArrayAttr) -> int:
     if len(axes_attr.data) != 1:
         raise NnLoweringError("reduce axes must contain exactly one element")
     axis_attr = axes_attr.data[0]
-    if not isinstance(axis_attr, IntegerAttr):
-        raise NnLoweringError("reduce axis must be integer")
-    return axis_attr.value.data
+    if isinstance(axis_attr, IntegerAttr):
+        return axis_attr.value.data
+    if isinstance(axis_attr, IntAttr):
+        return axis_attr.data
+    raise NnLoweringError("reduce axis must be integer")
 
 
 def _ensure_reduce_keepdim(op_name: str, keepdim_attr: Attribute) -> bool:
     """校验 reduce keepdim 参数。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
     - keepdim 必须是 IntegerAttr 0 或 1。
@@ -273,9 +275,12 @@ def _ensure_reduce_keepdim(op_name: str, keepdim_attr: Attribute) -> bool:
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
 
-    if not isinstance(keepdim_attr, IntegerAttr):
+    if isinstance(keepdim_attr, IntAttr):
+        keepdim = keepdim_attr.data
+    elif isinstance(keepdim_attr, IntegerAttr):
+        keepdim = keepdim_attr.value.data
+    else:
         raise NnLoweringError("keepdim must be integer")
-    keepdim = keepdim_attr.value.data
     if keepdim not in (0, 1):
         raise NnLoweringError("keepdim must be 0 or 1")
     return bool(keepdim)
@@ -340,6 +345,51 @@ def _normalize_shape_dims(shape: Iterable[Attribute]) -> list[int | str]:
             continue
         raise NnLoweringError("matmul shape must be IntAttr or StringAttr")
     return dims
+
+
+def _collect_reduce_dynamic_shape(
+    block: Block,
+    op: Operation,
+    operand: SSAValue,
+    operand_shape: list[int | str],
+    result_shape: list[int | str],
+    axis: int,
+    keepdim: bool,
+) -> list[SSAValue]:
+    """收集 reduce 结果的动态维度列表。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 遍历结果 shape 中的符号维度，按 axis/keepdim 映射回 operand 维度。
+    - 对每个符号维度插入 symbol.get_dim 作为 dma.alloc 的 dynamic_shape。
+
+    使用示例:
+    - params = _collect_reduce_dynamic_shape(block, op, operand, operand_shape, result_shape, axis, keepdim)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering.md
+    - test: test/pass/nn_lowering/reduce_min.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
+    """
+
+    symbol_dims: list[SSAValue] = []
+    for result_idx, dim in enumerate(result_shape):
+        if not isinstance(dim, str):
+            continue
+        source_axis = result_idx if keepdim or result_idx < axis else result_idx + 1
+        if source_axis < 0 or source_axis >= len(operand_shape):
+            raise NnLoweringError("reduce axis out of range")
+        source_dim = operand_shape[source_axis]
+        if not isinstance(source_dim, str):
+            raise NnLoweringError("reduce axis must be integer")
+        if source_dim != dim:
+            raise NnLoweringError("reduce axis symbol mismatch")
+        symbol_op = SymbolGetDimOp(operand, IntAttr(source_axis))
+        block.insert_op_before(symbol_op, op)
+        symbol_dims.append(symbol_op.result)
+    return symbol_dims
 
 
 def _ensure_matmul_shape(
@@ -550,7 +600,7 @@ def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:
     """lower reduce family。
 
     创建者: 金铲铲大作战
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 校验 axes / keepdim。
@@ -587,7 +637,18 @@ def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:
     expected_rank = operand_rank if keepdim else operand_rank - 1
     if result_rank != expected_rank:
         raise NnLoweringError("reduce shape rank must match")
-    alloc = DmaAllocOp([], result_type)
+    operand_shape = _normalize_shape_dims(operand.type.shape.data)
+    result_shape = _normalize_shape_dims(result_type.shape.data)
+    params = _collect_reduce_dynamic_shape(
+        block,
+        op,
+        operand,
+        operand_shape,
+        result_shape,
+        axis,
+        keepdim,
+    )
+    alloc = DmaAllocOp(params, result_type)
     block.insert_op_before(alloc, op)
     result = alloc.results[0]
     lowered = KernelReduceOp(operand, result, kind=kind, axis=axis, keepdim=keepdim, space=space)

@@ -1838,9 +1838,9 @@ class KernelReduceOp(IRDLOperation):
 
     input = operand_def(NnMemoryType)
     out = operand_def(NnMemoryType)
-    kind = attr_def(StringAttr)
     axis = attr_def(IntegerAttr)
     keepdim = attr_def(IntegerAttr)
+    kind = attr_def(StringAttr)
     space = attr_def(NnMemorySpaceAttr)
 
     def __init__(
@@ -1871,17 +1871,17 @@ class KernelReduceOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/kernel.py
         """
 
+        axis_attr = _normalize_i64_attr(axis, "axis")
+        keepdim_attr = _normalize_bool_attr(keepdim, "keepdim")
         kind_attr = _normalize_kind_attr(
             kind, op_name=self.name, field_name="kind", allowed=_REDUCE_KINDS
         )
-        axis_attr = _normalize_i64_attr(axis, "axis")
-        keepdim_attr = _normalize_bool_attr(keepdim, "keepdim")
         super().__init__(
             operands=[input_value, out],
             attributes={
-                "kind": kind_attr,
                 "axis": axis_attr,
                 "keepdim": keepdim_attr,
+                "kind": kind_attr,
                 "space": space,
             },
         )

@@ -473,16 +473,16 @@ func.return %out : !nn.memory<f32, [B], GM>
 
 - `input(!nn.memory<...>)`：输入 operand。
 - `out(!nn.memory<...>)`：输出 operand。
-- `kind(str)`：归约类型，允许 `sum/min/max`。
 - `axis(i64)`：reduction 轴。
 - `keepdim(bool)`：是否保留被归约维度。
+- `kind(str)`：归约类型，允许 `sum/min/max`。
 - `space(#nn.space<...>)`：op 的空间属性。
 
 使用示例：
 
 ```mlir
 %out = dma.alloc ... : !nn.memory<f32, [B], GM>
-kernel.reduce %src, %out {kind = "sum", axis = 1 : i64, keepdim = false, space = #nn.space<global>} : ...
+kernel.reduce %src, %out {axis = 1 : i64, keepdim = false, kind = "sum", space = #nn.space<global>} : ...
 func.return %out : !nn.memory<f32, [B], GM>
 ```
 
