@@ -151,7 +151,7 @@ module = pass_obj.run(module)
 ## 测试
 
 - 测试文件：`test/pass/test_lowering_tile.py`
-- 执行命令：`pytest -q test/pass/test_lowering_tile.py -k "elementwise or matmul or reduce or duplicate or nn_input or dead_carry or analysis_only"`
+- 执行命令：`pytest -q test/pass/test_lowering_tile.py`
 - 测试目标：
   - 覆盖 elementwise/matmul 成功路径的 loop/view 结构。
   - 覆盖 reduce 不支持、rank mismatch、重复 tile、输入合同与 dead carry 等错误路径。
