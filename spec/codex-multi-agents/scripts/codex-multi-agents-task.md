@@ -112,7 +112,8 @@
 - `-done-plan` 的 `-plan` 不允许为 `None`，且必须以 `.md` 结尾。
 - 权限限制：
   - `-new` 仅管理员或架构师可执行。
-  - `-dispatch/-done/-done-plan` 仅管理员可执行。
+  - `-dispatch/-done-plan` 仅管理员可执行。
+  - `-done` 管理员可执行；合并角色仅可对“指派给自身且任务类型为 `merge` 的运行中任务”执行。
 - 锁顺序固定：
   - `-dispatch/-pause/-continue/-reassign/-next`：先锁 `TODO.md`，再锁 `agents-lists.md`
   - `-done`：先锁 `TODO.md`，再锁 `DONE.md`，最后锁 `agents-lists.md`
@@ -222,6 +223,7 @@ codex-multi-agents-task.sh \
 
 - `-log` 只写入记录，不检查目标文件是否存在。
 - 若任务绑定计划书，则会同步更新计划表的已完成数与待完成数。
+- `-done` 由管理员执行；合并角色仅可处理“指派给自身且任务类型为 `merge` 的运行中任务”，不得对其他类型或他人任务执行。
 
 返回与限制：
 
@@ -485,7 +487,7 @@ codex-multi-agents-task.sh \
   - 验证分发前初始化、分发后消息发送、默认模板拼接与消息失败语义。
   - 验证 `-next` 清空指派并向管理员发送摘要；验证 `-next -auto` 仅续接同一任务、保留原任务 ID、按接手人场景发送摘要与会话消息。
   - 验证文件不存在、表结构非法、依赖未清空、角色忙碌、并行人数超限与锁冲突路径。
-  - 验证权限限制：管理员专属操作与管理员/架构师专属操作。
+  - 验证权限规则：管理员专属操作、管理员/架构师专属操作，以及合并角色执行 `-done` 的范围。
 - 功能与用例清单：
   - `TC-001` `test_dispatch_task_success`：分发成功，任务移入运行表，角色变为 `busy`
   - `TC-002` `test_dispatch_missing_task_returns_rc3`：分发不存在任务，返回 `3`
@@ -523,7 +525,8 @@ codex-multi-agents-task.sh \
   - `TC-034` `test_next_requires_message`：续接缺少描述，返回 `1`
   - `TC-035` `test_next_requires_type`：续接缺少任务类型，返回 `1`
   - `TC-036` `test_new_restricted_for_non_privileged_operator`：普通执行人调用 `-new`，返回 `3`
-  - `TC-037` `test_done_restricted_for_non_privileged_operator`：非管理员调用 `-done`，返回 `3`
+  - `TC-037` `test_done_restricted_for_non_privileged_operator`：非管理员且不满足合并角色条件调用 `-done`，返回 `3`
+  - `TC-037A` `test_done_allows_merge_operator`：合并角色完成自身 `merge` 任务，返回 `0`
   - `TC-038` `test_new_requires_worktree`：新建缺少 `-worktree`，返回 `1`
   - `TC-039` `test_dispatch_blocked_by_unresolved_dependency`：分发时依赖未清空，返回 `3`
   - `TC-040` `test_dispatch_rejects_busy_agent`：目标角色为 `busy`，返回 `3`

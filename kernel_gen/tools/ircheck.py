@@ -4,8 +4,9 @@
 最后一次更改: 小李飞刀
 
 功能说明:
-- 提供轻量的 IR 变换验证工具：读取单文件 case，按 `COMPILE_ARGS` 运行 pass / pipeline，
+- 提供轻量的 IR 变换验证工具：读取单文件 case，按 `COMPILE_ARGS` 顺序运行 pass / pipeline，
   对规范化后的 IR 执行 `CHECK:` / `CHECK-NEXT:` / `CHECK-NOT:` 子串匹配，输出 `true/false`。
+- CLI 支持 `-irdump`：自动写入每个 case 的输入与逐 step IR。
 - 对外仅三条公开 API 作为稳定合同：`parse_ircheck_file`、`run_ircheck_file`、`run_ircheck_text`，
   便于 CLI / pytest / 脚本复用。
 
@@ -40,7 +41,6 @@ from io import StringIO
 from pathlib import Path
 import os
 import re
-import shlex
 import sys
 from typing import Literal, Sequence
 
@@ -108,7 +108,7 @@ class IrcheckCaseBlock:
 
     关联文件:
     - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
-    - test: [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
+    - test: [test/tools/test_ircheck_cli.py](test/tools/test_ircheck_cli.py)
     - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
     """
 
@@ -193,6 +193,31 @@ class IrcheckResult:
     message: str | None = None
 
 
+@dataclass(frozen=True)
+class IrcheckCompileStep:
+    """compile args 解析后的单步执行指令。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 表示 `COMPILE_ARGS` 中的一条 `--pass` 或 `--pipeline` 指令。
+    - 保留 step 类型、名称与选项字典，便于顺序执行。
+
+    使用示例:
+    - step = IrcheckCompileStep(kind="pass", name="no-op", options={})
+
+    关联文件:
+    - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
+    - test: [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
+    - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
+    """
+
+    kind: Literal["pass", "pipeline"]
+    name: str
+    options: dict[str, str]
+
+
 def parse_ircheck_file(path: str) -> IrcheckCase:
     """从磁盘读取并解析单个 case 文件。
 
@@ -219,7 +244,7 @@ def parse_ircheck_file(path: str) -> IrcheckCase:
     return _parse_ircheck_text(text, source_path=path)
 
 
-def run_ircheck_file(path: str) -> IrcheckResult:
+def run_ircheck_file(path: str, *, irdump: bool = False) -> IrcheckResult:
     """运行单个 case 文件。
 
     创建者: 睡觉小分队
@@ -228,10 +253,12 @@ def run_ircheck_file(path: str) -> IrcheckResult:
     功能说明:
     - 读取并解析 case 文件后执行 pass/pipeline。
     - 对规范化 IR 执行 `CHECK*:` 指令匹配，并返回结构化结果。
+    - 若 `irdump=True`，按 `spec/tools/ircheck.md` 写入 `.irdump/<stem>/case_<index>/`。
 
     使用示例:
     - result = run_ircheck_file("case.ircheck")
     - assert result.ok is True
+    - _ = run_ircheck_file("case.ircheck", irdump=True)
 
     关联文件:
     - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
@@ -250,7 +277,8 @@ def run_ircheck_file(path: str) -> IrcheckResult:
             failed_check=None,
             message=str(exc),
         )
-    return _run_ircheck_cases(cases)
+    dump_root = _build_irdump_root(path, enabled=irdump)
+    return _run_ircheck_cases(cases, dump_root=dump_root)
 
 
 def run_ircheck_text(text: str, source_path: str | None = None) -> IrcheckResult:
@@ -376,16 +404,17 @@ def _parse_ircheck_cases(text: str, *, source_path: str | None) -> list[IrcheckC
     return cases
 
 
-def _run_ircheck_cases(cases: Sequence[IrcheckCase]) -> IrcheckResult:
+def _run_ircheck_cases(cases: Sequence[IrcheckCase], *, dump_root: Path | None = None) -> IrcheckResult:
     """顺序执行多个 case，并按 fail-fast 返回结果。
 
     创建者: 守护最好的爱莉希雅
-    最后一次更改: 守护最好的爱莉希雅
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 顺序执行每个 case。
     - 多 case 下任一失败立即返回，并在 message 追加失败 case 序号。
     - 全部通过时返回最后一个 case 的结果。
+    - 当 `dump_root` 非空时，为每个 case 创建 `case_XX` 子目录并写入 IR 快照。
 
     使用示例:
     - result = _run_ircheck_cases(cases)
@@ -409,7 +438,10 @@ def _run_ircheck_cases(cases: Sequence[IrcheckCase]) -> IrcheckResult:
     last_success: IrcheckResult | None = None
     multi_case = len(cases) > 1
     for index, case in enumerate(cases, start=1):
-        result = _run_ircheck_case(case)
+        case_dump_dir = None
+        if dump_root is not None:
+            case_dump_dir = dump_root / f"case_{index:02d}"
+        result = _run_ircheck_case(case, dump_dir=case_dump_dir)
         if not result.ok:
             if multi_case and result.message:
                 return IrcheckResult(
@@ -522,15 +554,17 @@ def _parse_ircheck_text(text: str, *, source_path: str | None, line_offset: int 
     )
 
 
-def _run_ircheck_case(case: IrcheckCase) -> IrcheckResult:
+def _run_ircheck_case(case: IrcheckCase, *, dump_dir: Path | None = None) -> IrcheckResult:
     """执行单个解析后的 case。
 
     创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
-    - 解析 compile args 并通过 pass registry 执行 pass/pipeline。
+    - 解析 compile args 为 step 列表并按顺序执行 pass/pipeline。
+    - 任一步失败即停止，`actual_ir` 返回失败前一刻的规范化 IR。
     - 打印规范化 IR，并按检查语义做子串匹配。
+    - `dump_dir` 非空时写入 `00-input.mlir` 与逐 step IR。
 
     使用示例:
     - case = parse_ircheck_file("case.ircheck")
@@ -542,8 +576,8 @@ def _run_ircheck_case(case: IrcheckCase) -> IrcheckResult:
     - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
     """
 
-    compile_mode = _parse_compile_args(case.compile_args)
-    if compile_mode is None:
+    compile_steps = _parse_compile_args(case.compile_args)
+    if not compile_steps:
         return IrcheckResult(
             ok=False,
             exit_code=2,
@@ -564,40 +598,132 @@ def _run_ircheck_case(case: IrcheckCase) -> IrcheckResult:
             message=f"IrcheckRunError: pass execution failed: failed to parse input ir ({exc})",
         )
 
+    try:
+        input_ir = _normalize_ir(module)
+    except Exception as exc:
+        return IrcheckResult(
+            ok=False,
+            exit_code=2,
+            actual_ir="",
+            failed_check=None,
+            message=f"IrcheckRunError: pass execution failed: failed to print input ({exc})",
+        )
+
+    if dump_dir is not None:
+        _write_irdump_file(dump_dir / "00-input.mlir", input_ir)
+
     load_builtin_passes()
-    try:
-        output = _run_compile_mode(module, compile_mode)
-    except Exception as exc:
-        return IrcheckResult(
-            ok=False,
-            exit_code=2,
-            actual_ir="",
-            failed_check=None,
-            message=f"IrcheckRunError: pass execution failed: {exc}",
-        )
+    current = module
+    last_success_ir = input_ir
+    for index, step in enumerate(compile_steps, start=1):
+        try:
+            output = _run_compile_step(current, step)
+        except Exception as exc:
+            if dump_dir is not None:
+                _write_irdump_file(
+                    dump_dir / f"{index:02d}-before-failed-{step.kind}-{step.name}.mlir",
+                    last_success_ir,
+                )
+            return IrcheckResult(
+                ok=False,
+                exit_code=2,
+                actual_ir=last_success_ir,
+                failed_check=None,
+                message=(
+                    "IrcheckRunError: pass execution failed "
+                    f"at step {index} ({step.kind} {step.name}): {exc}"
+                ),
+            )
 
-    try:
-        actual_ir = _normalize_ir(output)
-    except Exception as exc:
-        return IrcheckResult(
-            ok=False,
-            exit_code=2,
-            actual_ir="",
-            failed_check=None,
-            message=f"IrcheckRunError: pass execution failed: failed to print output ({exc})",
-        )
+        try:
+            actual_ir = _normalize_ir(output)
+        except Exception as exc:
+            if dump_dir is not None:
+                _write_irdump_file(
+                    dump_dir / f"{index:02d}-before-failed-{step.kind}-{step.name}.mlir",
+                    last_success_ir,
+                )
+            return IrcheckResult(
+                ok=False,
+                exit_code=2,
+                actual_ir=last_success_ir,
+                failed_check=None,
+                message=(
+                    "IrcheckRunError: pass execution failed "
+                    f"at step {index} ({step.kind} {step.name}): failed to print output ({exc})"
+                ),
+            )
 
-    ok, failed_check, message = _match_checks(actual_ir, case.checks, source_path=case.source_path)
+        if dump_dir is not None:
+            _write_irdump_file(dump_dir / f"{index:02d}-{step.kind}-{step.name}.mlir", actual_ir)
+        current = output
+        last_success_ir = actual_ir
+
+    ok, failed_check, message = _match_checks(last_success_ir, case.checks, source_path=case.source_path)
     if not ok:
         return IrcheckResult(
             ok=False,
             exit_code=1,
-            actual_ir=actual_ir,
+            actual_ir=last_success_ir,
             failed_check=failed_check,
             message=message,
         )
 
-    return IrcheckResult(ok=True, exit_code=0, actual_ir=actual_ir, failed_check=None, message=None)
+    return IrcheckResult(ok=True, exit_code=0, actual_ir=last_success_ir, failed_check=None, message=None)
+
+
+def _build_irdump_root(source_path: str | None, *, enabled: bool) -> Path | None:
+    """构造 `.irdump/<stem>/` 根目录路径。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 当 `enabled=False` 时返回 `None`，不触发写盘行为。
+    - 当 `source_path` 为空时使用 `inline` 作为 `<stem>`。
+    - 当 `source_path` 包含 `#case-` 后缀时，剥离后缀再取 `stem`。
+
+    使用示例:
+    - root = _build_irdump_root("case.ircheck", enabled=True)
+    - assert root.name == "case"
+
+    关联文件:
+    - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
+    - test: [test/tools/test_ircheck_cli.py](test/tools/test_ircheck_cli.py)
+    - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
+    """
+
+    if not enabled:
+        return None
+    base = source_path or "inline"
+    if "#" in base:
+        base = base.split("#", 1)[0]
+    stem = Path(base).stem or "inline"
+    return Path.cwd() / ".irdump" / stem
+
+
+def _write_irdump_file(path: Path, content: str) -> None:
+    """写入单个 IR dump 文件。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 自动创建父目录，并将规范化后的 IR 文本写入指定路径。
+    - 统一保证文本以换行结束，便于直接查看。
+
+    使用示例:
+    - _write_irdump_file(Path(".irdump/demo/00-input.mlir"), "builtin.module {}")
+
+    关联文件:
+    - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
+    - test: [test/tools/test_ircheck_cli.py](test/tools/test_ircheck_cli.py)
+    - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
+    """
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = content if content.endswith("\n") else f"{content}\n"
+    path.write_text(text, encoding="utf-8")
 
 
 def _parse_name_and_options(value: str) -> tuple[str, dict[str, str]] | None:
@@ -649,21 +775,23 @@ def _parse_name_and_options(value: str) -> tuple[str, dict[str, str]] | None:
     return (value, {})
 
 
-def _parse_compile_args(compile_args: str) -> tuple[str, str, dict[str, str]] | None:
-    """解析 `COMPILE_ARGS:` 字段为执行模式。
+def _parse_compile_args(compile_args: str) -> list[IrcheckCompileStep] | None:
+    """解析 `COMPILE_ARGS:` 字段为有序 step 列表。
 
     创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
-    - 支持以下写法：
+    - 支持重复的 `--pass` / `--pipeline`，按文本顺序解析为多个 step。
+    - 单步仍沿用以下写法：
       - `--pass <name>` / `--pipeline <name>`
       - `--pass "<name>{k=v}"` / `--pipeline "<name>{k=v}"`
-    - 其他形态一律返回 `None`。
+    - `compile_args` 中出现 `{` / `}` 时，必须用引号包住整个 `<name>{k=v}`。
+    - 任意非法形态返回 `None`。
 
     使用示例:
-    - mode = _parse_compile_args("--pass no-op")
-    - assert mode == ("pass", "no-op", {})
+    - steps = _parse_compile_args('--pass no-op --pipeline "default-lowering={bufferize=true}"')
+    - assert [step.kind for step in steps] == ["pass", "pipeline"]
 
     关联文件:
     - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
@@ -671,25 +799,32 @@ def _parse_compile_args(compile_args: str) -> tuple[str, str, dict[str, str]] | 
     - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
     """
 
-    if "{" in compile_args or "}" in compile_args:
-        if re.match(r'^\s*(--pass|--pipeline)\s+("[^"]*"|\'[^\']*\')\s*$', compile_args) is None:
+    pattern = re.compile(r'\s*(--pass|--pipeline)\s+(?:"([^"]*)"|\'([^\']*)\'|(\S+))')
+    steps: list[IrcheckCompileStep] = []
+    pos = 0
+    length = len(compile_args)
+    while pos < length:
+        match = pattern.match(compile_args, pos)
+        if match is None:
             return None
-    try:
-        tokens = shlex.split(compile_args)
-    except ValueError:
-        return None
-    if len(tokens) != 2:
-        return None
-    flag, name = tokens
-    parsed = _parse_name_and_options(name)
-    if parsed is None:
-        return None
-    pass_name, options = parsed
-    if flag == "--pass":
-        return ("pass", pass_name, options)
-    if flag == "--pipeline":
-        return ("pipeline", pass_name, options)
-    return None
+        flag = match.group(1)
+        quoted_value = match.group(2) if match.group(2) is not None else match.group(3)
+        raw_value = match.group(4)
+        value = quoted_value if quoted_value is not None else raw_value
+        if value is None:
+            return None
+        if ("{" in value or "}" in value) and quoted_value is None:
+            return None
+        parsed = _parse_name_and_options(value)
+        if parsed is None:
+            return None
+        name, options = parsed
+        kind = "pass" if flag == "--pass" else "pipeline"
+        steps.append(IrcheckCompileStep(kind=kind, name=name, options=options))
+        pos = match.end()
+        while pos < length and compile_args[pos].isspace():
+            pos += 1
+    return steps or None
 
 
 def _build_default_context() -> Context:
@@ -725,18 +860,18 @@ def _build_default_context() -> Context:
     return ctx
 
 
-def _run_compile_mode(module: Operation, compile_mode: tuple[str, str, dict[str, str]]) -> Operation:
-    """按 compile mode 执行 pass 或 pipeline。
+def _run_compile_step(module: Operation, step: IrcheckCompileStep) -> Operation:
+    """按单个 compile step 执行 pass 或 pipeline。
 
     创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
-    - `("pass", name, options)`：构造并运行单个 pass。
-    - `("pipeline", name, options)`：构造并运行 pipeline（PassManager）。
+    - `step.kind == "pass"`：构造并运行单个 pass。
+    - `step.kind == "pipeline"`：构造并运行 pipeline（PassManager）。
 
     使用示例:
-    - out = _run_compile_mode(module, ("pass", "no-op", {}))
+    - out = _run_compile_step(module, IrcheckCompileStep(kind="pass", name="no-op", options={}))
 
     关联文件:
     - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
@@ -744,7 +879,9 @@ def _run_compile_mode(module: Operation, compile_mode: tuple[str, str, dict[str,
     - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
     """
 
-    kind, name, options = compile_mode
+    kind = step.kind
+    name = step.name
+    options = step.options
     if kind == "pass":
         pass_obj = build_registered_pass(name, options)
         if not isinstance(pass_obj, Pass):
@@ -918,6 +1055,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     功能说明:
     - 运行单个 case 文件并在标准输出打印 `true/false`。
     - 若文件中包含 `// -----` 分隔符，会按顺序执行多个 case（fail-fast）。
+    - 支持 `-irdump <case-file>`，用于写入 `.irdump/<stem>/case_<index>/`。
     - 退出码约束见 `spec/tools/ircheck.md`。
 
     使用示例:
@@ -930,12 +1068,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
 
     args = list(sys.argv[1:] if argv is None else argv)
-    if len(args) != 1:
+    irdump = False
+    case_path: str | None = None
+    if len(args) == 1:
+        case_path = args[0]
+    elif len(args) == 2 and args[0] == "-irdump":
+        irdump = True
+        case_path = args[1]
+    if case_path is None:
         print("false")
         print("IrcheckCliError: invalid arguments")
         return 2
 
-    result = run_ircheck_file(args[0])
+    result = run_ircheck_file(case_path, irdump=irdump)
     if result.ok:
         print("true")
         return 0

@@ -7,6 +7,7 @@
 - 覆盖 `python -m kernel_gen.tools.ircheck <case-file>` 的最小 CLI 合同：
   - 成功时仅输出 `true`；
   - 失败时首行输出 `false`，并包含失败指令与规范化后的实际 IR（actual_ir）。
+- 覆盖 `-irdump` 目录生成与逐 step 文件命名约束。
 
 当前覆盖率信息:
 - 当前覆盖率: 未统计（本任务验证未启用 coverage 统计）。
@@ -115,3 +116,67 @@ def test_ircheck_cli_multi_case_success(tmp_path: Path, capsys: pytest.CaptureFi
 
     assert exit_code == 0
     assert captured.out.strip() == "true"
+
+
+# TC-IRCHECK-CLI-003
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-13 03:20:00 +0800
+# 最近一次运行成功时间: 2026-04-13 03:20:00 +0800
+# 功能说明: 验证 CLI `-irdump` 会生成 .irdump/<stem>/case_XX 目录与逐 step IR 文件。
+# 使用示例: pytest -q test/tools/test_ircheck_cli.py -k test_ircheck_cli_irdump_creates_files
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_cli.py
+def test_ircheck_cli_irdump_creates_files(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    case_one_ir = """builtin.module {
+  func.func @case_one() {
+    func.return
+  }
+}
+"""
+    case_two_ir = """builtin.module {
+  func.func @case_two() {
+    func.return
+  }
+}
+"""
+    content = f"""// COMPILE_ARGS: --pass no-op --pass no-op
+// CHECK: func.func @case_one
+
+{case_one_ir}
+// -----
+// COMPILE_ARGS: --pass no-op --pipeline no-op-pipeline
+// CHECK: func.func @case_two
+
+{case_two_ir}"""
+    case_path = tmp_path / "two_case_dump.ircheck"
+    case_path.write_text(content, encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    exit_code = main(["-irdump", str(case_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert captured.out.splitlines()[:1] == ["true"]
+
+    dump_root = tmp_path / ".irdump" / "two_case_dump"
+    case_01 = dump_root / "case_01"
+    case_02 = dump_root / "case_02"
+    assert case_01.is_dir()
+    assert case_02.is_dir()
+
+    expected_files = [
+        case_01 / "00-input.mlir",
+        case_01 / "01-pass-no-op.mlir",
+        case_01 / "02-pass-no-op.mlir",
+        case_02 / "00-input.mlir",
+        case_02 / "01-pass-no-op.mlir",
+        case_02 / "02-pipeline-no-op-pipeline.mlir",
+    ]
+    missing = [str(path) for path in expected_files if not path.is_file()]
+    assert not missing, f"missing dump files: {missing}"
