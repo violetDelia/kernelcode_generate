@@ -1,7 +1,7 @@
 """Pass registry API.
 
 创建者: 小李飞刀
-最后一次更改: 朽木露琪亚
+最后一次更改: 小李飞刀
 
 功能说明:
 - 提供 pass / pipeline 的进程内注册表，统一“名字 -> 构造器”的解析入口。
@@ -28,7 +28,7 @@ from .pass_manager import Pass, PassManager
 PassType = TypeVar("PassType", bound=Pass)
 
 _PASS_REGISTRY: dict[str, type[Pass]] = {}
-_PIPELINE_REGISTRY: dict[str, Callable[[], PassManager]] = {}
+_PIPELINE_REGISTRY: dict[str, Callable[..., PassManager]] = {}
 _BUILTINS_LOADED = False
 
 
@@ -85,7 +85,7 @@ def register_pass(pass_cls: type[PassType]) -> type[PassType]:
     return pass_cls
 
 
-def register_pipeline(name: str) -> Callable[[Callable[[], PassManager]], Callable[[], PassManager]]:
+def register_pipeline(name: str) -> Callable[[Callable[..., PassManager]], Callable[..., PassManager]]:
     """注册公开 pipeline builder。
 
     创建者: 睡觉小分队
@@ -94,6 +94,7 @@ def register_pipeline(name: str) -> Callable[[Callable[[], PassManager]], Callab
     功能说明:
     - 装饰器工厂：注册一个公开 pipeline builder，使用 `name` 作为 key。
     - 同一名字在进程内必须唯一；重复注册立即失败。
+    - builder 可选接受 `options` 参数，用于带选项的 pipeline 构造入口。
 
     使用示例:
     - @register_pipeline("default-lowering")
@@ -111,7 +112,7 @@ def register_pipeline(name: str) -> Callable[[Callable[[], PassManager]], Callab
     if name in _PIPELINE_REGISTRY:
         raise PassRegistryError(f"PassRegistryError: pipeline '{name}' is already registered")
 
-    def _decorator(builder: Callable[[], PassManager]) -> Callable[[], PassManager]:
+    def _decorator(builder: Callable[..., PassManager]) -> Callable[..., PassManager]:
         if not callable(builder):
             raise PassRegistryError("PassRegistryError: register_pipeline expects callable builder")
         _PIPELINE_REGISTRY[name] = builder
@@ -120,7 +121,7 @@ def register_pipeline(name: str) -> Callable[[Callable[[], PassManager]], Callab
     return _decorator
 
 
-def build_registered_pass(name: str) -> Pass:
+def build_registered_pass(name: str, options: dict[str, str] | None = None) -> Pass:
     """根据名称构造 pass 实例。
 
     创建者: 睡觉小分队
@@ -128,11 +129,12 @@ def build_registered_pass(name: str) -> Pass:
 
     功能说明:
     - 根据 pass name 构造并返回 pass 实例。
-    - 构造规则以“无参构造”为准；不可构造时报稳定错误短语。
+    - `options` 为空或 `None` 时，走无参构造；
+    - `options` 非空时，要求 pass 提供 `from_options(options)` 入口。
 
     使用示例:
     - load_builtin_passes()
-    - pass_obj = build_registered_pass("tile")
+    - pass_obj = build_registered_pass("tile", {"analysis-only": "true"})
 
     关联文件:
     - spec: [spec/pass/registry.md](spec/pass/registry.md)
@@ -143,13 +145,23 @@ def build_registered_pass(name: str) -> Pass:
     if name not in _PASS_REGISTRY:
         raise PassRegistryError(f"PassRegistryError: unknown pass '{name}'")
     pass_cls = _PASS_REGISTRY[name]
+    if not options:
+        try:
+            return pass_cls()
+        except Exception as exc:  # pragma: no cover - exception detail not stable
+            raise PassRegistryError(f"PassRegistryError: pass '{name}' is not constructible") from exc
+    from_options = getattr(pass_cls, "from_options", None)
+    if not callable(from_options):
+        raise PassRegistryError(f"PassRegistryError: pass '{name}' does not accept options")
     try:
-        return pass_cls()
+        return from_options(options)
+    except PassRegistryError:
+        raise
     except Exception as exc:  # pragma: no cover - exception detail not stable
         raise PassRegistryError(f"PassRegistryError: pass '{name}' is not constructible") from exc
 
 
-def build_registered_pipeline(name: str) -> PassManager:
+def build_registered_pipeline(name: str, options: dict[str, str] | None = None) -> PassManager:
     """根据名称构造 pipeline 对应的 PassManager。
 
     创建者: 睡觉小分队
@@ -157,6 +169,7 @@ def build_registered_pipeline(name: str) -> PassManager:
 
     功能说明:
     - 根据 pipeline name 调用 builder 构造并返回 `PassManager`。
+    - `options` 非空时优先走带参构造路径；否则走无参构造。
     - builder 返回值必须为 `PassManager`；否则报告稳定错误短语。
 
     使用示例:
@@ -174,7 +187,15 @@ def build_registered_pipeline(name: str) -> PassManager:
         raise PassRegistryError(f"PassRegistryError: unknown pipeline '{name}'")
     builder = _PIPELINE_REGISTRY[name]
     try:
-        pm = builder()
+        if options:
+            try:
+                pm = builder(options)
+            except TypeError as exc:
+                raise PassRegistryError(f"PassRegistryError: pipeline '{name}' does not accept options") from exc
+        else:
+            pm = builder()
+    except PassRegistryError:
+        raise
     except Exception as exc:  # pragma: no cover - builder error path not deterministic
         raise PassRegistryError(
             f"PassRegistryError: pipeline '{name}' did not return PassManager"

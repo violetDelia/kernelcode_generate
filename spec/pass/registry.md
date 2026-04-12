@@ -27,6 +27,7 @@
 - `pass name`：对外公开的 pass 标识字符串（来自 `Pass.name`）。
 - `pipeline name`：对外公开的 pipeline 标识字符串。
 - `constructible`：对 `build_registered_pass(name)` 来说，表示该 pass 可用无参方式构造为实例；若构造失败则视为不可构造。
+- `options`：传入注册层的 `{k: v}` 字典，key/value 均为字符串。
 
 ## 目标
 
@@ -39,6 +40,7 @@
 - 注册表不接收用户输入的任意 import path；也不负责扫描文件系统自动发现。
 - 注册发生在 Python import 时；因此对“内置 pass/pipeline”必须提供一个显式加载入口（见 `load_builtin_passes`）。
 - `build_registered_pass/build_registered_pipeline` 不得隐式调用 `load_builtin_passes()`；加载时机由调用方控制，以保持工具入口行为可预测。
+- 注册表不解析 `options` 语义；仅负责把 `options` 传给 pass / pipeline 构造入口。
 - 内置 pipeline 模块放在 `kernel_gen/passes/pipeline`；`load_builtin_passes()` 负责导入这些模块以触发注册。
 - registry 只负责注册与查询，不承载具体 pipeline builder 实现。
 - 重复注册同名 pass 或 pipeline 必须立即失败，不得覆盖旧项。
@@ -123,7 +125,7 @@ def build_default_lowering_pipeline() -> PassManager:
 
 - 返回被装饰函数本身。
 
-### `build_registered_pass(name: str) -> Pass`
+### `build_registered_pass(name: str, options: dict[str, str] | None = None) -> Pass`
 
 功能说明：
 
@@ -132,6 +134,7 @@ def build_default_lowering_pipeline() -> PassManager:
 参数说明：
 
 - `name (str)`：已注册 pass 名称。
+- `options (dict[str, str] | None)`：可选参数字典；为空或 `None` 时视为无参构造。
 
 使用示例：
 
@@ -139,14 +142,15 @@ def build_default_lowering_pipeline() -> PassManager:
 from kernel_gen.passes.registry import load_builtin_passes, build_registered_pass
 
 load_builtin_passes()
-pass_obj = build_registered_pass("tile")
+pass_obj = build_registered_pass("tile", {"analysis-only": "true"})
 ```
 
 注意事项：
 
 - 调用方应在首次查询前调用 `load_builtin_passes()`，以保证内置模块已完成 import 与装饰器注册。
 - pass 构造规则：
-  - 以“无参构造”为准（等价于 `pass_cls()` 可成功执行）
+  - `options` 为空或 `None`：以无参构造为准（等价于 `pass_cls()` 可成功执行）
+  - `options` 非空：若 pass 类提供 `from_options(options)` 则调用该入口；否则必须报错
   - 若构造抛错或缺少无参构造路径，必须报告“不可构造”
 
 返回与限制：
@@ -154,8 +158,9 @@ pass_obj = build_registered_pass("tile")
 - 失败时必须抛出 `PassRegistryError`，且错误短语前缀为：
   - `PassRegistryError: unknown pass '<name>'`
   - `PassRegistryError: pass '<name>' is not constructible`
+  - `PassRegistryError: pass '<name>' does not accept options`
 
-### `build_registered_pipeline(name: str) -> PassManager`
+### `build_registered_pipeline(name: str, options: dict[str, str] | None = None) -> PassManager`
 
 功能说明：
 
@@ -164,6 +169,7 @@ pass_obj = build_registered_pass("tile")
 参数说明：
 
 - `name (str)`：已注册 pipeline 名称。
+- `options (dict[str, str] | None)`：可选参数字典；为空或 `None` 时视为无参构造。
 
 使用示例：
 
@@ -171,13 +177,15 @@ pass_obj = build_registered_pass("tile")
 from kernel_gen.passes.registry import load_builtin_passes, build_registered_pipeline
 
 load_builtin_passes()
-pm = build_registered_pipeline("default-lowering")
+pm = build_registered_pipeline("default-lowering", {"bufferize": "true"})
 ```
 
 注意事项：
 
 - 调用方应在首次查询前调用 `load_builtin_passes()`。
 - 工具侧（如 ircheck）仅通过该接口解析 pipeline 名称，不直接 import pipeline builder。
+- `options` 为空或 `None` 时，调用 builder 的无参路径。
+- `options` 非空时，builder 必须接受 `options` 参数；否则必须报错。
 - builder 返回值必须为 `PassManager`；否则必须视为失败。
 
 返回与限制：
@@ -185,6 +193,7 @@ pm = build_registered_pipeline("default-lowering")
 - 失败时必须抛出 `PassRegistryError`，且错误短语前缀为：
   - `PassRegistryError: unknown pipeline '<name>'`
   - `PassRegistryError: pipeline '<name>' did not return PassManager`
+  - `PassRegistryError: pipeline '<name>' does not accept options`
 
 ### `load_builtin_passes() -> None`
 
@@ -239,5 +248,5 @@ names = list_registered_passes()
 - 执行命令：`pytest -q test/pass/test_pass_registry.py`
 - 测试目标：
   - `register_pass/register_pipeline`：重复注册立即失败，错误短语可机械匹配。
-  - `build_registered_pass/build_registered_pipeline`：未知名称与不可构造/返回值非法路径报告稳定错误短语。
+  - `build_registered_pass/build_registered_pipeline`：未知名称、不可构造、选项不被接受、返回值非法路径报告稳定错误短语。
   - `list_registered_*`：返回值顺序确定且不含重复项。

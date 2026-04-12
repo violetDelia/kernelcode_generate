@@ -38,7 +38,8 @@
 - `case block`：被 `// -----` 分隔出来的一个独立 case 单元。
 - `directive`：头部注释中的指令行，包括 `COMPILE_ARGS:` 与 `CHECK*:`。
 - `positive check`：`CHECK:` 与 `CHECK-NEXT:`，用于定义“顺序/相邻”的命中锚点。
-- `compile args`：`COMPILE_ARGS:` 指令后的一段参数串，仅承接 `--pass <name>` 或 `--pipeline <name>` 两种形式。
+- `compile args`：`COMPILE_ARGS:` 指令后的一段参数串，支持 `--pass <name>` / `--pipeline <name>` 及其带 `{k=v}` 选项的写法。
+- `options`：由 `{k=v,...}` 解析得到的字典，key/value 均为字符串。
 
 ## 目标
 
@@ -62,10 +63,14 @@
 
 - 指令集只支持三条检查指令：`CHECK:`、`CHECK-NOT:`、`CHECK-NEXT:`；不支持正则、变量捕获、`CHECK-LABEL`。
 - 多 case 仅支持固定分隔符 `// -----`；不支持 case 命名、标签跳转或条件执行。
-- `COMPILE_ARGS:` 只支持两种写法：
+- `COMPILE_ARGS:` 支持以下写法：
   - `--pass <pass-name>`
+  - `--pass "<pass-name>{k=v}"`
+  - `--pass "<pass-name>{k1=v1,k2=v2}"`
   - `--pipeline <pipeline-name>`
-- `ircheck` 不维护自己的 pass/pipeline 名称表；它只通过 [`spec/pass/registry.md`](../../spec/pass/registry.md) 定义的注册接口解析名字。
+  - `--pipeline "<pipeline-name>{k=v}"`
+  - `--pipeline "<pipeline-name>{k1=v1,k2=v2}"`
+- `ircheck` 不维护自己的 pass/pipeline 名称表，也不判断 option 业务语义；它只通过 [`spec/pass/registry.md`](../../spec/pass/registry.md) 定义的注册接口解析名字与选项。
 - 输出文本：
   - 成功：标准输出仅打印 `true`
   - 失败：标准输出第一行打印 `false`，后续打印最小失败说明（至少包含错误短语与触发原因）
@@ -167,12 +172,16 @@ assert result.ok is True
 注意事项：
 
 - `COMPILE_ARGS` 解析规则：
-  - 仅支持 `--pass <name>` 与 `--pipeline <name>` 两种形式
-  - 其他参数形态必须视为不支持
+  - 支持 `--pass <name>` 与 `--pipeline <name>`
+  - 支持 `--pass "<name>{k=v}"` 与 `--pipeline "<name>{k=v}"`
+  - 大括号内为逗号分隔的 `k=v` 列表，`k` 与 `v` 不能为空
+  - 不支持嵌套字典、不支持列表、不支持引号内再套引号
+  - 解析得到的 `options` 仅保留字符串值，交由 registry 决定是否接受
 - 名称解析与执行顺序要求：
   1. 调用 `load_builtin_passes()`
-  2. `--pass <name>`：调用 `build_registered_pass(name)` 得到 `Pass` 实例并执行
-  3. `--pipeline <name>`：调用 `build_registered_pipeline(name)` 得到 `PassManager` 并执行
+  2. `--pass <name>`：调用 `build_registered_pass(name, options)` 得到 `Pass` 实例并执行
+  3. `--pipeline <name>`：调用 `build_registered_pipeline(name, options)` 得到 `PassManager` 并执行
+- `options` 为空或未提供时，视为无参构造路径。
 - 名称解析仅走 registry 提供的接口，不直接 import pipeline builder。
 - 多 case 执行语义：
   1. 按文件中的 case block 顺序逐个执行；
@@ -184,7 +193,7 @@ assert result.ok is True
 - 若 case 文本解析失败，返回 `ok=False`，`exit_code=2`，且 `message` 前缀为：
   - `IrcheckParseError: invalid ircheck header`
   - `IrcheckParseError: missing input ir`
-- 若 `COMPILE_ARGS` 不支持，返回 `ok=False`，`exit_code=2`，且 `message` 前缀为：
+- 若 `COMPILE_ARGS` 不支持（含 option 语法不合法），返回 `ok=False`，`exit_code=2`，且 `message` 前缀为：
   - `IrcheckCompileArgsError: unsupported compile args`
 - 若 pass/pipeline 执行抛错或返回不可打印的对象，返回 `ok=False`，`exit_code=2`，且 `message` 前缀为：
   - `IrcheckRunError: pass execution failed`
@@ -365,5 +374,5 @@ builtin.module { /* ... */ }
   - `pytest -q test/tools/test_ircheck_cli.py`
 - 测试目标：
   - parser：能稳定解析头部注释区、提取 compile_args 与检查指令，并对缺失/重复指令返回稳定错误短语；`parse_ircheck_file` 对多 case 分隔符稳定拒绝。
-  - runner：能通过 pass registry 解析 `--pass/--pipeline` 并执行，输出 `IrcheckResult` 的 `ok/exit_code/message` 行为与本文件一致；支持多 case 顺序执行与 fail-fast。
+  - runner：能通过 pass registry 解析 `--pass/--pipeline` 与其 options 形式并执行，输出 `IrcheckResult` 的 `ok/exit_code/message` 行为与本文件一致；支持多 case 顺序执行与 fail-fast。
   - matcher：能按本文件“检查语义”规则稳定处理 `CHECK/CHECK-NEXT/CHECK-NOT` 的顺序、相邻与区间约束，并在失败时返回稳定错误短语。

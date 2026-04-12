@@ -75,6 +75,26 @@ def _raise_tile_error(keyword: str, detail: str) -> None:
     raise TilePassError(f"{keyword}: {detail}")
 
 
+class TilePassOptionError(ValueError):
+    """tile pass 选项解析错误。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 表示 TilePass.from_options 解析 options 时的可预期失败。
+    - `str(e)` 必须以 `TilePassOptionError:` 前缀开头，便于测试匹配。
+
+    使用示例:
+    - raise TilePassOptionError("TilePassOptionError: invalid analysis-only value")
+
+    关联文件:
+    - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
+    - test: [test/pass/test_lowering_tile.py](test/pass/test_lowering_tile.py)
+    - 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
+    """
+
+
 @irdl_op_definition
 class _TileSymbolLiteralOp(IRDLOperation):
     """tile 内部使用的 symbol.int 字面量 op。
@@ -1079,7 +1099,7 @@ def _insert_matmul_views_and_ops(
         inner_block.add_op(op)
 
 
-def _rewrite_function(func_op: func.FuncOp) -> None:
+def _rewrite_function(func_op: func.FuncOp, *, analysis_only: bool) -> None:
     """改写单个函数为 tile loop 结构。
 
     创建者: 小李飞刀
@@ -1087,10 +1107,11 @@ def _rewrite_function(func_op: func.FuncOp) -> None:
 
     功能说明:
     - 对 elementwise/matmul 分支生成 `tuner.param`、`tile.step_value`、`symbol.for` 与 `dma.view`。
+    - `analysis_only=True` 时仅做分析与参数推导，不插入 loop/view 或重写 kernel op。
     - 保持单函数合同，不新增 `func.call`。
 
     使用示例:
-    - _rewrite_function(func_op)
+    - _rewrite_function(func_op, analysis_only=False)
 
     关联文件:
     - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
@@ -1133,6 +1154,8 @@ def _rewrite_function(func_op: func.FuncOp) -> None:
                     f"elementwise rank mismatch at operand {index}",
                 )
         specs = _build_elementwise_loop_specs(func_op, block, reference_memory)
+        if analysis_only:
+            return
         inner_block = _nest_loops(specs)
         if inner_block is None:
             return
@@ -1151,6 +1174,8 @@ def _rewrite_function(func_op: func.FuncOp) -> None:
         rhs = SSAValue.get(matmul_op.operands[1])
         out = SSAValue.get(matmul_op.operands[-1])
         specs = _build_matmul_loop_specs(block, lhs, rhs, out)
+        if analysis_only:
+            return
         inner_block = _nest_loops(specs)
         if inner_block is None:
             return
@@ -1169,6 +1194,7 @@ class TilePass(Pass):
     功能说明:
     - 对 module 内满足输入合同的 func.func 执行 tile loop 改写。
     - elementwise 与 matmul 按固定规则插入 loop 与 view。
+    - 支持 `analysis-only` 选项：仅做分析与参数推导。
 
     使用示例:
     - module = TilePass().run(module)
@@ -1180,6 +1206,59 @@ class TilePass(Pass):
     """
 
     name = "tile"
+
+    def __init__(self: "TilePass", *, analysis_only: bool = False) -> None:
+        """初始化 TilePass。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 保存 analysis-only 选项，控制是否仅执行分析路径。
+
+        使用示例:
+        - pass_obj = TilePass(analysis_only=True)
+
+        关联文件:
+        - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
+        - test: [test/pass/test_lowering_tile.py](test/pass/test_lowering_tile.py)
+        - 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
+        """
+
+        self._analysis_only = analysis_only
+
+    @classmethod
+    def from_options(cls: type["TilePass"], options: dict[str, str]) -> "TilePass":
+        """根据 options 构造 TilePass。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 仅允许 `analysis-only=true|false`。
+        - 其他 key 或非法 value 均报错。
+
+        使用示例:
+        - pass_obj = TilePass.from_options({"analysis-only": "true"})
+
+        关联文件:
+        - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
+        - test: [test/pass/test_lowering_tile.py](test/pass/test_lowering_tile.py)
+        - 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
+        """
+
+        if not options:
+            return cls(analysis_only=False)
+        allowed_key = "analysis-only"
+        for key in options:
+            if key != allowed_key:
+                raise TilePassOptionError("TilePassOptionError: unknown option")
+        value = options.get(allowed_key, "")
+        if value == "true":
+            return cls(analysis_only=True)
+        if value == "false":
+            return cls(analysis_only=False)
+        raise TilePassOptionError("TilePassOptionError: invalid analysis-only value")
 
     def run(self: "TilePass", module: ModuleOp) -> ModuleOp:
         """执行 tile pass。
@@ -1202,7 +1281,7 @@ class TilePass(Pass):
 
         for op in module.ops:
             if isinstance(op, func.FuncOp):
-                _rewrite_function(op)
+                _rewrite_function(op, analysis_only=self._analysis_only)
         try:
             module.verify()
         except VerifyException as exc:
@@ -1213,6 +1292,7 @@ class TilePass(Pass):
 __all__ = [
     "TilePass",
     "TilePassError",
+    "TilePassOptionError",
     "_TileSymbolLiteralOp",
     "_TileStepValueOp",
 ]

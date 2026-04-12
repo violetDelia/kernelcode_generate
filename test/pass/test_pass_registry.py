@@ -239,3 +239,98 @@ def test_load_builtin_passes_is_idempotent() -> None:
     pm = build_registered_pipeline("default-lowering")
     assert isinstance(pm, PassManager)
     assert pm.name == "default-lowering"
+
+
+# TC-REGISTRY-009
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-12 10:20:00 +0800
+# 最近一次运行成功时间: 2026-04-12 10:20:00 +0800
+# 功能说明: 验证 pass 提供 from_options 时可构造带参实例。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_pass_accepts_options
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/pass/test_pass_registry.py
+def test_build_registered_pass_accepts_options() -> None:
+    @register_pass
+    class OptionPass(Pass):
+        name = "opt-pass"
+
+        def __init__(self, mode: str) -> None:
+            self.mode = mode
+
+        @classmethod
+        def from_options(cls, options: dict[str, str]) -> "OptionPass":
+            return cls(options["mode"])
+
+        def run(self, target: object) -> object:
+            return target
+
+    pass_obj = build_registered_pass("opt-pass", {"mode": "fast"})
+    assert isinstance(pass_obj, OptionPass)
+    assert pass_obj.mode == "fast"
+
+
+# TC-REGISTRY-010
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-12 10:20:00 +0800
+# 最近一次运行成功时间: 2026-04-12 10:20:00 +0800
+# 功能说明: 验证 pass 未声明 from_options 时拒绝带参构造。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_pass_rejects_options
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/pass/test_pass_registry.py
+def test_build_registered_pass_rejects_options() -> None:
+    @register_pass
+    class PlainPass(Pass):
+        name = "plain-pass"
+
+        def run(self, target: object) -> object:
+            return target
+
+    with pytest.raises(
+        PassRegistryError, match=r"^PassRegistryError: pass 'plain-pass' does not accept options$"
+    ):
+        _ = build_registered_pass("plain-pass", {"mode": "fast"})
+
+
+# TC-REGISTRY-011
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-12 10:20:00 +0800
+# 最近一次运行成功时间: 2026-04-12 10:20:00 +0800
+# 功能说明: 验证 pipeline builder 接受 options 时可成功构造。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_pipeline_accepts_options
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/pass/test_pass_registry.py
+def test_build_registered_pipeline_accepts_options() -> None:
+    @register_pipeline("opt-pipeline")
+    def _build_pipeline(options: dict[str, str]) -> PassManager:
+        return PassManager(name=f"opt-{options['mode']}")
+
+    pm = build_registered_pipeline("opt-pipeline", {"mode": "fast"})
+    assert isinstance(pm, PassManager)
+    assert pm.name == "opt-fast"
+
+
+# TC-REGISTRY-012
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-12 10:20:00 +0800
+# 最近一次运行成功时间: 2026-04-12 10:20:00 +0800
+# 功能说明: 验证 pipeline 不接受 options 时返回固定错误短语。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_pipeline_rejects_options
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/pass/test_pass_registry.py
+def test_build_registered_pipeline_rejects_options() -> None:
+    @register_pipeline("plain-pipeline")
+    def _build_plain() -> PassManager:
+        return PassManager(name="plain")
+
+    with pytest.raises(
+        PassRegistryError, match=r"^PassRegistryError: pipeline 'plain-pipeline' does not accept options$"
+    ):
+        _ = build_registered_pipeline("plain-pipeline", {"mode": "fast"})

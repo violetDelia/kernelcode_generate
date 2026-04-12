@@ -1,7 +1,7 @@
 """ircheck: IR transform check tool.
 
 创建者: 睡觉小分队
-最后一次更改: 金铲铲大作战
+最后一次更改: 小李飞刀
 
 功能说明:
 - 提供轻量的 IR 变换验证工具：读取单文件 case，按 `COMPILE_ARGS` 运行 pass / pipeline，
@@ -600,21 +600,20 @@ def _run_ircheck_case(case: IrcheckCase) -> IrcheckResult:
     return IrcheckResult(ok=True, exit_code=0, actual_ir=actual_ir, failed_check=None, message=None)
 
 
-def _parse_compile_args(compile_args: str) -> tuple[str, str] | None:
-    """解析 `COMPILE_ARGS:` 字段为执行模式。
+def _parse_name_and_options(value: str) -> tuple[str, dict[str, str]] | None:
+    """解析 `<name>{k=v}` 片段为 name 与 options。
 
     创建者: 小李飞刀
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 仅支持两种写法：
-      - `--pass <name>`
-      - `--pipeline <name>`
-    - 其他形态一律返回 `None`。
+    - 支持 `name` 与 `name={k=v,k2=v2}` 两种形态。
+    - `k` 与 `v` 不能为空，逗号分隔多个条目。
+    - 发现花括号但不符合语法时返回 `None`。
 
     使用示例:
-    - mode = _parse_compile_args("--pass no-op")
-    - assert mode == ("pass", "no-op")
+    - parsed = _parse_name_and_options("tile={analysis-only=true}")
+    - assert parsed == ("tile", {"analysis-only": "true"})
 
     关联文件:
     - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
@@ -622,6 +621,60 @@ def _parse_compile_args(compile_args: str) -> tuple[str, str] | None:
     - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
     """
 
+    if "{" in value or "}" in value:
+        if "={" not in value or not value.endswith("}"):
+            return None
+        name, option_block = value.split("={", 1)
+        if not name:
+            return None
+        options_text = option_block[:-1]
+        if not options_text:
+            return None
+        options: dict[str, str] = {}
+        for item in options_text.split(","):
+            if not item:
+                return None
+            if "=" not in item:
+                return None
+            key, raw_value = item.split("=", 1)
+            key = key.strip()
+            raw_value = raw_value.strip()
+            if not key or not raw_value:
+                return None
+            if key in options:
+                return None
+            options[key] = raw_value
+        return (name, options)
+    if not value:
+        return None
+    return (value, {})
+
+
+def _parse_compile_args(compile_args: str) -> tuple[str, str, dict[str, str]] | None:
+    """解析 `COMPILE_ARGS:` 字段为执行模式。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 支持以下写法：
+      - `--pass <name>` / `--pipeline <name>`
+      - `--pass "<name>{k=v}"` / `--pipeline "<name>{k=v}"`
+    - 其他形态一律返回 `None`。
+
+    使用示例:
+    - mode = _parse_compile_args("--pass no-op")
+    - assert mode == ("pass", "no-op", {})
+
+    关联文件:
+    - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
+    - test: [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
+    - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
+    """
+
+    if "{" in compile_args or "}" in compile_args:
+        if re.match(r'^\s*(--pass|--pipeline)\s+(".*"|\\\'.*\\\')\s*$', compile_args) is None:
+            return None
     try:
         tokens = shlex.split(compile_args)
     except ValueError:
@@ -629,10 +682,14 @@ def _parse_compile_args(compile_args: str) -> tuple[str, str] | None:
     if len(tokens) != 2:
         return None
     flag, name = tokens
+    parsed = _parse_name_and_options(name)
+    if parsed is None:
+        return None
+    pass_name, options = parsed
     if flag == "--pass":
-        return ("pass", name)
+        return ("pass", pass_name, options)
     if flag == "--pipeline":
-        return ("pipeline", name)
+        return ("pipeline", pass_name, options)
     return None
 
 
@@ -669,18 +726,18 @@ def _build_default_context() -> Context:
     return ctx
 
 
-def _run_compile_mode(module: Operation, compile_mode: tuple[str, str]) -> Operation:
+def _run_compile_mode(module: Operation, compile_mode: tuple[str, str, dict[str, str]]) -> Operation:
     """按 compile mode 执行 pass 或 pipeline。
 
     创建者: 小李飞刀
     最后一次更改: 小李飞刀
 
     功能说明:
-    - `("pass", name)`：构造并运行单个 pass。
-    - `("pipeline", name)`：构造并运行 pipeline（PassManager）。
+    - `("pass", name, options)`：构造并运行单个 pass。
+    - `("pipeline", name, options)`：构造并运行 pipeline（PassManager）。
 
     使用示例:
-    - out = _run_compile_mode(module, ("pass", "no-op"))
+    - out = _run_compile_mode(module, ("pass", "no-op", {}))
 
     关联文件:
     - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
@@ -688,14 +745,14 @@ def _run_compile_mode(module: Operation, compile_mode: tuple[str, str]) -> Opera
     - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
     """
 
-    kind, name = compile_mode
+    kind, name, options = compile_mode
     if kind == "pass":
-        pass_obj = build_registered_pass(name)
+        pass_obj = build_registered_pass(name, options)
         if not isinstance(pass_obj, Pass):
             raise TypeError("built pass is not Pass instance")
         out = pass_obj.run(module)
     elif kind == "pipeline":
-        pm = build_registered_pipeline(name)
+        pm = build_registered_pipeline(name, options)
         if not isinstance(pm, PassManager):
             raise TypeError("built pipeline is not PassManager instance")
         out = pm.run(module)

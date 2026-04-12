@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`小李飞刀`
-- 最后一次更改：`小李飞刀`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/pass/lowering/tile.md`](../../../spec/pass/lowering/tile.md)
 - `功能实现`：[`kernel_gen/passes/lowering/tile.py`](../../../kernel_gen/passes/lowering/tile.py)
 - `test`：[`test/pass/test_lowering_tile.py`](../../../test/pass/test_lowering_tile.py)
@@ -36,12 +36,15 @@
 - 保持单函数合同，不新增 `func.call` 或额外 `func.func`。
 - 明确 elementwise 与 matmul 的 loop 结构与 view 生成规则。
 - 固定错误短语，便于测试与上层逻辑稳定匹配。
+- 提供 `analysis-only` 选项，用于仅保留分析与参数推导结果。
 
 ## 限制与边界
 
 - 输入必须已完成 `LowerNnToKernelPass -> BufferResultsToOutParamsPass`；若残留 `nn.*` 或 memory-return ABI，必须失败。
 - 输入允许子集为：`kernel.*` / `dma.*` / `func.return`，并只额外允许 `tuner.param` 与 `symbol.get_dim` 作为桥接 op。
 - `func.call` 不允许出现在 tile 处理范围内。
+- `analysis-only` 仅允许 `true` 或 `false` 两个字符串值。
+- 除 `analysis-only` 以外的 option key 必须报错。
 - elementwise 要求所有参与的 `nn.memory` rank 一致；不一致报 `TilePassRankMismatch`。
 - matmul 仅支持 rank=2，且 `[M,K] x [K,N] -> [M,N]` 必须一致；不一致报 `TilePassRankMismatch`。
 - reduce 类 `kernel.reduce_*` 明确不支持，报 `TilePassUnsupportedOp`。
@@ -53,6 +56,7 @@
   - `TilePassUnsupportedOp`
   - `TilePassRequiresLoweredKernelIR`
   - `TilePassDeadCarryMemory`
+  - `TilePassOptionError`
 
 ## 公开接口
 
@@ -80,11 +84,43 @@ module = pass_obj.run(module)
 
 - 只处理 `func.func`，不会新增或拆分函数。
 - 不依赖额外属性作为触发条件。
+- `analysis-only=true` 时只做分析与参数推导，不生成 `symbol.for` / `dma.view` / `kernel.*` 改写。
+- `analysis-only=false` 时保持现有完整改写路径。
 
 返回与限制：
 
 - 返回改写后的 module。
 - 任一函数不满足输入合同时必须报错，不得静默跳过。
+
+### `TilePass.from_options(options: dict[str, str]) -> TilePass`
+
+功能说明：
+
+- 根据 options 构造 `TilePass` 实例。
+
+参数说明：
+
+- `options (dict[str, str])`：仅允许 `analysis-only`，取值为 `true` 或 `false`。
+
+使用示例：
+
+```python
+from kernel_gen.passes.lowering.tile import TilePass
+
+pass_obj = TilePass.from_options({"analysis-only": "true"})
+module = pass_obj.run(module)
+```
+
+注意事项：
+
+- 仅允许 `analysis-only` 一个 key；其他 key 必须报错。
+- `analysis-only` 取值非法时必须报错。
+
+返回与限制：
+
+- 报错前缀必须包含：
+  - `TilePassOptionError: unknown option`
+  - `TilePassOptionError: invalid analysis-only value`
 
 ### `TilePass.run(module)`
 
@@ -115,10 +151,12 @@ func.func @vec_add(%arg0: !nn.memory<[M, N], f32, #layout, #GM>,
 ## 测试
 
 - 测试文件：`test/pass/test_lowering_tile.py`
-- 执行命令：`pytest -q test/pass/test_lowering_tile.py -k "elementwise or matmul or reduce or duplicate or nn_input or dead_carry"`
+- 执行命令：`pytest -q test/pass/test_lowering_tile.py`
 - 测试目标：
   - 覆盖 elementwise/matmul 成功路径的 loop/view 结构。
   - 覆盖 reduce 不支持、rank mismatch、重复 tile、输入合同与 dead carry 等错误路径。
+  - 覆盖 analysis-only=true/false 的行为差异。
+  - 覆盖 analysis-only 非法取值与未知 option key 的报错路径。
 - 功能与用例清单：
   - `test_tile_elementwise_builds_nested_loops`
   - `test_tile_matmul_builds_mnk_loops`
@@ -127,3 +165,7 @@ func.func @vec_add(%arg0: !nn.memory<[M, N], f32, #layout, #GM>,
   - `test_tile_rejects_nn_input_ops`
   - `test_tile_rejects_dead_carry_memory`
   - `test_tile_rejects_rank_mismatch`
+  - `test_tile_analysis_only_true`
+  - `test_tile_analysis_only_false`
+  - `test_tile_rejects_invalid_analysis_only_value`
+  - `test_tile_rejects_unknown_options`
