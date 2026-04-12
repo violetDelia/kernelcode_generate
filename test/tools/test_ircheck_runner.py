@@ -507,3 +507,56 @@ def test_run_ircheck_text_rejects_unquoted_pipeline_options() -> None:
     assert result.exit_code == 2
     assert result.message is not None
     assert result.message.startswith("IrcheckCompileArgsError: unsupported compile args")
+
+
+# TC-IRCHECK-RUN-024
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-13 03:43:00 +0800
+# 最近一次运行成功时间: 2026-04-13 03:43:00 +0800
+# 功能说明: 验证单个 case 支持 pass/pipeline 混合多 step 顺序执行。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_multi_pass_sequence
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+def test_run_ircheck_text_multi_pass_sequence() -> None:
+    executed: list[str] = []
+
+    @register_pass
+    class PassA(Pass):
+        name = "pass-a"
+
+        def run(self, target: object) -> object:
+            executed.append("pass-a")
+            return target
+
+    @register_pass
+    class PassB(Pass):
+        name = "pass-b"
+
+        def run(self, target: object) -> object:
+            executed.append("pass-b")
+            return target
+
+    @register_pass
+    class PassC(Pass):
+        name = "pass-c"
+
+        def run(self, target: object) -> object:
+            executed.append("pass-c")
+            return target
+
+    @register_pipeline("pipe-b")
+    def _build_pipe() -> PassManager:
+        pm = PassManager(name="pipe-b")
+        pm.add_pass(PassB())
+        return pm
+
+    text = f"""// COMPILE_ARGS: --pass pass-a --pipeline pipe-b --pass pass-c
+// CHECK: builtin.module
+
+{_SIMPLE_IR}"""
+    result = run_ircheck_text(text, source_path="inline.ircheck")
+    assert result.ok is True
+    assert result.exit_code == 0
+    assert executed == ["pass-a", "pass-b", "pass-c"]
