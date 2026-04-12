@@ -1,7 +1,7 @@
 """codex-multi-agents-task.sh tests.
 
 创建者: 榕
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 task 脚本的任务分发、完成、暂停、继续、改派、新建、删除、状态查询与错误返回码路径。
@@ -479,6 +479,191 @@ def test_done_task_moves_to_done_file_success(tmp_path: Path) -> None:
     assert get_agent_status(agents, "worker-a") == "free"
 
 
+# TC-003A
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-13 07:40:00 +0800
+# 最近一次运行成功时间: 2026-04-13 07:40:00 +0800
+# 测试目的: 验证 合并角色调用 -done 可成功完成任务。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_done_allows_merge_operator(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-1",
+                "李白",
+                "2026-03-08 16:10:00 +0800",
+                ".",
+                "合并收口",
+                "merge",
+                "",
+                "",
+                "李白",
+                "进行中",
+                "",
+                "./log/ex1.md",
+            )
+        ],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            "| 李白 | busy | 李白 | codex | 李白 | 合并收口 | ./prompt.md | ./archive.md | 合并 |",
+            agent_row("worker-a", "busy"),
+            agent_row("worker-b", "busy"),
+        ],
+    )
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "李白"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script(
+        "-file",
+        str(todo),
+        "-done",
+        "-task_id",
+        "EX-1",
+        "-log",
+        "./log/record.md",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    done_file = tmp_path / "DONE.md"
+    done_text = done_file.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(todo.read_text(encoding="utf-8"), "## 正在执行的任务")
+
+    assert result.returncode == 0
+    assert "OK: done EX-1" in result.stdout
+    assert "EX-1" in done_text
+    assert not any(r[0] == "EX-1" for r in running_rows)
+    assert get_agent_status(agents, "李白") == "free"
+
+
+# TC-003B
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-13 07:40:00 +0800
+# 最近一次运行成功时间: 2026-04-13 07:40:00 +0800
+# 测试目的: 验证 合并角色不能完成非 merge 任务。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_done_rejects_merge_operator_for_non_merge_task(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-1",
+                "李白",
+                "2026-03-08 16:10:00 +0800",
+                ".",
+                "执行 build",
+                "build",
+                "",
+                "",
+                "李白",
+                "进行中",
+                "",
+                "./log/ex1.md",
+            )
+        ],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            "| 李白 | busy | 李白 | codex | 李白 | 合并收口 | ./prompt.md | ./archive.md | 合并 |",
+        ],
+    )
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "李白"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script(
+        "-file",
+        str(todo),
+        "-done",
+        "-task_id",
+        "EX-1",
+        "-log",
+        "./log/record.md",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    running_rows = parse_section_rows(todo.read_text(encoding="utf-8"), "## 正在执行的任务")
+    assert result.returncode == 3
+    assert "merge operator can only complete merge tasks: EX-1" in result.stderr
+    assert any(r[0] == "EX-1" for r in running_rows)
+
+
+# TC-003C
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-13 07:40:00 +0800
+# 最近一次运行成功时间: 2026-04-13 07:40:00 +0800
+# 测试目的: 验证 合并角色不能完成他人 merge 任务。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_done_rejects_merge_operator_for_other_assignee(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-1",
+                "李白",
+                "2026-03-08 16:10:00 +0800",
+                ".",
+                "合并收口",
+                "merge",
+                "",
+                "",
+                "worker-a",
+                "进行中",
+                "",
+                "./log/ex1.md",
+            )
+        ],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            "| 李白 | busy | 李白 | codex | 李白 | 合并收口 | ./prompt.md | ./archive.md | 合并 |",
+            agent_row("worker-a", "busy"),
+        ],
+    )
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "李白"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script(
+        "-file",
+        str(todo),
+        "-done",
+        "-task_id",
+        "EX-1",
+        "-log",
+        "./log/record.md",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    running_rows = parse_section_rows(todo.read_text(encoding="utf-8"), "## 正在执行的任务")
+    assert result.returncode == 3
+    assert "merge operator can only complete own tasks: EX-1" in result.stderr
+    assert any(r[0] == "EX-1" for r in running_rows)
+
+
 # TC-004
 # 创建者: 榕
 # 最后一次更改: 神秘人
@@ -818,7 +1003,7 @@ def test_status_requires_exactly_one_mode(tmp_path: Path) -> None:
 
 # TC-015A
 # 创建者: 榕
-# 最后一次更改: 守护最好的爱莉希雅
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-08 06:47:00 +0800
 # 最近一次运行成功时间: 2026-04-08 06:47:00 +0800
 # 测试目的: 验证 -status 在 TODO 表头不匹配时返回 RC=2（不应误返回 RC=0）。
@@ -1010,7 +1195,7 @@ def test_dispatch_runs_init_before_dispatch(tmp_path: Path) -> None:
 
 # TC-046
 # 创建者: 榕
-# 最后一次更改: 守护最好的爱莉希雅
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-08 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-08 00:00:00 +0800
 # 测试目的: 验证 -dispatch 未提供 -message 时，若默认消息发送失败仅告警且不回滚分发结果。
@@ -1055,7 +1240,7 @@ def test_dispatch_without_message_talk_failure_is_warning(tmp_path: Path) -> Non
 
 # TC-047
 # 创建者: 榕
-# 最后一次更改: 守护最好的爱莉希雅
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-08 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-08 00:00:00 +0800
 # 测试目的: 验证 -dispatch 未提供 -message 时，默认模板消息会按实际存在的 worktree/计划书拼接字段。
@@ -1370,7 +1555,7 @@ def test_delete_paused_running_task_success(tmp_path: Path) -> None:
 
 # TC-030
 # 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-08 13:40:00 +0800
 # 最近一次运行成功时间: 2026-04-08 13:40:00 +0800
 # 测试目的: 验证 -next 成功将运行中任务回退到任务列表并更新描述。
@@ -1543,7 +1728,7 @@ def test_new_restricted_for_non_privileged_operator(tmp_path: Path) -> None:
 
 # TC-033
 # 创建者: 守护最好的爱莉希雅
-# 最后一次更改: 守护最好的爱莉希雅
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-08 13:40:00 +0800
 # 最近一次运行成功时间: 2026-04-08 13:40:00 +0800
 # 测试目的: 验证 非管理员 调用 -done 被拒绝。
@@ -1562,7 +1747,7 @@ def test_done_restricted_for_non_privileged_operator(tmp_path: Path) -> None:
 
     running_rows = parse_section_rows(todo.read_text(encoding="utf-8"), "## 正在执行的任务")
     assert result.returncode == 3
-    assert "operation -done is restricted to 管理员: worker-a" in result.stderr
+    assert "operation -done is restricted to 管理员或合并: worker-a" in result.stderr
     assert any(r[0] == "EX-1" for r in running_rows)
 
 

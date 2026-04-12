@@ -39,6 +39,7 @@
 - 通用执行规则与命令权限分别以 [`agents/standard/协作执行通用规则.md`](../../../standard/协作执行通用规则.md) 和 [`agents/standard/角色权限矩阵.md`](../../../standard/角色权限矩阵.md) 为准。
 - 若当前任务是 `spec`，只改 `spec`；若是 `build`，只改实现/测试；若是 `review`，只给结论和问题清单。
 - 完成后必须先按任务记录约定写完任务日志，再使用完整的 `-next -auto` 命令推进后续；`-task_id`、`-from`、`-type`、`-message`、`-agents-list` 必填。
+- 任务日志必须写在任务 `worktree` 内的记录文件，不得在仓库主目录写日志。
 - `spec` 默认接 `build`，`build` 默认接 `review`，`review` 视结论接 `build`、`spec` 或 `merge`。
 
 ## 任务链路
