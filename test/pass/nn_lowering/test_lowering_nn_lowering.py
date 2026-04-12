@@ -957,11 +957,11 @@ def test_lower_img2col2d_to_kernel() -> None:
 # 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证 Lowering 对 nn.broadcast 的改写行为。
-# 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_broadcast_to_kernel
-# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_broadcast_dma
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
-def test_lower_broadcast_to_kernel() -> None:
+def test_lower_broadcast_dma() -> None:
     block = Block()
     operand_type = nn_memory_type(
         (IntAttr(2), IntAttr(2)),
@@ -1004,8 +1004,8 @@ def test_lower_broadcast_to_kernel() -> None:
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证 Lowering 对 nn.transpose 的改写行为。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_transpose_to_kernel
-# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_transpose_to_kernel() -> None:
     block = Block()
@@ -1110,8 +1110,8 @@ def test_lower_select_to_kernel_select() -> None:
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证 Lowering 对含符号维度 broadcast 的改写行为。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_broadcast_with_symbol_dim
-# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_broadcast_with_symbol_dim() -> None:
     block = Block()
@@ -1265,8 +1265,8 @@ def test_select_preserves_symbol_dim() -> None:
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证 Lowering 对 implicit expand broadcast 的改写行为。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_broadcast_with_implicit_expand
-# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_broadcast_with_implicit_expand() -> None:
     block = Block()
@@ -1426,8 +1426,8 @@ def test_lower_rejects_invalid_add_shape() -> None:
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证 Lowering 对 unknown dim 的拒绝。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_broadcast_rejects_unknown_dim
-# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_broadcast_rejects_unknown_dim() -> None:
     operand_type = nn_memory_type(
@@ -1513,8 +1513,8 @@ def test_select_preserves_symbol_dim() -> None:
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证 Lowering 对 transpose 动态维度的处理。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_transpose_dynamic
-# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_transpose_dynamic() -> None:
     operand_type = nn_memory_type(
@@ -1686,8 +1686,8 @@ def test_reduce_min_rejects_bad_keepdim() -> None:
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证 Lowering 对 broadcast 形状不匹配的拒绝。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_broadcast_rejects_invalid_shape
-# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_lower_broadcast_rejects_invalid_shape() -> None:
     operand_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
@@ -1719,8 +1719,8 @@ def test_lower_broadcast_rejects_invalid_shape() -> None:
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
 # 测试目的: 验证 Lowering 对 broadcast 标量使用的拒绝。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_broadcast_rejects_invalid_scalar
-# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
 def test_broadcast_rejects_invalid_scalar() -> None:
     block = Block()

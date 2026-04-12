@@ -243,9 +243,9 @@ class PassManager:
         result = target
         seen_names: list[str] = []
         for item in self._passes:
-            if item.name == "buffer-results-to-out-params" and "lower-nn-to-kernel" not in seen_names:
+            if item.name == "buffer-results-to-out-params" and "lower-nn" not in seen_names:
                 raise ValueError(
-                    "buffer-results-to-out-params requires lowered IR after lower-nn-to-kernel"
+                    "buffer-results-to-out-params requires lowered IR after lower-nn"
                 )
             result = item.run(result)
             seen_names.append(item.name)
