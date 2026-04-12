@@ -316,10 +316,11 @@ codex-multi-agents-task.sh \
 注意事项：
 
 - `-reassign` 仅适用于运行中任务；不能改派 `任务列表` 中的任务。
+- 目标角色必须在 `agents-lists.md` 中处于 `free` 状态。
 
 返回与限制：
 
-- 成功返回 `0`；任务不存在或目标角色不存在返回 `3`。
+- 成功返回 `0`；任务不存在、目标角色不存在或目标角色忙碌返回 `3`。
 
 ### `-next`
 
@@ -517,6 +518,7 @@ codex-multi-agents-task.sh \
   - `TC-026` `test_reassign_task_success`：改派成功，任务指派更新，角色状态重算
   - `TC-027` `test_reassign_missing_task_returns_rc3`：改派不存在任务，返回 `3`
   - `TC-028` `test_reassign_requires_agents_list`：改派缺少角色列表，返回 `1`
+  - `TC-028A` `test_reassign_rejects_busy_agent`：改派目标角色忙碌，返回 `3`
   - `TC-029` `test_delete_task_list_success`：删除任务列表任务
   - `TC-030` `test_delete_missing_task_returns_rc3`：删除不存在任务，返回 `3`
   - `TC-031` `test_delete_running_task_returns_rc3`：删除运行中任务，返回 `3`

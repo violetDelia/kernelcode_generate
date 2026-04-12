@@ -1096,6 +1096,8 @@ def main() -> int:
         new_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], new_assignee)
         if new_idx < 0:
             fail(RC_DATA, f"agent not found in agents list: {new_assignee}")
+        if agents_rows[new_idx][agents_table["status_idx"]].strip().lower() == "busy":
+            fail(RC_DATA, f"agent is busy, cannot reassign: {new_assignee}")
 
         old_assignee = exec_rows[idx][8].strip()
         old_idx = None

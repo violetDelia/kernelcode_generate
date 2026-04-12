@@ -1459,6 +1459,35 @@ def test_reassign_requires_agents_list(tmp_path: Path) -> None:
     assert "-reassign requires -agents-list" in result.stderr
 
 
+# TC-028A
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-13 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-13 00:00:00 +0800
+# 测试目的: 验证 -reassign 目标角色为 busy 时返回 RC=3。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_reassign_rejects_busy_agent(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file(
+        todo,
+        running_rows=[
+            row_running("EX-1", "李白", "2026-03-08 16:10:00 +0800", ".", "创建 src", "", "", "worker-a", "进行中", "xxx", "./log/ex1.md"),
+            row_running("EX-2", "杜甫", "2026-03-08 16:20:00 +0800", ".", "创建 test", "", "", "worker-b", "进行中", "xxx", "./log/ex2.md"),
+        ],
+    )
+    write_agents_file(agents, [agent_row("worker-a", "busy"), agent_row("worker-b", "busy")])
+
+    result = run_script("-file", str(todo), "-reassign", "-task_id", "EX-1", "-to", "worker-b", "-agents-list", str(agents))
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+
+    assert result.returncode == 3
+    assert "agent is busy, cannot reassign: worker-b" in result.stderr
+    assert any(r[0] == "EX-1" and r[8] == "worker-a" for r in running_rows)
+
+
 # TC-026
 # 创建者: 神秘人
 # 最后一次更改: 神秘人
