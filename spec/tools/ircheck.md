@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/tools/ircheck.md`](../../spec/tools/ircheck.md)
 - `功能实现`：[`kernel_gen/tools/ircheck.py`](../../kernel_gen/tools/ircheck.py)
 - `test`：
@@ -62,7 +62,7 @@
 
 - 指令集只支持三条检查指令：`CHECK:`、`CHECK-NOT:`、`CHECK-NEXT:`；不支持正则、变量捕获、`CHECK-LABEL`。
 - 多 case 仅支持固定分隔符 `// -----`；不支持 case 命名、标签跳转或条件执行。
-- `COMPILE_ARGS:` 仅支持以下写法：
+- `COMPILE_ARGS:` 支持重复 step，并按文本顺序执行；单个 step 仍沿用以下写法：
   - `--pass <pass-name>`
   - `--pass "<pass-name>{k=v}"`
   - `--pass "<pass-name>{k1=v1,k2=v2}"`
@@ -104,6 +104,7 @@ PYTHONPATH=. python -m kernel_gen.tools.ircheck case.ircheck
 注意事项：
 
 - CLI 内部应调用 `run_ircheck_file(path)` 并将返回值映射到输出与退出码（见下节）。
+- CLI 支持 `-irdump` 选项：开启后将每个 case 的每一步 IR 写入 `<cwd>/.irdump/<stem>/case_<index>/`。
 
 返回与限制：
 
@@ -177,13 +178,15 @@ assert result.ok is True
 注意事项：
 
 - `COMPILE_ARGS` 解析规则：
+  - 支持重复 `--pass` / `--pipeline`，并按文本顺序执行
   - 支持 `--pass <name>` / `--pipeline <name>`
   - 支持 `--pass "<name>{k=v}"` / `--pipeline "<name>{k=v}"`
   - 选项块语法非法或未加引号时，必须视为不支持
 - 名称解析与执行顺序要求：
   1. 调用 `load_builtin_passes()`
-  2. `--pass <name>`：调用 `build_registered_pass(name, options)` 得到 `Pass` 实例并执行
-  3. `--pipeline <name>`：调用 `build_registered_pipeline(name, options)` 得到 `PassManager` 并执行
+  2. 按 `COMPILE_ARGS` 文本顺序逐个 step 执行
+  3. `--pass <name>`：调用 `build_registered_pass(name, options)` 得到 `Pass` 实例并执行
+  4. `--pipeline <name>`：调用 `build_registered_pipeline(name, options)` 得到 `PassManager` 并执行
 - `options` 为空或未提供时，视为无参构造路径。
 - 名称解析仅走 registry 提供的接口，不直接 import pipeline builder。
 - 多 case 执行语义：
@@ -204,6 +207,7 @@ assert result.ok is True
   - `IrcheckMatchError: CHECK not found`
   - `IrcheckMatchError: CHECK-NEXT not found on next line`
   - `IrcheckMatchError: CHECK-NOT matched forbidden text`
+ - 若多 step 执行中途失败，`message` 必须包含失败 step 序号/类型/名字；`actual_ir` 返回失败前一刻的 IR。
 
 ### `run_ircheck_text(text: str, source_path: str | None = None) -> IrcheckResult`
 
@@ -236,6 +240,7 @@ assert result.ok is True
 返回与限制：
 
 - 返回行为与 `run_ircheck_file` 相同；仅输入源不同。
+ - `COMPILE_ARGS` 支持重复 `--pass` / `--pipeline` 并按文本顺序执行。
 
 ### 数据对象：`IrcheckCase` / `CheckDirective` / `IrcheckResult`
 
@@ -347,6 +352,23 @@ assert result.exit_code == 0
 
 builtin.module { /* ... */ }
 ```
+
+### 多 step 示例
+
+```mlir
+// COMPILE_ARGS: --pass lower-nn --pass "tile={tile-only=true,tile-elewise=true}" --pass buffer-results-to-out-params
+// CHECK: scf.for
+
+builtin.module { /* ... */ }
+```
+
+### `-irdump` 目录与文件命名
+
+- 开启 `-irdump` 后默认写入 `<cwd>/.irdump/<stem>/case_<index>/`。
+- 每个 case 内的文件命名固定为：
+  - `00-input.mlir`
+  - `01-pass-<name>.mlir` / `01-pipeline-<name>.mlir`
+  - 若某一步失败，额外写入 `NN-before-failed-<type>-<name>.mlir`。
 
 ### 迁移建议（从字符串断言到 ircheck）
 
