@@ -23,25 +23,7 @@ from xdsl.dialects.builtin import ModuleOp
 from xdsl.ir import Operation
 
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-
-
-class NnLoweringError(ValueError):
-    """nn_lowering pass 共享错误类型。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 统一 nn_lowering 阶段抛出的错误类型。
-
-    使用示例:
-    - raise NnLoweringError("module must be builtin.module")
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
-    - test: test/pass/nn_lowering/public_name.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering_utility.py
-    """
+from .nn_lowering import NnLoweringError
 
 
 def ensure_module_op(module: Operation) -> ModuleOp:

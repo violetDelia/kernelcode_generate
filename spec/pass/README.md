@@ -58,8 +58,8 @@
 from kernel_gen.passes.pass_manager import Pass
 
 
-class LowerNnToKernelPass(Pass):
-    name = "lower-nn-to-kernel"
+class NnLoweringPass(Pass):
+    name = "lower-nn"
 
     def run(self, target):
         return target
@@ -89,13 +89,13 @@ class LowerNnToKernelPass(Pass):
 from kernel_gen.passes.pass_manager import PassManager
 
 manager = PassManager(name="opt")
-manager.add_pass(LowerNnToKernelPass())
+manager.add_pass(NnLoweringPass())
 result = manager.run(target)
 ```
 
 ```python
 manager = PassManager()
-manager.extend([LowerNnToKernelPass()])
+manager.extend([NnLoweringPass()])
 result = manager.run(target)
 ```
 

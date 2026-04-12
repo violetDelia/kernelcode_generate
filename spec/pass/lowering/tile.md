@@ -18,7 +18,7 @@
 ## 依赖
 
 - Pass 管理抽象：[`spec/pass/pass_manager.md`](../../../spec/pass/pass_manager.md)
-- `nn -> kernel` lowering：[`spec/pass/lowering/nn_to_kernel.md`](../../../spec/pass/lowering/nn_to_kernel.md)
+- `nn -> kernel` lowering：[`spec/pass/lowering/nn_lowering.md`](../../../spec/pass/lowering/nn_lowering.md)
 - out-param ABI 收口：[`spec/pass/lowering/buffer_results_to_out_params.md`](../../../spec/pass/lowering/buffer_results_to_out_params.md)
 - `dma` 视图与 alloc：[`spec/dialect/dma.md`](../../../spec/dialect/dma.md)
 - `symbol` loop：[`spec/dialect/symbol.md`](../../../spec/dialect/symbol.md)
@@ -41,7 +41,7 @@
 
 ## 限制与边界
 
-- 输入必须已完成 `LowerNnToKernelPass -> BufferResultsToOutParamsPass`；若残留 `nn.*` 或 memory-return ABI，必须失败。
+- 输入必须已完成 `NnLoweringPass -> BufferResultsToOutParamsPass`；若残留 `nn.*` 或 memory-return ABI，必须失败。
 - 输入允许子集为：`kernel.*` / `dma.*` / `func.return`，并只额外允许 `tuner.param` 与 `symbol.get_dim` 作为桥接 op。
 - `func.call` 不允许出现在 tile 处理范围内。
 - `analysis-only=true` 不改变输入合同：输入不满足约束时仍需按相同错误短语失败。

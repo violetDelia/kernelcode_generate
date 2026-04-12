@@ -341,7 +341,7 @@ assert result.exit_code == 0
 - 最小示例：
 
 ```mlir
-// COMPILE_ARGS: --pass lower-nn-to-kernel
+// COMPILE_ARGS: --pass lower-nn
 // CHECK: kernel.add
 // CHECK-NOT: nn.add
 

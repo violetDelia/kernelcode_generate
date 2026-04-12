@@ -59,7 +59,7 @@ module = pm.run(module)
 - pipeline 名称为 `default-lowering`。
 - pass 顺序必须为：
   1. `DecompassPass`
-  2. `LowerNnToKernelPass`
+  2. `NnLoweringPass`
   3. `BufferResultsToOutParamsPass`
   4. `LowerDmaMemoryHierarchyPass`
 

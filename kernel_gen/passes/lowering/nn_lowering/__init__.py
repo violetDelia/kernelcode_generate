@@ -16,7 +16,6 @@
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/__init__.py
 """
 
-from .nn_lowering import NnLoweringPass
-from .nn_lowering_utility import NnLoweringError
+from .nn_lowering import NnLoweringError, NnLoweringPass
 
 __all__ = ["NnLoweringPass", "NnLoweringError"]

@@ -22,7 +22,7 @@
 
 - 提供可解析、可校验的逐元素、结构化张量变换与 reduction/matmul 类 `kernel.*` op 集合。
 - 明确 `ins(...)` / `outs(...)` 形式下的类型、shape、stride、space 与关键 attrs 一致性校验规则。
-- 明确 `LowerNnToKernelPass` 面向 `kernel.binary_elewise`、`kernel.compare family`、`kernel.exp`、`kernel.softmax`、`kernel.reduce`、`kernel.reduce_sum`、`kernel.reduce_min`、`kernel.reduce_max`、`kernel.matmul`、`kernel.img2col1d`、`kernel.img2col2d` 的目标 op 名字与输出消费链路。
+- 明确 `NnLoweringPass` 面向 `kernel.binary_elewise`、`kernel.compare family`、`kernel.exp`、`kernel.softmax`、`kernel.reduce(kind=...)`、`kernel.matmul`、`kernel.img2col1d`、`kernel.img2col2d` 的目标 op 名字与输出消费链路；`kernel.reduce_sum/min/max` 仍保留为具名 op，但 NnLoweringPass 产出以 `kernel.reduce(kind=...)` 为准。
 - 明确 expectation 所要求的 `dma.alloc -> kernel.* -> func.return` 是真实消费链路：`out` operand 必须被目标 op 实际写入，不允许只命中 op 名称而缺失输出写回语义。
 
 ## 限制与边界
@@ -671,10 +671,10 @@ func.return %out : !nn.memory<f16, [N, C, KH, KW, OH, OW], GM>
 
 - 测试文件：
   - [`test/dialect/test_kernel_dialect.py`](../../test/dialect/test_kernel_dialect.py)
-  - [`test/pass/test_lowering_nn_to_kernel.py`](../../test/pass/test_lowering_nn_to_kernel.py)
+  - [`test/pass/nn_lowering/public_contract_kernel.py`](../../test/pass/nn_lowering/public_contract_kernel.py)
 - 执行命令：
   - `pytest -q test/dialect/test_kernel_dialect.py`
-  - `pytest -q test/pass/test_lowering_nn_to_kernel.py -k public_contract_kernel_binary_elewise_and_reduce`
+  - `pytest -q test/pass/nn_lowering/public_contract_kernel.py`
 
 ### 测试目标
 

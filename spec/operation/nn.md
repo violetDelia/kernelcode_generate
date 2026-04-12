@@ -780,7 +780,7 @@ out_last_dim = softmax(value, axis=1)
 - 数值稳定性要求：实现必须采用“减去该轴最大值后再指数化”的等价语义，即 `exp(x - max(x)) / sum(exp(x - max(x)))`，避免直接对原值指数化。
 - 与现有 nn 算子兼容：`softmax` 输出仍为 `Memory`，可直接作为 `add/sub/mul/truediv/floordiv/compare` 的输入。
 - 与 `nn dialect` 的映射边界：operation 层冻结高层语义与异常口径；dialect 层只冻结结构化字段与 verifier，见 [`spec/dialect/nn.md`](../../spec/dialect/nn.md) 的 `nn.softmax` 小节。
-- 与 lowering 链路的机械边界：`softmax` 的高层输出合同保持不变，但 `nn.softmax` 不允许由 `LowerNnToKernelPass` 直降 `kernel.softmax`；进入该 pass 前必须先分解为 `nn.reduce_max -> nn.broadcast -> nn.sub -> nn.exp -> nn.reduce_sum -> nn.broadcast -> nn.truediv`。
+- 与 lowering 链路的机械边界：`softmax` 的高层输出合同保持不变，但 `nn.softmax` 不允许由 `NnLoweringPass` 直降 `kernel.softmax`；进入该 pass 前必须先分解为 `nn.reduce_max -> nn.broadcast -> nn.sub -> nn.exp -> nn.reduce_sum -> nn.broadcast -> nn.truediv`。
 
 返回与限制：
 

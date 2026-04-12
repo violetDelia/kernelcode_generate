@@ -9,12 +9,11 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/pass/lowering/nn_lowering.md`](../../../spec/pass/lowering/nn_lowering.md)
 - `功能实现`：[`kernel_gen/passes/lowering/nn_lowering/nn_lowering.py`](../../../kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
 - `test`：
   - [`test/pass/nn_lowering/public_name.py`](../../../test/pass/nn_lowering/public_name.py)
-  - [`test/pass/test_lowering_nn_to_kernel.py`](../../../test/pass/test_lowering_nn_to_kernel.py)
 
 ## 依赖
 
@@ -36,11 +35,11 @@
 
 - 仅支持以下 `nn` op 的 lowering：
   - 逐元素：`nn.add`/`nn.sub`/`nn.mul`/`nn.div`/`nn.truediv`、`nn.eq`/`nn.ne`/`nn.lt`/`nn.le`/`nn.gt`/`nn.ge`、`nn.select`、`nn.cast`
-  - 结构化：`nn.broadcast`、`nn.broadcast_to`、`nn.transpose`、`nn.exp`、`nn.softmax`、`nn.reduce_sum`/`nn.reduce_min`/`nn.reduce_max`、`nn.matmul`、`nn.img2col1d`/`nn.img2col2d`
+  - 结构化：`nn.broadcast`、`nn.transpose`、`nn.exp`、`nn.softmax`、`nn.reduce_sum`/`nn.reduce_min`/`nn.reduce_max`、`nn.matmul`、`nn.img2col1d`/`nn.img2col2d`
 - `nn.truediv` 与 `nn.div` 在 pass 层统一 lower 为 `kernel.binary_elewise(kind="div")`。
-- `nn.broadcast` / `nn.broadcast_to` 必须 lower 为 `dma.broadcast`。
-- `nn.transpose` 必须 lower 为 `dma.transpose`。
+- `nn.broadcast` / `nn.transpose` 必须 lower 为 `dma.broadcast` / `dma.transpose`。
 - `nn.exp` / `nn.softmax` / `nn.reduce_*` / `nn.matmul` / `nn.img2col*` 必须 lower 为具名 `kernel.*` op。
+- `nn` 逐元素/比较类 op 必须 lower 为 `kernel.binary_elewise`，`kind` 与原 op 语义一致。
 - `nn.exp` lowering 规则：
   - 目标 op 固定为 `kernel.exp`，并把结果写入 `out` operand。
   - `out` 必须由 `dma.alloc` 创建；输入与输出的 `shape/stride/element_type/space` 必须一致，否则抛出 `NnLoweringError`。
@@ -51,16 +50,20 @@
 - `nn.softmax` lowering 规则：
   - 目标 op 固定为 `kernel.softmax`，并把 `axis` 作为 op attr。
   - `out` 必须由 `dma.alloc` 创建；`axis` 与 `out` 形态不一致时必须抛出 `NnLoweringError`。
+- `nn.matmul` lowering 规则：
+  - 目标 op 固定为 `kernel.matmul`，并把结果写入 `out` operand。
+  - 动态维度只能来源于 `symbol.get_dim` 或显式 `!symbol.int<"...">`；不允许把 `i32/index` 直接作为动态维度来源。
+  - `out` 的 `shape/stride/element_type/space` 必须与 matmul 合同一致，否则抛出 `NnLoweringError`。
+- `nn.img2col1d/nn.img2col2d` lowering 规则：
+  - 目标 op 固定为 `kernel.img2col1d` / `kernel.img2col2d`。
+  - `kw/kh/sw/sh/dw/dh/pl/pr/ph/pw` 在进入 lowering 时必须是 `!symbol.int<"...">` 值；不接受 `i32/index` 或整数 attribute 直接作为 operand。
+  - 动态输出维度必须由 `symbol.get_dim` 或显式 `!symbol.int<"...">` 组合得出。
 - `nn` 结果 Memory 必须通过 `dma.alloc` 显式创建；不允许隐式分配或省略输出写入。
-- broadcast / broadcast_to 的动态符号维约束：
-  - `result.shape` 中的每个符号维必须能在 `input.shape` 中找到同名维度，或来自显式 `symbol.get_dim` 的结果。
-  - 不支持把 singleton 维扩张为“新引入的符号维”；违反时必须报错，错误信息必须包含关键短语 `LowerNnToKernelBroadcastSymbolDimNotFromSource`。
-  - `dma.alloc` 的动态维顺序必须与结果类型一致，并复用 `input.shape` 对应的符号维或 `symbol.get_dim` 结果。
-- transpose 的动态维约束：
-  - `dma.alloc` 的动态维顺序必须与结果类型一致，并按 `perm` 顺序从输入维度取值。
-  - `perm` 必须覆盖输入 rank 且与输出 rank 一致；不一致时必须报错。
+- 动态符号维的 broadcast 约束：
+  - `result.shape` 中的每个符号维必须能在 `input.shape` 中找到同名维度。
+  - 不支持把 singleton 维扩张为“新引入的符号维”；违反时必须报错，错误信息必须包含关键短语 `NnLoweringBroadcastSymbolDimNotFromSource`。
 - mixed compare 的桥接规则：
-  - `memory + memory` compare：直接 lower 为 `kernel` 比较类 op，且 `shape/stride/space/element_type` 必须一致。
+  - `memory + memory` compare：直接 lower 为 `kernel.binary_elewise(kind=...)`，且 `shape/stride/space/element_type` 必须一致。
   - `memory + symbol/const` compare：必须先用 `dma.alloc + dma.broadcast` 物化为 temporary memory，再进行 compare；禁止 `kernel` 比较 op 直接接收非 memory operand。
 - 遇到不支持的 op、结果类型非法、缺失 `nn.space`、operand 数量不匹配或 kernel 校验失败时，必须抛出 `NnLoweringError` 并终止。
 
@@ -185,67 +188,32 @@ module_op = ensure_module_op(module)
 
 - 测试文件：
   - [`test/pass/nn_lowering/public_name.py`](../../../test/pass/nn_lowering/public_name.py)
-  - [`test/pass/test_lowering_nn_to_kernel.py`](../../../test/pass/test_lowering_nn_to_kernel.py)
-  - [`test/pass/nn_lowering/element_binary_add.py`](../../../test/pass/nn_lowering/element_binary_add.py)
-  - [`test/pass/nn_lowering/element_binary_sub.py`](../../../test/pass/nn_lowering/element_binary_sub.py)
-  - [`test/pass/nn_lowering/element_binary_mul.py`](../../../test/pass/nn_lowering/element_binary_mul.py)
-  - [`test/pass/nn_lowering/element_binary_div.py`](../../../test/pass/nn_lowering/element_binary_div.py)
-  - [`test/pass/nn_lowering/element_binary_truediv.py`](../../../test/pass/nn_lowering/element_binary_truediv.py)
-  - [`test/pass/nn_lowering/element_compare_eq.py`](../../../test/pass/nn_lowering/element_compare_eq.py)
-  - [`test/pass/nn_lowering/element_compare_ne.py`](../../../test/pass/nn_lowering/element_compare_ne.py)
-  - [`test/pass/nn_lowering/element_compare_lt.py`](../../../test/pass/nn_lowering/element_compare_lt.py)
-  - [`test/pass/nn_lowering/element_compare_le.py`](../../../test/pass/nn_lowering/element_compare_le.py)
-  - [`test/pass/nn_lowering/element_compare_gt.py`](../../../test/pass/nn_lowering/element_compare_gt.py)
-  - [`test/pass/nn_lowering/element_compare_ge.py`](../../../test/pass/nn_lowering/element_compare_ge.py)
-  - [`test/pass/nn_lowering/select.py`](../../../test/pass/nn_lowering/select.py)
-  - [`test/pass/nn_lowering/cast.py`](../../../test/pass/nn_lowering/cast.py)
-  - [`test/pass/nn_lowering/exp.py`](../../../test/pass/nn_lowering/exp.py)
-  - [`test/pass/nn_lowering/reduce_sum.py`](../../../test/pass/nn_lowering/reduce_sum.py)
-  - [`test/pass/nn_lowering/reduce_min.py`](../../../test/pass/nn_lowering/reduce_min.py)
-  - [`test/pass/nn_lowering/reduce_max.py`](../../../test/pass/nn_lowering/reduce_max.py)
-  - [`test/pass/nn_lowering/softmax.py`](../../../test/pass/nn_lowering/softmax.py)
+  - [`test/pass/nn_lowering/test_lowering_nn_lowering.py`](../../../test/pass/nn_lowering/test_lowering_nn_lowering.py)
 - 执行命令：
   - `pytest -q test/pass/nn_lowering/public_name.py`
-  - `pytest -q test/pass/test_lowering_nn_to_kernel.py -k rename`
-  - `pytest -q test/pass/test_lowering_nn_to_kernel.py -k public_contract`
-  - `pytest -q test/pass/nn_lowering/element_binary_add.py`
-  - `pytest -q test/pass/nn_lowering/element_binary_sub.py`
-  - `pytest -q test/pass/nn_lowering/element_binary_mul.py`
-  - `pytest -q test/pass/nn_lowering/element_binary_div.py`
-  - `pytest -q test/pass/nn_lowering/element_binary_truediv.py`
-  - `pytest -q test/pass/nn_lowering/element_compare_eq.py`
-  - `pytest -q test/pass/nn_lowering/element_compare_ne.py`
-  - `pytest -q test/pass/nn_lowering/element_compare_lt.py`
-  - `pytest -q test/pass/nn_lowering/element_compare_le.py`
-  - `pytest -q test/pass/nn_lowering/element_compare_gt.py`
-  - `pytest -q test/pass/nn_lowering/element_compare_ge.py`
-  - `pytest -q test/pass/nn_lowering/select.py`
-  - `pytest -q test/pass/nn_lowering/cast.py`
-  - `pytest -q test/pass/nn_lowering/exp.py`
-  - `pytest -q test/pass/nn_lowering/reduce_sum.py`
-  - `pytest -q test/pass/nn_lowering/reduce_min.py`
-  - `pytest -q test/pass/nn_lowering/reduce_max.py`
-  - `pytest -q test/pass/nn_lowering/softmax.py`
+  - `pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py`
+  - `pytest -q test/pass/nn_lowering`
 - 测试目标：
   - 验证 `NnLoweringPass` 的公开名字与导出路径稳定。
   - 验证 `NnLoweringError` 与 `NnLoweringPass` 的公共导出可用。
-  - 验证 `NnLoweringPass` 在公共入口层面可见且可调用。
-  - 验证 `kernel.binary_elewise` 与 `kernel.reduce` 的公开合同可解析与可校验。
-  - 验证 element binary/compare/select/cast family 的 lowering 目标一致，且 `nn.div/nn.truediv` 统一使用 `kernel.binary_elewise(kind="div")`。
+  - 验证 `kernel.binary_elewise` 与 `kernel.reduce` 在 lowering 输出中可解析与可校验。
   - 验证 `nn.exp` -> `kernel.exp` 的 lowering 目标与输出消费链路。
-  - 验证 `nn.reduce_*` -> `kernel.reduce(kind=...)` 的 lowering 目标与 `axis/keepdim` 传递。
+  - 验证 `nn.reduce_sum/min/max` -> `kernel.reduce(kind=...)` 的 lowering 目标与 `axis/keepdim` 传递。
   - 验证 `nn.softmax` -> `kernel.softmax` 的 lowering 目标与 `axis` 传递。
+  - 验证 `nn.matmul` -> `kernel.matmul` 的 lowering 目标与输出 memory 约束。
+  - 验证 `nn.img2col1d/nn.img2col2d` -> `kernel.img2col1d/kernel.img2col2d` 的 lowering 目标与 symbol.int operand 约束。
 - 功能与用例清单：
 
 | 用例 ID | 功能 | 对应测试 |
 | --- | --- | --- |
 | TC-PASS-NNL-001 | `NnLoweringPass` 公开名称 | `test_nn_lowering_pass_public_name` |
 | TC-PASS-NNL-002 | `NnLoweringError` 导出可用 | `test_nn_lowering_pass_public_exports` |
-| TC-PASS-N2K-031 | `nn_lowering` 入口暴露 | `test_rename_exposes_nn_lowering_pass` |
-| TC-PASS-NNL-S2-001 | element binary add/sub/mul lower 为 `kernel.binary_elewise` | `element_binary_add.py` / `element_binary_sub.py` / `element_binary_mul.py` |
-| TC-PASS-NNL-S2-002 | `nn.div`/`nn.truediv` lower 为 `kernel.binary_elewise(kind="div")` | `element_binary_div.py` / `element_binary_truediv.py` |
-| TC-PASS-NNL-S2-003 | element compare lower 为 `kernel.binary_elewise` | `element_compare_eq.py` / `element_compare_ne.py` / `element_compare_lt.py` / `element_compare_le.py` / `element_compare_gt.py` / `element_compare_ge.py` |
-| TC-PASS-NNL-S2-004 | `nn.select`/`nn.cast` lower 为 `dma.alloc + kernel.select/dma.cast` | `select.py` / `cast.py` |
-| TC-PASS-NNL-010 | `nn.exp` lowering 目标为 `kernel.exp` | `test_nn_lowering_exp_target` |
-| TC-PASS-NNL-011 | `nn.reduce_*` lowering 目标为 `kernel.reduce(kind=...)` | `test_nn_lowering_reduce_family_targets` |
-| TC-PASS-NNL-012 | `nn.softmax` lowering 目标为 `kernel.softmax` | `test_nn_lowering_softmax_target` |
+| TC-PASS-NNL-010 | `nn.add` lowering 为 `kernel.binary_elewise(kind="add")` | `test_lower_add_to_kernel` |
+| TC-PASS-NNL-011 | `nn.truediv` lowering 为 `kernel.binary_elewise(kind="div")` | `test_lower_div_to_kernel` |
+| TC-PASS-NNL-012 | `nn.reduce_min` lowering 为 `kernel.reduce(kind="min")` | `test_lower_reduce_min_to_kernel` |
+| TC-PASS-NNL-013 | `nn.reduce_sum` lowering 为 `kernel.reduce(kind="sum")` | `test_lower_reduce_sum_to_kernel` |
+| TC-PASS-NNL-014 | `nn.reduce_max` lowering 为 `kernel.reduce(kind="max")` | `test_lower_reduce_max_to_kernel` |
+| TC-PASS-NNL-020 | `nn.softmax` lowering 目标为 `kernel.softmax` | `test_lower_softmax_to_kernel` |
+| TC-PASS-NNL-021 | `nn.matmul` lowering 目标为 `kernel.matmul` | `test_lower_matmul_to_kernel` |
+| TC-PASS-NNL-022 | `nn.img2col1d` lowering 目标为 `kernel.img2col1d` | `test_lower_img2col1d_to_kernel` |
+| TC-PASS-NNL-023 | `nn.img2col2d` lowering 目标为 `kernel.img2col2d` | `test_lower_img2col2d_to_kernel` |

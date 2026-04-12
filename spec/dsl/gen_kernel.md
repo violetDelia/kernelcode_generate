@@ -160,7 +160,7 @@ void add_barrier(
 - 上述函数级策略只允许作为 emitter 内部实现细节存在；不得再扩成新的公开入口、公开 helper 或测试主口径。
 - `func.return` 在默认 rewrite-after-IR 路径下仅支持无返回或单一非 `Memory` 标量返回；若仍返回 `Memory`，必须显式报错并包含 `legacy memory return ABI is not supported` 关键字。
 - 不得在本层引入未在 `emit_c` 中定义的单 op 生成特例。
-- `target=cpu` 下的 lowered add 成功链路必须来自 `LowerNnToKernelPass -> BufferResultsToOutParamsPass` 之后的 rewrite 后 IR，例如：
+- `target=cpu` 下的 lowered add 成功链路必须来自 `NnLoweringPass -> BufferResultsToOutParamsPass` 之后的 rewrite 后 IR，例如：
 
 ```cpp
 cpu::add(arg1, arg2, arg0);

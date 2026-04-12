@@ -139,13 +139,13 @@ DecompassError: result type must match input shape and stride
 
 ```python
 from kernel_gen.passes.lowering.decompass import DecompassPass
-from kernel_gen.passes.lowering.nn_to_kernel import LowerNnToKernelPass
+from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 from kernel_gen.passes.lowering.buffer_results_to_out_params import BufferResultsToOutParamsPass
 from kernel_gen.passes.pass_manager import PassManager
 
 pm = PassManager(name="lowering")
 pm.add_pass(DecompassPass())
-pm.add_pass(LowerNnToKernelPass())
+pm.add_pass(NnLoweringPass())
 pm.add_pass(BufferResultsToOutParamsPass())
 module = pm.run(module)
 ```

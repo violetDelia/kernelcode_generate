@@ -172,7 +172,7 @@ expr = emit_c_value(value, EmitCContext(target="cpu"))
 - 以下规则仅适用于 `target=cpu`，且只定义单个 op 在函数体中的节点级语句/语句块形态。
 - 本层只负责 tile-local `Memory<Space, T>` 声明、memory 视图重解释、显式 copy loop、`cpu::img2col2d(...)` 调用与局部计算节点本身。
 - 本层不负责固定 tile 常量、外层分块循环、完整函数签名或最终写回 `out` 的整体骨架；这些由 [`spec/dsl/gen_kernel.md`](../../spec/dsl/gen_kernel.md) 负责。
-- 本层不得通过 `kernel dialect` / `nn_to_kernel` 中转补语义，也不得引入新的 `slice(...)` / `deslice(...)` helper API。
+- 本层不得通过 `kernel dialect` / `nn_lowering` 中转补语义，也不得引入新的 `slice(...)` / `deslice(...)` helper API。
 
 ### `dma.alloc`
 

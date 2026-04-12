@@ -18,7 +18,7 @@
 ## 依赖
 
 - Pass 管理器：[`spec/pass/pass_manager.md`](../../../spec/pass/pass_manager.md)
-- `nn -> kernel` lowering：[`spec/pass/lowering/nn_to_kernel.md`](../../../spec/pass/lowering/nn_to_kernel.md)
+- `nn -> kernel` lowering：[`spec/pass/lowering/nn_lowering.md`](../../../spec/pass/lowering/nn_lowering.md)
 - `memory-return` ABI 收口：[`spec/pass/lowering/buffer_results_to_out_params.md`](../../../spec/pass/lowering/buffer_results_to_out_params.md)
 - DMA dialect：[`spec/dialect/dma.md`](../../../spec/dialect/dma.md)
 - Kernel dialect：[`spec/dialect/kernel.md`](../../../spec/dialect/kernel.md)
@@ -31,7 +31,7 @@
 
 ## 目标
 
-- 冻结 pass 名称与顺序边界：`LowerNnToKernelPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass`。
+- 固定 pass 名称与顺序边界：`NnLoweringPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass`。
 - 强制 `kernel.*` 计算仅在 `LM` 上发生，读写路径显式拆成 `GM -> SM -> LM` 与 `LM -> SM -> GM`。
 - 新增 hierarchy 搬运统一用 `dma.slice / dma.deslice`，整块搬运只是 `slice/deslice` 的全量窗口特例。
 - 冻结窗口链路口径：`GM -> SM` 与 `SM -> GM` 必须保留原窗口 `offsets/sizes`，并继续使用 unit stride；`SM -> LM` 与 `LM -> SM` 必须改写为 `zero offsets + unit strides`。
@@ -39,7 +39,7 @@
 
 ## 限制与边界
 
-- 本 pass 只能位于 `LowerNnToKernelPass` 与 `BufferResultsToOutParamsPass` 之后，且输入不得包含 `nn.*`。
+- 本 pass 只能位于 `NnLoweringPass` 与 `BufferResultsToOutParamsPass` 之后，且输入不得包含 `nn.*`。
 - 不改写函数 ABI；caller/callee 的 out-param 合同仍由 `BufferResultsToOutParamsPass` 负责。
 - 本 pass 新增的 hierarchy 搬运不得使用 `dma.copy` / `dma.load` / `dma.store`；若输入中已有这些 op，本 pass 不要求重写，但也不得用它们表达新增的层级主语义。
 - 读路径必须是 `GM -> SM -> LM`，写路径必须是 `LM -> SM -> GM`；不允许直连 `GM -> LM` 或 `LM -> GM`。
@@ -65,12 +65,12 @@
 
 ```python
 from kernel_gen.passes.pass_manager import PassManager
-from kernel_gen.passes.lowering.nn_to_kernel import LowerNnToKernelPass
+from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 from kernel_gen.passes.lowering.buffer_results_to_out_params import BufferResultsToOutParamsPass
 from kernel_gen.passes.lowering.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
 
 pm = PassManager(name="lowering")
-pm.add_pass(LowerNnToKernelPass())
+pm.add_pass(NnLoweringPass())
 pm.add_pass(BufferResultsToOutParamsPass())
 pm.add_pass(LowerDmaMemoryHierarchyPass())
 module = pm.run(module)
@@ -78,7 +78,7 @@ module = pm.run(module)
 
 注意事项：
 
-- pass 顺序必须固定为 `LowerNnToKernelPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass`。
+- pass 顺序必须固定为 `NnLoweringPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass`。
 - 新增 hierarchy 搬运必须使用 `dma.slice / dma.deslice`；整块搬运是全量窗口特例（`offsets=0`、`sizes=shape`、`strides=1`）。
 - 处理后的 `kernel.*` 只允许 `LM` memory 作为 operand/out。
 - staging `dma.alloc` 的 `dynamic_shape` 只能来自显式 symbol 来源；若 full-window 输入含匿名 `?`，`run` 必须显式失败而不是静默补默认值。
