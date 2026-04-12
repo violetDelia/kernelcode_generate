@@ -20,8 +20,6 @@
 from __future__ import annotations
 
 from xdsl.dialects.builtin import ModuleOp
-
-<<<<<<< HEAD
 from kernel_gen.passes.lowering.tile import (
     TilePass,
     TilePassError,

@@ -289,18 +289,21 @@ def load_builtin_passes() -> None:
     if _BUILTINS_LOADED:
         return
 
-    @register_pass
     class NoOpPass(Pass):
         name = "no-op"
 
         def run(self: "NoOpPass", target: object) -> object:
             return target
 
-    @register_pipeline("no-op-pipeline")
     def _build_no_op_pipeline() -> PassManager:
         pm = PassManager(name="no-op-pipeline")
         pm.add_pass(NoOpPass())
         return pm
+
+    if NoOpPass.name not in _PASS_REGISTRY:
+        register_pass(NoOpPass)
+    if "no-op-pipeline" not in _PIPELINE_REGISTRY:
+        register_pipeline("no-op-pipeline")(_build_no_op_pipeline)
 
     from kernel_gen.passes.analysis.func_cost import AnalyzeFuncCostPass
     from kernel_gen.passes.lowering.buffer_results_to_out_params import (
@@ -323,6 +326,9 @@ def load_builtin_passes() -> None:
         SymbolLoopHoistPass,
         MemoryPoolPass,
     ):
+        pass_name = getattr(pass_cls, "name", None)
+        if isinstance(pass_name, str) and pass_name in _PASS_REGISTRY:
+            continue
         register_pass(pass_cls)
 
     from kernel_gen.passes import pipeline as _pipeline
