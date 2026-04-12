@@ -31,6 +31,19 @@
 - `tile-only`：先运行 analysis 阶段，再进入 tile 改写阶段。
 - `tile.analysis`：analysis 阶段生成的角色标签矩阵，按 operand 与维度顺序输出。
 
+## analysis 结果文本合同
+
+- `tile.analysis` 必须是二维列表：外层按 operand 顺序排列，内层按该 operand 的维度顺序排列。
+- 每个维度位置只输出角色标签，不输出具体维度值。
+- 角色标签只允许使用：`elewise`、`expand`、`reduce`。
+
+示例：
+
+```text
+"dma.broadcast"(%out, %src)
+  {tile.analysis = [["elewise", "elewise"], ["expand", "elewise"]]}
+```
+
 ## 目标
 
 - 保持单公开 pass：`TilePass`，名字固定为 `tile`。
@@ -159,10 +172,19 @@ module = pass_obj.run(module)
 ## 测试
 
 - 测试文件：`test/pass/test_lowering_tile.py`
-- 执行命令：`pytest -q test/pass/test_lowering_tile.py`
+- 执行命令：
+  - `pytest -q test/pass/test_lowering_tile.py`
+- 运行前提：
+  - expectation 以 worktree 版本为准时，在 worktree 根目录执行上述命令。
+  - expectation 以主仓版本为准时，在主仓根目录执行命令，并将 worktree 路径置于 `PYTHONPATH` 前置，例如：
+    - `PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260413-tile-exp-s2:/home/lfr/kernelcode_generate python -m expectation.pass.tile.analysis`
+    - `PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260413-tile-exp-s2:/home/lfr/kernelcode_generate python /home/lfr/kernelcode_generate/expectation/pass/tile/analysis_only.py`
 - 测试目标：
   - 验证单入口行为与公开 option 组合。
   - 验证 `analysis-only` 与 `tile-only` 互斥的拒绝路径。
+  - 验证 analysis 目录入口可运行（以主仓 expectation 与 worktree 代码联动为准）：
+    - `PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260413-tile-exp-s2:/home/lfr/kernelcode_generate python -m expectation.pass.tile.analysis`
+    - `PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260413-tile-exp-s2:/home/lfr/kernelcode_generate python /home/lfr/kernelcode_generate/expectation/pass/tile/analysis_only.py`
 - 功能与用例清单：
   - `test_tile_analysis_only_true`
   - `test_tile_analysis_only_false`

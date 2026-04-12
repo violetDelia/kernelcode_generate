@@ -542,6 +542,7 @@ def _classify_kernel_ops(kernel_ops: list[Operation]) -> str | None:
         "kernel.ge",
         "kernel.select",
         "kernel.cast",
+        "kernel.binary_elewise",
     }
     for op in kernel_ops:
         if op.name not in allowed_elementwise:
@@ -1377,7 +1378,6 @@ def _rewrite_function(func_op: func.FuncOp, analysis_only: bool) -> None:
     block = _get_single_block(func_op)
     _validate_input_contract(func_op, block)
     kernel_ops = _collect_kernel_ops(block)
-    mode = _classify_kernel_ops(kernel_ops)
     _validate_intermediate_materialization(func_op, block)
 
     return_op = block.last_op
@@ -1391,6 +1391,7 @@ def _rewrite_function(func_op: func.FuncOp, analysis_only: bool) -> None:
         _annotate_tile_analysis(block)
         return
 
+    mode = _classify_kernel_ops(kernel_ops)
     _clear_tile_analysis(block)
     if mode is None:
         return
