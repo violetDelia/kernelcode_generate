@@ -1,11 +1,10 @@
 """lowering pass package.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 提供 nn -> kernel lowering pass 的公开入口。
-- 提供 `LowerNnToKernelPass` 兼容别名以满足旧 pipeline 入口。
 - 提供 buffer-results-to-out-params pass 的公开入口。
 - 提供 lower-dma-memory-hierarchy pass 的公开入口。
 - 提供 decompass pass 的公开入口。
@@ -14,8 +13,6 @@
 使用示例:
 - from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 - pass_obj = NnLoweringPass()
-- from kernel_gen.passes.lowering import LowerNnToKernelPass
-- pass_obj = LowerNnToKernelPass()
 - from kernel_gen.passes.lowering.buffer_results_to_out_params import BufferResultsToOutParamsPass
 - pass_obj = BufferResultsToOutParamsPass()
 - from kernel_gen.passes.lowering.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
@@ -51,9 +48,6 @@
 """
 
 from .nn_lowering import NnLoweringError, NnLoweringPass
-
-LowerNnToKernelPass = NnLoweringPass
-LowerNnToKernelError = NnLoweringError
 from .buffer_results_to_out_params import (
     BufferResultsToOutParamsError,
     BufferResultsToOutParamsPass,
@@ -69,8 +63,6 @@ from .tile import TilePass, TilePassError
 __all__ = [
     "NnLoweringPass",
     "NnLoweringError",
-    "LowerNnToKernelPass",
-    "LowerNnToKernelError",
     "BufferResultsToOutParamsPass",
     "BufferResultsToOutParamsError",
     "LowerDmaMemoryHierarchyPass",

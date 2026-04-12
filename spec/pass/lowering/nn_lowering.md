@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`朽木露琪亚`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/pass/lowering/nn_lowering.md`](../../../spec/pass/lowering/nn_lowering.md)
 - `功能实现`：[`kernel_gen/passes/lowering/nn_lowering/nn_lowering.py`](../../../kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
 - `test`：
@@ -25,11 +25,11 @@
 
 ## 目标
 
-- 提供新的公开入口 `NnLoweringPass`，并保持 `name == "lower-nn"`。
+- 提供唯一公开入口 `NnLoweringPass`，并保持 `name == "lower-nn"`。
 - 将支持的 `nn` op lower 为 `kernel/dma` op，输出 Memory 通过 `dma.alloc` 显式创建。
 - 输出 module 不应再包含 `nn` op。
 - 明确 `kernel.binary_elewise` 与 `kernel.reduce` 的公开合同已就绪，并在测试中验证可用性。
-- `lower-nn` 为公开 pass 名称；`lower-nn-to-kernel` 仅用于历史兼容与命名回归测试，不作为 expectation 执行入口。
+- `lower-nn` 为唯一公开 pass 名称，对外不再保留旧名入口。
 
 ## 限制与边界
 
@@ -173,16 +173,12 @@ module_op = ensure_module_op(module)
 
 ## 额外补充
 
-- S2 可改清单（仅收口 element binary / compare / select / cast family）：
-  - `kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py`
-  - `kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py`
-  - `test/pass/nn_lowering/element_binary_*.py`
-  - `test/pass/nn_lowering/element_compare_*.py`
-  - `test/pass/nn_lowering/select.py`
-  - `test/pass/nn_lowering/cast.py`
-  - `test/pass/nn_lowering/public_name.py`
-  - `test/pass/test_lowering_nn_to_kernel.py`
-- expectation 入口：统一使用 `lower-nn` pass；`lower-nn-to-kernel` 仅用于兼容性验证与命名回归测试。
+- 文件职责与 child spec 边界：
+  - `nn_lowering.py`：唯一公开 pass、调度顺序、顶层遍历、错误汇总。
+  - `nn_lowering_utility.py`：公共校验与 helper（module/space/result/operand 等）。
+  - `element_binary_lowering.py`：`nn.add/sub/mul/div/truediv/eq/ne/lt/le/gt/ge` 的 lowering。
+  - `select_cast_lowering.py`：`nn.select` / `nn.cast` 的 lowering。
+  - 对应 child spec：`nn_lowering_utility.md`、`element_binary_lowering.md`、`select_cast_lowering.md`。
 
 ## 测试
 
@@ -194,7 +190,7 @@ module_op = ensure_module_op(module)
   - `pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py`
   - `pytest -q test/pass/nn_lowering`
 - 测试目标：
-  - 验证 `NnLoweringPass` 的公开名字与导出路径稳定。
+  - 验证 `NnLoweringPass` 的公开名字与导出路径稳定（以 `public_name.py` 为稳定入口）。
   - 验证 `NnLoweringError` 与 `NnLoweringPass` 的公共导出可用。
   - 验证 `kernel.binary_elewise` 与 `kernel.reduce` 在 lowering 输出中可解析与可校验。
   - 验证 `nn.exp` -> `kernel.exp` 的 lowering 目标与输出消费链路。

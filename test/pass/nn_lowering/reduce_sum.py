@@ -13,7 +13,7 @@
 关联文件:
 - spec: spec/pass/lowering/nn_lowering.md
 - test: test/pass/nn_lowering/reduce_sum.py
-- 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+- 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
 """
 
 from __future__ import annotations
@@ -178,7 +178,7 @@ def _build_module(input_type: NnMemoryType, result_type: NnMemoryType) -> Module
 # 最近一次运行成功时间: 2026-04-12 08:20:00 +0800
 # 测试目的: 验证 nn.reduce_sum lowering 目标为 kernel.reduce(kind=sum)（静态形态）。
 # 使用示例: pytest -q test/pass/nn_lowering/reduce_sum.py -k test_nn_lowering_reduce_sum_static
-# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
 # 对应测试文件路径: test/pass/nn_lowering/reduce_sum.py
 def test_nn_lowering_reduce_sum_static() -> None:
@@ -192,7 +192,7 @@ def test_nn_lowering_reduce_sum_static() -> None:
 # 最近一次运行成功时间: 2026-04-12 08:20:00 +0800
 # 测试目的: 验证 nn.reduce_sum lowering 目标为 kernel.reduce(kind=sum)（符号维度）。
 # 使用示例: pytest -q test/pass/nn_lowering/reduce_sum.py -k test_nn_lowering_reduce_sum_dynamic
-# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
 # 对应测试文件路径: test/pass/nn_lowering/reduce_sum.py
 def test_nn_lowering_reduce_sum_dynamic() -> None:
@@ -206,7 +206,7 @@ def test_nn_lowering_reduce_sum_dynamic() -> None:
 # 最近一次运行成功时间: 2026-04-12 08:20:00 +0800
 # 测试目的: 验证 nn.reduce_sum 输出形态不一致时必须抛 NnLoweringError。
 # 使用示例: pytest -q test/pass/nn_lowering/reduce_sum.py -k test_nn_lowering_reduce_sum_shape_mismatch
-# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
 # 对应测试文件路径: test/pass/nn_lowering/reduce_sum.py
 def test_nn_lowering_reduce_sum_shape_mismatch() -> None:
