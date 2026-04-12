@@ -1,7 +1,7 @@
 """nn -> kernel lowering pass.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 小李飞刀
 
 功能说明:
 - 将 nn dialect 的逐元素 op lower 为 kernel dialect op。
@@ -474,7 +474,8 @@ def _build_broadcast_alloc_dynamic_shape(
     - 按尾维对齐规则，将 result 的每一维映射回 source 对应维度。
     - 对于可从 source 直接读取的维度（逐维相等），使用 symbol.get_dim 获取实际维度。
     - 对于由 singleton 扩张得到的静态整数维度，使用常量 symbol.int。
-    - 禁止把 singleton 扩张为符号维度，避免引入无法从 source 获得的符号维。
+    - 对于 singleton 扩张为符号维度，仅允许复用 source shape 中已有的符号维度。
+    - 禁止生成无法从 source 获得的符号维，避免引入不一致的 shape 语义。
 
     使用示例:
     - ops, operands = _build_broadcast_alloc_dynamic_shape(op.operands[0], result_type)
@@ -497,6 +498,11 @@ def _build_broadcast_alloc_dynamic_shape(
 
     ops: list[Operation] = []
     operands: list[SSAValue] = []
+    axis_values: dict[int, SSAValue] = {}
+    symbol_source_axes: dict[str, int] = {}
+    for axis, source_dim in enumerate(source_type.shape.data):
+        if isinstance(source_dim, StringAttr) and source_dim.data != "?":
+            symbol_source_axes.setdefault(source_dim.data, axis)
     for result_axis, result_dim in enumerate(result_type.shape.data):
         if isinstance(result_dim, StringAttr) and result_dim.data == "?":
             raise LowerNnToKernelError("nn op result shape must not contain '?'")
@@ -509,19 +515,33 @@ def _build_broadcast_alloc_dynamic_shape(
                 operands.append(value)
                 continue
             if isinstance(result_dim, StringAttr):
-                raise LowerNnToKernelError(
-                    "LowerNnToKernelBroadcastSymbolDimNotFromSource: "
-                    f"nn.broadcast cannot expand implicit singleton dim to symbol dim '{result_dim.data}'"
-                )
+                symbol_axis = symbol_source_axes.get(result_dim.data)
+                if symbol_axis is None:
+                    raise LowerNnToKernelError(
+                        "LowerNnToKernelBroadcastSymbolDimNotFromSource: "
+                        f"nn.broadcast cannot expand implicit singleton dim to symbol dim '{result_dim.data}'"
+                    )
+                dim_value = axis_values.get(symbol_axis)
+                if dim_value is None:
+                    get_dim = SymbolGetDimOp(source, IntAttr(symbol_axis))
+                    ops.append(get_dim)
+                    dim_value = get_dim.result
+                    axis_values[symbol_axis] = dim_value
+                operands.append(dim_value)
+                continue
             raise LowerNnToKernelError("nn op result shape entry must be IntAttr or StringAttr")
 
         source_dim = source_type.shape.data[source_axis]
 
         if isinstance(source_dim, IntAttr) and isinstance(result_dim, IntAttr):
             if source_dim.data == result_dim.data:
-                get_dim = SymbolGetDimOp(source, IntAttr(source_axis))
-                ops.append(get_dim)
-                operands.append(get_dim.result)
+                dim_value = axis_values.get(source_axis)
+                if dim_value is None:
+                    get_dim = SymbolGetDimOp(source, IntAttr(source_axis))
+                    ops.append(get_dim)
+                    dim_value = get_dim.result
+                    axis_values[source_axis] = dim_value
+                operands.append(dim_value)
                 continue
             if source_dim.data == 1:
                 new_ops, value = _const_symbol_value(str(result_dim.data), result_dim.data)
@@ -534,20 +554,93 @@ def _build_broadcast_alloc_dynamic_shape(
             if source_dim.data == "?":
                 raise LowerNnToKernelError("nn.broadcast operand shape must not contain '?'")
             if source_dim.data == result_dim.data:
-                get_dim = SymbolGetDimOp(source, IntAttr(source_axis))
-                ops.append(get_dim)
-                operands.append(get_dim.result)
+                dim_value = axis_values.get(source_axis)
+                if dim_value is None:
+                    get_dim = SymbolGetDimOp(source, IntAttr(source_axis))
+                    ops.append(get_dim)
+                    dim_value = get_dim.result
+                    axis_values[source_axis] = dim_value
+                operands.append(dim_value)
                 continue
             raise LowerNnToKernelError("nn.broadcast result shape is not compatible with operand shape")
 
         if isinstance(source_dim, IntAttr) and source_dim.data == 1 and isinstance(result_dim, StringAttr):
-            raise LowerNnToKernelError(
-                "LowerNnToKernelBroadcastSymbolDimNotFromSource: "
-                f"nn.broadcast cannot expand singleton dim to symbol dim '{result_dim.data}'"
-            )
+            symbol_axis = symbol_source_axes.get(result_dim.data)
+            if symbol_axis is None:
+                raise LowerNnToKernelError(
+                    "LowerNnToKernelBroadcastSymbolDimNotFromSource: "
+                    f"nn.broadcast cannot expand singleton dim to symbol dim '{result_dim.data}'"
+                )
+            dim_value = axis_values.get(symbol_axis)
+            if dim_value is None:
+                get_dim = SymbolGetDimOp(source, IntAttr(symbol_axis))
+                ops.append(get_dim)
+                dim_value = get_dim.result
+                axis_values[symbol_axis] = dim_value
+            operands.append(dim_value)
+            continue
 
         raise LowerNnToKernelError("nn.broadcast result shape is not compatible with operand shape")
 
+    return ops, operands
+
+
+def _build_transpose_alloc_dynamic_shape(
+    source: SSAValue,
+    result_type: NnMemoryType,
+    perm: ArrayAttr,
+) -> tuple[list[Operation], list[SSAValue]]:
+    """构造 nn.transpose 结果 dma.alloc 的 dynamic_shape operands。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 按 perm 顺序从 source 读取维度，保证动态维来自 symbol.get_dim。
+    - 仅接受 source/result rank 一致的 transpose。
+    - 拒绝结果 shape 中的匿名维度 `?`。
+
+    使用示例:
+    - ops, operands = _build_transpose_alloc_dynamic_shape(source, result_type, perm_attr)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering.md
+    - test: test/pass/test_lowering_nn_to_kernel.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    source_type = source.type
+    if not isinstance(source_type, NnMemoryType):
+        raise LowerNnToKernelError("nn.transpose operand must be nn.memory")
+
+    source_rank = len(source_type.shape.data)
+    result_rank = len(result_type.shape.data)
+    if result_rank != source_rank:
+        raise LowerNnToKernelError("nn.transpose result rank must match operand rank")
+
+    perm_values: list[int] = []
+    for entry in perm.data:
+        if isinstance(entry, IntAttr):
+            perm_values.append(entry.data)
+            continue
+        if isinstance(entry, IntegerAttr) and isinstance(entry.value, IntAttr):
+            perm_values.append(entry.value.data)
+            continue
+        raise LowerNnToKernelError("nn.transpose perm must be a permutation of 0..rank-1")
+
+    ops: list[Operation] = []
+    axis_values: dict[int, SSAValue] = {}
+    for source_axis in range(source_rank):
+        get_dim = SymbolGetDimOp(source, IntAttr(source_axis))
+        ops.append(get_dim)
+        axis_values[source_axis] = get_dim.result
+
+    operands: list[SSAValue] = []
+    for result_axis, source_axis in enumerate(perm_values):
+        result_dim = result_type.shape.data[result_axis]
+        if isinstance(result_dim, StringAttr) and result_dim.data == "?":
+            raise LowerNnToKernelError("nn op result shape must not contain '?'")
+        operands.append(axis_values[source_axis])
     return ops, operands
 
 
@@ -780,7 +873,7 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
     """将单个 nn op lower 为 kernel op。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 为结果插入 dma.alloc。
@@ -806,11 +899,13 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
         if not isinstance(source_type, NnMemoryType):
             raise LowerNnToKernelError("nn.transpose operand must be nn.memory")
         perm_attr = _parse_transpose_perm_attr(op.attributes.get("perm"), len(source_type.shape.data))
+        if len(result_type.shape.data) != len(source_type.shape.data):
+            raise LowerNnToKernelError("nn.transpose result rank must match operand rank")
         if _is_static_shape(result_type):
             shape_ops = []
             dynamic_shape = []
         else:
-            shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_result(result_type)
+            shape_ops, dynamic_shape = _build_transpose_alloc_dynamic_shape(source, result_type, perm_attr)
         alloc = DmaAllocOp(dynamic_shape, result_type)
         transpose = DmaTransposeOp(alloc.result, source, perm_attr)
 
@@ -825,7 +920,7 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
         block.erase_op(op)
         return
 
-    if op.name == "nn.broadcast":
+    if op.name in ("nn.broadcast", "nn.broadcast_to"):
         _ensure_operand_count(op, 1)
         result_type = _ensure_single_result(op)
         _ensure_space_attr(op)

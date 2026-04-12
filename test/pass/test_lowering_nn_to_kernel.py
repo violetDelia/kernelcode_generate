@@ -1,7 +1,7 @@
 """nn -> kernel lowering pass tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 朽木露琪亚
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 nn_to_kernel pass 的 lowering 行为与错误路径。
@@ -476,7 +476,7 @@ def _build_module(
     """构造包含单个 func 的 module。
 
     创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
+最后一次更改: 小李飞刀
 
     功能说明:
     - 按顺序插入 ops 并追加 func.return。
@@ -653,6 +653,44 @@ def test_lower_broadcast_rejects_singleton_expand_to_symbol_dim() -> None:
         LowerNnToKernelPass().run(module)
 
 
+# COV-N2K-030
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-12 08:11:20 +0800
+# 最近一次运行成功时间: 2026-04-12 08:11:20 +0800
+# 测试目的: 验证 singleton 扩张到 source 已有符号维时复用 symbol.get_dim。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_broadcast_allows_singleton_expand_to_existing_symbol_dim
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
+def test_lower_broadcast_allows_singleton_expand_to_existing_symbol_dim() -> None:
+    source_type = _make_memory_type(
+        shape=ArrayAttr([IntAttr(1), StringAttr("V")]),
+        stride=ArrayAttr([StringAttr("V"), IntAttr(1)]),
+    )
+    result_type = _make_memory_type(
+        shape=ArrayAttr([StringAttr("V"), StringAttr("V")]),
+        stride=ArrayAttr([StringAttr("V"), IntAttr(1)]),
+    )
+    space = _make_space("global")
+
+    module, block = _build_module(
+        [source_type],
+        result_type,
+        lambda block: [NnBroadcastOp(block.args[0], result_type, space)],
+    )
+    LowerNnToKernelPass().run(module)
+
+    alloc_ops = [op for op in _collect_ops(block) if isinstance(op, DmaAllocOp)]
+    assert len(alloc_ops) == 1
+    alloc_dynamic_shape = alloc_ops[0].dynamic_shape
+    assert len(alloc_dynamic_shape) == 2
+    assert alloc_dynamic_shape[0].type.get_value() == "V"
+    assert alloc_dynamic_shape[1].type.get_value() == "V"
+    assert isinstance(alloc_dynamic_shape[0].owner, SymbolGetDimOp)
+    assert alloc_dynamic_shape[0].owner is alloc_dynamic_shape[1].owner
+
+
 # COV-N2K-029
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
@@ -716,6 +754,44 @@ def test_lower_transpose_to_dma_transpose() -> None:
 
     ops = _collect_ops(block)
     assert any(isinstance(op, DmaTransposeOp) for op in ops)
+
+
+# COV-N2K-029
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-12 07:38:00 +0800
+# 最近一次运行成功时间: 2026-04-12 07:38:00 +0800
+# 测试目的: 验证 nn.transpose 动态维度按 perm 使用 symbol.get_dim 生成 alloc dynamic_shape。
+# 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_transpose_dynamic_shape_follows_perm
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应测试文件路径: test/pass/test_lowering_nn_to_kernel.py
+def test_lower_transpose_dynamic_shape_follows_perm() -> None:
+    source_type = _make_memory_type(
+        shape=ArrayAttr([StringAttr("M"), StringAttr("N")]),
+        stride=ArrayAttr([StringAttr("N"), IntAttr(1)]),
+    )
+    result_type = _make_memory_type(
+        shape=ArrayAttr([StringAttr("N"), StringAttr("M")]),
+        stride=ArrayAttr([IntAttr(1), StringAttr("N")]),
+    )
+    space = _make_space("global")
+
+    module, block = _build_module(
+        [source_type],
+        result_type,
+        lambda block: [NnTransposeOp(block.args[0], result_type, perm=[1, 0], space=space)],
+    )
+    LowerNnToKernelPass().run(module)
+
+    alloc_ops = [op for op in _collect_ops(block) if isinstance(op, DmaAllocOp)]
+    assert len(alloc_ops) == 1
+    alloc_dynamic_shape = alloc_ops[0].dynamic_shape
+    assert len(alloc_dynamic_shape) == 2
+    assert alloc_dynamic_shape[0].type.get_value() == "N"
+    assert alloc_dynamic_shape[1].type.get_value() == "M"
+    assert isinstance(alloc_dynamic_shape[0].owner, SymbolGetDimOp)
+    assert isinstance(alloc_dynamic_shape[1].owner, SymbolGetDimOp)
 # COV-N2K-026
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀

@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/pass/lowering/nn_lowering.md`](../../../spec/pass/lowering/nn_lowering.md)
 - `功能实现`：[`kernel_gen/passes/lowering/nn_lowering/nn_lowering.py`](../../../kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
 - `test`：
@@ -36,14 +36,19 @@
 
 - 仅支持以下 `nn` op 的 lowering：
   - 逐元素：`nn.add`/`nn.sub`/`nn.mul`/`nn.div`/`nn.truediv`、`nn.eq`/`nn.ne`/`nn.lt`/`nn.le`/`nn.gt`/`nn.ge`、`nn.select`、`nn.cast`
-  - 结构化：`nn.broadcast`、`nn.transpose`、`nn.exp`、`nn.softmax`、`nn.reduce_sum`/`nn.reduce_min`/`nn.reduce_max`、`nn.matmul`、`nn.img2col1d`/`nn.img2col2d`
+  - 结构化：`nn.broadcast`、`nn.broadcast_to`、`nn.transpose`、`nn.exp`、`nn.softmax`、`nn.reduce_sum`/`nn.reduce_min`/`nn.reduce_max`、`nn.matmul`、`nn.img2col1d`/`nn.img2col2d`
 - `nn.truediv` 与 `nn.div` 在 pass 层统一 lower 为 `kernel.binary_elewise(kind="div")`。
-- `nn.broadcast` / `nn.transpose` 必须 lower 为 `dma.broadcast` / `dma.transpose`。
+- `nn.broadcast` / `nn.broadcast_to` 必须 lower 为 `dma.broadcast`。
+- `nn.transpose` 必须 lower 为 `dma.transpose`。
 - `nn.exp` / `nn.softmax` / `nn.reduce_*` / `nn.matmul` / `nn.img2col*` 必须 lower 为具名 `kernel.*` op。
 - `nn` 结果 Memory 必须通过 `dma.alloc` 显式创建；不允许隐式分配或省略输出写入。
-- 动态符号维的 broadcast 约束：
-  - `result.shape` 中的每个符号维必须能在 `input.shape` 中找到同名维度。
+- broadcast / broadcast_to 的动态符号维约束：
+  - `result.shape` 中的每个符号维必须能在 `input.shape` 中找到同名维度，或来自显式 `symbol.get_dim` 的结果。
   - 不支持把 singleton 维扩张为“新引入的符号维”；违反时必须报错，错误信息必须包含关键短语 `LowerNnToKernelBroadcastSymbolDimNotFromSource`。
+  - `dma.alloc` 的动态维顺序必须与结果类型一致，并复用 `input.shape` 对应的符号维或 `symbol.get_dim` 结果。
+- transpose 的动态维约束：
+  - `dma.alloc` 的动态维顺序必须与结果类型一致，并按 `perm` 顺序从输入维度取值。
+  - `perm` 必须覆盖输入 rank 且与输出 rank 一致；不一致时必须报错。
 - mixed compare 的桥接规则：
   - `memory + memory` compare：直接 lower 为 `kernel` 比较类 op，且 `shape/stride/space/element_type` 必须一致。
   - `memory + symbol/const` compare：必须先用 `dma.alloc + dma.broadcast` 物化为 temporary memory，再进行 compare；禁止 `kernel` 比较 op 直接接收非 memory operand。
