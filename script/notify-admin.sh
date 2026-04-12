@@ -54,7 +54,7 @@ EOF
 
 # busy 执行人提醒消息（后发送；同一轮会逐一发送）。
 read -r -d '' BUSY_MESSAGE <<'EOF' || true
-继续当前任务，完成后使用 -next 并回报管理员。
+查看TODO.md, 继续你的任务，完成后使用 -next 并回报管理员,有任何阻塞/疑问再次回报管理/架构师，请求对方回复。
 EOF
 
 MODE="loop"
