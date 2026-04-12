@@ -560,3 +560,43 @@ def test_run_ircheck_text_multi_pass_sequence() -> None:
     assert result.ok is True
     assert result.exit_code == 0
     assert executed == ["pass-a", "pass-b", "pass-c"]
+
+
+# TC-IRCHECK-RUN-025
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-13 06:30:00 +0800
+# 最近一次运行成功时间: 2026-04-13 06:30:00 +0800
+# 功能说明: 验证多 step 失败时 message 标明失败 step，actual_ir 返回失败前一刻 IR。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_failing_step_reports_actual_ir
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+def test_run_ircheck_text_failing_step_reports_actual_ir() -> None:
+    @register_pass
+    class FailingPass(Pass):
+        name = "failing-pass"
+
+        def run(self, target: object) -> object:
+            raise RuntimeError("boom from failing-pass")
+
+    text = """// COMPILE_ARGS: --pass no-op --pass failing-pass --pass no-op
+// CHECK: builtin.module
+
+builtin.module {
+  func.func @main() {
+    %0 = arith.constant 1 : i32
+    func.return
+  }
+}
+"""
+    result = run_ircheck_text(text, source_path="inline.ircheck")
+    assert result.ok is False
+    assert result.exit_code == 2
+    assert result.message is not None
+    assert result.message.startswith(
+        "IrcheckRunError: pass execution failed at step 2 (pass failing-pass)"
+    )
+    assert "builtin.module" in result.actual_ir
+    assert "arith.constant 1 : i32" in result.actual_ir
+    assert result.failed_check is None

@@ -51,6 +51,7 @@
 - `expectation/tools/ircheck/basic_true.py`：验证 `run_ircheck_text(...)` 成功路径返回 `ok=True`。
 - `expectation/tools/ircheck/basic_false.py`：验证 `run_ircheck_text(...)` 返回 `ok=False` 且错误短语稳定。
 - `expectation/tools/ircheck/check_next_false.py`：验证相邻行匹配失败时返回稳定错误短语。
+- `expectation/tools/ircheck/multi_pass_fail.py`：验证失败 step 的定位信息与 `actual_ir` 语义。
 - `expectation/tools/ircheck/README.md`：样例入口与迁移写法，强调三条公开 API 为稳定合同。
 
 ## 迁移建议
@@ -70,6 +71,7 @@
   - `--pipeline "<pipeline-name>{k=v}"`
   - `--pipeline "<pipeline-name>{k1=v1,k2=v2}"`
 - 当 `compile args` 中包含 `{` / `}` 时，必须使用单引号或双引号包住整个 `<name>{k=v}`；未加引号视为不支持的写法。
+- 单个 case 内任一步执行失败必须立即停止，后续 step 不再执行。
 - 选项块语法为 `name={k=v[,k=v]}`：
   - `k` 与 `v` 去掉首尾空白后都不得为空；
   - `k` 不可重复；
@@ -207,7 +209,11 @@ assert result.ok is True
   - `IrcheckMatchError: CHECK not found`
   - `IrcheckMatchError: CHECK-NEXT not found on next line`
   - `IrcheckMatchError: CHECK-NOT matched forbidden text`
- - 若多 step 执行中途失败，`message` 必须包含失败 step 序号/类型/名字；`actual_ir` 返回失败前一刻的 IR。
+- 若多 step 执行中途失败：
+  - `message` 必须包含失败 step 序号（从 1 开始）、step 类型（pass/pipeline）与 step 名字（不含选项块）。
+  - `actual_ir` 必须返回失败前一刻的规范化 IR：
+    - step 1 失败时返回输入 IR 的规范化文本；
+    - step N 失败时返回第 N-1 步执行后的规范化 IR。
 
 ### `run_ircheck_text(text: str, source_path: str | None = None) -> IrcheckResult`
 
@@ -283,6 +289,7 @@ assert result.exit_code == 0
 
 - `failed_check` 仅在匹配失败时必须给出；其他失败类型可为 `None`。
 - `message` 的前缀必须使用本文件列出的错误短语之一。
+- `actual_ir` 在解析失败时允许为空；执行失败时按 “run_ircheck_file” 的 step 失败规则返回失败前一刻的 IR。
 
 返回与限制：
 
@@ -400,4 +407,5 @@ builtin.module { /* ... */ }
 - 测试目标：
   - parser：能稳定解析头部注释区、提取 compile_args 与检查指令，并对缺失/重复指令返回稳定错误短语；`parse_ircheck_file` 对多 case 分隔符稳定拒绝。
   - runner：能通过 pass registry 解析 `--pass/--pipeline` 与其 options 形式并执行，输出 `IrcheckResult` 的 `ok/exit_code/message` 行为与本文件一致；支持多 case 顺序执行与 fail-fast。
+  - runner：多 step 失败时必须返回 step 序号/类型/名字，并按失败前一刻 IR 填充 `actual_ir`；覆盖 `expectation/tools/ircheck/multi_pass_fail.py` 与 `test/tools/test_ircheck_runner.py` 对应用例。
   - matcher：能按本文件“检查语义”规则稳定处理 `CHECK/CHECK-NEXT/CHECK-NOT` 的顺序、相邻与区间约束，并在失败时返回稳定错误短语。
