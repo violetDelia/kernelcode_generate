@@ -5,12 +5,12 @@
 
 功能说明:
 - 统一 nn element binary/compare 的 lowering 目标为 kernel.binary_elewise(kind=...)。
-- mixed compare 先通过 dma.alloc + dma.broadcast 物化标量 operand。
+- mixed element binary/compare 先通过 dma.alloc + dma.broadcast 物化标量 operand。
 - 输出 memory 通过 dma.alloc 显式创建。
 
 使用示例:
-- from kernel_gen.passes.lowering.nn_lowering.element_binary_lowering import LowerNnElementBinaryPass
-- module = LowerNnElementBinaryPass().run(module)
+- from kernel_gen.passes.lowering.nn_lowering.element_binary_lowering import lower_element_binary_family
+- lower_element_binary_family(block, op)
 
 关联文件:
 - spec: spec/pass/lowering/nn_lowering.md
@@ -20,7 +20,6 @@
 
 from __future__ import annotations
 
-from xdsl.dialects import func
 from xdsl.dialects.builtin import IntAttr, StringAttr
 from xdsl.ir import Block, Operation, SSAValue
 from xdsl.utils.exceptions import VerifyException
@@ -29,10 +28,8 @@ from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolGetDimOp
-from kernel_gen.passes.pass_manager import Pass
 from .nn_lowering_utility import (
     NnLoweringError,
-    ensure_module_op,
     ensure_operand_count,
     ensure_single_result,
     ensure_space_attr,
@@ -122,11 +119,11 @@ def _build_alloc_dynamic_shape_from_source(
     return ops, operands
 
 
-def _materialize_compare_operand(
+def _materialize_scalar_operand(
     scalar: SSAValue,
     source: SSAValue,
 ) -> tuple[list[Operation], SSAValue]:
-    """把 compare 的标量 operand 物化为 memory。
+    """把标量 operand 物化为 memory。
 
     创建者: 小李飞刀
     最后一次更改: 小李飞刀
@@ -136,7 +133,7 @@ def _materialize_compare_operand(
     - 通过 dma.broadcast 写入标量值。
 
     使用示例:
-    - ops, value = _materialize_compare_operand(scalar, source)
+    - ops, value = _materialize_scalar_operand(scalar, source)
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering.md
@@ -161,7 +158,7 @@ def _lower_element_binary_op(op: Operation, block: Block) -> None:
 
     功能说明:
     - 统一转换为 kernel.binary_elewise(kind=...)。
-    - compare mixed operand 先 dma.broadcast 物化标量。
+    - mixed element binary/compare operand 先 dma.broadcast 物化标量。
 
     使用示例:
     - _lower_element_binary_op(op, block)
@@ -189,14 +186,20 @@ def _lower_element_binary_op(op: Operation, block: Block) -> None:
         if lhs_is_memory and rhs_is_memory:
             pass
         elif lhs_is_memory and not rhs_is_memory:
-            extra_ops, rhs_value = _materialize_compare_operand(rhs_value, lhs_value)
+            extra_ops, rhs_value = _materialize_scalar_operand(rhs_value, lhs_value)
         elif rhs_is_memory and not lhs_is_memory:
-            extra_ops, lhs_value = _materialize_compare_operand(lhs_value, rhs_value)
+            extra_ops, lhs_value = _materialize_scalar_operand(lhs_value, rhs_value)
         else:
             raise NnLoweringError("nn compare must provide at least one nn.memory operand")
     else:
-        if not lhs_is_memory or not rhs_is_memory:
-            raise NnLoweringError("nn element binary requires nn.memory operands")
+        if lhs_is_memory and rhs_is_memory:
+            pass
+        elif lhs_is_memory and not rhs_is_memory:
+            extra_ops, rhs_value = _materialize_scalar_operand(rhs_value, lhs_value)
+        elif rhs_is_memory and not lhs_is_memory:
+            extra_ops, lhs_value = _materialize_scalar_operand(lhs_value, rhs_value)
+        else:
+            raise NnLoweringError("nn element binary must provide at least one nn.memory operand")
 
     shape_source = _select_memory_operand(op)
     shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_source(shape_source, result_type)
@@ -226,17 +229,18 @@ def _lower_element_binary_op(op: Operation, block: Block) -> None:
     block.erase_op(op)
 
 
-def _lower_block(block: Block) -> None:
-    """遍历 block 执行 element binary/compare lowering。
+def lower_element_binary_family(block: Block, op: Operation) -> bool:
+    """执行 element binary/compare family lowering。
 
     创建者: 小李飞刀
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 按顺序处理 block 内的 nn element binary/compare op。
+    - 仅处理 element binary/compare family op。
+    - 成功处理返回 True；非本 family op 返回 False。
 
     使用示例:
-    - _lower_block(block)
+    - handled = lower_element_binary_family(block, op)
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering.md
@@ -244,56 +248,10 @@ def _lower_block(block: Block) -> None:
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
     """
 
-    for op in list(block.ops):
-        if op.name.startswith("nn."):
-            _lower_element_binary_op(op, block)
+    if op.name not in _ELEMENT_BINARY_KINDS and op.name not in _COMPARE_KINDS:
+        return False
+    _lower_element_binary_op(op, block)
+    return True
 
 
-class LowerNnElementBinaryPass(Pass):
-    """element binary/compare lowering pass。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 对 module 中的 element binary/compare 执行 lowering。
-    - 仅处理 func.func 内的 op。
-
-    使用示例:
-    - module = LowerNnElementBinaryPass().run(module)
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
-    - test: test/pass/nn_lowering/element_binary_add.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
-    """
-
-    name = "lower-nn-element-binary"
-
-    def run(self: "LowerNnElementBinaryPass", module: Operation) -> Operation:
-        """执行 element binary/compare lowering。
-
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
-
-        功能说明:
-        - 校验 module 类型并遍历 func.func。
-
-        使用示例:
-        - LowerNnElementBinaryPass().run(module)
-
-        关联文件:
-        - spec: spec/pass/lowering/nn_lowering.md
-        - test: test/pass/nn_lowering/element_binary_add.py
-        - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
-        """
-
-        module_op = ensure_module_op(module)
-        for op in module_op.ops:
-            if isinstance(op, func.FuncOp):
-                for block in op.body.blocks:
-                    _lower_block(block)
-        return module_op
-
-
-__all__ = ["LowerNnElementBinaryPass"]
+__all__ = ["lower_element_binary_family"]

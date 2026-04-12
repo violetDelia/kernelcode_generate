@@ -32,7 +32,9 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.dialect.dma import DmaAllocOp
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnGeOp, NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.passes.lowering.nn_lowering.element_binary_lowering import LowerNnElementBinaryPass
+from kernel_gen.passes.lowering.nn_lowering.element_binary_lowering import (
+    lower_element_binary_family,
+)
 
 
 def _make_memory_type(element_type: Attribute = i32) -> NnMemoryType:
@@ -114,7 +116,8 @@ def test_lower_ge_to_kernel_binary_elewise() -> None:
         result_type,
         lambda block: [NnGeOp(block.args[0], block.args[1], result_type, space)],
     )
-    LowerNnElementBinaryPass().run(module)
+    for op in list(block.ops):
+        lower_element_binary_family(block, op)
 
     ops = list(block.ops)
     kernel_ops = [op for op in ops if isinstance(op, KernelBinaryElewiseOp)]

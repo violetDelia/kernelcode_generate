@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from xdsl.dialects import arith, func
+from xdsl.dialects import func
 from xdsl.dialects.builtin import (
     ArrayAttr,
     IntAttr,
@@ -38,7 +38,6 @@ from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCopyOp, DmaFillOp, DmaTransposeOp
 from kernel_gen.dialect.kernel import (
-    KernelBinaryElewiseOp,
     KernelCastOp,
     KernelExpOp,
     KernelImg2col1dOp,
@@ -71,20 +70,6 @@ class NnLoweringError(ValueError):
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
 
-
-_SUPPORTED_BINARY = {
-    "nn.add": "add",
-    "nn.sub": "sub",
-    "nn.mul": "mul",
-    "nn.div": "div",
-    "nn.truediv": "div",
-    "nn.eq": "eq",
-    "nn.ne": "ne",
-    "nn.lt": "lt",
-    "nn.le": "le",
-    "nn.gt": "gt",
-    "nn.ge": "ge",
-}
 
 _RESULT_TYPED_ALLOC_OPS = {"nn.img2col1d", "nn.img2col2d"}
 
@@ -549,115 +534,6 @@ def _ensure_matmul_stride(mem_type: NnMemoryType) -> None:
     expected_stride1 = 1
     if stride[0].data != expected_stride0 or stride[1].data != expected_stride1:
         raise NnLoweringError("matmul stride must be contiguous")
-
-
-def _materialize_fill(
-    block: Block,
-    value: SSAValue,
-    result_type: NnMemoryType,
-    space: NnMemorySpaceAttr,
-) -> SSAValue:
-    """将标量填充为 nn.memory。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 插入 dma.alloc 与 dma.fill，将标量扩展为 memory。
-
-    使用示例:
-    - filled = _materialize_fill(block, scalar, result_type, space)
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-    """
-
-    alloc = DmaAllocOp([], result_type)
-    block.add_op(alloc)
-    fill = DmaFillOp(alloc, value)
-    block.add_op(fill)
-    return alloc.results[0]
-
-
-def _materialize_fill_for_mixed(
-    block: Block,
-    op: Operation,
-    lhs: SSAValue,
-    rhs: SSAValue,
-    result_type: NnMemoryType,
-) -> tuple[SSAValue, SSAValue]:
-    """处理 mixed symbol/nn.memory binary op。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 当只有一个 operand 为 nn.memory 时，将另一个标量填充为 memory。
-
-    使用示例:
-    - lhs, rhs = _materialize_fill_for_mixed(block, op, lhs, rhs, result_type)
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-    """
-
-    space = _ensure_space_attr(op)
-    if isinstance(lhs.type, NnMemoryType) and not isinstance(rhs.type, NnMemoryType):
-        rhs = _materialize_fill(block, rhs, result_type, space)
-    elif isinstance(rhs.type, NnMemoryType) and not isinstance(lhs.type, NnMemoryType):
-        lhs = _materialize_fill(block, lhs, result_type, space)
-    return lhs, rhs
-
-
-def _lower_binary(block: Block, op: Operation) -> None:
-    """lower binary ops。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 支持 element binary 与 compare family。
-    - 统一生成 kernel.binary_elewise op。
-
-    使用示例:
-    - _lower_binary(block, op)
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-    """
-
-    space = _ensure_space_attr(op)
-    result_type = _ensure_single_result(op)
-    _ensure_operand_count(op, 2)
-    lhs, rhs = op.operands
-
-    if isinstance(lhs.type, NnMemoryType) and isinstance(rhs.type, NnMemoryType):
-        lhs_type = lhs.type
-        rhs_type = rhs.type
-        if lhs_type.shape != rhs_type.shape:
-            raise NnLoweringError("nn op operands must have the same shape")
-        alloc = DmaAllocOp([], result_type)
-        block.insert_op_before(alloc, op)
-        result = alloc.results[0]
-    elif isinstance(lhs.type, NnMemoryType) or isinstance(rhs.type, NnMemoryType):
-        result = DmaAllocOp([], result_type)
-        block.insert_op_before(result, op)
-        result = result.results[0]
-        lhs, rhs = _materialize_fill_for_mixed(block, op, lhs, rhs, result_type)
-    else:
-        raise NnLoweringError("nn op must provide at least one nn.memory operand")
-
-    kind = _SUPPORTED_BINARY[op.name]
-    lowered = KernelBinaryElewiseOp(lhs, rhs, result, kind=kind, space=space)
-    block.insert_op_before(lowered, op)
-    op.results[0].replace_by(result)
-    block.erase_op(op)
 
 
 def _lower_select(block: Block, op: Operation) -> None:
@@ -1170,8 +1046,9 @@ def _lower_op(block: Block, op: Operation) -> None:
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
 
-    if op.name in _SUPPORTED_BINARY:
-        _lower_binary(block, op)
+    from .element_binary_lowering import lower_element_binary_family
+
+    if lower_element_binary_family(block, op):
         return
     if op.name == "nn.select":
         _lower_select(block, op)
