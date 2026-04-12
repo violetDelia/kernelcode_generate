@@ -57,9 +57,10 @@ module = pm.run(module)
 注意事项：
 
 - pipeline 名称为 `default-lowering`。
+- `lower-nn-to-kernel` 为历史兼容名称；默认 pipeline 使用 `LowerNnToKernelPass` 实例，命名说明以 nn_lowering 规范为准。
 - pass 顺序必须为：
   1. `DecompassPass`
-  2. `NnLoweringPass`
+  2. `LowerNnToKernelPass`
   3. `BufferResultsToOutParamsPass`
   4. `LowerDmaMemoryHierarchyPass`
 

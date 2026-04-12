@@ -47,7 +47,7 @@ def test_nn_lowering_pass_public_name() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-12 17:40:00 +0800
 # 最近一次运行成功时间: 2026-04-12 17:40:00 +0800
-# 测试目的: 验证 nn_lowering 公共导出只保留唯一入口与错误类型。
+# 测试目的: 验证 nn_lowering 公开导出以 NnLoweringPass 为主，兼容入口不进入 __all__。
 # 使用示例: pytest -q test/pass/nn_lowering/public_name.py -k test_nn_lowering_pass_public_exports
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/__init__.py
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
@@ -56,4 +56,5 @@ def test_nn_lowering_pass_public_exports() -> None:
     assert NnLoweringPass is not None
     assert NnLoweringError is not None
     assert "LowerNnToKernelPass" not in getattr(lowering_pkg, "__all__", [])
-    assert not hasattr(lowering_pkg, "LowerNnToKernelPass")
+    assert hasattr(lowering_pkg, "LowerNnToKernelPass")
+    assert lowering_pkg.LowerNnToKernelPass().name == "lower-nn-to-kernel"

@@ -10,7 +10,7 @@
 - pytest -q test/pass/test_decompose_nn_softmax.py
 
 关联文件:
-- 功能实现: kernel_gen/passes/lowering/decompose_nn_softmax.py
+- 功能实现: kernel_gen/passes/lowering/decompass.py
 - Spec 文档: spec/pass/lowering/decompass.md
 - 测试文件: test/pass/test_decompose_nn_softmax.py
 """
@@ -40,7 +40,7 @@ from kernel_gen.dialect.nn import (
     NnSubOp,
     NnTrueDivOp,
 )
-import kernel_gen.passes.lowering.decompose_nn_softmax as decompass_impl
+import kernel_gen.passes.lowering.decompass as decompass_impl
 from kernel_gen.passes.lowering.decompass import (
     DecompassError,
     DecompassPass,
@@ -141,7 +141,7 @@ def _make_exp_module(input_type: NnMemoryType) -> tuple[ModuleOp, func.FuncOp]:
 # 功能说明: 验证 decompass 会把 nn.softmax 固定改写为 7 段链。
 # 测试目的: 锁定 reduce_max -> broadcast -> sub -> exp -> reduce_sum -> broadcast -> truediv 的顺序与结果替换合同。
 # 使用示例: pytest -q test/pass/test_decompose_nn_softmax.py -k test_decompose_softmax_into_fixed_nn_chain
-# 对应功能实现文件路径: kernel_gen/passes/lowering/decompose_nn_softmax.py
+# 对应功能实现文件路径: kernel_gen/passes/lowering/decompass.py
 # 对应 spec 文件路径: spec/pass/lowering/decompass.md
 # 对应测试文件路径: test/pass/test_decompose_nn_softmax.py
 def test_decompose_softmax_into_fixed_nn_chain() -> None:
@@ -192,7 +192,7 @@ def test_decompose_softmax_into_fixed_nn_chain() -> None:
 # 功能说明: 验证负轴会在 pass 内规整为非负下标。
 # 测试目的: 锁定 axis=-1 在 rank=3 时会落到 axes=[2]。
 # 使用示例: pytest -q test/pass/test_decompose_nn_softmax.py -k test_decompose_softmax_normalizes_negative_axis
-# 对应功能实现文件路径: kernel_gen/passes/lowering/decompose_nn_softmax.py
+# 对应功能实现文件路径: kernel_gen/passes/lowering/decompass.py
 # 对应 spec 文件路径: spec/pass/lowering/decompass.md
 # 对应测试文件路径: test/pass/test_decompose_nn_softmax.py
 def test_decompose_softmax_normalizes_negative_axis() -> None:
@@ -218,7 +218,7 @@ def test_decompose_softmax_normalizes_negative_axis() -> None:
 # 功能说明: 验证规整后的 axis 越界时会返回固定短语。
 # 测试目的: 锁定 pass 不依赖方言 verifier 的通用错误，而是显式给出 normalized axis out of range。
 # 使用示例: pytest -q test/pass/test_decompose_nn_softmax.py -k test_decompose_softmax_rejects_normalized_axis_out_of_range
-# 对应功能实现文件路径: kernel_gen/passes/lowering/decompose_nn_softmax.py
+# 对应功能实现文件路径: kernel_gen/passes/lowering/decompass.py
 # 对应 spec 文件路径: spec/pass/lowering/decompass.md
 # 对应测试文件路径: test/pass/test_decompose_nn_softmax.py
 def test_decompose_softmax_rejects_normalized_axis_out_of_range() -> None:
@@ -240,7 +240,7 @@ def test_decompose_softmax_rejects_normalized_axis_out_of_range() -> None:
 # 功能说明: 验证 softmax 结果 shape/stride 与输入不一致时显式失败。
 # 测试目的: 锁定 pass 在 malformed softmax 上给出固定失败短语，避免产生半合法分解链。
 # 使用示例: pytest -q test/pass/test_decompose_nn_softmax.py -k test_decompose_softmax_rejects_result_type_mismatch
-# 对应功能实现文件路径: kernel_gen/passes/lowering/decompose_nn_softmax.py
+# 对应功能实现文件路径: kernel_gen/passes/lowering/decompass.py
 # 对应 spec 文件路径: spec/pass/lowering/decompass.md
 # 对应测试文件路径: test/pass/test_decompose_nn_softmax.py
 def test_decompose_softmax_rejects_result_type_mismatch() -> None:

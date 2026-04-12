@@ -11,7 +11,7 @@
 - 创建者：`小李飞刀`
 - 最后一次更改：`小李飞刀`
 - `spec`：[`spec/pass/lowering/decompass.md`](../../../spec/pass/lowering/decompass.md)
-- `功能实现`：[`kernel_gen/passes/lowering/decompose_nn_softmax.py`](../../../kernel_gen/passes/lowering/decompose_nn_softmax.py)
+- `功能实现`：[`kernel_gen/passes/lowering/decompass.py`](../../../kernel_gen/passes/lowering/decompass.py)
 - `test`：[`test/pass/test_decompose_nn_softmax.py`](../../../test/pass/test_decompose_nn_softmax.py)
 
 ## 依赖
