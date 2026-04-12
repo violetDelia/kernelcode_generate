@@ -11,8 +11,8 @@
 - 创建者：`规格小队`
 - 最后一次更改：`小李飞刀`
 - `spec`：[`spec/dsl/ast_visitor.md`](../../spec/dsl/ast_visitor.md)
-- `功能实现`：[`kernel_gen/dsl/ast_visitor.py`](../../kernel_gen/dsl/ast_visitor.py)
-- `test`：[`test/dsl/test_emit_mlir.py`](../../test/dsl/test_emit_mlir.py)
+- `功能实现`：[`kernel_gen/dsl/ast/visitor.py`](../../kernel_gen/dsl/ast/visitor.py)
+- `test`：[`test/dsl/ast/test_visitor.py`](../../test/dsl/ast/test_visitor.py)
 
 ## 依赖
 
@@ -148,6 +148,32 @@ visitor.visit_stmt(stmt_ast, ctx)
 
 - 语句节点通常不返回值。
 
+### `AstVisitor.visit(node, ctx)`
+
+功能说明：
+
+- 根据已注册的节点类型分发到对应的 visit 方法。
+
+参数说明：
+
+- `node` (`object`)：任意 AST 节点。
+- `ctx` (`EmitContext`)：发射上下文。
+
+使用示例：
+
+```python
+visitor = AstVisitor()
+result = visitor.visit(func_ast.body, ctx)
+```
+
+注意事项：
+
+- 未注册节点必须抛出 `AstVisitorError`。
+
+返回与限制：
+
+- 返回已注册 visit 方法的返回值。
+
 ### `AstVisitor.visit_expr(expr, ctx)`
 
 功能说明：
@@ -198,15 +224,14 @@ raise AstVisitorError("Unsupported node", location)
 
 ## 测试
 
-- 测试文件：[`test/dsl/test_emit_mlir.py`](../../test/dsl/test_emit_mlir.py)
-- 集成测试文件：[`test/dsl/test_mlir_gen.py`](../../test/dsl/test_mlir_gen.py)
-- 执行命令（visitor/emit 单测）：`pytest -q test/dsl/test_emit_mlir.py`
-- 执行命令（端到端集成）：`pytest -q test/dsl/test_mlir_gen.py`
-- 拆分归属：访问顺序、表达式缓存复用与 visitor 异常传播归属 `test_emit_mlir.py`；依赖 `build_func_op(...)` 的端到端回归归属 `test_mlir_gen.py`。
+- 测试文件：[`test/dsl/ast/test_visitor.py`](../../test/dsl/ast/test_visitor.py)
+- 执行命令（visitor 单测）：`pytest -q test/dsl/ast/test_visitor.py`
+- 覆盖率命令：`pytest -q --cov=kernel_gen.dsl.ast.visitor --cov-branch --cov-report=term-missing test/dsl/ast/test_visitor.py`
 - 测试目标：
-  - 覆盖遍历顺序与节点分发。
-  - 覆盖变量绑定复用与错误传播。
+  - 覆盖语句块遍历与异常提示。
+  - 覆盖已注册节点分发与未注册节点报错。
 - 功能与用例清单：
-  - AV-001：遍历函数体并生成稳定顺序。（`test_ast_visitor_visit_block_preserves_order`）
-  - AV-002：同一表达式复用同一 value。（`test_ast_visitor_reuses_expression_value`）
-  - AV-003：不支持语句/表达式时抛出 `AstVisitorError`。（`test_lowering_failure_reports_diagnostics`）
+  - AV-001：空 BlockAST 遍历返回 None。（`test_ast_visitor_empty_block_returns_none`）
+  - AV-002：未知 BlockAST 抛 `AstVisitorError`。（`test_ast_visitor_rejects_unknown_block`）
+  - AV-003：已注册节点正确分发。（`test_ast_visitor_dispatches_registered_node`）
+  - AV-004：未注册节点抛 `AstVisitorError`。（`test_ast_visitor_rejects_unregistered_node`）

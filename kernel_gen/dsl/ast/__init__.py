@@ -1,11 +1,11 @@
-"""DSL AST facade.
+"""DSL AST package facade.
 
 创建者: 小李飞刀
-最后一次更改: 朽木露琪亚
+最后一次更改: 小李飞刀
 
 功能说明:
-- 提供 facade 导入路径，聚合 AST 节点与解析入口。
-- 保持 `kernel_gen.dsl.ast` 的历史导入方式不变。
+- 聚合 AST 节点与解析入口，提供稳定的 `kernel_gen.dsl.ast` 导入路径。
+- 只做导出，不在本文件内实现节点定义或解析逻辑。
 
 使用示例:
 - from kernel_gen.dsl.ast import FunctionAST, parse_function
@@ -13,13 +13,13 @@
 
 关联文件:
 - spec: spec/dsl/ast.md
-- test: test/dsl/test_ast.py
-- 功能实现: kernel_gen/dsl/ast.py
+- test: test/dsl/ast/test_parser.py
+- 功能实现: kernel_gen/dsl/ast/__init__.py
 """
 
 from __future__ import annotations
 
-from .ast_nodes import (
+from .nodes import (
     ArchBarrierAST,
     ArchGetDynamicMemoryAST,
     ArchLaunchKernelAST,
@@ -60,7 +60,7 @@ from .ast_nodes import (
     TensorAxisAccessAST,
     VarAST,
 )
-from .ast_parser import AstParseError, _ParseFailure, _parse_function_impl, parse_function
+from .parser import AstParseError, _ParseFailure, _parse_function_impl, parse_function
 
 __all__ = [
     "ArchBarrierAST",

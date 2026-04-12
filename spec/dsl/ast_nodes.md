@@ -8,9 +8,9 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/dsl/ast_nodes.md`](../../spec/dsl/ast_nodes.md)
-- `功能实现`：[`kernel_gen/dsl/ast_nodes.py`](../../kernel_gen/dsl/ast_nodes.py)
+- `功能实现`：[`kernel_gen/dsl/ast/nodes.py`](../../kernel_gen/dsl/ast/nodes.py)
 - `test`：[`test/dsl/test_ast_nodes.py`](../../test/dsl/test_ast_nodes.py)
 
 ## 依赖

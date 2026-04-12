@@ -10,10 +10,10 @@
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/dsl/ast.md`](../../spec/dsl/ast.md)
-- `功能实现`：[`kernel_gen/dsl/ast.py`](../../kernel_gen/dsl/ast.py)
-- `test`：[`test/dsl/test_ast.py`](../../test/dsl/test_ast.py)
+- `功能实现`：[`kernel_gen/dsl/ast/__init__.py`](../../kernel_gen/dsl/ast/__init__.py)
+- `test`：[`test/dsl/ast/test_parser.py`](../../test/dsl/ast/test_parser.py)
 
 ## 依赖
 
@@ -40,7 +40,7 @@
 - 只覆盖 AST 与解析入口，不负责 MLIR 生成与输出。
 - 只支持受限语法子集，具体范围以测试清单为准。
 - 不做优化、融合或后端相关行为。
-- `kernel_gen/dsl/ast.py` 可仅承担 facade 与 re-export；节点定义与解析实现分别归属 `kernel_gen/dsl/ast_nodes.py` 与 `kernel_gen/dsl/ast_parser.py`，对外导入路径仍为 `kernel_gen.dsl.ast`。
+- `kernel_gen/dsl/ast/__init__.py` 仅承担 facade 与 re-export；节点定义与解析实现分别归属 `kernel_gen/dsl/ast/nodes.py` 与 `kernel_gen/dsl/ast/parser.py`，对外导入路径仍为 `kernel_gen.dsl.ast`。
 - [immutable]只提供ast节点定义以及将函数翻译为ast树的能力。
 - AST 节点仅表达前端语义，不携带 `target` 或 `hardware` 字段；`target` 为目标后端名称，`hardware` 为硬件参数表（字段范围见 [`spec/target/registry.md`](../../spec/target/registry.md)）。
 - target/硬件相关信息仅允许在后续 lowering 或 emit 阶段通过上下文注入，AST 不解析也不回写这些字段。
@@ -76,7 +76,7 @@ from kernel_gen.dsl.ast import FunctionAST, parse_function
 
 注意事项：
 
-- 真实实现分别位于 `kernel_gen/dsl/ast_nodes.py` 与 `kernel_gen/dsl/ast_parser.py`，本模块只做导出。
+- 真实实现分别位于 `kernel_gen/dsl/ast/nodes.py` 与 `kernel_gen/dsl/ast/parser.py`，本模块只做导出。
 - 导出的符号集合应覆盖下游使用的 AST 节点与解析入口。
 
 返回与限制：
