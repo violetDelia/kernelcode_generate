@@ -1,7 +1,7 @@
 """tile lowering pass.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: 小李飞刀
 
 功能说明:
 - 将已完成 nn -> kernel 与 out-param 收口的单函数 IR，显式改写为 `symbol.for` + `dma.view` 结构。
@@ -703,7 +703,7 @@ def _read_kernel_split_tile_spec(
     """读取 kernel_split tile 覆盖信息。
 
     创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 从 `func.func` 的 `kernel_split` 属性读取 axis 与 tile 名称。
@@ -912,22 +912,18 @@ def _insert_tile_helpers(
     block.insert_ops_before(helper_ops, return_op)
 
 
-def _insert_analysis_only_helpers(
-    block: Block,
-    specs: list[_TileLoopSpec],
-    return_op: Operation,
-) -> None:
-    """插入 analysis-only 需要的 helper ops。
+def _tile_analysis_attr(roles: list[list[str]]) -> ArrayAttr:
+    """构造 tile.analysis 的嵌套属性。
 
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
 
     功能说明:
-    - 仅插入 start/end/step，不插入 symbol.for。
-    - 保留 tuner.param 与维度推导结果供分析用途。
+    - 将角色标签矩阵转换为 `ArrayAttr(ArrayAttr(StringAttr))`。
+    - 保持按 operand、按维度的输出顺序。
 
     使用示例:
-    - _insert_analysis_only_helpers(block, specs, return_op)
+    - attr = _tile_analysis_attr([["elewise", "elewise"], ["expand", "elewise"]])
 
     关联文件:
     - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
@@ -935,10 +931,240 @@ def _insert_analysis_only_helpers(
     - 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
     """
 
-    helper_ops: list[Operation] = []
-    for spec in specs:
-        helper_ops.extend([spec.start, spec.end, spec.step])
-    block.insert_ops_before(helper_ops, return_op)
+    return ArrayAttr([ArrayAttr([StringAttr(role) for role in row]) for row in roles])
+
+
+def _set_tile_analysis(op: Operation, roles: list[list[str]]) -> None:
+    """为 op 写入 tile.analysis 属性。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅在 roles 非空时写入 `tile.analysis`。
+    - 保持输出与 expectation 的矩阵文本一致。
+
+    使用示例:
+    - _set_tile_analysis(op, [["elewise", "elewise"]])
+
+    关联文件:
+    - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
+    - test: [test/pass/test_lowering_tile.py](test/pass/test_lowering_tile.py)
+    - 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
+    """
+
+    if not roles:
+        return
+    op.attributes["tile.analysis"] = _tile_analysis_attr(roles)
+
+
+def _clear_tile_analysis(block: Block) -> None:
+    """清理 block 中残留的 tile.analysis 属性。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 在 tile-only 路径移除 analysis 阶段残留的属性。
+
+    使用示例:
+    - _clear_tile_analysis(block)
+
+    关联文件:
+    - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
+    - test: [test/pass/test_lowering_tile.py](test/pass/test_lowering_tile.py)
+    - 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
+    """
+
+    for op in block.ops:
+        if "tile.analysis" in op.attributes:
+            op.attributes.pop("tile.analysis", None)
+
+
+def _build_elementwise_tile_roles(op: Operation) -> list[list[str]]:
+    """构造 elementwise 的 tile.analysis 角色矩阵。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 对每个 memory operand 输出全 `elewise` 标签。
+
+    使用示例:
+    - roles = _build_elementwise_tile_roles(kernel_op)
+
+    关联文件:
+    - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
+    - test: [test/pass/test_lowering_tile.py](test/pass/test_lowering_tile.py)
+    - 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
+    """
+
+    memory_values = [SSAValue.get(operand) for operand in op.operands if isinstance(SSAValue.get(operand).type, NnMemoryType)]
+    if not memory_values:
+        return []
+    first_type = memory_values[0].type
+    if not isinstance(first_type, NnMemoryType):
+        return []
+    rank = len(first_type.shape.data)
+    return [["elewise"] * rank for _ in memory_values]
+
+
+def _build_matmul_tile_roles(op: Operation) -> list[list[str]]:
+    """构造 matmul 的 tile.analysis 角色矩阵。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 输出 `[elewise, reduce] / [reduce, elewise] / [elewise, elewise]` 的固定角色矩阵。
+
+    使用示例:
+    - roles = _build_matmul_tile_roles(matmul_op)
+
+    关联文件:
+    - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
+    - test: [test/pass/test_lowering_tile.py](test/pass/test_lowering_tile.py)
+    - 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
+    """
+
+    operands = [SSAValue.get(operand) for operand in op.operands]
+    if len(operands) < 3:
+        _raise_tile_error("TilePassRankMismatch", "matmul requires 3 operands")
+    lhs, rhs, out = operands[0], operands[1], operands[-1]
+    if not isinstance(lhs.type, NnMemoryType) or not isinstance(rhs.type, NnMemoryType) or not isinstance(out.type, NnMemoryType):
+        _raise_tile_error("TilePassRankMismatch", "matmul operands must be nn.memory")
+    if len(lhs.type.shape.data) != 2 or len(rhs.type.shape.data) != 2 or len(out.type.shape.data) != 2:
+        _raise_tile_error("TilePassRankMismatch", "matmul operands must be rank-2")
+    return [
+        ["elewise", "reduce"],
+        ["reduce", "elewise"],
+        ["elewise", "elewise"],
+    ]
+
+
+def _is_unit_dim(dim: Attribute) -> bool:
+    """判断维度是否为 1。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 支持 `IntAttr(1)` 与 `StringAttr("1")`。
+
+    使用示例:
+    - if _is_unit_dim(dim): ...
+
+    关联文件:
+    - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
+    - test: [test/pass/test_lowering_tile.py](test/pass/test_lowering_tile.py)
+    - 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
+    """
+
+    return (isinstance(dim, IntAttr) and dim.data == 1) or (isinstance(dim, StringAttr) and dim.data == "1")
+
+
+def _dim_equals(lhs: Attribute, rhs: Attribute) -> bool:
+    """判断两个维度是否相同。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 支持 `StringAttr` 与 `IntAttr` 的一致性判断。
+
+    使用示例:
+    - if _dim_equals(lhs_dim, rhs_dim): ...
+
+    关联文件:
+    - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
+    - test: [test/pass/test_lowering_tile.py](test/pass/test_lowering_tile.py)
+    - 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
+    """
+
+    if isinstance(lhs, StringAttr) and isinstance(rhs, StringAttr):
+        return lhs.data == rhs.data
+    if isinstance(lhs, IntAttr) and isinstance(rhs, IntAttr):
+        return lhs.data == rhs.data
+    return False
+
+
+def _build_broadcast_tile_roles(op: Operation) -> list[list[str]]:
+    """构造 dma.broadcast 的 tile.analysis 角色矩阵。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - target 维度统一标记为 `elewise`。
+    - source 对齐到 target rank，维度一致标记 `elewise`，其余标记 `expand`。
+
+    使用示例:
+    - roles = _build_broadcast_tile_roles(broadcast_op)
+
+    关联文件:
+    - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
+    - test: [test/pass/test_lowering_tile.py](test/pass/test_lowering_tile.py)
+    - 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
+    """
+
+    target = SSAValue.get(op.operands[0])
+    source = SSAValue.get(op.operands[1])
+    if not isinstance(target.type, NnMemoryType):
+        return []
+    target_dims = list(target.type.shape.data)
+    target_roles = ["elewise"] * len(target_dims)
+
+    if not isinstance(source.type, NnMemoryType):
+        source_roles = ["expand"] * len(target_dims)
+        return [target_roles, source_roles]
+
+    source_dims = list(source.type.shape.data)
+    pad = len(target_dims) - len(source_dims)
+    if pad < 0:
+        _raise_tile_error("TilePassRankMismatch", "broadcast source rank must be <= target rank")
+    aligned_source_dims: list[Attribute] = [IntAttr(1)] * pad + source_dims
+    source_roles: list[str] = []
+    for src_dim, tgt_dim in zip(aligned_source_dims, target_dims):
+        if _dim_equals(src_dim, tgt_dim):
+            source_roles.append("elewise")
+        elif _is_unit_dim(src_dim):
+            source_roles.append("expand")
+        else:
+            source_roles.append("expand")
+    return [target_roles, source_roles]
+
+
+def _annotate_tile_analysis(block: Block) -> None:
+    """为 analysis-only 路径写入 tile.analysis。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 为 kernel.* 与 dma.broadcast 追加 tile.analysis 属性。
+    - 仅在 analysis-only 路径使用。
+
+    使用示例:
+    - _annotate_tile_analysis(block)
+
+    关联文件:
+    - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
+    - test: [test/pass/test_lowering_tile.py](test/pass/test_lowering_tile.py)
+    - 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
+    """
+
+    for op in block.ops:
+        if op.name == "dma.broadcast":
+            roles = _build_broadcast_tile_roles(op)
+            _set_tile_analysis(op, roles)
+            continue
+        if op.name == "kernel.matmul":
+            roles = _build_matmul_tile_roles(op)
+            _set_tile_analysis(op, roles)
+            continue
+        if op.name.startswith("kernel."):
+            roles = _build_elementwise_tile_roles(op)
+            _set_tile_analysis(op, roles)
 
 
 def _nest_loops(specs: list[_TileLoopSpec]) -> Block | None:
@@ -1132,11 +1358,11 @@ def _rewrite_function(func_op: func.FuncOp, analysis_only: bool) -> None:
     """改写单个函数为 tile loop 结构。
 
     创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 对 elementwise/matmul 分支生成 `tuner.param`、`tile.step_value`、`symbol.for` 与 `dma.view`。
-    - analysis_only=true 时仅插入 `tuner.param` 与维度推导 helper，不生成 loop/view。
+    - analysis_only=true 时仅输出 `tile.analysis`，不生成 loop/view/helper。
     - 保持单函数合同，不新增 `func.call`。
 
     使用示例:
@@ -1152,9 +1378,6 @@ def _rewrite_function(func_op: func.FuncOp, analysis_only: bool) -> None:
     _validate_input_contract(func_op, block)
     kernel_ops = _collect_kernel_ops(block)
     mode = _classify_kernel_ops(kernel_ops)
-    if mode is None:
-        return
-
     _validate_intermediate_materialization(func_op, block)
 
     return_op = block.last_op
@@ -1163,6 +1386,14 @@ def _rewrite_function(func_op: func.FuncOp, analysis_only: bool) -> None:
             "TilePassRequiresLoweredKernelIR",
             f"function {func_op.sym_name.data} must terminate with func.return",
         )
+
+    if analysis_only:
+        _annotate_tile_analysis(block)
+        return
+
+    _clear_tile_analysis(block)
+    if mode is None:
+        return
 
     if mode == "elementwise":
         memory_values = _collect_kernel_memory_operands(kernel_ops)
@@ -1183,9 +1414,6 @@ def _rewrite_function(func_op: func.FuncOp, analysis_only: bool) -> None:
                     f"elementwise rank mismatch at operand {index}",
                 )
         specs = _build_elementwise_loop_specs(func_op, block, reference_memory)
-        if analysis_only:
-            _insert_analysis_only_helpers(block, specs, return_op)
-            return
         inner_block = _nest_loops(specs)
         if inner_block is None:
             return
@@ -1204,9 +1432,6 @@ def _rewrite_function(func_op: func.FuncOp, analysis_only: bool) -> None:
         rhs = SSAValue.get(matmul_op.operands[1])
         out = SSAValue.get(matmul_op.operands[-1])
         specs = _build_matmul_loop_specs(block, lhs, rhs, out)
-        if analysis_only:
-            _insert_analysis_only_helpers(block, specs, return_op)
-            return
         inner_block = _nest_loops(specs)
         if inner_block is None:
             return
@@ -1220,16 +1445,18 @@ class TilePass(Pass):
     """tile lowering pass。
 
     创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 对 module 内满足输入合同的 func.func 执行 tile loop 改写。
     - elementwise 与 matmul 按固定规则插入 loop 与 view。
-    - analysis-only 模式仅插入 `tuner.param` 与维度推导 helper。
+    - analysis-only=true 时只写 `tile.analysis` 角色矩阵（按 operand、按维度，且仅含角色标签）。
+    - tile-only=true 时先执行 analysis，再按 `tile.analysis` 改写并清理该属性。
 
     使用示例:
     - module = TilePass().run(module)
-    - module = TilePass.from_options({"analysis-only": "true"}).run(module)
+    - module = TilePass.from_options({"analysis-only": "true", "tile-elewise": "true", "tile-reduce": "false"}).run(module)
+    - module = TilePass.from_options({"tile-only": "true", "tile-elewise": "true", "tile-reduce": "true"}).run(module)
 
     关联文件:
     - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
@@ -1239,18 +1466,27 @@ class TilePass(Pass):
 
     name = "tile"
 
-    def __init__(self: "TilePass", analysis_only: bool = False) -> None:
+    def __init__(
+        self: "TilePass",
+        analysis_only: bool = False,
+        tile_only: bool | None = None,
+        tile_elewise: bool = True,
+        tile_reduce: bool = True,
+    ) -> None:
         """初始化 tile pass。
 
         创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
+        最后一次更改: 小李飞刀
 
         功能说明:
-        - analysis_only=true 时只生成维度推导相关 helper。
+        - analysis_only=true 时仅输出 `tile.analysis`。
+        - tile_only=true 时先执行 analysis，再进入 tile 改写。
+        - tile_elewise/tile_reduce 表示公开 option 的启用状态。
 
         使用示例:
         - pass_obj = TilePass()
         - pass_obj = TilePass(analysis_only=True)
+        - pass_obj = TilePass(tile_only=True, tile_elewise=True, tile_reduce=False)
 
         关联文件:
         - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
@@ -1258,21 +1494,33 @@ class TilePass(Pass):
         - 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
         """
 
+        if tile_only is None:
+            tile_only = not analysis_only
+        if analysis_only and tile_only:
+            _raise_tile_error("TilePassInvalidOption", "analysis-only conflicts with tile-only")
+        if not analysis_only and not tile_only:
+            _raise_tile_error("TilePassInvalidOption", "tile-only must be true when analysis-only=false")
         self._analysis_only = analysis_only
+        self._tile_only = tile_only
+        self._tile_elewise = tile_elewise
+        self._tile_reduce = tile_reduce
 
     @classmethod
     def from_options(cls, options: dict[str, str]) -> "TilePass":
         """从 options 构造 TilePass。
 
         创建者: 金铲铲大作战
-        最后一次更改: 金铲铲大作战
+        最后一次更改: 小李飞刀
 
         功能说明:
-        - 仅支持 `analysis-only=true|false`。
-        - 其他 key 或非法值会返回稳定错误短语。
+        - 支持 `analysis-only/tile-only/tile-elewise/tile-reduce` 四类选项。
+        - 仅接受 `true/false` 字符串。
+        - 公开组合以 `spec/pass/lowering/tile.md` 为准。
 
         使用示例:
-        - pass_obj = TilePass.from_options({"analysis-only": "true"})
+        - pass_obj = TilePass.from_options(
+            {"analysis-only": "true", "tile-elewise": "true", "tile-reduce": "false"}
+          )
 
         关联文件:
         - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
@@ -1282,36 +1530,80 @@ class TilePass(Pass):
 
         if not options:
             return cls()
-        if set(options.keys()) != {"analysis-only"}:
+
+        allowed_keys = {"analysis-only", "tile-only", "tile-elewise", "tile-reduce"}
+        extra_keys = set(options.keys()) - allowed_keys
+        if extra_keys:
             _raise_tile_error("TilePassInvalidOption", "unsupported tile options")
-        value = options["analysis-only"]
-        if value == "true":
-            return cls(analysis_only=True)
-        if value == "false":
-            return cls(analysis_only=False)
-        _raise_tile_error("TilePassInvalidOption", "analysis-only must be true or false")
-        return cls()
+
+        def _parse_flag(key: str) -> bool:
+            if key not in options:
+                return False
+            value = options[key]
+            if value == "true":
+                return True
+            if value == "false":
+                return False
+            _raise_tile_error("TilePassInvalidOption", f"{key} must be true or false")
+            return False
+
+        analysis_only = _parse_flag("analysis-only")
+        tile_only = _parse_flag("tile-only")
+        tile_elewise = _parse_flag("tile-elewise")
+        tile_reduce = _parse_flag("tile-reduce")
+
+        if analysis_only and tile_only:
+            _raise_tile_error("TilePassInvalidOption", "analysis-only conflicts with tile-only")
+
+        if analysis_only:
+            if not tile_elewise or tile_reduce:
+                _raise_tile_error("TilePassInvalidOption", "analysis-only must pair with tile-elewise=true,tile-reduce=false")
+            return cls(
+                analysis_only=True,
+                tile_only=False,
+                tile_elewise=tile_elewise,
+                tile_reduce=tile_reduce,
+            )
+
+        if not tile_only:
+            _raise_tile_error("TilePassInvalidOption", "tile-only must be true when analysis-only=false")
+        if not tile_elewise:
+            _raise_tile_error("TilePassInvalidOption", "tile-elewise must be true")
+
+        return cls(
+            analysis_only=False,
+            tile_only=True,
+            tile_elewise=tile_elewise,
+            tile_reduce=tile_reduce,
+        )
 
     def run(self: "TilePass", module: ModuleOp) -> ModuleOp:
         """执行 tile pass。
 
         创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
+        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 遍历 module 中的 func.func 并执行改写。
         - `module.verify()` 失败时统一转译为 `TilePassRequiresLoweredKernelIR`。
-        - analysis_only=true 时只保留分析所需的 helper。
+        - analysis_only=true 时仅写 `tile.analysis`，不生成 loop/view/helper。
+        - tile_only=true 时先执行 analysis，再进入改写阶段并清理 `tile.analysis`。
 
         使用示例:
         - lowered = TilePass().run(module)
-        - lowered = TilePass.from_options({"analysis-only": "true"}).run(module)
+        - lowered = TilePass.from_options({"analysis-only": "true", "tile-elewise": "true", "tile-reduce": "false"}).run(module)
+        - lowered = TilePass.from_options({"tile-only": "true", "tile-elewise": "true", "tile-reduce": "true"}).run(module)
 
         关联文件:
         - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
         - test: [test/pass/test_lowering_tile.py](test/pass/test_lowering_tile.py)
         - 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
         """
+
+        if self._analysis_only and self._tile_only:
+            _raise_tile_error("TilePassInvalidOption", "analysis-only conflicts with tile-only")
+        if not self._analysis_only and not self._tile_only:
+            _raise_tile_error("TilePassInvalidOption", "tile-only must be true when analysis-only=false")
 
         for op in module.ops:
             if isinstance(op, func.FuncOp):
