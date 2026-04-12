@@ -45,6 +45,7 @@ from kernel_gen.dialect.kernel import (
     KernelImg2col2dOp,
     KernelMatmulOp,
     KernelReduceMinOp,
+    KernelReduceOp,
     KernelSelectOp,
     KernelSoftmaxOp,
 )
@@ -132,6 +133,11 @@ _SUPPORTED_BINARY_KINDS = {
 }
 
 _RESULT_TYPED_ALLOC_OPS = {"nn.matmul", "nn.img2col1d", "nn.img2col2d"}
+_REDUCE_KIND_MAP = {
+    "nn.reduce_sum": "sum",
+    "nn.reduce_min": "min",
+    "nn.reduce_max": "max",
+}
 
 
 
@@ -456,6 +462,62 @@ def _build_alloc_dynamic_shape_from_result(
             new_ops, value = _const_symbol_value(dim.data, 0)
             ops.extend(new_ops)
             operands.append(value)
+            continue
+        raise LowerNnToKernelError("nn op result shape entry must be IntAttr or StringAttr")
+    return ops, operands
+
+
+def _build_reduce_alloc_dynamic_shape(
+    source: SSAValue,
+    result_type: NnMemoryType,
+    axis_attr: IntegerAttr,
+    keepdim_attr: IntegerAttr,
+    op_name: str,
+) -> tuple[list[Operation], list[SSAValue]]:
+    """构造 reduce 输出 dma.alloc 的 dynamic_shape operands。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅为符号维度生成 symbol.get_dim。
+    - static 维度不生成 dynamic_shape operand。
+    - keepdim=false 时按 axis 跳过被规约维度。
+
+    使用示例:
+    - ops, operands = _build_reduce_alloc_dynamic_shape(inp, out_type, axis, keepdim, "nn.reduce_sum")
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering.md
+    - test: test/pass/nn_lowering/reduce_sum.py
+    - 功能实现: kernel_gen/passes/lowering/nn_to_kernel.py
+    """
+
+    source_type = source.type
+    if not isinstance(source_type, NnMemoryType):
+        raise LowerNnToKernelError(f"{op_name} operand must be nn.memory")
+
+    axis_value = axis_attr.value.data
+    keepdim_flag = keepdim_attr.value.data != 0
+    rank = len(source_type.shape.data)
+    if axis_value < 0 or axis_value >= rank:
+        raise LowerNnToKernelError(f"{op_name} axis must be within input rank")
+    expected_rank = rank if keepdim_flag else rank - 1
+    if len(result_type.shape.data) != expected_rank:
+        raise LowerNnToKernelError(f"{op_name} result rank mismatch with keepdim")
+
+    ops: list[Operation] = []
+    operands: list[SSAValue] = []
+    for out_axis, out_dim in enumerate(result_type.shape.data):
+        if isinstance(out_dim, StringAttr):
+            if out_dim.data == "?":
+                raise LowerNnToKernelError("nn op result shape must not contain '?'")
+            in_axis = out_axis if keepdim_flag else out_axis + (1 if out_axis >= axis_value else 0)
+            get_dim = SymbolGetDimOp(source, IntAttr(in_axis))
+            ops.append(get_dim)
+            operands.append(get_dim.result)
+            continue
+        if isinstance(out_dim, IntAttr):
             continue
         raise LowerNnToKernelError("nn op result shape entry must be IntAttr or StringAttr")
     return ops, operands
@@ -860,11 +922,18 @@ def _build_kernel_op(
             space=space,
         )
 
-    if op.name == "nn.reduce_min":
+    if op.name in _REDUCE_KIND_MAP:
         _ensure_operand_count(op, 1)
-        axis_attr = _parse_reduce_axis_attr(op.attributes.get("axes"), "nn.reduce_min")
-        keepdim_attr = _parse_reduce_keepdim_attr(op.attributes.get("keepdim"), "nn.reduce_min")
-        return KernelReduceMinOp(op.operands[0], out_value, axis_attr, keepdim_attr, space)
+        axis_attr = _parse_reduce_axis_attr(op.attributes.get("axes"), op.name)
+        keepdim_attr = _parse_reduce_keepdim_attr(op.attributes.get("keepdim"), op.name)
+        return KernelReduceOp(
+            op.operands[0],
+            out_value,
+            kind=_REDUCE_KIND_MAP[op.name],
+            axis=axis_attr,
+            keepdim=keepdim_attr,
+            space=space,
+        )
 
     raise LowerNnToKernelError(f"Unsupported nn op: {op.name}")
 
@@ -981,10 +1050,16 @@ def _lower_nn_op(op: Operation, block: Block) -> None:
     if _is_static_shape(result_type):
         shape_ops: list[Operation] = []
         dynamic_shape: list[SSAValue] = []
-    elif op.name == "nn.reduce_min":
-        shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_result(
+    elif op.name in _REDUCE_KIND_MAP:
+        _ensure_operand_count(op, 1)
+        axis_attr = _parse_reduce_axis_attr(op.attributes.get("axes"), op.name)
+        keepdim_attr = _parse_reduce_keepdim_attr(op.attributes.get("keepdim"), op.name)
+        shape_ops, dynamic_shape = _build_reduce_alloc_dynamic_shape(
+            SSAValue.get(op.operands[0]),
             result_type,
-            include_static=False,
+            axis_attr,
+            keepdim_attr,
+            op.name,
         )
     elif op.name in _RESULT_TYPED_ALLOC_OPS:
         shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_result(result_type)

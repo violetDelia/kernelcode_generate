@@ -228,6 +228,7 @@ def load_builtin_passes() -> None:
     from kernel_gen.passes.lowering.decompose_nn_softmax import DecomposeNnSoftmaxPass
     from kernel_gen.passes.lowering.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
     from kernel_gen.passes.lowering.memory_pool import MemoryPoolPass
+    from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
     from kernel_gen.passes.lowering.nn_to_kernel import LowerNnToKernelPass
     from kernel_gen.passes.lowering.symbol_loop_hoist import SymbolLoopHoistPass
     from kernel_gen.passes.lowering.tile import TilePass
@@ -235,6 +236,7 @@ def load_builtin_passes() -> None:
     for pass_cls in (
         AnalyzeFuncCostPass,
         DecomposeNnSoftmaxPass,
+        NnLoweringPass,
         LowerNnToKernelPass,
         BufferResultsToOutParamsPass,
         LowerDmaMemoryHierarchyPass,

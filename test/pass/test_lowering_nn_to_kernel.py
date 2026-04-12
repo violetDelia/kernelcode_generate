@@ -72,7 +72,6 @@ from kernel_gen.dialect.kernel import (
     KernelNeOp,
     KernelMatmulOp,
     KernelReduceOp,
-    KernelReduceMinOp,
     KernelSelectOp,
 )
 from kernel_gen.dialect.nn import (
@@ -1741,7 +1740,7 @@ def test_lower_img2col2d_public_chain_to_kernel_img2col2d() -> None:
 # 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-09 05:31:18 +0800
 # 最近一次运行成功时间: 2026-04-09 05:31:18 +0800
-# 测试目的: 验证 nn.reduce_min 被 lower 为 kernel.reduce_min。
+# 测试目的: 验证 nn.reduce_min 被 lower 为 kernel.reduce(kind=min)。
 # 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_reduce_min_direct_dialect_op_to_kernel_reduce_min
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
 # 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
@@ -1763,13 +1762,14 @@ def test_lower_reduce_min_direct_dialect_op_to_kernel_reduce_min() -> None:
 
     LowerNnToKernelPass().run(module)
     after_ir = str(module)
-    assert "kernel.reduce_min" in after_ir
+    assert "kernel.reduce" in after_ir
+    assert 'kind = "min"' in after_ir
     assert "axis = 1 : i64" in after_ir
     assert "keepdim = true" in after_ir
     assert "nn.reduce_min" not in after_ir
 
     ops = _collect_ops(block)
-    assert any(isinstance(op, KernelReduceMinOp) for op in ops)
+    assert any(isinstance(op, KernelReduceOp) for op in ops)
 
 
 # TC-PASS-N2K-033
@@ -1777,7 +1777,7 @@ def test_lower_reduce_min_direct_dialect_op_to_kernel_reduce_min() -> None:
 # 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-09 05:31:18 +0800
 # 最近一次运行成功时间: 2026-04-09 05:31:18 +0800
-# 测试目的: 验证公开链路 reduce_min helper lower 为 kernel.reduce_min 并保留 axis。
+# 测试目的: 验证公开链路 reduce_min helper lower 为 kernel.reduce(kind=min) 并保留 axis。
 # 使用示例: pytest -q test/pass/test_lowering_nn_to_kernel.py -k test_lower_reduce_min_public_chain_to_kernel_reduce_min
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
 # 对应 spec 文件路径: spec/pass/lowering/nn_to_kernel.md
@@ -1792,7 +1792,8 @@ def test_lower_reduce_min_public_chain_to_kernel_reduce_min() -> None:
 
     LowerNnToKernelPass().run(module)
     after_ir = str(module)
-    assert "kernel.reduce_min" in after_ir
+    assert "kernel.reduce" in after_ir
+    assert 'kind = "min"' in after_ir
     assert "axis = 1" in after_ir
     assert "keepdim = true" in after_ir
     assert "nn.reduce_min" not in after_ir

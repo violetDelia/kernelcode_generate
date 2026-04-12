@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/pass/lowering/nn_lowering.md`](../../../spec/pass/lowering/nn_lowering.md)
 - `功能实现`：[`kernel_gen/passes/lowering/nn_lowering/nn_lowering.py`](../../../kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
 - `test`：
@@ -41,6 +41,16 @@
 - `nn.broadcast` / `nn.broadcast_to` 必须 lower 为 `dma.broadcast`。
 - `nn.transpose` 必须 lower 为 `dma.transpose`。
 - `nn.exp` / `nn.softmax` / `nn.reduce_*` / `nn.matmul` / `nn.img2col*` 必须 lower 为具名 `kernel.*` op。
+- `nn.exp` lowering 规则：
+  - 目标 op 固定为 `kernel.exp`，并把结果写入 `out` operand。
+  - `out` 必须由 `dma.alloc` 创建；输入与输出的 `shape/stride/element_type/space` 必须一致，否则抛出 `NnLoweringError`。
+- `nn.reduce_sum/min/max` lowering 规则：
+  - 目标 op 固定为 `kernel.reduce`，`kind` 取值分别为 `"sum" / "min" / "max"`。
+  - `axis/keepdim` 直接继承 `nn.reduce_*` 的语义；`out` 仅消费已有结果 memory，不得改写为 `kernel.reduce_sum/min/max`。
+  - `out` 的 `shape/stride/element_type/space` 必须满足 reduce 合同，否则抛出 `NnLoweringError`。
+- `nn.softmax` lowering 规则：
+  - 目标 op 固定为 `kernel.softmax`，并把 `axis` 作为 op attr。
+  - `out` 必须由 `dma.alloc` 创建；`axis` 与 `out` 形态不一致时必须抛出 `NnLoweringError`。
 - `nn` 结果 Memory 必须通过 `dma.alloc` 显式创建；不允许隐式分配或省略输出写入。
 - broadcast / broadcast_to 的动态符号维约束：
   - `result.shape` 中的每个符号维必须能在 `input.shape` 中找到同名维度，或来自显式 `symbol.get_dim` 的结果。
@@ -189,6 +199,11 @@ module_op = ensure_module_op(module)
   - [`test/pass/nn_lowering/element_compare_ge.py`](../../../test/pass/nn_lowering/element_compare_ge.py)
   - [`test/pass/nn_lowering/select.py`](../../../test/pass/nn_lowering/select.py)
   - [`test/pass/nn_lowering/cast.py`](../../../test/pass/nn_lowering/cast.py)
+  - [`test/pass/nn_lowering/exp.py`](../../../test/pass/nn_lowering/exp.py)
+  - [`test/pass/nn_lowering/reduce_sum.py`](../../../test/pass/nn_lowering/reduce_sum.py)
+  - [`test/pass/nn_lowering/reduce_min.py`](../../../test/pass/nn_lowering/reduce_min.py)
+  - [`test/pass/nn_lowering/reduce_max.py`](../../../test/pass/nn_lowering/reduce_max.py)
+  - [`test/pass/nn_lowering/softmax.py`](../../../test/pass/nn_lowering/softmax.py)
 - 执行命令：
   - `pytest -q test/pass/nn_lowering/public_name.py`
   - `pytest -q test/pass/test_lowering_nn_to_kernel.py -k rename`
@@ -206,12 +221,20 @@ module_op = ensure_module_op(module)
   - `pytest -q test/pass/nn_lowering/element_compare_ge.py`
   - `pytest -q test/pass/nn_lowering/select.py`
   - `pytest -q test/pass/nn_lowering/cast.py`
+  - `pytest -q test/pass/nn_lowering/exp.py`
+  - `pytest -q test/pass/nn_lowering/reduce_sum.py`
+  - `pytest -q test/pass/nn_lowering/reduce_min.py`
+  - `pytest -q test/pass/nn_lowering/reduce_max.py`
+  - `pytest -q test/pass/nn_lowering/softmax.py`
 - 测试目标：
   - 验证 `NnLoweringPass` 的公开名字与导出路径稳定。
   - 验证 `NnLoweringError` 与 `NnLoweringPass` 的公共导出可用。
   - 验证 `NnLoweringPass` 在公共入口层面可见且可调用。
   - 验证 `kernel.binary_elewise` 与 `kernel.reduce` 的公开合同可解析与可校验。
   - 验证 element binary/compare/select/cast family 的 lowering 目标一致，且 `nn.div/nn.truediv` 统一使用 `kernel.binary_elewise(kind="div")`。
+  - 验证 `nn.exp` -> `kernel.exp` 的 lowering 目标与输出消费链路。
+  - 验证 `nn.reduce_*` -> `kernel.reduce(kind=...)` 的 lowering 目标与 `axis/keepdim` 传递。
+  - 验证 `nn.softmax` -> `kernel.softmax` 的 lowering 目标与 `axis` 传递。
 - 功能与用例清单：
 
 | 用例 ID | 功能 | 对应测试 |
@@ -223,3 +246,6 @@ module_op = ensure_module_op(module)
 | TC-PASS-NNL-S2-002 | `nn.div`/`nn.truediv` lower 为 `kernel.binary_elewise(kind="div")` | `element_binary_div.py` / `element_binary_truediv.py` |
 | TC-PASS-NNL-S2-003 | element compare lower 为 `kernel.binary_elewise` | `element_compare_eq.py` / `element_compare_ne.py` / `element_compare_lt.py` / `element_compare_le.py` / `element_compare_gt.py` / `element_compare_ge.py` |
 | TC-PASS-NNL-S2-004 | `nn.select`/`nn.cast` lower 为 `dma.alloc + kernel.select/dma.cast` | `select.py` / `cast.py` |
+| TC-PASS-NNL-010 | `nn.exp` lowering 目标为 `kernel.exp` | `test_nn_lowering_exp_target` |
+| TC-PASS-NNL-011 | `nn.reduce_*` lowering 目标为 `kernel.reduce(kind=...)` | `test_nn_lowering_reduce_family_targets` |
+| TC-PASS-NNL-012 | `nn.softmax` lowering 目标为 `kernel.softmax` | `test_nn_lowering_softmax_target` |
