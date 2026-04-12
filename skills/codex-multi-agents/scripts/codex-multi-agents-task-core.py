@@ -2,7 +2,7 @@
 """codex-multi-agents-task-core.py.
 
 创建者: OpenAI
-最后一次更改: OpenAI
+最后一次更改: 小李飞刀
 
 功能说明:
 - 处理 `codex-multi-agents-task.sh` 的核心数据逻辑。
@@ -608,6 +608,24 @@ def ensure_operator_permission(
     operator_name: str,
     permission_agents_file: str,
 ) -> None:
+    """校验管理员/架构师权限并给出稳定错误短语。
+
+    创建者: 小李飞刀
+    最后修改人: 小李飞刀
+
+    功能说明:
+    - 对 `new/dispatch/done/done-plan` 做权限校验。
+    - 优先读取权限名单中的职责/介绍字段判断管理员或架构师。
+    - 当权限名单不包含操作者时，回退使用管理员/架构师姓名白名单。
+
+    使用示例:
+    - ensure_operator_permission("dispatch", "神秘人", "./agents-lists.md")
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-task.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+    """
     if op not in {"new", "dispatch", "done", "done-plan"}:
         return
 
@@ -624,11 +642,26 @@ def ensure_operator_permission(
             f"-{op} requires permission agents list; set CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE or AGENTS_FILE",
         )
 
+    admin_names = parse_csv_names(
+        os.environ.get("CODEX_MULTI_AGENTS_ADMIN_USERS", "神秘人")
+    )
+    arch_names = parse_csv_names(
+        os.environ.get("CODEX_MULTI_AGENTS_ARCH_USERS", "大闸蟹,守护最好的爱莉希雅")
+    )
+
     _, permission_table = parse_agents_table(permission_agents_file)
     permission_rows = [r[:] for r in permission_table["rows"]]
     row_idx = find_agent_row_index(permission_rows, permission_table["name_idx"], caller)
     if row_idx < 0:
-        fail(RC_DATA, f"operator not found in permission agents list: {caller}")
+        is_admin = caller in admin_names
+        is_arch = caller in arch_names
+        if op == "new":
+            if not (is_admin or is_arch):
+                fail(RC_DATA, f"operation -{op} is restricted to 架构师或管理员: {caller}")
+            return
+        if not is_admin:
+            fail(RC_DATA, f"operation -{op} is restricted to 管理员: {caller}")
+        return
 
     row = permission_rows[row_idx]
     intro = ""
@@ -639,12 +672,6 @@ def ensure_operator_permission(
         duty = row[permission_table["header"].index("职责")].strip()
 
     role_text = f"{intro} {duty}"
-    admin_names = parse_csv_names(
-        os.environ.get("CODEX_MULTI_AGENTS_ADMIN_USERS", "神秘人")
-    )
-    arch_names = parse_csv_names(
-        os.environ.get("CODEX_MULTI_AGENTS_ARCH_USERS", "大闸蟹,守护最好的爱莉希雅")
-    )
     is_admin = ("管理员" in role_text) or (caller in admin_names)
     is_arch = ("架构师" in role_text) or (caller in arch_names)
 

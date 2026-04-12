@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, IntAttr, ModuleOp, StringAttr
+from xdsl.dialects.builtin import ArrayAttr, DictionaryAttr, IntAttr, ModuleOp, StringAttr
 from xdsl.ir import Attribute, Block, Operation, SSAValue
 from xdsl.irdl import IRDLOperation, operand_def, irdl_op_definition, result_def
 from xdsl.utils.exceptions import VerifyException
@@ -676,6 +676,56 @@ def _validate_tile_name_uniqueness(tile_names: list[str]) -> None:
         _raise_tile_error("TilePassDuplicateTileParam", "tile names must be unique per function")
 
 
+def _read_kernel_split_tile_spec(
+    func_op: func.FuncOp,
+    rank: int,
+) -> tuple[int, str] | None:
+    """读取 kernel_split tile 覆盖信息。
+
+    创建者: 小李飞刀
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 从 `func.func` 的 `kernel_split` 属性读取 axis 与 tile 名称。
+    - 仅用于 elementwise 场景，返回 axis 与 tile 名称以覆盖默认命名。
+
+    使用示例:
+    - spec = _read_kernel_split_tile_spec(func_op, rank)
+    - if spec is not None: axis, tile_name = spec
+
+    关联文件:
+    - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
+    - test: [test/dsl/test_gen_kernel.py](test/dsl/test_gen_kernel.py)
+    - 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
+    """
+
+    if "kernel_split" not in func_op.attributes:
+        return None
+    attr = func_op.attributes["kernel_split"]
+    if not isinstance(attr, DictionaryAttr):
+        _raise_tile_error("TilePassUnsupportedOp", "kernel_split attr must be a dictionary")
+    axis_attr = attr.data.get("axis")
+    tile_attr = attr.data.get("tile")
+    if not isinstance(axis_attr, IntAttr) or not isinstance(tile_attr, StringAttr):
+        _raise_tile_error(
+            "TilePassUnsupportedOp",
+            "kernel_split attr must contain axis:int and tile:string",
+        )
+    axis = axis_attr.data
+    if axis < 0 or axis >= rank:
+        _raise_tile_error(
+            "TilePassUnsupportedOp",
+            "kernel_split axis must be within elementwise rank",
+        )
+    tile_name = tile_attr.data
+    if not tile_name:
+        _raise_tile_error(
+            "TilePassUnsupportedOp",
+            "kernel_split tile name must be non-empty",
+        )
+    return axis, tile_name
+
+
 def _build_elementwise_loop_specs(
     func_op: func.FuncOp,
     block: Block,
@@ -708,6 +758,10 @@ def _build_elementwise_loop_specs(
     tile_names = [
         _tile_name_from_dim(dim, axis) for axis, dim in enumerate(memory_type.shape.data)
     ]
+    kernel_split_spec = _read_kernel_split_tile_spec(func_op, len(tile_names))
+    if kernel_split_spec is not None:
+        axis, tile_name = kernel_split_spec
+        tile_names[axis] = tile_name
     _validate_tile_name_uniqueness(tile_names)
 
     specs: list[_TileLoopSpec] = []
