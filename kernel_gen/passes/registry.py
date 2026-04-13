@@ -336,9 +336,6 @@ def load_builtin_passes() -> None:
     if "default-lowering" not in _PIPELINE_REGISTRY:
         register_pipeline("default-lowering")(build_default_lowering_pipeline)
 
-    if "default-lowering" not in _PIPELINE_REGISTRY:
-        register_pipeline("default-lowering")(_pipeline.build_default_lowering_pipeline)
-
     _BUILTINS_LOADED = True
 
 
