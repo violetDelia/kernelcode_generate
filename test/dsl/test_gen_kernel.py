@@ -65,7 +65,14 @@ from kernel_gen.dialect.arch import (
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFillOp, DmaSliceOp, DmaViewOp
 from kernel_gen.dialect.kernel import KernelAddOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolAddOp, SymbolDimType, SymbolForOp, SymbolGetDimOp, SymbolValueType
+from kernel_gen.dialect.symbol import (
+    SymbolAddOp,
+    SymbolDimType,
+    SymbolForOp,
+    SymbolGetDimOp,
+    SymbolIterType,
+    SymbolValueType,
+)
 from kernel_gen.dialect.tuner import TunerParamOp
 from kernel_gen.dsl.emit_c import EmitCContext
 from kernel_gen.dsl.gen_kernel import GenKernelError, gen_kernel
@@ -1811,7 +1818,7 @@ def test_gen_kernel_rejects_kernel_split_missing_tuner_param() -> None:
     start = _KernelSplitSymbolLiteralOp("0")
     end = _KernelSplitSymbolLiteralOp("8")
     step = _KernelSplitTileValueOp(fake_dim.result, "TILE_M")
-    loop_body = Block(arg_types=[step.result.type])
+    loop_body = Block(arg_types=[SymbolIterType.from_bounds("0", "8", "TILE_M")])
     loop = SymbolForOp(start.result, end.result, step.result, Region(loop_body))
     block.add_ops([fake_dim, start, end, step, loop, func.ReturnOp()])
     func_op = func.FuncOp("split_missing_tuner_param", FunctionType.from_lists([], []), Region(block))
@@ -1885,7 +1892,7 @@ def test_gen_kernel_rejects_kernel_split_missing_tile_bridge() -> None:
     start = _KernelSplitSymbolLiteralOp("0")
     end = _KernelSplitSymbolLiteralOp("8")
     step = _KernelSplitSymbolLiteralOp("4")
-    loop_body = Block(arg_types=[SymbolValueType.from_expr("it")])
+    loop_body = Block(arg_types=[SymbolIterType.from_bounds("0", "8", "4")])
     loop = SymbolForOp(start.result, end.result, step.result, Region(loop_body))
     block.add_ops([tuner, start, end, step, loop, func.ReturnOp()])
     func_op = func.FuncOp("split_missing_tile_bridge", FunctionType.from_lists([mem_type], []), Region(block))

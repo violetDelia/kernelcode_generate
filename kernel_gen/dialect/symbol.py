@@ -23,11 +23,10 @@ import ast as py_ast
 import os
 import re
 from collections.abc import Sequence
-from typing import ClassVar
+from typing import ClassVar, TYPE_CHECKING
 
 from kernel_gen.common.errors import _ERROR_TEMPLATE
 os.environ.setdefault("SYMPY_GMPY", "0")
-import sympy as sp
 from xdsl.dialects.builtin import IntAttr, IntegerType, StringAttr, f32, i1, i32
 from xdsl.ir import Attribute, Block, Dialect, Operation, ParametrizedAttribute, Region, SSAValue, TypeAttribute
 from xdsl.irdl import (
@@ -47,7 +46,9 @@ from xdsl.traits import NoTerminator
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import NnMemoryType
-from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+
+if TYPE_CHECKING:
+    from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 _SYMBOL_TOKEN_PATTERN = r"(?:[A-Za-z_][A-Za-z0-9_]*|[+-]?[0-9]+)"
 _SYMBOL_EXPR_PATTERN = re.compile(
@@ -193,7 +194,7 @@ def _evaluate_concrete_expr(expr: str) -> int | None:
         return None
 
 
-def _make_symbol_runtime_value(expr: str) -> int | SymbolDim:
+def _make_symbol_runtime_value(expr: str) -> int | "SymbolDim":
     """将公开 symbol 表达解析为运行时可比较值。
 
     创建者: 金铲铲大作战
@@ -217,8 +218,17 @@ def _make_symbol_runtime_value(expr: str) -> int | SymbolDim:
         return concrete_value
 
     try:
+        from kernel_gen.symbol_variable.symbol_dim import SymbolDim  # pylint: disable=import-error
+    except Exception:
+        _raise_value_error("unsupported public symbol expression")
+
+    try:
         parsed = py_ast.parse(expr, mode="eval")
     except SyntaxError:
+        try:
+            import sympy as sp  # pylint: disable=import-error
+        except Exception:
+            _raise_value_error("unsupported public symbol expression")
         symbol_names = {
             name
             for name in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", expr)
@@ -265,6 +275,10 @@ def _make_symbol_runtime_value(expr: str) -> int | SymbolDim:
                 arg_value = _eval(node.args[0])
                 if isinstance(arg_value, int):
                     return arg_value
+                try:
+                    import sympy as sp  # pylint: disable=import-error
+                except Exception:
+                    _raise_value_error("unsupported public symbol expression")
                 return SymbolDim(sp.floor(arg_value.get_symbol()))
         _raise_value_error("unsupported public symbol expression")
 
@@ -771,28 +785,136 @@ class SymbolValueType(ParametrizedAttribute, TypeAttribute):
 
 
 @irdl_attr_definition
-class SymbolIterType(ParametrizedAttribute, TypeAttribute):
-    """表示循环迭代变量的 symbol 类型。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 提供 `!symbol.iter<"...">` 类型，用于表达循环迭代变量。
-    - 语义与 `!symbol.int<"...">` 一致，但在类型名上明确迭代语义。
-
-    使用示例:
-    - SymbolIterType.from_expr("index")
-
-    关联文件:
-    - spec: spec/dialect/symbol.md
-    - test: test/dialect/test_symbol_dialect.py
-    - 功能实现: kernel_gen/dialect/symbol.py
-    """
+class SymbolIterAttr(ParametrizedAttribute):
+    """承载 `symbol.iter` 循环边界 attribute。"""
 
     name = "symbol.iter"
 
-    expr: SymbolExprAttr = param_def(SymbolExprAttr)
+    start: SymbolExprAttr = param_def(SymbolExprAttr)
+    end: SymbolExprAttr = param_def(SymbolExprAttr)
+    step: SymbolExprAttr = param_def(SymbolExprAttr)
+
+    @classmethod
+    def parse_parameters(cls: type["SymbolIterAttr"], parser: AttrParser) -> Sequence[Attribute]:
+        """解析 symbol.iter attribute 参数。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 解析 `#symbol.iter<start = "...", end = "...", step = "...">` 语法。
+
+        使用示例:
+        - SymbolIterAttr.parse_parameters(parser)
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        parser.parse_punctuation("<", "Expected '<' for symbol.iter attribute.")
+        parser.parse_keyword("start", " in symbol.iter attribute")
+        parser.parse_characters("=", " in symbol.iter attribute")
+        start = parser.parse_str_literal("Expected quoted symbol expression.")
+        parser.parse_characters(",", " in symbol.iter attribute")
+        parser.parse_keyword("end", " in symbol.iter attribute")
+        parser.parse_characters("=", " in symbol.iter attribute")
+        end = parser.parse_str_literal("Expected quoted symbol expression.")
+        parser.parse_characters(",", " in symbol.iter attribute")
+        parser.parse_keyword("step", " in symbol.iter attribute")
+        parser.parse_characters("=", " in symbol.iter attribute")
+        step = parser.parse_str_literal("Expected quoted symbol expression.")
+        parser.parse_punctuation(">", "Expected '>' for symbol.iter attribute.")
+        return (
+            SymbolExprAttr.from_expr(start),
+            SymbolExprAttr.from_expr(end),
+            SymbolExprAttr.from_expr(step),
+        )
+
+    def print_parameters(self: "SymbolIterAttr", printer: Printer) -> None:
+        """打印 symbol.iter attribute 参数。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 输出 `#symbol.iter<start = "...", end = "...", step = "...">` 语法。
+
+        使用示例:
+        - SymbolIterAttr.from_bounds("0", "N", "TILE_D0").print_parameters(printer)
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        printer.print_string("<start = ")
+        printer.print_string_literal(_normalize_expr(self.start.expr.data))
+        printer.print_string(", end = ")
+        printer.print_string_literal(_normalize_expr(self.end.expr.data))
+        printer.print_string(", step = ")
+        printer.print_string_literal(_normalize_expr(self.step.expr.data))
+        printer.print_string(">")
+
+    def verify(self: "SymbolIterAttr") -> None:
+        """校验 symbol.iter attribute 参数。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 校验 start/end/step 的 symbol 表达式合法性。
+
+        使用示例:
+        - SymbolIterAttr.from_bounds("0", "N", "TILE_D0").verify()
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        self.start.verify()
+        self.end.verify()
+        self.step.verify()
+
+    @classmethod
+    def from_bounds(cls: type["SymbolIterAttr"], start: str, end: str, step: str) -> "SymbolIterAttr":
+        """从 start/end/step 字符串构造 symbol.iter attribute。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 统一构造 `#symbol.iter<start = "...", end = "...", step = "...">`。
+
+        使用示例:
+        - SymbolIterAttr.from_bounds("0", "N", "TILE_D0")
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        return cls(
+            SymbolExprAttr.from_expr(start),
+            SymbolExprAttr.from_expr(end),
+            SymbolExprAttr.from_expr(step),
+        )
+
+
+@irdl_attr_definition
+class SymbolIterType(ParametrizedAttribute, TypeAttribute):
+    """表示循环迭代变量的 symbol 类型。"""
+
+    name = "symbol.iter"
+
+    start: SymbolExprAttr = param_def(SymbolExprAttr)
+    end: SymbolExprAttr = param_def(SymbolExprAttr)
+    step: SymbolExprAttr = param_def(SymbolExprAttr)
 
     @classmethod
     def parse_parameters(cls: type["SymbolIterType"], parser: AttrParser) -> Sequence[Attribute]:
@@ -802,7 +924,8 @@ class SymbolIterType(ParametrizedAttribute, TypeAttribute):
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 解析 `!symbol.iter<"expr">` 中的表达式文本。
+        - 解析 `!symbol.iter<start = "...", end = "...", step = "...">` 语法。
+        - 兼容旧格式 `!symbol.iter<"expr">`，自动补齐 `start=0` 与 `step=1`。
 
         使用示例:
         - SymbolIterType.parse_parameters(parser)
@@ -814,9 +937,30 @@ class SymbolIterType(ParametrizedAttribute, TypeAttribute):
         """
 
         parser.parse_punctuation("<", "Expected '<' for symbol iter type.")
+        if parser.parse_optional_keyword("start") is not None:
+            parser.parse_characters("=", " in symbol.iter type")
+            start = parser.parse_str_literal("Expected quoted symbol expression.")
+            parser.parse_characters(",", " in symbol.iter type")
+            parser.parse_keyword("end", " in symbol.iter type")
+            parser.parse_characters("=", " in symbol.iter type")
+            end = parser.parse_str_literal("Expected quoted symbol expression.")
+            parser.parse_characters(",", " in symbol.iter type")
+            parser.parse_keyword("step", " in symbol.iter type")
+            parser.parse_characters("=", " in symbol.iter type")
+            step = parser.parse_str_literal("Expected quoted symbol expression.")
+            parser.parse_punctuation(">", "Expected '>' for symbol iter type.")
+            return (
+                SymbolExprAttr.from_expr(start),
+                SymbolExprAttr.from_expr(end),
+                SymbolExprAttr.from_expr(step),
+            )
         expr = parser.parse_str_literal("Expected quoted symbol expression.")
         parser.parse_punctuation(">", "Expected '>' for symbol iter type.")
-        return (SymbolExprAttr.from_expr(expr),)
+        return (
+            SymbolExprAttr.from_expr("0"),
+            SymbolExprAttr.from_expr(expr),
+            SymbolExprAttr.from_expr("1"),
+        )
 
     def print_parameters(self: "SymbolIterType", printer: Printer) -> None:
         """打印循环迭代类型参数。
@@ -825,10 +969,10 @@ class SymbolIterType(ParametrizedAttribute, TypeAttribute):
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 输出 `!symbol.iter<"...">` 的表达式参数。
+        - 输出 `!symbol.iter<start = "...", end = "...", step = "...">` 的表达式参数。
 
         使用示例:
-        - SymbolIterType.from_expr("index").print_parameters(printer)
+        - SymbolIterType.from_bounds("0", "N", "TILE_D0").print_parameters(printer)
 
         关联文件:
         - spec: spec/dialect/symbol.md
@@ -836,8 +980,12 @@ class SymbolIterType(ParametrizedAttribute, TypeAttribute):
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
-        printer.print_string("<")
-        printer.print_string_literal(_normalize_expr(self.expr.expr.data))
+        printer.print_string("<start = ")
+        printer.print_string_literal(_normalize_expr(self.start.expr.data))
+        printer.print_string(", end = ")
+        printer.print_string_literal(_normalize_expr(self.end.expr.data))
+        printer.print_string(", step = ")
+        printer.print_string_literal(_normalize_expr(self.step.expr.data))
         printer.print_string(">")
 
     def verify(self: "SymbolIterType") -> None:
@@ -847,10 +995,10 @@ class SymbolIterType(ParametrizedAttribute, TypeAttribute):
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 复用 symbol.expr 的合法性校验。
+        - 复用 symbol.expr 的合法性校验，确保 start/end/step 都合法。
 
         使用示例:
-        - SymbolIterType.from_expr("index").verify()
+        - SymbolIterType.from_bounds("0", "N", "TILE_D0").verify()
 
         关联文件:
         - spec: spec/dialect/symbol.md
@@ -858,7 +1006,9 @@ class SymbolIterType(ParametrizedAttribute, TypeAttribute):
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
-        self.expr.verify()
+        self.start.verify()
+        self.end.verify()
+        self.step.verify()
 
     def __str__(self: "SymbolIterType") -> str:
         """返回公开的 symbol.iter 文本表示。
@@ -867,10 +1017,10 @@ class SymbolIterType(ParametrizedAttribute, TypeAttribute):
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 生成 `symbol.iter<expr>` 形式的字符串表示。
+        - 生成 `symbol.iter<start,end,step>` 形式的字符串表示。
 
         使用示例:
-        - str(SymbolIterType.from_expr("index"))
+        - str(SymbolIterType.from_bounds("0", "N", "TILE_D0"))
 
         关联文件:
         - spec: spec/dialect/symbol.md
@@ -878,17 +1028,68 @@ class SymbolIterType(ParametrizedAttribute, TypeAttribute):
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
-        return f"symbol.iter<{_normalize_expr(self.expr.expr.data)}>"
+        return (
+            "symbol.iter<"
+            f"start={_normalize_expr(self.start.expr.data)}, "
+            f"end={_normalize_expr(self.end.expr.data)}, "
+            f"step={_normalize_expr(self.step.expr.data)}>"
+        )
 
     @classmethod
-    def from_expr(cls: type["SymbolIterType"], expr: str) -> "SymbolIterType":
-        """从字符串构造循环迭代类型。
+    def from_bounds(cls: type["SymbolIterType"], start: str, end: str, step: str) -> "SymbolIterType":
+        """从 start/end/step 构造循环迭代类型。
 
         创建者: 金铲铲大作战
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 统一创建 `!symbol.iter<\"expr\">` 类型实例。
+        - 统一创建 `!symbol.iter<start = "...", end = "...", step = "...">`。
+
+        使用示例:
+        - SymbolIterType.from_bounds("0", "N", "TILE_D0")
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        return cls(
+            SymbolExprAttr.from_expr(start),
+            SymbolExprAttr.from_expr(end),
+            SymbolExprAttr.from_expr(step),
+        )
+
+    @classmethod
+    def from_attr(cls: type["SymbolIterType"], attr: SymbolIterAttr) -> "SymbolIterType":
+        """从 symbol.iter attribute 构造循环迭代类型。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 将 `#symbol.iter<...>` 转换为对应的 `!symbol.iter<...>` 类型。
+
+        使用示例:
+        - SymbolIterType.from_attr(SymbolIterAttr.from_bounds("0", "N", "TILE_D0"))
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        return cls(attr.start, attr.end, attr.step)
+
+    @classmethod
+    def from_expr(cls: type["SymbolIterType"], expr: str) -> "SymbolIterType":
+        """从字符串构造循环迭代类型（legacy 语义）。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 兼容旧的 `!symbol.iter<"expr">` 语义，补齐 `start=0` 与 `step=1`。
 
         使用示例:
         - SymbolIterType.from_expr("index")
@@ -899,7 +1100,7 @@ class SymbolIterType(ParametrizedAttribute, TypeAttribute):
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
-        return cls(SymbolExprAttr.from_expr(expr))
+        return cls.from_bounds("0", expr, "1")
 
 
 @irdl_attr_definition
@@ -1619,6 +1820,7 @@ class SymbolForOp(IRDLOperation):
     start = operand_def(Attribute)
     end = operand_def(Attribute)
     step = operand_def(Attribute)
+    iter_attr = attr_def(SymbolIterAttr, attr_name="iter")
     body = region_def()
     traits = traits_def(NoTerminator())
 
@@ -1628,18 +1830,19 @@ class SymbolForOp(IRDLOperation):
         end: SSAValue | Operation,
         step: SSAValue | Operation,
         body: Region | Block | Sequence[Operation] | Sequence[Block],
+        iter_attr: SymbolIterAttr | None = None,
     ) -> None:
         """初始化 symbol.for。
 
         创建者: 我不是牛马
-        最后一次更改: 我不是牛马
+        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 设置 start/end/step 三个 symbol.int 操作数与单块循环体。
-        - 循环体块参数表示当前迭代变量 `it`。
+        - `iter` attribute 与 block 参数类型共同表达迭代边界语义。
 
         使用示例:
-        - SymbolForOp(start, end, step, Block(arg_types=[SymbolValueType.from_expr("M")]))
+        - SymbolForOp(start, end, step, Block(arg_types=[SymbolIterType.from_bounds("0", "M", "TILE_D0")]))
 
         关联文件:
         - spec: spec/dialect/symbol.md
@@ -1651,7 +1854,19 @@ class SymbolForOp(IRDLOperation):
             body = Region(body)
         elif not isinstance(body, Region):
             body = Region(list(body))
-        super().__init__(operands=[start, end, step], regions=[body])
+        if iter_attr is None:
+            start_type = SSAValue.get(start).type
+            end_type = SSAValue.get(end).type
+            step_type = SSAValue.get(step).type
+            if isinstance(start_type, SymbolValueType) and isinstance(end_type, SymbolValueType) and isinstance(step_type, SymbolValueType):
+                iter_attr = SymbolIterAttr.from_bounds(
+                    _normalize_expr(start_type.expr.expr.data),
+                    _normalize_expr(end_type.expr.expr.data),
+                    _normalize_expr(step_type.expr.expr.data),
+                )
+            else:
+                iter_attr = SymbolIterAttr.from_bounds("0", "0", "1")
+        super().__init__(operands=[start, end, step], regions=[body], attributes={"iter": iter_attr})
 
     def verify_(self: "SymbolForOp") -> None:
         """校验 symbol.for 约束。
@@ -1660,7 +1875,8 @@ class SymbolForOp(IRDLOperation):
         最后一次更改: 我不是牛马
 
         功能说明:
-        - 校验 start/end/step/it 均为 `!symbol.int<\"expr\">`。
+        - 校验 start/end/step 均为 `!symbol.int<\"expr\">`。
+        - 校验 `iter` attribute 与 block 参数类型一致。
         - 校验 region 为单块且仅包含一个块参数。
         - 当 step 可静态判定为 `0` 时直接报错。
 
@@ -1673,14 +1889,17 @@ class SymbolForOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/symbol.py
         """
 
-        for operand_name in ("start", "end", "step"):
-            operand = SSAValue.get(getattr(self, operand_name))
+        start_value = SSAValue.get(self.start)
+        end_value = SSAValue.get(self.end)
+        step_value = SSAValue.get(self.step)
+        for operand_name, operand in (("start", start_value), ("end", end_value), ("step", step_value)):
             if not _is_symbol_int_type(operand.type):
                 _raise_verify_error(f"{self.name} {operand_name} must have type !symbol.int<\"expr\">")
 
-        step_type = SSAValue.get(self.step).type
+        step_type = step_value.type
         assert isinstance(step_type, SymbolValueType)
-        if _normalize_expr(step_type.expr.expr.data) == "0":
+        step_expr = _normalize_expr(step_type.expr.expr.data)
+        if step_expr == "0":
             _raise_verify_error(f"{self.name} step must not be zero")
 
         blocks = list(self.body.blocks)
@@ -1690,8 +1909,22 @@ class SymbolForOp(IRDLOperation):
         if len(block.args) != 1:
             _raise_verify_error(f"{self.name} body must have exactly one block argument")
         iter_arg = block.args[0]
-        if not _is_symbol_int_type(iter_arg.type):
-            _raise_verify_error(f"{self.name} it must have type !symbol.int<\"expr\">")
+        if not isinstance(iter_arg.type, SymbolIterType):
+            _raise_verify_error(f"{self.name} it must have type !symbol.iter<...>")
+        iter_attr = self.iter_attr
+        if not isinstance(iter_attr, SymbolIterAttr):
+            _raise_verify_error(f"{self.name} iter attribute must be #symbol.iter<...>")
+        start_expr = _normalize_expr(start_value.type.expr.expr.data)
+        end_expr = _normalize_expr(end_value.type.expr.expr.data)
+        if _normalize_expr(iter_attr.start.expr.data) != start_expr:
+            _raise_verify_error(f"{self.name} iter.start must match start operand")
+        if _normalize_expr(iter_attr.end.expr.data) != end_expr:
+            _raise_verify_error(f"{self.name} iter.end must match end operand")
+        if _normalize_expr(iter_attr.step.expr.data) != step_expr:
+            _raise_verify_error(f"{self.name} iter.step must match step operand")
+        expected_iter_type = SymbolIterType.from_attr(iter_attr)
+        if iter_arg.type != expected_iter_type:
+            _raise_verify_error(f"{self.name} it must have type {expected_iter_type}")
 
     def print(self: "SymbolForOp", printer: Printer) -> None:
         """打印 symbol.for 自定义文本语法。"""
@@ -1710,13 +1943,9 @@ class SymbolForOp(IRDLOperation):
         printer.print_ssa_value(self.end)
         printer.print_string(" step ")
         printer.print_ssa_value(self.step)
-        printer.print_string(" : ")
-        printer.print_attribute(SSAValue.get(self.start).type)
-        printer.print_string(", ")
-        printer.print_attribute(SSAValue.get(self.end).type)
-        printer.print_string(", ")
-        printer.print_attribute(SSAValue.get(self.step).type)
-        printer.print_string(" {")
+        printer.print_string(" {iter = ")
+        printer.print_attribute(self.iter_attr)
+        printer.print_string("} {")
         if block.ops:
             with printer.indented():
                 for op in block.ops:
@@ -1735,8 +1964,8 @@ class SymbolForOp(IRDLOperation):
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 解析 `symbol.for %it = %start to %end step %step : start_type, end_type, step_type` 语法。
-        - 迭代变量统一解析为 `!symbol.int<"index">`，确保文本 round-trip 可稳定匹配 loop 体内 `index` 语义。
+        - 解析 `symbol.for %it = %start to %end step %step {iter = #symbol.iter<...>}` 语法。
+        - 迭代变量解析为 `!symbol.iter<start,end,step>`，保持边界语义闭环。
 
         使用示例:
         - SymbolForOp.parse(parser)
@@ -1749,24 +1978,21 @@ class SymbolForOp(IRDLOperation):
 
         unresolved_iter = parser.parse_argument(expect_type=False)
         parser.parse_characters("=", " in symbol.for")
-        start = parser.parse_unresolved_operand()
+        start_value = parser.parse_operand()
         parser.parse_characters("to", " in symbol.for")
-        end = parser.parse_unresolved_operand()
+        end_value = parser.parse_operand()
         parser.parse_characters("step", " in symbol.for")
-        step = parser.parse_unresolved_operand()
-        parser.parse_characters(":", " in symbol.for")
-        start_type = parser.parse_type()
-        parser.parse_characters(",", " in symbol.for type list")
-        end_type = parser.parse_type()
-        parser.parse_characters(",", " in symbol.for type list")
-        step_type = parser.parse_type()
-
-        iter_arg = unresolved_iter.resolve(SymbolValueType.from_expr("index"))
+        step_value = parser.parse_operand()
+        parser.parse_characters("{", " in symbol.for")
+        parser.parse_keyword("iter", " in symbol.for")
+        parser.parse_characters("=", " in symbol.for")
+        iter_attr = parser.parse_attribute()
+        if not isinstance(iter_attr, SymbolIterAttr):
+            raise VerifyException(_format_error("symbol.for iter attribute must be #symbol.iter<...>"))
+        parser.parse_characters("}", " in symbol.for")
+        iter_arg = unresolved_iter.resolve(SymbolIterType.from_attr(iter_attr))
         body = parser.parse_region((iter_arg,))
-        start_value = parser.resolve_operand(start, start_type)
-        end_value = parser.resolve_operand(end, end_type)
-        step_value = parser.resolve_operand(step, step_type)
-        return cls(start_value, end_value, step_value, body)
+        return cls(start_value, end_value, step_value, body, iter_attr)
 
 
 Symbol = Dialect(
@@ -1794,6 +2020,7 @@ Symbol = Dialect(
         SymbolExprAttr,
         SymbolDimType,
         SymbolPtrType,
+        SymbolIterAttr,
         SymbolIterType,
         SymbolValueType,
     ],
@@ -1815,6 +2042,7 @@ __all__ = [
     "SymbolLtOp",
     "SymbolNeOp",
     "SymbolIterType",
+    "SymbolIterAttr",
     "SymbolToFloatOp",
     "SymbolForOp",
     "SymbolFloorDivOp",

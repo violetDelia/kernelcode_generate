@@ -252,10 +252,10 @@ def test_symbol_value_type_round_trip_for_integer_only_semantics() -> None:
 # 对应测试文件路径: test/dialect/test_symbol_dialect.py
 def test_symbol_iter_type_round_trip() -> None:
     ctx = _build_context()
-    ty = Parser(ctx, '!symbol.iter<"index">').parse_attribute()
+    ty = Parser(ctx, '!symbol.iter<start = "0", end = "index", step = "1">').parse_attribute()
     assert isinstance(ty, SymbolIterType)
     ty.verify()
-    assert _print_attr(ty) == '!symbol.iter<"index">'
+    assert _print_attr(ty) == '!symbol.iter<start = "0", end = "index", step = "1">'
 
 
 # TC-SYM-049
@@ -1079,14 +1079,14 @@ def test_symbol_for_accepts_symbol_int_bounds_and_iter_arg() -> None:
     start = _make_symbol_value("M")
     end = _make_symbol_value("N")
     step = _make_symbol_value("1")
-    body = Block(arg_types=[SymbolValueType.from_expr("M")])
+    body = Block(arg_types=[SymbolIterType.from_bounds("M", "N", "1")])
 
     op = SymbolForOp(start, end, step, body)
 
     op.verify()
     assert len(op.body.block.args) == 1
-    assert isinstance(op.body.block.args[0].type, SymbolValueType)
-    assert _print_attr(op.body.block.args[0].type) == '!symbol.int<"M">'
+    assert isinstance(op.body.block.args[0].type, SymbolIterType)
+    assert _print_attr(op.body.block.args[0].type) == '!symbol.iter<start = "M", end = "N", step = "1">'
 
 
 # TC-SYM-033
@@ -1106,7 +1106,7 @@ builtin.module {
   %start = "test.op"() : () -> !symbol.int<"M">
   %end = "test.op"() : () -> !symbol.int<"N">
   %step = "test.op"() : () -> !symbol.int<"1">
-  symbol.for %i = %start to %end step %step : !symbol.int<"M">, !symbol.int<"N">, !symbol.int<"1"> {
+  symbol.for %i = %start to %end step %step {iter = #symbol.iter<start = "M", end = "N", step = "1">} {
   }
 }
 """,
@@ -1114,7 +1114,10 @@ builtin.module {
 
     op = module.body.block.ops.last
     assert isinstance(op, SymbolForOp)
-    assert _print_op(op) == 'symbol.for %i = %start to %end step %step : !symbol.int<"M">, !symbol.int<"N">, !symbol.int<"1"> {\n}'
+    assert (
+        _print_op(op)
+        == 'symbol.for %i = %start to %end step %step {iter = #symbol.iter<start = "M", end = "N", step = "1">} {\n}'
+    )
 
 
 # TC-SYM-034
@@ -1136,9 +1139,9 @@ def test_symbol_for_rejects_non_symbol_int_operands() -> None:
     ]
 
     with pytest.raises(VerifyException, match='symbol.for start must have type !symbol.int<"expr">'):
-        SymbolForOp(non_symbol_value, symbol_value, symbol_value, Block(arg_types=[SymbolValueType.from_expr("N")])).verify()
+        SymbolForOp(non_symbol_value, symbol_value, symbol_value, Block(arg_types=[SymbolIterType.from_bounds("N", "N", "N")])).verify()
     for non_symbol_it in non_symbol_it_values:
-        with pytest.raises(VerifyException, match='symbol.for it must have type !symbol.int<"expr">'):
+        with pytest.raises(VerifyException, match="symbol.for it must have type !symbol.iter<...>"):
             SymbolForOp(symbol_value, symbol_value, symbol_value, Block(arg_types=[non_symbol_it.type])).verify()
 
 
@@ -1156,7 +1159,7 @@ def test_symbol_for_rejects_zero_step() -> None:
     step = _make_symbol_value("0")
 
     with pytest.raises(VerifyException, match="symbol.for step must not be zero"):
-        SymbolForOp(start, end, step, Block(arg_types=[SymbolValueType.from_expr("M")])).verify()
+        SymbolForOp(start, end, step, Block(arg_types=[SymbolIterType.from_bounds("M", "N", "0")])).verify()
 
 
 # TC-SYM-036
@@ -1181,7 +1184,12 @@ def test_symbol_for_rejects_invalid_region_shape() -> None:
             start,
             end,
             step,
-            Region([Block(arg_types=[SymbolValueType.from_expr("M")]), Block(arg_types=[SymbolValueType.from_expr("M")])]),
+            Region(
+                [
+                    Block(arg_types=[SymbolIterType.from_bounds("M", "N", "1")]),
+                    Block(arg_types=[SymbolIterType.from_bounds("M", "N", "1")]),
+                ]
+            ),
         ).verify()
 
 
@@ -1204,7 +1212,7 @@ builtin.module {
   %start = "test.op"() : () -> !symbol.int<"M">
   %end = "test.op"() : () -> !symbol.int<"N">
   %step = "test.op"() : () -> !symbol.int<"1">
-  symbol.for %i = %start %end step %step : !symbol.int<"M">, !symbol.int<"N">, !symbol.int<"1"> {
+  symbol.for %i = %start %end step %step {iter = #symbol.iter<start = "M", end = "N", step = "1">} {
   }
 }
 """,
@@ -1217,7 +1225,7 @@ builtin.module {
   %start = "test.op"() : () -> !symbol.int<"M">
   %end = "test.op"() : () -> !symbol.int<"N">
   %step = "test.op"() : () -> !symbol.int<"1">
-  symbol.for %i = %start to %end step %step : !symbol.int<"M">, !symbol.int<"N"> {
+  symbol.for %i = %start to %end step %step {iter = #symbol.iter<start = "M", end = "N">} {
   }
 }
 """,
@@ -1238,7 +1246,7 @@ def test_symbol_for_error_messages_include_context() -> None:
     step = _make_symbol_value("0")
 
     with pytest.raises(VerifyException, match="symbol.for step must not be zero"):
-        SymbolForOp(start, end, step, Block(arg_types=[SymbolValueType.from_expr("M")])).verify()
+        SymbolForOp(start, end, step, Block(arg_types=[SymbolIterType.from_bounds("M", "N", "0")])).verify()
 
     ctx = _build_context()
     with pytest.raises(ParseError, match="symbol.for"):
@@ -1249,7 +1257,7 @@ builtin.module {
   %start = "test.op"() : () -> !symbol.int<"M">
   %end = "test.op"() : () -> !symbol.int<"N">
   %step = "test.op"() : () -> !symbol.int<"1">
-  symbol.for %i = %start to %end %step : !symbol.int<"M">, !symbol.int<"N">, !symbol.int<"1"> {
+  symbol.for %i = %start to %end %step {iter = #symbol.iter<start = "M", end = "N", step = "1">} {
   }
 }
 """,

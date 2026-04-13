@@ -111,7 +111,7 @@ def test_tuner_param_round_trip() -> None:
         ctx,
         """
 builtin.module {
-  %p0 = tuner.param : !symbol.dim<"BLOCK_M">
+  %p0 = tuner.param : !symbol.int<"BLOCK_M">
 }
 """,
     ).parse_module()
@@ -132,13 +132,13 @@ builtin.module {
 # 对应 spec 文件路径: spec/dialect/tuner.md
 def test_tuner_param_rejects_invalid_result_type() -> None:
     invalid_types = [
-        SymbolValueType.from_expr("N"),
+        SymbolDimType(StringAttr("BLOCK_M")),
         IndexType(),
         IntegerType(32),
     ]
     for invalid_type in invalid_types:
         op = TunerParamOp(invalid_type)
-        with pytest.raises(VerifyException, match="base attribute symbol.dim"):
+        with pytest.raises(VerifyException, match='tuner.param result type must be !symbol.int<"name">'):
             op.verify()
 
 
@@ -162,7 +162,7 @@ def test_tuner_param_rejects_invalid_name() -> None:
         ctx,
         """
 builtin.module {
-  %p0 = tuner.param : !symbol.dim<"">
+  %p0 = tuner.param : !symbol.int<"">
 }
 """,
     ).parse_module()
@@ -173,7 +173,7 @@ builtin.module {
         ctx,
         """
 builtin.module {
-  %p0 = tuner.param : !symbol.dim<"BLOCK-M">
+  %p0 = tuner.param : !symbol.int<"BLOCK-M">
 }
 """,
     ).parse_module()

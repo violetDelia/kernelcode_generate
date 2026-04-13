@@ -127,8 +127,8 @@ def _operand_int_value(value: SSAValue) -> int | None:
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 仅识别字面量整数表达式，例如 `!symbol.int<"4">` 或 `!symbol.iter<"4">`。
-    - 其他符号表达式统一视为运行期值。
+    - 仅识别字面量整数表达式，例如 `!symbol.int<"4">`。
+    - `!symbol.iter<start = "...", end = "...", step = "...">` 视为运行期值，不参与静态比较。
 
     使用示例:
     - _operand_int_value(op.sizes[0])
@@ -139,7 +139,9 @@ def _operand_int_value(value: SSAValue) -> int | None:
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
-    if not isinstance(value.type, (SymbolValueType, SymbolIterType)):
+    if isinstance(value.type, SymbolIterType):
+        return None
+    if not isinstance(value.type, SymbolValueType):
         return None
     expr = value.type.expr.expr.data.strip()
     try:

@@ -39,7 +39,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFreeOp, DmaSliceOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolForOp, SymbolGetDimOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolForOp, SymbolGetDimOp, SymbolIterType, SymbolValueType
 
 pass_module = importlib.import_module("kernel_gen.passes.lowering.symbol_loop_hoist")
 SymbolLoopHoistError = pass_module.SymbolLoopHoistError
@@ -102,7 +102,7 @@ def _make_module_for_hoist_alloc() -> ModuleOp:
     c128, c128_cast, one_two_eight = _const_symbol_int(128)
     ops.extend([c0, c0_cast, c1, c1_cast, c128, c128_cast])
 
-    loop_block = Block(arg_types=[SymbolValueType.from_expr("i")])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
     get_dim = SymbolGetDimOp(block.args[0], IntAttr(0))
     alloc_type = NnMemoryType(
         mem_type.shape,
@@ -133,7 +133,7 @@ def _make_module_for_fixed_read_slice() -> ModuleOp:
     c128, c128_cast, one_two_eight = _const_symbol_int(128)
     ops.extend([c0, c0_cast, c1, c1_cast, c128, c128_cast])
 
-    loop_block = Block(arg_types=[SymbolValueType.from_expr("i")])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
     bias_type = NnMemoryType(
         ArrayAttr([IntAttr(1), IntAttr(128)]),
         ArrayAttr([IntAttr(128), IntAttr(1)]),
@@ -170,7 +170,7 @@ def _make_module_with_forbidden_invariant_deslice() -> ModuleOp:
     c128, c128_cast, one_two_eight = _const_symbol_int(128)
     ops.extend([c0, c0_cast, c1, c1_cast, c128, c128_cast])
 
-    loop_block = Block(arg_types=[SymbolValueType.from_expr("i")])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
     lm_type = NnMemoryType(
         ArrayAttr([IntAttr(1), IntAttr(128)]),
         ArrayAttr([IntAttr(128), IntAttr(1)]),
@@ -207,7 +207,7 @@ def _make_module_with_step_zero() -> ModuleOp:
     c1, c1_cast, one = _const_symbol_int(1)
     ops.extend([c0, c0_cast, c1, c1_cast])
 
-    loop_block = Block(arg_types=[SymbolValueType.from_expr("i")])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "0")])
     get_dim = SymbolGetDimOp(block.args[0], IntAttr(0))
     loop_block.add_ops([get_dim])
     loop = SymbolForOp(zero, one, zero, loop_block)
@@ -231,7 +231,7 @@ def _make_module_with_alloc_freed_in_loop() -> ModuleOp:
     c128, c128_cast, one_two_eight = _const_symbol_int(128)
     ops.extend([c0, c0_cast, c1, c1_cast, c128, c128_cast])
 
-    loop_block = Block(arg_types=[SymbolValueType.from_expr("i")])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
     get_dim = SymbolGetDimOp(block.args[0], IntAttr(0))
     alloc_type = NnMemoryType(
         mem_type.shape,
@@ -263,7 +263,7 @@ def _make_module_with_fixed_read_slice_target_rewritten() -> ModuleOp:
     c128, c128_cast, one_two_eight = _const_symbol_int(128)
     ops.extend([c0, c0_cast, c1, c1_cast, c128, c128_cast])
 
-    loop_block = Block(arg_types=[SymbolValueType.from_expr("i")])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
     iv = loop_block.args[0]
     bias_type = NnMemoryType(
         ArrayAttr([IntAttr(1), IntAttr(128)]),
@@ -308,7 +308,7 @@ def _make_module_with_fixed_read_slice_source_mutated() -> ModuleOp:
     c128, c128_cast, one_two_eight = _const_symbol_int(128)
     ops.extend([c0, c0_cast, c1, c1_cast, c128, c128_cast])
 
-    loop_block = Block(arg_types=[SymbolValueType.from_expr("i")])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
     iv = loop_block.args[0]
     bias_type = NnMemoryType(
         ArrayAttr([IntAttr(1), IntAttr(128)]),

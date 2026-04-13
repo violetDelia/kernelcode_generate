@@ -105,6 +105,7 @@ from kernel_gen.dialect.symbol import (
     SymbolLtOp,
     SymbolMulOp,
     SymbolNeOp,
+    SymbolIterType,
     SymbolSubOp,
     SymbolToFloatOp,
     SymbolValueType,
@@ -4192,7 +4193,10 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
             isinstance(value.type, SymbolValueType) for value in (start_value, end_value, step_value)
         )
         if use_symbol_for:
-            iter_type = SymbolValueType.from_expr(node.var.name)
+            start_expr = start_value.type.expr.expr.data
+            end_expr = end_value.type.expr.expr.data
+            step_expr = step_value.type.expr.expr.data
+            iter_type = SymbolIterType.from_bounds(start_expr, end_expr, step_expr)
             body_block = Block(arg_types=[iter_type])
             loop_op = SymbolForOp(start_value, end_value, step_value, body_block)
         else:

@@ -42,7 +42,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaFreeOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolForOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolForOp, SymbolIterType, SymbolValueType
 from kernel_gen.passes.lowering.memory_pool import MemoryPoolError, MemoryPoolPass
 
 
@@ -570,7 +570,7 @@ def test_memory_pool_symbol_for_reuse() -> None:
     mem_type = _make_memory_type()
     alloc1 = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type)
 
-    loop_block = Block(arg_types=[SymbolValueType.from_expr("i")])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "4", "1")])
     alloc2 = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type)
     free2 = DmaFreeOp(alloc2.result)
     loop_block.add_ops([alloc2, free2])
@@ -645,7 +645,7 @@ def test_memory_pool_escape_return() -> None:
 def test_memory_pool_invalid_lifetime_loop() -> None:
     mem_type = _make_memory_type()
     alloc = DmaAllocOp(_make_symbol_operands([2, 4]), mem_type)
-    loop_block = Block(arg_types=[SymbolValueType.from_expr("i")])
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "4", "1")])
     loop_block.add_ops([DmaFreeOp(alloc.result)])
     loop_op = SymbolForOp(_symbol_value(0), _symbol_value(4), _symbol_value(1), loop_block)
     module = _build_module("main", [alloc, loop_op])
