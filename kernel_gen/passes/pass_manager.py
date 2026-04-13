@@ -185,7 +185,7 @@ class PassManager:
         """依序执行 Pass。
 
         创建者: 李白
-        最后一次更改: 小李飞刀
+        最后一次更改: 朽木露琪亚
 
         功能说明:
         - 逐个调用 Pass.run。
@@ -249,7 +249,7 @@ class PassManager:
         for item in self._passes:
             if item.name == "buffer-results-to-out-params" and lowering_names.isdisjoint(seen_set):
                 raise ValueError(
-                    "buffer-results-to-out-params requires lowered IR after lower-nn-to-kernel"
+                    "buffer-results-to-out-params requires lowered IR after lower-nn or lower-nn-to-kernel"
                 )
             result = item.run(result)
             seen_names.append(item.name)

@@ -1,7 +1,7 @@
 """emit_c tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 emit_c 节点级源码片段生成与错误路径。
@@ -43,7 +43,7 @@ from kernel_gen.dialect.symbol import SymbolAddOp, SymbolForOp, SymbolGetDimOp, 
 from kernel_gen.dsl.ast import BlockAST, ConstAST, ForAST, FunctionAST, Img2ColAST, LoadAST, ScalarArgAST, StoreAST, TensorAST, VarAST
 from kernel_gen.dsl.emit_c import EmitCContext, EmitCError, emit_c_op, emit_c_value
 from kernel_gen.dsl.mlir_gen import build_func_op, build_func_op_from_ast
-from kernel_gen.passes.lowering.nn_to_kernel import LowerNnToKernelPass
+from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace, NumericType
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
@@ -85,10 +85,10 @@ def _lower_single_op_func(
     result_type: object,
     build_ops,
 ) -> Block:
-    """构造单函数 module 并执行 `LowerNnToKernelPass`。
+    """构造单函数 module 并执行 `NnLoweringPass`。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 为 `emit_c` 的 pass-after IR 测试提供最小 lowering 包装。
@@ -111,7 +111,7 @@ def _lower_single_op_func(
     func_type = FunctionType.from_lists(input_types, [result_type])
     func_op = func.FuncOp("main", func_type, Region(block))
     module = ModuleOp([func_op])
-    LowerNnToKernelPass().run(module)
+    NnLoweringPass().run(module)
     return block
 
 
@@ -119,10 +119,10 @@ def _lower_built_func(fn: object, *runtime_args: object) -> Block:
     """对 `build_func_op(...)` 生成的 `func.func` 执行 pass 并返回 entry block。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 用于 I4 的公开链路 smoke：`build_func_op -> LowerNnToKernelPass -> emit_c`。
+    - 用于 I4 的公开链路 smoke：`build_func_op -> NnLoweringPass -> emit_c`。
     - 返回被 pass 改写后的 entry block，便于继续按 lowered op 发射节点级代码。
 
     使用示例:
@@ -136,7 +136,7 @@ def _lower_built_func(fn: object, *runtime_args: object) -> Block:
 
     func_op = build_func_op(fn, *runtime_args)
     module = ModuleOp([func_op])
-    LowerNnToKernelPass().run(module)
+    NnLoweringPass().run(module)
     return next(op for op in module.ops if isinstance(op, func.FuncOp)).body.block
 
 

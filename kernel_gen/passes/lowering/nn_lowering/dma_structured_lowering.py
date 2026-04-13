@@ -1,7 +1,7 @@
 """dma_structured lowering 实现。
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 负责 nn.broadcast / nn.transpose 的 lowering。
@@ -66,10 +66,12 @@ def _get_symbol_dim_from_source(
     """从 operand 的 symbol dim 提取维度。
 
     创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 使用 SymbolGetDimOp 从 operand 上读取动态维度。
+    - 支持 result 维度与 source 维度直接匹配或通过 result dim 在 operand_shape 中索引。
+    - 匹配失败时抛出稳定错误短语。
 
     使用示例:
     - _get_symbol_dim_from_source(block, op, idx, result_shape, operand, operand_shape)
@@ -85,13 +87,19 @@ def _get_symbol_dim_from_source(
     if source_axis < 0 or source_axis >= len(operand_shape):
         raise NnLoweringError("NnLoweringBroadcastSymbolDimNotFromSource: axis out of range")
     source_dim = operand_shape[source_axis]
+    result_dim = result_shape[axis]
+    if isinstance(source_dim, str) and source_dim == result_dim:
+        symbol_op = SymbolGetDimOp(operand, IntAttr(source_axis))
+        block.insert_op_before(symbol_op, op)
+        return symbol_op
+    if isinstance(result_dim, str) and result_dim in operand_shape:
+        source_axis = operand_shape.index(result_dim)
+        symbol_op = SymbolGetDimOp(operand, IntAttr(source_axis))
+        block.insert_op_before(symbol_op, op)
+        return symbol_op
     if not isinstance(source_dim, str):
         raise NnLoweringError("NnLoweringBroadcastSymbolDimNotFromSource: source dim is not symbolic")
-    if source_dim != result_shape[axis]:
-        raise NnLoweringError("NnLoweringBroadcastSymbolDimNotFromSource: symbol mismatch")
-    symbol_op = SymbolGetDimOp(operand, IntAttr(source_axis))
-    block.insert_op_before(symbol_op, op)
-    return symbol_op
+    raise NnLoweringError("NnLoweringBroadcastSymbolDimNotFromSource: symbol mismatch")
 
 
 def _ensure_broadcast_shape(
@@ -147,11 +155,12 @@ def _ensure_broadcast_compat(result_shape: list[int | str], operand_shape: list[
     """校验 nn.broadcast 的 shape 兼容性。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 按尾维对齐规则检查 operand/result 维度。
     - 对静态数值不匹配报错，对非法符号扩张报错。
+    - 允许 operand_dim=1 且 result_dim 为 operand_shape 中的符号维。
 
     使用示例:
     - _ensure_broadcast_compat(result_shape, operand_shape)
@@ -174,6 +183,8 @@ def _ensure_broadcast_compat(result_shape: list[int | str], operand_shape: list[
                 if operand_dim != 1 and operand_dim != result_dim:
                     raise NnLoweringError("invalid broadcast target shape")
                 continue
+            if operand_dim == 1 and isinstance(result_dim, str) and result_dim in operand_shape:
+                continue
             raise NnLoweringError("NnLoweringBroadcastSymbolDimNotFromSource: result dim not in source")
         if isinstance(result_dim, str):
             if operand_dim != result_dim:
@@ -186,10 +197,11 @@ def _lower_broadcast(block: Block, op: Operation) -> None:
     """lower nn.broadcast。
 
     创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 允许动态 shape，并使用 symbol.get_dim。
+    - 对重复符号维度进行缓存，避免重复生成 symbol.get_dim。
     - 先创建 dma.alloc，再调用 dma.broadcast。
 
     使用示例:
@@ -214,17 +226,22 @@ def _lower_broadcast(block: Block, op: Operation) -> None:
     _ensure_broadcast_compat(result_shape, operand_shape)
     if any(isinstance(dim, str) for dim in result_shape):
         symbol_dims: list[SSAValue] = []
+        cached_symbols: dict[str, SSAValue] = {}
         for idx, dim in enumerate(result_shape):
             if isinstance(dim, str):
-                symbol_op = _get_symbol_dim_from_source(
-                    block,
-                    op,
-                    idx,
-                    result_shape,
-                    operand,
-                    operand_shape,
-                )
-                symbol_dims.append(symbol_op.result)
+                cached = cached_symbols.get(dim)
+                if cached is None:
+                    symbol_op = _get_symbol_dim_from_source(
+                        block,
+                        op,
+                        idx,
+                        result_shape,
+                        operand,
+                        operand_shape,
+                    )
+                    cached = symbol_op.result
+                    cached_symbols[dim] = cached
+                symbol_dims.append(cached)
         alloc = DmaAllocOp(symbol_dims, result_type)
     else:
         alloc = DmaAllocOp([], result_type)
@@ -241,10 +258,11 @@ def _lower_transpose(block: Block, op: Operation) -> None:
     """lower nn.transpose。
 
     创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 校验 perm / shape / stride。
+    - 若含符号维度，使用 symbol.get_dim 生成 dma.alloc 的 dynamic_shape。
     - 先创建 dma.alloc，再调用 dma.transpose。
 
     使用示例:
@@ -266,7 +284,22 @@ def _lower_transpose(block: Block, op: Operation) -> None:
     perm = perm_attr.data
     if len(perm) != len(result_type.shape.data):
         raise NnLoweringError("nn.transpose perm rank mismatch")
-    alloc = DmaAllocOp([], result_type)
+    symbol_dims: list[SSAValue] = []
+    symbol_map: dict[str, SSAValue] = {}
+    for axis, dim in enumerate(operand.type.shape.data):
+        if isinstance(dim, StringAttr):
+            if dim.data == "?":
+                raise NnLoweringError("nn.transpose operand shape must not contain '?'")
+            symbol_op = SymbolGetDimOp(operand, IntAttr(axis))
+            block.insert_op_before(symbol_op, op)
+            symbol_map[dim.data] = symbol_op.result
+    for dim in result_type.shape.data:
+        if isinstance(dim, StringAttr):
+            symbol_value = symbol_map.get(dim.data)
+            if symbol_value is None:
+                raise NnLoweringError("nn.transpose result dim not in source")
+            symbol_dims.append(symbol_value)
+    alloc = DmaAllocOp(symbol_dims, result_type)
     block.insert_op_before(alloc, op)
     result = alloc.results[0]
     lowered = DmaTransposeOp(result, operand, perm_attr)

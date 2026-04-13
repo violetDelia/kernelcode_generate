@@ -1,11 +1,11 @@
 """lowering pass package.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 提供 nn -> kernel lowering pass 的公开入口。
-- 提供 `LowerNnToKernelPass` 与 `LowerNnToKernelError` 兼容入口。
+- 提供 `LowerNnToKernelPass` 兼容入口。
 - 提供 buffer-results-to-out-params pass 的公开入口。
 - 提供 lower-dma-memory-hierarchy pass 的公开入口。
 - 提供 decompass pass 的公开入口。
@@ -52,7 +52,7 @@
 """
 
 from .nn_lowering import NnLoweringError, NnLoweringPass
-from .nn_to_kernel import LowerNnToKernelError, LowerNnToKernelPass
+from .nn_to_kernel import LowerNnToKernelPass
 from .buffer_results_to_out_params import (
     BufferResultsToOutParamsError,
     BufferResultsToOutParamsPass,
@@ -70,8 +70,6 @@ __all__ = [
     "NnLoweringError",
     "BufferResultsToOutParamsPass",
     "BufferResultsToOutParamsError",
-    "LowerNnToKernelPass",
-    "LowerNnToKernelError",
     "LowerDmaMemoryHierarchyPass",
     "LowerDmaMemoryHierarchyError",
     "DecompassPass",

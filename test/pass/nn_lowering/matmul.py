@@ -1,7 +1,7 @@
 """nn_lowering matmul tests.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 验证 nn.matmul -> kernel.matmul 的 lowering 目标与结果类型约束。
@@ -35,7 +35,7 @@ from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 
 # TC-PASS-NNL-020
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-12 09:19:46 +0800
 # 最近一次运行成功时间: 2026-04-12 09:19:46 +0800
 # 测试目的: 验证 nn.matmul lowering 目标为 kernel.matmul 且结果类型一致。

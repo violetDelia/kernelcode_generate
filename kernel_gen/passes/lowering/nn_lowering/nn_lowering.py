@@ -1,7 +1,7 @@
 """nn -> kernel lowering pass.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 将 nn dialect 的逐元素 op lower 为 kernel dialect op。
@@ -796,10 +796,11 @@ def _lower_matmul(block: Block, op: Operation) -> None:
     """lower nn.matmul。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 校验 shape 与 stride。
+    - 动态维度通过 symbol.get_dim 生成 dma.alloc 的 dynamic_shape。
     - 先创建 dma.alloc，再调用 kernel.matmul。
 
     使用示例:
@@ -821,7 +822,23 @@ def _lower_matmul(block: Block, op: Operation) -> None:
     _ensure_matmul_stride(lhs.type)
     _ensure_matmul_stride(rhs.type)
     _ensure_matmul_stride(result_type)
-    alloc = DmaAllocOp([], result_type)
+    lhs_shape = _normalize_shape_dims(lhs.type.shape.data)
+    rhs_shape = _normalize_shape_dims(rhs.type.shape.data)
+    out_shape = _normalize_shape_dims(result_type.shape.data)
+    symbol_dims: list[SSAValue] = []
+    if isinstance(out_shape[0], str):
+        if out_shape[0] != lhs_shape[0]:
+            raise NnLoweringError("matmul output shape must match operands")
+        symbol_op = SymbolGetDimOp(lhs, IntAttr(0))
+        block.insert_op_before(symbol_op, op)
+        symbol_dims.append(symbol_op.result)
+    if isinstance(out_shape[1], str):
+        if out_shape[1] != rhs_shape[1]:
+            raise NnLoweringError("matmul output shape must match operands")
+        symbol_op = SymbolGetDimOp(rhs, IntAttr(1))
+        block.insert_op_before(symbol_op, op)
+        symbol_dims.append(symbol_op.result)
+    alloc = DmaAllocOp(symbol_dims, result_type)
     block.insert_op_before(alloc, op)
     result = alloc.results[0]
     lowered = KernelMatmulOp(lhs, rhs, result, space)
@@ -924,9 +941,10 @@ def _lower_op(block: Block, op: Operation) -> None:
     """lower 单个 op。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
+    - 仅处理 nn.* op；非 nn.* 直接返回。
     - 根据 op.name 分发到具体 lowering。
     - 非 nn dialect op 直接返回，避免误报 unknown op。
 
@@ -984,7 +1002,7 @@ def _lower_block(block: Block) -> None:
     """lower block 内的 ops。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 逐个遍历 block 中 nn dialect op 并执行 lowering。

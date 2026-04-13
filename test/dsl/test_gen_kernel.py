@@ -1,7 +1,7 @@
 """gen_kernel tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 func.func 到目标函数源码的组装行为。
@@ -79,7 +79,7 @@ from kernel_gen.dsl.gen_kernel import GenKernelError, gen_kernel
 from kernel_gen.dsl.mlir_gen import build_func_op
 from kernel_gen.passes.lowering.buffer_results_to_out_params import BufferResultsToOutParamsPass
 from kernel_gen.passes.lowering.kernel_split import KernelSplitPass, _KernelSplitSymbolLiteralOp, _KernelSplitTileValueOp
-from kernel_gen.passes.lowering.nn_to_kernel import LowerNnToKernelPass
+from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
@@ -301,10 +301,10 @@ def _make_npu_demo_add_barrier_module(
 
 
 def _lower_func(func_op: func.FuncOp) -> func.FuncOp:
-    """对单个 `func.func` 执行 `LowerNnToKernelPass` 并返回改写后的函数。
+    """对单个 `func.func` 执行 `NnLoweringPass` 并返回改写后的函数。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 为 I3 的 pass-after IR codegen 测试提供最小包装。
@@ -320,7 +320,7 @@ def _lower_func(func_op: func.FuncOp) -> func.FuncOp:
     """
 
     module = ModuleOp([func_op])
-    LowerNnToKernelPass().run(module)
+    NnLoweringPass().run(module)
     return next(op for op in module.ops if isinstance(op, func.FuncOp))
 
 
@@ -328,7 +328,7 @@ def _rewrite_func(func_op: func.FuncOp) -> func.FuncOp:
     """对单个 `func.func` 执行 `BufferResultsToOutParamsPass` 并返回改写后的函数。
 
     创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 为 O5 的 rewrite-after-IR codegen 测试提供最小包装。
@@ -355,7 +355,7 @@ def _lower_and_rewrite_func(func_op: func.FuncOp) -> func.FuncOp:
     最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 固定公开成功链路为 `LowerNnToKernelPass -> BufferResultsToOutParamsPass`。
+    - 固定公开成功链路为 `NnLoweringPass -> BufferResultsToOutParamsPass`。
     - 用于 O5 的 `build_func_op -> pass -> gen_kernel` 黑盒闭环测试。
 
     使用示例:
@@ -368,7 +368,7 @@ def _lower_and_rewrite_func(func_op: func.FuncOp) -> func.FuncOp:
     """
 
     module = ModuleOp([func_op])
-    LowerNnToKernelPass().run(module)
+    NnLoweringPass().run(module)
     BufferResultsToOutParamsPass().run(module)
     return next(op for op in module.ops if isinstance(op, func.FuncOp))
 
@@ -1520,7 +1520,7 @@ def test_gen_kernel_black_box_direct_return_nn_add_conv2d_img2col2d_tiled_and_np
 # 创建者: 大闸蟹
 # 最后一次更改: 朽木露琪亚
 # 功能说明: 验证 `build_func_op -> pass -> gen_kernel` 的三条 nn.add CPU 路径可生成源码并完成编译执行。
-# 测试目的: 作为 I4 的统一 smoke，确认公开成功链路来自 `build_func_op -> LowerNnToKernelPass -> gen_kernel`，而不是 raw `nn.add` direct-return 特化。
+# 测试目的: 作为 I4 的统一 smoke，确认公开成功链路来自 `build_func_op -> NnLoweringPass -> gen_kernel`，而不是 raw `nn.add` direct-return 特化。
 # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_compiles_and_runs_lowered_nn_add_variants_on_cpu
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md

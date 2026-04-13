@@ -1,7 +1,7 @@
 """nn_lowering img2col2d tests.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 验证 nn.img2col2d -> kernel.img2col2d 的 lowering 目标与 symbol.int 参数约束。
@@ -36,7 +36,7 @@ from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 
 # TC-PASS-NNL-022
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-12 09:19:46 +0800
 # 最近一次运行成功时间: 2026-04-12 09:19:46 +0800
 # 测试目的: 验证 nn.img2col2d lowering 目标为 kernel.img2col2d 且参数为 symbol.int。

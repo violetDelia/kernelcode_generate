@@ -1,7 +1,7 @@
 """nn_lowering reduce_sum tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 使用 ircheck 文本验证 `nn.reduce_sum` lowering 目标为 `kernel.reduce(kind=sum)`。
@@ -11,9 +11,9 @@
 - pytest -q test/pass/nn_lowering/reduce_sum.py
 
 关联文件:
-- spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
+- spec: spec/pass/lowering/nn_lowering.md
 - test: test/pass/nn_lowering/reduce_sum.py
-- 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
+- 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
 """
 
 from __future__ import annotations
@@ -173,13 +173,13 @@ def _build_module(input_type: NnMemoryType, result_type: NnMemoryType) -> Module
 
 # TC-PASS-NNL-011
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-12 08:20:00 +0800
 # 最近一次运行成功时间: 2026-04-12 08:20:00 +0800
 # 测试目的: 验证 nn.reduce_sum lowering 目标为 kernel.reduce(kind=sum)（静态形态）。
 # 使用示例: pytest -q test/pass/nn_lowering/reduce_sum.py -k test_nn_lowering_reduce_sum_static
-# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
 # 对应测试文件路径: test/pass/nn_lowering/reduce_sum.py
 def test_nn_lowering_reduce_sum_static() -> None:
     _assert_ircheck_ok(CASE_TEXT_STATIC, "test/pass/nn_lowering/reduce_sum.py:static")
@@ -187,13 +187,13 @@ def test_nn_lowering_reduce_sum_static() -> None:
 
 # TC-PASS-NNL-011
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-12 08:20:00 +0800
 # 最近一次运行成功时间: 2026-04-12 08:20:00 +0800
 # 测试目的: 验证 nn.reduce_sum lowering 目标为 kernel.reduce(kind=sum)（符号维度）。
 # 使用示例: pytest -q test/pass/nn_lowering/reduce_sum.py -k test_nn_lowering_reduce_sum_dynamic
-# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
 # 对应测试文件路径: test/pass/nn_lowering/reduce_sum.py
 def test_nn_lowering_reduce_sum_dynamic() -> None:
     _assert_ircheck_ok(CASE_TEXT_DYNAMIC, "test/pass/nn_lowering/reduce_sum.py:dynamic")
@@ -201,13 +201,13 @@ def test_nn_lowering_reduce_sum_dynamic() -> None:
 
 # TC-PASS-NNL-012
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-12 08:20:00 +0800
 # 最近一次运行成功时间: 2026-04-12 08:20:00 +0800
 # 测试目的: 验证 nn.reduce_sum 输出形态不一致时必须抛 NnLoweringError。
 # 使用示例: pytest -q test/pass/nn_lowering/reduce_sum.py -k test_nn_lowering_reduce_sum_shape_mismatch
-# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
 # 对应测试文件路径: test/pass/nn_lowering/reduce_sum.py
 def test_nn_lowering_reduce_sum_shape_mismatch() -> None:
     input_type = _make_memory_type([4, 8])

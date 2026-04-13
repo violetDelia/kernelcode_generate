@@ -1,7 +1,7 @@
 """buffer-results-to-out-params pass tests.
 
 创建者: 朽木露琪亚
-最后一次更改: jcc你莫辜负
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 buffer-results-to-out-params pass 的最小骨架行为与失败边界。
@@ -42,7 +42,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaFillOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.passes.lowering.nn_to_kernel import LowerNnToKernelPass
+from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 from kernel_gen.passes.pass_manager import PassManager
 
 pass_module = importlib.import_module(
@@ -256,7 +256,7 @@ def test_rewrite_callsite_replaces_old_memory_result_ssa() -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
-# 功能说明: 验证 lowering pipeline 中 BufferResultsToOutParamsPass 固定运行在 LowerNnToKernelPass 之后。
+# 功能说明: 验证 lowering pipeline 中 BufferResultsToOutParamsPass 固定运行在 NnLoweringPass 之后。
 # 测试目的: 锁定 O2 的 pass 链路位置，避免实现又回退到手工拼接或错误顺序。
 # 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_pass_manager_runs_lower_then_buffer_results_to_out_params
 # 对应功能实现文件路径: kernel_gen/passes/lowering/buffer_results_to_out_params.py
@@ -266,10 +266,10 @@ def _assert_pass_manager_runs_lower_then_buffer_results_to_out_params(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     order: list[str] = []
-    original_lower_run = LowerNnToKernelPass.run
+    original_lower_run = NnLoweringPass.run
     original_buffer_run = BufferResultsToOutParamsPass.run
 
-    def _record_lower(self: LowerNnToKernelPass, module: ModuleOp) -> ModuleOp:
+    def _record_lower(self: NnLoweringPass, module: ModuleOp) -> ModuleOp:
         order.append(self.name)
         return original_lower_run(self, module)
 
@@ -279,7 +279,7 @@ def _assert_pass_manager_runs_lower_then_buffer_results_to_out_params(
         order.append(self.name)
         return original_buffer_run(self, module)
 
-    monkeypatch.setattr(LowerNnToKernelPass, "run", _record_lower)
+    monkeypatch.setattr(NnLoweringPass, "run", _record_lower)
     monkeypatch.setattr(BufferResultsToOutParamsPass, "run", _record_buffer)
 
     mem_type = _make_memory_type()
@@ -298,11 +298,11 @@ def _assert_pass_manager_runs_lower_then_buffer_results_to_out_params(
     module = ModuleOp([func_op])
 
     pm = PassManager(name="lowering")
-    pm.add_pass(LowerNnToKernelPass())
+    pm.add_pass(NnLoweringPass())
     pm.add_pass(BufferResultsToOutParamsPass())
     pm.run(module)
 
-    assert order == ["lower-nn-to-kernel", "buffer-results-to-out-params"]
+    assert order == ["lower-nn", "buffer-results-to-out-params"]
 
 
 def test_pass_manager_runs_lower_then_buffer_results_to_out_params(

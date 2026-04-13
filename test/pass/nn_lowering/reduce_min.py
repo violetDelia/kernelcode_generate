@@ -1,7 +1,7 @@
 """nn_lowering reduce_min tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 使用 ircheck 文本验证 `nn.reduce_min` lowering 目标为 `kernel.reduce(kind=min)`。
@@ -10,9 +10,9 @@
 - pytest -q test/pass/nn_lowering/reduce_min.py
 
 关联文件:
-- spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
+- spec: spec/pass/lowering/nn_lowering.md
 - test: test/pass/nn_lowering/reduce_min.py
-- 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
+- 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
 """
 
 from __future__ import annotations
@@ -116,13 +116,13 @@ def _assert_ircheck_ok(case_text: str, source_path: str) -> None:
 
 # TC-PASS-NNL-011
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-12 08:20:00 +0800
 # 最近一次运行成功时间: 2026-04-12 08:20:00 +0800
 # 测试目的: 验证 nn.reduce_min lowering 目标为 kernel.reduce(kind=min)（静态形态）。
 # 使用示例: pytest -q test/pass/nn_lowering/reduce_min.py -k test_nn_lowering_reduce_min_static
-# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
 # 对应测试文件路径: test/pass/nn_lowering/reduce_min.py
 def test_nn_lowering_reduce_min_static() -> None:
     _assert_ircheck_ok(CASE_TEXT_STATIC, "test/pass/nn_lowering/reduce_min.py:static")
@@ -130,13 +130,13 @@ def test_nn_lowering_reduce_min_static() -> None:
 
 # TC-PASS-NNL-011
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-12 08:20:00 +0800
 # 最近一次运行成功时间: 2026-04-12 08:20:00 +0800
 # 测试目的: 验证 nn.reduce_min lowering 目标为 kernel.reduce(kind=min)（符号维度）。
 # 使用示例: pytest -q test/pass/nn_lowering/reduce_min.py -k test_nn_lowering_reduce_min_dynamic
-# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
 # 对应测试文件路径: test/pass/nn_lowering/reduce_min.py
 def test_nn_lowering_reduce_min_dynamic() -> None:
     _assert_ircheck_ok(CASE_TEXT_DYNAMIC, "test/pass/nn_lowering/reduce_min.py:dynamic")
@@ -144,13 +144,13 @@ def test_nn_lowering_reduce_min_dynamic() -> None:
 
 # TC-PASS-NNL-011
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-12 08:20:00 +0800
 # 最近一次运行成功时间: 2026-04-12 08:20:00 +0800
 # 测试目的: 验证 reduce 维度为符号时仍能 lower 为 kernel.reduce(kind=min)。
 # 使用示例: pytest -q test/pass/nn_lowering/reduce_min.py -k test_nn_lowering_reduce_min_symbol_dim
-# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
 # 对应测试文件路径: test/pass/nn_lowering/reduce_min.py
 def test_nn_lowering_reduce_min_symbol_dim() -> None:
     _assert_ircheck_ok(CASE_TEXT_DYNAMIC_SYMBOL_DIM, "test/pass/nn_lowering/reduce_min.py:symbol_dim")
