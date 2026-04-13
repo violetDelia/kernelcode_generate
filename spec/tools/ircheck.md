@@ -365,8 +365,8 @@ builtin.module { /* ... */ }
 ### 多 step 示例
 
 ```mlir
-// COMPILE_ARGS: --pass lower-nn --pass "tile={tile-only=true,tile-elewise=true}" --pass buffer-results-to-out-params
-// CHECK: scf.for
+// COMPILE_ARGS: --pass lower-nn --pass buffer-results-to-out-params --pass "tile={tile-only=true,tile-elewise=true}"
+// CHECK: symbol.for
 
 builtin.module { /* ... */ }
 ```

@@ -4,6 +4,7 @@
 
 - 定义 `TilePass` 的公开合同：在单函数 IR 上先做 analysis，再按 analysis 结果进行 tile 改写。
 - analysis 阶段只输出 `tile.analysis` 与参数推导辅助信息；tile 改写阶段产出 `tuner.param + tile.step_value + symbol.for + dma.view` 的显式结构。
+- 目录级黑盒完成态固定为 `PYTHONPATH=. python -m expectation.pass.tile`；`analysis_only.py` 与 `basic.py` 仅保留为兼容入口。
 - 公开 option 组合仅收口计划书 S1 覆盖的最小集合；其余组合不承诺支持。
 
 ## 文档信息
@@ -49,6 +50,7 @@
 - 保持单公开 pass：`TilePass`，名字固定为 `tile`。
 - 固定 analysis 与 tile 改写的前后顺序。
 - 明确 analysis-only 与 tile-only 的互斥关系。
+- 固定 `expectation.pass.tile` 为唯一目录级黑盒入口；`analysis_only.py` 与 `basic.py` 只承担兼容分流职责，不替代目录级完成态。
 - 公开 option 组合仅覆盖计划书 S1 所列最小集合。
 
 ## 限制与边界
@@ -57,6 +59,7 @@
 - `analysis-only` 与 `tile-only` 同时为 `true` 必须报 `TilePassInvalidOption`。
 - `analysis-only` 与 `tile-only` 的 value 只接受 `true/false` 字符串。
 - 除下述公开组合外，其他 option 组合未承诺支持，行为未定义。
+- 为跑通 `expectation.pass.tile` 目录入口所做的相邻导入或运行环境修正，只允许收口 `tile` 直接依赖的路径；不得借机扩展为其他 `nn lowering` 主题的公开合同改写。
 
 ## 公开接口
 
@@ -168,6 +171,11 @@ module = pass_obj.run(module)
 - 公开行为：
   - `analysis-only=true` 时：允许 `tile.analysis`/`tuner.param`/`symbol.get_dim`，不允许 `symbol.for`/`dma.view`/`tile.step_value`。
   - `tile-only=true` 时：analysis 先执行，再生成 `tuner.param + tile.step_value + symbol.for + dma.view`，改写后 `tile.analysis` 不再保留。
+- 目录入口合同：
+  - `python -m expectation.pass.tile` 必须串起 `expectation.pass.tile.analysis` 与 `expectation.pass.tile.tile_only`。
+  - `python expectation/pass/tile/analysis_only.py` 仅作为 `expectation.pass.tile.analysis` 的兼容入口。
+  - `python expectation/pass/tile/basic.py` 仅作为 `expectation.pass.tile.tile_only` 的兼容入口。
+  - 目录级黑盒完成态只认 `python -m expectation.pass.tile`；兼容入口仅用于分阶段排查，不替代完成态。
 
 ## tile-only 改写合同（matmul / fc / tile-reduce）
 
@@ -201,24 +209,19 @@ module = pass_obj.run(module)
 - 测试文件：`test/pass/test_lowering_tile.py`
 - 执行命令：
   - `pytest -q test/pass/test_lowering_tile.py`
+  - `PYTHONPATH=. python -m expectation.pass.tile`
 - 运行前提：
-  - expectation 以 worktree 版本为准时，在 worktree 根目录执行上述命令。
-  - expectation 以主仓版本为准时，在主仓根目录执行命令，并将 worktree 路径置于 `PYTHONPATH` 前置，例如：
-    - `PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260413-tile-exp-s4:/home/lfr/kernelcode_generate python -m expectation.pass.tile.analysis`
-    - `PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260413-tile-exp-s4:/home/lfr/kernelcode_generate python /home/lfr/kernelcode_generate/expectation/pass/tile/analysis_only.py`
-    - `PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260413-tile-exp-s4:/home/lfr/kernelcode_generate python expectation/pass/tile/tile_only/matmul.py`
-    - `PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260413-tile-exp-s4:/home/lfr/kernelcode_generate python expectation/pass/tile/tile_only/fc.py`
-    - `PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260413-tile-exp-s4:/home/lfr/kernelcode_generate python -m expectation.pass.tile.tile_only`
+  - expectation 目录位于当前工作目录时，直接在该目录执行上述命令。
+  - expectation 目录不在当前 worktree、而在仓库根目录时，应从仓库根目录执行，并将当前 `tile worktree` 置于 `PYTHONPATH` 前置，例如：
+    - `PYTHONPATH=<tile_worktree>:<repo_root> python -m expectation.pass.tile`
+    - `PYTHONPATH=<tile_worktree>:<repo_root> python -m expectation.pass.tile.analysis`
+    - `PYTHONPATH=<tile_worktree>:<repo_root> python -m expectation.pass.tile.tile_only`
 - 测试目标：
   - 验证单入口行为与公开 option 组合。
   - 验证 `analysis-only` 与 `tile-only` 互斥的拒绝路径。
-  - 验证 analysis 目录入口可运行（以主仓 expectation 与 worktree 代码联动为准）：
-    - `PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260413-tile-exp-s4:/home/lfr/kernelcode_generate python -m expectation.pass.tile.analysis`
-    - `PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260413-tile-exp-s4:/home/lfr/kernelcode_generate python /home/lfr/kernelcode_generate/expectation/pass/tile/analysis_only.py`
-  - 验证 tile-only 的 matmul/fc 入口可运行（以主仓 expectation 与 worktree 代码联动为准）：
-    - `PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260413-tile-exp-s4:/home/lfr/kernelcode_generate python expectation/pass/tile/tile_only/matmul.py`
-    - `PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260413-tile-exp-s4:/home/lfr/kernelcode_generate python expectation/pass/tile/tile_only/fc.py`
-    - `PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260413-tile-exp-s4:/home/lfr/kernelcode_generate python -m expectation.pass.tile.tile_only`
+  - 验证目录级黑盒入口可串起 analysis 与 tile_only 全部 case。
+  - 验证兼容入口 `analysis_only.py` / `basic.py` 仍分别转发到 `analysis` / `tile_only`，但不替代目录级完成态。
+  - 验证 `test/pass/test_lowering_tile.py` 与目录级 expectation 完成态同时通过，不允许只拉通其中一侧。
 - 功能与用例清单：
   - `test_tile_analysis_only_true`
   - `test_tile_analysis_only_false`
