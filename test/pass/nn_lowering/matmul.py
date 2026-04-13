@@ -10,8 +10,8 @@
 - pytest -q test/pass/nn_lowering/matmul.py
 
 关联文件:
-- 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-- Spec 文档: spec/pass/lowering/nn_lowering.md
+- 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
+- Spec 文档: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
 - 测试文件: test/pass/nn_lowering/matmul.py
 """
 
@@ -40,8 +40,8 @@ from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 # 最近一次运行成功时间: 2026-04-12 09:19:46 +0800
 # 测试目的: 验证 nn.matmul lowering 目标为 kernel.matmul 且结果类型一致。
 # 使用示例: pytest -q test/pass/nn_lowering/matmul.py -k test_nn_lowering_matmul_target
-# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
 # 对应测试文件路径: test/pass/nn_lowering/matmul.py
 def test_nn_lowering_matmul_target() -> None:
     space = NnMemorySpaceAttr(StringAttr("global"))

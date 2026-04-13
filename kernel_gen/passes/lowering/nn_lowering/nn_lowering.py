@@ -928,6 +928,7 @@ def _lower_op(block: Block, op: Operation) -> None:
 
     功能说明:
     - 根据 op.name 分发到具体 lowering。
+    - 非 nn dialect op 直接返回，避免误报 unknown op。
 
     使用示例:
     - _lower_op(block, op)
@@ -937,6 +938,9 @@ def _lower_op(block: Block, op: Operation) -> None:
     - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
     """
+
+    if not op.name.startswith("nn."):
+        return
 
     from .element_binary_lowering import lower_element_binary_family
 
@@ -965,14 +969,9 @@ def _lower_op(block: Block, op: Operation) -> None:
     if op.name == "nn.softmax":
         _lower_softmax(block, op)
         return
-    if op.name == "nn.matmul":
-        _lower_matmul(block, op)
-        return
-    if op.name == "nn.img2col1d":
-        _lower_img2col1d(block, op)
-        return
-    if op.name == "nn.img2col2d":
-        _lower_img2col2d(block, op)
+    from .matmul_img2col_lowering import lower_matmul_img2col_family
+
+    if lower_matmul_img2col_family(block, op):
         return
     from .dma_structured_lowering import lower_dma_structured_family
 
@@ -988,7 +987,8 @@ def _lower_block(block: Block) -> None:
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 逐个遍历 op 执行 lowering。
+    - 逐个遍历 block 中 nn dialect op 并执行 lowering。
+    - 非 nn dialect op 会被保留，不参与 lowering。
 
     使用示例:
     - _lower_block(block)
@@ -1001,6 +1001,8 @@ def _lower_block(block: Block) -> None:
 
     for op in list(block.ops):
         if isinstance(op, func.ReturnOp):
+            continue
+        if not op.name.startswith("nn."):
             continue
         _lower_op(block, op)
 
