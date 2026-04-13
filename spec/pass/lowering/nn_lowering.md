@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/pass/lowering/nn_lowering.md`](../../../spec/pass/lowering/nn_lowering.md)
 - `功能实现`：[`kernel_gen/passes/lowering/nn_lowering/nn_lowering.py`](../../../kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
 - `test`：
@@ -40,6 +40,9 @@
 - `nn.broadcast` / `nn.transpose` 必须 lower 为 `dma.broadcast` / `dma.transpose`。
 - `nn.exp` / `nn.softmax` / `nn.reduce_*` / `nn.matmul` / `nn.img2col*` 必须 lower 为具名 `kernel.*` op。
 - `nn` 逐元素/比较类 op 必须 lower 为 `kernel.binary_elewise`，`kind` 与原 op 语义一致。
+- `nn` 逐元素/比较类 op 的结果 memory 分配规则：
+  - 当结果 `shape` 全为静态整型维度时，`dma.alloc` 可直接使用空的 dynamic shape operand；此时 lowering 不要求先出现 `symbol.get_dim`。
+  - 当结果 `shape` 含符号维度时，必须按结果 rank 逐维生成 `symbol.get_dim`，并在 `dma.alloc` 之前按顺序传入这些符号值。
 - `nn.exp` lowering 规则：
   - 目标 op 固定为 `kernel.exp`，并把结果写入 `out` operand。
   - `out` 必须由 `dma.alloc` 创建；输入与输出的 `shape/stride/element_type/space` 必须一致，否则抛出 `NnLoweringError`。
@@ -65,6 +68,9 @@
 - mixed compare 的桥接规则：
   - `memory + memory` compare：直接 lower 为 `kernel.binary_elewise(kind=...)`，且 `shape/stride/space/element_type` 必须一致。
   - `memory + symbol/const` compare：必须先用 `dma.alloc + dma.broadcast` 物化为 temporary memory，再进行 compare；禁止 `kernel` 比较 op 直接接收非 memory operand。
+- element binary mixed operand 的桥接规则：
+  - `memory + memory` 的静态 add/sub case，应以 `dma.alloc + kernel.binary_elewise + func.return` 作为最小稳定输出序列。
+  - `memory + symbol/const` 或结果含符号维度时，允许在 `dma.alloc` 前生成 `symbol.get_dim`，并在需要时额外生成 `dma.broadcast`。
 - 遇到不支持的 op、结果类型非法、缺失 `nn.space`、operand 数量不匹配或 kernel 校验失败时，必须抛出 `NnLoweringError` 并终止。
 
 ## 公开接口
@@ -193,6 +199,8 @@ module_op = ensure_module_op(module)
   - 验证 `NnLoweringPass` 的公开名字与导出路径稳定（以 `public_name.py` 为稳定入口）。
   - 验证 `NnLoweringError` 与 `NnLoweringPass` 的公共导出可用。
   - 验证 `kernel.binary_elewise` 与 `kernel.reduce` 在 lowering 输出中可解析与可校验。
+  - 验证 add/sub 的静态 `memory + memory` lowering 不把 `symbol.get_dim` 作为必现前置行。
+  - 验证 add/sub 的符号维度 lowering 在 `dma.alloc` 前按维度生成 `symbol.get_dim`。
   - 验证 `nn.exp` -> `kernel.exp` 的 lowering 目标与输出消费链路。
   - 验证 `nn.reduce_sum/min/max` -> `kernel.reduce(kind=...)` 的 lowering 目标与 `axis/keepdim` 传递。
   - 验证 `nn.softmax` -> `kernel.softmax` 的 lowering 目标与 `axis` 传递。
