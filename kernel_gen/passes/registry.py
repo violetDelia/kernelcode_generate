@@ -332,10 +332,9 @@ def load_builtin_passes() -> None:
         register_pass(pass_cls)
 
     from kernel_gen.passes import pipeline as _pipeline
-    from kernel_gen.passes.pipeline import default_lowering as _default_lowering
 
     if "default-lowering" not in _PIPELINE_REGISTRY:
-        register_pipeline("default-lowering")(_default_lowering.build_default_lowering_pipeline)
+        register_pipeline("default-lowering")(_pipeline.build_default_lowering_pipeline)
 
     _BUILTINS_LOADED = True
 

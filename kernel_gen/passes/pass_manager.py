@@ -5,6 +5,7 @@
 
 功能说明:
 - 定义 Pass 与 PassManager 的基础行为。
+- 提供 `build_default_lowering_pass_manager` 兼容入口，内部委派到 pipeline builder。
 
 使用示例:
 - import importlib
@@ -13,6 +14,7 @@
 - pm = PassManager(name="opt")
 - pm.add_pass(MyPass())
 - result = pm.run(ir)
+- pm = build_default_lowering_pass_manager()
 
 关联文件:
 - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
@@ -247,7 +249,7 @@ class PassManager:
         for item in self._passes:
             if item.name == "buffer-results-to-out-params" and lowering_names.isdisjoint(seen_set):
                 raise ValueError(
-                    "buffer-results-to-out-params requires lowered IR after lower-nn or lower-nn-to-kernel"
+                    "buffer-results-to-out-params requires lowered IR after lower-nn-to-kernel"
                 )
             result = item.run(result)
             seen_names.append(item.name)
@@ -255,4 +257,29 @@ class PassManager:
         return result
 
 
-__all__ = ["Pass", "PassManager"]
+def build_default_lowering_pass_manager() -> "PassManager":
+    """兼容入口：构造默认 lowering PassManager。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 兼容旧入口 `build_default_lowering_pass_manager()`。
+    - 实际委派给 `kernel_gen.passes.pipeline.build_default_lowering_pipeline()`。
+
+    使用示例:
+    - pm = build_default_lowering_pass_manager()
+    - lowered = pm.run(module)
+
+    关联文件:
+    - spec: [spec/pass/pipeline/default_lowering.md](spec/pass/pipeline/default_lowering.md)
+    - test: [test/pass/test_pipeline_default_lowering.py](test/pass/test_pipeline_default_lowering.py)
+    - 功能实现: [kernel_gen/passes/pipeline/default_lowering.py](kernel_gen/passes/pipeline/default_lowering.py)
+    """
+
+    from kernel_gen.passes.pipeline import build_default_lowering_pipeline
+
+    return build_default_lowering_pipeline()
+
+
+__all__ = ["Pass", "PassManager", "build_default_lowering_pass_manager"]
