@@ -155,6 +155,25 @@ bash ./scripts/codex-multi-agents-task.sh \
 - `-worktree/-depends/-plan` 支持传 `None`，但 `-worktree` 不能为 `None` 或空字符串。
 - 权限：仅架构师与管理员可执行 `-new`。
 
+### 新建计划修复任务
+```bash
+bash ./scripts/codex-multi-agents-task.sh \
+  -file ./TODO.md \
+  -new -info "default-lowering-S6-实现；计划书：《ARCHITECTURE/plan/pass_pipeline_registration_refactor_green_plan.md》；任务目标：修复：收口 default-lowering 构建路径与 pass 名兼容；任务链记录：20260413-default-lowering-s6.md" \
+  -type build \
+  -worktree wt-20260413-default-lowering-s6 \
+  -depends None \
+  -plan ARCHITECTURE/plan/pass_pipeline_registration_refactor_green_plan.md \
+  -from 守护最好的爱莉希雅 \
+  -log agents/codex-multi-agents/log/task_records/2026/15/20260413-default-lowering-s6.md
+```
+
+说明：
+- 计划书终验若不通过，不直接归档；由给出最终“不通过”结论的架构师创建修复任务。
+- 修复任务继续挂在原计划书下，`任务目标` 第一短句直接写 `修复：<最小阻断项>`。
+- 另一位架构师只补充阻断项和修复范围，不再重复建同一任务。
+- 若误建了同一修复任务，只保留一条继续推进，另一条按重复任务处理。
+
 ### 分发任务
 ```bash
 bash ./scripts/codex-multi-agents-task.sh \
@@ -238,6 +257,7 @@ bash ./scripts/codex-multi-agents-task.sh \
 说明：
 - 仅当该计划在 `## 计划书` 中为“完成待检查”且待完成任务为 0 时可执行。
 - 权限：仅管理员可执行 `-done-plan`。
+- 若双架构师结论仍为“不通过”，应先等待修复任务完成并重新验收，不执行 `-done-plan`。
 
 ### 查看状态
 ```bash
@@ -275,3 +295,4 @@ bash ./scripts/codex-multi-agents-task.sh \
 ## 5. 任务流转速记
 - 实现任务默认包含测试验证。
 - 审查不通过则回到实现任务（含测试）再次迭代，直到审查通过。
+- 计划书终验不通过则由架构师补建修复任务，管理员只推进唯一保留的修复任务。
