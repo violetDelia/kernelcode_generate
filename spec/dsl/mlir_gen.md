@@ -9,10 +9,14 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`jcc你莫辜负`
 - `spec`：[`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
-- `功能实现`：[`kernel_gen/dsl/mlir_gen.py`](../../kernel_gen/dsl/mlir_gen.py)
-- `test`：[`test/dsl/test_mlir_gen.py`](../../test/dsl/test_mlir_gen.py)
+- `功能实现`：[`kernel_gen/dsl/mlir_gen/__init__.py`](../../kernel_gen/dsl/mlir_gen/__init__.py)
+- `test`：
+  - [`test/dsl/mlir_gen/test_function_builder.py`](../../test/dsl/mlir_gen/test_function_builder.py)
+  - [`test/dsl/mlir_gen/test_parse_env.py`](../../test/dsl/mlir_gen/test_parse_env.py)
+  - [`test/dsl/mlir_gen/test_signature.py`](../../test/dsl/mlir_gen/test_signature.py)
+  - [`test/dsl/mlir_gen/test_module_builder.py`](../../test/dsl/mlir_gen/test_module_builder.py)
 
 ## 依赖
 
@@ -259,7 +263,7 @@ assert ok is True
 - callee 的 `func.func` 签名必须由其 call-site operand 类型推导；callee 不要求也不接受额外的 `runtime_args`。
 - 同一个 callee 若在多个 call-site 下推导出不一致签名，必须失败，错误消息包含 `MlirGenModuleError: inconsistent callee signature`。
 - 递归调用不支持，必须失败，错误消息包含 `MlirGenModuleError: recursive callee graph is not supported`。
-- 遇到不支持的 callee 形式（例如匿名函数、lambda、本地闭包函数等），必须失败，错误消息包含 `MlirGenModuleError: unsupported callee function`。
+- 遇到不支持的 callee 形式（例如匿名函数、lambda、捕获外部变量的本地闭包函数等），必须失败，错误消息包含 `MlirGenModuleError: unsupported callee function`。
 - DSL helper 调用（例如 `softmax(...)`、`broadcast_to(...)`、`matmul(...)`）不属于“应当表达为 `func.call` 的 Python callee”，不得因此向 module 额外增加新的 `func.func`。
 
 module 内函数顺序：
@@ -304,13 +308,17 @@ builtin.module {
 
 ## 测试
 
-- 测试文件：[`test/dsl/test_mlir_gen.py`](../../test/dsl/test_mlir_gen.py)
+- 测试文件：
+  - [`test/dsl/mlir_gen/test_function_builder.py`](../../test/dsl/mlir_gen/test_function_builder.py)
+  - [`test/dsl/mlir_gen/test_parse_env.py`](../../test/dsl/mlir_gen/test_parse_env.py)
+  - [`test/dsl/mlir_gen/test_signature.py`](../../test/dsl/mlir_gen/test_signature.py)
+  - [`test/dsl/mlir_gen/test_module_builder.py`](../../test/dsl/mlir_gen/test_module_builder.py)
 - 依赖测试文件：[`test/dsl/test_ast.py`](../../test/dsl/test_ast.py)、[`test/dsl/test_emit_mlir.py`](../../test/dsl/test_emit_mlir.py)
 - 补充测试文件：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
-- 执行命令（mlir_gen 集成）：`pytest -q test/dsl/test_mlir_gen.py`
+- 执行命令（mlir_gen 集成）：`pytest -q test/dsl/mlir_gen/test_function_builder.py test/dsl/mlir_gen/test_parse_env.py test/dsl/mlir_gen/test_signature.py test/dsl/mlir_gen/test_module_builder.py`
 - 执行命令（依赖子链路）：`pytest -q test/dsl/test_ast.py && pytest -q test/dsl/test_emit_mlir.py`
 - 执行命令（ast_visitor 负路径）：`pytest -q test/dsl/test_ast_visitor.py`
-- 拆分归属：MGEN-001~MGEN-035 归属 `test_mlir_gen.py`；其中 AST/emit 的前置语义分别由 `test_ast.py` 与 `test_emit_mlir.py` 单测保证；MGEN-036/037/037A 与 arch helper 正反路径由 `test_ast.py`、`test_mlir_gen.py`、`expectation/dsl/mlir_gen/dialect/arch/*` 共同覆盖，当前缺口在下游实现/补测阶段补齐。
+- 拆分归属：MGEN-001~MGEN-035 归属 `test/dsl/mlir_gen/test_function_builder.py`、`test/dsl/mlir_gen/test_parse_env.py`、`test/dsl/mlir_gen/test_signature.py`、`test/dsl/mlir_gen/test_module_builder.py`；其中 AST/emit 的前置语义分别由 `test_ast.py` 与 `test_emit_mlir.py` 单测保证；MGEN-036/037/037A 与 arch helper 正反路径由 `test_ast.py`、`test/dsl/mlir_gen/test_function_builder.py`、`expectation/dsl/mlir_gen/dialect/arch/*` 共同覆盖，当前缺口在下游实现/补测阶段补齐。
 - 测试目标：
   - 验证 `build_func_op(...)` 生成 `func.func`。
   - 验证 `build_func_op(fn, *runtime_args, globals=None, builtins=None)` 的输入签名仅由运行时参数决定。

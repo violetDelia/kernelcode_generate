@@ -8,7 +8,7 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`小李飞刀`
+- 最后一次更改：`jcc你莫辜负`
 - `spec`：[`spec/tools/mlir_gen_compare.md`](../../spec/tools/mlir_gen_compare.md)
 - `功能实现`：[`kernel_gen/tools/mlir_gen_compare.py`](../../kernel_gen/tools/mlir_gen_compare.py)
 - `test`：[`test/tools/test_mlir_gen_compare.py`](../../test/tools/test_mlir_gen_compare.py)
@@ -16,7 +16,7 @@
 ## 依赖
 
 - module 生成入口（actual）：[`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
-- 依赖的实现模块（actual）：[`kernel_gen/dsl/mlir_gen.py`](../../kernel_gen/dsl/mlir_gen.py)
+- 依赖的实现模块（actual）：[`kernel_gen/dsl/mlir_gen/__init__.py`](../../kernel_gen/dsl/mlir_gen/__init__.py)
 - IR 解析与打印（归一化比较）：[`kernel_gen/context.py`](../../kernel_gen/context.py)
 - 默认解析上下文加载的 dialect（至少）：
   - `xdsl.dialects.builtin` / `xdsl.dialects.func` / `xdsl.dialects.arith`
@@ -149,3 +149,4 @@ assert ok is True
   - 不一致时返回 `False`
   - expected 不是 `builtin.module` 时返回 `False`
   - expected 解析失败时返回 `False`
+  - compare_mlir_file(...) 与 mlir_gen_compare(...) 行为一致

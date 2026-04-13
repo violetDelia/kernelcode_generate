@@ -1,10 +1,10 @@
 """mlir_gen compare tests.
 
 创建者: 睡觉小分队
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
-- 覆盖 mlir_gen_compare(...) / mlir_gen_compare_text(...) 的 True/False 路径与非法文本返回 False 的行为。
+- 覆盖 mlir_gen_compare(...) / mlir_gen_compare_text(...) / compare_mlir_file(...) 的 True/False 路径与非法文本返回 False 的行为。
 
 当前覆盖率信息:
 - 当前覆盖率: 未统计（本任务验证未启用 coverage 统计）。
@@ -179,6 +179,33 @@ def test_mlir_gen_compare_true(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(compare_module, "_build_default_context", _build_min_context)
 
     ok = compare_module.mlir_gen_compare(
+        fn=_dummy_kernel,
+        runtime_args=None,
+        config=None,
+        mlir_file=str(expected_path),
+    )
+
+    assert ok is True
+
+
+# TC-MLIR-GEN-COMPARE-011
+# 创建者: 睡觉小分队
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 对齐 compare_mlir_file 兼容接口与 mlir_gen_compare 的等价行为。
+# 测试目的: 验证 compare_mlir_file 在预期一致时返回 True。
+# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_compare_mlir_file_alias_true
+# 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
+# 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
+# 对应测试文件路径: test/tools/test_mlir_gen_compare.py
+def test_compare_mlir_file_alias_true(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    expected_path = tmp_path / "expected_alias.mlir"
+    expected_path.write_text(_SIMPLE_MODULE_TEXT, encoding="utf-8")
+    monkeypatch.setattr(compare_module, "_load_mlir_gen", lambda: _stub_mlir_gen)
+    monkeypatch.setattr(compare_module, "_build_default_context", _build_min_context)
+
+    ok = compare_module.compare_mlir_file(
         fn=_dummy_kernel,
         runtime_args=None,
         config=None,
