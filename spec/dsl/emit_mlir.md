@@ -11,8 +11,22 @@
 - 创建者：`规格小队`
 - 最后一次更改：`jcc你莫辜负`
 - `spec`：[`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)
-- `功能实现`：[`kernel_gen/dsl/emit_mlir.py`](../../kernel_gen/dsl/emit_mlir.py)
-- `test`：[`test/dsl/test_emit_mlir.py`](../../test/dsl/test_emit_mlir.py)
+- `功能实现`：
+  - [`kernel_gen/dsl/emit_mlir.py`](../../kernel_gen/dsl/emit_mlir.py)
+  - [`kernel_gen/dsl/mlir_gen/emit/__init__.py`](../../kernel_gen/dsl/mlir_gen/emit/__init__.py)
+  - [`kernel_gen/dsl/mlir_gen/emit/context.py`](../../kernel_gen/dsl/mlir_gen/emit/context.py)
+  - [`kernel_gen/dsl/mlir_gen/emit/dispatch.py`](../../kernel_gen/dsl/mlir_gen/emit/dispatch.py)
+  - [`kernel_gen/dsl/mlir_gen/emit/control_flow.py`](../../kernel_gen/dsl/mlir_gen/emit/control_flow.py)
+  - [`kernel_gen/dsl/mlir_gen/emit/value.py`](../../kernel_gen/dsl/mlir_gen/emit/value.py)
+  - [`kernel_gen/dsl/mlir_gen/emit/type_utils.py`](../../kernel_gen/dsl/mlir_gen/emit/type_utils.py)
+  - [`kernel_gen/dsl/mlir_gen/emit/shape_utils.py`](../../kernel_gen/dsl/mlir_gen/emit/shape_utils.py)
+- `test`：
+  - [`test/dsl/test_emit_mlir.py`](../../test/dsl/test_emit_mlir.py)
+  - [`test/dsl/mlir_gen/emit/test_dispatch.py`](../../test/dsl/mlir_gen/emit/test_dispatch.py)
+  - [`test/dsl/mlir_gen/emit/test_control_flow.py`](../../test/dsl/mlir_gen/emit/test_control_flow.py)
+  - [`test/dsl/mlir_gen/emit/test_value.py`](../../test/dsl/mlir_gen/emit/test_value.py)
+  - [`test/dsl/mlir_gen/emit/test_type_utils.py`](../../test/dsl/mlir_gen/emit/test_type_utils.py)
+  - [`test/dsl/mlir_gen/emit/test_shape_utils.py`](../../test/dsl/mlir_gen/emit/test_shape_utils.py)
 
 ## 依赖
 
@@ -33,6 +47,24 @@
 - 将 AST 表达式节点转换为 MLIR value。
 - 将 AST 语句节点转换为 MLIR op 或控制流结构。
 - 保证同一节点生成的 value 可被上游复用。
+
+## emit 共享核心职责
+
+- `kernel_gen/dsl/mlir_gen/emit/dispatch.py`
+  - 仅负责节点类型到处理函数的路由。
+  - 不直接实现 nn/dma/arch/symbol family 细节。
+- `kernel_gen/dsl/mlir_gen/emit/control_flow.py`
+  - 只处理控制流结构节点（当前聚焦 `ForAST`）。
+  - Assign/Return 在 AST 解析阶段折叠，不作为 emit 输入节点。
+- `kernel_gen/dsl/mlir_gen/emit/value.py`
+  - 只处理变量取值、字面量与 `symbol.const`/index operand。
+  - 不直接构造 nn/dma family op。
+- `kernel_gen/dsl/mlir_gen/emit/type_utils.py`
+  - 只处理 dtype/memory type/结果类型推导。
+  - 不执行 builder 插入逻辑。
+- `kernel_gen/dsl/mlir_gen/emit/shape_utils.py`
+  - 只处理 shape/stride/layout/index 规范化。
+  - 不直接发射最终 operation。
 
 ## 限制与边界
 
