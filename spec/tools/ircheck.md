@@ -51,7 +51,9 @@
 - `expectation/tools/ircheck/basic_true.py`：验证 `run_ircheck_text(...)` 成功路径返回 `ok=True`。
 - `expectation/tools/ircheck/basic_false.py`：验证 `run_ircheck_text(...)` 返回 `ok=False` 且错误短语稳定。
 - `expectation/tools/ircheck/check_next_false.py`：验证相邻行匹配失败时返回稳定错误短语。
+- `expectation/tools/ircheck/multi_pass_true.py`：验证多 step 顺序执行与成功路径输出。
 - `expectation/tools/ircheck/multi_pass_fail.py`：验证失败 step 的定位信息与 `actual_ir` 语义。
+- `expectation/tools/ircheck/ir_dump_true.py`：验证 `-irdump` 的目录与文件命名。
 - `expectation/tools/ircheck/README.md`：样例入口与迁移写法，强调三条公开 API 为稳定合同。
 
 ## 迁移建议
@@ -372,6 +374,7 @@ builtin.module { /* ... */ }
 ### `-irdump` 目录与文件命名
 
 - 开启 `-irdump` 后默认写入 `<cwd>/.irdump/<stem>/case_<index>/`。
+- 多 case 时目录必须按 `case_01`、`case_02`、`case_03` 递增编号；编号基于 case 在文件中的顺序。
 - 每个 case 内的文件命名固定为：
   - `00-input.mlir`
   - `01-pass-<name>.mlir` / `01-pipeline-<name>.mlir`
@@ -409,3 +412,4 @@ builtin.module { /* ... */ }
   - runner：能通过 pass registry 解析 `--pass/--pipeline` 与其 options 形式并执行，输出 `IrcheckResult` 的 `ok/exit_code/message` 行为与本文件一致；支持多 case 顺序执行与 fail-fast。
   - runner：多 step 失败时必须返回 step 序号/类型/名字，并按失败前一刻 IR 填充 `actual_ir`；覆盖 `expectation/tools/ircheck/multi_pass_fail.py` 与 `test/tools/test_ircheck_runner.py` 对应用例。
   - matcher：能按本文件“检查语义”规则稳定处理 `CHECK/CHECK-NEXT/CHECK-NOT` 的顺序、相邻与区间约束，并在失败时返回稳定错误短语。
+  - cli：开启 `-irdump` 后需生成 `.irdump/<stem>/case_01/`、`.irdump/<stem>/case_02/` 等目录与逐 step IR 文件；覆盖 `expectation/tools/ircheck/ir_dump_true.py` 与 `test/tools/test_ircheck_cli.py` 对应用例。
