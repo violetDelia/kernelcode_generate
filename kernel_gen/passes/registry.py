@@ -1,7 +1,7 @@
 """Pass registry API.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 提供 pass / pipeline 的进程内注册表，统一“名字 -> 构造器”的解析入口。
@@ -269,7 +269,7 @@ def load_builtin_passes() -> None:
     """加载仓库内置 pass / pipeline。
 
     创建者: 睡觉小分队
-    最后一次更改: 朽木露琪亚
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 主动加载仓库内置 pass / pipeline，使装饰器注册与显式注册生效。
@@ -331,7 +331,10 @@ def load_builtin_passes() -> None:
             continue
         register_pass(pass_cls)
 
-    from kernel_gen.passes import pipeline as _pipeline
+    from kernel_gen.passes.pipeline import build_default_lowering_pipeline
+
+    if "default-lowering" not in _PIPELINE_REGISTRY:
+        register_pipeline("default-lowering")(build_default_lowering_pipeline)
 
     if "default-lowering" not in _PIPELINE_REGISTRY:
         register_pipeline("default-lowering")(_pipeline.build_default_lowering_pipeline)
