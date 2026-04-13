@@ -149,11 +149,11 @@ def _ensure_int_attr(op: Operation, name: str) -> int:
     """获取并校验 op 的 int attribute。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 从 op.attributes 获取指定 name。
-    - 校验为 IntegerAttr，并返回其值。
+    - 校验为 IntegerAttr 或 IntAttr，并返回其值。
 
     使用示例:
     - axis = _ensure_int_attr(op, "axis")
@@ -165,9 +165,86 @@ def _ensure_int_attr(op: Operation, name: str) -> int:
     """
 
     attr = op.attributes.get(name)
-    if not isinstance(attr, IntegerAttr):
-        raise NnLoweringError(f"{op.name} {name} must be integer")
-    return attr.value.data
+    if isinstance(attr, IntegerAttr):
+        return attr.value.data
+    if isinstance(attr, IntAttr):
+        return attr.data
+    raise NnLoweringError(f"{op.name} {name} must be integer")
+
+
+def _ensure_unary_result_matches_operand(
+    op: Operation, operand_type: NnMemoryType, result_type: NnMemoryType
+) -> list[int | str]:
+    """校验 unary op 的结果类型与 operand 一致。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 要求 result/operand 的 shape、stride、element_type、space 完全一致。
+
+    使用示例:
+    - shape = _ensure_unary_result_matches_operand(op, operand.type, result_type)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering.md
+    - test: test/pass/nn_lowering/exp.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
+    """
+
+    operand_shape = _normalize_shape_dims(operand_type.shape.data)
+    result_shape = _normalize_shape_dims(result_type.shape.data)
+    if operand_shape != result_shape:
+        raise NnLoweringError(f"{op.name} result shape must match operand")
+    operand_stride = _normalize_shape_dims(operand_type.stride.data)
+    result_stride = _normalize_shape_dims(result_type.stride.data)
+    if operand_stride != result_stride:
+        raise NnLoweringError(f"{op.name} result stride must match operand")
+    if operand_type.element_type != result_type.element_type:
+        raise NnLoweringError(f"{op.name} result element type must match operand")
+    if operand_type.space != result_type.space:
+        raise NnLoweringError(f"{op.name} result space must match operand")
+    return result_shape
+
+
+def _collect_unary_dynamic_shape(
+    block: Block,
+    op: Operation,
+    operand: SSAValue,
+    operand_shape: list[int | str],
+    result_shape: list[int | str],
+) -> list[SSAValue]:
+    """收集 unary 结果的动态维度列表。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 对每个符号维度插入 symbol.get_dim 作为 dma.alloc 的 dynamic_shape。
+    - 要求 operand/result 的符号维度一致。
+
+    使用示例:
+    - params = _collect_unary_dynamic_shape(block, op, operand, operand_shape, result_shape)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering.md
+    - test: test/pass/nn_lowering/exp.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
+    """
+
+    symbol_dims: list[SSAValue] = []
+    for axis, dim in enumerate(result_shape):
+        if not isinstance(dim, str):
+            continue
+        source_dim = operand_shape[axis]
+        if not isinstance(source_dim, str):
+            raise NnLoweringError(f"{op.name} operand shape must match result shape")
+        if source_dim != dim:
+            raise NnLoweringError(f"{op.name} operand shape must match result shape")
+        symbol_op = SymbolGetDimOp(operand, IntAttr(axis))
+        block.insert_op_before(symbol_op, op)
+        symbol_dims.append(symbol_op.result)
+    return symbol_dims
 
 
 def _ensure_symbol_int(op: Operation, operand: SSAValue | Operation) -> SSAValue:
@@ -587,10 +664,23 @@ def _lower_exp(block: Block, op: Operation) -> None:
     space = _ensure_space_attr(op)
     result_type = _ensure_single_result(op)
     _ensure_operand_count(op, 1)
-    alloc = DmaAllocOp([], result_type)
+    operand = op.operands[0]
+    if not isinstance(operand.type, NnMemoryType):
+        raise NnLoweringError("nn.exp operand must be nn.memory")
+    operand_shape = _ensure_unary_result_matches_operand(op, operand.type, result_type)
+    params: list[SSAValue] = []
+    if any(isinstance(dim, str) for dim in operand_shape):
+        params = _collect_unary_dynamic_shape(
+            block,
+            op,
+            operand,
+            operand_shape,
+            operand_shape,
+        )
+    alloc = DmaAllocOp(params, result_type)
     block.insert_op_before(alloc, op)
     result = alloc.results[0]
-    lowered = KernelExpOp(op.operands[0], result, space)
+    lowered = KernelExpOp(operand, result, space)
     block.insert_op_before(lowered, op)
     op.results[0].replace_by(result)
     block.erase_op(op)
@@ -679,11 +769,24 @@ def _lower_softmax(block: Block, op: Operation) -> None:
     space = _ensure_space_attr(op)
     result_type = _ensure_single_result(op)
     _ensure_operand_count(op, 1)
+    operand = op.operands[0]
+    if not isinstance(operand.type, NnMemoryType):
+        raise NnLoweringError("nn.softmax operand must be nn.memory")
+    operand_shape = _ensure_unary_result_matches_operand(op, operand.type, result_type)
     axis = _ensure_softmax_axis(op)
-    alloc = DmaAllocOp([], result_type)
+    params: list[SSAValue] = []
+    if any(isinstance(dim, str) for dim in operand_shape):
+        params = _collect_unary_dynamic_shape(
+            block,
+            op,
+            operand,
+            operand_shape,
+            operand_shape,
+        )
+    alloc = DmaAllocOp(params, result_type)
     block.insert_op_before(alloc, op)
     result = alloc.results[0]
-    lowered = KernelSoftmaxOp(op.operands[0], result, axis, space)
+    lowered = KernelSoftmaxOp(operand, result, axis, space)
     block.insert_op_before(lowered, op)
     op.results[0].replace_by(result)
     block.erase_op(op)
