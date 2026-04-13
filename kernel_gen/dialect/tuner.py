@@ -24,24 +24,24 @@ from xdsl.parser import AttrParser
 from xdsl.printer import Printer
 from xdsl.utils.exceptions import VerifyException
 
-from kernel_gen.dialect.symbol import SymbolDimType, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolDimType
 
 _ERROR_ACTION = "请按接口约束传参"
 _ERROR_ACTUAL = "不满足期望"
 _ERROR_SCENE = "dialect.tuner verifier"
 
-def _verify_symbol_value_result_type(result_type: Attribute, op_name: str) -> SymbolValueType:
+def _verify_symbol_dim_result_type(result_type: Attribute, op_name: str) -> SymbolDimType:
     """校验 tuner.param 的结果类型。
 
     创建者: 我不是牛马
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
-    - 要求结果类型必须为 `!symbol.int<"name">` 并通过自身校验。
+    - 要求结果类型必须为 `!symbol.dim<"name">` 并通过自身校验。
     - 使用 `SymbolDimType` 的命名校验确保 name 合法。
 
     使用示例:
-    - _verify_symbol_value_result_type(SymbolValueType.from_expr("BLOCK_M"), "tuner.param")
+    - _verify_symbol_dim_result_type(SymbolDimType.from_name("BLOCK_M"), "tuner.param")
 
     关联文件:
     - spec: spec/dialect/tuner.md
@@ -49,17 +49,16 @@ def _verify_symbol_value_result_type(result_type: Attribute, op_name: str) -> Sy
     - 功能实现: kernel_gen/dialect/tuner.py
     """
 
-    if not isinstance(result_type, SymbolValueType):
+    if not isinstance(result_type, SymbolDimType):
         raise VerifyException(
             _ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
-                expected=f"{op_name} result type must be !symbol.int<\"name\">",
+                expected=f"{op_name} result type must be !symbol.dim<\"name\">",
                 actual=_ERROR_ACTUAL,
                 action=_ERROR_ACTION,
             )
         )
     result_type.verify()
-    SymbolDimType.from_name(result_type.expr.expr.data).verify()
     return result_type
 
 
@@ -69,19 +68,19 @@ class TunerParamOp(IRDLOperation):
 
     name = "tuner.param"
 
-    result = result_def(SymbolValueType)
+    result = result_def(Attribute)
 
     def __init__(self: "TunerParamOp", result_type: Attribute) -> None:
         """初始化 tuner.param 操作。
 
         创建者: 我不是牛马
-        最后一次更改: 金铲铲大作战
+        最后一次更改: 小李飞刀
 
         功能说明:
         - 构造仅含结果类型的 tuner.param op。
 
         使用示例:
-        - TunerParamOp(SymbolValueType.from_expr("BLOCK_M"))
+        - TunerParamOp(SymbolDimType.from_name("BLOCK_M"))
 
         关联文件:
         - spec: spec/dialect/tuner.md
@@ -95,13 +94,13 @@ class TunerParamOp(IRDLOperation):
         """校验 tuner.param 的结果类型。
 
         创建者: 我不是牛马
-        最后一次更改: 金铲铲大作战
+        最后一次更改: 小李飞刀
 
         功能说明:
-        - 要求结果类型为 `!symbol.int<"name">`。
+        - 要求结果类型为 `!symbol.dim<"name">`。
 
         使用示例:
-        - TunerParamOp(SymbolValueType.from_expr("BLOCK_M")).verify()
+        - TunerParamOp(SymbolDimType.from_name("BLOCK_M")).verify()
 
         关联文件:
         - spec: spec/dialect/tuner.md
@@ -109,19 +108,19 @@ class TunerParamOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/tuner.py
         """
 
-        _verify_symbol_value_result_type(self.result.type, self.name)
+        _verify_symbol_dim_result_type(self.result.type, self.name)
 
     def print(self: "TunerParamOp", printer: Printer) -> None:
         """打印 tuner.param 自定义文本语法。
 
         创建者: 我不是牛马
-        最后一次更改: 金铲铲大作战
+        最后一次更改: 小李飞刀
 
         功能说明:
-        - 输出 `tuner.param : !symbol.int<"name">`。
+        - 输出 `tuner.param : !symbol.dim<"name">`。
 
         使用示例:
-        - TunerParamOp(SymbolValueType.from_expr("BLOCK_M")).print(printer)
+        - TunerParamOp(SymbolDimType.from_name("BLOCK_M")).print(printer)
 
         关联文件:
         - spec: spec/dialect/tuner.md
@@ -137,10 +136,10 @@ class TunerParamOp(IRDLOperation):
         """解析 tuner.param 自定义文本语法。
 
         创建者: 我不是牛马
-        最后一次更改: 金铲铲大作战
+        最后一次更改: 小李飞刀
 
         功能说明:
-        - 解析 `tuner.param : !symbol.int<"name">` 格式。
+        - 解析 `tuner.param : !symbol.dim<"name">` 格式。
 
         使用示例:
         - TunerParamOp.parse(parser)

@@ -99,7 +99,7 @@ def _print_ir(value: object) -> str:
 
 # TC-TUNER-001
 # 创建者: 我不是牛马
-# 最后一次更改: 我不是牛马
+# 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-27 00:18:48 +0800
 # 最近一次运行成功时间: 2026-03-27 00:18:48 +0800
 # 测试目的: 验证 tuner.param 的 parse/print round-trip 与结果类型稳定。
@@ -111,7 +111,7 @@ def test_tuner_param_round_trip() -> None:
         ctx,
         """
 builtin.module {
-  %p0 = tuner.param : !symbol.int<"BLOCK_M">
+  %p0 = tuner.param : !symbol.dim<"BLOCK_M">
 }
 """,
     ).parse_module()
@@ -124,7 +124,7 @@ builtin.module {
 
 # TC-TUNER-002
 # 创建者: 我不是牛马
-# 最后一次更改: 我不是牛马
+# 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-26 23:17:09 +0800
 # 最近一次运行成功时间: 2026-03-26 23:17:09 +0800
 # 测试目的: 验证 tuner.param 拒绝非 !symbol.dim<"name"> 的结果类型。
@@ -132,19 +132,19 @@ builtin.module {
 # 对应 spec 文件路径: spec/dialect/tuner.md
 def test_tuner_param_rejects_invalid_result_type() -> None:
     invalid_types = [
-        SymbolDimType(StringAttr("BLOCK_M")),
+        SymbolValueType.from_expr("BLOCK_M"),
         IndexType(),
         IntegerType(32),
     ]
     for invalid_type in invalid_types:
         op = TunerParamOp(invalid_type)
-        with pytest.raises(VerifyException, match='tuner.param result type must be !symbol.int<"name">'):
+        with pytest.raises(VerifyException, match='tuner.param result type must be !symbol.dim<"name">'):
             op.verify()
 
 
 # TC-TUNER-003
 # 创建者: 我不是牛马
-# 最后一次更改: 我不是牛马
+# 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-26 23:17:09 +0800
 # 最近一次运行成功时间: 2026-03-26 23:17:09 +0800
 # 测试目的: 验证 tuner.param 对非法 name 的错误路径。
@@ -162,7 +162,7 @@ def test_tuner_param_rejects_invalid_name() -> None:
         ctx,
         """
 builtin.module {
-  %p0 = tuner.param : !symbol.int<"">
+  %p0 = tuner.param : !symbol.dim<"">
 }
 """,
     ).parse_module()
@@ -173,7 +173,7 @@ builtin.module {
         ctx,
         """
 builtin.module {
-  %p0 = tuner.param : !symbol.int<"BLOCK-M">
+  %p0 = tuner.param : !symbol.dim<"BLOCK-M">
 }
 """,
     ).parse_module()

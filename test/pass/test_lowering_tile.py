@@ -1,7 +1,7 @@
 """tile pass tests.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 TilePass elementwise/matmul 成功路径与关键错误短语。
@@ -29,7 +29,7 @@ from pathlib import Path
 
 import pytest
 from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, FunctionType, ModuleOp, StringAttr, i32
+from xdsl.dialects.builtin import ArrayAttr, DictionaryAttr, FunctionType, IntAttr, ModuleOp, StringAttr, i32
 from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
 from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def
 from xdsl.utils.exceptions import VerifyException
@@ -38,8 +38,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dialect.dma import DmaAllocOp, DmaViewOp
-from kernel_gen.dialect.kernel import KernelAddOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaViewOp
+from kernel_gen.dialect.kernel import KernelAddOp, KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolForOp, SymbolGetDimOp
 from kernel_gen.passes.lowering.tile import TilePass, TilePassError
@@ -94,6 +94,86 @@ def _build_elementwise_module(shape_names: list[str]) -> ModuleOp:
     func_op = func.FuncOp(
         "tile_elementwise",
         FunctionType.from_lists([mem_type, mem_type, mem_type], []),
+        Region(block),
+    )
+    return ModuleOp([func_op])
+
+
+def _build_broadcast_module(target_shape_names: list[str], source_shape_names: list[str]) -> ModuleOp:
+    """构造 broadcast 模块。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 生成 `dma.broadcast` 的单函数 IR。
+    - 用于覆盖低 rank source 的 tile-only 改写路径。
+
+    使用示例:
+    - module = _build_broadcast_module(["M", "N"], ["N"])
+
+    关联文件:
+    - spec: spec/pass/lowering/tile.md
+    - test: test/pass/test_lowering_tile.py
+    - 功能实现: kernel_gen/passes/lowering/tile.py
+    """
+
+    target_type = _make_memory_type(target_shape_names)
+    source_type = _make_memory_type(source_shape_names)
+    block = Block(arg_types=[target_type, source_type])
+    block.add_ops([DmaBroadcastOp(block.args[0], block.args[1]), func.ReturnOp()])
+    func_op = func.FuncOp(
+        "tile_broadcast",
+        FunctionType.from_lists([target_type, source_type], []),
+        Region(block),
+    )
+    return ModuleOp([func_op])
+
+
+def _build_fc_chain_module() -> ModuleOp:
+    """构造最小 fc 组合链路模块。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 构造 `dma.broadcast + kernel.matmul + kernel.binary_elewise` 的组合链路。
+    - 为 matmul 输出与 bias broadcast 结果显式分配 carry memory。
+
+    使用示例:
+    - module = _build_fc_chain_module()
+
+    关联文件:
+    - spec: spec/pass/lowering/tile.md
+    - test: test/pass/test_lowering_tile.py
+    - 功能实现: kernel_gen/passes/lowering/tile.py
+    """
+
+    out_type = _make_memory_type(["M", "N"])
+    lhs_type = _make_memory_type(["M", "K"])
+    rhs_type = _make_memory_type(["K", "N"])
+    bias_type = _make_memory_type(["N"])
+    block = Block(arg_types=[out_type, lhs_type, rhs_type, bias_type])
+    space = NnMemorySpaceAttr.from_name("global")
+    dim_m = SymbolGetDimOp(block.args[0], 0)
+    dim_n = SymbolGetDimOp(block.args[0], 1)
+    bias_b = DmaAllocOp([dim_m.result, dim_n.result], out_type)
+    mat_out = DmaAllocOp([dim_m.result, dim_n.result], out_type)
+    block.add_ops(
+        [
+            dim_m,
+            dim_n,
+            bias_b,
+            mat_out,
+            DmaBroadcastOp(bias_b.result, block.args[3]),
+            _KernelMatmulOp(block.args[1], block.args[2], mat_out.result, space),
+            KernelBinaryElewiseOp(mat_out.result, bias_b.result, block.args[0], kind="add", space=space),
+            func.ReturnOp(),
+        ]
+    )
+    func_op = func.FuncOp(
+        "tile_fc_chain",
+        FunctionType.from_lists([out_type, lhs_type, rhs_type, bias_type], []),
         Region(block),
     )
     return ModuleOp([func_op])
@@ -423,6 +503,96 @@ def test_tile_analysis_only_and_tile_only_conflict() -> None:
         )
 
 
+# TC-TILE-012
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-13 22:20:00 +0800
+# 最近一次运行成功时间: 2026-04-13 22:20:00 +0800
+# 功能说明: 验证 low-rank broadcast source 会保持 source 自身 rank 的 dma.view。
+# 测试目的: 覆盖 fc/broadcast 场景中 rank-1 bias 不再被错误改写成 rank-2 dma.view。
+# 使用示例: pytest -q test/pass/test_lowering_tile.py -k test_tile_broadcast_keeps_lower_rank_source_view
+# 对应功能实现文件路径: kernel_gen/passes/lowering/tile.py
+# 对应 spec 文件路径: spec/pass/lowering/tile.md
+# 对应测试文件路径: test/pass/test_lowering_tile.py
+def test_tile_broadcast_keeps_lower_rank_source_view() -> None:
+    module = _build_broadcast_module(["M", "N"], ["N"])
+    TilePass.from_options(
+        {
+            "tile-only": "true",
+            "tile-elewise": "true",
+            "tile-reduce": "false",
+        }
+    ).run(module)
+    module.verify()
+    ops = _collect_ops(module)
+    view_ops = [op for op in ops if isinstance(op, DmaViewOp)]
+    broadcast_ops = [op for op in ops if isinstance(op, DmaBroadcastOp)]
+    assert len(view_ops) == 2
+    assert len(broadcast_ops) == 1
+    target_view_ranks = sorted(len(op.result.type.shape.data) for op in view_ops)
+    assert target_view_ranks == [1, 2]
+    broadcast_op = broadcast_ops[0]
+    target_type = SSAValue.get(broadcast_op.operands[0]).type
+    source_type = SSAValue.get(broadcast_op.operands[1]).type
+    assert isinstance(target_type, NnMemoryType)
+    assert isinstance(source_type, NnMemoryType)
+    assert len(target_type.shape.data) == 2
+    assert len(source_type.shape.data) == 1
+
+
+# TC-TILE-013
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-13 22:20:00 +0800
+# 最近一次运行成功时间: 2026-04-13 22:20:00 +0800
+# 功能说明: 验证 TilePass.run 不会吞掉 verifier 失败。
+# 测试目的: 覆盖 TilePassRequiresLoweredKernelIR 的 verifier 传播路径。
+# 使用示例: pytest -q test/pass/test_lowering_tile.py -k test_tile_run_raises_on_verifier_failure
+# 对应功能实现文件路径: kernel_gen/passes/lowering/tile.py
+# 对应 spec 文件路径: spec/pass/lowering/tile.md
+# 对应测试文件路径: test/pass/test_lowering_tile.py
+def test_tile_run_raises_on_verifier_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _build_elementwise_module(["M", "N"])
+
+    def _raise_verify(_self: ModuleOp) -> None:
+        raise VerifyException("forced verifier failure")
+
+    monkeypatch.setattr(ModuleOp, "verify", _raise_verify)
+    with pytest.raises(TilePassError, match="TilePassRequiresLoweredKernelIR: forced verifier failure"):
+        TilePass().run(module)
+
+
+# TC-TILE-014
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-13 22:35:00 +0800
+# 最近一次运行成功时间: 2026-04-13 22:35:00 +0800
+# 功能说明: 验证 fc 组合链路会保留 carry alloc 并通过 verifier。
+# 测试目的: 覆盖 broadcast/matmul/elementwise 组合场景下的 carry memory 与 rank-1 bias tile 路径。
+# 使用示例: pytest -q test/pass/test_lowering_tile.py -k test_tile_fc_chain_preserves_carry_allocs_and_verifies
+# 对应功能实现文件路径: kernel_gen/passes/lowering/tile.py
+# 对应 spec 文件路径: spec/pass/lowering/tile.md
+# 对应测试文件路径: test/pass/test_lowering_tile.py
+def test_tile_fc_chain_preserves_carry_allocs_and_verifies() -> None:
+    module = _build_fc_chain_module()
+    TilePass.from_options(
+        {
+            "tile-only": "true",
+            "tile-elewise": "true",
+            "tile-reduce": "false",
+        }
+    ).run(module)
+    module.verify()
+    ops = _collect_ops(module)
+    alloc_ops = [op for op in ops if isinstance(op, DmaAllocOp)]
+    broadcast_ops = [op for op in ops if isinstance(op, DmaBroadcastOp)]
+    assert len(alloc_ops) == 2
+    assert len(broadcast_ops) == 1
+    source_type = SSAValue.get(broadcast_ops[0].operands[1]).type
+    assert isinstance(source_type, NnMemoryType)
+    assert len(source_type.shape.data) == 1
+
+
 # TC-TILE-003
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
@@ -462,6 +632,14 @@ def test_tile_rejects_reduce_kernel_ops() -> None:
 # 对应测试文件路径: test/pass/test_lowering_tile.py
 def test_tile_rejects_duplicate_tile_names() -> None:
     module = _build_elementwise_module(["M", "M"])
+    func_op = next(iter(module.ops))
+    assert isinstance(func_op, func.FuncOp)
+    func_op.attributes["kernel_split"] = DictionaryAttr(
+        {
+            "axis": IntAttr(1),
+            "tile": StringAttr("TILE_D0"),
+        }
+    )
     with pytest.raises(TilePassError, match="TilePassDuplicateTileParam"):
         TilePass().run(module)
 
