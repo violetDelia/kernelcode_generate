@@ -843,6 +843,10 @@ def _lower_op(block: Block, op: Operation) -> None:
 
     if lower_select_cast_family(block, op):
         return
+    from .reduce_softmax_lowering import lower_reduce_softmax_family
+
+    if lower_reduce_softmax_family(block, op):
+        return
     if op.name == "nn.exp":
         _lower_exp(block, op)
         return
