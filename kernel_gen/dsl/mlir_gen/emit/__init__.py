@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from .call_arch import emit_arch_call
+from .call_symbol import emit_symbol_call, emit_symbol_for
 from .context import EmitContext, LoweringError
 from .control_flow import emit_control_flow, emit_for
 from .dispatch import call_dispatch, emit_mlir
@@ -34,6 +36,7 @@ from .value import emit_index_operand, emit_symbol_const, emit_value
 __all__ = [
     "EmitContext",
     "LoweringError",
+    "emit_arch_call",
     "build_index_attrs",
     "build_index_operands_exact",
     "build_index_operands_from_layout",
@@ -41,6 +44,8 @@ __all__ = [
     "call_dispatch",
     "emit_control_flow",
     "emit_for",
+    "emit_symbol_call",
+    "emit_symbol_for",
     "emit_index_operand",
     "emit_mlir",
     "emit_symbol_const",

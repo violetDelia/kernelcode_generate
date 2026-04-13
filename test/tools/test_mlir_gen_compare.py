@@ -34,6 +34,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.dsl.ast import AstParseError
+from kernel_gen.dsl.ast_visitor import AstVisitorError
 from kernel_gen.tools import mlir_gen_compare as compare_module
 
 _SIMPLE_MODULE_TEXT = """builtin.module {
@@ -161,6 +163,20 @@ def _build_module_with_arith_constant() -> object:
     return ModuleOp([func])
 
 
+_LEGACY_SYMBOL_FOR_TEXT = """builtin.module {
+  func.func @main(%arg0 : !nn.memory<[8], [1], f32, #nn.space<global>>) {
+    %c0 = symbol.const 0 : !symbol.int<"0">
+    %c8 = symbol.const 8 : !symbol.int<"8">
+    %c2 = symbol.const 2 : !symbol.int<"2">
+    symbol.for %i = %c0 to %c8 step %c2 : !symbol.int<"0">, !symbol.int<"8">, !symbol.int<"2"> {
+      %tile = "dma.load"(%arg0, %i, %c2, %c2) <{operandSegmentSizes = array<i32: 1, 1, 1, 1>}> {space = #nn.space<global>} : (!nn.memory<[8], [1], f32, #nn.space<global>>, !symbol.int<"index">, !symbol.int<"2">, !symbol.int<"2">) -> !nn.memory<[8], [1], f32, #nn.space<global>>
+    }
+    func.return
+  }
+}
+"""
+
+
 # TC-MLIR-GEN-COMPARE-001
 # 创建者: 睡觉小分队
 # 最后一次更改: 金铲铲大作战
@@ -190,7 +206,7 @@ def test_mlir_gen_compare_true(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
 
 # TC-MLIR-GEN-COMPARE-011
 # 创建者: 睡觉小分队
-# 最后一次更改: jcc你莫辜负
+# 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
 # 功能说明: 对齐 compare_mlir_file 兼容接口与 mlir_gen_compare 的等价行为。
@@ -213,6 +229,172 @@ def test_compare_mlir_file_alias_true(tmp_path: Path, monkeypatch: pytest.Monkey
     )
 
     assert ok is True
+
+
+# TC-MLIR-GEN-COMPARE-012
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 对齐 compare 对前端 lowering 值域错误的异常保留语义。
+# 测试目的: 验证 compare 会将 launch_kernel 非法 extent 继续暴露为 AstVisitorError。
+# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_text_preserves_launch_kernel_lowering_error
+# 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
+# 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
+# 对应测试文件路径: test/tools/test_mlir_gen_compare.py
+def test_mlir_gen_compare_text_preserves_launch_kernel_lowering_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _raise_ast_visitor_error(*_args: object, **_kwargs: object) -> object:
+        raise AstVisitorError("launch_kernel thread must be > 0")
+
+    monkeypatch.setattr(compare_module, "_load_mlir_gen", lambda: _raise_ast_visitor_error)
+
+    with pytest.raises(AstVisitorError, match="launch_kernel thread must be > 0"):
+        compare_module.mlir_gen_compare_text(
+            fn=_dummy_kernel,
+            runtime_args=(),
+            config=None,
+            mlir_text=_SIMPLE_MODULE_TEXT,
+        )
+
+
+# TC-MLIR-GEN-COMPARE-013
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 对齐 compare 对 mlir_gen 原始类型错误的透传语义。
+# 测试目的: 验证 compare 遇到 symbol.compare 的输入类型错误时直接透传 AstVisitorError。
+# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_text_propagates_ast_visitor_type_error
+# 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
+# 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
+# 对应测试文件路径: test/tools/test_mlir_gen_compare.py
+def test_mlir_gen_compare_text_propagates_ast_visitor_type_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _raise_ast_visitor_error(*_args: object, **_kwargs: object) -> object:
+        raise AstVisitorError("Unsupported comparison type")
+
+    monkeypatch.setattr(compare_module, "_load_mlir_gen", lambda: _raise_ast_visitor_error)
+
+    with pytest.raises(AstVisitorError, match="Unsupported comparison type"):
+        compare_module.mlir_gen_compare_text(
+            fn=_dummy_kernel,
+            runtime_args=(),
+            config=None,
+            mlir_text=_SIMPLE_MODULE_TEXT,
+        )
+
+
+# TC-MLIR-GEN-COMPARE-013A
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 对齐 compare 对 mlir_gen 原始 parse 错误的透传语义。
+# 测试目的: 验证 compare 不会把 `Missing annotation` 改写成其他异常类型或消息。
+# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_text_propagates_missing_annotation_parse_error
+# 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
+# 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
+# 对应测试文件路径: test/tools/test_mlir_gen_compare.py
+def test_mlir_gen_compare_text_propagates_missing_annotation_parse_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _raise_ast_parse_error(*_args: object, **_kwargs: object) -> object:
+        raise AstParseError("Missing annotation", [])
+
+    monkeypatch.setattr(compare_module, "_load_mlir_gen", lambda: _raise_ast_parse_error)
+
+    with pytest.raises(AstParseError, match="Missing annotation"):
+        compare_module.mlir_gen_compare_text(
+            fn=_dummy_kernel,
+            runtime_args=(1.25,),
+            config=None,
+            mlir_text=_SIMPLE_MODULE_TEXT,
+        )
+
+
+# TC-MLIR-GEN-COMPARE-014
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 对齐 compare 对零步长 parse 失败的原始异常透传语义。
+# 测试目的: 验证 compare 会直接透传 LoopRange 零步长产生的 AstParseError。
+# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_text_propagates_zero_step_parse_error
+# 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
+# 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
+# 对应测试文件路径: test/tools/test_mlir_gen_compare.py
+def test_mlir_gen_compare_text_propagates_zero_step_parse_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _raise_ast_parse_error(*_args: object, **_kwargs: object) -> object:
+        raise AstParseError("step must not be 0", [])
+
+    monkeypatch.setattr(compare_module, "_load_mlir_gen", lambda: _raise_ast_parse_error)
+
+    with pytest.raises(AstParseError, match="step must not be 0"):
+        compare_module.mlir_gen_compare_text(
+            fn=_dummy_kernel,
+            runtime_args=(),
+            config=None,
+            mlir_text=_SIMPLE_MODULE_TEXT,
+        )
+
+
+# TC-MLIR-GEN-COMPARE-015
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 对齐 compare 对旧零步长 lowering 文案的原始异常透传语义。
+# 测试目的: 验证 compare 遇到既有 AstVisitorError 时保留原始异常类型与消息。
+# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_text_propagates_existing_zero_step_ast_visitor_error
+# 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
+# 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
+# 对应测试文件路径: test/tools/test_mlir_gen_compare.py
+def test_mlir_gen_compare_text_propagates_existing_zero_step_ast_visitor_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _raise_ast_visitor_error(*_args: object, **_kwargs: object) -> object:
+        raise AstVisitorError("for range step must not be zero")
+
+    monkeypatch.setattr(compare_module, "_load_mlir_gen", lambda: _raise_ast_visitor_error)
+
+    with pytest.raises(AstVisitorError, match="for range step must not be zero"):
+        compare_module.mlir_gen_compare_text(
+            fn=_dummy_kernel,
+            runtime_args=(),
+            config=None,
+            mlir_text=_SIMPLE_MODULE_TEXT,
+        )
+
+
+# TC-MLIR-GEN-COMPARE-015A
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 对齐 compare 对 helper 直接抛 ValueError 的原始异常透传语义。
+# 测试目的: 验证 compare 不会把裸 `step must not be 0` 改写为其他异常。
+# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_text_propagates_raw_zero_step_value_error
+# 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
+# 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
+# 对应测试文件路径: test/tools/test_mlir_gen_compare.py
+def test_mlir_gen_compare_text_propagates_raw_zero_step_value_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _raise_value_error(*_args: object, **_kwargs: object) -> object:
+        raise ValueError("step must not be 0")
+
+    monkeypatch.setattr(compare_module, "_load_mlir_gen", lambda: _raise_value_error)
+
+    with pytest.raises(ValueError, match="step must not be 0"):
+        compare_module.mlir_gen_compare_text(
+            fn=_dummy_kernel,
+            runtime_args=(),
+            config=None,
+            mlir_text=_SIMPLE_MODULE_TEXT,
+        )
 
 
 # TC-MLIR-GEN-COMPARE-002
@@ -273,6 +455,25 @@ def test_mlir_gen_compare_returns_false_on_invalid_text(
     )
 
     assert ok is False
+
+
+# TC-MLIR-GEN-COMPARE-012
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 对齐 legacy symbol.for expectation 文本到当前 dialect 语法。
+# 测试目的: 验证 compare 工具会为旧 `symbol.for` 头部补齐 iter attr，并把 `!symbol.int<"index">` 改写为对应 `!symbol.iter<...>`。
+# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_rewrite_legacy_symbol_for_expected_text
+# 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
+# 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
+# 对应测试文件路径: test/tools/test_mlir_gen_compare.py
+def test_rewrite_legacy_symbol_for_expected_text() -> None:
+    rewritten = compare_module._rewrite_legacy_symbol_for_expected_text(_LEGACY_SYMBOL_FOR_TEXT)
+
+    assert '{iter = #symbol.iter<start = "0", end = "8", step = "2">} {' in rewritten
+    assert '!symbol.iter<start = "0", end = "8", step = "2">' in rewritten
+    assert '!symbol.int<"index">' not in rewritten
 
 
 # TC-MLIR-GEN-COMPARE-004

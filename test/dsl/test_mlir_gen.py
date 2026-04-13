@@ -95,6 +95,7 @@ from kernel_gen.dialect.nn import (
 )
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
+    SymbolConstOp,
     SymbolDivOp,
     SymbolEqOp,
     SymbolFloorDivOp,
@@ -108,6 +109,7 @@ from kernel_gen.dialect.symbol import (
     SymbolMulOp,
     SymbolNeOp,
     SymbolSubOp,
+    SymbolIterType,
     SymbolToFloatOp,
     SymbolValueType,
 )
@@ -902,8 +904,9 @@ def test_build_func_op_lowers_arch_get_dynamic_memory_via_import_bound_aliases(
                 raise AssertionError("expected memory_space attr to match helper binding")
             if query_ops[0].result.type.element_type != i8:
                 raise AssertionError("expected dynamic memory result element type to stay i8")
-            if query_ops[0].result.type.shape.data[0] != StringAttr("?"):
-                raise AssertionError('expected dynamic memory result shape to stay [?]')
+            expected_shape = StringAttr(f"{expected_space_name.upper()}_SIZE")
+            if query_ops[0].result.type.shape.data[0] != expected_shape:
+                raise AssertionError("expected dynamic memory result shape to stay fixed SymbolDim name")
             if query_ops[0].result.type.stride.data[0] != IntAttr(1):
                 raise AssertionError("expected dynamic memory result stride to stay [1]")
             if query_ops[0].result.type.space.space.data != expected_space_name:
@@ -3111,6 +3114,38 @@ def test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type() -> N
     assert "symbol.add" in _print_module(ModuleOp([func_op]))
 
 
+# MGEN-020A
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-13 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-13 00:00:00 +0800
+# 功能说明: 验证零参整数字面量算术会 materialize 为 symbol.const + symbol.add。
+# 测试目的: 锁定 expectation 中 `return 4 + 5` 的公开合同，避免退回 `arith.constant i32 + nn.add`。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_constant_only_symbol_add
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/emit_mlir.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_lowers_constant_only_symbol_add() -> None:
+    def add_const() -> int:
+        return 4 + 5
+
+    func_op = build_func_op(add_const)
+    const_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolConstOp)]
+    add_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolAddOp)]
+    arith_const_ops = [op for op in func_op.body.block.ops if isinstance(op, arith.ConstantOp)]
+    module_text = _print_module(ModuleOp([func_op]))
+
+    assert len(const_ops) == 2
+    assert [op.value.data for op in const_ops] == [4, 5]
+    assert len(add_ops) == 1
+    assert not arith_const_ops
+    assert add_ops[0].result.type == SymbolValueType.from_expr("9")
+    assert list(func_op.function_type.outputs) == [SymbolValueType.from_expr("9")]
+    assert "symbol.const 4" in module_text
+    assert "symbol.const 5" in module_text
+    assert "symbol.add" in module_text
+
+
 # MGEN-030
 # 创建者: 我不是牛马
 # 最后一次更改: 我不是牛马
@@ -3543,7 +3578,7 @@ def test_multi_statement_ssa_order_and_reuse() -> None:
 # 最近一次运行测试时间: 2026-03-25 16:05:00 +0800
 # 最近一次运行成功时间: 2026-03-25 16:05:00 +0800
 # 功能说明: 验证 LoopRange + slice/deslice + 无 return 场景可生成 symbol.for + dma.slice/dma.deslice。
-# 测试目的: 验证 LoopRange + slice/deslice + 无 return 场景会直接传递 symbol.int 循环变量，不生成 arith.index_cast。
+# 测试目的: 验证 LoopRange + slice/deslice + 无 return 场景会直接传递 symbol.iter 循环变量，不生成 arith.index_cast。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_symbolic_for_loop_dma_without_return
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -3601,7 +3636,7 @@ def test_build_func_op_supports_symbolic_for_loop_dma_without_return(monkeypatch
     assert not any(isinstance(op, arith.IndexCastOp) for op in loop_body_ops)
     assert alloc_ops[0].result.type.space.space.data == "local"
     loop_body = loop_ops[0].body.block
-    assert isinstance(loop_body.args[0].type, SymbolValueType)
+    assert isinstance(loop_body.args[0].type, SymbolIterType)
     offsets = list(slice_ops[0].offsets)
     sizes = list(slice_ops[0].sizes)
     assert offsets[0] is loop_body.args[0]
