@@ -1,7 +1,7 @@
 """codex-multi-agents-task.sh tests.
 
 创建者: 榕
-最后一次更改: 金铲铲大作战
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 覆盖 task 脚本的任务分发、完成、暂停、继续、改派、新建、删除、状态查询与错误返回码路径。
@@ -2024,8 +2024,8 @@ def test_next_auto_reassigns_same_task_to_operator(tmp_path: Path) -> None:
 
 # TC-051
 # 创建者: OpenAI
-# 最后一次更改: OpenAI
-# 测试目的: 验证 -next -auto 会把同一任务续接给其他匹配角色，并发送任务消息与管理员摘要。
+# 最后一次更改: jcc你莫辜负
+# 测试目的: 验证 -next -auto 会把同一任务续接给其他匹配角色，并输出默认任务消息模板与管理员摘要。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
 def test_next_auto_reassigns_same_task_to_other_agent(tmp_path: Path) -> None:

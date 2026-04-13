@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`朽木露琪亚`
+- 最后一次更改：`jcc你莫辜负`
 - `spec`：[`spec/codex-multi-agents/scripts/codex-multi-agents-task.md`](../../../spec/codex-multi-agents/scripts/codex-multi-agents-task.md)
 - `test`：[`test/codex-multi-agents/test_codex-multi-agents-task.py`](../../../test/codex-multi-agents/test_codex-multi-agents-task.py)
 - `功能实现`：
@@ -372,9 +372,25 @@ codex-multi-agents-task.sh \
 - `-next -auto` 自动接续成功时，会把当前这条刚退回 `任务列表` 的同一任务移回 `正在执行的任务`，并把接手角色状态改为 `busy`。
 - `-next -auto` 自动接续成功时，沿用当前任务原 `任务 ID`，不改写为新 ID。
 - `-next -auto` 发给接手执行人的任务消息固定包含：任务 ID、描述，以及当前任务中实际存在的 `worktree`、计划书路径、记录文件、任务记录要求、问题咨询指引。
+- `-next -auto` 自动续接给其他角色时使用默认任务消息模板，与 `-dispatch` 保持一致。
 - `-next -auto` 无论是否成功自动接续，都会向管理员发送一条摘要消息。
   - `spec/build/review` 优先专职，只有专职不可用时才启用候补。
   - `merge` 不启用候补，若无可用专职则自动续接失败并保留在任务列表。
+
+默认任务消息模板（自动续接给其他角色）：
+
+- 当 `worktree`、`计划书`、`记录文件` 为空时，对应字段与分隔符不输出。
+- 模板固定格式如下：
+
+```
+请处理任务 <task_id>（<desc>）。worktree=<worktree>；计划书=<plan_doc>；记录文件=<record_file>；完成后按 <repo_root>/agents/standard/任务记录约定.md 记录并回报管理员；流程不清楚请询问管理员；实现/架构问题请询问架构师。
+```
+
+使用示例：
+
+```
+请处理任务 EX-2（下一阶段：补齐边界用例）。worktree=/tmp/wt-ex2；计划书=ARCHITECTURE/plan/demo.md；记录文件=./log/ex2.md；完成后按 /home/lfr/kernelcode_generate/agents/standard/任务记录约定.md 记录并回报管理员；流程不清楚请询问管理员；实现/架构问题请询问架构师。
+```
 
 返回与限制：
 
