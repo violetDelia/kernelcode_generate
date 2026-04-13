@@ -1,7 +1,7 @@
 """pass registry tests.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 覆盖 kernel_gen/passes/registry.py 的 pass/pipeline 注册、查询与错误短语约束。
@@ -235,6 +235,26 @@ def test_load_builtin_passes_is_idempotent() -> None:
     load_builtin_passes()
     assert "no-op" in list_registered_passes()
     assert "no-op-pipeline" in list_registered_pipelines()
+    assert "default-lowering" in list_registered_pipelines()
+    pm = build_registered_pipeline("default-lowering")
+    assert isinstance(pm, PassManager)
+    assert pm.name == "default-lowering"
+
+
+# TC-REGISTRY-008A
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-13 11:38:00 +0800
+# 最近一次运行成功时间: 2026-04-13 11:38:00 +0800
+# 功能说明: 验证重置 registry 后再次 load_builtin_passes 仍能注册 default-lowering。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_load_builtin_passes_after_reset_registers_default_lowering
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/pass/test_pass_registry.py
+def test_load_builtin_passes_after_reset_registers_default_lowering() -> None:
+    load_builtin_passes()
+    _reset_registry_for_test()
+    load_builtin_passes()
     assert "default-lowering" in list_registered_pipelines()
     pm = build_registered_pipeline("default-lowering")
     assert isinstance(pm, PassManager)
