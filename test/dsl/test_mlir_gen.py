@@ -1,7 +1,7 @@
 """MLIR gen integration tests.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 build_func_op/build_func_op_from_ast 及相关 lowering 集成回归。
@@ -1715,6 +1715,57 @@ def test_build_func_op_supports_matmul_helper_call() -> None:
     assert [attr.data for attr in matmul_ops[0].result.type.shape.data] == [16, 256]
     assert list(func_op.function_type.outputs) == [matmul_ops[0].result.type]
     assert return_ops[0].arguments[0].type == matmul_ops[0].result.type
+
+
+# MGEN-S2A
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 功能说明: 验证 tiled matmul 前端显式声明的 `MemorySpace.TSM` 会在 raw IR 中保持为 `#nn.space<tsm>`。
+# 测试目的: 锁定 execute_engine_npu_demo_matmul S2 的 tile memory 空间合同，避免 `TSM` 退化为 `shared`。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_matmul_tsm_tile_memory_keeps_tsm_in_raw_ir
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_matmul_tsm_tile_memory_keeps_tsm_in_raw_ir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.dma import alloc, deslice, slice
+    from kernel_gen.operation.nn import matmul
+    from kernel_gen.operation.scf import loop
+
+    lhs = Memory([32, 16], NumericType.Float32, space=MemorySpace.GM)
+    rhs = Memory([16, 32], NumericType.Float32, space=MemorySpace.GM)
+
+    def matmul_kernel(lhs: "Tensor[f32, 32, 16]", rhs: "Tensor[f32, 16, 32]") -> "Tensor[f32, 32, 32]":
+        out = alloc([32, 32], NumericType.Float32, MemorySpace.GM)
+        for m0 in loop(0, 32, 16):
+            for n0 in loop(0, 32, 16):
+                lhs_tile = slice(lhs, [m0, 0], [16, 16], [1, 1], MemorySpace.TSM)
+                rhs_tile = slice(rhs, [0, n0], [16, 16], [1, 1], MemorySpace.TSM)
+                partial = matmul(lhs_tile, rhs_tile)
+                deslice(partial, out, [m0, n0], [16, 16], [1, 1])
+        return out
+
+    for name, value in (
+        ("alloc", alloc),
+        ("deslice", deslice),
+        ("slice", slice),
+        ("matmul", matmul),
+        ("loop", loop),
+        ("NumericType", NumericType),
+        ("MemorySpace", MemorySpace),
+    ):
+        monkeypatch.setitem(matmul_kernel.__globals__, name, value)
+
+    func_ast = parse_function(matmul_kernel)
+    for func_op in (
+        build_func_op(matmul_kernel, lhs, rhs),
+        build_func_op_from_ast(func_ast, runtime_args=(lhs, rhs)),
+    ):
+        raw_text = str(func_op)
+        assert "#nn.space<tsm>" in raw_text
+        assert "#nn.space<shared>" not in raw_text
+        assert 'space = #nn.space<tsm>' in raw_text
 
 
 # MGEN-C1C
