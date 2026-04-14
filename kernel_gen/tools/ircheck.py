@@ -282,7 +282,7 @@ def _tokenize_regex_check(text: str) -> list[tuple[str, str, str | None]]:
 
 
 def _contains_invalid_regex_literal_fragment(literal: str) -> bool:
-    """判断 literal 片段里是否残留了非法 regex 变量痕迹。
+    r"""判断 literal 片段里是否残留了非法 regex 变量痕迹。
 
     创建者: 朽木露琪亚
     最后一次更改: 朽木露琪亚
