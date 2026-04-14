@@ -598,6 +598,7 @@ def _maybe_numel(shape: ArrayAttr[Attribute]) -> int | None:
 
 def _verify_static_view_bounds(
     source_shape: ArrayAttr[Attribute],
+    source_stride: ArrayAttr[Attribute],
     offsets: Sequence[SSAValue],
     shape: Sequence[SSAValue],
     stride: Sequence[SSAValue],
@@ -608,11 +609,11 @@ def _verify_static_view_bounds(
     最后一次更改: OpenAI
 
     功能说明:
-    - 当 `source.shape` 与 `offsets/shape/stride` 都可静态恢复时，执行
-      `offset + (size - 1) * stride < dim` 检查。
+    - 当 `source.shape/source.stride` 与 `offsets/shape/stride` 都可静态恢复时，
+      以源内存线性起点和结果线性覆盖范围执行静态边界检查。
 
     使用示例:
-    - _verify_static_view_bounds(source_type.shape, op.offsets, op.shape, op.stride)
+    - _verify_static_view_bounds(source_type.shape, source_type.stride, op.offsets, op.shape, op.stride)
 
     关联文件:
     - spec: spec/dialect/dma.md
@@ -620,17 +621,25 @@ def _verify_static_view_bounds(
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
-    for index, source_dim in enumerate(source_shape.data):
-        if not isinstance(source_dim, IntAttr):
-            continue
-        offset_value = _operand_int_value(offsets[index])
-        size_value = _operand_int_value(shape[index])
-        stride_value = _operand_int_value(stride[index])
-        if offset_value is None or size_value is None or stride_value is None:
-            continue
-        last_index = offset_value + (size_value - 1) * stride_value
-        if last_index >= source_dim.data:
-            raise VerifyException("dma.view bounds mismatch")
+    source_numel = _maybe_numel(source_shape)
+    if source_numel is None:
+        return
+    linear_start = 0
+    linear_extent = 0
+    for source_step_attr, offset_value, size_value, stride_value in zip(
+        source_stride.data, offsets, shape, stride, strict=True
+    ):
+        if not isinstance(source_step_attr, IntAttr):
+            return
+        offset_int = _operand_int_value(offset_value)
+        size_int = _operand_int_value(size_value)
+        stride_int = _operand_int_value(stride_value)
+        if offset_int is None or size_int is None or stride_int is None:
+            return
+        linear_start += offset_int * source_step_attr.data
+        linear_extent += (size_int - 1) * stride_int
+    if linear_start + linear_extent >= source_numel:
+        raise VerifyException("dma.view bounds mismatch")
 
 
 def _default_contiguous_stride(shape: ArrayAttr[Attribute]) -> list[Attribute]:
@@ -1532,7 +1541,7 @@ class DmaViewOp(IRDLOperation):
                 raise VerifyException("dma.view element_type mismatch")
             if source_numel is not None and result_numel is not None and source_numel != result_numel:
                 raise VerifyException("dma.view numel mismatch")
-            _verify_static_view_bounds(source_type.shape, offsets, shape, stride)
+            _verify_static_view_bounds(source_type.shape, source_type.stride, offsets, shape, stride)
 
 
 @irdl_op_definition

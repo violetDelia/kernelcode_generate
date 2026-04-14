@@ -100,11 +100,20 @@ def _parse_dim_list(parser: AttrParser) -> ArrayAttr[Attribute]:
             if integer is not None:
                 dims.append(IntAttr(integer))
             else:
+                start_pos = parser.pos
+                parsed_simple_ident = False
                 ident = parser.parse_optional_identifier()
                 if ident is not None:
-                    dims.append(StringAttr(ident))
-                else:
-                    start_pos = parser.pos
+                    input_text = parser.lexer.input.content
+                    lookahead = parser.pos
+                    while lookahead < len(input_text) and input_text[lookahead].isspace():
+                        lookahead += 1
+                    if lookahead >= len(input_text) or input_text[lookahead] in {",", "]"}:
+                        dims.append(StringAttr(ident))
+                        parsed_simple_ident = True
+                    else:
+                        parser._resume_from(start_pos)
+                if not parsed_simple_ident:
                     input_text = parser.lexer.input.content
                     depth = 0
                     end_pos = None

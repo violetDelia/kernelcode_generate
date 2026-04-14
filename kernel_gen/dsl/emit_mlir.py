@@ -114,6 +114,7 @@ from kernel_gen.dialect.symbol import (
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
+from kernel_gen.operation import dma as _KG_OPERATION_DMA
 from kernel_gen.target import registry
 from kernel_gen.operation import arch as _KG_OPERATION_ARCH
 from kernel_gen.operation import nn as _KG_OPERATION_NN
@@ -1055,7 +1056,145 @@ def _resolve_index_symbol_product(expr: str, ctx: EmitContext, location: SourceL
     return current
 
 
-def _resolve_index_operand(expr: object, ctx: EmitContext, location: SourceLocation | None) -> SSAValue:
+def _build_symbol_index_result(
+    lhs: SSAValue,
+    rhs: SSAValue,
+    op_symbol: str,
+    ctx: EmitContext,
+    location: SourceLocation | None,
+) -> SSAValue:
+    """基于两个 symbol.int 操作数构造索引表达式结果。"""
+
+    lhs_expr = lhs.type.expr.expr.data if isinstance(lhs.type, SymbolValueType) else None
+    rhs_expr = rhs.type.expr.expr.data if isinstance(rhs.type, SymbolValueType) else None
+    if lhs_expr is None or rhs_expr is None:
+        raise _LoweringError("Unsupported index expression", location=location)
+    lhs_value = _cast_to_symbol_int(lhs, ctx, lhs_expr, location)
+    rhs_value = _cast_to_symbol_int(rhs, ctx, rhs_expr, location)
+    result_type = SymbolValueType.from_expr(build_public_symbol_expr(lhs_value.type.expr.expr.data, rhs_value.type.expr.expr.data, op_symbol))
+    if op_symbol == "+":
+        op = SymbolAddOp(lhs_value, rhs_value, result_type)
+    elif op_symbol == "-":
+        op = SymbolSubOp(lhs_value, rhs_value, result_type)
+    elif op_symbol == "*":
+        op = SymbolMulOp(lhs_value, rhs_value, result_type)
+    elif op_symbol == "/":
+        op = SymbolDivOp(lhs_value, rhs_value, result_type)
+    elif op_symbol == "//":
+        op = SymbolFloorDivOp(lhs_value, rhs_value, result_type)
+    else:
+        raise _LoweringError("Unsupported index expression", location=location)
+    ctx.builder.add_op(op)
+    return op.result
+
+
+def _get_symbol_index_constant(
+    value: int,
+    ctx: EmitContext,
+    location: SourceLocation | None,
+    const_cache: dict[int, SSAValue] | None,
+) -> SSAValue:
+    """获取或创建索引表达式里的 symbol.const。"""
+
+    if const_cache is not None and value in const_cache:
+        return const_cache[value]
+    result = _const_symbol_int(value, ctx, location)
+    if const_cache is not None:
+        const_cache[value] = result
+    return result
+
+
+def _preload_symbolic_index_constants(
+    expr: object,
+    ctx: EmitContext,
+    location: SourceLocation | None,
+    const_cache: dict[int, SSAValue],
+) -> None:
+    """在 lowering 前预先 materialize 索引表达式里的整数常量。"""
+
+    if isinstance(expr, ConstAST) and isinstance(expr.value, int):
+        _get_symbol_index_constant(expr.value, ctx, expr.location, const_cache)
+        return
+    if isinstance(expr, BinaryExprAST):
+        _preload_symbolic_index_constants(expr.lhs, ctx, getattr(expr.lhs, "location", None) or location, const_cache)
+        _preload_symbolic_index_constants(expr.rhs, ctx, getattr(expr.rhs, "location", None) or location, const_cache)
+        return
+    if isinstance(expr, int):
+        _get_symbol_index_constant(expr, ctx, location, const_cache)
+        return
+    if isinstance(expr, str):
+        try:
+            parsed = py_ast.parse(expr, mode="eval").body
+        except SyntaxError:
+            return
+
+        def _walk(node: py_ast.AST) -> None:
+            if isinstance(node, py_ast.Constant) and isinstance(node.value, int):
+                _get_symbol_index_constant(node.value, ctx, location, const_cache)
+                return
+            if isinstance(node, py_ast.UnaryOp):
+                _walk(node.operand)
+                return
+            if isinstance(node, py_ast.BinOp):
+                _walk(node.left)
+                _walk(node.right)
+
+        _walk(parsed)
+
+
+def _lower_symbolic_index_node(
+    expr: py_ast.AST,
+    ctx: EmitContext,
+    location: SourceLocation | None,
+    const_cache: dict[int, SSAValue] | None = None,
+) -> SSAValue:
+    """将字符串索引表达式 AST 下沉为 `!symbol.int`。"""
+
+    if isinstance(expr, py_ast.Constant) and isinstance(expr.value, int):
+        return _get_symbol_index_constant(expr.value, ctx, location, const_cache)
+    if isinstance(expr, py_ast.Name):
+        return _resolve_index_symbol(expr.id, ctx, location)
+    if isinstance(expr, py_ast.UnaryOp) and isinstance(expr.op, py_ast.USub):
+        zero = _get_symbol_index_constant(0, ctx, location, const_cache)
+        operand = _lower_symbolic_index_node(expr.operand, ctx, location, const_cache)
+        return _build_symbol_index_result(zero, operand, "-", ctx, location)
+    if isinstance(expr, py_ast.BinOp):
+        lhs = _lower_symbolic_index_node(expr.left, ctx, location, const_cache)
+        rhs = _lower_symbolic_index_node(expr.right, ctx, location, const_cache)
+        if isinstance(expr.op, py_ast.Add):
+            return _build_symbol_index_result(lhs, rhs, "+", ctx, location)
+        if isinstance(expr.op, py_ast.Sub):
+            return _build_symbol_index_result(lhs, rhs, "-", ctx, location)
+        if isinstance(expr.op, py_ast.Mult):
+            return _build_symbol_index_result(lhs, rhs, "*", ctx, location)
+        if isinstance(expr.op, py_ast.Div):
+            return _build_symbol_index_result(lhs, rhs, "/", ctx, location)
+        if isinstance(expr.op, py_ast.FloorDiv):
+            return _build_symbol_index_result(lhs, rhs, "//", ctx, location)
+    raise _LoweringError("Unsupported index expression", location=location)
+
+
+def _lower_symbolic_index_text(
+    expr_text: str,
+    ctx: EmitContext,
+    location: SourceLocation | None,
+    const_cache: dict[int, SSAValue] | None = None,
+) -> SSAValue:
+    """将字符串形式的索引表达式下沉为 `!symbol.int`。"""
+
+    try:
+        parsed = py_ast.parse(expr_text, mode="eval").body
+    except SyntaxError as exc:
+        raise _LoweringError("Unsupported index expression", location=location) from exc
+    return _lower_symbolic_index_node(parsed, ctx, location, const_cache)
+
+
+def _resolve_index_operand(
+    expr: object,
+    ctx: EmitContext,
+    location: SourceLocation | None,
+    const_cache: dict[int, SSAValue] | None = None,
+) -> SSAValue:
     """将索引表达式 lowering 为 SSA operand。
 
     创建者: OpenAI
@@ -1076,21 +1215,32 @@ def _resolve_index_operand(expr: object, ctx: EmitContext, location: SourceLocat
     """
     if isinstance(expr, ConstAST):
         if isinstance(expr.value, int):
-            return _const_symbol_int(expr.value, ctx, expr.location)
+            return _get_symbol_index_constant(expr.value, ctx, expr.location, const_cache)
         if isinstance(expr.value, str):
-            return _resolve_index_symbol(expr.value, ctx, expr.location)
+            return _lower_symbolic_index_text(expr.value, ctx, expr.location, const_cache)
         raise _LoweringError("Index must be int or str", location=expr.location)
     if isinstance(expr, (ScalarArgAST, VarAST)):
         value = _lookup_symbol(expr, ctx)
         if not isinstance(value, SSAValue):
             raise _LoweringError("Index operand must be SSA value", location=expr.location)
         return _ensure_index_value(value, ctx, expr.location)
+    if isinstance(expr, BinaryExprAST):
+        lhs = _resolve_index_operand(expr.lhs, ctx, getattr(expr.lhs, "location", None) or location, const_cache)
+        rhs = _resolve_index_operand(expr.rhs, ctx, getattr(expr.rhs, "location", None) or location, const_cache)
+        op_symbol = {
+            "add": "+",
+            "sub": "-",
+            "mul": "*",
+            "div": "/",
+            "floordiv": "//",
+        }.get(expr.op)
+        if op_symbol is None:
+            raise _LoweringError("Unsupported index expression", location=location or expr.location)
+        return _build_symbol_index_result(lhs, rhs, op_symbol, ctx, location or expr.location)
     if isinstance(expr, int):
-        return _const_symbol_int(expr, ctx, location)
+        return _get_symbol_index_constant(expr, ctx, location, const_cache)
     if isinstance(expr, str):
-        if "*" in expr:
-            return _resolve_index_symbol_product(expr, ctx, location)
-        return _resolve_index_symbol(expr, ctx, location)
+        return _lower_symbolic_index_text(expr, ctx, location, const_cache)
     raise _LoweringError("Unsupported index expression", location=location or getattr(expr, "location", None))
 
 
@@ -1140,7 +1290,7 @@ def _resolve_index_expr(expr: object, ctx: EmitContext) -> int | str:
     """
     if isinstance(expr, ConstAST):
         if isinstance(expr.value, (int, str)):
-            return expr.value
+            return _resolve_static_index_expr(expr, location=expr.location)
         raise _LoweringError("Index must be int or str", location=expr.location)
     if isinstance(expr, ScalarArgAST):
         return expr.name
@@ -1149,8 +1299,18 @@ def _resolve_index_expr(expr: object, ctx: EmitContext) -> int | str:
         if expr.name in loop_vars:
             return loop_vars[expr.name]
         raise _LoweringError("Unknown loop variable", location=expr.location)
+    if isinstance(expr, BinaryExprAST):
+        lhs = _resolve_index_expr(expr.lhs, ctx)
+        rhs = _resolve_index_expr(expr.rhs, ctx)
+        value = _apply_symbolic_index_binary_op(lhs, rhs, expr.op, expr.location)
+        if isinstance(value, SymbolDim):
+            normalized = value.get_value()
+            if not isinstance(normalized, (int, str)):
+                raise _LoweringError("Unsupported index expression", location=expr.location)
+            return normalized
+        return value
     if isinstance(expr, (int, str)):
-        return expr
+        return _resolve_static_index_expr(expr, location=getattr(expr, "location", None))
     raise _LoweringError("Unsupported index expression", location=getattr(expr, "location", None))
 
 
@@ -1338,6 +1498,87 @@ def _build_stride_attrs(
     return stride
 
 
+def _apply_symbolic_index_binary_op(
+    lhs: int | str | SymbolDim,
+    rhs: int | str | SymbolDim,
+    op: str,
+    location: SourceLocation | None,
+) -> int | SymbolDim:
+    """执行索引表达式的静态算术。"""
+
+    lhs_value: int | SymbolDim
+    rhs_value: int | SymbolDim
+    if isinstance(lhs, SymbolDim):
+        lhs_value = lhs
+    elif isinstance(lhs, str):
+        lhs_value = _eval_symbolic_dim_expr(lhs, location)
+    else:
+        lhs_value = lhs
+    if isinstance(rhs, SymbolDim):
+        rhs_value = rhs
+    elif isinstance(rhs, str):
+        rhs_value = _eval_symbolic_dim_expr(rhs, location)
+    else:
+        rhs_value = rhs
+
+    if op == "add":
+        return lhs_value + rhs_value
+    if op == "sub":
+        return lhs_value - rhs_value
+    if op == "mul":
+        return lhs_value * rhs_value
+    if op == "div":
+        if isinstance(lhs_value, int) and isinstance(rhs_value, int):
+            if rhs_value == 0 or lhs_value % rhs_value != 0:
+                raise _LoweringError("Unsupported index expression", location=location)
+            return lhs_value // rhs_value
+        if isinstance(lhs_value, int):
+            lhs_value = SymbolDim(lhs_value)
+        return lhs_value / rhs_value
+    if op == "floordiv":
+        if isinstance(lhs_value, int) and isinstance(rhs_value, int):
+            if rhs_value == 0:
+                raise _LoweringError("Unsupported index expression", location=location)
+            return lhs_value // rhs_value
+        if isinstance(lhs_value, int):
+            lhs_value = SymbolDim(lhs_value)
+        return lhs_value // rhs_value
+    raise _LoweringError("Unsupported index expression", location=location)
+
+
+def _resolve_symbolic_index_value(
+    expr: object,
+    *,
+    location: SourceLocation | None = None,
+    runtime_values: dict[str, object] | None = None,
+) -> int | SymbolDim:
+    """解析索引表达式为静态 `int|SymbolDim`。"""
+
+    if isinstance(expr, ConstAST):
+        if isinstance(expr.value, int):
+            return expr.value
+        if isinstance(expr.value, str):
+            return _eval_symbolic_dim_expr(expr.value, expr.location)
+        raise _LoweringError("Index must be int or str", location=expr.location)
+    if isinstance(expr, ScalarArgAST):
+        if runtime_values is not None and expr.name in runtime_values:
+            runtime_value = runtime_values[expr.name]
+            if isinstance(runtime_value, (int, SymbolDim)):
+                return runtime_value
+        return SymbolDim(expr.name)
+    if isinstance(expr, VarAST):
+        return SymbolDim(expr.name)
+    if isinstance(expr, BinaryExprAST):
+        lhs = _resolve_symbolic_index_value(expr.lhs, location=expr.location, runtime_values=runtime_values)
+        rhs = _resolve_symbolic_index_value(expr.rhs, location=expr.location, runtime_values=runtime_values)
+        return _apply_symbolic_index_binary_op(lhs, rhs, expr.op, expr.location)
+    if isinstance(expr, int):
+        return expr
+    if isinstance(expr, str):
+        return _eval_symbolic_dim_expr(expr, location)
+    raise _LoweringError("Unsupported index expression", location=location or getattr(expr, "location", None))
+
+
 def _resolve_static_index_expr(
     expr: object,
     location: SourceLocation | None = None,
@@ -1360,23 +1601,13 @@ def _resolve_static_index_expr(
     - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
     """
 
-    if isinstance(expr, ConstAST):
-        if isinstance(expr.value, (int, str)):
-            return expr.value
-        raise _LoweringError("Index must be int or str", location=expr.location)
-    if isinstance(expr, ScalarArgAST):
-        if runtime_values is not None and expr.name in runtime_values:
-            runtime_value = runtime_values[expr.name]
-            if isinstance(runtime_value, SymbolDim):
-                return str(runtime_value.get_symbol())
-            if isinstance(runtime_value, int):
-                return runtime_value
-        return expr.name
-    if isinstance(expr, VarAST):
-        return expr.name
-    if isinstance(expr, (int, str)):
-        return expr
-    raise _LoweringError("Unsupported index expression", location=location or getattr(expr, "location", None))
+    value = _resolve_symbolic_index_value(expr, location=location, runtime_values=runtime_values)
+    if isinstance(value, SymbolDim):
+        normalized = value.get_value()
+        if not isinstance(normalized, (int, str)):
+            raise _LoweringError("Unsupported index expression", location=location or getattr(expr, "location", None))
+        return normalized
+    return value
 
 
 def _build_static_index_list(
@@ -1473,7 +1704,27 @@ def _build_index_operands_exact(
         entries = list(value)
     else:
         entries = [value]
-    return [_resolve_index_operand(entry, ctx, getattr(entry, "location", None) or location) for entry in entries]
+    const_cache: dict[int, SSAValue] = {}
+    for entry in entries:
+        _preload_symbolic_index_constants(entry, ctx, getattr(entry, "location", None) or location, const_cache)
+    return [
+        _resolve_index_operand(entry, ctx, getattr(entry, "location", None) or location, const_cache) for entry in entries
+    ]
+
+
+def _symbolic_index_sequence(
+    value: object,
+    *,
+    location: SourceLocation | None = None,
+    runtime_values: dict[str, object] | None = None,
+) -> list[int | SymbolDim]:
+    """将索引参数规整为 `int|SymbolDim` 序列。"""
+
+    entries = list(value) if isinstance(value, (list, tuple)) else [value]
+    return [
+        _resolve_symbolic_index_value(entry, location=getattr(entry, "location", None) or location, runtime_values=runtime_values)
+        for entry in entries
+    ]
 
 
 def _memory_type_from_parts(
@@ -2942,25 +3193,35 @@ def _infer_expr_type(
         if tensor_key not in type_map or not isinstance(type_map[tensor_key], NnMemoryType):
             raise _LoweringError("Unknown input reference", location=getattr(expr.tensor, "location", None))
         source_type = type_map[tensor_key]
-        rank = len(source_type.shape.data)
-        if expr.sizes is None:
-            shape_attr = source_type.shape
-        else:
-            shape_attr = ArrayAttr(
-                _build_static_index_list(
-                    expr.sizes,
-                    rank,
-                    default_value=1,
-                    location=expr.location,
-                    runtime_values=runtime_values,
-                )
-            )
-        stride_attr = ArrayAttr(_build_default_stride_attrs(shape_attr.data))
-        space_attr = _memory_space_from_ast(expr.space, source_type.space)
-        result_type = NnMemoryType(shape_attr, stride_attr, source_type.element_type, space_attr)
+        source_memory = _nn_memory_type_to_memory(source_type, location=expr.location)
+        offsets_value = _symbolic_index_sequence(expr.offset, location=expr.location, runtime_values=runtime_values)
+        sizes_value = (
+            [dim for dim in source_memory.shape]
+            if expr.sizes is None
+            else _symbolic_index_sequence(expr.sizes, location=expr.location, runtime_values=runtime_values)
+        )
+        strides_value = (
+            None
+            if expr.stride is None
+            else _symbolic_index_sequence(expr.stride, location=expr.location, runtime_values=runtime_values)
+        )
+        target_space = source_memory.space if expr.space is None else expr.space
+        result_memory = (
+            _KG_OPERATION_DMA.slice(source_memory, offsets_value, sizes_value, strides_value, target_space)
+            if expr.kind == "slice"
+            else _KG_OPERATION_DMA.load(source_memory, offsets_value, sizes_value, strides_value, target_space)
+        )
+        result_type = _memory_to_nn_type(result_memory, location=expr.location)
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, DmaAllocAST):
+        shape_value = _symbolic_index_sequence(expr.shape, location=expr.location, runtime_values=runtime_values)
+        stride_value = (
+            None
+            if expr.stride is None
+            else _symbolic_index_sequence(expr.stride, location=expr.location, runtime_values=runtime_values)
+        )
+        result_memory = _KG_OPERATION_DMA.alloc(shape_value, expr.dtype, expr.space, stride=stride_value)
         shape_attr = _build_static_index_attrs_exact(expr.shape, location=expr.location, runtime_values=runtime_values)
         stride_attr = (
             _build_static_index_attrs_exact(expr.stride, location=expr.location, runtime_values=runtime_values)
@@ -2970,35 +3231,25 @@ def _infer_expr_type(
         default_stride = _build_default_stride_attrs(shape_attr)
         if stride_attr != default_stride:
             raise _LoweringError("dma.alloc only supports contiguous stride", location=expr.location)
-        result_type = _memory_type_from_parts(
-            shape_attr,
-            default_stride,
-            _dtype_to_xdsl(expr.dtype, location=expr.location),
-            _memory_space_from_ast(expr.space, NnMemorySpaceAttr.from_name("global")),
-        )
+        result_type = _memory_to_nn_type(result_memory, location=expr.location)
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, DmaCopyAST):
         source_type = _infer_expr_type(expr.source, type_map, runtime_values=runtime_values)
         if not isinstance(source_type, NnMemoryType):
             raise _LoweringError("copy source must have nn.memory type", location=expr.location)
-        result_type = _memory_type_from_parts(
-            source_type.shape.data,
-            source_type.stride.data,
-            source_type.element_type,
-            _memory_space_from_ast(expr.space, source_type.space),
-        )
+        source_memory = _nn_memory_type_to_memory(source_type, location=expr.location)
+        result_type = _memory_to_nn_type(_KG_OPERATION_DMA.copy(source_memory, expr.space), location=expr.location)
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, DmaCastAST):
         source_type = _infer_expr_type(expr.source, type_map, runtime_values=runtime_values)
         if not isinstance(source_type, NnMemoryType):
             raise _LoweringError("cast source must have nn.memory type", location=expr.location)
-        result_type = _memory_type_from_parts(
-            source_type.shape.data,
-            source_type.stride.data,
-            _dtype_to_xdsl(expr.dtype, location=expr.location),
-            _memory_space_from_ast(expr.memoryspace, source_type.space),
+        source_memory = _nn_memory_type_to_memory(source_type, location=expr.location)
+        result_type = _memory_to_nn_type(
+            _KG_OPERATION_DMA.cast(source_memory, expr.dtype, memoryspace=expr.memoryspace),
+            location=expr.location,
         )
         type_map[expr_key] = result_type
         return result_type
@@ -3021,21 +3272,17 @@ def _infer_expr_type(
         source_type = _infer_expr_type(expr.source, type_map, runtime_values=runtime_values)
         if not isinstance(source_type, NnMemoryType):
             raise _LoweringError("reshape source must have nn.memory type", location=expr.location)
-        shape_attr = _build_static_index_attrs_exact(expr.shape, location=expr.location, runtime_values=runtime_values)
-        result_type = _memory_type_from_parts(
-            shape_attr,
-            _build_default_stride_attrs(shape_attr),
-            source_type.element_type,
-            source_type.space,
-        )
+        source_memory = _nn_memory_type_to_memory(source_type, location=expr.location)
+        shape_value = _symbolic_index_sequence(expr.shape, location=expr.location, runtime_values=runtime_values)
+        result_type = _memory_to_nn_type(_KG_OPERATION_DMA.reshape(source_memory, shape_value), location=expr.location)
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, DmaFlattenAST):
         source_type = _infer_expr_type(expr.source, type_map, runtime_values=runtime_values)
         if not isinstance(source_type, NnMemoryType):
             raise _LoweringError("flatten source must have nn.memory type", location=expr.location)
-        shape_attr = [_shape_numel_attr(source_type.shape.data)]
-        result_type = _memory_type_from_parts(shape_attr, [IntAttr(1)], source_type.element_type, source_type.space)
+        source_memory = _nn_memory_type_to_memory(source_type, location=expr.location)
+        result_type = _memory_to_nn_type(_KG_OPERATION_DMA.flatten(source_memory), location=expr.location)
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, NnBroadcastAST):
@@ -3488,7 +3735,11 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         result_type = _infer_expr_type(expr, ctx.types)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("copy result must be nn.memory", location=expr.location)
-        alloc_op = DmaAllocOp(_build_index_operands_from_layout(result_type.shape, ctx, location=expr.location), result_type)
+        if all(isinstance(dim, IntAttr) for dim in result_type.shape.data):
+            alloc_shape: list[SSAValue] = []
+        else:
+            alloc_shape = _build_index_operands_from_layout(result_type.shape, ctx, location=expr.location)
+        alloc_op = DmaAllocOp(alloc_shape, result_type)
         ctx.builder.add_op(alloc_op)
         copy_op = DmaCopyOp(source, alloc_op.result)
         ctx.builder.add_op(copy_op)
@@ -4133,6 +4384,37 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
             _infer_expr_type(node, ctx.types, config=ctx.config)
         return _lower_expr(node, ctx)
     if isinstance(node, StoreAST):
+        runtime_values = None
+        if isinstance(ctx.config, dict):
+            candidate_runtime_values = ctx.config.get("__runtime_values__")
+            if isinstance(candidate_runtime_values, dict):
+                runtime_values = candidate_runtime_values
+        try:
+            source_memory_type = _infer_expr_type(node.value, ctx.types)
+        except _LoweringError:
+            source_memory_type = None
+        try:
+            target_memory_type = _infer_expr_type(node.tensor, ctx.types)
+        except _LoweringError:
+            target_memory_type = None
+        if isinstance(source_memory_type, NnMemoryType) and isinstance(target_memory_type, NnMemoryType):
+            source_memory = _nn_memory_type_to_memory(source_memory_type, location=node.location)
+            target_memory = _nn_memory_type_to_memory(target_memory_type, location=node.location)
+            offsets_value = _symbolic_index_sequence(node.offset, location=node.location, runtime_values=runtime_values)
+            sizes_value = (
+                [dim for dim in source_memory.shape]
+                if node.sizes is None
+                else _symbolic_index_sequence(node.sizes, location=node.location, runtime_values=runtime_values)
+            )
+            strides_value = (
+                None
+                if node.stride is None
+                else _symbolic_index_sequence(node.stride, location=node.location, runtime_values=runtime_values)
+            )
+            if node.kind == "deslice":
+                _KG_OPERATION_DMA.deslice(source_memory, target_memory, offsets_value, sizes_value, strides_value)
+            else:
+                _KG_OPERATION_DMA.store(source_memory, target_memory, offsets_value, sizes_value, strides_value)
         target = _lower_expr(node.tensor, ctx)
         target_type = _expect_memory_value(target, node.location)
         value = _lower_expr(node.value, ctx)
@@ -4154,6 +4436,13 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
         ctx.builder.add_op(store_op)
         return store_op
     if isinstance(node, DmaFreeAST):
+        try:
+            value_type = _infer_expr_type(node.value, ctx.types)
+        except _LoweringError:
+            value_type = None
+        if not isinstance(value_type, NnMemoryType):
+            raw_value = node.value.value if isinstance(node.value, ConstAST) else node.value
+            _KG_OPERATION_DMA.free(raw_value)
         value = _lower_expr(node.value, ctx)
         _expect_memory_value(value, node.location)
         free_op = DmaFreeOp(value)

@@ -1747,6 +1747,50 @@ def test_build_func_op_supports_dma_view_helper() -> None:
     assert return_ops[0].arguments[0].type == view_ops[0].result.type
 
 
+# MGEN-025B
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 build_func_op 会拒绝静态可判定越界的 dma.view helper。
+# 测试目的: 锁定 function_builder 的 dma.view 预检继续使用 `offset + (size - 1) * stride` 边界语义。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_dma_view_static_out_of_bounds
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/function_builder.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_rejects_dma_view_static_out_of_bounds() -> None:
+    from kernel_gen.operation.dma import view
+
+    source = Memory([4], NumericType.Float32, space=MemorySpace.GM)
+
+    def bad_view(src: "Tensor[f32, 4]") -> "Tensor[f32, 3]":
+        return view(src, [0], [3], [2])
+
+    with pytest.raises(ValueError, match="Index out of bounds"):
+        build_func_op(bad_view, source)
+
+
+# MGEN-025C
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 build_func_op 对 slice helper 的非法 space 类型继续按 TypeError 对外暴露。
+# 测试目的: 锁定恢复 slice AST space 校验后，mlir_gen 路径仍满足 dma expectation 的异常合同。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_dma_slice_invalid_space_type
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/function_builder.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_build_func_op_rejects_dma_slice_invalid_space_type(monkeypatch: pytest.MonkeyPatch) -> None:
+    from kernel_gen.operation.dma import slice
+
+    source = Memory([4, 4], NumericType.Float32, space=MemorySpace.GM)
+
+    def bad_slice(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
+        return slice(src, [0, 0], [2, 2], [1, 1], "LM")
+
+    monkeypatch.setitem(bad_slice.__globals__, "slice", slice)
+
+    with pytest.raises(TypeError, match="slice space must be MemorySpace"):
+        build_func_op(bad_slice, source)
+
+
 # MGEN-026A
 # 创建者: 小李飞刀
 # 最后一次更改: 我不是牛马
@@ -2083,8 +2127,8 @@ def test_build_func_op_supports_dma_free_statement() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-30 03:03:30 +0800
 # 最近一次运行成功时间: 2026-03-30 03:03:30 +0800
-# 功能说明: 验证 build_func_op 遇到 free 非 memory operand 时抛出错误。
-# 测试目的: 锁定 AstVisitor/build_func_op 链路对 Operand must be nn.memory 的错误口径。
+# 功能说明: 验证 build_func_op 遇到 free 非 memory operand 时直接透传 operation.free 的类型错误。
+# 测试目的: 锁定 dma.free helper 对非 Memory 输入保持构造阶段 TypeError 口径。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_dma_free_non_memory_operand
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -2095,7 +2139,7 @@ def test_build_func_op_rejects_dma_free_non_memory_operand() -> None:
     def free_kernel():
         free(1)
 
-    with pytest.raises(AstVisitorError, match="Operand must be nn.memory"):
+    with pytest.raises(TypeError, match="value must be Memory"):
         build_func_op(free_kernel)
 
 
@@ -2104,8 +2148,8 @@ def test_build_func_op_rejects_dma_free_non_memory_operand() -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-25 10:18:40 +0800
 # 最近一次运行成功时间: 2026-03-25 10:18:40 +0800
-# 功能说明: 验证 build_func_op 在 load helper 场景下生成 dma.load。
-# 测试目的: 验证 load(...) 在 build_func_op 链路中被直接识别并 lowering 为 DmaLoadOp。
+# 功能说明: 验证 build_func_op 在 load helper 场景下生成 dma.alloc + dma.slice。
+# 测试目的: 验证 load(...) 在 build_func_op 链路中对齐公开 helper 语义，返回前置 dma.alloc 结果。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_supports_dma_load_helper
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -2119,9 +2163,15 @@ def test_build_func_op_supports_dma_load_helper() -> None:
         return load(src, [1, 1], [2, 2], [1, 1], MemorySpace.SM)
 
     func_op = build_func_op(load_kernel, source)
-    load_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaLoadOp)]
+    alloc_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaAllocOp)]
+    slice_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaSliceOp)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
     assert isinstance(func_op, func.FuncOp)
-    assert len(load_ops) == 1
+    assert len(alloc_ops) == 1
+    assert len(slice_ops) == 1
+    assert len(return_ops) == 1
+    assert slice_ops[0].target is alloc_ops[0].result
+    assert return_ops[0].operands[0] is alloc_ops[0].result
 
 
 # MGEN-026
@@ -3513,8 +3563,8 @@ def test_emit_mlir_dma_free_statement() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-30 03:03:30 +0800
 # 最近一次运行成功时间: 2026-03-30 03:03:30 +0800
-# 功能说明: 验证 free AST 遇到非 memory operand 时抛出错误。
-# 测试目的: 锁定 emit_mlir 在 dma.free statement lowering 中对 Operand must be nn.memory 的错误口径。
+# 功能说明: 验证 free AST 遇到非 memory operand 时直接透传 operation.free 的类型错误。
+# 测试目的: 锁定 emit_mlir 在 dma.free statement lowering 中保持构造阶段 TypeError 口径。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_emit_mlir_dma_free_rejects_non_memory_operand
 # 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
@@ -3523,7 +3573,7 @@ def test_emit_mlir_dma_free_rejects_non_memory_operand() -> None:
     block = Block()
     ctx = EmitContext(builder=block, symbols={}, types={})
 
-    with pytest.raises(_LoweringError, match="Operand must be nn.memory"):
+    with pytest.raises(TypeError, match="value must be Memory"):
         emit_node_mlir(DmaFreeAST(value=ConstAST(1, location=None), location=None), ctx)
 
 
@@ -3804,6 +3854,71 @@ def test_parse_function_rejects_invalid_slice_helper_variants(
             raise AssertionError(f"expected diagnostics for slice variant: {expected_message}")
         if diagnostics[0].message != expected_message:
             raise AssertionError(f"expected slice diagnostic {expected_message!r}, got {diagnostics[0].message!r}")
+
+
+# AST-014A
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 copy helper 的非法 space 参数继续在 AST 阶段报错。
+# 测试目的: 锁定 dma.copy 的 `space` 类型校验不回退。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_invalid_copy_helper_space
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_parse_function_rejects_invalid_copy_helper_space(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.dma import copy
+
+    def bad_space(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 4, 4]":
+        return copy(src, 1)
+
+    monkeypatch.setitem(bad_space.__globals__, "copy", copy)
+
+    with pytest.raises(AstParseError) as exc_info:
+        parse_function(bad_space)
+    diagnostics = exc_info.value.diagnostics
+    if not diagnostics:
+        raise AssertionError("expected diagnostics for copy invalid space")
+    if diagnostics[0].message != "copy space must be MemorySpace":
+        raise AssertionError(f"expected copy diagnostic 'copy space must be MemorySpace', got {diagnostics[0].message!r}")
+
+
+# AST-014B
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 cast helper 的非法 dtype/memoryspace 参数继续在 AST 阶段报错。
+# 测试目的: 锁定 dma.cast 的 `dtype` 与 `memoryspace` 类型校验不回退。
+# 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_invalid_cast_helper_parameters
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast_visitor.py
+def test_parse_function_rejects_invalid_cast_helper_parameters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.dma import cast
+
+    def bad_dtype(src: "Tensor[f32, 4, 4]") -> "Tensor[f16, 4, 4]":
+        return cast(src, "f16")
+
+    def bad_memoryspace(src: "Tensor[f32, 4, 4]") -> "Tensor[f16, 4, 4]":
+        return cast(src, NumericType.Float16, "LM")
+
+    for fn in (bad_dtype, bad_memoryspace):
+        monkeypatch.setitem(fn.__globals__, "cast", cast)
+
+    expected_messages = (
+        ("cast dtype must be NumericType", bad_dtype),
+        ("cast memoryspace must be MemorySpace", bad_memoryspace),
+    )
+    for expected_message, fn in expected_messages:
+        with pytest.raises(AstParseError) as exc_info:
+            parse_function(fn)
+        diagnostics = exc_info.value.diagnostics
+        if not diagnostics:
+            raise AssertionError(f"expected diagnostics for cast variant: {expected_message}")
+        if diagnostics[0].message != expected_message:
+            raise AssertionError(f"expected cast diagnostic {expected_message!r}, got {diagnostics[0].message!r}")
 
 
 # AST-015

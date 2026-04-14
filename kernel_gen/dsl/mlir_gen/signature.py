@@ -50,6 +50,7 @@ from kernel_gen.dsl.emit_mlir import (
     _infer_binary_memory_type,
     _infer_expr_type,
     _memory_to_nn_type,
+    _resolve_symbolic_index_value,
 )
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -156,7 +157,7 @@ def _is_dma_alloc_only_function(func_ast: FunctionAST) -> bool:
     return isinstance(statements[-1], DmaAllocAST)
 
 
-def _resolve_dma_alloc_shape_value(expr: object, runtime_values: dict[str, object]) -> int | str | SymbolDim:
+def _resolve_dma_alloc_shape_value(expr: object, runtime_values: dict[str, object]) -> int | SymbolDim:
     """解析 dma.alloc 形状/步长表达式为数值或 symbol 表达式。
 
     创建者: 朽木露琪亚
@@ -175,25 +176,7 @@ def _resolve_dma_alloc_shape_value(expr: object, runtime_values: dict[str, objec
     - 功能实现: [kernel_gen/dsl/mlir_gen/signature.py](kernel_gen/dsl/mlir_gen/signature.py)
     """
 
-    if isinstance(expr, ScalarArgAST):
-        if expr.name in runtime_values:
-            runtime_value = runtime_values[expr.name]
-            if isinstance(runtime_value, int):
-                return runtime_value
-            if isinstance(runtime_value, SymbolDim):
-                return runtime_value
-            runtime_expr = _symbol_expr_from_runtime_arg(runtime_value)
-            if runtime_expr is None:
-                raise _LoweringError("Unsupported scalar argument type", location=expr.location)
-            return runtime_expr
-        return expr.name
-    if isinstance(expr, ConstAST):
-        if isinstance(expr.value, (int, str)):
-            return expr.value
-        raise _LoweringError("Index must be int or str", location=expr.location)
-    if isinstance(expr, (int, str)):
-        return expr
-    raise _LoweringError("Unsupported index expression", location=getattr(expr, "location", None))
+    return _resolve_symbolic_index_value(expr, location=getattr(expr, "location", None), runtime_values=runtime_values)
 
 
 def _build_dma_alloc_only_result_type(

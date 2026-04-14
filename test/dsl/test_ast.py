@@ -1290,6 +1290,71 @@ def test_parse_function_rejects_invalid_slice_helper_variants(
             raise AssertionError(f"expected slice diagnostic {expected_message!r}, got {diagnostics[0].message!r}")
 
 
+# AST-014A
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 copy helper 的非法 space 参数继续在 AST 阶段报错。
+# 测试目的: 锁定 dma.copy 的 `space` 类型校验不回退。
+# 使用示例: pytest -q test/dsl/test_ast.py -k test_parse_function_rejects_invalid_copy_helper_space
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast.py
+def test_parse_function_rejects_invalid_copy_helper_space(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.dma import copy
+
+    def bad_space(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 4, 4]":
+        return copy(src, 1)
+
+    monkeypatch.setitem(bad_space.__globals__, "copy", copy)
+
+    with pytest.raises(AstParseError) as exc_info:
+        parse_function(bad_space)
+    diagnostics = exc_info.value.diagnostics
+    if not diagnostics:
+        raise AssertionError("expected diagnostics for copy invalid space")
+    if diagnostics[0].message != "copy space must be MemorySpace":
+        raise AssertionError(f"expected copy diagnostic 'copy space must be MemorySpace', got {diagnostics[0].message!r}")
+
+
+# AST-014B
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 cast helper 的非法 dtype/memoryspace 参数继续在 AST 阶段报错。
+# 测试目的: 锁定 dma.cast 的 `dtype` 与 `memoryspace` 类型校验不回退。
+# 使用示例: pytest -q test/dsl/test_ast.py -k test_parse_function_rejects_invalid_cast_helper_parameters
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/test_ast.py
+def test_parse_function_rejects_invalid_cast_helper_parameters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.dma import cast
+
+    def bad_dtype(src: "Tensor[f32, 4, 4]") -> "Tensor[f16, 4, 4]":
+        return cast(src, "f16")
+
+    def bad_memoryspace(src: "Tensor[f32, 4, 4]") -> "Tensor[f16, 4, 4]":
+        return cast(src, NumericType.Float16, "LM")
+
+    for fn in (bad_dtype, bad_memoryspace):
+        monkeypatch.setitem(fn.__globals__, "cast", cast)
+
+    expected_messages = (
+        ("cast dtype must be NumericType", bad_dtype),
+        ("cast memoryspace must be MemorySpace", bad_memoryspace),
+    )
+    for expected_message, fn in expected_messages:
+        with pytest.raises(AstParseError) as exc_info:
+            parse_function(fn)
+        diagnostics = exc_info.value.diagnostics
+        if not diagnostics:
+            raise AssertionError(f"expected diagnostics for cast variant: {expected_message}")
+        if diagnostics[0].message != expected_message:
+            raise AssertionError(f"expected cast diagnostic {expected_message!r}, got {diagnostics[0].message!r}")
+
+
 # AST-015
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战

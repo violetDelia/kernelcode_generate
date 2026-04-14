@@ -1336,13 +1336,14 @@ def _parse_load_like_call(
     space = _parse_expr(expr.args[4], env, globals_table, builtins_table) if len(expr.args) >= 5 else None
     if space is not None and not isinstance(space, MemorySpace):
         _raise_parse_error(f"{call_name} space must be MemorySpace", expr.args[4])
+    load_kind = "slice" if call_name == "load" else call_name
     return LoadAST(
         tensor=tensor,
         offset=offsets,
         sizes=sizes,
         stride=stride,
         space=space,
-        kind=call_name,
+        kind=load_kind,
         location=_location_from_node(expr),
     )
 

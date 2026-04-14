@@ -234,6 +234,8 @@ def mlir_gen(
                 location = exc.diagnostics[0].location if exc.diagnostics else None
                 if exc.message == "get_dynamic_memory space must be on-chip MemorySpace":
                     raise ValueError(exc.message) from exc
+                if exc.message.endswith("space must be MemorySpace") or exc.message == "cast dtype must be NumericType":
+                    raise TypeError(exc.message) from exc
                 raise AstVisitorError(exc.message, location=location) from exc
             callee_registry[callee] = build_func_op_from_ast(
                 callee_ast,
@@ -262,6 +264,8 @@ def mlir_gen(
         location = exc.diagnostics[0].location if exc.diagnostics else None
         if exc.message == "get_dynamic_memory space must be on-chip MemorySpace":
             raise ValueError(exc.message) from exc
+        if exc.message.endswith("space must be MemorySpace") or exc.message == "cast dtype must be NumericType":
+            raise TypeError(exc.message) from exc
         raise AstVisitorError(exc.message, location=location) from exc
 
     compiling.add(fn)

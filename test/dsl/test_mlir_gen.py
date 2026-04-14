@@ -1357,6 +1357,54 @@ def test_build_func_op_rejects_unimported_dma_view_and_slice_helpers() -> None:
             build_func_op(fn, source)
 
 
+# MGEN-026C
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 mlir_gen 对 slice helper 的非法 space 类型继续按 TypeError 对外暴露。
+# 测试目的: 锁定 module_builder 的 parse-error 包装与 dma slice expectation 一致。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_mlir_gen_rejects_dma_slice_invalid_space_type
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/module_builder.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_mlir_gen_rejects_dma_slice_invalid_space_type(monkeypatch: pytest.MonkeyPatch) -> None:
+    from kernel_gen.dsl.mlir_gen import mlir_gen
+    from kernel_gen.operation.dma import slice
+
+    source = Memory([4, 4], NumericType.Float32, space=MemorySpace.GM)
+
+    def bad_slice(src: "Tensor[f32, 4, 4]") -> "Tensor[f32, 2, 2]":
+        return slice(src, [0, 0], [2, 2], [1, 1], "LM")
+
+    monkeypatch.setitem(bad_slice.__globals__, "slice", slice)
+
+    with pytest.raises(TypeError, match="slice space must be MemorySpace"):
+        mlir_gen(bad_slice, source)
+
+
+# MGEN-026D
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 mlir_gen 对 cast helper 的非法 dtype 参数继续按 TypeError 对外暴露。
+# 测试目的: 锁定 parser 恢复 cast dtype AST 校验后，module_builder 不再把该错误回包为 AstVisitorError。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_mlir_gen_rejects_dma_cast_invalid_dtype
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/module_builder.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_mlir_gen_rejects_dma_cast_invalid_dtype(monkeypatch: pytest.MonkeyPatch) -> None:
+    from kernel_gen.dsl.mlir_gen import mlir_gen
+    from kernel_gen.operation.dma import cast
+
+    source = Memory([4, 4], NumericType.Float32, space=MemorySpace.GM)
+
+    def bad_cast(src: "Tensor[f32, 4, 4]") -> "Tensor[f16, 4, 4]":
+        return cast(src, "f16")
+
+    monkeypatch.setitem(bad_cast.__globals__, "cast", cast)
+
+    with pytest.raises(TypeError, match="cast dtype must be NumericType"):
+        mlir_gen(bad_cast, source)
+
+
 # MGEN-036
 # 创建者: 金铲铲大作战
 # 最后一次更改: jcc你莫辜负
@@ -2351,8 +2399,8 @@ def test_build_func_op_supports_dma_free_statement() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-30 03:03:30 +0800
 # 最近一次运行成功时间: 2026-03-30 03:03:30 +0800
-# 功能说明: 验证 build_func_op 遇到 free 非 memory operand 时抛出错误。
-# 测试目的: 锁定 build_func_op 链路对 Operand must be nn.memory 的错误口径。
+# 功能说明: 验证 build_func_op 遇到 free 非 memory operand 时直接透传 operation.free 的类型错误。
+# 测试目的: 锁定 dma.free helper 对非 Memory 输入保持构造阶段 TypeError 口径。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_rejects_dma_free_non_memory_operand
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -2363,7 +2411,7 @@ def test_build_func_op_rejects_dma_free_non_memory_operand() -> None:
     def free_kernel():
         free(1)
 
-    with pytest.raises(AstVisitorError, match="Operand must be nn.memory"):
+    with pytest.raises(TypeError, match="value must be Memory"):
         build_func_op(free_kernel)
 
 
@@ -2395,8 +2443,8 @@ def test_build_func_op_rejects_invalid_free_arity() -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-25 10:18:40 +0800
 # 最近一次运行成功时间: 2026-03-25 10:18:40 +0800
-# 功能说明: 验证 build_func_op 在 load helper 场景下生成 dma.load。
-# 测试目的: 验证 load(...) 在 build_func_op 链路中被直接识别并 lowering 为 DmaLoadOp。
+# 功能说明: 验证 build_func_op 在 load helper 场景下生成 dma.alloc + dma.slice。
+# 测试目的: 验证 load(...) 在 build_func_op 链路中对齐公开 helper 语义，返回前置 dma.alloc 结果。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_dma_load_helper
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -2410,9 +2458,15 @@ def test_build_func_op_supports_dma_load_helper() -> None:
         return load(src, [1, 1], [2, 2], [1, 1], MemorySpace.SM)
 
     func_op = build_func_op(load_kernel, source)
-    load_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaLoadOp)]
+    alloc_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaAllocOp)]
+    slice_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaSliceOp)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
     assert isinstance(func_op, func.FuncOp)
-    assert len(load_ops) == 1
+    assert len(alloc_ops) == 1
+    assert len(slice_ops) == 1
+    assert len(return_ops) == 1
+    assert slice_ops[0].target is alloc_ops[0].result
+    assert return_ops[0].operands[0] is alloc_ops[0].result
 
 
 # MGEN-026

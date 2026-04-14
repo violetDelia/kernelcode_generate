@@ -186,17 +186,30 @@ def _maybe_validate_dma_view_bounds(
         if not isinstance(source_memory, Memory):
             continue
         shape_values = source_memory.shape.get_values()
+        source_stride = source_memory.stride.get_values() if source_memory.stride is not None else None
+        if source_stride is None:
+            continue
         if not all(isinstance(value, int) for value in shape_values):
+            continue
+        if not all(isinstance(value, int) for value in source_stride):
             continue
         offsets = _resolve_static_index_list(stmt.offset, runtime_values)
         sizes = _resolve_static_index_list(stmt.size, runtime_values)
         strides = _resolve_static_index_list(stmt.stride, runtime_values)
         if not all(isinstance(value, int) for value in offsets + sizes + strides):
             continue
-        for dim, offset, size, stride in zip(shape_values, offsets, sizes, strides):
-            last_index = offset + (size - 1) * stride
-            if last_index >= dim:
-                raise ValueError("Index out of bounds")
+        source_numel = 1
+        for dim in shape_values:
+            source_numel *= dim
+        linear_start = 0
+        linear_extent = 0
+        for offset, size, stride, source_step in zip(offsets, sizes, strides, source_stride):
+            if stride <= 0:
+                raise ValueError("Invalid stride")
+            linear_start += offset * source_step
+            linear_extent += (size - 1) * stride
+        if linear_start + linear_extent >= source_numel:
+            raise ValueError("Index out of bounds")
 
 
 def _seed_input_symbol_aliases(ctx: EmitContext, func_ast: FunctionAST, block: Block) -> None:
@@ -308,6 +321,8 @@ def build_func_op(
         location = exc.diagnostics[0].location if exc.diagnostics else None
         if exc.message == "get_dynamic_memory space must be on-chip MemorySpace":
             raise ValueError(exc.message) from exc
+        if exc.message.endswith("space must be MemorySpace") or exc.message == "cast dtype must be NumericType":
+            raise TypeError(exc.message) from exc
         raise AstVisitorError(exc.message, location=location) from exc
     return build_func_op_from_ast(func_ast, runtime_args=runtime_args)
 
@@ -335,7 +350,7 @@ def _build_func_op_from_ast_impl(
     - 功能实现: [kernel_gen/dsl/mlir_gen/function_builder.py](kernel_gen/dsl/mlir_gen/function_builder.py)
     """
 
-    config = config or {}
+    config = dict(config or {})
     _maybe_validate_dma_view_bounds(func_ast, runtime_args)
     is_dma_alloc_only = _is_dma_alloc_only_function(func_ast)
     arg_types, type_map = _build_signature_types(
@@ -350,6 +365,7 @@ def _build_func_op_from_ast_impl(
             for index, input_arg in enumerate(func_ast.inputs)
             if isinstance(input_arg, ScalarArgAST)
         }
+        config.setdefault("__runtime_values__", dict(runtime_values))
     statements = _ensure_supported_statements(func_ast)
     last_stmt = statements[-1]
     result_types: list[object] = []
