@@ -2,16 +2,17 @@
 
 ## 功能简介
 
-定义 include/api 层统一对外的架构/运行时 API 头文件规范（`include/api/Arch.h`），冻结 `launch<block, thread, subthread>(callee, args...)` 的公开源码形态、`BarrierScope` 同步范围枚举，以及后端 `KernelContext` 暴露 `barrier(visibility, scope)` 时必须遵守的命名与参数合同。
+定义 include/api 层统一对外的架构/运行时 API 头文件规范（`include/api/Arch.h`），收口 `launch<block, thread, subthread>(callee, args...)` 的公开源码形态、`BarrierVisibility`/`BarrierScope` 枚举，以及后端 `KernelContext` 暴露 `barrier(visibility, scope)` 时必须遵守的命名与参数合同。
 
 - `launch<block, thread, subthread>(callee, args...)`：公开 launch 入口，`callee` 必须是函数对象，不能是字符串。
-- `BarrierScope`：公开同步范围枚举，当前稳定成员为 `BLOCK` 与 `THREAD`。
+- `BarrierVisibility`：公开可见域枚举，固定成员为 `TSM` 与 `TLM`；其中 `TLM` 表示聚合可见域，覆盖 `TLM1/TLM2/TLM3`。
+- `BarrierScope`：公开同步范围枚举，稳定成员为 `BLOCK`、`THREAD`、`SUBTHREAD`、`GLOBAL`。
 - `barrier(visibility, scope)`：公开同步接口名，`visibility` 与 `scope` 必填；不得退化为无参 barrier。
 
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/include/api/Arch.md`](../../../spec/include/api/Arch.md)
 - `统一头文件`：[`include/api/Arch.h`](../../../include/api/Arch.h)
 - `功能实现`：[`include/npu_demo/Arch.h`](../../../include/npu_demo/Arch.h)
@@ -20,7 +21,7 @@
 ## 依赖
 
 - [`spec/include/api/Core.md`](../../../spec/include/api/Core.md)：统一 `Status` / `StatusCode` 返回语义。
-- [`spec/include/api/Memory.md`](../../../spec/include/api/Memory.md)：统一 `MemorySpace` 枚举语义，供 `barrier(visibility, scope)` 复用。
+- [`spec/include/api/Memory.md`](../../../spec/include/api/Memory.md)：统一 `MemorySpace` 枚举语义，提供 `TLM1/TLM2/TLM3` 三块实际空间定义。
 - [`spec/operation/arch.md`](../../../spec/operation/arch.md)：高层 helper 与 include/api 命名需保持一致。
 - [`spec/dialect/arch.md`](../../../spec/dialect/arch.md)：`arch.launch` / `arch.barrier` 的 IR 语义与 include/api 源码形态保持同名职责映射。
 
@@ -36,11 +37,41 @@
 - 本规范只冻结源码级 `launch` / `barrier` 公开合同，不定义 DSL/front-end、MLIR lowering、codegen 或 runtime 调度细节。
 - `launch<block, thread, subthread>(...)` 的 `block/thread/subthread` 是编译期 launch extent，不是运行期位置参数。
 - `callee` 的公开语义是“函数对象或等价可调用对象”；不得将 `"my_kernel"` 之类字符串名称暴露为长期稳定合同。
-- `barrier(visibility, scope)` 的 `visibility` 元素类型必须是 `MemorySpace`；不得改成字符串列表、自由文本或后端私有空间枚举。
+- `barrier(visibility, scope)` 的 `visibility` 元素类型必须是 `BarrierVisibility`；不得改成 `MemorySpace` 列表、字符串列表、自由文本或后端私有空间枚举。
 - `BarrierScope` 公开成员允许后端实现做能力裁剪；若某后端暂不支持某个 scope，必须显式失败，不得静默降级为其他 scope。
 - include/api 层不定义具体 `KernelContext` 的存储布局、生命周期、默认构造、线程绑定或注入方式；这些职责由后端私有 include 承接。
 
 ## 公开接口
+
+### `BarrierVisibility`
+
+功能说明：
+
+- 定义 `barrier(visibility, scope)` 的公开可见域枚举。
+
+参数说明：
+
+- 无参数。
+
+使用示例：
+
+```cpp
+#include "include/api/Arch.h"
+
+BarrierVisibility vis = BarrierVisibility::TLM;
+```
+
+注意事项：
+
+- 当前稳定成员为 `BarrierVisibility::TSM` 与 `BarrierVisibility::TLM`。
+- `BarrierVisibility::TLM` 表示聚合可见域，覆盖 `MemorySpace::TLM1`、`MemorySpace::TLM2`、`MemorySpace::TLM3`。
+- `BarrierVisibility` 不用于 `Memory<Space, T>` 模板参数；实际内存空间仍由 `MemorySpace` 表达。
+
+返回与限制：
+
+- 返回类型：`BarrierVisibility`。
+- 返回语义：表示 barrier 的可见域。
+- 限制条件：不允许扩展额外公开成员或把 `TLM` 解释为独立真实内存空间。
 
 ### `BarrierScope`
 
@@ -57,13 +88,13 @@
 ```cpp
 #include "include/api/Arch.h"
 
-BarrierScope scope = BarrierScope::BLOCK;
+BarrierScope scope = BarrierScope::GLOBAL;
 ```
 
 注意事项：
 
-- 当前稳定成员为 `BarrierScope::BLOCK` 与 `BarrierScope::THREAD`。
-- `BLOCK` 表示“当前 launch block 内同步”；`THREAD` 表示公开保留的更细粒度范围，具体后端可显式拒绝。
+- 当前稳定成员为 `BarrierScope::BLOCK`、`BarrierScope::THREAD`、`BarrierScope::SUBTHREAD`、`BarrierScope::GLOBAL`。
+- `BLOCK` 表示当前 launch block 内同步；其余成员用于表达更细或更粗的公开范围，具体后端可显式拒绝。
 - 本规范不定义字符串别名、整数常量别名或其他额外 scope 成员。
 
 返回与限制：
@@ -117,20 +148,21 @@ Status status = launch<1, 4, 1>(add_barrier_body, lhs, rhs, out);
 
 参数说明：
 
-- `visibility (std::initializer_list<MemorySpace> 或等价只读列表)`：需要保证可见性的 memory space 列表。
+- `visibility (std::initializer_list<BarrierVisibility> 或等价只读列表)`：需要保证可见性的可见域列表。
 - `scope (BarrierScope)`：同步范围。
 
 使用示例：
 
 ```cpp
-ctx.barrier({MemorySpace::TSM, MemorySpace::TLM}, BarrierScope::BLOCK);
+ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
 ```
 
 注意事项：
 
 - 公开方法名固定为 `barrier`；不得改成 `sync`、`fence` 或无名副作用调用。
 - `visibility` 与 `scope` 都是必填；不得定义无参 `barrier()` 作为稳定公开合同。
-- `visibility` 不能为空；出现重复项、非法 space 或后端不支持的组合时必须显式失败。
+- `visibility` 不能为空；出现重复项、非法可见域或后端不支持的组合时必须显式失败。
+- `BarrierVisibility::TLM` 表示聚合可见域，不等于真实 `MemorySpace::TLM`，并固定覆盖 `TLM1/TLM2/TLM3`。
 - include/api 层不规定具体失败机制，但禁止静默降级为“忽略 barrier”或“忽略部分 visibility”。
 
 返回与限制：
@@ -144,6 +176,7 @@ ctx.barrier({MemorySpace::TSM, MemorySpace::TLM}, BarrierScope::BLOCK);
 - 测试文件：[`test/include/api/test_arch.py`](../../../test/include/api/test_arch.py)
 - 执行命令：`pytest -q test/include/api/test_arch.py`
 - 测试目标：
+  - 验证 `BarrierVisibility` 的稳定公开成员与聚合语义。
   - 验证 `BarrierScope` 的稳定公开成员与名称。
   - 验证 `launch<block, thread, subthread>(callee, args...)` 的公开源码形态与函数对象 callee 合同。
   - 验证 include/api 头文件只声明公共接口，不混入 `npu_demo` 私有实现。

@@ -92,6 +92,47 @@ def _compile_and_run(source: str) -> None:
             )
 
 
+def _compile_expect_failure(source: str) -> str:
+    """编译并断言 C++ 片段失败，返回编译 stderr。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 使用 g++ 编译临时源码，并验证其因公开 MemorySpace 合同违例而失败。
+
+    使用示例:
+    - stderr = _compile_expect_failure("int main() { return missing; }")
+
+    关联文件:
+    - spec: spec/include/api/Memory.md
+    - test: test/include/api/test_memory.py
+    - 功能实现: test/include/api/test_memory.py
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        source_path = Path(tmpdir) / "memory_test_fail.cpp"
+        binary_path = Path(tmpdir) / "memory_test_fail"
+        source_path.write_text(source, encoding="utf-8")
+
+        compile_result = subprocess.run(
+            [
+                "g++",
+                "-std=c++17",
+                "-I",
+                str(REPO_ROOT),
+                str(source_path),
+                "-o",
+                str(binary_path),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if compile_result.returncode == 0:
+            raise AssertionError("expected g++ compile failure, but compile succeeded")
+        return compile_result.stderr
+
+
 # API-MEMORY-001
 # 创建者: 小李飞刀
 # 最后一次更改: jcc你莫辜负
@@ -185,6 +226,9 @@ int main() {
 
     Memory<GM, float> gm_mem(data, shape, stride, 1);
     Memory<MemorySpace::GM, float> gm_mem2(data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<TLM1, float> tlm1_mem(data, shape, stride, 1);
+    Memory<TLM2, float> tlm2_mem(data, shape, stride, 1);
+    Memory<TLM3, float> tlm3_mem(data, shape, stride, 1);
 
     if (gm_mem.space() != MemorySpace::GM) {
         return fail(1);
@@ -192,7 +236,44 @@ int main() {
     if (gm_mem2.space() != MemorySpace::GM) {
         return fail(2);
     }
+    if (tlm1_mem.space() != MemorySpace::TLM1) {
+        return fail(3);
+    }
+    if (tlm2_mem.space() != MemorySpace::TLM2) {
+        return fail(4);
+    }
+    if (tlm3_mem.space() != MemorySpace::TLM3) {
+        return fail(5);
+    }
     return 0;
 }
 """
     _compile_and_run(source)
+
+
+# API-MEMORY-SPACE-TEMPLATE-002
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-15 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-15 00:00:00 +0800
+# 测试目的: 验证公开 MemorySpace 已拒绝旧 TLM 成员，调用方不能再以 `MemorySpace::TLM` 作为模板参数。
+# 使用示例: pytest -q test/include/api/test_memory.py -k test_memory_space_rejects_legacy_tlm_contract
+# 对应功能实现文件路径: include/api/Memory.h
+# 对应 spec 文件路径: spec/include/api/Memory.md
+# 对应测试文件路径: test/include/api/test_memory.py
+def test_memory_space_rejects_legacy_tlm_contract() -> None:
+    stderr = _compile_expect_failure(
+        r"""
+#include "include/api/Memory.h"
+#include "include/npu_demo/Memory.h"
+
+int main() {
+    float data[1] = {0.0f};
+    long long shape[1] = {1};
+    long long stride[1] = {1};
+    Memory<MemorySpace::TLM, float> mem(data, shape, stride, 1);
+    return mem.space() == MemorySpace::TLM ? 0 : 1;
+}
+"""
+    )
+    assert "TLM" in stderr

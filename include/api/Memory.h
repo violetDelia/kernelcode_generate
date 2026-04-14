@@ -11,7 +11,7 @@
 - Memory<SM, int> mem(data, shape, stride, 2, MemoryFormat::CLast);
 
 创建者: 神秘人
-最后修改人: jcc你莫辜负
+最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Memory.md
@@ -44,10 +44,10 @@ enum class MemoryFormat {
 
 /*
 功能说明:
-- 表示 Memory 视图的逻辑空间枚举。
+- 表示 Memory 视图的逻辑空间枚举，公开真实空间固定为 GM/SM/LM/TSM/TLM1/TLM2/TLM3。
 
 使用示例:
-- MemorySpace space = MemorySpace::SM;
+- MemorySpace space = MemorySpace::TLM1;
 
 创建者: 神秘人
 最后修改人: 金铲铲大作战
@@ -62,7 +62,9 @@ enum class MemorySpace {
     SM,
     LM,
     TSM,
-    TLM,
+    TLM1,
+    TLM2,
+    TLM3,
 };
 
 /*
@@ -85,7 +87,9 @@ inline constexpr MemorySpace GM = MemorySpace::GM;
 inline constexpr MemorySpace SM = MemorySpace::SM;
 inline constexpr MemorySpace LM = MemorySpace::LM;
 inline constexpr MemorySpace TSM = MemorySpace::TSM;
-inline constexpr MemorySpace TLM = MemorySpace::TLM;
+inline constexpr MemorySpace TLM1 = MemorySpace::TLM1;
+inline constexpr MemorySpace TLM2 = MemorySpace::TLM2;
+inline constexpr MemorySpace TLM3 = MemorySpace::TLM3;
 
 /*
 功能说明:

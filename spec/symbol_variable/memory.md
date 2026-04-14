@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`小李飞刀`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)
 - `test`：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)、[`test/symbol_variable/test_memory_operation.py`](../../test/symbol_variable/test_memory_operation.py)、[`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)
 - `功能实现`：[`kernel_gen/symbol_variable/memory.py`](../../kernel_gen/symbol_variable/memory.py)
@@ -93,12 +93,14 @@ meta = LocalSpaceMeta(name="GM", max_size=None, align=1024)
 from kernel_gen.symbol_variable.memory import MemorySpace
 
 gm_meta = MemorySpace.GM.value
+tlm1_meta = MemorySpace.TLM1.value
 ```
 
 注意事项：
 
-- 当前定义 `GM`/`SM`/`LM`/`TSM`/`TLM` 五种空间。
+- 当前定义 `GM`/`SM`/`LM`/`TSM`/`TLM1`/`TLM2`/`TLM3` 七种空间。
 - 默认元信息一致：`align=1024`、`max_size=None`。
+- `MemorySpace.TLM` 不属于公开成员；若输入旧别名应视为非法输入。
 
 返回与限制：
 
@@ -587,6 +589,7 @@ cmp_mem = lhs < 0
 
 - 验证 `LocalSpaceMeta` 的冻结语义与字段可访问性。
 - 验证 `MemorySpace` 枚举项与空间元信息稳定。
+- 验证 `MemorySpace.TLM1/TLM2/TLM3` 可作为公开空间被创建和读取，旧 `MemorySpace.TLM` 作为公开输入被拒绝。
 - 验证 `Memory` 默认空间、显式空间、显式步幅和动态形状构造行为。
 - 验证未显式提供 `stride` 时默认步幅生成（包含符号维度与字符串输入）。
 - 验证 `get_stride()` 对动态步幅分量返回 `SymbolDim`，`__repr__` / `__str__` 继续使用 `Shape(...)` 文本序列化。
@@ -623,3 +626,5 @@ cmp_mem = lhs < 0
 | ME-018 | 构造 | 符号维度默认 stride | N/A | `Memory([SymbolDim(\"M\"), SymbolDim(\"K\"), SymbolDim(\"N\")], NumericType.Float32)` | `get_stride()` 返回 `[SymbolDim(\"K\") * SymbolDim(\"N\"), SymbolDim(\"N\"), 1]`，`str/repr` 序列化为 `Shape(K*N, N, 1)` | `test_default_stride_symbolic_expression_repr` |
 | ME-019 | 构造 | 字符串形状默认 stride | N/A | `Memory([\"M\", \"K\", \"N\"], NumericType.Float32)` | `get_stride()` 返回动态 `SymbolDim` 分量，`str/repr` 序列化为 `Shape(K*N, N, 1)` | `test_default_stride_symbolic_expression_from_strings` |
 | ME-020 | 职责边界 | memory 相关单值整数 symbol 归属 | 已存在单个维度或步幅分量 | 在 `Memory` 场景中使用 `N`、`K*N`、`1` 这类分量 | 本文件仅要求 `SymbolShape/SymbolDim` 保持分量语义；dialect 层类型表达由 `spec/dialect/symbol.md` 负责 | `test_dynamic_shape_stride`、`test_default_stride_symbolic_expression_repr`、`test_default_stride_symbolic_expression_from_strings`、`test_symbol_value_type_round_trip_for_integer_only_semantics`、`test_memory_scalar_components_round_trip_through_symbol_dialect` |
+| ME-021 | 空间枚举 | 三块 TLM 空间公开可用 | N/A | 读取 `MemorySpace.TLM1.value`、`MemorySpace.TLM2.value`、`MemorySpace.TLM3.value` | 三个公开成员都返回 `LocalSpaceMeta` 且可用于 `Memory(..., space=...)` | `test_space_meta_includes_tlm123`（待补） |
+| ME-022 | 非法输入 | 旧 TLM 别名拒绝 | N/A | 以公开输入方式传入 `MemorySpace.TLM` | 抛出显式错误并提示使用 `TLM1/TLM2/TLM3` | `test_reject_legacy_tlm_alias`（待补） |

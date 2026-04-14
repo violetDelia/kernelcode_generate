@@ -1,7 +1,7 @@
 """Target registry definitions.
 
 创建者: 我不是牛马
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 定义 target 注册与查询入口，用于管理 `arch` op 支持矩阵与硬件参数。
@@ -36,7 +36,9 @@ _ALLOWED_HARDWARE_FIELDS = {
     "sm_memory_size",
     "lm_memory_size",
     "tsm_memory_size",
-    "tlm_memory_size",
+    "tlm1_memory_size",
+    "tlm2_memory_size",
+    "tlm3_memory_size",
 }
 _TARGET_NAME_PATTERN = re.compile(r"^[a-z0-9_]+$")
 _DEFAULT_CPU_UNSUPPORTED_OPS = {"arch.get_thread_id"}
@@ -47,7 +49,9 @@ _DEFAULT_CPU_HARDWARE = {
     "sm_memory_size": 0,
     "lm_memory_size": 0,
     "tsm_memory_size": 0,
-    "tlm_memory_size": 0,
+    "tlm1_memory_size": 0,
+    "tlm2_memory_size": 0,
+    "tlm3_memory_size": 0,
 }
 _DEFAULT_NPU_DEMO_SUPPORTED_OPS = {
     "arch.get_block_id",
@@ -68,7 +72,9 @@ _DEFAULT_NPU_DEMO_HARDWARE = {
     "sm_memory_size": 0,
     "lm_memory_size": 0,
     "tsm_memory_size": 24576,
-    "tlm_memory_size": 2048,
+    "tlm1_memory_size": 1024,
+    "tlm2_memory_size": 512,
+    "tlm3_memory_size": 512,
 }
 _DEFAULT_NPU_DEMO_ANALYSIS_DEFAULTS = {
     "path_bandwidth": {

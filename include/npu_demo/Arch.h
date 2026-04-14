@@ -7,7 +7,7 @@
 - Status status = npu_demo::launch<1, 4, 1>(kernel_body, output);
 
 创建者: 小李飞刀
-最后修改人: jcc你莫辜负
+最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/npu_demo/npu_demo.md
@@ -43,7 +43,9 @@ static constexpr long long kSubthreadCapability = 1;
 static constexpr long long kSmMemorySize = 0;
 static constexpr long long kLmMemorySize = 0;
 static constexpr long long kTsmMemorySize = 24576;
-static constexpr long long kTlmMemorySize = 2048;
+static constexpr long long kTlm1MemorySize = 1024;
+static constexpr long long kTlm2MemorySize = 512;
+static constexpr long long kTlm3MemorySize = 512;
 
 /*
 功能说明:
@@ -166,7 +168,7 @@ private:
 
 使用示例:
 - long long tid = ctx.thread_id();
-- ctx.barrier({MemorySpace::TSM, MemorySpace::TLM}, BarrierScope::BLOCK);
+- ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
 
 创建者: 小李飞刀
 最后修改人: 小李飞刀
@@ -352,56 +354,56 @@ public:
     - 在当前 launch block 内执行一次带 visibility / scope 的同步。
 
     使用示例:
-    - ctx.barrier({MemorySpace::TSM, MemorySpace::TLM}, BarrierScope::BLOCK);
+    - ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
 
     创建者: 小李飞刀
-    最后修改人: 小李飞刀
+    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/npu_demo/npu_demo.md
     - test: test/include/npu_demo/test_kernel_context.py
     - 功能实现: include/npu_demo/Arch.h
     */
-    inline void barrier(std::initializer_list<MemorySpace> visibility, BarrierScope scope) const {
+    inline void barrier(std::initializer_list<BarrierVisibility> visibility, BarrierScope scope) const {
         if (scope != BarrierScope::BLOCK) {
             throw std::invalid_argument(
                 "npu_demo::KernelContext::barrier requires scope=BarrierScope::BLOCK");
         }
         if (visibility.size() != 2) {
             throw std::invalid_argument(
-                "npu_demo::KernelContext::barrier visibility must contain MemorySpace::TSM "
-                "and MemorySpace::TLM exactly once");
+                "npu_demo::KernelContext::barrier visibility must contain BarrierVisibility::TSM "
+                "and BarrierVisibility::TLM exactly once");
         }
         bool saw_tsm = false;
         bool saw_tlm = false;
-        for (MemorySpace space : visibility) {
+        for (BarrierVisibility space : visibility) {
             switch (space) {
-                case MemorySpace::TSM:
+                case BarrierVisibility::TSM:
                     if (saw_tsm) {
                         throw std::invalid_argument(
-                            "npu_demo::KernelContext::barrier visibility must contain MemorySpace::TSM "
-                            "and MemorySpace::TLM exactly once");
+                            "npu_demo::KernelContext::barrier visibility must contain BarrierVisibility::TSM "
+                            "and BarrierVisibility::TLM exactly once");
                     }
                     saw_tsm = true;
                     break;
-                case MemorySpace::TLM:
+                case BarrierVisibility::TLM:
                     if (saw_tlm) {
                         throw std::invalid_argument(
-                            "npu_demo::KernelContext::barrier visibility must contain MemorySpace::TSM "
-                            "and MemorySpace::TLM exactly once");
+                            "npu_demo::KernelContext::barrier visibility must contain BarrierVisibility::TSM "
+                            "and BarrierVisibility::TLM exactly once");
                     }
                     saw_tlm = true;
                     break;
                 default:
                     throw std::invalid_argument(
                         "npu_demo::KernelContext::barrier visibility only supports "
-                        "MemorySpace::TSM and MemorySpace::TLM");
+                        "BarrierVisibility::TSM and BarrierVisibility::TLM");
             }
         }
         if (!saw_tsm || !saw_tlm) {
             throw std::invalid_argument(
-                "npu_demo::KernelContext::barrier visibility must contain MemorySpace::TSM "
-                "and MemorySpace::TLM exactly once");
+                "npu_demo::KernelContext::barrier visibility must contain BarrierVisibility::TSM "
+                "and BarrierVisibility::TLM exactly once");
         }
         if (barrier_state_ == nullptr) {
             throw std::runtime_error(
@@ -418,7 +420,7 @@ public:
     - auto tsm = ctx.get_dynamic_memory<TSM, float>();
 
     创建者: 小李飞刀
-    最后修改人: jcc你莫辜负
+    最后修改人: 金铲铲大作战
 
     关联文件:
     - spec: spec/include/npu_demo/npu_demo.md
@@ -429,8 +431,12 @@ public:
     Memory<Space, T> get_dynamic_memory() const {
         if constexpr (Space == MemorySpace::TSM) {
             return detail::make_linear_memory<MemorySpace::TSM, T>(detail::kTsmMemorySize);
-        } else if constexpr (Space == MemorySpace::TLM) {
-            return detail::make_linear_memory<MemorySpace::TLM, T>(detail::kTlmMemorySize);
+        } else if constexpr (Space == MemorySpace::TLM1) {
+            return detail::make_linear_memory<MemorySpace::TLM1, T>(detail::kTlm1MemorySize);
+        } else if constexpr (Space == MemorySpace::TLM2) {
+            return detail::make_linear_memory<MemorySpace::TLM2, T>(detail::kTlm2MemorySize);
+        } else if constexpr (Space == MemorySpace::TLM3) {
+            return detail::make_linear_memory<MemorySpace::TLM3, T>(detail::kTlm3MemorySize);
         } else if constexpr (Space == MemorySpace::SM) {
             detail::throw_zero_sized_memory(
                 "npu_demo::KernelContext::get_dynamic_memory rejected MemorySpace::SM because "

@@ -1,7 +1,7 @@
 """Memory implementation.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 定义内存空间枚举与 Memory 对象，描述 shape/dtype/stride/format/space 元信息。
@@ -54,7 +54,7 @@ class LocalSpaceMeta:
     """空间元信息描述。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 描述空间名称、最大容量与对齐要求。
@@ -81,7 +81,7 @@ class MemorySpace(Enum):
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 定义 GM/SM/LM/TSM/TLM 等空间枚举项。
+    - 定义 GM/SM/LM/TSM/TLM1/TLM2/TLM3 等空间枚举项。
 
     使用示例:
     - MemorySpace.GM.value.align
@@ -97,7 +97,9 @@ class MemorySpace(Enum):
     SM = LocalSpaceMeta(name="SM", max_size=None, align=1024)
     LM = LocalSpaceMeta(name="LM", max_size=None, align=1024)
     TSM = LocalSpaceMeta(name="TSM", max_size=None, align=1024)
-    TLM = LocalSpaceMeta(name="TLM", max_size=None, align=1024)
+    TLM1 = LocalSpaceMeta(name="TLM1", max_size=None, align=1024)
+    TLM2 = LocalSpaceMeta(name="TLM2", max_size=None, align=1024)
+    TLM3 = LocalSpaceMeta(name="TLM3", max_size=None, align=1024)
 
 
 class Memory:

@@ -153,6 +153,7 @@ def test_include_api_arch_exports_public_launch_and_scope_contract() -> None:
 static int fail(int code) { return code; }
 
 static void kernel_body(npu_demo::KernelContext& ctx, long long* seen_ids, long long* seen_thread_nums) {
+    ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
     const long long tid = ctx.thread_id();
     seen_ids[tid] = tid;
     seen_thread_nums[tid] = ctx.thread_num();
@@ -162,19 +163,28 @@ int main() {
     if (BarrierScope::BLOCK == BarrierScope::THREAD) {
         return fail(1);
     }
+    if (BarrierScope::THREAD == BarrierScope::SUBTHREAD) {
+        return fail(2);
+    }
+    if (BarrierScope::SUBTHREAD == BarrierScope::GLOBAL) {
+        return fail(3);
+    }
+    if (BarrierVisibility::TSM == BarrierVisibility::TLM) {
+        return fail(4);
+    }
 
     long long seen_ids[4] = {-1, -1, -1, -1};
     long long seen_thread_nums[4] = {0, 0, 0, 0};
     Status status = launch<1, 4, 1>(kernel_body, seen_ids, seen_thread_nums);
     if (status != StatusCode::kOk) {
-        return fail(2);
+        return fail(5);
     }
     for (long long i = 0; i < 4; ++i) {
         if (seen_ids[i] != i) {
-            return fail(3);
+            return fail(6);
         }
         if (seen_thread_nums[i] != 4) {
-            return fail(4);
+            return fail(7);
         }
     }
     return 0;
@@ -221,9 +231,50 @@ int main() {
 def test_include_api_arch_keeps_backend_impl_out_of_api_header() -> None:
     header = (REPO_ROOT / "include" / "api" / "Arch.h").read_text(encoding="utf-8")
 
+    assert "enum class BarrierVisibility" in header
     assert "enum class BarrierScope" in header
+    assert "SUBTHREAD" in header
+    assert "GLOBAL" in header
     assert "Status launch" in header
     assert "namespace npu_demo" not in header
     assert "std::thread" not in header
     assert "condition_variable" not in header
     assert "kThreadCapability" not in header
+
+
+# API-ARCH-004
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-15 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-15 00:00:00 +0800
+# 测试目的: 验证 npu_demo KernelContext 已暴露 TLM1/TLM2/TLM3 三块动态内存视图，且容量与公开合同一致。
+# 使用示例: `pytest -q test/include/api/test_arch.py -k test_include_api_arch_exposes_tlm123_dynamic_memory_contract`
+# 对应功能实现文件路径: `include/npu_demo/Arch.h`
+# 对应 spec 文件路径: `spec/include/api/Arch.md`
+# 对应测试文件路径: `test/include/api/test_arch.py`
+def test_include_api_arch_exposes_tlm123_dynamic_memory_contract() -> None:
+    source = r"""
+#include "include/api/Arch.h"
+#include "include/npu_demo/Arch.h"
+
+static int fail(int code) { return code; }
+
+int main() {
+    npu_demo::KernelContext ctx;
+    auto tlm1 = ctx.get_dynamic_memory<TLM1, float>();
+    auto tlm2 = ctx.get_dynamic_memory<TLM2, float>();
+    auto tlm3 = ctx.get_dynamic_memory<TLM3, float>();
+
+    if (tlm1.rank() != 1 || tlm1.shape()[0] != 1024 || tlm1.stride()[0] != 1 || tlm1.space() != MemorySpace::TLM1) {
+        return fail(1);
+    }
+    if (tlm2.rank() != 1 || tlm2.shape()[0] != 512 || tlm2.stride()[0] != 1 || tlm2.space() != MemorySpace::TLM2) {
+        return fail(2);
+    }
+    if (tlm3.rank() != 1 || tlm3.shape()[0] != 512 || tlm3.stride()[0] != 1 || tlm3.space() != MemorySpace::TLM3) {
+        return fail(3);
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)

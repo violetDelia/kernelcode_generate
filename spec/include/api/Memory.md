@@ -12,7 +12,7 @@
 ## 文档信息
 
 - 创建者：`神秘人`
-- 最后一次更改：`jcc你莫辜负`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/include/api/Memory.md`](../../../spec/include/api/Memory.md)
 - `功能实现`：[`include/api/Memory.h`](../../../include/api/Memory.h)
 - `test`：[`test/include/api/test_memory.py`](../../../test/include/api/test_memory.py)
@@ -36,7 +36,8 @@
 - 调用方需要保证 `rank > 0`、`shape[i] > 0`、`stride[i] > 0`，并确保 `indices[i]` 位于合法范围内。
 - 本规范不引入标准库容器、异常或动态分配依赖；实现需避免这些能力。
 - `MemoryFormat` 仅公开 `Norm` 与 `CLast`，不定义字符串别名或额外布局成员。
-- `MemorySpace` 仅公开 `GM`、`SM`、`LM`、`TSM`、`TLM`，只表达空间分类，不表达容量、对齐或同步规则。
+- `MemorySpace` 仅公开 `GM`、`SM`、`LM`、`TSM`、`TLM1`、`TLM2`、`TLM3`，只表达空间分类，不表达容量、对齐或同步规则。
+- `MemorySpace::TLM` 不再作为公开输入；需要同步聚合语义时应使用 `BarrierVisibility::TLM`（见 [`spec/include/api/Arch.md`](../../../spec/include/api/Arch.md)）。
 - 本规范只覆盖 API 级别的视图语义，不定义算子级搬运、广播或计算行为。
 - `include/api/Memory.h` 仅提供声明与类型边界，不提供函数体实现；具体后端实现需在各自 include 层提供（当前 `npu_demo` 实现头文件为 [`include/npu_demo/Memory.h`](../../../include/npu_demo/Memory.h)）。
 
@@ -91,8 +92,9 @@ MemorySpace space = MemorySpace::SM;
 
 注意事项：
 
-- 当前公开成员仅包含 `MemorySpace::GM`、`MemorySpace::SM`、`MemorySpace::LM`、`MemorySpace::TSM`、`MemorySpace::TLM`。
-- 为便于模板参数书写，提供 `GM/SM/LM/TSM/TLM` 作为 `MemorySpace::...` 等价常量，可直接用于 `Memory<GM, T>`。
+- 当前公开成员仅包含 `MemorySpace::GM`、`MemorySpace::SM`、`MemorySpace::LM`、`MemorySpace::TSM`、`MemorySpace::TLM1`、`MemorySpace::TLM2`、`MemorySpace::TLM3`。
+- 为便于模板参数书写，提供 `GM/SM/LM/TSM/TLM1/TLM2/TLM3` 作为 `MemorySpace::...` 等价常量，可直接用于 `Memory<GM, T>`。
+- `MemorySpace::TLM` 不属于公开成员；不得把其作为 `Memory<Space, T>` 模板参数或 API 输入。
 - 该枚举只负责空间分类，不承诺容量、带宽、地址合法性或跨空间访问规则。
 
 返回与限制：

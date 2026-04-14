@@ -73,6 +73,30 @@ def test_custom_space() -> None:
     assert mem.space is MemorySpace.LM
 
 
+# ME-002A
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-15 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-15 00:00:00 +0800
+# 测试目的: 验证公开 TLM 空间已拆分为 TLM1/TLM2/TLM3，且旧 TLM 成员不再对外暴露。
+# 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_tlm123_spaces_and_legacy_tlm_absent
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
+# 对应 spec 文件路径: spec/symbol_variable/memory.md
+# 对应测试文件路径: test/symbol_variable/test_memory.py
+def test_tlm123_spaces_and_legacy_tlm_absent() -> None:
+    tlm1 = Memory([1], NumericType.Float16, space=MemorySpace.TLM1)
+    tlm2 = Memory([2], NumericType.Float16, space=MemorySpace.TLM2)
+    tlm3 = Memory([3], NumericType.Float16, space=MemorySpace.TLM3)
+
+    assert tlm1.space is MemorySpace.TLM1
+    assert tlm2.space is MemorySpace.TLM2
+    assert tlm3.space is MemorySpace.TLM3
+    assert MemorySpace.TLM1.value.name == "TLM1"
+    assert MemorySpace.TLM2.value.name == "TLM2"
+    assert MemorySpace.TLM3.value.name == "TLM3"
+    assert not hasattr(MemorySpace, "TLM")
+
+
 # ME-003
 # 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战

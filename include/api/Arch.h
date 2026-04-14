@@ -4,10 +4,11 @@
 
 使用示例:
 - #include "include/api/Arch.h"
-- BarrierScope scope = BarrierScope::BLOCK;
+- BarrierVisibility vis = BarrierVisibility::TLM;
+- BarrierScope scope = BarrierScope::GLOBAL;
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Arch.md
@@ -23,13 +24,33 @@
 
 /*
 功能说明:
+- 定义公开 barrier 可见域枚举，`TLM` 表示覆盖 `TLM1/TLM2/TLM3` 的聚合可见域。
+
+使用示例:
+- BarrierVisibility vis = BarrierVisibility::TLM;
+
+创建者: 金铲铲大作战
+最后修改人: 金铲铲大作战
+
+关联文件:
+- spec: spec/include/api/Arch.md
+- test: test/include/api/test_arch.py
+- 功能实现: include/npu_demo/Arch.h
+*/
+enum class BarrierVisibility {
+    TSM,
+    TLM,
+};
+
+/*
+功能说明:
 - 定义公开 barrier 同步范围枚举。
 
 使用示例:
 - BarrierScope scope = BarrierScope::BLOCK;
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Arch.md
@@ -39,6 +60,8 @@
 enum class BarrierScope {
     BLOCK,
     THREAD,
+    SUBTHREAD,
+    GLOBAL,
 };
 
 /*

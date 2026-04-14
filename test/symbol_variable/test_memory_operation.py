@@ -299,3 +299,24 @@ def test_memory_scalar_type_error() -> None:
     mem64 = Memory([1], NumericType.Int64)
     result = mem64 + 1
     assert result.dtype is NumericType.Int64
+
+
+# ME-016A
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-15 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-15 00:00:00 +0800
+# 测试目的: 验证 TLM1/TLM2/TLM3 公开空间在逐元素运算后保持 lhs 空间语义。
+# 使用示例: pytest -q test/symbol_variable/test_memory_operation.py -k test_memory_operation_preserves_tlm123_space
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
+# 对应 spec 文件路径: spec/symbol_variable/memory.md
+# 对应测试文件路径: test/symbol_variable/test_memory_operation.py
+def test_memory_operation_preserves_tlm123_space() -> None:
+    lhs = Memory([4], NumericType.Float16, space=MemorySpace.TLM2, stride=[1], format=Farmat.Norm)
+    rhs = Memory([4], NumericType.Float16, space=MemorySpace.TLM3, stride=[1], format=Farmat.CLast)
+
+    add_result = lhs + rhs
+    scalar_result = lhs + 1
+
+    assert add_result.space is MemorySpace.TLM2
+    assert scalar_result.space is MemorySpace.TLM2

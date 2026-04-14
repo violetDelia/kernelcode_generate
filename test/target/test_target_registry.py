@@ -190,12 +190,18 @@ def test_target_registry_loads_txt_specs(tmp_path: Path) -> None:
             "arch.unsupported_ops=",
             "hw.thread_num=8",
             "hw.block_num=1024",
+            "hw.tlm1_memory_size=64",
+            "hw.tlm2_memory_size=32",
+            "hw.tlm3_memory_size=16",
         ],
     )
     loaded = target_registry.load_targets(tmp_path)
     assert "cpu_txt_valid" in loaded
     assert target_registry.is_arch_op_supported("cpu_txt_valid", "arch.get_thread_id") is True
     assert target_registry.get_target_hardware("cpu_txt_valid", "thread_num") == 8
+    assert target_registry.get_target_hardware("cpu_txt_valid", "tlm1_memory_size") == 64
+    assert target_registry.get_target_hardware("cpu_txt_valid", "tlm2_memory_size") == 32
+    assert target_registry.get_target_hardware("cpu_txt_valid", "tlm3_memory_size") == 16
     assert target_registry.get_target_hardware("cpu_txt_valid", "sm_memory_size") is None
 
 
@@ -339,7 +345,9 @@ def test_target_registry_npu_demo_template() -> None:
     assert target_registry.get_target_hardware("npu_demo", "sm_memory_size") == 0
     assert target_registry.get_target_hardware("npu_demo", "lm_memory_size") == 0
     assert target_registry.get_target_hardware("npu_demo", "tsm_memory_size") == 24576
-    assert target_registry.get_target_hardware("npu_demo", "tlm_memory_size") == 2048
+    assert target_registry.get_target_hardware("npu_demo", "tlm1_memory_size") == 1024
+    assert target_registry.get_target_hardware("npu_demo", "tlm2_memory_size") == 512
+    assert target_registry.get_target_hardware("npu_demo", "tlm3_memory_size") == 512
 
 
 # TC-TGT-011A
@@ -402,4 +410,6 @@ def test_target_registry_npu_demo_supports_launch_and_barrier_caps() -> None:
     assert target_registry.get_target_hardware("npu_demo", "sm_memory_size") == 0
     assert target_registry.get_target_hardware("npu_demo", "lm_memory_size") == 0
     assert target_registry.get_target_hardware("npu_demo", "tsm_memory_size") == 24576
-    assert target_registry.get_target_hardware("npu_demo", "tlm_memory_size") == 2048
+    assert target_registry.get_target_hardware("npu_demo", "tlm1_memory_size") == 1024
+    assert target_registry.get_target_hardware("npu_demo", "tlm2_memory_size") == 512
+    assert target_registry.get_target_hardware("npu_demo", "tlm3_memory_size") == 512
