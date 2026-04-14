@@ -186,7 +186,7 @@ from kernel_gen.dsl import ast_visitor as ast_visitor_module
 import kernel_gen.operation.nn as nn
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
-from kernel_gen.symbol_variable.type import NumericType
+from kernel_gen.symbol_variable.type import Farmat, NumericType
 
 
 def _tensor_arg(shape: list[object]) -> Memory:
@@ -1470,6 +1470,39 @@ def test_build_func_op_supports_img2col1d_symbolic_annotation() -> None:
     assert return_ops[0].arguments[0].type == img2col_ops[0].result.type
 
 
+# MGEN-036E
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 img2col1d helper 支持符号 kernel 参数并保留为 symbol.int operand。
+# 测试目的: 锁定 `img2col1d(src, kw=KW, ...)` 不再被当作纯静态整数路径，且输出类型仍按 operation 合同推导。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_img2col1d_symbolic_kernel_argument
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_img2col1d_symbolic_kernel_argument() -> None:
+    from kernel_gen.operation.nn import img2col1d
+
+    source = Memory([1, SymbolDim("W"), 4], NumericType.Float32, space=MemorySpace.GM, format=Farmat.CLast)
+    kw_symbol = SymbolDim("KW")
+    expected = img2col1d(source, kw=kw_symbol, sw=1, dw=1, pl=0, pr=0)
+
+    def img2col1d_kernel(
+        src: "Tensor[f32, 1, W, 4]",
+        KW: int,
+    ) -> "Tensor[f32, 1, (W - KW) / 1 + 1, KW, 4]":
+        return img2col1d(src, kw=KW, sw=1, dw=1, pl=0, pr=0)
+
+    func_op = build_func_op(img2col1d_kernel, source, kw_symbol)
+    img2col_ops = [op for op in func_op.body.block.ops if isinstance(op, NnImg2col1dOp)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
+    assert len(img2col_ops) == 1
+    assert len(return_ops) == 1
+    assert img2col_ops[0].kw.type == SymbolValueType.from_expr("KW")
+    assert img2col_ops[0].result.type == _memory_to_nn_type(expected)
+    assert list(func_op.function_type.outputs) == [img2col_ops[0].result.type]
+    assert return_ops[0].arguments[0].type == img2col_ops[0].result.type
+
+
 # MGEN-036A
 # 创建者: 金铲铲大作战
 # 最后一次更改: jcc你莫辜负
@@ -1742,6 +1775,44 @@ def test_build_func_op_supports_symbolic_conv_helper_call() -> None:
     assert len([op for op in func_op.body.block.ops if isinstance(op, NnImg2col2dOp)]) == 1
     assert len([op for op in func_op.body.block.ops if isinstance(op, NnMatmulOp)]) == 1
     assert len(return_ops) == 1
+    assert return_ops[0].arguments[0].type == _memory_to_nn_type(expected)
+
+
+# MGEN-C1F
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 conv helper 支持符号 kh/kw 与符号 padding 参数。
+# 测试目的: 锁定 conv 前端分解在符号 kernel/padding 路径下仍输出 nn.img2col2d + nn.matmul，并保持 helper 参数为 symbol.int operand。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_symbolic_conv_helper_kernel_and_padding
+# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_symbolic_conv_helper_kernel_and_padding() -> None:
+    from kernel_gen.operation.nn import conv
+
+    value = Memory([1, 3, SymbolDim("H"), SymbolDim("W")], NumericType.Float32, space=MemorySpace.GM)
+    weight = Memory([8, 3, SymbolDim("KH"), SymbolDim("KW")], NumericType.Float32, space=MemorySpace.GM)
+    ph_symbol = SymbolDim("PH")
+    expected = conv(value, weight, sh=1, sw=1, dh=1, dw=1, ph=ph_symbol, pw=ph_symbol, pl=0, pr=0)
+
+    def conv_kernel(
+        value: "Tensor[f32, 1, 3, H, W]",
+        weight: "Tensor[f32, 8, 3, KH, KW]",
+        PH: int,
+    ) -> "Tensor[f32, 1, 8, (H + PH + PH - 1 * (KH - 1) - 1) / 1 + 1, (W - 1 * (KW - 1) - 1) / 1 + 1]":
+        return conv(value, weight, sh=1, sw=1, dh=1, dw=1, ph=PH, pw=PH, pl=0, pr=0)
+
+    func_op = build_func_op(conv_kernel, value, weight, ph_symbol)
+    img2col_ops = [op for op in func_op.body.block.ops if isinstance(op, NnImg2col2dOp)]
+    matmul_ops = [op for op in func_op.body.block.ops if isinstance(op, NnMatmulOp)]
+    return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
+    assert len(img2col_ops) == 1
+    assert len(matmul_ops) == 1
+    assert len(return_ops) == 1
+    assert img2col_ops[0].kh.type == SymbolValueType.from_expr("KH")
+    assert img2col_ops[0].kw.type == SymbolValueType.from_expr("KW")
+    assert img2col_ops[0].ph.type == SymbolValueType.from_expr("PH")
+    assert img2col_ops[0].pw.type == SymbolValueType.from_expr("PH")
     assert return_ops[0].arguments[0].type == _memory_to_nn_type(expected)
 
 
