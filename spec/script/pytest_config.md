@@ -2,21 +2,21 @@
 
 ## 功能简介
 
-- 定义 `pyproject.toml` 中 pytest 配置的公开合同。
+- 定义 `pytest.ini` 中 pytest 配置的公开合同。
 - 统一基础设施测试标记与默认测试发现范围，避免扫描 worktree 与临时目录。
 - 约束 pytest 导入模式，降低重复 basename 的冲突风险。
 
 ## 文档信息
 
 - 创建者：`小李飞刀`
-- 最后一次更改：`小李飞刀`
+- 最后一次更改：`jcc你莫辜负`
 - `spec`：[`spec/script/pytest_config.md`](../../spec/script/pytest_config.md)
-- `功能实现`：[`pyproject.toml`](../../pyproject.toml)
+- `功能实现`：[`pytest.ini`](../../pytest.ini)
 - `test`：[`test/script/test_pytest_config.py`](../../test/script/test_pytest_config.py)
 
 ## 依赖
 
-- pytest 配置入口：[`pyproject.toml`](../../pyproject.toml)
+- pytest 配置入口：[`pytest.ini`](../../pytest.ini)
 - pytest 执行器：`pytest`（命令行）
 
 ## 目标
@@ -32,7 +32,7 @@
 
 ## 公开接口
 
-### `pyproject.toml` / `[tool.pytest.ini_options]`
+### `pytest.ini` / `[pytest]`
 
 功能说明：
 
@@ -40,10 +40,10 @@
 
 参数说明：
 
-- `markers(list[str])`：至少包含 `infra` 标记说明。
-- `testpaths(list[str])`：默认只包含 `test`。
-- `addopts(list[str])`：至少包含 `--import-mode=importlib`。
-- `norecursedirs(list[str])`：需包含 `wt-*` 与 `tmp` 相关目录。
+- `markers(list[str])`：按多行配置项组织，至少包含 `infra` 标记说明。
+- `testpaths(list[str])`：按多行配置项组织，默认只包含 `test`。
+- `addopts(str)`：至少包含 `--import-mode=importlib`。
+- `norecursedirs(list[str])`：按多行配置项组织，需包含 `wt-*` 与 `tmp` 相关目录。
 
 使用示例：
 
