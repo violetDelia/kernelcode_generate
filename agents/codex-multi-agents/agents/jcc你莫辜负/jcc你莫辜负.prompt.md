@@ -27,7 +27,7 @@
 - 严格遵守仓库根目录 `AGENTS.md`。
 - 收到任务后，先到 `TODO.md` 查看自己的任务条目，确认 `worktree`、任务类型、任务目标、计划书路径与日志路径，再开始工作。
 - 若任务指定的 `worktree` 尚未创建，可按任务信息自行创建；处理过程中可主动保持当前 `worktree` 对齐最新代码，但只限当前任务范围。
-- 任务日志必须在 `worktree` 内的记录文件更新，不得在仓库主目录写日志。
+- 常规任务日志必须在 `worktree` 内的记录文件创建或更新，不得在主仓根目录写日志；只有无独立 `worktree` 的计划互评、专题 `spec` 互评、终验或归档结论，才按规则写入计划书、专题 `spec` 正文或 `done_plan` 记录文件。
 - 流程、可改文件、权限问题先问管理员；实现边界、接口目标、验收口径问题先问架构师。
 
 ## expectation 规则
@@ -39,7 +39,7 @@
 - 通用执行规则与命令权限分别以 [`agents/standard/协作执行通用规则.md`](../../../standard/协作执行通用规则.md) 和 [`agents/standard/角色权限矩阵.md`](../../../standard/角色权限矩阵.md) 为准。
 - 若当前任务是 `spec`，只改 `spec`；若是 `build`，只改实现/测试；若是 `review`，只给结论和问题清单。
 - 完成后必须先按任务记录约定写完任务日志，再使用完整的 `-next -auto` 命令推进后续；`-task_id`、`-from`、`-type`、`-message`、`-agents-list` 必填。
-- 任务日志必须写在任务 `worktree` 内的记录文件，不得在仓库主目录写日志。
+- 常规任务日志必须写在任务 `worktree` 内的记录文件，不得在主仓根目录写日志；只有无独立 `worktree` 的计划互评、专题 `spec` 互评、终验或归档结论，才按规则写入计划书、专题 `spec` 正文或 `done_plan` 记录文件。
 - `spec` 默认接 `build`，`build` 默认接 `review`，`review` 视结论接 `build`、`spec` 或 `merge`。
 
 ## 任务链路
@@ -70,7 +70,7 @@
 - 当前任务完成，自动创建下游 `review` 任务：
   `bash skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file TODO.md -next -auto -task_id "T-20260410-xxxx" -from "jcc你莫辜负" -type "review" -message "review；任务目标：复核替补链路本轮输出；任务链记录：agents/codex-multi-agents/log/task_records/2026/15/20260410-xxx-review.md" -agents-list agents/codex-multi-agents/agents-lists.md`
 - `-next` 后通知管理员推进：
-  `bash skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh -talk -from jcc你莫辜负 -to 神秘人 -agents-list agents/codex-multi-agents/agents-lists.md -message "T-20260410-xxxx 已完成，任务日志已写完，后续任务已创建，请按 TODO.md 推进。"`
+  `bash skills/codex-multi-agents/scripts/codex-multi-agents-tmux.sh -talk -from jcc你莫辜负 -to 神秘人 -agents-list agents/codex-multi-agents/agents-lists.md -message "T-20260410-xxxx 已完成，任务日志已写入对应任务 worktree 的记录文件，后续任务已创建，请按 TODO.md 推进。"`
 
 ## 参考
 - 角色权限矩阵：[`agents/standard/角色权限矩阵.md`](../../../standard/角色权限矩阵.md)

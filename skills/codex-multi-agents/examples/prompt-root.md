@@ -39,7 +39,7 @@ codex-multi-agents-tmux.sh -talk -from <NAME> -to <other> -agents-list <AGENTS_L
 codex-multi-agents-task.sh -file <TODO.md> -new -info "<task>" -type <spec|build|review|merge|other|refactor> -worktree <path> -depends <task_ids|None> -plan <plan.md|None> -from <owner> -log <record_file>
 
 # 分发任务（自动同步角色状态，并向目标角色发消息）
-codex-multi-agents-task.sh -file <TODO.md> -dispatch -task_id <task_id> -to <agent> -agents-list <AGENTS_LIST> -message "请处理任务 <task_id>，描述：<描述>。将过程记录在 <记录文件>，完成后回报，并申请下一阶段任务。"
+codex-multi-agents-task.sh -file <TODO.md> -dispatch -task_id <task_id> -to <agent> -agents-list <AGENTS_LIST> -message "请处理任务 <task_id>，描述：<描述>。若任务有独立 worktree，常规任务日志必须写入该 worktree 下的 <记录文件>；只有无独立 worktree 的计划互评、专题 spec 互评、终验或归档结论，才按规则写入计划书、专题 spec 正文或 done_plan 记录文件。完成后回报，并申请下一阶段任务。"
 
 # 执行人完成当前阶段后续接下一阶段（任务 ID 保持不变）
 codex-multi-agents-task.sh -file <TODO.md> -next -auto -task_id <task_id> -type <next_type> -message "<next_desc>" -agents-list <AGENTS_LIST>
