@@ -40,7 +40,7 @@ LIST_SCRIPT="$REPO_ROOT/skills/codex-multi-agents/scripts/codex-multi-agents-lis
 # 可直接修改的配置区
 # -----------------------------
 # 每隔多久发送一次，单位秒。
-INTERVAL_SECONDS=1800
+INTERVAL_SECONDS=3600
 
 # 会话发送信息。
 FROM_NAME="榕"
