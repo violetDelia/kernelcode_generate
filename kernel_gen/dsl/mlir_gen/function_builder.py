@@ -391,7 +391,13 @@ def _build_func_op_from_ast_impl(
                                     f"{return_expr.kind} axis must be within [-{rank}, {rank - 1}]",
                                     location=return_expr.location,
                                 )
-            result_type = _infer_expr_type(return_expr, dict(type_map), runtime_values=runtime_values, config=config)
+            result_type = _infer_result_type_with_public_diagnostics(
+                return_expr,
+                dict(type_map),
+                runtime_values=runtime_values,
+                config=config,
+                fallback_location=func_ast.location,
+            )
         if func_ast.outputs:
             _validate_return_type(func_ast, result_type, return_expr, dict(type_map))
         type_map[_expr_key(return_expr)] = result_type
@@ -418,6 +424,43 @@ def _build_func_op_from_ast_impl(
         block.add_op(func.ReturnOp())
     _rewrite_dynamic_memory_result_types(func_op)
     return func_op
+
+
+def _infer_result_type_with_public_diagnostics(
+    expr: object,
+    type_map: dict[str, object],
+    runtime_values: dict[str, object] | None,
+    config: dict[str, object],
+    fallback_location: object,
+) -> object:
+    """在 `build_func_op` 公开入口中规整返回类型推导诊断。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 调用 `_infer_expr_type(...)` 推导返回表达式类型。
+    - 将隐式 broadcast 维度不匹配重新包装为带位置信息的 `_LoweringError`，
+      以保持 `build_func_op(...) -> AstVisitorError` 的既有公开合同。
+
+    使用示例:
+    - result_type = _infer_result_type_with_public_diagnostics(expr, type_map, runtime_values, config, func_ast.location)
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen/function_builder.py](kernel_gen/dsl/mlir_gen/function_builder.py)
+    """
+
+    try:
+        return _infer_expr_type(expr, type_map, runtime_values=runtime_values, config=config)
+    except ValueError as exc:
+        if "Implicit broadcast dimension mismatch" not in str(exc):
+            raise
+        raise _LoweringError(
+            str(exc),
+            location=getattr(expr, "location", None) or fallback_location,
+        ) from exc
 
 
 def build_func_op_from_ast(

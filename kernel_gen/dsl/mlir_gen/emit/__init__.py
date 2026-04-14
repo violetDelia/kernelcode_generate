@@ -21,6 +21,7 @@ from __future__ import annotations
 from .call_dma import emit_dma_call
 from .context import EmitContext, LoweringError
 from .control_flow import emit_control_flow, emit_for
+from .call_nn import emit_nn_call
 from .dispatch import call_dispatch, emit_mlir
 from .shape_utils import (
     build_index_attrs,
@@ -45,6 +46,7 @@ __all__ = [
     "emit_for",
     "emit_index_operand",
     "emit_mlir",
+    "emit_nn_call",
     "emit_symbol_const",
     "emit_value",
     "infer_expr_type",

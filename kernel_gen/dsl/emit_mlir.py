@@ -26,8 +26,11 @@ from typing import Sequence
 from xdsl.dialects import arith, func, scf
 from xdsl.dialects.builtin import (
     ArrayAttr,
+    BFloat16Type,
     FloatAttr,
     Float16Type,
+    Float32Type,
+    Float64Type,
     IndexType,
     IntAttr,
     IntegerAttr,
@@ -69,11 +72,15 @@ from kernel_gen.dialect.dma import (
 from kernel_gen.dialect.nn import (
     NnAddOp,
     NnBroadcastOp,
+    NnCastOp,
     NnEqOp,
     NnExpOp,
+    NnFloorDivOp,
     NnGeOp,
     NnGtOp,
+    NnHardSigmoidOp,
     NnMatmulOp,
+    NnLeakyReluOp,
     NnLeOp,
     NnLtOp,
     NnImg2col1dOp,
@@ -85,8 +92,11 @@ from kernel_gen.dialect.nn import (
     NnReduceMaxOp,
     NnReduceMinOp,
     NnReduceSumOp,
+    NnReluOp,
+    NnSigmoidOp,
     NnSoftmaxOp,
     NnSubOp,
+    NnTanhOp,
     NnTrueDivOp,
     NnTransposeOp,
 )
@@ -107,6 +117,7 @@ from kernel_gen.dialect.symbol import (
     SymbolNeOp,
     SymbolIterType,
     SymbolSubOp,
+    SymbolToIntOp,
     SymbolToFloatOp,
     SymbolValueType,
     build_public_symbol_expr,
@@ -306,10 +317,14 @@ def _dtype_to_xdsl(dtype: NumericType, location: SourceLocation | None = None) -
     """
     if dtype is NumericType.Bool:
         return i1
+    if dtype is NumericType.BFloat16:
+        return BFloat16Type()
     if dtype is NumericType.Float16:
         return Float16Type()
     if dtype is NumericType.Float32:
         return f32
+    if dtype is NumericType.Float64:
+        return Float64Type()
     if dtype is NumericType.Int8:
         return i8
     if dtype is NumericType.Int32:
@@ -326,7 +341,7 @@ def _xdsl_to_dtype(element_type: Attribute, location: SourceLocation | None = No
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 支持 Float16/Float32/Int32/Bool 解析为 NumericType。
+    - 支持 Float16/BFloat16/Float32/Float64/Int32/Bool 解析为 NumericType。
     - 不支持的 element_type 抛出 LoweringError。
 
     使用示例:
@@ -337,10 +352,14 @@ def _xdsl_to_dtype(element_type: Attribute, location: SourceLocation | None = No
     - test: [test/dsl/test_ast_visitor.py](test/dsl/test_ast_visitor.py)
     - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
     """
+    if isinstance(element_type, BFloat16Type):
+        return NumericType.BFloat16
     if isinstance(element_type, Float16Type):
         return NumericType.Float16
     if element_type == f32:
         return NumericType.Float32
+    if isinstance(element_type, Float64Type):
+        return NumericType.Float64
     if element_type == i8:
         return NumericType.Int8
     if element_type == i32:
@@ -1608,6 +1627,49 @@ def _resolve_static_index_expr(
             raise _LoweringError("Unsupported index expression", location=location or getattr(expr, "location", None))
         return normalized
     return value
+
+
+def _resolve_runtime_scalar_value(
+    expr: object,
+    inferred_type: Attribute | None,
+    runtime_values: dict[str, object] | None = None,
+) -> object | None:
+    """解析算术/激活 helper 在类型推导阶段使用的标量值。
+
+    创建者: 小李飞刀
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 优先解析 `ConstAST` 与 `runtime_values` 中可直接使用的标量值。
+    - 对符号输入统一返回 `SymbolDim`，供 mixed binary/helper 类型推导复用。
+    - 在仅有 `inferred_type` 时提供整数/浮点默认值，避免推导阶段出现空值分支。
+
+    使用示例:
+    - _resolve_runtime_scalar_value(ConstAST(1), i32, runtime_values=None)
+    - _resolve_runtime_scalar_value(ScalarArgAST("alpha"), f32, runtime_values={"alpha": 0.125})
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    if isinstance(expr, ConstAST) and isinstance(expr.value, (int, float, bool)):
+        return expr.value
+    if isinstance(expr, ScalarArgAST):
+        if runtime_values is not None and expr.name in runtime_values:
+            return runtime_values[expr.name]
+        if expr.is_symbolic:
+            return SymbolDim(expr.name)
+    if isinstance(expr, VarAST) and isinstance(inferred_type, SymbolValueType):
+        return SymbolDim(inferred_type.expr.expr.data)
+    if isinstance(inferred_type, SymbolValueType):
+        return SymbolDim(inferred_type.expr.expr.data)
+    if isinstance(inferred_type, IntegerType):
+        return 0
+    if isinstance(inferred_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
+        return 0.0
+    return None
 
 
 def _build_static_index_list(
@@ -3329,11 +3391,11 @@ def _infer_expr_type(
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, NnUnaryAST):
-        value_type = _infer_expr_type(expr.value, type_map, runtime_values=runtime_values)
-        if not isinstance(value_type, NnMemoryType):
-            raise _LoweringError("Unary op operand must be nn.memory", location=expr.location)
-        type_map[expr_key] = value_type
-        return value_type
+        from kernel_gen.dsl.mlir_gen.emit.call_nn import infer_nn_type
+
+        result_type = infer_nn_type(expr, type_map, runtime_values=runtime_values, config=config)
+        type_map[expr_key] = result_type
+        return result_type
     if isinstance(expr, NnReduceAST):
         input_type = _infer_expr_type(expr.value, type_map, runtime_values=runtime_values)
         if not isinstance(input_type, NnMemoryType):
@@ -3436,68 +3498,16 @@ def _infer_expr_type(
         return f32
 
     if isinstance(expr, BinaryExprAST):
-        lhs_type = _infer_expr_type(expr.lhs, type_map, runtime_values=runtime_values)
-        rhs_type = _infer_expr_type(expr.rhs, type_map, runtime_values=runtime_values)
-        if isinstance(lhs_type, SymbolValueType) and isinstance(rhs_type, SymbolValueType):
-            if expr.op not in {"add", "sub", "mul", "div", "floordiv"}:
-                raise _LoweringError("Unsupported symbol binary op", location=expr.location)
-            lhs_expr = lhs_type.expr.expr.data
-            rhs_expr = rhs_type.expr.expr.data
-            op_symbol = {
-                "add": "+",
-                "sub": "-",
-                "mul": "*",
-                "div": "/",
-                "floordiv": "//",
-            }[expr.op]
-            result_type = SymbolValueType.from_expr(build_public_symbol_expr(lhs_expr, rhs_expr, op_symbol))
-            type_map[expr_key] = result_type
-            return result_type
-        lhs_is_memory = isinstance(lhs_type, NnMemoryType)
-        rhs_is_memory = isinstance(rhs_type, NnMemoryType)
-        if expr.op == "add" and lhs_is_memory != rhs_is_memory:
-            memory_type = lhs_type if lhs_is_memory else rhs_type
-            scalar_type = rhs_type if lhs_is_memory else lhs_type
-            if not isinstance(memory_type, NnMemoryType):
-                raise _LoweringError("nn.add requires at least one nn.memory operand", location=expr.location)
-            result_type = _infer_add_mixed_memory_type(memory_type, scalar_type, expr.location)
-            type_map[expr_key] = result_type
-            return result_type
-        if expr.op == "add" and not lhs_is_memory and not rhs_is_memory:
-            raise _LoweringError("nn.add requires at least one nn.memory operand", location=expr.location)
-        if not isinstance(lhs_type, NnMemoryType) or not isinstance(rhs_type, NnMemoryType):
-            raise _LoweringError("Binary op operands must have nn.memory type", location=expr.location)
-        if lhs_type == rhs_type:
-            type_map[expr_key] = lhs_type
-            return lhs_type
-        target_element_type = lhs_type.element_type
-        if lhs_type.element_type != rhs_type.element_type:
-            target_element_type = _resolve_nn_arith_element_type(lhs_type, rhs_type, expr.location)
-        target_type = _infer_broadcast_memory_type(
-            lhs_type,
-            rhs_type,
-            expr.location,
-            element_type=target_element_type,
-        )
-        type_map[expr_key] = target_type
-        return target_type
+        from kernel_gen.dsl.mlir_gen.emit.call_nn import infer_nn_type
+
+        result_type = infer_nn_type(expr, type_map, runtime_values=runtime_values, config=config)
+        type_map[expr_key] = result_type
+        return result_type
 
     if isinstance(expr, CompareExprAST):
-        lhs_type = _infer_expr_type(expr.lhs, type_map, runtime_values=runtime_values)
-        rhs_type = _infer_expr_type(expr.rhs, type_map, runtime_values=runtime_values)
-        if isinstance(lhs_type, SymbolValueType) and isinstance(rhs_type, SymbolValueType):
-            if expr.op not in {"eq", "ge", "gt", "le", "lt", "ne"}:
-                raise _LoweringError("Unsupported symbol compare op", location=expr.location)
-            type_map[expr_key] = i1
-            return i1
-        if not isinstance(lhs_type, NnMemoryType) or not isinstance(rhs_type, NnMemoryType):
-            raise _LoweringError("Compare op operands must have nn.memory type", location=expr.location)
-        if lhs_type == rhs_type:
-            result_type = NnMemoryType(lhs_type.shape, lhs_type.stride, i1, lhs_type.space)
-            type_map[expr_key] = result_type
-            return result_type
-        target_type = _infer_broadcast_memory_type(lhs_type, rhs_type, expr.location)
-        result_type = NnMemoryType(target_type.shape, target_type.stride, i1, target_type.space)
+        from kernel_gen.dsl.mlir_gen.emit.call_nn import infer_nn_type
+
+        result_type = infer_nn_type(expr, type_map, runtime_values=runtime_values, config=config)
         type_map[expr_key] = result_type
         return result_type
 
@@ -3509,23 +3519,23 @@ def _infer_expr_type(
     raise _LoweringError("Unsupported expression for lowering", location=getattr(expr, "location", None))
 
 
-def _cast_add_scalar_operand(
+def _cast_nn_scalar_operand(
     value: SSAValue,
     target_element_type: Attribute,
     ctx: EmitContext,
     location: SourceLocation | None,
 ) -> SSAValue:
-    """将 `nn.add` mixed 路径中的标量 operand 转换到目标 dtype。
+    """将 nn mixed 路径中的标量 operand 转换到目标 dtype。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: OpenAI
 
     功能说明:
-    - `!symbol.int` 视为有符号整数，并在需要时 lowering 为浮点 cast。
-    - 仅生成满足 `nn.add` mixed promotion 所需的最少标量 cast。
+    - `!symbol.int` 根据目标类型 lowering 为 `symbol.to_int` 或 `symbol.to_float`。
+    - 普通整型按需 lowering 为 `arith.sitofp`，浮点之间按需做 ext/trunc。
 
     使用示例:
-    - _cast_add_scalar_operand(value, f32, ctx, location=None)
+    - _cast_nn_scalar_operand(value, f32, ctx, location=None)
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
@@ -3534,44 +3544,97 @@ def _cast_add_scalar_operand(
     """
 
     source_type = value.type
-    _normalize_add_scalar_element_type(source_type, location)
     if source_type == target_element_type:
         return value
 
-    if isinstance(source_type, SymbolValueType) or source_type == i32:
-        if isinstance(target_element_type, Float16Type) or target_element_type == f32:
+    if isinstance(source_type, SymbolValueType):
+        if isinstance(target_element_type, IntegerType):
+            cast_op = SymbolToIntOp(value, target_element_type)
+            ctx.builder.add_op(cast_op)
+            return cast_op.result
+        if isinstance(target_element_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
+            cast_op = SymbolToFloatOp(value, target_element_type)
+            ctx.builder.add_op(cast_op)
+            return cast_op.result
+        raise _LoweringError("nn scalar element_type must be integer/float or symbol.int", location=location)
+    if isinstance(source_type, IntegerType):
+        if isinstance(target_element_type, IntegerType):
+            if source_type == target_element_type:
+                return value
+            raise _LoweringError("nn scalar integer width conversion is unsupported", location=location)
+        if isinstance(target_element_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
             cast_op = arith.SIToFPOp(value, target_element_type)
             ctx.builder.add_op(cast_op)
             return cast_op.result
-        return value
-    if isinstance(source_type, Float16Type) and target_element_type == f32:
-        cast_op = arith.ExtFOp(value, target_element_type)
-        ctx.builder.add_op(cast_op)
-        return cast_op.result
-    if source_type == f32 and isinstance(target_element_type, Float16Type):
+        raise _LoweringError("nn scalar element_type must be integer/float or symbol.int", location=location)
+    if isinstance(source_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)) and isinstance(
+        target_element_type,
+        (Float16Type, BFloat16Type, Float32Type, Float64Type),
+    ):
+        if source_type == target_element_type:
+            return value
+        source_width = 16 if isinstance(source_type, (Float16Type, BFloat16Type)) else (32 if isinstance(source_type, Float32Type) else 64)
+        target_width = 16 if isinstance(target_element_type, (Float16Type, BFloat16Type)) else (32 if isinstance(target_element_type, Float32Type) else 64)
+        if source_width < target_width:
+            cast_op = arith.ExtFOp(value, target_element_type)
+            ctx.builder.add_op(cast_op)
+            return cast_op.result
         cast_op = arith.TruncFOp(value, target_element_type)
         ctx.builder.add_op(cast_op)
         return cast_op.result
-    raise _LoweringError("nn.add scalar element_type must be i32/f16/f32 or symbol.int", location=location)
+    raise _LoweringError("nn scalar element_type must be integer/float or symbol.int", location=location)
 
 
-def _lower_mixed_add_expr(
-    expr: BinaryExprAST,
-    lhs: SSAValue,
-    rhs: SSAValue,
+def _materialize_mixed_binary_scalar_operand(
+    scalar_expr: object,
+    scalar_value: SSAValue | None,
+    target_element_type: Attribute,
     ctx: EmitContext,
-) -> SSAValue | None:
-    """lower `nn.add` 的 mixed memory+scalar/symbol 路径。
+    location: SourceLocation | None,
+) -> SSAValue:
+    """为 nn mixed binary 路径生成符合公开合同的标量 SSA value。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 保持 memory operand 的 `shape/stride/space`，并只在 memory dtype 落后于目标 dtype 时插入 `dma.cast`。
-    - 标量侧根据 promotion 结果插入最少 `arith` cast，最终发射单个 `nn.add`。
+    - 对整数字面量统一经 `symbol.const` 生成 `!symbol.int`，保持 mixed 路径一致语义。
+    - 对已有 scalar SSA value 按目标 element type 执行 `_cast_nn_scalar_operand(...)`。
+    - 若无法物化 scalar operand，抛出稳定错误短语供调用方诊断。
 
     使用示例:
-    - _lower_mixed_add_expr(expr, lhs, rhs, ctx)
+    - _materialize_mixed_binary_scalar_operand(expr.rhs, rhs, f32, ctx, expr.location)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    if isinstance(scalar_expr, ConstAST) and isinstance(scalar_expr.value, int):
+        scalar_value = _const_symbol_int(int(scalar_expr.value), ctx, location)
+    if scalar_value is None:
+        raise _LoweringError("Binary op scalar operand could not be materialized", location=location)
+    return _cast_nn_scalar_operand(scalar_value, target_element_type, ctx, location)
+
+
+def _lower_mixed_binary_expr(
+    expr: BinaryExprAST,
+    lhs: SSAValue | None,
+    rhs: SSAValue | None,
+    ctx: EmitContext,
+) -> SSAValue | None:
+    """lower nn elementwise arithmetic 的 mixed memory+scalar/symbol 路径。
+
+    创建者: 小李飞刀
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 保持 memory operand 的 `shape/stride/space`，并在 dtype 不一致时插入 `nn.cast`。
+    - 整数字面量走 `symbol.const`，symbol 标量按目标 dtype 转成 `symbol.to_int`/`symbol.to_float`。
+
+    使用示例:
+    - _lower_mixed_binary_expr(expr, lhs, rhs, ctx)
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
@@ -3586,7 +3649,9 @@ def _lower_mixed_add_expr(
     if lhs_is_memory and rhs_is_memory:
         return None
     if not lhs_is_memory and not rhs_is_memory:
-        raise _LoweringError("nn.add requires at least one nn.memory operand", location=expr.location)
+        if expr.op == "add":
+            raise _LoweringError("nn.add requires at least one nn.memory operand", location=expr.location)
+        raise _LoweringError("Binary op operands must have nn.memory type", location=expr.location)
 
     result_type = _infer_expr_type(expr, ctx.types)
     if not isinstance(result_type, NnMemoryType):
@@ -3595,8 +3660,9 @@ def _lower_mixed_add_expr(
     memory_value = lhs if lhs_is_memory else rhs
     memory_type = lhs_type if lhs_is_memory else rhs_type
     scalar_value = rhs if lhs_is_memory else lhs
+    scalar_expr = expr.rhs if lhs_is_memory else expr.lhs
     if not isinstance(memory_type, NnMemoryType):
-        raise _LoweringError("nn.add requires at least one nn.memory operand", location=expr.location)
+        raise _LoweringError("Binary op operands must have nn.memory type", location=expr.location)
 
     if memory_type.element_type != result_type.element_type:
         cast_type = _memory_type_from_parts(
@@ -3605,13 +3671,29 @@ def _lower_mixed_add_expr(
             result_type.element_type,
             memory_type.space,
         )
-        cast_op = DmaCastOp(memory_value, cast_type)
+        cast_op = NnCastOp(memory_value, cast_type, cast_type.space)
         ctx.builder.add_op(cast_op)
         memory_value = cast_op.result
         memory_type = cast_type
 
-    scalar_value = _cast_add_scalar_operand(scalar_value, result_type.element_type, ctx, expr.location)
-    op = NnAddOp(
+    scalar_value = _materialize_mixed_binary_scalar_operand(
+        scalar_expr,
+        scalar_value,
+        result_type.element_type,
+        ctx,
+        expr.location,
+    )
+    op_map = {
+        "add": NnAddOp,
+        "sub": NnSubOp,
+        "mul": NnMulOp,
+        "div": NnTrueDivOp,
+        "floordiv": NnFloorDivOp,
+    }
+    op_cls = op_map.get(expr.op)
+    if op_cls is None:
+        raise _LoweringError(f"Unsupported binary op: {expr.op}", location=expr.location)
+    op = op_cls(
         memory_value if lhs_is_memory else scalar_value,
         scalar_value if lhs_is_memory else memory_value,
         result_type,
@@ -3793,20 +3875,9 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         ctx._set_cache(expr_key, op.result)
         return op.result
     if isinstance(expr, NnUnaryAST):
-        input_value = _lower_expr(expr.value, ctx)
-        input_type = _expect_memory_value(input_value, expr.location)
-        result_type = _infer_expr_type(expr, ctx.types)
-        if not isinstance(result_type, NnMemoryType):
-            raise _LoweringError("Unary op result must be nn.memory", location=expr.location)
-        if expr.kind == "exp":
-            op = NnExpOp(input_value, result_type, input_type.space)
-            op.verify()
-            ctx.builder.add_op(op)
-            ctx._set_cache(expr_key, op.result)
-            return op.result
-        ctx._set_cache(expr_key, input_value)
-        ctx.types[expr_key] = result_type
-        return input_value
+        from kernel_gen.dsl.mlir_gen.emit.call_nn import emit_nn_call
+
+        return emit_nn_call(expr, ctx)
     if isinstance(expr, NnBroadcastAST):
         value = _lower_expr(expr.value, ctx)
         target = _lower_expr(expr.target, ctx)
@@ -4171,118 +4242,14 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         return call_op.results[0]
 
     if isinstance(expr, BinaryExprAST):
-        lhs = _lower_expr(expr.lhs, ctx)
-        rhs = _lower_expr(expr.rhs, ctx)
-        lhs_attr = getattr(lhs, "type", None)
-        rhs_attr = getattr(rhs, "type", None)
-        if isinstance(lhs_attr, SymbolValueType) and isinstance(rhs_attr, SymbolValueType):
-            if expr.op not in {"add", "sub", "mul", "div", "floordiv"}:
-                raise _LoweringError("Unsupported symbol binary op", location=expr.location)
-            result_type = _infer_expr_type(expr, ctx.types)
-            if not isinstance(result_type, SymbolValueType):
-                raise _LoweringError("Symbol binary op result must be !symbol.int", location=expr.location)
-            op_map = {
-                "add": SymbolAddOp,
-                "sub": SymbolSubOp,
-                "mul": SymbolMulOp,
-                "div": SymbolDivOp,
-                "floordiv": SymbolFloorDivOp,
-            }
-            op = op_map[expr.op](lhs, rhs, result_type)
-            ctx.builder.add_op(op)
-            ctx._set_cache(expr_key, op.result)
-            return op.result
-        if expr.op == "add":
-            mixed_add_result = _lower_mixed_add_expr(expr, lhs, rhs, ctx)
-            if mixed_add_result is not None:
-                return mixed_add_result
-        lhs_type = _expect_memory_value(lhs, expr.location)
-        rhs_type = _expect_memory_value(rhs, expr.location)
-        result_type = _infer_expr_type(expr, ctx.types)
-        if not isinstance(result_type, NnMemoryType):
-            raise _LoweringError("Binary op result must be nn.memory", location=expr.location)
-        target_type = result_type
-        if lhs_type.element_type != target_type.element_type:
-            cast_type = _memory_type_from_parts(
-                lhs_type.shape.data,
-                lhs_type.stride.data,
-                target_type.element_type,
-                lhs_type.space,
-            )
-            cast_op = DmaCastOp(lhs, cast_type)
-            ctx.builder.add_op(cast_op)
-            lhs = cast_op.result
-            lhs_type = cast_type
-        if rhs_type.element_type != target_type.element_type:
-            cast_type = _memory_type_from_parts(
-                rhs_type.shape.data,
-                rhs_type.stride.data,
-                target_type.element_type,
-                rhs_type.space,
-            )
-            cast_op = DmaCastOp(rhs, cast_type)
-            ctx.builder.add_op(cast_op)
-            rhs = cast_op.result
-            rhs_type = cast_type
-        if lhs_type != target_type:
-            broadcast_op = NnBroadcastOp(lhs, target_type, target_type.space)
-            ctx.builder.add_op(broadcast_op)
-            lhs = broadcast_op.result
-            lhs_type = target_type
-        if rhs_type != target_type:
-            broadcast_op = NnBroadcastOp(rhs, target_type, target_type.space)
-            ctx.builder.add_op(broadcast_op)
-            rhs = broadcast_op.result
-            rhs_type = target_type
-        op_map = {"add": NnAddOp, "sub": NnSubOp, "mul": NnMulOp, "div": NnTrueDivOp}
-        if expr.op not in op_map:
-            raise _LoweringError(f"Unsupported binary op: {expr.op}", location=expr.location)
-        op = op_map[expr.op](lhs, rhs, target_type, target_type.space)
-        ctx.builder.add_op(op)
-        ctx._set_cache(expr_key, op.result)
-        return op.result
+        from kernel_gen.dsl.mlir_gen.emit.call_nn import emit_nn_call
+
+        return emit_nn_call(expr, ctx)
 
     if isinstance(expr, CompareExprAST):
-        lhs = _lower_expr(expr.lhs, ctx)
-        rhs = _lower_expr(expr.rhs, ctx)
-        lhs_attr = getattr(lhs, "type", None)
-        rhs_attr = getattr(rhs, "type", None)
-        if isinstance(lhs_attr, SymbolValueType) and isinstance(rhs_attr, SymbolValueType):
-            if expr.op not in {"eq", "ge", "gt", "le", "lt", "ne"}:
-                raise _LoweringError("Unsupported symbol compare op", location=expr.location)
-            op_map = {
-                "eq": SymbolEqOp,
-                "ge": SymbolGeOp,
-                "gt": SymbolGtOp,
-                "le": SymbolLeOp,
-                "lt": SymbolLtOp,
-                "ne": SymbolNeOp,
-            }
-            op = op_map[expr.op](lhs, rhs, i1)
-            ctx.builder.add_op(op)
-            ctx._set_cache(expr_key, op.result)
-            return op.result
-        lhs_type = _expect_memory_value(lhs, expr.location)
-        rhs_type = _expect_memory_value(rhs, expr.location)
-        if lhs_type != rhs_type:
-            target_type = _infer_broadcast_memory_type(lhs_type, rhs_type, expr.location)
-            if lhs_type != target_type:
-                broadcast_op = NnBroadcastOp(lhs, target_type, target_type.space)
-                ctx.builder.add_op(broadcast_op)
-                lhs = broadcast_op.result
-            if rhs_type != target_type:
-                broadcast_op = NnBroadcastOp(rhs, target_type, target_type.space)
-                ctx.builder.add_op(broadcast_op)
-                rhs = broadcast_op.result
-            lhs_type = target_type
-        result_type = NnMemoryType(lhs_type.shape, lhs_type.stride, i1, lhs_type.space)
-        op_map = {"eq": NnEqOp, "ne": NnNeOp, "lt": NnLtOp, "le": NnLeOp, "gt": NnGtOp, "ge": NnGeOp}
-        if expr.op not in op_map:
-            raise _LoweringError(f"Unsupported compare op: {expr.op}", location=expr.location)
-        op = op_map[expr.op](lhs, rhs, result_type, lhs_type.space)
-        ctx.builder.add_op(op)
-        ctx._set_cache(expr_key, op.result)
-        return op.result
+        from kernel_gen.dsl.mlir_gen.emit.call_nn import emit_nn_call
+
+        return emit_nn_call(expr, ctx)
 
     raise _LoweringError("Unsupported expression for lowering", location=getattr(expr, "location", None))
 

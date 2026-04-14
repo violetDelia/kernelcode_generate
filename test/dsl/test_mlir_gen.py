@@ -78,6 +78,7 @@ from kernel_gen.dialect.arch import (
 from kernel_gen.dialect.nn import (
     NnAddOp,
     NnBroadcastOp,
+    NnCastOp,
     NnEqOp,
     NnExpOp,
     NnImg2col1dOp,
@@ -3734,7 +3735,7 @@ def test_tensor_truediv_dtype_promotion_lowering() -> None:
     lhs_memory = Memory([2, 2], NumericType.Float32)
     rhs_memory = Memory([2, 2], NumericType.Int32)
     func_op = build_func_op(truediv, lhs_memory, rhs_memory)
-    cast_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaCastOp)]
+    cast_ops = [op for op in func_op.body.block.ops if isinstance(op, NnCastOp)]
     div_ops = [op for op in func_op.body.block.ops if isinstance(op, NnTrueDivOp)]
     assert len(cast_ops) == 1
     assert len(div_ops) == 1
@@ -3836,7 +3837,7 @@ def test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics() -> None
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-27 04:16:44 +0800
 # 最近一次运行成功时间: 2026-03-27 04:16:44 +0800
-# 功能说明: 验证 nn.sub dtype promotion 会插入 dma.cast 并返回目标 dtype 的 nn.sub。
+# 功能说明: 验证 nn.sub dtype promotion 会插入 nn.cast 并返回目标 dtype 的 nn.sub。
 # 测试目的: 锁定 build_func_op 对 nn.sub 混合 dtype 的 cast lowering 与返回类型。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/emit_mlir.py
@@ -3854,7 +3855,7 @@ def test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast() -> None:
     expected_type = _memory_to_nn_type(lhs_memory - rhs_memory)
 
     func_op = build_func_op(sub, lhs_memory, rhs_memory)
-    cast_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaCastOp)]
+    cast_ops = [op for op in func_op.body.block.ops if isinstance(op, NnCastOp)]
     sub_ops = [op for op in func_op.body.block.ops if isinstance(op, NnSubOp)]
     return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
 
@@ -3885,7 +3886,7 @@ def test_build_func_op_lowers_nn_add_memory_symbol_with_scalar_promotion() -> No
     func_op = build_func_op(add, lhs_memory, SymbolDim("K"))
     add_ops = [op for op in func_op.body.block.ops if isinstance(op, NnAddOp)]
     dma_cast_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaCastOp)]
-    scalar_cast_ops = [op for op in func_op.body.block.ops if isinstance(op, arith.SIToFPOp)]
+    scalar_cast_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolToFloatOp)]
     return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
 
     assert list(func_op.function_type.inputs) == [expected_type, SymbolValueType.from_expr("K")]

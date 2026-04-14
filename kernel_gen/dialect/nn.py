@@ -666,6 +666,60 @@ def _verify_add_op(op: "NnAddOp") -> None:
         _raise_verify_error("nn.add result element_type must match promoted element_type")
 
 
+def _verify_mixed_scalar_binary_op(op: "_BaseNnBinaryOp", op_name: str) -> None:
+    """校验支持 mixed memory+scalar/symbol 的 nn 二元算术 op。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 允许 `nn.memory + scalar`、`scalar + nn.memory`、`nn.memory + !symbol.int`。
+    - 结果的 shape/stride/space 继承 memory operand，dtype 按统一 promotion 规则决议。
+
+    使用示例:
+    - _verify_mixed_scalar_binary_op(op, "nn.sub")
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    lhs_value = SSAValue.get(op.lhs)
+    rhs_value = SSAValue.get(op.rhs)
+    lhs_type = lhs_value.type
+    rhs_type = rhs_value.type
+    result_type = _verify_memory_type(op.result.type, "result")
+
+    lhs_is_memory = isinstance(lhs_type, NnMemoryType)
+    rhs_is_memory = isinstance(rhs_type, NnMemoryType)
+    if not lhs_is_memory and not rhs_is_memory:
+        _raise_verify_error(f"{op_name} requires at least one nn.memory operand")
+
+    op.space.verify()
+    if lhs_is_memory and rhs_is_memory:
+        _verify_binary_memory_op(op, compare_result=False)
+        return
+
+    memory_type = _verify_memory_type(lhs_type if lhs_is_memory else rhs_type, "memory operand")
+    if memory_type.space.space.data != op.space.space.data:
+        _raise_verify_error(f"{op_name} attribute space must match memory operand space")
+    if result_type.space.space.data != memory_type.space.space.data:
+        _raise_verify_error(f"{op_name} result space must match memory operand")
+
+    if result_type.shape != memory_type.shape:
+        _raise_verify_error(f"{op_name} result shape must match memory operand")
+    if result_type.stride != memory_type.stride:
+        _raise_verify_error(f"{op_name} result stride must match memory operand")
+
+    scalar_type = rhs_type if lhs_is_memory else lhs_type
+    promoted_type = _promote_add_dtype(memory_type.element_type, scalar_type)
+    if promoted_type is None:
+        _raise_verify_error(f"{op_name} scalar element_type must be i32/f16/f32 or symbol.int")
+    if result_type.element_type != promoted_type:
+        _raise_verify_error(f"{op_name} result element_type must match promoted element_type")
+
+
 def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
     """判断两个维度是否语义一致。
 
@@ -1065,6 +1119,74 @@ def _verify_exp_op(op: "NnExpOp") -> None:
         _raise_verify_error("result-space-must-match-input-and-attr")
 
 
+def _verify_unary_float_op(
+    input_type: NnMemoryType,
+    result_type: NnMemoryType,
+    space: NnMemorySpaceAttr,
+) -> None:
+    """校验逐元素浮点 unary op 的公共合同。
+
+    创建者: 小李飞刀
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 统一校验 `relu/sigmoid/tanh/exp` 这类浮点 unary op 的输入、输出与 memory space 约束。
+    - 作为 `NnReluOp`、`NnSigmoidOp`、`NnTanhOp`、`NnExpOp` verifier 共享的底层 helper。
+
+    使用示例:
+    - _verify_unary_float_op(input_type, result_type, op.space)
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    input_type.verify()
+    result_type.verify()
+
+    if not _is_float_element_type(input_type.element_type):
+        _raise_verify_error("operand-element-type-must-be-float")
+
+    if input_type.shape != result_type.shape or input_type.stride != result_type.stride:
+        _raise_verify_error("result-shape-stride-must-match-input")
+
+    if input_type.element_type != result_type.element_type:
+        _raise_verify_error("result-element-type-must-match-input")
+
+    space.verify()
+    if input_type.space.space.data != result_type.space.space.data:
+        _raise_verify_error("result-space-must-match-input-and-attr")
+    if input_type.space.space.data != space.space.data:
+        _raise_verify_error("result-space-must-match-input-and-attr")
+
+
+def _verify_activation_scalar_operand(value: SSAValue, field_name: str) -> None:
+    """校验激活函数额外标量参数类型。
+
+    创建者: 小李飞刀
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 校验 `leaky_relu` / `hard_sigmoid` 的附加标量参数只能是整数或浮点标量。
+    - 明确拒绝 `nn.memory` 与 `symbol.int` 作为激活系数输入，避免 verifier 接受未公开的参数形态。
+
+    使用示例:
+    - _verify_activation_scalar_operand(op.alpha, "alpha")
+
+    关联文件:
+    - spec: spec/dialect/nn.md
+    - test: test/dialect/test_nn_dialect.py
+    - 功能实现: kernel_gen/dialect/nn.py
+    """
+
+    attr = value.type
+    if isinstance(attr, NnMemoryType) or _is_symbol_int_type(attr):
+        _raise_verify_error(f"{field_name} must be int or float scalar")
+    if not isinstance(attr, (IntegerType, Float16Type, BFloat16Type, Float32Type, Float64Type)):
+        _raise_verify_error(f"{field_name} must be int or float scalar")
+
+
 def _verify_reduce_axes(axes: ArrayAttr, rank: int) -> list[int]:
     """校验归约 axes 并返回整数列表。
 
@@ -1383,9 +1505,11 @@ class NnSubOp(_BaseNnBinaryOp):
     """nn.sub。"""
 
     name = "nn.sub"
+    lhs = operand_def(Attribute)
+    rhs = operand_def(Attribute)
 
     def verify_(self) -> None:
-        _verify_binary_memory_op(self, compare_result=False)
+        _verify_mixed_scalar_binary_op(self, "nn.sub")
 
 
 @irdl_op_definition
@@ -1393,9 +1517,11 @@ class NnMulOp(_BaseNnBinaryOp):
     """nn.mul。"""
 
     name = "nn.mul"
+    lhs = operand_def(Attribute)
+    rhs = operand_def(Attribute)
 
     def verify_(self) -> None:
-        _verify_binary_memory_op(self, compare_result=False)
+        _verify_mixed_scalar_binary_op(self, "nn.mul")
 
 
 @irdl_op_definition
@@ -1446,9 +1572,24 @@ class NnTrueDivOp(_BaseNnBinaryOp):
     """nn.truediv。"""
 
     name = "nn.truediv"
+    lhs = operand_def(Attribute)
+    rhs = operand_def(Attribute)
 
     def verify_(self) -> None:
-        _verify_binary_memory_op(self, compare_result=False)
+        _verify_mixed_scalar_binary_op(self, "nn.truediv")
+
+
+@irdl_op_definition
+class NnFloorDivOp(_BaseNnBinaryOp):
+    """nn.floordiv。"""
+
+    name = "nn.floordiv"
+
+    lhs = operand_def(Attribute)
+    rhs = operand_def(Attribute)
+
+    def verify_(self) -> None:
+        _verify_mixed_scalar_binary_op(self, "nn.floordiv")
 
 
 @irdl_op_definition
@@ -2046,6 +2187,124 @@ class NnTransposeOp(IRDLOperation):
 
         perm_values = _verify_transpose_perm(self.perm, len(input_type.shape.data))
         _verify_transpose_layout(input_type, result_type, perm_values)
+
+
+@irdl_op_definition
+class NnReluOp(IRDLOperation):
+    """nn.relu。"""
+
+    name = "nn.relu"
+
+    input = operand_def(NnMemoryType)
+    result = result_def(NnMemoryType)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(self, input_value: SSAValue | Operation, result_type: NnMemoryType, space: NnMemorySpaceAttr) -> None:
+        super().__init__(operands=[input_value], result_types=[result_type], attributes={"space": space})
+
+    def verify_(self) -> None:
+        input_type = _verify_memory_type(self.input.type, "input")
+        result_type = _verify_memory_type(self.result.type, "result")
+        _verify_unary_float_op(input_type, result_type, self.space)
+
+
+@irdl_op_definition
+class NnSigmoidOp(IRDLOperation):
+    """nn.sigmoid。"""
+
+    name = "nn.sigmoid"
+
+    input = operand_def(NnMemoryType)
+    result = result_def(NnMemoryType)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(self, input_value: SSAValue | Operation, result_type: NnMemoryType, space: NnMemorySpaceAttr) -> None:
+        super().__init__(operands=[input_value], result_types=[result_type], attributes={"space": space})
+
+    def verify_(self) -> None:
+        input_type = _verify_memory_type(self.input.type, "input")
+        result_type = _verify_memory_type(self.result.type, "result")
+        _verify_unary_float_op(input_type, result_type, self.space)
+
+
+@irdl_op_definition
+class NnTanhOp(IRDLOperation):
+    """nn.tanh。"""
+
+    name = "nn.tanh"
+
+    input = operand_def(NnMemoryType)
+    result = result_def(NnMemoryType)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(self, input_value: SSAValue | Operation, result_type: NnMemoryType, space: NnMemorySpaceAttr) -> None:
+        super().__init__(operands=[input_value], result_types=[result_type], attributes={"space": space})
+
+    def verify_(self) -> None:
+        input_type = _verify_memory_type(self.input.type, "input")
+        result_type = _verify_memory_type(self.result.type, "result")
+        _verify_unary_float_op(input_type, result_type, self.space)
+
+
+@irdl_op_definition
+class NnLeakyReluOp(IRDLOperation):
+    """nn.leaky_relu。"""
+
+    name = "nn.leaky_relu"
+
+    input = operand_def(NnMemoryType)
+    alpha = operand_def(Attribute)
+    result = result_def(NnMemoryType)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        input_value: SSAValue | Operation,
+        alpha: SSAValue | Operation,
+        result_type: NnMemoryType,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        super().__init__(operands=[input_value, alpha], result_types=[result_type], attributes={"space": space})
+
+    def verify_(self) -> None:
+        input_type = _verify_memory_type(self.input.type, "input")
+        result_type = _verify_memory_type(self.result.type, "result")
+        _verify_unary_float_op(input_type, result_type, self.space)
+        _verify_activation_scalar_operand(SSAValue.get(self.alpha), "alpha")
+
+
+@irdl_op_definition
+class NnHardSigmoidOp(IRDLOperation):
+    """nn.hard_sigmoid。"""
+
+    name = "nn.hard_sigmoid"
+
+    input = operand_def(NnMemoryType)
+    alpha = operand_def(Attribute)
+    beta = operand_def(Attribute)
+    result = result_def(NnMemoryType)
+    space = attr_def(NnMemorySpaceAttr)
+
+    def __init__(
+        self,
+        input_value: SSAValue | Operation,
+        alpha: SSAValue | Operation,
+        beta: SSAValue | Operation,
+        result_type: NnMemoryType,
+        space: NnMemorySpaceAttr,
+    ) -> None:
+        super().__init__(
+            operands=[input_value, alpha, beta],
+            result_types=[result_type],
+            attributes={"space": space},
+        )
+
+    def verify_(self) -> None:
+        input_type = _verify_memory_type(self.input.type, "input")
+        result_type = _verify_memory_type(self.result.type, "result")
+        _verify_unary_float_op(input_type, result_type, self.space)
+        _verify_activation_scalar_operand(SSAValue.get(self.alpha), "alpha")
+        _verify_activation_scalar_operand(SSAValue.get(self.beta), "beta")
 
 
 @irdl_op_definition
@@ -2763,6 +3022,7 @@ Nn = Dialect(
         NnMulOp,
         NnDivOp,
         NnTrueDivOp,
+        NnFloorDivOp,
         NnEqOp,
         NnNeOp,
         NnLtOp,
@@ -2773,6 +3033,11 @@ Nn = Dialect(
         NnCastOp,
         NnBroadcastOp,
         NnTransposeOp,
+        NnReluOp,
+        NnSigmoidOp,
+        NnTanhOp,
+        NnLeakyReluOp,
+        NnHardSigmoidOp,
         NnSoftmaxOp,
         NnExpOp,
         NnReduceSumOp,
@@ -2795,6 +3060,7 @@ __all__ = [
     "NnMulOp",
     "NnDivOp",
     "NnTrueDivOp",
+    "NnFloorDivOp",
     "NnEqOp",
     "NnNeOp",
     "NnLtOp",
@@ -2805,6 +3071,11 @@ __all__ = [
     "NnCastOp",
     "NnBroadcastOp",
     "NnTransposeOp",
+    "NnReluOp",
+    "NnSigmoidOp",
+    "NnTanhOp",
+    "NnLeakyReluOp",
+    "NnHardSigmoidOp",
     "NnSoftmaxOp",
     "NnExpOp",
     "NnReduceSumOp",

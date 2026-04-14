@@ -74,6 +74,7 @@ from kernel_gen.dialect.arch import (
 from kernel_gen.dialect.nn import (
     NnAddOp,
     NnBroadcastOp,
+    NnCastOp,
     NnEqOp,
     NnImg2col2dOp,
     NnMatmulOp,
@@ -98,6 +99,7 @@ from kernel_gen.dialect.symbol import (
     SymbolNeOp,
     SymbolSubOp,
     SymbolIterType,
+    SymbolToFloatOp,
     SymbolValueType,
 )
 from kernel_gen.dsl.ast import (
@@ -4330,7 +4332,7 @@ def test_tensor_truediv_dtype_promotion_lowering() -> None:
     lhs_memory = Memory([2, 2], NumericType.Float32)
     rhs_memory = Memory([2, 2], NumericType.Int32)
     func_op = build_func_op(truediv, lhs_memory, rhs_memory)
-    cast_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaCastOp)]
+    cast_ops = [op for op in func_op.body.block.ops if isinstance(op, NnCastOp)]
     div_ops = [op for op in func_op.body.block.ops if isinstance(op, NnTrueDivOp)]
     assert len(cast_ops) == 1
     assert len(div_ops) == 1
@@ -4426,7 +4428,7 @@ def test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics() -> None
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-27 04:16:44 +0800
 # 最近一次运行成功时间: 2026-03-27 04:16:44 +0800
-# 功能说明: 验证 nn.sub dtype promotion 会插入 dma.cast 并返回目标 dtype 的 nn.sub。
+# 功能说明: 验证 nn.sub dtype promotion 会插入 nn.cast 并返回目标 dtype 的 nn.sub。
 # 测试目的: 锁定 build_func_op 对 nn.sub 混合 dtype 的 cast lowering 与返回类型。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/emit_mlir.py
@@ -4444,7 +4446,7 @@ def test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast() -> None:
     expected_type = _memory_to_nn_type(lhs_memory - rhs_memory)
 
     func_op = build_func_op(sub, lhs_memory, rhs_memory)
-    cast_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaCastOp)]
+    cast_ops = [op for op in func_op.body.block.ops if isinstance(op, NnCastOp)]
     sub_ops = [op for op in func_op.body.block.ops if isinstance(op, NnSubOp)]
     return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
 
@@ -4480,7 +4482,7 @@ def test_build_func_op_lowers_nn_add_memory_const_without_dma_cast() -> None:
     assert len(cast_ops) == 0
     assert len(add_ops) == 1
     assert len(return_ops) == 1
-    assert isinstance(add_ops[0].rhs.owner, arith.SIToFPOp)
+    assert isinstance(add_ops[0].rhs.owner, SymbolToFloatOp)
     assert add_ops[0].result.type == expected_type
     assert return_ops[0].arguments[0].type == expected_type
 
@@ -4886,7 +4888,7 @@ def test_emit_mlir_lower_expr_branches() -> None:
     mixed_ctx.types[_expr_key(mixed_int_tensor)] = mixed_int_type
     mixed_const_expr = BinaryExprAST(op="add", lhs=mixed_int_tensor, rhs=ConstAST(1.5), location=None)
     mixed_const_value = _lower_expr(mixed_const_expr, mixed_ctx)
-    mixed_const_cast_ops = [op for op in mixed_block.ops if isinstance(op, DmaCastOp)]
+    mixed_const_cast_ops = [op for op in mixed_block.ops if isinstance(op, NnCastOp)]
     mixed_const_add_ops = [op for op in mixed_block.ops if isinstance(op, NnAddOp)]
     assert len(mixed_const_cast_ops) == 1
     assert len(mixed_const_add_ops) == 1
@@ -4911,7 +4913,7 @@ def test_emit_mlir_lower_expr_branches() -> None:
     mixed_symbol_ctx.types[_expr_key(mixed_symbol)] = mixed_symbol_block.args[1].type
     mixed_symbol_expr = BinaryExprAST(op="add", lhs=mixed_half_tensor, rhs=mixed_symbol, location=None)
     mixed_symbol_value = _lower_expr(mixed_symbol_expr, mixed_symbol_ctx)
-    mixed_symbol_cast_ops = [op for op in mixed_symbol_block.ops if isinstance(op, arith.SIToFPOp)]
+    mixed_symbol_cast_ops = [op for op in mixed_symbol_block.ops if isinstance(op, SymbolToFloatOp)]
     mixed_symbol_add_ops = [op for op in mixed_symbol_block.ops if isinstance(op, NnAddOp)]
     assert len(mixed_symbol_cast_ops) == 1
     assert len(mixed_symbol_add_ops) == 1

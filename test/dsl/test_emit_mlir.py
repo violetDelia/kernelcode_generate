@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import inspect
+import importlib
 from io import StringIO
 import sys
 from pathlib import Path
@@ -71,6 +72,7 @@ from kernel_gen.dialect.arch import (
 from kernel_gen.dialect.nn import (
     NnAddOp,
     NnBroadcastOp,
+    NnCastOp,
     NnEqOp,
     NnImg2col1dOp,
     NnImg2col2dOp,
@@ -83,6 +85,7 @@ from kernel_gen.dialect.nn import (
 )
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
+    SymbolConstOp,
     SymbolDivOp,
     SymbolFloorDivOp,
     SymbolForOp,
@@ -174,6 +177,9 @@ from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
+emit_mlir_module = importlib.import_module("kernel_gen.dsl.emit_mlir")
+call_nn_module = importlib.import_module("kernel_gen.dsl.mlir_gen.emit.call_nn")
+
 
 def _tensor_arg(shape: list[object]) -> Memory:
     return Memory(shape, NumericType.Float32)
@@ -218,6 +224,53 @@ def _parse_function_from_source(
     builtins_obj = globals_table.get("__builtins__", __builtins__)
     builtins_table = builtins_obj if isinstance(builtins_obj, dict) else getattr(builtins_obj, "__dict__", {})
     return _parse_function_with_env(kernel, globals_table, builtins_table, runtime_table, config=None)
+
+
+def test_emit_mlir_binary_expr_delegates_to_call_nn(monkeypatch: pytest.MonkeyPatch) -> None:
+    lhs = TensorAST(name="lhs", memory=Memory([2, 2], NumericType.Float32), location=None)
+    rhs = TensorAST(name="rhs", memory=Memory([2, 2], NumericType.Float32), location=None)
+    expr = BinaryExprAST(op="add", lhs=lhs, rhs=rhs, location=None)
+    block = Block()
+    ctx = EmitContext(builder=block, symbols={}, types={})
+    sentinel = object()
+    seen: list[object] = []
+
+    def fake_emit_nn_call(node: object, passed_ctx: EmitContext) -> object:
+        seen.append(node)
+        assert passed_ctx is ctx
+        return sentinel
+
+    monkeypatch.setattr(call_nn_module, "emit_nn_call", fake_emit_nn_call)
+
+    result = emit_mlir_module._lower_expr(expr, ctx)
+
+    assert result is sentinel
+    assert seen == [expr]
+
+
+def test_emit_mlir_binary_expr_type_inference_delegates_to_call_nn(monkeypatch: pytest.MonkeyPatch) -> None:
+    lhs = TensorAST(name="lhs", memory=Memory([2, 2], NumericType.Float32), location=None)
+    rhs = TensorAST(name="rhs", memory=Memory([2, 2], NumericType.Float32), location=None)
+    expr = BinaryExprAST(op="add", lhs=lhs, rhs=rhs, location=None)
+    sentinel = SymbolValueType.from_expr("delegated")
+    seen: list[object] = []
+
+    def fake_infer_nn_type(
+        node: object,
+        type_map: dict[str, object],
+        runtime_values: dict[str, object] | None = None,
+        config: dict[str, object] | None = None,
+    ) -> object:
+        del type_map, runtime_values, config
+        seen.append(node)
+        return sentinel
+
+    monkeypatch.setattr(call_nn_module, "infer_nn_type", fake_infer_nn_type)
+
+    result = emit_mlir_module._infer_expr_type(expr, {})
+
+    assert result is sentinel
+    assert seen == [expr]
 
 
 # EMIT-022A
@@ -672,7 +725,7 @@ def test_ast_visitor_reuses_expression_value() -> None:
 # 对应测试文件路径: test/dsl/test_emit_mlir.py
 def test_lowering_failure_reports_diagnostics() -> None:
     def bad(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
-        return x - 1
+        return x % x
 
     with pytest.raises(AstVisitorError) as exc_info:
         build_func_op(bad, _tensor_arg([2, 2]))
@@ -1101,7 +1154,7 @@ def test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast() -> None:
     expected_type = _memory_to_nn_type(lhs_memory - rhs_memory)
 
     func_op = build_func_op(sub, lhs_memory, rhs_memory)
-    cast_ops = [op for op in func_op.body.block.ops if isinstance(op, DmaCastOp)]
+    cast_ops = [op for op in func_op.body.block.ops if isinstance(op, NnCastOp)]
     sub_ops = [op for op in func_op.body.block.ops if isinstance(op, NnSubOp)]
     return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
 
@@ -1350,7 +1403,7 @@ def test_emit_mlir_index_resolution_helpers() -> None:
         _resolve_index_symbol("missing", ctx, location=None)
 
     const_value = _resolve_index_operand(ConstAST(3), ctx, location=None)
-    assert isinstance(const_value.owner, arith.ConstantOp)
+    assert isinstance(const_value.owner, SymbolConstOp)
 
     symbol_value = _resolve_index_operand(ConstAST("n"), ctx, location=None)
     assert symbol_value is block.args[1]
@@ -1534,7 +1587,7 @@ def test_emit_mlir_lower_expr_branches() -> None:
     mixed_ctx.types[_expr_key(mixed_int_tensor)] = mixed_int_type
     mixed_const_expr = BinaryExprAST(op="add", lhs=mixed_int_tensor, rhs=ConstAST(1.5), location=None)
     mixed_const_value = _lower_expr(mixed_const_expr, mixed_ctx)
-    mixed_const_cast_ops = [op for op in mixed_block.ops if isinstance(op, DmaCastOp)]
+    mixed_const_cast_ops = [op for op in mixed_block.ops if isinstance(op, NnCastOp)]
     mixed_const_add_ops = [op for op in mixed_block.ops if isinstance(op, NnAddOp)]
     assert len(mixed_const_cast_ops) == 1
     assert len(mixed_const_add_ops) == 1
@@ -1559,7 +1612,7 @@ def test_emit_mlir_lower_expr_branches() -> None:
     mixed_symbol_ctx.types[_expr_key(mixed_symbol)] = mixed_symbol_block.args[1].type
     mixed_symbol_expr = BinaryExprAST(op="add", lhs=mixed_half_tensor, rhs=mixed_symbol, location=None)
     mixed_symbol_value = _lower_expr(mixed_symbol_expr, mixed_symbol_ctx)
-    mixed_symbol_cast_ops = [op for op in mixed_symbol_block.ops if isinstance(op, arith.SIToFPOp)]
+    mixed_symbol_cast_ops = [op for op in mixed_symbol_block.ops if isinstance(op, SymbolToFloatOp)]
     mixed_symbol_add_ops = [op for op in mixed_symbol_block.ops if isinstance(op, NnAddOp)]
     assert len(mixed_symbol_cast_ops) == 1
     assert len(mixed_symbol_add_ops) == 1
@@ -1700,7 +1753,7 @@ def test_emit_mlir_index_operand_variants_and_loop_bound() -> None:
         _resolve_index_operand(ConstAST(1.5), ctx, location=None)
 
     const_value = _resolve_index_operand(2, ctx, location=None)
-    assert isinstance(const_value.owner, arith.ConstantOp)
+    assert isinstance(const_value.owner, SymbolConstOp)
 
     symbol_value = _resolve_index_operand("n", ctx, location=None)
     assert symbol_value is block.args[0]
@@ -1730,7 +1783,7 @@ def test_emit_mlir_layout_and_stride_helpers() -> None:
     layout = ArrayAttr([IntAttr(0), StringAttr("n")])
     operands = _build_index_operands_from_layout(layout, ctx, location=None)
     assert len(operands) == 2
-    assert isinstance(operands[0].owner, arith.ConstantOp)
+    assert isinstance(operands[0].owner, SymbolConstOp)
     assert operands[1] is block.args[0]
 
     with pytest.raises(_LoweringError, match="Only unit stride is supported"):

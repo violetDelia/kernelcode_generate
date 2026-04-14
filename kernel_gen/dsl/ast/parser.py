@@ -131,6 +131,17 @@ _ALLOWED_IMPORT_BOUND_HELPERS: dict[str, tuple[types.ModuleType, frozenset[str]]
         _KG_OPERATION_NN,
         frozenset(
             {
+                "add",
+                "sub",
+                "mul",
+                "truediv",
+                "floordiv",
+                "eq",
+                "ne",
+                "lt",
+                "le",
+                "gt",
+                "ge",
                 "conv",
                 "img2col1d",
                 "img2col2d",
@@ -1080,9 +1091,6 @@ def _parse_nn_arithmetic_call(
     - 功能实现: kernel_gen/dsl/ast_parser.py
     """
 
-    if not isinstance(expr.func, py_ast.Attribute):
-        return None
-    base_object = _resolve_call_base_object(expr.func.value, globals_table, builtins_table)
     symbol_binary_map = {
         "add": "add",
         "sub": "sub",
@@ -1090,14 +1098,62 @@ def _parse_nn_arithmetic_call(
         "truediv": "div",
         "floordiv": "floordiv",
     }
-    if getattr(base_object, "__name__", None) != "kernel_gen.operation.nn" or expr.func.attr not in symbol_binary_map:
+    call_name = _resolve_import_bound_helper_call(expr.func, globals_table, builtins_table)
+    if call_name not in symbol_binary_map:
         return None
     if len(expr.args) != 2 or expr.keywords:
         _raise_parse_error("Unsupported nn arithmetic arity", expr)
     lhs = _parse_expr(expr.args[0], env, globals_table, builtins_table)
     rhs = _parse_expr(expr.args[1], env, globals_table, builtins_table)
     return BinaryExprAST(
-        op=symbol_binary_map[expr.func.attr],
+        op=symbol_binary_map[call_name],
+        lhs=lhs,
+        rhs=rhs,
+        location=_location_from_node(expr),
+    )
+
+
+def _parse_nn_compare_call(
+    expr: py_ast.Call,
+    env: dict[str, object],
+    globals_table: dict[str, object],
+    builtins_table: dict[str, object],
+) -> CompareExprAST | None:
+    """解析 `nn.*` 形式的二元比较 helper。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - 将 `nn.eq/ne/lt/le/gt/ge` 统一映射为 `CompareExprAST`。
+    - 同时支持 `nn.eq(lhs, rhs)` 与 `from kernel_gen.operation.nn import eq` 后的直接调用。
+
+    使用示例:
+    - _parse_nn_compare_call(expr, env, globals(), __builtins__)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/ast/test_parser.py
+    - 功能实现: kernel_gen/dsl/ast_parser.py
+    """
+
+    compare_map = {
+        "eq": "eq",
+        "ne": "ne",
+        "lt": "lt",
+        "le": "le",
+        "gt": "gt",
+        "ge": "ge",
+    }
+    call_name = _resolve_import_bound_helper_call(expr.func, globals_table, builtins_table)
+    if call_name not in compare_map:
+        return None
+    if len(expr.args) != 2 or expr.keywords:
+        _raise_parse_error("Unsupported nn compare arity", expr)
+    lhs = _parse_expr(expr.args[0], env, globals_table, builtins_table)
+    rhs = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+    return CompareExprAST(
+        op=compare_map[call_name],
         lhs=lhs,
         rhs=rhs,
         location=_location_from_node(expr),
@@ -1438,10 +1494,12 @@ def _parse_dma_call(
     - 功能实现: kernel_gen/dsl/ast_parser.py
     """
 
-    if isinstance(expr.func, py_ast.Attribute):
-        nn_expr = _parse_nn_arithmetic_call(expr, env, globals_table, builtins_table)
-        if nn_expr is not None:
-            return nn_expr
+    nn_expr = _parse_nn_arithmetic_call(expr, env, globals_table, builtins_table)
+    if nn_expr is not None:
+        return nn_expr
+    nn_compare_expr = _parse_nn_compare_call(expr, env, globals_table, builtins_table)
+    if nn_compare_expr is not None:
+        return nn_compare_expr
     call_name = _resolve_import_bound_helper_call(expr.func, globals_table, builtins_table)
     if call_name is None:
         return None
