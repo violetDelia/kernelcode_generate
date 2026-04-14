@@ -739,34 +739,6 @@ def _const_i32(value: int, ctx: EmitContext, location: SourceLocation | None) ->
     return op.result
 
 
-def _symbol_expr_from_scalar_operand(expr: object, operand_type: object) -> str | None:
-    """提取可参与 symbol 二元算术的公开表达式字符串。
-
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 对 `!symbol.int<"...">` 直接返回其公开表达式。
-    - 对整数字面量 `ConstAST` 返回对应十进制文本，供 `symbol.const`/`symbol.add` 路径复用。
-    - 其余类型返回 `None`，保持 nn.memory 与普通 `i32` 标量路径不变。
-
-    使用示例:
-    - _symbol_expr_from_scalar_operand(ConstAST(4), i32)
-    - _symbol_expr_from_scalar_operand(lhs_ast, SymbolValueType.from_expr("M"))
-
-    关联文件:
-    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
-    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
-    """
-
-    if isinstance(operand_type, SymbolValueType):
-        return operand_type.expr.expr.data
-    if isinstance(expr, ConstAST) and isinstance(expr.value, int):
-        return str(expr.value)
-    return None
-
-
 def _build_arch_barrier_visibility_attr(
     visibility: object,
     location: SourceLocation | None,
@@ -882,7 +854,6 @@ def _ensure_index_value(value: SSAValue, ctx: EmitContext, location: SourceLocat
 
     功能说明:
     - `!symbol.int` 与 `index` 直接复用。
-    - `!symbol.iter` 作为 `symbol.for` 的迭代变量时也直接复用。
     - `i32` 等整数值通过 `arith.index_cast` 转成 `index`。
 
     使用示例:
@@ -893,9 +864,7 @@ def _ensure_index_value(value: SSAValue, ctx: EmitContext, location: SourceLocat
     - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
     - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
     """
-    if isinstance(value.type, SymbolValueType):
-        return value
-    if isinstance(value.type, SymbolIterType):
+    if isinstance(value.type, (SymbolValueType, SymbolIterType)):
         return value
     if isinstance(value.type, IndexType):
         return value
@@ -3222,11 +3191,11 @@ def _infer_expr_type(
     if isinstance(expr, BinaryExprAST):
         lhs_type = _infer_expr_type(expr.lhs, type_map, runtime_values=runtime_values)
         rhs_type = _infer_expr_type(expr.rhs, type_map, runtime_values=runtime_values)
-        lhs_symbol_expr = _symbol_expr_from_scalar_operand(expr.lhs, lhs_type)
-        rhs_symbol_expr = _symbol_expr_from_scalar_operand(expr.rhs, rhs_type)
-        if lhs_symbol_expr is not None and rhs_symbol_expr is not None:
+        if isinstance(lhs_type, SymbolValueType) and isinstance(rhs_type, SymbolValueType):
             if expr.op not in {"add", "sub", "mul", "div", "floordiv"}:
                 raise _LoweringError("Unsupported symbol binary op", location=expr.location)
+            lhs_expr = lhs_type.expr.expr.data
+            rhs_expr = rhs_type.expr.expr.data
             op_symbol = {
                 "add": "+",
                 "sub": "-",
@@ -3234,7 +3203,7 @@ def _infer_expr_type(
                 "div": "/",
                 "floordiv": "//",
             }[expr.op]
-            result_type = SymbolValueType.from_expr(build_public_symbol_expr(lhs_symbol_expr, rhs_symbol_expr, op_symbol))
+            result_type = SymbolValueType.from_expr(build_public_symbol_expr(lhs_expr, rhs_expr, op_symbol))
             type_map[expr_key] = result_type
             return result_type
         lhs_is_memory = isinstance(lhs_type, NnMemoryType)
@@ -3404,46 +3373,6 @@ def _lower_mixed_add_expr(
     ctx.builder.add_op(op)
     ctx._set_cache(_expr_key(expr), op.result)
     return op.result
-
-
-def _lower_symbol_scalar_operand(expr: object, ctx: EmitContext) -> SSAValue:
-    """将 symbol 二元算术的 operand 下沉为 `!symbol.int` SSA value。
-
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 对整数字面量直接生成 `symbol.const`，避免退回 `arith.constant i32`。
-    - 对嵌套 symbol 表达式复用既有 lowering。
-    - 若 operand 最终不是 `!symbol.int<"...">`，保持统一的 symbol 诊断。
-
-    使用示例:
-    - _lower_symbol_scalar_operand(ConstAST(5), ctx)
-    - _lower_symbol_scalar_operand(BinaryExprAST(op="add", lhs=lhs, rhs=rhs), ctx)
-
-    关联文件:
-    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
-    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
-    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
-    """
-
-    if isinstance(expr, ConstAST):
-        if not isinstance(expr.value, int):
-            raise _LoweringError("Symbol binary op only supports int constants", location=expr.location)
-        expr_key = _expr_key(expr)
-        if ctx._has_cache(expr_key):
-            cached_value = SSAValue.get(ctx._get_cache(expr_key))
-            if isinstance(getattr(cached_value, "type", None), SymbolValueType):
-                return cached_value
-        value = _const_symbol_int(expr.value, ctx, expr.location)
-        ctx._set_cache(expr_key, value)
-        ctx.types[expr_key] = value.type
-        return value
-
-    value = SSAValue.get(_lower_expr(expr, ctx))
-    if not isinstance(getattr(value, "type", None), SymbolValueType):
-        raise _LoweringError('Symbol binary op operands must have type !symbol.int<"expr">', location=getattr(expr, "location", None))
-    return value
 
 
 def _lower_expr(expr: object, ctx: EmitContext) -> object:
@@ -3991,12 +3920,16 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         return call_op.results[0]
 
     if isinstance(expr, BinaryExprAST):
-        result_type = _infer_expr_type(expr, ctx.types)
-        if isinstance(result_type, SymbolValueType):
-            lhs = _lower_symbol_scalar_operand(expr.lhs, ctx)
-            rhs = _lower_symbol_scalar_operand(expr.rhs, ctx)
+        lhs = _lower_expr(expr.lhs, ctx)
+        rhs = _lower_expr(expr.rhs, ctx)
+        lhs_attr = getattr(lhs, "type", None)
+        rhs_attr = getattr(rhs, "type", None)
+        if isinstance(lhs_attr, SymbolValueType) and isinstance(rhs_attr, SymbolValueType):
             if expr.op not in {"add", "sub", "mul", "div", "floordiv"}:
                 raise _LoweringError("Unsupported symbol binary op", location=expr.location)
+            result_type = _infer_expr_type(expr, ctx.types)
+            if not isinstance(result_type, SymbolValueType):
+                raise _LoweringError("Symbol binary op result must be !symbol.int", location=expr.location)
             op_map = {
                 "add": SymbolAddOp,
                 "sub": SymbolSubOp,
@@ -4008,14 +3941,13 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
             ctx.builder.add_op(op)
             ctx._set_cache(expr_key, op.result)
             return op.result
-        lhs = _lower_expr(expr.lhs, ctx)
-        rhs = _lower_expr(expr.rhs, ctx)
         if expr.op == "add":
             mixed_add_result = _lower_mixed_add_expr(expr, lhs, rhs, ctx)
             if mixed_add_result is not None:
                 return mixed_add_result
         lhs_type = _expect_memory_value(lhs, expr.location)
         rhs_type = _expect_memory_value(rhs, expr.location)
+        result_type = _infer_expr_type(expr, ctx.types)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("Binary op result must be nn.memory", location=expr.location)
         target_type = result_type

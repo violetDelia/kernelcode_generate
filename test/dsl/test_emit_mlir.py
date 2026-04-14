@@ -95,8 +95,8 @@ from kernel_gen.dialect.symbol import (
     SymbolMulOp,
     SymbolNeOp,
     SymbolSubOp,
-    SymbolIterType,
     SymbolToFloatOp,
+    SymbolIterType,
     SymbolValueType,
 )
 from kernel_gen.dsl.ast import (
@@ -835,8 +835,8 @@ def test_for_ast_lowering_emits_loads() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-26 21:43:31 +0800
 # 最近一次运行成功时间: 2026-03-26 21:43:31 +0800
-# 功能说明: 验证符号边界 ForAST lowering 为 symbol.for 并直接复用 symbol.iter 作为 DMA operand。
-# 测试目的: 验证符号边界 ForAST lowering 为 symbol.for 并直接复用 symbol.iter 作为 DMA operand。
+# 功能说明: 验证符号边界 ForAST lowering 为 symbol.for 并直接复用 symbol.int 作为 DMA operand。
+# 测试目的: 验证符号边界 ForAST lowering 为 symbol.for 并直接复用 symbol.int 作为 DMA operand。
 # 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_symbolic_for_loop_avoids_index_cast
 # 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
@@ -2147,7 +2147,7 @@ def test_emit_mlir_img2col2d_with_loop_slice_deslice_lowering() -> None:
     loop_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolForOp)]
     assert len(loop_ops) == 1
     loop_body = loop_ops[0].body.block
-    assert isinstance(loop_body.args[0].type, SymbolValueType)
+    assert isinstance(loop_body.args[0].type, SymbolIterType)
     loop_body_ops = list(loop_body.ops)
     assert not any(isinstance(op, arith.IndexCastOp) for op in loop_body_ops)
     slice_ops = [op for op in loop_body_ops if isinstance(op, DmaSliceOp)]

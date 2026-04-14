@@ -97,6 +97,7 @@ from kernel_gen.dialect.symbol import (
     SymbolMulOp,
     SymbolNeOp,
     SymbolSubOp,
+    SymbolIterType,
     SymbolValueType,
 )
 from kernel_gen.dsl.ast import (
@@ -3317,7 +3318,7 @@ def test_emit_mlir_symbolic_for_loop_avoids_index_cast() -> None:
     func_op = build_func_op_from_ast(func_ast)
     loop_ops = [op for op in func_op.body.block.ops if isinstance(op, SymbolForOp)]
     assert len(loop_ops) == 1
-    assert isinstance(loop_ops[0].body.block.args[0].type, SymbolValueType)
+    assert isinstance(loop_ops[0].body.block.args[0].type, SymbolIterType)
     loop_body_ops = list(loop_ops[0].body.block.ops)
     assert not any(isinstance(op, arith.IndexCastOp) for op in loop_body_ops)
     load_ops = [op for op in loop_body_ops if isinstance(op, DmaLoadOp)]
@@ -4043,7 +4044,7 @@ def test_build_func_op_supports_symbolic_for_loop_dma_without_return(monkeypatch
     assert not any(isinstance(op, arith.IndexCastOp) for op in loop_body_ops)
     assert alloc_ops[0].result.type.space.space.data == "local"
     loop_body = loop_ops[0].body.block
-    assert isinstance(loop_body.args[0].type, SymbolValueType)
+    assert isinstance(loop_body.args[0].type, SymbolIterType)
     offsets = list(slice_ops[0].offsets)
     sizes = list(slice_ops[0].sizes)
     assert offsets[0] is loop_body.args[0]

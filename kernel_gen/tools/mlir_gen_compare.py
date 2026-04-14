@@ -25,56 +25,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from io import StringIO
 from pathlib import Path
-import re
 
 from xdsl.context import Context
 from xdsl.dialects.builtin import ModuleOp
 from xdsl.parser import Parser
 from xdsl.printer import Printer
-
-_LEGACY_SYMBOL_FOR_HEADER_RE = re.compile(
-    r'(?P<prefix>symbol\.for\s+(?P<iter>%[\w.$-]+)\s*=\s*(?P<start>%[\w.$-]+)\s+to\s+(?P<end>%[\w.$-]+)\s+step\s+(?P<step>%[\w.$-]+))\s*:\s*!symbol\.int<"(?P<start_expr>[^"]+)">,\s*!symbol\.int<"(?P<end_expr>[^"]+)">,\s*!symbol\.int<"(?P<step_expr>[^"]+)">\s*\{'
-)
-
-
-def _rewrite_legacy_symbol_for_expected_text(expected_text: str) -> str:
-    """兼容旧版 `symbol.for` expectation 文本。
-
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 兼容旧 expectation 中 `symbol.for %i = ... : !symbol.int<...> {` 的短写法。
-    - 自动补出当前 dialect 需要的 `iter = #symbol.iter<...>` attribute。
-    - 对同一份 expectation 中遗留的 `!symbol.int<"index">` DMA offset 类型，一并改写为对应的 `!symbol.iter<...>`。
-
-    使用示例:
-    - text = _rewrite_legacy_symbol_for_expected_text(legacy_text)
-
-    关联文件:
-    - spec: [spec/tools/mlir_gen_compare.md](spec/tools/mlir_gen_compare.md)
-    - test: [test/tools/test_mlir_gen_compare.py](test/tools/test_mlir_gen_compare.py)
-    - 功能实现: [kernel_gen/tools/mlir_gen_compare.py](kernel_gen/tools/mlir_gen_compare.py)
-    """
-
-    iter_types: list[str] = []
-
-    def _replace_header(match: re.Match[str]) -> str:
-        iter_type = (
-            f'!symbol.iter<start = "{match.group("start_expr")}", '
-            f'end = "{match.group("end_expr")}", step = "{match.group("step_expr")}">'
-        )
-        iter_types.append(iter_type)
-        return (
-            f'{match.group("prefix")} '
-            f'{{iter = #symbol.iter<start = "{match.group("start_expr")}", '
-            f'end = "{match.group("end_expr")}", step = "{match.group("step_expr")}">}} {{'
-        )
-
-    rewritten = _LEGACY_SYMBOL_FOR_HEADER_RE.sub(_replace_header, expected_text)
-    if iter_types and len(set(iter_types)) == 1:
-        rewritten = rewritten.replace('!symbol.int<"index">', iter_types[0])
-    return rewritten
 
 
 def _build_default_context() -> Context:
@@ -194,7 +149,6 @@ def _mlir_gen_compare_expected_text(
         return False
 
     ctx = _build_default_context()
-    expected_text = _rewrite_legacy_symbol_for_expected_text(expected_text)
     try:
         expected_module = Parser(ctx, expected_text).parse_module()
     except Exception:

@@ -72,8 +72,8 @@
 - 不做优化、常量折叠或后端特化。
 - 不生成 MLIR 文本；文本输出由上游调用方负责。
 - 发射阶段仅消费 AST 与上下文，不向 AST 注入 `target`/`hardware` 字段；相关信息只能通过 `EmitContext` 或外部上下文传入。
-- 当 `ForAST` 来自 `LoopRange(start, end, step)` 且边界与循环变量保持 symbol 整数语义时，必须 lowering 为 `symbol.for`，不得回退为 `scf.for`；其循环块参数 `it` 必须为 `!symbol.int<"expr">`。
-- 在上述 `LoopRange` 场景中，循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand 必须直接复用 `!symbol.int<"expr">` value，不得插入 `arith.index_cast`；若循环变量 `it` 退化为 `index`、普通整数或浮点类型，应视为 lowering 违规。
+- 当 `ForAST` 来自 `LoopRange(start, end, step)` 且边界与循环变量保持 symbol 整数语义时，必须 lowering 为 `symbol.for`，不得回退为 `scf.for`；其循环块参数 `it` 必须为 `!symbol.iter<...>`。
+- 在上述 `LoopRange` 场景中，循环变量以及传入 `dma.slice` / `dma.deslice` 的 `offsets`、`sizes`、`strides` 等 DMA 标量 operand 必须直接复用 symbol 语义 value，不得插入 `arith.index_cast`；其中 `start/end/step` 保持 `!symbol.int<"expr">`，循环变量 `it` 可直接以 `!symbol.iter<...>` 参与 DMA operand；若 `it` 退化为 `index`、普通整数、浮点类型或其他非 symbol 迭代类型，应视为 lowering 违规。
 - 当 DSL AST 表达 `alloc`、`copy`、`cast`、`view`、`reshape`、`flatten`、`load`、`store`、`slice`、`deslice` 这组 DMA helper 调用时，`emit_mlir` 必须按对应 memory 语义 lowering；其中 `flatten` 公开上视为一维 `reshape` 语义，不要求生成独立 dialect op。
 - 当 DSL AST 表达 `img2col1d(...)` 或 `img2col2d(...)` helper 调用时，`emit_mlir` 必须直接 lowering 为 `nn.img2col1d` 或 `nn.img2col2d`；不得在 emit 层引入 `kernel_dialect`、`nn_lowering` 或 `cpu::img2col2d` 相关语义。
 - 当 DSL AST 表达 `matmul(lhs, rhs, memoryspace=...)` helper 调用时，`emit_mlir` 必须直接 lowering 为 `nn.matmul`；若左右操作数 `element_type` 不一致必须报错 `matmul element_type must match`，不得插入 `dma.cast`。
@@ -162,7 +162,7 @@ value = emit_mlir(expr_ast, ctx)
 
 - `emit_mlir` 必须覆盖 AST 中每一种节点类型。
 - 默认使用当前项目的目标 dialect（例如 `nn`），但节点到 op 的映射必须清晰可追踪。
-- `LoopRange` 触发的 `ForAST` 必须走 `symbol.for` 分支，并保持 symbol 整数值直接作为 DMA operand 传递。
+- `LoopRange` 触发的 `ForAST` 必须走 `symbol.for` 分支，并保持 `SymbolValueType` / `SymbolIterType` 直接作为 DMA operand 传递。
 - 当 `CompareExprAST` 的两侧均为 `!symbol.int<"expr">` 时，symbol compare family 必须一一 lowering 为对应 `symbol` dialect op，且结果类型统一为 `i1`：
   - `a == b` -> `symbol.eq`
   - `a != b` -> `symbol.ne`
@@ -234,7 +234,7 @@ value = emit_mlir(expr_ast, ctx)
 - `CallAST(img2col1d/img2col2d)`：分别生成 `nn.img2col1d/nn.img2col2d` memory 结果。
 - `CallAST(matmul)`：生成 `nn.matmul` memory 结果；`element_type` 不一致必须报错，不得插入 `dma.cast`。
 - `CallAST(conv)`：生成 raw `nn.img2col2d + dma.reshape + nn.matmul + dma.reshape` memory 结果。
-- `ForAST`：当来源于 `LoopRange(start, end, step)` 且边界为 symbol 整数时，生成 `symbol.for`；循环体内若包含 `dma.slice` / `dma.deslice`，其 DMA 标量 operand 直接使用 `!symbol.int<"expr">` value，不生成 `arith.index_cast`。
+- `ForAST`：当来源于 `LoopRange(start, end, step)` 且边界为 symbol 整数时，生成 `symbol.for`；`start/end/step` 保持 `!symbol.int<"expr">`，循环块参数 `it` 保持 `!symbol.iter<...>`；循环体内若包含 `dma.slice` / `dma.deslice`，其 DMA 标量 operand 直接复用这些 symbol value，不生成 `arith.index_cast`。
 - `TensorAxisAccessAST(kind="shape")`：生成 `symbol.get_dim`，返回 `!symbol.int<"...">`。
 - `TensorAxisAccessAST(kind="stride")`：生成 `symbol.get_stride`，返回 `!symbol.int<"...">`。
 - `ArchQueryAST(query_name="get_block_id")`：生成 `arch.get_block_id`，返回 `!symbol.int<"block_id">`。
@@ -261,7 +261,7 @@ value = emit_mlir(expr_ast, ctx)
   - 覆盖常见表达式与语句节点的发射结果。
   - 覆盖 `lhs != rhs` 到 `CompareExprAST(op="ne")` 的 memory lowering：`nn.ne` 结果为 `i1`，并支持 implicit broadcast。
   - 覆盖 `CompareExprAST(op="ne")` memory 路径在不可 broadcast 与 element type 不一致时的错误分支与诊断文案。
-  - 覆盖 `LoopRange` -> `symbol.for` 与 `it`/DMA operand 直接保持 `symbol.int` 的发射规则。
+  - 覆盖 `LoopRange` -> `symbol.for` 与 `it`/DMA operand 直接保持 `symbol.iter` / `symbol.int` 的发射规则。
   - 覆盖 `img2col1d/img2col2d` helper 的 emit 节点级规则：分别 lowering 为 `nn.img2col1d/nn.img2col2d`，且不引入 kernel dialect / `nn_lowering` / `cpu::img2col2d` 语义。
   - 覆盖 `img2col2d` 与 `loop + dma.slice/dma.deslice` 的协同 emit 规则，确保窗口读取/回写与循环节点映射保持一致。
   - 覆盖 `matmul(...)` helper 的 emit 节点级规则：lowering 为 `nn.matmul`，`element_type` 不一致必须报错。
@@ -293,7 +293,7 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-007：非 unit stride 抛出可定位错误。（`test_load_ast_lowering_raises_lowering_error`）
   - EMIT-008：索引 rank mismatch 抛出可定位错误。（`test_load_ast_index_rank_mismatch_reports_location`）
   - EMIT-009：`StoreAST` 输入非 memory 抛出错误。（`test_store_ast_lowering_raises_lowering_error`）
-  - EMIT-010：`ForAST` 在 `LoopRange` 场景下 lowering 为 `symbol.for`，循环块参数 `it` 与循环体内相关 DMA operand 直接复用 `!symbol.int<"...">`，不生成 `arith.index_cast`。（`test_emit_mlir_symbolic_for_loop_avoids_index_cast`）
+  - EMIT-010：`ForAST` 在 `LoopRange` 场景下 lowering 为 `symbol.for`，其中 `start/end/step` 保持 `!symbol.int<"...">`、循环块参数 `it` 保持 `!symbol.iter<...>`，循环体内相关 DMA operand 直接复用这些 symbol value，不生成 `arith.index_cast`。（`test_emit_mlir_symbolic_for_loop_avoids_index_cast`）
   - EMIT-011：循环变量表初始化与非法配置报错路径。（`test_emit_mlir_loop_vars_validation`）
   - EMIT-011B：`EmitContext` 校验 `config.target` 命名约束的错误路径。（`test_emit_context_rejects_invalid_target_name`）
   - EMIT-011C：`EmitContext` 校验 `config.hardware` 字段约束的错误路径。（`test_emit_context_rejects_invalid_hardware_field`）
