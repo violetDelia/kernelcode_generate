@@ -11,7 +11,7 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`金铲铲大作战`
+- 最后一次更改：`咯咯咯`（2026-04-15）
 - `spec`：[`spec/dsl/gen_kernel.md`](../../spec/dsl/gen_kernel.md)
 - `功能实现`：[`kernel_gen/dsl/gen_kernel.py`](../../kernel_gen/dsl/gen_kernel.py)
 - `test`：[`test/dsl/test_gen_kernel.py`](../../test/dsl/test_gen_kernel.py)
@@ -348,6 +348,28 @@ void conv2d_img2col2d_tiled(
 - 局部 buffer 必须至少包含 tile-local `col_buffer` 与 tile-local `acc_buffer`；它们服务于当前 tile 的中间展开与输出累积，不能省略成“临时变量若干”。
 - `out` 写回必须是函数级硬约束，生成源码中必须可机械判断存在最终写回 `out` 的语句或显式循环；不能只生成 `acc_buffer` 或局部 `Memory` 而没有写回。
 - `cpu::img2col2d(...)` 的节点级调用由 [`spec/dsl/emit_c.md`](../../spec/dsl/emit_c.md) 负责，但本层必须把它安放在上述固定循环骨架中，不得改走 `kernel dialect`、`launch(...)`、`arch.launch_kernel(...)` 或其他旁路结构。
+
+## `execute_engine + npu_demo + matmul` 源码合同（S1）
+
+功能说明：
+
+- 本节定义 `CASE-3` 的函数级输出要求：当输入链路已命中 `kernel.matmul` 时，`gen_kernel(target="npu_demo")` 生成源码必须可直接交给 `ExecutionEngine` 继续编译执行。
+
+使用示例：
+
+```cpp
+#include "include/npu_demo/npu_demo.h"
+...
+npu_demo::matmul(lhs_tile, rhs_tile, out_tile);
+```
+
+注意事项：
+
+- 本节只约束源码结构与关键调用，不扩展新的 target、运行时参数或调度接口。
+- 命中 matmul 路径时不得回退到 `cpu::matmul(...)`，也不得只输出占位注释。
+- `target="npu_demo"` 的 include 入口保持 `include/npu_demo/npu_demo.h`。
+- 关联合同资产：[`expectation/execute_engine/npu_demo/matmul.py`](../../expectation/execute_engine/npu_demo/matmul.py) 的 `CASE-3`。
+- 与 `CASE-2` 衔接：输入 IR 应已收口为 `kernel.matmul` 且不残留 `nn.matmul`。
 
 ## 测试
 

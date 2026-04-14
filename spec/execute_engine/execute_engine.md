@@ -17,7 +17,7 @@
 ## 文档信息
 
 - 创建者：睡觉小分队
-- 最后一次更改：睡觉小分队（2026-04-06）
+- 最后一次更改：咯咯咯（2026-04-15）
 - spec：[`spec/execute_engine/execute_engine.md`](spec/execute_engine/execute_engine.md)
 - 功能实现：[`kernel_gen/execute_engine/execution_engine.py`](kernel_gen/execute_engine/execution_engine.py)
 - test：[`test/execute_engine/test_execute_engine_contract.py`](test/execute_engine/test_execute_engine_contract.py)
@@ -126,6 +126,29 @@ if not result.ok:
         "symbol_resolve_failed",
     }
 ```
+
+## `execute_engine + npu_demo + matmul`（S1）合同说明
+
+- 适用范围：[`expectation/execute_engine/npu_demo/matmul.py`](expectation/execute_engine/npu_demo/matmul.py) 中固定 shape smoke（`M=32,K=16,N=32,tile=16`）。
+- 本阶段定义合同文本与验收映射，不在本文件扩展新的运行时能力。
+- `CASE-1`（raw IR）：前端 tile memory 语义必须体现 `MemorySpace.TSM -> #nn.space<tsm>`。
+- `CASE-2`（lowering IR）：tiled loop 内应出现 `kernel.matmul`，且不应残留 `nn.matmul`。
+- `CASE-3`（source + execute）：源码应命中 `npu_demo::matmul(`，并通过 `compile -> execute` 返回 `ok=True,status_code=0,failure_phrase=None`。
+
+使用示例：
+
+```python
+engine = ExecutionEngine(target="npu_demo")
+kernel = engine.compile(source=generated_source, function="npu_demo::matmul")
+result = kernel.execute(args=(out, lhs, rhs))
+assert result.ok and result.failure_phrase is None
+```
+
+验收映射：
+
+- 合同资产：[`expectation/execute_engine/npu_demo/matmul.py`](expectation/execute_engine/npu_demo/matmul.py)
+- 关联 spec：[`spec/dsl/emit_c.md`](spec/dsl/emit_c.md)、[`spec/dsl/gen_kernel.md`](spec/dsl/gen_kernel.md)
+- 关联测试：[`test/execute_engine/test_execute_engine_compile.py`](test/execute_engine/test_execute_engine_compile.py)、[`test/execute_engine/test_execute_engine_invoke.py`](test/execute_engine/test_execute_engine_invoke.py)
 
 ## 测试
 

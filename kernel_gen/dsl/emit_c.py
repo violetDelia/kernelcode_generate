@@ -28,9 +28,9 @@ from xdsl.ir import BlockArgument, Operation, SSAValue
 
 from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFillOp, DmaLoadOp, DmaSliceOp, DmaStoreOp, DmaViewOp
-from kernel_gen.dialect.kernel import KernelAddOp
+from kernel_gen.dialect.kernel import KernelAddOp, KernelBinaryElewiseOp, KernelMatmulOp
 from kernel_gen.dialect.nn import NnAddOp, NnImg2col2dOp, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolForOp, SymbolGetDimOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolConstOp, SymbolForOp, SymbolGetDimOp, SymbolValueType
 
 
 class EmitCError(ValueError):
@@ -447,7 +447,7 @@ def _emit_memory_decl(
 
     功能说明:
     - 生成 `shape/stride` 的 `long long[]` 声明。
-    - 生成 `Memory<Space, T> name(data, rank, shape, stride, format);` 声明。
+    - 生成 `Memory<Space, T> name(data, shape, stride, rank, format);` 声明。
     - 当 `with_backing_storage=True` 时，为静态 shape 生成 `name_buffer[numel]` 作为 backing，并把 `data` 指向该 buffer。
 
     使用示例:
@@ -480,7 +480,7 @@ def _emit_memory_decl(
         *storage_lines,
         (
             f"{ctx.current_indent}Memory<{space_expr}, {element_type}> {name}"
-            f"({data_expr}, {len(shape_values)}, {name}_shape, {name}_stride, "
+            f"({data_expr}, {name}_shape, {name}_stride, {len(shape_values)}, "
             f"{format_expr});"
         ),
     ]
@@ -877,6 +877,39 @@ def _emit_kernel_add_stmt(op: KernelAddOp, ctx: EmitCContext) -> str:
     return f"{ctx.current_indent}cpu::add({lhs_expr}, {rhs_expr}, {out_expr});"
 
 
+def _emit_kernel_binary_elewise_stmt(op: KernelBinaryElewiseOp, ctx: EmitCContext) -> str:
+    """生成 `kernel.binary_elewise(kind=add)` 的目标后端 helper 调用。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 在 `target=cpu` 下把 `kernel.binary_elewise(kind="add")` 收口为 `cpu::add(lhs, rhs, out);`。
+    - 在 `target=npu_demo` 下把 `kernel.binary_elewise(kind="add")` 收口为 `npu_demo::add(lhs, rhs, out);`。
+    - 其他 `kind` 继续报错，避免在本任务顺手扩展 compare/sub 等未点名能力。
+
+    使用示例:
+    - stmt = emit_c_op(binary_op, EmitCContext(target="cpu"))
+
+    关联文件:
+    - spec: spec/dsl/emit_c.md
+    - test: test/dsl/test_emit_c.py
+    - 功能实现: kernel_gen/dsl/emit_c.py
+    """
+
+    kind = op.kind.data
+    if kind != "add":
+        raise _emit_error(ctx, op.name, f"unsupported kind={kind}")
+    lhs_expr = _memory_base_name(op.lhs, ctx)
+    rhs_expr = _memory_base_name(op.rhs, ctx)
+    out_expr = _memory_base_name(op.out, ctx)
+    if ctx.target == "cpu":
+        return f"{ctx.current_indent}cpu::add({lhs_expr}, {rhs_expr}, {out_expr});"
+    if ctx.target == "npu_demo":
+        return f"{ctx.current_indent}npu_demo::add({lhs_expr}, {rhs_expr}, {out_expr});"
+    raise _emit_error(ctx, op.name, "unsupported target")
+
+
 def _emit_npu_kernel_add_stmt(op: KernelAddOp, ctx: EmitCContext) -> str:
     """生成 `target=npu_demo` 下 `kernel.add` 的 `npu_demo::add(...)` 调用片段。
 
@@ -1011,16 +1044,26 @@ def _emit_npu_slice_stmt(op: DmaSliceOp, ctx: EmitCContext) -> str:
     - 功能实现: kernel_gen/dsl/emit_c.py
     """
 
-    if len(op.offsets) != 1 or len(op.sizes) != 1 or len(op.strides) != 1:
-        raise _emit_error(ctx, op.name, "npu_demo slice requires 1-D offset/size/stride")
     target_expr = _memory_base_name(op.target, ctx)
     source_expr = _memory_base_name(op.source, ctx)
-    offset_expr = emit_c_value(op.offsets[0], ctx)
-    size_expr = emit_c_value(op.sizes[0], ctx)
-    stride_expr = emit_c_value(op.strides[0], ctx)
-    return (
-        f"{ctx.current_indent}slice({target_expr}, {source_expr}, "
-        f"{offset_expr}, {size_expr}, {stride_expr});"
+    if len(op.offsets) == 1 and len(op.sizes) == 1 and len(op.strides) == 1:
+        offset_expr = emit_c_value(op.offsets[0], ctx)
+        size_expr = emit_c_value(op.sizes[0], ctx)
+        stride_expr = emit_c_value(op.strides[0], ctx)
+        return (
+            f"{ctx.current_indent}slice({target_expr}, {source_expr}, "
+            f"{offset_expr}, {size_expr}, {stride_expr});"
+        )
+    offset_lines, offset_vec = _emit_npu_vector_binding("slice_offset", op.offsets, ctx)
+    size_lines, size_vec = _emit_npu_vector_binding("slice_size", op.sizes, ctx)
+    stride_lines, stride_vec = _emit_npu_vector_binding("slice_stride", op.strides, ctx)
+    return "\n".join(
+        [
+            *offset_lines,
+            *size_lines,
+            *stride_lines,
+            f"{ctx.current_indent}slice({target_expr}, {source_expr}, {offset_vec}, {size_vec}, {stride_vec});",
+        ]
     )
 
 
@@ -1043,17 +1086,62 @@ def _emit_npu_deslice_stmt(op: DmaDesliceOp, ctx: EmitCContext) -> str:
     - 功能实现: kernel_gen/dsl/emit_c.py
     """
 
-    if len(op.offsets) != 1 or len(op.sizes) != 1 or len(op.strides) != 1:
-        raise _emit_error(ctx, op.name, "npu_demo deslice requires 1-D offset/size/stride")
     source_expr = _memory_base_name(op.source, ctx)
     target_expr = _memory_base_name(op.target, ctx)
     ctx.bind_name(op.result, target_expr)
-    offset_expr = emit_c_value(op.offsets[0], ctx)
-    size_expr = emit_c_value(op.sizes[0], ctx)
-    stride_expr = emit_c_value(op.strides[0], ctx)
+    if len(op.offsets) == 1 and len(op.sizes) == 1 and len(op.strides) == 1:
+        offset_expr = emit_c_value(op.offsets[0], ctx)
+        size_expr = emit_c_value(op.sizes[0], ctx)
+        stride_expr = emit_c_value(op.strides[0], ctx)
+        return (
+            f"{ctx.current_indent}deslice({source_expr}, {target_expr}, "
+            f"{offset_expr}, {size_expr}, {stride_expr});"
+        )
+    offset_lines, offset_vec = _emit_npu_vector_binding("deslice_offset", op.offsets, ctx)
+    size_lines, size_vec = _emit_npu_vector_binding("deslice_size", op.sizes, ctx)
+    stride_lines, stride_vec = _emit_npu_vector_binding("deslice_stride", op.strides, ctx)
+    return "\n".join(
+        [
+            *offset_lines,
+            *size_lines,
+            *stride_lines,
+            f"{ctx.current_indent}deslice({source_expr}, {target_expr}, {offset_vec}, {size_vec}, {stride_vec});",
+        ]
+    )
+
+
+def _emit_npu_vector_binding(
+    prefix: str,
+    values: tuple[SSAValue, ...],
+    ctx: EmitCContext,
+) -> tuple[list[str], str]:
+    """生成 `target=npu_demo` 下 Vector 实参的缓冲区与绑定语句。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 把 `tuple[SSAValue, ...]` 发射为 `long long[N]` 缓冲区与 `Vector` 视图。
+    - 供 `dma.slice/dma.deslice` 的多维 offset/size/stride 生成复用。
+
+    使用示例:
+    - lines, name = _emit_npu_vector_binding("slice_offset", op.offsets, EmitCContext(target="npu_demo"))
+
+    关联文件:
+    - spec: spec/dsl/emit_c.md
+    - test: test/dsl/test_emit_c.py
+    - 功能实现: kernel_gen/dsl/emit_c.py
+    """
+
+    buffer_name = ctx.allocate_temp_name(prefix)
+    vector_name = f"{buffer_name}_vec"
+    value_exprs = [emit_c_value(value, ctx) for value in values]
     return (
-        f"{ctx.current_indent}deslice({source_expr}, {target_expr}, "
-        f"{offset_expr}, {size_expr}, {stride_expr});"
+        [
+            _emit_long_long_buffer(buffer_name, value_exprs, ctx),
+            f"{ctx.current_indent}Vector {vector_name}({buffer_name}, {len(values)});",
+        ],
+        vector_name,
     )
 
 
@@ -1086,6 +1174,31 @@ def _emit_npu_add_stmt(op: NnAddOp, ctx: EmitCContext) -> str:
     return f"{ctx.current_indent}add({lhs_expr}, {rhs_expr}, {result_name});"
 
 
+def _emit_npu_kernel_matmul_stmt(op: KernelMatmulOp, ctx: EmitCContext) -> str:
+    """生成 `target=npu_demo` 下 `kernel.matmul` 的 helper 调用。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 把 lowered `kernel.matmul(lhs, rhs, out)` 发射为 `npu_demo::matmul(lhs, rhs, out);`。
+    - 只在 `target=npu_demo` 公开该后端专用 helper。
+
+    使用示例:
+    - stmt = emit_c_op(kernel_matmul_op, EmitCContext(target="npu_demo"))
+
+    关联文件:
+    - spec: spec/dsl/emit_c.md
+    - test: test/dsl/test_emit_c.py
+    - 功能实现: kernel_gen/dsl/emit_c.py
+    """
+
+    lhs_expr = _memory_base_name(op.lhs, ctx)
+    rhs_expr = _memory_base_name(op.rhs, ctx)
+    out_expr = _memory_base_name(op.out, ctx)
+    return f"{ctx.current_indent}npu_demo::matmul({lhs_expr}, {rhs_expr}, {out_expr});"
+
+
 def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
     """把 SSA value 生成为可嵌入右值位置的表达式文本。
 
@@ -1113,6 +1226,8 @@ def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
     owner = value.owner
     if isinstance(owner, arith.ConstantOp):
         return _format_literal(owner, ctx)
+    if isinstance(owner, SymbolConstOp):
+        return str(owner.value.data)
     if ctx.target == "npu_demo":
         if isinstance(owner, ArchGetThreadIdOp):
             return "ctx.thread_id()"
@@ -1211,11 +1326,11 @@ def _emit_symbol_loop(op: SymbolForOp, ctx: EmitCContext) -> str:
     最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 在 `target=cpu` 下生成与 `scf.for` 同风格的循环结构。
+    - 在 `target=cpu/npu_demo` 下生成与 `scf.for` 同风格的循环结构。
     - 迭代变量命名由 `EmitCContext.allocate_name(..., prefix=\"i\")` 分配，确保稳定且避免冲突。
 
     使用示例:
-    - stmt = emit_c_op(symbol_for_op, EmitCContext(target=\"cpu\"))
+    - stmt = emit_c_op(symbol_for_op, EmitCContext(target=\"npu_demo\"))
 
     关联文件:
     - spec: spec/dsl/emit_c.md
@@ -1223,8 +1338,8 @@ def _emit_symbol_loop(op: SymbolForOp, ctx: EmitCContext) -> str:
     - 功能实现: kernel_gen/dsl/emit_c.py
     """
 
-    if ctx.target != "cpu":
-        raise _emit_error(ctx, op.name, "symbol loops are cpu-only")
+    if ctx.target not in {"cpu", "npu_demo"}:
+        raise _emit_error(ctx, op.name, "unsupported target")
     return _emit_loop_region(op.start, op.end, op.step, op.body.block, ctx)
 
 
@@ -1237,7 +1352,8 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
     功能说明:
     - 负责把单个 op 转换为赋值语句、控制流语句块、访存语句、memory 视图声明或 helper 调用片段。
     - `target=cpu` 支持现有 `symbol.for/symbol.get_dim/dma.alloc/fill/view/slice/deslice/kernel.add/nn.img2col2d/nn.add` 节点级发射。
-    - `target=npu_demo` 仅支持当前公开的 `KernelContext` 查询、`TSM/TLM` dynamic memory、`view/slice/deslice/add` 节点级发射。
+    - `target=npu_demo` 支持当前公开的 `symbol.const/symbol.for`、`KernelContext` 查询、`TSM/TLM` dynamic memory、
+      `view/slice/deslice/add/kernel.matmul` 节点级发射。
 
     使用示例:
     - stmt = emit_c_op(op, EmitCContext(target=\"cpu\"))
@@ -1251,6 +1367,8 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
     if op.name in _BINARY_SIGILS or isinstance(op, arith.CmpiOp):
         return _emit_assignment(op, ctx)
     if isinstance(op, arith.ConstantOp):
+        return ""
+    if isinstance(op, SymbolConstOp):
         return ""
     if op.name in {"tile.symbol_literal", "tile.step_value"}:
         if not op.results:
@@ -1268,6 +1386,8 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
             return _emit_npu_dynamic_memory_stmt(op, ctx)
         if isinstance(op, SymbolGetDimOp):
             return ""
+        if isinstance(op, SymbolForOp):
+            return _emit_symbol_loop(op, ctx)
         if isinstance(op, DmaAllocOp):
             return _emit_dma_alloc_stmt(op, ctx)
         if isinstance(op, DmaFillOp):
@@ -1280,6 +1400,10 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
             return _emit_npu_deslice_stmt(op, ctx)
         if isinstance(op, KernelAddOp):
             return _emit_npu_kernel_add_stmt(op, ctx)
+        if isinstance(op, KernelBinaryElewiseOp):
+            return _emit_kernel_binary_elewise_stmt(op, ctx)
+        if isinstance(op, KernelMatmulOp):
+            return _emit_npu_kernel_matmul_stmt(op, ctx)
         if isinstance(op, NnAddOp):
             return _emit_npu_add_stmt(op, ctx)
         raise _emit_error(ctx, op.name, "unsupported op")
@@ -1301,6 +1425,8 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
         return _emit_dma_view_stmt(op, ctx)
     if isinstance(op, KernelAddOp):
         return _emit_kernel_add_stmt(op, ctx)
+    if isinstance(op, KernelBinaryElewiseOp):
+        return _emit_kernel_binary_elewise_stmt(op, ctx)
     if isinstance(op, NnAddOp):
         return _emit_nn_add_stmt(op, ctx)
     if isinstance(op, scf.ForOp):

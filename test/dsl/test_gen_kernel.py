@@ -77,10 +77,13 @@ from kernel_gen.dialect.tuner import TunerParamOp
 from kernel_gen.dsl.emit_c import EmitCContext
 from kernel_gen.dsl.gen_kernel import GenKernelError, gen_kernel
 from kernel_gen.dsl.mlir_gen import build_func_op
+from kernel_gen.operation.dma import alloc, deslice, slice
+from kernel_gen.operation.nn import matmul
+from kernel_gen.operation.scf import loop
 from kernel_gen.passes.lowering.buffer_results_to_out_params import BufferResultsToOutParamsPass
 from kernel_gen.passes.lowering.kernel_split import KernelSplitPass, _KernelSplitSymbolLiteralOp, _KernelSplitTileValueOp
 from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
-from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
@@ -1393,6 +1396,49 @@ def test_gen_kernel_compiles_npu_demo_source_with_single_include() -> None:
 
     include_lines = [line for line in source.splitlines() if line.startswith("#include ")]
     assert include_lines == ['#include "include/npu_demo/npu_demo.h"']
+    _compile_only(source)
+
+
+# GK-017A
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-15 11:10:00 +0800
+# 最近一次运行成功时间: N/A
+# 功能说明: 验证 npu_demo target 可生成并编译 tiled matmul 源码。
+# 测试目的: 锁定二维 `slice/deslice`、`symbol.for` 与 `npu_demo::matmul(...)` 的最小编译闭环。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_compiles_npu_demo_tiled_matmul_source
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_compiles_npu_demo_tiled_matmul_source() -> None:
+    def tiled_matmul(lhs: "Tensor[f32, 32, 16]", rhs: "Tensor[f32, 16, 32]") -> "Tensor[f32, 32, 32]":
+        out = alloc([32, 32], NumericType.Float32, MemorySpace.GM)
+        for m0 in loop(0, 32, 16):
+            for n0 in loop(0, 32, 16):
+                lhs_tile = slice(lhs, [m0, 0], [16, 16], [1, 1], MemorySpace.TSM)
+                rhs_tile = slice(rhs, [0, n0], [16, 16], [1, 1], MemorySpace.TSM)
+                partial = matmul(lhs_tile, rhs_tile)
+                deslice(partial, out, [m0, n0], [16, 16], [1, 1])
+        return out
+
+    func_op = build_func_op(
+        tiled_matmul,
+        Memory([32, 16], NumericType.Float32),
+        Memory([16, 32], NumericType.Float32),
+    )
+    module = ModuleOp([func_op])
+    NnLoweringPass().run(module)
+    BufferResultsToOutParamsPass().run(module)
+    rewritten_func = next(op for op in module.ops if isinstance(op, func.FuncOp))
+
+    source = gen_kernel(rewritten_func, _npu_ctx())
+
+    assert source.startswith('#include "include/npu_demo/npu_demo.h"\n')
+    assert "npu_demo::matmul(" in source
+    assert "slice(" in source
+    assert "deslice(" in source
+    assert "cpu::matmul(" not in source
+    assert "nn.matmul" not in source
     _compile_only(source)
 
 

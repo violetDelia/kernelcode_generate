@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import sys
 
 import pytest
@@ -37,12 +38,15 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFillOp, DmaLoadOp, DmaSliceOp, DmaStoreOp, DmaViewOp
-from kernel_gen.dialect.kernel import KernelAddOp
+from kernel_gen.dialect.kernel import KernelAddOp, KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnAddOp, NnImg2col2dOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolForOp, SymbolGetDimOp, SymbolValueType
 from kernel_gen.dsl.ast import BlockAST, ConstAST, ForAST, FunctionAST, Img2ColAST, LoadAST, ScalarArgAST, StoreAST, TensorAST, VarAST
 from kernel_gen.dsl.emit_c import EmitCContext, EmitCError, emit_c_op, emit_c_value
 from kernel_gen.dsl.mlir_gen import build_func_op, build_func_op_from_ast
+from kernel_gen.operation.dma import alloc, deslice, slice
+from kernel_gen.operation.nn import matmul
+from kernel_gen.operation.scf import loop
 from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace, NumericType
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -670,7 +674,7 @@ def test_emit_c_memory_space_template_alloc() -> None:
     dim0 = next((op for op in ops if isinstance(op, SymbolGetDimOp) and op.axis.data == 0), None)
     dim1 = next((op for op in ops if isinstance(op, SymbolGetDimOp) and op.axis.data == 1), None)
     alloc = next(op for op in ops if isinstance(op, DmaAllocOp))
-    add = next(op for op in ops if isinstance(op, KernelAddOp))
+    add = next(op for op in ops if isinstance(op, (KernelAddOp, KernelBinaryElewiseOp)))
 
     ctx = _ctx()
     ctx.bind_name(block.args[0], "lhs")
@@ -688,7 +692,7 @@ def test_emit_c_memory_space_template_alloc() -> None:
         assert "long long v0_shape[2] = {2, 2};" in alloc_text
     assert "long long v0_stride[2] = {2, 1};" in alloc_text
     assert "int32_t v0_buffer[4] = {};" in alloc_text
-    assert "Memory<GM, int32_t> v0(v0_buffer, 2, v0_shape, v0_stride, MemoryFormat::Norm);" in alloc_text
+    assert "Memory<GM, int32_t> v0(v0_buffer, v0_shape, v0_stride, 2, MemoryFormat::Norm);" in alloc_text
     assert emit_c_op(add, ctx) == "cpu::add(lhs, rhs, v0);"
 
 
@@ -783,7 +787,7 @@ def test_emit_c_op_lowers_dma_alloc_and_view() -> None:
         "long long v0_shape[2] = {2, 3};\n"
         "long long v0_stride[2] = {3, 1};\n"
         "float v0_buffer[6] = {};\n"
-        "Memory<SM, float> v0(v0_buffer, 2, v0_shape, v0_stride, MemoryFormat::Norm);"
+        "Memory<SM, float> v0(v0_buffer, v0_shape, v0_stride, 2, MemoryFormat::Norm);"
     )
 
     dyn_shape0 = SymbolValueType.from_expr("N")
@@ -824,7 +828,7 @@ def test_emit_c_op_lowers_dma_alloc_and_view() -> None:
         "long long view_offset0 = (0 * source.stride()[0]) + (0 * source.stride()[1]);\n"
         "long long v0_shape[2] = {2, 2};\n"
         "long long v0_stride[2] = {1, 1};\n"
-        "Memory<GM, float> v0(const_cast<float*>(source.data()) + view_offset0, 2, v0_shape, v0_stride, source.format());"
+        "Memory<GM, float> v0(const_cast<float*>(source.data()) + view_offset0, v0_shape, v0_stride, 2, source.format());"
     )
 
 
@@ -899,10 +903,10 @@ def test_emit_c_op_lowers_img2col2d_dma_loop_pipeline() -> None:
 
     assert "for (long long i0 = start; i0 < end; i0 += step) {" in stmt
     assert "float v1_buffer[16] = {};" in stmt
-    assert "Memory<LM, float> v1(v1_buffer, 4, v1_shape, v1_stride, MemoryFormat::Norm);" in stmt
+    assert "Memory<LM, float> v1(v1_buffer, v1_shape, v1_stride, 4, MemoryFormat::Norm);" in stmt
     assert "v1.at(dma0_dst_indices) = input.at(dma0_src_indices);" in stmt
     assert "float v2_buffer[36] = {};" in stmt
-    assert "Memory<LM, float> v2(v2_buffer, 6, v2_shape, v2_stride, MemoryFormat::Norm);" in stmt
+    assert "Memory<LM, float> v2(v2_buffer, v2_shape, v2_stride, 6, MemoryFormat::Norm);" in stmt
     assert "cpu::img2col2d(v1, v2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0);" in stmt
     assert "output.at(dma1_dst_indices) = v2.at(dma1_src_indices);" in stmt
     assert "slice(" not in stmt
@@ -1103,4 +1107,58 @@ def test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline() -> None:
     assert "store<" not in stmt
     assert "launch" not in stmt
     assert "barrier" not in stmt
+
+
+# EC-020
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-15 11:10:00 +0800
+# 最近一次运行成功时间: N/A
+# 功能说明: 验证 npu_demo 下 tiled matmul 可发射 symbol.for + 2D slice/deslice + kernel.matmul 管线。
+# 测试目的: 锁定 target=npu_demo 的二维 tile helper 形态与 `npu_demo::matmul(...)` 调用，不回退到一维 helper 或残留 `nn.matmul`。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_lowers_npu_demo_tiled_matmul_pipeline
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_lowers_npu_demo_tiled_matmul_pipeline() -> None:
+    def tiled_matmul(lhs: "Tensor[f32, 32, 16]", rhs: "Tensor[f32, 16, 32]") -> "Tensor[f32, 32, 32]":
+        out = alloc([32, 32], NumericType.Float32, MemorySpace.GM)
+        for m0 in loop(0, 32, 16):
+            for n0 in loop(0, 32, 16):
+                lhs_tile = slice(lhs, [m0, 0], [16, 16], [1, 1], MemorySpace.TSM)
+                rhs_tile = slice(rhs, [0, n0], [16, 16], [1, 1], MemorySpace.TSM)
+                partial = matmul(lhs_tile, rhs_tile)
+                deslice(partial, out, [m0, n0], [16, 16], [1, 1])
+        return out
+
+    block = _lower_built_func(
+        tiled_matmul,
+        Memory([32, 16], NumericType.Float32),
+        Memory([16, 32], NumericType.Float32),
+    )
+    ctx = _npu_ctx()
+    ctx.bind_name(block.args[0], "lhs")
+    ctx.bind_name(block.args[1], "rhs")
+
+    stmt = "\n".join(
+        filter(
+            None,
+            (emit_c_op(op, ctx) for op in block.ops if not isinstance(op, func.ReturnOp)),
+        )
+    )
+
+    assert stmt.count("for (long long i") >= 2
+    assert re.search(r"long long slice_offset0\[2\] = \{i\d+, 0\};", stmt)
+    assert "Vector slice_offset0_vec(slice_offset0, 2);" in stmt
+    assert re.search(r"long long slice_offset3\[2\] = \{0, i\d+\};", stmt)
+    assert "Vector deslice_offset6_vec(deslice_offset6, 2);" in stmt
+    assert re.search(
+        r"Memory<TSM, float> v\d+\(v\d+_buffer, v\d+_shape, v\d+_stride, 2, MemoryFormat::Norm\);",
+        stmt,
+    )
+    assert re.search(r"slice\(v\d+, lhs, slice_offset0_vec, slice_size1_vec, slice_stride2_vec\);", stmt)
+    assert re.search(r"slice\(v\d+, rhs, slice_offset3_vec, slice_size4_vec, slice_stride5_vec\);", stmt)
+    assert re.search(r"npu_demo::matmul\(v\d+, v\d+, v\d+\);", stmt)
+    assert re.search(r"deslice\(v\d+, v\d+, deslice_offset6_vec, deslice_size7_vec, deslice_stride8_vec\);", stmt)
+    assert "nn.matmul" not in stmt
     assert "arch.launch_kernel" not in stmt

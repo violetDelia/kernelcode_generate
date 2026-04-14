@@ -1,6 +1,6 @@
 /*
 功能说明:
-- 提供 npu_demo 后端的逐元素算术、比较与显式 broadcast 轻量实现。
+- 提供 npu_demo 后端的逐元素算术、比较、显式 broadcast 与 matmul 轻量实现。
 
 使用示例:
 - #include "include/npu_demo/Nn.h"
@@ -58,6 +58,70 @@ inline Status add(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memo
     }
     return StatusCode::kOk;
 }
+
+/*
+功能说明:
+- 对两个二维内存视图执行矩阵乘法，结果写入输出视图。
+
+使用示例:
+- Status status = matmul(lhs, rhs, out);
+
+创建者: 小李飞刀
+最后修改人: 小李飞刀
+
+关联文件:
+- spec: spec/include/api/Nn.md
+- test: test/dsl/test_gen_kernel.py
+- 功能实现: include/npu_demo/Nn.h
+*/
+template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename T>
+inline Status matmul(
+    const Memory<LhsSpace, T>& lhs,
+    const Memory<RhsSpace, T>& rhs,
+    Memory<OutSpace, T>& out) {
+    if (lhs.rank() != 2 || rhs.rank() != 2 || out.rank() != 2) {
+        return StatusCode::kError;
+    }
+    const long long m = lhs.get_shape(0);
+    const long long k = lhs.get_shape(1);
+    const long long rhs_k = rhs.get_shape(0);
+    const long long n = rhs.get_shape(1);
+    if (m <= 0 || k <= 0 || rhs_k <= 0 || n <= 0) {
+        return StatusCode::kError;
+    }
+    if (rhs_k != k || out.get_shape(0) != m || out.get_shape(1) != n) {
+        return StatusCode::kError;
+    }
+    if (lhs.data() == nullptr || rhs.data() == nullptr || out.data() == nullptr) {
+        return StatusCode::kError;
+    }
+
+    long long lhs_indices[2] = {0, 0};
+    long long rhs_indices[2] = {0, 0};
+    long long out_indices[2] = {0, 0};
+    for (long long mi = 0; mi < m; ++mi) {
+        lhs_indices[0] = mi;
+        out_indices[0] = mi;
+        for (long long ni = 0; ni < n; ++ni) {
+            rhs_indices[1] = ni;
+            out_indices[1] = ni;
+            T acc = static_cast<T>(0);
+            for (long long ki = 0; ki < k; ++ki) {
+                lhs_indices[1] = ki;
+                rhs_indices[0] = ki;
+                acc += lhs.at(lhs_indices) * rhs.at(rhs_indices);
+            }
+            out.at(out_indices) = acc;
+        }
+    }
+    return StatusCode::kOk;
+}
+
+namespace npu_demo {
+
+using ::matmul;
+
+}  // namespace npu_demo
 
 /*
 功能说明:

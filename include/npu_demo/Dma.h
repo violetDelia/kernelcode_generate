@@ -149,7 +149,7 @@ inline Memory<Space, T> view(
 
 /*
 功能说明:
-- 从 source 读取切片并写入预分配 target（Vector offset/size/stride 版本），当前优先覆盖 1-D 子集。
+- 从 source 读取切片并写入预分配 target（Vector offset/size/stride 版本），支持与 source/target rank 一致的多维子集。
 
 使用示例:
 - Status status = slice(tile, source, offset, size, stride);
@@ -169,15 +169,77 @@ inline Status slice(
     const Vector& offset,
     const Vector& size,
     const Vector& stride) {
-    if (offset.size() != 1 || size.size() != 1 || stride.size() != 1) {
+    const unsigned long long rank = source.rank();
+    if (rank == 0 || rank > kMaxDmaRank) {
         return StatusCode::kError;
     }
-    return slice(target, source, offset[0], size[0], stride[0]);
+    if (target.rank() != rank || offset.size() != rank || size.size() != rank || stride.size() != rank) {
+        return StatusCode::kError;
+    }
+    if (source.data() == nullptr || target.data() == nullptr) {
+        return StatusCode::kError;
+    }
+
+    long long element_count = 1;
+    for (unsigned long long i = 0; i < rank; ++i) {
+        if (offset[i] < 0 || size[i] <= 0 || stride[i] <= 0) {
+            return StatusCode::kError;
+        }
+        if (source.get_shape(i) <= 0 || target.get_shape(i) <= 0) {
+            return StatusCode::kError;
+        }
+        if (source.get_stride(i) <= 0 || target.get_stride(i) <= 0) {
+            return StatusCode::kError;
+        }
+        if (target.get_shape(i) != size[i]) {
+            return StatusCode::kError;
+        }
+        long long span = 0;
+        if (!checked_mul_non_negative(size[i] - 1, stride[i], &span)) {
+            return StatusCode::kError;
+        }
+        long long last_index = 0;
+        if (!checked_add_non_negative(offset[i], span, &last_index)) {
+            return StatusCode::kError;
+        }
+        if (last_index >= source.get_shape(i)) {
+            return StatusCode::kError;
+        }
+        long long next_element_count = 0;
+        if (!checked_mul_non_negative(element_count, size[i], &next_element_count)) {
+            return StatusCode::kError;
+        }
+        element_count = next_element_count;
+    }
+
+    long long logical_indices[kMaxDmaRank] = {0};
+    long long source_indices[kMaxDmaRank] = {0};
+    long long target_indices[kMaxDmaRank] = {0};
+    for (long long linear = 0; linear < element_count; ++linear) {
+        long long remainder = linear;
+        for (unsigned long long reverse_index = 0; reverse_index < rank; ++reverse_index) {
+            const unsigned long long dim = rank - 1 - reverse_index;
+            logical_indices[dim] = remainder % size[dim];
+            remainder /= size[dim];
+        }
+        for (unsigned long long dim = 0; dim < rank; ++dim) {
+            target_indices[dim] = logical_indices[dim];
+            long long source_delta = 0;
+            if (!checked_mul_non_negative(logical_indices[dim], stride[dim], &source_delta)) {
+                return StatusCode::kError;
+            }
+            if (!checked_add_non_negative(offset[dim], source_delta, &source_indices[dim])) {
+                return StatusCode::kError;
+            }
+        }
+        target.at(target_indices) = source.at(source_indices);
+    }
+    return StatusCode::kOk;
 }
 
 /*
 功能说明:
-- 将 source 块写回 target 的指定区域（Vector offset/size/stride 版本），当前优先覆盖 1-D 子集。
+- 将 source 块写回 target 的指定区域（Vector offset/size/stride 版本），支持与 source/target rank 一致的多维子集。
 
 使用示例:
 - Status status = deslice(tile, target, offset, size, stride);
@@ -197,10 +259,72 @@ inline Status deslice(
     const Vector& offset,
     const Vector& size,
     const Vector& stride) {
-    if (offset.size() != 1 || size.size() != 1 || stride.size() != 1) {
+    const unsigned long long rank = source.rank();
+    if (rank == 0 || rank > kMaxDmaRank) {
         return StatusCode::kError;
     }
-    return deslice(source, target, offset[0], size[0], stride[0]);
+    if (target.rank() != rank || offset.size() != rank || size.size() != rank || stride.size() != rank) {
+        return StatusCode::kError;
+    }
+    if (source.data() == nullptr || target.data() == nullptr) {
+        return StatusCode::kError;
+    }
+
+    long long element_count = 1;
+    for (unsigned long long i = 0; i < rank; ++i) {
+        if (offset[i] < 0 || size[i] <= 0 || stride[i] <= 0) {
+            return StatusCode::kError;
+        }
+        if (source.get_shape(i) <= 0 || target.get_shape(i) <= 0) {
+            return StatusCode::kError;
+        }
+        if (source.get_stride(i) <= 0 || target.get_stride(i) <= 0) {
+            return StatusCode::kError;
+        }
+        if (source.get_shape(i) != size[i]) {
+            return StatusCode::kError;
+        }
+        long long span = 0;
+        if (!checked_mul_non_negative(size[i] - 1, stride[i], &span)) {
+            return StatusCode::kError;
+        }
+        long long last_index = 0;
+        if (!checked_add_non_negative(offset[i], span, &last_index)) {
+            return StatusCode::kError;
+        }
+        if (last_index >= target.get_shape(i)) {
+            return StatusCode::kError;
+        }
+        long long next_element_count = 0;
+        if (!checked_mul_non_negative(element_count, size[i], &next_element_count)) {
+            return StatusCode::kError;
+        }
+        element_count = next_element_count;
+    }
+
+    long long logical_indices[kMaxDmaRank] = {0};
+    long long source_indices[kMaxDmaRank] = {0};
+    long long target_indices[kMaxDmaRank] = {0};
+    for (long long linear = 0; linear < element_count; ++linear) {
+        long long remainder = linear;
+        for (unsigned long long reverse_index = 0; reverse_index < rank; ++reverse_index) {
+            const unsigned long long dim = rank - 1 - reverse_index;
+            logical_indices[dim] = remainder % size[dim];
+            remainder /= size[dim];
+        }
+        for (unsigned long long dim = 0; dim < rank; ++dim) {
+            source_indices[dim] = logical_indices[dim];
+            long long target_delta = 0;
+            if (!checked_mul_non_negative(logical_indices[dim], stride[dim], &target_delta)) {
+                return StatusCode::kError;
+            }
+            if (!checked_add_non_negative(offset[dim], target_delta, &target_indices[dim])) {
+                return StatusCode::kError;
+            }
+        }
+        target.at(target_indices) = source.at(source_indices);
+    }
+    return StatusCode::kOk;
 }
 
 /*

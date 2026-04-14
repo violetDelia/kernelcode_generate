@@ -174,8 +174,8 @@ _MEMORY_SPACE_MAP = {
     MemorySpace.GM: "global",
     MemorySpace.SM: "shared",
     MemorySpace.LM: "local",
-    MemorySpace.TSM: "shared",
-    MemorySpace.TLM: "local",
+    MemorySpace.TSM: "tsm",
+    MemorySpace.TLM: "tlm",
 }
 
 _DYNAMIC_MEMORY_SPACE_MAP = {

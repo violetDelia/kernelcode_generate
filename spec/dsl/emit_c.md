@@ -10,7 +10,7 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`金铲铲大作战`
+- 最后一次更改：`咯咯咯`（2026-04-15）
 - `spec`：[`spec/dsl/emit_c.md`](../../spec/dsl/emit_c.md)
 - `功能实现`：[`kernel_gen/dsl/emit_c.py`](../../kernel_gen/dsl/emit_c.py)
 - `test`：[`test/dsl/test_emit_c.py`](../../test/dsl/test_emit_c.py)
@@ -375,6 +375,28 @@ add(work_tile, work_tile, out_tile);
 
 - 参数顺序必须固定为 `lhs -> rhs -> out`。
 - 不得回退到 `cpu::add(...)`、运算符表达式拼接或 `load/store` 形式。
+
+### `execute_engine + npu_demo + matmul` 节点文本合同（S1）
+
+功能说明：
+
+- 本节定义 `CASE-3` 在节点层的最小输出要求：当输入链路命中 `kernel.matmul` 时，`target=npu_demo` 的文本需落到 `npu_demo::matmul(...)` 调用。
+
+使用示例：
+
+```cpp
+slice(lhs_tile, lhs, m0, 16, 1);
+slice(rhs_tile, rhs, n0, 16, 1);
+npu_demo::matmul(lhs_tile, rhs_tile, out_tile);
+deslice(out_tile, out, m0, 16, 1);
+```
+
+注意事项：
+
+- 本节只覆盖节点文本，不定义函数签名、wrapper 或编译执行流程。
+- `npu_demo` 路径命中 matmul 时不得生成 `cpu::matmul(...)`。
+- 若 `kernel.matmul` 在当前 target 下不可发射，必须报错并包含 `unsupported op`。
+- 关联合同资产：[`expectation/execute_engine/npu_demo/matmul.py`](../../expectation/execute_engine/npu_demo/matmul.py) 的 `CASE-3`。
 
 ## 测试
 

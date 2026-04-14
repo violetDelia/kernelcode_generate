@@ -1018,6 +1018,9 @@ def _lower_block(block: Block) -> None:
     """
 
     for op in list(block.ops):
+        for region in op.regions:
+            for nested_block in region.blocks:
+                _lower_block(nested_block)
         if isinstance(op, func.ReturnOp):
             continue
         if not op.name.startswith("nn."):
