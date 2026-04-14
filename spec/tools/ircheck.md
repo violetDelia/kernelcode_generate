@@ -2,9 +2,9 @@
 
 ## 功能简介
 
-- 定义一个面向 IR 变换验证的轻量工具 `ircheck`：读取 case 文本，按 `COMPILE_ARGS` 运行 pass / pipeline，对规范化后的 IR 执行 `CHECK:` / `CHECK-NOT:` / `CHECK-NEXT:` 子串匹配，最终输出 `true/false`。
+- 定义一个面向 IR 变换验证的轻量工具 `ircheck`：读取 case 文本，按 `COMPILE_ARGS` 运行 pass / pipeline，对规范化后的 IR 执行 `CHECK:` / `CHECK-NOT:` / `CHECK-NEXT:` 子串匹配，以及 `CHECK-REGEX:` / `CHECK-NEXT-REGEX:` / `CHECK-NOT-REGEX:` 正则匹配，最终输出 `true/false`。
 - 支持使用 `// -----` 在同一文件/文本中分隔多个 case（lit 风格），按顺序执行并在首个失败处停止。
-- 该工具用于“验证你关心的片段是否出现/不出现/是否相邻”，而不是做全量文本 diff。
+- 该工具用于“验证你关心的片段是否出现/不出现/是否相邻”，而不是做全量文本 diff；正则指令额外支持 `[[NAME:REGEX]]` 变量捕获与 `[[NAME]]` 复用。
 
 ## 文档信息
 
@@ -37,7 +37,9 @@
 - `case file`：包含头部注释指令与输入 IR 的单个文本文件（推荐扩展名 `.mlir` 或 `.ircheck`）。
 - `case block`：被 `// -----` 分隔出来的一个独立 case 单元。
 - `directive`：头部注释中的指令行，包括 `COMPILE_ARGS:` 与 `CHECK*:`。
-- `positive check`：`CHECK:` 与 `CHECK-NEXT:`，用于定义“顺序/相邻”的命中锚点。
+- `positive check`：`CHECK:`、`CHECK-NEXT:`、`CHECK-REGEX:` 与 `CHECK-NEXT-REGEX:`，用于定义“顺序/相邻”的命中锚点。
+  - 其中可作为首条正向锚点的只有 `CHECK:` 与 `CHECK-REGEX:`；
+  - `CHECK-NEXT:` 与 `CHECK-NEXT-REGEX:` 必须依附前一条已命中的 positive check。
 - `compile args`：`COMPILE_ARGS:` 指令后的一段参数串，支持 `--pass <name>` / `--pipeline <name>`，以及带 `{k=v}` 选项块的 `--pass "<name>{k=v}"` / `--pipeline "<name>{k=v}"`。
 
 ## 目标
@@ -54,16 +56,27 @@
 - `expectation/tools/ircheck/multi_pass_true.py`：验证多 step 顺序执行与成功路径输出。
 - `expectation/tools/ircheck/multi_pass_fail.py`：验证失败 step 的定位信息与 `actual_ir` 语义。
 - `expectation/tools/ircheck/ir_dump_true.py`：验证 `-irdump` 的目录与文件命名。
-- `expectation/tools/ircheck/README.md`：样例入口与迁移写法，强调三条公开 API 为稳定合同。
+- `expectation/tools/ircheck/regex_variable_true.py`：验证 `CHECK-REGEX*` 与变量捕获/引用的成功路径。
+- `expectation/tools/ircheck/regex_variable_false.py`：验证正则/变量写法失败时的稳定错误短语。
+- `expectation/tools/ircheck/README.md`：样例入口与迁移写法，强调三条公开 API 为稳定合同，并补齐 regex/variable 示例。
 
 ## 迁移建议
 
 - 旧测试中若手写字符串断言，可迁移为单文件 case + `ircheck` 检查指令。
 - expectation 文档统一写法：仅 `parse_ircheck_file`、`run_ircheck_file`、`run_ircheck_text` 为稳定合同，其余符号视为内部细节。
+- 固定文本仍优先使用 `CHECK:` / `CHECK-NEXT:` / `CHECK-NOT:`；当维度、符号名或 SSA 名需要“先捕获再复用”时，改用 `CHECK-REGEX:` / `CHECK-NEXT-REGEX:` / `CHECK-NOT-REGEX:`。
 
 ## 限制与边界
 
-- 指令集只支持三条检查指令：`CHECK:`、`CHECK-NOT:`、`CHECK-NEXT:`；不支持正则、变量捕获、`CHECK-LABEL`。
+- 指令集支持六条检查指令：`CHECK:`、`CHECK-NOT:`、`CHECK-NEXT:`、`CHECK-REGEX:`、`CHECK-NEXT-REGEX:`、`CHECK-NOT-REGEX:`；仍不支持 `CHECK-LABEL`。
+- `CHECK:` / `CHECK-NEXT:` / `CHECK-NOT:` 继续按“逐行子串匹配”工作；`CHECK-REGEX:` / `CHECK-NEXT-REGEX:` / `CHECK-NOT-REGEX:` 按“逐行正则匹配”工作，不做跨行拼接匹配。
+- 变量捕获语法 `[[NAME:REGEX]]` 与引用语法 `[[NAME]]` 仅在 `CHECK-REGEX*` 指令中生效；变量作用域只限当前 case，不跨 case 共享。
+- `CHECK-NOT-REGEX:` 禁止定义新变量；只允许引用已经在更早的 positive regex check 中成功捕获的变量。
+- IR 自身的字面量 `[` / `]` 不是变量语法的一部分；在正则指令中仍必须单独写作 `\[` / `\]`。
+- 内置正则别名仅允许出现在 `[[NAME:REGEX]]` 的 `REGEX` 区段内：
+  - `{reg}`：`[A-Za-z_][A-Za-z0-9_]*`
+  - `{dim}`：`[1-9][0-9]*`
+  - `{int}`：`-?[0-9]+`
 - 多 case 仅支持固定分隔符 `// -----`；不支持 case 命名、标签跳转或条件执行。
 - `COMPILE_ARGS:` 支持重复 step，并按文本顺序执行；单个 step 仍沿用以下写法：
   - `--pass <pass-name>`
@@ -143,13 +156,20 @@ assert case.compile_args.startswith("--pass ")
   2. 输入 IR 正文：从第一行“非 `//` 开头的行”起，到文件结束
 - 头部注释区内：
   - `COMPILE_ARGS:` 允许出现一次且必须出现一次
-  - `CHECK:` / `CHECK-NOT:` / `CHECK-NEXT:` 可出现零次或多次，按出现顺序保存
+  - `CHECK:` / `CHECK-NOT:` / `CHECK-NEXT:` / `CHECK-REGEX:` / `CHECK-NEXT-REGEX:` / `CHECK-NOT-REGEX:` 可出现零次或多次，按出现顺序保存
   - 非上述指令的注释行允许存在，解析时忽略
 - `COMPILE_ARGS:` 的参数串（冒号后内容）去掉首尾空白后不得为空。
-- `CHECK:` / `CHECK-NOT:` / `CHECK-NEXT:` 的检查文本（冒号后内容）去掉首尾空白后不得为空。
-- `CHECK-NEXT:` 不得作为“第一条 positive check”出现；也即：
-  - 在所有 `CHECK:` / `CHECK-NEXT:` 中，第一条必须为 `CHECK:`；
-  - 若第一条 positive check 为 `CHECK-NEXT:`，必须返回解析失败。
+- `CHECK:` / `CHECK-NOT:` / `CHECK-NEXT:` / `CHECK-REGEX:` / `CHECK-NEXT-REGEX:` / `CHECK-NOT-REGEX:` 的检查文本（冒号后内容）去掉首尾空白后都不得为空。
+- `CHECK-NEXT:` 与 `CHECK-NEXT-REGEX:` 都不得作为“第一条 positive check”出现；也即：
+  - 在所有 `CHECK:` / `CHECK-NEXT:` / `CHECK-REGEX:` / `CHECK-NEXT-REGEX:` 中，第一条必须为 `CHECK:` 或 `CHECK-REGEX:`；
+  - 若第一条 positive check 为 `CHECK-NEXT:` 或 `CHECK-NEXT-REGEX:`，必须返回解析失败。
+- `CHECK-REGEX*` 指令的变量语法验证规则：
+  - `[[NAME:REGEX]]` 表示“定义变量 `NAME` 并用 `REGEX` 捕获该段文本”；
+  - `[[NAME]]` 表示“引用先前已捕获的变量 `NAME`，按字面量匹配”；
+  - 同一 case 内，变量名只能定义一次；重复定义必须返回解析失败；
+  - 引用变量时，变量定义必须先于当前指令出现；引用未定义变量必须返回解析失败；
+  - `CHECK-NOT-REGEX:` 中出现 `[[NAME:REGEX]]` 必须返回解析失败；
+  - `{reg}` / `{dim}` / `{int}` 仅在 `[[NAME:REGEX]]` 的 `REGEX` 段内展开，在其他文本中保持普通字符含义。
 - 若输入 IR 正文在去掉空白后为空，必须返回解析失败。
 - `parse_ircheck_file` 只处理单 case；若文本包含 `// -----` 多 case 分隔符，必须返回 `IrcheckParseError: invalid ircheck header`。
 
@@ -158,6 +178,10 @@ assert case.compile_args.startswith("--pass ")
 - 失败时必须抛出异常，且错误信息前缀为下述之一：
   - `IrcheckParseError: invalid ircheck header`
   - `IrcheckParseError: missing input ir`
+  - `IrcheckParseError: invalid regex check`
+  - `IrcheckParseError: undefined regex variable`
+  - `IrcheckParseError: duplicate regex variable`
+  - `IrcheckParseError: CHECK-NOT-REGEX cannot define variables`
 
 ### `run_ircheck_file(path: str) -> IrcheckResult`
 
@@ -203,6 +227,10 @@ assert result.ok is True
 - 若 case 文本解析失败，返回 `ok=False`，`exit_code=2`，且 `message` 前缀为：
   - `IrcheckParseError: invalid ircheck header`
   - `IrcheckParseError: missing input ir`
+  - `IrcheckParseError: invalid regex check`
+  - `IrcheckParseError: undefined regex variable`
+  - `IrcheckParseError: duplicate regex variable`
+  - `IrcheckParseError: CHECK-NOT-REGEX cannot define variables`
 - 若 `COMPILE_ARGS` 不支持（含选项块语法非法或未加引号），返回 `ok=False`，`exit_code=2`，且 `message` 前缀为：
   - `IrcheckCompileArgsError: unsupported compile args`
 - 若 pass/pipeline 执行抛错或返回不可打印的对象，返回 `ok=False`，`exit_code=2`，且 `message` 前缀为：
@@ -211,6 +239,9 @@ assert result.ok is True
   - `IrcheckMatchError: CHECK not found`
   - `IrcheckMatchError: CHECK-NEXT not found on next line`
   - `IrcheckMatchError: CHECK-NOT matched forbidden text`
+  - `IrcheckMatchError: CHECK-REGEX not found`
+  - `IrcheckMatchError: CHECK-NEXT-REGEX not found on next line`
+  - `IrcheckMatchError: CHECK-NOT-REGEX matched forbidden text`
 - 若多 step 执行中途失败：
   - `message` 必须包含失败 step 序号（从 1 开始）、step 类型（pass/pipeline）与 step 名字（不含选项块）。
   - `actual_ir` 必须返回失败前一刻的规范化 IR：
@@ -266,7 +297,7 @@ assert result.ok is True
   - `input_ir (str)`
   - `source_path (str|None)`
 - `CheckDirective` 建议字段：
-  - `kind (Literal["CHECK", "CHECK-NEXT", "CHECK-NOT"])`
+  - `kind (Literal["CHECK", "CHECK-NEXT", "CHECK-NOT", "CHECK-REGEX", "CHECK-NEXT-REGEX", "CHECK-NOT-REGEX"])`
   - `text (str)`
   - `line_no (int)`：原始行号（从 1 开始）
 - `IrcheckResult` 建议字段：
@@ -301,42 +332,60 @@ assert result.exit_code == 0
 
 功能说明：
 
-- 定义 `CHECK:` / `CHECK-NEXT:` / `CHECK-NOT:` 三类指令在“规范化 IR 文本”上的匹配规则。
+- 定义 `CHECK:` / `CHECK-NEXT:` / `CHECK-NOT:` 与 `CHECK-REGEX:` / `CHECK-NEXT-REGEX:` / `CHECK-NOT-REGEX:` 在“规范化 IR 文本”上的匹配规则。
 
 注意事项：
 
-- 匹配规则为“子串匹配”，不做正则解释。
 - 匹配对象为 pass/pipeline 执行后的规范化 IR 文本 `actual_ir`，不匹配原始输入文本。
 - 匹配按“行”进行：把 `actual_ir` 视为按换行符拆分的行序列 `lines`（等价于 `actual_ir.splitlines()`），每条指令都在 `lines[i]` 上做子串查找；不做跨行拼接匹配。
-- 指令按在 case 文件中的出现顺序依次处理；`CHECK-NOT` 不改变后续 `CHECK` 的搜索起点。
+- `CHECK:` / `CHECK-NEXT:` / `CHECK-NOT:` 保持“子串匹配”语义，不做正则解释。
+- `CHECK-REGEX:` / `CHECK-NEXT-REGEX:` / `CHECK-NOT-REGEX:` 在单行文本上做正则匹配；IR 字面量 `[` / `]` 仍需单独写作 `\[` / `\]`。
+- 正则变量处理顺序固定为：
+  1. 先读取当前 case 已成功捕获的变量表；
+  2. 把 `[[NAME]]` 替换为 `re.escape(value)` 形式的字面量匹配；
+  3. 把 `[[NAME:REGEX]]` 转成“记录命中原文”的捕获片段，并在其中展开 `{reg}` / `{dim}` / `{int}`；
+  4. 当前 regex directive 匹配成功后，才把本条新定义的变量写回变量表；若本条匹配失败，则不得提交部分变量。
+- 指令按在 case 文件中的出现顺序依次处理；`CHECK-NOT` 与 `CHECK-NOT-REGEX` 都不改变后续 positive check 的搜索起点。
 
 返回与限制：
 
-- `positive check` 指令命中规则（会更新“当前命中行”）：
+- `positive check` 指令命中规则（会更新“当前命中行”；本节的 `positive check` 固定指 `CHECK:`、`CHECK-NEXT:`、`CHECK-REGEX:`、`CHECK-NEXT-REGEX:`）：
   - 初始 `last_positive_line = None`。
   - `CHECK:`：
     - 令 `start = 0`（当 `last_positive_line is None`）或 `start = last_positive_line + 1`；
     - 从 `lines[start:]` 中按行向后查找第一条包含 `text` 子串的行，命中行号为 `hit_line`；
     - 若找不到，则失败，错误短语为 `IrcheckMatchError: CHECK not found`；
     - 命中后：`last_positive_line = hit_line`。
+  - `CHECK-REGEX:`：
+    - 令 `start = 0`（当 `last_positive_line is None`）或 `start = last_positive_line + 1`；
+    - 从 `lines[start:]` 中按行向后查找第一条满足 regex 搜索的行，命中行号为 `hit_line`；
+    - 若找不到，则失败，错误短语为 `IrcheckMatchError: CHECK-REGEX not found`；
+    - 命中后：`last_positive_line = hit_line`，并提交本条新捕获的变量。
   - `CHECK-NEXT:`：
     - 该指令只能在 `last_positive_line is not None` 时出现（否则属于“无前置 positive check”，必须在解析阶段失败）；
     - 令 `hit_line = last_positive_line + 1`，要求 `hit_line` 存在且 `text` 为 `lines[hit_line]` 的子串；
     - 若不命中，则失败，错误短语为 `IrcheckMatchError: CHECK-NEXT not found on next line`；
     - 命中后：`last_positive_line = hit_line`。
-- `CHECK-NOT:` 指令命中规则（不更新 `last_positive_line`）：
-  - `CHECK-NOT` 以“区间约束”的方式生效：它约束的区间由其两侧最近的 positive check 的“命中行”决定。
+  - `CHECK-NEXT-REGEX:`：
+    - 该指令只能在 `last_positive_line is not None` 时出现（否则属于“无前置 positive check”，必须在解析阶段失败）；
+    - 令 `hit_line = last_positive_line + 1`，要求 `hit_line` 存在且当前 regex 能在 `lines[hit_line]` 上命中；
+    - 若不命中，则失败，错误短语为 `IrcheckMatchError: CHECK-NEXT-REGEX not found on next line`；
+    - 命中后：`last_positive_line = hit_line`，并提交本条新捕获的变量。
+- `CHECK-NOT:` / `CHECK-NOT-REGEX:` 指令命中规则（不更新 `last_positive_line`）：
+  - `CHECK-NOT` 与 `CHECK-NOT-REGEX` 都以“区间约束”的方式生效：它们约束的区间由其两侧最近的 positive check 的“命中行”决定。
   - 推荐实现方式（用于定义确定性合同）：
-    1. 依序扫描指令；遇到 `CHECK-NOT` 先加入 `pending_not` 列表。
+    1. 依序扫描指令；遇到 `CHECK-NOT` / `CHECK-NOT-REGEX` 先加入 `pending_not` 列表。
     2. 当遇到下一条 positive check 并成功命中行 `hit_line` 后，计算 `pending_not` 的禁止区间并逐条验证，然后清空 `pending_not`：
        - `forbid_start = 0`（当上一条 positive check 不存在）或 `forbid_start = prev_positive_line + 1`
        - `forbid_end = hit_line - 1`
        - 区间为闭区间 `[forbid_start, forbid_end]`；当 `forbid_start > forbid_end` 时区间为空，视为自动通过
        - 对每条 `CHECK-NOT: text`：要求 `text` 不得成为区间内任一行的子串
+       - 对每条 `CHECK-NOT-REGEX: regex`：要求 `regex` 不得在区间内任一行命中；该指令只允许引用已存在变量，不得定义新变量
     3. 所有指令处理完成后，若 `pending_not` 非空，按“最后一条 positive check 命中行之后到文件末尾”的区间验证：
        - `forbid_start = 0`（当不存在任何 positive check）或 `forbid_start = last_positive_line + 1`
        - `forbid_end = len(lines) - 1`
   - 若 `CHECK-NOT` 违反禁止区间，则失败，错误短语为 `IrcheckMatchError: CHECK-NOT matched forbidden text`。
+  - 若 `CHECK-NOT-REGEX` 违反禁止区间，则失败，错误短语为 `IrcheckMatchError: CHECK-NOT-REGEX matched forbidden text`。
 
 ## 额外补充
 
@@ -351,13 +400,26 @@ assert result.exit_code == 0
   - 分隔符前后不允许出现空 block（否则视为解析失败）。
 - 推荐写法：
   - 先用 `CHECK:` 选择一个稳定锚点（例如 `func.func @main`），再用 `CHECK:` / `CHECK-NEXT:` 逐步收紧局部相邻关系；
-  - 用 `CHECK-NOT:` 表达“在两条 positive check 之间不得出现”的否定约束。
+  - 用 `CHECK-NOT:` 表达“在两条 positive check 之间不得出现”的否定约束；
+  - 当维度、符号名或 SSA 名是动态值时，优先用 `CHECK-REGEX:` 定义变量，再用 `CHECK-NEXT-REGEX:` / `CHECK-NOT-REGEX:` 复用。
 - 最小示例：
 
 ```mlir
 // COMPILE_ARGS: --pass lower-nn
 // CHECK: kernel.add
 // CHECK-NOT: nn.add
+
+builtin.module { /* ... */ }
+```
+
+- 正则 / 变量最小示例：
+
+> `[[NAME:REGEX]]` / `[[NAME]]` 只表示 ircheck 变量占位；IR 自身的字面量 `[` / `]` 仍需单独写作 `\[` / `\]`。
+
+```mlir
+// COMPILE_ARGS: --pass lower-nn
+// CHECK-REGEX: func.func @exp_kernel\(%arg0 : !nn.memory<\[[[M:{dim}]], [[N:{dim}]]\], \[[[N]], 1\], f32, #nn.space<global>>\) -> !nn.memory<\[[[M]], [[N]]\], \[[[N]], 1\], f32, #nn.space<global>>
+// CHECK-NEXT-REGEX: "dma.alloc"() .* -> !nn.memory<\[[[M]], [[N]]\], \[[[N]], 1\], f32, #nn.space<global>>
 
 builtin.module { /* ... */ }
 ```
@@ -386,6 +448,7 @@ builtin.module { /* ... */ }
 - `assert "X" not in actual_ir` -> `// CHECK-NOT: X`
   - 建议把 `CHECK-NOT` 放在两个 positive check 之间（或文件末尾），以明确其禁止区间，避免歧义。
 - “相邻行”断言 -> `// CHECK: <anchor>` + `// CHECK-NEXT: <next>`
+- 动态维度 / 动态符号名断言 -> `// CHECK-REGEX: <...[[NAME:REGEX]]...>` + `// CHECK-NEXT-REGEX: <...[[NAME]]...>`
 
 ### 稳定接口范围（可复用表述）
 
@@ -408,8 +471,8 @@ builtin.module { /* ... */ }
   - `pytest -q test/tools/test_ircheck_matcher.py`
   - `pytest -q test/tools/test_ircheck_cli.py`
 - 测试目标：
-  - parser：能稳定解析头部注释区、提取 compile_args 与检查指令，并对缺失/重复指令返回稳定错误短语；`parse_ircheck_file` 对多 case 分隔符稳定拒绝。
+  - parser：能稳定解析头部注释区、提取 compile_args 与六类检查指令，并对缺失/重复指令、非法 regex 语法、未定义变量、重复变量、`CHECK-NOT-REGEX` 非法定义变量返回稳定错误短语；`parse_ircheck_file` 对多 case 分隔符稳定拒绝。
   - runner：能通过 pass registry 解析 `--pass/--pipeline` 与其 options 形式并执行，输出 `IrcheckResult` 的 `ok/exit_code/message` 行为与本文件一致；支持多 case 顺序执行与 fail-fast。
   - runner：多 step 失败时必须返回 step 序号/类型/名字，并按失败前一刻 IR 填充 `actual_ir`；覆盖 `expectation/tools/ircheck/multi_pass_fail.py` 与 `test/tools/test_ircheck_runner.py` 对应用例。
-  - matcher：能按本文件“检查语义”规则稳定处理 `CHECK/CHECK-NEXT/CHECK-NOT` 的顺序、相邻与区间约束，并在失败时返回稳定错误短语。
+  - matcher：能按本文件“检查语义”规则稳定处理 `CHECK/CHECK-NEXT/CHECK-NOT` 与 `CHECK-REGEX/CHECK-NEXT-REGEX/CHECK-NOT-REGEX` 的顺序、相邻、区间与变量复用约束，并在失败时返回稳定错误短语。
   - cli：开启 `-irdump` 后需生成 `.irdump/<stem>/case_01/`、`.irdump/<stem>/case_02/` 等目录与逐 step IR 文件；覆盖 `expectation/tools/ircheck/ir_dump_true.py` 与 `test/tools/test_ircheck_cli.py` 对应用例。
