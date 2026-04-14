@@ -9,11 +9,14 @@
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`jcc你莫辜负`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)
 - `功能实现`：
   - [`kernel_gen/dsl/emit_mlir.py`](../../kernel_gen/dsl/emit_mlir.py)
   - [`kernel_gen/dsl/mlir_gen/emit/__init__.py`](../../kernel_gen/dsl/mlir_gen/emit/__init__.py)
+  - [`kernel_gen/dsl/mlir_gen/emit/call_arch.py`](../../kernel_gen/dsl/mlir_gen/emit/call_arch.py)
+  - [`kernel_gen/dsl/mlir_gen/emit/call_dma.py`](../../kernel_gen/dsl/mlir_gen/emit/call_dma.py)
+  - [`kernel_gen/dsl/mlir_gen/emit/call_symbol.py`](../../kernel_gen/dsl/mlir_gen/emit/call_symbol.py)
   - [`kernel_gen/dsl/mlir_gen/emit/context.py`](../../kernel_gen/dsl/mlir_gen/emit/context.py)
   - [`kernel_gen/dsl/mlir_gen/emit/dispatch.py`](../../kernel_gen/dsl/mlir_gen/emit/dispatch.py)
   - [`kernel_gen/dsl/mlir_gen/emit/control_flow.py`](../../kernel_gen/dsl/mlir_gen/emit/control_flow.py)
@@ -22,6 +25,9 @@
   - [`kernel_gen/dsl/mlir_gen/emit/shape_utils.py`](../../kernel_gen/dsl/mlir_gen/emit/shape_utils.py)
 - `test`：
   - [`test/dsl/test_emit_mlir.py`](../../test/dsl/test_emit_mlir.py)
+  - [`test/dsl/mlir_gen/emit/test_call_arch.py`](../../test/dsl/mlir_gen/emit/test_call_arch.py)
+  - [`test/dsl/mlir_gen/emit/test_call_dma.py`](../../test/dsl/mlir_gen/emit/test_call_dma.py)
+  - [`test/dsl/mlir_gen/emit/test_call_symbol.py`](../../test/dsl/mlir_gen/emit/test_call_symbol.py)
   - [`test/dsl/mlir_gen/emit/test_dispatch.py`](../../test/dsl/mlir_gen/emit/test_dispatch.py)
   - [`test/dsl/mlir_gen/emit/test_control_flow.py`](../../test/dsl/mlir_gen/emit/test_control_flow.py)
   - [`test/dsl/mlir_gen/emit/test_value.py`](../../test/dsl/mlir_gen/emit/test_value.py)
@@ -52,7 +58,17 @@
 
 - `kernel_gen/dsl/mlir_gen/emit/dispatch.py`
   - 仅负责节点类型到处理函数的路由。
+  - `PythonCalleeCallAST` 的稳定入口通过 `call_dispatch(...)` 收口为 `func.call` 路径。
   - 不直接实现 nn/dma/arch/symbol family 细节。
+- `kernel_gen/dsl/mlir_gen/emit/call_dma.py`
+  - 只处理 `DmaAllocAST` / `DmaCopyAST` / `DmaCastAST` / `DmaViewAST` / `DmaReshapeAST` / `DmaFlattenAST` / `DmaFreeAST` / `LoadAST` / `StoreAST` 这组 DMA family AST。
+  - 统一复用既有 lowering，作为 DMA family 的最小拆分入口。
+- `kernel_gen/dsl/mlir_gen/emit/call_symbol.py`
+  - 只处理 `SymbolToFloatAST` / `TensorAxisAccessAST`，以及最终走 `symbol.for` 路径的 `ForAST`。
+  - 不直接承接 DMA / NN / arch family 细节。
+- `kernel_gen/dsl/mlir_gen/emit/call_arch.py`
+  - 只处理 `ArchQueryAST` / `ArchGetDynamicMemoryAST` / `ArchLaunchKernelAST` 这组 arch family AST。
+  - `ArchBarrierAST` 仍由核心 emit 入口直接收口，不在该拆分入口内重复定义语义。
 - `kernel_gen/dsl/mlir_gen/emit/control_flow.py`
   - 只处理控制流结构节点（当前聚焦 `ForAST`）。
   - Assign/Return 在 AST 解析阶段折叠，不作为 emit 输入节点。
@@ -161,6 +177,21 @@ value = emit_mlir(expr_ast, ctx)
 ## 额外补充
 
 - `emit_mlir` 必须覆盖 AST 中每一种节点类型。
+- AST -> MLIR owner 边界如下；除表中“结构/签名 owner”外，其余 node-level lowering 都不得在 `mlir_gen` / `ast_visitor` 里复制一套并行规则：
+
+  | AST 家族 | 节点 | owner | lowering / 行为 |
+  | --- | --- | --- | --- |
+  | 结构容器 | `ModuleAST` / `FunctionAST` / `BlockAST` | `mlir_gen` builder / `AstVisitor` | 组织 `builtin.module`、`func.func` 与 block 顺序；不直接发射单个 emit op。 |
+  | 签名输入 | `TensorAST` / `ScalarArgAST` | `signature.py` / `function_builder.py` | 决定当前已支持的 `func.func` 输入签名与 block args；emit 只读取既有 SSA 绑定。 |
+  | AST-only 签名节点 | `PtrArgAST` | AST / parser | 当前不进入 builder/signature 支持面；若流入 `mlir_gen`，必须按实现现状报 `Unsupported input type`。 |
+  | 值与索引 | `ConstAST` / `VarAST` | `value.py` + core emit | 生成 builtin literal / `symbol.const`，或从 cache / `ctx.symbols` 复用已有 SSA value。 |
+  | symbol family | `ForAST` / `TensorAxisAccessAST` / `SymbolToFloatAST` | `control_flow.py` / `call_symbol.py` + core emit | 生成 `symbol.for`、`symbol.get_dim`、`symbol.get_stride`、`symbol.to_float`。 |
+  | DMA family | `LoadAST` / `StoreAST` / `DmaAllocAST` / `DmaCopyAST` / `DmaCastAST` / `DmaViewAST` / `DmaReshapeAST` / `DmaFlattenAST` / `DmaFreeAST` | `call_dma.py` + core emit | 生成 `dma.load/store/slice/deslice/alloc/copy/cast/view/reshape/free`。 |
+  | NN family | `BinaryExprAST` / `CompareExprAST` / `NnBroadcastAST` / `NnBroadcastToAST` / `NnTransposeAST` / `NnUnaryAST` / `NnReduceAST` / `NnSoftmaxAST` / `Img2ColAST` / `MatmulAST` / `FCAST` / `ConvAST` | core emit + `type_utils.py` / `shape_utils.py` | 生成 `nn.*` 或 raw `nn + dma` 组合；具体 helper 不再使用旧 `CallAST(...)` 口径。 |
+  | arch family | `ArchQueryAST` / `ArchGetDynamicMemoryAST` / `ArchLaunchKernelAST` | `call_arch.py` + core emit | 生成 `arch.get_*` / `arch.get_dynamic_memory` / `arch.launch`。 |
+  | arch barrier | `ArchBarrierAST` | core emit | 生成无返回值 `arch.barrier`，不在 `call_arch.py` 内重复定义。 |
+  | Python callee | `PythonCalleeCallAST` | `dispatch.py` + core emit | 通过 callee registry 生成 `func.call`；不得混入 helper family 细节。 |
+
 - 默认使用当前项目的目标 dialect（例如 `nn`），但节点到 op 的映射必须清晰可追踪。
 - `LoopRange` 触发的 `ForAST` 必须走 `symbol.for` 分支，并保持 `SymbolValueType` / `SymbolIterType` 直接作为 DMA operand 传递。
 - 当 `CompareExprAST` 的两侧均为 `!symbol.int<"expr">` 时，symbol compare family 必须一一 lowering 为对应 `symbol` dialect op，且结果类型统一为 `i1`：
@@ -175,7 +206,7 @@ value = emit_mlir(expr_ast, ctx)
 - 当 tensor `truediv` 两侧 dtype 不一致时，必须按固定优先级决议目标 dtype，并在 lowering 中插入 `dma.cast`；`nn.truediv` 的结果类型必须与决议 dtype 一致。
 - 当二元算术 mixed dtype 需要插入显式 cast 时（由上游判定并生成 `DmaCastAST`），`emit_mlir` 必须发射 `dma.cast` 并保证 `nn.sub` 的结果类型与 dtype promotion 结果一致；当前公开覆盖仅限 `nn.sub` 的 mixed dtype 场景。
 - 当 `BinaryExprAST(op="mul")` 走 memory 路径时，`emit_mlir` 必须负责 `dtype promotion + dma.cast + broadcast` 的完整对齐流程：`element_type` 不一致时按 `i32 < f16 < f32` 决议目标类型并插入最少 `dma.cast`，shape 不一致时按 implicit broadcast 对齐；若 `space` 不一致必须报错 `Binary op operands must have the same space`，若 dtype 组合不受支持则报错 `Binary op operands must have the same element_type`。
-- 当 `CallAST(name="img2col1d"| "img2col2d")` 进入 emit 阶段时，helper 参数必须一一映射到 `nn.img2col1d/nn.img2col2d` 属性与 operand；若参数个数或类型不匹配，必须在 emit 入口报错并保留位置。
+- 当 `Img2ColAST(kind="img2col1d" | "img2col2d")` 进入 emit 阶段时，helper 参数必须一一映射到 `nn.img2col1d/nn.img2col2d` 属性与 operand；若参数个数或类型不匹配，必须在 emit 入口报错并保留位置。
 - DMA/NN helper lowering 矩阵与失败边界如下（emit 阶段必须在入口校验并保留错误位置）：
 
   **DMA helper lowering**
@@ -220,39 +251,54 @@ value = emit_mlir(expr_ast, ctx)
   - `conv` 的输出类型必须与 `kernel_gen.operation.nn.conv(...)` 的公式保持一致；符号输出维度允许以等价表达式形式出现。
   - 非法 stride/padding、非法 rank、dtype/space 不一致、输入通道不匹配等情况必须在 emit 入口显式失败；不得生成 `nn.conv`。
 
-节点映射示例：
+节点映射补充示例：
 
-- `ConstAST`：生成常量或等价字面量 op/value。
-- `BinaryExprAST(add/sub/mul/div/floordiv)`：生成对应的二元算术 op。
+- `ModuleAST` / `FunctionAST` / `BlockAST`：由 `mlir_gen` builder / `AstVisitor` 负责组织 `builtin.module`、`func.func` 与 block 顺序；它们不是单个 emit op 的 direct input。
+- `TensorAST` / `ScalarArgAST`：由签名 builder 决定 block args / `func.func` 输入类型；emit 只消费 `ctx.symbols` / `ctx.types` 中已有绑定。
+- `PtrArgAST`：当前只保留 AST / parser 层签名语义，不属于已支持的 emit 输入绑定；若误流入 builder/signature，必须报 `Unsupported input type`。
+- `ConstAST`：生成常量或等价字面量 op/value；symbol 整数路径可生成 `symbol.const`。
+- `VarAST`：从 `ctx.symbols` / cache 读取既有 SSA value，不得隐式制造新的变量 op。
+- `BinaryExprAST(add/sub/mul/div/floordiv)`：生成对应的 symbol / `nn` 二元算术 op，并按本文件约束执行 promotion / broadcast。
 - `CompareExprAST(eq/ne/lt/le/gt/ge)`：在 memory 路径生成对应 `nn` 比较 op（结果 `element_type` 为 `i1`），必要时隐式 broadcast；在 symbol 路径按 DSL 写法一一生成 `symbol.eq/symbol.ne/symbol.lt/symbol.le/symbol.gt/symbol.ge`。
-- `LoadAST`：生成张量读取相关 op/value；当携带 `sizes` 时发射 `dma.slice`。
-- `StoreAST`：生成张量写入相关 op；当携带 `sizes` 时发射 `dma.deslice`。
-- `CallAST(alloc/copy/cast/view/reshape/flatten)`：生成对应 DMA memory 结果。
-- `CallAST(view)`：一一生成 `dma.view` memory 结果。
-- `CallAST(float(symbol.int))`：生成 `symbol.to_float`，返回 `f32`。
-- `CallAST(free)`：发射单个无返回值 `dma.free` 语句。
-- `CallAST(img2col1d/img2col2d)`：分别生成 `nn.img2col1d/nn.img2col2d` memory 结果。
-- `CallAST(matmul)`：生成 `nn.matmul` memory 结果；`element_type` 不一致必须报错，不得插入 `dma.cast`。
-- `CallAST(conv)`：生成 raw `nn.img2col2d + dma.reshape + nn.matmul + dma.reshape` memory 结果。
-- `ForAST`：当来源于 `LoopRange(start, end, step)` 且边界为 symbol 整数时，生成 `symbol.for`；`start/end/step` 保持 `!symbol.int<"expr">`，循环块参数 `it` 保持 `!symbol.iter<...>`；循环体内若包含 `dma.slice` / `dma.deslice`，其 DMA 标量 operand 直接复用这些 symbol value，不生成 `arith.index_cast`。
+- `LoadAST`：生成读取相关 op/value；无 `sizes` 时发射 `dma.load`，携带 `sizes` 时发射 `dma.slice` 并返回 alloc 结果。
+- `StoreAST`：生成写入相关 op；无 `sizes` 时发射 `dma.store`，携带 `sizes` 时发射 `dma.deslice`。
+- `DmaAllocAST` / `DmaCopyAST` / `DmaCastAST` / `DmaViewAST` / `DmaReshapeAST` / `DmaFlattenAST` / `DmaFreeAST`：分别生成 `dma.alloc` / `dma.copy` / `dma.cast` / `dma.view` / `dma.reshape` / 一维 `dma.reshape` / `dma.free`。
+- `NnBroadcastAST`：生成 `nn.broadcast`，结果类型必须与 target memory type 一致。
+- `NnBroadcastToAST`：按 `target_shape + space` 生成 `nn.broadcast`，输出 shape 由 `target_shape` 推导。
+- `NnTransposeAST`：生成 `nn.transpose`。
+- `NnUnaryAST`：当前公开覆盖至少包含 `kind="exp"` -> `nn.exp`；其余 unary kind 是否开放，以实现和测试的既有口径为准，本轮不新增新 unary 合同。
+- `NnReduceAST`：按 `kind` 生成 `nn.reduce_sum` / `nn.reduce_min` / `nn.reduce_max`。
+- `NnSoftmaxAST`：生成 `nn.softmax`。
+- `Img2ColAST(kind="img2col1d" | "img2col2d")`：分别生成 `nn.img2col1d` / `nn.img2col2d` memory 结果。
+- `MatmulAST`：生成 `nn.matmul` memory 结果；`element_type` 不一致必须报错，不得插入 `dma.cast`。
+- `FCAST`：生成 `nn.transpose(weight) + nn.matmul(value, transposed_weight)` 的两段组合，输出 shape 为 `[M, N]`。
+- `ConvAST`：生成 raw `nn.img2col2d + dma.reshape + nn.matmul + dma.reshape` memory 结果，不得生成 `nn.conv`。
+- `SymbolToFloatAST`：生成 `symbol.to_float`，返回 `f32`。
 - `TensorAxisAccessAST(kind="shape")`：生成 `symbol.get_dim`，返回 `!symbol.int<"...">`。
 - `TensorAxisAccessAST(kind="stride")`：生成 `symbol.get_stride`，返回 `!symbol.int<"...">`。
-- `ArchQueryAST(query_name="get_block_id")`：生成 `arch.get_block_id`，返回 `!symbol.int<"block_id">`。
-- `ArchQueryAST(query_name="get_block_num")`：生成 `arch.get_block_num`，返回 `!symbol.int<"block_num">`。
-- `ArchQueryAST(query_name="get_subthread_id")`：生成 `arch.get_subthread_id`，返回 `!symbol.int<"subthread_id">`。
-- `ArchQueryAST(query_name="get_subthread_num")`：生成 `arch.get_subthread_num`，返回 `!symbol.int<"subthread_num">`。
-- `ArchQueryAST(query_name="get_thread_id")`：生成 `arch.get_thread_id`，返回 `!symbol.int<"thread_id">`。
-- `ArchQueryAST(query_name="get_thread_num")`：生成 `arch.get_thread_num`，返回 `!symbol.int<"thread_num">`。
+- `ForAST`：当来源于 `LoopRange(start, end, step)` 且边界为 symbol 整数时，生成 `symbol.for`；`start/end/step` 保持 `!symbol.int<"expr">`，循环块参数 `it` 保持 `!symbol.iter<...>`；循环体内相关 DMA operand 直接复用这些 symbol value，不生成 `arith.index_cast`。
+- `ArchQueryAST(query_name="get_block_id" | "get_block_num" | "get_subthread_id" | "get_subthread_num" | "get_thread_id" | "get_thread_num")`：生成对应 `arch.get_*`，返回匹配的 `!symbol.int<"...">`。
 - `ArchGetDynamicMemoryAST(space=...)`：生成 `arch.get_dynamic_memory`，返回 `!nn.memory<[?], [1], i8, #nn.space<space>>`。
 - `ArchBarrierAST(visibility, scope)`：生成无返回值 `arch.barrier {scope = #arch.scope<...>, visibility = [#nn.space<...>, ...]}`。
 - `ArchLaunchKernelAST(callee, block, thread, subthread, args)`：生成无返回值 `arch.launch<%block, %thread, %subthread>(@callee, %arg0, %arg1, ...) : ... -> ()`。
+- `PythonCalleeCallAST(callee, args)`：通过 callee registry 生成 `func.call @callee(args...)`，且 callee 必须预先存在于 `mlir_gen` 的闭包收集结果中。
 
 ## 测试
 
 - 测试文件：[`test/dsl/test_emit_mlir.py`](../../test/dsl/test_emit_mlir.py)
+- 拆分测试文件：
+  - [`test/dsl/mlir_gen/emit/test_call_arch.py`](../../test/dsl/mlir_gen/emit/test_call_arch.py)
+  - [`test/dsl/mlir_gen/emit/test_call_dma.py`](../../test/dsl/mlir_gen/emit/test_call_dma.py)
+  - [`test/dsl/mlir_gen/emit/test_call_symbol.py`](../../test/dsl/mlir_gen/emit/test_call_symbol.py)
+  - [`test/dsl/mlir_gen/emit/test_dispatch.py`](../../test/dsl/mlir_gen/emit/test_dispatch.py)
+  - [`test/dsl/mlir_gen/emit/test_control_flow.py`](../../test/dsl/mlir_gen/emit/test_control_flow.py)
+  - [`test/dsl/mlir_gen/emit/test_value.py`](../../test/dsl/mlir_gen/emit/test_value.py)
+  - [`test/dsl/mlir_gen/emit/test_type_utils.py`](../../test/dsl/mlir_gen/emit/test_type_utils.py)
+  - [`test/dsl/mlir_gen/emit/test_shape_utils.py`](../../test/dsl/mlir_gen/emit/test_shape_utils.py)
 - 集成测试文件：[`test/dsl/test_mlir_gen.py`](../../test/dsl/test_mlir_gen.py)
 - 补充测试文件：[`test/dsl/test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)
 - 执行命令（emit 单测）：`pytest -q test/dsl/test_emit_mlir.py`
+- 执行命令（emit 拆分单测）：`pytest -q test/dsl/mlir_gen/emit`
 - 执行命令（emit 端到端回归）：`pytest -q test/dsl/test_mlir_gen.py`
 - 执行命令（ast_visitor 负路径）：`pytest -q test/dsl/test_ast_visitor.py`
 - 拆分归属：EMIT-001~EMIT-028、EMIT-033~EMIT-035 默认归属 `test_emit_mlir.py`；EMIT-029 默认归属 `test_mlir_gen.py`；EMIT-031/031A/032 归属 `test_ast_visitor.py`、`test_mlir_gen.py` 与 `expectation/dsl/mlir_gen/dialect/arch/*` 的联合回归。当前 `barrier/launch` expectation 与 dedicated 测试缺口在下游实现+补测阶段补齐。
@@ -329,9 +375,9 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-002B：`CompareExprAST(op="ne")` memory 路径在不可 broadcast 或 element type/space 不一致时必须报错并保持固定诊断文案。（`test_emit_mlir_compare_memory_mismatch_reports_diagnostics`）
   - EMIT-028：`nn.sub` mixed dtype promotion 触发 `dma.cast` 并保持 `nn.sub` 与 `func.return` 的结果类型与 promotion 结果一致。（`test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast`）
   - EMIT-033：`nn.add` mixed memory+const/symbol lowering 需按 `i32 < f16 < f32` 执行 dtype promotion，`!symbol.int` 按 `i32` 参与决议；仅允许一侧为 memory 并按需插入 `dma.cast`，纯 scalar/symbol 双侧输入必须拒绝。（`test/dialect/test_nn_dialect.py::test_add_op_accepts_memory_const_rhs`、`test/dialect/test_nn_dialect.py::test_add_op_accepts_memory_symbol_rhs`、`test/dialect/test_nn_dialect.py::test_add_op_rejects_pure_scalar_operands`）
-  - EMIT-034：`CallAST(img2col1d)` 必须 lowering 为 `nn.img2col1d`，并保持参数到属性/operand 的节点级一一映射；禁止引入 kernel dialect / `nn_lowering` / `cpu::img2col2d` 语义。（`test/dsl/test_emit_mlir.py::test_emit_mlir_img2col1d_lowering`）
-  - EMIT-035：`CallAST(img2col2d)` 必须 lowering 为 `nn.img2col2d`，并与 `ForAST + dma.slice/dma.deslice` 协同路径保持节点级映射一致，循环迭代与 DMA 标量 operand 继续保持 `!symbol.int` 语义。（`test/dsl/test_emit_mlir.py::test_emit_mlir_img2col2d_with_loop_slice_deslice_lowering`、`test/dsl/test_mlir_gen.py::test_build_func_op_supports_symbolic_for_loop_dma_without_return`、`test/dsl/test_ast_visitor.py::test_build_func_op_supports_symbolic_for_loop_dma_without_return`）
+  - EMIT-034：`Img2ColAST(kind="img2col1d")` 必须 lowering 为 `nn.img2col1d`，并保持参数到属性/operand 的节点级一一映射；禁止引入 kernel dialect / `nn_lowering` / `cpu::img2col2d` 语义。（`test/dsl/test_emit_mlir.py::test_emit_mlir_img2col1d_lowering`）
+  - EMIT-035：`Img2ColAST(kind="img2col2d")` 必须 lowering 为 `nn.img2col2d`，并与 `ForAST + dma.slice/dma.deslice` 协同路径保持节点级映射一致，循环迭代与 DMA 标量 operand 继续保持 `!symbol.int` 语义。（`test/dsl/test_emit_mlir.py::test_emit_mlir_img2col2d_with_loop_slice_deslice_lowering`、`test/dsl/test_mlir_gen.py::test_build_func_op_supports_symbolic_for_loop_dma_without_return`、`test/dsl/test_ast_visitor.py::test_build_func_op_supports_symbolic_for_loop_dma_without_return`）
   - EMIT-036：`float(symbol.int)` 必须 lowering 为 `symbol.to_float`，结果类型固定为 `f32`；source 非 `!symbol.int<"...">` 时必须报具体类型错误。（下游待补测试映射：`test_emit_mlir_lowers_symbol_to_float`）
-  - EMIT-C1A：`CallAST(matmul)` 必须 lowering 为 `nn.matmul`，`element_type` 不一致必须报错 `matmul element_type must match`；不得回退为 `Unsupported call expression`。（`test_emit_mlir_matmul_lowering`、`test_build_func_op_supports_matmul_helper_call`）
-  - EMIT-C1C：`CallAST(conv)` 必须在 emit 层分解为 raw `nn.img2col2d + dma.reshape + nn.matmul + dma.reshape`，不得生成 `nn.conv`；符号输出维度与非法参数错误口径需保持稳定。（`test_build_func_op_supports_conv_helper_call`、`test_build_func_op_supports_symbolic_conv_helper_call`、`test_build_func_op_conv_helper_rejects_invalid_stride`、`test_build_func_op_conv_helper_rejects_invalid_arity`）
+  - EMIT-C1A：`MatmulAST` 必须 lowering 为 `nn.matmul`，`element_type` 不一致必须报错 `matmul element_type must match`；不得回退为 `Unsupported call expression`。（`test_emit_mlir_matmul_lowering`、`test_build_func_op_supports_matmul_helper_call`）
+  - EMIT-C1C：`ConvAST` 必须在 emit 层分解为 raw `nn.img2col2d + dma.reshape + nn.matmul + dma.reshape`，不得生成 `nn.conv`；符号输出维度与非法参数错误口径需保持稳定。（`test_build_func_op_supports_conv_helper_call`、`test_build_func_op_supports_symbolic_conv_helper_call`、`test_build_func_op_conv_helper_rejects_invalid_stride`、`test_build_func_op_conv_helper_rejects_invalid_arity`）
   - EMIT-C1B：`conv2d_img2col2d_tiled_npu_demo(...)` 这类 `loop + slice + img2col2d + reshape + matmul + deslice + return` 前端样例，emit 层必须允许 `alloc` 结果作为 `deslice` target，并生成 raw IR 中的循环、`dma.alloc/slice/reshape/deslice`、`nn.img2col2d`、`nn.matmul` 与 `func.return`。（`test_emit_mlir_supports_conv2d_img2col2d_tiled_npu_demo_chain`、`test_build_func_op_supports_conv2d_img2col2d_tiled_npu_demo`、`test_build_func_op_supports_conv2d_img2col2d_tiled_npu_demo_frontend`）

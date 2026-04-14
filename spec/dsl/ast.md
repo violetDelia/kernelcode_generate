@@ -10,7 +10,7 @@
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`小李飞刀`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/dsl/ast.md`](../../spec/dsl/ast.md)
 - `功能实现`：[`kernel_gen/dsl/ast/__init__.py`](../../kernel_gen/dsl/ast/__init__.py)
 - `test`：[`test/dsl/ast/test_parser.py`](../../test/dsl/ast/test_parser.py)
@@ -44,6 +44,11 @@
 - [immutable]只提供ast节点定义以及将函数翻译为ast树的能力。
 - AST 节点仅表达前端语义，不携带 `target` 或 `hardware` 字段；`target` 为目标后端名称，`hardware` 为硬件参数表（字段范围见 [`spec/target/registry.md`](../../spec/target/registry.md)）。
 - target/硬件相关信息仅允许在后续 lowering 或 emit 阶段通过上下文注入，AST 不解析也不回写这些字段。
+- AST -> MLIR owner 边界固定如下：
+  - `ModuleAST` / `FunctionAST` / `BlockAST` 只承担结构容器职责，由 `mlir_gen` builder / `AstVisitor` 组织，不直接定义单个 node-level lowering。
+  - `TensorAST` / `ScalarArgAST` 是当前 builder / signature 已支持的签名输入，决定 `func.func` 输入或 block args；emit 阶段只消费它们对应的既有 SSA 绑定。
+  - `PtrArgAST` 是 AST 层的指针签名节点，但当前 builder / signature 尚未支持；若进入 `mlir_gen` / `signature`，必须按实现现状报 `Unsupported input type`，不得在 spec 中误写为已支持的 block arg 输入。
+  - `ConstAST` / `VarAST` / `ForAST` / `LoadAST` / `StoreAST` / `DmaAllocAST` / `DmaCopyAST` / `DmaCastAST` / `DmaViewAST` / `DmaReshapeAST` / `DmaFlattenAST` / `DmaFreeAST` / `NnBroadcastAST` / `NnBroadcastToAST` / `NnTransposeAST` / `NnUnaryAST` / `NnReduceAST` / `NnSoftmaxAST` / `Img2ColAST` / `MatmulAST` / `FCAST` / `ConvAST` / `BinaryExprAST` / `CompareExprAST` / `PythonCalleeCallAST` / `SymbolToFloatAST` / `TensorAxisAccessAST` / `ArchQueryAST` / `ArchGetDynamicMemoryAST` / `ArchBarrierAST` / `ArchLaunchKernelAST` 都属于 node-level emit 输入，具体 lowering 合同以 [`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md) 为准。
 - `MemorySpace` 由 [`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md) 定义；AST 仅在 helper 参数校验中引用该枚举，不定义成员或语义。
 - `ArchQueryAST` 归属 AST 层，仅覆盖无参 arch builtin 查询入口，结果类型与 target/hardware 的解析由下游层负责。
 - `for` 循环仅支持 `range(...)`、`LoopRange(...)` 或 `loop(...)` 的 1~3 参数形式，并解析为 `ForAST` 的 `start/end/step` 字段。
@@ -181,7 +186,7 @@ Diagnostic(message="Unsupported syntax", location=SourceLocation(3, 4))
 参数说明：
 
 - `name` (`str`)：函数名。
-- `inputs` (`list[TensorAST|ScalarArgAST]`)：输入参数。
+- `inputs` (`list[TensorAST|ScalarArgAST|PtrArgAST]`)：输入参数。
 - `outputs` (`list[TensorAST|ScalarArgAST]`)：输出参数。
 - `body` (`BlockAST`)：函数体。
 - `location` (`SourceLocation|None`)：可选源码位置。
@@ -201,6 +206,7 @@ FunctionAST(name="kernel", inputs=[], outputs=[], body=BlockAST([]))
 注意事项：
 
 - `diagnostics` 仅用于记录解析阶段问题。
+- `inputs` 允许保留 `PtrArgAST` 这类 AST 层签名节点；但当前 builder / signature 只承诺支持 `TensorAST` / `ScalarArgAST`，`PtrArgAST` 流入 `mlir_gen` 时仍按实现现状报 `Unsupported input type`。
 - `outputs` 只表示显式返回注解解析结果，不等价于“函数体是否显式返回值”。
 - `returns_none=True` 仅表示函数显式写了 `-> None`；不能把“无返回注解”误判成 `returns_none=True`。
 
@@ -208,7 +214,7 @@ FunctionAST(name="kernel", inputs=[], outputs=[], body=BlockAST([]))
 
 ### `FunctionAST.iter_inputs()`
 
-功能说明：迭代 `inputs` 中的 `TensorAST` 与 `ScalarArgAST`。
+功能说明：迭代 `inputs` 中的 `TensorAST`、`ScalarArgAST` 与 `PtrArgAST`。
 
 参数说明：无。
 
@@ -220,7 +226,7 @@ list(func_ast.iter_inputs())
 
 注意事项：返回迭代器视图，不拷贝列表。
 
-返回与限制：返回 `Iterable[TensorAST|ScalarArgAST]`。
+返回与限制：返回 `Iterable[TensorAST|ScalarArgAST|PtrArgAST]`。
 
 ### `BlockAST`
 
@@ -278,6 +284,29 @@ ScalarArgAST(name="n", value_type=int)
 ```
 
 注意事项：仅保存类型信息，不负责类型转换。
+
+返回与限制：返回不可变的数据结构实例。
+
+### `PtrArgAST`
+
+功能说明：函数签名中的指针参数节点。
+
+参数说明：
+
+- `name` (`str`)：参数名。
+- `dtype` (`object`)：pointee dtype。
+- `location` (`SourceLocation|None`)：可选源码位置。
+
+使用示例：
+
+```python
+PtrArgAST(name="data", dtype=f32)
+```
+
+注意事项：
+
+- 该节点只承载 AST / parser 层的指针签名语义，不提供 shape/stride 信息。
+- 当前 builder / signature 仍不支持把 `PtrArgAST` lowering 为 `func.func` 输入；若流入 `mlir_gen`，必须按实现现状报 `Unsupported input type`。
 
 返回与限制：返回不可变的数据结构实例。
 
