@@ -1,7 +1,7 @@
 """ircheck matcher tests.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 kernel_gen/tools/ircheck.py 的检查语义实现：`CHECK:` / `CHECK-NEXT:` / `CHECK-NOT:`
@@ -197,3 +197,150 @@ def test_match_checks_check_not_after_last_positive_fails() -> None:
     assert message is not None
     assert message.startswith("IrcheckMatchError: CHECK-NOT matched forbidden text")
 
+
+# TC-IRCHECK-MATCH-006
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-14 14:10 +0800
+# 最近一次运行成功时间: 2026-04-14 14:10 +0800
+# 功能说明: 验证 CHECK-REGEX 与 CHECK-NEXT-REGEX 支持 alias、变量捕获与引用。
+# 使用示例: pytest -q test/tools/test_ircheck_matcher.py -k test_match_checks_regex_capture_and_reference_ok
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_matcher.py
+def test_match_checks_regex_capture_and_reference_ok() -> None:
+    actual_ir = "\n".join(
+        [
+            "%0 = arith.constant 7 : i32",
+            "%1 = arith.constant 7 : i32",
+            "func.return",
+        ]
+    )
+    ok, failed, message = _match_checks(
+        actual_ir,
+        [
+            CheckDirective(kind="CHECK-REGEX", text=r"%[[ID:{int}]] = arith\.constant [[VAL:{int}]] : i32", line_no=1),
+            CheckDirective(kind="CHECK-NEXT-REGEX", text=r"%[[NEXT_ID:{int}]] = arith\.constant [[VAL]] : i32", line_no=2),
+        ],
+        source_path="inline.ircheck",
+    )
+    assert ok is True
+    assert failed is None
+    assert message is None
+
+
+# TC-IRCHECK-MATCH-006A
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-14 15:05 +0800
+# 最近一次运行成功时间: 2026-04-14 15:05 +0800
+# 功能说明: 验证 `{reg}` 同时支持符号名与数字 SSA id，满足 expectation 中 memory/alloc 场景。
+# 使用示例: pytest -q test/tools/test_ircheck_matcher.py -k test_match_checks_reg_alias_matches_symbol_and_ssa_ids
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_matcher.py
+def test_match_checks_reg_alias_matches_symbol_and_ssa_ids() -> None:
+    actual_ir = "\n".join(
+        [
+            'func.func @main(%arg0 : !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>) -> !nn.memory<[M, N], [N, 1], f32, #nn.space<global>> {',
+            '  %0 = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>',
+            '  func.return %0 : !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>',
+        ]
+    )
+    ok, failed, message = _match_checks(
+        actual_ir,
+        [
+            CheckDirective(
+                kind="CHECK-REGEX",
+                text=(
+                    r"func.func @main\(%arg0 : !nn.memory<\[[[M:{reg}]], [[N:{reg}]]\], \[[[N]], 1\], "
+                    r"f32, #nn.space<global>>\) -> !nn.memory<\[[[M]], [[N]]\], \[[[N]], 1\], "
+                    r"f32, #nn.space<global>> {"
+                ),
+                line_no=1,
+            ),
+            CheckDirective(
+                kind="CHECK-NEXT-REGEX",
+                text=(
+                    r"%[[ALLOC:{reg}]] = \"dma.alloc\"\(\) <\{operandSegmentSizes = array<i32: 0>\}> : "
+                    r"\(\) -> !nn.memory<\[[[M]], [[N]]\], \[[[N]], 1\], f32, #nn.space<global>>"
+                ),
+                line_no=2,
+            ),
+            CheckDirective(
+                kind="CHECK-NEXT-REGEX",
+                text=r"func.return %[[ALLOC]] : !nn.memory<\[[[M]], [[N]]\], \[[[N]], 1\], f32, #nn.space<global>>",
+                line_no=3,
+            ),
+        ],
+        source_path="inline.ircheck",
+    )
+    assert ok is True
+    assert failed is None
+    assert message is None
+
+
+# TC-IRCHECK-MATCH-007
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-14 14:10 +0800
+# 最近一次运行成功时间: 2026-04-14 14:10 +0800
+# 功能说明: 验证 CHECK-NEXT-REGEX 只能在下一行命中，否则返回稳定错误短语前缀。
+# 使用示例: pytest -q test/tools/test_ircheck_matcher.py -k test_match_checks_check_next_regex_failure
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_matcher.py
+def test_match_checks_check_next_regex_failure() -> None:
+    actual_ir = "\n".join(
+        [
+            "%0 = arith.constant 7 : i32",
+            "func.return",
+        ]
+    )
+    ok, failed, message = _match_checks(
+        actual_ir,
+        [
+            CheckDirective(kind="CHECK-REGEX", text=r"%[[ID:{int}]] = arith\.constant [[VAL:{int}]] : i32", line_no=1),
+            CheckDirective(kind="CHECK-NEXT-REGEX", text=r"%[[NEXT_ID:{int}]] = arith\.constant [[VAL]] : i32", line_no=2),
+        ],
+        source_path="inline.ircheck",
+    )
+    assert ok is False
+    assert failed is not None
+    assert failed.kind == "CHECK-NEXT-REGEX"
+    assert message is not None
+    assert message.startswith("IrcheckMatchError: CHECK-NEXT-REGEX not found on next line")
+
+
+# TC-IRCHECK-MATCH-008
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-14 14:10 +0800
+# 最近一次运行成功时间: 2026-04-14 14:10 +0800
+# 功能说明: 验证 CHECK-NOT-REGEX 可引用已有变量，并在禁止区间命中时报稳定错误短语。
+# 使用示例: pytest -q test/tools/test_ircheck_matcher.py -k test_match_checks_check_not_regex_failure
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_matcher.py
+def test_match_checks_check_not_regex_failure() -> None:
+    actual_ir = "\n".join(
+        [
+            "%0 = arith.constant 7 : i32",
+            "%1 = arith.constant 7 : i32",
+            "func.return",
+        ]
+    )
+    ok, failed, message = _match_checks(
+        actual_ir,
+        [
+            CheckDirective(kind="CHECK-REGEX", text=r"%[[ID:{int}]] = arith\.constant [[VAL:{int}]] : i32", line_no=1),
+            CheckDirective(kind="CHECK-NOT-REGEX", text=r"%[[NEXT_ID:{int}]] = arith\.constant [[VAL]] : i32", line_no=2),
+            CheckDirective(kind="CHECK", text="func.return", line_no=3),
+        ],
+        source_path="inline.ircheck",
+    )
+    assert ok is False
+    assert failed is not None
+    assert failed.kind == "CHECK-NOT-REGEX"
+    assert message is not None
+    assert message.startswith("IrcheckMatchError: CHECK-NOT-REGEX matched forbidden text")

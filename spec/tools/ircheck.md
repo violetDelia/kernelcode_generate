@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/tools/ircheck.md`](../../spec/tools/ircheck.md)
 - `功能实现`：[`kernel_gen/tools/ircheck.py`](../../kernel_gen/tools/ircheck.py)
 - `test`：
@@ -64,6 +64,7 @@
 
 - 旧测试中若手写字符串断言，可迁移为单文件 case + `ircheck` 检查指令。
 - expectation 文档统一写法：仅 `parse_ircheck_file`、`run_ircheck_file`、`run_ircheck_text` 为稳定合同，其余符号视为内部细节。
+- `expectation/tools/ircheck/README.md` 是 expectation 侧的样例入口与写法说明，文本归属由架构侧或被明确点名的 `spec` 任务维护；实现、测试与审查阶段默认只按其当前公开口径做对照，不把 README 文本改动视为默认写入范围。
 - 固定文本仍优先使用 `CHECK:` / `CHECK-NEXT:` / `CHECK-NOT:`；当维度、符号名或 SSA 名需要“先捕获再复用”时，改用 `CHECK-REGEX:` / `CHECK-NEXT-REGEX:` / `CHECK-NOT-REGEX:`。
 
 ## 限制与边界
@@ -73,10 +74,13 @@
 - 变量捕获语法 `[[NAME:REGEX]]` 与引用语法 `[[NAME]]` 仅在 `CHECK-REGEX*` 指令中生效；变量作用域只限当前 case，不跨 case 共享。
 - `CHECK-NOT-REGEX:` 禁止定义新变量；只允许引用已经在更早的 positive regex check 中成功捕获的变量。
 - IR 自身的字面量 `[` / `]` 不是变量语法的一部分；在正则指令中仍必须单独写作 `\[` / `\]`。
+- `expectation/tools/ircheck/README.md` 属于 expectation 侧合同说明资产：build/review/merge 角色可以按 README 中的稳定示例执行联调与验收，但非架构阶段默认不得把 README 文本刷新混入实现或测试改动一起交付。
+- 当 README 中的最小示例、迁移说明或 expectation 目录说明需要调整时，应先由架构侧或被明确点名的 `spec` 任务完成口径收口；本轮实现链路的默认可合并范围不包含未授权的 README 文本改动。
 - 内置正则别名仅允许出现在 `[[NAME:REGEX]]` 的 `REGEX` 区段内：
-  - `{reg}`：`[A-Za-z_][A-Za-z0-9_]*`
+  - `{reg}`：`(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+)`
   - `{dim}`：`[1-9][0-9]*`
   - `{int}`：`-?[0-9]+`
+- `{reg}` 同时匹配 `M`、`arg0` 这类标识符名与 `0`、`1` 这类纯数字 SSA 后缀；匹配 `%0` 时，前导 `%` 仍写在 alias 外层，例如 `%[[ALLOC:{reg}]]`。
 - 多 case 仅支持固定分隔符 `// -----`；不支持 case 命名、标签跳转或条件执行。
 - `COMPILE_ARGS:` 支持重复 step，并按文本顺序执行；单个 step 仍沿用以下写法：
   - `--pass <pass-name>`
@@ -419,7 +423,8 @@ builtin.module { /* ... */ }
 ```mlir
 // COMPILE_ARGS: --pass lower-nn
 // CHECK-REGEX: func.func @exp_kernel\(%arg0 : !nn.memory<\[[[M:{dim}]], [[N:{dim}]]\], \[[[N]], 1\], f32, #nn.space<global>>\) -> !nn.memory<\[[[M]], [[N]]\], \[[[N]], 1\], f32, #nn.space<global>>
-// CHECK-NEXT-REGEX: "dma.alloc"() .* -> !nn.memory<\[[[M]], [[N]]\], \[[[N]], 1\], f32, #nn.space<global>>
+// CHECK-NEXT-REGEX: %[[ALLOC:{reg}]] = "dma.alloc"() .* -> !nn.memory<\[[[M]], [[N]]\], \[[[N]], 1\], f32, #nn.space<global>>
+// CHECK-NEXT-REGEX: func.return %[[ALLOC]] : !nn.memory<\[[[M]], [[N]]\], \[[[N]], 1\], f32, #nn.space<global>>
 
 builtin.module { /* ... */ }
 ```
