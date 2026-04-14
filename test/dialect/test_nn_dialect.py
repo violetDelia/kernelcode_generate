@@ -217,6 +217,9 @@ def test_memory_type_round_trip() -> None:
     for text in [
         "!nn.memory<[M, ?, 4], [4, 1, ?], i32, #nn.space<global>>",
         "!nn.memory<[], [], i32, #nn.space<global>>",
+        "!nn.memory<[?, 8], [8, 1], i32, #nn.space<tlm1>>",
+        "!nn.memory<[?, 8], [8, 1], i32, #nn.space<tlm2>>",
+        "!nn.memory<[?, 8], [8, 1], i32, #nn.space<tlm3>>",
     ]:
         memory_type = Parser(ctx, text).parse_attribute()
         assert isinstance(memory_type, NnMemoryType)
@@ -226,10 +229,10 @@ def test_memory_type_round_trip() -> None:
 
 # TY-002
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-03-22 13:09:11 +0800
 # 最近一次运行成功时间: 2026-03-22 13:09:11 +0800
-# 功能说明: 验证五种合法 space text form 均可 parse/print round-trip。
+# 功能说明: 验证公开 `global/shared/local/tsm/tlm1/tlm2/tlm3` space text form 均可 parse/print round-trip。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_space_attr_round_trip
 # 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
@@ -241,7 +244,9 @@ def test_space_attr_round_trip() -> None:
         "#nn.space<shared>",
         "#nn.space<local>",
         "#nn.space<tsm>",
-        "#nn.space<tlm>",
+        "#nn.space<tlm1>",
+        "#nn.space<tlm2>",
+        "#nn.space<tlm3>",
     ]:
         space_attr = Parser(ctx, text).parse_attribute()
         assert isinstance(space_attr, NnMemorySpaceAttr)
@@ -255,17 +260,20 @@ def test_space_attr_round_trip() -> None:
 
 # TY-002A
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-03-19 01:01:56 +0800
 # 最近一次运行成功时间: 2026-03-19 01:01:56 +0800
-# 功能说明: 验证非法 space attribute 会触发 verifier。
+# 功能说明: 验证非法或已废弃的 space attribute 会触发 verifier。
 # 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_invalid_space_attr_rejected
 # 对应功能实现文件路径: kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dialect/test_nn_dialect.py
 def test_invalid_space_attr_rejected() -> None:
-    with pytest.raises(VerifyException, match="global/shared/local/tsm/tlm"):
+    with pytest.raises(VerifyException, match="global/shared/local/tsm/tlm1/tlm2/tlm3"):
         _make_space("register").verify()
+
+    with pytest.raises(VerifyException, match="global/shared/local/tsm/tlm1/tlm2/tlm3"):
+        _make_space("tlm").verify()
 
 
 # TY-003
@@ -308,7 +316,7 @@ def test_add_op_verify_success() -> None:
 
 # NN-DIA-043
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-12 11:55:00 +0800
 # 最近一次运行成功时间: 2026-04-12 11:55:00 +0800
 # 功能说明: 验证 nn.div 合法路径可通过 verifier。

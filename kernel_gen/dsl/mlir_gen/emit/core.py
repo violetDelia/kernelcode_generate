@@ -1,7 +1,7 @@
 """AST emit utilities for DSL nodes.
 
 创建者: 小李飞刀
-最后一次更改: 朽木露琪亚
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 提供 AST 节点到 MLIR SSA value/op 的发射入口。
@@ -54,6 +54,7 @@ from kernel_gen.dialect.arch import (
     ArchGetSubthreadNumOp,
     ArchLaunchKernelOp,
     ArchScopeAttr,
+    ArchVisibilityAttr,
     ArchGetThreadIdOp,
     ArchGetThreadNumOp,
 )
@@ -175,14 +176,18 @@ _MEMORY_SPACE_MAP = {
     MemorySpace.SM: "shared",
     MemorySpace.LM: "local",
     MemorySpace.TSM: "tsm",
-    MemorySpace.TLM: "tlm",
+    MemorySpace.TLM1: "tlm1",
+    MemorySpace.TLM2: "tlm2",
+    MemorySpace.TLM3: "tlm3",
 }
 
 _DYNAMIC_MEMORY_SPACE_MAP = {
     MemorySpace.SM: "shared",
     MemorySpace.LM: "local",
     MemorySpace.TSM: "tsm",
-    MemorySpace.TLM: "tlm",
+    MemorySpace.TLM1: "tlm1",
+    MemorySpace.TLM2: "tlm2",
+    MemorySpace.TLM3: "tlm3",
 }
 
 _MLIR_GEN_CALLEE_REGISTRY_CONFIG_KEY = "__mlir_gen_callee_registry__"
@@ -771,11 +776,14 @@ def _build_arch_barrier_visibility_attr(
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 仅接受非空 `list[MemorySpace]`。
-    - 将 `MemorySpace.TSM/TLM` 映射为 `#nn.space<tsm/tlm>`，保持原有顺序。
+    - 仅接受非空 `list[BarrierVisibility]`。
+    - 将 `BarrierVisibility.TSM/TLM` 映射为 `#arch.visibility<tsm/tlm>`，保持原有顺序。
 
     使用示例:
-    - _build_arch_barrier_visibility_attr([MemorySpace.TSM, MemorySpace.TLM], location=None)
+    - _build_arch_barrier_visibility_attr(
+    -     [_KG_OPERATION_ARCH.BarrierVisibility.TSM, _KG_OPERATION_ARCH.BarrierVisibility.TLM],
+    -     location=None,
+    - )
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
@@ -783,18 +791,20 @@ def _build_arch_barrier_visibility_attr(
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
 
-    if not isinstance(visibility, list) or not visibility or not all(isinstance(space, MemorySpace) for space in visibility):
-        raise _LoweringError("barrier visibility must be non-empty MemorySpace list", location=location)
+    if not isinstance(visibility, list) or not visibility or not all(
+        isinstance(space, _KG_OPERATION_ARCH.BarrierVisibility) for space in visibility
+    ):
+        raise _LoweringError("barrier visibility must be non-empty BarrierVisibility list", location=location)
     space_map = {
-        MemorySpace.TSM: "tsm",
-        MemorySpace.TLM: "tlm",
+        _KG_OPERATION_ARCH.BarrierVisibility.TSM: "tsm",
+        _KG_OPERATION_ARCH.BarrierVisibility.TLM: "tlm",
     }
     attrs: list[Attribute] = []
     for space in visibility:
         space_name = space_map.get(space)
         if space_name is None:
-            raise _LoweringError("barrier visibility must be non-empty MemorySpace list", location=location)
-        attrs.append(NnMemorySpaceAttr.from_name(space_name))
+            raise _LoweringError("barrier visibility must be non-empty BarrierVisibility list", location=location)
+        attrs.append(ArchVisibilityAttr.from_name(space_name))
     return ArrayAttr(attrs)
 
 
@@ -2548,7 +2558,9 @@ def _nn_memory_type_to_memory(
         "shared": MemorySpace.SM,
         "local": MemorySpace.LM,
         "tsm": MemorySpace.TSM,
-        "tlm": MemorySpace.TLM,
+        "tlm1": MemorySpace.TLM1,
+        "tlm2": MemorySpace.TLM2,
+        "tlm3": MemorySpace.TLM3,
     }
     space = space_map.get(space_name)
     if space is None:

@@ -1,7 +1,7 @@
 """arch dialect tests.
 
 创建者: 朽木露琪亚
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 覆盖 arch dialect 的固定结果类型查询、动态 memory 入口与 kernel 启动描述的 parse/print 与 verifier。
@@ -53,6 +53,7 @@ from kernel_gen.dialect.arch import (
     ArchLaunchOp,
     ArchLaunchKernelOp,
     ArchScopeAttr,
+    ArchVisibilityAttr,
 )
 from kernel_gen.dialect import (
     Arch as ArchFromPackage,
@@ -148,6 +149,27 @@ def _make_space(name: str) -> NnMemorySpaceAttr:
     return NnMemorySpaceAttr(StringAttr(name))
 
 
+def _make_visibility(name: str) -> ArchVisibilityAttr:
+    """构造 arch.visibility attribute。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 为 `arch.barrier` 复用统一的聚合可见域构造。
+
+    使用示例:
+    - _make_visibility("tsm")
+
+    关联文件:
+    - spec: spec/dialect/arch.md
+    - test: test/dialect/test_arch_dialect.py
+    - 功能实现: kernel_gen/dialect/arch.py
+    """
+
+    return ArchVisibilityAttr.from_name(name)
+
+
 def _make_barrier_visibility() -> ArrayAttr[Attribute]:
     """构造 `arch.barrier` 需要的 visibility 列表。
 
@@ -155,7 +177,7 @@ def _make_barrier_visibility() -> ArrayAttr[Attribute]:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 统一生成 `[#nn.space<tsm>, #nn.space<tlm>]` 供 barrier 成功路径与 round-trip 复用。
+    - 统一生成 `[#arch.visibility<tsm>, #arch.visibility<tlm>]` 供 barrier 成功路径与 round-trip 复用。
 
     使用示例:
     - _make_barrier_visibility()
@@ -166,7 +188,7 @@ def _make_barrier_visibility() -> ArrayAttr[Attribute]:
     - 功能实现: kernel_gen/dialect/arch.py
     """
 
-    return ArrayAttr([_make_space("tsm"), _make_space("tlm")])
+    return ArrayAttr([_make_visibility("tsm"), _make_visibility("tlm")])
 
 
 def _make_dynamic_memory_type(
@@ -248,7 +270,7 @@ def _assert_fixed_result_type(op: Operation, expected: str) -> None:
 
 # TC-ARCH-001
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
+# 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-03-25 04:30:00 +0800
 # 最近一次运行成功时间: 2026-03-25 04:30:00 +0800
 # 测试目的: 验证 arch.get_block_id 固定返回 !symbol.int<"block_id">。
@@ -260,7 +282,7 @@ def test_arch_get_block_id_result_type() -> None:
 
 # TC-ARCH-002
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
+# 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-03-25 04:30:00 +0800
 # 最近一次运行成功时间: 2026-03-25 04:30:00 +0800
 # 测试目的: 验证 arch.get_block_num 固定返回 !symbol.int<"block_num">。
@@ -318,6 +340,29 @@ def test_arch_get_subthread_num_result_type() -> None:
     _assert_fixed_result_type(ArchGetSubthreadNumOp(), "subthread_num")
 
 
+# TC-ARCH-006A
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-15 13:00:00 +0800
+# 最近一次运行成功时间: 2026-04-15 13:00:00 +0800
+# 测试目的: 验证 `#arch.scope<global>` 与 `#arch.visibility<tsm|tlm>` 可 parse/print/verifier。
+# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 对应 spec 文件路径: spec/dialect/arch.md
+def test_arch_scope_and_visibility_attr_round_trip() -> None:
+    ctx = _build_context()
+
+    scope = Parser(ctx, "#arch.scope<global>").parse_attribute()
+    assert isinstance(scope, ArchScopeAttr)
+    scope.verify()
+    assert _print_ir(scope) == "#arch.scope<global>"
+
+    for text in ["#arch.visibility<tsm>", "#arch.visibility<tlm>"]:
+        visibility = Parser(ctx, text).parse_attribute()
+        assert isinstance(visibility, ArchVisibilityAttr)
+        visibility.verify()
+        assert _print_ir(visibility) == text
+
+
 # TC-ARCH-007
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚
@@ -333,6 +378,24 @@ def test_arch_get_dynamic_memory_success() -> None:
     assert _print_ir(op) == "%0 = arch.get_dynamic_memory #nn.space<shared> : !nn.memory<[?], [1], i8, #nn.space<shared>>"
 
 
+# TC-ARCH-007A
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-15 13:00:00 +0800
+# 最近一次运行成功时间: 2026-04-15 13:00:00 +0800
+# 测试目的: 验证 arch.get_dynamic_memory 支持 `tlm1/tlm2/tlm3` 三块动态内存文本。
+# 对应功能实现文件路径: kernel_gen/dialect/arch.py
+# 对应 spec 文件路径: spec/dialect/arch.md
+def test_arch_get_dynamic_memory_supports_tlm123() -> None:
+    for space in ("tlm1", "tlm2", "tlm3"):
+        op = ArchGetDynamicMemoryOp(_make_space(space))
+        op.verify()
+        assert op.result.type == _make_dynamic_memory_type(space=space)
+        assert _print_ir(op) == (
+            f"%0 = arch.get_dynamic_memory #nn.space<{space}> : !nn.memory<[?], [1], i8, #nn.space<{space}>>"
+        )
+
+
 # TC-ARCH-008
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚
@@ -342,8 +405,11 @@ def test_arch_get_dynamic_memory_success() -> None:
 # 对应功能实现文件路径: kernel_gen/dialect/arch.py
 # 对应 spec 文件路径: spec/dialect/arch.md
 def test_arch_get_dynamic_memory_verify_errors() -> None:
-    with pytest.raises(VerifyException, match="shared/local/tsm/tlm"):
+    with pytest.raises(VerifyException, match="shared/local/tsm/tlm1/tlm2/tlm3"):
         ArchGetDynamicMemoryOp(_make_space("global")).verify()
+
+    with pytest.raises(VerifyException, match="global/shared/local/tsm/tlm1/tlm2/tlm3"):
+        ArchGetDynamicMemoryOp(_make_space("tlm")).verify()
 
     with pytest.raises(VerifyException, match="result must be 1-D"):
         ArchGetDynamicMemoryOp(
@@ -375,10 +441,10 @@ def test_arch_get_dynamic_memory_verify_errors() -> None:
 
 # TC-ARCH-009
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-06 05:03:11 +0800
 # 最近一次运行成功时间: 2026-04-06 05:03:11 +0800
-# 测试目的: 验证 arch.barrier 在 block scope + [tsm, tlm] visibility 下通过 verifier 与 print。
+# 测试目的: 验证 arch.barrier 在合法 scope + [tsm, tlm] visibility 下通过 verifier 与 print。
 # 使用示例: PYTHONPATH=. pytest -q test/dialect/test_arch_dialect.py -k test_arch_barrier_success
 # 对应功能实现文件路径: kernel_gen/dialect/arch.py
 # 对应 spec 文件路径: spec/dialect/arch.md
@@ -387,22 +453,28 @@ def test_arch_barrier_success() -> None:
     op = ArchBarrierOp(ArchScopeAttr.from_name("block"), _make_barrier_visibility())
 
     op.verify()
-    assert _print_ir(op) == "arch.barrier {scope = #arch.scope<block>, visibility = [#nn.space<tsm>, #nn.space<tlm>]}"
+    assert _print_ir(op) == "arch.barrier {scope = #arch.scope<block>, visibility = [#arch.visibility<tsm>, #arch.visibility<tlm>]}"
+
+    global_scope_op = ArchBarrierOp(ArchScopeAttr.from_name("global"), _make_barrier_visibility())
+    global_scope_op.verify()
+    assert _print_ir(global_scope_op) == (
+        "arch.barrier {scope = #arch.scope<global>, visibility = [#arch.visibility<tsm>, #arch.visibility<tlm>]}"
+    )
 
 
 # TC-ARCH-010
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-06 05:03:11 +0800
 # 最近一次运行成功时间: 2026-04-06 05:03:11 +0800
-# 测试目的: 验证 arch.barrier 会拒绝非法 scope、空 visibility、重复 visibility 与非法 space。
+# 测试目的: 验证 arch.barrier 会拒绝非法 scope、空 visibility、重复 visibility 与旧 nn.space visibility。
 # 使用示例: PYTHONPATH=. pytest -q test/dialect/test_arch_dialect.py -k test_arch_barrier_verify_errors
 # 对应功能实现文件路径: kernel_gen/dialect/arch.py
 # 对应 spec 文件路径: spec/dialect/arch.md
 # 对应测试文件路径: test/dialect/test_arch_dialect.py
 def test_arch_barrier_verify_errors() -> None:
-    with pytest.raises(VerifyException, match="scope must be #arch.scope<block>"):
-        ArchBarrierOp(ArchScopeAttr.from_name("thread"), _make_barrier_visibility()).verify()
+    with pytest.raises(VerifyException, match="arch.scope must be block/thread/subthread/global"):
+        ArchBarrierOp(ArchScopeAttr.from_name("warp"), _make_barrier_visibility()).verify()
 
     with pytest.raises(VerifyException, match="visibility must not be empty"):
         ArchBarrierOp(ArchScopeAttr.from_name("block"), ArrayAttr([])).verify()
@@ -410,13 +482,13 @@ def test_arch_barrier_verify_errors() -> None:
     with pytest.raises(VerifyException, match="visibility must not contain duplicates"):
         ArchBarrierOp(
             ArchScopeAttr.from_name("block"),
-            ArrayAttr([_make_space("tsm"), _make_space("tsm")]),
+            ArrayAttr([_make_visibility("tsm"), _make_visibility("tsm")]),
         ).verify()
 
-    with pytest.raises(VerifyException, match="visibility must contain only #nn.space<tsm>/#nn.space<tlm>"):
+    with pytest.raises(VerifyException, match="visibility items must be #arch.visibility<...>"):
         ArchBarrierOp(
             ArchScopeAttr.from_name("block"),
-            ArrayAttr([_make_space("tsm"), _make_space("shared")]),
+            ArrayAttr([_make_visibility("tsm"), _make_space("tlm1")]),
         ).verify()
 
 
@@ -500,7 +572,8 @@ builtin.module {
   %stid = arch.get_subthread_id : !symbol.int<"subthread_id">
   %stnum = arch.get_subthread_num : !symbol.int<"subthread_num">
   %smem = arch.get_dynamic_memory #nn.space<shared> : !nn.memory<[?], [1], i8, #nn.space<shared>>
-  arch.barrier {scope = #arch.scope<block>, visibility = [#nn.space<tsm>, #nn.space<tlm>]}
+  %tlm1 = arch.get_dynamic_memory #nn.space<tlm1> : !nn.memory<[?], [1], i8, #nn.space<tlm1>>
+  arch.barrier {scope = #arch.scope<global>, visibility = [#arch.visibility<tsm>, #arch.visibility<tlm>]}
   arch.launch<%block, %thread, %subthread>(@my_kernel, %arg) : (!symbol.int<"arg_n">) -> ()
 }
 """,

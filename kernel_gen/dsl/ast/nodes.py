@@ -1,7 +1,7 @@
 """DSL AST node definitions.
 
 创建者: 小李飞刀
-最后一次更改: 朽木露琪亚
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 定义 DSL AST 节点与公共数据结构。
@@ -892,7 +892,7 @@ class ArchGetDynamicMemoryAST:
 
     功能说明:
     - 表示 `get_dynamic_memory(space)` 的调用节点。
-    - 仅允许片上空间 `SM/LM/TSM/TLM`。
+    - 仅允许片上空间 `SM/LM/TSM/TLM1/TLM2/TLM3`。
 
     使用示例:
     - ArchGetDynamicMemoryAST(space=MemorySpace.SM)
@@ -915,11 +915,14 @@ class ArchBarrierAST:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 表示 `barrier(visibility=[...], scope=BarrierScope.BLOCK)` 的同步语句。
+    - 表示 `barrier(visibility=[...], scope=BarrierScope.THREAD)` 的同步语句。
     - 仅保存 visibility / scope 两个显式字段，具体 verifier 细节交由 lowering 负责。
 
     使用示例:
-    - ArchBarrierAST(visibility=[MemorySpace.TSM, MemorySpace.TLM], scope=_KG_OPERATION_ARCH.BarrierScope.BLOCK)
+    - ArchBarrierAST(
+    -     visibility=[_KG_OPERATION_ARCH.BarrierVisibility.TSM, _KG_OPERATION_ARCH.BarrierVisibility.TLM],
+    -     scope=_KG_OPERATION_ARCH.BarrierScope.THREAD,
+    - )
 
     关联文件:
     - spec: spec/dsl/ast.md
@@ -927,7 +930,7 @@ class ArchBarrierAST:
     - 功能实现: kernel_gen/dsl/ast/nodes.py
     """
 
-    visibility: list[MemorySpace]
+    visibility: list[_KG_OPERATION_ARCH.BarrierVisibility]
     scope: _KG_OPERATION_ARCH.BarrierScope
     location: SourceLocation | None = None
 

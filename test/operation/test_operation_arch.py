@@ -1,7 +1,7 @@
 """arch operation API tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 覆盖 `kernel_gen/operation/arch.py` 的执行维度查询、动态内存入口与 kernel 启动 helper。
@@ -34,6 +34,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.operation.arch import (
     BarrierScope,
+    BarrierVisibility,
     barrier,
     get_block_id,
     get_block_num,
@@ -157,7 +158,7 @@ def test_get_subthread_num_returns_symbol_dim() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-25 21:41:11 +0800
 # 最近一次运行成功时间: 2026-03-25 21:41:11 +0800
-# 测试目的: 验证 get_dynamic_memory 在 SM/LM/TSM/TLM 四类片上空间均返回一维动态字节 Memory 语义。
+# 测试目的: 验证 get_dynamic_memory 在 SM/LM/TSM/TLM1/TLM2/TLM3 六类片上空间均返回一维动态字节 Memory 语义。
 # 使用示例: pytest -q test/operation/test_operation_arch.py -k test_get_dynamic_memory_returns_dynamic_int8_memory
 # 对应功能实现文件路径: kernel_gen/operation/arch.py
 # 对应 spec 文件路径: spec/operation/arch.md
@@ -167,7 +168,9 @@ def test_get_dynamic_memory_returns_dynamic_int8_memory() -> None:
         MemorySpace.SM,
         MemorySpace.LM,
         MemorySpace.TSM,
-        MemorySpace.TLM,
+        MemorySpace.TLM1,
+        MemorySpace.TLM2,
+        MemorySpace.TLM3,
     ):
         result = get_dynamic_memory(space)
 
@@ -206,12 +209,12 @@ def test_get_dynamic_memory_rejects_invalid_space() -> None:
 # 对应 spec 文件路径: spec/operation/arch.md
 # 对应测试文件路径: test/operation/test_operation_arch.py
 def test_barrier_accepts_valid_arguments() -> None:
-    result = barrier(
-        visibility=[MemorySpace.TSM, MemorySpace.TLM],
-        scope=BarrierScope.BLOCK,
-    )
-
-    assert result is None
+    for scope in BarrierScope:
+        result = barrier(
+            visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM],
+            scope=scope,
+        )
+        assert result is None
 
 
 # TC-OP-ARCH-010
@@ -228,25 +231,21 @@ def test_barrier_rejects_invalid_arguments() -> None:
     with pytest.raises(TypeError):
         barrier()
     with pytest.raises(TypeError):
-        barrier(visibility=[MemorySpace.TSM, MemorySpace.TLM])
+        barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM])
     with pytest.raises(TypeError):
         barrier(scope=BarrierScope.BLOCK)
-    with pytest.raises(TypeError, match="visibility must be list\\[MemorySpace\\] or tuple\\[MemorySpace, \\.\\.\\.\\]"):
+    with pytest.raises(TypeError, match="visibility must be list\\[BarrierVisibility\\] or tuple\\[BarrierVisibility, \\.\\.\\.\\]"):
         barrier(visibility="TSM/TLM", scope=BarrierScope.BLOCK)
-    with pytest.raises(TypeError, match="visibility items must be MemorySpace"):
-        barrier(visibility=[MemorySpace.TSM, "TLM"], scope=BarrierScope.BLOCK)
+    with pytest.raises(TypeError, match="visibility items must be BarrierVisibility"):
+        barrier(visibility=[BarrierVisibility.TSM, "TLM"], scope=BarrierScope.BLOCK)
     with pytest.raises(ValueError, match="visibility must not be empty"):
         barrier(visibility=[], scope=BarrierScope.BLOCK)
     with pytest.raises(ValueError, match="visibility must not contain duplicates"):
-        barrier(visibility=[MemorySpace.TSM, MemorySpace.TSM], scope=BarrierScope.BLOCK)
+        barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TSM], scope=BarrierScope.BLOCK)
     with pytest.raises(ValueError, match="visibility must contain TSM and TLM exactly once"):
-        barrier(visibility=[MemorySpace.TSM], scope=BarrierScope.BLOCK)
-    with pytest.raises(ValueError, match="visibility must contain TSM and TLM exactly once"):
-        barrier(visibility=[MemorySpace.TSM, MemorySpace.TLM, MemorySpace.SM], scope=BarrierScope.BLOCK)
+        barrier(visibility=[BarrierVisibility.TSM], scope=BarrierScope.BLOCK)
     with pytest.raises(TypeError, match="scope must be BarrierScope"):
-        barrier(visibility=[MemorySpace.TSM, MemorySpace.TLM], scope="block")
-    with pytest.raises(ValueError, match="scope must be BarrierScope.BLOCK"):
-        barrier(visibility=[MemorySpace.TSM, MemorySpace.TLM], scope=BarrierScope.THREAD)
+        barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM], scope="block")
 
 
 # TC-OP-ARCH-011
@@ -440,7 +439,7 @@ def test_barrier_and_launch_helpers_reject_unsupported_target_ops() -> None:
         with pytest.raises(ValueError, match="arch.get_dynamic_memory"):
             get_dynamic_memory(MemorySpace.SM)
         with pytest.raises(ValueError, match="arch.barrier"):
-            barrier(visibility=[MemorySpace.TSM, MemorySpace.TLM], scope=BarrierScope.BLOCK)
+            barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM], scope=BarrierScope.BLOCK)
         with pytest.raises(ValueError, match="arch.launch"):
             launch_kernel(lambda: None, 1, 1, 1)
     finally:

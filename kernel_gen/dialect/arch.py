@@ -1,7 +1,7 @@
 """Arch dialect definitions.
 
 创建者: 朽木露琪亚
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 定义 arch dialect 的执行维度查询、动态片上内存入口、barrier 与 launch op。
@@ -43,11 +43,11 @@ from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.target import registry as target_registry
 
-_DYNAMIC_MEMORY_SPACES = {"shared", "local", "tsm", "tlm"}
+_DYNAMIC_MEMORY_SPACES = {"shared", "local", "tsm", "tlm1", "tlm2", "tlm3"}
 _ERROR_ACTION = "请按接口约束传参"
 _ERROR_ACTUAL = "不满足期望"
 _ERROR_SCENE = "dialect.arch verifier"
-_BARRIER_SCOPE_VALUES = {"block", "thread", "subthread"}
+_BARRIER_SCOPE_VALUES = {"block", "thread", "subthread", "global"}
 _BARRIER_VISIBLE_SPACES = {"tsm", "tlm"}
 
 
@@ -55,7 +55,7 @@ def _raise_verify_error(expected: str, *, actual: str = _ERROR_ACTUAL) -> None:
     """统一抛出 arch dialect verifier 错误。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 复用统一错误模板，保持 barrier/launch 边界短语稳定。
@@ -176,7 +176,7 @@ def _verify_barrier_visibility_attr(visibility: Attribute) -> ArrayAttr[Attribut
 
     功能说明:
     - visibility 必须是非空 `ArrayAttr`。
-    - 元素必须唯一，且必须且只能包含 `#nn.space<tsm>` 与 `#nn.space<tlm>`。
+    - 元素必须唯一，且必须且只能包含 `#arch.visibility<tsm>` 与 `#arch.visibility<tlm>`。
 
     使用示例:
     - _verify_barrier_visibility_attr(ArrayAttr([...]))
@@ -193,17 +193,84 @@ def _verify_barrier_visibility_attr(visibility: Attribute) -> ArrayAttr[Attribut
         _raise_verify_error("arch.barrier visibility must not be empty")
     seen: set[str] = set()
     for entry in visibility.data:
-        if not isinstance(entry, NnMemorySpaceAttr):
-            _raise_verify_error("arch.barrier visibility items must be #nn.space<...>")
-        space_name = entry.space.data
+        if not isinstance(entry, ArchVisibilityAttr):
+            _raise_verify_error("arch.barrier visibility items must be #arch.visibility<...>")
+        space_name = entry.visibility.data
         if space_name in seen:
             _raise_verify_error("arch.barrier visibility must not contain duplicates")
         seen.add(space_name)
         if space_name not in _BARRIER_VISIBLE_SPACES:
-            _raise_verify_error("arch.barrier visibility must contain only #nn.space<tsm>/#nn.space<tlm>")
+            _raise_verify_error("arch.barrier visibility must contain only #arch.visibility<tsm>/#arch.visibility<tlm>")
     if seen != _BARRIER_VISIBLE_SPACES:
-        _raise_verify_error("arch.barrier visibility must contain both #nn.space<tsm> and #nn.space<tlm>")
+        _raise_verify_error("arch.barrier visibility must contain both #arch.visibility<tsm> and #arch.visibility<tlm>")
     return visibility
+
+
+@irdl_attr_definition
+class ArchVisibilityAttr(ParametrizedAttribute):
+    """表示 `arch.barrier` 的聚合可见域属性。"""
+
+    name = "arch.visibility"
+
+    visibility: StringAttr = param_def(StringAttr)
+
+    @classmethod
+    def parse_parameters(cls: type["ArchVisibilityAttr"], parser: AttrParser) -> Sequence[Attribute]:
+        """解析 arch.visibility 参数。
+
+        创建者: jcc你莫辜负
+        最后一次更改: jcc你莫辜负
+
+        功能说明:
+        - 支持 `#arch.visibility<tsm>` 与 `#arch.visibility<tlm>` 的文本。
+
+        使用示例:
+        - ArchVisibilityAttr.parse_parameters(parser)
+
+        关联文件:
+        - spec: spec/dialect/arch.md
+        - test: test/dialect/test_arch_dialect.py
+        - 功能实现: kernel_gen/dialect/arch.py
+        """
+
+        parser.parse_punctuation("<", "Expected '<' for arch.visibility.")
+        visibility_name = parser.parse_identifier("Expected arch visibility name.")
+        parser.parse_punctuation(">", "Expected '>' for arch.visibility.")
+        return (StringAttr(visibility_name),)
+
+    def print_parameters(self: "ArchVisibilityAttr", printer: Printer) -> None:
+        """打印 arch.visibility 参数。"""
+
+        printer.print_string("<")
+        printer.print_string(self.visibility.data)
+        printer.print_string(">")
+
+    def verify(self: "ArchVisibilityAttr") -> None:
+        """校验 arch.visibility 参数。"""
+
+        if self.visibility.data not in _BARRIER_VISIBLE_SPACES:
+            _raise_verify_error("arch.visibility must be tsm/tlm")
+
+    @classmethod
+    def from_name(cls: type["ArchVisibilityAttr"], name: str) -> "ArchVisibilityAttr":
+        """按名称构造 arch.visibility 属性。
+
+        创建者: jcc你莫辜负
+        最后一次更改: jcc你莫辜负
+
+        功能说明:
+        - 为测试与实现提供统一的 barrier 可见域构造入口。
+
+        使用示例:
+        - ArchVisibilityAttr.from_name("tsm")
+
+        关联文件:
+        - spec: spec/dialect/arch.md
+        - test: test/dialect/test_arch_dialect.py
+        - 功能实现: kernel_gen/dialect/arch.py
+        """
+
+        return cls(StringAttr(name))
 
 
 @irdl_attr_definition
@@ -219,10 +286,10 @@ class ArchScopeAttr(ParametrizedAttribute):
         """解析 arch.scope 参数。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: jcc你莫辜负
 
         功能说明:
-        - 支持 `#arch.scope<block>` / `thread` / `subthread>` 的文本。
+        - 支持 `#arch.scope<block>` / `thread` / `subthread` / `global>` 的文本。
 
         使用示例:
         - ArchScopeAttr.parse_parameters(parser)
@@ -249,14 +316,14 @@ class ArchScopeAttr(ParametrizedAttribute):
         """校验 arch.scope 参数。"""
 
         if self.scope.data not in _BARRIER_SCOPE_VALUES:
-            _raise_verify_error("arch.scope must be block/thread/subthread")
+            _raise_verify_error("arch.scope must be block/thread/subthread/global")
 
     @classmethod
     def from_name(cls: type["ArchScopeAttr"], name: str) -> "ArchScopeAttr":
         """按名称构造 arch.scope 属性。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 为测试与实现提供统一的构造入口。
@@ -524,7 +591,7 @@ class ArchGetDynamicMemoryOp(IRDLOperation):
             raise VerifyException(
                 _ERROR_TEMPLATE.format(
                     scene=_ERROR_SCENE,
-                    expected="arch.get_dynamic_memory memory_space must be shared/local/tsm/tlm",
+                    expected="arch.get_dynamic_memory memory_space must be shared/local/tsm/tlm1/tlm2/tlm3",
                     actual=_ERROR_ACTUAL,
                     action=_ERROR_ACTION,
                 )
@@ -641,7 +708,7 @@ class ArchBarrierOp(IRDLOperation):
         """初始化 arch.barrier。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 记录 barrier 的 scope 与 visibility。
@@ -664,8 +731,8 @@ class ArchBarrierOp(IRDLOperation):
         最后一次更改: 小李飞刀
 
         功能说明:
-        - 校验 scope 固定为 `#arch.scope<block>`。
-        - 校验 visibility 为唯一且完整的 `[tsm, tlm]`。
+        - 校验 scope 必须是公开 `#arch.scope<...>` 成员之一。
+        - 校验 visibility 为唯一且完整的 `[tsm, tlm]` 聚合可见域。
 
         使用示例:
         - ArchBarrierOp(...).verify()
@@ -678,8 +745,6 @@ class ArchBarrierOp(IRDLOperation):
 
         _verify_target_registry_support(self.name)
         self.scope.verify()
-        if self.scope.scope.data != "block":
-            _raise_verify_error("arch.barrier scope must be #arch.scope<block>")
         _verify_barrier_visibility_attr(self.visibility)
 
     def print(self: "ArchBarrierOp", printer: Printer) -> None:
@@ -851,12 +916,13 @@ Arch = Dialect(
         ArchBarrierOp,
         ArchLaunchOp,
     ],
-    [ArchScopeAttr],
+    [ArchScopeAttr, ArchVisibilityAttr],
 )
 
 __all__ = [
     "Arch",
     "ArchScopeAttr",
+    "ArchVisibilityAttr",
     "ArchGetBlockIdOp",
     "ArchGetBlockNumOp",
     "ArchGetThreadIdOp",

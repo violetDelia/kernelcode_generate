@@ -1,7 +1,7 @@
 """MLIR gen integration tests.
 
 创建者: 小李飞刀
-最后一次更改: 朽木露琪亚
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 覆盖 build_func_op/build_func_op_from_ast 及相关 lowering 集成回归。
@@ -74,6 +74,7 @@ from kernel_gen.dialect.arch import (
     ArchGetThreadNumOp,
     ArchLaunchKernelOp,
     ArchScopeAttr,
+    ArchVisibilityAttr,
 )
 from kernel_gen.dialect.nn import (
     NnAddOp,
@@ -873,16 +874,16 @@ def test_build_func_op_lowers_arch_get_dynamic_memory_via_import_bound_aliases(
         return arch_ops.get_dynamic_memory(MemorySpace.TSM)
 
     def direct_alias_kernel() -> "Tensor[i8, ?]":
-        return gdm(MemorySpace.TLM)
+        return gdm(MemorySpace.TLM1)
 
     monkeypatch.setitem(module_alias_kernel.__globals__, "arch_ops", arch_module)
     monkeypatch.setitem(direct_alias_kernel.__globals__, "gdm", arch_module.get_dynamic_memory)
 
     cases = (
         (module_alias_kernel, MemorySpace.TSM, "tsm", "TSM_SIZE"),
-        (direct_alias_kernel, MemorySpace.TLM, "tlm", "TLM_SIZE"),
+        (direct_alias_kernel, MemorySpace.TLM1, "tlm1", "TLM1_SIZE"),
     )
-    for fn, expected_space, expected_space_name, expected_shape_symbol in cases:
+    for fn, expected_space, expected_space_name, expected_symbol_name in cases:
         func_ast = parse_function(fn)
         if len(func_ast.body.statements) != 1:
             raise AssertionError("expected get_dynamic_memory alias kernel to lower to one AST statement")
@@ -904,8 +905,8 @@ def test_build_func_op_lowers_arch_get_dynamic_memory_via_import_bound_aliases(
                 raise AssertionError("expected memory_space attr to match helper binding")
             if query_ops[0].result.type.element_type != i8:
                 raise AssertionError("expected dynamic memory result element type to stay i8")
-            if query_ops[0].result.type.shape.data[0] != StringAttr(expected_shape_symbol):
-                raise AssertionError("expected dynamic memory result shape to use normalized symbol name")
+            if query_ops[0].result.type.shape.data[0] != StringAttr(expected_symbol_name):
+                raise AssertionError("expected dynamic memory result shape to be rewritten to symbolic capacity name")
             if query_ops[0].result.type.stride.data[0] != IntAttr(1):
                 raise AssertionError("expected dynamic memory result stride to stay [1]")
             if query_ops[0].result.type.space.space.data != expected_space_name:
@@ -4060,13 +4061,13 @@ def test_mlir_gen_build_func_op_builtins_and_parse_error() -> None:
 # 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_build_func_op_lowers_arch_barrier(monkeypatch: pytest.MonkeyPatch) -> None:
-    from kernel_gen.operation.arch import BarrierScope, barrier
+    from kernel_gen.operation.arch import BarrierScope, BarrierVisibility, barrier
 
     def barrier_kernel() -> None:
-        barrier(visibility=[MemorySpace.TSM, MemorySpace.TLM], scope=BarrierScope.BLOCK)
+        barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM], scope=BarrierScope.THREAD)
 
     monkeypatch.setitem(barrier_kernel.__globals__, "barrier", barrier)
-    monkeypatch.setitem(barrier_kernel.__globals__, "MemorySpace", MemorySpace)
+    monkeypatch.setitem(barrier_kernel.__globals__, "BarrierVisibility", BarrierVisibility)
     monkeypatch.setitem(barrier_kernel.__globals__, "BarrierScope", BarrierScope)
 
     func_ast = parse_function(barrier_kernel)
@@ -4079,17 +4080,17 @@ def test_build_func_op_lowers_arch_barrier(monkeypatch: pytest.MonkeyPatch) -> N
         return_ops = [op for op in body_ops if isinstance(op, func.ReturnOp)]
         if len(barrier_ops) != 1:
             raise AssertionError("expected exactly one arch.barrier op")
-        if barrier_ops[0].scope != ArchScopeAttr.from_name("block"):
-            raise AssertionError("expected barrier scope to lower as #arch.scope<block>")
+        if barrier_ops[0].scope != ArchScopeAttr.from_name("thread"):
+            raise AssertionError("expected barrier scope to lower as #arch.scope<thread>")
         if list(barrier_ops[0].visibility.data) != [
-            NnMemorySpaceAttr.from_name("tsm"),
-            NnMemorySpaceAttr.from_name("tlm"),
+            ArchVisibilityAttr.from_name("tsm"),
+            ArchVisibilityAttr.from_name("tlm"),
         ]:
-            raise AssertionError("expected barrier visibility to lower as [#nn.space<tsm>, #nn.space<tlm>]")
+            raise AssertionError("expected barrier visibility to lower as [#arch.visibility<tsm>, #arch.visibility<tlm>]")
         if len(return_ops) != 1 or len(return_ops[0].arguments) != 0:
             raise AssertionError("expected barrier kernel to end with empty func.return")
         printed = _print_module(ModuleOp([func_op]))
-        if "arch.barrier {scope = #arch.scope<block>, visibility = [#nn.space<tsm>, #nn.space<tlm>]}" not in printed:
+        if "arch.barrier {scope = #arch.scope<thread>, visibility = [#arch.visibility<tsm>, #arch.visibility<tlm>]}" not in printed:
             raise AssertionError("expected printed MLIR to contain arch.barrier custom syntax")
 
 
@@ -4105,7 +4106,7 @@ def test_build_func_op_lowers_arch_barrier(monkeypatch: pytest.MonkeyPatch) -> N
 # 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_build_func_op_lowers_arch_launch_with_callee(monkeypatch: pytest.MonkeyPatch) -> None:
-    from kernel_gen.operation.arch import BarrierScope, barrier, get_thread_num, launch_kernel
+    from kernel_gen.operation.arch import BarrierScope, BarrierVisibility, barrier, get_thread_num, launch_kernel
 
     tensor_args = [_tensor_arg([2, 2]), _tensor_arg([2, 2]), _tensor_arg([2, 2])]
 
@@ -4114,7 +4115,7 @@ def test_build_func_op_lowers_arch_launch_with_callee(monkeypatch: pytest.Monkey
         rhs: "Tensor[f32, 2, 2]",
         out: "Tensor[f32, 2, 2]",
     ) -> int:
-        barrier(visibility=[MemorySpace.TSM, MemorySpace.TLM], scope=BarrierScope.BLOCK)
+        barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM], scope=BarrierScope.BLOCK)
         return get_thread_num()
 
     def launch_entry(
@@ -4125,7 +4126,7 @@ def test_build_func_op_lowers_arch_launch_with_callee(monkeypatch: pytest.Monkey
         launch_kernel(add_barrier_body, 1, 4, 1, lhs, rhs, out)
 
     for fn in (add_barrier_body, launch_entry):
-        monkeypatch.setitem(fn.__globals__, "MemorySpace", MemorySpace)
+        monkeypatch.setitem(fn.__globals__, "BarrierVisibility", BarrierVisibility)
         monkeypatch.setitem(fn.__globals__, "BarrierScope", BarrierScope)
         monkeypatch.setitem(fn.__globals__, "barrier", barrier)
         monkeypatch.setitem(fn.__globals__, "get_thread_num", get_thread_num)

@@ -1,7 +1,7 @@
 """NN dialect definitions.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 定义 nn dialect 的 memory type、space attribute 与逐元素/广播 op。
@@ -49,7 +49,7 @@ from xdsl.parser import AttrParser
 from xdsl.printer import Printer
 from xdsl.utils.exceptions import VerifyException
 
-_VALID_SPACES = {"global", "shared", "local", "tsm", "tlm"}
+_VALID_SPACES = {"global", "shared", "local", "tsm", "tlm1", "tlm2", "tlm3"}
 _ERROR_ACTION = "请按接口约束传参"
 _ERROR_ACTUAL = "不满足期望"
 _ERROR_SCENE = "dialect.nn verifier"
@@ -72,7 +72,7 @@ def _parse_dim_list(parser: AttrParser) -> ArrayAttr[Attribute]:
     """解析 shape 或 stride 维度列表。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持非负整数、`?` 与符号标识符。
@@ -211,7 +211,7 @@ class NnMemorySpaceAttr(ParametrizedAttribute):
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 显式建模 `global`、`shared`、`local`、`tsm`、`tlm` 五种 memory space。
+    - 显式建模 `global`、`shared`、`local`、`tsm`、`tlm1`、`tlm2`、`tlm3` 七种 memory space。
 
     使用示例:
     - NnMemorySpaceAttr(StringAttr(\"global\"))
@@ -246,17 +246,17 @@ class NnMemorySpaceAttr(ParametrizedAttribute):
         """校验 space attribute。"""
 
         if self.space.data not in _VALID_SPACES:
-            _raise_verify_error("nn space must be one of global/shared/local/tsm/tlm")
+            _raise_verify_error("nn space must be one of global/shared/local/tsm/tlm1/tlm2/tlm3")
 
     @classmethod
     def from_name(cls, space: str) -> "NnMemorySpaceAttr":
         """从字符串构造 space attribute。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: jcc你莫辜负
 
         功能说明:
-        - 简化 `global/shared/local/tsm/tlm` 的构造。
+        - 简化 `global/shared/local/tsm/tlm1/tlm2/tlm3` 的构造。
 
         使用示例:
         - NnMemorySpaceAttr.from_name(\"global\")

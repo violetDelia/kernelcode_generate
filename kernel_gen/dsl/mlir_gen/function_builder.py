@@ -1,7 +1,7 @@
 """mlir_gen function builder.
 
 创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 提供 build_func_op/build_func_op_from_ast 的公开入口。
@@ -63,7 +63,9 @@ _DYNAMIC_MEMORY_SYMBOL_NAMES = {
     "shared": "SM_SIZE",
     "local": "LM_SIZE",
     "tsm": "TSM_SIZE",
-    "tlm": "TLM_SIZE",
+    "tlm1": "TLM1_SIZE",
+    "tlm2": "TLM2_SIZE",
+    "tlm3": "TLM3_SIZE",
 }
 
 
@@ -319,9 +321,7 @@ def build_func_op(
         )
     except AstParseError as exc:
         location = exc.diagnostics[0].location if exc.diagnostics else None
-        if exc.message == "get_dynamic_memory space must be on-chip MemorySpace":
-            raise ValueError(exc.message) from exc
-        if exc.message.endswith("space must be MemorySpace") or exc.message == "cast dtype must be NumericType":
+        if exc.message == "slice space must be MemorySpace" or exc.message == "cast dtype must be NumericType":
             raise TypeError(exc.message) from exc
         raise AstVisitorError(exc.message, location=location) from exc
     return build_func_op_from_ast(func_ast, runtime_args=runtime_args)
@@ -500,6 +500,4 @@ def build_func_op_from_ast(
     try:
         return _build_func_op_from_ast_impl(func_ast, runtime_args=runtime_args, config=config)
     except _LoweringError as exc:
-        if str(exc) == "get_dynamic_memory space must be on-chip MemorySpace":
-            raise ValueError(str(exc)) from exc
         raise AstVisitorError(str(exc), location=exc.location) from exc

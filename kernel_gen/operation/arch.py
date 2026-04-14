@@ -1,17 +1,17 @@
 """Arch operation API.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
-- 提供 operation 层的 arch helper，覆盖执行维度查询、动态片上内存入口与 kernel 启动描述。
-- 补充 block 级 barrier 合同，以及 launched body 内的 launch extent 查询语义。
+- 提供 operation 层的 arch helper，覆盖执行维度查询、动态片上内存入口、barrier 与 kernel 启动描述。
+- 区分真实内存空间 `MemorySpace` 与聚合可见域 `BarrierVisibility`，补充 launched body 内的 launch extent 查询语义。
 
 使用示例:
-- from kernel_gen.operation.arch import BarrierScope, barrier, get_block_id, get_dynamic_memory, launch_kernel
+- from kernel_gen.operation.arch import BarrierScope, BarrierVisibility, barrier, get_block_id, get_dynamic_memory, launch_kernel
 - bid = get_block_id()
 - smem = get_dynamic_memory(MemorySpace.SM)
-- barrier(visibility=[MemorySpace.TSM, MemorySpace.TLM], scope=BarrierScope.BLOCK)
+- barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM], scope=BarrierScope.THREAD)
 - launch_kernel(my_kernel, 1, 128, 4, lhs, rhs, out)
 
 关联文件:
@@ -39,7 +39,9 @@ _DYNAMIC_MEMORY_SPACES = (
     MemorySpace.SM,
     MemorySpace.LM,
     MemorySpace.TSM,
-    MemorySpace.TLM,
+    MemorySpace.TLM1,
+    MemorySpace.TLM2,
+    MemorySpace.TLM3,
 )
 _ERROR_ACTION = "请按接口约束传参"
 _ERROR_ACTUAL = "不满足期望"
@@ -48,9 +50,36 @@ _DYNAMIC_MEMORY_HARDWARE_KEYS = {
     MemorySpace.SM: "sm_memory_size",
     MemorySpace.LM: "lm_memory_size",
     MemorySpace.TSM: "tsm_memory_size",
-    MemorySpace.TLM: "tlm_memory_size",
+    MemorySpace.TLM1: "tlm1_memory_size",
+    MemorySpace.TLM2: "tlm2_memory_size",
+    MemorySpace.TLM3: "tlm3_memory_size",
 }
-_BARRIER_VISIBILITY_SPACES = (MemorySpace.TSM, MemorySpace.TLM)
+
+
+class BarrierVisibility(Enum):
+    """operation 层 barrier 聚合可见域枚举。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 区分 barrier 聚合可见域与真实内存空间。
+    - `TLM` 固定表示覆盖 `TLM1/TLM2/TLM3` 三块真实空间的聚合可见域。
+
+    使用示例:
+    - BarrierVisibility.TLM.value
+
+    关联文件:
+    - spec: spec/operation/arch.md
+    - test: test/operation/test_operation_arch.py
+    - 功能实现: kernel_gen/operation/arch.py
+    """
+
+    TSM = "tsm"
+    TLM = "tlm"
+
+
+_BARRIER_VISIBILITY_SPACES = (BarrierVisibility.TSM, BarrierVisibility.TLM)
 
 
 class BarrierScope(Enum):
@@ -59,6 +88,7 @@ class BarrierScope(Enum):
     BLOCK = "block"
     THREAD = "thread"
     SUBTHREAD = "subthread"
+    GLOBAL = "global"
 
 
 @dataclass(frozen=True)
@@ -261,7 +291,7 @@ def _ensure_dynamic_memory_space(space: object) -> MemorySpace:
 
     功能说明:
     - 仅接受 `MemorySpace`。
-    - 仅允许片上空间 `SM/LM/TSM/TLM`。
+    - 仅允许片上空间 `SM/LM/TSM/TLM1/TLM2/TLM3`。
 
     使用示例:
     - _ensure_dynamic_memory_space(MemorySpace.SM)
@@ -364,18 +394,18 @@ def _ensure_launch_callee(callee: object) -> object:
     return callee
 
 
-def _ensure_barrier_visibility(visibility: object) -> tuple[MemorySpace, ...]:
+def _ensure_barrier_visibility(visibility: object) -> tuple[BarrierVisibility, ...]:
     """校验 barrier 的 visibility 列表。
 
     创建者: 小李飞刀
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 仅接受 `list[MemorySpace] | tuple[MemorySpace, ...]`。
+    - 仅接受 `list[BarrierVisibility] | tuple[BarrierVisibility, ...]`。
     - 当前公开合同要求元素唯一，且必须且只能包含 `TSM/TLM`。
 
     使用示例:
-    - _ensure_barrier_visibility([MemorySpace.TSM, MemorySpace.TLM])
+    - _ensure_barrier_visibility([BarrierVisibility.TSM, BarrierVisibility.TLM])
 
     关联文件:
     - spec: spec/operation/arch.md
@@ -387,7 +417,7 @@ def _ensure_barrier_visibility(visibility: object) -> tuple[MemorySpace, ...]:
         raise TypeError(
             _ERROR_TEMPLATE.format(
                 scene="arch.barrier 参数校验",
-                expected="visibility must be list[MemorySpace] or tuple[MemorySpace, ...]",
+                expected="visibility must be list[BarrierVisibility] or tuple[BarrierVisibility, ...]",
                 actual=type(visibility).__name__,
                 action=_ERROR_ACTION,
             )
@@ -402,11 +432,11 @@ def _ensure_barrier_visibility(visibility: object) -> tuple[MemorySpace, ...]:
                 action=_ERROR_ACTION,
             )
         )
-    if any(not isinstance(space, MemorySpace) for space in normalized_visibility):
+    if any(not isinstance(space, BarrierVisibility) for space in normalized_visibility):
         raise TypeError(
             _ERROR_TEMPLATE.format(
                 scene="arch.barrier 参数校验",
-                expected="visibility items must be MemorySpace",
+                expected="visibility items must be BarrierVisibility",
                 actual=str(tuple(type(space).__name__ for space in normalized_visibility)),
                 action=_ERROR_ACTION,
             )
@@ -416,7 +446,7 @@ def _ensure_barrier_visibility(visibility: object) -> tuple[MemorySpace, ...]:
             _ERROR_TEMPLATE.format(
                 scene="arch.barrier 参数校验",
                 expected="visibility must not contain duplicates",
-                actual=str([space.name for space in normalized_visibility]),
+                actual=str([visibility_item.name for visibility_item in normalized_visibility]),
                 action=_ERROR_ACTION,
             )
         )
@@ -425,7 +455,7 @@ def _ensure_barrier_visibility(visibility: object) -> tuple[MemorySpace, ...]:
             _ERROR_TEMPLATE.format(
                 scene="arch.barrier 参数校验",
                 expected="visibility must contain TSM and TLM exactly once",
-                actual=str([space.name for space in normalized_visibility]),
+                actual=str([visibility_item.name for visibility_item in normalized_visibility]),
                 action=_ERROR_ACTION,
             )
         )
@@ -439,11 +469,11 @@ def _ensure_barrier_scope(scope: object) -> BarrierScope:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 仅接受 `BarrierScope.BLOCK`。
-    - 其他 scope 或非枚举输入均显式报错。
+    - 仅接受 `BarrierScope` 枚举。
+    - operation 合同允许 `BLOCK/THREAD/SUBTHREAD/GLOBAL` 四个公开 scope。
 
     使用示例:
-    - _ensure_barrier_scope(BarrierScope.BLOCK)
+    - _ensure_barrier_scope(BarrierScope.THREAD)
 
     关联文件:
     - spec: spec/operation/arch.md
@@ -457,15 +487,6 @@ def _ensure_barrier_scope(scope: object) -> BarrierScope:
                 scene="arch.barrier 参数校验",
                 expected="scope must be BarrierScope",
                 actual=type(scope).__name__,
-                action=_ERROR_ACTION,
-            )
-        )
-    if scope is not BarrierScope.BLOCK:
-        raise ValueError(
-            _ERROR_TEMPLATE.format(
-                scene="arch.barrier 参数校验",
-                expected="scope must be BarrierScope.BLOCK",
-                actual=scope.value,
                 action=_ERROR_ACTION,
             )
         )
@@ -645,7 +666,7 @@ def get_dynamic_memory(space: object) -> Memory:
 
     功能说明:
     - 返回 `shape=[?]`、`stride=[1]`、`dtype=NumericType.Int8` 的一维动态内存描述。
-    - 仅允许片上空间 `SM/LM/TSM/TLM`。
+    - 仅允许片上空间 `SM/LM/TSM/TLM1/TLM2/TLM3`。
     - 当 target registry 启用且不支持该 op，抛 ValueError。
     - 若当前 target 提供硬件容量，优先使用硬件 size 作为 shape。
 
@@ -671,12 +692,12 @@ def barrier(*, visibility: object, scope: object) -> None:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 仅接受 `visibility=[TSM, TLM]` 与 `scope=BarrierScope.BLOCK`。
+    - 仅接受 `visibility=[TSM, TLM]` 与公开 `BarrierScope` 枚举成员。
     - 对外只表达同步语义，不返回句柄或状态值。
     - 当 target registry 启用且不支持该 op，抛 ValueError。
 
     使用示例:
-    - barrier(visibility=[MemorySpace.TSM, MemorySpace.TLM], scope=BarrierScope.BLOCK)
+    - barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM], scope=BarrierScope.THREAD)
 
     关联文件:
     - spec: spec/operation/arch.md
@@ -728,6 +749,7 @@ def launch_kernel(
 
 
 __all__ = [
+    "BarrierVisibility",
     "BarrierScope",
     "get_block_id",
     "get_block_num",

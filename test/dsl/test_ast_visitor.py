@@ -1,7 +1,7 @@
 """AST visitor tests.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 覆盖 AST 前端、nn dialect IR 与 MLIR 文本入口的回归测试。
@@ -857,7 +857,7 @@ def test_build_func_op_rejects_invalid_arch_get_dynamic_memory_space() -> None:
     def get_dynamic_memory_kernel() -> "Tensor[i8, ?]":
         return get_dynamic_memory(MemorySpace.GM)
 
-    with pytest.raises(ValueError, match="get_dynamic_memory space must be on-chip MemorySpace"):
+    with pytest.raises(AstVisitorError, match="get_dynamic_memory space must be on-chip MemorySpace"):
         build_func_op(get_dynamic_memory_kernel)
 
 
@@ -881,16 +881,16 @@ def test_build_func_op_lowers_arch_get_dynamic_memory_via_import_bound_aliases(
         return arch_ops.get_dynamic_memory(MemorySpace.TSM)
 
     def direct_alias_kernel() -> "Tensor[i8, ?]":
-        return gdm(MemorySpace.TLM)
+        return gdm(MemorySpace.TLM1)
 
     monkeypatch.setitem(module_alias_kernel.__globals__, "arch_ops", arch_module)
     monkeypatch.setitem(direct_alias_kernel.__globals__, "gdm", arch_module.get_dynamic_memory)
 
     cases = (
         (module_alias_kernel, "get_dynamic_memory", MemorySpace.TSM, "tsm", "TSM_SIZE"),
-        (direct_alias_kernel, "gdm", MemorySpace.TLM, "tlm", "TLM_SIZE"),
+        (direct_alias_kernel, "gdm", MemorySpace.TLM1, "tlm1", "TLM1_SIZE"),
     )
-    for fn, helper_name, expected_space, expected_space_name, expected_shape_symbol in cases:
+    for fn, helper_name, expected_space, expected_space_name, expected_symbol_name in cases:
         func_ast = parse_function(fn)
         if len(func_ast.body.statements) != 1:
             raise AssertionError("expected get_dynamic_memory alias kernel to lower to one AST statement")
@@ -912,8 +912,8 @@ def test_build_func_op_lowers_arch_get_dynamic_memory_via_import_bound_aliases(
                 raise AssertionError("expected memory_space attr to match helper binding")
             if query_ops[0].result.type.element_type != i8:
                 raise AssertionError("expected dynamic memory result element type to stay i8")
-            if query_ops[0].result.type.shape.data[0] != StringAttr(expected_shape_symbol):
-                raise AssertionError("expected dynamic memory result shape to use normalized symbol name")
+            if query_ops[0].result.type.shape.data[0] != StringAttr(expected_symbol_name):
+                raise AssertionError("expected dynamic memory result shape to be rewritten to symbolic capacity name")
             if query_ops[0].result.type.stride.data[0] != IntAttr(1):
                 raise AssertionError("expected dynamic memory result stride to stay [1]")
             if query_ops[0].result.type.space.space.data != expected_space_name:

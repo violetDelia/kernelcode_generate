@@ -1,7 +1,7 @@
 """DSL AST parser.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 提供 `parse_function` 解析入口，将 Python 函数解析为 `FunctionAST`。
@@ -849,7 +849,7 @@ def _is_allowed_attribute_value(value: object) -> bool:
     最后一次更改: 我不是牛马
 
     功能说明:
-    - 仅允许 `MemorySpace.*`、`BarrierScope.*` 与 `NumericType.*` 这类 DSL 静态属性值参与函数体解析。
+    - 仅允许 `MemorySpace.*`、`BarrierVisibility.*`、`BarrierScope.*` 与 `NumericType.*` 这类 DSL 静态属性值参与函数体解析。
     - 拒绝将其他 Attribute 形式的外部值当作局部常量或隐式输入继续 lowering。
 
     使用示例:
@@ -861,7 +861,15 @@ def _is_allowed_attribute_value(value: object) -> bool:
     - 功能实现: kernel_gen/dsl/ast_parser.py
     """
 
-    return isinstance(value, (MemorySpace, NumericType, _KG_OPERATION_ARCH.BarrierScope))
+    return isinstance(
+        value,
+        (
+            MemorySpace,
+            NumericType,
+            _KG_OPERATION_ARCH.BarrierVisibility,
+            _KG_OPERATION_ARCH.BarrierScope,
+        ),
+    )
 
 
 def _is_memory_target_ast(node: object) -> bool:
@@ -1482,7 +1490,7 @@ def _parse_dma_call(
     - 将 `fc(...)` 解析为 `FCAST`，交由 lowering 阶段生成 `nn.matmul`。
     - 将 `get_block_id()` / `get_block_num()` / `get_subthread_id()` / `get_subthread_num()` / `get_thread_id()` / `get_thread_num()` 解析为 `ArchQueryAST`。
     - 将 `get_dynamic_memory(space)` 解析为 `ArchGetDynamicMemoryAST`。
-    - 将 `barrier(visibility=[...], scope=BarrierScope.BLOCK)` 解析为 `ArchBarrierAST`。
+    - 将 `barrier(visibility=[...], scope=BarrierScope.THREAD)` 解析为 `ArchBarrierAST`。
     - 将 `launch_kernel(callee, block, thread, subthread, *args)` 解析为 `ArchLaunchKernelAST`。
 
     使用示例:
@@ -1798,7 +1806,14 @@ def _parse_dma_call(
         space = _parse_expr(expr.args[0], env, globals_table, builtins_table)
         if not isinstance(space, MemorySpace):
             _raise_parse_error("get_dynamic_memory space must be MemorySpace", expr.args[0])
-        if space not in {MemorySpace.SM, MemorySpace.LM, MemorySpace.TSM, MemorySpace.TLM}:
+        if space not in {
+            MemorySpace.SM,
+            MemorySpace.LM,
+            MemorySpace.TSM,
+            MemorySpace.TLM1,
+            MemorySpace.TLM2,
+            MemorySpace.TLM3,
+        }:
             _raise_parse_error("get_dynamic_memory space must be on-chip MemorySpace", expr.args[0])
         return ArchGetDynamicMemoryAST(space=space, location=_location_from_node(expr))
 
@@ -1812,10 +1827,10 @@ def _parse_dma_call(
             keyword_values[keyword.arg] = _parse_expr(keyword.value, env, globals_table, builtins_table)
         visibility = keyword_values.get("visibility")
         if not isinstance(visibility, list) or not visibility or not all(
-            isinstance(space, MemorySpace) for space in visibility
+            isinstance(space, _KG_OPERATION_ARCH.BarrierVisibility) for space in visibility
         ):
             _raise_parse_error(
-                "barrier visibility must be non-empty MemorySpace list",
+                "barrier visibility must be non-empty BarrierVisibility list",
                 next(keyword.value for keyword in expr.keywords if keyword.arg == "visibility"),
             )
         scope = keyword_values.get("scope")
