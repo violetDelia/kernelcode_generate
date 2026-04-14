@@ -1,7 +1,7 @@
 """nn_lowering element compare eq tests.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 验证 nn.eq lower 为 kernel.binary_elewise(kind="eq")。
@@ -40,7 +40,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaFillOp
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolValueType
@@ -174,10 +174,10 @@ def _build_module(
 
 # TC-PASS-NNL-S2-006
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-11 23:00:00 +0800
-# 最近一次运行成功时间: 2026-04-11 23:00:00 +0800
-# 测试目的: 验证 nn.eq mixed compare 先 dma.broadcast 再 kernel.binary_elewise(kind="eq")。
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-14 10:20 +0800
+# 最近一次运行成功时间: 2026-04-14 10:20 +0800
+# 测试目的: 验证 nn.eq mixed compare 只保留 dma.broadcast，不混入 dma.fill，再生成 kernel.binary_elewise(kind="eq")。
 # 使用示例: pytest -q test/pass/nn_lowering/element_compare_eq.py -k test_lower_eq_mixed_compare_to_kernel_binary_elewise
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
@@ -201,4 +201,5 @@ def test_lower_eq_mixed_compare_to_kernel_binary_elewise() -> None:
     assert kernel_ops and kernel_ops[0].kind.data == "eq"
     assert any(isinstance(op, DmaBroadcastOp) for op in ops)
     assert any(isinstance(op, DmaAllocOp) for op in ops)
+    assert not any(isinstance(op, DmaFillOp) for op in ops)
     assert not any(op.name.startswith("nn.") for op in ops)

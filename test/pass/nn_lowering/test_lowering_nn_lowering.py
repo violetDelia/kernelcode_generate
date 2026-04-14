@@ -1,7 +1,7 @@
 """nn -> kernel lowering pass tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 nn_lowering pass 的 lowering 行为与错误路径。
@@ -57,7 +57,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaTransposeOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaFillOp, DmaTransposeOp
 from kernel_gen.dialect.kernel import (
     KernelBinaryElewiseOp,
     KernelExpOp,
@@ -1155,7 +1155,7 @@ def test_lower_broadcast_with_symbol_dim() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
-# 测试目的: 验证 Lowering 对 mixed symbol broadcast 的改写行为，生成 kernel.binary_elewise(kind="add")。
+# 测试目的: 验证 Lowering 对 mixed symbol add 的改写行为，生成 dma.alloc + dma.fill + kernel.binary_elewise(kind="add")。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_add_mixed_symbol_to_kernel
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
@@ -1186,7 +1186,52 @@ def test_lower_add_mixed_symbol_to_kernel() -> None:
 
     func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
     block = func_op.body.block
+    assert len([op for op in block.ops if isinstance(op, DmaAllocOp)]) == 2
+    _assert_single_op(block, DmaFillOp)
     _assert_single_binary_kind(block, "add")
+    assert not any(isinstance(op, DmaBroadcastOp) for op in block.ops)
+
+
+# TC-PASS-NNL-020A
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-14 10:20 +0800
+# 最近一次运行成功时间: 2026-04-14 10:20 +0800
+# 测试目的: 验证 Lowering 对 mixed symbol eq 的改写行为，生成 dma.alloc + dma.broadcast + kernel.binary_elewise(kind="eq")，且不混入 dma.fill。
+# 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_eq_mixed_symbol_uses_broadcast_only
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
+def test_lower_eq_mixed_symbol_uses_broadcast_only() -> None:
+    block = Block()
+    lhs_type = nn_memory_type(
+        (IntAttr(2), IntAttr(2)),
+        (IntAttr(2), IntAttr(1)),
+        i32,
+        SPACE_GLOBAL,
+    )
+    rhs_type = SymbolValueType.from_expr("K")
+    res_type = nn_memory_type(
+        (IntAttr(2), IntAttr(2)),
+        (IntAttr(2), IntAttr(1)),
+        i1,
+        SPACE_GLOBAL,
+    )
+    lhs = add_block_arg(block, lhs_type)
+    rhs = add_block_arg(block, rhs_type)
+    eq_op = NnEqOp(lhs, rhs, res_type, SPACE_GLOBAL)
+    block.add_op(eq_op)
+    block.add_op(func.ReturnOp(eq_op.results[0]))
+    module = ModuleOp([func.FuncOp("eq_mixed_symbol", FunctionType.from_lists([lhs_type, rhs_type], [res_type]), Region(block))])
+
+    NnLoweringPass().run(module)
+
+    func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
+    block = func_op.body.block
+    assert len([op for op in block.ops if isinstance(op, DmaAllocOp)]) == 2
+    _assert_single_op(block, DmaBroadcastOp)
+    _assert_single_binary_kind(block, "eq")
+    assert not any(isinstance(op, DmaFillOp) for op in block.ops)
 
 
 # TC-PASS-NNL-021

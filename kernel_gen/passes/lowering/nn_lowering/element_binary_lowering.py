@@ -5,7 +5,8 @@
 
 功能说明:
 - 统一 nn element binary/compare 的 lowering 目标为 kernel.binary_elewise(kind=...)。
-- mixed element binary/compare 先通过 dma.alloc + dma.broadcast 物化标量 operand。
+- mixed element binary 标量 operand 通过 dma.alloc + dma.fill 物化。
+- mixed compare 标量 operand 继续通过 dma.alloc + dma.broadcast 物化。
 - 输出 memory 通过 dma.alloc 显式创建。
 
 使用示例:
@@ -24,7 +25,7 @@ from xdsl.dialects.builtin import IntAttr, StringAttr
 from xdsl.ir import Block, Operation, SSAValue
 from xdsl.utils.exceptions import VerifyException
 
-from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaFillOp
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import (
@@ -147,22 +148,22 @@ def _build_alloc_dynamic_shape_from_source(
     return ops, operands
 
 
-def _materialize_scalar_operand(
+def _materialize_element_binary_scalar_operand(
     scalar: SSAValue,
     source_type: NnMemoryType,
     dynamic_shape: list[SSAValue],
 ) -> tuple[list[Operation], SSAValue]:
-    """把标量 operand 物化为 memory。
+    """把 element binary 标量 operand 物化为 memory。
 
     创建者: 小李飞刀
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 为标量创建与 source 同布局的临时 memory。
-    - 通过 dma.broadcast 写入标量值。
+    - 通过 dma.fill 写入标量值。
 
     使用示例:
-    - ops, value = _materialize_scalar_operand(scalar, source_type, dynamic_shape)
+    - ops, value = _materialize_element_binary_scalar_operand(scalar, source_type, dynamic_shape)
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering.md
@@ -176,6 +177,40 @@ def _materialize_scalar_operand(
         pass
     elif source_type.element_type != scalar.type:
         raise NnLoweringError("nn element binary scalar type mismatch")
+    alloc = DmaAllocOp(dynamic_shape, source_type)
+    fill = DmaFillOp(alloc.result, scalar)
+    return [alloc, fill], alloc.result
+
+
+def _materialize_compare_scalar_operand(
+    scalar: SSAValue,
+    source_type: NnMemoryType,
+    dynamic_shape: list[SSAValue],
+) -> tuple[list[Operation], SSAValue]:
+    """把 compare 标量 operand 物化为 memory。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 为 compare 标量创建与 source 同布局的临时 memory。
+    - 保留当前公开行为，继续通过 dma.broadcast 写入标量值。
+
+    使用示例:
+    - ops, value = _materialize_compare_scalar_operand(scalar, source_type, dynamic_shape)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering.md
+    - test: test/pass/nn_lowering/element_compare_eq.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
+    """
+
+    if not isinstance(source_type, NnMemoryType):
+        raise NnLoweringError("compare materialize source must be nn.memory")
+    if isinstance(scalar.type, SymbolValueType):
+        pass
+    elif source_type.element_type != scalar.type:
+        raise NnLoweringError("nn compare scalar type mismatch")
     alloc = DmaAllocOp(dynamic_shape, source_type)
     broadcast = DmaBroadcastOp(alloc.result, scalar)
     return [alloc, broadcast], alloc.result
@@ -231,7 +266,8 @@ def _lower_element_binary_op(op: Operation, block: Block) -> None:
 
     功能说明:
     - 统一转换为 kernel.binary_elewise(kind=...)。
-    - mixed element binary/compare operand 先 dma.broadcast 物化标量。
+    - mixed element binary 标量 operand 先 dma.fill 物化。
+    - mixed compare 标量 operand 继续 dma.broadcast 物化。
 
     使用示例:
     - _lower_element_binary_op(op, block)
@@ -282,9 +318,23 @@ def _lower_element_binary_op(op: Operation, block: Block) -> None:
     shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_source(shape_source, result_type)
     alloc = DmaAllocOp(dynamic_shape, result_type)
     if lhs_is_memory and not rhs_is_memory:
-        extra_ops, rhs_value = _materialize_scalar_operand(rhs_value, lhs_value.type, dynamic_shape)
+        if op.name in _ELEMENT_BINARY_KINDS:
+            extra_ops, rhs_value = _materialize_element_binary_scalar_operand(
+                rhs_value, lhs_value.type, dynamic_shape
+            )
+        else:
+            extra_ops, rhs_value = _materialize_compare_scalar_operand(
+                rhs_value, lhs_value.type, dynamic_shape
+            )
     elif rhs_is_memory and not lhs_is_memory:
-        extra_ops, lhs_value = _materialize_scalar_operand(lhs_value, rhs_value.type, dynamic_shape)
+        if op.name in _ELEMENT_BINARY_KINDS:
+            extra_ops, lhs_value = _materialize_element_binary_scalar_operand(
+                lhs_value, rhs_value.type, dynamic_shape
+            )
+        else:
+            extra_ops, lhs_value = _materialize_compare_scalar_operand(
+                lhs_value, rhs_value.type, dynamic_shape
+            )
     if op.name in _ELEMENT_BINARY_KINDS:
         kind_value = _ELEMENT_BINARY_KINDS[op.name]
     else:
