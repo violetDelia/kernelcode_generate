@@ -74,6 +74,7 @@ if lower_element_binary_family(block, op):
   - `nn.eq/ne/lt/le/gt/ge` -> `kernel.binary_elewise(kind="eq/ne/lt/le/gt/ge")`
 - 静态 `memory + memory` 的 add/sub case，ircheck 合同应从 `dma.alloc` 起锁定稳定顺序，而不是要求 `func.func` 后紧接 `symbol.get_dim`。
 - 符号维度 case 的 ircheck 合同必须锁定 `symbol.get_dim(axis=0..n-1) -> dma.alloc -> kernel.binary_elewise -> func.return`。
+- mixed scalar element binary 需要先物化 `dma.alloc + dma.fill`，再写入 `kernel.binary_elewise`；该路径禁止回退为 `dma.broadcast`。
 - mixed compare 需要先物化 `dma.alloc + dma.broadcast`，再写入 `kernel.binary_elewise`。
 - 任何空间、结果类型或 operand 校验失败必须抛出 `NnLoweringError`。
 

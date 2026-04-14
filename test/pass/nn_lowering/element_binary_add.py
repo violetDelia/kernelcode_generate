@@ -1,10 +1,11 @@
 """nn_lowering element binary add tests.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 验证 nn.add lower 为 kernel.binary_elewise(kind="add")。
+- 覆盖 mixed scalar 的 dma.fill 物化路径。
 
 使用示例:
 - pytest -q test/pass/nn_lowering/element_binary_add.py
@@ -21,15 +22,15 @@ import sys
 from pathlib import Path
 from collections.abc import Callable
 
-from xdsl.dialects import func
-from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, f32
+from xdsl.dialects import arith, func
+from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, IntegerAttr, ModuleOp, f32, i32
 from xdsl.ir import Attribute, Block, Operation, Region
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dialect.dma import DmaAllocOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaFillOp
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.passes.lowering.nn_lowering.element_binary_lowering import (
@@ -124,3 +125,45 @@ def test_lower_add_to_kernel_binary_elewise() -> None:
     assert kernel_ops and kernel_ops[0].kind.data == "add"
     assert any(isinstance(op, DmaAllocOp) for op in ops)
     assert not any(op.name.startswith("nn.") for op in ops)
+
+
+# TC-PASS-NNL-S2-001A
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-14 11:55:00 +0800
+# 最近一次运行成功时间: 2026-04-14 11:55:00 +0800
+# 测试目的: 验证 nn.add mixed scalar 走 dma.fill，且不再落回 dma.broadcast。
+# 使用示例: pytest -q test/pass/nn_lowering/element_binary_add.py -k test_lower_add_mixed_scalar_uses_dma_fill
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应测试文件路径: test/pass/nn_lowering/element_binary_add.py
+def test_lower_add_mixed_scalar_uses_dma_fill() -> None:
+    lhs_type = _make_memory_type(element_type=i32)
+    result_type = _make_memory_type(element_type=i32)
+    space = NnMemorySpaceAttr.from_name("global")
+
+    def _build_ops(block: Block) -> list[Operation]:
+        scalar = arith.ConstantOp(IntegerAttr(3, i32))
+        nn_op = NnAddOp(block.args[0], scalar.result, result_type, space)
+        return [scalar, nn_op]
+
+    module, block = _build_module([lhs_type], result_type, _build_ops)
+    for op in list(block.ops):
+        lower_element_binary_family(block, op)
+
+    ops = list(block.ops)
+    kernel_ops = [op for op in ops if isinstance(op, KernelBinaryElewiseOp)]
+    alloc_ops = [op for op in ops if isinstance(op, DmaAllocOp)]
+    fill_ops = [op for op in ops if isinstance(op, DmaFillOp)]
+    assert kernel_ops and kernel_ops[0].kind.data == "add"
+    assert len(alloc_ops) == 2
+    assert len(fill_ops) == 1
+    assert not any(isinstance(op, DmaBroadcastOp) for op in ops)
+    assert [op.name for op in ops] == [
+        "arith.constant",
+        "dma.alloc",
+        "dma.alloc",
+        "dma.fill",
+        "kernel.binary_elewise",
+        "func.return",
+    ]

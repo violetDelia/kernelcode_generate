@@ -1152,10 +1152,10 @@ def test_lower_broadcast_with_symbol_dim() -> None:
 
 # TC-PASS-NNL-020
 # 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
-# 测试目的: 验证 Lowering 对 mixed symbol add 的改写行为，生成 dma.alloc + dma.fill + kernel.binary_elewise(kind="add")。
+# 测试目的: 验证 Lowering 会把 mixed symbol scalar add 物化为 dma.fill 路径，并生成 kernel.binary_elewise(kind="add")。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_add_mixed_symbol_to_kernel
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md

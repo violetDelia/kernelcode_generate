@@ -70,7 +70,8 @@
   - `memory + symbol/const` compare：必须先用 `dma.alloc + dma.broadcast` 物化为 temporary memory，再进行 compare；禁止 `kernel` 比较 op 直接接收非 memory operand。
 - element binary mixed operand 的桥接规则：
   - `memory + memory` 的静态 add/sub case，应以 `dma.alloc + kernel.binary_elewise + func.return` 作为最小稳定输出序列。
-  - `memory + symbol/const` 或结果含符号维度时，允许在 `dma.alloc` 前生成 `symbol.get_dim`，并在需要时额外生成 `dma.broadcast`。
+  - `memory + symbol/const` 的 element binary（如 add/sub/mul/div/truediv）必须先物化 `dma.alloc + dma.fill` temporary memory，再执行 `kernel.binary_elewise`；不允许回退为 `dma.broadcast`。
+  - 结果含符号维度时，允许在 `dma.alloc` 前按 rank 顺序生成 `symbol.get_dim` 以构造 dynamic shape operand，但 mixed scalar binary 的物化路径仍固定为 `dma.fill`。
 - 遇到不支持的 op、结果类型非法、缺失 `nn.space`、operand 数量不匹配或 kernel 校验失败时，必须抛出 `NnLoweringError` 并终止。
 
 ## 公开接口
