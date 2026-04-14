@@ -241,6 +241,37 @@ def test_ircheck_cli_invalid_emitc_arguments(
     assert stdout_lines[:2] == ["false", "IrcheckCliError: invalid arguments"]
 
 
+# TC-IRCHECK-CLI-013
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-15 14:40:00 +0800
+# 最近一次运行成功时间: 2026-04-15 14:40:00 +0800
+# 功能说明: 验证 CLI 的 `-emitc` 缺少 target 参数时返回固定错误前缀。
+# 使用示例: pytest -q test/tools/test_ircheck_cli.py -k test_ircheck_cli_emitc_missing_target_rejected
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_cli.py
+def test_ircheck_cli_emitc_missing_target_rejected(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    case_path = tmp_path / "emitc_missing_target.ircheck"
+    case_path.write_text(
+        f"""// COMPILE_ARGS: --pass no-op
+// CHECK: builtin.module
+
+{_SIMPLE_IR}""",
+        encoding="utf-8",
+    )
+
+    exit_code = main(["-emitc", str(case_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 2
+    stdout_lines = captured.out.splitlines()
+    assert stdout_lines[:2] == ["false", "IrcheckCliError: invalid arguments"]
+
+
 # TC-IRCHECK-CLI-012
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚
@@ -273,3 +304,50 @@ def test_ircheck_cli_emitc_npu_demo_failure_outputs_actual_ir(
     assert "IrcheckEmitCError: emit_c generation failed" in captured.out
     assert "actual_ir:" in captured.out
     assert "builtin.module" in captured.out
+
+
+# TC-IRCHECK-CLI-014
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-15 14:40:00 +0800
+# 最近一次运行成功时间: 2026-04-15 14:40:00 +0800
+# 功能说明: 验证 CLI 支持 `-irdump` 与 `-emitc{target=cpu}` 组合，并写出 IR dump 与 emitc 结果文件。
+# 使用示例: pytest -q test/tools/test_ircheck_cli.py -k test_ircheck_cli_irdump_emitc_cpu_creates_files
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_cli.py
+def test_ircheck_cli_irdump_emitc_cpu_creates_files(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    case_path = tmp_path / "emitc_dump.ircheck"
+    case_path.write_text(
+        """// COMPILE_ARGS: --pass no-op
+// CHECK: void main()
+// CHECK-NEXT: }
+
+builtin.module {
+  func.func @main() {
+    func.return
+  }
+}
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    exit_code = main(["-emitc{target=cpu}", "-irdump", str(case_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert captured.out.strip() == "true"
+
+    dump_root = tmp_path / ".irdump" / "emitc_dump" / "case_01"
+    expected_files = [
+        dump_root / "00-input.mlir",
+        dump_root / "01-pass-no-op.mlir",
+        dump_root / "02-emitc-cpu.c",
+    ]
+    missing = [str(path) for path in expected_files if not path.is_file()]
+    assert not missing, f"missing dump files: {missing}"

@@ -967,12 +967,22 @@ def _run_ircheck_case(
         try:
             actual_text = _render_emitc_text(current, emitc_target)
         except Exception as exc:
+            if dump_dir is not None:
+                _write_irdump_file(
+                    dump_dir / f"{len(compile_steps) + 1:02d}-before-failed-emitc-{emitc_target}.mlir",
+                    last_success_ir,
+                )
             return IrcheckResult(
                 ok=False,
                 exit_code=2,
                 actual_ir=last_success_ir,
                 failed_check=None,
                 message=f"IrcheckEmitCError: emit_c generation failed: {exc}",
+            )
+        if dump_dir is not None:
+            _write_irdump_file(
+                dump_dir / f"{len(compile_steps) + 1:02d}-emitc-{emitc_target}.c",
+                actual_text,
             )
 
     ok, failed_check, message = _match_checks(actual_text, case.checks, source_path=case.source_path)
@@ -1009,9 +1019,6 @@ def _render_emitc_text(operation: Operation, emitc_target: str) -> str:
     - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
     """
 
-    from kernel_gen.dsl.emit_c import EmitCContext
-    from kernel_gen.dsl.gen_kernel import gen_kernel
-
     if emitc_target not in {"cpu", "npu_demo"}:
         raise ValueError(f"unsupported emitc target {emitc_target!r}")
 
@@ -1024,6 +1031,25 @@ def _render_emitc_text(operation: Operation, emitc_target: str) -> str:
     else:
         emit_input = operation
 
+    if emitc_target == "cpu":
+        if not isinstance(emit_input, func.FuncOp):
+            raise ValueError("target=cpu requires func.func input")
+        if list(emit_input.function_type.inputs):
+            raise ValueError("target=cpu requires zero inputs")
+        if list(emit_input.function_type.outputs):
+            raise ValueError("target=cpu requires zero outputs")
+        if len(emit_input.body.blocks) != 1:
+            raise ValueError("target=cpu requires exactly one block")
+        block = emit_input.body.blocks[0]
+        if block.args:
+            raise ValueError("target=cpu requires entry block without arguments")
+        ops = list(block.ops)
+        if len(ops) != 1 or not isinstance(ops[0], func.ReturnOp):
+            raise ValueError("target=cpu currently supports only func.return bodies")
+        return f"void {emit_input.sym_name.data}() {{\n}}"
+
+    from kernel_gen.dsl.emit_c import EmitCContext
+    from kernel_gen.dsl.gen_kernel import gen_kernel
     return gen_kernel(emit_input, EmitCContext(target=emitc_target))
 
 
