@@ -259,6 +259,76 @@ def test_run_ircheck_text_unquoted_options_rejected() -> None:
     assert result.message.startswith("IrcheckCompileArgsError: unsupported compile args")
 
 
+# TC-IRCHECK-RUN-030
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-15 03:40:00 +0800
+# 最近一次运行成功时间: 2026-04-15 03:40:00 +0800
+# 功能说明: 验证 emitc_target=cpu 会在 compile steps 后切到源码文本匹配。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_emitc_cpu_success
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+def test_run_ircheck_text_emitc_cpu_success() -> None:
+    text = f"""// COMPILE_ARGS: --pass no-op
+// CHECK: void main() {{
+// CHECK-NEXT: }}
+
+{_SIMPLE_IR}"""
+    result = run_ircheck_text(text, source_path="inline_emitc.ircheck", emitc_target="cpu")
+    assert result.ok is True
+    assert result.exit_code == 0
+    assert result.actual_ir == "void main() {\n}"
+
+
+# TC-IRCHECK-RUN-031
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-15 03:40:00 +0800
+# 最近一次运行成功时间: 2026-04-15 03:40:00 +0800
+# 功能说明: 验证 emitc_target=npu_demo 且输入不满足受控 module 合同时返回固定错误前缀，并保留进入源码分支前的最终 IR。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_emitc_npu_demo_failure_keeps_ir
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+def test_run_ircheck_text_emitc_npu_demo_failure_keeps_ir() -> None:
+    text = f"""// COMPILE_ARGS: --pass no-op
+// CHECK: ignored
+
+{_SIMPLE_IR}"""
+    result = run_ircheck_text(text, source_path="inline_emitc.ircheck", emitc_target="npu_demo")
+    assert result.ok is False
+    assert result.exit_code == 2
+    assert result.message is not None
+    assert result.message.startswith("IrcheckEmitCError: emit_c generation failed")
+    assert "builtin.module" in result.actual_ir
+    assert 'func.func @main()' in result.actual_ir
+
+
+# TC-IRCHECK-RUN-032
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-15 03:40:00 +0800
+# 最近一次运行成功时间: 2026-04-15 03:40:00 +0800
+# 功能说明: 验证 emitc_target 非法时返回固定错误前缀，并保留 compile steps 后的最终 IR。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_emitc_invalid_target
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+def test_run_ircheck_text_emitc_invalid_target() -> None:
+    text = f"""// COMPILE_ARGS: --pass no-op
+// CHECK: ignored
+
+{_SIMPLE_IR}"""
+    result = run_ircheck_text(text, source_path="inline_emitc.ircheck", emitc_target="gpu")
+    assert result.ok is False
+    assert result.exit_code == 2
+    assert result.message is not None
+    assert result.message.startswith("IrcheckEmitCError: emit_c generation failed")
+    assert "unsupported emitc target 'gpu'" in result.message
+    assert "builtin.module" in result.actual_ir
+
+
 # TC-IRCHECK-RUN-022
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战

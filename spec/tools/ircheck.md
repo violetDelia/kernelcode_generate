@@ -3,13 +3,14 @@
 ## 功能简介
 
 - 定义一个面向 IR 变换验证的轻量工具 `ircheck`：读取 case 文本，按 `COMPILE_ARGS` 运行 pass / pipeline，对规范化后的 IR 执行 `CHECK:` / `CHECK-NOT:` / `CHECK-NEXT:` 子串匹配，以及 `CHECK-REGEX:` / `CHECK-NEXT-REGEX:` / `CHECK-NOT-REGEX:` 正则匹配，最终输出 `true/false`。
+- 当显式启用 `emitc_target` 时，`ircheck` 在 compile steps 完成后改为对目标源码文本执行同一套 `CHECK*` 匹配；默认路径仍只匹配规范化 IR，不自动回退或混合双路径。
 - 支持使用 `// -----` 在同一文件/文本中分隔多个 case（lit 风格），按顺序执行并在首个失败处停止。
 - 该工具用于“验证你关心的片段是否出现/不出现/是否相邻”，而不是做全量文本 diff；正则指令额外支持 `[[NAME:REGEX]]` 变量捕获与 `[[NAME]]` 复用。
 
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/tools/ircheck.md`](../../spec/tools/ircheck.md)
 - `功能实现`：[`kernel_gen/tools/ircheck.py`](../../kernel_gen/tools/ircheck.py)
 - `test`：
@@ -28,6 +29,11 @@
 - IR 解析与打印（用于“规范化后的 IR”文本）：
   - [`kernel_gen/context.py`](../../kernel_gen/context.py)
   - [`kernel_gen/dialect`](../../kernel_gen/dialect)
+- `emitc` 代码生成分支：
+  - [`spec/dsl/gen_kernel.md`](../../spec/dsl/gen_kernel.md)
+  - [`spec/dsl/emit_c.md`](../../spec/dsl/emit_c.md)
+  - [`kernel_gen/dsl/gen_kernel.py`](../../kernel_gen/dsl/gen_kernel.py)
+  - [`kernel_gen/dsl/emit_c.py`](../../kernel_gen/dsl/emit_c.py)
 - 默认解析上下文加载的 dialect：
   - `xdsl.dialects.builtin` / `xdsl.dialects.func` / `xdsl.dialects.arith`
   - `kernel_gen.dialect.nn` / `kernel_gen.dialect.kernel`
@@ -41,6 +47,7 @@
   - 其中可作为首条正向锚点的只有 `CHECK:` 与 `CHECK-REGEX:`；
   - `CHECK-NEXT:` 与 `CHECK-NEXT-REGEX:` 必须依附前一条已命中的 positive check。
 - `compile args`：`COMPILE_ARGS:` 指令后的一段参数串，支持 `--pass <name>` / `--pipeline <name>`，以及带 `{k=v}` 选项块的 `--pass "<name>{k=v}"` / `--pipeline "<name>{k=v}"`。
+- `emitc mode`：指 `run_ircheck_file(...)` / `run_ircheck_text(...)` 或 CLI 显式提供 `emitc_target` 后，在 compile steps 结束后把匹配对象从规范化 IR 切换为生成源码文本的执行分支。
 
 ## 目标
 
@@ -58,6 +65,8 @@
 - `expectation/tools/ircheck/ir_dump_true.py`：验证 `-irdump` 的目录与文件命名。
 - `expectation/tools/ircheck/regex_variable_true.py`：验证 `CHECK-REGEX*` 与变量捕获/引用的成功路径。
 - `expectation/tools/ircheck/regex_variable_false.py`：验证正则/变量写法失败时的稳定错误短语。
+- `expectation/tools/ircheck/emitc_true.py`：验证 `emitc_target="cpu"` 的源码匹配成功路径。
+- `expectation/tools/ircheck/emitc_false.py`：验证 `emitc_target="npu_demo"` 的失败前缀与源码分支错误语义。
 - `expectation/tools/ircheck/README.md`：样例入口与迁移写法，强调三条公开 API 为稳定合同，并补齐 regex/variable 示例。
 
 ## 迁移建议
@@ -74,6 +83,13 @@
 - 变量捕获语法 `[[NAME:REGEX]]` 与引用语法 `[[NAME]]` 仅在 `CHECK-REGEX*` 指令中生效；变量作用域只限当前 case，不跨 case 共享。
 - `CHECK-NOT-REGEX:` 禁止定义新变量；只允许引用已经在更早的 positive regex check 中成功捕获的变量。
 - IR 自身的字面量 `[` / `]` 不是变量语法的一部分；在正则指令中仍必须单独写作 `\[` / `\]`。
+- `emitc_target` 只接受 `cpu`、`npu_demo` 与 `None`：
+  - `None`：仅匹配规范化 IR；
+  - `cpu`：compile steps 完成后把匹配对象切换到 CPU 源码文本；
+  - `npu_demo`：compile steps 完成后只接受 `gen_kernel` 当前公开合同允许的受控 module 子集。
+- 一旦进入 `emitc mode`，`actual_ir` 与 `CHECK*` 的匹配对象都固定为生成源码文本；不得在同一次执行中同时匹配 IR 与源码，也不得在生成失败时静默回退到 IR 匹配。
+- `emitc` 生成失败、`emitc_target` 不受支持、或目标 target 与当前 IR 结构不兼容时，统一返回 `IrcheckEmitCError: emit_c generation failed` 前缀；实现可以在该前缀后补充 target、异常正文或结构原因。
+- `expectation/tools/ircheck/emitc_true.py` 与 `expectation/tools/ircheck/emitc_false.py` 是本功能的 expectation 合同资产，但仓库 `.gitignore` 当前忽略 `/expectation/` 路径；因此只有 merge 阶段允许通过 `git add -f expectation/tools/ircheck/emitc_true.py expectation/tools/ircheck/emitc_false.py` 纳入交付，其他阶段不得修改 `.gitignore` 来绕过该约束。
 - `expectation/tools/ircheck/README.md` 属于 expectation 侧合同说明资产：build/review/merge 角色可以按 README 中的稳定示例执行联调与验收，但非架构阶段默认不得把 README 文本刷新混入实现或测试改动一起交付。
 - 当 README 中的最小示例、迁移说明或 expectation 目录说明需要调整时，应先由架构侧或被明确点名的 `spec` 任务完成口径收口；本轮实现链路的默认可合并范围不包含未授权的 README 文本改动。
 - 内置正则别名仅允许出现在 `[[NAME:REGEX]]` 的 `REGEX` 区段内：
@@ -105,15 +121,18 @@
 
 ## 公开接口
 
-### CLI：`python -m kernel_gen.tools.ircheck <case-file>`
+### CLI：`python -m kernel_gen.tools.ircheck [-irdump] [-emitc{target=<target>}] <case-file>`
 
 功能说明：
 
 - 运行一个 case 文件并在标准输出打印 `true/false`。
 - 当文件包含 `// -----` 时，按 case block 顺序执行（fail-fast）。
+- 当显式提供 `-emitc{target=<target>}` 时，compile steps 完成后改为对目标源码文本执行 `CHECK*`。
 
 参数说明：
 
+- `-irdump (flag)`：可选，导出每个 case 的逐步 IR。
+- `-emitc{target=<target>} (flag)`：可选，要求 compile steps 后把匹配对象切换为目标源码文本；`target` 只接受 `cpu`、`npu_demo`。
 - `<case-file> (str)`：单个文本文件路径。
 
 使用示例：
@@ -122,17 +141,22 @@
 PYTHONPATH=. python -m kernel_gen.tools.ircheck case.ircheck
 ```
 
+```text
+PYTHONPATH=. python -m kernel_gen.tools.ircheck -emitc{target=cpu} case.ircheck
+```
+
 注意事项：
 
-- CLI 内部应调用 `run_ircheck_file(path)` 并将返回值映射到输出与退出码（见下节）。
+- CLI 内部应调用 `run_ircheck_file(path, irdump=..., emitc_target=...)` 并将返回值映射到输出与退出码（见下节）。
 - CLI 支持 `-irdump` 选项：开启后将每个 case 的每一步 IR 写入 `<cwd>/.irdump/<stem>/case_<index>/`。
+- `-emitc` 缺少 `{target=...}`、`target` 为空、`target` 不在 `{cpu,npu_demo}`、或缺少 `<case-file>` 时，都必须返回 `IrcheckCliError: invalid arguments`。
 
 返回与限制：
 
 - 退出码：
   - `0`：检查通过
   - `1`：检查不通过（匹配失败）
-  - `2`：解析失败、参数不支持、或 pass/pipeline 执行失败
+  - `2`：解析失败、参数不支持、pass/pipeline 执行失败、或 `emitc` 生成失败
 
 ### `parse_ircheck_file(path: str) -> IrcheckCase`
 
@@ -187,7 +211,7 @@ assert case.compile_args.startswith("--pass ")
   - `IrcheckParseError: duplicate regex variable`
   - `IrcheckParseError: CHECK-NOT-REGEX cannot define variables`
 
-### `run_ircheck_file(path: str) -> IrcheckResult`
+### `run_ircheck_file(path: str, *, irdump: bool = False, emitc_target: str | None = None) -> IrcheckResult`
 
 功能说明：
 
@@ -197,6 +221,8 @@ assert case.compile_args.startswith("--pass ")
 参数说明：
 
 - `path (str)`：case 文件路径。
+- `irdump (bool)`：可选，是否导出逐步 IR。
+- `emitc_target (str|None)`：可选；为 `None` 时匹配规范化 IR，为 `cpu`/`npu_demo` 时匹配目标源码文本。
 
 使用示例：
 
@@ -205,6 +231,11 @@ from kernel_gen.tools.ircheck import run_ircheck_file
 
 result = run_ircheck_file("case.ircheck")
 assert result.ok is True
+```
+
+```python
+result = run_ircheck_file("case.ircheck", emitc_target="cpu")
+assert result.actual_ir.startswith("void ")
 ```
 
 注意事项：
@@ -225,6 +256,9 @@ assert result.ok is True
   1. 按文件中的 case block 顺序逐个执行；
   2. 任一 case 失败则立即返回（fail-fast）；
   3. 全部通过时返回最后一个 case 的成功结果。
+- `emitc_target is None` 时，匹配对象保持为规范化 IR。
+- `emitc_target in {"cpu", "npu_demo"}` 时，必须先执行完整 compile steps，再调用 [`gen_kernel(...)`](../../spec/dsl/gen_kernel.md) 对最终 IR 生成源码，并把生成结果写入 `actual_ir` 供 `CHECK*` 匹配。
+- `emitc_target="npu_demo"` 不放宽 [`spec/dsl/gen_kernel.md`](../../spec/dsl/gen_kernel.md) 已定义的受控 module 约束；若输入结构不满足该合同，必须返回 `IrcheckEmitCError: emit_c generation failed`，不得退回 IR 匹配。
 
 返回与限制：
 
@@ -239,6 +273,8 @@ assert result.ok is True
   - `IrcheckCompileArgsError: unsupported compile args`
 - 若 pass/pipeline 执行抛错或返回不可打印的对象，返回 `ok=False`，`exit_code=2`，且 `message` 前缀为：
   - `IrcheckRunError: pass execution failed`
+- 若 `emitc` 生成抛错、`emitc_target` 不受支持、或 target 与当前 IR 结构不兼容，返回 `ok=False`，`exit_code=2`，且 `message` 前缀为：
+  - `IrcheckEmitCError: emit_c generation failed`
 - 若匹配失败，返回 `ok=False`，`exit_code=1`，且 `message` 前缀为：
   - `IrcheckMatchError: CHECK not found`
   - `IrcheckMatchError: CHECK-NEXT not found on next line`
@@ -251,8 +287,9 @@ assert result.ok is True
   - `actual_ir` 必须返回失败前一刻的规范化 IR：
     - step 1 失败时返回输入 IR 的规范化文本；
     - step N 失败时返回第 N-1 步执行后的规范化 IR。
+- 若 compile steps 已成功但 `emitc` 生成失败，`actual_ir` 必须返回进入 `emitc` 分支前的最终规范化 IR，便于定位源码生成前的输入。
 
-### `run_ircheck_text(text: str, source_path: str | None = None) -> IrcheckResult`
+### `run_ircheck_text(text: str, source_path: str | None = None, emitc_target: str | None = None) -> IrcheckResult`
 
 功能说明：
 
@@ -263,6 +300,7 @@ assert result.ok is True
 
 - `text (str)`：完整 case 文本。
 - `source_path (str|None)`：可选，用于错误信息中的定位说明；不参与语义。
+- `emitc_target (str|None)`：可选；语义与 `run_ircheck_file` 相同。
 
 使用示例：
 
@@ -280,10 +318,27 @@ builtin.module { func.func @main() { func.return } }
 assert result.ok is True
 ```
 
+```python
+result = run_ircheck_text(
+    \"\"\"// COMPILE_ARGS: --pass no-op
+// CHECK: void main()
+
+builtin.module {
+  func.func @main() {
+    func.return
+  }
+}
+\"\"\",
+    source_path="inline_emitc.ircheck",
+    emitc_target="cpu",
+)
+assert result.ok is True
+```
+
 返回与限制：
 
 - 返回行为与 `run_ircheck_file` 相同；仅输入源不同。
- - `COMPILE_ARGS` 支持重复 `--pass` / `--pipeline` 并按文本顺序执行。
+- `COMPILE_ARGS` 支持重复 `--pass` / `--pipeline` 并按文本顺序执行。
 
 ### 数据对象：`IrcheckCase` / `CheckDirective` / `IrcheckResult`
 
@@ -307,7 +362,7 @@ assert result.ok is True
 - `IrcheckResult` 建议字段：
   - `ok (bool)`
   - `exit_code (int)`
-  - `actual_ir (str)`：规范化后的 IR 文本（若解析失败可为空串）
+  - `actual_ir (str)`：默认为规范化后的 IR 文本；进入 `emitc mode` 后改为生成源码文本；若解析失败可为空串
   - `failed_check (CheckDirective|None)`
   - `message (str|None)`
 
@@ -340,7 +395,8 @@ assert result.exit_code == 0
 
 注意事项：
 
-- 匹配对象为 pass/pipeline 执行后的规范化 IR 文本 `actual_ir`，不匹配原始输入文本。
+- 匹配对象始终为 `actual_ir`，不匹配原始输入文本。
+- 默认模式下，`actual_ir` 为 pass/pipeline 执行后的规范化 IR 文本；`emitc mode` 下，`actual_ir` 为 compile steps 之后生成的目标源码文本。
 - 匹配按“行”进行：把 `actual_ir` 视为按换行符拆分的行序列 `lines`（等价于 `actual_ir.splitlines()`），每条指令都在 `lines[i]` 上做子串查找；不做跨行拼接匹配。
 - `CHECK:` / `CHECK-NEXT:` / `CHECK-NOT:` 保持“子串匹配”语义，不做正则解释。
 - `CHECK-REGEX:` / `CHECK-NEXT-REGEX:` / `CHECK-NOT-REGEX:` 在单行文本上做正则匹配；IR 字面量 `[` / `]` 仍需单独写作 `\[` / `\]`。
@@ -438,6 +494,20 @@ builtin.module { /* ... */ }
 builtin.module { /* ... */ }
 ```
 
+### `emitc` expectation 资产与交付
+
+- 本功能的 expectation 合同资产固定为：
+  - `expectation/tools/ircheck/emitc_true.py`
+  - `expectation/tools/ircheck/emitc_false.py`
+- 这两份资产位于当前 `.gitignore` 忽略的 `/expectation/` 路径下；因此 `spec/build/review` 阶段只负责把路径、命令和预期行为写清，不要求在这些阶段改变 git 跟踪状态。
+- 只有 merge 阶段允许通过下列命令把资产纳入最终交付：
+
+```text
+git add -f expectation/tools/ircheck/emitc_true.py expectation/tools/ircheck/emitc_false.py
+```
+
+- merge 阶段不得通过修改 `.gitignore`、移动 expectation 路径或替换资产载体来绕过上述交付方式。
+
 ### `-irdump` 目录与文件命名
 
 - 开启 `-irdump` 后默认写入 `<cwd>/.irdump/<stem>/case_<index>/`。
@@ -475,9 +545,12 @@ builtin.module { /* ... */ }
   - `pytest -q test/tools/test_ircheck_runner.py`
   - `pytest -q test/tools/test_ircheck_matcher.py`
   - `pytest -q test/tools/test_ircheck_cli.py`
+  - `PYTHONPATH=. python expectation/tools/ircheck/emitc_true.py`
+  - `PYTHONPATH=. python expectation/tools/ircheck/emitc_false.py`
 - 测试目标：
   - parser：能稳定解析头部注释区、提取 compile_args 与六类检查指令，并对缺失/重复指令、非法 regex 语法、未定义变量、重复变量、`CHECK-NOT-REGEX` 非法定义变量返回稳定错误短语；`parse_ircheck_file` 对多 case 分隔符稳定拒绝。
   - runner：能通过 pass registry 解析 `--pass/--pipeline` 与其 options 形式并执行，输出 `IrcheckResult` 的 `ok/exit_code/message` 行为与本文件一致；支持多 case 顺序执行与 fail-fast。
   - runner：多 step 失败时必须返回 step 序号/类型/名字，并按失败前一刻 IR 填充 `actual_ir`；覆盖 `expectation/tools/ircheck/multi_pass_fail.py` 与 `test/tools/test_ircheck_runner.py` 对应用例。
   - matcher：能按本文件“检查语义”规则稳定处理 `CHECK/CHECK-NEXT/CHECK-NOT` 与 `CHECK-REGEX/CHECK-NEXT-REGEX/CHECK-NOT-REGEX` 的顺序、相邻、区间与变量复用约束，并在失败时返回稳定错误短语。
   - cli：开启 `-irdump` 后需生成 `.irdump/<stem>/case_01/`、`.irdump/<stem>/case_02/` 等目录与逐 step IR 文件；覆盖 `expectation/tools/ircheck/ir_dump_true.py` 与 `test/tools/test_ircheck_cli.py` 对应用例。
+  - emitc：显式启用 `emitc_target="cpu"` 时，`actual_ir` 与 `CHECK*` 匹配对象必须切到源码文本；显式启用 `emitc_target="npu_demo"` 且输入不满足受控 module 合同时，必须返回 `IrcheckEmitCError: emit_c generation failed`，覆盖 `expectation/tools/ircheck/emitc_true.py`、`expectation/tools/ircheck/emitc_false.py` 与 `test/tools/test_ircheck_runner.py` / `test/tools/test_ircheck_cli.py` 的 emitc 用例。

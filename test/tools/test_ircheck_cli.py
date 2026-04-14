@@ -1,7 +1,7 @@
 """ircheck CLI tests.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 `python -m kernel_gen.tools.ircheck <case-file>` 的最小 CLI 合同：
@@ -20,9 +20,11 @@
 - pytest -q test/tools/test_ircheck_cli.py
 
 关联文件:
-- 功能实现: kernel_gen/tools/ircheck.py
-- Spec 文档: spec/tools/ircheck.md
-- 测试文件: test/tools/test_ircheck_cli.py
+- 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
+- Spec 文档: [spec/tools/ircheck.md](spec/tools/ircheck.md)
+- 测试文件:
+  - [test/tools/test_ircheck_cli.py](test/tools/test_ircheck_cli.py)
+  - [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
 """
 
 from __future__ import annotations
@@ -180,3 +182,94 @@ def test_ircheck_cli_irdump_creates_files(
     ]
     missing = [str(path) for path in expected_files if not path.is_file()]
     assert not missing, f"missing dump files: {missing}"
+
+
+# TC-IRCHECK-CLI-010
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-15 03:40:00 +0800
+# 最近一次运行成功时间: 2026-04-15 03:40:00 +0800
+# 功能说明: 验证 CLI 支持 `-emitc{target=cpu}` 并对源码文本执行 CHECK 匹配。
+# 使用示例: pytest -q test/tools/test_ircheck_cli.py -k test_ircheck_cli_emitc_cpu_success
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_cli.py
+def test_ircheck_cli_emitc_cpu_success(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    content = f"""// COMPILE_ARGS: --pass no-op
+// CHECK: void main() {{
+// CHECK-NEXT: }}
+
+{_SIMPLE_IR}"""
+    case_path = tmp_path / "emitc_cpu.ircheck"
+    case_path.write_text(content, encoding="utf-8")
+
+    exit_code = main(["-emitc{target=cpu}", str(case_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert captured.out.strip() == "true"
+
+
+# TC-IRCHECK-CLI-011
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-15 03:40:00 +0800
+# 最近一次运行成功时间: 2026-04-15 03:40:00 +0800
+# 功能说明: 验证 CLI 的 emitc 参数非法时返回固定错误前缀。
+# 使用示例: pytest -q test/tools/test_ircheck_cli.py -k test_ircheck_cli_invalid_emitc_arguments
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_cli.py
+def test_ircheck_cli_invalid_emitc_arguments(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    case_path = tmp_path / "emitc_invalid.ircheck"
+    case_path.write_text(
+        f"""// COMPILE_ARGS: --pass no-op
+// CHECK: builtin.module
+
+{_SIMPLE_IR}""",
+        encoding="utf-8",
+    )
+
+    exit_code = main(["-emitc{target=gpu}", str(case_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 2
+    stdout_lines = captured.out.splitlines()
+    assert stdout_lines[:2] == ["false", "IrcheckCliError: invalid arguments"]
+
+
+# TC-IRCHECK-CLI-012
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-15 03:40:00 +0800
+# 最近一次运行成功时间: 2026-04-15 03:40:00 +0800
+# 功能说明: 验证 CLI 的 `-emitc{target=npu_demo}` 失败时返回固定错误前缀，并输出进入源码分支前的最终 IR。
+# 使用示例: pytest -q test/tools/test_ircheck_cli.py -k test_ircheck_cli_emitc_npu_demo_failure_outputs_actual_ir
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_cli.py
+def test_ircheck_cli_emitc_npu_demo_failure_outputs_actual_ir(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    case_path = tmp_path / "emitc_npu_demo.ircheck"
+    case_path.write_text(
+        f"""// COMPILE_ARGS: --pass no-op
+// CHECK: ignored
+
+{_SIMPLE_IR}""",
+        encoding="utf-8",
+    )
+
+    exit_code = main(["-emitc{target=npu_demo}", str(case_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 2
+    stdout_lines = captured.out.splitlines()
+    assert stdout_lines and stdout_lines[0] == "false"
+    assert "IrcheckEmitCError: emit_c generation failed" in captured.out
+    assert "actual_ir:" in captured.out
+    assert "builtin.module" in captured.out

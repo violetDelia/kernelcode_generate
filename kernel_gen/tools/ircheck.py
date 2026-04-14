@@ -1,7 +1,7 @@
 """ircheck: IR transform check tool.
 
 创建者: 睡觉小分队
-最后一次更改: 朽木露琪亚
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 提供轻量的 IR 变换验证工具：读取单文件 case，按 `COMPILE_ARGS` 顺序运行 pass / pipeline，
@@ -31,6 +31,7 @@ builtin.module {}
 - test:
   - [test/tools/test_ircheck_parser.py](test/tools/test_ircheck_parser.py)
   - [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
+  - [test/tools/test_ircheck_cli.py](test/tools/test_ircheck_cli.py)
   - [test/tools/test_ircheck_matcher.py](test/tools/test_ircheck_matcher.py)
 - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
 """
@@ -48,8 +49,9 @@ from typing import Literal, Sequence
 os.environ.setdefault("SYMPY_GMPY", "0")
 
 from xdsl.context import Context
+from xdsl.dialects import func
 from xdsl.dialects.arith import Arith
-from xdsl.dialects.builtin import Builtin
+from xdsl.dialects.builtin import Builtin, ModuleOp
 from xdsl.dialects.func import Func
 from xdsl.ir import Operation
 from xdsl.parser import Parser
@@ -198,7 +200,7 @@ class IrcheckResult:
 
     关联文件:
     - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
-    - test: [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
+    - test: [test/tools/test_ircheck_cli.py](test/tools/test_ircheck_cli.py)
     - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
     """
 
@@ -238,7 +240,7 @@ def _tokenize_regex_check(text: str) -> list[tuple[str, str, str | None]]:
     """把 regex check 文本拆成 literal/ref/define 片段。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 识别 `[[NAME]]` 引用与 `[[NAME:REGEX]]` 定义。
@@ -285,7 +287,7 @@ def _contains_invalid_regex_literal_fragment(literal: str) -> bool:
     r"""判断 literal 片段里是否残留了非法 regex 变量痕迹。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 原样出现的 `[[` / `]]` 视为未被 token 化的变量片段，必须报解析失败。
@@ -300,7 +302,9 @@ def _contains_invalid_regex_literal_fragment(literal: str) -> bool:
     关联文件:
     - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
     - test: [test/tools/test_ircheck_parser.py](test/tools/test_ircheck_parser.py)
-    - test: [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
+    - test:
+      - [test/tools/test_ircheck_cli.py](test/tools/test_ircheck_cli.py)
+      - [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
     - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
     """
 
@@ -471,25 +475,31 @@ def parse_ircheck_file(path: str) -> IrcheckCase:
     return _parse_ircheck_text(text, source_path=path)
 
 
-def run_ircheck_file(path: str, *, irdump: bool = False) -> IrcheckResult:
+def run_ircheck_file(
+    path: str, *, irdump: bool = False, emitc_target: str | None = None
+) -> IrcheckResult:
     """运行单个 case 文件。
 
     创建者: 睡觉小分队
-    最后一次更改: 小李飞刀
+    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 读取并解析 case 文件后执行 pass/pipeline。
     - 对规范化 IR 执行 `CHECK*:` 指令匹配，并返回结构化结果。
     - 若 `irdump=True`，按 `spec/tools/ircheck.md` 写入 `.irdump/<stem>/case_<index>/`。
+    - 若 `emitc_target` 非空，则在 compile steps 完成后生成目标源码文本，并改为对源码执行 `CHECK*`。
 
     使用示例:
     - result = run_ircheck_file("case.ircheck")
     - assert result.ok is True
     - _ = run_ircheck_file("case.ircheck", irdump=True)
+    - _ = run_ircheck_file("case.ircheck", emitc_target="cpu")
 
     关联文件:
     - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
-    - test: [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
+    - test:
+      - [test/tools/test_ircheck_cli.py](test/tools/test_ircheck_cli.py)
+      - [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
     - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
     """
 
@@ -505,17 +515,20 @@ def run_ircheck_file(path: str, *, irdump: bool = False) -> IrcheckResult:
             message=str(exc),
         )
     dump_root = _build_irdump_root(path, enabled=irdump)
-    return _run_ircheck_cases(cases, dump_root=dump_root)
+    return _run_ircheck_cases(cases, dump_root=dump_root, emitc_target=emitc_target)
 
 
-def run_ircheck_text(text: str, source_path: str | None = None) -> IrcheckResult:
+def run_ircheck_text(
+    text: str, source_path: str | None = None, emitc_target: str | None = None
+) -> IrcheckResult:
     """运行一段 case 文本。
 
     创建者: 睡觉小分队
-    最后一次更改: 小李飞刀
+    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 直接运行完整 case 文本（无需写入文件），其语义与 `run_ircheck_file` 一致。
+    - 若 `emitc_target` 非空，则在 compile steps 完成后生成目标源码文本，并改为对源码执行 `CHECK*`。
 
     使用示例:
     - result = run_ircheck_text(\"\"\"// COMPILE_ARGS: --pass no-op
@@ -524,6 +537,8 @@ def run_ircheck_text(text: str, source_path: str | None = None) -> IrcheckResult
 builtin.module {}
 \"\"\")
     - assert result.exit_code == 0
+    - emitc_result = run_ircheck_text(text, emitc_target="cpu")
+    - assert emitc_result.actual_ir.startswith("void ")
 
     关联文件:
     - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
@@ -541,7 +556,7 @@ builtin.module {}
             failed_check=None,
             message=str(exc),
         )
-    return _run_ircheck_cases(cases)
+    return _run_ircheck_cases(cases, emitc_target=emitc_target)
 
 
 def _split_ircheck_text_into_case_blocks(text: str) -> list[IrcheckCaseBlock]:
@@ -631,17 +646,23 @@ def _parse_ircheck_cases(text: str, *, source_path: str | None) -> list[IrcheckC
     return cases
 
 
-def _run_ircheck_cases(cases: Sequence[IrcheckCase], *, dump_root: Path | None = None) -> IrcheckResult:
+def _run_ircheck_cases(
+    cases: Sequence[IrcheckCase],
+    *,
+    dump_root: Path | None = None,
+    emitc_target: str | None = None,
+) -> IrcheckResult:
     """顺序执行多个 case，并按 fail-fast 返回结果。
 
     创建者: 守护最好的爱莉希雅
-    最后一次更改: 小李飞刀
+    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 顺序执行每个 case。
     - 多 case 下任一失败立即返回，并在 message 追加失败 case 序号。
     - 全部通过时返回最后一个 case 的结果。
     - 当 `dump_root` 非空时，为每个 case 创建 `case_XX` 子目录并写入 IR 快照。
+    - 当 `emitc_target` 非空时，把该目标透传给每个 case 的源码分支执行。
 
     使用示例:
     - result = _run_ircheck_cases(cases)
@@ -668,7 +689,7 @@ def _run_ircheck_cases(cases: Sequence[IrcheckCase], *, dump_root: Path | None =
         case_dump_dir = None
         if dump_root is not None:
             case_dump_dir = dump_root / f"case_{index:02d}"
-        result = _run_ircheck_case(case, dump_dir=case_dump_dir)
+        result = _run_ircheck_case(case, dump_dir=case_dump_dir, emitc_target=emitc_target)
         if not result.ok:
             if multi_case and result.message:
                 return IrcheckResult(
@@ -831,16 +852,21 @@ def _parse_ircheck_text(text: str, *, source_path: str | None, line_offset: int 
     )
 
 
-def _run_ircheck_case(case: IrcheckCase, *, dump_dir: Path | None = None) -> IrcheckResult:
+def _run_ircheck_case(
+    case: IrcheckCase,
+    *,
+    dump_dir: Path | None = None,
+    emitc_target: str | None = None,
+) -> IrcheckResult:
     """执行单个解析后的 case。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 解析 compile args 为 step 列表并按顺序执行 pass/pipeline。
     - 任一步失败即停止，`actual_ir` 返回失败前一刻的规范化 IR。
-    - 打印规范化 IR，并按检查语义做子串匹配。
+    - 默认对规范化 IR 执行 `CHECK*` 匹配；若 `emitc_target` 非空，则改为在 compile steps 结束后生成源码并对源码执行匹配。
     - `dump_dir` 非空时写入 `00-input.mlir` 与逐 step IR。
 
     使用示例:
@@ -936,17 +962,123 @@ def _run_ircheck_case(case: IrcheckCase, *, dump_dir: Path | None = None) -> Irc
         current = output
         last_success_ir = actual_ir
 
-    ok, failed_check, message = _match_checks(last_success_ir, case.checks, source_path=case.source_path)
+    actual_text = last_success_ir
+    if emitc_target is not None:
+        try:
+            actual_text = _render_emitc_text(current, emitc_target)
+        except Exception as exc:
+            return IrcheckResult(
+                ok=False,
+                exit_code=2,
+                actual_ir=last_success_ir,
+                failed_check=None,
+                message=f"IrcheckEmitCError: emit_c generation failed: {exc}",
+            )
+
+    ok, failed_check, message = _match_checks(actual_text, case.checks, source_path=case.source_path)
     if not ok:
         return IrcheckResult(
             ok=False,
             exit_code=1,
-            actual_ir=last_success_ir,
+            actual_ir=actual_text,
             failed_check=failed_check,
             message=message,
         )
 
-    return IrcheckResult(ok=True, exit_code=0, actual_ir=last_success_ir, failed_check=None, message=None)
+    return IrcheckResult(ok=True, exit_code=0, actual_ir=actual_text, failed_check=None, message=None)
+
+
+def _render_emitc_text(operation: Operation, emitc_target: str) -> str:
+    """把 compile steps 结果转换为 emitc 目标源码文本。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - `target=cpu` 时接受单个 `func.func`，或仅包含一个顶层 `func.func` 的 `builtin.module`。
+    - `target=npu_demo` 时把最终 op 直接交给 `gen_kernel(...)`，由其继续校验受控 `builtin.module` 合同。
+    - 其他 target 统一显式失败，避免静默退回 IR 匹配。
+
+    使用示例:
+    - source = _render_emitc_text(module_op, "cpu")
+    - assert source.startswith("void ")
+
+    关联文件:
+    - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
+    - test: [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
+    - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
+    """
+
+    from kernel_gen.dsl.emit_c import EmitCContext
+    from kernel_gen.dsl.gen_kernel import gen_kernel
+
+    if emitc_target not in {"cpu", "npu_demo"}:
+        raise ValueError(f"unsupported emitc target {emitc_target!r}")
+
+    emit_input: Operation | func.FuncOp
+    if emitc_target == "cpu" and isinstance(operation, ModuleOp):
+        top_ops = list(operation.ops)
+        if len(top_ops) != 1 or not isinstance(top_ops[0], func.FuncOp):
+            raise ValueError("target=cpu requires a module with exactly one top-level func.func")
+        emit_input = top_ops[0]
+    else:
+        emit_input = operation
+
+    return gen_kernel(emit_input, EmitCContext(target=emitc_target))
+
+
+def _parse_cli_args(args: Sequence[str]) -> tuple[str, bool, str | None] | None:
+    """解析 ircheck CLI 的文件路径、`-irdump` 与 `-emitc` 组合。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 支持 `<case-file>`、`-irdump <case-file>`、`-emitc{target=...} <case-file>` 以及两 flag 组合。
+    - `-emitc` 只接受 `cpu`、`npu_demo` 两个 target。
+    - 参数数量、flag 形态或 target 非法时返回 `None`，交由 CLI 输出统一错误前缀。
+
+    使用示例:
+    - parsed = _parse_cli_args(["-irdump", "-emitc{target=cpu}", "case.ircheck"])
+    - assert parsed == ("case.ircheck", True, "cpu")
+
+    关联文件:
+    - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
+    - test: [test/tools/test_ircheck_cli.py](test/tools/test_ircheck_cli.py)
+    - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
+    """
+
+    if not args:
+        return None
+
+    irdump = False
+    emitc_target: str | None = None
+    case_path: str | None = None
+    emitc_pattern = re.compile(r"^-emitc\{target=(cpu|npu_demo)\}$")
+
+    for arg in args:
+        if arg == "-irdump":
+            if irdump:
+                return None
+            irdump = True
+            continue
+        emitc_match = emitc_pattern.fullmatch(arg)
+        if emitc_match is not None:
+            if emitc_target is not None:
+                return None
+            emitc_target = emitc_match.group(1)
+            continue
+        if arg.startswith("-emitc"):
+            return None
+        if arg.startswith("-"):
+            return None
+        if case_path is not None:
+            return None
+        case_path = arg
+
+    if case_path is None:
+        return None
+    return (case_path, irdump, emitc_target)
 
 
 def _build_irdump_root(source_path: str | None, *, enabled: bool) -> Path | None:
@@ -1404,37 +1536,36 @@ def main(argv: Sequence[str] | None = None) -> int:
     """CLI 入口：`python -m kernel_gen.tools.ircheck <case-file>`。
 
     创建者: 睡觉小分队
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
     - 运行单个 case 文件并在标准输出打印 `true/false`。
     - 若文件中包含 `// -----` 分隔符，会按顺序执行多个 case（fail-fast）。
     - 支持 `-irdump <case-file>`，用于写入 `.irdump/<stem>/case_<index>/`。
+    - 支持 `-emitc{target=<target>}`，在 compile steps 完成后切换为源码匹配。
     - 退出码约束见 `spec/tools/ircheck.md`。
 
     使用示例:
     - PYTHONPATH=. python -m kernel_gen.tools.ircheck case.ircheck
+    - PYTHONPATH=. python -m kernel_gen.tools.ircheck -emitc{target=cpu} case.ircheck
 
     关联文件:
     - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
-    - test: [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
+    - test:
+      - [test/tools/test_ircheck_cli.py](test/tools/test_ircheck_cli.py)
+      - [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
     - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
     """
 
     args = list(sys.argv[1:] if argv is None else argv)
-    irdump = False
-    case_path: str | None = None
-    if len(args) == 1:
-        case_path = args[0]
-    elif len(args) == 2 and args[0] == "-irdump":
-        irdump = True
-        case_path = args[1]
-    if case_path is None:
+    parsed = _parse_cli_args(args)
+    if parsed is None:
         print("false")
         print("IrcheckCliError: invalid arguments")
         return 2
+    case_path, irdump, emitc_target = parsed
 
-    result = run_ircheck_file(case_path, irdump=irdump)
+    result = run_ircheck_file(case_path, irdump=irdump, emitc_target=emitc_target)
     if result.ok:
         print("true")
         return 0
