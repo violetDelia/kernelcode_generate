@@ -34,7 +34,7 @@ from .ast import (
     parse_function,
 )
 from .ast_visitor import AstVisitor, AstVisitorError
-from .emit_mlir import EmitContext, emit_mlir
+from .mlir_gen.emit import EmitContext, emit_mlir
 from .mlir_gen import build_func_op, build_func_op_from_ast
 
 __all__ = [

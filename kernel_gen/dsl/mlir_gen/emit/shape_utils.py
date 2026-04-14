@@ -21,7 +21,7 @@ from __future__ import annotations
 from xdsl.ir import Attribute, SSAValue
 
 from kernel_gen.dsl.ast import SourceLocation
-from kernel_gen.dsl.emit_mlir import (
+from .core import (
     _build_index_attrs,
     _build_index_operands_exact,
     _build_index_operands_from_layout,

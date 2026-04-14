@@ -20,9 +20,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from kernel_gen.dsl.ast import BlockAST, FunctionAST, SourceLocation
-from kernel_gen.dsl.emit_mlir import EmitContext, _LoweringError, _expr_key, emit_mlir as emit_node_mlir
+
+if TYPE_CHECKING:
+    from kernel_gen.dsl.mlir_gen.emit import EmitContext
 
 
 @dataclass(frozen=True)
@@ -108,6 +111,8 @@ class AstVisitor:
         return handler(node, ctx)
 
     def visit_function(self, func_ast: FunctionAST, ctx: EmitContext) -> object:
+        from kernel_gen.dsl.mlir_gen.emit.core import _expr_key
+
         block_args = getattr(ctx.builder, "args", ())
         for index, item in enumerate(func_ast.inputs):
             if item.name in ctx.symbols:
@@ -131,12 +136,16 @@ class AstVisitor:
         return last_value
 
     def visit_stmt(self, stmt: object, ctx: EmitContext) -> object:
+        from kernel_gen.dsl.mlir_gen.emit.core import _LoweringError
+
         try:
             return self.visit_expr(stmt, ctx)
         except _LoweringError as exc:
             raise AstVisitorError(str(exc), location=exc.location) from exc
 
     def visit_expr(self, expr: object, ctx: EmitContext) -> object:
+        from kernel_gen.dsl.mlir_gen.emit.core import _LoweringError, emit_mlir as emit_node_mlir
+
         try:
             return emit_node_mlir(expr, ctx)
         except _LoweringError as exc:

@@ -118,7 +118,7 @@ from kernel_gen.dsl.ast import (
     parse_function,
 )
 from kernel_gen.dsl.ast_visitor import AstVisitor, AstVisitorError
-from kernel_gen.dsl.emit_mlir import (
+from kernel_gen.dsl.mlir_gen.emit.core import (
     EmitContext,
     _LoweringError,
     _build_default_stride_attrs,

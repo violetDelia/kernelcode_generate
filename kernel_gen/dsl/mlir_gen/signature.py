@@ -44,7 +44,7 @@ from kernel_gen.dsl.ast import (
     TensorAST,
     TensorAxisAccessAST,
 )
-from kernel_gen.dsl.emit_mlir import (
+from kernel_gen.dsl.mlir_gen.emit.core import (
     _LoweringError,
     _expr_key,
     _infer_binary_memory_type,

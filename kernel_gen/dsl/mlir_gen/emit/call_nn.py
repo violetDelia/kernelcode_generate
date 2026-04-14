@@ -73,7 +73,7 @@ from kernel_gen.dialect.symbol import (
     build_public_symbol_expr,
 )
 from kernel_gen.dsl.ast import BinaryExprAST, CompareExprAST, ConstAST, NnUnaryAST, SourceLocation
-from kernel_gen.dsl.emit_mlir import (
+from .core import (
     _LoweringError,
     _const_symbol_int,
     _expect_memory_value,

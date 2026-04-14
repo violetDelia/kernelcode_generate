@@ -21,7 +21,7 @@ from __future__ import annotations
 from xdsl.ir import SSAValue
 
 from kernel_gen.dsl.ast import ConstAST, ScalarArgAST, TensorAST, VarAST
-from kernel_gen.dsl.emit_mlir import _const_symbol_int, _resolve_index_operand, emit_mlir as _emit_mlir
+from .core import _const_symbol_int, _resolve_index_operand, emit_mlir as _emit_mlir
 
 from .context import EmitContext, LoweringError
 

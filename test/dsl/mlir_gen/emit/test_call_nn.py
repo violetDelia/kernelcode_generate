@@ -39,7 +39,7 @@ from kernel_gen.dialect.nn import (
 )
 from kernel_gen.dialect.symbol import SymbolConstOp, SymbolToFloatOp
 from kernel_gen.dsl.ast import BinaryExprAST, CompareExprAST, ConstAST, NnUnaryAST, TensorAST
-from kernel_gen.dsl.emit_mlir import _expr_key
+from kernel_gen.dsl.mlir_gen.emit.core import _expr_key
 from kernel_gen.dsl.mlir_gen.emit import EmitContext, LoweringError
 from kernel_gen.dsl.mlir_gen.emit.call_nn import emit_nn_call
 from kernel_gen.symbol_variable.memory import Memory

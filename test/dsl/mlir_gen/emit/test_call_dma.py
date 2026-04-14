@@ -30,7 +30,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaCopyOp, DmaFreeOp, DmaLoadOp, DmaStoreOp, DmaViewOp
 from kernel_gen.dsl.ast import ConstAST, DmaAllocAST, DmaCopyAST, DmaFreeAST, DmaViewAST, LoadAST, StoreAST, TensorAST
-from kernel_gen.dsl.emit_mlir import _expr_key, _memory_to_nn_type
+from kernel_gen.dsl.mlir_gen.emit.core import _expr_key, _memory_to_nn_type
 from kernel_gen.dsl.mlir_gen.emit import EmitContext, LoweringError
 from kernel_gen.dsl.mlir_gen.emit.call_dma import emit_dma_call
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace

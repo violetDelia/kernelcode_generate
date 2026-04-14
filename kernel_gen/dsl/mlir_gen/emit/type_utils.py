@@ -23,7 +23,7 @@ from typing import Sequence
 from xdsl.ir import Attribute
 
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dsl.emit_mlir import _infer_expr_type, _memory_type_from_parts
+from .core import _infer_expr_type, _memory_type_from_parts
 
 
 def infer_expr_type(expr: object, type_map: dict[int, object]) -> object:

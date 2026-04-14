@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from kernel_gen.dsl.emit_mlir import EmitContext as EmitContext
-from kernel_gen.dsl.emit_mlir import _LoweringError as LoweringError
+from .core import EmitContext as EmitContext
+from .core import _LoweringError as LoweringError
 
 __all__ = ["EmitContext", "LoweringError"]

@@ -21,7 +21,7 @@ from __future__ import annotations
 from xdsl.ir import SSAValue
 
 from kernel_gen.dsl.ast import PythonCalleeCallAST
-from kernel_gen.dsl.emit_mlir import emit_mlir as _emit_mlir
+from .core import emit_mlir as _emit_mlir
 
 from .context import EmitContext, LoweringError
 

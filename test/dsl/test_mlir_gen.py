@@ -100,6 +100,7 @@ from kernel_gen.dialect.symbol import (
     SymbolEqOp,
     SymbolFloorDivOp,
     SymbolForOp,
+    SymbolIterType,
     SymbolGtOp,
     SymbolGeOp,
     SymbolGetDimOp,
@@ -143,7 +144,7 @@ from kernel_gen.dsl.ast import (
     parse_function,
 )
 from kernel_gen.dsl.ast_visitor import AstVisitor, AstVisitorError
-from kernel_gen.dsl.emit_mlir import (
+from kernel_gen.dsl.mlir_gen.emit.core import (
     EmitContext,
     _LoweringError,
     _build_default_stride_attrs,
@@ -692,7 +693,7 @@ def test_build_func_op_lowers_arch_get_thread_id_query(
 # 功能说明: 验证 `Memory.get_shape()[axis]` 可沿 build_func_op/build_func_op_from_ast lowering 为 symbol.get_dim。
 # 测试目的: 锁定 get_shape 轴访问在函数构建阶段返回 `!symbol.int` 并发射单个 symbol.get_dim。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_symbol_get_dim
-# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen/emit/core.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_build_func_op_lowers_symbol_get_dim() -> None:
@@ -725,7 +726,7 @@ def test_build_func_op_lowers_symbol_get_dim() -> None:
 # 功能说明: 验证 `Memory.get_stride()[axis]` 可沿 build_func_op/build_func_op_from_ast lowering 为 symbol.get_stride。
 # 测试目的: 锁定 get_stride 轴访问在函数构建阶段返回 `!symbol.int` 并发射单个 symbol.get_stride。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_symbol_get_stride
-# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen/emit/core.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_build_func_op_lowers_symbol_get_stride() -> None:
@@ -878,10 +879,10 @@ def test_build_func_op_lowers_arch_get_dynamic_memory_via_import_bound_aliases(
     monkeypatch.setitem(direct_alias_kernel.__globals__, "gdm", arch_module.get_dynamic_memory)
 
     cases = (
-        (module_alias_kernel, MemorySpace.TSM, "tsm"),
-        (direct_alias_kernel, MemorySpace.TLM, "tlm"),
+        (module_alias_kernel, MemorySpace.TSM, "tsm", "TSM_SIZE"),
+        (direct_alias_kernel, MemorySpace.TLM, "tlm", "TLM_SIZE"),
     )
-    for fn, expected_space, expected_space_name in cases:
+    for fn, expected_space, expected_space_name, expected_shape_symbol in cases:
         func_ast = parse_function(fn)
         if len(func_ast.body.statements) != 1:
             raise AssertionError("expected get_dynamic_memory alias kernel to lower to one AST statement")
@@ -903,8 +904,8 @@ def test_build_func_op_lowers_arch_get_dynamic_memory_via_import_bound_aliases(
                 raise AssertionError("expected memory_space attr to match helper binding")
             if query_ops[0].result.type.element_type != i8:
                 raise AssertionError("expected dynamic memory result element type to stay i8")
-            if query_ops[0].result.type.shape.data[0] != StringAttr("?"):
-                raise AssertionError('expected dynamic memory result shape to stay [?]')
+            if query_ops[0].result.type.shape.data[0] != StringAttr(expected_shape_symbol):
+                raise AssertionError("expected dynamic memory result shape to use normalized symbol name")
             if query_ops[0].result.type.stride.data[0] != IntAttr(1):
                 raise AssertionError("expected dynamic memory result stride to stay [1]")
             if query_ops[0].result.type.space.space.data != expected_space_name:
@@ -1093,7 +1094,7 @@ def test_build_func_op_from_ast_rejects_symbol_scalar_missing_runtime_args() -> 
     assert inputs == [SymbolValueType.from_expr("expr")]
     assert outputs == [SymbolValueType.from_expr("expr")]
     with pytest.raises(AstVisitorError, match="runtime_args must align"):
-        build_func_op_from_ast(func_ast, runtime_args=[])
+        build_func_op_from_ast(func_ast, runtime_args=[SymbolDim("expr"), SymbolDim("extra")])
 
 
 # MGEN-002A
@@ -1110,6 +1111,8 @@ def test_build_func_op_from_ast_rejects_symbol_scalar_missing_runtime_args() -> 
 def test_build_func_op_from_ast_forwards_config_to_visitor_and_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import kernel_gen.dsl.mlir_gen.function_builder as function_builder_module
+
     captured: dict[str, object] = {}
 
     class RecordingVisitor(ast_visitor_module.AstVisitor):
@@ -1124,7 +1127,7 @@ def test_build_func_op_from_ast_forwards_config_to_visitor_and_context(
     def identity(x: "Tensor[f32, 2, 2]") -> "Tensor[f32, 2, 2]":
         return x
 
-    monkeypatch.setattr(ast_visitor_module, "AstVisitor", RecordingVisitor)
+    monkeypatch.setattr(function_builder_module, "AstVisitor", RecordingVisitor)
     func_ast = parse_function(identity)
     config: dict[str, object] = {"loop_vars": {"i": "outer"}}
     func_op = build_func_op_from_ast(func_ast, config=config)
@@ -1210,7 +1213,7 @@ def test_mlir_gen_signature_validation_errors() -> None:
         BlockAST([]),
     )
     with pytest.raises(AstVisitorError, match="runtime_args must align"):
-        build_func_op_from_ast(single_tensor, runtime_args=[])
+        build_func_op_from_ast(single_tensor, runtime_args=[_tensor_arg([2, 2]), _tensor_arg([2, 2])])
 
     with pytest.raises(AstVisitorError, match="Unsupported scalar argument type"):
         build_func_op_from_ast(FunctionAST("bad", [ScalarArgAST("n", float)], [], BlockAST([])))
@@ -1443,7 +1446,7 @@ def test_build_func_op_supports_img2col1d_helper_call() -> None:
 # 功能说明: 验证 Tensor 注解中的符号表达式按 SymbolDim 语义解析。
 # 测试目的: 锁定 img2col1d 动态维表达式可同时匹配注解与返回类型，避免动态表达式回退。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_img2col1d_symbolic_annotation
-# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen/emit/core.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_build_func_op_supports_img2col1d_symbolic_annotation() -> None:
@@ -1540,7 +1543,7 @@ def test_build_func_op_supports_img2col2d_helper_call() -> None:
 # 功能说明: 验证 build_func_op 支持 exp helper 并下沉为 nn.exp。
 # 测试目的: 锁定 exp lowering 生成 NnExpOp 且返回类型匹配，避免 element_unary expectation 回退。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_exp_helper_call
-# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen/emit/core.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dialect/nn.md, spec/operation/nn.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_build_func_op_supports_exp_helper_call() -> None:
@@ -1568,7 +1571,7 @@ def test_build_func_op_supports_exp_helper_call() -> None:
 # 功能说明: 验证 build_func_op 支持 softmax helper 并下沉为 nn.softmax。
 # 测试目的: 锁定 softmax 生成 NnSoftmaxOp 且 axis 属性稳定传递，避免 expectation 回退。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_softmax_helper_call
-# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen/emit/core.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dialect/nn.md, spec/operation/nn.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_build_func_op_supports_softmax_helper_call() -> None:
@@ -1597,7 +1600,7 @@ def test_build_func_op_supports_softmax_helper_call() -> None:
 # 功能说明: 验证 build_func_op 支持 reduce_sum/min/max helper 并生成结构化输出类型。
 # 测试目的: 锁定 reduce lowering 覆盖三类 helper 且返回类型匹配，避免 reduce expectation 回退。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_reduce_helper_calls
-# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen/emit/core.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dialect/nn.md, spec/operation/nn.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_build_func_op_supports_reduce_helper_calls() -> None:
@@ -1658,7 +1661,7 @@ def test_build_func_op_supports_reduce_helper_calls() -> None:
 # 功能说明: 验证 reduce_* 在 axes/keepdim 非法时触发 verifier 失败短语。
 # 测试目的: 锁定 reduce verifier 关键短语，避免静默通过或错误信息回退。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_reduce_verifier_failures
-# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py, kernel_gen/dialect/nn.py
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py, kernel_gen/dialect/nn.py
 # 对应 spec 文件路径: spec/dialect/nn.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_build_func_op_reduce_verifier_failures() -> None:
@@ -1689,7 +1692,7 @@ def test_build_func_op_reduce_verifier_failures() -> None:
 # 功能说明: 验证 build_func_op 支持 nn.matmul helper 并生成单结果 raw func.func。
 # 测试目的: 锁定 matmul helper 已纳入 AST/emit/mlir_gen 前端集合，不再因 Unsupported call expression 失败。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_matmul_helper_call
-# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/emit_mlir.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/mlir_gen/emit/core.py
 # 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md, spec/dsl/emit_mlir.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_build_func_op_supports_matmul_helper_call() -> None:
@@ -1720,7 +1723,7 @@ def test_build_func_op_supports_matmul_helper_call() -> None:
 # 功能说明: 验证 conv helper 会前端分解为 nn.img2col2d + nn.matmul，而不是生成 nn.conv。
 # 测试目的: 锁定 conv 进入 AST/emit/mlir_gen 公开集合，并输出 raw nn.img2col2d/nn.matmul 链路。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_conv_helper_call
-# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen/emit/core.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dsl/emit_mlir.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_build_func_op_supports_conv_helper_call() -> None:
@@ -1754,7 +1757,7 @@ def test_build_func_op_supports_conv_helper_call() -> None:
 # 功能说明: 验证 conv helper 的符号输出维度可与等价返回注解对齐。
 # 测试目的: 锁定 `(H - 1)/1 + 1` 与 `H` 这类等价符号维不会被错误判定为返回注解不一致。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_symbolic_conv_helper_call
-# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dsl/emit_mlir.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_build_func_op_supports_symbolic_conv_helper_call() -> None:
@@ -1822,7 +1825,7 @@ def test_build_func_op_supports_symbolic_conv_helper_kernel_and_padding() -> Non
 # 功能说明: 验证 conv helper 的非法 stride 参数会显式失败。
 # 测试目的: 锁定 conv verifier 关键短语，避免非法参数静默通过。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_conv_helper_rejects_invalid_stride
-# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_build_func_op_conv_helper_rejects_invalid_stride() -> None:
@@ -1868,7 +1871,7 @@ def test_build_func_op_conv_helper_rejects_invalid_arity() -> None:
 # 功能说明: 验证 conv2d_img2col2d_tiled_npu_demo 前端函数可直接生成 raw func.func。
 # 测试目的: 锁定 `loop + slice + img2col2d + reshape + matmul + deslice + return` 链路在 build_func_op/build_func_op_from_ast 上完整可用。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_conv2d_img2col2d_tiled_npu_demo
-# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/emit_mlir.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/mlir_gen/emit/core.py
 # 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md, spec/dsl/emit_mlir.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_build_func_op_supports_conv2d_img2col2d_tiled_npu_demo(
@@ -1939,7 +1942,7 @@ def test_build_func_op_supports_conv2d_img2col2d_tiled_npu_demo(
 # 功能说明: 黑盒验证 conv2d_img2col2d_tiled_npu_demo 通过 build_func_op 生成 raw MLIR IR。
 # 测试目的: 锁定最小 conv2d 正例仅走 build_func_op，且 raw IR 中临时 tile 被后续计算与最终 deslice 真实消费。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_conv2d_npu_demo_blackbox_raw_ir
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/emit_mlir.py
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/mlir_gen/emit/core.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dsl/emit_mlir.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_build_func_op_conv2d_npu_demo_blackbox_raw_ir(
@@ -2409,7 +2412,7 @@ def test_build_func_op_rejects_dma_alloc_helper_with_invalid_space() -> None:
     def alloc_kernel(rank1: int, rank2: int) -> "Tensor[f32, 2, 3]":
         return alloc([rank1, rank2], NumericType.Float32, "shared")
 
-    with pytest.raises(AstVisitorError, match="alloc space must be MemorySpace"):
+    with pytest.raises(TypeError, match="alloc space must be MemorySpace"):
         build_func_op(alloc_kernel, 2, 3)
 
 
@@ -2606,7 +2609,7 @@ def test_build_func_op_supports_dma_slice_helper() -> None:
 # 功能说明: 验证 dynamic symbol slice helper 在 build_func_op 链路中可直接 lowering。
 # 测试目的: 锁定 dynamic symbol slice 的 `dma.alloc` 结果 shape 与 `func.return` 类型保持符号表达式，不再报 `Unknown index symbol`。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_dynamic_symbol_dma_slice_helper
-# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_build_func_op_supports_dynamic_symbol_dma_slice_helper() -> None:
@@ -3245,7 +3248,7 @@ def test_build_func_op_add_scalar_runtime_ints_lower_to_symbol_value_type() -> N
 # 功能说明: 验证 symbol 标量 >= 比较 lowering 为 symbol.ge 且返回 i1。
 # 测试目的: 覆盖 const/const 与 symbol/symbol 输入下的 return 与赋值返回形态。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_symbol_ge
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/emit_mlir.py
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/mlir_gen/emit/core.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_build_func_op_lowers_symbol_ge() -> None:
@@ -3727,7 +3730,7 @@ def test_build_func_op_supports_symbolic_for_loop_dma_without_return(monkeypatch
     assert not any(isinstance(op, arith.IndexCastOp) for op in loop_body_ops)
     assert alloc_ops[0].result.type.space.space.data == "local"
     loop_body = loop_ops[0].body.block
-    assert isinstance(loop_body.args[0].type, SymbolValueType)
+    assert isinstance(loop_body.args[0].type, SymbolIterType)
     offsets = list(slice_ops[0].offsets)
     sizes = list(slice_ops[0].sizes)
     assert offsets[0] is loop_body.args[0]
@@ -3793,7 +3796,7 @@ def test_tensor_binary_prepend_broadcast_lowering() -> None:
 # 功能说明: 验证 nn.truediv 在 dtype 不一致时插入 dma.cast 并使用固定优先级决议 dtype。
 # 测试目的: 保证 truediv lowering 结果包含 dma.cast + nn.truediv 且输出类型一致。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_tensor_truediv_dtype_promotion_lowering
-# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_tensor_truediv_dtype_promotion_lowering() -> None:
@@ -3854,7 +3857,7 @@ def test_compare_implicit_broadcast_lowering() -> None:
 # 功能说明: 验证 build_func_op 在 nn.ne 场景支持 Tensor[i1, ...] 返回注解。
 # 测试目的: 锁定 nn.ne 的 dtype 解析与 lowering 闭环，确保结果 element type 为 i1。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_nn_ne_with_tensor_i1_return_annotation
-# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen/emit/core.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_build_func_op_lowers_nn_ne_with_tensor_i1_return_annotation() -> None:
@@ -3911,7 +3914,7 @@ def test_tensor_binary_implicit_broadcast_mismatch_reports_diagnostics() -> None
 # 功能说明: 验证 nn.sub dtype promotion 会插入 nn.cast 并返回目标 dtype 的 nn.sub。
 # 测试目的: 锁定 build_func_op 对 nn.sub 混合 dtype 的 cast lowering 与返回类型。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/emit_mlir.py
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/mlir_gen/emit/core.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dsl/emit_mlir.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast() -> None:
@@ -3944,7 +3947,7 @@ def test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast() -> None:
 # 功能说明: 验证 build_func_op 支持 nn.add 的 memory+symbol lowering。
 # 测试目的: 锁定 MLIR 组装链路对 tensor + symbol.int 的 promotion 与标量 cast 发射，不额外生成 dma.cast。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_nn_add_memory_symbol_with_scalar_promotion
-# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/emit_mlir.py
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py, kernel_gen/dsl/mlir_gen/emit/core.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_build_func_op_lowers_nn_add_memory_symbol_with_scalar_promotion() -> None:
@@ -4002,7 +4005,7 @@ def test_mlir_gen_build_func_op_builtins_and_parse_error() -> None:
 # 功能说明: 验证 `barrier(visibility, scope)` 可沿 build_func_op / build_func_op_from_ast lowering 为 `arch.barrier`。
 # 测试目的: 锁定 barrier 在 DSL 链路中保持 `scope=#arch.scope<block>` 与 `[tsm, tlm]` visibility 顺序，并作为零返回语句 helper 发射。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_arch_barrier
-# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen/emit/core.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_build_func_op_lowers_arch_barrier(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -4047,7 +4050,7 @@ def test_build_func_op_lowers_arch_barrier(monkeypatch: pytest.MonkeyPatch) -> N
 # 功能说明: 验证 `launch_kernel(callee, block, thread, subthread, *args)` 可沿 DSL 链路 lowering 为 `arch.launch<...>(@callee, args...)`。
 # 测试目的: 锁定 callee 以 symbol ref 进入 IR，尾部 args 保持透传，且 launched body 内 `get_thread_num()` 仍返回 `!symbol.int<\"thread_num\">`。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_arch_launch_with_callee
-# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen/emit/core.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/emit_mlir.md, spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_build_func_op_lowers_arch_launch_with_callee(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -4211,7 +4214,11 @@ def test_mlir_gen_module_function_order_is_dfs() -> None:
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_mlir_gen_rejects_unsupported_callee() -> None:
+    scale = 1
+
     def helper(x: "Tensor[f32, 4]") -> "Tensor[f32, 4]":
+        if scale:
+            return x
         return x
 
     def main(x: "Tensor[f32, 4]") -> "Tensor[f32, 4]":
