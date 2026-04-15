@@ -40,3 +40,42 @@
   - `spec` 文件不应绑定某一版实现或测试细节。
   - `README.md` 不属于 `spec` 文件，不需要遵守本节结构要求。
   - `spec` 中不应出现除依赖文件以外的其他文件信息，例如 `expectation` 文件。
+
+## 合法例外写法
+
+- 一对多实现：
+  - 当一个公开 `spec` 对应“单一公开入口 + 多个直接协作实现文件”时，可在“文档信息”或“依赖”中列出主实现与辅助实现，并明确谁是公开入口、谁是内部配套实现。
+  - 例外成立前提：这些实现文件共同服务同一公开语义，而不是把多个无关模块硬并在一份 `spec`。
+- 多测试文件：
+  - 当同一公开语义需要用“主路径测试 + 边界/回归测试 + expectation/脚本”共同收口时，可在“测试”章节按“测试文件 / 执行命令 / 覆盖目标”分行列出多个测试文件。
+  - 例外成立前提：多测试文件共同锁定同一个公开合同，而不是把其他专题测试顺带挂进来。
+
+## 一对多实现示例
+
+```markdown
+## 文档信息
+- spec：`spec/execute_engine/execute_engine.md`
+- 功能实现：
+  - `kernel_gen/execute_engine/execution_engine.py`
+  - `kernel_gen/execute_engine/compiler.py`
+- test：
+  - `test/execute_engine/test_execute_engine_compile.py`
+  - `test/execute_engine/test_execute_engine_invoke.py`
+
+## 依赖
+- `kernel_gen/execute_engine/execution_engine.py`：公开入口
+- `kernel_gen/execute_engine/compiler.py`：编译辅助实现
+```
+
+## 多测试文件示例
+
+```markdown
+## 测试
+- 测试文件：`test/execute_engine/test_execute_engine_compile.py`
+- 执行命令：`pytest -q test/execute_engine/test_execute_engine_compile.py`
+- 测试目标：锁定 compile 侧公开行为
+
+- 测试文件：`test/execute_engine/test_execute_engine_invoke.py`
+- 执行命令：`pytest -q test/execute_engine/test_execute_engine_invoke.py`
+- 测试目标：锁定 execute 侧公开行为
+```
