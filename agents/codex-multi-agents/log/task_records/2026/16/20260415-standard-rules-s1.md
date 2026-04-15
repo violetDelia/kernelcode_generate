@@ -196,3 +196,17 @@
 - `git -C /home/lfr/kernelcode_generate/wt-20260415-standard-rules-s1 rev-parse --short HEAD` -> `a20360e`
 - `git -C /home/lfr/kernelcode_generate/wt-20260415-standard-rules-s1 diff --name-only` -> 仅 `agents/standard/*.md`
 结论：当前任务现场已与最新远端主线对齐，且最终提交范围仍受控；下一步直接提交、推送并执行 `-done` / `-talk`。
+
+时间：2026-04-15 12:33 +0800
+经办人：李白
+任务：T-20260415-785e88a8
+任务目标：回写当前 merge 结果，并在主仓根目录完成任务状态流转前的最终记录。
+改动：
+- 已在 `worktree=/home/lfr/kernelcode_generate/wt-20260415-standard-rules-s1` 生成 merge 提交 `37bb719`，提交信息为 `T-20260415-785e88a8 merge: standard rules governance`。
+- 已将该提交推送到远端主分支，`origin/main` 当前已前进到 `37bb719`；本轮交付范围仅包含 `agents/standard` 标准文档与当前任务记录文件。
+- 下一步仅在主仓根目录执行 `-done` 完成当前 merge 任务流转，并通过 `-talk` 向管理员回报结果；完成后清理本地任务现场。
+验证：
+- `git -C /home/lfr/kernelcode_generate/wt-20260415-standard-rules-s1 rev-parse --short HEAD` -> `37bb719`
+- `git -C /home/lfr/kernelcode_generate/wt-20260415-standard-rules-s1 rev-parse --short origin/main` -> `37bb719`
+- `git -C /home/lfr/kernelcode_generate/wt-20260415-standard-rules-s1 status --short --branch` -> 工作树干净
+结论：当前 merge 已完成并成功推送远端主分支；本条记录已在执行 `-done` / `-talk` 前补齐，接下来按流程完成任务收口。
