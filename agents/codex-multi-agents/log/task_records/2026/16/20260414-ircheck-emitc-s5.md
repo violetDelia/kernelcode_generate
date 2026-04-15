@@ -48,3 +48,17 @@
 - `git -C /home/lfr/kernelcode_generate/wt-20260414-ircheck-emitc-s5 ls-files --stage expectation/tools/ircheck/emitc_true.py expectation/tools/ircheck/emitc_false.py` -> 两份 expectation 资产均已被主线跟踪
 - `git -C /home/lfr/kernelcode_generate/wt-20260414-ircheck-emitc-s5 status --short --branch` -> 仅 `?? agents/codex-multi-agents/log/task_records/2026/16/20260414-ircheck-emitc-s5.md`
 结论：合并前日志已补齐，现场满足最小提交流程；下一步执行 `git add -f`、提交、推送，并完成 `-done` / `-talk` 收口。
+
+时间：2026-04-15 08:54 +0800
+经办人：李白
+任务：T-20260414-e3a0db84
+任务目标：回写本轮 merge 结果，并在主仓根目录完成任务状态流转。
+改动：
+- 已在 `worktree=/home/lfr/kernelcode_generate/wt-20260414-ircheck-emitc-s5` 提交最小收口变更，提交号 `67b7675`，提交信息为 `T-20260414-e3a0db84 merge: ircheck emitc s5`。
+- 已按当前合并口径将该提交推送到远端主分支，`origin/main` 已前进到 `67b7675`；本轮未引入除 S5 记录文件外的额外文件改动。
+- 下一步仅在主仓根目录执行 `-done` 完成当前 merge 任务流转，并通过 `-talk` 向管理员回报结果；完成后清理本地 `worktree` 与任务分支。
+验证：
+- `git -C /home/lfr/kernelcode_generate/wt-20260414-ircheck-emitc-s5 rev-parse --short HEAD` -> `67b7675`
+- `git -C /home/lfr/kernelcode_generate/wt-20260414-ircheck-emitc-s5 rev-parse --short origin/main` -> `67b7675`
+- `git -C /home/lfr/kernelcode_generate/wt-20260414-ircheck-emitc-s5 status --short --branch` -> 工作树干净
+结论：当前 merge 已完成并已推送远端主分支；本条记录已在执行 `-done` / `-talk` 前补齐，接下来按流程完成任务收口并回报管理员。
