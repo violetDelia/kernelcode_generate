@@ -77,5 +77,5 @@ def test_npu_demo_add_barrier_runs_end_to_end_with_real_barrier() -> None:
     source = helpers.gen_kernel(module, helpers._npu_ctx())
 
     assert "void add_barrier(" in source
-    assert "ctx.barrier({MemorySpace::TSM, MemorySpace::TLM}, BarrierScope::BLOCK);" in source
+    assert "ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);" in source
     helpers._compile_and_run_npu_demo_add_barrier_source(source, prove_barrier_runtime=True)

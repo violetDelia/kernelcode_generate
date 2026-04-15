@@ -1473,13 +1473,13 @@ def test_unsupported_syntax_reports_diagnostics() -> None:
 # 对应 spec 文件路径: spec/dsl/ast.md
 # 对应测试文件路径: test/dsl/test_ast.py
 def test_parse_function_parses_arch_barrier_statement(monkeypatch: pytest.MonkeyPatch) -> None:
-    from kernel_gen.operation.arch import BarrierScope, barrier
+    from kernel_gen.operation.arch import BarrierScope, BarrierVisibility, barrier
 
     def barrier_kernel() -> None:
-        barrier(visibility=[MemorySpace.TSM, MemorySpace.TLM], scope=BarrierScope.BLOCK)
+        barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM], scope=BarrierScope.BLOCK)
 
     monkeypatch.setitem(barrier_kernel.__globals__, "barrier", barrier)
-    monkeypatch.setitem(barrier_kernel.__globals__, "MemorySpace", MemorySpace)
+    monkeypatch.setitem(barrier_kernel.__globals__, "BarrierVisibility", BarrierVisibility)
     monkeypatch.setitem(barrier_kernel.__globals__, "BarrierScope", BarrierScope)
 
     func_ast = parse_function(barrier_kernel)
@@ -1488,8 +1488,8 @@ def test_parse_function_parses_arch_barrier_statement(monkeypatch: pytest.Monkey
     stmt = func_ast.body.statements[0]
     if not isinstance(stmt, ArchBarrierAST):
         raise AssertionError("expected barrier kernel to parse into ArchBarrierAST")
-    if stmt.visibility != [MemorySpace.TSM, MemorySpace.TLM]:
-        raise AssertionError("expected barrier visibility to preserve MemorySpace order")
+    if stmt.visibility != [BarrierVisibility.TSM, BarrierVisibility.TLM]:
+        raise AssertionError("expected barrier visibility to preserve BarrierVisibility order")
     if stmt.scope is not BarrierScope.BLOCK:
         raise AssertionError("expected barrier scope to stay BarrierScope.BLOCK")
 
@@ -1500,35 +1500,35 @@ def test_parse_function_parses_arch_barrier_statement(monkeypatch: pytest.Monkey
 # 最近一次运行测试时间: 2026-04-06 08:10:00 +0800
 # 最近一次运行成功时间: 2026-04-06 08:10:00 +0800
 # 功能说明: 验证 barrier 对非法 arity / visibility / scope 返回固定诊断。
-# 测试目的: 锁定 `Unsupported barrier arity`、`barrier visibility must be non-empty MemorySpace list` 与 `barrier scope must be BarrierScope` 三类错误口径。
+# 测试目的: 锁定 `Unsupported barrier arity`、`barrier visibility must be non-empty BarrierVisibility list` 与 `barrier scope must be BarrierScope` 三类错误口径。
 # 使用示例: pytest -q test/dsl/test_ast.py -k test_parse_function_rejects_invalid_arch_barrier_variants
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
 # 对应测试文件路径: test/dsl/test_ast.py
 def test_parse_function_rejects_invalid_arch_barrier_variants(monkeypatch: pytest.MonkeyPatch) -> None:
-    from kernel_gen.operation.arch import BarrierScope, barrier
+    from kernel_gen.operation.arch import BarrierScope, BarrierVisibility, barrier
 
     def bad_positional() -> None:
-        barrier([MemorySpace.TSM, MemorySpace.TLM], scope=BarrierScope.BLOCK)
+        barrier([BarrierVisibility.TSM, BarrierVisibility.TLM], scope=BarrierScope.BLOCK)
 
     def bad_visibility_type() -> None:
-        barrier(visibility=(MemorySpace.TSM, MemorySpace.TLM), scope=BarrierScope.BLOCK)
+        barrier(visibility=(BarrierVisibility.TSM, BarrierVisibility.TLM), scope=BarrierScope.BLOCK)
 
     def bad_visibility_empty() -> None:
         barrier(visibility=[], scope=BarrierScope.BLOCK)
 
     def bad_scope_type() -> None:
-        barrier(visibility=[MemorySpace.TSM, MemorySpace.TLM], scope="block")
+        barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM], scope="block")
 
     for fn in (bad_positional, bad_visibility_type, bad_visibility_empty, bad_scope_type):
         monkeypatch.setitem(fn.__globals__, "barrier", barrier)
-        monkeypatch.setitem(fn.__globals__, "MemorySpace", MemorySpace)
+        monkeypatch.setitem(fn.__globals__, "BarrierVisibility", BarrierVisibility)
         monkeypatch.setitem(fn.__globals__, "BarrierScope", BarrierScope)
 
     expected_messages = (
         ("Unsupported barrier arity", bad_positional),
-        ("barrier visibility must be non-empty MemorySpace list", bad_visibility_type),
-        ("barrier visibility must be non-empty MemorySpace list", bad_visibility_empty),
+        ("barrier visibility must be non-empty BarrierVisibility list", bad_visibility_type),
+        ("barrier visibility must be non-empty BarrierVisibility list", bad_visibility_empty),
         ("barrier scope must be BarrierScope", bad_scope_type),
     )
     for expected_message, fn in expected_messages:

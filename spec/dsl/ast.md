@@ -130,8 +130,8 @@ func_ast = parse_function(add)
 - `slice` 的 `space` 可选，但一旦提供必须为 `MemorySpace`；否则必须返回 `slice space must be MemorySpace` 诊断。
 - `store(...)` / `deslice(...)` 的 target 既可以是函数输入 `TensorAST`，也可以是 `alloc/view/reshape/flatten/cast/copy/img2col/matmul/get_dynamic_memory` 这类会产生 memory 结果的 AST 表达式；对纯标量或其他非 memory 目标，解析阶段继续保持 `store target must be TensorAST` / `deslice target must be TensorAST` 诊断口径。
 - `get_block_id/get_block_num/get_subthread_id/get_subthread_num/get_thread_id/get_thread_num` helper 仅允许 0 个参数且禁止关键字参数；不满足时必须返回 `Unsupported <helper> arity` 诊断。
-- `get_dynamic_memory(...)` helper 仅允许 1 个位置参数且禁止关键字参数；参数必须是 `MemorySpace` 且仅允许片上空间（`SM/LM/TSM/TLM`），否则必须返回 `Unsupported get_dynamic_memory arity`、`get_dynamic_memory space must be MemorySpace` 或 `get_dynamic_memory space must be on-chip MemorySpace` 诊断。
-- `barrier(...)` helper 的稳定 DSL 入口固定为 `barrier(visibility=[...], scope=BarrierScope.BLOCK)`；必须使用且只使用 `visibility` / `scope` 两个关键字参数，不接受位置参数、缺参、重复关键字或未知关键字。`visibility` 必须是非空 `MemorySpace` 列表，`scope` 必须是 `BarrierScope`；否则必须返回 `Unsupported barrier arity`、`barrier visibility must be non-empty MemorySpace list` 或 `barrier scope must be BarrierScope` 诊断。
+- `get_dynamic_memory(...)` helper 仅允许 1 个位置参数且禁止关键字参数；参数必须是 `MemorySpace` 且仅允许片上空间（`SM/LM/TSM/TLM1/TLM2/TLM3`），否则必须返回 `Unsupported get_dynamic_memory arity`、`get_dynamic_memory space must be MemorySpace` 或 `get_dynamic_memory space must be on-chip MemorySpace` 诊断。
+- `barrier(...)` helper 的稳定 DSL 入口固定为 `barrier(visibility=[...], scope=BarrierScope.BLOCK)`；必须使用且只使用 `visibility` / `scope` 两个关键字参数，不接受位置参数、缺参、重复关键字或未知关键字。`visibility` 必须是非空 `BarrierVisibility` 列表，`scope` 必须是 `BarrierScope`；否则必须返回 `Unsupported barrier arity`、`barrier visibility must be non-empty BarrierVisibility list` 或 `barrier scope must be BarrierScope` 诊断。
 - `launch_kernel(...)` helper 的稳定 DSL 入口固定为 `launch_kernel(callee, block, thread, subthread, *args)`；前四个参数必须按位置提供，且禁止任何关键字参数。`callee` 必须是函数对象对应的 bare symbol reference（例如 `add_barrier_body`），不允许字符串字面量、属性引用、lambda、调用表达式或其他运行时对象；否则必须返回 `launch_kernel callee must be function symbol reference` 诊断。`block/thread/subthread` 仅做 AST 入口语法校验（必须是正整数或 `SymbolDim` 语义），否则必须返回 `Unsupported launch_kernel arity`、`launch_kernel <dim> must be int or SymbolDim` 或 `launch_kernel <dim> must be > 0` 诊断；AST 阶段不承诺 extent 已完成 `!symbol.int` 归一化。额外的 `*args` 只要求可解析为值表达式，并按源码顺序原样保留给下游 lowering。
 - `-> float` 返回注解在本轮是合法 AST 入口，但仅用于 `symbol.to_float` 链路；除 `float(symbol.int)` 之外，不在 AST 层扩展新的浮点返回注解体系。
 - `float(value)` 在 AST 层当前仅作为 `symbol.int -> float` 的最小语法入口冻结；本轮只承诺 `def cast_dim(n: int) -> float: return float(n)` 这一类写法可进入后续链路，不在 AST 层扩展 `double`、`complex`、多参数 `float(...)`、关键字参数 `float(...)` 或其他 builtin cast 体系。
@@ -551,7 +551,7 @@ ArchQueryAST(query_name="get_thread_num")
 
 参数说明：
 
-- `space` (`MemorySpace`)：动态内存空间，公开语义仅允许 `SM/LM/TSM/TLM`。
+- `space` (`MemorySpace`)：动态内存空间，公开语义仅允许 `SM/LM/TSM/TLM1/TLM2/TLM3`。
 - `location` (`SourceLocation|None`)：可选源码位置。
 
 使用示例：
@@ -573,7 +573,7 @@ ArchGetDynamicMemoryAST(space=MemorySpace.SM)
 
 参数说明：
 
-- `visibility` (`list[MemorySpace]`)：需要保证可见性的 memory space 列表。
+- `visibility` (`list[BarrierVisibility]`)：需要保证可见性的聚合可见域列表。
 - `scope` (`object`)：同步范围，公开语义要求是 `BarrierScope`。
 - `location` (`SourceLocation|None`)：可选源码位置。
 
@@ -581,7 +581,7 @@ ArchGetDynamicMemoryAST(space=MemorySpace.SM)
 
 ```python
 ArchBarrierAST(
-    visibility=[MemorySpace.TSM, MemorySpace.TLM],
+    visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM],
     scope="BLOCK",
 )
 ```
@@ -712,8 +712,8 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
   - AST-014N：`get_dynamic_memory` 的参数个数或 `space` 类型/取值非法时，必须在 AST 解析阶段返回约定诊断。（`test_parse_function_rejects_invalid_get_dynamic_memory_variants`）
   - AST-014O：`launch_kernel(add_barrier_body, block, thread, subthread, lhs, rhs, out)` 必须在 AST 解析阶段生成 `ArchLaunchKernelAST` 语句节点，并保留 `callee/extent/args` 顺序语义。（实现阶段补齐：`test_parse_function_parses_arch_launch_kernel_with_callee`）
   - AST-014P：`launch_kernel` 的参数个数、callee 形态、关键字参数或启动规模非法时，必须在 AST 解析阶段返回约定诊断；合法路径需保留到下游 `arch.launch` lowering。（实现阶段补齐：`test_parse_function_rejects_invalid_arch_launch_kernel_variants`）
-  - AST-014Q：`barrier(visibility=[MemorySpace.TSM, MemorySpace.TLM], scope=BarrierScope.BLOCK)` 必须在 AST 解析阶段生成 `ArchBarrierAST` 语句节点，并保留 `visibility/scope` 源码顺序语义。（实现阶段补齐：`test_parse_function_parses_arch_barrier_statement`）
-  - AST-014R：`barrier` 缺少 `scope`、传入空 `visibility`、非 `MemorySpace` 列表或非法 `scope` 时，必须在 AST 解析阶段返回约定诊断；合法路径需保留到下游 `arch.barrier` lowering。（实现阶段补齐：`test_parse_function_rejects_invalid_arch_barrier_variants`）
+  - AST-014Q：`barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM], scope=BarrierScope.BLOCK)` 必须在 AST 解析阶段生成 `ArchBarrierAST` 语句节点，并保留 `visibility/scope` 源码顺序语义。（实现阶段补齐：`test_parse_function_parses_arch_barrier_statement`）
+  - AST-014R：`barrier` 缺少 `scope`、传入空 `visibility`、非 `BarrierVisibility` 列表或非法 `scope` 时，必须在 AST 解析阶段返回约定诊断；合法路径需保留到下游 `arch.barrier` lowering。（实现阶段补齐：`test_parse_function_rejects_invalid_arch_barrier_variants`）
   - AST-015：`lhs != rhs` 必须在 AST 中保持 `CompareExprAST(op="ne")` 语义，并与其他比较表达式共享后续 lowering 入口。（`test_build_func_op_lowers_nn_ne_with_tensor_i1_return_annotation`）
   - AST-018：`nn.mul(lhs, rhs)` 与 `lhs * rhs` 必须共用 `BinaryExprAST(op="mul")` 入口；`nn.mul` 的 arity 负路径继续复用 `Unsupported nn arithmetic arity` 诊断口径。（`test_symbol_scalar_function_lowers_symbol_binary_ops`、`test_parse_function_rejects_unsupported_nn_arithmetic_arity_variants`）
   - AST-C1：`conv2d_img2col2d_tiled_npu_demo(...)` 这类 `loop + slice + img2col2d + reshape + matmul + deslice + return` 前端样例必须解析成功，innermost body 保留 `Img2ColAST`、`MatmulAST`，且 `deslice` target 允许绑定到前序 `alloc(...)` 结果 AST。（`test_build_func_op_supports_conv2d_img2col2d_tiled_npu_demo_frontend`）
