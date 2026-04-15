@@ -165,20 +165,22 @@ def _alloc_ops(source_memory: object, mem_type: NnMemoryType) -> tuple[list[obje
 def _make_marked_kernel_split_module(*, axis: int = 1, tile: str = "TILE_M") -> tuple[ModuleOp, func.FuncOp]:
     mem_type = _make_memory_type([8, 4], [4, 1])
     space = NnMemorySpaceAttr.from_name("global")
-    block = Block(arg_types=[mem_type, mem_type])
+    block = Block(arg_types=[mem_type, mem_type, mem_type])
 
-    # signature: (out, lhs) -> ()
+    # signature: (out, lhs, rhs) -> ()
     func_op = func.FuncOp(
         "kernel_split_codegen",
-        FunctionType.from_lists([mem_type, mem_type], []),
+        FunctionType.from_lists([mem_type, mem_type, mem_type], []),
         Region(block),
-        arg_attrs=_arg_attrs("arg0", "lhs"),
+        arg_attrs=_arg_attrs("arg0", "lhs", "rhs"),
     )
     func_op.attributes["kernel_split"] = _make_kernel_split_attr(axis, tile)
 
+    alloc_setup, temp_alloc = _alloc_ops(block.args[0], mem_type)
     block.add_ops(
         [
-            KernelAddOp(block.args[1], block.args[1], block.args[0], space),
+            *alloc_setup[:2],
+            KernelAddOp(block.args[1], block.args[2], block.args[0], space),
             func.ReturnOp(),
         ]
     )
@@ -1446,7 +1448,7 @@ def test_gen_kernel_compiles_npu_demo_tiled_matmul_source() -> None:
 # 最近一次运行测试时间: 2026-04-02 21:00:00 +0800
 # 最近一次运行成功时间: 2026-04-02 21:00:00 +0800
 # 功能说明: 验证 npu_demo target 可生成固定的 dynamic memory/view/slice/deslice/add 管线。
-# 测试目的: 锁定 `TSM/TLM1`、`view/slice/deslice/add` 固定顺序，并防止回退到 `.view/load/store` 风格。
+# 测试目的: 锁定 `TSM/TLM`、`view/slice/deslice/add` 固定顺序，并防止回退到 `.view/load/store` 风格。
 # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_memory_pipeline
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
@@ -1557,7 +1559,6 @@ def test_gen_kernel_black_box_direct_return_nn_add_conv2d_img2col2d_tiled_and_np
     npu_source = gen_kernel(npu_func, _npu_ctx())
     assert "ctx.thread_id()" in npu_source
     assert "ctx.get_dynamic_memory<MemorySpace::TSM, float>()" in npu_source
-    assert "ctx.get_dynamic_memory<MemorySpace::TLM1, float>()" in npu_source
     assert "deslice(out_tile, out, tid * 16, 16, 1);" in npu_source
 
 

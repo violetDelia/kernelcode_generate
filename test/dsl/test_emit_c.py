@@ -692,7 +692,7 @@ def test_emit_c_memory_space_template_alloc() -> None:
         assert "long long v0_shape[2] = {2, 2};" in alloc_text
     assert "long long v0_stride[2] = {2, 1};" in alloc_text
     assert "int32_t v0_buffer[4] = {};" in alloc_text
-    assert "Memory<GM, int32_t> v0(v0_buffer, v0_shape, v0_stride, 2, MemoryFormat::Norm);" in alloc_text
+    assert "Memory<GM, int32_t> v0(v0_buffer, 2, v0_shape, v0_stride, MemoryFormat::Norm);" in alloc_text
     assert emit_c_op(add, ctx) == "cpu::add(lhs, rhs, v0);"
 
 
@@ -787,7 +787,7 @@ def test_emit_c_op_lowers_dma_alloc_and_view() -> None:
         "long long v0_shape[2] = {2, 3};\n"
         "long long v0_stride[2] = {3, 1};\n"
         "float v0_buffer[6] = {};\n"
-        "Memory<SM, float> v0(v0_buffer, v0_shape, v0_stride, 2, MemoryFormat::Norm);"
+        "Memory<SM, float> v0(v0_buffer, 2, v0_shape, v0_stride, MemoryFormat::Norm);"
     )
 
     dyn_shape0 = SymbolValueType.from_expr("N")
@@ -828,7 +828,7 @@ def test_emit_c_op_lowers_dma_alloc_and_view() -> None:
         "long long view_offset0 = (0 * source.stride()[0]) + (0 * source.stride()[1]);\n"
         "long long v0_shape[2] = {2, 2};\n"
         "long long v0_stride[2] = {1, 1};\n"
-        "Memory<GM, float> v0(const_cast<float*>(source.data()) + view_offset0, v0_shape, v0_stride, 2, source.format());"
+        "Memory<GM, float> v0(const_cast<float*>(source.data()) + view_offset0, 2, v0_shape, v0_stride, source.format());"
     )
 
 
@@ -903,10 +903,10 @@ def test_emit_c_op_lowers_img2col2d_dma_loop_pipeline() -> None:
 
     assert "for (long long i0 = start; i0 < end; i0 += step) {" in stmt
     assert "float v1_buffer[16] = {};" in stmt
-    assert "Memory<LM, float> v1(v1_buffer, v1_shape, v1_stride, 4, MemoryFormat::Norm);" in stmt
+    assert "Memory<LM, float> v1(v1_buffer, 4, v1_shape, v1_stride, MemoryFormat::Norm);" in stmt
     assert "v1.at(dma0_dst_indices) = input.at(dma0_src_indices);" in stmt
     assert "float v2_buffer[36] = {};" in stmt
-    assert "Memory<LM, float> v2(v2_buffer, v2_shape, v2_stride, 6, MemoryFormat::Norm);" in stmt
+    assert "Memory<LM, float> v2(v2_buffer, 6, v2_shape, v2_stride, MemoryFormat::Norm);" in stmt
     assert "cpu::img2col2d(v1, v2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0);" in stmt
     assert "output.at(dma1_dst_indices) = v2.at(dma1_src_indices);" in stmt
     assert "slice(" not in stmt
@@ -1010,8 +1010,8 @@ def test_emit_c_lowers_npu_demo_kernel_context_queries() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-02 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-02 00:00:00 +0800
-# 功能说明: 验证 npu_demo 下 dynamic memory 查询发射为 ctx.get_dynamic_memory<TSM/TLM1/TLM2/TLM3, T>()。
-# 测试目的: 锁定 target=npu_demo 的真实片上空间入口文本，避免回退到 load/store/malloc 或旧 `TLM` 聚合伪空间。
+# 功能说明: 验证 npu_demo 下 dynamic memory 查询发射为 ctx.get_dynamic_memory<TSM/TLM1, T>()。
+# 测试目的: 锁定 target=npu_demo 的 TSM/TLM1 动态片上内存入口文本，避免回退到 load/store/malloc。
 # 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_maps_nn_space_to_template_param
 # 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
 # 对应 spec 文件路径: spec/dsl/emit_c.md
@@ -1019,14 +1019,14 @@ def test_emit_c_lowers_npu_demo_kernel_context_queries() -> None:
 def test_emit_c_maps_nn_space_to_template_param() -> None:
     ctx = _npu_ctx()
     tsm_type = _make_memory_type([16], [1], space="tsm", element_type=f32)
-    tlm1_type = _make_memory_type([16], [1], space="tlm1", element_type=f32)
+    tlm_type = _make_memory_type([16], [1], space="tlm1", element_type=f32)
     tsm = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("tsm"), tsm_type)
-    tlm1 = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("tlm1"), tlm1_type)
+    tlm = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("tlm1"), tlm_type)
     ctx.bind_name(tsm.result, "tsm")
-    ctx.bind_name(tlm1.result, "tlm")
+    ctx.bind_name(tlm.result, "tlm")
 
     tsm_stmt = emit_c_op(tsm, ctx)
-    tlm_stmt = emit_c_op(tlm1, ctx)
+    tlm_stmt = emit_c_op(tlm, ctx)
 
     assert tsm_stmt == "Memory<TSM, float> tsm = ctx.get_dynamic_memory<TSM, float>();"
     assert tlm_stmt == "Memory<TLM1, float> tlm = ctx.get_dynamic_memory<TLM1, float>();"

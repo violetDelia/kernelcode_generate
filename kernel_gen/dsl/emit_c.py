@@ -480,7 +480,9 @@ def _emit_memory_decl(
 
     功能说明:
     - 生成 `shape/stride` 的 `long long[]` 声明。
-    - 生成 `Memory<Space, T> name(data, shape, stride, rank, format);` 声明。
+    - 生成目标相关的 `Memory<Space, T>` 构造：
+      - `target=cpu`: `name(data, rank, shape, stride, format);`
+      - `target=npu_demo`: `name(data, shape, stride, rank, format);`
     - 当 `with_backing_storage=True` 时，为静态 shape 生成 `name_buffer[numel]` 作为 backing，并把 `data` 指向该 buffer。
 
     使用示例:
@@ -507,15 +509,15 @@ def _emit_memory_decl(
         format_expr = "MemoryFormat::Norm"
     if space_expr is None:
         space_expr = _space_to_c(memory_type, ctx)
+    if ctx.target == "npu_demo":
+        ctor_args = f"{data_expr}, {name}_shape, {name}_stride, {len(shape_values)}, {format_expr}"
+    else:
+        ctor_args = f"{data_expr}, {len(shape_values)}, {name}_shape, {name}_stride, {format_expr}"
     lines = [
         _emit_long_long_buffer(f"{name}_shape", shape_values, ctx),
         _emit_long_long_buffer(f"{name}_stride", stride_values, ctx),
         *storage_lines,
-        (
-            f"{ctx.current_indent}Memory<{space_expr}, {element_type}> {name}"
-            f"({data_expr}, {name}_shape, {name}_stride, {len(shape_values)}, "
-            f"{format_expr});"
-        ),
+        f"{ctx.current_indent}Memory<{space_expr}, {element_type}> {name}({ctor_args});",
     ]
     return "\n".join(lines)
 
