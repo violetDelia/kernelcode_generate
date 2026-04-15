@@ -1,7 +1,7 @@
 """Arch operation API.
 
 创建者: 金铲铲大作战
-最后一次更改: jcc你莫辜负
+最后一次更改: 小李飞刀
 
 功能说明:
 - 提供 operation 层的 arch helper，覆盖执行维度查询、动态片上内存入口、barrier 与 kernel 启动描述。
@@ -138,6 +138,15 @@ def _verify_target_registry_support(op_name: str) -> None:
                 action=_ERROR_ACTION,
             )
         ) from exc
+    except (AttributeError, TypeError, KeyError) as exc:
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene=_TARGET_ERROR_SCENE,
+                expected="current target registry missing required arch fields",
+                actual=_ERROR_ACTUAL,
+                action=_ERROR_ACTION,
+            )
+        ) from exc
     if not supported:
         raise ValueError(
             _ERROR_TEMPLATE.format(
@@ -147,6 +156,47 @@ def _verify_target_registry_support(op_name: str) -> None:
                 action=_ERROR_ACTION,
             )
         )
+
+
+def _get_current_target_hardware_value(key: str) -> int | None:
+    """安全读取当前 target registry 的设备字段。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 复用 `target_registry.get_current_target_hardware(...)` 读取设备值。
+    - 当当前 target 资产缺少 `hardware` 等关键字段时，统一抛出显式 `ValueError`。
+
+    使用示例:
+    - _get_current_target_hardware_value("thread_num")
+
+    关联文件:
+    - spec: spec/operation/arch.md
+    - test: test/operation/test_operation_arch.py
+    - 功能实现: kernel_gen/operation/arch.py
+    """
+
+    try:
+        return target_registry.get_current_target_hardware(key)
+    except ValueError as exc:
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene=_TARGET_ERROR_SCENE,
+                expected=str(exc),
+                actual=_ERROR_ACTUAL,
+                action=_ERROR_ACTION,
+            )
+        ) from exc
+    except (AttributeError, TypeError, KeyError) as exc:
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene=_TARGET_ERROR_SCENE,
+                expected=f"current target registry missing required hardware field: {key}",
+                actual=_ERROR_ACTUAL,
+                action=_ERROR_ACTION,
+            )
+        ) from exc
 
 
 def _build_query_symbol(name: str) -> SymbolDim:
@@ -247,7 +297,7 @@ def _require_current_target_hardware(op_name: str, hardware_key: str) -> int | N
     current_target = target_registry._get_current_target()
     if current_target is None:
         return None
-    hardware_value = target_registry.get_current_target_hardware(hardware_key)
+    hardware_value = _get_current_target_hardware_value(hardware_key)
     if hardware_value is not None:
         return hardware_value
     raise ValueError(

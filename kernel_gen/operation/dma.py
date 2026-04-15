@@ -1,7 +1,7 @@
 """DMA operation API.
 
 创建者: 金铲铲大作战
-最后一次更改: jcc你莫辜负
+最后一次更改: 小李飞刀
 
 功能说明:
 - 提供 Memory 的数据搬运、视图变换与显式转换 API，包括 alloc/free/copy/load/store/slice/deslice/view/reshape/flatten/cast。
@@ -359,6 +359,47 @@ def _clone_symbol_list(value: SymbolShape | None) -> SymbolShape | None:
     return SymbolShape(value.get_shape())
 
 
+def _normalize_and_validate_access_region(
+    memory: Memory,
+    *,
+    offsets: object,
+    sizes: object,
+    strides: object | None = None,
+    offset_name: str = "offsets",
+    size_name: str = "sizes",
+    stride_name: str = "strides",
+    offset_normalizer=_normalize_index_list,
+    size_normalizer=_normalize_index_list,
+    stride_normalizer=_normalize_index_list,
+) -> tuple[SymbolShape, SymbolShape, SymbolShape | None]:
+    """统一规整并校验访问区域参数。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 统一复用 offsets/sizes/strides 的规范化、rank 校验、正值校验与静态越界校验。
+    - 允许调用方按 API 语义切换单个参数的规整函数，例如 `view` 继续复用 shape 风格校验。
+
+    使用示例:
+    - _normalize_and_validate_access_region(mem, offsets=[0, 0], sizes=[8, 8], strides=[1, 1])
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: kernel_gen/operation/dma.py
+    """
+    offsets_shape = offset_normalizer(offsets, offset_name)
+    sizes_shape = size_normalizer(sizes, size_name)
+    strides_shape = None if strides is None else stride_normalizer(strides, stride_name)
+    _ensure_index_rank(memory, offsets_shape, sizes_shape, strides_shape)
+    _ensure_sizes_positive(sizes_shape)
+    _ensure_offsets_non_negative(offsets_shape)
+    _ensure_strides_positive(strides_shape)
+    _ensure_bounds(memory, offsets_shape, sizes_shape, strides_shape)
+    return offsets_shape, sizes_shape, strides_shape
+
+
 def _ensure_bounds(
     memory: Memory,
     offsets: SymbolShape,
@@ -429,37 +470,6 @@ def _ensure_bounds(
                     action=_ERROR_ACTION,
                 )
             )
-
-
-def _validate_access_region(
-    memory: Memory,
-    offsets: SymbolShape,
-    sizes: SymbolShape,
-    strides: SymbolShape | None,
-) -> None:
-    """统一校验 dma 访问区域参数。
-
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 统一复用 rank、正长度、非负 offset、正 stride 与越界检查。
-    - 供 `load/store/slice/view` 共享同一访问区域入口，避免校验分叉。
-
-    使用示例:
-    - _validate_access_region(mem, SymbolShape([0, 0]), SymbolShape([2, 2]), SymbolShape([1, 1]))
-
-    关联文件:
-    - spec: spec/operation/dma.md
-    - test: test/operation/test_operation_dma.py
-    - 功能实现: kernel_gen/operation/dma.py
-    """
-
-    _ensure_index_rank(memory, offsets, sizes, strides)
-    _ensure_sizes_positive(sizes)
-    _ensure_offsets_non_negative(offsets)
-    _ensure_strides_positive(strides)
-    _ensure_bounds(memory, offsets, sizes, strides)
 
 
 def _is_contiguous(memory: Memory) -> bool:
@@ -640,10 +650,12 @@ def load(
                 action=_ERROR_ACTION,
             )
         )
-    offsets_shape = _normalize_index_list(offsets, "offsets")
-    sizes_shape = _normalize_index_list(sizes, "sizes")
-    strides_shape = None if strides is None else _normalize_index_list(strides, "strides")
-    _validate_access_region(src, offsets_shape, sizes_shape, strides_shape)
+    offsets_shape, sizes_shape, strides_shape = _normalize_and_validate_access_region(
+        src,
+        offsets=offsets,
+        sizes=sizes,
+        strides=strides,
+    )
     target_space = src.space if space is None else space
     return Memory(
         _clone_symbol_list(sizes_shape),
@@ -688,10 +700,12 @@ def store(
                 action=_ERROR_ACTION,
             )
         )
-    offsets_shape = _normalize_index_list(offsets, "offsets")
-    sizes_shape = _normalize_index_list(sizes, "sizes")
-    strides_shape = None if strides is None else _normalize_index_list(strides, "strides")
-    _validate_access_region(dst, offsets_shape, sizes_shape, strides_shape)
+    offsets_shape, sizes_shape, strides_shape = _normalize_and_validate_access_region(
+        dst,
+        offsets=offsets,
+        sizes=sizes,
+        strides=strides,
+    )
     if src.shape.get_values() != sizes_shape.get_values():
         raise ValueError(
             _ERROR_TEMPLATE.format(
@@ -738,10 +752,12 @@ def slice(
                 action=_ERROR_ACTION,
             )
         )
-    offsets_shape = _normalize_index_list(offsets, "offsets")
-    sizes_shape = _normalize_index_list(sizes, "sizes")
-    strides_shape = None if strides is None else _normalize_index_list(strides, "strides")
-    _validate_access_region(src, offsets_shape, sizes_shape, strides_shape)
+    offsets_shape, sizes_shape, strides_shape = _normalize_and_validate_access_region(
+        src,
+        offsets=offsets,
+        sizes=sizes,
+        strides=strides,
+    )
     target_space = src.space if space is None else space
     return alloc(_clone_symbol_list(sizes_shape), src.dtype, space=target_space, format=src.format)
 
@@ -797,10 +813,18 @@ def view(
     - 功能实现: kernel_gen/operation/dma.py
     """
     src = _ensure_memory(source, "source")
-    offset_value = _ensure_shape_value(offset, "offset")
-    size_value = _ensure_shape_value(size, "size")
-    stride_value = _ensure_shape_value(stride, "stride")
-    _validate_access_region(src, offset_value, size_value, stride_value)
+    offset_value, size_value, stride_value = _normalize_and_validate_access_region(
+        src,
+        offsets=offset,
+        sizes=size,
+        strides=stride,
+        offset_name="offset",
+        size_name="size",
+        stride_name="stride",
+        offset_normalizer=_ensure_shape_value,
+        size_normalizer=_ensure_shape_value,
+        stride_normalizer=_ensure_shape_value,
+    )
     return Memory(
         _clone_symbol_list(size_value),
         src.dtype,

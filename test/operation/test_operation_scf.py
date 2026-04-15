@@ -1,7 +1,7 @@
 """scf operation API tests.
 
 创建者: 摸鱼小分队
-最后一次更改: jcc你莫辜负
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 kernel_gen/operation/scf.py 的 loop 语义。
@@ -104,10 +104,10 @@ def test_loop_step_zero() -> None:
 
 # TC-OP-SCF-005
 # 创建者: 摸鱼小分队
-# 最后一次更改: 朽木露琪亚
+# 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-22 13:15:14 +0800
 # 最近一次运行成功时间: 2026-03-22 13:15:14 +0800
-# 测试目的: 验证非法类型输入抛出 TypeError。
+# 测试目的: 验证非法类型与 bool 输入均抛出 TypeError。
 # 使用示例: pytest -q test/operation/test_operation_scf.py -k test_loop_invalid_type
 # 对应功能实现文件路径: kernel_gen/operation/scf.py
 # 对应 spec 文件路径: spec/operation/scf.md
@@ -119,6 +119,62 @@ def test_loop_invalid_type() -> None:
         loop(0, "4", 1)
     with pytest.raises(TypeError):
         loop(0, 4, "1")
+
+
+# TC-OP-SCF-008
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-16 09:05:00 +0800
+# 最近一次运行成功时间: 2026-04-16 09:05:00 +0800
+# 测试目的: 验证 start/end/step/trip_count 中的 bool 不再按 int 接受。
+# 使用示例: pytest -q test/operation/test_operation_scf.py -k test_loop_rejects_bool_operands
+# 对应功能实现文件路径: kernel_gen/operation/scf.py
+# 对应 spec 文件路径: spec/operation/scf.md
+# 对应测试文件路径: test/operation/test_operation_scf.py
+def test_loop_rejects_bool_operands() -> None:
+    with pytest.raises(TypeError, match="start must be int or SymbolDim"):
+        loop(True, 4, 1)
+    with pytest.raises(TypeError, match="end must be int or SymbolDim"):
+        loop(0, False, 1)
+    with pytest.raises(TypeError, match="step must be int or SymbolDim"):
+        loop(0, 4, True)
+    with pytest.raises(TypeError, match="trip_count must be int or SymbolDim"):
+        loop(0, 4, 1, trip_count=True)
+
+
+# TC-OP-SCF-009
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-16 01:06:00 +0800
+# 最近一次运行成功时间: 2026-04-16 01:06:00 +0800
+# 测试目的: 验证非法 bound 输入在 `end` 位置触发显式 TypeError。
+# 使用示例: pytest -q test/operation/test_operation_scf.py -k test_loop_rejects_invalid_bound_operand
+# 对应功能实现文件路径: kernel_gen/operation/scf.py
+# 对应 spec 文件路径: spec/operation/scf.md
+# 对应测试文件路径: test/operation/test_operation_scf.py
+def test_loop_rejects_invalid_bound_operand() -> None:
+    with pytest.raises(TypeError, match="end must be int or SymbolDim"):
+        loop(0, object(), 1)
+
+
+# TC-OP-SCF-010
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-16 01:06:00 +0800
+# 最近一次运行成功时间: 2026-04-16 01:06:00 +0800
+# 测试目的: 验证符号步长路径继续返回 LoopRange，并保留 trip_count 合同。
+# 使用示例: pytest -q test/operation/test_operation_scf.py -k test_loop_symbolic_step_contract
+# 对应功能实现文件路径: kernel_gen/operation/scf.py
+# 对应 spec 文件路径: spec/operation/scf.md
+# 对应测试文件路径: test/operation/test_operation_scf.py
+def test_loop_symbolic_step_contract() -> None:
+    loop_range = loop(0, SymbolDim("N"), SymbolDim("S"), trip_count=3)
+
+    assert isinstance(loop_range, LoopRange)
+    assert loop_range.start == 0
+    assert loop_range.end.get_value() == "N"
+    assert loop_range.step.get_value() == "S"
+    assert loop_range.trip_count == 3
 
 
 # TC-OP-SCF-006
@@ -157,41 +213,3 @@ def test_loop_trip_count_sequence_semantics() -> None:
     assert isinstance(loop_range, LoopRange)
     assert loop_range.trip_count == 3
     assert [loop_range.start + loop_range.step * i for i in range(loop_range.trip_count)] == [1, 3, 5]
-
-
-# TC-OP-SCF-008
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-15 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-15 00:00:00 +0800
-# 测试目的: 验证 scf.loop 显式拒绝 bool 形式的 start/end/step。
-# 使用示例: pytest -q test/operation/test_operation_scf.py -k test_loop_rejects_bool_operands
-# 对应功能实现文件路径: kernel_gen/operation/scf.py
-# 对应 spec 文件路径: spec/operation/scf.md
-# 对应测试文件路径: test/operation/test_operation_scf.py
-@pytest.mark.parametrize(
-    ("start", "end", "step"),
-    [
-        (True, 4, 1),
-        (0, True, 1),
-        (0, 4, True),
-    ],
-)
-def test_loop_rejects_bool_operands(start: object, end: object, step: object) -> None:
-    with pytest.raises(TypeError, match="int or SymbolDim"):
-        loop(start, end, step)
-
-
-# TC-OP-SCF-009
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 最近一次运行测试时间: 2026-04-15 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-15 00:00:00 +0800
-# 测试目的: 验证 scf.loop 显式拒绝 bool 形式的 trip_count。
-# 使用示例: pytest -q test/operation/test_operation_scf.py -k test_loop_rejects_bool_trip_count
-# 对应功能实现文件路径: kernel_gen/operation/scf.py
-# 对应 spec 文件路径: spec/operation/scf.md
-# 对应测试文件路径: test/operation/test_operation_scf.py
-def test_loop_rejects_bool_trip_count() -> None:
-    with pytest.raises(TypeError, match="trip_count must be int or SymbolDim"):
-        loop(SymbolDim("M"), SymbolDim("N"), SymbolDim("S"), trip_count=True)

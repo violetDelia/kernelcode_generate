@@ -1,7 +1,7 @@
 """SCF operation API.
 
 创建者: 摸鱼小分队
-最后一次更改: jcc你莫辜负
+最后一次更改: 小李飞刀
 
 功能说明:
 - 提供 operation 层的 loop 语义入口，支持整数或符号范围的迭代描述。
@@ -179,10 +179,10 @@ def _ensure_loop_operand(value: object, name: str) -> int | SymbolDim:
     """校验 loop 的参数类型。
 
     创建者: 摸鱼小分队
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 摸鱼小分队
 
     功能说明:
-    - 仅允许非 `bool` 的 `int` 或 `SymbolDim` 输入。
+    - 仅允许 int 或 SymbolDim 输入。
 
     使用示例:
     - _ensure_loop_operand(1, "start")
@@ -208,10 +208,10 @@ def _normalize_trip_count(value: object) -> int | SymbolDim:
     """校验并归一化 trip_count。
 
     创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 允许非 `bool` 的 `int` 或 `SymbolDim`；None 会归一化为 1。
+    - 允许 int 或 SymbolDim；None 会归一化为 1。
     - 若为 int，必须 > 0。
 
     使用示例:

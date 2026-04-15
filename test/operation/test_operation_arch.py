@@ -1,7 +1,7 @@
 """arch operation API tests.
 
 创建者: 金铲铲大作战
-最后一次更改: jcc你莫辜负
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 `kernel_gen/operation/arch.py` 的执行维度查询、动态内存入口与 kernel 启动 helper。
@@ -447,6 +447,56 @@ def test_barrier_and_launch_helpers_reject_unsupported_target_ops() -> None:
 
 
 # TC-OP-ARCH-017
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-16 09:05:00 +0800
+# 最近一次运行成功时间: 2026-04-16 09:05:00 +0800
+# 测试目的: 验证 target registry 缺少 arch 支持矩阵关键字段时，arch query helper 返回显式错误。
+# 使用示例: pytest -q test/operation/test_operation_arch.py -k test_arch_queries_reject_target_registry_entries_missing_arch_fields
+# 对应功能实现文件路径: kernel_gen/operation/arch.py
+# 对应 spec 文件路径: spec/operation/arch.md
+# 对应测试文件路径: test/operation/test_operation_arch.py
+def test_arch_queries_reject_target_registry_entries_missing_arch_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    broken_target = type("BrokenTargetSpec", (), {"hardware": {}})()
+    monkeypatch.setitem(target_registry._TARGET_REGISTRY, "op_arch_missing_arch_fields", broken_target)
+    target_registry._set_current_target("op_arch_missing_arch_fields")
+    try:
+        with pytest.raises(ValueError, match="missing required arch fields"):
+            get_block_id()
+    finally:
+        target_registry._set_current_target(None)
+
+
+# TC-OP-ARCH-018
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-16 09:05:00 +0800
+# 最近一次运行成功时间: 2026-04-16 09:05:00 +0800
+# 测试目的: 验证 target registry 缺少 hardware 关键字段时，动态内存 helper 返回显式错误。
+# 使用示例: pytest -q test/operation/test_operation_arch.py -k test_get_dynamic_memory_rejects_target_registry_entries_missing_hardware_field
+# 对应功能实现文件路径: kernel_gen/operation/arch.py
+# 对应 spec 文件路径: spec/operation/arch.md
+# 对应测试文件路径: test/operation/test_operation_arch.py
+def test_get_dynamic_memory_rejects_target_registry_entries_missing_hardware_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    broken_target = type(
+        "BrokenHardwareTargetSpec",
+        (),
+        {"arch_supported_ops": None, "arch_unsupported_ops": set()},
+    )()
+    monkeypatch.setitem(target_registry._TARGET_REGISTRY, "op_arch_missing_hardware_field", broken_target)
+    target_registry._set_current_target("op_arch_missing_hardware_field")
+    try:
+        with pytest.raises(ValueError, match="missing required hardware field: sm_memory_size"):
+            get_dynamic_memory(MemorySpace.SM)
+    finally:
+        target_registry._set_current_target(None)
+
+
+# TC-OP-ARCH-019
 # 创建者: jcc你莫辜负
 # 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-15 00:00:00 +0800
