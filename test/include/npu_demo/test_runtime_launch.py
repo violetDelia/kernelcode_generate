@@ -152,7 +152,7 @@ static void kernel_body(
     }
     entered->fetch_add(1);
 
-    ctx.barrier({MemorySpace::TSM, MemorySpace::TLM}, BarrierScope::BLOCK);
+    ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
     after_values[tid] = entered->load();
 }
 

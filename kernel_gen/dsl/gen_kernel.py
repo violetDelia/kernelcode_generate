@@ -39,7 +39,7 @@ from xdsl.dialects.builtin import (
 from xdsl.ir import Operation
 
 from kernel_gen.dialect.arch import ArchBarrierOp, ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp, ArchLaunchOp
-from kernel_gen.dialect.dma import DmaAllocOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaViewOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolDimType, SymbolValueType
 
@@ -981,18 +981,19 @@ class _KernelEmitter:
                 raise _error(self.ctx, func_name, "npu_demo launch wrapper args must forward wrapper signature")
         return body_lhs_type, body_rhs_type, body_out_type
 
-    def _validate_npu_demo_launch_body_ops(self, func_op: func.FuncOp) -> tuple[ArchBarrierOp, ArchBarrierOp]:
+    def _validate_npu_demo_launch_body_ops(self, func_op: func.FuncOp) -> tuple[ArchBarrierOp, ArchBarrierOp, str]:
         """校验 body 函数是否匹配冻结的 add+barrier 骨架。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 允许辅助 `!symbol.int` 产生 op，但过滤后必须严格匹配固定序列。
         - barrier 本身仍使用 IR 上的 scope/visibility，避免静默回退到旧接口。
+        - 输出 tile 必须显式来自第二块 `tlm1/tlm2/tlm3` 动态内存，禁止回退到 `tsm`。
 
         使用示例:
-        - barrier0, barrier1 = self._validate_npu_demo_launch_body_ops(body_func)
+        - barrier0, barrier1, tlm_space = self._validate_npu_demo_launch_body_ops(body_func)
 
         关联文件:
         - spec: spec/dsl/gen_kernel.md
@@ -1053,7 +1054,35 @@ class _KernelEmitter:
         barrier1 = ops[13]
         assert isinstance(barrier0, ArchBarrierOp)
         assert isinstance(barrier1, ArchBarrierOp)
-        return barrier0, barrier1
+        tsm_dynamic = ops[2]
+        tlm_dynamic = ops[3]
+        out_view = ops[8]
+        add_op = ops[12]
+        deslice_op = ops[14]
+        assert isinstance(tsm_dynamic, ArchGetDynamicMemoryOp)
+        assert isinstance(tlm_dynamic, ArchGetDynamicMemoryOp)
+        assert isinstance(out_view, DmaViewOp)
+        assert isinstance(add_op, NnAddOp)
+        assert isinstance(deslice_op, DmaDesliceOp)
+
+        if tsm_dynamic.memory_space.space.data != "tsm":
+            raise _error(self.ctx, func_name, "npu_demo launch body must read TSM as first dynamic memory")
+        tlm_space = tlm_dynamic.memory_space.space.data
+        if tlm_space not in {"tlm1", "tlm2", "tlm3"}:
+            raise _error(self.ctx, func_name, "npu_demo launch body must read tlm1/tlm2/tlm3 as second dynamic memory")
+        out_view_type = out_view.result.type
+        add_result_type = add_op.result.type
+        if not isinstance(out_view_type, NnMemoryType) or out_view_type.space.space.data != tlm_space:
+            raise _error(self.ctx, func_name, "npu_demo output tile view must stay on tlm1/tlm2/tlm3")
+        if out_view.source is not tlm_dynamic.result:
+            raise _error(self.ctx, func_name, "npu_demo output tile must view tlm dynamic memory")
+        if add_op.space.space.data != tlm_space:
+            raise _error(self.ctx, func_name, "npu_demo add result space must stay on tlm1/tlm2/tlm3")
+        if not isinstance(add_result_type, NnMemoryType) or add_result_type.space.space.data != tlm_space:
+            raise _error(self.ctx, func_name, "npu_demo add result type must stay on tlm1/tlm2/tlm3")
+        if deslice_op.source is not add_op.result:
+            raise _error(self.ctx, func_name, "npu_demo deslice must consume add result directly")
+        return barrier0, barrier1, tlm_space
 
     def _format_npu_demo_barrier_stmt(self, barrier_op: ArchBarrierOp, func_name: str) -> str:
         """把 `arch.barrier` 格式化为 `KernelContext::barrier(...)` 语句。
@@ -1110,9 +1139,10 @@ class _KernelEmitter:
         """
 
         lhs_type, rhs_type, out_type = self._validate_npu_demo_launch_body_signature(func_op)
-        barrier0, barrier1 = self._validate_npu_demo_launch_body_ops(func_op)
+        barrier0, barrier1, tlm_space = self._validate_npu_demo_launch_body_ops(func_op)
         arg_names = _extract_arg_names(func_op)
         element_type = self._type_to_c(out_type.element_type)
+        tlm_space_c = _memory_space_to_c(NnMemorySpaceAttr.from_name(tlm_space))
         lhs_name, rhs_name, out_name = arg_names[1], arg_names[2], arg_names[3]
 
         signature = (
@@ -1132,8 +1162,8 @@ class _KernelEmitter:
                 f"ctx.get_dynamic_memory<MemorySpace::TSM, {element_type}>();"
             ),
             (
-                f"{indent}Memory<MemorySpace::TLM1, {element_type}> tlm = "
-                f"ctx.get_dynamic_memory<MemorySpace::TLM1, {element_type}>();"
+                f"{indent}Memory<{tlm_space_c}, {element_type}> tlm = "
+                f"ctx.get_dynamic_memory<{tlm_space_c}, {element_type}>();"
             ),
             "",
             f"{indent}auto {lhs_name}_gm = view({lhs_name}, tid * 16, 16, 1);",
@@ -1141,16 +1171,16 @@ class _KernelEmitter:
             "",
             f"{indent}auto {lhs_name}_tsm = view(tsm, tid * 16, 16, 1);",
             f"{indent}auto {rhs_name}_tsm = view(tsm, 64 + tid * 16, 16, 1);",
-            f"{indent}auto {out_name}_tsm = view(tsm, tid * 16, 16, 1);",
+            f"{indent}auto {out_name}_tlm = view(tlm, tid * 16, 16, 1);",
             "",
             f"{indent}slice({lhs_name}_tsm, {lhs_name}_gm, 0, 16, 1);",
             f"{indent}slice({rhs_name}_tsm, {rhs_name}_gm, 0, 16, 1);",
             self._format_npu_demo_barrier_stmt(barrier0, func_op.sym_name.data),
             "",
-            f"{indent}add({lhs_name}_tsm, {rhs_name}_tsm, {out_name}_tsm);",
+            f"{indent}add({lhs_name}_tsm, {rhs_name}_tsm, {out_name}_tlm);",
             self._format_npu_demo_barrier_stmt(barrier1, func_op.sym_name.data),
             "",
-            f"{indent}deslice({out_name}_tsm, {out_name}, tid * 16, 16, 1);",
+            f"{indent}deslice({out_name}_tlm, {out_name}, tid * 16, 16, 1);",
         ]
         body = "\n".join(lines)
         self.ctx.pop_indent()

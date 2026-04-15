@@ -7,7 +7,7 @@
 - Status status = add(lhs, rhs, out);
 
 创建者: 摸鱼小分队
-最后修改人: jcc你莫辜负
+最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Nn.md
@@ -24,20 +24,21 @@
 /*
 功能说明:
 - 对两个内存视图执行逐元素加法，结果写入输出视图。
+- 允许输入与输出位于不同 `MemorySpace`，以支持 `TSM + TSM -> TLMx` 这类 npu_demo 片上流水线。
 
 使用示例:
 - Status status = add(lhs, rhs, out);
 
 创建者: 摸鱼小分队
-最后修改人: jcc你莫辜负
+最后修改人: 金铲铲大作战
 
 关联文件:
 - spec: spec/include/api/Nn.md
 - test: test/include/api/test_nn.py
 - 功能实现: include/npu_demo/Nn.h
 */
-template <MemorySpace Space, typename T>
-inline Status add(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, T>& out) {
+template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename T>
+inline Status add(const Memory<LhsSpace, T>& lhs, const Memory<RhsSpace, T>& rhs, Memory<OutSpace, T>& out) {
     if (lhs.rank() != 1 || rhs.rank() != 1 || out.rank() != 1) {
         return StatusCode::kError;
     }
@@ -57,6 +58,11 @@ inline Status add(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memo
         out.data()[i * out_stride] = lhs.data()[i * lhs_stride] + rhs.data()[i * rhs_stride];
     }
     return StatusCode::kOk;
+}
+
+template <MemorySpace Space, typename T>
+inline Status add(const Memory<Space, T>& lhs, const Memory<Space, T>& rhs, Memory<Space, T>& out) {
+    return add<Space, Space, Space, T>(lhs, rhs, out);
 }
 
 /*

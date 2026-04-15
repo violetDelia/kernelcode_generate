@@ -14,7 +14,7 @@
 - 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/include/npu_demo/npu_demo.md`](../../../spec/include/npu_demo/npu_demo.md)
 - `功能实现`：[`include/npu_demo/npu_demo.h`](../../../include/npu_demo/npu_demo.h)、[`include/npu_demo/Arch.h`](../../../include/npu_demo/Arch.h)
-- `test`：[`test/include/npu_demo/test_kernel_context.py`](../../../test/include/npu_demo/test_kernel_context.py)、[`test/include/api/test_arch.py`](../../../test/include/api/test_arch.py)、[`test/target/test_target_registry.py`](../../../test/target/test_target_registry.py)
+- `test`：[`test/include/npu_demo/test_kernel_context.py`](../../../test/include/npu_demo/test_kernel_context.py)、[`test/include/npu_demo/test_runtime_launch.py`](../../../test/include/npu_demo/test_runtime_launch.py)、[`test/include/api/test_arch.py`](../../../test/include/api/test_arch.py)、[`test/target/test_target_registry.py`](../../../test/target/test_target_registry.py)
 
 ## 依赖
 
@@ -38,8 +38,8 @@
 - `KernelContext` 只表示当前 launched body 的运行时视图；不要求公开默认构造、复制持久化或脱离 launch 生命周期独立使用。
 - P0 launch 子集固定为：`block=1`、`subthread=1`、`2 <= thread <= registry.hardware.thread_num`；不支持的 extent 必须显式失败，禁止静默回退到单线程或忽略部分 extent。
 - `block_num()` / `thread_num()` / `subthread_num()` 的公开语义是“当前 launch 值”；`target.registry` 中的 `block_num/thread_num/subthread_num` 只作为能力上限与容量校验基线，不再直接等于 launched body 中可见的当前值。
-- `KernelContext::barrier(visibility, scope)` 在 `npu_demo` P0 仅支持 `visibility={MemorySpace::TSM, MemorySpace::TLM}` 且两者各出现一次，并要求 `scope=BarrierScope::BLOCK`；其他组合必须显式失败。
-- `get_dynamic_memory<Space, T>()` 只覆盖当前 `npu_demo` 片上空间入口：`TSM/TLM` 返回运行时视图，`SM/LM` 因容量为 `0` 必须显式失败，`GM` 不属于该接口输入域。
+- `KernelContext::barrier(visibility, scope)` 在 `npu_demo` P0 仅支持 `visibility={BarrierVisibility::TSM, BarrierVisibility::TLM}` 且两者各出现一次，并要求 `scope=BarrierScope::BLOCK`；其他组合必须显式失败。
+- `get_dynamic_memory<Space, T>()` 只覆盖当前 `npu_demo` 片上空间入口：`TSM/TLM1/TLM2/TLM3` 返回运行时视图，`SM/LM` 因容量为 `0` 必须显式失败，`GM` 不属于该接口输入域。
 - 本文件不定义 DSL/front-end、MLIR lowering、codegen 细节，也不承诺超出 P0 launch 子集的多 block / 多 subthread runtime 行为。
 
 ## 公开接口
@@ -71,7 +71,7 @@ static void add_barrier_body(
     Memory<GM, float>& out) {
     long long tid = ctx.thread_id();
     (void)tid;
-    ctx.barrier({MemorySpace::TSM, MemorySpace::TLM}, BarrierScope::BLOCK);
+    ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
 }
 
 Status status = npu_demo::launch<1, 4, 1>(add_barrier_body, lhs, rhs, out);
@@ -163,20 +163,20 @@ long long tnum = ctx.thread_num();
 
 参数说明：
 
-- `visibility (std::initializer_list<MemorySpace>)`：需要保证可见性的片上空间列表。
+- `visibility (std::initializer_list<BarrierVisibility>)`：需要保证可见性的聚合可见域列表。
 - `scope (BarrierScope)`：同步范围。
 
 使用示例：
 
 ```cpp
-ctx.barrier({MemorySpace::TSM, MemorySpace::TLM}, BarrierScope::BLOCK);
+ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
 ```
 
 注意事项：
 
 - `visibility` 与 `scope` 都是必填；不得退化为无参 barrier。
-- `npu_demo` P0 仅支持 `visibility={TSM, TLM}` 且两者各出现一次，并要求 `scope=BarrierScope::BLOCK`。
-- 空 `visibility`、重复 space、缺失 `TSM/TLM`、混入 `SM/LM/GM`，或 `scope=BarrierScope::THREAD` 都必须显式失败。
+- `npu_demo` P0 仅支持 `visibility={BarrierVisibility::TSM, BarrierVisibility::TLM}` 且两者各出现一次，并要求 `scope=BarrierScope::BLOCK`。
+- 空 `visibility`、重复项、缺失 `TSM/TLM`、混入非法 `BarrierVisibility` 枚举值，或 `scope=BarrierScope::THREAD` 都必须显式失败。
 
 返回与限制：
 
@@ -199,13 +199,15 @@ ctx.barrier({MemorySpace::TSM, MemorySpace::TLM}, BarrierScope::BLOCK);
 
 ```cpp
 Memory<TSM, float> tsm = ctx.get_dynamic_memory<TSM, float>();
-Memory<TLM, float> tlm = ctx.get_dynamic_memory<TLM, float>();
+Memory<TLM1, float> act = ctx.get_dynamic_memory<TLM1, float>();
+Memory<TLM2, float> weight = ctx.get_dynamic_memory<TLM2, float>();
+Memory<TLM3, float> out = ctx.get_dynamic_memory<TLM3, float>();
 ```
 
 注意事项：
 
 - `Space` 通过模板参数显式传入。
-- P0 下 `TSM` 与 `TLM` 分别返回 `shape=[24576]`、`shape=[2048]`、`stride=[1]`、`format=MemoryFormat::Norm`，`space` 与模板参数一致的 `Memory<Space, T>`。
+- P0 下 `TSM` 返回 `shape=[24576]`；`TLM1/TLM2/TLM3` 分别返回 `shape=[1024]`、`shape=[512]`、`shape=[512]`；上述空间的 `stride=[1]`、`format=MemoryFormat::Norm`，且 `space` 与模板参数一致。
 - `SM` / `LM` 因容量为 `0` 必须显式失败；错误消息或诊断至少需要指向对应的 `*_memory_size=0` 约束。
 - `GM` 不属于该接口输入域。
 
@@ -217,17 +219,17 @@ Memory<TLM, float> tlm = ctx.get_dynamic_memory<TLM, float>();
 
 ## 测试
 
-- 测试文件：[`test/include/api/test_arch.py`](../../../test/include/api/test_arch.py)、[`test/include/npu_demo/test_kernel_context.py`](../../../test/include/npu_demo/test_kernel_context.py)、[`test/target/test_target_registry.py`](../../../test/target/test_target_registry.py)
+- 测试文件：[`test/include/api/test_arch.py`](../../../test/include/api/test_arch.py)、[`test/include/npu_demo/test_kernel_context.py`](../../../test/include/npu_demo/test_kernel_context.py)、[`test/include/npu_demo/test_runtime_launch.py`](../../../test/include/npu_demo/test_runtime_launch.py)、[`test/target/test_target_registry.py`](../../../test/target/test_target_registry.py)
 - 执行命令：
   - `pytest -q test/include/api/test_arch.py`
-  - `pytest -q test/include/npu_demo/test_kernel_context.py -k "runtime or barrier"`
+  - `pytest -q test/include/npu_demo/test_kernel_context.py test/include/npu_demo/test_runtime_launch.py`
   - `pytest -q test/target/test_target_registry.py -k "npu_demo and launch"`
 - 测试目标：
   - 验证 `include/api/Arch.h` 与 `include/npu_demo/Arch.h` 的职责边界。
   - 验证 `KernelContext` 查询返回当前 launch 值，而非旧的固定模板常量。
-  - 验证 `ctx.barrier({TSM, TLM}, BarrierScope::BLOCK)` 的参数合同与显式失败边界。
+  - 验证 `ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK)` 的参数合同与显式失败边界。
   - 验证 `npu_demo::launch<1, thread, 1>(...)` 的函数对象 callee、launch extent 校验与 `thread_num()` 运行时视图。
-- 验证 `get_dynamic_memory<TSM, float>()` 与 `get_dynamic_memory<TLM, float>()` 返回固定容量视图，`SM/LM` 因零容量显式失败。
+- 验证 `get_dynamic_memory<TSM/TLM1/TLM2/TLM3, float>()` 返回固定容量视图，`SM/LM` 因零容量显式失败。
 - 功能与用例清单：
   - `test_include_api_arch_exports_public_launch_and_scope_contract`：锁定 `include/api/Arch.h` 的公开 launch/barrier 接口面。
   - `test_npu_demo_kernel_context_runtime_view_tracks_launch_extent`：锁定 `KernelContext` 的 `block/thread/subthread` 查询返回当前 launch 值。

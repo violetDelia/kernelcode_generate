@@ -200,6 +200,7 @@ def _make_npu_demo_add_barrier_module(
     subthread_extent_expr: str = "1",
     barrier_scope: str = "block",
     barrier_visibility_names: tuple[str, ...] = ("tsm", "tlm"),
+    tlm_space: str = "tlm1",
     emit_wrapper_return: bool = True,
     include_body: bool = True,
     include_wrapper: bool = True,
@@ -213,6 +214,7 @@ def _make_npu_demo_add_barrier_module(
     功能说明:
     - 生成 `body + wrapper` 双函数 module，覆盖 `gen_kernel(target="npu_demo")` 的受控 `builtin.module` 子集。
     - body 固定包含 `thread/view/slice/barrier/add/deslice` 骨架，wrapper 固定包含 `arch.launch + func.return`。
+    - 允许调用方显式切换 `tlm1/tlm2/tlm3`，用于锁定 npu_demo output tile 的真实动态内存空间。
 
     使用示例:
     - module = _make_npu_demo_add_barrier_module()
@@ -225,8 +227,9 @@ def _make_npu_demo_add_barrier_module(
 
     gm_type = _make_memory_type([64], [1], element_type=f32)
     tsm_buffer_type = _make_memory_type([128], [1], element_type=f32, space="tsm")
-    tlm_buffer_type = _make_memory_type([64], [1], element_type=f32, space="tlm1")
+    tlm_buffer_type = _make_memory_type([64], [1], element_type=f32, space=tlm_space)
     tsm_tile_type = _make_memory_type([16], [1], element_type=f32, space="tsm")
+    tlm_tile_type = _make_memory_type([16], [1], element_type=f32, space=tlm_space)
     gm_tile_type = _make_memory_type([16], [1], element_type=f32, space="global")
     barrier_visibility = ArrayAttr([ArchVisibilityAttr.from_name(space_name) for space_name in barrier_visibility_names])
 
@@ -239,16 +242,16 @@ def _make_npu_demo_add_barrier_module(
     tid = ArchGetThreadIdOp()
     tnum = ArchGetThreadNumOp()
     tsm = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("tsm"), tsm_buffer_type)
-    tlm = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("tlm1"), tlm_buffer_type)
+    tlm = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name(tlm_space), tlm_buffer_type)
     lhs_gm = DmaViewOp(body_block.args[1], [thread_offset.result], [size.result], [stride.result], gm_tile_type)
     rhs_gm = DmaViewOp(body_block.args[2], [thread_offset.result], [size.result], [stride.result], gm_tile_type)
     lhs_tsm = DmaViewOp(tsm.result, [thread_offset.result], [size.result], [stride.result], tsm_tile_type)
     rhs_tsm = DmaViewOp(tsm.result, [rhs_offset.result], [size.result], [stride.result], tsm_tile_type)
-    out_tsm = DmaViewOp(tsm.result, [thread_offset.result], [size.result], [stride.result], tsm_tile_type)
+    out_tlm = DmaViewOp(tlm.result, [thread_offset.result], [size.result], [stride.result], tlm_tile_type)
     lhs_slice = DmaSliceOp(lhs_tsm.result, lhs_gm.result, [zero.result], [size.result], [stride.result])
     rhs_slice = DmaSliceOp(rhs_tsm.result, rhs_gm.result, [zero.result], [size.result], [stride.result])
     barrier0 = ArchBarrierOp(ArchScopeAttr.from_name(barrier_scope), barrier_visibility)
-    add = NnAddOp(lhs_tsm.result, rhs_tsm.result, tsm_tile_type, NnMemorySpaceAttr.from_name("tsm"))
+    add = NnAddOp(lhs_tsm.result, rhs_tsm.result, tlm_tile_type, NnMemorySpaceAttr.from_name(tlm_space))
     barrier1 = ArchBarrierOp(ArchScopeAttr.from_name(barrier_scope), barrier_visibility)
     deslice = DmaDesliceOp(add.result, body_block.args[3], [thread_offset.result], [size.result], [stride.result], gm_type)
     body_block.add_ops(
@@ -266,7 +269,7 @@ def _make_npu_demo_add_barrier_module(
             rhs_gm,
             lhs_tsm,
             rhs_tsm,
-            out_tsm,
+            out_tlm,
             lhs_slice,
             rhs_slice,
             barrier0,
@@ -1958,8 +1961,12 @@ def test_gen_kernel_rejects_kernel_split_missing_tile_bridge() -> None:
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
 # 对应测试文件路径: test/dsl/test_gen_kernel.py
-def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body() -> None:
-    module = _make_npu_demo_add_barrier_module()
+@pytest.mark.parametrize(
+    ("tlm_space", "space_enum"),
+    [("tlm1", "TLM1"), ("tlm2", "TLM2"), ("tlm3", "TLM3")],
+)
+def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body(tlm_space: str, space_enum: str) -> None:
+    module = _make_npu_demo_add_barrier_module(tlm_space=tlm_space)
 
     source = gen_kernel(module, _npu_ctx())
 
@@ -1979,7 +1986,9 @@ def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body() -> None:
     assert source.index("long long tid = ctx.thread_id();") < source.index(
         "Memory<MemorySpace::TSM, float> tsm = ctx.get_dynamic_memory<MemorySpace::TSM, float>();"
     )
-    assert source.index("slice(lhs_tsm, lhs_gm, 0, 16, 1);") < source.index("add(lhs_tsm, rhs_tsm, out_tsm);") < source.index("deslice(out_tsm, out, tid * 16, 16, 1);")
+    assert f"Memory<MemorySpace::{space_enum}, float> tlm = ctx.get_dynamic_memory<MemorySpace::{space_enum}, float>();" in source
+    assert f"auto out_tlm = view(tlm, tid * 16, 16, 1);" in source
+    assert source.index("slice(lhs_tsm, lhs_gm, 0, 16, 1);") < source.index("add(lhs_tsm, rhs_tsm, out_tlm);") < source.index("deslice(out_tlm, out, tid * 16, 16, 1);")
     assert "arch.launch_kernel" not in source
     assert "ctx.sync_threads" not in source
 

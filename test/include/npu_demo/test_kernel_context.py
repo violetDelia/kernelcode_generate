@@ -203,7 +203,7 @@ int main() {
 # 最后修改人: 小李飞刀
 # 最近一次运行测试时间: 2026-04-06 06:05:00 +0800
 # 最近一次运行成功时间: 2026-04-06 06:05:00 +0800
-# 测试目的: 验证 KernelContext::barrier 需要显式 visibility / scope，且只接受 {TSM, TLM} + BLOCK。
+# 测试目的: 验证 KernelContext::barrier 需要显式 visibility / scope，且只接受 {BarrierVisibility::TSM, BarrierVisibility::TLM} + BLOCK。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_barrier_requires_visibility_and_block_scope
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
 # 对应 spec 文件链接: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
@@ -222,7 +222,7 @@ static bool contains(const std::string& value, const char* needle) {
 }
 
 static void kernel_body(npu_demo::KernelContext& ctx, int* result_code) {
-    ctx.barrier({MemorySpace::TLM, MemorySpace::TSM}, BarrierScope::BLOCK);
+    ctx.barrier({BarrierVisibility::TLM, BarrierVisibility::TSM}, BarrierScope::BLOCK);
     if (ctx.thread_id() != 0) {
         return;
     }
@@ -239,7 +239,7 @@ static void kernel_body(npu_demo::KernelContext& ctx, int* result_code) {
     }
 
     try {
-        ctx.barrier({MemorySpace::TSM}, BarrierScope::BLOCK);
+        ctx.barrier({BarrierVisibility::TSM}, BarrierScope::BLOCK);
         *result_code = 3;
         return;
     } catch (const std::invalid_argument& err) {
@@ -250,7 +250,7 @@ static void kernel_body(npu_demo::KernelContext& ctx, int* result_code) {
     }
 
     try {
-        ctx.barrier({MemorySpace::TSM, MemorySpace::TSM}, BarrierScope::BLOCK);
+        ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TSM}, BarrierScope::BLOCK);
         *result_code = 5;
         return;
     } catch (const std::invalid_argument& err) {
@@ -261,7 +261,7 @@ static void kernel_body(npu_demo::KernelContext& ctx, int* result_code) {
     }
 
     try {
-        ctx.barrier({MemorySpace::TSM, MemorySpace::GM}, BarrierScope::BLOCK);
+        ctx.barrier({BarrierVisibility::TSM, static_cast<BarrierVisibility>(-1)}, BarrierScope::BLOCK);
         *result_code = 7;
         return;
     } catch (const std::invalid_argument& err) {
@@ -272,7 +272,7 @@ static void kernel_body(npu_demo::KernelContext& ctx, int* result_code) {
     }
 
     try {
-        ctx.barrier({MemorySpace::TSM, MemorySpace::TLM}, BarrierScope::THREAD);
+        ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::THREAD);
         *result_code = 9;
         return;
     } catch (const std::invalid_argument& err) {
@@ -387,12 +387,12 @@ int main() {
 # 最后修改人: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-05 10:44:47 +0800
 # 最近一次运行成功时间: 2026-04-05 10:44:47 +0800
-# 测试目的: 验证 get_dynamic_memory<TLM, float>() 返回固定 shape/stride/space 的 Memory 视图。
-# 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_returns_typed_tlm_memory
+# 测试目的: 验证 get_dynamic_memory<TLM1/TLM2/TLM3, float>() 返回各自独立的 shape/stride/space Memory 视图。
+# 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_kernel_context_returns_typed_tlm123_memory
 # 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
 # 对应 spec 文件链接: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
 # 对应测试文件链接: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
-def test_npu_demo_kernel_context_returns_typed_tlm_memory() -> None:
+def test_npu_demo_kernel_context_returns_typed_tlm123_memory() -> None:
     source = r"""
 #include "include/npu_demo/npu_demo.h"
 
@@ -400,19 +400,45 @@ static int fail(int code) { return code; }
 
 int main() {
     npu_demo::KernelContext ctx;
-    auto mem = ctx.get_dynamic_memory<TLM, float>();
+    auto tlm1 = ctx.get_dynamic_memory<TLM1, float>();
+    auto tlm2 = ctx.get_dynamic_memory<TLM2, float>();
+    auto tlm3 = ctx.get_dynamic_memory<TLM3, float>();
 
-    if (mem.rank() != 1) {
+    if (tlm1.rank() != 1) {
         return fail(1);
     }
-    if (mem.shape()[0] != 2048) {
+    if (tlm1.shape()[0] != 1024) {
         return fail(2);
     }
-    if (mem.stride()[0] != 1) {
+    if (tlm1.stride()[0] != 1) {
         return fail(3);
     }
-    if (mem.space() != MemorySpace::TLM) {
+    if (tlm1.space() != MemorySpace::TLM1) {
         return fail(4);
+    }
+    if (tlm2.rank() != 1) {
+        return fail(5);
+    }
+    if (tlm2.shape()[0] != 512) {
+        return fail(6);
+    }
+    if (tlm2.stride()[0] != 1) {
+        return fail(7);
+    }
+    if (tlm2.space() != MemorySpace::TLM2) {
+        return fail(8);
+    }
+    if (tlm3.rank() != 1) {
+        return fail(9);
+    }
+    if (tlm3.shape()[0] != 512) {
+        return fail(10);
+    }
+    if (tlm3.stride()[0] != 1) {
+        return fail(11);
+    }
+    if (tlm3.space() != MemorySpace::TLM3) {
+        return fail(12);
     }
     return 0;
 }
@@ -506,7 +532,7 @@ int main() {
 # 最后修改人: 金铲铲大作战
 # 最近一次运行测试时间: N/A
 # 最近一次运行成功时间: N/A
-# 测试目的: 验证 get_dynamic_memory 模板空间入口的成功与失败路径可编译并返回稳定结果。
+# 测试目的: 验证 get_dynamic_memory 模板空间入口的成功与失败路径可编译并返回稳定结果，且 TLM1/TLM2/TLM3 容量各自独立。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_get_dynamic_memory_template_space_contract
 # 对应功能实现文件链接: [include/npu_demo/Arch.h](include/npu_demo/Arch.h)
 # 对应 spec 文件链接: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
@@ -531,33 +557,41 @@ int main() {
         return fail(1);
     }
 
-    auto tlm = ctx.get_dynamic_memory<TLM, float>();
-    if (tlm.rank() != 1 || tlm.shape()[0] != 2048 || tlm.stride()[0] != 1 || tlm.space() != MemorySpace::TLM) {
+    auto tlm1 = ctx.get_dynamic_memory<TLM1, float>();
+    if (tlm1.rank() != 1 || tlm1.shape()[0] != 1024 || tlm1.stride()[0] != 1 || tlm1.space() != MemorySpace::TLM1) {
         return fail(2);
+    }
+    auto tlm2 = ctx.get_dynamic_memory<TLM2, float>();
+    if (tlm2.rank() != 1 || tlm2.shape()[0] != 512 || tlm2.stride()[0] != 1 || tlm2.space() != MemorySpace::TLM2) {
+        return fail(3);
+    }
+    auto tlm3 = ctx.get_dynamic_memory<TLM3, float>();
+    if (tlm3.rank() != 1 || tlm3.shape()[0] != 512 || tlm3.stride()[0] != 1 || tlm3.space() != MemorySpace::TLM3) {
+        return fail(4);
     }
 
     try {
         auto sm = ctx.get_dynamic_memory<SM, float>();
         (void)sm;
-        return fail(3);
+        return fail(5);
     } catch (const std::runtime_error& err) {
         if (!contains(err.what(), "sm_memory_size=0")) {
-            return fail(4);
+            return fail(6);
         }
     } catch (...) {
-        return fail(5);
+        return fail(7);
     }
 
     try {
         auto lm = ctx.get_dynamic_memory<LM, float>();
         (void)lm;
-        return fail(6);
+        return fail(8);
     } catch (const std::runtime_error& err) {
         if (!contains(err.what(), "lm_memory_size=0")) {
-            return fail(7);
+            return fail(9);
         }
     } catch (...) {
-        return fail(8);
+        return fail(10);
     }
     return 0;
 }
