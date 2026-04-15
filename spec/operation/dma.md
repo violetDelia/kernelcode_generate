@@ -48,6 +48,32 @@
 - `view` 在 operation 层不要求 `source.shape` 与 `size` 的 `numel` 相等，只要求窗口边界合法。
 - operation 到 dialect 的映射边界：`view` 的 `offset/size/stride` 必须在调用点直接保留并传递给方言；仅依赖 `view` 返回的 `Memory` 无法恢复完整 subview 参数。
 
+## 额外补充
+
+### 关系图
+
+```text
+alloc -> 产出新的 Memory 规格
+copy -> 保留 shape/stride/format，仅切换目标 space
+load -> 从 source 读取窗口，直接返回结果块
+slice -> 用户侧返回值式 helper；lowering 时桥接为 alloc(target) + dma.slice(target, source, ...)
+view -> 仅保留 subview 窗口信息，不做搬运
+reshape/flatten -> 仅改 shape/stride 元信息，不做搬运
+store/deslice -> 把 source 写回 target 指定窗口
+```
+
+### 越界规则索引
+
+| helper | 核对对象 | 统一规则 |
+| --- | --- | --- |
+| `load` | `offsets/sizes/strides` 对 `source.shape` | 对可静态判定场景执行 `offset + (size - 1) * stride < dim`，越界时报 `ValueError` |
+| `slice` | `offsets/sizes/strides` 对 `source.shape` | 与 `load` 共享同一组 rank / 正长度 / 越界规则 |
+| `store` | `offsets/sizes/strides` 对 `target.shape`，且 `sizes == source.shape` | 先校验 rank，再校验 `sizes` 与源块一致，最后执行静态越界检查 |
+| `deslice` | `offsets/sizes/strides` 对 `target.shape`，且 `sizes == source.shape` | 与 `store` 共享同一组大小与越界规则 |
+| `view` | `offset/size/stride` 对 `source.shape` | 只检查窗口合法性，不要求 `numel` 相等；静态场景同样按 `offset + (size - 1) * stride < dim` 校验 |
+| `reshape` | `shape` 对 `source` 连续布局与 `numel` | 不做窗口越界检查；只校验连续布局和静态 `numel` 一致 |
+| `flatten` | `source` 连续布局 | 不做窗口越界检查；只校验连续布局 |
+
 ## 公开接口
 
 ### alloc(shape, dtype, space=MemorySpace.GM, stride=None, format=Farmat.Norm)

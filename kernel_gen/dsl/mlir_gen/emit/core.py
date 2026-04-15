@@ -125,7 +125,7 @@ from kernel_gen.dialect.symbol import (
 )
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
-from kernel_gen.symbol_variable.type import NumericType
+from kernel_gen.symbol_variable.type import Farmat, NumericType
 from kernel_gen.operation import dma as _KG_OPERATION_DMA
 from kernel_gen.target import registry
 from kernel_gen.operation import arch as _KG_OPERATION_ARCH
@@ -300,6 +300,33 @@ class EmitContext:
 
     def _restore_cache(self: "EmitContext", snapshot: dict[int, object]) -> None:
         self._cache = dict(snapshot)
+
+
+def _ctx_runtime_values(ctx: EmitContext) -> dict[str, object] | None:
+    """读取发射上下文中的 runtime_values。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 统一从 `ctx.config["__runtime_values__"]` 读取运行时符号表。
+    - 仅接受 `dict[str, object]`，其他配置一律视作不存在。
+
+    使用示例:
+    - runtime_values = _ctx_runtime_values(ctx)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_emit_mlir.py](test/dsl/test_emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    if not isinstance(ctx.config, dict):
+        return None
+    candidate = ctx.config.get("__runtime_values__")
+    if isinstance(candidate, dict):
+        return candidate
+    return None
 
 
 def _dtype_to_xdsl(dtype: NumericType, location: SourceLocation | None = None) -> object:
@@ -1583,7 +1610,24 @@ def _resolve_symbolic_index_value(
     location: SourceLocation | None = None,
     runtime_values: dict[str, object] | None = None,
 ) -> int | SymbolDim:
-    """解析索引表达式为静态 `int|SymbolDim`。"""
+    """解析索引表达式为静态 `int|SymbolDim`。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 支持 `ConstAST`、`ScalarArgAST`、`VarAST`、`BinaryExprAST` 以及直接的 `int|str`。
+    - 当 `runtime_values` 提供 `int|SymbolDim` 时，优先使用运行时标量值参与 helper 参数与 symbol shape 计算。
+    - 对纯符号表达式返回 `SymbolDim`，供 facade、helper 参数校验与类型推导统一复用。
+
+    使用示例:
+    - value = _resolve_symbolic_index_value(expr.axis, location=expr.location, runtime_values=runtime_values)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
 
     if isinstance(expr, ConstAST):
         if isinstance(expr.value, int):
@@ -1598,6 +1642,10 @@ def _resolve_symbolic_index_value(
                 return runtime_value
         return SymbolDim(expr.name)
     if isinstance(expr, VarAST):
+        if runtime_values is not None and expr.name in runtime_values:
+            runtime_value = runtime_values[expr.name]
+            if isinstance(runtime_value, (int, SymbolDim)):
+                return runtime_value
         return SymbolDim(expr.name)
     if isinstance(expr, BinaryExprAST):
         lhs = _resolve_symbolic_index_value(expr.lhs, location=expr.location, runtime_values=runtime_values)
@@ -1663,7 +1711,7 @@ def _resolve_helper_index_param_value(
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
     - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
-    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
 
     try:
@@ -1700,7 +1748,7 @@ def _helper_index_value_to_symbolic(
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
     - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
-    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
 
     if isinstance(value, int):
@@ -2005,7 +2053,7 @@ def _shape_attr_to_helper_index_operand(
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
     - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
-    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
 
     if isinstance(attr, IntAttr):
@@ -2037,7 +2085,7 @@ def _lower_helper_index_operand(
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
     - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
-    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
 
     if isinstance(expr, ConstAST):
@@ -2669,10 +2717,178 @@ def _infer_tensor_axis_access_type(
     raise _LoweringError("Tensor axis access does not support unknown entry '?'", location=expr.location)
 
 
-def _parse_img2col_helper(
+def _infer_img2col_input_format(input_type: NnMemoryType) -> Farmat:
+    """推导 img2col helper 输入的布局语义。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 对 rank-3 输入按 `[N, W, C]` 与 `[N, C, W]` 的现有公开合同做最小启发式判断。
+    - 对 rank-4 输入按 `[N, H, W, C]` 与 `[N, C, H, W]` 做同样判断。
+    - 其余情况默认回落 `Farmat.Norm`，保持现有 emit 兼容行为。
+
+    使用示例:
+    - layout = _infer_img2col_input_format(input_type)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    shape = list(input_type.shape.data)
+    if len(shape) == 3:
+        if isinstance(shape[1], StringAttr) and not isinstance(shape[2], StringAttr):
+            return Farmat.CLast
+        return Farmat.Norm
+    if len(shape) == 4:
+        if isinstance(shape[3], IntAttr) and (isinstance(shape[1], StringAttr) or isinstance(shape[2], StringAttr)):
+            return Farmat.CLast
+        return Farmat.Norm
+    return Farmat.Norm
+
+
+def _nn_memory_type_to_memory_with_format(
+    memory_type: NnMemoryType,
+    format_value: Farmat,
+    location: SourceLocation | None = None,
+) -> Memory:
+    """将 `NnMemoryType` 转为显式包含 format 的 `Memory`。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 复用 `_nn_memory_type_to_memory(...)` 的 shape/stride/dtype/space 解析逻辑。
+    - 在 DSL helper 类型推导阶段补上运行时 `Memory.format`，以便复用 operation API。
+
+    使用示例:
+    - memory = _nn_memory_type_to_memory_with_format(memory_type, Farmat.CLast)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    memory = _nn_memory_type_to_memory(memory_type, location=location)
+    return Memory(memory.shape, memory.dtype, space=memory.space, stride=memory.stride, format=format_value)
+
+
+def _resolve_helper_index_param(
+    *,
+    op_name: str,
+    param_name: str,
+    value: object,
+    location: SourceLocation | None,
+    runtime_values: dict[str, object] | None,
+    allow_zero: bool,
+) -> int | SymbolDim:
+    """解析 helper 参数为 `int|SymbolDim` 并校验取值范围。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 接受 `ConstAST`、`ScalarArgAST`、`VarAST`、`BinaryExprAST` 以及直接的 `int|str|SymbolDim`。
+    - 对静态整数执行正值/非负约束，动态符号值保持原样下传给 operation API 与方言 verifier。
+
+    使用示例:
+    - kw = _resolve_helper_index_param(op_name="img2col1d", param_name="kw", value=kw_ast, location=None, runtime_values=None, allow_zero=False)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    if isinstance(value, SymbolDim):
+        resolved: int | SymbolDim = value
+    else:
+        resolved = _resolve_symbolic_index_value(value, location=location, runtime_values=runtime_values)
+    if isinstance(resolved, int):
+        if allow_zero:
+            if resolved < 0:
+                raise _LoweringError(f"{op_name} {param_name} must be non-negative", location=location)
+        elif resolved <= 0:
+            raise _LoweringError(f"{op_name} {param_name} must be positive", location=location)
+    return resolved
+
+
+def _resolve_img2col_param_values(
     expr: Img2ColAST,
-    runtime_values: dict[str, object] | None = None,
-) -> tuple[object, dict[str, object], dict[str, int | str]]:
+    params: dict[str, object],
+    runtime_values: dict[str, object] | None,
+) -> dict[str, int | SymbolDim]:
+    """解析 img2col helper 参数为 `int|SymbolDim` 映射。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 保留 `img2col1d/img2col2d` 的默认值与参数顺序合同。
+    - 支持 `kw/kh/sh/sw/dh/dw/ph/pw/pl/pr` 由 `SymbolDim` 或符号表达式驱动。
+
+    使用示例:
+    - params = _resolve_img2col_param_values(expr, raw_params, runtime_values=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    resolved: dict[str, int | SymbolDim] = {}
+    for name, value in params.items():
+        resolved[name] = _resolve_helper_index_param(
+            op_name=expr.kind,
+            param_name=name,
+            value=value,
+            location=getattr(value, "location", None) or expr.location,
+            runtime_values=runtime_values,
+            allow_zero=name in {"ph", "pw", "pl", "pr"},
+        )
+    return resolved
+
+
+def _resolve_conv_param_values(
+    expr: ConvAST,
+    params: dict[str, object],
+    runtime_values: dict[str, object] | None,
+) -> dict[str, int | SymbolDim]:
+    """解析 conv helper 参数为 `int|SymbolDim` 映射。
+
+    创建者: OpenAI
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 支持 `sh/sw/dh/dw/ph/pw/pl/pr` 接受 `int|SymbolDim`。
+    - 对静态正值/非负约束执行最小前置校验，动态符号值继续交给后续合同处理。
+
+    使用示例:
+    - params = _resolve_conv_param_values(expr, raw_params, runtime_values=None)
+
+    关联文件:
+    - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    """
+
+    resolved: dict[str, int | SymbolDim] = {}
+    for name, value in params.items():
+        resolved[name] = _resolve_helper_index_param(
+            op_name="conv",
+            param_name=name,
+            value=value,
+            location=getattr(value, "location", None) or expr.location,
+            runtime_values=runtime_values,
+            allow_zero=name in {"ph", "pw", "pl", "pr"},
+        )
+    return resolved
+
+
+def _parse_img2col_helper(expr: Img2ColAST) -> tuple[object, dict[str, object]]:
     """解析 img2col helper 调用参数。
 
     创建者: 金铲铲大作战
@@ -2680,7 +2896,7 @@ def _parse_img2col_helper(
 
     功能说明:
     - 统一解析 `img2col1d/img2col2d` 的位置参数与关键字参数。
-    - 应用默认值并输出数值化属性，供 emit/type 推导复用。
+    - 应用默认值并保留 helper 参数 AST/标量原值，供 emit/type 推导分别解析。
 
     使用示例:
     - input_expr, param_exprs, attrs = _parse_img2col_helper(img2col_ast)
@@ -2717,25 +2933,11 @@ def _parse_img2col_helper(
             continue
         raise _LoweringError(f"{expr.kind} missing required argument '{name}'", location=expr.location)
 
-    input_expr = params["value"]
-    param_exprs = {name: value for name, value in params.items() if name != "value"}
-    resolved: dict[str, int | str] = {}
-    for name, value in param_exprs.items():
-        resolved[name] = _resolve_helper_index_param_value(
-            expr.kind,
-            name,
-            value,
-            expr.location,
-            runtime_values=runtime_values,
-        )
-
-    return input_expr, param_exprs, resolved
+    input_expr = params.pop("value")
+    return input_expr, params
 
 
-def _parse_conv_helper(
-    expr: ConvAST,
-    runtime_values: dict[str, object] | None = None,
-) -> tuple[object, object, dict[str, object], dict[str, int | str]]:
+def _parse_conv_helper(expr: ConvAST) -> tuple[object, object, dict[str, object]]:
     """解析 conv helper 调用参数。
 
     创建者: 朽木露琪亚
@@ -2743,7 +2945,7 @@ def _parse_conv_helper(
 
     功能说明:
     - 统一解析 `conv(value, weight, sh=..., sw=..., ...)` 的参数。
-    - 当前仅承接不带 bias 的前端分解路径，并为 emit/type 推导输出数值化属性。
+    - 当前仅承接不带 bias 的前端分解路径，并保留 helper 参数 AST/标量原值供后续解析。
 
     使用示例:
     - value_expr, weight_expr, param_exprs, params = _parse_conv_helper(conv_ast)
@@ -2754,22 +2956,13 @@ def _parse_conv_helper(
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
     params: dict[str, object] = dict(expr.kwargs)
-    param_exprs: dict[str, object] = {}
-    resolved: dict[str, int | str] = {}
+    resolved: dict[str, object] = {}
     for name, default_value in _CONV_PARAM_DEFAULTS.items():
-        value = params.pop(name, default_value)
-        param_exprs[name] = value
-        resolved[name] = _resolve_helper_index_param_value(
-            "conv",
-            name,
-            value,
-            expr.location,
-            runtime_values=runtime_values,
-        )
+        resolved[name] = params.pop(name, default_value)
     if params:
         unexpected = next(iter(params))
         raise _LoweringError(f"conv got unexpected keyword '{unexpected}'", location=expr.location)
-    return expr.value, expr.weight, param_exprs, resolved
+    return expr.value, expr.weight, resolved
 
 
 def _validate_conv_helper_params(params: dict[str, int | str], location: SourceLocation | None) -> None:
@@ -2902,7 +3095,7 @@ def _infer_conv_memory_type(
     """推导 conv helper 的结果类型。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 仅接受 `rank-4 value` 与 `rank-4 weight`。
@@ -2917,48 +3110,23 @@ def _infer_conv_memory_type(
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
 
-    if len(value_type.shape.data) != 4:
-        raise _LoweringError("conv value must be rank-4 nn.memory", location=expr.location)
-    if len(weight_type.shape.data) != 4:
-        raise _LoweringError("conv weight must be rank-4 nn.memory", location=expr.location)
-    if value_type.element_type != weight_type.element_type:
-        raise _LoweringError("conv dtype mismatch", location=expr.location)
-    if value_type.space != weight_type.space:
-        raise _LoweringError("conv space mismatch", location=expr.location)
-
-    _, _, _, params = _parse_conv_helper(expr, runtime_values=runtime_values)
-    _validate_conv_helper_params(params, expr.location)
-
-    n_dim, c_in_dim, h_dim, w_dim = value_type.shape.data
-    c_out_dim, c_in_weight_dim, kh_attr, kw_attr = weight_type.shape.data
-    if not _dims_equal(c_in_dim, c_in_weight_dim):
-        raise _LoweringError("conv input channel mismatch", location=expr.location)
-
-    kh = _static_kernel_dim(kh_attr, "kh", expr.location)
-    kw = _static_kernel_dim(kw_attr, "kw", expr.location)
-    h_out = _conv_out_dim_value(
-        h_dim,
-        axis_name="height",
-        kernel=kh,
-        stride=params["sh"],
-        dilation=params["dh"],
-        pad_before=params["ph"],
-        pad_after=params["pw"],
-        location=expr.location,
+    value_memory = _nn_memory_type_to_memory(value_type, location=expr.location)
+    weight_memory = _nn_memory_type_to_memory(weight_type, location=expr.location)
+    _, _, raw_params = _parse_conv_helper(expr)
+    params = _resolve_conv_param_values(expr, raw_params, runtime_values)
+    result_memory = _KG_OPERATION_NN.conv(
+        value_memory,
+        weight_memory,
+        sh=params["sh"],
+        sw=params["sw"],
+        dh=params["dh"],
+        dw=params["dw"],
+        ph=params["ph"],
+        pw=params["pw"],
+        pl=params["pl"],
+        pr=params["pr"],
     )
-    w_out = _conv_out_dim_value(
-        w_dim,
-        axis_name="width",
-        kernel=kw,
-        stride=params["sw"],
-        dilation=params["dw"],
-        pad_before=params["pl"],
-        pad_after=params["pr"],
-        location=expr.location,
-    )
-    result_shape = [n_dim, c_out_dim, _dim_to_attr(h_out), _dim_to_attr(w_out)]
-    result_stride = _build_symbolic_stride_attrs(result_shape, expr.location)
-    return _memory_type_from_parts(result_shape, result_stride, value_type.element_type, value_type.space)
+    return _memory_to_nn_type(result_memory, location=expr.location)
 
 
 def _img2col_out_dim_value(
@@ -3010,7 +3178,7 @@ def _img2col_out_dim_value(
 def _infer_img2col_output_shape_attrs(
     expr: Img2ColAST,
     input_type: NnMemoryType,
-    params: dict[str, int | str],
+    params: dict[str, int | SymbolDim],
 ) -> list[Attribute]:
     """推导 img2col 输出 shape 属性列表。
 
@@ -3029,51 +3197,38 @@ def _infer_img2col_output_shape_attrs(
     - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
-    shape = list(input_type.shape.data)
+    input_memory = _nn_memory_type_to_memory_with_format(
+        input_type,
+        _infer_img2col_input_format(input_type),
+        location=expr.location,
+    )
     if expr.kind == "img2col1d":
-        if len(shape) != 3:
-            raise _LoweringError("img2col1d input must be rank-3 nn.memory", location=expr.location)
-        n_dim, c_dim, w_dim = shape
-        kw = params["kw"]
-        sw = params["sw"]
-        dw = params["dw"]
-        pl = params["pl"]
-        pr = params["pr"]
-        is_nwc = isinstance(shape[1], StringAttr) and not isinstance(shape[2], StringAttr)
-        if is_nwc:
-            n_dim, w_dim, c_dim = shape
-            w_out = _img2col_out_dim_value(w_dim, kw, sw, dw, pl, pr, expr.location)
-            return [n_dim, _dim_to_attr(w_out), _dim_to_attr(kw), c_dim]
-        w_out = _img2col_out_dim_value(w_dim, kw, sw, dw, pl, pr, expr.location)
-        return [n_dim, c_dim, _dim_to_attr(kw), _dim_to_attr(w_out)]
-
-    if expr.kind == "img2col2d":
-        if len(shape) != 4:
-            raise _LoweringError("img2col2d input must be rank-4 nn.memory", location=expr.location)
-        n_dim, c_dim, h_dim, w_dim = shape
-        kh = params["kh"]
-        kw = params["kw"]
-        sh = params["sh"]
-        sw = params["sw"]
-        dh = params["dh"]
-        dw = params["dw"]
-        ph = params["ph"]
-        pw = params["pw"]
-        pl = params["pl"]
-        pr = params["pr"]
-        is_nhwc = isinstance(shape[3], IntAttr) and (
-            isinstance(shape[1], StringAttr) or isinstance(shape[2], StringAttr)
+        result_memory = _KG_OPERATION_NN.img2col1d(
+            input_memory,
+            kw=params["kw"],
+            sw=params["sw"],
+            dw=params["dw"],
+            pl=params["pl"],
+            pr=params["pr"],
         )
-        if is_nhwc:
-            n_dim, h_dim, w_dim, c_dim = shape
-            h_out = _img2col_out_dim_value(h_dim, kh, sh, dh, ph, pw, expr.location)
-            w_out = _img2col_out_dim_value(w_dim, kw, sw, dw, pl, pr, expr.location)
-            return [n_dim, _dim_to_attr(h_out), _dim_to_attr(w_out), _dim_to_attr(kh), _dim_to_attr(kw), c_dim]
-        h_out = _img2col_out_dim_value(h_dim, kh, sh, dh, ph, pw, expr.location)
-        w_out = _img2col_out_dim_value(w_dim, kw, sw, dw, pl, pr, expr.location)
-        return [n_dim, c_dim, _dim_to_attr(kh), _dim_to_attr(kw), _dim_to_attr(h_out), _dim_to_attr(w_out)]
-
-    raise _LoweringError("Unsupported img2col helper", location=expr.location)
+    elif expr.kind == "img2col2d":
+        result_memory = _KG_OPERATION_NN.img2col2d(
+            input_memory,
+            kh=params["kh"],
+            kw=params["kw"],
+            sh=params["sh"],
+            sw=params["sw"],
+            dh=params["dh"],
+            dw=params["dw"],
+            ph=params["ph"],
+            pw=params["pw"],
+            pl=params["pl"],
+            pr=params["pr"],
+        )
+    else:
+        raise _LoweringError("Unsupported img2col helper", location=expr.location)
+    result_type = _memory_to_nn_type(result_memory, location=expr.location)
+    return list(result_type.shape.data)
 
 
 def _parse_reduce_axis_expr(axis_expr: object | None, location: SourceLocation | None) -> list[int] | None:
@@ -3644,10 +3799,11 @@ def _infer_expr_type(
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, Img2ColAST):
-        input_expr, _, params = _parse_img2col_helper(expr, runtime_values=runtime_values)
+        input_expr, raw_params = _parse_img2col_helper(expr)
         input_type = _infer_expr_type(input_expr, type_map, runtime_values=runtime_values)
         if not isinstance(input_type, NnMemoryType):
             raise _LoweringError(f"{expr.kind} input must be nn.memory", location=expr.location)
+        params = _resolve_img2col_param_values(expr, raw_params, runtime_values)
         out_shape = _infer_img2col_output_shape_attrs(expr, input_type, params)
         stride_attr = _build_symbolic_stride_attrs(out_shape, expr.location)
         result_type = _memory_type_from_parts(out_shape, stride_attr, input_type.element_type, input_type.space)
@@ -3871,7 +4027,12 @@ def _lower_mixed_binary_expr(
             raise _LoweringError("nn.add requires at least one nn.memory operand", location=expr.location)
         raise _LoweringError("Binary op operands must have nn.memory type", location=expr.location)
 
-    result_type = _infer_expr_type(expr, ctx.types)
+    result_type = _infer_expr_type(
+        expr,
+        ctx.types,
+        runtime_values=_ctx_runtime_values(ctx),
+        config=ctx.config,
+    )
     if not isinstance(result_type, NnMemoryType):
         raise _LoweringError("Binary op result must be nn.memory", location=expr.location)
 
@@ -3926,7 +4087,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     """将表达式 AST 递归下沉为 MLIR SSA value。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 递归处理常量、内存操作、`symbol.to_float` 与算术/比较表达式，生成对应的 MLIR op。
@@ -3953,6 +4114,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
     expr_key = _expr_key(expr)
+    runtime_values = _ctx_runtime_values(ctx)
     if ctx._has_cache(expr_key):
         return ctx._get_cache(expr_key)
 
@@ -3983,7 +4145,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
             else _build_index_operands_from_layout(source_type.shape, ctx, location=expr.location)
         )
         strides = _build_stride_attrs(expr.stride, rank, ctx, location=expr.location)
-        result_type = _infer_expr_type(expr, ctx.types)
+        result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("LoadAST result must be nn.memory", location=expr.location)
         if expr.kind == "slice":
@@ -4009,7 +4171,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         ctx._set_cache(expr_key, load_op.result)
         return load_op.result
     if isinstance(expr, DmaAllocAST):
-        result_type = _infer_expr_type(expr, ctx.types)
+        result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("alloc result must be nn.memory", location=expr.location)
         if isinstance(expr.shape, (list, tuple)):
@@ -4032,7 +4194,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     if isinstance(expr, DmaCopyAST):
         source = _lower_expr(expr.source, ctx)
         source_type = _expect_memory_value(source, expr.location)
-        result_type = _infer_expr_type(expr, ctx.types)
+        result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("copy result must be nn.memory", location=expr.location)
         if all(isinstance(dim, IntAttr) for dim in result_type.shape.data):
@@ -4049,7 +4211,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     if isinstance(expr, DmaCastAST):
         source = _lower_expr(expr.source, ctx)
         _expect_memory_value(source, expr.location)
-        result_type = _infer_expr_type(expr, ctx.types)
+        result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("cast result must be nn.memory", location=expr.location)
         op = DmaCastOp(source, result_type)
@@ -4059,7 +4221,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     if isinstance(expr, DmaViewAST):
         source = _lower_expr(expr.source, ctx)
         _expect_memory_value(source, expr.location)
-        result_type = _infer_expr_type(expr, ctx.types)
+        result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("view result must be nn.memory", location=expr.location)
         rank = len(result_type.shape.data)
@@ -4073,7 +4235,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     if isinstance(expr, DmaReshapeAST):
         source = _lower_expr(expr.source, ctx)
         _expect_memory_value(source, expr.location)
-        result_type = _infer_expr_type(expr, ctx.types)
+        result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("reshape result must be nn.memory", location=expr.location)
         shape = _build_index_operands_exact(expr.shape, ctx, location=expr.location)
@@ -4084,7 +4246,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     if isinstance(expr, DmaFlattenAST):
         source = _lower_expr(expr.source, ctx)
         source_type = _expect_memory_value(source, expr.location)
-        result_type = _infer_expr_type(expr, ctx.types)
+        result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("flatten result must be nn.memory", location=expr.location)
         shape_operand = _build_flatten_shape_operands(source, source_type, ctx, location=expr.location)
@@ -4101,7 +4263,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         target = _lower_expr(expr.target, ctx)
         _expect_memory_value(value, expr.location)
         target_type = _expect_memory_value(target, expr.location)
-        result_type = _infer_expr_type(expr, ctx.types)
+        result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("broadcast result must be nn.memory", location=expr.location)
         if result_type != target_type:
@@ -4113,7 +4275,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     if isinstance(expr, NnBroadcastToAST):
         source = _lower_expr(expr.source, ctx)
         _expect_memory_value(source, expr.location)
-        result_type = _infer_expr_type(expr, ctx.types)
+        result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("broadcast_to result must be nn.memory", location=expr.location)
         op = NnBroadcastOp(source, result_type, result_type.space)
@@ -4123,7 +4285,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     if isinstance(expr, NnTransposeAST):
         value = _lower_expr(expr.value, ctx)
         input_type = _expect_memory_value(value, expr.location)
-        result_type = _infer_expr_type(expr, ctx.types)
+        result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("transpose result must be nn.memory", location=expr.location)
         perm_values = _parse_transpose_perm_expr(expr.perm, expr.location)
@@ -4135,7 +4297,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     if isinstance(expr, NnReduceAST):
         input_value = _lower_expr(expr.value, ctx)
         input_type = _expect_memory_value(input_value, expr.location)
-        result_type = _infer_expr_type(expr, ctx.types)
+        result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("reduce result must be nn.memory", location=expr.location)
         axes = _parse_reduce_axis_expr(expr.axis, expr.location)
@@ -4160,7 +4322,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
     if isinstance(expr, NnSoftmaxAST):
         input_value = _lower_expr(expr.value, ctx)
         input_type = _expect_memory_value(input_value, expr.location)
-        result_type = _infer_expr_type(expr, ctx.types)
+        result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("softmax result must be nn.memory", location=expr.location)
         axis_value = _parse_softmax_axis_expr(expr.axis, expr.location)
@@ -4174,53 +4336,45 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         weight = _lower_expr(expr.weight, ctx)
         value_type = _expect_memory_value(value, expr.location)
         weight_type = _expect_memory_value(weight, expr.location)
-        result_type = _infer_expr_type(expr, ctx.types)
+        result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("conv result must be nn.memory", location=expr.location)
 
-        runtime_values = ctx.config.get("__runtime_values__") if isinstance(ctx.config, dict) else None
-        _, _, param_exprs, params = _parse_conv_helper(expr, runtime_values=runtime_values)
-        _validate_conv_helper_params(params, expr.location)
+        _, _, raw_params = _parse_conv_helper(expr)
+        params = _resolve_conv_param_values(expr, raw_params, runtime_values)
         c_out_dim, _, kh_attr, kw_attr = weight_type.shape.data
-        kh = _static_kernel_dim(kh_attr, "kh", expr.location)
-        kw = _static_kernel_dim(kw_attr, "kw", expr.location)
-        img2col_expr = Img2ColAST(
-            kind="img2col2d",
-            args=[expr.value],
-            kwargs={
-                "kh": kh,
-                "kw": kw,
-                "sh": params["sh"],
-                "sw": params["sw"],
-                "dh": params["dh"],
-                "dw": params["dw"],
-                "ph": params["ph"],
-                "pw": params["pw"],
-                "pl": params["pl"],
-                "pr": params["pr"],
-            },
-            location=expr.location,
+        value_memory = _nn_memory_type_to_memory(value_type, location=expr.location)
+        kh_dim = _shape_attr_to_symbol_dim(kh_attr, expr.location)
+        kw_dim = _shape_attr_to_symbol_dim(kw_attr, expr.location)
+        if kh_dim is None or kw_dim is None:
+            raise _LoweringError("conv kh/kw must be int or symbol", location=expr.location)
+        img2col_memory = _KG_OPERATION_NN.img2col2d(
+            value_memory,
+            kh=kh_dim,
+            kw=kw_dim,
+            sh=params["sh"],
+            sw=params["sw"],
+            dh=params["dh"],
+            dw=params["dw"],
+            ph=params["ph"],
+            pw=params["pw"],
+            pl=params["pl"],
+            pr=params["pr"],
         )
-        img2col_shape = _infer_img2col_output_shape_attrs(img2col_expr, value_type, {**params, "kh": kh, "kw": kw})
-        img2col_type = _memory_type_from_parts(
-            img2col_shape,
-            _build_symbolic_stride_attrs(img2col_shape, expr.location),
-            value_type.element_type,
-            value_type.space,
-        )
+        img2col_type = _memory_to_nn_type(img2col_memory, location=expr.location)
         img2col_op = NnImg2col2dOp(
             value,
             img2col_type,
-            kh=_shape_attr_to_helper_index_operand(kh_attr, ctx, location=expr.location),
-            kw=_shape_attr_to_helper_index_operand(kw_attr, ctx, location=expr.location),
-            sh=_lower_helper_index_operand(param_exprs["sh"], ctx, location=expr.location),
-            sw=_lower_helper_index_operand(param_exprs["sw"], ctx, location=expr.location),
-            dh=_lower_helper_index_operand(param_exprs["dh"], ctx, location=expr.location),
-            dw=_lower_helper_index_operand(param_exprs["dw"], ctx, location=expr.location),
-            ph=_lower_helper_index_operand(param_exprs["ph"], ctx, location=expr.location),
-            pw=_lower_helper_index_operand(param_exprs["pw"], ctx, location=expr.location),
-            pl=_lower_helper_index_operand(param_exprs["pl"], ctx, location=expr.location),
-            pr=_lower_helper_index_operand(param_exprs["pr"], ctx, location=expr.location),
+            kh=_shape_attr_to_symbol_operand(kh_attr, ctx, location=expr.location),
+            kw=_shape_attr_to_symbol_operand(kw_attr, ctx, location=expr.location),
+            sh=_resolve_index_operand(raw_params["sh"], ctx, expr.location),
+            sw=_resolve_index_operand(raw_params["sw"], ctx, expr.location),
+            dh=_resolve_index_operand(raw_params["dh"], ctx, expr.location),
+            dw=_resolve_index_operand(raw_params["dw"], ctx, expr.location),
+            ph=_resolve_index_operand(raw_params["ph"], ctx, expr.location),
+            pw=_resolve_index_operand(raw_params["pw"], ctx, expr.location),
+            pl=_resolve_index_operand(raw_params["pl"], ctx, expr.location),
+            pr=_resolve_index_operand(raw_params["pr"], ctx, expr.location),
             space=value_type.space,
         )
         img2col_op.verify()
@@ -4283,38 +4437,37 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         ctx._set_cache(expr_key, result_reshape.result)
         return result_reshape.result
     if isinstance(expr, Img2ColAST):
-        runtime_values = ctx.config.get("__runtime_values__") if isinstance(ctx.config, dict) else None
-        input_expr, param_exprs, params = _parse_img2col_helper(expr, runtime_values=runtime_values)
+        input_expr, raw_params = _parse_img2col_helper(expr)
         input_value = _lower_expr(input_expr, ctx)
         input_type = _expect_memory_value(input_value, expr.location)
-        result_type = _infer_expr_type(expr, ctx.types)
+        result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError(f"{expr.kind} result must be nn.memory", location=expr.location)
         if expr.kind == "img2col1d":
             op = NnImg2col1dOp(
                 input_value,
                 result_type,
-                kw=_lower_helper_index_operand(param_exprs["kw"], ctx, location=expr.location),
-                sw=_lower_helper_index_operand(param_exprs["sw"], ctx, location=expr.location),
-                dw=_lower_helper_index_operand(param_exprs["dw"], ctx, location=expr.location),
-                pl=_lower_helper_index_operand(param_exprs["pl"], ctx, location=expr.location),
-                pr=_lower_helper_index_operand(param_exprs["pr"], ctx, location=expr.location),
+                kw=_resolve_index_operand(raw_params["kw"], ctx, expr.location),
+                sw=_resolve_index_operand(raw_params["sw"], ctx, expr.location),
+                dw=_resolve_index_operand(raw_params["dw"], ctx, expr.location),
+                pl=_resolve_index_operand(raw_params["pl"], ctx, expr.location),
+                pr=_resolve_index_operand(raw_params["pr"], ctx, expr.location),
                 space=input_type.space,
             )
         elif expr.kind == "img2col2d":
             op = NnImg2col2dOp(
                 input_value,
                 result_type,
-                kh=_lower_helper_index_operand(param_exprs["kh"], ctx, location=expr.location),
-                kw=_lower_helper_index_operand(param_exprs["kw"], ctx, location=expr.location),
-                sh=_lower_helper_index_operand(param_exprs["sh"], ctx, location=expr.location),
-                sw=_lower_helper_index_operand(param_exprs["sw"], ctx, location=expr.location),
-                dh=_lower_helper_index_operand(param_exprs["dh"], ctx, location=expr.location),
-                dw=_lower_helper_index_operand(param_exprs["dw"], ctx, location=expr.location),
-                ph=_lower_helper_index_operand(param_exprs["ph"], ctx, location=expr.location),
-                pw=_lower_helper_index_operand(param_exprs["pw"], ctx, location=expr.location),
-                pl=_lower_helper_index_operand(param_exprs["pl"], ctx, location=expr.location),
-                pr=_lower_helper_index_operand(param_exprs["pr"], ctx, location=expr.location),
+                kh=_resolve_index_operand(raw_params["kh"], ctx, expr.location),
+                kw=_resolve_index_operand(raw_params["kw"], ctx, expr.location),
+                sh=_resolve_index_operand(raw_params["sh"], ctx, expr.location),
+                sw=_resolve_index_operand(raw_params["sw"], ctx, expr.location),
+                dh=_resolve_index_operand(raw_params["dh"], ctx, expr.location),
+                dw=_resolve_index_operand(raw_params["dw"], ctx, expr.location),
+                ph=_resolve_index_operand(raw_params["ph"], ctx, expr.location),
+                pw=_resolve_index_operand(raw_params["pw"], ctx, expr.location),
+                pl=_resolve_index_operand(raw_params["pl"], ctx, expr.location),
+                pr=_resolve_index_operand(raw_params["pr"], ctx, expr.location),
                 space=input_type.space,
             )
         else:
@@ -4340,7 +4493,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         transpose_op = NnTransposeOp(weight, transpose_type, perm=[1, 0], space=weight_type.space)
         transpose_op.verify()
         ctx.builder.add_op(transpose_op)
-        result_type = _infer_expr_type(expr, ctx.types)
+        result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("fc result must be nn.memory", location=expr.location)
         matmul_op = NnMatmulOp(value, transpose_op.result, result_type, result_type.space)
@@ -4353,7 +4506,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         rhs = _lower_expr(expr.rhs, ctx)
         lhs_type = _expect_memory_value(lhs, expr.location)
         rhs_type = _expect_memory_value(rhs, expr.location)
-        result_type = _infer_expr_type(expr, ctx.types)
+        result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("matmul result must be nn.memory", location=expr.location)
         if lhs_type.element_type != result_type.element_type:
@@ -4568,20 +4721,21 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
         ),
     ):
         if _expr_key(node) not in ctx.types and not isinstance(node, (TensorAST, ScalarArgAST, VarAST)):
-            _infer_expr_type(node, ctx.types, config=ctx.config)
+            _infer_expr_type(node, ctx.types, runtime_values=_ctx_runtime_values(ctx), config=ctx.config)
         return _lower_expr(node, ctx)
     if isinstance(node, StoreAST):
-        runtime_values = None
-        if isinstance(ctx.config, dict):
-            candidate_runtime_values = ctx.config.get("__runtime_values__")
-            if isinstance(candidate_runtime_values, dict):
-                runtime_values = candidate_runtime_values
+        runtime_values = _ctx_runtime_values(ctx)
         try:
-            source_memory_type = _infer_expr_type(node.value, ctx.types)
+            source_memory_type = _infer_expr_type(node.value, ctx.types, runtime_values=runtime_values, config=ctx.config)
         except _LoweringError:
             source_memory_type = None
         try:
-            target_memory_type = _infer_expr_type(node.tensor, ctx.types)
+            target_memory_type = _infer_expr_type(
+                node.tensor,
+                ctx.types,
+                runtime_values=runtime_values,
+                config=ctx.config,
+            )
         except _LoweringError:
             target_memory_type = None
         if isinstance(source_memory_type, NnMemoryType) and isinstance(target_memory_type, NnMemoryType):
@@ -4624,7 +4778,12 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
         return store_op
     if isinstance(node, DmaFreeAST):
         try:
-            value_type = _infer_expr_type(node.value, ctx.types)
+            value_type = _infer_expr_type(
+                node.value,
+                ctx.types,
+                runtime_values=_ctx_runtime_values(ctx),
+                config=ctx.config,
+            )
         except _LoweringError:
             value_type = None
         if not isinstance(value_type, NnMemoryType):

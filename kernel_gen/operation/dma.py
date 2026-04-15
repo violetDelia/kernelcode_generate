@@ -1,7 +1,7 @@
 """DMA operation API.
 
 创建者: 金铲铲大作战
-最后一次更改: 朽木露琪亚
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 提供 Memory 的数据搬运、视图变换与显式转换 API，包括 alloc/free/copy/load/store/slice/deslice/view/reshape/flatten/cast。
@@ -431,6 +431,37 @@ def _ensure_bounds(
             )
 
 
+def _validate_access_region(
+    memory: Memory,
+    offsets: SymbolShape,
+    sizes: SymbolShape,
+    strides: SymbolShape | None,
+) -> None:
+    """统一校验 dma 访问区域参数。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 统一复用 rank、正长度、非负 offset、正 stride 与越界检查。
+    - 供 `load/store/slice/view` 共享同一访问区域入口，避免校验分叉。
+
+    使用示例:
+    - _validate_access_region(mem, SymbolShape([0, 0]), SymbolShape([2, 2]), SymbolShape([1, 1]))
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: kernel_gen/operation/dma.py
+    """
+
+    _ensure_index_rank(memory, offsets, sizes, strides)
+    _ensure_sizes_positive(sizes)
+    _ensure_offsets_non_negative(offsets)
+    _ensure_strides_positive(strides)
+    _ensure_bounds(memory, offsets, sizes, strides)
+
+
 def _is_contiguous(memory: Memory) -> bool:
     """判断 Memory 是否为连续行主序布局。
 
@@ -612,11 +643,7 @@ def load(
     offsets_shape = _normalize_index_list(offsets, "offsets")
     sizes_shape = _normalize_index_list(sizes, "sizes")
     strides_shape = None if strides is None else _normalize_index_list(strides, "strides")
-    _ensure_index_rank(src, offsets_shape, sizes_shape, strides_shape)
-    _ensure_sizes_positive(sizes_shape)
-    _ensure_offsets_non_negative(offsets_shape)
-    _ensure_strides_positive(strides_shape)
-    _ensure_bounds(src, offsets_shape, sizes_shape, strides_shape)
+    _validate_access_region(src, offsets_shape, sizes_shape, strides_shape)
     target_space = src.space if space is None else space
     return Memory(
         _clone_symbol_list(sizes_shape),
@@ -664,11 +691,7 @@ def store(
     offsets_shape = _normalize_index_list(offsets, "offsets")
     sizes_shape = _normalize_index_list(sizes, "sizes")
     strides_shape = None if strides is None else _normalize_index_list(strides, "strides")
-    _ensure_index_rank(dst, offsets_shape, sizes_shape, strides_shape)
-    _ensure_sizes_positive(sizes_shape)
-    _ensure_offsets_non_negative(offsets_shape)
-    _ensure_strides_positive(strides_shape)
-    _ensure_bounds(dst, offsets_shape, sizes_shape, strides_shape)
+    _validate_access_region(dst, offsets_shape, sizes_shape, strides_shape)
     if src.shape.get_values() != sizes_shape.get_values():
         raise ValueError(
             _ERROR_TEMPLATE.format(
@@ -718,11 +741,7 @@ def slice(
     offsets_shape = _normalize_index_list(offsets, "offsets")
     sizes_shape = _normalize_index_list(sizes, "sizes")
     strides_shape = None if strides is None else _normalize_index_list(strides, "strides")
-    _ensure_index_rank(src, offsets_shape, sizes_shape, strides_shape)
-    _ensure_sizes_positive(sizes_shape)
-    _ensure_offsets_non_negative(offsets_shape)
-    _ensure_strides_positive(strides_shape)
-    _ensure_bounds(src, offsets_shape, sizes_shape, strides_shape)
+    _validate_access_region(src, offsets_shape, sizes_shape, strides_shape)
     target_space = src.space if space is None else space
     return alloc(_clone_symbol_list(sizes_shape), src.dtype, space=target_space, format=src.format)
 
@@ -781,11 +800,7 @@ def view(
     offset_value = _ensure_shape_value(offset, "offset")
     size_value = _ensure_shape_value(size, "size")
     stride_value = _ensure_shape_value(stride, "stride")
-    _ensure_index_rank(src, offset_value, size_value, stride_value)
-    _ensure_sizes_positive(size_value)
-    _ensure_offsets_non_negative(offset_value)
-    _ensure_strides_positive(stride_value)
-    _ensure_bounds(src, offset_value, size_value, stride_value)
+    _validate_access_region(src, offset_value, size_value, stride_value)
     return Memory(
         _clone_symbol_list(size_value),
         src.dtype,

@@ -225,6 +225,41 @@ def _resolve_launch_context_symbol(symbol_name: str) -> SymbolDim | None:
     return None
 
 
+def _require_current_target_hardware(op_name: str, hardware_key: str) -> int | None:
+    """读取当前 target 需要的硬件字段，缺失时抛出一致错误。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 未启用 current target 时返回 `None`，保持 helper 的符号回退语义。
+    - 启用 current target 且字段缺失时，统一抛出 target registry 缺字段错误。
+
+    使用示例:
+    - _require_current_target_hardware("arch.get_thread_num", "thread_num")
+
+    关联文件:
+    - spec: spec/operation/arch.md
+    - test: test/operation/test_operation_arch.py
+    - 功能实现: kernel_gen/operation/arch.py
+    """
+
+    current_target = target_registry._get_current_target()
+    if current_target is None:
+        return None
+    hardware_value = target_registry.get_current_target_hardware(hardware_key)
+    if hardware_value is not None:
+        return hardware_value
+    raise ValueError(
+        _ERROR_TEMPLATE.format(
+            scene=_TARGET_ERROR_SCENE,
+            expected=f"{op_name} requires target {current_target} hardware.{hardware_key}",
+            actual=_ERROR_ACTUAL,
+            action=_ERROR_ACTION,
+        )
+    )
+
+
 def _resolve_query_symbol(op_name: str, symbol_name: str, hardware_key: str | None = None) -> SymbolDim:
     """构造执行维度查询 helper 的返回 SymbolDim。
 
@@ -234,6 +269,7 @@ def _resolve_query_symbol(op_name: str, symbol_name: str, hardware_key: str | No
     功能说明:
     - 先执行 target registry 支持性校验。
     - 当硬件值存在时优先使用硬件数值，否则回退到符号名称。
+    - 已启用 target registry 但缺失必需硬件字段时，抛出一致错误。
 
     使用示例:
     - _resolve_query_symbol("arch.get_block_num", "block_num", "block_num")
@@ -249,7 +285,7 @@ def _resolve_query_symbol(op_name: str, symbol_name: str, hardware_key: str | No
     if launch_symbol is not None:
         return launch_symbol
     if hardware_key is not None:
-        hardware_value = target_registry.get_current_target_hardware(hardware_key)
+        hardware_value = _require_current_target_hardware(op_name, hardware_key)
         if hardware_value is not None:
             return SymbolDim(hardware_value)
     return _build_query_symbol(symbol_name)
@@ -263,7 +299,8 @@ def _resolve_dynamic_memory_shape(space: MemorySpace) -> list[int | str]:
 
     功能说明:
     - 优先使用 target hardware 中的容量信息。
-    - 若缺失容量信息，回退为一维动态 `?`。
+    - 已启用 target registry 但缺失容量字段时，抛出一致错误。
+    - 未启用 target registry 时，回退为一维动态 `?`。
 
     使用示例:
     - _resolve_dynamic_memory_shape(MemorySpace.SM)
@@ -277,7 +314,7 @@ def _resolve_dynamic_memory_shape(space: MemorySpace) -> list[int | str]:
     hardware_key = _DYNAMIC_MEMORY_HARDWARE_KEYS.get(space)
     if hardware_key is None:
         return ["?"]
-    hardware_value = target_registry.get_current_target_hardware(hardware_key)
+    hardware_value = _require_current_target_hardware("arch.get_dynamic_memory", hardware_key)
     if hardware_value is not None:
         return [hardware_value]
     return ["?"]

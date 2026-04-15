@@ -82,9 +82,9 @@ def _parse_dim_list(parser: AttrParser) -> ArrayAttr[Attribute]:
     - _parse_dim_list(parser)
 
     关联文件:
-    - spec: spec/dialect/nn.md
-    - test: test/dialect/test_nn_dialect.py
-    - 功能实现: kernel_gen/dialect/nn.py
+    - spec: [spec/dialect/nn.md](spec/dialect/nn.md)
+    - test: [test/dialect/test_nn_dialect.py](test/dialect/test_nn_dialect.py)
+    - 功能实现: [kernel_gen/dialect/nn.py](kernel_gen/dialect/nn.py)
     """
 
     dims: list[Attribute] = []
@@ -96,15 +96,23 @@ def _parse_dim_list(parser: AttrParser) -> ArrayAttr[Attribute]:
         if parser.parse_optional_punctuation("?") is not None:
             dims.append(StringAttr("?"))
         else:
+            start_pos = parser.pos
+            input_text = parser.lexer.input.content
             integer = parser.parse_optional_integer(allow_boolean=False, allow_negative=False)
+            parsed_simple_integer = False
             if integer is not None:
-                dims.append(IntAttr(integer))
-            else:
-                start_pos = parser.pos
+                lookahead = parser.pos
+                while lookahead < len(input_text) and input_text[lookahead].isspace():
+                    lookahead += 1
+                if lookahead >= len(input_text) or input_text[lookahead] in {",", "]"}:
+                    dims.append(IntAttr(integer))
+                    parsed_simple_integer = True
+                else:
+                    parser._resume_from(start_pos)
+            if not parsed_simple_integer:
                 parsed_simple_ident = False
                 ident = parser.parse_optional_identifier()
                 if ident is not None:
-                    input_text = parser.lexer.input.content
                     lookahead = parser.pos
                     while lookahead < len(input_text) and input_text[lookahead].isspace():
                         lookahead += 1
@@ -114,7 +122,6 @@ def _parse_dim_list(parser: AttrParser) -> ArrayAttr[Attribute]:
                     else:
                         parser._resume_from(start_pos)
                 if not parsed_simple_ident:
-                    input_text = parser.lexer.input.content
                     depth = 0
                     end_pos = None
                     pos = start_pos

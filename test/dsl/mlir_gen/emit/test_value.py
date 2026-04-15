@@ -35,7 +35,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.symbol import SymbolConstOp, SymbolValueType
 from kernel_gen.dsl.ast import ConstAST, VarAST
-from kernel_gen.dsl.mlir_gen.emit import EmitContext, LoweringError
+from kernel_gen.dsl.mlir_gen.emit import EmitContext
+from kernel_gen.dsl.mlir_gen.emit.context import LoweringError
 from kernel_gen.dsl.mlir_gen.emit.value import emit_index_operand, emit_value
 
 

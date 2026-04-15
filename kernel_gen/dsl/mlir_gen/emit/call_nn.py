@@ -89,6 +89,7 @@ from .core import (
 )
 from kernel_gen.operation import nn as _KG_OPERATION_NN
 from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 from .context import EmitContext, LoweringError
 
@@ -216,16 +217,35 @@ def _infer_binary_type(
     runtime_values: dict[str, object] | None,
     config: dict[str, object] | None,
 ) -> object:
+    """推导 nn binary family 的结果类型。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 统一处理 `add/sub/mul/div/floordiv` 的 memory、mixed scalar 与纯 symbol 标量三条路径。
+    - 当 `runtime_values` 提供 `int|SymbolDim` 时，纯标量 binary 会收口为公开 `SymbolValueType` 表达式。
+    - mixed memory/scalar 路径继续复用 `nn` operation API 的 dtype/shape 语义。
+
+    使用示例:
+    - result_type = _infer_binary_type(BinaryExprAST(op="add", lhs=lhs, rhs=rhs), type_map, runtime_values, config)
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen/emit/call_nn.py](kernel_gen/dsl/mlir_gen/emit/call_nn.py)
+    """
+
     lhs_type = _emit_infer_expr_type(expr.lhs, type_map, runtime_values=runtime_values, config=config)
     rhs_type = _emit_infer_expr_type(expr.rhs, type_map, runtime_values=runtime_values, config=config)
     expr_key = _expr_key(expr)
-    if isinstance(lhs_type, SymbolValueType) and isinstance(rhs_type, SymbolValueType):
+    lhs_symbol_expr = _symbol_scalar_expr_text(expr.lhs, lhs_type, runtime_values)
+    rhs_symbol_expr = _symbol_scalar_expr_text(expr.rhs, rhs_type, runtime_values)
+    if lhs_symbol_expr is not None and rhs_symbol_expr is not None:
         if expr.op not in {"add", "sub", "mul", "div", "floordiv"}:
             raise _LoweringError("Unsupported symbol binary op", location=expr.location)
-        lhs_expr = lhs_type.expr.expr.data
-        rhs_expr = rhs_type.expr.expr.data
         op_symbol = {"add": "+", "sub": "-", "mul": "*", "div": "/", "floordiv": "//"}[expr.op]
-        result_type = SymbolValueType.from_expr(build_public_symbol_expr(lhs_expr, rhs_expr, op_symbol))
+        result_type = SymbolValueType.from_expr(build_public_symbol_expr(lhs_symbol_expr, rhs_symbol_expr, op_symbol))
         type_map[expr_key] = result_type
         return result_type
     nn_binary_map = {
@@ -306,6 +326,109 @@ def _normalize_mixed_scalar_element_type(scalar_type: Attribute, location: Sourc
     if isinstance(scalar_type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
         return scalar_type
     raise _LoweringError("nn.add scalar element_type must be i32/f16/f32 or symbol.int", location=location)
+
+
+def _symbol_scalar_expr_text(
+    expr: object,
+    inferred_type: object,
+    runtime_values: dict[str, object] | None,
+) -> str | None:
+    """解析纯标量 binary expr 的公开 symbol 表达式文本。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 支持 `ConstAST(int)`、runtime `int`、`SymbolDim` 与 `!symbol.int` 输入。
+    - 供纯标量 `add/sub/mul/div/floordiv` 分支统一决定是否走 `symbol.*` lowering。
+
+    使用示例:
+    - expr_text = _symbol_scalar_expr_text(ConstAST(4), i32, runtime_values=None)
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen/emit/call_nn.py](kernel_gen/dsl/mlir_gen/emit/call_nn.py)
+    """
+
+    if isinstance(inferred_type, SymbolValueType):
+        return inferred_type.expr.expr.data
+    runtime_value = _resolve_runtime_scalar_value(expr, inferred_type, runtime_values)
+    if isinstance(runtime_value, SymbolDim):
+        value = runtime_value.get_value()
+        return value if isinstance(value, str) else str(value)
+    if isinstance(runtime_value, int) and not isinstance(runtime_value, bool):
+        return str(runtime_value)
+    return None
+
+
+def _runtime_values_from_ctx(ctx: EmitContext) -> dict[str, object] | None:
+    """读取 emit 上下文中的 runtime values。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 从 `EmitContext.config["__runtime_values__"]` 读取当前函数构建阶段的运行时标量值映射。
+    - 仅在配置对象与目标字段都为 `dict` 时返回映射，其他情况统一返回 `None`。
+    - 供 symbol scalar binary 与 helper 参数解析共用，避免各 lowering 分支重复读取 config。
+
+    使用示例:
+    - runtime_values = _runtime_values_from_ctx(ctx)
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen/emit/call_nn.py](kernel_gen/dsl/mlir_gen/emit/call_nn.py)
+    """
+
+    if not isinstance(ctx.config, dict):
+        return None
+    runtime_values = ctx.config.get("__runtime_values__")
+    return runtime_values if isinstance(runtime_values, dict) else None
+
+
+def _materialize_symbol_binary_operand(
+    operand_expr: object,
+    operand_type: object,
+    ctx: EmitContext,
+    location: SourceLocation | None,
+) -> SSAValue:
+    """把纯标量 binary operand 物化为 `!symbol.int` SSAValue。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 常量整数统一物化为 `symbol.const`。
+    - 现有 `!symbol.int` 输入直接复用缓存中的 SSAValue。
+    - runtime `int|SymbolDim` 统一落到公开 `symbol` 表达式。
+
+    使用示例:
+    - lhs = _materialize_symbol_binary_operand(expr.lhs, lhs_type, ctx, expr.location)
+
+    关联文件:
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen/emit/call_nn.py](kernel_gen/dsl/mlir_gen/emit/call_nn.py)
+    """
+
+    runtime_values = _runtime_values_from_ctx(ctx)
+    if isinstance(operand_type, SymbolValueType):
+        value = _emit_lower_expr(operand_expr, ctx)
+        if isinstance(getattr(value, "type", None), SymbolValueType):
+            return value
+    runtime_value = _resolve_runtime_scalar_value(operand_expr, operand_type, runtime_values)
+    if isinstance(runtime_value, SymbolDim):
+        raw_value = runtime_value.get_value()
+        if isinstance(raw_value, int):
+            return _const_symbol_int(raw_value, ctx, location)
+        value = _emit_lower_expr(operand_expr, ctx)
+        if isinstance(getattr(value, "type", None), SymbolValueType):
+            return value
+    if isinstance(runtime_value, int) and not isinstance(runtime_value, bool):
+        return _const_symbol_int(int(runtime_value), ctx, location)
+    raise _LoweringError("Binary op operands must have nn.memory type", location=location)
 
 
 def _infer_mixed_binary_type(
@@ -614,7 +737,7 @@ def _emit_binary(expr: BinaryExprAST, ctx: EmitContext) -> SSAValue:
     """发射 nn binary expr。
 
     创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 统一处理 symbol-symbol、memory-memory、memory-scalar 三类 binary lowering 分支。
@@ -624,14 +747,36 @@ def _emit_binary(expr: BinaryExprAST, ctx: EmitContext) -> SSAValue:
     - value = _emit_binary(expr, ctx)
 
     关联文件:
-    - spec: spec/dsl/mlir_gen.md
-    - test: test/dsl/mlir_gen/emit/test_call_nn.py
-    - 功能实现: kernel_gen/dsl/mlir_gen/emit/call_nn.py
+    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
+    - test: [test/dsl/mlir_gen/emit/test_call_nn.py](test/dsl/mlir_gen/emit/test_call_nn.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen/emit/call_nn.py](kernel_gen/dsl/mlir_gen/emit/call_nn.py)
     """
 
     expr_key = _expr_key(expr)
     lhs_hint = infer_nn_type(expr.lhs, ctx.types, config=ctx.config) if isinstance(expr.lhs, NnUnaryAST) else _emit_infer_expr_type(expr.lhs, ctx.types, config=ctx.config)
     rhs_hint = infer_nn_type(expr.rhs, ctx.types, config=ctx.config) if isinstance(expr.rhs, NnUnaryAST) else _emit_infer_expr_type(expr.rhs, ctx.types, config=ctx.config)
+    runtime_values = _runtime_values_from_ctx(ctx)
+    lhs_symbol_expr = _symbol_scalar_expr_text(expr.lhs, lhs_hint, runtime_values)
+    rhs_symbol_expr = _symbol_scalar_expr_text(expr.rhs, rhs_hint, runtime_values)
+    if lhs_symbol_expr is not None and rhs_symbol_expr is not None:
+        if expr.op not in {"add", "sub", "mul", "div", "floordiv"}:
+            raise _LoweringError("Unsupported symbol binary op", location=expr.location)
+        lhs = _materialize_symbol_binary_operand(expr.lhs, lhs_hint, ctx, expr.location)
+        rhs = _materialize_symbol_binary_operand(expr.rhs, rhs_hint, ctx, expr.location)
+        result_type = _emit_infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
+        if not isinstance(result_type, SymbolValueType):
+            raise _LoweringError("Symbol binary op result must be !symbol.int", location=expr.location)
+        op_map = {
+            "add": SymbolAddOp,
+            "sub": SymbolSubOp,
+            "mul": SymbolMulOp,
+            "div": SymbolDivOp,
+            "floordiv": SymbolFloorDivOp,
+        }
+        op = op_map[expr.op](lhs, rhs, result_type)
+        ctx.builder.add_op(op)
+        ctx._set_cache(expr_key, op.result)
+        return op.result
     lhs_is_memory_hint = isinstance(lhs_hint, NnMemoryType)
     rhs_is_memory_hint = isinstance(rhs_hint, NnMemoryType)
     lhs_const_int = isinstance(expr.lhs, ConstAST) and isinstance(expr.lhs.value, int)

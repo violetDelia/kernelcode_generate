@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`咯咯咯`
-- 最后一次更改：`睡觉小分队`（2026-04-13）
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/pass/pipeline/default_lowering.md`](../../../spec/pass/pipeline/default_lowering.md)
 - `功能实现`：[`kernel_gen/passes/pipeline/default_lowering.py`](../../../kernel_gen/passes/pipeline/default_lowering.py)
 - `test`：[`test/pass/test_pipeline_default_lowering.py`](../../../test/pass/test_pipeline_default_lowering.py)
@@ -22,6 +22,7 @@
 - memory-return ABI 改写：[`spec/pass/lowering/buffer_results_to_out_params.md`](../../../spec/pass/lowering/buffer_results_to_out_params.md)
 - DMA memory hierarchy lowering：[`spec/pass/lowering/dma_memory_hierarchy.md`](../../../spec/pass/lowering/dma_memory_hierarchy.md)
 - `nn` 分解预处理：[`spec/pass/lowering/decompass.md`](../../../spec/pass/lowering/decompass.md)
+- host launch outline：[`spec/pass/lowering/outline_device_kernel.md`](../../../spec/pass/lowering/outline_device_kernel.md)
 
 ## 术语
 
@@ -45,6 +46,7 @@
   3. `BufferResultsToOutParamsPass`
   4. `LowerDmaMemoryHierarchyPass`
 - 默认 pipeline 的公开口径必须使用 `NnLoweringPass` / `lower-nn`；`LowerNnToKernelPass` / `lower-nn-to-kernel` 只属于 lowering 层兼容入口，不得作为 `default-lowering` 的验收文案或黑盒顺序描述。
+- `default-lowering remains unchanged`：`outline-device-kernel` 不属于默认 pipeline，调用方若需要 host launch outline，必须显式追加 standalone pass。
 - 对最小 `nn.add` memory-return 输入执行整条 pipeline 后，结果必须满足：
   - 原 `func.func` ABI 改写为前置 `out` 参数，函数返回值清空。
   - 函数体内不再残留 `nn.add` 等原始 `nn` op。
@@ -82,6 +84,7 @@ module = pm.run(module)
   3. `BufferResultsToOutParamsPass`
   4. `LowerDmaMemoryHierarchyPass`
 - 顺序说明、诊断文案与黑盒录制文本必须使用 `decompass -> lower-nn -> buffer-results-to-out-params -> lower-dma-memory-hierarchy`，不得继续使用 `lower-nn-to-kernel` 作为默认 pipeline 顺序口径。
+- `default-lowering remains unchanged`：不得在 builder、顺序说明、黑盒 expectation 或测试命令中隐式插入 `outline-device-kernel`。
 - 对最小 `nn.add` memory-return 输入运行该 pipeline 时，调用方应看到前置 `out` 参数 ABI、`kernel.binary_elewise(kind="add")` 与 `dma.slice / dma.deslice` 链；这属于默认 pipeline 的公开黑盒行为。
 
 返回与限制：
@@ -98,6 +101,7 @@ module = pm.run(module)
 - 失败边界的公开验收点：
   - 若把 `BufferResultsToOutParamsPass` 排在 `NnLoweringPass` 之前，必须显式失败。
   - 若输入包含当前不支持的 `nn` op，必须继续抛出 `NnLoweringError`，不得静默产出不合法 IR。
+  - 若调用方需要 `outline-device-kernel`，必须在默认 pipeline 之外显式追加；默认 pipeline expectation 仍只对应 `expectation/pass/pipeline/default_lowering.py`。
 
 ## 测试
 
@@ -110,6 +114,7 @@ module = pm.run(module)
   - builder 返回 `PassManager`。
   - 黑盒最小链路可验证前置 `out` 参数 ABI、`kernel.binary_elewise(kind="add")` 与 `dma.slice / dma.deslice`。
   - 顺序错误与不支持 op 的失败边界可验证。
+  - `default-lowering remains unchanged`，不把 `outline-device-kernel` 混入默认 pipeline。
 - 功能与用例清单：
   - `test_default_lowering_pipeline_builds_pass_manager`
   - `test_default_lowering_pipeline_pass_order`

@@ -5,6 +5,7 @@
 - 定义 operation 层控制流能力，提供 `loop` 的高层语义。
 - 面向上层 DSL 的范围迭代表达，支持 `for i in loop(start, end, step)`。
 - 允许 `SymbolDim` 参与范围描述，保持符号表达语义。
+- 当前只覆盖最小 loop helper；未来若要扩展 `if / while / yield / region builder`，必须另开计划，不在本文件顺手扩展。
 
 ## 文档信息
 
@@ -23,15 +24,19 @@
 - 提供统一的高层 `loop` 语义入口，使 DSL 可表达确定或符号范围迭代。
 - 允许 `start/end/step` 使用 `int` 与 `SymbolDim` 组合，保留符号表达而不强制求值。
 - 保持与 operation 层其他接口一致的错误处理与边界约束。
+- 保持 `loop` 作为 operation 层最小范围迭代 helper，不把本轮文本合同扩成完整控制流体系。
 
 ## 限制与边界
 
 - 仅定义高层范围迭代语义，不提供 IR/lowering 规则。
 - 不负责实际执行优化、自动并行或向后端映射。
 - 仅支持 `for i in loop(start, end, step)` 形式，当前不定义 `loop(end)` 或 `loop(start, end)` 的简写。
+- 当前只覆盖最小 loop helper，不定义 `if / while / yield / region builder` 或其他控制流族。
+- `start/end/step` 只接受 `int | SymbolDim`，并显式拒绝 `bool`；不得依赖 Python `bool` 是 `int` 子类的行为绕过校验。
 - 不允许 `step == 0`；`step` 为 0 必须抛出错误。
 - 当 `start/end/step` 中存在 `SymbolDim` 时，不要求在 Python 运行期求值或展开，只保留符号表达语义。
 - 当 `start/end/step` 含 `SymbolDim` 且无法推导真实迭代次数时，引入 `trip_count`（可选 keyword，默认 `1`，由上游决定）；迭代序列为 `start + step * i`，`i = 0..trip_count-1`。
+- `trip_count` 只接受 `int | SymbolDim | None`，并显式拒绝 `bool`；`None` 仅表示按默认值 `1` 归一化。
 - `trip_count <= 0` 必须抛出错误（建议 `ValueError`），不得 silent fallback 或默认当作 `1`。
 
 ## 公开接口
@@ -78,6 +83,7 @@ for t in loop(SymbolDim("S"), SymbolDim("S") + SymbolDim("K"), SymbolDim("K"), t
 注意事项：
 
 - 任意输入不是 `int` 或 `SymbolDim` 时必须抛出 `TypeError`。
+- `bool` 不属于合法 `int` 输入，`start/end/step/trip_count` 传入 `True/False` 必须抛出 `TypeError`。
 - `step == 0` 必须抛出 `ValueError`。
 - `trip_count <= 0` 必须抛出 `ValueError`；不得 silent fallback 或默认当作 `1`。
 - 当输入包含 `SymbolDim` 时，迭代变量代表符号索引，不要求在运行期展开为具体序列。
@@ -97,8 +103,10 @@ for t in loop(SymbolDim("S"), SymbolDim("S") + SymbolDim("K"), SymbolDim("K"), t
 - 测试目标：
   - 纯整数 `loop` 与 `range(start, end, step)` 的半开区间语义一致。
   - `SymbolDim` 输入可构建 `LoopRange` 并保留 `start/end/step` 语义。
+  - `bool` 输入不会因为 Python `bool` 是 `int` 子类而被接受。
   - `step == 0` 触发 `ValueError`。
   - `trip_count <= 0` 触发错误，且不得 silent fallback。
+  - 当前只收口最小 loop helper，不扩到其他控制流构造。
   - 非法类型输入触发 `TypeError`。
   - 边界/半开区间语义与正负步长的停止条件一致。
 - 功能与用例清单：

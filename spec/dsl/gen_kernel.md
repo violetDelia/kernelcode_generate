@@ -190,27 +190,27 @@ static void add_barrier_body(
     long long tnum = ctx.thread_num();
 
     auto tsm = ctx.get_dynamic_memory<MemorySpace::TSM, float>();
-    auto tlm = ctx.get_dynamic_memory<MemorySpace::TLM, float>();
+    auto tlm = ctx.get_dynamic_memory<MemorySpace::TLM1, float>();
 
     auto lhs_gm = view(lhs, tid * 16, 16, 1);
     auto rhs_gm = view(rhs, tid * 16, 16, 1);
 
     auto lhs_tsm = view(tsm, tid * 16, 16, 1);
     auto rhs_tsm = view(tsm, 64 + tid * 16, 16, 1);
-    auto out_tsm = view(tsm, tid * 16, 16, 1);
+    auto out_tlm = view(tlm, tid * 16, 16, 1);
 
     slice(lhs_tsm, lhs_gm, 0, 16, 1);
     slice(rhs_tsm, rhs_gm, 0, 16, 1);
     ctx.barrier(/* visibility=[TSM, TLM], scope=BLOCK */);
 
-    add(lhs_tsm, rhs_tsm, out_tsm);
+    add(lhs_tsm, rhs_tsm, out_tlm);
     ctx.barrier(/* visibility=[TSM, TLM], scope=BLOCK */);
 
-    deslice(out_tsm, out, tid * 16, 16, 1);
+    deslice(out_tlm, out, tid * 16, 16, 1);
 }
 ```
 
-- 上述骨架顺序是 `thread_id/thread_num -> get_dynamic_memory<MemorySpace::TSM/TLM, T>() -> view -> slice -> barrier -> add -> barrier -> deslice`；不得回退到 `.view<`、`load<`、`store<` 或表达式式 `auto tile = slice(source, ...)`。
+- 上述骨架顺序是 `thread_id/thread_num -> get_dynamic_memory<MemorySpace::TSM/TLM1..3, T>() -> view -> slice -> barrier -> add -> barrier -> deslice`，其中输出 tile 必须保持 `out_tlm = view(tlm, ...)` / `add(..., out_tlm)` / `deslice(out_tlm, ...)`；不得回退到 `.view<`、`load<`、`store<` 或表达式式 `auto tile = slice(source, ...)`。
 - 当 `func.return` 回写 `out` 的值未在 `EmitCContext` 中绑定名称，且该值为 `BlockArgument` 时，必须回退为 `arg{index}` 默认命名以保持与函数级签名一致。
 - 当 `func.return` 返回 `!symbol.int<"...">` 时，必须生成 `return <expr>;` 并复用 `emit_c` 的命名/表达式规则。
 - 对 `conv_cpu_tiled_v1` 子集，函数体骨架必须固定包含：`constexpr Ntile/Ctile/Ftile/Hotile/Wotile`、tile-local `col_buffer/acc_buffer`、`n -> f -> ho -> wo` 分块循环、循环体内的 `cpu::img2col2d(...)` 与 `c` 方向 tiled compute、以及最终写回 `out` 的显式循环或等价机械可判定写回语句。

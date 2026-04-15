@@ -444,3 +444,40 @@ def test_barrier_and_launch_helpers_reject_unsupported_target_ops() -> None:
             launch_kernel(lambda: None, 1, 1, 1)
     finally:
         target_registry._set_current_target(None)
+
+
+# TC-OP-ARCH-017
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-15 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-15 00:00:00 +0800
+# 测试目的: 验证启用 target registry 后，数量类 helper 与动态内存在缺失必需 hardware 字段时抛出稳定错误。
+# 使用示例: pytest -q test/operation/test_operation_arch.py -k test_query_helpers_reject_missing_target_hardware_fields
+# 对应功能实现文件路径: kernel_gen/operation/arch.py
+# 对应 spec 文件路径: spec/operation/arch.md
+# 对应测试文件路径: test/operation/test_operation_arch.py
+def test_query_helpers_reject_missing_target_hardware_fields() -> None:
+    spec = target_registry.TargetSpec(
+        name="op_arch_missing_hw_field",
+        arch_supported_ops={
+            "arch.get_block_num",
+            "arch.get_thread_num",
+            "arch.get_subthread_num",
+            "arch.get_dynamic_memory",
+        },
+        arch_unsupported_ops=set(),
+        hardware={},
+    )
+    target_registry.register_target(spec)
+    target_registry._set_current_target("op_arch_missing_hw_field")
+    try:
+        with pytest.raises(ValueError, match=r"hardware\.block_num"):
+            get_block_num()
+        with pytest.raises(ValueError, match=r"hardware\.thread_num"):
+            get_thread_num()
+        with pytest.raises(ValueError, match=r"hardware\.subthread_num"):
+            get_subthread_num()
+        with pytest.raises(ValueError, match=r"hardware\.sm_memory_size"):
+            get_dynamic_memory(MemorySpace.SM)
+    finally:
+        target_registry._set_current_target(None)

@@ -1,7 +1,7 @@
 """dma operation API tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 朽木露琪亚
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 覆盖 kernel_gen/operation/dma.py 的搬运 API。
@@ -34,6 +34,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+import kernel_gen.operation.dma as operation_dma
 from kernel_gen.operation.dma import alloc, cast, copy, deslice, flatten, free, load, reshape, slice, store, view
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -714,3 +715,44 @@ def test_flatten_non_contiguous_rejected() -> None:
     src = Memory([2, 3, 4], NumericType.Float32, stride=[100, 4, 1])
     with pytest.raises(ValueError, match="contiguous"):
         flatten(src)
+
+
+# TC-OP-DMA-029
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-15 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-15 00:00:00 +0800
+# 测试目的: 验证 load/store/slice/view 统一复用 dma 访问区域校验入口。
+# 使用示例: pytest -q test/operation/test_operation_dma.py -k test_access_region_operations_share_validation_entry
+# 对应功能实现文件路径: kernel_gen/operation/dma.py
+# 对应 spec 文件路径: spec/operation/dma.md
+# 对应测试文件路径: test/operation/test_operation_dma.py
+def test_access_region_operations_share_validation_entry(monkeypatch: pytest.MonkeyPatch) -> None:
+    source = Memory([8, 8], NumericType.Float32, space=MemorySpace.GM)
+    target = Memory([8, 8], NumericType.Float32, space=MemorySpace.SM)
+    tile = Memory([2, 2], NumericType.Float32, space=MemorySpace.LM)
+    original = operation_dma._validate_access_region
+    calls: list[MemorySpace] = []
+
+    def wrapped(
+        memory: Memory,
+        offsets: SymbolShape,
+        sizes: SymbolShape,
+        strides: SymbolShape | None,
+    ) -> None:
+        calls.append(memory.space)
+        original(memory, offsets, sizes, strides)
+
+    monkeypatch.setattr(operation_dma, "_validate_access_region", wrapped)
+
+    load(source, offsets=[0, 0], sizes=[2, 2], strides=[1, 1], space=MemorySpace.SM)
+    store(tile, target, offsets=[0, 0], sizes=[2, 2], strides=[1, 1])
+    slice(source, offsets=[0, 0], sizes=[2, 2], strides=[1, 1], space=MemorySpace.LM)
+    view(source, offset=[0, 0], size=[2, 2], stride=[1, 1])
+
+    assert calls == [
+        MemorySpace.GM,
+        MemorySpace.SM,
+        MemorySpace.GM,
+        MemorySpace.GM,
+    ]

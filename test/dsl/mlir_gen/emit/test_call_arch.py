@@ -29,7 +29,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp, ArchGetThreadNumOp
 from kernel_gen.dsl.ast import ArchGetDynamicMemoryAST, ArchQueryAST, ConstAST
-from kernel_gen.dsl.mlir_gen.emit import EmitContext, LoweringError
+from kernel_gen.dsl.mlir_gen.emit import EmitContext
+from kernel_gen.dsl.mlir_gen.emit.context import LoweringError
 from kernel_gen.dsl.mlir_gen.emit.call_arch import emit_arch_call
 from kernel_gen.symbol_variable.memory import MemorySpace
 

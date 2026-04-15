@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`咯咯咯`（2026-04-11）
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/pass/README.md`](../../spec/pass/README.md)
 - `功能实现`：
   - [`kernel_gen/passes/pass_manager.py`](../../kernel_gen/passes/pass_manager.py)
@@ -26,18 +26,22 @@
 - Pass/pipeline 注册表：[`spec/pass/registry.md`](../../spec/pass/registry.md)
 - Pipeline 目录说明：[`spec/pass/pipeline/README.md`](../../spec/pass/pipeline/README.md)
 - 默认 pipeline 合同：[`spec/pass/pipeline/default_lowering.md`](../../spec/pass/pipeline/default_lowering.md)
+- host launch outline 合同：[`spec/pass/lowering/outline_device_kernel.md`](../../spec/pass/lowering/outline_device_kernel.md)
 
 ## 目标
 
 - 给出 pass 编写与使用的最小范式。
 - 明确 pipeline 目录位置与默认 pipeline builder 的入口。
 - 说明 registry 是 pipeline 名字查询入口。
+- 说明 standalone pass 与默认 pipeline 的边界：`outline-device-kernel` 这类显式 opt-in pass 不自动进入 `default-lowering`。
 
 ## 限制与边界
 
 - 本文件只描述通用用法，不替代具体 pass 的独立 spec。
 - pipeline 的顺序与构造细节以 pipeline 目录下的 spec 为准。
 - registry 只负责注册与查询，不执行 pass。
+- standalone pass 的 expectation runner 应与 pass 名保持稳定映射；`outline-device-kernel` 的目录约定固定为 `expectation/pass/lowing/outline_device_kernel/`，其中 runner 入口为 `__main__.py`，子资产为 `basic.py`、`multi_function.py`、`invalid_attr.py`。
+- `expectation/pass/pipeline/default_lowering.py` 只服务默认 pipeline 黑盒验收，不与 `expectation/pass/lowing/outline_device_kernel/` 混用。
 
 ## 公开接口
 
@@ -138,6 +142,7 @@ module = pm.run(module)
 注意事项：
 
 - 通过 registry 查询前必须调用 `load_builtin_passes()`。
+- 若调用方需要 host launch outline，必须显式构造 `build_registered_pass("outline-device-kernel")` 或直接实例化 `OutlineDeviceKernelPass`；`default-lowering` remains unchanged。
 
 返回与限制：
 
