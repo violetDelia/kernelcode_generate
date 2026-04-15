@@ -61,6 +61,7 @@ from kernel_gen.dialect.arch import (
     ArchGetThreadNumOp,
     ArchLaunchOp,
     ArchScopeAttr,
+    ArchVisibilityAttr,
 )
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFillOp, DmaSliceOp, DmaViewOp
 from kernel_gen.dialect.kernel import KernelAddOp
@@ -164,23 +165,20 @@ def _alloc_ops(source_memory: object, mem_type: NnMemoryType) -> tuple[list[obje
 def _make_marked_kernel_split_module(*, axis: int = 1, tile: str = "TILE_M") -> tuple[ModuleOp, func.FuncOp]:
     mem_type = _make_memory_type([8, 4], [4, 1])
     space = NnMemorySpaceAttr.from_name("global")
-    block = Block(arg_types=[mem_type, mem_type, mem_type])
+    block = Block(arg_types=[mem_type, mem_type])
 
-    # signature: (out, lhs, rhs) -> ()
+    # signature: (out, lhs) -> ()
     func_op = func.FuncOp(
         "kernel_split_codegen",
-        FunctionType.from_lists([mem_type, mem_type, mem_type], []),
+        FunctionType.from_lists([mem_type, mem_type], []),
         Region(block),
-        arg_attrs=_arg_attrs("arg0", "lhs", "rhs"),
+        arg_attrs=_arg_attrs("arg0", "lhs"),
     )
     func_op.attributes["kernel_split"] = _make_kernel_split_attr(axis, tile)
 
-    alloc_setup, temp_alloc = _alloc_ops(block.args[0], mem_type)
     block.add_ops(
         [
-            *alloc_setup,
-            KernelAddOp(block.args[1], block.args[2], temp_alloc.result, space),
-            KernelAddOp(temp_alloc.result, block.args[2], block.args[0], space),
+            KernelAddOp(block.args[1], block.args[1], block.args[0], space),
             func.ReturnOp(),
         ]
     )
@@ -225,10 +223,10 @@ def _make_npu_demo_add_barrier_module(
 
     gm_type = _make_memory_type([64], [1], element_type=f32)
     tsm_buffer_type = _make_memory_type([128], [1], element_type=f32, space="tsm")
-    tlm_buffer_type = _make_memory_type([64], [1], element_type=f32, space="tlm")
+    tlm_buffer_type = _make_memory_type([64], [1], element_type=f32, space="tlm1")
     tsm_tile_type = _make_memory_type([16], [1], element_type=f32, space="tsm")
     gm_tile_type = _make_memory_type([16], [1], element_type=f32, space="global")
-    barrier_visibility = ArrayAttr([NnMemorySpaceAttr.from_name(space_name) for space_name in barrier_visibility_names])
+    barrier_visibility = ArrayAttr([ArchVisibilityAttr.from_name(space_name) for space_name in barrier_visibility_names])
 
     body_block = Block(arg_types=[IndexType(), gm_type, gm_type, gm_type])
     thread_offset = FakeSymbolValueOp("thread_id * 16")
@@ -239,7 +237,7 @@ def _make_npu_demo_add_barrier_module(
     tid = ArchGetThreadIdOp()
     tnum = ArchGetThreadNumOp()
     tsm = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("tsm"), tsm_buffer_type)
-    tlm = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("tlm"), tlm_buffer_type)
+    tlm = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("tlm1"), tlm_buffer_type)
     lhs_gm = DmaViewOp(body_block.args[1], [thread_offset.result], [size.result], [stride.result], gm_tile_type)
     rhs_gm = DmaViewOp(body_block.args[2], [thread_offset.result], [size.result], [stride.result], gm_tile_type)
     lhs_tsm = DmaViewOp(tsm.result, [thread_offset.result], [size.result], [stride.result], tsm_tile_type)
@@ -516,7 +514,7 @@ static void slow_barrier_probe(
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     entered->fetch_add(1);
-    ctx.barrier({MemorySpace::TSM, MemorySpace::TLM}, BarrierScope::BLOCK);
+    ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
     after_values[tid] = entered->load();
 }
 """
@@ -1448,7 +1446,7 @@ def test_gen_kernel_compiles_npu_demo_tiled_matmul_source() -> None:
 # 最近一次运行测试时间: 2026-04-02 21:00:00 +0800
 # 最近一次运行成功时间: 2026-04-02 21:00:00 +0800
 # 功能说明: 验证 npu_demo target 可生成固定的 dynamic memory/view/slice/deslice/add 管线。
-# 测试目的: 锁定 `TSM/TLM`、`view/slice/deslice/add` 固定顺序，并防止回退到 `.view/load/store` 风格。
+# 测试目的: 锁定 `TSM/TLM1`、`view/slice/deslice/add` 固定顺序，并防止回退到 `.view/load/store` 风格。
 # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_memory_pipeline
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
@@ -1461,7 +1459,7 @@ def test_gen_kernel_emits_npu_demo_memory_pipeline() -> None:
     source = gen_kernel(func_op, _npu_ctx())
 
     tsm_idx = source.index("Memory<MemorySpace::TSM, float> tsm = ctx.get_dynamic_memory<MemorySpace::TSM, float>();")
-    tlm_idx = source.index("Memory<MemorySpace::TLM, float> tlm = ctx.get_dynamic_memory<MemorySpace::TLM, float>();")
+    tlm_idx = source.index("Memory<MemorySpace::TLM1, float> tlm = ctx.get_dynamic_memory<MemorySpace::TLM1, float>();")
     src_view_idx = source.index("auto src_view = view(source, tid * 16, 16, 1);")
     work_view_idx = source.index("auto work_tile = view(tsm, 0, 16, 1);")
     out_view_idx = source.index("auto out_tile = view(tsm, 0, 16, 1);")
@@ -1559,6 +1557,7 @@ def test_gen_kernel_black_box_direct_return_nn_add_conv2d_img2col2d_tiled_and_np
     npu_source = gen_kernel(npu_func, _npu_ctx())
     assert "ctx.thread_id()" in npu_source
     assert "ctx.get_dynamic_memory<MemorySpace::TSM, float>()" in npu_source
+    assert "ctx.get_dynamic_memory<MemorySpace::TLM1, float>()" in npu_source
     assert "deslice(out_tile, out, tid * 16, 16, 1);" in npu_source
 
 
@@ -1839,9 +1838,9 @@ def test_gen_kernel_emits_kernel_split_single_function_tile_loop() -> None:
     source = gen_kernel(func_op, _ctx())
 
     assert 'tuner_param("TILE_D0")' in source
-    assert 'tuner_param("TILE_D1")' in source
+    assert 'tuner_param("TILE_M")' in source
     assert "+= tile_d0" in source
-    assert "+= tile_d1" in source
+    assert "+= tile_m" in source
     assert "for (long long" in source
     assert "KernelSplitMalformed" not in source
     assert "KernelSplitUnexpectedHelperFunction" not in source
@@ -1975,7 +1974,7 @@ def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body() -> None:
         in source
     )
     assert "npu_demo::launch<1, 4, 1>(add_barrier_body, lhs, rhs, out);" in source
-    assert source.count("ctx.barrier({MemorySpace::TSM, MemorySpace::TLM}, BarrierScope::BLOCK);") == 2
+    assert source.count("ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);") == 2
     assert source.index("long long tid = ctx.thread_id();") < source.index(
         "Memory<MemorySpace::TSM, float> tsm = ctx.get_dynamic_memory<MemorySpace::TSM, float>();"
     )
@@ -2022,7 +2021,7 @@ def test_gen_kernel_npu_demo_add_barrier_runtime_smoke() -> None:
     source = gen_kernel(module, _npu_ctx())
 
     assert "static void add_barrier_body" in source
-    assert "ctx.barrier({MemorySpace::TSM, MemorySpace::TLM}, BarrierScope::BLOCK);" in source
+    assert "ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);" in source
     _compile_and_run_npu_demo_add_barrier_source(source, prove_barrier_runtime=False)
 
 

@@ -560,7 +560,7 @@ def test_emit_c_op_lowers_build_func_op_nn_add_variants_after_pass() -> None:
     pair_ctx = _ctx()
     pair_ctx.bind_name(pair_block.args[0], "lhs")
     pair_ctx.bind_name(pair_block.args[1], "rhs")
-    pair_add = next(op for op in pair_block.ops if isinstance(op, KernelAddOp))
+    pair_add = next(op for op in pair_block.ops if isinstance(op, (KernelAddOp, KernelBinaryElewiseOp)))
     assert emit_c_op(pair_add, pair_ctx) == "cpu::add(lhs, rhs, v0);"
 
     const_block = _lower_built_func(
@@ -570,7 +570,7 @@ def test_emit_c_op_lowers_build_func_op_nn_add_variants_after_pass() -> None:
     const_ctx = _ctx()
     const_ctx.bind_name(const_block.args[0], "lhs")
     const_fill = next(op for op in const_block.ops if isinstance(op, DmaFillOp))
-    const_add = next(op for op in const_block.ops if isinstance(op, KernelAddOp))
+    const_add = next(op for op in const_block.ops if isinstance(op, (KernelAddOp, KernelBinaryElewiseOp)))
     for op in const_block.ops:
         if isinstance(op, DmaAllocOp):
             emit_c_op(op, const_ctx)
@@ -590,7 +590,7 @@ def test_emit_c_op_lowers_build_func_op_nn_add_variants_after_pass() -> None:
     symbol_ctx.bind_name(symbol_block.args[0], "lhs")
     symbol_ctx.bind_name(symbol_block.args[1], "bias")
     symbol_fill = next(op for op in symbol_block.ops if isinstance(op, DmaFillOp))
-    symbol_add = next(op for op in symbol_block.ops if isinstance(op, KernelAddOp))
+    symbol_add = next(op for op in symbol_block.ops if isinstance(op, (KernelAddOp, KernelBinaryElewiseOp)))
     for op in symbol_block.ops:
         if isinstance(op, DmaAllocOp):
             emit_c_op(op, symbol_ctx)
@@ -722,7 +722,7 @@ def test_emit_c_op_lowers_passed_mixed_add_pipeline_with_dma_fill() -> None:
     )
     const_ops = list(const_block.ops)
     const_fill = next(op for op in const_ops if isinstance(op, DmaFillOp))
-    const_add = next(op for op in const_ops if isinstance(op, KernelAddOp))
+    const_add = next(op for op in const_ops if isinstance(op, (KernelAddOp, KernelBinaryElewiseOp)))
 
     const_ctx = _ctx()
     const_ctx.bind_name(const_block.args[0], "lhs")
@@ -750,7 +750,7 @@ def test_emit_c_op_lowers_passed_mixed_add_pipeline_with_dma_fill() -> None:
     )
     symbol_ops = list(symbol_block.ops)
     symbol_fill = next(op for op in symbol_ops if isinstance(op, DmaFillOp))
-    symbol_add = next(op for op in symbol_ops if isinstance(op, KernelAddOp))
+    symbol_add = next(op for op in symbol_ops if isinstance(op, (KernelAddOp, KernelBinaryElewiseOp)))
 
     symbol_ctx = _ctx()
     symbol_ctx.bind_name(symbol_block.args[0], "lhs")
@@ -1010,8 +1010,8 @@ def test_emit_c_lowers_npu_demo_kernel_context_queries() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-02 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-02 00:00:00 +0800
-# 功能说明: 验证 npu_demo 下 dynamic memory 查询发射为 ctx.get_dynamic_memory<TSM/TLM, T>()。
-# 测试目的: 锁定 target=npu_demo 的 TSM/TLM 动态片上内存入口文本，避免回退到 load/store/malloc。
+# 功能说明: 验证 npu_demo 下 dynamic memory 查询发射为 ctx.get_dynamic_memory<TSM/TLM1/TLM2/TLM3, T>()。
+# 测试目的: 锁定 target=npu_demo 的真实片上空间入口文本，避免回退到 load/store/malloc 或旧 `TLM` 聚合伪空间。
 # 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_maps_nn_space_to_template_param
 # 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
 # 对应 spec 文件路径: spec/dsl/emit_c.md
@@ -1019,17 +1019,17 @@ def test_emit_c_lowers_npu_demo_kernel_context_queries() -> None:
 def test_emit_c_maps_nn_space_to_template_param() -> None:
     ctx = _npu_ctx()
     tsm_type = _make_memory_type([16], [1], space="tsm", element_type=f32)
-    tlm_type = _make_memory_type([16], [1], space="tlm", element_type=f32)
+    tlm1_type = _make_memory_type([16], [1], space="tlm1", element_type=f32)
     tsm = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("tsm"), tsm_type)
-    tlm = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("tlm"), tlm_type)
+    tlm1 = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("tlm1"), tlm1_type)
     ctx.bind_name(tsm.result, "tsm")
-    ctx.bind_name(tlm.result, "tlm")
+    ctx.bind_name(tlm1.result, "tlm")
 
     tsm_stmt = emit_c_op(tsm, ctx)
-    tlm_stmt = emit_c_op(tlm, ctx)
+    tlm_stmt = emit_c_op(tlm1, ctx)
 
     assert tsm_stmt == "Memory<TSM, float> tsm = ctx.get_dynamic_memory<TSM, float>();"
-    assert tlm_stmt == "Memory<TLM, float> tlm = ctx.get_dynamic_memory<TLM, float>();"
+    assert tlm_stmt == "Memory<TLM1, float> tlm = ctx.get_dynamic_memory<TLM1, float>();"
     assert "load<" not in tsm_stmt
     assert "store<" not in tlm_stmt
 
@@ -1048,7 +1048,7 @@ def test_emit_c_maps_nn_space_to_template_param() -> None:
 def test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline() -> None:
     mem_type = _make_memory_type([16], [1], space="global", element_type=f32)
     tsm_type = _make_memory_type([16], [1], space="tsm", element_type=f32)
-    tlm_type = _make_memory_type([16], [1], space="tlm", element_type=f32)
+    tlm_type = _make_memory_type([16], [1], space="tlm1", element_type=f32)
     block = Block(arg_types=[mem_type, mem_type])
     ctx = _npu_ctx()
     ctx.bind_name(block.args[0], "source")
@@ -1060,12 +1060,12 @@ def test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline() -> None:
     tid = ArchGetThreadIdOp()
     tnum = ArchGetThreadNumOp()
     tsm = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("tsm"), tsm_type)
-    tlm = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("tlm"), tlm_type)
+    tlm = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("tlm1"), tlm_type)
     src_view = DmaViewOp(block.args[0], [tid.result], [size.result], [stride.result], mem_type)
     work_tile_view = DmaViewOp(tsm.result, [zero.result], [size.result], [stride.result], tsm_type)
     out_tile_view = DmaViewOp(tlm.result, [zero.result], [size.result], [stride.result], tlm_type)
     slice_op = DmaSliceOp(work_tile_view.result, src_view.result, [zero.result], [size.result], [stride.result])
-    add_op = NnAddOp(work_tile_view.result, work_tile_view.result, tlm_type, NnMemorySpaceAttr.from_name("tlm"))
+    add_op = NnAddOp(work_tile_view.result, work_tile_view.result, tlm_type, NnMemorySpaceAttr.from_name("tlm1"))
     deslice_op = DmaDesliceOp(add_op.result, block.args[1], [tid.result], [size.result], [stride.result], mem_type)
 
     ctx.bind_name(tid.result, "tid")
@@ -1095,7 +1095,7 @@ def test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline() -> None:
     assert "long long tid = ctx.thread_id();" in stmt
     assert "long long tnum = ctx.thread_num();" in stmt
     assert "Memory<TSM, float> tsm = ctx.get_dynamic_memory<TSM, float>();" in stmt
-    assert "Memory<TLM, float> tlm = ctx.get_dynamic_memory<TLM, float>();" in stmt
+    assert "Memory<TLM1, float> tlm = ctx.get_dynamic_memory<TLM1, float>();" in stmt
     assert "auto src_view = view(source, tid, 16, 1);" in stmt
     assert "auto work_tile = view(tsm, 0, 16, 1);" in stmt
     assert "auto out_tile = view(tlm, 0, 16, 1);" in stmt

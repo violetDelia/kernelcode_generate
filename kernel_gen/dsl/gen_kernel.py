@@ -191,7 +191,7 @@ def _memory_space_to_c(space_attr: NnMemorySpaceAttr) -> str:
 
     功能说明:
     - 为 `Memory<Space, T>` 类型生成固定的 space 模板参数。
-    - 仅接受 `global/shared/local/tsm/tlm`，其余值显式失败。
+    - 仅接受 `global/shared/local/tsm/tlm1/tlm2/tlm3`，其余值显式失败。
 
     使用示例:
     - space = _memory_space_to_c(NnMemorySpaceAttr.from_name("global"))
@@ -209,7 +209,9 @@ def _memory_space_to_c(space_attr: NnMemorySpaceAttr) -> str:
         "shared": "MemorySpace::SM",
         "local": "MemorySpace::LM",
         "tsm": "MemorySpace::TSM",
-        "tlm": "MemorySpace::TLM",
+        "tlm1": "MemorySpace::TLM1",
+        "tlm2": "MemorySpace::TLM2",
+        "tlm3": "MemorySpace::TLM3",
     }
     if space not in mapping:
         raise TypeError(f"unsupported nn memory space: {space}")
@@ -223,8 +225,8 @@ def _memory_space_to_c_for_target(space_attr: NnMemorySpaceAttr, target: str) ->
     最后一次更改: 小李飞刀
 
     功能说明:
-    - `target=npu_demo` 时输出 `GM/SM/LM/TSM/TLM`，匹配 npu_demo helper 口径。
-    - 其他 target 维持 `MemorySpace::GM/SM/LM/TSM/TLM` 形式。
+    - `target=npu_demo` 时输出 `GM/SM/LM/TSM/TLM1/TLM2/TLM3`，匹配 npu_demo helper 口径。
+    - 其他 target 维持 `MemorySpace::GM/SM/LM/TSM/TLM1/TLM2/TLM3` 形式。
     - 非法 space 必须显式失败。
 
     使用示例:
@@ -243,7 +245,9 @@ def _memory_space_to_c_for_target(space_attr: NnMemorySpaceAttr, target: str) ->
             "shared": "SM",
             "local": "LM",
             "tsm": "TSM",
-            "tlm": "TLM",
+            "tlm1": "TLM1",
+            "tlm2": "TLM2",
+            "tlm3": "TLM3",
         }
     else:
         mapping = {
@@ -251,7 +255,9 @@ def _memory_space_to_c_for_target(space_attr: NnMemorySpaceAttr, target: str) ->
             "shared": "MemorySpace::SM",
             "local": "MemorySpace::LM",
             "tsm": "MemorySpace::TSM",
-            "tlm": "MemorySpace::TLM",
+            "tlm1": "MemorySpace::TLM1",
+            "tlm2": "MemorySpace::TLM2",
+            "tlm3": "MemorySpace::TLM3",
         }
     if space not in mapping:
         raise TypeError(f"unsupported nn memory space: {space}")
@@ -469,12 +475,17 @@ class _KernelEmitter:
             normalized,
         )
         normalized = re.sub(
-            r"Memory<\s*(?:cpu::)?(GM|TSM|TLM|LM|SM)\s*,",
+            r"Memory<\s*(?:cpu::)?(GM|TSM|TLM1|TLM2|TLM3|LM|SM)\s*,",
             r"Memory<MemorySpace::\1,",
             normalized,
         )
         normalized = re.sub(r"Memory<\s*(?!MemorySpace::)([^>]+)\s*>", r"Memory<MemorySpace::GM, \1>", normalized)
         normalized = re.sub(r",\s*MemorySpace::GM\s*\)", ")", normalized)
+        normalized = re.sub(
+            r"(Memory<[^>]+>\s+\w+\()\s*([^,]+),\s*([A-Za-z_][A-Za-z0-9_]*)_shape,\s*([A-Za-z_][A-Za-z0-9_]*)_stride,\s*([0-9]+),\s*([^)]+)\)",
+            r"\1\2, \5, \3_shape, \4_stride, \6)",
+            normalized,
+        )
         return normalized
 
     def emit(self, op_or_func: Any) -> str:
@@ -1051,7 +1062,8 @@ class _KernelEmitter:
         最后一次更改: 小李飞刀
 
         功能说明:
-        - 显式收口为 `ctx.barrier({MemorySpace::TSM, MemorySpace::TLM}, BarrierScope::BLOCK);`
+        - 显式收口为
+          `ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);`
         - 非 block 或缺失 `[tsm, tlm]` 时稳定失败，防止回退到旧接口。
 
         使用示例:
@@ -1065,10 +1077,18 @@ class _KernelEmitter:
 
         if barrier_op.scope.scope.data != "block":
             raise _error(self.ctx, func_name, "npu_demo barrier scope must be block")
-        spaces = [getattr(entry, "space", None).data for entry in barrier_op.visibility.data]
+        spaces = []
+        for entry in barrier_op.visibility.data:
+            visibility_attr = getattr(entry, "visibility", None)
+            if visibility_attr is None:
+                raise _error(self.ctx, func_name, "npu_demo barrier visibility must be [tsm, tlm]")
+            spaces.append(visibility_attr.data)
         if spaces != ["tsm", "tlm"]:
             raise _error(self.ctx, func_name, "npu_demo barrier visibility must be [tsm, tlm]")
-        return f"{self.ctx.current_indent}ctx.barrier({{MemorySpace::TSM, MemorySpace::TLM}}, BarrierScope::BLOCK);"
+        return (
+            f"{self.ctx.current_indent}ctx.barrier("
+            "{BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);"
+        )
 
     def _emit_npu_demo_launch_body_function(self, func_op: func.FuncOp) -> str:
         """生成 npu_demo `add+barrier` body 函数源码。
@@ -1112,8 +1132,8 @@ class _KernelEmitter:
                 f"ctx.get_dynamic_memory<MemorySpace::TSM, {element_type}>();"
             ),
             (
-                f"{indent}Memory<MemorySpace::TLM, {element_type}> tlm = "
-                f"ctx.get_dynamic_memory<MemorySpace::TLM, {element_type}>();"
+                f"{indent}Memory<MemorySpace::TLM1, {element_type}> tlm = "
+                f"ctx.get_dynamic_memory<MemorySpace::TLM1, {element_type}>();"
             ),
             "",
             f"{indent}auto {lhs_name}_gm = view({lhs_name}, tid * 16, 16, 1);",
@@ -1251,8 +1271,8 @@ class _KernelEmitter:
                 f"ctx.get_dynamic_memory<MemorySpace::TSM, {element_type}>();"
             ),
             (
-                f"{self.ctx.current_indent}Memory<MemorySpace::TLM, {element_type}> tlm = "
-                f"ctx.get_dynamic_memory<MemorySpace::TLM, {element_type}>();"
+                f"{self.ctx.current_indent}Memory<MemorySpace::TLM1, {element_type}> tlm = "
+                f"ctx.get_dynamic_memory<MemorySpace::TLM1, {element_type}>();"
             ),
             "",
             f"{self.ctx.current_indent}auto src_view = view({source_name}, tid * 16, 16, 1);",

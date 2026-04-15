@@ -23,14 +23,14 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from xdsl.dialects import arith, func, scf
-from xdsl.dialects.builtin import FloatAttr, IndexType, IntAttr, IntegerAttr, IntegerType, f32
+from xdsl.dialects.builtin import FloatAttr, IndexType, IntAttr, IntegerAttr, IntegerType, StringAttr, f32
 from xdsl.ir import BlockArgument, Operation, SSAValue
 
 from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFillOp, DmaLoadOp, DmaSliceOp, DmaStoreOp, DmaViewOp
 from kernel_gen.dialect.kernel import KernelAddOp, KernelBinaryElewiseOp, KernelMatmulOp
 from kernel_gen.dialect.nn import NnAddOp, NnImg2col2dOp, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolConstOp, SymbolForOp, SymbolGetDimOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolConstOp, SymbolForOp, SymbolGetDimOp, SymbolToIntOp, SymbolValueType
 
 
 class EmitCError(ValueError):
@@ -119,6 +119,31 @@ def _emit_error(ctx: EmitCContext, subject: str, reason: str) -> EmitCError:
     return EmitCError(f"target={ctx.target}: {subject}: {reason}")
 
 
+def _is_symbol_const_like(op: Operation) -> bool:
+    """判断 op 是否等价于 `symbol.const`。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 兼容直接 IRDL `SymbolConstOp` 与 pass 产出的 `builtin.unregistered` 形式 `symbol.const`。
+    - 仅用于节点级 emitter 透明跳过/取值，不扩展为新的公开 op 合同。
+
+    使用示例:
+    - _is_symbol_const_like(op)
+
+    关联文件:
+    - spec: spec/dsl/emit_c.md
+    - test: test/dsl/test_emit_c.py
+    - 功能实现: kernel_gen/dsl/emit_c.py
+    """
+
+    if isinstance(op, SymbolConstOp):
+        return True
+    op_name_attr = op.attributes.get("op_name__")
+    return op.name == "builtin.unregistered" and isinstance(op_name_attr, StringAttr) and op_name_attr.data == "symbol.const"
+
+
 _BINARY_SIGILS = {
     "arith.addi": "+",
     "arith.addf": "+",
@@ -138,6 +163,8 @@ _CMPI_SIGILS = {
     4: ">",
     5: ">=",
 }
+
+_NPU_DYNAMIC_MEMORY_SPACES = {"TSM", "TLM1", "TLM2", "TLM3"}
 
 
 def _type_to_c(attr: Any, ctx: EmitCContext) -> str:
@@ -235,7 +262,8 @@ def _space_to_c(memory_type: NnMemoryType, ctx: EmitCContext) -> str:
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 将 `#nn.space<global/shared/local/tsm/tlm>` 映射为对应的模板参数 `GM/SM/LM/TSM/TLM`。
+    - 将 `#nn.space<global/shared/local/tsm/tlm1/tlm2/tlm3>` 映射为对应的模板参数
+      `GM/SM/LM/TSM/TLM1/TLM2/TLM3`。
     - 用于 `dma.alloc`/`dma.view`/`nn.img2col2d` 等内存视图声明时的模板参数生成。
 
     使用示例:
@@ -252,7 +280,9 @@ def _space_to_c(memory_type: NnMemoryType, ctx: EmitCContext) -> str:
         "shared": "SM",
         "local": "LM",
         "tsm": "TSM",
-        "tlm": "TLM",
+        "tlm1": "TLM1",
+        "tlm2": "TLM2",
+        "tlm3": "TLM3",
     }
     space_name = memory_type.space.space.data
     mapped = mapping.get(space_name)
@@ -262,13 +292,14 @@ def _space_to_c(memory_type: NnMemoryType, ctx: EmitCContext) -> str:
 
 
 def _space_name_to_c(space_name: str, ctx: EmitCContext) -> str:
-    """把 space 名称映射为模板参数 `GM/SM/LM/TSM/TLM` 文本。
+    """把 space 名称映射为模板参数 `GM/SM/LM/TSM/TLM1/TLM2/TLM3` 文本。
 
     创建者: jcc你莫辜负
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 统一处理 `global/shared/local/tsm/tlm` 到 `GM/SM/LM/TSM/TLM` 的映射。
+    - 统一处理 `global/shared/local/tsm/tlm1/tlm2/tlm3` 到
+      `GM/SM/LM/TSM/TLM1/TLM2/TLM3` 的映射。
     - 供 `npu_demo` 的 `arch.get_dynamic_memory` 模板参数发射复用。
 
     使用示例:
@@ -285,7 +316,9 @@ def _space_name_to_c(space_name: str, ctx: EmitCContext) -> str:
         "shared": "SM",
         "local": "LM",
         "tsm": "TSM",
-        "tlm": "TLM",
+        "tlm1": "TLM1",
+        "tlm2": "TLM2",
+        "tlm3": "TLM3",
     }
     mapped = mapping.get(space_name)
     if mapped is None:
@@ -1002,7 +1035,8 @@ def _emit_npu_dynamic_memory_stmt(op: ArchGetDynamicMemoryOp, ctx: EmitCContext)
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 把 `arch.get_dynamic_memory` 发射为 `ctx.get_dynamic_memory<TSM/TLM, T>()`。
+    - 把 `arch.get_dynamic_memory` 发射为
+      `ctx.get_dynamic_memory<TSM/TLM1/TLM2/TLM3, T>()`。
     - 结果名可预绑定，但右值必须始终来自真实 helper 调用。
 
     使用示例:
@@ -1017,7 +1051,7 @@ def _emit_npu_dynamic_memory_stmt(op: ArchGetDynamicMemoryOp, ctx: EmitCContext)
     result_name = ctx.allocate_name(op.result)
     element_type = _type_to_c(op.result.type.element_type, ctx)
     space_expr = _space_name_to_c(op.memory_space.space.data, ctx)
-    if space_expr not in {"TSM", "TLM"}:
+    if space_expr not in _NPU_DYNAMIC_MEMORY_SPACES:
         raise _emit_error(ctx, op.name, "unsupported dynamic memory space")
     return (
         f"{ctx.current_indent}Memory<{space_expr}, {element_type}> {result_name} = "
@@ -1206,7 +1240,8 @@ def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 负责把常量、二元算术、比较、unit-tile `dma.load`、`symbol.add`（cpu）以及 `symbol.get_dim` 结果转换为右值表达式。
+    - 负责把常量、二元算术、比较、unit-tile `dma.load`、`symbol.add/symbol.to_int`（cpu）
+      以及 `symbol.get_dim` 结果转换为右值表达式。
     - 若 value 已在 `EmitCContext` 中绑定名称，则直接复用稳定名称。
 
     使用示例:
@@ -1226,8 +1261,12 @@ def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
     owner = value.owner
     if isinstance(owner, arith.ConstantOp):
         return _format_literal(owner, ctx)
-    if isinstance(owner, SymbolConstOp):
-        return str(owner.value.data)
+    if _is_symbol_const_like(owner):
+        if isinstance(owner, SymbolConstOp):
+            return str(owner.value.data)
+        if owner.results and isinstance(owner.results[0].type, SymbolValueType):
+            return owner.results[0].type.expr.expr.data
+        raise _emit_error(ctx, owner.name, "symbol.const result must be !symbol.int")
     if ctx.target == "npu_demo":
         if isinstance(owner, ArchGetThreadIdOp):
             return "ctx.thread_id()"
@@ -1236,7 +1275,7 @@ def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
         if isinstance(owner, ArchGetDynamicMemoryOp):
             element_type = _type_to_c(owner.result.type.element_type, ctx)
             space_expr = _space_name_to_c(owner.memory_space.space.data, ctx)
-            if space_expr not in {"TSM", "TLM"}:
+            if space_expr not in _NPU_DYNAMIC_MEMORY_SPACES:
                 raise _emit_error(ctx, owner.name, "unsupported dynamic memory space")
             return f"ctx.get_dynamic_memory<{space_expr}, {element_type}>()"
     if owner.name in _BINARY_SIGILS:
@@ -1252,6 +1291,8 @@ def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
         lhs = emit_c_value(owner.lhs, ctx)
         rhs = emit_c_value(owner.rhs, ctx)
         return f"({lhs} {_CMPI_SIGILS[predicate]} {rhs})"
+    if isinstance(owner, SymbolToIntOp):
+        return emit_c_value(owner.source, ctx)
     if isinstance(owner, DmaLoadOp):
         return _emit_dma_load_expr(owner, ctx)
     if isinstance(owner, SymbolGetDimOp):
@@ -1368,7 +1409,9 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
         return _emit_assignment(op, ctx)
     if isinstance(op, arith.ConstantOp):
         return ""
-    if isinstance(op, SymbolConstOp):
+    if _is_symbol_const_like(op):
+        return ""
+    if isinstance(op, SymbolToIntOp):
         return ""
     if op.name in {"tile.symbol_literal", "tile.step_value"}:
         if not op.results:
