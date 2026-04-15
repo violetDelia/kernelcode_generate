@@ -43,7 +43,8 @@ from kernel_gen.dsl.ast import (
     VarAST,
 )
 from kernel_gen.dsl.mlir_gen.emit.core import _expr_key
-from kernel_gen.dsl.mlir_gen.emit import EmitContext, LoweringError
+from kernel_gen.dsl.mlir_gen.emit import EmitContext
+from kernel_gen.dsl.mlir_gen.emit.context import LoweringError
 from kernel_gen.dsl.mlir_gen.emit.call_symbol import emit_symbol_call, emit_symbol_for
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.type import NumericType

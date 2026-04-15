@@ -1480,7 +1480,7 @@ def test_build_func_op_supports_img2col1d_symbolic_annotation() -> None:
 # 功能说明: 验证 img2col1d helper 支持符号 kernel 参数并保留为 symbol.int operand。
 # 测试目的: 锁定 `img2col1d(src, kw=KW, ...)` 不再被当作纯静态整数路径，且输出类型仍按 operation 合同推导。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_img2col1d_symbolic_kernel_argument
-# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dsl/emit_mlir.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_build_func_op_supports_img2col1d_symbolic_kernel_argument() -> None:
@@ -1839,7 +1839,7 @@ def test_build_func_op_supports_symbolic_conv_helper_call() -> None:
 # 功能说明: 验证 conv helper 支持符号 kh/kw 与符号 padding 参数。
 # 测试目的: 锁定 conv 前端分解在符号 kernel/padding 路径下仍输出 nn.img2col2d + nn.matmul，并保持 helper 参数为 symbol.int operand。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_symbolic_conv_helper_kernel_and_padding
-# 对应功能实现文件路径: kernel_gen/dsl/emit_mlir.py, kernel_gen/dsl/mlir_gen.py
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dsl/emit_mlir.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_build_func_op_supports_symbolic_conv_helper_kernel_and_padding() -> None:

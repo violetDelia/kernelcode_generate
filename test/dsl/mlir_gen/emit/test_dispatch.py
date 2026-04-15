@@ -1,7 +1,7 @@
 """Emit dispatch tests.
 
 创建者: jcc你莫辜负
-最后一次更改: jcc你莫辜负
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 emit dispatch/call_dispatch 的最小行为。
@@ -34,7 +34,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.dsl.ast import ConstAST
-from kernel_gen.dsl.mlir_gen.emit import EmitContext, LoweringError
+from kernel_gen.dsl.mlir_gen.emit import EmitContext
+from kernel_gen.dsl.mlir_gen.emit.context import LoweringError
 from kernel_gen.dsl.mlir_gen.emit.dispatch import call_dispatch, emit_mlir
 
 
@@ -81,3 +82,25 @@ def test_call_dispatch_rejects_non_callee() -> None:
 
     with pytest.raises(LoweringError, match="call_dispatch expects PythonCalleeCallAST"):
         call_dispatch(ConstAST(1), ctx)  # type: ignore[arg-type]
+
+
+# EMIT-DISP-003
+# 创建者: 金铲铲大作战
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-16 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-16 00:00:00 +0800
+# 功能说明: 验证 emit 包根仅公开 `EmitContext` 与 `emit_mlir` 两个稳定入口。
+# 测试目的: 锁定 `kernel_gen.dsl.mlir_gen.emit` 的包根公开集合，避免 `LoweringError`、`call_dispatch` 等 helper 被继续视为稳定 API。
+# 使用示例: pytest -q test/dsl/mlir_gen/emit/test_dispatch.py -k test_emit_package_root_exports_only_stable_api
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/__init__.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/mlir_gen/emit/test_dispatch.py
+def test_emit_package_root_exports_only_stable_api() -> None:
+    import kernel_gen.dsl.mlir_gen.emit as emit_pkg
+
+    if emit_pkg.__all__ != ["EmitContext", "emit_mlir"]:
+        raise AssertionError(f"unexpected package root exports: {emit_pkg.__all__}")
+    if hasattr(emit_pkg, "LoweringError"):
+        raise AssertionError("package root should not expose LoweringError")
+    if hasattr(emit_pkg, "call_dispatch"):
+        raise AssertionError("package root should not expose call_dispatch")

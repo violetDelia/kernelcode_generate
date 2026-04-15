@@ -1711,7 +1711,7 @@ def _resolve_helper_index_param_value(
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
     - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
-    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
 
     try:
@@ -1748,7 +1748,7 @@ def _helper_index_value_to_symbolic(
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
     - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
-    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
 
     if isinstance(value, int):
@@ -2053,7 +2053,7 @@ def _shape_attr_to_helper_index_operand(
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
     - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
-    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
 
     if isinstance(attr, IntAttr):
@@ -2085,7 +2085,7 @@ def _lower_helper_index_operand(
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
     - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
-    - 功能实现: [kernel_gen/dsl/emit_mlir.py](kernel_gen/dsl/emit_mlir.py)
+    - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
 
     if isinstance(expr, ConstAST):
