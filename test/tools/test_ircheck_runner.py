@@ -883,3 +883,93 @@ builtin.module {
     result = run_ircheck_text(text, source_path="inline.ircheck")
     assert result.ok is True
     assert result.exit_code == 0
+
+
+# TC-IRCHECK-RUN-031
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-15 08:55 +0800
+# 最近一次运行成功时间: 2026-04-15 08:55 +0800
+# 功能说明: 验证 `emitc_target="cpu"` 会在 compile steps 后切换到生成源码匹配，并把源码写回 `actual_ir`。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_emitc_cpu_matches_generated_source
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+def test_run_ircheck_text_emitc_cpu_matches_generated_source() -> None:
+    text = """// COMPILE_ARGS: --pass no-op
+// CHECK: void main()
+// CHECK-NEXT: }
+
+builtin.module {
+  func.func @main() {
+    func.return
+  }
+}
+"""
+    result = run_ircheck_text(text, source_path="inline_emitc.ircheck", emitc_target="cpu")
+
+    assert result.ok is True
+    assert result.exit_code == 0
+    assert result.failed_check is None
+    assert result.message is None
+    assert result.actual_ir == "void main() {\n}"
+
+
+# TC-IRCHECK-RUN-032
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-15 08:55 +0800
+# 最近一次运行成功时间: 2026-04-15 08:55 +0800
+# 功能说明: 验证 `emitc` 路径匹配失败时，`CHECK*` 面向生成源码而非规范化 IR，且 `actual_ir` 返回源码文本。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_emitc_cpu_match_failure_reports_generated_source
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+def test_run_ircheck_text_emitc_cpu_match_failure_reports_generated_source() -> None:
+    text = """// COMPILE_ARGS: --pass no-op
+// CHECK: builtin.module
+
+builtin.module {
+  func.func @main() {
+    func.return
+  }
+}
+"""
+    result = run_ircheck_text(text, source_path="inline_emitc.ircheck", emitc_target="cpu")
+
+    assert result.ok is False
+    assert result.exit_code == 1
+    assert result.failed_check is not None
+    assert result.failed_check.kind == "CHECK"
+    assert result.message is not None
+    assert result.message.startswith("IrcheckMatchError: CHECK not found")
+    assert result.actual_ir == "void main() {\n}"
+
+
+# TC-IRCHECK-RUN-033
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-15 08:55 +0800
+# 最近一次运行成功时间: 2026-04-15 08:55 +0800
+# 功能说明: 验证 `emitc_target="npu_demo"` 对普通单函数输入显式失败，并映射为稳定错误前缀。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_emitc_npu_demo_maps_generation_failure
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+def test_run_ircheck_text_emitc_npu_demo_maps_generation_failure() -> None:
+    text = """// COMPILE_ARGS: --pass no-op
+// CHECK: unused
+
+builtin.module {
+  func.func @main() {
+    func.return
+  }
+}
+"""
+    result = run_ircheck_text(text, source_path="inline_emitc.ircheck", emitc_target="npu_demo")
+
+    assert result.ok is False
+    assert result.exit_code == 2
+    assert result.failed_check is None
+    assert result.message is not None
+    assert result.message.startswith("IrcheckEmitCError: emit_c generation failed")
