@@ -159,3 +159,17 @@
 - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260414-execute-engine-matmul-s3:/home/lfr/kernelcode_generate python /home/lfr/kernelcode_generate/wt-20260414-execute-engine-matmul-s3/expectation/execute_engine/npu_demo/matmul.py` -> exit=0；`CASE-1/CASE-2/CASE-3` 全通过，源码包含 `npu_demo::matmul(`，真实执行结果为 `ExecuteResult(ok=True, status_code=0, failure_phrase=None)`
 - `git -C /home/lfr/kernelcode_generate/wt-20260414-execute-engine-matmul-s3 diff --name-only` -> 仅 `kernel_gen/dsl/emit_c.py`、`kernel_gen/dsl/gen_kernel.py`、`test/dsl/test_emit_c.py`、`test/dsl/test_gen_kernel.py`
 结论：最小必要验收已通过，当前提交范围符合 merge 口径；下一步执行 `git add -f expectation/execute_engine/npu_demo/matmul.py`、提交并推送 `origin/main`，随后执行 `-done` / `-talk` 收口。
+
+时间：2026-04-15 09:18 +0800
+经办人：李白
+任务：T-20260414-afcd18ce
+任务目标：回写当前 merge 结果，并完成任务状态流转前的最终记录。
+改动：
+- 已在 `worktree=/home/lfr/kernelcode_generate/wt-20260414-execute-engine-matmul-s3` 生成 merge 提交 `2bd83e4`，提交信息为 `T-20260414-afcd18ce merge: execute engine matmul`。
+- 已按计划书唯一口径在该提交中纳入 `kernel_gen/dsl/emit_c.py`、`kernel_gen/dsl/gen_kernel.py`、`test/dsl/test_emit_c.py`、`test/dsl/test_gen_kernel.py`、`expectation/execute_engine/npu_demo/matmul.py` 与本记录文件；`.gitignore` 未修改。
+- 已将该提交推送到远端主分支，`origin/main` 当前已前进到 `2bd83e4`；下一步只在主仓根目录执行 `-done` 与 `-talk`，随后清理本地任务现场。
+验证：
+- `git -C /home/lfr/kernelcode_generate/wt-20260414-execute-engine-matmul-s3 rev-parse --short HEAD` -> `2bd83e4`
+- `git -C /home/lfr/kernelcode_generate/wt-20260414-execute-engine-matmul-s3 rev-parse --short origin/main` -> `2bd83e4`
+- `git -C /home/lfr/kernelcode_generate/wt-20260414-execute-engine-matmul-s3 status --short --branch` -> 工作树干净
+结论：当前 merge 已完成并成功推送远端主分支；本条记录已在执行 `-done` / `-talk` 前补齐，接下来按流程完成任务收口。
