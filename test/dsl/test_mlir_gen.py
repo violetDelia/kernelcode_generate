@@ -1896,6 +1896,31 @@ def test_build_func_op_conv_helper_rejects_invalid_stride() -> None:
         build_func_op(conv_kernel, value, weight)
 
 
+# MGEN-C1E-CLAST
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证当前 conv helper 公开合同仍按 NCHW 输入解释，不接受 CLast 输入张量。
+# 测试目的: 锁定 `Tensor[f32, 1, 5, 5, 3]` + `Memory(format=CLast)` 不会被静默当作 NHWC 路径通过，而是继续报 `conv input channel mismatch`。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_conv_helper_rejects_clast_input_under_current_contract
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py, kernel_gen/dsl/mlir_gen/function_builder.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/operation/nn.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_conv_helper_rejects_clast_input_under_current_contract() -> None:
+    from kernel_gen.operation.nn import conv
+
+    value = Memory([1, 5, 5, 3], NumericType.Float32, space=MemorySpace.GM, format=Farmat.CLast)
+    weight = Memory([8, 3, 3, 3], NumericType.Float32, space=MemorySpace.GM)
+
+    def conv_kernel(
+        value: "Tensor[f32, 1, 5, 5, 3]",
+        weight: "Tensor[f32, 8, 3, 3, 3]",
+    ) -> "Tensor[f32, 1, 8, 5, 5]":
+        return conv(value, weight, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr=1)
+
+    with pytest.raises(ValueError, match="conv input channel mismatch"):
+        build_func_op(conv_kernel, value, weight)
+
+
 # MGEN-C1F
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚
