@@ -1,7 +1,7 @@
 """DSL nn.broadcast_to expectation.
 
 创建者: 大闸蟹
-最后一次更改: 守护最好的爱莉希雅
+最后一次更改: 小李飞刀
 
 功能说明:
 - 演示 `dsl/mlir_gen` expectation 如何直接使用 `mlir_gen_compare_text(...)` 比较完整 `builtin.module`。
@@ -17,7 +17,7 @@
 - spec: [`spec/tools/mlir_gen_compare.md`](spec/tools/mlir_gen_compare.md)
 - test: [`test/dsl/test_mlir_gen.py`](test/dsl/test_mlir_gen.py)
 - test: [`test/tools/test_mlir_gen_compare.py`](test/tools/test_mlir_gen_compare.py)
-- 功能实现: [`kernel_gen/dsl/mlir_gen.py`](kernel_gen/dsl/mlir_gen.py)
+- 功能实现: [`kernel_gen/dsl/mlir_gen/__init__.py`](kernel_gen/dsl/mlir_gen/__init__.py)
 - 功能实现: [`kernel_gen/tools/mlir_gen_compare.py`](kernel_gen/tools/mlir_gen_compare.py)
 """
 
@@ -58,6 +58,18 @@ CASE_1_RUNTIME_ARGS = (
     Memory([1, 4], NumericType.Float32, space=MemorySpace.SM, format=Farmat.CLast),
 )
 
+# broadcast_to_kernel_case_1
+# 创建者: 大闸蟹
+# 最后一次更改: 小李飞刀
+# 功能说明:
+# - 提供 `broadcast_to(src, target_shape=[3, 4], space=MemorySpace.LM)` 的静态目标样例。
+# 使用示例:
+# - `mlir_gen_compare_text(fn=broadcast_to_kernel_case_1, runtime_args=CASE_1_RUNTIME_ARGS, config=None, mlir_text=CASE_1_IR)`
+# 关联文件:
+# - spec: [`spec/dialect/nn.md`](spec/dialect/nn.md)
+# - test: [`test/dsl/test_mlir_gen.py`](test/dsl/test_mlir_gen.py)
+# - 功能实现: [`expectation/dsl/mlir_gen/dialect/nn/broadcast_to.py`](expectation/dsl/mlir_gen/dialect/nn/broadcast_to.py)
+# - 功能实现: [`kernel_gen/operation/nn.py`](kernel_gen/operation/nn.py)
 def broadcast_to_kernel_case_1(src):
     return broadcast_to(src, target_shape=[3, 4], space=MemorySpace.LM)
 
@@ -75,6 +87,18 @@ CASE_2_RUNTIME_ARGS = (
     SymbolDim("K"),
 )
 
+# broadcast_to_kernel_case_2
+# 创建者: 大闸蟹
+# 最后一次更改: 小李飞刀
+# 功能说明:
+# - 提供 symbol 目标 shape 的 `broadcast_to(...)` DSL 函数体，验证动态形状下仍生成 `nn.broadcast`。
+# 使用示例:
+# - `mlir_gen_compare_text(fn=broadcast_to_kernel_case_2, runtime_args=CASE_2_RUNTIME_ARGS, config=None, mlir_text=CASE_2_IR)`
+# 关联文件:
+# - spec: [`spec/dialect/nn.md`](spec/dialect/nn.md)
+# - test: [`test/dsl/test_mlir_gen.py`](test/dsl/test_mlir_gen.py)
+# - 功能实现: [`expectation/dsl/mlir_gen/dialect/nn/broadcast_to.py`](expectation/dsl/mlir_gen/dialect/nn/broadcast_to.py)
+# - 功能实现: [`kernel_gen/operation/nn.py`](kernel_gen/operation/nn.py)
 def broadcast_to_kernel_case_2(src, m, k):
     return broadcast_to(src, target_shape=[m, k], space=MemorySpace.LM)
 
@@ -83,23 +107,89 @@ CASE_3_RUNTIME_ARGS = (
     Memory([1, 4], NumericType.Float32, space=MemorySpace.SM, format=Farmat.CLast),
 )
 
+# broadcast_to_kernel_case_3
+# 创建者: 大闸蟹
+# 最后一次更改: 小李飞刀
+# 功能说明:
+# - 提供目标 rank 小于输入 rank 的 `broadcast_to(...)` DSL 函数体，用于验证构造阶段会直接拒绝。
+# 使用示例:
+# - `mlir_gen_compare_text(fn=broadcast_to_kernel_case_3, runtime_args=CASE_3_RUNTIME_ARGS, config=None, mlir_text=CASE_1_IR)`
+# 关联文件:
+# - spec: [`spec/dialect/nn.md`](spec/dialect/nn.md)
+# - test: [`test/dsl/test_mlir_gen.py`](test/dsl/test_mlir_gen.py)
+# - 功能实现: [`expectation/dsl/mlir_gen/dialect/nn/broadcast_to.py`](expectation/dsl/mlir_gen/dialect/nn/broadcast_to.py)
+# - 功能实现: [`kernel_gen/operation/nn.py`](kernel_gen/operation/nn.py)
 def broadcast_to_kernel_case_3(src):
     return broadcast_to(src, target_shape=[4], space=MemorySpace.LM)
 
 
 def _case_1_true():
+    """断言静态目标 shape 的 `broadcast_to` 文本合同成立。
+
+    创建者: 大闸蟹
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 打印 CASE-1 说明并校验静态 `broadcast_to` 样例的完整 IR 文本。
+
+    使用示例:
+    - `_case_1_true()`
+
+    关联文件:
+    - spec: [`spec/tools/mlir_gen_compare.md`](spec/tools/mlir_gen_compare.md)
+    - test: [`test/tools/test_mlir_gen_compare.py`](test/tools/test_mlir_gen_compare.py)
+    - 功能实现: [`expectation/dsl/mlir_gen/dialect/nn/broadcast_to.py`](expectation/dsl/mlir_gen/dialect/nn/broadcast_to.py)
+    - 功能实现: [`kernel_gen/tools/mlir_gen_compare.py`](kernel_gen/tools/mlir_gen_compare.py)
+    """
+
     print("[CASE-1] 静态正向例子：broadcast_to(source, target_shape, space) -> nn.broadcast")
     ok = mlir_gen_compare_text(fn=broadcast_to_kernel_case_1, runtime_args=CASE_1_RUNTIME_ARGS, config=None, mlir_text=CASE_1_IR)
     assert ok is True, "expected mlir_gen_compare_text(...) to return True for static broadcast_to module text"
 
 
 def _case_2_true():
+    """断言 symbol 目标 shape 的 `broadcast_to` 文本合同成立。
+
+    创建者: 大闸蟹
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 打印 CASE-2 说明并校验 symbol 目标形状 `broadcast_to` 样例的完整 IR 文本。
+
+    使用示例:
+    - `_case_2_true()`
+
+    关联文件:
+    - spec: [`spec/tools/mlir_gen_compare.md`](spec/tools/mlir_gen_compare.md)
+    - test: [`test/tools/test_mlir_gen_compare.py`](test/tools/test_mlir_gen_compare.py)
+    - 功能实现: [`expectation/dsl/mlir_gen/dialect/nn/broadcast_to.py`](expectation/dsl/mlir_gen/dialect/nn/broadcast_to.py)
+    - 功能实现: [`kernel_gen/tools/mlir_gen_compare.py`](kernel_gen/tools/mlir_gen_compare.py)
+    """
+
     print("[CASE-2] symbol 正向例子：broadcast_to(source, target_shape, space) symbol target -> nn.broadcast")
     ok = mlir_gen_compare_text(fn=broadcast_to_kernel_case_2, runtime_args=CASE_2_RUNTIME_ARGS, config=None, mlir_text=CASE_2_IR)
     assert ok is True, "expected mlir_gen_compare_text(...) to return True for symbol broadcast_to module text"
 
 
 def _case_3_reject_target_rank_too_small():
+    """断言目标 rank 过小的 `broadcast_to` 会在构造阶段被拒绝。
+
+    创建者: 大闸蟹
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 打印 CASE-3 说明并验证目标 rank 小于输入 rank 的场景不会进入正常 IR 对比。
+
+    使用示例:
+    - `_case_3_reject_target_rank_too_small()`
+
+    关联文件:
+    - spec: [`spec/dialect/nn.md`](spec/dialect/nn.md)
+    - test: [`test/dsl/test_ast_visitor.py`](test/dsl/test_ast_visitor.py)
+    - 功能实现: [`expectation/dsl/mlir_gen/dialect/nn/broadcast_to.py`](expectation/dsl/mlir_gen/dialect/nn/broadcast_to.py)
+    - 功能实现: [`kernel_gen/operation/nn.py`](kernel_gen/operation/nn.py)
+    """
+
     print("[CASE-3] 失败例子：broadcast_to(source, target_shape, space) 的目标 rank 小于输入 rank 时应在构造阶段拒绝")
     try:
         mlir_gen_compare_text(fn=broadcast_to_kernel_case_3, runtime_args=CASE_3_RUNTIME_ARGS, config=None, mlir_text=CASE_1_IR)
@@ -110,6 +200,25 @@ def _case_3_reject_target_rank_too_small():
 
 
 def main():
+    """运行 `nn.broadcast_to` expectation 的全部公开 case。
+
+    创建者: 大闸蟹
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 顺序执行静态目标、symbol 目标和目标 rank 过小三类 `broadcast_to` 合同样例。
+    - 汇总失败 case，并通过共享 runner 输出统一错误摘要。
+
+    使用示例:
+    - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python expectation/dsl/mlir_gen/dialect/nn/broadcast_to.py`
+
+    关联文件:
+    - spec: [`spec/dialect/nn.md`](spec/dialect/nn.md)
+    - test: [`test/dsl/test_mlir_gen.py`](test/dsl/test_mlir_gen.py)
+    - 功能实现: [`expectation/dsl/mlir_gen/dialect/nn/broadcast_to.py`](expectation/dsl/mlir_gen/dialect/nn/broadcast_to.py)
+    - 功能实现: [`expectation/utils/case_runner.py`](expectation/utils/case_runner.py)
+    """
+
     failures: list[tuple[str, BaseException]] = []
     run_case(failures, "CASE-1", _case_1_true)
     run_case(failures, "CASE-2", _case_2_true)
