@@ -1,7 +1,7 @@
 """Pass registry API.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 提供 pass / pipeline 的进程内注册表，统一“名字 -> 构造器”的解析入口。
@@ -269,7 +269,7 @@ def load_builtin_passes() -> None:
     """加载仓库内置 pass / pipeline。
 
     创建者: 睡觉小分队
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 主动加载仓库内置 pass / pipeline，使装饰器注册与显式注册生效。
@@ -313,6 +313,7 @@ def load_builtin_passes() -> None:
     from kernel_gen.passes.lowering.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
     from kernel_gen.passes.lowering.memory_pool import MemoryPoolPass
     from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
+    from kernel_gen.passes.lowering.outline_device_kernel import OutlineDeviceKernelPass
     from kernel_gen.passes.lowering.symbol_loop_hoist import SymbolLoopHoistPass
     from kernel_gen.passes.lowering.tile import TilePass
 
@@ -322,6 +323,7 @@ def load_builtin_passes() -> None:
         NnLoweringPass,
         BufferResultsToOutParamsPass,
         LowerDmaMemoryHierarchyPass,
+        OutlineDeviceKernelPass,
         TilePass,
         SymbolLoopHoistPass,
         MemoryPoolPass,

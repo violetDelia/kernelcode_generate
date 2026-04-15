@@ -9,6 +9,7 @@
 - 提供 buffer-results-to-out-params pass 的公开入口。
 - 提供 lower-dma-memory-hierarchy pass 的公开入口。
 - 提供 decompass pass 的公开入口。
+- 提供 outline-device-kernel pass 的公开入口。
 - 提供 tile pass 与 kernel_split 兼容入口。
 
 使用示例:
@@ -22,6 +23,8 @@
 - pass_obj = LowerDmaMemoryHierarchyPass()
 - from kernel_gen.passes.lowering.decompass import DecompassPass
 - pass_obj = DecompassPass()
+- from kernel_gen.passes.lowering.outline_device_kernel import OutlineDeviceKernelPass
+- pass_obj = OutlineDeviceKernelPass()
 - from kernel_gen.passes.lowering.tile import TilePass
 - pass_obj = TilePass()
 
@@ -31,6 +34,7 @@
   - [spec/pass/lowering/buffer_results_to_out_params.md](spec/pass/lowering/buffer_results_to_out_params.md)
   - [spec/pass/lowering/dma_memory_hierarchy.md](spec/pass/lowering/dma_memory_hierarchy.md)
   - [spec/pass/lowering/decompass.md](spec/pass/lowering/decompass.md)
+  - [spec/pass/lowering/outline_device_kernel.md](spec/pass/lowering/outline_device_kernel.md)
   - [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
   - [spec/pass/lowering/kernel_split.md](spec/pass/lowering/kernel_split.md)
 - test:
@@ -39,6 +43,7 @@
   - [test/pass/test_buffer_results_to_out_params.py](test/pass/test_buffer_results_to_out_params.py)
   - [test/pass/test_dma_memory_hierarchy.py](test/pass/test_dma_memory_hierarchy.py)
   - [test/pass/test_decompose_nn_softmax.py](test/pass/test_decompose_nn_softmax.py)
+  - [test/pass/test_outline_device_kernel.py](test/pass/test_outline_device_kernel.py)
   - [test/pass/test_lowering_tile.py](test/pass/test_lowering_tile.py)
   - [test/pass/test_lowering_kernel_split.py](test/pass/test_lowering_kernel_split.py)
 - 功能实现:
@@ -47,6 +52,7 @@
   - [kernel_gen/passes/lowering/buffer_results_to_out_params.py](kernel_gen/passes/lowering/buffer_results_to_out_params.py)
   - [kernel_gen/passes/lowering/dma_memory_hierarchy.py](kernel_gen/passes/lowering/dma_memory_hierarchy.py)
   - [kernel_gen/passes/lowering/decompass.py](kernel_gen/passes/lowering/decompass.py)
+  - [kernel_gen/passes/lowering/outline_device_kernel.py](kernel_gen/passes/lowering/outline_device_kernel.py)
   - [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
   - [kernel_gen/passes/lowering/kernel_split.py](kernel_gen/passes/lowering/kernel_split.py)
 """
@@ -63,6 +69,7 @@ from .dma_memory_hierarchy import (
 )
 from .decompass import DecompassError, DecompassPass, register_decompass_rewrite
 from .kernel_split import KernelSplitError, KernelSplitPass
+from .outline_device_kernel import OutlineDeviceKernelError, OutlineDeviceKernelPass
 from .tile import TilePass, TilePassError
 
 __all__ = [
@@ -75,6 +82,8 @@ __all__ = [
     "DecompassPass",
     "DecompassError",
     "register_decompass_rewrite",
+    "OutlineDeviceKernelPass",
+    "OutlineDeviceKernelError",
     "TilePass",
     "TilePassError",
     "KernelSplitPass",

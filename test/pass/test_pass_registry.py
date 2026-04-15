@@ -1,7 +1,7 @@
 """pass registry tests.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 kernel_gen/passes/registry.py 的 pass/pipeline 注册、查询与错误短语约束。
@@ -218,6 +218,23 @@ def test_list_registered_are_sorted() -> None:
 
     assert list_registered_passes() == ["a-pass", "b-pass"]
     assert list_registered_pipelines() == ["a-pipeline", "b-pipeline"]
+
+
+# TC-REGISTRY-007A
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 功能说明: 验证内置 pass 加载后可通过稳定名称构造 outline-device-kernel。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_outline_device_kernel_pass
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/pass/test_pass_registry.py
+def test_build_registered_outline_device_kernel_pass() -> None:
+    load_builtin_passes()
+
+    pass_obj = build_registered_pass("outline-device-kernel")
+
+    assert pass_obj.name == "outline-device-kernel"
+    assert type(pass_obj).__name__ == "OutlineDeviceKernelPass"
 
 
 # TC-REGISTRY-008
