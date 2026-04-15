@@ -1,7 +1,7 @@
 """scf operation API tests.
 
 创建者: 摸鱼小分队
-最后一次更改: 金铲铲大作战
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 覆盖 kernel_gen/operation/scf.py 的 loop 语义。
@@ -157,3 +157,41 @@ def test_loop_trip_count_sequence_semantics() -> None:
     assert isinstance(loop_range, LoopRange)
     assert loop_range.trip_count == 3
     assert [loop_range.start + loop_range.step * i for i in range(loop_range.trip_count)] == [1, 3, 5]
+
+
+# TC-OP-SCF-008
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-15 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-15 00:00:00 +0800
+# 测试目的: 验证 scf.loop 显式拒绝 bool 形式的 start/end/step。
+# 使用示例: pytest -q test/operation/test_operation_scf.py -k test_loop_rejects_bool_operands
+# 对应功能实现文件路径: kernel_gen/operation/scf.py
+# 对应 spec 文件路径: spec/operation/scf.md
+# 对应测试文件路径: test/operation/test_operation_scf.py
+@pytest.mark.parametrize(
+    ("start", "end", "step"),
+    [
+        (True, 4, 1),
+        (0, True, 1),
+        (0, 4, True),
+    ],
+)
+def test_loop_rejects_bool_operands(start: object, end: object, step: object) -> None:
+    with pytest.raises(TypeError, match="int or SymbolDim"):
+        loop(start, end, step)
+
+
+# TC-OP-SCF-009
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-15 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-15 00:00:00 +0800
+# 测试目的: 验证 scf.loop 显式拒绝 bool 形式的 trip_count。
+# 使用示例: pytest -q test/operation/test_operation_scf.py -k test_loop_rejects_bool_trip_count
+# 对应功能实现文件路径: kernel_gen/operation/scf.py
+# 对应 spec 文件路径: spec/operation/scf.md
+# 对应测试文件路径: test/operation/test_operation_scf.py
+def test_loop_rejects_bool_trip_count() -> None:
+    with pytest.raises(TypeError, match="trip_count must be int or SymbolDim"):
+        loop(SymbolDim("M"), SymbolDim("N"), SymbolDim("S"), trip_count=True)

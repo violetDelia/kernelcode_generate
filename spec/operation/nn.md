@@ -7,16 +7,18 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`摸鱼小分队`
-- 最后一次更改：`朽木露琪亚`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/operation/nn.md`](../../spec/operation/nn.md)
-- `功能实现`：[`kernel_gen/operation/nn.py`](../../kernel_gen/operation/nn.py)
+- `功能实现`：
+  - [`kernel_gen/operation/nn.py`](../../kernel_gen/operation/nn.py)
+  - [`kernel_gen/operation/__init__.py`](../../kernel_gen/operation/__init__.py)
 - `test`：[`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py)
 
 ## 依赖
 
 - [`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)：定义 `Memory` 的 `shape`/`stride`/`dtype`/`space` 基础语义。
 - [`spec/symbol_variable/type.md`](../../spec/symbol_variable/type.md)：定义 `NumericType` 与 `Farmat` 的公开枚举语义，比较结果中的 `NumericType.Bool` 以该文档为准。
+- [`kernel_gen/operation/__init__.py`](../../kernel_gen/operation/__init__.py)：定义 `kernel_gen.operation` 包级稳定导出集合，供本文件锁定顶层导出边界复用。
 
 ## 目标
 
@@ -44,8 +46,24 @@
 - 不引入超出本文规则的复杂自动类型提升；`dtype` 兼容性需显式检查。
 - 不负责 AST/IR/lowering 设计。
 - 激活函数仅支持 `Memory` 输入；输出 `shape`/`dtype`/`space`/`format`/`stride` 继承输入，仅允许浮点 `dtype`（`Float16`/`BFloat16`/`Float32`/`Float64`）。
+- `kernel_gen.operation.nn` 是本组稳定模块入口；内部若后续拆出 `_nn_common / _nn_elementwise / _nn_broadcast / _nn_structured / _nn_reduction`，也只作为实现组织，不承诺为新的公开导入路径。
+- `kernel_gen.operation` 顶层稳定导出只保留经过包级聚合的子集：`add / sub / mul / truediv / eq / ne / lt / le / gt / ge / matmul`；`floordiv`、激活、`broadcast`、`transpose`、`softmax`、`fc`、`conv`、`img2col1d`、`img2col2d` 与归约族均继续通过 `kernel_gen.operation.nn` 访问，不在本轮顺手上提到顶层。
 
-## nn 类型提升规则（算术算子统一口径）
+## 术语
+
+### family 划分与导出边界
+
+- 本文件的阅读主轴固定为：`逐元素 -> broadcast -> structured -> reduction`；公开合同按 family 理解，不按当前单文件实现的自然书写顺序理解。
+- `kernel_gen.operation.nn` 负责承载完整 `nn` 高层语义；`kernel_gen.operation` 只暴露一组稳定、克制的顶层 helper，不等价于 `nn` 子模块的全集。
+
+| family | `kernel_gen.operation.nn` 稳定入口 | `kernel_gen.operation` 顶层稳定导出 | 说明 |
+| --- | --- | --- | --- |
+| `逐元素` | `add / sub / mul / truediv / floordiv / eq / ne / lt / le / gt / ge / relu / leaky_relu / sigmoid / tanh / hard_sigmoid / exp` | `add / sub / mul / truediv / eq / ne / lt / le / gt / ge` | 算术与比较允许上提到顶层；激活与 `exp` 保持子模块入口 |
+| `broadcast` | `broadcast / broadcast_to / transpose` | `无` | 继续作为 `kernel_gen.operation.nn` 子模块 helper，不进入顶层 |
+| `structured` | `softmax / fc / matmul / conv / img2col1d / img2col2d` | `matmul` | `matmul` 是当前唯一上提到顶层的 structured helper |
+| `reduction` | `reduce_sum / reduce_min / reduce_max` | `无` | 归约族继续保持子模块入口 |
+
+### nn 类型提升规则（算术算子统一口径）
 
 - 统一优先级（低精度 -> 高精度）为：`Int8`、`Uint8`、`Int16`、`Uint16`、`Int32`、`Uint32`、`Int64`、`Uint64`、`Float16`、`BFloat16`、`Float32`、`Float64`。
 - `Memory/Memory` 路径按上述优先级选择顺序更靠后的类型（高优先级）。
@@ -59,6 +77,17 @@
   - 不支持的 `dtype`（不在优先级列表或 `NumericType.Bool` 参与算术提升）必须抛出 `TypeError`。
 
 ## 公开接口
+
+### family 导航
+
+| 阅读顺序 | family | 公开 API | 顶层导出边界 |
+| --- | --- | --- | --- |
+| 1 | `逐元素` | `add / sub / mul / truediv / floordiv / eq / ne / lt / le / gt / ge / relu / leaky_relu / sigmoid / tanh / hard_sigmoid / exp` | 仅 `add / sub / mul / truediv / eq / ne / lt / le / gt / ge` 进入 `kernel_gen.operation` |
+| 2 | `broadcast` | `broadcast / broadcast_to / transpose` | 全部保持 `kernel_gen.operation.nn` 子模块入口 |
+| 3 | `structured` | `softmax / fc / matmul / conv / img2col1d / img2col2d` | 仅 `matmul` 进入 `kernel_gen.operation` |
+| 4 | `reduction` | `reduce_sum / reduce_min / reduce_max` | 全部保持 `kernel_gen.operation.nn` 子模块入口 |
+
+- family 导航是本文件的阅读入口与顶层导出真源；内部实现拆分或单文件书写顺序不构成额外公开合同。
 
 ### `add(lhs, rhs)`
 
@@ -1036,6 +1065,8 @@ cols = img2col2d(value, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr
 ### 测试目标
 
 - 验证逐元素算术/比较的成功路径、链式表达式、标量参与规则与错误规则。
+- 验证 `nn.md` 的 family 口径仍以 `逐元素 / broadcast / structured / reduction` 为主轴理解，不回退到“按单文件实现顺序罗列”的阅读方式。
+- 验证 `kernel_gen.operation` 顶层导出继续只暴露克制子集；`img2col1d/img2col2d`、`transpose` 等 helper 不回流到顶层。
 - 验证 `nn.add` 在同形状输入时保持原有 `Memory` 描述。
 - 验证显式 `broadcast(value, target)` 与 `broadcast_to(source, target_shape, space)` 的尾维对齐、前置维扩张、目标对齐与错误规则。
 - 验证逐元素隐式 broadcast 的 singleton dim / 前置维扩张与错误规则。
@@ -1084,6 +1115,8 @@ cols = img2col2d(value, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr
 | OP-TP-004 | OP-TP 规则仅适用于算术算子（`add/sub/mul/truediv/floordiv/matmul`） | `test_nn_other_arithmetic`, `test_nn_sub_reverse_and_dtype_mismatch`, `test_nn_floordiv_rules`, `test_nn_matmul_success` |
 | OP-TP-005 | 比较算子与显式广播路径不适用 OP-TP：比较结果固定 `Bool`，broadcast 结果对齐 target 描述 | `test_nn_compare_predicate`, `test_nn_compare_alias`, `test_nn_broadcast_success` |
 | OP-TP-006 | 不支持的 dtype 参与算术提升或非法标量输入必须抛错 | `test_nn_dtype_invalid_error`, `test_nn_scalar_type_error` |
+| OP-EXP-001 | `kernel_gen.operation.nn.__all__` 与包级公开列表不包含旧 `img2col`，避免旧 API 回流 | `test_nn_img2col_public_exports` |
+| OP-EXP-002 | `transpose` 继续通过 `kernel_gen.operation.nn.__all__` 导出 | `test_nn_transpose_exported_in_all` |
 | OP-ACT-001 | `relu`/`sigmoid`/`tanh`/`hard_sigmoid` 输出 `shape/dtype/space/stride/format` 继承输入 | `test_nn_activation_basic` |
 | OP-ACT-002 | `leaky_relu` 的 `alpha` 参数规则与边界行为 | `test_nn_activation_leaky_relu_alpha` |
 | OP-ACT-003 | 激活函数的非 `Memory` 输入、非浮点 `dtype` 与无效参数报错 | `test_nn_activation_invalid_input` |
