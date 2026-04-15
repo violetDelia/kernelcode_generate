@@ -1874,8 +1874,8 @@ def test_build_func_op_supports_symbolic_conv_helper_kernel_and_padding() -> Non
 # MGEN-C1E
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚
-# 功能说明: 验证 conv helper 的非法 stride 参数会显式失败。
-# 测试目的: 锁定 conv verifier 关键短语，避免非法参数静默通过。
+# 功能说明: 验证 conv helper 的非法 stride 参数会在顶层 facade 显式失败。
+# 测试目的: 锁定 build_func_op(...) 顶层 facade 对 helper 参数范围错误的公开短语，避免非法参数静默通过。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_conv_helper_rejects_invalid_stride
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
@@ -1892,7 +1892,7 @@ def test_build_func_op_conv_helper_rejects_invalid_stride() -> None:
     ) -> "Tensor[f32, 1, 8, 5, 5]":
         return conv(value, weight, sh=0, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr=1)
 
-    with pytest.raises(VerifyException, match="sh must be positive|output height must be positive"):
+    with pytest.raises(AstVisitorError, match="conv sh must be positive|output height must be positive"):
         build_func_op(conv_kernel, value, weight)
 
 
