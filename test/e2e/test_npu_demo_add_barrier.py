@@ -1,7 +1,7 @@
 """npu_demo add+barrier end-to-end runtime tests.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 端到端验证 `gen_kernel(target="npu_demo")` 生成的 `add_barrier` 双函数源码可编译为真实可执行程序。

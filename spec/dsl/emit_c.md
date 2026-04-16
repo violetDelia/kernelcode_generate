@@ -298,14 +298,14 @@ long long tnum = ctx.thread_num();
 
 ```cpp
 auto tsm = ctx.get_dynamic_memory<TSM, float>();
-auto tlm = ctx.get_dynamic_memory<TLM, float>();
+auto tlm = ctx.get_dynamic_memory<TLM1, float>();
 ```
 
 注意事项：
 
-- 当前 `npu_demo` 成功路径只承认 `TSM` 与 `TLM`。
+- 当前 `npu_demo` 成功路径只承认 `TSM` 与 `TLM1/TLM2/TLM3`。
 - 元素类型模板参数 `T` 取自结果 `Memory<Space, T>` 的 element type，不得退回到字节级 `load/store` 组合。
-- 不得把 `TSM/TLM` dynamic memory 发射成 `malloc(...)`、`load<...>`、`store<...>` 或其他 CPU 旁路文本。
+- 不得把 `TSM/TLM1/TLM2/TLM3` dynamic memory 发射成 `malloc(...)`、`load<...>`、`store<...>` 或其他 CPU 旁路文本。
 
 ### `dma.view`
 
@@ -414,7 +414,7 @@ deslice(out_tile, out, m0, 16, 1);
 - 验证 `symbol.for`、`dma.alloc/view/slice/deslice` 与 `nn.img2col2d` 的最小 CPU 发射闭环，并锁定输出文本不引入 `slice/deslice` helper 与 `nullptr`。
 - 验证重复 `dma.slice/dma.deslice` 发射时辅助变量名保持唯一，避免同一作用域命名冲突。
 - 下游 `npu_demo` 专项验收至少应覆盖 `thread_id/thread_num` 查询，建议测试名为 `test_emit_c_lowers_npu_demo_kernel_context_queries`。
-- 下游 `npu_demo` 专项验收至少应覆盖 `TSM/TLM` dynamic memory 查询，建议测试名为 `test_emit_c_lowers_npu_demo_dynamic_memory_access`。
+- 下游 `npu_demo` 专项验收至少应覆盖 `TSM/TLM1/TLM2/TLM3` dynamic memory 查询，建议测试名为 `test_emit_c_lowers_npu_demo_dynamic_memory_access`。
 - 下游 `npu_demo` 专项验收至少应覆盖 `view + slice + add + deslice` 管线，建议测试名为 `test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline`，且不得回退到 `.view<`、`load<`、`store<`。
 
 ### 功能与用例清单

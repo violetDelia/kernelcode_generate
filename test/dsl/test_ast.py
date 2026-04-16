@@ -1,7 +1,7 @@
 """AST parsing tests.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 AST 解析入口、注解解析与诊断负路径的回归测试。
@@ -351,7 +351,7 @@ def kernel() -> int:
 
 # AST-014I
 # 创建者: OpenAI
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-31 03:20:00 +0800
 # 最近一次运行成功时间: 2026-03-31 03:20:00 +0800
 # 功能说明: 验证 `value.get_shape()[axis]` 可解析为 TensorAxisAccessAST。
@@ -1496,7 +1496,7 @@ def test_parse_function_parses_arch_barrier_statement(monkeypatch: pytest.Monkey
 
 # AST-014J
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-06 08:10:00 +0800
 # 最近一次运行成功时间: 2026-04-06 08:10:00 +0800
 # 功能说明: 验证 barrier 对非法 arity / visibility / scope 返回固定诊断。
