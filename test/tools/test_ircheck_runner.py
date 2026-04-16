@@ -85,6 +85,43 @@ def test_run_ircheck_text_pass_ok() -> None:
     assert "builtin.module" in result.actual_ir
 
 
+# TC-IRCHECK-RUN-001A
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
+# 最近一次运行成功时间: 待运行
+# 功能说明: 验证默认 ircheck context 已加载 arch dialect，可直接解析含 arch.launch / arch.barrier 的输入 IR。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_pass_ok_with_arch_dialect
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+def test_run_ircheck_text_pass_ok_with_arch_dialect() -> None:
+    text = """// COMPILE_ARGS: --pass no-op
+// CHECK: arch.launch
+// CHECK: arch.barrier
+
+builtin.module {
+  func.func @host(%arg0 : !nn.memory<[4], [1], f32, #nn.space<global>>) {
+    %c1 = symbol.const 1 : !symbol.int<"1">
+    %c1_1 = symbol.const 1 : !symbol.int<"1">
+    %c1_2 = symbol.const 1 : !symbol.int<"1">
+    arch.launch<%c1, %c1_1, %c1_2>(@_device, %arg0) : (!nn.memory<[4], [1], f32, #nn.space<global>>) -> ()
+    func.return
+  }
+
+  func.func @_device(%arg0 : !nn.memory<[4], [1], f32, #nn.space<global>>) {
+    arch.barrier {scope = #arch.scope<block>, visibility = [#arch.visibility<tsm>]}
+    func.return
+  }
+}
+"""
+    result = run_ircheck_text(text, source_path="inline_arch.ircheck")
+    assert result.ok is True
+    assert result.exit_code == 0
+    assert "arch.launch" in result.actual_ir
+    assert "arch.barrier" in result.actual_ir
+
+
 # TC-IRCHECK-RUN-002
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
