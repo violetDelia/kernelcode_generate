@@ -269,7 +269,8 @@ def build_func_op(
 
     限制与异常:
     - 运行时参数数量不匹配会抛出 `AstVisitorError`。
-    - 解析或下沉失败会抛出 `AstVisitorError`。
+    - `slice/cast/alloc` 等前端参数类型错误会按公开合同抛出 `TypeError`。
+    - 其余解析或下沉失败会抛出 `AstVisitorError`。
 
     使用示例:
     - func_op = build_func_op(fn, *runtime_args)
