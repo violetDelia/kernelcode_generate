@@ -27,6 +27,7 @@ from pathlib import Path
 
 import pytest
 from xdsl.dialects import arith
+from xdsl.dialects.builtin import f32
 from xdsl.ir import Block
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -34,9 +35,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.dsl.ast import ConstAST
-from kernel_gen.dsl.mlir_gen.emit import EmitContext
+from kernel_gen.dsl.mlir_gen.emit import EmitContext, memory_type_from_memory
 from kernel_gen.dsl.mlir_gen.emit.context import LoweringError
 from kernel_gen.dsl.mlir_gen.emit.dispatch import call_dispatch, emit_mlir
+from kernel_gen.symbol_variable.memory import Memory, NumericType
 
 
 # EMIT-DISP-001
@@ -89,8 +91,8 @@ def test_call_dispatch_rejects_non_callee() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-16 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-16 00:00:00 +0800
-# 功能说明: 验证 emit 包根仅公开 `EmitContext` 与 `emit_mlir` 两个稳定入口。
-# 测试目的: 锁定 `kernel_gen.dsl.mlir_gen.emit` 的包根公开集合，避免 `LoweringError`、`call_dispatch` 等 helper 被继续视为稳定 API。
+# 功能说明: 验证 emit 包根仅公开稳定入口集合。
+# 测试目的: 锁定 `kernel_gen.dsl.mlir_gen.emit` 的包根公开集合，避免 `LoweringError`、`call_dispatch` 等内部 helper 被继续视为稳定 API。
 # 使用示例: pytest -q test/dsl/mlir_gen/emit/test_dispatch.py -k test_emit_package_root_exports_only_stable_api
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/__init__.py
 # 对应 spec 文件路径: spec/dsl/emit_mlir.md
@@ -98,9 +100,29 @@ def test_call_dispatch_rejects_non_callee() -> None:
 def test_emit_package_root_exports_only_stable_api() -> None:
     import kernel_gen.dsl.mlir_gen.emit as emit_pkg
 
-    if emit_pkg.__all__ != ["EmitContext", "emit_mlir"]:
+    if emit_pkg.__all__ != ["EmitContext", "emit_mlir", "memory_type_from_memory"]:
         raise AssertionError(f"unexpected package root exports: {emit_pkg.__all__}")
     if hasattr(emit_pkg, "LoweringError"):
         raise AssertionError("package root should not expose LoweringError")
     if hasattr(emit_pkg, "call_dispatch"):
         raise AssertionError("package root should not expose call_dispatch")
+
+
+# EMIT-DISP-004
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-16 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-16 00:00:00 +0800
+# 功能说明: 验证 emit 包根公开的 `memory_type_from_memory(...)` 可生成稳定 memory type。
+# 测试目的: 锁定 expectation/tooling 通过包根而非 `.core` 私有 helper 复用 memory type 转换能力。
+# 使用示例: pytest -q test/dsl/mlir_gen/emit/test_dispatch.py -k test_emit_package_root_exposes_memory_type_from_memory
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/__init__.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/mlir_gen/emit/test_dispatch.py
+def test_emit_package_root_exposes_memory_type_from_memory() -> None:
+    mem_type = memory_type_from_memory(Memory([2, 3], NumericType.Float32))
+
+    if [dim.data for dim in mem_type.shape.data] != [2, 3]:
+        raise AssertionError(f"unexpected shape from package root helper: {mem_type.shape.data}")
+    if mem_type.element_type != f32:
+        raise AssertionError(f"unexpected element type from package root helper: {mem_type.element_type}")
