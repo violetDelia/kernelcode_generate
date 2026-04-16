@@ -321,7 +321,11 @@ def build_func_op(
         )
     except AstParseError as exc:
         location = exc.diagnostics[0].location if exc.diagnostics else None
-        if exc.message == "slice space must be MemorySpace" or exc.message == "cast dtype must be NumericType":
+        if (
+            exc.message == "slice space must be MemorySpace"
+            or exc.message == "cast dtype must be NumericType"
+            or exc.message == "alloc space must be MemorySpace"
+        ):
             raise TypeError(exc.message) from exc
         raise AstVisitorError(exc.message, location=location) from exc
     return build_func_op_from_ast(func_ast, runtime_args=runtime_args)
