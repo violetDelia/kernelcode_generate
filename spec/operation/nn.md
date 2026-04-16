@@ -37,7 +37,7 @@
 - `matmul` 仅定义二维矩阵乘，不支持 batch、广播或隐式转置。
 - `softmax` 仅支持 `Memory` 输入，默认沿最后一维归一化，不负责跨算子融合或近似策略选择。
 - `exp` 与激活函数同层，输入必须是浮点 `Memory`，不定义自动 cast 策略。
-- `reduce_sum` / `reduce_min` / `reduce_max` 只定义按轴归约语义，不定义跨算子融合、并行调度或硬件特化策略。
+- `reduce_sum` / `reduce_min` / `reduce_max` 只定义按轴归约语义，不定义跨算子融合、并行调度或设备特化策略。
 - `softmax` 在 operation 层定义默认参数、负轴归一化、数值稳定语义与错误边界；对应 dialect 层仅承接结构化 `nn.softmax` 合同（operand/result/axis/space verifier），不在 dialect 层重复高层数值语义全文。
 - `conv` 仅覆盖二维卷积，不支持 group、batch/broadcast 或隐式转置。
 - `img2col` 高层接口按维度拆分为 `img2col1d` 与 `img2col2d` 语义锚点；禁止继续使用笼统公开名 `img2col` 作为稳定对外规范名。
@@ -105,6 +105,7 @@
 ```python
 from kernel_gen.operation.nn import add
 from kernel_gen.symbol_variable.memory import Memory
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import Farmat, NumericType
 
 A = Memory(["M", "N"], NumericType.Int32)
@@ -114,10 +115,12 @@ C = add(A, B)
 lhs = Memory(["M", "N"], NumericType.Int32, stride=["N", 1], format=Farmat.CLast)
 rhs = Memory(["M", "N"], NumericType.Int32, stride=["N", 1], format=Farmat.Norm)
 D = add(lhs, rhs)
+E = add(1, SymbolDim("N"))
 
 assert C.get_shape() == ["M", "N"]
 assert D.get_format() is Farmat.Norm
 assert D.get_stride()[1] == 1
+assert E.get_value() == "N + 1"
 ```
 
 注意事项：
@@ -136,7 +139,8 @@ assert D.get_stride()[1] == 1
 - 返回 `Memory` 语义结果。
 - `shape` 为输入一致时的原 `shape`，或隐式广播的共同目标 `shape`。
 - `Memory/Memory` 路径返回的 `dtype` 必须满足上述固定优先级决议。
-- 纯标量输入必须抛出 `TypeError`。
+- 当两侧都为纯标量时，返回 Python 标量或 `SymbolDim` 算术结果，不再参与 `Memory` 广播与 `dtype` 提升。
+- 纯标量路径仍只接受合法标量类型；非法标量类型必须抛出 `TypeError`。
 
 ### `sub(lhs, rhs)`
 
@@ -163,6 +167,7 @@ D = sub(A, 1)
 返回与限制：
 
 - 返回 `Memory` 语义结果。
+- 当两侧都为纯标量时，返回 Python 标量或 `SymbolDim` 算术结果。
 
 ### `mul(lhs, rhs)`
 
@@ -189,6 +194,7 @@ D = mul(A, 2)
 返回与限制：
 
 - 返回 `Memory` 语义结果。
+- 当两侧都为纯标量时，返回 Python 标量或 `SymbolDim` 算术结果。
 
 ### `truediv(lhs, rhs)`
 
@@ -215,6 +221,7 @@ D = truediv(A, 2)
 返回与限制：
 
 - 返回 `Memory` 语义结果。
+- 当两侧都为纯标量时，返回 Python 标量或 `SymbolDim` 算术结果。
 
 ### `floordiv(lhs, rhs)`
 
@@ -238,11 +245,12 @@ D = floordiv(A, 2)
 
 - 复用 `add` 的隐式 broadcast、固定 `dtype` 优先级与标量参与规则。
 - 当 `format` 或 `stride` 任一不一致时，结果必须回落到默认布局：`format=Farmat.Norm`，`stride` 使用连续行主序默认步幅。
-- 纯标量输入必须抛出 `TypeError`。
+- 当两侧都为纯标量时，复用 Python/SymbolDim 的整除语义。
 
 返回与限制：
 
 - 返回 `Memory` 语义结果。
+- 当两侧都为纯标量时，返回 Python 标量或 `SymbolDim` 算术结果。
 
 ### `eq(lhs, rhs)`
 
@@ -808,7 +816,7 @@ out_last_dim = softmax(value, axis=1)
 - 允许负轴索引；归一化后的 `axis` 必须满足 `-rank <= axis < rank`，越界必须抛出 `ValueError`；因此 rank 为 `0` 的输入（若上游构造）始终无法通过 axis 校验。
 - 数值稳定性要求：实现必须采用“减去该轴最大值后再指数化”的等价语义，即 `exp(x - max(x)) / sum(exp(x - max(x)))`，避免直接对原值指数化。
 - 与现有 nn 算子兼容：`softmax` 输出仍为 `Memory`，可直接作为 `add/sub/mul/truediv/floordiv/compare` 的输入。
-- 与 `nn dialect` 的映射边界：operation 层冻结高层语义与异常口径；dialect 层只冻结结构化字段与 verifier，见 [`spec/dialect/nn.md`](../../spec/dialect/nn.md) 的 `nn.softmax` 小节。
+- 与 `nn dialect` 的映射边界：operation 层固定高层语义与异常口径；dialect 层只固定结构化字段与 verifier，见 [`spec/dialect/nn.md`](../../spec/dialect/nn.md) 的 `nn.softmax` 小节。
 - 与 lowering 链路的机械边界：`softmax` 的高层输出合同保持不变，但 `nn.softmax` 不允许由 `NnLoweringPass` 直降 `kernel.softmax`；进入该 pass 前必须先分解为 `nn.reduce_max -> nn.broadcast -> nn.sub -> nn.exp -> nn.reduce_sum -> nn.broadcast -> nn.truediv`。
 
 返回与限制：
@@ -1105,7 +1113,7 @@ cols = img2col2d(value, kh=3, kw=3, sh=1, sw=1, dh=1, dw=1, ph=1, pw=1, pl=1, pr
 | OP-008 | `add` 的不支持 `dtype` 输入触发 `TypeError` | `test_nn_dtype_invalid_error` |
 | OP-009 | 比较结果使用 `NumericType.Bool` 作为 predicate 载体 | `test_nn_compare_predicate` |
 | OP-010 | 比较时 shape 顺序不同报错 | `test_nn_compare_shape_order` |
-| OP-011 | 纯标量输入报 `TypeError` | `test_nn_scalar_only_error` |
+| OP-011 | 纯标量输入复用 Python/SymbolDim 算术语义，非法标量类型仍报 `TypeError` | `test_nn_scalar_only_error` |
 | OP-012 | `ne`/`le`/`ge` 比较别名可调用，且结果 `dtype` 为 `NumericType.Bool` | `test_nn_compare_alias` |
 | OP-013 | 同布局的 `Memory/Memory add` 保持原有 `Memory` 描述，且不依赖已移除的旧 shape 规范化入口 | `test_nn_operation_does_not_require_convert_from_list` |
 | OP-017 | `floordiv` 复用逐元素算术规则、支持标量并在布局不一致时回落默认布局 | `test_nn_floordiv_rules` |
