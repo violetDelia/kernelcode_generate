@@ -43,7 +43,7 @@
 - 不定义节点级发射细节，节点发射规则由 `emit_mlir` 约束。
 - `mlir_gen` 与 `emit_mlir` 的 owner 边界固定为：`ModuleAST` / `FunctionAST` / `BlockAST` 与签名节点 `TensorAST` / `ScalarArgAST` 由 builder / signature 层负责；其余 node-level AST 全部委托给 [`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md) 约束的 lowering 子系统，不得在 `mlir_gen` 内维护第二份 helper 映射表。
 - `PtrArgAST` 虽属于 AST 层签名节点，但当前不在 builder / signature 支持面内；若流入 `build_func_op(...)` / `build_func_op_from_ast(...)`，必须按实现现状报 `Unsupported input type`，不得在 spec 中误写为已支持输入。
-- 当前 node-level lowering 子系统的唯一公开入口是 `kernel_gen.dsl.mlir_gen.emit`；`mlir_gen` 对外只承认这一套 emit 语义，不再保留 `kernel_gen.dsl.emit_mlir` 的并列入口合同。expectation/tooling 若需复用稳定 helper，也必须经由该包根暴露的公开 API 访问，不得直连内部子模块。
+- 当前 node-level lowering 子系统的唯一公开入口是 `kernel_gen.dsl.mlir_gen.emit`；`mlir_gen` 对外只承认这一套 emit 语义，不再保留旧 facade 的并列入口合同。
 - 不做优化或自动修复非法 IR。
 - `build_func_op` 的公开入口接收目标函数、运行时参数，以及仅用于补充源码解析环境的可选 `globals` / `builtins`；这些额外参数不得改变由 `runtime_args` 决定的函数输入签名，也不能代替必填的运行时参数。
 - `build_func_op` 的公开契约仅覆盖可位置绑定的形参；`runtime_args` 必须按这些形参的顺序传入。
