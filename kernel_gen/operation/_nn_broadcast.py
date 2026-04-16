@@ -1,17 +1,17 @@
 """NN operation broadcast family.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 提供显式 broadcast 与 broadcast_to family 实现
 
 使用示例:
-- from kernel_gen.operation.nn import add, broadcast, reduce_sum
+- from kernel_gen.operation.nn import add, broadcast, broadcast_to
 
 关联文件:
 - spec: spec/operation/nn.md
-- test: test/operation/test_operation_nn.py
+- test: test/operation/test_operation_nn_broadcast.py
 - 功能实现: kernel_gen/operation/_nn_broadcast.py
 """
 
@@ -24,7 +24,7 @@ def _infer_broadcast_shape(lhs: SymbolShape, rhs: SymbolShape) -> SymbolShape:
     """推导逐元素隐式 broadcast 的目标 shape。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 按尾维对齐规则推导共同目标 shape。
@@ -35,7 +35,7 @@ def _infer_broadcast_shape(lhs: SymbolShape, rhs: SymbolShape) -> SymbolShape:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_broadcast.py
     - 功能实现: kernel_gen/operation/_nn_broadcast.py
     """
     lhs_dims = lhs.get_values()
@@ -75,7 +75,7 @@ def _broadcast_memory_pair(lhs: Memory, rhs: Memory) -> tuple[Memory, Memory]:
     """为逐元素运算执行隐式 broadcast。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 若 shape 不一致但可广播，则显式扩张到共同目标 shape。
@@ -85,7 +85,7 @@ def _broadcast_memory_pair(lhs: Memory, rhs: Memory) -> tuple[Memory, Memory]:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_broadcast.py
     - 功能实现: kernel_gen/operation/_nn_broadcast.py
     """
     lhs_values = lhs.shape.get_values()
@@ -111,7 +111,7 @@ def broadcast(value: object, target: object) -> Memory:
     """显式广播 Memory 到目标描述。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 按尾维对齐规则扩张 singleton dim。
@@ -122,7 +122,7 @@ def broadcast(value: object, target: object) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_broadcast.py
     - 功能实现: kernel_gen/operation/_nn_broadcast.py
     """
     if not isinstance(value, Memory):
@@ -192,7 +192,7 @@ def broadcast_to(source: object, target_shape: object, space: object) -> Memory:
     """显式广播 Memory 到目标 shape + space。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 复用 broadcast 的维度对齐规则。
@@ -203,7 +203,7 @@ def broadcast_to(source: object, target_shape: object, space: object) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_broadcast.py
     - 功能实现: kernel_gen/operation/_nn_broadcast.py
     """
     if not isinstance(source, Memory):

@@ -1,7 +1,7 @@
 """NN operation API facade.
 
 创建者: 金铲铲大作战
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 保留 `kernel_gen.operation.nn` 公开导入入口。
@@ -13,7 +13,10 @@
 
 关联文件:
 - spec: spec/operation/nn.md
-- test: test/operation/test_operation_nn.py
+- test: test/operation/test_operation_nn_elementwise.py
+- test: test/operation/test_operation_nn_broadcast.py
+- test: test/operation/test_operation_nn_structured.py
+- test: test/operation/test_operation_nn_reduction.py
 - 功能实现: kernel_gen/operation/nn.py
 - 功能实现: kernel_gen/operation/_nn_common.py
 - 功能实现: kernel_gen/operation/_nn_elementwise.py

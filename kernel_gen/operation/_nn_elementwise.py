@@ -1,17 +1,17 @@
 """NN operation elementwise family.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 提供逐元素算术、比较与激活 family 实现
 
 使用示例:
-- from kernel_gen.operation.nn import add, broadcast, reduce_sum
+- from kernel_gen.operation.nn import add, relu, ge
 
 关联文件:
 - spec: spec/operation/nn.md
-- test: test/operation/test_operation_nn.py
+- test: test/operation/test_operation_nn_elementwise.py
 - 功能实现: kernel_gen/operation/_nn_elementwise.py
 """
 
@@ -24,7 +24,7 @@ def _infer_implicit_broadcast_shape(lhs: Memory, rhs: Memory) -> SymbolShape:
     """推导逐元素隐式 broadcast 的共同目标 shape。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 按尾维对齐规则合并维度。
@@ -35,7 +35,7 @@ def _infer_implicit_broadcast_shape(lhs: Memory, rhs: Memory) -> SymbolShape:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_elementwise.py
     """
     lhs_values = lhs.shape.get_values()
@@ -57,7 +57,7 @@ def _binary_memory_result(lhs: Memory, rhs: Memory) -> Memory:
     """逐元素算术 Memory/Memory 结果推导。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持隐式 broadcast 推导目标 shape。
@@ -69,7 +69,7 @@ def _binary_memory_result(lhs: Memory, rhs: Memory) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_elementwise.py
     """
     result_dtype = _resolve_add_dtype(lhs.dtype, rhs.dtype)
@@ -101,7 +101,7 @@ def _binary_add_result(lhs: Memory, rhs: Memory) -> Memory:
     """逐元素加法 Memory/Memory 结果推导。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持隐式 broadcast 推导目标 shape。
@@ -113,7 +113,7 @@ def _binary_add_result(lhs: Memory, rhs: Memory) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_elementwise.py
     """
     result_dtype = _resolve_add_dtype(lhs.dtype, rhs.dtype)
@@ -145,7 +145,7 @@ def _compare_memory_result(lhs: Memory, rhs: Memory) -> Memory:
     """逐元素比较 Memory/Memory 结果推导。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持隐式 broadcast 推导目标 shape。
@@ -156,7 +156,7 @@ def _compare_memory_result(lhs: Memory, rhs: Memory) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_elementwise.py
     """
     if lhs.dtype is not rhs.dtype:
@@ -180,7 +180,7 @@ def _apply_scalar_operator(lhs: object, rhs: object, op: str, rop: str) -> Scala
     """执行纯标量算术并保持 Python 操作数顺序语义。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 优先尝试左操作数实现，失败后回退到右操作数反向实现。
@@ -190,8 +190,8 @@ def _apply_scalar_operator(lhs: object, rhs: object, op: str, rop: str) -> Scala
     - _apply_scalar_operator(SymbolDim("M"), 2, "__add__", "__radd__")
 
     关联文件:
-    - spec: spec/dsl/mlir_gen.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_elementwise.py
     """
 
@@ -227,7 +227,7 @@ def _dispatch_scalar_binary(lhs: object, rhs: object, op: str, rop: str) -> Scal
     """在无 Memory 参与时执行纯标量算术调度。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 当两侧都不是 Memory 时，直接返回 Python/SymbolDim 算术结果。
@@ -237,8 +237,8 @@ def _dispatch_scalar_binary(lhs: object, rhs: object, op: str, rop: str) -> Scal
     - _dispatch_scalar_binary(2, SymbolDim("N"), "__mul__", "__rmul__")
 
     关联文件:
-    - spec: spec/dsl/mlir_gen.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_elementwise.py
     """
     if isinstance(lhs, Memory) or isinstance(rhs, Memory):
@@ -250,7 +250,7 @@ def _dispatch_binary(lhs: object, rhs: object, op: str, rop: str) -> ArithmeticR
     """二元算术调度。
 
     创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 根据 Memory 所在侧选择正向或反向运算。
@@ -260,7 +260,7 @@ def _dispatch_binary(lhs: object, rhs: object, op: str, rop: str) -> ArithmeticR
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_elementwise.py
     """
     scalar_result = _dispatch_scalar_binary(lhs, rhs, op, rop)
@@ -280,7 +280,7 @@ def _dispatch_compare(lhs: object, rhs: object, op: str, rop: str) -> Memory:
     """二元比较调度。
 
     创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 保持比较方向的调度规则。
@@ -290,7 +290,7 @@ def _dispatch_compare(lhs: object, rhs: object, op: str, rop: str) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_elementwise.py
     """
     _ensure_memory_operand(lhs, rhs)
@@ -307,7 +307,7 @@ def add(lhs: object, rhs: object) -> ArithmeticResult:
     """逐元素加法。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持 Memory 与 Memory/标量的加法。
@@ -319,7 +319,7 @@ def add(lhs: object, rhs: object) -> ArithmeticResult:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_elementwise.py
     返回与限制：
 
@@ -343,7 +343,7 @@ def sub(lhs: object, rhs: object) -> ArithmeticResult:
     """逐元素减法。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持 Memory 与 Memory/标量的减法。
@@ -355,7 +355,7 @@ def sub(lhs: object, rhs: object) -> ArithmeticResult:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_elementwise.py
     返回与限制：
 
@@ -369,7 +369,7 @@ def mul(lhs: object, rhs: object) -> ArithmeticResult:
     """逐元素乘法。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持 Memory 与 Memory/标量的乘法。
@@ -381,7 +381,7 @@ def mul(lhs: object, rhs: object) -> ArithmeticResult:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_elementwise.py
     返回与限制：
 
@@ -395,7 +395,7 @@ def truediv(lhs: object, rhs: object) -> ArithmeticResult:
     """逐元素除法。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持 Memory 与 Memory/标量的除法。
@@ -407,7 +407,7 @@ def truediv(lhs: object, rhs: object) -> ArithmeticResult:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_elementwise.py
     返回与限制：
 
@@ -421,7 +421,7 @@ def floordiv(lhs: object, rhs: object) -> ArithmeticResult:
     """逐元素整除。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持 Memory 与 Memory/标量的整除。
@@ -433,7 +433,7 @@ def floordiv(lhs: object, rhs: object) -> ArithmeticResult:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_elementwise.py
     返回与限制：
 
@@ -457,7 +457,7 @@ def eq(lhs: object, rhs: object) -> Memory:
     """逐元素相等比较。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持 Memory 与 Memory/标量的相等比较。
@@ -467,7 +467,7 @@ def eq(lhs: object, rhs: object) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_elementwise.py
     """
     return _dispatch_compare(lhs, rhs, "__eq__", "__eq__")
@@ -477,7 +477,7 @@ def ne(lhs: object, rhs: object) -> Memory:
     """逐元素不等比较。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持 Memory 与 Memory/标量的不等比较。
@@ -487,7 +487,7 @@ def ne(lhs: object, rhs: object) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_elementwise.py
     """
     return _dispatch_compare(lhs, rhs, "__ne__", "__ne__")
@@ -497,7 +497,7 @@ def lt(lhs: object, rhs: object) -> Memory:
     """逐元素小于比较。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持 Memory 与 Memory/标量的小于比较。
@@ -507,7 +507,7 @@ def lt(lhs: object, rhs: object) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_elementwise.py
     """
     return _dispatch_compare(lhs, rhs, "__lt__", "__gt__")
@@ -517,7 +517,7 @@ def le(lhs: object, rhs: object) -> Memory:
     """逐元素小于等于比较。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持 Memory 与 Memory/标量的小于等于比较。
@@ -527,7 +527,7 @@ def le(lhs: object, rhs: object) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_elementwise.py
     """
     return _dispatch_compare(lhs, rhs, "__le__", "__ge__")
@@ -537,7 +537,7 @@ def gt(lhs: object, rhs: object) -> Memory:
     """逐元素大于比较。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持 Memory 与 Memory/标量的大于比较。
@@ -547,7 +547,7 @@ def gt(lhs: object, rhs: object) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_elementwise.py
     """
     return _dispatch_compare(lhs, rhs, "__gt__", "__lt__")
@@ -557,7 +557,7 @@ def ge(lhs: object, rhs: object) -> Memory:
     """逐元素大于等于比较。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持 Memory 与 Memory/标量的大于等于比较。
@@ -567,7 +567,7 @@ def ge(lhs: object, rhs: object) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_elementwise.py
     """
     return _dispatch_compare(lhs, rhs, "__ge__", "__le__")
@@ -577,7 +577,7 @@ def relu(value: object) -> Memory:
     """逐元素 ReLU 激活。
 
     创建者: 我不是牛马
-    最后一次更改: 我不是牛马
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅接受 Memory 输入，dtype 需为浮点类型。
@@ -587,7 +587,7 @@ def relu(value: object) -> Memory:
     - relu(Memory(["M", "N"], NumericType.Float32))
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_elementwise.py
     """
     memory = _ensure_float_memory(value, "relu")
@@ -598,7 +598,7 @@ def leaky_relu(value: object, alpha: int | float = 0.01) -> Memory:
     """逐元素 Leaky ReLU 激活。
 
     创建者: 我不是牛马
-    最后一次更改: 我不是牛马
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅接受 Memory 输入，dtype 需为浮点类型。
@@ -609,7 +609,7 @@ def leaky_relu(value: object, alpha: int | float = 0.01) -> Memory:
     - leaky_relu(Memory(["M", "N"], NumericType.Float16), alpha=0.2)
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_elementwise.py
     """
     memory = _ensure_float_memory(value, "leaky_relu")
@@ -621,7 +621,7 @@ def sigmoid(value: object) -> Memory:
     """逐元素 Sigmoid 激活。
 
     创建者: 我不是牛马
-    最后一次更改: 我不是牛马
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅接受 Memory 输入，dtype 需为浮点类型。
@@ -632,7 +632,7 @@ def sigmoid(value: object) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_elementwise.py
     """
     memory = _ensure_float_memory(value, "sigmoid")
@@ -643,7 +643,7 @@ def tanh(value: object) -> Memory:
     """逐元素 Tanh 激活。
 
     创建者: 我不是牛马
-    最后一次更改: 我不是牛马
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅接受 Memory 输入，dtype 需为浮点类型。
@@ -654,7 +654,7 @@ def tanh(value: object) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_elementwise.py
     """
     memory = _ensure_float_memory(value, "tanh")
@@ -665,7 +665,7 @@ def hard_sigmoid(value: object, alpha: int | float = 0.2, beta: int | float = 0.
     """逐元素 Hard Sigmoid 激活。
 
     创建者: 我不是牛马
-    最后一次更改: 我不是牛马
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅接受 Memory 输入，dtype 需为浮点类型。
@@ -677,7 +677,7 @@ def hard_sigmoid(value: object, alpha: int | float = 0.2, beta: int | float = 0.
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_elementwise.py
     """
     memory = _ensure_float_memory(value, "hard_sigmoid")
@@ -690,7 +690,7 @@ def exp(value: object) -> Memory:
     """逐元素指数函数。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅接受浮点 Memory 输入。
@@ -701,7 +701,7 @@ def exp(value: object) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_elementwise.py
     """
     memory = _ensure_float_memory(value, "exp")

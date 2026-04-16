@@ -1,17 +1,17 @@
 """NN operation reduction family.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 提供 reduce_sum/reduce_min/reduce_max family 实现
 
 使用示例:
-- from kernel_gen.operation.nn import add, broadcast, reduce_sum
+- from kernel_gen.operation.nn import reduce_sum, reduce_min, reduce_max
 
 关联文件:
 - spec: spec/operation/nn.md
-- test: test/operation/test_operation_nn.py
+- test: test/operation/test_operation_nn_reduction.py
 - 功能实现: kernel_gen/operation/_nn_reduction.py
 """
 
@@ -24,7 +24,7 @@ def _ensure_reduce_memory(value: object, op_name: str) -> Memory:
     """校验归约算子的 Memory 输入。
 
     创建者: 朽木露琪亚
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅接受 Memory 输入。
@@ -35,7 +35,7 @@ def _ensure_reduce_memory(value: object, op_name: str) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_reduction.py
     - 功能实现: kernel_gen/operation/_nn_reduction.py
     """
     if not isinstance(value, Memory):
@@ -54,7 +54,7 @@ def _normalize_reduce_axes(axis: object, rank: int, op_name: str) -> tuple[int, 
     """规范化 reduce 轴列表。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持 None/int/Sequence[int] 三种 axis 输入。
@@ -65,7 +65,7 @@ def _normalize_reduce_axes(axis: object, rank: int, op_name: str) -> tuple[int, 
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_reduction.py
     - 功能实现: kernel_gen/operation/_nn_reduction.py
     """
     if axis is None:
@@ -144,7 +144,7 @@ def _ensure_reduce_keepdim(keepdim: object, op_name: str) -> bool:
     """校验归约 keepdim 参数。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅接受 bool 作为 keepdim 输入。
@@ -154,7 +154,7 @@ def _ensure_reduce_keepdim(keepdim: object, op_name: str) -> bool:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_reduction.py
     - 功能实现: kernel_gen/operation/_nn_reduction.py
     """
     if not isinstance(keepdim, bool):
@@ -173,7 +173,7 @@ def _build_reduce_result_shape(value: Memory, axes: tuple[int, ...], keepdim: bo
     """根据归约轴推导输出 shape。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - keepdim=True 时将被归约轴替换为 1。
@@ -184,7 +184,7 @@ def _build_reduce_result_shape(value: Memory, axes: tuple[int, ...], keepdim: bo
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_reduction.py
     - 功能实现: kernel_gen/operation/_nn_reduction.py
     """
     dims = value.shape.get_shape()
@@ -201,7 +201,7 @@ def _ensure_non_empty_reduction_extent(value: Memory, axes: tuple[int, ...], op_
     """校验 reduce_min/max 的静态空归约域。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 若被归约轴的静态维度为 0，则直接报错。
@@ -212,7 +212,7 @@ def _ensure_non_empty_reduction_extent(value: Memory, axes: tuple[int, ...], op_
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_reduction.py
     - 功能实现: kernel_gen/operation/_nn_reduction.py
     """
     for axis in axes:
@@ -239,7 +239,7 @@ def _reduce_memory_result(
     """推导 nn.reduce_* 的结果 Memory。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 统一执行 value/axis/keepdim 校验。
@@ -250,7 +250,7 @@ def _reduce_memory_result(
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_reduction.py
     - 功能实现: kernel_gen/operation/_nn_reduction.py
     """
     memory = _ensure_reduce_memory(value, op_name)
@@ -272,7 +272,7 @@ def reduce_sum(value: object, axis: object = None, keepdim: bool = False) -> Mem
     """按指定轴执行求和归约。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持 axis=None/int/Sequence[int] 三种归约写法。
@@ -284,7 +284,7 @@ def reduce_sum(value: object, axis: object = None, keepdim: bool = False) -> Mem
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_reduction.py
     - 功能实现: kernel_gen/operation/_nn_reduction.py
     """
     return _reduce_memory_result(
@@ -300,7 +300,7 @@ def reduce_min(value: object, axis: object = None, keepdim: bool = False) -> Mem
     """按指定轴执行最小值归约。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 统一执行 axis/keepdim 校验与 shape 推导。
@@ -311,7 +311,7 @@ def reduce_min(value: object, axis: object = None, keepdim: bool = False) -> Mem
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_reduction.py
     - 功能实现: kernel_gen/operation/_nn_reduction.py
     """
     return _reduce_memory_result(
@@ -327,7 +327,7 @@ def reduce_max(value: object, axis: object = None, keepdim: bool = False) -> Mem
     """按指定轴执行最大值归约。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 统一执行 axis/keepdim 校验与 shape 推导。
@@ -338,7 +338,7 @@ def reduce_max(value: object, axis: object = None, keepdim: bool = False) -> Mem
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_reduction.py
     - 功能实现: kernel_gen/operation/_nn_reduction.py
     """
     return _reduce_memory_result(

@@ -1,17 +1,17 @@
 """NN operation structured family.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 提供 softmax/fc/matmul/conv/img2col/transpose family 实现
 
 使用示例:
-- from kernel_gen.operation.nn import add, broadcast, reduce_sum
+- from kernel_gen.operation.nn import fc, matmul, softmax
 
 关联文件:
 - spec: spec/operation/nn.md
-- test: test/operation/test_operation_nn.py
+- test: test/operation/test_operation_nn_structured.py
 - 功能实现: kernel_gen/operation/_nn_structured.py
 """
 
@@ -24,7 +24,7 @@ def softmax(value: object, axis: int = -1) -> Memory:
     """沿指定轴执行 softmax 归一化。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅接受 Memory 输入，并校验 dtype 与 axis。
@@ -37,7 +37,7 @@ def softmax(value: object, axis: int = -1) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_structured.py
     - 功能实现: kernel_gen/operation/_nn_structured.py
     """
     if not isinstance(value, Memory):
@@ -90,7 +90,7 @@ def fc(value: object, weight: object, bias: object | None = None) -> Memory:
     """全连接（fully connected）运算。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 支持 Memory 的末维与权重输入特征维线性变换。
@@ -101,7 +101,7 @@ def fc(value: object, weight: object, bias: object | None = None) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_structured.py
     - 功能实现: kernel_gen/operation/_nn_structured.py
     """
     if not isinstance(value, Memory) or not isinstance(weight, Memory):
@@ -204,7 +204,7 @@ def matmul(lhs: object, rhs: object, memoryspace: MemorySpace | None = None) -> 
     """二维矩阵乘。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅接受二维 Memory x Memory。
@@ -216,7 +216,7 @@ def matmul(lhs: object, rhs: object, memoryspace: MemorySpace | None = None) -> 
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_structured.py
     - 功能实现: kernel_gen/operation/_nn_structured.py
     """
     if not isinstance(lhs, Memory) or not isinstance(rhs, Memory):
@@ -272,7 +272,7 @@ def _normalize_img2col_param(name: str, value: int | SymbolDim, allow_zero: bool
     """规范化 img2col 参数为 SymbolDim。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅接受 int 或 SymbolDim。
@@ -283,7 +283,7 @@ def _normalize_img2col_param(name: str, value: int | SymbolDim, allow_zero: bool
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_structured.py
     - 功能实现: kernel_gen/operation/_nn_structured.py
     """
     if isinstance(value, bool):
@@ -367,7 +367,7 @@ def _img2col_output_dim(
     """计算 img2col 的输出维度。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 按 floor((size + pad_low + pad_high - dilation*(kernel-1) - 1) / stride) + 1 计算。
@@ -377,7 +377,7 @@ def _img2col_output_dim(
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_structured.py
     - 功能实现: kernel_gen/operation/_nn_structured.py
     """
     return ((size + pad_low + pad_high - dilation * (kernel - 1) - 1) // stride) + 1
@@ -387,7 +387,7 @@ def _normalize_conv_param(name: str, value: int | SymbolDim, allow_zero: bool) -
     """规范化 conv 参数为 SymbolDim。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅接受 int 或 SymbolDim。
@@ -398,7 +398,7 @@ def _normalize_conv_param(name: str, value: int | SymbolDim, allow_zero: bool) -
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_structured.py
     - 功能实现: kernel_gen/operation/_nn_structured.py
     """
     if isinstance(value, bool):
@@ -487,7 +487,7 @@ def conv(
     """二维卷积（NCHW）语义推导。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 校验输入类型、rank、空间与 dtype 一致性。
@@ -499,7 +499,7 @@ def conv(
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_structured.py
     - 功能实现: kernel_gen/operation/_nn_structured.py
     """
     if not isinstance(value, Memory):
@@ -669,7 +669,7 @@ def img2col1d(
     """一维窗口展开高层语义推导。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 校验输入类型与 rank。
@@ -681,7 +681,7 @@ def img2col1d(
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_structured.py
     - 功能实现: kernel_gen/operation/_nn_structured.py
     """
     if not isinstance(value, Memory):
@@ -763,7 +763,7 @@ def img2col2d(
     """二维窗口展开高层语义推导。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 校验输入类型与 rank。
@@ -775,7 +775,7 @@ def img2col2d(
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_structured.py
     - 功能实现: kernel_gen/operation/_nn_structured.py
     """
     return _img2col(value, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr)
@@ -797,7 +797,7 @@ def _img2col(
     """img2col2d 的内部展开实现。
 
     创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 供 img2col2d 复用的内部实现。
@@ -809,7 +809,7 @@ def _img2col(
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_structured.py
     - 功能实现: kernel_gen/operation/_nn_structured.py
     """
     if not isinstance(value, Memory):
@@ -895,7 +895,7 @@ def _normalize_transpose_perm(perm: object, rank: int) -> list[int]:
     """规范化 transpose 的 perm 参数。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 要求 perm 为非字符串序列，且元素必须是 int 但不能是 bool。
@@ -906,7 +906,7 @@ def _normalize_transpose_perm(perm: object, rank: int) -> list[int]:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_structured.py
     - 功能实现: kernel_gen/operation/_nn_structured.py
     """
     if isinstance(perm, (str, bytes)) or not isinstance(perm, Sequence):
@@ -958,7 +958,7 @@ def transpose(value: object, perm: object) -> Memory:
     """按指定 perm 重排 Memory 的轴顺序。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅接受 Memory 输入，输出保留输入的 dtype/space/format。
@@ -970,7 +970,7 @@ def transpose(value: object, perm: object) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_structured.py
     - 功能实现: kernel_gen/operation/_nn_structured.py
     """
     if not isinstance(value, Memory):

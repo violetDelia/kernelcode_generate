@@ -1,17 +1,20 @@
 """NN operation common helpers.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 提供 nn family 共享类型、常量与参数校验 helper
 
 使用示例:
-- from kernel_gen.operation.nn import add, broadcast, reduce_sum
+- from kernel_gen.operation.nn import add, broadcast, matmul, reduce_sum
 
 关联文件:
 - spec: spec/operation/nn.md
-- test: test/operation/test_operation_nn.py
+- test: test/operation/test_operation_nn_elementwise.py
+- test: test/operation/test_operation_nn_broadcast.py
+- test: test/operation/test_operation_nn_structured.py
+- test: test/operation/test_operation_nn_reduction.py
 - 功能实现: kernel_gen/operation/_nn_common.py
 """
 
@@ -52,7 +55,7 @@ class _AddStrideDim(SymbolDim):
     """nn.add 默认 stride 的符号维度包装。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 对含符号表达式的维度返回字符串形式，避免对外泄露 sympy 表达式。
@@ -62,7 +65,7 @@ class _AddStrideDim(SymbolDim):
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_common.py
     """
 
@@ -77,7 +80,7 @@ def _build_add_stride(shape: SymbolShape) -> SymbolShape:
     """构建 nn.add 默认 stride。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 按连续行主序生成 stride。
@@ -88,7 +91,7 @@ def _build_add_stride(shape: SymbolShape) -> SymbolShape:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_common.py
     """
     stride_values: list[SymbolDim] = []
@@ -104,7 +107,7 @@ def _resolve_add_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
     """解析 nn 算术的 dtype 决议。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 按固定优先级选择顺序更靠后的类型。
@@ -115,7 +118,7 @@ def _resolve_add_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_common.py
     """
     try:
@@ -137,7 +140,7 @@ def _resolve_scalar_dtype(memory_dtype: NumericType) -> NumericType:
     """解析 Memory/标量路径的 dtype 决议。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 标量按 Int32 参与类型提升规则。
@@ -147,7 +150,7 @@ def _resolve_scalar_dtype(memory_dtype: NumericType) -> NumericType:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_common.py
     """
     return _resolve_add_dtype(memory_dtype, NumericType.Int32)
@@ -157,7 +160,7 @@ def _merge_broadcast_dim(lhs_dim: int | str, rhs_dim: int | str) -> int | str:
     """合并两个维度为隐式 broadcast 目标维度。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 维度相等时返回该维度。
@@ -169,7 +172,7 @@ def _merge_broadcast_dim(lhs_dim: int | str, rhs_dim: int | str) -> int | str:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_broadcast.py
     - 功能实现: kernel_gen/operation/_nn_common.py
     """
     if lhs_dim == "?" or rhs_dim == "?":
@@ -203,7 +206,7 @@ def _ensure_memory_operand(lhs: object, rhs: object) -> None:
     """校验至少一侧为 Memory。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅允许 Memory 或与 Memory 组合的二元运算。
@@ -213,7 +216,7 @@ def _ensure_memory_operand(lhs: object, rhs: object) -> None:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_common.py
     """
     if not isinstance(lhs, Memory) and not isinstance(rhs, Memory):
@@ -231,7 +234,7 @@ def _ensure_scalar_value(value: object) -> None:
     """校验标量输入类型。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅允许 int/float/bool 标量。
@@ -241,7 +244,7 @@ def _ensure_scalar_value(value: object) -> None:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_common.py
     """
     if isinstance(value, bool):
@@ -261,7 +264,7 @@ def _ensure_scalar_arithmetic_value(value: object) -> None:
     """校验纯标量算术输入类型。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 允许 int/float/bool/SymbolDim 参与纯标量算术。
@@ -270,8 +273,8 @@ def _ensure_scalar_arithmetic_value(value: object) -> None:
     - _ensure_scalar_arithmetic_value(SymbolDim("N"))
 
     关联文件:
-    - spec: spec/dsl/mlir_gen.md
-    - test: test/dsl/test_ast_visitor.py
+    - spec: spec/operation/nn.md
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_common.py
     """
     if isinstance(value, SymbolDim):
@@ -283,7 +286,7 @@ def _ensure_float_memory(value: object, op_name: str) -> Memory:
     """校验激活函数的 Memory 与浮点 dtype 输入。
 
     创建者: 我不是牛马
-    最后一次更改: 我不是牛马
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅接受 Memory 输入。
@@ -294,7 +297,7 @@ def _ensure_float_memory(value: object, op_name: str) -> Memory:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_common.py
     """
     if not isinstance(value, Memory):
@@ -322,7 +325,7 @@ def _ensure_activation_scalar(name: str, value: object) -> None:
     """校验激活函数数值参数。
 
     创建者: 我不是牛马
-    最后一次更改: 我不是牛马
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 仅接受 int/float，不接受 bool 或 SymbolDim。
@@ -333,7 +336,7 @@ def _ensure_activation_scalar(name: str, value: object) -> None:
 
     关联文件:
     - spec: spec/operation/nn.md
-    - test: test/operation/test_operation_nn.py
+    - test: test/operation/test_operation_nn_elementwise.py
     - 功能实现: kernel_gen/operation/_nn_common.py
     """
     if isinstance(value, bool) or isinstance(value, SymbolDim):
