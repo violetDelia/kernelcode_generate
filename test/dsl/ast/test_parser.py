@@ -128,6 +128,31 @@ def test_parse_function_helper_call() -> None:
     assert any(isinstance(node, NnUnaryAST) for node in func_ast.body.statements)
 
 
+# AST-S1-P-004A
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 验证从 `kernel_gen.operation.nn` 直接导入到模块作用域的 helper alias 可被 parser 识别。
+# 测试目的: 锁定 direct symbol alias 不依赖 helper 对象的 `__module__ == kernel_gen.operation.nn`，避免 `kernel_gen.operation._nn_*` 实现模块导致回退。
+# 使用示例: pytest -q test/dsl/ast/test_parser.py -k test_parse_function_global_imported_nn_helper_call
+# 对应功能实现文件路径: kernel_gen/dsl/ast/parser.py
+# 对应 spec 文件路径: spec/dsl/ast.md
+# 对应测试文件路径: test/dsl/ast/test_parser.py
+def test_parse_function_global_imported_nn_helper_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.nn import relu
+
+    def helper_kernel(x: "Tensor[f32, 1]"):
+        return relu_alias(x)
+
+    monkeypatch.setitem(helper_kernel.__globals__, "relu_alias", relu)
+
+    func_ast = parse_function(helper_kernel)
+    assert any(isinstance(node, NnUnaryAST) for node in func_ast.body.statements)
+
+
 # AST-S1-P-005
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀

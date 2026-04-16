@@ -983,12 +983,23 @@ def _resolve_import_bound_helper_call(
             return None
     elif isinstance(expr, py_ast.Name):
         helper_object = _lookup_python_name(expr.id, globals_table, builtins_table)
-        module_name = getattr(helper_object, "__module__", None)
-        helper_name = getattr(helper_object, "__name__", None)
+        module_name = None
+        helper_name = None
+        module_info = None
+        for candidate_module_name, candidate_module_info in _ALLOWED_IMPORT_BOUND_HELPERS.items():
+            for candidate_name in candidate_module_info[1]:
+                if getattr(candidate_module_info[0], candidate_name, None) is helper_object:
+                    module_name = candidate_module_name
+                    helper_name = candidate_name
+                    module_info = candidate_module_info
+                    break
+            if module_info is not None:
+                break
     else:
         return None
 
-    module_info = _ALLOWED_IMPORT_BOUND_HELPERS.get(module_name)
+    if module_info is None:
+        module_info = _ALLOWED_IMPORT_BOUND_HELPERS.get(module_name)
     if module_info is None:
         return None
     if not isinstance(helper_name, str):

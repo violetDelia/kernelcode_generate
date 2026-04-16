@@ -86,6 +86,7 @@ from kernel_gen.dialect.nn import (
     NnExpOp,
     NnImg2col1dOp,
     NnImg2col2dOp,
+    NnReluOp,
     NnMatmulOp,
     NnMemorySpaceAttr,
     NnMemoryType,
@@ -136,6 +137,7 @@ from kernel_gen.dsl.ast import (
     FunctionAST,
     ForAST,
     LoadAST,
+    NnUnaryAST,
     SourceLocation,
     SymbolToFloatAST,
     StoreAST,
@@ -949,6 +951,53 @@ def test_build_func_op_lowers_arch_get_dynamic_memory_via_import_bound_aliases(
                 raise AssertionError("expected func.return to carry one dynamic memory value")
             if return_ops[0].arguments[0].type != query_ops[0].result.type:
                 raise AssertionError("expected func.return type to stay aligned with arch.get_dynamic_memory result")
+
+
+# MGEN-035B
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 验证 `kernel_gen.operation.nn` 导出的 direct symbol alias helper 可在 build_func_op 链路稳定 lowering。
+# 测试目的: 锁定 `relu_alias(x)` 不依赖 helper 对象的实现模块名，避免 `kernel_gen.operation._nn_*` 导出布局回退为 `Unsupported call expression`。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_nn_helper_via_direct_alias
+# 对应功能实现文件路径: kernel_gen/dsl/ast/parser.py, kernel_gen/dsl/mlir_gen/function_builder.py
+# 对应 spec 文件路径: spec/dsl/ast.md, spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_lowers_nn_helper_via_direct_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kernel_gen.operation.nn import relu
+
+    def relu_kernel(x):
+        return relu_alias(x)
+
+    monkeypatch.setitem(relu_kernel.__globals__, "relu_alias", relu)
+
+    func_ast = _parse_function_with_env(
+        relu_kernel,
+        globals_table=relu_kernel.__globals__,
+        builtins_table=None,
+        runtime_table={"x": _tensor_arg([4])},
+        config={"reject_external_values": True},
+    )
+    if len(func_ast.body.statements) != 1:
+        raise AssertionError("expected relu alias kernel to lower to one AST statement")
+    if not isinstance(func_ast.body.statements[0], NnUnaryAST):
+        raise AssertionError("expected relu alias kernel to parse into NnUnaryAST")
+
+    for func_op in (
+        build_func_op(relu_kernel, _tensor_arg([4])),
+        build_func_op_from_ast(func_ast, runtime_args=[_tensor_arg([4])]),
+    ):
+        relu_ops = [op for op in func_op.body.block.ops if isinstance(op, NnReluOp)]
+        return_ops = [op for op in func_op.body.block.ops if isinstance(op, func.ReturnOp)]
+        if len(relu_ops) != 1:
+            raise AssertionError("expected exactly one nn.relu op")
+        if len(return_ops) != 1 or len(return_ops[0].arguments) != 1:
+            raise AssertionError("expected func.return to carry one value")
+        if return_ops[0].arguments[0].type != relu_ops[0].result.type:
+            raise AssertionError("expected func.return type to stay aligned with nn.relu result")
 
 
 # MGEN-004

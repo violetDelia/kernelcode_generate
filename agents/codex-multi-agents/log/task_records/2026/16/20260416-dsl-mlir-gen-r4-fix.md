@@ -102,3 +102,95 @@
 结论：
 - 当前现场满足 merge 前检查要求，可按白名单文件继续执行提交与远端同步。
 - 本轮交付只包含 `test/dsl/test_mlir_gen.py` 与当前任务记录文件。
+
+时间：2026-04-16 09:24
+经办人：守护最好的爱莉希雅
+任务：T-20260416-505b3a01
+任务目标：补充 build 阶段 expectation 写权限与当前唯一执行边界，供执行人继续推进
+改动：
+- 复核当前主仓终验，结果与计划书 2026-04-16 09:18 +0800 复核一致：`arch / dma / symbol` family 已通过，但 `nn` family 仍有 11 组失败，`test/dsl/ast/test_parser.py::test_parse_function_helper_call` 仍失败。
+- 明确本轮对执行人的单次 expectation 授权：允许直接修改 `expectation/dsl/mlir_gen/__main__.py`，以及 `expectation/dsl/mlir_gen/dialect/nn/` 下当前失败面直接对应的 tracked expectation 文件：`__main__.py`、`broadcast.py`、`broadcast_to.py`、`conv.py`、`fc.py`、`img2col1d.py`、`img2col2d.py`、`matmul.py`、`softmax.py`、`reduce/__main__.py`、`reduce/_shared.py`、`reduce/reduce_max.py`、`reduce/reduce_min.py`、`reduce/reduce_sum.py`。
+- 明确本轮实现/测试侧不再限死更小子目录；凡是为收口 `nn` family 目录级失败与 imported helper call parser 回归所必需的直接相关实现/测试文件，均可在当前任务内调整。
+- 明确限制：不改 `symbol / arch / dma` 侧 expectation，不改其他无关 expectation，不改计划书以外的 `spec`、`agents`、配置文件；若不是包入口、依赖缺失、聚合入口脚本等 expectation 侧专属问题，应优先收口实现/测试，不回退现有 expectation 语义。
+验证：
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python -m expectation.dsl.mlir_gen.dialect.arch` -> `exit=0`
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python -m expectation.dsl.mlir_gen.dialect.dma` -> `exit=0`
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python -m expectation.dsl.mlir_gen.dialect.symbol` -> `exit=0`
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python -m expectation.dsl.mlir_gen.dialect.nn` -> `exit=1`
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python -m expectation.dsl.mlir_gen` -> `exit=1`
+- `PYTHONDONTWRITEBYTECODE=1 pytest -q test/dsl/ast test/dsl/mlir_gen test/dsl/mlir_gen/emit test/tools/test_mlir_gen_compare.py` -> `1 failed, 57 passed`
+结论：
+- `T-20260416-505b3a01` 继续作为本计划当前唯一继续项。
+- 执行人可按本记录直接继续推进，不需要再等待 expectation 写权限确认。
+- 当前计划仍不具备归档条件；待本任务收口 `nn` family 与 helper-call parser 回归后，再回到计划书执行下一轮终验。
+
+时间：2026-04-16 09:28 +0800
+经办人：朽木露琪亚
+任务：T-20260416-505b3a01
+任务目标：收口 imported helper call 的 parser 回归，并恢复 `expectation.dsl.mlir_gen.dialect.nn` 与 `expectation.dsl.mlir_gen` 目录级入口通过
+改动：
+- 按任务条目补建缺失的 [`wt-20260416-dsl-mlir-gen-r4-fix`](../../../../../../wt-20260416-dsl-mlir-gen-r4-fix) worktree（分支 `T-20260416-505b3a01`，基于当前 `HEAD 724f153`），随后在该 worktree 内复现到三处同源失败：`test/dsl/ast/test_parser.py::test_parse_function_helper_call`、`python -m expectation.dsl.mlir_gen.dialect.nn`、`python -m expectation.dsl.mlir_gen`。
+- 修正 [`kernel_gen/dsl/ast/parser.py`](../../../../../../kernel_gen/dsl/ast/parser.py) 的 `_resolve_import_bound_helper_call(...)`：对于 `from kernel_gen.operation.nn import helper` 或模块级 direct symbol alias 的 `Name` 调用，不再依赖 helper 对象的 `__module__ == kernel_gen.operation.nn`，而是按 `kernel_gen.operation.nn` 模块真实导出对象做 identity 匹配。这样 `relu/broadcast/conv/fc/...` 即使实现落在 `kernel_gen.operation._nn_*` 子模块，也仍按 import-bound helper 正常解析。
+- 在 [`test/dsl/ast/test_parser.py`](../../../../../../test/dsl/ast/test_parser.py) 新增 `test_parse_function_global_imported_nn_helper_call()`，锁定“模块级 direct symbol alias 的 nn helper”可被 parser 识别。
+- 在 [`test/dsl/test_mlir_gen.py`](../../../../../../test/dsl/test_mlir_gen.py) 新增 `test_build_func_op_lowers_nn_helper_via_direct_alias()`，锁定 `build_func_op(...)` / `build_func_op_from_ast(...)` 对 `kernel_gen.operation.nn` 导出 helper alias 的 lowering 不再回退。
+- 已收到架构师对 `expectation/dsl/mlir_gen/__main__.py` 与 `expectation/dsl/mlir_gen/dialect/nn/` 当前失败文件的单次授权；但本轮实际收口仅依赖实现/测试修复，未修改任何 tracked expectation 文件。
+验证：
+- `PYTHONDONTWRITEBYTECODE=1 pytest -q test/dsl/ast/test_parser.py -k 'test_parse_function_helper_call or test_parse_function_global_imported_nn_helper_call'` -> `2 passed, 4 deselected in 0.26s`
+- `PYTHONDONTWRITEBYTECODE=1 pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_nn_helper_via_direct_alias` -> `1 passed, 151 deselected in 0.37s`
+- `python - <<'PY' ... build_func_op(broadcast_kernel_case_1, *CASE_1_RUNTIME_ARGS) ... PY` -> 输出 `FuncOp`
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python -m expectation.dsl.mlir_gen.dialect.nn` -> `exit=0`
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python -m expectation.dsl.mlir_gen` -> `exit=0`
+- `PYTHONDONTWRITEBYTECODE=1 pytest -q test/dsl/ast test/dsl/mlir_gen test/dsl/mlir_gen/emit test/tools/test_mlir_gen_compare.py` -> `59 passed in 0.33s`
+- `git status --short --untracked-files=no` -> `M kernel_gen/dsl/ast/parser.py`、`M test/dsl/ast/test_parser.py`、`M test/dsl/test_mlir_gen.py`
+结论：
+- 本轮 build 已完成，实际根因是 imported helper direct alias 解析回退，不是 `nn` family expectation 合同本身先坏。
+- 在修复 parser 后，`expectation.dsl.mlir_gen.dialect.nn`、`expectation.dsl.mlir_gen` 与计划书点名 pytest 已全部恢复通过。
+- 当前无需动授权范围内的 expectation 文件；下一步可续接 `review`，复核 parser identity 匹配修复与两条新增回归是否足以锁定这轮问题。
+
+时间：2026-04-16 09:31 +0800
+经办人：不要啊教练
+任务：T-20260416-505b3a01
+任务目标：复核 imported helper call parser 回归修复与 `expectation.dsl.mlir_gen` `nn family/root` 复测结果
+改动：
+- 对照 [`TODO.md`](../../../../../../TODO.md)、计划书 [`ARCHITECTURE/plan/dsl_mlir_gen_expectation_green_plan.md`](../../../../../../ARCHITECTURE/plan/dsl_mlir_gen_expectation_green_plan.md) 与当前任务记录，确认本轮 review 聚焦 imported helper direct alias 的 parser 回退、`nn` family 目录级入口恢复，以及根入口 `expectation.dsl.mlir_gen` 是否重新稳定通过。
+- 复核当前写集仅包含 [`kernel_gen/dsl/ast/parser.py`](../../../../../../kernel_gen/dsl/ast/parser.py)、[`test/dsl/ast/test_parser.py`](../../../../../../test/dsl/ast/test_parser.py)、[`test/dsl/test_mlir_gen.py`](../../../../../../test/dsl/test_mlir_gen.py) 三个直接相关文件；未改动任何 tracked expectation、`spec`、`agents` 或无关实现。
+- 逐项审阅 parser 修复：[`_resolve_import_bound_helper_call(...)`](../../../../../../kernel_gen/dsl/ast/parser.py) 在 `py_ast.Name` 分支改为对 `_ALLOWED_IMPORT_BOUND_HELPERS` 导出对象做 identity 匹配，不再依赖 helper 对象的 `__module__ == kernel_gen.operation.nn`；这与任务记录中的根因一致，且仍保留“只能识别白名单导出对象、拒绝伪造同名 callable”的边界。
+- 审阅新增回归：
+  - [`test_parse_function_global_imported_nn_helper_call()`](../../../../../../test/dsl/ast/test_parser.py) 锁定“模块级 direct symbol alias 的 nn helper 可被 parser 识别”；
+  - [`test_build_func_op_lowers_nn_helper_via_direct_alias()`](../../../../../../test/dsl/test_mlir_gen.py) 锁定 `build_func_op(...)` / `build_func_op_from_ast(...)` 对 `kernel_gen.operation.nn` 导出 alias 的 lowering 不再回退。
+- 问题列表：未发现剩余问题。
+- 漏洞排查结果：
+  - 输入校验绕过：未见问题；parser 仍仅接受白名单 helper 对象，不会因为 direct alias 放宽为任意 callable。
+  - 类型/形状绕过：未见问题；新增回归仅验证 alias 识别与 lowering，不改变 `nn` op 的类型/shape 构造约束。
+  - 边界越界：未见问题；写集只在 parser 和测试，未越过本轮授权与计划边界。
+  - 错误处理缺失：未见问题；相关失败会继续落在现有 parser/build_func_op/expectation 命令输出中，可定位性足够。
+  - 状态污染：未见问题；`python -m expectation.dsl.mlir_gen.dialect.nn` 与 `python -m expectation.dsl.mlir_gen` 均已恢复 `exit 0`，未复现目录级串跑与子入口结果不一致。
+  - 资源释放问题：未见问题；本轮修复不引入新的持久资源或生命周期逻辑。
+- 改进建议：未发现额外改进点。
+验证：
+- `git -C /home/lfr/kernelcode_generate/wt-20260416-dsl-mlir-gen-r4-fix status --short --untracked-files=all --ignored=matching` -> 当前写集仅 `kernel_gen/dsl/ast/parser.py`、`test/dsl/ast/test_parser.py`、`test/dsl/test_mlir_gen.py` 与任务记录文件。
+- `git -C /home/lfr/kernelcode_generate/wt-20260416-dsl-mlir-gen-r4-fix diff -- kernel_gen/dsl/ast/parser.py test/dsl/ast/test_parser.py test/dsl/test_mlir_gen.py` -> parser 只在 `_resolve_import_bound_helper_call(...)` 的 `py_ast.Name` 分支补 identity 匹配；两组测试只新增 direct alias 回归。
+- `PYTHONDONTWRITEBYTECODE=1 pytest -q test/dsl/ast/test_parser.py -k 'test_parse_function_helper_call or test_parse_function_global_imported_nn_helper_call'` -> `2 passed, 4 deselected in 0.26s`。
+- `PYTHONDONTWRITEBYTECODE=1 pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_nn_helper_via_direct_alias` -> `1 passed, 151 deselected in 0.39s`。
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python -m expectation.dsl.mlir_gen.dialect.nn` -> `exit 0`。
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python -m expectation.dsl.mlir_gen` -> `exit 0`，标准输出包含 `dialect.symbol.element_binary.add` 的 `CASE-1` 文案。
+- `PYTHONDONTWRITEBYTECODE=1 pytest -q test/dsl/ast test/dsl/mlir_gen test/dsl/mlir_gen/emit test/tools/test_mlir_gen_compare.py` -> `59 passed in 0.36s`。
+结论：通过。imported helper direct alias 的 parser 回归已被 identity 匹配修复锁定，`expectation.dsl.mlir_gen.dialect.nn` 与根入口复测结果均恢复通过；下一步续接 `merge`。按当前临时口径，本轮仅使用普通 `-next` 回到任务列表，再由管理员手动改派给 `李白`。
+
+时间：2026-04-16 09:37 +0800
+经办人：李白
+任务：T-20260416-505b3a01
+任务目标：在指定 worktree 内合并 imported helper call parser 回归修复与 `expectation.dsl.mlir_gen` `nn family/root` 复测收口结果，并推送远端主分支
+改动：
+- 已核对 `TODO.md`、角色提示词、计划书 [`ARCHITECTURE/plan/dsl_mlir_gen_expectation_green_plan.md`](../../../../../../ARCHITECTURE/plan/dsl_mlir_gen_expectation_green_plan.md) 与同链记录，确认本轮只承接 `merge`，当前实际写集为 [`kernel_gen/dsl/ast/parser.py`](../../../../../../kernel_gen/dsl/ast/parser.py)、[`test/dsl/ast/test_parser.py`](../../../../../../test/dsl/ast/test_parser.py)、[`test/dsl/test_mlir_gen.py`](../../../../../../test/dsl/test_mlir_gen.py) 与当前任务记录文件。
+- 已复核授权范围内的 expectation 资产现场：[`expectation/dsl/mlir_gen/__main__.py`](../../../../../../expectation/dsl/mlir_gen/__main__.py) 与 `expectation/dsl/mlir_gen/dialect/nn/` 当前均无待提交文本差异；本轮不纳入任何 expectation 文件。
+- 已复核 parser 补丁仅收口 imported helper direct alias 的 identity 匹配，不混入无关实现；两条新增测试分别锁定 parser alias 识别与 `build_func_op(...)` lowering 回归。
+- 当前未执行暂存、提交、同步或推送；下一步按上述白名单文件完成暂存与提交，再与 `origin/main` 同步并推送。
+验证：
+- `rg -n "T-20260416-505b3a01" /home/lfr/kernelcode_generate/TODO.md` -> 当前任务为 `merge`，指派 `李白`，状态 `进行中`
+- `git -C /home/lfr/kernelcode_generate/wt-20260416-dsl-mlir-gen-r4-fix diff -- kernel_gen/dsl/ast/parser.py test/dsl/ast/test_parser.py test/dsl/test_mlir_gen.py` -> 仅命中 parser identity 匹配补丁与两条 direct alias 回归测试
+- `git -C /home/lfr/kernelcode_generate/wt-20260416-dsl-mlir-gen-r4-fix diff --name-only origin/main -- kernel_gen/dsl/ast/parser.py test/dsl/ast/test_parser.py test/dsl/test_mlir_gen.py expectation/dsl/mlir_gen/__main__.py expectation/dsl/mlir_gen/dialect/nn` -> 仅命中 `kernel_gen/dsl/ast/parser.py`、`test/dsl/ast/test_parser.py`、`test/dsl/test_mlir_gen.py`
+- `git -C /home/lfr/kernelcode_generate/wt-20260416-dsl-mlir-gen-r4-fix status -sb --ignored=matching --untracked-files=all` -> tracked 写集仅上述 3 个文件与任务记录文件，未见其他待交付改动
+结论：
+- 当前现场满足 merge 前检查要求，可按白名单文件继续执行提交与远端同步。
+- 本轮不纳入 expectation 文件；交付只包含 parser 修复、两条回归测试与当前任务记录文件。
