@@ -1002,7 +1002,7 @@ def test_build_func_op_lowers_nn_helper_via_direct_alias(
 
 # MGEN-004
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-22 15:38:56 +0800
 # 最近一次运行成功时间: 2026-03-22 15:38:56 +0800
 # 功能说明: 验证 build_func_op 生成 func.func 并包含 nn dialect IR。
@@ -2560,10 +2560,10 @@ def test_build_func_op_rejects_dma_alloc_helper_with_invalid_dtype() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-26 02:03:12 +0800
 # 最近一次运行成功时间: 2026-03-26 02:03:12 +0800
-# 功能说明: 验证 alloc-only kernel 拒绝非法 space 参数。
-# 测试目的: 锁定 alloc space 校验错误信息与公开语义一致。
+# 功能说明: 验证 alloc-only kernel 对非法 space 参数继续按 AstVisitorError 对外暴露。
+# 测试目的: 锁定 build_func_op 的 alloc space 解析错误会收口为带定位的 AstVisitorError。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_rejects_dma_alloc_helper_with_invalid_space
-# 对应功能实现文件路径: kernel_gen/dsl/ast.py
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/function_builder.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
 # 对应测试文件路径: test/dsl/test_mlir_gen.py
 def test_build_func_op_rejects_dma_alloc_helper_with_invalid_space() -> None:
@@ -2572,7 +2572,7 @@ def test_build_func_op_rejects_dma_alloc_helper_with_invalid_space() -> None:
     def alloc_kernel(rank1: int, rank2: int) -> "Tensor[f32, 2, 3]":
         return alloc([rank1, rank2], NumericType.Float32, "shared")
 
-    with pytest.raises(TypeError, match="alloc space must be MemorySpace"):
+    with pytest.raises(AstVisitorError, match="alloc space must be MemorySpace"):
         build_func_op(alloc_kernel, 2, 3)
 
 

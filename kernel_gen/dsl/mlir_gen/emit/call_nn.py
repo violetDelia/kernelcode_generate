@@ -72,7 +72,7 @@ from kernel_gen.dialect.symbol import (
     SymbolValueType,
     build_public_symbol_expr,
 )
-from kernel_gen.dsl.ast import BinaryExprAST, CompareExprAST, ConstAST, NnUnaryAST, SourceLocation
+from kernel_gen.dsl.ast import BinaryExprAST, CompareExprAST, ConstAST, NnUnaryAST, ScalarArgAST, SourceLocation
 from .core import (
     _LoweringError,
     _const_symbol_int,
@@ -353,12 +353,15 @@ def _symbol_scalar_expr_text(
 
     if isinstance(inferred_type, SymbolValueType):
         return inferred_type.expr.expr.data
-    runtime_value = _resolve_runtime_scalar_value(expr, inferred_type, runtime_values)
-    if isinstance(runtime_value, SymbolDim):
-        value = runtime_value.get_value()
-        return value if isinstance(value, str) else str(value)
-    if isinstance(runtime_value, int) and not isinstance(runtime_value, bool):
-        return str(runtime_value)
+    if isinstance(expr, ConstAST) and isinstance(expr.value, int) and not isinstance(expr.value, bool):
+        return str(expr.value)
+    if isinstance(expr, ScalarArgAST) and runtime_values is not None and expr.name in runtime_values:
+        runtime_value = runtime_values[expr.name]
+        if isinstance(runtime_value, SymbolDim):
+            value = runtime_value.get_value()
+            return value if isinstance(value, str) else str(value)
+        if isinstance(runtime_value, int) and not isinstance(runtime_value, bool):
+            return str(runtime_value)
     return None
 
 
