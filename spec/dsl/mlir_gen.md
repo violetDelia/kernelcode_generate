@@ -43,7 +43,7 @@
 - 不定义节点级发射细节，节点发射规则由 `emit_mlir` 约束。
 - `mlir_gen` 与 `emit_mlir` 的 owner 边界固定为：`ModuleAST` / `FunctionAST` / `BlockAST` 与签名节点 `TensorAST` / `ScalarArgAST` 由 builder / signature 层负责；其余 node-level AST 全部委托给 [`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md) 约束的 lowering 子系统，不得在 `mlir_gen` 内维护第二份 helper 映射表。
 - `PtrArgAST` 虽属于 AST 层签名节点，但当前不在 builder / signature 支持面内；若流入 `build_func_op(...)` / `build_func_op_from_ast(...)`，必须按实现现状报 `Unsupported input type`，不得在 spec 中误写为已支持输入。
-- 当前 node-level lowering 子系统可通过 `kernel_gen.dsl.emit_mlir` facade 或 `kernel_gen.dsl.mlir_gen.emit` 共享入口触达；对 `mlir_gen` 的公开合同而言，两者视为同一套 emit 语义，不额外区分。
+- 当前 node-level lowering 子系统的唯一公开入口是 `kernel_gen.dsl.mlir_gen.emit`；`mlir_gen` 对外只承认这一套 emit 语义，不再保留旧 facade 的并列入口合同。
 - 不做优化或自动修复非法 IR。
 - `build_func_op` 的公开入口接收目标函数、运行时参数，以及仅用于补充源码解析环境的可选 `globals` / `builtins`；这些额外参数不得改变由 `runtime_args` 决定的函数输入签名，也不能代替必填的运行时参数。
 - `build_func_op` 的公开契约仅覆盖可位置绑定的形参；`runtime_args` 必须按这些形参的顺序传入。
@@ -61,7 +61,7 @@
 - 对于纯 symbol 标量算术函数（仅符号标量入参/返回且返回为整型标量），函数签名中的输入与输出必须统一使用 `!symbol.int<"expr">`，不得降级为 `i32`、`index` 或其他 builtin 标量类型。
 - 对于纯 symbol 标量 compare family（`==` / `!=` / `<` / `<=` / `>` / `>=`）函数，函数签名中的输入必须保持 `!symbol.int<"expr">`，返回类型必须统一为 `i1`，不得退回 `!symbol.int<"expr">` 或其他 builtin 标量类型。
 - memory 路径的比较表达式（`eq/ne/lt/le/gt/ge`）必须复用逐元素隐式 broadcast 规则，且 `lhs/rhs` 的 `element_type`/`space` 必须一致；当隐式 broadcast 失败或类型不一致时，`build_func_op(...)` 必须抛出 `AstVisitorError` 并保留位置（例如 `Implicit broadcast dimension mismatch`、`Binary op operands must have the same element_type`、`Binary op operands must have the same space`）。当函数体以 `return lhs != rhs` 承载 tensor 比较语义时，必须复用 `CompareExprAST(op=\"ne\")` lowering 链路生成 `nn.ne`，且结果 element type 为 `i1`。
-- `build_func_op(...)` / `build_func_op_from_ast(...)` 经过的 unary/binary/compare 三条 `nn` elementwise 路径，长期规则归属必须统一落在 [`kernel_gen/dsl/mlir_gen/emit/call_nn.py`](../../kernel_gen/dsl/mlir_gen/emit/call_nn.py)；[`kernel_gen/dsl/emit_mlir.py`](../../kernel_gen/dsl/emit_mlir.py) 只允许保留 facade 入口、转发或兼容壳层职责，不得再维护第二份 elementwise 专用规则。
+- `build_func_op(...)` / `build_func_op_from_ast(...)` 经过的 unary/binary/compare 三条 `nn` elementwise 路径，长期规则归属必须统一落在 [`kernel_gen/dsl/mlir_gen/emit/call_nn.py`](../../kernel_gen/dsl/mlir_gen/emit/call_nn.py) 及其所属 `kernel_gen.dsl.mlir_gen.emit` 子系统，不得再维护第二份 elementwise 专用规则。
 - 当函数体以 `return lhs * rhs` 或 `return nn.mul(lhs, rhs)` 承载 tensor 乘法语义时，必须复用 `BinaryExprAST(op="mul")` lowering 链路生成 `nn.mul`；该链路允许 implicit broadcast，若 shape 不可 broadcast 必须报错 `Implicit broadcast dimension mismatch`。当两侧 `element_type` 不一致但 `space` 一致时，必须按二元算术 dtype promotion（`i32 < f16 < f32`）选择目标 element_type，并通过 `dma.cast` 将非目标侧对齐后再执行 `nn.mul`；若 `space` 不一致必须报错 `Binary op operands must have the same space`。
 - Tensor 返回注解放宽仅适用于“二元算术 mixed dtype”场景：仅当 `return` 表达式是 tensor 二元算术且两操作数 `element_type` 不一致时，允许返回注解与最终 lowering 结果在 `element_type` 上暂不一致；且注解 `element_type` 必须是左右操作数 `element_type` 之一，否则必须报错 `Return type does not match annotation`。
 - Tensor 注解既可使用普通字符串字面量 `"Tensor[...]"`，也可使用在源码层面可归一化为同等文本的 `f"Tensor[...]"`；归一化后的文本必须满足 Tensor 注解语法，若包含无法静态归一化的格式化片段或归一化后仍不符合语法，必须报错。
