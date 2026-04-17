@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`小李飞刀`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/dialect/symbol.md`](../../spec/dialect/symbol.md)
 - `test`：[`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)
 - `功能实现`：[`kernel_gen/dialect/symbol.py`](../../kernel_gen/dialect/symbol.py)
@@ -28,7 +28,7 @@
 - 提供从 memory type 读取单个维度或步幅并返回 symbol value 的查询接口，避免其他方言重复定义 `dim/stride -> value` 读取语义。
 - 为后续 `nn`、`dma`、`kernel`、`dsl` 等方言提供统一的符号值口径，避免每个方言各自维护一套符号标量表达。
 - 提供最小整数符号算术与比较接口，使 `!symbol.int<"expr">` 标量可在方言内完成基础加、减、乘、除、整除组合与相等/大小关系判断，而无需回退到其他算术方言。
-- 冻结 `symbol.gt` / `symbol.le` / `symbol.lt` / `symbol.ne` 与 `symbol.to_float` 的 dialect 合同，使上游 `a > b`、`a <= b`、`a < b`、`a != b` 与 `float(n)` 在进入 `symbol dialect` 后拥有稳定目标 op。
+- 明确 `symbol.gt` / `symbol.le` / `symbol.lt` / `symbol.ne` 与 `symbol.to_float` 的 dialect 合同，使上游 `a > b`、`a <= b`、`a < b`、`a != b` 与 `float(n)` 在进入 `symbol dialect` 后拥有稳定目标 op。
 - 提供 `!symbol.ptr<dtype>` 作为 DSL `Ptr(dtype)` 的最小 IR pointer type 载体，使函数签名 lowering 可以稳定表达“指向某个 pointee dtype 的指针输入”。
 - 提供 `SymbolIterType`，用于表达循环迭代变量语义，并支持 `!symbol.iter<start = "...", end = "...", step = "...">` 文本形式。
 - 保持类型表达尽量简单，优先服务开发者理解和方言间协同，而不是追求复杂的符号推导系统。
@@ -36,7 +36,7 @@
 
 ## 限制与边界
 
-- `symbol dialect` 只定义符号值类型、最小整数符号算术 op、基础约束以及从 memory type 读取单个 dim/stride 值的查询接口；不定义张量类型、内存类型、通用控制流 op、通用内存搬运 op 或逐元素张量算术 op。
+- `symbol dialect` 只定义符号值类型、最小整数符号算术 op、基础约束、`symbol.for` 的最小循环结构以及从 memory type 读取单个 dim/stride 值的查询接口；不定义张量类型、内存类型、通用控制流 op、通用内存搬运 op 或逐元素张量算术 op。
 - 本方言的重点是“值的符号语义如何表达”，不是“如何求值”或“如何解方程”。
 - 本方言不负责通用符号化简、约束求解、范围分析、证明或 SMT 集成。
 - 符号表达式只要求可稳定打印、可比较、可校验；不要求在 dialect 内部完成复杂等价变换。
@@ -52,6 +52,7 @@
 - 本方言暂不定义“未知但无名字”的匿名符号值；若需要动态未知值，应优先使用具名符号或由其他方言以 SSA value 传递。
 - 当前只定义整数语义，不区分 `int/int8/int16/int32/int64` 等具体整型宽度，也不定义 `index`、浮点或其他非整型 symbol 类型。
 - `SymbolIterType` 只用于表达循环迭代变量语义；`symbol.for` 的 `start/end/step` 仍要求 `!symbol.int<"expr">`，`it` 则要求 `!symbol.iter<...>`。
+- `symbol.for` 支持的循环承载值仅限一个 `f64` 累计值；该能力服务于成本函数一类“循环内累计、循环外返回”的 IR 表达，不扩展为通用多值控制流。
 - `symbol.ptr` 只定义 `!symbol.ptr<dtype>` 这一类最小 pointer type；它只承载 pointee dtype，不承载名字、地址值、shape、stride、offset 或 memory space。
 - `!symbol.ptr<dtype>` 中的 `dtype` 必须是合法 `TypeAttribute`，且不得为 `!symbol.int<"...">`；当前不定义 `!symbol.ptr<!symbol.int<"...">>` 这类“指向 symbol.int”的 pointer carrier。
 - 当前最小算术/比较范围仅包含 `symbol.add`、`symbol.sub`、`symbol.mul`、`symbol.div`、`symbol.floordiv`、`symbol.eq`、`symbol.ne`、`symbol.lt`、`symbol.le`、`symbol.gt`、`symbol.ge`；不定义取模、按位运算、布尔逻辑组合、广播或张量级算术。
@@ -601,6 +602,7 @@ SymbolPtrType(f32)
 - 用于在 IR 层显式表达“以符号整数边界驱动的半开区间循环”，其中 `start`、`end`、`step` 采用 `!symbol.int<"expr">`，迭代变量 `it` 采用 `!symbol.iter<...>`。
 - 该 op 只负责循环边界与迭代变量的符号整数约束，不扩展为通用控制流方言；循环体内部承载的具体计算或访存语义仍由其他 dialect 负责。
 - `it` 的类型基线必须是 `SymbolIterType`；用户口径中的“symbol scf”迭代变量，本质上就是 `symbol.for` 暴露的 `!symbol.iter<...>` block argument。
+- 可选支持一个 loop-carried `f64` 累计值。无 carried-value 形式保持旧合同；带 carried-value 形式用于把循环体内生成的 `f64` 累计值通过 SSA 传回循环外。
 
 参数说明：
 
@@ -608,6 +610,9 @@ SymbolPtrType(f32)
 - `end(value)`：循环结束值，类型必须为 `!symbol.int<"expr">`。
 - `step(value)`：循环步长值，类型必须为 `!symbol.int<"expr">`。
 - `it(block argument)`：循环体块参数，表示当前迭代值，类型必须为 `!symbol.iter<...>`，并与循环变量语义绑定。
+- `init(value | optional)`：可选初始累计值，类型固定为 `f64`。
+- `acc(block argument | optional)`：可选循环体累计块参数，类型固定为 `f64`；仅当 `init` 存在时出现，且必须位于 `it` 之后。
+- `yield(value | optional)`：可选循环体末尾传出的下一轮累计值，类型固定为 `f64`；仅当 `init/acc` 存在时必需。
 - `body(region)`：循环体 region；当前仅要求是单 region、单块结构。
 
 使用示例：
@@ -618,11 +623,23 @@ symbol.for %i = %start to %end step %step {iter = #symbol.iter<start = "M", end 
 }
 ```
 
+```text
+%zero = arith.constant 0.0 : f64
+%total = symbol.for %i = %start to %end step %step iter_args(%acc = %zero) {iter = #symbol.iter<start = "0", end = "M", step = "TILE_M">} -> f64 {
+  %local = tuner.cost(%tile_m) {kind = "move", cost_kind = "all", op_name = "dma.alloc", device_func = @_device_matmul_kernel_} : (!symbol.int<"TILE_M">) -> f64
+  %next = arith.addf %acc, %local : f64
+  symbol.yield %next : f64
+}
+```
+
 注意事项：
 
 - 语义采用半开区间：从 `start` 开始，每轮累加 `step`，当下一轮将不再满足区间进入条件时终止；不包含 `end` 本身。
 - `start`、`end`、`step` 必须是 `!symbol.int<"expr">`，`it` 必须是 `!symbol.iter<...>`；不接受普通整数类型、浮点类型或其他 dialect 的标量类型。
 - verifier 必须逐项校验 `it` 为 `SymbolIterType`；即使 `start/end/step` 合法，只要 `it` 为 `f32`、`f64`、`index`、普通 `i32` 或其他非 `SymbolIterType`，都必须报错。
+- 若存在 carried value，`init`、`acc`、`symbol.yield` value 与 `symbol.for` 结果类型必须全部为 `f64`；任一位置为 `f32`、`index`、普通整数或 `!symbol.int<"...">` 都必须报错。
+- V1 只允许一个 carried value。出现多个 `iter_args`、多个 carried block args、多个 `symbol.yield` values 或多个 op results 时必须报错。
+- 带 carried value 的循环体必须以 `symbol.yield <f64>` 结束；无 carried value 的旧形式仍可保持无 terminator 体，不因本轮新增能力而要求所有旧循环追加 terminator。
 - `it` 是循环体内部可见的迭代变量，其值语义应与当前迭代点一致；打印与解析时必须保持 `it` 的类型稳定。
 - 当前 verifier 只约束类型、region 结构、文本语法与可静态判定的错误路径；不要求在 `symbol dialect` 内完成一般符号大小关系证明。
 - 若 `step` 的表达式可静态判定为 `0`，必须报错；若 `step` 为纯符号表达且当前无法静态证明为非零，本 spec 不额外引入证明规则，由后续实现按最小可实现口径处理。
@@ -632,9 +649,39 @@ symbol.for %i = %start to %end step %step {iter = #symbol.iter<start = "M", end 
 
 返回与限制：
 
-- 返回类型：无结果 op。
-- 返回语义：通过 region 承载循环体，并在循环体块参数中暴露当前迭代变量 `it`。
-- 限制：当前只定义单迭代变量、单 region、单块的 `symbol.for`；不定义循环携带值、并行循环、多结果循环或提前退出语义。
+- 返回类型：无 carried-value 时无结果；带 carried-value 时返回单个 `f64`。
+- 返回语义：通过 region 承载循环体，并在循环体块参数中暴露当前迭代变量 `it`；带 carried-value 时，循环外结果为最后一次 `symbol.yield` 传出的 `f64` 累计值。
+- 限制：当前只定义单迭代变量、单 region、单块的 `symbol.for`；仅允许一个 `f64` carried value，不定义任意类型 carried value、并行循环、多结果循环或提前退出语义。
+
+### `symbol.yield`
+
+功能说明：
+
+- 表示带 carried-value 的 `symbol.for` 循环体末尾 terminator。
+- 用于把当前轮次的下一个累计值从循环体末尾传回 `symbol.for` 结果与下一轮 `acc`。
+
+参数说明：
+
+- `value(f64)`：下一轮累计值，类型固定为 `f64`。
+
+使用示例：
+
+```text
+%next = arith.addf %acc, %local : f64
+symbol.yield %next : f64
+```
+
+注意事项：
+
+- `symbol.yield` 只允许出现在带 carried-value 的 `symbol.for` 单块 region 末尾。
+- `symbol.yield` 的 value 数量固定为 1，且类型必须与 `symbol.for` carried value 一致，当前固定为 `f64`。
+- 无 carried-value 的旧 `symbol.for` 形式不要求出现 `symbol.yield`。
+- 当前不定义独立于 `symbol.for` 的通用 terminator 语义，不支持多值 yield 或其他类型 yield。
+
+返回与限制：
+
+- 返回类型：无结果。
+- 限制：仅服务 `symbol.for` 的单个 `f64` carried value 语义。
 
 ## 测试
 
@@ -659,6 +706,7 @@ symbol.for %i = %start to %end step %step {iter = #symbol.iter<start = "M", end 
 - 验证 `symbol.get_dim` / `symbol.get_stride` 的错误路径，包括非 memory type、轴号越界、匿名动态条目 `?` 与非法轴号。
 - 验证 `symbol.for` 的半开区间循环语义、`start/end/step` 的 `!symbol.int<"...">` 约束、`it` 的 `!symbol.iter<...>` 约束、parse/print 稳定性与 verifier 错误路径。
 - 验证 `symbol.for` 的迭代变量 `it` 必须为 `SymbolIterType`，不能是浮点、builtin 整数或其他非 `!symbol.iter<...>` 类型。
+- 验证 `symbol.for` 的单个 loop-carried `f64` 形式，包括 `iter_args`、第二块参数、单结果、`symbol.yield` 与旧无 carried-value 形式继续兼容。
 - 验证 `symbol.const` 生成常量的 `!symbol.int<"...">` 结果类型、parse/print 稳定性与结果类型一致性错误路径。
 
 ### 功能与用例清单
@@ -704,6 +752,8 @@ symbol.for %i = %start to %end step %step {iter = #symbol.iter<start = "M", end 
 | TC-SYM-036 | `symbol.for` | region 结构非法 | 缺少 region、块参数缺失或块参数类型不匹配 | 构造并校验 op | verifier 报错 | `test_symbol_for_rejects_invalid_region_shape` |
 | TC-SYM-037 | `symbol.for` | 文本语法非法 | 缺少 `to/step` 片段，或类型段数量不匹配 | parse `symbol.for` 文本 | parse 报错 | `test_symbol_for_parse_rejects_malformed_text` |
 | TC-SYM-038 | `symbol.for` | 错误信息闭环 | 操作数类型、步长或 region 校验失败 | 触发 verifier / parse 错误 | 错误信息包含 op 名称与失败原因 | `test_symbol_for_error_messages_include_context` |
+| TC-SYM-038A | `symbol.for` | 单个 `f64` carried value 合法路径 | `init`、累计块参数、`symbol.yield` 与 op 结果均为 `f64` | 构造 `symbol.for ... iter_args(%acc = %zero) ... -> f64` | verifier 通过；parse/print round-trip 稳定；旧无 carried-value 文本仍通过 | `test_symbol_for_loop_carried_f64_round_trip` |
+| TC-SYM-038B | `symbol.for` | carried value 类型非法 | carried value 任一位置不是 `f64`，或数量不为 1 | 构造并校验 op | verifier 报错，错误信息包含 `symbol.for` 与 `loop-carried f64` | `test_symbol_for_rejects_invalid_loop_carried_f64` |
 | TC-SYM-039 | `symbol.to_float` | 基础转换合法路径 | `source` 为 `!symbol.int<"...">`，结果为 `f32` | 构造 `symbol.to_float` | verifier 通过；返回 `f32` | `test_symbol_to_float_verify_success` |
 | TC-SYM-040 | `symbol.to_float` | parse/print 稳定 | 已实现公开文本语法 | parse 后再 print | 文本稳定 | `test_symbol_to_float_round_trip` |
 | TC-SYM-041 | `symbol.to_float` | 非法类型 | `source` 非 `!symbol.int<"...">` 或结果非 `f32` | 构造并校验 op | verifier 报错 | `test_symbol_to_float_rejects_invalid_types` |

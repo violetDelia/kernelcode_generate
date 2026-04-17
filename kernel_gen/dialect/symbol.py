@@ -1,15 +1,16 @@
 """Symbol dialect definitions.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 小李飞刀
 
 功能说明:
 - 定义仅表示整数符号值语义的 symbol dialect。
-- 提供 `SymbolExprAttr`、`SymbolValueType`、`SymbolDimType`、`symbol.add/sub/mul/div/floordiv`、`symbol.eq/ne/lt/le/gt/ge`、`symbol.to_int/symbol.to_float` 与 `symbol.get_dim/get_stride` 查询 op，不区分 `int8/int64` 等整型宽度。
+- 提供 `SymbolExprAttr`、`SymbolValueType`、`SymbolDimType`、`SymbolIterAttr`、`SymbolIterType`、`symbol.add/sub/mul/div/floordiv`、`symbol.eq/ne/lt/le/gt/ge`、`symbol.to_int/symbol.to_float`、`symbol.get_dim/get_stride`，以及带单个 loop-carried `f64` 的 `symbol.for` / `symbol.yield`。
+- `symbol.for` 同时兼容旧的无 carried-value 形式和新的 `iter_args(%acc = %zero) ... -> f64` 文本语法。
 - 在导入 sympy 前设置 `SYMPY_GMPY=0`，规避外部 gmpy 引发的 SystemError。
 
 使用示例:
-- from kernel_gen.dialect.symbol import Symbol, SymbolAddOp, SymbolConstOp, SymbolDivOp, SymbolEqOp, SymbolFloorDivOp, SymbolSubOp, SymbolMulOp, SymbolToIntOp, SymbolExprAttr, SymbolGetDimOp, SymbolGetStrideOp, SymbolValueType
+- from kernel_gen.dialect.symbol import Symbol, SymbolAddOp, SymbolConstOp, SymbolDivOp, SymbolEqOp, SymbolFloorDivOp, SymbolForOp, SymbolYieldOp, SymbolSubOp, SymbolMulOp, SymbolToIntOp, SymbolExprAttr, SymbolGetDimOp, SymbolGetStrideOp, SymbolValueType
 
 关联文件:
 - spec: spec/dialect/symbol.md
@@ -27,22 +28,25 @@ from typing import ClassVar, TYPE_CHECKING
 
 from kernel_gen.common.errors import _ERROR_TEMPLATE
 os.environ.setdefault("SYMPY_GMPY", "0")
-from xdsl.dialects.builtin import IntAttr, IntegerType, StringAttr, f32, i1, i32
+from xdsl.dialects.builtin import IntAttr, IntegerType, StringAttr, f32, f64, i1, i32
 from xdsl.ir import Attribute, Block, Dialect, Operation, ParametrizedAttribute, Region, SSAValue, TypeAttribute
 from xdsl.irdl import (
     IRDLOperation,
     attr_def,
     irdl_attr_definition,
     irdl_op_definition,
+    opt_operand_def,
+    opt_result_def,
     operand_def,
     param_def,
     region_def,
     result_def,
     traits_def,
+    var_operand_def,
 )
 from xdsl.parser import AttrParser
 from xdsl.printer import Printer
-from xdsl.traits import NoTerminator
+from xdsl.traits import IsTerminator, NoTerminator
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import NnMemoryType
@@ -1812,6 +1816,118 @@ class SymbolGetStrideOp(_BaseSymbolMemoryQueryOp):
 
 
 @irdl_op_definition
+class SymbolYieldOp(IRDLOperation):
+    """承载 symbol.for 单个 carried `f64` 的循环末尾值。"""
+
+    name = "symbol.yield"
+
+    value = operand_def(Attribute)
+    traits = traits_def(IsTerminator())
+
+    def __init__(self: "SymbolYieldOp", value: SSAValue | Operation) -> None:
+        """初始化 symbol.yield。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 构造仅承载一个 `f64` operand 的 terminator。
+        - 该 op 只服务带 carried-value 的 `symbol.for` 循环体。
+
+        使用示例:
+        - SymbolYieldOp(value)
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        super().__init__(operands=[value])
+
+    def verify_(self: "SymbolYieldOp") -> None:
+        """校验 symbol.yield 只能在 carried symbol.for 末尾使用。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 要求 `value` 类型固定为 `f64`。
+        - 要求当前 op 位于带单个 carried `f64` 的 `symbol.for` 单块 region 末尾。
+
+        使用示例:
+        - SymbolYieldOp(value).verify()
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        if SSAValue.get(self.value).type != f64:
+            _raise_verify_error(f"{self.name} value must have type f64")
+
+        parent_op = self.parent_op()
+        if not isinstance(parent_op, SymbolForOp):
+            _raise_verify_error(f"{self.name} must appear inside symbol.for")
+        if parent_op.init is None or parent_op.result is None:
+            _raise_verify_error(f"{self.name} requires symbol.for loop-carried f64")
+
+        parent_block = self.parent_block()
+        if parent_block is None or parent_block.last_op is not self:
+            _raise_verify_error(f"{self.name} must terminate symbol.for body")
+
+    def print(self: "SymbolYieldOp", printer: Printer) -> None:
+        """打印 symbol.yield 自定义文本语法。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 输出 `symbol.yield %value : f64` 形式文本。
+
+        使用示例:
+        - SymbolYieldOp(value).print(printer)
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        printer.print_string(" ")
+        printer.print_ssa_value(self.value)
+        printer.print_string(" : ")
+        printer.print_attribute(SSAValue.get(self.value).type)
+
+    @classmethod
+    def parse(cls: type["SymbolYieldOp"], parser: AttrParser) -> "SymbolYieldOp":
+        """解析 symbol.yield 自定义文本语法。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 解析 `symbol.yield %value : f64`。
+        - 在解析阶段把 unresolved operand 解析为具体验证类型，保持 print 后再 parse 闭环。
+
+        使用示例:
+        - SymbolYieldOp.parse(parser)
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        value = parser.parse_unresolved_operand()
+        parser.parse_characters(":", f" in {cls.name}")
+        value_type = parser.parse_type()
+        value = parser.resolve_operand(value, value_type)
+        return cls(value)
+
+
+@irdl_op_definition
 class SymbolForOp(IRDLOperation):
     """以 symbol.int 边界驱动的半开区间循环。"""
 
@@ -1820,8 +1936,10 @@ class SymbolForOp(IRDLOperation):
     start = operand_def(Attribute)
     end = operand_def(Attribute)
     step = operand_def(Attribute)
+    init = opt_operand_def(Attribute)
     iter_attr = attr_def(SymbolIterAttr, attr_name="iter")
     body = region_def()
+    result = opt_result_def(Attribute)
     traits = traits_def(NoTerminator())
 
     def __init__(
@@ -1831,18 +1949,21 @@ class SymbolForOp(IRDLOperation):
         step: SSAValue | Operation,
         body: Region | Block | Sequence[Operation] | Sequence[Block],
         iter_attr: SymbolIterAttr | None = None,
+        init: SSAValue | Operation | None = None,
     ) -> None:
         """初始化 symbol.for。
 
         创建者: 我不是牛马
-        最后一次更改: 金铲铲大作战
+        最后一次更改: 小李飞刀
 
         功能说明:
-        - 设置 start/end/step 三个 symbol.int 操作数与单块循环体。
-        - `iter` attribute 与 block 参数类型共同表达迭代边界语义。
+        - 设置 `start/end/step` 三个 `!symbol.int<"...">` 操作数与单块循环体。
+        - 兼容旧的无 carried-value 形式，也支持通过 `init` 构造单个 loop-carried `f64` 结果。
+        - `iter` attribute 与块参数类型共同表达迭代边界语义。
 
         使用示例:
         - SymbolForOp(start, end, step, Block(arg_types=[SymbolIterType.from_bounds("0", "M", "TILE_D0")]))
+        - SymbolForOp(start, end, step, Block(arg_types=[SymbolIterType.from_bounds("0", "M", "TILE_D0"), f64]), init=zero)
 
         关联文件:
         - spec: spec/dialect/symbol.md
@@ -1866,18 +1987,24 @@ class SymbolForOp(IRDLOperation):
                 )
             else:
                 iter_attr = SymbolIterAttr.from_bounds("0", "0", "1")
-        super().__init__(operands=[start, end, step], regions=[body], attributes={"iter": iter_attr})
+        super().__init__(
+            operands=[start, end, step, [] if init is None else [init]],
+            regions=[body],
+            result_types=[[] if init is None else [f64]],
+            attributes={"iter": iter_attr},
+        )
 
     def verify_(self: "SymbolForOp") -> None:
         """校验 symbol.for 约束。
 
         创建者: 我不是牛马
-        最后一次更改: 我不是牛马
+        最后一次更改: 小李飞刀
 
         功能说明:
         - 校验 start/end/step 均为 `!symbol.int<\"expr\">`。
         - 校验 `iter` attribute 与 block 参数类型一致。
-        - 校验 region 为单块且仅包含一个块参数。
+        - 校验 region 为单块；无 carried-value 时仅包含 `it` 一个块参数，带 carried-value 时包含 `it/acc` 两个块参数。
+        - 校验 loop-carried `f64` 的 `init/result/symbol.yield` 口径与 terminator 形状。
         - 当 step 可静态判定为 `0` 时直接报错。
 
         使用示例:
@@ -1906,7 +2033,17 @@ class SymbolForOp(IRDLOperation):
         if len(blocks) != 1:
             _raise_verify_error(f"{self.name} only supports single-block regions")
         block = blocks[0]
-        if len(block.args) != 1:
+        carried_init = self.init
+        carried_result = self.result
+        has_carried = carried_init is not None or carried_result is not None
+        if carried_init is None and carried_result is not None:
+            _raise_verify_error(f"{self.name} loop-carried f64 requires init operand")
+        if carried_init is not None and carried_result is None:
+            _raise_verify_error(f"{self.name} loop-carried f64 requires single f64 result")
+        expected_block_args = 2 if has_carried else 1
+        if len(block.args) != expected_block_args:
+            if has_carried:
+                _raise_verify_error(f"{self.name} loop-carried f64 requires exactly two block arguments")
             _raise_verify_error(f"{self.name} body must have exactly one block argument")
         iter_arg = block.args[0]
         if not isinstance(iter_arg.type, SymbolIterType):
@@ -1925,12 +2062,44 @@ class SymbolForOp(IRDLOperation):
         expected_iter_type = SymbolIterType.from_attr(iter_attr)
         if iter_arg.type != expected_iter_type:
             _raise_verify_error(f"{self.name} it must have type {expected_iter_type}")
+        if not has_carried:
+            return
+
+        if carried_init.type != f64:
+            _raise_verify_error(f"{self.name} loop-carried f64 init must have type f64")
+        if block.args[1].type != f64:
+            _raise_verify_error(f"{self.name} loop-carried f64 acc must have type f64")
+        if carried_result.type != f64:
+            _raise_verify_error(f"{self.name} loop-carried f64 result must have type f64")
+
+        terminator = block.last_op
+        if not isinstance(terminator, SymbolYieldOp):
+            _raise_verify_error(f"{self.name} loop-carried f64 body must terminate with symbol.yield")
+        if SSAValue.get(terminator.value).type != f64:
+            _raise_verify_error(f"{self.name} loop-carried f64 yield must have type f64")
 
     def print(self: "SymbolForOp", printer: Printer) -> None:
-        """打印 symbol.for 自定义文本语法。"""
+        """打印 symbol.for 自定义文本语法。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 无 carried-value 时输出旧文本语法。
+        - 带 carried-value 时输出 `iter_args(%acc = %init) {iter = ...} -> f64 { ... }`，与 parser 使用同一公开顺序。
+
+        使用示例:
+        - SymbolForOp(start, end, step, body, init=zero).print(printer)
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
 
         blocks = list(self.body.blocks)
-        if len(blocks) != 1 or len(blocks[0].args) != 1:
+        has_carried = self.init is not None and self.result is not None
+        if len(blocks) != 1 or len(blocks[0].args) != (2 if has_carried else 1):
             printer.print_op_with_default_format(self)
             return
         block = blocks[0]
@@ -1943,9 +2112,19 @@ class SymbolForOp(IRDLOperation):
         printer.print_ssa_value(self.end)
         printer.print_string(" step ")
         printer.print_ssa_value(self.step)
+        if has_carried:
+            printer.print_string(" iter_args(")
+            printer.print_ssa_value(block.args[1])
+            printer.print_string(" = ")
+            printer.print_ssa_value(self.init)
+            printer.print_string(")")
         printer.print_string(" {iter = ")
         printer.print_attribute(self.iter_attr)
-        printer.print_string("} {")
+        printer.print_string("}")
+        if has_carried:
+            printer.print_string(" -> ")
+            printer.print_attribute(self.result.type)
+        printer.print_string(" {")
         if block.ops:
             with printer.indented():
                 for op in block.ops:
@@ -1961,11 +2140,12 @@ class SymbolForOp(IRDLOperation):
         """解析 symbol.for 自定义文本语法。
 
         创建者: 我不是牛马
-        最后一次更改: 金铲铲大作战
+        最后一次更改: 小李飞刀
 
         功能说明:
-        - 解析 `symbol.for %it = %start to %end step %step {iter = #symbol.iter<...>}` 语法。
-        - 迭代变量解析为 `!symbol.iter<start,end,step>`，保持边界语义闭环。
+        - 解析旧的 `symbol.for %it = %start to %end step %step {iter = #symbol.iter<...>} { ... }`。
+        - 解析新的 `symbol.for %it = %start to %end step %step iter_args(%acc = %zero) {iter = #symbol.iter<...>} -> f64 { ... }`。
+        - 迭代变量与 carried `acc` 都在进入 region 前完成类型解析，保持 print 后再 parse 闭环。
 
         使用示例:
         - SymbolForOp.parse(parser)
@@ -1983,6 +2163,15 @@ class SymbolForOp(IRDLOperation):
         end_value = parser.parse_operand()
         parser.parse_characters("step", " in symbol.for")
         step_value = parser.parse_operand()
+        init_value = None
+        acc_arg = None
+        if parser.parse_optional_keyword("iter_args") is not None:
+            parser.parse_punctuation("(", " in symbol.for")
+            unresolved_acc = parser.parse_argument(expect_type=False)
+            parser.parse_characters("=", " in symbol.for")
+            init_value = parser.parse_operand()
+            parser.parse_punctuation(")", " in symbol.for")
+            acc_arg = unresolved_acc.resolve(f64)
         parser.parse_characters("{", " in symbol.for")
         parser.parse_keyword("iter", " in symbol.for")
         parser.parse_characters("=", " in symbol.for")
@@ -1991,8 +2180,17 @@ class SymbolForOp(IRDLOperation):
             raise VerifyException(_format_error("symbol.for iter attribute must be #symbol.iter<...>"))
         parser.parse_characters("}", " in symbol.for")
         iter_arg = unresolved_iter.resolve(SymbolIterType.from_attr(iter_attr))
-        body = parser.parse_region((iter_arg,))
-        return cls(start_value, end_value, step_value, body, iter_attr)
+        block_args = (iter_arg,) if acc_arg is None else (iter_arg, acc_arg)
+        result_type = None
+        if parser.parse_optional_characters("->") is not None:
+            result_type = parser.parse_type()
+        body = parser.parse_region(block_args)
+        op = cls(start_value, end_value, step_value, body, iter_attr, init=init_value)
+        if init_value is None and result_type is not None:
+            raise VerifyException(_format_error("symbol.for result type requires loop-carried f64"))
+        if init_value is not None and result_type != f64:
+            raise VerifyException(_format_error("symbol.for loop-carried f64 result must be f64"))
+        return op
 
 
 Symbol = Dialect(
@@ -2014,6 +2212,7 @@ Symbol = Dialect(
         SymbolToFloatOp,
         SymbolGetDimOp,
         SymbolGetStrideOp,
+        SymbolYieldOp,
         SymbolForOp,
     ],
     [
@@ -2043,6 +2242,7 @@ __all__ = [
     "SymbolNeOp",
     "SymbolIterType",
     "SymbolIterAttr",
+    "SymbolYieldOp",
     "SymbolToFloatOp",
     "SymbolForOp",
     "SymbolFloorDivOp",

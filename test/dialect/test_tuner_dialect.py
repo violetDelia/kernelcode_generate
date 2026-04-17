@@ -29,7 +29,8 @@ from pathlib import Path
 
 import pytest
 from xdsl.context import Context
-from xdsl.dialects.builtin import Builtin, IndexType, IntegerType, StringAttr
+from xdsl.dialects.builtin import Builtin, IndexType, IntegerType, StringAttr, SymbolRefAttr, f32, f64
+from xdsl.dialects.test import Test
 from xdsl.ir import Attribute, Operation
 from xdsl.parser import Parser
 from xdsl.printer import Printer
@@ -40,7 +41,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.dialect.symbol import Symbol, SymbolDimType, SymbolValueType
-from kernel_gen.dialect.tuner import Tuner, TunerParamOp
+from kernel_gen.dialect.tuner import Tuner, TunerCostOp, TunerParamOp
 
 
 def _build_context() -> Context:
@@ -63,6 +64,7 @@ def _build_context() -> Context:
 
     ctx = Context()
     ctx.load_dialect(Builtin)
+    ctx.load_dialect(Test)
     ctx.load_dialect(Symbol)
     ctx.load_dialect(Tuner)
     return ctx
@@ -179,3 +181,97 @@ builtin.module {
     ).parse_module()
     with pytest.raises(VerifyException, match="symbol dim name must match"):
         module_bad.verify()
+
+
+# TC-TUNER-004
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-17 10:30:00 +0800
+# 最近一次运行成功时间: 2026-04-17 10:30:00 +0800
+# 测试目的: 验证 tuner.cost 的 parse/print round-trip、operand 透传与固定 f64 结果。
+# 对应功能实现文件路径: kernel_gen/dialect/tuner.py
+# 对应 spec 文件路径: spec/dialect/tuner.md
+def test_tuner_cost_round_trip() -> None:
+    ctx = _build_context()
+    module = Parser(
+        ctx,
+        """
+builtin.module {
+  %tile_m = "test.op"() : () -> !symbol.int<"TILE_M">
+  %k = "test.op"() : () -> !symbol.int<"K">
+  %cost0 = tuner.cost(%tile_m, %k) {kind = "move", cost_kind = "all", op_name = "dma.alloc", device_func = @_device_matmul_kernel_} : (!symbol.int<"TILE_M">, !symbol.int<"K">) -> f64
+}
+""",
+    ).parse_module()
+
+    module.verify()
+    printed = _print_ir(module).rstrip()
+    reparsed = Parser(ctx, printed).parse_module()
+    reparsed.verify()
+    assert "tuner.cost(%tile_m, %k)" in printed
+    assert 'cost_kind = "all"' in printed
+    assert printed == _print_ir(reparsed).rstrip()
+
+
+# TC-TUNER-005
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-17 10:30:00 +0800
+# 最近一次运行成功时间: 2026-04-17 10:30:00 +0800
+# 测试目的: 验证 tuner.cost 的 kind / cost_kind 仅接受公开合同允许值。
+# 对应功能实现文件路径: kernel_gen/dialect/tuner.py
+# 对应 spec 文件路径: spec/dialect/tuner.md
+def test_tuner_cost_rejects_invalid_kind_attrs() -> None:
+    value = TunerParamOp(SymbolDimType.from_name("BLOCK_M")).result
+
+    with pytest.raises(VerifyException, match="tuner.cost kind must be one of compute or move"):
+        TunerCostOp(
+            [value],
+            kind=StringAttr("all"),
+            cost_kind=StringAttr("all"),
+            op_name=StringAttr("dma.alloc"),
+            device_func=SymbolRefAttr("kernel"),
+        ).verify()
+
+    with pytest.raises(VerifyException, match="tuner.cost cost_kind must be one of compute, move or all"):
+        TunerCostOp(
+            [value],
+            kind=StringAttr("move"),
+            cost_kind=StringAttr("other"),
+            op_name=StringAttr("dma.alloc"),
+            device_func=SymbolRefAttr("kernel"),
+        ).verify()
+
+
+# TC-TUNER-006
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-17 10:30:00 +0800
+# 最近一次运行成功时间: 2026-04-17 10:30:00 +0800
+# 测试目的: 验证 tuner.cost 缺少必填 attrs 或结果类型不是 f64 时会报错。
+# 对应功能实现文件路径: kernel_gen/dialect/tuner.py
+# 对应 spec 文件路径: spec/dialect/tuner.md
+def test_tuner_cost_rejects_missing_attrs_or_invalid_result_type() -> None:
+    ctx = _build_context()
+    value = TunerParamOp(SymbolDimType.from_name("BLOCK_M")).result
+
+    with pytest.raises(VerifyException, match="tuner.cost result type must be f64"):
+        TunerCostOp(
+            [value],
+            kind=StringAttr("move"),
+            cost_kind=StringAttr("all"),
+            op_name=StringAttr("dma.alloc"),
+            device_func=SymbolRefAttr("kernel"),
+            result_type=f32,
+        ).verify()
+
+    with pytest.raises(VerifyException, match="tuner.cost requires attribute device_func"):
+        Parser(
+            ctx,
+            """
+builtin.module {
+  %tile_m = "test.op"() : () -> !symbol.int<"TILE_M">
+  %cost0 = tuner.cost(%tile_m) {kind = "move", cost_kind = "all", op_name = "dma.alloc"} : (!symbol.int<"TILE_M">) -> f64
+}
+""",
+        ).parse_module()
