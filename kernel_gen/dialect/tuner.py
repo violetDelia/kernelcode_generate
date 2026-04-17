@@ -60,7 +60,6 @@ def _raise_verify_error(expected: str) -> None:
             action=_ERROR_ACTION,
         )
     )
-
 def _verify_symbol_dim_result_type(result_type: Attribute, op_name: str) -> SymbolDimType:
     """校验 tuner.param 的结果类型。
 
@@ -219,7 +218,7 @@ class TunerCostOp(IRDLOperation):
         - 保留原 op attrs，并显式要求 pass-owned metadata attrs。
 
         使用示例:
-        - TunerCostOp([value], kind=StringAttr(\"move\"), cost_kind=StringAttr(\"all\"), op_name=StringAttr(\"dma.alloc\"), device_func=SymbolRefAttr(\"@kernel\"))
+        - TunerCostOp([value], kind=StringAttr("move"), cost_kind=StringAttr("all"), op_name=StringAttr("dma.alloc"), device_func=SymbolRefAttr("kernel"))
 
         关联文件:
         - spec: spec/dialect/tuner.md

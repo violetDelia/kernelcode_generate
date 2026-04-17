@@ -1,10 +1,11 @@
 """tuner dialect tests.
 
 创建者: 我不是牛马
-最后一次更改: 我不是牛马
+最后一次更改: 金铲铲大作战
 
 功能说明:
-- 覆盖 tuner dialect 的 `tuner.param` parse/print 与错误路径。
+- 覆盖 tuner dialect 的 `tuner.param` 与 `tuner.cost` parse/print、verifier 与错误路径。
+- `tuner.param` 负责返回 `!symbol.dim<"name">` 的超参数标量；`tuner.cost` 负责透传原 op operands 并固定返回 `f64` 局部成本。
 
 使用示例:
 - pytest -q test/dialect/test_tuner_dialect.py

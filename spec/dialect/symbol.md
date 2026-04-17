@@ -2,12 +2,12 @@
 
 ## 功能简介
 
-定义 `symbol dialect` 的类型与基础构件，用于在 IR 中显式表示“带符号值语义的整型标量”以及“最小 pointer type 承载”。同时提供 `!symbol.iter<start = "...", end = "...", step = "...">` 用于表达循环迭代变量语义，与 `!symbol.int<"expr">` 同样承载整数值语义，但额外记录迭代边界。该方言的核心目标是让类型本身携带一个符号表达，例如 `!symbol.int<"N">` 表示“这是一个整数值，其值语义为符号 `N`”。本方言同时作为 memory 相关符号标量语义的唯一归属：`shape`、`stride`、`offset`、`size`、循环边界等位置只要进入 IR 并需要表达单个整数符号值，就统一落到 `symbol dialect`。在此基础上，本方言允许最小范围的整数符号算术与比较 op，用于在 IR 中显式表达 `symbol.int` 标量之间的加、减、乘、除、整除以及比较计算，并提供 `symbol.to_int`（转为普通整型）与 `symbol.to_float`（转为 `f32`）两类显式类型转换 op；同时提供 `!symbol.ptr<dtype>` 作为 DSL `Ptr(dtype)` 在 IR 类型层的唯一最小载体。该方言不负责张量、内存容器、通用控制流、pointer body op，或超出最小整数符号算术/比较范围的数值计算语义。
+定义 `symbol dialect` 的类型与基础构件，用于在 IR 中显式表示“带符号值语义的整型标量”以及“最小 pointer type 承载”。同时提供 `!symbol.iter<start = "...", end = "...", step = "...">` 用于表达循环迭代变量语义，与 `!symbol.int<"expr">` 同样承载整数值语义，但额外记录迭代边界。该方言的核心目标是让类型本身携带一个符号表达，例如 `!symbol.int<"N">` 表示“这是一个整数值，其值语义为符号 `N`”。本方言同时作为 memory 相关符号标量语义的唯一归属：`shape`、`stride`、`offset`、`size`、循环边界等位置只要进入 IR 并需要表达单个整数符号值，就统一落到 `symbol dialect`。在此基础上，本方言允许最小范围的整数符号算术与比较 op，用于在 IR 中显式表达 `symbol.int` 标量之间的加、减、乘、除、整除以及比较计算，并提供 `symbol.to_int`（转为普通整型）与 `symbol.to_float`（转为 `f32`）两类显式类型转换 op；同时提供 `!symbol.ptr<dtype>` 作为 DSL `Ptr(dtype)` 在 IR 类型层的唯一最小载体。`symbol.for` 现支持旧的无 carried-value 形式，也支持单个 loop-carried `f64` 的 `iter_args(%acc = %init) ... -> f64` 公开语法，并通过 `symbol.yield` 终止循环体。该方言不负责张量、内存容器、通用控制流、pointer body op，或超出最小整数符号算术/比较范围的数值计算语义。
 
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/dialect/symbol.md`](../../spec/dialect/symbol.md)
 - `test`：[`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)
 - `功能实现`：[`kernel_gen/dialect/symbol.py`](../../kernel_gen/dialect/symbol.py)
@@ -31,6 +31,7 @@
 - 明确 `symbol.gt` / `symbol.le` / `symbol.lt` / `symbol.ne` 与 `symbol.to_float` 的 dialect 合同，使上游 `a > b`、`a <= b`、`a < b`、`a != b` 与 `float(n)` 在进入 `symbol dialect` 后拥有稳定目标 op。
 - 提供 `!symbol.ptr<dtype>` 作为 DSL `Ptr(dtype)` 的最小 IR pointer type 载体，使函数签名 lowering 可以稳定表达“指向某个 pointee dtype 的指针输入”。
 - 提供 `SymbolIterType`，用于表达循环迭代变量语义，并支持 `!symbol.iter<start = "...", end = "...", step = "...">` 文本形式。
+- 提供 `symbol.yield` 与带单个 carried `f64` 的 `symbol.for`，用于表达循环体终止与最小归约语义。
 - 保持类型表达尽量简单，优先服务开发者理解和方言间协同，而不是追求复杂的符号推导系统。
 - 本文件中的“符号值”指与 SSA value 绑定的单个整数值语义表达，可以是具名符号、整型表达式或整型常量，如 `N`、`M + 1`、`B * K`、`1`、`2`、`3`。
 
@@ -67,11 +68,13 @@
 
 功能说明：
 
-- `symbol dialect` 的公开构件由三部分组成：
+- `symbol dialect` 的公开构件由五部分组成：
   - `SymbolValueType`：带符号值语义的整型标量类型
   - `SymbolExprAttr`：用于承载符号表达的 attribute
   - `SymbolPtrType`：用于承载 `Ptr(dtype)` 的最小 pointer type
   - `SymbolIterType`：用于承载循环迭代变量语义的 symbol 类型
+  - `SymbolYieldOp`：用于承载 `symbol.for` carried `f64` 的终止 op
+  - `SymbolForOp`：用于表达 `symbol.for` 循环的公开 op
 
 参数说明：
 
@@ -80,7 +83,7 @@
 使用示例：
 
 ```python
-from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolIterType, SymbolPtrType, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolForOp, SymbolIterType, SymbolPtrType, SymbolValueType, SymbolYieldOp
 ```
 
 注意事项：
@@ -89,6 +92,8 @@ from kernel_gen.dialect.symbol import SymbolExprAttr, SymbolIterType, SymbolPtrT
 - `SymbolExprAttr` 只承载单个标量值对应的整数值语义表达。
 - `SymbolPtrType` 只承载 pointee dtype，用于函数签名等类型位置的最小 pointer carrier。
 - `SymbolIterType` 表示循环迭代变量语义，表达式规则与 `SymbolValueType` 一致。
+- `SymbolYieldOp` 仅用于带单个 carried `f64` 的 `symbol.for` 终止位置。
+- `SymbolForOp` 兼容旧的无 carried 值语法与新的单个 carried `f64` 语法。
 
 返回与限制：
 
@@ -210,6 +215,34 @@ iter_attr = SymbolIterAttr.from_bounds("0", "N", "TILE_D0")
 
 - 返回类型：`SymbolIterAttr`
 - 限制：仅用于 `symbol.for` 的迭代边界表达。
+
+### `SymbolYieldOp`
+
+功能说明：
+
+- 表示 `symbol.for` carried `f64` 循环体的终止 op。
+- 该 op 只承载一个 `f64` SSA value，并要求位于 `symbol.for` body 的最后一条指令位置。
+
+参数说明：
+
+- `value(value)`：循环体内的归约值，类型必须为 `f64`。
+
+使用示例：
+
+```text
+symbol.yield %next : f64
+```
+
+注意事项：
+
+- `symbol.yield` 只能出现在带单个 carried `f64` 的 `symbol.for` 循环体末尾。
+- `value` 必须为 `f64`，不接受 `i1`、`i32`、`index` 或其他类型。
+- 该 op 不定义多结果或多值 yield 语义。
+
+返回与限制：
+
+- 返回类型：无结果 op。
+- 限制：仅作为 `symbol.for` carried `f64` 的 terminator。
 
 ### `SymbolPtrType`
 
@@ -641,10 +674,12 @@ symbol.for %i = %start to %end step %step {iter = #symbol.iter<start = "M", end 
 - V1 只允许一个 carried value。出现多个 `iter_args`、多个 carried block args、多个 `symbol.yield` values 或多个 op results 时必须报错。
 - 带 carried value 的循环体必须以 `symbol.yield <f64>` 结束；无 carried value 的旧形式仍可保持无 terminator 体，不因本轮新增能力而要求所有旧循环追加 terminator。
 - `it` 是循环体内部可见的迭代变量，其值语义应与当前迭代点一致；打印与解析时必须保持 `it` 的类型稳定。
+- 当使用 carried 语法时，`init`、`acc`、`result` 与 `symbol.yield` 的值类型必须全部为 `f64`，且 `symbol.yield` 必须位于 body 末尾。
 - 当前 verifier 只约束类型、region 结构、文本语法与可静态判定的错误路径；不要求在 `symbol dialect` 内完成一般符号大小关系证明。
 - 若 `step` 的表达式可静态判定为 `0`，必须报错；若 `step` 为纯符号表达且当前无法静态证明为非零，本 spec 不额外引入证明规则，由后续实现按最小可实现口径处理。
 - `symbol.for` 不负责推导循环 trip count，不负责循环展开、融合或 lowering 到其他控制流方言。
-- 当前文本语法中的类型段按 `start/end/step` 的顺序显式打印，`it` 类型由 `iter = #symbol.iter<...>` 属性与块参数共同约束。
+- 当前文本语法中的类型段按 `start/end/step` 的顺序显式打印；无 carried 值时仅打印迭代边界与 body，带 carried 值时额外打印 `iter_args(%acc = %init) ... -> f64`。
+- `it` 类型由 `iter = #symbol.iter<...>` 属性与块参数共同约束，carried 语法下的 `acc` 则固定为 `f64`。
 - parse/print 必须保持 round-trip 稳定；错误信息至少应包含出错操作、失败原因以及相关操作数或 region 位置。
 
 返回与限制：

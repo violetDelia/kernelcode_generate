@@ -36,6 +36,7 @@
 - `tuner.param` 结果类型必须为 `!symbol.dim<"name">`；不得使用 `!symbol.int<"...">`、builtin `index`、普通整数或其他类型替代。
 - `name` 必须为非空标识符，且只能包含字母、数字与下划线，并以字母或下划线开头。
 - `tuner.cost` 无 region，operand 列表按原 op operands 原顺序透传，结果类型固定为 `f64`。
+- `tuner.cost` 的 `kind` 只接受 `compute` 或 `move`，`cost_kind` 只接受 `compute`、`move` 或 `all`，`op_name` 必须为非空字符串，`device_func` 必须为 `SymbolRefAttr`。
 - `tuner.cost` 不求值、不查表、不裁剪节点；“不同 `cost_kind` 下某类 op 是否为 0”属于后续 evaluator 语义。
 - 本方言不定义任何超参数值求解、范围约束、搜索策略、默认值逻辑或真实 cost evaluator。
 
