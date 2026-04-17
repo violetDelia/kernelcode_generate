@@ -4,8 +4,8 @@
 最后一次更改: 朽木露琪亚
 
 功能说明:
-- 覆盖 kernel_gen/tools/ircheck.py 的检查语义实现：`CHECK:` / `CHECK-NEXT:` / `CHECK-NOT:`
-  在 line-based 子串匹配下的“顺序/相邻/区间”约束。
+- 覆盖 kernel_gen/tools/ircheck.py 的检查语义实现：
+  - `CHECK:` / `CHECK-NEXT:` / `CHECK-NOT:` 的 FileCheck 风格“字面量 + 变量”约束。
 
 当前覆盖率信息:
 - 当前覆盖率: 未统计（本任务验证未启用 coverage 统计）。
@@ -198,17 +198,17 @@ def test_match_checks_check_not_after_last_positive_fails() -> None:
     assert message.startswith("IrcheckMatchError: CHECK-NOT matched forbidden text")
 
 
-# TC-IRCHECK-MATCH-006
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-14 14:10 +0800
-# 最近一次运行成功时间: 2026-04-14 14:10 +0800
-# 功能说明: 验证 CHECK-REGEX 与 CHECK-NEXT-REGEX 支持 alias、变量捕获与引用。
-# 使用示例: pytest -q test/tools/test_ircheck_matcher.py -k test_match_checks_regex_capture_and_reference_ok
+# TC-IRCHECK-MATCH-005A
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
+# 最近一次运行成功时间: 待本轮验证后补充
+# 功能说明: 验证 CHECK 支持 `[[NAME:REGEX]]` 捕获、`[[NAME]]` 复用，且普通文本按字面量匹配无需写 `\.`。
+# 使用示例: pytest -q test/tools/test_ircheck_matcher.py -k test_match_checks_literal_check_supports_variable_capture_and_plain_dot
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_matcher.py
-def test_match_checks_regex_capture_and_reference_ok() -> None:
+def test_match_checks_literal_check_supports_variable_capture_and_plain_dot() -> None:
     actual_ir = "\n".join(
         [
             "%0 = arith.constant 7 : i32",
@@ -219,8 +219,71 @@ def test_match_checks_regex_capture_and_reference_ok() -> None:
     ok, failed, message = _match_checks(
         actual_ir,
         [
-            CheckDirective(kind="CHECK-REGEX", text=r"%[[ID:{int}]] = arith\.constant [[VAL:{int}]] : i32", line_no=1),
-            CheckDirective(kind="CHECK-NEXT-REGEX", text=r"%[[NEXT_ID:{int}]] = arith\.constant [[VAL]] : i32", line_no=2),
+            CheckDirective(kind="CHECK", text="%[[ID:{int}]] = arith.constant [[VAL:{int}]] : i32", line_no=1),
+            CheckDirective(kind="CHECK-NEXT", text="%[[NEXT:{int}]] = arith.constant [[VAL]] : i32", line_no=2),
+        ],
+        source_path="inline.ircheck",
+    )
+    assert ok is True
+    assert failed is None
+    assert message is None
+
+
+# TC-IRCHECK-MATCH-005B
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
+# 最近一次运行成功时间: 待本轮验证后补充
+# 功能说明: 验证 CHECK-NOT 可引用前序 CHECK 捕获的变量。
+# 使用示例: pytest -q test/tools/test_ircheck_matcher.py -k test_match_checks_literal_check_not_can_reference_bound_variable
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_matcher.py
+def test_match_checks_literal_check_not_can_reference_bound_variable() -> None:
+    actual_ir = "\n".join(
+        [
+            "%0 = arith.constant 7 : i32",
+            "%1 = arith.constant 8 : i32",
+            "func.return",
+        ]
+    )
+    ok, failed, message = _match_checks(
+        actual_ir,
+        [
+            CheckDirective(kind="CHECK", text="%[[ID:{int}]] = arith.constant [[VAL:{int}]] : i32", line_no=1),
+            CheckDirective(kind="CHECK-NOT", text="%[[OTHER:{int}]] = arith.constant [[VAL]] : i32", line_no=2),
+            CheckDirective(kind="CHECK", text="func.return", line_no=3),
+        ],
+        source_path="inline.ircheck",
+    )
+    assert ok is True
+    assert failed is None
+    assert message is None
+
+
+# TC-IRCHECK-MATCH-006
+# 创建者: 朽木露琪亚
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
+# 最近一次运行成功时间: 待本轮验证后补充
+# 功能说明: 验证 CHECK 与 CHECK-NEXT 支持 alias、变量捕获与引用。
+# 使用示例: pytest -q test/tools/test_ircheck_matcher.py -k test_match_checks_capture_and_reference_ok
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_matcher.py
+def test_match_checks_capture_and_reference_ok() -> None:
+    actual_ir = "\n".join(
+        [
+            "%0 = arith.constant 7 : i32",
+            "%1 = arith.constant 7 : i32",
+            "func.return",
+        ]
+    )
+    ok, failed, message = _match_checks(
+        actual_ir,
+        [
+            CheckDirective(kind="CHECK", text="%[[ID:{int}]] = arith.constant [[VAL:{int}]] : i32", line_no=1),
+            CheckDirective(kind="CHECK-NEXT", text="%[[NEXT_ID:{int}]] = arith.constant [[VAL]] : i32", line_no=2),
         ],
         source_path="inline.ircheck",
     )
@@ -251,25 +314,25 @@ def test_match_checks_reg_alias_matches_symbol_and_ssa_ids() -> None:
         actual_ir,
         [
             CheckDirective(
-                kind="CHECK-REGEX",
+                kind="CHECK",
                 text=(
-                    r"func.func @main\(%arg0 : !nn.memory<\[[[M:{reg}]], [[N:{reg}]]\], \[[[N]], 1\], "
-                    r"f32, #nn.space<global>>\) -> !nn.memory<\[[[M]], [[N]]\], \[[[N]], 1\], "
-                    r"f32, #nn.space<global>> {"
+                    "func.func @main(%arg0 : !nn.memory<[[[M:{reg}]], [[N:{reg}]]], [[[N]], 1], "
+                    "f32, #nn.space<global>>) -> !nn.memory<[[[M]], [[N]]], [[[N]], 1], "
+                    "f32, #nn.space<global>> {"
                 ),
                 line_no=1,
             ),
             CheckDirective(
-                kind="CHECK-NEXT-REGEX",
+                kind="CHECK-NEXT",
                 text=(
-                    r"%[[ALLOC:{reg}]] = \"dma.alloc\"\(\) <\{operandSegmentSizes = array<i32: 0>\}> : "
-                    r"\(\) -> !nn.memory<\[[[M]], [[N]]\], \[[[N]], 1\], f32, #nn.space<global>>"
+                    '%[[ALLOC:{reg}]] = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : '
+                    "() -> !nn.memory<[[[M]], [[N]]], [[[N]], 1], f32, #nn.space<global>>"
                 ),
                 line_no=2,
             ),
             CheckDirective(
-                kind="CHECK-NEXT-REGEX",
-                text=r"func.return %[[ALLOC]] : !nn.memory<\[[[M]], [[N]]\], \[[[N]], 1\], f32, #nn.space<global>>",
+                kind="CHECK-NEXT",
+                text="func.return %[[ALLOC]] : !nn.memory<[[[M]], [[N]]], [[[N]], 1], f32, #nn.space<global>>",
                 line_no=3,
             ),
         ],
@@ -282,15 +345,15 @@ def test_match_checks_reg_alias_matches_symbol_and_ssa_ids() -> None:
 
 # TC-IRCHECK-MATCH-007
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-14 14:10 +0800
-# 最近一次运行成功时间: 2026-04-14 14:10 +0800
-# 功能说明: 验证 CHECK-NEXT-REGEX 只能在下一行命中，否则返回稳定错误短语前缀。
-# 使用示例: pytest -q test/tools/test_ircheck_matcher.py -k test_match_checks_check_next_regex_failure
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
+# 最近一次运行成功时间: 待本轮验证后补充
+# 功能说明: 验证带变量的 CHECK-NEXT 只能在下一行命中，否则返回稳定错误短语前缀。
+# 使用示例: pytest -q test/tools/test_ircheck_matcher.py -k test_match_checks_check_next_variable_failure
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_matcher.py
-def test_match_checks_check_next_regex_failure() -> None:
+def test_match_checks_check_next_variable_failure() -> None:
     actual_ir = "\n".join(
         [
             "%0 = arith.constant 7 : i32",
@@ -300,29 +363,29 @@ def test_match_checks_check_next_regex_failure() -> None:
     ok, failed, message = _match_checks(
         actual_ir,
         [
-            CheckDirective(kind="CHECK-REGEX", text=r"%[[ID:{int}]] = arith\.constant [[VAL:{int}]] : i32", line_no=1),
-            CheckDirective(kind="CHECK-NEXT-REGEX", text=r"%[[NEXT_ID:{int}]] = arith\.constant [[VAL]] : i32", line_no=2),
+            CheckDirective(kind="CHECK", text="%[[ID:{int}]] = arith.constant [[VAL:{int}]] : i32", line_no=1),
+            CheckDirective(kind="CHECK-NEXT", text="%[[NEXT_ID:{int}]] = arith.constant [[VAL]] : i32", line_no=2),
         ],
         source_path="inline.ircheck",
     )
     assert ok is False
     assert failed is not None
-    assert failed.kind == "CHECK-NEXT-REGEX"
+    assert failed.kind == "CHECK-NEXT"
     assert message is not None
-    assert message.startswith("IrcheckMatchError: CHECK-NEXT-REGEX not found on next line")
+    assert message.startswith("IrcheckMatchError: CHECK-NEXT not found on next line")
 
 
 # TC-IRCHECK-MATCH-008
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-14 14:10 +0800
-# 最近一次运行成功时间: 2026-04-14 14:10 +0800
-# 功能说明: 验证 CHECK-NOT-REGEX 可引用已有变量，并在禁止区间命中时报稳定错误短语。
-# 使用示例: pytest -q test/tools/test_ircheck_matcher.py -k test_match_checks_check_not_regex_failure
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
+# 最近一次运行成功时间: 待本轮验证后补充
+# 功能说明: 验证 CHECK-NOT 可引用已有变量，并在禁止区间命中时报稳定错误短语。
+# 使用示例: pytest -q test/tools/test_ircheck_matcher.py -k test_match_checks_check_not_variable_failure
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_matcher.py
-def test_match_checks_check_not_regex_failure() -> None:
+def test_match_checks_check_not_variable_failure() -> None:
     actual_ir = "\n".join(
         [
             "%0 = arith.constant 7 : i32",
@@ -333,14 +396,14 @@ def test_match_checks_check_not_regex_failure() -> None:
     ok, failed, message = _match_checks(
         actual_ir,
         [
-            CheckDirective(kind="CHECK-REGEX", text=r"%[[ID:{int}]] = arith\.constant [[VAL:{int}]] : i32", line_no=1),
-            CheckDirective(kind="CHECK-NOT-REGEX", text=r"%[[NEXT_ID:{int}]] = arith\.constant [[VAL]] : i32", line_no=2),
+            CheckDirective(kind="CHECK", text="%[[ID:{int}]] = arith.constant [[VAL:{int}]] : i32", line_no=1),
+            CheckDirective(kind="CHECK-NOT", text="%[[NEXT_ID:{int}]] = arith.constant [[VAL]] : i32", line_no=2),
             CheckDirective(kind="CHECK", text="func.return", line_no=3),
         ],
         source_path="inline.ircheck",
     )
     assert ok is False
     assert failed is not None
-    assert failed.kind == "CHECK-NOT-REGEX"
+    assert failed.kind == "CHECK-NOT"
     assert message is not None
-    assert message.startswith("IrcheckMatchError: CHECK-NOT-REGEX matched forbidden text")
+    assert message.startswith("IrcheckMatchError: CHECK-NOT matched forbidden text")

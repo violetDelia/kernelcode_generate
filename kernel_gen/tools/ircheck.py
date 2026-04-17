@@ -5,8 +5,10 @@
 
 功能说明:
 - 提供轻量的 IR 变换验证工具：读取单文件 case，按 `COMPILE_ARGS` 顺序运行 pass / pipeline，
-  对规范化后的 IR 执行 `CHECK:` / `CHECK-NEXT:` / `CHECK-NOT:` 子串匹配，以及
-  `CHECK-REGEX:` / `CHECK-NEXT-REGEX:` / `CHECK-NOT-REGEX:` 正则匹配，输出 `true/false`。
+  对规范化后的 IR 执行 FileCheck 风格的逐行匹配：
+  - `CHECK:` / `CHECK-NEXT:` / `CHECK-NOT:` 按“普通文本字面量 + `[[NAME:REGEX]]` / `[[NAME]]` 变量”匹配；
+  - 不再支持 `CHECK-REGEX*` 变体，整行 regex 需求统一收口到 `[[NAME:REGEX]]` 的局部片段内。
+  最终输出 `true/false`。
 - CLI 支持 `-irdump`：自动写入每个 case 的输入与逐 step IR。
 - 对外仅三条公开 API 作为稳定合同：`parse_ircheck_file`、`run_ircheck_file`、`run_ircheck_text`，
   便于 CLI / pytest / 脚本复用。
@@ -75,12 +77,9 @@ CheckKind = Literal[
     "CHECK",
     "CHECK-NEXT",
     "CHECK-NOT",
-    "CHECK-REGEX",
-    "CHECK-NEXT-REGEX",
-    "CHECK-NOT-REGEX",
 ]
 CASE_SEPARATOR = "// -----"
-_REGEX_TOKEN_PATTERN = re.compile(r"\[\[([A-Za-z_][A-Za-z0-9_]*)(?::(.*?))?\]\]")
+_CHECK_TOKEN_PATTERN = re.compile(r"\[\[([A-Za-z_][A-Za-z0-9_]*)(?::(.*?))?\]\]")
 _REGEX_ALIAS_PATTERN = re.compile(r"\{(reg|dim|int)\}")
 _REGEX_UNPARSED_MARKERS = ("[[", "]]")
 _REGEX_ALIASES = {
@@ -237,19 +236,19 @@ class IrcheckCompileStep:
     options: dict[str, str]
 
 
-def _tokenize_regex_check(text: str) -> list[tuple[str, str, str | None]]:
-    """把 regex check 文本拆成 literal/ref/define 片段。
+def _tokenize_check_pattern(text: str) -> list[tuple[str, str, str | None]]:
+    """把 `CHECK*` 文本拆成 literal/ref/define 片段。
 
     创建者: 朽木露琪亚
     最后一次更改: 金铲铲大作战
 
     功能说明:
     - 识别 `[[NAME]]` 引用与 `[[NAME:REGEX]]` 定义。
-    - 保留普通文本片段，供后续拼接成完整 regex。
+    - 保留普通文本片段，供后续按“literal 模式”或“regex 模式”拼接完整单行 pattern。
     - 若存在未闭合 `[[...` / `...]]` 或空定义片段，抛出稳定解析错误。
 
     使用示例:
-    - tokens = _tokenize_regex_check(r"func @[[NAME:{reg}]] -> [[NAME]]")
+    - tokens = _tokenize_check_pattern(r"func @[[NAME:{reg}]] -> [[NAME]]")
     - assert [token[0] for token in tokens] == ["literal", "define", "literal", "ref"]
 
     关联文件:
@@ -260,7 +259,7 @@ def _tokenize_regex_check(text: str) -> list[tuple[str, str, str | None]]:
 
     tokens: list[tuple[str, str, str | None]] = []
     cursor = 0
-    for match in _REGEX_TOKEN_PATTERN.finditer(text):
+    for match in _CHECK_TOKEN_PATTERN.finditer(text):
         literal = text[cursor : match.start()]
         if _contains_invalid_regex_literal_fragment(literal):
             raise IrcheckParseError("IrcheckParseError: invalid regex check")
@@ -282,6 +281,44 @@ def _tokenize_regex_check(text: str) -> list[tuple[str, str, str | None]]:
     if tail:
         tokens.append(("literal", tail, None))
     return tokens
+
+
+def _decode_literal_check_fragment(literal: str) -> str:
+    r"""把 literal 模式下的兼容转义还原成字面量文本。
+
+    创建者: 守护最好的爱莉希雅
+    最后一次更改: 守护最好的爱莉希雅
+
+    功能说明:
+    - `CHECK:` / `CHECK-NEXT:` / `CHECK-NOT:` 的普通文本默认按字面量匹配。
+    - 为兼容旧 expectation 中的过度转义写法，允许把 `\.`、`\(`、`\[`、`\]` 等“反斜杠 + 标点”
+      还原成对应字面量字符。
+    - 若反斜杠后跟的是字母、数字或下划线，则保留反斜杠本身，避免吞掉真实路径或标识符文本。
+
+    使用示例:
+    - assert _decode_literal_check_fragment(r"arith\.constant \[\[") == "arith.constant [["
+
+    关联文件:
+    - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
+    - test:
+      - [test/tools/test_ircheck_matcher.py](test/tools/test_ircheck_matcher.py)
+      - [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
+    - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
+    """
+
+    chars: list[str] = []
+    index = 0
+    while index < len(literal):
+        current = literal[index]
+        if current == "\\" and index + 1 < len(literal):
+            nxt = literal[index + 1]
+            if not (nxt.isalnum() or nxt == "_"):
+                chars.append(nxt)
+                index += 2
+                continue
+        chars.append(current)
+        index += 1
+    return "".join(chars)
 
 
 def _contains_invalid_regex_literal_fragment(literal: str) -> bool:
@@ -354,19 +391,20 @@ def _expand_regex_aliases(regex_text: str) -> str:
     return _REGEX_ALIAS_PATTERN.sub(lambda match: _REGEX_ALIASES[match.group(1)], regex_text)
 
 
-def _validate_regex_directive(text: str, kind: CheckKind, declared_variables: set[str]) -> list[str]:
-    """校验 regex 指令中的变量语法与 regex 合法性。
+def _validate_pattern_directive(text: str, kind: CheckKind, declared_variables: set[str]) -> list[str]:
+    """校验 `CHECK*` 指令中的变量语法与 pattern 合法性。
 
     创建者: 朽木露琪亚
     最后一次更改: 朽木露琪亚
 
     功能说明:
     - 校验 `[[NAME:REGEX]]` / `[[NAME]]` 的结构是否合法。
-    - 校验重复变量、未定义变量、`CHECK-NOT-REGEX` 定义变量等稳定错误短语。
+    - 校验重复变量、未定义变量、`CHECK-NOT` 定义变量等稳定错误短语。
+    - `CHECK*` 的 literal 片段先按 FileCheck 风格解码，再 `re.escape(...)` 成字面量。
     - 预编译替换后的 regex，确保语法错误在解析阶段暴露。
 
     使用示例:
-    - new_defs = _validate_regex_directive(r"@[[FN:{reg}]] -> [[FN]]", "CHECK-REGEX", set())
+    - new_defs = _validate_pattern_directive(r"@[[FN:{reg}]] -> [[FN]]", "CHECK", set())
     - assert new_defs == ["FN"]
 
     关联文件:
@@ -378,9 +416,9 @@ def _validate_regex_directive(text: str, kind: CheckKind, declared_variables: se
     visible_variables = set(declared_variables)
     new_definitions: list[str] = []
     pattern_parts: list[str] = []
-    for token_kind, name, payload in _tokenize_regex_check(text):
+    for token_kind, name, payload in _tokenize_check_pattern(text):
         if token_kind == "literal":
-            pattern_parts.append(name)
+            pattern_parts.append(re.escape(_decode_literal_check_fragment(name)))
             continue
         if token_kind == "ref":
             if name not in visible_variables:
@@ -392,8 +430,8 @@ def _validate_regex_directive(text: str, kind: CheckKind, declared_variables: se
             continue
 
         assert payload is not None
-        if kind == "CHECK-NOT-REGEX":
-            raise IrcheckParseError("IrcheckParseError: CHECK-NOT-REGEX cannot define variables")
+        if kind == "CHECK-NOT":
+            raise IrcheckParseError("IrcheckParseError: CHECK-NOT cannot define variables")
         if name in visible_variables:
             raise IrcheckParseError("IrcheckParseError: duplicate regex variable")
         visible_variables.add(name)
@@ -407,10 +445,10 @@ def _validate_regex_directive(text: str, kind: CheckKind, declared_variables: se
     return new_definitions
 
 
-def _compile_regex_directive(
+def _compile_pattern_directive(
     directive: CheckDirective, bound_variables: dict[str, str]
 ) -> tuple[re.Pattern[str], list[str]]:
-    """按当前变量表把 regex 指令编译为可执行的单行 pattern。
+    """按当前变量表把 `CHECK*` 指令编译为可执行的单行 pattern。
 
     创建者: 朽木露琪亚
     最后一次更改: 朽木露琪亚
@@ -418,10 +456,11 @@ def _compile_regex_directive(
     功能说明:
     - 将 `[[NAME]]` 引用替换为前序已捕获变量的字面量匹配。
     - 将同一条指令内“先定义再引用”的 `[[NAME]]` 转为 regex back-reference。
+    - `CHECK*` 的 literal 片段按字面量匹配。
     - 返回编译好的 pattern 与本条新增变量名列表，供命中后一次性写回变量表。
 
     使用示例:
-    - pattern, defs = _compile_regex_directive(directive, {"M": "16"})
+    - pattern, defs = _compile_pattern_directive(directive, {"M": "16"})
     - assert isinstance(pattern, re.Pattern)
 
     关联文件:
@@ -432,9 +471,9 @@ def _compile_regex_directive(
 
     local_definitions: list[str] = []
     pattern_parts: list[str] = []
-    for token_kind, name, payload in _tokenize_regex_check(directive.text):
+    for token_kind, name, payload in _tokenize_check_pattern(directive.text):
         if token_kind == "literal":
-            pattern_parts.append(name)
+            pattern_parts.append(re.escape(_decode_literal_check_fragment(name)))
             continue
         if token_kind == "ref":
             if name in local_definitions:
@@ -743,7 +782,7 @@ def _parse_ircheck_text(text: str, *, source_path: str | None, line_offset: int 
     compile_args: str | None = None
     checks: list[CheckDirective] = []
     saw_positive_check = False
-    declared_regex_variables: set[str] = set()
+    declared_pattern_variables: set[str] = set()
     for line_no, raw in header_lines:
         content = raw[2:].lstrip()
         if content.startswith("COMPILE_ARGS:"):
@@ -753,58 +792,11 @@ def _parse_ircheck_text(text: str, *, source_path: str | None, line_offset: int 
             if not compile_args:
                 raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
             continue
-        if content.startswith("CHECK-NEXT-REGEX:"):
-            check_text = content[len("CHECK-NEXT-REGEX:") :].strip()
-            if not check_text:
-                raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
-            _ = _validate_regex_directive(check_text, "CHECK-NEXT-REGEX", declared_regex_variables)
-            if not saw_positive_check:
-                raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
-            checks.append(
-                CheckDirective(
-                    kind="CHECK-NEXT-REGEX",
-                    text=check_text,
-                    line_no=line_no,
-                )
-            )
-            declared_regex_variables.update(
-                _validate_regex_directive(check_text, "CHECK-NEXT-REGEX", declared_regex_variables)
-            )
-            saw_positive_check = True
-            continue
-        if content.startswith("CHECK-NOT-REGEX:"):
-            check_text = content[len("CHECK-NOT-REGEX:") :].strip()
-            if not check_text:
-                raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
-            _ = _validate_regex_directive(check_text, "CHECK-NOT-REGEX", declared_regex_variables)
-            checks.append(
-                CheckDirective(
-                    kind="CHECK-NOT-REGEX",
-                    text=check_text,
-                    line_no=line_no,
-                )
-            )
-            continue
-        if content.startswith("CHECK-REGEX:"):
-            check_text = content[len("CHECK-REGEX:") :].strip()
-            if not check_text:
-                raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
-            checks.append(
-                CheckDirective(
-                    kind="CHECK-REGEX",
-                    text=check_text,
-                    line_no=line_no,
-                )
-            )
-            declared_regex_variables.update(
-                _validate_regex_directive(check_text, "CHECK-REGEX", declared_regex_variables)
-            )
-            saw_positive_check = True
-            continue
         if content.startswith("CHECK-NEXT:"):
             check_text = content[len("CHECK-NEXT:") :].strip()
             if not check_text:
                 raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
+            _ = _validate_pattern_directive(check_text, "CHECK-NEXT", declared_pattern_variables)
             if not saw_positive_check:
                 raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
             checks.append(
@@ -814,12 +806,16 @@ def _parse_ircheck_text(text: str, *, source_path: str | None, line_offset: int 
                     line_no=line_no,
                 )
             )
+            declared_pattern_variables.update(
+                _validate_pattern_directive(check_text, "CHECK-NEXT", declared_pattern_variables)
+            )
             saw_positive_check = True
             continue
         if content.startswith("CHECK-NOT:"):
             check_text = content[len("CHECK-NOT:") :].strip()
             if not check_text:
                 raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
+            _ = _validate_pattern_directive(check_text, "CHECK-NOT", declared_pattern_variables)
             checks.append(
                 CheckDirective(
                     kind="CHECK-NOT",
@@ -832,6 +828,7 @@ def _parse_ircheck_text(text: str, *, source_path: str | None, line_offset: int 
             check_text = content[len("CHECK:") :].strip()
             if not check_text:
                 raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
+            _ = _validate_pattern_directive(check_text, "CHECK", declared_pattern_variables)
             checks.append(
                 CheckDirective(
                     kind="CHECK",
@@ -839,8 +836,17 @@ def _parse_ircheck_text(text: str, *, source_path: str | None, line_offset: int 
                     line_no=line_no,
                 )
             )
+            declared_pattern_variables.update(
+                _validate_pattern_directive(check_text, "CHECK", declared_pattern_variables)
+            )
             saw_positive_check = True
             continue
+        if (
+            content.startswith("CHECK-REGEX:")
+            or content.startswith("CHECK-NEXT-REGEX:")
+            or content.startswith("CHECK-NOT-REGEX:")
+        ):
+            raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
 
     if compile_args is None:
         raise IrcheckParseError("IrcheckParseError: invalid ircheck header")
@@ -1379,10 +1385,11 @@ def _match_checks(
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 按 `spec/tools/ircheck.md` 定义的 literal/regex 匹配语义实现：
-      - `CHECK:` / `CHECK-REGEX:`：从上一次 positive check 命中行之后继续查找。
-      - `CHECK-NEXT:` / `CHECK-NEXT-REGEX:`：必须出现在上一条 positive check 命中行的下一行。
-      - `CHECK-NOT:` / `CHECK-NOT-REGEX:`：禁止出现在相邻两条 positive check 命中行之间（或起始/末尾区间）。
+    - 按 `spec/tools/ircheck.md` 定义的 FileCheck 风格逐行语义实现：
+      - `CHECK:` / `CHECK-NEXT:` / `CHECK-NOT:`：普通文本按字面量匹配，`[[...]]` 变量片段按模式匹配。
+      - `CHECK:`：从上一次正向检查命中行之后继续查找。
+      - `CHECK-NEXT:`：必须出现在上一条正向检查命中行的下一行。
+      - `CHECK-NOT:`：禁止出现在相邻两条正向检查命中行之间（或起始/末尾区间）。
 
     使用示例:
     - ok, failed, message = _match_checks(actual_ir, case.checks, source_path=case.source_path)
@@ -1411,36 +1418,21 @@ def _match_checks(
 
     def _check_not_range(start_line: int, end_line_exclusive: int) -> tuple[bool, CheckDirective | None, str | None]:
         for directive in pending_not:
-            if directive.kind == "CHECK-NOT":
-                for line in lines[start_line:end_line_exclusive]:
-                    if directive.text and directive.text in line:
-                        return _fail(
-                            "IrcheckMatchError: CHECK-NOT matched forbidden text",
-                            directive,
-                            f"forbidden text '{directive.text}' matched",
-                        )
-                continue
-
-            pattern, _ = _compile_regex_directive(directive, bound_variables)
+            pattern, _ = _compile_pattern_directive(directive, bound_variables)
             for line in lines[start_line:end_line_exclusive]:
                 if pattern.search(line):
+                    prefix = "IrcheckMatchError: CHECK-NOT matched forbidden text"
                     return _fail(
-                        "IrcheckMatchError: CHECK-NOT-REGEX matched forbidden text",
+                        prefix,
                         directive,
-                        f"regex '{directive.text}' matched",
+                        f"forbidden pattern '{directive.text}' matched",
                     )
         return (True, None, None)
 
-    def _find_literal_check_line(start_line: int, needle: str) -> int | None:
-        for idx in range(start_line, len(lines)):
-            if needle and needle in lines[idx]:
-                return idx
-        return None
-
-    def _find_regex_check_line(
+    def _find_check_line(
         start_line: int, directive: CheckDirective
     ) -> tuple[int | None, dict[str, str] | None]:
-        pattern, definition_names = _compile_regex_directive(directive, bound_variables)
+        pattern, definition_names = _compile_pattern_directive(directive, bound_variables)
         for idx in range(start_line, len(lines)):
             match = pattern.search(lines[idx])
             if match is None:
@@ -1453,34 +1445,18 @@ def _match_checks(
         return None, None
 
     for directive in checks:
-        if directive.kind in {"CHECK-NOT", "CHECK-NOT-REGEX"}:
+        if directive.kind == "CHECK-NOT":
             pending_not.append(directive)
             continue
 
         if directive.kind == "CHECK":
             start_line = 0 if last_positive_line is None else last_positive_line + 1
-            match_line = _find_literal_check_line(start_line, directive.text)
+            match_line, captured = _find_check_line(start_line, directive)
             if match_line is None:
                 return _fail(
                     "IrcheckMatchError: CHECK not found",
                     directive,
-                    f"text '{directive.text}' not found",
-                )
-            ok, failed, message = _check_not_range(start_line, match_line)
-            if not ok:
-                return (ok, failed, message)
-            pending_not.clear()
-            last_positive_line = match_line
-            continue
-
-        if directive.kind == "CHECK-REGEX":
-            start_line = 0 if last_positive_line is None else last_positive_line + 1
-            match_line, captured = _find_regex_check_line(start_line, directive)
-            if match_line is None:
-                return _fail(
-                    "IrcheckMatchError: CHECK-REGEX not found",
-                    directive,
-                    f"regex '{directive.text}' not found",
+                    f"pattern '{directive.text}' not found",
                 )
             ok, failed, message = _check_not_range(start_line, match_line)
             if not ok:
@@ -1503,41 +1479,19 @@ def _match_checks(
             ok, failed, message = _check_not_range(start_line, match_line)
             if not ok:
                 return (ok, failed, message)
-            if match_line >= len(lines) or not (directive.text and directive.text in lines[match_line]):
+            if match_line >= len(lines):
                 return _fail(
                     "IrcheckMatchError: CHECK-NEXT not found on next line",
                     directive,
-                    f"text '{directive.text}' not found on next line",
+                    f"pattern '{directive.text}' not found on next line",
                 )
-            pending_not.clear()
-            last_positive_line = match_line
-            continue
-
-        if directive.kind == "CHECK-NEXT-REGEX":
-            if last_positive_line is None:
-                return _fail(
-                    "IrcheckMatchError: CHECK-NEXT-REGEX not found on next line",
-                    directive,
-                    "CHECK-NEXT-REGEX requires previous positive check",
-                )
-            start_line = last_positive_line + 1
-            match_line = start_line
-            ok, failed, message = _check_not_range(start_line, match_line)
-            if not ok:
-                return (ok, failed, message)
-            if match_line >= len(lines):
-                return _fail(
-                    "IrcheckMatchError: CHECK-NEXT-REGEX not found on next line",
-                    directive,
-                    f"regex '{directive.text}' not found on next line",
-                )
-            pattern, definition_names = _compile_regex_directive(directive, bound_variables)
+            pattern, definition_names = _compile_pattern_directive(directive, bound_variables)
             match = pattern.search(lines[match_line])
             if match is None:
                 return _fail(
-                    "IrcheckMatchError: CHECK-NEXT-REGEX not found on next line",
+                    "IrcheckMatchError: CHECK-NEXT not found on next line",
                     directive,
-                    f"regex '{directive.text}' not found on next line",
+                    f"pattern '{directive.text}' not found on next line",
                 )
             pending_not.clear()
             for name in definition_names:

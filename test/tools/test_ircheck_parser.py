@@ -216,6 +216,40 @@ builtin.module {
         _ = parse_ircheck_file(str(path))
 
 
+# TC-IRCHECK-PARSE-007A
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
+# 最近一次运行成功时间: 待本轮验证后补充
+# 功能说明: 验证旧 CHECK-REGEX 系列语法不再兼容，必须直接解析失败。
+# 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_legacy_regex_directives_fail
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_parser.py
+@pytest.mark.parametrize(
+    "header",
+    [
+        "// CHECK-REGEX: func.func @main",
+        "// CHECK: func.func @main\n// CHECK-NEXT-REGEX: func.return",
+        "// CHECK-NOT-REGEX: func.call",
+    ],
+)
+def test_parse_ircheck_file_legacy_regex_directives_fail(tmp_path: Path, header: str) -> None:
+    content = f"""// COMPILE_ARGS: --pass no-op
+{header}
+
+builtin.module {{
+  func.func @main() {{
+    func.return
+  }}
+}}
+"""
+    path = tmp_path / "legacy_regex_directives.ircheck"
+    path.write_text(content, encoding="utf-8")
+    with pytest.raises(IrcheckParseError, match=r"^IrcheckParseError: invalid ircheck header$"):
+        _ = parse_ircheck_file(str(path))
+
+
 # TC-IRCHECK-PARSE-008
 # 创建者: 守护最好的爱莉希雅
 # 最后一次更改: 守护最好的爱莉希雅
@@ -245,19 +279,19 @@ builtin.module {}
 
 # TC-IRCHECK-PARSE-009
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-14 14:10 +0800
-# 最近一次运行成功时间: 2026-04-14 14:10 +0800
-# 功能说明: 验证 parser 可识别 CHECK-REGEX/CHECK-NEXT-REGEX/CHECK-NOT-REGEX 及变量定义/引用。
-# 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_regex_directives
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
+# 最近一次运行成功时间: 待本轮验证后补充
+# 功能说明: 验证 parser 可识别 CHECK/CHECK-NEXT/CHECK-NOT 里的变量定义与引用。
+# 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_variable_directives
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_parser.py
-def test_parse_ircheck_file_regex_directives(tmp_path: Path) -> None:
+def test_parse_ircheck_file_variable_directives(tmp_path: Path) -> None:
     content = """// COMPILE_ARGS: --pass no-op
-// CHECK-REGEX: %[[VAL:{int}]] = arith.constant [[VAL]] : i32
-// CHECK-NEXT-REGEX: %[[NEXT:{int}]] = arith.constant [[VAL]] : i32
-// CHECK-NOT-REGEX: func\\.call
+// CHECK: %[[VAL:{int}]] = arith.constant [[VAL]] : i32
+// CHECK-NEXT: %[[NEXT:{int}]] = arith.constant [[VAL]] : i32
+// CHECK-NOT: func.call
 
 builtin.module {
   func.func @main() {
@@ -271,9 +305,9 @@ builtin.module {
     path.write_text(content, encoding="utf-8")
     case = parse_ircheck_file(str(path))
     assert [directive.kind for directive in case.checks] == [
-        "CHECK-REGEX",
-        "CHECK-NEXT-REGEX",
-        "CHECK-NOT-REGEX",
+        "CHECK",
+        "CHECK-NEXT",
+        "CHECK-NOT",
     ]
     assert case.checks[0].line_no == 2
     assert case.checks[1].line_no == 3
@@ -285,14 +319,14 @@ builtin.module {
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-14 14:10 +0800
 # 最近一次运行成功时间: 2026-04-14 14:10 +0800
-# 功能说明: 验证非法 regex 写法会返回稳定错误短语 `invalid regex check`。
-# 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_invalid_regex_check_fails
+# 功能说明: 验证非法变量 regex 写法会返回稳定错误短语 `invalid regex check`。
+# 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_invalid_variable_regex_fails
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_parser.py
-def test_parse_ircheck_file_invalid_regex_check_fails(tmp_path: Path) -> None:
+def test_parse_ircheck_file_invalid_variable_regex_fails(tmp_path: Path) -> None:
     content = """// COMPILE_ARGS: --pass no-op
-// CHECK-REGEX: func.func @[[FN:(]]
+// CHECK: func.func @[[FN:(]]
 
 builtin.module {
   func.func @main() {
@@ -312,13 +346,13 @@ builtin.module {
 # 最近一次运行测试时间: 2026-04-14 15:05 +0800
 # 最近一次运行成功时间: 2026-04-14 15:05 +0800
 # 功能说明: 验证未闭合的转义 `[[` 变量片段也会返回稳定错误短语 `invalid regex check`。
-# 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_unclosed_escaped_regex_variable_fails
+# 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_unclosed_escaped_variable_fails
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_parser.py
-def test_parse_ircheck_file_unclosed_escaped_regex_variable_fails(tmp_path: Path) -> None:
+def test_parse_ircheck_file_unclosed_escaped_variable_fails(tmp_path: Path) -> None:
     content = """// COMPILE_ARGS: --pass no-op
-// CHECK-REGEX: func.func @main\\(\\[\\[BROKEN:{reg}\\]
+// CHECK: func.func @main\\(\\[\\[BROKEN:{reg}\\]
 
 builtin.module {
   func.func @main() {
@@ -344,7 +378,7 @@ builtin.module {
 # 对应测试文件路径: test/tools/test_ircheck_parser.py
 def test_parse_ircheck_file_escaped_double_brackets_literal_ok(tmp_path: Path) -> None:
     content = """// COMPILE_ARGS: --pass no-op
-// CHECK-REGEX: note = "\\[\\[LIT\\]\\]"
+// CHECK: note = "\\[\\[LIT\\]\\]"
 
 builtin.module attributes {note = "[[LIT]]"} {
   func.func @main() {
@@ -355,7 +389,7 @@ builtin.module attributes {note = "[[LIT]]"} {
     path = tmp_path / "escaped_double_brackets_literal.ircheck"
     path.write_text(content, encoding="utf-8")
     case = parse_ircheck_file(str(path))
-    assert case.checks[0].kind == "CHECK-REGEX"
+    assert case.checks[0].kind == "CHECK"
     assert case.checks[0].text == r'note = "\[\[LIT\]\]"'
 
 
@@ -371,7 +405,7 @@ builtin.module attributes {note = "[[LIT]]"} {
 # 对应测试文件路径: test/tools/test_ircheck_parser.py
 def test_parse_ircheck_file_escaped_double_open_brackets_prefix_ok(tmp_path: Path) -> None:
     content = """// COMPILE_ARGS: --pass no-op
-// CHECK-REGEX: note = "\\[\\["
+// CHECK: note = "\\[\\["
 
 builtin.module attributes {note = "[["} {
   func.func @main() {
@@ -382,7 +416,7 @@ builtin.module attributes {note = "[["} {
     path = tmp_path / "escaped_double_open_prefix.ircheck"
     path.write_text(content, encoding="utf-8")
     case = parse_ircheck_file(str(path))
-    assert case.checks[0].kind == "CHECK-REGEX"
+    assert case.checks[0].kind == "CHECK"
     assert case.checks[0].text == r'note = "\[\["'
 
 
@@ -391,14 +425,14 @@ builtin.module attributes {note = "[["} {
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-14 14:10 +0800
 # 最近一次运行成功时间: 2026-04-14 14:10 +0800
-# 功能说明: 验证引用未定义 regex 变量会返回稳定错误短语 `undefined regex variable`。
-# 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_undefined_regex_variable_fails
+# 功能说明: 验证引用未定义变量会返回稳定错误短语 `undefined regex variable`。
+# 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_undefined_variable_fails
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_parser.py
-def test_parse_ircheck_file_undefined_regex_variable_fails(tmp_path: Path) -> None:
+def test_parse_ircheck_file_undefined_variable_fails(tmp_path: Path) -> None:
     content = """// COMPILE_ARGS: --pass no-op
-// CHECK-REGEX: func.func @[[FN]]
+// CHECK: func.func @[[FN]]
 
 builtin.module {
   func.func @main() {
@@ -417,8 +451,8 @@ builtin.module {
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-14 14:10 +0800
 # 最近一次运行成功时间: 2026-04-14 14:10 +0800
-# 功能说明: 验证重复定义 regex 变量与 CHECK-NOT-REGEX 定义变量都会返回稳定错误短语。
-# 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_duplicate_or_not_regex_variable_fails
+# 功能说明: 验证重复定义变量与 CHECK-NOT 定义变量都会返回稳定错误短语。
+# 使用示例: pytest -q test/tools/test_ircheck_parser.py -k test_parse_ircheck_file_duplicate_or_not_variable_fails
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_parser.py
@@ -426,16 +460,16 @@ builtin.module {
     ("header", "message"),
     [
         (
-            "// CHECK-REGEX: func.func @[[FN:{reg}]]\n// CHECK-REGEX: func.func @[[FN:{reg}]]",
+            "// CHECK: func.func @[[FN:{reg}]]\n// CHECK: func.func @[[FN:{reg}]]",
             r"^IrcheckParseError: duplicate regex variable$",
         ),
         (
-            "// CHECK: func.func @main\n// CHECK-NOT-REGEX: [[FN:{reg}]]",
-            r"^IrcheckParseError: CHECK-NOT-REGEX cannot define variables$",
+            "// CHECK: func.func @main\n// CHECK-NOT: [[FN:{reg}]]",
+            r"^IrcheckParseError: CHECK-NOT cannot define variables$",
         ),
     ],
 )
-def test_parse_ircheck_file_duplicate_or_not_regex_variable_fails(
+def test_parse_ircheck_file_duplicate_or_not_variable_fails(
     tmp_path: Path, header: str, message: str
 ) -> None:
     content = f"""// COMPILE_ARGS: --pass no-op

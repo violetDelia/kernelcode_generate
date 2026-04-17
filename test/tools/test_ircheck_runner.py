@@ -711,19 +711,19 @@ builtin.module {
 
 # TC-IRCHECK-RUN-026
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-14 14:10 +0800
-# 最近一次运行成功时间: 2026-04-14 14:10 +0800
-# 功能说明: 验证 CHECK-REGEX/CHECK-NEXT-REGEX 支持 alias、变量捕获与跨指令引用。
-# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_regex_variable_success
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
+# 最近一次运行成功时间: 待本轮验证后补充
+# 功能说明: 验证 CHECK/CHECK-NEXT 支持 alias、变量捕获与跨指令引用。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_variable_success
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_runner.py
-def test_run_ircheck_text_regex_variable_success() -> None:
+def test_run_ircheck_text_variable_success() -> None:
     text = """// COMPILE_ARGS: --pass no-op
-// CHECK-REGEX: %[[ID:{int}]] = arith\\.constant [[VAL:{int}]] : i32
-// CHECK-NEXT-REGEX: %[[NEXT_ID:{int}]] = arith\\.constant [[VAL]] : i32
-// CHECK-NOT-REGEX: func\\.call
+// CHECK: %[[ID:{int}]] = arith.constant [[VAL:{int}]] : i32
+// CHECK-NEXT: %[[NEXT_ID:{int}]] = arith.constant [[VAL]] : i32
+// CHECK-NOT: func.call
 
 builtin.module {
   func.func @main() {
@@ -741,17 +741,17 @@ builtin.module {
 
 # TC-IRCHECK-RUN-027
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-14 14:10 +0800
-# 最近一次运行成功时间: 2026-04-14 14:10 +0800
-# 功能说明: 验证 regex 语法错误会映射为 exit_code=2 与稳定错误短语前缀。
-# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_invalid_regex_check_maps_to_exit_code_2
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
+# 最近一次运行成功时间: 待本轮验证后补充
+# 功能说明: 验证变量 regex 语法错误会映射为 exit_code=2 与稳定错误短语前缀。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_invalid_variable_regex_maps_to_exit_code_2
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_runner.py
-def test_run_ircheck_text_invalid_regex_check_maps_to_exit_code_2() -> None:
+def test_run_ircheck_text_invalid_variable_regex_maps_to_exit_code_2() -> None:
     text = f"""// COMPILE_ARGS: --pass no-op
-// CHECK-REGEX: func.func @[[FN:(]]
+// CHECK: func.func @[[FN:(]]
 
 {_SIMPLE_IR}"""
     result = run_ircheck_text(text, source_path="inline.ircheck")
@@ -767,13 +767,13 @@ def test_run_ircheck_text_invalid_regex_check_maps_to_exit_code_2() -> None:
 # 最近一次运行测试时间: 2026-04-14 15:05 +0800
 # 最近一次运行成功时间: 2026-04-14 15:05 +0800
 # 功能说明: 验证未闭合的转义 `[[` 变量片段会在解析阶段映射为 exit_code=2。
-# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_unclosed_escaped_regex_variable_maps_to_exit_code_2
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_unclosed_escaped_variable_maps_to_exit_code_2
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_runner.py
-def test_run_ircheck_text_unclosed_escaped_regex_variable_maps_to_exit_code_2() -> None:
+def test_run_ircheck_text_unclosed_escaped_variable_maps_to_exit_code_2() -> None:
     text = f"""// COMPILE_ARGS: --pass no-op
-// CHECK-REGEX: func.func @main\\(\\[\\[BROKEN:{{reg}}\\]
+// CHECK: func.func @main\\(\\[\\[BROKEN:{{reg}}\\]
 
 {_SIMPLE_IR}"""
     result = run_ircheck_text(text, source_path="inline.ircheck")
@@ -785,17 +785,17 @@ def test_run_ircheck_text_unclosed_escaped_regex_variable_maps_to_exit_code_2() 
 
 # TC-IRCHECK-RUN-027B
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-14 21:02 +0800
-# 最近一次运行成功时间: 2026-04-14 21:02 +0800
-# 功能说明: 验证按 spec 转义的字面量 `[[...]]` 可作为普通 regex 文本参与匹配。
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
+# 最近一次运行成功时间: 待本轮验证后补充
+# 功能说明: 验证按 spec 转义的字面量 `[[...]]` 可作为普通 CHECK 文本参与匹配。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_escaped_double_brackets_literal_ok
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_runner.py
 def test_run_ircheck_text_escaped_double_brackets_literal_ok() -> None:
     text = """// COMPILE_ARGS: --pass no-op
-// CHECK-REGEX: note = "\\[\\[LIT\\]\\]"
+// CHECK: note = "\\[\\[LIT\\]\\]"
 
 builtin.module attributes {note = "[[LIT]]"} {
   func.func @main() {
@@ -811,17 +811,17 @@ builtin.module attributes {note = "[[LIT]]"} {
 
 # TC-IRCHECK-RUN-027C
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-14 21:08 +0800
-# 最近一次运行成功时间: 2026-04-14 21:08 +0800
-# 功能说明: 验证按 spec 转义的字面量 `[[` 前缀可作为普通 regex 文本参与匹配。
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
+# 最近一次运行成功时间: 待本轮验证后补充
+# 功能说明: 验证按 spec 转义的字面量 `[[` 前缀可作为普通 CHECK 文本参与匹配。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_escaped_double_open_brackets_prefix_ok
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_runner.py
 def test_run_ircheck_text_escaped_double_open_brackets_prefix_ok() -> None:
     text = """// COMPILE_ARGS: --pass no-op
-// CHECK-REGEX: note = "\\[\\["
+// CHECK: note = "\\[\\["
 
 builtin.module attributes {note = "[["} {
   func.func @main() {
@@ -837,40 +837,40 @@ builtin.module attributes {note = "[["} {
 
 # TC-IRCHECK-RUN-028
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-14 14:10 +0800
-# 最近一次运行成功时间: 2026-04-14 14:10 +0800
-# 功能说明: 验证 CHECK-NOT-REGEX 定义变量会映射为 exit_code=2 与稳定错误短语前缀。
-# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_check_not_regex_define_variable_maps_to_exit_code_2
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
+# 最近一次运行成功时间: 待本轮验证后补充
+# 功能说明: 验证 CHECK-NOT 定义变量会映射为 exit_code=2 与稳定错误短语前缀。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_check_not_define_variable_maps_to_exit_code_2
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_runner.py
-def test_run_ircheck_text_check_not_regex_define_variable_maps_to_exit_code_2() -> None:
+def test_run_ircheck_text_check_not_define_variable_maps_to_exit_code_2() -> None:
     text = f"""// COMPILE_ARGS: --pass no-op
 // CHECK: builtin.module
-// CHECK-NOT-REGEX: [[FN:.*]]
+// CHECK-NOT: [[FN:.*]]
 
 {_SIMPLE_IR}"""
     result = run_ircheck_text(text, source_path="inline.ircheck")
     assert result.ok is False
     assert result.exit_code == 2
     assert result.message is not None
-    assert result.message.startswith("IrcheckParseError: CHECK-NOT-REGEX cannot define variables")
+    assert result.message.startswith("IrcheckParseError: CHECK-NOT cannot define variables")
 
 
 # TC-IRCHECK-RUN-029
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-14 14:10 +0800
-# 最近一次运行成功时间: 2026-04-14 14:10 +0800
-# 功能说明: 验证多 case 下 regex 变量作用域按 case 隔离，同名变量可在不同 case 重新定义。
-# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_regex_variables_are_case_local
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
+# 最近一次运行成功时间: 待本轮验证后补充
+# 功能说明: 验证多 case 下变量作用域按 case 隔离，同名变量可在不同 case 重新定义。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_variables_are_case_local
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_runner.py
-def test_run_ircheck_text_regex_variables_are_case_local() -> None:
+def test_run_ircheck_text_variables_are_case_local() -> None:
     text = """// COMPILE_ARGS: --pass no-op
-// CHECK-REGEX: %[[ID:{int}]] = arith\\.constant [[VAL:{int}]] : i32
+// CHECK: %[[ID:{int}]] = arith.constant [[VAL:{int}]] : i32
 
 builtin.module {
   func.func @main() {
@@ -880,7 +880,7 @@ builtin.module {
 }
 // -----
 // COMPILE_ARGS: --pass no-op
-// CHECK-REGEX: %[[ID:{int}]] = arith\\.constant [[VAL:{int}]] : i32
+// CHECK: %[[ID:{int}]] = arith.constant [[VAL:{int}]] : i32
 
 builtin.module {
   func.func @main() {
@@ -896,19 +896,19 @@ builtin.module {
 
 # TC-IRCHECK-RUN-030
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-14 15:05 +0800
-# 最近一次运行成功时间: 2026-04-14 15:05 +0800
+# 最后一次更改: 守护最好的爱莉希雅
+# 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
+# 最近一次运行成功时间: 待本轮验证后补充
 # 功能说明: 验证 `{reg}` 同时支持符号名与数字 SSA id，满足 expectation 的 memory/alloc 匹配。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_reg_alias_matches_ssa_ids
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
 # 对应测试文件路径: test/tools/test_ircheck_runner.py
 def test_run_ircheck_text_reg_alias_matches_ssa_ids() -> None:
-    text = r"""// COMPILE_ARGS: --pass no-op
-// CHECK-REGEX: func.func @main\(%arg0 : !nn.memory<\[[[M:{reg}]], [[N:{reg}]]\], \[[[N]], 1\], f32, #nn.space<global>>\) -> !nn.memory<\[[[M]], [[N]]\], \[[[N]], 1\], f32, #nn.space<global>> {
-// CHECK-NEXT-REGEX: %[[ALLOC:{reg}]] = "dma.alloc"\(\) <\{operandSegmentSizes = array<i32: 0>\}> : \(\) -> !nn.memory<\[[[M]], [[N]]\], \[[[N]], 1\], f32, #nn.space<global>>
-// CHECK-NEXT-REGEX: func.return %[[ALLOC]] : !nn.memory<\[[[M]], [[N]]\], \[[[N]], 1\], f32, #nn.space<global>>
+    text = """// COMPILE_ARGS: --pass no-op
+// CHECK: func.func @main(%arg0 : !nn.memory<[[[M:{reg}]], [[N:{reg}]]], [[[N]], 1], f32, #nn.space<global>>) -> !nn.memory<[[[M]], [[N]]], [[[N]], 1], f32, #nn.space<global>> {
+// CHECK-NEXT: %[[ALLOC:{reg}]] = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[[[M]], [[N]]], [[[N]], 1], f32, #nn.space<global>>
+// CHECK-NEXT: func.return %[[ALLOC]] : !nn.memory<[[[M]], [[N]]], [[[N]], 1], f32, #nn.space<global>>
 
 builtin.module {
   func.func @main(%arg0: !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>) -> !nn.memory<[M, N], [N, 1], f32, #nn.space<global>> {
