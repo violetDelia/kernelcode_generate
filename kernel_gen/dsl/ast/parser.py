@@ -182,7 +182,7 @@ class AstParseError(Exception):
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     def __init__(self: AstParseError, message: str, diagnostics: list[Diagnostic]) -> None:
@@ -278,7 +278,7 @@ def _eval_symbolic_dim_node(expr: py_ast.AST, node: object | None) -> int | Symb
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_mlir_gen.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
     if isinstance(expr, py_ast.Constant) and isinstance(expr.value, int):
         return expr.value
@@ -333,7 +333,7 @@ def _eval_symbolic_dim_expr(expr_text: str, node: object | None) -> int | Symbol
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_mlir_gen.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
     try:
         parsed = py_ast.parse(expr_text, mode="eval").body
@@ -358,7 +358,7 @@ def _split_tensor_annotation(text: str, node: object | None) -> tuple[NumericTyp
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_mlir_gen.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
     normalized = text.strip()
     if not normalized.startswith("Tensor[") or not normalized.endswith("]"):
@@ -411,7 +411,7 @@ def _eval_formatted_annotation_expr(
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     if isinstance(expr, py_ast.Name):
@@ -493,7 +493,7 @@ def _format_joinedstr_value(
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     if node.conversion != -1 or node.format_spec is not None:
@@ -529,7 +529,7 @@ def _normalize_annotation_text(
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     if isinstance(node, py_ast.Constant) and isinstance(node.value, str):
@@ -564,7 +564,7 @@ def _annotation_from_runtime_value(arg_name: str, runtime_value: object) -> Tens
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     if isinstance(runtime_value, Memory):
@@ -591,7 +591,7 @@ def _annotation_from_name_lookup(arg_name: str, namespace: dict[str, object]) ->
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     value = namespace.get(arg_name)
@@ -622,7 +622,7 @@ def _annotation_from_text(
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     location = _location_from_node(node)
@@ -652,7 +652,7 @@ def _tensor_annotation_text_from_subscript(node: py_ast.Subscript) -> str:
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     slice_node = node.slice
@@ -684,7 +684,7 @@ def _flatten_pep604_union_nodes(node: object) -> list[object]:
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     if isinstance(node, py_ast.BinOp) and isinstance(node.op, py_ast.BitOr):
@@ -714,7 +714,7 @@ def _parse_annotation_node(
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
     if node is None:
         if runtime_table is not None and arg_name is not None and arg_name in runtime_table:
@@ -797,7 +797,7 @@ def _lookup_python_name(name: str, globals_table: dict[str, object], builtins_ta
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     if name in globals_table:
@@ -826,7 +826,7 @@ def _parse_attribute_object(
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     if isinstance(expr.value, py_ast.Name):
@@ -858,7 +858,7 @@ def _is_allowed_attribute_value(value: object) -> bool:
     关联文件:
     - spec: spec/dsl/mlir_gen.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     return isinstance(
@@ -889,7 +889,7 @@ def _is_memory_target_ast(node: object) -> bool:
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     return isinstance(
@@ -931,7 +931,7 @@ def _resolve_call_base_object(
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     if isinstance(expr, py_ast.Name):
@@ -965,7 +965,7 @@ def _resolve_import_bound_helper_call(
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     if isinstance(expr, py_ast.Attribute):
@@ -1029,7 +1029,7 @@ def _bind_safe_local_import(stmt: py_ast.Import | py_ast.ImportFrom, globals_tab
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     if isinstance(stmt, py_ast.Import):
@@ -1074,7 +1074,7 @@ def _parse_symbol_to_float_call(
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     if not isinstance(expr.func, py_ast.Name) or expr.func.id != "float":
@@ -1107,7 +1107,7 @@ def _parse_nn_arithmetic_call(
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     symbol_binary_map = {
@@ -1153,7 +1153,7 @@ def _parse_nn_compare_call(
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/ast/test_parser.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     compare_map = {
@@ -1201,7 +1201,7 @@ def _parse_unary_helper_call(
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     simple_unary = {"relu", "sigmoid", "tanh", "exp"}
@@ -1283,7 +1283,7 @@ def _parse_softmax_helper_call(
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     if len(expr.args) < 1 or len(expr.args) > 2:
@@ -1326,7 +1326,7 @@ def _parse_reduce_helper_call(
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     if len(expr.args) < 1 or len(expr.args) > 3:
@@ -1394,7 +1394,7 @@ def _parse_load_like_call(
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     if len(expr.args) < 3 or len(expr.args) > 5:
@@ -1444,7 +1444,7 @@ def _parse_store_like_call(
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     min_arity = 4
@@ -1510,7 +1510,7 @@ def _parse_dma_call(
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     nn_expr = _parse_nn_arithmetic_call(expr, env, globals_table, builtins_table)
@@ -1931,7 +1931,7 @@ def _parse_python_callee_call(
     关联文件:
     - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
     - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
-    - 功能实现: [kernel_gen/dsl/ast_parser.py](kernel_gen/dsl/ast_parser.py)
+    - 功能实现: [kernel_gen/dsl/ast/parser.py](kernel_gen/dsl/ast/parser.py)
     """
 
     if not isinstance(expr.func, py_ast.Name):
@@ -1970,7 +1970,7 @@ def _parse_expr(
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     if isinstance(expr, py_ast.Name):
@@ -2090,7 +2090,7 @@ def _parse_for(
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     if not isinstance(stmt.target, py_ast.Name):
@@ -2156,7 +2156,7 @@ def _parse_stmt(
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     if isinstance(stmt, py_ast.FunctionDef):
@@ -2216,7 +2216,7 @@ def _parse_function_impl(
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     config = config or {}
@@ -2344,7 +2344,7 @@ def parse_function(fn: object) -> FunctionAST:
     关联文件:
     - spec: spec/dsl/ast.md
     - test: test/dsl/test_ast_visitor.py
-    - 功能实现: kernel_gen/dsl/ast_parser.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
     """
 
     try:

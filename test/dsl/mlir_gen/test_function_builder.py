@@ -35,7 +35,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.dsl.ast import parse_function
-from kernel_gen.dsl.ast_visitor import AstVisitorError
+from kernel_gen.dsl.ast.visitor import AstVisitorError
 from kernel_gen.dsl.mlir_gen import build_func_op, build_func_op_from_ast
 from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.type import NumericType

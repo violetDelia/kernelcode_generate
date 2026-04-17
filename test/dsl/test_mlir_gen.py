@@ -148,7 +148,7 @@ from kernel_gen.dsl.ast import (
     _ParseFailure,
     parse_function,
 )
-from kernel_gen.dsl.ast_visitor import AstVisitor, AstVisitorError
+from kernel_gen.dsl.ast.visitor import AstVisitor, AstVisitorError
 from kernel_gen.dsl.mlir_gen.emit.core import (
     EmitContext,
     _LoweringError,
@@ -188,7 +188,7 @@ from kernel_gen.dsl.mlir_gen import (
     build_func_op_from_ast,
 )
 from kernel_gen.dsl import mlir_gen as mlir_gen_module
-from kernel_gen.dsl import ast_visitor as ast_visitor_module
+from kernel_gen.dsl.ast import visitor as ast_visitor_module
 import kernel_gen.operation.nn as nn
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim

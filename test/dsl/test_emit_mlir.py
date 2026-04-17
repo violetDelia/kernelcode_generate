@@ -10,12 +10,12 @@
 - pytest -q test/dsl/test_emit_mlir.py
 
 覆盖率信息:
-- 覆盖率命令: coverage run -m pytest -q test/dsl/test_emit_mlir.py && coverage report --include=kernel_gen/dsl/ast_visitor.py,kernel_gen/dsl/mlir_gen/emit/core.py -m
+- 覆盖率命令: coverage run -m pytest -q test/dsl/test_emit_mlir.py && coverage report --include=kernel_gen/dsl/ast/visitor.py,kernel_gen/dsl/mlir_gen/emit/core.py -m
 - 覆盖率结果: 未统计（待补充）
 - 达标线: 95%
 
 关联文件:
-- 功能实现: kernel_gen/dsl/ast_visitor.py, kernel_gen/dsl/mlir_gen/emit/core.py
+- 功能实现: kernel_gen/dsl/ast/visitor.py, kernel_gen/dsl/mlir_gen/emit/core.py
 - Spec 文档: spec/dsl/ast_visitor.md, spec/dsl/emit_mlir.md
 - 测试文件: test/dsl/test_emit_mlir.py
 """
@@ -131,7 +131,7 @@ from kernel_gen.dsl.ast import (
     _ParseFailure,
     parse_function,
 )
-from kernel_gen.dsl.ast_visitor import AstVisitor, AstVisitorError
+from kernel_gen.dsl.ast.visitor import AstVisitor, AstVisitorError
 from kernel_gen.dsl.mlir_gen.emit.core import (
     EmitContext,
     _LoweringError,
@@ -171,7 +171,7 @@ from kernel_gen.dsl.mlir_gen import (
     build_func_op_from_ast,
 )
 from kernel_gen.dsl import mlir_gen as mlir_gen_module
-from kernel_gen.dsl import ast_visitor as ast_visitor_module
+from kernel_gen.dsl.ast import visitor as ast_visitor_module
 import kernel_gen.operation.nn as nn
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -660,7 +660,7 @@ def test_emit_mlir_unsupported_node_reports_location() -> None:
 # 功能说明: 验证 AstVisitor 顺序访问 block 并生成多语句 SSA。
 # 测试目的: 验证 AstVisitor 顺序访问 block 并生成多语句 SSA。
 # 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_ast_visitor_visit_block_preserves_order
-# 对应功能实现文件路径: kernel_gen/dsl/ast_visitor.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast/visitor.py
 # 对应 spec 文件路径: spec/dsl/ast_visitor.md
 # 对应测试文件路径: test/dsl/test_emit_mlir.py
 def test_ast_visitor_visit_block_preserves_order() -> None:
@@ -697,7 +697,7 @@ def test_ast_visitor_visit_block_preserves_order() -> None:
 # 功能说明: 验证同一表达式节点复用同一 value。
 # 测试目的: 验证同一表达式节点复用同一 value。
 # 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_ast_visitor_reuses_expression_value
-# 对应功能实现文件路径: kernel_gen/dsl/ast_visitor.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast/visitor.py
 # 对应 spec 文件路径: spec/dsl/ast_visitor.md
 # 对应测试文件路径: test/dsl/test_emit_mlir.py
 def test_ast_visitor_reuses_expression_value() -> None:
@@ -720,7 +720,7 @@ def test_ast_visitor_reuses_expression_value() -> None:
 # 功能说明: 验证不支持语句/表达式时抛 AstVisitorError 并携带位置信息。
 # 测试目的: 验证不支持语句/表达式时抛 AstVisitorError 并携带位置信息。
 # 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_lowering_failure_reports_diagnostics
-# 对应功能实现文件路径: kernel_gen/dsl/ast_visitor.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast/visitor.py
 # 对应 spec 文件路径: spec/dsl/ast_visitor.md
 # 对应测试文件路径: test/dsl/test_emit_mlir.py
 def test_lowering_failure_reports_diagnostics() -> None:
@@ -1171,7 +1171,7 @@ def test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast() -> None:
 # 功能说明: 覆盖 AstVisitor.visit_function 的符号表命中与跳过分支。
 # 测试目的: 覆盖 AstVisitor.visit_function 的符号表命中与跳过分支。
 # 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_ast_visitor_visit_function_skips_unbound_input
-# 对应功能实现文件路径: kernel_gen/dsl/ast_visitor.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast/visitor.py
 # 对应 spec 文件路径: spec/dsl/ast_visitor.md
 # 对应测试文件路径: test/dsl/test_emit_mlir.py
 def test_ast_visitor_visit_function_skips_unbound_input() -> None:
@@ -1197,7 +1197,7 @@ def test_ast_visitor_visit_function_skips_unbound_input() -> None:
 # 功能说明: 验证 visit_block 遇到未知 block 节点会抛出 AstVisitorError。
 # 测试目的: 验证 visit_block 遇到未知 block 节点会抛出 AstVisitorError。
 # 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_ast_visitor_rejects_block_without_statements
-# 对应功能实现文件路径: kernel_gen/dsl/ast_visitor.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast/visitor.py
 # 对应 spec 文件路径: spec/dsl/ast_visitor.md
 # 对应测试文件路径: test/dsl/test_emit_mlir.py
 def test_ast_visitor_rejects_block_without_statements() -> None:
@@ -1221,7 +1221,7 @@ def test_ast_visitor_rejects_block_without_statements() -> None:
 # 功能说明: 验证 visit_stmt 捕获 _LoweringError 并转为 AstVisitorError。
 # 测试目的: 验证 visit_stmt 捕获 _LoweringError 并转为 AstVisitorError。
 # 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_ast_visitor_visit_stmt_wraps_lowering_error
-# 对应功能实现文件路径: kernel_gen/dsl/ast_visitor.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast/visitor.py
 # 对应 spec 文件路径: spec/dsl/ast_visitor.md
 # 对应测试文件路径: test/dsl/test_emit_mlir.py
 def test_ast_visitor_visit_stmt_wraps_lowering_error() -> None:

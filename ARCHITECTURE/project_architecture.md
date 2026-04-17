@@ -13,7 +13,7 @@
 3. 代码层只看 `spec/`、`kernel_gen/`、`include/`、`test/`、`expectation/`；不要把 `agents/`、`TODO.md`、`wt-*` 误判为产品架构。
 4. `ARCHITECTURE/project_architecture.md` 解释“项目是什么、链路到哪里”；[`ARCHITECTURE/plan`](plan) 解释“某个目标怎么推进”。
 5. `operation` 是算子语义唯一来源；若 shape、dtype、错误边界变化，应先改 `spec/operation/* + kernel_gen/operation/* + test/operation/*`。
-6. `dsl/ast -> ast_visitor -> emit_mlir/mlir_gen` 是 DSL 前端 lowering；`emit_c/gen_kernel` 是 DSL 代码生成 backend；两者不能混写职责。
+6. `kernel_gen/dsl/ast/* -> kernel_gen/dsl/mlir_gen/*` 是 DSL 前端 lowering；`emit_c/gen_kernel` 是 DSL 代码生成 backend；两者不能混写职责。
 7. `mlir_gen` 仅接受函数形参和函数体内可达值；不允许外部值隐式捕获。
 8. `passes` 只消费受限 IR 子集，例如 `nn_to_kernel` 只处理少量 `nn` op；它不是所有 dialect 的统一中转站。
 9. `emit_c/gen_kernel` 也只接受受控 IR 子集；当前并不意味着所有高层 `nn` 算子都能直接生成 CPU 代码。
@@ -31,10 +31,10 @@
   - [`kernel_gen/dialect/kernel.py`](../kernel_gen/dialect/kernel.py)
   - [`kernel_gen/passes/pass_manager.py`](../kernel_gen/passes/pass_manager.py)
   - [`kernel_gen/passes/lowering/nn_to_kernel.py`](../kernel_gen/passes/lowering/nn_to_kernel.py)
-  - [`kernel_gen/dsl/ast.py`](../kernel_gen/dsl/ast.py)
-  - [`kernel_gen/dsl/ast_visitor.py`](../kernel_gen/dsl/ast_visitor.py)
-  - [`kernel_gen/dsl/emit_mlir.py`](../kernel_gen/dsl/emit_mlir.py)
-  - [`kernel_gen/dsl/mlir_gen.py`](../kernel_gen/dsl/mlir_gen.py)
+  - [`kernel_gen/dsl/ast/__init__.py`](../kernel_gen/dsl/ast/__init__.py)
+  - [`kernel_gen/dsl/ast/visitor.py`](../kernel_gen/dsl/ast/visitor.py)
+  - [`kernel_gen/dsl/mlir_gen/emit/core.py`](../kernel_gen/dsl/mlir_gen/emit/core.py)
+  - [`kernel_gen/dsl/mlir_gen/__init__.py`](../kernel_gen/dsl/mlir_gen/__init__.py)
   - [`kernel_gen/dsl/emit_c.py`](../kernel_gen/dsl/emit_c.py)
   - [`kernel_gen/dsl/gen_kernel.py`](../kernel_gen/dsl/gen_kernel.py)
   - [`kernel_gen/target/registry.py`](../kernel_gen/target/registry.py)
@@ -144,9 +144,9 @@ Memory / SymbolDim / SymbolShape
 
 ```text
 Python / DSL 函数
-  -> kernel_gen/dsl/ast.py
-  -> kernel_gen/dsl/ast_visitor.py
-  -> kernel_gen/dsl/emit_mlir.py + mlir_gen.py
+  -> kernel_gen/dsl/ast/__init__.py + parser.py + nodes.py
+  -> kernel_gen/dsl/ast/visitor.py
+  -> kernel_gen/dsl/mlir_gen/emit/core.py + kernel_gen/dsl/mlir_gen/__init__.py
   -> func.func + 相关 dialect op
   -> kernel_gen/dsl/emit_c.py + gen_kernel.py
   -> CPU C/C++ 源码字符串
@@ -219,7 +219,7 @@ kernel_gen/target/targets/*.json|*.txt
 | 模块 | 生产什么 | 消费什么 | 说明 |
 | --- | --- | --- | --- |
 | [`kernel_gen/operation`](../kernel_gen/operation) | 高层语义对象、形状/类型约束 | `Memory`、标量、`MemorySpace`、target 查询结果 | 不直接消费 DSL AST，也不直接消费 `emit_c` 产物 |
-| [`kernel_gen/dsl/emit_mlir.py`](../kernel_gen/dsl/emit_mlir.py) + [`kernel_gen/dsl/mlir_gen.py`](../kernel_gen/dsl/mlir_gen.py) | `func.func` 与一部分 `dialect` op | DSL AST、函数形参、函数体内可达值 | 是 DSL 前端的 IR 生产者，不等于 pass 管线入口 |
+| [`kernel_gen/dsl/mlir_gen/emit/core.py`](../kernel_gen/dsl/mlir_gen/emit/core.py) + [`kernel_gen/dsl/mlir_gen/__init__.py`](../kernel_gen/dsl/mlir_gen/__init__.py) | `func.func` 与一部分 `dialect` op | DSL AST、函数形参、函数体内可达值 | 是 DSL 前端的 IR 生产者，不等于 pass 管线入口 |
 | [`kernel_gen/passes`](../kernel_gen/passes) | 变换后的 IR | 已存在的合法 IR | 当前只消费受限 IR 子集，例如特定 `nn` op |
 | [`kernel_gen/dsl/emit_c.py`](../kernel_gen/dsl/emit_c.py) + [`kernel_gen/dsl/gen_kernel.py`](../kernel_gen/dsl/gen_kernel.py) | CPU C/C++ 源码字符串 | 受支持的 op、SSA value、`func.func` | 不是所有 dialect IR 的通用消费者 |
 
@@ -236,8 +236,8 @@ kernel_gen/target/targets/*.json|*.txt
 | [`kernel_gen/operation/`](../kernel_gen/operation) | `Memory`、标量参数、`MemorySpace`、target 查询结果 | 高层语义结果：`Memory`、`SymbolDim`、调用约束 | 算子形状、类型、错误边界的唯一来源是 `spec/operation/* + kernel_gen/operation/*` | 高层算子/arch helper 的语义推导、参数校验、输出描述 | 不负责 verifier、pass、C/C++ 模板 |
 | [`kernel_gen/dialect/`](../kernel_gen/dialect) | 已明确的语义与 IR 设计需求 | 可校验的 op、type、attribute | 交给 pass、emit 或测试的都是“可校验 IR” | IR 语义、parse/print、verifier | 不重新定义高层数学语义，不直接拼装目标源码 |
 | [`kernel_gen/passes/`](../kernel_gen/passes) | 合法 IR module / func / op | 变换后的 IR | 只做 IR 到 IR 的组织、合法化与 lowering | pass 调度、lowering、IR 重写 | 不做 DSL 解析、runtime API 或高层算子规则 |
-| [`kernel_gen/dsl/ast.py`](../kernel_gen/dsl/ast.py) + [`kernel_gen/dsl/ast_visitor.py`](../kernel_gen/dsl/ast_visitor.py) | Python AST / DSL 写法 | DSL AST | 只负责把用户写法变成内部 AST，不推导算子语义 | AST 节点建模、遍历、语法层转换 | 不负责高层 `Memory` 语义或目标代码模板 |
-| [`kernel_gen/dsl/emit_mlir.py`](../kernel_gen/dsl/emit_mlir.py) + [`kernel_gen/dsl/mlir_gen.py`](../kernel_gen/dsl/mlir_gen.py) | DSL AST、函数形参、函数体内可达值 | `func.func` 与相关 dialect op | 仅接受函数体内可达值/实参作为 lowering 输入；不允许外部值隐式捕获；不得在此层复写 `operation` 的算子规则 | DSL 到 MLIR 的发射、函数级装配、必要类型桥接 | 不定义高层算子形状公式，不负责完整 C/C++ 模板 |
+| [`kernel_gen/dsl/ast/__init__.py`](../kernel_gen/dsl/ast/__init__.py) + [`kernel_gen/dsl/ast/visitor.py`](../kernel_gen/dsl/ast/visitor.py) | Python AST / DSL 写法 | DSL AST | 只负责把用户写法变成内部 AST，不推导算子语义 | AST 节点建模、遍历、语法层转换 | 不负责高层 `Memory` 语义或目标代码模板 |
+| [`kernel_gen/dsl/mlir_gen/emit/core.py`](../kernel_gen/dsl/mlir_gen/emit/core.py) + [`kernel_gen/dsl/mlir_gen/__init__.py`](../kernel_gen/dsl/mlir_gen/__init__.py) | DSL AST、函数形参、函数体内可达值 | `func.func` 与相关 dialect op | 仅接受函数体内可达值/实参作为 lowering 输入；不允许外部值隐式捕获；不得在此层复写 `operation` 的算子规则 | DSL 到 MLIR 的发射、函数级装配、必要类型桥接 | 不定义高层算子形状公式，不负责完整 C/C++ 模板 |
 | [`kernel_gen/dsl/emit_c.py`](../kernel_gen/dsl/emit_c.py) + [`kernel_gen/dsl/gen_kernel.py`](../kernel_gen/dsl/gen_kernel.py) | 已合法化的单个 op、SSA value、`func.func` | 目标后端源码字符串 | `emit_c` 负责节点级片段，`gen_kernel` 负责函数签名和函数体拼装 | 节点级与函数级源码生成 | 不新增高层 lowering 特例，不负责文件写盘/编译/链接 |
 | [`kernel_gen/analysis/`](../kernel_gen/analysis) | IR 或语义对象 | 静态估算结果 | 只输出分析结果，不改写语义 | 计算量/搬运量分析 | 不负责 lowering、调度、真实执行 |
 | [`kernel_gen/target/`](../kernel_gen/target) | `json/txt` target 配置 | target 能力与硬件参数查询结果 | registry 不补业务默认值；硬件缺失时由调用层决定回退；`cpu.txt` 的白名单空值特例由 spec 明确 | target 配置解析、注册、查询 | 不生成代码，不决定算子完整 lowering 策略 |
@@ -345,7 +345,7 @@ kernel_gen/target/targets/*.json|*.txt
 ```text
 1. 修改 conv 输出 shape 公式：spec/operation + kernel_gen/operation + test/operation
 2. 新增可校验 op 或 verifier 规则：spec/dialect + kernel_gen/dialect + test/dialect
-3. 新增 DSL 语法或 AST walk：spec/dsl/ast* + kernel_gen/dsl/{ast,ast_visitor} + test/dsl
+3. 新增 DSL 语法或 AST walk：spec/dsl/ast* + kernel_gen/dsl/ast/* + kernel_gen/dsl/mlir_gen/* + test/dsl
 4. 新增 CPU 代码模板：spec/dsl/{emit_c,gen_kernel} + kernel_gen/dsl + test/dsl + include/cpu(如 runtime 需要)
 5. 新增专题目标与阶段验收：ARCHITECTURE/plan
 ```
