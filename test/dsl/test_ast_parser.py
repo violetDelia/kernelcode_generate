@@ -4,7 +4,7 @@
 最后一次更改: 朽木露琪亚
 
 功能说明:
-- 覆盖 kernel_gen/dsl/ast_parser.py 的解析入口与诊断路径。
+- 覆盖 `kernel_gen.dsl.ast.parser` 的解析入口与诊断路径。
 - 覆盖 for range(..., step=0) 的解析期拒绝诊断。
 
 当前覆盖率信息:
@@ -12,13 +12,13 @@
 - 达标判定: 待后续补充统计结果。
 
 覆盖率命令:
-- `pytest -q --cov=kernel_gen.dsl.ast_parser --cov-branch --cov-report=term-missing test/dsl/test_ast_parser.py`
+- `pytest -q --cov=kernel_gen.dsl.ast.parser --cov-branch --cov-report=term-missing test/dsl/test_ast_parser.py`
 
 使用示例:
 - pytest -q test/dsl/test_ast_parser.py
 
 关联文件:
-- 功能实现: kernel_gen/dsl/ast_parser.py
+- 功能实现: kernel_gen/dsl/ast/parser.py
 - Spec 文档: spec/dsl/ast_parser.md
 - 测试文件: test/dsl/test_ast_parser.py
 """
@@ -35,10 +35,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-parser_module = importlib.import_module("kernel_gen.dsl.ast_parser")
+parser_module = importlib.import_module("kernel_gen.dsl.ast.parser")
 parse_function = parser_module.parse_function
 AstParseError = parser_module.AstParseError
-FunctionAST = importlib.import_module("kernel_gen.dsl.ast_nodes").FunctionAST
+FunctionAST = importlib.import_module("kernel_gen.dsl.ast").FunctionAST
 
 
 # AST-P-001
@@ -48,7 +48,7 @@ FunctionAST = importlib.import_module("kernel_gen.dsl.ast_nodes").FunctionAST
 # 最近一次运行成功时间: 2026-04-12 00:35:00 +0800
 # 功能说明: 解析函数生成 FunctionAST。
 # 使用示例: pytest -q test/dsl/test_ast_parser.py -k test_ast_parser_builds_function_ast
-# 对应功能实现文件路径: kernel_gen/dsl/ast_parser.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast/parser.py
 # 对应 spec 文件路径: spec/dsl/ast_parser.md
 # 对应测试文件路径: test/dsl/test_ast_parser.py
 def test_ast_parser_builds_function_ast() -> None:
@@ -68,7 +68,7 @@ def test_ast_parser_builds_function_ast() -> None:
 # 最近一次运行成功时间: 2026-04-12 00:35:00 +0800
 # 功能说明: 解析失败时返回带位置信息的诊断。
 # 使用示例: pytest -q test/dsl/test_ast_parser.py -k test_ast_parser_reports_diagnostics
-# 对应功能实现文件路径: kernel_gen/dsl/ast_parser.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast/parser.py
 # 对应 spec 文件路径: spec/dsl/ast_parser.md
 # 对应测试文件路径: test/dsl/test_ast_parser.py
 def test_ast_parser_reports_diagnostics() -> None:
@@ -88,7 +88,7 @@ def test_ast_parser_reports_diagnostics() -> None:
 # 最近一次运行成功时间: 2026-04-12 00:35:00 +0800
 # 功能说明: 解析 helper 非法参数形态并报稳定错误。
 # 使用示例: pytest -q test/dsl/test_ast_parser.py -k test_ast_parser_rejects_invalid_helper_arity
-# 对应功能实现文件路径: kernel_gen/dsl/ast_parser.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast/parser.py
 # 对应 spec 文件路径: spec/dsl/ast_parser.md
 # 对应测试文件路径: test/dsl/test_ast_parser.py
 def test_ast_parser_rejects_invalid_helper_arity() -> None:
@@ -108,7 +108,7 @@ def test_ast_parser_rejects_invalid_helper_arity() -> None:
 # 最近一次运行成功时间: 2026-04-13 09:40:00 +0800
 # 功能说明: for range(..., step=0) 在解析阶段直接报错。
 # 使用示例: pytest -q test/dsl/test_ast_parser.py -k test_ast_parser_rejects_zero_step
-# 对应功能实现文件路径: kernel_gen/dsl/ast_parser.py
+# 对应功能实现文件路径: kernel_gen/dsl/ast/parser.py
 # 对应 spec 文件路径: spec/dsl/ast.md
 # 对应测试文件路径: test/dsl/test_ast_parser.py
 def test_ast_parser_rejects_zero_step() -> None:
@@ -117,5 +117,5 @@ def test_ast_parser_rejects_zero_step() -> None:
             x = x
         return x
 
-    with pytest.raises(AstParseError, match="step must not be 0"):
+    with pytest.raises(AstParseError, match="for range step must not be zero"):
         _ = parse_function(kernel)

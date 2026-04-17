@@ -38,7 +38,7 @@ from kernel_gen.dsl.ast import (
     ScalarArgAST,
     TensorAST,
 )
-from kernel_gen.dsl.ast_visitor import AstVisitor, AstVisitorError
+from kernel_gen.dsl.ast.visitor import AstVisitor, AstVisitorError
 from kernel_gen.dsl.mlir_gen.emit.core import (
     EmitContext,
     _LoweringError,

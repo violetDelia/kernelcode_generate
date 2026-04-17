@@ -10,7 +10,7 @@
 - 创建者：`睡觉小分队`
 - 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/dsl/ast_parser.md`](../../spec/dsl/ast_parser.md)
-- `功能实现`：[`kernel_gen/dsl/ast_parser.py`](../../kernel_gen/dsl/ast_parser.py)
+- `功能实现`：[`kernel_gen/dsl/ast/parser.py`](../../kernel_gen/dsl/ast/parser.py)
 - `test`：[`test/dsl/test_ast_parser.py`](../../test/dsl/test_ast_parser.py)
 
 ## 依赖
@@ -63,7 +63,7 @@ func_ast = parse_function(add)
 
 - 必须能获取函数源码；否则应抛出解析错误。
 - 注解解析规则、helper 入口与诊断口径以 `spec/dsl/ast.md` 为准。
-- 解析结果中的节点类型来自 `kernel_gen/dsl/ast_nodes.py`，并通过 `kernel_gen.dsl.ast` 对外导出。
+- 解析结果中的节点类型来自 `kernel_gen/dsl/ast/nodes.py`，并通过 `kernel_gen.dsl.ast` 对外导出。
 
 返回与限制：
 

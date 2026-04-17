@@ -33,7 +33,7 @@ from .ast import (
     VarAST,
     parse_function,
 )
-from .ast_visitor import AstVisitor, AstVisitorError
+from .ast.visitor import AstVisitor, AstVisitorError
 from .mlir_gen.emit import EmitContext, emit_mlir
 from .mlir_gen import build_func_op, build_func_op_from_ast
 

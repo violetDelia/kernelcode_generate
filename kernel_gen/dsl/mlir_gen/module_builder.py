@@ -27,7 +27,7 @@ from xdsl.dialects.builtin import ModuleOp, i32
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.dsl.ast import AstParseError
-from kernel_gen.dsl.ast_visitor import AstVisitorError
+from kernel_gen.dsl.ast.visitor import AstVisitorError
 from kernel_gen.dsl.mlir_gen.emit.core import (
     _MLIR_GEN_CALLEE_COMPILER_CONFIG_KEY,
     _MLIR_GEN_CALLEE_REGISTRY_CONFIG_KEY,
