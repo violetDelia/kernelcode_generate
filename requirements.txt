@@ -1,0 +1,26 @@
+# requirements.txt
+#
+# 创建者: 金铲铲大作战
+# 最后修改人: 小李飞刀
+#
+# 功能说明:
+# - 汇总当前仓库直接导入可见的核心 Python 依赖：`pytest`、`sympy`、`xdsl`。
+# - 补齐仓库测试与覆盖率命令广泛使用的 `pytest-cov`。
+# - 补齐 `execute_engine` 公开接口文档涉及的 `numpy.ndarray` 与 `torch.Tensor` 运行时依赖，便于按当前文档与示例直接准备环境。
+#
+# 使用示例:
+# - `python3 -m pip install -r requirements.txt`
+# - `python3 -m pytest -q test/script/test_requirements_txt.py`
+#
+# 关联文件:
+# - spec: `spec/script/pytest_config.md`
+# - spec: `spec/execute_engine/execute_engine_api.md`
+# - test: `test/script/test_requirements_txt.py`
+# - 功能实现: `requirements.txt`
+
+numpy==2.4.4
+pytest==9.0.2
+pytest-cov==7.1.0
+sympy==1.14.0
+torch==2.11.0
+xdsl==0.56.2
