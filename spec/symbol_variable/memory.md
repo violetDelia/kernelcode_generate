@@ -7,9 +7,9 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/symbol_variable/memory.md`](../../spec/symbol_variable/memory.md)
-- `test`：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)、[`test/symbol_variable/test_memory_operation.py`](../../test/symbol_variable/test_memory_operation.py)、[`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)
+- `test`：[`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)、[`test/symbol_variable/test_memory_operation.py`](../../test/symbol_variable/test_memory_operation.py)、[`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)、[`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py)
 - `功能实现`：[`kernel_gen/symbol_variable/memory.py`](../../kernel_gen/symbol_variable/memory.py)
 
 ## 依赖
@@ -45,6 +45,7 @@
 - `shape/stride` 的默认公开比较口径是“公开值语义等价”，不是“内部表达式结构完全一致”。
 - 静态分量按整数值比较；动态分量按公开返回值比较：`shape` 以 `get_shape()` 返回的稳定字符串/整数为准，`stride` 以 `get_stride()` 返回分量的公开值为准，动态 `SymbolDim` 分量默认比较 `get_value()` 结果。
 - 若两个动态表达式的公开值一致（例如稳定公开值同为 `8*N`），即使底层 sympy 节点类型、树形结构或对象身份不同，也视为同一 `shape/stride` 公开语义。
+- `Memory` 的动态分量比较基线直接继承 `SymbolDim.get_value()` 的公开值语义；只要公开值一致，就不得再把底层 sympy 结构或对象身份当成默认合同差异。
 - 只有当某条 spec/expectation 显式声明 `exact` 或“内部表达式结构完全一致”口径时，调用方才可要求比较底层表达式结构；未显式声明时，默认不得把结构级比较视为 `Memory` 长期公开合同。
 
 ## 公开接口
@@ -574,16 +575,19 @@ cmp_mem = lhs < 0
   - [`test/symbol_variable/test_memory_operation.py`](../../test/symbol_variable/test_memory_operation.py)：验证 `Memory` 运算符重载（逐元素算术/比较）与错误路径。
 - 交叉验证：
   - [`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)：验证 memory 相关整数 symbol 分量进入 dialect 后仍符合边界约定。
+  - [`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py)：验证 `SymbolDim` 公开值语义与动态表达式稳定性，为 `Memory` 动态 `shape/stride` 比较提供上游基线。
 - 执行命令：
   - `pytest -q test/symbol_variable/test_memory.py`
   - `pytest -q test/symbol_variable/test_memory_operation.py`
   - `pytest -q test/dialect/test_symbol_dialect.py`
+  - `pytest -q test/symbol_variable/test_symbol_dim.py`
 
 ### 测试分层
 
 - `test/symbol_variable/test_memory.py` 负责 `Memory` / `MemorySpace` / `LocalSpaceMeta` 的构造、表示与公开访问接口。
 - `test/symbol_variable/test_memory_operation.py` 负责 `Memory` 运算符重载（逐元素算术/比较）的 dtype 规则、元数据继承与错误路径，不重复覆盖构造与表示语义。
 - `test/dialect/test_symbol_dialect.py` 只验证单个整数分量进入 dialect 后的兼容性，不替代 `Memory` 主测试。
+- `test/symbol_variable/test_symbol_dim.py` 负责 `SymbolDim` 公开值语义与动态表达式稳定性；`Memory` 的动态 `shape/stride` 比较只继承这层公开值，不额外依赖底层 sympy 树形。
 
 ### 测试目标
 
@@ -594,6 +598,7 @@ cmp_mem = lhs < 0
 - 验证未显式提供 `stride` 时默认步幅生成（包含符号维度与字符串输入）。
 - 验证 `get_stride()` 对动态步幅分量返回 `SymbolDim`，`__repr__` / `__str__` 继续使用 `Shape(...)` 文本序列化。
 - 验证 `shape/stride` 的公开比较默认锁定公开值语义与稳定序列化，而不是底层 sympy 结构。
+- 验证 `SymbolDim` 的公开值语义是 `Memory` 动态 `shape/stride` 公开比较的上游基线；`test_symbol_dim.py` 与 `test_memory.py` 组合时不能因为底层结构不同误判公开语义。
 - 验证 `shape` 与 `stride` 可直接接收 `SymbolShape` 或普通可迭代输入。
 - 验证 `tensor-like` 字段直入能够通过公开构造入口完成。
 - 验证 `__repr__` 包含空间与张量元信息。

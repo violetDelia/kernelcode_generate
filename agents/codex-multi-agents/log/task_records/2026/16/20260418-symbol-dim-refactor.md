@@ -103,6 +103,14 @@
 - `python3 - <<'PY' ...` 复测扩展样例 -> `(A*B)/(B*C)` 的 `get_symbol()` 与 `get_value()` 均为 `A/C`
 结论：通过；当前 review 已完成，任务日志已写入对应任务 worktree 的记录文件；下一步建议创建 `merge` 任务并通知管理员推进。
 
+时间：2026-04-18 18:09 +0800
+经办人：李白
+任务：T-20260418-a46b4404
+任务目标：在 `wt-20260418-symbol-dim-s3` 内按当前 merge 边界合入 `Memory` 与 `SymbolDim` 联动公开比较口径改动，并补齐对应记录文件
+改动：已完成合并前范围核对；当前 `worktree` 仅有 `kernel_gen/symbol_variable/memory.py`、`spec/symbol_variable/memory.md`、`test/symbol_variable/test_memory.py` 与本记录文件 4 处改动，无额外未跟踪现场文件；已确认 `HEAD` 与 `origin/main` 当前均指向 `9179e09810caf94f92963d95234ef40a35b3f70a`，本轮准备仅提交这 4 个改动文件并继续完成推送与 `-done`
+验证：`git status --short --branch` -> `## wt-20260418-symbol-dim-s3`，`M agents/codex-multi-agents/log/task_records/2026/16/20260418-symbol-dim-refactor.md`、`M kernel_gen/symbol_variable/memory.py`、`M spec/symbol_variable/memory.md`、`M test/symbol_variable/test_memory.py`；`git diff --name-only` -> `agents/codex-multi-agents/log/task_records/2026/16/20260418-symbol-dim-refactor.md`、`kernel_gen/symbol_variable/memory.py`、`spec/symbol_variable/memory.md`、`test/symbol_variable/test_memory.py`；`git rev-parse HEAD` -> `9179e09810caf94f92963d95234ef40a35b3f70a`；`git rev-parse origin/main` -> `9179e09810caf94f92963d95234ef40a35b3f70a`；`find /home/lfr/kernelcode_generate/wt-20260418-symbol-dim-s3 -maxdepth 2 \\( -name '.venv' -o -name '.venv-pytest-check.py' \\)` -> 无输出
+结论：已完成合并前核对，准备只提交当前任务改动文件并执行推送与 `-done`
+
 时间：2026-04-18 16:16 +0800
 经办人：朽木露琪亚
 任务：T-20260418-a1838667
@@ -181,3 +189,42 @@
 改动：已完成合并前范围核对；当前 `worktree` 仅有 `spec/symbol_variable/symbol_dim.md`、`test/symbol_variable/test_symbol_dim.py` 与本记录文件 3 处改动，无额外未跟踪现场文件。已确认远端 `origin/main` 不存在 `agents/codex-multi-agents/log/task_records/2026/16/20260418-symbol-dim-refactor.md`，当前链路记录文件建立在本地依赖基线 `780d422` 之上；本轮准备仅提交这 3 个改动文件并继续完成推送与 `-done`
 验证：`git status --short --branch` -> `## wt-20260418-symbol-dim-s2`，`M agents/codex-multi-agents/log/task_records/2026/16/20260418-symbol-dim-refactor.md`、`M spec/symbol_variable/symbol_dim.md`、`M test/symbol_variable/test_symbol_dim.py`；`git diff --name-only` -> `agents/codex-multi-agents/log/task_records/2026/16/20260418-symbol-dim-refactor.md`、`spec/symbol_variable/symbol_dim.md`、`test/symbol_variable/test_symbol_dim.py`；`git rev-parse HEAD` -> `780d42251b46db11cad3a81e0b742a41dfdcfbd8`；`git rev-parse origin/main` -> `dee922fd9e2a5ad07513fe679256e11d6a425de3`；`git cat-file -e origin/main:agents/codex-multi-agents/log/task_records/2026/16/20260418-symbol-dim-refactor.md` -> 路径不存在
 结论：已完成合并前核对，准备只提交当前任务改动文件并执行推送与 `-done`
+
+时间：2026-04-18 17:38
+经办人：睡觉小分队
+任务：T-20260418-a46b4404
+任务目标：收口 `Memory` 与 `SymbolDim` 的联动回归口径，明确动态 `shape/stride` 的公开比较以 `SymbolDim.get_value()` 为基线，并把 `test_symbol_dim.py` 作为联动回归资产写入 `spec`。
+改动：更新 [`spec/symbol_variable/memory.md`](../../../../../../spec/symbol_variable/memory.md)，将 `test/symbol_variable/test_symbol_dim.py` 加入文档信息与交叉验证说明；在 `限制与边界` 中明确 `Memory` 动态分量比较基线直接继承 `SymbolDim.get_value()` 的公开值语义，不把底层 sympy 结构或对象身份当作默认合同差异；在 `测试` 章节补充 `SymbolDim` 与 `Memory` 的联动回归目标，要求 `test_symbol_dim.py` 与 `test_memory.py` 组合时按公开值语义判断动态 `shape/stride`，不因内部结构不同误判公开语义。
+验证：`git rev-parse HEAD` -> `9179e09810caf94f92963d95234ef40a35b3f70a`，确认本轮基线仍是当前 `wt-20260418-symbol-dim-s3` 现场；`rg -n '最后一次更改|test_symbol_dim|SymbolDim.get_value|公开值语义是 \`Memory\` 动态|test/dialect/test_symbol_dialect|pytest -q test/symbol_variable/test_symbol_dim.py' spec/symbol_variable/memory.md` -> 命中本轮新增的联动说明与执行命令；`git diff -- spec/symbol_variable/memory.md` -> 仅看到本轮对 `memory.md` 的文档改动，无实现或测试文件变更；未执行 `pytest`，原因：当前阶段仅负责 `spec` 文档编写。
+结论：当前 `S3-spec` 已完成，任务日志已写入对应 `worktree` 的记录文件；下一步创建 `S3-build` 任务，由 `build` 角色按最新 `memory.md` 收口实现与测试。
+
+时间：2026-04-18 18:06 +0800
+经办人：金铲铲大作战
+任务：T-20260418-a46b4404
+任务目标：按最新 `memory spec` 收口 `Memory` 与 `SymbolDim` 的联动回归口径，保持动态 `shape/stride` 的公开比较以 `SymbolDim.get_value()` 为基线，并补齐联动测试。
+改动：更新 [`kernel_gen/symbol_variable/memory.py`](../../../../../../kernel_gen/symbol_variable/memory.py)，新增 `_public_dim_values()`，在 `Memory` 层将动态 `shape` 的公开值统一切到 `SymbolDim.get_value()`，并让 `_ensure_same_shape()` 基于 `get_shape()` 的公开值做匹配，不再直接依赖 `SymbolShape.get_values()` 的底层表达式字符串。更新 [`test/symbol_variable/test_memory.py`](../../../../../../test/symbol_variable/test_memory.py)，新增 `ME-006A` 与 `ME-021`，分别锁定“动态 shape 的公开序列化继承 `SymbolDim.get_value()`”以及“两个内部表达式结构不同但 `get_value()` 一致的动态 shape 在 `Memory` 运算入口视为同一公开形状”。
+验证：`python3 -m pytest -q test/symbol_variable/test_memory.py test/symbol_variable/test_memory_operation.py` -> exit 0，24 passed；`PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260418-symbol-dim-s3:/home/lfr/kernelcode_generate python3 /home/lfr/kernelcode_generate/expectation/symbol_variable/memory.py` -> exit 0；`python3 -m pytest -q test/symbol_variable/test_symbol_dim.py test/symbol_variable/test_symbol_shape.py` -> exit 0，34 passed；`python3 - <<'PY' ...` -> exit 0，确认 `shape_internal=['(A*B)/B', 4]` 时 `shape_public=['A*B/B', 4]`，以及 `8*N` / `N*8` 两种内部结构的 `Memory` 在公开形状上都为 `['8*N', 4]` 且可正常参与运算。
+结论：当前 build 已完成，任务日志已写入对应任务 worktree 的记录文件；下一步创建 review 任务并通知管理员推进。
+
+时间：2026-04-18 18:07 +0800
+经办人：提莫炖蘑菇
+任务：T-20260418-a46b4404
+任务目标：审查 `Memory` 与 `SymbolDim` 联动公开比较口径及联动测试收口结果，确认实现、测试与计划书合同一致。
+改动：
+- 审查范围：[`kernel_gen/symbol_variable/memory.py`](../../../../../../kernel_gen/symbol_variable/memory.py)、[`spec/symbol_variable/memory.md`](../../../../../../spec/symbol_variable/memory.md)、[`test/symbol_variable/test_memory.py`](../../../../../../test/symbol_variable/test_memory.py)、[`test/symbol_variable/test_memory_operation.py`](../../../../../../test/symbol_variable/test_memory_operation.py)、[`test/symbol_variable/test_symbol_dim.py`](../../../../../../test/symbol_variable/test_symbol_dim.py)、[`ARCHITECTURE/plan/symbol_dim_expectation_green_plan.md`](../../../../../../ARCHITECTURE/plan/symbol_dim_expectation_green_plan.md)、[`expectation/symbol_variable/memory.py`](/home/lfr/kernelcode_generate/expectation/symbol_variable/memory.py)、[`expectation/symbol_variable/symbol_dim.py`](/home/lfr/kernelcode_generate/expectation/symbol_variable/symbol_dim.py)。
+- 问题列表：未发现阻断项。
+- 漏洞排查结果：
+  - 输入校验绕过：`Memory` 公开构造、`shape/stride` 访问与联动测试复测未见回退。
+  - 类型/形状绕过：`_ensure_same_shape()` 已切到 `get_shape()` 的公开值语义，`8*N` / `N*8` 这类内部结构差异不会再误判为形状不一致。
+  - 边界越界：`shape_internal=['(A*B)/B', 4]` 与 `shape_public=['A*B/B', 4]` 的分层符合当前 `SymbolDim.get_value()` 基线；动态 stride 仍通过 `SymbolDim.get_value()` 暴露稳定公开值。
+  - 错误处理缺失：`memory` / `symbol_dim` expectation 与联动 pytest 全部通过，未见新增异常分支缺口。
+  - 状态污染：`expectation/symbol_variable/memory.py`、`test_memory*`、`test_symbol_dim.py`、`test_symbol_shape.py` 复测未见回退。
+  - 资源释放问题：本轮仅涉及公开比较值与形状匹配逻辑，未见新增资源问题。
+- 改进建议：未发现额外改进点。
+验证：
+- `python3 -m pytest -q test/symbol_variable/test_memory.py test/symbol_variable/test_memory_operation.py` -> `exit 0`，`24 passed`
+- `python3 -m pytest -q test/symbol_variable/test_symbol_dim.py test/symbol_variable/test_symbol_shape.py` -> `exit 0`，`34 passed`
+- `PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260418-symbol-dim-s3:/home/lfr/kernelcode_generate python3 /home/lfr/kernelcode_generate/expectation/symbol_variable/memory.py` -> `exit 0`
+- `PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260418-symbol-dim-s3:/home/lfr/kernelcode_generate python3 /home/lfr/kernelcode_generate/expectation/symbol_variable/symbol_dim.py` -> `exit 0`
+- `python3 - <<'PY' ...` 复测手工样例 -> `shape_internal=['(A*B)/B', 4]`、`shape_public=['A*B/B', 4]`、`stride_public=['A*B/B', 1]`；`lhs_public=['8*N', 4]`、`rhs_public=['8*N', 4]`，`lhs + rhs` 的公开形状仍为 `['8*N', 4]`
+结论：通过；当前 review 已完成，任务日志已写入对应任务 worktree 的记录文件；下一步建议创建 `merge` 任务并通知管理员推进。

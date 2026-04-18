@@ -241,6 +241,34 @@ class Memory:
         )
 
     @staticmethod
+    def _public_dim_values(shape: SymbolShape) -> list[int | str]:
+        """按 SymbolDim.get_value() 生成公开比较值序列。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 静态分量返回整数，动态分量返回 `SymbolDim.get_value()` 的稳定字符串。
+        - 用于 `Memory` 层的公开比较口径，不改变 `SymbolShape` 自身的序列化合同。
+
+        使用示例:
+        - Memory._public_dim_values(SymbolShape([SymbolDim("A") * SymbolDim("B") / SymbolDim("B")]))
+
+        关联文件:
+        - spec: spec/symbol_variable/memory.md
+        - test: test/symbol_variable/test_memory.py
+        - 功能实现: kernel_gen/symbol_variable/memory.py
+        """
+        values: list[int | str] = []
+        for dim in shape.get_shape():
+            public_value = dim.get_value()
+            if isinstance(public_value, str):
+                values.append(public_value)
+            else:
+                values.append(int(public_value))
+        return values
+
+    @staticmethod
     def _default_stride(shape: SymbolShape) -> SymbolShape:
         """按连续行主序生成默认 stride。
 
@@ -285,7 +313,7 @@ class Memory:
         - test: test/symbol_variable/test_memory.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
-        return self.shape.get_values()
+        return self._public_dim_values(self.shape)
 
     def get_stride(self: "Memory") -> list[int | SymbolDim]:
         """返回 stride 列表，动态分量保留 SymbolDim。
@@ -422,7 +450,7 @@ class Memory:
         - test: test/symbol_variable/test_memory_operation.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
-        if self.shape.get_values() != other.shape.get_values():
+        if self.get_shape() != other.get_shape():
             raise ValueError("Memory shape mismatch")
 
     def _ensure_same_dtype(self: "Memory", other: "Memory") -> None:

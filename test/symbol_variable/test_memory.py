@@ -1,7 +1,7 @@
 """memory tests.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 Memory/MemorySpace/LocalSpaceMeta 构造、表示与转换行为。
@@ -27,6 +27,7 @@ from __future__ import annotations
 from dataclasses import FrozenInstanceError
 
 import pytest
+import sympy as sp
 
 from kernel_gen.symbol_variable.memory import LocalSpaceMeta, Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -194,6 +195,35 @@ def test_dynamic_shape_stride() -> None:
     assert mem.get_stride() == [SymbolDim("C"), 1]
 
 
+# ME-006A
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-18 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-18 00:00:00 +0800
+# 测试目的: 验证动态 shape 的公开序列化继承 SymbolDim.get_value()，而不是底层 sympy 结构文本。
+# 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_dynamic_shape_public_values_use_symbol_dim_get_value
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
+# 对应 spec 文件路径: spec/symbol_variable/memory.md
+# 对应测试文件路径: test/symbol_variable/test_memory.py
+def test_dynamic_shape_public_values_use_symbol_dim_get_value() -> None:
+    reducible = SymbolDim(
+        sp.Mul(
+            sp.Mul(
+                sp.symbols("A", integer=True, real=True),
+                sp.symbols("B", integer=True, real=True),
+                evaluate=False,
+            ),
+            sp.Pow(sp.symbols("B", integer=True, real=True), -1, evaluate=False),
+            evaluate=False,
+        )
+    )
+    mem = Memory([reducible, 4], NumericType.Float32, stride=[reducible, 1])
+
+    assert mem.shape.get_values() == ["(A*B)/B", 4]
+    assert mem.get_shape() == ["A*B/B", 4]
+    assert mem.get_stride()[0].get_value() == "A*B/B"
+
+
 # ME-007
 # 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战
@@ -330,3 +360,31 @@ def test_clone_with_dtype_preserves_symbolic_stride_expression() -> None:
     cloned_dim = cloned.stride.get_shape()[0]
     assert cloned_dim is not original_dim
     assert cloned_dim == original_dim
+
+
+# ME-021
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-18 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-18 00:00:00 +0800
+# 测试目的: 验证 Memory 形状匹配基于 SymbolDim.get_value() 的公开值，而非底层表达式结构。
+# 使用示例: pytest -q test/symbol_variable/test_memory.py -k test_memory_shape_match_uses_symbol_dim_public_values
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
+# 对应 spec 文件路径: spec/symbol_variable/memory.md
+# 对应测试文件路径: test/symbol_variable/test_memory.py
+def test_memory_shape_match_uses_symbol_dim_public_values() -> None:
+    n_symbol = sp.symbols("N", integer=True, real=True)
+    lhs_shape_dim = SymbolDim(sp.Mul(sp.Integer(8), n_symbol, evaluate=False))
+    rhs_shape_dim = SymbolDim(sp.Mul(n_symbol, sp.Integer(8), evaluate=False))
+    lhs = Memory([lhs_shape_dim, 4], NumericType.Float32, stride=[4, 1], format=Farmat.CLast)
+    rhs = Memory([rhs_shape_dim, 4], NumericType.Float32, stride=[8, 1], format=Farmat.Norm)
+
+    result = lhs + rhs
+
+    assert lhs.shape.get_values() != rhs.shape.get_values()
+    assert lhs.get_shape() == ["8*N", 4]
+    assert rhs.get_shape() == ["8*N", 4]
+    assert result.get_shape() == ["8*N", 4]
+    assert result.dtype is NumericType.Float32
+    assert result.space is lhs.space
+    assert result.format is lhs.format
