@@ -1,7 +1,7 @@
 """pass registry tests.
 
 创建者: 小李飞刀
-最后一次更改: 朽木露琪亚
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 kernel_gen/passes/registry.py 的 pass/pipeline 注册、查询与错误短语约束。
@@ -48,6 +48,9 @@ _reset_registry_for_test = registry_module._reset_registry_for_test
 pass_manager_module = importlib.import_module("kernel_gen.passes.pass_manager")
 Pass = pass_manager_module.Pass
 PassManager = pass_manager_module.PassManager
+LaunchKernelCostFuncError = importlib.import_module(
+    "kernel_gen.passes.tuning.launch_kernel_cost_func"
+).LaunchKernelCostFuncError
 
 
 @pytest.fixture(autouse=True)
@@ -235,6 +238,46 @@ def test_build_registered_outline_device_kernel_pass() -> None:
 
     assert pass_obj.name == "outline-device-kernel"
     assert type(pass_obj).__name__ == "OutlineDeviceKernelPass"
+
+
+# TC-REGISTRY-007B
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-18 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-18 00:00:00 +0800
+# 功能说明: 验证内置 pass 加载后可通过稳定名称构造 launch-kernel-cost-func，并透传 kind 选项。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_launch_kernel_cost_func_pass
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/pass/test_pass_registry.py
+def test_build_registered_launch_kernel_cost_func_pass() -> None:
+    load_builtin_passes()
+
+    pass_obj = build_registered_pass("launch-kernel-cost-func", {"kind": "move"})
+
+    assert pass_obj.name == "launch-kernel-cost-func"
+    assert type(pass_obj).__name__ == "LaunchKernelCostFuncPass"
+    assert getattr(pass_obj, "kind") == "move"
+
+
+# TC-REGISTRY-007C
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-18 02:00:00 +0800
+# 最近一次运行成功时间: 2026-04-18 02:00:00 +0800
+# 功能说明: 验证 registry 构造 launch-kernel-cost-func 时不会把非法 `kind` 改写成通用 option error。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_launch_kernel_cost_func_rejects_invalid_kind
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/pass/test_pass_registry.py
+def test_build_registered_launch_kernel_cost_func_rejects_invalid_kind() -> None:
+    load_builtin_passes()
+
+    with pytest.raises(
+        LaunchKernelCostFuncError,
+        match=r"^LaunchKernelCostFuncError: kind must be one of compute, move, all$",
+    ):
+        build_registered_pass("launch-kernel-cost-func", {"kind": "invalid"})
 
 
 # TC-REGISTRY-008

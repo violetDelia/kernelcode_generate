@@ -65,6 +65,7 @@ def build_default_context() -> Context:
     from kernel_gen.dialect.kernel import Kernel
     from kernel_gen.dialect.nn import Nn
     from kernel_gen.dialect.symbol import Symbol
+    from kernel_gen.dialect.tuner import Tuner
 
     ctx = Context()
     ctx.load_dialect(Builtin)
@@ -73,6 +74,7 @@ def build_default_context() -> Context:
     ctx.load_dialect(Nn)
     ctx.load_dialect(Kernel)
     ctx.load_dialect(Symbol)
+    ctx.load_dialect(Tuner)
     ctx.load_dialect(Dma)
     ctx.load_dialect(Arch)
     return ctx

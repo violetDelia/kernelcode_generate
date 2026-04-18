@@ -1,7 +1,7 @@
 """Pass registry API.
 
 创建者: 小李飞刀
-最后一次更改: 朽木露琪亚
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 提供 pass / pipeline 的进程内注册表，统一“名字 -> 构造器”的解析入口。
@@ -209,6 +209,13 @@ def build_registered_pass(name: str, options: dict[str, str] | None = None) -> P
         try:
             pass_obj = from_options(normalized_options)
         except Exception as exc:  # pragma: no cover - exception detail not stable
+            if name == "launch-kernel-cost-func":
+                from kernel_gen.passes.tuning.launch_kernel_cost_func import (
+                    LaunchKernelCostFuncError,
+                )
+
+                if isinstance(exc, LaunchKernelCostFuncError):
+                    raise
             raise PassRegistryError(f"PassRegistryError: pass '{name}' option error") from exc
         if not isinstance(pass_obj, Pass):
             raise PassRegistryError(f"PassRegistryError: pass '{name}' option error")
@@ -316,6 +323,7 @@ def load_builtin_passes() -> None:
     from kernel_gen.passes.lowering.outline_device_kernel import OutlineDeviceKernelPass
     from kernel_gen.passes.lowering.symbol_loop_hoist import SymbolLoopHoistPass
     from kernel_gen.passes.lowering.tile import TilePass
+    from kernel_gen.passes.tuning import LaunchKernelCostFuncPass
 
     for pass_cls in (
         AnalyzeFuncCostPass,
@@ -327,6 +335,7 @@ def load_builtin_passes() -> None:
         TilePass,
         SymbolLoopHoistPass,
         MemoryPoolPass,
+        LaunchKernelCostFuncPass,
     ):
         pass_name = getattr(pass_cls, "name", None)
         if isinstance(pass_name, str) and pass_name in _PASS_REGISTRY:
