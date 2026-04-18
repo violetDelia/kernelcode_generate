@@ -1,7 +1,7 @@
 """SymbolDim implementation.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 提供符号维度表达、基础算术运算与动态性判断。
@@ -17,6 +17,8 @@
 """
 
 from __future__ import annotations
+
+import re
 
 import sympy as sp
 
@@ -40,17 +42,43 @@ class _SymbolDim:
     - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
     """
 
+    _NUMERIC_LITERAL_RE = re.compile(
+        r"^[+-]?(?:(?:\d(?:_?\d)*)(?:\.(?:\d(?:_?\d)*)?)?|\.(?:\d(?:_?\d)*))(?:[eE][+-]?\d(?:_?\d)*)?$"
+    )
+
+    @staticmethod
+    def _is_numeric_literal_str(value: str) -> bool:
+        """判断字符串是否属于数值字面量。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 识别整数、小数、科学计数法及带正负号的数值字面量字符串。
+        - 仅用于字符串输入域校验，不负责解析 sympy 表达式。
+
+        使用示例:
+        - _SymbolDim._is_numeric_literal_str("12")
+        - _SymbolDim._is_numeric_literal_str("1e3")
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+        return bool(_SymbolDim._NUMERIC_LITERAL_RE.fullmatch(value))
+
     @staticmethod
     def _normalize_str(value: str) -> str:
         """统一规范化字符串输入并校验。
 
         创建者: 小李飞刀
-        最后一次更改: 我不是牛马
+        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 使用 strip() 去除首尾空白。
         - 空字符串或仅空白字符串抛 ValueError。
-        - 纯数字字符串抛 ValueError。
+        - 数值字面量字符串抛 ValueError。
 
         使用示例:
         - _SymbolDim._normalize_str(" N ")
@@ -63,9 +91,163 @@ class _SymbolDim:
         normalized = value.strip()
         if not normalized:
             raise ValueError("SymbolDim string must not be blank")
-        if normalized.isdigit():
+        if _SymbolDim._is_numeric_literal_str(normalized):
             raise ValueError("SymbolDim string must not be numeric")
         return normalized
+
+    @staticmethod
+    def _is_truediv_expr(expr: sp.Basic) -> bool:
+        """判断表达式是否属于真除法链。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 识别由 `__truediv__`/`__rtruediv__` 构造的嵌套 `Mul(..., Pow(..., -1))` 结构。
+        - 仅用于生成对外公开值，不改变内部表达式对象。
+
+        使用示例:
+        - _SymbolDim._is_truediv_expr(SymbolDim("A").get_symbol() / SymbolDim("B").get_symbol())
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+        return _SymbolDim._split_truediv_expr(expr) is not None
+
+    @staticmethod
+    def _split_truediv_expr(expr: sp.Basic) -> tuple[sp.Basic, list[sp.Basic]] | None:
+        """拆解真除法链的分子与分母因子顺序。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 将内部 `Mul(lhs, Pow(rhs, -1))` 结构拆为 `(numerator, [denominator...])`。
+        - 分母因子按公开运算顺序保存，便于输出稳定且可区分的公开值。
+
+        使用示例:
+        - _SymbolDim._split_truediv_expr(SymbolDim("A").get_symbol() / SymbolDim("B").get_symbol())
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+        if not isinstance(expr, sp.Mul) or len(expr.args) != 2:
+            return None
+
+        reciprocal = None
+        numerator = None
+        for arg in expr.args:
+            if isinstance(arg, sp.Pow) and arg.exp == -1:
+                reciprocal = arg.base
+            else:
+                numerator = arg
+
+        if reciprocal is None or numerator is None:
+            return None
+
+        nested = _SymbolDim._split_truediv_expr(numerator)
+        if nested is None:
+            return numerator, [reciprocal]
+
+        base_numerator, denominator_factors = nested
+        return base_numerator, [reciprocal, *denominator_factors]
+
+    @staticmethod
+    def _format_public_expr(expr: sp.Basic) -> str:
+        """格式化对外公开表达式片段。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 对分子、分母因子进行最小必要的字符串格式化。
+        - 对加法等低优先级表达式补括号，避免公开值歧义。
+
+        使用示例:
+        - _SymbolDim._format_public_expr(sp.Symbol("N") + 1)
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+        formatted = str(sp.simplify(expr))
+        if expr.is_Add:
+            return f"({formatted})"
+        return formatted
+
+    @staticmethod
+    def _public_value(expr: sp.Basic) -> int | float | str | sp.Basic:
+        """生成稳定的公开比较值。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 先按 SymPy 做最小必要简化，静态结果返回 Python 数值。
+        - 对动态真除法链保留分母出现顺序，避免不同链式顺序对外公开值混同。
+        - 其他动态表达式返回 SymPy 简化后的稳定字符串。
+
+        使用示例:
+        - _SymbolDim._public_value(SymbolDim("A").get_symbol())
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+        simplified = sp.simplify(expr)
+        if simplified.is_number:
+            if simplified.is_integer:
+                return int(simplified)
+            return float(simplified)
+
+        if expr.free_symbols and _SymbolDim._is_truediv_expr(expr):
+            split_expr = _SymbolDim._split_truediv_expr(expr)
+            if split_expr is not None:
+                numerator, denominator_factors = split_expr
+                numerator_text = _SymbolDim._format_public_expr(numerator)
+                denominator_parts = [
+                    _SymbolDim._format_public_expr(factor)
+                    for factor in denominator_factors
+                    if sp.simplify(factor) != 1
+                ]
+                if not denominator_parts:
+                    return numerator_text
+                if len(denominator_parts) == 1:
+                    return f"{numerator_text}/{denominator_parts[0]}"
+                return f"{numerator_text}/({'*'.join(denominator_parts)})"
+
+        if expr.free_symbols:
+            return str(simplified)
+        return simplified
+
+    @staticmethod
+    def _should_use_simplified_quotient(expr: sp.Basic, simplified: sp.Basic) -> bool:
+        """判断除法结果是否应采用简化表达式。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 仅在简化结果明显收短表达式时采用 `sp.simplify(...)` 的结果。
+        - 避免把链式除法的公开顺序信息一并抹平成同一个表达式。
+
+        使用示例:
+        - _SymbolDim._should_use_simplified_quotient(expr, sp.simplify(expr))
+
+        关联文件:
+        - spec: spec/symbol_variable/symbol_dim.md
+        - test: test/symbol_variable/test_symbol_dim.py
+        - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
+        """
+        if simplified.is_number:
+            return True
+        return sp.count_ops(simplified) < sp.count_ops(expr)
 
     @staticmethod
     def _symbol_from_str(value: str) -> sp.Symbol:
@@ -161,13 +343,13 @@ class _SymbolDim:
         """初始化符号维度。
 
         创建者: 小李飞刀
-        最后一次更改: 我不是牛马
+        最后一次更改: 小李飞刀
 
         功能说明:
         - int 转为 sympy.Integer。
-        - str 必须为非纯数字且非空白字符串，转为 sympy.symbols(..., integer=True, real=True)。
+        - str 必须为非数值字面量且非空白字符串，转为 sympy.symbols(..., integer=True, real=True)。
         - sympy.Basic 默认直接保存；若为未设定假设的 Symbol，则统一为 integer=True, real=True。
-        - 纯数字字符串或空白字符串抛 ValueError。
+        - 数值字面量字符串或空白字符串抛 ValueError。
         - 其他类型抛 TypeError。
 
         使用示例:
@@ -195,7 +377,7 @@ class _SymbolDim:
 
         功能说明:
         - 支持 int/str/sympy.Basic/_SymbolDim，其他类型抛 TypeError。
-        - str 与构造路径一致，空白/纯数字字符串抛 ValueError。
+        - str 与构造路径一致，空白/数值字面量字符串抛 ValueError。
         - sympy.Symbol 若无显式假设，统一规范化为 integer=True, real=True。
 
         使用示例:
@@ -251,16 +433,7 @@ class _SymbolDim:
         - test: test/symbol_variable/test_symbol_dim.py
         - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
         """
-        expr = self.get_symbol()
-        if expr.free_symbols:
-            return str(expr)
-
-        simplified = sp.simplify(expr)
-        if simplified.is_number:
-            if simplified.is_integer:
-                return int(simplified)
-            return float(simplified)
-        return simplified
+        return self._public_value(self.get_symbol())
 
     def __repr__(self) -> str:
         """返回符号维度的字符串表示。
@@ -399,7 +572,7 @@ class _SymbolDim:
         """符号维度除法。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 支持 int/str/SymbolDim，返回 SymbolDim。
@@ -413,13 +586,17 @@ class _SymbolDim:
         - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
         """
         other_sym = self._normalize_operand(other)
-        return SymbolDim(sp.Mul(self.get_symbol(), sp.Pow(other_sym, -1, evaluate=False), evaluate=False))
+        expr = sp.Mul(self.get_symbol(), sp.Pow(other_sym, -1, evaluate=False), evaluate=False)
+        simplified = sp.simplify(expr)
+        if self._should_use_simplified_quotient(expr, simplified):
+            return SymbolDim(simplified)
+        return SymbolDim(expr)
 
     def __rtruediv__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度反向除法。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 支持 int/str/SymbolDim，返回 SymbolDim。
@@ -433,13 +610,17 @@ class _SymbolDim:
         - 功能实现: kernel_gen/symbol_variable/symbol_dim.py
         """
         other_sym = self._normalize_operand(other)
-        return SymbolDim(sp.Mul(other_sym, sp.Pow(self.get_symbol(), -1, evaluate=False), evaluate=False))
+        expr = sp.Mul(other_sym, sp.Pow(self.get_symbol(), -1, evaluate=False), evaluate=False)
+        simplified = sp.simplify(expr)
+        if self._should_use_simplified_quotient(expr, simplified):
+            return SymbolDim(simplified)
+        return SymbolDim(expr)
 
     def __floordiv__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度整除。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 支持 int/str/SymbolDim，返回 SymbolDim。
@@ -456,13 +637,17 @@ class _SymbolDim:
         if not self.get_symbol().free_symbols and not other_sym.free_symbols:
             return SymbolDim(sp.Integer(int(sp.simplify(self.get_symbol())) // int(sp.simplify(other_sym))))
         expr = sp.Mul(self.get_symbol(), sp.Pow(other_sym, -1, evaluate=False), evaluate=False)
-        return SymbolDim(sp.floor(expr))
+        floored = sp.floor(expr)
+        simplified = sp.simplify(floored)
+        if self._should_use_simplified_quotient(floored, simplified):
+            return SymbolDim(simplified)
+        return SymbolDim(floored)
 
     def __rfloordiv__(self, other: int | str | sp.Basic | "_SymbolDim") -> "SymbolDim":
         """符号维度反向整除。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 金铲铲大作战
 
         功能说明:
         - 支持 int/str/SymbolDim，返回 SymbolDim。
@@ -479,7 +664,11 @@ class _SymbolDim:
         if not self.get_symbol().free_symbols and not other_sym.free_symbols:
             return SymbolDim(sp.Integer(int(sp.simplify(other_sym)) // int(sp.simplify(self.get_symbol()))))
         expr = sp.Mul(other_sym, sp.Pow(self.get_symbol(), -1, evaluate=False), evaluate=False)
-        return SymbolDim(sp.floor(expr))
+        floored = sp.floor(expr)
+        simplified = sp.simplify(floored)
+        if self._should_use_simplified_quotient(floored, simplified):
+            return SymbolDim(simplified)
+        return SymbolDim(floored)
 
     def __eq__(self, other: object) -> bool:
         """比较符号维度表达式等价性。

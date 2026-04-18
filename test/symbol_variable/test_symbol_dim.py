@@ -1,7 +1,7 @@
 """symbol_dim tests.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 SymbolDim 构造、运算、比较、动态性判断与错误分支。
@@ -51,23 +51,23 @@ def test_init_accepts_int() -> None:
 
 # SD-002
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-06 02:19:46 +0800
 # 最近一次运行成功时间: 2026-04-06 02:19:46 +0800
-# 测试目的: 验证 str 符号输入可构造 SymbolDim，非纯数字字符串按符号名处理。
+# 测试目的: 验证非数值字面量字符串会按符号名语义构造 SymbolDim。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_init_accepts_symbol_string
 # 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_dim.py
 def test_init_accepts_symbol_string() -> None:
     dim = SymbolDim("N")
-    plus_dim = SymbolDim("+1")
-    float_dim = SymbolDim("3.14")
+    spaced_dim = SymbolDim(" N ")
+    named_dim = SymbolDim("BLOCK_M1")
     assert dim.is_dynamic() is True
     assert dim.get_symbol() == sp.symbols("N", integer=True, real=True)
     assert dim.get_value() == "N"
-    assert plus_dim.get_symbol() == sp.symbols("+1", integer=True, real=True)
-    assert float_dim.get_symbol() == sp.symbols("3.14", integer=True, real=True)
+    assert spaced_dim.get_symbol() == sp.symbols("N", integer=True, real=True)
+    assert named_dim.get_symbol() == sp.symbols("BLOCK_M1", integer=True, real=True)
 
 
 # SD-003
@@ -200,26 +200,46 @@ def test_is_dynamic() -> None:
 
 # SD-007
 # 创建者: 小李飞刀
-# 最后一次更改: 咯咯咯
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-23 22:10:59 +0800
 # 最近一次运行成功时间: 2026-03-23 22:10:59 +0800
-# 测试目的: 验证纯数字字符串输入抛 ValueError。
+# 测试目的: 验证数值字面量字符串在构造、算术操作数与比较路径上统一抛 ValueError。
 # 使用示例: pytest -q test/symbol_variable/test_symbol_dim.py -k test_numeric_string_rejected
 # 对应功能实现文件路径: kernel_gen/symbol_variable/symbol_dim.py
 # 对应 spec 文件路径: spec/symbol_variable/symbol_dim.md
 # 对应测试文件路径: test/symbol_variable/test_symbol_dim.py
 def test_numeric_string_rejected() -> None:
-    for value in ["12", " 12 ", "１２", "٠١٢"]:
+    values = ["12", " 12 ", "１２", "٠١٢", "3.14", ".5", "1e3", "+1", "-2"]
+
+    for value in values:
         with pytest.raises(ValueError):
             SymbolDim(value)
+
     dim = SymbolDim("N")
-    for value in ["12", " 12 ", "１２", "٠١٢"]:
+
+    for value in values:
         with pytest.raises(ValueError):
             _ = dim + value
-    with pytest.raises(ValueError):
-        _ = "12" / dim
-    with pytest.raises(ValueError):
-        _ = dim == "12"
+        with pytest.raises(ValueError):
+            _ = value + dim
+        with pytest.raises(ValueError):
+            _ = dim - value
+        with pytest.raises(ValueError):
+            _ = value - dim
+        with pytest.raises(ValueError):
+            _ = dim * value
+        with pytest.raises(ValueError):
+            _ = value * dim
+        with pytest.raises(ValueError):
+            _ = dim / value
+        with pytest.raises(ValueError):
+            _ = value / dim
+        with pytest.raises(ValueError):
+            _ = dim // value
+        with pytest.raises(ValueError):
+            _ = value // dim
+        with pytest.raises(ValueError):
+            _ = dim == value
 
 
 # SD-008
@@ -328,7 +348,7 @@ def test_dynamic_mixed_add_sub_mul_semantics() -> None:
 
 # SD-012
 # 创建者: 我不是牛马
-# 最后一次更改: 我不是牛马
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-23 22:27:41 +0800
 # 最近一次运行成功时间: 2026-03-23 22:27:41 +0800
 # 测试目的: 验证真除法在静态与动态表达式下的 get_value 语义与链式结合顺序。
@@ -340,18 +360,30 @@ def test_truediv_get_value_and_order_semantics() -> None:
     static_expr = SymbolDim(9) / SymbolDim(4)
     dynamic_expr = SymbolDim(9) / SymbolDim("N")
     chain_expr = SymbolDim("A") / SymbolDim("B") / SymbolDim(3)
+    reordered_expr = SymbolDim("A") / SymbolDim(3) / SymbolDim("B")
+    same_expr = SymbolDim("A") / SymbolDim("A")
+    reducible_symbol_expr = (SymbolDim("A") * SymbolDim("B")) / SymbolDim("B")
+    reducible_static_factor_expr = (SymbolDim("A") * 3) / 3
 
     assert static_expr.is_dynamic() is False
     assert dynamic_expr.is_dynamic() is True
     assert static_expr.get_value() == 9 / 4
     assert dynamic_expr.get_value() == (SymbolDim(9) / SymbolDim("N")).get_value()
     assert chain_expr == SymbolDim("A") / SymbolDim("B") / SymbolDim(3)
-    assert chain_expr != SymbolDim("A") / SymbolDim(3) / SymbolDim("B")
+    assert chain_expr != reordered_expr
+    assert chain_expr.get_value() == "A/(3*B)"
+    assert chain_expr.get_value() != reordered_expr.get_value()
+    assert same_expr.get_symbol() == sp.Integer(1)
+    assert same_expr.get_value() == 1
+    assert reducible_symbol_expr.get_symbol() == sp.symbols("A", integer=True, real=True)
+    assert reducible_symbol_expr.get_value() == "A"
+    assert reducible_static_factor_expr.get_symbol() == sp.symbols("A", integer=True, real=True)
+    assert reducible_static_factor_expr.get_value() == "A"
 
 
 # SD-013
 # 创建者: 我不是牛马
-# 最后一次更改: 我不是牛马
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-23 22:27:41 +0800
 # 最近一次运行成功时间: 2026-03-23 22:27:41 +0800
 # 测试目的: 验证整除在静态与动态表达式下的 get_value 语义与链式结合顺序。
@@ -364,6 +396,10 @@ def test_floordiv_get_value_and_order_semantics() -> None:
     reverse_static_expr = 9 // SymbolDim(4)
     dynamic_expr = SymbolDim(9) // SymbolDim("N")
     chain_expr = SymbolDim("A") // SymbolDim("B") // SymbolDim(3)
+    reordered_expr = SymbolDim("A") // SymbolDim(3) // SymbolDim("B")
+    same_expr = SymbolDim("A") // SymbolDim("A")
+    reducible_symbol_expr = (SymbolDim("A") * SymbolDim("B")) // SymbolDim("B")
+    reducible_static_factor_expr = (SymbolDim("A") * 3) // 3
 
     assert static_expr.is_dynamic() is False
     assert reverse_static_expr.is_dynamic() is False
@@ -372,7 +408,14 @@ def test_floordiv_get_value_and_order_semantics() -> None:
     assert reverse_static_expr.get_value() == 9 // 4
     assert dynamic_expr.get_value() == (SymbolDim(9) // SymbolDim("N")).get_value()
     assert chain_expr == SymbolDim("A") // SymbolDim("B") // SymbolDim(3)
-    assert chain_expr != SymbolDim("A") // SymbolDim(3) // SymbolDim("B")
+    assert chain_expr != reordered_expr
+    assert chain_expr.get_value() != reordered_expr.get_value()
+    assert same_expr.get_symbol() == sp.Integer(1)
+    assert same_expr.get_value() == 1
+    assert reducible_symbol_expr.get_symbol() == sp.symbols("A", integer=True, real=True)
+    assert reducible_symbol_expr.get_value() == "A"
+    assert reducible_static_factor_expr.get_symbol() == sp.symbols("A", integer=True, real=True)
+    assert reducible_static_factor_expr.get_value() == "A"
 
 
 # SD-014
