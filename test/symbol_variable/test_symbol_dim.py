@@ -1,7 +1,7 @@
 """symbol_dim tests.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 SymbolDim 构造、运算、比较、动态性判断与错误分支。
@@ -348,7 +348,7 @@ def test_dynamic_mixed_add_sub_mul_semantics() -> None:
 
 # SD-012
 # 创建者: 我不是牛马
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 22:27:41 +0800
 # 最近一次运行成功时间: 2026-03-23 22:27:41 +0800
 # 测试目的: 验证真除法在静态与动态表达式下的 get_value 语义与链式结合顺序。
@@ -371,7 +371,13 @@ def test_truediv_get_value_and_order_semantics() -> None:
     assert dynamic_expr.get_value() == (SymbolDim(9) / SymbolDim("N")).get_value()
     assert chain_expr == SymbolDim("A") / SymbolDim("B") / SymbolDim(3)
     assert chain_expr != reordered_expr
+    assert repr(chain_expr) == "(A/B)/3"
+    assert repr(reordered_expr) == "(A/3)/B"
+    assert str(chain_expr.get_symbol()) == "(A/B)/3"
+    assert str(reordered_expr.get_symbol()) == "(A/3)/B"
     assert chain_expr.get_value() == "A/(3*B)"
+    assert reordered_expr.get_value() == "A/(B*3)"
+    assert repr(chain_expr) != chain_expr.get_value()
     assert chain_expr.get_value() != reordered_expr.get_value()
     assert same_expr.get_symbol() == sp.Integer(1)
     assert same_expr.get_value() == 1
@@ -383,7 +389,7 @@ def test_truediv_get_value_and_order_semantics() -> None:
 
 # SD-013
 # 创建者: 我不是牛马
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-23 22:27:41 +0800
 # 最近一次运行成功时间: 2026-03-23 22:27:41 +0800
 # 测试目的: 验证整除在静态与动态表达式下的 get_value 语义与链式结合顺序。
@@ -409,6 +415,12 @@ def test_floordiv_get_value_and_order_semantics() -> None:
     assert dynamic_expr.get_value() == (SymbolDim(9) // SymbolDim("N")).get_value()
     assert chain_expr == SymbolDim("A") // SymbolDim("B") // SymbolDim(3)
     assert chain_expr != reordered_expr
+    assert repr(chain_expr) == "floor(floor(A/B)/3)"
+    assert repr(reordered_expr) == "floor(floor(A/3)/B)"
+    assert str(chain_expr.get_symbol()) == "floor(floor(A/B)/3)"
+    assert str(reordered_expr.get_symbol()) == "floor(floor(A/3)/B)"
+    assert chain_expr.get_value() == "floor(floor(A/B)/3)"
+    assert reordered_expr.get_value() == "floor(floor(A/3)/B)"
     assert chain_expr.get_value() != reordered_expr.get_value()
     assert same_expr.get_symbol() == sp.Integer(1)
     assert same_expr.get_value() == 1

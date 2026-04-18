@@ -20,9 +20,9 @@
 ## 目标
 
 - 提供统一的 `SymbolDim(value)` 公开入口，覆盖静态整数、动态符号与整数表达式。
-- 冻结字符串输入域合同：`int` 合法，按符号名语义规整后的 `str` 合法，数值字面量字符串非法。
-- 明确构造、算术操作数、比较操作数三条路径共用同一套字符串词法校验。
-- 保持现有公开 API 名称与参数顺序不变，为实现与测试同步收口提供直接依据。
+- 明确字符串输入域：`int` 合法，按符号名语义规整后的 `str` 合法，数值字面量字符串非法。
+- 明确 `get_symbol()` 与 `get_value()` 的职责分层：前者暴露内部 `sympy.Basic` 表达式，后者暴露稳定的公开比较值。
+- 明确 `+`、`-`、`*`、`/`、`//` 在静态值、动态值、可约表达式、链式除法与链式整除下的公开行为，为实现与测试同步收口提供直接依据。
 
 ## 限制与边界
 
@@ -41,10 +41,16 @@
 - 动态性判断以表达式是否含自由符号为准：
   - 静态整数输入、静态整数之间的 `+`、`-`、`*`、`/`、`//` 结果必须保持 `is_dynamic() == False`。
   - 只要任一操作数含自由符号，结果必须保持 `is_dynamic() == True`。
-- `get_symbol()` 返回内部规整后的 `sympy.Basic` 表达式。
+- `get_symbol()` 返回内部 `sympy.Basic` 表达式：
+  - 加、减、乘与显然更短的可约除法/整除结果可以直接以简化后的内部表达出现，例如 `A + A -> 2*A`、`A - A -> 0`、`A / A -> 1`、`(A*B) / B -> A`、`(A*3) // 3 -> A`。
+  - 顺序敏感的链式真除法与整除在内部表达上仍需保持可区分性，例如 `(A / B) / 3` 与 `(A / 3) / B` 必须保留不同的 `sympy.Basic` 结构，`A // B // 3` 与 `A // 3 // B` 也必须保留不同的嵌套 `floor(...)` 结构。
 - `get_value()` 的公开返回值为 `int | float | str`：
   - 静态表达式返回可直接与 Python 运算结果比较的具体值。
-  - 动态表达式返回稳定、可机械比较的字符串表示，不暴露 `sympy` 内部对象类型。
+  - 动态加、减、乘与其他非链式真除法表达式返回 `str(sp.simplify(expr))` 对应的稳定文本。
+  - 动态真除法链返回保持顺序可区分的公开文本，例如 `A / B / 3 -> "A/(3*B)"`，`A / 3 / B -> "A/(B*3)"`。
+  - 动态整除链保持嵌套 `floor(...)` 的顺序信息，例如 `A // B // 3 -> "floor(floor(A/B)/3)"`，`A // 3 // B -> "floor(floor(A/3)/B)"`。
+  - 若结果已经化简为静态值或单个动态符号，公开结果直接返回该值对应的 `int`、`float` 或 `str`，例如 `A / A -> 1`、`(A*B) / B -> "A"`。
+- `__repr__()` 返回 `str(get_symbol())`，因此它描述的是内部表达，不承诺与 `get_value()` 完全相同。
 - `sympy.Symbol` 若未显式声明整数假设，实现需统一为整数语义。
 - 不额外承诺异常消息文本；兼容性只要求异常类型与公开行为稳定。
 
@@ -87,7 +93,7 @@ SymbolDim(sp.Symbol("M", integer=True, real=True) + 1)
 
 功能说明：
 
-- 返回内部规整后的 `sympy` 表达式，作为实现侧统一表达。
+- 返回内部 `sympy.Basic` 表达式，供实现和测试读取当前规整结果。
 
 参数说明：
 
@@ -98,13 +104,21 @@ SymbolDim(sp.Symbol("M", integer=True, real=True) + 1)
 ```python
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
-expr = SymbolDim(" N ").get_symbol()
+A = SymbolDim("A")
+B = SymbolDim("B")
+
+assert str((A + A).get_symbol()) == "2*A"
+assert (A / A).get_symbol() == 1
+assert str((A / B / 3).get_symbol()) == "(A/B)/3"
+assert str((A // B // 3).get_symbol()) == "floor(floor(A/B)/3)"
 ```
 
 注意事项：
 
 - 返回值始终是 `sympy.Basic`。
-- 该接口用于实现与测试读取标准化表达，不替代 `get_value()` 的对外比较语义。
+- 该接口体现内部表达而不是最终公开文本。
+- 显然更短的可约结果直接以简化后的内部表达返回，例如 `A / A -> 1`、`(A*B) / B -> A`、`(A*3) // 3 -> A`。
+- 顺序敏感的链式真除法与整除仍需保留内部结构差异，例如 `(A/B)/3` 与 `(A/3)/B` 不得收成同一内部表达。
 
 返回与限制：
 
@@ -114,7 +128,7 @@ expr = SymbolDim(" N ").get_symbol()
 
 功能说明：
 
-- 返回用于公开比较的当前值。
+- 返回用于对外机械比较的当前值。
 
 参数说明：
 
@@ -125,14 +139,24 @@ expr = SymbolDim(" N ").get_symbol()
 ```python
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
+A = SymbolDim("A")
+B = SymbolDim("B")
+
 assert SymbolDim(8).get_value() == 8
-assert SymbolDim(" N ").get_value() == "N"
+assert (A + A).get_value() == "2*A"
+assert (A / A).get_value() == 1
+assert (A / B / 3).get_value() == "A/(3*B)"
+assert (A / 3 / B).get_value() == "A/(B*3)"
+assert (A // B // 3).get_value() == "floor(floor(A/B)/3)"
 ```
 
 注意事项：
 
 - 静态表达式必须返回可与 Python 对应结果直接比较的具体值。
-- 动态表达式必须返回 `str`，作为公开机械比较口径；调用方不得依赖 `sympy` 内部对象类型。
+- 动态加、减、乘与其他非链式真除法表达式返回 `str(sp.simplify(expr))` 对应的稳定文本。
+- 动态真除法链需要把分母按出现顺序重组为右侧乘积文本，以保持 `(A/B)/3` 与 `(A/3)/B` 的公开值可区分。
+- 动态整除链必须保留嵌套 `floor(...)` 的顺序，例如 `floor(floor(A/B)/3)` 与 `floor(floor(A/3)/B)` 不得混同。
+- 若结果已经化简为静态值或单个动态符号，直接返回该值对应的 `int`、`float` 或 `str`，不再保留冗余表达式文本。
 
 返回与限制：
 
@@ -142,7 +166,7 @@ assert SymbolDim(" N ").get_value() == "N"
 
 功能说明：
 
-- 返回当前内部表达式的公开字符串表示。
+- 返回当前内部表达式的字符串表示。
 
 参数说明：
 
@@ -153,12 +177,17 @@ assert SymbolDim(" N ").get_value() == "N"
 ```python
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
+A = SymbolDim("A")
+B = SymbolDim("B")
+
 assert repr(SymbolDim("N")) == "N"
+assert repr(A / B / 3) == "(A/B)/3"
 ```
 
 注意事项：
 
-- 输出以内部规整后的表达式为准。
+- 输出等于 `str(get_symbol())`。
+- 当 `get_symbol()` 与 `get_value()` 的职责不同步时，`__repr__()` 以内部表达为准；例如 `repr(A / B / 3)` 与 `(A / B / 3).get_value()` 的文本可以不同。
 
 返回与限制：
 
@@ -188,6 +217,7 @@ dynamic_sum = 3 + SymbolDim("N")
 - 静态整数加静态整数的结果必须保持非动态。
 - 只要任一操作数含自由符号，结果必须保持动态。
 - `str` 操作数复用构造路径的字符串词法校验；数值字面量字符串必须抛出 `ValueError`。
+- `A + A` 的内部表达与公开值都应表现为 `2*A`，`A + 0` 的内部表达与公开值都应表现为 `A`。
 - 浮点操作数必须抛出 `NotImplementedError`。
 
 返回与限制：
@@ -217,6 +247,8 @@ dynamic_diff = SymbolDim(9) - SymbolDim("N")
 
 - 结果动态性遵循“限制与边界”中的传播规则。
 - `str` 操作数复用构造路径的字符串词法校验；数值字面量字符串必须抛出 `ValueError`。
+- `A - A` 的内部表达与公开值都应表现为 `0`。
+- 链式减法的公开值使用 `str(sp.simplify(expr))` 对应的稳定文本。
 - 浮点操作数必须抛出 `NotImplementedError`。
 
 返回与限制：
@@ -246,6 +278,7 @@ dynamic_prod = SymbolDim(3) * SymbolDim("N")
 
 - 结果动态性遵循“限制与边界”中的传播规则。
 - `str` 操作数复用构造路径的字符串词法校验；数值字面量字符串必须抛出 `ValueError`。
+- `A * 1` 的内部表达与公开值都应表现为 `A`。
 - 浮点操作数必须抛出 `NotImplementedError`。
 
 返回与限制：
@@ -267,14 +300,19 @@ dynamic_prod = SymbolDim(3) * SymbolDim("N")
 ```python
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
-static_div = SymbolDim(9) / SymbolDim(4)
-dynamic_div = SymbolDim("N") / SymbolDim(4)
+A = SymbolDim("A")
+B = SymbolDim("B")
+
+assert str((A / B / 3).get_symbol()) == "(A/B)/3"
+assert (A / B / 3).get_value() == "A/(3*B)"
+assert (A / A).get_value() == 1
 ```
 
 注意事项：
 
 - 静态整数之间的真除法结果必须可通过 `get_value()` 与 Python `/` 结果直接比较。
-- 含符号的真除法结果必须保持动态。
+- 动态真除法在内部表达上保留顺序敏感的链式结构，在公开值上给出可区分且稳定的文本。
+- 当 `sp.simplify(...)` 能把结果收成更短的表达式或静态值时，内部表达可以直接采用简化结果，例如 `A / A -> 1`、`(A*B) / B -> A`、`(A*3) / 3 -> A`。
 - `str` 操作数复用构造路径的字符串词法校验；数值字面量字符串必须抛出 `ValueError`。
 - 浮点操作数必须抛出 `NotImplementedError`。
 
@@ -297,14 +335,19 @@ dynamic_div = SymbolDim("N") / SymbolDim(4)
 ```python
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
-static_div = SymbolDim(9) // SymbolDim(4)
-dynamic_div = SymbolDim("N") // SymbolDim(4)
+A = SymbolDim("A")
+B = SymbolDim("B")
+
+assert str((A // B // 3).get_symbol()) == "floor(floor(A/B)/3)"
+assert (A // B // 3).get_value() == "floor(floor(A/B)/3)"
+assert (A // A).get_value() == 1
 ```
 
 注意事项：
 
 - 静态整数之间的整除结果必须可通过 `get_value()` 与 Python `//` 结果直接比较。
-- 含符号的整除结果必须保持动态。
+- 动态整除在内部表达与公开值上都必须保留嵌套 `floor(...)` 的顺序信息。
+- 当结果能直接约为更短的表达式或静态值时，内部表达与公开值都可以直接表现为该结果，例如 `A // A -> 1`、`(A*B) // B -> A`、`(A*3) // 3 -> A`。
 - `str` 操作数复用构造路径的字符串词法校验；数值字面量字符串必须抛出 `ValueError`。
 - 浮点操作数必须抛出 `NotImplementedError`。
 
@@ -380,7 +423,7 @@ assert (SymbolDim(8) + SymbolDim("N")).is_dynamic() is True
 
 - 测试文件：[`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py)
 - 执行命令：`pytest -q test/symbol_variable/test_symbol_dim.py`
-- 测试目标：锁定构造输入域、算术操作数与比较路径的字符串词法边界，并保持基础动态性、算术与错误分支回归覆盖。
+- 测试目标：保持输入域、动态性、异常分支回归覆盖，并锁定 `get_symbol()` 与 `get_value()` 在静态值、可约表达式、链式真除法、链式整除下的公开行为。
 - 功能与用例清单：
   - `test_init_accepts_int`：验证 `int` 输入可构造 `SymbolDim`，且保持静态值语义。
   - `test_init_accepts_symbol_string`：验证符号名字符串在 `strip()` 后可构造 `SymbolDim`，并返回规整后的公开值。
@@ -388,8 +431,13 @@ assert (SymbolDim(8) + SymbolDim("N")).is_dynamic() is True
   - `test_arithmetic_ops`：验证 `+`、`-`、`*`、`/`、`//` 及反向运算返回 `SymbolDim`。
   - `test_equality`：验证 `__eq__()` 对 `int`、`str`、`sympy.Basic`、`SymbolDim` 的公开比较行为。
   - `test_is_dynamic`：验证 `is_dynamic()` 能区分静态整数与动态符号。
-  - `test_numeric_string_rejected`：验证 `"12"`、`"3.14"`、`".5"`、`"1e3"`、`"+1"`、`"-2"` 在构造、操作数、比较路径上均抛出 `ValueError`；若现有测试未覆盖，执行者需补齐。
+  - `test_numeric_string_rejected`：验证数值字面量字符串在构造、操作数、比较路径上均抛出 `ValueError`。
   - `test_blank_string_rejected`：验证空字符串与空白字符串在构造、操作数、比较路径上均抛出 `ValueError`。
   - `test_invalid_type_rejected`：验证除浮点外的其他非法类型在构造、操作数、比较路径上抛出 `TypeError`。
-  - `test_float_constructor_rejected`：验证浮点构造输入抛出 `NotImplementedError`；若现有测试未覆盖，执行者需补齐。
-  - `test_float_operands_rejected`：验证浮点算术操作数在正向/反向路径上抛出 `NotImplementedError`；若现有测试未覆盖，执行者需补齐。
+  - `test_static_arithmetic_get_value_semantics`：验证静态整数之间的 `+`、`-`、`*`、`/`、`//` 结果保持非动态，且 `get_value()` 可直接与 Python 结果比较。
+  - `test_dynamic_mixed_add_sub_mul_semantics`：验证动态加、减、乘及链式减法在 `get_value()` 上的稳定文本。
+  - `test_truediv_get_value_and_order_semantics`：验证真除法的内部表达、公开值、同项约分与链式顺序区分。
+  - `test_floordiv_get_value_and_order_semantics`：验证整除的内部表达、公开值、同项约分与嵌套 `floor(...)` 顺序区分。
+  - `test_mixed_expression_get_value_semantics`：验证混合表达式的动态性传播与 `get_value()` 稳定性。
+  - `test_float_constructor_rejected`：验证浮点构造输入抛出 `NotImplementedError`。
+  - `test_float_operands_rejected`：验证浮点算术操作数在正向/反向路径上抛出 `NotImplementedError`。
