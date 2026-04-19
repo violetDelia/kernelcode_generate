@@ -24,7 +24,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_SCRIPT = REPO_ROOT / "script/run-op-mlir-s4-gen-kernel-expectation.sh"
-EXPECTATION_ENTRY = REPO_ROOT / "script/run_op_mlir_s4_gen_kernel_expectation.py"
+EXPECTATION_ENTRY = REPO_ROOT.parent / "expectation/dsl/gen_kernel/npu_demo_add_barrier"
 
 
 def _run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
