@@ -1503,18 +1503,7 @@ def _classify_kernel_ops(kernel_ops: list[Operation]) -> str | None:
         return "matmul"
 
     allowed_elementwise = {
-        "kernel.add",
-        "kernel.sub",
-        "kernel.mul",
-        "kernel.div",
-        "kernel.eq",
-        "kernel.ne",
-        "kernel.lt",
-        "kernel.le",
-        "kernel.gt",
-        "kernel.ge",
         "kernel.select",
-        "kernel.cast",
         "kernel.binary_elewise",
     }
     for op in kernel_ops:

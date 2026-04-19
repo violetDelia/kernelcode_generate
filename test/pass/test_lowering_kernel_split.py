@@ -36,7 +36,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.dialect.dma import DmaViewOp
-from kernel_gen.dialect.kernel import KernelAddOp
+from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolForOp
 from kernel_gen.passes.lowering.kernel_split import KernelSplitError, KernelSplitPass
@@ -74,7 +74,7 @@ def _build_elementwise_module() -> ModuleOp:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 生成 `kernel.add` 的单函数 IR。
+    - 生成 `kernel.binary_elewise(kind="add")` 的单函数 IR。
 
     使用示例:
     - module = _build_elementwise_module()
@@ -88,7 +88,14 @@ def _build_elementwise_module() -> ModuleOp:
     mem_type = _make_memory_type(["M", "N"])
     block = Block(arg_types=[mem_type, mem_type, mem_type])
     space = NnMemorySpaceAttr.from_name("global")
-    block.add_ops([KernelAddOp(block.args[2], block.args[0], block.args[1], space), func.ReturnOp()])
+    block.add_ops(
+        [
+            KernelBinaryElewiseOp(
+                block.args[2], block.args[0], block.args[1], kind="add", space=space
+            ),
+            func.ReturnOp(),
+        ]
+    )
     func_op = func.FuncOp(
         "kernel_split_elementwise",
         FunctionType.from_lists([mem_type, mem_type, mem_type], []),

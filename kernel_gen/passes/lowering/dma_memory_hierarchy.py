@@ -469,8 +469,8 @@ class LowerDmaMemoryHierarchyPass(Pass):
             if not op.operands:
                 continue
 
-            # kernel dialect 约定：最后一个 nn.memory operand 为 out。
-            out_index = len(op.operands) - 1
+            # 当前公开 kernel dialect 约定：第一个 nn.memory operand 为 out。
+            out_index = 0
             out_value = SSAValue.get(op.operands[out_index])
             out_type = out_value.type
             if not isinstance(out_type, NnMemoryType):
@@ -478,7 +478,9 @@ class LowerDmaMemoryHierarchyPass(Pass):
 
             # 预检：只允许 GM/LM space，且仅当存在 GM 时才插入 staging op。
             gm_input_indices: list[int] = []
-            for idx in range(out_index):
+            for idx in range(len(op.operands)):
+                if idx == out_index:
+                    continue
                 operand_value = SSAValue.get(op.operands[idx])
                 operand_type = operand_value.type
                 if not isinstance(operand_type, NnMemoryType):

@@ -432,17 +432,17 @@ class FakeRegionOp(IRDLOperation):
 
 
 @irdl_op_definition
-class FakeKernelScalarAddOp(IRDLOperation):
-    """测试用标量 kernel.add op。
+class FakeKernelScalarBinaryElewiseOp(IRDLOperation):
+    """测试用标量 kernel.binary_elewise op。
 
     创建者: 朽木露琪亚
     最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 为 A1 的单 op 统一入口测试提供 `kernel.add(i32, i32) -> i32` 形态。
+    - 为 A1 的单 op 统一入口测试提供 `kernel.binary_elewise(i32, i32) -> i32` 形态。
 
     使用示例:
-    - FakeKernelScalarAddOp(i32)
+    - FakeKernelScalarBinaryElewiseOp(i32)
 
     关联文件:
     - spec: spec/analysis/analysis_engine.md
@@ -450,7 +450,7 @@ class FakeKernelScalarAddOp(IRDLOperation):
     - 功能实现: kernel_gen/analysis/analysis.py
     """
 
-    name = "kernel.add"
+    name = "kernel.binary_elewise"
 
     lhs = operand_def(Attribute)
     rhs = operand_def(Attribute)
@@ -499,34 +499,6 @@ class FakeKernelSelectOp(IRDLOperation):
         result_type: Attribute,
     ) -> None:
         super().__init__(operands=[cond, lhs, rhs], result_types=[result_type])
-
-
-@irdl_op_definition
-class FakeKernelCastOp(IRDLOperation):
-    """测试用 kernel.cast op。
-
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
-
-    功能说明:
-    - 用于验证 kernel.cast 计入标量计算。
-
-    使用示例:
-    - FakeKernelCastOp(value, i32)
-
-    关联文件:
-    - spec: spec/analysis/analysis_engine.md
-    - test: test/analysis/test_analysis.py
-    - 功能实现: kernel_gen/analysis/compute/kernel.py
-    """
-
-    name = "kernel.cast"
-
-    value = operand_def(Attribute)
-    result = result_def(Attribute)
-
-    def __init__(self, value: SSAValue | Operation, result_type: Attribute) -> None:
-        super().__init__(operands=[value], result_types=[result_type])
 
 
 @irdl_op_definition
@@ -1293,14 +1265,14 @@ def test_analysis_function_unsupported_op() -> None:
 # 最近一次运行测试时间: 2026-04-03 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-03 00:00:00 +0800
 # 测试目的: 验证单 op 统一入口返回新结果结构，且默认不写 analysis.* 属性。
-# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_entry_returns_new_result_for_scalar_kernel_add
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_entry_returns_new_result_for_scalar_kernel_binary_elewise
 # 对应功能实现文件路径: kernel_gen/analysis/analysis.py
 # 对应 spec 文件路径: spec/analysis/analysis_engine.md
 # 对应测试文件路径: test/analysis/test_analysis.py
-def test_analysis_entry_returns_new_result_for_scalar_kernel_add() -> None:
+def test_analysis_entry_returns_new_result_for_scalar_kernel_binary_elewise() -> None:
     lhs = arith.ConstantOp(IntegerAttr(1, i32))
     rhs = arith.ConstantOp(IntegerAttr(2, i32))
-    add_op = FakeKernelScalarAddOp(lhs.result, rhs.result, i32)
+    add_op = FakeKernelScalarBinaryElewiseOp(lhs.result, rhs.result, i32)
 
     result = analysis(
         add_op,
@@ -1336,7 +1308,7 @@ def test_analysis_entry_returns_new_result_for_scalar_kernel_add() -> None:
 def test_analysis_entry_write_op_attrs_is_explicit() -> None:
     lhs = arith.ConstantOp(IntegerAttr(1, i32))
     rhs = arith.ConstantOp(IntegerAttr(2, i32))
-    add_op = FakeKernelScalarAddOp(lhs.result, rhs.result, i32)
+    add_op = FakeKernelScalarBinaryElewiseOp(lhs.result, rhs.result, i32)
 
     analysis(
         add_op,
@@ -1562,7 +1534,7 @@ def test_analysis_memory_missing_target_metric_fails_explicitly(
 # 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
-# 测试目的: 验证标量 kernel.add 会落到 ComputeKind.SCALAR。
+# 测试目的: 验证标量 kernel.binary_elewise 会落到 ComputeKind.SCALAR。
 # 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_scalar_compute_kind
 # 对应功能实现文件路径: kernel_gen/analysis/analysis.py
 # 对应 spec 文件路径: spec/analysis/analysis_engine.md
@@ -1570,7 +1542,7 @@ def test_analysis_memory_missing_target_metric_fails_explicitly(
 def test_analysis_scalar_compute_kind() -> None:
     lhs = arith.ConstantOp(IntegerAttr(1, i32))
     rhs = arith.ConstantOp(IntegerAttr(2, i32))
-    add_op = FakeKernelScalarAddOp(lhs.result, rhs.result, i32)
+    add_op = FakeKernelScalarBinaryElewiseOp(lhs.result, rhs.result, i32)
 
     result = analysis(add_op, AnalysisConfig(enable_compute=True, enable_memory=False))
 
@@ -2451,26 +2423,23 @@ def test_analysis_invalid_public_dma_raises() -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-05 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-05 00:00:00 +0800
-# 测试目的: 验证 kernel.select/cast 计入 SCALAR 计算且无 warning。
-# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_kernel_select_cast_scalar_compute
+# 测试目的: 验证 kernel.select 计入 SCALAR 计算且无 warning。
+# 使用示例: pytest -q test/analysis/test_analysis.py -k test_analysis_kernel_select_scalar_compute
 # 对应功能实现文件路径: kernel_gen/analysis/compute/kernel.py
 # 对应 spec 文件路径: spec/analysis/analysis_engine.md
 # 对应测试文件路径: test/analysis/test_analysis.py
-def test_analysis_kernel_select_cast_scalar_compute(recwarn: pytest.WarningsRecorder) -> None:
+def test_analysis_kernel_select_scalar_compute(recwarn: pytest.WarningsRecorder) -> None:
     cond = arith.ConstantOp(IntegerAttr(1, i1))
     lhs = arith.ConstantOp(IntegerAttr(1, i32))
     rhs = arith.ConstantOp(IntegerAttr(2, i32))
 
     select_op = FakeKernelSelectOp(cond, lhs, rhs, i32)
-    cast_op = FakeKernelCastOp(lhs, i32)
     config = AnalysisConfig(enable_compute=True, enable_memory=True)
 
     select_result = analysis(select_op, config)
-    cast_result = analysis(cast_op, config)
 
     assert len(recwarn) == 0
     assert select_result.compute_totals_by_kind == {ComputeKind.SCALAR: sp.Integer(1)}
-    assert cast_result.compute_totals_by_kind == {ComputeKind.SCALAR: sp.Integer(1)}
 
 
 # AN-020I

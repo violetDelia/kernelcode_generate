@@ -241,8 +241,11 @@ def _build_cost_node(
 
     op_kind = _classify_supported_op(op)
     assert op_kind is not None
+    extra_attrs = dict(op.attributes)
+    if op.name == "kernel.binary_elewise" and "kind" in extra_attrs:
+        extra_attrs["kernel_kind"] = extra_attrs.pop("kind")
     for attr_name in _RESERVED_METADATA_ATTRS:
-        if attr_name in op.attributes:
+        if attr_name in extra_attrs:
             raise LaunchKernelCostFuncError(
                 "LaunchKernelCostFuncError: "
                 f"op '{op.name}' in device function '{device_func_name}' already defines reserved attr '{attr_name}'"
@@ -253,7 +256,7 @@ def _build_cost_node(
         cost_kind=StringAttr(cost_kind),
         op_name=StringAttr(op.name),
         device_func=SymbolRefAttr(device_func_name),
-        extra_attrs=dict(op.attributes),
+        extra_attrs=extra_attrs,
     )
 
 

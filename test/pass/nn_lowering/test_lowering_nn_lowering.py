@@ -99,6 +99,8 @@ from kernel_gen.symbol_variable.memory import Memory
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 pass_module = importlib.import_module("kernel_gen.passes.lowering.nn_lowering")
+compat_pass_module = importlib.import_module("kernel_gen.passes.lowering.nn_to_kernel")
+LowerNnToKernelPass = compat_pass_module.LowerNnToKernelPass
 NnLoweringError = pass_module.NnLoweringError
 NnLoweringPass = pass_module.NnLoweringPass
 
@@ -397,6 +399,39 @@ def test_lower_add_to_kernel() -> None:
     block = func_op.body.block
     _assert_single_alloc(block)
     _assert_single_binary_kind_after_first_alloc(block, "add")
+
+
+# TC-PASS-NNL-001A
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-20 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-20 00:00:00 +0800
+# 测试目的: 验证 `LowerNnToKernelPass` 仅保留旧 pass 名，不回写旧 `kernel.add`。
+# 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_nn_to_kernel_compat_keeps_binary_elewise
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
+def test_lower_nn_to_kernel_compat_keeps_binary_elewise() -> None:
+    block = Block()
+    lhs_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
+    rhs_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
+    res_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
+    lhs = add_block_arg(block, lhs_type)
+    rhs = add_block_arg(block, rhs_type)
+    add_op = NnAddOp(lhs, rhs, res_type, SPACE_GLOBAL)
+    block.add_op(add_op)
+    block.add_op(func.ReturnOp(add_op.results[0]))
+    module = ModuleOp(
+        [func.FuncOp("add_compat", FunctionType.from_lists([lhs_type, rhs_type], [res_type]), Region(block))]
+    )
+
+    LowerNnToKernelPass().run(module)
+
+    func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
+    block = func_op.body.block
+    _assert_single_alloc(block)
+    _assert_single_binary_kind_after_first_alloc(block, "add")
+    assert not any(op.name == "kernel.add" for op in block.ops)
 
 
 # TC-PASS-NNL-002

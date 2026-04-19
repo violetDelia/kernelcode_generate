@@ -35,7 +35,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.dialect.arch import ArchBarrierOp, ArchLaunchOp, ArchScopeAttr, ArchVisibilityAttr
-from kernel_gen.dialect.kernel import KernelAddOp
+from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolConstOp, SymbolForOp, SymbolIterType, SymbolValueType
 from kernel_gen.passes.registry import build_registered_pass, load_builtin_passes
@@ -86,7 +86,7 @@ def _make_memory_type(space: str = "global") -> NnMemoryType:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 生成固定二维 `f32` memory type，供 wrapper/device 参数与 `kernel.add` 复用。
+    - 生成固定二维 `f32` memory type，供 wrapper/device 参数与 `kernel.binary_elewise(kind="add")` 复用。
 
     使用示例:
     - memory_type = _make_memory_type()
@@ -143,8 +143,8 @@ def _build_launch_kernel_module(
 
     功能说明:
     - 生成一个 wrapper 与一个 device function。
-    - device body 内包含 `symbol.for`、`arch.barrier` 与 `kernel.add`，用于覆盖 move/compute 双类别成本节点。
-    - 可选生成共享 callee 的第二个 wrapper，或为 `kernel.add` 注入保留 metadata attr 冲突。
+    - device body 内包含 `symbol.for`、`arch.barrier` 与 `kernel.binary_elewise(kind="add")`，用于覆盖 move/compute 双类别成本节点。
+    - 可选生成共享 callee 的第二个 wrapper，或为目标 op 注入保留 metadata attr 冲突。
 
     使用示例:
     - module = _build_launch_kernel_module()
@@ -208,14 +208,15 @@ def _build_launch_kernel_module(
     start = SymbolConstOp(0)
     step = SymbolConstOp(1)
     barrier = ArchBarrierOp(ArchScopeAttr.from_name("block"), _make_barrier_visibility())
-    kernel_add = KernelAddOp(
+    kernel_add = KernelBinaryElewiseOp(
         device_block.args[2],
         device_block.args[0],
         device_block.args[1],
-        NnMemorySpaceAttr(StringAttr("global")),
+        kind="add",
+        space=NnMemorySpaceAttr(StringAttr("global")),
     )
     if conflict_attr:
-        kernel_add.attributes["kind"] = StringAttr("move")
+        kernel_add.attributes["cost_kind"] = StringAttr("move")
     loop_block.add_op(barrier)
     if unsupported_op:
         loop_block.add_op(UnsupportedOp())
@@ -283,7 +284,8 @@ def test_launch_kernel_cost_func_builds_cost_function_for_all_kind() -> None:
     assert "@_cost_all__device_kernel" in printed
     assert 'cost_kind = "all"' in printed
     assert 'op_name = "arch.barrier"' in printed
-    assert 'op_name = "kernel.add"' in printed
+    assert 'op_name = "kernel.binary_elewise"' in printed
+    assert 'kernel_kind = "add"' in printed
     assert "symbol.for" in printed
     assert "iter_args(" in printed
     assert "symbol.yield" in printed
@@ -407,7 +409,7 @@ def test_launch_kernel_cost_func_rejects_metadata_attr_conflict() -> None:
 
     with pytest.raises(
         LaunchKernelCostFuncError,
-        match=r"reserved attr 'kind'$",
+        match=r"reserved attr 'cost_kind'$",
     ):
         LaunchKernelCostFuncPass(kind="all").run(module)
 

@@ -39,7 +39,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaSliceOp, DmaViewOp
-from kernel_gen.dialect.kernel import KernelAddOp
+from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.target import registry as target_registry
@@ -130,18 +130,20 @@ def _make_anonymous_dynamic_memory_type(space: str) -> NnMemoryType:
     )
 
 
-def _build_kernel_add_module_with_type(mem_type: NnMemoryType) -> tuple[ModuleOp, Block, KernelAddOp]:
-    """构造使用指定 `nn.memory` 类型的单个 kernel.add module。
+def _build_kernel_binary_elewise_add_module_with_type(
+    mem_type: NnMemoryType,
+) -> tuple[ModuleOp, Block, KernelBinaryElewiseOp]:
+    """构造使用指定 `nn.memory` 类型的单个 kernel.binary_elewise(kind="add") module。
 
     创建者: 咯咯咯
     最后一次更改: 咯咯咯
 
     功能说明:
     - func 签名包含 2 个输入与 1 个 out operand（均为给定 `nn.memory` 类型）。
-    - func 内插入 `kernel.add(lhs, rhs, out)` 与空 return。
+    - func 内插入 `kernel.binary_elewise(kind="add")` 与空 return。
 
     使用示例:
-    - module, block, kernel_op = _build_kernel_add_module_with_type(_make_symbolic_memory_type("global"))
+    - module, block, kernel_op = _build_kernel_binary_elewise_add_module_with_type(_make_symbolic_memory_type("global"))
 
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy.md
@@ -151,11 +153,12 @@ def _build_kernel_add_module_with_type(mem_type: NnMemoryType) -> tuple[ModuleOp
 
     func_type = FunctionType.from_lists([mem_type, mem_type, mem_type], [])
     block = Block(arg_types=[mem_type, mem_type, mem_type])
-    kernel_op = KernelAddOp(
+    kernel_op = KernelBinaryElewiseOp(
         block.args[2],
         block.args[0],
         block.args[1],
-        NnMemorySpaceAttr.from_name(mem_type.space.space.data),
+        kind="add",
+        space=NnMemorySpaceAttr.from_name(mem_type.space.space.data),
     )
     block.add_ops([kernel_op, func.ReturnOp()])
     func_op = func.FuncOp("main", func_type, Region(block))
@@ -163,18 +166,20 @@ def _build_kernel_add_module_with_type(mem_type: NnMemoryType) -> tuple[ModuleOp
     return module, block, kernel_op
 
 
-def _build_kernel_add_module(space: str) -> tuple[ModuleOp, Block, KernelAddOp]:
-    """构造包含单个 kernel.add 的 module。
+def _build_kernel_binary_elewise_add_module(
+    space: str,
+) -> tuple[ModuleOp, Block, KernelBinaryElewiseOp]:
+    """构造包含单个 kernel.binary_elewise(kind="add") 的 module。
 
     创建者: 朽木露琪亚
     最后一次更改: 朽木露琪亚
 
     功能说明:
     - func 签名包含 2 个输入与 1 个 out operand（均为 nn.memory）。
-    - func 内插入 `kernel.add(lhs, rhs, out)` 与空 return。
+    - func 内插入 `kernel.binary_elewise(kind="add")` 与空 return。
 
     使用示例:
-    - module, block, kernel_op = _build_kernel_add_module("global")
+    - module, block, kernel_op = _build_kernel_binary_elewise_add_module("global")
 
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy.md
@@ -183,23 +188,24 @@ def _build_kernel_add_module(space: str) -> tuple[ModuleOp, Block, KernelAddOp]:
     """
 
     mem_type = _make_memory_type(space)
-    return _build_kernel_add_module_with_type(mem_type)
+    return _build_kernel_binary_elewise_add_module_with_type(mem_type)
 
 
-def _build_kernel_add_module_with_window() -> tuple[ModuleOp, Block, KernelAddOp]:
-    """构造包含 window view 的 kernel.add module。
+def _build_kernel_binary_elewise_add_module_with_window(
+) -> tuple[ModuleOp, Block, KernelBinaryElewiseOp]:
+    """构造包含 window view 的 kernel.binary_elewise(kind="add") module。
 
     创建者: jcc你莫辜负
     最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 通过 dma.view 构造 GM window 视图，并作为 kernel.add 的输入与输出。
+    - 通过 dma.view 构造 GM window 视图，并作为 kernel.binary_elewise(kind="add") 的输入与输出。
     - window 形状与 stride 固定为 `[2, 3]` / `[3, 1]`，offsets 使用非零常量。
     - 该 helper 仅负责构造原始 window 元信息；hierarchy lowering 生成的 `dma.slice/dma.deslice`
       必须保留 offsets/sizes，并把新路径 strides 规范化为 unit stride。
 
     使用示例:
-    - module, block, kernel_op = _build_kernel_add_module_with_window()
+    - module, block, kernel_op = _build_kernel_binary_elewise_add_module_with_window()
 
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy.md
@@ -239,11 +245,12 @@ def _build_kernel_add_module_with_window() -> tuple[ModuleOp, Block, KernelAddOp
     view_in0 = DmaViewOp(block.args[0], in_offsets, sizes, strides, window_type)
     view_in1 = DmaViewOp(block.args[1], in_offsets, sizes, strides, window_type)
     view_out = DmaViewOp(block.args[2], out_offsets, sizes, strides, window_type)
-    kernel_op = KernelAddOp(
+    kernel_op = KernelBinaryElewiseOp(
         view_out.result,
         view_in0.result,
         view_in1.result,
-        NnMemorySpaceAttr.from_name("global"),
+        kind="add",
+        space=NnMemorySpaceAttr.from_name("global"),
     )
     block.add_ops([view_in0, view_in1, view_out, kernel_op, func.ReturnOp()])
     func_op = func.FuncOp("main", func_type, Region(block))
@@ -332,7 +339,9 @@ def _ensure_sm_lm_target_registered() -> str:
             "sm_memory_size": 1024,
             "lm_memory_size": 1024,
             "tsm_memory_size": 0,
-            "tlm_memory_size": 0,
+            "tlm1_memory_size": 0,
+            "tlm2_memory_size": 0,
+            "tlm3_memory_size": 0,
         },
     )
     try:
@@ -354,7 +363,7 @@ def _ensure_sm_lm_target_registered() -> str:
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy.md
 # 对应测试文件路径: test/pass/test_dma_memory_hierarchy.py
 def test_dma_memory_hierarchy_stages_gm_to_lm_and_writeback() -> None:
-    module, block, kernel_op = _build_kernel_add_module("global")
+    module, block, kernel_op = _build_kernel_binary_elewise_add_module("global")
     target_name = _ensure_sm_lm_target_registered()
     target_registry._set_current_target(target_name)
     try:
@@ -420,7 +429,7 @@ def test_dma_memory_hierarchy_stages_gm_to_lm_and_writeback() -> None:
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy.md
 # 对应测试文件路径: test/pass/test_dma_memory_hierarchy.py
 def test_dma_memory_hierarchy_lm_only_is_noop() -> None:
-    module, block, kernel_op = _build_kernel_add_module("local")
+    module, block, kernel_op = _build_kernel_binary_elewise_add_module("local")
     target_name = _ensure_sm_lm_target_registered()
     target_registry._set_current_target(target_name)
     try:
@@ -444,7 +453,7 @@ def test_dma_memory_hierarchy_lm_only_is_noop() -> None:
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy.md
 # 对应测试文件路径: test/pass/test_dma_memory_hierarchy.py
 def test_dma_memory_hierarchy_window_offsets_and_unit_strides() -> None:
-    module, block, kernel_op = _build_kernel_add_module_with_window()
+    module, block, kernel_op = _build_kernel_binary_elewise_add_module_with_window()
     target_name = _ensure_sm_lm_target_registered()
     target_registry._set_current_target(target_name)
     try:
@@ -528,7 +537,9 @@ def test_dma_memory_hierarchy_window_offsets_and_unit_strides() -> None:
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy.md
 # 对应测试文件路径: test/pass/test_dma_memory_hierarchy.py
 def test_dma_memory_hierarchy_symbol_shape_passthrough() -> None:
-    module, block, _ = _build_kernel_add_module_with_type(_make_symbolic_memory_type("global"))
+    module, block, _ = _build_kernel_binary_elewise_add_module_with_type(
+        _make_symbolic_memory_type("global")
+    )
     target_name = _ensure_sm_lm_target_registered()
     target_registry._set_current_target(target_name)
     try:
@@ -553,7 +564,7 @@ def test_dma_memory_hierarchy_symbol_shape_passthrough() -> None:
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy.md
 # 对应测试文件路径: test/pass/test_dma_memory_hierarchy.py
 def test_dma_memory_hierarchy_requires_sm_lm() -> None:
-    module, _, _ = _build_kernel_add_module("global")
+    module, _, _ = _build_kernel_binary_elewise_add_module("global")
     target_registry._set_current_target("cpu")
     try:
         with pytest.raises(LowerDmaMemoryHierarchyError, match="SM/LM"):
@@ -573,7 +584,9 @@ def test_dma_memory_hierarchy_requires_sm_lm() -> None:
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy.md
 # 对应测试文件路径: test/pass/test_dma_memory_hierarchy.py
 def test_dma_memory_hierarchy_rejects_anonymous_dynamic_shape() -> None:
-    module, _, _ = _build_kernel_add_module_with_type(_make_anonymous_dynamic_memory_type("global"))
+    module, _, _ = _build_kernel_binary_elewise_add_module_with_type(
+        _make_anonymous_dynamic_memory_type("global")
+    )
     target_name = _ensure_sm_lm_target_registered()
     target_registry._set_current_target(target_name)
     try:

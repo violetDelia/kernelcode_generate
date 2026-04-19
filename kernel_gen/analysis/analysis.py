@@ -1712,7 +1712,7 @@ def _analyze_scalar_kernel_op(op: Operation, config: AnalysisConfig) -> _Analyze
     最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 为 `kernel.add/sub/mul/div/eq/lt/gt/...` 的单结果标量形态生成新结果结构。
+    - 为 `kernel.binary_elewise/select` 的单结果标量形态生成新结果结构。
     - 该入口只服务 A1 的单 op 统一入口基线，不替代后续 A2 的完整分类收口。
 
     使用示例:
