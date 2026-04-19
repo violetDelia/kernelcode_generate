@@ -1,7 +1,8 @@
 /*
 功能说明:
 - 定义 include/api/Dma.h 的统一 DMA 接口声明。
-- 公共层只保留 `slice` / `deslice`；`view` / `reshape` 已移动到 `Memory` 的成员接口。
+- 公共层提供 `alloc / slice / deslice` 三类 DMA helper 声明；
+  `view` / `reshape` 已移动到 `Memory` 的成员接口。
 
 使用示例:
 - #include "include/api/Dma.h"
@@ -22,8 +23,32 @@
 #ifndef KERNELCODE_GENERATE_INCLUDE_API_DMA_H_
 #define KERNELCODE_GENERATE_INCLUDE_API_DMA_H_
 
+#include <initializer_list>
+
 #include "include/api/Core.h"
 #include "include/api/Memory.h"
+
+/*
+功能说明:
+- 按给定 shape/stride 创建 DMA 临时 `Memory<Space, T>` 视图。
+- 该 helper 供 `target=npu_demo` 的 `emit_c/gen_kernel` 合同生成局部 temporary memory。
+
+使用示例:
+- Memory<TSM, float> tile = alloc<TSM, float>({16}, {1});
+
+创建者: 小李飞刀
+最后修改人: 小李飞刀
+
+关联文件:
+- spec: spec/include/api/Dma.md
+- test: test/include/api/test_dma.py
+- 功能实现: include/npu_demo/Dma.h
+*/
+template <MemorySpace Space, typename T>
+Memory<Space, T> alloc(
+    std::initializer_list<long long> shape,
+    std::initializer_list<long long> stride,
+    MemoryFormat format = MemoryFormat::Norm);
 
 /*
 功能说明:

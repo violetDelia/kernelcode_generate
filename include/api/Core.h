@@ -59,6 +59,23 @@ using Status = StatusCode;
 
 /*
 功能说明:
+- 定义统一的符号整数公开别名，供 `emit_c/gen_kernel(target=npu_demo)` 的动态 shape / symbol 参数复用。
+
+使用示例:
+- S_INT dim = 16;
+
+创建者: 小李飞刀
+最后修改人: 小李飞刀
+
+关联文件:
+- spec: spec/include/api/Core.md
+- test: test/dsl/test_gen_kernel.py
+- 功能实现: include/api/Core.h
+*/
+using S_INT = long long;
+
+/*
+功能说明:
 - 轻量坐标/索引向量视图，封装调用方提供的连续 int64 缓冲区。
 
 使用示例:

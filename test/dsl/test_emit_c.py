@@ -37,10 +37,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp
-from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFillOp, DmaLoadOp, DmaSliceOp, DmaStoreOp, DmaViewOp
-from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCastOp, DmaCopyOp, DmaDesliceOp, DmaFillOp, DmaFreeOp, DmaLoadOp, DmaReshapeOp, DmaSliceOp, DmaStoreOp, DmaTransposeOp, DmaViewOp
+from kernel_gen.dialect.kernel import KernelAddOp, KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnAddOp, NnImg2col2dOp, NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolAddOp, SymbolCastOp, SymbolConstOp, SymbolEqOp, SymbolForOp, SymbolGetDimOp, SymbolGetStrideOp, SymbolIterType, SymbolToFloatOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolAddOp, SymbolCastOp, SymbolConstOp, SymbolEqOp, SymbolForOp, SymbolGetDimOp, SymbolGetStrideOp, SymbolIterType, SymbolToFloatOp, SymbolToIntOp, SymbolValueType
 from kernel_gen.dsl.ast import BlockAST, ConstAST, ForAST, FunctionAST, Img2ColAST, LoadAST, ScalarArgAST, StoreAST, TensorAST, VarAST
 from kernel_gen.dsl.emit_c import EmitCContext, EmitCError, emit_c_op, emit_c_value
 from kernel_gen.dsl.mlir_gen import build_func_op, build_func_op_from_ast
@@ -772,6 +772,146 @@ def test_emit_c_memory_space_template_alloc() -> None:
     assert emit_c_op(add, ctx) == "cpu::add(lhs, rhs, v0);"
 
 
+# EC-I3-001A
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: N/A
+# 最近一次运行成功时间: N/A
+# 功能说明: 验证 target=npu_demo 下 `dma.alloc` 会发射 helper 形式的 `alloc<Space, T>(shape, stride)`。
+# 测试目的: 锁定 `npu_demo` 下 `dma.alloc` 不再展开底层 buffer + `Memory(...)` 构造，而是走 `include/api` 约定的 helper 形态。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_lowers_npu_demo_dma_alloc_helper_contract
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_lowers_npu_demo_dma_alloc_helper_contract() -> None:
+    alloc_type = _make_memory_type([2, 3], [3, 1], space="tsm", element_type=f32)
+    alloc = DmaAllocOp([], alloc_type)
+
+    alloc_stmt = emit_c_op(alloc, _npu_ctx())
+
+    assert alloc_stmt == (
+        "Memory<TSM, float> v0 = alloc<TSM, float>({2, 3} /*shape*/, {3, 1} /*stride*/);"
+    )
+
+    dyn_m = SymbolValueType.from_expr("M")
+    dyn_n = SymbolValueType.from_expr("N")
+    dyn_block = Block(arg_types=[dyn_m, dyn_n])
+    dyn_ctx = _npu_ctx()
+    dyn_ctx.bind_name(dyn_block.args[0], "m")
+    dyn_ctx.bind_name(dyn_block.args[1], "n")
+    dyn_alloc_type = NnMemoryType(
+        ArrayAttr([StringAttr("M"), StringAttr("N")]),
+        ArrayAttr([StringAttr("N"), IntAttr(1)]),
+        f32,
+        NnMemorySpaceAttr.from_name("tsm"),
+    )
+    dyn_alloc = DmaAllocOp([dyn_block.args[0], dyn_block.args[1]], dyn_alloc_type)
+
+    dyn_stmt = emit_c_op(dyn_alloc, dyn_ctx)
+
+    assert dyn_stmt == (
+        "Memory<TSM, float> v0 = alloc<TSM, float>({m, n} /*shape*/, {n, 1} /*stride*/);"
+    )
+
+
+# EC-I3-001B
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: N/A
+# 最近一次运行成功时间: N/A
+# 功能说明: 验证 target=npu_demo 下 `dma.broadcast` 会发射 helper 形式的 `npu_demo::broadcast<...>(dst, source)`。
+# 测试目的: 锁定 `dma.broadcast` 在 `npu_demo` 下不再保留 IR 名称，也不误落回 `unsupported op`。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_lowers_npu_demo_dma_broadcast_helper_contract
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_lowers_npu_demo_dma_broadcast_helper_contract() -> None:
+    dst_type = _make_memory_type([4, 8], [8, 1], space="tsm", element_type=f32)
+    src_type = _make_memory_type([1, 8], [8, 1], space="tsm", element_type=f32)
+    block = Block(arg_types=[dst_type, src_type])
+    ctx = _npu_ctx()
+    ctx.bind_name(block.args[0], "dst")
+    ctx.bind_name(block.args[1], "src")
+
+    stmt = emit_c_op(DmaBroadcastOp(block.args[0], block.args[1]), ctx)
+
+    assert stmt == "npu_demo::broadcast<TSM, TSM, float, float>(dst /*dst*/, src /*source*/);"
+
+
+def test_emit_c_lowers_npu_demo_dma_misc_helper_contracts() -> None:
+    dst_type = _make_memory_type([2, 3], [3, 1], space="global", element_type=f32)
+    src_type = _make_memory_type([2, 3], [3, 1], space="global", element_type=i32)
+    reshape_dst_type = _make_memory_type([3, 2], [2, 1], space="global", element_type=f32)
+    block = Block(arg_types=[dst_type, src_type])
+    ctx = _npu_ctx()
+    ctx.bind_name(block.args[0], "dst")
+    ctx.bind_name(block.args[1], "src")
+
+    cast_stmt = emit_c_op(DmaCastOp(block.args[0], block.args[1]), ctx)
+    copy_stmt = emit_c_op(DmaCopyOp(block.args[0], block.args[0]), ctx)
+    free_stmt = emit_c_op(DmaFreeOp(block.args[0]), ctx)
+    transpose_stmt = emit_c_op(DmaTransposeOp(block.args[0], block.args[0], perm=[1, 0]), ctx)
+    reshape_stmt = emit_c_op(
+        DmaReshapeOp(
+            block.args[0],
+            [arith.ConstantOp(IntegerAttr(3, i32)).result, arith.ConstantOp(IntegerAttr(2, i32)).result],
+            reshape_dst_type,
+        ),
+        ctx,
+    )
+
+    assert cast_stmt == "npu_demo::cast<GM, float, int32_t>(dst /*dst*/, src /*source*/);"
+    assert copy_stmt == "npu_demo::copy<GM, GM, float, float>(dst /*dst*/, dst /*source*/);"
+    assert free_stmt == "npu_demo::free<GM, float>(dst /*source*/);"
+    assert transpose_stmt == "npu_demo::transpose<GM, GM, float, float>(dst /*dst*/, dst /*source*/, {1, 0} /*perm*/);"
+    assert "Memory<GM, float> v0 = dst.reshape({3, 2} /*shape*/);" == reshape_stmt
+
+
+def test_emit_c_lowers_npu_demo_dma_indexed_and_fill_helpers() -> None:
+    dst_type = _make_memory_type([2, 3], [3, 1], space="global", element_type=i32)
+    src_type = _make_memory_type([4, 5], [5, 1], space="global", element_type=i32)
+    block = Block(arg_types=[dst_type, src_type])
+    ctx = _npu_ctx()
+    ctx.bind_name(block.args[0], "dst")
+    ctx.bind_name(block.args[1], "src")
+
+    offset0 = SymbolConstOp(1)
+    offset1 = SymbolConstOp(2)
+    size0 = SymbolConstOp(2)
+    size1 = SymbolConstOp(3)
+    stride0 = SymbolConstOp(1)
+    stride1 = SymbolConstOp(1)
+    fill_value = SymbolConstOp(7)
+    fill_cast = SymbolToIntOp(fill_value.result, i32)
+
+    prologue = [
+        emit_c_op(offset0, ctx),
+        emit_c_op(offset1, ctx),
+        emit_c_op(size0, ctx),
+        emit_c_op(size1, ctx),
+        emit_c_op(stride0, ctx),
+        emit_c_op(stride1, ctx),
+        emit_c_op(fill_value, ctx),
+        emit_c_op(fill_cast, ctx),
+    ]
+    load_stmt = emit_c_op(
+        DmaLoadOp(block.args[0], block.args[1], [offset0.result, offset1.result], [size0.result, size1.result], [stride0.result, stride1.result]),
+        ctx,
+    )
+    store_stmt = emit_c_op(
+        DmaStoreOp(block.args[0], block.args[1], [offset0.result, offset1.result], [size0.result, size1.result], [stride0.result, stride1.result]),
+        ctx,
+    )
+    fill_stmt = emit_c_op(DmaFillOp(block.args[0], fill_cast.result), ctx)
+
+    joined = "\n".join(prologue + [load_stmt, store_stmt, fill_stmt])
+    assert "S_INT c_7 = 7;" in joined
+    assert "int32_t c_7_cast_int32_t = c_7;" in joined
+    assert "npu_demo::load<GM, GM, int32_t, int32_t>(dst /*dst*/, src /*source*/, {1, 2} /*offset*/, {2, 3} /*size*/, {1, 1} /*stride*/);" in joined
+    assert "npu_demo::store<GM, GM, int32_t, int32_t>(src /*dst*/, dst /*source*/, {1, 2} /*offset*/, {2, 3} /*size*/, {1, 1} /*stride*/);" in joined
+    assert "npu_demo::fill<GM, int32_t>(dst /*dst*/, c_7_cast_int32_t /*value*/);" in joined
+
+
 # EC-I3-002
 # 创建者: 小李飞刀
 # 最后一次更改: 朽木露琪亚
@@ -1116,7 +1256,7 @@ def test_emit_c_maps_nn_space_to_template_param() -> None:
 # 最近一次运行测试时间: 2026-04-02 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-02 00:00:00 +0800
 # 功能说明: 验证 npu_demo 下 view/slice/deslice/add 管线可发射稳定节点级文本。
-# 测试目的: 锁定 target=npu_demo 的 helper 形态，确保不回退到 .view<T>()、load/store、launch/barrier 或 arch.launch_kernel。
+# 测试目的: 锁定 target=npu_demo 的 DMA helper 只消费 `include/api` 的成员式 `view<T>(Vector,...)` 与 Vector 版 `slice/deslice` 接口。
 # 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline
 # 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
 # 对应 spec 文件路径: spec/dsl/emit_c.md
@@ -1167,13 +1307,13 @@ def test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline() -> None:
     assert "long long tid = ctx.thread_id();" in stmt
     assert "long long tnum = ctx.thread_num();" in stmt
     assert "Memory<TSM, float> tsm = ctx.get_dynamic_memory<TSM, float>();" in stmt
-    assert "auto src_view = view(source, tid, 16, 1);" in stmt
-    assert "auto work_tile = view(tsm, 0, 16, 1);" in stmt
-    assert "auto out_tile = view(tsm, 0, 16, 1);" in stmt
-    assert "slice(work_tile, src_view, 0, 16, 1);" in stmt
-    assert "npu_demo::add<TSM, float, float>(out_tile /*out*/, work_tile /*lhs*/, work_tile /*rhs*/);" in stmt
+    assert "Memory<GM, float> src_view = source.view({tid} /*offset*/, {16} /*size*/, {1} /*stride*/);" in stmt
+    assert "Memory<TSM, float> work_tile = tsm.view({0} /*offset*/, {16} /*size*/, {1} /*stride*/);" in stmt
+    assert "Memory<TSM, float> out_tile = tsm.view({0} /*offset*/, {16} /*size*/, {1} /*stride*/);" in stmt
+    assert "slice(work_tile /*dst*/, src_view /*source*/, 0 /*offset*/, 16 /*size*/, 1 /*stride*/);" in stmt
+    assert "npu_demo::add<TSM, float, float>(out_tile, work_tile, work_tile);" in stmt
     assert "deslice(out, out_tile, tid, 16, 1);" in stmt
-    assert ".view<" not in stmt
+    assert ".view({" in stmt
     assert "load<" not in stmt
     assert "store<" not in stmt
     assert "launch" not in stmt
@@ -1224,15 +1364,17 @@ def test_emit_c_lowers_npu_demo_tiled_matmul_pipeline() -> None:
     assert re.search(r"long long slice_offset3\[2\] = \{(?:0|c_0), i\d+\};", stmt)
     assert "Vector deslice_offset6_vec(deslice_offset6, 2);" in stmt
     assert re.search(
-        r"Memory<TSM, float> v\d+\(v\d+_buffer, v\d+_shape, v\d+_stride, 2, MemoryFormat::Norm\);",
+        r"Memory<GM, float> v\d+ = alloc<GM, float>\(\{32, 32\} /\*shape\*/, \{32, 1\} /\*stride\*/\);",
         stmt,
     )
-    assert re.search(r"slice\(v\d+, lhs, slice_offset0_vec, slice_size1_vec, slice_stride2_vec\);", stmt)
-    assert re.search(r"slice\(v\d+, rhs, slice_offset3_vec, slice_size4_vec, slice_stride5_vec\);", stmt)
+    assert re.search(r"slice\(v\d+ /\*dst\*/, lhs /\*source\*/, \{i\d+, c_0(?:_\d+)?\} /\*offset\*/, \{c_16(?:_\d+)?, c_16(?:_\d+)?\} /\*size\*/, \{c_1(?:_\d+)?, c_1(?:_\d+)?\} /\*stride\*/\);", stmt)
+    assert re.search(r"slice\(v\d+ /\*dst\*/, rhs /\*source\*/, \{c_0(?:_\d+)?, i\d+\} /\*offset\*/, \{c_16(?:_\d+)?, c_16(?:_\d+)?\} /\*size\*/, \{c_1(?:_\d+)?, c_1(?:_\d+)?\} /\*stride\*/\);", stmt)
     assert re.search(
         r"npu_demo::matmul<[^>]+>\(v\d+ /\*out\*/, v\d+ /\*lhs\*/, v\d+ /\*rhs\*/\);",
         stmt,
     )
-    assert re.search(r"deslice\(v\d+, v\d+, deslice_offset6_vec, deslice_size7_vec, deslice_stride8_vec\);", stmt)
+    assert re.search(r"long long deslice_offset\d+\[2\] = \{i\d+, i\d+\};", stmt)
+    assert re.search(r"Vector deslice_offset\d+_vec\(deslice_offset\d+, 2\);", stmt)
+    assert re.search(r"deslice\(v\d+, v\d+, deslice_offset\d+_vec, deslice_size\d+_vec, deslice_stride\d+_vec\);", stmt)
     assert "nn.matmul" not in stmt
     assert "arch.launch_kernel" not in stmt

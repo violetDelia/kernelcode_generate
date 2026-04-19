@@ -349,6 +349,64 @@ int main() {
     _compile_and_run(source)
 
 
+# API-DMA-003A
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 `alloc<Space, T>(shape, stride)` helper 可配合 npu_demo 后端编译运行。
+# 最近一次运行测试时间: N/A
+# 最近一次运行成功时间: N/A
+# 测试目的: 锁定 DMA helper temporary memory 的公开源码形态存在对应实现，支持静态与动态 shape/stride。
+# 使用示例: `pytest -q test/include/api/test_dma.py -k test_dma_alloc_helper_contract`
+# 对应功能实现文件路径: `include/npu_demo/Dma.h`
+# 对应 spec 文件路径: `spec/include/api/Dma.md`
+# 对应测试文件路径: `test/include/api/test_dma.py`
+def test_dma_alloc_helper_contract() -> None:
+    source = r"""
+#include "include/api/Dma.h"
+#include "include/npu_demo/Dma.h"
+
+static int fail(int code) { return code; }
+
+int main() {
+    auto tile = alloc<TSM, float>({2, 3}, {3, 1});
+    if (tile.rank() != 2) {
+        return fail(1);
+    }
+    if (tile.get_shape(0) != 2 || tile.get_shape(1) != 3) {
+        return fail(2);
+    }
+    if (tile.get_stride(0) != 3 || tile.get_stride(1) != 1) {
+        return fail(3);
+    }
+    if (tile.space() != MemorySpace::TSM) {
+        return fail(4);
+    }
+    tile.data()[0] = 7.0f;
+    if (tile.data()[0] != 7.0f) {
+        return fail(5);
+    }
+
+    long long m = 4;
+    long long n = 5;
+    auto dyn = alloc<GM, float>({m, n}, {n, 1});
+    if (dyn.rank() != 2) {
+        return fail(6);
+    }
+    if (dyn.get_shape(0) != m || dyn.get_shape(1) != n) {
+        return fail(7);
+    }
+    if (dyn.get_stride(0) != n || dyn.get_stride(1) != 1) {
+        return fail(8);
+    }
+    if (dyn.space() != MemorySpace::GM) {
+        return fail(9);
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
 # API-DMA-004
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战

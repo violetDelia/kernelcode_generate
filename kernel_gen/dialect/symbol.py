@@ -1784,7 +1784,6 @@ class SymbolCastOp(IRDLOperation):
         - test: test/dialect/test_symbol_dialect.py
         - 功能实现: kernel_gen/dialect/symbol.py
         """
-
         source_value = SSAValue.get(self.source)
         if not _is_symbol_int_type(source_value.type):
             _raise_verify_error(f"{self.name} source must have type !symbol.int<\"expr\">")
@@ -1793,7 +1792,6 @@ class SymbolCastOp(IRDLOperation):
 
     def print(self: "SymbolCastOp", printer: Printer) -> None:
         """打印 symbol.cast 自定义文本语法。"""
-
         printer.print_string(" ")
         printer.print_ssa_value(self.source)
         printer.print_string(" : ")
@@ -1804,7 +1802,6 @@ class SymbolCastOp(IRDLOperation):
     @classmethod
     def parse(cls: type["SymbolCastOp"], parser: AttrParser) -> "SymbolCastOp":
         """解析 symbol.cast 自定义文本语法。"""
-
         unresolved_source = parser.parse_unresolved_operand()
         parser.parse_characters(":", f" in {cls.name}")
         source_type = parser.parse_type()

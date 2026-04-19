@@ -1385,6 +1385,60 @@ def test_gen_kernel_emits_npu_demo_body_level_kernel() -> None:
 
 
 # GK-017A
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: N/A
+# 最近一次运行成功时间: N/A
+# 功能说明: 验证 target=npu_demo 下单函数 `dma.alloc` module 可生成 helper 形式源码。
+# 测试目的: 锁定 `builtin.module -> func.func(dma.alloc)` 这条 `npu_demo` 子集会发射 `alloc<Space, T>(shape, stride)`，不再被 launch module 约束误拒绝。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_dma_alloc_module
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_emits_npu_demo_dma_alloc_module() -> None:
+    static_type = _make_memory_type([2, 3], [3, 1], space="tsm", element_type=f32)
+    static_block = Block()
+    static_alloc = DmaAllocOp([], static_type)
+    static_block.add_ops([static_alloc, func.ReturnOp()])
+    static_func = func.FuncOp(
+        "dma_alloc_case",
+        FunctionType.from_lists([], []),
+        Region(static_block),
+    )
+    static_module = ModuleOp([static_func])
+
+    static_source = gen_kernel(static_module, _npu_ctx())
+
+    assert '#include "include/npu_demo/npu_demo.h"' in static_source
+    assert "void dma_alloc_case()" in static_source
+    assert "Memory<TSM, float> v0 = alloc<TSM, float>({2, 3} /*shape*/, {3, 1} /*stride*/);" in static_source
+
+    dyn_m = SymbolValueType.from_expr("M")
+    dyn_n = SymbolValueType.from_expr("N")
+    dynamic_type = NnMemoryType(
+        ArrayAttr([StringAttr("M"), StringAttr("N")]),
+        ArrayAttr([StringAttr("N"), IntAttr(1)]),
+        f32,
+        NnMemorySpaceAttr.from_name("tsm"),
+    )
+    dynamic_block = Block(arg_types=[dyn_m, dyn_n])
+    dynamic_alloc = DmaAllocOp([dynamic_block.args[0], dynamic_block.args[1]], dynamic_type)
+    dynamic_block.add_ops([dynamic_alloc, func.ReturnOp()])
+    dynamic_func = func.FuncOp(
+        "dma_alloc_dynamic_case",
+        FunctionType.from_lists([dyn_m, dyn_n], []),
+        Region(dynamic_block),
+    )
+    dynamic_module = ModuleOp([dynamic_func])
+
+    dynamic_source = gen_kernel(dynamic_module, _npu_ctx())
+
+    assert "void dma_alloc_dynamic_case(S_INT arg0, S_INT arg1)" in dynamic_source
+    assert "Memory<TSM, float> v0 = alloc<TSM, float>({arg0, arg1} /*shape*/, {arg1, 1} /*stride*/);" in dynamic_source
+    _compile_only(dynamic_source)
+
+
+# GK-017A
 # 创建者: jcc你莫辜负
 # 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-05 16:36:25 +0800

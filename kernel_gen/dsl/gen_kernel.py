@@ -42,7 +42,7 @@ from xdsl.dialects.builtin import (
 from xdsl.ir import BlockArgument, Operation, SSAValue
 
 from kernel_gen.dialect.arch import ArchBarrierOp, ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp, ArchLaunchOp
-from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaViewOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCastOp, DmaCopyOp, DmaDesliceOp, DmaFillOp, DmaLoadOp, DmaReshapeOp, DmaSliceOp, DmaStoreOp, DmaTransposeOp, DmaViewOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolDimType, SymbolValueType
 
@@ -369,7 +369,7 @@ def _type_to_c(attr: Any) -> str:
     - 用于 `gen_kernel(...)` 的函数级签名拼装，将 IR 类型属性转换为 C/C++ 侧可用类型名。
     - 支持的类型映射清单：
       - `IntegerType(1)` -> `bool`
-      - `IntegerType(N)` -> `int{N}_t`
+      - `IntegerType(N)` -> `int{N}_t` / `uint{N}_t`
       - `Float32Type` -> `float`
       - `Float64Type` -> `double`
       - `IndexType` -> `long long`
@@ -452,6 +452,8 @@ def _type_to_c_for_target(attr: Any, target: str) -> str:
         space = _memory_space_to_c_for_target(attr.space, target)
         return f"Memory<{space}, {_type_to_c_for_target(attr.element_type, target)}>"
     if isinstance(attr, SymbolValueType):
+        if target == "npu_demo":
+            return "S_INT"
         return "long long"
     raise TypeError(f"unsupported type: {attr}")
 
@@ -624,6 +626,10 @@ class _KernelEmitter:
         if self.ctx.target != "npu_demo":
             raise GenKernelError(f"target={self.ctx.target}: func <module>: builtin.module is only supported for target=npu_demo")
 
+        plain_func = self._get_npu_demo_plain_func(module_op)
+        if plain_func is not None:
+            return self._emit_func(plain_func)
+
         body_func, wrapper_func = self._classify_npu_demo_launch_module(module_op)
         emitted: list[str] = []
         for top_op in module_op.ops:
@@ -637,6 +643,46 @@ class _KernelEmitter:
                 continue
             raise _error(self.ctx, "<module>", "npu_demo launch module must contain exactly one body func and one wrapper func")
         return "\n\n".join(emitted)
+
+    def _get_npu_demo_plain_func(self, module_op: ModuleOp) -> func.FuncOp | None:
+        """识别单函数 `npu_demo` module 的普通 emit_c 子集。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 允许 `builtin.module` 只包含一个 `func.func`，且该函数不是 `arch.launch` 双函数 module。
+        - 单函数 body 必须至少包含一个非 `func.return` 的语义 op，避免把空 module 误当成成功输入。
+        - 该分支复用普通 `_emit_func(...)` 路径，不影响既有 `launch body + wrapper` 约束。
+
+        使用示例:
+        - func_op = self._get_npu_demo_plain_func(module_op)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
+
+        top_ops = list(module_op.ops)
+        if any(not isinstance(top_op, func.FuncOp) for top_op in top_ops):
+            return None
+        func_ops = [top_op for top_op in top_ops if isinstance(top_op, func.FuncOp)]
+        if len(func_ops) != 1:
+            return None
+        func_op = func_ops[0]
+        filtered_ops = self._filtered_npu_demo_launch_ops(func_op)
+        if not filtered_ops:
+            return None
+        if len(filtered_ops) != len(list(func_op.body.block.ops)):
+            return None
+        if not isinstance(filtered_ops[-1], func.ReturnOp):
+            return None
+        if any(isinstance(op, ArchLaunchOp) for op in filtered_ops):
+            return None
+        if all(isinstance(op, func.ReturnOp) for op in filtered_ops):
+            return None
+        return func_op
 
     def _emit_func(self, func_op: func.FuncOp) -> str:
         strategy = self._select_func_strategy(func_op)
@@ -1467,11 +1513,12 @@ class _KernelEmitter:
         leading_out_params = _leading_rewritten_out_param_count(func_op)
         if leading_out_params == 0 and not result_types:
             leading_out_params = _leading_out_param_count_from_body(func_op)
+        mutable_memory_args = self._mutable_memory_arg_indices(func_op)
         params: list[str] = []
         for index, (arg_name, arg_type, arg_value) in enumerate(zip(arg_names, input_types, func_op.args, strict=True)):
             self.ctx.bind_name(arg_value, arg_name)
             if isinstance(arg_type, NnMemoryType):
-                if index < leading_out_params:
+                if index < leading_out_params or index in mutable_memory_args:
                     params.append(f"{self._type_to_c(arg_type)}& {arg_name}")
                 else:
                     params.append(f"const {self._type_to_c(arg_type)}& {arg_name}")
@@ -1484,6 +1531,48 @@ class _KernelEmitter:
 
         return f"{return_type} {func_name}({', '.join(params)})"
 
+    def _mutable_memory_arg_indices(self, func_op: func.FuncOp) -> set[int]:
+        """推断普通函数签名里需要可写引用的 memory 参数位置。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 仅扫描当前函数体里已知的写入类 op，把其 `target/out` 所对应的 block argument 记为可写参数。
+        - 供 `npu_demo` 单函数 module 的默认签名复用，避免把 `dst` 一律误生成为 `const&`。
+
+        使用示例:
+        - mutable = self._mutable_memory_arg_indices(func_op)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
+
+        arg_to_index = {arg: index for index, arg in enumerate(func_op.args)}
+        mutable: set[int] = set()
+        for op in func_op.body.block.ops:
+            for value in self._mutable_memory_operands(op):
+                if isinstance(value, BlockArgument) and value in arg_to_index:
+                    mutable.add(arg_to_index[value])
+        return mutable
+
+    def _mutable_memory_operands(self, op: Operation) -> tuple[BlockArgument, ...]:
+        """返回当前 op 中会被写入的 block argument operand。"""
+
+        candidates: list[object] = []
+        if isinstance(op, (DmaBroadcastOp, DmaCastOp, DmaCopyOp, DmaFillOp, DmaLoadOp, DmaSliceOp, DmaTransposeOp)):
+            if not isinstance(op, DmaCastOp) or len(op.operands) == 2:
+                candidates.append(op.target)
+        if isinstance(op, DmaStoreOp):
+            candidates.append(op.target)
+        mutable_args: list[BlockArgument] = []
+        for candidate in candidates:
+            if isinstance(candidate, BlockArgument):
+                mutable_args.append(candidate)
+        return tuple(mutable_args)
+
     def _is_returned_output_alloc(self, func_op: func.FuncOp, op: DmaAllocOp) -> bool:
         if self.ctx.target != "cpu":
             return False
@@ -1491,6 +1580,21 @@ class _KernelEmitter:
         if len(result_types) != 1 or not isinstance(result_types[0], NnMemoryType):
             return False
         return any(isinstance(use.operation, func.ReturnOp) for use in op.result.uses)
+
+    def _bind_rewritten_out_result(self, func_op: func.FuncOp, op: Operation) -> None:
+        """把 rewrite 后仍保留 memory result 的 DMA op 绑定到首个 out 参数。"""
+
+        if not func_op.args or not op.results or len(op.results) != 1:
+            return
+        if not isinstance(op, (DmaCastOp, DmaViewOp, DmaReshapeOp)):
+            return
+        result = op.results[0]
+        if not isinstance(result.type, NnMemoryType):
+            return
+        out_name = self.ctx.lookup_name(func_op.args[0])
+        if out_name is None:
+            return
+        self.ctx.bind_name(result, out_name)
 
     def _is_direct_return_nn_add(self, return_op: func.ReturnOp) -> bool:
         if self.ctx.target != "cpu":
@@ -1656,6 +1760,7 @@ class _KernelEmitter:
             if isinstance(op, DmaAllocOp) and self._is_returned_output_alloc(func_op, op):
                 self.ctx.bind_name(op.result, "out")
                 continue
+            self._bind_rewritten_out_result(func_op, op)
             stmt = emit_c_op(op, self.ctx)
             if stmt and self.ctx.target == "cpu":
                 stmt = self._normalize_cpu_memory_stmt(stmt)
@@ -1678,6 +1783,7 @@ class _KernelEmitter:
                 unique_user = op.result.get_user_of_unique_use()
                 if isinstance(unique_user, func.ReturnOp) and self._is_direct_return_nn_add(unique_user):
                     self.ctx.bind_name(op.result, "out")
+            self._bind_rewritten_out_result(func_op, op)
             stmt = emit_c_op(op, self.ctx)
             if stmt and self.ctx.target == "cpu":
                 stmt = self._normalize_cpu_memory_stmt(stmt)

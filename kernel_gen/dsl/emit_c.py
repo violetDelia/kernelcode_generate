@@ -23,12 +23,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from xdsl.dialects import arith, func, scf
-from xdsl.dialects.builtin import BFloat16Type, Float16Type, Float64Type, FloatAttr, IndexType, IntAttr, IntegerAttr, IntegerType, Signedness, StringAttr, f32
+from xdsl.dialects.builtin import BFloat16Type, Float16Type, Float64Type, FloatAttr, IndexType, IntAttr, IntegerAttr, IntegerType, Signedness, StringAttr, f32, f64
 from xdsl.ir import BlockArgument, Operation, SSAValue
 
 from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp
-from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFillOp, DmaLoadOp, DmaSliceOp, DmaStoreOp, DmaViewOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCastOp, DmaCopyOp, DmaDesliceOp, DmaFillOp, DmaFreeOp, DmaLoadOp, DmaReshapeOp, DmaSliceOp, DmaStoreOp, DmaTransposeOp, DmaViewOp
 from kernel_gen.dialect.kernel import (
+    KernelAddOp,
     KernelBinaryElewiseOp,
     KernelExpOp,
     KernelImg2col1dOp,
@@ -149,6 +150,21 @@ class EmitCContext:
 
 def _emit_error(ctx: EmitCContext, subject: str, reason: str) -> EmitCError:
     return EmitCError(f"target={ctx.target}: {subject}: {reason}")
+
+
+def _bind_preferred_name(ctx: EmitCContext, value: SSAValue, preferred: str) -> str:
+    """按首选前缀为 SSA value 绑定稳定名称。"""
+
+    existing = ctx.lookup_name(value)
+    if existing is not None:
+        return existing
+    used = set(ctx._names.values())
+    if preferred not in used:
+        return ctx.bind_name(value, preferred)
+    suffix = 1
+    while f"{preferred}_{suffix}" in used:
+        suffix += 1
+    return ctx.bind_name(value, f"{preferred}_{suffix}")
 
 
 def _block_arg_index(value: SSAValue) -> int | None:
@@ -327,7 +343,7 @@ def _type_to_c(attr: Any, ctx: EmitCContext) -> str:
 
     功能说明:
     - 在未提供 `ctx.type_converter` 时，按最小覆盖集把常用类型映射为 C/C++ 类型字符串。
-    - 当前覆盖：`i1/bool`、`i32/int32_t`、`index/long long`、`f32/float`、`!nn.memory/Memory<Space, T>`、`!symbol.int/long long`。
+    - 当前覆盖：`i1/bool`、`i32/int32_t`、`ui32/uint32_t`、`index/long long`、`f32/float`、`f64/double`、`!nn.memory/Memory<Space, T>`、`!symbol.int/S_INT|long long`。
     - 对于未知类型必须抛错，避免静默生成不可编译或语义错误的代码。
 
     使用示例:
@@ -354,7 +370,7 @@ def _type_to_c(attr: Any, ctx: EmitCContext) -> str:
         return "bfloat16_t"
     if attr == f32:
         return "float"
-    if isinstance(attr, Float64Type):
+    if isinstance(attr, Float64Type) or attr == f64:
         return "double"
     if isinstance(attr, IndexType):
         return "long long"
@@ -362,6 +378,8 @@ def _type_to_c(attr: Any, ctx: EmitCContext) -> str:
         space_param = _space_to_c(attr, ctx)
         return f"Memory<{space_param}, {_type_to_c(attr.element_type, ctx)}>"
     if isinstance(attr, SymbolValueType):
+        if ctx.target == "npu_demo":
+            return "S_INT"
         return "long long"
     raise _emit_error(ctx, f"type {attr}", "unsupported type")
 
@@ -536,6 +554,44 @@ def _format_static_layout(values: Any, ctx: EmitCContext, subject: str) -> list[
     return formatted
 
 
+def _format_npu_alloc_layout(
+    values: Any,
+    ctx: EmitCContext,
+    subject: str,
+    *,
+    symbol_bindings: dict[str, str] | None = None,
+) -> list[str]:
+    """格式化 npu_demo `dma.alloc` 的 shape/stride 列表。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 接受静态 `IntAttr` 与符号 `StringAttr` 两类维度条目。
+    - 对符号条目优先使用当前上下文里已绑定的 SSA 名称，确保动态 `alloc` 输出可直接复用函数参数名。
+
+    使用示例:
+    - _format_npu_alloc_layout(result_type.stride.data, ctx, "dma.alloc stride", symbol_bindings={"N": "arg1"})
+
+    关联文件:
+    - spec: spec/dsl/emit_c.md
+    - test: test/dsl/test_emit_c.py
+    - 功能实现: kernel_gen/dsl/emit_c.py
+    """
+
+    formatted: list[str] = []
+    for value in values:
+        if isinstance(value, IntAttr):
+            formatted.append(str(value.data))
+            continue
+        if isinstance(value, StringAttr):
+            mapped = None if symbol_bindings is None else symbol_bindings.get(value.data)
+            formatted.append(mapped or value.data)
+            continue
+        raise _emit_error(ctx, subject, "unsupported alloc layout value")
+    return formatted
+
+
 def _emit_long_long_buffer(name: str, values: list[str], ctx: EmitCContext) -> str:
     """生成 `long long[]` 常量缓冲区声明语句。
 
@@ -705,6 +761,12 @@ def _emit_memory_decl(
     return "\n".join(lines)
 
 
+def _emit_npu_brace_list(values: tuple[SSAValue, ...], ctx: EmitCContext) -> str:
+    """生成 `target=npu_demo` 下的 brace-list 实参文本。"""
+
+    return "{" + ", ".join(emit_c_value(value, ctx) for value in values) + "}"
+
+
 def _is_unit_tile(memory_type: NnMemoryType) -> bool:
     if len(memory_type.shape.data) == 0:
         return False
@@ -739,15 +801,15 @@ def _emit_dma_store_stmt(op: DmaStoreOp, ctx: EmitCContext) -> str:
 
 
 def _emit_dma_alloc_stmt(op: DmaAllocOp, ctx: EmitCContext) -> str:
-    """生成 `dma.alloc` 的 CPU 侧 `Memory<Space, T>` 声明片段。
+    """生成 `dma.alloc` 的 `Memory<Space, T>` 声明片段。
 
     创建者: 小李飞刀
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 在 `target=cpu` 下为 `dma.alloc` 结果发射 `shape/stride` 缓冲区与 `Memory<Space, T>` 声明。
-    - 当前阶段必须生成有效 backing storage（静态 shape 为栈上数组）。
-    - 若结果 type.shape 包含符号维度，必须报错（避免 dynamic backing 生命周期不明确）。
+    - 在 `target=cpu` 下发射 backing storage + `Memory<Space, T>` 声明。
+    - 在 `target=npu_demo` 下发射 `alloc<Space, T>({shape...} /*shape*/, {stride...} /*stride*/)` helper 调用。
+    - `target=npu_demo` 的动态 shape 允许复用当前函数作用域内的符号参数名。
 
     使用示例:
     - stmt = emit_c_op(DmaAllocOp([], alloc_type), EmitCContext(target=\"cpu\"))
@@ -766,8 +828,35 @@ def _emit_dma_alloc_stmt(op: DmaAllocOp, ctx: EmitCContext) -> str:
         raise _emit_error(ctx, op.name, "result must be nn.memory")
     shape_values = [emit_c_value(value, ctx) for value in op.dynamic_shape]
     if not shape_values:
-        shape_values = _format_static_layout(result_type.shape.data, ctx, op.name)
-    return _emit_memory_decl(result_name, result_type, ctx, shape_values=shape_values, with_backing_storage=True)
+        shape_values = _format_npu_alloc_layout(result_type.shape.data, ctx, op.name)
+    symbol_bindings: dict[str, str] = {}
+    for value in op.dynamic_shape:
+        value_type = value.type
+        if isinstance(value_type, SymbolValueType):
+            symbol_bindings[value_type.expr.expr.data] = emit_c_value(value, ctx)
+    stride_values = _format_npu_alloc_layout(
+        result_type.stride.data,
+        ctx,
+        f"{op.name} stride",
+        symbol_bindings=symbol_bindings,
+    )
+    if ctx.target == "npu_demo":
+        space_expr = _space_to_c(result_type, ctx)
+        element_type = _type_to_c(result_type.element_type, ctx)
+        shape_text = ", ".join(shape_values)
+        stride_text = ", ".join(stride_values)
+        return (
+            f"{ctx.current_indent}Memory<{space_expr}, {element_type}> {result_name} = "
+            f"alloc<{space_expr}, {element_type}>({{{shape_text}}} /*shape*/, {{{stride_text}}} /*stride*/);"
+        )
+    return _emit_memory_decl(
+        result_name,
+        result_type,
+        ctx,
+        shape_values=shape_values,
+        stride_values=stride_values,
+        with_backing_storage=True,
+    )
 
 
 def _emit_dma_fill_stmt(op: DmaFillOp, ctx: EmitCContext) -> str:
@@ -1159,8 +1248,8 @@ def _emit_npu_view_stmt(op: DmaViewOp, ctx: EmitCContext) -> str:
     最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 把一维 `dma.view` 收口为 `auto name = view(source, offset, size, stride);`。
-    - 当前仅支持单维 offset/shape/stride，避免超出已冻结的 `npu_demo` helper 合同。
+    - 把 `dma.view` 收口为 `Memory<...> out = source.view({offset} /*offset*/, {size} /*size*/, {stride} /*stride*/);`。
+    - 使用当前 expectation 约定的 brace-list 文本，而不是 Vector 临时绑定。
 
     使用示例:
     - stmt = emit_c_op(view_op, EmitCContext(target="npu_demo"))
@@ -1170,17 +1259,15 @@ def _emit_npu_view_stmt(op: DmaViewOp, ctx: EmitCContext) -> str:
     - test: test/dsl/test_emit_c.py
     - 功能实现: kernel_gen/dsl/emit_c.py
     """
-
-    if len(op.offsets) != 1 or len(op.shape) != 1 or len(op.stride) != 1:
-        raise _emit_error(ctx, op.name, "npu_demo view requires 1-D offset/size/stride")
     result_name = ctx.allocate_name(op.result)
     source_expr = _memory_base_name(op.source, ctx)
-    offset_expr = emit_c_value(op.offsets[0], ctx)
-    size_expr = emit_c_value(op.shape[0], ctx)
-    stride_expr = emit_c_value(op.stride[0], ctx)
+    result_type = _type_to_c(op.result.type, ctx)
+    offset_expr = _emit_npu_brace_list(op.offsets, ctx)
+    size_expr = _emit_npu_brace_list(op.shape, ctx)
+    stride_expr = _emit_npu_brace_list(op.stride, ctx)
     return (
-        f"{ctx.current_indent}auto {result_name} = "
-        f"view({source_expr}, {offset_expr}, {size_expr}, {stride_expr});"
+        f"{ctx.current_indent}{result_type} {result_name} = "
+        f"{source_expr}.view({offset_expr} /*offset*/, {size_expr} /*size*/, {stride_expr} /*stride*/);"
     )
 
 
@@ -1246,8 +1333,8 @@ def _emit_npu_slice_stmt(op: DmaSliceOp, ctx: EmitCContext) -> str:
     最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 把一维 `dma.slice` 发射为 `slice(target, source, offset, size, stride);`。
-    - 不回退到显式 loop nest copy、`load/store` 或表达式式 `slice(...)`。
+    - 把 `dma.slice` 统一发射为 `slice(target, source, {offset}, {size}, {stride});`。
+    - 使用当前 expectation 约定的 brace-list 文本。
 
     使用示例:
     - stmt = emit_c_op(slice_op, EmitCContext(target="npu_demo"))
@@ -1257,27 +1344,16 @@ def _emit_npu_slice_stmt(op: DmaSliceOp, ctx: EmitCContext) -> str:
     - test: test/dsl/test_emit_c.py
     - 功能实现: kernel_gen/dsl/emit_c.py
     """
-
     target_expr = _memory_base_name(op.target, ctx)
     source_expr = _memory_base_name(op.source, ctx)
-    if len(op.offsets) == 1 and len(op.sizes) == 1 and len(op.strides) == 1:
-        offset_expr = emit_c_value(op.offsets[0], ctx)
-        size_expr = emit_c_value(op.sizes[0], ctx)
-        stride_expr = emit_c_value(op.strides[0], ctx)
+    if len(op.offsets) == len(op.sizes) == len(op.strides) == 1:
         return (
-            f"{ctx.current_indent}slice({target_expr}, {source_expr}, "
-            f"{offset_expr}, {size_expr}, {stride_expr});"
+            f"{ctx.current_indent}slice({target_expr} /*dst*/, {source_expr} /*source*/, "
+            f"{emit_c_value(op.offsets[0], ctx)} /*offset*/, {emit_c_value(op.sizes[0], ctx)} /*size*/, {emit_c_value(op.strides[0], ctx)} /*stride*/);"
         )
-    offset_lines, offset_vec = _emit_npu_vector_binding("slice_offset", op.offsets, ctx)
-    size_lines, size_vec = _emit_npu_vector_binding("slice_size", op.sizes, ctx)
-    stride_lines, stride_vec = _emit_npu_vector_binding("slice_stride", op.strides, ctx)
-    return "\n".join(
-        [
-            *offset_lines,
-            *size_lines,
-            *stride_lines,
-            f"{ctx.current_indent}slice({target_expr}, {source_expr}, {offset_vec}, {size_vec}, {stride_vec});",
-        ]
+    return (
+        f"{ctx.current_indent}slice({target_expr} /*dst*/, {source_expr} /*source*/, "
+        f"{_emit_npu_brace_list(op.offsets, ctx)} /*offset*/, {_emit_npu_brace_list(op.sizes, ctx)} /*size*/, {_emit_npu_brace_list(op.strides, ctx)} /*stride*/);"
     )
 
 
@@ -1288,8 +1364,9 @@ def _emit_npu_deslice_stmt(op: DmaDesliceOp, ctx: EmitCContext) -> str:
     最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 把一维 `dma.deslice` 发射为 `deslice(target, source, offset, size, stride);`。
+    - 把 `dma.deslice` 统一发射为 `deslice(target, source, {offset}, {size}, {stride});`。
     - 结果值绑定到 target 名称，确保后续节点可稳定引用该 memory。
+    - 使用当前 expectation 约定的 brace-list 文本。
 
     使用示例:
     - stmt = emit_c_op(deslice_op, EmitCContext(target="npu_demo"))
@@ -1303,13 +1380,10 @@ def _emit_npu_deslice_stmt(op: DmaDesliceOp, ctx: EmitCContext) -> str:
     source_expr = _memory_base_name(op.source, ctx)
     target_expr = _memory_base_name(op.target, ctx)
     ctx.bind_name(op.result, target_expr)
-    if len(op.offsets) == 1 and len(op.sizes) == 1 and len(op.strides) == 1:
-        offset_expr = emit_c_value(op.offsets[0], ctx)
-        size_expr = emit_c_value(op.sizes[0], ctx)
-        stride_expr = emit_c_value(op.strides[0], ctx)
+    if len(op.offsets) == len(op.sizes) == len(op.strides) == 1:
         return (
             f"{ctx.current_indent}deslice({target_expr}, {source_expr}, "
-            f"{offset_expr}, {size_expr}, {stride_expr});"
+            f"{emit_c_value(op.offsets[0], ctx)}, {emit_c_value(op.sizes[0], ctx)}, {emit_c_value(op.strides[0], ctx)});"
         )
     offset_lines, offset_vec = _emit_npu_vector_binding("deslice_offset", op.offsets, ctx)
     size_lines, size_vec = _emit_npu_vector_binding("deslice_size", op.sizes, ctx)
@@ -1510,6 +1584,190 @@ def _emit_npu_kernel_img2col2d_stmt(op: KernelImg2col2dOp, ctx: EmitCContext) ->
         f"{ctx.current_indent}npu_demo::img2col2d<{input_space}, {output_space}, {input_type}, {output_type}>"
         f"({out_expr} /*out*/, {input_expr} /*input*/, {params[0]} /*kh*/, {params[1]} /*kw*/, {params[2]} /*sh*/, {params[3]} /*sw*/, {params[4]} /*dh*/, {params[5]} /*dw*/, {params[6]} /*ph*/, {params[7]} /*pw*/, {params[8]} /*pl*/, {params[9]} /*pr*/);"
     )
+
+
+def _emit_npu_broadcast_stmt(op: DmaBroadcastOp, ctx: EmitCContext) -> str:
+    """生成 `target=npu_demo` 下 `dma.broadcast` 的 helper 调用。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 把 `dma.broadcast(target, source)` 发射为显式模板参数的
+      `npu_demo::broadcast<DstSpace, SrcSpace, DstType, SrcType>(dst, source);`。
+    - 仅覆盖当前 expectation 需要的 memory source 路径。
+
+    使用示例:
+    - stmt = emit_c_op(broadcast_op, EmitCContext(target="npu_demo"))
+
+    关联文件:
+    - spec: spec/dsl/emit_c.md
+    - test: test/dsl/test_emit_c.py
+    - 功能实现: kernel_gen/dsl/emit_c.py
+    """
+
+    if not isinstance(op.target.type, NnMemoryType) or not isinstance(op.source.type, NnMemoryType):
+        raise _emit_error(ctx, op.name, "unsupported op")
+    dst_expr = _memory_base_name(op.target, ctx)
+    src_expr = _memory_base_name(op.source, ctx)
+    dst_space = _space_to_c(op.target.type, ctx)
+    src_space = _space_to_c(op.source.type, ctx)
+    dst_type = _type_to_c(op.target.type.element_type, ctx)
+    src_type = _type_to_c(op.source.type.element_type, ctx)
+    return (
+        f"{ctx.current_indent}npu_demo::broadcast<{dst_space}, {src_space}, {dst_type}, {src_type}>"
+        f"({dst_expr} /*dst*/, {src_expr} /*source*/);"
+    )
+
+
+def _emit_npu_copy_stmt(op: DmaCopyOp, ctx: EmitCContext) -> str:
+    target_expr = _memory_base_name(op.target, ctx)
+    source_expr = _memory_base_name(op.source, ctx)
+    target_space = _space_to_c(op.target.type, ctx)
+    source_space = _space_to_c(op.source.type, ctx)
+    target_type = _type_to_c(op.target.type.element_type, ctx)
+    source_type = _type_to_c(op.source.type.element_type, ctx)
+    return (
+        f"{ctx.current_indent}npu_demo::copy<{target_space}, {source_space}, {target_type}, {source_type}>"
+        f"({target_expr} /*dst*/, {source_expr} /*source*/);"
+    )
+
+
+def _emit_npu_cast_stmt(op: DmaCastOp, ctx: EmitCContext) -> str:
+    if len(op.operands) == 2:
+        target_value = op.target
+        source_value = op.source
+        target_type_attr = op.target.type
+    elif len(op.operands) == 1 and len(op.results) == 1:
+        target_value = op.results[0]
+        source_value = op.operands[0]
+        target_type_attr = op.results[0].type
+    else:
+        raise _emit_error(ctx, op.name, "unsupported op")
+    if not isinstance(target_type_attr, NnMemoryType) or not isinstance(source_value.type, NnMemoryType):
+        raise _emit_error(ctx, op.name, "unsupported op")
+    target_expr = _memory_base_name(target_value, ctx)
+    source_expr = _memory_base_name(source_value, ctx)
+    space_expr = _space_to_c(target_type_attr, ctx)
+    target_type = _type_to_c(target_type_attr.element_type, ctx)
+    source_type = _type_to_c(source_value.type.element_type, ctx)
+    return (
+        f"{ctx.current_indent}npu_demo::cast<{space_expr}, {target_type}, {source_type}>"
+        f"({target_expr} /*dst*/, {source_expr} /*source*/);"
+    )
+
+
+def _emit_npu_fill_stmt(op: DmaFillOp, ctx: EmitCContext) -> str:
+    target_expr = _memory_base_name(op.target, ctx)
+    space_expr = _space_to_c(op.target.type, ctx)
+    target_type = _type_to_c(op.target.type.element_type, ctx)
+    value_expr = emit_c_value(op.value, ctx)
+    return (
+        f"{ctx.current_indent}npu_demo::fill<{space_expr}, {target_type}>"
+        f"({target_expr} /*dst*/, {value_expr} /*value*/);"
+    )
+
+
+def _emit_npu_free_stmt(op: DmaFreeOp, ctx: EmitCContext) -> str:
+    source_expr = _memory_base_name(op.source, ctx)
+    space_expr = _space_to_c(op.source.type, ctx)
+    source_type = _type_to_c(op.source.type.element_type, ctx)
+    return (
+        f"{ctx.current_indent}npu_demo::free<{space_expr}, {source_type}>"
+        f"({source_expr} /*source*/);"
+    )
+
+
+def _emit_npu_load_stmt(op: DmaLoadOp, ctx: EmitCContext) -> str:
+    target_expr = _memory_base_name(op.target, ctx)
+    source_expr = _memory_base_name(op.source, ctx)
+    target_space = _space_to_c(op.target.type, ctx)
+    source_space = _space_to_c(op.source.type, ctx)
+    target_type = _type_to_c(op.target.type.element_type, ctx)
+    source_type = _type_to_c(op.source.type.element_type, ctx)
+    offset_expr = _emit_npu_brace_list(op.offsets, ctx)
+    size_expr = _emit_npu_brace_list(op.sizes, ctx)
+    stride_expr = _emit_npu_brace_list(op.strides, ctx)
+    return (
+        f"{ctx.current_indent}npu_demo::load<{target_space}, {source_space}, {target_type}, {source_type}>"
+        f"({target_expr} /*dst*/, {source_expr} /*source*/, {offset_expr} /*offset*/, "
+        f"{size_expr} /*size*/, {stride_expr} /*stride*/);"
+    )
+
+
+def _emit_npu_store_stmt(op: DmaStoreOp, ctx: EmitCContext) -> str:
+    target_expr = _memory_base_name(op.target, ctx)
+    source_expr = _memory_base_name(op.source, ctx)
+    target_space = _space_to_c(op.target.type, ctx)
+    source_space = _space_to_c(op.source.type, ctx)
+    target_type = _type_to_c(op.target.type.element_type, ctx)
+    source_type = _type_to_c(op.source.type.element_type, ctx)
+    offset_expr = _emit_npu_brace_list(op.offsets, ctx)
+    size_expr = _emit_npu_brace_list(op.sizes, ctx)
+    stride_expr = _emit_npu_brace_list(op.strides, ctx)
+    return (
+        f"{ctx.current_indent}npu_demo::store<{target_space}, {source_space}, {target_type}, {source_type}>"
+        f"({target_expr} /*dst*/, {source_expr} /*source*/, {offset_expr} /*offset*/, "
+        f"{size_expr} /*size*/, {stride_expr} /*stride*/);"
+    )
+
+
+def _emit_npu_transpose_stmt(op: DmaTransposeOp, ctx: EmitCContext) -> str:
+    target_expr = _memory_base_name(op.target, ctx)
+    source_expr = _memory_base_name(op.source, ctx)
+    target_space = _space_to_c(op.target.type, ctx)
+    source_space = _space_to_c(op.source.type, ctx)
+    target_type = _type_to_c(op.target.type.element_type, ctx)
+    source_type = _type_to_c(op.source.type.element_type, ctx)
+    perm_values = ", ".join(
+        str(value.data if isinstance(value, IntAttr) else value.value.data) for value in op.perm.data
+    )
+    return (
+        f"{ctx.current_indent}npu_demo::transpose<{target_space}, {source_space}, {target_type}, {source_type}>"
+        f"({target_expr} /*dst*/, {source_expr} /*source*/, {{{perm_values}}} /*perm*/);"
+    )
+
+
+def _emit_npu_reshape_stmt(op: DmaReshapeOp, ctx: EmitCContext) -> str:
+    result_name = ctx.allocate_name(op.result)
+    source_expr = _memory_base_name(op.source, ctx)
+    result_type = _type_to_c(op.result.type, ctx)
+    shape_expr = _emit_npu_brace_list(op.shape, ctx)
+    return (
+        f"{ctx.current_indent}{result_type} {result_name} = "
+        f"{source_expr}.reshape({shape_expr} /*shape*/);"
+    )
+
+
+def _emit_symbol_const_stmt(op: Operation, ctx: EmitCContext) -> str:
+    if isinstance(op, SymbolConstOp):
+        value_text = str(op.value.data)
+        result = op.result
+    else:
+        if not op.results or not isinstance(op.results[0].type, SymbolValueType):
+            raise _emit_error(ctx, op.name, "symbol.const result must be !symbol.int")
+        value_text = op.results[0].type.expr.expr.data
+        result = op.results[0]
+    if all(isinstance(use.operation, (DmaLoadOp, DmaStoreOp)) for use in result.uses):
+        return ""
+    preferred = f"c_{value_text}".replace("-", "neg_")
+    if result.uses and all(isinstance(use.operation, DmaSliceOp) for use in result.uses):
+        name = _bind_preferred_name(ctx, result, preferred)
+    else:
+        name = ctx.bind_name(result, preferred)
+    return f"{ctx.current_indent}S_INT {name} = {value_text};"
+
+
+def _emit_symbol_cast_stmt(op: SymbolToIntOp | SymbolCastOp, ctx: EmitCContext) -> str:
+    result_name = ctx.lookup_name(op.result)
+    if result_name is None:
+        source_owner = op.source.owner
+        if isinstance(source_owner, Operation) and _is_symbol_const_like(source_owner):
+            source_name = emit_c_value(op.source, ctx)
+            result_name = ctx.bind_name(op.result, f"{source_name}_cast_{_type_to_c(op.result.type, ctx)}")
+        else:
+            result_name = ctx.bind_name(op.result, f"value_cast_{_type_to_c(op.result.type, ctx)}")
+    return f"{ctx.current_indent}{_type_to_c(op.result.type, ctx)} {result_name} = {emit_c_value(op.source, ctx)};"
 
 
 def _emit_npu_kernel_matmul_stmt(op: KernelMatmulOp, ctx: EmitCContext) -> str:
@@ -1739,9 +1997,13 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
         return ""
     if _is_symbol_const_like(op):
         if ctx.target == "npu_demo":
-            return _emit_npu_symbol_const_stmt(op, ctx)
+            return _emit_symbol_const_stmt(op, ctx)
         return ""
-    if isinstance(op, (SymbolToIntOp, SymbolCastOp, SymbolToFloatOp)):
+    if isinstance(op, (SymbolToIntOp, SymbolCastOp)):
+        if ctx.target == "npu_demo":
+            return _emit_symbol_cast_stmt(op, ctx)
+        return ""
+    if isinstance(op, SymbolToFloatOp):
         if ctx.target == "npu_demo":
             return _emit_assignment(op, ctx)
         return ""
@@ -1766,13 +2028,31 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
         if isinstance(op, DmaAllocOp):
             return _emit_dma_alloc_stmt(op, ctx)
         if isinstance(op, DmaFillOp):
-            return _emit_dma_fill_stmt(op, ctx)
+            return _emit_npu_fill_stmt(op, ctx)
+        if isinstance(op, DmaFreeOp):
+            return _emit_npu_free_stmt(op, ctx)
+        if isinstance(op, DmaCopyOp):
+            return _emit_npu_copy_stmt(op, ctx)
         if isinstance(op, DmaViewOp):
             return _emit_npu_view_stmt(op, ctx)
+        if isinstance(op, DmaReshapeOp):
+            return _emit_npu_reshape_stmt(op, ctx)
+        if isinstance(op, DmaCastOp):
+            return _emit_npu_cast_stmt(op, ctx)
         if isinstance(op, DmaSliceOp):
             return _emit_npu_slice_stmt(op, ctx)
         if isinstance(op, DmaDesliceOp):
             return _emit_npu_deslice_stmt(op, ctx)
+        if isinstance(op, DmaBroadcastOp):
+            return _emit_npu_broadcast_stmt(op, ctx)
+        if isinstance(op, DmaLoadOp):
+            return _emit_npu_load_stmt(op, ctx)
+        if isinstance(op, DmaStoreOp):
+            return _emit_npu_store_stmt(op, ctx)
+        if isinstance(op, DmaTransposeOp):
+            return _emit_npu_transpose_stmt(op, ctx)
+        if isinstance(op, KernelAddOp):
+            return _emit_npu_kernel_add_stmt(op, ctx)
         if isinstance(op, KernelBinaryElewiseOp):
             return _emit_kernel_binary_elewise_stmt(op, ctx)
         if isinstance(op, KernelExpOp):

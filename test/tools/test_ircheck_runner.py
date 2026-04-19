@@ -370,6 +370,39 @@ def test_run_ircheck_text_emitc_npu_demo_failure_keeps_ir() -> None:
     assert "void main() {" in result.actual_ir
 
 
+# TC-IRCHECK-RUN-031A
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: N/A
+# 最近一次运行成功时间: N/A
+# 功能说明: 验证 `emitc_target=npu_demo` 可接受单函数 `dma.alloc` module 子集，并返回 helper 形式源码。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_emitc_npu_demo_plain_dma_alloc_success
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+def test_run_ircheck_text_emitc_npu_demo_plain_dma_alloc_success() -> None:
+    text = """// COMPILE_ARGS: --pass no-op
+// CHECK: #include "include/npu_demo/npu_demo.h"
+// CHECK: void dma_alloc_case() {
+// CHECK-NEXT:     Memory<GM, uint8_t> [[OUT:{val}]] = alloc<GM, uint8_t>({2, 3} /*shape*/, {3, 1} /*stride*/);
+// CHECK-NEXT: }
+
+builtin.module {
+  func.func @dma_alloc_case() {
+    %0 = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[2, 3], [3, 1], ui8, #nn.space<global>>
+    func.return
+  }
+}
+"""
+    result = run_ircheck_text(text, source_path="inline_emitc_alloc.ircheck", emitc_target="npu_demo")
+
+    assert result.ok is True
+    assert result.exit_code == 0
+    assert result.message is None
+    assert 'Memory<GM, uint8_t>' in result.actual_ir
+    assert "alloc<GM, uint8_t>({2, 3} /*shape*/, {3, 1} /*stride*/);" in result.actual_ir
+
+
 # TC-IRCHECK-RUN-032
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚

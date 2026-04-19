@@ -1,6 +1,6 @@
 /*
 功能说明:
-- 提供 npu_demo 后端的 `slice/deslice` 轻量实现，并复用 `Memory` 的成员式 `view/reshape` 接口。
+- 提供 npu_demo 后端的 `alloc/slice/deslice` 轻量实现，并复用 `Memory` 的成员式 `view/reshape` 接口。
 
 使用示例:
 - #include "include/npu_demo/Dma.h"
@@ -18,7 +18,9 @@
 #ifndef KERNELCODE_GENERATE_INCLUDE_NPU_DEMO_DMA_H_
 #define KERNELCODE_GENERATE_INCLUDE_NPU_DEMO_DMA_H_
 
+#include <initializer_list>
 #include <limits>
+#include <stdexcept>
 
 #include "include/api/Dma.h"
 #include "include/npu_demo/Core.h"
@@ -55,6 +57,61 @@ inline bool checked_add_non_negative(long long lhs, long long rhs, long long* ou
 }
 
 }  // namespace npu_demo_dma_detail
+
+/*
+功能说明:
+- 按给定 shape/stride 创建一块新的 `Memory<Space, T>`，供 npu_demo DMA helper 使用。
+- backing storage 由 helper 在堆上分配，并按 shape/stride 复制到返回的 Memory 元信息中。
+
+使用示例:
+- Memory<TSM, float> tile = alloc<TSM, float>({16}, {1});
+
+创建者: 小李飞刀
+最后修改人: 小李飞刀
+
+关联文件:
+- spec: spec/include/api/Dma.md
+- test: test/include/api/test_dma.py
+- 功能实现: include/npu_demo/Dma.h
+*/
+template <MemorySpace Space, typename T>
+inline Memory<Space, T> alloc(
+    std::initializer_list<long long> shape,
+    std::initializer_list<long long> stride,
+    MemoryFormat format) {
+    const unsigned long long rank = shape.size();
+    if (rank == 0 || rank != stride.size() || rank > npu_demo_dma_detail::kMaxDmaRank) {
+        throw std::runtime_error("dma.alloc: invalid shape/stride");
+    }
+
+    long long shape_buf[npu_demo_dma_detail::kMaxDmaRank] = {0};
+    long long stride_buf[npu_demo_dma_detail::kMaxDmaRank] = {0};
+    long long max_linear_offset = 0;
+    auto shape_it = shape.begin();
+    auto stride_it = stride.begin();
+    for (unsigned long long i = 0; i < rank; ++i, ++shape_it, ++stride_it) {
+        if (*shape_it <= 0 || *stride_it <= 0) {
+            throw std::runtime_error("dma.alloc: invalid shape/stride");
+        }
+        shape_buf[i] = *shape_it;
+        stride_buf[i] = *stride_it;
+
+        long long span = 0;
+        if (!npu_demo_dma_detail::checked_mul_non_negative(shape_buf[i] - 1, stride_buf[i], &span)) {
+            throw std::runtime_error("dma.alloc: overflow");
+        }
+        if (!npu_demo_dma_detail::checked_add_non_negative(max_linear_offset, span, &max_linear_offset)) {
+            throw std::runtime_error("dma.alloc: overflow");
+        }
+    }
+
+    long long storage_size = 0;
+    if (!npu_demo_dma_detail::checked_add_non_negative(max_linear_offset, 1, &storage_size)) {
+        throw std::runtime_error("dma.alloc: overflow");
+    }
+    T* data = new T[static_cast<unsigned long long>(storage_size)]();
+    return Memory<Space, T>(data, shape_buf, stride_buf, rank, format);
+}
 
 /*
 功能说明:
