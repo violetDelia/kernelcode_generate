@@ -1955,7 +1955,7 @@ def _emit_symbol_loop(op: SymbolForOp, ctx: EmitCContext) -> str:
 
     if ctx.target not in {"cpu", "npu_demo"}:
         raise _emit_error(ctx, op.name, "unsupported target")
-    iv_type = "long long"
+    iv_type = "S_INT" if ctx.target == "npu_demo" else "long long"
     return _emit_loop_region(op.start, op.end, op.step, op.body.block, ctx, iv_type=iv_type)
 
 
