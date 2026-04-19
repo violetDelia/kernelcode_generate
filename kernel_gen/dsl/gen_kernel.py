@@ -1826,7 +1826,7 @@ def gen_kernel(op_or_func: Any, ctx: EmitCContext) -> str:
     if ctx.target == "npu_demo":
         emit_ctx = EmitCContext(
             target=ctx.target,
-            indent="     ",
+            indent="    ",
             naming=ctx.naming,
             type_converter=ctx.type_converter,
             config=dict(ctx.config or {}),
