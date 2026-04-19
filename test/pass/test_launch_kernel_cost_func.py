@@ -5,7 +5,7 @@
 
 功能说明:
 - 覆盖 `LaunchKernelCostFuncPass` 的成功路径、共享 callee 去重与显式失败边界。
-- 锁定 `tuner.cost` metadata、`symbol.for` carried `f64` 累计与 registry 名称合同。
+- 锁定 `tuner.cost` metadata、`symbol.for` carried `!symbol.int` 与 `symbol.add` 累计链，以及 registry 名称合同。
 
 使用示例:
 - pytest -q test/pass/test_launch_kernel_cost_func.py
@@ -25,7 +25,8 @@ from pathlib import Path
 import pytest
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ArrayAttr, Float32Type, IntAttr, ModuleOp, StringAttr, i32
-from xdsl.irdl import IRDLOperation, irdl_op_definition, result_def
+from xdsl.ir import Attribute, Region
+from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def, result_def
 from xdsl.dialects.builtin import SymbolRefAttr
 from xdsl.printer import Printer
 from xdsl.utils.exceptions import VerifyException
@@ -34,8 +35,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dialect.arch import ArchBarrierOp, ArchLaunchOp, ArchScopeAttr, ArchVisibilityAttr
-from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
+from kernel_gen.dialect.arch import ArchLaunchOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolConstOp, SymbolForOp, SymbolIterType, SymbolValueType
 from kernel_gen.passes.registry import build_registered_pass, load_builtin_passes
@@ -54,6 +54,63 @@ class UnsupportedOp(IRDLOperation):
 
     def __init__(self: "UnsupportedOp") -> None:
         super().__init__(result_types=[i32])
+
+
+@irdl_op_definition
+class DmaViewOp(IRDLOperation):
+    """测试专用的 helper `dma.view`。"""
+
+    name = "dma.view"
+    source = operand_def(Attribute)
+    result = result_def(Attribute)
+
+    def __init__(self: "DmaViewOp", source: object, result_type: Attribute) -> None:
+        super().__init__(operands=[source], result_types=[result_type])
+
+
+@irdl_op_definition
+class DmaReshapeOp(IRDLOperation):
+    """测试专用的 helper `dma.reshape`。"""
+
+    name = "dma.reshape"
+    source = operand_def(Attribute)
+    result = result_def(Attribute)
+
+    def __init__(self: "DmaReshapeOp", source: object, result_type: Attribute) -> None:
+        super().__init__(operands=[source], result_types=[result_type])
+
+
+@irdl_op_definition
+class DmaCopyOp(IRDLOperation):
+    """测试专用的 `dma.copy`。"""
+
+    name = "dma.copy"
+    dst = operand_def(Attribute)
+    src = operand_def(Attribute)
+
+    def __init__(self: "DmaCopyOp", dst: object, src: object) -> None:
+        super().__init__(operands=[dst, src])
+
+
+@irdl_op_definition
+class KernelAddOp(IRDLOperation):
+    """测试专用的 `kernel.add`。"""
+
+    name = "kernel.add"
+    out = operand_def(Attribute)
+    lhs = operand_def(Attribute)
+    rhs = operand_def(Attribute)
+    space = attr_def(Attribute)
+
+    def __init__(
+        self: "KernelAddOp",
+        out: object,
+        lhs: object,
+        rhs: object,
+        *,
+        space: Attribute,
+    ) -> None:
+        super().__init__(operands=[out, lhs, rhs], attributes={"space": space})
 
 
 def _print_ir(module: ModuleOp) -> str:
@@ -86,7 +143,7 @@ def _make_memory_type(space: str = "global") -> NnMemoryType:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 生成固定二维 `f32` memory type，供 wrapper/device 参数与 `kernel.binary_elewise(kind="add")` 复用。
+    - 生成固定二维 `f32` memory type，供 wrapper/device 参数与 `dma.copy`、`kernel.add` 复用。
 
     使用示例:
     - memory_type = _make_memory_type()
@@ -105,29 +162,6 @@ def _make_memory_type(space: str = "global") -> NnMemoryType:
     )
 
 
-def _make_barrier_visibility() -> ArrayAttr:
-    """构造 `arch.barrier` 需要的 visibility 列表。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 统一生成 `[#arch.visibility<tsm>, #arch.visibility<tlm>]`。
-
-    使用示例:
-    - visibility = _make_barrier_visibility()
-
-    关联文件:
-    - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
-    - test: [test/pass/test_launch_kernel_cost_func.py](test/pass/test_launch_kernel_cost_func.py)
-    - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](kernel_gen/passes/tuning/launch_kernel_cost_func.py)
-    """
-
-    return ArrayAttr(
-        [ArchVisibilityAttr.from_name("tsm"), ArchVisibilityAttr.from_name("tlm")]
-    )
-
-
 def _build_launch_kernel_module(
     *,
     duplicate_launch: bool = False,
@@ -143,7 +177,7 @@ def _build_launch_kernel_module(
 
     功能说明:
     - 生成一个 wrapper 与一个 device function。
-    - device body 内包含 `symbol.for`、`arch.barrier` 与 `kernel.binary_elewise(kind="add")`，用于覆盖 move/compute 双类别成本节点。
+    - device body 内包含 `symbol.for`、`dma.view`、`dma.reshape`、`dma.copy` 与 `kernel.add`，用于覆盖 helper 保留与成本节点生成合同。
     - 可选生成共享 callee 的第二个 wrapper，或为目标 op 注入保留 metadata attr 冲突。
 
     使用示例:
@@ -207,17 +241,20 @@ def _build_launch_kernel_module(
 
     start = SymbolConstOp(0)
     step = SymbolConstOp(1)
-    barrier = ArchBarrierOp(ArchScopeAttr.from_name("block"), _make_barrier_visibility())
-    kernel_add = KernelBinaryElewiseOp(
+    view = DmaViewOp(device_block.args[0], memory_type)
+    reshape = DmaReshapeOp(device_block.args[1], memory_type)
+    dma_copy = DmaCopyOp(device_block.args[2], view.result)
+    kernel_add = KernelAddOp(
         device_block.args[2],
         device_block.args[0],
         device_block.args[1],
-        kind="add",
         space=NnMemorySpaceAttr(StringAttr("global")),
     )
     if conflict_attr:
-        kernel_add.attributes["cost_kind"] = StringAttr("move")
-    loop_block.add_op(barrier)
+        kernel_add.attributes["cost_kind"] = StringAttr("memory")
+    loop_block.add_op(view)
+    loop_block.add_op(reshape)
+    loop_block.add_op(dma_copy)
     if unsupported_op:
         loop_block.add_op(UnsupportedOp())
     loop_block.add_op(kernel_add)
@@ -242,7 +279,7 @@ def _build_launch_kernel_module(
         ops.append(extra_wrapper)
     ops.append(device)
     if preexisting_cost_func:
-        ops.append(func.FuncOp("_cost_all__device_kernel", ([], [])))
+        ops.append(func.FuncOp("_cost_compute__device_kernel", ([], [])))
     module = ModuleOp(ops)
     return module
 
@@ -263,85 +300,68 @@ def test_launch_kernel_cost_func_pass_registry_name() -> None:
 
 # TC-LKCF-002
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-18 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-18 00:00:00 +0800
-# 功能说明: 验证 `kind="all"` 成功路径会新增 cost function，并在循环内生成 `tuner.cost + arith.addf` 累计链。
-# 使用示例: pytest -q test/pass/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_builds_cost_function_for_all_kind
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-20 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-20 00:00:00 +0800
+# 功能说明: 验证 `cost_kind=compute` 成功路径会新增 cost function，并生成 `tuner.cost + symbol.add` 累计链。
+# 使用示例: pytest -q test/pass/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_builds_cost_function_for_compute_kind
 # 对应功能实现文件路径: kernel_gen/passes/tuning/launch_kernel_cost_func.py
 # 对应 spec 文件路径: spec/pass/tuning/launch_kernel_cost_func.md
 # 对应测试文件路径: test/pass/test_launch_kernel_cost_func.py
-def test_launch_kernel_cost_func_builds_cost_function_for_all_kind() -> None:
+def test_launch_kernel_cost_func_builds_cost_function_for_compute_kind() -> None:
     module = _build_launch_kernel_module()
 
-    LaunchKernelCostFuncPass(kind="all").run(module)
+    LaunchKernelCostFuncPass(cost_kind="compute").run(module)
     module.verify()
 
     funcs = [op for op in module.ops if isinstance(op, func.FuncOp)]
-    assert [op.sym_name.data for op in funcs] == ["wrapper", "_device_kernel", "_cost_all__device_kernel"]
+    assert [op.sym_name.data for op in funcs] == ["wrapper", "_device_kernel", "_cost_compute__device_kernel"]
 
     printed = _print_ir(module)
-    assert "@_cost_all__device_kernel" in printed
-    assert 'cost_kind = "all"' in printed
-    assert 'op_name = "arch.barrier"' in printed
-    assert 'op_name = "kernel.binary_elewise"' in printed
-    assert 'kernel_kind = "add"' in printed
+    assert "@_cost_compute__device_kernel" in printed
+    assert printed.count('cost_kind = "compute"') == 2
+    assert 'op_name = "dma.copy"' in printed
+    assert 'op_name = "kernel.add"' in printed
     assert "symbol.for" in printed
     assert "iter_args(" in printed
     assert "symbol.yield" in printed
-    assert "arith.addf" in printed
+    assert "symbol.add" in printed
+    assert '"dma.view"' in printed
+    assert '"dma.reshape"' in printed
+    assert 'op_name = "dma.view"' not in printed
+    assert 'op_name = "dma.reshape"' not in printed
+    assert ' kind = "compute"' not in printed
+    assert ' kind = "memory"' not in printed
     assert printed.count("tuner.cost") == 2
 
 
 # TC-LKCF-003
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-18 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-18 00:00:00 +0800
-# 功能说明: 验证 `kind="compute"` 不裁掉 move 节点，只改 `cost_kind`。
-# 使用示例: pytest -q test/pass/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_compute_keeps_move_nodes
-# 对应功能实现文件路径: kernel_gen/passes/tuning/launch_kernel_cost_func.py
-# 对应 spec 文件路径: spec/pass/tuning/launch_kernel_cost_func.md
-# 对应测试文件路径: test/pass/test_launch_kernel_cost_func.py
-def test_launch_kernel_cost_func_compute_keeps_move_nodes() -> None:
-    module = _build_launch_kernel_module()
-
-    LaunchKernelCostFuncPass(kind="compute").run(module)
-
-    printed = _print_ir(module)
-    assert "@_cost_compute__device_kernel" in printed
-    assert printed.count('cost_kind = "compute"') == 2
-    assert 'kind = "move"' in printed
-    assert 'kind = "compute"' in printed
-
-
-# TC-LKCF-003A
-# 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-18 02:00:00 +0800
-# 最近一次运行成功时间: 2026-04-18 02:00:00 +0800
-# 功能说明: 验证 `kind="move"` 成功路径会保留 compute 节点，只把 `cost_kind` 收口为 move。
-# 使用示例: pytest -q test/pass/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_move_keeps_compute_nodes
+# 最近一次运行测试时间: 2026-04-20 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-20 00:00:00 +0800
+# 功能说明: 验证 `cost_kind=memory` 不裁剪成本节点，仅切换 metadata 值。
+# 使用示例: pytest -q test/pass/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_memory_keeps_compute_nodes
 # 对应功能实现文件路径: kernel_gen/passes/tuning/launch_kernel_cost_func.py
 # 对应 spec 文件路径: spec/pass/tuning/launch_kernel_cost_func.md
 # 对应测试文件路径: test/pass/test_launch_kernel_cost_func.py
-def test_launch_kernel_cost_func_move_keeps_compute_nodes() -> None:
+def test_launch_kernel_cost_func_memory_keeps_compute_nodes() -> None:
     module = _build_launch_kernel_module()
 
-    LaunchKernelCostFuncPass(kind="move").run(module)
+    LaunchKernelCostFuncPass(cost_kind="memory").run(module)
 
     printed = _print_ir(module)
-    assert "@_cost_move__device_kernel" in printed
-    assert printed.count('cost_kind = "move"') == 2
-    assert 'kind = "move"' in printed
-    assert 'kind = "compute"' in printed
+    assert "@_cost_memory__device_kernel" in printed
+    assert printed.count('cost_kind = "memory"') == 2
+    assert 'op_name = "dma.copy"' in printed
+    assert 'op_name = "kernel.add"' in printed
 
 
 # TC-LKCF-004
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-18 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-18 00:00:00 +0800
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-20 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-20 00:00:00 +0800
 # 功能说明: 验证共享 callee 时同一 `cost_kind` 仅生成一份 cost function。
 # 使用示例: pytest -q test/pass/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_shared_callee_once
 # 对应功能实现文件路径: kernel_gen/passes/tuning/launch_kernel_cost_func.py
@@ -350,55 +370,55 @@ def test_launch_kernel_cost_func_move_keeps_compute_nodes() -> None:
 def test_launch_kernel_cost_func_shared_callee_once() -> None:
     module = _build_launch_kernel_module(duplicate_launch=True)
 
-    LaunchKernelCostFuncPass(kind="all").run(module)
+    LaunchKernelCostFuncPass(cost_kind="compute").run(module)
 
     funcs = [op.sym_name.data for op in module.ops if isinstance(op, func.FuncOp)]
-    assert funcs == ["wrapper", "wrapper_2", "_device_kernel", "_cost_all__device_kernel"]
+    assert funcs == ["wrapper", "wrapper_2", "_device_kernel", "_cost_compute__device_kernel"]
 
 
 # TC-LKCF-005A
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-18 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-18 00:00:00 +0800
-# 功能说明: 验证非法 `kind` 报稳定错误短语。
-# 使用示例: pytest -q test/pass/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_rejects_invalid_kind
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-20 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-20 00:00:00 +0800
+# 功能说明: 验证非法 `cost_kind` 报稳定错误短语。
+# 使用示例: pytest -q test/pass/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_rejects_invalid_cost_kind
 # 对应功能实现文件路径: kernel_gen/passes/tuning/launch_kernel_cost_func.py
 # 对应 spec 文件路径: spec/pass/tuning/launch_kernel_cost_func.md
 # 对应测试文件路径: test/pass/test_launch_kernel_cost_func.py
-def test_launch_kernel_cost_func_rejects_invalid_kind() -> None:
+def test_launch_kernel_cost_func_rejects_invalid_cost_kind() -> None:
     with pytest.raises(
         LaunchKernelCostFuncError,
-        match=r"^LaunchKernelCostFuncError: kind must be one of compute, move, all$",
+        match=r"^LaunchKernelCostFuncError: cost_kind must be one of compute, memory$",
     ):
-        LaunchKernelCostFuncPass(kind="invalid")
+        LaunchKernelCostFuncPass(cost_kind="invalid")
 
 
 # TC-LKCF-005B
 # 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-18 02:00:00 +0800
-# 最近一次运行成功时间: 2026-04-18 02:00:00 +0800
-# 功能说明: 验证 registry 构造 launch-kernel-cost-func 时不会吞掉非法 `kind` 的业务错误。
-# 使用示例: pytest -q test/pass/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_rejects_invalid_kind_via_registry
+# 最近一次运行测试时间: 2026-04-20 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-20 00:00:00 +0800
+# 功能说明: 验证 registry 构造 launch-kernel-cost-func 时不会吞掉非法 `cost_kind` 的业务错误。
+# 使用示例: pytest -q test/pass/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_rejects_invalid_cost_kind_via_registry
 # 对应功能实现文件路径: kernel_gen/passes/registry.py
 # 对应 spec 文件路径: spec/pass/registry.md
 # 对应测试文件路径: test/pass/test_launch_kernel_cost_func.py
-def test_launch_kernel_cost_func_rejects_invalid_kind_via_registry() -> None:
+def test_launch_kernel_cost_func_rejects_invalid_cost_kind_via_registry() -> None:
     load_builtin_passes()
 
     with pytest.raises(
         LaunchKernelCostFuncError,
-        match=r"^LaunchKernelCostFuncError: kind must be one of compute, move, all$",
+        match=r"^LaunchKernelCostFuncError: cost_kind must be one of compute, memory$",
     ):
-        build_registered_pass("launch-kernel-cost-func", {"kind": "invalid"})
+        build_registered_pass("launch-kernel-cost-func", {"cost_kind": "invalid"})
 
 
 # TC-LKCF-006
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-18 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-18 00:00:00 +0800
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-20 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-20 00:00:00 +0800
 # 功能说明: 验证原 op metadata attr 与 pass-owned attr 冲突时显式失败。
 # 使用示例: pytest -q test/pass/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_rejects_metadata_attr_conflict
 # 对应功能实现文件路径: kernel_gen/passes/tuning/launch_kernel_cost_func.py
@@ -411,14 +431,14 @@ def test_launch_kernel_cost_func_rejects_metadata_attr_conflict() -> None:
         LaunchKernelCostFuncError,
         match=r"reserved attr 'cost_kind'$",
     ):
-        LaunchKernelCostFuncPass(kind="all").run(module)
+        LaunchKernelCostFuncPass(cost_kind="compute").run(module)
 
 
 # TC-LKCF-007
 # 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-18 02:00:00 +0800
-# 最近一次运行成功时间: 2026-04-18 02:00:00 +0800
+# 最近一次运行测试时间: 2026-04-20 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-20 00:00:00 +0800
 # 功能说明: 验证 device callee 缺失时显式失败，不 silent skip。
 # 使用示例: pytest -q test/pass/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_rejects_missing_callee
 # 对应功能实现文件路径: kernel_gen/passes/tuning/launch_kernel_cost_func.py
@@ -431,14 +451,14 @@ def test_launch_kernel_cost_func_rejects_missing_callee() -> None:
         LaunchKernelCostFuncError,
         match=r"arch\.launch callee 'missing_kernel' not found",
     ):
-        LaunchKernelCostFuncPass(kind="all").run(module)
+        LaunchKernelCostFuncPass(cost_kind="compute").run(module)
 
 
 # TC-LKCF-008
 # 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-18 02:00:00 +0800
-# 最近一次运行成功时间: 2026-04-18 02:00:00 +0800
+# 最近一次运行测试时间: 2026-04-20 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-20 00:00:00 +0800
 # 功能说明: 验证非支持 op 会触发显式失败，而不是静默跳过。
 # 使用示例: pytest -q test/pass/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_rejects_unsupported_op
 # 对应功能实现文件路径: kernel_gen/passes/tuning/launch_kernel_cost_func.py
@@ -451,14 +471,14 @@ def test_launch_kernel_cost_func_rejects_unsupported_op() -> None:
         LaunchKernelCostFuncError,
         match=r"unsupported op 'test\.unsupported' in device function '_device_kernel'",
     ):
-        LaunchKernelCostFuncPass(kind="all").run(module)
+        LaunchKernelCostFuncPass(cost_kind="compute").run(module)
 
 
 # TC-LKCF-009
 # 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-18 02:00:00 +0800
-# 最近一次运行成功时间: 2026-04-18 02:00:00 +0800
+# 最近一次运行测试时间: 2026-04-20 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-20 00:00:00 +0800
 # 功能说明: 验证预存同名 cost function 会显式失败，不覆盖已有定义。
 # 使用示例: pytest -q test/pass/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_rejects_existing_cost_func
 # 对应功能实现文件路径: kernel_gen/passes/tuning/launch_kernel_cost_func.py
@@ -469,6 +489,6 @@ def test_launch_kernel_cost_func_rejects_existing_cost_func() -> None:
 
     with pytest.raises(
         LaunchKernelCostFuncError,
-        match=r"cost function '_cost_all__device_kernel' already exists",
+        match=r"cost function '_cost_compute__device_kernel' already exists",
     ):
-        LaunchKernelCostFuncPass(kind="all").run(module)
+        LaunchKernelCostFuncPass(cost_kind="compute").run(module)

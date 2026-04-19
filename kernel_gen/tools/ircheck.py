@@ -370,6 +370,45 @@ def _contains_invalid_regex_literal_fragment(literal: str) -> bool:
         search_start = open_idx + 4
 
 
+def _compile_literal_fragment(literal: str) -> str:
+    r"""把 CHECK literal 片段编译为 regex 片段。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 默认仍按字面量匹配（`re.escape`）。
+    - 兼容 FileCheck 风格的 `{{...}}` 行内 regex 片段。
+    - 对未闭合或空 `{{...}}` 片段抛稳定解析错误。
+    """
+
+    decoded = _decode_literal_check_fragment(literal)
+    pattern_parts: list[str] = []
+    cursor = 0
+    while True:
+        open_double_idx = decoded.find("{{", cursor)
+        open_single_idx = decoded.find("{.*}", cursor)
+        candidates = [idx for idx in (open_double_idx, open_single_idx) if idx != -1]
+        if not candidates:
+            pattern_parts.append(re.escape(decoded[cursor:]))
+            break
+        open_idx = min(candidates)
+        pattern_parts.append(re.escape(decoded[cursor:open_idx]))
+        if open_idx == open_double_idx:
+            close_idx = decoded.find("}}", open_idx + 2)
+            if close_idx == -1:
+                raise IrcheckParseError("IrcheckParseError: invalid regex check")
+            regex_text = decoded[open_idx + 2 : close_idx]
+            if not regex_text:
+                raise IrcheckParseError("IrcheckParseError: invalid regex check")
+            pattern_parts.append(_expand_regex_aliases(regex_text))
+            cursor = close_idx + 2
+            continue
+        pattern_parts.append(".*")
+        cursor = open_idx + len("{.*}")
+    return "".join(pattern_parts)
+
+
 def _expand_regex_aliases(regex_text: str) -> str:
     """展开 `[[NAME:REGEX]]` 中支持的内置 alias。
 
@@ -419,7 +458,7 @@ def _validate_pattern_directive(text: str, kind: CheckKind, declared_variables: 
     pattern_parts: list[str] = []
     for token_kind, name, payload in _tokenize_check_pattern(text):
         if token_kind == "literal":
-            pattern_parts.append(re.escape(_decode_literal_check_fragment(name)))
+            pattern_parts.append(_compile_literal_fragment(name))
             continue
         if token_kind == "ref":
             if name not in visible_variables:
@@ -474,7 +513,7 @@ def _compile_pattern_directive(
     pattern_parts: list[str] = []
     for token_kind, name, payload in _tokenize_check_pattern(directive.text):
         if token_kind == "literal":
-            pattern_parts.append(re.escape(_decode_literal_check_fragment(name)))
+            pattern_parts.append(_compile_literal_fragment(name))
             continue
         if token_kind == "ref":
             if name in local_definitions:
@@ -1297,6 +1336,8 @@ def _build_default_context() -> Context:
     """
 
     ctx = Context()
+    # expectation 允许出现未在当前 context 注册的通用 op 文本（如 "kernel.add"）。
+    ctx.allow_unregistered = True
     ctx.load_dialect(Builtin)
     ctx.load_dialect(Func)
     ctx.load_dialect(Arith)
