@@ -101,4 +101,4 @@ def test_script_runs_real_nn_lowering_expectation() -> None:
 
     assert result.returncode == 0, result.stderr
     assert "[CASE-broadcast-static]" in result.stdout
-    assert "[CASE-img2col2d-dynamic]" in result.stdout
+    assert "[CASE-transpose-dynamic]" in result.stdout

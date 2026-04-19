@@ -377,8 +377,6 @@ def _type_to_c(attr: Any, ctx: EmitCContext) -> str:
         space_param = _space_to_c(attr, ctx)
         return f"Memory<{space_param}, {_type_to_c(attr.element_type, ctx)}>"
     if isinstance(attr, SymbolValueType):
-        if ctx.target == "npu_demo":
-            return "S_INT"
         return "long long"
     raise _emit_error(ctx, f"type {attr}", "unsupported type")
 
@@ -401,12 +399,7 @@ def _emit_npu_symbol_const_stmt(op: Operation, ctx: EmitCContext) -> str:
         if not isinstance(value_attr, IntegerAttr):
             raise _emit_error(ctx, op.name, "symbol.const value must be integer attribute")
         value = int(value_attr.value.data)
-    existing_name = ctx._symbol_const_names.get(value)
-    if existing_name is not None:
-        ctx.bind_name(op.results[0], existing_name)
-        return ""
-    result_name = _symbol_const_name(value)
-    ctx._symbol_const_names[value] = ctx.bind_name(op.results[0], result_name)
+    result_name = _bind_preferred_name(ctx, op.results[0], _symbol_const_name(value))
     return f"{ctx.current_indent}long long {result_name} = {value};"
 
 
@@ -1750,11 +1743,8 @@ def _emit_symbol_const_stmt(op: Operation, ctx: EmitCContext) -> str:
     if all(isinstance(use.operation, (DmaLoadOp, DmaStoreOp)) for use in result.uses):
         return ""
     preferred = f"c_{value_text}".replace("-", "neg_")
-    if result.uses and all(isinstance(use.operation, DmaSliceOp) for use in result.uses):
-        name = _bind_preferred_name(ctx, result, preferred)
-    else:
-        name = ctx.bind_name(result, preferred)
-    return f"{ctx.current_indent}S_INT {name} = {value_text};"
+    name = _bind_preferred_name(ctx, result, preferred)
+    return f"{ctx.current_indent}long long {name} = {value_text};"
 
 
 def _emit_symbol_cast_stmt(op: SymbolToIntOp | SymbolCastOp, ctx: EmitCContext) -> str:

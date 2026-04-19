@@ -24,9 +24,27 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKTREE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-MAIN_REPO_ROOT="$(cd "$WORKTREE_ROOT/.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 MODULE_NAME="expectation.pass.lowing.nn_lowering"
+
+resolve_expectation_repo_root() {
+  if [[ -d "$WORKTREE_ROOT/expectation" ]]; then
+    printf '%s\n' "$WORKTREE_ROOT"
+    return 0
+  fi
+
+  local parent_root
+  parent_root="$(cd "$WORKTREE_ROOT/.." && pwd)"
+  if [[ -d "$parent_root/expectation" ]]; then
+    printf '%s\n' "$parent_root"
+    return 0
+  fi
+
+  printf 'expectation repo root not found from %s\n' "$WORKTREE_ROOT" >&2
+  return 1
+}
+
+MAIN_REPO_ROOT="$(resolve_expectation_repo_root)"
 PYTHONPATH_VALUE="$MAIN_REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
 usage() {

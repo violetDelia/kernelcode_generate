@@ -1067,3 +1067,44 @@ int main() {
 }
 """
     _compile_and_run(source)
+
+
+# NPU-DEMO-KC-008
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 测试目的: 锁定 `include/npu_demo/npu_demo.h` 不再重新聚合 `include/npu_demo/Nn.h`，同时单入口仍能承接 bare `add(lhs, rhs, out)`。
+# 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_single_entry_keeps_kernel_bridge_without_reexporting_nn_header
+# 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
+# 对应 spec 文件链接: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
+# 对应测试文件链接: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
+def test_npu_demo_single_entry_keeps_kernel_bridge_without_reexporting_nn_header() -> None:
+    header_text = (REPO_ROOT / "include" / "npu_demo" / "npu_demo.h").read_text(encoding="utf-8")
+
+    assert '#include "include/npu_demo/Nn.h"' not in header_text
+
+    source = r"""
+#include "include/npu_demo/npu_demo.h"
+
+static int fail(int code) { return code; }
+
+int main() {
+    float lhs_data[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+    float rhs_data[4] = {10.0f, 20.0f, 30.0f, 40.0f};
+    float out_data[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    long long shape[1] = {4};
+    long long stride[1] = {1};
+    Memory<TSM, float> lhs(lhs_data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<TSM, float> rhs(rhs_data, shape, stride, 1, MemoryFormat::Norm);
+    Memory<TLM1, float> out(out_data, shape, stride, 1, MemoryFormat::Norm);
+
+    if (add(lhs, rhs, out) != StatusCode::kOk) {
+        return fail(1);
+    }
+    if (out_data[0] != 11.0f || out_data[1] != 22.0f || out_data[2] != 33.0f || out_data[3] != 44.0f) {
+        return fail(2);
+    }
+    return 0;
+}
+"""
+
+    _compile_and_run(source)

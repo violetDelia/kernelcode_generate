@@ -527,7 +527,7 @@ def test_emit_c_op_rejects_symbol_add_on_non_cpu() -> None:
 # EC-008A
 # 创建者: jcc你莫辜负
 # 最后修改人: jcc你莫辜负
-# 测试目的: 验证 npu_demo 下 symbol.const/cast/to_float 可生成 `S_INT` 与目标结果类型局部变量语句。
+# 测试目的: 验证 npu_demo 下 symbol.const/cast/to_float 可生成 `long long` 与目标结果类型局部变量语句。
 # 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
 # 对应 spec 文件路径: spec/dsl/emit_c.md
 # 对应测试文件路径: test/dsl/test_emit_c.py
@@ -537,15 +537,15 @@ def test_emit_c_op_lowers_npu_demo_symbol_const_cast_and_to_float() -> None:
     cast = SymbolCastOp(const.result, i32)
     to_float = SymbolToFloatOp(const.result, f32)
 
-    assert emit_c_op(const, ctx) == "S_INT c_7 = 7;"
-    assert emit_c_op(cast, ctx) == "int32_t c_7_cast_int32_t = c_7;"
-    assert emit_c_op(to_float, ctx) == "float v0 = c_7;"
+    assert emit_c_op(const, ctx) == "long long c_7 = 7;"
+    assert emit_c_op(cast, ctx) == "int32_t v0 = c_7;"
+    assert emit_c_op(to_float, ctx) == "float v1 = c_7;"
 
 
 # EC-008B
 # 创建者: jcc你莫辜负
 # 最后修改人: jcc你莫辜负
-# 测试目的: 验证 npu_demo 下 symbol 二元与比较 op 会生成 `S_INT/bool` 局部变量语句。
+# 测试目的: 验证 npu_demo 下 symbol 二元与比较 op 会生成 `long long/bool` 局部变量语句。
 # 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
 # 对应 spec 文件路径: spec/dsl/emit_c.md
 # 对应测试文件路径: test/dsl/test_emit_c.py
@@ -561,7 +561,7 @@ def test_emit_c_op_lowers_npu_demo_symbol_binary_and_compare() -> None:
     add = SymbolAddOp(block.args[0], block.args[1], add_type)
     eq = SymbolEqOp(block.args[0], block.args[1], i1)
 
-    assert emit_c_op(add, ctx) == "S_INT v0 = (lhs + rhs);"
+    assert emit_c_op(add, ctx) == "long long v0 = (lhs + rhs);"
     assert emit_c_op(eq, ctx) == "bool v1 = (lhs == rhs);"
 
 
@@ -582,8 +582,8 @@ def test_emit_c_op_lowers_npu_demo_symbol_queries() -> None:
 
     assert emit_c_value(dim.result, ctx) == "src.get_shape(1)"
     assert emit_c_value(stride.result, ctx) == "src.get_stride(0)"
-    assert emit_c_op(dim, ctx) == "S_INT v0 = src.get_shape(1);"
-    assert emit_c_op(stride, ctx) == "S_INT v1 = src.get_stride(0);"
+    assert emit_c_op(dim, ctx) == "long long v0 = src.get_shape(1);"
+    assert emit_c_op(stride, ctx) == "long long v1 = src.get_stride(0);"
 
 
 # EC-008D
@@ -601,9 +601,9 @@ def test_emit_c_op_lowers_npu_demo_symbol_for() -> None:
     body = Block(arg_types=[SymbolIterType.from_bounds("0", "8", "2")])
     loop = SymbolForOp(start.result, end.result, step.result, body)
 
-    assert emit_c_op(start, ctx) == "S_INT c_0 = 0;"
-    assert emit_c_op(end, ctx) == "S_INT c_8 = 8;"
-    assert emit_c_op(step, ctx) == "S_INT c_2 = 2;"
+    assert emit_c_op(start, ctx) == "long long c_0 = 0;"
+    assert emit_c_op(end, ctx) == "long long c_8 = 8;"
+    assert emit_c_op(step, ctx) == "long long c_2 = 2;"
     assert emit_c_op(loop, ctx) == "for (long long i0 = c_0; i0 < c_8; i0 += c_2) {\n}"
 
 

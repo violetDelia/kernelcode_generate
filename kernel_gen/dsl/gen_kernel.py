@@ -452,8 +452,6 @@ def _type_to_c_for_target(attr: Any, target: str) -> str:
         space = _memory_space_to_c_for_target(attr.space, target)
         return f"Memory<{space}, {_type_to_c_for_target(attr.element_type, target)}>"
     if isinstance(attr, SymbolValueType):
-        if target == "npu_demo":
-            return "S_INT"
         return "long long"
     raise TypeError(f"unsupported type: {attr}")
 
