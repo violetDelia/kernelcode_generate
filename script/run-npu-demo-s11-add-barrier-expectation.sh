@@ -7,7 +7,8 @@
 #
 # 功能说明:
 # - 为 `T-20260419-a10007f4` 提供 S11 `npu_demo_add_barrier` expectation 的 worktree 内可执行入口。
-# - 从当前 worktree 启动 Python，并通过主仓路径加载 `expectation/dsl/gen_kernel/npu_demo_add_barrier`。
+# - 优先从当前 worktree 解析 expectation 入口，必要时回退到父仓中的 `expectation/dsl/gen_kernel/npu_demo_add_barrier`。
+# - 运行时只注入当前 worktree 的 `PYTHONPATH`，由 expectation 文件自身完成仓根定位。
 # - 支持 `--print-command` 输出实际执行命令，便于任务记录与复审直接复用。
 #
 # 使用示例:
@@ -23,10 +24,28 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKTREE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-MAIN_REPO_ROOT="$(cd "$WORKTREE_ROOT/.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-EXPECTATION_ENTRY="$MAIN_REPO_ROOT/expectation/dsl/gen_kernel/npu_demo_add_barrier"
-PYTHONPATH_VALUE="$WORKTREE_ROOT:$MAIN_REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+
+resolve_expectation_repo_root() {
+  if [[ -f "$WORKTREE_ROOT/expectation/dsl/gen_kernel/npu_demo_add_barrier" ]]; then
+    printf '%s\n' "$WORKTREE_ROOT"
+    return 0
+  fi
+
+  local parent_root
+  parent_root="$(cd "$WORKTREE_ROOT/.." && pwd)"
+  if [[ -f "$parent_root/expectation/dsl/gen_kernel/npu_demo_add_barrier" ]]; then
+    printf '%s\n' "$parent_root"
+    return 0
+  fi
+
+  printf 'expectation entry not found from %s\n' "$WORKTREE_ROOT" >&2
+  return 1
+}
+
+EXPECTATION_REPO_ROOT="$(resolve_expectation_repo_root)"
+EXPECTATION_ENTRY="$EXPECTATION_REPO_ROOT/expectation/dsl/gen_kernel/npu_demo_add_barrier"
+PYTHONPATH_VALUE="$WORKTREE_ROOT"
 
 usage() {
   cat <<'EOF'
