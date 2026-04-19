@@ -38,7 +38,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFillOp, DmaLoadOp, DmaSliceOp, DmaStoreOp, DmaViewOp
-from kernel_gen.dialect.kernel import KernelAddOp, KernelBinaryElewiseOp
+from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnAddOp, NnImg2col2dOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolCastOp, SymbolConstOp, SymbolEqOp, SymbolForOp, SymbolGetDimOp, SymbolGetStrideOp, SymbolIterType, SymbolToFloatOp, SymbolValueType
 from kernel_gen.dsl.ast import BlockAST, ConstAST, ForAST, FunctionAST, Img2ColAST, LoadAST, ScalarArgAST, StoreAST, TensorAST, VarAST
@@ -527,7 +527,7 @@ def test_emit_c_op_rejects_symbol_add_on_non_cpu() -> None:
 # EC-008A
 # 创建者: jcc你莫辜负
 # 最后修改人: jcc你莫辜负
-# 测试目的: 验证 npu_demo 下 symbol.const/cast/to_float 可生成 `S_INT` 与目标结果类型局部变量语句。
+# 测试目的: 验证 npu_demo 下 symbol.const/cast/to_float 可生成 `long long` 与目标结果类型局部变量语句。
 # 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
 # 对应 spec 文件路径: spec/dsl/emit_c.md
 # 对应测试文件路径: test/dsl/test_emit_c.py
@@ -537,7 +537,7 @@ def test_emit_c_op_lowers_npu_demo_symbol_const_cast_and_to_float() -> None:
     cast = SymbolCastOp(const.result, i32)
     to_float = SymbolToFloatOp(const.result, f32)
 
-    assert emit_c_op(const, ctx) == "S_INT c_7 = 7;"
+    assert emit_c_op(const, ctx) == "long long c_7 = 7;"
     assert emit_c_op(cast, ctx) == "int32_t v0 = c_7;"
     assert emit_c_op(to_float, ctx) == "float v1 = c_7;"
 
@@ -545,7 +545,7 @@ def test_emit_c_op_lowers_npu_demo_symbol_const_cast_and_to_float() -> None:
 # EC-008B
 # 创建者: jcc你莫辜负
 # 最后修改人: jcc你莫辜负
-# 测试目的: 验证 npu_demo 下 symbol 二元与比较 op 会生成 `S_INT/bool` 局部变量语句。
+# 测试目的: 验证 npu_demo 下 symbol 二元与比较 op 会生成 `long long/bool` 局部变量语句。
 # 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
 # 对应 spec 文件路径: spec/dsl/emit_c.md
 # 对应测试文件路径: test/dsl/test_emit_c.py
@@ -561,7 +561,7 @@ def test_emit_c_op_lowers_npu_demo_symbol_binary_and_compare() -> None:
     add = SymbolAddOp(block.args[0], block.args[1], add_type)
     eq = SymbolEqOp(block.args[0], block.args[1], i1)
 
-    assert emit_c_op(add, ctx) == "S_INT v0 = (lhs + rhs);"
+    assert emit_c_op(add, ctx) == "long long v0 = (lhs + rhs);"
     assert emit_c_op(eq, ctx) == "bool v1 = (lhs == rhs);"
 
 
@@ -582,14 +582,14 @@ def test_emit_c_op_lowers_npu_demo_symbol_queries() -> None:
 
     assert emit_c_value(dim.result, ctx) == "src.get_shape(1)"
     assert emit_c_value(stride.result, ctx) == "src.get_stride(0)"
-    assert emit_c_op(dim, ctx) == "S_INT v0 = src.get_shape(1);"
-    assert emit_c_op(stride, ctx) == "S_INT v1 = src.get_stride(0);"
+    assert emit_c_op(dim, ctx) == "long long v0 = src.get_shape(1);"
+    assert emit_c_op(stride, ctx) == "long long v1 = src.get_stride(0);"
 
 
 # EC-008D
 # 创建者: jcc你莫辜负
 # 最后修改人: jcc你莫辜负
-# 测试目的: 验证 npu_demo 下 symbol.for 使用 `S_INT` 迭代变量，并复用前置 symbol.const 名称。
+# 测试目的: 验证 npu_demo 下 symbol.for 使用 `long long` 迭代变量，并复用前置 symbol.const 名称。
 # 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
 # 对应 spec 文件路径: spec/dsl/emit_c.md
 # 对应测试文件路径: test/dsl/test_emit_c.py
@@ -601,10 +601,10 @@ def test_emit_c_op_lowers_npu_demo_symbol_for() -> None:
     body = Block(arg_types=[SymbolIterType.from_bounds("0", "8", "2")])
     loop = SymbolForOp(start.result, end.result, step.result, body)
 
-    assert emit_c_op(start, ctx) == "S_INT c_0 = 0;"
-    assert emit_c_op(end, ctx) == "S_INT c_8 = 8;"
-    assert emit_c_op(step, ctx) == "S_INT c_2 = 2;"
-    assert emit_c_op(loop, ctx) == "for (S_INT i0 = c_0; i0 < c_8; i0 += c_2) {\n}"
+    assert emit_c_op(start, ctx) == "long long c_0 = 0;"
+    assert emit_c_op(end, ctx) == "long long c_8 = 8;"
+    assert emit_c_op(step, ctx) == "long long c_2 = 2;"
+    assert emit_c_op(loop, ctx) == "for (long long i0 = c_0; i0 < c_8; i0 += c_2) {\n}"
 
 
 # EC-008E
@@ -613,7 +613,7 @@ def test_emit_c_op_lowers_npu_demo_symbol_for() -> None:
 # 最近一次运行测试时间: 2026-04-02 23:04:42 +0800
 # 最近一次运行成功时间: 2026-04-02 23:04:42 +0800
 # 功能说明: 验证 `build_func_op -> pass -> emit_c` 的 add 三条 CPU 路径可生成 lowered IR 节点片段。
-# 测试目的: 清理 raw `NnAddOp` 节点级直出源码的旧成功口径，锁定公开成功链路来自 pass 后 `kernel.add` / `dma.fill`。
+# 测试目的: 清理 raw `NnAddOp` 节点级直出源码的旧成功口径，锁定公开成功链路来自 pass 后 `kernel.binary_elewise` / `dma.fill`。
 # 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_op_lowers_build_func_op_nn_add_variants_after_pass
 # 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
 # 对应 spec 文件路径: spec/dsl/emit_c.md
@@ -636,7 +636,7 @@ def test_emit_c_op_lowers_build_func_op_nn_add_variants_after_pass() -> None:
     pair_ctx = _ctx()
     pair_ctx.bind_name(pair_block.args[0], "lhs")
     pair_ctx.bind_name(pair_block.args[1], "rhs")
-    pair_add = next(op for op in pair_block.ops if isinstance(op, (KernelAddOp, KernelBinaryElewiseOp)))
+    pair_add = next(op for op in pair_block.ops if isinstance(op, KernelBinaryElewiseOp))
     assert emit_c_op(pair_add, pair_ctx) == "cpu::add(lhs, rhs, v0);"
 
     const_block = _lower_built_func(
@@ -646,7 +646,7 @@ def test_emit_c_op_lowers_build_func_op_nn_add_variants_after_pass() -> None:
     const_ctx = _ctx()
     const_ctx.bind_name(const_block.args[0], "lhs")
     const_fill = next(op for op in const_block.ops if isinstance(op, DmaFillOp))
-    const_add = next(op for op in const_block.ops if isinstance(op, (KernelAddOp, KernelBinaryElewiseOp)))
+    const_add = next(op for op in const_block.ops if isinstance(op, KernelBinaryElewiseOp))
     for op in const_block.ops:
         if isinstance(op, DmaAllocOp):
             emit_c_op(op, const_ctx)
@@ -666,7 +666,7 @@ def test_emit_c_op_lowers_build_func_op_nn_add_variants_after_pass() -> None:
     symbol_ctx.bind_name(symbol_block.args[0], "lhs")
     symbol_ctx.bind_name(symbol_block.args[1], "bias")
     symbol_fill = next(op for op in symbol_block.ops if isinstance(op, DmaFillOp))
-    symbol_add = next(op for op in symbol_block.ops if isinstance(op, (KernelAddOp, KernelBinaryElewiseOp)))
+    symbol_add = next(op for op in symbol_block.ops if isinstance(op, KernelBinaryElewiseOp))
     for op in symbol_block.ops:
         if isinstance(op, DmaAllocOp):
             emit_c_op(op, symbol_ctx)
@@ -732,8 +732,8 @@ def test_emit_c_op_keeps_nn_add_unsupported_without_prebound_result_or_on_non_cp
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-02 20:39:00 +0800
 # 最近一次运行成功时间: 2026-04-02 20:39:00 +0800
-# 功能说明: 验证 emit_c 可消费 pass 后 `symbol.get_dim + dma.alloc + kernel.add` 的 memory+memory lowered IR。
-# 测试目的: 锁定 CPU emitter 不再卡在 `symbol.get_dim: unsupported op`，且 `kernel.add` 会收口为 `cpu::add(...)`。
+# 功能说明: 验证 emit_c 可消费 pass 后 `symbol.get_dim + dma.alloc + kernel.binary_elewise` 的 memory+memory lowered IR。
+# 测试目的: 锁定 CPU emitter 不再卡在 `symbol.get_dim: unsupported op`，且 `kernel.binary_elewise(kind="add")` 会收口为 `cpu::add(...)`。
 # 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_memory_space_template_alloc
 # 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
 # 对应 spec 文件路径: spec/dsl/emit_c.md
@@ -750,7 +750,7 @@ def test_emit_c_memory_space_template_alloc() -> None:
     dim0 = next((op for op in ops if isinstance(op, SymbolGetDimOp) and op.axis.data == 0), None)
     dim1 = next((op for op in ops if isinstance(op, SymbolGetDimOp) and op.axis.data == 1), None)
     alloc = next(op for op in ops if isinstance(op, DmaAllocOp))
-    add = next(op for op in ops if isinstance(op, (KernelAddOp, KernelBinaryElewiseOp)))
+    add = next(op for op in ops if isinstance(op, KernelBinaryElewiseOp))
 
     ctx = _ctx()
     ctx.bind_name(block.args[0], "lhs")
@@ -777,7 +777,7 @@ def test_emit_c_memory_space_template_alloc() -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-02 20:39:00 +0800
 # 最近一次运行成功时间: 2026-04-02 20:39:00 +0800
-# 功能说明: 验证 emit_c 可消费 pass 后 `dma.fill + kernel.add` 的 mixed add lowered IR。
+# 功能说明: 验证 emit_c 可消费 pass 后 `dma.fill + kernel.binary_elewise` 的 mixed add lowered IR。
 # 测试目的: 锁定 `memory+const(i32)` 与 `memory+symbol.int` 在 CPU emitter 中都走真实填充后再参与 `cpu::add(...)`。
 # 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_op_lowers_passed_mixed_add_pipeline_with_dma_fill
 # 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
@@ -798,7 +798,7 @@ def test_emit_c_op_lowers_passed_mixed_add_pipeline_with_dma_fill() -> None:
     )
     const_ops = list(const_block.ops)
     const_fill = next(op for op in const_ops if isinstance(op, DmaFillOp))
-    const_add = next(op for op in const_ops if isinstance(op, (KernelAddOp, KernelBinaryElewiseOp)))
+    const_add = next(op for op in const_ops if isinstance(op, KernelBinaryElewiseOp))
 
     const_ctx = _ctx()
     const_ctx.bind_name(const_block.args[0], "lhs")
@@ -826,7 +826,7 @@ def test_emit_c_op_lowers_passed_mixed_add_pipeline_with_dma_fill() -> None:
     )
     symbol_ops = list(symbol_block.ops)
     symbol_fill = next(op for op in symbol_ops if isinstance(op, DmaFillOp))
-    symbol_add = next(op for op in symbol_ops if isinstance(op, (KernelAddOp, KernelBinaryElewiseOp)))
+    symbol_add = next(op for op in symbol_ops if isinstance(op, KernelBinaryElewiseOp))
 
     symbol_ctx = _ctx()
     symbol_ctx.bind_name(symbol_block.args[0], "lhs")
@@ -1171,7 +1171,7 @@ def test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline() -> None:
     assert "auto work_tile = view(tsm, 0, 16, 1);" in stmt
     assert "auto out_tile = view(tsm, 0, 16, 1);" in stmt
     assert "slice(work_tile, src_view, 0, 16, 1);" in stmt
-    assert "npu_demo::add<TSM, float, float>(out_tile, work_tile, work_tile);" in stmt
+    assert "npu_demo::add<TSM, float, float>(out_tile /*out*/, work_tile /*lhs*/, work_tile /*rhs*/);" in stmt
     assert "deslice(out, out_tile, tid, 16, 1);" in stmt
     assert ".view<" not in stmt
     assert "load<" not in stmt
@@ -1230,7 +1230,7 @@ def test_emit_c_lowers_npu_demo_tiled_matmul_pipeline() -> None:
     assert re.search(r"slice\(v\d+, lhs, slice_offset0_vec, slice_size1_vec, slice_stride2_vec\);", stmt)
     assert re.search(r"slice\(v\d+, rhs, slice_offset3_vec, slice_size4_vec, slice_stride5_vec\);", stmt)
     assert re.search(
-        r"npu_demo::matmul<[^>]+>\(v\d+, v\d+, v\d+\);",
+        r"npu_demo::matmul<[^>]+>\(v\d+ /\*out\*/, v\d+ /\*lhs\*/, v\d+ /\*rhs\*/\);",
         stmt,
     )
     assert re.search(r"deslice\(v\d+, v\d+, deslice_offset6_vec, deslice_size7_vec, deslice_stride8_vec\);", stmt)

@@ -27,7 +27,9 @@ from typing import Any
 from xdsl.dialects import func
 from xdsl.dialects.builtin import (
     ArrayAttr,
+    BFloat16Type,
     DictionaryAttr,
+    Float16Type,
     Float32Type,
     Float64Type,
     IntegerType,
@@ -37,7 +39,7 @@ from xdsl.dialects.builtin import (
     StringAttr,
     SymbolRefAttr,
 )
-from xdsl.ir import Operation
+from xdsl.ir import BlockArgument, Operation, SSAValue
 
 from kernel_gen.dialect.arch import ArchBarrierOp, ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp, ArchLaunchOp
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaViewOp
@@ -184,6 +186,98 @@ def _leading_rewritten_out_param_count(func_op: func.FuncOp) -> int:
     return count
 
 
+def _block_arg_index(value: object) -> int | None:
+    if isinstance(value, BlockArgument):
+        return value.index
+    return None
+
+
+def _kernel_out_operand(value_op: Operation) -> SSAValue | None:
+    """返回 codegen 视角下的 kernel 输出 operand。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 当前公开 kernel 合同统一把第一个 `nn.memory` operand 视作 out。
+    - 对只读 expectation 中遗留的 `kernel.binary_elewise(lhs, rhs, out)` 文本，
+      按 block argument 位置做最小规整，继续把真正的 out 识别为最前置参数。
+
+    使用示例:
+    - out_value = _kernel_out_operand(op)
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: kernel_gen/dsl/gen_kernel.py
+    """
+
+    candidate_arity = {
+        "kernel.binary_elewise": 3,
+        "kernel.matmul": 3,
+        "kernel.exp": 2,
+        "kernel.reduce": 2,
+        "kernel.reduce_min": 2,
+        "kernel.img2col1d": 2,
+        "kernel.img2col2d": 2,
+        "kernel.select": 4,
+    }.get(value_op.name)
+    if candidate_arity is None or len(value_op.operands) < candidate_arity:
+        if not value_op.operands:
+            return None
+        candidate = SSAValue.get(value_op.operands[0])
+        return candidate if isinstance(candidate.type, NnMemoryType) else None
+
+    candidates = [SSAValue.get(value_op.operands[index]) for index in range(candidate_arity)]
+    if not all(isinstance(candidate.type, NnMemoryType) for candidate in candidates):
+        return None
+
+    block_arg_indices = [_block_arg_index(candidate) for candidate in candidates]
+    if all(index is not None for index in block_arg_indices):
+        min_index = min(block_arg_indices)
+        min_pos = block_arg_indices.index(min_index)
+        return candidates[min_pos]
+    return candidates[0]
+
+
+def _leading_out_param_count_from_body(func_op: func.FuncOp) -> int:
+    """从函数体推断前置 out 参数个数。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅在函数没有 `memory return`、也没有 rewrite 后显式 `arg0/arg1/...` 标记时启用。
+    - 逐个检查最前面连续的 memory 参数，若它们作为 kernel/dma 写路径的 target/out 出现，则视为 out 参数。
+
+    使用示例:
+    - count = _leading_out_param_count_from_body(func_op)
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: kernel_gen/dsl/gen_kernel.py
+    """
+
+    out_args: set[SSAValue] = set()
+    for op in _walk_ops(func_op):
+        if op.name.startswith("kernel."):
+            out_value = _kernel_out_operand(op)
+            if out_value is not None:
+                out_args.add(out_value)
+        elif isinstance(op, DmaDesliceOp):
+            out_args.add(SSAValue.get(op.target))
+
+    count = 0
+    for arg in func_op.args:
+        if not isinstance(arg.type, NnMemoryType):
+            break
+        if arg not in out_args:
+            break
+        count += 1
+    return count
+
+
 def _memory_space_to_c(space_attr: NnMemorySpaceAttr) -> str:
     """将 `nn.space` 映射为 `MemorySpace::<space>` 模板参数文本。
 
@@ -303,6 +397,10 @@ def _type_to_c(attr: Any) -> str:
         return f"{prefix}{attr.width.data}_t"
     if isinstance(attr, Float32Type):
         return "float"
+    if isinstance(attr, Float16Type):
+        return "half"
+    if isinstance(attr, BFloat16Type):
+        return "bfloat16_t"
     if isinstance(attr, Float64Type):
         return "double"
     if isinstance(attr, IndexType):
@@ -342,6 +440,10 @@ def _type_to_c_for_target(attr: Any, target: str) -> str:
         return f"{prefix}{attr.width.data}_t"
     if isinstance(attr, Float32Type):
         return "float"
+    if isinstance(attr, Float16Type):
+        return "half"
+    if isinstance(attr, BFloat16Type):
+        return "bfloat16_t"
     if isinstance(attr, Float64Type):
         return "double"
     if isinstance(attr, IndexType):
@@ -350,7 +452,7 @@ def _type_to_c_for_target(attr: Any, target: str) -> str:
         space = _memory_space_to_c_for_target(attr.space, target)
         return f"Memory<{space}, {_type_to_c_for_target(attr.element_type, target)}>"
     if isinstance(attr, SymbolValueType):
-        return "S_INT" if target == "npu_demo" else "long long"
+        return "long long"
     raise TypeError(f"unsupported type: {attr}")
 
 def _memory_rank(memory_type: NnMemoryType) -> int:
@@ -1363,6 +1465,8 @@ class _KernelEmitter:
 
         arg_names = _extract_arg_names(func_op)
         leading_out_params = _leading_rewritten_out_param_count(func_op)
+        if leading_out_params == 0 and not result_types:
+            leading_out_params = _leading_out_param_count_from_body(func_op)
         params: list[str] = []
         for index, (arg_name, arg_type, arg_value) in enumerate(zip(arg_names, input_types, func_op.args, strict=True)):
             self.ctx.bind_name(arg_value, arg_name)

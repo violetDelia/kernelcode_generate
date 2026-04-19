@@ -28,7 +28,16 @@ from xdsl.ir import BlockArgument, Operation, SSAValue
 
 from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFillOp, DmaLoadOp, DmaSliceOp, DmaStoreOp, DmaViewOp
-from kernel_gen.dialect.kernel import KernelAddOp, KernelBinaryElewiseOp, KernelMatmulOp
+from kernel_gen.dialect.kernel import (
+    KernelBinaryElewiseOp,
+    KernelExpOp,
+    KernelImg2col1dOp,
+    KernelImg2col2dOp,
+    KernelMatmulOp,
+    KernelReduceMinOp,
+    KernelReduceOp,
+    KernelSelectOp,
+)
 from kernel_gen.dialect.nn import NnAddOp, NnImg2col2dOp, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolCastOp, SymbolConstOp, SymbolForOp, SymbolGetDimOp, SymbolGetStrideOp, SymbolToFloatOp, SymbolToIntOp, SymbolValueType
 
@@ -50,6 +59,7 @@ class EmitCContext:
     _next_id: int = 0
     _next_temp_id: int = 0
     _indent_level: int = 0
+    _symbol_const_names: dict[int, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.config is None:
@@ -139,6 +149,106 @@ class EmitCContext:
 
 def _emit_error(ctx: EmitCContext, subject: str, reason: str) -> EmitCError:
     return EmitCError(f"target={ctx.target}: {subject}: {reason}")
+
+
+def _block_arg_index(value: SSAValue) -> int | None:
+    if isinstance(value, BlockArgument):
+        return value.index
+    return None
+
+
+def _normalized_binary_elewise_operands(
+    op: KernelBinaryElewiseOp,
+) -> tuple[SSAValue, SSAValue, SSAValue]:
+    """返回按公开合同规整后的 `out/lhs/rhs`。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 默认按当前公开合同直接返回 `out/lhs/rhs`。
+    - 若命中只读 expectation 遗留的旧文本顺序 `kernel.binary_elewise(lhs, rhs, out)`，
+      则在发射前按 block argument 位置把它规整回 `out-first`。
+
+    使用示例:
+    - out_value, lhs_value, rhs_value = _normalized_binary_elewise_operands(op)
+
+    关联文件:
+    - spec: spec/dsl/emit_c.md
+    - test: test/dsl/test_emit_c.py
+    - 功能实现: kernel_gen/dsl/emit_c.py
+    """
+
+    out_value = SSAValue.get(op.out)
+    lhs_value = SSAValue.get(op.lhs)
+    rhs_value = SSAValue.get(op.rhs)
+    out_idx = _block_arg_index(out_value)
+    lhs_idx = _block_arg_index(lhs_value)
+    rhs_idx = _block_arg_index(rhs_value)
+    if (
+        out_idx is not None
+        and lhs_idx is not None
+        and rhs_idx is not None
+        and rhs_idx < out_idx
+        and rhs_idx < lhs_idx
+    ):
+        return rhs_value, out_value, lhs_value
+    return out_value, lhs_value, rhs_value
+
+
+def _normalized_out_input_operands(
+    out_value: SSAValue,
+    input_value: SSAValue,
+) -> tuple[SSAValue, SSAValue]:
+    out_idx = _block_arg_index(out_value)
+    input_idx = _block_arg_index(input_value)
+    if out_idx is not None and input_idx is not None and input_idx < out_idx:
+        return input_value, out_value
+    return out_value, input_value
+
+
+def _normalized_matmul_operands(
+    op: KernelMatmulOp,
+) -> tuple[SSAValue, SSAValue, SSAValue]:
+    out_value = SSAValue.get(op.out)
+    lhs_value = SSAValue.get(op.lhs)
+    rhs_value = SSAValue.get(op.rhs)
+    out_idx = _block_arg_index(out_value)
+    lhs_idx = _block_arg_index(lhs_value)
+    rhs_idx = _block_arg_index(rhs_value)
+    if (
+        out_idx is not None
+        and lhs_idx is not None
+        and rhs_idx is not None
+        and rhs_idx < out_idx
+        and rhs_idx < lhs_idx
+    ):
+        return rhs_value, out_value, lhs_value
+    return out_value, lhs_value, rhs_value
+
+
+def _normalized_select_operands(
+    op: KernelSelectOp,
+) -> tuple[SSAValue, SSAValue, SSAValue, SSAValue]:
+    out_value = SSAValue.get(op.out)
+    cond_value = SSAValue.get(op.cond)
+    lhs_value = SSAValue.get(op.lhs)
+    rhs_value = SSAValue.get(op.rhs)
+    out_idx = _block_arg_index(out_value)
+    cond_idx = _block_arg_index(cond_value)
+    lhs_idx = _block_arg_index(lhs_value)
+    rhs_idx = _block_arg_index(rhs_value)
+    if (
+        out_idx is not None
+        and cond_idx is not None
+        and lhs_idx is not None
+        and rhs_idx is not None
+        and rhs_idx < out_idx
+        and rhs_idx < cond_idx
+        and rhs_idx < lhs_idx
+    ):
+        return rhs_value, out_value, cond_value, lhs_value
+    return out_value, cond_value, lhs_value, rhs_value
 
 
 def _is_symbol_const_like(op: Operation) -> bool:
@@ -252,7 +362,7 @@ def _type_to_c(attr: Any, ctx: EmitCContext) -> str:
         space_param = _space_to_c(attr, ctx)
         return f"Memory<{space_param}, {_type_to_c(attr.element_type, ctx)}>"
     if isinstance(attr, SymbolValueType):
-        return "S_INT" if ctx.target == "npu_demo" else "long long"
+        return "long long"
     raise _emit_error(ctx, f"type {attr}", "unsupported type")
 
 
@@ -274,12 +384,13 @@ def _emit_npu_symbol_const_stmt(op: Operation, ctx: EmitCContext) -> str:
         if not isinstance(value_attr, IntegerAttr):
             raise _emit_error(ctx, op.name, "symbol.const value must be integer attribute")
         value = int(value_attr.value.data)
-    result_name = _symbol_const_name(value)
-    if ctx.has_bound_name(result_name):
-        ctx.bind_name(op.results[0], result_name)
+    existing_name = ctx._symbol_const_names.get(value)
+    if existing_name is not None:
+        ctx.bind_name(op.results[0], existing_name)
         return ""
-    ctx.bind_name(op.results[0], result_name)
-    return f"{ctx.current_indent}S_INT {result_name} = {value};"
+    result_name = _symbol_const_name(value)
+    ctx._symbol_const_names[value] = ctx.bind_name(op.results[0], result_name)
+    return f"{ctx.current_indent}long long {result_name} = {value};"
 
 
 def _format_literal(op: arith.ConstantOp, ctx: EmitCContext) -> str:
@@ -967,33 +1078,6 @@ def _emit_nn_add_stmt(op: NnAddOp, ctx: EmitCContext) -> str:
     return f"{ctx.current_indent}cpu::add({memory_expr}, {scalar_expr}, {result_name});"
 
 
-def _emit_kernel_add_stmt(op: KernelAddOp, ctx: EmitCContext) -> str:
-    """生成 `kernel.add` 的 CPU 侧 `cpu::add(...)` 调用片段。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 在 `target=cpu` 下把 lowered `kernel.add(lhs, rhs, out)` 收口为 `cpu::add(lhs, rhs, out);`。
-    - 仅消费 memory-to-memory 形式，不在本层回退到 raw `nn.add` 或函数级特化。
-
-    使用示例:
-    - stmt = emit_c_op(kernel_add_op, EmitCContext(target=\"cpu\"))
-
-    关联文件:
-    - spec: spec/dsl/emit_c.md
-    - test: test/dsl/test_emit_c.py
-    - 功能实现: kernel_gen/dsl/emit_c.py
-    """
-
-    if ctx.target != "cpu":
-        raise _emit_error(ctx, op.name, "unsupported op")
-    lhs_expr = _memory_base_name(op.lhs, ctx)
-    rhs_expr = _memory_base_name(op.rhs, ctx)
-    out_expr = _memory_base_name(op.out, ctx)
-    return f"{ctx.current_indent}cpu::add({lhs_expr}, {rhs_expr}, {out_expr});"
-
-
 def _emit_kernel_binary_elewise_stmt(op: KernelBinaryElewiseOp, ctx: EmitCContext) -> str:
     """生成 `kernel.binary_elewise(kind=add)` 的目标后端 helper 调用。
 
@@ -1001,7 +1085,7 @@ def _emit_kernel_binary_elewise_stmt(op: KernelBinaryElewiseOp, ctx: EmitCContex
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 在 `target=cpu` 下把 `kernel.binary_elewise(kind="add")` 收口为 `cpu::add(lhs, rhs, out);`。
+    - 在 `target=cpu` 下把 `kernel.binary_elewise(kind=...)` 收口为对应 helper 调用。
     - 在 `target=npu_demo` 下把二元 helper 收口为显式模板参数且 `out-first` 的
       `npu_demo::<helper><Space, InType, OutType>(out, lhs, rhs);`。
 
@@ -1014,16 +1098,34 @@ def _emit_kernel_binary_elewise_stmt(op: KernelBinaryElewiseOp, ctx: EmitCContex
     - 功能实现: kernel_gen/dsl/emit_c.py
     """
 
-    lhs_expr = _memory_base_name(op.lhs, ctx)
-    rhs_expr = _memory_base_name(op.rhs, ctx)
-    out_expr = _memory_base_name(op.out, ctx)
+    out_value, lhs_value, rhs_value = _normalized_binary_elewise_operands(op)
+    lhs_expr = _memory_base_name(lhs_value, ctx)
+    rhs_expr = _memory_base_name(rhs_value, ctx)
+    out_expr = _memory_base_name(out_value, ctx)
     kind = op.kind.data
     if ctx.target == "cpu":
-        if kind != "add":
+        helper_map = {
+            "add": "add",
+            "sub": "sub",
+            "mul": "mul",
+            "div": "div",
+            "eq": "eq",
+            "ne": "ne",
+            "lt": "lt",
+            "le": "le",
+            "gt": "gt",
+            "ge": "ge",
+        }
+        helper_name = helper_map.get(kind)
+        if helper_name is None:
             raise _emit_error(ctx, op.name, f"unsupported kind={kind}")
-        return f"{ctx.current_indent}cpu::add({lhs_expr}, {rhs_expr}, {out_expr});"
+        return f"{ctx.current_indent}cpu::{helper_name}({lhs_expr}, {rhs_expr}, {out_expr});"
     if ctx.target == "npu_demo":
-        if not isinstance(op.lhs.type, NnMemoryType) or not isinstance(op.rhs.type, NnMemoryType) or not isinstance(op.out.type, NnMemoryType):
+        if (
+            not isinstance(lhs_value.type, NnMemoryType)
+            or not isinstance(rhs_value.type, NnMemoryType)
+            or not isinstance(out_value.type, NnMemoryType)
+        ):
             raise _emit_error(ctx, op.name, "unsupported op")
         helper_map = {
             "add": "add",
@@ -1040,50 +1142,14 @@ def _emit_kernel_binary_elewise_stmt(op: KernelBinaryElewiseOp, ctx: EmitCContex
         helper_name = helper_map.get(kind)
         if helper_name is None:
             raise _emit_error(ctx, op.name, f"unsupported kind={kind}")
-        space_expr = _space_to_c(op.out.type, ctx)
-        input_type = _type_to_c(op.lhs.type.element_type, ctx)
-        output_type = _type_to_c(op.out.type.element_type, ctx)
+        space_expr = _space_to_c(out_value.type, ctx)
+        input_type = _type_to_c(lhs_value.type.element_type, ctx)
+        output_type = _type_to_c(out_value.type.element_type, ctx)
         return (
             f"{ctx.current_indent}npu_demo::{helper_name}<{space_expr}, {input_type}, {output_type}>"
-            f"({out_expr}, {lhs_expr}, {rhs_expr});"
+            f"({out_expr} /*out*/, {lhs_expr} /*lhs*/, {rhs_expr} /*rhs*/);"
         )
     raise _emit_error(ctx, op.name, "unsupported target")
-
-
-def _emit_npu_kernel_add_stmt(op: KernelAddOp, ctx: EmitCContext) -> str:
-    """生成 `target=npu_demo` 下 `kernel.add` 的 `npu_demo::add(...)` 调用片段。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 把 lowered `kernel.add(lhs, rhs, out)` 发射为显式模板参数且 `out-first` 的
-      `npu_demo::add<Space, InType, OutType>(out, lhs, rhs);`。
-    - 仅接受 memory-to-memory 形式。
-
-    使用示例:
-    - stmt = emit_c_op(kernel_add_op, EmitCContext(target="npu_demo"))
-
-    关联文件:
-    - spec: spec/dsl/emit_c.md
-    - test: test/dsl/test_emit_c.py
-    - 功能实现: kernel_gen/dsl/emit_c.py
-    """
-
-    if ctx.target != "npu_demo":
-        raise _emit_error(ctx, op.name, "unsupported op")
-    if not isinstance(op.lhs.type, NnMemoryType) or not isinstance(op.rhs.type, NnMemoryType) or not isinstance(op.out.type, NnMemoryType):
-        raise _emit_error(ctx, op.name, "unsupported op")
-    lhs_expr = _memory_base_name(op.lhs, ctx)
-    rhs_expr = _memory_base_name(op.rhs, ctx)
-    out_expr = _memory_base_name(op.out, ctx)
-    space_expr = _space_to_c(op.out.type, ctx)
-    input_type = _type_to_c(op.lhs.type.element_type, ctx)
-    output_type = _type_to_c(op.out.type.element_type, ctx)
-    return (
-        f"{ctx.current_indent}npu_demo::add<{space_expr}, {input_type}, {output_type}>"
-        f"({out_expr}, {lhs_expr}, {rhs_expr});"
-    )
 
 
 def _emit_npu_view_stmt(op: DmaViewOp, ctx: EmitCContext) -> str:
@@ -1327,7 +1393,122 @@ def _emit_npu_add_stmt(op: NnAddOp, ctx: EmitCContext) -> str:
     output_type = _type_to_c(op.result.type.element_type, ctx)
     return (
         f"{ctx.current_indent}npu_demo::add<{space_expr}, {input_type}, {output_type}>"
-        f"({result_name}, {lhs_expr}, {rhs_expr});"
+        f"({result_name} /*out*/, {lhs_expr} /*lhs*/, {rhs_expr} /*rhs*/);"
+    )
+
+
+def _emit_npu_kernel_exp_stmt(op: KernelExpOp, ctx: EmitCContext) -> str:
+    out_value, input_value = _normalized_out_input_operands(
+        SSAValue.get(op.out), SSAValue.get(op.input)
+    )
+    if not isinstance(input_value.type, NnMemoryType) or not isinstance(out_value.type, NnMemoryType):
+        raise _emit_error(ctx, op.name, "unsupported op")
+    out_expr = _memory_base_name(out_value, ctx)
+    input_expr = _memory_base_name(input_value, ctx)
+    space_expr = _space_to_c(out_value.type, ctx)
+    input_type = _type_to_c(input_value.type.element_type, ctx)
+    output_type = _type_to_c(out_value.type.element_type, ctx)
+    return (
+        f"{ctx.current_indent}npu_demo::exp<{space_expr}, {input_type}, {output_type}>"
+        f"({out_expr} /*out*/, {input_expr} /*input*/);"
+    )
+
+
+def _emit_npu_kernel_select_stmt(op: KernelSelectOp, ctx: EmitCContext) -> str:
+    out_value, cond_value, lhs_value, rhs_value = _normalized_select_operands(op)
+    if (
+        not isinstance(out_value.type, NnMemoryType)
+        or not isinstance(cond_value.type, NnMemoryType)
+        or not isinstance(lhs_value.type, NnMemoryType)
+        or not isinstance(rhs_value.type, NnMemoryType)
+    ):
+        raise _emit_error(ctx, op.name, "unsupported op")
+    out_expr = _memory_base_name(out_value, ctx)
+    cond_expr = _memory_base_name(cond_value, ctx)
+    lhs_expr = _memory_base_name(lhs_value, ctx)
+    rhs_expr = _memory_base_name(rhs_value, ctx)
+    space_expr = _space_to_c(out_value.type, ctx)
+    input_type = _type_to_c(lhs_value.type.element_type, ctx)
+    output_type = _type_to_c(out_value.type.element_type, ctx)
+    return (
+        f"{ctx.current_indent}npu_demo::select<{space_expr}, {input_type}, {output_type}>"
+        f"({out_expr} /*out*/, {cond_expr} /*cond*/, {lhs_expr} /*lhs*/, {rhs_expr} /*rhs*/);"
+    )
+
+
+def _emit_npu_kernel_reduce_stmt(op: KernelReduceOp, ctx: EmitCContext) -> str:
+    out_value, input_value = _normalized_out_input_operands(
+        SSAValue.get(op.out), SSAValue.get(op.input)
+    )
+    if not isinstance(input_value.type, NnMemoryType) or not isinstance(out_value.type, NnMemoryType):
+        raise _emit_error(ctx, op.name, "unsupported op")
+    if op.kind.data != "sum":
+        raise _emit_error(ctx, op.name, f"unsupported kind={op.kind.data}")
+    out_expr = _memory_base_name(out_value, ctx)
+    input_expr = _memory_base_name(input_value, ctx)
+    space_expr = _space_to_c(out_value.type, ctx)
+    input_type = _type_to_c(input_value.type.element_type, ctx)
+    output_type = _type_to_c(out_value.type.element_type, ctx)
+    axis_expr = op.axis.value.data
+    return (
+        f"{ctx.current_indent}npu_demo::reduce_sum<{space_expr}, {input_type}, {output_type}>"
+        f"({out_expr} /*out*/, {input_expr} /*input*/, {axis_expr} /*axis*/);"
+    )
+
+
+def _emit_npu_kernel_reduce_min_stmt(op: KernelReduceMinOp, ctx: EmitCContext) -> str:
+    out_value, input_value = _normalized_out_input_operands(
+        SSAValue.get(op.out), SSAValue.get(op.input)
+    )
+    if not isinstance(input_value.type, NnMemoryType) or not isinstance(out_value.type, NnMemoryType):
+        raise _emit_error(ctx, op.name, "unsupported op")
+    out_expr = _memory_base_name(out_value, ctx)
+    input_expr = _memory_base_name(input_value, ctx)
+    space_expr = _space_to_c(out_value.type, ctx)
+    input_type = _type_to_c(input_value.type.element_type, ctx)
+    output_type = _type_to_c(out_value.type.element_type, ctx)
+    axis_expr = op.axis.value.data
+    return (
+        f"{ctx.current_indent}npu_demo::reduce_min<{space_expr}, {input_type}, {output_type}>"
+        f"({out_expr} /*out*/, {input_expr} /*input*/, {axis_expr} /*axis*/);"
+    )
+
+
+def _emit_npu_kernel_img2col1d_stmt(op: KernelImg2col1dOp, ctx: EmitCContext) -> str:
+    out_value, input_value = _normalized_out_input_operands(
+        SSAValue.get(op.out), SSAValue.get(op.input)
+    )
+    if not isinstance(input_value.type, NnMemoryType) or not isinstance(out_value.type, NnMemoryType):
+        raise _emit_error(ctx, op.name, "unsupported op")
+    out_expr = _memory_base_name(out_value, ctx)
+    input_expr = _memory_base_name(input_value, ctx)
+    input_space = _space_to_c(input_value.type, ctx)
+    output_space = _space_to_c(out_value.type, ctx)
+    input_type = _type_to_c(input_value.type.element_type, ctx)
+    output_type = _type_to_c(out_value.type.element_type, ctx)
+    params = [emit_c_value(value, ctx) for value in (op.k, op.s, op.d, op.p_left, op.p_right)]
+    return (
+        f"{ctx.current_indent}npu_demo::img2col1d<{input_space}, {output_space}, {input_type}, {output_type}>"
+        f"({out_expr} /*out*/, {input_expr} /*input*/, {params[0]} /*k*/, {params[1]} /*s*/, {params[2]} /*d*/, {params[3]} /*p_left*/, {params[4]} /*p_right*/);"
+    )
+
+
+def _emit_npu_kernel_img2col2d_stmt(op: KernelImg2col2dOp, ctx: EmitCContext) -> str:
+    out_value, input_value = _normalized_out_input_operands(
+        SSAValue.get(op.out), SSAValue.get(op.input)
+    )
+    if not isinstance(input_value.type, NnMemoryType) or not isinstance(out_value.type, NnMemoryType):
+        raise _emit_error(ctx, op.name, "unsupported op")
+    out_expr = _memory_base_name(out_value, ctx)
+    input_expr = _memory_base_name(input_value, ctx)
+    input_space = _space_to_c(input_value.type, ctx)
+    output_space = _space_to_c(out_value.type, ctx)
+    input_type = _type_to_c(input_value.type.element_type, ctx)
+    output_type = _type_to_c(out_value.type.element_type, ctx)
+    params = [emit_c_value(value, ctx) for value in (op.kh, op.kw, op.sh, op.sw, op.dh, op.dw, op.ph, op.pw, op.pl, op.pr)]
+    return (
+        f"{ctx.current_indent}npu_demo::img2col2d<{input_space}, {output_space}, {input_type}, {output_type}>"
+        f"({out_expr} /*out*/, {input_expr} /*input*/, {params[0]} /*kh*/, {params[1]} /*kw*/, {params[2]} /*sh*/, {params[3]} /*sw*/, {params[4]} /*dh*/, {params[5]} /*dw*/, {params[6]} /*ph*/, {params[7]} /*pw*/, {params[8]} /*pl*/, {params[9]} /*pr*/);"
     )
 
 
@@ -1351,18 +1532,19 @@ def _emit_npu_kernel_matmul_stmt(op: KernelMatmulOp, ctx: EmitCContext) -> str:
     - 功能实现: kernel_gen/dsl/emit_c.py
     """
 
-    lhs_expr = _memory_base_name(op.lhs, ctx)
-    rhs_expr = _memory_base_name(op.rhs, ctx)
-    out_expr = _memory_base_name(op.out, ctx)
-    lhs_space = _space_to_c(op.lhs.type, ctx)
-    rhs_space = _space_to_c(op.rhs.type, ctx)
-    out_space = _space_to_c(op.out.type, ctx)
-    lhs_type = _type_to_c(op.lhs.type.element_type, ctx)
-    rhs_type = _type_to_c(op.rhs.type.element_type, ctx)
-    out_type = _type_to_c(op.out.type.element_type, ctx)
+    out_value, lhs_value, rhs_value = _normalized_matmul_operands(op)
+    lhs_expr = _memory_base_name(lhs_value, ctx)
+    rhs_expr = _memory_base_name(rhs_value, ctx)
+    out_expr = _memory_base_name(out_value, ctx)
+    lhs_space = _space_to_c(lhs_value.type, ctx)
+    rhs_space = _space_to_c(rhs_value.type, ctx)
+    out_space = _space_to_c(out_value.type, ctx)
+    lhs_type = _type_to_c(lhs_value.type.element_type, ctx)
+    rhs_type = _type_to_c(rhs_value.type.element_type, ctx)
+    out_type = _type_to_c(out_value.type.element_type, ctx)
     return (
         f"{ctx.current_indent}npu_demo::matmul<{lhs_space}, {rhs_space}, {out_space}, "
-        f"{lhs_type}, {rhs_type}, {out_type}>({out_expr}, {lhs_expr}, {rhs_expr});"
+        f"{lhs_type}, {rhs_type}, {out_type}>({out_expr} /*out*/, {lhs_expr} /*lhs*/, {rhs_expr} /*rhs*/);"
     )
 
 
@@ -1526,7 +1708,7 @@ def _emit_symbol_loop(op: SymbolForOp, ctx: EmitCContext) -> str:
 
     if ctx.target not in {"cpu", "npu_demo"}:
         raise _emit_error(ctx, op.name, "unsupported target")
-    iv_type = "S_INT" if ctx.target == "npu_demo" else "long long"
+    iv_type = "long long"
     return _emit_loop_region(op.start, op.end, op.step, op.body.block, ctx, iv_type=iv_type)
 
 
@@ -1538,7 +1720,7 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
 
     功能说明:
     - 负责把单个 op 转换为赋值语句、控制流语句块、访存语句、memory 视图声明或 helper 调用片段。
-    - `target=cpu` 支持现有 `symbol.for/symbol.get_dim/dma.alloc/fill/view/slice/deslice/kernel.add/nn.img2col2d/nn.add` 节点级发射。
+    - `target=cpu` 支持现有 `symbol.for/symbol.get_dim/dma.alloc/fill/view/slice/deslice/kernel.binary_elewise/nn.img2col2d/nn.add` 节点级发射。
     - `target=npu_demo` 支持当前公开的 `symbol.const/symbol.for`、`KernelContext` 查询、`TSM/TLM` dynamic memory、
       `view/slice/deslice/add/kernel.matmul` 节点级发射。
 
@@ -1591,10 +1773,20 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
             return _emit_npu_slice_stmt(op, ctx)
         if isinstance(op, DmaDesliceOp):
             return _emit_npu_deslice_stmt(op, ctx)
-        if isinstance(op, KernelAddOp):
-            return _emit_npu_kernel_add_stmt(op, ctx)
         if isinstance(op, KernelBinaryElewiseOp):
             return _emit_kernel_binary_elewise_stmt(op, ctx)
+        if isinstance(op, KernelExpOp):
+            return _emit_npu_kernel_exp_stmt(op, ctx)
+        if isinstance(op, KernelSelectOp):
+            return _emit_npu_kernel_select_stmt(op, ctx)
+        if isinstance(op, KernelReduceOp):
+            return _emit_npu_kernel_reduce_stmt(op, ctx)
+        if isinstance(op, KernelReduceMinOp):
+            return _emit_npu_kernel_reduce_min_stmt(op, ctx)
+        if isinstance(op, KernelImg2col1dOp):
+            return _emit_npu_kernel_img2col1d_stmt(op, ctx)
+        if isinstance(op, KernelImg2col2dOp):
+            return _emit_npu_kernel_img2col2d_stmt(op, ctx)
         if isinstance(op, KernelMatmulOp):
             return _emit_npu_kernel_matmul_stmt(op, ctx)
         if isinstance(op, NnAddOp):
@@ -1618,8 +1810,6 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
         return _emit_dma_deslice_stmt(op, ctx)
     if isinstance(op, DmaViewOp):
         return _emit_dma_view_stmt(op, ctx)
-    if isinstance(op, KernelAddOp):
-        return _emit_kernel_add_stmt(op, ctx)
     if isinstance(op, KernelBinaryElewiseOp):
         return _emit_kernel_binary_elewise_stmt(op, ctx)
     if isinstance(op, NnAddOp):

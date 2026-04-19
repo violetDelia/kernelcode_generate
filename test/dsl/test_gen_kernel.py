@@ -64,7 +64,7 @@ from kernel_gen.dialect.arch import (
     ArchVisibilityAttr,
 )
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFillOp, DmaSliceOp, DmaViewOp
-from kernel_gen.dialect.kernel import KernelAddOp
+from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
@@ -180,7 +180,13 @@ def _make_marked_kernel_split_module(*, axis: int = 1, tile: str = "TILE_M") -> 
     block.add_ops(
         [
             *alloc_setup[:2],
-            KernelAddOp(block.args[0], block.args[1], block.args[2], space),
+            KernelBinaryElewiseOp(
+                block.args[0],
+                block.args[1],
+                block.args[2],
+                kind="add",
+                space=space,
+            ),
             func.ReturnOp(),
         ]
     )
@@ -1032,9 +1038,8 @@ def test_gen_kernel_rejects_unsupported_return_form() -> None:
     float_block.add_op(func.ReturnOp())
     float_type = FunctionType.from_lists([f16], [])
     float_func = func.FuncOp("f16_arg", float_type, Region(float_block))
-    with pytest.raises(TypeError) as exc_info:
-        gen_kernel(float_func, _ctx())
-    assert "unsupported type" in str(exc_info.value)
+    source = gen_kernel(float_func, _ctx())
+    assert source.startswith("void f16_arg(half arg0)")
 
 # GK-012
 # 创建者: jcc你莫辜负
