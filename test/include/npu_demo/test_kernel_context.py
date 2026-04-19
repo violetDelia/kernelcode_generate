@@ -1014,10 +1014,10 @@ int main() {
 # 最后修改人: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-05 16:05:57 +0800
 # 最近一次运行成功时间: 2026-04-05 16:05:57 +0800
-# 测试目的: 验证 add 在 1-D 子集下执行逐元素加法，并对 shape 不一致与任一 operand 的 rank!=1 返回失败。
+# 测试目的: 验证 `npu_demo::add<...>(...)` 在 1-D 子集下执行逐元素加法，并对 shape 不一致与任一 operand 的 rank!=1 返回失败。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_add_supports_1d_subset
-# 对应功能实现文件链接: [include/npu_demo/npu_demo.h](include/npu_demo/npu_demo.h)
-# 对应 spec 文件链接: [spec/include/api/Nn.md](spec/include/api/Nn.md)
+# 对应功能实现文件链接: [include/npu_demo/Kernel.h](include/npu_demo/Kernel.h)
+# 对应 spec 文件链接: [spec/include/api/Kernel.md](spec/include/api/Kernel.md)
 # 对应测试文件链接: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
 def test_npu_demo_add_supports_1d_subset() -> None:
     source = r"""
@@ -1035,7 +1035,7 @@ int main() {
     Memory<MemorySpace::GM, float> rhs(rhs_data, shape, stride, 1, MemoryFormat::Norm);
     Memory<MemorySpace::GM, float> out(out_data, shape, stride, 1, MemoryFormat::Norm);
 
-    if (add(lhs, rhs, out) != StatusCode::kOk) {
+    if (npu_demo::add<MemorySpace::GM, float, float>(out, lhs, rhs) != StatusCode::kOk) {
         return fail(1);
     }
     if (out_data[0] != 11.0f || out_data[1] != 22.0f || out_data[2] != 33.0f ||
@@ -1045,22 +1045,22 @@ int main() {
 
     long long bad_shape[1] = {3};
     Memory<MemorySpace::GM, float> bad(lhs_data, bad_shape, stride, 1, MemoryFormat::Norm);
-    if (add(bad, rhs, out) == StatusCode::kOk) {
+    if (npu_demo::add<MemorySpace::GM, float, float>(out, bad, rhs) == StatusCode::kOk) {
         return fail(3);
     }
 
     long long rank2_shape[2] = {2, 2};
     long long rank2_stride[2] = {2, 1};
     Memory<MemorySpace::GM, float> bad_rank(lhs_data, rank2_shape, rank2_stride, 2, MemoryFormat::Norm);
-    if (add(bad_rank, rhs, out) == StatusCode::kOk) {
+    if (npu_demo::add<MemorySpace::GM, float, float>(out, bad_rank, rhs) == StatusCode::kOk) {
         return fail(4);
     }
     Memory<MemorySpace::GM, float> bad_rhs(rhs_data, rank2_shape, rank2_stride, 2, MemoryFormat::Norm);
-    if (add(lhs, bad_rhs, out) == StatusCode::kOk) {
+    if (npu_demo::add<MemorySpace::GM, float, float>(out, lhs, bad_rhs) == StatusCode::kOk) {
         return fail(5);
     }
     Memory<MemorySpace::GM, float> bad_out(out_data, rank2_shape, rank2_stride, 2, MemoryFormat::Norm);
-    if (add(lhs, rhs, bad_out) == StatusCode::kOk) {
+    if (npu_demo::add<MemorySpace::GM, float, float>(bad_out, lhs, rhs) == StatusCode::kOk) {
         return fail(6);
     }
     return 0;
