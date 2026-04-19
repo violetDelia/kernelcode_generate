@@ -89,6 +89,7 @@
 - `expectation/tools/ircheck/emitc_true.py` 与 `expectation/tools/ircheck/emitc_false.py` 是本功能的 expectation 合同资产，但仓库 `.gitignore` 当前忽略 `/expectation/` 路径；因此只有 merge 阶段允许通过 `git add -f expectation/tools/ircheck/emitc_true.py expectation/tools/ircheck/emitc_false.py` 纳入交付，其他阶段不得修改 `.gitignore`。
 - 内置正则别名仅允许出现在 `[[NAME:REGEX]]` 的 `REGEX` 区段内：
   - `{reg}`：`(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+)`
+  - `{val}`：`[A-Za-z_][A-Za-z0-9_]*`
   - `{dim}`：`[1-9][0-9]*`
   - `{int}`：`-?[0-9]+`
 - 多 case 仅支持固定分隔符 `// -----`；不支持 case 命名、标签跳转或条件执行。
@@ -141,7 +142,7 @@
   - 同一 case 内，变量名只能定义一次；
   - 引用变量时，变量定义必须先于当前指令出现；
   - `CHECK-NOT:` 中出现 `[[NAME:REGEX]]` 必须返回解析失败；
-  - `{reg}` / `{dim}` / `{int}` 仅在 `[[NAME:REGEX]]` 的 `REGEX` 段内展开。
+  - `{reg}` / `{val}` / `{dim}` / `{int}` 仅在 `[[NAME:REGEX]]` 的 `REGEX` 段内展开。
 - 若输入 IR 正文在去掉空白后为空，必须返回解析失败。
 - `parse_ircheck_file` 只处理单 case；若文本包含 `// -----` 多 case 分隔符，必须返回 `IrcheckParseError: invalid ircheck header`。
 
@@ -224,7 +225,7 @@
 - 变量处理顺序固定为：
   1. 先读取当前 case 已成功捕获的变量表；
   2. 把 `[[NAME]]` 替换为 `re.escape(value)` 形式的字面量匹配；
-  3. 把 `[[NAME:REGEX]]` 转成记录命中原文的捕获片段，并在其中展开 `{reg}` / `{dim}` / `{int}`；
+  3. 把 `[[NAME:REGEX]]` 转成记录命中原文的捕获片段，并在其中展开 `{reg}` / `{val}` / `{dim}` / `{int}`；
   4. 普通文本一律按字面量转义；
   5. 当前指令匹配成功后，才把本条新定义的变量写回变量表。
 - 指令按在 case 文件中的出现顺序依次处理；`CHECK-NOT` 不改变后续正向检查的搜索起点。

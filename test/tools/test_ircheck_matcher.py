@@ -343,6 +343,42 @@ def test_match_checks_reg_alias_matches_symbol_and_ssa_ids() -> None:
     assert message is None
 
 
+# TC-IRCHECK-MATCH-006B
+# 创建者: 榕
+# 最后一次更改: 榕
+# 最近一次运行测试时间: 待本轮验证后补充
+# 最近一次运行成功时间: 待本轮验证后补充
+# 功能说明: 验证 `{val}` 只匹配标识符名，适合 emit_c C++ 局部变量场景。
+# 使用示例: pytest -q test/tools/test_ircheck_matcher.py -k test_match_checks_val_alias_matches_identifiers
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_matcher.py
+def test_match_checks_val_alias_matches_identifiers() -> None:
+    actual_ir = "\n".join(
+        [
+            "void dma_alloc_case() {",
+            "  Memory<GM, int32_t> v0 = alloc<GM, int32_t>({4, 8}, {8, 1});",
+            "}",
+        ]
+    )
+    ok, failed, message = _match_checks(
+        actual_ir,
+        [
+            CheckDirective(kind="CHECK", text="void dma_alloc_case() {", line_no=1),
+            CheckDirective(
+                kind="CHECK-NEXT",
+                text="Memory<GM, int32_t> [[OUT:{val}]] = alloc<GM, int32_t>({4, 8}, {8, 1});",
+                line_no=2,
+            ),
+            CheckDirective(kind="CHECK-NEXT", text="}", line_no=3),
+        ],
+        source_path="inline.ircheck",
+    )
+    assert ok is True
+    assert failed is None
+    assert message is None
+
+
 # TC-IRCHECK-MATCH-007
 # 创建者: 朽木露琪亚
 # 最后一次更改: 守护最好的爱莉希雅

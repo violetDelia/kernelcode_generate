@@ -80,10 +80,11 @@ CheckKind = Literal[
 ]
 CASE_SEPARATOR = "// -----"
 _CHECK_TOKEN_PATTERN = re.compile(r"\[\[([A-Za-z_][A-Za-z0-9_]*)(?::(.*?))?\]\]")
-_REGEX_ALIAS_PATTERN = re.compile(r"\{(reg|dim|int)\}")
+_REGEX_ALIAS_PATTERN = re.compile(r"\{(reg|val|dim|int)\}")
 _REGEX_UNPARSED_MARKERS = ("[[", "]]")
 _REGEX_ALIASES = {
     "reg": r"(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+)",
+    "val": r"[A-Za-z_][A-Za-z0-9_]*",
     "dim": r"[1-9][0-9]*",
     "int": r"-?[0-9]+",
 }
@@ -376,7 +377,7 @@ def _expand_regex_aliases(regex_text: str) -> str:
     最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 仅展开 `{reg}`、`{dim}`、`{int}` 三个 alias。
+    - 仅展开 `{reg}`、`{val}`、`{dim}`、`{int}` 四个 alias。
     - 未命中的花括号内容保持原样，继续交给 Python regex 解释。
 
     使用示例:

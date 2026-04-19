@@ -922,6 +922,32 @@ builtin.module {
     assert result.exit_code == 0
 
 
+# TC-IRCHECK-RUN-030A
+# 创建者: 榕
+# 最后一次更改: 榕
+# 最近一次运行测试时间: 待本轮验证后补充
+# 最近一次运行成功时间: 待本轮验证后补充
+# 功能说明: 验证 `{val}` 可用于源码或文本里的标识符匹配，不会退化成数字 id。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_val_alias_matches_identifiers
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+def test_run_ircheck_text_val_alias_matches_identifiers() -> None:
+    text = """// COMPILE_ARGS: --pass no-op
+// CHECK: func.func @[[FN:{val}]]()
+// CHECK-NEXT: func.return
+
+builtin.module {
+  func.func @main() {
+    func.return
+  }
+}
+"""
+    result = run_ircheck_text(text, source_path="inline.ircheck")
+    assert result.ok is True
+    assert result.exit_code == 0
+
+
 # TC-IRCHECK-RUN-031
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚
