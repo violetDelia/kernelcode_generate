@@ -399,8 +399,13 @@ def _emit_npu_symbol_const_stmt(op: Operation, ctx: EmitCContext) -> str:
         if not isinstance(value_attr, IntegerAttr):
             raise _emit_error(ctx, op.name, "symbol.const value must be integer attribute")
         value = int(value_attr.value.data)
-    result_name = _bind_preferred_name(ctx, op.results[0], _symbol_const_name(value))
-    return f"{ctx.current_indent}long long {result_name} = {value};"
+    existing_name = ctx._symbol_const_names.get(value)
+    if existing_name is not None:
+        ctx.bind_name(op.results[0], existing_name)
+        return ""
+    result_name = _symbol_const_name(value)
+    ctx._symbol_const_names[value] = ctx.bind_name(op.results[0], result_name)
+    return f"{ctx.current_indent}S_INT {result_name} = {value};"
 
 
 def _format_literal(op: arith.ConstantOp, ctx: EmitCContext) -> str:
@@ -1325,8 +1330,9 @@ def _emit_npu_slice_stmt(op: DmaSliceOp, ctx: EmitCContext) -> str:
     最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 把 `dma.slice` 统一发射为 `slice(target, source, {offset}, {size}, {stride});`。
-    - 使用当前 expectation 约定的 brace-list 文本。
+    - 一维参数发射为 `slice(target, source, offset, size, stride);` 标量调用。
+    - 多维参数发射为 `Vector` 绑定后再调用 `slice(target, source, offset_vec, size_vec, stride_vec);`，
+      与 `include/npu_demo/Dma.h` 的 `const Vector&` 合同对齐。
 
     使用示例:
     - stmt = emit_c_op(slice_op, EmitCContext(target="npu_demo"))
@@ -1343,9 +1349,19 @@ def _emit_npu_slice_stmt(op: DmaSliceOp, ctx: EmitCContext) -> str:
             f"{ctx.current_indent}slice({target_expr} /*dst*/, {source_expr} /*source*/, "
             f"{emit_c_value(op.offsets[0], ctx)} /*offset*/, {emit_c_value(op.sizes[0], ctx)} /*size*/, {emit_c_value(op.strides[0], ctx)} /*stride*/);"
         )
-    return (
-        f"{ctx.current_indent}slice({target_expr} /*dst*/, {source_expr} /*source*/, "
-        f"{_emit_npu_brace_list(op.offsets, ctx)} /*offset*/, {_emit_npu_brace_list(op.sizes, ctx)} /*size*/, {_emit_npu_brace_list(op.strides, ctx)} /*stride*/);"
+    offset_lines, offset_vec = _emit_npu_vector_binding("slice_offset", op.offsets, ctx)
+    size_lines, size_vec = _emit_npu_vector_binding("slice_size", op.sizes, ctx)
+    stride_lines, stride_vec = _emit_npu_vector_binding("slice_stride", op.strides, ctx)
+    return "\n".join(
+        [
+            *offset_lines,
+            *size_lines,
+            *stride_lines,
+            (
+                f"{ctx.current_indent}slice({target_expr} /*dst*/, {source_expr} /*source*/, "
+                f"{offset_vec} /*offset*/, {size_vec} /*size*/, {stride_vec} /*stride*/);"
+            ),
+        ]
     )
 
 
@@ -1353,12 +1369,13 @@ def _emit_npu_deslice_stmt(op: DmaDesliceOp, ctx: EmitCContext) -> str:
     """生成 `target=npu_demo` 下 `dma.deslice` 的目标式 helper 调用。
 
     创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 小李飞刀
 
     功能说明:
-    - 把 `dma.deslice` 统一发射为 `deslice(target, source, {offset}, {size}, {stride});`。
+    - 一维参数发射为 `deslice(target, source, offset, size, stride);` 标量调用。
+    - 多维参数发射为 `Vector` 绑定后再调用
+      `deslice(target, source, offset_vec, size_vec, stride_vec);`，与 `include/npu_demo/Dma.h` 的 `const Vector&` 合同对齐。
     - 结果值绑定到 target 名称，确保后续节点可稳定引用该 memory。
-    - 使用当前 expectation 约定的 brace-list 文本。
 
     使用示例:
     - stmt = emit_c_op(deslice_op, EmitCContext(target="npu_demo"))
@@ -1743,8 +1760,13 @@ def _emit_symbol_const_stmt(op: Operation, ctx: EmitCContext) -> str:
     if all(isinstance(use.operation, (DmaLoadOp, DmaStoreOp)) for use in result.uses):
         return ""
     preferred = f"c_{value_text}".replace("-", "neg_")
-    name = _bind_preferred_name(ctx, result, preferred)
-    return f"{ctx.current_indent}long long {name} = {value_text};"
+    if result.uses and all(isinstance(use.operation, DmaSliceOp) for use in result.uses):
+        name = _bind_preferred_name(ctx, result, preferred)
+    elif ctx.has_bound_name(preferred):
+        name = _bind_preferred_name(ctx, result, preferred)
+    else:
+        name = ctx.bind_name(result, preferred)
+    return f"{ctx.current_indent}S_INT {name} = {value_text};"
 
 
 def _emit_symbol_cast_stmt(op: SymbolToIntOp | SymbolCastOp, ctx: EmitCContext) -> str:

@@ -1323,10 +1323,10 @@ def test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline() -> None:
 # EC-020
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-15 11:10:00 +0800
-# 最近一次运行成功时间: N/A
-# 功能说明: 验证 npu_demo 下 tiled matmul 可发射 symbol.for + 2D slice/deslice + kernel.matmul 管线。
-# 测试目的: 锁定 target=npu_demo 的二维 tile helper 形态与 `npu_demo::matmul(...)` 调用，不回退到一维 helper 或残留 `nn.matmul`。
+# 最近一次运行测试时间: 2026-04-20 02:54:53 +0800
+# 最近一次运行成功时间: 2026-04-20 02:54:53 +0800
+# 功能说明: 验证 npu_demo 下 tiled matmul 可发射 symbol.for + 2D slice/deslice + kernel.matmul 管线，且多维 slice/deslice 采用 Vector 绑定合同。
+# 测试目的: 锁定 target=npu_demo 的二维 tile helper 形态与 `npu_demo::matmul(...)` 调用，确保多维参数不回退到 brace-list 文本并保持 deslice Vector 调用链稳定。
 # 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_lowers_npu_demo_tiled_matmul_pipeline
 # 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
 # 对应 spec 文件路径: spec/dsl/emit_c.md
@@ -1363,8 +1363,19 @@ def test_emit_c_lowers_npu_demo_tiled_matmul_pipeline() -> None:
         r"Memory<GM, float> v\d+ = alloc<GM, float>\(\{32, 32\} /\*shape\*/, \{32, 1\} /\*stride\*/\);",
         stmt,
     )
-    assert re.search(r"slice\(v\d+ /\*dst\*/, lhs /\*source\*/, \{i\d+, c_0(?:_\d+)?\} /\*offset\*/, \{c_16(?:_\d+)?, c_16(?:_\d+)?\} /\*size\*/, \{c_1(?:_\d+)?, c_1(?:_\d+)?\} /\*stride\*/\);", stmt)
-    assert re.search(r"slice\(v\d+ /\*dst\*/, rhs /\*source\*/, \{c_0(?:_\d+)?, i\d+\} /\*offset\*/, \{c_16(?:_\d+)?, c_16(?:_\d+)?\} /\*size\*/, \{c_1(?:_\d+)?, c_1(?:_\d+)?\} /\*stride\*/\);", stmt)
+    assert re.search(r"long long slice_offset\d+\[2\] = \{i\d+, c_0(?:_\d+)?\};", stmt)
+    assert re.search(r"long long slice_offset\d+\[2\] = \{c_0(?:_\d+)?, i\d+\};", stmt)
+    assert re.search(r"Vector slice_offset\d+_vec\(slice_offset\d+, 2\);", stmt)
+    assert re.search(r"Vector slice_size\d+_vec\(slice_size\d+, 2\);", stmt)
+    assert re.search(r"Vector slice_stride\d+_vec\(slice_stride\d+, 2\);", stmt)
+    assert re.search(
+        r"slice\(v\d+ /\*dst\*/, lhs /\*source\*/, slice_offset\d+_vec /\*offset\*/, slice_size\d+_vec /\*size\*/, slice_stride\d+_vec /\*stride\*/\);",
+        stmt,
+    )
+    assert re.search(
+        r"slice\(v\d+ /\*dst\*/, rhs /\*source\*/, slice_offset\d+_vec /\*offset\*/, slice_size\d+_vec /\*size\*/, slice_stride\d+_vec /\*stride\*/\);",
+        stmt,
+    )
     assert re.search(
         r"npu_demo::matmul<[^>]+>\(v\d+ /\*out\*/, v\d+ /\*lhs\*/, v\d+ /\*rhs\*/\);",
         stmt,
