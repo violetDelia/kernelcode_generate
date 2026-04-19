@@ -265,3 +265,69 @@
 改动：根据用户最新口径，S4 merge 不再按此前“只合入口与计划书引用”的窄边界执行；当前将以 `wt-20260418-op-mlir-codegen-s4` 现场的非 `expectation`、非 `ignore` 改动为准，准备合入 [`kernel_gen/dsl/emit_c.py`](../../../../../../kernel_gen/dsl/emit_c.py)、[`kernel_gen/dsl/gen_kernel.py`](../../../../../../kernel_gen/dsl/gen_kernel.py)、[`kernel_gen/dsl/mlir_gen/emit/core.py`](../../../../../../kernel_gen/dsl/mlir_gen/emit/core.py)、[`script/run-op-mlir-s4-gen-kernel-expectation.sh`](../../../../../../script/run-op-mlir-s4-gen-kernel-expectation.sh)、[`test/dsl/mlir_gen/emit/test_call_dma.py`](../../../../../../test/dsl/mlir_gen/emit/test_call_dma.py)、[`test/dsl/test_ast_visitor.py`](../../../../../../test/dsl/test_ast_visitor.py)、[`test/dsl/test_emit_c.py`](../../../../../../test/dsl/test_emit_c.py)、[`test/dsl/test_emit_mlir.py`](../../../../../../test/dsl/test_emit_mlir.py)、[`test/dsl/test_expectation_softmax_negative_axis_normalize.py`](../../../../../../test/dsl/test_expectation_softmax_negative_axis_normalize.py)、[`test/dsl/test_gen_kernel.py`](../../../../../../test/dsl/test_gen_kernel.py)、[`test/script/test_run_op_mlir_s4_gen_kernel_expectation.py`](../../../../../../test/script/test_run_op_mlir_s4_gen_kernel_expectation.py)，以及已删除的 S2 脚本/旧脚本测试与当前记录文件；不合入任何 `expectation/` 路径文件，也不合入 `gitignore` 命中的现场文件。
 验证：`git -C /home/lfr/kernelcode_generate/wt-20260418-op-mlir-codegen-s4 status --short --branch` -> 当前改动仅命中上述实现、脚本、测试与记录文件；`git -C /home/lfr/kernelcode_generate ls-files -o -i --exclude-standard wt-20260418-op-mlir-codegen-s4` -> 空结果
 结论：已按新口径完成 S4 合并前核对；下一步先把当前 worktree 变基到最新主线，再提交本轮允许范围内的非 `expectation`、非 `ignore` 改动并推送。
+
+时间：2026-04-19 17:25 +0800
+经办人：提莫炖蘑菇
+任务：T-20260418-6a014c49
+任务目标：复核 expectation 与 pytest 是否按新合同全量通过，并确认“旧签名残留”检查是否已收齐。
+改动：
+- 审查范围：[`ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md`](../../../../../../ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md)、[`script/run-op-mlir-s3-expectation.sh`](../../../../../../script/run-op-mlir-s3-expectation.sh)、[`script/run-op-mlir-s4-gen-kernel-expectation.sh`](../../../../../../script/run-op-mlir-s4-gen-kernel-expectation.sh)、[`test/script/test_run_op_mlir_s4_gen_kernel_expectation.py`](../../../../../../test/script/test_run_op_mlir_s4_gen_kernel_expectation.py)、[`test/dsl/test_expectation_softmax_negative_axis_normalize.py`](../../../../../../test/dsl/test_expectation_softmax_negative_axis_normalize.py)、[`test/dsl/test_gen_kernel.py`](../../../../../../test/dsl/test_gen_kernel.py)、[`test/pass/nn_lowering/img2col1d.py`](../../../../../../test/pass/nn_lowering/img2col1d.py)、[`test/pass/nn_lowering/img2col2d.py`](../../../../../../test/pass/nn_lowering/img2col2d.py)、[`test/pass/nn_lowering/softmax.py`](../../../../../../test/pass/nn_lowering/softmax.py)、[`test/pass/nn_lowering/reduce_sum.py`](../../../../../../test/pass/nn_lowering/reduce_sum.py) 与计划书 S5 小节原文命令。
+- 问题列表：
+  - [P1] 文件/接口：[`ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md`](../../../../../../ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md:428)、[`ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md`](../../../../../../ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md:429)、[`ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md`](../../../../../../ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md:442)、[`ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md`](../../../../../../ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md:443)、[`ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md`](../../../../../../ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md:444)、[`ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md`](../../../../../../ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md:445)；现象：S5 计划书原文仍要求执行 `python3 -m expectation.pass.lowing`、`python3 -m expectation.dsl.gen_kernel`、`pytest -q test/pass/nn_lowering/test_expectation_img2col.py`、`pytest -q test/pass/nn_lowering/test_expectation_broadcast_new_symbol_dim.py`。当前 worktree 下前两条直接 `ModuleNotFoundError: No module named 'expectation'`，后两条目标文件不存在。风险：S5 “全量 expectation 与 pytest 通过”的验收命令仍不可按计划书原文复现，当前不能判定本轮收口完成。建议：把 S5 小节入口改成当前可直接执行的 expectation/pytest 组合，再回 review。
+  - [P1] 文件/接口：[`ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md`](../../../../../../ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md:438)、[`ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md`](../../../../../../ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md:448)；现象：S5 的“旧签名残留”检查仍写 `rg -n 'result_type|\\.result\\b|dma\\.load|dma\\.cast' kernel_gen test expectation`。我按当前路径复跑后命中大量现行、合法用法，包括当前 `dma.load` / `dma.cast` 合同说明、合法 `result` 字段访问、`expectation/operation/dma/*.py` 正文等。风险：这条检索不能区分“旧签名残留”和“当前合同正文”，即使实现已收口也会持续报大量命中，无法作为通过标准。建议：把 S5 的残留检查改成只匹配真正的旧签名样式，而不是笼统匹配当前合法关键词。
+- 漏洞排查结果：
+  - 输入校验绕过：当前有效入口 `script/run-op-mlir-s3-expectation.sh`、`script/run-op-mlir-s4-gen-kernel-expectation.sh` 均可直接执行，未见执行目录或环境拼装绕过。
+  - 类型/形状绕过：`img2col1d/img2col2d/softmax/reduce_sum` 与 S4 相关 pytest 全部通过，未见因新顺序/新建模引入的类型或形状回退。
+  - 边界越界：当前主要缺口在 S5 计划书验收命令与残留检查口径，非实现行为新增越界。
+  - 错误处理缺失：S5 原文入口在执行时直接报模块缺失或文件缺失，说明计划书入口未完成更新。
+  - 状态污染：当前 worktree 下有效入口与相关 pytest 稳定通过，未见现场残留问题。
+  - 资源释放问题：本轮只涉及验收入口、检索口径与复测，未见新增资源问题。
+- 改进建议：除上述必须修改项外，未发现额外改进点。
+验证：
+- `python3 -m expectation.pass.lowing` -> `exit 1`，`ModuleNotFoundError: No module named 'expectation'`
+- `python3 -m expectation.dsl.gen_kernel` -> `exit 1`，`ModuleNotFoundError: No module named 'expectation'`
+- `python3 -m pytest -q test/pass/nn_lowering/test_expectation_img2col.py` -> `exit 4`，`file or directory not found`
+- `python3 -m pytest -q test/pass/nn_lowering/test_expectation_broadcast_new_symbol_dim.py` -> `exit 4`，`file or directory not found`
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260418-op-mlir-verify-s5:/home/lfr/kernelcode_generate python3 -m expectation.pass.lowing.nn_lowering` -> `exit 0`
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260418-op-mlir-verify-s5:/home/lfr/kernelcode_generate python3 /home/lfr/kernelcode_generate/expectation/dsl/gen_kernel/npu_demo_add_barrier` -> `exit 0`
+- `python3 -m pytest -q test/pass/nn_lowering/img2col1d.py test/pass/nn_lowering/img2col2d.py test/pass/nn_lowering/softmax.py test/pass/nn_lowering/reduce_sum.py test/dsl/test_expectation_softmax_negative_axis_normalize.py test/dsl/test_gen_kernel.py` -> `69 passed, 8 warnings`
+- `rg -n 'result_type|\\.result\\b|dma\\.load|dma\\.cast' kernel_gen test /home/lfr/kernelcode_generate/expectation` -> 大量命中当前合法实现、测试与 expectation 文本，不能直接作为“旧签名残留”判断
+结论：需修改；当前有效入口与关键 pytest 基本通过，但 S5 计划书中的全量验收命令和“旧签名残留”检索口径仍未对齐当前合同，暂不能判通过。下一步建议创建 `build` 任务，只修正 S5 小节的验收命令与残留检查表达后再回 review。
+
+时间：2026-04-19 17:30 +0800
+经办人：小李飞刀
+任务：T-20260418-6a014c49
+任务目标：修正 S5 计划书中的全量验收命令与旧签名残留检查口径，确保都可直接复现。
+改动：本轮只修改了 [`ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md`](../../../../../../ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md) 的 S5 小节。1）把“预期输出”从不可直接运行的 `python3 -m expectation.pass.lowing` / `python3 -m expectation.dsl.gen_kernel` 改为当前已实跑通过的 `script/run-op-mlir-s3-expectation.sh` 与 `script/run-op-mlir-s4-gen-kernel-expectation.sh`。2）把“验收必过项目”改成两条脚本入口、两组现存 pytest 文件，以及两条入口脚本的脚本测试，不再引用不存在的 `test_expectation_img2col.py`、`test_expectation_broadcast_new_symbol_dim.py`。3）把“旧签名残留”检查从过宽的 `rg -n 'result_type|\\.result\\b|dma\\.load|dma\\.cast' kernel_gen test expectation`，改为仅匹配真正旧样式的检索：`%... = "dma.load/cast"`、`DmaCastOp(...result_type)`、`DmaLoadOp(...result_type)`、`dma.load/cast(...) ->`，作用范围限定在 `kernel_gen/dialect/dma.py`、`kernel_gen/dsl/ast`、`kernel_gen/dsl/mlir_gen`、`kernel_gen/dsl/gen_kernel.py`、`kernel_gen/passes/lowering`、`test/dsl`、`test/pass`。
+验证：
+- `bash -n script/run-op-mlir-s3-expectation.sh script/run-op-mlir-s4-gen-kernel-expectation.sh` -> `exit 0`
+- `script/run-op-mlir-s3-expectation.sh` -> `exit 0`
+- `script/run-op-mlir-s4-gen-kernel-expectation.sh` -> `exit 0`
+- `python3 -m pytest -q test/pass/nn_lowering/img2col1d.py test/pass/nn_lowering/img2col2d.py test/pass/nn_lowering/softmax.py test/pass/nn_lowering/reduce_sum.py test/dsl/test_expectation_softmax_negative_axis_normalize.py test/dsl/test_gen_kernel.py test/script/test_run_op_mlir_s3_expectation.py test/script/test_run_op_mlir_s4_gen_kernel_expectation.py` -> `75 passed, 8 warnings`
+- `rg -n '%[^ ]+ = "dma\\.(load|cast)"|DmaCastOp\\([^\\n]*result_type|DmaLoadOp\\([^\\n]*result_type|dma\\.(load|cast)\\([^)]*\\)\\s*->' kernel_gen/dialect/dma.py kernel_gen/dsl/ast kernel_gen/dsl/mlir_gen kernel_gen/dsl/gen_kernel.py kernel_gen/passes/lowering test/dsl test/pass -g '!*.md'` -> `exit 1`，空结果
+- `python3 - <<'PY' ...` 核对计划书 `424-447` 行 -> 已显示新脚本入口、新 pytest 集合与新 `rg` 口径
+结论：本轮 build 已完成；S5 小节的全量验收命令和旧签名残留检查已与当前可执行入口一致，可重新进入 review。
+
+时间：2026-04-19 17:31 +0800
+经办人：不要啊教练
+任务：T-20260418-6a014c49
+任务目标：复核 S5 小节的全量验收命令与旧签名残留检查是否已对齐当前可执行入口
+改动：完成本轮复审。问题列表：无。漏洞排查结果：1）输入校验绕过：[`script/run-op-mlir-s3-expectation.sh`](../../../../../../script/run-op-mlir-s3-expectation.sh) 与 [`script/run-op-mlir-s4-gen-kernel-expectation.sh`](../../../../../../script/run-op-mlir-s4-gen-kernel-expectation.sh) 在当前 worktree 可直接执行，未见执行目录或环境拼装绕过。2）类型/形状绕过：`img2col1d/img2col2d/softmax/reduce_sum` 以及 S4 的 `softmax negative axis`、`gen_kernel` 相关 pytest 复跑通过，未见新顺序/新建模回退。3）边界越界：S5 小节当前列出的两条脚本、三组 pytest 与旧样式检索都能在当前 worktree 直接复现，未再引用缺失模块或不存在的测试文件。4）错误处理缺失：`bash -n`、脚本真跑与脚本测试均通过，未见入口级错误。5）状态污染：脚本入口、pytest 集合与 `rg` 检索在同一 worktree 内独立复跑稳定，未见现场残留问题。6）资源释放问题：本轮仅涉及验收命令、脚本入口与文本检索复核，未见新增资源问题。改进建议：未发现额外改进点。
+验证：`bash -n script/run-op-mlir-s3-expectation.sh script/run-op-mlir-s4-gen-kernel-expectation.sh` -> `exit 0`；`script/run-op-mlir-s3-expectation.sh` -> `exit 0`；`script/run-op-mlir-s4-gen-kernel-expectation.sh` -> `exit 0`；`python3 -m pytest -q test/pass/nn_lowering/img2col1d.py test/pass/nn_lowering/img2col2d.py test/pass/nn_lowering/softmax.py test/pass/nn_lowering/reduce_sum.py test/dsl/test_expectation_softmax_negative_axis_normalize.py test/dsl/test_gen_kernel.py test/script/test_run_op_mlir_s3_expectation.py test/script/test_run_op_mlir_s4_gen_kernel_expectation.py` -> `75 passed, 8 warnings`；`rg -n '%[^ ]+ = "dma\\.(load|cast)"|DmaCastOp\\([^\\n]*result_type|DmaLoadOp\\([^\\n]*result_type|dma\\.(load|cast)\\([^)]*\\)\\s*->' kernel_gen/dialect/dma.py kernel_gen/dsl/ast kernel_gen/dsl/mlir_gen kernel_gen/dsl/gen_kernel.py kernel_gen/passes/lowering test/dsl test/pass -g '!*.md'` -> `exit 1`，空结果；文本核对 [`ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md`](../../../../../../ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md:428)、[`ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md`](../../../../../../ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md:429)、[`ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md`](../../../../../../ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md:442)、[`ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md`](../../../../../../ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md:443)、[`ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md`](../../../../../../ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md:444)、[`ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md`](../../../../../../ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md:445)、[`ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md`](../../../../../../ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md:446)、[`ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md`](../../../../../../ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md:447) 已与当前可执行入口一致。
+结论：通过。S5 小节的全量验收命令与旧签名残留检查已对齐当前可执行入口，建议进入 merge。
+
+时间：2026-04-19 17:33
+经办人：jcc你莫辜负
+任务：T-20260418-6a014c49
+任务目标：确认当前收到的 `merge` 指派是否符合替补角色职责，并核对任务表是否一致。
+改动：核对 [`TODO.md`](../../../../../../TODO.md)、[`agents/codex-multi-agents/agents/jcc你莫辜负/jcc你莫辜负.prompt.md`](../../../../../../agents/codex-multi-agents/agents/jcc你莫辜负/jcc你莫辜负.prompt.md) 与 [`agents/standard/角色权限矩阵.md`](../../../../../../agents/standard/角色权限矩阵.md)，确认当前收到的是 `merge` 任务，但 `jcc你莫辜负` 明确不承接合并任务且无 `-done` 权限；同时 `TODO.md` 当前条目显示该任务已指派给 `李白`，与本轮收到的对话分派不一致。本轮未执行任何合并动作，准备按异常流程向管理员回报。
+验证：`rg -n '^\| T-20260418-6a014c49 \|' TODO.md` -> 确认该任务当前在任务表中指派为 `李白`；`rg -n '不承接合并任务|禁止执行 \`-new\`、\`-done\`、\`-dispatch\`' agents/codex-multi-agents/agents/jcc你莫辜负/jcc你莫辜负.prompt.md` -> 命中“`不承接合并任务`”与“`禁止执行 \`-new\`、\`-done\`、\`-dispatch\``”；`rg -n '^\| 替补 \|' agents/standard/角色权限矩阵.md` -> 确认替补角色仅允许 `-talk`、`-next -auto -type`，不含 `-done`；未执行 `git` 或合并命令，原因：任务类型与任务表指派均不符合当前角色边界。
+结论：当前任务待确认，未继续推进合并；下一步使用 `-talk` 向管理员说明“收到的对话指派”与 `TODO.md` 当前条目不一致，且任务类型超出替补角色权限，请管理员按任务表统一处理。
+
+时间：2026-04-19 17:39 +0800
+经办人：李白
+任务：T-20260418-6a014c49
+任务目标：在 `wt-20260418-op-mlir-verify-s5` 内按当前口径完成 S5 merge 收口
+改动：已完成合并前核对。当前 `wt-20260418-op-mlir-verify-s5` 中唯一未提交改动为当前记录文件，计划书 [`ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md`](../../../../../../ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md) 与对应脚本/测试口径更新已包含在主线基线中，本次无额外非 `expectation`、非 `ignore` 业务文件需要再合入；当前将仅提交本轮 S5 merge 收口记录。
+验证：`git -C /home/lfr/kernelcode_generate/wt-20260418-op-mlir-verify-s5 diff --name-only` -> 仅命中 `agents/codex-multi-agents/log/task_records/2026/16/20260418-op-mlir-plan.md`；`git -C /home/lfr/kernelcode_generate/wt-20260418-op-mlir-verify-s5 status --short --branch` -> 仅当前记录文件为已修改；`test -f /home/lfr/kernelcode_generate/wt-20260418-op-mlir-verify-s5/ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md; echo $?` -> `1`
+结论：已完成 S5 merge 前核对；下一步只提交当前记录文件，执行一次推送、`-done` 并回报管理员。
