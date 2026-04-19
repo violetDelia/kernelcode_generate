@@ -1789,7 +1789,7 @@ def _emit_npu_kernel_matmul_stmt(op: KernelMatmulOp, ctx: EmitCContext) -> str:
 
     功能说明:
     - 把 lowered `kernel.matmul(lhs, rhs, out)` 发射为显式模板参数且 `out-first` 的
-      `npu_demo::matmul<lhs_space, rhs_space, out_space, lhs_dtype, rhs_dtype, out_dtype>(out, lhs, rhs);`。
+      `npu_demo::matmul<lhs_space, rhs_space, out_space, lhs_dtype, rhs_dtype, out_dtype>(out /*out*/, lhs /*lhs*/, rhs /*rhs*/);`。
     - 模板参数顺序固定按 `lhs space -> rhs space -> out space -> lhs dtype -> rhs dtype -> out dtype` 展开，
       避免依赖 C++ 推导，同时保持 `execute_engine` / `emit_c` 的 `npu_demo` matmul 合同一致。
     - 只在 `target=npu_demo` 公开该后端专用 helper。
