@@ -1,0 +1,15 @@
+时间：2026-04-19 23:54 +0800
+经办人：不要啊教练
+任务：T-20260419-c68add02
+任务目标：复核 Arch 公共接口与 include/api vs include/npu_demo 分层是否对齐
+改动：完成本轮复审。当前任务指定的 `worktree` 初始不存在，我已基于当前仓库快照创建 `/home/lfr/kernelcode_generate/wt-20260419-emitc-api-s8-arch-review` 作为审查现场。问题列表：无。已核对 [`spec/include/api/Arch.md`](../../../../../../spec/include/api/Arch.md)、[`include/api/Arch.h`](../../../../../../include/api/Arch.h) 与 [`include/npu_demo/Arch.h`](../../../../../../include/npu_demo/Arch.h)，当前公开合同只在 `include/api` 层保留 `launch / BarrierVisibility / BarrierScope / KernelContext::{thread_id, thread_num, barrier, get_dynamic_memory}` 的最小接口面；线程实现、barrier 共享状态、动态内存 backing store 与 launch runtime 细节继续留在 `include/npu_demo`，两层职责没有交叉。
+验证：`python3 -m pytest -q test/include/api/test_arch.py` -> `5 passed in 0.81s`；`python3 -m pytest -q test/include/npu_demo/test_kernel_context.py test/include/npu_demo/test_runtime_launch.py` -> `14 passed in 4.62s`；`rg -n "std::thread|std::mutex|condition_variable|LaunchBarrierState|kThreadCapability|kTsmMemorySize|thread_id_|barrier_state_" include/api/Arch.h include/npu_demo/Arch.h` -> 仅命中 `include/npu_demo/Arch.h`，`include/api/Arch.h` 无 runtime 细节残留；`rg -n "virtual long long thread_id\\(|virtual long long thread_num\\(|virtual void barrier\\(|template <MemorySpace Space, typename T>\\s*Memory<Space, T> get_dynamic_memory|template <long long block, long long thread, long long subthread" include/api/Arch.h` -> 命中公开接口声明；`git -C /home/lfr/kernelcode_generate/wt-20260419-emitc-api-s8-arch-review status --short` -> 仅新增当前审查日志。漏洞排查结果：1）输入校验绕过：`test_arch.py` 继续覆盖字符串 callee、非法 barrier 可见域/范围等公开边界。2）类型/形状绕过：`BarrierVisibility` / `BarrierScope` / `get_dynamic_memory<Space, T>` 的模板与参数面继续由 API 编译回归锁定。3）边界越界：`include/api` 未混入线程/同步实现细节，runtime 行为仍只在 `include/npu_demo` 中承接。4）错误处理缺失：`include/npu_demo` 侧回归继续覆盖 launch / barrier / dynamic memory 的显式失败路径。5）状态污染：两层头文件的职责边界清晰，未见 include/api 与后端私有层的双轨合同。6）资源释放问题：本轮 Arch 公开接口与 npu_demo runtime 回归未见新增资源生命周期问题。改进建议：未发现额外改进点。
+结论：通过。下一步建议创建 `merge` 任务，按 S8 通过路径继续推进。
+
+时间：2026-04-19 23:55 +0800
+经办人：李白
+任务：T-20260419-c68add02
+任务目标：合并已通过复审的 Arch 公共接口与 include/api vs include/npu_demo 分层 S8 结论，并完成当前 merge 任务收口。
+改动：接手 `merge` 后核对 [`spec/include/api/Arch.md`](../../../../../../spec/include/api/Arch.md)、[`include/api/Arch.h`](../../../../../../include/api/Arch.h)、[`include/npu_demo/Arch.h`](../../../../../../include/npu_demo/Arch.h) 与当前 `worktree` 现场，确认该审查现场基于仓库当前 `main` 创建，相对 `origin/main` 不存在额外实现、`spec` 或测试差异；本轮待合并内容仅为当前任务记录文件，用于把 S8 复审结论收口入主线。
+验证：`git -C /home/lfr/kernelcode_generate/wt-20260419-emitc-api-s8-arch-review status --short` -> 当前仅有 `agents/codex-multi-agents/log/task_records/2026/16/20260419-emitc-api-s8-arch-review.md` 未跟踪；`git -C /home/lfr/kernelcode_generate/wt-20260419-emitc-api-s8-arch-review diff --name-only origin/main...HEAD` -> 无输出，确认当前 `worktree` 相对主线无额外实现、`spec`、测试差异；`rg -n "T-20260419-c68add02" /home/lfr/kernelcode_generate/TODO.md` -> 当前任务已指派为 `李白`，可继续执行 `merge` 收口。
+结论：本轮可按“只收口记录文件”的边界继续 merge；下一步仅提交当前记录文件并向远端主分支发起一次推送，然后执行 `-done` 与管理员回报。
