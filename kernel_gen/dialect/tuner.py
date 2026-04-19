@@ -1,11 +1,11 @@
 """Tuner dialect definitions.
 
 创建者: 我不是牛马
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 定义 tuner dialect 的超参数声明与局部成本节点接口。
-- `tuner.param` 返回 `!symbol.dim<"name">` 超参数标量，`tuner.cost` 透传原 op operands 与 metadata，并固定返回 `f64` 局部成本。
+- `tuner.param` 返回 `!symbol.dim<"name">` 超参数标量，`tuner.cost` 透传原 op operands 与公开 metadata，并固定返回 `!symbol.int<"expr">` 局部成本。
 
 使用示例:
 - from kernel_gen.dialect.tuner import Tuner, TunerParamOp, TunerCostOp
@@ -19,14 +19,14 @@
 from __future__ import annotations
 
 from kernel_gen.common.errors import _ERROR_TEMPLATE
-from xdsl.dialects.builtin import SymbolRefAttr, f64
+from xdsl.dialects.builtin import StringAttr
 from xdsl.ir import Attribute, Dialect, Operation, SSAValue
 from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, result_def, var_operand_def
 from xdsl.parser import AttrParser
 from xdsl.printer import Printer
 from xdsl.utils.exceptions import VerifyException
 
-from kernel_gen.dialect.symbol import SymbolDimType
+from kernel_gen.dialect.symbol import SymbolDimType, SymbolValueType
 
 _ERROR_ACTION = "请按接口约束传参"
 _ERROR_ACTUAL = "不满足期望"
@@ -44,7 +44,7 @@ def _raise_verify_error(expected: str) -> None:
     - 供 `tuner.param`、`tuner.cost` 等 verifier 与 parser 共享错误格式，保持报错文本一致。
 
     使用示例:
-    - _raise_verify_error("tuner.cost result type must be f64")
+    - _raise_verify_error('tuner.cost result type must be !symbol.int<"expr">')
 
     关联文件:
     - spec: spec/dialect/tuner.md
@@ -191,34 +191,30 @@ class TunerCostOp(IRDLOperation):
     name = "tuner.cost"
 
     operands_ = var_operand_def(Attribute)
-    kind = attr_def(Attribute)
     cost_kind = attr_def(Attribute)
     op_name = attr_def(Attribute)
-    device_func = attr_def(Attribute)
     result = result_def(Attribute)
 
     def __init__(
         self: "TunerCostOp",
         operands: list[SSAValue | Operation],
         *,
-        kind: Attribute,
         cost_kind: Attribute,
         op_name: Attribute,
-        device_func: Attribute,
         extra_attrs: dict[str, Attribute] | None = None,
-        result_type: Attribute = f64,
+        result_type: Attribute = SymbolValueType.from_expr("COST"),
     ) -> None:
         """初始化 tuner.cost。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 构造透传原 op operands 的 `tuner.cost(...)->f64`。
-        - 保留原 op attrs，并显式要求 pass-owned metadata attrs。
+        - 构造透传原 op operands 的 `tuner.cost(...)->!symbol.int<"...">`。
+        - 保留原 op attrs，并显式要求公开 metadata attrs `cost_kind/op_name`。
 
         使用示例:
-        - TunerCostOp([value], kind=StringAttr("move"), cost_kind=StringAttr("all"), op_name=StringAttr("dma.alloc"), device_func=SymbolRefAttr("kernel"))
+        - TunerCostOp([value], cost_kind=StringAttr("compute"), op_name=StringAttr("dma.copy"))
 
         关联文件:
         - spec: spec/dialect/tuner.md
@@ -229,26 +225,25 @@ class TunerCostOp(IRDLOperation):
         attributes = dict(extra_attrs or {})
         attributes.update(
             {
-                "kind": kind,
                 "cost_kind": cost_kind,
                 "op_name": op_name,
-                "device_func": device_func,
             }
         )
         super().__init__(operands=[operands], result_types=[result_type], attributes=attributes)
 
     def verify_(self: "TunerCostOp") -> None:
-        """校验 tuner.cost metadata 与固定 `f64` 结果。
+        """校验 tuner.cost metadata 与整数结果。
 
         创建者: 小李飞刀
-        最后一次更改: 小李飞刀
+        最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 要求结果类型固定为 `f64`。
-        - 要求 `kind/cost_kind/op_name/device_func` 四个 metadata attr 满足公开合同。
+        - 要求结果类型固定为 `!symbol.int<"expr">`。
+        - 要求 `cost_kind/op_name` 两个 metadata attr 满足公开合同。
+        - 显式拒绝旧 `kind/device_func` attrs。
 
         使用示例:
-        - TunerCostOp([value], kind=StringAttr("move"), cost_kind=StringAttr("all"), op_name=StringAttr("dma.alloc"), device_func=SymbolRefAttr("kernel")).verify()
+        - TunerCostOp([value], cost_kind=StringAttr("compute"), op_name=StringAttr("dma.copy")).verify()
 
         关联文件:
         - spec: spec/dialect/tuner.md
@@ -256,20 +251,21 @@ class TunerCostOp(IRDLOperation):
         - 功能实现: kernel_gen/dialect/tuner.py
         """
 
-        if self.result.type != f64:
-            _raise_verify_error("tuner.cost result type must be f64")
+        if not isinstance(self.result.type, SymbolValueType):
+            _raise_verify_error('tuner.cost result type must be !symbol.int<"expr">')
+        self.result.type.verify()
 
-        for attr_name in ("kind", "cost_kind", "op_name"):
+        for attr_name in ("cost_kind", "op_name"):
             attr_value = getattr(self, attr_name)
             if not hasattr(attr_value, "data") or not isinstance(attr_value.data, str):
                 _raise_verify_error(f"tuner.cost {attr_name} must be string attr")
-        if not isinstance(self.device_func, SymbolRefAttr):
-            _raise_verify_error("tuner.cost device_func must be symbol ref attr")
+        if "kind" in self.attributes:
+            _raise_verify_error("tuner.cost kind attr is not part of public contract")
+        if "device_func" in self.attributes:
+            _raise_verify_error("tuner.cost device_func attr is not part of public contract")
 
-        if self.kind.data not in ("compute", "move"):
-            _raise_verify_error("tuner.cost kind must be one of compute or move")
-        if self.cost_kind.data not in ("compute", "move", "all"):
-            _raise_verify_error("tuner.cost cost_kind must be one of compute, move or all")
+        if self.cost_kind.data not in ("compute", "memory"):
+            _raise_verify_error("tuner.cost cost_kind must be one of compute or memory")
         if not self.op_name.data.strip():
             _raise_verify_error("tuner.cost op_name must not be empty")
 
@@ -280,11 +276,11 @@ class TunerCostOp(IRDLOperation):
         最后一次更改: 小李飞刀
 
         功能说明:
-        - 输出 `tuner.cost(%args) {attrs} : (types) -> f64` 形式文本。
+        - 输出 `tuner.cost(%args) {attrs} : (types) -> !symbol.int<"...">` 形式文本。
         - 保持 operands、attrs、类型段顺序稳定，便于 round-trip。
 
         使用示例:
-        - TunerCostOp([value], kind=kind, cost_kind=cost_kind, op_name=op_name, device_func=device_func).print(printer)
+        - TunerCostOp([value], cost_kind=cost_kind, op_name=op_name).print(printer)
 
         关联文件:
         - spec: spec/dialect/tuner.md
@@ -315,7 +311,7 @@ class TunerCostOp(IRDLOperation):
         最后一次更改: 小李飞刀
 
         功能说明:
-        - 解析 `tuner.cost(%args) {attrs} : (types) -> f64`。
+        - 解析 `tuner.cost(%args) {attrs} : (types) -> !symbol.int<"...">`。
         - 在解析阶段按类型段解析 unresolved operands，确保 print 后再 parse 可闭环。
 
         使用示例:
@@ -339,19 +335,15 @@ class TunerCostOp(IRDLOperation):
         resolved_operands = [parser.resolve_operand(operand, operand_type) for operand, operand_type in zip(operands, operand_types, strict=True)]
 
         try:
-            kind = attrs.pop("kind")
             cost_kind = attrs.pop("cost_kind")
             op_name = attrs.pop("op_name")
-            device_func = attrs.pop("device_func")
         except KeyError as exc:
             _raise_verify_error(f"tuner.cost requires attribute {exc.args[0]}")
 
         return cls(
             resolved_operands,
-            kind=kind,
             cost_kind=cost_kind,
             op_name=op_name,
-            device_func=device_func,
             extra_attrs=attrs,
             result_type=result_type,
         )

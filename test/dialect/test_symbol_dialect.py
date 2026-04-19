@@ -27,8 +27,8 @@ from pathlib import Path
 
 import pytest
 from xdsl.context import Context
-from xdsl.dialects.arith import AddfOp, Arith, ConstantOp
-from xdsl.dialects.builtin import ArrayAttr, Builtin, FloatAttr, IndexType, IntAttr, IntegerType, StringAttr, bf16, f16, f32, f64, i1, i8, i16, i32, i64
+from xdsl.dialects.arith import Arith
+from xdsl.dialects.builtin import ArrayAttr, Builtin, IndexType, IntAttr, IntegerType, StringAttr, bf16, f16, f32, f64, i1, i8, i16, i32, i64
 from xdsl.dialects.test import Test, TestOp as _TestOp
 from xdsl.ir import Block, Region
 from xdsl.parser import Parser
@@ -197,29 +197,6 @@ def _make_symbol_value(expr: str):
     """
 
     return _TestOp(result_types=[SymbolValueType.from_expr(expr)]).results[0]
-
-
-def _make_f64_value(value: float = 0.0):
-    """构造携带 `f64` 常量结果的测试 SSA value。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 使用 `arith.constant` 构造测试专用 `f64` SSA value。
-    - 供 `symbol.for` carried-value 与其他浮点方言测试复用，避免在各用例中重复展开常量构造。
-
-    使用示例:
-    - _make_f64_value()
-    - _make_f64_value(1.25)
-
-    关联文件:
-    - spec: spec/dialect/symbol.md
-    - test: test/dialect/test_symbol_dialect.py
-    - 功能实现: kernel_gen/dialect/symbol.py
-    """
-
-    return ConstantOp(FloatAttr(value, f64)).result
 
 
 # TC-SYM-001 / TC-SYM-002 / TC-SYM-009
@@ -1339,25 +1316,29 @@ builtin.module {
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-17 10:30:00 +0800
 # 最近一次运行成功时间: 2026-04-17 10:30:00 +0800
-# 测试目的: 验证 symbol.for 支持单个 loop-carried f64，并保持 parse/print round-trip 稳定。
+# 测试目的: 验证 symbol.for 支持单个 loop-carried symbol.int，并保持 parse/print round-trip 稳定。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
-def test_symbol_for_loop_carried_f64_round_trip() -> None:
+def test_symbol_for_loop_carried_symbol_int_round_trip() -> None:
     start = _make_symbol_value("0")
     end = _make_symbol_value("M")
     step = _make_symbol_value("TILE_M")
-    init = _make_f64_value(0.0)
+    init = SymbolConstOp(0).result
     iter_type = SymbolIterType.from_bounds("0", "M", "TILE_M")
-    block = Block(arg_types=[iter_type, f64])
+    acc_type = SymbolValueType.from_expr("ACC")
+    result_type = SymbolValueType.from_expr("TOTAL")
+    block = Block(arg_types=[iter_type, acc_type])
     acc = block.args[1]
-    local = _make_f64_value(1.25)
-    block.add_op(AddfOp(acc, local))
-    block.add_op(SymbolYieldOp(block.last_op.result))
+    local = SymbolConstOp(1)
+    block.add_op(local)
+    next_op = SymbolAddOp(acc, local.result, SymbolValueType.from_expr("NEXT"))
+    block.add_op(next_op)
+    block.add_op(SymbolYieldOp(next_op.result))
 
-    op = SymbolForOp(start, end, step, block, init=init)
+    op = SymbolForOp(start, end, step, block, init=init, result_type=result_type)
     op.verify()
     assert op.result is not None
-    assert op.result.type == f64
+    assert op.result.type == result_type
     assert isinstance(block.last_op, SymbolYieldOp)
 
     ctx = _build_context()
@@ -1368,11 +1349,11 @@ builtin.module {
   %start = "test.op"() : () -> !symbol.int<"0">
   %end = "test.op"() : () -> !symbol.int<"M">
   %step = "test.op"() : () -> !symbol.int<"TILE_M">
-  %zero = arith.constant 0.000000e+00 : f64
-  %total = symbol.for %i = %start to %end step %step iter_args(%acc = %zero) {iter = #symbol.iter<start = "0", end = "M", step = "TILE_M">} -> f64 {
-    %one = arith.constant 1.250000e+00 : f64
-    %next = arith.addf %acc, %one : f64
-    symbol.yield %next : f64
+  %zero = symbol.const 0 : !symbol.int<"0">
+  %total = symbol.for %i = %start to %end step %step iter_args(%acc = %zero) {iter = #symbol.iter<start = "0", end = "M", step = "TILE_M">} -> !symbol.int<"TOTAL"> {
+    %one = symbol.const 1 : !symbol.int<"1">
+    %next = symbol.add %acc, %one : !symbol.int<"TOTAL">, !symbol.int<"1"> -> !symbol.int<"NEXT">
+    symbol.yield %next : !symbol.int<"NEXT">
   }
 }
 """,
@@ -1382,8 +1363,8 @@ builtin.module {
     reparsed = Parser(ctx, printed).parse_module()
     reparsed.verify()
     assert "iter_args(%acc = %zero)" in printed
-    assert "symbol.yield %next : f64" in printed
-    assert " -> f64 {" in printed
+    assert 'symbol.yield %next : !symbol.int<"NEXT">' in printed
+    assert ' -> !symbol.int<"TOTAL"> {' in printed
     assert printed == _print_op(reparsed).rstrip()
 
 
@@ -1392,38 +1373,64 @@ builtin.module {
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-17 10:30:00 +0800
 # 最近一次运行成功时间: 2026-04-17 10:30:00 +0800
-# 测试目的: 验证 symbol.for loop-carried f64 仅允许单个 f64 init/acc/yield/result 组合。
+# 测试目的: 验证 symbol.for loop-carried symbol.int 仅允许单个 symbol.int init/acc/yield/result 组合。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
-def test_symbol_for_rejects_invalid_loop_carried_f64() -> None:
+def test_symbol_for_rejects_invalid_loop_carried_symbol_int() -> None:
     start = _make_symbol_value("0")
     end = _make_symbol_value("M")
     step = _make_symbol_value("TILE_M")
-    valid_init = _make_f64_value(0.0)
+    valid_init = SymbolConstOp(0).result
 
-    with pytest.raises(VerifyException, match="symbol.for loop-carried f64 init must have type f64"):
+    with pytest.raises(VerifyException, match='symbol.for loop-carried init must have type !symbol.int<"expr">'):
         SymbolForOp(
             start,
             end,
             step,
-            Block(arg_types=[SymbolIterType.from_bounds("0", "M", "TILE_M"), f64]),
-            init=_make_symbol_value("0"),
+            Block(arg_types=[SymbolIterType.from_bounds("0", "M", "TILE_M"), SymbolValueType.from_expr("ACC")]),
+            init=_TestOp(result_types=[f32]).results[0],
+            result_type=SymbolValueType.from_expr("TOTAL"),
         ).verify()
 
-    with pytest.raises(VerifyException, match="symbol.for loop-carried f64 acc must have type f64"):
+    with pytest.raises(VerifyException, match='symbol.for loop-carried acc must have type !symbol.int<"expr">'):
         SymbolForOp(
             start,
             end,
             step,
             Block(arg_types=[SymbolIterType.from_bounds("0", "M", "TILE_M"), i32]),
             init=valid_init,
+            result_type=SymbolValueType.from_expr("TOTAL"),
         ).verify()
 
-    block_missing_yield = Block(arg_types=[SymbolIterType.from_bounds("0", "M", "TILE_M"), f64])
-    with pytest.raises(VerifyException, match="symbol.for loop-carried f64 body must terminate with symbol.yield"):
-        SymbolForOp(start, end, step, block_missing_yield, init=valid_init).verify()
+    with pytest.raises(VerifyException, match='symbol.for loop-carried result must have type !symbol.int<"expr">'):
+        SymbolForOp(
+            start,
+            end,
+            step,
+            Block(arg_types=[SymbolIterType.from_bounds("0", "M", "TILE_M"), SymbolValueType.from_expr("ACC")]),
+            init=valid_init,
+            result_type=f32,
+        ).verify()
 
-    block_bad_yield = Block(arg_types=[SymbolIterType.from_bounds("0", "M", "TILE_M"), f64])
+    block_missing_yield = Block(arg_types=[SymbolIterType.from_bounds("0", "M", "TILE_M"), SymbolValueType.from_expr("ACC")])
+    with pytest.raises(VerifyException, match="symbol.for loop-carried body must terminate with symbol.yield"):
+        SymbolForOp(
+            start,
+            end,
+            step,
+            block_missing_yield,
+            init=valid_init,
+            result_type=SymbolValueType.from_expr("TOTAL"),
+        ).verify()
+
+    block_bad_yield = Block(arg_types=[SymbolIterType.from_bounds("0", "M", "TILE_M"), SymbolValueType.from_expr("ACC")])
     block_bad_yield.add_op(SymbolYieldOp(_TestOp(result_types=[f32]).results[0]))
-    with pytest.raises(VerifyException, match="symbol.yield value must have type f64"):
-        SymbolForOp(start, end, step, block_bad_yield, init=valid_init).verify()
+    with pytest.raises(VerifyException, match='symbol.yield value must have type !symbol.int<"expr">'):
+        SymbolForOp(
+            start,
+            end,
+            step,
+            block_bad_yield,
+            init=valid_init,
+            result_type=SymbolValueType.from_expr("TOTAL"),
+        ).verify()
