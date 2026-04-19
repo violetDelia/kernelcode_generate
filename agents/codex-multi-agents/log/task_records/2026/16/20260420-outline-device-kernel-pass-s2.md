@@ -21,3 +21,11 @@
 改动：完成同步确认：当前任务 worktree 基线为 `cbd3b3a`，`origin/main` 为 `7bc29af`；`origin/main..HEAD` 仅含已复审提交 `cbd3b3a (T-20260419-c1deb170-outline-device-kernel-pass-s1-merge)`，并存在当前记录文件未跟踪。计划先将 `cbd3b3a` 前移到最新主线，再补交记录文件并推送。
 验证：`git -C /home/lfr/kernelcode_generate/wt-20260420-outline-device-kernel-pass-s2 status --short --branch` -> 仅命中当前记录文件；`git -C /home/lfr/kernelcode_generate/wt-20260420-outline-device-kernel-pass-s2 log --oneline origin/main..HEAD` -> 仅命中 `cbd3b3a`；`git -C /home/lfr/kernelcode_generate/wt-20260420-outline-device-kernel-pass-s2 rev-parse --short HEAD` -> `cbd3b3a`，`git -C /home/lfr/kernelcode_generate/wt-20260420-outline-device-kernel-pass-s2 rev-parse --short origin/main` -> `7bc29af`。
 结论：开始 merge，下一步重放提交并推送，然后执行 `-done` 与回报管理员。
+
+时间：2026-04-20 02:57 +0800
+经办人：李白
+任务：T-20260420-fc52a758
+任务目标：完成 merge、推送主线并收口任务流转。
+改动：将 `T-20260419-c1deb170-outline-device-kernel-pass-s1-merge` 前移到 `origin/main@7bc29af`，冲突点仅在 `kernel_gen/passes/__init__.py`、`kernel_gen/passes/lowering/__init__.py`、`spec/pass/pipeline/default_lowering.md` 的文档/导出口径；按当前主线目录收口为 `decompass` 与 `outline_device_kernel` 并存、`outline_device_kernel` 统一根路径（`kernel_gen/passes/outline_device_kernel.py`、`spec/pass/outline_device_kernel.md`、`test/pass/outline_device_kernel/test_outline_device_kernel.py`），并清理旧链路日志文件带入。
+验证：`python3 -m pytest -q test/pass/outline_device_kernel/test_outline_device_kernel.py` -> `12 passed`；`python3 -m pytest -q test/pass/test_pass_registry.py -k outline_device_kernel` -> `1 passed, 17 deselected`；`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260420-outline-device-kernel-pass-s2:/home/lfr/kernelcode_generate python3 -m expectation.pass.outline_device_kernel` -> `exit 0`；`git -C /home/lfr/kernelcode_generate/wt-20260420-outline-device-kernel-pass-s2 diff --check` -> 通过；`timeout 60 git -C /home/lfr/kernelcode_generate/wt-20260420-outline-device-kernel-pass-s2 push origin HEAD:main` -> `7bc29af..85ec2ac` 成功。
+结论：merge 已完成并推送主分支，下一步执行 `-done` 并回报管理员。
