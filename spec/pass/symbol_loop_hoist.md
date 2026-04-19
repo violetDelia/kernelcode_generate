@@ -9,9 +9,9 @@
 ## 文档信息
 
 - 创建者：朽木露琪亚
-- 最后一次更改：睡觉小分队
-- spec：[`spec/pass/lowering/symbol_loop_hoist.md`](spec/pass/lowering/symbol_loop_hoist.md)
-- 功能实现：[`kernel_gen/passes/lowering/symbol_loop_hoist.py`](kernel_gen/passes/lowering/symbol_loop_hoist.py)
+- 最后一次更改：小李飞刀
+- spec：[`spec/pass/symbol_loop_hoist.md`](spec/pass/symbol_loop_hoist.md)
+- 功能实现：[`kernel_gen/passes/symbol_loop_hoist.py`](kernel_gen/passes/symbol_loop_hoist.py)
 - test：[`test/pass/test_symbol_loop_hoist.py`](test/pass/test_symbol_loop_hoist.py)
 
 ## 依赖
@@ -41,7 +41,7 @@
 - 不新建函数，不改变函数签名，不引入 helper function。
 
 使用示例：
-- `from kernel_gen.passes.lowering.symbol_loop_hoist import SymbolLoopHoistPass`
+- `from kernel_gen.passes.symbol_loop_hoist import SymbolLoopHoistPass`
 - `module = SymbolLoopHoistPass().run(module)`
 
 注意事项：

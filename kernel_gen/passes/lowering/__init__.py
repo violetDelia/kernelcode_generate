@@ -1,7 +1,7 @@
 """lowering pass compatibility package.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 小李飞刀
 
 功能说明:
 - 提供 nn -> kernel lowering pass 的公开入口。
@@ -11,6 +11,7 @@
 - 提供 decompass pass 的公开入口。
 - 提供 outline-device-kernel 的 lowering 兼容入口。
 - 提供 tile pass 与 kernel_split 兼容入口。
+- 提供 symbol-loop-hoist 的兼容入口。
 
 使用示例:
 - from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
@@ -27,6 +28,8 @@
 - pass_obj = OutlineDeviceKernelPass()
 - from kernel_gen.passes.lowering.tile import TilePass
 - pass_obj = TilePass()
+- from kernel_gen.passes import SymbolLoopHoistPass
+- pass_obj = SymbolLoopHoistPass()
 
 关联文件:
 - spec:
@@ -37,6 +40,7 @@
   - [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
   - [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
   - [spec/pass/lowering/kernel_split.md](spec/pass/lowering/kernel_split.md)
+  - [spec/pass/symbol_loop_hoist.md](spec/pass/symbol_loop_hoist.md)
 - test:
   - [test/pass/nn_lowering/public_name.py](test/pass/nn_lowering/public_name.py)
   - [test/pass/nn_lowering/test_lowering_nn_lowering.py](test/pass/nn_lowering/test_lowering_nn_lowering.py)
@@ -46,6 +50,7 @@
   - [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
   - [test/pass/test_lowering_tile.py](test/pass/test_lowering_tile.py)
   - [test/pass/test_lowering_kernel_split.py](test/pass/test_lowering_kernel_split.py)
+  - [test/pass/test_symbol_loop_hoist.py](test/pass/test_symbol_loop_hoist.py)
 - 功能实现:
   - [kernel_gen/passes/lowering/nn_lowering/nn_lowering.py](kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
   - [kernel_gen/passes/lowering/nn_to_kernel.py](kernel_gen/passes/lowering/nn_to_kernel.py)
@@ -57,6 +62,7 @@
   - [kernel_gen/passes/lowering/__init__.py](kernel_gen/passes/lowering/__init__.py)
   - [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
   - [kernel_gen/passes/lowering/kernel_split.py](kernel_gen/passes/lowering/kernel_split.py)
+  - [kernel_gen/passes/symbol_loop_hoist.py](kernel_gen/passes/symbol_loop_hoist.py)
 """
 
 import sys
@@ -64,6 +70,7 @@ import sys
 from .nn_lowering import NnLoweringError, NnLoweringPass
 from .nn_to_kernel import LowerNnToKernelPass
 from .. import outline_device_kernel as _outline_device_kernel_module
+from .. import symbol_loop_hoist as _symbol_loop_hoist_module
 from ..buffer_results_to_out_params import (
     BufferResultsToOutParamsError,
     BufferResultsToOutParamsPass,
@@ -75,10 +82,13 @@ from .dma_memory_hierarchy import (
 from ..decompass import DecompassError, DecompassPass, register_decompass_rewrite
 from .kernel_split import KernelSplitError, KernelSplitPass
 from ..outline_device_kernel import OutlineDeviceKernelError, OutlineDeviceKernelPass
+from ..symbol_loop_hoist import SymbolLoopHoistError, SymbolLoopHoistPass
 from .tile import TilePass, TilePassError
 
 outline_device_kernel = _outline_device_kernel_module
 sys.modules.setdefault(__name__ + ".outline_device_kernel", _outline_device_kernel_module)
+symbol_loop_hoist = _symbol_loop_hoist_module
+sys.modules.setdefault(__name__ + ".symbol_loop_hoist", _symbol_loop_hoist_module)
 
 __all__ = [
     "NnLoweringPass",
@@ -96,4 +106,6 @@ __all__ = [
     "TilePassError",
     "KernelSplitPass",
     "KernelSplitError",
+    "SymbolLoopHoistPass",
+    "SymbolLoopHoistError",
 ]

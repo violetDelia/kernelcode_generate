@@ -1,7 +1,7 @@
-"""symbol-loop-hoist lowering pass.
+"""symbol-loop-hoist pass.
 
 创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
+最后一次更改: 小李飞刀
 
 功能说明:
 - 实现 `symbol-loop-hoist` pass，仅处理 `symbol.for`。
@@ -10,13 +10,13 @@
 - 首版以白名单为主，不做通用 LICM。
 
 使用示例:
-- from kernel_gen.passes.lowering.symbol_loop_hoist import SymbolLoopHoistPass
+- from kernel_gen.passes.symbol_loop_hoist import SymbolLoopHoistPass
 - module = SymbolLoopHoistPass().run(module)
 
 关联文件:
-- spec: spec/pass/lowering/symbol_loop_hoist.md
+- spec: spec/pass/symbol_loop_hoist.md
 - test: test/pass/test_symbol_loop_hoist.py
-- 功能实现: kernel_gen/passes/lowering/symbol_loop_hoist.py
+- 功能实现: kernel_gen/passes/symbol_loop_hoist.py
 """
 
 from __future__ import annotations
@@ -77,9 +77,9 @@ class SymbolLoopHoistError(ValueError):
     - raise SymbolLoopHoistError("SymbolLoopHoistSideEffectOp: ...")
 
     关联文件:
-    - spec: spec/pass/lowering/symbol_loop_hoist.md
+    - spec: spec/pass/symbol_loop_hoist.md
     - test: test/pass/test_symbol_loop_hoist.py
-    - 功能实现: kernel_gen/passes/lowering/symbol_loop_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
     """
 
 
@@ -280,7 +280,7 @@ def _hoist_from_symbol_for(symbol_for: SymbolForOp) -> None:
 
 
 class SymbolLoopHoistPass(Pass):
-    """symbol-loop-hoist lowering pass。
+    """symbol-loop-hoist pass。
 
     创建者: 朽木露琪亚
     最后一次更改: 朽木露琪亚
@@ -293,9 +293,9 @@ class SymbolLoopHoistPass(Pass):
     - module = SymbolLoopHoistPass().run(module)
 
     关联文件:
-    - spec: spec/pass/lowering/symbol_loop_hoist.md
+    - spec: spec/pass/symbol_loop_hoist.md
     - test: test/pass/test_symbol_loop_hoist.py
-    - 功能实现: kernel_gen/passes/lowering/symbol_loop_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
     """
 
     name = "symbol-loop-hoist"

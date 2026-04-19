@@ -1,7 +1,7 @@
 """symbol-loop-hoist pass tests.
 
 创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 `SymbolLoopHoistPass` 的外提白名单、禁止项与固定失败短语。
@@ -10,14 +10,14 @@
 - pytest -q test/pass/test_symbol_loop_hoist.py
 
 当前覆盖率信息:
-- `kernel_gen.passes.lowering.symbol_loop_hoist`：`80%`（Stmts=133 Miss=20 Branch=70 BrPart=14；最近一次统计：2026-04-07 09:40:00 +0800）。
+- `kernel_gen.passes.symbol_loop_hoist`：`80%`（Stmts=133 Miss=20 Branch=70 BrPart=14；最近一次统计：2026-04-07 09:40:00 +0800）。
 
 覆盖率命令:
-- `pytest -q --cov=kernel_gen.passes.lowering.symbol_loop_hoist --cov-branch --cov-report=term-missing test/pass/test_symbol_loop_hoist.py`
+- `pytest -q --cov=kernel_gen.passes.symbol_loop_hoist --cov-branch --cov-report=term-missing test/pass/test_symbol_loop_hoist.py`
 
 关联文件:
-- 功能实现: kernel_gen/passes/lowering/symbol_loop_hoist.py
-- Spec 文档: spec/pass/lowering/symbol_loop_hoist.md
+- 功能实现: kernel_gen/passes/symbol_loop_hoist.py
+- Spec 文档: spec/pass/symbol_loop_hoist.md
 - 测试文件: test/pass/test_symbol_loop_hoist.py
 """
 
@@ -41,9 +41,10 @@ from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFreeOp, DmaSlice
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolConstOp, SymbolForOp, SymbolGetDimOp, SymbolIterType, SymbolValueType
 
-pass_module = importlib.import_module("kernel_gen.passes.lowering.symbol_loop_hoist")
+pass_module = importlib.import_module("kernel_gen.passes.symbol_loop_hoist")
 SymbolLoopHoistError = pass_module.SymbolLoopHoistError
 SymbolLoopHoistPass = pass_module.SymbolLoopHoistPass
+lowering_pass_module = importlib.import_module("kernel_gen.passes.lowering")
 
 
 def _const_symbol_int(value: int) -> tuple[arith.ConstantOp, UnrealizedConversionCastOp, SSAValue]:
@@ -377,8 +378,8 @@ def _make_module_with_fixed_read_slice_source_mutated() -> ModuleOp:
 # 最近一次运行测试时间: 2026-04-07 09:10:00 +0800
 # 最近一次运行成功时间: 2026-04-07 09:10:00 +0800
 # 测试目的: 验证 `symbol.get_dim + dma.alloc` 可从 `symbol.for` 内外提到循环外。
-# 对应功能实现文件路径: kernel_gen/passes/lowering/symbol_loop_hoist.py
-# 对应 spec 文件路径: spec/pass/lowering/symbol_loop_hoist.md
+# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
 # 对应测试文件路径: test/pass/test_symbol_loop_hoist.py
 def test_symbol_loop_hoist_hoists_get_dim_and_alloc() -> None:
     module = _make_module_for_hoist_alloc()
@@ -400,8 +401,8 @@ def test_symbol_loop_hoist_hoists_get_dim_and_alloc() -> None:
 # 最近一次运行测试时间: 2026-04-20 00:00:00 +0800
 # 最近一次运行成功时间: N/A
 # 测试目的: 验证 loop 内的 invariant `symbol.const` 会被向上提一层到 `symbol.for` 之前。
-# 对应功能实现文件路径: kernel_gen/passes/lowering/symbol_loop_hoist.py
-# 对应 spec 文件路径: spec/pass/lowering/symbol_loop_hoist.md
+# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
 # 对应测试文件路径: test/pass/test_symbol_loop_hoist.py
 def test_symbol_loop_hoist_hoists_symbol_const() -> None:
     module = _make_module_for_const_hoist()
@@ -418,14 +419,19 @@ def test_symbol_loop_hoist_hoists_symbol_const() -> None:
     assert [op.value.data for op in hoisted_consts] == [0, 1, 1, 2]
 
 
+def test_symbol_loop_hoist_is_exported_from_lowering_package() -> None:
+    assert lowering_pass_module.SymbolLoopHoistPass is SymbolLoopHoistPass
+    assert lowering_pass_module.SymbolLoopHoistError is SymbolLoopHoistError
+
+
 # TC-SLH-002
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-07 09:10:00 +0800
 # 最近一次运行成功时间: 2026-04-07 09:10:00 +0800
 # 测试目的: 验证固定窗口只读来源的 `dma.slice` 可外提，且外提后循环体内仍能使用准备好的 buffer。
-# 对应功能实现文件路径: kernel_gen/passes/lowering/symbol_loop_hoist.py
-# 对应 spec 文件路径: spec/pass/lowering/symbol_loop_hoist.md
+# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
 # 对应测试文件路径: test/pass/test_symbol_loop_hoist.py
 def test_symbol_loop_hoist_hoists_fixed_read_slice() -> None:
     module = _make_module_for_fixed_read_slice()
@@ -447,8 +453,8 @@ def test_symbol_loop_hoist_hoists_fixed_read_slice() -> None:
 # 最近一次运行测试时间: 2026-04-07 09:10:00 +0800
 # 最近一次运行成功时间: 2026-04-07 09:10:00 +0800
 # 测试目的: 验证禁止项（`dma.deslice`）在 loop invariant 形态下会触发显式失败短语。
-# 对应功能实现文件路径: kernel_gen/passes/lowering/symbol_loop_hoist.py
-# 对应 spec 文件路径: spec/pass/lowering/symbol_loop_hoist.md
+# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
 # 对应测试文件路径: test/pass/test_symbol_loop_hoist.py
 def test_symbol_loop_hoist_rejects_invariant_deslice() -> None:
     module = _make_module_with_forbidden_invariant_deslice()
@@ -461,8 +467,8 @@ def test_symbol_loop_hoist_rejects_invariant_deslice() -> None:
 # 最近一次运行测试时间: 2026-04-07 09:40:00 +0800
 # 最近一次运行成功时间: 2026-04-07 09:40:00 +0800
 # 测试目的: 验证 `dma.alloc` 在 loop 内释放会触发固定失败短语 `SymbolLoopHoistAllocLifetimeUnsafe`。
-# 对应功能实现文件路径: kernel_gen/passes/lowering/symbol_loop_hoist.py
-# 对应 spec 文件路径: spec/pass/lowering/symbol_loop_hoist.md
+# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
 # 对应测试文件路径: test/pass/test_symbol_loop_hoist.py
 def test_symbol_loop_hoist_rejects_alloc_freed_in_loop() -> None:
     module = _make_module_with_alloc_freed_in_loop()
@@ -476,8 +482,8 @@ def test_symbol_loop_hoist_rejects_alloc_freed_in_loop() -> None:
 # 最近一次运行测试时间: 2026-04-07 09:40:00 +0800
 # 最近一次运行成功时间: 2026-04-07 09:40:00 +0800
 # 测试目的: 验证固定窗口 `dma.slice` 的目标 buffer 在 loop 内仍被写会触发 `SymbolLoopHoistFixedReadResultRewritten`。
-# 对应功能实现文件路径: kernel_gen/passes/lowering/symbol_loop_hoist.py
-# 对应 spec 文件路径: spec/pass/lowering/symbol_loop_hoist.md
+# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
 # 对应测试文件路径: test/pass/test_symbol_loop_hoist.py
 def test_symbol_loop_hoist_rejects_fixed_read_slice_target_rewritten() -> None:
     module = _make_module_with_fixed_read_slice_target_rewritten()
@@ -491,8 +497,8 @@ def test_symbol_loop_hoist_rejects_fixed_read_slice_target_rewritten() -> None:
 # 最近一次运行测试时间: 2026-04-07 09:40:00 +0800
 # 最近一次运行成功时间: 2026-04-07 09:40:00 +0800
 # 测试目的: 验证固定窗口 `dma.slice` 的来源在 loop 内被写会触发 `SymbolLoopHoistFixedReadSourceMutated`。
-# 对应功能实现文件路径: kernel_gen/passes/lowering/symbol_loop_hoist.py
-# 对应 spec 文件路径: spec/pass/lowering/symbol_loop_hoist.md
+# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
 # 对应测试文件路径: test/pass/test_symbol_loop_hoist.py
 def test_symbol_loop_hoist_rejects_fixed_read_slice_source_mutated() -> None:
     module = _make_module_with_fixed_read_slice_source_mutated()
@@ -506,8 +512,8 @@ def test_symbol_loop_hoist_rejects_fixed_read_slice_source_mutated() -> None:
 # 最近一次运行测试时间: 2026-04-07 09:40:00 +0800
 # 最近一次运行成功时间: 2026-04-07 09:40:00 +0800
 # 测试目的: 验证 `module.verify()` 失败会被包装为固定失败短语 `SymbolLoopHoistVerifierError`。
-# 对应功能实现文件路径: kernel_gen/passes/lowering/symbol_loop_hoist.py
-# 对应 spec 文件路径: spec/pass/lowering/symbol_loop_hoist.md
+# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
 # 对应测试文件路径: test/pass/test_symbol_loop_hoist.py
 def test_symbol_loop_hoist_verifier_errors_are_wrapped() -> None:
     module = _make_module_with_step_zero()

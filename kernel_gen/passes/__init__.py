@@ -1,13 +1,14 @@
 """pass package.
 
 创建者: 李白
-最后一次更改: 李白
+最后一次更改: 小李飞刀
 
 功能说明:
 - 暴露 Pass 管理相关实现。
 - 暴露 `buffer-results-to-out-params` 的公开入口。
 - 暴露 `decompass` 专题 pass 的根路径入口。
 - 暴露 `outline-device-kernel` 的公开入口。
+- 暴露 `symbol-loop-hoist` 专题 pass 的根路径入口。
 
 使用示例:
 - import importlib
@@ -18,6 +19,8 @@
 - decompass_pass = DecompassPass()
 - from kernel_gen.passes import OutlineDeviceKernelPass
 - outline_pass = OutlineDeviceKernelPass()
+- from kernel_gen.passes import SymbolLoopHoistPass
+- hoist_pass = SymbolLoopHoistPass()
 
 关联文件:
 - spec:
@@ -25,16 +28,19 @@
   - spec/pass/lowering/buffer_results_to_out_params.md
   - spec/pass/decompass.md
   - spec/pass/outline_device_kernel.md
+  - spec/pass/symbol_loop_hoist.md
 - test:
   - test/pass/test_pass_manager.py
   - test/pass/test_buffer_results_to_out_params.py
   - test/pass/decompass/test_softmax.py
   - test/pass/outline_device_kernel/test_outline_device_kernel.py
+  - test/pass/test_symbol_loop_hoist.py
 - 功能实现:
   - kernel_gen/passes/pass_manager.py
   - kernel_gen/passes/buffer_results_to_out_params.py
   - kernel_gen/passes/decompass.py
   - kernel_gen/passes/outline_device_kernel.py
+  - kernel_gen/passes/symbol_loop_hoist.py
 """
 
 from .buffer_results_to_out_params import (
@@ -44,6 +50,7 @@ from .buffer_results_to_out_params import (
 from .decompass import DecompassError, DecompassPass, register_decompass_rewrite
 from .outline_device_kernel import OutlineDeviceKernelError, OutlineDeviceKernelPass
 from .pass_manager import Pass, PassManager
+from .symbol_loop_hoist import SymbolLoopHoistError, SymbolLoopHoistPass
 
 __all__ = [
     "Pass",
@@ -55,4 +62,6 @@ __all__ = [
     "register_decompass_rewrite",
     "OutlineDeviceKernelPass",
     "OutlineDeviceKernelError",
+    "SymbolLoopHoistPass",
+    "SymbolLoopHoistError",
 ]
