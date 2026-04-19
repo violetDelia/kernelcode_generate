@@ -4,8 +4,8 @@
 最后一次更改: jcc你莫辜负
 
 功能说明:
-- 通过编译并运行 C++ 片段验证 include/api/Memory.h 的 Memory 视图声明，
-  并使用 include/npu_demo/Memory.h 提供实现。
+- 通过编译并运行 C++ 片段验证 include/api/Memory.h 的 `Memory` 视图声明，
+  包括成员式 `view/reshape` 与按轴查询接口，并使用 include/npu_demo/Memory.h 提供实现。
 
 覆盖率信息:
 - 当前覆盖率: `N/A`。该链路为 C++ 头文件，按规则豁免 `pytest-cov` 覆盖率统计。
@@ -277,3 +277,98 @@ int main() {
 """
     )
     assert "TLM" in stderr
+
+
+# API-MEMORY-002
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: N/A
+# 最近一次运行成功时间: N/A
+# 测试目的: 验证成员式 `source.view<T>(...)` 与 `source.reshape(shape)` 已成为公共层稳定视图接口。
+# 使用示例: pytest -q test/include/api/test_memory.py -k test_memory_member_view_and_reshape_contract
+# 对应功能实现文件路径: include/npu_demo/Memory.h
+# 对应 spec 文件路径: spec/include/api/Memory.md
+# 对应测试文件路径: test/include/api/test_memory.py
+def test_memory_member_view_and_reshape_contract() -> None:
+    source = r"""
+#include "include/api/Memory.h"
+#include "include/npu_demo/Memory.h"
+
+static int fail(int code) {
+    return code;
+}
+
+int main() {
+    float data[6] = {0, 1, 2, 3, 4, 5};
+    long long shape[1] = {6};
+    long long stride[1] = {1};
+    Memory<GM, float> source(data, shape, stride, 1, MemoryFormat::Norm);
+
+    long long offset_buf[1] = {2};
+    long long size_buf[1] = {2};
+    long long stride_buf[1] = {2};
+    Vector offset(offset_buf, 1);
+    Vector size(size_buf, 1);
+    Vector view_stride(stride_buf, 1);
+
+    Memory<GM, float> tile = source.view<float>(offset, size, view_stride);
+    if (tile.rank() != 1) {
+        return fail(1);
+    }
+    if (tile.get_shape(0) != 2 || tile.get_stride(0) != 2) {
+        return fail(2);
+    }
+    if (tile.data() != source.data() + 2) {
+        return fail(3);
+    }
+
+    long long reshape_buf[2] = {2, 3};
+    Vector reshape_shape(reshape_buf, 2);
+    Memory<GM, float> reshaped = source.reshape(reshape_shape);
+    if (reshaped.rank() != 2) {
+        return fail(4);
+    }
+    if (reshaped.get_shape(0) != 2 || reshaped.get_shape(1) != 3) {
+        return fail(5);
+    }
+    if (reshaped.get_stride(0) != 3 || reshaped.get_stride(1) != 1) {
+        return fail(6);
+    }
+    if (reshaped.data() != source.data()) {
+        return fail(7);
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
+# API-MEMORY-003
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: N/A
+# 最近一次运行成功时间: N/A
+# 测试目的: 验证旧自由函数 `reshape(source, shape)` 已退出公共层稳定口径。
+# 使用示例: pytest -q test/include/api/test_memory.py -k test_memory_rejects_legacy_free_reshape_contract
+# 对应功能实现文件路径: include/api/Memory.h
+# 对应 spec 文件路径: spec/include/api/Memory.md
+# 对应测试文件路径: test/include/api/test_memory.py
+def test_memory_rejects_legacy_free_reshape_contract() -> None:
+    stderr = _compile_expect_failure(
+        r"""
+#include "include/api/Memory.h"
+#include "include/npu_demo/Memory.h"
+
+int main() {
+    float data[6] = {0, 1, 2, 3, 4, 5};
+    long long shape[1] = {6};
+    long long stride[1] = {1};
+    long long reshape_buf[2] = {2, 3};
+    Memory<GM, float> source(data, shape, stride, 1, MemoryFormat::Norm);
+    Vector reshape_shape(reshape_buf, 2);
+    auto bad = reshape(source, reshape_shape);
+    return bad.rank();
+}
+"""
+    )
+    assert "reshape" in stderr

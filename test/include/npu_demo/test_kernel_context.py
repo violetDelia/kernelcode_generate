@@ -632,11 +632,11 @@ int main() {
     Vector size(size_buf, 1);
     Vector stride_vec(stride_buf, 1);
 
-    auto sub = view(source, offset, size, stride_vec);
-    if (sub.rank() != 1 || sub.shape()[0] != 4) {
+    auto sub = source.view<float>(offset, size, stride_vec);
+    if (sub.rank() != 1 || sub.get_shape(0) != 4) {
         return fail(1);
     }
-    if (sub.stride()[0] != 2) {
+    if (sub.get_stride(0) != 2) {
         return fail(2);
     }
     if (sub.data() != source.data() + 1) {
@@ -656,7 +656,7 @@ int main() {
 
     float target_data[10] = {0};
     Memory<MemorySpace::GM, float> target(target_data, shape, stride, 1, MemoryFormat::Norm);
-    if (deslice(tile, target, offset, size, stride_vec) != StatusCode::kOk) {
+    if (deslice(target, tile, offset, size, stride_vec) != StatusCode::kOk) {
         return fail(6);
     }
     if (target_data[1] != 1.0f || target_data[3] != 3.0f || target_data[5] != 5.0f ||
@@ -673,10 +673,10 @@ int main() {
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
 # 最后修改人: 金铲铲大作战
-# 测试目的: 验证 view 在 1-D 子集下对非法 offset/size/stride、越界与 rank!=1 明确失败（抛出 runtime_error 并携带关键字）。
+# 测试目的: 验证成员式 `view<T>(...)` 在 1-D 子集下对非法 offset/size/stride、越界与 rank!=1 明确失败（抛出 runtime_error 并携带关键字）。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_dma_view_rejects_invalid_params
-# 对应功能实现文件链接: [include/npu_demo/Dma.h](include/npu_demo/Dma.h)
-# 对应 spec 文件链接: [spec/include/api/Dma.md](spec/include/api/Dma.md)
+# 对应功能实现文件链接: [include/npu_demo/Memory.h](include/npu_demo/Memory.h)
+# 对应 spec 文件链接: [spec/include/api/Memory.md](spec/include/api/Memory.md)
 # 对应测试文件链接: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
 def test_npu_demo_dma_view_rejects_invalid_params() -> None:
     source = r"""
@@ -708,20 +708,30 @@ int main() {
     long long stride[1] = {1};
     Memory<MemorySpace::GM, float> source(data, shape, stride, 1, MemoryFormat::Norm);
 
-    // 标量参数：非法 offset/size/stride 与越界。
+    // 成员式 Vector 参数：非法 offset/size/stride 与越界。
+    long long offset_neg_scalar_buf[1] = {-1};
+    long long size_scalar_buf[1] = {4};
+    long long stride_scalar_buf[1] = {1};
+    Vector offset_neg_scalar(offset_neg_scalar_buf, 1);
+    Vector size_scalar(size_scalar_buf, 1);
+    Vector stride_scalar(stride_scalar_buf, 1);
     try {
-        auto bad = view(source, -1, 4, 1);
+        auto bad = source.view<float>(offset_neg_scalar, size_scalar, stride_scalar);
         (void)bad;
         return fail(1);
     } catch (const std::runtime_error& err) {
-        const int status = expect_runtime_error_contains(err, "dma.view", 2);
+        const int status = expect_runtime_error_contains(err, "memory.view", 2);
         if (status != 0) {
             return status;
         }
     }
 
+    long long offset_zero_buf[1] = {0};
+    long long size_zero_buf[1] = {0};
+    Vector offset_zero(offset_zero_buf, 1);
+    Vector size_zero(size_zero_buf, 1);
     try {
-        auto bad = view(source, 0, 0, 1);
+        auto bad = source.view<float>(offset_zero, size_zero, stride_scalar);
         (void)bad;
         return fail(3);
     } catch (const std::runtime_error& err) {
@@ -731,8 +741,10 @@ int main() {
         }
     }
 
+    long long stride_zero_buf[1] = {0};
+    Vector stride_zero(stride_zero_buf, 1);
     try {
-        auto bad = view(source, 0, 4, 0);
+        auto bad = source.view<float>(offset_zero, size_scalar, stride_zero);
         (void)bad;
         return fail(5);
     } catch (const std::runtime_error& err) {
@@ -742,8 +754,12 @@ int main() {
         }
     }
 
+    long long offset_oob_scalar_buf[1] = {9};
+    long long size_oob_scalar_buf[1] = {2};
+    Vector offset_oob_scalar(offset_oob_scalar_buf, 1);
+    Vector size_oob_scalar(size_oob_scalar_buf, 1);
     try {
-        auto bad = view(source, 9, 2, 1);
+        auto bad = source.view<float>(offset_oob_scalar, size_oob_scalar, stride_scalar);
         (void)bad;
         return fail(7);
     } catch (const std::runtime_error& err) {
@@ -762,7 +778,7 @@ int main() {
     Vector stride_bad_rank(stride_bad_rank_buf, 2);
 
     try {
-        auto bad = view(source, offset_bad_rank, size_bad_rank, stride_bad_rank);
+        auto bad = source.view<float>(offset_bad_rank, size_bad_rank, stride_bad_rank);
         (void)bad;
         return fail(9);
     } catch (const std::runtime_error& err) {
@@ -780,7 +796,7 @@ int main() {
     Vector stride_ok(stride_ok_buf, 1);
 
     try {
-        auto bad = view(source, offset_neg, size_ok, stride_ok);
+        auto bad = source.view<float>(offset_neg, size_ok, stride_ok);
         (void)bad;
         return fail(11);
     } catch (const std::runtime_error& err) {
@@ -796,7 +812,7 @@ int main() {
     Vector size_oob(size_oob_buf, 1);
 
     try {
-        auto bad = view(source, offset_oob, size_oob, stride_ok);
+        auto bad = source.view<float>(offset_oob, size_oob, stride_ok);
         (void)bad;
         return fail(13);
     } catch (const std::runtime_error& err) {
@@ -812,26 +828,15 @@ int main() {
     long long stride2[2] = {3, 1};
     Memory<MemorySpace::GM, float> source2(data2, shape2, stride2, 2, MemoryFormat::Norm);
 
-    try {
-        auto bad = view(source2, 0, 1, 1);
-        (void)bad;
-        return fail(15);
-    } catch (const std::runtime_error& err) {
-        const int status = expect_runtime_error_contains(err, "rank!=1", 16);
-        if (status != 0) {
-            return status;
-        }
-    }
-
     Vector offset2(offset_bad_rank_buf, 2);
     Vector size2(size_bad_rank_buf, 2);
     Vector stride2_vec(stride_bad_rank_buf, 2);
     try {
-        auto bad = view(source2, offset2, size2, stride2_vec);
+        auto bad = source2.view<float>(offset2, size2, stride2_vec);
         (void)bad;
-        return fail(17);
+        return fail(15);
     } catch (const std::runtime_error& err) {
-        const int status = expect_runtime_error_contains(err, "rank!=1", 18);
+        const int status = expect_runtime_error_contains(err, "rank!=1", 16);
         if (status != 0) {
             return status;
         }
@@ -847,10 +852,10 @@ int main() {
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
 # 最后修改人: 金铲铲大作战
-# 测试目的: 验证 view 对 last_index/linear_offset/stride 的 overflow 风险明确失败并锁定 `overflow` 关键字。
+# 测试目的: 验证成员式 `view<T>(...)` 对 last_index/linear_offset/stride 的 overflow 风险明确失败并锁定 `overflow` 关键字。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_dma_view_rejects_overflow_params
-# 对应功能实现文件链接: [include/npu_demo/Dma.h](include/npu_demo/Dma.h)
-# 对应 spec 文件链接: [spec/include/api/Dma.md](spec/include/api/Dma.md)
+# 对应功能实现文件链接: [include/npu_demo/Memory.h](include/npu_demo/Memory.h)
+# 对应 spec 文件链接: [spec/include/api/Memory.md](spec/include/api/Memory.md)
 # 对应测试文件链接: [test/include/npu_demo/test_kernel_context.py](test/include/npu_demo/test_kernel_context.py)
 def test_npu_demo_dma_view_rejects_overflow_params() -> None:
     source = r"""
@@ -879,7 +884,13 @@ int main() {
     Memory<MemorySpace::GM, float> huge_source(data, huge_shape, unit_stride, 1, MemoryFormat::Norm);
 
     try {
-        auto bad = view(huge_source, 1, kMax, 2);
+        long long offset_buf[1] = {1};
+        long long size_buf[1] = {kMax};
+        long long stride_buf[1] = {2};
+        Vector offset(offset_buf, 1);
+        Vector size(size_buf, 1);
+        Vector stride(stride_buf, 1);
+        auto bad = huge_source.view<float>(offset, size, stride);
         (void)bad;
         return fail(1);
     } catch (const std::runtime_error& err) {
@@ -893,7 +904,13 @@ int main() {
     Memory<MemorySpace::GM, float> huge_stride_source(data, huge_shape, huge_stride, 1, MemoryFormat::Norm);
 
     try {
-        auto bad = view(huge_stride_source, 2, 1, 1);
+        long long offset_buf[1] = {2};
+        long long size_buf[1] = {1};
+        long long stride_buf[1] = {1};
+        Vector offset(offset_buf, 1);
+        Vector size(size_buf, 1);
+        Vector stride(stride_buf, 1);
+        auto bad = huge_stride_source.view<float>(offset, size, stride);
         (void)bad;
         return fail(3);
     } catch (const std::runtime_error& err) {
@@ -911,7 +928,7 @@ int main() {
     Vector stride(stride_buf, 1);
 
     try {
-        auto bad = view(huge_stride_source, offset, size, stride);
+        auto bad = huge_stride_source.view<float>(offset, size, stride);
         (void)bad;
         return fail(5);
     } catch (const std::runtime_error& err) {
@@ -931,7 +948,7 @@ int main() {
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
 # 最后修改人: 金铲铲大作战
-# 测试目的: 验证 slice/deslice 对 overflow 参数返回 kError。
+# 测试目的: 验证 Vector 版 slice/deslice 对 overflow 参数返回 kError。
 # 使用示例: pytest -q test/include/npu_demo/test_kernel_context.py -k test_npu_demo_dma_slice_deslice_rejects_overflow_params
 # 对应功能实现文件链接: [include/npu_demo/Dma.h](include/npu_demo/Dma.h)
 # 对应 spec 文件链接: [spec/include/api/Dma.md](spec/include/api/Dma.md)
@@ -961,16 +978,28 @@ int main() {
     long long tile_big_stride[1] = {1};
     Memory<MemorySpace::GM, float> tile_big(data, tile_big_shape, tile_big_stride, 1, MemoryFormat::Norm);
 
-    if (slice(tile_small, huge_source, 2, 1, 1) != StatusCode::kError) {
+    long long offset_small_buf[1] = {2};
+    long long size_small_buf[1] = {1};
+    long long stride_small_buf[1] = {1};
+    Vector offset_small(offset_small_buf, 1);
+    Vector size_small(size_small_buf, 1);
+    Vector stride_small(stride_small_buf, 1);
+    if (slice(tile_small, huge_source, offset_small, size_small, stride_small) != StatusCode::kError) {
         return fail(1);
     }
-    if (slice(tile_big, huge_source, 1, kMax, 2) != StatusCode::kError) {
+    long long offset_big_buf[1] = {1};
+    long long size_big_buf[1] = {kMax};
+    long long stride_big_buf[1] = {2};
+    Vector offset_big(offset_big_buf, 1);
+    Vector size_big(size_big_buf, 1);
+    Vector stride_big(stride_big_buf, 1);
+    if (slice(tile_big, huge_source, offset_big, size_big, stride_big) != StatusCode::kError) {
         return fail(2);
     }
-    if (deslice(tile_small, huge_target, 2, 1, 1) != StatusCode::kError) {
+    if (deslice(huge_target, tile_small, offset_small, size_small, stride_small) != StatusCode::kError) {
         return fail(3);
     }
-    if (deslice(tile_big, huge_target, 1, kMax, 2) != StatusCode::kError) {
+    if (deslice(huge_target, tile_big, offset_big, size_big, stride_big) != StatusCode::kError) {
         return fail(4);
     }
     return 0;

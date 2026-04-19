@@ -1,6 +1,7 @@
 /*
 功能说明:
-- 定义 include/api/Memory.h 的统一 Memory<Space, T> 视图类型与 MemoryFormat/MemorySpace 声明。
+- 定义 include/api/Memory.h 的统一 `Memory<Space, T>` 视图类型与 `MemoryFormat/MemorySpace` 声明。
+- 固定公共层成员式 `view<T>(...)` / `reshape(shape)` 接口，以及 `get_shape(axis)` / `get_stride(axis)` 查询口径。
 
 使用示例:
 - #include "include/api/Memory.h"
@@ -21,6 +22,8 @@
 
 #ifndef KERNELCODE_GENERATE_INCLUDE_API_MEMORY_H_
 #define KERNELCODE_GENERATE_INCLUDE_API_MEMORY_H_
+
+#include "include/api/Core.h"
 
 /*
 功能说明:
@@ -330,6 +333,44 @@ public:
     - 功能实现: include/npu_demo/Memory.h
     */
     long long get_stride(unsigned long long axis) const;
+
+    /*
+    功能说明:
+    - 返回成员式子视图，当前 expectation 子集下要求 `ViewT` 与原始元素类型一致。
+
+    使用示例:
+    - Memory<GM, float> tile = source.view<float>(offset, size, stride);
+
+    创建者: 金铲铲大作战
+    最后修改人: 金铲铲大作战
+
+    关联文件:
+    - spec: spec/include/api/Memory.md
+    - test: test/include/api/test_memory.py
+    - 功能实现: include/npu_demo/Memory.h
+    */
+    template <typename ViewT>
+    Memory<Space, ViewT> view(
+        const Vector& offset,
+        const Vector& size,
+        const Vector& stride) const;
+
+    /*
+    功能说明:
+    - 返回成员式重解释视图，目标形状通过 `Vector` 提供。
+
+    使用示例:
+    - Memory<GM, float> reshaped = source.reshape(shape_vec);
+
+    创建者: 金铲铲大作战
+    最后修改人: 金铲铲大作战
+
+    关联文件:
+    - spec: spec/include/api/Memory.md
+    - test: test/include/api/test_memory.py
+    - 功能实现: include/npu_demo/Memory.h
+    */
+    Memory<Space, T> reshape(const Vector& shape) const;
 
     /*
     功能说明:

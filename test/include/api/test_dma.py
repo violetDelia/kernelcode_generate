@@ -4,8 +4,8 @@
 最后一次更改: 金铲铲大作战
 
 功能说明:
-- 通过编译并运行 C++ 片段验证 `include/api/Dma.h` 的 `view/slice/deslice` 声明，
-  并使用 `include/npu_demo/Dma.h` 提供实现。
+- 通过编译并运行 C++ 片段验证 `include/api/Dma.h` 的 `slice/deslice` 声明，
+  并结合 `Memory` 的成员式 `view` 接口与 `include/npu_demo/Dma.h` 提供的后端实现。
 
 覆盖率信息:
 - 当前覆盖率: `N/A`。该链路为 C++ 头文件，按规则豁免 `pytest-cov` 覆盖率统计。
@@ -92,18 +92,59 @@ def _compile_and_run(source: str) -> None:
             )
 
 
+def _compile_expect_failure(source: str) -> str:
+    """编译并断言 C++ 片段失败，返回编译 stderr。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 使用 `g++` 编译临时源码，并验证其因 DMA 旧公共接口已删除而编译失败。
+
+    使用示例:
+    - `stderr = _compile_expect_failure("int main() { return missing; }")`
+
+    关联文件:
+    - spec: [`spec/include/api/Dma.md`](spec/include/api/Dma.md)
+    - test: [`test/include/api/test_dma.py`](test/include/api/test_dma.py)
+    - 功能实现: [`test/include/api/test_dma.py`](test/include/api/test_dma.py)
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        source_path = Path(tmpdir) / "dma_test_fail.cpp"
+        binary_path = Path(tmpdir) / "dma_test_fail"
+        source_path.write_text(source, encoding="utf-8")
+
+        compile_result = subprocess.run(
+            [
+                "g++",
+                "-std=c++17",
+                "-I",
+                str(REPO_ROOT),
+                str(source_path),
+                "-o",
+                str(binary_path),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if compile_result.returncode == 0:
+            raise AssertionError("expected g++ compile failure, but compile succeeded")
+        return compile_result.stderr
+
+
 # API-DMA-001
 # 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战
-# 功能说明: 验证 DMA view/slice/deslice 的基础调用链可编译并正确运行。
+# 功能说明: 验证成员式 `view` 配合 `slice/deslice` 的基础调用链可编译并正确运行。
 # 最近一次运行测试时间: 2026-04-05 23:44:24 +0800
 # 最近一次运行成功时间: 2026-04-05 23:44:24 +0800
-# 测试目的: 验证 `include/api/Dma.h` 声明可配合 `npu_demo` 后端完成 1-D `view/slice/deslice` 基础路径。
-# 使用示例: `pytest -q test/include/api/test_dma.py -k test_dma_view_returns_same_space_template`
+# 测试目的: 验证 `source.view<T>(...)` 与 `slice/deslice` 的公共层组合调用可配合 `npu_demo` 后端完成 1-D 基础路径。
+# 使用示例: `pytest -q test/include/api/test_dma.py -k test_dma_member_view_and_target_first_deslice_contract`
 # 对应功能实现文件路径: `include/npu_demo/Dma.h`
 # 对应 spec 文件路径: `spec/include/api/Dma.md`
 # 对应测试文件路径: `test/include/api/test_dma.py`
-def test_dma_view_returns_same_space_template() -> None:
+def test_dma_member_view_and_target_first_deslice_contract() -> None:
     source = r"""
 #include "include/api/Dma.h"
 #include "include/npu_demo/Dma.h"
@@ -126,11 +167,11 @@ int main() {
     Vector size(size_buf, 1);
     Vector stride_vec(stride_buf, 1);
 
-    Memory<GM, float> sub = view(source, offset, size, stride_vec);
-    if (sub.rank() != 1 || sub.shape()[0] != 4) {
+    Memory<GM, float> sub = source.view<float>(offset, size, stride_vec);
+    if (sub.rank() != 1 || sub.get_shape(0) != 4) {
         return fail(1);
     }
-    if (sub.stride()[0] != 2) {
+    if (sub.get_stride(0) != 2) {
         return fail(2);
     }
     if (sub.data() != source.data() + 1) {
@@ -160,7 +201,7 @@ int main() {
         stride,
         1,
         MemoryFormat::Norm);
-    if (deslice(tile, target, offset, size, stride_vec) != StatusCode::kOk) {
+    if (deslice(target, tile, offset, size, stride_vec) != StatusCode::kOk) {
         return fail(6);
     }
     if (target_data[1] != 1.0f || target_data[3] != 3.0f || target_data[5] != 5.0f ||
@@ -176,7 +217,7 @@ int main() {
 # API-DMA-002
 # 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战
-# 功能说明: 验证 DMA 入口在非法 vector rank 下返回稳定错误边界。
+# 功能说明: 验证成员式 `view` 与 DMA 入口在非法 vector rank 下保持稳定错误边界。
 # 最近一次运行测试时间: 2026-04-05 23:44:24 +0800
 # 最近一次运行成功时间: 2026-04-05 23:44:24 +0800
 # 测试目的: 验证 `include/api/Dma.h` 入口在非法 vector rank 下保持后端约定的错误边界。
@@ -212,7 +253,7 @@ int main() {
     Vector stride_vec(stride_buf, 2);
 
     try {
-        auto bad = view(source, offset, size, stride_vec);
+        auto bad = source.view<float>(offset, size, stride_vec);
         (void)bad;
         return fail(1);
     } catch (const std::runtime_error& err) {
@@ -241,7 +282,7 @@ int main() {
         stride,
         1,
         MemoryFormat::Norm);
-    if (deslice(tile, target, offset, size, stride_vec) != StatusCode::kError) {
+    if (deslice(target, tile, offset, size, stride_vec) != StatusCode::kError) {
         return fail(4);
     }
     return 0;
@@ -253,7 +294,7 @@ int main() {
 # API-DMA-003
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 功能说明: 验证 deslice 在跨空间模板参数下可编译并返回成功。
+# 功能说明: 验证 target-first `deslice` 在跨空间模板参数下可编译并返回成功。
 # 最近一次运行测试时间: N/A
 # 最近一次运行成功时间: N/A
 # 测试目的: 验证 `deslice` 接口允许 `SourceSpace/TargetSpace` 跨空间模板组合。
@@ -295,7 +336,7 @@ int main() {
 
     float target_data[8] = {0};
     Memory<GM, float> target(target_data, shape, stride, 1, MemoryFormat::Norm);
-    if (deslice(tile, target, offset, size, stride_vec) != StatusCode::kOk) {
+    if (deslice(target, tile, offset, size, stride_vec) != StatusCode::kOk) {
         return fail(2);
     }
     if (target_data[2] != 2.0f || target_data[3] != 3.0f || target_data[4] != 4.0f ||
@@ -306,3 +347,44 @@ int main() {
 }
 """
     _compile_and_run(source)
+
+
+# API-DMA-004
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: N/A
+# 最近一次运行成功时间: N/A
+# 测试目的: 验证旧自由函数 `view(source, ...)` 已退出 DMA 公共层稳定口径，且头文件中的 `deslice` 声明保持 target-first。
+# 使用示例: `pytest -q test/include/api/test_dma.py -k test_dma_rejects_legacy_free_view_contract`
+# 对应功能实现文件路径: `include/api/Dma.h`
+# 对应 spec 文件路径: `spec/include/api/Dma.md`
+# 对应测试文件路径: `test/include/api/test_dma.py`
+def test_dma_rejects_legacy_free_view_contract() -> None:
+    stderr = _compile_expect_failure(
+        r"""
+#include "include/api/Dma.h"
+#include "include/npu_demo/Dma.h"
+
+int main() {
+    float source_data[4] = {0};
+    long long shape[1] = {4};
+    long long stride[1] = {1};
+    long long offset_buf[1] = {0};
+    long long size_buf[1] = {1};
+    long long stride_buf[1] = {1};
+    Memory<GM, float> source(source_data, shape, stride, 1, MemoryFormat::Norm);
+    Vector offset(offset_buf, 1);
+    Vector size(size_buf, 1);
+    Vector stride_vec(stride_buf, 1);
+    auto bad = view(source, offset, size, stride_vec);
+    return bad.rank();
+}
+"""
+    )
+    assert "view" in stderr
+
+    header = (REPO_ROOT / "include" / "api" / "Dma.h").read_text(encoding="utf-8")
+    assert "Memory<Space, T> view(" not in header
+    assert "Status deslice(" in header
+    assert "Memory<TargetSpace, T>& target" in header
+    assert "const Memory<SourceSpace, T>& source,\n    Memory<TargetSpace, T>& target" not in header
