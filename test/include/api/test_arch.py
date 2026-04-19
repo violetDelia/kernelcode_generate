@@ -135,6 +135,52 @@ def _compile_expect_failure(source: str) -> str:
         return compile_result.stderr
 
 
+def _compile_only(source: str) -> None:
+    """仅编译 C++ 测试片段，不执行链接或运行。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 使用 `g++ -c` 校验 `include/api/Arch.h` 的公开声明是否可被源码侧直接引用。
+    - 适用于只暴露接口面、具体实现由私有 include 承接的头文件场景。
+
+    使用示例:
+    - `_compile_only("void f();")`
+
+    关联文件:
+    - spec: [`spec/include/api/Arch.md`](spec/include/api/Arch.md)
+    - test: [`test/include/api/test_arch.py`](test/include/api/test_arch.py)
+    - 功能实现: [`include/api/Arch.h`](include/api/Arch.h)
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        source_path = Path(tmpdir) / "arch_test_compile_only.cpp"
+        object_path = Path(tmpdir) / "arch_test_compile_only.o"
+        source_path.write_text(source, encoding="utf-8")
+
+        compile_result = subprocess.run(
+            [
+                "g++",
+                "-std=c++17",
+                "-c",
+                "-I",
+                str(REPO_ROOT),
+                str(source_path),
+                "-o",
+                str(object_path),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if compile_result.returncode != 0:
+            raise AssertionError(
+                "g++ compile-only failed:\n"
+                f"stdout:\n{compile_result.stdout}\n"
+                f"stderr:\n{compile_result.stderr}"
+            )
+
+
 # API-ARCH-001
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
@@ -233,6 +279,12 @@ def test_include_api_arch_keeps_backend_impl_out_of_api_header() -> None:
 
     assert "enum class BarrierVisibility" in header
     assert "enum class BarrierScope" in header
+    assert "class KernelContext" in header
+    assert "virtual long long thread_id() const = 0;" in header
+    assert "virtual long long thread_num() const = 0;" in header
+    assert "std::initializer_list<BarrierVisibility> visibility" in header
+    assert "BarrierScope scope" in header
+    assert "Memory<Space, T> get_dynamic_memory() const;" in header
     assert "SUBTHREAD" in header
     assert "GLOBAL" in header
     assert "Status launch" in header
@@ -278,3 +330,30 @@ int main() {
 }
 """
     _compile_and_run(source)
+
+
+# API-ARCH-005
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-19 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-19 00:00:00 +0800
+# 测试目的: 验证 `include/api/Arch.h` 已显式声明抽象 `KernelContext` 接口面，且源码侧可在不引入后端实现的前提下引用这些公开声明。
+# 使用示例: `pytest -q test/include/api/test_arch.py -k test_include_api_arch_declares_public_kernel_context_surface`
+# 对应功能实现文件路径: `include/api/Arch.h`
+# 对应 spec 文件路径: `spec/include/api/Arch.md`
+# 对应测试文件路径: `test/include/api/test_arch.py`
+def test_include_api_arch_declares_public_kernel_context_surface() -> None:
+    source = r"""
+#include <type_traits>
+
+#include "include/api/Arch.h"
+
+static_assert(std::is_abstract<KernelContext>::value, "KernelContext must stay abstract in include/api");
+
+void inspect(KernelContext& ctx) {
+    (void)ctx.thread_id();
+    (void)ctx.thread_num();
+    ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
+}
+"""
+    _compile_only(source)
