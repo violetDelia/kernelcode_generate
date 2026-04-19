@@ -220,7 +220,7 @@ def _lower_exp(block: Block, op: Operation) -> None:
     alloc = DmaAllocOp(dynamic_shape, result_type)
     block.insert_op_before(alloc, op)
     result = alloc.results[0]
-    lowered = KernelExpOp(operand, result, space)
+    lowered = KernelExpOp(result, operand, space)
     block.insert_op_before(lowered, op)
     op.results[0].replace_by(result)
     block.erase_op(op)
@@ -324,7 +324,7 @@ def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:
     alloc = DmaAllocOp(dynamic_shape, result_type)
     block.insert_op_before(alloc, op)
     result = alloc.results[0]
-    lowered = KernelReduceOp(operand, result, kind=kind, axis=axis, keepdim=keepdim, space=space)
+    lowered = KernelReduceOp(result, operand, kind=kind, axis=axis, keepdim=keepdim, space=space)
     lowered.attributes = {
         "axis": lowered.attributes["axis"],
         "keepdim": lowered.attributes["keepdim"],
@@ -369,7 +369,7 @@ def _lower_softmax(block: Block, op: Operation) -> None:
     alloc = DmaAllocOp(dynamic_shape, result_type)
     block.insert_op_before(alloc, op)
     result = alloc.results[0]
-    lowered = KernelSoftmaxOp(operand, result, axis, space)
+    lowered = KernelSoftmaxOp(result, operand, axis, space)
     block.insert_op_before(lowered, op)
     op.results[0].replace_by(result)
     block.erase_op(op)

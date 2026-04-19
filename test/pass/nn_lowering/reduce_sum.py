@@ -40,7 +40,7 @@ CASE_TEXT_STATIC = """// COMPILE_ARGS: --pass lower-nn
 // CHECK: builtin.module {
 // CHECK-NEXT: func.func @reduce_sum_kernel(%arg0 : !nn.memory<[4, 8], [8, 1], f32, #nn.space<global>>) -> !nn.memory<[4, 1], [1, 1], f32, #nn.space<global>> {
 // CHECK-NEXT: %0 = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[4, 1], [1, 1], f32, #nn.space<global>>
-// CHECK-NEXT: "kernel.reduce"(%arg0, %0) {axis = 1 : i64, keepdim = true, kind = "sum", space = #nn.space<global>} : (!nn.memory<[4, 8], [8, 1], f32, #nn.space<global>>, !nn.memory<[4, 1], [1, 1], f32, #nn.space<global>>) -> ()
+// CHECK-NEXT: "kernel.reduce"(%0, %arg0) {axis = 1 : i64, keepdim = true, kind = "sum", space = #nn.space<global>} : (!nn.memory<[4, 1], [1, 1], f32, #nn.space<global>>, !nn.memory<[4, 8], [8, 1], f32, #nn.space<global>>) -> ()
 // CHECK-NEXT: func.return %0 : !nn.memory<[4, 1], [1, 1], f32, #nn.space<global>>
 // CHECK-NEXT: }
 // CHECK-NEXT: }
@@ -60,7 +60,7 @@ CASE_TEXT_DYNAMIC = """// COMPILE_ARGS: --pass lower-nn
 // CHECK-NEXT: func.func @reduce_sum_kernel(%arg0 : !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>) -> !nn.memory<[M, 1], [1, 1], f32, #nn.space<global>> {
 // CHECK-NEXT: %0 = "symbol.get_dim"(%arg0) {axis = #builtin.int<0>} : (!nn.memory<[M, N], [N, 1], f32, #nn.space<global>>) -> !symbol.int<"M">
 // CHECK-NEXT: %1 = "dma.alloc"(%0) <{operandSegmentSizes = array<i32: 1>}> : (!symbol.int<"M">) -> !nn.memory<[M, 1], [1, 1], f32, #nn.space<global>>
-// CHECK-NEXT: "kernel.reduce"(%arg0, %1) {axis = 1 : i64, keepdim = true, kind = "sum", space = #nn.space<global>} : (!nn.memory<[M, N], [N, 1], f32, #nn.space<global>>, !nn.memory<[M, 1], [1, 1], f32, #nn.space<global>>) -> ()
+// CHECK-NEXT: "kernel.reduce"(%1, %arg0) {axis = 1 : i64, keepdim = true, kind = "sum", space = #nn.space<global>} : (!nn.memory<[M, 1], [1, 1], f32, #nn.space<global>>, !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>) -> ()
 // CHECK-NEXT: func.return %1 : !nn.memory<[M, 1], [1, 1], f32, #nn.space<global>>
 // CHECK-NEXT: }
 // CHECK-NEXT: }

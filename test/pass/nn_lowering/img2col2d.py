@@ -108,3 +108,96 @@ def test_nn_lowering_img2col2d_target() -> None:
     assert isinstance(kernel_op.pw.type, SymbolValueType)
     assert isinstance(kernel_op.pl.type, SymbolValueType)
     assert isinstance(kernel_op.pr.type, SymbolValueType)
+
+
+def test_nn_lowering_img2col2d_accepts_noncanonical_symbol_names() -> None:
+    """TC-PASS-NNL-022A: 动态 img2col2d 不应依赖固定符号名。"""
+
+    space = NnMemorySpaceAttr(StringAttr("global"))
+    input_type = NnMemoryType(
+        ArrayAttr(
+            [
+                StringAttr("BATCH_DIM"),
+                StringAttr("CHANNEL_DIM"),
+                StringAttr("HEIGHT_DIM"),
+                StringAttr("WIDTH_DIM"),
+            ]
+        ),
+        ArrayAttr(
+            [
+                StringAttr("CHANNEL_DIM*HEIGHT_DIM*WIDTH_DIM"),
+                StringAttr("HEIGHT_DIM*WIDTH_DIM"),
+                StringAttr("WIDTH_DIM"),
+                IntAttr(1),
+            ]
+        ),
+        f32,
+        space,
+    )
+    result_type = NnMemoryType(
+        ArrayAttr(
+            [
+                StringAttr("BATCH_DIM"),
+                StringAttr("CHANNEL_DIM"),
+                StringAttr("KH_DIM"),
+                StringAttr("KW_DIM"),
+                StringAttr("OH_DIM"),
+                StringAttr("OW_DIM"),
+            ]
+        ),
+        ArrayAttr(
+            [
+                StringAttr("CHANNEL_DIM*KH_DIM*KW_DIM*OH_DIM*OW_DIM"),
+                StringAttr("KH_DIM*KW_DIM*OH_DIM*OW_DIM"),
+                StringAttr("KW_DIM*OH_DIM*OW_DIM"),
+                StringAttr("OH_DIM*OW_DIM"),
+                StringAttr("OW_DIM"),
+                IntAttr(1),
+            ]
+        ),
+        f32,
+        space,
+    )
+    symbol_types = [
+        SymbolValueType.from_expr("KH_DIM"),
+        SymbolValueType.from_expr("KW_DIM"),
+        SymbolValueType.from_expr("STEP_H_DIM"),
+        SymbolValueType.from_expr("STEP_W_DIM"),
+        SymbolValueType.from_expr("DIL_H_DIM"),
+        SymbolValueType.from_expr("DIL_W_DIM"),
+        SymbolValueType.from_expr("PAD_H0_DIM"),
+        SymbolValueType.from_expr("PAD_H1_DIM"),
+        SymbolValueType.from_expr("PAD_W0_DIM"),
+        SymbolValueType.from_expr("PAD_W1_DIM"),
+    ]
+
+    block = Block(arg_types=[input_type, *symbol_types])
+    img2col = NnImg2col2dOp(
+        block.args[0],
+        result_type,
+        kh=block.args[1],
+        kw=block.args[2],
+        sh=block.args[3],
+        sw=block.args[4],
+        dh=block.args[5],
+        dw=block.args[6],
+        ph=block.args[7],
+        pw=block.args[8],
+        pl=block.args[9],
+        pr=block.args[10],
+        space=space,
+    )
+    block.add_op(img2col)
+    block.add_op(func.ReturnOp(img2col.result))
+    func_type = FunctionType.from_lists([input_type, *symbol_types], [result_type])
+    func_op = func.FuncOp("dynamic_img2col2d", func_type, Region(block))
+    module = ModuleOp([func_op])
+
+    NnLoweringPass().run(module)
+    module_text = str(module)
+
+    kernel_ops = [op for op in module.walk() if isinstance(op, KernelImg2col2dOp)]
+    assert len(kernel_ops) == 1
+    assert not any(isinstance(op, NnImg2col2dOp) for op in module.walk())
+    assert 'floor((-DIL_H_DIM*(KH_DIM - 1) + HEIGHT_DIM + PAD_H0_DIM + PAD_H1_DIM - 1)/STEP_H_DIM) + 1' in module_text
+    assert 'floor((-DIL_W_DIM*(KW_DIM - 1) + PAD_W0_DIM + PAD_W1_DIM + WIDTH_DIM - 1)/STEP_W_DIM) + 1' in module_text

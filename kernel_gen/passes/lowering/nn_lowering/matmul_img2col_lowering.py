@@ -35,6 +35,7 @@ from kernel_gen.dialect.symbol import (
     SymbolMulOp,
     SymbolSubOp,
     SymbolValueType,
+    build_public_symbol_expr,
 )
 from .nn_lowering_utility import (
     NnLoweringError,
@@ -270,34 +271,46 @@ def _build_symbol_attr(value: SSAValue, *, prefer_i64: bool) -> Attribute:
     return StringAttr(expr)
 
 
-def _insert_symbol_get_dims(block: Block, op: Operation, operand: SSAValue) -> dict[str, SSAValue]:
-    """为输入 memory 的符号维度插入 symbol.get_dim。
+def _get_symbol_dim_by_axis(
+    block: Block,
+    op: Operation,
+    operand: SSAValue,
+    axis: int,
+    cache: dict[int, SSAValue],
+) -> SSAValue:
+    """按轴读取输入 memory 的符号维度。
 
     创建者: 小李飞刀
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 遍历输入 `nn.memory` 的 shape。
-    - 对符号维度插入 `symbol.get_dim`，并返回映射表。
+    - 仅当指定轴为符号维度时，插入一次 `symbol.get_dim`。
+    - 使用缓存避免同一轴重复生成 `symbol.get_dim`。
 
     使用示例:
-    - dims = _insert_symbol_get_dims(block, op, operand)
+    - width = _get_symbol_dim_by_axis(block, op, operand, 2, cache)
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
-    - test: test/pass/nn_lowering/img2col2d.py
+    - test: test/pass/nn_lowering/img2col1d.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
     """
 
     if not isinstance(operand.type, NnMemoryType):
         raise NnLoweringError("nn img2col operand must be nn.memory")
-    dims: dict[str, SSAValue] = {}
-    for idx, dim in enumerate(operand.type.shape.data):
-        if isinstance(dim, StringAttr):
-            symbol_op = SymbolGetDimOp(operand, idx)
-            block.insert_op_before(symbol_op, op)
-            dims[dim.data] = symbol_op.result
-    return dims
+    cached = cache.get(axis)
+    if cached is not None:
+        return cached
+    dims = list(operand.type.shape.data)
+    if axis < 0 or axis >= len(dims):
+        raise NnLoweringError("nn img2col operand axis out of range")
+    dim = dims[axis]
+    if not isinstance(dim, StringAttr):
+        raise NnLoweringError("nn img2col symbolic dim must come from symbolic source axis")
+    symbol_op = SymbolGetDimOp(operand, axis)
+    block.insert_op_before(symbol_op, op)
+    cache[axis] = symbol_op.result
+    return symbol_op.result
 
 
 def _build_img2col1d_dynamic_dims(
@@ -329,16 +342,12 @@ def _build_img2col1d_dynamic_dims(
         return []
     one = SymbolConstOp(1)
     block.insert_op_before(one, op)
-    input_dims = _insert_symbol_get_dims(block, op, operand)
-    param_dims = {_symbol_expr(param): param for param in params}
-    kw = param_dims.get("KW")
-    sw = param_dims.get("SW")
-    dw = param_dims.get("DW")
-    pl = param_dims.get("PL")
-    pr = param_dims.get("PR")
-    w = input_dims.get("W")
-    if not all([kw, sw, dw, pl, pr, w]):
-        raise NnLoweringError("nn img2col1d requires KW/SW/DW/PL/PR/W symbols")
+    source_dims: dict[int, SSAValue] = {}
+    for axis in range(3):
+        if isinstance(operand.type.shape.data[axis], StringAttr):
+            _get_symbol_dim_by_axis(block, op, operand, axis, source_dims)
+    kw, sw, dw, pl, pr = params
+    w = _get_symbol_dim_by_axis(block, op, operand, 2, source_dims)
     one_expr = _symbol_expr(one.result)
     kw_expr = _symbol_expr(kw)
     sw_expr = _symbol_expr(sw)
@@ -375,22 +384,23 @@ def _build_img2col1d_dynamic_dims(
     w_div = SymbolFloorDivOp(w_minus_one, sw, SymbolValueType.from_expr(w_div_expr))
     block.insert_op_before(w_div, op)
 
-    w_out_expr = f"{w_div_expr} + {one_expr}"
+    w_out_expr = build_public_symbol_expr(w_div_expr, one_expr, "+")
     w_out = SymbolAddOp(w_div, one, SymbolValueType.from_expr(w_out_expr))
     block.insert_op_before(w_out, op)
 
-    dim_map = {
-        **input_dims,
-        **param_dims,
-        w_out_expr: w_out.result,
-    }
     dynamic_dims: list[SSAValue] = []
-    for dim in result_type.shape.data:
+    for axis, dim in enumerate(result_type.shape.data):
         if isinstance(dim, StringAttr):
-            value = dim_map.get(dim.data)
-            if value is None:
-                raise NnLoweringError(f"nn img2col1d missing dynamic dim {dim.data}")
-            dynamic_dims.append(value)
+            if axis == 0:
+                dynamic_dims.append(_get_symbol_dim_by_axis(block, op, operand, 0, source_dims))
+            elif axis == 1:
+                dynamic_dims.append(_get_symbol_dim_by_axis(block, op, operand, 1, source_dims))
+            elif axis == 2:
+                dynamic_dims.append(kw)
+            elif axis == 3:
+                dynamic_dims.append(w_out.result)
+            else:
+                raise NnLoweringError("nn img2col1d result rank must be 4")
     return dynamic_dims
 
 
@@ -423,22 +433,13 @@ def _build_img2col2d_dynamic_dims(
         return []
     one = SymbolConstOp(1)
     block.insert_op_before(one, op)
-    input_dims = _insert_symbol_get_dims(block, op, operand)
-    param_dims = {_symbol_expr(param): param for param in params}
-    kh = param_dims.get("KH")
-    kw = param_dims.get("KW")
-    sh = param_dims.get("SH")
-    sw = param_dims.get("SW")
-    dh = param_dims.get("DH")
-    dw = param_dims.get("DW")
-    ph = param_dims.get("PH")
-    pw = param_dims.get("PW")
-    pl = param_dims.get("PL")
-    pr = param_dims.get("PR")
-    h = input_dims.get("H")
-    w = input_dims.get("W")
-    if not all([kh, kw, sh, sw, dh, dw, ph, pw, pl, pr, h, w]):
-        raise NnLoweringError("nn img2col2d requires KH/KW/SH/SW/DH/DW/PH/PW/PL/PR/H/W symbols")
+    source_dims: dict[int, SSAValue] = {}
+    for axis in range(4):
+        if isinstance(operand.type.shape.data[axis], StringAttr):
+            _get_symbol_dim_by_axis(block, op, operand, axis, source_dims)
+    kh, kw, sh, sw, dh, dw, ph, pw, pl, pr = params
+    h = _get_symbol_dim_by_axis(block, op, operand, 2, source_dims)
+    w = _get_symbol_dim_by_axis(block, op, operand, 3, source_dims)
     one_expr = _symbol_expr(one.result)
     kh_expr = _symbol_expr(kh)
     kw_expr = _symbol_expr(kw)
@@ -482,7 +483,7 @@ def _build_img2col2d_dynamic_dims(
     h_div_expr = f"({h_minus_one_expr}) // {sh_expr}"
     h_div = SymbolFloorDivOp(h_minus_one, sh, SymbolValueType.from_expr(h_div_expr))
     block.insert_op_before(h_div, op)
-    h_out_expr = f"{h_div_expr} + {one_expr}"
+    h_out_expr = build_public_symbol_expr(h_div_expr, one_expr, "+")
     h_out = SymbolAddOp(h_div, one, SymbolValueType.from_expr(h_out_expr))
     block.insert_op_before(h_out, op)
 
@@ -501,25 +502,27 @@ def _build_img2col2d_dynamic_dims(
     w_div_expr = f"({w_minus_one_expr}) // {sw_expr}"
     w_div = SymbolFloorDivOp(w_minus_one, sw, SymbolValueType.from_expr(w_div_expr))
     block.insert_op_before(w_div, op)
-    w_out_expr = f"{w_div_expr} + {one_expr}"
+    w_out_expr = build_public_symbol_expr(w_div_expr, one_expr, "+")
     w_out = SymbolAddOp(w_div, one, SymbolValueType.from_expr(w_out_expr))
     block.insert_op_before(w_out, op)
 
-    dim_map = {
-        **input_dims,
-        **param_dims,
-        h_out_expr: h_out.result,
-        w_out_expr: w_out.result,
-        "OH": h_out.result,
-        "OW": w_out.result,
-    }
     dynamic_dims: list[SSAValue] = []
-    for dim in result_type.shape.data:
+    for axis, dim in enumerate(result_type.shape.data):
         if isinstance(dim, StringAttr):
-            value = dim_map.get(dim.data)
-            if value is None:
-                raise NnLoweringError(f"nn img2col2d missing dynamic dim {dim.data}")
-            dynamic_dims.append(value)
+            if axis == 0:
+                dynamic_dims.append(_get_symbol_dim_by_axis(block, op, operand, 0, source_dims))
+            elif axis == 1:
+                dynamic_dims.append(_get_symbol_dim_by_axis(block, op, operand, 1, source_dims))
+            elif axis == 2:
+                dynamic_dims.append(kh)
+            elif axis == 3:
+                dynamic_dims.append(kw)
+            elif axis == 4:
+                dynamic_dims.append(h_out.result)
+            elif axis == 5:
+                dynamic_dims.append(w_out.result)
+            else:
+                raise NnLoweringError("nn img2col2d result rank must be 6")
     return dynamic_dims
 
 
@@ -598,7 +601,7 @@ def _lower_img2col1d(block: Block, op: Operation) -> None:
     alloc = DmaAllocOp(dynamic_dims, result_type)
     block.insert_op_before(alloc, op)
     result = alloc.results[0]
-    lowered = KernelImg2col1dOp(operand, result, *params, space)
+    lowered = KernelImg2col1dOp(result, operand, *params, space)
     lowered.attributes["stride"] = ArrayAttr([_build_symbol_attr(params[1], prefer_i64=False)])
     lowered.attributes["dilation"] = ArrayAttr([_build_symbol_attr(params[2], prefer_i64=False)])
     lowered.attributes["pad"] = ArrayAttr(
@@ -641,7 +644,7 @@ def _lower_img2col2d(block: Block, op: Operation) -> None:
     alloc = DmaAllocOp(dynamic_dims, result_type)
     block.insert_op_before(alloc, op)
     result = alloc.results[0]
-    lowered = KernelImg2col2dOp(operand, result, *params, space)
+    lowered = KernelImg2col2dOp(result, operand, *params, space)
     lowered.attributes["stride"] = ArrayAttr(
         [
             _build_symbol_attr(params[2], prefer_i64=True),

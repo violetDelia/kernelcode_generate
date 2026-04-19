@@ -226,6 +226,14 @@
 验证：`git -C /home/lfr/kernelcode_generate/wt-20260418-op-mlir-lowering-s3 status --short --branch` -> 命中记录文件、上述实现/回归改动以及未跟踪的 S3 入口脚本/测试；`rg -n "script/run-op-mlir-s3-expectation.sh|pytest -q test/pass/nn_lowering/img2col1d.py test/pass/nn_lowering/img2col2d.py|pytest -q test/pass/nn_lowering/softmax.py test/pass/nn_lowering/reduce_sum.py|pytest -q test/script/test_run_op_mlir_s3_expectation.py" /home/lfr/kernelcode_generate/ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md` -> 命中主仓计划书 S3 小节新验收命令；`test -f /home/lfr/kernelcode_generate/wt-20260418-op-mlir-lowering-s3/ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md; echo $?` -> `1`
 结论：已完成合并前核对，当前将只提交 S3 入口脚本、对应测试与记录文件，不带入其他现场文件；完成提交后执行一次推送、`-done` 并回报管理员。
 
+时间：2026-04-19 15:25 +0800
+经办人：李白
+任务：T-20260418-fdbc4ed2
+任务目标：补记本次 merge 完成后的流转结果，并记录 `-done` 阻塞原因
+改动：已在 `wt-20260418-op-mlir-lowering-s3` 内完成最小范围合并提交，只带入 [`script/run-op-mlir-s3-expectation.sh`](../../../../../../script/run-op-mlir-s3-expectation.sh)、[`test/script/test_run_op_mlir_s3_expectation.py`](../../../../../../test/script/test_run_op_mlir_s3_expectation.py) 与当前记录文件；未带入 `kernel_gen/*`、`test/pass/*` 等其他现场文件。合并提交已推送到远端主分支，但执行任务脚本 `-done` 时收到“`merge operator can only complete own tasks`”，说明当前任务在系统中仍不归 `李白` 所有。
+验证：`git -C /home/lfr/kernelcode_generate/wt-20260418-op-mlir-lowering-s3 diff --cached --name-only` -> 仅命中记录文件、S3 入口脚本与对应测试；`git -C /home/lfr/kernelcode_generate/wt-20260418-op-mlir-lowering-s3 commit -m "T-20260418-fdbc4ed2-merge-op-mlir-lowering-s3"` -> `57b6994`；`timeout 60 git -C /home/lfr/kernelcode_generate/wt-20260418-op-mlir-lowering-s3 push origin HEAD:main` -> `exit 0`；`bash /home/lfr/kernelcode_generate/skills/codex-multi-agents/scripts/codex-multi-agents-task.sh ... -done -task_id "T-20260418-fdbc4ed2"` -> `ERROR(3): merge operator can only complete own tasks: T-20260418-fdbc4ed2`
+结论：当前 merge 已完成并已推送主线，但任务流转阻塞在 `-done` 权限校验；已补阻塞记录，下一步请管理员修正任务归属或代为处理流转后再通知我继续。
+
 时间：2026-04-19 15:22
 经办人：jcc你莫辜负
 任务：T-20260418-fdbc4ed2
@@ -233,3 +241,11 @@
 改动：收到管理员 `神秘人` 的明确回复：当前 `merge` 指派非法，且因唯一合法 `merge` 角色仍在处理其他任务，本任务先按管理员口径暂停，等待后续合法改派；本轮不再继续执行任何合并、状态流转或额外脚本动作。
 验证：未执行命令，原因：管理员已明确“你无需继续推进”，当前仅补任务记录以同步暂停状态。
 结论：当前任务已按管理员口径暂停，等待后续合法改派；本轮到此停止。
+
+时间：2026-04-19 17:15 +0800
+经办人：李白
+任务：T-20260418-fdbc4ed2
+任务目标：按最新口径补合 S3 worktree 中此前未带入的非 `expectation`、非 `ignore` 改动
+改动：根据用户最新口径，S3 merge 不再只限脚本入口与对应测试；当前将补合 `wt-20260418-op-mlir-lowering-s3` 中剩余的非 `expectation`、非 `ignore` 改动，包括 [`kernel_gen/dialect/kernel.py`](../../../../../../kernel_gen/dialect/kernel.py)、[`kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py`](../../../../../../kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py)、[`kernel_gen/passes/lowering/nn_lowering/nn_lowering.py`](../../../../../../kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)、[`kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py`](../../../../../../kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py)、[`test/dialect/test_kernel_dialect.py`](../../../../../../test/dialect/test_kernel_dialect.py)、[`test/pass/nn_lowering/img2col1d.py`](../../../../../../test/pass/nn_lowering/img2col1d.py)、[`test/pass/nn_lowering/img2col2d.py`](../../../../../../test/pass/nn_lowering/img2col2d.py)、[`test/pass/nn_lowering/reduce_sum.py`](../../../../../../test/pass/nn_lowering/reduce_sum.py)、[`test/pass/nn_lowering/softmax.py`](../../../../../../test/pass/nn_lowering/softmax.py) 与当前记录文件；不带入任何 `expectation/` 路径文件，也不带入 `gitignore` 命中的现场文件。
+验证：`git -C /home/lfr/kernelcode_generate/wt-20260418-op-mlir-lowering-s3 status --short --branch` -> 剩余未提交改动仅命中上述实现、测试与记录文件；`git -C /home/lfr/kernelcode_generate ls-files -o -i --exclude-standard wt-20260418-op-mlir-lowering-s3` -> 空结果
+结论：已按新口径完成补合前核对；下一步在当前 worktree 内提交剩余非 `expectation`、非 `ignore` 改动并推送主线。

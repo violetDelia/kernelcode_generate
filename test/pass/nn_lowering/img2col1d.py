@@ -93,3 +93,67 @@ def test_nn_lowering_img2col1d_target() -> None:
     assert isinstance(kernel_op.d.type, SymbolValueType)
     assert isinstance(kernel_op.p_left.type, SymbolValueType)
     assert isinstance(kernel_op.p_right.type, SymbolValueType)
+
+
+def test_nn_lowering_img2col1d_accepts_noncanonical_symbol_names() -> None:
+    """TC-PASS-NNL-021A: 动态 img2col1d 不应依赖固定符号名。"""
+
+    space = NnMemorySpaceAttr(StringAttr("global"))
+    input_type = NnMemoryType(
+        ArrayAttr([StringAttr("BATCH_DIM"), StringAttr("CHANNEL_DIM"), StringAttr("WIDTH_DIM")]),
+        ArrayAttr([StringAttr("CHANNEL_DIM*WIDTH_DIM"), StringAttr("WIDTH_DIM"), IntAttr(1)]),
+        f32,
+        space,
+    )
+    result_type = NnMemoryType(
+        ArrayAttr(
+            [
+                StringAttr("BATCH_DIM"),
+                StringAttr("CHANNEL_DIM"),
+                StringAttr("WIN_DIM"),
+                StringAttr("OUT_EXTENT_DIM"),
+            ]
+        ),
+        ArrayAttr(
+            [
+                StringAttr("CHANNEL_DIM*WIN_DIM*OUT_EXTENT_DIM"),
+                StringAttr("WIN_DIM*OUT_EXTENT_DIM"),
+                StringAttr("OUT_EXTENT_DIM"),
+                IntAttr(1),
+            ]
+        ),
+        f32,
+        space,
+    )
+    symbol_types = [
+        SymbolValueType.from_expr("WIN_DIM"),
+        SymbolValueType.from_expr("STEP_DIM"),
+        SymbolValueType.from_expr("DILATION_DIM"),
+        SymbolValueType.from_expr("PAD_LEFT_DIM"),
+        SymbolValueType.from_expr("PAD_RIGHT_DIM"),
+    ]
+
+    block = Block(arg_types=[input_type, *symbol_types])
+    img2col = NnImg2col1dOp(
+        block.args[0],
+        result_type,
+        kw=block.args[1],
+        sw=block.args[2],
+        dw=block.args[3],
+        pl=block.args[4],
+        pr=block.args[5],
+        space=space,
+    )
+    block.add_op(img2col)
+    block.add_op(func.ReturnOp(img2col.result))
+    func_type = FunctionType.from_lists([input_type, *symbol_types], [result_type])
+    func_op = func.FuncOp("dynamic_img2col1d", func_type, Region(block))
+    module = ModuleOp([func_op])
+
+    NnLoweringPass().run(module)
+    module_text = str(module)
+
+    kernel_ops = [op for op in module.walk() if isinstance(op, KernelImg2col1dOp)]
+    assert len(kernel_ops) == 1
+    assert not any(isinstance(op, NnImg2col1dOp) for op in module.walk())
+    assert 'floor((-DILATION_DIM*(WIN_DIM - 1) + PAD_LEFT_DIM + PAD_RIGHT_DIM + WIDTH_DIM - 1)/STEP_DIM) + 1' in module_text

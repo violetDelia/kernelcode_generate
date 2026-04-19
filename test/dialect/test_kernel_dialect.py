@@ -424,10 +424,10 @@ def test_kernel_ops_no_result() -> None:
     cast_op = KernelCastOp(cast_input, cast_output, _make_space("global"))
     exp_input = _make_value(_make_memory_type(element_type=Float32Type()))
     exp_output = _make_value(_make_memory_type(element_type=Float32Type()))
-    exp_op = KernelExpOp(exp_input, exp_output, _make_space("global"))
+    exp_op = KernelExpOp(exp_output, exp_input, _make_space("global"))
     softmax_input = _make_value(_make_memory_type(element_type=Float32Type()))
     softmax_output = _make_value(_make_memory_type(element_type=Float32Type()))
-    softmax_op = KernelSoftmaxOp(softmax_input, softmax_output, axis=1, space=_make_space("global"))
+    softmax_op = KernelSoftmaxOp(softmax_output, softmax_input, axis=1, space=_make_space("global"))
     img2col_input_type = _make_memory_type(
         shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5), IntAttr(5)]),
         stride=ArrayAttr([IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)]),
@@ -439,8 +439,8 @@ def test_kernel_ops_no_result() -> None:
         element_type=Float32Type(),
     )
     img2col_op = KernelImg2col2dOp(
-        _make_value(img2col_input_type),
         _make_value(img2col_output_type),
+        _make_value(img2col_input_type),
         kh=_const_i32(3),
         kw=_const_i32(3),
         sh=_const_i32(1),
@@ -464,8 +464,8 @@ def test_kernel_ops_no_result() -> None:
         element_type=Float32Type(),
     )
     img2col1d_op = KernelImg2col1dOp(
-        _make_value(img2col1d_input_type),
         _make_value(img2col1d_output_type),
+        _make_value(img2col1d_input_type),
         k=_const_i32(3),
         s=_const_i32(1),
         d=_const_i32(1),
@@ -508,7 +508,7 @@ def test_kernel_ops_no_result() -> None:
 def test_kernel_exp_success() -> None:
     input_type = _make_memory_type(element_type=Float32Type())
     out_type = _make_memory_type(element_type=Float32Type())
-    op = KernelExpOp(_make_value(input_type), _make_value(out_type), _make_space("global"))
+    op = KernelExpOp(_make_value(out_type), _make_value(input_type), _make_space("global"))
     op.verify()
 
 
@@ -525,7 +525,7 @@ def test_kernel_exp_success() -> None:
 def test_kernel_exp_supports_bf16() -> None:
     input_type = _make_memory_type(element_type=BFloat16Type())
     out_type = _make_memory_type(element_type=BFloat16Type())
-    op = KernelExpOp(_make_value(input_type), _make_value(out_type), _make_space("global"))
+    op = KernelExpOp(_make_value(out_type), _make_value(input_type), _make_space("global"))
     op.verify()
 
 
@@ -542,7 +542,7 @@ def test_kernel_exp_supports_bf16() -> None:
 def test_kernel_exp_requires_float() -> None:
     input_type = _make_memory_type(element_type=i32)
     out_type = _make_memory_type(element_type=i32)
-    op = KernelExpOp(_make_value(input_type), _make_value(out_type), _make_space("global"))
+    op = KernelExpOp(_make_value(out_type), _make_value(input_type), _make_space("global"))
     with pytest.raises(VerifyException, match="kernel.exp element_type must be float"):
         op.verify()
 
@@ -639,8 +639,8 @@ def test_kernel_img2col_structured_contract() -> None:
         element_type=Float32Type(),
     )
     KernelImg2col1dOp(
-        _make_value(img2col1d_input_type),
         _make_value(img2col1d_output_type),
+        _make_value(img2col1d_input_type),
         k=_const_i32(3),
         s=_const_i32(1),
         d=_const_i32(1),
@@ -660,8 +660,8 @@ def test_kernel_img2col_structured_contract() -> None:
         element_type=Float32Type(),
     )
     KernelImg2col2dOp(
-        _make_value(img2col2d_input_type),
         _make_value(img2col2d_output_type),
+        _make_value(img2col2d_input_type),
         kh=_const_i32(3),
         kw=_const_i32(3),
         sh=_const_i32(1),
@@ -699,8 +699,8 @@ def test_kernel_img2col_input_rank_layout_contract() -> None:
     )
     with pytest.raises(VerifyException, match="kernel.img2col1d requires rank-3 input"):
         KernelImg2col1dOp(
-            _make_value(rank2_input),
             _make_value(img2col1d_output_type),
+            _make_value(rank2_input),
             k=_const_i32(3),
             s=_const_i32(1),
             d=_const_i32(1),
@@ -716,8 +716,8 @@ def test_kernel_img2col_input_rank_layout_contract() -> None:
     )
     with pytest.raises(VerifyException, match="kernel.img2col1d input layout must be contiguous"):
         KernelImg2col1dOp(
-            _make_value(non_contiguous_1d_input),
             _make_value(img2col1d_output_type),
+            _make_value(non_contiguous_1d_input),
             k=_const_i32(3),
             s=_const_i32(1),
             d=_const_i32(1),
@@ -738,8 +738,8 @@ def test_kernel_img2col_input_rank_layout_contract() -> None:
     )
     with pytest.raises(VerifyException, match="kernel.img2col1d requires rank-4 result"):
         KernelImg2col1dOp(
-            _make_value(img2col1d_input_type),
             _make_value(rank3_output),
+            _make_value(img2col1d_input_type),
             k=_const_i32(3),
             s=_const_i32(1),
             d=_const_i32(1),
@@ -760,8 +760,8 @@ def test_kernel_img2col_input_rank_layout_contract() -> None:
     )
     with pytest.raises(VerifyException, match="kernel.img2col2d requires rank-4 input"):
         KernelImg2col2dOp(
-            _make_value(rank3_2d_input),
             _make_value(img2col2d_output_type),
+            _make_value(rank3_2d_input),
             kh=_const_i32(3),
             kw=_const_i32(3),
             sh=_const_i32(1),
@@ -782,8 +782,8 @@ def test_kernel_img2col_input_rank_layout_contract() -> None:
     )
     with pytest.raises(VerifyException, match="kernel.img2col2d input layout must be contiguous"):
         KernelImg2col2dOp(
-            _make_value(non_contiguous_2d_input),
             _make_value(img2col2d_output_type),
+            _make_value(non_contiguous_2d_input),
             kh=_const_i32(3),
             kw=_const_i32(3),
             sh=_const_i32(1),
@@ -809,8 +809,8 @@ def test_kernel_img2col_input_rank_layout_contract() -> None:
     )
     with pytest.raises(VerifyException, match="kernel.img2col2d requires rank-6 result"):
         KernelImg2col2dOp(
-            _make_value(img2col2d_input_type),
             _make_value(rank5_output),
+            _make_value(img2col2d_input_type),
             kh=_const_i32(3),
             kw=_const_i32(3),
             sh=_const_i32(1),
@@ -848,8 +848,8 @@ def test_kernel_img2col_output_extent_contract() -> None:
     )
     with pytest.raises(VerifyException, match="kernel.img2col1d result shape/stride must match img2col1d contract"):
         KernelImg2col1dOp(
-            _make_value(img2col1d_input_type),
             _make_value(bad_window_axis_1d_output),
+            _make_value(img2col1d_input_type),
             k=_const_i32(3),
             s=_const_i32(1),
             d=_const_i32(1),
@@ -865,8 +865,8 @@ def test_kernel_img2col_output_extent_contract() -> None:
     )
     with pytest.raises(VerifyException, match="kernel.img2col1d result shape/stride must match img2col1d contract"):
         KernelImg2col1dOp(
-            _make_value(img2col1d_input_type),
             _make_value(bad_extent_1d_output),
+            _make_value(img2col1d_input_type),
             k=_const_i32(3),
             s=_const_i32(1),
             d=_const_i32(1),
@@ -882,8 +882,8 @@ def test_kernel_img2col_output_extent_contract() -> None:
     )
     with pytest.raises(VerifyException, match="kernel.img2col1d result shape/stride must match img2col1d contract"):
         KernelImg2col1dOp(
-            _make_value(img2col1d_input_type),
             _make_value(bad_stride_1d_output),
+            _make_value(img2col1d_input_type),
             k=_const_i32(3),
             s=_const_i32(1),
             d=_const_i32(1),
@@ -904,8 +904,8 @@ def test_kernel_img2col_output_extent_contract() -> None:
     )
     with pytest.raises(VerifyException, match="kernel.img2col1d result shape/stride must match img2col1d contract"):
         KernelImg2col1dOp(
-            _make_value(short_1d_input),
             _make_value(short_1d_output),
+            _make_value(short_1d_input),
             k=_const_i32(3),
             s=_const_i32(1),
             d=_const_i32(1),
@@ -926,8 +926,8 @@ def test_kernel_img2col_output_extent_contract() -> None:
     )
     with pytest.raises(VerifyException, match="kernel.img2col2d result shape/stride must match img2col2d contract"):
         KernelImg2col2dOp(
-            _make_value(img2col2d_input_type),
             _make_value(bad_window_axis_2d_output),
+            _make_value(img2col2d_input_type),
             kh=_const_i32(3),
             kw=_const_i32(3),
             sh=_const_i32(1),
@@ -948,8 +948,8 @@ def test_kernel_img2col_output_extent_contract() -> None:
     )
     with pytest.raises(VerifyException, match="kernel.img2col2d result shape/stride must match img2col2d contract"):
         KernelImg2col2dOp(
-            _make_value(img2col2d_input_type),
             _make_value(bad_extent_2d_output),
+            _make_value(img2col2d_input_type),
             kh=_const_i32(3),
             kw=_const_i32(3),
             sh=_const_i32(1),
@@ -970,8 +970,8 @@ def test_kernel_img2col_output_extent_contract() -> None:
     )
     with pytest.raises(VerifyException, match="kernel.img2col2d result shape/stride must match img2col2d contract"):
         KernelImg2col2dOp(
-            _make_value(img2col2d_input_type),
             _make_value(bad_stride_2d_output),
+            _make_value(img2col2d_input_type),
             kh=_const_i32(3),
             kw=_const_i32(3),
             sh=_const_i32(1),
@@ -997,8 +997,8 @@ def test_kernel_img2col_output_extent_contract() -> None:
     )
     with pytest.raises(VerifyException, match="kernel.img2col2d result shape/stride must match img2col2d contract"):
         KernelImg2col2dOp(
-            _make_value(short_2d_input),
             _make_value(short_2d_output),
+            _make_value(short_2d_input),
             kh=_const_i32(3),
             kw=_const_i32(3),
             sh=_const_i32(1),
@@ -1026,7 +1026,7 @@ def test_kernel_img2col_output_extent_contract() -> None:
 def test_kernel_softmax_success() -> None:
     input_type = _make_memory_type(element_type=Float32Type())
     out_type = _make_memory_type(element_type=Float32Type())
-    op = KernelSoftmaxOp(_make_value(input_type), _make_value(out_type), axis=1, space=_make_space("global"))
+    op = KernelSoftmaxOp(_make_value(out_type), _make_value(input_type), axis=1, space=_make_space("global"))
     op.verify()
 
 
@@ -1043,7 +1043,7 @@ def test_kernel_softmax_success() -> None:
 def test_kernel_softmax_axis_error() -> None:
     input_type = _make_memory_type(element_type=Float32Type())
     out_type = _make_memory_type(element_type=Float32Type())
-    op = KernelSoftmaxOp(_make_value(input_type), _make_value(out_type), axis=2, space=_make_space("global"))
+    op = KernelSoftmaxOp(_make_value(out_type), _make_value(input_type), axis=2, space=_make_space("global"))
     with pytest.raises(VerifyException, match="axis must be within"):
         op.verify()
 
@@ -1061,7 +1061,7 @@ def test_kernel_softmax_axis_error() -> None:
 def test_kernel_softmax_requires_float() -> None:
     input_type = _make_memory_type(element_type=i32)
     out_type = _make_memory_type(element_type=i32)
-    op = KernelSoftmaxOp(_make_value(input_type), _make_value(out_type), axis=1, space=_make_space("global"))
+    op = KernelSoftmaxOp(_make_value(out_type), _make_value(input_type), axis=1, space=_make_space("global"))
     with pytest.raises(VerifyException, match="kernel.softmax element_type must be float"):
         op.verify()
 
@@ -1084,8 +1084,8 @@ def test_kernel_reduce_min_success() -> None:
         element_type=Float32Type(),
     )
     op = KernelReduceMinOp(
-        _make_value(input_type),
         _make_value(out_type),
+        _make_value(input_type),
         axis=1,
         keepdim=True,
         space=_make_space("global"),
@@ -1111,8 +1111,8 @@ def test_kernel_reduce_min_axis_error() -> None:
         element_type=Float32Type(),
     )
     op = KernelReduceMinOp(
-        _make_value(input_type),
         _make_value(out_type),
+        _make_value(input_type),
         axis=2,
         keepdim=True,
         space=_make_space("global"),
@@ -1139,8 +1139,8 @@ def test_kernel_reduce_min_out_shape_mismatch() -> None:
         element_type=Float32Type(),
     )
     op = KernelReduceMinOp(
-        _make_value(input_type),
         _make_value(out_type),
+        _make_value(input_type),
         axis=1,
         keepdim=True,
         space=_make_space("global"),
@@ -1167,8 +1167,8 @@ def test_kernel_reduce_min_keepdim_error() -> None:
         element_type=Float32Type(),
     )
     op = KernelReduceMinOp(
-        _make_value(input_type),
         _make_value(out_type),
+        _make_value(input_type),
         axis=1,
         keepdim=IntegerAttr(2, IntegerType(8)),
         space=_make_space("global"),

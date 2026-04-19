@@ -1202,8 +1202,8 @@ class KernelImg2col1dOp(IRDLOperation):
 
     name = "kernel.img2col1d"
 
-    input = operand_def(NnMemoryType)
     out = operand_def(NnMemoryType)
+    input = operand_def(NnMemoryType)
     k = operand_def(Attribute)
     s = operand_def(Attribute)
     d = operand_def(Attribute)
@@ -1213,8 +1213,8 @@ class KernelImg2col1dOp(IRDLOperation):
 
     def __init__(
         self,
-        input_value: SSAValue | Operation,
         out: SSAValue | Operation,
+        input_value: SSAValue | Operation,
         k: SSAValue | Operation,
         s: SSAValue | Operation,
         d: SSAValue | Operation,
@@ -1240,7 +1240,7 @@ class KernelImg2col1dOp(IRDLOperation):
         """
 
         super().__init__(
-            operands=[input_value, out, k, s, d, p_left, p_right],
+            operands=[out, input_value, k, s, d, p_left, p_right],
             attributes={"space": space},
         )
 
@@ -1395,8 +1395,8 @@ class KernelImg2col2dOp(IRDLOperation):
 
     name = "kernel.img2col2d"
 
-    input = operand_def(NnMemoryType)
     out = operand_def(NnMemoryType)
+    input = operand_def(NnMemoryType)
     kh = operand_def(Attribute)
     kw = operand_def(Attribute)
     sh = operand_def(Attribute)
@@ -1411,8 +1411,8 @@ class KernelImg2col2dOp(IRDLOperation):
 
     def __init__(
         self,
-        input_value: SSAValue | Operation,
         out: SSAValue | Operation,
+        input_value: SSAValue | Operation,
         kh: SSAValue | Operation,
         kw: SSAValue | Operation,
         sh: SSAValue | Operation,
@@ -1443,7 +1443,7 @@ class KernelImg2col2dOp(IRDLOperation):
         """
 
         super().__init__(
-            operands=[input_value, out, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr],
+            operands=[out, input_value, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr],
             attributes={"space": space},
         )
 
@@ -1652,19 +1652,19 @@ class KernelCastOp(IRDLOperation):
 
     name = "kernel.cast"
 
-    input = operand_def(NnMemoryType)
     out = operand_def(NnMemoryType)
+    input = operand_def(NnMemoryType)
     space = attr_def(NnMemorySpaceAttr)
 
     def __init__(
         self,
-        input_value: SSAValue | Operation,
         out: SSAValue | Operation,
+        input_value: SSAValue | Operation,
         space: NnMemorySpaceAttr,
     ) -> None:
         """初始化 cast op。"""
 
-        super().__init__(operands=[input_value, out], attributes={"space": space})
+        super().__init__(operands=[out, input_value], attributes={"space": space})
 
     def verify_(self) -> None:
         input_type = _verify_memory_type(self.input.type, "input")
@@ -1689,8 +1689,8 @@ class KernelExpOp(IRDLOperation):
 
     name = "kernel.exp"
 
-    input = operand_def(NnMemoryType)
     out = operand_def(NnMemoryType)
+    input = operand_def(NnMemoryType)
     space = attr_def(NnMemorySpaceAttr)
 
     def __init__(
@@ -1750,8 +1750,8 @@ class KernelSoftmaxOp(IRDLOperation):
 
     def __init__(
         self,
-        input_value: SSAValue | Operation,
         out: SSAValue | Operation,
+        input_value: SSAValue | Operation,
         axis: int | IntegerAttr | IntAttr,
         space: NnMemorySpaceAttr,
     ) -> None:
@@ -1774,7 +1774,7 @@ class KernelSoftmaxOp(IRDLOperation):
         """
 
         axis_attr = _normalize_i64_attr(axis, "axis")
-        super().__init__(operands=[input_value, out], attributes={"axis": axis_attr, "space": space})
+        super().__init__(operands=[out, input_value], attributes={"axis": axis_attr, "space": space})
 
     def verify_(self) -> None:
         """校验 kernel.softmax 的 verifier 合同。
@@ -1836,8 +1836,8 @@ class KernelReduceOp(IRDLOperation):
 
     name = "kernel.reduce"
 
-    input = operand_def(NnMemoryType)
     out = operand_def(NnMemoryType)
+    input = operand_def(NnMemoryType)
     axis = attr_def(IntegerAttr)
     keepdim = attr_def(IntegerAttr)
     kind = attr_def(StringAttr)
@@ -1845,8 +1845,8 @@ class KernelReduceOp(IRDLOperation):
 
     def __init__(
         self,
-        input_value: SSAValue | Operation,
         out: SSAValue | Operation,
+        input_value: SSAValue | Operation,
         *,
         kind: str | StringAttr,
         axis: int | IntegerAttr | IntAttr,
@@ -1877,7 +1877,7 @@ class KernelReduceOp(IRDLOperation):
             kind, op_name=self.name, field_name="kind", allowed=_REDUCE_KINDS
         )
         super().__init__(
-            operands=[input_value, out],
+            operands=[out, input_value],
             attributes={
                 "axis": axis_attr,
                 "keepdim": keepdim_attr,
@@ -1959,7 +1959,7 @@ class KernelReduceMinOp(IRDLOperation):
     - 定义 kernel.reduce_min op 与 verifier 约束。
 
     使用示例:
-    - KernelReduceMinOp(inp, out, axis=1, keepdim=False, space=NnMemorySpaceAttr.from_name("global"))
+    - KernelReduceMinOp(out, inp, axis=1, keepdim=False, space=NnMemorySpaceAttr.from_name("global"))
 
     关联文件:
     - spec: spec/dialect/kernel.md
@@ -1969,16 +1969,16 @@ class KernelReduceMinOp(IRDLOperation):
 
     name = "kernel.reduce_min"
 
-    input = operand_def(NnMemoryType)
     out = operand_def(NnMemoryType)
+    input = operand_def(NnMemoryType)
     axis = attr_def(IntegerAttr)
     keepdim = attr_def(IntegerAttr)
     space = attr_def(NnMemorySpaceAttr)
 
     def __init__(
         self,
-        input_value: SSAValue | Operation,
         out: SSAValue | Operation,
+        input_value: SSAValue | Operation,
         axis: int | IntegerAttr | IntAttr,
         keepdim: bool | int | IntegerAttr | IntAttr,
         space: NnMemorySpaceAttr,
@@ -1993,7 +1993,7 @@ class KernelReduceMinOp(IRDLOperation):
         - axis 规整为 i64 IntegerAttr，keepdim 规整为 i1。
 
         使用示例:
-        - KernelReduceMinOp(inp, out, axis=1, keepdim=False, space=NnMemorySpaceAttr.from_name("global"))
+        - KernelReduceMinOp(out, inp, axis=1, keepdim=False, space=NnMemorySpaceAttr.from_name("global"))
 
         关联文件:
         - spec: spec/dialect/kernel.md
@@ -2004,7 +2004,7 @@ class KernelReduceMinOp(IRDLOperation):
         axis_attr = _normalize_i64_attr(axis, "axis")
         keepdim_attr = _normalize_bool_attr(keepdim, "keepdim")
         super().__init__(
-            operands=[input_value, out],
+            operands=[out, input_value],
             attributes={"axis": axis_attr, "keepdim": keepdim_attr, "space": space},
         )
 
@@ -2019,7 +2019,7 @@ class KernelReduceMinOp(IRDLOperation):
         - 校验 element_type 与 space 一致性。
 
         使用示例:
-        - KernelReduceMinOp(inp, out, axis=1, keepdim=False, space=NnMemorySpaceAttr.from_name("global")).verify_()
+        - KernelReduceMinOp(out, inp, axis=1, keepdim=False, space=NnMemorySpaceAttr.from_name("global")).verify_()
 
         关联文件:
         - spec: spec/dialect/kernel.md

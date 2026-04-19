@@ -680,7 +680,7 @@ def _lower_exp(block: Block, op: Operation) -> None:
     alloc = DmaAllocOp(params, result_type)
     block.insert_op_before(alloc, op)
     result = alloc.results[0]
-    lowered = KernelExpOp(operand, result, space)
+    lowered = KernelExpOp(result, operand, space)
     block.insert_op_before(lowered, op)
     op.results[0].replace_by(result)
     block.erase_op(op)
@@ -741,7 +741,7 @@ def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:
     alloc = DmaAllocOp(params, result_type)
     block.insert_op_before(alloc, op)
     result = alloc.results[0]
-    lowered = KernelReduceOp(operand, result, kind=kind, axis=axis, keepdim=keepdim, space=space)
+    lowered = KernelReduceOp(result, operand, kind=kind, axis=axis, keepdim=keepdim, space=space)
     block.insert_op_before(lowered, op)
     op.results[0].replace_by(result)
     block.erase_op(op)
@@ -786,7 +786,7 @@ def _lower_softmax(block: Block, op: Operation) -> None:
     alloc = DmaAllocOp(params, result_type)
     block.insert_op_before(alloc, op)
     result = alloc.results[0]
-    lowered = KernelSoftmaxOp(operand, result, axis, space)
+    lowered = KernelSoftmaxOp(result, operand, axis, space)
     block.insert_op_before(lowered, op)
     op.results[0].replace_by(result)
     block.erase_op(op)
@@ -900,7 +900,7 @@ def _lower_img2col1d(block: Block, op: Operation) -> None:
     alloc = DmaAllocOp(params, result_type)
     block.insert_op_before(alloc, op)
     result = alloc.results[0]
-    lowered = KernelImg2col1dOp(operand, *params, result, space)
+    lowered = KernelImg2col1dOp(result, operand, *params, space)
     block.insert_op_before(lowered, op)
     op.results[0].replace_by(result)
     block.erase_op(op)
@@ -931,7 +931,7 @@ def _lower_img2col2d(block: Block, op: Operation) -> None:
     alloc = DmaAllocOp(params, result_type)
     block.insert_op_before(alloc, op)
     result = alloc.results[0]
-    lowered = KernelImg2col2dOp(operand, *params, result, space)
+    lowered = KernelImg2col2dOp(result, operand, *params, space)
     block.insert_op_before(lowered, op)
     op.results[0].replace_by(result)
     block.erase_op(op)
