@@ -35,10 +35,10 @@
 
 - 仅支持以下 `nn` op 的 lowering：
   - 逐元素：`nn.add`/`nn.sub`/`nn.mul`/`nn.div`/`nn.truediv`、`nn.eq`/`nn.ne`/`nn.lt`/`nn.le`/`nn.gt`/`nn.ge`、`nn.select`、`nn.cast`
-  - 结构化：`nn.broadcast`、`nn.transpose`、`nn.exp`、`nn.softmax`、`nn.reduce_sum`/`nn.reduce_min`/`nn.reduce_max`、`nn.matmul`、`nn.img2col1d`/`nn.img2col2d`
+  - 结构化：`nn.broadcast`、`nn.transpose`、`nn.exp`、`nn.reduce_sum`/`nn.reduce_min`/`nn.reduce_max`、`nn.matmul`、`nn.img2col1d`/`nn.img2col2d`
 - `nn.truediv` 与 `nn.div` 在 pass 层统一 lower 为 `kernel.binary_elewise(kind="div")`。
 - `nn.broadcast` / `nn.transpose` 必须 lower 为 `dma.broadcast` / `dma.transpose`。
-- `nn.exp` / `nn.softmax` / `nn.reduce_*` / `nn.matmul` / `nn.img2col*` 必须 lower 为具名 `kernel.*` op。
+- `nn.exp` / `nn.reduce_*` / `nn.matmul` / `nn.img2col*` 必须 lower 为具名 `kernel.*` op。
 - `nn` 逐元素/比较类 op 必须 lower 为 `kernel.binary_elewise`，`kind` 与原 op 语义一致。
 - `nn` 逐元素/比较类 op 的结果 memory 分配规则：
   - 当结果 `shape` 全为静态整型维度时，`dma.alloc` 可直接使用空的 dynamic shape operand；此时 lowering 不要求先出现 `symbol.get_dim`。
@@ -50,9 +50,9 @@
   - 目标 op 固定为 `kernel.reduce`，`kind` 取值分别为 `"sum" / "min" / "max"`。
   - `axis/keepdim` 直接继承 `nn.reduce_*` 的语义；`out` 仅消费已有结果 memory，不得改写为 `kernel.reduce_sum/min/max`。
   - `out` 的 `shape/stride/element_type/space` 必须满足 reduce 合同，否则抛出 `NnLoweringError`。
-- `nn.softmax` lowering 规则：
-  - 目标 op 固定为 `kernel.softmax`，并把 `axis` 作为 op attr。
-  - `out` 必须由 `dma.alloc` 创建；`axis` 与 `out` 形态不一致时必须抛出 `NnLoweringError`。
+- `nn.softmax` 不在 `lower-nn` 内直接 lowering：
+  - 进入本 pass 前必须先由上游 helper/分解 pass 展开为公开稳定链路。
+  - 若仍直接命中 `nn.softmax`，必须抛出 `NnLoweringError`，错误信息需明确要求“先分解再进入 lower-nn”。
 - `nn.matmul` lowering 规则：
   - 目标 op 固定为 `kernel.matmul`，并把结果写入 `out` operand。
   - 动态维度只能来源于 `symbol.get_dim` 或显式 `!symbol.int<"...">`；不允许把 `i32/index` 直接作为动态维度来源。
@@ -204,7 +204,7 @@ module_op = ensure_module_op(module)
   - 验证 add/sub 的符号维度 lowering 在 `dma.alloc` 前按维度生成 `symbol.get_dim`。
   - 验证 `nn.exp` -> `kernel.exp` 的 lowering 目标与输出消费链路。
   - 验证 `nn.reduce_sum/min/max` -> `kernel.reduce(kind=...)` 的 lowering 目标与 `axis/keepdim` 传递。
-  - 验证 `nn.softmax` -> `kernel.softmax` 的 lowering 目标与 `axis` 传递。
+  - 验证 direct `nn.softmax` 会被拒绝，并提示需先完成分解。
   - 验证 `nn.matmul` -> `kernel.matmul` 的 lowering 目标与输出 memory 约束。
   - 验证 `nn.img2col1d/nn.img2col2d` -> `kernel.img2col1d/kernel.img2col2d` 的 lowering 目标与 symbol.int operand 约束。
 - 功能与用例清单：
@@ -218,7 +218,7 @@ module_op = ensure_module_op(module)
 | TC-PASS-NNL-012 | `nn.reduce_min` lowering 为 `kernel.reduce(kind="min")` | `test_lower_reduce_min_to_kernel` |
 | TC-PASS-NNL-013 | `nn.reduce_sum` lowering 为 `kernel.reduce(kind="sum")` | `test_lower_reduce_sum_to_kernel` |
 | TC-PASS-NNL-014 | `nn.reduce_max` lowering 为 `kernel.reduce(kind="max")` | `test_lower_reduce_max_to_kernel` |
-| TC-PASS-NNL-020 | `nn.softmax` lowering 目标为 `kernel.softmax` | `test_lower_softmax_to_kernel` |
+| TC-PASS-NNL-020 | direct `nn.softmax` 需先分解后再进入 `lower-nn` | `test_lower_softmax_requires_decompass` |
 | TC-PASS-NNL-021 | `nn.matmul` lowering 目标为 `kernel.matmul` | `test_lower_matmul_to_kernel` |
 | TC-PASS-NNL-022 | `nn.img2col1d` lowering 目标为 `kernel.img2col1d` | `test_lower_img2col1d_to_kernel` |
 | TC-PASS-NNL-023 | `nn.img2col2d` lowering 目标为 `kernel.img2col2d` | `test_lower_img2col2d_to_kernel` |

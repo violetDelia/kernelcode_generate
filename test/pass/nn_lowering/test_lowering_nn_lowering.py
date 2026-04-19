@@ -65,7 +65,6 @@ from kernel_gen.dialect.kernel import (
     KernelMatmulOp,
     KernelReduceOp,
     KernelSelectOp,
-    KernelSoftmaxOp,
 )
 from kernel_gen.dialect.nn import (
     NnAddOp,
@@ -91,7 +90,7 @@ from kernel_gen.dialect.nn import (
 )
 from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
 from kernel_gen.dsl.mlir_gen import build_func_op
-from kernel_gen.operation.nn import img2col1d, img2col2d, reduce_min, softmax
+from kernel_gen.operation.nn import img2col1d, img2col2d, reduce_min
 from kernel_gen.passes.buffer_results_to_out_params import (
     BufferResultsToOutParamsError,
     BufferResultsToOutParamsPass,
@@ -745,12 +744,12 @@ def test_lower_reduce_max_to_kernel() -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
-# 测试目的: 验证 Lowering 对 nn.softmax 的改写行为。
-# 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_softmax_to_kernel
+# 测试目的: 验证 direct `nn.softmax` 会被拒绝，并提示需要先做分解。
+# 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_softmax_requires_decompass
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
-def test_lower_softmax_to_kernel() -> None:
+def test_lower_softmax_requires_decompass() -> None:
     block = Block()
     operand_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
     res_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
@@ -765,12 +764,8 @@ def test_lower_softmax_to_kernel() -> None:
     block.add_op(func.ReturnOp(softmax_op.results[0]))
     module = ModuleOp([func.FuncOp("softmax", FunctionType.from_lists([operand_type], [res_type]), Region(block))])
 
-    NnLoweringPass().run(module)
-
-    func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
-    block = func_op.body.block
-    _assert_single_alloc(block)
-    _assert_single_op(block, KernelSoftmaxOp)
+    with pytest.raises(NnLoweringError, match="nn.softmax must be decomposed before lower-nn"):
+        NnLoweringPass().run(module)
 
 
 # TC-PASS-NNL-012
@@ -1872,12 +1867,12 @@ def test_reduce_keepdim_validation() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-23 04:07:56 +0800
 # 最近一次运行成功时间: 2026-03-23 04:07:56 +0800
-# 测试目的: 验证 Lowering 对 softmax axis 校验。
-# 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_softmax_axis_validation
+# 测试目的: 验证 direct `nn.softmax` 即使 axis 非法，也会先按“需先分解”路径拒绝。
+# 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_softmax_requires_decompass_before_axis_validation
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
 # 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
-def test_softmax_axis_validation() -> None:
+def test_softmax_requires_decompass_before_axis_validation() -> None:
     block = Block()
     operand_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
     res_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
@@ -1892,5 +1887,5 @@ def test_softmax_axis_validation() -> None:
     block.add_op(func.ReturnOp(softmax_op.results[0]))
     module = ModuleOp([func.FuncOp("softmax", FunctionType.from_lists([operand_type], [res_type]), Region(block))])
 
-    with pytest.raises(NnLoweringError, match="softmax axis out of range"):
+    with pytest.raises(NnLoweringError, match="nn.softmax must be decomposed before lower-nn"):
         NnLoweringPass().run(module)

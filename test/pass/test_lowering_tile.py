@@ -39,7 +39,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaViewOp
-from kernel_gen.dialect.kernel import KernelAddOp, KernelBinaryElewiseOp
+from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolForOp, SymbolGetDimOp
 from kernel_gen.passes.lowering.tile import TilePass, TilePassError
@@ -76,7 +76,7 @@ def _build_elementwise_module(shape_names: list[str]) -> ModuleOp:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 生成 `kernel.add` 的单函数 IR。
+    - 生成 `kernel.binary_elewise(kind="add")` 的单函数 IR。
 
     使用示例:
     - module = _build_elementwise_module(["M", "N"])
@@ -90,7 +90,12 @@ def _build_elementwise_module(shape_names: list[str]) -> ModuleOp:
     mem_type = _make_memory_type(shape_names)
     block = Block(arg_types=[mem_type, mem_type, mem_type])
     space = NnMemorySpaceAttr.from_name("global")
-    block.add_ops([KernelAddOp(block.args[2], block.args[0], block.args[1], space), func.ReturnOp()])
+    block.add_ops(
+        [
+            KernelBinaryElewiseOp(block.args[2], block.args[0], block.args[1], kind="add", space=space),
+            func.ReturnOp(),
+        ]
+    )
     func_op = func.FuncOp(
         "tile_elementwise",
         FunctionType.from_lists([mem_type, mem_type, mem_type], []),
@@ -416,7 +421,7 @@ def test_tile_analysis_only_true() -> None:
     ops = _collect_ops(module)
     loop_ops = [op for op in ops if isinstance(op, SymbolForOp)]
     view_ops = [op for op in ops if isinstance(op, DmaViewOp)]
-    kernel_ops = [op for op in ops if isinstance(op, KernelAddOp)]
+    kernel_ops = [op for op in ops if isinstance(op, KernelBinaryElewiseOp)]
     analysis_ops = [op for op in kernel_ops if "tile.analysis" in op.attributes]
     internal_ops = [op for op in ops if op.name in {"tile.symbol_literal", "tile.step_value"}]
     expected_roles = ArrayAttr(
@@ -687,7 +692,14 @@ def test_tile_rejects_dead_carry_memory() -> None:
     shape_ops = [SymbolGetDimOp(block.args[0], axis) for axis in range(2)]
     alloc = DmaAllocOp([op.result for op in shape_ops], mem_type)
     space = NnMemorySpaceAttr.from_name("global")
-    block.add_ops([*shape_ops, alloc, KernelAddOp(alloc.result, block.args[0], block.args[1], space), func.ReturnOp()])
+    block.add_ops(
+        [
+            *shape_ops,
+            alloc,
+            KernelBinaryElewiseOp(alloc.result, block.args[0], block.args[1], kind="add", space=space),
+            func.ReturnOp(),
+        ]
+    )
     func_op = func.FuncOp(
         "tile_dead_carry",
         FunctionType.from_lists([mem_type, mem_type], []),
@@ -715,7 +727,12 @@ def test_tile_rejects_rank_mismatch() -> None:
     out_type = _make_memory_type(["M", "N"])
     block = Block(arg_types=[lhs_type, rhs_type, out_type])
     space = NnMemorySpaceAttr.from_name("global")
-    block.add_ops([KernelAddOp(block.args[2], block.args[0], block.args[1], space), func.ReturnOp()])
+    block.add_ops(
+        [
+            KernelBinaryElewiseOp(block.args[2], block.args[0], block.args[1], kind="add", space=space),
+            func.ReturnOp(),
+        ]
+    )
     func_op = func.FuncOp(
         "tile_rank_mismatch",
         FunctionType.from_lists([lhs_type, rhs_type, out_type], []),

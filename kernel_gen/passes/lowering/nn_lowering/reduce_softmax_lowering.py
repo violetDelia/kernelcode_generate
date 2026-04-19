@@ -1,12 +1,12 @@
-"""reduce/softmax family lowering 实现。
+"""reduce family lowering 实现。
 
 创建者: 小李飞刀
 最后一次更改: 小李飞刀
 
 功能说明:
-- 提供 nn.exp / nn.reduce_* / nn.softmax 的 lowering 入口。
+- 提供 nn.exp / nn.reduce_* 的 lowering 入口。
 - 统一 reduce 族 op 到 kernel.reduce(kind=...)。
-- softmax 保持 axis 校验并 lower 为 kernel.softmax。
+- `nn.softmax` 不在本层直接 lowering，需先由上游完成分解。
 
 使用示例:
 - from kernel_gen.passes.lowering.nn_lowering.reduce_softmax_lowering import lower_reduce_softmax_family
@@ -14,7 +14,7 @@
 
 关联文件:
 - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-- test: test/pass/nn_lowering/softmax.py
+- test: test/pass/nn_lowering/reduce_sum.py
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
 """
 
@@ -24,7 +24,7 @@ from xdsl.dialects.builtin import ArrayAttr, IntAttr, IntegerAttr, StringAttr
 from xdsl.ir import Attribute, Block, Operation, SSAValue
 
 from kernel_gen.dialect.dma import DmaAllocOp
-from kernel_gen.dialect.kernel import KernelExpOp, KernelReduceOp, KernelSoftmaxOp
+from kernel_gen.dialect.kernel import KernelExpOp, KernelReduceOp
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolGetDimOp
 from .nn_lowering import (
@@ -122,32 +122,6 @@ def _ensure_reduce_keepdim(op_name: str, keepdim_attr: Attribute) -> bool:
     if keepdim in (0, 1, -1):
         return bool(keepdim)
     raise NnLoweringError("keepdim must be 0 or 1")
-
-
-def _ensure_softmax_axis(op: Operation) -> int:
-    """校验 softmax axis。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 从 op.attributes 解析 axis，并校验范围。
-
-    使用示例:
-    - axis = _ensure_softmax_axis(op)
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-    - test: test/pass/nn_lowering/softmax.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
-    """
-
-    axis = _ensure_int_attr(op, "axis")
-    result_type = _ensure_single_result(op)
-    rank = len(result_type.shape.data)
-    if axis < 0 or axis >= rank:
-        raise NnLoweringError("softmax axis out of range")
-    return axis
 
 
 def _build_alloc_dynamic_shape_from_operand(
@@ -336,53 +310,14 @@ def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:
     block.erase_op(op)
 
 
-def _lower_softmax(block: Block, op: Operation) -> None:
-    """lower nn.softmax。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 校验 axis。
-    - 先创建 dma.alloc，再调用 kernel.softmax。
-
-    使用示例:
-    - _lower_softmax(block, op)
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-    - test: test/pass/nn_lowering/softmax.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
-    """
-
-    space = _ensure_space_attr(op)
-    result_type = _ensure_single_result(op)
-    _ensure_operand_count(op, 1)
-    axis = _ensure_softmax_axis(op)
-    operand = op.operands[0]
-    if not isinstance(operand.type, NnMemoryType):
-        raise NnLoweringError("nn.softmax operand must be nn.memory")
-    if operand.type.shape != result_type.shape or operand.type.stride != result_type.stride:
-        raise NnLoweringError("nn.softmax result shape must match operand")
-    axis_map = list(range(len(result_type.shape.data)))
-    dynamic_shape = _build_alloc_dynamic_shape_from_operand(block, op, operand, result_type, axis_map)
-    alloc = DmaAllocOp(dynamic_shape, result_type)
-    block.insert_op_before(alloc, op)
-    result = alloc.results[0]
-    lowered = KernelSoftmaxOp(result, operand, axis, space)
-    block.insert_op_before(lowered, op)
-    op.results[0].replace_by(result)
-    block.erase_op(op)
-
-
 def lower_reduce_softmax_family(block: Block, op: Operation) -> bool:
-    """处理 reduce/softmax family 的 lowering。
+    """处理 reduce family 的 lowering。
 
     创建者: 小李飞刀
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 识别 nn.exp / nn.reduce_* / nn.softmax。
+    - 识别 nn.exp / nn.reduce_*。
     - 对匹配 op 执行 lowering 并返回 True。
 
     使用示例:
@@ -390,7 +325,7 @@ def lower_reduce_softmax_family(block: Block, op: Operation) -> bool:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-    - test: test/pass/nn_lowering/softmax.py
+    - test: test/pass/nn_lowering/reduce_sum.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
     """
 
@@ -405,9 +340,6 @@ def lower_reduce_softmax_family(block: Block, op: Operation) -> bool:
         return True
     if op.name == "nn.reduce_max":
         _lower_reduce(block, op, kind="max")
-        return True
-    if op.name == "nn.softmax":
-        _lower_softmax(block, op)
         return True
     return False
 

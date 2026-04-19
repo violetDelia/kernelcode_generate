@@ -49,21 +49,13 @@ from kernel_gen.dialect.kernel import (
     _verify_element_type_match,
     _verify_memory_type,
     _verify_same_layout,
-    KernelAddOp,
-    KernelCastOp,
-    KernelDivOp,
-    KernelEqOp,
+    KernelBinaryElewiseOp,
     KernelExpOp,
-    KernelGtOp,
     KernelImg2col1dOp,
     KernelImg2col2dOp,
-    KernelLtOp,
     KernelMatmulOp,
-    KernelMulOp,
     KernelReduceMinOp,
-    KernelSoftmaxOp,
     KernelSelectOp,
-    KernelSubOp,
 )
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 
@@ -211,17 +203,17 @@ def test_kernel_memory_type_rank_mismatch() -> None:
 # 最后一次更改: 咯咯咯
 # 最近一次运行测试时间: 2026-03-22 13:05:49 +0800
 # 最近一次运行成功时间: 2026-03-22 13:05:49 +0800
-# 功能说明: 验证 kernel.add 正常路径可通过。
-# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_add_success
+# 功能说明: 验证 kernel.binary_elewise(kind="add") 正常路径可通过。
+# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_binary_elewise_add_success
 # 对应功能实现文件路径: kernel_gen/dialect/kernel.py
 # 对应 spec 文件路径: spec/dialect/kernel.md
 # 对应测试文件路径: test/dialect/test_kernel_dialect.py
-def test_kernel_add_success() -> None:
+def test_kernel_binary_elewise_add_success() -> None:
     memory_type = _make_memory_type()
     lhs = _make_value(memory_type)
     rhs = _make_value(memory_type)
     out = _make_value(memory_type)
-    op = KernelAddOp(out, lhs, rhs, _make_space("global"))
+    op = KernelBinaryElewiseOp(out, lhs, rhs, kind="add", space=_make_space("global"))
     op.verify()
 
 
@@ -230,45 +222,75 @@ def test_kernel_add_success() -> None:
 # 最后一次更改: 咯咯咯
 # 最近一次运行测试时间: 2026-03-22 13:05:49 +0800
 # 最近一次运行成功时间: 2026-03-22 13:05:49 +0800
-# 功能说明: 验证 kernel.add shape 不一致报错。
-# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_add_shape_mismatch
+# 功能说明: 验证 kernel.binary_elewise(kind="add") 的 layout 或 element_type 不一致时报错。
+# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_binary_elewise_add_layout_mismatch
 # 对应功能实现文件路径: kernel_gen/dialect/kernel.py
 # 对应 spec 文件路径: spec/dialect/kernel.md
 # 对应测试文件路径: test/dialect/test_kernel_dialect.py
-def test_kernel_add_shape_mismatch() -> None:
+def test_kernel_binary_elewise_add_layout_mismatch() -> None:
     lhs_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(4)]))
     rhs_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(5)]))
     out_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(4)]))
-    op = KernelAddOp(_make_value(out_type), _make_value(lhs_type), _make_value(rhs_type), _make_space("global"))
+    op = KernelBinaryElewiseOp(
+        _make_value(out_type),
+        _make_value(lhs_type),
+        _make_value(rhs_type),
+        kind="add",
+        space=_make_space("global"),
+    )
     with pytest.raises(VerifyException, match="shape must match"):
         op.verify()
 
     lhs_type = _make_memory_type(stride=ArrayAttr([IntAttr(4), IntAttr(1)]))
     rhs_type = _make_memory_type(stride=ArrayAttr([IntAttr(5), IntAttr(1)]))
     out_type = _make_memory_type(stride=ArrayAttr([IntAttr(4), IntAttr(1)]))
-    op = KernelAddOp(_make_value(out_type), _make_value(lhs_type), _make_value(rhs_type), _make_space("global"))
+    op = KernelBinaryElewiseOp(
+        _make_value(out_type),
+        _make_value(lhs_type),
+        _make_value(rhs_type),
+        kind="add",
+        space=_make_space("global"),
+    )
     with pytest.raises(VerifyException, match="stride must match"):
         op.verify()
 
     lhs_type = _make_memory_type(space="global")
     rhs_type = _make_memory_type(space="local")
     out_type = _make_memory_type(space="global")
-    op = KernelAddOp(_make_value(out_type), _make_value(lhs_type), _make_value(rhs_type), _make_space("global"))
+    op = KernelBinaryElewiseOp(
+        _make_value(out_type),
+        _make_value(lhs_type),
+        _make_value(rhs_type),
+        kind="add",
+        space=_make_space("global"),
+    )
     with pytest.raises(VerifyException, match="same space"):
         op.verify()
 
     lhs_type = _make_memory_type(space="global")
     rhs_type = _make_memory_type(space="global")
     out_type = _make_memory_type(space="global")
-    op = KernelAddOp(_make_value(out_type), _make_value(lhs_type), _make_value(rhs_type), _make_space("local"))
+    op = KernelBinaryElewiseOp(
+        _make_value(out_type),
+        _make_value(lhs_type),
+        _make_value(rhs_type),
+        kind="add",
+        space=_make_space("local"),
+    )
     with pytest.raises(VerifyException, match="attribute space"):
         op.verify()
 
     lhs_type = _make_memory_type(element_type=i32)
     rhs_type = _make_memory_type(element_type=i32)
     out_type = _make_memory_type(element_type=Float32Type())
-    op = KernelAddOp(_make_value(out_type), _make_value(lhs_type), _make_value(rhs_type), _make_space("global"))
-    with pytest.raises(VerifyException, match="kernel arithmetic element_type must match"):
+    op = KernelBinaryElewiseOp(
+        _make_value(out_type),
+        _make_value(lhs_type),
+        _make_value(rhs_type),
+        kind="add",
+        space=_make_space("global"),
+    )
+    with pytest.raises(VerifyException, match="kernel.binary_elewise element_type must match"):
         op.verify()
 
     invalid_lhs = _TestOp(result_types=[i32]).results[0]
@@ -281,16 +303,22 @@ def test_kernel_add_shape_mismatch() -> None:
 # 最后一次更改: 咯咯咯
 # 最近一次运行测试时间: 2026-03-22 13:05:49 +0800
 # 最近一次运行成功时间: 2026-03-22 13:05:49 +0800
-# 功能说明: 验证 kernel.eq 输出类型为 i1。
-# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_eq_output_type
+# 功能说明: 验证 kernel.binary_elewise(kind="eq") 的输出类型为 i1。
+# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_binary_elewise_compare_output_type
 # 对应功能实现文件路径: kernel_gen/dialect/kernel.py
 # 对应 spec 文件路径: spec/dialect/kernel.md
 # 对应测试文件路径: test/dialect/test_kernel_dialect.py
-def test_kernel_eq_output_type() -> None:
+def test_kernel_binary_elewise_compare_output_type() -> None:
     lhs_type = _make_memory_type(element_type=i32)
     rhs_type = _make_memory_type(element_type=i32)
     out_type = _make_memory_type(element_type=i1)
-    op = KernelEqOp(_make_value(out_type), _make_value(lhs_type), _make_value(rhs_type), _make_space("global"))
+    op = KernelBinaryElewiseOp(
+        _make_value(out_type),
+        _make_value(lhs_type),
+        _make_value(rhs_type),
+        kind="eq",
+        space=_make_space("global"),
+    )
     op.verify()
 
 
@@ -299,26 +327,63 @@ def test_kernel_eq_output_type() -> None:
 # 最后一次更改: 咯咯咯
 # 最近一次运行测试时间: 2026-03-22 13:05:49 +0800
 # 最近一次运行成功时间: 2026-03-22 13:05:49 +0800
-# 功能说明: 验证 kernel.eq 输出类型非法报错。
-# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_eq_output_type_error
+# 功能说明: 验证 kernel.binary_elewise 比较类输出类型非法或 kind 非法时报错。
+# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_binary_elewise_compare_output_type_error
 # 对应功能实现文件路径: kernel_gen/dialect/kernel.py
 # 对应 spec 文件路径: spec/dialect/kernel.md
 # 对应测试文件路径: test/dialect/test_kernel_dialect.py
-def test_kernel_eq_output_type_error() -> None:
+def test_kernel_binary_elewise_compare_output_type_error() -> None:
     lhs_type = _make_memory_type(element_type=i32)
     rhs_type = _make_memory_type(element_type=i32)
     out_type = _make_memory_type(element_type=i32)
-    op = KernelEqOp(_make_value(out_type), _make_value(lhs_type), _make_value(rhs_type), _make_space("global"))
+    op = KernelBinaryElewiseOp(
+        _make_value(out_type),
+        _make_value(lhs_type),
+        _make_value(rhs_type),
+        kind="eq",
+        space=_make_space("global"),
+    )
     with pytest.raises(VerifyException, match="compare output element_type must be i1"):
         op.verify()
 
-    lt_op = KernelLtOp(_make_value(out_type), _make_value(lhs_type), _make_value(rhs_type), _make_space("global"))
+    lt_op = KernelBinaryElewiseOp(
+        _make_value(out_type),
+        _make_value(lhs_type),
+        _make_value(rhs_type),
+        kind="lt",
+        space=_make_space("global"),
+    )
     with pytest.raises(VerifyException, match="compare output element_type must be i1"):
         lt_op.verify()
 
-    gt_op = KernelGtOp(_make_value(out_type), _make_value(lhs_type), _make_value(rhs_type), _make_space("global"))
+    gt_op = KernelBinaryElewiseOp(
+        _make_value(out_type),
+        _make_value(lhs_type),
+        _make_value(rhs_type),
+        kind="gt",
+        space=_make_space("global"),
+    )
     with pytest.raises(VerifyException, match="compare output element_type must be i1"):
         gt_op.verify()
+
+    bool_rhs_op = KernelBinaryElewiseOp(
+        _make_value(out_type),
+        _make_value(lhs_type),
+        _make_value(_make_memory_type(element_type=i1)),
+        kind="eq",
+        space=_make_space("global"),
+    )
+    with pytest.raises(VerifyException, match="compare output element_type must be i1"):
+        bool_rhs_op.verify()
+
+    with pytest.raises(VerifyException, match="kind must be one of"):
+        KernelBinaryElewiseOp(
+            _make_value(_make_memory_type()),
+            _make_value(_make_memory_type()),
+            _make_value(_make_memory_type()),
+            kind="pow",
+            space=_make_space("global"),
+        )
 
 
 # TC-KRN-008
@@ -357,39 +422,6 @@ def test_kernel_select_cond_type_error() -> None:
     op.verify()
 
 
-# TC-KRN-009
-# 创建者: 小李飞刀
-# 最后一次更改: 咯咯咯
-# 最近一次运行测试时间: 2026-03-22 13:05:49 +0800
-# 最近一次运行成功时间: 2026-03-22 13:05:49 +0800
-# 功能说明: 验证 kernel.cast 类型非法报错。
-# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_cast_type_error
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
-# 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel_dialect.py
-def test_kernel_cast_type_error() -> None:
-    input_type = _make_memory_type(element_type=i1)
-    out_type = _make_memory_type(element_type=i32)
-    op = KernelCastOp(_make_value(input_type), _make_value(out_type), _make_space("global"))
-    with pytest.raises(VerifyException, match="kernel.cast element_type"):
-        op.verify()
-
-
-# TC-KRN-024
-# 创建者: jcc你莫辜负
-# 最后一次更改: jcc你莫辜负
-# 功能说明: 验证 kernel.cast 支持 bfloat16 类型。
-# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_cast_bfloat16_ok
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
-# 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel_dialect.py
-def test_kernel_cast_bfloat16_ok() -> None:
-    input_type = _make_memory_type(element_type=BFloat16Type())
-    out_type = _make_memory_type(element_type=Float16Type())
-    op = KernelCastOp(_make_value(input_type), _make_value(out_type), _make_space("global"))
-    op.verify()
-
-
 # TC-KRN-010
 # 创建者: 小李飞刀
 # 最后一次更改: 咯咯咯
@@ -405,13 +437,14 @@ def test_kernel_ops_no_result() -> None:
     lhs = _make_value(memory_type)
     rhs = _make_value(memory_type)
     out = _make_value(memory_type)
-    add_op = KernelAddOp(out, lhs, rhs, _make_space("global"))
-    sub_op = KernelSubOp(out, lhs, rhs, _make_space("global"))
-    mul_op = KernelMulOp(out, lhs, rhs, _make_space("global"))
-    div_op = KernelDivOp(out, lhs, rhs, _make_space("global"))
-    eq_op = KernelEqOp(_make_value(_make_memory_type(element_type=i1)), lhs, rhs, _make_space("global"))
-    gt_op = KernelGtOp(_make_value(_make_memory_type(element_type=i1)), lhs, rhs, _make_space("global"))
-    lt_op = KernelLtOp(_make_value(_make_memory_type(element_type=i1)), lhs, rhs, _make_space("global"))
+    add_op = KernelBinaryElewiseOp(out, lhs, rhs, kind="add", space=_make_space("global"))
+    eq_op = KernelBinaryElewiseOp(
+        _make_value(_make_memory_type(element_type=i1)),
+        lhs,
+        rhs,
+        kind="eq",
+        space=_make_space("global"),
+    )
     select_op = KernelSelectOp(
         out,
         _make_value(_make_memory_type(element_type=i1)),
@@ -419,15 +452,9 @@ def test_kernel_ops_no_result() -> None:
         rhs,
         _make_space("global"),
     )
-    cast_input = _make_value(_make_memory_type(element_type=Float32Type()))
-    cast_output = _make_value(_make_memory_type(element_type=Float16Type()))
-    cast_op = KernelCastOp(cast_input, cast_output, _make_space("global"))
     exp_input = _make_value(_make_memory_type(element_type=Float32Type()))
     exp_output = _make_value(_make_memory_type(element_type=Float32Type()))
     exp_op = KernelExpOp(exp_output, exp_input, _make_space("global"))
-    softmax_input = _make_value(_make_memory_type(element_type=Float32Type()))
-    softmax_output = _make_value(_make_memory_type(element_type=Float32Type()))
-    softmax_op = KernelSoftmaxOp(softmax_output, softmax_input, axis=1, space=_make_space("global"))
     img2col_input_type = _make_memory_type(
         shape=ArrayAttr([IntAttr(1), IntAttr(3), IntAttr(5), IntAttr(5)]),
         stride=ArrayAttr([IntAttr(75), IntAttr(25), IntAttr(5), IntAttr(1)]),
@@ -475,16 +502,9 @@ def test_kernel_ops_no_result() -> None:
     )
     for op in (
         add_op,
-        sub_op,
-        mul_op,
-        div_op,
         eq_op,
-        gt_op,
-        lt_op,
         select_op,
-        cast_op,
         exp_op,
-        softmax_op,
         img2col1d_op,
         img2col_op,
     ):
@@ -1011,59 +1031,6 @@ def test_kernel_img2col_output_extent_contract() -> None:
             pr=_const_i32(0),
             space=_make_space("global"),
         ).verify()
-
-
-# TC-KRN-016
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-08 21:12:06 +0800
-# 最近一次运行成功时间: 2026-04-08 21:12:06 +0800
-# 功能说明: 验证 kernel.softmax 正常路径可通过。
-# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_softmax_success
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
-# 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel_dialect.py
-def test_kernel_softmax_success() -> None:
-    input_type = _make_memory_type(element_type=Float32Type())
-    out_type = _make_memory_type(element_type=Float32Type())
-    op = KernelSoftmaxOp(_make_value(out_type), _make_value(input_type), axis=1, space=_make_space("global"))
-    op.verify()
-
-
-# TC-KRN-020
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-08 21:12:06 +0800
-# 最近一次运行成功时间: 2026-04-08 21:12:06 +0800
-# 功能说明: 验证 kernel.softmax axis 越界会报错。
-# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_softmax_axis_error
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
-# 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel_dialect.py
-def test_kernel_softmax_axis_error() -> None:
-    input_type = _make_memory_type(element_type=Float32Type())
-    out_type = _make_memory_type(element_type=Float32Type())
-    op = KernelSoftmaxOp(_make_value(out_type), _make_value(input_type), axis=2, space=_make_space("global"))
-    with pytest.raises(VerifyException, match="axis must be within"):
-        op.verify()
-
-
-# TC-KRN-021
-# 创建者: 金铲铲大作战
-# 最后一次更改: 金铲铲大作战
-# 最近一次运行测试时间: 2026-04-08 21:12:06 +0800
-# 最近一次运行成功时间: 2026-04-08 21:12:06 +0800
-# 功能说明: 验证 kernel.softmax 拒绝非浮点 element_type。
-# 使用示例: pytest -q test/dialect/test_kernel_dialect.py -k test_kernel_softmax_requires_float
-# 对应功能实现文件路径: kernel_gen/dialect/kernel.py
-# 对应 spec 文件路径: spec/dialect/kernel.md
-# 对应测试文件路径: test/dialect/test_kernel_dialect.py
-def test_kernel_softmax_requires_float() -> None:
-    input_type = _make_memory_type(element_type=i32)
-    out_type = _make_memory_type(element_type=i32)
-    op = KernelSoftmaxOp(_make_value(out_type), _make_value(input_type), axis=1, space=_make_space("global"))
-    with pytest.raises(VerifyException, match="kernel.softmax element_type must be float"):
-        op.verify()
 
 
 # TC-KRN-023

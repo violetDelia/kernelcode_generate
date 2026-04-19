@@ -32,6 +32,7 @@ from xdsl.dialects.builtin import (
     ModuleOp,
     StringAttr,
     UnregisteredOp,
+    i1,
     i32,
 )
 from xdsl.ir import Attribute, Block, Operation, SSAValue
@@ -44,6 +45,7 @@ from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolDimType, SymbolForOp, SymbolGetDimOp, SymbolIterType, SymbolValueType
 from kernel_gen.dialect.tuner import TunerParamOp
 from kernel_gen.passes.pass_manager import Pass
+from kernel_gen.symbol_variable.type import NumericType
 
 
 class TilePassError(ValueError):
@@ -323,6 +325,66 @@ def _collect_kernel_ops(block: Block) -> list[Operation]:
     """
 
     return [op for op in block.ops if op.name.startswith("kernel.")]
+
+
+def _is_bool_memory(value: SSAValue) -> bool:
+    """判断 SSAValue 是否为布尔 memory。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 兼容 builtin `i1` 与 `NumericType.Bool` 两种布尔表达。
+
+    使用示例:
+    - if _is_bool_memory(value): ...
+
+    关联文件:
+    - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
+    - test: [test/pass/test_lowering_tile.py](test/pass/test_lowering_tile.py)
+    - 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
+    """
+
+    if not isinstance(value.type, NnMemoryType):
+        return False
+    return value.type.element_type == i1 or value.type.element_type == NumericType.Bool
+
+
+def _normalize_binary_elewise_compare_compat(block: Block) -> None:
+    """把旧 compare 文本顺序重排为当前 `out-first` 规范。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 只处理 compare kind 且第三个 operand 明确是布尔输出的旧文本。
+    - 保持当前公开 API 与专属测试使用的 `out, lhs, rhs` 规范不变。
+
+    使用示例:
+    - _normalize_binary_elewise_compare_compat(block)
+
+    关联文件:
+    - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
+    - test: [test/pass/test_lowering_tile.py](test/pass/test_lowering_tile.py)
+    - 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
+    """
+
+    compare_kinds = {"eq", "ne", "lt", "le", "gt", "ge"}
+    for op in list(block.ops):
+        if not isinstance(op, KernelBinaryElewiseOp):
+            continue
+        kind = getattr(op.kind, "data", None)
+        if kind not in compare_kinds:
+            continue
+        if _is_bool_memory(op.out):
+            continue
+        if not _is_bool_memory(op.rhs):
+            continue
+        reordered = KernelBinaryElewiseOp(op.rhs, op.out, op.lhs, kind=op.kind, space=op.space)
+        if "tile.analysis" in op.attributes:
+            reordered.attributes["tile.analysis"] = op.attributes["tile.analysis"]
+        block.insert_op_before(reordered, op)
+        block.erase_op(op)
 
 
 def _is_allowed_input_contract_op(op: Operation) -> bool:
@@ -2288,6 +2350,8 @@ def _rewrite_function(func_op: func.FuncOp, *, analysis_only: bool, tile_reduce:
     """
 
     block = _get_single_block(func_op)
+    if not analysis_only:
+        _normalize_binary_elewise_compare_compat(block)
     _validate_input_contract(func_op, block)
     _validate_intermediate_materialization(func_op, block)
 
@@ -2521,8 +2585,58 @@ class TilePass(Pass):
         return module
 
 
+class TileAnalysisPass(Pass):
+    """`tile-analysis` 兼容入口。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 为只读 expectation 保留旧 pass 名 `tile-analysis`。
+    - 真实执行固定转发到 analysis-only 的 `TilePass` 组合。
+
+    使用示例:
+    - module = TileAnalysisPass().run(module)
+
+    关联文件:
+    - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
+    - test: [test/pass/test_lowering_tile.py](test/pass/test_lowering_tile.py)
+    - 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
+    """
+
+    name = "tile-analysis"
+
+    def run(self: "TileAnalysisPass", module: ModuleOp) -> ModuleOp:
+        """执行 `tile-analysis` 兼容入口。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 固定使用 analysis-only 组合，避免旧 expectation 依赖新 option 文本。
+
+        使用示例:
+        - module = TileAnalysisPass().run(module)
+
+        关联文件:
+        - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
+        - test: [test/pass/test_lowering_tile.py](test/pass/test_lowering_tile.py)
+        - 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
+        """
+        if not isinstance(module, ModuleOp):
+            _raise_tile_error("TilePassRequiresLoweredKernelIR", "module must be builtin.module")
+        for op in module.ops:
+            if not isinstance(op, func.FuncOp):
+                continue
+            block = _get_single_block(op)
+            _validate_input_contract(op, block)
+            _annotate_tile_analysis(block)
+        return module
+
+
 __all__ = [
     "TilePass",
+    "TileAnalysisPass",
     "TilePassError",
     "TilePassOptionError",
     "_TileSymbolLiteralOp",

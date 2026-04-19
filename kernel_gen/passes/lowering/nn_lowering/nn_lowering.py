@@ -6,7 +6,7 @@
 功能说明:
 - 将 nn dialect 的逐元素 op lower 为 kernel dialect op。
 - 当结果无法复用已有输出时，为结果插入 dma.alloc。
-- `nn.softmax` lower 为 `kernel.softmax` 并保留 `axis`。
+- `nn.softmax` 不在本 pass 直接 lower，需先由上游完成分解。
 
 使用示例:
 - from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
@@ -44,7 +44,6 @@ from kernel_gen.dialect.kernel import (
     KernelImg2col2dOp,
     KernelMatmulOp,
     KernelReduceOp,
-    KernelSoftmaxOp,
 )
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
@@ -361,32 +360,6 @@ def _ensure_reduce_keepdim(op_name: str, keepdim_attr: Attribute) -> bool:
     if keepdim not in (0, 1):
         raise NnLoweringError("keepdim must be 0 or 1")
     return bool(keepdim)
-
-
-def _ensure_softmax_axis(op: Operation) -> int:
-    """校验 softmax axis。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 从 op.attributes 解析 axis，并校验范围。
-
-    使用示例:
-    - axis = _ensure_softmax_axis(op)
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-    """
-
-    axis = _ensure_int_attr(op, "axis")
-    result_type = _ensure_single_result(op)
-    rank = len(result_type.shape.data)
-    if axis < 0 or axis >= rank:
-        raise NnLoweringError("softmax axis out of range")
-    return axis
 
 
 def _normalize_shape_dims(shape: Iterable[Attribute]) -> list[int | str]:
@@ -747,51 +720,6 @@ def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:
     block.erase_op(op)
 
 
-def _lower_softmax(block: Block, op: Operation) -> None:
-    """lower nn.softmax。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 朽木露琪亚
-
-    功能说明:
-    - 校验 axis。
-    - 先创建 dma.alloc，再调用 kernel.softmax。
-
-    使用示例:
-    - _lower_softmax(block, op)
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-    """
-
-    space = _ensure_space_attr(op)
-    result_type = _ensure_single_result(op)
-    _ensure_operand_count(op, 1)
-    operand = op.operands[0]
-    if not isinstance(operand.type, NnMemoryType):
-        raise NnLoweringError("nn.softmax operand must be nn.memory")
-    operand_shape = _ensure_unary_result_matches_operand(op, operand.type, result_type)
-    axis = _ensure_softmax_axis(op)
-    params: list[SSAValue] = []
-    if any(isinstance(dim, str) for dim in operand_shape):
-        params = _collect_unary_dynamic_shape(
-            block,
-            op,
-            operand,
-            operand_shape,
-            operand_shape,
-        )
-    alloc = DmaAllocOp(params, result_type)
-    block.insert_op_before(alloc, op)
-    result = alloc.results[0]
-    lowered = KernelSoftmaxOp(result, operand, axis, space)
-    block.insert_op_before(lowered, op)
-    op.results[0].replace_by(result)
-    block.erase_op(op)
-
-
 def _lower_matmul(block: Block, op: Operation) -> None:
     """lower nn.matmul。
 
@@ -985,8 +913,7 @@ def _lower_op(block: Block, op: Operation) -> None:
         _lower_reduce(block, op, kind="max")
         return
     if op.name == "nn.softmax":
-        _lower_softmax(block, op)
-        return
+        raise NnLoweringError("nn.softmax must be decomposed before lower-nn")
     from .matmul_img2col_lowering import lower_matmul_img2col_family
 
     if lower_matmul_img2col_family(block, op):

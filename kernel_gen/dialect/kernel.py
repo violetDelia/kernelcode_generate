@@ -4,12 +4,12 @@
 最后一次更改: jcc你莫辜负
 
 功能说明:
-- 定义 kernel dialect 的逐元素算术、比较、选择、指数、归约与类型转换 op。
+- 定义 kernel dialect 的逐元素算术、比较、选择、指数、归约与结构化 kernel op。
 - 复用 nn dialect 的 NnMemoryType 与 NnMemorySpaceAttr。
 - 所有结果通过 outs(...) 写回，不产生 SSA result。
 
 使用示例:
-- from kernel_gen.dialect.kernel import Kernel, KernelAddOp
+- from kernel_gen.dialect.kernel import Kernel, KernelBinaryElewiseOp
 
 关联文件:
 - spec: spec/dialect/kernel.md
@@ -46,6 +46,27 @@ _BINARY_ELEWISE_ARITH_KINDS = {"add", "sub", "mul", "div", "truediv"}
 _BINARY_ELEWISE_COMPARE_KINDS = {"eq", "ne", "lt", "le", "gt", "ge"}
 _BINARY_ELEWISE_KINDS = _BINARY_ELEWISE_ARITH_KINDS | _BINARY_ELEWISE_COMPARE_KINDS
 _REDUCE_KINDS = {"sum", "min", "max"}
+
+
+def _is_compare_output_element_type(value: Attribute) -> bool:
+    """判断 compare 输出元素类型是否可接受。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - compare 输出只接受 builtin `i1`。
+
+    使用示例:
+    - assert _is_compare_output_element_type(i1)
+
+    关联文件:
+    - spec: spec/dialect/kernel.md
+    - test: test/dialect/test_kernel_dialect.py
+    - 功能实现: kernel_gen/dialect/kernel.py
+    """
+
+    return value == i1
 
 
 def _normalize_kind_attr(
@@ -795,7 +816,7 @@ def _verify_reduce_result_shape(
 
 
 class _BaseKernelBinaryOp(IRDLOperation):
-    """kernel 二元 op 基类。"""
+    """内部兼容用的旧二元 op 基类。"""
 
     out = operand_def(NnMemoryType)
     lhs = operand_def(NnMemoryType)
@@ -903,7 +924,7 @@ class KernelBinaryElewiseOp(IRDLOperation):
             self.kind, op_name=self.name, field_name="kind", allowed=_BINARY_ELEWISE_KINDS
         ).data
         if kind_value in _BINARY_ELEWISE_COMPARE_KINDS:
-            if out_type.element_type != i1:
+            if not _is_compare_output_element_type(out_type.element_type):
                 raise VerifyException(
                     _ERROR_TEMPLATE.format(
                         scene=_ERROR_SCENE,
@@ -2071,23 +2092,11 @@ Kernel = Dialect(
     "kernel",
     [
         KernelBinaryElewiseOp,
-        KernelAddOp,
-        KernelSubOp,
-        KernelMulOp,
-        KernelDivOp,
-        KernelEqOp,
-        KernelNeOp,
-        KernelLtOp,
-        KernelLeOp,
-        KernelGtOp,
-        KernelGeOp,
         KernelMatmulOp,
         KernelImg2col1dOp,
         KernelImg2col2dOp,
         KernelSelectOp,
-        KernelCastOp,
         KernelExpOp,
-        KernelSoftmaxOp,
         KernelReduceOp,
         KernelReduceMinOp,
     ],
@@ -2097,23 +2106,11 @@ Kernel = Dialect(
 __all__ = [
     "Kernel",
     "KernelBinaryElewiseOp",
-    "KernelAddOp",
-    "KernelSubOp",
-    "KernelMulOp",
-    "KernelDivOp",
-    "KernelEqOp",
-    "KernelNeOp",
-    "KernelLtOp",
-    "KernelLeOp",
-    "KernelGtOp",
-    "KernelGeOp",
     "KernelMatmulOp",
     "KernelImg2col1dOp",
     "KernelImg2col2dOp",
     "KernelSelectOp",
-    "KernelCastOp",
     "KernelExpOp",
-    "KernelSoftmaxOp",
     "KernelReduceOp",
     "KernelReduceMinOp",
 ]
