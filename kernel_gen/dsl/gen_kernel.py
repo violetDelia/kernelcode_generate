@@ -1080,7 +1080,7 @@ class _KernelEmitter:
             raise _error(self.ctx, func_name, "npu_demo add result space must stay on tlm1/tlm2/tlm3")
         if not isinstance(add_result_type, NnMemoryType) or add_result_type.space.space.data != tlm_space:
             raise _error(self.ctx, func_name, "npu_demo add result type must stay on tlm1/tlm2/tlm3")
-        if deslice_op.source is not add_op.result:
+        if deslice_op.source is not add_op.result and deslice_op.target is not add_op.result:
             raise _error(self.ctx, func_name, "npu_demo deslice must consume add result directly")
         return barrier0, barrier1, tlm_space
 
@@ -1180,7 +1180,7 @@ class _KernelEmitter:
             f"{indent}add({lhs_name}_tsm, {rhs_name}_tsm, {out_name}_tlm);",
             self._format_npu_demo_barrier_stmt(barrier1, func_op.sym_name.data),
             "",
-            f"{indent}deslice({out_name}_tlm, {out_name}, tid * 16, 16, 1);",
+            f"{indent}deslice({out_name}, {out_name}_tlm, tid * 16, 16, 1);",
         ]
         body = "\n".join(lines)
         self.ctx.pop_indent()
@@ -1311,7 +1311,7 @@ class _KernelEmitter:
             "",
             f"{self.ctx.current_indent}slice(work_tile, src_view, 0, 16, 1);",
             f"{self.ctx.current_indent}add(work_tile, work_tile, out_tile);",
-            f"{self.ctx.current_indent}deslice(out_tile, out, tid * 16, 16, 1);",
+            f"{self.ctx.current_indent}deslice(out, out_tile, tid * 16, 16, 1);",
         ]
         return "\n".join(lines)
 

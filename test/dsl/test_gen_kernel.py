@@ -180,7 +180,7 @@ def _make_marked_kernel_split_module(*, axis: int = 1, tile: str = "TILE_M") -> 
     block.add_ops(
         [
             *alloc_setup[:2],
-            KernelAddOp(block.args[1], block.args[2], block.args[0], space),
+            KernelAddOp(block.args[0], block.args[1], block.args[2], space),
             func.ReturnOp(),
         ]
     )
@@ -1470,7 +1470,7 @@ def test_gen_kernel_emits_npu_demo_memory_pipeline() -> None:
     out_view_idx = source.index("auto out_tile = view(tsm, 0, 16, 1);")
     slice_idx = source.index("slice(work_tile, src_view, 0, 16, 1);")
     add_idx = source.index("add(work_tile, work_tile, out_tile);")
-    deslice_idx = source.index("deslice(out_tile, out, tid * 16, 16, 1);")
+    deslice_idx = source.index("deslice(out, out_tile, tid * 16, 16, 1);")
 
     assert tsm_idx < tlm_idx < src_view_idx < work_view_idx < out_view_idx < slice_idx < add_idx < deslice_idx
     assert ".view<" not in source
@@ -1562,7 +1562,7 @@ def test_gen_kernel_black_box_direct_return_nn_add_conv2d_img2col2d_tiled_and_np
     npu_source = gen_kernel(npu_func, _npu_ctx())
     assert "ctx.thread_id()" in npu_source
     assert "ctx.get_dynamic_memory<MemorySpace::TSM, float>()" in npu_source
-    assert "deslice(out_tile, out, tid * 16, 16, 1);" in npu_source
+    assert "deslice(out, out_tile, tid * 16, 16, 1);" in npu_source
 
 
 # GK-I2-001
@@ -1988,7 +1988,7 @@ def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body(tlm_space: st
     )
     assert f"Memory<MemorySpace::{space_enum}, float> tlm = ctx.get_dynamic_memory<MemorySpace::{space_enum}, float>();" in source
     assert f"auto out_tlm = view(tlm, tid * 16, 16, 1);" in source
-    assert source.index("slice(lhs_tsm, lhs_gm, 0, 16, 1);") < source.index("add(lhs_tsm, rhs_tsm, out_tlm);") < source.index("deslice(out_tlm, out, tid * 16, 16, 1);")
+    assert source.index("slice(lhs_tsm, lhs_gm, 0, 16, 1);") < source.index("add(lhs_tsm, rhs_tsm, out_tlm);") < source.index("deslice(out, out_tlm, tid * 16, 16, 1);")
     assert "arch.launch_kernel" not in source
     assert "ctx.sync_threads" not in source
 

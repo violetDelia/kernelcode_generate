@@ -528,12 +528,22 @@ def _is_unit_tile(memory_type: NnMemoryType) -> bool:
     return all(isinstance(dim, IntAttr) and dim.data == 1 for dim in memory_type.shape.data)
 
 
-def _emit_dma_load_expr(op: DmaLoadOp, ctx: EmitCContext) -> str:
-    result_type = op.result.type
-    if not isinstance(result_type, NnMemoryType) or not _is_unit_tile(result_type):
-        raise _emit_error(ctx, op.name, "only unit-tile dma.load is supported")
-    base = _memory_base_name(op.source, ctx)
-    return f"{base}{_format_indices(op.offsets, ctx)}"
+def _emit_dma_load_stmt(op: DmaLoadOp, ctx: EmitCContext) -> str:
+    """生成 `dma.load` 的显式 loop nest copy 片段。"""
+
+    if ctx.target != "cpu":
+        raise _emit_error(ctx, op.name, "dma ops are cpu-only")
+    target_expr = _memory_base_name(op.target, ctx)
+    source_expr = _memory_base_name(op.source, ctx)
+    return _emit_dma_copy_loop_nest(
+        source_expr=source_expr,
+        target_expr=target_expr,
+        offsets=op.offsets,
+        sizes=op.sizes,
+        strides=op.strides,
+        ctx=ctx,
+        target_has_offsets=False,
+    )
 
 
 def _emit_dma_store_stmt(op: DmaStoreOp, ctx: EmitCContext) -> str:
@@ -1110,7 +1120,7 @@ def _emit_npu_deslice_stmt(op: DmaDesliceOp, ctx: EmitCContext) -> str:
     最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 把一维 `dma.deslice` 发射为 `deslice(source, target, offset, size, stride);`。
+    - 把一维 `dma.deslice` 发射为 `deslice(target, source, offset, size, stride);`。
     - 结果值绑定到 target 名称，确保后续节点可稳定引用该 memory。
 
     使用示例:
@@ -1130,7 +1140,7 @@ def _emit_npu_deslice_stmt(op: DmaDesliceOp, ctx: EmitCContext) -> str:
         size_expr = emit_c_value(op.sizes[0], ctx)
         stride_expr = emit_c_value(op.strides[0], ctx)
         return (
-            f"{ctx.current_indent}deslice({source_expr}, {target_expr}, "
+            f"{ctx.current_indent}deslice({target_expr}, {source_expr}, "
             f"{offset_expr}, {size_expr}, {stride_expr});"
         )
     offset_lines, offset_vec = _emit_npu_vector_binding("deslice_offset", op.offsets, ctx)
@@ -1141,7 +1151,7 @@ def _emit_npu_deslice_stmt(op: DmaDesliceOp, ctx: EmitCContext) -> str:
             *offset_lines,
             *size_lines,
             *stride_lines,
-            f"{ctx.current_indent}deslice({source_expr}, {target_expr}, {offset_vec}, {size_vec}, {stride_vec});",
+            f"{ctx.current_indent}deslice({target_expr}, {source_expr}, {offset_vec}, {size_vec}, {stride_vec});",
         ]
     )
 
@@ -1295,8 +1305,6 @@ def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
         return f"({lhs} {_CMPI_SIGILS[predicate]} {rhs})"
     if isinstance(owner, SymbolToIntOp):
         return emit_c_value(owner.source, ctx)
-    if isinstance(owner, DmaLoadOp):
-        return _emit_dma_load_expr(owner, ctx)
     if isinstance(owner, SymbolGetDimOp):
         if not isinstance(owner.axis, IntAttr):
             raise _emit_error(ctx, owner.name, "axis must be IntAttr")
@@ -1308,8 +1316,6 @@ def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
 def _emit_assignment(op: Operation, ctx: EmitCContext) -> str:
     result = op.results[0]
     result_type = _type_to_c(result.type, ctx)
-    if isinstance(op, DmaLoadOp) and isinstance(result.type, NnMemoryType) and _is_unit_tile(result.type):
-        result_type = _type_to_c(result.type.element_type, ctx)
     expr = emit_c_value(result, ctx)
     result_name = ctx.allocate_name(result)
     return f"{ctx.current_indent}{result_type} {result_name} = {expr};"
@@ -1459,7 +1465,7 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
     if isinstance(op, DmaFillOp):
         return _emit_dma_fill_stmt(op, ctx)
     if isinstance(op, DmaLoadOp):
-        return _emit_assignment(op, ctx)
+        return _emit_dma_load_stmt(op, ctx)
     if isinstance(op, DmaStoreOp):
         return _emit_dma_store_stmt(op, ctx)
     if isinstance(op, DmaSliceOp):

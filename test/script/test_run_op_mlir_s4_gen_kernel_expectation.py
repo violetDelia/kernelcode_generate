@@ -1,19 +1,19 @@
-"""S2 expectation entry tests.
+"""S4 gen_kernel expectation entry tests.
 
-创建者: 小李飞刀
-最后一次更改: 小李飞刀
+创建者: 金铲铲大作战
+最后一次更改: 金铲铲大作战
 
 功能说明:
-- 覆盖 `script/run-op-mlir-s2-expectation.sh` 的命令骨架与调用环境。
-- 锁定当前 worktree 通过主仓 expectation 入口复测 S2 验收命令的可执行方式。
+- 覆盖 `script/run-op-mlir-s4-gen-kernel-expectation.sh` 的命令骨架与调用环境。
+- 锁定 S4 `gen_kernel` expectation 可在当前 worktree 内直接复现。
 
 关联文件:
-- 功能实现: script/run-op-mlir-s2-expectation.sh
+- 功能实现: script/run-op-mlir-s4-gen-kernel-expectation.sh
 - 计划书: ARCHITECTURE/plan/operation_mlir_gen_expectation_green_plan.md
-- 测试文件: test/script/test_run_op_mlir_s2_expectation.py
+- 测试文件: test/script/test_run_op_mlir_s4_gen_kernel_expectation.py
 
 使用示例:
-- pytest -q test/script/test_run_op_mlir_s2_expectation.py
+- pytest -q test/script/test_run_op_mlir_s4_gen_kernel_expectation.py
 """
 
 from __future__ import annotations
@@ -22,18 +22,12 @@ import os
 import subprocess
 from pathlib import Path
 
-import pytest
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SOURCE_SCRIPT = REPO_ROOT / "script/run-op-mlir-s2-expectation.sh"
-EXPECTATION_MODULE = "expectation.pass.lowing.nn_lowering.element_binary"
-
-pytestmark = pytest.mark.infra
+SOURCE_SCRIPT = REPO_ROOT / "script/run-op-mlir-s4-gen-kernel-expectation.sh"
+EXPECTATION_ENTRY = REPO_ROOT.parent / "expectation/dsl/gen_kernel/npu_demo_add_barrier"
 
 
 def _run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    """执行 S2 expectation 入口脚本。"""
-
     runtime_env = os.environ.copy()
     if env is not None:
         runtime_env.update(env)
@@ -48,22 +42,18 @@ def _run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.Com
 
 
 def test_print_command_uses_worktree_and_main_repo_paths() -> None:
-    """TC-S2-ENTRY-001: `--print-command` 输出应显式包含主仓与 worktree 路径。"""
-
     result = _run_script("--print-command")
 
-    expected_pythonpath = str(REPO_ROOT.parent)
+    expected_pythonpath = f"{REPO_ROOT}:{REPO_ROOT.parent}"
     expected = (
         f"cd {REPO_ROOT} && PYTHONDONTWRITEBYTECODE=1 "
-        f"PYTHONPATH={expected_pythonpath} python3 -m {EXPECTATION_MODULE}"
+        f"PYTHONPATH={expected_pythonpath} python3 {EXPECTATION_ENTRY}"
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == expected
 
 
-def test_script_runs_module_from_main_repo_with_prefixed_pythonpath(tmp_path: Path) -> None:
-    """TC-S2-ENTRY-002: 脚本执行时应从 worktree 启动，并通过 `PYTHONPATH` 暴露主仓 expectation。"""
-
+def test_script_runs_expectation_from_worktree(tmp_path: Path) -> None:
     state_file = tmp_path / "fake_python_state.txt"
     fake_python = tmp_path / "fake-python"
     fake_python.write_text(
@@ -89,16 +79,11 @@ def test_script_runs_module_from_main_repo_with_prefixed_pythonpath(tmp_path: Pa
     assert result.returncode == 0, result.stderr
     content = state_file.read_text(encoding="utf-8")
     assert f"cwd={REPO_ROOT}" in content
-    assert f"argv=-m {EXPECTATION_MODULE}" in content
+    assert f"argv={EXPECTATION_ENTRY}" in content
     assert "pythondontwritebytecode=1" in content
-    assert f"pythonpath={REPO_ROOT.parent}" in content
+    assert f"pythonpath={REPO_ROOT}:{REPO_ROOT.parent}" in content
 
 
-def test_script_runs_real_element_binary_expectation() -> None:
-    """TC-S2-ENTRY-003: 真实 expectation 应在 fresh process 下以当前 worktree 实现通过。"""
-
+def test_script_runs_real_gen_kernel_expectation() -> None:
     result = _run_script()
-
     assert result.returncode == 0, result.stderr
-    assert "[CASE-add-static-1]" in result.stdout
-    assert "[CASE-truediv-dynamic-3]" in result.stdout

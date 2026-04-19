@@ -28,8 +28,8 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dialect.dma import DmaAllocOp, DmaCopyOp, DmaFreeOp, DmaLoadOp, DmaStoreOp, DmaViewOp
-from kernel_gen.dsl.ast import ConstAST, DmaAllocAST, DmaCopyAST, DmaFreeAST, DmaViewAST, LoadAST, StoreAST, TensorAST
+from kernel_gen.dialect.dma import DmaAllocOp, DmaCastOp, DmaCopyOp, DmaFreeOp, DmaLoadOp, DmaStoreOp, DmaViewOp
+from kernel_gen.dsl.ast import ConstAST, DmaAllocAST, DmaCastAST, DmaCopyAST, DmaFreeAST, DmaViewAST, LoadAST, StoreAST, TensorAST
 from kernel_gen.dsl.mlir_gen.emit.core import _expr_key, _memory_to_nn_type
 from kernel_gen.dsl.mlir_gen.emit import EmitContext
 from kernel_gen.dsl.mlir_gen.emit.context import LoweringError
@@ -111,6 +111,9 @@ def test_emit_dma_call_lowers_copy() -> None:
     assert isinstance(result.owner, DmaAllocOp)
     assert any(isinstance(op, DmaCopyOp) for op in body_ops)
     assert result.type.space.space.data == "shared"
+    copy_ops = [op for op in body_ops if isinstance(op, DmaCopyOp)]
+    assert len(copy_ops) == 1
+    assert copy_ops[0].target is result
 
 
 # EMIT-CALL-DMA-003
@@ -193,10 +196,30 @@ def test_emit_dma_call_lowers_read_and_write() -> None:
     )
 
     body_ops = list(block.ops)
-    assert isinstance(load_result.owner, DmaLoadOp)
+    assert isinstance(load_result.owner, DmaAllocOp)
     assert isinstance(store_result, DmaStoreOp)
-    assert any(isinstance(op, DmaLoadOp) for op in body_ops)
+    load_ops = [op for op in body_ops if isinstance(op, DmaLoadOp)]
+    assert len(load_ops) == 1
+    assert load_ops[0].target is load_result
     assert any(isinstance(op, DmaStoreOp) for op in body_ops)
+
+
+def test_emit_dma_call_lowers_cast() -> None:
+    source = _memory_tensor("src", [2, 3], space=MemorySpace.GM)
+    block = Block(arg_types=[_memory_to_nn_type(source.memory)])
+    ctx = EmitContext(builder=block, symbols={"src": block.args[0]}, types={})
+    ctx._set_cache(_expr_key(source), block.args[0])
+    ctx.types[_expr_key(source)] = block.args[0].type
+
+    result = emit_dma_call(DmaCastAST(source=source, dtype=NumericType.Float16, memoryspace=MemorySpace.SM, location=None), ctx)
+
+    body_ops = list(block.ops)
+    assert isinstance(result.owner, DmaAllocOp)
+    cast_ops = [op for op in body_ops if isinstance(op, DmaCastOp)]
+    assert len(cast_ops) == 1
+    assert cast_ops[0].target is result
+    assert result.type.element_type != block.args[0].type.element_type
+    assert result.type.space.space.data == "shared"
 
 
 # EMIT-CALL-DMA-005

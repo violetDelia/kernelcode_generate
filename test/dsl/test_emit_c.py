@@ -350,17 +350,18 @@ def test_emit_c_op_lowers_memory_access() -> None:
     ctx.bind_name(block.args[1], "target")
     c0 = arith.ConstantOp(IntegerAttr(0, IndexType()))
     c1 = arith.ConstantOp(IntegerAttr(1, IndexType()))
+    load_target = DmaAllocOp([], tile_type)
+    ctx.bind_name(load_target.result, "tile")
     load = DmaLoadOp(
+        load_target.result,
         block.args[0],
         [c0.result, c1.result],
         [c1.result, c1.result],
         [c1.result, c1.result],
-        tile_type,
-        NnMemorySpaceAttr.from_name("global"),
     )
     load_stmt = emit_c_op(load, ctx)
     store = DmaStoreOp(
-        load.result,
+        load_target.result,
         block.args[1],
         [c0.result, c1.result],
         [c1.result, c1.result],
@@ -369,39 +370,31 @@ def test_emit_c_op_lowers_memory_access() -> None:
 
     store_stmt = emit_c_op(store, ctx)
 
-    assert load_stmt == "int32_t v0 = source[0][1];"
-    assert store_stmt == "target[0][1] = v0;"
+    assert "tile" in load_stmt
+    assert "_src_indices" in load_stmt
+    assert "_dst_indices" in load_stmt
+    assert "tile.at(" in load_stmt
+    assert "source.at(" in load_stmt
+    assert store_stmt == "target[0][1] = tile;"
 
     ctx_unbound = _ctx()
+    load_unbound_target = DmaAllocOp([], tile_type)
+    ctx_unbound.bind_name(load_unbound_target.result, "v0")
     load_unbound = DmaLoadOp(
+        load_unbound_target.result,
         block.args[0],
         [c0.result, c1.result],
         [c1.result, c1.result],
         [c1.result, c1.result],
-        tile_type,
-        NnMemorySpaceAttr.from_name("global"),
     )
     store_unbound = DmaStoreOp(
-        load_unbound.result,
+        load_unbound_target.result,
         block.args[1],
         [c0.result, c1.result],
         [c1.result, c1.result],
         [c1.result, c1.result],
     )
     assert emit_c_op(store_unbound, ctx_unbound) == "arg1[0][1] = v0;"
-
-    empty_type = _make_memory_type([], [])
-    bad_load = DmaLoadOp(
-        block.args[0],
-        [c0.result, c1.result],
-        [c1.result, c1.result],
-        [c1.result, c1.result],
-        empty_type,
-        NnMemorySpaceAttr.from_name("global"),
-    )
-    with pytest.raises(EmitCError) as exc_info:
-        emit_c_op(bad_load, _ctx())
-    assert "only unit-tile dma.load is supported" in str(exc_info.value)
 
     bad_store = DmaStoreOp(
         block.args[0],
@@ -415,13 +408,13 @@ def test_emit_c_op_lowers_memory_access() -> None:
     assert "only unit-tile dma.store source is supported" in str(exc_info.value)
 
     bad_source = arith.AddiOp(block.args[0], block.args[0])
+    bad_target = DmaAllocOp([], tile_type)
     bad_source_load = DmaLoadOp(
+        bad_target.result,
         bad_source.result,
         [c0.result, c1.result],
         [c1.result, c1.result],
         [c1.result, c1.result],
-        tile_type,
-        NnMemorySpaceAttr.from_name("global"),
     )
     with pytest.raises(EmitCError) as exc_info:
         emit_c_op(bad_source_load, _ctx())

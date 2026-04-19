@@ -3271,7 +3271,7 @@ def _parse_reduce_axis_expr(axis_expr: object | None, location: SourceLocation |
     raise _LoweringError("reduce axis must be int or list of int", location=location)
 
 
-def _parse_softmax_axis_expr(axis_expr: object | None, location: SourceLocation | None) -> int:
+def _parse_softmax_axis_expr(axis_expr: object | None, rank: int, location: SourceLocation | None) -> int:
     """解析 softmax axis 表达式为整数。
 
     创建者: 小李飞刀
@@ -3279,10 +3279,10 @@ def _parse_softmax_axis_expr(axis_expr: object | None, location: SourceLocation 
 
     功能说明:
     - 支持 int / ConstAST[int] 的 axis。
-    - 未提供 axis 时默认返回 -1。
+    - 未提供 axis 时默认使用末轴，并统一规整为非负轴。
 
     使用示例:
-    - _parse_softmax_axis_expr(ConstAST(1), location=None)
+    - _parse_softmax_axis_expr(ConstAST(1), rank=2, location=None)
 
     关联文件:
     - spec: [spec/dsl/emit_mlir.md](spec/dsl/emit_mlir.md)
@@ -3290,16 +3290,18 @@ def _parse_softmax_axis_expr(axis_expr: object | None, location: SourceLocation 
     - 功能实现: [kernel_gen/dsl/mlir_gen/emit/core.py](kernel_gen/dsl/mlir_gen/emit/core.py)
     """
     if axis_expr is None:
-        return -1
-    value: object
-    if isinstance(axis_expr, ConstAST):
-        value = axis_expr.value
-        location = axis_expr.location or location
+        value = -1
     else:
         value = axis_expr
+        if isinstance(axis_expr, ConstAST):
+            value = axis_expr.value
+            location = axis_expr.location or location
     if isinstance(value, bool) or not isinstance(value, int):
         raise _LoweringError("softmax axis must be int", location=location)
-    return value
+    normalized = value + rank if value < 0 else value
+    if normalized < 0 or normalized >= rank:
+        raise _LoweringError("softmax axis out of range", location=location)
+    return normalized
 
 
 def _parse_transpose_perm_expr(perm_expr: object | None, location: SourceLocation | None) -> list[int]:
@@ -4159,17 +4161,22 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
             ctx.builder.add_op(slice_op)
             ctx._set_cache(expr_key, alloc_op.result)
             return alloc_op.result
+        if any(isinstance(dim, StringAttr) for dim in result_type.shape.data):
+            alloc_shape = _build_index_operands_from_layout(result_type.shape, ctx, location=expr.location)
+        else:
+            alloc_shape = []
+        alloc_op = DmaAllocOp(alloc_shape, result_type)
+        ctx.builder.add_op(alloc_op)
         load_op = DmaLoadOp(
+            alloc_op.result,
             source,
             offsets,
             sizes,
             strides,
-            result_type,
-            _memory_space_from_ast(expr.space, source_type.space),
         )
         ctx.builder.add_op(load_op)
-        ctx._set_cache(expr_key, load_op.result)
-        return load_op.result
+        ctx._set_cache(expr_key, alloc_op.result)
+        return alloc_op.result
     if isinstance(expr, DmaAllocAST):
         result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
@@ -4203,7 +4210,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
             alloc_shape = _build_index_operands_from_layout(result_type.shape, ctx, location=expr.location)
         alloc_op = DmaAllocOp(alloc_shape, result_type)
         ctx.builder.add_op(alloc_op)
-        copy_op = DmaCopyOp(source, alloc_op.result)
+        copy_op = DmaCopyOp(alloc_op.result, source)
         ctx.builder.add_op(copy_op)
         ctx._set_cache(expr_key, alloc_op.result)
         ctx.types[_expr_key(expr.source)] = source_type
@@ -4214,10 +4221,16 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("cast result must be nn.memory", location=expr.location)
-        op = DmaCastOp(source, result_type)
+        if all(isinstance(dim, IntAttr) for dim in result_type.shape.data):
+            alloc_shape = []
+        else:
+            alloc_shape = _build_index_operands_from_layout(result_type.shape, ctx, location=expr.location)
+        alloc_op = DmaAllocOp(alloc_shape, result_type)
+        ctx.builder.add_op(alloc_op)
+        op = DmaCastOp(alloc_op.result, source)
         ctx.builder.add_op(op)
-        ctx._set_cache(expr_key, op.result)
-        return op.result
+        ctx._set_cache(expr_key, alloc_op.result)
+        return alloc_op.result
     if isinstance(expr, DmaViewAST):
         source = _lower_expr(expr.source, ctx)
         _expect_memory_value(source, expr.location)
@@ -4325,7 +4338,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         result_type = _infer_expr_type(expr, ctx.types, runtime_values=runtime_values, config=ctx.config)
         if not isinstance(result_type, NnMemoryType):
             raise _LoweringError("softmax result must be nn.memory", location=expr.location)
-        axis_value = _parse_softmax_axis_expr(expr.axis, expr.location)
+        axis_value = _parse_softmax_axis_expr(expr.axis, len(input_type.shape.data), expr.location)
         op = NnSoftmaxOp(input_value, result_type, axis=axis_value, space=input_type.space)
         op.verify()
         ctx.builder.add_op(op)
@@ -4516,9 +4529,11 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
                 result_type.element_type,
                 lhs_type.space,
             )
-            cast_op = DmaCastOp(lhs, cast_type)
+            lhs_cast_alloc = DmaAllocOp([], cast_type)
+            ctx.builder.add_op(lhs_cast_alloc)
+            cast_op = DmaCastOp(lhs_cast_alloc.result, lhs)
             ctx.builder.add_op(cast_op)
-            lhs = cast_op.result
+            lhs = lhs_cast_alloc.result
         if rhs_type.element_type != result_type.element_type:
             cast_type = _memory_type_from_parts(
                 rhs_type.shape.data,
@@ -4526,9 +4541,11 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
                 result_type.element_type,
                 rhs_type.space,
             )
-            cast_op = DmaCastOp(rhs, cast_type)
+            rhs_cast_alloc = DmaAllocOp([], cast_type)
+            ctx.builder.add_op(rhs_cast_alloc)
+            cast_op = DmaCastOp(rhs_cast_alloc.result, rhs)
             ctx.builder.add_op(cast_op)
-            rhs = cast_op.result
+            rhs = rhs_cast_alloc.result
         op = NnMatmulOp(lhs, rhs, result_type, result_type.space)
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)

@@ -997,7 +997,10 @@ def test_emit_mlir_dma_cast_lowering() -> None:
         DmaCastAST(source=source, dtype=NumericType.Float16, memoryspace=MemorySpace.SM, location=None),
         ctx,
     )
-    assert isinstance(result.owner, DmaCastOp)
+    assert isinstance(result.owner, DmaAllocOp)
+    cast_ops = [op for op in block.ops if isinstance(op, DmaCastOp)]
+    assert len(cast_ops) == 1
+    assert cast_ops[0].target is result
     assert result.type.element_type != block.args[0].type.element_type
     assert result.type.space.space.data == "shared"
 
