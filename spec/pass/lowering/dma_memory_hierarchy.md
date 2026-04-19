@@ -10,7 +10,7 @@
 ## 文档信息
 
 - 创建者：`咯咯咯`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/pass/lowering/dma_memory_hierarchy.md`](../../../spec/pass/lowering/dma_memory_hierarchy.md)
 - `功能实现`：[`kernel_gen/passes/lowering/dma_memory_hierarchy.py`](../../../kernel_gen/passes/lowering/dma_memory_hierarchy.py)
 - `test`：[`test/pass/test_dma_memory_hierarchy.py`](../../../test/pass/test_dma_memory_hierarchy.py)
@@ -64,10 +64,10 @@
 使用示例：
 
 ```python
-from kernel_gen.passes.pass_manager import PassManager
-from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
-from kernel_gen.passes.lowering.buffer_results_to_out_params import BufferResultsToOutParamsPass
+from kernel_gen.passes.buffer_results_to_out_params import BufferResultsToOutParamsPass
 from kernel_gen.passes.lowering.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
+from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
+from kernel_gen.passes.pass_manager import PassManager
 
 pm = PassManager(name="lowering")
 pm.add_pass(NnLoweringPass())

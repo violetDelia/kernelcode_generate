@@ -313,9 +313,7 @@ def load_builtin_passes() -> None:
         register_pipeline("no-op-pipeline")(_build_no_op_pipeline)
 
     from kernel_gen.passes.analysis.func_cost import AnalyzeFuncCostPass
-    from kernel_gen.passes.lowering.buffer_results_to_out_params import (
-        BufferResultsToOutParamsPass,
-    )
+    from kernel_gen.passes.buffer_results_to_out_params import BufferResultsToOutParamsPass
     from kernel_gen.passes.lowering.decompass import DecomposeNnSoftmaxPass
     from kernel_gen.passes.lowering.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
     from kernel_gen.passes.lowering.memory_pool import MemoryPoolPass

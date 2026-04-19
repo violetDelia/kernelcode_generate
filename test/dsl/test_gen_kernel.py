@@ -81,7 +81,7 @@ from kernel_gen.dsl.mlir_gen import build_func_op
 from kernel_gen.operation.dma import alloc, deslice, slice
 from kernel_gen.operation.nn import matmul
 from kernel_gen.operation.scf import loop
-from kernel_gen.passes.lowering.buffer_results_to_out_params import BufferResultsToOutParamsPass
+from kernel_gen.passes.buffer_results_to_out_params import BufferResultsToOutParamsPass
 from kernel_gen.passes.lowering.kernel_split import KernelSplitPass, _KernelSplitSymbolLiteralOp, _KernelSplitTileValueOp
 from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace

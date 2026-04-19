@@ -6,7 +6,7 @@
 功能说明:
 - 提供 nn -> kernel lowering pass 的公开入口。
 - 提供 `LowerNnToKernelPass` 兼容入口。
-- 提供 buffer-results-to-out-params pass 的公开入口。
+- 提供 buffer-results-to-out-params 的 lowering 兼容入口。
 - 提供 lower-dma-memory-hierarchy pass 的公开入口。
 - 提供 decompass pass 的公开入口。
 - 提供 outline-device-kernel pass 的公开入口。
@@ -49,6 +49,7 @@
 - 功能实现:
   - [kernel_gen/passes/lowering/nn_lowering/nn_lowering.py](kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
   - [kernel_gen/passes/lowering/nn_to_kernel.py](kernel_gen/passes/lowering/nn_to_kernel.py)
+  - [kernel_gen/passes/buffer_results_to_out_params.py](kernel_gen/passes/buffer_results_to_out_params.py)
   - [kernel_gen/passes/lowering/buffer_results_to_out_params.py](kernel_gen/passes/lowering/buffer_results_to_out_params.py)
   - [kernel_gen/passes/lowering/dma_memory_hierarchy.py](kernel_gen/passes/lowering/dma_memory_hierarchy.py)
   - [kernel_gen/passes/lowering/decompass.py](kernel_gen/passes/lowering/decompass.py)
@@ -59,7 +60,7 @@
 
 from .nn_lowering import NnLoweringError, NnLoweringPass
 from .nn_to_kernel import LowerNnToKernelPass
-from .buffer_results_to_out_params import (
+from ..buffer_results_to_out_params import (
     BufferResultsToOutParamsError,
     BufferResultsToOutParamsPass,
 )

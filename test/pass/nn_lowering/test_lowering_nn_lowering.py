@@ -92,7 +92,7 @@ from kernel_gen.dialect.nn import (
 from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
 from kernel_gen.dsl.mlir_gen import build_func_op
 from kernel_gen.operation.nn import img2col1d, img2col2d, reduce_min, softmax
-from kernel_gen.passes.lowering.buffer_results_to_out_params import (
+from kernel_gen.passes.buffer_results_to_out_params import (
     BufferResultsToOutParamsError,
     BufferResultsToOutParamsPass,
 )

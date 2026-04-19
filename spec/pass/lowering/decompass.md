@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`小李飞刀`
-- 最后一次更改：`小李飞刀`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/pass/lowering/decompass.md`](../../../spec/pass/lowering/decompass.md)
 - `功能实现`：[`kernel_gen/passes/lowering/decompass.py`](../../../kernel_gen/passes/lowering/decompass.py)
 - `test`：[`test/pass/test_decompose_nn_softmax.py`](../../../test/pass/test_decompose_nn_softmax.py)
@@ -138,9 +138,9 @@ DecompassError: result type must match input shape and stride
 ## 使用示例
 
 ```python
+from kernel_gen.passes.buffer_results_to_out_params import BufferResultsToOutParamsPass
 from kernel_gen.passes.lowering.decompass import DecompassPass
 from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
-from kernel_gen.passes.lowering.buffer_results_to_out_params import BufferResultsToOutParamsPass
 from kernel_gen.passes.pass_manager import PassManager
 
 pm = PassManager(name="lowering")

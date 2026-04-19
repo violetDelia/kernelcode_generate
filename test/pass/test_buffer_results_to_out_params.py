@@ -10,7 +10,7 @@
 - pytest -q test/pass/test_buffer_results_to_out_params.py
 
 关联文件:
-- 功能实现: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+- 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
 - Spec 文档: spec/pass/lowering/buffer_results_to_out_params.md
 - 测试文件: test/pass/test_buffer_results_to_out_params.py
 """
@@ -46,10 +46,24 @@ from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 from kernel_gen.passes.pass_manager import PassManager
 
 pass_module = importlib.import_module(
-    "kernel_gen.passes.lowering.buffer_results_to_out_params"
+    "kernel_gen.passes.buffer_results_to_out_params"
 )
 BufferResultsToOutParamsError = pass_module.BufferResultsToOutParamsError
 BufferResultsToOutParamsPass = pass_module.BufferResultsToOutParamsPass
+
+
+def test_public_import_path_matches_lowering_compat_shim() -> None:
+    """验证公开入口与 lowering 兼容层导出的对象一致。"""
+
+    lowering_module = importlib.import_module(
+        "kernel_gen.passes.lowering.buffer_results_to_out_params"
+    )
+    package_module = importlib.import_module("kernel_gen.passes")
+
+    assert lowering_module.BufferResultsToOutParamsPass is BufferResultsToOutParamsPass
+    assert lowering_module.BufferResultsToOutParamsError is BufferResultsToOutParamsError
+    assert package_module.BufferResultsToOutParamsPass is BufferResultsToOutParamsPass
+    assert package_module.BufferResultsToOutParamsError is BufferResultsToOutParamsError
 
 
 def _make_memory_type() -> NnMemoryType:
@@ -67,7 +81,7 @@ def _make_memory_type() -> NnMemoryType:
     关联文件:
     - spec: spec/pass/lowering/buffer_results_to_out_params.md
     - test: test/pass/test_buffer_results_to_out_params.py
-    - 功能实现: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+    - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
     """
 
     return NnMemoryType(
@@ -94,7 +108,7 @@ def _make_memory_type_with_shape(shape: tuple[int, ...]) -> NnMemoryType:
     关联文件:
     - spec: spec/pass/lowering/buffer_results_to_out_params.md
     - test: test/pass/test_buffer_results_to_out_params.py
-    - 功能实现: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+    - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
     """
 
     stride: list[int] = []
@@ -126,7 +140,7 @@ def _arg_attrs(*names: str) -> ArrayAttr[DictionaryAttr]:
     关联文件:
     - spec: spec/pass/lowering/buffer_results_to_out_params.md
     - test: test/pass/test_buffer_results_to_out_params.py
-    - 功能实现: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+    - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
     """
 
     return ArrayAttr([DictionaryAttr({"name": StringAttr(name)}) for name in names])
@@ -140,7 +154,7 @@ def _arg_attrs(*names: str) -> ArrayAttr[DictionaryAttr]:
 # 功能说明: 验证单个 memory 返回值会被改写为最前置 out 参数。
 # 测试目的: 锁定 function_type.inputs 最前插入 arg0、outputs 清空、func.return 变为空 return，且函数体内对返回 buffer 的使用改写到 arg0。
 # 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_single_memory_result_to_front_out_param
-# 对应功能实现文件路径: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+# 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
 # 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
 # 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
 def test_rewrite_single_memory_result_to_front_out_param() -> None:
@@ -181,7 +195,7 @@ def test_rewrite_single_memory_result_to_front_out_param() -> None:
 # 功能说明: 验证 external declaration 会被显式拒绝。
 # 测试目的: 锁定未定义函数体的 memory-return 函数不会被半改写。
 # 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_rejects_external_declaration
-# 对应功能实现文件路径: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+# 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
 # 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
 # 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
 def test_rewrite_rejects_external_declaration() -> None:
@@ -204,7 +218,7 @@ def test_rewrite_rejects_external_declaration() -> None:
 # 功能说明: 验证模块内 caller/callee 会同步改写为显式 out 实参 + 零 result 的 func.call。
 # 测试目的: 锁定 pass 不再保留旧 memory call result SSA，caller 侧必须先提供 out buffer。
 # 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_callsite_replaces_old_memory_result_ssa
-# 对应功能实现文件路径: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+# 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
 # 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
 # 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
 def test_rewrite_callsite_replaces_old_memory_result_ssa() -> None:
@@ -259,7 +273,7 @@ def test_rewrite_callsite_replaces_old_memory_result_ssa() -> None:
 # 功能说明: 验证 lowering pipeline 中 BufferResultsToOutParamsPass 固定运行在 NnLoweringPass 之后。
 # 测试目的: 锁定 O2 的 pass 链路位置，避免实现又回退到手工拼接或错误顺序。
 # 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_pass_manager_runs_lower_then_buffer_results_to_out_params
-# 对应功能实现文件路径: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+# 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
 def _assert_pass_manager_runs_lower_then_buffer_results_to_out_params(
@@ -325,7 +339,7 @@ def test_pipeline_position_pass_manager_runs_lower_then_buffer_results_to_out_pa
 # 功能说明: 验证双 memory returns 会固定重排为最前置 `arg0/arg1`，并同步改写 caller 侧 callsite。
 # 测试目的: 锁定多个 output 的前置顺序与 caller 显式 out 实参顺序，不允许交换或保留旧 memory call result SSA。
 # 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_multiple_memory_results_to_arg0_arg1
-# 对应功能实现文件路径: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+# 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
 # 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
 # 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
 def test_rewrite_multiple_memory_results_to_arg0_arg1() -> None:
@@ -393,7 +407,7 @@ def test_rewrite_multiple_memory_results_to_arg0_arg1() -> None:
 # 功能说明: 验证 `memory + scalar` 混合返回会前置 memory out，同时保留 scalar 返回。
 # 测试目的: 锁定 mixed returns 改写后 caller 侧 `func.call` 只保留 scalar result，旧 memory result SSA 不再存在。
 # 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_mixed_memory_and_scalar_results_preserves_scalar_return
-# 对应功能实现文件路径: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+# 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
 # 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
 # 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
 def test_rewrite_mixed_memory_and_scalar_results_preserves_scalar_return() -> None:
@@ -462,7 +476,7 @@ def test_rewrite_mixed_memory_and_scalar_results_preserves_scalar_return() -> No
 # 功能说明: 验证 multi-block function 会被显式拒绝。
 # 测试目的: 锁定仅支持单 block 的边界，避免 CFG/分支场景被误改写。
 # 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_rejects_multi_block_function
-# 对应功能实现文件路径: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+# 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
 # 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
 # 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
 def test_rewrite_rejects_multi_block_function() -> None:
@@ -490,7 +504,7 @@ def test_rewrite_rejects_multi_block_function() -> None:
 # 功能说明: 验证 return operand 个数与 outputs 不一致会被显式拒绝。
 # 测试目的: 锁定 return/output arity mismatch 的边界诊断。
 # 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_rejects_return_arity_mismatch
-# 对应功能实现文件路径: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+# 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
 # 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
 # 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
 def test_rewrite_rejects_return_arity_mismatch() -> None:
@@ -517,7 +531,7 @@ def test_rewrite_rejects_return_arity_mismatch() -> None:
 # 功能说明: 验证 callsite 与 callee 签名不一致会显式失败。
 # 测试目的: 锁定 callsite mismatch 不允许静默通过或部分改写。
 # 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_rejects_callsite_signature_mismatch
-# 对应功能实现文件路径: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+# 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
 # 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
 # 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
 def test_rewrite_rejects_callsite_signature_mismatch() -> None:
@@ -556,7 +570,7 @@ def test_rewrite_rejects_callsite_signature_mismatch() -> None:
 # 功能说明: 验证已改写 callee 遇到旧 memory-result caller 会显式拒绝。
 # 测试目的: 锁定“callee 已是 out-param ABI，但 caller 仍消费旧 memory result”不会被静默放过。
 # 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_rejects_old_memory_callsite_against_rewritten_callee
-# 对应功能实现文件路径: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+# 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
 # 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
 # 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
 def test_rewrite_rejects_old_memory_callsite_against_rewritten_callee() -> None:
@@ -595,7 +609,7 @@ def test_rewrite_rejects_old_memory_callsite_against_rewritten_callee() -> None:
 # 功能说明: 验证 local callsite 与 callee 同 arity 但结果类型不一致时会显式拒绝。
 # 测试目的: 锁定 ABI 校验不只比较参数/结果个数，还要比较 caller/callee 的结果类型。
 # 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_rejects_callsite_result_type_mismatch_with_same_arity
-# 对应功能实现文件路径: kernel_gen/passes/lowering/buffer_results_to_out_params.py
+# 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
 # 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
 # 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
 def test_rewrite_rejects_callsite_result_type_mismatch_with_same_arity() -> None:
