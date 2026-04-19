@@ -6,21 +6,23 @@
 功能说明:
 - 覆盖 `OutlineDeviceKernelPass` 的公开 outline 合同。
 - 锁定 wrapper/device 双函数形状、显式失败路径与未标记函数保持原样的边界。
+- 锁定只读 expectation 仍可通过 lowering 兼容路径导入 outline-device-kernel 入口。
 
 使用示例:
-- pytest -q test/pass/test_outline_device_kernel.py
+- pytest -q test/pass/outline_device_kernel/test_outline_device_kernel.py
 
 关联文件:
-- spec: [spec/pass/lowering/outline_device_kernel.md](spec/pass/lowering/outline_device_kernel.md)
-- test: [test/pass/test_outline_device_kernel.py](test/pass/test_outline_device_kernel.py)
-- 功能实现: [kernel_gen/passes/lowering/outline_device_kernel.py](kernel_gen/passes/lowering/outline_device_kernel.py)
+- spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
+- test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
+- 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
 """
 
 from __future__ import annotations
 
+import importlib
 from io import StringIO
-import sys
 from pathlib import Path
+import sys
 
 import pytest
 from xdsl.context import Context
@@ -30,15 +32,12 @@ from xdsl.dialects.test import Test
 from xdsl.parser import Parser
 from xdsl.printer import Printer
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.context import build_default_context
-from kernel_gen.passes.lowering.outline_device_kernel import (
-    OutlineDeviceKernelError,
-    OutlineDeviceKernelPass,
-)
+from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelError, OutlineDeviceKernelPass
 
 
 def _build_context() -> Context:
@@ -55,9 +54,9 @@ def _build_context() -> Context:
     - ctx = _build_context()
 
     关联文件:
-    - spec: [spec/pass/lowering/outline_device_kernel.md](spec/pass/lowering/outline_device_kernel.md)
-    - test: [test/pass/test_outline_device_kernel.py](test/pass/test_outline_device_kernel.py)
-    - 功能实现: [kernel_gen/passes/lowering/outline_device_kernel.py](kernel_gen/passes/lowering/outline_device_kernel.py)
+    - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
+    - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
+    - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
     """
 
     ctx = build_default_context()
@@ -78,9 +77,9 @@ def _parse_module(text: str) -> ModuleOp:
     - module = _parse_module("builtin.module { func.func @main() { func.return } }")
 
     关联文件:
-    - spec: [spec/pass/lowering/outline_device_kernel.md](spec/pass/lowering/outline_device_kernel.md)
-    - test: [test/pass/test_outline_device_kernel.py](test/pass/test_outline_device_kernel.py)
-    - 功能实现: [kernel_gen/passes/lowering/outline_device_kernel.py](kernel_gen/passes/lowering/outline_device_kernel.py)
+    - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
+    - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
+    - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
     """
 
     return Parser(_build_context(), text).parse_module()
@@ -99,9 +98,9 @@ def _print_ir(module: ModuleOp) -> str:
     - text = _print_ir(module)
 
     关联文件:
-    - spec: [spec/pass/lowering/outline_device_kernel.md](spec/pass/lowering/outline_device_kernel.md)
-    - test: [test/pass/test_outline_device_kernel.py](test/pass/test_outline_device_kernel.py)
-    - 功能实现: [kernel_gen/passes/lowering/outline_device_kernel.py](kernel_gen/passes/lowering/outline_device_kernel.py)
+    - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
+    - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
+    - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
     """
 
     stream = StringIO()
@@ -113,10 +112,10 @@ def _print_ir(module: ModuleOp) -> str:
 # 创建者: 朽木露琪亚
 # 最后一次更改: 金铲铲大作战
 # 功能说明: 锁定公开 pass 名称，供 registry 与 standalone 构造共同复用。
-# 使用示例: pytest -q test/pass/test_outline_device_kernel.py -k test_outline_device_kernel_pass_registry_name
-# 对应功能实现文件路径: kernel_gen/passes/lowering/outline_device_kernel.py
-# 对应 spec 文件路径: spec/pass/lowering/outline_device_kernel.md
-# 对应测试文件路径: test/pass/test_outline_device_kernel.py
+# 使用示例: pytest -q test/pass/outline_device_kernel/test_outline_device_kernel.py -k test_outline_device_kernel_pass_registry_name
+# 对应功能实现文件路径: kernel_gen/passes/outline_device_kernel.py
+# 对应 spec 文件路径: spec/pass/outline_device_kernel.md
+# 对应测试文件路径: test/pass/outline_device_kernel/test_outline_device_kernel.py
 def test_outline_device_kernel_pass_registry_name() -> None:
     assert OutlineDeviceKernelPass.name == "outline-device-kernel"
 
@@ -124,11 +123,28 @@ def test_outline_device_kernel_pass_registry_name() -> None:
 # TC-ODK-002
 # 创建者: 朽木露琪亚
 # 最后一次更改: 金铲铲大作战
+# 功能说明: 锁定 lowering 兼容导入仍映射到迁移后的唯一实现模块。
+# 使用示例: pytest -q test/pass/outline_device_kernel/test_outline_device_kernel.py -k test_outline_device_kernel_lowering_compat_import_matches_rehome_entry
+# 对应功能实现文件路径: kernel_gen/passes/outline_device_kernel.py
+# 对应 spec 文件路径: spec/pass/outline_device_kernel.md
+# 对应测试文件路径: test/pass/outline_device_kernel/test_outline_device_kernel.py
+def test_outline_device_kernel_lowering_compat_import_matches_rehome_entry() -> None:
+    compat_module = importlib.import_module("kernel_gen.passes.lowering.outline_device_kernel")
+    direct_module = importlib.import_module("kernel_gen.passes.outline_device_kernel")
+
+    assert compat_module is direct_module
+    assert compat_module.OutlineDeviceKernelPass is OutlineDeviceKernelPass
+    assert compat_module.OutlineDeviceKernelError is OutlineDeviceKernelError
+
+
+# TC-ODK-003
+# 创建者: 朽木露琪亚
+# 最后一次更改: 金铲铲大作战
 # 功能说明: 锁定非 builtin.module 输入时报稳定错误类型与短语。
-# 使用示例: pytest -q test/pass/test_outline_device_kernel.py -k test_outline_device_kernel_non_module_input_raises_stable_error
-# 对应功能实现文件路径: kernel_gen/passes/lowering/outline_device_kernel.py
-# 对应 spec 文件路径: spec/pass/lowering/outline_device_kernel.md
-# 对应测试文件路径: test/pass/test_outline_device_kernel.py
+# 使用示例: pytest -q test/pass/outline_device_kernel/test_outline_device_kernel.py -k test_outline_device_kernel_non_module_input_raises_stable_error
+# 对应功能实现文件路径: kernel_gen/passes/outline_device_kernel.py
+# 对应 spec 文件路径: spec/pass/outline_device_kernel.md
+# 对应测试文件路径: test/pass/outline_device_kernel/test_outline_device_kernel.py
 def test_outline_device_kernel_non_module_input_raises_stable_error() -> None:
     with pytest.raises(
         OutlineDeviceKernelError,
@@ -137,14 +153,14 @@ def test_outline_device_kernel_non_module_input_raises_stable_error() -> None:
         OutlineDeviceKernelPass().run(object())
 
 
-# TC-ODK-003
+# TC-ODK-004
 # 创建者: 朽木露琪亚
 # 最后一次更改: 金铲铲大作战
-# 功能说明: 锁定空 module 直接返回同一对象，不在 S2 引入额外改写副作用。
-# 使用示例: pytest -q test/pass/test_outline_device_kernel.py -k test_outline_device_kernel_empty_module_returns_same_object
-# 对应功能实现文件路径: kernel_gen/passes/lowering/outline_device_kernel.py
-# 对应 spec 文件路径: spec/pass/lowering/outline_device_kernel.md
-# 对应测试文件路径: test/pass/test_outline_device_kernel.py
+# 功能说明: 锁定空 module 直接返回同一对象，不引入额外改写副作用。
+# 使用示例: pytest -q test/pass/outline_device_kernel/test_outline_device_kernel.py -k test_outline_device_kernel_empty_module_returns_same_object
+# 对应功能实现文件路径: kernel_gen/passes/outline_device_kernel.py
+# 对应 spec 文件路径: spec/pass/outline_device_kernel.md
+# 对应测试文件路径: test/pass/outline_device_kernel/test_outline_device_kernel.py
 def test_outline_device_kernel_empty_module_returns_same_object() -> None:
     module = ModuleOp([])
 
@@ -173,14 +189,14 @@ builtin.module {
 """
 
 
-# TC-ODK-004
+# TC-ODK-005
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
 # 功能说明: 验证 outline 成功时生成 `wrapper + device` 双函数，且 `shared_memory_size` 仅保留在 device 上。
-# 使用示例: pytest -q test/pass/test_outline_device_kernel.py -k test_outline_device_kernel_outlines_single_function
-# 对应功能实现文件路径: kernel_gen/passes/lowering/outline_device_kernel.py
-# 对应 spec 文件路径: spec/pass/lowering/outline_device_kernel.md
-# 对应测试文件路径: test/pass/test_outline_device_kernel.py
+# 使用示例: pytest -q test/pass/outline_device_kernel/test_outline_device_kernel.py -k test_outline_device_kernel_outlines_single_function
+# 对应功能实现文件路径: kernel_gen/passes/outline_device_kernel.py
+# 对应 spec 文件路径: spec/pass/outline_device_kernel.md
+# 对应测试文件路径: test/pass/outline_device_kernel/test_outline_device_kernel.py
 def test_outline_device_kernel_outlines_single_function() -> None:
     module = _parse_module(_BASIC_MODULE)
 
@@ -216,14 +232,14 @@ def test_outline_device_kernel_outlines_single_function() -> None:
     assert "shared_memory_size = 0 : i64" in printed
 
 
-# TC-ODK-005
+# TC-ODK-006
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
 # 功能说明: 验证未标记函数保持原样，标记函数在模块内就地扩成 wrapper + device。
-# 使用示例: pytest -q test/pass/test_outline_device_kernel.py -k test_outline_device_kernel_leaves_unmarked_function_unchanged
-# 对应功能实现文件路径: kernel_gen/passes/lowering/outline_device_kernel.py
-# 对应 spec 文件路径: spec/pass/lowering/outline_device_kernel.md
-# 对应测试文件路径: test/pass/test_outline_device_kernel.py
+# 使用示例: pytest -q test/pass/outline_device_kernel/test_outline_device_kernel.py -k test_outline_device_kernel_leaves_unmarked_function_unchanged
+# 对应功能实现文件路径: kernel_gen/passes/outline_device_kernel.py
+# 对应 spec 文件路径: spec/pass/outline_device_kernel.md
+# 对应测试文件路径: test/pass/outline_device_kernel/test_outline_device_kernel.py
 def test_outline_device_kernel_leaves_unmarked_function_unchanged() -> None:
     module = _parse_module(
         """
@@ -253,14 +269,14 @@ builtin.module {
     assert "launch_block" not in helper.attributes
 
 
-# TC-ODK-006
+# TC-ODK-007
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
 # 功能说明: 验证只出现部分 launch attrs 时显式失败。
-# 使用示例: pytest -q test/pass/test_outline_device_kernel.py -k test_outline_device_kernel_rejects_partial_launch_attrs
-# 对应功能实现文件路径: kernel_gen/passes/lowering/outline_device_kernel.py
-# 对应 spec 文件路径: spec/pass/lowering/outline_device_kernel.md
-# 对应测试文件路径: test/pass/test_outline_device_kernel.py
+# 使用示例: pytest -q test/pass/outline_device_kernel/test_outline_device_kernel.py -k test_outline_device_kernel_rejects_partial_launch_attrs
+# 对应功能实现文件路径: kernel_gen/passes/outline_device_kernel.py
+# 对应 spec 文件路径: spec/pass/outline_device_kernel.md
+# 对应测试文件路径: test/pass/outline_device_kernel/test_outline_device_kernel.py
 def test_outline_device_kernel_rejects_partial_launch_attrs() -> None:
     module = _parse_module(
         """
@@ -285,14 +301,14 @@ builtin.module {
         OutlineDeviceKernelPass().run(module)
 
 
-# TC-ODK-007
+# TC-ODK-008
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 功能说明: 验证非零 launch extent 显式失败并给出稳定短语。
-# 使用示例: pytest -q test/pass/test_outline_device_kernel.py -k test_outline_device_kernel_rejects_non_positive_launch_extent
-# 对应功能实现文件路径: kernel_gen/passes/lowering/outline_device_kernel.py
-# 对应 spec 文件路径: spec/pass/lowering/outline_device_kernel.md
-# 对应测试文件路径: test/pass/test_outline_device_kernel.py
+# 功能说明: 验证非正 launch extent 显式失败并给出稳定短语。
+# 使用示例: pytest -q test/pass/outline_device_kernel/test_outline_device_kernel.py -k test_outline_device_kernel_rejects_non_positive_launch_extent
+# 对应功能实现文件路径: kernel_gen/passes/outline_device_kernel.py
+# 对应 spec 文件路径: spec/pass/outline_device_kernel.md
+# 对应测试文件路径: test/pass/outline_device_kernel/test_outline_device_kernel.py
 def test_outline_device_kernel_rejects_non_positive_launch_extent() -> None:
     module = _parse_module(
         """
@@ -315,14 +331,76 @@ builtin.module {
         OutlineDeviceKernelPass().run(module)
 
 
-# TC-ODK-008
+# TC-ODK-009
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 `shared_memory_size` 不是 int-like attr 时显式失败。
+# 使用示例: pytest -q test/pass/outline_device_kernel/test_outline_device_kernel.py -k test_outline_device_kernel_rejects_non_int_like_shared_memory_size
+# 对应功能实现文件路径: kernel_gen/passes/outline_device_kernel.py
+# 对应 spec 文件路径: spec/pass/outline_device_kernel.md
+# 对应测试文件路径: test/pass/outline_device_kernel/test_outline_device_kernel.py
+def test_outline_device_kernel_rejects_non_int_like_shared_memory_size() -> None:
+    module = _parse_module(
+        """
+builtin.module {
+  func.func @kernel() attributes {
+    launch_block = 1 : i64,
+    launch_thread = 1 : i64,
+    launch_subthread = 1 : i64,
+    shared_memory_size = "bad"
+  } {
+    func.return
+  }
+}
+"""
+    )
+
+    with pytest.raises(
+        OutlineDeviceKernelError,
+        match=r"^OutlineDeviceKernelError: function kernel shared_memory_size must be int-like attribute$",
+    ):
+        OutlineDeviceKernelPass().run(module)
+
+
+# TC-ODK-010
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 `shared_memory_size` 为负值时显式失败。
+# 使用示例: pytest -q test/pass/outline_device_kernel/test_outline_device_kernel.py -k test_outline_device_kernel_rejects_negative_shared_memory_size
+# 对应功能实现文件路径: kernel_gen/passes/outline_device_kernel.py
+# 对应 spec 文件路径: spec/pass/outline_device_kernel.md
+# 对应测试文件路径: test/pass/outline_device_kernel/test_outline_device_kernel.py
+def test_outline_device_kernel_rejects_negative_shared_memory_size() -> None:
+    module = _parse_module(
+        """
+builtin.module {
+  func.func @kernel() attributes {
+    launch_block = 1 : i64,
+    launch_thread = 1 : i64,
+    launch_subthread = 1 : i64,
+    shared_memory_size = -1 : i64
+  } {
+    func.return
+  }
+}
+"""
+    )
+
+    with pytest.raises(
+        OutlineDeviceKernelError,
+        match=r"^OutlineDeviceKernelError: function kernel shared_memory_size must be >= 0$",
+    ):
+        OutlineDeviceKernelPass().run(module)
+
+
+# TC-ODK-011
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
 # 功能说明: 验证非零返回函数不会被隐式改写 ABI，而是显式失败。
-# 使用示例: pytest -q test/pass/test_outline_device_kernel.py -k test_outline_device_kernel_rejects_non_zero_result_function
-# 对应功能实现文件路径: kernel_gen/passes/lowering/outline_device_kernel.py
-# 对应 spec 文件路径: spec/pass/lowering/outline_device_kernel.md
-# 对应测试文件路径: test/pass/test_outline_device_kernel.py
+# 使用示例: pytest -q test/pass/outline_device_kernel/test_outline_device_kernel.py -k test_outline_device_kernel_rejects_non_zero_result_function
+# 对应功能实现文件路径: kernel_gen/passes/outline_device_kernel.py
+# 对应 spec 文件路径: spec/pass/outline_device_kernel.md
+# 对应测试文件路径: test/pass/outline_device_kernel/test_outline_device_kernel.py
 def test_outline_device_kernel_rejects_non_zero_result_function() -> None:
     module = _parse_module(
         """
@@ -346,14 +424,14 @@ builtin.module {
         OutlineDeviceKernelPass().run(module)
 
 
-# TC-ODK-009
+# TC-ODK-012
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
 # 功能说明: 验证 `_device` 命名冲突会在改写前显式失败。
-# 使用示例: pytest -q test/pass/test_outline_device_kernel.py -k test_outline_device_kernel_rejects_existing_device_name_conflict
-# 对应功能实现文件路径: kernel_gen/passes/lowering/outline_device_kernel.py
-# 对应 spec 文件路径: spec/pass/lowering/outline_device_kernel.md
-# 对应测试文件路径: test/pass/test_outline_device_kernel.py
+# 使用示例: pytest -q test/pass/outline_device_kernel/test_outline_device_kernel.py -k test_outline_device_kernel_rejects_existing_device_name_conflict
+# 对应功能实现文件路径: kernel_gen/passes/outline_device_kernel.py
+# 对应 spec 文件路径: spec/pass/outline_device_kernel.md
+# 对应测试文件路径: test/pass/outline_device_kernel/test_outline_device_kernel.py
 def test_outline_device_kernel_rejects_existing_device_name_conflict() -> None:
     module = _parse_module(
         """

@@ -10,13 +10,13 @@
 
 - 创建者：`咯咯咯`
 - 最后一次更改：`咯咯咯`
-- `spec`：[`spec/pass/lowering/outline_device_kernel.md`](../../../spec/pass/lowering/outline_device_kernel.md)
+- `spec`：[`spec/pass/outline_device_kernel.md`](../../../spec/pass/outline_device_kernel.md)
 - `功能实现`：
-  - [`kernel_gen/passes/lowering/outline_device_kernel.py`](../../../kernel_gen/passes/lowering/outline_device_kernel.py)
+  - [`kernel_gen/passes/outline_device_kernel.py`](../../../kernel_gen/passes/outline_device_kernel.py)
   - [`kernel_gen/passes/lowering/__init__.py`](../../../kernel_gen/passes/lowering/__init__.py)
   - [`kernel_gen/passes/registry.py`](../../../kernel_gen/passes/registry.py)
 - `test`：
-  - [`test/pass/test_outline_device_kernel.py`](../../../test/pass/test_outline_device_kernel.py)
+  - [`test/pass/outline_device_kernel/test_outline_device_kernel.py`](../../../test/pass/outline_device_kernel/test_outline_device_kernel.py)
   - [`test/pass/test_pass_registry.py`](../../../test/pass/test_pass_registry.py)
   - [`test/pass/test_pipeline_default_lowering.py`](../../../test/pass/test_pipeline_default_lowering.py)
 
@@ -38,6 +38,7 @@
 ## 目标
 
 - 固定 pass 公开名称：`outline-device-kernel`。
+- 固定实现唯一入口：[`kernel_gen/passes/outline_device_kernel.py`](../../../kernel_gen/passes/outline_device_kernel.py)。
 - 固定触发合同：只对带 `launch_block / launch_thread / launch_subthread` 三项属性的 `func.func` 生效。
 - 固定输出 IR 形状：原函数名保留为 host wrapper，新函数名固定追加 `_device`。
 - 固定首轮 ABI 边界：只接受零返回 / 已完成 out-param ABI 的输入。
@@ -51,7 +52,8 @@
 - host wrapper 保留原函数名与原参数顺序，且函数体只允许 outline pass 新增的 extent 常量、单个 `arch.launch` 与 `func.return`。
 - device body 函数名固定为 `@<orig>_device`，继承原参数顺序与原主体 op 序列。
 - wrapper 上不得保留 `launch_block / launch_thread / launch_subthread`；`shared_memory_size` 若存在，只保留在 device function attributes 上。
-- `shared_memory_size` is metadata-only in V1；本轮不扩展 `arch.launch` op 的 operand/attribute 形状。
+- `shared_memory_size` 仅做 metadata 合法性校验：需要是 int-like attr，且值必须大于等于 `0`；本轮不扩展 `arch.launch` op 的 operand/attribute 形状。
+- 旧路径 `kernel_gen.passes.lowering.outline_device_kernel` 只保留兼容导入，不再承载独立实现文件。
 - 本轮范围排除 `gen_kernel(target="npu_demo")` / `ctx` 专用适配，也不把 `buffer-results-to-out-params` 并入本 pass 职责面。
 
 ## 公开接口
@@ -74,7 +76,7 @@ raise OutlineDeviceKernelError("outline-device-kernel requires zero-result func.
 
 注意事项：
 
-- 非空返回值、属性缺失、非法 extent 或命名冲突等显式失败路径都应统一抛出该错误。
+- 非空返回值、属性缺失、非法 extent、非法 `shared_memory_size` 或命名冲突等显式失败路径都应统一抛出该错误。
 
 返回与限制：
 
@@ -93,7 +95,7 @@ raise OutlineDeviceKernelError("outline-device-kernel requires zero-result func.
 使用示例：
 
 ```python
-from kernel_gen.passes.lowering import OutlineDeviceKernelPass
+from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelPass
 
 module = OutlineDeviceKernelPass().run(module)
 ```
@@ -168,6 +170,7 @@ func.func @matmul_kernel(%lhs: !nn.memory<...>, %rhs: !nn.memory<...>, %out: !nn
 
 - 三项 launch 属性必须同时存在。
 - extent 必须能规整为正整数语义的 `!symbol.int`。
+- `shared_memory_size` 若存在，必须是 int-like attr，且值必须大于等于 `0`。
 - 输入函数必须是零返回；非空返回值显式失败。
 
 返回与限制：
@@ -217,18 +220,22 @@ builtin.module {
 
 ## 额外补充
 
-- expectation runner 目录约定固定为 `expectation/pass/lowing/outline_device_kernel/`。
-- 公开 runner 入口固定为 `expectation/pass/lowing/outline_device_kernel/__main__.py`。
+- expectation runner 目录约定固定为 `expectation/pass/outline_device_kernel/`。
+- 公开 runner 入口固定为 `expectation/pass/outline_device_kernel/__main__.py`。
 - 子资产路径固定为：
-  - `expectation/pass/lowing/outline_device_kernel/basic.py`
-  - `expectation/pass/lowing/outline_device_kernel/multi_function.py`
-  - `expectation/pass/lowing/outline_device_kernel/invalid_attr.py`
+  - `expectation/pass/outline_device_kernel/basic.py`
+  - `expectation/pass/outline_device_kernel/multi_function.py`
+  - `expectation/pass/outline_device_kernel/invalid_attr.py`
+- 兼容导入 `kernel_gen.passes.lowering.outline_device_kernel` 只用于旧调用方与架构侧只读 expectation 资产；新实现与新测试统一指向 `kernel_gen.passes.outline_device_kernel`。
+- 当前任务链的正式验收只依赖当前 `worktree` 内的 `spec / test / kernel_gen` 正式交付物；`expectation/pass/outline_device_kernel/**` 由架构侧保管，只作为补充核对。
+- 旧路径清理的正式检索范围固定为 `spec / test / kernel_gen`；仓库根目录中的 expectation 文本不纳入本轮正式检索结论。
+- 若当前 `worktree` 本身不带 `expectation/` 目录，补充 runner 仍在当前 `worktree` 下执行，并通过 `PYTHONPATH=<task_worktree>:<repo_root>` 追加架构侧 expectation 资产。
 
 ## 测试
 
-- 测试文件：[`test/pass/test_outline_device_kernel.py`](../../../test/pass/test_outline_device_kernel.py)
-- 执行命令：`pytest -q test/pass/test_outline_device_kernel.py`
-- 测试目标：锁定显式 launch attrs 触发、双函数输出形状、命名冲突、属性非法与非空返回失败路径。
+- 测试文件：[`test/pass/outline_device_kernel/test_outline_device_kernel.py`](../../../test/pass/outline_device_kernel/test_outline_device_kernel.py)
+- 执行命令：`pytest -q test/pass/outline_device_kernel/test_outline_device_kernel.py`
+- 测试目标：锁定显式 launch attrs 触发、双函数输出形状、`shared_memory_size` 校验、兼容导入与非空返回失败路径。
 
 - 测试文件：[`test/pass/test_pass_registry.py`](../../../test/pass/test_pass_registry.py)
 - 执行命令：`pytest -q test/pass/test_pass_registry.py -k outline_device_kernel`
@@ -238,12 +245,13 @@ builtin.module {
 - 执行命令：`pytest -q test/pass/test_pipeline_default_lowering.py`
 - 测试目标：锁定 `default-lowering remains unchanged`，不把 `outline-device-kernel` 混入默认 pipeline。
 
-- 执行命令：`PYTHONPATH=. python expectation/pass/lowing/outline_device_kernel`
-- 测试目标：锁定 host launch outline 的 expectation runner 路径与 `__main__.py/basic.py/multi_function.py/invalid_attr.py` 资产集合。
+- 执行命令：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=<task_worktree>:<repo_root> python3 -m expectation.pass.outline_device_kernel`
+- 测试目标：作为架构侧补充核对，锁定 host launch outline 的 expectation runner 路径与 `__main__.py/basic.py/multi_function.py/invalid_attr.py` 资产集合；不作为当前任务正式合入前置。
 
 - 功能与用例清单：
   - `HL-ODK-001`：显式 `launch_block / launch_thread / launch_subthread` 三项属性同时存在时才触发 outline。
   - `HL-ODK-002`：输出 IR 固定为 `@name + @name_device` 双函数形状，wrapper 中只保留单个 `arch.launch`。
   - `HL-ODK-003`：非空返回值输入显式失败，不承担 ABI 改写。
   - `HL-ODK-004`：`shared_memory_size` 只保留在 device function attributes，`arch.launch` 形状保持不变。
-  - `HL-ODK-005`：`default-lowering remains unchanged`，调用方必须显式追加 `outline-device-kernel`。
+  - `HL-ODK-005`：`shared_memory_size` 非 int-like 或负值时显式失败。
+  - `HL-ODK-006`：`default-lowering remains unchanged`，调用方必须显式追加 `outline-device-kernel`。

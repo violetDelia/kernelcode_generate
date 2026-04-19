@@ -26,7 +26,7 @@
 - `arch.launch` 输入形状：[`spec/dialect/arch.md`](../../dialect/arch.md)
 - `symbol.for` loop-carried `f64`：[`spec/dialect/symbol.md`](../../dialect/symbol.md)
 - `tuner.cost` 局部成本节点：[`spec/dialect/tuner.md`](../../dialect/tuner.md)
-- host launch outline 前置形状：[`spec/pass/lowering/outline_device_kernel.md`](../lowering/outline_device_kernel.md)
+- host launch outline 前置形状：[`spec/pass/outline_device_kernel.md`](../outline_device_kernel.md)
 - 只读分析 pass 边界：[`spec/pass/analysis/func_cost.md`](../analysis/func_cost.md)
 
 ## 术语

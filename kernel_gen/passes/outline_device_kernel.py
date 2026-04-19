@@ -1,4 +1,4 @@
-"""outline-device-kernel lowering pass.
+"""outline-device-kernel pass.
 
 创建者: 朽木露琪亚
 最后一次更改: 金铲铲大作战
@@ -10,14 +10,14 @@
 
 使用示例:
 - from xdsl.dialects.builtin import ModuleOp
-- from kernel_gen.passes.lowering.outline_device_kernel import OutlineDeviceKernelPass
+- from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelPass
 - module = ModuleOp([])
 - assert OutlineDeviceKernelPass().run(module) is module
 
 关联文件:
-- spec: [spec/pass/lowering/outline_device_kernel.md](spec/pass/lowering/outline_device_kernel.md)
-- test: [test/pass/test_outline_device_kernel.py](test/pass/test_outline_device_kernel.py)
-- 功能实现: [kernel_gen/passes/lowering/outline_device_kernel.py](kernel_gen/passes/lowering/outline_device_kernel.py)
+- spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
+- test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
+- 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
 """
 
 from __future__ import annotations
@@ -49,9 +49,9 @@ class OutlineDeviceKernelError(ValueError):
     - raise OutlineDeviceKernelError("OutlineDeviceKernelError: module must be builtin.module")
 
     关联文件:
-    - spec: [spec/pass/lowering/outline_device_kernel.md](spec/pass/lowering/outline_device_kernel.md)
-    - test: [test/pass/test_outline_device_kernel.py](test/pass/test_outline_device_kernel.py)
-    - 功能实现: [kernel_gen/passes/lowering/outline_device_kernel.py](kernel_gen/passes/lowering/outline_device_kernel.py)
+    - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
+    - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
+    - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
     """
 
 
@@ -70,9 +70,9 @@ class _OutlineCandidate:
     - candidate = _OutlineCandidate(func_op=func_op, device_name="kernel_device", block=1, thread=4, subthread=1)
 
     关联文件:
-    - spec: [spec/pass/lowering/outline_device_kernel.md](spec/pass/lowering/outline_device_kernel.md)
-    - test: [test/pass/test_outline_device_kernel.py](test/pass/test_outline_device_kernel.py)
-    - 功能实现: [kernel_gen/passes/lowering/outline_device_kernel.py](kernel_gen/passes/lowering/outline_device_kernel.py)
+    - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
+    - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
+    - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
     """
 
     func_op: func.FuncOp
@@ -82,6 +82,41 @@ class _OutlineCandidate:
     subthread: int
 
 
+def _extract_int_like_attr(attr_name: str, attr: Attribute, func_name: str) -> int:
+    """把函数属性提取为 Python 整数。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 支持 `IntAttr`、`IntegerAttr` 与可转整数的 `StringAttr`。
+    - 对非整数语义统一抛出稳定错误短语。
+
+    使用示例:
+    - value = _extract_int_like_attr("launch_thread", IntAttr(4), "kernel")
+
+    关联文件:
+    - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
+    - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
+    - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
+    """
+
+    if isinstance(attr, IntAttr):
+        return attr.data
+    if isinstance(attr, IntegerAttr):
+        return attr.value.data
+    if isinstance(attr, StringAttr):
+        try:
+            return int(attr.data)
+        except ValueError as exc:
+            raise OutlineDeviceKernelError(
+                f"OutlineDeviceKernelError: function {func_name} {attr_name} must be int-like attribute"
+            ) from exc
+    raise OutlineDeviceKernelError(
+        f"OutlineDeviceKernelError: function {func_name} {attr_name} must be int-like attribute"
+    )
+
+
 def _normalize_positive_int_attr(attr_name: str, attr: Attribute, func_name: str) -> int:
     """把函数属性规整为正整数 launch extent。
 
@@ -89,36 +124,49 @@ def _normalize_positive_int_attr(attr_name: str, attr: Attribute, func_name: str
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 支持 `IntAttr`、`IntegerAttr` 与可转整数的 `StringAttr`。
+    - 复用 int-like 提取逻辑，校验 launch extent 必须大于 `0`。
     - 对非整数或非正数语义抛出稳定错误短语。
 
     使用示例:
     - value = _normalize_positive_int_attr("launch_thread", IntAttr(4), "kernel")
 
     关联文件:
-    - spec: [spec/pass/lowering/outline_device_kernel.md](spec/pass/lowering/outline_device_kernel.md)
-    - test: [test/pass/test_outline_device_kernel.py](test/pass/test_outline_device_kernel.py)
-    - 功能实现: [kernel_gen/passes/lowering/outline_device_kernel.py](kernel_gen/passes/lowering/outline_device_kernel.py)
+    - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
+    - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
+    - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
     """
 
-    if isinstance(attr, IntAttr):
-        value = attr.data
-    elif isinstance(attr, IntegerAttr):
-        value = attr.value.data
-    elif isinstance(attr, StringAttr):
-        try:
-            value = int(attr.data)
-        except ValueError as exc:
-            raise OutlineDeviceKernelError(
-                f"OutlineDeviceKernelError: function {func_name} {attr_name} must be int-like attribute"
-            ) from exc
-    else:
-        raise OutlineDeviceKernelError(
-            f"OutlineDeviceKernelError: function {func_name} {attr_name} must be int-like attribute"
-        )
+    value = _extract_int_like_attr(attr_name, attr, func_name)
     if value <= 0:
         raise OutlineDeviceKernelError(
             f"OutlineDeviceKernelError: function {func_name} {attr_name} must be > 0"
+        )
+    return value
+
+
+def _normalize_non_negative_int_attr(attr_name: str, attr: Attribute, func_name: str) -> int:
+    """把函数属性规整为非负整数 metadata。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 复用 int-like 提取逻辑，校验 metadata 必须大于等于 `0`。
+    - 供 `shared_memory_size` 这类可选 metadata 在候选收集阶段统一校验。
+
+    使用示例:
+    - value = _normalize_non_negative_int_attr("shared_memory_size", IntAttr(0), "kernel")
+
+    关联文件:
+    - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
+    - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
+    - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
+    """
+
+    value = _extract_int_like_attr(attr_name, attr, func_name)
+    if value < 0:
+        raise OutlineDeviceKernelError(
+            f"OutlineDeviceKernelError: function {func_name} {attr_name} must be >= 0"
         )
     return value
 
@@ -134,15 +182,15 @@ def _collect_outline_candidate(
 
     功能说明:
     - 只对显式出现 launch 属性的函数做校验与候选收集。
-    - 锁定零返回、完整属性组与 `_device` 命名冲突等公开边界。
+    - 锁定零返回、完整属性组、`shared_memory_size` 合法性与 `_device` 命名冲突等公开边界。
 
     使用示例:
     - candidate = _collect_outline_candidate(func_op, {"kernel", "helper"})
 
     关联文件:
-    - spec: [spec/pass/lowering/outline_device_kernel.md](spec/pass/lowering/outline_device_kernel.md)
-    - test: [test/pass/test_outline_device_kernel.py](test/pass/test_outline_device_kernel.py)
-    - 功能实现: [kernel_gen/passes/lowering/outline_device_kernel.py](kernel_gen/passes/lowering/outline_device_kernel.py)
+    - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
+    - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
+    - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
     """
 
     present_attrs = [name for name in _LAUNCH_ATTRS if name in func_op.attributes]
@@ -158,6 +206,12 @@ def _collect_outline_candidate(
         raise OutlineDeviceKernelError(f"OutlineDeviceKernelError: function {func_name} must have zero results")
     if not any(True for _ in func_op.body.blocks):
         raise OutlineDeviceKernelError(f"OutlineDeviceKernelError: function {func_name} must contain a body")
+    if "shared_memory_size" in func_op.attributes:
+        _normalize_non_negative_int_attr(
+            "shared_memory_size",
+            func_op.attributes["shared_memory_size"],
+            func_name,
+        )
 
     device_name = f"{func_name}_device"
     if device_name in existing_names:
@@ -188,9 +242,9 @@ def _build_wrapper_attrs(attributes: dict[str, Attribute]) -> dict[str, Attribut
     - wrapper_attrs = _build_wrapper_attrs(dict(func_op.attributes))
 
     关联文件:
-    - spec: [spec/pass/lowering/outline_device_kernel.md](spec/pass/lowering/outline_device_kernel.md)
-    - test: [test/pass/test_outline_device_kernel.py](test/pass/test_outline_device_kernel.py)
-    - 功能实现: [kernel_gen/passes/lowering/outline_device_kernel.py](kernel_gen/passes/lowering/outline_device_kernel.py)
+    - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
+    - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
+    - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
     """
 
     return {
@@ -214,9 +268,9 @@ def _build_device_attrs(attributes: dict[str, Attribute]) -> dict[str, Attribute
     - device_attrs = _build_device_attrs(dict(func_op.attributes))
 
     关联文件:
-    - spec: [spec/pass/lowering/outline_device_kernel.md](spec/pass/lowering/outline_device_kernel.md)
-    - test: [test/pass/test_outline_device_kernel.py](test/pass/test_outline_device_kernel.py)
-    - 功能实现: [kernel_gen/passes/lowering/outline_device_kernel.py](kernel_gen/passes/lowering/outline_device_kernel.py)
+    - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
+    - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
+    - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
     """
 
     return {name: attr for name, attr in attributes.items() if name not in _LAUNCH_ATTRS}
@@ -236,9 +290,9 @@ def _build_wrapper_block(candidate: _OutlineCandidate) -> Block:
     - block = _build_wrapper_block(candidate)
 
     关联文件:
-    - spec: [spec/pass/lowering/outline_device_kernel.md](spec/pass/lowering/outline_device_kernel.md)
-    - test: [test/pass/test_outline_device_kernel.py](test/pass/test_outline_device_kernel.py)
-    - 功能实现: [kernel_gen/passes/lowering/outline_device_kernel.py](kernel_gen/passes/lowering/outline_device_kernel.py)
+    - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
+    - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
+    - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
     """
 
     input_types = list(candidate.func_op.function_type.inputs.data)
@@ -271,9 +325,9 @@ def _outline_function(module: ModuleOp, candidate: _OutlineCandidate) -> None:
     - _outline_function(module, candidate)
 
     关联文件:
-    - spec: [spec/pass/lowering/outline_device_kernel.md](spec/pass/lowering/outline_device_kernel.md)
-    - test: [test/pass/test_outline_device_kernel.py](test/pass/test_outline_device_kernel.py)
-    - 功能实现: [kernel_gen/passes/lowering/outline_device_kernel.py](kernel_gen/passes/lowering/outline_device_kernel.py)
+    - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
+    - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
+    - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
     """
 
     func_op = candidate.func_op
@@ -314,9 +368,9 @@ class OutlineDeviceKernelPass(Pass):
     - module = OutlineDeviceKernelPass().run(ModuleOp([]))
 
     关联文件:
-    - spec: [spec/pass/lowering/outline_device_kernel.md](spec/pass/lowering/outline_device_kernel.md)
-    - test: [test/pass/test_outline_device_kernel.py](test/pass/test_outline_device_kernel.py)
-    - 功能实现: [kernel_gen/passes/lowering/outline_device_kernel.py](kernel_gen/passes/lowering/outline_device_kernel.py)
+    - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
+    - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
+    - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
     """
 
     name = "outline-device-kernel"
@@ -336,9 +390,9 @@ class OutlineDeviceKernelPass(Pass):
         - same_module = OutlineDeviceKernelPass().run(module)
 
         关联文件:
-        - spec: [spec/pass/lowering/outline_device_kernel.md](spec/pass/lowering/outline_device_kernel.md)
-        - test: [test/pass/test_outline_device_kernel.py](test/pass/test_outline_device_kernel.py)
-        - 功能实现: [kernel_gen/passes/lowering/outline_device_kernel.py](kernel_gen/passes/lowering/outline_device_kernel.py)
+        - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
+        - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
+        - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
         """
 
         if not isinstance(module, ModuleOp):

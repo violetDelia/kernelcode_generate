@@ -26,7 +26,7 @@
 - Pass/pipeline 注册表：[`spec/pass/registry.md`](../../spec/pass/registry.md)
 - Pipeline 目录说明：[`spec/pass/pipeline/README.md`](../../spec/pass/pipeline/README.md)
 - 默认 pipeline 合同：[`spec/pass/pipeline/default_lowering.md`](../../spec/pass/pipeline/default_lowering.md)
-- host launch outline 合同：[`spec/pass/lowering/outline_device_kernel.md`](../../spec/pass/lowering/outline_device_kernel.md)
+- host launch outline 合同：[`spec/pass/outline_device_kernel.md`](../../spec/pass/outline_device_kernel.md)
 
 ## 目标
 
@@ -40,8 +40,8 @@
 - 本文件只描述通用用法，不替代具体 pass 的独立 spec。
 - pipeline 的顺序与构造细节以 pipeline 目录下的 spec 为准。
 - registry 只负责注册与查询，不执行 pass。
-- standalone pass 的 expectation runner 应与 pass 名保持稳定映射；`outline-device-kernel` 的目录约定固定为 `expectation/pass/lowing/outline_device_kernel/`，其中 runner 入口为 `__main__.py`，子资产为 `basic.py`、`multi_function.py`、`invalid_attr.py`。
-- `expectation/pass/pipeline/default_lowering.py` 只服务默认 pipeline 黑盒验收，不与 `expectation/pass/lowing/outline_device_kernel/` 混用。
+- standalone pass 的 expectation runner 应与 pass 名保持稳定映射；`outline-device-kernel` 的目录约定固定为 `expectation/pass/outline_device_kernel/`，其中 runner 入口为 `__main__.py`，子资产为 `basic.py`、`multi_function.py`、`invalid_attr.py`。
+- `expectation/pass/pipeline/default_lowering.py` 只服务默认 pipeline 黑盒验收，不与 `expectation/pass/outline_device_kernel/` 混用。
 
 ## 公开接口
 

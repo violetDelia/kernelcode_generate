@@ -22,7 +22,7 @@
 - memory-return ABI 改写：[`spec/pass/lowering/buffer_results_to_out_params.md`](../../../spec/pass/lowering/buffer_results_to_out_params.md)
 - DMA memory hierarchy lowering：[`spec/pass/lowering/dma_memory_hierarchy.md`](../../../spec/pass/lowering/dma_memory_hierarchy.md)
 - `nn` 分解预处理：[`spec/pass/decompass.md`](../../../spec/pass/decompass.md)
-- host launch outline：[`spec/pass/lowering/outline_device_kernel.md`](../../../spec/pass/lowering/outline_device_kernel.md)
+- host launch outline：[`spec/pass/outline_device_kernel.md`](../../../spec/pass/outline_device_kernel.md)
 
 ## 术语
 
