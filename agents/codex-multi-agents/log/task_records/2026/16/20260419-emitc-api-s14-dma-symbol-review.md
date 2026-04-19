@@ -45,3 +45,11 @@
 改动：完成同步确认：当前 worktree 待合并文件为 [`kernel_gen/dsl/emit_c.py`](../../../../../../kernel_gen/dsl/emit_c.py)、[`test/dsl/test_emit_c.py`](../../../../../../test/dsl/test_emit_c.py) 与当前记录文件；当前基线 `HEAD=b4a7211`，最新 `origin/main=63843bb`，需先提交后前移到主线再推送。
 验证：`git -C /home/lfr/kernelcode_generate/wt-20260419-emitc-api-s14-dma-symbol-review status --short --branch` -> 仅命中上述 2 个业务文件与记录文件；`git -C /home/lfr/kernelcode_generate/wt-20260419-emitc-api-s14-dma-symbol-review diff --stat` -> `2 files changed, 16 insertions(+), 16 deletions(-)`；`git -C /home/lfr/kernelcode_generate/wt-20260419-emitc-api-s14-dma-symbol-review rev-parse --short HEAD` -> `b4a7211`，`git -C /home/lfr/kernelcode_generate/wt-20260419-emitc-api-s14-dma-symbol-review rev-parse --short origin/main` -> `63843bb`。
 结论：开始 merge，下一步提交当前写集并前移到最新主线后推送，再执行 `-done` 与回报管理员。
+
+时间：2026-04-20 02:59 +0800
+经办人：李白
+任务：T-20260419-b49dc21a
+任务目标：完成 merge、推送主分支并收口任务流转。
+改动：完成合并提交 `11d8cf0 (T-20260419-b49dc21a-merge-emitc-api-s14)`，带入 `kernel_gen/dsl/emit_c.py` 的 `npu_demo symbol.for` 迭代变量 `S_INT` 口径与 `test/dsl/test_emit_c.py` 的同步断言修正；并携带当前任务记录文件。
+验证：`git -C /home/lfr/kernelcode_generate/wt-20260419-emitc-api-s14-dma-symbol-review diff --check origin/main..HEAD` -> 通过；`timeout 60 git -C /home/lfr/kernelcode_generate/wt-20260419-emitc-api-s14-dma-symbol-review push origin HEAD:main` -> `63843bb..11d8cf0` 成功。
+结论：merge 已完成并推送主分支；下一步执行 `-done` 并回报管理员。
