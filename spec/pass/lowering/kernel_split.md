@@ -80,7 +80,7 @@ module = pass_obj.run(module)
 func.func @vec_add(%arg0: !nn.memory<[M, N], f32, #layout, #GM>,
                    %arg1: !nn.memory<[M, N], f32, #layout, #GM>,
                    %arg2: !nn.memory<[M, N], f32, #layout, #GM>) {
-  %0 = kernel.add %arg0, %arg1 outs(%arg2)
+  kernel.binary_elewise %arg0, %arg1, %arg2 {kind = "add", space = #nn.space<global>} : ...
   func.return
 }
 ```

@@ -708,7 +708,8 @@ def _make_space(space_name: str) -> NnMemorySpaceAttr:
     - test: test/analysis/test_analysis.py
     - 功能实现: kernel_gen/analysis/analysis.py
     """
-    return NnMemorySpaceAttr.from_name(space_name)
+    normalized = "tlm1" if space_name == "tlm" else space_name
+    return NnMemorySpaceAttr.from_name(normalized)
 
 
 def _make_memory_type(
@@ -861,9 +862,9 @@ def _build_mixed_analysis_module(
     add_op = NnAddOp(block.args[0], block.args[1], mem_type, space)
     add_const_op = FakeNnAddOp(add_op.result, const_op.result, mem_type, space)
     eq_op = NnEqOp(add_const_op.result, block.args[1], pred_type, space)
-    load_op = DmaLoadOp(block.args[0], offsets, sizes, strides, mem_type, space)
-    copy_op = DmaCopyOp(block.args[0], block.args[2])
-    store_op = DmaStoreOp(load_op.result, block.args[2], offsets, sizes, strides)
+    load_op = DmaLoadOp(block.args[2], block.args[0], offsets, sizes, strides)
+    copy_op = DmaCopyOp(block.args[2], block.args[0])
+    store_op = DmaStoreOp(block.args[2], block.args[1], offsets, sizes, strides)
 
     for op in (const_op, add_op, add_const_op, eq_op, load_op, copy_op, store_op):
         block.add_op(op)
@@ -1480,7 +1481,7 @@ def test_analysis_target_registry_is_single_source_for_analysis_defaults(
     _, func_op, _ = _build_module(
         [source_type, target_type],
         target_type,
-        lambda block: ([DmaCopyOp(block.args[0], block.args[1])], block.args[1]),
+        lambda block: ([DmaCopyOp(block.args[1], block.args[0])], block.args[1]),
     )
     config = AnalysisConfig(target="npu_demo", enable_compute=False, enable_memory=True)
     result = analysis(func_op, config)
@@ -2156,7 +2157,7 @@ def test_analysis_dma_copy_reports_gm_to_lm_path_and_time() -> None:
     source_type = _make_memory_type([IntAttr(2), IntAttr(2)], f32, "global")
     target_type = _make_memory_type([IntAttr(2), IntAttr(2)], f32, "local")
     block = Block(arg_types=[source_type, target_type])
-    copy_op = DmaCopyOp(block.args[0], block.args[1])
+    copy_op = DmaCopyOp(block.args[1], block.args[0])
 
     result = analysis(
         copy_op,
@@ -2285,8 +2286,8 @@ def test_analysis_dma_cast_reports_compute_and_memory() -> None:
     i8 = IntegerType(8)
     source_type = _make_memory_type([IntAttr(2), IntAttr(3)], i8, "global")
     result_type = _make_memory_type([IntAttr(2), IntAttr(3)], f32, "global")
-    block = Block(arg_types=[source_type])
-    cast_op = DmaCastOp(block.args[0], result_type)
+    block = Block(arg_types=[result_type, source_type])
+    cast_op = DmaCastOp(block.args[0], block.args[1])
 
     result = analysis(
         cast_op,
@@ -2404,7 +2405,7 @@ def test_analysis_invalid_public_dma_raises() -> None:
     source_type = _make_memory_type([IntAttr(2), IntAttr(2)], f32, "global")
     target_type = _make_memory_type([IntAttr(2), IntAttr(4)], f32, "global")
     block = Block(arg_types=[source_type, target_type])
-    copy_op = DmaCopyOp(block.args[0], block.args[1])
+    copy_op = DmaCopyOp(block.args[1], block.args[0])
 
     with pytest.raises(AnalysisError, match="dma.copy source/target shape mismatch"):
         analysis(
@@ -2631,8 +2632,8 @@ def test_analysis_mixed_func_totals_equal_bucket_sums() -> None:
     _assert_expr_equal(result.total_compute, bucket_compute_total)
     _assert_expr_equal(result.total_read_bytes + result.total_write_bytes, bucket_memory_total)
     assert result.compute_totals_by_kind == {ComputeKind.VECTOR: sp.Integer(12)}
-    assert MemoryPath.GM_TO_GM in result.memory_totals_by_path
     assert MemoryPath.GM_TO_LM in result.memory_totals_by_path
+    assert MemoryPath.LM_TO_GM in result.memory_totals_by_path
 
     assert kernel_summary.op_costs == result.op_costs
     assert kernel_summary.value_traffic == result.value_traffic
@@ -2844,13 +2845,13 @@ def test_analyze_kernel_dma_load_tracks_source_and_result() -> None:
     arg_types = [mem_type, *symbol_types]
 
     def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
-        offsets = [block.args[1], block.args[2]]
-        sizes = [block.args[3], block.args[4]]
-        strides = [block.args[5], block.args[6]]
-        load_op = DmaLoadOp(block.args[0], offsets, sizes, strides, mem_type, space)
-        return [load_op], load_op.result
+        offsets = [block.args[2], block.args[3]]
+        sizes = [block.args[4], block.args[5]]
+        strides = [block.args[6], block.args[7]]
+        load_op = DmaLoadOp(block.args[1], block.args[0], offsets, sizes, strides)
+        return [load_op], block.args[1]
 
-    _, func_op, _ = _build_module(arg_types, mem_type, _builder)
+    _, func_op, _ = _build_module([mem_type, mem_type, *symbol_types], mem_type, _builder)
     summary = analyze_kernel(func_op, dtype_size_overrides={"f32": 4})
     expected_bytes = sp.Integer(16)
     _assert_expr_equal(summary.total_compute, sp.Integer(0))
@@ -2859,7 +2860,7 @@ def test_analyze_kernel_dma_load_tracks_source_and_result() -> None:
 
     traffic = _value_traffic_map(summary)
     _assert_expr_equal(traffic["arg0"].read_bytes, expected_bytes)
-    _assert_expr_equal(traffic["op0.result0"].write_bytes, expected_bytes)
+    _assert_expr_equal(traffic["arg1"].write_bytes, expected_bytes)
 
 
 # AK-006
@@ -3013,7 +3014,7 @@ def test_analyze_kernel_dma_copy_and_store_track_source_and_target_traffic() -> 
     arg_types = [mem_type, mem_type, *symbol_types]
 
     def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
-        copy_op = DmaCopyOp(block.args[0], block.args[1])
+        copy_op = DmaCopyOp(block.args[1], block.args[0])
         store_op = DmaStoreOp(
             block.args[0],
             block.args[1],
@@ -3050,7 +3051,7 @@ def test_analyze_kernel_rejects_invalid_public_dma_op() -> None:
     target_type = _make_memory_type([IntAttr(2), IntAttr(4)], f32, "global")
 
     def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
-        copy_op = DmaCopyOp(block.args[0], block.args[1])
+        copy_op = DmaCopyOp(block.args[1], block.args[0])
         return [copy_op], block.args[0]
 
     _, func_op, _ = _build_module([source_type, target_type], source_type, _builder)

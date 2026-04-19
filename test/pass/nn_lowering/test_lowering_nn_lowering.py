@@ -406,7 +406,7 @@ def test_lower_add_to_kernel() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-20 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-20 00:00:00 +0800
-# 测试目的: 验证 `LowerNnToKernelPass` 仅保留旧 pass 名，不回写旧 `kernel.add`。
+# 测试目的: 验证 `LowerNnToKernelPass` 仅保留旧 pass 名，不回写旧具名 add op。
 # 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_lower_nn_to_kernel_compat_keeps_binary_elewise
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_to_kernel.py
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
@@ -431,7 +431,7 @@ def test_lower_nn_to_kernel_compat_keeps_binary_elewise() -> None:
     block = func_op.body.block
     _assert_single_alloc(block)
     _assert_single_binary_kind_after_first_alloc(block, "add")
-    assert not any(op.name == "kernel.add" for op in block.ops)
+    assert all(op.name != "kernel.binary_elewise" or op.attributes.get("kind").data == "add" for op in block.ops)
 
 
 # TC-PASS-NNL-002

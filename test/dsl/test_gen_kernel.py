@@ -1177,7 +1177,7 @@ def test_gen_kernel_rejects_symbol_scalar_return_on_non_cpu() -> None:
 # 最近一次运行测试时间: 2026-04-02 23:04:42 +0800
 # 最近一次运行成功时间: 2026-04-02 23:04:42 +0800
 # 功能说明: 验证 `build_func_op -> pass -> gen_kernel` 的 memory+memory add 在 cpu target 下可生成源码。
-# 测试目的: 清理 raw `nn.add` 直出源码的旧成功口径，锁定 pass 后 `kernel.add` 已被消费为 `cpu::add(lhs, rhs, out)`。
+# 测试目的: 清理 raw `nn.add` 直出源码的旧成功口径，锁定 pass 后逐元素加法已被消费为 `cpu::add(lhs, rhs, out)`。
 # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_supports_lowered_nn_add_memory_memory_on_cpu
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
@@ -1193,7 +1193,7 @@ def test_gen_kernel_supports_lowered_nn_add_memory_memory_on_cpu() -> None:
         "void add_direct(Memory<MemorySpace::GM, int32_t>& arg0, const Memory<MemorySpace::GM, int32_t>& arg1, const Memory<MemorySpace::GM, int32_t>& arg2)"
     )
     assert "cpu::add(arg1, arg2, arg0);" in source
-    assert "kernel.add" not in source
+    assert "kernel." not in source
     assert "nn.add" not in source
     assert "out = " not in source
 
@@ -1222,7 +1222,7 @@ def test_gen_kernel_supports_lowered_nn_add_memory_const_on_cpu() -> None:
     assert "cpu::add(arg1, v0, arg0);" in source
     assert "for (long long fill0_i = 0; fill0_i < v0.element_count(); ++fill0_i) {" in source
     assert "v0.data()[fill0_i] = 1;" in source
-    assert "kernel.add" not in source
+    assert "kernel." not in source
     assert "nn.add" not in source
     assert "out = " not in source
 
@@ -1251,7 +1251,7 @@ def test_gen_kernel_supports_lowered_nn_add_memory_symbol_on_cpu() -> None:
     assert "cpu::add(arg1, v0, arg0);" in source
     assert "for (long long fill0_i = 0; fill0_i < v0.element_count(); ++fill0_i) {" in source
     assert "v0.data()[fill0_i] = arg2;" in source
-    assert "kernel.add" not in source
+    assert "kernel." not in source
     assert "nn.add" not in source
     assert "out = " not in source
 
@@ -1657,7 +1657,7 @@ def test_gen_kernel_compiles_and_runs_lowered_nn_add_variants_on_cpu() -> None:
     )
 
     assert "cpu::add(arg1, arg2, arg0);" in pair_source
-    assert "kernel.add" not in pair_source
+    assert "kernel." not in pair_source
     assert "nn.add" not in pair_source
     if "arg1.shape()[0]" in const_source:
         assert "arg1.shape()[1]" in const_source
@@ -1666,7 +1666,7 @@ def test_gen_kernel_compiles_and_runs_lowered_nn_add_variants_on_cpu() -> None:
     assert "cpu::add(arg1, v0, arg0);" in const_source
     assert "for (long long fill0_i = 0; fill0_i < v0.element_count(); ++fill0_i) {" in const_source
     assert "v0.data()[fill0_i] = 1;" in const_source
-    assert "kernel.add" not in const_source
+    assert "kernel." not in const_source
     assert "nn.add" not in const_source
     if "arg1.shape()[0]" in symbol_source:
         assert "arg1.shape()[1]" in symbol_source
@@ -1675,7 +1675,7 @@ def test_gen_kernel_compiles_and_runs_lowered_nn_add_variants_on_cpu() -> None:
     assert "cpu::add(arg1, v0, arg0);" in symbol_source
     assert "for (long long fill0_i = 0; fill0_i < v0.element_count(); ++fill0_i) {" in symbol_source
     assert "v0.data()[fill0_i] = arg2;" in symbol_source
-    assert "kernel.add" not in symbol_source
+    assert "kernel." not in symbol_source
     assert "nn.add" not in symbol_source
 
     cpp_source = f"""\

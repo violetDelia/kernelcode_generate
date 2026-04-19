@@ -54,6 +54,9 @@ _SPACE_TOKENS = {
     "local": "LM",
     "tsm": "TSM",
     "tlm": "TLM",
+    "tlm1": "TLM",
+    "tlm2": "TLM",
+    "tlm3": "TLM",
 }
 
 PUBLIC_DMA_OPS = (
@@ -467,20 +470,20 @@ def analyze_dma_op(
         )
     if isinstance(op, DmaLoadOp):
         _verify_public_dma_op(op)
+        target = op.target
         source = op.source
-        result = op.result
+        if not isinstance(target.type, NnMemoryType):
+            raise ValueError("dma.load target must be nn.memory")
         if not isinstance(source.type, NnMemoryType):
             raise ValueError("dma.load source must be nn.memory")
-        if not isinstance(result.type, NnMemoryType):
-            raise ValueError("dma.load result must be nn.memory")
-        numel = _numel_from_mem_type(result.type)
+        numel = _numel_from_mem_type(target.type)
         if numel is None:
-            raise ValueError("dma.load result shape unsupported")
-        elem_size = _element_size(result.type.element_type, dtype_size_overrides)
+            raise ValueError("dma.load target shape unsupported")
+        elem_size = _element_size(target.type.element_type, dtype_size_overrides)
         if elem_size is None:
-            raise ValueError("dma.load result dtype unsupported")
+            raise ValueError("dma.load target dtype unsupported")
         bytes_expr = numel * sp.Integer(elem_size)
-        path = _memory_path_from_types(source.type, result.type)
+        path = _memory_path_from_types(source.type, target.type)
         items = (
             _build_memory_item_tuple(path, "read", bytes_expr, path_latency_ns=path_latency_ns, path_bandwidth=path_bandwidth),
             _build_memory_item_tuple(path, "write", bytes_expr, path_latency_ns=path_latency_ns, path_bandwidth=path_bandwidth),
@@ -491,7 +494,7 @@ def analyze_dma_op(
             read_bytes=bytes_expr,
             write_bytes=bytes_expr,
             value_reads=((source, bytes_expr),),
-            result_write_bytes=bytes_expr,
+            direct_writes=((target, bytes_expr),),
         )
     if isinstance(op, DmaStoreOp):
         _verify_public_dma_op(op)
@@ -581,22 +584,22 @@ def analyze_dma_op(
         )
     if isinstance(op, DmaCastOp):
         _verify_public_dma_op(op)
+        target = op.target
         source = op.source
-        result = op.result
-        if not isinstance(source.type, NnMemoryType) or not isinstance(result.type, NnMemoryType):
-            raise ValueError("dma.cast source/result must be nn.memory")
-        numel = _numel_from_mem_type(result.type)
+        if not isinstance(source.type, NnMemoryType) or not isinstance(target.type, NnMemoryType):
+            raise ValueError("dma.cast source/target must be nn.memory")
+        numel = _numel_from_mem_type(target.type)
         if numel is None:
-            raise ValueError("dma.cast result shape unsupported")
+            raise ValueError("dma.cast target shape unsupported")
         source_elem_size = _element_size(source.type.element_type, dtype_size_overrides)
         if source_elem_size is None:
             raise ValueError("dma.cast source dtype unsupported")
-        result_elem_size = _element_size(result.type.element_type, dtype_size_overrides)
+        result_elem_size = _element_size(target.type.element_type, dtype_size_overrides)
         if result_elem_size is None:
-            raise ValueError("dma.cast result dtype unsupported")
+            raise ValueError("dma.cast target dtype unsupported")
         read_bytes = numel * sp.Integer(source_elem_size)
         write_bytes = numel * sp.Integer(result_elem_size)
-        path = _memory_path_from_types(source.type, result.type)
+        path = _memory_path_from_types(source.type, target.type)
         items = (
             _build_memory_item_tuple(path, "read", read_bytes, path_latency_ns=path_latency_ns, path_bandwidth=path_bandwidth),
             _build_memory_item_tuple(path, "write", write_bytes, path_latency_ns=path_latency_ns, path_bandwidth=path_bandwidth),
@@ -607,7 +610,7 @@ def analyze_dma_op(
             read_bytes=read_bytes,
             write_bytes=write_bytes,
             value_reads=((source, read_bytes),),
-            result_write_bytes=write_bytes,
+            direct_writes=((target, write_bytes),),
         )
     return None
 

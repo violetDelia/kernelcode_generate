@@ -360,7 +360,7 @@ deslice(out_tile, out, tid * 16, 16, 1);
 - 参数顺序必须固定为 `source -> target -> offset -> size -> stride`。
 - 不得发射为显式 loop nest copy、`store<...>` 组合或其他 CPU 旁路文本。
 
-### `kernel.add`
+### `kernel.binary_elewise(kind="add")`
 
 功能说明：
 

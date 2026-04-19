@@ -7,7 +7,7 @@
 - 提供 `LowerNnToKernelPass` 兼容入口，内部复用 `NnLoweringPass` 的实现。
 - 保持 pass 名称为 `lower-nn-to-kernel`，以兼容既有 pipeline 与测试。
 - 提供 `LowerNnToKernelError` 兼容错误类型，确保旧导入口可用。
-- 不再回写旧 `kernel.add`，公开结果统一保持为 `kernel.binary_elewise(kind=...)`。
+- 不再回写旧具名逐元素 add op，公开结果统一保持为 `kernel.binary_elewise(kind=...)`。
 
 使用示例:
 - from kernel_gen.passes.lowering.nn_to_kernel import LowerNnToKernelPass

@@ -172,6 +172,8 @@ def _static_int_from_operand(operand: SSAValue) -> int | None:
     owner_name = getattr(owner, "name", None)
     if owner_name == "arith.constant":
         value_attr = owner.attributes.get("value")
+        if value_attr is None:
+            value_attr = owner.properties.get("value")
         if isinstance(value_attr, IntegerAttr):
             return int(value_attr.value.data)
         if isinstance(value_attr, IntAttr):

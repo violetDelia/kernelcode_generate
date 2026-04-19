@@ -112,7 +112,7 @@ source = gen_kernel(func_op, EmitCContext(target="cpu"))
 - 默认 CPU 路径不再接受 `-> (!nn.memory<...>)` 这类旧返回 ABI；memory 输出必须已经在 IR 中前移成参数。
 - 若函数已有前置 out 参数但仍声明 `memory` 作为返回类型，视为 half-rewritten ABI，必须抛出 `GenKernelError` 且错误消息包含 `legacy memory return ABI is not supported`。
 - 当 rewrite 后函数返回类型仅包含 `scalar` 结果时（mixed returns 场景），函数应生成前置 out 参数与单一标量返回值并存的签名。
-- rewrite 后 `kernel.add` 的完整目标源码形态可接近以下形式：
+- rewrite 后的逐元素加法 kernel 目标源码形态可接近以下形式：
 
 ```cpp
 void add(Memory<MemorySpace::GM, int32_t>& arg0, const Memory<MemorySpace::GM, int32_t>& arg1, const Memory<MemorySpace::GM, int32_t>& arg2) {
@@ -413,9 +413,9 @@ npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out_tile, lhs_tile, rhs_ti
 - GK-010：`!symbol.int<"...">` 标量返回可生成函数返回值。（`test_gen_kernel_supports_symbol_scalar_return`）
 - GK-011：非 cpu target 下 `!symbol.int<"...">` 标量返回必须报错，防止跨 target 误生成返回签名/函数体。（`test_gen_kernel_rejects_symbol_scalar_return_on_non_cpu`）
 - GK-012：`f32/f64` 标量与 `Memory<Space, f32/f64>` 可生成 `float/double` 与 `Memory<MemorySpace::GM, float>/Memory<MemorySpace::GM, double>` 形式签名。（`test_gen_kernel_supports_float32_scalar_and_memory`）
-- GK-013：rewrite 后 `kernel.add(memory, memory)` 在 cpu target 下可生成 `Memory<MemorySpace::GM, int32_t>& arg0` 签名与 `cpu::add(arg1, arg2, arg0);` 函数体。（`test_gen_kernel_supports_lowered_nn_add_memory_memory_on_cpu`）
-- GK-014：rewrite 后 `kernel.add(memory, const(i32))` 在 cpu target 下可生成 `cpu::add(arg1, v0, arg0);` 函数体。（`test_gen_kernel_supports_lowered_nn_add_memory_const_on_cpu`）
-- GK-015：rewrite 后 `kernel.add(memory, symbol.int)` 在 cpu target 下可生成 `cpu::add(arg1, v0, arg0);` 函数体，并保留 `long long` 标量参数。（`test_gen_kernel_supports_lowered_nn_add_memory_symbol_on_cpu`）
+- GK-013：rewrite 后的逐元素加法 memory+memory 形态在 cpu target 下可生成 `Memory<MemorySpace::GM, int32_t>& arg0` 签名与 `cpu::add(arg1, arg2, arg0);` 函数体。（`test_gen_kernel_supports_lowered_nn_add_memory_memory_on_cpu`）
+- GK-014：rewrite 后的逐元素加法 memory+const(i32) 形态在 cpu target 下可生成 `cpu::add(arg1, v0, arg0);` 函数体。（`test_gen_kernel_supports_lowered_nn_add_memory_const_on_cpu`）
+- GK-015：rewrite 后的逐元素加法 memory+symbol.int 形态在 cpu target 下可生成 `cpu::add(arg1, v0, arg0);` 函数体，并保留 `long long` 标量参数。（`test_gen_kernel_supports_lowered_nn_add_memory_symbol_on_cpu`）
 - GK-016：rewrite 后 `memory + scalar` mixed output 函数中，memory 走前置 `arg0`，scalar 继续返回。（`test_gen_kernel_accepts_rewritten_mixed_output_function`）
 - GK-017：`target="npu_demo"` 可消费受控 `builtin.module` 子集并生成双函数源码：`static` body（首参 `npu_demo::KernelContext& ctx`）+ 非 `static` wrapper；wrapper 必须调用 `npu_demo::launch<1, 4, 1>(body, ...)`。（`test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body`）
 - GK-018：`target="npu_demo"` 的 body 函数可生成 `Kernel` 公共 helper 所需的 dynamic memory、`view/slice -> ctx.barrier -> Kernel helper -> ctx.barrier -> deslice` 的固定顺序，并且不出现公开 `Nn` 别名、`.view<`、`load<`、`store<`、`auto tile = slice(` 或 `ctx.sync_threads(`。（`test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body`、`test_gen_kernel_compiles_npu_demo_launch_wrapper_and_barrier_body`）

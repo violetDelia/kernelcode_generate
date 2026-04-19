@@ -129,10 +129,10 @@ func.return %out : !nn.memory<f32, [N, C], GM>
 
 功能说明：
 
-- `kernel.add/sub/mul/div`
-- `kernel.eq/ne/lt/le/gt/ge`
-- `kernel.cast`
-- `kernel.softmax`
+- 旧具名逐元素算术 op
+- 旧具名逐元素比较 op
+- 旧 cast op
+- 旧 softmax op
 
 注意事项：
 

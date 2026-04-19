@@ -523,6 +523,9 @@ _SPACE_TOKENS = {
     "local": "LM",
     "tsm": "TSM",
     "tlm": "TLM",
+    "tlm1": "TLM",
+    "tlm2": "TLM",
+    "tlm3": "TLM",
 }
 _ANALYSIS_METRIC_KEYS = ("path_bandwidth", "path_latency_ns", "theoretical_compute")
 
@@ -1892,8 +1895,9 @@ def _coerce_memory_analyzer_result(
                 for item in analyzed.memory_items
             ]
         compute_items: list[ComputeItem] = []
-        if config.enable_compute and op.name == "dma.cast" and op.results:
-            result_type = op.results[0].type
+        if config.enable_compute and op.name == "dma.cast":
+            result_type = getattr(op, "target", None)
+            result_type = getattr(result_type, "type", None)
             if isinstance(result_type, NnMemoryType):
                 numel = _numel_from_mem_type(result_type)
                 if numel is not None:
