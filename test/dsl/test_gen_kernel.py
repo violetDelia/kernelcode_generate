@@ -236,6 +236,7 @@ def _make_npu_demo_add_barrier_module(
     body_block = Block(arg_types=[IndexType(), gm_type, gm_type, gm_type])
     thread_offset = FakeSymbolValueOp("thread_id * 16")
     rhs_offset = FakeSymbolValueOp("64 + thread_id * 16")
+    out_offset = FakeSymbolValueOp("128 + thread_id * 16")
     zero = FakeSymbolValueOp("0")
     size = FakeSymbolValueOp("16")
     stride = FakeSymbolValueOp("1")
@@ -247,17 +248,18 @@ def _make_npu_demo_add_barrier_module(
     rhs_gm = DmaViewOp(body_block.args[2], [thread_offset.result], [size.result], [stride.result], gm_tile_type)
     lhs_tsm = DmaViewOp(tsm.result, [thread_offset.result], [size.result], [stride.result], tsm_tile_type)
     rhs_tsm = DmaViewOp(tsm.result, [rhs_offset.result], [size.result], [stride.result], tsm_tile_type)
-    out_tlm = DmaViewOp(tlm.result, [thread_offset.result], [size.result], [stride.result], tlm_tile_type)
+    out_tsm = DmaViewOp(tsm.result, [out_offset.result], [size.result], [stride.result], tsm_tile_type)
     lhs_slice = DmaSliceOp(lhs_tsm.result, lhs_gm.result, [zero.result], [size.result], [stride.result])
     rhs_slice = DmaSliceOp(rhs_tsm.result, rhs_gm.result, [zero.result], [size.result], [stride.result])
     barrier0 = ArchBarrierOp(ArchScopeAttr.from_name(barrier_scope), barrier_visibility)
-    add = NnAddOp(lhs_tsm.result, rhs_tsm.result, tlm_tile_type, NnMemorySpaceAttr.from_name(tlm_space))
+    add = NnAddOp(lhs_tsm.result, rhs_tsm.result, tsm_tile_type, NnMemorySpaceAttr.from_name("tsm"))
     barrier1 = ArchBarrierOp(ArchScopeAttr.from_name(barrier_scope), barrier_visibility)
     deslice = DmaDesliceOp(add.result, body_block.args[3], [thread_offset.result], [size.result], [stride.result], gm_type)
     body_block.add_ops(
         [
             thread_offset,
             rhs_offset,
+            out_offset,
             zero,
             size,
             stride,
@@ -269,7 +271,7 @@ def _make_npu_demo_add_barrier_module(
             rhs_gm,
             lhs_tsm,
             rhs_tsm,
-            out_tlm,
+            out_tsm,
             lhs_slice,
             rhs_slice,
             barrier0,
@@ -1437,7 +1439,7 @@ def test_gen_kernel_compiles_npu_demo_tiled_matmul_source() -> None:
     source = gen_kernel(rewritten_func, _npu_ctx())
 
     assert source.startswith('#include "include/npu_demo/npu_demo.h"\n')
-    assert "npu_demo::matmul(" in source
+    assert "npu_demo::matmul<" in source
     assert "slice(" in source
     assert "deslice(" in source
     assert "cpu::matmul(" not in source
@@ -1469,7 +1471,7 @@ def test_gen_kernel_emits_npu_demo_memory_pipeline() -> None:
     work_view_idx = source.index("auto work_tile = view(tsm, 0, 16, 1);")
     out_view_idx = source.index("auto out_tile = view(tsm, 0, 16, 1);")
     slice_idx = source.index("slice(work_tile, src_view, 0, 16, 1);")
-    add_idx = source.index("add(work_tile, work_tile, out_tile);")
+    add_idx = source.index("npu_demo::add<MemorySpace::TSM, float, float>(out_tile, work_tile, work_tile);")
     deslice_idx = source.index("deslice(out, out_tile, tid * 16, 16, 1);")
 
     assert tsm_idx < tlm_idx < src_view_idx < work_view_idx < out_view_idx < slice_idx < add_idx < deslice_idx
@@ -1987,8 +1989,8 @@ def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body(tlm_space: st
         "Memory<MemorySpace::TSM, float> tsm = ctx.get_dynamic_memory<MemorySpace::TSM, float>();"
     )
     assert f"Memory<MemorySpace::{space_enum}, float> tlm = ctx.get_dynamic_memory<MemorySpace::{space_enum}, float>();" in source
-    assert f"auto out_tlm = view(tlm, tid * 16, 16, 1);" in source
-    assert source.index("slice(lhs_tsm, lhs_gm, 0, 16, 1);") < source.index("add(lhs_tsm, rhs_tsm, out_tlm);") < source.index("deslice(out, out_tlm, tid * 16, 16, 1);")
+    assert f"auto out_tsm = view(tsm, 128 + tid * 16, 16, 1);" in source
+    assert source.index("slice(lhs_tsm, lhs_gm, 0, 16, 1);") < source.index("npu_demo::add<MemorySpace::TSM, float, float>(out_tsm, lhs_tsm, rhs_tsm);") < source.index("deslice(out, out_tsm, tid * 16, 16, 1);")
     assert "arch.launch_kernel" not in source
     assert "ctx.sync_threads" not in source
 

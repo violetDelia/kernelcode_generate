@@ -1,6 +1,7 @@
 /*
 功能说明:
 - 定义 npu_demo 单入口 include，透传 include/api 的统一声明并汇聚后端实现。
+- 当前公共计算 helper 已从 `include/api/Nn.h` 切到 `include/api/Kernel.h`。
 
 使用示例:
 - #include "include/npu_demo/npu_demo.h"
@@ -21,11 +22,11 @@
 #include "include/api/Arch.h"
 #include "include/api/Memory.h"
 #include "include/api/Dma.h"
-#include "include/api/Nn.h"
+#include "include/api/Kernel.h"
 #include "include/npu_demo/Core.h"
 #include "include/npu_demo/Arch.h"
 #include "include/npu_demo/Memory.h"
 #include "include/npu_demo/Dma.h"
-#include "include/npu_demo/Nn.h"
+#include "include/npu_demo/Kernel.h"
 
 #endif  // KERNELCODE_GENERATE_INCLUDE_NPU_DEMO_NPU_DEMO_H_

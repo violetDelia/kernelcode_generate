@@ -930,8 +930,8 @@ def _emit_kernel_binary_elewise_stmt(op: KernelBinaryElewiseOp, ctx: EmitCContex
 
     功能说明:
     - 在 `target=cpu` 下把 `kernel.binary_elewise(kind="add")` 收口为 `cpu::add(lhs, rhs, out);`。
-    - 在 `target=npu_demo` 下把 `kernel.binary_elewise(kind="add")` 收口为 `npu_demo::add(lhs, rhs, out);`。
-    - 其他 `kind` 继续报错，避免在本任务顺手扩展 compare/sub 等未点名能力。
+    - 在 `target=npu_demo` 下把二元 helper 收口为显式模板参数且 `out-first` 的
+      `npu_demo::<helper><Space, InType, OutType>(out, lhs, rhs);`。
 
     使用示例:
     - stmt = emit_c_op(binary_op, EmitCContext(target="cpu"))
@@ -942,16 +942,39 @@ def _emit_kernel_binary_elewise_stmt(op: KernelBinaryElewiseOp, ctx: EmitCContex
     - 功能实现: kernel_gen/dsl/emit_c.py
     """
 
-    kind = op.kind.data
-    if kind != "add":
-        raise _emit_error(ctx, op.name, f"unsupported kind={kind}")
     lhs_expr = _memory_base_name(op.lhs, ctx)
     rhs_expr = _memory_base_name(op.rhs, ctx)
     out_expr = _memory_base_name(op.out, ctx)
+    kind = op.kind.data
     if ctx.target == "cpu":
+        if kind != "add":
+            raise _emit_error(ctx, op.name, f"unsupported kind={kind}")
         return f"{ctx.current_indent}cpu::add({lhs_expr}, {rhs_expr}, {out_expr});"
     if ctx.target == "npu_demo":
-        return f"{ctx.current_indent}npu_demo::add({lhs_expr}, {rhs_expr}, {out_expr});"
+        if not isinstance(op.lhs.type, NnMemoryType) or not isinstance(op.rhs.type, NnMemoryType) or not isinstance(op.out.type, NnMemoryType):
+            raise _emit_error(ctx, op.name, "unsupported op")
+        helper_map = {
+            "add": "add",
+            "sub": "sub",
+            "mul": "mul",
+            "div": "truediv",
+            "eq": "eq",
+            "ne": "ne",
+            "lt": "lt",
+            "le": "le",
+            "gt": "gt",
+            "ge": "ge",
+        }
+        helper_name = helper_map.get(kind)
+        if helper_name is None:
+            raise _emit_error(ctx, op.name, f"unsupported kind={kind}")
+        space_expr = _space_to_c(op.out.type, ctx)
+        input_type = _type_to_c(op.lhs.type.element_type, ctx)
+        output_type = _type_to_c(op.out.type.element_type, ctx)
+        return (
+            f"{ctx.current_indent}npu_demo::{helper_name}<{space_expr}, {input_type}, {output_type}>"
+            f"({out_expr}, {lhs_expr}, {rhs_expr});"
+        )
     raise _emit_error(ctx, op.name, "unsupported target")
 
 
@@ -962,7 +985,8 @@ def _emit_npu_kernel_add_stmt(op: KernelAddOp, ctx: EmitCContext) -> str:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 把 lowered `kernel.add(lhs, rhs, out)` 发射为 `npu_demo::add(lhs, rhs, out);`。
+    - 把 lowered `kernel.add(lhs, rhs, out)` 发射为显式模板参数且 `out-first` 的
+      `npu_demo::add<Space, InType, OutType>(out, lhs, rhs);`。
     - 仅接受 memory-to-memory 形式。
 
     使用示例:
@@ -981,7 +1005,13 @@ def _emit_npu_kernel_add_stmt(op: KernelAddOp, ctx: EmitCContext) -> str:
     lhs_expr = _memory_base_name(op.lhs, ctx)
     rhs_expr = _memory_base_name(op.rhs, ctx)
     out_expr = _memory_base_name(op.out, ctx)
-    return f"{ctx.current_indent}npu_demo::add({lhs_expr}, {rhs_expr}, {out_expr});"
+    space_expr = _space_to_c(op.out.type, ctx)
+    input_type = _type_to_c(op.lhs.type.element_type, ctx)
+    output_type = _type_to_c(op.out.type.element_type, ctx)
+    return (
+        f"{ctx.current_indent}npu_demo::add<{space_expr}, {input_type}, {output_type}>"
+        f"({out_expr}, {lhs_expr}, {rhs_expr});"
+    )
 
 
 def _emit_npu_view_stmt(op: DmaViewOp, ctx: EmitCContext) -> str:
@@ -1198,7 +1228,8 @@ def _emit_npu_add_stmt(op: NnAddOp, ctx: EmitCContext) -> str:
     最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 把 `nn.add(memory, memory)` 发射为 `add(lhs, rhs, out);`。
+    - 把 `nn.add(memory, memory)` 发射为显式模板参数且 `out-first` 的
+      `npu_demo::add<Space, InType, OutType>(out, lhs, rhs);`。
     - 结果必须预绑定为现有 memory 目标名；不在本层隐式声明临时输出。
 
     使用示例:
@@ -1212,12 +1243,20 @@ def _emit_npu_add_stmt(op: NnAddOp, ctx: EmitCContext) -> str:
 
     if not isinstance(op.lhs.type, NnMemoryType) or not isinstance(op.rhs.type, NnMemoryType):
         raise _emit_error(ctx, op.name, "unsupported op")
+    if not isinstance(op.result.type, NnMemoryType):
+        raise _emit_error(ctx, op.name, "unsupported op")
     result_name = ctx.lookup_name(op.result)
     if result_name is None:
         raise _emit_error(ctx, op.name, "unsupported op")
     lhs_expr = _memory_base_name(op.lhs, ctx)
     rhs_expr = _memory_base_name(op.rhs, ctx)
-    return f"{ctx.current_indent}add({lhs_expr}, {rhs_expr}, {result_name});"
+    space_expr = _space_to_c(op.result.type, ctx)
+    input_type = _type_to_c(op.lhs.type.element_type, ctx)
+    output_type = _type_to_c(op.result.type.element_type, ctx)
+    return (
+        f"{ctx.current_indent}npu_demo::add<{space_expr}, {input_type}, {output_type}>"
+        f"({result_name}, {lhs_expr}, {rhs_expr});"
+    )
 
 
 def _emit_npu_kernel_matmul_stmt(op: KernelMatmulOp, ctx: EmitCContext) -> str:
@@ -1227,7 +1266,8 @@ def _emit_npu_kernel_matmul_stmt(op: KernelMatmulOp, ctx: EmitCContext) -> str:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 把 lowered `kernel.matmul(lhs, rhs, out)` 发射为 `npu_demo::matmul(lhs, rhs, out);`。
+    - 把 lowered `kernel.matmul(lhs, rhs, out)` 发射为显式模板参数且 `out-first` 的
+      `npu_demo::matmul<LhsSpace, RhsSpace, OutSpace, LhsType, RhsType, OutType>(out, lhs, rhs);`。
     - 只在 `target=npu_demo` 公开该后端专用 helper。
 
     使用示例:
@@ -1242,7 +1282,16 @@ def _emit_npu_kernel_matmul_stmt(op: KernelMatmulOp, ctx: EmitCContext) -> str:
     lhs_expr = _memory_base_name(op.lhs, ctx)
     rhs_expr = _memory_base_name(op.rhs, ctx)
     out_expr = _memory_base_name(op.out, ctx)
-    return f"{ctx.current_indent}npu_demo::matmul({lhs_expr}, {rhs_expr}, {out_expr});"
+    lhs_space = _space_to_c(op.lhs.type, ctx)
+    rhs_space = _space_to_c(op.rhs.type, ctx)
+    out_space = _space_to_c(op.out.type, ctx)
+    lhs_type = _type_to_c(op.lhs.type.element_type, ctx)
+    rhs_type = _type_to_c(op.rhs.type.element_type, ctx)
+    out_type = _type_to_c(op.out.type.element_type, ctx)
+    return (
+        f"{ctx.current_indent}npu_demo::matmul<{lhs_space}, {rhs_space}, {out_space}, "
+        f"{lhs_type}, {rhs_type}, {out_type}>({out_expr}, {lhs_expr}, {rhs_expr});"
+    )
 
 
 def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:

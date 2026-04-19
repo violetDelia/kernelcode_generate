@@ -1041,7 +1041,6 @@ def test_emit_c_maps_nn_space_to_template_param() -> None:
 def test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline() -> None:
     mem_type = _make_memory_type([16], [1], space="global", element_type=f32)
     tsm_type = _make_memory_type([16], [1], space="tsm", element_type=f32)
-    tlm_type = _make_memory_type([16], [1], space="tlm1", element_type=f32)
     block = Block(arg_types=[mem_type, mem_type])
     ctx = _npu_ctx()
     ctx.bind_name(block.args[0], "source")
@@ -1053,32 +1052,29 @@ def test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline() -> None:
     tid = ArchGetThreadIdOp()
     tnum = ArchGetThreadNumOp()
     tsm = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("tsm"), tsm_type)
-    tlm = ArchGetDynamicMemoryOp(NnMemorySpaceAttr.from_name("tlm1"), tlm_type)
     src_view = DmaViewOp(block.args[0], [tid.result], [size.result], [stride.result], mem_type)
     work_tile_view = DmaViewOp(tsm.result, [zero.result], [size.result], [stride.result], tsm_type)
-    out_tile_view = DmaViewOp(tlm.result, [zero.result], [size.result], [stride.result], tlm_type)
+    out_tile_view = DmaViewOp(tsm.result, [zero.result], [size.result], [stride.result], tsm_type)
     slice_op = DmaSliceOp(work_tile_view.result, src_view.result, [zero.result], [size.result], [stride.result])
-    add_op = NnAddOp(work_tile_view.result, work_tile_view.result, tlm_type, NnMemorySpaceAttr.from_name("tlm1"))
+    add_op = NnAddOp(work_tile_view.result, work_tile_view.result, tsm_type, NnMemorySpaceAttr.from_name("tsm"))
     deslice_op = DmaDesliceOp(add_op.result, block.args[1], [tid.result], [size.result], [stride.result], mem_type)
 
     ctx.bind_name(tid.result, "tid")
     ctx.bind_name(tnum.result, "tnum")
     ctx.bind_name(tsm.result, "tsm")
-    ctx.bind_name(tlm.result, "tlm")
     ctx.bind_name(src_view.result, "src_view")
     ctx.bind_name(work_tile_view.result, "work_tile")
     ctx.bind_name(out_tile_view.result, "out_tile")
     ctx.bind_name(add_op.result, "out_tile")
 
     stmt = "\n".join(
-        [
-            emit_c_op(tid, ctx),
-            emit_c_op(tnum, ctx),
-            emit_c_op(tsm, ctx),
-            emit_c_op(tlm, ctx),
-            emit_c_op(src_view, ctx),
-            emit_c_op(work_tile_view, ctx),
-            emit_c_op(out_tile_view, ctx),
+            [
+                emit_c_op(tid, ctx),
+                emit_c_op(tnum, ctx),
+                emit_c_op(tsm, ctx),
+                emit_c_op(src_view, ctx),
+                emit_c_op(work_tile_view, ctx),
+                emit_c_op(out_tile_view, ctx),
             emit_c_op(slice_op, ctx),
             emit_c_op(add_op, ctx),
             emit_c_op(deslice_op, ctx),
@@ -1088,13 +1084,12 @@ def test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline() -> None:
     assert "long long tid = ctx.thread_id();" in stmt
     assert "long long tnum = ctx.thread_num();" in stmt
     assert "Memory<TSM, float> tsm = ctx.get_dynamic_memory<TSM, float>();" in stmt
-    assert "Memory<TLM1, float> tlm = ctx.get_dynamic_memory<TLM1, float>();" in stmt
     assert "auto src_view = view(source, tid, 16, 1);" in stmt
     assert "auto work_tile = view(tsm, 0, 16, 1);" in stmt
-    assert "auto out_tile = view(tlm, 0, 16, 1);" in stmt
+    assert "auto out_tile = view(tsm, 0, 16, 1);" in stmt
     assert "slice(work_tile, src_view, 0, 16, 1);" in stmt
-    assert "add(work_tile, work_tile, out_tile);" in stmt
-    assert "deslice(out_tile, out, tid, 16, 1);" in stmt
+    assert "npu_demo::add<TSM, float, float>(out_tile, work_tile, work_tile);" in stmt
+    assert "deslice(out, out_tile, tid, 16, 1);" in stmt
     assert ".view<" not in stmt
     assert "load<" not in stmt
     assert "store<" not in stmt
@@ -1151,7 +1146,10 @@ def test_emit_c_lowers_npu_demo_tiled_matmul_pipeline() -> None:
     )
     assert re.search(r"slice\(v\d+, lhs, slice_offset0_vec, slice_size1_vec, slice_stride2_vec\);", stmt)
     assert re.search(r"slice\(v\d+, rhs, slice_offset3_vec, slice_size4_vec, slice_stride5_vec\);", stmt)
-    assert re.search(r"npu_demo::matmul\(v\d+, v\d+, v\d+\);", stmt)
+    assert re.search(
+        r"npu_demo::matmul<[^>]+>\(v\d+, v\d+, v\d+\);",
+        stmt,
+    )
     assert re.search(r"deslice\(v\d+, v\d+, deslice_offset6_vec, deslice_size7_vec, deslice_stride8_vec\);", stmt)
     assert "nn.matmul" not in stmt
     assert "arch.launch_kernel" not in stmt

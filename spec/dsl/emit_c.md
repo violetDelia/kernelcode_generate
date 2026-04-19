@@ -10,7 +10,7 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`咯咯咯`（2026-04-15）
+- 最后一次更改：`朽木露琪亚`（2026-04-19）
 - `spec`：[`spec/dsl/emit_c.md`](../../spec/dsl/emit_c.md)
 - `功能实现`：[`kernel_gen/dsl/emit_c.py`](../../kernel_gen/dsl/emit_c.py)
 - `test`：[`test/dsl/test_emit_c.py`](../../test/dsl/test_emit_c.py)
@@ -19,6 +19,7 @@
 
 - [`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)：MLIR `func.func` 生成来源。
 - [`spec/dsl/gen_kernel.md`](../../spec/dsl/gen_kernel.md)：函数级源码生成入口。
+- [`spec/include/api/Kernel.md`](../../spec/include/api/Kernel.md)：`target=npu_demo` 下 `Kernel` helper 的公开名字、模板顺序与参数顺序合同。
 - [`kernel_gen/dsl/emit_c.py`](../../kernel_gen/dsl/emit_c.py)：节点级源码片段生成实现。
 - [`test/dsl/test_emit_c.py`](../../test/dsl/test_emit_c.py)：节点级源码片段生成测试。
 
@@ -27,7 +28,7 @@
 - 为常见算术、比较、控制流与访存 op 提供稳定的节点级源码片段生成规则。
 - 保证同一 SSA value 在同一 `EmitCContext` 中具备稳定命名与稳定表达式输出。
 - 为后续实现恢复明确最小支持范围：`arith` 二元算术、`arith.cmpi`、`scf.for`、`symbol.for`、unit-tile `dma.load`/`dma.store`、`dma.alloc`/`dma.view`/`dma.slice`/`dma.deslice`、`symbol.add`（cpu 标量）、`nn.img2col2d`（cpu memory）、`nn.add`（cpu，需预绑定结果目标）与错误路径。
-- 为 `target="npu_demo"` 冻结节点级文本映射合同，明确 `KernelContext` 查询、`TSM/TLM` dynamic memory、`view/slice/deslice/add` 在节点层的稳定发射形态，供后续实现与 `gen_kernel` 骨架拼装收口。
+- 为 `target="npu_demo"` 冻结节点级文本映射合同，明确 `KernelContext` 查询、`TSM/TLM` dynamic memory、`view/slice/deslice` 与 `Kernel` helper family 在节点层的稳定发射形态，供后续实现与 `gen_kernel` 骨架拼装收口。
 
 ## 限制与边界
 
@@ -46,7 +47,7 @@
 - 当 value 类型为 `!symbol.int<"...">` 时，`target=cpu` 默认映射为 `long long`。
 - 当前 `test/dsl/test_emit_c.py` 已定义并可直接映射的用例范围以本节 `EC-001` ~ `EC-011` 为准；`EC-012` ~ `EC-016` 在本阶段仅冻结为 `nn.add` 的节点级验收标准，待下游测试落地后再补具体测试映射。
 - 对 `target=npu_demo`，本层只冻结节点级文本映射，不定义完整函数签名或 `npu_demo::KernelContext& ctx` 的参数注入方式；上层 `gen_kernel` 需提供稳定上下文变量名 `ctx`，本层只消费该绑定。
-- 对 `target=npu_demo`，当前只承认 `thread_id/thread_num` 查询、`TSM/TLM` dynamic memory、`view/slice/deslice/add` 的成功发射路径；不得回退到 `source.view<T>(...)`、`load<...>`、`store<...>`、`launch`、`barrier` 或 `arch.launch_kernel`。
+- 对 `target=npu_demo`，当前只承认 `thread_id/thread_num` 查询、`TSM/TLM` dynamic memory、`view/slice/deslice` 与 [`spec/include/api/Kernel.md`](../../spec/include/api/Kernel.md) 已冻结的 helper family 的成功发射路径；不得回退到旧公开 `Nn` 层、`source.view<T>(...)`、`load<...>`、`store<...>`、`launch`、`barrier` 或 `arch.launch_kernel`。
 - 当前 CPU 恢复范围继续以 `test/dsl/test_emit_c.py` 已定义用例为准；`target=npu_demo` 的专项验收目标先行冻结，留待后续实现阶段补齐对应测试。
 
 ## 公开接口
@@ -267,7 +268,7 @@ cpu::img2col2d(input_tile, col_tile, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr);
 
 - 以下规则仅适用于 `target=npu_demo`，且只定义单个查询/访存/算子节点如何发成 body-level kernel 内部的局部文本片段。
 - 本层不声明 `npu_demo::KernelContext` 局部变量，也不定义完整函数签名；上层 `gen_kernel` 必须提供已绑定的上下文变量名 `ctx`，本层只负责引用 `ctx.thread_id()`、`ctx.thread_num()` 与 `ctx.get_dynamic_memory<Space, T>()`。
-- 本层当前只收口 `thread_id/thread_num` 查询、`TSM/TLM` dynamic memory、`view`、目标式 `slice`、`deslice` 与 `add`。
+- 本层当前只收口 `thread_id/thread_num` 查询、`TSM/TLM` dynamic memory、`view`、目标式 `slice`、`deslice` 与 `Kernel` helper family。
 - 本层不得回退到 CPU 风格 `.view<T>()`、`load<...>`、`store<...>`、显式 loop nest copy、`launch`、`barrier` 或 `arch.launch_kernel`。
 
 ### `arch.get_thread_id` / `arch.get_thread_num`
@@ -359,22 +360,23 @@ deslice(out_tile, out, tid * 16, 16, 1);
 - 参数顺序必须固定为 `source -> target -> offset -> size -> stride`。
 - 不得发射为显式 loop nest copy、`store<...>` 组合或其他 CPU 旁路文本。
 
-### `nn.add`
+### `kernel.add`
 
 功能说明：
 
-- `npu_demo` 下的逐元素加法节点必须发射为稳定的目标 helper 调用 `add(lhs, rhs, out);`。
+- `npu_demo` 下的逐元素加法节点必须发射为稳定的公共 `Kernel` helper 调用 `npu_demo::add<...>(out, lhs, rhs);`。
 
 使用示例：
 
 ```cpp
-add(work_tile, work_tile, out_tile);
+npu_demo::add<TSM, float, float>(out_tile, lhs_tile, rhs_tile);
 ```
 
 注意事项：
 
-- 参数顺序必须固定为 `lhs -> rhs -> out`。
-- 不得回退到 `cpu::add(...)`、运算符表达式拼接或 `load/store` 形式。
+- 参数顺序必须固定为 `out -> lhs -> rhs`。
+- 模板顺序必须与 [`spec/include/api/Kernel.md`](../../spec/include/api/Kernel.md) 一致。
+- 不得回退到公开 `Nn` helper、`cpu::add(...)`、运算符表达式拼接或 `load/store` 形式。
 
 ### `execute_engine + npu_demo + matmul` 节点文本合同（S1）
 
@@ -387,7 +389,7 @@ add(work_tile, work_tile, out_tile);
 ```cpp
 slice(lhs_tile, lhs, m0, 16, 1);
 slice(rhs_tile, rhs, n0, 16, 1);
-npu_demo::matmul(lhs_tile, rhs_tile, out_tile);
+npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out_tile, lhs_tile, rhs_tile);
 deslice(out_tile, out, m0, 16, 1);
 ```
 
