@@ -35,9 +35,11 @@
 - `start/end/step` 只接受 `int | SymbolDim`，并显式拒绝 `bool`；不得依赖 Python `bool` 是 `int` 子类的行为绕过校验。
 - 不允许 `step == 0`；`step` 为 0 必须抛出错误。
 - 当 `start/end/step` 中存在 `SymbolDim` 时，不要求在 Python 运行期求值或展开，只保留符号表达语义。
-- 当 `start/end/step` 含 `SymbolDim` 且无法推导真实迭代次数时，引入 `trip_count`（可选 keyword，默认 `1`，由上游决定）；迭代序列为 `start + step * i`，`i = 0..trip_count-1`。
+- 当 `start/end/step` 含 `SymbolDim` 且无法推导真实迭代次数时，引入 `trip_count`（可选 keyword，默认 `1`，由上游决定）；若 `trip_count` 为整数，则 operation/Python helper 层的迭代序列为 `start + step * i`，`i = 0..trip_count-1`。
+- 当 `trip_count` 本身也是 `SymbolDim` 时，当前 operation/Python helper 层只保守产出首项 `start`，不承诺在运行期按符号次数完整展开；lowering 仍只消费 `start/end/step` 的符号范围语义，不消费该有限展开结果。
 - `trip_count` 只接受 `int | SymbolDim | None`，并显式拒绝 `bool`；`None` 仅表示按默认值 `1` 归一化。
 - `trip_count <= 0` 必须抛出错误（建议 `ValueError`），不得 silent fallback 或默认当作 `1`。
+- `LoopRange(...)` 作为公开可直接构造入口，必须与 `loop(...)` 共用同一组输入校验与 `trip_count=None -> 1` 的归一化规则。
 
 ## 公开接口
 
@@ -54,7 +56,7 @@
 - `start (int | SymbolDim)`：起始索引。
 - `end (int | SymbolDim)`：结束索引（半开区间终止）。
 - `step (int | SymbolDim)`：步长，禁止为 `0`。
-- `trip_count (int | SymbolDim | None)`：可选 keyword 迭代次数；当 `start/end/step` 含 `SymbolDim` 且无法推导真实次数时使用；默认 `1`。
+- `trip_count (int | SymbolDim | None)`：可选 keyword 迭代次数；当 `start/end/step` 含 `SymbolDim` 且无法推导真实次数时使用；默认 `1`。若 `trip_count` 为整数，则运行期 helper 有限展开 `trip_count` 项；若 `trip_count` 为 `SymbolDim`，当前只保守产出首项。
 
 使用示例：
 
@@ -88,13 +90,17 @@ for t in loop(SymbolDim("S"), SymbolDim("S") + SymbolDim("K"), SymbolDim("K"), t
 - `trip_count <= 0` 必须抛出 `ValueError`；不得 silent fallback 或默认当作 `1`。
 - 当输入包含 `SymbolDim` 时，迭代变量代表符号索引，不要求在运行期展开为具体序列。
 - 当无法推导真实迭代次数时，上游可显式提供 `trip_count`；未提供时默认 `1`，且 `trip_count <= 0` 必须报错。
+- 当 `trip_count` 为整数时，operation/Python helper 层按 `start + step * i` 生成有限序列；当 `trip_count` 为 `SymbolDim` 时，当前只保守返回首项 `start`，避免在运行期伪造符号次数展开。
+- `trip_count` 的运行期作用仅限 operation/Python helper 层的有限展开；lowering 不消费该字段。
 
 返回与限制：
 
 - 返回可迭代对象 `LoopRange`（实现名可自定义，但语义需一致）。
 - 对纯整数输入，迭代行为与 `range(start, end, step)` 等价。
-- 对含 `SymbolDim` 输入，迭代变量的符号表达遵循 `start + k * step` 的语义约束，其中 `k` 为非负整数索引；当无法推导真实迭代次数时，`k` 的范围为 `0..trip_count-1`。
+- 对含 `SymbolDim` 输入，迭代变量的符号表达遵循 `start + k * step` 的语义约束，其中 `k` 为非负整数索引；当 `trip_count` 为整数时，运行期 helper 生成 `k = 0..trip_count-1` 的有限序列。
+- 当 `trip_count` 为 `SymbolDim` 时，当前运行期 helper 只保守返回首项 `start`，不承诺按符号次数完整展开。
 - 返回对象需公开只读的 `start/end/step/trip_count` 属性（或等价访问接口），以便上层 DSL 保留范围表达并用于测试校验。
+- `LoopRange(...)` 直接构造时，公开行为必须与 `loop(...)` 保持一致，不能绕过 `bool` / 非法类型 / 非法 `trip_count` 的显式校验。
 
 ## 测试
 
@@ -117,3 +123,4 @@ for t in loop(SymbolDim("S"), SymbolDim("S") + SymbolDim("K"), SymbolDim("K"), t
   - TC-OP-SCF-005：`start/end/step` 存在非法类型时抛出 `TypeError`。
   - TC-OP-SCF-006：隐式 `trip_count <= 0` 必须报错，不得 fallback。
   - TC-OP-SCF-007：显式 `trip_count = 3` 时迭代语义为 `start`、`start + step`、`start + step * 2`。
+  - TC-OP-SCF-013：`trip_count = SymbolDim("T")` 时，当前运行期 helper 只保守返回首项 `start`，并保留 `trip_count` 本身供上层读取。

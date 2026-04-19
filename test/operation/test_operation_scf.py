@@ -175,6 +175,11 @@ def test_loop_symbolic_step_contract() -> None:
     assert loop_range.end.get_value() == "N"
     assert loop_range.step.get_value() == "S"
     assert loop_range.trip_count == 3
+    assert [item if isinstance(item, int) else item.get_value() for item in loop_range] == [
+        0,
+        "S",
+        "2*S",
+    ]
 
 
 # TC-OP-SCF-006
@@ -212,4 +217,60 @@ def test_loop_trip_count_sequence_semantics() -> None:
     loop_range = loop(1, end, 2, trip_count=3)
     assert isinstance(loop_range, LoopRange)
     assert loop_range.trip_count == 3
-    assert [loop_range.start + loop_range.step * i for i in range(loop_range.trip_count)] == [1, 3, 5]
+    assert list(loop_range) == [1, 3, 5]
+
+
+# TC-OP-SCF-011
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-19 20:55:00 +0800
+# 最近一次运行成功时间: 2026-04-19 20:55:00 +0800
+# 测试目的: 验证 LoopRange(...) 直接构造与 loop(...) 共享输入校验。
+# 使用示例: pytest -q test/operation/test_operation_scf.py -k test_looprange_shares_input_validation
+# 对应功能实现文件路径: kernel_gen/operation/scf.py
+# 对应 spec 文件路径: spec/operation/scf.md
+# 对应测试文件路径: test/operation/test_operation_scf.py
+def test_looprange_shares_input_validation() -> None:
+    with pytest.raises(TypeError, match="start must be int or SymbolDim"):
+        LoopRange(True, 4, 1)
+    with pytest.raises(TypeError, match="end must be int or SymbolDim"):
+        LoopRange(0, object(), 1)
+    with pytest.raises(TypeError, match="trip_count must be int or SymbolDim"):
+        LoopRange(0, SymbolDim("N"), SymbolDim("S"), trip_count=True)
+    with pytest.raises(ValueError, match="trip_count must be > 0"):
+        LoopRange(0, SymbolDim("N"), SymbolDim("S"), trip_count=0)
+
+
+# TC-OP-SCF-012
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-19 20:55:00 +0800
+# 最近一次运行成功时间: 2026-04-19 20:55:00 +0800
+# 测试目的: 验证 LoopRange(...) 直接构造会把 trip_count=None 归一化为 1。
+# 使用示例: pytest -q test/operation/test_operation_scf.py -k test_looprange_none_trip_count_defaults_to_one
+# 对应功能实现文件路径: kernel_gen/operation/scf.py
+# 对应 spec 文件路径: spec/operation/scf.md
+# 对应测试文件路径: test/operation/test_operation_scf.py
+def test_looprange_none_trip_count_defaults_to_one() -> None:
+    loop_range = LoopRange(0, SymbolDim("N"), SymbolDim("S"), trip_count=None)
+    assert loop_range.trip_count == 1
+    assert list(loop_range) == [0]
+
+
+# TC-OP-SCF-013
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-19 21:00:00 +0800
+# 最近一次运行成功时间: 2026-04-19 21:00:00 +0800
+# 测试目的: 验证 trip_count=SymbolDim 时当前运行期 helper 仅保守产出首项，并保留 trip_count 本身。
+# 使用示例: pytest -q test/operation/test_operation_scf.py -k test_loop_symbolic_trip_count_is_conservative_single_item
+# 对应功能实现文件路径: kernel_gen/operation/scf.py
+# 对应 spec 文件路径: spec/operation/scf.md
+# 对应测试文件路径: test/operation/test_operation_scf.py
+def test_loop_symbolic_trip_count_is_conservative_single_item() -> None:
+    trip_count = SymbolDim("T")
+    loop_range = loop(0, SymbolDim("N"), SymbolDim("S"), trip_count=trip_count)
+
+    assert isinstance(loop_range, LoopRange)
+    assert loop_range.trip_count is trip_count
+    assert list(loop_range) == [0]
