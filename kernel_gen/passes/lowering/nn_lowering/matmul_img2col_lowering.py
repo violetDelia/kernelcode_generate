@@ -566,7 +566,7 @@ def _lower_matmul(block: Block, op: Operation) -> None:
     alloc = DmaAllocOp(symbol_dims, result_type)
     block.insert_op_before(alloc, op)
     result = alloc.results[0]
-    lowered = KernelMatmulOp(lhs, rhs, result, space)
+    lowered = KernelMatmulOp(result, lhs, rhs, space)
     block.insert_op_before(lowered, op)
     op.results[0].replace_by(result)
     block.erase_op(op)

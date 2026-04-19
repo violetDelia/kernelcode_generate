@@ -90,7 +90,7 @@ def _build_elementwise_module(shape_names: list[str]) -> ModuleOp:
     mem_type = _make_memory_type(shape_names)
     block = Block(arg_types=[mem_type, mem_type, mem_type])
     space = NnMemorySpaceAttr.from_name("global")
-    block.add_ops([KernelAddOp(block.args[0], block.args[1], block.args[2], space), func.ReturnOp()])
+    block.add_ops([KernelAddOp(block.args[2], block.args[0], block.args[1], space), func.ReturnOp()])
     func_op = func.FuncOp(
         "tile_elementwise",
         FunctionType.from_lists([mem_type, mem_type, mem_type], []),
@@ -166,8 +166,8 @@ def _build_fc_chain_module() -> ModuleOp:
             bias_b,
             mat_out,
             DmaBroadcastOp(bias_b.result, block.args[3]),
-            _KernelMatmulOp(block.args[1], block.args[2], mat_out.result, space),
-            KernelBinaryElewiseOp(mat_out.result, bias_b.result, block.args[0], kind="add", space=space),
+            _KernelMatmulOp(mat_out.result, block.args[1], block.args[2], space),
+            KernelBinaryElewiseOp(block.args[0], mat_out.result, bias_b.result, kind="add", space=space),
             func.ReturnOp(),
         ]
     )
@@ -221,7 +221,7 @@ class _KernelMatmulOp(IRDLOperation):
     - 为 matmul 分支提供最小 kernel.matmul 语义。
 
     使用示例:
-    - _KernelMatmulOp(lhs, rhs, out, space)
+    - _KernelMatmulOp(out, lhs, rhs, space)
 
     关联文件:
     - spec: spec/pass/lowering/tile.md
@@ -231,16 +231,16 @@ class _KernelMatmulOp(IRDLOperation):
 
     name = "kernel.matmul"
 
+    out = operand_def(NnMemoryType)
     lhs = operand_def(NnMemoryType)
     rhs = operand_def(NnMemoryType)
-    out = operand_def(NnMemoryType)
     space = attr_def(NnMemorySpaceAttr)
 
     def __init__(
         self,
+        out: Operation | Attribute,
         lhs: Operation | Attribute,
         rhs: Operation | Attribute,
-        out: Operation | Attribute,
         space: NnMemorySpaceAttr,
     ) -> None:
         """初始化测试用 kernel.matmul。
@@ -249,10 +249,10 @@ class _KernelMatmulOp(IRDLOperation):
         最后一次更改: 小李飞刀
 
         功能说明:
-        - 绑定 lhs/rhs/out 与 space 属性。
+        - 绑定 out/lhs/rhs 与 space 属性。
 
         使用示例:
-        - _KernelMatmulOp(lhs, rhs, out, space)
+        - _KernelMatmulOp(out, lhs, rhs, space)
 
         关联文件:
         - spec: spec/pass/lowering/tile.md
@@ -260,7 +260,7 @@ class _KernelMatmulOp(IRDLOperation):
         - 功能实现: kernel_gen/passes/lowering/tile.py
         """
 
-        super().__init__(operands=[lhs, rhs, out], attributes={"space": space})
+        super().__init__(operands=[out, lhs, rhs], attributes={"space": space})
 
     def verify_(self) -> None:
         """校验测试用 kernel.matmul。
@@ -384,7 +384,7 @@ def test_tile_matmul_builds_mnk_loops() -> None:
     out_type = _make_memory_type(["M", "N"])
     block = Block(arg_types=[lhs_type, rhs_type, out_type])
     space = NnMemorySpaceAttr.from_name("global")
-    block.add_ops([_KernelMatmulOp(block.args[0], block.args[1], block.args[2], space), func.ReturnOp()])
+    block.add_ops([_KernelMatmulOp(block.args[2], block.args[0], block.args[1], space), func.ReturnOp()])
     func_op = func.FuncOp(
         "tile_matmul",
         FunctionType.from_lists([lhs_type, rhs_type, out_type], []),
@@ -687,7 +687,7 @@ def test_tile_rejects_dead_carry_memory() -> None:
     shape_ops = [SymbolGetDimOp(block.args[0], axis) for axis in range(2)]
     alloc = DmaAllocOp([op.result for op in shape_ops], mem_type)
     space = NnMemorySpaceAttr.from_name("global")
-    block.add_ops([*shape_ops, alloc, KernelAddOp(block.args[0], block.args[1], alloc.result, space), func.ReturnOp()])
+    block.add_ops([*shape_ops, alloc, KernelAddOp(alloc.result, block.args[0], block.args[1], space), func.ReturnOp()])
     func_op = func.FuncOp(
         "tile_dead_carry",
         FunctionType.from_lists([mem_type, mem_type], []),
@@ -715,7 +715,7 @@ def test_tile_rejects_rank_mismatch() -> None:
     out_type = _make_memory_type(["M", "N"])
     block = Block(arg_types=[lhs_type, rhs_type, out_type])
     space = NnMemorySpaceAttr.from_name("global")
-    block.add_ops([KernelAddOp(block.args[0], block.args[1], block.args[2], space), func.ReturnOp()])
+    block.add_ops([KernelAddOp(block.args[2], block.args[0], block.args[1], space), func.ReturnOp()])
     func_op = func.FuncOp(
         "tile_rank_mismatch",
         FunctionType.from_lists([lhs_type, rhs_type, out_type], []),

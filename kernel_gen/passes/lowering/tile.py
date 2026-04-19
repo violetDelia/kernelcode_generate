@@ -429,7 +429,7 @@ def _kernel_out_operand(op: Operation) -> SSAValue:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 当前约定所有 `kernel.*` 的最后一个 operand 为写出 buffer。
+    - 当前约定所有 `kernel.*` 的第一个 operand 为写出 buffer。
 
     使用示例:
     - out_value = _kernel_out_operand(kernel_op)
@@ -440,7 +440,7 @@ def _kernel_out_operand(op: Operation) -> SSAValue:
     - 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
     """
 
-    return SSAValue.get(op.operands[-1])
+    return SSAValue.get(op.operands[0])
 
 
 def _validate_intermediate_materialization(func_op: func.FuncOp, block: Block) -> None:
@@ -1265,9 +1265,9 @@ def _rewrite_matmul_plan(
     """
 
     op = plan.op
-    lhs = SSAValue.get(op.operands[0])
-    rhs = SSAValue.get(op.operands[1])
-    out = SSAValue.get(op.operands[-1])
+    out = SSAValue.get(op.operands[0])
+    lhs = SSAValue.get(op.operands[1])
+    rhs = SSAValue.get(op.operands[2])
     if not (isinstance(lhs.type, NnMemoryType) and isinstance(rhs.type, NnMemoryType) and isinstance(out.type, NnMemoryType)):
         _raise_tile_error("TilePassRankMismatch", "matmul operands must be nn.memory")
     space_attr = op.attributes.get("space")
@@ -1340,16 +1340,16 @@ def _rewrite_matmul_plan(
             reduce_block.add_op(tmp_alloc)
             reduce_block.add_op(
                 KernelMatmulOp(
+                    tmp_alloc.results[0],
                     lhs_view.result,
                     rhs_view.result,
-                    tmp_alloc.results[0],
                     space,
                 )
             )
             reduce_block.add_op(
                 KernelBinaryElewiseOp(
-                    tmp_alloc.results[0],
                     out_view.result,
+                    tmp_alloc.results[0],
                     out_view.result,
                     kind="add",
                     space=space,
@@ -1381,9 +1381,9 @@ def _rewrite_matmul_plan(
     inner_block.add_op(out_view)
     inner_block.add_op(
         KernelMatmulOp(
+            out_view.result,
             lhs_view.result,
             rhs_view.result,
-            out_view.result,
             space,
         )
     )
@@ -1942,7 +1942,7 @@ def _build_matmul_tile_roles(op: Operation) -> list[list[str]]:
     operands = [SSAValue.get(operand) for operand in op.operands]
     if len(operands) < 3:
         _raise_tile_error("TilePassRankMismatch", "matmul requires 3 operands")
-    lhs, rhs, out = operands[0], operands[1], operands[-1]
+    out, lhs, rhs = operands[0], operands[1], operands[2]
     if not isinstance(lhs.type, NnMemoryType) or not isinstance(rhs.type, NnMemoryType) or not isinstance(out.type, NnMemoryType):
         _raise_tile_error("TilePassRankMismatch", "matmul operands must be nn.memory")
     if len(lhs.type.shape.data) != 2 or len(rhs.type.shape.data) != 2 or len(out.type.shape.data) != 2:
@@ -2232,9 +2232,9 @@ def _insert_matmul_views_and_ops(
 
     view_map: dict[SSAValue, SSAValue] = {}
     for op in kernel_ops:
-        lhs = SSAValue.get(op.operands[0])
-        rhs = SSAValue.get(op.operands[1])
-        out = SSAValue.get(op.operands[-1])
+        out = SSAValue.get(op.operands[0])
+        lhs = SSAValue.get(op.operands[1])
+        rhs = SSAValue.get(op.operands[2])
         if lhs not in view_map:
             view_map[lhs] = _make_view(
                 lhs,

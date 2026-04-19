@@ -19,7 +19,7 @@
 
 from __future__ import annotations
 
-from xdsl.dialects.builtin import IntAttr, StringAttr, UnregisteredOp
+from xdsl.dialects.builtin import IntAttr, StringAttr
 from xdsl.dialects.builtin import IntegerType
 from xdsl.dialects.builtin import (
     BFloat16Type,
@@ -123,7 +123,7 @@ def _lower_select_op(op: Operation, block: Block) -> None:
 
     shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_source(lhs_value, result_type)
     alloc = DmaAllocOp(dynamic_shape, result_type)
-    kernel_op = KernelSelectOp(cond_value, lhs_value, rhs_value, alloc.result, space)
+    kernel_op = KernelSelectOp(alloc.result, cond_value, lhs_value, rhs_value, space)
 
     try:
         alloc.verify()
@@ -174,13 +174,10 @@ def _lower_cast_op(op: Operation, block: Block) -> None:
 
     shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_source(input_value, result_type)
     alloc = DmaAllocOp(dynamic_shape, result_type)
-    dma_cast_op = UnregisteredOp.with_name("dma.cast").create(
-        operands=[alloc.result, input_value],
-        result_types=[],
-    )
+    dma_cast_op = DmaCastOp(alloc.result, input_value)
 
     try:
-        DmaCastOp(input_value, result_type).verify_()
+        dma_cast_op.verify_()
         alloc.verify()
     except VerifyException as exc:
         raise NnLoweringError(str(exc)) from exc

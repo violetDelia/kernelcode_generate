@@ -103,7 +103,7 @@ class LowerNnToKernelPass(Pass):
             block = op.parent
             if not isinstance(block, Block):
                 raise LowerNnToKernelError("lower-nn-to-kernel expects kernel op in block")
-            block.insert_op_before(KernelAddOp(op.lhs, op.rhs, op.out, op.space), op)
+            block.insert_op_before(KernelAddOp(op.out, op.lhs, op.rhs, op.space), op)
             block.erase_op(op)
         return lowered
 

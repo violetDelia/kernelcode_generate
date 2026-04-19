@@ -38,7 +38,6 @@ from xdsl.dialects.builtin import (
     IntegerAttr,
     ModuleOp,
     StringAttr,
-    UnregisteredOp,
     f32,
     i1,
     i32,
@@ -57,7 +56,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaFillOp, DmaTransposeOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCastOp, DmaFillOp, DmaTransposeOp
 from kernel_gen.dialect.kernel import (
     KernelBinaryElewiseOp,
     KernelExpOp,
@@ -333,8 +332,7 @@ def _assert_single_dma_cast_after_first_alloc(block: Block) -> None:
             target_idx = idx + 1
             assert target_idx < len(op_list)
             target = op_list[target_idx]
-            assert isinstance(target, UnregisteredOp)
-            assert target.op_name.data == "dma.cast"
+            assert isinstance(target, DmaCastOp)
             return
     raise AssertionError("no DmaAllocOp found in block")
 

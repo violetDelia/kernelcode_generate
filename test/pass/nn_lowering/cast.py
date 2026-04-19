@@ -28,7 +28,6 @@ from xdsl.dialects.builtin import (
     FunctionType,
     IntAttr,
     ModuleOp,
-    UnregisteredOp,
     f32,
     i32,
 )
@@ -38,7 +37,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dialect.dma import DmaAllocOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaCastOp
 from kernel_gen.dialect.nn import NnCastOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.passes.lowering.nn_lowering.select_cast_lowering import (
     lower_select_cast_family,
@@ -127,9 +126,7 @@ def test_lower_cast_to_dma_cast() -> None:
         lower_select_cast_family(block, op)
 
     ops = list(block.ops)
-    assert any(
-        isinstance(op, UnregisteredOp) and op.op_name.data == "dma.cast" for op in ops
-    )
+    assert any(isinstance(op, DmaCastOp) for op in ops)
     assert any(isinstance(op, DmaAllocOp) for op in ops)
     assert not any(op.name.startswith("nn.") for op in ops)
 
@@ -156,8 +153,6 @@ def test_lower_cast_bfloat16_to_dma_cast() -> None:
         lower_select_cast_family(block, op)
 
     ops = list(block.ops)
-    assert any(
-        isinstance(op, UnregisteredOp) and op.op_name.data == "dma.cast" for op in ops
-    )
+    assert any(isinstance(op, DmaCastOp) for op in ops)
     assert any(isinstance(op, DmaAllocOp) for op in ops)
     assert not any(op.name.startswith("nn.") for op in ops)

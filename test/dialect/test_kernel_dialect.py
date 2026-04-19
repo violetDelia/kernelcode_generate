@@ -221,7 +221,7 @@ def test_kernel_add_success() -> None:
     lhs = _make_value(memory_type)
     rhs = _make_value(memory_type)
     out = _make_value(memory_type)
-    op = KernelAddOp(lhs, rhs, out, _make_space("global"))
+    op = KernelAddOp(out, lhs, rhs, _make_space("global"))
     op.verify()
 
 
@@ -239,35 +239,35 @@ def test_kernel_add_shape_mismatch() -> None:
     lhs_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(4)]))
     rhs_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(5)]))
     out_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(4)]))
-    op = KernelAddOp(_make_value(lhs_type), _make_value(rhs_type), _make_value(out_type), _make_space("global"))
+    op = KernelAddOp(_make_value(out_type), _make_value(lhs_type), _make_value(rhs_type), _make_space("global"))
     with pytest.raises(VerifyException, match="shape must match"):
         op.verify()
 
     lhs_type = _make_memory_type(stride=ArrayAttr([IntAttr(4), IntAttr(1)]))
     rhs_type = _make_memory_type(stride=ArrayAttr([IntAttr(5), IntAttr(1)]))
     out_type = _make_memory_type(stride=ArrayAttr([IntAttr(4), IntAttr(1)]))
-    op = KernelAddOp(_make_value(lhs_type), _make_value(rhs_type), _make_value(out_type), _make_space("global"))
+    op = KernelAddOp(_make_value(out_type), _make_value(lhs_type), _make_value(rhs_type), _make_space("global"))
     with pytest.raises(VerifyException, match="stride must match"):
         op.verify()
 
     lhs_type = _make_memory_type(space="global")
     rhs_type = _make_memory_type(space="local")
     out_type = _make_memory_type(space="global")
-    op = KernelAddOp(_make_value(lhs_type), _make_value(rhs_type), _make_value(out_type), _make_space("global"))
+    op = KernelAddOp(_make_value(out_type), _make_value(lhs_type), _make_value(rhs_type), _make_space("global"))
     with pytest.raises(VerifyException, match="same space"):
         op.verify()
 
     lhs_type = _make_memory_type(space="global")
     rhs_type = _make_memory_type(space="global")
     out_type = _make_memory_type(space="global")
-    op = KernelAddOp(_make_value(lhs_type), _make_value(rhs_type), _make_value(out_type), _make_space("local"))
+    op = KernelAddOp(_make_value(out_type), _make_value(lhs_type), _make_value(rhs_type), _make_space("local"))
     with pytest.raises(VerifyException, match="attribute space"):
         op.verify()
 
     lhs_type = _make_memory_type(element_type=i32)
     rhs_type = _make_memory_type(element_type=i32)
     out_type = _make_memory_type(element_type=Float32Type())
-    op = KernelAddOp(_make_value(lhs_type), _make_value(rhs_type), _make_value(out_type), _make_space("global"))
+    op = KernelAddOp(_make_value(out_type), _make_value(lhs_type), _make_value(rhs_type), _make_space("global"))
     with pytest.raises(VerifyException, match="kernel arithmetic element_type must match"):
         op.verify()
 
@@ -290,7 +290,7 @@ def test_kernel_eq_output_type() -> None:
     lhs_type = _make_memory_type(element_type=i32)
     rhs_type = _make_memory_type(element_type=i32)
     out_type = _make_memory_type(element_type=i1)
-    op = KernelEqOp(_make_value(lhs_type), _make_value(rhs_type), _make_value(out_type), _make_space("global"))
+    op = KernelEqOp(_make_value(out_type), _make_value(lhs_type), _make_value(rhs_type), _make_space("global"))
     op.verify()
 
 
@@ -308,15 +308,15 @@ def test_kernel_eq_output_type_error() -> None:
     lhs_type = _make_memory_type(element_type=i32)
     rhs_type = _make_memory_type(element_type=i32)
     out_type = _make_memory_type(element_type=i32)
-    op = KernelEqOp(_make_value(lhs_type), _make_value(rhs_type), _make_value(out_type), _make_space("global"))
+    op = KernelEqOp(_make_value(out_type), _make_value(lhs_type), _make_value(rhs_type), _make_space("global"))
     with pytest.raises(VerifyException, match="compare output element_type must be i1"):
         op.verify()
 
-    lt_op = KernelLtOp(_make_value(lhs_type), _make_value(rhs_type), _make_value(out_type), _make_space("global"))
+    lt_op = KernelLtOp(_make_value(out_type), _make_value(lhs_type), _make_value(rhs_type), _make_space("global"))
     with pytest.raises(VerifyException, match="compare output element_type must be i1"):
         lt_op.verify()
 
-    gt_op = KernelGtOp(_make_value(lhs_type), _make_value(rhs_type), _make_value(out_type), _make_space("global"))
+    gt_op = KernelGtOp(_make_value(out_type), _make_value(lhs_type), _make_value(rhs_type), _make_space("global"))
     with pytest.raises(VerifyException, match="compare output element_type must be i1"):
         gt_op.verify()
 
@@ -337,10 +337,10 @@ def test_kernel_select_cond_type_error() -> None:
     rhs_type = _make_memory_type(element_type=i32)
     out_type = _make_memory_type(element_type=i32)
     op = KernelSelectOp(
+        _make_value(out_type),
         _make_value(cond_type),
         _make_value(lhs_type),
         _make_value(rhs_type),
-        _make_value(out_type),
         _make_space("global"),
     )
     with pytest.raises(VerifyException, match="cond element_type must be i1"):
@@ -348,10 +348,10 @@ def test_kernel_select_cond_type_error() -> None:
 
     cond_type = _make_memory_type(element_type=i1)
     op = KernelSelectOp(
+        _make_value(out_type),
         _make_value(cond_type),
         _make_value(lhs_type),
         _make_value(rhs_type),
-        _make_value(out_type),
         _make_space("global"),
     )
     op.verify()
@@ -405,18 +405,18 @@ def test_kernel_ops_no_result() -> None:
     lhs = _make_value(memory_type)
     rhs = _make_value(memory_type)
     out = _make_value(memory_type)
-    add_op = KernelAddOp(lhs, rhs, out, _make_space("global"))
-    sub_op = KernelSubOp(lhs, rhs, out, _make_space("global"))
-    mul_op = KernelMulOp(lhs, rhs, out, _make_space("global"))
-    div_op = KernelDivOp(lhs, rhs, out, _make_space("global"))
-    eq_op = KernelEqOp(lhs, rhs, _make_value(_make_memory_type(element_type=i1)), _make_space("global"))
-    gt_op = KernelGtOp(lhs, rhs, _make_value(_make_memory_type(element_type=i1)), _make_space("global"))
-    lt_op = KernelLtOp(lhs, rhs, _make_value(_make_memory_type(element_type=i1)), _make_space("global"))
+    add_op = KernelAddOp(out, lhs, rhs, _make_space("global"))
+    sub_op = KernelSubOp(out, lhs, rhs, _make_space("global"))
+    mul_op = KernelMulOp(out, lhs, rhs, _make_space("global"))
+    div_op = KernelDivOp(out, lhs, rhs, _make_space("global"))
+    eq_op = KernelEqOp(_make_value(_make_memory_type(element_type=i1)), lhs, rhs, _make_space("global"))
+    gt_op = KernelGtOp(_make_value(_make_memory_type(element_type=i1)), lhs, rhs, _make_space("global"))
+    lt_op = KernelLtOp(_make_value(_make_memory_type(element_type=i1)), lhs, rhs, _make_space("global"))
     select_op = KernelSelectOp(
+        out,
         _make_value(_make_memory_type(element_type=i1)),
         lhs,
         rhs,
-        out,
         _make_space("global"),
     )
     cast_input = _make_value(_make_memory_type(element_type=Float32Type()))
@@ -571,9 +571,9 @@ def test_kernel_matmul_dtype_mismatch() -> None:
         element_type=Float32Type(),
     )
     op = KernelMatmulOp(
+        _make_value(out_type),
         _make_value(lhs_type),
         _make_value(rhs_type),
-        _make_value(out_type),
         _make_space("global"),
     )
     with pytest.raises(VerifyException, match="kernel.matmul element_type"):
@@ -598,9 +598,9 @@ def test_kernel_matmul_rank_shape_contract() -> None:
     )
     out_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(4)]))
     op = KernelMatmulOp(
+        _make_value(out_type),
         _make_value(lhs_type),
         _make_value(rhs_rank3_type),
-        _make_value(out_type),
         _make_space("global"),
     )
     with pytest.raises(VerifyException, match="kernel.matmul requires rank-2"):
@@ -608,9 +608,9 @@ def test_kernel_matmul_rank_shape_contract() -> None:
 
     rhs_mismatch_type = _make_memory_type(shape=ArrayAttr([IntAttr(5), IntAttr(4)]))
     op = KernelMatmulOp(
+        _make_value(out_type),
         _make_value(lhs_type),
         _make_value(rhs_mismatch_type),
-        _make_value(out_type),
         _make_space("global"),
     )
     with pytest.raises(VerifyException, match="kernel.matmul contracting dimensions"):

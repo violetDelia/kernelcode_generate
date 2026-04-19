@@ -152,9 +152,9 @@ def _build_kernel_add_module_with_type(mem_type: NnMemoryType) -> tuple[ModuleOp
     func_type = FunctionType.from_lists([mem_type, mem_type, mem_type], [])
     block = Block(arg_types=[mem_type, mem_type, mem_type])
     kernel_op = KernelAddOp(
+        block.args[2],
         block.args[0],
         block.args[1],
-        block.args[2],
         NnMemorySpaceAttr.from_name(mem_type.space.space.data),
     )
     block.add_ops([kernel_op, func.ReturnOp()])
@@ -240,9 +240,9 @@ def _build_kernel_add_module_with_window() -> tuple[ModuleOp, Block, KernelAddOp
     view_in1 = DmaViewOp(block.args[1], in_offsets, sizes, strides, window_type)
     view_out = DmaViewOp(block.args[2], out_offsets, sizes, strides, window_type)
     kernel_op = KernelAddOp(
+        view_out.result,
         view_in0.result,
         view_in1.result,
-        view_out.result,
         NnMemorySpaceAttr.from_name("global"),
     )
     block.add_ops([view_in0, view_in1, view_out, kernel_op, func.ReturnOp()])

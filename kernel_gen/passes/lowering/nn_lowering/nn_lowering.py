@@ -637,7 +637,7 @@ def _lower_binary(block: Block, op: Operation) -> None:
         raise NnLoweringError("nn op must provide at least one nn.memory operand")
 
     kind = _SUPPORTED_BINARY[op.name]
-    lowered = KernelBinaryElewiseOp(lhs, rhs, result, kind=kind, space=space)
+    lowered = KernelBinaryElewiseOp(result, lhs, rhs, kind=kind, space=space)
     block.insert_op_before(lowered, op)
     op.results[0].replace_by(result)
     block.erase_op(op)
@@ -841,7 +841,7 @@ def _lower_matmul(block: Block, op: Operation) -> None:
     alloc = DmaAllocOp(symbol_dims, result_type)
     block.insert_op_before(alloc, op)
     result = alloc.results[0]
-    lowered = KernelMatmulOp(lhs, rhs, result, space)
+    lowered = KernelMatmulOp(result, lhs, rhs, space)
     block.insert_op_before(lowered, op)
     op.results[0].replace_by(result)
     block.erase_op(op)

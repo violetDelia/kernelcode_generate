@@ -209,9 +209,9 @@ def _build_launch_kernel_module(
     step = SymbolConstOp(1)
     barrier = ArchBarrierOp(ArchScopeAttr.from_name("block"), _make_barrier_visibility())
     kernel_add = KernelAddOp(
+        device_block.args[2],
         device_block.args[0],
         device_block.args[1],
-        device_block.args[2],
         NnMemorySpaceAttr(StringAttr("global")),
     )
     if conflict_attr:

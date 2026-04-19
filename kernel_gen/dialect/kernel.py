@@ -797,21 +797,21 @@ def _verify_reduce_result_shape(
 class _BaseKernelBinaryOp(IRDLOperation):
     """kernel 二元 op 基类。"""
 
+    out = operand_def(NnMemoryType)
     lhs = operand_def(NnMemoryType)
     rhs = operand_def(NnMemoryType)
-    out = operand_def(NnMemoryType)
     space = attr_def(NnMemorySpaceAttr)
 
     def __init__(
         self,
+        out: SSAValue | Operation,
         lhs: SSAValue | Operation,
         rhs: SSAValue | Operation,
-        out: SSAValue | Operation,
         space: NnMemorySpaceAttr,
     ) -> None:
         """初始化二元 op。"""
 
-        super().__init__(operands=[lhs, rhs, out], attributes={"space": space})
+        super().__init__(operands=[out, lhs, rhs], attributes={"space": space})
 
 
 @irdl_op_definition
@@ -826,7 +826,7 @@ class KernelBinaryElewiseOp(IRDLOperation):
     - 通过 kind 属性区分 add/sub/eq 等语义。
 
     使用示例:
-    - KernelBinaryElewiseOp(lhs, rhs, out, kind="add", space=NnMemorySpaceAttr.from_name("global"))
+    - KernelBinaryElewiseOp(out, lhs, rhs, kind="add", space=NnMemorySpaceAttr.from_name("global"))
 
     关联文件:
     - spec: spec/dialect/kernel.md
@@ -836,17 +836,17 @@ class KernelBinaryElewiseOp(IRDLOperation):
 
     name = "kernel.binary_elewise"
 
+    out = operand_def(NnMemoryType)
     lhs = operand_def(NnMemoryType)
     rhs = operand_def(NnMemoryType)
-    out = operand_def(NnMemoryType)
     kind = attr_def(StringAttr)
     space = attr_def(NnMemorySpaceAttr)
 
     def __init__(
         self,
+        out: SSAValue | Operation,
         lhs: SSAValue | Operation,
         rhs: SSAValue | Operation,
-        out: SSAValue | Operation,
         *,
         kind: str | StringAttr,
         space: NnMemorySpaceAttr,
@@ -860,7 +860,7 @@ class KernelBinaryElewiseOp(IRDLOperation):
         - 绑定输入、输出与 kind/space 属性。
 
         使用示例:
-        - KernelBinaryElewiseOp(lhs, rhs, out, kind="add", space=NnMemorySpaceAttr.from_name("global"))
+        - KernelBinaryElewiseOp(out, lhs, rhs, kind="add", space=NnMemorySpaceAttr.from_name("global"))
 
         关联文件:
         - spec: spec/dialect/kernel.md
@@ -872,7 +872,7 @@ class KernelBinaryElewiseOp(IRDLOperation):
             kind, op_name=self.name, field_name="kind", allowed=_BINARY_ELEWISE_KINDS
         )
         super().__init__(
-            operands=[lhs, rhs, out],
+            operands=[out, lhs, rhs],
             attributes={"kind": kind_attr, "space": space},
         )
 
@@ -887,7 +887,7 @@ class KernelBinaryElewiseOp(IRDLOperation):
         - 根据 kind 决定 element_type 校验规则。
 
         使用示例:
-        - KernelBinaryElewiseOp(lhs, rhs, out, kind="add", space=space).verify_()
+        - KernelBinaryElewiseOp(out, lhs, rhs, kind="add", space=space).verify_()
 
         关联文件:
         - spec: spec/dialect/kernel.md
@@ -1131,7 +1131,7 @@ class KernelMatmulOp(_BaseKernelBinaryOp):
     - verifier 强制二维输入、shape 机械一致及 element_type/space 对齐。
 
     使用示例:
-    - KernelMatmulOp(lhs, rhs, out, _make_space("global"))
+    - KernelMatmulOp(out, lhs, rhs, _make_space("global"))
 
     关联文件:
     - spec: spec/dialect/kernel.md
@@ -1607,23 +1607,23 @@ class KernelSelectOp(IRDLOperation):
 
     name = "kernel.select"
 
+    out = operand_def(NnMemoryType)
     cond = operand_def(NnMemoryType)
     lhs = operand_def(NnMemoryType)
     rhs = operand_def(NnMemoryType)
-    out = operand_def(NnMemoryType)
     space = attr_def(NnMemorySpaceAttr)
 
     def __init__(
         self,
+        out: SSAValue | Operation,
         cond: SSAValue | Operation,
         lhs: SSAValue | Operation,
         rhs: SSAValue | Operation,
-        out: SSAValue | Operation,
         space: NnMemorySpaceAttr,
     ) -> None:
         """初始化 select op。"""
 
-        super().__init__(operands=[cond, lhs, rhs, out], attributes={"space": space})
+        super().__init__(operands=[out, cond, lhs, rhs], attributes={"space": space})
 
     def verify_(self) -> None:
         cond_type = _verify_memory_type(self.cond.type, "cond")

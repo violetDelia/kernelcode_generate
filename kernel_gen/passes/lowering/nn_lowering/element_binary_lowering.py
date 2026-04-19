@@ -340,9 +340,9 @@ def _lower_element_binary_op(op: Operation, block: Block) -> None:
     else:
         kind_value = _COMPARE_KINDS[op.name]
     kernel_op = KernelBinaryElewiseOp(
+        alloc.result,
         lhs_value,
         rhs_value,
-        alloc.result,
         kind=kind_value,
         space=space,
     )

@@ -88,7 +88,7 @@ def _build_elementwise_module() -> ModuleOp:
     mem_type = _make_memory_type(["M", "N"])
     block = Block(arg_types=[mem_type, mem_type, mem_type])
     space = NnMemorySpaceAttr.from_name("global")
-    block.add_ops([KernelAddOp(block.args[0], block.args[1], block.args[2], space), func.ReturnOp()])
+    block.add_ops([KernelAddOp(block.args[2], block.args[0], block.args[1], space), func.ReturnOp()])
     func_op = func.FuncOp(
         "kernel_split_elementwise",
         FunctionType.from_lists([mem_type, mem_type, mem_type], []),

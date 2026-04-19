@@ -226,7 +226,7 @@ def _make_symbol_operands(values: list[int | str | None]) -> list[SSAValue]:
 def test_dma_requires_nn_memory_type() -> None:
     source = _TestOp(result_types=[i32]).results[0]
     target = _TestOp(result_types=[_make_memory_type()]).results[0]
-    op = DmaCopyOp(source, target)
+    op = DmaCopyOp(target, source)
     with pytest.raises(VerifyException, match="nn.memory"):
         op.verify()
 
@@ -245,7 +245,7 @@ def test_dma_copy_verify_success() -> None:
     memory_type = _make_memory_type()
     source = _TestOp(result_types=[memory_type]).results[0]
     target = _TestOp(result_types=[memory_type]).results[0]
-    op = DmaCopyOp(source, target)
+    op = DmaCopyOp(target, source)
     op.verify()
 
 
@@ -264,7 +264,7 @@ def test_dma_copy_shape_mismatch() -> None:
     target_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(8)]))
     source = _TestOp(result_types=[source_type]).results[0]
     target = _TestOp(result_types=[target_type]).results[0]
-    op = DmaCopyOp(source, target)
+    op = DmaCopyOp(target, source)
     with pytest.raises(VerifyException, match="shape mismatch"):
         op.verify()
 
@@ -274,25 +274,26 @@ def test_dma_copy_shape_mismatch() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-18 21:00:16 +0800
 # 最近一次运行成功时间: 2026-03-18 21:00:16 +0800
-# 功能说明: 验证 dma.load 的 result.space 必须与 op.space 一致，且结果 shape 必须匹配 sizes。
+# 功能说明: 验证 dma.load 的 target space 可独立于 source，且 target shape 必须匹配 sizes。
 # 使用示例: pytest -q test/dialect/test_dma_dialect.py -k test_dma_load_result_space_mismatch
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma_dialect.py
 def test_dma_load_result_space_mismatch() -> None:
     source_type = _make_memory_type(space="global")
-    result_type = _make_memory_type(space="global")
+    target_type = _make_memory_type(space="shared")
     source = _TestOp(result_types=[source_type]).results[0]
+    target = _TestOp(result_types=[target_type]).results[0]
     offsets = _make_symbol_operands([0, 0])
     sizes = _make_symbol_operands([2, 4])
     strides = _make_symbol_operands([1, 1])
-    op = DmaLoadOp(source, offsets, sizes, strides, result_type, _make_space("shared"))
-    with pytest.raises(VerifyException, match="space attribute must match result space"):
-        op.verify()
+    op = DmaLoadOp(target, source, offsets, sizes, strides)
+    op.verify()
 
-    result_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(3)]), space="global")
-    op = DmaLoadOp(source, offsets, sizes, strides, result_type, _make_space("global"))
-    with pytest.raises(VerifyException, match="shape must match sizes"):
+    bad_target_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(3)]), space="shared")
+    bad_target = _TestOp(result_types=[bad_target_type]).results[0]
+    op = DmaLoadOp(bad_target, source, offsets, sizes, strides)
+    with pytest.raises(VerifyException, match="target shape must match sizes"):
         op.verify()
 
 
@@ -306,14 +307,15 @@ def test_dma_load_result_space_mismatch() -> None:
 # 对应测试文件路径: test/dialect/test_dma_dialect.py
 def test_dma_load_accepts_symbol_iter_offset() -> None:
     source_type = _make_memory_type()
-    result_type = _make_memory_type()
+    target_type = _make_memory_type()
     source = _TestOp(result_types=[source_type]).results[0]
+    target = _TestOp(result_types=[target_type]).results[0]
     iter_offset = _TestOp(result_types=[SymbolIterType.from_expr("index")]).results[0]
     zero_offset = _make_symbol_operands([0])[0]
     offsets = [iter_offset, zero_offset]
     sizes = _make_symbol_operands([2, 4])
     strides = _make_symbol_operands([1, 1])
-    op = DmaLoadOp(source, offsets, sizes, strides, result_type, _make_space("global"))
+    op = DmaLoadOp(target, source, offsets, sizes, strides)
     op.verify()
 
 
@@ -429,7 +431,7 @@ def test_dma_nn_memory_type_verifier_passthrough(monkeypatch: pytest.MonkeyPatch
     memory_type = _make_memory_type()
     source = _TestOp(result_types=[memory_type]).results[0]
     target = _TestOp(result_types=[memory_type]).results[0]
-    op = DmaCopyOp(source, target)
+    op = DmaCopyOp(target, source)
 
     def _raise_verify(_: NnMemoryType) -> None:
         raise VerifyException("nn memory shape and stride rank must match")
@@ -466,7 +468,7 @@ def test_dma_dynamic_symbol_int_operands_valid() -> None:
     sizes = _make_symbol_operands(["TM", "TN"])
     strides = _make_symbol_operands([1, 1])
 
-    DmaLoadOp(source, offsets, sizes, strides, result_type, _make_space("shared")).verify()
+    DmaLoadOp(tile, source, offsets, sizes, strides).verify()
     DmaSliceOp(tile, source, offsets, sizes, strides).verify()
     DmaStoreOp(tile, target, offsets, sizes, strides).verify()
     DmaDesliceOp(tile, target, offsets, sizes, strides, source_type).verify()
@@ -485,8 +487,9 @@ def test_dma_dynamic_symbol_int_operands_valid() -> None:
 def test_dma_cast_verify_success() -> None:
     source_type = _make_memory_type()
     source = _TestOp(result_types=[source_type]).results[0]
-    result_type = NnMemoryType(source_type.shape, source_type.stride, i1, source_type.space)
-    op = DmaCastOp(source, result_type)
+    target_type = NnMemoryType(source_type.shape, source_type.stride, i1, source_type.space)
+    target = _TestOp(result_types=[target_type]).results[0]
+    op = DmaCastOp(target, source)
     op.verify()
 
 
@@ -504,18 +507,18 @@ def test_dma_cast_layout_or_space_mismatch() -> None:
     source_type = _make_memory_type()
     source = _TestOp(result_types=[source_type]).results[0]
 
-    result_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(5)]))
-    op = DmaCastOp(source, result_type)
+    target_type = _make_memory_type(shape=ArrayAttr([IntAttr(2), IntAttr(5)]))
+    op = DmaCastOp(_TestOp(result_types=[target_type]).results[0], source)
     with pytest.raises(VerifyException, match="dma.cast shape mismatch"):
         op.verify()
 
-    result_type = _make_memory_type(stride=ArrayAttr([IntAttr(5), IntAttr(1)]))
-    op = DmaCastOp(source, result_type)
+    target_type = _make_memory_type(stride=ArrayAttr([IntAttr(5), IntAttr(1)]))
+    op = DmaCastOp(_TestOp(result_types=[target_type]).results[0], source)
     with pytest.raises(VerifyException, match="dma.cast stride mismatch"):
         op.verify()
 
-    result_type = _make_memory_type(space="shared")
-    op = DmaCastOp(source, result_type)
+    target_type = _make_memory_type(space="shared")
+    op = DmaCastOp(_TestOp(result_types=[target_type]).results[0], source)
     with pytest.raises(VerifyException, match="dma.cast space mismatch"):
         op.verify()
 
@@ -946,16 +949,17 @@ def test_dma_dynamic_symbol_int_parse_print_round_trip() -> None:
         [c3.results[0], c3.results[0]],
         view_type,
     )
+    load_target_op = _TestOp(result_types=[load_type])
+    load_target = load_target_op.results[0]
     load = DmaLoadOp(
+        load_target,
         alloc.result,
         [c2.results[0], c2.results[0]],
         [c0.results[0], c1.results[0]],
         [c3.results[0], c3.results[0]],
-        load_type,
-        _make_space("shared"),
     )
     store = DmaStoreOp(
-        load.result,
+        load_target,
         alloc.result,
         [c2.results[0], c2.results[0]],
         [c0.results[0], c1.results[0]],
@@ -969,7 +973,7 @@ def test_dma_dynamic_symbol_int_parse_print_round_trip() -> None:
         [c3.results[0], c3.results[0]],
     )
     deslice = DmaDesliceOp(
-        load.result,
+        load_target,
         alloc.result,
         [c2.results[0], c2.results[0]],
         [c0.results[0], c1.results[0]],
@@ -977,9 +981,15 @@ def test_dma_dynamic_symbol_int_parse_print_round_trip() -> None:
         alloc_type,
     )
     reshape = DmaReshapeOp(alloc.result, [c1.results[0], c0.results[0]], reshape_type)
-    cast = DmaCastOp(alloc.result, NnMemoryType(alloc_type.shape, alloc_type.stride, i1, alloc_type.space))
+    cast_target_op = _TestOp(
+        result_types=[NnMemoryType(alloc_type.shape, alloc_type.stride, i1, alloc_type.space)]
+    )
+    cast_target = cast_target_op.results[0]
+    cast = DmaCastOp(cast_target, alloc.result)
 
-    module = ModuleOp([c0, c1, c2, c3, alloc, fill, view, load, store, slice_op, deslice, reshape, cast])
+    module = ModuleOp(
+        [c0, c1, c2, c3, alloc, fill, view, load_target_op, load, store, slice_op, deslice, reshape, cast_target_op, cast]
+    )
     printed = _print_ir(module).rstrip()
     reparsed = Parser(ctx, printed).parse_module()
     reparsed.verify()
@@ -1004,20 +1014,19 @@ def test_dma_rejects_non_symbol_int_scalar_operands() -> None:
     symbol_sizes = _make_symbol_operands([2, 4])
     symbol_strides = _make_symbol_operands([1, 1])
 
-    with pytest.raises(VerifyException, match="base attribute symbol.int"):
+    with pytest.raises(VerifyException, match="offsets entries must be !symbol.int or !symbol.iter"):
         DmaLoadOp(
+            target,
             source,
             [index_operand, index_operand],
             symbol_sizes,
             symbol_strides,
-            source_type,
-            _make_space("global"),
         ).verify()
 
     with pytest.raises(VerifyException, match="base attribute symbol.int"):
         DmaAllocOp([index_operand, index_operand], source_type).verify()
 
-    with pytest.raises(VerifyException, match="base attribute symbol.int"):
+    with pytest.raises(VerifyException, match="offsets entries must be !symbol.int or !symbol.iter"):
         DmaViewOp(
             source,
             [index_operand, index_operand],
@@ -1108,12 +1117,12 @@ def test_dma_copy_rejects_stride_or_element_type_mismatch() -> None:
     source = _TestOp(result_types=[source_type]).results[0]
 
     stride_mismatch = _make_memory_type(stride=ArrayAttr([IntAttr(8), IntAttr(1)]))
-    op = DmaCopyOp(source, _TestOp(result_types=[stride_mismatch]).results[0])
+    op = DmaCopyOp(_TestOp(result_types=[stride_mismatch]).results[0], source)
     with pytest.raises(VerifyException, match="dma.copy source/target stride mismatch"):
         op.verify()
 
     element_type_mismatch = NnMemoryType(source_type.shape, source_type.stride, i1, source_type.space)
-    op = DmaCopyOp(source, _TestOp(result_types=[element_type_mismatch]).results[0])
+    op = DmaCopyOp(_TestOp(result_types=[element_type_mismatch]).results[0], source)
     with pytest.raises(VerifyException, match="dma.copy source/target element_type mismatch"):
         op.verify()
 
@@ -1122,7 +1131,7 @@ def test_dma_copy_rejects_stride_or_element_type_mismatch() -> None:
 # 最后一次更改: OpenAI
 # 最近一次运行测试时间: 2026-03-22 23:58:00 +0800
 # 最近一次运行成功时间: 2026-03-22 23:58:00 +0800
-# 测试目的: 补充覆盖 dma.load/store/slice/deslice 的 element_type / space / result 约束。
+# 测试目的: 补充覆盖 dma.load/store/slice/deslice 的 element_type / space / target 约束。
 # 对应功能实现文件路径: kernel_gen/dialect/dma.py
 # 对应 spec 文件路径: spec/dialect/dma.md
 # 对应测试文件路径: test/dialect/test_dma_dialect.py
@@ -1136,7 +1145,8 @@ def test_dma_transfer_ops_reject_element_space_or_result_mismatch() -> None:
     strides = _make_symbol_operands([1, 1])
 
     bad_load_type = NnMemoryType(source_type.shape, source_type.stride, i1, source_type.space)
-    op = DmaLoadOp(source, offsets, sizes, strides, bad_load_type, _make_space("global"))
+    bad_load_target = _TestOp(result_types=[bad_load_type]).results[0]
+    op = DmaLoadOp(bad_load_target, source, offsets, sizes, strides)
     with pytest.raises(VerifyException, match="dma.load element_type mismatch"):
         op.verify()
 
