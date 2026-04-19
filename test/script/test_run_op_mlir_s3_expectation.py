@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+MAIN_REPO_ROOT = Path("/home/lfr/kernelcode_generate")
 SOURCE_SCRIPT = REPO_ROOT / "script/run-op-mlir-s3-expectation.sh"
 EXPECTATION_MODULE = "expectation.pass.lowing.nn_lowering"
 
@@ -50,9 +51,9 @@ def _run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.Com
 def test_print_command_uses_worktree_and_main_repo_paths() -> None:
     """TC-S3-ENTRY-001: `--print-command` 输出应显式包含主仓与 worktree 路径。"""
 
-    result = _run_script("--print-command")
+    result = _run_script("--print-command", env={"PYTHONPATH": "."})
 
-    expected_pythonpath = str(REPO_ROOT.parent)
+    expected_pythonpath = f"{MAIN_REPO_ROOT}:."
     expected = (
         f"cd {REPO_ROOT} && PYTHONDONTWRITEBYTECODE=1 "
         f"PYTHONPATH={expected_pythonpath} python3 -m {EXPECTATION_MODULE}"
@@ -91,7 +92,7 @@ def test_script_runs_module_from_main_repo_with_prefixed_pythonpath(tmp_path: Pa
     assert f"cwd={REPO_ROOT}" in content
     assert f"argv=-m {EXPECTATION_MODULE}" in content
     assert "pythondontwritebytecode=1" in content
-    assert f"pythonpath={REPO_ROOT.parent}" in content
+    assert f"pythonpath={MAIN_REPO_ROOT}" in content
 
 
 def test_script_runs_real_nn_lowering_expectation() -> None:

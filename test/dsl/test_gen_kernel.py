@@ -1476,7 +1476,7 @@ def test_gen_kernel_emits_npu_demo_dma_alloc_module() -> None:
 
     dynamic_source = gen_kernel(dynamic_module, _npu_ctx())
 
-    assert "void dma_alloc_dynamic_case(S_INT arg0, S_INT arg1)" in dynamic_source
+    assert "void dma_alloc_dynamic_case(long long arg0, long long arg1)" in dynamic_source
     assert "Memory<TSM, float> v0 = alloc<TSM, float>({arg0, arg1} /*shape*/, {arg1, 1} /*stride*/);" in dynamic_source
     _compile_only(dynamic_source)
 

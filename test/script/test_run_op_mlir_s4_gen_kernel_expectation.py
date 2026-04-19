@@ -23,8 +23,9 @@ import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+MAIN_REPO_ROOT = Path("/home/lfr/kernelcode_generate")
 SOURCE_SCRIPT = REPO_ROOT / "script/run-op-mlir-s4-gen-kernel-expectation.sh"
-EXPECTATION_ENTRY = REPO_ROOT.parent / "expectation/dsl/gen_kernel/npu_demo_add_barrier"
+EXPECTATION_ENTRY = MAIN_REPO_ROOT / "expectation/dsl/gen_kernel/npu_demo_add_barrier"
 
 
 def _run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -42,9 +43,10 @@ def _run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.Com
 
 
 def test_print_command_uses_worktree_and_main_repo_paths() -> None:
-    result = _run_script("--print-command")
+    # 显式清空外层 PYTHONPATH，避免 exact-match 断言被调用环境污染。
+    result = _run_script("--print-command", env={"PYTHONPATH": ""})
 
-    expected_pythonpath = f"{REPO_ROOT}:{REPO_ROOT.parent}"
+    expected_pythonpath = f"{REPO_ROOT}:{MAIN_REPO_ROOT}"
     expected = (
         f"cd {REPO_ROOT} && PYTHONDONTWRITEBYTECODE=1 "
         f"PYTHONPATH={expected_pythonpath} python3 {EXPECTATION_ENTRY}"
@@ -74,14 +76,14 @@ def test_script_runs_expectation_from_worktree(tmp_path: Path) -> None:
     )
     fake_python.chmod(0o755)
 
-    result = _run_script(env={"PYTHON_BIN": str(fake_python)})
+    result = _run_script(env={"PYTHON_BIN": str(fake_python), "PYTHONPATH": ""})
 
     assert result.returncode == 0, result.stderr
     content = state_file.read_text(encoding="utf-8")
     assert f"cwd={REPO_ROOT}" in content
     assert f"argv={EXPECTATION_ENTRY}" in content
     assert "pythondontwritebytecode=1" in content
-    assert f"pythonpath={REPO_ROOT}:{REPO_ROOT.parent}" in content
+    assert f"pythonpath={REPO_ROOT}:{MAIN_REPO_ROOT}" in content
 
 
 def test_script_runs_real_gen_kernel_expectation() -> None:
