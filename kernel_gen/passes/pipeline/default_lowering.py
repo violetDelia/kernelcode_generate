@@ -22,8 +22,8 @@
 from __future__ import annotations
 
 from kernel_gen.passes.buffer_results_to_out_params import BufferResultsToOutParamsPass
+from kernel_gen.passes.decompass import DecompassPass
 from kernel_gen.passes.lowering import LowerDmaMemoryHierarchyPass, NnLoweringPass
-from kernel_gen.passes.lowering.decompass import DecompassPass
 from kernel_gen.passes.pass_manager import PassManager
 from kernel_gen.passes.registry import register_pipeline
 

@@ -21,7 +21,7 @@
 - pass_obj = BufferResultsToOutParamsPass()
 - from kernel_gen.passes.lowering.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
 - pass_obj = LowerDmaMemoryHierarchyPass()
-- from kernel_gen.passes.lowering.decompass import DecompassPass
+- from kernel_gen.passes.decompass import DecompassPass
 - pass_obj = DecompassPass()
 - from kernel_gen.passes.lowering.outline_device_kernel import OutlineDeviceKernelPass
 - pass_obj = OutlineDeviceKernelPass()
@@ -33,7 +33,7 @@
   - [spec/pass/lowering/nn_lowering.md](spec/pass/lowering/nn_lowering.md)
   - [spec/pass/lowering/buffer_results_to_out_params.md](spec/pass/lowering/buffer_results_to_out_params.md)
   - [spec/pass/lowering/dma_memory_hierarchy.md](spec/pass/lowering/dma_memory_hierarchy.md)
-  - [spec/pass/lowering/decompass.md](spec/pass/lowering/decompass.md)
+  - [spec/pass/decompass.md](spec/pass/decompass.md)
   - [spec/pass/lowering/outline_device_kernel.md](spec/pass/lowering/outline_device_kernel.md)
   - [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
   - [spec/pass/lowering/kernel_split.md](spec/pass/lowering/kernel_split.md)
@@ -42,7 +42,7 @@
   - [test/pass/nn_lowering/test_lowering_nn_lowering.py](test/pass/nn_lowering/test_lowering_nn_lowering.py)
   - [test/pass/test_buffer_results_to_out_params.py](test/pass/test_buffer_results_to_out_params.py)
   - [test/pass/test_dma_memory_hierarchy.py](test/pass/test_dma_memory_hierarchy.py)
-  - [test/pass/test_decompose_nn_softmax.py](test/pass/test_decompose_nn_softmax.py)
+  - [test/pass/decompass/test_softmax.py](test/pass/decompass/test_softmax.py)
   - [test/pass/test_outline_device_kernel.py](test/pass/test_outline_device_kernel.py)
   - [test/pass/test_lowering_tile.py](test/pass/test_lowering_tile.py)
   - [test/pass/test_lowering_kernel_split.py](test/pass/test_lowering_kernel_split.py)
@@ -52,7 +52,7 @@
   - [kernel_gen/passes/buffer_results_to_out_params.py](kernel_gen/passes/buffer_results_to_out_params.py)
   - [kernel_gen/passes/lowering/buffer_results_to_out_params.py](kernel_gen/passes/lowering/buffer_results_to_out_params.py)
   - [kernel_gen/passes/lowering/dma_memory_hierarchy.py](kernel_gen/passes/lowering/dma_memory_hierarchy.py)
-  - [kernel_gen/passes/lowering/decompass.py](kernel_gen/passes/lowering/decompass.py)
+  - [kernel_gen/passes/decompass.py](kernel_gen/passes/decompass.py)
   - [kernel_gen/passes/lowering/outline_device_kernel.py](kernel_gen/passes/lowering/outline_device_kernel.py)
   - [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
   - [kernel_gen/passes/lowering/kernel_split.py](kernel_gen/passes/lowering/kernel_split.py)
@@ -68,7 +68,7 @@ from .dma_memory_hierarchy import (
     LowerDmaMemoryHierarchyError,
     LowerDmaMemoryHierarchyPass,
 )
-from .decompass import DecompassError, DecompassPass, register_decompass_rewrite
+from ..decompass import DecompassError, DecompassPass, register_decompass_rewrite
 from .kernel_split import KernelSplitError, KernelSplitPass
 from .outline_device_kernel import OutlineDeviceKernelError, OutlineDeviceKernelPass
 from .tile import TilePass, TilePassError

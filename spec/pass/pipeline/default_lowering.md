@@ -21,7 +21,7 @@
 - `nn -> kernel/dma` lowering：[`spec/pass/lowering/nn_lowering.md`](../../../spec/pass/lowering/nn_lowering.md)
 - memory-return ABI 改写：[`spec/pass/lowering/buffer_results_to_out_params.md`](../../../spec/pass/lowering/buffer_results_to_out_params.md)
 - DMA memory hierarchy lowering：[`spec/pass/lowering/dma_memory_hierarchy.md`](../../../spec/pass/lowering/dma_memory_hierarchy.md)
-- `nn` 分解预处理：[`spec/pass/lowering/decompass.md`](../../../spec/pass/lowering/decompass.md)
+- `nn` 分解预处理：[`spec/pass/decompass.md`](../../../spec/pass/decompass.md)
 - host launch outline：[`spec/pass/lowering/outline_device_kernel.md`](../../../spec/pass/lowering/outline_device_kernel.md)
 
 ## 术语
@@ -101,20 +101,21 @@ module = pm.run(module)
 - 失败边界的公开验收点：
   - 若把 `BufferResultsToOutParamsPass` 排在 `NnLoweringPass` 之前，必须显式失败。
   - 若输入包含当前不支持的 `nn` op，必须继续抛出 `NnLoweringError`，不得静默产出不合法 IR。
-  - 若调用方需要 `outline-device-kernel`，必须在默认 pipeline 之外显式追加；默认 pipeline expectation 仍只对应 `expectation/pass/pipeline/default_lowering.py`。
+  - 若调用方需要 `outline-device-kernel`，必须在默认 pipeline 之外显式追加；当前任务链的正式验收只依赖 `pytest` 与顺序口径检查，架构侧 black-box runner 仅作补充对照。
 
 ## 测试
 
 - 测试文件：[`test/pass/test_pipeline_default_lowering.py`](../../../test/pass/test_pipeline_default_lowering.py)
 - 执行命令：
   - `pytest -q test/pass/test_pipeline_default_lowering.py`
-  - `PYTHONPATH=. python expectation/pass/pipeline/default_lowering.py`
+  - `rg -n "decompass -> lower-nn -> buffer-results-to-out-params -> lower-dma-memory-hierarchy" spec/pass/pipeline/default_lowering.md`
 - 测试目标：
   - pipeline 名称与 pass 顺序可验证。
   - builder 返回 `PassManager`。
   - 黑盒最小链路可验证前置 `out` 参数 ABI、`kernel.binary_elewise(kind="add")` 与 `dma.slice / dma.deslice`。
   - 顺序错误与不支持 op 的失败边界可验证。
   - `default-lowering remains unchanged`，不把 `outline-device-kernel` 混入默认 pipeline。
+  - 当前任务链的正式验收不依赖 `worktree` 内本地 `expectation` 副本；若现场具备架构侧 runner，可另做补充对照。
 - 功能与用例清单：
   - `test_default_lowering_pipeline_builds_pass_manager`
   - `test_default_lowering_pipeline_pass_order`

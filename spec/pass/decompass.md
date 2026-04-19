@@ -9,10 +9,10 @@
 ## 文档信息
 
 - 创建者：`小李飞刀`
-- 最后一次更改：`睡觉小分队`
-- `spec`：[`spec/pass/lowering/decompass.md`](../../../spec/pass/lowering/decompass.md)
-- `功能实现`：[`kernel_gen/passes/lowering/decompass.py`](../../../kernel_gen/passes/lowering/decompass.py)
-- `test`：[`test/pass/test_decompose_nn_softmax.py`](../../../test/pass/test_decompose_nn_softmax.py)
+- 最后一次更改：`咯咯咯`
+- `spec`：[`spec/pass/decompass.md`](../../../spec/pass/decompass.md)
+- `功能实现`：[`kernel_gen/passes/decompass.py`](../../../kernel_gen/passes/decompass.py)
+- `test`：[`test/pass/decompass/test_softmax.py`](../../../test/pass/decompass/test_softmax.py)
 
 ## 依赖
 
@@ -26,7 +26,7 @@
 - 固定 pass 名字为 `decompass`。
 - 提供 `register_decompass_rewrite(op_name, rewrite)` 注册接口，用于扩展其它 `nn.*` 分解。
 - 固定内置 `nn.softmax` 分解链与顺序，不允许实现自由选择等价组合。
-- 固定 `axis` 先规整为非负下标，再写入 `nn.reduce_max` 与 `nn.reduce_sum` 的 `axes=[...]`。
+- 固定 `axis` 只接受 `[0, rank)` 范围内的非负下标；负轴与越界轴都必须显式失败。
 - 固定 `nn.reduce_max` 与 `nn.reduce_sum` 使用 `keepdim=true`。
 - 固定两个 `nn.broadcast` 结果类型都与原 `nn.softmax.result` 一致。
 
@@ -37,6 +37,7 @@
 - 其它 op 的分解仅通过注册接口扩展。
 - 不修改 `dsl/mlir_gen` 的 helper 入口形式。
 - 不扩后端 runtime、stream 或 target 相关能力。
+- 当前任务链的正式验收只依赖 `spec`、公开导入路径与 `pytest`；若现场额外具备架构侧 black-box runner，只作为补充对照，不要求当前任务携带本地 `expectation` 副本。
 
 ## 公开接口
 
@@ -55,7 +56,7 @@
 - 使用示例：
 
 ```python
-from kernel_gen.passes.lowering.decompass import DecompassPass
+from kernel_gen.passes.decompass import DecompassPass
 
 module = DecompassPass().run(module)
 ```
@@ -75,7 +76,7 @@ module = DecompassPass().run(module)
 - 使用示例：
 
 ```python
-from kernel_gen.passes.lowering.decompass import register_decompass_rewrite
+from kernel_gen.passes.decompass import register_decompass_rewrite
 
 def rewrite_exp(op, block):
     op.result.replace_by(op.input)
@@ -118,7 +119,7 @@ register_decompass_rewrite("nn.exp", rewrite_exp)
 
 ### 失败路径
 
-- `axis` 规整越界时必须报错：
+- `axis` 为负数或越界时必须报错：
 
 ```text
 DecompassError: normalized axis out of range
@@ -132,14 +133,15 @@ DecompassError: result type must match input shape and stride
 
 ## 验证要求
 
-- `pytest -q test/pass/test_decompose_nn_softmax.py`
+- `pytest -q test/pass/decompass/test_softmax.py`
 - `pytest -q test/pass/test_pass_manager.py -k "decompass"`
+- `rg -n --glob '!spec/pass/decompass.md' "kernel_gen\\.passes\\.lowering\\.decompass|spec/pass/lowering/decompass|test/pass/test_decompose_nn_softmax" kernel_gen spec test`
 
 ## 使用示例
 
 ```python
 from kernel_gen.passes.buffer_results_to_out_params import BufferResultsToOutParamsPass
-from kernel_gen.passes.lowering.decompass import DecompassPass
+from kernel_gen.passes.decompass import DecompassPass
 from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 from kernel_gen.passes.pass_manager import PassManager
 

@@ -181,7 +181,7 @@ def test_pass_manager_builds_default_lowering_pipeline_for_buffer_results_to_out
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
-    decompose_module = importlib.import_module("kernel_gen.passes.lowering.decompass")
+    decompose_module = importlib.import_module("kernel_gen.passes.decompass")
     DecompassPass = decompose_module.DecompassPass
     NnLoweringPass = lowering_module.NnLoweringPass
     BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass

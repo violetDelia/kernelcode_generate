@@ -71,7 +71,7 @@ def test_default_lowering_pipeline_builds_pass_manager() -> None:
 # 对应测试文件路径: test/pass/test_pipeline_default_lowering.py
 def test_default_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
-    decompose_module = importlib.import_module("kernel_gen.passes.lowering.decompass")
+    decompose_module = importlib.import_module("kernel_gen.passes.decompass")
     DecompassPass = decompose_module.DecompassPass
     NnLoweringPass = lowering_module.NnLoweringPass
     BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
