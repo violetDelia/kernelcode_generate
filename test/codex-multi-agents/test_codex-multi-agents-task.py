@@ -1394,31 +1394,93 @@ def test_continue_requires_agents_list(tmp_path: Path) -> None:
 # 最后一次更改: 神秘人
 # 最近一次运行测试时间: 2026-03-26 11:00:00 +0800
 # 最近一次运行成功时间: 2026-03-26 11:00:00 +0800
-# 测试目的: 验证 -reassign 成功更新任务指派并同步旧/新角色状态。
+# 测试目的: 验证 -reassign 成功更新任务指派、同步旧/新角色状态，并通知旧/新接手人。
 # 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
 # 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
 def test_reassign_task_success(tmp_path: Path) -> None:
     todo = tmp_path / "TODO.md"
     agents = tmp_path / "agents-lists.md"
-    write_todo_file(
+    bin_dir = tmp_path / "bin"
+    state_dir = tmp_path / "state"
+    calls_file = write_fake_tmux(
+        bin_dir,
+        state_dir,
+        sessions=["worker-b-session", "worker-c-session"],
+    )
+    write_todo_file_current(
         todo,
         running_rows=[
-            row_running("EX-1", "李白", "2026-03-08 16:10:00 +0800", ".", "创建 src", "", "", "worker-a", "进行中", "xxx", "./log/ex1.md"),
-            row_running("EX-2", "杜甫", "2026-03-08 16:20:00 +0800", ".", "创建 test", "", "", "worker-b", "进行中", "xxx", "./log/ex2.md"),
+            row_running_typed(
+                "EX-1",
+                "李白",
+                "2026-03-08 16:10:00 +0800",
+                ".",
+                "创建 src",
+                "build",
+                "",
+                "",
+                "worker-a",
+                "进行中",
+                "xxx",
+                "./log/ex1.md",
+            ),
+            row_running_typed(
+                "EX-2",
+                "杜甫",
+                "2026-03-08 16:20:00 +0800",
+                "/tmp/wt-ex2",
+                "创建 test",
+                "build",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "worker-b",
+                "进行中",
+                "xxx",
+                "./log/ex2.md",
+            ),
         ],
     )
     write_agents_file(agents, [agent_row("worker-a", "busy"), agent_row("worker-b", "busy"), agent_row("worker-c", "free")])
+    env = os.environ.copy()
+    env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
 
-    result = run_script("-file", str(todo), "-reassign", "-task_id", "EX-2", "-to", "worker-c", "-agents-list", str(agents))
+    result = run_script(
+        "-file",
+        str(todo),
+        "-reassign",
+        "-task_id",
+        "EX-2",
+        "-to",
+        "worker-c",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
     content = todo.read_text(encoding="utf-8")
     running_rows = parse_section_rows(content, "## 正在执行的任务")
 
     assert result.returncode == 0
     assert "OK: reassign EX-2 -> worker-c" in result.stdout
+    assert "OK: talk 神秘人 -> worker-b (worker-b-session)" in result.stdout
+    assert "OK: talk 神秘人 -> worker-c (worker-c-session)" in result.stdout
     assert any(r[0] == "EX-2" and r[8] == "worker-c" for r in running_rows)
     assert get_agent_status(agents, "worker-a") == "busy"
     assert get_agent_status(agents, "worker-b") == "free"
     assert get_agent_status(agents, "worker-c") == "busy"
+    calls_text = calls_file.read_text(encoding="utf-8")
+    assert (
+        "send:worker-b-session:@神秘人向@worker-b发起会话: "
+        "任务 EX-2 已改派给 worker-c，请停止当前处理并等待新的安排。:"
+    ) in calls_text
+    expected_new_message = (
+        "@神秘人向@worker-c发起会话: 请处理任务 EX-2（创建 test）。"
+        "worktree=/tmp/wt-ex2；计划书=ARCHITECTURE/plan/demo.md；记录文件=./log/ex2.md；"
+        f"完成后按 {REPO_ROOT}/agents/standard/任务记录约定.md 记录并回报管理员；"
+        "流程不清楚请询问管理员；实现/架构问题请询问架构师。"
+    )
+    assert expected_new_message in calls_text
 
 
 # TC-024
@@ -1486,6 +1548,120 @@ def test_reassign_rejects_busy_agent(tmp_path: Path) -> None:
     assert result.returncode == 3
     assert "agent is busy, cannot reassign: worker-b" in result.stderr
     assert any(r[0] == "EX-1" and r[8] == "worker-a" for r in running_rows)
+
+
+# TC-028B
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 测试目的: 验证 merge 任务改派时只允许合并专职，候补不可接手。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_reassign_rejects_merge_task_for_substitute(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-2",
+                "杜甫",
+                "2026-03-08 16:20:00 +0800",
+                "/tmp/wt-ex2",
+                "准备合并",
+                "merge",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "worker-m",
+                "进行中",
+                "xxx",
+                "./log/ex2.md",
+            ),
+        ],
+        list_rows=[],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row_with_role("worker-m", "busy", "合并"),
+            agent_row_with_role("worker-s", "free", "全能替补（不含合并）"),
+        ],
+    )
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-reassign",
+        "-task_id",
+        "EX-2",
+        "-to",
+        "worker-s",
+        "-agents-list",
+        str(agents),
+    )
+
+    running_rows = parse_section_rows(todo.read_text(encoding="utf-8"), "## 正在执行的任务")
+    assert result.returncode == 3
+    assert "merge tasks can only be reassigned to merge specialists: worker-s" in result.stderr
+    assert any(r[0] == "EX-2" and r[8] == "worker-m" for r in running_rows)
+    assert get_agent_status(agents, "worker-m") == "busy"
+    assert get_agent_status(agents, "worker-s") == "free"
+
+
+# TC-028C
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 测试目的: 验证 merge 任务改派时，非候补但不含合并职责的普通专职角色也不能接手。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_reassign_rejects_merge_task_for_non_merge_specialist(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-2",
+                "杜甫",
+                "2026-03-08 16:20:00 +0800",
+                "/tmp/wt-ex2",
+                "准备合并",
+                "merge",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "worker-m",
+                "进行中",
+                "xxx",
+                "./log/ex2.md",
+            ),
+        ],
+        list_rows=[],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row_with_role("worker-m", "busy", "合并"),
+            agent_row_with_role("worker-r", "free", "审查"),
+        ],
+    )
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-reassign",
+        "-task_id",
+        "EX-2",
+        "-to",
+        "worker-r",
+        "-agents-list",
+        str(agents),
+    )
+
+    running_rows = parse_section_rows(todo.read_text(encoding="utf-8"), "## 正在执行的任务")
+    assert result.returncode == 3
+    assert "merge tasks can only be reassigned to merge specialists: worker-r" in result.stderr
+    assert any(r[0] == "EX-2" and r[8] == "worker-m" for r in running_rows)
+    assert get_agent_status(agents, "worker-m") == "busy"
+    assert get_agent_status(agents, "worker-r") == "free"
 
 
 # TC-026
@@ -1881,6 +2057,128 @@ def test_dispatch_rejects_busy_agent(tmp_path: Path) -> None:
     assert "agent is busy, cannot dispatch: worker-b" in result.stderr
     assert not any(r[0] == "EX-3" and r[8] == "worker-b" for r in running_rows)
     assert any(r[0] == "EX-3" for r in list_rows)
+
+
+# TC-036A
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 测试目的: 验证 merge 任务分发时只允许合并专职，候补不可接手。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_dispatch_rejects_merge_task_for_substitute(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file_current(
+        todo,
+        list_rows=[
+            row_list_typed(
+                "EX-3",
+                "苏轼",
+                "2026-03-08 16:30:00 +0800",
+                "/tmp/wt-ex3",
+                "合并分支",
+                "merge",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "",
+                "./log/ex3.md",
+            )
+        ],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row_with_role("神秘人", "free", "管理员", "神秘人-session", "管理员"),
+            agent_row_with_role("worker-s", "free", "全能替补（不含合并）"),
+        ],
+    )
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_ADMIN_USERS"] = "神秘人"
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-dispatch",
+        "-task_id",
+        "EX-3",
+        "-to",
+        "worker-s",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+    list_rows = parse_section_rows(content, "## 任务列表")
+    assert result.returncode == 3
+    assert "merge tasks can only be dispatched to merge specialists: worker-s" in result.stderr
+    assert not any(r[0] == "EX-3" for r in running_rows)
+    assert any(r[0] == "EX-3" and r[5] == "merge" for r in list_rows)
+    assert get_agent_status(agents, "worker-s") == "free"
+
+
+# TC-036B
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 测试目的: 验证 merge 任务分发时，非候补但不含合并职责的普通专职角色也不能接手。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_dispatch_rejects_merge_task_for_non_merge_specialist(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file_current(
+        todo,
+        list_rows=[
+            row_list_typed(
+                "EX-3",
+                "苏轼",
+                "2026-03-08 16:30:00 +0800",
+                "/tmp/wt-ex3",
+                "合并分支",
+                "merge",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "",
+                "./log/ex3.md",
+            )
+        ],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row_with_role("神秘人", "free", "管理员", "神秘人-session", "管理员"),
+            agent_row_with_role("worker-r", "free", "实现 测试"),
+        ],
+    )
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_ADMIN_USERS"] = "神秘人"
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-dispatch",
+        "-task_id",
+        "EX-3",
+        "-to",
+        "worker-r",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+    list_rows = parse_section_rows(content, "## 任务列表")
+    assert result.returncode == 3
+    assert "merge tasks can only be dispatched to merge specialists: worker-r" in result.stderr
+    assert not any(r[0] == "EX-3" for r in running_rows)
+    assert any(r[0] == "EX-3" and r[5] == "merge" for r in list_rows)
+    assert get_agent_status(agents, "worker-r") == "free"
 
 
 # TC-037
@@ -2490,6 +2788,87 @@ def test_next_auto_merge_rejects_fallback(tmp_path: Path) -> None:
     assert not any(r[0] == "EX-2" for r in running_rows)
     assert any(r[0] == "EX-2" and r[5] == "merge" and r[8] == "" for r in list_rows)
     calls_text = calls_file.read_text(encoding="utf-8")
+    assert (
+        "send:神秘人-session:@worker-b向@神秘人发起会话: "
+        "任务 EX-2 已完成当前阶段，已回到任务列表；新任务类型=merge，请管理员推进。:"
+    ) in calls_text
+
+
+# TC-062A
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 测试目的: 验证 merge 自动续接不会错误挑选非候补但不含合并职责的普通专职角色。
+# 使用示例: pytest -q test/codex-multi-agents/test_codex-multi-agents-task.py -k test_next_auto_merge_rejects_non_merge_specialist
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_next_auto_merge_rejects_non_merge_specialist(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    bin_dir = tmp_path / "bin"
+    state_dir = tmp_path / "state"
+    calls_file = write_fake_tmux(bin_dir, state_dir, sessions=["神秘人-session", "worker-r-session"])
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-2",
+                "杜甫",
+                "2026-03-08 16:20:00 +0800",
+                "/tmp/wt-ex2",
+                "创建 test",
+                "merge",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "worker-b",
+                "进行中",
+                "xxx",
+                "./log/ex2.md",
+            ),
+        ],
+        list_rows=[],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row_with_role("神秘人", "free", "管理员", "神秘人-session", "管理员"),
+            agent_row_with_role("worker-b", "busy", "实现 测试"),
+            agent_row_with_role("worker-r", "free", "审查"),
+        ],
+    )
+
+    env = os.environ.copy()
+    env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["CODEX_MULTI_AGENTS_ADMIN_USERS"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-b"
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-next",
+        "-auto",
+        "-task_id",
+        "EX-2",
+        "-from",
+        "worker-b",
+        "-type",
+        "merge",
+        "-message",
+        "下一阶段：补齐边界用例",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    assert result.returncode == 0
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+    list_rows = parse_section_rows(content, "## 任务列表")
+    assert not any(r[0] == "EX-2" for r in running_rows)
+    assert any(r[0] == "EX-2" and r[5] == "merge" and r[8] == "" for r in list_rows)
+    assert get_agent_status(agents, "worker-r") == "free"
+    calls_text = calls_file.read_text(encoding="utf-8")
+    assert "worker-r-session" not in calls_text
     assert (
         "send:神秘人-session:@worker-b向@神秘人发起会话: "
         "任务 EX-2 已完成当前阶段，已回到任务列表；新任务类型=merge，请管理员推进。:"

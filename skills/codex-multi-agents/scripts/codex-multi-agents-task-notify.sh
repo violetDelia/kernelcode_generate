@@ -2,11 +2,11 @@
 # codex-multi-agents-task-notify.sh
 #
 # 创建者: OpenAI
-# 最后一次更改: OpenAI
+# 最后一次更改: 小李飞刀
 #
 # 功能:
 # - 执行 task 脚本的通知副作用：list -init、tmux -talk、任务消息拼装、管理员摘要发送。
-# - 供 codex-multi-agents-task.sh 在 -dispatch 与 -next/-auto 成功后调用。
+# - 供 codex-multi-agents-task.sh 在 -dispatch、-reassign 与 -next/-auto 成功后调用。
 #
 # 对应文件:
 # - spec: /home/lfr/kernelcode_generate/spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -31,11 +31,13 @@ TMUX_SCRIPT="${SCRIPT_DIR}/codex-multi-agents-tmux.sh"
 
 OP_DISPATCH_INIT=0
 OP_DISPATCH_MESSAGE=0
+OP_REASSIGN=0
 OP_NEXT=0
 
 FILE=""
 TASK_ID=""
 TO=""
+OLD_ASSIGNEE=""
 FROM=""
 AGENTS_LIST=""
 MESSAGE=""
@@ -63,6 +65,7 @@ usage() {
 Usage:
   codex-multi-agents-task-notify.sh -dispatch-init -agents-list <agents-lists.md> -to <worker>
   codex-multi-agents-task-notify.sh -dispatch-message -file <TODO.md> -task_id <id> -to <worker> -from <sender> -agents-list <agents-lists.md> [-message <text>]
+  codex-multi-agents-task-notify.sh -reassign -file <TODO.md> -task_id <id> -to <worker> -old-assignee <worker> -from <sender> -agents-list <agents-lists.md>
   codex-multi-agents-task-notify.sh -next -file <TODO.md> -task_id <id> -type <spec|build|review|merge|other|refactor> -agents-list <agents-lists.md> -from <sender> -admin <admin> [-auto-task-id <id>] [-auto-assignee <name>]
 USAGE
 }
@@ -77,6 +80,10 @@ parse_args() {
         ;;
       -dispatch-message)
         OP_DISPATCH_MESSAGE=1
+        shift
+        ;;
+      -reassign)
+        OP_REASSIGN=1
         shift
         ;;
       -next)
@@ -96,6 +103,11 @@ parse_args() {
       -to)
         [[ $# -ge 2 ]] || err "$RC_ARG" "missing value for -to"
         TO="$2"
+        shift 2
+        ;;
+      -old-assignee)
+        [[ $# -ge 2 ]] || err "$RC_ARG" "missing value for -old-assignee"
+        OLD_ASSIGNEE="$2"
         shift 2
         ;;
       -from)
@@ -143,8 +155,8 @@ parse_args() {
     esac
   done
 
-  local op_count=$((OP_DISPATCH_INIT + OP_DISPATCH_MESSAGE + OP_NEXT))
-  [[ "$op_count" -eq 1 ]] || err "$RC_ARG" "exactly one operation is required: -dispatch-init|-dispatch-message|-next"
+  local op_count=$((OP_DISPATCH_INIT + OP_DISPATCH_MESSAGE + OP_REASSIGN + OP_NEXT))
+  [[ "$op_count" -eq 1 ]] || err "$RC_ARG" "exactly one operation is required: -dispatch-init|-dispatch-message|-reassign|-next"
 
   if [[ "$OP_DISPATCH_INIT" -eq 1 ]]; then
     [[ -n "$(trim "$AGENTS_LIST")" ]] || err "$RC_ARG" "-dispatch-init requires -agents-list"
@@ -155,6 +167,13 @@ parse_args() {
     [[ -n "$(trim "$TO")" ]] || err "$RC_ARG" "-dispatch-message requires -to"
     [[ -n "$(trim "$FROM")" ]] || err "$RC_ARG" "-dispatch-message requires -from"
     [[ -n "$(trim "$AGENTS_LIST")" ]] || err "$RC_ARG" "-dispatch-message requires -agents-list"
+  elif [[ "$OP_REASSIGN" -eq 1 ]]; then
+    [[ -n "$(trim "$FILE")" ]] || err "$RC_ARG" "-reassign requires -file"
+    [[ -n "$(trim "$TASK_ID")" ]] || err "$RC_ARG" "-reassign requires -task_id"
+    [[ -n "$(trim "$TO")" ]] || err "$RC_ARG" "-reassign requires -to"
+    [[ -n "$(trim "$OLD_ASSIGNEE")" ]] || err "$RC_ARG" "-reassign requires -old-assignee"
+    [[ -n "$(trim "$FROM")" ]] || err "$RC_ARG" "-reassign requires -from"
+    [[ -n "$(trim "$AGENTS_LIST")" ]] || err "$RC_ARG" "-reassign requires -agents-list"
   elif [[ "$OP_NEXT" -eq 1 ]]; then
     [[ -n "$(trim "$FILE")" ]] || err "$RC_ARG" "-next requires -file"
     [[ -n "$(trim "$TASK_ID")" ]] || err "$RC_ARG" "-next requires -task_id"
@@ -346,6 +365,38 @@ dispatch_message() {
   [[ -z "$output" ]] || printf "%s\n" "$output"
 }
 
+build_reassign_cancel_message() {
+  # 功能说明:
+  # - 生成旧接手人在改派后收到的默认提示文本。
+  # - 固定包含任务 ID 与新接手人，提醒旧接手人停止当前处理。
+  #
+  # 使用示例:
+  # - build_reassign_cancel_message
+  #
+  # 关联文件:
+  # - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+  # - test: test/codex-multi-agents/test_codex-multi-agents-task.py
+  # - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-notify.sh
+  printf "任务 %s 已改派给 %s，请停止当前处理并等待新的安排。" "$TASK_ID" "$TO"
+}
+
+reassign_notify() {
+  # 功能说明:
+  # - 在改派成功后同时通知旧接手人与新接手人。
+  # - 旧接手人收到取消提示，新接手人收到与分发一致的任务消息模板。
+  #
+  # 使用示例:
+  # - reassign_notify
+  #
+  # 关联文件:
+  # - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+  # - test: test/codex-multi-agents/test_codex-multi-agents-task.py
+  # - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-notify.sh
+  send_talk_message "$FROM" "$OLD_ASSIGNEE" "$(build_reassign_cancel_message)"
+  send_init_for_agent "$TO"
+  dispatch_message
+}
+
 next_notify() {
   local summary_message=""
   local assignee_label=""
@@ -379,6 +430,11 @@ main() {
 
   if [[ "$OP_DISPATCH_MESSAGE" -eq 1 ]]; then
     dispatch_message
+    return $?
+  fi
+
+  if [[ "$OP_REASSIGN" -eq 1 ]]; then
+    reassign_notify
     return $?
   fi
 

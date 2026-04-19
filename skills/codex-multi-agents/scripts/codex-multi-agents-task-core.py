@@ -517,6 +517,8 @@ def agent_matches_type(kind: str, duty: str) -> bool:
     """
     if kind == "other":
         return True
+    if kind == "merge":
+        return is_merge_specialist_duty(duty)
     keywords = type_duty_keywords(kind)
     duty_text = duty.strip()
     return any((kw in duty_text for kw in keywords))
@@ -542,6 +544,58 @@ def is_substitute_duty(duty: str) -> bool:
     return "全能替补" in duty
 
 
+def is_merge_specialist_duty(duty: str) -> bool:
+    """判断是否为可承接 merge 任务的合并专职职责。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅接受职责包含“合并”且未显式声明“不含合并”的角色。
+    - 排除候补职责，避免 `merge` 被候补角色接手。
+
+    使用示例:
+    - ok = is_merge_specialist_duty("合并")
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-task.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+    """
+    duty_text = duty.strip()
+    if not duty_text:
+        return False
+    if is_substitute_duty(duty_text):
+        return False
+    return ("合并" in duty_text) and ("不含合并" not in duty_text)
+
+
+def get_agent_duty(
+    agent_row: list[str],
+    agents_table: dict,
+) -> str:
+    """读取角色表行中的职责文本。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 从 agents 表头中定位“职责”列。
+    - 表头不存在时返回空字符串，供上层约束统一处理。
+
+    使用示例:
+    - duty = get_agent_duty(agent_row, agents_table)
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-task.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+    """
+    header: list[str] = agents_table["header"]
+    duty_idx = header.index("职责") if "职责" in header else -1
+    return agent_row[duty_idx].strip() if duty_idx >= 0 else ""
+
+
 def is_specialist_candidate(kind: str, duty: str) -> bool:
     """判断是否满足专职候选条件。
 
@@ -565,6 +619,39 @@ def is_specialist_candidate(kind: str, duty: str) -> bool:
     if kind in {"spec", "build", "review"} and is_substitute_duty(duty):
         return False
     return True
+
+
+def ensure_merge_specialist_assignee(
+    kind: str,
+    assignee: str,
+    agent_row: list[str],
+    agents_table: dict,
+    action: str,
+) -> None:
+    """校验 merge 任务的目标角色是否满足合并专职约束。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 仅对 `merge` 任务生效，其余任务直接返回。
+    - 显式分发、改派时统一复用相同的职责校验与错误短语。
+
+    使用示例:
+    - ensure_merge_specialist_assignee("merge", "worker-m", agent_row, agents_table, "dispatch")
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-task.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+    """
+    if kind != "merge":
+        return
+    duty = get_agent_duty(agent_row, agents_table)
+    if is_merge_specialist_duty(duty):
+        return
+    verb = "dispatch" if action == "dispatch" else "reassign"
+    fail(RC_DATA, f"merge tasks can only be {verb}ed to merge specialists: {assignee}")
 
 
 def is_agent_eligible_for_auto(
@@ -928,17 +1015,25 @@ def main() -> int:
         agent_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], assignee)
         if agent_idx < 0:
             fail(RC_DATA, f"agent not found in agents list: {assignee}")
-        if agents_rows[agent_idx][agents_table["status_idx"]].strip().lower() == "busy":
-            fail(RC_DATA, f"agent is busy, cannot dispatch: {assignee}")
-        active_assignees = count_active_assignees(exec_rows)
-        if active_assignees >= max_parallel:
-            fail(RC_DATA, f"parallel assignee limit reached: {active_assignees}/{max_parallel}")
         table_type = row[5].strip()
         if type_kind and table_type and table_type != type_kind:
             fail(RC_DATA, f"task type mismatch: table={table_type} arg={type_kind}")
         task_type = table_type or type_kind
         if not task_type:
             fail(RC_DATA, f"empty task type in task list: {task_id}")
+        normalized_task_type = normalize_task_type(task_type, RC_DATA, f"dispatch task {task_id}")
+        ensure_merge_specialist_assignee(
+            normalized_task_type,
+            assignee,
+            agents_rows[agent_idx],
+            agents_table,
+            "dispatch",
+        )
+        if agents_rows[agent_idx][agents_table["status_idx"]].strip().lower() == "busy":
+            fail(RC_DATA, f"agent is busy, cannot dispatch: {assignee}")
+        active_assignees = count_active_assignees(exec_rows)
+        if active_assignees >= max_parallel:
+            fail(RC_DATA, f"parallel assignee limit reached: {active_assignees}/{max_parallel}")
         for dependency in parse_dependencies(row[6]):
             if find_row_index(exec_rows, dependency) >= 0 or find_row_index(list_rows, dependency) >= 0:
                 fail(RC_DATA, f"task has unresolved dependency: {dependency}")
@@ -958,7 +1053,7 @@ def main() -> int:
                 created_at,
                 worktree_val,
                 desc,
-                task_type,
+                normalized_task_type,
                 depends_val,
                 plan_doc_val,
                 assignee,
@@ -1096,6 +1191,14 @@ def main() -> int:
         new_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], new_assignee)
         if new_idx < 0:
             fail(RC_DATA, f"agent not found in agents list: {new_assignee}")
+        task_type = normalize_task_type(exec_rows[idx][5], RC_DATA, f"running task {task_id}")
+        ensure_merge_specialist_assignee(
+            task_type,
+            new_assignee,
+            agents_rows[new_idx],
+            agents_table,
+            "reassign",
+        )
         if agents_rows[new_idx][agents_table["status_idx"]].strip().lower() == "busy":
             fail(RC_DATA, f"agent is busy, cannot reassign: {new_assignee}")
 
@@ -1108,6 +1211,7 @@ def main() -> int:
 
         exec_rows[idx][8] = new_assignee
         message_lines.append(f"OK: reassign {task_id} -> {new_assignee}")
+        message_lines.append(f"__REASSIGN__={old_assignee}|{new_assignee}")
 
         updated: set[str] = set()
 

@@ -2,7 +2,7 @@
 # codex-multi-agents-task.sh
 #
 # 创建者: 榕
-# 最后一次更改: 神秘人
+# 最后一次更改: 小李飞刀
 #
 # 功能:
 # - 管理 TODO.md 任务流转: 分发、完成、暂停、继续、改派、续接、新建、删除、计划归档。
@@ -10,7 +10,7 @@
 # - 在分发、完成、暂停、继续、改派、续接时同步更新 agents-lists.md 角色状态。
 # - 在 TODO.md 维护计划书进度表，支持 -status -plan-list 与 -done-plan 收口归档。
 # - 通过 task-core.py 处理表格读写、状态流转、权限与自动续接判定。
-# - 通过 task-notify.sh 处理 list -init、tmux -talk、任务消息与管理员摘要。
+# - 通过 task-notify.sh 处理 list -init、tmux -talk、任务消息、改派通知与管理员摘要。
 # - 写操作统一使用 flock 文件锁。
 #
 # 对应文件:
@@ -764,6 +764,8 @@ main() {
   local auto_flag="0"
   local auto_next_task_id=""
   local auto_next_assignee=""
+  local reassign_old_assignee=""
+  local reassign_new_assignee=""
   local visible_output=""
   local core_output=""
   local rc=0
@@ -861,6 +863,14 @@ main() {
       local marker_kind=""
       IFS='|' read -r marker_kind auto_next_task_id auto_next_assignee <<<"$auto_payload"
     fi
+  elif [[ "$op" == "reassign" ]]; then
+    local reassign_marker=""
+    reassign_marker="$(printf "%s\n" "$core_output" | grep '^__REASSIGN__=' || true)"
+    visible_output="$(printf "%s\n" "$core_output" | grep -v '^__REASSIGN__=' || true)"
+    if [[ -n "$reassign_marker" ]]; then
+      local reassign_payload="${reassign_marker#__REASSIGN__=}"
+      IFS='|' read -r reassign_old_assignee reassign_new_assignee <<<"$reassign_payload"
+    fi
   else
     visible_output="$core_output"
   fi
@@ -909,6 +919,20 @@ main() {
       next_notify_args+=(-auto-assignee "$auto_next_assignee")
     fi
     run_task_notify "${next_notify_args[@]}"
+    return 0
+  fi
+
+  if [[ "$op" == "reassign" ]]; then
+    release_lock_fd "$agents_lock_fd"
+    release_lock_fd "$todo_lock_fd"
+    run_task_notify \
+      -reassign \
+      -file "$FILE" \
+      -task_id "$TASK_ID" \
+      -to "${reassign_new_assignee:-$TO}" \
+      -old-assignee "$reassign_old_assignee" \
+      -from "$(resolve_dispatch_sender)" \
+      -agents-list "$AGENTS_LIST"
     return 0
   fi
 

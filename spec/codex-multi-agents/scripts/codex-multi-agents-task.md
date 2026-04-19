@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`jcc你莫辜负`
+- 最后一次更改：`小李飞刀`
 - `spec`：[`spec/codex-multi-agents/scripts/codex-multi-agents-task.md`](../../../spec/codex-multi-agents/scripts/codex-multi-agents-task.md)
 - `test`：[`test/codex-multi-agents/test_codex-multi-agents-task.py`](../../../test/codex-multi-agents/test_codex-multi-agents-task.py)
 - `功能实现`：
@@ -41,7 +41,7 @@
 - 提供统一的 `-dispatch/-done/-pause/-continue/-reassign/-next/-new/-delete/-done-plan/-status` 命令入口。
 - 维护 `TODO.md`、`DONE.md`、`agents-lists.md` 之间一致的任务状态和角色状态。
 - 在 `-new/-done/-delete/-done-plan` 时维护 `## 计划书` 统计。
-- 在 `-dispatch` 成功后发送固定格式的任务消息；在 `-next` 成功后固定向管理员发送阶段摘要；在 `-next -auto` 成功时额外发送自动续接消息。
+- 在 `-dispatch` 成功后发送固定格式的任务消息；在 `-reassign` 成功后同时通知旧接手人与新接手人；在 `-next` 成功后固定向管理员发送阶段摘要；在 `-next -auto` 成功时额外发送自动续接消息。
 - 在参数错误、文件错误、数据错误、锁冲突与内部错误时返回稳定返回码。
 
 ## 实现分层
@@ -79,6 +79,7 @@
 - `-dispatch` 默认读取任务记录中的 `任务类型`；若显式提供 `-type`，则必须与任务记录一致。
 - `-dispatch` 仅在全部依赖任务已经从 `正在执行的任务` 与 `任务列表` 中消失时才允许继续。
 - `-dispatch` 仅在目标角色存在、当前空闲且总并发人数未超过 `CODEX_MULTI_AGENTS_MAX_PARALLEL` 时才允许继续。
+- `merge` 任务在 `-dispatch/-reassign/-next -auto` 下只允许分配给合并专职：职责包含 `合并`，且职责不包含 `全能替补` 或 `不含合并`。
 - `-next` 仅负责：
   - 将运行中任务移回 `任务列表`
   - 用 `-message` 更新 `描述`
@@ -92,7 +93,7 @@
   - `spec` 专职：职责包含 `spec` 或 `spec 文档编写`，且职责不包含 `全能替补`。
   - `build` 专职：职责包含 `实现` 或 `测试`，且职责不包含 `全能替补`。
   - `review` 专职：职责包含 `审查` 或 `复审`，且职责不包含 `全能替补`。
-  - `merge` 专职：职责包含 `合并`。
+  - `merge` 专职：职责包含 `合并`，且职责不包含 `全能替补` 或 `不含合并`。
   - 候补：职责包含 `全能替补`。
   - 仅保留 `agents-lists.md` 中状态为 `free` 且职责匹配的角色；职责包含 `不承担管理员分发的任务` 的角色不计入候选。
   - 若当前执行者满足上述条件，则作为候选之一参与选择。
@@ -188,6 +189,7 @@ codex-multi-agents-task.sh \
 
 - 分发前会尽力执行一次 `codex-multi-agents-list.sh -init -file <agents-list> -name <to>`。
 - 若任务记录与命令行都没有可用的 `任务类型`，则分发失败。
+- `merge` 任务只允许分发给合并专职；候补与声明 `不含合并` 的角色不能接手。
 - 默认任务消息固定包含：任务 ID、描述、当前任务中实际存在的 `worktree`、计划书路径、记录文件、任务记录要求、问题咨询指引；其中“任务记录要求”必须明确：若任务有独立 `worktree`，常规任务日志必须写入该 `worktree` 下的对应记录文件。
 - 提供 `-message` 时，仅作为默认任务消息后的补充说明。
 
@@ -294,6 +296,7 @@ codex-multi-agents-task.sh \
 功能说明：
 
 - 在 `正在执行的任务` 中替换指派对象，并重算旧角色与新角色的状态。
+- 改派成功后同步通知被取消任务的旧角色与新的接手角色。
 
 参数说明：
 
@@ -317,6 +320,8 @@ codex-multi-agents-task.sh \
 
 - `-reassign` 仅适用于运行中任务；不能改派 `任务列表` 中的任务。
 - 目标角色必须在 `agents-lists.md` 中处于 `free` 状态。
+- `merge` 任务只允许改派给合并专职；候补与声明 `不含合并` 的角色不能接手。
+- 旧角色收到“停止当前处理”的提示，新角色收到与 `-dispatch` 一致的默认任务消息模板。
 
 返回与限制：
 
@@ -532,10 +537,11 @@ codex-multi-agents-task.sh \
   - `TC-023` `test_continue_missing_task_returns_rc3`：继续不存在任务，返回 `3`
   - `TC-024` `test_continue_requires_paused_status`：继续非暂停任务，返回 `3`
   - `TC-025` `test_continue_requires_agents_list`：继续任务缺少角色列表，返回 `1`
-  - `TC-026` `test_reassign_task_success`：改派成功，任务指派更新，角色状态重算
+  - `TC-026` `test_reassign_task_success`：改派成功，任务指派更新，角色状态重算，并通知旧/新接手人
   - `TC-027` `test_reassign_missing_task_returns_rc3`：改派不存在任务，返回 `3`
   - `TC-028` `test_reassign_requires_agents_list`：改派缺少角色列表，返回 `1`
   - `TC-028A` `test_reassign_rejects_busy_agent`：改派目标角色忙碌，返回 `3`
+  - `TC-028B` `test_reassign_rejects_merge_task_for_substitute`：`merge` 改派到候补角色被拒绝
   - `TC-029` `test_delete_task_list_success`：删除任务列表任务
   - `TC-030` `test_delete_missing_task_returns_rc3`：删除不存在任务，返回 `3`
   - `TC-031` `test_delete_running_task_returns_rc3`：删除运行中任务，返回 `3`
@@ -549,6 +555,7 @@ codex-multi-agents-task.sh \
   - `TC-038` `test_new_requires_worktree`：新建缺少 `-worktree`，返回 `1`
   - `TC-039` `test_dispatch_blocked_by_unresolved_dependency`：分发时依赖未清空，返回 `3`
   - `TC-040` `test_dispatch_rejects_busy_agent`：目标角色为 `busy`，返回 `3`
+  - `TC-040A` `test_dispatch_rejects_merge_task_for_substitute`：`merge` 分发到候补角色被拒绝
   - `TC-041` `test_next_requires_agents_list`：续接缺少角色列表，返回 `1`
   - `TC-041A` `test_next_requires_from`：续接缺少发起人，返回 `1`
   - `TC-042` `test_new_requires_depends_and_plan`：新建缺少 `-depends/-plan`，返回 `1`
