@@ -1511,8 +1511,6 @@ class _KernelEmitter:
 
         arg_names = _extract_arg_names(func_op)
         leading_out_params = _leading_rewritten_out_param_count(func_op)
-        if leading_out_params == 0 and not result_types:
-            leading_out_params = _leading_out_param_count_from_body(func_op)
         mutable_memory_args = self._mutable_memory_arg_indices(func_op)
         params: list[str] = []
         for index, (arg_name, arg_type, arg_value) in enumerate(zip(arg_names, input_types, func_op.args, strict=True)):
