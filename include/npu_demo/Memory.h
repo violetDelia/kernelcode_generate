@@ -402,6 +402,37 @@ inline Memory<Space, ViewT> Memory<Space, T>::view(
 
 /*
 功能说明:
+- 提供 `gen_kernel/emit_c(target=npu_demo)` 使用的一维自由函数 `view(...)` 包装，
+  让生成源码可继续保持 `view(source, offset, size, stride)` 的稳定文本合同。
+
+使用示例:
+- auto tile = view(source, tid * 16, 16, 1);
+
+创建者: jcc你莫辜负
+最后修改人: jcc你莫辜负
+
+关联文件:
+- spec: spec/include/npu_demo/npu_demo.md
+- test: test/dsl/test_gen_kernel.py
+- 功能实现: include/npu_demo/Memory.h
+*/
+template <MemorySpace Space, typename T>
+inline Memory<Space, T> view(
+    const Memory<Space, T>& source,
+    long long offset,
+    long long size,
+    long long stride) {
+    long long offset_buf[1] = {offset};
+    long long size_buf[1] = {size};
+    long long stride_buf[1] = {stride};
+    Vector offset_vec(offset_buf, 1);
+    Vector size_vec(size_buf, 1);
+    Vector stride_vec(stride_buf, 1);
+    return source.template view<T>(offset_vec, size_vec, stride_vec);
+}
+
+/*
+功能说明:
 - 返回成员式重解释视图，当前要求源视图连续且目标形状元素总数一致。
 
 使用示例:

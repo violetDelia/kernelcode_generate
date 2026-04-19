@@ -166,6 +166,38 @@ inline Status slice(
 
 /*
 功能说明:
+- 提供 `gen_kernel/emit_c(target=npu_demo)` 使用的一维标量 `slice(...)` 包装，
+  让生成源码可继续保持 `slice(target, source, offset, size, stride)` 的稳定文本合同。
+
+使用示例:
+- Status status = slice(tile, source, 0, 16, 1);
+
+创建者: jcc你莫辜负
+最后修改人: jcc你莫辜负
+
+关联文件:
+- spec: spec/include/npu_demo/npu_demo.md
+- test: test/dsl/test_gen_kernel.py
+- 功能实现: include/npu_demo/Dma.h
+*/
+template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T>
+inline Status slice(
+    Memory<TargetSpace, T>& target,
+    const Memory<SourceSpace, T>& source,
+    long long offset,
+    long long size,
+    long long stride) {
+    long long offset_buf[1] = {offset};
+    long long size_buf[1] = {size};
+    long long stride_buf[1] = {stride};
+    Vector offset_vec(offset_buf, 1);
+    Vector size_vec(size_buf, 1);
+    Vector stride_vec(stride_buf, 1);
+    return slice(target, source, offset_vec, size_vec, stride_vec);
+}
+
+/*
+功能说明:
 - 将 source 块写回 target 的指定区域（Vector offset/size/stride 版本），公开参数顺序固定为 `target-first`。
 
 使用示例:
@@ -270,6 +302,38 @@ inline Status deslice(
         target.at(target_indices) = source.at(source_indices);
     }
     return StatusCode::kOk;
+}
+
+/*
+功能说明:
+- 提供 `gen_kernel/emit_c(target=npu_demo)` 使用的一维标量 `deslice(...)` 包装，
+  让生成源码可继续保持 `deslice(target, source, offset, size, stride)` 的稳定文本合同。
+
+使用示例:
+- Status status = deslice(target, tile, tid * 16, 16, 1);
+
+创建者: jcc你莫辜负
+最后修改人: jcc你莫辜负
+
+关联文件:
+- spec: spec/include/npu_demo/npu_demo.md
+- test: test/dsl/test_gen_kernel.py
+- 功能实现: include/npu_demo/Dma.h
+*/
+template <MemorySpace TargetSpace, MemorySpace SourceSpace, typename T>
+inline Status deslice(
+    Memory<TargetSpace, T>& target,
+    const Memory<SourceSpace, T>& source,
+    long long offset,
+    long long size,
+    long long stride) {
+    long long offset_buf[1] = {offset};
+    long long size_buf[1] = {size};
+    long long stride_buf[1] = {stride};
+    Vector offset_vec(offset_buf, 1);
+    Vector size_vec(size_buf, 1);
+    Vector stride_vec(stride_buf, 1);
+    return deslice(target, source, offset_vec, size_vec, stride_vec);
 }
 
 #endif  // KERNELCODE_GENERATE_INCLUDE_NPU_DEMO_DMA_H_
