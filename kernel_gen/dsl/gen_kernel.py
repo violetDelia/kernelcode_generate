@@ -1509,9 +1509,17 @@ class _KernelEmitter:
                 raise _error(self.ctx, func_name, "symbol scalar return is cpu-only")
             self._type_to_c(result_type)
 
+        mutable_memory_args = self._mutable_memory_arg_indices(func_op)
         arg_names = _extract_arg_names(func_op)
         leading_out_params = _leading_rewritten_out_param_count(func_op)
-        mutable_memory_args = self._mutable_memory_arg_indices(func_op)
+        if mutable_memory_args:
+            contiguous_mutable_prefix = 0
+            while (
+                contiguous_mutable_prefix < leading_out_params
+                and contiguous_mutable_prefix in mutable_memory_args
+            ):
+                contiguous_mutable_prefix += 1
+            leading_out_params = contiguous_mutable_prefix
         params: list[str] = []
         for index, (arg_name, arg_type, arg_value) in enumerate(zip(arg_names, input_types, func_op.args, strict=True)):
             self.ctx.bind_name(arg_value, arg_name)
@@ -1560,6 +1568,10 @@ class _KernelEmitter:
         """返回当前 op 中会被写入的 block argument operand。"""
 
         candidates: list[object] = []
+        if op.name.startswith("kernel."):
+            out_value = _kernel_out_operand(op)
+            if out_value is not None:
+                candidates.append(out_value)
         if isinstance(op, (DmaBroadcastOp, DmaCastOp, DmaCopyOp, DmaFillOp, DmaLoadOp, DmaSliceOp, DmaTransposeOp)):
             if not isinstance(op, DmaCastOp) or len(op.operands) == 2:
                 candidates.append(op.target)

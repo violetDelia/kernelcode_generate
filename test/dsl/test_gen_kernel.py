@@ -1384,6 +1384,49 @@ def test_gen_kernel_emits_npu_demo_body_level_kernel() -> None:
     assert "arch.launch_kernel" not in source
 
 
+# GK-S4-001
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: N/A
+# 最近一次运行成功时间: N/A
+# 功能说明: 验证 npu_demo 单函数 kernel family 会把最前置 out 参数生成为可写引用，并通过 Kernel helper 发射。
+# 测试目的: 锁定 `kernel.binary_elewise(kind="add")` 在 `target=npu_demo` 下的函数签名与 helper 调用都遵循 `out-first` 口径，防止把 out 误生成为 `const Memory&`。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_kernel_binary_signature_out_first
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_emits_npu_demo_kernel_binary_signature_out_first() -> None:
+    out_type = _make_memory_type([4], [1], element_type=f64, space="tlm1")
+    input_type = _make_memory_type([4], [1], element_type=i32, space="tlm1")
+    block = Block(arg_types=[out_type, input_type, input_type])
+    block.add_op(
+        KernelBinaryElewiseOp(
+            block.args[0],
+            block.args[1],
+            block.args[2],
+            kind="add",
+            space=NnMemorySpaceAttr.from_name("tlm1"),
+        )
+    )
+    block.add_op(func.ReturnOp())
+    func_op = _func(
+        "kernel_binary_add_case",
+        [out_type, input_type, input_type],
+        [],
+        block,
+        ("arg0", "arg1", "arg2"),
+    )
+
+    source = gen_kernel(func_op, _npu_ctx())
+
+    assert (
+        "void kernel_binary_add_case(Memory<TLM1, double>& arg0, const Memory<TLM1, int32_t>& arg1, const Memory<TLM1, int32_t>& arg2)"
+        in source
+    )
+    assert "const Memory<TLM1, double>& arg0" not in source
+    assert "npu_demo::add<TLM1, int32_t, double>(arg0 /*out*/, arg1 /*lhs*/, arg2 /*rhs*/);" in source
+
+
 # GK-017A
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀

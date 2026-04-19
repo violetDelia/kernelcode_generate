@@ -29,7 +29,6 @@ from xdsl.ir import BlockArgument, Operation, SSAValue
 from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCastOp, DmaCopyOp, DmaDesliceOp, DmaFillOp, DmaFreeOp, DmaLoadOp, DmaReshapeOp, DmaSliceOp, DmaStoreOp, DmaTransposeOp, DmaViewOp
 from kernel_gen.dialect.kernel import (
-    KernelAddOp,
     KernelBinaryElewiseOp,
     KernelExpOp,
     KernelImg2col1dOp,
@@ -2051,8 +2050,6 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
             return _emit_npu_store_stmt(op, ctx)
         if isinstance(op, DmaTransposeOp):
             return _emit_npu_transpose_stmt(op, ctx)
-        if isinstance(op, KernelAddOp):
-            return _emit_npu_kernel_add_stmt(op, ctx)
         if isinstance(op, KernelBinaryElewiseOp):
             return _emit_kernel_binary_elewise_stmt(op, ctx)
         if isinstance(op, KernelExpOp):
