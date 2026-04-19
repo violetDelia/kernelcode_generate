@@ -236,7 +236,6 @@ def _make_npu_demo_add_barrier_module(
     body_block = Block(arg_types=[IndexType(), gm_type, gm_type, gm_type])
     thread_offset = FakeSymbolValueOp("thread_id * 16")
     rhs_offset = FakeSymbolValueOp("64 + thread_id * 16")
-    out_offset = FakeSymbolValueOp("128 + thread_id * 16")
     zero = FakeSymbolValueOp("0")
     size = FakeSymbolValueOp("16")
     stride = FakeSymbolValueOp("1")
@@ -248,18 +247,17 @@ def _make_npu_demo_add_barrier_module(
     rhs_gm = DmaViewOp(body_block.args[2], [thread_offset.result], [size.result], [stride.result], gm_tile_type)
     lhs_tsm = DmaViewOp(tsm.result, [thread_offset.result], [size.result], [stride.result], tsm_tile_type)
     rhs_tsm = DmaViewOp(tsm.result, [rhs_offset.result], [size.result], [stride.result], tsm_tile_type)
-    out_tsm = DmaViewOp(tsm.result, [out_offset.result], [size.result], [stride.result], tsm_tile_type)
+    out_tlm = DmaViewOp(tlm.result, [thread_offset.result], [size.result], [stride.result], tlm_tile_type)
     lhs_slice = DmaSliceOp(lhs_tsm.result, lhs_gm.result, [zero.result], [size.result], [stride.result])
     rhs_slice = DmaSliceOp(rhs_tsm.result, rhs_gm.result, [zero.result], [size.result], [stride.result])
     barrier0 = ArchBarrierOp(ArchScopeAttr.from_name(barrier_scope), barrier_visibility)
-    add = NnAddOp(lhs_tsm.result, rhs_tsm.result, tsm_tile_type, NnMemorySpaceAttr.from_name("tsm"))
+    add = NnAddOp(lhs_tsm.result, rhs_tsm.result, tlm_tile_type, NnMemorySpaceAttr.from_name(tlm_space))
     barrier1 = ArchBarrierOp(ArchScopeAttr.from_name(barrier_scope), barrier_visibility)
     deslice = DmaDesliceOp(add.result, body_block.args[3], [thread_offset.result], [size.result], [stride.result], gm_type)
     body_block.add_ops(
         [
             thread_offset,
             rhs_offset,
-            out_offset,
             zero,
             size,
             stride,
@@ -271,7 +269,7 @@ def _make_npu_demo_add_barrier_module(
             rhs_gm,
             lhs_tsm,
             rhs_tsm,
-            out_tsm,
+            out_tlm,
             lhs_slice,
             rhs_slice,
             barrier0,
@@ -1989,8 +1987,8 @@ def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body(tlm_space: st
         "Memory<MemorySpace::TSM, float> tsm = ctx.get_dynamic_memory<MemorySpace::TSM, float>();"
     )
     assert f"Memory<MemorySpace::{space_enum}, float> tlm = ctx.get_dynamic_memory<MemorySpace::{space_enum}, float>();" in source
-    assert f"auto out_tsm = view(tsm, 128 + tid * 16, 16, 1);" in source
-    assert source.index("slice(lhs_tsm, lhs_gm, 0, 16, 1);") < source.index("npu_demo::add<MemorySpace::TSM, float, float>(out_tsm, lhs_tsm, rhs_tsm);") < source.index("deslice(out, out_tsm, tid * 16, 16, 1);")
+    assert f"auto out_tlm = view(tlm, tid * 16, 16, 1);" in source
+    assert source.index("slice(lhs_tsm, lhs_gm, 0, 16, 1);") < source.index("add(lhs_tsm, rhs_tsm, out_tlm);") < source.index("deslice(out, out_tlm, tid * 16, 16, 1);")
     assert "arch.launch_kernel" not in source
     assert "ctx.sync_threads" not in source
 

@@ -994,7 +994,7 @@ class _KernelEmitter:
         - 允许辅助 `!symbol.int` 产生 op，但过滤后必须严格匹配固定序列。
         - barrier 本身仍使用 IR 上的 scope/visibility，避免静默回退到旧接口。
         - 第二块动态内存仍必须读取 `tlm1/tlm2/tlm3`，用于锁定 launch body 的动态内存查询口径。
-        - 当前固定 add 骨架允许把输出 tile 放在 `tsm`，再经 `deslice` 写回 `out`。
+        - 当前固定 add 骨架要求把输出 tile 放在 `tlm1/tlm2/tlm3`，再经 `deslice` 写回 `out`。
 
         使用示例:
         - barrier0, barrier1, tlm_space = self._validate_npu_demo_launch_body_ops(body_func)
@@ -1076,14 +1076,14 @@ class _KernelEmitter:
             raise _error(self.ctx, func_name, "npu_demo launch body must read tlm1/tlm2/tlm3 as second dynamic memory")
         out_view_type = out_view.result.type
         add_result_type = add_op.result.type
-        if not isinstance(out_view_type, NnMemoryType) or out_view_type.space.space.data != "tsm":
-            raise _error(self.ctx, func_name, "npu_demo output tile view must stay on tsm")
-        if out_view.source is not tsm_dynamic.result:
-            raise _error(self.ctx, func_name, "npu_demo output tile must view tsm dynamic memory")
-        if add_op.space.space.data != "tsm":
-            raise _error(self.ctx, func_name, "npu_demo add result space must stay on tsm")
-        if not isinstance(add_result_type, NnMemoryType) or add_result_type.space.space.data != "tsm":
-            raise _error(self.ctx, func_name, "npu_demo add result type must stay on tsm")
+        if not isinstance(out_view_type, NnMemoryType) or out_view_type.space.space.data != tlm_space:
+            raise _error(self.ctx, func_name, "npu_demo output tile view must stay on tlm")
+        if out_view.source is not tlm_dynamic.result:
+            raise _error(self.ctx, func_name, "npu_demo output tile must view tlm dynamic memory")
+        if add_op.space.space.data != tlm_space:
+            raise _error(self.ctx, func_name, "npu_demo add result space must stay on tlm")
+        if not isinstance(add_result_type, NnMemoryType) or add_result_type.space.space.data != tlm_space:
+            raise _error(self.ctx, func_name, "npu_demo add result type must stay on tlm")
         if deslice_op.source is not add_op.result and deslice_op.target is not add_op.result:
             raise _error(self.ctx, func_name, "npu_demo deslice must consume add result directly")
         return barrier0, barrier1, tlm_space
@@ -1127,10 +1127,11 @@ class _KernelEmitter:
         """生成 npu_demo `add+barrier` body 函数源码。
 
         创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
+        最后一次更改: jcc你莫辜负
 
         功能说明:
         - 输出 `static` body 签名，以及固定的 `thread/view/slice/barrier/add/deslice` 管线。
+        - `lhs/rhs` tile 固定放在 `TSM`，`out` tile 固定放在 `TLM1/TLM2/TLM3`。
         - 仅消费 `S4` 冻结的 add+barrier 受控子集。
 
         使用示例:
@@ -1175,19 +1176,18 @@ class _KernelEmitter:
             "",
             f"{indent}auto {lhs_name}_tsm = view(tsm, tid * 16, 16, 1);",
             f"{indent}auto {rhs_name}_tsm = view(tsm, 64 + tid * 16, 16, 1);",
-            f"{indent}auto {out_name}_tsm = view(tsm, 128 + tid * 16, 16, 1);",
+            f"{indent}auto {out_name}_tlm = view(tlm, tid * 16, 16, 1);",
             "",
             f"{indent}slice({lhs_name}_tsm, {lhs_name}_gm, 0, 16, 1);",
             f"{indent}slice({rhs_name}_tsm, {rhs_name}_gm, 0, 16, 1);",
             self._format_npu_demo_barrier_stmt(barrier0, func_op.sym_name.data),
             "",
             (
-                f"{indent}npu_demo::add<MemorySpace::TSM, {element_type}, {element_type}>"
-                f"({out_name}_tsm, {lhs_name}_tsm, {rhs_name}_tsm);"
+                f"{indent}add({lhs_name}_tsm, {rhs_name}_tsm, {out_name}_tlm);"
             ),
             self._format_npu_demo_barrier_stmt(barrier1, func_op.sym_name.data),
             "",
-            f"{indent}deslice({out_name}, {out_name}_tsm, tid * 16, 16, 1);",
+            f"{indent}deslice({out_name}, {out_name}_tlm, tid * 16, 16, 1);",
         ]
         body = "\n".join(lines)
         self.ctx.pop_indent()

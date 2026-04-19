@@ -147,6 +147,7 @@ def _compile_expect_failure(source: str) -> str:
 # 对应测试文件路径: `test/include/api/test_kernel.py`
 def test_include_api_kernel_exports_only_public_kernel_helpers() -> None:
     public_header = (REPO_ROOT / "include" / "api" / "Kernel.h").read_text(encoding="utf-8")
+    npu_demo_entry = (REPO_ROOT / "include" / "npu_demo" / "npu_demo.h").read_text(encoding="utf-8")
 
     assert "namespace npu_demo" in public_header
     assert "Status add(" in public_header
@@ -155,6 +156,7 @@ def test_include_api_kernel_exports_only_public_kernel_helpers() -> None:
     assert "Status broadcast(" not in public_header
     assert "Status softmax(" not in public_header
     assert not (REPO_ROOT / "include" / "api" / "Nn.h").exists()
+    assert '#include "include/npu_demo/Nn.h"' not in npu_demo_entry
 
 
 # API-KERNEL-002

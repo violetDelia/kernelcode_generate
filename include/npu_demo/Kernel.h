@@ -9,7 +9,7 @@
 - Status st2 = npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out, lhs, rhs);
 
 创建者: 小李飞刀
-最后修改人: 小李飞刀
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: spec/include/api/Kernel.md
@@ -692,5 +692,51 @@ inline Status img2col2d(
 }
 
 }  // namespace npu_demo
+
+/*
+功能说明:
+- 为 `gen_kernel(target="npu_demo")` 的 `add_barrier` 骨架提供跨 MemorySpace 的私有 `add(lhs, rhs, out)` 承接。
+- 仅用于单入口源码中 `TSM + TSM -> TLMx` 这类受控路径；不改变 `include/api/Kernel.h` 的公开 `out-first` 合同。
+
+使用示例:
+- Status st = add(lhs_tsm, rhs_tsm, out_tlm);
+
+创建者: jcc你莫辜负
+最后修改人: jcc你莫辜负
+
+关联文件:
+- spec: spec/include/npu_demo/npu_demo.md
+- test: test/dsl/test_gen_kernel.py
+- 功能实现: include/npu_demo/Kernel.h
+*/
+template <MemorySpace LhsSpace, MemorySpace RhsSpace, MemorySpace OutSpace, typename T>
+inline Status add(const Memory<LhsSpace, T>& lhs, const Memory<RhsSpace, T>& rhs, Memory<OutSpace, T>& out) {
+    if (lhs.rank() != 1 || rhs.rank() != 1 || out.rank() != 1) {
+        return StatusCode::kError;
+    }
+    if (!npu_demo::detail::is_non_null(lhs.data()) || !npu_demo::detail::is_non_null(rhs.data())
+        || !npu_demo::detail::is_non_null(out.data())) {
+        return StatusCode::kError;
+    }
+    const long long lhs_size = lhs.get_shape(0);
+    const long long rhs_size = rhs.get_shape(0);
+    const long long out_size = out.get_shape(0);
+    if (lhs_size <= 0 || rhs_size <= 0 || out_size <= 0) {
+        return StatusCode::kError;
+    }
+    if (lhs_size != rhs_size || lhs_size != out_size) {
+        return StatusCode::kError;
+    }
+    const long long lhs_stride = lhs.get_stride(0);
+    const long long rhs_stride = rhs.get_stride(0);
+    const long long out_stride = out.get_stride(0);
+    if (lhs_stride <= 0 || rhs_stride <= 0 || out_stride <= 0) {
+        return StatusCode::kError;
+    }
+    for (long long i = 0; i < lhs_size; ++i) {
+        out.data()[i * out_stride] = lhs.data()[i * lhs_stride] + rhs.data()[i * rhs_stride];
+    }
+    return StatusCode::kOk;
+}
 
 #endif  // KERNELCODE_GENERATE_INCLUDE_NPU_DEMO_KERNEL_H_

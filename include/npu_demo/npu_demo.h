@@ -1,14 +1,14 @@
 /*
 功能说明:
 - 定义 npu_demo 单入口 include，透传 include/api 的统一声明并汇聚后端实现。
-- 当前公共计算 helper 已从 `include/api/Nn.h` 切到 `include/api/Kernel.h`。
+- 当前只聚合 `Core / Memory / Dma / Kernel / Arch` 五类头文件，不再重新聚合 `Nn.h`。
 
 使用示例:
 - #include "include/npu_demo/npu_demo.h"
 - Status status = npu_demo::launch<1, 4, 1>(kernel_body, output);
 
 创建者: 朽木露琪亚
-最后修改人: 小李飞刀
+最后修改人: jcc你莫辜负
 
 关联文件:
 - spec: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
