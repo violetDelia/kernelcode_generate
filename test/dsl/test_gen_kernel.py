@@ -1539,7 +1539,8 @@ def test_gen_kernel_compiles_npu_demo_tiled_matmul_source() -> None:
     source = gen_kernel(rewritten_func, _npu_ctx())
 
     assert source.startswith('#include "include/npu_demo/npu_demo.h"\n')
-    assert "npu_demo::matmul<" in source
+    assert "npu_demo::matmul(" in source
+    assert "npu_demo::matmul<" not in source
     assert "slice(" in source
     assert "deslice(" in source
     assert "cpu::matmul(" not in source

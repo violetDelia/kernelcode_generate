@@ -1788,8 +1788,10 @@ def _emit_npu_kernel_matmul_stmt(op: KernelMatmulOp, ctx: EmitCContext) -> str:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 把 lowered `kernel.matmul(lhs, rhs, out)` 发射为显式模板参数且 `out-first` 的
-      `npu_demo::matmul<LhsSpace, RhsSpace, OutSpace, LhsType, RhsType, OutType>(out, lhs, rhs);`。
+    - 把 lowered `kernel.matmul(lhs, rhs, out)` 发射为 `out-first` 的
+      `npu_demo::matmul(out, lhs, rhs);`。
+    - 依赖 C++ 模板参数推导，避免在 emit 文本里硬编码模板参数，保持 execute_engine
+      npu_demo matmul 真链路合同稳定。
     - 只在 `target=npu_demo` 公开该后端专用 helper。
 
     使用示例:
@@ -1805,16 +1807,7 @@ def _emit_npu_kernel_matmul_stmt(op: KernelMatmulOp, ctx: EmitCContext) -> str:
     lhs_expr = _memory_base_name(lhs_value, ctx)
     rhs_expr = _memory_base_name(rhs_value, ctx)
     out_expr = _memory_base_name(out_value, ctx)
-    lhs_space = _space_to_c(lhs_value.type, ctx)
-    rhs_space = _space_to_c(rhs_value.type, ctx)
-    out_space = _space_to_c(out_value.type, ctx)
-    lhs_type = _type_to_c(lhs_value.type.element_type, ctx)
-    rhs_type = _type_to_c(rhs_value.type.element_type, ctx)
-    out_type = _type_to_c(out_value.type.element_type, ctx)
-    return (
-        f"{ctx.current_indent}npu_demo::matmul<{lhs_space}, {rhs_space}, {out_space}, "
-        f"{lhs_type}, {rhs_type}, {out_type}>({out_expr} /*out*/, {lhs_expr} /*lhs*/, {rhs_expr} /*rhs*/);"
-    )
+    return f"{ctx.current_indent}npu_demo::matmul({out_expr} /*out*/, {lhs_expr} /*lhs*/, {rhs_expr} /*rhs*/);"
 
 
 def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:

@@ -1061,8 +1061,6 @@ class ExecutionEngine:
             target_includes=target_headers,
             entry_shim_source=shim_source,
         )
-        if target == "npu_demo":
-            compile_unit = _inject_npu_demo_namespace_aliases(compile_unit)
         artifacts = compile_source(
             source=compile_unit,
             compiler=compiler,

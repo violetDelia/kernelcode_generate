@@ -1377,7 +1377,7 @@ def test_emit_c_lowers_npu_demo_tiled_matmul_pipeline() -> None:
         stmt,
     )
     assert re.search(
-        r"npu_demo::matmul<[^>]+>\(v\d+ /\*out\*/, v\d+ /\*lhs\*/, v\d+ /\*rhs\*/\);",
+        r"npu_demo::matmul\(v\d+ /\*out\*/, v\d+ /\*lhs\*/, v\d+ /\*rhs\*/\);",
         stmt,
     )
     assert re.search(r"long long deslice_offset\d+\[2\] = \{i\d+, i\d+\};", stmt)
