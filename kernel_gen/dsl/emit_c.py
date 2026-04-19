@@ -377,7 +377,7 @@ def _type_to_c(attr: Any, ctx: EmitCContext) -> str:
         space_param = _space_to_c(attr, ctx)
         return f"Memory<{space_param}, {_type_to_c(attr.element_type, ctx)}>"
     if isinstance(attr, SymbolValueType):
-        return "long long"
+        return "S_INT" if ctx.target == "npu_demo" else "long long"
     raise _emit_error(ctx, f"type {attr}", "unsupported type")
 
 
@@ -1788,14 +1788,15 @@ def _emit_npu_kernel_matmul_stmt(op: KernelMatmulOp, ctx: EmitCContext) -> str:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 把 lowered `kernel.matmul(lhs, rhs, out)` 发射为 `out-first` 的
-      `npu_demo::matmul(out, lhs, rhs);`。
-    - 依赖 C++ 模板参数推导，避免在 emit 文本里硬编码模板参数，保持 execute_engine
-      npu_demo matmul 真链路合同稳定。
+    - 把 lowered `kernel.matmul(lhs, rhs, out)` 发射为显式模板参数且 `out-first` 的
+      `npu_demo::matmul<lhs_space, rhs_space, out_space, lhs_dtype, rhs_dtype, out_dtype>(out, lhs, rhs);`。
+    - 模板参数顺序固定按 `lhs space -> rhs space -> out space -> lhs dtype -> rhs dtype -> out dtype` 展开，
+      避免依赖 C++ 推导，同时保持 `execute_engine` / `emit_c` 的 `npu_demo` matmul 合同一致。
     - 只在 `target=npu_demo` 公开该后端专用 helper。
 
     使用示例:
     - stmt = emit_c_op(kernel_matmul_op, EmitCContext(target="npu_demo"))
+    - npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out, lhs, rhs)
 
     关联文件:
     - spec: spec/dsl/emit_c.md
@@ -1807,7 +1808,16 @@ def _emit_npu_kernel_matmul_stmt(op: KernelMatmulOp, ctx: EmitCContext) -> str:
     lhs_expr = _memory_base_name(lhs_value, ctx)
     rhs_expr = _memory_base_name(rhs_value, ctx)
     out_expr = _memory_base_name(out_value, ctx)
-    return f"{ctx.current_indent}npu_demo::matmul({out_expr} /*out*/, {lhs_expr} /*lhs*/, {rhs_expr} /*rhs*/);"
+    lhs_space = _space_to_c(lhs_value.type, ctx)
+    rhs_space = _space_to_c(rhs_value.type, ctx)
+    out_space = _space_to_c(out_value.type, ctx)
+    lhs_type = _type_to_c(lhs_value.type.element_type, ctx)
+    rhs_type = _type_to_c(rhs_value.type.element_type, ctx)
+    out_type = _type_to_c(out_value.type.element_type, ctx)
+    return (
+        f"{ctx.current_indent}npu_demo::matmul<{lhs_space}, {rhs_space}, {out_space}, "
+        f"{lhs_type}, {rhs_type}, {out_type}>({out_expr} /*out*/, {lhs_expr} /*lhs*/, {rhs_expr} /*rhs*/);"
+    )
 
 
 def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:

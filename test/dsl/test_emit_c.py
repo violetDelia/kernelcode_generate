@@ -1326,7 +1326,7 @@ def test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline() -> None:
 # 最近一次运行测试时间: 2026-04-20 02:54:53 +0800
 # 最近一次运行成功时间: 2026-04-20 02:54:53 +0800
 # 功能说明: 验证 npu_demo 下 tiled matmul 可发射 symbol.for + 2D slice/deslice + kernel.matmul 管线，且多维 slice/deslice 采用 Vector 绑定合同。
-# 测试目的: 锁定 target=npu_demo 的二维 tile helper 形态与 `npu_demo::matmul(...)` 调用，确保多维参数不回退到 brace-list 文本并保持 deslice Vector 调用链稳定。
+# 测试目的: 锁定 target=npu_demo 的二维 tile helper 形态与 `npu_demo::matmul<...>(...)` 调用，确保多维参数不回退到 brace-list 文本并保持 deslice Vector 调用链稳定。
 # 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_lowers_npu_demo_tiled_matmul_pipeline
 # 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
 # 对应 spec 文件路径: spec/dsl/emit_c.md
@@ -1377,7 +1377,7 @@ def test_emit_c_lowers_npu_demo_tiled_matmul_pipeline() -> None:
         stmt,
     )
     assert re.search(
-        r"npu_demo::matmul\(v\d+ /\*out\*/, v\d+ /\*lhs\*/, v\d+ /\*rhs\*/\);",
+        r"npu_demo::matmul<[^>]+>\(v\d+ /\*out\*/, v\d+ /\*lhs\*/, v\d+ /\*rhs\*/\);",
         stmt,
     )
     assert re.search(r"long long deslice_offset\d+\[2\] = \{i\d+, i\d+\};", stmt)

@@ -1476,7 +1476,7 @@ def test_gen_kernel_emits_npu_demo_dma_alloc_module() -> None:
 
     dynamic_source = gen_kernel(dynamic_module, _npu_ctx())
 
-    assert "void dma_alloc_dynamic_case(long long arg0, long long arg1)" in dynamic_source
+    assert "void dma_alloc_dynamic_case(S_INT arg0, S_INT arg1)" in dynamic_source
     assert "Memory<TSM, float> v0 = alloc<TSM, float>({arg0, arg1} /*shape*/, {arg1, 1} /*stride*/);" in dynamic_source
     _compile_only(dynamic_source)
 
@@ -1510,7 +1510,7 @@ def test_gen_kernel_compiles_npu_demo_source_with_single_include() -> None:
 # 最近一次运行测试时间: 2026-04-15 11:10:00 +0800
 # 最近一次运行成功时间: N/A
 # 功能说明: 验证 npu_demo target 可生成并编译 tiled matmul 源码。
-# 测试目的: 锁定二维 `slice/deslice`、`symbol.for` 与 `npu_demo::matmul(...)` 的最小编译闭环。
+# 测试目的: 锁定二维 `slice/deslice`、`symbol.for` 与 `npu_demo::matmul<...>(...)` 的最小编译闭环。
 # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_compiles_npu_demo_tiled_matmul_source
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
@@ -1539,8 +1539,8 @@ def test_gen_kernel_compiles_npu_demo_tiled_matmul_source() -> None:
     source = gen_kernel(rewritten_func, _npu_ctx())
 
     assert source.startswith('#include "include/npu_demo/npu_demo.h"\n')
-    assert "npu_demo::matmul(" in source
-    assert "npu_demo::matmul<" not in source
+    assert "npu_demo::matmul<" in source
+    assert "npu_demo::matmul(" not in source
     assert "slice(" in source
     assert "deslice(" in source
     assert "cpu::matmul(" not in source

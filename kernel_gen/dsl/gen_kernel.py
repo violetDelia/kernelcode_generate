@@ -452,7 +452,7 @@ def _type_to_c_for_target(attr: Any, target: str) -> str:
         space = _memory_space_to_c_for_target(attr.space, target)
         return f"Memory<{space}, {_type_to_c_for_target(attr.element_type, target)}>"
     if isinstance(attr, SymbolValueType):
-        return "long long"
+        return "S_INT" if target == "npu_demo" else "long long"
     raise TypeError(f"unsupported type: {attr}")
 
 def _memory_rank(memory_type: NnMemoryType) -> int:
@@ -1822,11 +1822,18 @@ def gen_kernel(op_or_func: Any, ctx: EmitCContext) -> str:
     - 功能实现: kernel_gen/dsl/gen_kernel.py
     """
 
-    source = _KernelEmitter(ctx).emit(op_or_func)
+    emit_ctx = ctx
+    if ctx.target == "npu_demo":
+        emit_ctx = EmitCContext(
+            target=ctx.target,
+            indent="     ",
+            naming=ctx.naming,
+            type_converter=ctx.type_converter,
+            config=dict(ctx.config or {}),
+        )
+    source = _KernelEmitter(emit_ctx).emit(op_or_func)
     if ctx.target == "npu_demo":
         prelude = '#include "include/npu_demo/npu_demo.h"\n\n'
-        if "S_INT" in source:
-            prelude += "using S_INT = long long;\n\n"
         return prelude + source
     return source
 

@@ -156,6 +156,7 @@ def test_include_api_kernel_exports_only_public_kernel_helpers() -> None:
     assert "Status broadcast(" not in public_header
     assert "Status softmax(" not in public_header
     assert not (REPO_ROOT / "include" / "api" / "Nn.h").exists()
+    assert not (REPO_ROOT / "include" / "npu_demo" / "Nn.h").exists()
     assert '#include "include/npu_demo/Nn.h"' not in npu_demo_entry
 
 
