@@ -4,6 +4,7 @@
 
 - 未经特别授权，不得修改 `.skills` 目录中的任何文件。
 - 所有函数与文件都需补充完整的功能说明和使用示例，并提供对应的 `创建者`、`最后修改人`、`spec`、`test`、`功能实现` 文件链接。
+- 常规任务日志、阻塞记录与待确认记录默认写入对应 `worktree`；主仓根目录不作为常规日志落点，只保留共享状态文件与无独立 `worktree` 的例外结论。
 - 文件链接示例：
   - `spec`：[`spec/codex-multi-agents/scripts/codex-multi-agents-list.md`](spec/codex-multi-agents/scripts/codex-multi-agents-list.md)
   - `test`：[`test/codex-multi-agents/test_codex-multi-agents-list.py`](test/codex-multi-agents/test_codex-multi-agents-list.py)
