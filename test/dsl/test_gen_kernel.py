@@ -1384,7 +1384,7 @@ def test_gen_kernel_emits_npu_demo_body_level_kernel() -> None:
     assert "arch.launch_kernel" not in source
 
 
-# GK-S4-001
+# GK-S12-001
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: N/A
