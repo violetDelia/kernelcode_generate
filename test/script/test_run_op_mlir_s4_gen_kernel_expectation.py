@@ -1,11 +1,11 @@
 """S4 gen_kernel expectation entry tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 朽木露琪亚
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 `script/run-op-mlir-s4-gen-kernel-expectation.sh` 的命令骨架与调用环境。
-- 锁定 S4 `gen_kernel` expectation 可在当前 worktree 内直接复现。
+- 锁定 S4 `gen_kernel` expectation 只通过当前 worktree 的 `PYTHONPATH` 直接复现。
 
 关联文件:
 - 功能实现: script/run-op-mlir-s4-gen-kernel-expectation.sh
@@ -23,12 +23,14 @@ import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MAIN_REPO_ROOT = Path("/home/lfr/kernelcode_generate")
+EXPECTATION_REPO_ROOT = Path("/home/lfr/kernelcode_generate")
 SOURCE_SCRIPT = REPO_ROOT / "script/run-op-mlir-s4-gen-kernel-expectation.sh"
-EXPECTATION_ENTRY = MAIN_REPO_ROOT / "expectation/dsl/gen_kernel/npu_demo_add_barrier"
+EXPECTATION_ENTRY = EXPECTATION_REPO_ROOT / "expectation/dsl/gen_kernel/npu_demo_add_barrier"
 
 
 def _run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    """在当前 worktree 里执行 S4 expectation 入口脚本。"""
+
     runtime_env = os.environ.copy()
     if env is not None:
         runtime_env.update(env)
@@ -42,11 +44,13 @@ def _run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.Com
     )
 
 
-def test_print_command_uses_worktree_and_main_repo_paths() -> None:
+def test_print_command_uses_worktree_pythonpath_only() -> None:
+    """TC-S4-ENTRY-001: `--print-command` 输出应只注入当前 worktree 的 `PYTHONPATH`。"""
+
     # 显式清空外层 PYTHONPATH，避免 exact-match 断言被调用环境污染。
     result = _run_script("--print-command", env={"PYTHONPATH": ""})
 
-    expected_pythonpath = f"{REPO_ROOT}:{MAIN_REPO_ROOT}"
+    expected_pythonpath = f"{REPO_ROOT}"
     expected = (
         f"cd {REPO_ROOT} && PYTHONDONTWRITEBYTECODE=1 "
         f"PYTHONPATH={expected_pythonpath} python3 {EXPECTATION_ENTRY}"
@@ -56,6 +60,8 @@ def test_print_command_uses_worktree_and_main_repo_paths() -> None:
 
 
 def test_script_runs_expectation_from_worktree(tmp_path: Path) -> None:
+    """TC-S4-ENTRY-002: 真正执行时应只把当前 worktree 注入到 `PYTHONPATH`。"""
+
     state_file = tmp_path / "fake_python_state.txt"
     fake_python = tmp_path / "fake-python"
     fake_python.write_text(
@@ -83,9 +89,11 @@ def test_script_runs_expectation_from_worktree(tmp_path: Path) -> None:
     assert f"cwd={REPO_ROOT}" in content
     assert f"argv={EXPECTATION_ENTRY}" in content
     assert "pythondontwritebytecode=1" in content
-    assert f"pythonpath={REPO_ROOT}:{MAIN_REPO_ROOT}" in content
+    assert f"pythonpath={REPO_ROOT}" in content
 
 
 def test_script_runs_real_gen_kernel_expectation() -> None:
-    result = _run_script()
+    """TC-S4-ENTRY-003: 真实 expectation 应在清洁的 worktree 环境下通过。"""
+
+    result = _run_script(env={"PYTHONPATH": ""})
     assert result.returncode == 0, result.stderr

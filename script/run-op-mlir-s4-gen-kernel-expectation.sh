@@ -2,12 +2,13 @@
 # run-op-mlir-s4-gen-kernel-expectation.sh
 #
 # 创建者: 金铲铲大作战
-# 最后修改人: 金铲铲大作战
-# 最后修改日期: 2026-04-19
+# 最后修改人: 小李飞刀
+# 最后修改日期: 2026-04-20
 #
 # 功能说明:
 # - 为 `T-20260418-20ddd3cf` 提供 S4 `gen_kernel` expectation 的 worktree 内可执行入口。
-# - 从当前 worktree 启动 Python，并通过主仓路径加载 `expectation/dsl/gen_kernel/npu_demo_add_barrier`。
+# - 从当前 worktree 启动 Python，并通过 expectation 仓路径加载 `expectation/dsl/gen_kernel/npu_demo_add_barrier`。
+# - 运行时只注入当前 worktree 的 `PYTHONPATH`，确保脚本测试口径能稳定命中本次实现。
 # - 支持 `--print-command` 输出实际执行命令，便于任务记录与计划书直接复用。
 #
 # 使用示例:
@@ -42,13 +43,9 @@ resolve_expectation_repo_root() {
   return 1
 }
 
-MAIN_REPO_ROOT="$(resolve_expectation_repo_root)"
-EXPECTATION_ENTRY="$MAIN_REPO_ROOT/expectation/dsl/gen_kernel/npu_demo_add_barrier"
-if [[ "$MAIN_REPO_ROOT" == "$WORKTREE_ROOT" ]]; then
-  PYTHONPATH_VALUE="$WORKTREE_ROOT${PYTHONPATH:+:$PYTHONPATH}"
-else
-  PYTHONPATH_VALUE="$WORKTREE_ROOT:$MAIN_REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
-fi
+EXPECTATION_REPO_ROOT="$(resolve_expectation_repo_root)"
+EXPECTATION_ENTRY="$EXPECTATION_REPO_ROOT/expectation/dsl/gen_kernel/npu_demo_add_barrier"
+PYTHONPATH_VALUE="$WORKTREE_ROOT"
 
 usage() {
   cat <<'EOF'
