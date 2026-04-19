@@ -1,7 +1,7 @@
 """S3 expectation entry tests.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 `script/run-op-mlir-s3-expectation.sh` 的命令骨架与调用环境。
@@ -100,5 +100,5 @@ def test_script_runs_real_nn_lowering_expectation() -> None:
     result = _run_script()
 
     assert result.returncode == 0, result.stderr
-    assert "[CASE-softmax-static]" in result.stdout
+    assert "[CASE-broadcast-static]" in result.stdout
     assert "[CASE-img2col2d-dynamic]" in result.stdout

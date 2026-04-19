@@ -7,7 +7,7 @@
 #
 # 功能说明:
 # - 为 `T-20260418-20ddd3cf` 提供 S4 `gen_kernel` expectation 的 worktree 内可执行入口。
-# - 从当前 worktree 启动 Python，并通过主仓路径加载 `expectation/dsl/gen_kernel/npu_demo_add_barrier`。
+# - 从当前 worktree 启动 Python，并执行 worktree 自带的 `script/run_op_mlir_s4_gen_kernel_expectation.py`。
 # - 支持 `--print-command` 输出实际执行命令，便于任务记录与计划书直接复用。
 #
 # 使用示例:
@@ -25,7 +25,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKTREE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 MAIN_REPO_ROOT="$(cd "$WORKTREE_ROOT/.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-EXPECTATION_ENTRY="$MAIN_REPO_ROOT/expectation/dsl/gen_kernel/npu_demo_add_barrier"
+EXPECTATION_ENTRY="$WORKTREE_ROOT/script/run_op_mlir_s4_gen_kernel_expectation.py"
 PYTHONPATH_VALUE="$WORKTREE_ROOT:$MAIN_REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
 usage() {

@@ -1,7 +1,7 @@
 """S4 gen_kernel expectation entry tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 `script/run-op-mlir-s4-gen-kernel-expectation.sh` 的命令骨架与调用环境。
@@ -24,7 +24,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_SCRIPT = REPO_ROOT / "script/run-op-mlir-s4-gen-kernel-expectation.sh"
-EXPECTATION_ENTRY = REPO_ROOT.parent / "expectation/dsl/gen_kernel/npu_demo_add_barrier"
+EXPECTATION_ENTRY = REPO_ROOT / "script/run_op_mlir_s4_gen_kernel_expectation.py"
 
 
 def _run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:

@@ -114,6 +114,28 @@ class EmitCContext:
         self._next_temp_id += 1
         return name
 
+    def has_bound_name(self, name: str) -> bool:
+        """判断上下文里是否已绑定过同名变量。
+
+        创建者: 朽木露琪亚
+        最后一次更改: 朽木露琪亚
+
+        功能说明:
+        - 供 `symbol.const` 这类可复用字面量名的 emitter 查询当前作用域是否已出现同名绑定。
+        - 仅检查当前 `EmitCContext` 的命名表，不推断外部作用域或跨上下文状态。
+
+        使用示例:
+        - ctx.has_bound_name("c_16")
+        - if not ctx.has_bound_name("tile0"): ...
+
+        关联文件:
+        - spec: spec/dsl/emit_c.md
+        - test: test/dsl/test_emit_c.py
+        - 功能实现: kernel_gen/dsl/emit_c.py
+        """
+
+        return name in self._names.values()
+
 
 def _emit_error(ctx: EmitCContext, subject: str, reason: str) -> EmitCError:
     return EmitCError(f"target={ctx.target}: {subject}: {reason}")
@@ -252,7 +274,11 @@ def _emit_npu_symbol_const_stmt(op: Operation, ctx: EmitCContext) -> str:
         if not isinstance(value_attr, IntegerAttr):
             raise _emit_error(ctx, op.name, "symbol.const value must be integer attribute")
         value = int(value_attr.value.data)
-    result_name = ctx.bind_name(op.results[0], _symbol_const_name(value))
+    result_name = _symbol_const_name(value)
+    if ctx.has_bound_name(result_name):
+        ctx.bind_name(op.results[0], result_name)
+        return ""
+    ctx.bind_name(op.results[0], result_name)
     return f"{ctx.current_indent}S_INT {result_name} = {value};"
 
 

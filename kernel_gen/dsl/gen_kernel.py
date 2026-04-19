@@ -1606,7 +1606,10 @@ def gen_kernel(op_or_func: Any, ctx: EmitCContext) -> str:
 
     source = _KernelEmitter(ctx).emit(op_or_func)
     if ctx.target == "npu_demo":
-        return '#include "include/npu_demo/npu_demo.h"\n\n' + source
+        prelude = '#include "include/npu_demo/npu_demo.h"\n\n'
+        if "S_INT" in source:
+            prelude += "using S_INT = long long;\n\n"
+        return prelude + source
     return source
 
 
