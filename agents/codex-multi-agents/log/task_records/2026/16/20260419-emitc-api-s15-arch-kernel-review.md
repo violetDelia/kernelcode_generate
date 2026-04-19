@@ -74,3 +74,11 @@
 改动：完成同步确认：当前 worktree 待合并写集为 [`kernel_gen/dsl/emit_c.py`](../../../../../../kernel_gen/dsl/emit_c.py)、[`test/dsl/test_emit_c.py`](../../../../../../test/dsl/test_emit_c.py) 与当前记录文件；当前基线 `HEAD=43a0b15`，最新 `origin/main=0255b0d`，需先提交后前移到主线再推送。
 验证：`git -C /home/lfr/kernelcode_generate/wt-20260419-emitc-api-s15-arch-kernel-review status --short --branch` -> 仅命中上述 2 个业务文件与记录文件；`git -C /home/lfr/kernelcode_generate/wt-20260419-emitc-api-s15-arch-kernel-review diff --stat` -> `2 files changed, 40 insertions(+), 15 deletions(-)`；`git -C /home/lfr/kernelcode_generate/wt-20260419-emitc-api-s15-arch-kernel-review rev-parse --short HEAD` -> `43a0b15`，`git -C /home/lfr/kernelcode_generate/wt-20260419-emitc-api-s15-arch-kernel-review rev-parse --short origin/main` -> `0255b0d`。
 结论：开始 merge，下一步提交当前写集并前移到最新主线后推送，再执行 `-done` 与回报管理员。
+
+时间：2026-04-20 03:05 +0800
+经办人：李白
+任务：T-20260419-f6efa359
+任务目标：完成 merge、推送主分支并收口任务流转。
+改动：合并提交 `e07a6d7 (T-20260419-f6efa359-merge-emitc-api-s15)` 已前移到 `origin/main` 并推送；冲突仅在 `kernel_gen/dsl/emit_c.py`，按本任务已复核口径收敛为：恢复 `npu_demo symbol.const` 经 `_emit_symbol_const_stmt` 的旧分发/短路行为，保留 `_emit_npu_deslice_stmt` 的 Vector 合同文案同步，并保留 `symbol.const` 同名常量避冲突分支；`test/dsl/test_emit_c.py` 同步保留 EC-020 元信息与 Vector 断言更新。
+验证：`python3 -m pytest -q test/dsl/test_emit_c.py -k "test_emit_c_lowers_npu_demo_dma_indexed_and_fill_helpers or test_emit_c_lowers_npu_demo_tiled_matmul_pipeline or test_emit_c_op_lowers_npu_demo_symbol_const_cast_and_to_float"` -> `3 passed, 25 deselected`；`python3 -m pytest -q test/dsl/test_gen_kernel.py -k "test_gen_kernel_compiles_npu_demo_tiled_matmul_source"` -> `1 passed, 58 deselected`；`git -C /home/lfr/kernelcode_generate/wt-20260419-emitc-api-s15-arch-kernel-review diff --check origin/main..HEAD` -> 通过；`timeout 60 git -C /home/lfr/kernelcode_generate/wt-20260419-emitc-api-s15-arch-kernel-review push origin HEAD:main` -> `0255b0d..e07a6d7` 成功。
+结论：merge 已完成并推送主分支；下一步执行 `-done` 并回报管理员。
