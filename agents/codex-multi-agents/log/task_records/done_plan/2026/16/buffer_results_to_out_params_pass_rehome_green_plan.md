@@ -1,0 +1,7 @@
+时间：2026-04-20 00:19 +0800
+经办人：李白
+任务：T-20260420-ddc616ef
+任务目标：将 `buffer_results_to_out_params_pass_rehome_green_plan` 归档到 `agents/codex-multi-agents/log/task_records/done_plan/2026/16/buffer_results_to_out_params_pass_rehome_green_plan.md`，并在归档合并完成后通知管理员继续后续收口。
+改动：接手归档 `merge` 后核对任务表、归档 `worktree` 现场与当前分支 `HEAD`，确认 `/home/lfr/kernelcode_generate/wt-20260420-archive-buffer-results-plan` 已存在且已注册为 git worktree，但该现场与主仓当前分支中都不存在原计划文件 `ARCHITECTURE/plan/buffer_results_to_out_params_pass_rehome_green_plan.md`；同时当前分支中也不存在对应 `done_plan` 记录文件。按现有分支现场，本轮归档收口边界因此等价于“只新增 `done_plan` 归档记录文件”，无需再删除原计划文件。
+验证：`git -C /home/lfr/kernelcode_generate/wt-20260420-archive-buffer-results-plan status --short` -> 当前现场干净；`git -C /home/lfr/kernelcode_generate worktree list | rg 'wt-20260420-archive-buffer-results-plan'` -> 命中已注册的归档 worktree；`find /home/lfr/kernelcode_generate/ARCHITECTURE -maxdepth 3 -name 'buffer_results_to_out_params_pass_rehome_green_plan.md' -print` -> 无输出；`git -C /home/lfr/kernelcode_generate ls-tree -r --name-only HEAD | rg 'ARCHITECTURE/plan/buffer_results_to_out_params_pass_rehome_green_plan.md|agents/codex-multi-agents/log/task_records/done_plan/2026/16/buffer_results_to_out_params_pass_rehome_green_plan.md'` -> 无输出；`rg -n "T-20260420-ddc616ef" /home/lfr/kernelcode_generate/TODO.md` -> 当前任务已指派为 `李白`，可继续执行归档 merge。
+结论：当前任务可按“只提交 done_plan 归档记录文件”的边界继续归档 merge；下一步仅提交当前记录文件并向远端主分支发起一次推送，然后执行当前 merge 任务的 `-done`，并脚本回报管理员继续执行后续流程。
