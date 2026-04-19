@@ -215,6 +215,34 @@ def test_run_ircheck_text_check_next_failure() -> None:
     assert result.failed_check.kind == "CHECK-NEXT"
 
 
+# TC-IRCHECK-RUN-004A
+# 创建者: jcc你莫辜负
+# 最后修改人: jcc你莫辜负
+# 功能说明: 验证 `target=npu_demo` 的单函数 symbol case 可直接生成源码文本，不再要求双函数模块。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_emitc_npu_demo_single_symbol_func
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+def test_run_ircheck_text_emitc_npu_demo_single_symbol_func() -> None:
+    text = """// COMPILE_ARGS: --pass no-op
+// CHECK: #include "include/npu_demo/npu_demo.h"
+// CHECK: void symbol_cast_case(S_INT [[IN:{val}]]) {
+// CHECK-NEXT:     int32_t [[OUT:{val}]] = [[IN]];
+// CHECK-NEXT: }
+
+builtin.module {
+  func.func @symbol_cast_case(%0 : !symbol.int<"N">) {
+    %1 = "symbol.cast"(%0) : (!symbol.int<"N">) -> i32
+    func.return
+  }
+}
+"""
+    result = run_ircheck_text(text, source_path="inline_npu_symbol.ircheck", emitc_target="npu_demo")
+    assert result.ok is True
+    assert result.exit_code == 0
+    assert 'void symbol_cast_case(S_INT ' in result.actual_ir
+
+
 # TC-IRCHECK-RUN-005
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
@@ -323,7 +351,7 @@ def test_run_ircheck_text_emitc_cpu_success() -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-15 03:40:00 +0800
 # 最近一次运行成功时间: 2026-04-15 03:40:00 +0800
-# 功能说明: 验证 emitc_target=npu_demo 且输入不满足受控 module 合同时返回固定错误前缀，并保留进入源码分支前的最终 IR。
+# 功能说明: 验证 emitc_target=npu_demo 的单函数输入可生成源码文本，随后若 CHECK 不匹配则返回匹配失败，并保留源码文本。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_emitc_npu_demo_failure_keeps_ir
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
@@ -335,11 +363,11 @@ def test_run_ircheck_text_emitc_npu_demo_failure_keeps_ir() -> None:
 {_SIMPLE_IR}"""
     result = run_ircheck_text(text, source_path="inline_emitc.ircheck", emitc_target="npu_demo")
     assert result.ok is False
-    assert result.exit_code == 2
+    assert result.exit_code == 1
     assert result.message is not None
-    assert result.message.startswith("IrcheckEmitCError: emit_c generation failed")
-    assert "builtin.module" in result.actual_ir
-    assert 'func.func @main()' in result.actual_ir
+    assert result.message.startswith("IrcheckMatchError: CHECK not found")
+    assert '#include "include/npu_demo/npu_demo.h"' in result.actual_ir
+    assert "void main() {" in result.actual_ir
 
 
 # TC-IRCHECK-RUN-032
@@ -1014,7 +1042,7 @@ builtin.module {
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-15 08:55 +0800
 # 最近一次运行成功时间: 2026-04-15 08:55 +0800
-# 功能说明: 验证 `emitc_target="npu_demo"` 对普通单函数输入显式失败，并映射为稳定错误前缀。
+# 功能说明: 验证 `emitc_target="npu_demo"` 对不满足双函数形态的多函数模块仍显式失败，并映射为稳定错误前缀。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_emitc_npu_demo_maps_generation_failure
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
@@ -1025,6 +1053,9 @@ def test_run_ircheck_text_emitc_npu_demo_maps_generation_failure() -> None:
 
 builtin.module {
   func.func @main() {
+    func.return
+  }
+  func.func @helper() {
     func.return
   }
 }

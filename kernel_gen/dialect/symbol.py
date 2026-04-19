@@ -28,7 +28,7 @@ from typing import ClassVar, TYPE_CHECKING
 
 from kernel_gen.common.errors import _ERROR_TEMPLATE
 os.environ.setdefault("SYMPY_GMPY", "0")
-from xdsl.dialects.builtin import IntAttr, IntegerType, StringAttr, f32, f64, i1, i32
+from xdsl.dialects.builtin import BFloat16Type, Float16Type, Float32Type, Float64Type, IntAttr, IntegerType, StringAttr, f32, f64, i1, i32
 from xdsl.ir import Attribute, Block, Dialect, Operation, ParametrizedAttribute, Region, SSAValue, TypeAttribute
 from xdsl.irdl import (
     IRDLOperation,
@@ -1590,7 +1590,7 @@ class SymbolToFloatOp(IRDLOperation):
         最后一次更改: 小李飞刀
 
         功能说明:
-        - 设置单个 `!symbol.int<"expr">` 操作数与 `f32` 结果类型。
+        - 设置单个 `!symbol.int<"expr">` 操作数与浮点结果类型。
 
         使用示例:
         - SymbolToFloatOp(source, f32)
@@ -1611,7 +1611,7 @@ class SymbolToFloatOp(IRDLOperation):
 
         功能说明:
         - 校验 source 必须为 `!symbol.int<"expr">`。
-        - 校验 result 必须为 `f32`。
+        - 校验 result 必须为浮点类型。
 
         使用示例:
         - SymbolToFloatOp(source, f32).verify_()
@@ -1625,8 +1625,8 @@ class SymbolToFloatOp(IRDLOperation):
         source_value = SSAValue.get(self.source)
         if not _is_symbol_int_type(source_value.type):
             _raise_verify_error(f"{self.name} source must have type !symbol.int<\"expr\">")
-        if self.result.type != f32:
-            _raise_verify_error(f"{self.name} result type must be f32")
+        if not isinstance(self.result.type, (Float16Type, BFloat16Type, Float32Type, Float64Type)):
+            _raise_verify_error(f"{self.name} result type must be float")
 
     def print(self: "SymbolToFloatOp", printer: Printer) -> None:
         """打印 symbol.to_float 自定义文本语法。"""
@@ -1722,6 +1722,88 @@ class SymbolToIntOp(IRDLOperation):
     @classmethod
     def parse(cls: type["SymbolToIntOp"], parser: AttrParser) -> "SymbolToIntOp":
         """解析 symbol.to_int 自定义文本语法。"""
+
+        unresolved_source = parser.parse_unresolved_operand()
+        parser.parse_characters(":", f" in {cls.name}")
+        source_type = parser.parse_type()
+        parser.parse_characters("->", f" in {cls.name}")
+        result_type = parser.parse_type()
+        source = parser.resolve_operand(unresolved_source, source_type)
+        return cls(source, result_type)
+
+
+@irdl_op_definition
+class SymbolCastOp(IRDLOperation):
+    """将 symbol.int 标量转换为普通整型。"""
+
+    name = "symbol.cast"
+
+    source = operand_def(Attribute)
+    result = result_def(Attribute)
+
+    def __init__(
+        self: "SymbolCastOp",
+        source: SSAValue | Operation,
+        result_type: Attribute = i32,
+    ) -> None:
+        """初始化 symbol.cast。
+
+        创建者: jcc你莫辜负
+        最后修改人: jcc你莫辜负
+
+        功能说明:
+        - 设置单个 `!symbol.int<"expr">` 操作数与普通整型结果类型。
+        - 供 `emit_c/npu_demo` 读取 `symbol.cast` 文本输入。
+
+        使用示例:
+        - SymbolCastOp(source, i32)
+
+        关联文件:
+        - spec: spec/dsl/emit_c.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        super().__init__(operands=[source], result_types=[result_type])
+
+    def verify_(self: "SymbolCastOp") -> None:
+        """校验 symbol.cast 的类型约束。
+
+        创建者: jcc你莫辜负
+        最后修改人: jcc你莫辜负
+
+        功能说明:
+        - 校验 source 必须为 `!symbol.int<"expr">`。
+        - 校验 result 必须为 builtin 整型。
+
+        使用示例:
+        - SymbolCastOp(source, i32).verify_()
+
+        关联文件:
+        - spec: spec/dsl/emit_c.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        source_value = SSAValue.get(self.source)
+        if not _is_symbol_int_type(source_value.type):
+            _raise_verify_error(f"{self.name} source must have type !symbol.int<\"expr\">")
+        if not isinstance(self.result.type, IntegerType):
+            _raise_verify_error(f"{self.name} result type must be integer")
+
+    def print(self: "SymbolCastOp", printer: Printer) -> None:
+        """打印 symbol.cast 自定义文本语法。"""
+
+        printer.print_string(" ")
+        printer.print_ssa_value(self.source)
+        printer.print_string(" : ")
+        printer.print_attribute(SSAValue.get(self.source).type)
+        printer.print_string(" -> ")
+        printer.print_attribute(self.result.type)
+
+    @classmethod
+    def parse(cls: type["SymbolCastOp"], parser: AttrParser) -> "SymbolCastOp":
+        """解析 symbol.cast 自定义文本语法。"""
 
         unresolved_source = parser.parse_unresolved_operand()
         parser.parse_characters(":", f" in {cls.name}")
@@ -2208,6 +2290,7 @@ Symbol = Dialect(
         SymbolLeOp,
         SymbolGtOp,
         SymbolGeOp,
+        SymbolCastOp,
         SymbolToIntOp,
         SymbolToFloatOp,
         SymbolGetDimOp,
@@ -2228,6 +2311,7 @@ Symbol = Dialect(
 __all__ = [
     "Symbol",
     "SymbolAddOp",
+    "SymbolCastOp",
     "SymbolConstOp",
     "SymbolDivOp",
     "SymbolDimType",

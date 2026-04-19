@@ -28,7 +28,7 @@ import sys
 
 import pytest
 from xdsl.dialects import arith, func, scf
-from xdsl.dialects.builtin import ArrayAttr, DenseIntOrFPElementsAttr, FloatAttr, FunctionType, IndexType, IntAttr, IntegerAttr, ModuleOp, StringAttr, TensorType, f32, i32
+from xdsl.dialects.builtin import ArrayAttr, DenseIntOrFPElementsAttr, FloatAttr, FunctionType, IndexType, IntAttr, IntegerAttr, ModuleOp, StringAttr, TensorType, f32, i1, i32
 from xdsl.ir import Block, Region
 from xdsl.irdl import IRDLOperation, irdl_op_definition, result_def
 
@@ -40,7 +40,7 @@ from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp, ArchGetThreadIdOp, A
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFillOp, DmaLoadOp, DmaSliceOp, DmaStoreOp, DmaViewOp
 from kernel_gen.dialect.kernel import KernelAddOp, KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnAddOp, NnImg2col2dOp, NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolAddOp, SymbolForOp, SymbolGetDimOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolAddOp, SymbolCastOp, SymbolConstOp, SymbolEqOp, SymbolForOp, SymbolGetDimOp, SymbolGetStrideOp, SymbolIterType, SymbolToFloatOp, SymbolValueType
 from kernel_gen.dsl.ast import BlockAST, ConstAST, ForAST, FunctionAST, Img2ColAST, LoadAST, ScalarArgAST, StoreAST, TensorAST, VarAST
 from kernel_gen.dsl.emit_c import EmitCContext, EmitCError, emit_c_op, emit_c_value
 from kernel_gen.dsl.mlir_gen import build_func_op, build_func_op_from_ast
@@ -504,8 +504,8 @@ def test_emit_c_op_lowers_symbol_add() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-03-28 04:12:37 +0800
 # 最近一次运行成功时间: 2026-03-28 04:12:37 +0800
-# 功能说明: 验证非 cpu target 下 symbol.add 必须报错。
-# 测试目的: 锁定 emit_c 对 symbol.add 的 target=cpu 约束，避免错误下发。
+# 功能说明: 验证不支持的后端目标仍会拒绝 symbol.add。
+# 测试目的: 锁定 emit_c 只在 cpu/npu_demo 两类目标支持 symbol 标量运算。
 # 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_op_rejects_symbol_add_on_non_cpu
 # 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
 # 对应 spec 文件路径: spec/dsl/emit_c.md
@@ -520,11 +520,94 @@ def test_emit_c_op_rejects_symbol_add_on_non_cpu() -> None:
     ctx.bind_name(block.args[1], "rhs")
     op = SymbolAddOp(block.args[0], block.args[1], out_type)
 
-    with pytest.raises(EmitCError, match="symbol scalar ops are cpu-only"):
+    with pytest.raises(EmitCError, match="unsupported target"):
         emit_c_value(op.result, ctx)
 
 
 # EC-008A
+# 创建者: jcc你莫辜负
+# 最后修改人: jcc你莫辜负
+# 测试目的: 验证 npu_demo 下 symbol.const/cast/to_float 可生成 `S_INT` 与目标结果类型局部变量语句。
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_op_lowers_npu_demo_symbol_const_cast_and_to_float() -> None:
+    ctx = _npu_ctx()
+    const = SymbolConstOp(7)
+    cast = SymbolCastOp(const.result, i32)
+    to_float = SymbolToFloatOp(const.result, f32)
+
+    assert emit_c_op(const, ctx) == "S_INT c_7 = 7;"
+    assert emit_c_op(cast, ctx) == "int32_t v0 = c_7;"
+    assert emit_c_op(to_float, ctx) == "float v1 = c_7;"
+
+
+# EC-008B
+# 创建者: jcc你莫辜负
+# 最后修改人: jcc你莫辜负
+# 测试目的: 验证 npu_demo 下 symbol 二元与比较 op 会生成 `S_INT/bool` 局部变量语句。
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_op_lowers_npu_demo_symbol_binary_and_compare() -> None:
+    lhs_type = SymbolValueType.from_expr("L")
+    rhs_type = SymbolValueType.from_expr("R")
+    add_type = SymbolValueType.from_expr("L + R")
+    block = Block(arg_types=[lhs_type, rhs_type])
+    ctx = _npu_ctx()
+    ctx.bind_name(block.args[0], "lhs")
+    ctx.bind_name(block.args[1], "rhs")
+
+    add = SymbolAddOp(block.args[0], block.args[1], add_type)
+    eq = SymbolEqOp(block.args[0], block.args[1], i1)
+
+    assert emit_c_op(add, ctx) == "S_INT v0 = (lhs + rhs);"
+    assert emit_c_op(eq, ctx) == "bool v1 = (lhs == rhs);"
+
+
+# EC-008C
+# 创建者: jcc你莫辜负
+# 最后修改人: jcc你莫辜负
+# 测试目的: 验证 npu_demo 下 symbol.get_dim/get_stride 会生成成员查询局部变量语句。
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_op_lowers_npu_demo_symbol_queries() -> None:
+    mem = _make_memory_type([4, 8], [8, 1], space="global")
+    block = Block(arg_types=[mem])
+    ctx = _npu_ctx()
+    ctx.bind_name(block.args[0], "src")
+    dim = SymbolGetDimOp(block.args[0], 1)
+    stride = SymbolGetStrideOp(block.args[0], 0)
+
+    assert emit_c_value(dim.result, ctx) == "src.get_shape(1)"
+    assert emit_c_value(stride.result, ctx) == "src.get_stride(0)"
+    assert emit_c_op(dim, ctx) == "S_INT v0 = src.get_shape(1);"
+    assert emit_c_op(stride, ctx) == "S_INT v1 = src.get_stride(0);"
+
+
+# EC-008D
+# 创建者: jcc你莫辜负
+# 最后修改人: jcc你莫辜负
+# 测试目的: 验证 npu_demo 下 symbol.for 使用 `S_INT` 迭代变量，并复用前置 symbol.const 名称。
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_op_lowers_npu_demo_symbol_for() -> None:
+    ctx = _npu_ctx()
+    start = SymbolConstOp(0)
+    end = SymbolConstOp(8)
+    step = SymbolConstOp(2)
+    body = Block(arg_types=[SymbolIterType.from_bounds("0", "8", "2")])
+    loop = SymbolForOp(start.result, end.result, step.result, body)
+
+    assert emit_c_op(start, ctx) == "S_INT c_0 = 0;"
+    assert emit_c_op(end, ctx) == "S_INT c_8 = 8;"
+    assert emit_c_op(step, ctx) == "S_INT c_2 = 2;"
+    assert emit_c_op(loop, ctx) == "for (S_INT i0 = c_0; i0 < c_8; i0 += c_2) {\n}"
+
+
+# EC-008E
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-02 23:04:42 +0800
@@ -1135,10 +1218,10 @@ def test_emit_c_lowers_npu_demo_tiled_matmul_pipeline() -> None:
         )
     )
 
-    assert stmt.count("for (long long i") >= 2
-    assert re.search(r"long long slice_offset0\[2\] = \{i\d+, 0\};", stmt)
+    assert len(re.findall(r"for \((?:S_INT|long long) i", stmt)) >= 2
+    assert re.search(r"long long slice_offset0\[2\] = \{i\d+, (?:0|c_0)\};", stmt)
     assert "Vector slice_offset0_vec(slice_offset0, 2);" in stmt
-    assert re.search(r"long long slice_offset3\[2\] = \{0, i\d+\};", stmt)
+    assert re.search(r"long long slice_offset3\[2\] = \{(?:0|c_0), i\d+\};", stmt)
     assert "Vector deslice_offset6_vec(deslice_offset6, 2);" in stmt
     assert re.search(
         r"Memory<TSM, float> v\d+\(v\d+_buffer, v\d+_shape, v\d+_stride, 2, MemoryFormat::Norm\);",

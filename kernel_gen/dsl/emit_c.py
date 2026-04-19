@@ -23,14 +23,14 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from xdsl.dialects import arith, func, scf
-from xdsl.dialects.builtin import FloatAttr, IndexType, IntAttr, IntegerAttr, IntegerType, StringAttr, f32
+from xdsl.dialects.builtin import BFloat16Type, Float16Type, Float64Type, FloatAttr, IndexType, IntAttr, IntegerAttr, IntegerType, Signedness, StringAttr, f32
 from xdsl.ir import BlockArgument, Operation, SSAValue
 
 from kernel_gen.dialect.arch import ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFillOp, DmaLoadOp, DmaSliceOp, DmaStoreOp, DmaViewOp
 from kernel_gen.dialect.kernel import KernelAddOp, KernelBinaryElewiseOp, KernelMatmulOp
 from kernel_gen.dialect.nn import NnAddOp, NnImg2col2dOp, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolConstOp, SymbolForOp, SymbolGetDimOp, SymbolToIntOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolCastOp, SymbolConstOp, SymbolForOp, SymbolGetDimOp, SymbolGetStrideOp, SymbolToFloatOp, SymbolToIntOp, SymbolValueType
 
 
 class EmitCError(ValueError):
@@ -153,6 +153,19 @@ _BINARY_SIGILS = {
     "arith.mulf": "*",
     "arith.divf": "/",
     "symbol.add": "+",
+    "symbol.sub": "-",
+    "symbol.mul": "*",
+    "symbol.div": "/",
+    "symbol.floordiv": "/",
+}
+
+_SYMBOL_COMPARE_SIGILS = {
+    "symbol.eq": "==",
+    "symbol.ne": "!=",
+    "symbol.lt": "<",
+    "symbol.le": "<=",
+    "symbol.gt": ">",
+    "symbol.ge": ">=",
 }
 
 _CMPI_SIGILS = {
@@ -165,6 +178,13 @@ _CMPI_SIGILS = {
 }
 
 _NPU_DYNAMIC_MEMORY_SPACES = {"TSM", "TLM1", "TLM2", "TLM3"}
+
+
+def _integer_type_to_c(attr: IntegerType) -> str:
+    if attr.width.data == 1:
+        return "bool"
+    prefix = "uint" if attr.signedness.data == Signedness.UNSIGNED else "int"
+    return f"{prefix}{attr.width.data}_t"
 
 
 def _type_to_c(attr: Any, ctx: EmitCContext) -> str:
@@ -195,19 +215,45 @@ def _type_to_c(attr: Any, ctx: EmitCContext) -> str:
             return ctx.type_converter.convert(attr)
         raise EmitCError(f"target={ctx.target}: unsupported type converter")
     if isinstance(attr, IntegerType):
-        if attr.width.data == 1:
-            return "bool"
-        return f"int{attr.width.data}_t"
+        return _integer_type_to_c(attr)
+    if isinstance(attr, Float16Type):
+        return "half"
+    if isinstance(attr, BFloat16Type):
+        return "bfloat16_t"
     if attr == f32:
         return "float"
+    if isinstance(attr, Float64Type):
+        return "double"
     if isinstance(attr, IndexType):
         return "long long"
     if isinstance(attr, NnMemoryType):
         space_param = _space_to_c(attr, ctx)
         return f"Memory<{space_param}, {_type_to_c(attr.element_type, ctx)}>"
     if isinstance(attr, SymbolValueType):
-        return "long long"
+        return "S_INT" if ctx.target == "npu_demo" else "long long"
     raise _emit_error(ctx, f"type {attr}", "unsupported type")
+
+
+def _symbol_const_name(value: int) -> str:
+    if value >= 0:
+        return f"c_{value}"
+    return f"c_m{abs(value)}"
+
+
+def _emit_npu_symbol_const_stmt(op: Operation, ctx: EmitCContext) -> str:
+    """生成 `target=npu_demo` 下 `symbol.const` 的局部变量语句。"""
+
+    if not op.results or not isinstance(op.results[0].type, SymbolValueType):
+        raise _emit_error(ctx, op.name, "symbol.const result must be !symbol.int")
+    if isinstance(op, SymbolConstOp):
+        value = int(op.value.data)
+    else:
+        value_attr = op.attributes.get("value")
+        if not isinstance(value_attr, IntegerAttr):
+            raise _emit_error(ctx, op.name, "symbol.const value must be integer attribute")
+        value = int(value_attr.value.data)
+    result_name = ctx.bind_name(op.results[0], _symbol_const_name(value))
+    return f"{ctx.current_indent}S_INT {result_name} = {value};"
 
 
 def _format_literal(op: arith.ConstantOp, ctx: EmitCContext) -> str:
@@ -1340,11 +1386,17 @@ def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
                 raise _emit_error(ctx, owner.name, "unsupported dynamic memory space")
             return f"ctx.get_dynamic_memory<{space_expr}, {element_type}>()"
     if owner.name in _BINARY_SIGILS:
-        if owner.name == "symbol.add" and ctx.target != "cpu":
-            raise _emit_error(ctx, owner.name, "symbol scalar ops are cpu-only")
+        if owner.name.startswith("symbol.") and ctx.target not in {"cpu", "npu_demo"}:
+            raise _emit_error(ctx, owner.name, "unsupported target")
         lhs = emit_c_value(owner.operands[0], ctx)
         rhs = emit_c_value(owner.operands[1], ctx)
         return f"({lhs} {_BINARY_SIGILS[owner.name]} {rhs})"
+    if owner.name in _SYMBOL_COMPARE_SIGILS:
+        if ctx.target not in {"cpu", "npu_demo"}:
+            raise _emit_error(ctx, owner.name, "unsupported target")
+        lhs = emit_c_value(owner.operands[0], ctx)
+        rhs = emit_c_value(owner.operands[1], ctx)
+        return f"({lhs} {_SYMBOL_COMPARE_SIGILS[owner.name]} {rhs})"
     if isinstance(owner, arith.CmpiOp):
         predicate = owner.predicate.value.data
         if predicate not in _CMPI_SIGILS:
@@ -1352,13 +1404,22 @@ def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
         lhs = emit_c_value(owner.lhs, ctx)
         rhs = emit_c_value(owner.rhs, ctx)
         return f"({lhs} {_CMPI_SIGILS[predicate]} {rhs})"
-    if isinstance(owner, SymbolToIntOp):
+    if isinstance(owner, (SymbolToIntOp, SymbolCastOp, SymbolToFloatOp)):
         return emit_c_value(owner.source, ctx)
     if isinstance(owner, SymbolGetDimOp):
         if not isinstance(owner.axis, IntAttr):
             raise _emit_error(ctx, owner.name, "axis must be IntAttr")
         source_expr = _memory_base_name(owner.source, ctx)
+        if ctx.target == "npu_demo":
+            return f"{source_expr}.get_shape({owner.axis.data})"
         return f"{source_expr}.shape()[{owner.axis.data}]"
+    if isinstance(owner, SymbolGetStrideOp):
+        if not isinstance(owner.axis, IntAttr):
+            raise _emit_error(ctx, owner.name, "axis must be IntAttr")
+        source_expr = _memory_base_name(owner.source, ctx)
+        if ctx.target == "npu_demo":
+            return f"{source_expr}.get_stride({owner.axis.data})"
+        return f"{source_expr}.stride()[{owner.axis.data}]"
     raise _emit_error(ctx, owner.name, f"invalid dependency for value {value}")
 
 
@@ -1376,6 +1437,7 @@ def _emit_loop_region(
     step: SSAValue,
     block: Any,
     ctx: EmitCContext,
+    iv_type: str = "long long",
 ) -> str:
     """把循环 region 发射为 `for (...) { ... }` 语句块。
 
@@ -1399,7 +1461,7 @@ def _emit_loop_region(
     upper_expr = emit_c_value(upper, ctx)
     step_expr = emit_c_value(step, ctx)
     lines = [
-        f"{ctx.current_indent}for (long long {iv_name} = {lower_expr}; {iv_name} < {upper_expr}; {iv_name} += {step_expr}) {{"
+        f"{ctx.current_indent}for ({iv_type} {iv_name} = {lower_expr}; {iv_name} < {upper_expr}; {iv_name} += {step_expr}) {{"
     ]
     ctx.push_indent()
     for body_op in block.ops:
@@ -1438,7 +1500,8 @@ def _emit_symbol_loop(op: SymbolForOp, ctx: EmitCContext) -> str:
 
     if ctx.target not in {"cpu", "npu_demo"}:
         raise _emit_error(ctx, op.name, "unsupported target")
-    return _emit_loop_region(op.start, op.end, op.step, op.body.block, ctx)
+    iv_type = "S_INT" if ctx.target == "npu_demo" else "long long"
+    return _emit_loop_region(op.start, op.end, op.step, op.body.block, ctx, iv_type=iv_type)
 
 
 def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
@@ -1462,13 +1525,17 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
     - 功能实现: kernel_gen/dsl/emit_c.py
     """
 
-    if op.name in _BINARY_SIGILS or isinstance(op, arith.CmpiOp):
+    if op.name in _BINARY_SIGILS or op.name in _SYMBOL_COMPARE_SIGILS or isinstance(op, arith.CmpiOp):
         return _emit_assignment(op, ctx)
     if isinstance(op, arith.ConstantOp):
         return ""
     if _is_symbol_const_like(op):
+        if ctx.target == "npu_demo":
+            return _emit_npu_symbol_const_stmt(op, ctx)
         return ""
-    if isinstance(op, SymbolToIntOp):
+    if isinstance(op, (SymbolToIntOp, SymbolCastOp, SymbolToFloatOp)):
+        if ctx.target == "npu_demo":
+            return _emit_assignment(op, ctx)
         return ""
     if op.name in {"tile.symbol_literal", "tile.step_value"}:
         if not op.results:
@@ -1484,8 +1551,8 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
             return _emit_npu_query_stmt(op, ctx)
         if isinstance(op, ArchGetDynamicMemoryOp):
             return _emit_npu_dynamic_memory_stmt(op, ctx)
-        if isinstance(op, SymbolGetDimOp):
-            return ""
+        if isinstance(op, (SymbolGetDimOp, SymbolGetStrideOp)):
+            return _emit_assignment(op, ctx)
         if isinstance(op, SymbolForOp):
             return _emit_symbol_loop(op, ctx)
         if isinstance(op, DmaAllocOp):
@@ -1508,6 +1575,8 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
             return _emit_npu_add_stmt(op, ctx)
         raise _emit_error(ctx, op.name, "unsupported op")
     if isinstance(op, SymbolGetDimOp):
+        return ""
+    if isinstance(op, SymbolGetStrideOp):
         return ""
     if isinstance(op, DmaAllocOp):
         return _emit_dma_alloc_stmt(op, ctx)

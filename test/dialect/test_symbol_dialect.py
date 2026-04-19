@@ -28,7 +28,7 @@ from pathlib import Path
 import pytest
 from xdsl.context import Context
 from xdsl.dialects.arith import AddfOp, Arith, ConstantOp
-from xdsl.dialects.builtin import ArrayAttr, Builtin, FloatAttr, IndexType, IntAttr, IntegerType, StringAttr, f32, f64, i1, i8, i16, i32, i64
+from xdsl.dialects.builtin import ArrayAttr, Builtin, FloatAttr, IndexType, IntAttr, IntegerType, StringAttr, bf16, f16, f32, f64, i1, i8, i16, i32, i64
 from xdsl.dialects.test import Test, TestOp as _TestOp
 from xdsl.ir import Block, Region
 from xdsl.parser import Parser
@@ -43,6 +43,7 @@ from kernel_gen.dialect.nn import Nn, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import (
     Symbol,
     SymbolAddOp,
+    SymbolCastOp,
     SymbolConstOp,
     SymbolDivOp,
     SymbolEqOp,
@@ -793,7 +794,7 @@ builtin.module {
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-03-25 00:17:51 +0800
 # 最近一次运行成功时间: 2026-03-25 00:17:51 +0800
-# 测试目的: 验证 symbol.to_float 会拒绝非 symbol.int 输入或非 f32 结果类型。
+# 测试目的: 验证 symbol.to_float 会拒绝非 symbol.int 输入或非浮点结果类型。
 # 对应功能实现文件路径: kernel_gen/dialect/symbol.py
 # 对应 spec 文件路径: spec/dialect/symbol.md
 def test_symbol_to_float_rejects_invalid_types() -> None:
@@ -802,8 +803,51 @@ def test_symbol_to_float_rejects_invalid_types() -> None:
 
     with pytest.raises(VerifyException, match='symbol.to_float source must have type !symbol.int<"expr">'):
         SymbolToFloatOp(non_symbol_value, f32).verify()
-    with pytest.raises(VerifyException, match="symbol.to_float result type must be f32"):
-        SymbolToFloatOp(symbol_value, f64).verify()
+    for result_type in (f16, bf16, f32, f64):
+        SymbolToFloatOp(symbol_value, result_type).verify()
+    with pytest.raises(VerifyException, match="symbol.to_float result type must be float"):
+        SymbolToFloatOp(symbol_value, i32).verify()
+
+
+# TC-SYM-041A
+# 创建者: jcc你莫辜负
+# 最后修改人: jcc你莫辜负
+# 测试目的: 验证 symbol.cast 支持整型结果并保持 parse/print 稳定。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+def test_symbol_cast_round_trip() -> None:
+    ctx = _build_context()
+    module = Parser(
+        ctx,
+        """
+builtin.module {
+  %n = "test.op"() : () -> !symbol.int<"N">
+  %i8 = symbol.cast %n : !symbol.int<"N"> -> i8
+  %i32 = symbol.cast %n : !symbol.int<"N"> -> i32
+}
+""",
+    ).parse_module()
+
+    module.verify()
+    printed = _print_op(module)
+    assert 'symbol.cast %n : !symbol.int<"N"> -> i8' in printed
+    assert 'symbol.cast %n : !symbol.int<"N"> -> i32' in printed
+
+
+# TC-SYM-041B
+# 创建者: jcc你莫辜负
+# 最后修改人: jcc你莫辜负
+# 测试目的: 验证 symbol.cast 会拒绝非 symbol.int 输入或非整型结果类型。
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+def test_symbol_cast_rejects_invalid_types() -> None:
+    non_symbol_value = _TestOp(result_types=[i32]).results[0]
+    symbol_value = _make_symbol_value("N")
+
+    with pytest.raises(VerifyException, match='symbol.cast source must have type !symbol.int<"expr">'):
+        SymbolCastOp(non_symbol_value, i32).verify()
+    with pytest.raises(VerifyException, match="symbol.cast result type must be integer"):
+        SymbolCastOp(symbol_value, f32).verify()
 
 
 # TC-SYM-042

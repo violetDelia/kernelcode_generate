@@ -32,6 +32,7 @@ from xdsl.dialects.builtin import (
     Float64Type,
     IntegerType,
     IndexType,
+    Signedness,
     ModuleOp,
     StringAttr,
     SymbolRefAttr,
@@ -298,7 +299,8 @@ def _type_to_c(attr: Any) -> str:
     if isinstance(attr, IntegerType):
         if attr.width.data == 1:
             return "bool"
-        return f"int{attr.width.data}_t"
+        prefix = "uint" if attr.signedness.data == Signedness.UNSIGNED else "int"
+        return f"{prefix}{attr.width.data}_t"
     if isinstance(attr, Float32Type):
         return "float"
     if isinstance(attr, Float64Type):
@@ -336,7 +338,8 @@ def _type_to_c_for_target(attr: Any, target: str) -> str:
     if isinstance(attr, IntegerType):
         if attr.width.data == 1:
             return "bool"
-        return f"int{attr.width.data}_t"
+        prefix = "uint" if attr.signedness.data == Signedness.UNSIGNED else "int"
+        return f"{prefix}{attr.width.data}_t"
     if isinstance(attr, Float32Type):
         return "float"
     if isinstance(attr, Float64Type):
@@ -347,7 +350,7 @@ def _type_to_c_for_target(attr: Any, target: str) -> str:
         space = _memory_space_to_c_for_target(attr.space, target)
         return f"Memory<{space}, {_type_to_c_for_target(attr.element_type, target)}>"
     if isinstance(attr, SymbolValueType):
-        return "long long"
+        return "S_INT" if target == "npu_demo" else "long long"
     raise TypeError(f"unsupported type: {attr}")
 
 def _memory_rank(memory_type: NnMemoryType) -> int:

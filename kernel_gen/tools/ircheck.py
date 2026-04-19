@@ -1031,11 +1031,16 @@ def _render_emitc_text(operation: Operation, emitc_target: str) -> str:
         raise ValueError(f"unsupported emitc target {emitc_target!r}")
 
     emit_input: Operation | func.FuncOp
-    if emitc_target == "cpu" and isinstance(operation, ModuleOp):
+    if isinstance(operation, ModuleOp):
         top_ops = list(operation.ops)
-        if len(top_ops) != 1 or not isinstance(top_ops[0], func.FuncOp):
-            raise ValueError("target=cpu requires a module with exactly one top-level func.func")
-        emit_input = top_ops[0]
+        if emitc_target == "cpu":
+            if len(top_ops) != 1 or not isinstance(top_ops[0], func.FuncOp):
+                raise ValueError("target=cpu requires a module with exactly one top-level func.func")
+            emit_input = top_ops[0]
+        elif emitc_target == "npu_demo" and len(top_ops) == 1 and isinstance(top_ops[0], func.FuncOp):
+            emit_input = top_ops[0]
+        else:
+            emit_input = operation
     else:
         emit_input = operation
 
