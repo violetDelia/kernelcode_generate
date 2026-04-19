@@ -43,6 +43,7 @@ from kernel_gen.dialect.dma import (
 from kernel_gen.dialect.kernel import _BaseKernelBinaryOp
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
+    SymbolConstOp,
     SymbolDivOp,
     SymbolEqOp,
     SymbolFloorDivOp,
@@ -88,6 +89,7 @@ def _raise_symbol_loop_hoist_error(keyword: str, detail: str) -> None:
 
 _SYMBOL_PURE_OPS: tuple[type[Operation], ...] = (
     TunerParamOp,
+    SymbolConstOp,
     SymbolGetDimOp,
     SymbolGetStrideOp,
     SymbolAddOp,

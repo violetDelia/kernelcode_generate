@@ -39,7 +39,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFreeOp, DmaSliceOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolForOp, SymbolGetDimOp, SymbolIterType, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolConstOp, SymbolForOp, SymbolGetDimOp, SymbolIterType, SymbolValueType
 
 pass_module = importlib.import_module("kernel_gen.passes.lowering.symbol_loop_hoist")
 SymbolLoopHoistError = pass_module.SymbolLoopHoistError
@@ -119,6 +119,29 @@ def _make_module_for_hoist_alloc() -> ModuleOp:
     func_op = func.FuncOp(
         "hoist_alloc",
         FunctionType.from_lists([mem_type, mem_type, mem_type], []),
+        Region(block),
+    )
+    return ModuleOp([func_op])
+
+
+def _make_module_for_const_hoist() -> ModuleOp:
+    block = Block(arg_types=[])
+    ops: list[object] = []
+    c0 = SymbolConstOp(0)
+    c1 = SymbolConstOp(1)
+    c2 = SymbolConstOp(1)
+    ops.extend([c0, c1, c2])
+
+    loop_block = Block(arg_types=[SymbolIterType.from_bounds("0", "1", "1")])
+    hoist_const = SymbolConstOp(2)
+    loop_block.add_ops([hoist_const])
+    loop = SymbolForOp(c0.result, c1.result, c2.result, loop_block)
+    ops.append(loop)
+    ops.append(func.ReturnOp())
+    block.add_ops(ops)
+    func_op = func.FuncOp(
+        "hoist_const",
+        FunctionType.from_lists([], []),
         Region(block),
     )
     return ModuleOp([func_op])
@@ -369,6 +392,30 @@ def test_symbol_loop_hoist_hoists_get_dim_and_alloc() -> None:
     loop_index = ops.index(loop)
     assert any(isinstance(op, SymbolGetDimOp) for op in ops[:loop_index])
     assert any(isinstance(op, DmaAllocOp) for op in ops[:loop_index])
+
+
+# TC-SLH-001A
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 2026-04-20 00:00:00 +0800
+# 最近一次运行成功时间: N/A
+# 测试目的: 验证 loop 内的 invariant `symbol.const` 会被向上提一层到 `symbol.for` 之前。
+# 对应功能实现文件路径: kernel_gen/passes/lowering/symbol_loop_hoist.py
+# 对应 spec 文件路径: spec/pass/lowering/symbol_loop_hoist.md
+# 对应测试文件路径: test/pass/test_symbol_loop_hoist.py
+def test_symbol_loop_hoist_hoists_symbol_const() -> None:
+    module = _make_module_for_const_hoist()
+    func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
+    block = func_op.body.blocks.first
+    loop = next(op for op in block.ops if isinstance(op, SymbolForOp))
+
+    SymbolLoopHoistPass().run(module)
+
+    ops = list(block.ops)
+    loop_index = ops.index(loop)
+    hoisted_consts = [op for op in ops[:loop_index] if isinstance(op, SymbolConstOp)]
+    assert len(hoisted_consts) == 4
+    assert [op.value.data for op in hoisted_consts] == [0, 1, 1, 2]
 
 
 # TC-SLH-002

@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：朽木露琪亚
-- 最后一次更改：朽木露琪亚
+- 最后一次更改：睡觉小分队
 - spec：[`spec/pass/lowering/symbol_loop_hoist.md`](spec/pass/lowering/symbol_loop_hoist.md)
 - 功能实现：[`kernel_gen/passes/lowering/symbol_loop_hoist.py`](kernel_gen/passes/lowering/symbol_loop_hoist.py)
 - test：[`test/pass/test_symbol_loop_hoist.py`](test/pass/test_symbol_loop_hoist.py)
@@ -85,6 +85,7 @@
   - 验证固定窗口 `dma.slice` 在只读来源且结果不被改写时可外提
   - 验证禁止项（例如 `dma.deslice`）在 loop invariant 形态下会触发显式失败短语
   - 验证 `PassManager` 的 `symbol-loop-hoist` 顺序约束（在 `test/pass/test_pass_manager.py` 中覆盖）
+  - 普通实现、审查与合并阶段只以当前 pytest 与架构侧合同基线为准，不通过本地 expectation 副本或 `.gitignore` 放行承接交付内容
 
 功能与用例清单：
 - `TC-SLH-001`：外提 `symbol.get_dim + dma.alloc`
