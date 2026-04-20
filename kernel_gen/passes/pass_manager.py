@@ -273,11 +273,7 @@ class PassManager:
         tile_family_indices = [index for index, name in enumerate(pass_names) if name in tile_family_names]
         if "symbol-loop-hoist" in pass_names:
             hoist_index = pass_names.index("symbol-loop-hoist")
-            if not tile_family_indices:
-                raise ValueError(
-                    "SymbolLoopHoistRequiresSymbolFor: symbol-loop-hoist requires tile to materialize symbol.for"
-                )
-            if hoist_index < max(tile_family_indices):
+            if tile_family_indices and hoist_index < max(tile_family_indices):
                 raise ValueError(
                     "SymbolLoopHoistRequiresSymbolFor: symbol-loop-hoist must run after tile"
                 )

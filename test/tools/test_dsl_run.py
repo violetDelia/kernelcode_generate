@@ -1,7 +1,7 @@
 """dsl_run tests.
 
 创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
+最后一次更改: 小李飞刀
 
 功能说明:
 - 覆盖 `dsl_run(func, real_args, pipeline, emitcconfig)` 的正向执行、错误合同与结果模型口径。
@@ -26,10 +26,39 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+
+def _find_expectation_root(start: Path) -> Path:
+    """向上定位 `expectation/tools/dsl_run` 所在的真实仓根。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 兼容 worktree 与主仓两种执行环境，优先返回包含 `expectation/tools/dsl_run/add.py`
+      的最近祖先目录。
+    - 让合同资产检查始终指向当前主线实际落点，而不是写死某一级父目录。
+
+    使用示例:
+    - expectation_root = _find_expectation_root(Path(__file__).resolve().parents[2])
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
+    - 功能实现: [expectation/tools/dsl_run/add.py](expectation/tools/dsl_run/add.py)
+    """
+
+    for candidate in (start, *start.parents):
+        if (candidate / "expectation/tools/dsl_run/add.py").is_file():
+            return candidate
+    raise FileNotFoundError("cannot locate expectation/tools/dsl_run/add.py")
+
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
+EXPECTATION_ROOT = _find_expectation_root(REPO_ROOT)
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-EXPECTATION_ROOT = REPO_ROOT.parent
+if str(EXPECTATION_ROOT) not in sys.path:
+    sys.path.append(str(EXPECTATION_ROOT))
 
 from expectation.tools.dsl_run.add import add_kernel
 from expectation.tools.dsl_run.invalid_contract import (
@@ -326,7 +355,7 @@ def test_dsl_run_rejects_arity_mismatch() -> None:
 
 # TC-DSL-RUN-011
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
+# 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
 # 测试目的: 确认 spec、expectation 与测试文件都已落到当前工作书。
