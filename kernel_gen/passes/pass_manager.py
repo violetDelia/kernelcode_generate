@@ -271,15 +271,12 @@ class PassManager:
         pass_names = [item.name for item in self._passes]
         if "symbol-loop-hoist" in pass_names:
             hoist_index = pass_names.index("symbol-loop-hoist")
-            if "tile" not in pass_names:
-                raise ValueError(
-                    "SymbolLoopHoistRequiresSymbolFor: symbol-loop-hoist requires tile to materialize symbol.for"
-                )
-            tile_index = pass_names.index("tile")
-            if hoist_index < tile_index:
-                raise ValueError(
-                    "SymbolLoopHoistRequiresSymbolFor: symbol-loop-hoist must run after tile"
-                )
+            if "tile" in pass_names:
+                tile_index = pass_names.index("tile")
+                if hoist_index < tile_index:
+                    raise ValueError(
+                        "SymbolLoopHoistRequiresSymbolFor: symbol-loop-hoist must run after tile"
+                    )
             if "lower-dma-memory-hierarchy" in pass_names:
                 dma_index = pass_names.index("lower-dma-memory-hierarchy")
                 if hoist_index > dma_index:

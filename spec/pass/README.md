@@ -15,10 +15,12 @@
   - [`kernel_gen/passes/pass_manager.py`](../../kernel_gen/passes/pass_manager.py)
   - [`kernel_gen/passes/registry.py`](../../kernel_gen/passes/registry.py)
   - [`kernel_gen/passes/pipeline/default_lowering.py`](../../kernel_gen/passes/pipeline/default_lowering.py)
+  - [`kernel_gen/passes/pipeline/npu_demo_lowering.py`](../../kernel_gen/passes/pipeline/npu_demo_lowering.py)
 - `test`：
   - [`test/pass/test_pass_manager.py`](../../test/pass/test_pass_manager.py)
   - [`test/pass/test_pass_registry.py`](../../test/pass/test_pass_registry.py)
   - [`test/pass/test_pipeline_default_lowering.py`](../../test/pass/test_pipeline_default_lowering.py)
+  - [`test/pass/test_pipeline_npu_demo_lowering.py`](../../test/pass/test_pipeline_npu_demo_lowering.py)
 
 ## 依赖
 
@@ -26,6 +28,7 @@
 - Pass/pipeline 注册表：[`spec/pass/registry.md`](../../spec/pass/registry.md)
 - Pipeline 目录说明：[`spec/pass/pipeline/README.md`](../../spec/pass/pipeline/README.md)
 - 默认 pipeline 合同：[`spec/pass/pipeline/default_lowering.md`](../../spec/pass/pipeline/default_lowering.md)
+- npu-demo pipeline 合同：[`spec/pass/pipeline/npu_demo_lowering.md`](../../spec/pass/pipeline/npu_demo_lowering.md)
 - host launch outline 合同：[`spec/pass/outline_device_kernel.md`](../../spec/pass/outline_device_kernel.md)
 
 ## 目标
@@ -34,6 +37,7 @@
 - 明确 pipeline 目录位置与默认 pipeline builder 的入口。
 - 说明 registry 是 pipeline 名字查询入口。
 - 说明 standalone pass 与默认 pipeline 的边界：`outline-device-kernel` 这类显式 opt-in pass 不自动进入 `default-lowering`。
+- 说明 `npu-demo-lowering` 与默认 pipeline 的边界：`npu-demo-lowering` 是 `dsl_run` 的正向主合同，不把 `tile`、`buffer-results-to-out-params`、`lower-dma-memory-hierarchy` 混入其中。
 
 ## 限制与边界
 
@@ -116,11 +120,12 @@ result = manager.run(target)
 功能说明：
 
 - `build_default_lowering_pipeline()`：直接构造默认 lowering pipeline。
+- `build_npu_demo_lowering_pipeline()`：直接构造 `npu-demo-lowering` pipeline。
 - `build_registered_pipeline(name)`：通过 registry 名字查询构造 pipeline。
 
 参数说明：
 
-- `name (str)`：pipeline 名称，如 `default-lowering`。
+- `name (str)`：pipeline 名称，如 `default-lowering` 或 `npu-demo-lowering`。
 
 使用示例：
 
@@ -128,6 +133,13 @@ result = manager.run(target)
 from kernel_gen.passes.pipeline import build_default_lowering_pipeline
 
 pm = build_default_lowering_pipeline()
+module = pm.run(module)
+```
+
+```python
+from kernel_gen.passes.pipeline import build_npu_demo_lowering_pipeline
+
+pm = build_npu_demo_lowering_pipeline()
 module = pm.run(module)
 ```
 

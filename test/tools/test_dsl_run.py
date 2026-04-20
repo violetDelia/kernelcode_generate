@@ -19,7 +19,6 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 import re
 import sys
 from pathlib import Path
@@ -30,6 +29,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+SHARED_ROOT = REPO_ROOT.parent
 
 from expectation.tools.dsl_run.add import add_kernel
 from expectation.tools.dsl_run.invalid_contract import (
@@ -45,7 +45,6 @@ from expectation.tools.dsl_run.invalid_contract import (
 from kernel_gen.dsl.emit_c import EmitCContext
 from kernel_gen.passes.pass_manager import PassManager
 from kernel_gen.passes.registry import build_registered_pipeline, load_builtin_passes
-from kernel_gen.target import registry as target_registry
 from kernel_gen.tools.dsl_run import DslRunError, dsl_run
 
 try:
@@ -53,91 +52,18 @@ try:
 except ImportError as exc:  # pragma: no cover - tests require torch
     raise RuntimeError("test/tools/test_dsl_run.py requires torch") from exc
 
-
-_DSL_RUN_TEST_TARGET_NAME = "dsl_run_test_target"
-
-
-def _ensure_dsl_run_test_target_registered() -> str:
-    """确保测试用临时 target 已注册。
+def _build_npu_demo_lowering_pipeline() -> PassManager:
+    """构造 `npu-demo-lowering` pipeline。
 
     创建者: 朽木露琪亚
     最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 复用内置 `npu_demo` 的 arch 能力，仅把 `sm_memory_size` / `lm_memory_size` 提升到可用值。
-    - 只在当前进程注册一次，避免重复注册影响后续测试。
-
-    使用示例:
-    - target_name = _ensure_dsl_run_test_target_registered()
-
-    关联文件:
-    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
-    - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
-    - 功能实现: [kernel_gen/target/registry.py](kernel_gen/target/registry.py)
-    """
-
-    registry = getattr(target_registry, "_TARGET_REGISTRY", {})
-    if _DSL_RUN_TEST_TARGET_NAME in registry:
-        return _DSL_RUN_TEST_TARGET_NAME
-    base_spec = registry["npu_demo"]
-    hardware = dict(base_spec.hardware)
-    hardware["sm_memory_size"] = 1024
-    hardware["lm_memory_size"] = 1024
-    target_registry.register_target(
-        target_registry.TargetSpec(
-            name=_DSL_RUN_TEST_TARGET_NAME,
-            arch_supported_ops=set(base_spec.arch_supported_ops)
-            if base_spec.arch_supported_ops is not None
-            else None,
-            arch_unsupported_ops=set(base_spec.arch_unsupported_ops),
-            hardware=hardware,
-        )
-    )
-    return _DSL_RUN_TEST_TARGET_NAME
-
-
-@contextmanager
-def _use_dsl_run_test_target() -> None:
-    """切换到测试所需的临时 target，并在退出时恢复原状。
-
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
-
-    功能说明:
-    - 让 `lower-dma-memory-hierarchy` 能读取到有效的 SM/LM 硬件参数。
-    - 避免测试污染进程级 current target。
-
-    使用示例:
-    - with _use_dsl_run_test_target():
-          dsl_run(...)
-
-    关联文件:
-    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
-    - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
-    - 功能实现: [kernel_gen/target/registry.py](kernel_gen/target/registry.py)
-    """
-
-    previous_target = target_registry._get_current_target()
-    target_name = _ensure_dsl_run_test_target_registered()
-    target_registry._set_current_target(target_name)
-    try:
-        yield
-    finally:
-        target_registry._set_current_target(previous_target)
-
-
-def _build_default_lowering_pipeline() -> PassManager:
-    """构造 `default-lowering` pipeline。
-
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
-
-    功能说明:
-    - 显式加载 builtin passes 后，再通过 registry 构造默认 lowering pipeline。
+    - 显式加载 builtin passes 后，再通过 registry 构造 `npu-demo-lowering` pipeline。
     - 便于测试同时覆盖字符串 pipeline 与现成 `PassManager` 两条入口。
 
     使用示例:
-    - pipeline = _build_default_lowering_pipeline()
+    - pipeline = _build_npu_demo_lowering_pipeline()
 
     关联文件:
     - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
@@ -146,7 +72,7 @@ def _build_default_lowering_pipeline() -> PassManager:
     """
 
     load_builtin_passes()
-    pipeline = build_registered_pipeline("default-lowering")
+    pipeline = build_registered_pipeline("npu-demo-lowering")
     assert isinstance(pipeline, PassManager)
     return pipeline
 
@@ -208,13 +134,12 @@ def test_dsl_run_string_pipeline_with_torch_numpy_mix() -> None:
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
     expected = lhs + torch.from_numpy(rhs)
 
-    with _use_dsl_run_test_target():
-        result = dsl_run(
-            add_kernel,
-            (out, lhs, rhs),
-            "default-lowering",
-            EmitCContext(target="npu_demo"),
-        )
+    result = dsl_run(
+        add_kernel,
+        (out, lhs, rhs),
+        "npu-demo-lowering",
+        EmitCContext(target="npu_demo"),
+    )
 
     _assert_result_contract(result, out, expected)
 
@@ -229,19 +154,18 @@ def test_dsl_run_string_pipeline_with_torch_numpy_mix() -> None:
 # 对应 spec 文件路径: spec/tools/dsl_run.md
 # 对应测试文件路径: test/tools/test_dsl_run.py
 def test_dsl_run_pass_manager_with_list_real_args() -> None:
-    pipeline = _build_default_lowering_pipeline()
+    pipeline = _build_npu_demo_lowering_pipeline()
     out = torch.empty((6,), dtype=torch.int32)
     lhs = np.array([11, 12, 13, 14, 15, 16], dtype=np.int32)
     rhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
     expected = torch.from_numpy(lhs) + rhs
 
-    with _use_dsl_run_test_target():
-        result = dsl_run(
-            add_kernel,
-            [out, lhs, rhs],
-            pipeline,
-            EmitCContext(target="npu_demo"),
-        )
+    result = dsl_run(
+        add_kernel,
+        [out, lhs, rhs],
+        pipeline,
+        EmitCContext(target="npu_demo"),
+    )
 
     _assert_result_contract(result, out, expected)
 
@@ -261,13 +185,12 @@ def test_dsl_run_numpy_output() -> None:
     rhs = np.array([12, 11, 10, 9, 8, 7], dtype=np.int32)
     expected = lhs.numpy() + rhs
 
-    with _use_dsl_run_test_target():
-        result = dsl_run(
-            add_kernel,
-            (out, lhs, rhs),
-            "default-lowering",
-            EmitCContext(target="npu_demo"),
-        )
+    result = dsl_run(
+        add_kernel,
+        (out, lhs, rhs),
+        "npu-demo-lowering",
+        EmitCContext(target="npu_demo"),
+    )
 
     _assert_result_contract(result, out, expected)
 
@@ -289,7 +212,7 @@ def test_dsl_run_rejects_value_return_kernel() -> None:
         dsl_run(
             return_add_kernel,
             (lhs, rhs),
-            "default-lowering",
+            "npu-demo-lowering",
             EmitCContext(target="npu_demo"),
         )
 
@@ -309,7 +232,7 @@ def test_dsl_run_rejects_none_emitcconfig() -> None:
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
 
     with pytest.raises(DslRunError, match=re.escape(EMITCCONFIG_ERROR)):
-        dsl_run(store_add_kernel, (out, lhs, rhs), "default-lowering", None)
+        dsl_run(store_add_kernel, (out, lhs, rhs), "npu-demo-lowering", None)
 
 
 # TC-DSL-RUN-006
@@ -327,7 +250,7 @@ def test_dsl_run_rejects_invalid_emitcconfig_type() -> None:
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
 
     with pytest.raises(DslRunError, match=re.escape(EMITCCONFIG_ERROR)):
-        dsl_run(store_add_kernel, (out, lhs, rhs), "default-lowering", object())
+        dsl_run(store_add_kernel, (out, lhs, rhs), "npu-demo-lowering", object())
 
 
 # TC-DSL-RUN-007
@@ -381,7 +304,7 @@ def test_dsl_run_rejects_unsupported_runtime_arg_type() -> None:
     rhs = object()
 
     with pytest.raises(DslRunError, match=re.escape(REAL_ARG_TYPE_ERROR)):
-        dsl_run(store_add_kernel, (out, lhs, rhs), "default-lowering", EmitCContext(target="npu_demo"))
+        dsl_run(store_add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(target="npu_demo"))
 
 
 # TC-DSL-RUN-010
@@ -398,7 +321,7 @@ def test_dsl_run_rejects_arity_mismatch() -> None:
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
 
     with pytest.raises(DslRunError, match=re.escape(ARITY_ERROR)):
-        dsl_run(store_add_kernel, (out, lhs), "default-lowering", EmitCContext(target="npu_demo"))
+        dsl_run(store_add_kernel, (out, lhs), "npu-demo-lowering", EmitCContext(target="npu_demo"))
 
 
 # TC-DSL-RUN-011
@@ -412,7 +335,7 @@ def test_dsl_run_rejects_arity_mismatch() -> None:
 # 对应测试文件路径: test/tools/test_dsl_run.py
 def test_dsl_run_contract_files_exist() -> None:
     assert (REPO_ROOT / "spec/tools/dsl_run.md").is_file()
-    assert (REPO_ROOT / "expectation/tools/dsl_run/add.py").is_file()
-    assert (REPO_ROOT / "expectation/tools/dsl_run/invalid_contract.py").is_file()
-    assert (REPO_ROOT / "expectation/tools/dsl_run/__main__.py").is_file()
+    assert (SHARED_ROOT / "expectation/tools/dsl_run/add.py").is_file()
+    assert (SHARED_ROOT / "expectation/tools/dsl_run/invalid_contract.py").is_file()
+    assert (SHARED_ROOT / "expectation/tools/dsl_run/__main__.py").is_file()
     assert (REPO_ROOT / "kernel_gen/tools/dsl_run.py").is_file()

@@ -98,7 +98,7 @@ def add_kernel(out, lhs, rhs):
 result = dsl_run(
     add_kernel,
     (out, lhs, rhs),
-    "default-lowering",
+    "npu-demo-lowering",
     EmitCContext(target="npu_demo"),
 )
 assert result.execute_result.ok is True
@@ -107,7 +107,7 @@ assert result.execute_result.ok is True
 ## Expectation 口径
 
 - `expectation/tools/dsl_run/add.py` 覆盖正向合同：
-  - 字符串 pipeline
+  - 字符串 pipeline，正向主合同使用 `npu-demo-lowering`
   - `PassManager` pipeline
   - `torch.Tensor` 与 `numpy.ndarray` 的混合运行时参数
   - `numpy.ndarray` 输出位

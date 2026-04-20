@@ -10,7 +10,7 @@
 
 使用示例:
 - from kernel_gen.tools.dsl_run import dsl_run
-- result = dsl_run(add_kernel, (out, lhs, rhs), "default-lowering", EmitCContext(target="npu_demo"))
+- result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(target="npu_demo"))
 - assert result.execute_result.ok is True
 
 关联文件:
@@ -268,7 +268,7 @@ def _resolve_pipeline(pipeline: str | PassManager) -> PassManager:
     - 未知 pipeline 名称统一收口为稳定错误短语。
 
     使用示例:
-    - pm = _resolve_pipeline("default-lowering")
+    - pm = _resolve_pipeline("npu-demo-lowering")
 
     关联文件:
     - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
@@ -361,7 +361,7 @@ class DslRunResult:
     - `runtime_args` 保留为 tuple，便于下游机械比较和再次调用执行引擎。
 
     使用示例:
-    - result = dsl_run(add_kernel, (out, lhs, rhs), "default-lowering", EmitCContext(target="npu_demo"))
+    - result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(target="npu_demo"))
     - assert result.execute_result.ok is True
 
     关联文件:
@@ -396,7 +396,7 @@ def dsl_run(
     - 结果以 `DslRunResult` 返回，外部可以继续读取 `func_op/module/source/compiled_kernel/execute_result/runtime_args`。
 
     使用示例:
-    - result = dsl_run(add_kernel, (out, lhs, rhs), "default-lowering", EmitCContext(target="npu_demo"))
+    - result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(target="npu_demo"))
     - assert result.execute_result.ok is True
 
     关联文件:

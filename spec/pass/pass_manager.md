@@ -29,6 +29,7 @@
 - 对 nn 分解 lowering 链固定公开一个顺序边界：`DecompassPass` 必须运行在 `NnLoweringPass` 之前，确保默认 lowering 链路不让 residual `nn.*` 直接进入 `nn_lowering`。
 - 对下游 `gen_kernel` 合同固定明确：`gen_kernel` 仅接受已执行 `BufferResultsToOutParamsPass` 的 rewrite 后 ABI；若仍保留旧 `memory return` ABI，必须显式失败。
 - 对显式 memory hierarchy lowering 链固定公开一个扩展顺序边界：当调用方注册 `LowerDmaMemoryHierarchyPass` 时，其位置必须在 `NnLoweringPass` 与 `BufferResultsToOutParamsPass` 之后。
+- 对 `symbol-loop-hoist` 的公开边界固定为：当模块中没有 `symbol.for` 时，`symbol-loop-hoist` 允许在不依赖 `tile` 的情况下 no-op；若调用方同时注册 `tile`，则 `symbol-loop-hoist` 仍需位于 `tile` 之后，且在 `lower-dma-memory-hierarchy` 之前。
 
 ## 限制与边界
 

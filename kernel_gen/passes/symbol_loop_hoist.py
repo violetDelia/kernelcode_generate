@@ -4,7 +4,8 @@
 最后一次更改: 朽木露琪亚
 
 功能说明:
-- 作为 `ModulePass` 实现 `symbol-loop-hoist` pass，仅处理 `symbol.for`。
+- 作为 `ModulePass` 实现 `symbol-loop-hoist` pass，仅处理 `symbol.for`；当 module 中不存在
+  `symbol.for` 时保持 no-op。
 - 把循环体内仅依赖循环外 SSA 的对象外提到 `symbol.for` 之前，减少 split 后循环体内重复构造的符号查询、
   形状推导与可复用 buffer/视图描述。
 - 首版以白名单为主，不做通用 LICM。
@@ -293,6 +294,7 @@ class SymbolLoopHoistPass(Pass, ModulePass):
 
     功能说明:
     - 作为 `ModulePass` 遍历 module 中的 `symbol.for` 并外提循环 invariant 的对象。
+    - 若 module 中不存在 `symbol.for`，则直接 no-op 并通过 `module.verify()`。
     - 在最终 `module.verify()` 失败时统一转译为 `SymbolLoopHoistVerifierError`。
 
     使用示例:

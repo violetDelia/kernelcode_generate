@@ -563,31 +563,46 @@ def test_pass_manager_rejects_dma_memory_hierarchy_before_out_params() -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-07 13:50:00 +0800
 # 最近一次运行成功时间: 2026-04-07 13:50:00 +0800
-# 功能说明: 验证显式启用 symbol-loop-hoist 但缺少 tile 时会被拒绝，并包含固定错误短语。
-# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_rejects_symbol_loop_hoist_without_tile
+# 功能说明: 验证显式启用 symbol-loop-hoist 但缺少 tile 时仍可正常执行。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_allows_symbol_loop_hoist_without_tile
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
 @pytest.mark.nn_lowering
-def test_pass_manager_rejects_symbol_loop_hoist_without_tile() -> None:
+def test_pass_manager_allows_symbol_loop_hoist_without_tile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     NnLoweringPass = lowering_module.NnLoweringPass
     BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
-    LowerDmaMemoryHierarchyPass = lowering_module.LowerDmaMemoryHierarchyPass
+    order: list[str] = []
+
+    def _record_lower(self: object, target: object) -> object:
+        order.append("lower-nn")
+        return target
+
+    def _record_buffer(self: object, ctx: object, module: object) -> None:
+        order.append("buffer-results-to-out-params")
+        return None
 
     class SymbolLoopHoistPass(Pass):
         name = "symbol-loop-hoist"
 
         def run(self: "SymbolLoopHoistPass", target: object) -> object:
+            order.append("symbol-loop-hoist")
             return target
+
+    monkeypatch.setattr(NnLoweringPass, "run", _record_lower)
+    monkeypatch.setattr(BufferResultsToOutParamsPass, "apply", _record_buffer)
 
     pm = PassManager(name="missing-tile")
     pm.add_pass(NnLoweringPass())
     pm.add_pass(BufferResultsToOutParamsPass())
     pm.add_pass(SymbolLoopHoistPass())
-    pm.add_pass(LowerDmaMemoryHierarchyPass())
-    with pytest.raises(ValueError, match="SymbolLoopHoistRequiresSymbolFor"):
-        pm.run(object())
+
+    sentinel = object()
+    assert pm.run(sentinel) is sentinel
+    assert order == ["lower-nn", "buffer-results-to-out-params", "symbol-loop-hoist"]
 
 
 # TC-PASS-016

@@ -16,7 +16,7 @@
 builtin.module {}
 \"\"\")
 - assert result.ok is True
-- result = dsl_run(add_kernel, (out, lhs, rhs), "default-lowering", EmitCContext(target="npu_demo"))
+- result = dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(target="npu_demo"))
 
 关联文件:
 - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)

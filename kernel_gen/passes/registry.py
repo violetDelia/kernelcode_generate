@@ -241,6 +241,7 @@ def build_registered_pipeline(name: str, options: dict[str, str] | None = None) 
     使用示例:
     - load_builtin_passes()
     - pm = build_registered_pipeline("no-op-pipeline")
+    - pm = build_registered_pipeline("npu-demo-lowering")
     - pm = build_registered_pipeline("default-lowering", {"analysis-only": "true"})
     - lowered = pm.run(module)
 
@@ -282,6 +283,7 @@ def load_builtin_passes() -> None:
     功能说明:
     - 主动加载仓库内置 pass / pipeline，使装饰器注册与显式注册生效。
     - 满足幂等性：重复调用不会重复注册或造成副作用。
+    - 当前内置 pipeline 包含 `default-lowering` 与 `npu-demo-lowering`。
 
     使用示例:
     - load_builtin_passes()
@@ -343,10 +345,15 @@ def load_builtin_passes() -> None:
             continue
         register_pass(pass_cls)
 
-    from kernel_gen.passes.pipeline import build_default_lowering_pipeline
+    from kernel_gen.passes.pipeline import (
+        build_default_lowering_pipeline,
+        build_npu_demo_lowering_pipeline,
+    )
 
     if "default-lowering" not in _PIPELINE_REGISTRY:
         register_pipeline("default-lowering")(build_default_lowering_pipeline)
+    if "npu-demo-lowering" not in _PIPELINE_REGISTRY:
+        register_pipeline("npu-demo-lowering")(build_npu_demo_lowering_pipeline)
 
     _BUILTINS_LOADED = True
 

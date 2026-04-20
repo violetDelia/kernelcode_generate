@@ -22,6 +22,7 @@
 - pipeline 目录与默认 pipeline：
   - [`spec/pass/pipeline/README.md`](../../spec/pass/pipeline/README.md)
   - [`spec/pass/pipeline/default_lowering.md`](../../spec/pass/pipeline/default_lowering.md)
+  - [`spec/pass/pipeline/npu_demo_lowering.md`](../../spec/pass/pipeline/npu_demo_lowering.md)
 - standalone tuning pass：
   - [`spec/pass/tuning/launch_kernel_cost_func.md`](../../spec/pass/tuning/launch_kernel_cost_func.md)
 
@@ -45,6 +46,7 @@
 - `build_registered_pass/build_registered_pipeline` 不得隐式调用 `load_builtin_passes()`；加载时机由调用方控制，以保持工具入口行为可预测。
 - 注册表不解析 `options` 语义；仅负责把 `options` 传给 pass / pipeline 构造入口。
 - 内置 pipeline 模块放在 `kernel_gen/passes/pipeline`；`load_builtin_passes()` 负责导入这些模块以触发注册。
+- 当前内置 pipeline 至少包含 `default-lowering` 与 `npu-demo-lowering` 两个公开 builder。
 - registry 只负责注册与查询，不承载具体 pipeline builder 实现。
 - 重复注册同名 pass 或 pipeline 必须立即失败，不得覆盖旧项。
 - 为便于工具与测试编写最小用例，仓库内置 pass 至少应包含：
@@ -195,6 +197,7 @@ from kernel_gen.passes.registry import load_builtin_passes, build_registered_pip
 
 load_builtin_passes()
 pm = build_registered_pipeline("default-lowering")
+pm = build_registered_pipeline("npu-demo-lowering")
 pm = build_registered_pipeline("default-lowering", {"bufferize": "true"})
 ```
 
@@ -233,6 +236,7 @@ load_builtin_passes()
 - 该函数必须满足幂等性：重复调用不会重复注册或造成副作用。
 - 只加载仓库内置模块；不得接收用户输入的任意模块路径。
 - 建议至少提供一个内置 pass 名称 `no-op`，其语义为“返回输入不变”，用于工具链与 matcher 的最小验证链。
+- 当前内置 pipeline 至少应包含 `default-lowering` 与 `npu-demo-lowering`。
 
 返回与限制：
 
