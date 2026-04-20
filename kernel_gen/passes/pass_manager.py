@@ -27,10 +27,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from xdsl.context import Context
+from xdsl.dialects.builtin import ModuleOp
 from xdsl.passes import ModulePass
 
 
-class Pass:
+class Pass(ModulePass):
     """Pass 抽象基类。
 
     创建者: 李白
@@ -71,6 +72,12 @@ class Pass:
         - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
         """
         raise NotImplementedError("Pass.run must be implemented")
+
+    def apply(self: "Pass", ctx: Context, op: object) -> None:
+        """兼容 xdsl `ModulePass` 接口。"""
+
+        _ = ctx
+        self.run(op)
 
 
 def _is_pass_like(obj: object) -> bool:
@@ -258,7 +265,7 @@ class PassManager:
                 raise ValueError(
                     "buffer-results-to-out-params requires lowered IR after lower-nn or lower-nn-to-kernel"
                 )
-            if isinstance(item, ModulePass):
+            if isinstance(item, ModulePass) and isinstance(result, ModuleOp):
                 if ctx is None:
                     ctx = Context()
                 item.apply(ctx, result)
