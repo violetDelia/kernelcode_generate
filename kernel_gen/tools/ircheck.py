@@ -1493,8 +1493,8 @@ def _normalize_ir(value: Operation) -> str:
     printer = Printer(stream=stream)
     printer.print_op(value)
     text = stream.getvalue().rstrip()
-    # 归一化 func.func 签名里 `name:` 的空格口径，让期望文本可按旧合同继续匹配。
-    text = re.sub(r"(%[A-Za-z_][A-Za-z0-9_]*|%\d+):(?=\s)", r"\1 :", text)
+    # 归一化 func.func 签名里命名 SSA `name:` 的空格口径，让期望文本可按旧合同继续匹配。
+    text = re.sub(r"(%[A-Za-z_][A-Za-z0-9_]*):(?=\s)", r"\1 :", text)
     if "kernel.img2col1d" in text:
         lines = text.splitlines()
         for idx, line in enumerate(lines):

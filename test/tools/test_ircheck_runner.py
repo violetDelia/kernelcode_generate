@@ -1021,8 +1021,8 @@ builtin.module {
 # TC-IRCHECK-RUN-030A
 # 创建者: 榕
 # 最后一次更改: 榕
-# 最近一次运行测试时间: 待本轮验证后补充
-# 最近一次运行成功时间: 待本轮验证后补充
+# 最近一次运行测试时间: 2026-04-21 00:30:50 +0800
+# 最近一次运行成功时间: 2026-04-21 00:30:50 +0800
 # 功能说明: 验证 `{val}` 可用于源码或文本里的标识符匹配，不会退化成数字 id。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_val_alias_matches_identifiers
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
@@ -1042,6 +1042,33 @@ builtin.module {
     result = run_ircheck_text(text, source_path="inline.ircheck")
     assert result.ok is True
     assert result.exit_code == 0
+
+
+# TC-IRCHECK-RUN-030B
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 待本轮验证后补充
+# 最近一次运行成功时间: 待本轮验证后补充
+# 功能说明: 验证 numeric SSA 形参在函数签名里保持紧贴冒号，避免被归一成 `%0 :`。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_numeric_ssa_signature_keeps_colon_tight
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+def test_run_ircheck_text_numeric_ssa_signature_keeps_colon_tight() -> None:
+    text = """// COMPILE_ARGS: --pass no-op
+// CHECK: func.func @copy(%0: !nn.memory<[9], [1], i8, #nn.space<tsm>> {name = "arg0"}, %1: !nn.memory<[9], [1], i8, #nn.space<tsm>> {name = "src"}) {
+// CHECK-NEXT: func.return
+
+builtin.module {
+  func.func @copy(%0: !nn.memory<[9], [1], i8, #nn.space<tsm>> {name = "arg0"}, %1: !nn.memory<[9], [1], i8, #nn.space<tsm>> {name = "src"}) {
+    func.return
+  }
+}
+"""
+    result = run_ircheck_text(text, source_path="inline.ircheck")
+    assert result.ok is True
+    assert result.exit_code == 0
+    assert "func.func @copy(%0:" in result.actual_ir
 
 
 # TC-IRCHECK-RUN-031
