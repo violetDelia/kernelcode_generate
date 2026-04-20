@@ -10,7 +10,7 @@
 - 提供 lower-dma-memory-hierarchy pass 的公开入口。
 - 提供 decompass pass 的公开入口。
 - 提供 outline-device-kernel 的 lowering 兼容入口。
-- 提供 tile pass 与 kernel_split 兼容入口。
+- 提供 tile-analysis ModulePass、tile pass 与 kernel_split 兼容入口。
 - 提供 symbol-loop-hoist 的兼容入口。
 
 使用示例:
@@ -26,6 +26,8 @@
 - pass_obj = DecompassPass()
 - from kernel_gen.passes.lowering import OutlineDeviceKernelPass
 - pass_obj = OutlineDeviceKernelPass()
+- from kernel_gen.passes.lowering.tile_analysis import TileAnalysisPass
+- pass_obj = TileAnalysisPass()
 - from kernel_gen.passes.lowering.tile import TilePass
 - pass_obj = TilePass()
 - from kernel_gen.passes import SymbolLoopHoistPass
@@ -38,6 +40,7 @@
   - [spec/pass/lowering/dma_memory_hierarchy.md](spec/pass/lowering/dma_memory_hierarchy.md)
   - [spec/pass/decompass.md](spec/pass/decompass.md)
   - [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
+  - [spec/pass/lowering/tile_analysis.md](spec/pass/lowering/tile_analysis.md)
   - [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
   - [spec/pass/lowering/kernel_split.md](spec/pass/lowering/kernel_split.md)
   - [spec/pass/symbol_loop_hoist.md](spec/pass/symbol_loop_hoist.md)
@@ -59,6 +62,7 @@
   - [kernel_gen/passes/lowering/dma_memory_hierarchy.py](kernel_gen/passes/lowering/dma_memory_hierarchy.py)
   - [kernel_gen/passes/decompass.py](kernel_gen/passes/decompass.py)
   - [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
+  - [kernel_gen/passes/lowering/tile_analysis.py](kernel_gen/passes/lowering/tile_analysis.py)
   - [kernel_gen/passes/lowering/__init__.py](kernel_gen/passes/lowering/__init__.py)
   - [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
   - [kernel_gen/passes/lowering/kernel_split.py](kernel_gen/passes/lowering/kernel_split.py)
@@ -84,6 +88,7 @@ from .kernel_split import KernelSplitError, KernelSplitPass
 from ..outline_device_kernel import OutlineDeviceKernelError, OutlineDeviceKernelPass
 from ..symbol_loop_hoist import SymbolLoopHoistError, SymbolLoopHoistPass
 from .tile import TilePass, TilePassError
+from .tile_analysis import TileAnalysisPass
 
 outline_device_kernel = _outline_device_kernel_module
 sys.modules.setdefault(__name__ + ".outline_device_kernel", _outline_device_kernel_module)
@@ -104,6 +109,7 @@ __all__ = [
     "OutlineDeviceKernelError",
     "TilePass",
     "TilePassError",
+    "TileAnalysisPass",
     "KernelSplitPass",
     "KernelSplitError",
     "SymbolLoopHoistPass",

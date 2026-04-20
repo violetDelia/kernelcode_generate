@@ -1898,13 +1898,14 @@ def _tile_analysis_attr(roles: list[list[str]]) -> ArrayAttr:
 
 
 def _set_tile_analysis(op: Operation, roles: list[list[str]]) -> None:
-    """为 op 写入 tile.analysis 属性。
+    """为 op 写入 tile.analysis 与 tile.tile_exprs 属性。
 
     创建者: 小李飞刀
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 仅在 roles 非空时写入 `tile.analysis`。
+    - 仅在 roles 非空时写入 `tile.analysis` 与 `tile.tile_exprs`。
+    - `tile.analysis` 保持角色标签矩阵，`tile.tile_exprs` 保持同形状空串矩阵。
     - 保持输出与 expectation 的矩阵文本一致。
 
     使用示例:
@@ -1919,6 +1920,9 @@ def _set_tile_analysis(op: Operation, roles: list[list[str]]) -> None:
     if not roles:
         return
     op.attributes["tile.analysis"] = _tile_analysis_attr(roles)
+    op.attributes["tile.tile_exprs"] = ArrayAttr(
+        [ArrayAttr([StringAttr("") for _ in row]) for row in roles]
+    )
 
 
 def _clear_tile_analysis(block: Block) -> None:
@@ -2104,7 +2108,7 @@ def _annotate_tile_analysis(block: Block) -> None:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 为 kernel.* 与 dma.broadcast 追加 tile.analysis 属性。
+    - 为 kernel.* 与 dma.broadcast 追加 tile.analysis 与 tile.tile_exprs 属性。
     - 仅在 analysis-only 路径使用。
 
     使用示例:

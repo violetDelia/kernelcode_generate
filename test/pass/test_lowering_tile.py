@@ -409,7 +409,7 @@ def test_tile_matmul_builds_mnk_loops() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-13 01:25:30 +0800
 # 最近一次运行成功时间: 2026-04-13 01:25:30 +0800
-# 功能说明: 验证 analysis-only=true 仅输出 tile.analysis，不生成 loop/view。
+# 功能说明: 验证 analysis-only=true 仅输出 tile.analysis / tile.tile_exprs，不生成 loop/view。
 # 测试目的: 覆盖 analysis-only=true 的公开行为。
 # 使用示例: pytest -q test/pass/test_lowering_tile.py -k test_tile_analysis_only_true
 # 对应功能实现文件路径: kernel_gen/passes/lowering/tile.py

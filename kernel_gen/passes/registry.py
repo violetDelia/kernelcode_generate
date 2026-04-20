@@ -321,7 +321,8 @@ def load_builtin_passes() -> None:
     from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
     from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelPass
     from kernel_gen.passes.symbol_loop_hoist import SymbolLoopHoistPass
-    from kernel_gen.passes.lowering.tile import TileAnalysisPass, TilePass
+    from kernel_gen.passes.lowering.tile import TilePass
+    from kernel_gen.passes.lowering.tile_analysis import TileAnalysisPass
     from kernel_gen.passes.tuning import LaunchKernelCostFuncPass
 
     for pass_cls in (
