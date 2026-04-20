@@ -1,7 +1,7 @@
 """symbol-loop-hoist pass tests.
 
 创建者: 朽木露琪亚
-最后一次更改: 小李飞刀
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 `SymbolLoopHoistPass` 的外提白名单、禁止项与固定失败短语。
@@ -32,6 +32,8 @@ from xdsl.dialects import arith, func
 from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, IntegerAttr, ModuleOp, StringAttr, i32
 from xdsl.ir import Block, Region, SSAValue
 from xdsl.dialects.builtin import UnrealizedConversionCastOp
+from xdsl.context import Context
+from xdsl.passes import ModulePass
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -422,6 +424,26 @@ def test_symbol_loop_hoist_hoists_symbol_const() -> None:
 def test_symbol_loop_hoist_is_exported_from_lowering_package() -> None:
     assert lowering_pass_module.SymbolLoopHoistPass is SymbolLoopHoistPass
     assert lowering_pass_module.SymbolLoopHoistError is SymbolLoopHoistError
+
+
+# TC-SLH-001B
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 测试目的: 验证 `SymbolLoopHoistPass` 作为 ModulePass 可直接通过 apply(ctx, module) 执行。
+# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
+# 对应测试文件路径: test/pass/test_symbol_loop_hoist.py
+def test_symbol_loop_hoist_apply_behaves_like_module_pass() -> None:
+    module = _make_module_for_const_hoist()
+    pass_obj = SymbolLoopHoistPass()
+    ctx = Context()
+
+    assert isinstance(pass_obj, ModulePass)
+
+    result = pass_obj.apply(ctx, module)
+
+    assert result is None
+    module.verify()
 
 
 # TC-SLH-002

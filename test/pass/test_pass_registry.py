@@ -29,6 +29,7 @@ from pathlib import Path
 
 import importlib
 import pytest
+from xdsl.passes import ModulePass
 
 from xdsl.context import Context
 from xdsl.passes import ModulePass
@@ -241,6 +242,25 @@ def test_build_registered_outline_device_kernel_pass() -> None:
 
     assert pass_obj.name == "outline-device-kernel"
     assert type(pass_obj).__name__ == "OutlineDeviceKernelPass"
+    assert isinstance(pass_obj, ModulePass)
+
+
+# TC-REGISTRY-007D
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 功能说明: 验证内置 pass 加载后可通过稳定名称构造 symbol-loop-hoist。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_symbol_loop_hoist_pass
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/pass/test_pass_registry.py
+def test_build_registered_symbol_loop_hoist_pass() -> None:
+    load_builtin_passes()
+
+    pass_obj = build_registered_pass("symbol-loop-hoist")
+
+    assert pass_obj.name == "symbol-loop-hoist"
+    assert type(pass_obj).__name__ == "SymbolLoopHoistPass"
+    assert isinstance(pass_obj, ModulePass)
 
 
 # TC-REGISTRY-007B

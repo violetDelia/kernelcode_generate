@@ -1,18 +1,20 @@
 """outline-device-kernel pass.
 
 创建者: 朽木露琪亚
-最后一次更改: 金铲铲大作战
+最后一次更改: 朽木露琪亚
 
 功能说明:
-- 为带显式 launch 属性的 `func.func` 执行 host-launch outline。
+- 作为 `ModulePass` 为带显式 launch 属性的 `func.func` 执行 host-launch outline。
 - 把原函数改写为只包含 `symbol.const + arch.launch + func.return` 的 host wrapper。
 - 把原函数体搬移到新的 `@<name>_device`，并只在 device 侧保留 `shared_memory_size`。
 
 使用示例:
+- from xdsl.context import Context
 - from xdsl.dialects.builtin import ModuleOp
 - from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelPass
 - module = ModuleOp([])
-- assert OutlineDeviceKernelPass().run(module) is module
+- OutlineDeviceKernelPass().apply(Context(), module)
+- # 兼容旧调用方仍可使用 OutlineDeviceKernelPass().run(module)
 
 关联文件:
 - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
@@ -24,9 +26,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from xdsl.context import Context
 from xdsl.dialects import func
 from xdsl.dialects.builtin import IntAttr, IntegerAttr, ModuleOp, StringAttr
 from xdsl.ir import Attribute, Block, Region
+from xdsl.passes import ModulePass
 
 from kernel_gen.dialect.arch import ArchLaunchOp
 from kernel_gen.dialect.symbol import SymbolConstOp
@@ -39,7 +43,7 @@ class OutlineDeviceKernelError(ValueError):
     """outline-device-kernel pass 的稳定错误类型。
 
     创建者: 朽木露琪亚
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 统一承载 outline 过程中的显式失败路径。
@@ -353,19 +357,22 @@ def _outline_function(module: ModuleOp, candidate: _OutlineCandidate) -> None:
     module.body.block.insert_op_after(device_func, func_op)
 
 
-class OutlineDeviceKernelPass(Pass):
+class OutlineDeviceKernelPass(Pass, ModulePass):
     """outline-device-kernel pass。
 
     创建者: 朽木露琪亚
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 固定公开名称为 `outline-device-kernel`。
-    - 对带显式 launch 属性的零返回函数执行 host-launch outline。
+    - 作为 `ModulePass` 由 `apply(ctx, module)` 执行。
     - 保持未标记函数原样不变，且不并入默认 pipeline。
 
     使用示例:
-    - module = OutlineDeviceKernelPass().run(ModuleOp([]))
+    - from xdsl.context import Context
+    - from xdsl.dialects.builtin import ModuleOp
+    - module = ModuleOp([])
+    - OutlineDeviceKernelPass().apply(Context(), module)
 
     关联文件:
     - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
@@ -375,19 +382,21 @@ class OutlineDeviceKernelPass(Pass):
 
     name = "outline-device-kernel"
 
-    def run(self: "OutlineDeviceKernelPass", module: object) -> ModuleOp:
-        """执行 outline-device-kernel pass。
+    def apply(self: "OutlineDeviceKernelPass", ctx: Context, module: ModuleOp) -> None:
+        """执行 outline-device-kernel ModulePass。
 
         创建者: 朽木露琪亚
-        最后一次更改: 金铲铲大作战
+        最后一次更改: 朽木露琪亚
 
         功能说明:
-        - 仅接受 `builtin.module` 作为 pass 输入。
+        - 仅接受 `builtin.module` 作为 ModulePass 输入。
         - 先收集并校验所有待 outline 函数，再统一执行改写。
 
         使用示例:
+        - from xdsl.context import Context
+        - from xdsl.dialects.builtin import ModuleOp
         - module = ModuleOp([])
-        - same_module = OutlineDeviceKernelPass().run(module)
+        - OutlineDeviceKernelPass().apply(Context(), module)
 
         关联文件:
         - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
@@ -395,10 +404,11 @@ class OutlineDeviceKernelPass(Pass):
         - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
         """
 
+        del ctx
         if not isinstance(module, ModuleOp):
             raise OutlineDeviceKernelError("OutlineDeviceKernelError: module must be builtin.module")
         if not any(True for _ in module.ops):
-            return module
+            return
         existing_names = {op.sym_name.data for op in module.ops if isinstance(op, func.FuncOp)}
         candidates: list[_OutlineCandidate] = []
         for op in module.ops:
@@ -409,6 +419,28 @@ class OutlineDeviceKernelPass(Pass):
                 candidates.append(candidate)
         for candidate in candidates:
             _outline_function(module, candidate)
+
+    def run(self: "OutlineDeviceKernelPass", module: object) -> ModuleOp:
+        """兼容旧 Pass 接口的执行入口。
+
+        创建者: 朽木露琪亚
+        最后一次更改: 朽木露琪亚
+
+        功能说明:
+        - 保持旧 `run(module)` 调用方可继续工作。
+        - 内部直接复用 `apply(Context(), module)`。
+
+        使用示例:
+        - from xdsl.dialects.builtin import ModuleOp
+        - module = OutlineDeviceKernelPass().run(ModuleOp([]))
+
+        关联文件:
+        - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
+        - test: [test/pass/outline_device_kernel/test_outline_device_kernel.py](test/pass/outline_device_kernel/test_outline_device_kernel.py)
+        - 功能实现: [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
+        """
+
+        self.apply(Context(), module)  # type: ignore[arg-type]
         return module
 
 

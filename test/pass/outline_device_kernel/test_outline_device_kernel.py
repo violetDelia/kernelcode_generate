@@ -1,7 +1,7 @@
 """outline-device-kernel pass tests.
 
 创建者: 朽木露琪亚
-最后一次更改: 金铲铲大作战
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 `OutlineDeviceKernelPass` 的公开 outline 合同。
@@ -31,6 +31,7 @@ from xdsl.dialects.builtin import ModuleOp
 from xdsl.dialects.test import Test
 from xdsl.parser import Parser
 from xdsl.printer import Printer
+from xdsl.passes import ModulePass
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -168,6 +169,27 @@ def test_outline_device_kernel_empty_module_returns_same_object() -> None:
 
     assert result is module
     assert list(module.ops) == []
+
+
+# TC-ODK-004A
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 功能说明: 验证 OutlineDeviceKernelPass 作为 ModulePass 可直接通过 apply(ctx, module) 执行。
+# 使用示例: pytest -q test/pass/outline_device_kernel/test_outline_device_kernel.py -k test_outline_device_kernel_apply_behaves_like_module_pass
+# 对应功能实现文件路径: kernel_gen/passes/outline_device_kernel.py
+# 对应 spec 文件路径: spec/pass/outline_device_kernel.md
+# 对应测试文件路径: test/pass/outline_device_kernel/test_outline_device_kernel.py
+def test_outline_device_kernel_apply_behaves_like_module_pass() -> None:
+    module = _parse_module(_BASIC_MODULE)
+    pass_obj = OutlineDeviceKernelPass()
+    ctx = Context()
+
+    assert isinstance(pass_obj, ModulePass)
+
+    result = pass_obj.apply(ctx, module)
+
+    assert result is None
+    module.verify()
 
 
 _BASIC_MODULE = """

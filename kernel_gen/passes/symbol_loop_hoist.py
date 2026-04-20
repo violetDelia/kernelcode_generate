@@ -1,17 +1,21 @@
 """symbol-loop-hoist pass.
 
 创建者: 朽木露琪亚
-最后一次更改: 小李飞刀
+最后一次更改: 朽木露琪亚
 
 功能说明:
-- 实现 `symbol-loop-hoist` pass，仅处理 `symbol.for`。
+- 作为 `ModulePass` 实现 `symbol-loop-hoist` pass，仅处理 `symbol.for`。
 - 把循环体内仅依赖循环外 SSA 的对象外提到 `symbol.for` 之前，减少 split 后循环体内重复构造的符号查询、
   形状推导与可复用 buffer/视图描述。
 - 首版以白名单为主，不做通用 LICM。
 
 使用示例:
+- from xdsl.context import Context
+- from xdsl.dialects.builtin import ModuleOp
 - from kernel_gen.passes.symbol_loop_hoist import SymbolLoopHoistPass
-- module = SymbolLoopHoistPass().run(module)
+- module = ModuleOp([])
+- SymbolLoopHoistPass().apply(Context(), module)
+- # 兼容旧调用方仍可使用 SymbolLoopHoistPass().run(module)
 
 关联文件:
 - spec: spec/pass/symbol_loop_hoist.md
@@ -23,9 +27,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from xdsl.context import Context
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ModuleOp
 from xdsl.ir import Block, BlockArgument, Operation, SSAValue
+from xdsl.passes import ModulePass
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.dma import (
@@ -279,18 +285,20 @@ def _hoist_from_symbol_for(symbol_for: SymbolForOp) -> None:
                 continue
 
 
-class SymbolLoopHoistPass(Pass):
+class SymbolLoopHoistPass(Pass, ModulePass):
     """symbol-loop-hoist pass。
 
     创建者: 朽木露琪亚
     最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 遍历 module 中的 `symbol.for` 并外提循环 invariant 的对象。
+    - 作为 `ModulePass` 遍历 module 中的 `symbol.for` 并外提循环 invariant 的对象。
     - 在最终 `module.verify()` 失败时统一转译为 `SymbolLoopHoistVerifierError`。
 
     使用示例:
-    - module = SymbolLoopHoistPass().run(module)
+    - from xdsl.context import Context
+    - module = ModuleOp([])
+    - SymbolLoopHoistPass().apply(Context(), module)
 
     关联文件:
     - spec: spec/pass/symbol_loop_hoist.md
@@ -300,8 +308,29 @@ class SymbolLoopHoistPass(Pass):
 
     name = "symbol-loop-hoist"
 
-    def run(self: "SymbolLoopHoistPass", module: ModuleOp) -> ModuleOp:
-        """执行 symbol-loop-hoist pass。"""
+    def apply(self: "SymbolLoopHoistPass", ctx: Context, module: ModuleOp) -> None:
+        """执行 symbol-loop-hoist ModulePass。
+
+        创建者: 朽木露琪亚
+        最后一次更改: 朽木露琪亚
+
+        功能说明:
+        - 遍历 module 中的 `symbol.for` 并外提循环 invariant 的对象。
+        - 在最终 `module.verify()` 失败时统一转译为 `SymbolLoopHoistVerifierError`。
+
+        使用示例:
+        - from xdsl.context import Context
+        - from xdsl.dialects.builtin import ModuleOp
+        - module = ModuleOp([])
+        - SymbolLoopHoistPass().apply(Context(), module)
+
+        关联文件:
+        - spec: spec/pass/symbol_loop_hoist.md
+        - test: test/pass/test_symbol_loop_hoist.py
+        - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
+        """
+
+        del ctx
 
         for op in module.walk():
             if isinstance(op, SymbolForOp):
@@ -310,6 +339,29 @@ class SymbolLoopHoistPass(Pass):
             module.verify()
         except VerifyException as exc:
             _raise_symbol_loop_hoist_error("SymbolLoopHoistVerifierError", str(exc))
+
+    def run(self: "SymbolLoopHoistPass", module: ModuleOp) -> ModuleOp:
+        """兼容旧 Pass 接口的执行入口。
+
+        创建者: 朽木露琪亚
+        最后一次更改: 朽木露琪亚
+
+        功能说明:
+        - 保持旧 `run(module)` 调用方可继续工作。
+        - 内部直接复用 `apply(Context(), module)`。
+
+        使用示例:
+- from xdsl.dialects.builtin import ModuleOp
+- module = ModuleOp([])
+- SymbolLoopHoistPass().run(module)
+
+        关联文件:
+        - spec: spec/pass/symbol_loop_hoist.md
+        - test: test/pass/test_symbol_loop_hoist.py
+        - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
+        """
+
+        self.apply(Context(), module)
         return module
 
 
