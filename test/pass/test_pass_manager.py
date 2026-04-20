@@ -217,25 +217,25 @@ def test_pass_manager_builds_default_lowering_pipeline_for_buffer_results_to_out
     LowerDmaMemoryHierarchyPass = lowering_module.LowerDmaMemoryHierarchyPass
     order: list[str] = []
 
-    def _record_decompose(self: object, target: object) -> object:
+    def _record_decompose(self: object, ctx: object, module: object) -> None:
         order.append("decompass")
-        return target
+        return None
 
     def _record_lower(self: object, target: object) -> object:
         order.append("lower-nn")
         return target
 
-    def _record_buffer(self: object, target: object) -> object:
+    def _record_buffer(self: object, ctx: object, module: object) -> None:
         order.append("buffer-results-to-out-params")
-        return target
+        return None
 
     def _record_dma(self: object, target: object) -> object:
         order.append("lower-dma-memory-hierarchy")
         return target
 
-    monkeypatch.setattr(DecompassPass, "run", _record_decompose)
+    monkeypatch.setattr(DecompassPass, "apply", _record_decompose)
     monkeypatch.setattr(NnLoweringPass, "run", _record_lower)
-    monkeypatch.setattr(BufferResultsToOutParamsPass, "run", _record_buffer)
+    monkeypatch.setattr(BufferResultsToOutParamsPass, "apply", _record_buffer)
     monkeypatch.setattr(LowerDmaMemoryHierarchyPass, "run", _record_dma)
 
     pm = build_default_lowering_pipeline()
@@ -304,12 +304,12 @@ def test_pass_manager_allows_buffer_results_to_out_params_after_lowering_with_in
         order.append("lower-nn")
         return target
 
-    def _record_buffer(self: object, target: object) -> object:
+    def _record_buffer(self: object, ctx: object, module: object) -> None:
         order.append("buffer-results-to-out-params")
-        return target
+        return None
 
     monkeypatch.setattr(NnLoweringPass, "run", _record_lower)
-    monkeypatch.setattr(BufferResultsToOutParamsPass, "run", _record_buffer)
+    monkeypatch.setattr(BufferResultsToOutParamsPass, "apply", _record_buffer)
 
     pm = PassManager(name="lowering")
     pm.add_pass(NnLoweringPass())
@@ -372,9 +372,9 @@ def test_default_lowering_pipeline_orders_tile_after_out_params(
         order.append("lower-nn")
         return target
 
-    def _record_buffer(self: object, target: object) -> object:
+    def _record_buffer(self: object, ctx: object, module: object) -> None:
         order.append("buffer-results-to-out-params")
-        return target
+        return None
 
     def _record_dma(self: object, target: object) -> object:
         order.append("lower-dma-memory-hierarchy")
@@ -385,7 +385,7 @@ def test_default_lowering_pipeline_orders_tile_after_out_params(
         return target
 
     monkeypatch.setattr(NnLoweringPass, "run", _record_lower)
-    monkeypatch.setattr(BufferResultsToOutParamsPass, "run", _record_buffer)
+    monkeypatch.setattr(BufferResultsToOutParamsPass, "apply", _record_buffer)
     monkeypatch.setattr(LowerDmaMemoryHierarchyPass, "run", _record_dma)
     monkeypatch.setattr(TilePass, "run", _record_tile)
 
@@ -427,18 +427,21 @@ def test_tile_pipeline_materializes_tuner_params_before_codegen(
     tile_module = importlib.import_module("kernel_gen.passes.lowering.tile")
     TilePass = tile_module.TilePass
 
-    def _noop(self: object, target: object) -> object:
+    def _noop_run(self: object, target: object) -> object:
         return target
+
+    def _noop_apply(self: object, ctx: object, module: object) -> None:
+        return None
 
     def _materialize_tuner_param(self: object, target: object) -> object:
         assert isinstance(target, dict)
         target["tuner.param"] = True
         return target
 
-    monkeypatch.setattr(NnLoweringPass, "run", _noop)
-    monkeypatch.setattr(BufferResultsToOutParamsPass, "run", _noop)
+    monkeypatch.setattr(NnLoweringPass, "run", _noop_run)
+    monkeypatch.setattr(BufferResultsToOutParamsPass, "apply", _noop_apply)
     monkeypatch.setattr(TilePass, "run", _materialize_tuner_param)
-    monkeypatch.setattr(LowerDmaMemoryHierarchyPass, "run", _noop)
+    monkeypatch.setattr(LowerDmaMemoryHierarchyPass, "run", _noop_run)
 
     pm = PassManager(name="tile-lowering")
     pm.add_pass(NnLoweringPass())

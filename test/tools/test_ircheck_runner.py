@@ -30,6 +30,10 @@ from pathlib import Path
 import importlib
 import pytest
 
+from xdsl.context import Context
+from xdsl.dialects.builtin import ModuleOp
+from xdsl.passes import ModulePass
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -80,6 +84,37 @@ def test_run_ircheck_text_pass_ok() -> None:
 
 {_SIMPLE_IR}"""
     result = run_ircheck_text(text, source_path="inline.ircheck")
+    assert result.ok is True
+    assert result.exit_code == 0
+    assert "builtin.module" in result.actual_ir
+
+
+# TC-IRCHECK-RUN-001B
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-20 23:57:30 +0800
+# 最近一次运行成功时间: 2026-04-20 23:57:30 +0800
+# 功能说明: 验证 ircheck 可直接执行 ModulePass 公开入口，不再受旧 Pass 类型门槛限制。
+# 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_module_pass_ok
+# 对应功能实现文件路径: kernel_gen/tools/ircheck.py
+# 对应 spec 文件路径: spec/tools/ircheck.md
+# 对应测试文件路径: test/tools/test_ircheck_runner.py
+def test_run_ircheck_text_module_pass_ok() -> None:
+    @register_pass
+    class ModuleNoOpPass(ModulePass):
+        name = "module-no-op"
+
+        def apply(self: "ModuleNoOpPass", ctx: Context, op: ModuleOp) -> None:
+            _ = ctx
+            assert isinstance(op, ModuleOp)
+
+    text = f"""// COMPILE_ARGS: --pass module-no-op
+// CHECK: builtin.module
+// CHECK: func.func @main
+// CHECK-NEXT: func.return
+
+{_SIMPLE_IR}"""
+    result = run_ircheck_text(text, source_path="inline_module_pass.ircheck")
     assert result.ok is True
     assert result.exit_code == 0
     assert "builtin.module" in result.actual_ir

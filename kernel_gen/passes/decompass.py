@@ -10,8 +10,9 @@
 - 仅停留在 `nn` 方言层，不承担 `nn -> kernel` lowering。
 
 使用示例:
+- from xdsl.context import Context
 - from kernel_gen.passes.decompass import DecompassPass
-- module = DecompassPass().run(module)
+- DecompassPass().apply(Context(), module)
 
 关联文件:
 - spec: spec/pass/decompass.md
@@ -21,11 +22,21 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from collections.abc import Callable, Sequence
 
+from xdsl.context import Context
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ArrayAttr, IntAttr, ModuleOp, StringAttr
-from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
+from xdsl.ir import Attribute, Block, Operation
+from xdsl.passes import ModulePass
+from xdsl.pattern_rewriter import (
+    GreedyRewritePatternApplier,
+    PatternRewriter,
+    PatternRewriteWalker,
+    RewritePattern,
+    op_type_rewrite_pattern,
+)
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.nn import (
@@ -38,8 +49,6 @@ from kernel_gen.dialect.nn import (
     NnSubOp,
     NnTrueDivOp,
 )
-from .pass_manager import Pass
-
 DecompassRewrite = Callable[[Operation, Block], None]
 
 
@@ -262,7 +271,7 @@ def _verify_new_ops(ops: Sequence[Operation]) -> None:
             raise DecompassError(f"DecompassError: {exc}") from exc
 
 
-def _decompose_softmax_op(op: NnSoftmaxOp, block: Block) -> None:
+def _decompose_softmax_op(op: NnSoftmaxOp, rewriter: PatternRewriter) -> None:
     """把单个 `nn.softmax` 展开为固定 7 段链。
 
     创建者: jcc你莫辜负
@@ -273,7 +282,44 @@ def _decompose_softmax_op(op: NnSoftmaxOp, block: Block) -> None:
     - 替换原 softmax 结果并移除原 op。
 
     使用示例:
-    - _decompose_softmax_op(softmax_op, block)
+    - _decompose_softmax_op(softmax_op, rewriter)
+
+    关联文件:
+    - spec: spec/pass/decompass.md
+    - test: test/pass/decompass/test_softmax.py
+    - 功能实现: kernel_gen/passes/decompass.py
+    """
+
+    input_type, result_type = _ensure_softmax_result_matches_input(op)
+    rank = len(input_type.shape.data)
+    axis = _validate_axis(op.axis.value.data, rank)
+    reduce_type = _build_reduce_result_type(input_type, axis)
+
+    max_op = NnReduceMaxOp(op.input, reduce_type, axes=[axis], keepdim=True, space=op.space)
+    max_broadcast = NnBroadcastOp(max_op.result, result_type, op.space)
+    sub_op = NnSubOp(op.input, max_broadcast.result, result_type, op.space)
+    exp_op = NnExpOp(sub_op.result, result_type, op.space)
+    sum_op = NnReduceSumOp(exp_op.result, reduce_type, axes=[axis], keepdim=True, space=op.space)
+    sum_broadcast = NnBroadcastOp(sum_op.result, result_type, op.space)
+    div_op = NnTrueDivOp(exp_op.result, sum_broadcast.result, result_type, op.space)
+    new_ops = [max_op, max_broadcast, sub_op, exp_op, sum_op, sum_broadcast, div_op]
+
+    _verify_new_ops(new_ops)
+    rewriter.replace_matched_op(new_ops, [div_op.result])
+
+
+def _decompose_softmax_op_in_block(op: NnSoftmaxOp, block: Block) -> None:
+    """在 block 级直接展开单个 `nn.softmax`。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 为保持 `register_decompass_rewrite(...)` 旧签名兼容，保留 block 直接改写实现。
+    - 该 helper 仅用于已注册回调的兼容入口，不作为主链遍历入口。
+
+    使用示例:
+    - _decompose_softmax_op_in_block(softmax_op, block)
 
     关联文件:
     - spec: spec/pass/decompass.md
@@ -321,7 +367,7 @@ def _rewrite_softmax_op(op: Operation, block: Block) -> None:
 
     if not isinstance(op, NnSoftmaxOp):
         raise DecompassError("DecompassError: nn.softmax rewrite expects NnSoftmaxOp")
-    _decompose_softmax_op(op, block)
+    _decompose_softmax_op_in_block(op, block)
 
 
 _DECOMPASS_REWRITES: dict[str, DecompassRewrite] = {"nn.softmax": _rewrite_softmax_op}
@@ -352,18 +398,19 @@ def register_decompass_rewrite(op_name: str, rewrite: DecompassRewrite) -> None:
     _DECOMPASS_REWRITES[op_name_trimmed] = rewrite
 
 
-def _try_rewrite_registered_op(op: Operation, block: Block) -> None:
-    """尝试按注册表分解 op。
+@dataclass(frozen=True)
+class _DecompassRewritePattern(RewritePattern):
+    """统一调度已注册的 decompass rewrite。
 
-    创建者: jcc你莫辜负
-    最后修改人: 金铲铲大作战
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 按 op.name 查找已注册的分解规则并执行。
-    - 未命中注册表时保持原样返回。
+    - 通过 `PatternRewriteWalker` 递归遍历所有 op，并在匹配到已注册规则时执行分解。
+    - `nn.softmax` 默认走 rewriter 版本，其他已注册规则沿用 block 兼容入口。
 
     使用示例:
-    - _try_rewrite_registered_op(op, block)
+    - pattern = _DecompassRewritePattern()
 
     关联文件:
     - spec: spec/pass/decompass.md
@@ -371,82 +418,23 @@ def _try_rewrite_registered_op(op: Operation, block: Block) -> None:
     - 功能实现: kernel_gen/passes/decompass.py
     """
 
-    rewrite = _DECOMPASS_REWRITES.get(op.name)
-    if rewrite is None:
-        return
-    rewrite(op, block)
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: Operation, rewriter: PatternRewriter, /) -> None:
+        rewrite = _DECOMPASS_REWRITES.get(op.name)
+        if rewrite is None:
+            return
+        if op.name == "nn.softmax" and rewrite is _rewrite_softmax_op and isinstance(op, NnSoftmaxOp):
+            _decompose_softmax_op(op, rewriter)
+            return
+        block = op.parent
+        if not isinstance(block, Block):
+            raise DecompassError("DecompassError: rewrite requires op to live in a block")
+        rewrite(op, block)
+        if op.parent is not None:
+            rewriter.notify_op_modified(op)
 
 
-def _decompose_block(block: Block) -> None:
-    """递归处理 block 内部全部已注册分解 op。
-
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 对 block 内 op 递归处理 region，并替换命中的已注册分解 op。
-
-    使用示例:
-    - _decompose_block(block)
-
-    关联文件:
-    - spec: spec/pass/decompass.md
-    - test: test/pass/decompass/test_softmax.py
-    - 功能实现: kernel_gen/passes/decompass.py
-    """
-
-    for op in list(block.ops):
-        for region in op.regions:
-            _decompose_region(region)
-        _try_rewrite_registered_op(op, block)
-
-
-def _decompose_region(region: Region) -> None:
-    """递归处理 region。
-
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 遍历 region 内 block，调用 block 级分解。
-
-    使用示例:
-    - _decompose_region(region)
-
-    关联文件:
-    - spec: spec/pass/decompass.md
-    - test: test/pass/decompass/test_softmax.py
-    - 功能实现: kernel_gen/passes/decompass.py
-    """
-
-    for block in region.blocks:
-        _decompose_block(block)
-
-
-def _decompose_module(module: ModuleOp) -> None:
-    """仅在 `func.func` 内执行 decompass 分解。
-
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 限定 pass 只处理 func.func 内的已注册分解 op，避免影响其他方言结构。
-
-    使用示例:
-    - _decompose_module(module)
-
-    关联文件:
-    - spec: spec/pass/decompass.md
-    - test: test/pass/decompass/test_softmax.py
-    - 功能实现: kernel_gen/passes/decompass.py
-    """
-
-    for op in module.ops:
-        if isinstance(op, func.FuncOp):
-            _decompose_region(op.body)
-
-
-class DecompassPass(Pass):
+class DecompassPass(ModulePass):
     """执行 decompass 分解链。
 
     创建者: jcc你莫辜负
@@ -456,7 +444,8 @@ class DecompassPass(Pass):
     - 在 ModuleOp 的 func.func 内识别已注册 op，并替换为对应分解链。
 
     使用示例:
-    - module = DecompassPass().run(module)
+    - from xdsl.context import Context
+    - DecompassPass().apply(Context(), module)
 
     关联文件:
     - spec: spec/pass/decompass.md
@@ -466,7 +455,7 @@ class DecompassPass(Pass):
 
     name = "decompass"
 
-    def run(self: "DecompassPass", module: Operation) -> Operation:
+    def apply(self, ctx: Context, module: ModuleOp) -> None:
         """执行 `decompass` pass。
 
         创建者: jcc你莫辜负
@@ -476,7 +465,7 @@ class DecompassPass(Pass):
         - 校验 module 类型，随后执行 decompass 分解。
 
         使用示例:
-        - _ = DecompassPass().run(module)
+        - DecompassPass().apply(Context(), module)
 
         关联文件:
         - spec: spec/pass/decompass.md
@@ -486,7 +475,31 @@ class DecompassPass(Pass):
 
         if not isinstance(module, ModuleOp):
             raise DecompassError("DecompassError: module must be builtin.module")
-        _decompose_module(module)
+        PatternRewriteWalker(
+            GreedyRewritePatternApplier([
+                _DecompassRewritePattern(),
+            ], ctx=ctx, dce_enabled=False)
+        ).rewrite_module(module)
+
+    def run(self, module: ModuleOp) -> ModuleOp:
+        """兼容旧 `run()` 入口。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 过渡期保留旧调用方式，内部复用 `apply()`。
+
+        使用示例:
+        - module = DecompassPass().run(module)
+
+        关联文件:
+        - spec: spec/pass/decompass.md
+        - test: test/pass/decompass/test_softmax.py
+        - 功能实现: kernel_gen/passes/decompass.py
+        """
+
+        self.apply(Context(), module)
         return module
 
 __all__ = [

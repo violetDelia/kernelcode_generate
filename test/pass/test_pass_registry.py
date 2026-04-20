@@ -301,6 +301,106 @@ def test_build_registered_launch_kernel_cost_func_rejects_invalid_kind() -> None
         build_registered_pass("launch-kernel-cost-func", {"cost_kind": "invalid"})
 
 
+# TC-REGISTRY-007D
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 功能说明: 验证 registry 可直接构造 xdsl ModulePass，并保持返回值为 ModulePass 实例。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_module_pass
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/pass/test_pass_registry.py
+def test_build_registered_module_pass() -> None:
+    @register_pass
+    class ModuleNoopPass(ModulePass):
+        name = "module-noop-pass"
+
+        def apply(self: "ModuleNoopPass", ctx: Context, module: dict[str, int]) -> None:
+            assert isinstance(ctx, Context)
+            module["value"] += 1
+
+    pass_obj = build_registered_pass("module-noop-pass")
+
+    assert isinstance(pass_obj, ModulePass)
+    assert type(pass_obj).__name__ == "ModuleNoopPass"
+
+    module = {"value": 1}
+    pm = PassManager(name="module-noop")
+    pm.add_pass(pass_obj)
+    assert pm.run(module) is module
+    assert module["value"] == 2
+
+
+# TC-REGISTRY-007E
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 功能说明: 验证 ModulePass 的 from_options 构造入口可被 registry 正常透传。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_module_pass_with_options
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/pass/test_pass_registry.py
+def test_build_registered_module_pass_with_options() -> None:
+    @register_pass
+    class ModuleScalePass(ModulePass):
+        name = "module-scale-pass"
+
+        def __init__(self: "ModuleScalePass", scale: int) -> None:
+            self.scale = scale
+
+        @classmethod
+        def from_options(cls, options: dict[str, str]) -> "ModuleScalePass":
+            return cls(int(options["scale"]))
+
+        def apply(self: "ModuleScalePass", ctx: Context, module: dict[str, int]) -> None:
+            assert isinstance(ctx, Context)
+            module["value"] *= self.scale
+
+    pass_obj = build_registered_pass("module-scale-pass", {"scale": "3"})
+
+    assert isinstance(pass_obj, ModulePass)
+    assert type(pass_obj).__name__ == "ModuleScalePass"
+    assert getattr(pass_obj, "scale") == 3
+
+    module = {"value": 2}
+    pm = PassManager(name="module-scale")
+    pm.add_pass(pass_obj)
+    assert pm.run(module) is module
+    assert module["value"] == 6
+
+
+# TC-REGISTRY-007F
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证内置加载后 buffer-results-to-out-params 通过 registry 返回 ModulePass。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_buffer_results_to_out_params_pass
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/pass/test_pass_registry.py
+def test_build_registered_buffer_results_to_out_params_pass() -> None:
+    load_builtin_passes()
+
+    pass_obj = build_registered_pass("buffer-results-to-out-params")
+
+    assert isinstance(pass_obj, ModulePass)
+    assert pass_obj.name == "buffer-results-to-out-params"
+    assert type(pass_obj).__name__ == "BufferResultsToOutParamsPass"
+
+
+# TC-REGISTRY-007G
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证内置加载后 decompass 通过 registry 返回 ModulePass。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_decompass_pass
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/pass/test_pass_registry.py
+def test_build_registered_decompass_pass() -> None:
+    load_builtin_passes()
+
+    pass_obj = build_registered_pass("decompass")
+
+    assert isinstance(pass_obj, ModulePass)
+    assert pass_obj.name == "decompass"
+    assert type(pass_obj).__name__ == "DecompassPass"
 # TC-REGISTRY-008
 # 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战

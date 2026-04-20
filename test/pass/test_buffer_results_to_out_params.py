@@ -281,20 +281,18 @@ def _assert_pass_manager_runs_lower_then_buffer_results_to_out_params(
 ) -> None:
     order: list[str] = []
     original_lower_run = NnLoweringPass.run
-    original_buffer_run = BufferResultsToOutParamsPass.run
+    original_buffer_apply = BufferResultsToOutParamsPass.apply
 
     def _record_lower(self: NnLoweringPass, module: ModuleOp) -> ModuleOp:
         order.append(self.name)
         return original_lower_run(self, module)
 
-    def _record_buffer(
-        self: BufferResultsToOutParamsPass, module: ModuleOp
-    ) -> ModuleOp:
+    def _record_buffer(self: BufferResultsToOutParamsPass, ctx: object, module: ModuleOp) -> None:
         order.append(self.name)
-        return original_buffer_run(self, module)
+        return original_buffer_apply(self, ctx, module)
 
     monkeypatch.setattr(NnLoweringPass, "run", _record_lower)
-    monkeypatch.setattr(BufferResultsToOutParamsPass, "run", _record_buffer)
+    monkeypatch.setattr(BufferResultsToOutParamsPass, "apply", _record_buffer)
 
     mem_type = _make_memory_type()
     block = Block(arg_types=[mem_type])

@@ -58,6 +58,7 @@ from xdsl.dialects.func import Func
 from xdsl.ir import Operation
 from xdsl.parser import Parser
 from xdsl.printer import Printer
+from xdsl.passes import ModulePass
 
 from kernel_gen.dialect.dma import Dma
 from kernel_gen.dialect.arch import Arch
@@ -967,7 +968,7 @@ def _run_ircheck_case(
     last_success_ir = input_ir
     for index, step in enumerate(compile_steps, start=1):
         try:
-            output = _run_compile_step(current, step)
+            output = _run_compile_step(ctx, current, step)
         except Exception as exc:
             if dump_dir is not None:
                 _write_irdump_file(
@@ -1420,7 +1421,7 @@ def _build_default_context() -> Context:
     return ctx
 
 
-def _run_compile_step(module: Operation, step: IrcheckCompileStep) -> Operation:
+def _run_compile_step(ctx: Context, module: Operation, step: IrcheckCompileStep) -> Operation:
     """按单个 compile step 执行 pass 或 pipeline。
 
     创建者: 小李飞刀
@@ -1428,10 +1429,11 @@ def _run_compile_step(module: Operation, step: IrcheckCompileStep) -> Operation:
 
     功能说明:
     - `step.kind == "pass"`：构造并运行单个 pass。
+      兼容 legacy `Pass.run(...)` 与直接实现 `ModulePass.apply(...)` 的公开 pass。
     - `step.kind == "pipeline"`：构造并运行 pipeline（PassManager）。
 
     使用示例:
-    - out = _run_compile_step(module, IrcheckCompileStep(kind="pass", name="no-op", options={}))
+    - out = _run_compile_step(ctx, module, IrcheckCompileStep(kind="pass", name="no-op", options={}))
 
     关联文件:
     - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
@@ -1444,9 +1446,15 @@ def _run_compile_step(module: Operation, step: IrcheckCompileStep) -> Operation:
     options = step.options
     if kind == "pass":
         pass_obj = build_registered_pass(name, options)
-        if not isinstance(pass_obj, Pass):
-            raise TypeError("built pass is not Pass instance")
-        out = pass_obj.run(module)
+        if isinstance(pass_obj, Pass):
+            out = pass_obj.run(module)
+        elif isinstance(pass_obj, ModulePass):
+            if not isinstance(module, ModuleOp):
+                raise TypeError("built pass requires builtin.module target")
+            pass_obj.apply(ctx, module)
+            out = module
+        else:
+            raise TypeError("built pass is not supported pass instance")
     elif kind == "pipeline":
         pm = build_registered_pipeline(name, options)
         if not isinstance(pm, PassManager):
@@ -1468,6 +1476,7 @@ def _normalize_ir(value: Operation) -> str:
 
     功能说明:
     - 使用 xdsl `Printer` 将 operation 打印为文本，用于后续的 line-based 匹配。
+    - 统一函数签名里 SSA 名称与类型之间的空格口径，避免不同 expectation 仍沿用旧打印样式。
     - 对 `func.func` 签名参数冒号间距做兼容归一，并对 `kernel.img2col1d` 行做最小格式归一，
       避免格式噪音影响文本匹配。
 
@@ -1484,13 +1493,8 @@ def _normalize_ir(value: Operation) -> str:
     printer = Printer(stream=stream)
     printer.print_op(value)
     text = stream.getvalue().rstrip()
-    # 保持函数签名里的参数冒号间距与 expectation 侧历史文本一致。
-    lines = text.splitlines()
-    for idx, line in enumerate(lines):
-        if not line.lstrip().startswith("func.func "):
-            continue
-        lines[idx] = re.sub(r"(%[A-Za-z_][A-Za-z0-9_]*):", r"\1 :", line)
-    text = "\n".join(lines)
+    # 归一化 func.func 签名里 `name:` 的空格口径，让期望文本可按旧合同继续匹配。
+    text = re.sub(r"(%[A-Za-z_][A-Za-z0-9_]*|%\d+):(?=\s)", r"\1 :", text)
     if "kernel.img2col1d" in text:
         lines = text.splitlines()
         for idx, line in enumerate(lines):

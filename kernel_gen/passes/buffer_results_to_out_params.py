@@ -9,8 +9,9 @@
 - 当前覆盖单个 `memory` 返回、多 `memory` 返回和 `memory + scalar` 混合返回；external declaration 仍显式失败。
 
 使用示例:
+- from xdsl.context import Context
 - from kernel_gen.passes.buffer_results_to_out_params import BufferResultsToOutParamsPass
-- module = BufferResultsToOutParamsPass().run(module)
+- BufferResultsToOutParamsPass().apply(Context(), module)
 
 关联文件:
 - spec: spec/pass/lowering/buffer_results_to_out_params.md
@@ -22,13 +23,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from xdsl.context import Context
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ArrayAttr, DictionaryAttr, ModuleOp, StringAttr
 from xdsl.ir import Attribute, Block, BlockArgument, Operation, SSAValue
+from xdsl.passes import ModulePass
+from xdsl.pattern_rewriter import (
+    GreedyRewritePatternApplier,
+    PatternRewriter,
+    PatternRewriteWalker,
+    RewritePattern,
+    op_type_rewrite_pattern,
+)
+from xdsl.rewriter import InsertPoint
 
 from kernel_gen.dialect.dma import DmaAllocOp
 from kernel_gen.dialect.nn import NnMemoryType
-from kernel_gen.passes.pass_manager import Pass
 
 
 class BufferResultsToOutParamsError(ValueError):
@@ -357,68 +367,6 @@ def _collect_rewrite_targets(module: ModuleOp) -> dict[str, _RewriteTarget]:
     return targets
 
 
-def _collect_target_calls(module: ModuleOp, targets: dict[str, _RewriteTarget]) -> list[func.CallOp]:
-    """收集调用待改写函数的 `func.call`。
-
-    创建者: 朽木露琪亚
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 只处理模块内可解析的 `func.call`。
-    - 返回所有调用待改写 callee 的调用点，交由后续统一同步改写。
-
-    使用示例:
-    - calls = _collect_target_calls(module, targets)
-
-    关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
-    - test: test/pass/test_buffer_results_to_out_params.py
-    - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
-    """
-
-    if not targets:
-        return []
-    target_names = set(targets)
-    calls: list[func.CallOp] = []
-    for op in module.walk():
-        if not isinstance(op, func.CallOp):
-            continue
-        callee = op.callee.root_reference.data
-        if callee in target_names:
-            calls.append(op)
-    return calls
-
-
-def _callsite_involves_memory_rewrite(call_op: func.CallOp, callee: func.FuncOp) -> bool:
-    """判断 local callsite 是否落在 memory-return 改写责任范围内。
-
-    创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 把“caller/callee 是否涉及旧 memory-return ABI 或新 out-param ABI”收口成统一判定。
-    - 仅对与本 pass 责任相关的 callsite mismatch 抛出 `half-rewritten`，避免越界拒绝纯标量调用。
-
-    使用示例:
-    - if _callsite_involves_memory_rewrite(call_op, callee): ...
-
-    关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
-    - test: test/pass/test_buffer_results_to_out_params.py
-    - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
-    """
-
-    callsite_has_memory_results = any(
-        isinstance(result.type, NnMemoryType) for result in call_op.results
-    )
-    callee_signature = _output_signature(callee)
-    return (
-        callsite_has_memory_results
-        or bool(callee_signature.memory_indices)
-        or _leading_out_param_count(callee) > 0
-    )
-
-
 def _validate_local_callsites(
     module: ModuleOp,
     targets: dict[str, _RewriteTarget],
@@ -464,11 +412,15 @@ def _validate_local_callsites(
         actual_outputs = [result.type for result in op.results]
         if actual_inputs == expected_inputs and actual_outputs == expected_outputs:
             continue
-        if target is not None or _callsite_involves_memory_rewrite(op, callee):
+        if target is not None or any(isinstance(result.type, NnMemoryType) for result in op.results):
             _raise_half_rewritten(f"callsite for {callee_name} does not match callee signature")
 
 
-def _rewrite_callsite(call_op: func.CallOp, targets: dict[str, _RewriteTarget]) -> None:
+def _rewrite_callsite(
+    call_op: func.CallOp,
+    target: _RewriteTarget,
+    rewriter: PatternRewriter,
+) -> None:
     """把调用待改写 callee 的 `func.call` 改成显式 out-arg 形式。
 
     创建者: 朽木露琪亚
@@ -480,7 +432,7 @@ def _rewrite_callsite(call_op: func.CallOp, targets: dict[str, _RewriteTarget]) 
     - 旧 memory call result SSA 全量替换为 caller 侧显式 out buffer；非 memory result 继续作为新的 `func.call` 返回值保留。
 
     使用示例:
-    - _rewrite_callsite(call_op, targets)
+    - _rewrite_callsite(call_op, target, rewriter)
 
     关联文件:
     - spec: spec/pass/lowering/buffer_results_to_out_params.md
@@ -489,17 +441,10 @@ def _rewrite_callsite(call_op: func.CallOp, targets: dict[str, _RewriteTarget]) 
     """
 
     callee_name = call_op.callee.root_reference.data
-    target = targets.get(callee_name)
-    if target is None:
-        return
     memory_indices = target.output_signature.memory_indices
     output_types = target.output_signature.output_types
     if len(call_op.arguments) != len(target.input_types) or len(call_op.results) != len(output_types):
         _raise_half_rewritten(f"callsite for {callee_name} does not match callee signature")
-    block = call_op.parent
-    if not isinstance(block, Block):
-        raise BufferResultsToOutParamsError("callsite rewrite requires call op to live in a block")
-
     out_allocs: list[DmaAllocOp] = []
     for result_index in memory_indices:
         result_type = call_op.results[result_index].type
@@ -515,39 +460,19 @@ def _rewrite_callsite(call_op: func.CallOp, targets: dict[str, _RewriteTarget]) 
         [*(alloc.result for alloc in out_allocs), *call_op.arguments],
         [output_types[index] for index in scalar_indices],
     )
-    block.insert_ops_before([*out_allocs, new_call], call_op)
+    memory_index_set = set(memory_indices)
+    scalar_results = iter(new_call.results)
+    new_results: list[SSAValue] = []
+    for result_index in range(len(output_types)):
+        if result_index in memory_index_set:
+            new_results.append(out_allocs[memory_indices.index(result_index)].result)
+        else:
+            new_results.append(next(scalar_results))
 
-    for alloc, result_index in zip(out_allocs, memory_indices, strict=True):
-        call_op.results[result_index].replace_by(alloc.result)
-    for new_result, result_index in zip(new_call.results, scalar_indices, strict=True):
-        call_op.results[result_index].replace_by(new_result)
-    block.erase_op(call_op)
-
-
-def _rewrite_callsites(module: ModuleOp, targets: dict[str, _RewriteTarget]) -> None:
-    """同步改写所有调用待改写函数的 `func.call`。
-
-    创建者: 朽木露琪亚
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 统一处理模块内 caller/callee，避免只改 `func.func` 而遗漏调用点。
-    - 当前只覆盖模块内可解析的 `func.call`，允许 mixed/multi 返回同步改写。
-
-    使用示例:
-    - _rewrite_callsites(module, targets)
-
-    关联文件:
-    - spec: spec/pass/lowering/buffer_results_to_out_params.md
-    - test: test/pass/test_buffer_results_to_out_params.py
-    - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
-    """
-
-    for call_op in list(_collect_target_calls(module, targets)):
-        _rewrite_callsite(call_op, targets)
+    rewriter.replace_matched_op([*out_allocs, new_call], new_results)
 
 
-def _erase_dead_result_owner(value: SSAValue, block: Block) -> None:
+def _erase_dead_result_owner(value: SSAValue, rewriter: PatternRewriter) -> None:
     """删除替换后已无用途的临时结果定义。
 
     创建者: 朽木露琪亚
@@ -558,7 +483,7 @@ def _erase_dead_result_owner(value: SSAValue, block: Block) -> None:
     - 避免保留仅为旧 return 服务的死临时 buffer。
 
     使用示例:
-    - _erase_dead_result_owner(return_value, block)
+    - _erase_dead_result_owner(return_value, rewriter)
 
     关联文件:
     - spec: spec/pass/lowering/buffer_results_to_out_params.md
@@ -567,13 +492,13 @@ def _erase_dead_result_owner(value: SSAValue, block: Block) -> None:
     """
 
     owner = getattr(value, "owner", None)
-    if isinstance(owner, DmaAllocOp) and owner.parent is block and all(
-        result.first_use is None for result in owner.results
-    ):
-        block.erase_op(owner)
+    if not isinstance(owner, DmaAllocOp):
+        return
+    if all(result.first_use is None for result in owner.results):
+        rewriter.erase_op(owner)
 
 
-def _rewrite_memory_results_to_out_params(target: _RewriteTarget) -> None:
+def _rewrite_memory_results_to_out_params(target: _RewriteTarget, rewriter: PatternRewriter) -> None:
     """将函数返回中的所有 `memory` 结果改写为最前置 out 参数。
 
     创建者: 朽木露琪亚
@@ -586,7 +511,7 @@ def _rewrite_memory_results_to_out_params(target: _RewriteTarget) -> None:
     - 刷新函数签名，使 `function_type.outputs` 只保留原 scalar 返回。
 
     使用示例:
-    - _rewrite_memory_results_to_out_params(func_op)
+    - _rewrite_memory_results_to_out_params(func_op, rewriter)
 
     关联文件:
     - spec: spec/pass/lowering/buffer_results_to_out_params.md
@@ -611,22 +536,90 @@ def _rewrite_memory_results_to_out_params(target: _RewriteTarget) -> None:
         memory_type = output_types[memory_output_index]
         if not isinstance(memory_type, NnMemoryType):
             raise BufferResultsToOutParamsError("memory output index must point to nn.memory")
-        new_out_args.append(block.insert_arg(memory_type, insert_index))
+        new_out_args.append(rewriter.insert_block_argument(block, insert_index, memory_type))
 
     func_op.properties["arg_attrs"] = _rebuild_arg_attrs(func_op, len(new_out_args))
 
     scalar_return_values = [return_op.arguments[index] for index in target.output_signature.scalar_indices]
     memory_return_values = [return_op.arguments[index] for index in memory_indices]
     for new_out_arg, return_value in zip(new_out_args, memory_return_values, strict=True):
-        return_value.replace_by(new_out_arg)
-    block.erase_op(return_op)
-    block.add_op(func.ReturnOp(*scalar_return_values))
+        rewriter.replace_all_uses_with(return_value, new_out_arg)
+    rewriter.erase_op(return_op)
+    rewriter.insert_op(func.ReturnOp(*scalar_return_values), InsertPoint.at_end(block))
     for return_value in memory_return_values:
-        _erase_dead_result_owner(return_value, block)
+        _erase_dead_result_owner(return_value, rewriter)
     func_op.update_function_type()
+    rewriter.notify_op_modified(func_op)
 
 
-class BufferResultsToOutParamsPass(Pass):
+@dataclass(frozen=True)
+class _BufferResultsToOutParamsCallPattern(RewritePattern):
+    """按 `func.call` 重写 buffer-results-to-out-params。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅处理模块内命中的旧 `memory result` callsite。
+    - 通过 pattern rewrite 将 caller 侧显式 out buffer 与新 `func.call` 一并插入。
+
+    使用示例:
+    - pattern = _BufferResultsToOutParamsCallPattern(targets)
+
+    关联文件:
+    - spec: spec/pass/lowering/buffer_results_to_out_params.md
+    - test: test/pass/test_buffer_results_to_out_params.py
+    - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
+    """
+
+    targets: dict[str, _RewriteTarget]
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: func.CallOp, rewriter: PatternRewriter, /) -> None:
+        callee_name = op.callee.root_reference.data
+        target = self.targets.get(callee_name)
+        if target is None:
+            return
+        if not any(isinstance(result.type, NnMemoryType) for result in op.results):
+            return
+        _rewrite_callsite(op, target, rewriter)
+
+
+@dataclass(frozen=True)
+class _BufferResultsToOutParamsFuncPattern(RewritePattern):
+    """按 `func.func` 重写 buffer-results-to-out-params。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 将命中的 memory 返回函数改写为前置 out 参数。
+    - 只处理候选集合中仍保留 memory 输出的函数。
+
+    使用示例:
+    - pattern = _BufferResultsToOutParamsFuncPattern(targets)
+
+    关联文件:
+    - spec: spec/pass/lowering/buffer_results_to_out_params.md
+    - test: test/pass/test_buffer_results_to_out_params.py
+    - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
+    """
+
+    targets: dict[str, _RewriteTarget]
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: func.FuncOp, rewriter: PatternRewriter, /) -> None:
+        target = self.targets.get(op.sym_name.data)
+        if target is None or not target.output_signature.memory_indices:
+            return
+        if list(op.function_type.inputs.data) != target.input_types:
+            return
+        if list(op.function_type.outputs.data) != target.output_signature.output_types:
+            return
+        _rewrite_memory_results_to_out_params(target, rewriter)
+
+
+class BufferResultsToOutParamsPass(ModulePass):
     """将 `memory` 返回值改写为最前置 out 参数的 lowering pass。
 
     创建者: 朽木露琪亚
@@ -638,7 +631,8 @@ class BufferResultsToOutParamsPass(Pass):
     - memory 返回会按原顺序前置为 `arg0 / arg1 / ...`，scalar 返回继续保留在 `func.return`。
 
     使用示例:
-    - module = BufferResultsToOutParamsPass().run(module)
+    - from xdsl.context import Context
+    - BufferResultsToOutParamsPass().apply(Context(), module)
 
     关联文件:
     - spec: spec/pass/lowering/buffer_results_to_out_params.md
@@ -648,7 +642,7 @@ class BufferResultsToOutParamsPass(Pass):
 
     name = "buffer-results-to-out-params"
 
-    def run(self, module: ModuleOp) -> ModuleOp:
+    def apply(self, ctx: Context, module: ModuleOp) -> None:
         """执行最小骨架改写。
 
         创建者: 朽木露琪亚
@@ -659,7 +653,7 @@ class BufferResultsToOutParamsPass(Pass):
         - 先同步改写 caller 侧 `func.call`，再改写 callee 返回合同。
 
         使用示例:
-        - module = BufferResultsToOutParamsPass().run(module)
+        - BufferResultsToOutParamsPass().apply(Context(), module)
 
         关联文件:
         - spec: spec/pass/lowering/buffer_results_to_out_params.md
@@ -671,9 +665,36 @@ class BufferResultsToOutParamsPass(Pass):
             raise BufferResultsToOutParamsError("module must be builtin.module")
         targets = _collect_rewrite_targets(module)
         _validate_local_callsites(module, targets)
-        _rewrite_callsites(module, targets)
-        for target in targets.values():
-            _rewrite_memory_results_to_out_params(target)
+        PatternRewriteWalker(
+            GreedyRewritePatternApplier(
+                [
+                    _BufferResultsToOutParamsCallPattern(targets),
+                    _BufferResultsToOutParamsFuncPattern(targets),
+                ],
+                ctx=ctx,
+                dce_enabled=False,
+            )
+        ).rewrite_module(module)
+
+    def run(self, module: ModuleOp) -> ModuleOp:
+        """兼容旧 `run()` 入口。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 过渡期保留旧调用方式，内部复用 `apply()`。
+
+        使用示例:
+        - module = BufferResultsToOutParamsPass().run(module)
+
+        关联文件:
+        - spec: spec/pass/lowering/buffer_results_to_out_params.md
+        - test: test/pass/test_buffer_results_to_out_params.py
+        - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
+        """
+
+        self.apply(Context(), module)
         return module
 
 
