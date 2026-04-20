@@ -266,6 +266,25 @@ def test_build_registered_tile_analysis_pass() -> None:
 # TC-REGISTRY-007A-1
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
+# 功能说明: 验证内置 pass 加载后可通过稳定名称构造 tile-elewise ModulePass。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_tile_elewise_pass
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/pass/test_pass_registry.py
+def test_build_registered_tile_elewise_pass() -> None:
+    load_builtin_passes()
+
+    pass_obj = build_registered_pass("tile-elewise")
+
+    assert pass_obj.name == "tile-elewise"
+    assert type(pass_obj).__name__ == "TileElewisePass"
+    assert isinstance(pass_obj, ModulePass)
+    assert pass_obj.__class__.__module__ == "kernel_gen.passes.lowering.tile_elewise"
+
+
+# TC-REGISTRY-007A-1
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
 # 功能说明: 验证内置 nn lowering pass 加载后返回 ModulePass。
 # 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_nn_lowering_pass_is_module_pass
 # 对应功能实现文件路径: kernel_gen/passes/registry.py

@@ -1596,13 +1596,14 @@ def _emit_npu_kernel_img2col2d_stmt(op: KernelImg2col2dOp, ctx: EmitCContext) ->
 
 
 def _emit_npu_broadcast_stmt(op: DmaBroadcastOp, ctx: EmitCContext) -> str:
-    """生成 `target=npu_demo` 下 `dma.broadcast` 的 helper 调用。
+    """生成 `target=cpu` / `target=npu_demo` 下 `dma.broadcast` 的 helper 调用。
 
     创建者: 小李飞刀
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 把 `dma.broadcast(target, source)` 发射为显式模板参数的
+    - `target=cpu` 时把 `dma.broadcast(target, source)` 发射为 `cpu::broadcast(source, target);`。
+    - `target=npu_demo` 时把 `dma.broadcast(target, source)` 发射为显式模板参数的
       `npu_demo::broadcast<DstSpace, SrcSpace, DstType, SrcType>(dst, source);`。
     - 仅覆盖当前 expectation 需要的 memory source 路径。
 
@@ -1615,10 +1616,14 @@ def _emit_npu_broadcast_stmt(op: DmaBroadcastOp, ctx: EmitCContext) -> str:
     - 功能实现: kernel_gen/dsl/emit_c.py
     """
 
-    if not isinstance(op.target.type, NnMemoryType) or not isinstance(op.source.type, NnMemoryType):
-        raise _emit_error(ctx, op.name, "unsupported op")
     dst_expr = _memory_base_name(op.target, ctx)
     src_expr = _memory_base_name(op.source, ctx)
+    if ctx.target == "cpu":
+        if not isinstance(op.target.type, NnMemoryType) or not isinstance(op.source.type, NnMemoryType):
+            raise _emit_error(ctx, op.name, "unsupported op")
+        return f"{ctx.current_indent}cpu::broadcast({src_expr}, {dst_expr});"
+    if not isinstance(op.target.type, NnMemoryType) or not isinstance(op.source.type, NnMemoryType):
+        raise _emit_error(ctx, op.name, "unsupported op")
     dst_space = _space_to_c(op.target.type, ctx)
     src_space = _space_to_c(op.source.type, ctx)
     dst_type = _type_to_c(op.target.type.element_type, ctx)
@@ -2101,6 +2106,8 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
         return _emit_dma_deslice_stmt(op, ctx)
     if isinstance(op, DmaViewOp):
         return _emit_dma_view_stmt(op, ctx)
+    if isinstance(op, DmaBroadcastOp):
+        return _emit_npu_broadcast_stmt(op, ctx)
     if isinstance(op, KernelBinaryElewiseOp):
         return _emit_kernel_binary_elewise_stmt(op, ctx)
     if isinstance(op, NnAddOp):

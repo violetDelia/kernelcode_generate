@@ -3,8 +3,8 @@
 ## 功能简介
 
 - 本页是 tile family 的总览/索引页，不再承载旧 `TilePass` 的完整公开合同。
-- 当前已经完成并对外收口的子合同是 `tile-analysis`。
-- 后续 `tile-elewise`、`tile-reduce` 将在后续阶段补齐并各自落到独立子 spec。
+- 当前已经完成并对外收口的子合同是 `tile-analysis` 与 `tile-elewise`。
+- 后续 `tile-reduce` 将在后续阶段补齐并各自落到独立子 spec。
 - 需要具体行为定义时，优先进入子 spec；需要整体迁移背景时，参考计划书。
 
 ## 文档信息
@@ -24,14 +24,15 @@
   - `test`：[`test/pass/test_lowering_tile_analysis.py`](../../../test/pass/test_lowering_tile_analysis.py)
   - `expectation`：[`expectation/pass/tile/analysis`](../../../expectation/pass/tile/analysis)
   - 当前状态：S1 已收口
+- `tile-elewise`
+  - `spec`：[`spec/pass/lowering/tile_elewise.md`](../../../spec/pass/lowering/tile_elewise.md)
+  - `功能实现`：[`kernel_gen/passes/lowering/tile_elewise.py`](../../../kernel_gen/passes/lowering/tile_elewise.py)
+  - `test`：[`test/pass/test_lowering_tile_elewise.py`](../../../test/pass/test_lowering_tile_elewise.py)
+  - `expectation`：[`expectation/pass/tile/elewise`](../../../expectation/pass/tile/elewise)
+  - 当前状态：S2 已收口
 
 ### 规划中
 
-- `tile-elewise`
-  - `spec`：待 S2 新增
-  - `功能实现`：待 S2 新增
-  - `test`：待 S2 新增
-  - `expectation`：待 S2 新增
 - `tile-reduce`
   - `spec`：待 S3 新增
   - `功能实现`：待 S3 新增
@@ -41,8 +42,9 @@
 ## 迁移说明
 
 - 旧 `TilePass` / `KernelSplitPass` 的完整公开合同不在本页展开。
+- `tile-analysis` 与 `tile-elewise` 的公开输出都保持 `tile.analysis + tile.tile_exprs`。
 - 旧 `tile.step_value`、`kernel_split.tile_value`、`tile.symbol_literal`、`kernel_split.symbol_literal` 等桥接名属于后续迁移/退场范围。
-- 当前 tile family 的黑盒验证以子目录 expectation 为准；S1 阶段的目录级入口是 `python -m expectation.pass.tile.analysis`。
+- 当前 tile family 的黑盒验证以子目录 expectation 为准；S1/S2 阶段的目录级入口分别是 `python -m expectation.pass.tile.analysis` 与 `python -m expectation.pass.tile.elewise`。
 
 ## 验收口径
 

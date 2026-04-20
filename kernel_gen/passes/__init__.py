@@ -10,6 +10,7 @@
 - 暴露 `outline-device-kernel` 的公开入口。
 - 暴露 `symbol-loop-hoist` 专题 pass 的根路径入口。
 - 暴露 `tile-analysis` 的公开入口。
+- 暴露 `tile-elewise` 的公开入口。
 
 使用示例:
 - import importlib
@@ -22,6 +23,8 @@
 - outline_pass = OutlineDeviceKernelPass()
 - from kernel_gen.passes import TileAnalysisPass
 - tile_analysis_pass = TileAnalysisPass()
+- from kernel_gen.passes import TileElewisePass
+- tile_elewise_pass = TileElewisePass()
 - from kernel_gen.passes import SymbolLoopHoistPass
 - hoist_pass = SymbolLoopHoistPass()
 
@@ -38,6 +41,7 @@
   - test/pass/decompass/test_softmax.py
   - test/pass/outline_device_kernel/test_outline_device_kernel.py
   - test/pass/test_lowering_tile_analysis.py
+  - test/pass/test_lowering_tile_elewise.py
   - test/pass/test_symbol_loop_hoist.py
 - 功能实现:
   - kernel_gen/passes/pass_manager.py
@@ -45,6 +49,7 @@
   - kernel_gen/passes/decompass.py
   - kernel_gen/passes/outline_device_kernel.py
   - kernel_gen/passes/lowering/tile_analysis.py
+  - kernel_gen/passes/lowering/tile_elewise.py
   - kernel_gen/passes/symbol_loop_hoist.py
 """
 
@@ -55,6 +60,7 @@ from .buffer_results_to_out_params import (
 from .decompass import DecompassError, DecompassPass, register_decompass_rewrite
 from .outline_device_kernel import OutlineDeviceKernelError, OutlineDeviceKernelPass
 from .lowering.tile_analysis import TileAnalysisPass
+from .lowering.tile_elewise import TileElewisePass
 from .pass_manager import Pass, PassManager
 from .symbol_loop_hoist import SymbolLoopHoistError, SymbolLoopHoistPass
 
@@ -69,6 +75,7 @@ __all__ = [
     "OutlineDeviceKernelPass",
     "OutlineDeviceKernelError",
     "TileAnalysisPass",
+    "TileElewisePass",
     "SymbolLoopHoistPass",
     "SymbolLoopHoistError",
 ]

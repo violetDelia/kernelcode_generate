@@ -838,6 +838,19 @@ def test_emit_c_lowers_npu_demo_dma_broadcast_helper_contract() -> None:
     assert stmt == "npu_demo::broadcast<TSM, TSM, float, float>(dst /*dst*/, src /*source*/);"
 
 
+def test_emit_c_lowers_cpu_dma_broadcast_helper_contract() -> None:
+    dst_type = _make_memory_type([4, 8], [8, 1], space="global", element_type=f32)
+    src_type = _make_memory_type([1, 8], [8, 1], space="global", element_type=f32)
+    block = Block(arg_types=[dst_type, src_type])
+    ctx = _ctx()
+    ctx.bind_name(block.args[0], "dst")
+    ctx.bind_name(block.args[1], "src")
+
+    stmt = emit_c_op(DmaBroadcastOp(block.args[0], block.args[1]), ctx)
+
+    assert stmt == "cpu::broadcast(src, dst);"
+
+
 def test_emit_c_lowers_npu_demo_dma_misc_helper_contracts() -> None:
     dst_type = _make_memory_type([2, 3], [3, 1], space="global", element_type=f32)
     src_type = _make_memory_type([2, 3], [3, 1], space="global", element_type=i32)

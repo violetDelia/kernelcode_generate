@@ -30,6 +30,7 @@ import subprocess
 import tempfile
 
 import pytest
+from xdsl.context import Context
 from xdsl.dialects import arith, func, scf
 from xdsl.dialects.builtin import (
     ArrayAttr,
@@ -89,6 +90,11 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
 gen_kernel_module = importlib.import_module("kernel_gen.dsl.gen_kernel")
+tile_analysis_helpers = importlib.import_module("test.pass.test_lowering_tile_analysis")
+tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
+tile_elewise_module = importlib.import_module("kernel_gen.passes.lowering.tile_elewise")
+TileAnalysisPass = tile_analysis_module.TileAnalysisPass
+TileElewisePass = tile_elewise_module.TileElewisePass
 
 
 @irdl_op_definition
@@ -382,6 +388,31 @@ def _lower_and_rewrite_func(func_op: func.FuncOp) -> func.FuncOp:
     module = ModuleOp([func_op])
     NnLoweringPass().run(module)
     BufferResultsToOutParamsPass().run(module)
+    return next(op for op in module.ops if isinstance(op, func.FuncOp))
+
+
+def _tile_elewise_func(module: ModuleOp) -> func.FuncOp:
+    """对单个 `func.func` 先执行 tile-analysis 再执行 tile-elewise。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 为 tile-elewise 代码生成测试提供最小组合包装。
+    - 返回被 pass 改写后的函数，便于后续交给 `gen_kernel(...)`。
+
+    使用示例:
+    - func_op = _tile_elewise_func(tile_analysis_helpers._build_module())
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: test/dsl/test_gen_kernel.py
+    """
+
+    ctx = Context()
+    TileAnalysisPass().apply(ctx, module)
+    TileElewisePass().apply(ctx, module)
     return next(op for op in module.ops if isinstance(op, func.FuncOp))
 
 
@@ -2051,6 +2082,50 @@ def test_gen_kernel_rejects_kernel_split_missing_tile_bridge() -> None:
 
     with pytest.raises(GenKernelError, match="KernelSplitMalformed"):
         gen_kernel(func_op, _ctx())
+
+
+# GK-S5-001
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: N/A
+# 最近一次运行成功时间: N/A
+# 功能说明: 验证 tile-elewise after-IR 的 elementwise/broadcast 可生成稳定的 CPU 源码绑定。
+# 测试目的: 锁定 `tuner_param("TILE_D0")` 与 `cpu::add` / `cpu::broadcast` 的公开收口口径。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_emits_tile_elewise_cpu_source_for_elementwise_and_broadcast
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+@pytest.mark.parametrize(
+    ("builder", "expected_tuners", "expected_fragment"),
+    [
+        pytest.param(
+            tile_analysis_helpers._build_module,
+            ("tuner_param(\"TILE_D0\")", "tuner_param(\"TILE_D1\")"),
+            "cpu::add(",
+            id="elementwise",
+        ),
+        pytest.param(
+            tile_analysis_helpers._build_broadcast_module,
+            ("tuner_param(\"TILE_D0\")",),
+            "cpu::broadcast(",
+            id="broadcast",
+        ),
+    ],
+)
+def test_gen_kernel_emits_tile_elewise_cpu_source_for_elementwise_and_broadcast(
+    builder: object,
+    expected_tuners: tuple[str, ...],
+    expected_fragment: str,
+) -> None:
+    func_op = _tile_elewise_func(builder())
+    source = gen_kernel(func_op, _ctx())
+
+    assert source.count("tuner_param(") == len(expected_tuners)
+    for needle in expected_tuners:
+        assert needle in source
+    assert expected_fragment in source
+    assert "tile.step_value" not in source
+    assert "kernel_split.tile_value" not in source
 
 
 # GK-S4-001

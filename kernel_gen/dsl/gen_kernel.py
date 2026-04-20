@@ -87,17 +87,30 @@ def _walk_ops(op: Operation) -> list[Operation]:
 
 def _is_kernel_split_codegen_function(func_op: func.FuncOp) -> bool:
     ops = list(func_op.body.block.ops)
-    return any(op.name in {"tuner.param", "kernel_split.tile_value", "tile.step_value"} for op in ops)
+    for op in ops:
+        if op.name in {"kernel_split.tile_value", "tile.step_value", "kernel_split.symbol_literal", "tile.symbol_literal"}:
+            return True
+        if op.name == "tuner.param" and op.results and isinstance(op.results[0].type, SymbolDimType):
+            return True
+    return False
+
+
+def _is_tile_elewise_codegen_function(func_op: func.FuncOp) -> bool:
+    ops = list(func_op.body.block.ops)
+    return any(
+        op.name == "tuner.param" and op.results and isinstance(op.results[0].type, SymbolValueType)
+        for op in ops
+    )
 
 
 def _validate_kernel_split_codegen_contract(func_op: func.FuncOp, ctx: EmitCContext) -> None:
-    """校验 split 后单函数 IR 的最小 codegen 前置条件。
+    """校验 legacy split 后单函数 IR 的最小 codegen 前置条件。
 
     创建者: 朽木露琪亚
     最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 若函数体包含 kernel split 相关 op（`tuner.param` / `kernel_split.tile_value`），则视为 split-after-IR。
+    - 若函数体包含 legacy kernel split 相关 op（`tuner.param : !symbol.dim<...>` / `kernel_split.tile_value`），则视为 split-after-IR。
     - split-after-IR 必须满足：
       - `target=cpu`；
       - 存在显式分块结构 `symbol.for`；
@@ -128,6 +141,41 @@ def _validate_kernel_split_codegen_contract(func_op: func.FuncOp, ctx: EmitCCont
     if not any(op.name in {"kernel_split.tile_value", "tile.step_value"} for op in ops):
         raise _error(ctx, func_name, "KernelSplitMalformed: missing kernel_split.tile_value")
 
+    if any(item.name == "func.call" for item in _walk_ops(func_op)):
+        raise _error(ctx, func_name, "KernelSplitUnexpectedHelperFunction: func.call is not allowed in split codegen")
+
+
+def _validate_tile_elewise_codegen_contract(func_op: func.FuncOp, ctx: EmitCContext) -> None:
+    """校验 tile-elewise after-IR 单函数 codegen 前置条件。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - tile-elewise 只接受 `target=cpu`。
+    - 必须保留显式 `symbol.for`，并通过 `tuner.param : !symbol.int<"...">` 绑定 tile 因子。
+    - 不允许回退到 `kernel_split.tile_value` / `tile.step_value` 旧桥接口径。
+
+    使用示例:
+    - _validate_tile_elewise_codegen_contract(func_op, EmitCContext(target="cpu"))
+
+    关联文件:
+    - spec: [spec/dsl/gen_kernel.md](spec/dsl/gen_kernel.md)
+    - test: [test/dsl/test_gen_kernel.py](test/dsl/test_gen_kernel.py)
+    - 功能实现: [kernel_gen/dsl/gen_kernel.py](kernel_gen/dsl/gen_kernel.py)
+    """
+
+    func_name = func_op.sym_name.data
+    if ctx.target != "cpu":
+        raise _error(ctx, func_name, "TileElewiseMalformed: tile-elewise codegen is cpu-only")
+
+    ops = list(func_op.body.block.ops)
+    if not any(op.name == "symbol.for" for op in ops):
+        raise _error(ctx, func_name, "TileElewiseMalformed: missing explicit tile loop (symbol.for)")
+    if not any(op.name == "tuner.param" and op.results and isinstance(op.results[0].type, SymbolValueType) for op in ops):
+        raise _error(ctx, func_name, "TileElewiseMalformed: missing tuner.param")
+    if any(op.name in {"kernel_split.tile_value", "tile.step_value", "kernel_split.symbol_literal", "tile.symbol_literal"} for op in ops):
+        raise _error(ctx, func_name, "TileElewiseMalformed: bridge ops are not allowed")
     if any(item.name == "func.call" for item in _walk_ops(func_op)):
         raise _error(ctx, func_name, "KernelSplitUnexpectedHelperFunction: func.call is not allowed in split codegen")
 
@@ -1717,11 +1765,17 @@ class _KernelEmitter:
         - test: test/dsl/test_gen_kernel.py
         - 功能实现: kernel_gen/dsl/gen_kernel.py
         """
-        if _is_kernel_split_codegen_function(func_op):
+        is_tile_elewise = _is_tile_elewise_codegen_function(func_op)
+        is_kernel_split = _is_kernel_split_codegen_function(func_op)
+        if is_tile_elewise:
+            _validate_tile_elewise_codegen_contract(func_op, self.ctx)
+        elif is_kernel_split:
             _validate_kernel_split_codegen_contract(func_op, self.ctx)
 
         tile_var_by_dim: dict[str, str] = {}
+        tile_var_by_expr: dict[str, str] = {}
         emitted_tile_dims: set[str] = set()
+        emitted_tile_exprs: set[str] = set()
 
         def _tile_var_name(dim_name: str) -> str:
             return dim_name.strip().lower()
@@ -1750,15 +1804,31 @@ class _KernelEmitter:
                 if not op.results:
                     raise _error(self.ctx, func_op.sym_name.data, "KernelSplitMalformed: tuner.param must have a result")
                 result_type = op.results[0].type
-                if not isinstance(result_type, SymbolDimType):
-                    raise _error(self.ctx, func_op.sym_name.data, "KernelSplitMalformed: tuner.param result must be !symbol.dim")
-                dim_name = result_type.dim.data
-                var_name = tile_var_by_dim.setdefault(dim_name, _tile_var_name(dim_name))
-                self.ctx.bind_name(op.results[0], var_name)
-                if dim_name not in emitted_tile_dims:
-                    lines.append(f'{self.ctx.current_indent}long long {var_name} = tuner_param("{dim_name}");')
-                    emitted_tile_dims.add(dim_name)
-                continue
+                if isinstance(result_type, SymbolDimType):
+                    if is_tile_elewise:
+                        raise _error(
+                            self.ctx,
+                            func_op.sym_name.data,
+                            "TileElewiseMalformed: tuner.param result must be !symbol.int",
+                        )
+                    dim_name = result_type.dim.data
+                    var_name = tile_var_by_dim.setdefault(dim_name, _tile_var_name(dim_name))
+                    self.ctx.bind_name(op.results[0], var_name)
+                    if dim_name not in emitted_tile_dims:
+                        lines.append(f'{self.ctx.current_indent}long long {var_name} = tuner_param("{dim_name}");')
+                        emitted_tile_dims.add(dim_name)
+                    continue
+                if isinstance(result_type, SymbolValueType):
+                    if is_kernel_split:
+                        raise _error(self.ctx, func_op.sym_name.data, "KernelSplitMalformed: tuner.param result must be !symbol.dim")
+                    expr_name = result_type.expr.expr.data
+                    var_name = tile_var_by_expr.setdefault(expr_name, _tile_var_name(expr_name))
+                    self.ctx.bind_name(op.results[0], var_name)
+                    if expr_name not in emitted_tile_exprs:
+                        lines.append(f'{self.ctx.current_indent}long long {var_name} = tuner_param("{expr_name}");')
+                        emitted_tile_exprs.add(expr_name)
+                    continue
+                raise _error(self.ctx, func_op.sym_name.data, "KernelSplitMalformed: tuner.param result type is unsupported")
 
             if op.name in {"kernel_split.tile_value", "tile.step_value"}:
                 if not op.operands or not op.results:

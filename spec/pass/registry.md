@@ -51,6 +51,7 @@
 - 重复注册同名 pass 或 pipeline 必须立即失败，不得覆盖旧项。
 - 为便于工具与测试编写最小用例，仓库内置 pass 至少应包含：
   - `no-op`：恒等 pass（对输入 module 不做任何改写），且必须满足“可构造”要求（`pass_cls()` 可成功执行）。
+  - `tile-analysis` / `tile-elewise`：tile family 的公开 `ModulePass` 名称，供 expectation、pytest 与工具层统一解析。
 - tuning pass `launch-kernel-cost-func` 属于 standalone pass，必须通过 pass registry 显式启用；不得自动进入任何默认 pipeline。
 - `launch-kernel-cost-func` 接受 `options={"cost_kind": "compute" | "memory"}`；非法 `cost_kind` 必须由 pass 构造入口或 pass 本身显式失败，registry 不吞掉该错误。
 - registry 不解析 `options` 的语义；`options` 仅按字典透传给 pass 或 pipeline 构造入口。

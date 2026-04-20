@@ -526,6 +526,102 @@ def test_tile_pipeline_keeps_single_function_contract() -> None:
     ]
 
 
+# TC-PASS-013A
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 tile-analysis / tile-elewise 作为 tile family 可按顺序位于 out-params 与 dma hierarchy 之间。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_tile_family_orders_tile_analysis_and_tile_elewise_before_dma_memory_hierarchy
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
+# 对应 spec 文件路径: spec/pass/pass_manager.md
+# 对应测试文件路径: test/pass/test_pass_manager.py
+@pytest.mark.nn_lowering
+def test_tile_family_orders_tile_analysis_and_tile_elewise_before_dma_memory_hierarchy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lowering_module = importlib.import_module("kernel_gen.passes.lowering")
+    NnLoweringPass = lowering_module.NnLoweringPass
+    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
+    LowerDmaMemoryHierarchyPass = lowering_module.LowerDmaMemoryHierarchyPass
+    tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
+    TileAnalysisPass = tile_analysis_module.TileAnalysisPass
+    tile_elewise_module = importlib.import_module("kernel_gen.passes.lowering.tile_elewise")
+    TileElewisePass = tile_elewise_module.TileElewisePass
+    order: list[str] = []
+
+    def _record_lower(self: object, target: object) -> object:
+        order.append("lower-nn")
+        return target
+
+    def _record_buffer(self: object, ctx: object, module: object) -> None:
+        order.append("buffer-results-to-out-params")
+        return None
+
+    def _record_tile_analysis(self: object, ctx: object, module: object) -> None:
+        order.append("tile-analysis")
+        return None
+
+    def _record_tile_elewise(self: object, ctx: object, module: object) -> None:
+        order.append("tile-elewise")
+        return None
+
+    def _record_dma(self: object, target: object) -> object:
+        order.append("lower-dma-memory-hierarchy")
+        return target
+
+    monkeypatch.setattr(NnLoweringPass, "run", _record_lower)
+    monkeypatch.setattr(BufferResultsToOutParamsPass, "apply", _record_buffer)
+    monkeypatch.setattr(TileAnalysisPass, "apply", _record_tile_analysis)
+    monkeypatch.setattr(TileElewisePass, "apply", _record_tile_elewise)
+    monkeypatch.setattr(LowerDmaMemoryHierarchyPass, "run", _record_dma)
+
+    pm = PassManager(name="tile-family")
+    pm.add_pass(NnLoweringPass())
+    pm.add_pass(BufferResultsToOutParamsPass())
+    pm.add_pass(TileAnalysisPass())
+    pm.add_pass(TileElewisePass())
+    pm.add_pass(LowerDmaMemoryHierarchyPass())
+
+    sentinel = object()
+    assert pm.run(sentinel) is sentinel
+    assert order == [
+        "lower-nn",
+        "buffer-results-to-out-params",
+        "tile-analysis",
+        "tile-elewise",
+        "lower-dma-memory-hierarchy",
+    ]
+
+
+# TC-PASS-013B
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 symbol-loop-hoist 若插在 tile-analysis 与 tile-elewise 之间会被拒绝。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_rejects_symbol_loop_hoist_before_tile_elewise
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
+# 对应 spec 文件路径: spec/pass/pass_manager.md
+# 对应测试文件路径: test/pass/test_pass_manager.py
+@pytest.mark.nn_lowering
+def test_pass_manager_rejects_symbol_loop_hoist_before_tile_elewise() -> None:
+    lowering_module = importlib.import_module("kernel_gen.passes.lowering")
+    NnLoweringPass = lowering_module.NnLoweringPass
+    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
+    tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
+    TileAnalysisPass = tile_analysis_module.TileAnalysisPass
+    tile_elewise_module = importlib.import_module("kernel_gen.passes.lowering.tile_elewise")
+    TileElewisePass = tile_elewise_module.TileElewisePass
+    symbol_loop_hoist_module = importlib.import_module("kernel_gen.passes.symbol_loop_hoist")
+    SymbolLoopHoistPass = symbol_loop_hoist_module.SymbolLoopHoistPass
+
+    pm = PassManager(name="bad-symbol-loop-hoist-tile-family")
+    pm.add_pass(NnLoweringPass())
+    pm.add_pass(BufferResultsToOutParamsPass())
+    pm.add_pass(TileAnalysisPass())
+    pm.add_pass(SymbolLoopHoistPass())
+    pm.add_pass(TileElewisePass())
+    with pytest.raises(ValueError, match="SymbolLoopHoistRequiresSymbolFor"):
+        pm.run(object())
+
+
 # TC-PASS-014
 # 创建者: jcc你莫辜负
 # 最后一次更改: 朽木露琪亚
@@ -563,46 +659,32 @@ def test_pass_manager_rejects_dma_memory_hierarchy_before_out_params() -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-07 13:50:00 +0800
 # 最近一次运行成功时间: 2026-04-07 13:50:00 +0800
-# 功能说明: 验证显式启用 symbol-loop-hoist 但缺少 tile 时仍可正常执行。
-# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_allows_symbol_loop_hoist_without_tile
+# 功能说明: 验证显式启用 symbol-loop-hoist 但缺少 tile family 时会被拒绝。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_rejects_symbol_loop_hoist_without_tile
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
 @pytest.mark.nn_lowering
-def test_pass_manager_allows_symbol_loop_hoist_without_tile(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_pass_manager_rejects_symbol_loop_hoist_without_tile() -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     NnLoweringPass = lowering_module.NnLoweringPass
     BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
-    order: list[str] = []
-
-    def _record_lower(self: object, target: object) -> object:
-        order.append("lower-nn")
-        return target
-
-    def _record_buffer(self: object, ctx: object, module: object) -> None:
-        order.append("buffer-results-to-out-params")
-        return None
+    LowerDmaMemoryHierarchyPass = lowering_module.LowerDmaMemoryHierarchyPass
 
     class SymbolLoopHoistPass(Pass):
         name = "symbol-loop-hoist"
 
         def run(self: "SymbolLoopHoistPass", target: object) -> object:
-            order.append("symbol-loop-hoist")
             return target
-
-    monkeypatch.setattr(NnLoweringPass, "run", _record_lower)
-    monkeypatch.setattr(BufferResultsToOutParamsPass, "apply", _record_buffer)
 
     pm = PassManager(name="missing-tile")
     pm.add_pass(NnLoweringPass())
     pm.add_pass(BufferResultsToOutParamsPass())
     pm.add_pass(SymbolLoopHoistPass())
+    pm.add_pass(LowerDmaMemoryHierarchyPass())
 
-    sentinel = object()
-    assert pm.run(sentinel) is sentinel
-    assert order == ["lower-nn", "buffer-results-to-out-params", "symbol-loop-hoist"]
+    with pytest.raises(ValueError, match="SymbolLoopHoistRequiresSymbolFor"):
+        pm.run(object())
 
 
 # TC-PASS-016

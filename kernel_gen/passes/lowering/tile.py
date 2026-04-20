@@ -359,6 +359,7 @@ def _normalize_binary_elewise_compare_compat(block: Block) -> None:
     功能说明:
     - 只处理 compare kind 且第三个 operand 明确是布尔输出的旧文本。
     - 保持当前公开 API 与专属测试使用的 `out, lhs, rhs` 规范不变。
+    - 重排时同步保留 `tile.analysis` 与 `tile.tile_exprs`，避免分析/表达信息在兼容路径中丢失。
 
     使用示例:
     - _normalize_binary_elewise_compare_compat(block)
@@ -383,6 +384,8 @@ def _normalize_binary_elewise_compare_compat(block: Block) -> None:
         reordered = KernelBinaryElewiseOp(op.rhs, op.out, op.lhs, kind=op.kind, space=op.space)
         if "tile.analysis" in op.attributes:
             reordered.attributes["tile.analysis"] = op.attributes["tile.analysis"]
+        if "tile.tile_exprs" in op.attributes:
+            reordered.attributes["tile.tile_exprs"] = op.attributes["tile.tile_exprs"]
         block.insert_op_before(reordered, op)
         block.erase_op(op)
 
@@ -1327,6 +1330,15 @@ def _rewrite_matmul_plan(
     """
 
     op = plan.op
+    tile_analysis_attr = op.attributes.get("tile.analysis")
+    tile_exprs_attr = op.attributes.get("tile.tile_exprs")
+
+    def _copy_tile_attrs(target_op: Operation) -> None:
+        if tile_analysis_attr is not None:
+            target_op.attributes["tile.analysis"] = tile_analysis_attr
+        if tile_exprs_attr is not None:
+            target_op.attributes["tile.tile_exprs"] = tile_exprs_attr
+
     out = SSAValue.get(op.operands[0])
     lhs = SSAValue.get(op.operands[1])
     rhs = SSAValue.get(op.operands[2])
@@ -1401,13 +1413,14 @@ def _rewrite_matmul_plan(
             )
             reduce_block.add_op(tmp_alloc)
             reduce_block.add_op(
-                KernelMatmulOp(
+                (tmp_kernel := KernelMatmulOp(
                     tmp_alloc.results[0],
                     lhs_view.result,
                     rhs_view.result,
                     space,
-                )
+                ))
             )
+            _copy_tile_attrs(tmp_kernel)
             reduce_block.add_op(
                 KernelBinaryElewiseOp(
                     out_view.result,
@@ -1442,13 +1455,14 @@ def _rewrite_matmul_plan(
     )
     inner_block.add_op(out_view)
     inner_block.add_op(
-        KernelMatmulOp(
+        (matmul_op := KernelMatmulOp(
             out_view.result,
             lhs_view.result,
             rhs_view.result,
             space,
-        )
+        ))
     )
+    _copy_tile_attrs(matmul_op)
     helper_ops.append(outer_loop)
     return helper_ops
 

@@ -269,14 +269,18 @@ class PassManager:
         - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
         """
         pass_names = [item.name for item in self._passes]
+        tile_family_names = {"tile", "tile-elewise"}
+        tile_family_indices = [index for index, name in enumerate(pass_names) if name in tile_family_names]
         if "symbol-loop-hoist" in pass_names:
             hoist_index = pass_names.index("symbol-loop-hoist")
-            if "tile" in pass_names:
-                tile_index = pass_names.index("tile")
-                if hoist_index < tile_index:
-                    raise ValueError(
-                        "SymbolLoopHoistRequiresSymbolFor: symbol-loop-hoist must run after tile"
-                    )
+            if not tile_family_indices:
+                raise ValueError(
+                    "SymbolLoopHoistRequiresSymbolFor: symbol-loop-hoist requires tile to materialize symbol.for"
+                )
+            if hoist_index < max(tile_family_indices):
+                raise ValueError(
+                    "SymbolLoopHoistRequiresSymbolFor: symbol-loop-hoist must run after tile"
+                )
             if "lower-dma-memory-hierarchy" in pass_names:
                 dma_index = pass_names.index("lower-dma-memory-hierarchy")
                 if hoist_index > dma_index:
@@ -294,17 +298,18 @@ class PassManager:
                 raise ValueError(
                     "DmaMemoryHierarchyOrderError: lower-dma-memory-hierarchy must run after buffer-results-to-out-params"
                 )
-        if "tile" in pass_names:
-            tile_index = pass_names.index("tile")
+        if tile_family_indices:
+            first_tile_index = min(tile_family_indices)
+            last_tile_index = max(tile_family_indices)
             if "buffer-results-to-out-params" in pass_names:
                 buffer_index = pass_names.index("buffer-results-to-out-params")
-                if tile_index < buffer_index:
+                if first_tile_index < buffer_index:
                     raise ValueError(
                         "TilePassOrderError: tile must run after buffer-results-to-out-params"
                     )
             if "lower-dma-memory-hierarchy" in pass_names:
                 dma_hierarchy_index = pass_names.index("lower-dma-memory-hierarchy")
-                if tile_index > dma_hierarchy_index:
+                if last_tile_index > dma_hierarchy_index:
                     raise ValueError(
                         "TilePassOrderError: tile must run before lower-dma-memory-hierarchy"
                     )

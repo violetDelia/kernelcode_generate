@@ -45,7 +45,7 @@
 - `dma.slice`/`dma.deslice` 当前仅支持发射显式 loop nest copy；不得生成 `slice(`/`deslice(` helper 调用，避免引入未声明依赖。
 - 对于需要 backing storage 的 memory（例如 `dma.alloc` 结果、`nn.img2col2d` 结果），当前仅支持**静态** shape（type.shape 全为 `IntAttr`）；动态 shape 必须报错，避免 `new[]` 生命周期不明确导致泄漏。
 - 当 value 类型为 `!symbol.int<"...">` 时，`target=cpu` 默认映射为 `long long`。
-- 当前 `test/dsl/test_emit_c.py` 已定义并可直接映射的用例范围以本节 `EC-001` ~ `EC-011` 为准；`EC-012` ~ `EC-016` 在本阶段仅冻结为 `nn.add` 的节点级验收标准，待下游测试落地后再补具体测试映射。
+- 当前 `test/dsl/test_emit_c.py` 已定义并可直接映射的用例范围以本节 `EC-001` ~ `EC-011` 为准，另含 `EC-009A`；`EC-012` ~ `EC-016` 在本阶段仅冻结为 `nn.add` 的节点级验收标准，待下游测试落地后再补具体测试映射。
 - 对 `target=npu_demo`，本层只冻结节点级文本映射，不定义完整函数签名或 `npu_demo::KernelContext& ctx` 的参数注入方式；上层 `gen_kernel` 需提供稳定上下文变量名 `ctx`，本层只消费该绑定。
 - 对 `target=npu_demo`，当前只承认 `thread_id/thread_num` 查询、`TSM/TLM` dynamic memory、`view/slice/deslice` 与 [`spec/include/api/Kernel.md`](../../spec/include/api/Kernel.md) 已冻结的 helper family 的成功发射路径；不得回退到旧公开 `Nn` 层、`source.view<T>(...)`、`load<...>`、`store<...>`、`launch`、`barrier` 或 `arch.launch_kernel`。
 - 当前 CPU 恢复范围继续以 `test/dsl/test_emit_c.py` 已定义用例为准；`target=npu_demo` 的专项验收目标先行冻结，留待后续实现阶段补齐对应测试。
@@ -326,6 +326,25 @@ auto work_tile = view(tsm, 0, 16, 1);
 - `view(...)` 的参数顺序必须保持 `source -> offset -> size -> stride`。
 - 不得发射为 `source.view<float>(...)`、手写 `Memory<Space, T>` 构造旁路或 `load/store` 组合。
 
+### `dma.broadcast`
+
+功能说明：
+
+- `target=cpu` 时必须发射为稳定的 `cpu::broadcast(source, target);` 调用。
+- `target=npu_demo` 时必须发射为稳定的 `npu_demo::broadcast<DstSpace, SrcSpace, DstType, SrcType>(dst, source);` 调用。
+
+使用示例：
+
+```cpp
+cpu::broadcast(src, dst);
+npu_demo::broadcast<TSM, TSM, float, float>(dst /*dst*/, src /*source*/);
+```
+
+注意事项：
+
+- 参数顺序必须分别固定为 `source -> target` 与 `dst -> source`。
+- 不得回退到旧 `TilePass` / `KernelSplitPass` 公开桥接名。
+
 ### `dma.slice`
 
 功能说明：
@@ -431,6 +450,7 @@ deslice(out_tile, out, m0, 16, 1);
 - EC-007：`symbol.add` 在 cpu target 下可生成标量赋值语句与右值表达式。（`test_emit_c_op_lowers_symbol_add`）
 - EC-008：非 cpu target 下 `symbol.add` 必须报错，禁止跨 target 误下发。（`test_emit_c_op_rejects_symbol_add_on_non_cpu`）
 - EC-009：`dma.alloc`/`dma.view` 在 cpu target 下可生成最小 CPU 文本片段。（`test_emit_c_op_lowers_dma_alloc_and_view`）
+- EC-009A：`dma.broadcast` 在 cpu target 下可生成稳定的 `cpu::broadcast(source, target);` 片段。（`test_emit_c_lowers_cpu_dma_broadcast_helper_contract`）
 - EC-010：`symbol.for + dma.alloc + dma.slice + nn.img2col2d + dma.deslice` 链路可发射稳定 CPU 文本片段，且不引入 `slice/deslice` helper 与 `nullptr`。（`test_emit_c_op_lowers_img2col2d_dma_loop_pipeline`）
 - EC-011：重复 `dma.slice/dma.deslice` 发射时辅助变量名必须保持唯一。（`test_emit_c_op_assigns_unique_helper_names_for_repeated_dma_slice_and_deslice`）
 - EC-012：当 `ctx` 已把结果预绑定为 `out` 时，`NnAddOp(memory, memory)` 在 cpu target 下必须精确生成 `cpu::add(lhs, rhs, out);`。（下游待补测试映射）

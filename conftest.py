@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
 
@@ -28,3 +29,6 @@ if str(WORKTREE_ROOT) not in sys.path:
 for module_name in list(sys.modules):
     if module_name == "kernel_gen" or module_name.startswith("kernel_gen."):
         del sys.modules[module_name]
+
+# 重新预热 worktree 版包，确保后续测试收集期导入命中本目录实现。
+importlib.import_module("kernel_gen.passes.lowering")

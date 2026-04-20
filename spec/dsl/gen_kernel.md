@@ -290,6 +290,47 @@ void vec_add_exp(...) {
 - 若源码生成阶段试图把 split 结果额外抽成 helper 函数或额外调用层，`gen_kernel(...)` 必须抛出 `GenKernelError`，且错误消息包含 `KernelSplitUnexpectedHelperFunction`。
 - 上述失败都禁止 silent fallback：不得改为输出未切分源码、不得删掉 split 相关阶段、不得把 `tuner.param` / `kernel_split.tile_value` 伪装成固定整数字面量后继续生成。
 
+## tile-elewise ModulePass codegen 合同
+
+### 适用范围
+
+- 本节适用于已经过 `tile-analysis -> tile-elewise` 的单个 `func.func` 输入。
+- 函数体必须继续保留 `tile.analysis + tile.tile_exprs` 这两个公开合同属性，作为后续验收资产。
+- `tile-elewise` 的公开输出仍以 tile-analysis 的分析合同为真源，只在 elewise 轴上做显式分块，不回退到旧 `TilePass` / `KernelSplitPass` bridge 口径。
+
+### 目标源码形态
+
+功能说明：
+
+- `gen_kernel(...)` 消费 tile-elewise after-IR 输入时，目标源码必须仍是单个函数定义；tile 因子通过 `tuner.param : !symbol.int<"...">` 进入源码，并以 `tuner_param("TILE_D0")` 这类非字面量绑定方式出现。
+- `kernel.binary_elewise` 与 `dma.broadcast` 在 `target=cpu` 下分别收口到 `cpu::add(...)` 与 `cpu::broadcast(...)`，以便当前 tile-elewise 目录级验收可直接复现。
+- `kernel.matmul` 的 tile-elewise 改写同样必须保留 `tile.analysis + tile.tile_exprs`，但当前 CPU codegen 不在本节额外承诺其 helper 形态；后续 target-specific contract 仍沿用既有 `emit_c` / `gen_kernel` 路径。
+
+使用示例：
+
+```cpp
+void tile_elewise_example(
+    Memory<MemorySpace::GM, int32_t>& arg0,
+    const Memory<MemorySpace::GM, int32_t>& arg1,
+    const Memory<MemorySpace::GM, int32_t>& arg2) {
+    long long tile_d0 = tuner_param("TILE_D0");
+    long long tile_d1 = tuner_param("TILE_D1");
+    for (long long d0 = 0; d0 < arg2.shape()[0]; d0 += tile_d0) {
+        for (long long d1 = 0; d1 < arg2.shape()[1]; d1 += tile_d1) {
+            cpu::add(arg1_tile, arg2_tile, arg0_tile);
+            cpu::broadcast(src_tile, dst_tile);
+        }
+    }
+}
+```
+
+注意事项：
+
+- `tile.analysis` 与 `tile.tile_exprs` 必须在 rewritten op 上继续可见，不得在 `tile-elewise` 后被清理掉。
+- `tile-elewise` 只消费 elewise 轴；reduce 轴必须继续保持未切分。
+- 不得把 `tuner.param` 回退成 `kernel_split.tile_value` / `tile.step_value` 旧桥接文本，也不得通过 helper 抽取规避本节合同。
+- 当前本节只冻结 elementwise / broadcast 的 CPU codegen 成功口径；matmul 仅要求保留公开合同属性与 tile 改写结构，不把 CPU helper 作为新增承诺。
+
 ## CPU `conv2d_img2col2d_tiled(...)` 固定骨架
 
 ### 适用范围
@@ -428,6 +469,8 @@ npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out_tile, lhs_tile, rhs_ti
 - GK-S3-003：split codegen 缺少显式分块结构 `symbol.for` 时必须报 `KernelSplitMalformed`，不得退化成未切分源码。（`test_gen_kernel_rejects_kernel_split_missing_loop`）
 - GK-S3-004：split codegen 不允许出现 helper/函数抽取式承接；出现 `func.call` 时必须报 `KernelSplitUnexpectedHelperFunction`。（`test_gen_kernel_rejects_kernel_split_with_helper_call`）
 - GK-S3-005：split codegen 缺少 tile bridge `kernel_split.tile_value` 时必须报 `KernelSplitMalformed`，不得把 tile 因子硬编码成常量。（`test_gen_kernel_rejects_kernel_split_missing_tile_bridge`）
+- GK-S5-001：tile-elewise after-IR 输入可继续保留 `tile.analysis + tile.tile_exprs`，并对 elementwise/broadcast 生成稳定的 `tuner_param("TILE_D0")` / `cpu::add(...)` / `cpu::broadcast(...)` 源码。（`test_gen_kernel_emits_tile_elewise_cpu_source_for_elementwise_and_broadcast`）
+- GK-S5-002：tile-elewise after-IR 的 matmul 改写输出必须继续保留 `tile.analysis + tile.tile_exprs`，且 rewritten `kernel.matmul` 仍可机械识别为 tile family 成员。（`test_tile_elewise_pass_preserves_matmul_contract`）
 
 ### C2 下游验收标准
 
