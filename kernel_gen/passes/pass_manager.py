@@ -127,7 +127,6 @@ def _is_pass_like(obj: object) -> bool:
     return False
 
 
-
 class PassManager:
     """Pass 管理器。
 
@@ -221,8 +220,8 @@ class PassManager:
         最后一次更改: 小李飞刀
 
         功能说明:
-        - `builtin.ModuleOp` 目标优先走 `apply(...)`，以便真正消费 ModulePass。
-        - 其它目标保留旧 `run(...)` 路径。
+        - `Pass` 家族优先保留旧 `run(...)` 路径。
+        - 新 `ModulePass` 家族若提供 `run(...)` 兼容入口，则优先使用；否则回落到 `apply(...)`。
 
         使用示例:
         - result = self._execute_pass(pass_obj, target)
@@ -233,15 +232,23 @@ class PassManager:
         - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
         """
 
-        apply = getattr(pass_obj, "apply", None)
-        if callable(apply) and isinstance(target, ModuleOp):
-            apply(ctx, target)
-            return target
         run = getattr(pass_obj, "run", None)
-        if callable(run):
-            return run(target)
-        if callable(apply):
-            raise TypeError("ModulePass requires builtin.module target")
+        if isinstance(pass_obj, Pass):
+            if callable(run) and type(pass_obj).run is not Pass.run:
+                return run(target)
+            apply = getattr(pass_obj, "apply", None)
+            if callable(apply):
+                apply(ctx, target)
+                return target
+            if callable(run):
+                return run(target)
+        else:
+            if callable(run):
+                return run(target)
+            apply = getattr(pass_obj, "apply", None)
+            if callable(apply):
+                apply(ctx, target)
+                return target
         raise TypeError("pass_obj must provide run(target) or apply(ctx, module)")
 
     def run(self: "PassManager", target: object) -> object:

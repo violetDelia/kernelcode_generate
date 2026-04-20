@@ -90,3 +90,19 @@
 - `cd /home/lfr/kernelcode_generate/wt-20260420-selected-passes-xdsl-modulepass-s3 && PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260420-selected-passes-xdsl-modulepass-s3:/home/lfr/kernelcode_generate python3 -m expectation.pass.decompass` -> 通过，目录级 3 个 CASE 全部成功
 - `cd /home/lfr/kernelcode_generate/wt-20260420-selected-passes-xdsl-modulepass-s3 && git diff --check` -> 通过
 结论：本轮 buffer-results-to-out-params / decompass / ircheck / pytest / expectation 证据已全部收口，满足 merge 条件；下一步提交并推送主线后执行 `-done` 并回报管理员。
+
+时间：2026-04-21 00:09:15 +0800
+经办人：李白
+任务：T-20260420-69eaf7e7
+任务目标：继续收口 merge 过程中暴露的 `PassManager` 分发与 buffer-results expectation 口径残留
+改动：
+- 更新 [`kernel_gen/passes/pass_manager.py`](../../../../../../kernel_gen/passes/pass_manager.py)，将分发逻辑收紧为“旧 `Pass` 家族优先 `run(...)`，新 `ModulePass` 家族若提供 `run(...)` 兼容入口则优先使用，否则回落 `apply(...)`”，修复 legacy run / ModulePass monkeypatch 双边回归。
+- 更新 [`test/pass/test_pass_registry.py`](../../../../../../test/pass/test_pass_registry.py)，补上 `Context` 导入，消除 `ModulePass` 构造回归用例中的 `NameError`。
+- 更新 [`expectation/pass/buffer_results_to_out_params/single_output.py`](../../../../../../expectation/pass/buffer_results_to_out_params/single_output.py)、[`expectation/pass/buffer_results_to_out_params/mixed_output.py`](../../../../../../expectation/pass/buffer_results_to_out_params/mixed_output.py)、[`expectation/pass/buffer_results_to_out_params/multi_output.py`](../../../../../../expectation/pass/buffer_results_to_out_params/multi_output.py)，将公开 expectation 的 `func.func` 签名口径收齐到当前实际 IR 打印样式，消除 `CHECK-NEXT` 旧空格残留。
+验证：
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260420-selected-passes-xdsl-modulepass-s3:/home/lfr/kernelcode_generate pytest -q /home/lfr/kernelcode_generate/wt-20260420-selected-passes-xdsl-modulepass-s3/test/pass/test_pass_manager.py /home/lfr/kernelcode_generate/wt-20260420-selected-passes-xdsl-modulepass-s3/test/pass/test_pass_registry.py` -> `42 passed`
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260420-selected-passes-xdsl-modulepass-s3:/home/lfr/kernelcode_generate pytest -q /home/lfr/kernelcode_generate/wt-20260420-selected-passes-xdsl-modulepass-s3/test/pass/test_buffer_results_to_out_params.py /home/lfr/kernelcode_generate/wt-20260420-selected-passes-xdsl-modulepass-s3/test/pass/decompass/test_softmax.py /home/lfr/kernelcode_generate/wt-20260420-selected-passes-xdsl-modulepass-s3/test/pass/test_pipeline_default_lowering.py /home/lfr/kernelcode_generate/wt-20260420-selected-passes-xdsl-modulepass-s3/test/tools/test_ircheck_runner.py` -> `60 passed`
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260420-selected-passes-xdsl-modulepass-s3:/home/lfr/kernelcode_generate python3 -m expectation.pass.buffer_results_to_out_params` -> 通过，single / mixed / multi / reject 全部成功
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260420-selected-passes-xdsl-modulepass-s3:/home/lfr/kernelcode_generate python3 -m expectation.pass.decompass` -> 通过
+- `git diff --check` -> 通过
+结论：通过。当前 worktree 内 merge 证据已完全收口，`PassManager`、registry、ircheck、pytest、expectation 与任务日志均已对齐，可进入最终提交与 `-done` 回报。

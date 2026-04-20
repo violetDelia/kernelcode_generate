@@ -30,6 +30,7 @@ from pathlib import Path
 import importlib
 import pytest
 
+from xdsl.context import Context
 from xdsl.passes import ModulePass
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
