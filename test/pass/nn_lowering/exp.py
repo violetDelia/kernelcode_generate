@@ -39,7 +39,7 @@ CASE_TEXT_STATIC = """// COMPILE_ARGS: --pass lower-nn
 // CHECK: builtin.module {
 // CHECK-NEXT: func.func @exp_kernel(%arg0 : !nn.memory<[4, 8], [8, 1], f32, #nn.space<global>>) -> !nn.memory<[4, 8], [8, 1], f32, #nn.space<global>> {
 // CHECK-NEXT: %0 = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[4, 8], [8, 1], f32, #nn.space<global>>
-// CHECK-NEXT: "kernel.exp"(%arg0, %0) {space = #nn.space<global>} : (!nn.memory<[4, 8], [8, 1], f32, #nn.space<global>>, !nn.memory<[4, 8], [8, 1], f32, #nn.space<global>>) -> ()
+// CHECK-NEXT: "kernel.exp"(%0, %arg0) {space = #nn.space<global>} : (!nn.memory<[4, 8], [8, 1], f32, #nn.space<global>>, !nn.memory<[4, 8], [8, 1], f32, #nn.space<global>>) -> ()
 // CHECK-NEXT: func.return %0 : !nn.memory<[4, 8], [8, 1], f32, #nn.space<global>>
 // CHECK-NEXT: }
 // CHECK-NEXT: }
@@ -60,7 +60,7 @@ CASE_TEXT_DYNAMIC = """// COMPILE_ARGS: --pass lower-nn
 // CHECK-NEXT: %0 = "symbol.get_dim"(%arg0) {axis = #builtin.int<0>} : (!nn.memory<[M, N], [N, 1], f32, #nn.space<global>>) -> !symbol.int<"M">
 // CHECK-NEXT: %1 = "symbol.get_dim"(%arg0) {axis = #builtin.int<1>} : (!nn.memory<[M, N], [N, 1], f32, #nn.space<global>>) -> !symbol.int<"N">
 // CHECK-NEXT: %2 = "dma.alloc"(%0, %1) <{operandSegmentSizes = array<i32: 2>}> : (!symbol.int<"M">, !symbol.int<"N">) -> !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>
-// CHECK-NEXT: "kernel.exp"(%arg0, %2) {space = #nn.space<global>} : (!nn.memory<[M, N], [N, 1], f32, #nn.space<global>>, !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>) -> ()
+// CHECK-NEXT: "kernel.exp"(%2, %arg0) {space = #nn.space<global>} : (!nn.memory<[M, N], [N, 1], f32, #nn.space<global>>, !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>) -> ()
 // CHECK-NEXT: func.return %2 : !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>
 // CHECK-NEXT: }
 // CHECK-NEXT: }

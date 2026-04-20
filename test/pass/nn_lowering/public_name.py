@@ -20,6 +20,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from xdsl.passes import ModulePass
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -39,7 +41,9 @@ from kernel_gen.passes.lowering import NnLoweringError, NnLoweringPass
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
 # 对应测试文件路径: test/pass/nn_lowering/public_name.py
 def test_nn_lowering_pass_public_name() -> None:
-    assert NnLoweringPass().name == "lower-nn"
+    pass_obj = NnLoweringPass()
+    assert pass_obj.name == "lower-nn"
+    assert isinstance(pass_obj, ModulePass)
 
 
 # TC-PASS-NNL-002
@@ -57,4 +61,6 @@ def test_nn_lowering_pass_public_exports() -> None:
     assert NnLoweringError is not None
     assert "LowerNnToKernelPass" not in getattr(lowering_pkg, "__all__", [])
     assert hasattr(lowering_pkg, "LowerNnToKernelPass")
-    assert lowering_pkg.LowerNnToKernelPass().name == "lower-nn-to-kernel"
+    lower_to_kernel = lowering_pkg.LowerNnToKernelPass()
+    assert lower_to_kernel.name == "lower-nn-to-kernel"
+    assert isinstance(lower_to_kernel, ModulePass)

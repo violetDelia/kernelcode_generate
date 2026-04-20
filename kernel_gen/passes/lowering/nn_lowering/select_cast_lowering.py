@@ -1,4 +1,4 @@
-"""select/cast lowering 实现。
+"""select/cast/exp lowering 实现。
 
 创建者: 小李飞刀
 最后一次更改: jcc你莫辜负
@@ -6,14 +6,20 @@
 功能说明:
 - nn.select -> dma.alloc + kernel.select
 - nn.cast -> dma.alloc + dma.cast
+- nn.exp -> dma.alloc + kernel.exp
+- 既保留 block 级兼容 helper，也提供单 op RewritePattern 集合。
 
 使用示例:
 - from kernel_gen.passes.lowering.nn_lowering.select_cast_lowering import lower_select_cast_family
 - lower_select_cast_family(block, op)
+- from kernel_gen.passes.lowering.nn_lowering.select_cast_lowering import select_cast_patterns
+- patterns = select_cast_patterns()
 
 关联文件:
 - spec: spec/pass/lowering/nn_lowering.md
 - test: test/pass/nn_lowering/select.py
+- test: test/pass/nn_lowering/cast.py
+- test: test/pass/nn_lowering/exp.py
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
 """
 
@@ -28,10 +34,11 @@ from xdsl.dialects.builtin import (
     Float64Type,
 )
 from xdsl.ir import Block, Operation, SSAValue
+from xdsl.pattern_rewriter import PatternRewriter, RewritePattern, op_type_rewrite_pattern
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaCastOp
-from kernel_gen.dialect.kernel import KernelSelectOp
+from kernel_gen.dialect.kernel import KernelExpOp, KernelSelectOp
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
 from .nn_lowering_utility import (
@@ -187,6 +194,48 @@ def _lower_cast_op(op: Operation, block: Block) -> None:
     block.erase_op(op)
 
 
+def _lower_exp_op(op: Operation, block: Block) -> None:
+    """对 nn.exp 执行 lowering。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 输出 memory 通过 dma.alloc 创建。
+    - 使用 kernel.exp 完成写入。
+
+    使用示例:
+    - _lower_exp_op(op, block)
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering.md
+    - test: test/pass/nn_lowering/exp.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
+    """
+
+    ensure_operand_count(op, 1)
+    result_type = ensure_single_result(op)
+
+    operand = SSAValue.get(op.operands[0])
+    if not isinstance(operand.type, NnMemoryType):
+        raise NnLoweringError("nn.exp operand must be nn.memory")
+    if operand.type.shape != result_type.shape or operand.type.stride != result_type.stride:
+        raise NnLoweringError("nn.exp result shape must match operand")
+
+    shape_ops, dynamic_shape = _build_alloc_dynamic_shape_from_source(operand, result_type)
+    alloc = DmaAllocOp(dynamic_shape, result_type)
+    lowered = KernelExpOp(alloc.result, operand, ensure_space_attr(op))
+
+    try:
+        alloc.verify()
+    except VerifyException as exc:
+        raise NnLoweringError(str(exc)) from exc
+
+    block.insert_ops_before([*shape_ops, alloc, lowered], op)
+    op.results[0].replace_by(alloc.result)
+    block.erase_op(op)
+
+
 def _ensure_symbol_or_int(op: Operation, operand: SSAValue | Operation) -> SSAValue:
     """确保 operand 为 symbol.int 或整数类型。
 
@@ -214,6 +263,70 @@ def _ensure_symbol_or_int(op: Operation, operand: SSAValue | Operation) -> SSAVa
     raise NnLoweringError("nn.cast optional operand must be int or symbol")
 
 
+class _LowerSelectPattern(RewritePattern):
+    """将单个 nn.select lowering 为 kernel.select。"""
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: Operation, rewriter: PatternRewriter) -> None:
+        if op.name != "nn.select":
+            return
+        block = op.parent_block()
+        if block is None:
+            raise NnLoweringError("nn op must be inside a block")
+        _lower_select_op(op, block)
+        rewriter.has_done_action = True
+
+
+class _LowerCastPattern(RewritePattern):
+    """将单个 nn.cast lowering 为 dma.cast。"""
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: Operation, rewriter: PatternRewriter) -> None:
+        if op.name != "nn.cast":
+            return
+        block = op.parent_block()
+        if block is None:
+            raise NnLoweringError("nn op must be inside a block")
+        _lower_cast_op(op, block)
+        rewriter.has_done_action = True
+
+
+class _LowerExpPattern(RewritePattern):
+    """将单个 nn.exp lowering 为 kernel.exp。"""
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: Operation, rewriter: PatternRewriter) -> None:
+        if op.name != "nn.exp":
+            return
+        block = op.parent_block()
+        if block is None:
+            raise NnLoweringError("nn op must be inside a block")
+        _lower_exp_op(op, block)
+        rewriter.has_done_action = True
+
+
+def select_cast_patterns() -> list[RewritePattern]:
+    """返回 select/cast/exp 的 rewrite pattern 集合。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 以单 op pattern 方式承载 nn.select / nn.cast / nn.exp lowering。
+    - 供 nn_lowering 主 orchestrator 组装使用。
+
+    使用示例:
+    - patterns = select_cast_patterns()
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/select_cast_lowering.md
+    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
+    """
+
+    return [_LowerSelectPattern(), _LowerCastPattern(), _LowerExpPattern()]
+
+
 def lower_select_cast_family(block: Block, op: Operation) -> bool:
     """执行 select/cast family lowering。
 
@@ -221,7 +334,7 @@ def lower_select_cast_family(block: Block, op: Operation) -> bool:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 仅处理 nn.select 与 nn.cast。
+    - 处理 nn.select、nn.cast 与 nn.exp。
     - 成功处理返回 True；非本 family op 返回 False。
 
     使用示例:
@@ -230,6 +343,8 @@ def lower_select_cast_family(block: Block, op: Operation) -> bool:
     关联文件:
     - spec: spec/pass/lowering/nn_lowering.md
     - test: test/pass/nn_lowering/select.py
+    - test: test/pass/nn_lowering/cast.py
+    - test: test/pass/nn_lowering/exp.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
     """
 
@@ -239,7 +354,10 @@ def lower_select_cast_family(block: Block, op: Operation) -> bool:
     if op.name == "nn.cast":
         _lower_cast_op(op, block)
         return True
+    if op.name == "nn.exp":
+        _lower_exp_op(op, block)
+        return True
     return False
 
 
-__all__ = ["lower_select_cast_family"]
+__all__ = ["lower_select_cast_family", "select_cast_patterns"]

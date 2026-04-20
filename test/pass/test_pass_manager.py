@@ -31,7 +31,7 @@ from pathlib import Path
 import importlib
 import pytest
 
-from xdsl.context import Context
+from xdsl.dialects.builtin import ModuleOp
 from xdsl.passes import ModulePass
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -170,43 +170,29 @@ def test_pass_manager_exception_propagation() -> None:
 
 
 # TC-PASS-005A
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 功能说明: 验证 PassManager 同时接纳 legacy Pass 与 xdsl ModulePass，并按顺序执行。
-# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_mixes_legacy_pass_and_module_pass
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 ModulePass 仅实现 apply(...) 时，PassManager 仍可在 builtin.module 目标上执行。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_module_pass_apply_only
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
-def test_pass_manager_mixes_legacy_pass_and_module_pass() -> None:
+def test_pass_manager_module_pass_apply_only() -> None:
     order: list[str] = []
 
-    class AddOnePass(Pass):
-        name = "add-one"
+    class ApplyOnlyPass(ModulePass):
+        name = "apply-only"
 
-        def run(self: "AddOnePass", target: dict[str, int]) -> dict[str, int]:
-            order.append("run")
-            target["value"] += 1
-            return target
+        def apply(self, ctx: object, op: ModuleOp) -> None:
+            _ = ctx
+            order.append("apply-only")
+            assert isinstance(op, ModuleOp)
 
-    class TouchModulePass(ModulePass):
-        name = "touch-module"
-
-        def apply(self: "TouchModulePass", ctx: Context, module: dict[str, int]) -> None:
-            assert isinstance(ctx, Context)
-            order.append("apply")
-            module["seen"] = module["value"] * 2
-
-    pm = PassManager(name="mixed")
-    pm.add_pass(AddOnePass())
-    pm.add_pass(TouchModulePass())
-    pm.add_pass(AddOnePass())
-
-    module = {"value": 1, "seen": 0}
-    result = pm.run(module)
-
-    assert result is module
-    assert module == {"value": 3, "seen": 4}
-    assert order == ["run", "apply", "run"]
+    pm = PassManager(name="module-pass")
+    pm.add_pass(ApplyOnlyPass())
+    module = ModuleOp([])
+    assert pm.run(module) is module
+    assert order == ["apply-only"]
 
 
 # TC-PASS-006

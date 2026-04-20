@@ -1,10 +1,10 @@
 """Pass manager API.
 
 创建者: 李白
-最后一次更改: 朽木露琪亚
+最后一次更改: 小李飞刀
 
 功能说明:
-- 定义 Pass / ModulePass 与 PassManager 的基础行为。
+- 定义 Pass 与 PassManager 的基础行为。
 - 提供 `build_default_lowering_pass_manager` 兼容入口，内部委派到 pipeline builder。
 
 使用示例:
@@ -28,10 +28,10 @@ from collections.abc import Sequence
 
 from xdsl.context import Context
 from xdsl.dialects.builtin import ModuleOp
-from xdsl.passes import ModulePass
+from xdsl.passes import ModulePass as XdslModulePass
 
 
-class Pass(ModulePass):
+class Pass(XdslModulePass):
     """Pass 抽象基类。
 
     创建者: 李白
@@ -73,22 +73,38 @@ class Pass(ModulePass):
         """
         raise NotImplementedError("Pass.run must be implemented")
 
-    def apply(self: "Pass", ctx: Context, op: object) -> None:
-        """兼容 xdsl `ModulePass` 接口。"""
+    def apply(self: "Pass", ctx: Context, op: ModuleOp) -> None:
+        """兼容 xdsl `ModulePass` 接口。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - 默认将 `ModulePass.apply(...)` 适配到旧 `run(...)` 合同。
+        - 允许现有 pass 仍以 `run(...)` 作为主要实现入口，同时满足新的
+          `ModulePass` 公开合同。
+
+        使用示例:
+        - pass_obj.apply(ctx, module)
+
+        关联文件:
+        - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
+        - test: [test/pass/test_pass_manager.py](test/pass/test_pass_manager.py)
+        - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
+        """
 
         _ = ctx
         self.run(op)
 
 
 def _is_pass_like(obj: object) -> bool:
-    """判断对象是否满足 Pass / ModulePass 最小协议。
+    """判断对象是否满足 Pass 最小协议。
 
     创建者: 小李飞刀
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 小李飞刀
 
     功能说明:
-    - Legacy `Pass` 必须包含 `run` 可调用属性。
-    - xdsl `ModulePass` 必须包含 `apply` 可调用属性。
+    - 必须包含 `run` 可调用属性。
     - 必须包含字符串类型的 `name` 属性。
 
     使用示例:
@@ -102,10 +118,12 @@ def _is_pass_like(obj: object) -> bool:
 
     if not hasattr(obj, "name"):
         return False
-    if isinstance(obj, ModulePass):
-        return callable(getattr(obj, "apply", None)) and isinstance(getattr(obj, "name"), str)
-    if isinstance(obj, Pass):
-        return callable(getattr(obj, "run", None)) and isinstance(getattr(obj, "name"), str)
+    if not isinstance(getattr(obj, "name"), str):
+        return False
+    if hasattr(obj, "run") and callable(getattr(obj, "run")):
+        return True
+    if hasattr(obj, "apply") and callable(getattr(obj, "apply")):
+        return True
     return False
 
 
@@ -114,11 +132,10 @@ class PassManager:
     """Pass 管理器。
 
     创建者: 李白
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 小李飞刀
 
     功能说明:
     - 按顺序执行 Pass 列表。
-    - 迁移期同时兼容 legacy `Pass.run(target)` 与 xdsl `ModulePass.apply(ctx, module)`。
 
     使用示例:
     - pm = PassManager(name="opt")
@@ -135,7 +152,7 @@ class PassManager:
         """初始化 PassManager。
 
         创建者: 小李飞刀
-        最后一次更改: 朽木露琪亚
+        最后一次更改: 小李飞刀
 
         功能说明:
         - 设置管理器名称并初始化 Pass 列表。
@@ -150,16 +167,16 @@ class PassManager:
         """
 
         self.name = name
-        self._passes: list[Pass | ModulePass] = []
+        self._passes: list[XdslModulePass] = []
 
-    def add_pass(self: "PassManager", pass_obj: Pass | ModulePass) -> None:
+    def add_pass(self: "PassManager", pass_obj: Pass) -> None:
         """注册单个 Pass。
 
         创建者: 李白
-        最后一次更改: 朽木露琪亚
+        最后一次更改: 李白
 
         功能说明:
-        - 追加到 Pass 列表，兼容 legacy `Pass` 与 xdsl `ModulePass`。
+        - 追加到 Pass 列表。
 
         使用示例:
         - pm.add_pass(MyPass())
@@ -170,17 +187,17 @@ class PassManager:
         - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
         """
         if not _is_pass_like(pass_obj):
-            raise TypeError("pass_obj must provide name(str) and run(target)")
+            raise TypeError("pass_obj must provide name(str) and run(target) or apply(ctx, module)")
         self._passes.append(pass_obj)
 
-    def extend(self: "PassManager", passes: Sequence[Pass | ModulePass]) -> None:
+    def extend(self: "PassManager", passes: Sequence[Pass]) -> None:
         """批量注册 Pass。
 
         创建者: 李白
-        最后一次更改: 朽木露琪亚
+        最后一次更改: 李白
 
         功能说明:
-        - 依序追加到 Pass 列表，兼容 legacy `Pass` 与 xdsl `ModulePass`。
+        - 依序追加到 Pass 列表。
 
         使用示例:
         - pm.extend([PassA(), PassB()])
@@ -192,8 +209,40 @@ class PassManager:
         """
         for item in passes:
             if not _is_pass_like(item):
-                raise TypeError("passes must contain Pass items")
+                raise TypeError("passes must contain pass-like items")
             self._passes.append(item)
+
+    def _execute_pass(
+        self: "PassManager", ctx: Context, pass_obj: XdslModulePass, target: object
+    ) -> object:
+        """执行单个 pass，兼容旧 `run` 与新 `apply` 合同。
+
+        创建者: 小李飞刀
+        最后一次更改: 小李飞刀
+
+        功能说明:
+        - `builtin.ModuleOp` 目标优先走 `apply(...)`，以便真正消费 ModulePass。
+        - 其它目标保留旧 `run(...)` 路径。
+
+        使用示例:
+        - result = self._execute_pass(pass_obj, target)
+
+        关联文件:
+        - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
+        - test: [test/pass/test_pass_manager.py](test/pass/test_pass_manager.py)
+        - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
+        """
+
+        apply = getattr(pass_obj, "apply", None)
+        if callable(apply) and isinstance(target, ModuleOp):
+            apply(ctx, target)
+            return target
+        run = getattr(pass_obj, "run", None)
+        if callable(run):
+            return run(target)
+        if callable(apply):
+            raise TypeError("ModulePass requires builtin.module target")
+        raise TypeError("pass_obj must provide run(target) or apply(ctx, module)")
 
     def run(self: "PassManager", target: object) -> object:
         """依序执行 Pass。
@@ -202,7 +251,7 @@ class PassManager:
         最后一次更改: 朽木露琪亚
 
         功能说明:
-        - 逐个调用 `Pass.run` 或 `ModulePass.apply(ctx, module)`。
+        - 逐个调用 Pass.run。
 
         使用示例:
         - result = pm.run(ir)
@@ -257,20 +306,17 @@ class PassManager:
                     )
 
         result = target
+        ctx = Context()
+        seen_names: list[str] = []
         seen_set: set[str] = set()
-        ctx: Context | None = None
         lowering_names = {"lower-nn", "lower-nn-to-kernel"}
         for item in self._passes:
             if item.name == "buffer-results-to-out-params" and lowering_names.isdisjoint(seen_set):
                 raise ValueError(
                     "buffer-results-to-out-params requires lowered IR after lower-nn or lower-nn-to-kernel"
                 )
-            if isinstance(item, ModulePass) and isinstance(result, ModuleOp):
-                if ctx is None:
-                    ctx = Context()
-                item.apply(ctx, result)
-            else:
-                result = item.run(result)
+            result = self._execute_pass(ctx, item, result)
+            seen_names.append(item.name)
             seen_set.add(item.name)
         return result
 

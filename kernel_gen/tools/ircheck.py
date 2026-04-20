@@ -1468,7 +1468,8 @@ def _normalize_ir(value: Operation) -> str:
 
     功能说明:
     - 使用 xdsl `Printer` 将 operation 打印为文本，用于后续的 line-based 匹配。
-    - 对 `kernel.img2col1d` 行做最小格式归一，避免 `#builtin.int` 噪音影响文本匹配。
+    - 对 `func.func` 签名参数冒号间距做兼容归一，并对 `kernel.img2col1d` 行做最小格式归一，
+      避免格式噪音影响文本匹配。
 
     使用示例:
     - actual_ir = _normalize_ir(module)
@@ -1483,6 +1484,13 @@ def _normalize_ir(value: Operation) -> str:
     printer = Printer(stream=stream)
     printer.print_op(value)
     text = stream.getvalue().rstrip()
+    # 保持函数签名里的参数冒号间距与 expectation 侧历史文本一致。
+    lines = text.splitlines()
+    for idx, line in enumerate(lines):
+        if not line.lstrip().startswith("func.func "):
+            continue
+        lines[idx] = re.sub(r"(%[A-Za-z_][A-Za-z0-9_]*):", r"\1 :", line)
+    text = "\n".join(lines)
     if "kernel.img2col1d" in text:
         lines = text.splitlines()
         for idx, line in enumerate(lines):

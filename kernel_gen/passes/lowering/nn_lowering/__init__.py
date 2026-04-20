@@ -8,7 +8,8 @@
 
 使用示例:
 - from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
-- module = NnLoweringPass().run(module)
+- from xdsl.context import Context
+- NnLoweringPass().apply(Context(), module)
 
 关联文件:
 - spec: spec/pass/lowering/nn_lowering.md
