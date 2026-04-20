@@ -1138,7 +1138,7 @@ def _normalize_npu_demo_emitc_text(text: str, *, source_path: str | None) -> str
         while index < len(lines):
             line = lines[index]
             if index + 6 < len(lines):
-                offset_match = re.match(r"^(?P<indent> {5})long long slice_offset0\[3\] = \{(?P<values>[^}]*)\};$", line)
+                offset_match = re.match(r"^(?P<indent> {4})long long slice_offset0\[3\] = \{(?P<values>[^}]*)\};$", line)
                 if offset_match is not None:
                     indent = offset_match.group("indent")
                     size_match = re.match(
