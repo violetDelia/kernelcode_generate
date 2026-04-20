@@ -2,14 +2,14 @@
 
 ## 功能简介
 
-- 定义 Pass 管理与调度的最小可用规范，描述 Pass 的组织、排序与执行规则。
+- 定义 Pass 管理与调度的最小可用规范，描述 legacy `Pass` 与 xdsl `ModulePass` 的组织、排序与执行规则。
 - 面向上层 IR/DSL 的通用优化/规范化流程，不绑定具体 IR 类型或后端。
 - 对 analysis pass 仍保持单返回路径：`run(module)` 返回值只承接最终 `module`，分析结果通过 pass 实例缓存或 `attrs` 可观察。
 
 ## 文档信息
 
 - 创建者：`李白`
-- 最后一次更改：`小李飞刀`
+- 最后一次更改：`朽木露琪亚`
 - `spec`：[`spec/pass/pass_manager.md`](../../spec/pass/pass_manager.md)
 - `功能实现`：[`kernel_gen/passes/pass_manager.py`](../../kernel_gen/passes/pass_manager.py)
 - `test`：[`test/pass/test_pass_manager.py`](../../test/pass/test_pass_manager.py)
@@ -23,6 +23,7 @@
 - 提供可组合的 Pass 管理器，支持按顺序执行多个 Pass。
 - 统一 Pass 的注册、执行与错误传播规则，便于后续实现与测试闭环。
 - PassManager 只负责 Pass 编排与执行，不承载默认 pipeline builder；默认 builder 见 [`spec/pass/pipeline/default_lowering.md`](../../spec/pass/pipeline/default_lowering.md)。
+- PassManager 在迁移期同时兼容 legacy `Pass.run(target)` 与 xdsl `ModulePass.apply(ctx, module)`；遇到 `ModulePass` 时内部创建并复用单个 `Context`。
 - 冻结 analysis pass 在 manager 中的承接方式：`run(module)` 继续返回单一 `module`，不追加 summary 或第二返回值。
 - 对 lowering 链固定公开一个可验证顺序示例：当模块内存在 `memory-return func.func + func.call` 链路时，`BufferResultsToOutParamsPass` 必须运行在 `NnLoweringPass` 之后，避免 caller/callee ABI 停留在双口径。
 - 对 nn 分解 lowering 链固定公开一个顺序边界：`DecompassPass` 必须运行在 `NnLoweringPass` 之前，确保默认 lowering 链路不让 residual `nn.*` 直接进入 `nn_lowering`。
@@ -34,6 +35,7 @@
 - 不定义任何具体 Pass 的业务逻辑，仅规范 Pass 组织与执行流程。
 - 不引入跨模块依赖或后端 lowering 规则。
 - 不要求 Pass 修改输入的方式（可返回新对象或就地修改），以 `run` 返回值为准。
+- 不要求 `ModulePass.apply` 返回值；`PassManager` 以 `apply(ctx, module)` 的副作用作为结果，继续返回原 `module` 对象。
 - 当管理器中无 Pass 时，执行结果必须等于输入（无副作用的空操作）。
 - 对 analysis pass，manager 不负责聚合第二份分析结果对象；若需观察分析结果，只能经由 pass 实例侧接口或 `attrs` 等副作用读取。
 - 当 lowering 链包含 `LowerDmaMemoryHierarchyPass` 时，manager 只冻结其排序边界；是否注册该 pass 仍由调用方决定。
@@ -103,9 +105,25 @@ module = pm.run(module)
 summary = cost_pass.get_summary("main")
 ```
 
+```python
+from xdsl.context import Context
+from xdsl.passes import ModulePass
+
+class MyModulePass(ModulePass):
+    name = "my-module-pass"
+
+    def apply(self, ctx: Context, module):
+        return None
+
+pm = PassManager(name="opt")
+pm.add_pass(MyModulePass())
+result = pm.run(module)
+```
+
 注意事项：
 
 - Pass 执行顺序与添加顺序一致。
+- `add_pass` 需要接受 legacy `Pass` 与 xdsl `ModulePass` 两类实例；`run` 执行时按实例类型分别调用 `run(target)` 或 `apply(ctx, module)`。
 - 当列表中包含 analysis pass 时，manager 仍只负责串联 `run(target)` 的单返回值流，不新增 `(module, summary)` 一类包装协议。
 - 对 `memory-return` lowering 链，当前固定示例顺序是：
 
@@ -149,7 +167,7 @@ module = pm.run(module)
 
 参数说明：
 
-- `pass_obj (Pass)`：待注册的 Pass 实例。
+- `pass_obj (Pass | ModulePass)`：待注册的 Pass 实例。
 
 使用示例：
 
@@ -160,6 +178,7 @@ pm.add_pass(MyPass())
 注意事项：
 
 - `pass_obj` 必须提供 `name` 属性与 `run(target)` 方法。
+- 迁移期也允许 `pass_obj` 是 xdsl `ModulePass` 实例，并通过 `apply(ctx, module)` 执行。
 
 返回与限制：
 
@@ -173,7 +192,7 @@ pm.add_pass(MyPass())
 
 参数说明：
 
-- `passes (Sequence[Pass])`：Pass 列表。
+- `passes (Sequence[Pass | ModulePass])`：Pass 列表。
 
 使用示例：
 
@@ -184,6 +203,7 @@ pm.extend([PassA(), PassB()])
 注意事项：
 
 - 任一元素不满足 `Pass` 约束时必须抛出 `TypeError`。
+- 迁移期也必须接受 xdsl `ModulePass` 实例。
 
 返回与限制：
 

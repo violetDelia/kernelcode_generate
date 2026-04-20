@@ -1,10 +1,11 @@
 """Pass registry API.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 提供 pass / pipeline 的进程内注册表，统一“名字 -> 构造器”的解析入口。
+- 支持 legacy `Pass` 与 xdsl `ModulePass` 的统一注册与构造。
 - 为工具层（如 ircheck）提供稳定名称解析能力，避免依赖具体 Python import path。
 
 使用示例:
@@ -24,11 +25,13 @@ from collections.abc import Callable
 import inspect
 from typing import TypeVar
 
+from xdsl.passes import ModulePass
+
 from .pass_manager import Pass, PassManager
 
-PassType = TypeVar("PassType", bound=Pass)
+PassType = TypeVar("PassType")
 
-_PASS_REGISTRY: dict[str, type[Pass]] = {}
+_PASS_REGISTRY: dict[str, type[Pass] | type[ModulePass]] = {}
 _PIPELINE_REGISTRY: dict[str, Callable[..., PassManager]] = {}
 _BUILTINS_LOADED = False
 
@@ -37,7 +40,7 @@ class PassRegistryError(RuntimeError):
     """Pass registry 预期失败异常。
 
     创建者: 睡觉小分队
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 朽木露琪亚
 
     功能说明:
     - 表示 pass / pipeline 注册与查询阶段的可预期失败。
@@ -57,10 +60,10 @@ def register_pass(pass_cls: type[PassType]) -> type[PassType]:
     """注册公开 pass 类。
 
     创建者: 睡觉小分队
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 装饰器：注册一个公开 pass 类（`Pass` 子类），使用 `pass_cls.name` 作为 key。
+    - 装饰器：注册一个公开 pass 类（`Pass` 或 `ModulePass` 子类），使用 `pass_cls.name` 作为 key。
     - 同一名字在进程内必须唯一；重复注册立即失败。
 
     使用示例:
@@ -75,7 +78,7 @@ def register_pass(pass_cls: type[PassType]) -> type[PassType]:
     - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
     """
 
-    if not isinstance(pass_cls, type) or not issubclass(pass_cls, Pass):
+    if not isinstance(pass_cls, type) or not (issubclass(pass_cls, Pass) or issubclass(pass_cls, ModulePass)):
         raise PassRegistryError("PassRegistryError: register_pass expects Pass subclass")
     pass_name = getattr(pass_cls, "name", None)
     if not isinstance(pass_name, str) or not pass_name.strip():
@@ -176,7 +179,7 @@ def _pipeline_accepts_options(builder: Callable[..., PassManager]) -> bool:
     return len(params) == 1
 
 
-def build_registered_pass(name: str, options: dict[str, str] | None = None) -> Pass:
+def build_registered_pass(name: str, options: dict[str, str] | None = None) -> Pass | ModulePass:
     """根据名称构造 pass 实例。
 
     创建者: 睡觉小分队
@@ -184,6 +187,7 @@ def build_registered_pass(name: str, options: dict[str, str] | None = None) -> P
 
     功能说明:
     - 根据 pass name 构造并返回 pass 实例。
+    - 迁移期允许返回 legacy `Pass` 或 xdsl `ModulePass`，由注册的类决定。
     - 若提供 options，则要求 pass_cls 提供 `from_options(options)` 构造入口。
     - options 为空时沿用“无参构造”规则；不可构造时报稳定错误短语。
 
@@ -217,7 +221,7 @@ def build_registered_pass(name: str, options: dict[str, str] | None = None) -> P
                 if isinstance(exc, LaunchKernelCostFuncError):
                     raise
             raise PassRegistryError(f"PassRegistryError: pass '{name}' option error") from exc
-        if not isinstance(pass_obj, Pass):
+        if not isinstance(pass_obj, (Pass, ModulePass)):
             raise PassRegistryError(f"PassRegistryError: pass '{name}' option error")
         return pass_obj
     try:
