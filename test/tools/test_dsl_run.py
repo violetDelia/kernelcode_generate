@@ -29,7 +29,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-SHARED_ROOT = REPO_ROOT.parent
+EXPECTATION_ROOT = REPO_ROOT.parent
 
 from expectation.tools.dsl_run.add import add_kernel
 from expectation.tools.dsl_run.invalid_contract import (
@@ -335,7 +335,7 @@ def test_dsl_run_rejects_arity_mismatch() -> None:
 # 对应测试文件路径: test/tools/test_dsl_run.py
 def test_dsl_run_contract_files_exist() -> None:
     assert (REPO_ROOT / "spec/tools/dsl_run.md").is_file()
-    assert (SHARED_ROOT / "expectation/tools/dsl_run/add.py").is_file()
-    assert (SHARED_ROOT / "expectation/tools/dsl_run/invalid_contract.py").is_file()
-    assert (SHARED_ROOT / "expectation/tools/dsl_run/__main__.py").is_file()
+    assert (EXPECTATION_ROOT / "expectation/tools/dsl_run/add.py").is_file()
+    assert (EXPECTATION_ROOT / "expectation/tools/dsl_run/invalid_contract.py").is_file()
+    assert (EXPECTATION_ROOT / "expectation/tools/dsl_run/__main__.py").is_file()
     assert (REPO_ROOT / "kernel_gen/tools/dsl_run.py").is_file()
