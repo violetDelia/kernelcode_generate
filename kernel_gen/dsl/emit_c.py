@@ -1715,8 +1715,7 @@ def _emit_npu_store_stmt(op: DmaStoreOp, ctx: EmitCContext) -> str:
     size_expr = _emit_npu_brace_list(op.sizes, ctx)
     stride_expr = _emit_npu_brace_list(op.strides, ctx)
     return (
-        f"{ctx.current_indent}npu_demo::store<{target_space}, {source_space}, {target_type}, {source_type}>"
-        f"({target_expr} /*dst*/, {source_expr} /*source*/, {offset_expr} /*offset*/, "
+        f"{ctx.current_indent}deslice({target_expr} /*target*/, {source_expr} /*source*/, {offset_expr} /*offset*/, "
         f"{size_expr} /*size*/, {stride_expr} /*stride*/);"
     )
 

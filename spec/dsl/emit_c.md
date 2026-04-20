@@ -347,17 +347,17 @@ slice(work_tile, src_view, 0, 16, 1);
 
 功能说明：
 
-- `npu_demo` 下的回写节点必须发射为目标式 `deslice(source, target, offset, size, stride);`。
+- `npu_demo` 下的回写节点必须发射为目标式 `deslice(target, source, offset, size, stride);`。
 
 使用示例：
 
 ```cpp
-deslice(out_tile, out, tid * 16, 16, 1);
+deslice(out, out_tile, tid * 16, 16, 1);
 ```
 
 注意事项：
 
-- 参数顺序必须固定为 `source -> target -> offset -> size -> stride`。
+- 参数顺序必须固定为 `target -> source -> offset -> size -> stride`。
 - 不得发射为显式 loop nest copy、`store<...>` 组合或其他 CPU 旁路文本。
 
 ### `kernel.binary_elewise(kind="add")`

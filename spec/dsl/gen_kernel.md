@@ -208,7 +208,7 @@ static void add_barrier_body(
     npu_demo::add<MemorySpace::TSM, float, float>(out_tsm, lhs_tsm, rhs_tsm);
     ctx.barrier(/* visibility=[TSM, TLM], scope=BLOCK */);
 
-    deslice(out_tsm, out, tid * 16, 16, 1);
+    deslice(out, out_tsm, tid * 16, 16, 1);
 }
 ```
 
@@ -247,7 +247,7 @@ void vec_add_exp(
         auto out = slice(arg2, i, tile_m, 1);
         add(lhs, rhs, carry);
         exp(carry, carry);
-        deslice(carry, out);
+        deslice(out, carry);
     }
 }
 ```

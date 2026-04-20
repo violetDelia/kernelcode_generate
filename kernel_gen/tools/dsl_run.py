@@ -207,9 +207,6 @@ def _build_dsl_globals_table(fn: Callable[..., object]) -> dict[str, object]:
         ("nn", __import__("kernel_gen.operation.nn", fromlist=["*"])),
         ("dma", __import__("kernel_gen.operation.dma", fromlist=["*"])),
         ("scf", __import__("kernel_gen.operation.scf", fromlist=["*"])),
-        ("Memory", __import__("kernel_gen.symbol_variable.memory", fromlist=["*"])),
-        ("NumericType", __import__("kernel_gen.symbol_variable.type", fromlist=["*"])),
-        ("SymbolDim", __import__("kernel_gen.symbol_variable.symbol_dim", fromlist=["*"])),
     )
     for alias, module in helper_modules:
         if alias not in fn_globals:
@@ -221,8 +218,11 @@ def _build_dsl_globals_table(fn: Callable[..., object]) -> dict[str, object]:
             if not isinstance(name, str) or name in fn_globals or name in helper_globals:
                 continue
             helper_globals[name] = getattr(module, name)
-    helper_globals.setdefault("Farmat", Farmat)
+    helper_globals.setdefault("Memory", Memory)
     helper_globals.setdefault("MemorySpace", MemorySpace)
+    helper_globals.setdefault("NumericType", NumericType)
+    helper_globals.setdefault("SymbolDim", SymbolDim)
+    helper_globals.setdefault("Farmat", Farmat)
     helper_globals.setdefault("BarrierVisibility", BarrierVisibility)
     helper_globals.setdefault("BarrierScope", BarrierScope)
     helper_globals.setdefault("loop", _operation_loop)

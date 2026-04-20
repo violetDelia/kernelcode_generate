@@ -908,7 +908,7 @@ def test_emit_c_lowers_npu_demo_dma_indexed_and_fill_helpers() -> None:
     assert "S_INT c_7 = 7;" in joined
     assert "int32_t c_7_cast_int32_t = c_7;" in joined
     assert "npu_demo::load<GM, GM, int32_t, int32_t>(dst /*dst*/, src /*source*/, {1, 2} /*offset*/, {2, 3} /*size*/, {1, 1} /*stride*/);" in joined
-    assert "npu_demo::store<GM, GM, int32_t, int32_t>(src /*dst*/, dst /*source*/, {1, 2} /*offset*/, {2, 3} /*size*/, {1, 1} /*stride*/);" in joined
+    assert "deslice(src /*target*/, dst /*source*/, {1, 2} /*offset*/, {2, 3} /*size*/, {1, 1} /*stride*/);" in joined
     assert "npu_demo::fill<GM, int32_t>(dst /*dst*/, c_7_cast_int32_t /*value*/);" in joined
 
 

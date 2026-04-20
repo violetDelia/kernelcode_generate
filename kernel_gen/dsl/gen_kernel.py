@@ -46,7 +46,7 @@ from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCastOp, DmaCop
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolDimType, SymbolValueType
 
-from .emit_c import EmitCContext, emit_c_op
+from .emit_c import EmitCContext, emit_c_op, emit_c_value
 
 
 class GenKernelError(ValueError):
@@ -1604,6 +1604,32 @@ class _KernelEmitter:
             return
         self.ctx.bind_name(result, out_name)
 
+    def _bind_transparent_unrealized_conversion_cast(self, op: Operation) -> bool:
+        """透明绑定单层 `builtin.unrealized_conversion_cast`。
+
+        创建者: 朽木露琪亚
+        最后一次更改: 朽木露琪亚
+
+        功能说明:
+        - lowering 链路中会残留少量 `unrealized_conversion_cast`，主要用于把常量包装成 `!symbol.int`。
+        - 这类 op 在源码生成阶段不需要独立语句，只需把结果别名回其唯一输入表达式。
+
+        使用示例:
+        - if self._bind_transparent_unrealized_conversion_cast(op): continue
+
+        关联文件:
+        - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+        - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
+        - 功能实现: [kernel_gen/dsl/gen_kernel.py](kernel_gen/dsl/gen_kernel.py)
+        """
+
+        if op.name != "builtin.unrealized_conversion_cast":
+            return False
+        if len(op.operands) != 1 or len(op.results) != 1:
+            raise _error(self.ctx, op.name, "unrealized_conversion_cast must have exactly one operand and one result")
+        self.ctx.bind_name(op.results[0], emit_c_value(op.operands[0], self.ctx))
+        return True
+
     def _is_direct_return_nn_add(self, return_op: func.ReturnOp) -> bool:
         if self.ctx.target != "cpu":
             return False
@@ -1765,6 +1791,8 @@ class _KernelEmitter:
                 if stmt:
                     lines.append(stmt)
                 continue
+            if self._bind_transparent_unrealized_conversion_cast(op):
+                continue
             if isinstance(op, DmaAllocOp) and self._is_returned_output_alloc(func_op, op):
                 self.ctx.bind_name(op.result, "out")
                 continue
@@ -1786,6 +1814,8 @@ class _KernelEmitter:
                 continue
             if isinstance(op, DmaAllocOp) and self._is_returned_output_alloc(func_op, op):
                 self.ctx.bind_name(op.result, "out")
+                continue
+            if self._bind_transparent_unrealized_conversion_cast(op):
                 continue
             if isinstance(op, NnAddOp) and op.result.has_one_use():
                 unique_user = op.result.get_user_of_unique_use()

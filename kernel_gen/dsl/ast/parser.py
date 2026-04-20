@@ -2208,6 +2208,7 @@ def _parse_function_impl(
     功能说明:
     - 从源码中定位唯一顶层 FunctionDef，并解析参数/返回注解为 TensorAST/ScalarArgAST。
     - 解析函数体语句，收集诊断并执行返回语句位置与缺失校验。
+    - 忽略函数体首个 docstring 语句，保留函数说明文本而不把它当成 DSL 常量参与 lowering。
     - 可按配置拒绝外部值，确保 AST 合同与禁用项诊断一致。
 
     使用示例:
@@ -2280,9 +2281,15 @@ def _parse_function_impl(
             _raise_parse_error("Unsupported return annotation", func_def.returns)
 
     statements: list[object] = []
+    body = list(func_def.body)
+    if body and isinstance(body[0], py_ast.Expr):
+        first_stmt = body[0]
+        first_value = getattr(first_stmt, "value", None)
+        if isinstance(first_value, py_ast.Constant) and isinstance(first_value.value, str):
+            body = body[1:]
     parsed_body_statements: list[py_ast.stmt] = []
     has_explicit_return = False
-    for stmt in func_def.body:
+    for stmt in body:
         if isinstance(stmt, (py_ast.Import, py_ast.ImportFrom)):
             if has_explicit_return:
                 raise AstParseError(
@@ -2299,10 +2306,10 @@ def _parse_function_impl(
 
     if has_return_annotation and not has_explicit_return and not returns_none:
         raise AstParseError("Missing return statement", [Diagnostic("Missing return statement", _location_from_node(func_def))])
-    if has_explicit_return and func_def.body and not isinstance(func_def.body[-1], py_ast.Return):
+    if has_explicit_return and body and not isinstance(body[-1], py_ast.Return):
         raise AstParseError(
             "Return statement must be last",
-            [Diagnostic("Return statement must be last", _location_from_node(func_def.body[-1]))],
+            [Diagnostic("Return statement must be last", _location_from_node(body[-1]))],
         )
     if outputs and isinstance(outputs[0], ScalarArgAST) and outputs[0].value_type is float:
         if not statements or not isinstance(statements[-1], SymbolToFloatAST):
