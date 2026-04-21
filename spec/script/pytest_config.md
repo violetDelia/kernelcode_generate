@@ -22,6 +22,8 @@
 ## 目标
 
 - 保证 `infra` 标记稳定可用，便于分层执行测试。
+- 保证 `nn_lowering` 标记稳定可用，避免 `nn_lowering` 专题测试产生未知标记 warning。
+- 通过显式 `filterwarnings` 说明默认 warning 策略，避免把项目 warning 静默吞掉。
 - 限制 pytest 只扫描 `test` 目录，避免误采集 worktree 与临时目录。
 - 统一使用 `importlib` 导入模式，降低同名测试冲突。
 
@@ -40,7 +42,8 @@
 
 参数说明：
 
-- `markers(list[str])`：按多行配置项组织，至少包含 `infra` 标记说明。
+- `markers(list[str])`：按多行配置项组织，至少包含 `infra` 与 `nn_lowering` 标记说明。
+- `filterwarnings(list[str])`：按多行配置项组织，默认至少包含 `default`，以显式保留 warning 可见性。
 - `testpaths(list[str])`：按多行配置项组织，默认只包含 `test`。
 - `addopts(str)`：至少包含 `--import-mode=importlib`。
 - `norecursedirs(list[str])`：按多行配置项组织，需包含 `wt-*` 与 `tmp` 相关目录。
@@ -67,7 +70,11 @@ pytest -m infra -p no:cov
 - 执行命令：`pytest -q test/script/test_pytest_config.py`
 - 测试目标：
   - 校验 pytest 配置存在且包含 `infra` 标记说明。
+  - 校验 pytest 配置存在且包含 `nn_lowering` 标记说明。
+  - 校验 pytest 配置存在且包含显式 warning 策略。
   - 校验 `testpaths`、`addopts` 与 `norecursedirs` 与合同一致。
 - 功能与用例清单：
   - `TC-PC-001 / test_pytest_ini_options_present`：配置块存在且包含 `infra` 标记说明。
   - `TC-PC-002 / test_pytest_config_values`：`testpaths/addopts/norecursedirs` 与合同一致。
+  - `TC-PC-003 / test_pytest_ini_options_present`：配置块存在且包含 `nn_lowering` 标记说明。
+  - `TC-PC-004 / test_pytest_config_values`：配置块存在且包含 `filterwarnings=default`。

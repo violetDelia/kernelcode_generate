@@ -95,6 +95,7 @@ def _pytest_options() -> dict[str, object]:
     assert parser.has_section("pytest")
     return {
         "markers": _split_ini_lines(parser.get("pytest", "markers", fallback="")),
+        "filterwarnings": _split_ini_lines(parser.get("pytest", "filterwarnings", fallback="")),
         "testpaths": _split_ini_lines(parser.get("pytest", "testpaths", fallback="")),
         "addopts": parser.get("pytest", "addopts", fallback="").strip(),
         "norecursedirs": _split_ini_lines(parser.get("pytest", "norecursedirs", fallback="")),
@@ -102,11 +103,12 @@ def _pytest_options() -> dict[str, object]:
 
 
 def test_pytest_ini_options_present() -> None:
-    """TC-PC-001: pytest 配置块存在且包含 infra 标记。"""
+    """TC-PC-001: pytest 配置块存在且包含 infra 与 nn_lowering 标记。"""
     options = _pytest_options()
     assert options
     markers = options.get("markers", [])
     assert "infra: 标记脚本与基础设施测试" in markers
+    assert "nn_lowering: 标记 nn_lowering 相关测试" in markers
 
 
 def test_pytest_config_values() -> None:
@@ -115,3 +117,4 @@ def test_pytest_config_values() -> None:
     assert options.get("testpaths") == ["test"]
     assert options.get("addopts") == "--import-mode=importlib"
     assert options.get("norecursedirs") == ["wt-*", "tmp", "tmp/*", "tmp/**", "__pycache__"]
+    assert options.get("filterwarnings") == ["default"]
