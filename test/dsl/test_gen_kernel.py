@@ -736,6 +736,27 @@ def test_gen_kernel_returns_target_source() -> None:
     assert "out = input;" not in memory_source
 
 
+# GK-014B
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-21 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-21 00:00:00 +0800
+# 功能说明: 验证 gen_kernel 继续把 EmitCError 折回旧公开错误类型。
+# 测试目的: 锁定 `gen_kernel(...)` 的兼容包装语义不变，避免 direct emit_c 错误类型泄漏。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_converts_emit_c_error_to_gen_kernel_error
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/__init__.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_converts_emit_c_error_to_gen_kernel_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _boom(obj: object, ctx: EmitCContext) -> str:
+        raise EmitCError("boom")
+
+    monkeypatch.setattr(gen_kernel_module, "emit_c", _boom)
+
+    with pytest.raises(GenKernelError, match="boom"):
+        gen_kernel(object(), _ctx())
+
+
 # GK-014
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚

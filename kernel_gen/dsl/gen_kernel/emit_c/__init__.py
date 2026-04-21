@@ -7,6 +7,7 @@
 - 汇总 `emit_c_op` / `emit_c_value` / `emit_c` 的包内公开入口。
 - 通过注册表挂接各 dialect 的节点级发射实现，并在必要时回落旧实现。
 - 为 `kernel_gen.dsl.gen_kernel` 包根提供稳定的 `emit_c` 主入口。
+- 函数 / module 级源码组装迁入 `function.py`，避免继续把完整源码路径藏在兼容包装层里。
 
 使用示例:
 - from kernel_gen.dsl.gen_kernel.emit_c import EmitCContext, emit_c
@@ -26,8 +27,9 @@ from typing import Any
 
 from xdsl.ir import BlockArgument, Operation, SSAValue
 
-from .._legacy import load_legacy_emit_c_module, load_legacy_gen_kernel_module
+from .._legacy import load_legacy_emit_c_module
 from ..emit_context import EmitCContext, EmitCError
+from . import function as _function_module
 from .register import (
     dispatch_op,
     dispatch_value,
@@ -65,21 +67,6 @@ def _call_legacy_emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
     return legacy_emit_c.emit_c_value(value, ctx)
 
 
-def _call_legacy_gen_kernel(obj: object, ctx: EmitCContext) -> str:
-    """调用旧版 `gen_kernel` 实现，并透传包内当前的节点级发射导出。"""
-
-    legacy_gen_kernel = load_legacy_gen_kernel_module()
-    legacy_emit_c_op = legacy_gen_kernel.emit_c_op
-    legacy_emit_c_value = legacy_gen_kernel.emit_c_value
-    legacy_gen_kernel.emit_c_op = emit_c_op
-    legacy_gen_kernel.emit_c_value = emit_c_value
-    try:
-        return legacy_gen_kernel.gen_kernel(obj, ctx)
-    finally:
-        legacy_gen_kernel.emit_c_op = legacy_emit_c_op
-        legacy_gen_kernel.emit_c_value = legacy_emit_c_value
-
-
 def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
     """把单个 MLIR op 生成为目标后端的语句或语句块文本。"""
 
@@ -108,7 +95,7 @@ def emit_c(obj: object, ctx: EmitCContext) -> str:
 
     if isinstance(obj, SSAValue):
         return emit_c_value(obj, ctx)
-    return _call_legacy_gen_kernel(obj, ctx)
+    return _function_module.emit_c_source(obj, ctx, emit_c_op, emit_c_value)
 
 
 __all__ = [

@@ -53,6 +53,7 @@ from kernel_gen.symbol_variable.memory import Memory, MemorySpace, NumericType
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
 emit_c_package = importlib.import_module("kernel_gen.dsl.gen_kernel.emit_c")
+emit_c_function = importlib.import_module("kernel_gen.dsl.gen_kernel.emit_c.function")
 emit_c_register = importlib.import_module("kernel_gen.dsl.gen_kernel.emit_c.register")
 
 
@@ -80,6 +81,39 @@ def test_emit_c_public_entry_matches_gen_kernel_for_empty_func() -> None:
     func_op = func.FuncOp("empty_kernel", func_type, Region(block))
 
     assert emit_c(func_op, _ctx()) == gen_kernel(func_op, _ctx())
+
+
+# EC-001A
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-21 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-21 00:00:00 +0800
+# 功能说明: 验证 emit_c 的 func / module 入口改走 function.py 桥接层。
+# 测试目的: 锁定包根 `emit_c(...)` 不再绕旧兼容包装层，直接走新函数级源码入口。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_routes_func_and_module_source_via_function_module
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/emit_c/function.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_routes_func_and_module_source_via_function_module(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[str, str]] = []
+
+    def _fake_emit_c_source(obj: object, ctx: EmitCContext, emit_op, emit_value) -> str:
+        seen.append((type(obj).__name__, ctx.target))
+        assert callable(emit_op)
+        assert callable(emit_value)
+        return f"source:{type(obj).__name__}:{ctx.target}"
+
+    monkeypatch.setattr(emit_c_function, "emit_c_source", _fake_emit_c_source)
+
+    block = Block(arg_types=[])
+    block.add_op(func.ReturnOp())
+    func_type = FunctionType.from_lists([], [])
+    func_op = func.FuncOp("empty_kernel", func_type, Region(block))
+    module = ModuleOp([])
+
+    assert emit_c(func_op, _ctx()) == "source:FuncOp:cpu"
+    assert emit_c(module, _npu_ctx()) == "source:ModuleOp:npu_demo"
+    assert seen == [("FuncOp", "cpu"), ("ModuleOp", "npu_demo")]
 
 
 def test_emit_c_package_registers_common_op_and_value_types() -> None:
