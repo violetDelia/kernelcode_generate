@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`李白`
-- 最后一次更改：`朽木露琪亚`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/pass/pass_manager.md`](../../spec/pass/pass_manager.md)
 - `功能实现`：[`kernel_gen/passes/pass_manager.py`](../../kernel_gen/passes/pass_manager.py)
 - `test`：[`test/pass/test_pass_manager.py`](../../test/pass/test_pass_manager.py)
@@ -29,8 +29,7 @@
 - 对 nn 分解 lowering 链固定公开一个顺序边界：`DecompassPass` 必须运行在 `NnLoweringPass` 之前，确保默认 lowering 链路不让 residual `nn.*` 直接进入 `nn_lowering`。
 - 对下游 `gen_kernel` 合同固定明确：`gen_kernel` 仅接受已执行 `BufferResultsToOutParamsPass` 的 rewrite 后 ABI；若仍保留旧 `memory return` ABI，必须显式失败。
 - 对显式 memory hierarchy lowering 链固定公开一个扩展顺序边界：当调用方注册 `LowerDmaMemoryHierarchyPass` 时，其位置必须在 `NnLoweringPass` 与 `BufferResultsToOutParamsPass` 之后。
-- 对 tile family 固定公开一个顺序边界：`TilePass` / `TileElewisePass` / `TileReducePass` 必须运行在 `BufferResultsToOutParamsPass` 之后，并且位于 `LowerDmaMemoryHierarchyPass` 之前。
-- 对 `symbol-loop-hoist` 固定公开一个 materialize 边界：当 pipeline 中存在 `tile` / `tile-elewise` / `tile-reduce` 时，`symbol-loop-hoist` 必须运行在这些 tile family materializer 之后，且位于 `lower-dma-memory-hierarchy` 之前。
+- 对 tile family 固定公开一个顺序边界：`tile-analysis` / `tile-elewise` / `tile-reduce` 必须在 `BufferResultsToOutParamsPass` 之后、`LowerDmaMemoryHierarchyPass` 之前；若同时注册 `SymbolLoopHoistPass`，它必须位于 tile family 之后。
 
 ## 限制与边界
 
@@ -41,7 +40,7 @@
 - 当管理器中无 Pass 时，执行结果必须等于输入（无副作用的空操作）。
 - 对 analysis pass，manager 不负责聚合第二份分析结果对象；若需观察分析结果，只能经由 pass 实例侧接口或 `attrs` 等副作用读取。
 - 当 lowering 链包含 `LowerDmaMemoryHierarchyPass` 时，manager 只冻结其排序边界；是否注册该 pass 仍由调用方决定。
-- 当 lowering 链包含 `TilePass` / `TileElewisePass` / `TileReducePass` 时，manager 只冻结其排序边界；是否注册具体 tile family pass 仍由调用方决定。
+- 当 lowering 链包含 tile family 时，manager 只固定 tile family 与 out-params / dma hierarchy / symbol-loop-hoist 的相对边界；是否注册具体 tile pass 仍由调用方决定。
 
 ## 公开接口
 
@@ -138,16 +137,13 @@ pm.add_pass(BufferResultsToOutParamsPass())
 module = pm.run(module)
 ```
 
-- 当需要显式插入 tile family lowering 时，顺序固定扩展为：
+- 当需要显式插入 DMA memory hierarchy lowering 时，顺序固定扩展为：
 
 ```python
 pm = PassManager(name="lowering")
 pm.add_pass(DecompassPass())
 pm.add_pass(NnLoweringPass())
 pm.add_pass(BufferResultsToOutParamsPass())
-pm.add_pass(TilePass())
-pm.add_pass(TileElewisePass())
-pm.add_pass(TileReducePass())
 pm.add_pass(LowerDmaMemoryHierarchyPass())
 module = pm.run(module)
 ```

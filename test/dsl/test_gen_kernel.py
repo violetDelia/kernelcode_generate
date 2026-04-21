@@ -83,7 +83,6 @@ from kernel_gen.operation.dma import alloc, deslice, slice
 from kernel_gen.operation.nn import matmul
 from kernel_gen.operation.scf import loop
 from kernel_gen.passes.buffer_results_to_out_params import BufferResultsToOutParamsPass
-from kernel_gen.passes.lowering.kernel_split import KernelSplitPass, _KernelSplitSymbolLiteralOp, _KernelSplitTileValueOp
 from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -93,8 +92,10 @@ gen_kernel_module = importlib.import_module("kernel_gen.dsl.gen_kernel")
 tile_analysis_helpers = importlib.import_module("test.pass.test_lowering_tile_analysis")
 tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
 tile_elewise_module = importlib.import_module("kernel_gen.passes.lowering.tile_elewise")
+tile_reduce_module = importlib.import_module("kernel_gen.passes.lowering.tile_reduce")
 TileAnalysisPass = tile_analysis_module.TileAnalysisPass
 TileElewisePass = tile_elewise_module.TileElewisePass
+TileReducePass = tile_reduce_module.TileReducePass
 
 
 @irdl_op_definition
@@ -158,47 +159,10 @@ def _func(name: str, input_types: list[object], result_types: list[object], bloc
     return func.FuncOp(name, func_type, Region(block), arg_attrs=_arg_attrs(*arg_names))
 
 
-def _make_kernel_split_attr(axis: int, tile: str) -> DictionaryAttr:
-    return DictionaryAttr({"axis": IntAttr(axis), "tile": StringAttr(tile)})
-
-
 def _alloc_ops(source_memory: object, mem_type: NnMemoryType) -> tuple[list[object], DmaAllocOp]:
     shape_ops = [SymbolGetDimOp(source_memory, axis) for axis, _ in enumerate(mem_type.shape.data)]
     alloc = DmaAllocOp([op.result for op in shape_ops], mem_type)
     return [*shape_ops, alloc], alloc
-
-
-def _make_marked_kernel_split_module(*, axis: int = 1, tile: str = "TILE_M") -> tuple[ModuleOp, func.FuncOp]:
-    mem_type = _make_memory_type([8, 4], [4, 1])
-    space = NnMemorySpaceAttr.from_name("global")
-    block = Block(arg_types=[mem_type, mem_type, mem_type])
-
-    # signature: (out, lhs, rhs) -> ()
-    func_op = func.FuncOp(
-        "kernel_split_codegen",
-        FunctionType.from_lists([mem_type, mem_type, mem_type], []),
-        Region(block),
-        arg_attrs=_arg_attrs("arg0", "lhs", "rhs"),
-    )
-    func_op.attributes["kernel_split"] = _make_kernel_split_attr(axis, tile)
-
-    alloc_setup, temp_alloc = _alloc_ops(block.args[0], mem_type)
-    block.add_ops(
-        [
-            *alloc_setup[:2],
-            KernelBinaryElewiseOp(
-                block.args[0],
-                block.args[1],
-                block.args[2],
-                kind="add",
-                space=space,
-            ),
-            func.ReturnOp(),
-        ]
-    )
-
-    module = ModuleOp([func_op])
-    return module, func_op
 
 
 def _make_npu_demo_add_barrier_module(
@@ -391,6 +355,30 @@ def _lower_and_rewrite_func(func_op: func.FuncOp) -> func.FuncOp:
     return next(op for op in module.ops if isinstance(op, func.FuncOp))
 
 
+def _tile_analysis_func(module: ModuleOp) -> func.FuncOp:
+    """对单个 `func.func` 执行 tile-analysis。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 为 tile after-IR 负例测试提供只带 `tile.analysis + tile.tile_exprs` 的最小包装。
+    - 返回被 pass 标注后的函数，便于后续人为构造缺环路/缺 `tuner.param` 的 malformed IR。
+
+    使用示例:
+    - func_op = _tile_analysis_func(tile_analysis_helpers._build_module())
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: test/dsl/test_gen_kernel.py
+    """
+
+    ctx = Context()
+    TileAnalysisPass().apply(ctx, module)
+    return next(op for op in module.ops if isinstance(op, func.FuncOp))
+
+
 def _tile_elewise_func(module: ModuleOp) -> func.FuncOp:
     """对单个 `func.func` 先执行 tile-analysis 再执行 tile-elewise。
 
@@ -413,6 +401,31 @@ def _tile_elewise_func(module: ModuleOp) -> func.FuncOp:
     ctx = Context()
     TileAnalysisPass().apply(ctx, module)
     TileElewisePass().apply(ctx, module)
+    return next(op for op in module.ops if isinstance(op, func.FuncOp))
+
+
+def _tile_reduce_func(module: ModuleOp) -> func.FuncOp:
+    """对单个 `func.func` 先执行 tile-analysis 再执行 tile-reduce。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 为 tile-reduce 代码生成/结构测试提供最小组合包装。
+    - 返回被 pass 改写后的函数，便于后续交给 `gen_kernel(...)` 或直接断言 IR。
+
+    使用示例:
+    - func_op = _tile_reduce_func(tile_analysis_helpers._build_matmul_module())
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: test/dsl/test_gen_kernel.py
+    """
+
+    ctx = Context()
+    TileAnalysisPass().apply(ctx, module)
+    TileReducePass().apply(ctx, module)
     return next(op for op in module.ops if isinstance(op, func.FuncOp))
 
 
@@ -1959,128 +1972,115 @@ def test_gen_kernel_rejects_conv2d_img2col2d_tiled_with_nonempty_body() -> None:
 
 
 # GK-S3-001
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-06 03:56:07 +0800
-# 最近一次运行成功时间: 2026-04-06 03:56:07 +0800
-# 功能说明: 验证 gen_kernel 支持 KernelSplitPass 后的单函数 split IR 代码生成。
-# 测试目的: 锁定 tile 因子只能来自 tuner.param（非字面量），并且必须在单函数内生成显式分块循环。
-# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_emits_kernel_split_single_function_tile_loop
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: N/A
+# 最近一次运行成功时间: N/A
+# 功能说明: 验证 gen_kernel 支持 tile-elewise after-IR 的单函数 tile loop 代码生成。
+# 测试目的: 锁定 tile 因子只能来自 `tuner.param : !symbol.int<...>`，并且必须在单函数内生成显式分块循环。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_emits_tile_codegen_single_function_tile_loop
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
 # 对应测试文件路径: test/dsl/test_gen_kernel.py
-def test_gen_kernel_emits_kernel_split_single_function_tile_loop() -> None:
-    module, func_op = _make_marked_kernel_split_module()
-    KernelSplitPass().run(module)
+def test_gen_kernel_emits_tile_codegen_single_function_tile_loop() -> None:
+    func_op = _tile_elewise_func(tile_analysis_helpers._build_module())
 
     source = gen_kernel(func_op, _ctx())
 
     assert 'tuner_param("TILE_D0")' in source
-    assert 'tuner_param("TILE_M")' in source
+    assert 'tuner_param("TILE_D1")' in source
     assert "+= tile_d0" in source
-    assert "+= tile_m" in source
+    assert "+= tile_d1" in source
     assert "for (long long" in source
-    assert "KernelSplitMalformed" not in source
-    assert "KernelSplitUnexpectedHelperFunction" not in source
+    assert "TileCodegenMalformed" not in source
+    assert "TileCodegenUnexpectedHelperFunction" not in source
 
 
 # GK-S3-002
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-06 03:56:07 +0800
-# 最近一次运行成功时间: 2026-04-06 03:56:07 +0800
-# 功能说明: 验证 split codegen 缺少 tuner.param 时必须显式失败。
-# 测试目的: 禁止 silent fallback，确保失败短语包含 KernelSplitMalformed。
-# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_rejects_kernel_split_missing_tuner_param
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: N/A
+# 最近一次运行成功时间: N/A
+# 功能说明: 验证 tile codegen 缺少 tuner.param 时必须显式失败。
+# 测试目的: 禁止 silent fallback，确保失败短语包含 TileCodegenMalformed。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_rejects_tile_codegen_missing_tuner_param
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
 # 对应测试文件路径: test/dsl/test_gen_kernel.py
-def test_gen_kernel_rejects_kernel_split_missing_tuner_param() -> None:
-    block = Block(arg_types=[])
-    fake_dim = FakeSymbolDimOp("TILE_M")
-    start = _KernelSplitSymbolLiteralOp("0")
-    end = _KernelSplitSymbolLiteralOp("8")
-    step = _KernelSplitTileValueOp(fake_dim.result, "TILE_M")
-    loop_body = Block(arg_types=[SymbolIterType.from_bounds("0", "8", "TILE_M")])
+def test_gen_kernel_rejects_tile_codegen_missing_tuner_param() -> None:
+    func_op = _tile_analysis_func(tile_analysis_helpers._build_module())
+    block = func_op.body.block
+    start = FakeSymbolValueOp("0")
+    end = FakeSymbolValueOp("8")
+    step = FakeSymbolValueOp("1")
+    loop_body = Block(arg_types=[SymbolIterType.from_bounds("0", "8", "1")])
     loop = SymbolForOp(start.result, end.result, step.result, Region(loop_body))
-    block.add_ops([fake_dim, start, end, step, loop, func.ReturnOp()])
-    func_op = func.FuncOp("split_missing_tuner_param", FunctionType.from_lists([], []), Region(block))
+    block.insert_ops_before([start, end, step, loop], block.last_op)
 
-    with pytest.raises(GenKernelError, match="KernelSplitMalformed"):
+    with pytest.raises(GenKernelError, match="missing tuner.param"):
         gen_kernel(func_op, _ctx())
 
 
 # GK-S3-003
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-06 03:56:07 +0800
-# 最近一次运行成功时间: 2026-04-06 03:56:07 +0800
-# 功能说明: 验证 split codegen 缺少显式分块结构（symbol.for）时必须失败。
-# 测试目的: 锁定 malformed split IR 的 fail-fast 路径，禁止退化成未切分源码生成。
-# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_rejects_kernel_split_missing_loop
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: N/A
+# 最近一次运行成功时间: N/A
+# 功能说明: 验证 tile codegen 缺少显式分块结构（symbol.for）时必须失败。
+# 测试目的: 锁定 malformed tile IR 的 fail-fast 路径，禁止退化成未切分源码生成。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_rejects_tile_codegen_missing_loop
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
 # 对应测试文件路径: test/dsl/test_gen_kernel.py
-def test_gen_kernel_rejects_kernel_split_missing_loop() -> None:
-    tile_type = SymbolDimType.from_name("TILE_M")
-    block = Block(arg_types=[])
-    tuner = TunerParamOp(tile_type)
-    step = _KernelSplitTileValueOp(tuner.result, "TILE_M")
-    block.add_ops([tuner, step, func.ReturnOp()])
-    func_op = func.FuncOp("split_missing_loop", FunctionType.from_lists([], []), Region(block))
+def test_gen_kernel_rejects_tile_codegen_missing_loop() -> None:
+    func_op = _tile_analysis_func(tile_analysis_helpers._build_module())
 
-    with pytest.raises(GenKernelError, match="KernelSplitMalformed"):
+    with pytest.raises(GenKernelError, match="missing explicit tile loop"):
         gen_kernel(func_op, _ctx())
 
 
 # GK-S3-004
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-06 03:56:07 +0800
-# 最近一次运行成功时间: 2026-04-06 03:56:07 +0800
-# 功能说明: 验证 split codegen 不允许出现 helper/函数抽取式承接。
-# 测试目的: 当 split IR 中出现 func.call 时必须报 KernelSplitUnexpectedHelperFunction。
-# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_rejects_kernel_split_with_helper_call
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: N/A
+# 最近一次运行成功时间: N/A
+# 功能说明: 验证 tile codegen 不允许出现 helper/函数抽取式承接。
+# 测试目的: 当 tile IR 中出现 func.call 时必须报 TileCodegenUnexpectedHelperFunction。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_rejects_tile_codegen_with_helper_call
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
 # 对应测试文件路径: test/dsl/test_gen_kernel.py
-def test_gen_kernel_rejects_kernel_split_with_helper_call() -> None:
-    module, func_op = _make_marked_kernel_split_module()
-    KernelSplitPass().run(module)
+def test_gen_kernel_rejects_tile_codegen_with_helper_call() -> None:
+    func_op = _tile_elewise_func(tile_analysis_helpers._build_module())
 
     loop = next(op for op in func_op.body.block.ops if isinstance(op, SymbolForOp))
     loop_block = loop.body.blocks.first
     first_op = next(iter(loop_block.ops))
     loop_block.insert_op_before(func.CallOp("helper", [], []), first_op)
 
-    with pytest.raises(GenKernelError, match="KernelSplitUnexpectedHelperFunction"):
+    with pytest.raises(GenKernelError, match="TileCodegenUnexpectedHelperFunction"):
         gen_kernel(func_op, _ctx())
 
 
 # GK-S3-005
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-06 03:56:07 +0800
-# 最近一次运行成功时间: 2026-04-06 03:56:07 +0800
-# 功能说明: 验证 split codegen 缺少 tile bridge（kernel_split.tile_value）时必须失败。
-# 测试目的: 防止实现隐式把 tile 因子烘焙成常量或静默忽略 split 结构。
-# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_rejects_kernel_split_missing_tile_bridge
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: N/A
+# 最近一次运行成功时间: N/A
+# 功能说明: 验证旧 split bridge 合同不再被接受。
+# 测试目的: 防止实现继续接受 `tuner.param : !symbol.dim<...>` 这类旧合同。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_rejects_legacy_split_tuner_param_contract
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
 # 对应测试文件路径: test/dsl/test_gen_kernel.py
-def test_gen_kernel_rejects_kernel_split_missing_tile_bridge() -> None:
+def test_gen_kernel_rejects_legacy_split_tuner_param_contract() -> None:
     mem_type = _make_memory_type([8, 4], [4, 1])
     block = Block(arg_types=[mem_type])
     tuner = TunerParamOp(SymbolDimType.from_name("TILE_M"))
-    start = _KernelSplitSymbolLiteralOp("0")
-    end = _KernelSplitSymbolLiteralOp("8")
-    step = _KernelSplitSymbolLiteralOp("4")
-    loop_body = Block(arg_types=[SymbolIterType.from_bounds("0", "8", "4")])
-    loop = SymbolForOp(start.result, end.result, step.result, Region(loop_body))
-    block.add_ops([tuner, start, end, step, loop, func.ReturnOp()])
-    func_op = func.FuncOp("split_missing_tile_bridge", FunctionType.from_lists([mem_type], []), Region(block))
+    block.add_ops([tuner, func.ReturnOp()])
+    func_op = func.FuncOp("legacy_split_contract", FunctionType.from_lists([mem_type], []), Region(block))
 
-    with pytest.raises(GenKernelError, match="KernelSplitMalformed"):
+    with pytest.raises(GenKernelError, match="TileCodegenMalformed"):
         gen_kernel(func_op, _ctx())
 
 

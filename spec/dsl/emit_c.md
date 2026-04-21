@@ -10,7 +10,7 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`朽木露琪亚`（2026-04-19）
+- 最后一次更改：`金铲铲大作战`（2026-04-21）
 - `spec`：[`spec/dsl/emit_c.md`](../../spec/dsl/emit_c.md)
 - `功能实现`：[`kernel_gen/dsl/emit_c.py`](../../kernel_gen/dsl/emit_c.py)
 - `test`：[`test/dsl/test_emit_c.py`](../../test/dsl/test_emit_c.py)
@@ -343,7 +343,7 @@ npu_demo::broadcast<TSM, TSM, float, float>(dst /*dst*/, src /*source*/);
 注意事项：
 
 - 参数顺序必须分别固定为 `source -> target` 与 `dst -> source`。
-- 不得回退到旧 `TilePass` / `KernelSplitPass` 公开桥接名。
+- 不得回退到历史 tile 桥接名。
 
 ### `dma.slice`
 

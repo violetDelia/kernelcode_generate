@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`金铲铲大作战`
-- 最后一次更改：`小李飞刀`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/pass/lowering/memory_pool.md`](../../../spec/pass/lowering/memory_pool.md)
 - `功能实现`：[`kernel_gen/passes/lowering/memory_pool.py`](../../../kernel_gen/passes/lowering/memory_pool.py)
 - `test`：[`test/pass/test_memory_pool.py`](../../../test/pass/test_memory_pool.py)
@@ -44,8 +44,8 @@
 - 当 interval 在上述索引模型中可证明不重叠时，允许它们共享同一个 `offset_bytes_expr`（体现 byte pool 的复用）。
 - 参与改写的 alloc 必须同 bucket、相同字节 size 表达式；生命周期重叠会分配不同 offset。
 - pool 采用 1-D `i8` byte pool，并通过 `dma.view` 恢复原始类型。
-- 当 lowering pipeline 同时包含 `TilePass`、`SymbolLoopHoistPass`、`LowerDmaMemoryHierarchyPass` 时，`MemoryPoolPass` 的相对顺序要求为：
-  - `TilePass -> SymbolLoopHoistPass -> MemoryPoolPass -> LowerDmaMemoryHierarchyPass`
+- 当 lowering pipeline 同时包含 tile family、`SymbolLoopHoistPass`、`LowerDmaMemoryHierarchyPass` 时，`MemoryPoolPass` 的相对顺序要求为：
+  - `tile family -> SymbolLoopHoistPass -> MemoryPoolPass -> LowerDmaMemoryHierarchyPass`
 
 ## 公开接口
 

@@ -362,7 +362,7 @@ def test_pass_manager_allows_buffer_results_to_out_params_after_lowering_with_in
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-07 13:50:00 +0800
 # 最近一次运行成功时间: 2026-04-07 13:50:00 +0800
-# 功能说明: 验证 `TilePass` 为显式开启 pass，默认 lowering builder 不会自动插入。
+# 功能说明: 验证 tile family 为显式开启 pass，默认 lowering builder 不会自动插入。
 # 测试目的: 锁定默认 `build_default_lowering_pipeline()` 的 pass 集合只包含 decompose + lowering + out-params + dma hierarchy。
 # 使用示例: pytest -q test/pass/test_pass_manager.py -k test_tile_pipeline_requires_explicit_enable
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
@@ -379,6 +379,8 @@ def test_tile_pipeline_requires_explicit_enable() -> None:
         "lower-dma-memory-hierarchy",
     ]
     assert "tile" not in pass_names
+    assert "tile-analysis" not in pass_names
+    assert "tile-elewise" not in pass_names
     assert "tile-reduce" not in pass_names
 
 
@@ -387,22 +389,26 @@ def test_tile_pipeline_requires_explicit_enable() -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-07 13:50:00 +0800
 # 最近一次运行成功时间: 2026-04-07 13:50:00 +0800
-# 功能说明: 验证显式开启 `TilePass` 时，其顺序必须位于 `LowerDmaMemoryHierarchyPass` 之前。
-# 测试目的: 机械锁定推荐 pipeline：`NnLoweringPass -> BufferResultsToOutParamsPass -> TilePass -> LowerDmaMemoryHierarchyPass`。
-# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_default_lowering_pipeline_orders_tile_after_out_params
+# 功能说明: 验证显式开启 tile family 时，其顺序必须位于 `LowerDmaMemoryHierarchyPass` 之前。
+# 测试目的: 机械锁定推荐 pipeline：`NnLoweringPass -> BufferResultsToOutParamsPass -> TileAnalysisPass -> TileElewisePass -> TileReducePass -> LowerDmaMemoryHierarchyPass`。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_default_lowering_pipeline_orders_tile_family_after_out_params
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
 @pytest.mark.nn_lowering
-def test_default_lowering_pipeline_orders_tile_after_out_params(
+def test_default_lowering_pipeline_orders_tile_family_after_out_params(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     NnLoweringPass = lowering_module.NnLoweringPass
     BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     LowerDmaMemoryHierarchyPass = lowering_module.LowerDmaMemoryHierarchyPass
-    tile_module = importlib.import_module("kernel_gen.passes.lowering.tile")
-    TilePass = tile_module.TilePass
+    tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
+    TileAnalysisPass = tile_analysis_module.TileAnalysisPass
+    tile_elewise_module = importlib.import_module("kernel_gen.passes.lowering.tile_elewise")
+    TileElewisePass = tile_elewise_module.TileElewisePass
+    tile_reduce_module = importlib.import_module("kernel_gen.passes.lowering.tile_reduce")
+    TileReducePass = tile_reduce_module.TileReducePass
     order: list[str] = []
 
     def _record_lower(self: object, target: object) -> object:
@@ -417,19 +423,34 @@ def test_default_lowering_pipeline_orders_tile_after_out_params(
         order.append("lower-dma-memory-hierarchy")
         return target
 
-    def _record_tile(self: object, target: object) -> object:
-        order.append("tile")
-        return target
+    def _record_tile_analysis(self: object, ctx: object, module: object) -> None:
+        _ = ctx
+        order.append("tile-analysis")
+        _ = module
+
+    def _record_tile_elewise(self: object, ctx: object, module: object) -> None:
+        _ = ctx
+        order.append("tile-elewise")
+        _ = module
+
+    def _record_tile_reduce(self: object, ctx: object, module: object) -> None:
+        _ = ctx
+        order.append("tile-reduce")
+        _ = module
 
     monkeypatch.setattr(NnLoweringPass, "run", _record_lower)
     monkeypatch.setattr(BufferResultsToOutParamsPass, "apply", _record_buffer)
     monkeypatch.setattr(LowerDmaMemoryHierarchyPass, "run", _record_dma)
-    monkeypatch.setattr(TilePass, "run", _record_tile)
+    monkeypatch.setattr(TileAnalysisPass, "apply", _record_tile_analysis)
+    monkeypatch.setattr(TileElewisePass, "apply", _record_tile_elewise)
+    monkeypatch.setattr(TileReducePass, "apply", _record_tile_reduce)
 
     pm = PassManager(name="tile-lowering")
     pm.add_pass(NnLoweringPass())
     pm.add_pass(BufferResultsToOutParamsPass())
-    pm.add_pass(TilePass())
+    pm.add_pass(TileAnalysisPass())
+    pm.add_pass(TileElewisePass())
+    pm.add_pass(TileReducePass())
     pm.add_pass(LowerDmaMemoryHierarchyPass())
 
     sentinel = object()
@@ -437,7 +458,9 @@ def test_default_lowering_pipeline_orders_tile_after_out_params(
     assert order == [
         "lower-nn",
         "buffer-results-to-out-params",
-        "tile",
+        "tile-analysis",
+        "tile-elewise",
+        "tile-reduce",
         "lower-dma-memory-hierarchy",
     ]
 
@@ -507,22 +530,24 @@ def test_default_lowering_pipeline_orders_tile_reduce_after_out_params(
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-07 13:50:00 +0800
 # 最近一次运行成功时间: 2026-04-07 13:50:00 +0800
-# 功能说明: 验证 tile pipeline 的 `tuner.param` 来源口径为“由 tile pass 在函数体内插入/复用”。
-# 测试目的: 锁定 PassManager 端不引入额外前置合同：tile 所需的 `tuner.param` 由 `TilePass.run` 负责物化。
-# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_tile_pipeline_materializes_tuner_params_before_codegen
+# 功能说明: 验证 tile family 的 `tuner.param` 来源口径为“由 tile pass 在函数体内插入/复用”。
+# 测试目的: 锁定 PassManager 端不引入额外前置合同：tile 所需的 `tuner.param` 由 `TileReducePass.apply` 负责物化。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_tile_family_materializes_tuner_params_before_codegen
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
 @pytest.mark.nn_lowering
-def test_tile_pipeline_materializes_tuner_params_before_codegen(
+def test_tile_family_materializes_tuner_params_before_codegen(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     NnLoweringPass = lowering_module.NnLoweringPass
     BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     LowerDmaMemoryHierarchyPass = lowering_module.LowerDmaMemoryHierarchyPass
-    tile_module = importlib.import_module("kernel_gen.passes.lowering.tile")
-    TilePass = tile_module.TilePass
+    tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
+    TileAnalysisPass = tile_analysis_module.TileAnalysisPass
+    tile_reduce_module = importlib.import_module("kernel_gen.passes.lowering.tile_reduce")
+    TileReducePass = tile_reduce_module.TileReducePass
 
     def _noop_run(self: object, target: object) -> object:
         return target
@@ -530,20 +555,23 @@ def test_tile_pipeline_materializes_tuner_params_before_codegen(
     def _noop_apply(self: object, ctx: object, module: object) -> None:
         return None
 
-    def _materialize_tuner_param(self: object, target: object) -> object:
-        assert isinstance(target, dict)
-        target["tuner.param"] = True
-        return target
+    def _materialize_tuner_param(self: object, ctx: object, module: object) -> None:
+        _ = self
+        _ = ctx
+        assert isinstance(module, dict)
+        module["tuner.param"] = True
 
     monkeypatch.setattr(NnLoweringPass, "run", _noop_run)
     monkeypatch.setattr(BufferResultsToOutParamsPass, "apply", _noop_apply)
-    monkeypatch.setattr(TilePass, "run", _materialize_tuner_param)
+    monkeypatch.setattr(TileAnalysisPass, "apply", _noop_apply)
+    monkeypatch.setattr(TileReducePass, "apply", _materialize_tuner_param)
     monkeypatch.setattr(LowerDmaMemoryHierarchyPass, "run", _noop_run)
 
     pm = PassManager(name="tile-lowering")
     pm.add_pass(NnLoweringPass())
     pm.add_pass(BufferResultsToOutParamsPass())
-    pm.add_pass(TilePass())
+    pm.add_pass(TileAnalysisPass())
+    pm.add_pass(TileReducePass())
     pm.add_pass(LowerDmaMemoryHierarchyPass())
 
     module = {"tuner.param": False}
@@ -557,19 +585,19 @@ def test_tile_pipeline_materializes_tuner_params_before_codegen(
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-07 13:50:00 +0800
 # 最近一次运行成功时间: 2026-04-07 13:50:00 +0800
-# 功能说明: 验证错误 tile 顺序会被显式拒绝，并包含固定错误关键字 `TilePassOrderError`。
+# 功能说明: 验证错误 tile family 顺序会被显式拒绝，并包含固定错误关键字 `TilePassOrderError`。
 # 测试目的: 机械锁定 tile 顺序边界，避免错误 pipeline 导致 ABI 双重改写或 DMA hierarchy 口径偏差。
-# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_tile_pipeline_rejects_wrong_order
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_tile_family_rejects_wrong_order
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
 @pytest.mark.nn_lowering
-def test_tile_pipeline_rejects_wrong_order() -> None:
+def test_tile_family_rejects_wrong_order() -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     NnLoweringPass = lowering_module.NnLoweringPass
     BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
-    tile_module = importlib.import_module("kernel_gen.passes.lowering.tile")
-    TilePass = tile_module.TilePass
+    tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
+    TileAnalysisPass = tile_analysis_module.TileAnalysisPass
     tile_reduce_module = importlib.import_module("kernel_gen.passes.lowering.tile_reduce")
     TileReducePass = tile_reduce_module.TileReducePass
     dma_hierarchy_module = importlib.import_module("kernel_gen.passes.lowering.dma_memory_hierarchy")
@@ -577,7 +605,7 @@ def test_tile_pipeline_rejects_wrong_order() -> None:
 
     pm = PassManager(name="bad-tile-order")
     pm.add_pass(NnLoweringPass())
-    pm.add_pass(TilePass())
+    pm.add_pass(TileAnalysisPass())
     pm.add_pass(BufferResultsToOutParamsPass())
     with pytest.raises(ValueError, match="TilePassOrderError"):
         pm.run(object())
@@ -586,7 +614,7 @@ def test_tile_pipeline_rejects_wrong_order() -> None:
     pm.add_pass(NnLoweringPass())
     pm.add_pass(BufferResultsToOutParamsPass())
     pm.add_pass(LowerDmaMemoryHierarchyPass())
-    pm.add_pass(TilePass())
+    pm.add_pass(TileReducePass())
     with pytest.raises(ValueError, match="TilePassOrderError"):
         pm.run(object())
 
@@ -611,31 +639,39 @@ def test_tile_pipeline_rejects_wrong_order() -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-07 13:50:00 +0800
 # 最近一次运行成功时间: 2026-04-07 13:50:00 +0800
-# 功能说明: 验证显式 tile pipeline 不会隐式引入新的“函数抽取阶段”pass，保持单函数合同的 pipeline 组成可审计。
-# 测试目的: 锁定显式 tile pipeline 只包含 lowering + out-params + tile + dma hierarchy，不夹带额外 pass。
+# 功能说明: 验证显式 tile family pipeline 不会隐式引入新的“函数抽取阶段”pass，保持单函数合同的 pipeline 组成可审计。
+# 测试目的: 锁定显式 tile pipeline 只包含 lowering + out-params + tile family + dma hierarchy，不夹带额外 pass。
 # 使用示例: pytest -q test/pass/test_pass_manager.py -k test_tile_pipeline_keeps_single_function_contract
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
 @pytest.mark.nn_lowering
 def test_tile_pipeline_keeps_single_function_contract() -> None:
-    tile_module = importlib.import_module("kernel_gen.passes.lowering.tile")
-    TilePass = tile_module.TilePass
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     NnLoweringPass = lowering_module.NnLoweringPass
     BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     LowerDmaMemoryHierarchyPass = lowering_module.LowerDmaMemoryHierarchyPass
+    tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
+    TileAnalysisPass = tile_analysis_module.TileAnalysisPass
+    tile_elewise_module = importlib.import_module("kernel_gen.passes.lowering.tile_elewise")
+    TileElewisePass = tile_elewise_module.TileElewisePass
+    tile_reduce_module = importlib.import_module("kernel_gen.passes.lowering.tile_reduce")
+    TileReducePass = tile_reduce_module.TileReducePass
 
     pm = PassManager(name="tile-lowering")
     pm.add_pass(NnLoweringPass())
     pm.add_pass(BufferResultsToOutParamsPass())
-    pm.add_pass(TilePass())
+    pm.add_pass(TileAnalysisPass())
+    pm.add_pass(TileElewisePass())
+    pm.add_pass(TileReducePass())
     pm.add_pass(LowerDmaMemoryHierarchyPass())
     pass_names = [item.name for item in pm._passes]  # noqa: SLF001 - test asserts pipeline boundary
     assert pass_names == [
         "lower-nn",
         "buffer-results-to-out-params",
-        "tile",
+        "tile-analysis",
+        "tile-elewise",
+        "tile-reduce",
         "lower-dma-memory-hierarchy",
     ]
 
@@ -643,13 +679,13 @@ def test_tile_pipeline_keeps_single_function_contract() -> None:
 # TC-PASS-013A
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 功能说明: 验证 tile-analysis / tile-elewise 作为 tile family 可按顺序位于 out-params 与 dma hierarchy 之间。
-# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_tile_family_orders_tile_analysis_and_tile_elewise_before_dma_memory_hierarchy
+# 功能说明: 验证 tile-analysis / tile-elewise / tile-reduce 作为 tile family 可按顺序位于 out-params 与 dma hierarchy 之间。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_tile_family_orders_tile_analysis_elewise_and_reduce_before_dma_memory_hierarchy
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
 @pytest.mark.nn_lowering
-def test_tile_family_orders_tile_analysis_and_tile_elewise_before_dma_memory_hierarchy(
+def test_tile_family_orders_tile_analysis_elewise_and_reduce_before_dma_memory_hierarchy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
@@ -660,6 +696,8 @@ def test_tile_family_orders_tile_analysis_and_tile_elewise_before_dma_memory_hie
     TileAnalysisPass = tile_analysis_module.TileAnalysisPass
     tile_elewise_module = importlib.import_module("kernel_gen.passes.lowering.tile_elewise")
     TileElewisePass = tile_elewise_module.TileElewisePass
+    tile_reduce_module = importlib.import_module("kernel_gen.passes.lowering.tile_reduce")
+    TileReducePass = tile_reduce_module.TileReducePass
     order: list[str] = []
 
     def _record_lower(self: object, target: object) -> object:
@@ -678,6 +716,10 @@ def test_tile_family_orders_tile_analysis_and_tile_elewise_before_dma_memory_hie
         order.append("tile-elewise")
         return None
 
+    def _record_tile_reduce(self: object, ctx: object, module: object) -> None:
+        order.append("tile-reduce")
+        return None
+
     def _record_dma(self: object, target: object) -> object:
         order.append("lower-dma-memory-hierarchy")
         return target
@@ -686,6 +728,7 @@ def test_tile_family_orders_tile_analysis_and_tile_elewise_before_dma_memory_hie
     monkeypatch.setattr(BufferResultsToOutParamsPass, "apply", _record_buffer)
     monkeypatch.setattr(TileAnalysisPass, "apply", _record_tile_analysis)
     monkeypatch.setattr(TileElewisePass, "apply", _record_tile_elewise)
+    monkeypatch.setattr(TileReducePass, "apply", _record_tile_reduce)
     monkeypatch.setattr(LowerDmaMemoryHierarchyPass, "run", _record_dma)
 
     pm = PassManager(name="tile-family")
@@ -693,6 +736,7 @@ def test_tile_family_orders_tile_analysis_and_tile_elewise_before_dma_memory_hie
     pm.add_pass(BufferResultsToOutParamsPass())
     pm.add_pass(TileAnalysisPass())
     pm.add_pass(TileElewisePass())
+    pm.add_pass(TileReducePass())
     pm.add_pass(LowerDmaMemoryHierarchyPass())
 
     sentinel = object()
@@ -702,6 +746,7 @@ def test_tile_family_orders_tile_analysis_and_tile_elewise_before_dma_memory_hie
         "buffer-results-to-out-params",
         "tile-analysis",
         "tile-elewise",
+        "tile-reduce",
         "lower-dma-memory-hierarchy",
     ]
 
@@ -709,20 +754,20 @@ def test_tile_family_orders_tile_analysis_and_tile_elewise_before_dma_memory_hie
 # TC-PASS-013B
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 功能说明: 验证 symbol-loop-hoist 若插在 tile-analysis 与 tile-elewise 之间会被拒绝。
-# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_rejects_symbol_loop_hoist_before_tile_elewise
+# 功能说明: 验证 symbol-loop-hoist 若插在 tile-analysis 与 tile-reduce 之间会被拒绝。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_rejects_symbol_loop_hoist_before_tile_reduce
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
 @pytest.mark.nn_lowering
-def test_pass_manager_rejects_symbol_loop_hoist_before_tile_elewise() -> None:
+def test_pass_manager_rejects_symbol_loop_hoist_before_tile_reduce() -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     NnLoweringPass = lowering_module.NnLoweringPass
     BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
     TileAnalysisPass = tile_analysis_module.TileAnalysisPass
-    tile_elewise_module = importlib.import_module("kernel_gen.passes.lowering.tile_elewise")
-    TileElewisePass = tile_elewise_module.TileElewisePass
+    tile_reduce_module = importlib.import_module("kernel_gen.passes.lowering.tile_reduce")
+    TileReducePass = tile_reduce_module.TileReducePass
     symbol_loop_hoist_module = importlib.import_module("kernel_gen.passes.symbol_loop_hoist")
     SymbolLoopHoistPass = symbol_loop_hoist_module.SymbolLoopHoistPass
 
@@ -731,7 +776,7 @@ def test_pass_manager_rejects_symbol_loop_hoist_before_tile_elewise() -> None:
     pm.add_pass(BufferResultsToOutParamsPass())
     pm.add_pass(TileAnalysisPass())
     pm.add_pass(SymbolLoopHoistPass())
-    pm.add_pass(TileElewisePass())
+    pm.add_pass(TileReducePass())
     with pytest.raises(ValueError, match="SymbolLoopHoistRequiresSymbolFor"):
         pm.run(object())
 
@@ -823,20 +868,20 @@ def test_pass_manager_allows_symbol_loop_hoist_without_tile() -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-07 13:50:00 +0800
 # 最近一次运行成功时间: 2026-04-07 13:50:00 +0800
-# 功能说明: 验证 symbol-loop-hoist 必须位于 tile 之后，否则显式失败。
-# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_rejects_symbol_loop_hoist_before_tile
+# 功能说明: 验证 symbol-loop-hoist 必须位于 tile family 之后，否则显式失败。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_rejects_symbol_loop_hoist_before_tile_family
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
 @pytest.mark.nn_lowering
-def test_pass_manager_rejects_symbol_loop_hoist_before_tile() -> None:
+def test_pass_manager_rejects_symbol_loop_hoist_before_tile_family() -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     NnLoweringPass = lowering_module.NnLoweringPass
     BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     dma_hierarchy_module = importlib.import_module("kernel_gen.passes.lowering.dma_memory_hierarchy")
     LowerDmaMemoryHierarchyPass = dma_hierarchy_module.LowerDmaMemoryHierarchyPass
-    tile_module = importlib.import_module("kernel_gen.passes.lowering.tile")
-    TilePass = tile_module.TilePass
+    tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
+    TileAnalysisPass = tile_analysis_module.TileAnalysisPass
 
     class SymbolLoopHoistPass(Pass):
         name = "symbol-loop-hoist"
@@ -848,7 +893,7 @@ def test_pass_manager_rejects_symbol_loop_hoist_before_tile() -> None:
     pm.add_pass(NnLoweringPass())
     pm.add_pass(BufferResultsToOutParamsPass())
     pm.add_pass(SymbolLoopHoistPass())
-    pm.add_pass(TilePass())
+    pm.add_pass(TileAnalysisPass())
     pm.add_pass(LowerDmaMemoryHierarchyPass())
     with pytest.raises(ValueError, match="SymbolLoopHoistRequiresSymbolFor"):
         pm.run(object())
@@ -859,7 +904,7 @@ def test_pass_manager_rejects_symbol_loop_hoist_before_tile() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-21 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-21 00:00:00 +0800
-# 功能说明: 验证 symbol-loop-hoist 必须位于 tile-reduce 之后，否则显式失败。
+# 功能说明: 验证 symbol-loop-hoist 必须位于 tile family 之后，否则显式失败。
 # 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_rejects_symbol_loop_hoist_before_tile_reduce
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
@@ -886,7 +931,7 @@ def test_pass_manager_rejects_symbol_loop_hoist_before_tile_reduce() -> None:
     pm.add_pass(SymbolLoopHoistPass())
     pm.add_pass(TileReducePass())
     pm.add_pass(LowerDmaMemoryHierarchyPass())
-    with pytest.raises(ValueError, match="SymbolLoopHoistRequiresSymbolFor: symbol-loop-hoist must run after tile-reduce"):
+    with pytest.raises(ValueError, match="SymbolLoopHoistRequiresSymbolFor: symbol-loop-hoist must run after tile family"):
         pm.run(object())
 
 
@@ -907,8 +952,8 @@ def test_pass_manager_rejects_symbol_loop_hoist_after_dma_memory_hierarchy() -> 
     BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     dma_hierarchy_module = importlib.import_module("kernel_gen.passes.lowering.dma_memory_hierarchy")
     LowerDmaMemoryHierarchyPass = dma_hierarchy_module.LowerDmaMemoryHierarchyPass
-    tile_module = importlib.import_module("kernel_gen.passes.lowering.tile")
-    TilePass = tile_module.TilePass
+    tile_reduce_module = importlib.import_module("kernel_gen.passes.lowering.tile_reduce")
+    TileReducePass = tile_reduce_module.TileReducePass
 
     class SymbolLoopHoistPass(Pass):
         name = "symbol-loop-hoist"
@@ -919,7 +964,7 @@ def test_pass_manager_rejects_symbol_loop_hoist_after_dma_memory_hierarchy() -> 
     pm = PassManager(name="bad-symbol-loop-hoist-dma-order")
     pm.add_pass(NnLoweringPass())
     pm.add_pass(BufferResultsToOutParamsPass())
-    pm.add_pass(TilePass())
+    pm.add_pass(TileReducePass())
     pm.add_pass(LowerDmaMemoryHierarchyPass())
     pm.add_pass(SymbolLoopHoistPass())
     with pytest.raises(ValueError, match="SymbolLoopHoistRequiresSymbolFor"):

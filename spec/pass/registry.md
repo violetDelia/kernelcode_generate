@@ -3,13 +3,13 @@
 ## 功能简介
 
 - 定义 pass / pipeline 的公开注册与查询接口：把“名字”与“构造器”解耦，使工具层（如 `ircheck`）只依赖稳定名称而不依赖具体 Python 模块路径。
-- 迁移期同时支持 legacy `Pass` 与 xdsl `ModulePass` 的注册与构造。
+- 支持 xdsl `ModulePass` 的注册与构造。
 - 该注册表服务于 CLI / pytest / 工具脚本的统一入口；同一名字在进程内必须唯一。
 
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`朽木露琪亚`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/pass/registry.md`](../../spec/pass/registry.md)
 - `功能实现`：[`kernel_gen/passes/registry.py`](../../kernel_gen/passes/registry.py)
 - `test`：[`test/pass/test_pass_registry.py`](../../test/pass/test_pass_registry.py)
@@ -77,29 +77,29 @@
 
 功能说明：
 
-- 装饰器：注册一个公开 pass 类（`Pass` 或 `ModulePass` 子类），使用 `pass_cls.name` 作为 key。
+- 装饰器：注册一个公开 `ModulePass` 子类，使用 `pass_cls.name` 作为 key。
 
 参数说明：
 
-- `pass_cls (type[Pass] | type[ModulePass])`：待注册的 pass 类。
+- `pass_cls (type[ModulePass])`：待注册的 pass 类。
 
 使用示例：
 
 ```python
-from kernel_gen.passes.pass_manager import Pass
+from xdsl.passes import ModulePass
 from kernel_gen.passes.registry import register_pass
 
 @register_pass
-class TilePass(Pass):
-    name = "tile"
+class TileAnalysisPass(ModulePass):
+    name = "tile-analysis"
 
-    def run(self, module):
-        return module
+    def apply(self, ctx, module):
+        return None
 ```
 
 注意事项：
 
-- `pass_cls` 必须是 `Pass` 或 `ModulePass` 子类。
+- `pass_cls` 必须是 `ModulePass` 子类。
 - `pass_cls.name` 必须是非空字符串。
 - 若同名 pass 已存在，必须抛出 `PassRegistryError`。
 
@@ -140,12 +140,12 @@ def build_default_lowering_pipeline() -> PassManager:
 
 - 返回被装饰函数本身。
 
-### `build_registered_pass(name: str, options: dict[str, str] | None = None) -> Pass | ModulePass`
+### `build_registered_pass(name: str, options: dict[str, str] | None = None) -> ModulePass`
 
 功能说明：
 
 - 根据 pass 名称构造并返回 pass 实例。
-- 迁移期可直接返回 legacy `Pass` 或 xdsl `ModulePass` 实例，具体由注册的类决定。
+- 返回值必须是 xdsl `ModulePass` 实例。
 
 参数说明：
 
@@ -158,8 +158,8 @@ def build_default_lowering_pipeline() -> PassManager:
 from kernel_gen.passes.registry import load_builtin_passes, build_registered_pass
 
 load_builtin_passes()
-pass_obj = build_registered_pass("tile")
-pass_obj = build_registered_pass("tile", {"analysis-only": "true"})
+pass_obj = build_registered_pass("tile-analysis")
+pass_obj = build_registered_pass("tile-reduce")
 cost_pass = build_registered_pass("launch-kernel-cost-func", {"cost_kind": "compute"})
 ```
 
@@ -169,7 +169,7 @@ cost_pass = build_registered_pass("launch-kernel-cost-func", {"cost_kind": "comp
 - pass 构造规则：
   - `options` 为空或 `None`：以无参构造为准（等价于 `pass_cls()` 可成功执行）。
   - `options` 非空：pass 类必须提供 `from_options(options)` 构造入口。
-  - `from_options` 失败或返回非 `Pass` / `ModulePass` 实例时，必须报告 `option error`。
+  - `from_options` 失败或返回非 `ModulePass` 实例时，必须报告 `option error`。
   - 无参构造失败时必须报告“不可构造”。
 
 返回与限制：

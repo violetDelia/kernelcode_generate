@@ -66,8 +66,8 @@ def register_pass(pass_cls: type[PassType]) -> type[PassType]:
 
     使用示例:
     - @register_pass
-      class TilePass(Pass):
-          name = "tile"
+      class TileReducePass(Pass):
+          name = "tile-reduce"
           def run(self, module): return module
 
     关联文件:
@@ -190,8 +190,8 @@ def build_registered_pass(name: str, options: dict[str, str] | None = None) -> X
 
     使用示例:
     - load_builtin_passes()
-    - pass_obj = build_registered_pass("tile")
-    - pass_obj = build_registered_pass("tile", {"analysis-only": "true"})
+    - pass_obj = build_registered_pass("tile-analysis")
+    - pass_obj = build_registered_pass("tile-reduce")
 
     关联文件:
     - spec: [spec/pass/registry.md](spec/pass/registry.md)
@@ -323,7 +323,6 @@ def load_builtin_passes() -> None:
     from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
     from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelPass
     from kernel_gen.passes.symbol_loop_hoist import SymbolLoopHoistPass
-    from kernel_gen.passes.lowering.tile import TilePass
     from kernel_gen.passes.lowering.tile_analysis import TileAnalysisPass
     from kernel_gen.passes.lowering.tile_elewise import TileElewisePass
     from kernel_gen.passes.lowering.tile_reduce import TileReducePass
@@ -336,7 +335,6 @@ def load_builtin_passes() -> None:
         BufferResultsToOutParamsPass,
         LowerDmaMemoryHierarchyPass,
         OutlineDeviceKernelPass,
-        TilePass,
         TileAnalysisPass,
         TileElewisePass,
         TileReducePass,

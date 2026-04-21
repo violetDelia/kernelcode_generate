@@ -301,7 +301,26 @@ def test_build_registered_tile_elewise_pass() -> None:
     assert pass_obj.__class__.__module__ == "kernel_gen.passes.lowering.tile_elewise"
 
 
-# TC-REGISTRY-007A-1
+# TC-REGISTRY-007A-2
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证内置 pass 加载后可通过稳定名称构造 tile-reduce ModulePass。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_tile_reduce_pass
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/pass/test_pass_registry.py
+def test_build_registered_tile_reduce_pass() -> None:
+    load_builtin_passes()
+
+    pass_obj = build_registered_pass("tile-reduce")
+
+    assert pass_obj.name == "tile-reduce"
+    assert type(pass_obj).__name__ == "TileReducePass"
+    assert isinstance(pass_obj, ModulePass)
+    assert pass_obj.__class__.__module__ == "kernel_gen.passes.lowering.tile_reduce"
+
+
+# TC-REGISTRY-007A-3
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 功能说明: 验证内置 nn lowering pass 加载后返回 ModulePass。

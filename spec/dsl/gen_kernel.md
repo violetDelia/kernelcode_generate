@@ -5,13 +5,13 @@
 - 定义将单个优化后的 MLIR op / `func.func` 转换为目标源码文本的规则。
 - 对 `func.func` 负责函数签名生成、按 IR 顺序遍历函数体，并逐个调用 [`spec/dsl/emit_c.md`](../../spec/dsl/emit_c.md) 中定义的节点级公开发射接口。
 - 对 `func.func` 的 rewrite-after-IR CPU kernel、`conv2d_img2col2d_tiled(...)`、以及 `target="npu_demo"` 的“launch wrapper + body kernel”受控 module 子集等函数级特化，必须通过统一 emitter 内部策略选择收口。
-- 对已经过 `KernelSplitPass` 的 split-after-IR 单函数输入，冻结 `gen_kernel(...)` 的黑盒 codegen 合同：tile 因子由 `tuner.param` 驱动、`symbol.for` 保留显式分块、malformed split IR 必须显式失败。
+- 对已经过 tile family 的 split-after-IR 单函数输入，明确 `gen_kernel(...)` 的黑盒 codegen 合同：tile 因子由 `tuner.param : !symbol.int<"...">` 驱动、`symbol.for` 保留显式分块、malformed tile IR 必须显式失败。
 - 对单个普通 op 直接复用 `emit_c` 的节点级公开接口返回源码片段；不负责文件写盘、编译、链接或运行。
 
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`朽木露琪亚`（2026-04-19）
+- 最后一次更改：`金铲铲大作战`（2026-04-21）
 - `spec`：[`spec/dsl/gen_kernel.md`](../../spec/dsl/gen_kernel.md)
 - `功能实现`：[`kernel_gen/dsl/gen_kernel.py`](../../kernel_gen/dsl/gen_kernel.py)
 - `test`：[`test/dsl/test_gen_kernel.py`](../../test/dsl/test_gen_kernel.py)
@@ -32,7 +32,7 @@
 - 明确支持：mixed `memory + scalar` returns 经 rewrite 后，`memory` 作为前置 out 参数、`scalar` 继续保留为函数返回值。
 - 明确支持：`f32/f64` 类型在 `target=cpu` 下映射为 `float/double`，用于 `Memory<MemorySpace::GM, float>/Memory<MemorySpace::GM, double>` 与 `float/double` 标量参数生成。
 - 冻结 `target=cpu` 的 rewrite-after-IR 合同：`gen_kernel(...)` 只接受已经经过 `BufferResultsToOutParamsPass` 的 lowered IR；默认 CPU 路径不再从旧 `memory return` ABI 隐式推导 `out`。
-- 冻结 split-after-IR 的单函数 codegen 合同：目标源码仍为单个函数定义，tile 相关表达必须由 `tuner.param` / `kernel_split.tile_value` 承接，显式分块结构必须对应 `symbol.for`。
+- 明确 split-after-IR 的单函数 codegen 合同：目标源码仍为单个函数定义，tile 相关表达必须由 `tuner.param : !symbol.int<"...">` 与 `symbol.for` 承接。
 - 冻结 `target="npu_demo"` 的完整源码合同：`gen_kernel(target="npu_demo")` 必须支持“launch wrapper + body kernel”的受控 `builtin.module` 子集，并生成包含 **body 函数 + launch wrapper 函数** 的双函数源码；body 函数内必须生成 `ctx.barrier(...)`，wrapper 函数必须生成 `npu_demo::launch<1, 4, 1>(...)`。
 - 冻结 `target="npu_demo"` 生成源码的 include 入口为 `#include "include/npu_demo/npu_demo.h"`，并以“只编译”方式作为 compile gate 目标（`g++ -std=c++17 -I <repo> -c <source>`）。
 - 冻结 `target="npu_demo"` 的计算 helper 只允许消费 [`spec/include/api/Kernel.md`](../../spec/include/api/Kernel.md) 已声明的公共接口；不得继续依赖公开 `Nn` 层。
@@ -51,7 +51,7 @@
 - 默认路径下，旧 `memory return` ABI 必须显式失败并提示先运行 `BufferResultsToOutParamsPass`；不允许继续从 `func.return %mem` 或函数返回类型里偷推 `out`。
 - 若 IR 已含前置 out 参数但仍保留 `memory return`（half-rewritten ABI），必须抛出 `GenKernelError` 且错误消息包含 `legacy memory return ABI is not supported`。
 - rewrite 后 IR 中，只有最前面连续且由 `arg_attrs.name` 显式标记为 `arg0/arg1/...` 的 `Memory` 参数才视为 out 参数；其余 `Memory` 参数仍视为只读输入。
-- 若输入号称 split-after-IR 单函数，但缺少 `tuner.param`、`kernel_split.tile_value`、`symbol.for` 或阶段间必需承接对象，`gen_kernel(...)` 必须抛出 `GenKernelError`，禁止静默回退到未切分源码。
+- 若输入号称 tile family split-after-IR 单函数，但缺少 `tuner.param`、`symbol.for` 或阶段间必需承接对象，`gen_kernel(...)` 必须抛出 `GenKernelError`，禁止静默回退到未切分源码。
 - 若 split codegen 试图额外抽取 helper 函数或 `func.call` 承接阶段结果，必须显式失败；该类失败的错误消息必须包含 `KernelSplitUnexpectedHelperFunction`。
 - `target="npu_demo"` 必须走受控 `builtin.module` 子集；若只提供单个 body-level `func.func`、或 module 内缺少 wrapper/body 之一，必须显式失败，禁止静默退化为“只输出 body 骨架”。
 - `target="npu_demo"` 的计算节点只允许落到 `Kernel` 公共 helper family；不得回退到公开 `Nn` 别名或后端私造的平行 helper 名。
@@ -88,7 +88,7 @@ source = gen_kernel(func_op, EmitCContext(target="cpu"))
 - `func.func` 输入必须已经完成本仓库要求的合法化。
 - 若输入为普通 op，则直接委托 `emit_c_op(...)` 的公开节点级接口发射，不补额外函数级前后文。
 - `func.return` 不允许作为单独普通 op 走这条公开接口；它的 `out` 绑定与返回语义必须留在 `func.func` 的主遍历流程中处理。
-- 若输入为 split-after-IR 单函数，则 `gen_kernel(...)` 只接受已经具备 `tuner.param + kernel_split.tile_value + symbol.for + 合法承接对象` 的函数体；缺任一要素都必须在函数级入口显式报错。
+- 若输入为 tile family split-after-IR 单函数，则 `gen_kernel(...)` 只接受已经具备 `tuner.param + symbol.for + 合法承接对象` 的函数体；缺任一要素都必须在函数级入口显式报错。
 - 若 IR 中仍含未支持 op，必须向上抛出对应失败原因。
 
 返回与限制：
@@ -217,20 +217,20 @@ static void add_barrier_body(
 - 当 `func.return` 返回 `!symbol.int<"...">` 时，必须生成 `return <expr>;` 并复用 `emit_c` 的命名/表达式规则。
 - 对 `conv_cpu_tiled_v1` 子集，函数体骨架必须固定包含：`constexpr Ntile/Ctile/Ftile/Hotile/Wotile`、tile-local `col_buffer/acc_buffer`、`n -> f -> ho -> wo` 分块循环、循环体内的 `cpu::img2col2d(...)` 与 `c` 方向 tiled compute、以及最终写回 `out` 的显式循环或等价机械可判定写回语句。
 
-## Split-after-IR 单函数 codegen 合同
+## tile family split-after-IR 单函数 codegen 合同
 
 ### 适用范围
 
-- 本节适用于已经过 `KernelSplitPass`、且仍保持单个 `func.func` 的 split-after-IR 输入。
-- 本节只冻结 `gen_kernel(...)` 的黑盒源码合同，不定义 `emit_c` 内部 helper、host launch、多 stream 或并行调度细节。
-- 输入 IR 必须同时满足四项前置条件：存在至少一个 `tuner.param`、存在至少一个与 tile 因子桥接的 `kernel_split.tile_value`、函数体中存在显式分块结构 `symbol.for`、跨阶段中间值已有合法承接对象（SSA 或显式 carry memory / 中间 buffer）。
+- 本节适用于已经过 `tile-analysis -> tile-elewise` 或 `tile-analysis -> tile-reduce`、且仍保持单个 `func.func` 的 tile family after-IR 输入。
+- 本节只定义 `gen_kernel(...)` 的黑盒源码合同，不定义 `emit_c` 内部 helper、host launch、多 stream 或并行调度细节。
+- 输入 IR 必须同时满足三项前置条件：存在至少一个 `tuner.param : !symbol.int<"...">`、函数体中存在显式分块结构 `symbol.for`、跨阶段中间值已有合法承接对象（SSA 或显式 carry memory / 中间 buffer）。
 
 ### 目标源码形态
 
 功能说明：
 
-- `gen_kernel(...)` 消费 split-after-IR 输入时，目标源码必须仍然是单个函数定义；tile 遍历、阶段执行与中间值承接都必须留在该函数体内完成。
-- `tuner.param` 对应的 tile 因子必须先桥接到 `kernel_split.tile_value`，再在源码中表现为“非字面量”的 tile 绑定，供循环步长、切片长度或等价分段范围复用。
+- `gen_kernel(...)` 消费 tile family after-IR 输入时，目标源码必须仍然是单个函数定义；tile 遍历、阶段执行与中间值承接都必须留在该函数体内完成。
+- `tuner.param` 对应的 tile 因子必须在源码中表现为非字面量 tile 绑定，供循环步长、切片长度或等价分段范围复用。
 
 使用示例：
 
@@ -239,12 +239,12 @@ void vec_add_exp(
     const Memory<MemorySpace::GM, float>& arg0,
     const Memory<MemorySpace::GM, float>& arg1,
     Memory<MemorySpace::GM, float>& arg2) {
-    long long tile_m = tuner_param("TILE_M");
+    long long tile_d0 = tuner_param("TILE_D0");
     auto carry = alloc(...);
-    for (long long i = 0; i < M; i += tile_m) {
-        auto lhs = slice(arg0, i, tile_m, 1);
-        auto rhs = slice(arg1, i, tile_m, 1);
-        auto out = slice(arg2, i, tile_m, 1);
+    for (long long i = 0; i < M; i += tile_d0) {
+        auto lhs = slice(arg0, i, tile_d0, 1);
+        auto rhs = slice(arg1, i, tile_d0, 1);
+        auto out = slice(arg2, i, tile_d0, 1);
         add(lhs, rhs, carry);
         exp(carry, carry);
         deslice(out, carry);
@@ -253,42 +253,28 @@ void vec_add_exp(
 ```
 
 ```text
-// 对应 split-after-IR 的最小显式分块结构
-%tile_m = tuner.param : !symbol.dim<"TILE_M">
-%tile_value = kernel_split.tile_value %tile_m
-symbol.for %it = %c0 to %M step %tile_value {
+// 对应 tile family after-IR 的最小显式分块结构
+%tile_d0 = tuner.param : !symbol.int<"TILE_D0">
+symbol.for %it = %c0 to %M step %tile_d0 {
   ...
-}
-```
-
-```cpp
-// 非法：tile 硬编码 + helper 抽取 + 丢失显式 split 结构
-static void vec_add_tile(...);
-void vec_add_exp(...) {
-    for (long long i = 0; i < M; i += 64) {
-        vec_add_tile(...);
-    }
 }
 ```
 
 注意事项：
 
-- `tuner.param : !symbol.dim<"TILE_M">` 的公开源码占位口径是 `tuner_param("TILE_M")` 风格的非字面量 tile 来源；例如 `long long tile_m = tuner_param("TILE_M");`。
-- `kernel_split.tile_value` 是 split-after-IR 到 codegen 的公开 tile bridge：它表示“该 split 阶段实际使用的 tile 因子值”来自对应的 `tuner.param`，不得被实现偷换为固定整数。
-- `symbol.for` 是 split-after-IR 的公开显式分块结构；在代码生成后必须保留为函数体内可机械识别的 tile 遍历顺序，不得静默退化成整块一次性执行。
-- 与 tile 因子相关的循环步长、切片长度、回写长度或等价分段范围，必须复用同一 `tuner.param`-backed 绑定；不允许一边声明 `tile_m`、一边在实际循环/切片里改用硬编码常量。
-- 当 split 后 IR 需要跨阶段中间值承接时，生成源码必须保留显式承接对象，例如局部 `Memory` / `alloc(...)` / 命名中间 buffer；不能依赖“代码生成阶段隐式重算”或“实现内部临时值自定”。
-- 本节禁止额外抽取 helper 函数、额外生成 `func.call` 风格承接或把 split 阶段外包给未公开的子函数；split-after-IR 的公开合同仍是单函数源码。
-- `0`、`1` 这类与 tile 因子无关的循环初值或单位 stride 常量不在“禁止字面量”范围内；被禁止的是把 tile 因子及其派生分块范围直接烘焙为固定整数。
+- `tuner.param : !symbol.int<"TILE_D0">` 的公开源码占位口径是 `tuner_param("TILE_D0")` 风格的非字面量 tile 来源；例如 `long long tile_d0 = tuner_param("TILE_D0");`。
+- `symbol.for` 是 tile family after-IR 的公开显式分块结构；在代码生成后必须保留为函数体内可机械识别的 tile 遍历顺序，不得静默退化成整块一次性执行。
+- 与 tile 因子相关的循环步长、切片长度、回写长度或等价分段范围，必须复用同一 `tuner.param`-backed 绑定。
+- 当 split 后 IR 需要跨阶段中间值承接时，生成源码必须保留显式承接对象，例如局部 `Memory` / `alloc(...)` / 命名中间 buffer；不能依赖代码生成阶段隐式重算。
+- 本节禁止额外抽取 helper 函数、额外生成 `func.call` 风格承接或把 split 阶段外包给未公开的子函数；tile family after-IR 的公开合同仍是单函数源码。
 
 ### 失败边界
 
-- 若 split-after-IR 缺少必需的 `tuner.param`，`gen_kernel(...)` 必须抛出 `GenKernelError`，且错误消息包含 `KernelSplitMalformed: missing tuner.param`。
-- 若 split-after-IR 缺少必需的 `kernel_split.tile_value`，`gen_kernel(...)` 必须抛出 `GenKernelError`，且错误消息包含 `KernelSplitMalformed: missing kernel_split.tile_value`。
-- 若 split-after-IR 缺少显式分块结构 `symbol.for`，`gen_kernel(...)` 必须抛出 `GenKernelError`，且错误消息包含 `KernelSplitMalformed: missing explicit split structure (symbol.for)`。
-- 若 split-after-IR 需要跨阶段承接对象但既无合法 SSA 承接、也无显式 carry memory / 中间 buffer，`gen_kernel(...)` 必须抛出 `GenKernelError`，且错误消息包含 `KernelSplitMalformed` 与具体缺失原因。
-- 若源码生成阶段试图把 split 结果额外抽成 helper 函数或额外调用层，`gen_kernel(...)` 必须抛出 `GenKernelError`，且错误消息包含 `KernelSplitUnexpectedHelperFunction`。
-- 上述失败都禁止 silent fallback：不得改为输出未切分源码、不得删掉 split 相关阶段、不得把 `tuner.param` / `kernel_split.tile_value` 伪装成固定整数字面量后继续生成。
+- 若 tile family after-IR 缺少必需的 `tuner.param`，`gen_kernel(...)` 必须抛出 `GenKernelError`，且错误消息包含 `TileCodegenMalformed: missing tuner.param`。
+- 若 tile family after-IR 缺少显式分块结构 `symbol.for`，`gen_kernel(...)` 必须抛出 `GenKernelError`，且错误消息包含 `TileCodegenMalformed: missing explicit tile loop (symbol.for)`。
+- 若 tile family after-IR 需要跨阶段承接对象但既无合法 SSA 承接、也无显式 carry memory / 中间 buffer，`gen_kernel(...)` 必须抛出 `GenKernelError`，且错误消息包含 `TileCodegenMalformed` 与具体缺失原因。
+- 若源码生成阶段试图把 split 结果额外抽成 helper 函数或额外调用层，`gen_kernel(...)` 必须抛出 `GenKernelError`，且错误消息包含 `TileCodegenUnexpectedHelperFunction`。
+- 上述失败都禁止 silent fallback：不得改为输出未切分源码、不得删掉 split 相关阶段。
 
 ## tile-elewise ModulePass codegen 合同
 
@@ -296,7 +282,7 @@ void vec_add_exp(...) {
 
 - 本节适用于已经过 `tile-analysis -> tile-elewise` 的单个 `func.func` 输入。
 - 函数体必须继续保留 `tile.analysis + tile.tile_exprs` 这两个公开合同属性，作为后续验收资产。
-- `tile-elewise` 的公开输出仍以 tile-analysis 的分析合同为真源，只在 elewise 轴上做显式分块，不回退到旧 `TilePass` / `KernelSplitPass` bridge 口径。
+- `tile-elewise` 的公开输出仍以 tile-analysis 的分析合同为真源，只在 elewise 轴上做显式分块，不回退到历史桥接口径。
 
 ### 目标源码形态
 
@@ -328,8 +314,52 @@ void tile_elewise_example(
 
 - `tile.analysis` 与 `tile.tile_exprs` 必须在 rewritten op 上继续可见，不得在 `tile-elewise` 后被清理掉。
 - `tile-elewise` 只消费 elewise 轴；reduce 轴必须继续保持未切分。
-- 不得把 `tuner.param` 回退成 `kernel_split.tile_value` / `tile.step_value` 旧桥接文本，也不得通过 helper 抽取规避本节合同。
-- 当前本节只冻结 elementwise / broadcast 的 CPU codegen 成功口径；matmul 仅要求保留公开合同属性与 tile 改写结构，不把 CPU helper 作为新增承诺。
+- 不得把 `tuner.param` 回退成历史桥接文本，也不得通过 helper 抽取规避本节合同。
+- 当前本节只明确 elementwise / broadcast 的 CPU codegen 成功口径；matmul 仅要求保留公开合同属性与 tile 改写结构，不把 CPU helper 作为新增承诺。
+
+## tile-reduce ModulePass codegen 合同
+
+### 适用范围
+
+- 本节适用于已经过 `tile-analysis -> tile-reduce` 的单个 `func.func` 输入。
+- 函数体必须继续保留 `tile.analysis + tile.tile_exprs` 这两个公开合同属性，作为后续验收资产。
+- `tile-reduce` 的公开输出仍以 tile-analysis 的分析合同为真源，对 matmul 的输出轴与 reduce 轴生成显式分块。
+
+### 目标源码形态
+
+功能说明：
+
+- `gen_kernel(...)` 消费 tile-reduce after-IR 输入时，目标源码必须仍是单个函数定义；tile 因子通过 `tuner.param : !symbol.int<"...">` 进入源码，并以 `tuner_param("TILE_D0")`、`tuner_param("TILE_D1")`、`tuner_param("TILE_R0")` 这类非字面量绑定方式出现。
+- reduce 输出结构必须可机械识别为 `symbol.for -> symbol.for -> dma.fill -> symbol.for -> dma.view/dma.alloc/kernel.matmul/kernel.binary_elewise`。
+- rewritten `kernel.matmul` 必须继续保留 `tile.analysis + tile.tile_exprs`，其中 `tile.tile_exprs` 记录当前输出 tile 表达。
+
+使用示例：
+
+```cpp
+void tile_reduce_matmul(
+    Memory<MemorySpace::GM, int32_t>& out,
+    const Memory<MemorySpace::GM, int32_t>& lhs,
+    const Memory<MemorySpace::GM, int32_t>& rhs) {
+    long long tile_d0 = tuner_param("TILE_D0");
+    long long tile_d1 = tuner_param("TILE_D1");
+    long long tile_r0 = tuner_param("TILE_R0");
+    for (long long d0 = 0; d0 < out.shape()[0]; d0 += tile_d0) {
+        for (long long d1 = 0; d1 < out.shape()[1]; d1 += tile_d1) {
+            fill(out_tile, 0);
+            for (long long r0 = 0; r0 < lhs.shape()[1]; r0 += tile_r0) {
+                matmul(tmp, lhs_tile, rhs_tile);
+                add(out_tile, tmp, out_tile);
+            }
+        }
+    }
+}
+```
+
+注意事项：
+
+- `tile-reduce` 不承诺额外 helper 函数或调用层。
+- `TILE_R0` 只作为 reduce loop 步长与 reduce tile view 尺寸，不写入 rewritten matmul 的输出 tile 表达矩阵。
+- 当前 CPU codegen 仍只以可机械识别的 tile loop、tuner 参数与 kernel op 顺序为公开合同。
 
 ## CPU `conv2d_img2col2d_tiled(...)` 固定骨架
 
@@ -434,7 +464,7 @@ npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out_tile, lhs_tile, rhs_ti
 - 验证 `target="npu_demo"` 的 body 函数骨架必须包含 `ctx.thread_id()`、`ctx.thread_num()`、`ctx.get_dynamic_memory<...>()`，并保持 `view/slice/barrier/Kernel helper/barrier/deslice` 的固定顺序；不得回退到公开 `Nn` 别名、`.view<`、`load<`、`store<` 或表达式式 `auto tile = slice(source, ...)`，且不得生成旧接口 `ctx.sync_threads()`。
 - 验证非 `Memory` 标量返回的签名与函数体生成规则；其中 `!symbol.int<"...">` 仅允许 `target=cpu`。
 - 对 `conv_cpu_tiled_v1` 下游实现阶段，验证 `conv2d_img2col2d_tiled(...)` 生成源码包含固定 tile 常量、`cpu::img2col2d(...)`、局部 `col_buffer/acc_buffer`、`n/f/ho/wo` 分块循环与最终写回 `out`。
-- 注：本次 `KernelSplitPass` 相关验收当前先冻结为本 spec 的下游测试映射；`test/dsl/test_gen_kernel.py` 已收口相应用例，后续修改不得绕过这些黑盒约束。
+- 注：tile family split-after-IR 相关验收以本 spec 的下游测试映射为准；`test/dsl/test_gen_kernel.py` 已收口相应用例，后续修改不得绕过这些黑盒约束。
 - 注：`S3` 计划中的四个 direct-return `nn.add` 验收用例当前先冻结为本 spec 的下游待补测试映射；在 `test/dsl/test_gen_kernel.py` 实际落地前，不把它们写成“当前已存在的可执行测试”。
 
 ### 功能与用例清单
@@ -464,13 +494,14 @@ npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out_tile, lhs_tile, rhs_ti
 - GK-019：rewrite 后成功链路不再残留旧 memory return ABI。（`test_rewritten_pipeline_has_no_memory_return_abi_left`）
 - GK-020：half-rewritten IR 会被 `gen_kernel(...)` 显式拒绝。（`test_rewritten_pipeline_fails_on_half_rewritten_ir`）
 - GK-021：rewrite 后 lowered add、`conv2d_img2col2d_tiled(...)`、`target="npu_demo"` 的受控双函数 module 子集三类函数级形态继续只通过黑盒 `gen_kernel(...)` 验证源码合同；测试不得直接依赖内部 helper、内部策略函数或内部策略名。（`test_gen_kernel_black_box_direct_return_nn_add_conv2d_img2col2d_tiled_and_npu_demo_contracts`）
-- GK-S3-001：split-after-IR 进入 `gen_kernel(...)` 时，目标源码必须保持单个函数定义，切分逻辑位于函数体内部，且 tile 循环来自 `symbol.for` 的显式分块语义。（`test_gen_kernel_emits_kernel_split_single_function_tile_loop`）
-- GK-S3-002：split codegen 缺少 `tuner.param` 时必须报 `KernelSplitMalformed`，禁止 silent fallback。（`test_gen_kernel_rejects_kernel_split_missing_tuner_param`）
-- GK-S3-003：split codegen 缺少显式分块结构 `symbol.for` 时必须报 `KernelSplitMalformed`，不得退化成未切分源码。（`test_gen_kernel_rejects_kernel_split_missing_loop`）
-- GK-S3-004：split codegen 不允许出现 helper/函数抽取式承接；出现 `func.call` 时必须报 `KernelSplitUnexpectedHelperFunction`。（`test_gen_kernel_rejects_kernel_split_with_helper_call`）
-- GK-S3-005：split codegen 缺少 tile bridge `kernel_split.tile_value` 时必须报 `KernelSplitMalformed`，不得把 tile 因子硬编码成常量。（`test_gen_kernel_rejects_kernel_split_missing_tile_bridge`）
+- GK-S3-001：tile family after-IR 进入 `gen_kernel(...)` 时，目标源码必须保持单个函数定义，切分逻辑位于函数体内部，且 tile 循环来自 `symbol.for` 的显式分块语义。（`test_gen_kernel_emits_tile_codegen_single_function_tile_loop`）
+- GK-S3-002：tile codegen 缺少 `tuner.param` 时必须报 `TileCodegenMalformed`，禁止 silent fallback。（`test_gen_kernel_rejects_tile_codegen_missing_tuner_param`）
+- GK-S3-003：tile codegen 缺少显式分块结构 `symbol.for` 时必须报 `TileCodegenMalformed`，不得退化成未切分源码。（`test_gen_kernel_rejects_tile_codegen_missing_loop`）
+- GK-S3-004：tile codegen 不允许出现 helper/函数抽取式承接；出现 `func.call` 时必须报 `TileCodegenUnexpectedHelperFunction`。（`test_gen_kernel_rejects_tile_codegen_with_helper_call`）
+- GK-S3-005：tile codegen 遇到历史 split tuner 参数合同必须报 `TileCodegenMalformed`。（`test_gen_kernel_rejects_legacy_split_tuner_param_contract`）
 - GK-S5-001：tile-elewise after-IR 输入可继续保留 `tile.analysis + tile.tile_exprs`，并对 elementwise/broadcast 生成稳定的 `tuner_param("TILE_D0")` / `cpu::add(...)` / `cpu::broadcast(...)` 源码。（`test_gen_kernel_emits_tile_elewise_cpu_source_for_elementwise_and_broadcast`）
 - GK-S5-002：tile-elewise after-IR 的 matmul 改写输出必须继续保留 `tile.analysis + tile.tile_exprs`，且 rewritten `kernel.matmul` 仍可机械识别为 tile family 成员。（`test_tile_elewise_pass_preserves_matmul_contract`）
+- GK-S6-001：tile-reduce after-IR 输入可继续保留 `tile.analysis + tile.tile_exprs`，并生成稳定的 `TILE_D0/TILE_D1/TILE_R0`、三层 `symbol.for`、`dma.fill`、`kernel.matmul` 与累加结构。（`test_tile_reduce_pass_rewrites_matmul_and_preserves_contract`）
 
 ### C2 下游验收标准
 

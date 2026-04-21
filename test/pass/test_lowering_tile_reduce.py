@@ -1,189 +1,264 @@
 """tile-reduce pass tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 金铲铲大作战
+最后一次更改: 朽木露琪亚
 
 功能说明:
-- 覆盖 `kernel_gen.passes.lowering.tile_reduce.TileReducePass` 的公开 ModulePass 合同。
-- 通过 expectation 目录级黑盒锁定 `tile-reduce` 对 matmul / fc 路径的 reduction-only 收口结果。
-- 通过 registry 断言 `tile-reduce` 可稳定构造为 `ModulePass`。
+- 覆盖 `kernel_gen.passes.lowering.tile_reduce.TileReducePass` 的 ModulePass 合同。
+- 锁定 `tile-reduce` 会在 `tile-analysis` 的基础上继续写出 `symbol.for` / `dma.view` / `dma.fill` 的 reduce 结构。
+- 锁定 rewritten `kernel.matmul` 继续保留 `tile.analysis + tile.tile_exprs`。
 
 使用示例:
 - pytest -q test/pass/test_lowering_tile_reduce.py
 
 关联文件:
-- spec: [spec/pass/lowering/tile_reduce.md](spec/pass/lowering/tile_reduce.md)
-- test: [test/pass/test_lowering_tile_reduce.py](test/pass/test_lowering_tile_reduce.py)
 - 功能实现: [kernel_gen/passes/lowering/tile_reduce.py](kernel_gen/passes/lowering/tile_reduce.py)
+- Spec 文档: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
+- 测试文件: [test/pass/test_lowering_tile_reduce.py](test/pass/test_lowering_tile_reduce.py)
 """
 
 from __future__ import annotations
 
-import os
 import importlib
-import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 from xdsl.context import Context
-from xdsl.dialects.builtin import ModuleOp
+from xdsl.dialects.builtin import ArrayAttr, StringAttr
 from xdsl.passes import ModulePass
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-REPO_ROOT_STR = str(REPO_ROOT)
-if REPO_ROOT_STR in sys.path:
-    sys.path.remove(REPO_ROOT_STR)
-sys.path.insert(0, REPO_ROOT_STR)
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-for module_name in list(sys.modules):
-    if module_name == "kernel_gen" or module_name.startswith("kernel_gen."):
-        del sys.modules[module_name]
-
+tile_analysis_helpers = importlib.import_module("test.pass.test_lowering_tile_analysis")
+tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
+tile_module = importlib.import_module("kernel_gen.passes.lowering.tile")
+tile_reduce_module = importlib.import_module("kernel_gen.passes.lowering.tile_reduce")
 registry_module = importlib.import_module("kernel_gen.passes.registry")
+
+from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp
+from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelMatmulOp
+
+TileAnalysisPass = tile_analysis_module.TileAnalysisPass
+TilePassError = tile_module.TilePassError
+TileReducePass = tile_reduce_module.TileReducePass
 build_registered_pass = registry_module.build_registered_pass
 load_builtin_passes = registry_module.load_builtin_passes
 
-tile_reduce_module = importlib.import_module("kernel_gen.passes.lowering.tile_reduce")
-TileReduceError = tile_reduce_module.TileReduceError
-TileReducePass = tile_reduce_module.TileReducePass
 
-tile_reduce_matmul = importlib.import_module("expectation.pass.tile.reduce.matmul")
-tile_reduce_fc = importlib.import_module("expectation.pass.tile.reduce.fc")
-
-
-def _run_expectation_module(module_name: str) -> subprocess.CompletedProcess[str]:
-    """以独立进程运行 expectation 目录入口。
+def _apply_tile_reduce_pipeline(module):
+    """先执行 tile-analysis，再执行 tile-reduce。
 
     创建者: 金铲铲大作战
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 固定在当前 worktree 根目录启动，复现 package 级 expectation 的入口解析路径。
-    - 使用 worktree-first `PYTHONPATH`，验证目录入口不会串到仓根旧合同。
+    - 为 tile-reduce 专门测试提供最小组合入口。
+    - 返回就地改写后的 module，供后续断言。
 
     使用示例:
-    - result = _run_expectation_module("expectation.pass.tile.reduce")
+    - module = _apply_tile_reduce_pipeline(module)
 
     关联文件:
-    - spec: [spec/pass/lowering/tile_reduce.md](spec/pass/lowering/tile_reduce.md)
-    - test: [test/pass/test_lowering_tile_reduce.py](test/pass/test_lowering_tile_reduce.py)
-    - 功能实现: [expectation/pass/tile/reduce/__main__.py](expectation/pass/tile/reduce/__main__.py)
+    - 功能实现: [kernel_gen/passes/lowering/tile_reduce.py](kernel_gen/passes/lowering/tile_reduce.py)
+    - Spec 文档: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
+    - 测试文件: [test/pass/test_lowering_tile_reduce.py](test/pass/test_lowering_tile_reduce.py)
     """
 
-    env = os.environ.copy()
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
-    env["PYTHONPATH"] = os.pathsep.join([str(REPO_ROOT), str(REPO_ROOT.parent)])
-    return subprocess.run(
-        [sys.executable, "-m", module_name],
-        cwd=REPO_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    ctx = Context()
+    TileAnalysisPass().apply(ctx, module)
+    TileReducePass().apply(ctx, module)
+    return module
 
 
-def _assert_ircheck_ok(case_text: str, source_path: str, *, required_fragments: tuple[str, ...]) -> None:
-    """运行 tile-reduce 黑盒并断言通过。
+def _expected_matmul_exprs() -> ArrayAttr:
+    """返回 tile-reduce matmul 的期望 tile 表达矩阵。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 使用 `run_ircheck_text` 验证 `tile-reduce` 目录级 expectation。
+    - 统一复用 `TILE_D0/TILE_D1` 的三 operand 矩阵。
 
     使用示例:
-    - _assert_ircheck_ok(CASE_TEXT_STATIC, "test/pass/test_lowering_tile_reduce.py:static", required_fragments=("tile.analysis",))
+    - expected = _expected_matmul_exprs()
 
     关联文件:
-    - spec: [spec/pass/lowering/tile_reduce.md](spec/pass/lowering/tile_reduce.md)
-    - test: [test/pass/test_lowering_tile_reduce.py](test/pass/test_lowering_tile_reduce.py)
-    - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
+    - 功能实现: [kernel_gen/passes/lowering/tile_reduce.py](kernel_gen/passes/lowering/tile_reduce.py)
+    - Spec 文档: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
+    - 测试文件: [test/pass/test_lowering_tile_reduce.py](test/pass/test_lowering_tile_reduce.py)
     """
 
-    run_ircheck_text = importlib.import_module("kernel_gen.tools.ircheck").run_ircheck_text
-    result = run_ircheck_text(case_text, source_path=source_path)
-    assert result.ok is True, (
-        f"expected ok=True, got ok={result.ok}, exit_code={result.exit_code}, message={result.message!r}"
+    return ArrayAttr(
+        [
+            ArrayAttr([StringAttr("TILE_D0"), StringAttr("TILE_D1")]),
+            ArrayAttr([StringAttr("TILE_D0"), StringAttr("TILE_D1")]),
+            ArrayAttr([StringAttr("TILE_D0"), StringAttr("TILE_D1")]),
+        ]
     )
-    assert result.exit_code == 0, f"expected exit_code=0, got {result.exit_code}"
-    assert result.actual_ir.count("symbol.for") == 1
-    assert '"tile.step_value"(' not in result.actual_ir
-    assert "tile.analysis" in result.actual_ir
-    assert "tile.tile_exprs" in result.actual_ir
-    for fragment in required_fragments:
-        assert fragment in result.actual_ir, f"actual_ir must contain {fragment!r}"
 
 
-def test_tile_reduce_pass_is_module_pass_and_registry_construction() -> None:
-    """验证 tile-reduce 可作为 ModulePass 由 registry 构造。"""
+def _build_fc_chain_module():
+    """构造 broadcast -> matmul -> binary 组合链路模块。
 
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 生成最小 fc 风格 lowered IR，用于验证 tile-reduce 只为 matmul reduce 计划建参。
+    - `matmul` 的输出使用 `dma.alloc` 中间 buffer，满足跨阶段 carry memory 合同。
+
+    使用示例:
+    - module = _build_fc_chain_module()
+
+    关联文件:
+    - 功能实现: [kernel_gen/passes/lowering/tile_reduce.py](kernel_gen/passes/lowering/tile_reduce.py)
+    - Spec 文档: [spec/pass/lowering/tile_reduce.md](spec/pass/lowering/tile_reduce.md)
+    - 测试文件: [test/pass/test_lowering_tile_reduce.py](test/pass/test_lowering_tile_reduce.py)
+    """
+
+    out_type = tile_analysis_helpers._make_memory_type(["M", "N"])
+    x_type = tile_analysis_helpers._make_memory_type(["M", "K"])
+    weight_type = tile_analysis_helpers._make_memory_type(["K", "N"])
+    bias_type = tile_analysis_helpers._make_memory_type(["N"])
+    block = tile_analysis_helpers.Block(arg_types=[out_type, x_type, weight_type, bias_type])
+    space = tile_analysis_helpers.NnMemorySpaceAttr.from_name("global")
+    bias_alloc = DmaAllocOp([], out_type)
+    matmul_alloc = DmaAllocOp([], out_type)
+    block.add_ops(
+        [
+            bias_alloc,
+            matmul_alloc,
+            DmaBroadcastOp(bias_alloc.result, block.args[3]),
+            KernelMatmulOp(matmul_alloc.result, block.args[1], block.args[2], space),
+            KernelBinaryElewiseOp(block.args[0], matmul_alloc.result, bias_alloc.result, kind="add", space=space),
+            tile_analysis_helpers.func.ReturnOp(),
+        ]
+    )
+    func_op = tile_analysis_helpers.func.FuncOp(
+        "tile_reduce_fc_chain",
+        tile_analysis_helpers.FunctionType.from_lists([out_type, x_type, weight_type, bias_type], []),
+        tile_analysis_helpers.Region(block),
+    )
+    return tile_analysis_helpers.ModuleOp([func_op])
+
+
+def _tuner_param_names(module) -> list[str]:
+    """提取 module 中 `tuner.param` 的名称。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 遍历 IR 并读取 `tuner.param` 结果类型中的 `symbol.int` 名称。
+    - 保持遍历顺序，便于断言 pass 产出的参数顺序。
+
+    使用示例:
+    - names = _tuner_param_names(module)
+
+    关联文件:
+    - 功能实现: [kernel_gen/passes/lowering/tile_reduce.py](kernel_gen/passes/lowering/tile_reduce.py)
+    - Spec 文档: [spec/pass/lowering/tile_reduce.md](spec/pass/lowering/tile_reduce.md)
+    - 测试文件: [test/pass/test_lowering_tile_reduce.py](test/pass/test_lowering_tile_reduce.py)
+    """
+
+    names: list[str] = []
+    for op in tile_analysis_helpers._collect_ops(module):
+        if getattr(op, "name", None) != "tuner.param":
+            continue
+        value = op.result.type.get_value()
+        names.append(str(value))
+    return names
+
+
+# TC-TILE-REDUCE-001
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 TileReducePass 作为 ModulePass 可直接执行，并对 matmul 输出显式 reduce 结构。
+# 使用示例: pytest -q test/pass/test_lowering_tile_reduce.py -k test_tile_reduce_pass_rewrites_matmul_and_preserves_contract
+# 对应功能实现文件路径: kernel_gen/passes/lowering/tile_reduce.py
+# 对应 spec 文件路径: spec/pass/lowering/tile.md
+# 对应测试文件路径: test/pass/test_lowering_tile_reduce.py
+def test_tile_reduce_pass_rewrites_matmul_and_preserves_contract() -> None:
+    module = _apply_tile_reduce_pipeline(tile_analysis_helpers._build_matmul_module())
+
+    ops = tile_analysis_helpers._collect_ops(module)
+    matmul_ops = [op for op in ops if getattr(op, "name", None) == "kernel.matmul"]
+    loop_ops = [op for op in ops if getattr(op, "name", None) == "symbol.for"]
+    view_ops = [op for op in ops if getattr(op, "name", None) == "dma.view"]
+    fill_ops = [op for op in ops if getattr(op, "name", None) == "dma.fill"]
+    alloc_ops = [op for op in ops if getattr(op, "name", None) == "dma.alloc"]
+    bridge_ops = [
+        op
+        for op in ops
+        if getattr(op, "name", None) in {"tile.step_value", "kernel_split.tile_value", "tile.symbol_literal"}
+    ]
+
+    expected_roles = ArrayAttr(
+        [
+            ArrayAttr([StringAttr("elewise"), StringAttr("reduce")]),
+            ArrayAttr([StringAttr("reduce"), StringAttr("elewise")]),
+            ArrayAttr([StringAttr("elewise"), StringAttr("elewise")]),
+        ]
+    )
+
+    assert len(matmul_ops) == 1
+    assert len(loop_ops) == 3
+    assert len(view_ops) == 3
+    assert len(fill_ops) == 1
+    assert len(alloc_ops) == 1
+    assert bridge_ops == []
+    assert matmul_ops[0].attributes["tile.analysis"] == expected_roles
+    assert matmul_ops[0].attributes["tile.tile_exprs"] == _expected_matmul_exprs()
+
+
+# TC-TILE-REDUCE-001A
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 功能说明: 验证 TileReducePass 对缺少 tile.analysis 的 kernel.matmul 显式失败。
+# 使用示例: pytest -q test/pass/test_lowering_tile_reduce.py -k test_tile_reduce_rejects_matmul_without_analysis_attrs
+# 对应功能实现文件路径: kernel_gen/passes/lowering/tile_reduce.py
+# 对应 spec 文件路径: spec/pass/lowering/tile_reduce.md
+# 对应测试文件路径: test/pass/test_lowering_tile_reduce.py
+def test_tile_reduce_rejects_matmul_without_analysis_attrs() -> None:
+    module = tile_analysis_helpers._build_matmul_module()
+
+    with pytest.raises(TilePassError, match="TilePassUnsupportedOp: .*requires tile.analysis and tile.tile_exprs"):
+        TileReducePass().apply(Context(), module)
+
+
+# TC-TILE-REDUCE-001B
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 功能说明: 验证 TileReducePass 在组合链路中只为 matmul reduce 计划建参。
+# 使用示例: pytest -q test/pass/test_lowering_tile_reduce.py -k test_tile_reduce_fc_chain_omits_unconsumed_tuner_params
+# 对应功能实现文件路径: kernel_gen/passes/lowering/tile_reduce.py
+# 对应 spec 文件路径: spec/pass/lowering/tile_reduce.md
+# 对应测试文件路径: test/pass/test_lowering_tile_reduce.py
+def test_tile_reduce_fc_chain_omits_unconsumed_tuner_params() -> None:
+    module = _apply_tile_reduce_pipeline(_build_fc_chain_module())
+
+    assert _tuner_param_names(module) == ["TILE_M0", "TILE_M1", "TILE_R0"]
+    assert "TILE_B0" not in str(module)
+    assert "TILE_E0" not in str(module)
+    assert "TILE_E1" not in str(module)
+
+
+# TC-TILE-REDUCE-002
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 tile-reduce 目录入口对应的 registry 名称可直接构造 ModulePass。
+# 使用示例: pytest -q test/pass/test_lowering_tile_reduce.py -k test_tile_reduce_registered_pass_is_module_pass
+# 对应功能实现文件路径: kernel_gen/passes/lowering/tile_reduce.py
+# 对应 spec 文件路径: spec/pass/lowering/tile.md
+# 对应测试文件路径: test/pass/test_lowering_tile_reduce.py
+def test_tile_reduce_registered_pass_is_module_pass() -> None:
     load_builtin_passes()
-
     pass_obj = build_registered_pass("tile-reduce")
 
     assert isinstance(pass_obj, ModulePass)
     assert pass_obj.name == "tile-reduce"
     assert type(pass_obj).__name__ == "TileReducePass"
     assert pass_obj.__class__.__module__ == "kernel_gen.passes.lowering.tile_reduce"
-
-
-def test_tile_reduce_pass_rejects_non_module_input() -> None:
-    """验证 tile-reduce 的 `apply` 仅接受 builtin.module。"""
-
-    with pytest.raises(
-        TileReduceError,
-        match=r"^TileReduceRequiresLoweredKernelIR: module must be builtin\.module$",
-    ):
-        TileReducePass().apply(Context(), object())
-
-
-def test_tile_reduce_expectation_matmul_cases() -> None:
-    """验证 tile-reduce matmul 目录级 expectation。"""
-
-    _assert_ircheck_ok(
-        tile_reduce_matmul.CASE_TEXT_STATIC,
-        "expectation/pass/tile/reduce/matmul.py:static",
-        required_fragments=('"kernel.matmul"', '"kernel.binary_elewise"'),
-    )
-    _assert_ircheck_ok(
-        tile_reduce_matmul.CASE_TEXT_DYNAMIC,
-        "expectation/pass/tile/reduce/matmul.py:dynamic",
-        required_fragments=('"kernel.matmul"', '"kernel.binary_elewise"'),
-    )
-    _assert_ircheck_ok(
-        tile_reduce_matmul.CASE_TEXT_MIXED,
-        "expectation/pass/tile/reduce/matmul.py:mixed",
-        required_fragments=('"kernel.matmul"', '"kernel.binary_elewise"'),
-    )
-
-
-def test_tile_reduce_expectation_fc_cases() -> None:
-    """验证 tile-reduce fc 目录级 expectation。"""
-
-    _assert_ircheck_ok(
-        tile_reduce_fc.CASE_TEXT_STATIC,
-        "expectation/pass/tile/reduce/fc.py:static",
-        required_fragments=('"dma.broadcast"', '"kernel.matmul"', '"kernel.binary_elewise"'),
-    )
-    _assert_ircheck_ok(
-        tile_reduce_fc.CASE_TEXT_DYNAMIC,
-        "expectation/pass/tile/reduce/fc.py:dynamic",
-        required_fragments=('"dma.broadcast"', '"kernel.matmul"', '"kernel.binary_elewise"'),
-    )
-    _assert_ircheck_ok(
-        tile_reduce_fc.CASE_TEXT_MIXED,
-        "expectation/pass/tile/reduce/fc.py:mixed",
-        required_fragments=('"dma.broadcast"', '"kernel.matmul"', '"kernel.binary_elewise"'),
-    )
-
-
-def test_tile_reduce_expectation_package_entry_uses_worktree_first() -> None:
-    """验证 tile-reduce 包级 expectation 入口不会串到仓根旧合同。"""
-
-    result = _run_expectation_module("expectation.pass.tile.reduce")
-    assert result.returncode == 0, (
-        f"expected returncode=0, got {result.returncode}, stdout={result.stdout!r}, stderr={result.stderr!r}"
-    )
-    assert result.stderr == "", f"expected stderr to be empty, got {result.stderr!r}"

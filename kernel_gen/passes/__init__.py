@@ -24,9 +24,8 @@
 - outline_pass = OutlineDeviceKernelPass()
 - from kernel_gen.passes import TileAnalysisPass
 - tile_analysis_pass = TileAnalysisPass()
-- from kernel_gen.passes import TileElewisePass
+- from kernel_gen.passes import TileElewisePass, TileReducePass
 - tile_elewise_pass = TileElewisePass()
-- from kernel_gen.passes import TileReducePass
 - tile_reduce_pass = TileReducePass()
 - from kernel_gen.passes import SymbolLoopHoistPass
 - hoist_pass = SymbolLoopHoistPass()
@@ -38,26 +37,24 @@
   - spec/pass/decompass.md
   - spec/pass/outline_device_kernel.md
   - spec/pass/symbol_loop_hoist.md
-  - spec/pass/lowering/tile_elewise.md
-  - spec/pass/lowering/tile_reduce.md
 - test:
   - test/pass/test_pass_manager.py
   - test/pass/test_buffer_results_to_out_params.py
   - test/pass/decompass/test_softmax.py
   - test/pass/outline_device_kernel/test_outline_device_kernel.py
-  - test/pass/test_lowering_tile_analysis.py
-  - test/pass/test_lowering_tile_elewise.py
-  - test/pass/test_lowering_tile_reduce.py
-  - test/pass/test_symbol_loop_hoist.py
+- test/pass/test_lowering_tile_analysis.py
+- test/pass/test_lowering_tile_elewise.py
+- test/pass/test_lowering_tile_reduce.py
+- test/pass/test_symbol_loop_hoist.py
 - 功能实现:
   - kernel_gen/passes/pass_manager.py
   - kernel_gen/passes/buffer_results_to_out_params.py
   - kernel_gen/passes/decompass.py
   - kernel_gen/passes/outline_device_kernel.py
-  - kernel_gen/passes/lowering/tile_analysis.py
-  - kernel_gen/passes/lowering/tile_elewise.py
-  - kernel_gen/passes/lowering/tile_reduce.py
-  - kernel_gen/passes/symbol_loop_hoist.py
+- kernel_gen/passes/lowering/tile_analysis.py
+- kernel_gen/passes/lowering/tile_elewise.py
+- kernel_gen/passes/lowering/tile_reduce.py
+- kernel_gen/passes/symbol_loop_hoist.py
 """
 
 from .buffer_results_to_out_params import (
@@ -68,7 +65,7 @@ from .decompass import DecompassError, DecompassPass, register_decompass_rewrite
 from .outline_device_kernel import OutlineDeviceKernelError, OutlineDeviceKernelPass
 from .lowering.tile_analysis import TileAnalysisPass
 from .lowering.tile_elewise import TileElewisePass
-from .lowering.tile_reduce import TileReduceError, TileReducePass
+from .lowering.tile_reduce import TileReducePass
 from .pass_manager import Pass, PassManager
 from .symbol_loop_hoist import SymbolLoopHoistError, SymbolLoopHoistPass
 
@@ -85,7 +82,6 @@ __all__ = [
     "TileAnalysisPass",
     "TileElewisePass",
     "TileReducePass",
-    "TileReduceError",
     "SymbolLoopHoistPass",
     "SymbolLoopHoistError",
 ]

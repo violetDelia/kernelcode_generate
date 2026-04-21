@@ -4,12 +4,11 @@
 
 - 定义 `tile-analysis` 的公开 `ModulePass` 合同。
 - 该 pass 只负责 analysis 标注，不生成 tile 改写结构。
-- 目录级黑盒入口固定为 `python -m expectation.pass.tile.analysis`。
 
 ## 文档信息
 
 - 创建者：`朽木露琪亚`
-- 最后一次更改：`朽木露琪亚`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/pass/lowering/tile_analysis.md`](../../../spec/pass/lowering/tile_analysis.md)
 - `功能实现`：[`kernel_gen/passes/lowering/tile_analysis.py`](../../../kernel_gen/passes/lowering/tile_analysis.py)
 - `test`：[`test/pass/test_lowering_tile_analysis.py`](../../../test/pass/test_lowering_tile_analysis.py)
@@ -20,8 +19,6 @@
 - Pass / pipeline 注册表：[`spec/pass/registry.md`](../../../spec/pass/registry.md)
 - `tile` 总览：[`spec/pass/lowering/tile.md`](../../../spec/pass/lowering/tile.md)
 - `tuner.param` 与符号类型：[`spec/dialect/tuner.md`](../../../spec/dialect/tuner.md)
-- `tile-analysis` expectation 入口：
-  - [`expectation/pass/tile/analysis`](../../../expectation/pass/tile/analysis)
 
 ## 术语
 
@@ -33,7 +30,7 @@
 
 - 保持公开名字固定为 `tile-analysis`。
 - 只写 `tile.analysis` 与 `tile.tile_exprs`。
-- 不生成 `symbol.for`、`dma.view`、`tile.step_value` 或其他 tile 改写结构。
+- 不生成 `symbol.for`、`dma.view` 或其他 tile 改写结构。
 - 作为 `ModulePass` 通过 `apply(ctx, module)` 执行。
 
 ## 限制与边界
@@ -73,10 +70,7 @@ TileAnalysisPass().apply(Context(), module)
 ## 测试
 
 - 测试文件：[`test/pass/test_lowering_tile_analysis.py`](../../../test/pass/test_lowering_tile_analysis.py)
-- 执行命令：
-  - `pytest -q test/pass/test_lowering_tile_analysis.py`
-  - `PYTHONPATH=. python -m expectation.pass.tile.analysis`
+- 执行命令：`pytest -q test/pass/test_lowering_tile_analysis.py`
 - 测试目标：
   - `TileAnalysisPass` 可作为 `ModulePass` 由 registry 构造。
   - `tile-analysis` 只写 `tile.analysis` 与 `tile.tile_exprs`。
-  - 目录级 expectation 入口可稳定执行。
