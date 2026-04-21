@@ -41,6 +41,7 @@ from xdsl.dialects.builtin import (
     i1,
     i8,
     i32,
+    i64,
 )
 from xdsl.ir import Attribute, Block, SSAValue
 from xdsl.utils.exceptions import VerifyException
@@ -336,7 +337,7 @@ def _dtype_to_xdsl(dtype: NumericType, location: SourceLocation | None = None) -
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 将 DSL NumericType 转为 nn.memory 的 element_type。
+    - 将 DSL NumericType 转为 nn.memory 的 element_type，当前覆盖 Bool/Int8/Int32/Int64/BFloat16/Float16/Float32/Float64。
     - 遇到不支持类型时抛出 LoweringError。
 
     使用示例:
@@ -361,6 +362,8 @@ def _dtype_to_xdsl(dtype: NumericType, location: SourceLocation | None = None) -
         return i8
     if dtype is NumericType.Int32:
         return i32
+    if dtype is NumericType.Int64:
+        return i64
     if dtype is NumericType.Bool:
         return i1
     raise _LoweringError(f"Unsupported dtype: {dtype}", location=location)
@@ -373,7 +376,7 @@ def _xdsl_to_dtype(element_type: Attribute, location: SourceLocation | None = No
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 支持 Float16/BFloat16/Float32/Float64/Int32/Bool 解析为 NumericType。
+    - 支持 Float16/BFloat16/Float32/Float64/Int32/Int64/Bool 解析为 NumericType。
     - 不支持的 element_type 抛出 LoweringError。
 
     使用示例:
@@ -396,6 +399,8 @@ def _xdsl_to_dtype(element_type: Attribute, location: SourceLocation | None = No
         return NumericType.Int8
     if element_type == i32:
         return NumericType.Int32
+    if element_type == i64:
+        return NumericType.Int64
     if element_type == i1:
         return NumericType.Bool
     raise _LoweringError("Unsupported element_type for nn arithmetic", location=location)

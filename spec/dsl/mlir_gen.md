@@ -129,7 +129,7 @@ func_op = build_func_op(only_symbol, s)
 - 若 `fn` 没有可位置绑定形参，则允许以零个 `runtime_args` 调用；函数结果类型仍必须遵守本文件的统一返回装配规则，即由显式 `return` lowering 结果决定，或在显式 `-> None` / 语句型零返回函数场景下保持零结果，不能靠最后一个值表达式猜输出。
 - 若函数没有返回注解但存在显式 `return expr`，则 `func.func outputs` 与 `func.return` operand 类型必须跟随该 `return expr` 的 lowering 结果，不得因为 `FunctionAST.outputs == []` 而退回零结果。
 - 若函数没有返回注解、也没有显式 `return`，但函数体最后停在值表达式上，则必须抛出 `AstVisitorError`，错误消息包含 `Function return requires explicit return syntax or annotation`；不得靠最后一个值表达式猜函数输出。
-- 张量类运行时参数应按其对应 spec lowering 为项目内的 memory type。
+- 张量类运行时参数应按其对应 spec lowering 为项目内的 memory type；当前 tensor dtype lowering 必须覆盖 `NumericType.Int64 -> i64`，不得在 `i64` 场景下静默退回其他 builtin 整型。
 - `SymbolDim("s")` 这类运行时参数必须 lowering 为 `!symbol.int<"s">`；`SymbolDim(1)` 这类常量 symbol 必须 lowering 为 `!symbol.int<"1">`。
 - 当 `runtime_args` 为普通 Python `int` 且函数场景属于整型标量运算时，输入参数必须 lowering 为携带该整数值的 `SymbolValueType`，而不是 builtin 整数类型；负数实参的对外字符串表示必须保持 `symbol.int<-3>` 这类十进制负数字面量形式。
 - 允许 `for` 循环内包含 `dma.slice`/`dma.deslice` 相关语义；当循环来自 `LoopRange` 且边界为 symbol 整数时，必须保留 `symbol.for` 结构，且迭代变量 `it` 不能退化为 `index`、`i32`、浮点或其他非 `SymbolValueType`。

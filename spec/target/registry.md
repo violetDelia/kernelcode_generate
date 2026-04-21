@@ -2,8 +2,8 @@
 
 ## 功能简介
 
-- 定义 target 注册中心的规范，负责提供固定内置模板与目录 target 的统一注册/查询入口。
-- 支持三类来源：固定内置模板、`json` 与 `txt`；其中 `json/txt` 可混用。
+- 定义 target 注册中心的规范，负责提供文件化固定 target 与目录 target 的统一注册/查询入口。
+- 支持三类来源：文件化固定 target、`json` 与 `txt`；其中 `json/txt` 可混用。
 - target 信息用于驱动 `arch` 相关 operation/dialect/include-runtime 的“能力检查”和“硬件参数读取”，例如 `thread_num`、`sm_memory_size`、`arch.launch`、`arch.barrier`。
 
 ## 文档信息
@@ -115,9 +115,9 @@ hw.tlm3_memory_size=0
 - `hw.*` 必须可解析为整数。
 - 未识别 key 必须报错，防止静默拼写错误。
 
-### 固定内置模板
+### 文件化固定 target
 
-除目录中的 `json/txt` 文件外，registry 可为保留 target 提供固定模板。本轮必须固定 `npu_demo` 的能力矩阵与硬件参数，调用方不要求额外提供 `npu_demo.json` 或 `npu_demo.txt`。
+除目录中的 `json/txt` 文件外，registry 可为保留 target 提供文件化固定 target。本轮必须固定 `npu_demo` 的能力矩阵与硬件参数，调用方通过 `kernel_gen/target/targets/npu_demo.txt` 获得该 target 的唯一标准数据源，不再要求额外提供 `npu_demo.json`。
 
 `npu_demo` 的固定模板语义等价于：
 
@@ -138,7 +138,7 @@ TargetSpec(
     arch_unsupported_ops=set(),
     hardware={
         "block_num": 1,
-        "thread_num": 8,
+        "thread_num": 1,
         "subthread_num": 1,
         "sm_memory_size": 0,
         "lm_memory_size": 0,
@@ -155,9 +155,9 @@ TargetSpec(
 - `npu_demo` 使用显式白名单；除上述 `arch.get_*` 查询、`arch.get_dynamic_memory`、`arch.barrier` 与 `arch.launch` 外，其他能力查询固定判定为未启用。
 - `arch.launch` / `arch.barrier` 是 `npu_demo` P0 真实并行 + 同步路径的正式能力键；旧名 `arch.launch_kernel` 不再进入 `npu_demo` 已启用能力矩阵。
 - `launch` 与 `barrier` 这类未带 `arch.` 前缀的字符串不属于 registry 的稳定输入域；若上层错误传入此类字符串，结果必须仍然收敛为未启用。
-- `block_num=1`、`thread_num=8`、`subthread_num=1` 表示 `npu_demo` P0 launch 能力上限：`block` 固定为 `1`、`subthread` 固定为 `1`、`thread` 允许到 `8`；这些字段不再直接表示 launched body 中当前可见的运行时 extent。
+- `block_num=1`、`thread_num=1`、`subthread_num=1` 表示 `npu_demo` P0 launch 能力上限：`block` 固定为 `1`、`subthread` 固定为 `1`、`thread` 固定为 `1`；这些字段不再直接表示 launched body 中当前可见的运行时 extent。
 - `sm_memory_size=0` 与 `lm_memory_size=0` 表示 `npu_demo` 不提供 `SM/LM` 动态内存容量；`tsm_memory_size=24576`、`tlm1_memory_size=1024`、`tlm2_memory_size=512`、`tlm3_memory_size=512` 为固定片上容量。
-- `npu_demo` 的标准注册入口是 registry 的固定内置模板注册流程，而不是外部 `json/txt` 文件；标准查询入口是 `is_arch_op_supported(...)`、`get_target_hardware(...)` 与 `get_current_target_hardware(...)`。
+- `npu_demo` 的标准注册入口是 registry 的文件化固定 target 加载流程，标准 target 文件路径是 `kernel_gen/target/targets/npu_demo.txt`；标准查询入口是 `is_arch_op_supported(...)`、`get_target_hardware(...)` 与 `get_current_target_hardware(...)`。
 - `npu_demo` 的 analysis 默认参数也由 registry 固定提供，当前至少包含：
   - `path_bandwidth["GM->LM"] = 64`
   - `path_bandwidth["GM->SM"] = 96`
@@ -204,7 +204,7 @@ spec = TargetSpec(
 
 - 扫描目录并加载 `*.json` 与 `*.txt` target 文件。
 - 成功加载后返回“本次加载集合”。
-- 固定内置模板不依赖目录扫描来源；`load_targets(...)` 不是 `npu_demo` 的唯一注册入口。
+- 文件化固定 target 不依赖目录扫描来源；`load_targets(...)` 不是 `npu_demo` 的唯一注册入口。
 
 使用示例：
 
@@ -220,7 +220,7 @@ loaded = registry.load_targets(Path("kernel_gen/target/targets"))
 功能说明：
 
 - 注册单个 target；用于测试或运行时增量注入。
-- 固定内置模板（如 `npu_demo`）不要求调用方手工调用该接口注册。
+- 文件化固定 target（如 `npu_demo`）不要求调用方手工调用该接口注册。
 
 ### `is_arch_op_supported(target: str, op_name: str) -> bool`
 
@@ -257,7 +257,7 @@ loaded = registry.load_targets(Path("kernel_gen/target/targets"))
 - 在无 launch 上下文时，`operation/arch` 查询数量类 helper（如 `get_thread_num`）可读取 `hardware` 作为能力上限或静态回退值；一旦进入 launched body，当前值必须由 runtime 上下文提供。
 - `operation/arch.get_dynamic_memory(space)` 可读取 `*_memory_size` 作为静态 shape；无值时回退动态 shape。
 - `dialect/arch` 在 verifier 阶段可根据“当前 target”校验 op 支持性。
-- 当 `target="npu_demo"` 时，`block_num=1`、`thread_num=8`、`subthread_num=1` 必须作为 P0 能力上限读取；`SM/LM` 动态内存容量固定为 `0`，`TSM/TLM1/TLM2/TLM3` 动态内存容量固定为 `24576/1024/512/512`。
+- 当 `target="npu_demo"` 时，`block_num=1`、`thread_num=1`、`subthread_num=1` 必须作为 P0 能力上限读取；`SM/LM` 动态内存容量固定为 `0`，`TSM/TLM1/TLM2/TLM3` 动态内存容量固定为 `24576/1024/512/512`。
 - 当 `target="npu_demo"` 时，`analysis` 侧的 `path_bandwidth / path_latency_ns / theoretical_compute` 默认参数也必须由 registry 提供；当前不允许 `analysis` 在调用点长期手写这些常量。
 - 当 `target="npu_demo"` 时，`arch.launch` 与 `arch.barrier` 通过 `is_arch_op_supported(...)` 查询必须返回已启用；旧名 `arch.launch_kernel` 必须保持未启用。
 
@@ -296,7 +296,8 @@ hw.tlm3_memory_size=0
 - `json` 与 `txt` 混合目录可同时加载。
 - 默认目录 `kernel_gen/target/targets` 加载后，`cpu.txt` 的 `arch.supported_ops=` 空值应归一化为 `None`，并保持 `arch.get_block_num` 可用、`arch.get_thread_id` 受黑名单限制。
 - 默认目录重复加载应保持幂等，不得因内置 `cpu` 与 `cpu.txt` 冲突而失败。
-- `npu_demo` 固定模板应通过标准查询入口满足以下能力/容量值：`block_num=1`、`thread_num=8`、`subthread_num=1`、`sm_memory_size=0`、`lm_memory_size=0`、`tsm_memory_size=24576`、`tlm1_memory_size=1024`、`tlm2_memory_size=512`、`tlm3_memory_size=512`。
+- `npu_demo` 固定 target 应通过标准查询入口满足以下能力/容量值：`block_num=1`、`thread_num=1`、`subthread_num=1`、`sm_memory_size=0`、`lm_memory_size=0`、`tsm_memory_size=24576`、`tlm1_memory_size=1024`、`tlm2_memory_size=512`、`tlm3_memory_size=512`。
+- `npu_demo.txt` 作为唯一标准 target 数据源，必须能被 `load_targets(Path("kernel_gen/target/targets"))` 一并加载；默认目录重复加载应保持幂等，不得因 `npu_demo` 与内置注册冲突而失败。
 - `npu_demo` 固定模板应通过 `get_target_analysis_defaults("npu_demo")` 暴露 analysis 默认参数；至少覆盖 `path_bandwidth["GM->LM"]`、`path_latency_ns["GM->LM"]` 与 `theoretical_compute["scalar"/"tensor"]`。
 - `npu_demo` 的 `arch.launch` / `arch.barrier` 查询必须固定判定为已启用；旧名 `arch.launch_kernel` 与未带 `arch.` 前缀的 `launch` / `barrier` 不属于已启用能力。
 - `name` 缺失、格式非法、与文件名不一致时报错。
@@ -304,4 +305,4 @@ hw.tlm3_memory_size=0
 - `hw.*` 非整数时报错。
 - 未知 key 报错。
 - `get_target_hardware` 与 `get_current_target_hardware` 在“存在/缺失/未设置当前 target”三类场景行为正确。
-- 下游待补验收标准建议使用 `test_target_registry_npu_demo_supports_launch_and_barrier_caps`：输入 `target="npu_demo"`；预期通过 `is_arch_op_supported(...)` 读取到 `arch.launch=True`、`arch.barrier=True`、`arch.launch_kernel=False`，并通过 `get_target_hardware(...)` / `get_current_target_hardware(...)` 读到 `block_num=1`、`thread_num=8`、`subthread_num=1`、`sm_memory_size=0`、`lm_memory_size=0`、`tsm_memory_size=24576`、`tlm1_memory_size=1024`、`tlm2_memory_size=512`、`tlm3_memory_size=512`。
+- 下游待补验收标准建议使用 `test_target_registry_npu_demo_supports_launch_and_barrier_caps`：输入 `target="npu_demo"`；预期通过 `is_arch_op_supported(...)` 读取到 `arch.launch=True`、`arch.barrier=True`、`arch.launch_kernel=False`，并通过 `get_target_hardware(...)` / `get_current_target_hardware(...)` 读到 `block_num=1`、`thread_num=1`、`subthread_num=1`、`sm_memory_size=0`、`lm_memory_size=0`、`tsm_memory_size=24576`、`tlm1_memory_size=1024`、`tlm2_memory_size=512`、`tlm3_memory_size=512`。

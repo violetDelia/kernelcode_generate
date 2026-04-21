@@ -251,12 +251,16 @@ def test_target_registry_loads_default_cpu_directory() -> None:
     default_dir = REPO_ROOT / "kernel_gen" / "target" / "targets"
     assert default_dir.is_dir()
     assert (default_dir / "cpu.txt").is_file()
+    assert (default_dir / "npu_demo.txt").is_file()
     loaded = target_registry.load_targets(default_dir)
     assert "cpu" in loaded
+    assert "npu_demo" in loaded
     assert loaded["cpu"].arch_supported_ops is None
     assert target_registry.is_arch_op_supported("cpu", "arch.get_thread_id") is False
     assert target_registry.is_arch_op_supported("cpu", "arch.get_block_num") is True
     assert target_registry.get_target_hardware("cpu", "thread_num") == 1
+    assert target_registry.is_arch_op_supported("npu_demo", "arch.launch") is True
+    assert target_registry.get_target_hardware("npu_demo", "thread_num") == 1
 
 
 # TC-TGT-010
@@ -330,7 +334,7 @@ def test_target_registry_current_target_hardware() -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-02 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-02 00:00:00 +0800
-# 测试目的: 验证 npu_demo 固定内置模板的能力矩阵与硬件值可直接查询。
+# 测试目的: 验证 npu_demo 文件化固定 target 的能力矩阵与硬件值可直接查询。
 # 对应功能实现文件路径: kernel_gen/target/registry.py
 # 对应 spec 文件路径: spec/target/registry.md
 def test_target_registry_npu_demo_template() -> None:
@@ -340,7 +344,7 @@ def test_target_registry_npu_demo_template() -> None:
     assert target_registry.is_arch_op_supported("npu_demo", "arch.get_dynamic_memory") is True
 
     assert target_registry.get_target_hardware("npu_demo", "block_num") == 1
-    assert target_registry.get_target_hardware("npu_demo", "thread_num") == 8
+    assert target_registry.get_target_hardware("npu_demo", "thread_num") == 1
     assert target_registry.get_target_hardware("npu_demo", "subthread_num") == 1
     assert target_registry.get_target_hardware("npu_demo", "sm_memory_size") == 0
     assert target_registry.get_target_hardware("npu_demo", "lm_memory_size") == 0
@@ -355,7 +359,7 @@ def test_target_registry_npu_demo_template() -> None:
 # 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-04 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-04 00:00:00 +0800
-# 测试目的: 验证 npu_demo 固定内置模板同时暴露 analysis 默认参数。
+# 测试目的: 验证 npu_demo 文件化固定 target 同时暴露 analysis 默认参数。
 # 对应功能实现文件路径: kernel_gen/target/registry.py
 # 对应 spec 文件路径: spec/target/registry.md
 def test_target_registry_npu_demo_analysis_defaults() -> None:
@@ -405,7 +409,7 @@ def test_target_registry_npu_demo_supports_launch_and_barrier_caps() -> None:
     assert target_registry.is_arch_op_supported("npu_demo", "barrier") is False
 
     assert target_registry.get_target_hardware("npu_demo", "block_num") == 1
-    assert target_registry.get_target_hardware("npu_demo", "thread_num") == 8
+    assert target_registry.get_target_hardware("npu_demo", "thread_num") == 1
     assert target_registry.get_target_hardware("npu_demo", "subthread_num") == 1
     assert target_registry.get_target_hardware("npu_demo", "sm_memory_size") == 0
     assert target_registry.get_target_hardware("npu_demo", "lm_memory_size") == 0

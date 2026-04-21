@@ -41,6 +41,7 @@ from xdsl.dialects.builtin import (
     f32,
     i1,
     i32,
+    i64,
 )
 from xdsl.ir import Block
 from xdsl.printer import Printer
@@ -271,6 +272,26 @@ def test_emit_mlir_binary_expr_type_inference_delegates_to_call_nn(monkeypatch: 
 
     assert result is sentinel
     assert seen == [expr]
+
+
+# EMIT-037
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 `Memory[Int64]` 与 `_dtype_to_xdsl(...)` / `_nn_memory_type_to_memory(...)` 的双向映射都能稳定落到 `i64`。
+# 测试目的: 锁定 DSL/MLIR 前置链路在 `i64` tensor memory 场景下不再断链。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_maps_int64_memory_dtype_to_i64
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_emit_mlir_maps_int64_memory_dtype_to_i64() -> None:
+    memory = Memory([2, 3], NumericType.Int64, space=MemorySpace.GM)
+
+    nn_type = _memory_to_nn_type(memory)
+    roundtrip = emit_mlir_module._nn_memory_type_to_memory(nn_type)
+
+    assert _dtype_to_xdsl(NumericType.Int64) == i64
+    assert nn_type.element_type == i64
+    assert roundtrip.dtype is NumericType.Int64
 
 
 # EMIT-022A

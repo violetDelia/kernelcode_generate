@@ -41,6 +41,8 @@ _ALLOWED_HARDWARE_FIELDS = {
     "tlm3_memory_size",
 }
 _TARGET_NAME_PATTERN = re.compile(r"^[a-z0-9_]+$")
+_TARGETS_DIR = Path(__file__).resolve().parent / "targets"
+_NPU_DEMO_TARGET_FILE = _TARGETS_DIR / "npu_demo.txt"
 _DEFAULT_CPU_UNSUPPORTED_OPS = {"arch.get_thread_id"}
 _DEFAULT_CPU_HARDWARE = {
     "thread_num": 1,
@@ -52,29 +54,6 @@ _DEFAULT_CPU_HARDWARE = {
     "tlm1_memory_size": 0,
     "tlm2_memory_size": 0,
     "tlm3_memory_size": 0,
-}
-_DEFAULT_NPU_DEMO_SUPPORTED_OPS = {
-    "arch.get_block_id",
-    "arch.get_block_num",
-    "arch.get_thread_id",
-    "arch.get_thread_num",
-    "arch.get_subthread_id",
-    "arch.get_subthread_num",
-    "arch.get_dynamic_memory",
-    "arch.barrier",
-    "arch.launch",
-}
-_DEFAULT_NPU_DEMO_UNSUPPORTED_OPS = {"arch.launch_kernel"}
-_DEFAULT_NPU_DEMO_HARDWARE = {
-    "block_num": 1,
-    "thread_num": 8,
-    "subthread_num": 1,
-    "sm_memory_size": 0,
-    "lm_memory_size": 0,
-    "tsm_memory_size": 24576,
-    "tlm1_memory_size": 1024,
-    "tlm2_memory_size": 512,
-    "tlm3_memory_size": 512,
 }
 _DEFAULT_NPU_DEMO_ANALYSIS_DEFAULTS = {
     "path_bandwidth": {
@@ -618,13 +597,13 @@ def _ensure_cpu_target() -> None:
 
 
 def _ensure_npu_demo_target() -> None:
-    """注册内置 `npu_demo` target。
+    """注册文件化 `npu_demo` target。
 
     创建者: 朽木露琪亚
     最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 确保 registry 始终包含 `npu_demo` 固定模板。
+    - 确保 registry 始终包含 `kernel_gen/target/targets/npu_demo.txt` 定义的固定 target。
     - 固定 `arch` 能力白名单、`arch.launch_kernel` 未启用结论与硬件参数。
 
     使用示例:
@@ -636,14 +615,14 @@ def _ensure_npu_demo_target() -> None:
     - 功能实现: kernel_gen/target/registry.py
     """
 
-    if "npu_demo" in _TARGET_REGISTRY:
-        return
-    spec = TargetSpec(
-        name="npu_demo",
-        arch_supported_ops=set(_DEFAULT_NPU_DEMO_SUPPORTED_OPS),
-        arch_unsupported_ops=set(_DEFAULT_NPU_DEMO_UNSUPPORTED_OPS),
-        hardware=dict(_DEFAULT_NPU_DEMO_HARDWARE),
-    )
+    if not _NPU_DEMO_TARGET_FILE.is_file():
+        _raise_value_error(f"target file does not exist: {_NPU_DEMO_TARGET_FILE}")
+    spec = _parse_target_txt(_NPU_DEMO_TARGET_FILE)
+    existing = _TARGET_REGISTRY.get("npu_demo")
+    if existing is not None:
+        if _same_target_spec(existing, spec):
+            return
+        _raise_value_error("target already registered: npu_demo")
     register_target(spec)
 
 
@@ -721,14 +700,16 @@ def _register_loaded_target(spec: TargetSpec) -> None:
     if spec.name not in _TARGET_REGISTRY:
         register_target(spec)
         return
-    if spec.name != "cpu":
-        _raise_value_error(f"target already registered: {spec.name}")
     _validate_target_name(spec.name)
     _validate_arch_ops(spec)
     _validate_hardware_map(spec.hardware, spec.name)
     existing = _TARGET_REGISTRY["cpu"]
     if _same_target_spec(existing, spec):
         return
+    if _same_target_spec(_TARGET_REGISTRY[spec.name], spec):
+        return
+    if spec.name != "cpu":
+        _raise_value_error(f"target already registered: {spec.name}")
     if _is_default_cpu_spec(existing):
         _TARGET_REGISTRY[spec.name] = spec
         return

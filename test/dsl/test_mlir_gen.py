@@ -44,6 +44,7 @@ from xdsl.dialects.builtin import (
     i1,
     i8,
     i32,
+    i64,
 )
 from xdsl.ir import Block
 from xdsl.printer import Printer
@@ -1074,6 +1075,30 @@ def test_build_func_op_returns_func_op() -> None:
     inputs = list(func_op.function_type.inputs)
     assert len(inputs) == 3
     assert inputs[2] == i32
+
+
+# MGEN-001B
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 `build_func_op(...)` 在 `Tensor[i64, ...]` 场景下可稳定生成 `i64` 输入/输出签名。
+# 测试目的: 锁定 MLIR 签名构建对 `NumericType.Int64` 的支持。
+# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_int64_tensor_signature
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen.py
+# 对应 spec 文件路径: spec/dsl/mlir_gen.md
+# 对应测试文件路径: test/dsl/test_mlir_gen.py
+def test_build_func_op_supports_int64_tensor_signature() -> None:
+    def identity(x: "Tensor[i64, 2]") -> "Tensor[i64, 2]":
+        return x
+
+    int64_memory = Memory([2], NumericType.Int64)
+    func_op = build_func_op(identity, int64_memory)
+
+    inputs = list(func_op.function_type.inputs)
+    outputs = list(func_op.function_type.outputs)
+    assert len(inputs) == 1
+    assert len(outputs) == 1
+    assert inputs[0].element_type == i64
+    assert outputs[0].element_type == i64
 
 
 # MGEN-001A
