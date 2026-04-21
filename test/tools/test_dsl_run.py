@@ -61,6 +61,9 @@ if str(EXPECTATION_ROOT) not in sys.path:
     sys.path.append(str(EXPECTATION_ROOT))
 
 from expectation.tools.dsl_run.add import add_kernel
+from expectation.execute_engine.npu_demo.add import (
+    case_slice_store_add_runs_with_dsl_run,
+)
 from expectation.tools.dsl_run.invalid_contract import (
     ARITY_ERROR,
     EMITCCONFIG_ERROR,
@@ -222,6 +225,19 @@ def test_dsl_run_numpy_output() -> None:
     )
 
     _assert_result_contract(result, out, expected)
+
+
+# TC-DSL-RUN-003A
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 测试目的: 锁定 execute_engine/npu_demo/add.py 的 CASE-1 在 worktree 实现下可通过主线 expectation 资产真实执行。
+# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
+# 对应 spec 文件路径: spec/tools/dsl_run.md
+# 对应测试文件路径: test/tools/test_dsl_run.py
+def test_execute_engine_npu_demo_add_case1_matches_public_contract() -> None:
+    case_slice_store_add_runs_with_dsl_run()
 
 
 # TC-DSL-RUN-004
