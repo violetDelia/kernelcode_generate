@@ -17,9 +17,13 @@
 
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
 
+import pytest
+from xdsl.context import Context
+from xdsl.dialects.builtin import ModuleOp
 from xdsl.passes import ModulePass
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -28,6 +32,10 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.passes import lowering as lowering_pkg
 from kernel_gen.passes.lowering import NnLoweringError, NnLoweringPass
+
+nn_lowering_module = importlib.import_module(
+    "kernel_gen.passes.lowering.nn_lowering.nn_lowering"
+)
 
 
 # TC-PASS-NNL-001
@@ -64,3 +72,65 @@ def test_nn_lowering_pass_public_exports() -> None:
     lower_to_kernel = lowering_pkg.LowerNnToKernelPass()
     assert lower_to_kernel.name == "lower-nn-to-kernel"
     assert isinstance(lower_to_kernel, ModulePass)
+
+
+# TC-PASS-NNL-003
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 测试目的: 验证 nn_lowering pattern driver 的注册顺序，unsupported reject 保持最后。
+# 使用示例: pytest -q test/pass/nn_lowering/public_name.py -k test_nn_lowering_patterns_register_reject_last
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应测试文件路径: test/pass/nn_lowering/public_name.py
+def test_nn_lowering_patterns_register_reject_last() -> None:
+    names = [type(pattern).__name__ for pattern in nn_lowering_module.nn_lowering_patterns()]
+
+    assert names == [
+        "_LowerElementBinaryFamilyPattern",
+        "_LowerSelectPattern",
+        "_LowerCastPattern",
+        "_LowerExpPattern",
+        "_LowerDmaStructuredFamilyPattern",
+        "_LowerMatmulImg2colFamilyPattern",
+        "_LowerReduceSoftmaxFamilyPattern",
+        "_RejectSoftmaxPattern",
+        "_RejectUnsupportedNnOpPattern",
+    ]
+    assert "_LowerNnSupportedOpPattern" not in names
+
+
+# TC-PASS-NNL-004
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 测试目的: 验证 NnLoweringPass.apply(...) 直接使用 nn_lowering_patterns() 驱动 PatternRewriteWalker。
+# 使用示例: pytest -q test/pass/nn_lowering/public_name.py -k test_nn_lowering_apply_uses_pattern_driver
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应测试文件路径: test/pass/nn_lowering/public_name.py
+def test_nn_lowering_apply_uses_pattern_driver(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: dict[str, object] = {}
+    sentinel_pattern = object()
+
+    class FakeApplier:
+        def __init__(self, patterns: list[object], *, dce_enabled: bool) -> None:
+            calls["patterns"] = patterns
+            calls["dce_enabled"] = dce_enabled
+
+    class FakeWalker:
+        def __init__(self, applier: FakeApplier) -> None:
+            calls["applier"] = applier
+
+        def rewrite_module(self, module: ModuleOp) -> None:
+            calls["module"] = module
+
+    monkeypatch.setattr(nn_lowering_module, "nn_lowering_patterns", lambda: [sentinel_pattern])
+    monkeypatch.setattr(nn_lowering_module, "GreedyRewritePatternApplier", FakeApplier)
+    monkeypatch.setattr(nn_lowering_module, "PatternRewriteWalker", FakeWalker)
+
+    module = ModuleOp([])
+    NnLoweringPass().apply(Context(), module)
+
+    assert calls["patterns"] == [sentinel_pattern]
+    assert calls["dce_enabled"] is False
+    assert isinstance(calls["applier"], FakeApplier)
+    assert calls["module"] is module

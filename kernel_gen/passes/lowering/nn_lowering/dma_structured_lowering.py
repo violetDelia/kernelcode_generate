@@ -21,11 +21,15 @@ from __future__ import annotations
 
 from xdsl.dialects.builtin import ArrayAttr, IntAttr, IntegerAttr, IntegerType, StringAttr
 from xdsl.ir import Attribute, Block, Operation, SSAValue
+from xdsl.pattern_rewriter import PatternRewriter, RewritePattern, op_type_rewrite_pattern
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaTransposeOp
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
 from .nn_lowering_utility import NnLoweringError, ensure_single_result
+
+
+_DMA_STRUCTURED_OP_NAMES = {"nn.broadcast", "nn.transpose"}
 
 
 def _ensure_symbol_or_int(op: Operation, operand: SSAValue | Operation) -> SSAValue:
@@ -336,4 +340,56 @@ def lower_dma_structured_family(block: Block, op: Operation) -> bool:
     return False
 
 
-__all__ = ["lower_dma_structured_family"]
+class _LowerDmaStructuredFamilyPattern(RewritePattern):
+    """将 dma structured family 交给当前 family helper 改写。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 作为 S1 pattern driver 的 dma structured family 入口。
+    - 仅处理 nn.broadcast / nn.transpose，保持既有输出不变。
+
+    使用示例:
+    - pattern = _LowerDmaStructuredFamilyPattern()
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
+    - test: test/pass/nn_lowering/public_name.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
+    """
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: Operation, rewriter: PatternRewriter) -> None:
+        if op.name not in _DMA_STRUCTURED_OP_NAMES:
+            return
+        block = op.parent_block()
+        if block is None:
+            raise NnLoweringError("nn op must be inside a block")
+        lower_dma_structured_family(block, op)
+        rewriter.has_done_action = True
+
+
+def dma_structured_patterns() -> list[RewritePattern]:
+    """返回 dma structured rewrite pattern 集合。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 提供 nn_lowering 主 driver 的 family pattern 注册入口。
+    - S1 阶段保持 family helper 复用，后续阶段可替换为单 op pattern。
+
+    使用示例:
+    - patterns = dma_structured_patterns()
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
+    - test: test/pass/nn_lowering/public_name.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
+    """
+
+    return [_LowerDmaStructuredFamilyPattern()]
+
+
+__all__ = ["dma_structured_patterns", "lower_dma_structured_family"]

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from xdsl.dialects.builtin import ArrayAttr, IntAttr, IntegerAttr, StringAttr
 from xdsl.ir import Attribute, Block, Operation, SSAValue
+from xdsl.pattern_rewriter import PatternRewriter, RewritePattern, op_type_rewrite_pattern
 
 from kernel_gen.dialect.dma import DmaAllocOp
 from kernel_gen.dialect.kernel import KernelExpOp, KernelReduceOp
@@ -34,6 +35,9 @@ from .nn_lowering import (
     _ensure_space_attr,
     _ensure_symbol_or_int,
 )
+
+
+_REDUCE_SOFTMAX_OP_NAMES = {"nn.exp", "nn.reduce_sum", "nn.reduce_min", "nn.reduce_max"}
 
 
 def _ensure_int_attr(op: Operation, name: str) -> int:
@@ -344,4 +348,81 @@ def lower_reduce_softmax_family(block: Block, op: Operation) -> bool:
     return False
 
 
-__all__ = ["lower_reduce_softmax_family"]
+class _LowerReduceSoftmaxFamilyPattern(RewritePattern):
+    """将 reduce/exp family 交给当前 family helper 改写。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 作为 S1 pattern driver 的 reduce/exp family 入口。
+    - 只处理当前已支持的 reduce/exp op，保持既有 lowering 行为。
+
+    使用示例:
+    - pattern = _LowerReduceSoftmaxFamilyPattern()
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
+    - test: test/pass/nn_lowering/public_name.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
+    """
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: Operation, rewriter: PatternRewriter) -> None:
+        if op.name not in _REDUCE_SOFTMAX_OP_NAMES:
+            return
+        block = op.parent_block()
+        if block is None:
+            raise NnLoweringError("nn op must be inside a block")
+        lower_reduce_softmax_family(block, op)
+        rewriter.has_done_action = True
+
+
+class _RejectSoftmaxPattern(RewritePattern):
+    """拒绝 direct nn.softmax lowering。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 维持当前公开错误短语：nn.softmax 必须先由上游分解。
+
+    使用示例:
+    - pattern = _RejectSoftmaxPattern()
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
+    - test: test/pass/nn_lowering/public_name.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
+    """
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: Operation, rewriter: PatternRewriter) -> None:
+        _ = rewriter
+        if op.name == "nn.softmax":
+            raise NnLoweringError("nn.softmax must be decomposed before lower-nn")
+
+
+def reduce_softmax_patterns() -> list[RewritePattern]:
+    """返回 reduce/softmax 边界 rewrite pattern 集合。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 提供 nn_lowering 主 driver 的 family pattern 注册入口。
+    - 保留 direct nn.softmax 的显式拒绝边界。
+
+    使用示例:
+    - patterns = reduce_softmax_patterns()
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
+    - test: test/pass/nn_lowering/public_name.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
+    """
+
+    return [_LowerReduceSoftmaxFamilyPattern(), _RejectSoftmaxPattern()]
+
+
+__all__ = ["lower_reduce_softmax_family", "reduce_softmax_patterns"]

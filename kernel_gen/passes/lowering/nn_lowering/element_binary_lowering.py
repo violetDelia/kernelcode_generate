@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from xdsl.dialects.builtin import IntAttr, StringAttr
 from xdsl.ir import Block, Operation, SSAValue
+from xdsl.pattern_rewriter import PatternRewriter, RewritePattern, op_type_rewrite_pattern
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaFillOp
@@ -385,4 +386,56 @@ def lower_element_binary_family(block: Block, op: Operation) -> bool:
     return True
 
 
-__all__ = ["lower_element_binary_family"]
+class _LowerElementBinaryFamilyPattern(RewritePattern):
+    """将 element binary/compare family 交给当前 family helper 改写。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 作为 S1 pattern driver 的 family 级入口。
+    - 只匹配 element binary/compare family，保持现有 lowering 行为不变。
+
+    使用示例:
+    - pattern = _LowerElementBinaryFamilyPattern()
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/element_binary_lowering.md
+    - test: test/pass/nn_lowering/public_name.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
+    """
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: Operation, rewriter: PatternRewriter) -> None:
+        if op.name not in _ELEMENT_BINARY_KINDS and op.name not in _COMPARE_KINDS:
+            return
+        block = op.parent_block()
+        if block is None:
+            raise NnLoweringError("nn op must be inside a block")
+        lower_element_binary_family(block, op)
+        rewriter.has_done_action = True
+
+
+def element_binary_patterns() -> list[RewritePattern]:
+    """返回 element binary/compare rewrite pattern 集合。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 提供 nn_lowering 主 driver 的 family pattern 注册入口。
+    - S1 阶段保持 family helper 复用，后续阶段可在此替换为单 op pattern。
+
+    使用示例:
+    - patterns = element_binary_patterns()
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/element_binary_lowering.md
+    - test: test/pass/nn_lowering/public_name.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
+    """
+
+    return [_LowerElementBinaryFamilyPattern()]
+
+
+__all__ = ["element_binary_patterns", "lower_element_binary_family"]

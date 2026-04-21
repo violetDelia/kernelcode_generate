@@ -43,6 +43,10 @@ Pass = pass_module.Pass
 PassManager = pass_module.PassManager
 pipeline_module = importlib.import_module("kernel_gen.passes.pipeline")
 build_default_lowering_pipeline = pipeline_module.build_default_lowering_pipeline
+registry_module = importlib.import_module("kernel_gen.passes.registry")
+build_registered_pass = registry_module.build_registered_pass
+load_builtin_passes = registry_module.load_builtin_passes
+_reset_registry_for_test = registry_module._reset_registry_for_test
 
 
 # TC-PASS-001
@@ -193,6 +197,38 @@ def test_pass_manager_module_pass_apply_only() -> None:
     module = ModuleOp([])
     assert pm.run(module) is module
     assert order == ["apply-only"]
+
+
+# TC-PASS-005B
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 功能说明: 验证 registry 构造出的 lower-nn 可继续由 PassManager 执行。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_runs_registered_lower_nn
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
+# 对应 spec 文件路径: spec/pass/pass_manager.md
+# 对应测试文件路径: test/pass/test_pass_manager.py
+def test_pass_manager_runs_registered_lower_nn(monkeypatch: pytest.MonkeyPatch) -> None:
+    _reset_registry_for_test()
+    try:
+        load_builtin_passes()
+        pass_obj = build_registered_pass("lower-nn")
+        order: list[str] = []
+
+        def _record_run(self: object, target: ModuleOp) -> ModuleOp:
+            order.append(getattr(self, "name"))
+            assert isinstance(target, ModuleOp)
+            return target
+
+        monkeypatch.setattr(type(pass_obj), "run", _record_run)
+
+        pm = PassManager(name="registry-lower-nn")
+        pm.add_pass(pass_obj)
+        module = ModuleOp([])
+
+        assert pm.run(module) is module
+        assert order == ["lower-nn"]
+    finally:
+        _reset_registry_for_test()
 
 
 # TC-PASS-006

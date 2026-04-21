@@ -78,34 +78,6 @@ class NnLoweringError(ValueError):
     """
 
 
-_RESULT_TYPED_ALLOC_OPS = {"nn.img2col1d", "nn.img2col2d"}
-_SUPPORTED_NN_OP_NAMES = {
-    "nn.add",
-    "nn.sub",
-    "nn.mul",
-    "nn.div",
-    "nn.truediv",
-    "nn.eq",
-    "nn.ne",
-    "nn.lt",
-    "nn.le",
-    "nn.gt",
-    "nn.ge",
-    "nn.select",
-    "nn.cast",
-    "nn.broadcast",
-    "nn.transpose",
-    "nn.softmax",
-    "nn.exp",
-    "nn.reduce_sum",
-    "nn.reduce_min",
-    "nn.reduce_max",
-    "nn.img2col1d",
-    "nn.img2col2d",
-    "nn.matmul",
-}
-
-
 def _ensure_space_attr(op: Operation) -> NnMemorySpaceAttr:
     """获取并校验 nn op 的 space attribute。
 
@@ -856,202 +828,66 @@ def _lower_img2col2d(block: Block, op: Operation) -> None:
     block.erase_op(op)
 
 
-def _lower_op(block: Block, op: Operation) -> None:
-    """lower 单个 op。
-
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 仅处理 nn.* op；非 nn.* 直接返回。
-    - 根据 op.name 分发到具体 lowering。
-    - 非 nn dialect op 直接返回，避免误报 unknown op。
-
-    使用示例:
-    - _lower_op(block, op)
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-    """
-
-    if not op.name.startswith("nn."):
-        return
-
-    from .element_binary_lowering import lower_element_binary_family
-
-    if lower_element_binary_family(block, op):
-        return
-    from .reduce_softmax_lowering import lower_reduce_softmax_family
-
-    if lower_reduce_softmax_family(block, op):
-        return
-    if op.name == "nn.reduce_sum":
-        _lower_reduce(block, op, kind="sum")
-        return
-    if op.name == "nn.reduce_min":
-        _lower_reduce(block, op, kind="min")
-        return
-    if op.name == "nn.reduce_max":
-        _lower_reduce(block, op, kind="max")
-        return
-    if op.name == "nn.softmax":
-        raise NnLoweringError("nn.softmax must be decomposed before lower-nn")
-    from .matmul_img2col_lowering import lower_matmul_img2col_family
-
-    if lower_matmul_img2col_family(block, op):
-        return
-    from .dma_structured_lowering import lower_dma_structured_family
-
-    if lower_dma_structured_family(block, op):
-        return
-    raise NnLoweringError(f"unknown op: {op.name}")
-
-
-def _lower_block(block: Block) -> None:
-    """lower block 内的 ops。
-
-    创建者: 金铲铲大作战
-    最后一次更改: jcc你莫辜负
-
-    功能说明:
-    - 逐个遍历 block 中 nn dialect op 并执行 lowering。
-    - 非 nn dialect op 会被保留，不参与 lowering。
-
-    使用示例:
-    - _lower_block(block)
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-    """
-
-    for op in list(block.ops):
-        for region in op.regions:
-            for nested_block in region.blocks:
-                _lower_block(nested_block)
-        if isinstance(op, func.ReturnOp):
-            continue
-        if not op.name.startswith("nn."):
-            continue
-        _lower_op(block, op)
-
-
-def _lower_func(func_op: func.FuncOp) -> None:
-    """lower func。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 对 func 的 entry block 进行 lowering。
-
-    使用示例:
-    - _lower_func(func_op)
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-    """
-
-    block = func_op.body.block
-    _lower_block(block)
-
-
-def _lower_module(module: ModuleOp) -> None:
-    """lower module。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 遍历 module 内所有 func 并执行 lowering。
-
-    使用示例:
-    - _lower_module(module)
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
-    """
-
-    for op in module.ops:
-        if not isinstance(op, func.FuncOp):
-            continue
-        _lower_func(op)
-
-
-def _lower_with_current_op(op: Operation, rewriter: PatternRewriter) -> None:
-    """复用旧 lowering 入口处理当前匹配的 nn op。
+def nn_lowering_patterns() -> list[RewritePattern]:
+    """返回 lower-nn 的 rewrite pattern 集合。
 
     创建者: 小李飞刀
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 保留既有 lowering 逻辑的错误短语与 IR 形态。
-    - 通过 rewrite pattern 驱动单个 op 的改写，再由 pattern walker 负责遍历。
+    - 汇总 nn_lowering 各 family pattern，作为 NnLoweringPass.apply(...) 的唯一 driver 输入。
+    - `_RejectUnsupportedNnOpPattern` 必须保持在最后，保证已支持 pattern 先尝试改写。
 
     使用示例:
-    - _lower_with_current_op(op, rewriter)
+    - patterns = nn_lowering_patterns()
 
     关联文件:
     - spec: [spec/pass/lowering/nn_lowering.md](spec/pass/lowering/nn_lowering.md)
-    - test: [test/pass/nn_lowering/test_lowering_nn_lowering.py](test/pass/nn_lowering/test_lowering_nn_lowering.py)
+    - test: [test/pass/nn_lowering/public_name.py](test/pass/nn_lowering/public_name.py)
     - 功能实现: [kernel_gen/passes/lowering/nn_lowering/nn_lowering.py](kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
     """
 
-    block = op.parent_block()
-    if block is None:
-        raise NnLoweringError("nn op must be inside a block")
-    _lower_op(block, op)
-    rewriter.has_done_action = True
+    from .dma_structured_lowering import dma_structured_patterns
+    from .element_binary_lowering import element_binary_patterns
+    from .matmul_img2col_lowering import matmul_img2col_patterns
+    from .reduce_softmax_lowering import reduce_softmax_patterns
+    from .select_cast_lowering import select_cast_patterns
 
-
-class _LowerNnSupportedOpPattern(RewritePattern):
-    """按单个 nn op 匹配并复用既有 lowering 逻辑。"""
-
-    @op_type_rewrite_pattern
-    def match_and_rewrite(
-        self,
-        op: Operation,
-        rewriter: PatternRewriter,
-    ) -> None:
-        if op.name not in _SUPPORTED_NN_OP_NAMES:
-            return
-        _lower_with_current_op(op, rewriter)
+    return [
+        *element_binary_patterns(),
+        *select_cast_patterns(),
+        *dma_structured_patterns(),
+        *matmul_img2col_patterns(),
+        *reduce_softmax_patterns(),
+        _RejectUnsupportedNnOpPattern(),
+    ]
 
 
 class _RejectUnsupportedNnOpPattern(RewritePattern):
-    """拒绝未纳入 nn_lowering family 的 nn op。"""
+    """拒绝未纳入 nn_lowering family 的 nn op。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 放在所有已支持 family pattern 之后。
+    - 若仍有 nn.* op 未被处理，则按现有 unknown op 合同抛出 NnLoweringError。
+
+    使用示例:
+    - pattern = _RejectUnsupportedNnOpPattern()
+
+    关联文件:
+    - spec: [spec/pass/lowering/nn_lowering.md](spec/pass/lowering/nn_lowering.md)
+    - test: [test/pass/nn_lowering/public_name.py](test/pass/nn_lowering/public_name.py)
+    - 功能实现: [kernel_gen/passes/lowering/nn_lowering/nn_lowering.py](kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
+    """
 
     @op_type_rewrite_pattern
     def match_and_rewrite(self, op: Operation, rewriter: PatternRewriter) -> None:
+        _ = rewriter
         if not op.name.startswith("nn."):
             return
-        if op.name in _SUPPORTED_NN_OP_NAMES:
-            return
         raise NnLoweringError(f"unknown op: {op.name}")
-
-
-def _lower_module(module: ModuleOp) -> None:
-    """使用 pattern rewrite 机制执行 nn lowering。"""
-
-    from .select_cast_lowering import select_cast_patterns
-
-    PatternRewriteWalker(
-        GreedyRewritePatternApplier(
-            [
-                *select_cast_patterns(),
-                _LowerNnSupportedOpPattern(),
-                _RejectUnsupportedNnOpPattern(),
-            ],
-            dce_enabled=False,
-        )
-    ).rewrite_module(module)
 
 
 class NnLoweringPass(Pass):
@@ -1081,7 +917,9 @@ class NnLoweringPass(Pass):
         """执行 nn lowering。"""
 
         _ = ctx
-        _lower_module(op)
+        PatternRewriteWalker(
+            GreedyRewritePatternApplier(nn_lowering_patterns(), dce_enabled=False)
+        ).rewrite_module(op)
 
     def run(self, module: ModuleOp) -> ModuleOp:
         """兼容旧 `run(...)` 入口。"""

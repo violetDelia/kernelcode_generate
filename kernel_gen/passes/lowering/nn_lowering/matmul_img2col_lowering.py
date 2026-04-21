@@ -23,6 +23,7 @@ from collections.abc import Iterable
 
 from xdsl.dialects.builtin import ArrayAttr, IntAttr, IntegerAttr, StringAttr, i64
 from xdsl.ir import Attribute, Block, Operation, SSAValue
+from xdsl.pattern_rewriter import PatternRewriter, RewritePattern, op_type_rewrite_pattern
 
 from kernel_gen.dialect.dma import DmaAllocOp
 from kernel_gen.dialect.kernel import KernelImg2col1dOp, KernelImg2col2dOp, KernelMatmulOp
@@ -43,6 +44,9 @@ from .nn_lowering_utility import (
     ensure_single_result,
     ensure_space_attr,
 )
+
+
+_MATMUL_IMG2COL_OP_NAMES = {"nn.matmul", "nn.img2col1d", "nn.img2col2d"}
 
 
 def _normalize_shape_dims(shape: Iterable[Attribute]) -> list[int | str]:
@@ -704,4 +708,56 @@ def lower_matmul_img2col_family(block: Block, op: Operation) -> bool:
     return False
 
 
-__all__ = ["lower_matmul_img2col_family"]
+class _LowerMatmulImg2colFamilyPattern(RewritePattern):
+    """将 matmul/img2col family 交给当前 family helper 改写。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 作为 S1 pattern driver 的 matmul/img2col family 入口。
+    - 只匹配 nn.matmul / nn.img2col1d / nn.img2col2d，保持既有 lowering 行为。
+
+    使用示例:
+    - pattern = _LowerMatmulImg2colFamilyPattern()
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
+    - test: test/pass/nn_lowering/public_name.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
+    """
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: Operation, rewriter: PatternRewriter) -> None:
+        if op.name not in _MATMUL_IMG2COL_OP_NAMES:
+            return
+        block = op.parent_block()
+        if block is None:
+            raise NnLoweringError("nn op must be inside a block")
+        lower_matmul_img2col_family(block, op)
+        rewriter.has_done_action = True
+
+
+def matmul_img2col_patterns() -> list[RewritePattern]:
+    """返回 matmul/img2col rewrite pattern 集合。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 提供 nn_lowering 主 driver 的 family pattern 注册入口。
+    - S1 阶段保持 family helper 复用，后续阶段可替换为单 op pattern。
+
+    使用示例:
+    - patterns = matmul_img2col_patterns()
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
+    - test: test/pass/nn_lowering/public_name.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
+    """
+
+    return [_LowerMatmulImg2colFamilyPattern()]
+
+
+__all__ = ["matmul_img2col_patterns", "lower_matmul_img2col_family"]
