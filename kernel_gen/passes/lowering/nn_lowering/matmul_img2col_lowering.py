@@ -27,7 +27,7 @@ from xdsl.pattern_rewriter import PatternRewriter, RewritePattern, op_type_rewri
 
 from kernel_gen.dialect.dma import DmaAllocOp
 from kernel_gen.dialect.kernel import KernelImg2col1dOp, KernelImg2col2dOp, KernelMatmulOp
-from kernel_gen.dialect.nn import NnMemoryType
+from kernel_gen.dialect.nn import NnImg2col1dOp, NnImg2col2dOp, NnMatmulOp, NnMemoryType
 from kernel_gen.dialect.symbol import (
     SymbolAddOp,
     SymbolConstOp,
@@ -44,9 +44,6 @@ from .nn_lowering_utility import (
     ensure_single_result,
     ensure_space_attr,
 )
-
-
-_MATMUL_IMG2COL_OP_NAMES = {"nn.matmul", "nn.img2col1d", "nn.img2col2d"}
 
 
 def _normalize_shape_dims(shape: Iterable[Attribute]) -> list[int | str]:
@@ -708,18 +705,18 @@ def lower_matmul_img2col_family(block: Block, op: Operation) -> bool:
     return False
 
 
-class _LowerMatmulImg2colFamilyPattern(RewritePattern):
-    """将 matmul/img2col family 交给当前 family helper 改写。
+class _LowerNnMatmulPattern(RewritePattern):
+    """将单个 nn.matmul lowering 为 kernel.matmul。
 
     创建者: 小李飞刀
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 作为 S1 pattern driver 的 matmul/img2col family 入口。
-    - 只匹配 nn.matmul / nn.img2col1d / nn.img2col2d，保持既有 lowering 行为。
+    - 只匹配 NnMatmulOp，避免 family 级 op.name 分派。
+    - 复用现有 matmul helper，保持 IR 输出与校验语义不变。
 
     使用示例:
-    - pattern = _LowerMatmulImg2colFamilyPattern()
+    - pattern = _LowerNnMatmulPattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
@@ -728,13 +725,67 @@ class _LowerMatmulImg2colFamilyPattern(RewritePattern):
     """
 
     @op_type_rewrite_pattern
-    def match_and_rewrite(self, op: Operation, rewriter: PatternRewriter) -> None:
-        if op.name not in _MATMUL_IMG2COL_OP_NAMES:
-            return
+    def match_and_rewrite(self, op: NnMatmulOp, rewriter: PatternRewriter) -> None:
         block = op.parent_block()
         if block is None:
             raise NnLoweringError("nn op must be inside a block")
-        lower_matmul_img2col_family(block, op)
+        _lower_matmul(block, op)
+        rewriter.has_done_action = True
+
+
+class _LowerNnImg2col1dPattern(RewritePattern):
+    """将单个 nn.img2col1d lowering 为 kernel.img2col1d。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 只匹配 NnImg2col1dOp，避免 family 级 op.name 分派。
+    - 复用现有 img2col1d helper，保持 IR 输出与校验语义不变。
+
+    使用示例:
+    - pattern = _LowerNnImg2col1dPattern()
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
+    - test: test/pass/nn_lowering/img2col1d.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
+    """
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: NnImg2col1dOp, rewriter: PatternRewriter) -> None:
+        block = op.parent_block()
+        if block is None:
+            raise NnLoweringError("nn op must be inside a block")
+        _lower_img2col1d(block, op)
+        rewriter.has_done_action = True
+
+
+class _LowerNnImg2col2dPattern(RewritePattern):
+    """将单个 nn.img2col2d lowering 为 kernel.img2col2d。
+
+    创建者: 小李飞刀
+    最后一次更改: 小李飞刀
+
+    功能说明:
+    - 只匹配 NnImg2col2dOp，避免 family 级 op.name 分派。
+    - 复用现有 img2col2d helper，保持 IR 输出与校验语义不变。
+
+    使用示例:
+    - pattern = _LowerNnImg2col2dPattern()
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
+    - test: test/pass/nn_lowering/img2col2d.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
+    """
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: NnImg2col2dOp, rewriter: PatternRewriter) -> None:
+        block = op.parent_block()
+        if block is None:
+            raise NnLoweringError("nn op must be inside a block")
+        _lower_img2col2d(block, op)
         rewriter.has_done_action = True
 
 
@@ -745,8 +796,8 @@ def matmul_img2col_patterns() -> list[RewritePattern]:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 提供 nn_lowering 主 driver 的 family pattern 注册入口。
-    - S1 阶段保持 family helper 复用，后续阶段可替换为单 op pattern。
+    - 提供 nn_lowering 主 driver 的单 op pattern 注册入口。
+    - 每个 pattern 只匹配一个具体 nn op，不再保留 family pattern 名称分派。
 
     使用示例:
     - patterns = matmul_img2col_patterns()
@@ -757,7 +808,7 @@ def matmul_img2col_patterns() -> list[RewritePattern]:
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
     """
 
-    return [_LowerMatmulImg2colFamilyPattern()]
+    return [_LowerNnMatmulPattern(), _LowerNnImg2col1dPattern(), _LowerNnImg2col2dPattern()]
 
 
 __all__ = ["matmul_img2col_patterns", "lower_matmul_img2col_family"]

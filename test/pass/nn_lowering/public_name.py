@@ -90,13 +90,18 @@ def test_nn_lowering_patterns_register_reject_last() -> None:
         "_LowerSelectPattern",
         "_LowerCastPattern",
         "_LowerExpPattern",
-        "_LowerDmaStructuredFamilyPattern",
-        "_LowerMatmulImg2colFamilyPattern",
+        "_LowerNnBroadcastPattern",
+        "_LowerNnTransposePattern",
+        "_LowerNnMatmulPattern",
+        "_LowerNnImg2col1dPattern",
+        "_LowerNnImg2col2dPattern",
         "_LowerReduceSoftmaxFamilyPattern",
         "_RejectSoftmaxPattern",
         "_RejectUnsupportedNnOpPattern",
     ]
     assert "_LowerNnSupportedOpPattern" not in names
+    assert "_LowerDmaStructuredFamilyPattern" not in names
+    assert "_LowerMatmulImg2colFamilyPattern" not in names
 
 
 # TC-PASS-NNL-004
