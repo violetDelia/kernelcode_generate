@@ -42,7 +42,7 @@ from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnAddOp, NnImg2col2dOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolCastOp, SymbolConstOp, SymbolEqOp, SymbolForOp, SymbolGetDimOp, SymbolGetStrideOp, SymbolIterType, SymbolToFloatOp, SymbolToIntOp, SymbolValueType
 from kernel_gen.dsl.ast import BlockAST, ConstAST, ForAST, FunctionAST, Img2ColAST, LoadAST, ScalarArgAST, StoreAST, TensorAST, VarAST
-from kernel_gen.dsl.emit_c import EmitCContext, EmitCError, emit_c_op, emit_c_value
+from kernel_gen.dsl.gen_kernel import EmitCContext, EmitCError, emit_c, emit_c_op, emit_c_value, gen_kernel
 from kernel_gen.dsl.mlir_gen import build_func_op, build_func_op_from_ast
 from kernel_gen.operation.dma import alloc, deslice, slice
 from kernel_gen.operation.nn import matmul
@@ -67,6 +67,15 @@ def _ctx() -> EmitCContext:
 
 def _npu_ctx() -> EmitCContext:
     return EmitCContext(target="npu_demo")
+
+
+def test_emit_c_public_entry_matches_gen_kernel_for_empty_func() -> None:
+    block = Block(arg_types=[])
+    block.add_op(func.ReturnOp())
+    func_type = FunctionType.from_lists([], [])
+    func_op = func.FuncOp("empty_kernel", func_type, Region(block))
+
+    assert emit_c(func_op, _ctx()) == gen_kernel(func_op, _ctx())
 
 
 def _make_memory_type(

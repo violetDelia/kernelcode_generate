@@ -1102,8 +1102,7 @@ def _render_emitc_text(operation: Operation, emitc_target: str) -> str:
             raise ValueError("target=cpu currently supports only func.return bodies")
         return f"void {emit_input.sym_name.data}() {{\n}}"
 
-    from kernel_gen.dsl.emit_c import EmitCContext
-    from kernel_gen.dsl.gen_kernel import gen_kernel
+    from kernel_gen.dsl.gen_kernel import EmitCContext, gen_kernel
     return gen_kernel(emit_input, EmitCContext(target=emitc_target))
 
 

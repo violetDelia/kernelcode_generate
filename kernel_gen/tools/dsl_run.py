@@ -29,8 +29,7 @@ from typing import Any
 from xdsl.dialects import func
 from xdsl.dialects.builtin import ModuleOp
 
-from kernel_gen.dsl.emit_c import EmitCContext
-from kernel_gen.dsl.gen_kernel import gen_kernel
+from kernel_gen.dsl.gen_kernel import EmitCContext, gen_kernel
 from kernel_gen.dsl.mlir_gen import mlir_gen
 from kernel_gen.execute_engine import CompiledKernel, ExecuteResult, ExecutionEngine
 from kernel_gen.operation import loop as _operation_loop

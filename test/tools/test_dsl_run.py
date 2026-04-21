@@ -87,7 +87,7 @@ from expectation.tools.dsl_run.invalid_contract import (
     return_add_kernel,
     store_add_kernel,
 )
-from kernel_gen.dsl.emit_c import EmitCContext
+from kernel_gen.dsl.gen_kernel import EmitCContext
 from kernel_gen.passes.pass_manager import PassManager
 from kernel_gen.passes.registry import build_registered_pipeline, load_builtin_passes
 from kernel_gen.tools.dsl_run import DslRunError, dsl_run

@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import shutil
 import sys
 import importlib
@@ -76,8 +77,7 @@ from kernel_gen.dialect.symbol import (
     SymbolValueType,
 )
 from kernel_gen.dialect.tuner import TunerParamOp
-from kernel_gen.dsl.emit_c import EmitCContext
-from kernel_gen.dsl.gen_kernel import GenKernelError, gen_kernel
+from kernel_gen.dsl.gen_kernel import EmitCContext, EmitCError, emit_c, emit_c_op, emit_c_value, GenKernelError, gen_kernel
 from kernel_gen.dsl.mlir_gen import build_func_op
 from kernel_gen.operation.dma import alloc, deslice, slice
 from kernel_gen.operation.nn import matmul
@@ -89,6 +89,7 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
 gen_kernel_module = importlib.import_module("kernel_gen.dsl.gen_kernel")
+emit_context_module = importlib.import_module("kernel_gen.dsl.gen_kernel.emit_context")
 tile_analysis_helpers = importlib.import_module("test.pass.test_lowering_tile_analysis")
 tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
 tile_elewise_module = importlib.import_module("kernel_gen.passes.lowering.tile_elewise")
@@ -740,25 +741,86 @@ def test_gen_kernel_returns_target_source() -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-04 20:25:00 +0800
 # 最近一次运行成功时间: 2026-04-04 20:25:00 +0800
-# 功能说明: 验证 gen_kernel 模块对外只保留唯一稳定公开入口。
-# 测试目的: 锁定 gen_kernel/__all__ 的公开边界，避免 gen_signature/gen_body 继续作为公开稳定接口回流。
-# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_is_the_only_public_entry
-# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 功能说明: 验证 gen_kernel 包根对外导出公开 API 与上下文子模块。
+# 测试目的: 锁定 `kernel_gen.dsl.gen_kernel` 的公开边界，避免旧双接口回流，同时确保 `emit_context` 子模块可稳定导入。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_is_the_package_public_entry
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/__init__.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
 # 对应测试文件路径: test/dsl/test_gen_kernel.py
 
-def test_gen_kernel_is_the_only_public_entry() -> None:
-    assert gen_kernel_module.__all__ == ["GenKernelError", "gen_kernel"]
+def test_gen_kernel_is_the_package_public_entry() -> None:
+    assert gen_kernel_module.__all__ == [
+        "GenKernelError",
+        "gen_kernel",
+        "EmitCContext",
+        "EmitCError",
+        "emit_c",
+        "emit_c_op",
+        "emit_c_value",
+    ]
 
     namespace: dict[str, object] = {}
     exec("from kernel_gen.dsl.gen_kernel import *", namespace)
     public_names = {name for name in namespace if name != "__builtins__"}
 
-    assert public_names == {"GenKernelError", "gen_kernel"}
+    assert public_names == {
+        "GenKernelError",
+        "gen_kernel",
+        "EmitCContext",
+        "EmitCError",
+        "emit_c",
+        "emit_c_op",
+        "emit_c_value",
+    }
     assert namespace["GenKernelError"] is GenKernelError
     assert namespace["gen_kernel"] is gen_kernel
+    assert namespace["EmitCContext"] is EmitCContext
+    assert namespace["EmitCError"] is EmitCError
+    assert namespace["emit_c"] is emit_c
+    assert namespace["emit_c_op"] is emit_c_op
+    assert namespace["emit_c_value"] is emit_c_value
     assert "gen_signature" not in public_names
     assert "gen_body" not in public_names
+    assert emit_context_module.EmitCContext is EmitCContext
+    assert emit_context_module.EmitCError is EmitCError
+    assert emit_context_module.__all__ == ["EmitCContext", "EmitCError"]
+
+
+# GK-015B
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-21 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-21 00:00:00 +0800
+# 功能说明: 验证旧路径先导入时，包根仍复用同一份 EmitCContext / EmitCError 类型对象。
+# 测试目的: 锁定 `kernel_gen.dsl.emit_c` 与 `kernel_gen.dsl.gen_kernel` 的模块单例边界，避免类对象分裂导致 dsl_run / expectation 兼容失败。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_reuses_legacy_emit_c_context_identity_when_old_path_imports_first
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/_legacy.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_reuses_legacy_emit_c_context_identity_when_old_path_imports_first() -> None:
+    script = """
+import importlib
+
+legacy_emit_c = importlib.import_module("kernel_gen.dsl.emit_c")
+gen_kernel = importlib.import_module("kernel_gen.dsl.gen_kernel")
+
+assert legacy_emit_c.EmitCContext is gen_kernel.EmitCContext
+assert legacy_emit_c.EmitCError is gen_kernel.EmitCError
+"""
+    env = os.environ.copy()
+    pythonpath_parts = [str(REPO_ROOT), "/home/lfr/kernelcode_generate"]
+    existing_pythonpath = env.get("PYTHONPATH")
+    if existing_pythonpath:
+        pythonpath_parts.append(existing_pythonpath)
+    env["PYTHONPATH"] = ":".join(part for part in pythonpath_parts if part)
+
+    result = subprocess.run([sys.executable, "-c", script], check=False, capture_output=True, text=True, env=env)
+    if result.returncode != 0:
+        raise AssertionError(
+            "legacy-first import order should keep package-root emit_c types identical:\n"
+            f"stdout:\n{result.stdout}\n"
+            f"stderr:\n{result.stderr}"
+        )
 
 
 # GK-014A
