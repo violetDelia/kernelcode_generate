@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import importlib
 import re
 import sys
 
@@ -51,6 +52,9 @@ from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace, NumericType
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 
+emit_c_package = importlib.import_module("kernel_gen.dsl.gen_kernel.emit_c")
+emit_c_register = importlib.import_module("kernel_gen.dsl.gen_kernel.emit_c.register")
+
 
 @irdl_op_definition
 class UnsupportedOp(IRDLOperation):
@@ -76,6 +80,19 @@ def test_emit_c_public_entry_matches_gen_kernel_for_empty_func() -> None:
     func_op = func.FuncOp("empty_kernel", func_type, Region(block))
 
     assert emit_c(func_op, _ctx()) == gen_kernel(func_op, _ctx())
+
+
+def test_emit_c_package_registers_common_op_and_value_types() -> None:
+    op_types = set(emit_c_register.registered_op_types())
+    value_types = set(emit_c_register.registered_value_types())
+
+    assert callable(emit_c_package.emit_c_op)
+    assert callable(emit_c_package.emit_c_value)
+    assert DmaAllocOp in op_types
+    assert KernelBinaryElewiseOp in op_types
+    assert NnAddOp in op_types
+    assert SymbolConstOp in value_types
+    assert ArchGetThreadIdOp in value_types
 
 
 def _make_memory_type(

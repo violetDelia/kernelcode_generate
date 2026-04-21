@@ -26,15 +26,22 @@ from typing import Any
 
 from xdsl.ir import SSAValue
 
-from ._legacy import load_legacy_emit_c_module, load_legacy_gen_kernel_module
-from .emit_context import EmitCContext, EmitCError
-
-_legacy_emit_c = load_legacy_emit_c_module()
+from ._legacy import load_legacy_gen_kernel_module
+from .emit_c import EmitCContext, EmitCError
+from . import emit_c as _emit_c_module
 _legacy_gen_kernel = load_legacy_gen_kernel_module()
 
 GenKernelError = _legacy_gen_kernel.GenKernelError
-emit_c_op = _legacy_emit_c.emit_c_op
-emit_c_value = _legacy_emit_c.emit_c_value
+emit_c_op = _emit_c_module.emit_c_op
+emit_c_value = _emit_c_module.emit_c_value
+
+
+def emit_c(obj: object, ctx: EmitCContext) -> str:
+    """统一发射 DSL 源码片段或完整函数源码。"""
+
+    if isinstance(obj, SSAValue):
+        return emit_c_value(obj, ctx)
+    return _call_legacy_gen_kernel(obj, ctx)
 
 
 def _call_legacy_gen_kernel(obj: object, ctx: EmitCContext) -> str:
@@ -66,34 +73,6 @@ def _call_legacy_gen_kernel(obj: object, ctx: EmitCContext) -> str:
     finally:
         _legacy_gen_kernel.emit_c_op = legacy_emit_c_op
         _legacy_gen_kernel.emit_c_value = legacy_emit_c_value
-
-
-def emit_c(obj: object, ctx: EmitCContext) -> str:
-    """统一发射 DSL 源码片段或完整函数源码。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 对 `SSAValue` 直接复用 `emit_c_value(...)`。
-    - 其余对象统一委托旧版 `gen_kernel(...)` 兼容实现。
-    - 这样既保留现有生成行为，也把公开入口收口到包根。
-
-    使用示例:
-    - source = emit_c(func_op, EmitCContext(target="cpu"))
-    - expr = emit_c(block_arg, EmitCContext(target="cpu"))
-
-    关联文件:
-    - spec: [spec/dsl/emit_c.md](../../../spec/dsl/emit_c.md)
-    - spec: [spec/dsl/gen_kernel.md](../../../spec/dsl/gen_kernel.md)
-    - test: [test/dsl/test_emit_c.py](../../../test/dsl/test_emit_c.py)
-    - test: [test/dsl/test_gen_kernel.py](../../../test/dsl/test_gen_kernel.py)
-    - 功能实现: [kernel_gen/dsl/gen_kernel/](.)
-    """
-
-    if isinstance(obj, SSAValue):
-        return emit_c_value(obj, ctx)
-    return _call_legacy_gen_kernel(obj, ctx)
 
 
 def gen_kernel(obj: object, ctx: EmitCContext) -> str:
