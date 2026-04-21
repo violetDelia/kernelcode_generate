@@ -15,6 +15,10 @@
 - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
 - expectation: [expectation/tools/dsl_run/add.py](expectation/tools/dsl_run/add.py)
 - expectation: [expectation/tools/dsl_run/invalid_contract.py](expectation/tools/dsl_run/invalid_contract.py)
+- expectation: [expectation/execute_engine/npu_demo/kernel_only/add.py](expectation/execute_engine/npu_demo/kernel_only/add.py)
+- expectation: [expectation/execute_engine/npu_demo/kernel_only/mul.py](expectation/execute_engine/npu_demo/kernel_only/mul.py)
+- expectation: [expectation/execute_engine/npu_demo/kernel_only/sub.py](expectation/execute_engine/npu_demo/kernel_only/sub.py)
+- expectation: [expectation/execute_engine/npu_demo/kernel_only/matmul.py](expectation/execute_engine/npu_demo/kernel_only/matmul.py)
 """
 
 from __future__ import annotations
@@ -61,15 +65,15 @@ if str(EXPECTATION_ROOT) not in sys.path:
     sys.path.append(str(EXPECTATION_ROOT))
 
 from expectation.tools.dsl_run.add import add_kernel
-from expectation.execute_engine.npu_demo.add import (
+from expectation.execute_engine.npu_demo.kernel_only.add import (
     case_for_loop_add_runs_with_dsl_run,
     case_slice_store_add_runs_with_dsl_run,
 )
-from expectation.execute_engine.npu_demo.mul import (
+from expectation.execute_engine.npu_demo.kernel_only.mul import (
     case_mul_emit_compile_execute,
     case_mul_lowering_contract,
 )
-from expectation.execute_engine.npu_demo.sub import (
+from expectation.execute_engine.npu_demo.kernel_only.sub import (
     case_sub_emit_compile_execute,
     case_sub_lowering_contract,
 )

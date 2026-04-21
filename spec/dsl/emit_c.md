@@ -423,7 +423,7 @@ npu_demo::deslice(out_tile, out, m0, 16, 1);
 - 本节只覆盖节点文本，不定义函数签名、wrapper 或编译执行流程。
 - `npu_demo` 路径命中 matmul 时不得生成 `cpu::matmul(...)`。
 - 若 `kernel.matmul` 在当前 target 下不可发射，必须报错并包含 `unsupported op`。
-- 关联合同资产：[`expectation/execute_engine/npu_demo/matmul.py`](../../expectation/execute_engine/npu_demo/matmul.py) 的 `CASE-3`。
+- 关联合同资产：[`expectation/execute_engine/npu_demo/kernel_only/matmul.py`](../../expectation/execute_engine/npu_demo/kernel_only/matmul.py) 与 [`expectation/execute_engine/npu_demo/default/matmul.py`](../../expectation/execute_engine/npu_demo/default/matmul.py) 的 `CASE-3`。
 
 ## 测试
 

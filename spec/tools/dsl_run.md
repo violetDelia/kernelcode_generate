@@ -118,11 +118,11 @@ assert result.execute_result.ok is True
   - 非法 `pipeline` 类型失败
   - 非法 runtime 参数类型失败
   - runtime 参数数量不匹配失败
-- `expectation/execute_engine/npu_demo/add.py`、[`expectation/execute_engine/npu_demo/sub.py`](../../expectation/execute_engine/npu_demo/sub.py)、[`expectation/execute_engine/npu_demo/mul.py`](../../expectation/execute_engine/npu_demo/mul.py) 的公开行为统一收口到 `dsl_run + npu-demo-lowering + EmitCContext(target="npu_demo")`。
-  - `add.py` 的 `CASE-1` 与固定 tile for-loop `CASE-2` 都通过同一条 `dsl_run` 链真实编译执行。
-  - `add.py` 的 `CASE-2` 按层次锁定片段：DSL 示例使用 `store(lhs_tile + rhs_tile, out, ...)`；lowered IR 必须命中 `symbol.for`、`dma.slice`、`dma.store` 与 `kind = "add"`；生成的 `npu_demo` C++ 源码必须命中 `for (`、`slice(`、`deslice(` 与 `npu_demo::add<`，不得再把 `store(` 当作源码必需片段。
-  - `sub.py` / `mul.py` 通过 out-param wrapper 或 rewrite 后的等价公开行为收口；`dsl_run` 本身不扩展到 value-return kernel。
-  - `sub.py` / `mul.py` 的合同资产不得继续把手工 `parse / lowering / gen / compile` 串接作为公开正向路径；若需要保留内部对照，必须与 `dsl_run` 正向入口分离，不能作为执行入口。
+- `expectation/execute_engine/npu_demo/kernel_only/{add,mul,sub,matmul}.py` 与 `expectation/execute_engine/npu_demo/default/{add,mul,sub,matmul}.py` 的公开行为统一收口到 `dsl_run + npu-demo-lowering + EmitCContext(target="npu_demo")`。
+  - `kernel_only` 分组锁定 kernel-only 源码路径，覆盖 `add`、`mul`、`sub`、`matmul` 的公开正向合同。
+  - `default` 分组锁定默认 outline 路径，覆盖同一组 case 的 host wrapper + device/body kernel 公开合同。
+  - `add.py` 的 `CASE-1` 与固定 tile for-loop `CASE-2` 都通过同一条 `dsl_run` 链真实编译执行；`CASE-2` 的 DSL 示例保留 `store(lhs_tile + rhs_tile, out, ...)`，lowered IR 必须命中 `symbol.for`、`dma.slice`、`dma.store` 与 `kind = "add"`；生成的 `npu_demo` C++ 源码必须命中 `for (`、`slice(`、`deslice(` 与 `npu_demo::add<`，`store(` 不是源码必需片段。
+  - `sub.py` / `mul.py` / `matmul.py` 的公开合同都必须通过上述 `dsl_run` 入口真实执行，不再把手工 `parse / lowering / gen / compile` 串接作为公开正向路径；若需要保留内部对照，必须与 `dsl_run` 正向入口分离，不能作为执行入口。
 
 ## 测试
 

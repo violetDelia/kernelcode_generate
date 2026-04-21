@@ -442,7 +442,7 @@ npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out_tile, lhs_tile, rhs_ti
 - 本节只约束源码结构与关键调用，不扩展新的 target、运行时参数或调度接口。
 - 命中 matmul 路径时不得回退到 `cpu::matmul(...)`，也不得只输出占位注释。
 - `target="npu_demo"` 的 include 入口保持 `include/npu_demo/npu_demo.h`。
-- 关联合同资产：[`expectation/execute_engine/npu_demo/matmul.py`](../../expectation/execute_engine/npu_demo/matmul.py) 的 `CASE-3`。
+- 关联合同资产：[`expectation/execute_engine/npu_demo/kernel_only/matmul.py`](../../expectation/execute_engine/npu_demo/kernel_only/matmul.py) 与 [`expectation/execute_engine/npu_demo/default/matmul.py`](../../expectation/execute_engine/npu_demo/default/matmul.py) 的 `CASE-3`。
 - 与 `CASE-2` 衔接：输入 IR 应已收口为 `kernel.matmul` 且不残留 `nn.matmul`。
 
 ## 测试
