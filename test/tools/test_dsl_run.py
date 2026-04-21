@@ -362,6 +362,60 @@ def test_dsl_run_supports_mul_store_kernel_on_npu_demo() -> None:
     assert 'kind = "mul"' in str(result.func_op)
 
 
+# TC-DSL-RUN-003F
+# 创建者: 朽木露琪亚
+# 最后一次更改: 朽木露琪亚
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 测试目的: 锁定 dsl_run + npu-demo-lowering 对 execute_engine/npu_demo/matmul.py 同等 tiled matmul 合同的正向链路，覆盖 TSM、kernel.matmul、npu_demo 源码和真实执行结果。
+# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
+# 对应 spec 文件路径: spec/tools/dsl_run.md
+# 对应测试文件路径: test/tools/test_dsl_run.py
+def test_dsl_run_supports_tiled_matmul_kernel_on_npu_demo() -> None:
+    def matmul_out_kernel(
+        out: "Tensor[f32, 32, 32]",
+        lhs: "Tensor[f32, 32, 16]",
+        rhs: "Tensor[f32, 16, 32]",
+    ) -> None:
+        for m0 in loop(0, 32, 16):
+            for n0 in loop(0, 32, 16):
+                lhs_tile = slice(lhs, [m0, 0], [16, 16], [1, 1], MemorySpace.TSM)
+                rhs_tile = slice(rhs, [0, n0], [16, 16], [1, 1], MemorySpace.TSM)
+                partial = matmul(lhs_tile, rhs_tile)
+                deslice(partial, out, [m0, n0], [16, 16], [1, 1])
+
+    out = torch.empty((32, 32), dtype=torch.float32)
+    lhs = torch.arange(32 * 16, dtype=torch.float32).reshape(32, 16) / 17.0
+    rhs = (np.arange(16 * 32, dtype=np.float32).reshape(16, 32) - 11.0) / 19.0
+    expected = torch.matmul(lhs, torch.from_numpy(rhs))
+
+    result = dsl_run(
+        matmul_out_kernel,
+        (out, lhs, rhs),
+        "npu-demo-lowering",
+        EmitCContext(target="npu_demo"),
+    )
+
+    lowered_text = str(result.func_op)
+    assert result.execute_result.ok is True
+    assert result.execute_result.failure_phrase is None
+    assert not result.compiled_kernel.compile_stdout.startswith("dry-run: ")
+    assert "#nn.space<tsm>" in lowered_text
+    assert "#nn.space<shared>" not in lowered_text
+    assert "kernel.matmul" in lowered_text
+    assert "nn.matmul" not in lowered_text
+    assert result.source.startswith('#include "include/npu_demo/npu_demo.h"\n')
+    assert "npu_demo::matmul<" in result.source
+    assert "cpu::matmul(" not in result.source
+    assert result.source.count("for (") >= 2
+    assert "slice(" in result.source
+    assert "deslice(" in result.source
+    assert isinstance(out, torch.Tensor)
+    assert out.dtype == torch.float32
+    assert out.shape == (32, 32)
+    assert torch.allclose(out, expected, atol=1e-5, rtol=1e-5)
+
+
 # TC-DSL-RUN-004
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚
