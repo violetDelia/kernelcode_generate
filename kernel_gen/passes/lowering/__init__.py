@@ -10,7 +10,7 @@
 - 提供 lower-dma-memory-hierarchy pass 的公开入口。
 - 提供 decompass pass 的公开入口。
 - 提供 outline-device-kernel 的 lowering 兼容入口。
-- 提供 tile-analysis / tile-elewise ModulePass、tile pass 与 kernel_split 兼容入口。
+- 提供 tile-analysis / tile-elewise / tile-reduce ModulePass、tile pass 与 kernel_split 兼容入口。
 - 提供 symbol-loop-hoist 的兼容入口。
 
 使用示例:
@@ -30,6 +30,8 @@
 - pass_obj = TileAnalysisPass()
 - from kernel_gen.passes.lowering.tile_elewise import TileElewisePass
 - pass_obj = TileElewisePass()
+- from kernel_gen.passes.lowering.tile_reduce import TileReducePass
+- pass_obj = TileReducePass()
 - from kernel_gen.passes.lowering.tile import TilePass
 - pass_obj = TilePass()
 - from kernel_gen.passes import SymbolLoopHoistPass
@@ -44,6 +46,7 @@
   - [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
   - [spec/pass/lowering/tile_analysis.md](spec/pass/lowering/tile_analysis.md)
   - [spec/pass/lowering/tile_elewise.md](spec/pass/lowering/tile_elewise.md)
+  - [spec/pass/lowering/tile_reduce.md](spec/pass/lowering/tile_reduce.md)
   - [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
   - [spec/pass/lowering/kernel_split.md](spec/pass/lowering/kernel_split.md)
   - [spec/pass/symbol_loop_hoist.md](spec/pass/symbol_loop_hoist.md)
@@ -57,6 +60,7 @@
   - [test/pass/test_lowering_tile.py](test/pass/test_lowering_tile.py)
   - [test/pass/test_lowering_tile_analysis.py](test/pass/test_lowering_tile_analysis.py)
   - [test/pass/test_lowering_tile_elewise.py](test/pass/test_lowering_tile_elewise.py)
+  - [test/pass/test_lowering_tile_reduce.py](test/pass/test_lowering_tile_reduce.py)
   - [test/pass/test_lowering_kernel_split.py](test/pass/test_lowering_kernel_split.py)
   - [test/pass/test_symbol_loop_hoist.py](test/pass/test_symbol_loop_hoist.py)
 - 功能实现:
@@ -69,6 +73,7 @@
   - [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
   - [kernel_gen/passes/lowering/tile_analysis.py](kernel_gen/passes/lowering/tile_analysis.py)
   - [kernel_gen/passes/lowering/tile_elewise.py](kernel_gen/passes/lowering/tile_elewise.py)
+  - [kernel_gen/passes/lowering/tile_reduce.py](kernel_gen/passes/lowering/tile_reduce.py)
   - [kernel_gen/passes/lowering/__init__.py](kernel_gen/passes/lowering/__init__.py)
   - [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
   - [kernel_gen/passes/lowering/kernel_split.py](kernel_gen/passes/lowering/kernel_split.py)
@@ -118,8 +123,20 @@ __all__ = [
     "TilePassError",
     "TileAnalysisPass",
     "TileElewisePass",
+    "TileReducePass",
+    "TileReduceError",
     "KernelSplitPass",
     "KernelSplitError",
     "SymbolLoopHoistPass",
     "SymbolLoopHoistError",
 ]
+
+
+def __getattr__(name: str):
+    if name in {"TileReducePass", "TileReduceError"}:
+        from .tile_reduce import TileReduceError, TileReducePass
+
+        globals()["TileReducePass"] = TileReducePass
+        globals()["TileReduceError"] = TileReduceError
+        return globals()[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

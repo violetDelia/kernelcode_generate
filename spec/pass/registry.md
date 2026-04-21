@@ -51,7 +51,7 @@
 - 重复注册同名 pass 或 pipeline 必须立即失败，不得覆盖旧项。
 - 为便于工具与测试编写最小用例，仓库内置 pass 至少应包含：
   - `no-op`：恒等 pass（对输入 module 不做任何改写），且必须满足“可构造”要求（`pass_cls()` 可成功执行）。
-  - `tile-analysis` / `tile-elewise`：tile family 的公开 `ModulePass` 名称，供 expectation、pytest 与工具层统一解析。
+  - `tile-analysis` / `tile-elewise` / `tile-reduce`：tile family 的公开 `ModulePass` 名称，供 expectation、pytest 与工具层统一解析。
 - tuning pass `launch-kernel-cost-func` 属于 standalone pass，必须通过 pass registry 显式启用；不得自动进入任何默认 pipeline。
 - `launch-kernel-cost-func` 接受 `options={"cost_kind": "compute" | "memory"}`；非法 `cost_kind` 必须由 pass 构造入口或 pass 本身显式失败，registry 不吞掉该错误。
 - registry 不解析 `options` 的语义；`options` 仅按字典透传给 pass 或 pipeline 构造入口。
@@ -273,5 +273,6 @@ names = list_registered_passes()
 - 测试目标：
   - `register_pass/register_pipeline`：重复注册立即失败，错误短语可机械匹配。
   - `build_registered_pass/build_registered_pipeline`：未知名称、不可构造、选项不被接受、返回值非法路径报告稳定错误短语。
-  - `launch-kernel-cost-func`：通过 `load_builtin_passes()` 后可查询；`cost_kind=compute|memory` 选项可透传构造；非法 `cost_kind` 不被 registry 层吞掉。
-  - `list_registered_*`：返回值顺序确定且不含重复项。
+- `launch-kernel-cost-func`：通过 `load_builtin_passes()` 后可查询；`cost_kind=compute|memory` 选项可透传构造；非法 `cost_kind` 不被 registry 层吞掉。
+- `tile-analysis` / `tile-elewise` / `tile-reduce`：通过 `load_builtin_passes()` 后可查询；三者均以 `ModulePass` 形式公开给 registry / pipeline / expectation 入口。
+- `list_registered_*`：返回值顺序确定且不含重复项。
