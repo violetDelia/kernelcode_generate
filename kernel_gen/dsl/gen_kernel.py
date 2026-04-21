@@ -1590,7 +1590,8 @@ class _KernelEmitter:
         最后一次更改: 小李飞刀
 
         功能说明:
-        - 仅扫描当前函数体里已知的写入类 op，把其 `target/out` 所对应的 block argument 记为可写参数。
+        - 递归扫描当前函数里已知的写入类 op，把其 `target/out` 所对应的 block argument 记为可写参数。
+        - 覆盖 `symbol.for` / `scf.for` region 内的 `dma.store`，避免把循环内写回的 out 参数误生成 `const&`。
         - 供 `npu_demo` 单函数 module 的默认签名复用，避免把 `dst` 一律误生成为 `const&`。
 
         使用示例:
@@ -1604,7 +1605,7 @@ class _KernelEmitter:
 
         arg_to_index = {arg: index for index, arg in enumerate(func_op.args)}
         mutable: set[int] = set()
-        for op in func_op.body.block.ops:
+        for op in _walk_ops(func_op):
             for value in self._mutable_memory_operands(op):
                 if isinstance(value, BlockArgument) and value in arg_to_index:
                     mutable.add(arg_to_index[value])
@@ -1621,7 +1622,7 @@ class _KernelEmitter:
         if isinstance(op, (DmaBroadcastOp, DmaCastOp, DmaCopyOp, DmaFillOp, DmaLoadOp, DmaSliceOp, DmaTransposeOp)):
             if not isinstance(op, DmaCastOp) or len(op.operands) == 2:
                 candidates.append(op.target)
-        if isinstance(op, DmaStoreOp):
+        if isinstance(op, (DmaDesliceOp, DmaStoreOp)):
             candidates.append(op.target)
         mutable_args: list[BlockArgument] = []
         for candidate in candidates:
