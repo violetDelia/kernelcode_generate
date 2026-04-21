@@ -78,7 +78,7 @@ def test_nn_lowering_pass_public_exports() -> None:
 # TC-PASS-NNL-003
 # 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战
-# 测试目的: 验证 nn_lowering pattern driver 的注册顺序，elementwise/compare/select/cast 已按单 op pattern 注册，unsupported reject 保持最后。
+# 测试目的: 验证 nn_lowering pattern driver 的注册顺序，elementwise/compare/select/cast/reduce/softmax 已按单 op pattern 注册，unsupported reject 保持最后。
 # 使用示例: pytest -q test/pass/nn_lowering/public_name.py -k test_nn_lowering_patterns_register_reject_last
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/nn_lowering.py
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
@@ -106,14 +106,18 @@ def test_nn_lowering_patterns_register_reject_last() -> None:
         "_LowerNnMatmulPattern",
         "_LowerNnImg2col1dPattern",
         "_LowerNnImg2col2dPattern",
-        "_LowerReduceSoftmaxFamilyPattern",
-        "_RejectSoftmaxPattern",
+        "_LowerNnReduceSumPattern",
+        "_LowerNnReduceMinPattern",
+        "_LowerNnReduceMaxPattern",
+        "_RejectNnSoftmaxPattern",
         "_RejectUnsupportedNnOpPattern",
     ]
     assert "_LowerNnSupportedOpPattern" not in names
     assert "_LowerElementBinaryFamilyPattern" not in names
     assert "_LowerDmaStructuredFamilyPattern" not in names
     assert "_LowerMatmulImg2colFamilyPattern" not in names
+    assert "_LowerReduceSoftmaxFamilyPattern" not in names
+    assert "_RejectSoftmaxPattern" not in names
 
 
 # TC-PASS-NNL-004

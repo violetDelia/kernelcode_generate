@@ -1,7 +1,7 @@
 """nn_lowering reduce_min tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 朽木露琪亚
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 使用 ircheck 文本验证 `nn.reduce_min` lowering 目标为 `kernel.reduce(kind=min)`。
@@ -32,7 +32,7 @@ CASE_TEXT_STATIC = """// COMPILE_ARGS: --pass lower-nn
 // CHECK: builtin.module {
 // CHECK-NEXT: func.func @reduce_min_kernel(%arg0 : !nn.memory<[4, 8], [8, 1], f32, #nn.space<global>>) -> !nn.memory<[4, 1], [1, 1], f32, #nn.space<global>> {
 // CHECK-NEXT: %0 = "dma.alloc"() <{operandSegmentSizes = array<i32: 0>}> : () -> !nn.memory<[4, 1], [1, 1], f32, #nn.space<global>>
-// CHECK-NEXT: "kernel.reduce"(%arg0, %0) {axis = 1 : i64, keepdim = true, kind = "min", space = #nn.space<global>} : (!nn.memory<[4, 8], [8, 1], f32, #nn.space<global>>, !nn.memory<[4, 1], [1, 1], f32, #nn.space<global>>) -> ()
+// CHECK-NEXT: "kernel.reduce"(%0, %arg0) {axis = 1 : i64, keepdim = true, kind = "min", space = #nn.space<global>} : (!nn.memory<[4, 1], [1, 1], f32, #nn.space<global>>, !nn.memory<[4, 8], [8, 1], f32, #nn.space<global>>) -> ()
 // CHECK-NEXT: func.return %0 : !nn.memory<[4, 1], [1, 1], f32, #nn.space<global>>
 // CHECK-NEXT: }
 // CHECK-NEXT: }
@@ -52,7 +52,7 @@ CASE_TEXT_DYNAMIC = """// COMPILE_ARGS: --pass lower-nn
 // CHECK-NEXT: func.func @reduce_min_kernel(%arg0 : !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>) -> !nn.memory<[M, 1], [1, 1], f32, #nn.space<global>> {
 // CHECK-NEXT: %0 = "symbol.get_dim"(%arg0) {axis = #builtin.int<0>} : (!nn.memory<[M, N], [N, 1], f32, #nn.space<global>>) -> !symbol.int<"M">
 // CHECK-NEXT: %1 = "dma.alloc"(%0) <{operandSegmentSizes = array<i32: 1>}> : (!symbol.int<"M">) -> !nn.memory<[M, 1], [1, 1], f32, #nn.space<global>>
-// CHECK-NEXT: "kernel.reduce"(%arg0, %1) {axis = 1 : i64, keepdim = true, kind = "min", space = #nn.space<global>} : (!nn.memory<[M, N], [N, 1], f32, #nn.space<global>>, !nn.memory<[M, 1], [1, 1], f32, #nn.space<global>>) -> ()
+// CHECK-NEXT: "kernel.reduce"(%1, %arg0) {axis = 1 : i64, keepdim = true, kind = "min", space = #nn.space<global>} : (!nn.memory<[M, 1], [1, 1], f32, #nn.space<global>>, !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>) -> ()
 // CHECK-NEXT: func.return %1 : !nn.memory<[M, 1], [1, 1], f32, #nn.space<global>>
 // CHECK-NEXT: }
 // CHECK-NEXT: }
@@ -72,7 +72,7 @@ CASE_TEXT_DYNAMIC_SYMBOL_DIM = """// COMPILE_ARGS: --pass lower-nn
 // CHECK-NEXT: func.func @reduce_min_symbol_dim_kernel(%arg0 : !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>) -> !nn.memory<[1, N], [N, 1], f32, #nn.space<global>> {
 // CHECK-NEXT: %0 = "symbol.get_dim"(%arg0) {axis = #builtin.int<1>} : (!nn.memory<[M, N], [N, 1], f32, #nn.space<global>>) -> !symbol.int<"N">
 // CHECK-NEXT: %1 = "dma.alloc"(%0) <{operandSegmentSizes = array<i32: 1>}> : (!symbol.int<"N">) -> !nn.memory<[1, N], [N, 1], f32, #nn.space<global>>
-// CHECK-NEXT: "kernel.reduce"(%arg0, %1) {axis = 0 : i64, keepdim = true, kind = "min", space = #nn.space<global>} : (!nn.memory<[M, N], [N, 1], f32, #nn.space<global>>, !nn.memory<[1, N], [N, 1], f32, #nn.space<global>>) -> ()
+// CHECK-NEXT: "kernel.reduce"(%1, %arg0) {axis = 0 : i64, keepdim = true, kind = "min", space = #nn.space<global>} : (!nn.memory<[1, N], [N, 1], f32, #nn.space<global>>, !nn.memory<[M, N], [N, 1], f32, #nn.space<global>>) -> ()
 // CHECK-NEXT: func.return %1 : !nn.memory<[1, N], [N, 1], f32, #nn.space<global>>
 // CHECK-NEXT: }
 // CHECK-NEXT: }
@@ -116,7 +116,7 @@ def _assert_ircheck_ok(case_text: str, source_path: str) -> None:
 
 # TC-PASS-NNL-011
 # 创建者: 金铲铲大作战
-# 最后一次更改: 朽木露琪亚
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-12 08:20:00 +0800
 # 最近一次运行成功时间: 2026-04-12 08:20:00 +0800
 # 测试目的: 验证 nn.reduce_min lowering 目标为 kernel.reduce(kind=min)（静态形态）。
@@ -130,7 +130,7 @@ def test_nn_lowering_reduce_min_static() -> None:
 
 # TC-PASS-NNL-011
 # 创建者: 金铲铲大作战
-# 最后一次更改: 朽木露琪亚
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-12 08:20:00 +0800
 # 最近一次运行成功时间: 2026-04-12 08:20:00 +0800
 # 测试目的: 验证 nn.reduce_min lowering 目标为 kernel.reduce(kind=min)（符号维度）。
@@ -144,7 +144,7 @@ def test_nn_lowering_reduce_min_dynamic() -> None:
 
 # TC-PASS-NNL-011
 # 创建者: 金铲铲大作战
-# 最后一次更改: 朽木露琪亚
+# 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-12 08:20:00 +0800
 # 最近一次运行成功时间: 2026-04-12 08:20:00 +0800
 # 测试目的: 验证 reduce 维度为符号时仍能 lower 为 kernel.reduce(kind=min)。

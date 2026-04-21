@@ -1,20 +1,23 @@
-"""reduce family lowering 实现。
+"""reduce/softmax boundary lowering 实现。
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
-- 提供 nn.exp / nn.reduce_* 的 lowering 入口。
-- 统一 reduce 族 op 到 kernel.reduce(kind=...)。
+- 提供 nn.reduce_* 的单 op pattern lowering 入口。
+- 兼容 helper 仍支持 nn.exp / nn.reduce_* 的 block 级调用。
 - `nn.softmax` 不在本层直接 lowering，需先由上游完成分解。
 
 使用示例:
 - from kernel_gen.passes.lowering.nn_lowering.reduce_softmax_lowering import lower_reduce_softmax_family
 - handled = lower_reduce_softmax_family(block, op)
+- from kernel_gen.passes.lowering.nn_lowering.reduce_softmax_lowering import reduce_softmax_patterns
+- patterns = reduce_softmax_patterns()
 
 关联文件:
 - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
 - test: test/pass/nn_lowering/reduce_sum.py
+- test: test/pass/nn_lowering/public_name.py
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
 """
 
@@ -26,7 +29,14 @@ from xdsl.pattern_rewriter import PatternRewriter, RewritePattern, op_type_rewri
 
 from kernel_gen.dialect.dma import DmaAllocOp
 from kernel_gen.dialect.kernel import KernelExpOp, KernelReduceOp
-from kernel_gen.dialect.nn import NnMemoryType
+from kernel_gen.dialect.nn import (
+    NnExpOp,
+    NnMemoryType,
+    NnReduceMaxOp,
+    NnReduceMinOp,
+    NnReduceSumOp,
+    NnSoftmaxOp,
+)
 from kernel_gen.dialect.symbol import SymbolGetDimOp
 from .nn_lowering import (
     NnLoweringError,
@@ -35,9 +45,7 @@ from .nn_lowering import (
     _ensure_space_attr,
     _ensure_symbol_or_int,
 )
-
-
-_REDUCE_SOFTMAX_OP_NAMES = {"nn.exp", "nn.reduce_sum", "nn.reduce_min", "nn.reduce_max"}
+from .nn_lowering_utility import ensure_expected_op_name
 
 
 def _ensure_int_attr(op: Operation, name: str) -> int:
@@ -123,7 +131,7 @@ def _ensure_reduce_keepdim(op_name: str, keepdim_attr: Attribute) -> bool:
         keepdim = keepdim_attr.data
     else:
         raise NnLoweringError("keepdim must be integer")
-    if keepdim in (0, 1, -1):
+    if keepdim in (0, 1):
         return bool(keepdim)
     raise NnLoweringError("keepdim must be 0 or 1")
 
@@ -315,14 +323,15 @@ def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:
 
 
 def lower_reduce_softmax_family(block: Block, op: Operation) -> bool:
-    """处理 reduce family 的 lowering。
+    """处理 exp/reduce family 的兼容 lowering。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 识别 nn.exp / nn.reduce_*。
+    - 通过具体 nn op Python 类型识别 nn.exp / nn.reduce_*。
     - 对匹配 op 执行 lowering 并返回 True。
+    - 主 driver 使用 reduce_softmax_patterns() 的单 op pattern，本 helper 仅保留给旧调用点。
 
     使用示例:
     - handled = lower_reduce_softmax_family(block, op)
@@ -333,33 +342,37 @@ def lower_reduce_softmax_family(block: Block, op: Operation) -> bool:
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
     """
 
-    if op.name == "nn.exp":
+    if isinstance(op, NnExpOp):
+        ensure_expected_op_name(op, "nn.exp")
         _lower_exp(block, op)
         return True
-    if op.name == "nn.reduce_sum":
+    if isinstance(op, NnReduceSumOp):
+        ensure_expected_op_name(op, "nn.reduce_sum")
         _lower_reduce(block, op, kind="sum")
         return True
-    if op.name == "nn.reduce_min":
+    if isinstance(op, NnReduceMinOp):
+        ensure_expected_op_name(op, "nn.reduce_min")
         _lower_reduce(block, op, kind="min")
         return True
-    if op.name == "nn.reduce_max":
+    if isinstance(op, NnReduceMaxOp):
+        ensure_expected_op_name(op, "nn.reduce_max")
         _lower_reduce(block, op, kind="max")
         return True
     return False
 
 
-class _LowerReduceSoftmaxFamilyPattern(RewritePattern):
-    """将 reduce/exp family 交给当前 family helper 改写。
+class _LowerNnReduceSumPattern(RewritePattern):
+    """将单个 nn.reduce_sum lowering 为 kernel.reduce(kind=sum)。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 作为 S1 pattern driver 的 reduce/exp family 入口。
-    - 只处理当前已支持的 reduce/exp op，保持既有 lowering 行为。
+    - 通过 `@op_type_rewrite_pattern` 直接匹配 `NnReduceSumOp`。
+    - 复用 `_lower_reduce(..., kind="sum")`，保持既有 IR 输出不变。
 
     使用示例:
-    - pattern = _LowerReduceSoftmaxFamilyPattern()
+    - pattern = _LowerNnReduceSumPattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
@@ -368,27 +381,27 @@ class _LowerReduceSoftmaxFamilyPattern(RewritePattern):
     """
 
     @op_type_rewrite_pattern
-    def match_and_rewrite(self, op: Operation, rewriter: PatternRewriter) -> None:
-        if op.name not in _REDUCE_SOFTMAX_OP_NAMES:
-            return
+    def match_and_rewrite(self, op: NnReduceSumOp, rewriter: PatternRewriter, /) -> None:
         block = op.parent_block()
         if block is None:
             raise NnLoweringError("nn op must be inside a block")
-        lower_reduce_softmax_family(block, op)
+        ensure_expected_op_name(op, "nn.reduce_sum")
+        _lower_reduce(block, op, kind="sum")
         rewriter.has_done_action = True
 
 
-class _RejectSoftmaxPattern(RewritePattern):
-    """拒绝 direct nn.softmax lowering。
+class _LowerNnReduceMinPattern(RewritePattern):
+    """将单个 nn.reduce_min lowering 为 kernel.reduce(kind=min)。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 维持当前公开错误短语：nn.softmax 必须先由上游分解。
+    - 通过 `@op_type_rewrite_pattern` 直接匹配 `NnReduceMinOp`。
+    - 复用 `_lower_reduce(..., kind="min")`，保持既有 IR 输出不变。
 
     使用示例:
-    - pattern = _RejectSoftmaxPattern()
+    - pattern = _LowerNnReduceMinPattern()
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
@@ -397,20 +410,78 @@ class _RejectSoftmaxPattern(RewritePattern):
     """
 
     @op_type_rewrite_pattern
-    def match_and_rewrite(self, op: Operation, rewriter: PatternRewriter) -> None:
+    def match_and_rewrite(self, op: NnReduceMinOp, rewriter: PatternRewriter, /) -> None:
+        block = op.parent_block()
+        if block is None:
+            raise NnLoweringError("nn op must be inside a block")
+        ensure_expected_op_name(op, "nn.reduce_min")
+        _lower_reduce(block, op, kind="min")
+        rewriter.has_done_action = True
+
+
+class _LowerNnReduceMaxPattern(RewritePattern):
+    """将单个 nn.reduce_max lowering 为 kernel.reduce(kind=max)。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 通过 `@op_type_rewrite_pattern` 直接匹配 `NnReduceMaxOp`。
+    - 复用 `_lower_reduce(..., kind="max")`，保持既有 IR 输出不变。
+
+    使用示例:
+    - pattern = _LowerNnReduceMaxPattern()
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
+    - test: test/pass/nn_lowering/public_name.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
+    """
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: NnReduceMaxOp, rewriter: PatternRewriter, /) -> None:
+        block = op.parent_block()
+        if block is None:
+            raise NnLoweringError("nn op must be inside a block")
+        ensure_expected_op_name(op, "nn.reduce_max")
+        _lower_reduce(block, op, kind="max")
+        rewriter.has_done_action = True
+
+
+class _RejectNnSoftmaxPattern(RewritePattern):
+    """拒绝 direct nn.softmax lowering。
+
+    创建者: 小李飞刀
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 通过 `@op_type_rewrite_pattern` 直接匹配 `NnSoftmaxOp`。
+    - 维持当前公开错误短语：nn.softmax 必须先由上游分解。
+
+    使用示例:
+    - pattern = _RejectNnSoftmaxPattern()
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
+    - test: test/pass/nn_lowering/public_name.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
+    """
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, op: NnSoftmaxOp, rewriter: PatternRewriter, /) -> None:
         _ = rewriter
-        if op.name == "nn.softmax":
-            raise NnLoweringError("nn.softmax must be decomposed before lower-nn")
+        ensure_expected_op_name(op, "nn.softmax")
+        raise NnLoweringError("nn.softmax must be decomposed before lower-nn")
 
 
 def reduce_softmax_patterns() -> list[RewritePattern]:
     """返回 reduce/softmax 边界 rewrite pattern 集合。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 提供 nn_lowering 主 driver 的 family pattern 注册入口。
+    - 提供 nn_lowering 主 driver 的 reduce 单 op pattern 注册入口。
     - 保留 direct nn.softmax 的显式拒绝边界。
 
     使用示例:
@@ -422,7 +493,12 @@ def reduce_softmax_patterns() -> list[RewritePattern]:
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
     """
 
-    return [_LowerReduceSoftmaxFamilyPattern(), _RejectSoftmaxPattern()]
+    return [
+        _LowerNnReduceSumPattern(),
+        _LowerNnReduceMinPattern(),
+        _LowerNnReduceMaxPattern(),
+        _RejectNnSoftmaxPattern(),
+    ]
 
 
 __all__ = ["lower_reduce_softmax_family", "reduce_softmax_patterns"]

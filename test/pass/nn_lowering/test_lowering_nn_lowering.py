@@ -1642,6 +1642,36 @@ def test_reduce_min_rejects_bad_keepdim() -> None:
         NnLoweringPass().run(module)
 
 
+# TC-PASS-NNL-033A
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-21 21:40:00 +0800
+# 最近一次运行成功时间: 2026-04-21 21:40:00 +0800
+# 测试目的: 验证 Lowering 对 reduce_min keepdim=-1 的拒绝。
+# 使用示例: pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py -k test_reduce_min_rejects_keepdim_negative_one
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
+# 对应测试文件路径: test/pass/nn_lowering/test_lowering_nn_lowering.py
+def test_reduce_min_rejects_keepdim_negative_one() -> None:
+    block = Block()
+    operand_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
+    res_type = nn_memory_type((IntAttr(2), IntAttr(1)), (IntAttr(1), IntAttr(1)), f32, SPACE_GLOBAL)
+    operand = add_block_arg(block, operand_type)
+    reduce_op = NnReduceMinOp(
+        operand,
+        res_type,
+        ArrayAttr([IntegerAttr.from_int_and_width(1, 64)]),
+        IntegerAttr.from_int_and_width(-1, 64),
+        SPACE_GLOBAL,
+    )
+    block.add_op(reduce_op)
+    block.add_op(func.ReturnOp(reduce_op.results[0]))
+    module = ModuleOp([func.FuncOp("reduce_min", FunctionType.from_lists([operand_type], [res_type]), Region(block))])
+
+    with pytest.raises(NnLoweringError, match="keepdim must be 0 or 1"):
+        NnLoweringPass().run(module)
+
+
 # TC-PASS-NNL-034
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战

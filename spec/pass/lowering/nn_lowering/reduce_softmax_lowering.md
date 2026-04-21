@@ -2,12 +2,12 @@
 
 ## 功能简介
 
-为 `nn.exp` 与 `nn.reduce_*` 提供统一的 lowering 入口，输出 `kernel.exp` 与 `kernel.reduce` 形态，并补齐 `dma.alloc`；`nn.softmax` 不在本层直接 lowering。
+为 `nn.reduce_*` 提供单 op pattern lowering 入口，输出 `kernel.reduce` 形态，并补齐 `dma.alloc`；`nn.softmax` 不在本层直接 lowering。`nn.exp` 已由 `select_cast_lowering.py` 的单 op pattern 承接，本文件的兼容 helper 仍支持旧调用点处理 `nn.exp`。
 
 ## 文档信息
 
 - 创建者：小李飞刀
-- 最后一次更改：小李飞刀
+- 最后一次更改：金铲铲大作战
 - spec：[`spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md`](spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md)
 - 功能实现：[`kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py`](kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py)
 - test：[`test/pass/nn_lowering/reduce_sum.py`](test/pass/nn_lowering/reduce_sum.py)
@@ -21,12 +21,14 @@
 
 ## 目标
 
-- 为 exp / reduce family 提供可复用的 lowering 入口。
+- 为 reduce family 提供单 op pattern lowering 入口。
+- 保留 exp / reduce 兼容 helper，避免旧调用点立即失效。
 - 保持 `axis`、`keepdim` 等属性校验与输出一致。
 
 ## 限制与边界
 
-- 仅处理 `nn.exp`、`nn.reduce_sum`、`nn.reduce_min`、`nn.reduce_max`。
+- 主注册入口仅处理 `nn.reduce_sum`、`nn.reduce_min`、`nn.reduce_max` 与 direct `nn.softmax` 拒绝。
+- 兼容 helper 仅处理具体 `NnExpOp`、`NnReduceSumOp`、`NnReduceMinOp`、`NnReduceMaxOp` 类型。
 - reduce 仅支持单轴 `axes`，且 `keepdim` 需为 0/1。
 - `nn.softmax` 需在进入本层前先完成分解；本文件不承诺 softmax 的 direct lowering。
 
@@ -35,7 +37,7 @@
 ### `lower_reduce_softmax_family(block, op) -> bool`
 
 - 功能说明：
-  - 识别并 lower exp / reduce family op。
+  - 通过具体 op 类型识别并 lower exp / reduce family op。
   - 成功处理后返回 `True`，不匹配则返回 `False`。
 - 参数说明：
   - `block(Block)`: 当前 op 所在 block。
@@ -46,6 +48,16 @@
   - 输入 op 不满足 shape 或属性约束时抛 `NnLoweringError`。
 - 返回与限制：
   - `True` 表示已完成 lowering；`False` 表示不匹配。
+
+### `reduce_softmax_patterns() -> list[RewritePattern]`
+
+- 功能说明：
+  - 返回 `NnReduceSumOp`、`NnReduceMinOp`、`NnReduceMaxOp` 与 direct `NnSoftmaxOp` 的具体 pattern。
+  - `nn.softmax` pattern 只抛出 `NnLoweringError("nn.softmax must be decomposed before lower-nn")`。
+- 使用示例：
+  - `patterns = reduce_softmax_patterns()`
+- 注意事项：
+  - 不再注册 reduce/softmax family pattern；主 driver 按具体 op 类型命中。
 
 ## 测试
 
