@@ -777,7 +777,7 @@ def test_emit_c_memory_space_template_alloc() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: N/A
 # 最近一次运行成功时间: N/A
-# 功能说明: 验证 target=npu_demo 下 `dma.alloc` 会发射 helper 形式的 `alloc<Space, T>(shape, stride)`。
+# 功能说明: 验证 target=npu_demo 下 `dma.alloc` 会发射 helper 形式的 `npu_demo::alloc<Space, T>(shape, stride)`。
 # 测试目的: 锁定 `npu_demo` 下 `dma.alloc` 不再展开底层 buffer + `Memory(...)` 构造，而是走 `include/api` 约定的 helper 形态。
 # 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_lowers_npu_demo_dma_alloc_helper_contract
 # 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
@@ -790,7 +790,7 @@ def test_emit_c_lowers_npu_demo_dma_alloc_helper_contract() -> None:
     alloc_stmt = emit_c_op(alloc, _npu_ctx())
 
     assert alloc_stmt == (
-        "Memory<TSM, float> v0 = alloc<TSM, float>({2, 3} /*shape*/, {3, 1} /*stride*/);"
+        "Memory<TSM, float> v0 = npu_demo::alloc<TSM, float>({2, 3} /*shape*/, {3, 1} /*stride*/);"
     )
 
     dyn_m = SymbolValueType.from_expr("M")
@@ -810,7 +810,7 @@ def test_emit_c_lowers_npu_demo_dma_alloc_helper_contract() -> None:
     dyn_stmt = emit_c_op(dyn_alloc, dyn_ctx)
 
     assert dyn_stmt == (
-        "Memory<TSM, float> v0 = alloc<TSM, float>({m, n} /*shape*/, {n, 1} /*stride*/);"
+        "Memory<TSM, float> v0 = npu_demo::alloc<TSM, float>({m, n} /*shape*/, {n, 1} /*stride*/);"
     )
 
 
@@ -921,7 +921,7 @@ def test_emit_c_lowers_npu_demo_dma_indexed_and_fill_helpers() -> None:
     assert "S_INT c_7 = 7;" in joined
     assert "int32_t c_7_cast_int32_t = c_7;" in joined
     assert "npu_demo::load<GM, GM, int32_t, int32_t>(dst /*dst*/, src /*source*/, {1, 2} /*offset*/, {2, 3} /*size*/, {1, 1} /*stride*/);" in joined
-    assert "deslice(src /*target*/, dst /*source*/, {1, 2} /*offset*/, {2, 3} /*size*/, {1, 1} /*stride*/);" in joined
+    assert "npu_demo::deslice(src /*target*/, dst /*source*/, {1, 2} /*offset*/, {2, 3} /*size*/, {1, 1} /*stride*/);" in joined
     assert "npu_demo::fill<GM, int32_t>(dst /*dst*/, c_7_cast_int32_t /*value*/);" in joined
 
 
@@ -1320,13 +1320,13 @@ def test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline() -> None:
     assert "long long tid = ctx.thread_id();" in stmt
     assert "long long tnum = ctx.thread_num();" in stmt
     assert "Memory<TSM, float> tsm = ctx.get_dynamic_memory<TSM, float>();" in stmt
-    assert "Memory<GM, float> src_view = source.view({tid} /*offset*/, {16} /*size*/, {1} /*stride*/);" in stmt
-    assert "Memory<TSM, float> work_tile = tsm.view({0} /*offset*/, {16} /*size*/, {1} /*stride*/);" in stmt
-    assert "Memory<TSM, float> out_tile = tsm.view({0} /*offset*/, {16} /*size*/, {1} /*stride*/);" in stmt
-    assert "slice(work_tile /*dst*/, src_view /*source*/, 0 /*offset*/, 16 /*size*/, 1 /*stride*/);" in stmt
+    assert "Memory<GM, float> src_view = npu_demo::view(source, {tid} /*offset*/, {16} /*size*/, {1} /*stride*/);" in stmt
+    assert "Memory<TSM, float> work_tile = npu_demo::view(tsm, {0} /*offset*/, {16} /*size*/, {1} /*stride*/);" in stmt
+    assert "Memory<TSM, float> out_tile = npu_demo::view(tsm, {0} /*offset*/, {16} /*size*/, {1} /*stride*/);" in stmt
+    assert "npu_demo::slice(work_tile /*dst*/, src_view /*source*/, 0 /*offset*/, 16 /*size*/, 1 /*stride*/);" in stmt
     assert "npu_demo::add<TSM, float, float>(out_tile /*out*/, work_tile /*lhs*/, work_tile /*rhs*/);" in stmt
-    assert "deslice(out, out_tile, tid, 16, 1);" in stmt
-    assert ".view({" in stmt
+    assert "npu_demo::deslice(out, out_tile, tid, 16, 1);" in stmt
+    assert "npu_demo::view(" in stmt
     assert "load<" not in stmt
     assert "store<" not in stmt
     assert "launch" not in stmt
@@ -1373,7 +1373,7 @@ def test_emit_c_lowers_npu_demo_tiled_matmul_pipeline() -> None:
 
     assert stmt.count("for (S_INT i") >= 2
     assert re.search(
-        r"Memory<GM, float> v\d+ = alloc<GM, float>\(\{32, 32\} /\*shape\*/, \{32, 1\} /\*stride\*/\);",
+        r"Memory<GM, float> v\d+ = npu_demo::alloc<GM, float>\(\{32, 32\} /\*shape\*/, \{32, 1\} /\*stride\*/\);",
         stmt,
     )
     assert re.search(r"long long slice_offset\d+\[2\] = \{i\d+, c_0(?:_\d+)?\};", stmt)

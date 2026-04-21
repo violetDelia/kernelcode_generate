@@ -155,7 +155,7 @@ int main() {
     int data[6] = {0, 1, 2, 3, 4, 5};
     long long shape[2] = {2, 3};
     long long stride[2] = {0, 0};
-    build_contiguous_stride(shape, 2, stride);
+    npu_demo::build_contiguous_stride(shape, 2, stride);
 
     Memory<SM, int> mem(data, shape, stride, 2, MemoryFormat::CLast);
     if (mem.rank() != 2) {

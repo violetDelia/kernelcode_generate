@@ -8,7 +8,7 @@
 - int data[6] = {0, 1, 2, 3, 4, 5};
 - long long shape[2] = {2, 3};
 - long long stride[2] = {0, 0};
-- build_contiguous_stride(shape, 2, stride);
+- npu_demo::build_contiguous_stride(shape, 2, stride);
 - Memory<SM, int> mem(data, shape, stride, 2, MemoryFormat::CLast);
 
 创建者: 神秘人
@@ -101,7 +101,7 @@ inline constexpr MemorySpace TLM3 = MemorySpace::TLM3;
 使用示例:
 - long long shape[2] = {2, 3};
 - long long stride[2] = {0, 0};
-- build_contiguous_stride(shape, 2, stride);
+- npu_demo::build_contiguous_stride(shape, 2, stride);
 
 创建者: 神秘人
 最后修改人: 金铲铲大作战
@@ -111,7 +111,11 @@ inline constexpr MemorySpace TLM3 = MemorySpace::TLM3;
 - test: test/include/api/test_memory.py
 - 功能实现: include/npu_demo/Memory.h
 */
+namespace npu_demo {
+
 void build_contiguous_stride(const long long* shape, unsigned long long rank, long long* out_stride);
+
+}  // namespace npu_demo
 
 /*
 功能说明:
@@ -121,7 +125,7 @@ void build_contiguous_stride(const long long* shape, unsigned long long rank, lo
 - int data[6] = {0, 1, 2, 3, 4, 5};
 - long long shape[2] = {2, 3};
 - long long stride[2] = {0, 0};
-- build_contiguous_stride(shape, 2, stride);
+- npu_demo::build_contiguous_stride(shape, 2, stride);
 - Memory<GM, int> mem(data, shape, stride, 2);
 
 创建者: 神秘人

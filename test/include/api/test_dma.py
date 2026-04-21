@@ -187,7 +187,7 @@ int main() {
         tile_stride,
         1,
         MemoryFormat::Norm);
-    if (slice(tile, source, offset, size, stride_vec) != StatusCode::kOk) {
+    if (npu_demo::slice(tile, source, offset, size, stride_vec) != StatusCode::kOk) {
         return fail(4);
     }
     if (tile_data[0] != 1.0f || tile_data[1] != 3.0f || tile_data[2] != 5.0f || tile_data[3] != 7.0f) {
@@ -201,7 +201,7 @@ int main() {
         stride,
         1,
         MemoryFormat::Norm);
-    if (deslice(target, tile, offset, size, stride_vec) != StatusCode::kOk) {
+    if (npu_demo::deslice(target, tile, offset, size, stride_vec) != StatusCode::kOk) {
         return fail(6);
     }
     if (target_data[1] != 1.0f || target_data[3] != 3.0f || target_data[5] != 5.0f ||
@@ -271,7 +271,7 @@ int main() {
         tile_stride,
         1,
         MemoryFormat::Norm);
-    if (slice(tile, source, offset, size, stride_vec) != StatusCode::kError) {
+    if (npu_demo::slice(tile, source, offset, size, stride_vec) != StatusCode::kError) {
         return fail(3);
     }
 
@@ -282,7 +282,7 @@ int main() {
         stride,
         1,
         MemoryFormat::Norm);
-    if (deslice(target, tile, offset, size, stride_vec) != StatusCode::kError) {
+    if (npu_demo::deslice(target, tile, offset, size, stride_vec) != StatusCode::kError) {
         return fail(4);
     }
     return 0;
@@ -330,13 +330,13 @@ int main() {
     long long tile_stride[1] = {1};
     Memory<TSM, float> tile(tile_data, tile_shape, tile_stride, 1, MemoryFormat::Norm);
 
-    if (slice(tile, source, offset, size, stride_vec) != StatusCode::kOk) {
+    if (npu_demo::slice(tile, source, offset, size, stride_vec) != StatusCode::kOk) {
         return fail(1);
     }
 
     float target_data[8] = {0};
     Memory<GM, float> target(target_data, shape, stride, 1, MemoryFormat::Norm);
-    if (deslice(target, tile, offset, size, stride_vec) != StatusCode::kOk) {
+    if (npu_demo::deslice(target, tile, offset, size, stride_vec) != StatusCode::kOk) {
         return fail(2);
     }
     if (target_data[2] != 2.0f || target_data[3] != 3.0f || target_data[4] != 4.0f ||
@@ -368,7 +368,7 @@ def test_dma_alloc_helper_contract() -> None:
 static int fail(int code) { return code; }
 
 int main() {
-    auto tile = alloc<TSM, float>({2, 3}, {3, 1});
+    auto tile = npu_demo::alloc<TSM, float>({2, 3}, {3, 1});
     if (tile.rank() != 2) {
         return fail(1);
     }
@@ -388,7 +388,7 @@ int main() {
 
     long long m = 4;
     long long n = 5;
-    auto dyn = alloc<GM, float>({m, n}, {n, 1});
+    auto dyn = npu_demo::alloc<GM, float>({m, n}, {n, 1});
     if (dyn.rank() != 2) {
         return fail(6);
     }

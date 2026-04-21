@@ -647,7 +647,7 @@ int main() {
     long long tile_shape[1] = {4};
     long long tile_stride[1] = {1};
     Memory<MemorySpace::TSM, float> tile(tile_data, tile_shape, tile_stride, 1, MemoryFormat::Norm);
-    if (slice(tile, source, offset, size, stride_vec) != StatusCode::kOk) {
+    if (npu_demo::slice(tile, source, offset, size, stride_vec) != StatusCode::kOk) {
         return fail(4);
     }
     if (tile_data[0] != 1.0f || tile_data[1] != 3.0f || tile_data[2] != 5.0f || tile_data[3] != 7.0f) {
@@ -656,7 +656,7 @@ int main() {
 
     float target_data[10] = {0};
     Memory<MemorySpace::GM, float> target(target_data, shape, stride, 1, MemoryFormat::Norm);
-    if (deslice(target, tile, offset, size, stride_vec) != StatusCode::kOk) {
+    if (npu_demo::deslice(target, tile, offset, size, stride_vec) != StatusCode::kOk) {
         return fail(6);
     }
     if (target_data[1] != 1.0f || target_data[3] != 3.0f || target_data[5] != 5.0f ||
@@ -984,7 +984,7 @@ int main() {
     Vector offset_small(offset_small_buf, 1);
     Vector size_small(size_small_buf, 1);
     Vector stride_small(stride_small_buf, 1);
-    if (slice(tile_small, huge_source, offset_small, size_small, stride_small) != StatusCode::kError) {
+    if (npu_demo::slice(tile_small, huge_source, offset_small, size_small, stride_small) != StatusCode::kError) {
         return fail(1);
     }
     long long offset_big_buf[1] = {1};
@@ -993,13 +993,13 @@ int main() {
     Vector offset_big(offset_big_buf, 1);
     Vector size_big(size_big_buf, 1);
     Vector stride_big(stride_big_buf, 1);
-    if (slice(tile_big, huge_source, offset_big, size_big, stride_big) != StatusCode::kError) {
+    if (npu_demo::slice(tile_big, huge_source, offset_big, size_big, stride_big) != StatusCode::kError) {
         return fail(2);
     }
-    if (deslice(huge_target, tile_small, offset_small, size_small, stride_small) != StatusCode::kError) {
+    if (npu_demo::deslice(huge_target, tile_small, offset_small, size_small, stride_small) != StatusCode::kError) {
         return fail(3);
     }
-    if (deslice(huge_target, tile_big, offset_big, size_big, stride_big) != StatusCode::kError) {
+    if (npu_demo::deslice(huge_target, tile_big, offset_big, size_big, stride_big) != StatusCode::kError) {
         return fail(4);
     }
     return 0;

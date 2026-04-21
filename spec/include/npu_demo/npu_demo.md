@@ -8,22 +8,22 @@
 - `KernelContext` 是由 `launch` 注入到 kernel body 的运行时上下文视图，不再是固定常量容器。
 - `thread_num()` / `block_num()` / `subthread_num()` 返回本次 launch 的 extent，而不是 target registry 的固定模板值。
 - `include/npu_demo/npu_demo.h` 作为单入口头文件，需透传 `include/api/Memory.h` / `Dma.h` / `Kernel.h` / `Arch.h` 的统一声明，并汇聚 `include/npu_demo/Core.h` / `Memory.h` / `Dma.h` / `Kernel.h` / `Arch.h` 的后端实现。
-- `npu_demo::add/sub/mul/...`、`npu_demo::launch(...)` 以及后续 `npu_demo::alloc/slice/deslice/view/build_contiguous_stride` 是 public function 的唯一成功消费方向；`detail` 只服务实现内部。
+- `npu_demo::add/sub/mul/...`、`npu_demo::launch(...)`、`npu_demo::build_contiguous_stride(...)`、`npu_demo::view(...)`、`npu_demo::alloc(...)`、`npu_demo::slice(...)`、`npu_demo::deslice(...)` 是 public function 的唯一成功消费方向；`detail` 只服务实现内部。
 
 ## 文档信息
 
 - 创建者：`jcc你莫辜负`
-- 最后一次更改：`jcc你莫辜负`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/include/npu_demo/npu_demo.md`](../../../spec/include/npu_demo/npu_demo.md)
-- `功能实现`：[`include/npu_demo/npu_demo.h`](../../../include/npu_demo/npu_demo.h)、[`include/npu_demo/Arch.h`](../../../include/npu_demo/Arch.h)、[`include/npu_demo/Kernel.h`](../../../include/npu_demo/Kernel.h)
-- `test`：[`test/include/npu_demo/test_kernel_context.py`](../../../test/include/npu_demo/test_kernel_context.py)、[`test/include/npu_demo/test_runtime_launch.py`](../../../test/include/npu_demo/test_runtime_launch.py)、[`test/include/npu_demo/test_public_namespace.py`](../../../test/include/npu_demo/test_public_namespace.py)、[`test/include/api/test_arch.py`](../../../test/include/api/test_arch.py)、[`test/include/api/test_kernel.py`](../../../test/include/api/test_kernel.py)、[`test/target/test_target_registry.py`](../../../test/target/test_target_registry.py)
+- `功能实现`：[`include/npu_demo/npu_demo.h`](../../../include/npu_demo/npu_demo.h)、[`include/npu_demo/Memory.h`](../../../include/npu_demo/Memory.h)、[`include/npu_demo/Dma.h`](../../../include/npu_demo/Dma.h)、[`include/npu_demo/Arch.h`](../../../include/npu_demo/Arch.h)、[`include/npu_demo/Kernel.h`](../../../include/npu_demo/Kernel.h)
+- `test`：[`test/include/api/test_memory.py`](../../../test/include/api/test_memory.py)、[`test/include/api/test_dma.py`](../../../test/include/api/test_dma.py)、[`test/include/npu_demo/test_kernel_context.py`](../../../test/include/npu_demo/test_kernel_context.py)、[`test/include/npu_demo/test_runtime_launch.py`](../../../test/include/npu_demo/test_runtime_launch.py)、[`test/include/npu_demo/test_public_namespace.py`](../../../test/include/npu_demo/test_public_namespace.py)、[`test/include/api/test_arch.py`](../../../test/include/api/test_arch.py)、[`test/include/api/test_kernel.py`](../../../test/include/api/test_kernel.py)、[`test/target/test_target_registry.py`](../../../test/target/test_target_registry.py)
 
 ## 依赖
 
 - [`spec/include/api/Arch.md`](../../../spec/include/api/Arch.md)：统一 `launch` / `BarrierScope` / `barrier(visibility, scope)` 公开合同。
 - [`spec/include/api/Core.md`](../../../spec/include/api/Core.md)：统一 `Status` / `StatusCode` 语义。
-- [`spec/include/api/Memory.md`](../../../spec/include/api/Memory.md)：统一 `Memory<Space, T>`、`MemorySpace`、`MemoryFormat` 语义。
-- [`spec/include/api/Dma.md`](../../../spec/include/api/Dma.md)：统一 `view/slice/deslice` 对 `Memory<Space, T>` 的公开职责。
+- [`spec/include/api/Memory.md`](../../../spec/include/api/Memory.md)：统一 `Memory<Space, T>`、`MemorySpace`、`MemoryFormat`、`npu_demo::build_contiguous_stride(...)` 与成员式 `view<T>` / `reshape` 语义。
+- [`spec/include/api/Dma.md`](../../../spec/include/api/Dma.md)：统一 `npu_demo::alloc/slice/deslice` 对 `Memory<Space, T>` 的公开职责。
 - [`spec/include/api/Kernel.md`](../../../spec/include/api/Kernel.md)：统一 `Kernel` helper 公共接口职责。
 - [`spec/target/registry.md`](../../../spec/target/registry.md)：定义 `npu_demo` 的 launch 能力上限与片上空间容量来源。
 
@@ -71,15 +71,24 @@
 ```cpp
 #include "include/npu_demo/npu_demo.h"
 
-Status add_status = npu_demo::add<GM, float, float>(out, lhs, rhs);
-Status launch_status = npu_demo::launch<1, 2, 1>(kernel_body, &value);
+long long shape_buf[2] = {2, 3};
+long long stride_buf[2] = {0, 0};
+npu_demo::build_contiguous_stride(shape_buf, 2, stride_buf);
+
+float source_data[6] = {0, 1, 2, 3, 4, 5};
+float out_data[6] = {0, 0, 0, 0, 0, 0};
+Memory<GM, float> source(source_data, shape_buf, stride_buf, 2, MemoryFormat::Norm);
+Memory<GM, float> out(out_data, shape_buf, stride_buf, 2, MemoryFormat::Norm);
+auto tile = npu_demo::alloc<TSM, float>({2, 3}, {3, 1}, MemoryFormat::Norm);
+Status slice_status = npu_demo::slice(tile, source, Vector{0, 0}, Vector{2, 3}, Vector{1, 1});
+Status deslice_status = npu_demo::deslice(out, tile, Vector{0, 0}, Vector{2, 3}, Vector{1, 1});
 ```
 
 注意事项：
 
 - 正向调用示例不得直接使用 `npu_demo::detail` 或 `*_detail` 名称。
 - `Vector shape{2, 3}`、`Memory<GM, float>`、`StatusCode::kOk` 等基础类型仍保持当前公开位置。
-- `npu_demo::alloc/slice/deslice/view/build_contiguous_stride` 的迁移由后续阶段收口；本阶段先写入总合同与最小 smoke。
+- `npu_demo::alloc/slice/deslice/view/build_contiguous_stride` 已属于当前 public function 合同；未限定的全局 `alloc/slice/deslice/view/build_contiguous_stride` 不作为成功调用方向。
 
 返回与限制：
 
@@ -263,12 +272,15 @@ Memory<TLM3, float> out = ctx.get_dynamic_memory<TLM3, float>();
 
 - 测试文件：[`test/include/api/test_arch.py`](../../../test/include/api/test_arch.py)、[`test/include/npu_demo/test_kernel_context.py`](../../../test/include/npu_demo/test_kernel_context.py)、[`test/include/npu_demo/test_runtime_launch.py`](../../../test/include/npu_demo/test_runtime_launch.py)、[`test/include/npu_demo/test_public_namespace.py`](../../../test/include/npu_demo/test_public_namespace.py)、[`test/target/test_target_registry.py`](../../../test/target/test_target_registry.py)
 - 执行命令：
+  - `pytest -q test/include/api/test_memory.py test/include/api/test_dma.py`
   - `pytest -q test/include/api/test_arch.py`
   - `pytest -q test/include/npu_demo/test_kernel_context.py test/include/npu_demo/test_runtime_launch.py`
   - `pytest -q test/include/npu_demo/test_public_namespace.py`
   - `pytest -q test/target/test_target_registry.py -k "npu_demo and launch"`
 - 测试目标：
+  - 验证 `test/include/api/test_memory.py` 与 `test/include/api/test_dma.py` 仍按 `npu_demo::build_contiguous_stride/view/alloc/slice/deslice` 口径消费。
   - 验证 `include/api/Arch.h` 与 `include/npu_demo/Arch.h` 的职责边界。
+  - 验证 `Memory/Dma` public function 通过 `npu_demo::build_contiguous_stride/view/alloc/slice/deslice` 正向消费，且正向片段不消费 `detail` 或旧 helper 名称。
   - 验证 `KernelContext` 查询返回当前 launch 值，而非旧的固定模板常量。
   - 验证 `ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK)` 的参数合同与显式失败边界。
   - 验证 `npu_demo::launch<1, thread, 1>(...)` 的函数对象 callee、launch extent 校验与 `thread_num()` 运行时视图。
@@ -280,4 +292,5 @@ Memory<TLM3, float> out = ctx.get_dynamic_memory<TLM3, float>();
   - `test_npu_demo_kernel_context_barrier_requires_visibility_and_block_scope`：锁定 barrier 的 `visibility / scope` 参数合同。
   - `test_npu_demo_launch_rejects_unsupported_extent_without_fallback`：锁定 `block!=1`、`subthread!=1`、`thread<2` 或 `thread>8` 的显式失败边界。
   - `test_npu_demo_public_namespace_smoke_compiles_vector_kernel_and_launch`：锁定 `npu_demo::` public function 最小正向消费。
+  - `test_npu_demo_public_namespace_memory_dma_helpers`：锁定 `Memory/Dma` public function 只通过 `npu_demo::` 正向消费，未限定的全局 helper 不作为成功路径。
   - `test_target_registry_npu_demo_supports_launch_and_barrier_caps`：锁定 registry 的 `arch.launch` / `arch.barrier` 能力开关与 `thread_num=8` 上限语义。

@@ -805,7 +805,7 @@ def _emit_dma_alloc_stmt(op: DmaAllocOp, ctx: EmitCContext) -> str:
 
     功能说明:
     - 在 `target=cpu` 下发射 backing storage + `Memory<Space, T>` 声明。
-    - 在 `target=npu_demo` 下发射 `alloc<Space, T>({shape...} /*shape*/, {stride...} /*stride*/)` helper 调用。
+    - 在 `target=npu_demo` 下发射 `npu_demo::alloc<Space, T>({shape...} /*shape*/, {stride...} /*stride*/)` helper 调用。
     - `target=npu_demo` 的动态 shape 允许复用当前函数作用域内的符号参数名。
 
     使用示例:
@@ -844,7 +844,7 @@ def _emit_dma_alloc_stmt(op: DmaAllocOp, ctx: EmitCContext) -> str:
         stride_text = ", ".join(stride_values)
         return (
             f"{ctx.current_indent}Memory<{space_expr}, {element_type}> {result_name} = "
-            f"alloc<{space_expr}, {element_type}>({{{shape_text}}} /*shape*/, {{{stride_text}}} /*stride*/);"
+            f"npu_demo::alloc<{space_expr}, {element_type}>({{{shape_text}}} /*shape*/, {{{stride_text}}} /*stride*/);"
         )
     return _emit_memory_decl(
         result_name,
@@ -1245,7 +1245,7 @@ def _emit_npu_view_stmt(op: DmaViewOp, ctx: EmitCContext) -> str:
     最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 把 `dma.view` 收口为 `Memory<...> out = source.view({offset} /*offset*/, {size} /*size*/, {stride} /*stride*/);`。
+    - 把 `dma.view` 收口为 `Memory<...> out = npu_demo::view(source, {offset} /*offset*/, {size} /*size*/, {stride} /*stride*/);`。
     - 使用当前 expectation 约定的 brace-list 文本，而不是 Vector 临时绑定。
 
     使用示例:
@@ -1264,7 +1264,7 @@ def _emit_npu_view_stmt(op: DmaViewOp, ctx: EmitCContext) -> str:
     stride_expr = _emit_npu_brace_list(op.stride, ctx)
     return (
         f"{ctx.current_indent}{result_type} {result_name} = "
-        f"{source_expr}.view({offset_expr} /*offset*/, {size_expr} /*size*/, {stride_expr} /*stride*/);"
+        f"npu_demo::view({source_expr}, {offset_expr} /*offset*/, {size_expr} /*size*/, {stride_expr} /*stride*/);"
     )
 
 
@@ -1330,8 +1330,8 @@ def _emit_npu_slice_stmt(op: DmaSliceOp, ctx: EmitCContext) -> str:
     最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 一维参数发射为 `slice(target, source, offset, size, stride);` 标量调用。
-    - 多维参数发射为 `Vector` 绑定后再调用 `slice(target, source, offset_vec, size_vec, stride_vec);`，
+    - 一维参数发射为 `npu_demo::slice(target, source, offset, size, stride);` 标量调用。
+    - 多维参数发射为 `Vector` 绑定后再调用 `npu_demo::slice(target, source, offset_vec, size_vec, stride_vec);`，
       与 `include/npu_demo/Dma.h` 的 `const Vector&` 合同对齐。
 
     使用示例:
@@ -1346,7 +1346,7 @@ def _emit_npu_slice_stmt(op: DmaSliceOp, ctx: EmitCContext) -> str:
     source_expr = _memory_base_name(op.source, ctx)
     if len(op.offsets) == len(op.sizes) == len(op.strides) == 1:
         return (
-            f"{ctx.current_indent}slice({target_expr} /*dst*/, {source_expr} /*source*/, "
+            f"{ctx.current_indent}npu_demo::slice({target_expr} /*dst*/, {source_expr} /*source*/, "
             f"{emit_c_value(op.offsets[0], ctx)} /*offset*/, {emit_c_value(op.sizes[0], ctx)} /*size*/, {emit_c_value(op.strides[0], ctx)} /*stride*/);"
         )
     offset_lines, offset_vec = _emit_npu_vector_binding("slice_offset", op.offsets, ctx)
@@ -1358,7 +1358,7 @@ def _emit_npu_slice_stmt(op: DmaSliceOp, ctx: EmitCContext) -> str:
             *size_lines,
             *stride_lines,
             (
-                f"{ctx.current_indent}slice({target_expr} /*dst*/, {source_expr} /*source*/, "
+                f"{ctx.current_indent}npu_demo::slice({target_expr} /*dst*/, {source_expr} /*source*/, "
                 f"{offset_vec} /*offset*/, {size_vec} /*size*/, {stride_vec} /*stride*/);"
             ),
         ]
@@ -1372,9 +1372,9 @@ def _emit_npu_deslice_stmt(op: DmaDesliceOp, ctx: EmitCContext) -> str:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 一维参数发射为 `deslice(target, source, offset, size, stride);` 标量调用。
+    - 一维参数发射为 `npu_demo::deslice(target, source, offset, size, stride);` 标量调用。
     - 多维参数发射为 `Vector` 绑定后再调用
-      `deslice(target, source, offset_vec, size_vec, stride_vec);`，与 `include/npu_demo/Dma.h` 的 `const Vector&` 合同对齐。
+      `npu_demo::deslice(target, source, offset_vec, size_vec, stride_vec);`，与 `include/npu_demo/Dma.h` 的 `const Vector&` 合同对齐。
     - 结果值绑定到 target 名称，确保后续节点可稳定引用该 memory。
 
     使用示例:
@@ -1391,7 +1391,7 @@ def _emit_npu_deslice_stmt(op: DmaDesliceOp, ctx: EmitCContext) -> str:
     ctx.bind_name(op.result, target_expr)
     if len(op.offsets) == len(op.sizes) == len(op.strides) == 1:
         return (
-            f"{ctx.current_indent}deslice({target_expr}, {source_expr}, "
+            f"{ctx.current_indent}npu_demo::deslice({target_expr}, {source_expr}, "
             f"{emit_c_value(op.offsets[0], ctx)}, {emit_c_value(op.sizes[0], ctx)}, {emit_c_value(op.strides[0], ctx)});"
         )
     offset_lines, offset_vec = _emit_npu_vector_binding("deslice_offset", op.offsets, ctx)
@@ -1402,7 +1402,7 @@ def _emit_npu_deslice_stmt(op: DmaDesliceOp, ctx: EmitCContext) -> str:
             *offset_lines,
             *size_lines,
             *stride_lines,
-            f"{ctx.current_indent}deslice({target_expr}, {source_expr}, {offset_vec}, {size_vec}, {stride_vec});",
+            f"{ctx.current_indent}npu_demo::deslice({target_expr}, {source_expr}, {offset_vec}, {size_vec}, {stride_vec});",
         ]
     )
 
@@ -1720,7 +1720,7 @@ def _emit_npu_store_stmt(op: DmaStoreOp, ctx: EmitCContext) -> str:
     size_expr = _emit_npu_brace_list(op.sizes, ctx)
     stride_expr = _emit_npu_brace_list(op.strides, ctx)
     return (
-        f"{ctx.current_indent}deslice({target_expr} /*target*/, {source_expr} /*source*/, {offset_expr} /*offset*/, "
+        f"{ctx.current_indent}npu_demo::deslice({target_expr} /*target*/, {source_expr} /*source*/, {offset_expr} /*offset*/, "
         f"{size_expr} /*size*/, {stride_expr} /*stride*/);"
     )
 

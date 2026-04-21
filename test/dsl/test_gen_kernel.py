@@ -1477,7 +1477,7 @@ def test_gen_kernel_emits_npu_demo_kernel_binary_signature_out_first() -> None:
 # 最近一次运行测试时间: N/A
 # 最近一次运行成功时间: N/A
 # 功能说明: 验证 target=npu_demo 下单函数 `dma.alloc` module 可生成 helper 形式源码。
-# 测试目的: 锁定 `builtin.module -> func.func(dma.alloc)` 这条 `npu_demo` 子集会发射 `alloc<Space, T>(shape, stride)`，不再被 launch module 约束误拒绝。
+# 测试目的: 锁定 `builtin.module -> func.func(dma.alloc)` 这条 `npu_demo` 子集会发射 `npu_demo::alloc<Space, T>(shape, stride)`，不再被 launch module 约束误拒绝。
 # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_dma_alloc_module
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
@@ -1498,7 +1498,7 @@ def test_gen_kernel_emits_npu_demo_dma_alloc_module() -> None:
 
     assert '#include "include/npu_demo/npu_demo.h"' in static_source
     assert "void dma_alloc_case()" in static_source
-    assert "Memory<TSM, float> v0 = alloc<TSM, float>({2, 3} /*shape*/, {3, 1} /*stride*/);" in static_source
+    assert "Memory<TSM, float> v0 = npu_demo::alloc<TSM, float>({2, 3} /*shape*/, {3, 1} /*stride*/);" in static_source
 
     dyn_m = SymbolValueType.from_expr("M")
     dyn_n = SymbolValueType.from_expr("N")
@@ -1521,7 +1521,7 @@ def test_gen_kernel_emits_npu_demo_dma_alloc_module() -> None:
     dynamic_source = gen_kernel(dynamic_module, _npu_ctx())
 
     assert "void dma_alloc_dynamic_case(S_INT arg0, S_INT arg1)" in dynamic_source
-    assert "Memory<TSM, float> v0 = alloc<TSM, float>({arg0, arg1} /*shape*/, {arg1, 1} /*stride*/);" in dynamic_source
+    assert "Memory<TSM, float> v0 = npu_demo::alloc<TSM, float>({arg0, arg1} /*shape*/, {arg1, 1} /*stride*/);" in dynamic_source
     _compile_only(dynamic_source)
 
 
@@ -1585,8 +1585,8 @@ def test_gen_kernel_compiles_npu_demo_tiled_matmul_source() -> None:
     assert source.startswith('#include "include/npu_demo/npu_demo.h"\n')
     assert "npu_demo::matmul<" in source
     assert "npu_demo::matmul(" not in source
-    assert "slice(" in source
-    assert "deslice(" in source
+    assert "npu_demo::slice(" in source
+    assert "npu_demo::deslice(" in source
     assert "cpu::matmul(" not in source
     assert "nn.matmul" not in source
     _compile_only(source)
@@ -1612,12 +1612,12 @@ def test_gen_kernel_emits_npu_demo_memory_pipeline() -> None:
 
     tsm_idx = source.index("Memory<MemorySpace::TSM, float> tsm = ctx.get_dynamic_memory<MemorySpace::TSM, float>();")
     tlm_idx = source.index("Memory<MemorySpace::TLM1, float> tlm = ctx.get_dynamic_memory<MemorySpace::TLM1, float>();")
-    src_view_idx = source.index("auto src_view = view(source, tid * 16, 16, 1);")
-    work_view_idx = source.index("auto work_tile = view(tsm, 0, 16, 1);")
-    out_view_idx = source.index("auto out_tile = view(tsm, 0, 16, 1);")
-    slice_idx = source.index("slice(work_tile, src_view, 0, 16, 1);")
+    src_view_idx = source.index("auto src_view = npu_demo::view(source, tid * 16, 16, 1);")
+    work_view_idx = source.index("auto work_tile = npu_demo::view(tsm, 0, 16, 1);")
+    out_view_idx = source.index("auto out_tile = npu_demo::view(tsm, 0, 16, 1);")
+    slice_idx = source.index("npu_demo::slice(work_tile, src_view, 0, 16, 1);")
     add_idx = source.index("npu_demo::add<MemorySpace::TSM, float, float>(out_tile, work_tile, work_tile);")
-    deslice_idx = source.index("deslice(out, out_tile, tid * 16, 16, 1);")
+    deslice_idx = source.index("npu_demo::deslice(out, out_tile, tid * 16, 16, 1);")
 
     assert tsm_idx < tlm_idx < src_view_idx < work_view_idx < out_view_idx < slice_idx < add_idx < deslice_idx
     assert ".view<" not in source
@@ -1709,7 +1709,7 @@ def test_gen_kernel_black_box_direct_return_nn_add_conv2d_img2col2d_tiled_and_np
     npu_source = gen_kernel(npu_func, _npu_ctx())
     assert "ctx.thread_id()" in npu_source
     assert "ctx.get_dynamic_memory<MemorySpace::TSM, float>()" in npu_source
-    assert "deslice(out, out_tile, tid * 16, 16, 1);" in npu_source
+    assert "npu_demo::deslice(out, out_tile, tid * 16, 16, 1);" in npu_source
 
 
 # GK-I2-001
@@ -2165,8 +2165,8 @@ def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body(tlm_space: st
         "Memory<MemorySpace::TSM, float> tsm = ctx.get_dynamic_memory<MemorySpace::TSM, float>();"
     )
     assert f"Memory<MemorySpace::{space_enum}, float> tlm = ctx.get_dynamic_memory<MemorySpace::{space_enum}, float>();" in source
-    assert f"auto out_tlm = view(tlm, tid * 16, 16, 1);" in source
-    assert source.index("slice(lhs_tsm, lhs_gm, 0, 16, 1);") < source.index("add(lhs_tsm, rhs_tsm, out_tlm);") < source.index("deslice(out, out_tlm, tid * 16, 16, 1);")
+    assert f"auto out_tlm = npu_demo::view(tlm, tid * 16, 16, 1);" in source
+    assert source.index("npu_demo::slice(lhs_tsm, lhs_gm, 0, 16, 1);") < source.index("add(lhs_tsm, rhs_tsm, out_tlm);") < source.index("npu_demo::deslice(out, out_tlm, tid * 16, 16, 1);")
     assert "arch.launch_kernel" not in source
     assert "ctx.sync_threads" not in source
 
