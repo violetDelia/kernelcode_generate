@@ -34,7 +34,7 @@
 - 冻结 `target=cpu` 的 rewrite-after-IR 合同：`gen_kernel(...)` 只接受已经经过 `BufferResultsToOutParamsPass` 的 lowered IR；默认 CPU 路径不再从旧 `memory return` ABI 隐式推导 `out`。
 - 明确 split-after-IR 的单函数 codegen 合同：目标源码仍为单个函数定义，tile 相关表达必须由 `tuner.param : !symbol.int<"...">` 与 `symbol.for` 承接。
 - 冻结 `target="npu_demo"` 的完整源码合同：`gen_kernel(target="npu_demo")` 必须支持“launch wrapper + body kernel”的受控 `builtin.module` 子集，并生成包含 **body 函数 + launch wrapper 函数** 的双函数源码；body 函数内必须生成 `ctx.barrier(...)`，wrapper 函数必须生成 `npu_demo::launch<1, 4, 1>(...)`；当受控 module 中包含 `dma.alloc` 时，body 还必须稳定发射 `npu_demo::alloc<Space, T>(shape, stride)` helper 调用。
-- 冻结 `target="npu_demo"` 生成源码的 include 入口为 `#include "include/npu_demo/npu_demo.h"`，并以“只编译”方式作为 compile gate 目标（`g++ -std=c++17 -I <repo> -c <source>`）。
+- 冻结 `target="npu_demo"` 生成源码的头部入口为 `#include "include/npu_demo/npu_demo.h"` 后紧跟 `using namespace npu_demo;`，并以“只编译”方式作为 compile gate 目标（`g++ -std=c++17 -I <repo> -c <source>`）。
 - 冻结 `target="npu_demo"` 的计算 helper 只允许消费 [`spec/include/api/Kernel.md`](../../spec/include/api/Kernel.md) 已声明的公共接口；不得继续依赖公开 `Nn` 层。
 - 支持单一非 `Memory` 标量返回生成函数返回值文本；`!symbol.int<"...">` 仍固定为 `target=cpu` 路径。
 - 对 `conv_cpu_tiled_v1` 当前子集，冻结 `conv2d_img2col2d_tiled(...)` 的函数级 CPU 骨架：固定 `Ntile=1`、`Ctile=16`、`Ftile=16`、`Hotile=16`、`Wotile=16`，包含外层分块循环、tile-local `col_buffer/acc_buffer`、`cpu::img2col2d(...)` 调用与最终写回 `out`。
@@ -433,6 +433,7 @@ void conv2d_img2col2d_tiled(
 
 ```cpp
 #include "include/npu_demo/npu_demo.h"
+using namespace npu_demo;
 ...
 npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out_tile, lhs_tile, rhs_tile);
 ```
@@ -441,7 +442,7 @@ npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out_tile, lhs_tile, rhs_ti
 
 - 本节只约束源码结构与关键调用，不扩展新的 target、运行时参数或调度接口。
 - 命中 matmul 路径时不得回退到 `cpu::matmul(...)`，也不得只输出占位注释。
-- `target="npu_demo"` 的 include 入口保持 `include/npu_demo/npu_demo.h`。
+- `target="npu_demo"` 的头部入口保持 `include/npu_demo/npu_demo.h` 后紧跟 `using namespace npu_demo;`。
 - 关联合同资产：[`expectation/execute_engine/npu_demo/kernel_only/matmul.py`](../../expectation/execute_engine/npu_demo/kernel_only/matmul.py) 与 [`expectation/execute_engine/npu_demo/default/matmul.py`](../../expectation/execute_engine/npu_demo/default/matmul.py) 的 `CASE-3`。
 - 与 `CASE-2` 衔接：输入 IR 应已收口为 `kernel.matmul` 且不残留 `nn.matmul`。
 

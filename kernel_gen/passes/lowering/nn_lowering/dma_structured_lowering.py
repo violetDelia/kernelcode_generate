@@ -29,6 +29,31 @@ from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
 from .nn_lowering_utility import NnLoweringError, ensure_single_result
 
 
+def _find_block_symbol_dim(block: Block, dim: str) -> SSAValue | None:
+    """查找当前 block 中可直接复用的 symbol 维度参数。
+
+    创建者: 守护最好的爱莉希雅
+    最后一次更改: 守护最好的爱莉希雅
+
+    功能说明:
+    - 在 block 参数中查找公开值等于 `dim` 的 `!symbol.int<"...">`。
+    - 用于支持 `[1, N] -> [M, N]` 这类新动态 broadcast 维度。
+
+    使用示例:
+    - symbol_value = _find_block_symbol_dim(block, "M")
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering.md
+    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
+    """
+
+    for arg in block.args:
+        if isinstance(arg.type, SymbolValueType) and arg.type.get_value() == dim:
+            return arg
+    return None
+
+
 def _ensure_symbol_or_int(op: Operation, operand: SSAValue | Operation) -> SSAValue:
     """确保 operand 为 symbol.int 或 IntegerType。
 
@@ -63,15 +88,16 @@ def _get_symbol_dim_from_source(
     result_shape: list[int | str],
     operand: SSAValue,
     operand_shape: list[int | str],
-) -> SymbolGetDimOp:
-    """从 operand 的 symbol dim 提取维度。
+) -> SSAValue:
+    """获取 broadcast 结果动态维度的 SSA 值。
 
     创建者: 金铲铲大作战
     最后一次更改: jcc你莫辜负
 
     功能说明:
-    - 使用 SymbolGetDimOp 从 operand 上读取动态维度。
+    - 使用 SymbolGetDimOp 从 operand 上读取来自 source 的动态维度。
     - 支持 result 维度与 source 维度直接匹配或通过 result dim 在 operand_shape 中索引。
+    - 当 source 对齐维为 1 时，允许 result 新符号维来自当前 block 的 symbol 参数。
     - 匹配失败时抛出稳定错误短语。
 
     使用示例:
@@ -85,19 +111,34 @@ def _get_symbol_dim_from_source(
 
     axis_offset = len(result_shape) - len(operand_shape)
     source_axis = axis - axis_offset
+    result_dim = result_shape[axis]
+    if not isinstance(result_dim, str):
+        raise NnLoweringError("NnLoweringBroadcastSymbolDimNotFromSource: result dim is not symbolic")
     if source_axis < 0 or source_axis >= len(operand_shape):
+        if result_dim in operand_shape:
+            source_axis = operand_shape.index(result_dim)
+            symbol_op = SymbolGetDimOp(operand, IntAttr(source_axis))
+            block.insert_op_before(symbol_op, op)
+            return symbol_op.result
+        block_symbol = _find_block_symbol_dim(block, result_dim)
+        if block_symbol is not None:
+            return block_symbol
         raise NnLoweringError("NnLoweringBroadcastSymbolDimNotFromSource: axis out of range")
     source_dim = operand_shape[source_axis]
-    result_dim = result_shape[axis]
     if isinstance(source_dim, str) and source_dim == result_dim:
         symbol_op = SymbolGetDimOp(operand, IntAttr(source_axis))
         block.insert_op_before(symbol_op, op)
-        return symbol_op
-    if isinstance(result_dim, str) and result_dim in operand_shape:
+        return symbol_op.result
+    if result_dim in operand_shape:
         source_axis = operand_shape.index(result_dim)
         symbol_op = SymbolGetDimOp(operand, IntAttr(source_axis))
         block.insert_op_before(symbol_op, op)
-        return symbol_op
+        return symbol_op.result
+    if source_dim == 1:
+        block_symbol = _find_block_symbol_dim(block, result_dim)
+        if block_symbol is not None:
+            return block_symbol
+        raise NnLoweringError("NnLoweringBroadcastSymbolDimNotFromSource: result dim not in source")
     if not isinstance(source_dim, str):
         raise NnLoweringError("NnLoweringBroadcastSymbolDimNotFromSource: source dim is not symbolic")
     raise NnLoweringError("NnLoweringBroadcastSymbolDimNotFromSource: symbol mismatch")
@@ -160,8 +201,8 @@ def _ensure_broadcast_compat(result_shape: list[int | str], operand_shape: list[
 
     功能说明:
     - 按尾维对齐规则检查 operand/result 维度。
-    - 对静态数值不匹配报错，对非法符号扩张报错。
-    - 允许 operand_dim=1 且 result_dim 为 operand_shape 中的符号维。
+    - 对静态数值不匹配报错，对非法符号扩张由动态维度解析阶段报错。
+    - 允许 operand_dim=1 且 result_dim 为符号维，后续会要求该符号来自 source 或 block 参数。
 
     使用示例:
     - _ensure_broadcast_compat(result_shape, operand_shape)
@@ -173,10 +214,6 @@ def _ensure_broadcast_compat(result_shape: list[int | str], operand_shape: list[
     """
 
     axis_offset = len(result_shape) - len(operand_shape)
-    for idx in range(axis_offset):
-        dim = result_shape[idx]
-        if isinstance(dim, str):
-            raise NnLoweringError("NnLoweringBroadcastSymbolDimNotFromSource: new symbol dim")
     for idx, operand_dim in enumerate(operand_shape):
         result_dim = result_shape[idx + axis_offset]
         if isinstance(operand_dim, int):
@@ -184,7 +221,7 @@ def _ensure_broadcast_compat(result_shape: list[int | str], operand_shape: list[
                 if operand_dim != 1 and operand_dim != result_dim:
                     raise NnLoweringError("invalid broadcast target shape")
                 continue
-            if operand_dim == 1 and isinstance(result_dim, str) and result_dim in operand_shape:
+            if operand_dim == 1 and isinstance(result_dim, str):
                 continue
             raise NnLoweringError("NnLoweringBroadcastSymbolDimNotFromSource: result dim not in source")
         if isinstance(result_dim, str):
@@ -232,7 +269,7 @@ def _lower_broadcast(block: Block, op: Operation) -> None:
             if isinstance(dim, str):
                 cached = cached_symbols.get(dim)
                 if cached is None:
-                    symbol_op = _get_symbol_dim_from_source(
+                    cached = _get_symbol_dim_from_source(
                         block,
                         op,
                         idx,
@@ -240,7 +277,6 @@ def _lower_broadcast(block: Block, op: Operation) -> None:
                         operand,
                         operand_shape,
                     )
-                    cached = symbol_op.result
                     cached_symbols[dim] = cached
                 symbol_dims.append(cached)
         alloc = DmaAllocOp(symbol_dims, result_type)

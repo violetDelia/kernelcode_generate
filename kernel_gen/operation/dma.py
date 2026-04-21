@@ -555,6 +555,31 @@ def _ensure_view_numel_compatible(source: Memory, shape: SymbolShape) -> None:
         )
 
 
+def _combine_view_stride(source_stride: SymbolShape, view_stride: SymbolShape) -> SymbolShape:
+    """组合 source 物理 stride 与 view 逻辑 stride。
+
+    创建者: OpenAI
+    最后一次更改: OpenAI
+
+    功能说明:
+    - `dma.view` 的 stride 表示在 source 既有物理 stride 基础上的额外步长。
+    - 逐维返回 `source_stride[i] * view_stride[i]`，静态维度由 SymbolDim 自动规整为整数。
+
+    使用示例:
+    - _combine_view_stride(SymbolShape(["LD", 1]), SymbolShape(["STEP", 1]))
+
+    关联文件:
+    - spec: spec/operation/dma.md
+    - test: test/operation/test_operation_dma.py
+    - 功能实现: kernel_gen/operation/dma.py
+    """
+    combined = [
+        source_dim * view_dim
+        for source_dim, view_dim in zip(source_stride.get_shape(), view_stride.get_shape())
+    ]
+    return SymbolShape(combined)
+
+
 def _is_supported_cast(source: NumericType, target: NumericType) -> bool:
     """判断是否支持 dtype 转换。
 
@@ -562,7 +587,7 @@ def _is_supported_cast(source: NumericType, target: NumericType) -> bool:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 当前仅支持同类数值类型间的显式转换。
+    - 当前支持 float/int 数值类型之间的显式转换。
 
     使用示例:
     - _is_supported_cast(NumericType.Float32, NumericType.Float16)
@@ -574,9 +599,8 @@ def _is_supported_cast(source: NumericType, target: NumericType) -> bool:
     """
     if source is target:
         return True
-    if source in FLOAT_DTYPES and target in FLOAT_DTYPES:
-        return True
-    if source in INT_DTYPES and target in INT_DTYPES:
+    numeric_dtypes = FLOAT_DTYPES | INT_DTYPES
+    if source in numeric_dtypes and target in numeric_dtypes:
         return True
     return False
 
@@ -802,7 +826,7 @@ def view(
     功能说明:
     - 仅保留 `offset/size/stride` 子视图参数，不做数据搬运。
     - 返回结果的 `shape` 固定等于 `size`，默认继承 `source` 的 `dtype/space/format`。
-    - 返回结果继承 `source` 的规格，仅替换 `shape`。
+    - 返回结果 stride 由 source 物理 stride 与 view 逻辑 stride 逐维组合。
 
     使用示例:
     - view(Memory(["M", "K"], NumericType.Float32), offset=["M_t", "K_t"], size=[2, 2], stride=["stride", 1])
@@ -829,7 +853,7 @@ def view(
         _clone_symbol_list(size_value),
         src.dtype,
         space=src.space,
-        stride=_clone_symbol_list(src.stride),
+        stride=_combine_view_stride(src.stride, stride_value),
         format=src.format,
     )
 

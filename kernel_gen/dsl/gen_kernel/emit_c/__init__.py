@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from xdsl.dialects.builtin import StringAttr
 from xdsl.ir import BlockArgument, Operation, SSAValue
 
 from .._legacy import load_legacy_emit_c_module
@@ -70,10 +71,46 @@ def _call_legacy_emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
 def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
     """把单个 MLIR op 生成为目标后端的语句或语句块文本。"""
 
+    legacy_kernel_add = _emit_legacy_kernel_add(op, ctx)
+    if legacy_kernel_add is not None:
+        return legacy_kernel_add
     stmt = dispatch_op(op, ctx)
     if stmt is not None:
         return stmt
     return _call_legacy_emit_c_op(op, ctx)
+
+
+def _emit_legacy_kernel_add(op: Operation, ctx: EmitCContext) -> str | None:
+    """兼容历史文本 IR 中的旧公开名 `kernel.add`。
+
+    创建者: 大闸蟹
+    最后修改人: 大闸蟹
+
+    功能说明:
+    - 当前 kernel dialect 已收口到 `kernel.binary_elewise(kind="add")`。
+    - `ircheck` 为了读取旧合同资产会允许未注册 op，旧 `"kernel.add"` 会以
+      `builtin.unregistered` + `op_name__ = "kernel.add"` 进入发射器。
+    - 该兼容分支只在 `target=cpu` 下把旧三操作数顺序 `lhs, rhs, out` 转成
+      `cpu::add(lhs, rhs, out);`，其余未注册 op 继续走常规错误路径。
+
+    使用示例:
+    - `emit_c_op(old_kernel_add_op, EmitCContext(target="cpu")) == "cpu::add(lhs, rhs, out);"`
+
+    关联文件:
+    - spec: [spec/dsl/emit_c.md](../../../../spec/dsl/emit_c.md)
+    - test: [test/tools/test_ircheck_runner.py](../../../../test/tools/test_ircheck_runner.py)
+    - 功能实现: [kernel_gen/dsl/gen_kernel/emit_c/](.)
+    """
+
+    op_name_attr = op.attributes.get("op_name__")
+    if not isinstance(op_name_attr, StringAttr) or op_name_attr.data != "kernel.add":
+        return None
+    if ctx.target != "cpu" or len(op.operands) != 3:
+        return None
+    lhs_expr = emit_c_value(op.operands[0], ctx)
+    rhs_expr = emit_c_value(op.operands[1], ctx)
+    out_expr = emit_c_value(op.operands[2], ctx)
+    return f"{ctx.current_indent}cpu::add({lhs_expr}, {rhs_expr}, {out_expr});"
 
 
 def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:

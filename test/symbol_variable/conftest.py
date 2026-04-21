@@ -1,7 +1,7 @@
 """symbol_variable pytest shared configuration.
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 大闸蟹
 
 功能说明:
 - 统一把仓库根目录加入 `sys.path`，保证从任意工作目录运行 pytest 都能导入 `kernel_gen.*`。
@@ -11,7 +11,7 @@
 - `pytest -q test/symbol_variable`
 
 关联文件:
-- Spec 文档: [`spec/symbol_variable/README.md`](spec/symbol_variable/README.md)
+- Spec 文档: [`spec/symbol_variable/package_api.md`](spec/symbol_variable/package_api.md)
 - 测试文件: [`test/symbol_variable`](test/symbol_variable)
 - 功能实现: [`test/symbol_variable/conftest.py`](test/symbol_variable/conftest.py)
 """

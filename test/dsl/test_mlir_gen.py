@@ -1415,7 +1415,7 @@ def test_build_func_op_supports_dma_helper_calls() -> None:
     assert len(view_ops) == 1
     assert len(return_ops) == 1
     assert [attr.data for attr in view_ops[0].result.type.shape.data] == [2, 2]
-    assert [attr.data for attr in view_ops[0].result.type.stride.data] == [1, 1]
+    assert [attr.data for attr in view_ops[0].result.type.stride.data] == [4, 1]
     assert list(view_func.function_type.outputs) == [view_ops[0].result.type]
     assert return_ops[0].arguments[0].type == view_ops[0].result.type
 
@@ -4442,4 +4442,5 @@ def test_expectation_dsl_mlir_gen_root_entry_runs_in_fresh_process() -> None:
     result = _run_expectation_module("expectation.dsl.mlir_gen")
 
     assert result.returncode == 0, result.stderr or result.stdout
-    assert "[CASE-1] symbol const 正向例子：4 + 5 应在函数体内 materialize 为 symbol.const，并生成 symbol.add" in result.stdout
+    assert "[CASE-1] module alias：cc.slice(...)" in result.stdout
+    assert "[CASE-1] 静态正向例子：随机静态整数形参应生成显式 symbol.add" in result.stdout

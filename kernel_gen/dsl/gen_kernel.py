@@ -1319,15 +1319,15 @@ class _KernelEmitter:
                 f"ctx.get_dynamic_memory<{tlm_space_c}, {element_type}>();"
             ),
             "",
-            f"{indent}auto {lhs_name}_gm = npu_demo::view({lhs_name}, tid * 16, 16, 1);",
-            f"{indent}auto {rhs_name}_gm = npu_demo::view({rhs_name}, tid * 16, 16, 1);",
+            f"{indent}auto {lhs_name}_gm = view({lhs_name}, tid * 16, 16, 1);",
+            f"{indent}auto {rhs_name}_gm = view({rhs_name}, tid * 16, 16, 1);",
             "",
-            f"{indent}auto {lhs_name}_tsm = npu_demo::view(tsm, tid * 16, 16, 1);",
-            f"{indent}auto {rhs_name}_tsm = npu_demo::view(tsm, 64 + tid * 16, 16, 1);",
-            f"{indent}auto {out_name}_tlm = npu_demo::view(tlm, tid * 16, 16, 1);",
+            f"{indent}auto {lhs_name}_tsm = view(tsm, tid * 16, 16, 1);",
+            f"{indent}auto {rhs_name}_tsm = view(tsm, 64 + tid * 16, 16, 1);",
+            f"{indent}auto {out_name}_tlm = view(tlm, tid * 16, 16, 1);",
             "",
-            f"{indent}npu_demo::slice({lhs_name}_tsm, {lhs_name}_gm, 0, 16, 1);",
-            f"{indent}npu_demo::slice({rhs_name}_tsm, {rhs_name}_gm, 0, 16, 1);",
+            f"{indent}slice({lhs_name}_tsm, {lhs_name}_gm, 0, 16, 1);",
+            f"{indent}slice({rhs_name}_tsm, {rhs_name}_gm, 0, 16, 1);",
             self._format_npu_demo_barrier_stmt(barrier0, func_op.sym_name.data),
             "",
             (
@@ -1335,7 +1335,7 @@ class _KernelEmitter:
             ),
             self._format_npu_demo_barrier_stmt(barrier1, func_op.sym_name.data),
             "",
-            f"{indent}npu_demo::deslice({out_name}, {out_name}_tlm, tid * 16, 16, 1);",
+            f"{indent}deslice({out_name}, {out_name}_tlm, tid * 16, 16, 1);",
         ]
         body = "\n".join(lines)
         self.ctx.pop_indent()
@@ -1460,16 +1460,14 @@ class _KernelEmitter:
                 f"ctx.get_dynamic_memory<MemorySpace::TLM1, {element_type}>();"
             ),
             "",
-            f"{self.ctx.current_indent}auto src_view = npu_demo::view({source_name}, tid * 16, 16, 1);",
-            f"{self.ctx.current_indent}auto work_tile = npu_demo::view(tsm, 0, 16, 1);",
-            f"{self.ctx.current_indent}auto out_tile = npu_demo::view(tsm, 0, 16, 1);",
+            f"{self.ctx.current_indent}auto src_view = view({source_name}, tid * 16, 16, 1);",
+            f"{self.ctx.current_indent}auto work_tile = view(tsm, 0, 16, 1);",
+            f"{self.ctx.current_indent}auto out_tile = view(tsm, 0, 16, 1);",
             "",
-            f"{self.ctx.current_indent}npu_demo::slice(work_tile, src_view, 0, 16, 1);",
-            (
-                f"{self.ctx.current_indent}npu_demo::add<MemorySpace::TSM, {element_type}, {element_type}>"
-                f"(out_tile, work_tile, work_tile);"
-            ),
-            f"{self.ctx.current_indent}npu_demo::deslice(out, out_tile, tid * 16, 16, 1);",
+            f"{self.ctx.current_indent}slice(work_tile, src_view, 0, 16, 1);",
+            f"{self.ctx.current_indent}add<MemorySpace::TSM, {element_type}, {element_type}>"
+            f"(out_tile, work_tile, work_tile);",
+            f"{self.ctx.current_indent}deslice(out, out_tile, tid * 16, 16, 1);",
         ]
         return "\n".join(lines)
 
@@ -1830,7 +1828,7 @@ def gen_kernel(op_or_func: Any, ctx: EmitCContext) -> str:
         )
     source = _KernelEmitter(emit_ctx).emit(op_or_func)
     if ctx.target == "npu_demo":
-        prelude = '#include "include/npu_demo/npu_demo.h"\n\n'
+        prelude = '#include "include/npu_demo/npu_demo.h"\nusing namespace npu_demo;\n\n'
         return prelude + source
     return source
 

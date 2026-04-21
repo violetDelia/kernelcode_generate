@@ -275,7 +275,7 @@ def _infer_binary_type(
         scalar_type = rhs_type if lhs_is_memory else lhs_type
         if not isinstance(memory_type, NnMemoryType) or not isinstance(scalar_type, Attribute):
             raise _LoweringError("Binary op operands must have nn.memory type", location=expr.location)
-        result_type = _infer_mixed_binary_type(memory_type, scalar_type, expr.location)
+        result_type = _infer_mixed_binary_type(memory_type, scalar_type, expr.location, op_name=expr.op)
         type_map[expr_key] = result_type
         return result_type
     lhs_value = (
@@ -438,6 +438,8 @@ def _infer_mixed_binary_type(
     memory_type: NnMemoryType,
     scalar_type: Attribute,
     location: SourceLocation | None,
+    *,
+    op_name: str = "add",
 ) -> NnMemoryType:
     """推导 mixed memory-scalar binary expr 的结果类型。
 
@@ -446,16 +448,23 @@ def _infer_mixed_binary_type(
 
     功能说明:
     - 根据 memory operand 与 scalar operand 的 element type，决定 mixed binary 的结果 `nn.memory` 类型。
+    - `floordiv` 复用 operation API 的 scalar promotion 规则，保证 `Int8 // scalar` 提升为 `Int32`。
     - 统一复用 mixed scalar 的 dtype promotion 规则，确保 `call_nn.py` 内只有这一份长期推导逻辑。
 
     使用示例:
-    - result_type = _infer_mixed_binary_type(memory_type, f32, expr.location)
+    - result_type = _infer_mixed_binary_type(memory_type, f32, expr.location, op_name="add")
 
     关联文件:
     - spec: spec/dsl/mlir_gen.md
     - test: test/dsl/mlir_gen/emit/test_call_nn.py
     - 功能实现: kernel_gen/dsl/mlir_gen/emit/call_nn.py
     """
+
+    if op_name == "floordiv":
+        output_memory = _KG_OPERATION_NN.floordiv(_nn_memory_type_to_memory(memory_type, location=location), 1)
+        if not isinstance(output_memory, Memory):
+            raise _LoweringError("Binary op result must be nn.memory", location=location)
+        return _memory_to_nn_type(output_memory, location=location)
 
     scalar_type = _normalize_mixed_scalar_element_type(scalar_type, location)
     target_element_type = memory_type.element_type
@@ -577,6 +586,8 @@ def _materialize_mixed_binary_scalar_operand(
     target_element_type: Attribute,
     ctx: EmitContext,
     location: SourceLocation | None,
+    *,
+    cast_to_element_type: bool = True,
 ) -> SSAValue:
     """物化 mixed binary 中的标量操作数。
 
@@ -585,7 +596,8 @@ def _materialize_mixed_binary_scalar_operand(
 
     功能说明:
     - 把 `ConstAST(int)`、runtime scalar 或 symbol scalar 统一物化为可参与 `nn` binary op 的 SSAValue。
-    - 在物化完成后立即走 `_cast_nn_scalar_operand(...)`，保证 mixed scalar lowering 使用同一条公开类型路径。
+    - 默认在物化完成后立即走 `_cast_nn_scalar_operand(...)`，保证 mixed scalar lowering 使用同一条公开类型路径。
+    - `cast_to_element_type=False` 时保留 `!symbol.int`，用于 `nn.floordiv(memory, symbol)` 合同。
 
     使用示例:
     - rhs_value = _materialize_mixed_binary_scalar_operand(expr.rhs, rhs, result_type.element_type, ctx, expr.location)
@@ -600,6 +612,8 @@ def _materialize_mixed_binary_scalar_operand(
         scalar_value = _const_symbol_int(int(scalar_expr.value), ctx, location)
     if scalar_value is None:
         raise _LoweringError("Binary op scalar operand could not be materialized", location=location)
+    if not cast_to_element_type:
+        return scalar_value
     return _cast_nn_scalar_operand(scalar_value, target_element_type, ctx, location)
 
 
@@ -649,7 +663,7 @@ def _lower_mixed_binary_expr(
     if not isinstance(memory_type, NnMemoryType):
         raise _LoweringError("Binary op operands must have nn.memory type", location=expr.location)
 
-    if memory_type.element_type != result_type.element_type:
+    if expr.op != "floordiv" and memory_type.element_type != result_type.element_type:
         cast_type = _memory_type_from_parts(
             memory_type.shape.data,
             memory_type.stride.data,
@@ -667,6 +681,7 @@ def _lower_mixed_binary_expr(
         result_type.element_type,
         ctx,
         expr.location,
+        cast_to_element_type=expr.op != "floordiv",
     )
     op_map = {
         "add": NnAddOp,

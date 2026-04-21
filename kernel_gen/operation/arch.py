@@ -54,6 +54,14 @@ _DYNAMIC_MEMORY_HARDWARE_KEYS = {
     MemorySpace.TLM2: "tlm2_memory_size",
     MemorySpace.TLM3: "tlm3_memory_size",
 }
+_DYNAMIC_MEMORY_FALLBACK_SYMBOLS = {
+    MemorySpace.SM: "SM_SIZE",
+    MemorySpace.LM: "LM_SIZE",
+    MemorySpace.TSM: "TSM_SIZE",
+    MemorySpace.TLM1: "TLM1_SIZE",
+    MemorySpace.TLM2: "TLM2_SIZE",
+    MemorySpace.TLM3: "TLM3_SIZE",
+}
 
 
 class BarrierVisibility(Enum):
@@ -350,7 +358,7 @@ def _resolve_dynamic_memory_shape(space: MemorySpace) -> list[int | str]:
     功能说明:
     - 优先使用 target hardware 中的容量信息。
     - 已启用 target registry 但缺失容量字段时，抛出一致错误。
-    - 未启用 target registry 时，回退为一维动态 `?`。
+    - 未启用 target registry 时，回退为空间对应的一维容量符号。
 
     使用示例:
     - _resolve_dynamic_memory_shape(MemorySpace.SM)
@@ -367,7 +375,7 @@ def _resolve_dynamic_memory_shape(space: MemorySpace) -> list[int | str]:
     hardware_value = _require_current_target_hardware("arch.get_dynamic_memory", hardware_key)
     if hardware_value is not None:
         return [hardware_value]
-    return ["?"]
+    return [_DYNAMIC_MEMORY_FALLBACK_SYMBOLS[space]]
 
 
 def _ensure_dynamic_memory_space(space: object) -> MemorySpace:

@@ -1561,7 +1561,8 @@ def test_emit_mlir_lower_expr_branches() -> None:
         location=None,
     )
     load_value = _lower_expr(load, ctx)
-    assert isinstance(load_value.owner, DmaLoadOp)
+    assert isinstance(load_value.owner, DmaAllocOp)
+    assert any(isinstance(op, DmaLoadOp) for op in block.ops)
 
     bad_load = LoadAST(tensor=tensor, offset=ConstAST(0), stride=None, location=None)
     ctx.types[_expr_key(bad_load)] = i32

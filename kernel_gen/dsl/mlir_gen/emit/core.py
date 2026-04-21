@@ -3280,6 +3280,7 @@ def _parse_softmax_axis_expr(axis_expr: object | None, rank: int, location: Sour
     功能说明:
     - 支持 int / ConstAST[int] 的 axis。
     - 未提供 axis 时默认使用末轴，并统一规整为非负轴。
+    - 不提前拒绝越界正轴，保留给 `NnSoftmaxOp.verify()` 产出方言级诊断。
 
     使用示例:
     - _parse_softmax_axis_expr(ConstAST(1), rank=2, location=None)
@@ -3299,9 +3300,7 @@ def _parse_softmax_axis_expr(axis_expr: object | None, rank: int, location: Sour
     if isinstance(value, bool) or not isinstance(value, int):
         raise _LoweringError("softmax axis must be int", location=location)
     normalized = value + rank if value < 0 else value
-    if normalized < 0 or normalized >= rank:
-        raise _LoweringError("softmax axis out of range", location=location)
-    return normalized
+    return normalized if normalized >= 0 else value
 
 
 def _parse_transpose_perm_expr(perm_expr: object | None, location: SourceLocation | None) -> list[int]:
@@ -3694,15 +3693,14 @@ def _infer_expr_type(
         source_type = _infer_expr_type(expr.source, type_map, runtime_values=runtime_values)
         if not isinstance(source_type, NnMemoryType):
             raise _LoweringError("view source must have nn.memory type", location=expr.location)
-        shape_attr = _build_static_index_attrs_exact(expr.size, location=expr.location, runtime_values=runtime_values)
-        stride_attr = _build_static_index_list(
-            expr.stride,
-            len(shape_attr),
-            default_value=1,
+        source_memory = _nn_memory_type_to_memory(source_type, location=expr.location)
+        offset_value = _symbolic_index_sequence(expr.offset, location=expr.location, runtime_values=runtime_values)
+        size_value = _symbolic_index_sequence(expr.size, location=expr.location, runtime_values=runtime_values)
+        stride_value = _symbolic_index_sequence(expr.stride, location=expr.location, runtime_values=runtime_values)
+        result_type = _memory_to_nn_type(
+            _KG_OPERATION_DMA.view(source_memory, offset_value, size_value, stride_value),
             location=expr.location,
-            runtime_values=runtime_values,
         )
-        result_type = _memory_type_from_parts(shape_attr, stride_attr, source_type.element_type, source_type.space)
         type_map[expr_key] = result_type
         return result_type
     if isinstance(expr, DmaReshapeAST):
@@ -3967,6 +3965,8 @@ def _materialize_mixed_binary_scalar_operand(
     target_element_type: Attribute,
     ctx: EmitContext,
     location: SourceLocation | None,
+    *,
+    cast_to_element_type: bool = True,
 ) -> SSAValue:
     """为 nn mixed binary 路径生成符合公开合同的标量 SSA value。
 
@@ -3975,7 +3975,8 @@ def _materialize_mixed_binary_scalar_operand(
 
     功能说明:
     - 对整数字面量统一经 `symbol.const` 生成 `!symbol.int`，保持 mixed 路径一致语义。
-    - 对已有 scalar SSA value 按目标 element type 执行 `_cast_nn_scalar_operand(...)`。
+    - 对已有 scalar SSA value 默认按目标 element type 执行 `_cast_nn_scalar_operand(...)`。
+    - `cast_to_element_type=False` 时保留 `!symbol.int`，用于 `nn.floordiv(memory, symbol)` 合同。
     - 若无法物化 scalar operand，抛出稳定错误短语供调用方诊断。
 
     使用示例:
@@ -3991,6 +3992,8 @@ def _materialize_mixed_binary_scalar_operand(
         scalar_value = _const_symbol_int(int(scalar_expr.value), ctx, location)
     if scalar_value is None:
         raise _LoweringError("Binary op scalar operand could not be materialized", location=location)
+    if not cast_to_element_type:
+        return scalar_value
     return _cast_nn_scalar_operand(scalar_value, target_element_type, ctx, location)
 
 
@@ -4063,6 +4066,7 @@ def _lower_mixed_binary_expr(
         result_type.element_type,
         ctx,
         expr.location,
+        cast_to_element_type=expr.op != "floordiv",
     )
     op_map = {
         "add": NnAddOp,
@@ -4210,7 +4214,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
             alloc_shape = _build_index_operands_from_layout(result_type.shape, ctx, location=expr.location)
         alloc_op = DmaAllocOp(alloc_shape, result_type)
         ctx.builder.add_op(alloc_op)
-        copy_op = DmaCopyOp(alloc_op.result, source)
+        copy_op = DmaCopyOp(source, alloc_op.result)
         ctx.builder.add_op(copy_op)
         ctx._set_cache(expr_key, alloc_op.result)
         ctx.types[_expr_key(expr.source)] = source_type
@@ -4240,7 +4244,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
         rank = len(result_type.shape.data)
         offsets = _build_index_attrs(expr.offset, rank, ctx, location=expr.location)
         shape = _build_index_operands_exact(expr.size, ctx, location=expr.location)
-        stride = _build_index_operands_from_layout(result_type.stride, ctx, location=expr.location)
+        stride = _build_index_attrs(expr.stride, rank, ctx, default_value=1, location=expr.location)
         op = DmaViewOp(source, offsets, shape, stride, result_type)
         ctx.builder.add_op(op)
         ctx._set_cache(expr_key, op.result)

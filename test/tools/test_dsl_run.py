@@ -15,10 +15,10 @@
 - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
 - expectation: [expectation/tools/dsl_run/add.py](expectation/tools/dsl_run/add.py)
 - expectation: [expectation/tools/dsl_run/invalid_contract.py](expectation/tools/dsl_run/invalid_contract.py)
-- expectation: [expectation/execute_engine/npu_demo/kernel_only/add.py](expectation/execute_engine/npu_demo/kernel_only/add.py)
-- expectation: [expectation/execute_engine/npu_demo/kernel_only/mul.py](expectation/execute_engine/npu_demo/kernel_only/mul.py)
-- expectation: [expectation/execute_engine/npu_demo/kernel_only/sub.py](expectation/execute_engine/npu_demo/kernel_only/sub.py)
-- expectation: [expectation/execute_engine/npu_demo/kernel_only/matmul.py](expectation/execute_engine/npu_demo/kernel_only/matmul.py)
+- expectation: [expectation/execute_engine/npu_demo/kernel_type/add.py](expectation/execute_engine/npu_demo/kernel_type/add.py)
+- expectation: [expectation/execute_engine/npu_demo/kernel_type/mul.py](expectation/execute_engine/npu_demo/kernel_type/mul.py)
+- expectation: [expectation/execute_engine/npu_demo/kernel_type/sub.py](expectation/execute_engine/npu_demo/kernel_type/sub.py)
+- expectation: [expectation/execute_engine/npu_demo/kernel_type/matmul.py](expectation/execute_engine/npu_demo/kernel_type/matmul.py)
 """
 
 from __future__ import annotations
@@ -65,15 +65,15 @@ if str(EXPECTATION_ROOT) not in sys.path:
     sys.path.append(str(EXPECTATION_ROOT))
 
 from expectation.tools.dsl_run.add import add_kernel
-from expectation.execute_engine.npu_demo.kernel_only.add import (
+from expectation.execute_engine.npu_demo.kernel_type.add import (
     case_for_loop_add_runs_with_dsl_run,
     case_slice_store_add_runs_with_dsl_run,
 )
-from expectation.execute_engine.npu_demo.kernel_only.mul import (
+from expectation.execute_engine.npu_demo.kernel_type.mul import (
     case_mul_emit_compile_execute,
     case_mul_lowering_contract,
 )
-from expectation.execute_engine.npu_demo.kernel_only.sub import (
+from expectation.execute_engine.npu_demo.kernel_type.sub import (
     case_sub_emit_compile_execute,
     case_sub_lowering_contract,
 )
@@ -127,7 +127,7 @@ def _assert_result_contract(
     out: object,
     expected: object,
     *,
-    helper_snippet: str = "npu_demo::add<",
+    helper_snippet: str = "add<",
 ) -> None:
     """断言 `dsl_run(...)` 的最小公开结果合同。
 
@@ -329,7 +329,7 @@ def test_dsl_run_supports_sub_store_kernel_on_npu_demo() -> None:
         EmitCContext(target="npu_demo"),
     )
 
-    _assert_result_contract(result, out, expected, helper_snippet="npu_demo::sub<")
+    _assert_result_contract(result, out, expected, helper_snippet="sub<")
     assert 'kind = "sub"' in str(result.func_op)
 
 
@@ -362,7 +362,7 @@ def test_dsl_run_supports_mul_store_kernel_on_npu_demo() -> None:
         EmitCContext(target="npu_demo"),
     )
 
-    _assert_result_contract(result, out, expected, helper_snippet="npu_demo::mul<")
+    _assert_result_contract(result, out, expected, helper_snippet="mul<")
     assert 'kind = "mul"' in str(result.func_op)
 
 
@@ -409,7 +409,7 @@ def test_dsl_run_supports_tiled_matmul_kernel_on_npu_demo() -> None:
     assert "kernel.matmul" in lowered_text
     assert "nn.matmul" not in lowered_text
     assert result.source.startswith('#include "include/npu_demo/npu_demo.h"\n')
-    assert "npu_demo::matmul<" in result.source
+    assert "matmul<" in result.source
     assert "cpu::matmul(" not in result.source
     assert result.source.count("for (") >= 2
     assert "slice(" in result.source

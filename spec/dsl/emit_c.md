@@ -318,19 +318,19 @@ auto tlm = ctx.get_dynamic_memory<TLM1, float>();
 
 功能说明：
 
-- `npu_demo` 下的视图节点必须发射为稳定的 `npu_demo::view(source, offset, size, stride)` 调用，用于表达 source memory 上的局部视图。
+- `npu_demo` 下的视图节点必须发射为稳定的 `source.view<T>(offset, size, stride)` 成员式调用，用于表达 source memory 上的局部视图。
 
 使用示例：
 
 ```cpp
-auto src_view = npu_demo::view(source, tid * 16, 16, 1);
-auto work_tile = npu_demo::view(tsm, 0, 16, 1);
+auto src_view = source.view<float>({tid * 16}, {16}, {1});
+auto work_tile = tsm.view<float>({0}, {16}, {1});
 ```
 
 注意事项：
 
-- `npu_demo::view(...)` 的参数顺序必须保持 `source -> offset -> size -> stride`。
-- 不得发射为 `source.view<float>(...)`、手写 `Memory<Space, T>` 构造旁路或 `load/store` 组合。
+- `source.view<T>(...)` 的模板参数必须取结果 memory 的元素类型，参数顺序必须保持 `offset -> size -> stride`。
+- 不得发射为命名空间包装式 `npu_demo::view(...)`、手写 `Memory<Space, T>` 构造旁路或 `load/store` 组合。
 
 ### `dma.broadcast`
 
@@ -389,12 +389,12 @@ npu_demo::deslice(out, out_tile, tid * 16, 16, 1);
 
 功能说明：
 
-- `npu_demo` 下的逐元素加法节点必须发射为稳定的公共 `Kernel` helper 调用 `npu_demo::add<...>(out, lhs, rhs);`。
+- `npu_demo` 下的逐元素加法节点必须发射为稳定的公共 `Kernel` helper 调用 `add<...>(out, lhs, rhs);`。
 
 使用示例：
 
 ```cpp
-npu_demo::add<TSM, float, float>(out_tile, lhs_tile, rhs_tile);
+add<TSM, float, float>(out_tile, lhs_tile, rhs_tile);
 ```
 
 注意事项：
@@ -407,14 +407,14 @@ npu_demo::add<TSM, float, float>(out_tile, lhs_tile, rhs_tile);
 
 功能说明：
 
-- 本节定义 `CASE-3` 在节点层的最小输出要求：当输入链路命中 `kernel.matmul` 时，`target=npu_demo` 的文本需落到 `npu_demo::matmul(...)` 调用。
+- 本节定义 `CASE-3` 在节点层的最小输出要求：当输入链路命中 `kernel.matmul` 时，`target=npu_demo` 的文本需落到 `matmul(...)` 调用。
 
 使用示例：
 
 ```cpp
 npu_demo::slice(lhs_tile, lhs, m0, 16, 1);
 npu_demo::slice(rhs_tile, rhs, n0, 16, 1);
-npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out_tile, lhs_tile, rhs_tile);
+matmul<TSM, TSM, TLM1, float, float, float>(out_tile, lhs_tile, rhs_tile);
 npu_demo::deslice(out_tile, out, m0, 16, 1);
 ```
 
@@ -442,7 +442,7 @@ npu_demo::deslice(out_tile, out, m0, 16, 1);
 - 验证重复 `dma.slice/dma.deslice` 发射时辅助变量名保持唯一，避免同一作用域命名冲突。
 - 下游 `npu_demo` 专项验收至少应覆盖 `thread_id/thread_num` 查询，建议测试名为 `test_emit_c_lowers_npu_demo_kernel_context_queries`。
 - 下游 `npu_demo` 专项验收至少应覆盖 `TSM/TLM1/TLM2/TLM3` dynamic memory 查询，建议测试名为 `test_emit_c_lowers_npu_demo_dynamic_memory_access`。
-- 下游 `npu_demo` 专项验收至少应覆盖 `npu_demo::alloc + npu_demo::view + npu_demo::slice + npu_demo::add + npu_demo::deslice` 管线，建议测试名为 `test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline`，且不得回退到 `.view<`、`load<`、`store<`。
+- 下游 `npu_demo` 专项验收至少应覆盖 `alloc + source.view<T> + slice + add + deslice` 管线，建议测试名为 `test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline`，且不得回退到 `npu_demo::view(`、`load<`、`store<`。
 
 ### 功能与用例清单
 

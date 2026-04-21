@@ -181,7 +181,7 @@ def fc(value: object, weight: object, bias: object | None = None) -> Memory:
                 )
             )
     result_dtype = _resolve_add_dtype(value.dtype, weight.dtype)
-    if bias is not None and _resolve_add_dtype(result_dtype, bias.dtype) is not result_dtype:
+    if bias is not None and bias.dtype is not result_dtype:
         raise TypeError(
             _ERROR_TEMPLATE.format(
                 scene="nn.fc 参数校验",
