@@ -5,11 +5,12 @@
 
 功能说明:
 - 通过编译并运行 C++ 片段验证 include/api/Core.h 的 Vector 与 Status 语义，并使用 include/npu_demo/Core.h 提供实现。
+- 覆盖 `Vector{...}` 与 `Vector values = {...}` 的 1..4 个 long long 固定参数构造。
 
 覆盖率信息:
 - 当前覆盖率: `N/A`。该链路为 C++ 头文件，按规则豁免 `pytest-cov` 覆盖率统计。
 - 达标判定: C++ 头文件实现按规则豁免 `95%` 覆盖率达标线。
-- 当前覆盖基线: `API-CORE-001`。
+- 当前覆盖基线: `API-CORE-001`、`API-CORE-002`。
 
 覆盖率命令:
 - `pytest -q test/include/api/test_core.py`
@@ -122,6 +123,121 @@ int main() {
     Status status = StatusCode::kOk;
     if (status != StatusCode::kOk) {
         return fail(3);
+    }
+    return 0;
+}
+"""
+    _compile_and_run(source)
+
+
+# API-CORE-002
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 2026-04-21 21:00:00 +0800
+# 最近一次运行成功时间: 2026-04-21 21:00:00 +0800
+# 测试目的: 验证 Vector 花括号构造复制到对象自有存储，且 pointer-view 构造保持可用。
+# 使用示例: pytest -q test/include/api/test_core.py -k test_api_core_vector_brace_constructors_keep_owned_values_without_std_helpers
+# 对应功能实现文件链接: [include/npu_demo/Core.h](include/npu_demo/Core.h)
+# 对应 spec 文件链接: [spec/include/api/Core.md](spec/include/api/Core.md)
+# 对应测试文件链接: [test/include/api/test_core.py](test/include/api/test_core.py)
+def test_api_core_vector_brace_constructors_keep_owned_values_without_std_helpers() -> None:
+    api_header = (REPO_ROOT / "include/api/Core.h").read_text(encoding="utf-8")
+    impl_header = (REPO_ROOT / "include/npu_demo/Core.h").read_text(encoding="utf-8")
+    for token in (
+        "<initializer_list>",
+        "std::initializer_list",
+        "std::vector",
+        "std::array",
+        "new ",
+        "malloc",
+    ):
+        assert token not in api_header
+        assert token not in impl_header
+
+    source = r"""
+#include "include/api/Core.h"
+#include "include/npu_demo/Core.h"
+
+static int fail(int code) {
+    return code;
+}
+
+static int expect_vector(const Vector& values, unsigned long long size, const long long* expected) {
+    if (values.size() != size) {
+        return 1;
+    }
+    for (unsigned long long i = 0; i < size; ++i) {
+        if (values.data()[i] != expected[i]) {
+            return 2;
+        }
+        if (values[i] != expected[i]) {
+            return 3;
+        }
+    }
+    return 0;
+}
+
+int main() {
+    long long one_expected[1] = {16};
+    Vector one{16};
+    if (expect_vector(one, 1, one_expected) != 0) {
+        return fail(1);
+    }
+
+    long long two_expected[2] = {2, 3};
+    Vector two{2, 3};
+    if (expect_vector(two, 2, two_expected) != 0) {
+        return fail(2);
+    }
+
+    long long three_expected[3] = {2, 3, 4};
+    Vector dims = {2, 3, 4};
+    if (expect_vector(dims, 3, three_expected) != 0) {
+        return fail(3);
+    }
+
+    long long four_expected[4] = {1, 2, 3, 4};
+    Vector full{1, 2, 3, 4};
+    if (expect_vector(full, 4, four_expected) != 0) {
+        return fail(4);
+    }
+    full[2] = 9;
+    if (full.data()[2] != 9) {
+        return fail(5);
+    }
+
+    Vector source{7, 8, 9};
+    Vector copied(source);
+    source[1] = 80;
+    if (copied.size() != 3 || copied[0] != 7 || copied[1] != 8 || copied[2] != 9) {
+        return fail(6);
+    }
+
+    Vector assigned{0};
+    Vector assign_source{10, 11, 12, 13};
+    assigned = assign_source;
+    assign_source[0] = 100;
+    if (assigned.size() != 4 || assigned[0] != 10 || assigned[3] != 13) {
+        return fail(7);
+    }
+
+    long long external[2] = {30, 31};
+    Vector view(external, 2);
+    Vector view_copy(view);
+    external[1] = 77;
+    if (view_copy.size() != 2 || view_copy[0] != 30 || view_copy[1] != 77) {
+        return fail(8);
+    }
+
+    const long long const_external[2] = {40, 41};
+    Vector const_view(const_external, 2);
+    if (const_view.size() != 2 || const_view.data()[0] != 40 || const_view[1] != 41) {
+        return fail(9);
+    }
+
+    Status status = StatusCode::kOk;
+    if (status != StatusCode::kOk) {
+        return fail(10);
     }
     return 0;
 }

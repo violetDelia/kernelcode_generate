@@ -3,18 +3,20 @@
 ## 功能简介
 
 定义 `npu_demo` 后端私有 include/runtime 规范，明确 `KernelContext` 的运行时视图语义、`KernelContext::barrier(visibility, scope)` 的同步契约、`npu_demo::launch<block, thread, subthread>(callee, args...)` 的后端承接位置，以及 `get_dynamic_memory<Space, T>()` 的片上内存入口行为。
+同时定义 `include/npu_demo/npu_demo.h` 的 public function namespace 总合同：面向调用方的后端函数入口统一放在 `namespace npu_demo`，基础类型继续沿用 `include/api` 的公开类型边界。
 
 - `KernelContext` 是由 `launch` 注入到 kernel body 的运行时上下文视图，不再是固定常量容器。
 - `thread_num()` / `block_num()` / `subthread_num()` 返回本次 launch 的 extent，而不是 target registry 的固定模板值。
 - `include/npu_demo/npu_demo.h` 作为单入口头文件，需透传 `include/api/Memory.h` / `Dma.h` / `Kernel.h` / `Arch.h` 的统一声明，并汇聚 `include/npu_demo/Core.h` / `Memory.h` / `Dma.h` / `Kernel.h` / `Arch.h` 的后端实现。
+- `npu_demo::add/sub/mul/...`、`npu_demo::launch(...)` 以及后续 `npu_demo::alloc/slice/deslice/view/build_contiguous_stride` 是 public function 的唯一成功消费方向；`detail` 只服务实现内部。
 
 ## 文档信息
 
 - 创建者：`jcc你莫辜负`
-- 最后一次更改：`朽木露琪亚`
+- 最后一次更改：`jcc你莫辜负`
 - `spec`：[`spec/include/npu_demo/npu_demo.md`](../../../spec/include/npu_demo/npu_demo.md)
 - `功能实现`：[`include/npu_demo/npu_demo.h`](../../../include/npu_demo/npu_demo.h)、[`include/npu_demo/Arch.h`](../../../include/npu_demo/Arch.h)、[`include/npu_demo/Kernel.h`](../../../include/npu_demo/Kernel.h)
-- `test`：[`test/include/npu_demo/test_kernel_context.py`](../../../test/include/npu_demo/test_kernel_context.py)、[`test/include/npu_demo/test_runtime_launch.py`](../../../test/include/npu_demo/test_runtime_launch.py)、[`test/include/api/test_arch.py`](../../../test/include/api/test_arch.py)、[`test/include/api/test_kernel.py`](../../../test/include/api/test_kernel.py)、[`test/target/test_target_registry.py`](../../../test/target/test_target_registry.py)
+- `test`：[`test/include/npu_demo/test_kernel_context.py`](../../../test/include/npu_demo/test_kernel_context.py)、[`test/include/npu_demo/test_runtime_launch.py`](../../../test/include/npu_demo/test_runtime_launch.py)、[`test/include/npu_demo/test_public_namespace.py`](../../../test/include/npu_demo/test_public_namespace.py)、[`test/include/api/test_arch.py`](../../../test/include/api/test_arch.py)、[`test/include/api/test_kernel.py`](../../../test/include/api/test_kernel.py)、[`test/target/test_target_registry.py`](../../../test/target/test_target_registry.py)
 
 ## 依赖
 
@@ -29,6 +31,8 @@
 
 - 冻结 `include/api/Arch.h` 与 `include/npu_demo/Arch.h` 的职责边界：前者只声明公共接口，后者承接 `npu_demo` 的真实线程/同步实现。
 - 冻结 `include/npu_demo/npu_demo.h` 的单入口聚合边界：对外只聚合 `Core / Memory / Dma / Arch / Kernel` 五类公共接口及其后端实现，不再聚合公开 `Nn` 层。
+- 明确后端 public function 的消费方向：调用方经 `npu_demo::` 访问函数入口，不能把 `npu_demo::detail` 或旧 `*_detail` 名称当作公开合同。
+- 明确基础类型边界：`Status`、`StatusCode`、`Vector`、`Memory`、`MemorySpace` 等类型暂不整体迁入 `namespace npu_demo`。
 - 冻结 `KernelContext` 的运行时视图合同，确保 launched body 读取到的是当前 launch 的 `block/thread/subthread` 维度与索引。
 - 冻结 `npu_demo` P0 路径对 `launch + barrier + dynamic memory` 的最小成功子集，为后续实现/补测提供唯一稳定口径。
 
@@ -37,6 +41,9 @@
 - 本规范是后端私有 include/runtime 合同，不面向业务侧直接公开；业务侧只经由生成源码或后端封装间接消费。
 - `include/npu_demo/npu_demo.h` 只聚合当前公共 API 与后端实现；`include/api/Nn.h` 不再属于可聚合的公开层。
 - `include/api/Arch.h` 只冻结名称、参数面与最小返回语义；真实线程启动、barrier 共享对象与运行时注入必须由 [`include/npu_demo/Arch.h`](../../../include/npu_demo/Arch.h) 承接。
+- public function 必须位于 `namespace npu_demo`；基础类型与 enum 可以继续来自 `include/api` 全局公开类型。
+- `npu_demo::detail` 只用于实现内部复用；公开测试、spec 示例、生成源码不得直接消费 `npu_demo::detail` 或 `*_detail` 名称。
+- `include/npu_demo/npu_demo.h` 是唯一聚合入口，不新增第二套 target include。
 - `Kernel` family 的公开 helper 名、模板顺序与参数顺序由 [`spec/include/api/Kernel.md`](../../../spec/include/api/Kernel.md) 冻结；`npu_demo` 只负责承接实现，不得重新发明旧 `Nn` 公共别名。
 - `KernelContext` 只表示当前 launched body 的运行时视图；不要求公开默认构造、复制持久化或脱离 launch 生命周期独立使用。
 - P0 launch 子集固定为：`block=1`、`subthread=1`、`2 <= thread <= registry.hardware.thread_num`；不支持的 extent 必须显式失败，禁止静默回退到单线程或忽略部分 extent。
@@ -46,6 +53,38 @@
 - 本文件不定义 DSL/front-end、MLIR lowering、codegen 细节，也不承诺超出 P0 launch 子集的多 block / 多 subthread runtime 行为。
 
 ## 公开接口
+
+### public function namespace 总合同
+
+功能说明：
+
+- `npu_demo` 后端的 public function 入口统一位于 `namespace npu_demo`。
+- 基础类型继续沿用 `include/api` 层公开类型，不因函数迁移而整体改名。
+- 非公开 helper 只允许作为实现内部细节，不属于调用方稳定入口。
+
+参数说明：
+
+- 无额外参数；该合同约束函数所在命名空间与消费方向。
+
+使用示例：
+
+```cpp
+#include "include/npu_demo/npu_demo.h"
+
+Status add_status = npu_demo::add<GM, float, float>(out, lhs, rhs);
+Status launch_status = npu_demo::launch<1, 2, 1>(kernel_body, &value);
+```
+
+注意事项：
+
+- 正向调用示例不得直接使用 `npu_demo::detail` 或 `*_detail` 名称。
+- `Vector shape{2, 3}`、`Memory<GM, float>`、`StatusCode::kOk` 等基础类型仍保持当前公开位置。
+- `npu_demo::alloc/slice/deslice/view/build_contiguous_stride` 的迁移由后续阶段收口；本阶段先写入总合同与最小 smoke。
+
+返回与限制：
+
+- 返回类型：由各 public function 自行定义。
+- 限制条件：旧全局函数不再作为新增正向测试或生成源码的成功消费方向。
 
 ### `npu_demo::launch<block, thread, subthread>(callee, args...)`
 
@@ -222,20 +261,23 @@ Memory<TLM3, float> out = ctx.get_dynamic_memory<TLM3, float>();
 
 ## 测试
 
-- 测试文件：[`test/include/api/test_arch.py`](../../../test/include/api/test_arch.py)、[`test/include/npu_demo/test_kernel_context.py`](../../../test/include/npu_demo/test_kernel_context.py)、[`test/include/npu_demo/test_runtime_launch.py`](../../../test/include/npu_demo/test_runtime_launch.py)、[`test/target/test_target_registry.py`](../../../test/target/test_target_registry.py)
+- 测试文件：[`test/include/api/test_arch.py`](../../../test/include/api/test_arch.py)、[`test/include/npu_demo/test_kernel_context.py`](../../../test/include/npu_demo/test_kernel_context.py)、[`test/include/npu_demo/test_runtime_launch.py`](../../../test/include/npu_demo/test_runtime_launch.py)、[`test/include/npu_demo/test_public_namespace.py`](../../../test/include/npu_demo/test_public_namespace.py)、[`test/target/test_target_registry.py`](../../../test/target/test_target_registry.py)
 - 执行命令：
   - `pytest -q test/include/api/test_arch.py`
   - `pytest -q test/include/npu_demo/test_kernel_context.py test/include/npu_demo/test_runtime_launch.py`
+  - `pytest -q test/include/npu_demo/test_public_namespace.py`
   - `pytest -q test/target/test_target_registry.py -k "npu_demo and launch"`
 - 测试目标：
   - 验证 `include/api/Arch.h` 与 `include/npu_demo/Arch.h` 的职责边界。
   - 验证 `KernelContext` 查询返回当前 launch 值，而非旧的固定模板常量。
   - 验证 `ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK)` 的参数合同与显式失败边界。
   - 验证 `npu_demo::launch<1, thread, 1>(...)` 的函数对象 callee、launch extent 校验与 `thread_num()` 运行时视图。
+- 验证 `include/npu_demo/npu_demo.h` 的最小 public namespace smoke：`Vector{...}` 可用于 `Memory` shape/stride，`npu_demo::add` 与 `npu_demo::launch` 可编译运行，正向片段不消费 `npu_demo::detail`。
 - 验证 `get_dynamic_memory<TSM/TLM1/TLM2/TLM3, float>()` 返回固定容量视图，`SM/LM` 因零容量显式失败。
 - 功能与用例清单：
   - `test_include_api_arch_exports_public_launch_and_scope_contract`：锁定 `include/api/Arch.h` 的公开 launch/barrier 接口面。
   - `test_npu_demo_kernel_context_runtime_view_tracks_launch_extent`：锁定 `KernelContext` 的 `block/thread/subthread` 查询返回当前 launch 值。
   - `test_npu_demo_kernel_context_barrier_requires_visibility_and_block_scope`：锁定 barrier 的 `visibility / scope` 参数合同。
   - `test_npu_demo_launch_rejects_unsupported_extent_without_fallback`：锁定 `block!=1`、`subthread!=1`、`thread<2` 或 `thread>8` 的显式失败边界。
+  - `test_npu_demo_public_namespace_smoke_compiles_vector_kernel_and_launch`：锁定 `npu_demo::` public function 最小正向消费。
   - `test_target_registry_npu_demo_supports_launch_and_barrier_caps`：锁定 registry 的 `arch.launch` / `arch.barrier` 能力开关与 `thread_num=8` 上限语义。
