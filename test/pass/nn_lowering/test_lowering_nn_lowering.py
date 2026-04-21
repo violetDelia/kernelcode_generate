@@ -1,7 +1,7 @@
 """nn -> kernel lowering pass tests.
 
 创建者: 金铲铲大作战
-最后一次更改: 朽木露琪亚
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 nn_lowering pass 的 lowering 行为与错误路径。
@@ -43,13 +43,6 @@ from xdsl.dialects.builtin import (
     i32,
 )
 from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
-from xdsl.irdl import (
-    IRDLOperation,
-    irdl_op_definition,
-    operand_def,
-    opt_attr_def,
-    result_def,
-)
 from xdsl.utils.exceptions import VerifyException
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -69,6 +62,7 @@ from kernel_gen.dialect.kernel import (
 from kernel_gen.dialect.nn import (
     NnAddOp,
     NnBroadcastOp,
+    NnCastOp,
     NnEqOp,
     NnExpOp,
     NnGeOp,
@@ -84,6 +78,7 @@ from kernel_gen.dialect.nn import (
     NnReduceMaxOp,
     NnReduceMinOp,
     NnReduceSumOp,
+    NnSelectOp,
     NnSoftmaxOp,
     NnTransposeOp,
     NnTrueDivOp,
@@ -152,111 +147,6 @@ def add_block_arg(block: Block, arg_type: Attribute) -> SSAValue:
     """
 
     return block.insert_arg(arg_type, len(block.args))
-
-
-@irdl_op_definition
-class NnSelectOp(IRDLOperation):
-    """测试用 nn.select op。
-
-    创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 用于构造 nn.select 的测试输入。
-
-    使用示例:
-    - NnSelectOp(cond, lhs, rhs, NnMemoryType(...))
-
-    关联文件:
-    - spec: spec/operation/nn.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
-    - 功能实现: test/pass/nn_lowering/test_lowering_nn_lowering.py
-    """
-
-    name = "nn.select"
-
-    cond = operand_def(NnMemoryType)
-    lhs = operand_def(NnMemoryType)
-    rhs = operand_def(NnMemoryType)
-    res = result_def(NnMemoryType)
-    space = opt_attr_def(NnMemorySpaceAttr)
-
-    def __init__(
-        self,
-        cond: SSAValue | Operation,
-        lhs: SSAValue | Operation,
-        rhs: SSAValue | Operation,
-        result_type: NnMemoryType,
-        space: NnMemorySpaceAttr | None = None,
-    ) -> None:
-        """初始化 nn.select 测试 op。
-
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
-
-        功能说明:
-        - 绑定 cond/lhs/rhs operand、结果类型与可选 space 属性。
-
-        使用示例:
-        - NnSelectOp(cond, lhs, rhs, result_type, space)
-
-        关联文件:
-        - spec: spec/operation/nn.md
-        - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
-        - 功能实现: test/pass/nn_lowering/test_lowering_nn_lowering.py
-        """
-
-        attributes = {"space": space} if space is not None else {}
-        super().__init__(operands=[cond, lhs, rhs], result_types=[result_type], attributes=attributes)
-
-    @staticmethod
-    def get_immitted_memory_space_attr() -> NnMemorySpaceAttr:
-        return NnMemorySpaceAttr(StringAttr("global"))
-
-
-@irdl_op_definition
-class NnCastOp(IRDLOperation):
-    """测试用 nn.cast op。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 用于构造 nn.cast 的测试输入。
-
-    使用示例:
-    - NnCastOp(src, NnMemoryType(...))
-
-    关联文件:
-    - spec: spec/operation/nn.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
-    - 功能实现: test/pass/nn_lowering/test_lowering_nn_lowering.py
-    """
-
-    name = "nn.cast"
-
-    operand = operand_def(NnMemoryType)
-    res = result_def(NnMemoryType)
-
-    def __init__(self, operand: SSAValue | Operation, result_type: NnMemoryType) -> None:
-        """初始化 nn.cast 测试 op。
-
-        创建者: 小李飞刀
-        最后一次更改: 小李飞刀
-
-        功能说明:
-        - 绑定输入 operand 与结果类型。
-
-        使用示例:
-        - NnCastOp(value, result_type)
-
-        关联文件:
-        - spec: spec/operation/nn.md
-        - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
-        - 功能实现: test/pass/nn_lowering/test_lowering_nn_lowering.py
-        """
-
-        super().__init__(operands=[operand], result_types=[result_type])
 
 
 def _extract_ops(module: ModuleOp, op_type: type[Operation]) -> list[Operation]:
@@ -1087,7 +977,7 @@ def test_lower_cast_to_dma_cast() -> None:
     operand_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)
     result_type = nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), f32, SPACE_GLOBAL)
     operand = add_block_arg(block, operand_type)
-    cast_op = NnCastOp(operand, result_type)
+    cast_op = NnCastOp(operand, result_type, SPACE_GLOBAL)
     block.add_op(cast_op)
     block.add_op(func.ReturnOp(cast_op.results[0]))
     module = ModuleOp([func.FuncOp("cast", FunctionType.from_lists([operand_type], [result_type]), Region(block))])
@@ -1287,7 +1177,7 @@ def test_lower_cast_preserves_symbol_dim() -> None:
         SPACE_GLOBAL,
     )
     operand = add_block_arg(block, operand_type)
-    cast_op = NnCastOp(operand, result_type)
+    cast_op = NnCastOp(operand, result_type, SPACE_GLOBAL)
     block.add_op(cast_op)
     block.add_op(func.ReturnOp(cast_op.results[0]))
     module = ModuleOp([func.FuncOp("cast", FunctionType.from_lists([operand_type], [result_type]), Region(block))])
@@ -1538,7 +1428,7 @@ def test_lower_cast_symbol_dim_rejects_mismatch() -> None:
     region = Region()
     block = Block(arg_types=[operand_type])
     region.add_block(block)
-    cast_op = NnCastOp(block.args[0], result_type)
+    cast_op = NnCastOp(block.args[0], result_type, SPACE_GLOBAL)
     block.add_op(cast_op)
     block.add_op(func.ReturnOp(cast_op.results[0]))
     func_op = func.FuncOp("cast_mismatch", FunctionType.from_lists([operand_type], [result_type]), region)
@@ -1640,7 +1530,7 @@ def test_lower_bfloat16_cast() -> None:
     region = Region()
     block = Block(arg_types=[operand_type])
     region.add_block(block)
-    cast_op = NnCastOp(block.args[0], result_type)
+    cast_op = NnCastOp(block.args[0], result_type, SPACE_GLOBAL)
     block.add_op(cast_op)
     block.add_op(func.ReturnOp(cast_op.results[0]))
     func_op = func.FuncOp("cast_bfloat16", FunctionType.from_lists([operand_type], [result_type]), region)

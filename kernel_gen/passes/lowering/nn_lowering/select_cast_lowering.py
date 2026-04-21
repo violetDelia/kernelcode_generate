@@ -1,13 +1,13 @@
 """select/cast/exp lowering 实现。
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - nn.select -> dma.alloc + kernel.select
 - nn.cast -> dma.alloc + dma.cast
 - nn.exp -> dma.alloc + kernel.exp
-- 既保留 block 级兼容 helper，也提供单 op RewritePattern 集合。
+- 既保留 block 级兼容 helper，也提供按具体 nn op 类型匹配的单 op RewritePattern 集合。
 
 使用示例:
 - from kernel_gen.passes.lowering.nn_lowering.select_cast_lowering import lower_select_cast_family
@@ -39,10 +39,11 @@ from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaCastOp
 from kernel_gen.dialect.kernel import KernelExpOp, KernelSelectOp
-from kernel_gen.dialect.nn import NnMemoryType
+from kernel_gen.dialect.nn import NnCastOp, NnExpOp, NnMemoryType, NnSelectOp
 from kernel_gen.dialect.symbol import SymbolGetDimOp, SymbolValueType
 from .nn_lowering_utility import (
     NnLoweringError,
+    ensure_expected_op_name,
     ensure_operand_count,
     ensure_single_result,
     ensure_space_attr,
@@ -264,43 +265,88 @@ def _ensure_symbol_or_int(op: Operation, operand: SSAValue | Operation) -> SSAVa
 
 
 class _LowerSelectPattern(RewritePattern):
-    """将单个 nn.select lowering 为 kernel.select。"""
+    """将单个 nn.select lowering 为 kernel.select。
+
+    创建者: 小李飞刀
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 通过 `@op_type_rewrite_pattern` 直接匹配 `NnSelectOp`。
+    - 复用 `_lower_select_op(...)`，保持现有 IR 输出不变。
+
+    使用示例:
+    - pattern = _LowerSelectPattern()
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/select_cast_lowering.md
+    - test: test/pass/nn_lowering/select.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
+    """
 
     @op_type_rewrite_pattern
-    def match_and_rewrite(self, op: Operation, rewriter: PatternRewriter) -> None:
-        if op.name != "nn.select":
-            return
+    def match_and_rewrite(self, op: NnSelectOp, rewriter: PatternRewriter, /) -> None:
         block = op.parent_block()
         if block is None:
             raise NnLoweringError("nn op must be inside a block")
+        ensure_expected_op_name(op, "nn.select")
         _lower_select_op(op, block)
         rewriter.has_done_action = True
 
 
 class _LowerCastPattern(RewritePattern):
-    """将单个 nn.cast lowering 为 dma.cast。"""
+    """将单个 nn.cast lowering 为 dma.cast。
+
+    创建者: 小李飞刀
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 通过 `@op_type_rewrite_pattern` 直接匹配 `NnCastOp`。
+    - 复用 `_lower_cast_op(...)`，保持现有 IR 输出与错误短语不变。
+
+    使用示例:
+    - pattern = _LowerCastPattern()
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/select_cast_lowering.md
+    - test: test/pass/nn_lowering/cast.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
+    """
 
     @op_type_rewrite_pattern
-    def match_and_rewrite(self, op: Operation, rewriter: PatternRewriter) -> None:
-        if op.name != "nn.cast":
-            return
+    def match_and_rewrite(self, op: NnCastOp, rewriter: PatternRewriter, /) -> None:
         block = op.parent_block()
         if block is None:
             raise NnLoweringError("nn op must be inside a block")
+        ensure_expected_op_name(op, "nn.cast")
         _lower_cast_op(op, block)
         rewriter.has_done_action = True
 
 
 class _LowerExpPattern(RewritePattern):
-    """将单个 nn.exp lowering 为 kernel.exp。"""
+    """将单个 nn.exp lowering 为 kernel.exp。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 通过 `@op_type_rewrite_pattern` 直接匹配 `NnExpOp`。
+    - 保持既有注册位置与 lowering 输出不变；reduce/softmax family 后续阶段可继续收口边界。
+
+    使用示例:
+    - pattern = _LowerExpPattern()
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering/select_cast_lowering.md
+    - test: test/pass/nn_lowering/exp.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
+    """
 
     @op_type_rewrite_pattern
-    def match_and_rewrite(self, op: Operation, rewriter: PatternRewriter) -> None:
-        if op.name != "nn.exp":
-            return
+    def match_and_rewrite(self, op: NnExpOp, rewriter: PatternRewriter, /) -> None:
         block = op.parent_block()
         if block is None:
             raise NnLoweringError("nn op must be inside a block")
+        ensure_expected_op_name(op, "nn.exp")
         _lower_exp_op(op, block)
         rewriter.has_done_action = True
 
@@ -348,13 +394,16 @@ def lower_select_cast_family(block: Block, op: Operation) -> bool:
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
     """
 
-    if op.name == "nn.select":
+    if isinstance(op, NnSelectOp):
+        ensure_expected_op_name(op, "nn.select")
         _lower_select_op(op, block)
         return True
-    if op.name == "nn.cast":
+    if isinstance(op, NnCastOp):
+        ensure_expected_op_name(op, "nn.cast")
         _lower_cast_op(op, block)
         return True
-    if op.name == "nn.exp":
+    if isinstance(op, NnExpOp):
+        ensure_expected_op_name(op, "nn.exp")
         _lower_exp_op(op, block)
         return True
     return False

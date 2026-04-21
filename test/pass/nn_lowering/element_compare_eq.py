@@ -1,7 +1,7 @@
 """nn_lowering element compare eq tests.
 
 创建者: 小李飞刀
-最后一次更改: 朽木露琪亚
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 验证 nn.eq lower 为 kernel.binary_elewise(kind="eq")。
@@ -33,7 +33,6 @@ from xdsl.dialects.builtin import (
     i1,
     i32,
 )
-from xdsl.irdl import IRDLOperation, attr_def, irdl_op_definition, operand_def, result_def
 from xdsl.ir import Attribute, Block, Operation, Region, SSAValue
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -42,51 +41,11 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaFillOp
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
-from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
+from kernel_gen.dialect.nn import NnEqOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.passes.lowering.nn_lowering.element_binary_lowering import (
     lower_element_binary_family,
 )
-
-
-@irdl_op_definition
-class NnEqOp(IRDLOperation):
-    """测试用 nn.eq op。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 构造 nn.eq，用于 mixed compare 测试。
-
-    使用示例:
-    - NnEqOp(lhs, rhs, result_type, space)
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
-    - test: test/pass/nn_lowering/element_compare_eq.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
-    """
-
-    name = "nn.eq"
-
-    lhs = operand_def(Attribute)
-    rhs = operand_def(Attribute)
-    result = result_def(NnMemoryType)
-    space = attr_def(NnMemorySpaceAttr)
-
-    def __init__(
-        self,
-        lhs_value: SSAValue | Operation,
-        rhs_value: SSAValue | Operation,
-        result_type: NnMemoryType,
-        space: NnMemorySpaceAttr,
-    ) -> None:
-        super().__init__(
-            operands=[lhs_value, rhs_value],
-            result_types=[result_type],
-            attributes={"space": space},
-        )
 
 
 def _make_memory_type(element_type: Attribute = i32) -> NnMemoryType:

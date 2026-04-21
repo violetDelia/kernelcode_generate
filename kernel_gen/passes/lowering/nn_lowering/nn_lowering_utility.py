@@ -1,11 +1,11 @@
 """nn_lowering 公共辅助函数。
 
 创建者: 小李飞刀
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 提供 nn_lowering pass 的公共校验与辅助构造入口。
-- 统一 nn op 的空间、结果数量与 operand 计数检查。
+- 统一 nn op 的空间、名称、结果数量与 operand 计数检查。
 
 使用示例:
 - from kernel_gen.passes.lowering.nn_lowering.nn_lowering_utility import ensure_space_attr
@@ -128,8 +128,32 @@ def ensure_operand_count(op: Operation, expected: int) -> None:
         )
 
 
+def ensure_expected_op_name(op: Operation, expected: str) -> None:
+    """校验具体 pattern 命中的 op 名称未被篡改。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 单 op pattern 先按具体 Python 类型命中。
+    - 此处只校验实例名称与该类型公开名称一致，避免被改名的 nn op 绕过未知 op 错误路径。
+
+    使用示例:
+    - ensure_expected_op_name(op, "nn.add")
+
+    关联文件:
+    - spec: spec/pass/lowering/nn_lowering.md
+    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
+    - 功能实现: kernel_gen/passes/lowering/nn_lowering/nn_lowering_utility.py
+    """
+
+    if op.name != expected:
+        raise NnLoweringError(f"unknown op: {op.name}")
+
+
 __all__ = [
     "NnLoweringError",
+    "ensure_expected_op_name",
     "ensure_module_op",
     "ensure_space_attr",
     "ensure_single_result",
