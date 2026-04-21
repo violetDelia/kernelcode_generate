@@ -22,19 +22,18 @@
 
 from __future__ import annotations
 
+import importlib
 from typing import Any
 
 from xdsl.ir import SSAValue
 
-from ._legacy import load_legacy_gen_kernel_module
+from .gen_kernel import GenKernelError, gen_kernel
 from .emit_c import EmitCContext, EmitCError
 from .emit_c import function as _emit_c_function_module
 from . import emit_c as _emit_c_module
-_legacy_gen_kernel = load_legacy_gen_kernel_module()
-
-GenKernelError = _legacy_gen_kernel.GenKernelError
 emit_c_op = _emit_c_module.emit_c_op
 emit_c_value = _emit_c_module.emit_c_value
+_gen_kernel_entry_module = importlib.import_module(f"{__name__}.gen_kernel")
 
 
 def emit_c(obj: object, ctx: EmitCContext) -> str:
@@ -44,31 +43,7 @@ def emit_c(obj: object, ctx: EmitCContext) -> str:
         return emit_c_value(obj, ctx)
     return _emit_c_function_module.emit_c_source(obj, ctx, emit_c_op, emit_c_value)
 
-
-def gen_kernel(obj: object, ctx: EmitCContext) -> str:
-    """兼容保留旧函数名的源码发射入口。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 保持历史 `gen_kernel(...)` 调用方式可用。
-    - 直接复用包根 `emit_c(...)` 收口后的统一实现，不再额外维护一套新逻辑。
-    - 将 `EmitCError` 折叠回 `GenKernelError`，维持旧公开错误类型。
-
-    使用示例:
-    - source = gen_kernel(func_op, EmitCContext(target="cpu"))
-
-    关联文件:
-    - spec: [spec/dsl/gen_kernel.md](../../../spec/dsl/gen_kernel.md)
-    - test: [test/dsl/test_gen_kernel.py](../../../test/dsl/test_gen_kernel.py)
-    - 功能实现: [kernel_gen/dsl/gen_kernel/](.)
-    """
-
-    try:
-        return emit_c(obj, ctx)
-    except EmitCError as exc:
-        raise GenKernelError(str(exc)) from exc
+_gen_kernel_entry_module.emit_c = emit_c
 
 
 def __getattr__(name: str) -> Any:

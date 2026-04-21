@@ -89,6 +89,7 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
 gen_kernel_module = importlib.import_module("kernel_gen.dsl.gen_kernel")
+gen_kernel_entry_module = importlib.import_module("kernel_gen.dsl.gen_kernel.gen_kernel")
 emit_context_module = importlib.import_module("kernel_gen.dsl.gen_kernel.emit_context")
 tile_analysis_helpers = importlib.import_module("test.pass.test_lowering_tile_analysis")
 tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
@@ -739,9 +740,9 @@ def test_gen_kernel_returns_target_source() -> None:
 # GK-014B
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-04-21 00:00:00 +0800
-# 最近一次运行成功时间: 2026-04-21 00:00:00 +0800
-# 功能说明: 验证 gen_kernel 继续把 EmitCError 折回旧公开错误类型。
+# 最近一次运行测试时间: 2026-04-22 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-22 00:00:00 +0800
+# 功能说明: 验证包根 `gen_kernel` 继续把 `EmitCError` 折回旧公开错误类型。
 # 测试目的: 锁定 `gen_kernel(...)` 的兼容包装语义不变，避免 direct emit_c 错误类型泄漏。
 # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_converts_emit_c_error_to_gen_kernel_error
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/__init__.py
@@ -751,10 +752,46 @@ def test_gen_kernel_converts_emit_c_error_to_gen_kernel_error(monkeypatch: pytes
     def _boom(obj: object, ctx: EmitCContext) -> str:
         raise EmitCError("boom")
 
-    monkeypatch.setattr(gen_kernel_module, "emit_c", _boom)
+    monkeypatch.setattr(gen_kernel_entry_module, "emit_c", _boom)
 
     with pytest.raises(GenKernelError, match="boom"):
         gen_kernel(object(), _ctx())
+
+
+# GK-014C
+# 创建者: 小李飞刀
+# 最后一次更改: 小李飞刀
+# 最近一次运行测试时间: 2026-04-22 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-22 00:00:00 +0800
+# 功能说明: 验证包内 gen_kernel 兼容包装层直接委托 emit_c 并保留错误转换。
+# 测试目的: 锁定 `kernel_gen.dsl.gen_kernel.gen_kernel` 的实际 diff，避免只靠包根间接调用覆盖到旧实现。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_wrapper_module_delegates_emit_c_and_converts_errors
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_wrapper_module_delegates_emit_c_and_converts_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[str, str]] = []
+
+    def _fake_emit_c(obj: object, ctx: EmitCContext) -> str:
+        seen.append((type(obj).__name__, ctx.target))
+        return f"wrapped:{type(obj).__name__}:{ctx.target}"
+
+    monkeypatch.setattr(gen_kernel_entry_module, "emit_c", _fake_emit_c)
+
+    block = Block(arg_types=[])
+    block.add_op(func.ReturnOp())
+    func_type = FunctionType.from_lists([], [])
+    func_op = func.FuncOp("empty_kernel", func_type, Region(block))
+
+    assert gen_kernel_entry_module.gen_kernel(func_op, _ctx()) == "wrapped:FuncOp:cpu"
+    assert seen == [("FuncOp", "cpu")]
+
+    def _boom(obj: object, ctx: EmitCContext) -> str:
+        raise EmitCError("boom")
+
+    monkeypatch.setattr(gen_kernel_entry_module, "emit_c", _boom)
+    with pytest.raises(GenKernelError, match="boom"):
+        gen_kernel_entry_module.gen_kernel(func_op, _ctx())
 
 
 # GK-014
@@ -800,6 +837,7 @@ def test_gen_kernel_is_the_package_public_entry() -> None:
     assert namespace["emit_c"] is emit_c
     assert namespace["emit_c_op"] is emit_c_op
     assert namespace["emit_c_value"] is emit_c_value
+    assert gen_kernel_module.gen_kernel is gen_kernel_entry_module.gen_kernel
     assert "gen_signature" not in public_names
     assert "gen_body" not in public_names
     assert emit_context_module.EmitCContext is EmitCContext
