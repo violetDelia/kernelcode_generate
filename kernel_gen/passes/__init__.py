@@ -5,6 +5,8 @@
 
 功能说明:
 - 暴露 Pass 管理相关实现。
+- 暴露 `inline` 的公开入口。
+- 暴露 `attach-arch-information` 的公开入口。
 - 暴露 `buffer-results-to-out-params` 的公开入口。
 - 暴露 `decompass` 专题 pass 的根路径入口。
 - 暴露 `outline-device-kernel` 的公开入口。
@@ -20,6 +22,10 @@
 - from kernel_gen.passes import BufferResultsToOutParamsPass, DecompassPass
 - buffer_pass = BufferResultsToOutParamsPass()
 - decompass_pass = DecompassPass()
+- from kernel_gen.passes import InlinePass
+- inline_pass = InlinePass()
+- from kernel_gen.passes import AttachArchInformationPass
+- attach_pass = AttachArchInformationPass(target="npu_demo")
 - from kernel_gen.passes import OutlineDeviceKernelPass
 - outline_pass = OutlineDeviceKernelPass()
 - from kernel_gen.passes import TileAnalysisPass
@@ -33,12 +39,16 @@
 关联文件:
 - spec:
   - spec/pass/pass_manager.md
+  - spec/pass/inline.md
+  - spec/pass/attach_arch_information.md
   - spec/pass/lowering/buffer_results_to_out_params.md
   - spec/pass/decompass.md
   - spec/pass/outline_device_kernel.md
   - spec/pass/symbol_loop_hoist.md
 - test:
   - test/pass/test_pass_manager.py
+  - test/pass/test_inline.py
+  - test/pass/test_attach_arch_information.py
   - test/pass/test_buffer_results_to_out_params.py
   - test/pass/decompass/test_softmax.py
   - test/pass/outline_device_kernel/test_outline_device_kernel.py
@@ -48,6 +58,8 @@
 - test/pass/test_symbol_loop_hoist.py
 - 功能实现:
   - kernel_gen/passes/pass_manager.py
+  - kernel_gen/passes/inline.py
+  - kernel_gen/passes/attach_arch_information.py
   - kernel_gen/passes/buffer_results_to_out_params.py
   - kernel_gen/passes/decompass.py
   - kernel_gen/passes/outline_device_kernel.py
@@ -61,7 +73,9 @@ from .buffer_results_to_out_params import (
     BufferResultsToOutParamsError,
     BufferResultsToOutParamsPass,
 )
+from .attach_arch_information import AttachArchInformationError, AttachArchInformationPass
 from .decompass import DecompassError, DecompassPass, register_decompass_rewrite
+from .inline import InlineError, InlinePass
 from .outline_device_kernel import OutlineDeviceKernelError, OutlineDeviceKernelPass
 from .lowering.tile_analysis import TileAnalysisPass
 from .lowering.tile_elewise import TileElewisePass
@@ -72,6 +86,10 @@ from .symbol_loop_hoist import SymbolLoopHoistError, SymbolLoopHoistPass
 __all__ = [
     "Pass",
     "PassManager",
+    "InlinePass",
+    "InlineError",
+    "AttachArchInformationPass",
+    "AttachArchInformationError",
     "BufferResultsToOutParamsPass",
     "BufferResultsToOutParamsError",
     "DecompassPass",

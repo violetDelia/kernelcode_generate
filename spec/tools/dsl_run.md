@@ -39,6 +39,7 @@
 - `DslRunError` 继承 `ValueError`，用于稳定收口公开失败短语。
 - `DslRunResult.runtime_args` 必须保持为 tuple。
 - `dsl_run` 会根据 `emitcconfig.target` 决定源码生成与执行目标，不做跨 target 的自动猜测。
+- 当 `emitcconfig.target == "npu_demo"` 时，lowered module 必须包含且仅包含一个带 `arch.launch` 的 wrapper func；否则必须显式失败，不得回退到首个普通 `func.func`。
 - lowering 链路可能残留透明的 `builtin.unrealized_conversion_cast`，工具层代码生成会自动吞掉这一层包装。
 - 需要 `lower-dma-memory-hierarchy` 的 pipeline 依赖当前 target 提供 `sm_memory_size` 与 `lm_memory_size`。
 

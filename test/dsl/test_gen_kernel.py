@@ -174,7 +174,7 @@ def _make_npu_demo_add_barrier_module(
     callee_name: str | None = None,
     callee_attr: SymbolRefAttr | None = None,
     block_extent_expr: str = "1",
-    thread_extent_expr: str = "4",
+    thread_extent_expr: str = "1",
     subthread_extent_expr: str = "1",
     barrier_scope: str = "block",
     barrier_visibility_names: tuple[str, ...] = ("tsm", "tlm"),
@@ -231,7 +231,7 @@ def _make_npu_demo_add_barrier_module(
     barrier0 = ArchBarrierOp(ArchScopeAttr.from_name(barrier_scope), barrier_visibility)
     add = NnAddOp(lhs_tsm.result, rhs_tsm.result, tlm_tile_type, NnMemorySpaceAttr.from_name(tlm_space))
     barrier1 = ArchBarrierOp(ArchScopeAttr.from_name(barrier_scope), barrier_visibility)
-    deslice = DmaDesliceOp(body_block.args[3], add.result, [thread_offset.result], [size.result], [stride.result], gm_type)
+    deslice = DmaDesliceOp(add.result, body_block.args[3], [thread_offset.result], [size.result], [stride.result], gm_type)
     body_block.add_ops(
         [
             thread_offset,
@@ -2255,7 +2255,7 @@ def test_gen_kernel_emits_tile_elewise_cpu_source_for_elementwise_and_broadcast(
 # 最近一次运行测试时间: 2026-04-06 12:40:00 +0800
 # 最近一次运行成功时间: 2026-04-06 12:40:00 +0800
 # 功能说明: 验证 `target=\"npu_demo\"` 的受控 module 输入可生成 wrapper + body 双函数源码，并保留 barrier 管线。
-# 测试目的: 让 gate `-k 'npu_demo and barrier'` 命中真实正例，锁定 `launch<1, 4, 1>`、双 barrier 与固定 body 顺序。
+# 测试目的: 让 gate `-k 'npu_demo and barrier'` 命中真实正例，锁定 `launch<1, 1, 1>`、双 barrier 与固定 body 顺序。
 # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
@@ -2280,7 +2280,7 @@ def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body(tlm_space: st
         "const Memory<MemorySpace::GM, float>& rhs, Memory<MemorySpace::GM, float>& out)"
         in source
     )
-    assert "npu_demo::launch<1, 4, 1>(add_barrier_body, lhs, rhs, out);" in source
+    assert "npu_demo::launch<1, 1, 1>(add_barrier_body, lhs, rhs, out);" in source
     assert source.count("ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);") == 2
     assert source.index("long long tid = ctx.thread_id();") < source.index(
         "Memory<MemorySpace::TSM, float> tsm = ctx.get_dynamic_memory<MemorySpace::TSM, float>();"
@@ -2375,7 +2375,7 @@ def test_gen_kernel_rejects_npu_demo_barrier_wrapper_missing_body_symbol() -> No
         pytest.param(
             _make_npu_demo_add_barrier_module(include_wrapper=False),
             _npu_ctx(),
-            r"must contain exactly one body func and one wrapper func",
+            r"must contain exactly one wrapper func with arch\.launch",
             id="func-count-not-two",
         ),
         pytest.param(
@@ -2399,8 +2399,8 @@ def test_gen_kernel_rejects_npu_demo_barrier_wrapper_missing_body_symbol() -> No
         pytest.param(
             _make_npu_demo_add_barrier_module(thread_extent_expr="8"),
             _npu_ctx(),
-            r"must use npu_demo::launch<1, 4, 1>; got thread=8",
-            id="extent-not-1-4-1",
+            r"must use npu_demo::launch<1, 1, 1>; got block=1, thread=8, subthread=1",
+            id="extent-not-1-1-1",
         ),
         pytest.param(
             _make_npu_demo_add_barrier_module(barrier_scope="thread"),

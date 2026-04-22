@@ -18,9 +18,11 @@
 
 - Pass 管理与排序：[`spec/pass/pass_manager.md`](../../../spec/pass/pass_manager.md)
 - 注册表：[`spec/pass/registry.md`](../../../spec/pass/registry.md)
+- `inline` 公开入口：[`spec/pass/inline.md`](../../../spec/pass/inline.md)
 - `decompass` 公开入口：[`spec/pass/decompass.md`](../../../spec/pass/decompass.md)
 - `nn` lowering：[`spec/pass/lowering/nn_lowering.md`](../../../spec/pass/lowering/nn_lowering.md)
 - `symbol-loop-hoist`：[`spec/pass/symbol_loop_hoist.md`](../../../spec/pass/symbol_loop_hoist.md)
+- `attach-arch-information` 公开入口：[`spec/pass/attach_arch_information.md`](../../../spec/pass/attach_arch_information.md)
 - `outline-device-kernel` 公开入口：[`spec/pass/outline_device_kernel.md`](../../../spec/pass/outline_device_kernel.md)
 
 ## 术语
@@ -43,20 +45,21 @@
 
 - builder 必须返回 `PassManager`。
 - builder 必须通过 `register_pipeline("npu-demo-lowering")` 注册。
-- builder 不接受 `options`；`only-kernel`、`only_kernel` 或其他选项都必须显式失败。
+- builder 允许 `options={"target": "npu_demo"}`，空字典与 `None` 表示默认 target；`only-kernel`、`only_kernel` 或其他选项都必须显式失败。
 - 公开顺序必须固定为：
-  1. `inline`
+  1. `InlinePass`
   2. `DecompassPass`
   3. `NnLoweringPass`
   4. `SymbolLoopHoistPass`
-  5. `attach-arch-information`
+  5. `AttachArchInformationPass`
   6. `OutlineDeviceKernelPass`
 - 该 pipeline 不包含 `tile`、`buffer-results-to-out-params` 或 `lower-dma-memory-hierarchy`。
 - 若输入 module 中不存在 `symbol.for`，`SymbolLoopHoistPass` 必须保持 no-op。
+- builder 会把默认 `target` 收口为 `npu_demo`。
 
 ## 公开接口
 
-### `build_npu_demo_lowering_pipeline() -> PassManager`
+### `build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> PassManager`
 
 功能说明：
 
@@ -64,14 +67,14 @@
 
 参数说明：
 
-- 无参数。
+- `options (dict[str, str] | None)`：可选选项字典；当前允许 `{"target": "npu_demo"}`，空字典与 `None` 表示使用默认 target。
 
 使用示例：
 
 ```python
 from kernel_gen.passes.pipeline import build_npu_demo_lowering_pipeline
 
-pm = build_npu_demo_lowering_pipeline()
+pm = build_npu_demo_lowering_pipeline({"target": "npu_demo"})
 module = pm.run(module)
 ```
 

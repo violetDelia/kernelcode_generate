@@ -62,6 +62,7 @@ _INT_TYPE_PATTERN = re.compile(
 _FLOAT_TYPE_PATTERN = re.compile(
     r"^(?:const\s+)?(?P<type>float|double)(?:\s*&)?\s+\w+$"
 )
+_KERNEL_CONTEXT_TYPE_PATTERN = re.compile(r"^(?:npu_demo::)?KernelContext\s*&\s+\w+$")
 _MEMORY_TYPE_PATTERN = re.compile(
     r"^(?:const\s+)?Memory<\s*(?P<space>[^,\s>]+)\s*,\s*(?P<dtype>[^>\s]+)\s*>\s*&\s+\w+$"
 )
@@ -152,6 +153,8 @@ def _parse_param_spec(param_text: str) -> _ParamSpec | None:
     float_match = _FLOAT_TYPE_PATTERN.match(normalized)
     if float_match is not None:
         return _ParamSpec(kind="float", ctype=float_match.group("type"))
+    if _KERNEL_CONTEXT_TYPE_PATTERN.match(normalized):
+        return _ParamSpec(kind="kernel_context", ctype="npu_demo::KernelContext")
     return None
 
 
@@ -211,7 +214,8 @@ def _build_runtime_entry_shim_source(
 
     功能说明:
     - 生成稳定的 C ABI 入口：`extern "C" int <entry_point>(...)`。
-    - 把 `ordered_args` 映射为函数形参并执行真实调用。
+    - 把 `ordered_args` 映射为函数形参并执行真实调用；若首参是 `npu_demo::KernelContext&`，
+      则自动构造默认上下文并把它作为第一个实参传入 body。
 
     使用示例:
     - _build_runtime_entry_shim_source(function="add_kernel", entry_point="kg_execute_entry", params=(...))
@@ -222,6 +226,7 @@ def _build_runtime_entry_shim_source(
     - 功能实现: kernel_gen/execute_engine/entry_shim_builder.py
     """
 
+    runtime_params = [spec for spec in params if spec.kind != "kernel_context"]
     lines: list[str] = [
         f"// runtime entry shim for {function} as {entry_point}",
         "enum KgArgKind : int {",
@@ -242,50 +247,61 @@ def _build_runtime_entry_shim_source(
         "  if (ordered_args == nullptr) {",
         "    return -1;",
         "  }",
-        f"  if (arg_count != {len(params)}ULL) {{",
+        f"  if (arg_count != {len(runtime_params)}ULL) {{",
         "    return -1;",
         "  }",
     ]
-    for idx, spec in enumerate(params):
+    call_args: list[str] = []
+    runtime_arg_index = 0
+    for spec in params:
+        if spec.kind == "kernel_context":
+            lines.append("  npu_demo::KernelContext ctx;")
+            call_args.append("ctx")
+            continue
+        runtime_idx = runtime_arg_index
+        runtime_arg_index += 1
         if spec.kind == "memory":
             lines.extend(
                 [
-                    f"  if (ordered_args[{idx}].kind != KG_ARG_MEMORY) {{",
+                    f"  if (ordered_args[{runtime_idx}].kind != KG_ARG_MEMORY) {{",
                     "    return -1;",
                     "  }",
-                    f"  if (ordered_args[{idx}].data == nullptr || ordered_args[{idx}].shape == nullptr || ordered_args[{idx}].stride == nullptr) {{",
+                    f"  if (ordered_args[{runtime_idx}].data == nullptr || ordered_args[{runtime_idx}].shape == nullptr || ordered_args[{runtime_idx}].stride == nullptr) {{",
                     "    return -1;",
                     "  }",
-                    f"  Memory<{spec.memory_space}, {spec.ctype}> arg{idx}(",
-                    f"      reinterpret_cast<{spec.ctype}*>(ordered_args[{idx}].data),",
-                    f"      ordered_args[{idx}].shape,",
-                    f"      ordered_args[{idx}].stride,",
-                    f"      ordered_args[{idx}].rank);",
+                    f"  Memory<{spec.memory_space}, {spec.ctype}> arg{runtime_idx}(",
+                    f"      reinterpret_cast<{spec.ctype}*>(ordered_args[{runtime_idx}].data),",
+                    f"      ordered_args[{runtime_idx}].shape,",
+                    f"      ordered_args[{runtime_idx}].stride,",
+                    f"      ordered_args[{runtime_idx}].rank);",
                 ]
             )
+            call_args.append(f"arg{runtime_idx}")
             continue
         if spec.kind == "int":
             lines.extend(
                 [
-                    f"  if (ordered_args[{idx}].kind != KG_ARG_INT) {{",
+                    f"  if (ordered_args[{runtime_idx}].kind != KG_ARG_INT) {{",
                     "    return -1;",
                     "  }",
-                    f"  {spec.ctype} arg{idx} = static_cast<{spec.ctype}>(ordered_args[{idx}].int_value);",
+                    f"  {spec.ctype} arg{runtime_idx} = static_cast<{spec.ctype}>(ordered_args[{runtime_idx}].int_value);",
                 ]
             )
+            call_args.append(f"arg{runtime_idx}")
             continue
         lines.extend(
             [
-                f"  if (ordered_args[{idx}].kind != KG_ARG_FLOAT) {{",
+                f"  if (ordered_args[{runtime_idx}].kind != KG_ARG_FLOAT) {{",
                 "    return -1;",
                 "  }",
-                f"  {spec.ctype} arg{idx} = static_cast<{spec.ctype}>(ordered_args[{idx}].float_value);",
+                f"  {spec.ctype} arg{runtime_idx} = static_cast<{spec.ctype}>(ordered_args[{runtime_idx}].float_value);",
             ]
         )
-    call_args = ", ".join(f"arg{idx}" for idx in range(len(params)))
+        call_args.append(f"arg{runtime_idx}")
+    call_args_text = ", ".join(call_args)
     lines.extend(
         [
-            f"  {function}({call_args});",
+            f"  {function}({call_args_text});",
             "  return 0;",
             "}",
             "",
@@ -327,6 +343,7 @@ def build_entry_shim_source(*, function: str, entry_point: str, source: str | No
 
     功能说明:
     - 可解析参数时生成真实参数绑定 shim，用于 `ExecutionEngine.execute` 的真实调用。
+    - body 函数若以 `npu_demo::KernelContext&` 作为首参，会被桥接为默认构造上下文 + 真实 runtime 参数。
     - 参数不可解析时回退最小占位 shim，保持历史编译路径兼容。
 
     使用示例:

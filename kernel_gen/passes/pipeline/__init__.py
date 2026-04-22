@@ -12,7 +12,7 @@
 -     build_npu_demo_lowering_pipeline,
 - )
 - pm = build_default_lowering_pipeline()
-- pm = build_npu_demo_lowering_pipeline()
+- pm = build_npu_demo_lowering_pipeline({"target": "npu_demo"})
 
 关联文件:
 - spec: [spec/pass/pipeline/README.md](spec/pass/pipeline/README.md)

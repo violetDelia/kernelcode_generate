@@ -47,12 +47,14 @@
 - 注册表不解析 `options` 语义；仅负责把 `options` 传给 pass / pipeline 构造入口。
 - 内置 pipeline 模块放在 `kernel_gen/passes/pipeline`；`load_builtin_passes()` 负责导入这些模块以触发注册。
 - 当前内置 pipeline 至少包含 `default-lowering` 与 `npu-demo-lowering` 两个公开 builder。
-- `npu-demo-lowering` 公开 builder 不接受 `options`；`only-kernel` / `only_kernel` 之类选项必须显式失败，不能把 host wrapper 与 device body 的 outline 流程裁成仅 kernel 形态。
+- `npu-demo-lowering` 公开 builder 支持 `options={"target": "npu_demo"}`；`only-kernel` / `only_kernel` 之类选项必须显式失败，不能把 host wrapper 与 device body 的 outline 流程裁成仅 kernel 形态。
 - registry 只负责注册与查询，不承载具体 pipeline builder 实现。
 - 重复注册同名 pass 或 pipeline 必须立即失败，不得覆盖旧项。
 - 为便于工具与测试编写最小用例，仓库内置 pass 至少应包含：
   - `no-op`：恒等 pass（对输入 module 不做任何改写），且必须满足“可构造”要求（`pass_cls()` 可成功执行）。
-  - `tile-analysis` / `tile-elewise` / `tile-reduce`：tile family 的公开 `ModulePass` 名称，供 pytest 与工具层统一解析。
+  - `inline`：module 内 helper 展平 pass，供 `npu-demo-lowering` 前置收口。
+  - `attach-arch-information`：把 target registry 的 launch extent 写回入口 `func.func`。
+  - `tile-analysis` / `tile-elewise` / `tile-reduce`：tile family 的公开 `ModulePass` 名称，供 expectation、pytest 与工具层统一解析。
 - tuning pass `launch-kernel-cost-func` 属于 standalone pass，必须通过 pass registry 显式启用；不得自动进入任何默认 pipeline。
 - `launch-kernel-cost-func` 接受 `options={"cost_kind": "compute" | "memory"}`；非法 `cost_kind` 必须由 pass 构造入口或 pass 本身显式失败，registry 不吞掉该错误。
 - registry 不解析 `options` 的语义；`options` 仅按字典透传给 pass 或 pipeline 构造入口。
@@ -161,6 +163,8 @@ from kernel_gen.passes.registry import load_builtin_passes, build_registered_pas
 load_builtin_passes()
 pass_obj = build_registered_pass("tile-analysis")
 pass_obj = build_registered_pass("tile-reduce")
+inline_pass = build_registered_pass("inline")
+attach_pass = build_registered_pass("attach-arch-information")
 cost_pass = build_registered_pass("launch-kernel-cost-func", {"cost_kind": "compute"})
 ```
 
@@ -200,6 +204,7 @@ from kernel_gen.passes.registry import load_builtin_passes, build_registered_pip
 load_builtin_passes()
 pm = build_registered_pipeline("default-lowering")
 pm = build_registered_pipeline("npu-demo-lowering")
+pm = build_registered_pipeline("npu-demo-lowering", {"target": "npu_demo"})
 pm = build_registered_pipeline("default-lowering", {"bufferize": "true"})
 ```
 
@@ -209,6 +214,7 @@ pm = build_registered_pipeline("default-lowering", {"bufferize": "true"})
 - 工具侧（如 ircheck）仅通过该接口解析 pipeline 名称，不直接 import pipeline builder。
 - `options` 为空或 `None` 时，调用 builder 的无参路径。
 - `options` 非空时，builder 必须接受 `options` 参数；否则必须报告“不接受选项”。
+- `npu-demo-lowering` builder 支持 `options={"target": "npu_demo"}`；其他未知选项必须显式失败。
 - builder 返回值必须为 `PassManager`；否则必须视为失败。
 
 返回与限制：

@@ -481,6 +481,42 @@ def test_build_registered_decompass_pass() -> None:
 
 
 # TC-REGISTRY-007H
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证内置加载后 inline 通过 registry 返回 ModulePass。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_inline_pass
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/pass/test_pass_registry.py
+def test_build_registered_inline_pass() -> None:
+    load_builtin_passes()
+
+    pass_obj = build_registered_pass("inline")
+
+    assert isinstance(pass_obj, ModulePass)
+    assert pass_obj.name == "inline"
+    assert type(pass_obj).__name__ == "InlinePass"
+
+
+# TC-REGISTRY-007I
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证内置加载后 attach-arch-information 通过 registry 返回 ModulePass。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_attach_arch_information_pass
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/pass/test_pass_registry.py
+def test_build_registered_attach_arch_information_pass() -> None:
+    load_builtin_passes()
+
+    pass_obj = build_registered_pass("attach-arch-information")
+
+    assert isinstance(pass_obj, ModulePass)
+    assert pass_obj.name == "attach-arch-information"
+    assert type(pass_obj).__name__ == "AttachArchInformationPass"
+
+
+# TC-REGISTRY-007J
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚
 # 功能说明: 验证内置 pipeline 加载后可通过稳定名称构造 npu-demo-lowering。
@@ -491,7 +527,7 @@ def test_build_registered_decompass_pass() -> None:
 def test_build_registered_npu_demo_lowering_pipeline() -> None:
     load_builtin_passes()
 
-    pm = build_registered_pipeline("npu-demo-lowering")
+    pm = build_registered_pipeline("npu-demo-lowering", {"target": "npu_demo"})
 
     assert isinstance(pm, PassManager)
     assert pm.name == "npu-demo-lowering"
@@ -511,13 +547,15 @@ def test_load_builtin_passes_is_idempotent() -> None:
     load_builtin_passes()
     load_builtin_passes()
     assert "no-op" in list_registered_passes()
+    assert "inline" in list_registered_passes()
+    assert "attach-arch-information" in list_registered_passes()
     assert "no-op-pipeline" in list_registered_pipelines()
     assert "default-lowering" in list_registered_pipelines()
     assert "npu-demo-lowering" in list_registered_pipelines()
     pm = build_registered_pipeline("default-lowering")
     assert isinstance(pm, PassManager)
     assert pm.name == "default-lowering"
-    npu_pm = build_registered_pipeline("npu-demo-lowering")
+    npu_pm = build_registered_pipeline("npu-demo-lowering", {"target": "npu_demo"})
     assert isinstance(npu_pm, PassManager)
     assert npu_pm.name == "npu-demo-lowering"
 
@@ -541,9 +579,42 @@ def test_load_builtin_passes_after_reset_registers_default_lowering() -> None:
     pm = build_registered_pipeline("default-lowering")
     assert isinstance(pm, PassManager)
     assert pm.name == "default-lowering"
-    npu_pm = build_registered_pipeline("npu-demo-lowering")
+    npu_pm = build_registered_pipeline("npu-demo-lowering", {"target": "npu_demo"})
     assert isinstance(npu_pm, PassManager)
     assert npu_pm.name == "npu-demo-lowering"
+
+
+# TC-REGISTRY-008B
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 npu-demo-lowering 接受 target 选项。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_npu_demo_lowering_pipeline_with_options
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/pass/test_pass_registry.py
+def test_build_registered_npu_demo_lowering_pipeline_with_options() -> None:
+    load_builtin_passes()
+
+    pm = build_registered_pipeline("npu-demo-lowering", {"target": "npu_demo"})
+    assert isinstance(pm, PassManager)
+    assert pm.name == "npu-demo-lowering"
+
+
+# TC-REGISTRY-008C
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 npu-demo-lowering 的未知选项会显式失败。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_npu_demo_lowering_pipeline_rejects_unknown_option
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/pass/test_pass_registry.py
+def test_build_registered_npu_demo_lowering_pipeline_rejects_unknown_option() -> None:
+    load_builtin_passes()
+
+    with pytest.raises(
+        PassRegistryError, match=r"^PassRegistryError: pipeline 'npu-demo-lowering' option error$"
+    ):
+        build_registered_pipeline("npu-demo-lowering", {"only-kernel": "true"})
 
 
 # TC-REGISTRY-009

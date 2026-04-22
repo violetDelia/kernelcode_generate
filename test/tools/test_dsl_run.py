@@ -1,7 +1,7 @@
 """dsl_run tests.
 
 创建者: 朽木露琪亚
-最后一次更改: 小李飞刀
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 `dsl_run(func, real_args, pipeline, emitcconfig)` 的正向执行、错误合同与结果模型口径。
@@ -24,11 +24,15 @@
 from __future__ import annotations
 
 import re
+import importlib
 import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
+from xdsl.dialects import func
+from xdsl.dialects.builtin import FunctionType, ModuleOp
+from xdsl.ir import Block, Region
 
 
 def _find_expectation_root(start: Path) -> Path:
@@ -91,6 +95,9 @@ from kernel_gen.dsl.gen_kernel import EmitCContext
 from kernel_gen.passes.pass_manager import PassManager
 from kernel_gen.passes.registry import build_registered_pipeline, load_builtin_passes
 from kernel_gen.tools.dsl_run import DslRunError, dsl_run
+from kernel_gen.tools.dsl_run import NPU_DEMO_WRAPPER_ERROR
+
+dsl_run_module = importlib.import_module("kernel_gen.tools.dsl_run")
 
 try:
     import torch
@@ -104,7 +111,7 @@ def _build_npu_demo_lowering_pipeline() -> PassManager:
     最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 显式加载 builtin passes 后，再通过 registry 构造 `npu-demo-lowering` pipeline。
+    - 显式加载 builtin passes 后，再通过 registry 构造 `npu-demo-lowering` pipeline，并显式传入 `{"target": "npu_demo"}`。
     - 便于测试同时覆盖字符串 pipeline 与现成 `PassManager` 两条入口。
 
     使用示例:
@@ -117,9 +124,34 @@ def _build_npu_demo_lowering_pipeline() -> PassManager:
     """
 
     load_builtin_passes()
-    pipeline = build_registered_pipeline("npu-demo-lowering")
+    pipeline = build_registered_pipeline("npu-demo-lowering", {"target": "npu_demo"})
     assert isinstance(pipeline, PassManager)
     return pipeline
+
+
+def _make_body_only_module() -> ModuleOp:
+    """构造一个只有普通 `func.func` 的 lowered module。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 用于验证 `npu_demo` 在缺少唯一 `arch.launch` wrapper 时必须显式失败。
+    - 该 module 不含任何 wrapper 语义，便于锁定“不得回退到首个普通 func.func”的机械边界。
+
+    使用示例:
+    - module = _make_body_only_module()
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+
+    block = Block()
+    block.add_op(func.ReturnOp())
+    func_op = func.FuncOp("body_kernel", FunctionType.from_lists([], []), Region(block))
+    return ModuleOp([func_op])
 
 
 def _assert_result_contract(
@@ -418,6 +450,38 @@ def test_dsl_run_supports_tiled_matmul_kernel_on_npu_demo() -> None:
     assert out.dtype == torch.float32
     assert out.shape == (32, 32)
     assert torch.allclose(out, expected, atol=1e-5, rtol=1e-5)
+
+
+# TC-DSL-RUN-003G
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 测试目的: 锁定 npu_demo lowered module 在 wrapper 不唯一/缺失时必须显式失败，避免静默回退到首个普通 func.func。
+# 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
+# 对应 spec 文件路径: spec/tools/dsl_run.md
+# 对应测试文件路径: test/tools/test_dsl_run.py
+def test_dsl_run_rejects_npu_demo_module_without_unique_wrapper(monkeypatch: pytest.MonkeyPatch) -> None:
+    lowered_module = _make_body_only_module()
+
+    def _unexpected_gen_kernel(*args: object, **kwargs: object) -> str:
+        pytest.fail("npu_demo lowered module should not fall back to the first normal func.func")
+
+    monkeypatch.setattr(dsl_run_module, "mlir_gen", lambda *args, **kwargs: lowered_module)
+    monkeypatch.setattr(dsl_run_module.PassManager, "run", lambda self, module: lowered_module)
+    monkeypatch.setattr(dsl_run_module, "gen_kernel", _unexpected_gen_kernel)
+
+    out = torch.empty((6,), dtype=torch.int32)
+    lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
+    rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
+
+    with pytest.raises(DslRunError, match=re.escape(NPU_DEMO_WRAPPER_ERROR)):
+        dsl_run(
+            store_add_kernel,
+            (out, lhs, rhs),
+            PassManager(),
+            EmitCContext(target="npu_demo"),
+        )
 
 
 # TC-DSL-RUN-004

@@ -112,6 +112,7 @@ PIPELINE_NAME_ERROR = "DslRunUnknownPipeline: unknown pipeline 'missing-pipeline
 PIPELINE_TYPE_ERROR = "DslRunInvalidPipeline: pipeline must be str or PassManager"
 REAL_ARG_TYPE_ERROR = "DslRunUnsupportedRealArg: real_args only supports torch.Tensor and numpy.ndarray"
 ARITY_ERROR = "DslRunArityMismatch: real_args count does not match function signature"
+NPU_DEMO_WRAPPER_ERROR = "DslRunInternalError: lowered npu_demo module must contain exactly one wrapper func with arch.launch"
 
 
 def _runtime_module_name(value: object) -> str:
@@ -311,6 +312,31 @@ def _find_first_func(module: ModuleOp) -> func.FuncOp:
     raise DslRunError("DslRunInternalError: lowered module does not contain func.func")
 
 
+def _find_func_by_sym_name(module: ModuleOp, sym_name: str) -> func.FuncOp:
+    """按符号名在 lowered module 中查找 `func.func`。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 用于 npu_demo outline wrapper 场景，把 `arch.launch` 指向的 device body 精确找回。
+    - 若 module 中不存在对应符号名的函数，则抛出统一内部错误，避免悄悄回退到错误的 IR 视图。
+
+    使用示例:
+    - body_func = _find_func_by_sym_name(module, "matmul_kernel_device")
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+
+    for op in module.ops:
+        if isinstance(op, func.FuncOp) and op.sym_name.data == sym_name:
+            return op
+    raise DslRunError(f"DslRunInternalError: lowered module does not contain func.func @{sym_name}")
+
+
 def _select_source_and_entry(module: ModuleOp, emitcconfig: EmitCContext) -> tuple[str, str, func.FuncOp]:
     """根据 lowered module 选择源码生成入口与执行入口名。
 
@@ -319,8 +345,10 @@ def _select_source_and_entry(module: ModuleOp, emitcconfig: EmitCContext) -> tup
 
     功能说明:
     - 单函数 module 时，直接按该函数生成源码并以该函数名作为执行入口。
-    - `npu_demo` 的 launch 双函数 module 时，优先按 module 级别生成源码，并把带 `arch.launch` 的 wrapper 作为入口。
-    - 其余情形退回到首个 `func.func` 的源码生成入口，保证常见单函数和 expectation 场景稳定可执行。
+    - `npu_demo` 的 wrapper module 若存在唯一带 `arch.launch` 的 wrapper，则按 module 级别生成源码，
+      但返回 wrapper 所指向的 body func 作为 `DslRunResult.func_op` 与执行入口，确保结果对象和真实 lowering IR 对齐。
+    - `npu_demo` 若 wrapper 候选不存在或不唯一，则显式失败，不退回到首个普通 `func.func`。
+    - 其余 target 退回到首个 `func.func` 的源码生成入口，保证常见单函数和 expectation 场景稳定可执行。
 
     使用示例:
     - source, entry_name, func_op = _select_source_and_entry(module, EmitCContext(target="npu_demo"))
@@ -333,18 +361,21 @@ def _select_source_and_entry(module: ModuleOp, emitcconfig: EmitCContext) -> tup
 
     func_ops = [op for op in module.ops if isinstance(op, func.FuncOp)]
     root_func = _find_first_func(module)
-    if emitcconfig.target == "npu_demo" and len(func_ops) == 2:
-        wrapper_candidates = [func_op for func_op in func_ops if any(item.name == "arch.launch" for item in func_op.body.block.ops)]
-        if len(wrapper_candidates) == 1:
-            try:
-                return gen_kernel(module, emitcconfig), wrapper_candidates[0].sym_name.data, wrapper_candidates[0]
-            except Exception:
-                pass
+    if emitcconfig.target == "npu_demo":
+        wrapper_candidates = [
+            func_op
+            for func_op in func_ops
+            if any(item.name == "arch.launch" for item in func_op.body.block.ops)
+        ]
+        if len(wrapper_candidates) != 1:
+            raise DslRunError(NPU_DEMO_WRAPPER_ERROR)
+        wrapper_func = wrapper_candidates[0]
+        wrapper_launch = next(item for item in wrapper_func.body.block.ops if item.name == "arch.launch")
+        body_func = _find_func_by_sym_name(module, wrapper_launch.callee.root_reference.data)
+        return gen_kernel(module, emitcconfig), body_func.sym_name.data, body_func
     try:
         return gen_kernel(root_func, emitcconfig), root_func.sym_name.data, root_func
     except Exception:
-        if emitcconfig.target == "npu_demo":
-            return gen_kernel(module, emitcconfig), root_func.sym_name.data, root_func
         raise
 
 

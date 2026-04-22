@@ -14,11 +14,15 @@
 - `功能实现`：
   - [`kernel_gen/passes/pass_manager.py`](../../kernel_gen/passes/pass_manager.py)
   - [`kernel_gen/passes/registry.py`](../../kernel_gen/passes/registry.py)
+  - [`kernel_gen/passes/inline.py`](../../kernel_gen/passes/inline.py)
+  - [`kernel_gen/passes/attach_arch_information.py`](../../kernel_gen/passes/attach_arch_information.py)
   - [`kernel_gen/passes/pipeline/default_lowering.py`](../../kernel_gen/passes/pipeline/default_lowering.py)
   - [`kernel_gen/passes/pipeline/npu_demo_lowering.py`](../../kernel_gen/passes/pipeline/npu_demo_lowering.py)
 - `test`：
   - [`test/pass/test_pass_manager.py`](../../test/pass/test_pass_manager.py)
   - [`test/pass/test_pass_registry.py`](../../test/pass/test_pass_registry.py)
+  - [`test/pass/test_inline.py`](../../test/pass/test_inline.py)
+  - [`test/pass/test_attach_arch_information.py`](../../test/pass/test_attach_arch_information.py)
   - [`test/pass/test_pipeline_default_lowering.py`](../../test/pass/test_pipeline_default_lowering.py)
   - [`test/pass/test_pipeline_npu_demo_lowering.py`](../../test/pass/test_pipeline_npu_demo_lowering.py)
 
@@ -37,6 +41,7 @@
 - 明确 pipeline 目录位置与默认 pipeline builder 的入口。
 - 说明 registry 是 pipeline 名字查询入口。
 - 说明 standalone pass 与默认 pipeline 的边界：`outline-device-kernel` 这类显式 opt-in pass 不自动进入 `default-lowering`。
+- 说明 `inline` 与 `attach-arch-information` 这类内置前置 pass 是 `npu-demo-lowering` 的 pipeline 组成部分，不要求调用方手工串接。
 - 说明 `npu-demo-lowering` 与默认 pipeline 的边界：`npu-demo-lowering` 是 `dsl_run` 的正向主合同，按 `inline -> decompass -> lower-nn -> symbol-loop-hoist -> attach-arch-information -> outline-device-kernel` 执行，并产出 host wrapper + device body，不把 `tile`、`buffer-results-to-out-params`、`lower-dma-memory-hierarchy` 混入其中。
 
 ## 限制与边界
@@ -115,13 +120,13 @@ result = manager.run(target)
 
 - `run` 返回最后一个 pass 的输出；无 pass 时返回输入。
 
-### `build_default_lowering_pipeline()` / `build_registered_pipeline(name)`
+### `build_default_lowering_pipeline()` / `build_npu_demo_lowering_pipeline(options=None)` / `build_registered_pipeline(name, options=None)`
 
 功能说明：
 
 - `build_default_lowering_pipeline()`：直接构造默认 lowering pipeline。
-- `build_npu_demo_lowering_pipeline()`：直接构造 `npu-demo-lowering` pipeline。
-- `build_registered_pipeline(name)`：通过 registry 名字查询构造 pipeline。
+- `build_npu_demo_lowering_pipeline(options=None)`：直接构造 `npu-demo-lowering` pipeline。
+- `build_registered_pipeline(name, options=None)`：通过 registry 名字查询构造 pipeline。
 
 参数说明：
 
@@ -139,7 +144,7 @@ module = pm.run(module)
 ```python
 from kernel_gen.passes.pipeline import build_npu_demo_lowering_pipeline
 
-pm = build_npu_demo_lowering_pipeline()
+pm = build_npu_demo_lowering_pipeline({"target": "npu_demo"})
 module = pm.run(module)
 ```
 
@@ -148,12 +153,14 @@ from kernel_gen.passes.registry import load_builtin_passes, build_registered_pip
 
 load_builtin_passes()
 pm = build_registered_pipeline("default-lowering")
+pm = build_registered_pipeline("npu-demo-lowering", {"target": "npu_demo"})
 module = pm.run(module)
 ```
 
 注意事项：
 
 - 通过 registry 查询前必须调用 `load_builtin_passes()`。
+- `npu-demo-lowering` 支持 `{"target": "npu_demo"}` 选项，其他未知选项必须显式失败。
 - 若调用方需要 host launch outline，必须显式构造 `build_registered_pass("outline-device-kernel")` 或直接实例化 `OutlineDeviceKernelPass`；`default-lowering` remains unchanged。
 
 返回与限制：

@@ -36,7 +36,7 @@
 - 明确支持：`f32/f64` 类型在 `target=cpu` 下映射为 `float/double`，用于 `Memory<MemorySpace::GM, float>/Memory<MemorySpace::GM, double>` 与 `float/double` 标量参数生成。
 - 冻结 `target=cpu` 的 rewrite-after-IR 合同：`gen_kernel(...)` 只接受已经经过 `BufferResultsToOutParamsPass` 的 lowered IR；默认 CPU 路径不再从旧 `memory return` ABI 隐式推导 `out`。
 - 明确 split-after-IR 的单函数 codegen 合同：目标源码仍为单个函数定义，tile 相关表达必须由 `tuner.param : !symbol.int<"...">` 与 `symbol.for` 承接。
-- 冻结 `target="npu_demo"` 的完整源码合同：`gen_kernel(target="npu_demo")` 必须支持“launch wrapper + body kernel”的受控 `builtin.module` 子集，并生成包含 **body 函数 + launch wrapper 函数** 的双函数源码；body 函数内必须生成 `ctx.barrier(...)`，wrapper 函数必须生成 `npu_demo::launch<1, 4, 1>(...)`；当受控 module 中包含 `dma.alloc` 时，body 还必须稳定发射 `npu_demo::alloc<Space, T>(shape, stride)` helper 调用。
+- 冻结 `target="npu_demo"` 的完整源码合同：`gen_kernel(target="npu_demo")` 必须支持“launch wrapper + body kernel”的受控 `builtin.module` 子集，并生成包含 **body 函数 + launch wrapper 函数** 的双函数源码；body 函数内必须生成 `ctx.barrier(...)`，wrapper 函数必须生成 `npu_demo::launch<1, 1, 1>(...)`；当受控 module 中包含 `dma.alloc` 时，body 还必须稳定发射 `npu_demo::alloc<Space, T>(shape, stride)` helper 调用。
 - 冻结 `target="npu_demo"` 生成源码的头部入口为 `#include "include/npu_demo/npu_demo.h"` 后紧跟 `using namespace npu_demo;`，并以“只编译”方式作为 compile gate 目标（`g++ -std=c++17 -I <repo> -c <source>`）。
 - 冻结 `target="npu_demo"` 的计算 helper 只允许消费 [`spec/include/api/Kernel.md`](../../spec/include/api/Kernel.md) 已声明的公共接口；不得继续依赖公开 `Nn` 层。
 - 支持单一非 `Memory` 标量返回生成函数返回值文本；`!symbol.int<"...">` 仍固定为 `target=cpu` 路径。
@@ -124,10 +124,10 @@ void add(Memory<MemorySpace::GM, int32_t>& arg0, const Memory<MemorySpace::GM, i
 }
 ```
 
-- `target="npu_demo"` 必须以受控 `builtin.module` 子集作为输入：module 内至少包含一个 body 函数与一个 wrapper 函数，wrapper 通过 `arch.launch<1, 4, 1>(@body, ...)`（或等价可机械识别的 launch 形态）调用 body。
+- `target="npu_demo"` 必须以受控 `builtin.module` 子集作为输入：module 内至少包含一个 body 函数与一个 wrapper 函数，wrapper 通过 `arch.launch<1, 1, 1>(@body, ...)`（或等价可机械识别的 launch 形态）调用 body。
 - `target="npu_demo"` 的目标输出必须包含 **两个 C++ 函数定义**，其中：
   - body 函数必须包含 `npu_demo::KernelContext& ctx` 作为首参，并按只读 `Memory` 输入 + 显式 `Memory` 输出参数顺序生成签名；
-  - wrapper 函数不包含 `KernelContext` 参数，负责调用 `npu_demo::launch<1, 4, 1>(body, ...)` 并透传其余参数。
+  - wrapper 函数不包含 `KernelContext` 参数，负责调用 `npu_demo::launch<1, 1, 1>(body, ...)` 并透传其余参数。
 - `target="npu_demo"` 的完整目标源码形态可接近以下形式：
 
 ```cpp
@@ -143,7 +143,7 @@ void add_barrier(
     const Memory<MemorySpace::GM, float>& lhs,
     const Memory<MemorySpace::GM, float>& rhs,
     Memory<MemorySpace::GM, float>& out) {
-    npu_demo::launch<1, 4, 1>(add_barrier_body, lhs, rhs, out);
+    npu_demo::launch<1, 1, 1>(add_barrier_body, lhs, rhs, out);
 }
 ```
 
@@ -176,9 +176,9 @@ cpu::add(arg1, v0, arg0);
 
 - 不允许从旧 `func.return %mem`、旧 `function_type.outputs` 或隐式 alias 回退到 `out = tmp`、`return tmp` 或其他 generic fallback。
 - `target="npu_demo"` 的受控 module 子集必须满足两项冻结点：
-  - wrapper 函数必须生成可机械识别的 `npu_demo::launch<1, 4, 1>(body, ...)` 调用；不得生成注释占位或缺失 wrapper。
+  - wrapper 函数必须生成可机械识别的 `npu_demo::launch<1, 1, 1>(body, ...)` 调用；不得生成注释占位或缺失 wrapper。
   - body 函数必须生成可机械识别的 `ctx.barrier(` 调用，且不得生成旧接口 `ctx.sync_threads(`。
-- `target="npu_demo"` 的受控 `builtin.module` 子集必须收口为“严格双函数”形态：module 内只允许出现 **一个 body 函数 + 一个 wrapper 函数**（及必要的 symbol/attr），不得夹带额外 `func.func` 或其他顶层 op；否则必须抛出 `GenKernelError`，禁止 silent fallback。
+- `target="npu_demo"` 的受控 `builtin.module` 子集必须收口为“至少一个 body 函数 + 一个 wrapper 函数”形态：module 内必须存在唯一 wrapper func（由唯一 `arch.launch` 识别）与唯一 body func，允许额外 helper `func.func` 通过通用函数发射输出；否则必须抛出 `GenKernelError`，禁止 silent fallback。
 - `target="npu_demo"` 必须显式拒绝“wrapper launch 指向不存在的 body 函数”的输入，并在错误消息中包含缺失 callee 的符号名（例如 `missing_body`）以便下游机械判断：
 
 ```text
@@ -465,7 +465,7 @@ npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out_tile, lhs_tile, rhs_ti
 - 验证 rewrite 后成功链路不再残留旧 `memory return` ABI；IR / 源码中都不再出现“返回 memory 再隐式推导 out”的路径。
 - 验证 half-rewritten IR 会被 `gen_kernel(...)` 显式拒绝。
 - 验证 rewrite 后的 lowered add 只通过黑盒 `gen_kernel(...)` 输出验证，不依赖内部 helper 或内部策略名。
-- 验证 `target="npu_demo"` 支持受控 `builtin.module` 子集输入，并生成 **body + wrapper** 两个函数定义；wrapper 必须包含 `npu_demo::launch<1, 4, 1>(...)`，body 必须包含 `npu_demo::KernelContext& ctx` 与 `ctx.barrier(...)`，且 `dma.alloc` 仍按 `npu_demo::alloc<Space, T>(shape, stride)` 形式发射。
+- 验证 `target="npu_demo"` 支持受控 `builtin.module` 子集输入，并生成 **body + wrapper** 两个函数定义；wrapper 必须包含 `npu_demo::launch<1, 1, 1>(...)`，body 必须包含 `npu_demo::KernelContext& ctx` 与 `ctx.barrier(...)`，且 `dma.alloc` 仍按 `npu_demo::alloc<Space, T>(shape, stride)` 形式发射。
 - 验证 `target="npu_demo"` 的 body 函数骨架必须包含 `ctx.thread_id()`、`ctx.thread_num()`、`ctx.get_dynamic_memory<...>()`，并保持 `npu_demo::view/npu_demo::slice/barrier/npu_demo::Kernel helper/barrier/npu_demo::deslice` 的固定顺序；不得回退到公开 `Nn` 别名、`.view<`、`load<`、`store<` 或表达式式 `auto tile = slice(source, ...)`，且不得生成旧接口 `ctx.sync_threads()`。
 - 验证非 `Memory` 标量返回的签名与函数体生成规则；其中 `!symbol.int<"...">` 仅允许 `target=cpu`。
 - 对 `conv_cpu_tiled_v1` 下游实现阶段，验证 `conv2d_img2col2d_tiled(...)` 生成源码包含固定 tile 常量、`cpu::img2col2d(...)`、局部 `col_buffer/acc_buffer`、`n/f/ho/wo` 分块循环与最终写回 `out`。
@@ -493,13 +493,13 @@ npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out_tile, lhs_tile, rhs_ti
 - GK-014：rewrite 后的逐元素加法 memory+const(i32) 形态在 cpu target 下可生成 `cpu::add(arg1, v0, arg0);` 函数体。（`test_gen_kernel_supports_lowered_nn_add_memory_const_on_cpu`）
 - GK-015：rewrite 后的逐元素加法 memory+symbol.int 形态在 cpu target 下可生成 `cpu::add(arg1, v0, arg0);` 函数体，并保留 `long long` 标量参数。（`test_gen_kernel_supports_lowered_nn_add_memory_symbol_on_cpu`）
 - GK-016：rewrite 后 `memory + scalar` mixed output 函数中，memory 走前置 `arg0`，scalar 继续返回。（`test_gen_kernel_accepts_rewritten_mixed_output_function`）
-- GK-017：`target="npu_demo"` 可消费受控 `builtin.module` 子集并生成双函数源码：`static` body（首参 `npu_demo::KernelContext& ctx`）+ 非 `static` wrapper；wrapper 必须调用 `npu_demo::launch<1, 4, 1>(body, ...)`。（`test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body`）
+- GK-017：`target="npu_demo"` 可消费受控 `builtin.module` 子集并生成双函数源码：`static` body（首参 `npu_demo::KernelContext& ctx`）+ 非 `static` wrapper；wrapper 必须调用 `npu_demo::launch<1, 1, 1>(body, ...)`。（`test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body`）
 - GK-017A：`target="npu_demo"` 的受控 `builtin.module` 若仅包含 `dma.alloc`，必须生成 `npu_demo::alloc<Space, T>(shape, stride)` helper 语句，静态与动态 shape 均保持同一命名空间与模板口径。（`test_gen_kernel_emits_npu_demo_dma_alloc_module`）
 - GK-018：`target="npu_demo"` 的 body 函数可生成 `Kernel` 公共 helper 所需的 dynamic memory、`npu_demo::view/npu_demo::slice -> ctx.barrier -> npu_demo::Kernel helper -> ctx.barrier -> npu_demo::deslice` 的固定顺序，并且不出现公开 `Nn` 别名、`.view<`、`load<`、`store<`、`auto tile = slice(` 或 `ctx.sync_threads(`。（`test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body`、`test_gen_kernel_compiles_npu_demo_launch_wrapper_and_barrier_body`）
 - GK-S4-003：`target="npu_demo"` 的受控 module 输入若越过顶层 `func.func`、wrapper 骨架、callee、extent、barrier scope/visibility 或 target 边界，必须 fail-fast 并保持稳定错误短语。（`test_gen_kernel_rejects_npu_demo_barrier_wrapper_missing_body_symbol`、`test_gen_kernel_rejects_npu_demo_barrier_fail_fast_boundaries`）
 - GK-019：rewrite 后成功链路不再残留旧 memory return ABI。（`test_rewritten_pipeline_has_no_memory_return_abi_left`）
 - GK-020：half-rewritten IR 会被 `gen_kernel(...)` 显式拒绝。（`test_rewritten_pipeline_fails_on_half_rewritten_ir`）
-- GK-021：rewrite 后 lowered add、`conv2d_img2col2d_tiled(...)`、`target="npu_demo"` 的受控双函数 module 子集三类函数级形态继续只通过黑盒 `gen_kernel(...)` 验证源码合同；测试不得直接依赖内部 helper、内部策略函数或内部策略名。（`test_gen_kernel_black_box_direct_return_nn_add_conv2d_img2col2d_tiled_and_npu_demo_contracts`）
+- GK-021：rewrite 后 lowered add、`conv2d_img2col2d_tiled(...)`、`target="npu_demo"` 的受控 module 子集三类函数级形态继续只通过黑盒 `gen_kernel(...)` 验证源码合同；测试不得直接依赖内部 helper、内部策略函数或内部策略名。（`test_gen_kernel_black_box_direct_return_nn_add_conv2d_img2col2d_tiled_and_npu_demo_contracts`）
 - GK-S3-001：tile family after-IR 进入 `gen_kernel(...)` 时，目标源码必须保持单个函数定义，切分逻辑位于函数体内部，且 tile 循环来自 `symbol.for` 的显式分块语义。（`test_gen_kernel_emits_tile_codegen_single_function_tile_loop`）
 - GK-S3-002：tile codegen 缺少 `tuner.param` 时必须报 `TileCodegenMalformed`，禁止 silent fallback。（`test_gen_kernel_rejects_tile_codegen_missing_tuner_param`）
 - GK-S3-003：tile codegen 缺少显式分块结构 `symbol.for` 时必须报 `TileCodegenMalformed`，不得退化成未切分源码。（`test_gen_kernel_rejects_tile_codegen_missing_loop`）

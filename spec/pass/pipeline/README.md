@@ -74,7 +74,7 @@ module = pm.run(module)
 
 - 返回 `PassManager` 实例。
 
-### `build_npu_demo_lowering_pipeline() -> PassManager`
+### `build_npu_demo_lowering_pipeline(options: dict[str, str] | None = None) -> PassManager`
 
 功能说明：
 
@@ -89,7 +89,7 @@ module = pm.run(module)
 ```python
 from kernel_gen.passes.pipeline import build_npu_demo_lowering_pipeline
 
-pm = build_npu_demo_lowering_pipeline()
+pm = build_npu_demo_lowering_pipeline({"target": "npu_demo"})
 module = pm.run(module)
 ```
 
@@ -101,7 +101,7 @@ module = pm.run(module)
 
 - 返回 `PassManager` 实例。
 
-### `build_registered_pipeline(name: str) -> PassManager`
+### `build_registered_pipeline(name: str, options: dict[str, str] | None = None) -> PassManager`
 
 功能说明：
 
@@ -118,13 +118,14 @@ from kernel_gen.passes.registry import load_builtin_passes, build_registered_pip
 
 load_builtin_passes()
 pm = build_registered_pipeline("default-lowering")
-pm = build_registered_pipeline("npu-demo-lowering")
+pm = build_registered_pipeline("npu-demo-lowering", {"target": "npu_demo"})
 module = pm.run(module)
 ```
 
 注意事项：
 
 - 调用前必须确保 `load_builtin_passes()` 已执行。
+- `npu-demo-lowering` 支持 `{"target": "npu_demo"}` 选项，其他未知选项必须显式失败。
 
 返回与限制：
 
