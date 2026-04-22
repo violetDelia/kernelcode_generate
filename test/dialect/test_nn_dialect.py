@@ -75,6 +75,13 @@ from kernel_gen.dialect.nn import (
     NnCastOp,
     NnDivOp,
     NnExpOp,
+    _normalize_axes_attr,
+    _normalize_bool_attr,
+    _promote_add_dtype,
+    _resolve_add_dtype_key,
+    _verify_activation_scalar_operand,
+    _verify_img2col_param_operands,
+    _verify_unary_float_op,
     NnReduceMaxOp,
     NnReduceMinOp,
     NnReduceSumOp,
@@ -2242,3 +2249,65 @@ def test_reduce_ops_reject_non_contiguous_result_stride() -> None:
         op = op_type(inp, bad_result_type, axes=[1], keepdim=False, space=_make_space("global"))
         with pytest.raises(VerifyException, match="result-stride-must-be-contiguous-for-result-shape"):
             op.verify()
+
+
+# NN-DIA-055
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 测试目的: 验证 nn helper 的规范化、promotion 与激活/归约校验边界。
+# 使用示例: pytest -q test/dialect/test_nn_dialect.py -k test_nn_helper_contracts_and_validation_branches
+# 对应功能实现文件路径: kernel_gen/dialect/nn.py
+# 对应 spec 文件路径: spec/dialect/nn.md
+# 对应测试文件路径: test/dialect/test_nn_dialect.py
+def test_nn_helper_contracts_and_validation_branches() -> None:
+    axes_attr = _normalize_axes_attr([0, 2])
+    assert axes_attr == ArrayAttr([IntegerAttr(0, IntegerType(64)), IntegerAttr(2, IntegerType(64))])
+    assert _normalize_axes_attr(axes_attr) is axes_attr
+
+    keepdim_true = _normalize_bool_attr(True, "keepdim")
+    keepdim_zero = _normalize_bool_attr(IntAttr(0), "keepdim")
+    keepdim_attr = IntegerAttr(1, IntegerType(1))
+    assert keepdim_true == keepdim_attr
+    assert keepdim_zero == IntegerAttr(0, IntegerType(1))
+    assert _normalize_bool_attr(keepdim_attr, "keepdim") is keepdim_attr
+
+    assert _resolve_add_dtype_key(i32) == "i32"
+    assert _resolve_add_dtype_key(Float16Type()) == "f16"
+    assert _resolve_add_dtype_key(Float32Type()) == "f32"
+    assert _resolve_add_dtype_key(StringAttr("bad")) is None
+    assert isinstance(_promote_add_dtype(i32, Float16Type()), Float16Type)
+    assert _promote_add_dtype(StringAttr("bad"), Float16Type()) is None
+
+    valid_operand = arith.ConstantOp(IntegerAttr(1, i32)).result
+    assert _verify_img2col_param_operands(
+        [valid_operand],
+        allow_zero=False,
+        type_error_phrase="kw-sw-must-be-int-or-symbol",
+        value_error_phrase="kw-sw-must-be-positive",
+    ) == [1]
+    with pytest.raises(VerifyException, match="kw-sw-must-be-int-or-symbol"):
+        _verify_img2col_param_operands(
+            [_TestOp(result_types=[Float32Type()]).results[0]],
+            allow_zero=False,
+            type_error_phrase="kw-sw-must-be-int-or-symbol",
+            value_error_phrase="kw-sw-must-be-positive",
+        )
+    with pytest.raises(VerifyException, match="kw-sw-must-be-positive"):
+        _verify_img2col_param_operands(
+            [arith.ConstantOp(IntegerAttr(0, i32)).result],
+            allow_zero=False,
+            type_error_phrase="kw-sw-must-be-int-or-symbol",
+            value_error_phrase="kw-sw-must-be-positive",
+        )
+
+    good_input = _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], space="global", element_type=Float32Type())
+    bad_input = _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], space="global", element_type=i32)
+    good_result = _make_simple_memory_type([IntAttr(2)], [IntAttr(1)], space="global", element_type=Float32Type())
+    with pytest.raises(VerifyException, match="operand-element-type-must-be-float"):
+        _verify_unary_float_op(bad_input, good_result, _make_space("global"))
+    with pytest.raises(VerifyException, match="result-shape-stride-must-match-input"):
+        _verify_unary_float_op(good_input, _make_simple_memory_type([IntAttr(2)], [IntAttr(2)], space="global"), _make_space("global"))
+    with pytest.raises(VerifyException, match="alpha must be int or float scalar"):
+        _verify_activation_scalar_operand(_TestOp(result_types=[_make_memory_type()]).results[0], "alpha")

@@ -64,6 +64,7 @@ from kernel_gen.operation.nn import (
     transpose,
     truediv,
 )
+from kernel_gen.operation._nn_common import _ensure_activation_scalar, _ensure_memory_operand
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.symbol_shape import SymbolList, SymbolShape
@@ -476,6 +477,30 @@ def test_nn_add_stride_dim_serialization() -> None:
     constant = _AddStrideDim(SymbolDim(3).get_symbol())
     assert symbolic.get_value() == "N"
     assert constant.get_value() == 3
+
+
+# OP-018
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 测试目的: 验证 nn_common helper 对非法 operand 与激活参数直接失败。
+# 使用示例: pytest -q test/operation/test_operation_nn_elementwise.py -k test_nn_helper_validation_branches
+# 对应功能实现文件路径: kernel_gen/operation/_nn_common.py
+# 对应 spec 文件路径: spec/operation/nn.md
+# 对应测试文件路径: test/operation/test_operation_nn_elementwise.py
+def test_nn_helper_validation_branches() -> None:
+    with pytest.raises(TypeError, match="At least one operand must be Memory"):
+        _ensure_memory_operand(1, 2)
+
+    with pytest.raises(TypeError, match="must be int or float"):
+        _ensure_activation_scalar("alpha", True)
+
+    with pytest.raises(TypeError, match="must be int or float"):
+        _ensure_activation_scalar("alpha", SymbolDim("N"))
+
+    with pytest.raises(ValueError, match="must be finite"):
+        _ensure_activation_scalar("alpha", float("inf"))
 
 
 # OP-ACT-001

@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-定义 `NumericType` 的常用 dtype 集合常量，供 `operation` 与 `dialect` 模块共享使用，避免重复定义。
+定义 `NumericType` 的常用 dtype 集合常量与 arithmetic promotion 顺序常量，供 `operation` 与 `dialect` 模块共享使用，避免重复定义。
 
 ## 文档信息
 
@@ -48,6 +48,73 @@ assert NumericType.Float16 in FLOAT_DTYPES
 返回与限制：
 
 - 返回类型为 `set[NumericType]`。
+
+### `ARITHMETIC_DTYPE_ORDER`
+
+功能说明：
+
+- 定义 arithmetic promotion 的稳定顺序。
+- 该顺序同时供 `Memory` dtype promotion 与 `nn` family dtype promotion 共享。
+
+参数说明：
+
+- `tuple[NumericType, ...]`，顺序为：
+  - `NumericType.Int8`
+  - `NumericType.Uint8`
+  - `NumericType.Int16`
+  - `NumericType.Uint16`
+  - `NumericType.Int32`
+  - `NumericType.Uint32`
+  - `NumericType.Int64`
+  - `NumericType.Uint64`
+  - `NumericType.Float16`
+  - `NumericType.BFloat16`
+  - `NumericType.Float32`
+  - `NumericType.Float64`
+
+使用示例：
+
+```python
+from kernel_gen.symbol_variable.dtype_constants import ARITHMETIC_DTYPE_ORDER
+
+assert ARITHMETIC_DTYPE_ORDER[0].name == "Int8"
+```
+
+注意事项：
+
+- 顺序是公共合同；若变更 promotion 规则，必须同步更新 `memory` 与 `nn` 相关实现与测试。
+
+返回与限制：
+
+- 返回类型为 `tuple[NumericType, ...]`。
+
+### `ARITHMETIC_DTYPE_RANK`
+
+功能说明：
+
+- 由 `ARITHMETIC_DTYPE_ORDER` 派生的 dtype 优先级映射。
+- 用于 `Memory` 与 `nn` family 的 dtype promotion 决议，避免各模块自维护 rank 字典。
+
+参数说明：
+
+- `dict[NumericType, int]`，键与 `ARITHMETIC_DTYPE_ORDER` 一致。
+
+使用示例：
+
+```python
+from kernel_gen.symbol_variable.dtype_constants import ARITHMETIC_DTYPE_RANK
+from kernel_gen.symbol_variable.type import NumericType
+
+assert ARITHMETIC_DTYPE_RANK[NumericType.Float32] > ARITHMETIC_DTYPE_RANK[NumericType.Int32]
+```
+
+注意事项：
+
+- `ARITHMETIC_DTYPE_RANK` 必须与 `ARITHMETIC_DTYPE_ORDER` 保持一致。
+
+返回与限制：
+
+- 返回类型为 `dict[NumericType, int]`。
 
 ### `INT_DTYPES`
 
@@ -118,7 +185,9 @@ assert NumericType.BFloat16 in NN_FLOAT_DTYPES
 - 测试目标：
   - 验证 `FLOAT_DTYPES` 与 `INT_DTYPES` 集合内容。
   - 验证 `NN_FLOAT_DTYPES` 与 `FLOAT_DTYPES` 一致。
+  - 验证 `ARITHMETIC_DTYPE_ORDER` / `ARITHMETIC_DTYPE_RANK` 的排序与映射关系。
 - 功能与用例清单：
   - `DC-001`：浮点 dtype 集合正确。
   - `DC-002`：整数 dtype 集合正确。
   - `DC-003`：`NN_FLOAT_DTYPES` 与 `FLOAT_DTYPES` 一致。
+  - `DC-004`：arithmetic dtype 顺序与 rank 映射正确。

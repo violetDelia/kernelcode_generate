@@ -22,33 +22,15 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Final
 
 from kernel_gen.common.contracts import _default_stride as _common_default_stride
 from kernel_gen.common.contracts import _public_dim_values as _common_public_dim_values
+from kernel_gen.symbol_variable.dtype_constants import ARITHMETIC_DTYPE_RANK
 from .symbol_dim import SymbolDim
 from .symbol_shape import SymbolShape
 from .type import Farmat, NumericType
 
 ShapeLike = SymbolShape | Sequence[SymbolDim | int | str]
-
-_ARITHMETIC_DTYPE_ORDER: Final[tuple[NumericType, ...]] = (
-    NumericType.Int8,
-    NumericType.Uint8,
-    NumericType.Int16,
-    NumericType.Uint16,
-    NumericType.Int32,
-    NumericType.Uint32,
-    NumericType.Int64,
-    NumericType.Uint64,
-    NumericType.Float16,
-    NumericType.BFloat16,
-    NumericType.Float32,
-    NumericType.Float64,
-)
-_ARITHMETIC_DTYPE_RANK: Final[dict[NumericType, int]] = {
-    dtype: index for index, dtype in enumerate(_ARITHMETIC_DTYPE_ORDER)
-}
 
 
 @dataclass(frozen=True)
@@ -204,9 +186,9 @@ class Memory:
     @staticmethod
     def _promote_ranked_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
         """按固定优先级选择顺序更靠后的 dtype。"""
-        if lhs not in _ARITHMETIC_DTYPE_RANK or rhs not in _ARITHMETIC_DTYPE_RANK:
+        if lhs not in ARITHMETIC_DTYPE_RANK or rhs not in ARITHMETIC_DTYPE_RANK:
             raise TypeError("Memory dtype mismatch")
-        return lhs if _ARITHMETIC_DTYPE_RANK[lhs] >= _ARITHMETIC_DTYPE_RANK[rhs] else rhs
+        return lhs if ARITHMETIC_DTYPE_RANK[lhs] >= ARITHMETIC_DTYPE_RANK[rhs] else rhs
 
     @staticmethod
     def _clone_shape_like(value: SymbolShape | None) -> SymbolShape | None:
@@ -483,7 +465,7 @@ class Memory:
             value = int(value)
         if not isinstance(value, int):
             raise TypeError("Unsupported scalar type for Memory operation")
-        if self.dtype not in _ARITHMETIC_DTYPE_RANK:
+        if self.dtype not in ARITHMETIC_DTYPE_RANK:
             raise TypeError("Scalar incompatible with Memory dtype")
 
     @staticmethod

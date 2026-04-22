@@ -24,6 +24,7 @@ from collections.abc import Sequence
 import math
 
 from kernel_gen.common.errors import _ERROR_TEMPLATE
+from kernel_gen.symbol_variable.dtype_constants import ARITHMETIC_DTYPE_RANK
 from kernel_gen.symbol_variable.dtype_constants import NN_FLOAT_DTYPES
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
@@ -33,21 +34,6 @@ from kernel_gen.symbol_variable.type import Farmat, NumericType
 ScalarArithmeticValue = int | float | SymbolDim
 ArithmeticResult = Memory | ScalarArithmeticValue
 
-_NN_ADD_PROMOTION_ORDER = (
-    NumericType.Int8,
-    NumericType.Uint8,
-    NumericType.Int16,
-    NumericType.Uint16,
-    NumericType.Int32,
-    NumericType.Uint32,
-    NumericType.Int64,
-    NumericType.Uint64,
-    NumericType.Float16,
-    NumericType.BFloat16,
-    NumericType.Float32,
-    NumericType.Float64,
-)
-_NN_ADD_PROMOTION_RANK = {dtype: index for index, dtype in enumerate(_NN_ADD_PROMOTION_ORDER)}
 _ERROR_ACTION = "请按接口约束传参"
 _ERROR_SCENE = "nn operation 参数校验"
 
@@ -122,8 +108,8 @@ def _resolve_add_dtype(lhs: NumericType, rhs: NumericType) -> NumericType:
     - 功能实现: kernel_gen/operation/_nn_common.py
     """
     try:
-        lhs_rank = _NN_ADD_PROMOTION_RANK[lhs]
-        rhs_rank = _NN_ADD_PROMOTION_RANK[rhs]
+        lhs_rank = ARITHMETIC_DTYPE_RANK[lhs]
+        rhs_rank = ARITHMETIC_DTYPE_RANK[rhs]
     except KeyError as exc:
         raise TypeError(
             _ERROR_TEMPLATE.format(

@@ -30,6 +30,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
 from xdsl.parser import Parser
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -52,6 +53,10 @@ def test_join_text_sections_merges_sections() -> None:
     assert join_text_sections("#include <a>", "", "int main() {}") == "#include <a>\n\nint main() {}\n"
 
 
+def test_join_text_sections_empty_returns_single_newline() -> None:
+    assert join_text_sections("", "", "") == "\n"
+
+
 def test_render_operation_text_strips_trailing_newline() -> None:
     ctx = build_default_context()
     module = Parser(ctx, _SIMPLE_MODULE_TEXT).parse_module()
@@ -69,3 +74,20 @@ def test_normalize_module_text_roundtrips_builtin_module() -> None:
     normalized = normalize_module_text(module, ctx)
 
     assert normalized == _SIMPLE_MODULE_TEXT.rstrip()
+
+
+def test_normalize_module_text_rejects_non_module_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeParser:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def parse_module(self) -> object:
+            return object()
+
+    monkeypatch.setattr("kernel_gen.common.text.Parser", _FakeParser)
+
+    ctx = build_default_context()
+    module = Parser(ctx, _SIMPLE_MODULE_TEXT).parse_module()
+
+    with pytest.raises(ValueError, match="builtin.module"):
+        normalize_module_text(module, ctx)

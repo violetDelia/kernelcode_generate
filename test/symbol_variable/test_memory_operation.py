@@ -27,6 +27,8 @@ from __future__ import annotations
 import pytest
 
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
+from kernel_gen.symbol_variable.symbol_dim import SymbolDim
+from kernel_gen.symbol_variable.symbol_shape import SymbolShape
 from kernel_gen.symbol_variable.type import Farmat, NumericType
 
 
@@ -320,3 +322,36 @@ def test_memory_operation_preserves_tlm123_space() -> None:
 
     assert add_result.space is MemorySpace.TLM2
     assert scalar_result.space is MemorySpace.TLM2
+
+
+# ME-022
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 测试目的: 验证 clone / dtype / scalar helper 的边界分支可直接失败。
+# 使用示例: pytest -q test/symbol_variable/test_memory_operation.py -k test_memory_helper_branches
+# 对应功能实现文件路径: kernel_gen/symbol_variable/memory.py
+# 对应 spec 文件路径: spec/symbol_variable/memory.md
+# 对应测试文件路径: test/symbol_variable/test_memory_operation.py
+def test_memory_helper_branches() -> None:
+    shape = SymbolShape([SymbolDim("N"), SymbolDim("K")])
+    cloned = Memory._clone_shape_like(shape)
+    assert cloned is not None
+    assert cloned is not shape
+    assert cloned.get_values() == shape.get_values()
+    assert Memory._clone_shape_like(None) is None
+
+    lhs = Memory([1], NumericType.Float32)
+    rhs = Memory([1], NumericType.Int32)
+    with pytest.raises(TypeError, match="Memory dtype mismatch"):
+        lhs._ensure_same_dtype(rhs)
+
+    with pytest.raises(TypeError, match="Unsupported scalar type for Memory operation"):
+        lhs._ensure_scalar_compatible("x")
+
+    with pytest.raises(TypeError, match="Scalar incompatible with Memory dtype"):
+        Memory([1], NumericType.Bool)._ensure_scalar_compatible(1)
+
+    with pytest.raises(TypeError, match="Unsupported scalar type for Memory operation"):
+        Memory._scalar_dtype("x")
