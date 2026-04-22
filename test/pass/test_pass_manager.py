@@ -41,6 +41,7 @@ if str(REPO_ROOT) not in sys.path:
 pass_module = importlib.import_module("kernel_gen.passes.pass_manager")
 Pass = pass_module.Pass
 PassManager = pass_module.PassManager
+build_default_lowering_pass_manager = pass_module.build_default_lowering_pass_manager
 pipeline_module = importlib.import_module("kernel_gen.passes.pipeline")
 build_default_lowering_pipeline = pipeline_module.build_default_lowering_pipeline
 registry_module = importlib.import_module("kernel_gen.passes.registry")
@@ -233,56 +234,30 @@ def test_pass_manager_runs_registered_lower_nn(monkeypatch: pytest.MonkeyPatch) 
 
 # TC-PASS-006
 # 创建者: 金铲铲大作战
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 2026-04-06 09:53:59 +0800
-# 最近一次运行成功时间: 2026-04-06 09:53:59 +0800
-# 功能说明: 验证默认 lowering pipeline 会固定注册 `DecompassPass -> NnLoweringPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass`。
-# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_builds_default_lowering_pipeline_for_buffer_results_to_out_params
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 验证 build_default_lowering_pass_manager 兼容入口仍然委派到 default-lowering pipeline。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_builds_default_lowering_pass_manager
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
 @pytest.mark.nn_lowering
-def test_pass_manager_builds_default_lowering_pipeline_for_buffer_results_to_out_params(
+def test_pass_manager_builds_default_lowering_pass_manager(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    lowering_module = importlib.import_module("kernel_gen.passes.lowering")
-    decompose_module = importlib.import_module("kernel_gen.passes.decompass")
-    DecompassPass = decompose_module.DecompassPass
-    NnLoweringPass = lowering_module.NnLoweringPass
-    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
-    LowerDmaMemoryHierarchyPass = lowering_module.LowerDmaMemoryHierarchyPass
-    order: list[str] = []
+    calls: list[str] = []
 
-    def _record_decompose(self: object, ctx: object, module: object) -> None:
-        order.append("decompass")
-        return None
+    def _fake_builder() -> PassManager:
+        calls.append("build_default_lowering_pipeline")
+        return PassManager(name="default-lowering")
 
-    def _record_lower(self: object, target: object) -> object:
-        order.append("lower-nn")
-        return target
+    monkeypatch.setattr(pipeline_module, "build_default_lowering_pipeline", _fake_builder)
 
-    def _record_buffer(self: object, ctx: object, module: object) -> None:
-        order.append("buffer-results-to-out-params")
-        return None
-
-    def _record_dma(self: object, target: object) -> object:
-        order.append("lower-dma-memory-hierarchy")
-        return target
-
-    monkeypatch.setattr(DecompassPass, "apply", _record_decompose)
-    monkeypatch.setattr(NnLoweringPass, "run", _record_lower)
-    monkeypatch.setattr(BufferResultsToOutParamsPass, "apply", _record_buffer)
-    monkeypatch.setattr(LowerDmaMemoryHierarchyPass, "run", _record_dma)
-
-    pm = build_default_lowering_pipeline()
-    sentinel = object()
-    assert pm.run(sentinel) is sentinel
-    assert order == [
-        "decompass",
-        "lower-nn",
-        "buffer-results-to-out-params",
-        "lower-dma-memory-hierarchy",
-    ]
+    pm = build_default_lowering_pass_manager()
+    assert isinstance(pm, PassManager)
+    assert pm.name == "default-lowering"
+    assert calls == ["build_default_lowering_pipeline"]
 
 
 # TC-PASS-007

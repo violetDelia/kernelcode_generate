@@ -8,6 +8,9 @@ xpu/
 temp
 .coverage
 coverage/
+!test/fixtures/
+!test/fixtures/coverage/
+!test/fixtures/coverage/*.json
 command.txt
 .vscode
 *.lock

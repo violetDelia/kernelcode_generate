@@ -1,0 +1,8 @@
+{
+  "totals": {
+    "covered_lines": 40,
+    "num_statements": 42,
+    "covered_branches": 7,
+    "num_branches": 10
+  }
+}
