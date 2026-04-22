@@ -3,7 +3,7 @@
 ## 功能简介
 
 - 本文档定义执行引擎（Execution Engine）的 `P0` 总览合同：把由 `emit_c` 产生的 C++ 源码片段，按 `compile -> execute` 两段式流程编译并执行。
-- **生命周期**：`compile(request) -> CompiledKernel`，随后 `CompiledKernel.execute(exec_request) -> ExecuteResult`。
+- **生命周期**：`compile(request) -> CompiledKernel`，随后 `CompiledKernel.execute(exec_request) -> ExecuteResult`；当编译过程使用内部临时工作区时，`CompiledKernel.close()` 或对象析构必须释放该工作区。
 - **输入**：
   - `source`：C++ 源码字符串（单个 translation unit）。
   - `target`：目标后端标识（`cpu` / `npu_demo`）。
@@ -89,6 +89,7 @@ assert result.ok is True
   - `entry_point(str)`: 可选；未提供时默认 `"kg_execute_entry"`。
 - 返回与限制：
   - 编译失败必须失败，`failure_phrase == "compile_failed"`。
+  - 若编译过程使用了内部临时工作区，则在失败返回前必须先释放该工作区，避免临时文件残留。
 
 ### `CompiledKernel.execute(...)`
 
@@ -101,6 +102,24 @@ assert result.ok is True
 - 返回与限制：
   - 运行时抛出/abort 必须失败，`failure_phrase == "runtime_throw_or_abort"`。
   - `entry_point` 无法解析时必须失败，`failure_phrase == "symbol_resolve_failed"`。
+
+### `CompiledKernel.close()`
+
+- 功能说明：显式释放编译阶段创建的内部临时工作区。
+- 使用示例：
+
+```python
+kernel = engine.compile(source="int main(){}", function="cpu::add")
+try:
+    result = kernel.execute(args=())
+    assert result.ok is True
+finally:
+    kernel.close()
+```
+
+- 注意事项：
+  - `close()` 必须是幂等的，重复调用不得再释放同一临时工作区。
+  - 若编译阶段未使用内部临时工作区，`close()` 必须保持空操作语义。
 
 ### `ExecuteResult`
 

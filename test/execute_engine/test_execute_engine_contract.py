@@ -75,10 +75,13 @@ def test_execute_engine_contract_files_exist() -> None:
 def test_execute_engine_compile_execute_ok() -> None:
     engine = ExecutionEngine(target="cpu")
     kernel = engine.compile(source="int main(){}", function="cpu::add")
-    result = kernel.execute(args=())
-    assert result.ok is True
-    assert result.status_code == 0
-    assert result.failure_phrase is None
+    try:
+        result = kernel.execute(args=())
+        assert result.ok is True
+        assert result.status_code == 0
+        assert result.failure_phrase is None
+    finally:
+        kernel.close()
 
 
 # EE-S1-002
@@ -93,9 +96,12 @@ def test_execute_engine_compile_execute_ok() -> None:
 def test_execute_engine_stream_not_supported() -> None:
     engine = ExecutionEngine(target="cpu")
     kernel = engine.compile(source="int main(){}", function="cpu::add")
-    with pytest.raises(ExecutionEngineError) as exc:
-        kernel.execute(request=ExecuteRequest(args=(), stream=object()))
-    assert exc.value.failure_phrase == FAILURE_STREAM_NOT_SUPPORTED
+    try:
+        with pytest.raises(ExecutionEngineError) as exc:
+            kernel.execute(request=ExecuteRequest(args=(), stream=object()))
+        assert exc.value.failure_phrase == FAILURE_STREAM_NOT_SUPPORTED
+    finally:
+        kernel.close()
 
 
 # EE-S1-003
@@ -110,9 +116,12 @@ def test_execute_engine_stream_not_supported() -> None:
 def test_execute_engine_function_output_capture_not_supported() -> None:
     engine = ExecutionEngine(target="cpu")
     kernel = engine.compile(source="int main(){}", function="cpu::add")
-    with pytest.raises(ExecutionEngineError) as exc:
-        kernel.execute(request=ExecuteRequest(args=(), capture_function_output=True))
-    assert exc.value.failure_phrase == FAILURE_FUNCTION_OUTPUT_CAPTURE_NOT_SUPPORTED
+    try:
+        with pytest.raises(ExecutionEngineError) as exc:
+            kernel.execute(request=ExecuteRequest(args=(), capture_function_output=True))
+        assert exc.value.failure_phrase == FAILURE_FUNCTION_OUTPUT_CAPTURE_NOT_SUPPORTED
+    finally:
+        kernel.close()
 
 
 # EE-S1-004

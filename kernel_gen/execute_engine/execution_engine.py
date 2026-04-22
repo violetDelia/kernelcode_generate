@@ -27,7 +27,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import re
 from typing import Any, Callable, Literal, TypeAlias
@@ -856,7 +856,25 @@ class ExecuteResult:
 
 @dataclass(frozen=True)
 class CompiledKernel:
-    """编译产物的只读描述（P0）。"""
+    """编译产物的只读描述（P0）。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 承载已编译产物的目标、共享库路径与入口名。
+    - 若底层编译使用了内部临时工作目录，可通过 `close()` 显式释放；析构时也会兜底释放。
+
+    使用示例:
+    - kernel = engine.compile(source="int main(){}", function="cpu::add")
+    - kernel.close()
+
+    关联文件:
+    - spec: spec/execute_engine/execute_engine.md
+    - spec: spec/execute_engine/execute_engine_api.md
+    - test: test/execute_engine/test_execute_engine_compile.py
+    - 功能实现: kernel_gen/execute_engine/execution_engine.py
+    """
 
     target: str
     soname_path: str
@@ -864,6 +882,40 @@ class CompiledKernel:
     entry_point: str
     compile_stdout: str = ""
     compile_stderr: str = ""
+    _cleanup: Callable[[], None] | None = field(default=None, repr=False, compare=False)
+
+    def close(self) -> None:
+        """释放编译产物关联的内部临时工作区。
+
+        创建者: 金铲铲大作战
+        最后一次更改: 金铲铲大作战
+
+        功能说明:
+        - 当 `compile()` 使用内部临时目录时，显式删除该目录，避免临时文件长期残留。
+        - 重复调用是安全的，已关闭时不再重复释放。
+
+        使用示例:
+        - kernel = engine.compile(source="int main(){}", function="cpu::add")
+        - kernel.close()
+
+        关联文件:
+        - spec: spec/execute_engine/execute_engine.md
+        - spec: spec/execute_engine/execute_engine_api.md
+        - test: test/execute_engine/test_execute_engine_compile.py
+        - 功能实现: kernel_gen/execute_engine/execution_engine.py
+        """
+
+        cleanup = self._cleanup
+        if cleanup is None:
+            return
+        object.__setattr__(self, "_cleanup", None)
+        cleanup()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def execute(
         self,
@@ -975,7 +1027,8 @@ class ExecutionEngine:
 
         功能说明:
         - S2 阶段固定编译路径拼装：target include 选择 -> entry shim -> 编译命令生成 -> CompiledKernel。
-        - `target=cpu` 保持 dry-run；`target=npu_demo` 走真实编译，支持 expectation 真执行。
+        - `target=cpu` 保持 dry-run；`target=npu_demo` 走真实编译，支持下游合同验收的真实执行。
+        - 编译失败时会先回收内部临时工作区，再抛出 `compile_failed`。
         - 保持公共失败短语：
           - `target_header_mismatch`
           - `source_empty_or_invalid`
@@ -1069,16 +1122,24 @@ class ExecutionEngine:
             include_dirs=(str(REPO_ROOT),),
             dry_run=(target == "cpu"),
         )
-        if artifacts.return_code != 0:
-            raise ExecutionEngineError(
-                FAILURE_COMPILE_FAILED,
-                f"compiler returned non-zero ({artifacts.return_code})",
-            )
-        if not Path(artifacts.soname_path).exists():
-            raise ExecutionEngineError(
-                FAILURE_COMPILE_FAILED,
-                "compile output is missing",
-            )
+        try:
+            if artifacts.return_code != 0:
+                raise ExecutionEngineError(
+                    FAILURE_COMPILE_FAILED,
+                    f"compiler returned non-zero ({artifacts.return_code})",
+                )
+            if not Path(artifacts.soname_path).exists():
+                raise ExecutionEngineError(
+                    FAILURE_COMPILE_FAILED,
+                    "compile output is missing",
+                )
+        except Exception:
+            if artifacts._cleanup is not None:
+                try:
+                    artifacts._cleanup()
+                except Exception:
+                    pass
+            raise
 
         return CompiledKernel(
             target=target,
@@ -1087,6 +1148,7 @@ class ExecutionEngine:
             entry_point=entry_point,
             compile_stdout=artifacts.stdout,
             compile_stderr=artifacts.stderr,
+            _cleanup=artifacts._cleanup,
         )
 
 

@@ -26,6 +26,8 @@
 from __future__ import annotations
 
 import sys
+import tempfile
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -36,6 +38,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.execute_engine import (
     FAILURE_COMPILE_FAILED,
+    FAILURE_RUNTIME_THROW_OR_ABORT,
     FAILURE_SOURCE_EMPTY_OR_INVALID,
     FAILURE_SYMBOL_RESOLVE_FAILED,
     FAILURE_TARGET_HEADER_MISMATCH,
@@ -175,16 +178,96 @@ def test_execute_engine_compile_unit_injects_includes_and_shim() -> None:
 def test_execute_engine_compile_returns_kernel_with_command() -> None:
     engine = ExecutionEngine(target="cpu")
     kernel = engine.compile(source="int main(){}", function="cpu::add")
-    assert kernel.target == "cpu"
-    assert kernel.function == "cpu::add"
-    assert kernel.entry_point == "kg_execute_entry"
-    assert kernel.compile_stdout.startswith("dry-run: ")
-    command = kernel.compile_stdout.replace("dry-run: ", "").split()
-    assert command[0] == "g++"
-    assert "-std=c++17" in command
-    assert any(arg.startswith("-I") and str(REPO_ROOT) in arg for arg in command)
-    assert "-o" in command
-    assert Path(kernel.soname_path).is_file()
+    try:
+        assert kernel.target == "cpu"
+        assert kernel.function == "cpu::add"
+        assert kernel.entry_point == "kg_execute_entry"
+        assert kernel.compile_stdout.startswith("dry-run: ")
+        command = kernel.compile_stdout.replace("dry-run: ", "").split()
+        assert command[0] == "g++"
+        assert "-std=c++17" in command
+        assert any(arg.startswith("-I") and str(REPO_ROOT) in arg for arg in command)
+        assert "-o" in command
+        assert Path(kernel.soname_path).is_file()
+    finally:
+        kernel.close()
+
+
+# EE-S5-C-004
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-23 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-23 00:00:00 +0800
+# 功能说明: 覆盖编译产物 close() 的临时工作区释放与幂等行为。
+# 使用示例: pytest -q test/execute_engine/test_execute_engine_compile.py -k "S5-C-004"
+# 测试目的: 验证 compile 过程中创建的临时工作区会在 close() 后被移除，且重复 close 安全。
+# 对应功能实现文件路径: kernel_gen/execute_engine/execution_engine.py
+# 对应 spec 文件路径: spec/execute_engine/execute_engine.md
+# 对应测试文件路径: test/execute_engine/test_execute_engine_compile.py
+def test_execute_engine_compile_close_releases_temp_workdir_and_is_idempotent() -> None:
+    engine = ExecutionEngine(target="cpu")
+    kernel = engine.compile(source="int main(){}", function="cpu::add")
+    workdir = Path(kernel.soname_path).parent
+    try:
+        assert workdir.is_dir()
+
+        kernel.close()
+        kernel.close()
+
+        assert not workdir.exists()
+        with pytest.raises(ExecutionEngineError) as exc:
+            kernel.execute(args=())
+        assert exc.value.failure_phrase == FAILURE_RUNTIME_THROW_OR_ABORT
+    finally:
+        kernel.close()
+
+
+# EE-S5-C-005
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-23 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-23 00:00:00 +0800
+# 功能说明: 覆盖 compile 失败时的临时工作区回收分支。
+# 使用示例: pytest -q test/execute_engine/test_execute_engine_compile.py -k "S5-C-005"
+# 测试目的: 验证 ExecutionEngine.compile 在返回非零编译结果时会先回收临时工作区，再抛出 compile_failed。
+# 对应功能实现文件路径: kernel_gen/execute_engine/execution_engine.py
+# 对应 spec 文件路径: spec/execute_engine/execute_engine.md
+# 对应测试文件路径: test/execute_engine/test_execute_engine_compile.py
+def test_execute_engine_compile_cleans_temp_workdir_on_compile_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = ExecutionEngine(target="cpu")
+    temp_workdir = tempfile.TemporaryDirectory()
+    workdir_path = Path(temp_workdir.name)
+    source_path = workdir_path / "kernel.cpp"
+    soname_path = workdir_path / "libkernel.so"
+    source_path.write_text("int main(){}", encoding="utf-8")
+    soname_path.write_text("", encoding="utf-8")
+
+    def _cleanup() -> None:
+        temp_workdir.cleanup()
+
+    fake_artifacts = SimpleNamespace(
+        soname_path=str(soname_path),
+        source_path=str(source_path),
+        command=("g++",),
+        stdout="",
+        stderr="",
+        return_code=1,
+        _cleanup=_cleanup,
+    )
+    monkeypatch.setattr(
+        "kernel_gen.execute_engine.execution_engine.compile_source",
+        lambda **kwargs: fake_artifacts,
+    )
+
+    try:
+        with pytest.raises(ExecutionEngineError) as exc:
+            engine.compile(source="int main(){}", function="cpu::add")
+        assert exc.value.failure_phrase == FAILURE_COMPILE_FAILED
+        assert not workdir_path.exists()
+    finally:
+        temp_workdir.cleanup()
 
 
 # EE-S2-C-003
@@ -209,9 +292,12 @@ def test_execute_engine_compile_request_compiler_flags_order() -> None:
     )
     engine = ExecutionEngine(target="cpu")
     kernel = engine.compile(request=req)
-    command = kernel.compile_stdout.replace("dry-run: ", "").split()
-    assert command[0] == "clang++"
-    assert "-std=c++17" in command
-    assert "-O2" in command
-    assert command.index("-std=c++17") < command.index("-O2")
-    assert "-lm" in command
+    try:
+        command = kernel.compile_stdout.replace("dry-run: ", "").split()
+        assert command[0] == "clang++"
+        assert "-std=c++17" in command
+        assert "-O2" in command
+        assert command.index("-std=c++17") < command.index("-O2")
+        assert "-lm" in command
+    finally:
+        kernel.close()

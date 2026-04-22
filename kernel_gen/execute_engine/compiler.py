@@ -20,11 +20,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
-from typing import Iterable
+from typing import Callable, Iterable
 
 from kernel_gen.common.text import join_text_sections
 
@@ -59,9 +60,17 @@ class CompileArtifacts:
 
     功能说明:
     - 统一承载编译命令、产物路径与 stdout/stderr，便于测试与记录。
+    - 当编译器内部创建临时工作目录时，会附带私有 cleanup 句柄，用于由上层在合适时机释放。
 
     使用示例:
-    - artifacts = CompileArtifacts(soname_path="libkernel.so", source_path="kernel.cpp", command=("g++",), stdout="", stderr="", return_code=0)
+    - artifacts = CompileArtifacts(
+        soname_path="libkernel.so",
+        source_path="kernel.cpp",
+        command=("g++",),
+        stdout="",
+        stderr="",
+        return_code=0,
+      )
 
     关联文件:
     - spec: spec/execute_engine/execute_engine_target.md
@@ -75,6 +84,7 @@ class CompileArtifacts:
     stdout: str
     stderr: str
     return_code: int
+    _cleanup: Callable[[], None] | None = field(default=None, repr=False, compare=False)
 
 
 def build_compile_unit(
@@ -182,6 +192,7 @@ def compile_source(
     功能说明:
     - 将编译单元写入工作目录，生成编译命令并执行或 dry-run。
     - dry_run 模式下仅创建产物占位文件并返回命令，避免依赖真实编译器环境。
+    - 若内部自动创建临时工作目录，则通过返回值携带 cleanup 句柄，由上层在 close / 失败分支释放。
 
     使用示例:
     - artifacts = compile_source(
@@ -199,46 +210,58 @@ def compile_source(
     - 功能实现: kernel_gen/execute_engine/compiler.py
     """
 
-    if work_dir is None:
-        work_dir = Path(tempfile.mkdtemp(prefix="kg_execute_engine_"))
-    work_dir.mkdir(parents=True, exist_ok=True)
-    source_path = work_dir / "kernel.cpp"
-    soname_path = work_dir / "libkernel.so"
-    source_path.write_text(source, encoding="utf-8")
-    command = build_compile_command(
-        compiler=compiler,
-        source_path=str(source_path),
-        output_path=str(soname_path),
-        compiler_flags=compiler_flags,
-        link_flags=link_flags,
-        include_dirs=include_dirs,
-    )
-    if dry_run:
-        soname_path.write_text("", encoding="utf-8")
-        stdout = f"dry-run: {' '.join(command)}"
+    cleanup: Callable[[], None] | None = None
+    try:
+        if work_dir is None:
+            work_dir = Path(tempfile.mkdtemp(prefix="kg_execute_engine_"))
+            cleanup = lambda work_dir=work_dir: shutil.rmtree(work_dir, ignore_errors=True)
+        work_dir.mkdir(parents=True, exist_ok=True)
+        source_path = work_dir / "kernel.cpp"
+        soname_path = work_dir / "libkernel.so"
+        source_path.write_text(source, encoding="utf-8")
+        command = build_compile_command(
+            compiler=compiler,
+            source_path=str(source_path),
+            output_path=str(soname_path),
+            compiler_flags=compiler_flags,
+            link_flags=link_flags,
+            include_dirs=include_dirs,
+        )
+        if dry_run:
+            soname_path.write_text("", encoding="utf-8")
+            stdout = f"dry-run: {' '.join(command)}"
+            return CompileArtifacts(
+                soname_path=str(soname_path),
+                source_path=str(source_path),
+                command=command,
+                stdout=stdout,
+                stderr="",
+                return_code=0,
+                _cleanup=cleanup,
+            )
+
+        result = subprocess.run(
+            list(command),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         return CompileArtifacts(
             soname_path=str(soname_path),
             source_path=str(source_path),
             command=command,
-            stdout=stdout,
-            stderr="",
-            return_code=0,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            return_code=result.returncode,
+            _cleanup=cleanup,
         )
-
-    result = subprocess.run(
-        list(command),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return CompileArtifacts(
-        soname_path=str(soname_path),
-        source_path=str(source_path),
-        command=command,
-        stdout=result.stdout,
-        stderr=result.stderr,
-        return_code=result.returncode,
-    )
+    except Exception:
+        if cleanup is not None:
+            try:
+                cleanup()
+            except Exception:
+                pass
+        raise
 
 
 __all__ = [

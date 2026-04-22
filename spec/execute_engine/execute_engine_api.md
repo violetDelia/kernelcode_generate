@@ -110,7 +110,7 @@ exec_req = ExecuteRequest(
 
 功能说明：
 
-- 编译产物的只读描述，用于后续执行。
+- 编译产物的只读描述，用于后续执行；当编译阶段使用内部临时工作区时，提供 `close()` 用于显式释放该工作区。
 
 参数说明：
 
@@ -126,11 +126,14 @@ exec_req = ExecuteRequest(
 ```python
 kernel = engine.compile(req)
 assert kernel.entry_point == "kg_execute_entry"
+kernel.close()
 ```
 
 注意事项：
 
 - `entry_point` 若与产物符号不匹配，执行阶段必须返回 `symbol_resolve_failed`。
+- `close()` 必须是幂等的；若编译使用了内部临时工作区，则 `close()` 会释放该工作区，析构时也应兜底释放。
+- 若编译过程在返回前已经判定失败，内部临时工作区也必须在抛出/返回失败之前释放。
 
 返回与限制：
 
