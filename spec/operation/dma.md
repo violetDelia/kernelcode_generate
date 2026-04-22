@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`大闸蟹`
 - `spec`：[`spec/operation/dma.md`](../../spec/operation/dma.md)
 - `功能实现`：[`kernel_gen/operation/dma.py`](../../kernel_gen/operation/dma.py)
 - `test`：[`test/operation/test_operation_dma.py`](../../test/operation/test_operation_dma.py)
@@ -169,7 +169,7 @@ def copy_kernel(src: "Tensor[f32, 8, 8]") -> "Tensor[f32, 8, 8]":
     from kernel_gen.operation.dma import copy
     return copy(src, MemorySpace.SM)
 
-# 目标 raw IR：dma.alloc + dma.copy + func.return
+# 目标 raw IR：dma.alloc + dma.copy(target, source) + func.return
 # 非法例：copy(src, "SM") 必须在 helper/build_func_op 边界显式报错
 ```
 
@@ -187,7 +187,7 @@ def copy_kernel(src: "Tensor[f32, 8, 8]") -> "Tensor[f32, 8, 8]":
 返回与限制：
 
 - 返回新的 `Memory`，`shape/stride/dtype/format` 继承 `source`，`space` 由参数决定。
-- lowering 必须显式生成 `dma.alloc + dma.copy`，并返回 alloc 结果。
+- lowering 必须显式生成 `dma.alloc + dma.copy(target, source)`，并返回 alloc 结果。
 
 ### cast(source, dtype, memoryspace=None)
 

@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`大闸蟹`
 - `spec`：[`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)
 - `功能实现`：
   - [`kernel_gen/dsl/mlir_gen/emit/core.py`](../../kernel_gen/dsl/mlir_gen/emit/core.py)
@@ -215,7 +215,7 @@ value = emit_mlir(expr_ast, ctx)
   | helper | lowering | 结果 | 非法输入失败边界 |
   | --- | --- | --- | --- |
   | `alloc(...)` | `dma.alloc` | memory value | 参数个数/类型不匹配、`shape/stride/format` 不可规范化时必须报错。 |
-  | `copy(...)` | `dma.alloc + dma.copy` | memory value（返回 alloc 结果） | `source` 不是 `nn.memory` 或目标空间参数非法时必须报错。 |
+  | `copy(...)` | `dma.alloc + dma.copy(target, source)` | memory value（返回 alloc 结果） | `source` 不是 `nn.memory` 或目标空间参数非法时必须报错。 |
   | `cast(...)` | `dma.cast` | memory value | `source` 不是 `nn.memory` 或 `dtype` 非法时必须报错。 |
   | `view(...)` | `dma.view` | memory value | `source` 非 `nn.memory` 或 `offset/size/stride` 不满足 DMA helper 约束时必须报具体的 `view(...)` lowering 错误。 |
   | `reshape(...)` | `dma.reshape` | memory value | `source` 非 `nn.memory`、非连续布局或 `numel` 不一致时必须报错。 |

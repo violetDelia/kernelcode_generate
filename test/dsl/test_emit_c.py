@@ -1437,25 +1437,27 @@ def test_emit_c_lowers_npu_demo_tiled_matmul_pipeline() -> None:
         r"Memory<GM, float> v\d+ = alloc<GM, float>\(\{32, 32\} /\*shape\*/, \{32, 1\} /\*stride\*/\);",
         stmt,
     )
-    assert re.search(r"long long slice_offset\d+\[2\] = \{i\d+, c_0(?:_\d+)?\};", stmt)
-    assert re.search(r"long long slice_offset\d+\[2\] = \{c_0(?:_\d+)?, i\d+\};", stmt)
-    assert re.search(r"Vector slice_offset\d+_vec\(slice_offset\d+, 2\);", stmt)
-    assert re.search(r"Vector slice_size\d+_vec\(slice_size\d+, 2\);", stmt)
-    assert re.search(r"Vector slice_stride\d+_vec\(slice_stride\d+, 2\);", stmt)
+    assert "long long slice_offset" not in stmt
+    assert "long long deslice_offset" not in stmt
+    assert re.search(r"Vector\{i\d+, c_0(?:_\d+)?\}", stmt)
+    assert re.search(r"Vector\{c_0(?:_\d+)?, i\d+\}", stmt)
+    assert re.search(r"Vector\{c_16(?:_\d+)?, c_16(?:_\d+)?\}", stmt)
+    assert re.search(r"Vector\{c_1(?:_\d+)?, c_1(?:_\d+)?\}", stmt)
     assert re.search(
-        r"slice\(v\d+ /\*dst\*/, lhs /\*source\*/, slice_offset\d+_vec /\*offset\*/, slice_size\d+_vec /\*size\*/, slice_stride\d+_vec /\*stride\*/\);",
+        r"slice\(v\d+ /\*dst\*/, lhs /\*source\*/, Vector\{i\d+, c_0(?:_\d+)?\} /\*offset\*/, Vector\{c_16(?:_\d+)?, c_16(?:_\d+)?\} /\*size\*/, Vector\{c_1(?:_\d+)?, c_1(?:_\d+)?\} /\*stride\*/\);",
         stmt,
     )
     assert re.search(
-        r"slice\(v\d+ /\*dst\*/, rhs /\*source\*/, slice_offset\d+_vec /\*offset\*/, slice_size\d+_vec /\*size\*/, slice_stride\d+_vec /\*stride\*/\);",
+        r"slice\(v\d+ /\*dst\*/, rhs /\*source\*/, Vector\{c_0(?:_\d+)?, i\d+\} /\*offset\*/, Vector\{c_16(?:_\d+)?, c_16(?:_\d+)?\} /\*size\*/, Vector\{c_1(?:_\d+)?, c_1(?:_\d+)?\} /\*stride\*/\);",
         stmt,
     )
     assert re.search(
         r"matmul<[^>]+>\(v\d+ /\*out\*/, v\d+ /\*lhs\*/, v\d+ /\*rhs\*/\);",
         stmt,
     )
-    assert re.search(r"long long deslice_offset\d+\[2\] = \{i\d+, i\d+\};", stmt)
-    assert re.search(r"Vector deslice_offset\d+_vec\(deslice_offset\d+, 2\);", stmt)
-    assert re.search(r"deslice\(v\d+, v\d+, deslice_offset\d+_vec, deslice_size\d+_vec, deslice_stride\d+_vec\);", stmt)
+    assert re.search(
+        r"deslice\(v\d+, v\d+, Vector\{i\d+, i\d+\}, Vector\{c_16(?:_\d+)?, c_16(?:_\d+)?\}, Vector\{c_1(?:_\d+)?, c_1(?:_\d+)?\}\);",
+        stmt,
+    )
     assert "nn.matmul" not in stmt
     assert "arch.launch_kernel" not in stmt

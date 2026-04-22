@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`金铲铲大作战`
+- 最后一次更改：`大闸蟹`
 - `spec`：[`spec/dialect/dma.md`](../../spec/dialect/dma.md)
 - `test`：[`test/dialect/test_dma_dialect.py`](../../test/dialect/test_dma_dialect.py)
 - `功能实现`：[`kernel_gen/dialect/dma.py`](../../kernel_gen/dialect/dma.py)
@@ -351,13 +351,13 @@ op = DmaViewOp(source, offsets, shape, stride, result_type)
 
 参数说明：
 
-- `source`：源内存，类型为 `!nn.memory<...>`。
 - `target`：目标内存，类型为 `!nn.memory<...>`。
+- `source`：源内存，类型为 `!nn.memory<...>`。
 
 使用示例：
 
 ```python
-op = DmaCopyOp(source, target)
+op = DmaCopyOp(target, source)
 ```
 
 注意事项：

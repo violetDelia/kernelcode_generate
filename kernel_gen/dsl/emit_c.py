@@ -781,6 +781,36 @@ def _emit_npu_brace_list(values: tuple[SSAValue, ...], ctx: EmitCContext) -> str
     return "{" + ", ".join(emit_c_value(value, ctx) for value in values) + "}"
 
 
+def _emit_npu_vector_expr(
+    values: tuple[SSAValue, ...],
+    ctx: EmitCContext,
+    *,
+    subject: str,
+) -> str:
+    """生成 `target=npu_demo` 下的内联 `Vector{...}` 实参文本。
+
+    创建者: 小李飞刀
+    最后一次更改: 大闸蟹
+
+    功能说明:
+    - 把 `tuple[SSAValue, ...]` 发射为 `Vector{v0, ...}` 临时对象。
+    - 仅支持 `include/api/Core.h` 已公开的 1..4 个 `long long` 固定参数构造函数。
+    - 避免为 `dma.slice/dma.deslice` 的 offset/size/stride 生成临时 `long long[]` 缓冲区。
+
+    使用示例:
+    - expr = _emit_npu_vector_expr(op.offsets, EmitCContext(target="npu_demo"), subject="slice offset")
+
+    关联文件:
+    - spec: spec/dsl/emit_c.md
+    - test: test/dsl/test_emit_c.py
+    - 功能实现: kernel_gen/dsl/emit_c.py
+    """
+
+    if not 1 <= len(values) <= 4:
+        raise _emit_error(ctx, subject, "npu_demo Vector supports 1..4 values")
+    return "Vector{" + ", ".join(emit_c_value(value, ctx) for value in values) + "}"
+
+
 def _is_unit_tile(memory_type: NnMemoryType) -> bool:
     if len(memory_type.shape.data) == 0:
         return False
@@ -1268,7 +1298,7 @@ def _emit_npu_view_stmt(op: DmaViewOp, ctx: EmitCContext) -> str:
     """生成 `target=npu_demo` 下 `dma.view` 的 helper 调用。
 
     创建者: jcc你莫辜负
-    最后一次更改: jcc你莫辜负
+    最后一次更改: 大闸蟹
 
     功能说明:
     - 把 `dma.view` 收口为 `Memory<...> out = source.view<T>({offset}, {size}, {stride});`。
@@ -1363,9 +1393,9 @@ def _emit_npu_slice_stmt(op: DmaSliceOp, ctx: EmitCContext) -> str:
 
     功能说明:
     - 一维参数发射为 `slice(target, source, offset, size, stride);` 标量调用。
-    - 三维参数直接发射 brace-list 临时 `Vector` 实参，避免生成无必要的局部 `Vector` 绑定。
-    - 其他多维参数发射为 `Vector` 绑定后再调用 `slice(target, source, offset_vec, size_vec, stride_vec);`，
-      与 `include/npu_demo/Dma.h` 的 `const Vector&` 合同对齐。
+    - 三维参数沿用 brace-list 临时实参，保持现有合同资产稳定。
+    - 其他多维参数直接发射 `Vector{...}` 临时实参，避免生成无必要的局部 `long long[]` 与 `Vector` 绑定。
+    - 其他多维 rank 必须落在 `Vector` 公开固定参数构造函数支持的 2..4 范围内。
 
     使用示例:
     - stmt = emit_c_op(slice_op, EmitCContext(target="npu_demo"))
@@ -1408,12 +1438,13 @@ def _emit_npu_deslice_stmt(op: DmaDesliceOp, ctx: EmitCContext) -> str:
     """生成 `target=npu_demo` 下 `dma.deslice` 的目标式 helper 调用。
 
     创建者: jcc你莫辜负
-    最后一次更改: 小李飞刀
+    最后一次更改: 大闸蟹
 
     功能说明:
     - 一维参数发射为 `deslice(target, source, offset, size, stride);` 标量调用。
-    - 多维参数发射为 `Vector` 绑定后再调用
-      `deslice(target, source, offset_vec, size_vec, stride_vec);`，与 `include/npu_demo/Dma.h` 的 `const Vector&` 合同对齐。
+    - 三维参数沿用 brace-list 临时实参，保持现有合同资产稳定。
+    - 其他多维参数直接发射 `Vector{...}` 临时实参，避免生成无必要的局部 `long long[]` 与 `Vector` 绑定。
+    - 其他多维 rank 必须落在 `Vector` 公开固定参数构造函数支持的 2..4 范围内。
     - 结果值绑定到 target 名称，确保后续节点可稳定引用该 memory。
 
     使用示例:
@@ -1458,17 +1489,18 @@ def _emit_npu_vector_binding(
     values: tuple[SSAValue, ...],
     ctx: EmitCContext,
 ) -> tuple[list[str], str]:
-    """生成 `target=npu_demo` 下 Vector 实参的缓冲区与绑定语句。
+    """生成 `target=npu_demo` 下 Vector 实参表达式。
 
     创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    最后一次更改: 大闸蟹
 
     功能说明:
-    - 把 `tuple[SSAValue, ...]` 发射为 `long long[N]` 缓冲区与 `Vector` 视图。
+    - 把 `tuple[SSAValue, ...]` 发射为内联 `Vector{...}` 临时对象。
     - 供 `dma.slice/dma.deslice` 的多维 offset/size/stride 生成复用。
+    - 返回空的前置语句列表，保持旧调用点的 tuple 合同稳定。
 
     使用示例:
-    - lines, name = _emit_npu_vector_binding("slice_offset", op.offsets, EmitCContext(target="npu_demo"))
+    - lines, expr = _emit_npu_vector_binding("slice_offset", op.offsets, EmitCContext(target="npu_demo"))
 
     关联文件:
     - spec: spec/dsl/emit_c.md
@@ -1476,16 +1508,7 @@ def _emit_npu_vector_binding(
     - 功能实现: kernel_gen/dsl/emit_c.py
     """
 
-    buffer_name = ctx.allocate_temp_name(prefix)
-    vector_name = f"{buffer_name}_vec"
-    value_exprs = [emit_c_value(value, ctx) for value in values]
-    return (
-        [
-            _emit_long_long_buffer(buffer_name, value_exprs, ctx),
-            f"{ctx.current_indent}Vector {vector_name}({buffer_name}, {len(values)});",
-        ],
-        vector_name,
-    )
+    return [], _emit_npu_vector_expr(values, ctx, subject=prefix)
 
 
 def _emit_npu_add_stmt(op: NnAddOp, ctx: EmitCContext) -> str:
