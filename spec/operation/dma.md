@@ -43,8 +43,8 @@
 - `load/slice/store/deslice` 允许非单位 `strides` 作为访问步进并执行边界校验；但当前 `dma dialect` 仅支持单位步长语义，进入方言层时任一维 `stride != 1` 必须显式报错，以避免生成无法验证的方言 op。
 - `store/deslice` 的 `sizes` 必须与 `source.shape` 一致。
 - `copy/cast` 仅改变 `Memory` 规格，不负责数据填充或变形。
-- `view` 不提供 `space` 或 `memoryspec` 参数；返回值总是继承 `source` 的 `dtype/space/format/stride`。
-- `view` 的 `stride` 参数只用于描述 subview 窗口步进与边界检查，不会覆盖返回值的 `Memory.stride`。
+- `view` 不提供 `space` 或 `memoryspec` 参数；返回值总是继承 `source` 的 `dtype/space/format`，`stride` 由 source 物理 stride 与 view 逻辑 stride 逐维组合得到。
+- `view` 的 `stride` 参数只用于描述 subview 窗口步进与边界检查，不会直接替换返回值的 `Memory.stride`。
 - `view` 在 operation 层不要求 `source.shape` 与 `size` 的 `numel` 相等，只要求窗口边界合法。
 - operation 到 dialect 的映射边界：`view` 的 `offset/size/stride` 必须在调用点直接保留并传递给方言；仅依赖 `view` 返回的 `Memory` 无法恢复完整 subview 参数。
 
@@ -210,12 +210,12 @@ dst = cast(src, NumericType.Float16, memoryspace=MemorySpace.GM)
 注意事项：
 
 - `dtype` 必须为合法的 `NumericType`，`memoryspace` 若提供必须为 `MemorySpace`。
-- 不支持的转换路径必须显式报错。
+- 当前实现支持数值类型之间的显式转换，返回值的 `dtype` 由目标参数决定。
 
 非法输入：
 
 - `source` 不是 `Memory`、`dtype` 非 `NumericType` 或 `memoryspace` 非 `MemorySpace|None` 时必须抛出 `TypeError`。
-- 不支持的转换路径必须抛出 `NotImplementedError`。
+- 数值类型之间的转换按当前实现全部支持；非法 `dtype` / `memoryspace` 仍必须抛出 `TypeError`。
 
 返回与限制：
 
@@ -400,7 +400,7 @@ sub = view(src, offset=["M_t", "K_t"], size=[2, 2], stride=["stride", 1])
 
 - `offset/size/stride` 都必须可被 `SymbolShape` 规范化，且长度必须与 `source.rank` 一致。
 - `size` 中静态维度必须为正。
-- `stride` 仅用于描述子视图访问步进，不等同于返回 `Memory` 的连续布局步幅。
+- `stride` 仅用于描述子视图访问步进；返回 `Memory.stride` 仍应反映 source 物理 stride 与 view stride 的组合结果，而不是直接沿用 source 或直接替换为入参。
 - `view` 仅做窗口合法性检查，不要求 `source.shape` 与 `size` 的 `numel` 在 operation 层相等。
 - 对于可静态判定的场景，必须进行边界检查。
 - 当 `offset/size/stride` 含 `SymbolDim` 或 `?` 且无法静态判定越界时，允许通过并保留符号表达。
@@ -524,9 +524,9 @@ dst = flatten(src)
 | TC-OP-DMA-010 | `copy` 规格继承 | `copy` 继承 `shape/stride/format` | `test_copy_preserves_spec` | `test/operation/test_operation_dma.py` |
 | TC-OP-DMA-011 | `cast` 基础转换 | `cast` 返回相同 `shape/stride/space`、新 `dtype` 的 `Memory` | `test_cast_changes_dtype` | `test/operation/test_operation_dma.py` |
 | TC-OP-DMA-012 | `cast` 非法 dtype | 非法目标 `dtype` 触发 `TypeError` | `test_cast_invalid_dtype` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-013 | `cast` 不支持的转换 | 不支持的转换路径显式报错 | `test_cast_unsupported_conversion` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-013 | `cast` 数值类型转换 | 支持从浮点到整数的显式转换 | `test_cast_numeric_conversion_supported` | `test/operation/test_operation_dma_alloc_lifecycle.py` |
 | TC-OP-DMA-014 | `view` 子视图基础语义 | `view` 返回 `shape == size` 的 `Memory` | `test_view_subview_returns_memory` | `test/operation/test_operation_dma.py` |
-| TC-OP-DMA-015 | `view` 规格继承 | `view` 返回 `dtype/space/format/stride` 继承 `source` | `test_view_inherits_source_memoryspec` | `test/operation/test_operation_dma.py` |
+| TC-OP-DMA-015 | `view` 规格与 stride 组合 | `view` 返回 `dtype/space/format` 继承 `source`，`stride` 由 source/view 组合 | `test_view_inherits_source_memoryspec` | `test/operation/test_operation_dma.py` |
 | TC-OP-DMA-016 | `view` 边界校验 | `view` 在静态场景下对 `offset + (size - 1) * stride` 执行边界检查 | `test_view_bounds_check` | `test/operation/test_operation_dma.py` |
 | TC-OP-DMA-017 | `flatten` 连续布局 | 连续布局下 `flatten` 返回一维 `shape` 与 `stride=[1]` | `test_flatten_contiguous` | `test/operation/test_operation_dma.py` |
 | TC-OP-DMA-018 | `flatten` 非连续布局 | 非连续布局触发错误 | `test_flatten_non_contiguous_rejected` | `test/operation/test_operation_dma.py` |

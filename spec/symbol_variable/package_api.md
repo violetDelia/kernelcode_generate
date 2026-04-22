@@ -33,7 +33,7 @@
 | `type.md` | `kernel_gen.symbol_variable.type` 与 `kernel_gen.symbol_variable` 重导出 | `NumericType` / `Farmat` 枚举语义与模块级导出边界 | [`test/symbol_variable/test_type.py`](../../test/symbol_variable/test_type.py) | [`test/operation/test_operation_nn.py`](../../test/operation/test_operation_nn.py) |
 | `symbol_dim.md` | `kernel_gen.symbol_variable.symbol_dim` | 单个整数维度/符号表达与基础算术语义 | [`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py) | [`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py) |
 | `symbol_shape.md` | `kernel_gen.symbol_variable.symbol_shape` | 形状容器规整、访问、切片赋值与序列化 | [`test/symbol_variable/test_symbol_shape.py`](../../test/symbol_variable/test_symbol_shape.py) | [`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py) |
-| `memory.md` | `kernel_gen.symbol_variable.memory` 与 `kernel_gen.symbol_variable` 重导出 | `Memory` / `MemorySpace` / `LocalSpaceMeta` 元信息容器与逐元素算术/比较元数据规则 | [`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)、[`test/symbol_variable/test_memory_operation.py`](../../test/symbol_variable/test_memory_operation.py) | [`expectation/symbol_variable/memory.py`](../../expectation/symbol_variable/memory.py)、[`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py) |
+| `memory.md` | `kernel_gen.symbol_variable.memory` 与 `kernel_gen.symbol_variable` 重导出 | `Memory` / `MemorySpace` / `LocalSpaceMeta` 元信息容器与逐元素算术/比较元数据规则 | [`test/symbol_variable/test_memory.py`](../../test/symbol_variable/test_memory.py)、[`test/symbol_variable/test_memory_operation.py`](../../test/symbol_variable/test_memory_operation.py) | [`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py) |
 | `ptr.md` | `kernel_gen.symbol_variable.ptr` | `Ptr(dtype)` 的 submodule 公开语义 | [`test/symbol_variable/test_ptr.py`](../../test/symbol_variable/test_ptr.py) | N/A |
 
 ## 限制与边界
@@ -264,9 +264,7 @@ importlib.import_module("kernel_gen.symbol_variable")
 ## 测试
 
 - 测试文件：[`test/symbol_variable/test_package_api.py`](../../test/symbol_variable/test_package_api.py)
-- expectation 目录入口：[`expectation/symbol_variable/__main__.py`](../../expectation/symbol_variable/__main__.py)
 - 执行命令：`pytest -q test/symbol_variable/test_package_api.py`
-- 执行命令：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python3 -m expectation.symbol_variable`
 
 ### 测试目标
 
@@ -289,4 +287,4 @@ importlib.import_module("kernel_gen.symbol_variable")
 | PM-005 | 构造 | 顶层导出参与构造 | N/A | `Memory([1, 2], NumericType.Float32, format=Farmat.Norm)` | 构造成功 | `test_package_type_construct_memory` |
 | PM-006 | 导出 | `__all__` 边界 | N/A | 读取 `kernel_gen.symbol_variable.__all__` | 严格等于公开导出集合 | `test_python_package_all_boundary` |
 | PM-007 | 导出 | `import *` 边界 | N/A | 执行 `from kernel_gen.symbol_variable import *` | 仅暴露公开导出集合 | `test_python_package_import_star_exports_only_public_names` |
-| PM-008 | expectation | 目录入口 | N/A | `python -m expectation.symbol_variable` | `symbol_dim` 与 `memory` expectation 全部通过 | N/A |
+| PM-008 | 合同验收 | 目录级资产 | N/A | 目录级合同验收入口统一运行 | 合同验收资产单列，通过专门验收记录维护 | N/A |

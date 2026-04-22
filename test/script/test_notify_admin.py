@@ -32,8 +32,8 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_SCRIPT = REPO_ROOT / "script/notify-admin.sh"
-DEFAULT_ADMIN_MESSAGE = "请推进“正在执行的任务”并分发“任务列表”中可分发任务。"
-DEFAULT_BUSY_MESSAGE = "继续当前任务，完成后使用 -next 并回报管理员。"
+DEFAULT_ADMIN_MESSAGE = "请推进“正在执行的任务”并分发“任务列表”中可分发任务。有任何问题和回复,使用脚本 -talk 对话。如果有完成的任务按照顺序一个一个询问架构师验收,验收通过后归档。"
+DEFAULT_BUSY_MESSAGE = "再次查看TODO.md, 继续你的任务，完成后使用 -next 并回报管理员,如果发现之前执行过相同的任务,说明任务又流转到你身上,查看日志,继续按照任务要求执行。有任何阻塞/疑问再次回报管理/架构师,重复用脚本询问要求对方回复,直到对方回复。"
 
 pytestmark = pytest.mark.infra
 
@@ -153,7 +153,7 @@ def run_script(repo_root: Path, *args: str, random_roll: str | None = None) -> s
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-06 11:24:00 +0800
 # 最近一次运行成功时间: 2026-04-06 11:24:00 +0800
-# 测试目的: 验证循环模式默认使用 1800 秒间隔，先提醒管理员推进任务，再逐个提醒 busy 执行人。
+# 测试目的: 验证循环模式默认使用 3600 秒间隔，先提醒管理员推进任务，再逐个提醒 busy 执行人。
 # 对应功能实现文件路径: script/notify-admin.sh
 # 对应 spec 文件路径: spec/script/notify-admin.md
 def test_notify_admin_loop_uses_default_interval_and_message(tmp_path: Path) -> None:
@@ -164,7 +164,7 @@ def test_notify_admin_loop_uses_default_interval_and_message(tmp_path: Path) -> 
 
     assert result.returncode == 5
     assert "sleep failed" in result.stderr
-    assert (state_dir / "sleep_arg.txt").read_text(encoding="utf-8").strip() == "1800"
+    assert (state_dir / "sleep_arg.txt").read_text(encoding="utf-8").strip() == "3600"
     assert len(tmux_calls) == 2
     assert tmux_calls[0] == [
         "-talk",

@@ -25,6 +25,9 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import pytest
 
 
@@ -60,8 +63,25 @@ def test_python_symbol_variable_imports() -> None:
 def test_legacy_import_disabled() -> None:
     import importlib
 
-    with pytest.raises(ModuleNotFoundError):
-        importlib.import_module("symbol_variable")
+    test_dir = str(Path(__file__).resolve().parents[1])
+    original_sys_path = sys.path[:]
+    # 清理可能由其他测试遗留在 sys.modules 里的旧别名缓存，保证这里验证的是当前导入边界。
+    legacy_modules = [
+        "symbol_variable",
+        "symbol_variable.symbol_dim",
+        "symbol_variable.symbol_shape",
+        "symbol_variable.memory",
+        "symbol_variable.type",
+    ]
+    try:
+        sys.path = [path for path in sys.path if path != test_dir]
+        for module_name in legacy_modules:
+            sys.modules.pop(module_name, None)
+
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module("symbol_variable")
+    finally:
+        sys.path[:] = original_sys_path
 
 
 # PM-003
@@ -77,15 +97,26 @@ def test_legacy_import_disabled() -> None:
 def test_legacy_submodule_import_disabled() -> None:
     import importlib
 
+    test_dir = str(Path(__file__).resolve().parents[1])
+    original_sys_path = sys.path[:]
+    # 同步清理旧别名缓存，避免前序测试向 sys.modules 注入过 symbol_variable 顶层包。
     legacy_modules = [
+        "symbol_variable",
         "symbol_variable.symbol_dim",
         "symbol_variable.symbol_shape",
         "symbol_variable.memory",
         "symbol_variable.type",
     ]
-    for module_name in legacy_modules:
-        with pytest.raises(ModuleNotFoundError):
-            importlib.import_module(module_name)
+    try:
+        sys.path = [path for path in sys.path if path != test_dir]
+        for module_name in legacy_modules:
+            sys.modules.pop(module_name, None)
+
+        for module_name in legacy_modules[1:]:
+            with pytest.raises(ModuleNotFoundError):
+                importlib.import_module(module_name)
+    finally:
+        sys.path[:] = original_sys_path
 
 
 # PM-004

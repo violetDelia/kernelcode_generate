@@ -61,6 +61,14 @@ def _compile_and_run(source: str) -> None:
             [
                 "g++",
                 "-std=c++17",
+                # GCC 13 会在 include/npu_demo/Dma.h 的某些模板组合上触发 ICE，
+                # 这里用较保守的优化开关保持“可编译”门槛可测，不改变语义。
+                "-fno-tree-ccp",
+                "-fno-tree-dce",
+                "-fno-tree-forwprop",
+                "-fno-tree-scev-cprop",
+                "-fno-tree-vrp",
+                "-fno-tree-ter",
                 "-I",
                 str(REPO_ROOT),
                 str(source_path),
@@ -118,6 +126,12 @@ def _compile_expect_failure(source: str) -> str:
             [
                 "g++",
                 "-std=c++17",
+                "-fno-tree-ccp",
+                "-fno-tree-dce",
+                "-fno-tree-forwprop",
+                "-fno-tree-scev-cprop",
+                "-fno-tree-vrp",
+                "-fno-tree-ter",
                 "-I",
                 str(REPO_ROOT),
                 str(source_path),

@@ -70,6 +70,14 @@ def _compile_and_run(source: str) -> None:
                     "g++",
                     "-std=c++17",
                     "-pthread",
+                    # GCC 13 在 npu_demo 头文件模板上会在 tree/cfgcleanup 类阶段触发 ICE；
+                    # 关闭几组相关优化，保留“可编译”门禁本身。
+                    "-fno-tree-ccp",
+                    "-fno-tree-dce",
+                    "-fno-tree-forwprop",
+                    "-fno-tree-scev-cprop",
+                    "-fno-tree-vrp",
+                    "-fno-tree-ter",
                     "-Wl,--no-keep-memory",
                     "-I",
                     str(REPO_ROOT),

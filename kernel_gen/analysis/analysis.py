@@ -407,7 +407,7 @@ class AnalysisSummary:
     total: OpStats
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class KernelOpCost:
     """单个 kernel op 的成本统计。
 
@@ -431,6 +431,22 @@ class KernelOpCost:
     compute: sp.Basic
     read_bytes: sp.Basic
     write_bytes: sp.Basic
+
+    def __init__(
+        self,
+        op_index: int,
+        op_name: str,
+        compute: sp.Basic,
+        read_bytes: sp.Basic,
+        write_bytes: sp.Basic,
+    ) -> None:
+        """初始化单个 kernel op 的成本统计。"""
+
+        object.__setattr__(self, "op_index", op_index)
+        object.__setattr__(self, "op_name", op_name)
+        object.__setattr__(self, "compute", compute)
+        object.__setattr__(self, "read_bytes", read_bytes)
+        object.__setattr__(self, "write_bytes", write_bytes)
 
 
 @dataclass(frozen=True)

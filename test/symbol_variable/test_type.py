@@ -24,6 +24,9 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import pytest
 
 
@@ -148,5 +151,19 @@ def test_python_type_import_star_exports_only_public_names() -> None:
 def test_legacy_type_import_disabled() -> None:
     import importlib
 
-    with pytest.raises(ModuleNotFoundError):
-        importlib.import_module("symbol_variable.type")
+    test_dir = str(Path(__file__).resolve().parents[1])
+    original_sys_path = sys.path[:]
+    # 清理可能由前序测试残留的旧别名缓存，确保此处验证的是当前 legacy 导入边界。
+    legacy_modules = [
+        "symbol_variable",
+        "symbol_variable.type",
+    ]
+    try:
+        sys.path = [path for path in sys.path if path != test_dir]
+        for module_name in legacy_modules:
+            sys.modules.pop(module_name, None)
+
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module("symbol_variable.type")
+    finally:
+        sys.path[:] = original_sys_path

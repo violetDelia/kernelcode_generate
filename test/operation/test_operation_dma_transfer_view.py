@@ -235,7 +235,7 @@ def test_dma_type_error() -> None:
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
 # 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
-# 测试目的: 验证 view(source, offset, size, stride) 返回 shape == size 的子视图 Memory。
+# 测试目的: 验证 view(source, offset, size, stride) 返回 shape == size 且 stride 逐维组合的子视图 Memory。
 # 使用示例: pytest -q test/operation/test_operation_dma_transfer_view.py -k test_view_subview_returns_memory
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -246,7 +246,7 @@ def test_view_subview_returns_memory() -> None:
     assert isinstance(dst, Memory)
     assert dst.shape.get_values() == [2, 2]
     assert dst.stride is not None
-    assert dst.stride.get_values() == src.stride.get_values()
+    assert dst.stride.get_values() == ["K*stride", 1]
     assert dst.dtype is NumericType.Float32
     assert dst.space is MemorySpace.SM
     assert dst.format is src.format
@@ -257,7 +257,7 @@ def test_view_subview_returns_memory() -> None:
 # 最后一次更改: 我不是牛马
 # 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
 # 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
-# 测试目的: 验证 view 沿用 source 规格。
+# 测试目的: 验证 view 沿用 source 规格，并按 subview stride 组合返回结果 stride。
 # 使用示例: pytest -q test/operation/test_operation_dma_transfer_view.py -k test_view_inherits_source_memoryspec
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
@@ -267,7 +267,7 @@ def test_view_inherits_source_memoryspec() -> None:
     dst = view(src, offset=[1, 2], size=[2, 2], stride=[2, 1])
     assert dst.shape.get_values() == [2, 2]
     assert dst.stride is not None
-    assert dst.stride.get_values() == [32, 4]
+    assert dst.stride.get_values() == [64, 4]
     assert dst.dtype is NumericType.Float32
     assert dst.space is MemorySpace.LM
     assert dst.format is Farmat.CLast

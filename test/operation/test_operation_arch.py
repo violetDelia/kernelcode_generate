@@ -164,6 +164,14 @@ def test_get_subthread_num_returns_symbol_dim() -> None:
 # 对应 spec 文件路径: spec/operation/arch.md
 # 对应测试文件路径: test/operation/test_operation_arch.py
 def test_get_dynamic_memory_returns_dynamic_int8_memory() -> None:
+    expected_shapes = {
+        MemorySpace.SM: ["SM_SIZE"],
+        MemorySpace.LM: ["LM_SIZE"],
+        MemorySpace.TSM: ["TSM_SIZE"],
+        MemorySpace.TLM1: ["TLM1_SIZE"],
+        MemorySpace.TLM2: ["TLM2_SIZE"],
+        MemorySpace.TLM3: ["TLM3_SIZE"],
+    }
     for space in (
         MemorySpace.SM,
         MemorySpace.LM,
@@ -175,7 +183,7 @@ def test_get_dynamic_memory_returns_dynamic_int8_memory() -> None:
         result = get_dynamic_memory(space)
 
         assert isinstance(result, Memory)
-        assert result.get_shape() == ["?"]
+        assert result.get_shape() == expected_shapes[space]
         assert result.get_stride() == [1]
         assert result.dtype is NumericType.Int8
         assert result.space is space

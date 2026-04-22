@@ -68,7 +68,7 @@ NOTIFY_ADMIN_RANDOM_ROLL=0 ./script/notify-admin.sh
 
 注意事项：
 
-- 默认 `INTERVAL_SECONDS=1800`。
+- 默认 `INTERVAL_SECONDS=3600`。
 - 默认发送身份与路径为：`FROM_NAME="榕"`、`TO_NAME="神秘人"`、`AGENTS_LIST_FILE="agents/codex-multi-agents/agents-lists.md"`。
 - 默认提醒文案分为两段：`ADMIN_MESSAGE="请推进“正在执行的任务”并分发“任务列表”中可分发任务。"`，`BUSY_MESSAGE="继续当前任务，完成后使用 -next 并回报管理员。"`。
 - 初始化会调用 `codex-multi-agents-list.sh -file <AGENTS_LIST_FILE> -init -name "$TO_NAME"`。
@@ -95,14 +95,14 @@ NOTIFY_ADMIN_RANDOM_ROLL=0 ./script/notify-admin.sh
 - 执行命令：`pytest -q test/script/test_notify_admin.py`
 - 测试目标：
   - 校验脚本语法正确。
-  - 校验循环模式默认使用 `1800` 秒间隔，并固定遵循“先管理员、后 `busy`”的发送顺序。
+  - 校验循环模式默认使用 `3600` 秒间隔，并固定遵循“先管理员、后 `busy`”的发送顺序。
   - 校验命中初始化分支时先执行管理员初始化，未命中时不会初始化。
   - 校验 `busy` 提醒会跳过管理员、架构师和 `TO_NAME` 自身。
   - 校验 `-init` 时会调用人员名单脚本完成管理员初始化。
   - 校验 `NOTIFY_ADMIN_RANDOM_ROLL` 非法时会立即报错并给出稳定错误短语。
   - 当前测试清单不覆盖下游 `tmux` 非零返回；该语义由 `script/notify-admin.sh` 与本 `spec` 共同约束。
 - 功能与用例清单：
-  - `TC-NA-001 / test_notify_admin_loop_uses_default_interval_and_message`：默认循环配置使用 `1800` 秒间隔；同轮先向管理员发送 `ADMIN_MESSAGE`，再向符合条件的 `busy` 执行人发送 `BUSY_MESSAGE`；`sleep` 失败时报 `ERROR(5): sleep failed`。
+  - `TC-NA-001 / test_notify_admin_loop_uses_default_interval_and_message`：默认循环配置使用 `3600` 秒间隔；同轮先向管理员发送 `ADMIN_MESSAGE`，再向符合条件的 `busy` 执行人发送 `BUSY_MESSAGE`；`sleep` 失败时报 `ERROR(5): sleep failed`。
   - `TC-NA-002 / test_notify_admin_loop_may_trigger_admin_init`：命中初始化分支时，会先调用 `codex-multi-agents-list.sh -init`，再开始会话发送。
   - `TC-NA-003 / test_notify_admin_loop_skips_admin_init_when_roll_misses`：未命中初始化分支时，不会调用管理员初始化脚本，但仍保持“先管理员、后 `busy`”的顺序。
   - `TC-NA-004 / test_notify_admin_init_mode_calls_list_script`：`-init` 模式会调用 `codex-multi-agents-list.sh -file <AGENTS_LIST_FILE> -init -name <TO_NAME>`。

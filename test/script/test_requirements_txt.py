@@ -37,7 +37,7 @@ EXPECTED_REQUIREMENTS = [
     "pytest-cov==7.1.0",
     "sympy==1.14.0",
     "torch==2.11.0",
-    "xdsl==0.56.2",
+    "xdsl==0.62.1",
 ]
 
 pytestmark = pytest.mark.infra

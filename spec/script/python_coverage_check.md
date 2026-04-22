@@ -4,7 +4,7 @@
 
 - 定义 `script/check_python_coverage.py` 的公开合同。
 - 读取 `coverage.py` 生成的 JSON 报告，检查 Python 项目的 line / branch 覆盖率阈值。
-- 支持按 `kernel_gen` 模块前缀做阶段内 scoped 验收，不把 `expectation/`、`test/`、`spec/` 计入本轮阈值。
+- 支持按 `kernel_gen` 模块前缀做阶段内 scoped 验收，不把合同验收资产、`test/`、`spec/` 计入本轮阈值。
 
 ## 文档信息
 
@@ -29,8 +29,8 @@
 ## 限制与边界
 
 - 仅处理 `coverage.py` JSON 报告，不负责生成覆盖率数据。
-- 不读取 `expectation/`，也不把 `expectation/` 纳入覆盖率目标。
-- 不替代 `pytest`，不替代 `python3 -m expectation`，只负责 coverage 阈值校验。
+- 不读取合同验收资产目录，也不把合同验收资产纳入覆盖率目标。
+- 不替代 `pytest`，只负责 coverage 阈值校验。
 
 ## 公开接口
 

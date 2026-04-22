@@ -296,18 +296,20 @@ def test_cast_invalid_dtype() -> None:
 
 # TC-OP-DMA-013
 # 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
-# 最近一次运行测试时间: 2026-03-24 19:29:54 +0800
-# 最近一次运行成功时间: 2026-03-24 19:29:54 +0800
-# 测试目的: 验证 cast 不支持的转换路径显式报错。
-# 使用示例: pytest -q test/operation/test_operation_dma_alloc_lifecycle.py -k test_cast_unsupported_conversion
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-22 10:39:00 +0800
+# 最近一次运行成功时间: 2026-04-22 10:39:00 +0800
+# 测试目的: 验证 cast 支持数值类型之间的显式转换。
+# 使用示例: pytest -q test/operation/test_operation_dma_alloc_lifecycle.py -k test_cast_numeric_conversion_supported
 # 对应功能实现文件路径: kernel_gen/operation/dma.py
 # 对应 spec 文件路径: spec/operation/dma.md
 # 对应测试文件路径: test/operation/test_operation_dma_alloc_lifecycle.py
-def test_cast_unsupported_conversion() -> None:
+def test_cast_numeric_conversion_supported() -> None:
     src = Memory([1, 2], NumericType.Float32)
-    with pytest.raises(NotImplementedError):
-        cast(src, NumericType.Int32)
+    dst = cast(src, NumericType.Int32)
+    assert dst.dtype is NumericType.Int32
+    assert dst.shape.get_values() == [1, 2]
+    assert dst.space is src.space
 
 
 # TC-OP-DMA-027

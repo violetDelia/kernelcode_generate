@@ -42,12 +42,34 @@ pytestmark = pytest.mark.infra
 
 def run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     """调用待测 shell 脚本并返回执行结果。"""
+    merged_env = os.environ.copy()
+    merged_env.setdefault("CODEX_MULTI_AGENTS_ROOT_NAME", "神秘人")
+
+    if env is not None:
+        merged_env.update(env)
+
+    if "CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE" not in merged_env:
+        agents_list_path: str | None = None
+        for i, arg in enumerate(args):
+            if arg == "-agents-list" and i + 1 < len(args):
+                agents_list_path = args[i + 1]
+                break
+            if arg.startswith("-agents-list="):
+                agents_list_path = arg.split("=", 1)[1]
+                break
+        if agents_list_path:
+            merged_env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = agents_list_path
+        else:
+            merged_env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(
+                REPO_ROOT.parent / "agents/codex-multi-agents/agents-lists.md"
+            )
+
     return subprocess.run(
         ["bash", str(SCRIPT_PATH), *args],
         text=True,
         capture_output=True,
         check=False,
-        env=env,
+        env=merged_env,
     )
 
 
@@ -378,7 +400,21 @@ def test_dispatch_task_success(tmp_path: Path) -> None:
     write_todo_file_current(todo)
     write_agents_file(agents)
 
-    result = run_script("-file", str(todo), "-dispatch", "-task_id", "EX-3", "-to", "worker-a", "-agents-list", str(agents))
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script(
+        "-file",
+        str(todo),
+        "-dispatch",
+        "-task_id",
+        "EX-3",
+        "-to",
+        "worker-a",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
     content = todo.read_text(encoding="utf-8")
     running_rows = parse_section_rows(content, "## 正在执行的任务")
     list_rows = parse_section_rows(content, "## 任务列表")
@@ -438,7 +474,21 @@ def test_dispatch_missing_task_returns_rc3(tmp_path: Path) -> None:
     write_todo_file_current(todo)
     write_agents_file(agents)
 
-    result = run_script("-file", str(todo), "-dispatch", "-task_id", "BAD", "-to", "worker-a", "-agents-list", str(agents))
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script(
+        "-file",
+        str(todo),
+        "-dispatch",
+        "-task_id",
+        "BAD",
+        "-to",
+        "worker-a",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
 
     assert result.returncode == 3
     assert "task not found in task list: BAD" in result.stderr
@@ -932,7 +982,21 @@ def test_lock_conflict_returns_rc4(tmp_path: Path) -> None:
 
     with todo.open("r", encoding="utf-8") as lock_file:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        result = run_script("-file", str(todo), "-dispatch", "-task_id", "EX-3", "-to", "worker-a", "-agents-list", str(agents))
+        env = os.environ.copy()
+        env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
+        env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+        result = run_script(
+            "-file",
+            str(todo),
+            "-dispatch",
+            "-task_id",
+            "EX-3",
+            "-to",
+            "worker-a",
+            "-agents-list",
+            str(agents),
+            env=env,
+        )
 
     assert result.returncode == 4
     assert "cannot acquire lock" in result.stderr
@@ -2012,7 +2076,21 @@ def test_dispatch_blocked_by_unresolved_dependency(tmp_path: Path) -> None:
     )
     write_agents_file(agents)
 
-    result = run_script("-file", str(todo), "-dispatch", "-task_id", "EX-3", "-to", "worker-a", "-agents-list", str(agents))
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script(
+        "-file",
+        str(todo),
+        "-dispatch",
+        "-task_id",
+        "EX-3",
+        "-to",
+        "worker-a",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
     content = todo.read_text(encoding="utf-8")
     running_rows = parse_section_rows(content, "## 正在执行的任务")
     list_rows = parse_section_rows(content, "## 任务列表")
@@ -2029,7 +2107,21 @@ def test_dispatch_blocked_by_unresolved_dependency(tmp_path: Path) -> None:
             row_list("EX-4", "辛弃疾", "2026-03-08 16:40:00 +0800", "", "补充验收", "", "", "", "./log/ex4.md"),
         ],
     )
-    result = run_script("-file", str(todo), "-dispatch", "-task_id", "EX-3", "-to", "worker-a", "-agents-list", str(agents))
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script(
+        "-file",
+        str(todo),
+        "-dispatch",
+        "-task_id",
+        "EX-3",
+        "-to",
+        "worker-a",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
     assert result.returncode == 3
     assert "task has unresolved dependency: EX-4" in result.stderr
 
@@ -2048,7 +2140,21 @@ def test_dispatch_rejects_busy_agent(tmp_path: Path) -> None:
     write_todo_file(todo)
     write_agents_file(agents, rows=[agent_row("worker-a", "free"), agent_row("worker-b", "busy")])
 
-    result = run_script("-file", str(todo), "-dispatch", "-task_id", "EX-3", "-to", "worker-b", "-agents-list", str(agents))
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script(
+        "-file",
+        str(todo),
+        "-dispatch",
+        "-task_id",
+        "EX-3",
+        "-to",
+        "worker-b",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
     content = todo.read_text(encoding="utf-8")
     running_rows = parse_section_rows(content, "## 正在执行的任务")
     list_rows = parse_section_rows(content, "## 任务列表")
@@ -3128,7 +3234,22 @@ def test_auto_only_supports_next(tmp_path: Path) -> None:
     write_todo_file_current(todo)
     write_agents_file(agents, rows=[agent_row_with_role("神秘人", "free", "管理员", "神秘人-session", "管理员")])
 
-    result = run_script("-file", str(todo), "-dispatch", "-auto", "-task_id", "EX-3", "-to", "worker-a", "-agents-list", str(agents))
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(agents)
+    result = run_script(
+        "-file",
+        str(todo),
+        "-dispatch",
+        "-auto",
+        "-task_id",
+        "EX-3",
+        "-to",
+        "worker-a",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
 
     assert result.returncode == 1
     assert "-auto only supports -next" in result.stderr

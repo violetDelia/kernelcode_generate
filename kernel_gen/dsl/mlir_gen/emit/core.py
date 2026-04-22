@@ -4219,7 +4219,7 @@ def _lower_expr(expr: object, ctx: EmitContext) -> object:
             alloc_shape = _build_index_operands_from_layout(result_type.shape, ctx, location=expr.location)
         alloc_op = DmaAllocOp(alloc_shape, result_type)
         ctx.builder.add_op(alloc_op)
-        copy_op = DmaCopyOp(source, alloc_op.result)
+        copy_op = DmaCopyOp(alloc_op.result, source)
         ctx.builder.add_op(copy_op)
         ctx._set_cache(expr_key, alloc_op.result)
         ctx.types[_expr_key(expr.source)] = source_type

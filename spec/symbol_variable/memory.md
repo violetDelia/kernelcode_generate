@@ -576,13 +576,11 @@ cmp_mem = lhs < 0
 - 交叉验证：
   - [`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py)：验证 memory 相关整数 symbol 分量进入 dialect 后仍符合边界约定。
   - [`test/symbol_variable/test_symbol_dim.py`](../../test/symbol_variable/test_symbol_dim.py)：验证 `SymbolDim` 公开值语义与动态表达式稳定性，为 `Memory` 动态 `shape/stride` 比较提供上游基线。
-  - [`expectation/symbol_variable/memory.py`](../../expectation/symbol_variable/memory.py)：验证 `Memory` 合同真源可被目录级入口统一运行。
 - 执行命令：
   - `pytest -q test/symbol_variable/test_memory.py`
   - `pytest -q test/symbol_variable/test_memory_operation.py`
   - `pytest -q test/dialect/test_symbol_dialect.py`
   - `pytest -q test/symbol_variable/test_symbol_dim.py`
-  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python3 -m expectation.symbol_variable`
 
 ### 测试分层
 
@@ -590,7 +588,7 @@ cmp_mem = lhs < 0
 - `test/symbol_variable/test_memory_operation.py` 负责 `Memory` 运算符重载（逐元素算术/比较）的 dtype 规则、元数据继承与错误路径，不重复覆盖构造与表示语义。
 - `test/dialect/test_symbol_dialect.py` 只验证单个整数分量进入 dialect 后的兼容性，不替代 `Memory` 主测试。
 - `test/symbol_variable/test_symbol_dim.py` 负责 `SymbolDim` 公开值语义与动态表达式稳定性；`Memory` 的动态 `shape/stride` 比较只继承这层公开值，不额外依赖底层 sympy 树形。
-- `expectation/symbol_variable/__main__.py` 负责把 `symbol_dim` 与 `memory` 两组合同作为目录级资产统一运行，不替代专属 pytest 的细粒度断言。
+- 目录级合同验收资产负责把 `symbol_dim` 与 `memory` 两组合同统一运行，不替代专属 pytest 的细粒度断言。
 
 ### 测试目标
 
@@ -609,7 +607,6 @@ cmp_mem = lhs < 0
 - 验证运算符重载结果元数据独立（对应 `ME-012`）。
 - 验证比较结果 `dtype` 为 `NumericType.Bool`（对应 `ME-013`）。
 - 验证 memory 相关单值整数语义的 dialect 归属由 [`test/dialect/test_symbol_dialect.py`](../../test/dialect/test_symbol_dialect.py) 覆盖，本文件测试仅覆盖 `Memory` 容器行为本身。
-- 验证 [`expectation/symbol_variable/memory.py`](../../expectation/symbol_variable/memory.py) 可被 [`expectation/symbol_variable/__main__.py`](../../expectation/symbol_variable/__main__.py) 目录级入口统一运行。
 
 ### 功能与用例清单
 

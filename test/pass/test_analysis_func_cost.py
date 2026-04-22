@@ -419,21 +419,20 @@ def test_func_cost_dma_memory_traffic() -> None:
     def _builder(block: Block) -> tuple[list[Operation], SSAValue]:
         copy_op = DmaCopyOp(block.args[0], block.args[1])
         load_op = DmaLoadOp(
+            block.args[1],
             block.args[0],
             [block.args[2], block.args[3]],
             [block.args[4], block.args[5]],
             [block.args[6], block.args[7]],
-            mem_type,
-            space,
         )
         store_op = DmaStoreOp(
-            load_op.result,
+            block.args[0],
             block.args[1],
             [block.args[2], block.args[3]],
             [block.args[4], block.args[5]],
             [block.args[6], block.args[7]],
         )
-        return [copy_op, load_op, store_op], load_op.result
+        return [copy_op, load_op, store_op], block.args[1]
 
     module, _, _ = _build_module(arg_types, mem_type, _builder)
     pass_obj = AnalyzeFuncCostPass()
@@ -475,12 +474,12 @@ def test_func_cost_dma_sizes_smaller_than_shape() -> None:
         offsets = [block.args[2], block.args[3]]
         sizes = [block.args[4], block.args[5]]
         strides = [block.args[6], block.args[7]]
-        load_op = DmaLoadOp(block.args[0], offsets, sizes, strides, tile_type, space)
         alloc_op = DmaAllocOp(sizes, tile_type)
+        load_op = DmaLoadOp(alloc_op.result, block.args[0], offsets, sizes, strides)
         slice_op = DmaSliceOp(alloc_op.result, block.args[0], offsets, sizes, strides)
-        store_op = DmaStoreOp(load_op.result, block.args[1], offsets, sizes, strides)
-        deslice_op = DmaDesliceOp(load_op.result, block.args[1], offsets, sizes, strides, full_type)
-        return [load_op, alloc_op, slice_op, store_op, deslice_op], deslice_op.result
+        store_op = DmaStoreOp(alloc_op.result, block.args[1], offsets, sizes, strides)
+        deslice_op = DmaDesliceOp(alloc_op.result, block.args[1], offsets, sizes, strides, full_type)
+        return [alloc_op, load_op, slice_op, store_op, deslice_op], deslice_op.results[0]
 
     module, func_op, _ = _build_module(arg_types, full_type, _builder)
     pass_obj = AnalyzeFuncCostPass()

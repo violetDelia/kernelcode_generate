@@ -546,11 +546,19 @@ def _compile_only(source: str) -> None:
         source_path.write_text(source, encoding="utf-8")
 
         compile_result = subprocess.run(
-            [
-                "g++",
-                "-std=c++17",
-                "-I",
-                str(REPO_ROOT),
+                [
+                    "g++",
+                    "-std=c++17",
+                    # GCC 13 在 npu_demo 的 DMA 模板上会在树优化/CFG cleanup 阶段触发 ICE；
+                    # 这里关闭几组相关优化，保留“可编译”门禁本身，不影响源码语义检查。
+                    "-fno-tree-ccp",
+                    "-fno-tree-dce",
+                    "-fno-tree-forwprop",
+                    "-fno-tree-scev-cprop",
+                    "-fno-tree-vrp",
+                    "-fno-tree-ter",
+                    "-I",
+                    str(REPO_ROOT),
                 "-c",
                 str(source_path),
                 "-o",
