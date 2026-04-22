@@ -167,7 +167,7 @@ int main() {
     long long subthread_ids[4] = {-1, -1, -1, -1};
     long long subthread_nums[4] = {0, 0, 0, 0};
 
-    if (npu_demo::launch<1, 4, 1>(
+    if (npu_demo::launch<1, 4, 1, 0>(
             kernel_body,
             block_ids,
             block_nums,
@@ -295,7 +295,7 @@ static void kernel_body(npu_demo::KernelContext& ctx, int* result_code) {
 
 int main() {
     int result_code = 99;
-    if (npu_demo::launch<1, 2, 1>(kernel_body, &result_code) != StatusCode::kOk) {
+    if (npu_demo::launch<1, 2, 1, 0>(kernel_body, &result_code) != StatusCode::kOk) {
         return fail(11);
     }
     if (result_code != 0) {
@@ -329,19 +329,19 @@ static void noop(npu_demo::KernelContext& ctx) {
 }
 
 int main() {
-    if (npu_demo::launch<1, 2, 1>(noop) != StatusCode::kOk) {
+    if (npu_demo::launch<1, 2, 1, 0>(noop) != StatusCode::kOk) {
         return fail(1);
     }
-    if (npu_demo::launch<2, 2, 1>(noop) != StatusCode::kError) {
+    if (npu_demo::launch<2, 2, 1, 0>(noop) != StatusCode::kError) {
         return fail(2);
     }
-    if (npu_demo::launch<1, 1, 1>(noop) != StatusCode::kError) {
+    if (npu_demo::launch<1, 1, 1, 0>(noop) != StatusCode::kError) {
         return fail(3);
     }
-    if (npu_demo::launch<1, 9, 1>(noop) != StatusCode::kError) {
+    if (npu_demo::launch<1, 9, 1, 0>(noop) != StatusCode::kError) {
         return fail(4);
     }
-    if (npu_demo::launch<1, 2, 2>(noop) != StatusCode::kError) {
+    if (npu_demo::launch<1, 2, 2, 0>(noop) != StatusCode::kError) {
         return fail(5);
     }
     return 0;
@@ -477,7 +477,7 @@ static int fail(int code) { return code; }
 int main() {
     npu_demo::KernelContext ctx;
     try {
-        auto mem = ctx.get_dynamic_memory<SM, float>();
+        auto mem = ctx.get_dynamic_memory<MemorySpace::SM, float>();
         (void)mem;
         return fail(1);
     } catch (const std::runtime_error& err) {

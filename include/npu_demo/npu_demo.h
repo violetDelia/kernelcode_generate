@@ -6,7 +6,7 @@
 
 使用示例:
 - #include "include/npu_demo/npu_demo.h"
-- Status status = npu_demo::launch<1, 4, 1>(kernel_body, output);
+- Status status = npu_demo::launch<1, 4, 1, 0>(kernel_body, output);
 
 创建者: 朽木露琪亚
 最后修改人: jcc你莫辜负

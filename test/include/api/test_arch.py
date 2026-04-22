@@ -186,7 +186,7 @@ def _compile_only(source: str) -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-06 06:05:00 +0800
 # 最近一次运行成功时间: 2026-04-06 06:05:00 +0800
-# 测试目的: 验证 `BarrierScope` 与 `launch<block, thread, subthread>(callee, args...)` 的公开接口面可配合后端实现编译运行。
+# 测试目的: 验证 `BarrierScope` 与 `launch<block, thread, subthread, shared_memory_size>(callee, args...)` 的公开接口面可配合后端实现编译运行。
 # 使用示例: `pytest -q test/include/api/test_arch.py -k test_include_api_arch_exports_public_launch_and_scope_contract`
 # 对应功能实现文件路径: `include/npu_demo/Arch.h`
 # 对应 spec 文件路径: `spec/include/api/Arch.md`
@@ -221,7 +221,7 @@ int main() {
 
     long long seen_ids[4] = {-1, -1, -1, -1};
     long long seen_thread_nums[4] = {0, 0, 0, 0};
-    Status status = launch<1, 4, 1>(kernel_body, seen_ids, seen_thread_nums);
+    Status status = launch<1, 4, 1, 0>(kernel_body, seen_ids, seen_thread_nums);
     if (status != StatusCode::kOk) {
         return fail(5);
     }
@@ -256,7 +256,7 @@ def test_include_api_arch_rejects_string_callee_contract() -> None:
 #include "include/npu_demo/Arch.h"
 
 int main() {
-    return launch<1, 4, 1>("kernel_name");
+    return launch<1, 4, 1, 0>("kernel_name");
 }
 """
     )

@@ -67,11 +67,18 @@ class _OutlineCandidate:
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 在正式改写前固定函数对象、device 名称与三层 launch extent。
+    - 在正式改写前固定函数对象、device 名称与四段 launch extent。
     - 让校验与改写分离，避免失败路径产生半改写状态。
 
     使用示例:
-    - candidate = _OutlineCandidate(func_op=func_op, device_name="kernel_device", block=1, thread=4, subthread=1)
+    - candidate = _OutlineCandidate(
+    -     func_op=func_op,
+    -     device_name="kernel_device",
+    -     block=1,
+    -     thread=4,
+    -     subthread=1,
+    -     shared_memory_size=0,
+    - )
 
     关联文件:
     - spec: [spec/pass/outline_device_kernel.md](spec/pass/outline_device_kernel.md)
@@ -84,6 +91,7 @@ class _OutlineCandidate:
     block: int
     thread: int
     subthread: int
+    shared_memory_size: int
 
 
 def _extract_int_like_attr(attr_name: str, attr: Attribute, func_name: str) -> int:
@@ -210,8 +218,9 @@ def _collect_outline_candidate(
         raise OutlineDeviceKernelError(f"OutlineDeviceKernelError: function {func_name} must have zero results")
     if not any(True for _ in func_op.body.blocks):
         raise OutlineDeviceKernelError(f"OutlineDeviceKernelError: function {func_name} must contain a body")
+    shared_memory_size = 0
     if "shared_memory_size" in func_op.attributes:
-        _normalize_non_negative_int_attr(
+        shared_memory_size = _normalize_non_negative_int_attr(
             "shared_memory_size",
             func_op.attributes["shared_memory_size"],
             func_name,
@@ -229,6 +238,7 @@ def _collect_outline_candidate(
         block=_normalize_positive_int_attr("launch_block", func_op.attributes["launch_block"], func_name),
         thread=_normalize_positive_int_attr("launch_thread", func_op.attributes["launch_thread"], func_name),
         subthread=_normalize_positive_int_attr("launch_subthread", func_op.attributes["launch_subthread"], func_name),
+        shared_memory_size=shared_memory_size,
     )
 
 
@@ -288,7 +298,7 @@ def _build_wrapper_block(candidate: _OutlineCandidate) -> Block:
 
     功能说明:
     - 以原参数类型生成新 block 参数。
-    - 固定插入 `symbol.const` 三元组、单个 `arch.launch` 与空 `func.return`。
+    - 固定插入 `symbol.const` 四元组、单个 `arch.launch` 与空 `func.return`。
 
     使用示例:
     - block = _build_wrapper_block(candidate)
@@ -304,14 +314,18 @@ def _build_wrapper_block(candidate: _OutlineCandidate) -> Block:
     block_const = SymbolConstOp(candidate.block)
     thread_const = SymbolConstOp(candidate.thread)
     subthread_const = SymbolConstOp(candidate.subthread)
+    shared_memory_size_const = SymbolConstOp(candidate.shared_memory_size)
     launch = ArchLaunchOp(
         candidate.device_name,
         block_const.result,
         thread_const.result,
         subthread_const.result,
+        shared_memory_size_const.result,
         tuple(wrapper_block.args),
     )
-    wrapper_block.add_ops([block_const, thread_const, subthread_const, launch, func.ReturnOp()])
+    wrapper_block.add_ops(
+        [block_const, thread_const, subthread_const, shared_memory_size_const, launch, func.ReturnOp()]
+    )
     return wrapper_block
 
 

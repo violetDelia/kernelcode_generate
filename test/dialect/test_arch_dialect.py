@@ -506,12 +506,13 @@ def test_arch_launch_success() -> None:
     block = _make_symbol_value("grid_x")
     thread = _make_symbol_value("8")
     subthread = _make_symbol_value("1")
+    shared_memory_size = _make_symbol_value("0")
     arg = _make_symbol_value("arg_n")
-    op = ArchLaunchOp("my_kernel", block, thread, subthread, (arg,))
+    op = ArchLaunchOp("my_kernel", block, thread, subthread, shared_memory_size, (arg,))
 
     op.verify()
     assert _print_ir(op) == (
-        'arch.launch<%0, %1, %2>(@my_kernel, %3) : (!symbol.int<"arg_n">) -> ()'
+        'arch.launch<%0, %1, %2, %3>(@my_kernel, %4) : (!symbol.int<"arg_n">) -> ()'
     )
 
 
@@ -533,16 +534,44 @@ def test_arch_launch_verify_errors() -> None:
             _make_symbol_value("1"),
             _make_symbol_value("1"),
             _make_symbol_value("1"),
+            _make_symbol_value("0"),
         ).verify()
 
     with pytest.raises(VerifyException, match='block must have type !symbol.int<"expr">'):
-        ArchLaunchOp("my_kernel", non_symbol_value, _make_symbol_value("1"), _make_symbol_value("1")).verify()
+        ArchLaunchOp(
+            "my_kernel",
+            non_symbol_value,
+            _make_symbol_value("1"),
+            _make_symbol_value("1"),
+            _make_symbol_value("0"),
+        ).verify()
 
     with pytest.raises(VerifyException, match="thread must be > 0 when statically known"):
-        ArchLaunchOp("my_kernel", _make_symbol_value("1"), _make_symbol_value("0"), _make_symbol_value("1")).verify()
+        ArchLaunchOp(
+            "my_kernel",
+            _make_symbol_value("1"),
+            _make_symbol_value("0"),
+            _make_symbol_value("1"),
+            _make_symbol_value("0"),
+        ).verify()
 
     with pytest.raises(VerifyException, match="subthread must be > 0 when statically known"):
-        ArchLaunchOp("my_kernel", _make_symbol_value("1"), _make_symbol_value("1"), _make_symbol_value("-1")).verify()
+        ArchLaunchOp(
+            "my_kernel",
+            _make_symbol_value("1"),
+            _make_symbol_value("1"),
+            _make_symbol_value("-1"),
+            _make_symbol_value("0"),
+        ).verify()
+
+    with pytest.raises(VerifyException, match="shared_memory_size must be >= 0 when statically known"):
+        ArchLaunchOp(
+            "my_kernel",
+            _make_symbol_value("1"),
+            _make_symbol_value("1"),
+            _make_symbol_value("1"),
+            _make_symbol_value("-1"),
+        ).verify()
 
 
 # TC-ARCH-013
@@ -571,10 +600,11 @@ builtin.module {
   %tnum = arch.get_thread_num : !symbol.int<"thread_num">
   %stid = arch.get_subthread_id : !symbol.int<"subthread_id">
   %stnum = arch.get_subthread_num : !symbol.int<"subthread_num">
-  %smem = arch.get_dynamic_memory #nn.space<shared> : !nn.memory<[?], [1], i8, #nn.space<shared>>
+  %smem_size = arch.get_dynamic_memory #nn.space<shared> : !nn.memory<[?], [1], i8, #nn.space<shared>>
   %tlm1 = arch.get_dynamic_memory #nn.space<tlm1> : !nn.memory<[?], [1], i8, #nn.space<tlm1>>
   arch.barrier {scope = #arch.scope<global>, visibility = [#arch.visibility<tsm>, #arch.visibility<tlm>]}
-  arch.launch<%block, %thread, %subthread>(@my_kernel, %arg) : (!symbol.int<"arg_n">) -> ()
+  %smem = "test.op"() : () -> !symbol.int<"smem_n">
+  arch.launch<%block, %thread, %subthread, %smem>(@my_kernel, %arg) : (!symbol.int<"arg_n">) -> ()
 }
 """,
     ).parse_module()
@@ -592,7 +622,8 @@ builtin.module {
   %block = "test.op"() : () -> !symbol.int<"grid_x">
   %thread = "test.op"() : () -> !symbol.int<"block_x">
   %subthread = "test.op"() : () -> !symbol.int<"subthread_x">
-  arch.launch<%block, %thread, %subthread>("my_kernel") : () -> ()
+  %smem = "test.op"() : () -> !symbol.int<"smem_n">
+  arch.launch<%block, %thread, %subthread, %smem>("my_kernel") : () -> ()
 }
 """,
     ).parse_module()

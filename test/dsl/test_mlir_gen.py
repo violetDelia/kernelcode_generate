@@ -4201,7 +4201,7 @@ def test_build_func_op_lowers_arch_barrier(monkeypatch: pytest.MonkeyPatch) -> N
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-06 08:10:00 +0800
 # 最近一次运行成功时间: 2026-04-06 08:10:00 +0800
-# 功能说明: 验证 `launch_kernel(callee, block, thread, subthread, *args)` 可沿 DSL 链路 lowering 为 `arch.launch<...>(@callee, args...)`。
+# 功能说明: 验证 `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)` 可沿 DSL 链路 lowering 为 `arch.launch<...>(@callee, args...)`。
 # 测试目的: 锁定 callee 以 symbol ref 进入 IR，尾部 args 保持透传，且 launched body 内 `get_thread_num()` 仍返回 `!symbol.int<\"thread_num\">`。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_lowers_arch_launch_with_callee
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen/emit/core.py, kernel_gen/dsl/mlir_gen.py
@@ -4225,7 +4225,7 @@ def test_build_func_op_lowers_arch_launch_with_callee(monkeypatch: pytest.Monkey
         rhs: "Tensor[f32, 2, 2]",
         out: "Tensor[f32, 2, 2]",
     ) -> None:
-        launch_kernel(add_barrier_body, 1, 4, 1, lhs, rhs, out)
+        launch_kernel[1, 4, 1, 0](add_barrier_body, lhs, rhs, out)
 
     for fn in (add_barrier_body, launch_entry):
         monkeypatch.setitem(fn.__globals__, "BarrierVisibility", BarrierVisibility)

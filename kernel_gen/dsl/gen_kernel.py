@@ -1009,14 +1009,14 @@ class _KernelEmitter:
             raise _error(self.ctx, wrapper_name, f"npu_demo launch wrapper {field_name} must be static integer")
         return value
 
-    def _expected_npu_demo_launch_extents(self) -> tuple[int, int, int]:
+    def _expected_npu_demo_launch_extents(self) -> tuple[int, int, int, int]:
         """读取当前 target 的 launch extent 期望值。
 
         创建者: 金铲铲大作战
         最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 从 target registry 读取 `block_num/thread_num/subthread_num`。
+        - 从 target registry 读取 `block_num/thread_num/subthread_num/sm_memory_size`。
         - 作为 `npu_demo` wrapper 的唯一标准 extents 来源。
 
         使用示例:
@@ -1029,14 +1029,14 @@ class _KernelEmitter:
         """
 
         extents: list[int] = []
-        for hw_key in ("block_num", "thread_num", "subthread_num"):
+        for hw_key in ("block_num", "thread_num", "subthread_num", "sm_memory_size"):
             value = target_registry.get_target_hardware(self.ctx.target, hw_key)
             if value is None:
                 raise _error(self.ctx, "<module>", f"npu_demo target missing {hw_key}")
             extents.append(value)
-        return extents[0], extents[1], extents[2]
+        return extents[0], extents[1], extents[2], extents[3]
 
-    def _launch_extents_from_wrapper(self, launch_op: ArchLaunchOp, wrapper_name: str) -> tuple[int, int, int]:
+    def _launch_extents_from_wrapper(self, launch_op: ArchLaunchOp, wrapper_name: str) -> tuple[int, int, int, int]:
         """读取 wrapper 内 `arch.launch` 的静态 extent。
 
         创建者: 金铲铲大作战
@@ -1059,6 +1059,7 @@ class _KernelEmitter:
             self._static_launch_extent(launch_op, "block", wrapper_name),
             self._static_launch_extent(launch_op, "thread", wrapper_name),
             self._static_launch_extent(launch_op, "subthread", wrapper_name),
+            self._static_launch_extent(launch_op, "shared_memory_size", wrapper_name),
         )
 
     def _classify_npu_demo_launch_module(self, module_op: ModuleOp) -> tuple[func.FuncOp, func.FuncOp]:
@@ -1181,19 +1182,25 @@ class _KernelEmitter:
         if input_types != body_input_types:
             raise _error(self.ctx, func_name, "npu_demo launch wrapper signature must match body inputs")
 
-        expected_block, expected_thread, expected_subthread = self._expected_npu_demo_launch_extents()
-        actual_block, actual_thread, actual_subthread = self._launch_extents_from_wrapper(launch_op, func_name)
-        if (actual_block, actual_thread, actual_subthread) != (
+        expected_block, expected_thread, expected_subthread, expected_shared_memory_size = (
+            self._expected_npu_demo_launch_extents()
+        )
+        actual_block, actual_thread, actual_subthread, actual_shared_memory_size = self._launch_extents_from_wrapper(
+            launch_op, func_name
+        )
+        if (actual_block, actual_thread, actual_subthread, actual_shared_memory_size) != (
             expected_block,
             expected_thread,
             expected_subthread,
+            expected_shared_memory_size,
         ):
             raise _error(
                 self.ctx,
                 func_name,
                 "npu_demo launch wrapper must use npu_demo::launch<"
-                f"{expected_block}, {expected_thread}, {expected_subthread}>; "
-                f"got block={actual_block}, thread={actual_thread}, subthread={actual_subthread}",
+                f"{expected_block}, {expected_thread}, {expected_subthread}, {expected_shared_memory_size}>; "
+                f"got block={actual_block}, thread={actual_thread}, subthread={actual_subthread}, "
+                f"shared_memory_size={actual_shared_memory_size}",
             )
 
         if len(launch_op.args) != len(wrapper_func.args):
@@ -1409,7 +1416,7 @@ class _KernelEmitter:
         最后一次更改: 小李飞刀
 
         功能说明:
-        - wrapper 负责把 `lhs/rhs/out` 原样透传给 `npu_demo::launch<block, thread, subthread>(body, ...)`。
+        - wrapper 负责把 `lhs/rhs/out` 原样透传给 `npu_demo::launch<block, thread, subthread, shared_memory_size>(body, ...)`。
         - 不生成 `KernelContext` 参数，也不引入旧同步接口。
 
         使用示例:
@@ -1424,7 +1431,7 @@ class _KernelEmitter:
         body_input_types, body_arg_offset = self._validate_npu_demo_launch_wrapper_signature(wrapper_func, body_func)
         arg_names = _extract_arg_names(wrapper_func)
         launch_op = self._filtered_npu_demo_launch_ops(wrapper_func)[0]
-        block_extent, thread_extent, subthread_extent = self._launch_extents_from_wrapper(
+        block_extent, thread_extent, subthread_extent, shared_memory_size_extent = self._launch_extents_from_wrapper(
             launch_op,
             wrapper_func.sym_name.data,
         )
@@ -1440,9 +1447,9 @@ class _KernelEmitter:
         self.ctx.push_indent()
         call_args = ", ".join(arg_names)
         body = (
-            f"{self.ctx.current_indent}npu_demo::launch<{block_extent}, {thread_extent}, {subthread_extent}>({body_func.sym_name.data}, {call_args});"
+            f"{self.ctx.current_indent}npu_demo::launch<{block_extent}, {thread_extent}, {subthread_extent}, {shared_memory_size_extent}>({body_func.sym_name.data}, {call_args});"
             if call_args
-            else f"{self.ctx.current_indent}npu_demo::launch<{block_extent}, {thread_extent}, {subthread_extent}>({body_func.sym_name.data});"
+            else f"{self.ctx.current_indent}npu_demo::launch<{block_extent}, {thread_extent}, {subthread_extent}, {shared_memory_size_extent}>({body_func.sym_name.data});"
         )
         self.ctx.pop_indent()
         return f"{signature} {{\n{body}\n}}"

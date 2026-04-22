@@ -47,7 +47,7 @@
 - 当 value 类型为 `!symbol.int<"...">` 时，`target=cpu` 默认映射为 `long long`。
 - 当前 `test/dsl/test_emit_c.py` 已定义并可直接映射的用例范围以本节 `EC-001` ~ `EC-011` 为准，另含 `EC-009A`；`EC-012` ~ `EC-016` 在本阶段仅冻结为 `nn.add` 的节点级验收标准，待下游测试落地后再补具体测试映射。
 - 对 `target=npu_demo`，本层只冻结节点级文本映射，不定义完整函数签名或 `npu_demo::KernelContext& ctx` 的参数注入方式；上层 `gen_kernel` 需提供稳定上下文变量名 `ctx`，本层只消费该绑定。
-- 对 `target=npu_demo`，当前只承认 `thread_id/thread_num` 查询、`TSM/TLM` dynamic memory、`npu_demo::alloc` / `npu_demo::view` / `npu_demo::slice` / `npu_demo::deslice` 与 [`spec/include/api/Kernel.md`](../../spec/include/api/Kernel.md) 已冻结的 helper family 的成功发射路径；不得回退到旧公开 `Nn` 层、`source.view<T>(...)`、`load<...>`、`store<...>`、`launch`、`barrier` 或 `arch.launch_kernel`。
+- 对 `target=npu_demo`，当前只承认 `thread_id/thread_num` 查询、`TSM/TLM` dynamic memory、`npu_demo::alloc` / `npu_demo::view` / `npu_demo::slice` / `npu_demo::deslice` 与 [`spec/include/api/Kernel.md`](../../spec/include/api/Kernel.md) 已冻结的 helper family 的成功发射路径；不得回退到旧公开 `Nn` 层、`source.view<T>(...)`、`load<...>`、`store<...>`、`launch`、`barrier` 或 `arch.launch(...)`。
 - 当前 CPU 恢复范围继续以 `test/dsl/test_emit_c.py` 已定义用例为准；`target=npu_demo` 的专项验收目标先行冻结，留待后续实现阶段补齐对应测试。
 
 ## 公开接口
@@ -275,7 +275,7 @@ cpu::img2col2d(input_tile, col_tile, kh, kw, sh, sw, dh, dw, ph, pw, pl, pr);
 - 以下规则仅适用于 `target=npu_demo`，且只定义单个查询/访存/算子节点如何发成 body-level kernel 内部的局部文本片段。
 - 本层不声明 `npu_demo::KernelContext` 局部变量，也不定义完整函数签名；上层 `gen_kernel` 必须提供已绑定的上下文变量名 `ctx`，本层只负责引用 `ctx.thread_id()`、`ctx.thread_num()` 与 `ctx.get_dynamic_memory<Space, T>()`。
 - 本层当前只收口 `thread_id/thread_num` 查询、`TSM/TLM` dynamic memory、`npu_demo::alloc`、`npu_demo::view`、`npu_demo::slice`、`npu_demo::deslice` 与 `npu_demo::Kernel` helper family。
-- 本层不得回退到 CPU 风格 `.view<T>()`、`load<...>`、`store<...>`、显式 loop nest copy、`launch`、`barrier` 或 `arch.launch_kernel`。
+- 本层不得回退到 CPU 风格 `.view<T>()`、`load<...>`、`store<...>`、显式 loop nest copy、`launch`、`barrier` 或 `arch.launch(...)`。
 
 ### `arch.get_thread_id` / `arch.get_thread_num`
 

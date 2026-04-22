@@ -2,11 +2,11 @@
 
 ## 功能简介
 
-定义 `npu_demo` 后端私有 include/runtime 规范，明确 `KernelContext` 的运行时视图语义、`KernelContext::barrier(visibility, scope)` 的同步契约、`npu_demo::launch<block, thread, subthread>(callee, args...)` 的后端承接位置，以及 `get_dynamic_memory<Space, T>()` 的片上内存入口行为。
+定义 `npu_demo` 后端私有 include/runtime 规范，明确 `KernelContext` 的运行时视图语义、`KernelContext::barrier(visibility, scope)` 的同步契约、`npu_demo::launch<block, thread, subthread, shared_memory_size>(callee, args...)` 的后端承接位置，以及 `get_dynamic_memory<Space, T>()` 的片上内存入口行为。
 同时定义 `include/npu_demo/npu_demo.h` 的 public function namespace 总合同：面向调用方的后端函数入口统一放在 `namespace npu_demo`，基础类型继续沿用 `include/api` 的公开类型边界。
 
 - `KernelContext` 是由 `launch` 注入到 kernel body 的运行时上下文视图，不再是固定常量容器。
-- `thread_num()` / `block_num()` / `subthread_num()` 返回本次 launch 的 extent，而不是 target registry 的固定模板值。
+- `thread_num()` / `block_num()` / `subthread_num()` 返回本次 launch 的 extent，而不是 target registry 的固定模板值；`shared_memory_size` 作为 launch metadata 以编译期模板参数承接。
 - `include/npu_demo/npu_demo.h` 作为单入口头文件，需透传 `include/api/Memory.h` / `Dma.h` / `Kernel.h` / `Arch.h` 的统一声明，并汇聚 `include/npu_demo/Core.h` / `Memory.h` / `Dma.h` / `Kernel.h` / `Arch.h` 的后端实现。
 - `npu_demo::add/sub/mul/...`、`npu_demo::launch(...)`、`npu_demo::build_contiguous_stride(...)`、`npu_demo::view(...)`、`npu_demo::alloc(...)`、`npu_demo::slice(...)`、`npu_demo::deslice(...)` 是 public function 的唯一成功消费方向；`detail` 只服务实现内部。
 
@@ -46,7 +46,7 @@
 - `include/npu_demo/npu_demo.h` 是唯一聚合入口，不新增第二套 target include。
 - `Kernel` family 的公开 helper 名、模板顺序与参数顺序由 [`spec/include/api/Kernel.md`](../../../spec/include/api/Kernel.md) 冻结；`npu_demo` 只负责承接实现，不得重新发明旧 `Nn` 公共别名。
 - `KernelContext` 只表示当前 launched body 的运行时视图；不要求公开默认构造、复制持久化或脱离 launch 生命周期独立使用。
-- P0 launch 子集固定为：`block=1`、`subthread=1`、`2 <= thread <= registry.hardware.thread_num`；不支持的 extent 必须显式失败，禁止静默回退到单线程或忽略部分 extent。
+- P0 launch 子集固定为：`block=1`、`subthread=1`、`shared_memory_size=0`、`2 <= thread <= registry.hardware.thread_num`；不支持的 extent 必须显式失败，禁止静默回退到单线程或忽略部分 extent。
 - `block_num()` / `thread_num()` / `subthread_num()` 的公开语义是“当前 launch 值”；`target.registry` 中的 `block_num/thread_num/subthread_num` 只作为能力上限与容量校验基线，不再直接等于 launched body 中可见的当前值。
 - `KernelContext::barrier(visibility, scope)` 在 `npu_demo` P0 仅支持 `visibility={BarrierVisibility::TSM, BarrierVisibility::TLM}` 且两者各出现一次，并要求 `scope=BarrierScope::BLOCK`；其他组合必须显式失败。
 - `get_dynamic_memory<Space, T>()` 只覆盖当前 `npu_demo` 片上空间入口：`TSM/TLM1/TLM2/TLM3` 返回运行时视图，`SM/LM` 因容量为 `0` 必须显式失败，`GM` 不属于该接口输入域。
@@ -95,7 +95,7 @@ Status deslice_status = npu_demo::deslice(out, tile, Vector{0, 0}, Vector{2, 3},
 - 返回类型：由各 public function 自行定义。
 - 限制条件：旧全局函数不再作为新增正向测试或生成源码的成功消费方向。
 
-### `npu_demo::launch<block, thread, subthread>(callee, args...)`
+### `npu_demo::launch<block, thread, subthread, shared_memory_size>(callee, args...)`
 
 功能说明：
 
@@ -107,6 +107,7 @@ Status deslice_status = npu_demo::deslice(out, tile, Vector{0, 0}, Vector{2, 3},
 - `block (template int)`：编译期 block extent。
 - `thread (template int)`：编译期 thread extent。
 - `subthread (template int)`：编译期 subthread extent。
+- `shared_memory_size (template int)`：编译期共享内存规模。
 - `callee (callable)`：kernel body 对应的函数对象。
 - `args...`：按原顺序转发给 `callee` 的 kernel 参数。
 
@@ -125,12 +126,12 @@ static void add_barrier_body(
     ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);
 }
 
-Status status = npu_demo::launch<1, 4, 1>(add_barrier_body, lhs, rhs, out);
+Status status = npu_demo::launch<1, 4, 1, 0>(add_barrier_body, lhs, rhs, out);
 ```
 
 注意事项：
 
-- 公开源码形态固定为 `launch<block, thread, subthread>(callee, args...)`；不得回退为字符串 callee 或运行期 extent 位置参数。
+- 公开源码形态固定为 `launch<block, thread, subthread, shared_memory_size>(callee, args...)`；不得回退为字符串 callee 或运行期 extent 位置参数。
 - `callee` 必须是函数对象或等价可调用对象；`"add_barrier_body"` 之类字符串不属于合法公开合同。
 - `launch` 必须把同一 block 内线程绑定到同一个 barrier 共享对象上，使 `ctx.barrier(...)` 真正同步本次 launch 的参与线程。
 - P0 下 `block` 与 `subthread` 固定为 `1`，`thread` 必须落在 `[2, registry.hardware.thread_num]`；超出能力或不属于 P0 子集时必须显式失败。
@@ -198,7 +199,7 @@ long long tnum = ctx.thread_num();
 - 返回值语义统一为 `int64`，当前以 `long long` 表达。
 - `block_id()` / `thread_id()` / `subthread_id()` 必须是以 `0` 为起点的当前执行索引，分别满足 `0 <= id < num`。
 - `block_num()` / `thread_num()` / `subthread_num()` 必须返回当前 launch 的 extent，而不是 registry 的固定模板值。
-- `npu_demo` 的 P0 路径固定为 `block_num()==1`、`subthread_num()==1`，`thread_num()` 返回本次 `launch<1, thread, 1>` 中的 `thread` 模板值。
+- `npu_demo` 的 P0 路径固定为 `block_num()==1`、`subthread_num()==1`、`shared_memory_size==0`，`thread_num()` 返回本次 `launch<1, thread, 1, 0>` 中的 `thread` 模板值。
 
 返回与限制：
 
@@ -283,7 +284,7 @@ Memory<TLM3, float> out = ctx.get_dynamic_memory<TLM3, float>();
   - 验证 `Memory/Dma` public function 通过 `npu_demo::build_contiguous_stride/view/alloc/slice/deslice` 正向消费，且正向片段不消费 `detail` 或旧 helper 名称。
   - 验证 `KernelContext` 查询返回当前 launch 值，而非旧的固定模板常量。
   - 验证 `ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK)` 的参数合同与显式失败边界。
-  - 验证 `npu_demo::launch<1, thread, 1>(...)` 的函数对象 callee、launch extent 校验与 `thread_num()` 运行时视图。
+  - 验证 `npu_demo::launch<1, thread, 1, 0>(...)` 的函数对象 callee、launch extent 校验与 `thread_num()` 运行时视图。
 - 验证 `include/npu_demo/npu_demo.h` 的最小 public namespace smoke：`Vector{...}` 可用于 `Memory` shape/stride，`npu_demo::add` 与 `npu_demo::launch` 可编译运行，正向片段不消费 `npu_demo::detail`。
 - 验证 `get_dynamic_memory<TSM/TLM1/TLM2/TLM3, float>()` 返回固定容量视图，`SM/LM` 因零容量显式失败。
 - 功能与用例清单：

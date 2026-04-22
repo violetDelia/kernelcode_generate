@@ -242,6 +242,7 @@ def test_outline_device_kernel_outlines_single_function() -> None:
         "symbol.const",
         "symbol.const",
         "symbol.const",
+        "symbol.const",
         "arch.launch",
         "func.return",
     ]
@@ -250,6 +251,7 @@ def test_outline_device_kernel_outlines_single_function() -> None:
     printed = _print_ir(module)
     assert "@kernel_device" in printed
     assert 'symbol.const 4 : !symbol.int<"4">' in printed
+    assert 'symbol.const 0 : !symbol.int<"0">' in printed
     assert "arch.launch<" in printed
     assert "shared_memory_size = 0 : i64" in printed
 
@@ -273,7 +275,8 @@ builtin.module {
   func.func @kernel(%arg0 : !nn.memory<[4], [1], f32, #nn.space<global>>) attributes {
     launch_block = 1 : i64,
     launch_thread = 2 : i64,
-    launch_subthread = 1 : i64
+    launch_subthread = 1 : i64,
+    shared_memory_size = 0 : i64
   } {
     "test.op"(%arg0) : (!nn.memory<[4], [1], f32, #nn.space<global>>) -> ()
     func.return
@@ -338,7 +341,8 @@ builtin.module {
   func.func @kernel() attributes {
     launch_block = 1 : i64,
     launch_thread = 0 : i64,
-    launch_subthread = 1 : i64
+    launch_subthread = 1 : i64,
+    shared_memory_size = 0 : i64
   } {
     func.return
   }
@@ -430,7 +434,8 @@ builtin.module {
   func.func @kernel() -> i32 attributes {
     launch_block = 1 : i64,
     launch_thread = 1 : i64,
-    launch_subthread = 1 : i64
+    launch_subthread = 1 : i64,
+    shared_memory_size = 0 : i64
   } {
     %0 = "test.op"() : () -> i32
     func.return %0 : i32
@@ -461,7 +466,8 @@ builtin.module {
   func.func @kernel() attributes {
     launch_block = 1 : i64,
     launch_thread = 1 : i64,
-    launch_subthread = 1 : i64
+    launch_subthread = 1 : i64,
+    shared_memory_size = 0 : i64
   } {
     func.return
   }

@@ -4,7 +4,7 @@
 
 使用示例:
 - #include "include/npu_demo/Arch.h"
-- Status status = npu_demo::launch<1, 4, 1>(kernel_body, output);
+- Status status = npu_demo::launch<1, 4, 1, 0>(kernel_body, output);
 
 创建者: 小李飞刀
 最后修改人: 金铲铲大作战
@@ -470,7 +470,7 @@ private:
 - 启动一次 npu_demo P0 kernel 执行，并向 callee 注入运行时 KernelContext。
 
 使用示例:
-- Status status = launch<1, 4, 1>(kernel_body, output);
+- Status status = launch<1, 4, 1, 0>(kernel_body, output);
 
 创建者: 小李飞刀
 最后修改人: 小李飞刀
@@ -480,7 +480,7 @@ private:
 - test: test/include/api/test_arch.py
 - 功能实现: include/npu_demo/Arch.h
 */
-template <long long block, long long thread, long long subthread, typename Callable, typename... Args>
+template <long long block, long long thread, long long subthread, long long shared_memory_size, typename Callable, typename... Args>
 inline Status launch(Callable&& callee, Args&&... args) {
     static_assert(
         !std::is_convertible<typename std::decay<Callable>::type, const char*>::value,
@@ -489,7 +489,7 @@ inline Status launch(Callable&& callee, Args&&... args) {
         std::is_invocable<typename std::decay<Callable>::type, npu_demo::KernelContext&, Args...>::value,
         "launch callee must accept npu_demo::KernelContext& as first argument");
 
-    if constexpr (block <= 0 || thread <= 0 || subthread <= 0) {
+    if constexpr (block <= 0 || thread <= 0 || subthread <= 0 || shared_memory_size < 0) {
         return StatusCode::kError;
     }
     if constexpr (

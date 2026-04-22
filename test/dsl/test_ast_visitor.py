@@ -1041,8 +1041,8 @@ def test_emit_mlir_lowers_arch_get_subthread_num_query() -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-03-28 13:01:00 +0800
 # 最近一次运行成功时间: 2026-03-28 13:01:00 +0800
-# 功能说明: 验证未显式导入的 bare launch_kernel 调用会在 AST 入口被统一拒绝。
-# 测试目的: 锁定未导入的 launch_kernel(...) 不再进入 helper 语义校验，而是直接返回 Unsupported call expression。
+# 功能说明: 验证未显式导入的 bare launch_kernel 下标调用会在 AST 入口被统一拒绝。
+# 测试目的: 锁定未导入的 launch_kernel[...] 不再进入 helper 语义校验，而是直接返回 Unsupported call expression。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_parse_function_rejects_invalid_launch_kernel_variants
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
 # 对应 spec 文件路径: spec/dsl/ast.md
@@ -1054,28 +1054,28 @@ def test_parse_function_rejects_invalid_launch_kernel_variants(
         (
             """\
 def kernel() -> None:
-    launch_kernel("k", 1, 2)
+    launch_kernel[1, 2, 1, 0]("k")
 """,
             "Unsupported call expression",
         ),
         (
             """\
 def kernel() -> None:
-    launch_kernel("", 1, 2, 3)
+    launch_kernel[1, 2, 1, 0]("")
 """,
             "Unsupported call expression",
         ),
         (
             """\
 def kernel() -> None:
-    launch_kernel("k", 1.0, 2, 3)
+    launch_kernel[1.0, 2, 1, 0]("k")
 """,
             "Unsupported call expression",
         ),
         (
             """\
 def kernel() -> None:
-    launch_kernel("k", 0, 2, 3)
+    launch_kernel[0, 2, 1, 0]("k")
 """,
             "Unsupported call expression",
         ),
@@ -1110,6 +1110,7 @@ def test_emit_mlir_rejects_invalid_arch_launch_kernel_args() -> None:
                 block=ConstAST(1),
                 thread=ConstAST(1),
                 subthread=ConstAST(1),
+                shared_memory_size=ConstAST(0),
             ),
             "launch_kernel callee must be function symbol reference",
         ),
@@ -1119,6 +1120,7 @@ def test_emit_mlir_rejects_invalid_arch_launch_kernel_args() -> None:
                 block=ConstAST("bad"),
                 thread=ConstAST(1),
                 subthread=ConstAST(1),
+                shared_memory_size=ConstAST(0),
             ),
             "launch_kernel block must be !symbol.int",
         ),
@@ -1146,7 +1148,7 @@ def test_build_func_op_rejects_invalid_arch_launch_kernel_args() -> None:
     from kernel_gen.operation.arch import launch_kernel
 
     def launch_kernel_kernel() -> None:
-        launch_kernel("kernel", 1, 2, 3)
+        launch_kernel[1, 2, 1, 0]("kernel")
 
     with pytest.raises(AstVisitorError, match="launch_kernel callee must be function symbol reference"):
         build_func_op(launch_kernel_kernel)

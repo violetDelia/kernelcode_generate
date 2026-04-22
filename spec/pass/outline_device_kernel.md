@@ -3,7 +3,7 @@
 ## 功能简介
 
 - 定义 `outline-device-kernel` pass 的公开合同：把显式标记的 device 风格 `func.func` outline 成 `host wrapper + device body` 双函数 IR。
-- 首轮能力固定为纯 IR host launch outline：只消费 `launch_block / launch_thread / launch_subthread` 三项显式属性，不从 target registry、函数名或 IR 结构做隐式推断。
+- 首轮能力固定为纯 IR host launch outline：触发仍只消费 `launch_block / launch_thread / launch_subthread` 三项显式属性，不从 target registry、函数名或 IR 结构做隐式推断；`shared_memory_size` 作为 device metadata 与 wrapper 的第 4 个 `arch.launch` extent 一并承接。
 - 首轮 ABI 边界固定为“只接受零返回 / 已完成 out-param ABI 的 `func.func`”；命中非空返回值时显式报错，不在本轮同步承担返回值改写。
 
 ## 文档信息
@@ -33,7 +33,7 @@
 - `host wrapper`：保留原函数名、只负责常量 launch extent、单个 `arch.launch` 与 `func.return` 的 host 侧 wrapper。
 - `device body`：由原函数主体改写得到的新 `func.func @<orig>_device`。
 - `trigger attrs`：`launch_block / launch_thread / launch_subthread` 三项显式属性；三者必须同时存在才能触发 outline。
-- `metadata-only`：`shared_memory_size` 仅保留在 outlined device function 的 `func.func attributes` 中，不扩展 `arch.launch` 形状。
+- `metadata-plus-launch-extent`：`shared_memory_size` 仅保留在 outlined device function 的 `func.func attributes` 中，并作为 host wrapper 的第 4 个 `arch.launch` extent operand 一并写出。
 
 ## 目标
 
@@ -51,8 +51,8 @@
 - 输入 `func.func` 必须是零返回；若上游已完成 out-param ABI，本 pass 直接沿用该零返回签名；命中非空返回值时必须显式报错。
 - host wrapper 保留原函数名与原参数顺序，且函数体只允许 outline pass 新增的 extent 常量、单个 `arch.launch` 与 `func.return`。
 - device body 函数名固定为 `@<orig>_device`，继承原参数顺序与原主体 op 序列。
-- wrapper 上不得保留 `launch_block / launch_thread / launch_subthread`；`shared_memory_size` 若存在，只保留在 device function attributes 上。
-- `shared_memory_size` 仅做 metadata 合法性校验：需要是 int-like attr，且值必须大于等于 `0`；本轮不扩展 `arch.launch` op 的 operand/attribute 形状。
+- wrapper 上不得保留 `launch_block / launch_thread / launch_subthread`；`shared_memory_size` 若存在，只保留在 device function attributes 上，并由 wrapper 的 `arch.launch` 透传为第 4 个 extent operand。
+- `shared_memory_size` 仅做 metadata 合法性校验：需要是 int-like attr，且值必须大于等于 `0`；本轮扩展 `arch.launch` op 的第 4 个 extent operand，但不改写其它 op 属性形状。
 - 旧路径 `kernel_gen.passes.lowering.outline_device_kernel` 只保留兼容导入，不再承载独立实现文件。
 - 本轮范围排除 `gen_kernel(target="npu_demo")` / `ctx` 专用适配，也不把 `buffer-results-to-out-params` 并入本 pass 职责面。
 
@@ -195,7 +195,7 @@ builtin.module {
     %b = symbol.const 1 : !symbol.int<"1">
     %t = symbol.const 4 : !symbol.int<"4">
     %s = symbol.const 1 : !symbol.int<"1">
-    arch.launch<%b, %t, %s>(@matmul_kernel_device, %lhs, %rhs, %out)
+    arch.launch<%b, %t, %s, %smem>(@matmul_kernel_device, %lhs, %rhs, %out)
     func.return
   }
 
@@ -236,6 +236,6 @@ builtin.module {
   - `HL-ODK-001`：显式 `launch_block / launch_thread / launch_subthread` 三项属性同时存在时才触发 outline。
   - `HL-ODK-002`：输出 IR 固定为 `@name + @name_device` 双函数形状，wrapper 中只保留单个 `arch.launch`。
   - `HL-ODK-003`：非空返回值输入显式失败，不承担 ABI 改写。
-  - `HL-ODK-004`：`shared_memory_size` 只保留在 device function attributes，`arch.launch` 形状保持不变。
+  - `HL-ODK-004`：`shared_memory_size` 只保留在 device function attributes，但 wrapper 必须把它透传为 `arch.launch` 的第 4 个 extent operand。
   - `HL-ODK-005`：`shared_memory_size` 非 int-like 或负值时显式失败。
   - `HL-ODK-006`：`default-lowering remains unchanged`，调用方必须显式追加 `outline-device-kernel`。

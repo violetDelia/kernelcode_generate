@@ -604,7 +604,7 @@ def _ensure_npu_demo_target() -> None:
 
     功能说明:
     - 确保 registry 始终包含 `kernel_gen/target/targets/npu_demo.txt` 定义的固定 target。
-    - 固定 `arch` 能力白名单、`arch.launch_kernel` 未启用结论与硬件参数。
+    - 固定 `arch.launch` 能力白名单、旧 `arch.launch_kernel` 未启用结论与硬件参数。
 
     使用示例:
     - _ensure_npu_demo_target()

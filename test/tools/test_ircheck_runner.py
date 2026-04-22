@@ -140,7 +140,8 @@ builtin.module {
     %c1 = symbol.const 1 : !symbol.int<"1">
     %c1_1 = symbol.const 1 : !symbol.int<"1">
     %c1_2 = symbol.const 1 : !symbol.int<"1">
-    arch.launch<%c1, %c1_1, %c1_2>(@_device, %arg0) : (!nn.memory<[4], [1], f32, #nn.space<global>>) -> ()
+    %c0 = symbol.const 0 : !symbol.int<"0">
+    arch.launch<%c1, %c1_1, %c1_2, %c0>(@_device, %arg0) : (!nn.memory<[4], [1], f32, #nn.space<global>>) -> ()
     func.return
   }
 

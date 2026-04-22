@@ -943,11 +943,18 @@ class ArchLaunchKernelAST:
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 表示 `launch_kernel(callee, block, thread, subthread, *args)` 的启动描述。
-    - 仅校验 callee symbol ref 与三层规模的基础约束，不承担 lowering 细节。
+    - 表示 `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)` 的启动描述。
+    - 仅校验 callee symbol ref 与四字段 launch ABI 的基础约束，不承担 lowering 细节。
 
     使用示例:
-    - ArchLaunchKernelAST(callee="kernel_body", block=ScalarArgAST("block", int), thread=ConstAST(128), subthread=ConstAST(4), args=[TensorAST("lhs", memory)])
+    - ArchLaunchKernelAST(
+    -     callee="kernel_body",
+    -     block=ScalarArgAST("block", int),
+    -     thread=ConstAST(128),
+    -     subthread=ConstAST(4),
+    -     args=[TensorAST("lhs", memory)],
+    -     shared_memory_size=ConstAST(0),
+    - )
 
     关联文件:
     - spec: spec/dsl/ast.md
@@ -960,6 +967,7 @@ class ArchLaunchKernelAST:
     thread: object
     subthread: object
     args: list[object] = field(default_factory=list)
+    shared_memory_size: object = 0
     location: SourceLocation | None = None
 
 

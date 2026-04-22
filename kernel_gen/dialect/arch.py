@@ -86,10 +86,10 @@ def _verify_symbol_int_operand(value: SSAValue, field_name: str, op_name: str) -
     最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 统一校验 `arch.launch_kernel` 的维度输入类型。
+    - 统一校验 `arch.launch` 的维度输入类型。
 
     使用示例:
-    - _verify_symbol_int_operand(op.block, "block", "arch.launch_kernel")
+    - _verify_symbol_int_operand(op.block, "block", "arch.launch")
 
     关联文件:
     - spec: spec/dialect/arch.md
@@ -121,7 +121,7 @@ def _verify_positive_static_symbol(operand_type: SymbolValueType, field_name: st
     - 对无法静态求值的符号表达式保持放行。
 
     使用示例:
-    - _verify_positive_static_symbol(SymbolValueType.from_expr("8"), "block", "arch.launch_kernel")
+    - _verify_positive_static_symbol(SymbolValueType.from_expr("8"), "block", "arch.launch")
 
     关联文件:
     - spec: spec/dialect/arch.md
@@ -135,6 +135,37 @@ def _verify_positive_static_symbol(operand_type: SymbolValueType, field_name: st
             _ERROR_TEMPLATE.format(
                 scene=_ERROR_SCENE,
                 expected=f"{op_name} {field_name} must be > 0 when statically known",
+                actual=str(static_value),
+                action=_ERROR_ACTION,
+            )
+        )
+
+
+def _verify_non_negative_static_symbol(operand_type: SymbolValueType, field_name: str, op_name: str) -> None:
+    """校验可静态求值的 symbol.int 启动规模为非负整数。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 对字面量整数表达式执行 `>= 0` 约束。
+    - 对无法静态求值的符号表达式保持放行。
+
+    使用示例:
+    - _verify_non_negative_static_symbol(SymbolValueType.from_expr("0"), "shared_memory_size", "arch.launch")
+
+    关联文件:
+    - spec: spec/dialect/arch.md
+    - test: test/dialect/test_arch_dialect.py
+    - 功能实现: kernel_gen/dialect/arch.py
+    """
+
+    static_value = operand_type.get_value()
+    if isinstance(static_value, int) and static_value < 0:
+        raise VerifyException(
+            _ERROR_TEMPLATE.format(
+                scene=_ERROR_SCENE,
+                expected=f"{op_name} {field_name} must be >= 0 when statically known",
                 actual=str(static_value),
                 action=_ERROR_ACTION,
             )
@@ -776,13 +807,14 @@ class ArchBarrierOp(IRDLOperation):
 
 @irdl_op_definition
 class ArchLaunchOp(IRDLOperation):
-    """描述一次三层执行维度的 kernel 启动请求。"""
+    """描述一次四层执行规模的 kernel 启动请求。"""
 
     name = "arch.launch"
 
     block = operand_def(Attribute)
     thread = operand_def(Attribute)
     subthread = operand_def(Attribute)
+    shared_memory_size = operand_def(Attribute)
     args = var_operand_def(Attribute)
     callee = attr_def(SymbolRefAttr)
 
@@ -794,6 +826,7 @@ class ArchLaunchOp(IRDLOperation):
         block: SSAValue | Operation,
         thread: SSAValue | Operation,
         subthread: SSAValue | Operation,
+        shared_memory_size: SSAValue | Operation,
         args: Sequence[SSAValue | Operation] = (),
     ) -> None:
         """初始化 arch.launch。
@@ -802,10 +835,10 @@ class ArchLaunchOp(IRDLOperation):
         最后一次更改: 小李飞刀
 
         功能说明:
-        - 记录 `@callee`、block/thread/subthread 与尾部 args。
+        - 记录 `@callee`、block/thread/subthread/shared_memory_size 与尾部 args。
 
         使用示例:
-        - ArchLaunchOp("my_kernel", block, thread, subthread, (lhs, rhs, out))
+        - ArchLaunchOp("my_kernel", block, thread, subthread, shared_memory_size, (lhs, rhs, out))
 
         关联文件:
         - spec: spec/dialect/arch.md
@@ -815,7 +848,7 @@ class ArchLaunchOp(IRDLOperation):
 
         callee_attr = SymbolRefAttr(callee) if isinstance(callee, str) else callee
         super().__init__(
-            operands=[block, thread, subthread, list(args)],
+            operands=[block, thread, subthread, shared_memory_size, list(args)],
             attributes={"callee": callee_attr},
         )
 
@@ -826,11 +859,12 @@ class ArchLaunchOp(IRDLOperation):
         最后一次更改: 小李飞刀
 
         功能说明:
-        - 校验 `@callee` 与三层 extent。
-        - extent 必须是 `!symbol.int<...>` 且静态已知时必须 `> 0`。
+        - 校验 `@callee` 与四字段 extent。
+        - 前三字段必须是 `!symbol.int<...>` 且静态已知时必须 `> 0`。
+        - `shared_memory_size` 必须是 `!symbol.int<...>` 且静态已知时必须 `>= 0`。
 
         使用示例:
-        - ArchLaunchOp("kernel", block, thread, subthread).verify()
+        - ArchLaunchOp("kernel", block, thread, subthread, shared_memory_size).verify()
 
         关联文件:
         - spec: spec/dialect/arch.md
@@ -845,6 +879,9 @@ class ArchLaunchOp(IRDLOperation):
             operand_value = SSAValue.get(getattr(self, field_name))
             operand_type = _verify_symbol_int_operand(operand_value, field_name, self.name)
             _verify_positive_static_symbol(operand_type, field_name, self.name)
+        shared_memory_size = SSAValue.get(self.shared_memory_size)
+        shared_memory_size_type = _verify_symbol_int_operand(shared_memory_size, "shared_memory_size", self.name)
+        _verify_non_negative_static_symbol(shared_memory_size_type, "shared_memory_size", self.name)
 
     def print(self: "ArchLaunchOp", printer: Printer) -> None:
         """打印 arch.launch 自定义文本语法。"""
@@ -855,6 +892,8 @@ class ArchLaunchOp(IRDLOperation):
         printer.print_ssa_value(self.thread)
         printer.print_string(", ")
         printer.print_ssa_value(self.subthread)
+        printer.print_string(", ")
+        printer.print_ssa_value(self.shared_memory_size)
         printer.print_string(">(")
         printer.print_attribute(self.callee)
         for operand in self.args:
@@ -877,6 +916,8 @@ class ArchLaunchOp(IRDLOperation):
         thread = parser.parse_operand("Expected thread extent operand.")
         parser.parse_punctuation(",", f"Expected ',' after thread extent in {cls.name}.")
         subthread = parser.parse_operand("Expected subthread extent operand.")
+        parser.parse_punctuation(",", f"Expected ',' after subthread extent in {cls.name}.")
+        shared_memory_size = parser.parse_operand("Expected shared_memory_size extent operand.")
         parser.parse_punctuation(">", f"Expected '>' after extents in {cls.name}.")
         parser.parse_punctuation("(", f"Expected '(' before callee in {cls.name}.")
         callee = parser.parse_attribute()
@@ -897,7 +938,7 @@ class ArchLaunchOp(IRDLOperation):
         for operand, operand_type in zip(args, arg_types, strict=True):
             if SSAValue.get(operand).type != operand_type:
                 _raise_verify_error("arch.launch arg types must match operand types")
-        return cls(callee, block, thread, subthread, args)
+        return cls(callee, block, thread, subthread, shared_memory_size, args)
 
 
 ArchLaunchKernelOp = ArchLaunchOp

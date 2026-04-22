@@ -102,6 +102,7 @@ def test_attach_arch_information_writes_registry_launch_extents() -> None:
     assert func_op.attributes["launch_block"] == IntAttr(1)
     assert func_op.attributes["launch_thread"] == IntAttr(1)
     assert func_op.attributes["launch_subthread"] == IntAttr(1)
+    assert func_op.attributes["shared_memory_size"] == IntAttr(0)
 
 
 def test_attach_arch_information_rejects_partial_launch_attrs() -> None:
@@ -111,7 +112,7 @@ def test_attach_arch_information_rejects_partial_launch_attrs() -> None:
 
     with pytest.raises(
         AttachArchInformationError,
-        match=r"^AttachArchInformationError: function launch_kernel must define launch_block, launch_thread, and launch_subthread together$",
+        match=r"^AttachArchInformationError: function launch_kernel must define launch_block, launch_thread, launch_subthread, and shared_memory_size together$",
     ):
         AttachArchInformationPass(target="npu_demo").run(module)
 

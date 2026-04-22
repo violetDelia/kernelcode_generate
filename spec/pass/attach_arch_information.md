@@ -2,7 +2,7 @@
 
 ## 功能简介
 
-- 定义 `attach-arch-information` pass 的公开合同：从 target registry 读取 launch extent，并把 `launch_block / launch_thread / launch_subthread` 写回入口 `func.func`。
+- 定义 `attach-arch-information` pass 的公开合同：从 target registry 读取 launch extent 与 `shared_memory_size`，并把 `launch_block / launch_thread / launch_subthread / shared_memory_size` 写回入口 `func.func`。
 - 该 pass 不承担 outline 逻辑，只负责把 IR 级 launch 信息补齐到后续 `outline-device-kernel` 可消费的状态。
 
 ## 文档信息
@@ -23,11 +23,11 @@
 ## 术语
 
 - `entry func`：module 中唯一的非 declaration `func.func`，作为 attach 的默认入口。
-- `launch extent`：从 target registry 读取的 `block_num / thread_num / subthread_num` 三层 launch 数值。
+- `launch extent`：从 target registry 读取的 `block_num / thread_num / subthread_num / sm_memory_size` 四层 launch 数值。
 
 ## 目标
 
-- 为入口函数补齐 `launch_block / launch_thread / launch_subthread`。
+- 为入口函数补齐 `launch_block / launch_thread / launch_subthread / shared_memory_size`。
 - 让 `npu_demo` 的 launch extent 统一从 `kernel_gen/target/targets/npu_demo.txt` 读取。
 - 若入口已存在 launch 属性，则必须与 target registry 的 extent 完全一致。
 
@@ -35,8 +35,8 @@
 
 - 只接受 `builtin.module` 输入。
 - 只对 module 中唯一的 non-declaration `func.func` 生效；缺失或多个时必须显式失败，不得静默选择首个函数。
-- 三项 launch 属性必须同时存在；部分存在时必须显式失败。
-- `launch_block / launch_thread / launch_subthread` 仅写回 `func.func attributes`，不扩展 `arch.launch` 形状。
+- 四项 launch 属性必须同时存在；部分存在时必须显式失败。
+- `launch_block / launch_thread / launch_subthread / shared_memory_size` 仅写回 `func.func attributes`，不扩展 `arch.launch` 形状。
 
 ## 公开接口
 

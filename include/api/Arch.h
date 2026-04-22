@@ -202,7 +202,7 @@ protected:
 - 声明公开 kernel launch 入口，具体后端实现由私有 include 提供。
 
 使用示例:
-- Status status = launch<1, 4, 1>(kernel_body, input, output);
+- Status status = launch<1, 4, 1, 0>(kernel_body, input, output);
 
 创建者: 小李飞刀
 最后修改人: 小李飞刀
@@ -212,7 +212,7 @@ protected:
 - test: test/include/api/test_arch.py
 - 功能实现: include/npu_demo/Arch.h
 */
-template <long long block, long long thread, long long subthread, typename Callable, typename... Args>
+template <long long block, long long thread, long long subthread, long long shared_memory_size, typename Callable, typename... Args>
 Status launch(Callable&& callee, Args&&... args);
 
 #endif  // KERNELCODE_GENERATE_INCLUDE_API_ARCH_H_

@@ -201,6 +201,7 @@ def _make_npu_demo_add_barrier_module(
     block_extent_expr: str = "1",
     thread_extent_expr: str = "1",
     subthread_extent_expr: str = "1",
+    shared_memory_size_expr: str = "0",
     barrier_scope: str = "block",
     barrier_visibility_names: tuple[str, ...] = ("tsm", "tlm"),
     tlm_space: str = "tlm1",
@@ -295,14 +296,16 @@ def _make_npu_demo_add_barrier_module(
     block_extent = FakeSymbolValueOp(block_extent_expr)
     thread_extent = FakeSymbolValueOp(thread_extent_expr)
     subthread_extent = FakeSymbolValueOp(subthread_extent_expr)
+    shared_memory_size = FakeSymbolValueOp(shared_memory_size_expr)
     launch = ArchLaunchOp(
         callee_attr or SymbolRefAttr(callee_name or body_name),
         block_extent.result,
         thread_extent.result,
         subthread_extent.result,
+        shared_memory_size.result,
         (wrapper_block.args[0], wrapper_block.args[1], wrapper_block.args[2]),
     )
-    wrapper_ops: list[Operation] = [block_extent, thread_extent, subthread_extent, launch]
+    wrapper_ops: list[Operation] = [block_extent, thread_extent, subthread_extent, shared_memory_size, launch]
     if emit_wrapper_return:
         wrapper_ops.append(func.ReturnOp())
     wrapper_block.add_ops(wrapper_ops)
@@ -642,7 +645,7 @@ static void slow_barrier_probe(
         barrier_assert = r"""
     std::atomic<long long> entered(0);
     long long after_values[4] = {-1, -1, -1, -1};
-    if (npu_demo::launch<1, 4, 1>(slow_barrier_probe, &entered, after_values) != StatusCode::kOk) {
+    if (npu_demo::launch<1, 4, 1, 0>(slow_barrier_probe, &entered, after_values) != StatusCode::kOk) {
         return fail(4);
     }
     for (long long i = 0; i < 4; ++i) {
@@ -2319,7 +2322,7 @@ def test_gen_kernel_emits_tile_elewise_cpu_source_for_elementwise_and_broadcast(
 # 最近一次运行测试时间: 2026-04-06 12:40:00 +0800
 # 最近一次运行成功时间: 2026-04-06 12:40:00 +0800
 # 功能说明: 验证 `target=\"npu_demo\"` 的受控 module 输入可生成 wrapper + body 双函数源码，并允许 helper func.func 按 module 顺序输出。
-# 测试目的: 让 gate `-k 'npu_demo and barrier'` 命中真实正例，锁定 `launch<1, 1, 1>`、双 barrier、helper 顺序与固定 body 语义。
+# 测试目的: 让 gate `-k 'npu_demo and barrier'` 命中真实正例，锁定 `launch<1, 1, 1, 0>`、双 barrier、helper 顺序与固定 body 语义。
 # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
@@ -2348,7 +2351,7 @@ def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body(tlm_space: st
         "const Memory<MemorySpace::GM, float>& rhs, Memory<MemorySpace::GM, float>& out)"
         in source
     )
-    assert "npu_demo::launch<1, 1, 1>(add_barrier_body, lhs, rhs, out);" in source
+    assert "npu_demo::launch<1, 1, 1, 0>(add_barrier_body, lhs, rhs, out);" in source
     assert source.count("ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);") == 2
     assert source.index("long long v0 = ctx.thread_id();") < source.index(
         "Memory<TSM, float> v2 = ctx.get_dynamic_memory<TSM, float>();"
@@ -2421,7 +2424,7 @@ builtin.module {
 
     assert source.index("static void kernel_device(") < source.index("void kernel(")
     assert source.count("static void kernel_device(") == 2
-    assert "npu_demo::launch<1, 1, 1>(kernel_device" in source
+    assert "npu_demo::launch<1, 1, 1, 0>(kernel_device" in source
     _compile_only(source)
 
 
@@ -2511,7 +2514,7 @@ def test_gen_kernel_rejects_npu_demo_barrier_wrapper_missing_body_symbol() -> No
         pytest.param(
             _make_npu_demo_add_barrier_module(thread_extent_expr="8"),
             _npu_ctx(),
-            r"must use npu_demo::launch<1, 1, 1>; got block=1, thread=8, subthread=1",
+            r"must use npu_demo::launch<1, 1, 1, 0>; got block=1, thread=8, subthread=1, shared_memory_size=0",
             id="extent-not-1-1-1",
         ),
         pytest.param(

@@ -872,6 +872,8 @@ def _lower_launch_extent_symbol(
     dim_name: str,
     ctx: EmitContext,
     location: SourceLocation | None,
+    *,
+    allow_zero: bool = False,
 ) -> SSAValue:
     """将 launch extent 归一化为 `!symbol.int<...>`。
 
@@ -880,7 +882,7 @@ def _lower_launch_extent_symbol(
 
     功能说明:
     - 支持 `ConstAST(int)` 与 `ScalarArgAST(int)` 两类 DSL extent 入口。
-    - 对静态已知值保持 `> 0` 约束，并统一返回 `!symbol.int` SSAValue。
+    - 对静态已知值保持正整数或非负整数约束，并统一返回 `!symbol.int` SSAValue。
 
     使用示例:
     - _lower_launch_extent_symbol(ConstAST(8), "thread", ctx, location=None)
@@ -894,15 +896,23 @@ def _lower_launch_extent_symbol(
     if isinstance(extent, ConstAST):
         if not isinstance(extent.value, int):
             raise _LoweringError(f"launch_kernel {dim_name} must be !symbol.int", location=location)
-        if extent.value <= 0:
+        if allow_zero:
+            if extent.value < 0:
+                raise _LoweringError(f"launch_kernel {dim_name} must be >= 0", location=location)
+        elif extent.value <= 0:
             raise _LoweringError(f"launch_kernel {dim_name} must be > 0", location=location)
         return _const_symbol_int(extent.value, ctx, location)
 
     value = _lower_expr(extent, ctx)
     if isinstance(value.type, SymbolValueType):
         expr_text = value.type.expr.expr.data
-        if isinstance(expr_text, str) and expr_text.lstrip("-").isdigit() and int(expr_text) <= 0:
-            raise _LoweringError(f"launch_kernel {dim_name} must be > 0", location=location)
+        if isinstance(expr_text, str) and expr_text.lstrip("-").isdigit():
+            int_value = int(expr_text)
+            if allow_zero:
+                if int_value < 0:
+                    raise _LoweringError(f"launch_kernel {dim_name} must be >= 0", location=location)
+            elif int_value <= 0:
+                raise _LoweringError(f"launch_kernel {dim_name} must be > 0", location=location)
         return value
 
     if isinstance(extent, ScalarArgAST):
@@ -4837,8 +4847,15 @@ def emit_mlir(node: object, ctx: EmitContext) -> object:
         block = _lower_launch_extent_symbol(node.block, "block", ctx, node.location)
         thread = _lower_launch_extent_symbol(node.thread, "thread", ctx, node.location)
         subthread = _lower_launch_extent_symbol(node.subthread, "subthread", ctx, node.location)
+        shared_memory_size = _lower_launch_extent_symbol(
+            node.shared_memory_size,
+            "shared_memory_size",
+            ctx,
+            node.location,
+            allow_zero=True,
+        )
         args = [SSAValue.get(_lower_expr(arg, ctx)) for arg in node.args]
-        op = ArchLaunchKernelOp(node.callee, block, thread, subthread, args)
+        op = ArchLaunchKernelOp(node.callee, block, thread, subthread, shared_memory_size, args)
         try:
             op.verify()
         except VerifyException as exc:

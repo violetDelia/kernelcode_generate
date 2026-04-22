@@ -12,7 +12,7 @@
 - bid = get_block_id()
 - smem = get_dynamic_memory(MemorySpace.SM)
 - barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM], scope=BarrierScope.THREAD)
-- launch_kernel(my_kernel, 1, 128, 4, lhs, rhs, out)
+- launch_kernel[1, 128, 4, 0](my_kernel, lhs, rhs, out)
 
 关联文件:
 - spec: spec/operation/arch.md
@@ -35,6 +35,7 @@ from kernel_gen.symbol_variable.type import NumericType
 from kernel_gen.target import registry as target_registry
 
 LaunchExtent = int | SymbolDim
+LaunchSharedMemorySize = int | SymbolDim
 _DYNAMIC_MEMORY_SPACES = (
     MemorySpace.SM,
     MemorySpace.LM,
@@ -440,7 +441,7 @@ def _ensure_launch_extent(value: object, name: str) -> LaunchExtent:
     if isinstance(value, bool) or not isinstance(value, (int, SymbolDim)):
         raise TypeError(
             _ERROR_TEMPLATE.format(
-                scene="arch.launch_kernel 参数校验",
+                scene="arch.launch 参数校验",
                 expected=f"{name} must be int or SymbolDim",
                 actual=type(value).__name__,
                 action=_ERROR_ACTION,
@@ -449,8 +450,48 @@ def _ensure_launch_extent(value: object, name: str) -> LaunchExtent:
     if isinstance(value, int) and value <= 0:
         raise ValueError(
             _ERROR_TEMPLATE.format(
-                scene="arch.launch_kernel 参数校验",
+                scene="arch.launch 参数校验",
                 expected=f"{name} must be > 0",
+                actual=str(value),
+                action=_ERROR_ACTION,
+            )
+    )
+    return value
+
+
+def _ensure_launch_shared_memory_size(value: object, name: str) -> LaunchSharedMemorySize:
+    """校验 kernel launch 的共享内存规模参数。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 仅接受非负整数或 `SymbolDim`。
+    - 静态整数要求 `>= 0`。
+
+    使用示例:
+    - _ensure_launch_shared_memory_size(0, "shared_memory_size")
+
+    关联文件:
+    - spec: spec/operation/arch.md
+    - test: test/operation/test_operation_arch.py
+    - 功能实现: kernel_gen/operation/arch.py
+    """
+
+    if isinstance(value, bool) or not isinstance(value, (int, SymbolDim)):
+        raise TypeError(
+            _ERROR_TEMPLATE.format(
+                scene="arch.launch 参数校验",
+                expected=f"{name} must be int or SymbolDim",
+                actual=type(value).__name__,
+                action=_ERROR_ACTION,
+            )
+        )
+    if isinstance(value, int) and value < 0:
+        raise ValueError(
+            _ERROR_TEMPLATE.format(
+                scene="arch.launch 参数校验",
+                expected=f"{name} must be >= 0",
                 actual=str(value),
                 action=_ERROR_ACTION,
             )
@@ -480,7 +521,7 @@ def _ensure_launch_callee(callee: object) -> object:
     if not inspect.isfunction(callee):
         raise TypeError(
             _ERROR_TEMPLATE.format(
-                scene="arch.launch_kernel 参数校验",
+                scene="arch.launch 参数校验",
                 expected="callee must be function object",
                 actual=type(callee).__name__,
                 action=_ERROR_ACTION,
@@ -806,26 +847,27 @@ def barrier(*, visibility: object, scope: object) -> None:
     return None
 
 
-def launch_kernel(
+def _launch_kernel_impl(
     callee: object,
     block: LaunchExtent,
     thread: LaunchExtent,
     subthread: LaunchExtent,
-    *args: object,
+    shared_memory_size: LaunchSharedMemorySize,
+    args: tuple[object, ...],
 ) -> None:
-    """记录一次 kernel 启动请求。
+    """执行一次 kernel 启动请求的共有实现。
 
     创建者: 金铲铲大作战
-    最后一次更改: 小李飞刀
+    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 校验 `callee` 与三层执行规模，并保留尾部 kernel 参数顺序。
-    - 在调用 Python 函数对象时临时建立 launch 上下文，让数量类 helper 暴露本次 launch extent。
-    - 只保留 operation 层启动语义，返回 `None`，不返回事件、句柄或状态值。
-    - 当 target registry 启用且不支持该 op，抛 ValueError。
+    - 校验 `callee` 与 launch 规模，并保留尾部 kernel 参数顺序。
+    - 只在调用 Python 函数对象时临时建立 launch 上下文，让数量类 helper 暴露本次 launch extent。
+    - 仅保留 operation 层启动语义，返回 `None`，不返回事件、句柄或状态值。
+    - 当 target registry 启用且不支持该 op，抛 `ValueError`。
 
     使用示例:
-    - launch_kernel(my_kernel, SymbolDim("GRID_X"), 128, 4, lhs, rhs, out)
+    - _launch_kernel_impl(my_kernel, 1, 128, 4, 0, (lhs, rhs, out))
 
     关联文件:
     - spec: spec/operation/arch.md
@@ -838,9 +880,97 @@ def launch_kernel(
     normalized_block = _ensure_launch_extent(block, "block")
     normalized_thread = _ensure_launch_extent(thread, "thread")
     normalized_subthread = _ensure_launch_extent(subthread, "subthread")
+    _ensure_launch_shared_memory_size(shared_memory_size, "shared_memory_size")
     with _launch_context(normalized_block, normalized_thread, normalized_subthread):
         normalized_callee(*args)
     return None
+
+
+@dataclass(frozen=True)
+class _LaunchKernelInvocation:
+    """记录一次 `launch_kernel[...]` 下标式调用的 launch extent。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 绑定 `block/thread/subthread/shared_memory_size` 四个编译期 extent。
+    - 调用时再接收 `callee` 与尾部 kernel 参数。
+
+    使用示例:
+    - launch_kernel[1, 4, 1, 0](kernel_body, lhs, rhs, out)
+
+    关联文件:
+    - spec: spec/operation/arch.md
+    - test: test/operation/test_operation_arch.py
+    - 功能实现: kernel_gen/operation/arch.py
+    """
+
+    block: LaunchExtent
+    thread: LaunchExtent
+    subthread: LaunchExtent
+    shared_memory_size: LaunchSharedMemorySize
+
+    def __call__(self, callee: object, *args: object) -> None:
+        """按绑定好的 extent 执行一次 kernel 启动请求。"""
+
+        return _launch_kernel_impl(callee, self.block, self.thread, self.subthread, self.shared_memory_size, args)
+
+
+class _LaunchKernelBuilder:
+    """公开 `launch_kernel` 入口的 builder 对象。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 兼容直调用 `launch_kernel(callee, block, thread, subthread, shared_memory_size, *args)`。
+    - 支持新的 `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)` 入口。
+
+    使用示例:
+    - launch_kernel[1, 4, 1, 0](kernel_body, lhs, rhs, out)
+
+    关联文件:
+    - spec: spec/operation/arch.md
+    - test: test/operation/test_operation_arch.py
+    - 功能实现: kernel_gen/operation/arch.py
+    """
+
+    def __call__(
+        self,
+        callee: object,
+        block: LaunchExtent,
+        thread: LaunchExtent,
+        subthread: LaunchExtent,
+        shared_memory_size: LaunchSharedMemorySize,
+        *args: object,
+    ) -> None:
+        """兼容直调用 `launch_kernel(callee, block, thread, subthread, shared_memory_size, *args)`。"""
+
+        return _launch_kernel_impl(callee, block, thread, subthread, shared_memory_size, args)
+
+    def __getitem__(self, extents: object) -> _LaunchKernelInvocation:
+        """绑定 `launch_kernel[...]` 的四个 launch extent。"""
+
+        if not isinstance(extents, tuple):
+            extents = (extents,)
+        if len(extents) != 4:
+            raise TypeError(
+                _ERROR_TEMPLATE.format(
+                    scene="arch.launch 参数校验",
+                    expected="launch_kernel extents must contain block, thread, subthread, shared_memory_size",
+                    actual=str(len(extents)),
+                    action=_ERROR_ACTION,
+                )
+            )
+        block = _ensure_launch_extent(extents[0], "block")
+        thread = _ensure_launch_extent(extents[1], "thread")
+        subthread = _ensure_launch_extent(extents[2], "subthread")
+        shared_memory_size = _ensure_launch_shared_memory_size(extents[3], "shared_memory_size")
+        return _LaunchKernelInvocation(block, thread, subthread, shared_memory_size)
+
+
+launch_kernel = _LaunchKernelBuilder()
 
 
 __all__ = [

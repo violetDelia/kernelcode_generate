@@ -275,7 +275,7 @@ def test_launch_kernel_accepts_valid_extents_and_kernel_args() -> None:
         captured["thread"] = get_thread_num().get_value()
         captured["subthread"] = get_subthread_num().get_value()
 
-    result = launch_kernel(add_barrier_body, SymbolDim("GRID_X"), 128, 4, "lhs", "rhs", "out")
+    result = launch_kernel(add_barrier_body, SymbolDim("GRID_X"), 128, 4, 0, "lhs", "rhs", "out")
 
     assert result is None
     assert captured["args"] == ("lhs", "rhs", "out")
@@ -299,21 +299,21 @@ def test_launch_kernel_rejects_invalid_arguments() -> None:
         raise AssertionError("unsupported launch must fail before body execution")
 
     with pytest.raises(TypeError, match="callee must be function object"):
-        launch_kernel("my_kernel", 1, 1, 1)
+        launch_kernel("my_kernel", 1, 1, 1, 0)
     with pytest.raises(TypeError, match="callee must be function object"):
-        launch_kernel(object(), 1, 1, 1)
+        launch_kernel(object(), 1, 1, 1, 0)
     with pytest.raises(TypeError, match="block must be int or SymbolDim"):
-        launch_kernel(kernel_body, "1", 1, 1)
+        launch_kernel(kernel_body, "1", 1, 1, 0)
     with pytest.raises(TypeError, match="thread must be int or SymbolDim"):
-        launch_kernel(kernel_body, 1, object(), 1)
+        launch_kernel(kernel_body, 1, object(), 1, 0)
     with pytest.raises(TypeError, match="subthread must be int or SymbolDim"):
-        launch_kernel(kernel_body, 1, 1, [])
+        launch_kernel(kernel_body, 1, 1, [], 0)
     with pytest.raises(ValueError, match="block must be > 0"):
-        launch_kernel(kernel_body, 0, 1, 1)
+        launch_kernel(kernel_body, 0, 1, 1, 0)
     with pytest.raises(ValueError, match="thread must be > 0"):
-        launch_kernel(kernel_body, 1, -1, 1)
+        launch_kernel(kernel_body, 1, -1, 1, 0)
     with pytest.raises(ValueError, match="subthread must be > 0"):
-        launch_kernel(kernel_body, 1, 1, 0)
+        launch_kernel(kernel_body, 1, 1, 0, 0)
 
 
 # TC-OP-ARCH-013
@@ -331,11 +331,11 @@ def test_launch_kernel_call_signature_errors() -> None:
         return None
 
     with pytest.raises(TypeError):
-        launch_kernel(kernel_body, 1, 1)
+        launch_kernel(block=1, thread=1, subthread=1, callee=kernel_body)
     with pytest.raises(TypeError):
-        launch_kernel(block=1, thread=1, subthread=1)
+        launch_kernel(block=1, thread=1, subthread=1, shared_memory_size=0)
     with pytest.raises(TypeError):
-        launch_kernel(callee=kernel_body, block=1, thread=1, subthread=1, grid=1)
+        launch_kernel(callee=kernel_body, block=1, thread=1, subthread=1, shared_memory_size=0, grid=1)
 
 
 # TC-OP-ARCH-014
@@ -354,7 +354,7 @@ def test_launch_kernel_keyword_call_success() -> None:
     def kernel_body() -> None:
         captured.append("called")
 
-    result = launch_kernel(thread=2, subthread=1, block=4, callee=kernel_body)
+    result = launch_kernel(thread=2, subthread=1, block=4, shared_memory_size=0, callee=kernel_body)
 
     assert result is None
     assert captured == ["called"]
@@ -398,7 +398,7 @@ def test_launch_queries_and_memory_prefer_launch_or_hardware_context() -> None:
             captured["subthread"] = get_subthread_num().get_value()
             captured["smem_shape"] = get_dynamic_memory(MemorySpace.SM).get_shape()
 
-        launch_kernel(launched_body, SymbolDim("GRID_X"), 8, SymbolDim("SUBTHREAD_X"))
+        launch_kernel(launched_body, SymbolDim("GRID_X"), 8, SymbolDim("SUBTHREAD_X"), 0)
 
         assert block_num.get_value() == 256
         assert thread_num.get_value() == 128
@@ -449,7 +449,7 @@ def test_barrier_and_launch_helpers_reject_unsupported_target_ops() -> None:
         with pytest.raises(ValueError, match="arch.barrier"):
             barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM], scope=BarrierScope.BLOCK)
         with pytest.raises(ValueError, match="arch.launch"):
-            launch_kernel(lambda: None, 1, 1, 1)
+            launch_kernel(lambda: None, 1, 1, 1, 0)
     finally:
         target_registry._set_current_target(None)
 

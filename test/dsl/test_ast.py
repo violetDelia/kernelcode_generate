@@ -1546,7 +1546,7 @@ def test_parse_function_rejects_invalid_arch_barrier_variants(monkeypatch: pytes
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-06 08:10:00 +0800
 # 最近一次运行成功时间: 2026-04-06 08:10:00 +0800
-# 功能说明: 验证 `launch_kernel(callee, block, thread, subthread, *args)` 可解析为新版 `ArchLaunchKernelAST`。
+# 功能说明: 验证 `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)` 可解析为新版 `ArchLaunchKernelAST`。
 # 测试目的: 锁定 callee 从函数对象规整为 symbol ref 名称，且尾部 args 顺序在 AST 中保留。
 # 使用示例: pytest -q test/dsl/test_ast.py -k test_parse_function_parses_arch_launch_kernel_with_callee
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py
@@ -1568,7 +1568,7 @@ def test_parse_function_parses_arch_launch_kernel_with_callee(monkeypatch: pytes
         out: "Tensor[f32, 2, 2]",
         thread_extent: int,
     ) -> None:
-        launch_kernel(add_barrier_body, 1, thread_extent, 2, lhs, rhs, out)
+        launch_kernel[1, thread_extent, 2, 0](add_barrier_body, lhs, rhs, out)
 
     monkeypatch.setitem(launch_entry.__globals__, "launch_kernel", launch_kernel)
     monkeypatch.setitem(launch_entry.__globals__, "add_barrier_body", add_barrier_body)
@@ -1614,16 +1614,16 @@ def test_parse_function_rejects_invalid_arch_launch_kernel_variants(monkeypatch:
     holder = Holder()
 
     def bad_string_callee() -> None:
-        launch_kernel("add_barrier_body", 1, 2, 1)
+        launch_kernel[1, 2, 1, 0]("add_barrier_body")
 
     def bad_attribute_callee() -> None:
-        launch_kernel(holder.add_barrier_body, 1, 2, 1)
+        launch_kernel[1, 2, 1, 0](holder.add_barrier_body)
 
     def bad_keyword_call() -> None:
-        launch_kernel(launched_body, block=1, thread=2, subthread=1)
+        launch_kernel[1, 2, 1, 0](launched_body, block=1)
 
     def bad_zero_extent() -> None:
-        launch_kernel(launched_body, 0, 2, 1)
+        launch_kernel[0, 2, 1, 0](launched_body)
 
     for fn in (bad_string_callee, bad_attribute_callee, bad_keyword_call, bad_zero_extent):
         monkeypatch.setitem(fn.__globals__, "launch_kernel", launch_kernel)

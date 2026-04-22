@@ -31,7 +31,9 @@ from kernel_gen.passes.pass_manager import Pass
 from kernel_gen.target import registry as target_registry
 
 _LAUNCH_ATTRS = ("launch_block", "launch_thread", "launch_subthread")
-_TARGET_HW_KEYS = ("block_num", "thread_num", "subthread_num")
+_LAUNCH_SHARED_MEMORY_ATTR = "shared_memory_size"
+_LAUNCH_ATTR_NAMES = _LAUNCH_ATTRS + (_LAUNCH_SHARED_MEMORY_ATTR,)
+_TARGET_HW_KEYS = ("block_num", "thread_num", "subthread_num", "sm_memory_size")
 
 
 class AttachArchInformationError(ValueError):
@@ -116,18 +118,45 @@ def _normalize_positive_int_attr(attr_name: str, attr: Attribute, func_name: str
     return value
 
 
-def _target_launch_extents(target: str) -> tuple[int, int, int]:
+def _normalize_non_negative_int_attr(attr_name: str, attr: Attribute, func_name: str) -> int:
+    """把属性规整为非负整数 metadata。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 复用 int-like 提取逻辑，校验 metadata 必须大于等于 `0`。
+    - 供 `shared_memory_size` 这类 metadata 在 attach 阶段统一校验。
+
+    使用示例:
+    - value = _normalize_non_negative_int_attr("shared_memory_size", IntAttr(0), "kernel")
+
+    关联文件:
+    - spec: [spec/pass/attach_arch_information.md](../../spec/pass/attach_arch_information.md)
+    - test: [test/pass/test_attach_arch_information.py](../../test/pass/test_attach_arch_information.py)
+    - 功能实现: [kernel_gen/passes/attach_arch_information.py](../../kernel_gen/passes/attach_arch_information.py)
+    """
+
+    value = _extract_int_like_attr(attr_name, attr, func_name)
+    if value < 0:
+        raise AttachArchInformationError(
+            f"AttachArchInformationError: function {func_name} {attr_name} must be >= 0"
+        )
+    return value
+
+
+def _target_launch_extents(target: str) -> tuple[int, int, int, int]:
     """读取 target 对应的 launch extent。
 
     创建者: 金铲铲大作战
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 从 target registry 读取 `block_num / thread_num / subthread_num`。
+    - 从 target registry 读取 `block_num / thread_num / subthread_num / sm_memory_size`。
     - 同时校验 `arch.launch` 是否对当前 target 公开可用。
 
     使用示例:
-    - block, thread, subthread = _target_launch_extents("npu_demo")
+    - block, thread, subthread, shared_memory_size = _target_launch_extents("npu_demo")
 
     关联文件:
     - spec: [spec/pass/attach_arch_information.md](../../spec/pass/attach_arch_information.md)
@@ -140,14 +169,22 @@ def _target_launch_extents(target: str) -> tuple[int, int, int]:
             f"AttachArchInformationError: target {target} does not support arch.launch"
         )
     extents: list[int] = []
-    for hw_key, attr_name in zip(_TARGET_HW_KEYS, _LAUNCH_ATTRS, strict=True):
+    for hw_key, attr_name in zip(_TARGET_HW_KEYS[:-1], _LAUNCH_ATTRS, strict=True):
         extent = target_registry.get_target_hardware(target, hw_key)
         if extent is None:
             raise AttachArchInformationError(
                 f"AttachArchInformationError: target {target} is missing launch extent"
             )
         extents.append(_normalize_positive_int_attr(attr_name, IntAttr(extent), target))
-    return extents[0], extents[1], extents[2]
+    shared_memory_size = target_registry.get_target_hardware(target, _TARGET_HW_KEYS[-1])
+    if shared_memory_size is None:
+        raise AttachArchInformationError(
+            f"AttachArchInformationError: target {target} is missing launch extent"
+        )
+    extents.append(
+        _normalize_non_negative_int_attr(_LAUNCH_SHARED_MEMORY_ATTR, IntAttr(shared_memory_size), target)
+    )
+    return extents[0], extents[1], extents[2], extents[3]
 
 
 def _select_entry_func(module: ModuleOp) -> func.FuncOp:
@@ -189,8 +226,8 @@ def _validate_existing_launch_attrs(func_op: func.FuncOp, target_name: str) -> b
     最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 若三项 launch 属性部分存在，显式失败。
-    - 若三项 launch 属性全部存在，则必须与 target registry 的 extent 完全一致。
+    - 若四项 launch 属性部分存在，显式失败。
+    - 若四项 launch 属性全部存在，则必须与 target registry 的 extent 完全一致。
     - 返回 `True` 表示属性已存在且可直接复用，无需再写回。
 
     使用示例:
@@ -202,22 +239,29 @@ def _validate_existing_launch_attrs(func_op: func.FuncOp, target_name: str) -> b
     - 功能实现: [kernel_gen/passes/attach_arch_information.py](../../kernel_gen/passes/attach_arch_information.py)
     """
 
-    present = [name for name in _LAUNCH_ATTRS if name in func_op.attributes]
+    present = [name for name in _LAUNCH_ATTR_NAMES if name in func_op.attributes]
     if not present:
         return False
     func_name = func_op.sym_name.data
-    if len(present) != len(_LAUNCH_ATTRS):
+    if len(present) != len(_LAUNCH_ATTR_NAMES):
         raise AttachArchInformationError(
             "AttachArchInformationError: function "
-            f"{func_name} must define launch_block, launch_thread, and launch_subthread together"
+            f"{func_name} must define launch_block, launch_thread, launch_subthread, and shared_memory_size together"
         )
-    expected_block, expected_thread, expected_subthread = _target_launch_extents(target_name)
+    expected_block, expected_thread, expected_subthread, expected_shared_memory_size = _target_launch_extents(
+        target_name
+    )
     current = (
         _extract_int_like_attr("launch_block", func_op.attributes["launch_block"], func_name),
         _extract_int_like_attr("launch_thread", func_op.attributes["launch_thread"], func_name),
         _extract_int_like_attr("launch_subthread", func_op.attributes["launch_subthread"], func_name),
+        _extract_int_like_attr(
+            _LAUNCH_SHARED_MEMORY_ATTR,
+            func_op.attributes[_LAUNCH_SHARED_MEMORY_ATTR],
+            func_name,
+        ),
     )
-    if current != (expected_block, expected_thread, expected_subthread):
+    if current != (expected_block, expected_thread, expected_subthread, expected_shared_memory_size):
         raise AttachArchInformationError(
             f"AttachArchInformationError: function {func_name} launch extents must match target {target_name}"
         )
@@ -232,7 +276,7 @@ class AttachArchInformationPass(Pass, ModulePass):
 
     功能说明:
     - 固定公开名称为 `attach-arch-information`。
-    - 为入口 `func.func` 从 target registry 补齐 launch extent。
+        - 为入口 `func.func` 从 target registry 补齐 launch extent 与 shared_memory_size。
     - 兼容 `PassManager` 与 xdsl `ModulePass` 两套执行入口。
 
     使用示例:
@@ -312,7 +356,7 @@ class AttachArchInformationPass(Pass, ModulePass):
 
         功能说明:
         - 只接受 `builtin.module` 输入。
-        - 只对模块入口 `func.func` 写回三层 launch extent。
+        - 只对模块入口 `func.func` 写回四段 launch extent。
         - 若已有 launch 属性，则必须与 target registry 一致。
 
         使用示例:
@@ -330,10 +374,11 @@ class AttachArchInformationPass(Pass, ModulePass):
         entry_func = _select_entry_func(module)
         if _validate_existing_launch_attrs(entry_func, self.target):
             return
-        block, thread, subthread = _target_launch_extents(self.target)
+        block, thread, subthread, shared_memory_size = _target_launch_extents(self.target)
         entry_func.attributes["launch_block"] = IntAttr(block)
         entry_func.attributes["launch_thread"] = IntAttr(thread)
         entry_func.attributes["launch_subthread"] = IntAttr(subthread)
+        entry_func.attributes[_LAUNCH_SHARED_MEMORY_ATTR] = IntAttr(shared_memory_size)
 
     def run(self: "AttachArchInformationPass", module: object) -> ModuleOp:
         """兼容旧 Pass 接口的执行入口。

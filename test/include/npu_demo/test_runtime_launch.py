@@ -4,7 +4,7 @@
 最后一次更改: 朽木露琪亚
 
 功能说明:
-- 通过编译并运行 C++ 片段验证 `npu_demo::launch<1, 4, 1>` 的运行时行为：
+- 通过编译并运行 C++ 片段验证 `npu_demo::launch<1, 4, 1, 0>` 的运行时行为：
   - 必须真实启动 `4` 个线程（禁止 for-loop 串行模拟）。
   - 同一次 launch 的 `KernelContext::barrier(...)` 必须共享同一 barrier 状态并能真实汇合。
   - `thread_id()` / `thread_num()` 返回值必须与 launch extent 一致。
@@ -126,7 +126,7 @@ def _compile_and_run(source: str, *, timeout_s: float = 5.0) -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-06 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-06 00:00:00 +0800
-# 测试目的: 验证 `launch<1, 4, 1>` 必须真实启动 4 线程，并共享同一 barrier 状态（禁止串行模拟/私有 barrier）。
+# 测试目的: 验证 `launch<1, 4, 1, 0>` 必须真实启动 4 线程，并共享同一 barrier 状态（禁止串行模拟/私有 barrier）。
 # 使用示例: pytest -q test/include/npu_demo/test_runtime_launch.py -k test_npu_demo_launch_spawns_threads_and_barrier_waits_for_all_participants
 # 对应功能实现文件链接: [include/npu_demo/Arch.h](include/npu_demo/Arch.h)
 # 对应 spec 文件链接: [spec/include/npu_demo/npu_demo.md](spec/include/npu_demo/npu_demo.md)
@@ -168,7 +168,7 @@ int main() {
     long long thread_ids[4] = {-1, -1, -1, -1};
     long long thread_nums[4] = {0, 0, 0, 0};
 
-    if (npu_demo::launch<1, 4, 1>(
+    if (npu_demo::launch<1, 4, 1, 0>(
             kernel_body,
             &entered,
             after_values,

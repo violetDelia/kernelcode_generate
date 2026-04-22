@@ -1476,6 +1476,123 @@ def _parse_store_like_call(
     )
 
 
+def _parse_launch_kernel_call(
+    expr: py_ast.Call,
+    env: dict[str, object],
+    globals_table: dict[str, object],
+    builtins_table: dict[str, object],
+    *,
+    launch_slice: py_ast.expr | None = None,
+) -> ArchLaunchKernelAST:
+    """解析 `launch_kernel[...]` / `launch_kernel(...)` 启动描述。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 支持新的四字段下标式入口 `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)`。
+    - 兼容直调用入口 `launch_kernel(callee, block, thread, subthread, shared_memory_size, *args)`，便于旧消费面平滑过渡。
+    - callee 只允许函数对象对应的 bare symbol reference；launch extent 保持正整数 / `SymbolDim` 语义。
+
+    使用示例:
+    - _parse_launch_kernel_call(expr, env, globals(), __builtins__, launch_slice=expr.func.slice)
+
+    关联文件:
+    - spec: spec/dsl/ast.md
+    - test: test/dsl/test_ast.py
+    - 功能实现: kernel_gen/dsl/ast/parser.py
+    """
+
+    if len(expr.args) < 1:
+        _raise_parse_error("Unsupported launch_kernel arity", expr)
+    if expr.keywords:
+        _raise_parse_error("Unsupported launch_kernel arity", expr)
+    callee_node = expr.args[0]
+    if not isinstance(callee_node, py_ast.Name):
+        _raise_parse_error("launch_kernel callee must be function symbol reference", callee_node)
+    callee_value = env.get(callee_node.id)
+    if callee_value is None:
+        callee_value = _lookup_python_name(callee_node.id, globals_table, builtins_table)
+    if not inspect.isfunction(callee_value):
+        _raise_parse_error("launch_kernel callee must be function symbol reference", callee_node)
+    kernel_name = getattr(callee_value, "__name__", "")
+    if not isinstance(kernel_name, str) or kernel_name == "":
+        _raise_parse_error("launch_kernel callee must be function symbol reference", callee_node)
+
+    def _validate_launch_extent(value: object, dim_name: str, node: object, *, allow_zero: bool = False) -> None:
+        if isinstance(value, ConstAST):
+            if not isinstance(value.value, int):
+                _raise_parse_error(f"launch_kernel {dim_name} must be int or SymbolDim", node)
+            if allow_zero:
+                if value.value < 0:
+                    _raise_parse_error(f"launch_kernel {dim_name} must be >= 0", node)
+            elif value.value <= 0:
+                _raise_parse_error(f"launch_kernel {dim_name} must be > 0", node)
+            return
+        if isinstance(value, ScalarArgAST):
+            if value.value_type is not int:
+                _raise_parse_error(f"launch_kernel {dim_name} must be int or SymbolDim", node)
+            return
+        if isinstance(value, SymbolDim):
+            return
+        if isinstance(value, int):
+            if allow_zero:
+                if value < 0:
+                    _raise_parse_error(f"launch_kernel {dim_name} must be >= 0", node)
+            elif value <= 0:
+                _raise_parse_error(f"launch_kernel {dim_name} must be > 0", node)
+            return
+        _raise_parse_error(f"launch_kernel {dim_name} must be int or SymbolDim", node)
+
+    if launch_slice is not None:
+        launch_extents = list(launch_slice.elts) if isinstance(launch_slice, py_ast.Tuple) else [launch_slice]
+        if len(launch_extents) != 4:
+            _raise_parse_error("Unsupported launch_kernel arity", expr)
+        block = _parse_expr(launch_extents[0], env, globals_table, builtins_table)
+        thread = _parse_expr(launch_extents[1], env, globals_table, builtins_table)
+        subthread = _parse_expr(launch_extents[2], env, globals_table, builtins_table)
+        shared_memory_size = _parse_expr(launch_extents[3], env, globals_table, builtins_table)
+        _validate_launch_extent(block, "block", launch_extents[0])
+        _validate_launch_extent(thread, "thread", launch_extents[1])
+        _validate_launch_extent(subthread, "subthread", launch_extents[2])
+        _validate_launch_extent(shared_memory_size, "shared_memory_size", launch_extents[3], allow_zero=True)
+        args = [_parse_expr(arg, env, globals_table, builtins_table) for arg in expr.args[1:]]
+        return ArchLaunchKernelAST(
+            callee=kernel_name,
+            block=block,
+            thread=thread,
+            subthread=subthread,
+            args=args,
+            shared_memory_size=shared_memory_size,
+            location=_location_from_node(expr),
+        )
+
+    if len(expr.args) < 5:
+        _raise_parse_error("Unsupported launch_kernel arity", expr)
+
+    def _validate_legacy_launch_extent(value: object, dim_name: str, node: object) -> None:
+        _validate_launch_extent(value, dim_name, node)
+
+    block = _parse_expr(expr.args[1], env, globals_table, builtins_table)
+    thread = _parse_expr(expr.args[2], env, globals_table, builtins_table)
+    subthread = _parse_expr(expr.args[3], env, globals_table, builtins_table)
+    shared_memory_size = _parse_expr(expr.args[4], env, globals_table, builtins_table)
+    args = [_parse_expr(arg, env, globals_table, builtins_table) for arg in expr.args[5:]]
+    _validate_legacy_launch_extent(block, "block", expr.args[1])
+    _validate_legacy_launch_extent(thread, "thread", expr.args[2])
+    _validate_legacy_launch_extent(subthread, "subthread", expr.args[3])
+    _validate_launch_extent(shared_memory_size, "shared_memory_size", expr.args[4], allow_zero=True)
+    return ArchLaunchKernelAST(
+        callee=kernel_name,
+        block=block,
+        thread=thread,
+        subthread=subthread,
+        args=args,
+        shared_memory_size=shared_memory_size,
+        location=_location_from_node(expr),
+    )
+
+
 def _parse_dma_call(
     expr: py_ast.Call,
     env: dict[str, object],
@@ -1502,7 +1619,7 @@ def _parse_dma_call(
     - 将 `get_block_id()` / `get_block_num()` / `get_subthread_id()` / `get_subthread_num()` / `get_thread_id()` / `get_thread_num()` 解析为 `ArchQueryAST`。
     - 将 `get_dynamic_memory(space)` 解析为 `ArchGetDynamicMemoryAST`。
     - 将 `barrier(visibility=[...], scope=BarrierScope.THREAD)` 解析为 `ArchBarrierAST`。
-    - 将 `launch_kernel(callee, block, thread, subthread, *args)` 解析为 `ArchLaunchKernelAST`。
+    - 将 `launch_kernel(callee, block, thread, subthread, shared_memory_size, *args)` 解析为 `ArchLaunchKernelAST`。
 
     使用示例:
     - _parse_dma_call(py_ast.parse("slice(A, [i], [n])").body[0].value, env, globals(), __builtins__)
@@ -1519,6 +1636,16 @@ def _parse_dma_call(
     nn_compare_expr = _parse_nn_compare_call(expr, env, globals_table, builtins_table)
     if nn_compare_expr is not None:
         return nn_compare_expr
+    if isinstance(expr.func, py_ast.Subscript):
+        launch_helper_name = _resolve_import_bound_helper_call(expr.func.value, globals_table, builtins_table)
+        if launch_helper_name == "launch_kernel":
+            return _parse_launch_kernel_call(
+                expr,
+                env,
+                globals_table,
+                builtins_table,
+                launch_slice=expr.func.slice,
+            )
     call_name = _resolve_import_bound_helper_call(expr.func, globals_table, builtins_table)
     if call_name is None:
         return None
@@ -1857,54 +1984,7 @@ def _parse_dma_call(
         )
 
     if call_name == "launch_kernel":
-        if len(expr.args) < 4 or expr.keywords:
-            _raise_parse_error("Unsupported launch_kernel arity", expr)
-        callee_node = expr.args[0]
-        if not isinstance(callee_node, py_ast.Name):
-            _raise_parse_error("launch_kernel callee must be function symbol reference", callee_node)
-        callee_value = env.get(callee_node.id)
-        if callee_value is None:
-            callee_value = _lookup_python_name(callee_node.id, globals_table, builtins_table)
-        if not inspect.isfunction(callee_value):
-            _raise_parse_error("launch_kernel callee must be function symbol reference", callee_node)
-        kernel_name = getattr(callee_value, "__name__", "")
-        if not isinstance(kernel_name, str) or kernel_name == "":
-            _raise_parse_error("launch_kernel callee must be function symbol reference", callee_node)
-
-        def _validate_launch_extent(value: object, dim_name: str, node: object) -> None:
-            if isinstance(value, ConstAST):
-                if not isinstance(value.value, int):
-                    _raise_parse_error(f"launch_kernel {dim_name} must be int or SymbolDim", node)
-                if value.value <= 0:
-                    _raise_parse_error(f"launch_kernel {dim_name} must be > 0", node)
-                return
-            if isinstance(value, ScalarArgAST):
-                if value.value_type is not int:
-                    _raise_parse_error(f"launch_kernel {dim_name} must be int or SymbolDim", node)
-                return
-            if isinstance(value, SymbolDim):
-                return
-            if isinstance(value, int):
-                if value <= 0:
-                    _raise_parse_error(f"launch_kernel {dim_name} must be > 0", node)
-                return
-            _raise_parse_error(f"launch_kernel {dim_name} must be int or SymbolDim", node)
-
-        block = _parse_expr(expr.args[1], env, globals_table, builtins_table)
-        thread = _parse_expr(expr.args[2], env, globals_table, builtins_table)
-        subthread = _parse_expr(expr.args[3], env, globals_table, builtins_table)
-        args = [_parse_expr(arg, env, globals_table, builtins_table) for arg in expr.args[4:]]
-        _validate_launch_extent(block, "block", expr.args[1])
-        _validate_launch_extent(thread, "thread", expr.args[2])
-        _validate_launch_extent(subthread, "subthread", expr.args[3])
-        return ArchLaunchKernelAST(
-            callee=kernel_name,
-            block=block,
-            thread=thread,
-            subthread=subthread,
-            args=args,
-            location=_location_from_node(expr),
-        )
+        return _parse_launch_kernel_call(expr, env, globals_table, builtins_table)
 
     return None
 

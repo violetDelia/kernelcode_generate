@@ -191,7 +191,7 @@ int main() {
     }
 
     long long thread_nums[2] = {0, 0};
-    Status launch_status = npu_demo::launch<1, 2, 1>(kernel_body, &thread_nums[0]);
+    Status launch_status = npu_demo::launch<1, 2, 1, 0>(kernel_body, &thread_nums[0]);
     if (launch_status != StatusCode::kOk) {
         return fail(3);
     }
