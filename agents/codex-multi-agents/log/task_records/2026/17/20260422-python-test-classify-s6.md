@@ -74,24 +74,4 @@ Diff 反推自测 / Diff 反推审查：沿用已写入 build / review 记录中
 
 合同验收（如适用）：本轮 expectation 仍仅作为合同验收资产单列，不新增 expectation 验收
 
-结论：merge 收口已完成，待提交并推送
-
-## merge
-
-时间：2026-04-22 11:28 CST
-
-经办人：李白
-
-任务：T-20260422-9c6e1378
-
-任务目标：完成 merge 收口与同步确认
-
-改动：当前 worktree 保留 `test/` 侧 expectation 旧口径清理结果、`spec/symbol_variable/package_api.md` 以及对应 pytest 回归；本轮在已通过 Diff 反推审查 的基础上补写 merge 收口记录，不扩大修改面
-
-验证：`timeout 60 git -C /home/lfr/kernelcode_generate/wt-20260422-python-test-classify-s6 fetch origin` -> 通过；`git -C /home/lfr/kernelcode_generate/wt-20260422-python-test-classify-s6 status --short --untracked-files=all` -> 仅当前任务相关文件待提交；`git -C /home/lfr/kernelcode_generate/wt-20260422-python-test-classify-s6 diff --check` -> 通过
-
-Diff 反推自测 / Diff 反推审查：沿用已写入 build / review 记录中的结论；本轮 merge 不新增测试，只收口提交与同步
-
-合同验收（如适用）：本轮 expectation 仍仅作为合同验收资产单列，不新增 expectation 验收
-
-结论：merge 收口已完成，待提交并推送
+结论：merge 收口已完成，已提交、推送并同步到主目录，待执行 -done
