@@ -29,9 +29,18 @@ if str(REPO_ROOT) not in sys.path:
 
 from expectation.utils.case_runner import raise_if_failures, run_case
 random_shared = importlib.import_module("expectation.pass.tile._random_shared")
+ARITH_DTYPE = random_shared.ARITH_DTYPE
+ARITH_DTYPE_IR = random_shared.ARITH_DTYPE_IR
+BOOL_DTYPE = random_shared.BOOL_DTYPE
+BOOL_DTYPE_IR = random_shared.BOOL_DTYPE_IR
 FLOAT_DTYPE = random_shared.FLOAT_DTYPE
+FLOAT_DTYPE_IR = random_shared.FLOAT_DTYPE_IR
 SPACE_ATTR = random_shared.SPACE_ATTR
 memory_ir = random_shared.memory_ir
+random_compare_kinds = random_shared.random_compare_kinds
+random_element_binary_kinds = random_shared.random_element_binary_kinds
+random_rank1_static_dynamic = random_shared.random_rank1_static_dynamic
+random_rank2_static_dynamic = random_shared.random_rank2_static_dynamic
 random_rank3_static_dynamic = random_shared.random_rank3_static_dynamic
 
 
@@ -104,10 +113,19 @@ def test_run_case_rejects_invalid_arguments() -> None:
 def test_random_shared_memory_ir_uses_contiguous_row_major_stride() -> None:
     """验证 tile expectation 共享 helper 的 memory 文本拼装行为。"""
 
+    assert ARITH_DTYPE == "i32"
+    assert ARITH_DTYPE_IR == "i32"
+    assert BOOL_DTYPE == "i1"
+    assert BOOL_DTYPE_IR == "i1"
     assert FLOAT_DTYPE == "f32"
+    assert FLOAT_DTYPE_IR == "f32"
     assert SPACE_ATTR == "#nn.space<global>"
+    assert random_rank1_static_dynamic() == (4, "P")
+    assert random_rank2_static_dynamic() == (4, 8, "M", "N")
     assert memory_ir([4, 8], FLOAT_DTYPE) == "!nn.memory<[4, 8], [8, 1], f32, #nn.space<global>>"
     assert memory_ir(["M", "N"], FLOAT_DTYPE) == "!nn.memory<[M, N], [N, 1], f32, #nn.space<global>>"
+    assert random_compare_kinds() == ("eq", "ne", "gt", "ge")
+    assert random_element_binary_kinds() == ("add", "sub", "mul", "div")
 
 
 def test_random_rank3_static_dynamic_returns_fixed_shape_pairs() -> None:
