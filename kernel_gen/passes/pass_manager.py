@@ -127,6 +127,122 @@ def _is_pass_like(obj: object) -> bool:
     return False
 
 
+def _build_pass_manager_from_passes(
+    name: str | None, passes: Sequence[XdslModulePass]
+) -> "PassManager":
+    """按顺序构造 PassManager。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 通过共享 helper 统一 `PassManager` 的初始化与批量追加逻辑。
+    - 供 pipeline builder 与 registry 内部的 no-op pipeline 复用，避免重复写
+      `PassManager(...)` + `add_pass(...)` 的构造样板。
+
+    使用示例:
+    - pm = _build_pass_manager_from_passes("default-lowering", [DecompassPass(), NnLoweringPass()])
+
+    关联文件:
+    - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
+    - test: [test/pass/test_pass_manager.py](test/pass/test_pass_manager.py)
+    - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
+    """
+
+    pm = PassManager(name=name)
+    pm.extend(passes)
+    return pm
+
+
+def _build_pass_name_positions(pass_names: Sequence[str]) -> dict[str, int]:
+    """把 pass 名称列表规整为首个位置映射。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 统一 pass 顺序校验使用的索引查询，避免在同一组名称上重复遍历。
+    - 若出现重复名称，只保留首次出现的位置，保持与 `list.index(...)` 一致的语义。
+
+    使用示例:
+    - positions = _build_pass_name_positions(["decompass", "lower-nn", "lower-nn"])
+
+    关联文件:
+    - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
+    - test: [test/pass/test_pass_manager.py](test/pass/test_pass_manager.py)
+    - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
+    """
+
+    positions: dict[str, int] = {}
+    for index, name in enumerate(pass_names):
+        if name not in positions:
+            positions[name] = index
+    return positions
+
+
+def _validate_pass_order_constraints(pass_names: Sequence[str]) -> None:
+    """校验 PassManager 的公开顺序约束。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 将 `symbol-loop-hoist`、`lower-dma-memory-hierarchy` 与 tile family、buffer 之间的
+      顺序约束收口到单一 helper。
+    - 失败时保留原有稳定错误短语，供 `pytest` 与 expectation 机械匹配。
+
+    使用示例:
+    - _validate_pass_order_constraints(["decompass", "lower-nn", "buffer-results-to-out-params"])
+
+    关联文件:
+    - spec: [spec/pass/pass_manager.md](spec/pass/pass_manager.md)
+    - test: [test/pass/test_pass_manager.py](test/pass/test_pass_manager.py)
+    - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
+    """
+
+    positions = _build_pass_name_positions(pass_names)
+    tile_family_names = {"tile-analysis", "tile-elewise", "tile-reduce"}
+    tile_family_indices = [index for index, name in enumerate(pass_names) if name in tile_family_names]
+    if "symbol-loop-hoist" in positions:
+        hoist_index = positions["symbol-loop-hoist"]
+        if tile_family_indices and hoist_index < max(tile_family_indices):
+            raise ValueError(
+                "SymbolLoopHoistRequiresSymbolFor: symbol-loop-hoist must run after tile family"
+            )
+        if "lower-dma-memory-hierarchy" in positions:
+            dma_index = positions["lower-dma-memory-hierarchy"]
+            if hoist_index > dma_index:
+                raise ValueError(
+                    "SymbolLoopHoistRequiresSymbolFor: symbol-loop-hoist must run before lower-dma-memory-hierarchy"
+                )
+    if "lower-dma-memory-hierarchy" in positions:
+        dma_index = positions["lower-dma-memory-hierarchy"]
+        if "buffer-results-to-out-params" not in positions:
+            raise ValueError(
+                "DmaMemoryHierarchyOrderError: lower-dma-memory-hierarchy requires buffer-results-to-out-params"
+            )
+        buffer_index = positions["buffer-results-to-out-params"]
+        if dma_index < buffer_index:
+            raise ValueError(
+                "DmaMemoryHierarchyOrderError: lower-dma-memory-hierarchy must run after buffer-results-to-out-params"
+            )
+    if tile_family_indices:
+        first_tile_index = min(tile_family_indices)
+        last_tile_index = max(tile_family_indices)
+        if "buffer-results-to-out-params" in positions:
+            buffer_index = positions["buffer-results-to-out-params"]
+            if first_tile_index < buffer_index:
+                raise ValueError(
+                    "TilePassOrderError: tile family must run after buffer-results-to-out-params"
+                )
+        if "lower-dma-memory-hierarchy" in positions:
+            dma_hierarchy_index = positions["lower-dma-memory-hierarchy"]
+            if last_tile_index > dma_hierarchy_index:
+                raise ValueError(
+                    "TilePassOrderError: tile family must run before lower-dma-memory-hierarchy"
+                )
+
+
 class PassManager:
     """Pass 管理器。
 
@@ -269,46 +385,7 @@ class PassManager:
         - 功能实现: [kernel_gen/passes/pass_manager.py](kernel_gen/passes/pass_manager.py)
         """
         pass_names = [item.name for item in self._passes]
-        tile_family_names = {"tile-analysis", "tile-elewise", "tile-reduce"}
-        tile_family_indices = [index for index, name in enumerate(pass_names) if name in tile_family_names]
-        if "symbol-loop-hoist" in pass_names:
-            hoist_index = pass_names.index("symbol-loop-hoist")
-            if tile_family_indices and hoist_index < max(tile_family_indices):
-                raise ValueError(
-                        "SymbolLoopHoistRequiresSymbolFor: symbol-loop-hoist must run after tile family"
-                )
-            if "lower-dma-memory-hierarchy" in pass_names:
-                dma_index = pass_names.index("lower-dma-memory-hierarchy")
-                if hoist_index > dma_index:
-                    raise ValueError(
-                        "SymbolLoopHoistRequiresSymbolFor: symbol-loop-hoist must run before lower-dma-memory-hierarchy"
-                    )
-        if "lower-dma-memory-hierarchy" in pass_names:
-            dma_index = pass_names.index("lower-dma-memory-hierarchy")
-            if "buffer-results-to-out-params" not in pass_names:
-                raise ValueError(
-                    "DmaMemoryHierarchyOrderError: lower-dma-memory-hierarchy requires buffer-results-to-out-params"
-                )
-            buffer_index = pass_names.index("buffer-results-to-out-params")
-            if dma_index < buffer_index:
-                raise ValueError(
-                    "DmaMemoryHierarchyOrderError: lower-dma-memory-hierarchy must run after buffer-results-to-out-params"
-                )
-        if tile_family_indices:
-            first_tile_index = min(tile_family_indices)
-            last_tile_index = max(tile_family_indices)
-            if "buffer-results-to-out-params" in pass_names:
-                buffer_index = pass_names.index("buffer-results-to-out-params")
-                if first_tile_index < buffer_index:
-                    raise ValueError(
-                        "TilePassOrderError: tile family must run after buffer-results-to-out-params"
-                    )
-            if "lower-dma-memory-hierarchy" in pass_names:
-                dma_hierarchy_index = pass_names.index("lower-dma-memory-hierarchy")
-                if last_tile_index > dma_hierarchy_index:
-                    raise ValueError(
-                        "TilePassOrderError: tile family must run before lower-dma-memory-hierarchy"
-                    )
+        _validate_pass_order_constraints(pass_names)
 
         result = target
         ctx = Context()

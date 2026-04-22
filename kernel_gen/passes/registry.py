@@ -24,10 +24,11 @@ from collections.abc import Callable
 import inspect
 from typing import TypeVar
 
-from .pass_manager import Pass, PassManager
+from .pass_manager import Pass, PassManager, _build_pass_manager_from_passes
 from xdsl.passes import ModulePass as XdslModulePass
 
 PassType = TypeVar("PassType", bound=XdslModulePass)
+RegistryEntryType = TypeVar("RegistryEntryType")
 
 _PASS_REGISTRY: dict[str, type[XdslModulePass]] = {}
 _PIPELINE_REGISTRY: dict[str, Callable[..., PassManager]] = {}
@@ -52,6 +53,117 @@ class PassRegistryError(RuntimeError):
     - test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
     - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
     """
+
+
+def _register_registry_entry(
+    registry: dict[str, RegistryEntryType], name: str, value: RegistryEntryType, kind: str
+) -> None:
+    """把单个注册项写入 registry 并保留重复名失败语义。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 统一 pass / pipeline 的同名重复注册检查。
+    - 失败时保留稳定错误短语，供 pytest 与 expectation 机械匹配。
+
+    使用示例:
+    - _register_registry_entry(_PASS_REGISTRY, "no-op", NoOpPass, "pass")
+
+    关联文件:
+    - spec: [spec/pass/registry.md](spec/pass/registry.md)
+    - test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
+    - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
+    """
+
+    if name in registry:
+        raise PassRegistryError(f"PassRegistryError: {kind} '{name}' is already registered")
+    registry[name] = value
+
+
+def _build_registered_pass_instance(
+    name: str,
+    pass_cls: type[XdslModulePass],
+    options: dict[str, str],
+    passthrough_errors: tuple[type[BaseException], ...] = (),
+) -> XdslModulePass:
+    """根据注册的 pass 类构造实例，并统一错误转换。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 将 pass 无参构造与 `from_options(options)` 两条入口的错误转换收口到单一 helper。
+    - `passthrough_errors` 用于保留特定 pass 的原生异常，不被 registry 吞掉。
+
+    使用示例:
+    - _build_registered_pass_instance("no-op", NoOpPass, {})
+
+    关联文件:
+    - spec: [spec/pass/registry.md](spec/pass/registry.md)
+    - test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
+    - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
+    """
+
+    if options:
+        from_options = getattr(pass_cls, "from_options", None)
+        if not callable(from_options):
+            raise PassRegistryError(f"PassRegistryError: pass '{name}' does not accept options")
+        try:
+            pass_obj = from_options(options)
+        except Exception as exc:  # pragma: no cover - exception detail not stable
+            if passthrough_errors and isinstance(exc, passthrough_errors):
+                raise
+            raise PassRegistryError(f"PassRegistryError: pass '{name}' option error") from exc
+        if not isinstance(pass_obj, XdslModulePass):
+            raise PassRegistryError(f"PassRegistryError: pass '{name}' option error")
+        return pass_obj
+    try:
+        return pass_cls()
+    except Exception as exc:  # pragma: no cover - exception detail not stable
+        if passthrough_errors and isinstance(exc, passthrough_errors):
+            raise
+        raise PassRegistryError(f"PassRegistryError: pass '{name}' is not constructible") from exc
+
+
+def _build_registered_pipeline_manager(
+    name: str, builder: Callable[..., PassManager], options: dict[str, str]
+) -> PassManager:
+    """根据注册的 pipeline builder 构造 PassManager，并统一错误转换。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 将 pipeline 无参构造、options 传参与返回值校验收口到单一 helper。
+    - 保留 registry 层稳定错误短语，不改变公开 pipeline 入口兼容边界。
+
+    使用示例:
+    - pm = _build_registered_pipeline_manager("default-lowering", build_default_lowering_pipeline, {})
+
+    关联文件:
+    - spec: [spec/pass/registry.md](spec/pass/registry.md)
+    - test: [test/pass/test_pass_registry.py](test/pass/test_pass_registry.py)
+    - 功能实现: [kernel_gen/passes/registry.py](kernel_gen/passes/registry.py)
+    """
+
+    if options:
+        if not _pipeline_accepts_options(builder):
+            raise PassRegistryError(f"PassRegistryError: pipeline '{name}' does not accept options")
+        try:
+            pm = builder(options)
+        except Exception as exc:  # pragma: no cover - builder error path not deterministic
+            raise PassRegistryError(f"PassRegistryError: pipeline '{name}' option error") from exc
+    else:
+        try:
+            pm = builder()
+        except Exception as exc:  # pragma: no cover - builder error path not deterministic
+            raise PassRegistryError(
+                f"PassRegistryError: pipeline '{name}' did not return PassManager"
+            ) from exc
+    if not isinstance(pm, PassManager):
+        raise PassRegistryError(f"PassRegistryError: pipeline '{name}' did not return PassManager")
+    return pm
 
 
 def register_pass(pass_cls: type[PassType]) -> type[PassType]:
@@ -81,9 +193,7 @@ def register_pass(pass_cls: type[PassType]) -> type[PassType]:
     pass_name = getattr(pass_cls, "name", None)
     if not isinstance(pass_name, str) or not pass_name.strip():
         raise PassRegistryError("PassRegistryError: pass name must be non-empty string")
-    if pass_name in _PASS_REGISTRY:
-        raise PassRegistryError(f"PassRegistryError: pass '{pass_name}' is already registered")
-    _PASS_REGISTRY[pass_name] = pass_cls
+    _register_registry_entry(_PASS_REGISTRY, pass_name, pass_cls, "pass")
     return pass_cls
 
 
@@ -117,7 +227,7 @@ def register_pipeline(name: str) -> Callable[[Callable[..., PassManager]], Calla
     def _decorator(builder: Callable[..., PassManager]) -> Callable[..., PassManager]:
         if not callable(builder):
             raise PassRegistryError("PassRegistryError: register_pipeline expects callable builder")
-        _PIPELINE_REGISTRY[name] = builder
+        _register_registry_entry(_PIPELINE_REGISTRY, name, builder, "pipeline")
         return builder
 
     return _decorator
@@ -203,28 +313,17 @@ def build_registered_pass(name: str, options: dict[str, str] | None = None) -> X
         raise PassRegistryError(f"PassRegistryError: unknown pass '{name}'")
     pass_cls = _PASS_REGISTRY[name]
     normalized_options = _normalize_options(options)
-    if normalized_options:
-        from_options = getattr(pass_cls, "from_options", None)
-        if not callable(from_options):
-            raise PassRegistryError(f"PassRegistryError: pass '{name}' does not accept options")
-        try:
-            pass_obj = from_options(normalized_options)
-        except Exception as exc:  # pragma: no cover - exception detail not stable
-            if name == "launch-kernel-cost-func":
-                from kernel_gen.passes.tuning.launch_kernel_cost_func import (
-                    LaunchKernelCostFuncError,
-                )
+    passthrough_errors: tuple[type[BaseException], ...] = ()
+    if name == "launch-kernel-cost-func":
+        from kernel_gen.passes.tuning.launch_kernel_cost_func import LaunchKernelCostFuncError
 
-                if isinstance(exc, LaunchKernelCostFuncError):
-                    raise
-            raise PassRegistryError(f"PassRegistryError: pass '{name}' option error") from exc
-        if not isinstance(pass_obj, XdslModulePass):
-            raise PassRegistryError(f"PassRegistryError: pass '{name}' option error")
-        return pass_obj
-    try:
-        return pass_cls()
-    except Exception as exc:  # pragma: no cover - exception detail not stable
-        raise PassRegistryError(f"PassRegistryError: pass '{name}' is not constructible") from exc
+        passthrough_errors = (LaunchKernelCostFuncError,)
+    return _build_registered_pass_instance(
+        name,
+        pass_cls,
+        normalized_options,
+        passthrough_errors=passthrough_errors,
+    )
 
 
 def build_registered_pipeline(name: str, options: dict[str, str] | None = None) -> PassManager:
@@ -255,23 +354,7 @@ def build_registered_pipeline(name: str, options: dict[str, str] | None = None) 
         raise PassRegistryError(f"PassRegistryError: unknown pipeline '{name}'")
     builder = _PIPELINE_REGISTRY[name]
     normalized_options = _normalize_options(options)
-    if normalized_options:
-        if not _pipeline_accepts_options(builder):
-            raise PassRegistryError(f"PassRegistryError: pipeline '{name}' does not accept options")
-        try:
-            pm = builder(normalized_options)
-        except Exception as exc:  # pragma: no cover - builder error path not deterministic
-            raise PassRegistryError(f"PassRegistryError: pipeline '{name}' option error") from exc
-    else:
-        try:
-            pm = builder()
-        except Exception as exc:  # pragma: no cover - builder error path not deterministic
-            raise PassRegistryError(
-                f"PassRegistryError: pipeline '{name}' did not return PassManager"
-            ) from exc
-    if not isinstance(pm, PassManager):
-        raise PassRegistryError(f"PassRegistryError: pipeline '{name}' did not return PassManager")
-    return pm
+    return _build_registered_pipeline_manager(name, builder, normalized_options)
 
 
 def load_builtin_passes() -> None:
@@ -306,9 +389,7 @@ def load_builtin_passes() -> None:
             return target
 
     def _build_no_op_pipeline() -> PassManager:
-        pm = PassManager(name="no-op-pipeline")
-        pm.add_pass(NoOpPass())
-        return pm
+        return _build_pass_manager_from_passes("no-op-pipeline", [NoOpPass()])
 
     if NoOpPass.name not in _PASS_REGISTRY:
         register_pass(NoOpPass)

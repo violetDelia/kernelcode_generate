@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from kernel_gen.passes.decompass import DecompassPass
 from kernel_gen.passes.lowering import NnLoweringPass
-from kernel_gen.passes.pass_manager import PassManager
+from kernel_gen.passes.pass_manager import PassManager, _build_pass_manager_from_passes
 from kernel_gen.passes.registry import register_pipeline
 from kernel_gen.passes.symbol_loop_hoist import SymbolLoopHoistPass
 
@@ -51,8 +51,7 @@ def build_npu_demo_lowering_pipeline() -> PassManager:
     - 功能实现: [kernel_gen/passes/pipeline/npu_demo_lowering.py](kernel_gen/passes/pipeline/npu_demo_lowering.py)
     """
 
-    pm = PassManager(name="npu-demo-lowering")
-    pm.add_pass(DecompassPass())
-    pm.add_pass(NnLoweringPass())
-    pm.add_pass(SymbolLoopHoistPass())
-    return pm
+    return _build_pass_manager_from_passes(
+        "npu-demo-lowering",
+        [DecompassPass(), NnLoweringPass(), SymbolLoopHoistPass()],
+    )
