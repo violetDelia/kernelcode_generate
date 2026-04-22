@@ -137,3 +137,25 @@
 - 验证：`bash /home/lfr/kernelcode_generate/skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file TODO.md -done -task_id "T-20260422-10958bce" -log "agents/codex-multi-agents/log/task_records/2026/17/20260422-python-quality-s4-pass.md" -agents-list agents/codex-multi-agents/agents-lists.md` -> `ERROR(3): task not found in running list: T-20260422-10958bce`
 - Diff 反推自测 / Diff 反推审查：本轮仍沿用前文已完成的 `build` / `review` 结论；当前补记仅确认状态脚本未通过，不新增 `expectation` 依赖。
 - 结论：merge 代码已收口完成；`-done` 仍受 TODO 状态影响，需管理员先把任务切入运行列表后再补执行。
+
+## Merge 收口再续
+
+- 时间：`2026-04-23 02:38 +0800`
+- 经办人：`李白`
+- 任务：`T-20260422-10958bce`
+- 任务目标：任务重新进入运行列表后，继续执行 merge 收口并完成 `-done`。
+- 改动：本轮不再新增代码，仅补写收口前状态，保留此前 blocker 与收口事实，确保记录继续真实。
+- 验证：当前仍以已通过的 launch ABI / operation / pytest 结论为准；此处仅补记录，不额外跑重复测试。
+- Diff 反推自测 / Diff 反推审查：沿用前文已完成的 diff 反推结论，不把 expectation 计入本轮测试。
+- 结论：准备执行 `-done`，随后如有必要再补写最终状态并同步主线。
+
+## Merge 收口完成
+
+- 时间：`2026-04-23 02:42 +0800`
+- 经办人：`李白`
+- 任务：`T-20260422-10958bce`
+- 任务目标：`-done` 已完成，记录补齐最终收口结果。
+- 改动：本轮不再新增代码；仅补写最终状态，保留前文 blocker、收口与重试过程，确保任务链真实可追溯。
+- 验证：`bash /home/lfr/kernelcode_generate/skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file TODO.md -done -task_id "T-20260422-10958bce" -log "agents/codex-multi-agents/log/task_records/2026/17/20260422-python-quality-s4-pass.md" -agents-list agents/codex-multi-agents/agents-lists.md` -> `OK: done T-20260422-10958bce`、`OK: replace 李白 状态`
+- Diff 反推自测 / Diff 反推审查：最终状态仅反映任务流转，不新增实现 diff；继续沿用前文已通过的 launch ABI / operation / pytest 结论。
+- 结论：当前任务已完成 merge 收口与 `-done`，等待管理员查看任务链记录即可。
