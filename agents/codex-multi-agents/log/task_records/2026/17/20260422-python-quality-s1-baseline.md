@@ -116,4 +116,4 @@ Diff 反推自测：已按实际 diff 复核 `kernel_gen/tools/__init__.py`、`k
 
 Diff 反推审查：沿用 `T-20260422-854cafe4` review 记录中的实际审查结论，确认产品测试树已从 expectation 依赖迁出，`kernel_gen.tools.case_runner` 已成为可复用公开 helper，`spec/test/实现` 三者链路对齐；本轮未再引入新的 expectation 直接依赖。
 
-结论：准备进入提交与同步。
+结论：已完成提交与同步，case_runner 迁入 `kernel_gen.tools`、旧 expectation 产品测试入口已删除，合并结论通过。
