@@ -51,11 +51,13 @@ from xdsl.dialects.builtin import (
 )
 from xdsl.ir import Block, Operation, Region
 from xdsl.irdl import IRDLOperation, irdl_op_definition, result_def
+from xdsl.parser import Parser
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from kernel_gen.context import build_default_context
 from kernel_gen.dialect.arch import (
     ArchBarrierOp,
     ArchGetDynamicMemoryOp,
@@ -84,6 +86,7 @@ from kernel_gen.operation.nn import matmul
 from kernel_gen.operation.scf import loop
 from kernel_gen.passes.buffer_results_to_out_params import BufferResultsToOutParamsPass
 from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
+from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelPass
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
 from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
@@ -137,6 +140,28 @@ def _ctx() -> EmitCContext:
 
 def _npu_ctx() -> EmitCContext:
     return EmitCContext(target="npu_demo")
+
+
+def _parse_npu_demo_launch_module(text: str) -> ModuleOp:
+    """解析 `npu_demo` launch 测试 IR。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 复用仓库默认 dialect 上下文解析单函数 launch module。
+    - 为 outline -> gen_kernel 的回归测试提供最小文本入口。
+
+    使用示例:
+    - module = _parse_npu_demo_launch_module(ir_text)
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: kernel_gen/dsl/gen_kernel.py
+    """
+
+    return Parser(build_default_context(), text).parse_module()
 
 
 def _make_memory_type(shape: list[int], stride: list[int], element_type: object = i32, space: str = "global") -> NnMemoryType:
@@ -2355,6 +2380,48 @@ def test_gen_kernel_compiles_npu_demo_launch_wrapper_and_barrier_body() -> None:
 
     include_lines = [line for line in source.splitlines() if line.startswith("#include ")]
     assert include_lines == ['#include "include/npu_demo/npu_demo.h"']
+    _compile_only(source)
+
+
+# GK-S4-002A
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 验证单函数 `npu_demo` launch IR 经过 outline 后，gen_kernel 先输出 body 前置声明再输出 wrapper/definition，并保持可编译。
+# 测试目的: 直接覆盖 outline 后 wrapper 先于 body 的源码顺序回退，防止 wrapper 先引用未声明 body。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_compiles_outlined_npu_demo_launch_module
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_compiles_outlined_npu_demo_launch_module() -> None:
+    module = _parse_npu_demo_launch_module(
+        """
+builtin.module {
+  func.func @kernel(
+    %lhs : !nn.memory<[4], [1], f32, #nn.space<global>>,
+    %rhs : !nn.memory<[4], [1], f32, #nn.space<global>>,
+    %out : !nn.memory<[4], [1], f32, #nn.space<global>>
+  ) attributes {
+    launch_block = 1 : i64,
+    launch_thread = 1 : i64,
+    launch_subthread = 1 : i64,
+    shared_memory_size = 0 : i64
+  } {
+    func.return
+  }
+}
+"""
+    )
+
+    OutlineDeviceKernelPass().run(module)
+    module.verify()
+
+    source = gen_kernel(module, _npu_ctx())
+
+    assert source.index("static void kernel_device(") < source.index("void kernel(")
+    assert source.count("static void kernel_device(") == 2
+    assert "npu_demo::launch<1, 1, 1>(kernel_device" in source
     _compile_only(source)
 
 

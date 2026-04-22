@@ -633,7 +633,7 @@ class _KernelEmitter:
             return self._emit_func(plain_func)
 
         body_func, wrapper_func = self._classify_npu_demo_launch_module(module_op)
-        emitted: list[str] = []
+        emitted: list[str] = [self._emit_npu_demo_launch_body_declaration(body_func)]
         for top_op in module_op.ops:
             if not isinstance(top_op, func.FuncOp):
                 raise _error(self.ctx, "<module>", "npu_demo launch module must contain only func.func")
@@ -1233,15 +1233,7 @@ class _KernelEmitter:
         for arg_name, arg_value in zip(arg_names, func_op.args, strict=True):
             self.ctx.bind_name(arg_value, arg_name)
 
-        body_arg_names = arg_names[body_arg_offset:]
-        mutable_memory_args = self._mutable_memory_arg_indices(func_op)
-        params: list[str] = [f"npu_demo::KernelContext& ctx"]
-        for arg_index, (arg_name, arg_type) in enumerate(zip(body_arg_names, body_input_types, strict=True), start=body_arg_offset):
-            if not isinstance(arg_type, NnMemoryType):
-                raise _error(self.ctx, func_name, "unsupported npu_demo launch body signature")
-            qualifier = "" if arg_index in mutable_memory_args else "const "
-            params.append(f"{qualifier}{self._type_to_c(arg_type)}& {arg_name}")
-        signature = f"static void {func_name}({', '.join(params)})"
+        signature = self._emit_npu_demo_launch_body_signature(func_op, body_input_types, body_arg_offset)
 
         lines: list[str] = []
         last_memory_result_name: str | None = None
@@ -1351,6 +1343,64 @@ class _KernelEmitter:
 
         body_input_types, body_arg_offset = self._validate_npu_demo_launch_body_signature(func_op)
         return self._emit_npu_demo_generic_launch_body_function(func_op, body_input_types, body_arg_offset)
+
+    def _emit_npu_demo_launch_body_declaration(self, func_op: func.FuncOp) -> str:
+        """生成 npu_demo launch body 的前置声明。
+
+        创建者: jcc你莫辜负
+        最后一次更改: jcc你莫辜负
+
+        功能说明:
+        - 为 `npu_demo` launch module 提供与定义完全一致的 body 前置声明。
+        - 解决 outline 后 wrapper 先于 body 出现时的函数可见性问题，避免 wrapper 调用未声明的 body。
+
+        使用示例:
+        - decl = self._emit_npu_demo_launch_body_declaration(body_func)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
+
+        body_input_types, body_arg_offset = self._validate_npu_demo_launch_body_signature(func_op)
+        return f"{self._emit_npu_demo_launch_body_signature(func_op, body_input_types, body_arg_offset)};"
+
+    def _emit_npu_demo_launch_body_signature(
+        self,
+        func_op: func.FuncOp,
+        body_input_types: list[NnMemoryType],
+        body_arg_offset: int,
+    ) -> str:
+        """生成 npu_demo launch body 的函数签名。
+
+        创建者: jcc你莫辜负
+        最后一次更改: jcc你莫辜负
+
+        功能说明:
+        - 统一构造 `static void <body>(npu_demo::KernelContext& ctx, ...)` 的签名。
+        - 供 body 定义与前置声明共享，避免两处拼接逻辑不一致。
+
+        使用示例:
+        - signature = self._emit_npu_demo_launch_body_signature(func_op, body_input_types, body_arg_offset)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
+
+        func_name = func_op.sym_name.data
+        arg_names = _extract_arg_names(func_op)
+        body_arg_names = arg_names[body_arg_offset:]
+        mutable_memory_args = self._mutable_memory_arg_indices(func_op)
+        params: list[str] = [f"npu_demo::KernelContext& ctx"]
+        for arg_index, (arg_name, arg_type) in enumerate(zip(body_arg_names, body_input_types, strict=True), start=body_arg_offset):
+            if not isinstance(arg_type, NnMemoryType):
+                raise _error(self.ctx, func_name, "unsupported npu_demo launch body signature")
+            qualifier = "" if arg_index in mutable_memory_args else "const "
+            params.append(f"{qualifier}{self._type_to_c(arg_type)}& {arg_name}")
+        return f"static void {func_name}({', '.join(params)})"
 
     def _emit_npu_demo_launch_wrapper_function(self, wrapper_func: func.FuncOp, body_func: func.FuncOp) -> str:
         """生成 npu_demo wrapper 函数源码。
