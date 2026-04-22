@@ -24,6 +24,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Final
 
+from kernel_gen.common.contracts import _default_stride as _common_default_stride
+from kernel_gen.common.contracts import _public_dim_values as _common_public_dim_values
 from .symbol_dim import SymbolDim
 from .symbol_shape import SymbolShape
 from .type import Farmat, NumericType
@@ -259,14 +261,7 @@ class Memory:
         - test: test/symbol_variable/test_memory.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
-        values: list[int | str] = []
-        for dim in shape.get_shape():
-            public_value = dim.get_value()
-            if isinstance(public_value, str):
-                values.append(public_value)
-            else:
-                values.append(int(public_value))
-        return values
+        return _common_public_dim_values(shape)
 
     @staticmethod
     def _default_stride(shape: SymbolShape) -> SymbolShape:
@@ -288,13 +283,7 @@ class Memory:
         - test: test/symbol_variable/test_memory.py
         - 功能实现: kernel_gen/symbol_variable/memory.py
         """
-        stride_values: list[SymbolDim] = []
-        running = SymbolDim(1)
-        for dim in reversed(shape.get_shape()):
-            stride_values.append(running)
-            running = dim * running
-        stride_values.reverse()
-        return SymbolShape(stride_values)
+        return _common_default_stride(shape)
 
     def get_shape(self: "Memory") -> list[int | str]:
         """返回序列化后的 shape 列表。

@@ -44,6 +44,10 @@ from xdsl.irdl import (
 )
 from xdsl.utils.exceptions import VerifyException
 
+from kernel_gen.common.contracts import (
+    _dims_equal as _common_dims_equal,
+    _verify_memory_type as _common_verify_memory_type,
+)
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolIterType, SymbolValueType
 
@@ -66,10 +70,7 @@ def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
-    if not isinstance(value, NnMemoryType):
-        raise VerifyException(f"{field_name} must be nn.memory")
-    value.verify()
-    return value
+    return _common_verify_memory_type(value, field_name, scene="dialect.dma verifier")
 
 
 def _verify_memory_operand(value: SSAValue, field_name: str) -> NnMemoryType:
@@ -374,11 +375,7 @@ def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
     - 功能实现: kernel_gen/dialect/dma.py
     """
 
-    if isinstance(lhs, IntAttr) and isinstance(rhs, IntAttr):
-        return lhs.data == rhs.data
-    if isinstance(lhs, StringAttr) and isinstance(rhs, StringAttr):
-        return lhs.data == rhs.data
-    return False
+    return _common_dims_equal(lhs, rhs)
 
 
 def _verify_transpose_perm(perm: ArrayAttr, rank: int) -> list[int]:

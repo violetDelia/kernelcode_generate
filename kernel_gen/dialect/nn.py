@@ -21,6 +21,15 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from kernel_gen.common.contracts import (
+    _build_contiguous_stride as _common_build_contiguous_stride,
+    _collect_int_dims as _common_collect_int_dims,
+    _dims_equal as _common_dims_equal,
+    _verify_i64_attr as _common_verify_i64_attr,
+    _verify_i64_attr_group as _common_verify_i64_attr_group,
+    _verify_i64_attr_value as _common_verify_i64_attr_value,
+    _verify_memory_type as _common_verify_memory_type,
+)
 from kernel_gen.common.errors import _ERROR_TEMPLATE
 from xdsl.dialects.builtin import (
     ArrayAttr,
@@ -358,10 +367,7 @@ class NnMemoryType(ParametrizedAttribute, TypeAttribute):
 def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
     """校验并返回 memory type。"""
 
-    if not isinstance(value, NnMemoryType):
-        _raise_verify_error(f"{field_name} must be nn.memory")
-    value.verify()
-    return value
+    return _common_verify_memory_type(value, field_name, scene=_ERROR_SCENE)
 
 
 def _verify_binary_memory_op(op: "_BaseNnBinaryOp", compare_result: bool) -> None:
@@ -744,11 +750,7 @@ def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
     - test: test/dialect/test_nn_dialect.py
     - 功能实现: kernel_gen/dialect/nn.py
     """
-    if isinstance(lhs, IntAttr) and isinstance(rhs, IntAttr):
-        return lhs.data == rhs.data
-    if isinstance(lhs, StringAttr) and isinstance(rhs, StringAttr):
-        return lhs.data == rhs.data
-    return False
+    return _common_dims_equal(lhs, rhs)
 
 
 def _verify_broadcast_compat(input_type: NnMemoryType, result_type: NnMemoryType) -> None:
@@ -893,19 +895,12 @@ def _verify_i64_attr_value(attr: IntegerAttr, field_name: str, *, allow_zero: bo
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
-    if not isinstance(attr.type, IntegerType):
-        _raise_verify_error(f"{field_name} must be i64")
-    width_attr = attr.type.width
-    width_value = width_attr.data if isinstance(width_attr, IntAttr) else width_attr
-    if width_value != 64:
-        _raise_verify_error(f"{field_name} must be i64")
-    value = attr.value.data
-    if allow_zero:
-        if value < 0:
-            _raise_verify_error(f"{field_name} must be non-negative")
-    elif value <= 0:
-        _raise_verify_error(f"{field_name} must be positive")
-    return value
+    return _common_verify_i64_attr_value(
+        attr,
+        field_name,
+        allow_zero=allow_zero,
+        scene=_ERROR_SCENE,
+    )
 
 
 def _verify_i64_attr_group(
@@ -932,22 +927,12 @@ def _verify_i64_attr_group(
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
-    values: list[int] = []
-    for attr in attrs:
-        if not isinstance(attr.type, IntegerType):
-            _raise_verify_error(error_phrase)
-        width_attr = attr.type.width
-        width_value = width_attr.data if isinstance(width_attr, IntAttr) else width_attr
-        if width_value != 64:
-            _raise_verify_error(error_phrase)
-        value = attr.value.data
-        if allow_zero:
-            if value < 0:
-                _raise_verify_error(error_phrase)
-        elif value <= 0:
-            _raise_verify_error(error_phrase)
-        values.append(value)
-    return values
+    return _common_verify_i64_attr_group(
+        attrs,
+        allow_zero=allow_zero,
+        error_phrase=error_phrase,
+        scene=_ERROR_SCENE,
+    )
 
 
 def _verify_i64_attr(attr: IntegerAttr, field_name: str) -> int:
@@ -969,13 +954,7 @@ def _verify_i64_attr(attr: IntegerAttr, field_name: str) -> int:
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
-    if not isinstance(attr.type, IntegerType):
-        _raise_verify_error(f"{field_name} must be i64")
-    width_attr = attr.type.width
-    width_value = width_attr.data if isinstance(width_attr, IntAttr) else width_attr
-    if width_value != 64:
-        _raise_verify_error(f"{field_name} must be i64")
-    return attr.value.data
+    return _common_verify_i64_attr(attr, field_name, scene=_ERROR_SCENE)
 
 
 def _collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None:
@@ -997,12 +976,7 @@ def _collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None:
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
-    values: list[int] = []
-    for dim in dims:
-        if not isinstance(dim, IntAttr):
-            return None
-        values.append(dim.data)
-    return values
+    return _common_collect_int_dims(dims)
 
 
 def _build_contiguous_stride(shape: Sequence[int]) -> list[int]:
@@ -1023,13 +997,7 @@ def _build_contiguous_stride(shape: Sequence[int]) -> list[int]:
     - 功能实现: kernel_gen/dialect/nn.py
     """
 
-    running = 1
-    strides: list[int] = []
-    for dim in reversed(shape):
-        strides.append(running)
-        running *= dim
-    strides.reverse()
-    return strides
+    return _common_build_contiguous_stride(shape)
 
 
 def _normalize_axes_attr(axes: Sequence[int] | ArrayAttr) -> ArrayAttr:

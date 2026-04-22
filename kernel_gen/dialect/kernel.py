@@ -21,6 +21,13 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
+from kernel_gen.common.contracts import (
+    _build_contiguous_stride as _common_build_contiguous_stride,
+    _collect_int_dims as _common_collect_int_dims,
+    _dims_equal as _common_dims_equal,
+    _verify_i64_attr_range as _common_verify_i64_attr_range,
+    _verify_memory_type as _common_verify_memory_type,
+)
 from kernel_gen.common.errors import _ERROR_TEMPLATE
 from xdsl.dialects.builtin import (
     BFloat16Type,
@@ -137,17 +144,7 @@ def _verify_memory_type(value: Attribute, field_name: str) -> NnMemoryType:
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
-    if not isinstance(value, NnMemoryType):
-        raise VerifyException(
-            _ERROR_TEMPLATE.format(
-                scene=_ERROR_SCENE,
-                expected=f"{field_name} must be nn.memory",
-                actual=_ERROR_ACTUAL,
-                action=_ERROR_ACTION,
-            )
-        )
-    value.verify()
-    return value
+    return _common_verify_memory_type(value, field_name, scene=_ERROR_SCENE)
 
 
 def _verify_same_layout(types: Iterable[NnMemoryType], op_space: NnMemorySpaceAttr) -> None:
@@ -349,37 +346,13 @@ def _verify_i64_attr_range(attr: IntegerAttr, field_name: str, *, min_value: int
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
-    if not isinstance(attr.type, IntegerType):
-        raise VerifyException(
-            _ERROR_TEMPLATE.format(
-                scene=_ERROR_SCENE,
-                expected=f"{field_name} must be i64",
-                actual=_ERROR_ACTUAL,
-                action=_ERROR_ACTION,
-            )
-        )
-    width_attr = attr.type.width
-    width_value = width_attr.data if isinstance(width_attr, IntAttr) else width_attr
-    if width_value != 64:
-        raise VerifyException(
-            _ERROR_TEMPLATE.format(
-                scene=_ERROR_SCENE,
-                expected=f"{field_name} must be i64",
-                actual=_ERROR_ACTUAL,
-                action=_ERROR_ACTION,
-            )
-        )
-    value = attr.value.data
-    if value < min_value or value > max_value:
-        raise VerifyException(
-            _ERROR_TEMPLATE.format(
-                scene=_ERROR_SCENE,
-                expected=f"{field_name} must be within [{min_value}, {max_value}]",
-                actual=_ERROR_ACTUAL,
-                action=_ERROR_ACTION,
-            )
-        )
-    return value
+    return _common_verify_i64_attr_range(
+        attr,
+        field_name,
+        min_value=min_value,
+        max_value=max_value,
+        scene=_ERROR_SCENE,
+    )
 
 
 def _is_symbol_int_type(attr: Attribute) -> bool:
@@ -550,12 +523,7 @@ def _collect_int_dims(dims: Sequence[Attribute]) -> list[int] | None:
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
-    values: list[int] = []
-    for dim in dims:
-        if not isinstance(dim, IntAttr):
-            return None
-        values.append(dim.data)
-    return values
+    return _common_collect_int_dims(dims)
 
 
 def _build_contiguous_stride(shape: Sequence[int]) -> list[int]:
@@ -577,13 +545,7 @@ def _build_contiguous_stride(shape: Sequence[int]) -> list[int]:
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
-    running = 1
-    strides: list[int] = []
-    for dim in reversed(shape):
-        strides.append(running)
-        running *= dim
-    strides.reverse()
-    return strides
+    return _common_build_contiguous_stride(shape)
 
 
 def _img2col_output_dim(size: int, kernel: int, stride: int, dilation: int, pad_before: int, pad_after: int) -> int:
@@ -708,11 +670,7 @@ def _dims_equal(lhs: Attribute, rhs: Attribute) -> bool:
     - 功能实现: kernel_gen/dialect/kernel.py
     """
 
-    if isinstance(lhs, IntAttr) and isinstance(rhs, IntAttr):
-        return lhs.data == rhs.data
-    if isinstance(lhs, StringAttr) and isinstance(rhs, StringAttr):
-        return lhs.data == rhs.data
-    return False
+    return _common_dims_equal(lhs, rhs)
 
 
 def _build_reduce_result_shape(

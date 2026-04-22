@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from kernel_gen.common.contracts import _shape_numel as _common_shape_numel
 from kernel_gen.common.errors import _ERROR_TEMPLATE
 from kernel_gen.symbol_variable.dtype_constants import FLOAT_DTYPES, INT_DTYPES
 from kernel_gen.symbol_variable.memory import Memory, MemorySpace
@@ -515,10 +516,7 @@ def _shape_numel(shape: SymbolShape) -> SymbolDim:
     - test: test/operation/test_operation_dma.py
     - 功能实现: kernel_gen/operation/dma.py
     """
-    total = SymbolDim(1)
-    for dim in shape.get_shape():
-        total = total * dim
-    return total
+    return _common_shape_numel(shape)
 
 
 def _ensure_view_numel_compatible(source: Memory, shape: SymbolShape) -> None:
