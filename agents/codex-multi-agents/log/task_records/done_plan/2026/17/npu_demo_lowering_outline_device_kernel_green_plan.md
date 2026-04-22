@@ -3,8 +3,8 @@
 ## 文档信息
 
 - 创建者：`Codex`
-- 最后一次更改：`大闸蟹`
-- 最近一次更新时间：`2026-04-22 00:00:00 +0800`
+- 最后一次更改：`Codex`
+- 最近一次更新时间：`2026-04-22 22:36:51 +0800`
 - 目标 `spec`：
   - [`spec/target/registry.md`](../../spec/target/registry.md)
   - [`spec/dsl/emit_mlir.md`](../../spec/dsl/emit_mlir.md)
@@ -108,7 +108,7 @@
 
 - 启用 target registry + `npu_demo.txt`：npu demo 的 arch 能力和硬件参数从 target 文件加载，当前 `block_num/thread_num/subthread_num` 写成 `1/1/1`，后续只改 target 文件或 target 查询策略即可恢复真实硬件值。
 - 新增或补齐 `attach-arch-information` pass：它只负责从 target 查询 launch extent 并附着 `launch_block / launch_thread / launch_subthread`，不做 outline、不猜测 target、不写死 `1/1/1`。
-- 收口 `npu-demo-lowering` 默认 pipeline：固定执行 `inline -> decompass -> lower-nn -> symbol-loop-hoist -> attach-arch-information -> outline-device-kernel`，不再公开支持 `only-kernel=true`，传入该 option 必须稳定失败。
+- 收口 `npu-demo-lowering` pipeline：固定执行 `inline -> decompass -> lower-nn -> symbol-loop-hoist -> attach-arch-information -> outline-device-kernel`，不再公开支持 `only-kernel=true`，传入该 option 必须稳定失败。
 - 泛化 `gen_kernel` 的 launch module codegen：根据 IR 中的 `arch.launch` 和 target registry 生成源码，删除 frozen add+barrier 骨架、`launch<1,4,1>` 限制和只支持 `lhs/rhs/out` 的签名限制。
 - 泛化 `dsl_run` 入口选择：npu demo module 以唯一 `arch.launch` wrapper 作为入口；存在 helper 函数时也能工作；wrapper codegen 失败必须失败，不能 fallback 到首个普通函数。
 - 保留 `i64` 修复作为前置闭环：execute expectation 随机 dtype 可以包含 `i64`，不能通过缩小随机池绕过。
@@ -319,7 +319,7 @@ assert "i64" in str(module)
 - `build_registered_pipeline("npu-demo-lowering", {"only-kernel": "true"})` 或 CLI `npu-demo-lowering{only-kernel=true}` 稳定失败。
 - `gen_kernel` 对 npu demo launch module 不再限定 add/barrier 固定骨架、不再限定三参数 `lhs/rhs/out`、不再生成 `launch<1,4,1>`。
 - `dsl_run(..., "npu-demo-lowering", EmitCContext(target="npu_demo"))` 选择 wrapper 入口真实编译执行，不允许只 lower、只出源码、dry-run 或 fallback 到首个普通函数。
-- execute expectation 的 add/sub/mul/matmul 默认链路支持随机 shape 和随机 dtype；`i64` 能进入 MLIR/codegen，不通过缩小随机池绕过。
+- execute expectation 的 add/sub/mul/matmul `npu-demo-lowering` 链路支持随机 shape 和随机 dtype；`i64` 能进入 MLIR/codegen，不通过缩小随机池绕过。
 - `default-lowering` builder 和 standalone `outline-device-kernel` pass 入口保持公开兼容。
 
 ## 验收设计
@@ -332,7 +332,7 @@ assert "i64" in str(module)
   - `expectation/pass/outline_device_kernel`：继续锁定 standalone outline pass 消费显式 attrs 的 IR 行为。
   - `test/dsl/test_gen_kernel.py`：锁定 generic `arch.launch` extents、ctx 注入、删除 frozen add/barrier 特化。
   - `test/tools/test_dsl_run.py`：锁定 wrapper entry selection 不 silent fallback。
-  - `expectation/execute_engine/npu_demo/default`：锁定 default pipeline 的 add/sub/mul/matmul 真实执行。
+  - `expectation/execute_engine/npu_demo/default`：锁定 `npu-demo-lowering` pipeline 的 add/sub/mul/matmul 真实执行。
 - 最终必过命令：
 
 ```bash
@@ -405,7 +405,7 @@ MLIR dtype: i64
 
 #### 阶段目标
 
-- 收口默认 pipeline：通过 `attach-arch-information` 查询 target 并附着 attrs，再由 `outline-device-kernel` 生成 host wrapper + device function。
+- 收口 `npu-demo-lowering` pipeline：通过 `attach-arch-information` 查询 target 并附着 attrs，再由 `outline-device-kernel` 生成 host wrapper + device function。
 
 #### 目标 spec / API
 
