@@ -914,11 +914,15 @@ class NnLoweringPass(Pass):
     name = "lower-nn"
 
     def apply(self, ctx: Context, op: ModuleOp) -> None:
-        """执行 nn lowering。"""
+        """执行 nn lowering，并在 rewrite driver 内启用 folding。"""
 
-        _ = ctx
         PatternRewriteWalker(
-            GreedyRewritePatternApplier(nn_lowering_patterns(), dce_enabled=False)
+            GreedyRewritePatternApplier(
+                nn_lowering_patterns(),
+                ctx=ctx,
+                folding_enabled=True,
+                dce_enabled=False,
+            )
         ).rewrite_module(op)
 
     def run(self, module: ModuleOp) -> ModuleOp:

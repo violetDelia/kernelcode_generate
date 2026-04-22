@@ -29,6 +29,7 @@ from typing import ClassVar, TYPE_CHECKING
 from kernel_gen.common.errors import _ERROR_TEMPLATE
 os.environ.setdefault("SYMPY_GMPY", "0")
 from xdsl.dialects.builtin import BFloat16Type, Float16Type, Float32Type, Float64Type, IntAttr, IntegerType, StringAttr, f32, f64, i1, i32
+from xdsl.dialect_interfaces.constant_materialization import ConstantMaterializationInterface
 from xdsl.ir import Attribute, Block, Dialect, Operation, ParametrizedAttribute, Region, SSAValue, TypeAttribute
 from xdsl.irdl import (
     IRDLOperation,
@@ -44,6 +45,7 @@ from xdsl.irdl import (
     traits_def,
     var_operand_def,
 )
+from xdsl.interfaces import HasFolderInterface
 from xdsl.parser import AttrParser
 from xdsl.printer import Printer
 from xdsl.traits import IsTerminator, NoTerminator
@@ -493,6 +495,31 @@ def _is_symbol_int_type(attr: Attribute) -> bool:
     """
 
     return isinstance(attr, SymbolValueType)
+
+
+def _get_concrete_symbol_int_value(attr: Attribute) -> int | None:
+    """提取静态可求值的 `!symbol.int` 整数值。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 仅当 `attr` 是静态整数 `SymbolValueType` 时返回具体整数。
+    - 动态 symbol 表达返回 `None`，供 fold 逻辑保守拒绝。
+
+    使用示例:
+    - _get_concrete_symbol_int_value(SymbolValueType.from_expr("3"))
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/dialect/test_symbol_dialect.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    if not isinstance(attr, SymbolValueType):
+        return None
+    value = attr.get_value()
+    return value if isinstance(value, int) else None
 
 
 @irdl_attr_definition
@@ -1202,7 +1229,7 @@ class SymbolPtrType(ParametrizedAttribute, TypeAttribute):
             _raise_verify_error("symbol.ptr dtype must not be symbol.int")
 
 
-class _BaseSymbolBinaryArithOp(IRDLOperation):
+class _BaseSymbolBinaryArithOp(IRDLOperation, HasFolderInterface):
     """symbol 二元整数算术 op 基类。"""
 
     lhs = operand_def(Attribute)
@@ -1258,6 +1285,52 @@ class _BaseSymbolBinaryArithOp(IRDLOperation):
                 _raise_verify_error(f"{self.name} {field_name} must have type !symbol.int<\"expr\">")
         if not _is_symbol_int_type(self.result.type):
             _raise_verify_error(f"{self.name} result type must be !symbol.int<\"expr\">")
+
+    def fold(self: "_BaseSymbolBinaryArithOp") -> Sequence[SSAValue | Attribute] | None:
+        """折叠静态整数 symbol 二元算术 op。
+
+        创建者: jcc你莫辜负
+        最后一次更改: jcc你莫辜负
+
+        功能说明:
+        - 仅当 lhs/rhs/result 都是静态整数 `!symbol.int` 时折叠。
+        - 动态 symbol 表达一律保守返回 `None`，避免误折叠。
+
+        使用示例:
+        - SymbolAddOp(SymbolConstOp(1).result, SymbolConstOp(2).result, SymbolValueType.from_expr("3")).fold()
+
+        关联文件:
+        - spec: spec/dialect/symbol.md
+        - test: test/dialect/test_symbol_dialect.py
+        - 功能实现: kernel_gen/dialect/symbol.py
+        """
+
+        lhs_value = _get_concrete_symbol_int_value(SSAValue.get(self.lhs).type)
+        rhs_value = _get_concrete_symbol_int_value(SSAValue.get(self.rhs).type)
+        result_type = SSAValue.get(self.result).type
+        if lhs_value is None or rhs_value is None or not isinstance(result_type, SymbolValueType):
+            return None
+
+        if self.name == "symbol.add":
+            result_value = lhs_value + rhs_value
+        elif self.name == "symbol.sub":
+            result_value = lhs_value - rhs_value
+        elif self.name == "symbol.mul":
+            result_value = lhs_value * rhs_value
+        elif self.name == "symbol.div":
+            if rhs_value == 0 or lhs_value % rhs_value != 0:
+                return None
+            result_value = lhs_value // rhs_value
+        elif self.name == "symbol.floordiv":
+            if rhs_value == 0:
+                return None
+            result_value = lhs_value // rhs_value
+        else:
+            return None
+
+        if result_type.get_value() != result_value:
+            return None
+        return (IntAttr(result_value),)
 
     def print(self: "_BaseSymbolBinaryArithOp", printer: Printer) -> None:
         """打印 symbol 二元整数算术 op 自定义文本语法。"""
@@ -1491,6 +1564,37 @@ class SymbolConstOp(IRDLOperation):
         parser.parse_characters(":", f" in {cls.name}")
         result_type = parser.parse_type()
         return cls(value, result_type)
+
+
+class SymbolConstantMaterializationInterface(ConstantMaterializationInterface):
+    """将 folded 整数属性 materialize 回 symbol.const。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 仅接受与 `SymbolValueType` 一致的静态整数常量。
+    - 为 xdsl folding 提供 `symbol.const` 物化入口，不新增独立 cleanup pass。
+
+    使用示例:
+    - SymbolConstantMaterializationInterface().materialize_constant(IntAttr(3), SymbolValueType.from_expr("3"))
+
+    关联文件:
+    - spec: spec/dialect/symbol.md
+    - test: test/dialect/test_symbol_dialect.py
+    - 功能实现: kernel_gen/dialect/symbol.py
+    """
+
+    def materialize_constant(self, value: Attribute, type: Attribute) -> Operation | None:
+        """把整数常量 materialize 为 `symbol.const`。"""
+
+        if not isinstance(value, IntAttr):
+            return None
+        if not isinstance(type, SymbolValueType):
+            return None
+        if type.get_value() != value.data:
+            return None
+        return SymbolConstOp(value, type)
 
 
 @irdl_op_definition
@@ -2304,6 +2408,9 @@ Symbol = Dialect(
         SymbolIterAttr,
         SymbolIterType,
         SymbolValueType,
+    ],
+    [
+        SymbolConstantMaterializationInterface(),
     ],
 )
 

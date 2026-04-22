@@ -133,8 +133,17 @@ def test_nn_lowering_apply_uses_pattern_driver(monkeypatch: pytest.MonkeyPatch) 
     sentinel_pattern = object()
 
     class FakeApplier:
-        def __init__(self, patterns: list[object], *, dce_enabled: bool) -> None:
+        def __init__(
+            self,
+            patterns: list[object],
+            ctx: Context | None = None,
+            *,
+            folding_enabled: bool = False,
+            dce_enabled: bool,
+        ) -> None:
             calls["patterns"] = patterns
+            calls["ctx"] = ctx
+            calls["folding_enabled"] = folding_enabled
             calls["dce_enabled"] = dce_enabled
 
     class FakeWalker:
@@ -148,10 +157,13 @@ def test_nn_lowering_apply_uses_pattern_driver(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(nn_lowering_module, "GreedyRewritePatternApplier", FakeApplier)
     monkeypatch.setattr(nn_lowering_module, "PatternRewriteWalker", FakeWalker)
 
+    ctx = Context()
     module = ModuleOp([])
-    NnLoweringPass().apply(Context(), module)
+    NnLoweringPass().apply(ctx, module)
 
     assert calls["patterns"] == [sentinel_pattern]
+    assert calls["ctx"] is ctx
+    assert calls["folding_enabled"] is True
     assert calls["dce_enabled"] is False
     assert isinstance(calls["applier"], FakeApplier)
     assert calls["module"] is module

@@ -31,6 +31,7 @@ from xdsl.dialects.arith import Arith
 from xdsl.dialects.builtin import ArrayAttr, Builtin, IndexType, IntAttr, IntegerType, StringAttr, bf16, f16, f32, f64, i1, i8, i16, i32, i64
 from xdsl.dialects.test import Test, TestOp as _TestOp
 from xdsl.ir import Block, Region
+from xdsl.folder import Folder
 from xdsl.parser import Parser
 from xdsl.printer import Printer
 from xdsl.utils.exceptions import ParseError, VerifyException
@@ -300,6 +301,64 @@ builtin.module {
     printed = _print_op(module)
     assert 'symbol.const 0 : !symbol.int<"0">' in printed
     assert 'symbol.const -4 : !symbol.int<"-4">' in printed
+
+
+# TC-SYM-052 / TC-SYM-053 / TC-SYM-054 / TC-SYM-055 / TC-SYM-056
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 测试目的: 验证 symbol.add/sub/mul/div/floordiv 的静态整数 fold 会 materialize 为 symbol.const。
+# 使用示例: pytest -q test/dialect/test_symbol_dialect.py -k test_symbol_binary_arith_fold_constant_operands
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+@pytest.mark.parametrize(
+    ("op_factory", "lhs", "rhs", "result_type", "expected"),
+    [
+        (SymbolAddOp, 2, 3, "5", 5),
+        (SymbolSubOp, 7, 4, "3", 3),
+        (SymbolMulOp, 6, 5, "30", 30),
+        (SymbolDivOp, 6, 3, "2", 2),
+        (SymbolFloorDivOp, 7, 3, "2", 2),
+    ],
+)
+def test_symbol_binary_arith_fold_constant_operands(
+    op_factory: type[SymbolAddOp],
+    lhs: int,
+    rhs: int,
+    result_type: str,
+    expected: int,
+) -> None:
+    ctx = _build_context()
+    folder = Folder(ctx)
+    lhs_op = SymbolConstOp(lhs)
+    rhs_op = SymbolConstOp(rhs)
+    op = op_factory(lhs_op.result, rhs_op.result, SymbolValueType.from_expr(result_type))
+
+    folded = folder.try_fold(op)
+
+    assert folded is not None
+    values, new_ops = folded
+    assert len(values) == 1
+    assert len(new_ops) == 1
+    assert isinstance(new_op := new_ops[0], SymbolConstOp)
+    assert new_op.value.data == expected
+    assert new_op.result.type == SymbolValueType.from_expr(str(expected))
+
+
+# TC-SYM-057
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 测试目的: 验证静态 folding 不会误折叠含动态 symbol 的二元算术表达式。
+# 使用示例: pytest -q test/dialect/test_symbol_dialect.py -k test_symbol_binary_arith_fold_rejects_dynamic_operands
+# 对应功能实现文件路径: kernel_gen/dialect/symbol.py
+# 对应 spec 文件路径: spec/dialect/symbol.md
+def test_symbol_binary_arith_fold_rejects_dynamic_operands() -> None:
+    ctx = _build_context()
+    folder = Folder(ctx)
+    lhs = _TestOp(result_types=[SymbolValueType.from_expr("N")]).results[0]
+    rhs = SymbolConstOp(2).result
+    op = SymbolAddOp(lhs, rhs, SymbolValueType.from_expr("N + 2"))
+
+    assert folder.try_fold(op) is None
 
 
 # TC-SYM-051
