@@ -37,6 +37,7 @@
 - 比较的输入必须是完整 `builtin.module`：
   - expected 来自 `mlir_file` 文件内容
   - actual 来自 `mlir_gen(...)` 的返回值
+- 不对旧 `expectation` 文本做兼容修补；expected 必须直接符合当前公开比较口径。
 
 ## 公开接口
 

@@ -79,6 +79,7 @@
 - `emitc_target` 只接受 `cpu`、`npu_demo` 与 `None`。
 - 一旦进入 `emitc mode`，`actual_ir` 与 `CHECK*` 的匹配对象都固定为生成源码文本；不得在同一次执行中同时匹配 IR 与源码，也不得在生成失败时静默回退到 IR 匹配。
 - `emitc` 生成失败、`emitc_target` 不受支持、或目标 target 与当前 IR 结构不兼容时，统一返回 `IrcheckEmitCError: emit_c generation failed` 前缀。
+- `ircheck` 不根据 `source_path` 中是否出现 `expectation/` 路径做额外文本修补；`emitc_target` 只切换匹配对象，不切换旧 expectation 兼容视图。
 - 内置正则别名仅允许出现在 `[[NAME:REGEX]]` 的 `REGEX` 区段内：
   - `{reg}`：`(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+)`
   - `{val}`：`[A-Za-z_][A-Za-z0-9_]*`

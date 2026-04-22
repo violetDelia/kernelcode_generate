@@ -118,6 +118,7 @@ def _build_min_context() -> object:
     from xdsl.dialects.builtin import Builtin
     from xdsl.dialects.func import Func
 
+    from kernel_gen.dialect.dma import Dma
     from kernel_gen.dialect.kernel import Kernel
     from kernel_gen.dialect.nn import Nn
 
@@ -126,6 +127,7 @@ def _build_min_context() -> object:
     ctx.load_dialect(Func)
     ctx.load_dialect(Arith)
     ctx.load_dialect(Nn)
+    ctx.load_dialect(Dma)
     ctx.load_dialect(Kernel)
     return ctx
 
@@ -432,6 +434,50 @@ def test_mlir_gen_compare_returns_false_when_actual_not_module(
         runtime_args=None,
         config=None,
         mlir_file=str(expected_path),
+    )
+
+    assert ok is False
+
+
+# TC-MLIR-GEN-COMPARE-003A
+# 创建者: 金铲铲大作战
+# 最后更改: 金铲铲大作战
+# 最近一次运行测试时间: 未运行
+# 最近一次运行成功时间: 未运行
+# 功能说明: 验证 mlir_gen_compare 不再对旧 expectation 中的 dma.view 结果 dtype 做兼容修补。
+# 测试目的: 锁定 expected 文本若仍保留旧 f32 结果类型，会直接比较失败。
+# 使用示例: pytest -q test/tools/test_mlir_gen_compare.py -k test_mlir_gen_compare_does_not_repair_legacy_dma_view_result_dtype
+# 对应功能实现文件路径: kernel_gen/tools/mlir_gen_compare.py
+# 对应 spec 文件路径: spec/tools/mlir_gen_compare.md
+# 对应测试文件路径: test/tools/test_mlir_gen_compare.py
+def test_mlir_gen_compare_does_not_repair_legacy_dma_view_result_dtype(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actual_text = """builtin.module {
+  func.func @main(%0 : !nn.memory<[2], [1], f16, #nn.space<global>>, %1 : i32, %2 : i32, %3 : i32, %4 : i32, %5 : i32, %6 : i32) {
+    %7 = "dma.view"(%0, %1, %2, %3, %4, %5, %6) <{operandSegmentSizes = array<i32: 1, 2, 2, 2>}> : (!nn.memory<[2], [1], f16, #nn.space<global>>, i32, i32, i32, i32, i32, i32) -> !nn.memory<[2], [1], f16, #nn.space<global>>
+    func.return
+  }
+}
+"""
+    expected_text = actual_text.replace(
+        "-> !nn.memory<[2], [1], f16, #nn.space<global>>",
+        "-> !nn.memory<[2], [1], f32, #nn.space<global>>",
+        1,
+    )
+
+    def _stub_mlir_gen_dma(*_args: object, **_kwargs: object) -> object:
+        ctx = compare_module._build_default_context()
+        return Parser(ctx, actual_text).parse_module()
+
+    monkeypatch.setattr(compare_module, "_load_mlir_gen", lambda: _stub_mlir_gen_dma)
+    monkeypatch.setattr(compare_module, "_build_default_context", _build_min_context)
+
+    ok = compare_module.mlir_gen_compare_text(
+        fn=_dummy_kernel,
+        runtime_args=None,
+        config=None,
+        mlir_text=expected_text,
     )
 
     assert ok is False

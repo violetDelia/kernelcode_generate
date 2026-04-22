@@ -6,7 +6,7 @@
 功能说明:
 - 提供 `dsl_run(func, real_args, pipeline, emitcconfig)` 的一体化入口。
 - 负责把 DSL 函数解析为 module，按指定 pipeline 做 lowering，再生成源码并交给执行引擎真实编译/执行。
-- 只承载 `expectation/tools/dsl_run` 锁定的公开合同，不把内部 parse / pass / emit / execute 细节暴露为外部依赖。
+- 只承载公开合同，不把内部 parse / pass / emit / execute 细节暴露为外部依赖。
 
 使用示例:
 - from kernel_gen.tools.dsl_run import dsl_run

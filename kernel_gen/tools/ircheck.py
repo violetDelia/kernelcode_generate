@@ -25,11 +25,6 @@ builtin.module {}
 
 关联文件:
 - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
-- expectation:
-  - [expectation/tools/ircheck/basic_true.py](expectation/tools/ircheck/basic_true.py)
-  - [expectation/tools/ircheck/basic_false.py](expectation/tools/ircheck/basic_false.py)
-  - [expectation/tools/ircheck/check_next_false.py](expectation/tools/ircheck/check_next_false.py)
-  - [expectation/tools/ircheck/README.md](expectation/tools/ircheck/README.md)
 - test:
   - [test/tools/test_ircheck_parser.py](test/tools/test_ircheck_parser.py)
   - [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
@@ -1151,102 +1146,11 @@ def _normalize_emitc_text(text: str, *, emitc_target: str, source_path: str | No
     最后修改人: 大闸蟹
 
     功能说明:
-    - 保持真实 `gen_kernel` 生成源码不变，只在 `ircheck` 的 `CHECK*` 匹配文本里做窄范围兼容。
-    - `target=npu_demo` 沿用既有常量后缀规整。
-    - `target=cpu` 仅兼容 `expectation/tools/ircheck/emitc_single_ops_true.py` 的历史 CPU 单 op 文本。
+    - 保持真实 `gen_kernel` 生成源码不变，只在 `ircheck` 的 `CHECK*` 匹配文本里做 target 级切换。
+    - `emitc_target` 只决定匹配对象是否切换为源码文本，不根据 `source_path` 中的历史路径做额外修补。
 
     使用示例:
-    - `actual = _normalize_emitc_text(source, emitc_target="cpu", source_path="expectation/tools/ircheck/emitc_single_ops_true.py#dma_fill")`
-
-    关联文件:
-    - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
-    - expectation: [expectation/tools/ircheck/emitc_single_ops_true.py](expectation/tools/ircheck/emitc_single_ops_true.py)
-    - test: [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
-    - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
-    """
-
-    if emitc_target == "npu_demo":
-        return _normalize_npu_demo_emitc_text(text, source_path=source_path)
-    if emitc_target == "cpu":
-        return _normalize_cpu_emitc_text(text, source_path=source_path)
-    return text
-
-
-def _normalize_cpu_emitc_text(text: str, *, source_path: str | None) -> str:
-    """兼容历史 CPU 单 op expectation 的源码文本。
-
-    创建者: 大闸蟹
-    最后修改人: 大闸蟹
-
-    功能说明:
-    - 当前 `gen_kernel(target="cpu")` 已按主合同生成更准确的可写 out 参数和 view stride 文本。
-    - `expectation/tools/ircheck/emitc_single_ops_true.py` 锁定的是旧单 op ircheck 匹配视图，
-      其目标是证明 `ircheck` 走真实源码生成分支，而不是约束通用 gen_kernel 签名策略。
-    - 因此只对该 expectation 文件做文本规整，不影响其它调用方拿到的真实源码。
-
-    使用示例:
-    - `text = _normalize_cpu_emitc_text(text, source_path="expectation/tools/ircheck/emitc_single_ops_true.py#dma_view")`
-
-    关联文件:
-    - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
-    - expectation: [expectation/tools/ircheck/emitc_single_ops_true.py](expectation/tools/ircheck/emitc_single_ops_true.py)
-    - test: [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
-    - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
-    """
-
-    if not source_path or "expectation/tools/ircheck/emitc_single_ops_true.py" not in source_path:
-        return text
-
-    replacements = {
-        "void fill_case(Memory<MemorySpace::GM, int32_t>& arg0) {": (
-            "void fill_case(const Memory<MemorySpace::GM, int32_t>& arg0) {"
-        ),
-        "void slice_case(Memory<MemorySpace::LM, float>& arg0, const Memory<MemorySpace::GM, float>& arg1, int32_t arg2, int32_t arg3, int32_t arg4) {": (
-            "void slice_case(const Memory<MemorySpace::LM, float>& arg0, const Memory<MemorySpace::GM, float>& arg1, int32_t arg2, int32_t arg3, int32_t arg4) {"
-        ),
-        "void deslice_case(const Memory<MemorySpace::GM, float>& arg0, const Memory<MemorySpace::LM, float>& arg1, Memory<MemorySpace::GM, float>& arg2, int32_t arg3, int32_t arg4, int32_t arg5) {": (
-            "void deslice_case(Memory<MemorySpace::GM, float>& arg0, const Memory<MemorySpace::LM, float>& arg1, const Memory<MemorySpace::GM, float>& arg2, int32_t arg3, int32_t arg4, int32_t arg5) {"
-        ),
-        "void kernel_binary_add_case(Memory<MemorySpace::GM, int32_t>& arg0, const Memory<MemorySpace::GM, int32_t>& arg1, const Memory<MemorySpace::GM, int32_t>& arg2) {": (
-            "void kernel_binary_add_case(const Memory<MemorySpace::GM, int32_t>& arg0, const Memory<MemorySpace::GM, int32_t>& arg1, const Memory<MemorySpace::GM, int32_t>& arg2) {"
-        ),
-    }
-    for old, new in replacements.items():
-        text = text.replace(old, new)
-
-    text = text.replace(
-        (
-            "    long long view_offset0 = (0 * arg1.stride()[0]) + (0 * arg1.stride()[1]);\n"
-            "    long long arg0_shape[2] = {2, 2};\n"
-            "    long long arg0_stride[2] = {1, 1};\n"
-            "    Memory<MemorySpace::GM, float> arg0(const_cast<float*>(arg1.data()) + view_offset0, 2, arg0_shape, arg0_stride, arg1.format());"
-        ),
-        (
-            "    long long view_offset0 = 0;\n"
-            "    long long v0_shape[2] = {2, 2};\n"
-            "    long long v0_stride[2] = {2, 1};\n"
-            "    Memory<MemorySpace::GM, float> v0(const_cast<float*>(arg1.data()) + view_offset0, 2, v0_shape, v0_stride, arg1.format());"
-        ),
-    )
-    return text
-
-
-def _normalize_npu_demo_emitc_text(text: str, *, source_path: str | None) -> str:
-    """把 `npu_demo` emitc 文本里的重复常量后缀收口成老 expectation 口径。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 仅对 `expectation/dsl/emit_c/npu_demo/dma/deslice.py*` 这类仍保留旧命名口径的 case 生效。
-    - `gen_kernel(target=\"npu_demo\")` 会为同值常量补后缀，避免生成重复变量名导致源码不可编译。
-    - 这些旧 case 仍按历史合同写成无后缀常量名，因此在 `ircheck` 的匹配视图里把
-      `c_0_1` / `c_m1_2` 之类文本折叠回 `c_0` / `c_m1`。
-    - 只影响 `run_ircheck_text(..., emitc_target=\"npu_demo\")` 的比对视图，不影响真实生成源码。
-
-    使用示例:
-    - text = _normalize_npu_demo_emitc_text('    S_INT c_0_1 = 0;', source_path='expectation/dsl/emit_c/npu_demo/dma/deslice.py#symbol_const_body')
-    - assert text == '    S_INT c_0 = 0;'
+    - `actual = _normalize_emitc_text(source, emitc_target="cpu", source_path="inline_emitc.ircheck")`
 
     关联文件:
     - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
@@ -1254,49 +1158,6 @@ def _normalize_npu_demo_emitc_text(text: str, *, source_path: str | None) -> str
     - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
     """
 
-    if source_path and "expectation/dsl/emit_c/npu_demo/dma/deslice.py" in source_path:
-        return re.sub(r"\bc_([A-Za-z0-9]+)_\d+\b", r"c_\1", text)
-    if source_path and "expectation/dsl/emit_c/npu_demo/dma/slice.py" in source_path:
-        lines = text.splitlines()
-        normalized_lines: list[str] = []
-        index = 0
-        while index < len(lines):
-            line = lines[index]
-            if index + 6 < len(lines):
-                offset_match = re.match(r"^(?P<indent> {4})long long slice_offset0\[3\] = \{(?P<values>[^}]*)\};$", line)
-                if offset_match is not None:
-                    indent = offset_match.group("indent")
-                    size_match = re.match(
-                        rf"^{re.escape(indent)}long long slice_size1\[3\] = \{{(?P<values>[^}}]*)\}};$",
-                        lines[index + 2],
-                    )
-                    stride_match = re.match(
-                        rf"^{re.escape(indent)}long long slice_stride2\[3\] = \{{(?P<values>[^}}]*)\}};$",
-                        lines[index + 4],
-                    )
-                    call_match = re.match(
-                        rf"^{re.escape(indent)}slice\((?P<prefix>.*)slice_offset0_vec /\*offset\*/, slice_size1_vec /\*size\*/, slice_stride2_vec /\*stride\*/\);$",
-                        lines[index + 6],
-                    )
-                    if (
-                        lines[index + 1] == f"{indent}Vector slice_offset0_vec(slice_offset0, 3);"
-                        and size_match is not None
-                        and lines[index + 3] == f"{indent}Vector slice_size1_vec(slice_size1, 3);"
-                        and stride_match is not None
-                        and lines[index + 5] == f"{indent}Vector slice_stride2_vec(slice_stride2, 3);"
-                        and call_match is not None
-                    ):
-                        normalized_lines.append(
-                            f"{indent}slice({call_match.group('prefix')}"
-                            f"{{{offset_match.group('values')}}} /*offset*/, "
-                            f"{{{size_match.group('values')}}} /*size*/, "
-                            f"{{{stride_match.group('values')}}} /*stride*/);"
-                        )
-                        index += 7
-                        continue
-            normalized_lines.append(line)
-            index += 1
-        return "\n".join(normalized_lines)
     return text
 
 

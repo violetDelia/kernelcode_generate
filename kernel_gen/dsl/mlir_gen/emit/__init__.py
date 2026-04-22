@@ -5,7 +5,7 @@
 
 功能说明:
 - 收口 `kernel_gen.dsl.mlir_gen.emit` 包根的稳定公开集合。
-- 包根暴露 `EmitContext`、`emit_mlir`，以及供 expectation/tooling 复用的稳定 memory type 转换 helper。
+- 包根暴露 `EmitContext`、`emit_mlir`，以及供工具和测试复用的稳定 memory type 转换 helper。
 - family/helper 入口仍需从对应子模块访问。
 
 使用示例:
@@ -33,9 +33,9 @@ def memory_type_from_memory(memory: Memory):
     创建者: 小李飞刀
     最后一次更改: 小李飞刀
 
-    功能说明:
-    - 为 expectation / tooling 提供通过 `emit` 包根可见的稳定 memory type 转换入口。
-    - 对外只暴露“`Memory` -> `NnMemoryType`”这一最小能力，避免下游继续直连 `.core` 私有 helper。
+功能说明:
+- 为工具和测试提供通过 `emit` 包根可见的稳定 memory type 转换入口。
+- 对外只暴露“`Memory` -> `NnMemoryType`”这一最小能力，避免下游继续直连 `.core` 私有 helper。
 
     参数说明:
     - `memory`: 需要转换的 `Memory` 描述对象。
