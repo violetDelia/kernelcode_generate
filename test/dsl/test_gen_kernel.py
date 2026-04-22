@@ -851,7 +851,7 @@ def test_gen_kernel_is_the_package_public_entry() -> None:
 # 最近一次运行测试时间: 2026-04-21 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-21 00:00:00 +0800
 # 功能说明: 验证旧路径先导入时，包根仍复用同一份 EmitCContext / EmitCError 类型对象。
-# 测试目的: 锁定 `kernel_gen.dsl.emit_c` 与 `kernel_gen.dsl.gen_kernel` 的模块单例边界，避免类对象分裂导致 dsl_run / expectation 兼容失败。
+# 测试目的: 锁定 `kernel_gen.dsl.emit_c` 与 `kernel_gen.dsl.gen_kernel` 的模块单例边界，避免类对象分裂导致 dsl_run 兼容失败。
 # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_reuses_legacy_emit_c_context_identity_when_old_path_imports_first
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/_legacy.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md

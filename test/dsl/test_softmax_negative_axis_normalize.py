@@ -8,11 +8,11 @@
 - 锁定 S4 helper call lowering 不再把 `axis=-1` 直接透传到 `nn.softmax`。
 
 使用示例:
-- pytest -q test/dsl/test_expectation_softmax_negative_axis_normalize.py
+- pytest -q test/dsl/test_softmax_negative_axis_normalize.py
 
 关联文件:
 - 功能实现: kernel_gen/dsl/mlir_gen/emit/core.py
-- test: test/dsl/test_expectation_softmax_negative_axis_normalize.py
+- test: test/dsl/test_softmax_negative_axis_normalize.py
 - 功能实现: kernel_gen/dsl/mlir_gen/emit/core.py
 """
 

@@ -114,7 +114,7 @@ def test_emit_package_root_exports_only_stable_api() -> None:
 # 最近一次运行测试时间: 2026-04-16 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-16 00:00:00 +0800
 # 功能说明: 验证 emit 包根公开的 `memory_type_from_memory(...)` 可生成稳定 memory type。
-# 测试目的: 锁定 expectation/tooling 通过包根而非 `.core` 私有 helper 复用 memory type 转换能力。
+# 测试目的: 锁定 tooling 通过包根而非 `.core` 私有 helper 复用 memory type 转换能力。
 # 使用示例: pytest -q test/dsl/mlir_gen/emit/test_dispatch.py -k test_emit_package_root_exposes_memory_type_from_memory
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/__init__.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md

@@ -994,7 +994,7 @@ builtin.module {
 # 最后一次更改: 守护最好的爱莉希雅
 # 最近一次运行测试时间: 2026-04-17 00:00:00 +0800
 # 最近一次运行成功时间: 待本轮验证后补充
-# 功能说明: 验证 `{reg}` 同时支持符号名与数字 SSA id，满足 expectation 的 memory/alloc 匹配。
+# 功能说明: 验证 `{reg}` 同时支持符号名与数字 SSA id，满足合同的 memory/alloc 匹配。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_reg_alias_matches_ssa_ids
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md

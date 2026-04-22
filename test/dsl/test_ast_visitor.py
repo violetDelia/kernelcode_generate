@@ -1777,7 +1777,7 @@ def test_build_func_op_rejects_dma_view_static_out_of_bounds() -> None:
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 功能说明: 验证 build_func_op 对 slice helper 的非法 space 类型继续按 TypeError 对外暴露。
-# 测试目的: 锁定恢复 slice AST space 校验后，mlir_gen 路径仍满足 dma expectation 的异常合同。
+# 测试目的: 锁定恢复 slice AST space 校验后，mlir_gen 路径仍满足 dma 合同的异常约束。
 # 使用示例: pytest -q test/dsl/test_ast_visitor.py -k test_build_func_op_rejects_dma_slice_invalid_space_type
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/function_builder.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md

@@ -1,11 +1,11 @@
 """dsl_run tests.
 
 创建者: 朽木露琪亚
-最后一次更改: 金铲铲大作战
+最后一次更改: 朽木露琪亚
 
 功能说明:
 - 覆盖 `dsl_run(func, real_args, pipeline, emitcconfig)` 的正向执行、错误合同与结果模型口径。
-- 同时锁定 `expectation/tools/dsl_run` 对应的正向与反向样例。
+- 同时锁定 `dsl_run` 对正向、反向与 tiled matmul 样例的行为。
 
 使用示例:
 - pytest -q test/tools/test_dsl_run.py
@@ -13,12 +13,7 @@
 关联文件:
 - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
 - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
-- expectation: [expectation/tools/dsl_run/add.py](expectation/tools/dsl_run/add.py)
-- expectation: [expectation/tools/dsl_run/invalid_contract.py](expectation/tools/dsl_run/invalid_contract.py)
-- expectation: [expectation/execute_engine/npu_demo/kernel_type/add.py](expectation/execute_engine/npu_demo/kernel_type/add.py)
-- expectation: [expectation/execute_engine/npu_demo/kernel_type/mul.py](expectation/execute_engine/npu_demo/kernel_type/mul.py)
-- expectation: [expectation/execute_engine/npu_demo/kernel_type/sub.py](expectation/execute_engine/npu_demo/kernel_type/sub.py)
-- expectation: [expectation/execute_engine/npu_demo/kernel_type/matmul.py](expectation/execute_engine/npu_demo/kernel_type/matmul.py)
+- test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
 """
 
 from __future__ import annotations
@@ -35,67 +30,42 @@ from xdsl.dialects.builtin import FunctionType, ModuleOp
 from xdsl.ir import Block, Region
 
 
-def _find_expectation_root(start: Path) -> Path:
-    """向上定位 `expectation/tools/dsl_run` 所在的真实仓根。
+def _find_repo_root(start: Path) -> Path:
+    """向上定位当前仓库根目录。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
 
     功能说明:
-    - 兼容 worktree 与主仓两种执行环境，优先返回包含 `expectation/tools/dsl_run/add.py`
-      的最近祖先目录。
-    - 让合同资产检查始终指向当前主线实际落点，而不是写死某一级父目录。
+    - 兼容 worktree 与主仓两种执行环境，优先返回包含 `spec/tools/dsl_run.md` 的最近祖先目录。
+    - 让合同检查始终指向当前主线实际落点，而不是写死某一级父目录。
 
     使用示例:
-    - expectation_root = _find_expectation_root(Path(__file__).resolve().parents[2])
+    - repo_root = _find_repo_root(Path(__file__).resolve().parents[2])
 
     关联文件:
     - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
     - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
-    - 功能实现: [expectation/tools/dsl_run/add.py](expectation/tools/dsl_run/add.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
     """
 
     for candidate in (start, *start.parents):
-        if (candidate / "expectation/tools/dsl_run/add.py").is_file():
+        if (candidate / "spec/tools/dsl_run.md").is_file():
             return candidate
-    raise FileNotFoundError("cannot locate expectation/tools/dsl_run/add.py")
+    raise FileNotFoundError("cannot locate spec/tools/dsl_run.md")
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-EXPECTATION_ROOT = _find_expectation_root(REPO_ROOT)
+REPO_ROOT = _find_repo_root(Path(__file__).resolve().parents[2])
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-if str(EXPECTATION_ROOT) not in sys.path:
-    sys.path.append(str(EXPECTATION_ROOT))
 
-from expectation.tools.dsl_run.add import add_kernel
-from expectation.execute_engine.npu_demo.kernel_type.add import (
-    case_for_loop_add_runs_with_dsl_run,
-    case_slice_store_add_runs_with_dsl_run,
-)
-from expectation.execute_engine.npu_demo.kernel_type.mul import (
-    case_mul_emit_compile_execute,
-    case_mul_lowering_contract,
-)
-from expectation.execute_engine.npu_demo.kernel_type.sub import (
-    case_sub_emit_compile_execute,
-    case_sub_lowering_contract,
-)
-from expectation.tools.dsl_run.invalid_contract import (
-    ARITY_ERROR,
-    EMITCCONFIG_ERROR,
-    PIPELINE_NAME_ERROR,
-    PIPELINE_TYPE_ERROR,
-    REAL_ARG_TYPE_ERROR,
-    RETURN_VALUE_ERROR,
-    return_add_kernel,
-    store_add_kernel,
-)
 from kernel_gen.dsl.gen_kernel import EmitCContext
+from kernel_gen.operation import deslice, loop, matmul, slice, store
 from kernel_gen.passes.pass_manager import PassManager
 from kernel_gen.passes.registry import build_registered_pipeline, load_builtin_passes
 from kernel_gen.tools.dsl_run import DslRunError, dsl_run
 from kernel_gen.tools.dsl_run import NPU_DEMO_WRAPPER_ERROR
+from kernel_gen.symbol_variable.memory import MemorySpace
 
 dsl_run_module = importlib.import_module("kernel_gen.tools.dsl_run")
 
@@ -104,14 +74,23 @@ try:
 except ImportError as exc:  # pragma: no cover - tests require torch
     raise RuntimeError("test/tools/test_dsl_run.py requires torch") from exc
 
+
+RETURN_VALUE_ERROR = "DslRunReturnValueUnsupported: dsl_run only supports functions without DSL return values"
+EMITCCONFIG_ERROR = "DslRunInvalidEmitCContext: emitcconfig must be EmitCContext"
+PIPELINE_NAME_ERROR = "DslRunUnknownPipeline: unknown pipeline 'missing-pipeline'"
+PIPELINE_TYPE_ERROR = "DslRunInvalidPipeline: pipeline must be str or PassManager"
+REAL_ARG_TYPE_ERROR = "DslRunUnsupportedRealArg: real_args only supports torch.Tensor and numpy.ndarray"
+ARITY_ERROR = "DslRunArityMismatch: real_args count does not match function signature"
+
+
 def _build_npu_demo_lowering_pipeline() -> PassManager:
     """构造 `npu-demo-lowering` pipeline。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后更改: 朽木露琪亚
 
     功能说明:
-    - 显式加载 builtin passes 后，再通过 registry 构造 `npu-demo-lowering` pipeline，并显式传入 `{"target": "npu_demo"}`。
+    - 显式加载 builtin passes 后，再通过 registry 构造 `npu-demo-lowering` pipeline。
     - 便于测试同时覆盖字符串 pipeline 与现成 `PassManager` 两条入口。
 
     使用示例:
@@ -124,7 +103,7 @@ def _build_npu_demo_lowering_pipeline() -> PassManager:
     """
 
     load_builtin_passes()
-    pipeline = build_registered_pipeline("npu-demo-lowering", {"target": "npu_demo"})
+    pipeline = build_registered_pipeline("npu-demo-lowering")
     assert isinstance(pipeline, PassManager)
     return pipeline
 
@@ -154,6 +133,111 @@ def _make_body_only_module() -> ModuleOp:
     return ModuleOp([func_op])
 
 
+def add_kernel(
+    out: "Tensor[i32, 6]",
+    lhs: "Tensor[i32, 6]",
+    rhs: "Tensor[i32, 6]",
+) -> None:
+    """最小 add 样例，仅通过显式 out 参数写回结果。
+
+    创建者: 朽木露琪亚
+    最后更改: 朽木露琪亚
+
+    功能说明:
+    - 为 `dsl_run(...)` 提供最小正向样例。
+    - 本函数不返回 DSL 值，只通过 `store(...)` 写入 `out`。
+
+    使用示例:
+    - `dsl_run(add_kernel, (out, lhs, rhs), "npu-demo-lowering", EmitCContext(target="npu_demo"))`
+
+    关联文件:
+    - spec: [spec/tools/dsl_run.md](spec/tools/dsl_run.md)
+    - test: [test/tools/test_dsl_run.py](test/tools/test_dsl_run.py)
+    - 功能实现: [kernel_gen/tools/dsl_run.py](kernel_gen/tools/dsl_run.py)
+    """
+
+    store(lhs + rhs, out, [0], [6], [1])
+
+
+def store_add_kernel(
+    out: "Tensor[i32, 6]",
+    lhs: "Tensor[i32, 6]",
+    rhs: "Tensor[i32, 6]",
+) -> None:
+    """显式 out 参数版本的 add 样例。"""
+
+    store(lhs + rhs, out, [0], [6], [1])
+
+
+def return_add_kernel(
+    lhs: "Tensor[i32, 6]",
+    rhs: "Tensor[i32, 6]",
+) -> "Tensor[i32, 6]":
+    """非法样例：存在 DSL 值返回。"""
+
+    return lhs + rhs
+
+
+def add_slice_store_kernel(
+    out: "Tensor[i32, 6]",
+    lhs: "Tensor[i32, 6]",
+    rhs: "Tensor[i32, 6]",
+) -> None:
+    """slice + store 风格的 add 样例。"""
+
+    lhs_tile = slice(lhs, [1], [4], [1], MemorySpace.TSM)
+    rhs_tile = slice(rhs, [1], [4], [1], MemorySpace.TSM)
+    store(lhs_tile + rhs_tile, out, [1], [4], [1])
+
+
+def add_for_loop_kernel(
+    out: "Tensor[i32, 6]",
+    lhs: "Tensor[i32, 6]",
+    rhs: "Tensor[i32, 6]",
+) -> None:
+    """固定可整除 tile 的 for-loop add 样例。"""
+
+    for index in loop(0, 6, 3):
+        lhs_tile = slice(lhs, [index], [3], [1], MemorySpace.TSM)
+        rhs_tile = slice(rhs, [index], [3], [1], MemorySpace.TSM)
+        store(lhs_tile + rhs_tile, out, [index], [3], [1])
+
+
+def sub_store_kernel(
+    out: "Tensor[i32, 6]",
+    lhs: "Tensor[i32, 6]",
+    rhs: "Tensor[i32, 6]",
+) -> None:
+    """显式 out 参数版本的 sub 样例。"""
+
+    store(lhs - rhs, out, [0], [6], [1])
+
+
+def mul_store_kernel(
+    out: "Tensor[i32, 6]",
+    lhs: "Tensor[i32, 6]",
+    rhs: "Tensor[i32, 6]",
+) -> None:
+    """显式 out 参数版本的 mul 样例。"""
+
+    store(lhs * rhs, out, [0], [6], [1])
+
+
+def matmul_out_kernel(
+    out: "Tensor[f32, 32, 32]",
+    lhs: "Tensor[f32, 32, 16]",
+    rhs: "Tensor[f32, 16, 32]",
+) -> None:
+    """tiled matmul out-param 样例。"""
+
+    for m0 in loop(0, 32, 16):
+        for n0 in loop(0, 32, 16):
+            lhs_tile = slice(lhs, [m0, 0], [16, 16], [1, 1], MemorySpace.TSM)
+            rhs_tile = slice(rhs, [0, n0], [16, 16], [1, 1], MemorySpace.TSM)
+            partial = matmul(lhs_tile, rhs_tile)
+            deslice(partial, out, [m0, n0], [16, 16], [1, 1])
+
+
 def _assert_result_contract(
     result: object,
     out: object,
@@ -164,7 +248,7 @@ def _assert_result_contract(
     """断言 `dsl_run(...)` 的最小公开结果合同。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后更改: 朽木露琪亚
 
     功能说明:
     - 锁定 `DslRunResult` 的字段可用性、执行成功标记与源码头部。
@@ -192,6 +276,7 @@ def _assert_result_contract(
     assert isinstance(result.source, str)
     assert result.source.startswith('#include "include/npu_demo/npu_demo.h"\n')
     assert helper_snippet in result.source
+    assert not result.compiled_kernel.compile_stdout.startswith("dry-run: ")
 
     if isinstance(out, torch.Tensor):
         assert isinstance(expected, torch.Tensor)
@@ -255,7 +340,7 @@ def test_dsl_run_pass_manager_with_list_real_args() -> None:
 
 # TC-DSL-RUN-003
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
+# 最后更改: 朽木露琪亚
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
 # 测试目的: 锁定 dsl_run 对 numpy 输出位的支持。
@@ -269,7 +354,7 @@ def test_dsl_run_numpy_output() -> None:
     expected = lhs.numpy() + rhs
 
     result = dsl_run(
-        add_kernel,
+        store_add_kernel,
         (out, lhs, rhs),
         "npu-demo-lowering",
         EmitCContext(target="npu_demo"),
@@ -279,76 +364,138 @@ def test_dsl_run_numpy_output() -> None:
 
 
 # TC-DSL-RUN-003A
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 创建者: 朽木露琪亚
+# 最后更改: 朽木露琪亚
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
-# 测试目的: 锁定 execute_engine/npu_demo/add.py 的 CASE-1 在 worktree 实现下可通过主线 expectation 资产真实执行。
+# 测试目的: 锁定 slice + store add 在 worktree 实现下可通过主线合同真实执行。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
 # 对应测试文件路径: test/tools/test_dsl_run.py
-def test_execute_engine_npu_demo_add_case1_matches_public_contract() -> None:
-    case_slice_store_add_runs_with_dsl_run()
+def test_dsl_run_add_slice_store_matches_public_contract() -> None:
+    out = torch.full((6,), -99, dtype=torch.int32)
+    lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
+    rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
+    expected = out.clone()
+    expected[1:5] = lhs[1:5] + torch.from_numpy(rhs)[1:5]
+
+    result = dsl_run(
+        add_slice_store_kernel,
+        (out, lhs, rhs),
+        "npu-demo-lowering",
+        EmitCContext(target="npu_demo"),
+    )
+
+    lowered_text = str(result.func_op)
+    assert result.execute_result.ok is True
+    assert result.execute_result.failure_phrase is None
+    assert "#nn.space<tsm>" in lowered_text
+    assert "kernel.binary_elewise" in lowered_text
+    assert "kind = \"add\"" in lowered_text
+    assert "slice(" in result.source
+    _assert_result_contract(result, out, expected, helper_snippet="add<")
 
 
 # TC-DSL-RUN-003A2
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 创建者: 朽木露琪亚
+# 最后更改: 朽木露琪亚
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
-# 测试目的: 锁定 execute_engine/npu_demo/add.py 的 CASE-2 静态 tile for-loop add 在 worktree 实现下可通过 dsl_run 真实执行。
+# 测试目的: 锁定可整除 tile 的 for-loop add 在 worktree 实现下可通过主线合同真实执行。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
 # 对应测试文件路径: test/tools/test_dsl_run.py
-def test_execute_engine_npu_demo_add_case2_matches_public_contract() -> None:
-    case_for_loop_add_runs_with_dsl_run()
+def test_dsl_run_add_for_loop_matches_public_contract() -> None:
+    out = torch.full((6,), -7, dtype=torch.int32)
+    lhs = torch.tensor([10, 11, 12, 13, 14, 15], dtype=torch.int32)
+    rhs = np.array([1, 2, 3, 4, 5, 6], dtype=np.int32)
+    expected = lhs + torch.from_numpy(rhs)
+
+    result = dsl_run(
+        add_for_loop_kernel,
+        (out, lhs, rhs),
+        "npu-demo-lowering",
+        EmitCContext(target="npu_demo"),
+    )
+
+    lowered_text = str(result.func_op)
+    assert result.execute_result.ok is True
+    assert result.execute_result.failure_phrase is None
+    assert "#nn.space<tsm>" in lowered_text
+    assert "symbol.for" in lowered_text
+    assert "kernel.binary_elewise" in lowered_text
+    assert "kind = \"add\"" in lowered_text
+    _assert_result_contract(result, out, expected, helper_snippet="add<")
 
 
 # TC-DSL-RUN-003B
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 创建者: 朽木露琪亚
+# 最后更改: 朽木露琪亚
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
 # 测试目的: 锁定 execute_engine/npu_demo/sub.py 的 lowering 与 compile/execute 公开合同在当前 worktree 下可直接复现。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
 # 对应测试文件路径: test/tools/test_dsl_run.py
-def test_execute_engine_npu_demo_sub_expectation_matches_public_contract() -> None:
-    case_sub_lowering_contract()
-    case_sub_emit_compile_execute()
+def test_dsl_run_sub_matches_public_contract() -> None:
+    out = torch.empty((6,), dtype=torch.int32)
+    lhs = torch.tensor([10, 11, 12, 13, 14, 15], dtype=torch.int32)
+    rhs = np.array([1, 2, 3, 4, 5, 6], dtype=np.int32)
+    expected = lhs - torch.from_numpy(rhs)
+
+    result = dsl_run(
+        sub_store_kernel,
+        (out, lhs, rhs),
+        "npu-demo-lowering",
+        EmitCContext(target="npu_demo"),
+    )
+
+    lowered_text = str(result.func_op)
+    assert "kernel.binary_elewise" in lowered_text
+    assert 'kind = "sub"' in lowered_text
+    assert "nn.sub" not in lowered_text
+    _assert_result_contract(result, out, expected, helper_snippet="sub<")
 
 
 # TC-DSL-RUN-003C
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 创建者: 朽木露琪亚
+# 最后更改: 朽木露琪亚
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
 # 测试目的: 锁定 execute_engine/npu_demo/mul.py 的 lowering 与 compile/execute 公开合同在当前 worktree 下可直接复现。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
 # 对应测试文件路径: test/tools/test_dsl_run.py
-def test_execute_engine_npu_demo_mul_expectation_matches_public_contract() -> None:
-    case_mul_lowering_contract()
-    case_mul_emit_compile_execute()
+def test_dsl_run_mul_matches_public_contract() -> None:
+    out = torch.empty((6,), dtype=torch.int32)
+    lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
+    rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
+    expected = lhs * torch.from_numpy(rhs)
+
+    result = dsl_run(
+        mul_store_kernel,
+        (out, lhs, rhs),
+        "npu-demo-lowering",
+        EmitCContext(target="npu_demo"),
+    )
+
+    lowered_text = str(result.func_op)
+    assert "kernel.binary_elewise" in lowered_text
+    assert 'kind = "mul"' in lowered_text
+    assert "nn.mul" not in lowered_text
+    _assert_result_contract(result, out, expected, helper_snippet="mul<")
 
 
 # TC-DSL-RUN-003D
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 创建者: 朽木露琪亚
+# 最后更改: 朽木露琪亚
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
-# 测试目的: 锁定 dsl_run + npu-demo-lowering 对 sub 的 out-param 正向链路，避免 execute_engine family 只剩手工 parse/lower/gen/compile 分支有回归覆盖。
+# 测试目的: 锁定 dsl_run + npu-demo-lowering 对 sub 的 out-param 正向链路，避免执行链路只剩手工分支有回归覆盖。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
 # 对应测试文件路径: test/tools/test_dsl_run.py
 def test_dsl_run_supports_sub_store_kernel_on_npu_demo() -> None:
-    def sub_store_kernel(
-        out: "Tensor[i32, 6]",
-        lhs: "Tensor[i32, 6]",
-        rhs: "Tensor[i32, 6]",
-    ) -> None:
-        store(lhs - rhs, out, [0], [6], [1])
-
     out = torch.empty((6,), dtype=torch.int32)
     lhs = torch.tensor([10, 11, 12, 13, 14, 15], dtype=torch.int32)
     rhs = np.array([1, 2, 3, 4, 5, 6], dtype=np.int32)
@@ -366,22 +513,15 @@ def test_dsl_run_supports_sub_store_kernel_on_npu_demo() -> None:
 
 
 # TC-DSL-RUN-003E
-# 创建者: 小李飞刀
-# 最后一次更改: 小李飞刀
+# 创建者: 朽木露琪亚
+# 最后更改: 朽木露琪亚
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
-# 测试目的: 锁定 dsl_run + npu-demo-lowering 对 mul 的 out-param 正向链路，避免 execute_engine family 只剩手工 parse/lower/gen/compile 分支有回归覆盖。
+# 测试目的: 锁定 dsl_run + npu-demo-lowering 对 mul 的 out-param 正向链路，避免执行链路只剩手工分支有回归覆盖。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
 # 对应测试文件路径: test/tools/test_dsl_run.py
 def test_dsl_run_supports_mul_store_kernel_on_npu_demo() -> None:
-    def mul_store_kernel(
-        out: "Tensor[i32, 6]",
-        lhs: "Tensor[i32, 6]",
-        rhs: "Tensor[i32, 6]",
-    ) -> None:
-        store(lhs * rhs, out, [0], [6], [1])
-
     out = torch.empty((6,), dtype=torch.int32)
     lhs = torch.tensor([1, 2, 3, 4, 5, 6], dtype=torch.int32)
     rhs = np.array([6, 5, 4, 3, 2, 1], dtype=np.int32)
@@ -400,26 +540,14 @@ def test_dsl_run_supports_mul_store_kernel_on_npu_demo() -> None:
 
 # TC-DSL-RUN-003F
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
+# 最后更改: 朽木露琪亚
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
-# 测试目的: 锁定 dsl_run + npu-demo-lowering 对 execute_engine/npu_demo/matmul.py 同等 tiled matmul 合同的正向链路，覆盖 TSM、kernel.matmul、npu_demo 源码和真实执行结果。
+# 测试目的: 锁定 dsl_run + npu-demo-lowering 对 tiled matmul 合同的正向链路，覆盖 TSM、kernel.matmul、npu_demo 源码和真实执行结果。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
 # 对应测试文件路径: test/tools/test_dsl_run.py
 def test_dsl_run_supports_tiled_matmul_kernel_on_npu_demo() -> None:
-    def matmul_out_kernel(
-        out: "Tensor[f32, 32, 32]",
-        lhs: "Tensor[f32, 32, 16]",
-        rhs: "Tensor[f32, 16, 32]",
-    ) -> None:
-        for m0 in loop(0, 32, 16):
-            for n0 in loop(0, 32, 16):
-                lhs_tile = slice(lhs, [m0, 0], [16, 16], [1, 1], MemorySpace.TSM)
-                rhs_tile = slice(rhs, [0, n0], [16, 16], [1, 1], MemorySpace.TSM)
-                partial = matmul(lhs_tile, rhs_tile)
-                deslice(partial, out, [m0, n0], [16, 16], [1, 1])
-
     out = torch.empty((32, 32), dtype=torch.float32)
     lhs = torch.arange(32 * 16, dtype=torch.float32).reshape(32, 16) / 17.0
     rhs = (np.arange(16 * 32, dtype=np.float32).reshape(16, 32) - 11.0) / 19.0
@@ -486,7 +614,7 @@ def test_dsl_run_rejects_npu_demo_module_without_unique_wrapper(monkeypatch: pyt
 
 # TC-DSL-RUN-004
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
+# 最后更改: 朽木露琪亚
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
 # 测试目的: 锁定 DSL 值返回函数的固定失败短语。
@@ -508,7 +636,7 @@ def test_dsl_run_rejects_value_return_kernel() -> None:
 
 # TC-DSL-RUN-005
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
+# 最后更改: 朽木露琪亚
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
 # 测试目的: 锁定 emitcconfig=None 的固定失败短语。
@@ -526,7 +654,7 @@ def test_dsl_run_rejects_none_emitcconfig() -> None:
 
 # TC-DSL-RUN-006
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
+# 最后更改: 朽木露琪亚
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
 # 测试目的: 锁定 emitcconfig 不是 EmitCContext 的固定失败短语。
@@ -544,7 +672,7 @@ def test_dsl_run_rejects_invalid_emitcconfig_type() -> None:
 
 # TC-DSL-RUN-007
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
+# 最后更改: 朽木露琪亚
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
 # 测试目的: 锁定未知 pipeline 名称的固定失败短语。
@@ -562,7 +690,7 @@ def test_dsl_run_rejects_unknown_pipeline_name() -> None:
 
 # TC-DSL-RUN-008
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
+# 最后更改: 朽木露琪亚
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
 # 测试目的: 锁定非法 pipeline 类型的固定失败短语。
@@ -580,7 +708,7 @@ def test_dsl_run_rejects_invalid_pipeline_type() -> None:
 
 # TC-DSL-RUN-009
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
+# 最后更改: 朽木露琪亚
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
 # 测试目的: 锁定非法 runtime 参数类型的固定失败短语。
@@ -598,7 +726,7 @@ def test_dsl_run_rejects_unsupported_runtime_arg_type() -> None:
 
 # TC-DSL-RUN-010
 # 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
+# 最后更改: 朽木露琪亚
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
 # 测试目的: 锁定 runtime 参数数量不匹配的固定失败短语。
@@ -615,16 +743,14 @@ def test_dsl_run_rejects_arity_mismatch() -> None:
 
 # TC-DSL-RUN-011
 # 创建者: 朽木露琪亚
-# 最后一次更改: 小李飞刀
+# 最后更改: 朽木露琪亚
 # 最近一次运行测试时间: 未运行
 # 最近一次运行成功时间: 未运行
-# 测试目的: 确认 spec、expectation 与测试文件都已落到当前工作书。
+# 测试目的: 确认 spec、实现与测试文件都已落到当前工作书。
 # 对应功能实现文件路径: kernel_gen/tools/dsl_run.py
 # 对应 spec 文件路径: spec/tools/dsl_run.md
 # 对应测试文件路径: test/tools/test_dsl_run.py
 def test_dsl_run_contract_files_exist() -> None:
     assert (REPO_ROOT / "spec/tools/dsl_run.md").is_file()
-    assert (EXPECTATION_ROOT / "expectation/tools/dsl_run/add.py").is_file()
-    assert (EXPECTATION_ROOT / "expectation/tools/dsl_run/invalid_contract.py").is_file()
-    assert (EXPECTATION_ROOT / "expectation/tools/dsl_run/__main__.py").is_file()
     assert (REPO_ROOT / "kernel_gen/tools/dsl_run.py").is_file()
+    assert (REPO_ROOT / "test/tools/test_dsl_run.py").is_file()

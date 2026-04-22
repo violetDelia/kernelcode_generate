@@ -297,7 +297,7 @@ def test_match_checks_capture_and_reference_ok() -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-14 15:05 +0800
 # 最近一次运行成功时间: 2026-04-14 15:05 +0800
-# 功能说明: 验证 `{reg}` 同时支持符号名与数字 SSA id，满足 expectation 中 memory/alloc 场景。
+# 功能说明: 验证 `{reg}` 同时支持符号名与数字 SSA id，满足合同中的 memory/alloc 场景。
 # 使用示例: pytest -q test/tools/test_ircheck_matcher.py -k test_match_checks_reg_alias_matches_symbol_and_ssa_ids
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md

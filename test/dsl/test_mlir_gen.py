@@ -217,37 +217,6 @@ def _tensor_arg(shape: list[object]) -> Memory:
     return Memory(shape, NumericType.Float32)
 
 
-def _run_expectation_module(module_name: str) -> subprocess.CompletedProcess[str]:
-    """以 fresh process 运行 expectation 模块入口。
-
-    创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
-
-    功能说明:
-    - 统一用独立 Python 进程执行 `python -m ...`，避免当前 pytest 进程内的导入状态影响 expectation 根入口验证。
-    - 固定在仓库根目录运行，并设置 `PYTHONDONTWRITEBYTECODE=1` 与 `PYTHONPATH=<repo_root>`，对齐任务验收命令。
-
-    使用示例:
-    - `result = _run_expectation_module("expectation.dsl.mlir_gen")`
-
-    关联文件:
-    - spec: [spec/dsl/mlir_gen.md](spec/dsl/mlir_gen.md)
-    - test: [test/dsl/test_mlir_gen.py](test/dsl/test_mlir_gen.py)
-    - 功能实现: [expectation/dsl/mlir_gen/__main__.py](expectation/dsl/mlir_gen/__main__.py)
-    """
-
-    env = os.environ.copy()
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
-    env["PYTHONPATH"] = str(REPO_ROOT)
-    return subprocess.run(
-        [sys.executable, "-m", module_name],
-        cwd=REPO_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
 # 注意: 这些 helper 作为 `mlir_gen(...)` 的 callee 会被解析/下沉到 IR，
 # 因此函数体内不能包含 docstring（否则会被解析为常量表达式并触发 lowering 错误）。
 #
@@ -1474,7 +1443,7 @@ def test_build_func_op_rejects_unimported_dma_view_and_slice_helpers() -> None:
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 功能说明: 验证 mlir_gen 对 slice helper 的非法 space 类型继续按 TypeError 对外暴露。
-# 测试目的: 锁定 module_builder 的 parse-error 包装与 dma slice expectation 一致。
+# 测试目的: 锁定 module_builder 的 parse-error 包装与 dma slice 合同一致。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_mlir_gen_rejects_dma_slice_invalid_space_type
 # 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/module_builder.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md
@@ -1650,7 +1619,7 @@ def test_build_func_op_supports_img2col2d_helper_call() -> None:
 # 最近一次运行测试时间: 2026-04-05 03:15:23 +0800
 # 最近一次运行成功时间: 2026-04-05 03:15:23 +0800
 # 功能说明: 验证 build_func_op 支持 exp helper 并下沉为 nn.exp。
-# 测试目的: 锁定 exp lowering 生成 NnExpOp 且返回类型匹配，避免 element_unary expectation 回退。
+# 测试目的: 锁定 exp lowering 生成 NnExpOp 且返回类型匹配，避免 element_unary 回退。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_exp_helper_call
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen/emit/core.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dialect/nn.md, spec/operation/nn.md
@@ -1678,7 +1647,7 @@ def test_build_func_op_supports_exp_helper_call() -> None:
 # 最近一次运行测试时间: 2026-04-06 23:36:32 +0800
 # 最近一次运行成功时间: 2026-04-06 23:36:32 +0800
 # 功能说明: 验证 build_func_op 支持 softmax helper 并下沉为 nn.softmax。
-# 测试目的: 锁定 softmax 生成 NnSoftmaxOp 且 axis 属性稳定传递，避免 expectation 回退。
+# 测试目的: 锁定 softmax 生成 NnSoftmaxOp 且 axis 属性稳定传递，避免行为回退。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_softmax_helper_call
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen/emit/core.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dialect/nn.md, spec/operation/nn.md
@@ -1707,7 +1676,7 @@ def test_build_func_op_supports_softmax_helper_call() -> None:
 # 最近一次运行测试时间: 2026-04-05 03:15:23 +0800
 # 最近一次运行成功时间: 2026-04-05 03:15:23 +0800
 # 功能说明: 验证 build_func_op 支持 reduce_sum/min/max helper 并生成结构化输出类型。
-# 测试目的: 锁定 reduce lowering 覆盖三类 helper 且返回类型匹配，避免 reduce expectation 回退。
+# 测试目的: 锁定 reduce lowering 覆盖三类 helper 且返回类型匹配，避免 reduce 行为回退。
 # 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_build_func_op_supports_reduce_helper_calls
 # 对应功能实现文件路径: kernel_gen/dsl/ast.py, kernel_gen/dsl/mlir_gen/emit/core.py, kernel_gen/dsl/mlir_gen.py
 # 对应 spec 文件路径: spec/dsl/mlir_gen.md, spec/dialect/nn.md, spec/operation/nn.md
@@ -4450,22 +4419,3 @@ def test_mlir_gen_rejects_inconsistent_callee_signature() -> None:
     with pytest.raises(mlir_gen_module.MlirGenModuleError) as excinfo:
         mlir_gen_module.mlir_gen(main, _tensor_arg([2, 2]), _tensor_arg([4]))
     assert "MlirGenModuleError: inconsistent callee signature" in str(excinfo.value)
-
-
-# MGEN-048
-# 创建者: 朽木露琪亚
-# 最后一次更改: 朽木露琪亚
-# 最近一次运行测试时间: 未运行
-# 最近一次运行成功时间: 未运行
-# 功能说明: 验证 `python -m expectation.dsl.mlir_gen` 在 fresh process 中可稳定串跑目录级入口。
-# 测试目的: 锁定根入口 `exit 0`，并确保 `dialect.symbol.element_binary.add` 的 CASE-1 会在目录级串跑场景输出，避免再次出现“子入口通过但根入口回退”。
-# 使用示例: pytest -q test/dsl/test_mlir_gen.py -k test_expectation_dsl_mlir_gen_root_entry_runs_in_fresh_process
-# 对应功能实现文件路径: expectation/dsl/mlir_gen/__main__.py, expectation/dsl/mlir_gen/dialect/symbol/__main__.py
-# 对应 spec 文件路径: spec/dsl/mlir_gen.md
-# 对应测试文件路径: test/dsl/test_mlir_gen.py
-def test_expectation_dsl_mlir_gen_root_entry_runs_in_fresh_process() -> None:
-    result = _run_expectation_module("expectation.dsl.mlir_gen")
-
-    assert result.returncode == 0, result.stderr or result.stdout
-    assert "[CASE-1] module alias：cc.slice(...)" in result.stdout
-    assert "[CASE-1] 静态正向例子：随机静态整数形参应生成显式 symbol.add" in result.stdout

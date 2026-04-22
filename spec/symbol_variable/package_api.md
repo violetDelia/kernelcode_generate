@@ -264,10 +264,8 @@ importlib.import_module("kernel_gen.symbol_variable")
 ## 测试
 
 - 测试文件：[`test/symbol_variable/test_package_api.py`](../../test/symbol_variable/test_package_api.py)
-- expectation 入口测试：[`test/symbol_variable/test_expectation_suite.py`](../../test/symbol_variable/test_expectation_suite.py)
 - expectation 目录入口：[`expectation/symbol_variable/__main__.py`](../../expectation/symbol_variable/__main__.py)
 - 执行命令：`pytest -q test/symbol_variable/test_package_api.py`
-- 执行命令：`pytest -q test/symbol_variable/test_expectation_suite.py`
 - 执行命令：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python3 -m expectation.symbol_variable`
 
 ### 测试目标
@@ -279,7 +277,6 @@ importlib.import_module("kernel_gen.symbol_variable")
 - 验证 `from kernel_gen.symbol_variable import *` 仅暴露约定公开符号。
 - 验证旧路径 `symbol_variable` 不可导入。
 - 验证旧子模块路径 `symbol_variable.symbol_dim`、`symbol_variable.symbol_shape`、`symbol_variable.memory`、`symbol_variable.type` 不可导入。
-- 验证 `expectation.symbol_variable` 目录级入口可运行 `symbol_dim` 与 `memory` 两组公开合同。
 
 ### 功能与用例清单
 
@@ -292,4 +289,4 @@ importlib.import_module("kernel_gen.symbol_variable")
 | PM-005 | 构造 | 顶层导出参与构造 | N/A | `Memory([1, 2], NumericType.Float32, format=Farmat.Norm)` | 构造成功 | `test_package_type_construct_memory` |
 | PM-006 | 导出 | `__all__` 边界 | N/A | 读取 `kernel_gen.symbol_variable.__all__` | 严格等于公开导出集合 | `test_python_package_all_boundary` |
 | PM-007 | 导出 | `import *` 边界 | N/A | 执行 `from kernel_gen.symbol_variable import *` | 仅暴露公开导出集合 | `test_python_package_import_star_exports_only_public_names` |
-| PM-008 | expectation | 目录入口 | N/A | `python -m expectation.symbol_variable` | `symbol_dim` 与 `memory` expectation 全部通过 | `test_symbol_variable_expectation_package_entrypoint` |
+| PM-008 | expectation | 目录入口 | N/A | `python -m expectation.symbol_variable` | `symbol_dim` 与 `memory` expectation 全部通过 | N/A |

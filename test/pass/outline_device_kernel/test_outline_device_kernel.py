@@ -6,7 +6,7 @@
 功能说明:
 - 覆盖 `OutlineDeviceKernelPass` 的公开 outline 合同。
 - 锁定 wrapper/device 双函数形状、显式失败路径与未标记函数保持原样的边界。
-- 锁定只读 expectation 仍可通过 lowering 兼容路径导入 outline-device-kernel 入口。
+- 锁定只读合同仍可通过 lowering 兼容路径导入 outline-device-kernel 入口。
 
 使用示例:
 - pytest -q test/pass/outline_device_kernel/test_outline_device_kernel.py
