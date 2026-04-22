@@ -88,3 +88,16 @@ Diff 反推自测：改动文件按实际 diff 反推到 `kernel_gen/passes/atta
 - Diff 反推自测 / Diff 反推审查：沿用已写入 build / review 记录中的结论；本轮 merge 不新增测试，只收口提交与同步
 - 合同验收（如适用）：本轮 expectation 仍仅作为合同验收资产单列，不新增 expectation 验收
 - 结论：merge 收口已完成，待提交并推送
+
+## merge 完成
+
+- 时间：`2026-04-22 12:03`
+- 经办人：`李白`
+- 任务：`T-20260422-ee586cde`
+- 提交：`80cb0e9`
+- 推送：已同步到 `origin/main`
+- 主目录同步：`git -C /home/lfr/kernelcode_generate merge --ff-only origin/main` 已完成，主目录已快进到 `80cb0e9`
+- 状态：任务 worktree 仅保留本任务记录与收口结果，`-done` 待执行
+- Diff 反推自测 / Diff 反推审查：沿用已写入 build / review 记录中的结论；本轮 merge 不新增测试
+- 合同验收（如适用）：`expectation` 仍仅作为合同验收资产单列
+- 结论：merge 已完成，等待任务状态切换与回报
