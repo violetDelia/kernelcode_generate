@@ -26,6 +26,8 @@ import subprocess
 import tempfile
 from typing import Iterable
 
+from kernel_gen.common.text import join_text_sections
+
 
 def default_compiler() -> str:
     """返回 P0 默认编译器名。
@@ -110,7 +112,7 @@ def build_compile_unit(
     sections.append(source.rstrip())
     if entry_shim_source:
         sections.append(entry_shim_source.rstrip())
-    return "\n\n".join(sections).rstrip() + "\n"
+    return join_text_sections(*sections)
 
 
 def build_compile_command(

@@ -41,7 +41,6 @@ builtin.module {}
 from __future__ import annotations
 
 from dataclasses import dataclass
-from io import StringIO
 from pathlib import Path
 import os
 import re
@@ -52,20 +51,13 @@ os.environ.setdefault("SYMPY_GMPY", "0")
 
 from xdsl.context import Context
 from xdsl.dialects import func
-from xdsl.dialects.arith import Arith
-from xdsl.dialects.builtin import Builtin, ModuleOp
-from xdsl.dialects.func import Func
+from xdsl.dialects.builtin import ModuleOp
 from xdsl.ir import Operation
 from xdsl.parser import Parser
-from xdsl.printer import Printer
 from xdsl.passes import ModulePass
 
-from kernel_gen.dialect.dma import Dma
-from kernel_gen.dialect.arch import Arch
-from kernel_gen.dialect.kernel import Kernel
-from kernel_gen.dialect.nn import Nn
-from kernel_gen.dialect.symbol import Symbol
-from kernel_gen.dialect.tuner import Tuner
+from kernel_gen.common.text import render_operation_text
+from kernel_gen.context import build_default_context as _build_default_context_base
 from kernel_gen.passes.registry import (
     PassRegistryError,
     build_registered_pass,
@@ -89,6 +81,32 @@ _REGEX_ALIASES = {
     "dim": r"[1-9][0-9]*",
     "int": r"-?[0-9]+",
 }
+
+
+def _build_default_context() -> Context:
+    """构造用于解析与打印的默认 xdsl Context。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 复用 `kernel_gen.context.build_default_context()` 的基础 dialect 组合。
+    - 额外开启 `allow_unregistered`，保持 ircheck 对 expectation 文本的宽松解析口径。
+
+    使用示例:
+    - ctx = _build_default_context()
+
+    关联文件:
+    - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
+    - test:
+      - [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
+      - [test/tools/test_ircheck_parser.py](test/tools/test_ircheck_parser.py)
+    - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
+    """
+
+    ctx = _build_default_context_base()
+    ctx.allow_unregistered = True
+    return ctx
 
 
 class IrcheckParseError(ValueError):
@@ -1099,7 +1117,7 @@ def _is_empty_npu_demo_func(func_op: func.FuncOp) -> bool:
     """判断 `npu_demo` emitc 输入是否只是空函数壳。
 
     创建者: 大闸蟹
-    最后修改人: 大闸蟹
+    最后修改人: 金铲铲大作战
 
     功能说明:
     - `ircheck` 的 `target=npu_demo` 源码分支只接受实际含有可发射 body 的函数。
@@ -1491,42 +1509,6 @@ def _parse_compile_args(compile_args: str) -> list[IrcheckCompileStep] | None:
     return steps or None
 
 
-def _build_default_context() -> Context:
-    """构造用于解析与打印的默认 xdsl Context。
-
-    创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 加载 `builtin` / `func` / `arith` 与仓库内公开 dialect。
-    - 默认支持 `nn` / `kernel` / `dma` / `symbol` / `arch` / `tuner`，便于直接解析 lowering /
-      pipeline expectation 中常见的 bridge op 与 memory op。
-
-    使用示例:
-    - ctx = _build_default_context()
-    - module = Parser(ctx, ir_text).parse_module()
-
-    关联文件:
-    - spec: [spec/tools/ircheck.md](spec/tools/ircheck.md)
-    - test: [test/tools/test_ircheck_runner.py](test/tools/test_ircheck_runner.py)
-    - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
-    """
-
-    ctx = Context()
-    # expectation 允许出现未在当前 context 注册的通用 op 文本（如 "kernel.add"）。
-    ctx.allow_unregistered = True
-    ctx.load_dialect(Builtin)
-    ctx.load_dialect(Func)
-    ctx.load_dialect(Arith)
-    ctx.load_dialect(Nn)
-    ctx.load_dialect(Kernel)
-    ctx.load_dialect(Dma)
-    ctx.load_dialect(Symbol)
-    ctx.load_dialect(Arch)
-    ctx.load_dialect(Tuner)
-    return ctx
-
-
 def _run_compile_step(ctx: Context, module: Operation, step: IrcheckCompileStep) -> Operation:
     """按单个 compile step 执行 pass 或 pipeline。
 
@@ -1595,10 +1577,7 @@ def _normalize_ir(value: Operation) -> str:
     - 功能实现: [kernel_gen/tools/ircheck.py](kernel_gen/tools/ircheck.py)
     """
 
-    stream = StringIO()
-    printer = Printer(stream=stream)
-    printer.print_op(value)
-    text = stream.getvalue().rstrip()
+    text = render_operation_text(value)
     # 归一化 func.func 签名里命名 SSA `name:` 的空格口径，让期望文本可按旧合同继续匹配。
     text = re.sub(r"(%[A-Za-z_][A-Za-z0-9_]*):(?=\s)", r"\1 :", text)
     if "kernel.img2col1d" in text:

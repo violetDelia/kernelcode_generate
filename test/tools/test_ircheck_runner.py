@@ -386,7 +386,7 @@ def test_run_ircheck_text_emitc_cpu_success() -> None:
 # 最后一次更改: 朽木露琪亚
 # 最近一次运行测试时间: 2026-04-15 03:40:00 +0800
 # 最近一次运行成功时间: 2026-04-15 03:40:00 +0800
-# 功能说明: 验证 emitc_target=npu_demo 的单函数输入可生成源码文本，随后若 CHECK 不匹配则返回匹配失败，并保留源码文本。
+# 功能说明: 验证 emitc_target=npu_demo 对空 func.func 壳显式失败，并保留生成前的 IR 作为 actual_ir。
 # 使用示例: pytest -q test/tools/test_ircheck_runner.py -k test_run_ircheck_text_emitc_npu_demo_failure_keeps_ir
 # 对应功能实现文件路径: kernel_gen/tools/ircheck.py
 # 对应 spec 文件路径: spec/tools/ircheck.md
@@ -398,11 +398,10 @@ def test_run_ircheck_text_emitc_npu_demo_failure_keeps_ir() -> None:
 {_SIMPLE_IR}"""
     result = run_ircheck_text(text, source_path="inline_emitc.ircheck", emitc_target="npu_demo")
     assert result.ok is False
-    assert result.exit_code == 1
+    assert result.exit_code == 2
     assert result.message is not None
-    assert result.message.startswith("IrcheckMatchError: CHECK not found")
-    assert '#include "include/npu_demo/npu_demo.h"' in result.actual_ir
-    assert "void main() {" in result.actual_ir
+    assert result.message.startswith("IrcheckEmitCError: emit_c generation failed")
+    assert result.actual_ir == _SIMPLE_IR.rstrip()
 
 
 # TC-IRCHECK-RUN-031A

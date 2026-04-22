@@ -27,12 +27,12 @@ from xdsl.dialects.builtin import ModuleOp, i32
 from kernel_gen.dialect.nn import NnMemoryType
 from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.dsl.ast import AstParseError
-from kernel_gen.dsl.ast.visitor import AstVisitorError
 from kernel_gen.dsl.mlir_gen.emit.core import (
     _MLIR_GEN_CALLEE_COMPILER_CONFIG_KEY,
     _MLIR_GEN_CALLEE_REGISTRY_CONFIG_KEY,
     _nn_memory_type_to_memory,
 )
+from kernel_gen.dsl.mlir_gen.errors import raise_visitor_error_from_parse_error
 from kernel_gen.dsl.mlir_gen.function_builder import build_func_op_from_ast
 from kernel_gen.dsl.mlir_gen.parse_env import (
     _build_parse_environment,
@@ -231,12 +231,10 @@ def mlir_gen(
                     config=parse_config,
                 )
             except AstParseError as exc:
-                location = exc.diagnostics[0].location if exc.diagnostics else None
-                if exc.message == "get_dynamic_memory space must be on-chip MemorySpace":
-                    raise ValueError(exc.message) from exc
-                if exc.message.endswith("space must be MemorySpace") or exc.message == "cast dtype must be NumericType":
-                    raise TypeError(exc.message) from exc
-                raise AstVisitorError(exc.message, location=location) from exc
+                raise_visitor_error_from_parse_error(
+                    exc,
+                    value_messages=("get_dynamic_memory space must be on-chip MemorySpace",),
+                )
             callee_registry[callee] = build_func_op_from_ast(
                 callee_ast,
                 runtime_args=callee_runtime_args,
@@ -261,12 +259,10 @@ def mlir_gen(
             config=parse_config,
         )
     except AstParseError as exc:
-        location = exc.diagnostics[0].location if exc.diagnostics else None
-        if exc.message == "get_dynamic_memory space must be on-chip MemorySpace":
-            raise ValueError(exc.message) from exc
-        if exc.message.endswith("space must be MemorySpace") or exc.message == "cast dtype must be NumericType":
-            raise TypeError(exc.message) from exc
-        raise AstVisitorError(exc.message, location=location) from exc
+        raise_visitor_error_from_parse_error(
+            exc,
+            value_messages=("get_dynamic_memory space must be on-chip MemorySpace",),
+        )
 
     compiling.add(fn)
     try:

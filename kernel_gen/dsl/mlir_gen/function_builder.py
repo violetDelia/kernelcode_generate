@@ -48,6 +48,7 @@ from kernel_gen.dsl.mlir_gen.emit.core import (
     _parse_reduce_axis_expr,
     _resolve_static_index_expr,
 )
+from kernel_gen.dsl.mlir_gen.errors import raise_visitor_error_from_parse_error
 from kernel_gen.dsl.mlir_gen.parse_env import _parse_function_with_env
 from kernel_gen.dsl.mlir_gen.signature import (
     _build_dma_alloc_only_result_type,
@@ -321,14 +322,10 @@ def build_func_op(
             config={"reject_external_values": True},
         )
     except AstParseError as exc:
-        location = exc.diagnostics[0].location if exc.diagnostics else None
-        if (
-            exc.message == "slice space must be MemorySpace"
-            or exc.message == "cast dtype must be NumericType"
-            or exc.message == "alloc space must be MemorySpace"
-        ):
-            raise TypeError(exc.message) from exc
-        raise AstVisitorError(exc.message, location=location) from exc
+        raise_visitor_error_from_parse_error(
+            exc,
+            value_messages=(),
+        )
     return build_func_op_from_ast(func_ast, runtime_args=runtime_args)
 
 

@@ -24,6 +24,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
+from kernel_gen.common.text import join_text_sections
+
 
 @dataclass(frozen=True)
 class _ParamSpec:
@@ -289,7 +291,7 @@ def _build_runtime_entry_shim_source(
             "",
         ]
     )
-    return "\n".join(lines)
+    return join_text_sections("\n".join(lines))
 
 
 def needs_entry_shim(source: str, entry_point: str) -> bool:

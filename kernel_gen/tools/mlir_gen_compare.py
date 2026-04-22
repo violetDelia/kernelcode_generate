@@ -23,74 +23,19 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from io import StringIO
 from pathlib import Path
 import re
 
-from xdsl.context import Context
 from xdsl.dialects.builtin import ModuleOp
 from xdsl.parser import Parser
-from xdsl.printer import Printer
 
+from kernel_gen.common.text import normalize_module_text as _normalize_module
+from kernel_gen.context import build_default_context as _build_default_context
 
 _NN_MEMORY_TYPE_RE = re.compile(
     r"!nn\.memory<\[(?P<shape>[^\]]*)\], \[(?P<stride>[^\]]*)\], "
     r"(?P<element>[^,>]+), #nn\.space<(?P<space>[^>]+)>>"
 )
-
-
-def _build_default_context() -> Context:
-    """构造用于解析与打印的默认 xdsl Context。
-
-    创建者: 睡觉小分队
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 通过 kernel_gen/context.py 提供的统一入口加载默认 dialect 集合，确保解析与打印稳定。
-    - 默认包含 builtin/func/arith + 仓库内 nn/kernel/symbol/dma/arch 等常见 dialect。
-
-    使用示例:
-    - ctx = _build_default_context()
-    - module = Parser(ctx, ir_text).parse_module()
-
-    关联文件:
-    - spec: [spec/tools/mlir_gen_compare.md](spec/tools/mlir_gen_compare.md)
-    - test: [test/tools/test_mlir_gen_compare.py](test/tools/test_mlir_gen_compare.py)
-    - 功能实现: [kernel_gen/tools/mlir_gen_compare.py](kernel_gen/tools/mlir_gen_compare.py)
-    """
-
-    from kernel_gen.context import build_default_context
-
-    return build_default_context()
-
-
-def _normalize_module(module: ModuleOp, ctx: Context) -> str:
-    """对 module 执行解析后再打印的归一化。
-
-    创建者: 睡觉小分队
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 使用统一 parser/printer 规范化 module 文本，消除空白与格式差异。
-
-    使用示例:
-    - text = _normalize_module(module, ctx)
-
-    关联文件:
-    - spec: [spec/tools/mlir_gen_compare.md](spec/tools/mlir_gen_compare.md)
-    - test: [test/tools/test_mlir_gen_compare.py](test/tools/test_mlir_gen_compare.py)
-    - 功能实现: [kernel_gen/tools/mlir_gen_compare.py](kernel_gen/tools/mlir_gen_compare.py)
-    """
-
-    buffer = StringIO()
-    Printer(buffer).print_op(module)
-    text = buffer.getvalue()
-    parsed = Parser(ctx, text).parse_module()
-    if not isinstance(parsed, ModuleOp):
-        raise ValueError("mlir_gen_compare expects builtin.module")
-    normalized = StringIO()
-    Printer(normalized).print_op(parsed)
-    return normalized.getvalue()
 
 
 def _load_mlir_gen() -> Callable[..., ModuleOp]:
