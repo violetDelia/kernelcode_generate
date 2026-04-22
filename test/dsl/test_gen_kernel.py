@@ -184,13 +184,14 @@ def _make_npu_demo_add_barrier_module(
     include_wrapper: bool = True,
     top_level_extra_ops: tuple[Operation, ...] = (),
 ) -> ModuleOp:
-    """构造 `npu_demo` add+barrier 受控 module。
+    """构造 `npu_demo` launch wrapper/body 受控 module。
 
     创建者: 小李飞刀
     最后一次更改: 金铲铲大作战
 
     功能说明:
     - 生成 `body + wrapper` 双函数 module，覆盖 `gen_kernel(target="npu_demo")` 的受控 `builtin.module` 子集。
+    - 允许调用方追加 helper `func.func`，并按 module 中的出现顺序输出源码。
     - body 固定包含 `thread/view/slice/barrier/add/deslice` 骨架，wrapper 固定包含 `arch.launch + func.return`。
     - 允许调用方显式切换 `tlm1/tlm2/tlm3`，用于锁定 npu_demo output tile 的真实动态内存空间。
 
@@ -225,13 +226,19 @@ def _make_npu_demo_add_barrier_module(
     rhs_gm = DmaViewOp(body_block.args[2], [thread_offset.result], [size.result], [stride.result], gm_tile_type)
     lhs_tsm = DmaViewOp(tsm.result, [thread_offset.result], [size.result], [stride.result], tsm_tile_type)
     rhs_tsm = DmaViewOp(tsm.result, [rhs_offset.result], [size.result], [stride.result], tsm_tile_type)
-    out_tlm = DmaViewOp(tlm.result, [thread_offset.result], [size.result], [stride.result], tlm_tile_type)
+    out_tsm = DmaViewOp(tsm.result, [thread_offset.result], [size.result], [stride.result], tsm_tile_type)
     lhs_slice = DmaSliceOp(lhs_tsm.result, lhs_gm.result, [zero.result], [size.result], [stride.result])
     rhs_slice = DmaSliceOp(rhs_tsm.result, rhs_gm.result, [zero.result], [size.result], [stride.result])
     barrier0 = ArchBarrierOp(ArchScopeAttr.from_name(barrier_scope), barrier_visibility)
-    add = NnAddOp(lhs_tsm.result, rhs_tsm.result, tlm_tile_type, NnMemorySpaceAttr.from_name(tlm_space))
+    add = KernelBinaryElewiseOp(
+        out_tsm.result,
+        lhs_tsm.result,
+        rhs_tsm.result,
+        kind="add",
+        space=NnMemorySpaceAttr.from_name("tsm"),
+    )
     barrier1 = ArchBarrierOp(ArchScopeAttr.from_name(barrier_scope), barrier_visibility)
-    deslice = DmaDesliceOp(add.result, body_block.args[3], [thread_offset.result], [size.result], [stride.result], gm_type)
+    deslice = DmaDesliceOp(out_tsm.result, body_block.args[3], [thread_offset.result], [size.result], [stride.result], gm_type)
     body_block.add_ops(
         [
             thread_offset,
@@ -247,7 +254,7 @@ def _make_npu_demo_add_barrier_module(
             rhs_gm,
             lhs_tsm,
             rhs_tsm,
-            out_tlm,
+            out_tsm,
             lhs_slice,
             rhs_slice,
             barrier0,
@@ -282,6 +289,30 @@ def _make_npu_demo_add_barrier_module(
         top_level_ops.append(wrapper_func)
     top_level_ops.extend(top_level_extra_ops)
     return ModuleOp(top_level_ops)
+
+
+def _make_npu_demo_helper_func(name: str = "npu_demo_helper") -> func.FuncOp:
+    """构造 `npu_demo` 受控 module 的 helper `func.func`。
+
+    创建者: 朽木露琪亚
+    最后一次更改: 朽木露琪亚
+
+    功能说明:
+    - 为 `target="npu_demo"` 的 module 顺序输出测试提供一个最小 helper。
+    - 该 helper 不含 `arch.launch`，因此必须走通用 `func.func` 发射路径。
+
+    使用示例:
+    - helper = _make_npu_demo_helper_func()
+
+    关联文件:
+    - spec: spec/dsl/gen_kernel.md
+    - test: test/dsl/test_gen_kernel.py
+    - 功能实现: test/dsl/test_gen_kernel.py
+    """
+
+    block = Block()
+    block.add_ops([func.ReturnOp()])
+    return _func(name, [], [], block, ())
 
 
 def _lower_func(func_op: func.FuncOp) -> func.FuncOp:
@@ -2254,8 +2285,8 @@ def test_gen_kernel_emits_tile_elewise_cpu_source_for_elementwise_and_broadcast(
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-06 12:40:00 +0800
 # 最近一次运行成功时间: 2026-04-06 12:40:00 +0800
-# 功能说明: 验证 `target=\"npu_demo\"` 的受控 module 输入可生成 wrapper + body 双函数源码，并保留 barrier 管线。
-# 测试目的: 让 gate `-k 'npu_demo and barrier'` 命中真实正例，锁定 `launch<1, 1, 1>`、双 barrier 与固定 body 顺序。
+# 功能说明: 验证 `target=\"npu_demo\"` 的受控 module 输入可生成 wrapper + body 双函数源码，并允许 helper func.func 按 module 顺序输出。
+# 测试目的: 让 gate `-k 'npu_demo and barrier'` 命中真实正例，锁定 `launch<1, 1, 1>`、双 barrier、helper 顺序与固定 body 语义。
 # 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body
 # 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
 # 对应 spec 文件路径: spec/dsl/gen_kernel.md
@@ -2265,14 +2296,18 @@ def test_gen_kernel_emits_tile_elewise_cpu_source_for_elementwise_and_broadcast(
     [("tlm1", "TLM1"), ("tlm2", "TLM2"), ("tlm3", "TLM3")],
 )
 def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body(tlm_space: str, space_enum: str) -> None:
-    module = _make_npu_demo_add_barrier_module(tlm_space=tlm_space)
+    module = _make_npu_demo_add_barrier_module(
+        tlm_space=tlm_space,
+        top_level_extra_ops=(_make_npu_demo_helper_func(),),
+    )
 
     source = gen_kernel(module, _npu_ctx())
 
     assert source.startswith('#include "include/npu_demo/npu_demo.h"\nusing namespace npu_demo;\n\n')
+    assert source.index("static void add_barrier_body(") < source.index("void add_barrier(") < source.index("void npu_demo_helper()")
     assert (
-        "static void add_barrier_body(npu_demo::KernelContext& ctx, const Memory<MemorySpace::GM, float>& lhs, "
-        "const Memory<MemorySpace::GM, float>& rhs, Memory<MemorySpace::GM, float>& out)"
+        "static void add_barrier_body(npu_demo::KernelContext& ctx, const Memory<GM, float>& lhs, "
+        "const Memory<GM, float>& rhs, Memory<GM, float>& out)"
         in source
     )
     assert (
@@ -2282,12 +2317,14 @@ def test_gen_kernel_emits_npu_demo_launch_wrapper_and_barrier_body(tlm_space: st
     )
     assert "npu_demo::launch<1, 1, 1>(add_barrier_body, lhs, rhs, out);" in source
     assert source.count("ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK);") == 2
-    assert source.index("long long tid = ctx.thread_id();") < source.index(
-        "Memory<MemorySpace::TSM, float> tsm = ctx.get_dynamic_memory<MemorySpace::TSM, float>();"
+    assert source.index("long long v0 = ctx.thread_id();") < source.index(
+        "Memory<TSM, float> v2 = ctx.get_dynamic_memory<TSM, float>();"
     )
-    assert f"Memory<MemorySpace::{space_enum}, float> tlm = ctx.get_dynamic_memory<MemorySpace::{space_enum}, float>();" in source
-    assert f"auto out_tlm = view(tlm, tid * 16, 16, 1);" in source
-    assert source.index("slice(lhs_tsm, lhs_gm, 0, 16, 1);") < source.index("add(lhs_tsm, rhs_tsm, out_tlm);") < source.index("deslice(out, out_tlm, tid * 16, 16, 1);")
+    assert f"Memory<{space_enum}, float> v3 = ctx.get_dynamic_memory<{space_enum}, float>();" in source
+    assert "ctx.thread_id() * 16" in source
+    assert source.index("slice(v6 /*dst*/, v4 /*source*/, 0 /*offset*/, 16 /*size*/, 1 /*stride*/);") < source.index(
+        "add<TSM, float, float>(v8 /*out*/, v6 /*lhs*/, v7 /*rhs*/);"
+    ) < source.index("deslice(out /*target*/, v8 /*source*/, ctx.thread_id() * 16 /*offset*/, 16 /*size*/, 1 /*stride*/);")
     assert "arch.launch_kernel" not in source
     assert "ctx.sync_threads" not in source
 

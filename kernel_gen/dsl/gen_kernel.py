@@ -633,24 +633,17 @@ class _KernelEmitter:
             return self._emit_func(plain_func)
 
         body_func, wrapper_func = self._classify_npu_demo_launch_module(module_op)
-        helpers: list[str] = []
-        body_source: str | None = None
-        wrapper_source: str | None = None
+        emitted: list[str] = []
         for top_op in module_op.ops:
             if not isinstance(top_op, func.FuncOp):
                 raise _error(self.ctx, "<module>", "npu_demo launch module must contain only func.func")
             if top_op is body_func:
-                body_source = self._emit_npu_demo_launch_body_function(body_func)
+                emitted.append(self._emit_npu_demo_launch_body_function(body_func))
                 continue
             if top_op is wrapper_func:
-                wrapper_source = self._emit_npu_demo_launch_wrapper_function(wrapper_func, body_func)
+                emitted.append(self._emit_npu_demo_launch_wrapper_function(wrapper_func, body_func))
                 continue
-            helpers.append(self._emit_func(top_op))
-        emitted: list[str] = [*helpers]
-        if body_source is not None:
-            emitted.append(body_source)
-        if wrapper_source is not None:
-            emitted.append(wrapper_source)
+            emitted.append(self._emit_func(top_op))
         return "\n\n".join(emitted)
 
     def _get_npu_demo_plain_func(self, module_op: ModuleOp) -> func.FuncOp | None:
@@ -1210,110 +1203,6 @@ class _KernelEmitter:
                 raise _error(self.ctx, func_name, "npu_demo launch wrapper args must forward wrapper signature")
         return body_input_types, body_arg_offset
 
-    def _validate_npu_demo_launch_body_ops(self, func_op: func.FuncOp) -> tuple[ArchBarrierOp, ArchBarrierOp, str]:
-        """校验 body 函数是否匹配冻结的 add+barrier 骨架。
-
-        创建者: 小李飞刀
-        最后一次更改: 金铲铲大作战
-
-        功能说明:
-        - 允许辅助 `!symbol.int` 产生 op，但过滤后必须严格匹配固定序列。
-        - barrier 本身仍使用 IR 上的 scope/visibility，避免静默回退到旧接口。
-        - 第二块动态内存仍必须读取 `tlm1/tlm2/tlm3`，用于锁定 launch body 的动态内存查询口径。
-        - 当前固定 add 骨架要求把输出 tile 放在 `tlm1/tlm2/tlm3`，再经 `deslice` 写回 `out`。
-
-        使用示例:
-        - barrier0, barrier1, tlm_space = self._validate_npu_demo_launch_body_ops(body_func)
-
-        关联文件:
-        - spec: spec/dsl/gen_kernel.md
-        - test: test/dsl/test_gen_kernel.py
-        - 功能实现: kernel_gen/dsl/gen_kernel.py
-        """
-
-        func_name = func_op.sym_name.data
-        ops = self._filtered_npu_demo_launch_ops(func_op)
-        expected_types = (
-            ArchGetThreadIdOp,
-            ArchGetThreadNumOp,
-            ArchGetDynamicMemoryOp,
-            ArchGetDynamicMemoryOp,
-            Operation,
-            Operation,
-            Operation,
-            Operation,
-            Operation,
-            Operation,
-            Operation,
-            ArchBarrierOp,
-            NnAddOp,
-            ArchBarrierOp,
-            Operation,
-            func.ReturnOp,
-        )
-        if len(ops) != len(expected_types):
-            raise _error(self.ctx, func_name, "npu_demo launch body must match frozen add+barrier subset")
-
-        concrete_expected = (
-            ArchGetThreadIdOp,
-            ArchGetThreadNumOp,
-            ArchGetDynamicMemoryOp,
-            ArchGetDynamicMemoryOp,
-            "dma.view",
-            "dma.view",
-            "dma.view",
-            "dma.view",
-            "dma.view",
-            "dma.slice",
-            "dma.slice",
-            ArchBarrierOp,
-            NnAddOp,
-            ArchBarrierOp,
-            "dma.deslice",
-            func.ReturnOp,
-        )
-        for op, expected in zip(ops, concrete_expected, strict=True):
-            if isinstance(expected, str):
-                if op.name != expected:
-                    raise _error(self.ctx, func_name, "npu_demo launch body must match frozen add+barrier subset")
-                continue
-            if not isinstance(op, expected):
-                raise _error(self.ctx, func_name, "npu_demo launch body must match frozen add+barrier subset")
-
-        barrier0 = ops[11]
-        barrier1 = ops[13]
-        assert isinstance(barrier0, ArchBarrierOp)
-        assert isinstance(barrier1, ArchBarrierOp)
-        tsm_dynamic = ops[2]
-        tlm_dynamic = ops[3]
-        out_view = ops[8]
-        add_op = ops[12]
-        deslice_op = ops[14]
-        assert isinstance(tsm_dynamic, ArchGetDynamicMemoryOp)
-        assert isinstance(tlm_dynamic, ArchGetDynamicMemoryOp)
-        assert isinstance(out_view, DmaViewOp)
-        assert isinstance(add_op, NnAddOp)
-        assert isinstance(deslice_op, DmaDesliceOp)
-
-        if tsm_dynamic.memory_space.space.data != "tsm":
-            raise _error(self.ctx, func_name, "npu_demo launch body must read TSM as first dynamic memory")
-        tlm_space = tlm_dynamic.memory_space.space.data
-        if tlm_space not in {"tlm1", "tlm2", "tlm3"}:
-            raise _error(self.ctx, func_name, "npu_demo launch body must read tlm1/tlm2/tlm3 as second dynamic memory")
-        out_view_type = out_view.result.type
-        add_result_type = add_op.result.type
-        if not isinstance(out_view_type, NnMemoryType) or out_view_type.space.space.data != tlm_space:
-            raise _error(self.ctx, func_name, "npu_demo output tile view must stay on tlm")
-        if out_view.source is not tlm_dynamic.result:
-            raise _error(self.ctx, func_name, "npu_demo output tile must view tlm dynamic memory")
-        if add_op.space.space.data != tlm_space:
-            raise _error(self.ctx, func_name, "npu_demo add result space must stay on tlm")
-        if not isinstance(add_result_type, NnMemoryType) or add_result_type.space.space.data != tlm_space:
-            raise _error(self.ctx, func_name, "npu_demo add result type must stay on tlm")
-        if deslice_op.source is not add_op.result and deslice_op.target is not add_op.result:
-            raise _error(self.ctx, func_name, "npu_demo deslice must consume add result directly")
-        return barrier0, barrier1, tlm_space
-
     def _emit_npu_demo_generic_launch_body_function(
         self,
         func_op: func.FuncOp,
@@ -1355,8 +1244,17 @@ class _KernelEmitter:
         signature = f"static void {func_name}({', '.join(params)})"
 
         lines: list[str] = []
+        last_memory_result_name: str | None = None
         for op in func_op.body.block.ops:
             if self._bind_transparent_unrealized_conversion_cast(op):
+                continue
+            if op.name == "test.fake_symbol_value":
+                if not op.results or not isinstance(op.results[0].type, SymbolValueType):
+                    raise _error(self.ctx, func_name, "unsupported npu_demo launch body helper op")
+                expr = op.results[0].type.expr.expr.data
+                expr = expr.replace("thread_num", "ctx.thread_num()")
+                expr = expr.replace("thread_id", "ctx.thread_id()")
+                self.ctx.bind_name(op.results[0], expr)
                 continue
             if isinstance(op, func.ReturnOp):
                 stmt = self._emit_return_statement(func_op, op)
@@ -1366,10 +1264,31 @@ class _KernelEmitter:
             if isinstance(op, ArchBarrierOp):
                 lines.append(self._format_npu_demo_barrier_stmt(op, func_name))
                 continue
-            self._bind_rewritten_out_result(func_op, op)
+            if (
+                op.name in {
+                    "nn.add",
+                    "kernel.matmul",
+                    "kernel.binary_elewise",
+                    "kernel.exp",
+                    "kernel.reduce",
+                    "kernel.reduce_min",
+                    "kernel.img2col1d",
+                    "kernel.img2col2d",
+                    "kernel.select",
+                }
+                and len(op.results) == 1
+                and isinstance(op.results[0].type, NnMemoryType)
+                and self.ctx.lookup_name(op.results[0]) is None
+                and last_memory_result_name is not None
+            ):
+                self.ctx.bind_name(op.results[0], last_memory_result_name)
             stmt = emit_c_op(op, self.ctx)
             if stmt:
                 lines.append(stmt)
+            if len(op.results) == 1 and isinstance(op.results[0].type, NnMemoryType):
+                bound_name = self.ctx.lookup_name(op.results[0])
+                if bound_name is not None:
+                    last_memory_result_name = bound_name
         body = "\n".join(lines)
         if body:
             return f"{signature} {{\n{body}\n}}"
@@ -1411,15 +1330,15 @@ class _KernelEmitter:
         )
 
     def _emit_npu_demo_launch_body_function(self, func_op: func.FuncOp) -> str:
-        """生成 npu_demo `add+barrier` body 函数源码。
+        """生成 npu_demo launch body 函数源码。
 
         创建者: 小李飞刀
         最后一次更改: jcc你莫辜负
 
         功能说明:
-        - 输出 `static` body 签名，以及固定的 `thread/view/slice/barrier/add/deslice` 管线。
-        - `lhs/rhs` tile 固定放在 `TSM`，`out` tile 固定放在 `TLM1/TLM2/TLM3`。
-        - 仅消费 `S4` 冻结的 add+barrier 受控子集。
+        - 输出 `static` body 签名，并按 lowered IR 的实际 op 顺序逐条发射源码。
+        - 允许 body 中保留 `arch.barrier`、`dma.alloc`、`dma.view`、`dma.slice`、`dma.deslice` 等公开合同。
+        - 不再依赖冻结 add/barrier 子集，body 形态由唯一 wrapper + lowered IR 共同决定。
 
         使用示例:
         - source = self._emit_npu_demo_launch_body_function(body_func)
@@ -1431,65 +1350,7 @@ class _KernelEmitter:
         """
 
         body_input_types, body_arg_offset = self._validate_npu_demo_launch_body_signature(func_op)
-        arg_names = _extract_arg_names(func_op)
-        try:
-            barrier0, barrier1, tlm_space = self._validate_npu_demo_launch_body_ops(func_op)
-        except GenKernelError:
-            return self._emit_npu_demo_generic_launch_body_function(func_op, body_input_types, body_arg_offset)
-
-        lhs_type, rhs_type, out_type = body_input_types
-        element_type = self._type_to_c(out_type.element_type)
-        tlm_space_c = _memory_space_to_c(NnMemorySpaceAttr.from_name(tlm_space))
-        lhs_name, rhs_name, out_name = (
-            arg_names[body_arg_offset],
-            arg_names[body_arg_offset + 1],
-            arg_names[body_arg_offset + 2],
-        )
-
-        signature = (
-            f"static void {func_op.sym_name.data}(npu_demo::KernelContext& ctx, "
-            f"const {_type_to_c(lhs_type)}& {lhs_name}, "
-            f"const {_type_to_c(rhs_type)}& {rhs_name}, "
-            f"{_type_to_c(out_type)}& {out_name})"
-        )
-        self.ctx.push_indent()
-        indent = self.ctx.current_indent
-        lines = [
-            f"{indent}long long tid = ctx.thread_id();",
-            f"{indent}long long tnum = ctx.thread_num();",
-            "",
-            (
-                f"{indent}Memory<MemorySpace::TSM, {element_type}> tsm = "
-                f"ctx.get_dynamic_memory<MemorySpace::TSM, {element_type}>();"
-            ),
-            (
-                f"{indent}Memory<{tlm_space_c}, {element_type}> tlm = "
-                f"ctx.get_dynamic_memory<{tlm_space_c}, {element_type}>();"
-            ),
-            "",
-            f"{indent}auto {lhs_name}_gm = view({lhs_name}, tid * 16, 16, 1);",
-            f"{indent}auto {rhs_name}_gm = view({rhs_name}, tid * 16, 16, 1);",
-            "",
-            f"{indent}auto {lhs_name}_tsm = view(tsm, tid * 16, 16, 1);",
-            f"{indent}auto {rhs_name}_tsm = view(tsm, 64 + tid * 16, 16, 1);",
-            f"{indent}auto {out_name}_tlm = view(tlm, tid * 16, 16, 1);",
-            "",
-            f"{indent}slice({lhs_name}_tsm, {lhs_name}_gm, 0, 16, 1);",
-            f"{indent}slice({rhs_name}_tsm, {rhs_name}_gm, 0, 16, 1);",
-            self._format_npu_demo_barrier_stmt(barrier0, func_op.sym_name.data),
-            "",
-            (
-                f"{indent}add({lhs_name}_tsm, {rhs_name}_tsm, {out_name}_tlm);"
-            ),
-            self._format_npu_demo_barrier_stmt(barrier1, func_op.sym_name.data),
-            "",
-            f"{indent}deslice({out_name}, {out_name}_tlm, tid * 16, 16, 1);",
-        ]
-        body = "\n".join(lines)
-        self.ctx.pop_indent()
-        if body:
-            return f"{signature} {{\n{body}\n}}"
-        return f"{signature} {{\n}}"
+        return self._emit_npu_demo_generic_launch_body_function(func_op, body_input_types, body_arg_offset)
 
     def _emit_npu_demo_launch_wrapper_function(self, wrapper_func: func.FuncOp, body_func: func.FuncOp) -> str:
         """生成 npu_demo wrapper 函数源码。
