@@ -127,7 +127,7 @@ Usage:
   codex-multi-agents-task.sh -file <TODO.md> -pause -task_id <id> -agents-list <agents-lists.md>
   codex-multi-agents-task.sh -file <TODO.md> -continue -task_id <id> -agents-list <agents-lists.md>
   codex-multi-agents-task.sh -file <TODO.md> -reassign -task_id <id> -to <worker> -agents-list <agents-lists.md>
-  codex-multi-agents-task.sh -file <TODO.md> -next [-auto] -task_id <id> -from <sender> -type <spec|build|review|merge|other|refactor> -message <text> -agents-list <agents-lists.md>
+  codex-multi-agents-task.sh -file <TODO.md> -next [-to <worker>|-auto] -task_id <id> -from <sender> -type <spec|build|review|merge|other|refactor> -message <text> -agents-list <agents-lists.md>
   codex-multi-agents-task.sh -file <TODO.md> -new -info <desc> -type <spec|build|review|merge|other|refactor> -worktree <path> -depends <task_ids|None> -plan <plan_doc|None> [-to <worker>] [-from <owner>] [-log <record_path>]
   codex-multi-agents-task.sh -file <TODO.md> -status -doing
   codex-multi-agents-task.sh -file <TODO.md> -status -task-list
@@ -142,6 +142,7 @@ Examples:
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -continue -task_id EX-2 -agents-list ./agents/codex-multi-agents/agents-lists.md
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -reassign -task_id EX-2 -to worker-c -agents-list ./agents/codex-multi-agents/agents-lists.md
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -next -task_id EX-2 -from worker-b -type review -message "下一阶段：补齐边界测试" -agents-list ./agents/codex-multi-agents/agents-lists.md
+  codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -next -task_id EX-2 -from worker-b -to worker-c -type review -message "下一阶段：补齐边界测试" -agents-list ./agents/codex-multi-agents/agents-lists.md
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -next -auto -task_id EX-2 -from worker-b -type review -message "下一阶段：补齐边界测试" -agents-list ./agents/codex-multi-agents/agents-lists.md
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -new -info "补充单元测试" -type build -worktree repo-x -depends "EX-2,EX-5" -plan "ARCHITECTURE/plan/x.md" -to worker-b -from 李白 -log ./log/record.md
   codex-multi-agents-task.sh ./skills/codex-multi-agents/examples/TODO.md -file -status -doing
@@ -449,7 +450,11 @@ parse_args() {
     TYPE_KIND="$(validate_type_kind "$TYPE_KIND")"
     [[ -n "$(trim "$MESSAGE")" ]] || err "$RC_ARG" "empty value for -message"
     [[ -n "$(trim "$AGENTS_LIST")" ]] || err "$RC_ARG" "empty value for -agents-list"
-    [[ "$HAS_TO" -eq 0 && "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_DOING" -eq 0 && "$HAS_TASK_LIST" -eq 0 && "$HAS_PLAN_LIST" -eq 0 && "$HAS_DEPENDS" -eq 0 && "$HAS_PLAN" -eq 0 ]] || err "$RC_ARG" "-next does not accept -to/-info/-log/-worktree/-doing/-task-list/-plan-list/-depends/-plan"
+    if [[ "$HAS_TO" -eq 1 ]]; then
+      [[ -n "$(trim "$TO")" ]] || err "$RC_ARG" "empty value for -to"
+    fi
+    [[ ! ( "$HAS_TO" -eq 1 && "$HAS_AUTO" -eq 1 ) ]] || err "$RC_ARG" "-next cannot combine -to and -auto"
+    [[ "$HAS_INFO" -eq 0 && "$HAS_LOG" -eq 0 && "$HAS_WORKTREE" -eq 0 && "$HAS_DOING" -eq 0 && "$HAS_TASK_LIST" -eq 0 && "$HAS_PLAN_LIST" -eq 0 && "$HAS_DEPENDS" -eq 0 && "$HAS_PLAN" -eq 0 ]] || err "$RC_ARG" "-next does not accept -info/-log/-worktree/-doing/-task-list/-plan-list/-depends/-plan"
   fi
 
   if [[ "$HAS_AUTO" -eq 1 && "$OP_NEXT" -eq 0 ]]; then

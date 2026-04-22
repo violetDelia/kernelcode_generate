@@ -1232,28 +1232,91 @@ def main() -> int:
             fail(RC_DATA, f"task not found in running list: {task_id}")
         if not message.strip():
             fail(RC_ARG, "empty value for -message")
+        if to.strip() and auto_flag:
+            fail(RC_ARG, "-next cannot combine -to and -auto")
 
         row = exec_rows.pop(idx)
         assignee = row[8].strip()
         next_list_row = [row[0], row[1], row[2], row[3], message.strip(), type_kind, row[6], row[7], "", row[11]]
-        list_rows.append(next_list_row)
         message_lines.append(f"OK: next {task_id}")
 
-        if assignee:
-            assert agents_table is not None
-            assert agents_rows is not None
-            agent_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], assignee)
-            if agent_idx < 0:
-                fail(RC_DATA, f"agent not found in agents list: {assignee}")
-            if count_doing_tasks(exec_rows, assignee) == 0:
-                agents_rows[agent_idx][agents_table["status_idx"]] = "free"
-            else:
-                agents_rows[agent_idx][agents_table["status_idx"]] = "busy"
-            message_lines.append(f"OK: replace {assignee} 状态")
+        assert agents_table is not None
+        assert agents_rows is not None
 
-        if auto_flag:
-            assert agents_table is not None
-            assert agents_rows is not None
+        manual_assignee = to.strip()
+        if manual_assignee:
+            next_kind = normalize_task_type(next_list_row[5], RC_DATA, f"next task {task_id}")
+            candidate_agent_idx = find_agent_row_index(
+                agents_rows,
+                agents_table["name_idx"],
+                manual_assignee,
+            )
+            if candidate_agent_idx < 0:
+                fail(RC_DATA, f"agent not found in agents list: {manual_assignee}")
+            ensure_merge_specialist_assignee(
+                next_kind,
+                manual_assignee,
+                agents_rows[candidate_agent_idx],
+                agents_table,
+                "dispatch",
+            )
+            if assignee and assignee != manual_assignee:
+                agent_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], assignee)
+                if agent_idx < 0:
+                    fail(RC_DATA, f"agent not found in agents list: {assignee}")
+                if count_doing_tasks(exec_rows, assignee) == 0:
+                    agents_rows[agent_idx][agents_table["status_idx"]] = "free"
+                else:
+                    agents_rows[agent_idx][agents_table["status_idx"]] = "busy"
+                message_lines.append(f"OK: replace {assignee} 状态")
+
+            candidate_is_current_without_other_task = (
+                manual_assignee == assignee
+                and count_doing_tasks(exec_rows, manual_assignee) == 0
+            )
+            if (
+                not candidate_is_current_without_other_task
+                and agents_rows[candidate_agent_idx][agents_table["status_idx"]].strip().lower() == "busy"
+            ):
+                fail(RC_DATA, f"agent is busy, cannot next to: {manual_assignee}")
+            if count_active_assignees(exec_rows) >= max_parallel:
+                fail(RC_DATA, f"parallel assignee limit reached: {count_active_assignees(exec_rows)}/{max_parallel}")
+
+            exec_rows.append(
+                [
+                    next_list_row[0],
+                    next_list_row[1],
+                    next_list_row[2],
+                    next_list_row[3],
+                    next_list_row[4],
+                    next_list_row[5],
+                    next_list_row[6],
+                    next_list_row[7],
+                    manual_assignee,
+                    "进行中",
+                    "",
+                    next_list_row[9],
+                ]
+            )
+            agents_rows[candidate_agent_idx][agents_table["status_idx"]] = "busy"
+            message_lines.append(f"OK: next-dispatch {task_id} -> {manual_assignee}")
+            message_lines.append(f"OK: replace {manual_assignee} 状态")
+            message_lines.append(f"__AUTO_NEXT__=dispatch|{task_id}|{manual_assignee}")
+
+        else:
+            list_rows.append(next_list_row)
+
+            if assignee:
+                agent_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], assignee)
+                if agent_idx < 0:
+                    fail(RC_DATA, f"agent not found in agents list: {assignee}")
+                if count_doing_tasks(exec_rows, assignee) == 0:
+                    agents_rows[agent_idx][agents_table["status_idx"]] = "free"
+                else:
+                    agents_rows[agent_idx][agents_table["status_idx"]] = "busy"
+                message_lines.append(f"OK: replace {assignee} 状态")
+
+        if (not manual_assignee) and auto_flag:
             next_kind = normalize_task_type(next_list_row[5], RC_DATA, f"next task {task_id}")
             if next_kind not in {"merge", "review", "build", "spec"}:
                 message_lines.append("__AUTO_NEXT__=none")

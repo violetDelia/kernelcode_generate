@@ -79,13 +79,17 @@
 - `-dispatch` 默认读取任务记录中的 `任务类型`；若显式提供 `-type`，则必须与任务记录一致。
 - `-dispatch` 仅在全部依赖任务已经从 `正在执行的任务` 与 `任务列表` 中消失时才允许继续。
 - `-dispatch` 仅在目标角色存在、当前空闲且总并发人数未超过 `CODEX_MULTI_AGENTS_MAX_PARALLEL` 时才允许继续。
-- `merge` 任务在 `-dispatch/-reassign/-next -auto` 下只允许分配给合并专职：职责包含 `合并`，且职责不包含 `全能替补` 或 `不含合并`。
-- `-next` 仅负责：
+- `merge` 任务在 `-dispatch/-reassign/-next -to/-next -auto` 下只允许分配给合并专职：职责包含 `合并`，且职责不包含 `全能替补` 或 `不含合并`。
+- 不带 `-to/-auto` 的 `-next` 仅负责：
   - 将运行中任务移回 `任务列表`
   - 用 `-message` 更新 `描述`
   - 用 `-type` 更新下一阶段 `任务类型`
-- `-next` 将任务退回 `任务列表` 时，`指派` 必须清空。
-- `-next` 成功后固定向管理员发送摘要：`任务 <task_id> 已完成当前阶段，已回到任务列表；新任务类型=<type>，请管理员推进。`；发送者使用 `-from`。
+- 不带 `-to/-auto` 的 `-next` 将任务退回 `任务列表` 时，`指派` 必须清空。
+- `-next -to <worker>` 表示手动续接并立即指派：同一任务直接进入 `正在执行的任务`，`指派=<worker>`、`状态=进行中`，旧接手人按剩余运行中任务数重算 `free/busy`，新接手人置为 `busy`。
+- `-next -to` 的目标角色必须存在、处于可接手状态，且满足任务类型职责约束；目标角色为当前执行者时，当前任务先从运行表移除再判断其是否仍有其他运行中任务。
+- `-next -to` 与 `-auto` 互斥。
+- 不带 `-to/-auto` 的 `-next` 成功后固定向管理员发送摘要：`任务 <task_id> 已完成当前阶段，已回到任务列表；新任务类型=<type>，请管理员推进。`；发送者使用 `-from`。
+- `-next -to` 成功后会先执行一次 `list -init`，再向接手人发送任务消息，并向管理员发送摘要：`任务 <task_id> 已完成当前阶段，已回到任务列表；新任务类型=<type>，已经指派给-> <当前执行者|角色名>。`；发送者使用 `-from`。
 - `-next -auto` 仅对 `merge/review/build/spec` 四类任务执行自动续接；`other/refactor` 仍保留在 `任务列表`。
 - `-next -auto` 只尝试自动续接当前刚通过 `-next` 退回 `任务列表` 的同一任务，不扫描其他任务。
 - `-next -auto` 的候选人集合规则：
@@ -331,16 +335,17 @@ codex-multi-agents-task.sh \
 
 功能说明：
 
-- 将当前运行中任务退回 `任务列表`，改写下一阶段的描述与任务类型；带 `-auto` 时，仅尝试自动续接当前这同一条任务。
+- 将当前运行中任务改写为下一阶段；默认退回 `任务列表`，带 `-to` 时手动指派给指定角色，带 `-auto` 时按候选规则自动续接当前这同一条任务。
 
 参数说明：
 
 - `-next(开关)`：启用续接操作。
 - `-task_id(字符串)`：目标任务 ID。
 - `-from(字符串)`：发起 `-next` 的当前执行者姓名；用于 `-next` 与 `-next -auto` 的后续会话消息发送者。
+- `-to(字符串，可选)`：手动指定下一阶段接手人；与 `-auto` 互斥。
 - `-type(枚举)`：下一阶段任务类型。
 - `-message(字符串)`：新的任务描述。
-- `-agents-list(路径)`：角色列表文件。
+- `-agents-list(路径)`：角色列表文件；普通 `-next`、`-next -to`、`-next -auto` 都必须显式提供。
 - `-auto(开关，可选)`：启用自动续接。
 
 使用示例：
@@ -360,6 +365,16 @@ codex-multi-agents-task.sh \
   -next \
   -task_id "EX-2" \
   -from "worker-b" \
+  -to "worker-c" \
+  -type "review" \
+  -message "下一阶段：补齐边界测试" \
+  -agents-list "./agents/codex-multi-agents/agents-lists.md"
+
+codex-multi-agents-task.sh \
+  -file "./skills/codex-multi-agents/examples/TODO.md" \
+  -next \
+  -task_id "EX-2" \
+  -from "worker-b" \
   -type "review" \
   -message "下一阶段：补齐边界测试" \
   -agents-list "./agents/codex-multi-agents/agents-lists.md" \
@@ -370,6 +385,7 @@ codex-multi-agents-task.sh \
 
 - `-next` 不修改依赖任务、计划书、记录文件与创建时间。
 - `-next` 将任务退回 `任务列表` 时，会清空该任务的 `指派`。
+- `-next -to` 不退回等待管理员分发的任务列表，而是原任务 ID 直接续接到指定角色；`任务列表` 不保留该任务副本。
 - `-next` 与 `-next -auto` 的所有会话消息都使用命令行显式传入的 `-from` 作为发送者，不再依赖环境变量解析。
 - `-next` 成功后，若原指派角色没有其他运行中任务，则其状态更新为 `free`。
 - `-next` 无论是否带 `-auto`，都会向管理员发送一条摘要消息。
@@ -508,7 +524,7 @@ codex-multi-agents-task.sh \
 - 测试目标：
   - 验证各主操作的参数校验、状态迁移、计划统计与角色状态同步。
   - 验证分发前初始化、分发后消息发送、默认模板拼接与消息失败语义。
-  - 验证 `-next` 清空指派并向管理员发送摘要；验证 `-next -auto` 仅续接同一任务、保留原任务 ID、按接手人场景发送摘要与会话消息。
+  - 验证 `-next` 清空指派并向管理员发送摘要；验证 `-next -to` 手动续接、角色状态同步与会话消息；验证 `-next -auto` 仅续接同一任务、保留原任务 ID、按接手人场景发送摘要与会话消息。
   - 验证文件不存在、表结构非法、依赖未清空、角色忙碌、并行人数超限与锁冲突路径。
   - 验证权限规则：管理员专属操作、管理员/架构师专属操作，以及合并角色执行 `-done` 的范围。
 - 功能与用例清单：
@@ -547,6 +563,7 @@ codex-multi-agents-task.sh \
   - `TC-031` `test_delete_running_task_returns_rc3`：删除运行中任务，返回 `3`
   - `TC-032` `test_delete_paused_running_task_success`：删除已暂停运行中任务
   - `TC-033` `test_next_task_moves_running_to_task_list_success`：续接成功，任务回到列表，描述与类型更新
+  - `TC-033A` `test_next_to_dispatches_same_task_and_updates_agent_status`：手动续接到指定角色，任务回到运行表并同步旧/新角色状态
   - `TC-034` `test_next_requires_message`：续接缺少描述，返回 `1`
   - `TC-035` `test_next_requires_type`：续接缺少任务类型，返回 `1`
   - `TC-036` `test_new_restricted_for_non_privileged_operator`：普通执行人调用 `-new`，返回 `3`

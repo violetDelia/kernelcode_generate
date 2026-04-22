@@ -61,7 +61,7 @@ def run_script(*args: str, env: dict[str, str] | None = None) -> subprocess.Comp
             merged_env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = agents_list_path
         else:
             merged_env["CODEX_MULTI_AGENTS_PERMISSION_AGENTS_FILE"] = str(
-                REPO_ROOT.parent / "agents/codex-multi-agents/agents-lists.md"
+                REPO_ROOT / "agents/codex-multi-agents/agents-lists.md"
             )
 
     return subprocess.run(
@@ -1892,6 +1892,94 @@ def test_next_task_moves_running_to_task_list_success(tmp_path: Path) -> None:
     assert (
         "send:神秘人-session:@worker-b向@神秘人发起会话: "
         "任务 EX-2 已完成当前阶段，已回到任务列表；新任务类型=review，请管理员推进。:"
+    ) in calls_text
+
+
+# TC-030A
+# 创建者: 守护最好的爱莉希雅
+# 最后一次更改: 守护最好的爱莉希雅
+# 测试目的: 验证 -next -to 手动续接到指定角色时，任务直接回到运行表并同步旧/新角色状态。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_next_to_dispatches_same_task_and_updates_agent_status(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    bin_dir = tmp_path / "bin"
+    state_dir = tmp_path / "state"
+    calls_file = write_fake_tmux(bin_dir, state_dir, sessions=["神秘人-session", "worker-c-session"])
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-2",
+                "杜甫",
+                "2026-03-08 16:20:00 +0800",
+                "/tmp/wt-ex2",
+                "创建 test",
+                "build",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "worker-b",
+                "进行中",
+                "xxx",
+                "./log/ex2.md",
+            ),
+        ],
+        list_rows=[],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row_with_role("神秘人", "free", "管理员", "神秘人-session", "管理员"),
+            agent_row_with_role("worker-b", "busy", "开发"),
+            agent_row_with_role("worker-c", "free", "审查"),
+        ],
+    )
+
+    env = os.environ.copy()
+    env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["CODEX_MULTI_AGENTS_ADMIN_USERS"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-b"
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-next",
+        "-task_id",
+        "EX-2",
+        "-from",
+        "worker-b",
+        "-to",
+        "worker-c",
+        "-type",
+        "review",
+        "-message",
+        "下一阶段：补齐边界用例",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+    list_rows = parse_section_rows(content, "## 任务列表")
+
+    assert result.returncode == 0
+    assert "OK: next EX-2" in result.stdout
+    assert "OK: next-dispatch EX-2 -> worker-c" in result.stdout
+    assert "OK: replace worker-b 状态" in result.stdout
+    assert "OK: replace worker-c 状态" in result.stdout
+    assert any(r[0] == "EX-2" and r[5] == "review" and r[8] == "worker-c" and r[9] == "进行中" for r in running_rows)
+    assert not any(r[0] == "EX-2" for r in list_rows)
+    assert get_agent_status(agents, "worker-b") == "free"
+    assert get_agent_status(agents, "worker-c") == "busy"
+    calls_text = calls_file.read_text(encoding="utf-8")
+    assert "你的名字叫做worker-c" in calls_text
+    assert "@worker-b向@worker-c发起会话: 请处理任务 EX-2（下一阶段：补齐边界用例）。" in calls_text
+    assert (
+        "send:神秘人-session:@worker-b向@神秘人发起会话: "
+        "任务 EX-2 已完成当前阶段，已回到任务列表；新任务类型=review，已经指派给-> worker-c。:"
     ) in calls_text
 
 

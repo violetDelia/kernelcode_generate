@@ -212,6 +212,7 @@ bash ./scripts/codex-multi-agents-task.sh \
 bash ./scripts/codex-multi-agents-task.sh \
   -file ./TODO.md \
   -next -task_id T-20260308-xxxxxxx1 \
+  -from worker-a \
   -type review \
   -message "审查：复核权限校验与并行上限分发阻断" \
   -agents-list ./agents/codex-multi-agents/agents-lists.md
@@ -220,13 +221,31 @@ bash ./scripts/codex-multi-agents-task.sh \
 说明：
 - `-next` 会把任务从“正在执行的任务”移回“任务列表”。
 - `-next` 必须显式提供下一阶段 `-type`，避免阶段类型误判。
-- 只替换“描述”和“任务类型”，其余字段（worktree/依赖/计划书/指派/记录文件）保持不变。
+- 只替换“描述”和“任务类型”；worktree/依赖/计划书/记录文件保持不变；退回任务列表时 `指派` 会清空。
+
+### 手动续接并指派（-next -to）
+```bash
+bash ./scripts/codex-multi-agents-task.sh \
+  -file ./TODO.md \
+  -next -task_id T-20260308-xxxxxxx1 \
+  -from worker-a \
+  -to worker-b \
+  -type review \
+  -message "审查：复核权限校验与并行上限分发阻断" \
+  -agents-list ./agents/codex-multi-agents/agents-lists.md
+```
+
+说明：
+- `-next -to <worker>` 会把同一任务直接续接到指定角色，不在任务列表保留待分发副本。
+- 脚本会同步更新 `agents-lists.md`：原接手人按剩余运行中任务数重算 `free/busy`，新接手人置为 `busy`。
+- `-next -to` 与 `-next -auto` 互斥。
 
 ### 自动续接任务（-next -auto）
 ```bash
 bash ./scripts/codex-multi-agents-task.sh \
   -file ./TODO.md \
   -next -task_id T-20260308-xxxxxxx1 \
+  -from worker-a \
   -type review \
   -message "审查：复核权限校验与并行上限分发阻断" \
   -agents-list ./agents/codex-multi-agents/agents-lists.md \
