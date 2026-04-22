@@ -111,3 +111,19 @@ Diff 反推审查：
 验证复核：沿用本记录中的 `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/lfr/kernelcode_generate/wt-20260422-main-npu-demo-launch-s1:/home/lfr/kernelcode_generate pytest -q test/operation/test_operation_arch.py test/dialect/test_arch_dialect.py test/include/api/test_arch.py test/include/npu_demo/test_runtime_launch.py test/include/npu_demo/test_kernel_context.py test/dsl/test_ast.py test/dsl/test_mlir_gen.py test/dsl/test_gen_kernel.py test/pass/test_attach_arch_information.py test/pass/outline_device_kernel/test_outline_device_kernel.py test/tools/test_ircheck_runner.py test/target/test_target_registry.py`、`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/operation/test_operation_arch.py -k 'launch_kernel or barrier'`、`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/pass/test_attach_arch_information.py`、`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/pass/outline_device_kernel/test_outline_device_kernel.py`、`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest -q test/dsl/test_ast.py -k 'launch_kernel'` 与 `git diff --check` 的通过结果；未新增阻断项。
 合同验收（如适用）：未执行 expectation；按计划仅作为后续终验合同资产单列，不计入本轮 Diff 反推自测。
 结论：本轮 S1 merge 已完成，任务记录已写回 worktree，请按流程执行 `-done` 并回报管理员。
+
+状态更新尝试：
+- 已按流程尝试执行 `-done`，但脚本返回 `ERROR(3): task not found in running list: T-20260422-e5e78096`。
+- 现状核对：`TODO.md` 中该任务仍位于 `任务列表`，尚未进入 `正在执行的任务`，因此当前仅完成了代码合并与主线推送，未完成状态收口。
+- 处理建议：请由管理员先把该任务分发进运行列表，再由 `merge` 继续执行 `-done` 收口。
+
+## Merge 收口补记
+
+- 时间：`2026-04-23 02:25 +0800`
+- 经办人：`李白`
+- 任务：`T-20260422-e5e78096`
+- 任务目标：任务重新进入运行列表后，完成 merge 收口并执行 `-done`。
+- 改动：本轮不新增代码内容；仅补写状态收口结果，保留前文 blocker 作为真实过程记录。
+- 验证：`bash /home/lfr/kernelcode_generate/skills/codex-multi-agents/scripts/codex-multi-agents-task.sh -file TODO.md -done -task_id "T-20260422-e5e78096" -log "agents/codex-multi-agents/log/task_records/2026/17/20260422-main-npu-demo-launch-s1.md" -agents-list agents/codex-multi-agents/agents-lists.md` -> `OK: done T-20260422-e5e78096`、`OK: replace 李白 状态`
+- Diff 反推自测 / Diff 反推审查：本轮仅做状态收口与日志补记，不新增实现 diff；继续沿用前文已通过的 launch ABI / operation / pytest 结论。
+- 结论：当前任务已完成 merge 收口与 `-done`，记录保持真实，不再追加空泛总结。
