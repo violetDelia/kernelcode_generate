@@ -149,11 +149,15 @@ def _path_matches_module(path: str, module: str) -> bool:
         return False
     normalized_parts = [part for part in PurePosixPath(path.replace("\\", "/")).parts if part not in {"", "/"}]
     prefix_parts = prefix.split("/")
-    if len(normalized_parts) < len(prefix_parts):
-        return False
-    for index in range(len(normalized_parts) - len(prefix_parts) + 1):
-        if normalized_parts[index : index + len(prefix_parts)] == prefix_parts:
-            return True
+    path_candidates = [normalized_parts]
+    if normalized_parts and normalized_parts[-1].endswith(".py"):
+        path_candidates.append([*normalized_parts[:-1], normalized_parts[-1][:-3]])
+    for candidate in path_candidates:
+        if len(candidate) < len(prefix_parts):
+            continue
+        for index in range(len(candidate) - len(prefix_parts) + 1):
+            if candidate[index : index + len(prefix_parts)] == prefix_parts:
+                return True
     return False
 
 

@@ -119,6 +119,27 @@ def test_check_python_coverage_supports_include_module_filter() -> None:
     assert stderr == ""
 
 
+def test_check_python_coverage_supports_include_module_filter_for_py_suffix_path() -> None:
+    """TC-CPY-002A: include-module should match coverage paths ending in .py."""
+
+    code, stdout, stderr = _run_check(
+        [
+            "--coverage-json",
+            str(_fixture("core_module_filter_pass.json")),
+            "--include-module",
+            "kernel_gen.dsl.mlir_gen.emit.core",
+            "--line-min",
+            "95",
+            "--branch-min",
+            "60",
+        ]
+    )
+    assert code == 0
+    assert "scope=kernel_gen/dsl/mlir_gen/emit/core" in stdout
+    assert "line=100.00%" in stdout
+    assert stderr == ""
+
+
 def test_check_python_coverage_rejects_line_threshold() -> None:
     """TC-CPY-003: line coverage below threshold must fail."""
 

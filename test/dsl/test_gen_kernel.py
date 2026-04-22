@@ -932,8 +932,12 @@ gen_kernel = importlib.import_module("kernel_gen.dsl.gen_kernel")
 
 assert legacy_emit_c.EmitCContext is gen_kernel.EmitCContext
 assert legacy_emit_c.EmitCError is gen_kernel.EmitCError
-"""
+    """
     env = os.environ.copy()
+    # 子进程只验证模块单例，不继承 coverage 注入变量，避免测量环境干扰导入顺序。
+    for key in list(env):
+        if key.startswith("COVERAGE") or key.startswith("COV_CORE"):
+            env.pop(key)
     pythonpath_parts = [str(REPO_ROOT), "/home/lfr/kernelcode_generate"]
     existing_pythonpath = env.get("PYTHONPATH")
     if existing_pythonpath:
