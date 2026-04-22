@@ -218,19 +218,6 @@ builtin.module {
 
 - 输出 IR 保持零返回 ABI，不引入隐式返回值改写。
 
-## 额外补充
-
-- expectation runner 目录约定固定为 `expectation/pass/outline_device_kernel/`。
-- 公开 runner 入口固定为 `expectation/pass/outline_device_kernel/__main__.py`。
-- 子资产路径固定为：
-  - `expectation/pass/outline_device_kernel/basic.py`
-  - `expectation/pass/outline_device_kernel/multi_function.py`
-  - `expectation/pass/outline_device_kernel/invalid_attr.py`
-- 兼容导入 `kernel_gen.passes.lowering.outline_device_kernel` 只用于旧调用方与架构侧只读 expectation 资产；新实现与新测试统一指向 `kernel_gen.passes.outline_device_kernel`。
-- 当前任务链的正式验收只依赖当前 `worktree` 内的 `spec / test / kernel_gen` 正式交付物；`expectation/pass/outline_device_kernel/**` 由架构侧保管，只作为补充核对。
-- 旧路径清理的正式检索范围固定为 `spec / test / kernel_gen`；仓库根目录中的 expectation 文本不纳入本轮正式检索结论。
-- 若当前 `worktree` 本身不带 `expectation/` 目录，补充 runner 仍在当前 `worktree` 下执行，并通过 `PYTHONPATH=<task_worktree>:<repo_root>` 追加架构侧 expectation 资产。
-
 ## 测试
 
 - 测试文件：[`test/pass/outline_device_kernel/test_outline_device_kernel.py`](../../../test/pass/outline_device_kernel/test_outline_device_kernel.py)
@@ -244,9 +231,6 @@ builtin.module {
 - 测试文件：[`test/pass/test_pipeline_default_lowering.py`](../../../test/pass/test_pipeline_default_lowering.py)
 - 执行命令：`pytest -q test/pass/test_pipeline_default_lowering.py`
 - 测试目标：锁定 `default-lowering remains unchanged`，不把 `outline-device-kernel` 混入默认 pipeline。
-
-- 执行命令：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=<task_worktree>:<repo_root> python3 -m expectation.pass.outline_device_kernel`
-- 测试目标：作为架构侧补充核对，锁定 host launch outline 的 expectation runner 路径与 `__main__.py/basic.py/multi_function.py/invalid_attr.py` 资产集合；不作为当前任务正式合入前置。
 
 - 功能与用例清单：
   - `HL-ODK-001`：显式 `launch_block / launch_thread / launch_subthread` 三项属性同时存在时才触发 outline。

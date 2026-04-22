@@ -86,7 +86,7 @@
   - 验证固定窗口 `dma.slice` 在只读来源且结果不被改写时可外提
   - 验证禁止项（例如 `dma.deslice`）在 loop invariant 形态下会触发显式失败短语
 - 验证 `PassManager` 的 `symbol-loop-hoist` 顺序约束（仅在与 `tile` 同时出现时由 `test/pass/test_pass_manager.py` 覆盖）
-  - 普通实现、审查与合并阶段只以当前 pytest 与架构侧合同基线为准，不通过本地 expectation 副本或 `.gitignore` 放行承接交付内容
+  - 普通实现、审查与合并阶段只以当前 pytest 与架构侧合同基线为准，不通过本地测试副本或 `.gitignore` 放行承接交付内容
 
 功能与用例清单：
 - `TC-SLH-001`：外提 `symbol.get_dim + dma.alloc`

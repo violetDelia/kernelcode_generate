@@ -84,7 +84,7 @@ module = pm.run(module)
   3. `BufferResultsToOutParamsPass`
   4. `LowerDmaMemoryHierarchyPass`
 - 顺序说明、诊断文案与黑盒录制文本必须使用 `decompass -> lower-nn -> buffer-results-to-out-params -> lower-dma-memory-hierarchy`，不得继续使用 `lower-nn-to-kernel` 作为默认 pipeline 顺序口径。
-- `default-lowering remains unchanged`：不得在 builder、顺序说明、黑盒 expectation 或测试命令中隐式插入 `outline-device-kernel`。
+- `default-lowering remains unchanged`：不得在 builder、顺序说明、黑盒验收或测试命令中隐式插入 `outline-device-kernel`。
 - 对最小 `nn.add` memory-return 输入运行该 pipeline 时，调用方应看到前置 `out` 参数 ABI、`kernel.binary_elewise(kind="add")` 与 `dma.slice / dma.deslice` 链；这属于默认 pipeline 的公开黑盒行为。
 
 返回与限制：
@@ -115,7 +115,7 @@ module = pm.run(module)
   - 黑盒最小链路可验证前置 `out` 参数 ABI、`kernel.binary_elewise(kind="add")` 与 `dma.slice / dma.deslice`。
   - 顺序错误与不支持 op 的失败边界可验证。
   - `default-lowering remains unchanged`，不把 `outline-device-kernel` 混入默认 pipeline。
-  - 当前任务链的正式验收不依赖 `worktree` 内本地 `expectation` 副本；若现场具备架构侧 runner，可另做补充对照。
+  - 当前任务链的正式验收不依赖 `worktree` 内本地测试副本；若现场具备架构侧 runner，可另做补充对照。
 - 功能与用例清单：
   - `test_default_lowering_pipeline_builds_pass_manager`
   - `test_default_lowering_pipeline_pass_order`

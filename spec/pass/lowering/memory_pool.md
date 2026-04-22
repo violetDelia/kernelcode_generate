@@ -278,9 +278,6 @@ raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free not found for alloc")
 - 执行命令：
   - `pytest -q test/pass/test_memory_pool.py`
   - `pytest -q test/pass/test_memory_pool.py -k "symbol_for or escape or layout or invalid_lifetime"`
-  - `PYTHONPATH=. python -m expectation.pass.lowing.memory_pool`
-  - `PYTHONPATH=. python expectation/pass/lowing/memory_pool/summary.py`
-  - `PYTHONPATH=. python expectation/pass/lowing/memory_pool/loop_reuse.py`
 - 测试目标：
   - 验证摘要生成与文本输出稳定。
   - 验证区间索引与 bucket 统计正确。

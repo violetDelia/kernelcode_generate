@@ -129,7 +129,7 @@ if not result.ok:
 
 ## `execute_engine + npu_demo + matmul`（S1）合同说明
 
-- 适用范围：[`expectation/execute_engine/npu_demo/kernel_only/matmul.py`](expectation/execute_engine/npu_demo/kernel_only/matmul.py) 与 [`expectation/execute_engine/npu_demo/default/matmul.py`](expectation/execute_engine/npu_demo/default/matmul.py) 中的 tiled matmul smoke。
+- 适用范围：[`test/execute_engine/test_execute_engine_compile.py`](test/execute_engine/test_execute_engine_compile.py) 与 [`test/execute_engine/test_execute_engine_invoke.py`](test/execute_engine/test_execute_engine_invoke.py) 中的 tiled matmul smoke。
 - 本阶段定义合同文本与验收映射，不在本文件扩展新的运行时能力。
 - `CASE-1`（raw IR）：前端 tile memory 语义必须体现 `MemorySpace.TSM -> #nn.space<tsm>`。
 - `CASE-2`（lowering IR）：tiled loop 内应出现 `kernel.matmul`，且不应残留 `nn.matmul`。
@@ -146,7 +146,7 @@ assert result.ok and result.failure_phrase is None
 
 验收映射：
 
-- 合同资产：[`expectation/execute_engine/npu_demo/kernel_only/matmul.py`](expectation/execute_engine/npu_demo/kernel_only/matmul.py)、[`expectation/execute_engine/npu_demo/default/matmul.py`](expectation/execute_engine/npu_demo/default/matmul.py)
+- 合同资产：[`test/execute_engine/test_execute_engine_compile.py`](test/execute_engine/test_execute_engine_compile.py)、[`test/execute_engine/test_execute_engine_invoke.py`](test/execute_engine/test_execute_engine_invoke.py)
 - 关联 spec：[`spec/dsl/emit_c.md`](spec/dsl/emit_c.md)、[`spec/dsl/gen_kernel.md`](spec/dsl/gen_kernel.md)
 - 关联测试：[`test/execute_engine/test_execute_engine_compile.py`](test/execute_engine/test_execute_engine_compile.py)、[`test/execute_engine/test_execute_engine_invoke.py`](test/execute_engine/test_execute_engine_invoke.py)
 

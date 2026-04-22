@@ -37,7 +37,7 @@
 - 其它 op 的分解仅通过注册接口扩展。
 - 不修改 `dsl/mlir_gen` 的 helper 入口形式。
 - 不扩后端 runtime、stream 或 target 相关能力。
-- 当前任务链的正式验收只依赖 `spec`、公开导入路径与 `pytest`；若现场额外具备架构侧 black-box runner，只作为补充对照，不要求当前任务携带本地 `expectation` 副本。
+- 当前任务链的正式验收只依赖 `spec`、公开导入路径与 `pytest`；若现场额外具备架构侧 black-box runner，只作为补充对照，不要求当前任务携带本地测试副本。
 
 ## 公开接口
 

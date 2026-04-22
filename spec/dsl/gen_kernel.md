@@ -13,7 +13,9 @@
 - 创建者：`摸鱼小分队`
 - 最后一次更改：`金铲铲大作战`（2026-04-21）
 - `spec`：[`spec/dsl/gen_kernel.md`](../../spec/dsl/gen_kernel.md)
-- `功能实现`：[`kernel_gen/dsl/gen_kernel.py`](../../kernel_gen/dsl/gen_kernel.py)
+- `功能实现`：
+  - [`kernel_gen/dsl/gen_kernel/__init__.py`](../../kernel_gen/dsl/gen_kernel/__init__.py)
+  - [`kernel_gen/dsl/gen_kernel.py`](../../kernel_gen/dsl/gen_kernel.py)
 - `test`：[`test/dsl/test_gen_kernel.py`](../../test/dsl/test_gen_kernel.py)
 
 ## 依赖
@@ -21,7 +23,8 @@
 - [`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)：优化后 `func.func` 的来源。
 - [`spec/dsl/emit_c.md`](../../spec/dsl/emit_c.md)：单个 op/value 的源码片段生成规则。
 - [`spec/include/api/Kernel.md`](../../spec/include/api/Kernel.md)：`target=npu_demo` 下 `Kernel` helper 的唯一公共接口合同。
-- [`kernel_gen/dsl/gen_kernel.py`](../../kernel_gen/dsl/gen_kernel.py)：函数级源码生成实现。
+- [`kernel_gen/dsl/gen_kernel/__init__.py`](../../kernel_gen/dsl/gen_kernel/__init__.py)：函数级源码生成包根公开入口。
+- [`kernel_gen/dsl/gen_kernel.py`](../../kernel_gen/dsl/gen_kernel.py)：兼容保留的旧实现入口。
 - [`test/dsl/test_gen_kernel.py`](../../test/dsl/test_gen_kernel.py)：函数级源码生成测试。
 
 ## 目标
@@ -78,7 +81,7 @@
 使用示例：
 
 ```python
-from kernel_gen.dsl.emit_c import EmitCContext
+from kernel_gen.dsl.gen_kernel import EmitCContext
 from kernel_gen.dsl.gen_kernel import gen_kernel
 
 source = gen_kernel(func_op, EmitCContext(target="cpu"))
@@ -442,8 +445,8 @@ npu_demo::matmul<TSM, TSM, TLM1, float, float, float>(out_tile, lhs_tile, rhs_ti
 
 - 本节只约束源码结构与关键调用，不扩展新的 target、运行时参数或调度接口。
 - 命中 matmul 路径时不得回退到 `cpu::matmul(...)`，也不得只输出占位注释。
-- `target="npu_demo"` 的头部入口保持 `include/npu_demo/npu_demo.h` 后紧跟 `using namespace npu_demo;`。
-- 关联合同资产：[`expectation/execute_engine/npu_demo/kernel_only/matmul.py`](../../expectation/execute_engine/npu_demo/kernel_only/matmul.py) 与 [`expectation/execute_engine/npu_demo/default/matmul.py`](../../expectation/execute_engine/npu_demo/default/matmul.py) 的 `CASE-3`。
+- `target="npu_demo"` 的 include 入口保持 `include/npu_demo/npu_demo.h`。
+- 关联合同资产：[`test/execute_engine/test_execute_engine_compile.py`](../../test/execute_engine/test_execute_engine_compile.py) 与 [`test/execute_engine/test_execute_engine_invoke.py`](../../test/execute_engine/test_execute_engine_invoke.py) 的 `CASE-3`。
 - 与 `CASE-2` 衔接：输入 IR 应已收口为 `kernel.matmul` 且不残留 `nn.matmul`。
 
 ## 测试

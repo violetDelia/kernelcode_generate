@@ -302,7 +302,7 @@ value = emit_mlir(expr_ast, ctx)
 - 执行命令（emit 拆分单测）：`pytest -q test/dsl/mlir_gen/emit`
 - 执行命令（emit 端到端回归）：`pytest -q test/dsl/test_mlir_gen.py`
 - 执行命令（ast_visitor 负路径）：`pytest -q test/dsl/test_ast_visitor.py`
-- 拆分归属：EMIT-001~EMIT-028、EMIT-033~EMIT-035 默认归属 `test_emit_mlir.py`；EMIT-029 默认归属 `test_mlir_gen.py`；EMIT-031/031A/032 归属 `test_ast_visitor.py`、`test_mlir_gen.py` 与 `expectation/dsl/mlir_gen/dialect/arch/*` 的联合回归。当前 `barrier/launch` expectation 与 dedicated 测试缺口在下游实现+补测阶段补齐。
+- 拆分归属：EMIT-001~EMIT-028、EMIT-033~EMIT-035 默认归属 [`test_emit_mlir.py`](../../test/dsl/test_emit_mlir.py)；EMIT-029 默认归属 [`test_mlir_gen.py`](../../test/dsl/test_mlir_gen.py)；EMIT-031/031A/032 归属 [`test_ast_visitor.py`](../../test/dsl/test_ast_visitor.py)、[`test_mlir_gen.py`](../../test/dsl/test_mlir_gen.py) 的联合回归。当前 `barrier/launch` 专项测试缺口在下游实现+补测阶段补齐。
 - 编号口径：EMIT-001A/EMIT-001B/EMIT-030/EMIT-030A 为有效拆分编号，纳入本清单映射；其中 EMIT-030 绑定 `get_thread_num` helper 参数约束用例，EMIT-030A 绑定 `arch.get_thread_num` 正向 lowering 用例。
 - 测试目标：
   - 覆盖常见表达式与语句节点的发射结果。
@@ -369,9 +369,9 @@ value = emit_mlir(expr_ast, ctx)
   - EMIT-029：tensor `truediv` mixed dtype promotion 需插入 `dma.cast`，且 `nn.truediv` 结果类型与决议 dtype 一致。（`test_mlir_gen.py::test_tensor_truediv_dtype_promotion_lowering`、`test_ast_visitor.py::test_tensor_truediv_dtype_promotion_lowering`）
   - EMIT-031：`ArchGetDynamicMemoryAST(space=...)` lowering 为 `arch.get_dynamic_memory`，并固定返回 `!nn.memory<[?], [1], i8, #nn.space<space>>`；非法 `space` 必须报错。（`test_ast_visitor.py::test_emit_mlir_rejects_invalid_arch_get_dynamic_memory_space`）
   - EMIT-031A：`ArchBarrierAST(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM], scope=BarrierScope.BLOCK)` 必须 lowering 为单个无返回值 `arch.barrier {scope = #arch.scope<block>, visibility = [#arch.visibility<tsm>, #arch.visibility<tlm>]}`；空 visibility、非法元素类型或非法 scope 必须分别报 `barrier visibility must be non-empty BarrierVisibility list`、`barrier scope must be BarrierScope`。（下游待补测试映射：`test_emit_mlir_lowers_arch_barrier`）
-  - EMIT-032：`ArchLaunchKernelAST(callee="add_barrier_body", block, thread, subthread, args=[lhs, rhs, out])` lowering 为单个无返回值 `arch.launch<%block, %thread, %subthread>(@add_barrier_body, %lhs, %rhs, %out) : ... -> ()`；extent 必须为正整数 `!symbol.int`，非法 `callee`/keyword args/extent 必须报错，并保持 launched body 的 `get_thread_num()` 语义来自当前 launch extent。（下游待补测试映射：`test_emit_mlir_lowers_arch_launch_with_callee`、`expectation/dsl/mlir_gen/dialect/arch/launch_with_callee`）
-  - EMIT-033：`TensorAxisAccessAST(kind="shape")` 必须 lowering 为 `symbol.get_dim`，并保持 `axis` 为静态非负整数且未越界；非 `nn.memory` 来源或非法 `axis` 必须报错。（`expectation/dsl/mlir_gen/dialect/symbol/get_dim.py`）
-  - EMIT-034：`TensorAxisAccessAST(kind="stride")` 必须 lowering 为 `symbol.get_stride`，并保持 `axis` 为静态非负整数且未越界；非 `nn.memory` 来源或非法 `axis` 必须报错。（`expectation/dsl/mlir_gen/dialect/symbol/get_stride.py`）
+  - EMIT-032：`ArchLaunchKernelAST(callee="add_barrier_body", block, thread, subthread, args=[lhs, rhs, out])` lowering 为单个无返回值 `arch.launch<%block, %thread, %subthread>(@add_barrier_body, %lhs, %rhs, %out) : ... -> ()`；extent 必须为正整数 `!symbol.int`，非法 `callee`/keyword args/extent 必须报错，并保持 launched body 的 `get_thread_num()` 语义来自当前 launch extent。（下游待补测试映射：`test_emit_mlir_lowers_arch_launch_with_callee`）
+  - EMIT-033：`TensorAxisAccessAST(kind="shape")` 必须 lowering 为 `symbol.get_dim`，并保持 `axis` 为静态非负整数且未越界；非 `nn.memory` 来源或非法 `axis` 必须报错。（[`test_emit_mlir.py`](../../test/dsl/test_emit_mlir.py)）
+  - EMIT-034：`TensorAxisAccessAST(kind="stride")` 必须 lowering 为 `symbol.get_stride`，并保持 `axis` 为静态非负整数且未越界；非 `nn.memory` 来源或非法 `axis` 必须报错。（[`test_emit_mlir.py`](../../test/dsl/test_emit_mlir.py)）
   - EMIT-002A：`CompareExprAST(op="ne")` 在 memory 路径必须生成 compare op（必要时带 `nn.broadcast`），结果 element type 为 `i1`。（`test_emit_mlir_binary_compare_broadcast_rhs`）
   - EMIT-002B：`CompareExprAST(op="ne")` memory 路径在不可 broadcast 或 element type/space 不一致时必须报错并保持固定诊断文案。（`test_emit_mlir_compare_memory_mismatch_reports_diagnostics`）
   - EMIT-028：`nn.sub` mixed dtype promotion 触发 `dma.cast` 并保持 `nn.sub` 与 `func.return` 的结果类型与 promotion 结果一致。（`test_build_func_op_lowers_nn_sub_dtype_promotion_with_cast`）

@@ -12,7 +12,7 @@
 - 创建者：`摸鱼小分队`
 - 最后一次更改：`金铲铲大作战`（2026-04-21）
 - `spec`：[`spec/dsl/emit_c.md`](../../spec/dsl/emit_c.md)
-- `功能实现`：[`kernel_gen/dsl/emit_c.py`](../../kernel_gen/dsl/emit_c.py)
+- `功能实现`：[`kernel_gen/dsl/gen_kernel/emit_c/__init__.py`](../../kernel_gen/dsl/gen_kernel/emit_c/__init__.py)
 - `test`：[`test/dsl/test_emit_c.py`](../../test/dsl/test_emit_c.py)
 
 ## 依赖
@@ -20,7 +20,7 @@
 - [`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)：MLIR `func.func` 生成来源。
 - [`spec/dsl/gen_kernel.md`](../../spec/dsl/gen_kernel.md)：函数级源码生成入口。
 - [`spec/include/api/Kernel.md`](../../spec/include/api/Kernel.md)：`target=npu_demo` 下 `Kernel` helper 的公开名字、模板顺序与参数顺序合同。
-- [`kernel_gen/dsl/emit_c.py`](../../kernel_gen/dsl/emit_c.py)：节点级源码片段生成实现。
+- [`kernel_gen/dsl/gen_kernel/emit_c/__init__.py`](../../kernel_gen/dsl/gen_kernel/emit_c/__init__.py)：节点级源码片段生成实现。
 - [`test/dsl/test_emit_c.py`](../../test/dsl/test_emit_c.py)：节点级源码片段生成测试。
 
 ## 目标
@@ -69,7 +69,7 @@
 使用示例：
 
 ```python
-from kernel_gen.dsl.emit_c import EmitCContext
+from kernel_gen.dsl.gen_kernel import EmitCContext
 
 ctx = EmitCContext(target="cpu", indent="    ")
 ```
@@ -98,7 +98,7 @@ ctx = EmitCContext(target="cpu", indent="    ")
 使用示例：
 
 ```python
-from kernel_gen.dsl.emit_c import EmitCContext, emit_c_op
+from kernel_gen.dsl.gen_kernel import EmitCContext, emit_c_op
 
 stmt = emit_c_op(op, EmitCContext(target="cpu"))
 ```
@@ -146,7 +146,7 @@ cpu::add(lhs, bias, out);
 使用示例：
 
 ```python
-from kernel_gen.dsl.emit_c import EmitCContext, emit_c_value
+from kernel_gen.dsl.gen_kernel import EmitCContext, emit_c_value
 
 expr = emit_c_value(value, EmitCContext(target="cpu"))
 ```
@@ -423,7 +423,7 @@ npu_demo::deslice(out_tile, out, m0, 16, 1);
 - 本节只覆盖节点文本，不定义函数签名、wrapper 或编译执行流程。
 - `npu_demo` 路径命中 matmul 时不得生成 `cpu::matmul(...)`。
 - 若 `kernel.matmul` 在当前 target 下不可发射，必须报错并包含 `unsupported op`。
-- 关联合同资产：[`expectation/execute_engine/npu_demo/kernel_only/matmul.py`](../../expectation/execute_engine/npu_demo/kernel_only/matmul.py) 与 [`expectation/execute_engine/npu_demo/default/matmul.py`](../../expectation/execute_engine/npu_demo/default/matmul.py) 的 `CASE-3`。
+- 关联合同资产：[`test/execute_engine/test_execute_engine_compile.py`](../../test/execute_engine/test_execute_engine_compile.py) 与 [`test/execute_engine/test_execute_engine_invoke.py`](../../test/execute_engine/test_execute_engine_invoke.py) 的 `CASE-3`。
 
 ## 测试
 

@@ -70,7 +70,7 @@
 - DSL 函数体内允许出现显式绑定到 `kernel_gen.operation.nn` 的 `conv(...)`、`img2col1d(...)`、`img2col2d(...)` 与 `matmul(...)` helper；其公开语义由 `emit_mlir` 负责落实到具体 lowering。
 - 当函数体返回 `conv(value, weight, sh=..., sw=..., dh=..., dw=..., ph=..., pw=..., pl=..., pr=...)` 时，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须接受该 helper，并在前端分解后输出 raw `nn.img2col2d + nn.matmul` 链路；不得报 `Unsupported call expression`，也不得生成 `nn.conv`。
 - Tensor 返回注解的 shape 校验必须按符号表达式语义比较；像 `H` 与 `(H - 1)/1 + 1` 这类数学上等价的维度表达式必须视为一致，不得仅按字符串字面量比较。
-- 当函数体返回 `view(...)` helper 时，`func.return` 类型必须与 `dma.view` 的结果类型一致，并与 expectation 依赖的 `Memory` 口径对齐；不得把 `dma.view` 结果写成“生成 op 即可、return type 可另行决定”。
+- 当函数体返回 `view(...)` helper 时，`func.return` 类型必须与 `dma.view` 的结果类型一致，并与 `Memory` 口径对齐；不得把 `dma.view` 结果写成“生成 op 即可、return type 可另行决定”。
 - 当函数体返回 `float(symbol.int)` 且返回注解为 `float` 时，`build_func_op(...)` / `build_func_op_from_ast(...)` 的 `func.return` 类型必须固定为 `f32`，并与 `symbol.to_float` 的结果类型保持一致。
 - 当 `build_func_op(...)` / `build_func_op_from_ast(...)` 处理 `slice(...)` 时，必须先生成 `dma.alloc`，再生成 `dma.slice(target, source, ...)`；表达式返回值绑定到 alloc 结果，`func.return` 返回 alloc 结果，`dma.slice` 的结果不得直接作为返回值或局部变量绑定。
 - 当 `store(...)` / `deslice(...)` 的 target 来自前序 `alloc/view/reshape/flatten/cast/copy/img2col/matmul/get_dynamic_memory` 等 memory 表达式时，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须允许该 target 继续参与 raw `func.func` lowering；不得把该场景错误收敛为仅允许函数输入张量的 AST 入口失败。
@@ -322,7 +322,7 @@ builtin.module {
 - 执行命令（mlir_gen 集成）：`pytest -q test/dsl/mlir_gen/test_function_builder.py test/dsl/mlir_gen/test_parse_env.py test/dsl/mlir_gen/test_signature.py test/dsl/mlir_gen/test_module_builder.py`
 - 执行命令（依赖子链路）：`pytest -q test/dsl/test_ast.py && pytest -q test/dsl/test_emit_mlir.py`
 - 执行命令（ast_visitor 负路径）：`pytest -q test/dsl/test_ast_visitor.py`
-- 拆分归属：MGEN-001~MGEN-035 归属 `test/dsl/mlir_gen/test_function_builder.py`、`test/dsl/mlir_gen/test_parse_env.py`、`test/dsl/mlir_gen/test_signature.py`、`test/dsl/mlir_gen/test_module_builder.py`；其中 AST/emit 的前置语义分别由 `test_ast.py` 与 `test_emit_mlir.py` 单测保证；MGEN-036/037/037A 与 arch helper 正反路径由 `test_ast.py`、`test/dsl/mlir_gen/test_function_builder.py`、`expectation/dsl/mlir_gen/dialect/arch/*` 共同覆盖，当前缺口在下游实现/补测阶段补齐。
+- 拆分归属：MGEN-001~MGEN-035 归属 `test/dsl/mlir_gen/test_function_builder.py`、`test/dsl/mlir_gen/test_parse_env.py`、`test/dsl/mlir_gen/test_signature.py`、`test/dsl/mlir_gen/test_module_builder.py`；其中 AST/emit 的前置语义分别由 `test_ast.py` 与 `test_emit_mlir.py` 单测保证；MGEN-036/037/037A 与 arch helper 正反路径由 `test_ast.py`、`test/dsl/mlir_gen/test_function_builder.py` 共同覆盖，当前缺口在下游实现/补测阶段补齐。
 - 测试目标：
   - 验证 `build_func_op(...)` 生成 `func.func`。
   - 验证 `build_func_op(fn, *runtime_args, globals=None, builtins=None)` 的输入签名仅由运行时参数决定。
@@ -358,7 +358,7 @@ builtin.module {
   - 验证 `get_shape/get_stride` 轴访问在 `build_func_op(...)` / `build_func_op_from_ast(...)` 链路中分别 lowering 为 `symbol.get_dim/symbol.get_stride`，并覆盖非 memory 来源、负轴、越界轴与非静态轴错误路径。
   - 验证纯 symbol 标量 compare family（`==` / `!=` / `<` / `<=` / `>` / `>=`）会生成对应 `symbol.*` 比较 op，且返回类型统一为 `i1`。
   - 验证 `build_func_op` 对 `slice(...)` 表达式先生成 `dma.alloc` 再生成 `dma.slice(target, source, ...)`，并确保 `func.return` 返回 alloc 结果。
-  - 验证 `build_func_op` 在 `view(...)` helper 场景下的 `func.return` 类型与 `dma.view` 结果类型及 expectation 口径一致。
+  - 验证 `build_func_op` 在 `view(...)` helper 场景下的 `func.return` 类型与 `dma.view` 结果类型及合同口径一致。
   - 验证 `build_func_op` 在 `float(symbol.int)` 场景下的 `func.return` 类型固定为 `f32`，并与 `symbol.to_float` 结果类型一致。
   - 验证无返回注解但有显式 `return` 的 `add_memory / gt / cast_dim / view_kernel` 仍会生成单结果 `func.func`，且输出类型跟随实际 `return` lowering 结果。
   - 验证无返回注解、也没有显式 `return` 的值表达式函数体必须报 `Function return requires explicit return syntax or annotation`，不得靠最后一个值表达式猜函数输出，也不得静默退成零结果 `func.func`。
@@ -416,11 +416,11 @@ builtin.module {
   - MGEN-035：零入参函数直接返回 `get_thread_num()` 时，`build_func_op(...)` / `build_func_op_from_ast(...)` 必须生成零参数 `func.func`、单个 `arch.get_thread_num`，并返回 `!symbol.int<"thread_num">`。（`test_build_func_op_lowers_arch_get_thread_num_query`）
   - MGEN-036：返回 `get_dynamic_memory(space)` 的 DSL 函数必须 lowering 为 `arch.get_dynamic_memory`，并固定返回 `!nn.memory<[?], [1], i8, #nn.space<space>>`；非法 `space` 必须报错。（`test_build_func_op_rejects_invalid_arch_get_dynamic_memory_space`）
   - MGEN-037：包含 `barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM], scope=BarrierScope.BLOCK)` 语句的 DSL 函数必须 lowering 为单个无返回值 `arch.barrier`；缺失 `scope/visibility`、空 visibility、非法元素类型或把 `barrier(...)` 静默当成未知 helper 都必须报错并保留固定关键短语。（下游待补测试映射：`test_parse_function_supports_arch_barrier_helper`、`test_build_func_op_lowers_arch_barrier`）
-  - MGEN-037A：包含 `launch_kernel(add_barrier_body, block, thread, subthread, lhs, rhs, out)` 语句的 DSL 函数必须 lowering 为单个无返回值 `arch.launch<block, thread, subthread>(@add_barrier_body, %lhs, %rhs, %out)`；`callee` 必须是函数对象 / symbol ref，字符串字面量、attribute/call expr、keyword args 与非法 extent（含非 `!symbol.int` 或静态 `<= 0`）必须报错。（下游待补测试映射：`test_parse_function_supports_arch_launch_with_callee`、`test_build_func_op_lowers_arch_launch_with_callee`、`expectation/dsl/mlir_gen/dialect/arch/launch_with_callee`）
+  - MGEN-037A：包含 `launch_kernel(add_barrier_body, block, thread, subthread, lhs, rhs, out)` 语句的 DSL 函数必须 lowering 为单个无返回值 `arch.launch<block, thread, subthread>(@add_barrier_body, %lhs, %rhs, %out)`；`callee` 必须是函数对象 / symbol ref，字符串字面量、attribute/call expr、keyword args 与非法 extent（含非 `!symbol.int` 或静态 `<= 0`）必须报错。（下游待补测试映射：`test_parse_function_supports_arch_launch_with_callee`、`test_build_func_op_lowers_arch_launch_with_callee`）
   - MGEN-038：`build_func_op(...)` 处理 `slice(...)` 表达式时必须先生成 `dma.alloc`，再生成 `dma.slice(target, source, ...)`；表达式与 `func.return` 返回值绑定到 alloc 结果，`dma.slice` 结果不得直接作为返回值。（`test_build_func_op_slice_expression_lowers_to_alloc_then_target_slice`）
   - MGEN-039：纯 symbol 标量 compare family 在函数级返回装配中统一返回 `i1`；`eq/ge` 已有回归测试，`ne/lt/le/gt` 当前为下游待补测试映射。（现有映射：`test_build_func_op_lowers_symbol_eq`、`test_build_func_op_lowers_symbol_ge`；下游待补测试映射：`test_build_func_op_lowers_symbol_ne`、`test_build_func_op_lowers_symbol_lt`、`test_build_func_op_lowers_symbol_le`、`test_build_func_op_lowers_symbol_gt`）
   - MGEN-040：`return float(symbol.int)` 在函数级返回装配中必须返回 `f32`，并与 `symbol.to_float` 结果类型一致。（下游待补测试映射：`test_build_func_op_lowers_symbol_to_float`）
-  - MGEN-041：`return view(...)` 在函数级返回装配中必须直接返回 `dma.view` 结果，`func.return` 类型与 expectation 依赖的 `dma.view` 结果类型一致。（下游待补测试映射：`test_build_func_op_supports_dma_view_helper`）
+  - MGEN-041：`return view(...)` 在函数级返回装配中必须直接返回 `dma.view` 结果，`func.return` 类型与 `dma.view` 结果类型一致。（下游待补测试映射：`test_build_func_op_supports_dma_view_helper`）
   - MGEN-042：`mlir_gen(...)` 必须返回 `builtin.module`，且至少包含根函数对应的 `func.func`。（下游待补测试映射：`test_mlir_gen_returns_builtin_module`）
   - MGEN-043：`mlir_gen(...)` 遇到根函数调用的可支持 Python callee 时，module 中必须补齐该 callee；收集范围为传递闭包。（下游待补测试映射：`test_mlir_gen_collects_transitive_callees`）
   - MGEN-044：`mlir_gen(...)` 返回 module 内函数顺序必须确定：根函数在前，callee 按首次出现调用顺序做 DFS 追加。（下游待补测试映射：`test_mlir_gen_module_function_order_is_dfs`）

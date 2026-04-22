@@ -72,8 +72,6 @@ handled = lower_matmul_img2col_family(block, op)
   - [`test/pass/nn_lowering/img2col2d.py`](../../../../test/pass/nn_lowering/img2col2d.py)
 - 执行命令：
   - `pytest -q test/pass/nn_lowering/matmul.py test/pass/nn_lowering/img2col1d.py test/pass/nn_lowering/img2col2d.py`
-  - `PYTHONPATH=. python expectation/pass/lowing/nn_lowering/matmul.py`
-  - `PYTHONPATH=. python -m expectation.pass.lowing.nn_lowering.img2col`
 - 测试目标：
   - 验证 `nn.matmul` -> `kernel.matmul` 的 lowering 目标与输出 memory 约束。
   - 验证 `nn.img2col1d/nn.img2col2d` -> `kernel.img2col*` 的 lowering 目标与 `symbol.int` 参数约束。

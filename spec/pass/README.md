@@ -37,15 +37,15 @@
 - 明确 pipeline 目录位置与默认 pipeline builder 的入口。
 - 说明 registry 是 pipeline 名字查询入口。
 - 说明 standalone pass 与默认 pipeline 的边界：`outline-device-kernel` 这类显式 opt-in pass 不自动进入 `default-lowering`。
-- 说明 `npu-demo-lowering` 与默认 pipeline 的边界：`npu-demo-lowering` 是 `dsl_run` 的正向主合同，不把 `tile`、`buffer-results-to-out-params`、`lower-dma-memory-hierarchy` 混入其中。
+- 说明 `npu-demo-lowering` 与默认 pipeline 的边界：`npu-demo-lowering` 是 `dsl_run` 的正向主合同，按 `inline -> decompass -> lower-nn -> symbol-loop-hoist -> attach-arch-information -> outline-device-kernel` 执行，并产出 host wrapper + device body，不把 `tile`、`buffer-results-to-out-params`、`lower-dma-memory-hierarchy` 混入其中。
 
 ## 限制与边界
 
 - 本文件只描述通用用法，不替代具体 pass 的独立 spec。
 - pipeline 的顺序与构造细节以 pipeline 目录下的 spec 为准。
 - registry 只负责注册与查询，不执行 pass。
-- standalone pass 的 expectation runner 应与 pass 名保持稳定映射；`outline-device-kernel` 的目录约定固定为 `expectation/pass/outline_device_kernel/`，其中 runner 入口为 `__main__.py`，子资产为 `basic.py`、`multi_function.py`、`invalid_attr.py`。
-- `expectation/pass/pipeline/default_lowering.py` 只服务默认 pipeline 黑盒验收，不与 `expectation/pass/outline_device_kernel/` 混用。
+- standalone pass 的测试目录应与 pass 名保持稳定映射；`outline-device-kernel` 的目录约定固定为 `test/pass/outline_device_kernel/`。
+- [`test/pass/test_pipeline_default_lowering.py`](../../test/pass/test_pipeline_default_lowering.py) 只服务默认 pipeline 黑盒验收，不与 `test/pass/outline_device_kernel/` 混用。
 
 ## 公开接口
 

@@ -2,8 +2,8 @@
 
 ## 功能简介
 
-- 定义 target 注册中心的规范，负责提供文件化固定 target 与目录 target 的统一注册/查询入口。
-- 支持三类来源：文件化固定 target、`json` 与 `txt`；其中 `json/txt` 可混用。
+- 定义 target 注册中心的规范，负责提供目录 target 的统一注册/查询入口。
+- 支持 `json` 与 `txt` 两类来源；其中 `npu_demo` 的公开真源是 `kernel_gen/target/targets/npu_demo.txt`，不再以 Python 内置模板形式对外承诺。
 - target 信息用于驱动 `arch` 相关 operation/dialect/include-runtime 的“能力检查”和“硬件参数读取”，例如 `thread_num`、`sm_memory_size`、`arch.launch`、`arch.barrier`。
 
 ## 文档信息
@@ -24,7 +24,7 @@
 - 统一 target 配置加载流程，避免硬编码后端差异。
 - 让 operation/dialect 在不绑定具体后端实现的前提下，读取标准硬件参数。
 - 保持配置文件可读、可扩展、可校验。
-- 为约定 target 冻结固定模板、launch 能力上限与能力矩阵，避免下游 codegen/runtime 再次推断硬件值或误放开未支持能力。
+- 为约定 target 冻结目录文件语义、launch 能力上限与能力矩阵，避免下游 codegen/runtime 再次推断硬件值或误放开未支持能力。
 - 为 `analysis` 主线提供正式 baseline 来源；当前需要由 registry 对 `npu_demo` 暴露 `path_bandwidth / path_latency_ns / theoretical_compute` 三类默认参数。
 
 ## 限制与边界
@@ -115,39 +115,26 @@ hw.tlm3_memory_size=0
 - `hw.*` 必须可解析为整数。
 - 未识别 key 必须报错，防止静默拼写错误。
 
-### 文件化固定 target
+### `npu_demo.txt` 目录 target
 
-除目录中的 `json/txt` 文件外，registry 可为保留 target 提供文件化固定 target。本轮必须固定 `npu_demo` 的能力矩阵与硬件参数，调用方通过 `kernel_gen/target/targets/npu_demo.txt` 获得该 target 的唯一标准数据源，不再要求额外提供 `npu_demo.json`。
+- `npu_demo` 的标准注册入口是 `kernel_gen/target/targets/npu_demo.txt`；调用方通过 `load_targets(...)` 从目录加载，registry 不再把 `npu_demo` 当作 Python 内置模板对外承诺。
+- `npu_demo.txt` 的字段使用普通 TXT 语法，字段与 `cpu.txt` 同类：`name`、`arch.supported_ops`、`arch.unsupported_ops` 与 `hw.*`。
 
-`npu_demo` 的固定模板语义等价于：
+`kernel_gen/target/targets/npu_demo.txt` 的推荐内容语义等价于：
 
-```python
-TargetSpec(
-    name="npu_demo",
-    arch_supported_ops={
-        "arch.get_block_id",
-        "arch.get_block_num",
-        "arch.get_thread_id",
-        "arch.get_thread_num",
-        "arch.get_subthread_id",
-        "arch.get_subthread_num",
-        "arch.get_dynamic_memory",
-        "arch.barrier",
-        "arch.launch",
-    },
-    arch_unsupported_ops=set(),
-    hardware={
-        "block_num": 1,
-        "thread_num": 1,
-        "subthread_num": 1,
-        "sm_memory_size": 0,
-        "lm_memory_size": 0,
-        "tsm_memory_size": 24576,
-        "tlm1_memory_size": 1024,
-        "tlm2_memory_size": 512,
-        "tlm3_memory_size": 512,
-    },
-)
+```txt
+name=npu_demo
+arch.supported_ops=arch.get_block_id,arch.get_block_num,arch.get_thread_id,arch.get_thread_num,arch.get_subthread_id,arch.get_subthread_num,arch.get_dynamic_memory,arch.barrier,arch.launch
+arch.unsupported_ops=arch.launch_kernel
+hw.block_num=1
+hw.thread_num=1
+hw.subthread_num=1
+hw.sm_memory_size=0
+hw.lm_memory_size=0
+hw.tsm_memory_size=24576
+hw.tlm1_memory_size=1024
+hw.tlm2_memory_size=512
+hw.tlm3_memory_size=512
 ```
 
 语义说明：
@@ -157,8 +144,8 @@ TargetSpec(
 - `launch` 与 `barrier` 这类未带 `arch.` 前缀的字符串不属于 registry 的稳定输入域；若上层错误传入此类字符串，结果必须仍然收敛为未启用。
 - `block_num=1`、`thread_num=1`、`subthread_num=1` 表示 `npu_demo` P0 launch 能力上限：`block` 固定为 `1`、`subthread` 固定为 `1`、`thread` 固定为 `1`；这些字段不再直接表示 launched body 中当前可见的运行时 extent。
 - `sm_memory_size=0` 与 `lm_memory_size=0` 表示 `npu_demo` 不提供 `SM/LM` 动态内存容量；`tsm_memory_size=24576`、`tlm1_memory_size=1024`、`tlm2_memory_size=512`、`tlm3_memory_size=512` 为固定片上容量。
-- `npu_demo` 的标准注册入口是 registry 的文件化固定 target 加载流程，标准 target 文件路径是 `kernel_gen/target/targets/npu_demo.txt`；标准查询入口是 `is_arch_op_supported(...)`、`get_target_hardware(...)` 与 `get_current_target_hardware(...)`。
-- `npu_demo` 的 analysis 默认参数也由 registry 固定提供，当前至少包含：
+- `npu_demo` 的标准注册入口是 `kernel_gen/target/targets/npu_demo.txt`；标准查询入口是 `is_arch_op_supported(...)`、`get_target_hardware(...)` 与 `get_current_target_hardware(...)`。
+- `npu_demo` 的 analysis 默认参数仍由 registry 固定提供，当前至少包含：
   - `path_bandwidth["GM->LM"] = 64`
   - `path_bandwidth["GM->SM"] = 96`
   - `path_bandwidth["GM->TSM"] = 32`
@@ -204,7 +191,7 @@ spec = TargetSpec(
 
 - 扫描目录并加载 `*.json` 与 `*.txt` target 文件。
 - 成功加载后返回“本次加载集合”。
-- 文件化固定 target 不依赖目录扫描来源；`load_targets(...)` 不是 `npu_demo` 的唯一注册入口。
+- `npu_demo` 的公开真源是目录中的 `npu_demo.txt`；调用方不应再依赖 Python 内置模板口径。
 
 使用示例：
 
@@ -220,7 +207,7 @@ loaded = registry.load_targets(Path("kernel_gen/target/targets"))
 功能说明：
 
 - 注册单个 target；用于测试或运行时增量注入。
-- 文件化固定 target（如 `npu_demo`）不要求调用方手工调用该接口注册。
+- 即使 `npu_demo` 以 `npu_demo.txt` 作为公开真源，测试仍可通过该接口做临时注入。
 
 ### `is_arch_op_supported(target: str, op_name: str) -> bool`
 
@@ -296,9 +283,9 @@ hw.tlm3_memory_size=0
 - `json` 与 `txt` 混合目录可同时加载。
 - 默认目录 `kernel_gen/target/targets` 加载后，`cpu.txt` 的 `arch.supported_ops=` 空值应归一化为 `None`，并保持 `arch.get_block_num` 可用、`arch.get_thread_id` 受黑名单限制。
 - 默认目录重复加载应保持幂等，不得因内置 `cpu` 与 `cpu.txt` 冲突而失败。
-- `npu_demo` 固定 target 应通过标准查询入口满足以下能力/容量值：`block_num=1`、`thread_num=1`、`subthread_num=1`、`sm_memory_size=0`、`lm_memory_size=0`、`tsm_memory_size=24576`、`tlm1_memory_size=1024`、`tlm2_memory_size=512`、`tlm3_memory_size=512`。
+- `npu_demo.txt` 应通过标准查询入口满足以下能力/容量值：`block_num=1`、`thread_num=1`、`subthread_num=1`、`sm_memory_size=0`、`lm_memory_size=0`、`tsm_memory_size=24576`、`tlm1_memory_size=1024`、`tlm2_memory_size=512`、`tlm3_memory_size=512`。
 - `npu_demo.txt` 作为唯一标准 target 数据源，必须能被 `load_targets(Path("kernel_gen/target/targets"))` 一并加载；默认目录重复加载应保持幂等，不得因 `npu_demo` 与内置注册冲突而失败。
-- `npu_demo` 固定模板应通过 `get_target_analysis_defaults("npu_demo")` 暴露 analysis 默认参数；至少覆盖 `path_bandwidth["GM->LM"]`、`path_latency_ns["GM->LM"]` 与 `theoretical_compute["scalar"/"tensor"]`。
+- `npu_demo.txt` 应通过 `get_target_analysis_defaults("npu_demo")` 暴露 analysis 默认参数；至少覆盖 `path_bandwidth["GM->LM"]`、`path_latency_ns["GM->LM"]` 与 `theoretical_compute["scalar"/"tensor"]`。
 - `npu_demo` 的 `arch.launch` / `arch.barrier` 查询必须固定判定为已启用；旧名 `arch.launch_kernel` 与未带 `arch.` 前缀的 `launch` / `barrier` 不属于已启用能力。
 - `name` 缺失、格式非法、与文件名不一致时报错。
 - `arch.supported_ops` 与 `arch.unsupported_ops` 冲突时报错。

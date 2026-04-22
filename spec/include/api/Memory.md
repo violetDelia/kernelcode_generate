@@ -46,8 +46,8 @@
 - `MemorySpace::TLM` 不再作为公开输入；需要聚合语义时应使用 `BarrierVisibility::TLM`。
 - 本轮公共层只收口 `rank()`、`get_shape(axis)`、`get_stride(axis)`、`source.view<T>(...)`、`source.reshape(shape)` 与 `npu_demo::build_contiguous_stride(...)` 这组访问口径；若实现暂时保留 `shape()`、`stride()`、`element_count()`、`is_contiguous()`、`linear_offset()`、`at()` 等辅助接口，它们也不属于本轮稳定公开合同。
 - `build_contiguous_stride` 不迁移 `Vector`、`Memory`、`MemorySpace` 等基础类型；这些类型继续来自 include/api 的当前公开位置。
-- `view` 不再作为 DMA 自由函数暴露在公共层；`dma.view` expectation 的源码目标固定桥接到成员式 `source.view<T>(...)`。
-- `reshape(shape)` 只按当前 expectation 子集收口为成员式接口，不在本轮扩展模板参数、隐式拷贝或空间改写语义。
+- `view` 不再作为 DMA 自由函数暴露在公共层；`dma.view` 的源码目标固定桥接到成员式 `source.view<T>(...)`。
+- `reshape(shape)` 只按当前公开子集收口为成员式接口，不在本轮扩展模板参数、隐式拷贝或空间改写语义。
 - `include/api/Memory.h` 仅提供声明与类型边界，不提供函数体实现；具体后端实现需在各自 include 层提供。
 
 ## 公开接口
@@ -191,7 +191,7 @@ Memory<GM, float> reshaped = source.reshape(reshape_shape);
 - `data()` 可保留可写与只读两类重载，供实现层与后端私有层使用。
 - `get_shape(axis)` 与 `get_stride(axis)` 为统一公开查询接口；调用方需保证 `0 <= axis < rank()`。
 - `view<T>(...)` 与 `reshape(shape)` 是当前公共层唯一稳定的视图变换接口；不得继续把以 `source` 为首参的自由函数 `view` 或其他同义 helper 写成 include/api 口径。
-- 当前 `view<T>(...)` 先按 expectation 子集收口为“`T` 与 `source` 元素类型一致”的成员式视图接口。
+- 当前 `view<T>(...)` 先按公开子集收口为“`T` 与 `source` 元素类型一致”的成员式视图接口。
 
 返回与限制：
 
@@ -273,7 +273,7 @@ long long n_stride = mem.get_stride(0);
 
 参数说明：
 
-- `T (type)`：当前 expectation 子集下与 `source` 元素类型保持一致的模板参数。
+- `T (type)`：当前公开子集下与 `source` 元素类型保持一致的模板参数。
 - `offset (Vector)`：起始偏移向量。
 - `size (Vector)`：子视图逻辑大小。
 - `stride (Vector)`：子视图步进向量。
@@ -298,7 +298,7 @@ Memory<GM, float> tile = source.view<float>(offset, size, stride);
 
 - `view<T>(...)` 是本轮 include/api 唯一稳定视图 helper 入口。
 - `offset/size/stride` 的长度必须与当前 memory 的 `rank()` 一致。
-- 当前 expectation 子集只要求 `T` 与 `source` 元素类型一致；不在本轮公开类型重解释。
+- 当前公开子集只要求 `T` 与 `source` 元素类型一致；不在本轮公开类型重解释。
 
 返回与限制：
 
@@ -330,13 +330,13 @@ Memory<GM, float> reshaped = source.reshape(reshape_shape);
 注意事项：
 
 - `reshape(shape)` 固定为成员式接口；不再把自由函数 `reshape(source, ...)` 写成公共层口径。
-- 当前公开语义只按 expectation 子集收口，不在本轮扩展模板参数、显式空间改写或隐式数据复制。
+- 当前公开语义只按公开子集收口，不在本轮扩展模板参数、显式空间改写或隐式数据复制。
 
 返回与限制：
 
 - 返回类型：`Memory<Space, T>`。
 - 返回语义：返回按目标 `shape` 重解释后的视图。
-- 限制条件：目标形状与底层元素总数是否一致，由实现按当前 expectation 和后端规则显式处理。
+- 限制条件：目标形状与底层元素总数是否一致，由实现按当前公开合同和后端规则显式处理。
 
 ## 测试
 

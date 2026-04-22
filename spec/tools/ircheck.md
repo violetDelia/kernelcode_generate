@@ -33,8 +33,8 @@
 - `emitc` 代码生成分支：
   - [`spec/dsl/gen_kernel.md`](../../spec/dsl/gen_kernel.md)
   - [`spec/dsl/emit_c.md`](../../spec/dsl/emit_c.md)
-  - [`kernel_gen/dsl/gen_kernel.py`](../../kernel_gen/dsl/gen_kernel.py)
-  - [`kernel_gen/dsl/emit_c.py`](../../kernel_gen/dsl/emit_c.py)
+  - [`kernel_gen/dsl/gen_kernel/__init__.py`](../../kernel_gen/dsl/gen_kernel/__init__.py)
+  - [`kernel_gen/dsl/gen_kernel/emit_c/__init__.py`](../../kernel_gen/dsl/gen_kernel/emit_c/__init__.py)
 
 ## 术语
 
@@ -53,24 +53,17 @@
 - 把外部依赖稳定收口到三条公开 Python API：`parse_ircheck_file`、`run_ircheck_file`、`run_ircheck_text`。
 - 让下游验证用例可以只写“关心的几行”，而不必在测试里拼接大量断言样板。
 
-## 样例目录
+## 测试目录
 
-- `expectation/tools/ircheck/basic_true.py`：验证 `run_ircheck_text(...)` 成功路径返回 `ok=True`。
-- `expectation/tools/ircheck/basic_false.py`：验证 `run_ircheck_text(...)` 返回 `ok=False` 且错误短语稳定。
-- `expectation/tools/ircheck/check_next_false.py`：验证相邻行匹配失败时返回稳定错误短语。
-- `expectation/tools/ircheck/multi_pass_true.py`：验证多 step 顺序执行与成功路径输出。
-- `expectation/tools/ircheck/multi_pass_fail.py`：验证失败 step 的定位信息与 `actual_ir` 语义。
-- `expectation/tools/ircheck/ir_dump_true.py`：验证 `-irdump` 的目录与文件命名。
-- `expectation/tools/ircheck/regex_variable_true.py`：验证 `CHECK*` 与变量捕获/引用的成功路径。
-- `expectation/tools/ircheck/regex_variable_false.py`：验证变量写法失败时的稳定错误短语。
-- `expectation/tools/ircheck/emitc_true.py`：验证 `emitc_target="cpu"` 的源码匹配成功路径。
-- `expectation/tools/ircheck/emitc_false.py`：验证 `emitc_target="npu_demo"` 的失败前缀与源码分支错误语义。
-- `expectation/tools/ircheck/README.md`：样例入口与迁移写法，强调三条公开 API 为稳定合同，并补齐 variable 示例。
+- [`test/tools/test_ircheck_parser.py`](../../test/tools/test_ircheck_parser.py)：解析与指令校验。
+- [`test/tools/test_ircheck_runner.py`](../../test/tools/test_ircheck_runner.py)：pass / pipeline 执行与多 case 流程。
+- [`test/tools/test_ircheck_matcher.py`](../../test/tools/test_ircheck_matcher.py)：`CHECK*` 匹配语义与变量复用。
+- [`test/tools/test_ircheck_cli.py`](../../test/tools/test_ircheck_cli.py)：命令行入口与 `-irdump` / `-emitc` 分支。
 
 ## 迁移建议
 
 - 旧测试中若手写字符串断言，可迁移为单文件 case + `ircheck` 检查指令。
-- expectation 文档统一写法：仅 `parse_ircheck_file`、`run_ircheck_file`、`run_ircheck_text` 为稳定合同，其余符号视为内部细节。
+- 测试文档统一写法：仅 `parse_ircheck_file`、`run_ircheck_file`、`run_ircheck_text` 为稳定合同，其余符号视为内部细节。
 - 默认优先使用 `CHECK:` / `CHECK-NEXT:` / `CHECK-NOT:`：
   - 普通文本直接按字面量写，不需要像 Python regex 一样转义 `.`、`(`、`)`、`[`、`]` 等字符；
   - 若同一行需要捕获或复用 SSA 名、维度名、符号名，再在该行局部使用 `[[NAME:REGEX]]` / `[[NAME]]`。
@@ -86,7 +79,6 @@
 - `emitc_target` 只接受 `cpu`、`npu_demo` 与 `None`。
 - 一旦进入 `emitc mode`，`actual_ir` 与 `CHECK*` 的匹配对象都固定为生成源码文本；不得在同一次执行中同时匹配 IR 与源码，也不得在生成失败时静默回退到 IR 匹配。
 - `emitc` 生成失败、`emitc_target` 不受支持、或目标 target 与当前 IR 结构不兼容时，统一返回 `IrcheckEmitCError: emit_c generation failed` 前缀。
-- `expectation/tools/ircheck/emitc_true.py` 与 `expectation/tools/ircheck/emitc_false.py` 是本功能的 expectation 合同资产，但仓库 `.gitignore` 当前忽略 `/expectation/` 路径；因此只有 merge 阶段允许通过 `git add -f expectation/tools/ircheck/emitc_true.py expectation/tools/ircheck/emitc_false.py` 纳入交付，其他阶段不得修改 `.gitignore`。
 - 内置正则别名仅允许出现在 `[[NAME:REGEX]]` 的 `REGEX` 区段内：
   - `{reg}`：`(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+)`
   - `{val}`：`[A-Za-z_][A-Za-z0-9_]*`
@@ -283,8 +275,6 @@ builtin.module { /* ... */ }
   - `pytest -q test/tools/test_ircheck_runner.py`
   - `pytest -q test/tools/test_ircheck_matcher.py`
   - `pytest -q test/tools/test_ircheck_cli.py`
-  - `PYTHONPATH=. python expectation/tools/ircheck/emitc_true.py`
-  - `PYTHONPATH=. python expectation/tools/ircheck/emitc_false.py`
 - 测试目标：
   - parser：能稳定解析头部注释区、提取 compile_args 与三类检查指令，并对缺失/重复指令、非法 regex 语法、未定义变量、重复变量、`CHECK-NOT` 非法定义变量返回稳定错误短语。
   - runner：能通过 pass registry 解析 `--pass/--pipeline` 与其 options 形式并执行，输出 `IrcheckResult` 的 `ok/exit_code/message` 行为与本文件一致；支持多 case 顺序执行与 fail-fast。

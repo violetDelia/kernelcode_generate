@@ -68,8 +68,6 @@
   - [`test/pass/nn_lowering/reduce_max.py`](test/pass/nn_lowering/reduce_max.py)
 - 执行命令：
   - `pytest -q test/pass/nn_lowering/exp.py test/pass/nn_lowering/reduce_sum.py test/pass/nn_lowering/reduce_min.py test/pass/nn_lowering/reduce_max.py`
-  - `PYTHONPATH=. python expectation/pass/lowing/nn_lowering/exp.py`
-  - `PYTHONPATH=. python -m expectation.pass.lowing.nn_lowering.reduce`
 - 测试目标：
   - 确认 exp / reduce family 的 lowering 结果与属性校验一致。
 - 功能与用例清单：
