@@ -78,6 +78,20 @@ class NnLoweringError(ValueError):
     """
 
 
+_SUPPORTED_BINARY: dict[str, str] = {
+    "nn.add": "add",
+    "nn.sub": "sub",
+    "nn.mul": "mul",
+    "nn.truediv": "div",
+    "nn.eq": "eq",
+    "nn.ne": "ne",
+    "nn.lt": "lt",
+    "nn.le": "le",
+    "nn.gt": "gt",
+    "nn.ge": "ge",
+}
+
+
 def _ensure_space_attr(op: Operation) -> NnMemorySpaceAttr:
     """获取并校验 nn op 的 space attribute。
 
