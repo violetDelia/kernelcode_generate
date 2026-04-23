@@ -42,6 +42,7 @@ DONE_TABLE_HEADER = ["任务 ID", "描述", "指派", "完成状态", "完成时
 AGENTS_REQUIRED_COLUMNS = ["姓名", "状态"]
 ALLOWED_TASK_TYPES: set[str] = {"spec", "build", "review", "merge", "other", "refactor"}
 MERGE_USERS = {"李白"}
+AUTO_ASSIGNABLE_TASK_TYPES: set[str] = {"spec", "build", "review", "merge", "refactor"}
 
 
 class TaskError(Exception):
@@ -621,37 +622,102 @@ def is_specialist_candidate(kind: str, duty: str) -> bool:
     return True
 
 
-def ensure_merge_specialist_assignee(
-    kind: str,
-    assignee: str,
-    agent_row: list[str],
-    agents_table: dict,
-    action: str,
-) -> None:
-    """校验 merge 任务的目标角色是否满足合并专职约束。
+def is_assignment_allowed_for_task(kind: str, duty: str) -> bool:
+    """判断职责是否允许接手该任务类型。
 
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
+    创建者: OpenAI
+    最后一次更改: Codex
 
     功能说明:
-    - 仅对 `merge` 任务生效，其余任务直接返回。
-    - 显式分发、改派时统一复用相同的职责校验与错误短语。
+    - `merge` 仅允许合并专职。
+    - `spec/build/review/refactor` 允许对应专职，必要时允许全能替补。
+    - `other` 保持无职责限制。
 
     使用示例:
-    - ensure_merge_specialist_assignee("merge", "worker-m", agent_row, agents_table, "dispatch")
+    - ok = is_assignment_allowed_for_task("build", "仅负责实现与测试")
 
     关联文件:
     - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
     - test: test/codex-multi-agents/test_codex-multi-agents-task.py
     - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
     """
-    if kind != "merge":
-        return
+    if kind == "merge":
+        return is_merge_specialist_duty(duty)
+    if kind == "other":
+        return True
+    if is_specialist_candidate(kind, duty):
+        return True
+    return kind in {"spec", "build", "review", "refactor"} and is_substitute_duty(duty)
+
+
+def assignment_role_label(kind: str) -> str:
+    """返回任务类型对应的可分发角色标签。
+
+    创建者: OpenAI
+    最后一次更改: Codex
+
+    功能说明:
+    - 统一显式分发失败时的职责提示短语。
+
+    使用示例:
+    - label = assignment_role_label("review")
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-task.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+    """
+    if kind == "spec":
+        return "spec specialists or substitutes"
+    if kind == "build":
+        return "build specialists or substitutes"
+    if kind == "review":
+        return "review specialists or substitutes"
+    if kind == "merge":
+        return "merge specialists"
+    if kind == "refactor":
+        return "refactor specialists or substitutes"
+    return "eligible agents"
+
+
+def ensure_assignee_matches_task_type(
+    kind: str,
+    assignee: str,
+    agent_row: list[str],
+    agents_table: dict,
+    action: str,
+) -> None:
+    """校验显式分发目标角色是否满足任务类型职责约束。
+
+    创建者: OpenAI
+    最后一次更改: Codex
+
+    功能说明:
+    - `merge` 仅允许合并专职。
+    - `spec/build/review/refactor` 允许对应专职，必要时允许全能替补。
+    - 显式分发、改派与 `-next -to` 共用稳定错误短语。
+
+    使用示例:
+    - ensure_assignee_matches_task_type("build", "worker-b", agent_row, agents_table, "dispatch")
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-task.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+    """
     duty = get_agent_duty(agent_row, agents_table)
-    if is_merge_specialist_duty(duty):
+    if is_assignment_allowed_for_task(kind, duty):
         return
-    verb = "dispatch" if action == "dispatch" else "reassign"
-    fail(RC_DATA, f"merge tasks can only be {verb}ed to merge specialists: {assignee}")
+    verb_map = {
+        "dispatch": "dispatched",
+        "reassign": "reassigned",
+        "assign": "assigned",
+    }
+    verb = verb_map.get(action, "assigned")
+    fail(
+        RC_DATA,
+        f"{kind} tasks can only be {verb} to {assignment_role_label(kind)}: {assignee}",
+    )
 
 
 def is_agent_eligible_for_auto(
@@ -749,6 +815,7 @@ def pick_next_auto_assignee(
     agents_rows: list[list[str]],
     agents_table: dict,
     operator_name: str,
+    rng: random.Random | None = None,
 ) -> tuple[str, int] | None:
     """在候选人集合中选择自动续接接手人。
 
@@ -757,7 +824,7 @@ def pick_next_auto_assignee(
 
     功能说明:
     - 在专职候选集合中随机选择接手人。
-    - 专职候选为空时，对 spec/build/review 退到候补候选集合。
+    - 专职候选为空时，对 spec/build/review/refactor 退到候补候选集合。
     - 候选集合顺序由 agents-lists.md 决定。
 
     使用示例:
@@ -786,7 +853,7 @@ def pick_next_auto_assignee(
         if is_specialist_candidate(kind, duty):
             primary_candidates.append((name, candidate_idx))
             continue
-        if kind in {"spec", "build", "review"} and is_substitute_duty(duty):
+        if kind in {"spec", "build", "review", "refactor"} and is_substitute_duty(duty):
             fallback_candidates.append((name, candidate_idx))
     candidates: list[tuple[str, int]]
     if kind == "merge":
@@ -795,8 +862,80 @@ def pick_next_auto_assignee(
         candidates = primary_candidates or fallback_candidates
     if not candidates:
         return None
-    rng = build_auto_random()
+    if rng is None:
+        rng = build_auto_random()
     return rng.choice(candidates)
+
+
+def dependencies_resolved_for_row(
+    row: list[str],
+    exec_rows: list[list[str]],
+    list_rows: list[list[str]],
+) -> bool:
+    """判断任务行的依赖是否已全部完成。
+
+    创建者: OpenAI
+    最后一次更改: Codex
+
+    功能说明:
+    - 依赖任务只要仍存在于运行表或任务列表中，即视为未完成。
+
+    使用示例:
+    - ready = dependencies_resolved_for_row(row, exec_rows, list_rows)
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-task.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+    """
+    for dependency in parse_dependencies(row[6]):
+        if find_row_index(exec_rows, dependency) >= 0 or find_row_index(list_rows, dependency) >= 0:
+            return False
+    return True
+
+
+def pick_ready_task_auto_dispatch(
+    list_rows: list[list[str]],
+    exec_rows: list[list[str]],
+    agents_rows: list[list[str]],
+    agents_table: dict,
+    operator_name: str,
+    max_parallel: int,
+) -> tuple[int, str, int] | None:
+    """从任务列表中挑选首个可自动启动的任务。
+
+    创建者: OpenAI
+    最后一次更改: Codex
+
+    功能说明:
+    - 只扫描依赖已清空的任务。
+    - 任务优先级按 `任务列表` 当前顺序决定。
+    - 角色选择继续复用现有专职优先、候补回退与随机种子规则。
+    - 仅对 spec/build/review/merge/refactor 五类任务执行自动启动。
+
+    使用示例:
+    - picked = pick_ready_task_auto_dispatch(list_rows, exec_rows, agents_rows, agents_table, "worker-a", 8)
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-task.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+    """
+    if count_active_assignees(exec_rows) >= max_parallel:
+        return None
+    rng = build_auto_random()
+    for idx, row in enumerate(list_rows):
+        kind = normalize_task_type(row[5], RC_DATA, f"task list row {row[0].strip()}")
+        if kind not in AUTO_ASSIGNABLE_TASK_TYPES:
+            continue
+        if not dependencies_resolved_for_row(row, exec_rows, list_rows):
+            continue
+        picked = pick_next_auto_assignee(row, agents_rows, agents_table, operator_name, rng)
+        if picked is None:
+            continue
+        assignee, agent_idx = picked
+        return idx, assignee, agent_idx
+    return None
 
 
 def ensure_operator_permission(
@@ -1022,7 +1161,7 @@ def main() -> int:
         if not task_type:
             fail(RC_DATA, f"empty task type in task list: {task_id}")
         normalized_task_type = normalize_task_type(task_type, RC_DATA, f"dispatch task {task_id}")
-        ensure_merge_specialist_assignee(
+        ensure_assignee_matches_task_type(
             normalized_task_type,
             assignee,
             agents_rows[agent_idx],
@@ -1192,7 +1331,7 @@ def main() -> int:
         if new_idx < 0:
             fail(RC_DATA, f"agent not found in agents list: {new_assignee}")
         task_type = normalize_task_type(exec_rows[idx][5], RC_DATA, f"running task {task_id}")
-        ensure_merge_specialist_assignee(
+        ensure_assignee_matches_task_type(
             task_type,
             new_assignee,
             agents_rows[new_idx],
@@ -1253,12 +1392,12 @@ def main() -> int:
             )
             if candidate_agent_idx < 0:
                 fail(RC_DATA, f"agent not found in agents list: {manual_assignee}")
-            ensure_merge_specialist_assignee(
+            ensure_assignee_matches_task_type(
                 next_kind,
                 manual_assignee,
                 agents_rows[candidate_agent_idx],
                 agents_table,
-                "dispatch",
+                "assign",
             )
             if assignee and assignee != manual_assignee:
                 agent_idx = find_agent_row_index(agents_rows, agents_table["name_idx"], assignee)
@@ -1316,42 +1455,40 @@ def main() -> int:
                     agents_rows[agent_idx][agents_table["status_idx"]] = "busy"
                 message_lines.append(f"OK: replace {assignee} 状态")
 
-        if (not manual_assignee) and auto_flag:
-            next_kind = normalize_task_type(next_list_row[5], RC_DATA, f"next task {task_id}")
-            if next_kind not in {"merge", "review", "build", "spec"}:
-                message_lines.append("__AUTO_NEXT__=none")
-            elif count_active_assignees(exec_rows) >= max_parallel:
+        if not manual_assignee:
+            picked_ready_task = pick_ready_task_auto_dispatch(
+                list_rows,
+                exec_rows,
+                agents_rows,
+                agents_table,
+                operator_name,
+                max_parallel,
+            )
+            if picked_ready_task is None:
                 message_lines.append("__AUTO_NEXT__=none")
             else:
-                picked = pick_next_auto_assignee(next_list_row, agents_rows, agents_table, operator_name)
-                if picked is None:
-                    message_lines.append("__AUTO_NEXT__=none")
-                else:
-                    candidate_assignee, candidate_agent_idx = picked
-                    candidate_idx = find_row_index(list_rows, task_id)
-                    if candidate_idx < 0:
-                        fail(RC_INTERNAL, f"task not found after next append: {task_id}")
-                    candidate_row = list_rows.pop(candidate_idx)
-                    exec_rows.append(
-                        [
-                            candidate_row[0],
-                            candidate_row[1],
-                            candidate_row[2],
-                            candidate_row[3],
-                            candidate_row[4],
-                            candidate_row[5],
-                            candidate_row[6],
-                            candidate_row[7],
-                            candidate_assignee,
-                            "进行中",
-                            "",
-                            candidate_row[9],
-                        ]
-                    )
-                    agents_rows[candidate_agent_idx][agents_table["status_idx"]] = "busy"
-                    message_lines.append(f"OK: auto-dispatch {candidate_row[0]} -> {candidate_assignee}")
-                    message_lines.append(f"OK: replace {candidate_assignee} 状态")
-                    message_lines.append(f"__AUTO_NEXT__=dispatch|{candidate_row[0]}|{candidate_assignee}")
+                candidate_idx, candidate_assignee, candidate_agent_idx = picked_ready_task
+                candidate_row = list_rows.pop(candidate_idx)
+                exec_rows.append(
+                    [
+                        candidate_row[0],
+                        candidate_row[1],
+                        candidate_row[2],
+                        candidate_row[3],
+                        candidate_row[4],
+                        candidate_row[5],
+                        candidate_row[6],
+                        candidate_row[7],
+                        candidate_assignee,
+                        "进行中",
+                        "",
+                        candidate_row[9],
+                    ]
+                )
+                agents_rows[candidate_agent_idx][agents_table["status_idx"]] = "busy"
+                message_lines.append(f"OK: auto-dispatch {candidate_row[0]} -> {candidate_assignee}")
+                message_lines.append(f"OK: replace {candidate_assignee} 状态")
+                message_lines.append(f"__AUTO_NEXT__=dispatch|{candidate_row[0]}|{candidate_assignee}")
 
     elif op == "new":
         existing_ids = {r[0].strip() for r in (exec_rows + list_rows) if not is_empty_row(r)}

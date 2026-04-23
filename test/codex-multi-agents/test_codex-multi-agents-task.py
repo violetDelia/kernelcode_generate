@@ -9,7 +9,7 @@
 覆盖率信息:
 - 当前覆盖率: `N/A`。该链路的功能实现为 shell 脚本 `skills/codex-multi-agents/scripts/codex-multi-agents-task.sh`，`pytest-cov` 无法直接采集脚本覆盖率，执行覆盖率命令会得到 `no-data-collected`。
 - 达标判定: shell 实现按规则豁免 `95%` 覆盖率达标线。
-- 当前以 `TC-001..049` 共 49 条测试用例作为覆盖基线，覆盖分发、分发前初始化、分发消息发送、完成、暂停、继续、改派、续接、新建、删除、状态查询、计划书进度、权限校验、并行上限、文件错误、结构错误与锁冲突路径。
+- 当前以 `77` 条 pytest 用例作为覆盖基线，覆盖分发、分发前初始化、分发消息发送、完成、暂停、继续、改派、续接、新建、删除、状态查询、计划书进度、权限校验、并行上限、文件错误、结构错误、自动续接与角色职责约束路径。
 
 覆盖率命令:
 - `pytest -q --cov=skills/codex-multi-agents/scripts/codex-multi-agents-task.sh --cov-branch --cov-report=term-missing test/codex-multi-agents/test_codex-multi-agents-task.py`
@@ -111,8 +111,8 @@ def row_list(
     )
 
 
-def agent_row(name: str, status: str = "free") -> str:
-    return f"| {name} | {status} | {name}-session | codex | agent-{name} | 简介 | ./prompt.md | ./archive.md | 执行 |"
+def agent_row(name: str, status: str = "free", duty: str = "实现 测试") -> str:
+    return f"| {name} | {status} | {name}-session | codex | agent-{name} | 简介 | ./prompt.md | ./archive.md | {duty} |"
 
 
 def write_agents_file(path: Path, rows: list[str] | None = None) -> None:
@@ -1728,6 +1728,59 @@ def test_reassign_rejects_merge_task_for_non_merge_specialist(tmp_path: Path) ->
     assert get_agent_status(agents, "worker-r") == "free"
 
 
+# TC-028D
+# 创建者: OpenAI
+# 最后一次更改: Codex
+# 测试目的: 验证 -reassign 不允许把 build 任务改派给审查角色。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_reassign_rejects_build_task_for_review_specialist(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-1",
+                "李白",
+                "2026-03-08 16:10:00 +0800",
+                "/tmp/wt-ex1",
+                "创建 src",
+                "build",
+                "",
+                "",
+                "worker-a",
+                "进行中",
+                "xxx",
+                "./log/ex1.md",
+            ),
+        ],
+        list_rows=[],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row_with_role("worker-a", "busy", "实现 测试"),
+            agent_row_with_role("worker-r", "free", "审查"),
+        ],
+    )
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-reassign",
+        "-task_id",
+        "EX-1",
+        "-to",
+        "worker-r",
+        "-agents-list",
+        str(agents),
+    )
+
+    assert result.returncode == 3
+    assert "build tasks can only be reassigned to build specialists or substitutes: worker-r" in result.stderr
+
+
 # TC-026
 # 创建者: 神秘人
 # 最后一次更改: 神秘人
@@ -1981,6 +2034,71 @@ def test_next_to_dispatches_same_task_and_updates_agent_status(tmp_path: Path) -
         "send:神秘人-session:@worker-b向@神秘人发起会话: "
         "任务 EX-2 已完成当前阶段，已回到任务列表；新任务类型=review，已经指派给-> worker-c。:"
     ) in calls_text
+
+
+# TC-030B
+# 创建者: OpenAI
+# 最后一次更改: Codex
+# 测试目的: 验证 -next -to 不允许把 build 任务直接续接给审查角色。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_next_to_rejects_build_task_for_review_specialist(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-2",
+                "杜甫",
+                "2026-03-08 16:20:00 +0800",
+                "/tmp/wt-ex2",
+                "创建 test",
+                "build",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "worker-b",
+                "进行中",
+                "xxx",
+                "./log/ex2.md",
+            ),
+        ],
+        list_rows=[],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row_with_role("神秘人", "free", "管理员", "神秘人-session", "管理员"),
+            agent_row_with_role("worker-b", "busy", "实现 测试"),
+            agent_row_with_role("worker-c", "free", "审查"),
+        ],
+    )
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ADMIN_USERS"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-b"
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-next",
+        "-task_id",
+        "EX-2",
+        "-from",
+        "worker-b",
+        "-to",
+        "worker-c",
+        "-type",
+        "build",
+        "-message",
+        "下一阶段：继续实现",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    assert result.returncode == 3
+    assert "build tasks can only be assigned to build specialists or substitutes: worker-c" in result.stderr
 
 
 # TC-031
@@ -2375,6 +2493,67 @@ def test_dispatch_rejects_merge_task_for_non_merge_specialist(tmp_path: Path) ->
     assert get_agent_status(agents, "worker-r") == "free"
 
 
+# TC-036C
+# 创建者: OpenAI
+# 最后一次更改: Codex
+# 测试目的: 验证 build 任务分发时不能直接分给审查角色。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_dispatch_rejects_build_task_for_review_specialist(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    write_todo_file_current(
+        todo,
+        list_rows=[
+            row_list_typed(
+                "EX-3",
+                "苏轼",
+                "2026-03-08 16:30:00 +0800",
+                "/tmp/wt-ex3",
+                "补齐实现",
+                "build",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "",
+                "./log/ex3.md",
+            )
+        ],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row_with_role("神秘人", "free", "管理员", "神秘人-session", "管理员"),
+            agent_row_with_role("worker-r", "free", "审查"),
+        ],
+    )
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_ADMIN_USERS"] = "神秘人"
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-dispatch",
+        "-task_id",
+        "EX-3",
+        "-to",
+        "worker-r",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+    list_rows = parse_section_rows(content, "## 任务列表")
+    assert result.returncode == 3
+    assert "build tasks can only be dispatched to build specialists or substitutes: worker-r" in result.stderr
+    assert not any(r[0] == "EX-3" for r in running_rows)
+    assert any(r[0] == "EX-3" and r[5] == "build" for r in list_rows)
+    assert get_agent_status(agents, "worker-r") == "free"
+
+
 # TC-037
 # 创建者: 守护最好的爱莉希雅
 # 最后一次更改: 守护最好的爱莉希雅
@@ -2599,6 +2778,95 @@ def test_next_auto_reassigns_same_task_to_other_agent(tmp_path: Path) -> None:
     assert (
         "send:神秘人-session:@worker-b向@神秘人发起会话: "
         "任务 EX-2 已完成当前阶段，已回到任务列表；新任务类型=review，已经指派给-> worker-c。:"
+    ) in calls_text
+
+
+# TC-051A
+# 创建者: OpenAI
+# 最后一次更改: Codex
+# 测试目的: 验证不带 -auto 的 -next 也会自动拉起任务列表中首个依赖已清空的可启动任务。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_next_auto_starts_first_ready_task_from_task_list(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    bin_dir = tmp_path / "bin"
+    state_dir = tmp_path / "state"
+    calls_file = write_fake_tmux(bin_dir, state_dir, sessions=["神秘人-session"])
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-2",
+                "杜甫",
+                "2026-03-08 16:20:00 +0800",
+                "/tmp/wt-ex2",
+                "创建 test",
+                "build",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "worker-b",
+                "进行中",
+                "xxx",
+                "./log/ex2.md",
+            ),
+        ],
+        list_rows=[
+            row_list_typed(
+                "EX-3",
+                "苏轼",
+                "2026-03-08 16:30:00 +0800",
+                "/tmp/wt-ex3",
+                "补齐实现",
+                "build",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "",
+                "./log/ex3.md",
+            ),
+        ],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row_with_role("神秘人", "free", "管理员", "神秘人-session", "管理员"),
+            agent_row_with_role("worker-b", "busy", "实现 测试"),
+        ],
+    )
+
+    env = os.environ.copy()
+    env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["CODEX_MULTI_AGENTS_ADMIN_USERS"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-b"
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-next",
+        "-task_id",
+        "EX-2",
+        "-from",
+        "worker-b",
+        "-type",
+        "review",
+        "-message",
+        "下一阶段：补齐边界用例",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    assert result.returncode == 0
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+    list_rows = parse_section_rows(content, "## 任务列表")
+    assert any(r[0] == "EX-3" and r[5] == "build" and r[8] == "worker-b" and r[9] == "进行中" for r in running_rows)
+    assert any(r[0] == "EX-2" and r[5] == "review" and r[8] == "" for r in list_rows)
+    calls_text = calls_file.read_text(encoding="utf-8")
+    assert (
+        "send:神秘人-session:@worker-b向@神秘人发起会话: "
+        "任务 EX-2 已完成当前阶段，已回到任务列表；已自动开始任务 EX-3 -> 当前执行者。:"
     ) in calls_text
 
 

@@ -6,7 +6,7 @@
 #
 # 功能:
 # - 执行 task 脚本的通知副作用：list -init、tmux -talk、任务消息拼装、管理员摘要发送。
-# - 供 codex-multi-agents-task.sh 在 -dispatch、-reassign 与 -next/-auto 成功后调用。
+# - 供 codex-multi-agents-task.sh 在 -dispatch、-reassign 与 -next 成功后调用。
 #
 # 对应文件:
 # - spec: /home/lfr/kernelcode_generate/spec/codex-multi-agents/scripts/codex-multi-agents-task.md
@@ -412,7 +412,11 @@ next_notify() {
       if [[ "$AUTO_ASSIGNEE" == "$FROM" ]]; then
         assignee_label="当前执行者"
       fi
-      summary_message="任务 $TASK_ID 已完成当前阶段，已回到任务列表；新任务类型=$TYPE_KIND，已经指派给-> $assignee_label。"
+      if [[ "$AUTO_TASK_ID" == "$TASK_ID" ]]; then
+        summary_message="任务 $TASK_ID 已完成当前阶段，已回到任务列表；新任务类型=$TYPE_KIND，已经指派给-> $assignee_label。"
+      else
+        summary_message="任务 $TASK_ID 已完成当前阶段，已回到任务列表；已自动开始任务 $AUTO_TASK_ID -> $assignee_label。"
+      fi
     else
       summary_message="任务 $TASK_ID 已完成当前阶段，已回到任务列表；新任务类型=$TYPE_KIND，请管理员推进。"
     fi

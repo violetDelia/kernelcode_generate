@@ -41,7 +41,7 @@
 - 提供统一的 `-dispatch/-done/-pause/-continue/-reassign/-next/-new/-delete/-done-plan/-status` 命令入口。
 - 维护 `TODO.md`、`DONE.md`、`agents-lists.md` 之间一致的任务状态和角色状态。
 - 在 `-new/-done/-delete/-done-plan` 时维护 `## 计划书` 统计。
-- 在 `-dispatch` 成功后发送固定格式的任务消息；在 `-reassign` 成功后同时通知旧接手人与新接手人；在 `-next` 成功后固定向管理员发送阶段摘要；在 `-next -auto` 成功时额外发送自动续接消息。
+- 在 `-dispatch` 成功后发送固定格式的任务消息；在 `-reassign` 成功后同时通知旧接手人与新接手人；在 `-next` 成功后固定向管理员发送阶段摘要；当 `-next` 触发自动续接时，额外发送自动续接消息。
 - 在参数错误、文件错误、数据错误、锁冲突与内部错误时返回稳定返回码。
 
 ## 实现分层
@@ -79,38 +79,47 @@
 - `-dispatch` 默认读取任务记录中的 `任务类型`；若显式提供 `-type`，则必须与任务记录一致。
 - `-dispatch` 仅在全部依赖任务已经从 `正在执行的任务` 与 `任务列表` 中消失时才允许继续。
 - `-dispatch` 仅在目标角色存在、当前空闲且总并发人数未超过 `CODEX_MULTI_AGENTS_MAX_PARALLEL` 时才允许继续。
-- `merge` 任务在 `-dispatch/-reassign/-next -to/-next -auto` 下只允许分配给合并专职：职责包含 `合并`，且职责不包含 `全能替补` 或 `不含合并`。
-- 不带 `-to/-auto` 的 `-next` 仅负责：
-  - 将运行中任务移回 `任务列表`
-  - 用 `-message` 更新 `描述`
-  - 用 `-type` 更新下一阶段 `任务类型`
+- `-dispatch/-reassign/-next -to` 的目标角色必须满足任务类型职责约束：
+  - `spec`：只允许 `spec` 专职或 `全能替补`。
+  - `build`：只允许 `实现/测试` 专职或 `全能替补`。
+  - `review`：只允许 `审查/复审` 专职或 `全能替补`。
+  - `refactor`：只允许 `实现/开发/测试/重构` 专职或 `全能替补`。
+  - `merge`：只允许合并专职；职责必须包含 `合并`，且职责不包含 `全能替补` 或 `不含合并`。
+  - `other`：不做额外职责限制。
+- 不带 `-to` 的 `-next` 会先：
+  - 将当前运行中任务按新的 `描述` 与 `任务类型` 退回 `任务列表`
+  - 清空该任务的 `指派`
+  - 再按当前 `任务列表` 顺序，尝试自动启动首个依赖已清空且存在合适候选人的任务
 - 不带 `-to/-auto` 的 `-next` 将任务退回 `任务列表` 时，`指派` 必须清空。
 - `-next -to <worker>` 表示手动续接并立即指派：同一任务直接进入 `正在执行的任务`，`指派=<worker>`、`状态=进行中`，旧接手人按剩余运行中任务数重算 `free/busy`，新接手人置为 `busy`。
 - `-next -to` 的目标角色必须存在、处于可接手状态，且满足任务类型职责约束；目标角色为当前执行者时，当前任务先从运行表移除再判断其是否仍有其他运行中任务。
 - `-next -to` 与 `-auto` 互斥。
-- 不带 `-to/-auto` 的 `-next` 成功后固定向管理员发送摘要：`任务 <task_id> 已完成当前阶段，已回到任务列表；新任务类型=<type>，请管理员推进。`；发送者使用 `-from`。
+- 不带 `-to` 的 `-next` 若未自动启动任何任务，则向管理员发送摘要：`任务 <task_id> 已完成当前阶段，已回到任务列表；新任务类型=<type>，请管理员推进。`；发送者使用 `-from`。
 - `-next -to` 成功后会先执行一次 `list -init`，再向接手人发送任务消息，并向管理员发送摘要：`任务 <task_id> 已完成当前阶段，已回到任务列表；新任务类型=<type>，已经指派给-> <当前执行者|角色名>。`；发送者使用 `-from`。
-- `-next -auto` 仅对 `merge/review/build/spec` 四类任务执行自动续接；`other/refactor` 仍保留在 `任务列表`。
-- `-next -auto` 只尝试自动续接当前刚通过 `-next` 退回 `任务列表` 的同一任务，不扫描其他任务。
-- `-next -auto` 的候选人集合规则：
+- `-next` 与 `-next -auto` 的自动续接逻辑一致；`-auto` 仅保留为兼容开关。
+- 自动续接仅对 `spec/build/review/merge/refactor` 五类任务生效；`other` 仍保留在 `任务列表`。
+- 自动续接会扫描整个 `任务列表`，只考虑“依赖任务已经从 `正在执行的任务` 与 `任务列表` 中消失”的 ready 任务。
+- 自动续接按 `任务列表` 当前顺序选择首个可启动任务，不会跳过前面的可启动任务去启动后面的任务。
+- 自动续接的候选人集合规则：
   - 先按任务类型筛出专职池，再按需要启用候补池。
   - `spec` 专职：职责包含 `spec` 或 `spec 文档编写`，且职责不包含 `全能替补`。
   - `build` 专职：职责包含 `实现` 或 `测试`，且职责不包含 `全能替补`。
   - `review` 专职：职责包含 `审查` 或 `复审`，且职责不包含 `全能替补`。
+  - `refactor` 专职：职责包含 `实现`、`开发`、`测试` 或 `重构`，且职责匹配后可在专职池中参与选择。
   - `merge` 专职：职责包含 `合并`，且职责不包含 `全能替补` 或 `不含合并`。
   - 候补：职责包含 `全能替补`。
   - 仅保留 `agents-lists.md` 中状态为 `free` 且职责匹配的角色；职责包含 `不承担管理员分发的任务` 的角色不计入候选。
   - 若当前执行者满足上述条件，则作为候选之一参与选择。
-- `-next -auto` 的选择规则：
-  - `spec/build/review`：若存在可用专职，只在专职池内随机；专职池为空时才允许候补池参与随机。
+- 自动续接的选择规则：
+  - `spec/build/review/refactor`：若存在可用专职，只在专职池内随机；专职池为空时才允许候补池参与随机。
   - `merge`：只在专职池内随机；若无可用专职则自动续接失败，任务保留在 `任务列表` 并通知管理员。
   - 随机范围仅限当前启用的候选池，不跨层级混合随机。
 - 若设置 `CODEX_MULTI_AGENTS_AUTO_RANDOM_SEED`，自动续接使用该值的 `sha256` 结果作为随机种子；在候选集合与 `agents-lists.md` 顺序不变时可复现选择结果。
-- `-next -auto` 若自动接续到其他角色，会先执行一次 `list -init`，再向接手人发送任务消息，并向管理员发送摘要。
-- `-next -auto` 若自动接续到当前执行者本人，不向本人发消息，只向管理员发送摘要。
-- `-next -auto` 若当前任务类型不支持自动续接、没有合适角色、或当前并发人数已达上限，则当前任务保留在 `任务列表`，并向管理员发送摘要。
-- `-next -auto` 自动接续成功时，接续任务沿用当前任务原 `任务 ID`，不生成新任务 ID。
-- `-next -auto` 向管理员发送的成功摘要固定为：`任务 <current_task_id> 已完成当前阶段，已回到任务列表；新任务类型=<type>，已经指派给-> <当前执行者|角色名>。`；发送者使用 `-from`。
+- 自动续接若启动的是当前刚通过 `-next` 退回的同一任务，会沿用当前任务原 `任务 ID`，不生成新任务 ID。
+- 自动续接若启动的是 `任务列表` 中其他 ready 任务，则管理员摘要固定为：`任务 <current_task_id> 已完成当前阶段，已回到任务列表；已自动开始任务 <auto_task_id> -> <当前执行者|角色名>。`
+- 自动续接若启动到其他角色，会先执行一次 `list -init`，再向接手人发送任务消息，并向管理员发送摘要。
+- 自动续接若启动到当前执行者本人，不向本人发消息，只向管理员发送摘要。
+- 自动续接若当前没有可启动任务、没有合适角色、或当前并发人数已达上限，则当前 `-next` 处理后的任务保留在 `任务列表`，并向管理员发送摘要。
 - `-auto` 只能与 `-next` 组合使用。
 - `-delete` 只能删除 `任务列表` 中的任务，或 `正在执行的任务` 中 `状态=暂停` 的任务；不能删除 `状态=进行中` 的任务。
 - `-done-plan` 只能处理 `完成状态=完成待检查` 且 `待完成任务=0` 的计划书记录。
@@ -193,13 +202,13 @@ codex-multi-agents-task.sh \
 
 - 分发前会尽力执行一次 `codex-multi-agents-list.sh -init -file <agents-list> -name <to>`。
 - 若任务记录与命令行都没有可用的 `任务类型`，则分发失败。
-- `merge` 任务只允许分发给合并专职；候补与声明 `不含合并` 的角色不能接手。
+- `-dispatch` 的目标角色必须满足对应任务类型职责约束；`build` 不能分发给 `审查/复审` 专职，`merge` 不能分发给候补或非合并专职。
 - 默认任务消息固定包含：任务 ID、描述、当前任务中实际存在的 `worktree`、计划书路径、记录文件、任务记录要求、问题咨询指引；其中“任务记录要求”必须明确：若任务有独立 `worktree`，常规任务日志必须写入该 `worktree` 下的对应记录文件。
 - 提供 `-message` 时，仅作为默认任务消息后的补充说明。
 
 返回与限制：
 
-- 成功返回 `0`；任务不存在、目标角色不存在、角色忙碌、依赖未清空、任务类型不一致或并发人数超限时返回 `3`。
+- 成功返回 `0`；任务不存在、目标角色不存在、角色忙碌、依赖未清空、任务类型不一致、目标角色职责不匹配或并发人数超限时返回 `3`。
 
 ### `-done`
 
@@ -324,18 +333,18 @@ codex-multi-agents-task.sh \
 
 - `-reassign` 仅适用于运行中任务；不能改派 `任务列表` 中的任务。
 - 目标角色必须在 `agents-lists.md` 中处于 `free` 状态。
-- `merge` 任务只允许改派给合并专职；候补与声明 `不含合并` 的角色不能接手。
+- `-reassign` 的目标角色必须满足对应任务类型职责约束；`build` 不能改派给 `审查/复审` 专职，`merge` 不能改派给候补或非合并专职。
 - 旧角色收到“停止当前处理”的提示，新角色收到与 `-dispatch` 一致的默认任务消息模板。
 
 返回与限制：
 
-- 成功返回 `0`；任务不存在、目标角色不存在或目标角色忙碌返回 `3`。
+- 成功返回 `0`；任务不存在、目标角色不存在、目标角色忙碌或目标角色职责不匹配返回 `3`。
 
 ### `-next`
 
 功能说明：
 
-- 将当前运行中任务改写为下一阶段；默认退回 `任务列表`，带 `-to` 时手动指派给指定角色，带 `-auto` 时按候选规则自动续接当前这同一条任务。
+- 将当前运行中任务改写为下一阶段；默认退回 `任务列表`，随后尝试自动启动 `任务列表` 中首个 ready 任务；带 `-to` 时手动指派给指定角色；`-auto` 仅作为兼容开关保留。
 
 参数说明：
 
@@ -346,7 +355,7 @@ codex-multi-agents-task.sh \
 - `-type(枚举)`：下一阶段任务类型。
 - `-message(字符串)`：新的任务描述。
 - `-agents-list(路径)`：角色列表文件；普通 `-next`、`-next -to`、`-next -auto` 都必须显式提供。
-- `-auto(开关，可选)`：启用自动续接。
+- `-auto(开关，可选)`：兼容开关；与不带 `-auto` 的自动续接逻辑一致。
 
 使用示例：
 
@@ -389,14 +398,16 @@ codex-multi-agents-task.sh \
 - `-next` 与 `-next -auto` 的所有会话消息都使用命令行显式传入的 `-from` 作为发送者，不再依赖环境变量解析。
 - `-next` 成功后，若原指派角色没有其他运行中任务，则其状态更新为 `free`。
 - `-next` 无论是否带 `-auto`，都会向管理员发送一条摘要消息。
-- `-next -auto` 只会自动接续 `merge/review/build/spec`；`other/refactor` 仍保留在 `任务列表`。
-- `-next -auto` 自动接续成功时，会把当前这条刚退回 `任务列表` 的同一任务移回 `正在执行的任务`，并把接手角色状态改为 `busy`。
-- `-next -auto` 自动接续成功时，沿用当前任务原 `任务 ID`，不改写为新 ID。
-- `-next -auto` 发给接手执行人的任务消息固定包含：任务 ID、描述，以及当前任务中实际存在的 `worktree`、计划书路径、记录文件、任务记录要求、问题咨询指引；其中“任务记录要求”必须明确：若任务有独立 `worktree`，常规任务日志必须写入该 `worktree` 下的对应记录文件。
-- `-next -auto` 自动续接给其他角色时使用默认任务消息模板，与 `-dispatch` 保持一致。
-- `-next -auto` 无论是否成功自动接续，都会向管理员发送一条摘要消息。
-  - `spec/build/review` 优先专职，只有专职不可用时才启用候补。
+- 自动续接只会尝试启动 `spec/build/review/merge/refactor` 五类 ready 任务；`other` 不参与自动续接。
+- 自动续接会扫描整个 `任务列表`，按列表顺序尝试启动首个 ready 且存在候选人的任务。
+- 自动续接成功时，会把被选中的 ready 任务移回 `正在执行的任务`，并把接手角色状态改为 `busy`。
+- 若被自动续接的是当前这条刚退回 `任务列表` 的同一任务，则沿用当前任务原 `任务 ID`。
+- `-next` 自动续接给其他角色时使用默认任务消息模板，与 `-dispatch` 保持一致。
+- `-next` 发给接手执行人的任务消息固定包含：任务 ID、描述，以及当前任务中实际存在的 `worktree`、计划书路径、记录文件、任务记录要求、问题咨询指引；其中“任务记录要求”必须明确：若任务有独立 `worktree`，常规任务日志必须写入该 `worktree` 下的对应记录文件。
+- 自动续接无论是否成功，都会向管理员发送一条摘要消息。
+  - `spec/build/review/refactor` 优先专职，只有专职不可用时才启用候补。
   - `merge` 不启用候补，若无可用专职则自动续接失败并保留在任务列表。
+  - `other` 不参与自动续接。
 
 默认任务消息模板（自动续接给其他角色）：
 
@@ -415,7 +426,7 @@ codex-multi-agents-task.sh \
 
 返回与限制：
 
-- 成功返回 `0`；任务不存在返回 `3`。
+- 成功返回 `0`；任务不存在、目标角色不存在、目标角色忙碌、目标角色职责不匹配或并发人数超限时返回 `3`。
 
 ### `-delete`
 
@@ -524,7 +535,7 @@ codex-multi-agents-task.sh \
 - 测试目标：
   - 验证各主操作的参数校验、状态迁移、计划统计与角色状态同步。
   - 验证分发前初始化、分发后消息发送、默认模板拼接与消息失败语义。
-  - 验证 `-next` 清空指派并向管理员发送摘要；验证 `-next -to` 手动续接、角色状态同步与会话消息；验证 `-next -auto` 仅续接同一任务、保留原任务 ID、按接手人场景发送摘要与会话消息。
+  - 验证 `-next` 清空指派并向管理员发送摘要；验证 `-next -to` 手动续接、角色状态同步与会话消息；验证 `-next/-next -auto` 会扫描 `任务列表` 中首个 ready 任务并按接手人场景发送摘要与会话消息。
   - 验证文件不存在、表结构非法、依赖未清空、角色忙碌、并行人数超限与锁冲突路径。
   - 验证权限规则：管理员专属操作、管理员/架构师专属操作，以及合并角色执行 `-done` 的范围。
 - 功能与用例清单：
@@ -558,12 +569,15 @@ codex-multi-agents-task.sh \
   - `TC-028` `test_reassign_requires_agents_list`：改派缺少角色列表，返回 `1`
   - `TC-028A` `test_reassign_rejects_busy_agent`：改派目标角色忙碌，返回 `3`
   - `TC-028B` `test_reassign_rejects_merge_task_for_substitute`：`merge` 改派到候补角色被拒绝
+  - `TC-028C` `test_reassign_rejects_merge_task_for_non_merge_specialist`：`merge` 改派到非合并专职被拒绝
+  - `TC-028D` `test_reassign_rejects_build_task_for_review_specialist`：`build` 改派到 `review` 专职被拒绝
   - `TC-029` `test_delete_task_list_success`：删除任务列表任务
   - `TC-030` `test_delete_missing_task_returns_rc3`：删除不存在任务，返回 `3`
   - `TC-031` `test_delete_running_task_returns_rc3`：删除运行中任务，返回 `3`
   - `TC-032` `test_delete_paused_running_task_success`：删除已暂停运行中任务
   - `TC-033` `test_next_task_moves_running_to_task_list_success`：续接成功，任务回到列表，描述与类型更新
   - `TC-033A` `test_next_to_dispatches_same_task_and_updates_agent_status`：手动续接到指定角色，任务回到运行表并同步旧/新角色状态
+  - `TC-030B` `test_next_to_rejects_build_task_for_review_specialist`：`-next -to` 不能把 `build` 手动续接给 `review` 专职
   - `TC-034` `test_next_requires_message`：续接缺少描述，返回 `1`
   - `TC-035` `test_next_requires_type`：续接缺少任务类型，返回 `1`
   - `TC-036` `test_new_restricted_for_non_privileged_operator`：普通执行人调用 `-new`，返回 `3`
@@ -572,7 +586,9 @@ codex-multi-agents-task.sh \
   - `TC-038` `test_new_requires_worktree`：新建缺少 `-worktree`，返回 `1`
   - `TC-039` `test_dispatch_blocked_by_unresolved_dependency`：分发时依赖未清空，返回 `3`
   - `TC-040` `test_dispatch_rejects_busy_agent`：目标角色为 `busy`，返回 `3`
-  - `TC-040A` `test_dispatch_rejects_merge_task_for_substitute`：`merge` 分发到候补角色被拒绝
+  - `TC-036A` `test_dispatch_rejects_merge_task_for_substitute`：`merge` 分发到候补角色被拒绝
+  - `TC-036B` `test_dispatch_rejects_merge_task_for_non_merge_specialist`：`merge` 分发到非合并专职被拒绝
+  - `TC-036C` `test_dispatch_rejects_build_task_for_review_specialist`：`build` 分发到 `review` 专职被拒绝
   - `TC-041` `test_next_requires_agents_list`：续接缺少角色列表，返回 `1`
   - `TC-041A` `test_next_requires_from`：续接缺少发起人，返回 `1`
   - `TC-042` `test_new_requires_depends_and_plan`：新建缺少 `-depends/-plan`，返回 `1`
@@ -591,8 +607,10 @@ codex-multi-agents-task.sh \
   - `TC-055` `test_auto_only_supports_next`：`-auto` 与其他命令组合，返回 `1`
   - `TC-056` `test_next_auto_random_assignment_with_seed`：设置随机种子时自动续接结果可复现
   - `TC-057` `test_next_auto_random_assignment_seed_changes`：不同随机种子会触发不同接手人
+  - `TC-057A` `test_next_auto_starts_first_ready_task_from_task_list`：普通 `-next` 会自动启动任务列表中首个 ready 任务
   - `TC-058` `test_next_auto_spec_dedicated_first`：`spec` 专职可用时仅从专职池选择
   - `TC-059` `test_next_auto_build_dedicated_first`：`build` 专职可用时仅从专职池选择
   - `TC-060` `test_next_auto_build_falls_back_to_substitute`：`build` 专职不可用时回退到候补池
   - `TC-061` `test_next_auto_review_dedicated_first`：`review` 专职可用时仅从专职池选择
   - `TC-062` `test_next_auto_merge_rejects_fallback`：`merge` 无专职且仅候补可用时自动续接失败
+  - `TC-062A` `test_next_auto_merge_rejects_non_merge_specialist`：`merge` 自动续接不会错误挑选非合并专职

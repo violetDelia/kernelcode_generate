@@ -135,6 +135,11 @@ Usage:
   codex-multi-agents-task.sh -file <TODO.md> -delete -task_id <id>
   codex-multi-agents-task.sh -file <TODO.md> -done-plan -plan <plan_doc>
 
+Notes:
+  - -next without -to will try to auto-start the first ready task in 任务列表 after updating the current task.
+  - -next -auto keeps the same auto-start behavior and is accepted for compatibility.
+  - explicit -dispatch/-reassign/-next -to must match the target agent duty with the task type; merge only allows merge specialists.
+
 Examples:
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -dispatch -task_id EX-3 -to worker-a -agents-list ./agents/codex-multi-agents/agents-lists.md -message "请处理任务 EX-3"
   codex-multi-agents-task.sh -file ./skills/codex-multi-agents/examples/TODO.md -done -task_id EX-1 -log ./agents/codex-multi-agents/log/task-EX-1.log -agents-list ./agents/codex-multi-agents/agents-lists.md
