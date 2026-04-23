@@ -304,20 +304,124 @@ def test_build_registered_tile_elewise_pass() -> None:
 # TC-REGISTRY-007A-2
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 功能说明: 验证内置 pass 加载后可通过稳定名称构造 tile-reduce ModulePass。
-# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_tile_reduce_pass
+# 功能说明: 验证 registry caller 当前冻结的 surviving public path 与 compat consumer matrix。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_registry_surviving_public_paths_match_consumer_matrix
 # 对应功能实现文件路径: kernel_gen/passes/registry.py
 # 对应 spec 文件路径: spec/pass/registry.md
 # 对应测试文件路径: test/pass/test_pass_registry.py
-def test_build_registered_tile_reduce_pass() -> None:
-    load_builtin_passes()
+def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
+    expected_exports = (
+        ("kernel_gen.passes.registry", "build_registered_pass", registry_module.build_registered_pass),
+        ("kernel_gen.passes.registry", "build_registered_pipeline", registry_module.build_registered_pipeline),
+        ("kernel_gen.passes.registry", "load_builtin_passes", registry_module.load_builtin_passes),
+        ("kernel_gen.passes.pass_manager", "Pass", Pass),
+        ("kernel_gen.passes.pass_manager", "PassManager", PassManager),
+        (
+            "kernel_gen.passes.buffer_results_to_out_params",
+            "BufferResultsToOutParamsPass",
+            importlib.import_module("kernel_gen.passes.buffer_results_to_out_params").BufferResultsToOutParamsPass,
+        ),
+        ("kernel_gen.passes.inline", "InlinePass", importlib.import_module("kernel_gen.passes.inline").InlinePass),
+        (
+            "kernel_gen.passes.attach_arch_information",
+            "AttachArchInformationPass",
+            importlib.import_module("kernel_gen.passes.attach_arch_information").AttachArchInformationPass,
+        ),
+        (
+            "kernel_gen.passes.decompass",
+            "DecompassPass",
+            importlib.import_module("kernel_gen.passes.decompass").DecompassPass,
+        ),
+        (
+            "kernel_gen.passes.outline_device_kernel",
+            "OutlineDeviceKernelPass",
+            importlib.import_module("kernel_gen.passes.outline_device_kernel").OutlineDeviceKernelPass,
+        ),
+        (
+            "kernel_gen.passes.symbol_loop_hoist",
+            "SymbolLoopHoistPass",
+            importlib.import_module("kernel_gen.passes.symbol_loop_hoist").SymbolLoopHoistPass,
+        ),
+        (
+            "kernel_gen.passes.lowering",
+            "NnLoweringPass",
+            importlib.import_module("kernel_gen.passes.lowering.nn_lowering").NnLoweringPass,
+        ),
+        (
+            "kernel_gen.passes.lowering",
+            "BufferResultsToOutParamsPass",
+            importlib.import_module("kernel_gen.passes.buffer_results_to_out_params").BufferResultsToOutParamsPass,
+        ),
+        (
+            "kernel_gen.passes.lowering",
+            "LowerDmaMemoryHierarchyPass",
+            importlib.import_module("kernel_gen.passes.lowering.dma_memory_hierarchy").LowerDmaMemoryHierarchyPass,
+        ),
+        (
+            "kernel_gen.passes.lowering",
+            "TileAnalysisPass",
+            importlib.import_module("kernel_gen.passes.lowering.tile_analysis").TileAnalysisPass,
+        ),
+        (
+            "kernel_gen.passes.lowering",
+            "TileElewisePass",
+            importlib.import_module("kernel_gen.passes.lowering.tile_elewise").TileElewisePass,
+        ),
+        (
+            "kernel_gen.passes.lowering",
+            "TileReducePass",
+            importlib.import_module("kernel_gen.passes.lowering.tile_reduce").TileReducePass,
+        ),
+        (
+            "kernel_gen.passes.lowering.buffer_results_to_out_params",
+            "BufferResultsToOutParamsPass",
+            importlib.import_module("kernel_gen.passes.buffer_results_to_out_params").BufferResultsToOutParamsPass,
+        ),
+        (
+            "kernel_gen.passes.lowering.dma_memory_hierarchy",
+            "LowerDmaMemoryHierarchyPass",
+            importlib.import_module("kernel_gen.passes.lowering.dma_memory_hierarchy").LowerDmaMemoryHierarchyPass,
+        ),
+        (
+            "kernel_gen.passes.lowering.memory_pool",
+            "MemoryPoolPass",
+            importlib.import_module("kernel_gen.passes.lowering.memory_pool").MemoryPoolPass,
+        ),
+        (
+            "kernel_gen.passes.lowering.nn_to_kernel",
+            "LowerNnToKernelPass",
+            importlib.import_module("kernel_gen.passes.lowering.nn_to_kernel").LowerNnToKernelPass,
+        ),
+        (
+            "kernel_gen.passes.lowering.tile_analysis",
+            "TileAnalysisPass",
+            importlib.import_module("kernel_gen.passes.lowering.tile_analysis").TileAnalysisPass,
+        ),
+        (
+            "kernel_gen.passes.lowering.tile_elewise",
+            "TileElewisePass",
+            importlib.import_module("kernel_gen.passes.lowering.tile_elewise").TileElewisePass,
+        ),
+        (
+            "kernel_gen.passes.lowering.tile_reduce",
+            "TileReducePass",
+            importlib.import_module("kernel_gen.passes.lowering.tile_reduce").TileReducePass,
+        ),
+        (
+            "kernel_gen.passes.lowering.outline_device_kernel",
+            "OutlineDeviceKernelPass",
+            importlib.import_module("kernel_gen.passes.outline_device_kernel").OutlineDeviceKernelPass,
+        ),
+        (
+            "kernel_gen.passes.lowering.symbol_loop_hoist",
+            "SymbolLoopHoistPass",
+            importlib.import_module("kernel_gen.passes.symbol_loop_hoist").SymbolLoopHoistPass,
+        ),
+    )
 
-    pass_obj = build_registered_pass("tile-reduce")
-
-    assert pass_obj.name == "tile-reduce"
-    assert type(pass_obj).__name__ == "TileReducePass"
-    assert isinstance(pass_obj, ModulePass)
-    assert pass_obj.__class__.__module__ == "kernel_gen.passes.lowering.tile_reduce"
+    for module_name, attr_name, expected_obj in expected_exports:
+        module = importlib.import_module(module_name)
+        assert getattr(module, attr_name) is expected_obj
 
 
 # TC-REGISTRY-007A-3
@@ -520,6 +624,28 @@ def test_build_registered_attach_arch_information_pass() -> None:
 
 
 # TC-REGISTRY-007J
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证已退场的 lowering 旧路径在 S1 基线中稳定失败。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_registry_old_lowering_paths_fail_fast
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/pass/test_pass_registry.py
+def test_registry_old_lowering_paths_fail_fast() -> None:
+    old_module_paths = (
+        "kernel_gen.passes.lowering.registry",
+        "kernel_gen.passes.lowering.pass_manager",
+        "kernel_gen.passes.lowering.inline",
+        "kernel_gen.passes.lowering.attach_arch_information",
+        "kernel_gen.passes.lowering.decompass",
+    )
+
+    for module_name in old_module_paths:
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(module_name)
+
+
+# TC-REGISTRY-007K
 # 创建者: 朽木露琪亚
 # 最后一次更改: 朽木露琪亚
 # 功能说明: 验证内置 pipeline 加载后可通过稳定名称构造 npu-demo-lowering。

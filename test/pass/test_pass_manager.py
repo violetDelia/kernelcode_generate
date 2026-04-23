@@ -232,6 +232,64 @@ def test_pass_manager_runs_registered_lower_nn(monkeypatch: pytest.MonkeyPatch) 
         _reset_registry_for_test()
 
 
+# TC-PASS-005C
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 pass manager caller 当前冻结的 surviving import matrix。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_surviving_import_matrix
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
+# 对应 spec 文件路径: spec/pass/pass_manager.md
+# 对应测试文件路径: test/pass/test_pass_manager.py
+def test_pass_manager_surviving_import_matrix() -> None:
+    lowering_module = importlib.import_module("kernel_gen.passes.lowering")
+    default_lowering_pipeline_module = importlib.import_module(
+        "kernel_gen.passes.pipeline.default_lowering"
+    )
+    npu_demo_pipeline_module = importlib.import_module("kernel_gen.passes.pipeline.npu_demo_lowering")
+    dma_hierarchy_module = importlib.import_module("kernel_gen.passes.lowering.dma_memory_hierarchy")
+    tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
+    tile_elewise_module = importlib.import_module("kernel_gen.passes.lowering.tile_elewise")
+    tile_reduce_module = importlib.import_module("kernel_gen.passes.lowering.tile_reduce")
+
+    assert pass_module.Pass is Pass
+    assert pass_module.PassManager is PassManager
+    assert (
+        pipeline_module.build_default_lowering_pipeline
+        is default_lowering_pipeline_module.build_default_lowering_pipeline
+    )
+    assert (
+        pipeline_module.build_npu_demo_lowering_pipeline
+        is npu_demo_pipeline_module.build_npu_demo_lowering_pipeline
+    )
+    assert lowering_module.NnLoweringPass is importlib.import_module(
+        "kernel_gen.passes.lowering.nn_lowering"
+    ).NnLoweringPass
+    assert lowering_module.BufferResultsToOutParamsPass is importlib.import_module(
+        "kernel_gen.passes.buffer_results_to_out_params"
+    ).BufferResultsToOutParamsPass
+    assert lowering_module.LowerDmaMemoryHierarchyPass is dma_hierarchy_module.LowerDmaMemoryHierarchyPass
+    assert lowering_module.TileAnalysisPass is tile_analysis_module.TileAnalysisPass
+    assert lowering_module.TileElewisePass is tile_elewise_module.TileElewisePass
+    assert lowering_module.TileReducePass is tile_reduce_module.TileReducePass
+
+
+# TC-PASS-005D
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证已退场的旧 pass manager / registry lowering 路径稳定失败。
+# 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_old_lowering_paths_fail_fast
+# 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
+# 对应 spec 文件路径: spec/pass/pass_manager.md
+# 对应测试文件路径: test/pass/test_pass_manager.py
+def test_pass_manager_old_lowering_paths_fail_fast() -> None:
+    for module_name in (
+        "kernel_gen.passes.lowering.pass_manager",
+        "kernel_gen.passes.lowering.registry",
+    ):
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(module_name)
+
+
 # TC-PASS-006
 # 创建者: 金铲铲大作战
 # 最后一次更改: jcc你莫辜负

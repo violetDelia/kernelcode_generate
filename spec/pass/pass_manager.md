@@ -42,6 +42,21 @@
 - 当 lowering 链包含 `LowerDmaMemoryHierarchyPass` 时，manager 只冻结其排序边界；是否注册该 pass 仍由调用方决定。
 - 当 lowering 链包含 tile family 时，manager 只固定 tile family 与 out-params / dma hierarchy / symbol-loop-hoist 的相对边界；是否注册具体 tile pass 仍由调用方决定。
 
+## S1 冻结的调用边界
+
+- `PassManager` 与 legacy `Pass` 的 canonical public path 固定为 `kernel_gen.passes.pass_manager`。
+- default / npu-demo pipeline builder 的 canonical public path 固定为 `kernel_gen.passes.pipeline`。
+- 当前仍允许 pass manager caller 通过下列活跃模块导入 lowering family：
+  - `kernel_gen.passes.lowering`
+  - `kernel_gen.passes.lowering.tile_analysis`
+  - `kernel_gen.passes.lowering.tile_elewise`
+  - `kernel_gen.passes.lowering.tile_reduce`
+  - `kernel_gen.passes.lowering.dma_memory_hierarchy`
+- 以下旧路径在 `S1` 当前基线中必须稳定失败：
+  - `kernel_gen.passes.lowering.pass_manager`
+  - `kernel_gen.passes.lowering.registry`
+- `S1` 只冻结当前 import baseline；`S2+` 若继续收窄 compat shim，必须同步更新 `spec + pytest + 任务记录`。
+
 ## 公开接口
 
 ### `class Pass`

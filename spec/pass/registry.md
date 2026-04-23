@@ -59,6 +59,40 @@
 - `launch-kernel-cost-func` 接受 `options={"cost_kind": "compute|memory|kind2|kind3"}`；非法 `cost_kind` 必须由 pass 构造入口或 pass 本身显式失败，registry 不吞掉该错误。
 - registry 不解析 `options` 的语义；`options` 仅按字典透传给 pass 或 pipeline 构造入口。
 
+## S1 冻结的公开路径与迁移矩阵
+
+- 本节只冻结 `S1` 的当前基线，不提前宣告 `S2+` 会退场的 compat shim 已经失败。
+- 对 registry / pass manager caller，当前 canonical public path 固定为：
+  - `kernel_gen.passes.registry`
+  - `kernel_gen.passes.pass_manager`
+- 对根路径 pass caller，当前 canonical public path 固定为：
+  - `kernel_gen.passes.buffer_results_to_out_params`
+  - `kernel_gen.passes.inline`
+  - `kernel_gen.passes.attach_arch_information`
+  - `kernel_gen.passes.decompass`
+  - `kernel_gen.passes.outline_device_kernel`
+  - `kernel_gen.passes.symbol_loop_hoist`
+- 对当前仍存活的 compat / family caller，`S1` 冻结为“继续可导入但不承诺永久保留”：
+  - `kernel_gen.passes.lowering`
+  - `kernel_gen.passes.lowering.buffer_results_to_out_params`
+  - `kernel_gen.passes.lowering.dma_memory_hierarchy`
+  - `kernel_gen.passes.lowering.memory_pool`
+  - `kernel_gen.passes.lowering.nn_to_kernel`
+  - `kernel_gen.passes.lowering.tile_analysis`
+  - `kernel_gen.passes.lowering.tile_elewise`
+  - `kernel_gen.passes.lowering.tile_reduce`
+  - `kernel_gen.passes.lowering.outline_device_kernel`
+  - `kernel_gen.passes.lowering.symbol_loop_hoist`
+- 对已退场的旧路径，`S1` 当前必须稳定失败：
+  - `kernel_gen.passes.lowering.registry`
+  - `kernel_gen.passes.lowering.pass_manager`
+  - `kernel_gen.passes.lowering.inline`
+  - `kernel_gen.passes.lowering.attach_arch_information`
+  - `kernel_gen.passes.lowering.decompass`
+- 机械验收口径：
+  - `test/pass/test_pass_registry.py` 负责锁定 canonical public path、旧路径失败边界与 registry caller 的 `importlib` 消费者矩阵。
+  - `test/pass/test_pass_manager.py` 负责锁定 pass manager / pipeline caller 的 `importlib` 消费者矩阵。
+
 ## 公开接口
 
 ### 异常：`PassRegistryError`
