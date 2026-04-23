@@ -447,7 +447,7 @@ def test_build_registered_nn_lowering_pass_is_module_pass() -> None:
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-18 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-18 00:00:00 +0800
-# 功能说明: 验证内置 pass 加载后可通过稳定名称构造 launch-kernel-cost-func，并透传 cost_kind 选项。
+# 功能说明: 验证内置 pass 加载后可通过稳定名称构造 launch-kernel-cost-func，并透传 open-kind cost_kind 选项。
 # 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_launch_kernel_cost_func_pass
 # 对应功能实现文件路径: kernel_gen/passes/registry.py
 # 对应 spec 文件路径: spec/pass/registry.md
@@ -456,13 +456,13 @@ def test_build_registered_launch_kernel_cost_func_pass() -> None:
     load_builtin_passes()
 
     pass_obj = build_registered_pass(
-        "launch-kernel-cost-func", {"cost_kind": "compute|memory|kind2|kind3"}
+        "launch-kernel-cost-func", {"cost_kind": "compute|memory|latency"}
     )
 
     assert pass_obj.name == "launch-kernel-cost-func"
     assert type(pass_obj).__name__ == "LaunchKernelCostFuncPass"
-    assert getattr(pass_obj, "cost_kind") == "compute|memory|kind2|kind3"
-    assert getattr(pass_obj, "cost_kinds") == ("compute", "memory", "kind2", "kind3")
+    assert getattr(pass_obj, "cost_kind") == "compute|memory|latency"
+    assert getattr(pass_obj, "cost_kinds") == ("compute", "memory", "latency")
 
 
 # TC-REGISTRY-007C
@@ -470,7 +470,7 @@ def test_build_registered_launch_kernel_cost_func_pass() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-18 02:00:00 +0800
 # 最近一次运行成功时间: 2026-04-18 02:00:00 +0800
-# 功能说明: 验证 registry 构造 launch-kernel-cost-func 时不会把非法 `cost_kind` 改写成通用 option error。
+# 功能说明: 验证 registry 构造 launch-kernel-cost-func 时不会把空段 / 重复 `cost_kind` 改写成通用 option error。
 # 使用示例: pytest -q test/pass/test_pass_registry.py -k test_build_registered_launch_kernel_cost_func_rejects_invalid_kind
 # 对应功能实现文件路径: kernel_gen/passes/registry.py
 # 对应 spec 文件路径: spec/pass/registry.md
@@ -480,9 +480,9 @@ def test_build_registered_launch_kernel_cost_func_rejects_invalid_kind() -> None
 
     with pytest.raises(
         LaunchKernelCostFuncError,
-        match=r"^LaunchKernelCostFuncError: cost_kind must be one of compute, memory, kind2, kind3$",
+        match=r"^LaunchKernelCostFuncError: cost_kind must be a non-empty '\|' separated list of unique kind names$",
     ):
-        build_registered_pass("launch-kernel-cost-func", {"cost_kind": "invalid"})
+        build_registered_pass("launch-kernel-cost-func", {"cost_kind": "compute|latency|compute"})
 
 
 # TC-REGISTRY-007D
