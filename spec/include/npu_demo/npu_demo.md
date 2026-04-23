@@ -7,16 +7,16 @@
 
 - `KernelContext` 是由 `launch` 注入到 kernel body 的运行时上下文视图，不再是固定常量容器。
 - `thread_num()` / `block_num()` / `subthread_num()` 返回本次 launch 的 extent，而不是 target registry 的固定模板值；`shared_memory_size` 作为 launch metadata 以编译期模板参数承接。
-- `include/npu_demo/npu_demo.h` 作为单入口头文件，需透传 `include/api/Memory.h` / `Dma.h` / `Kernel.h` / `Arch.h` 的统一声明，并汇聚 `include/npu_demo/Core.h` / `Memory.h` / `Dma.h` / `Kernel.h` / `Arch.h` 的后端实现。
-- `npu_demo::add/sub/mul/...`、`npu_demo::launch(...)`、`npu_demo::build_contiguous_stride(...)`、`npu_demo::view(...)`、`npu_demo::alloc(...)`、`npu_demo::slice(...)`、`npu_demo::deslice(...)` 是 public function 的唯一成功消费方向；`detail` 只服务实现内部。
+- `include/npu_demo/npu_demo.h` 作为单入口头文件，需透传 `include/api/Memory.h` / `Dma.h` / `Kernel.h` / `Arch.h` / `cost/*.h` 的统一声明，并汇聚 `include/npu_demo/Core.h` / `Memory.h` / `Dma.h` / `Kernel.h` / `Arch.h` / `cost/*.h` 的后端实现。
+- `npu_demo::add/sub/mul/...`、`npu_demo::launch(...)`、`npu_demo::build_contiguous_stride(...)`、`npu_demo::view(...)`、`npu_demo::alloc(...)`、`npu_demo::slice(...)`、`npu_demo::deslice(...)` 以及 `npu_demo::cost::add/copy/...` 是 public function 的唯一成功消费方向；`detail` 只服务实现内部。
 
 ## 文档信息
 
 - 创建者：`jcc你莫辜负`
-- 最后一次更改：`咯咯咯`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/include/npu_demo/npu_demo.md`](../../../spec/include/npu_demo/npu_demo.md)
-- `功能实现`：[`include/npu_demo/npu_demo.h`](../../../include/npu_demo/npu_demo.h)、[`include/npu_demo/Memory.h`](../../../include/npu_demo/Memory.h)、[`include/npu_demo/Dma.h`](../../../include/npu_demo/Dma.h)、[`include/npu_demo/Arch.h`](../../../include/npu_demo/Arch.h)、[`include/npu_demo/Kernel.h`](../../../include/npu_demo/Kernel.h)
-- `test`：[`test/include/api/test_memory.py`](../../../test/include/api/test_memory.py)、[`test/include/api/test_dma.py`](../../../test/include/api/test_dma.py)、[`test/include/npu_demo/test_kernel_context.py`](../../../test/include/npu_demo/test_kernel_context.py)、[`test/include/npu_demo/test_runtime_launch.py`](../../../test/include/npu_demo/test_runtime_launch.py)、[`test/include/npu_demo/test_public_namespace.py`](../../../test/include/npu_demo/test_public_namespace.py)、[`test/include/api/test_arch.py`](../../../test/include/api/test_arch.py)、[`test/include/api/test_kernel.py`](../../../test/include/api/test_kernel.py)、[`test/target/test_target_registry.py`](../../../test/target/test_target_registry.py)
+- `功能实现`：[`include/npu_demo/npu_demo.h`](../../../include/npu_demo/npu_demo.h)、[`include/npu_demo/Memory.h`](../../../include/npu_demo/Memory.h)、[`include/npu_demo/Dma.h`](../../../include/npu_demo/Dma.h)、[`include/npu_demo/Arch.h`](../../../include/npu_demo/Arch.h)、[`include/npu_demo/Kernel.h`](../../../include/npu_demo/Kernel.h)、[`include/npu_demo/cost/Core.h`](../../../include/npu_demo/cost/Core.h)、[`include/npu_demo/cost/Dma.h`](../../../include/npu_demo/cost/Dma.h)、[`include/npu_demo/cost/Kernel.h`](../../../include/npu_demo/cost/Kernel.h)
+- `test`：[`test/include/api/test_memory.py`](../../../test/include/api/test_memory.py)、[`test/include/api/test_dma.py`](../../../test/include/api/test_dma.py)、[`test/include/npu_demo/test_kernel_context.py`](../../../test/include/npu_demo/test_kernel_context.py)、[`test/include/npu_demo/test_runtime_launch.py`](../../../test/include/npu_demo/test_runtime_launch.py)、[`test/include/npu_demo/test_public_namespace.py`](../../../test/include/npu_demo/test_public_namespace.py)、[`test/include/api/test_arch.py`](../../../test/include/api/test_arch.py)、[`test/include/api/test_kernel.py`](../../../test/include/api/test_kernel.py)、`test/include/api/test_cost.py`、`test/include/npu_demo/test_cost.py`、[`test/target/test_target_registry.py`](../../../test/target/test_target_registry.py)
 
 ## 依赖
 
@@ -25,12 +25,15 @@
 - [`spec/include/api/Memory.md`](../../../spec/include/api/Memory.md)：统一 `Memory<Space, T>`、`MemorySpace`、`MemoryFormat`、`npu_demo::build_contiguous_stride(...)` 与成员式 `view<T>` / `reshape` 语义。
 - [`spec/include/api/Dma.md`](../../../spec/include/api/Dma.md)：统一 `npu_demo::alloc/slice/deslice` 对 `Memory<Space, T>` 的公开职责。
 - [`spec/include/api/Kernel.md`](../../../spec/include/api/Kernel.md)：统一 `Kernel` helper 公共接口职责。
+- [`spec/include/api/cost/Core.md`](../../../spec/include/api/cost/Core.md)：统一 `npu_demo::cost::CostKind` 与 `S_INT` 成本返回语义。
+- [`spec/include/api/cost/Dma.md`](../../../spec/include/api/cost/Dma.md)：统一 `npu_demo::cost::copy/slice/deslice` 的公共合同。
+- [`spec/include/api/cost/Kernel.md`](../../../spec/include/api/cost/Kernel.md)：统一 `npu_demo::cost::add/matmul/...` 的公共合同。
 - [`spec/target/registry.md`](../../../spec/target/registry.md)：定义 `npu_demo` 的 launch 能力上限与片上空间容量来源。
 
 ## 目标
 
 - 冻结 `include/api/Arch.h` 与 `include/npu_demo/Arch.h` 的职责边界：前者只声明公共接口，后者承接 `npu_demo` 的真实线程/同步实现。
-- 冻结 `include/npu_demo/npu_demo.h` 的单入口聚合边界：对外只聚合 `Core / Memory / Dma / Arch / Kernel` 五类公共接口及其后端实现，不再聚合公开 `Nn` 层。
+- 冻结 `include/npu_demo/npu_demo.h` 的单入口聚合边界：对外只聚合 `Core / Memory / Dma / Arch / Kernel / cost` 六类公共接口及其后端实现，不再聚合公开 `Nn` 层。
 - 明确后端 public function 的消费方向：调用方经 `npu_demo::` 访问函数入口，不能把 `npu_demo::detail` 或旧 `*_detail` 名称当作公开合同。
 - 明确基础类型边界：`Status`、`StatusCode`、`Vector`、`Memory`、`MemorySpace` 等类型暂不整体迁入 `namespace npu_demo`。
 - 冻结 `KernelContext` 的运行时视图合同，确保 launched body 读取到的是当前 launch 的 `block/thread/subthread` 维度与索引。
@@ -40,11 +43,13 @@
 
 - 本规范是后端私有 include/runtime 合同，不面向业务侧直接公开；业务侧只经由生成源码或后端封装间接消费。
 - `include/npu_demo/npu_demo.h` 只聚合当前公共 API 与后端实现；`include/api/Nn.h` 不再属于可聚合的公开层。
+- `include/npu_demo/npu_demo.h` 必须继续承接 `include/api/cost/*.h` 与 `include/npu_demo/cost/*.h`；`npu_demo::cost` 是当前公开子命名空间的一部分。
 - `include/api/Arch.h` 只冻结名称、参数面与最小返回语义；真实线程启动、barrier 共享对象与运行时注入必须由 [`include/npu_demo/Arch.h`](../../../include/npu_demo/Arch.h) 承接。
 - public function 必须位于 `namespace npu_demo`；基础类型与 enum 可以继续来自 `include/api` 全局公开类型。
 - `npu_demo::detail` 只用于实现内部复用；公开测试、spec 示例、生成源码不得直接消费 `npu_demo::detail` 或 `*_detail` 名称。
 - `include/npu_demo/npu_demo.h` 是唯一聚合入口，不新增第二套 target include。
 - `Kernel` family 的公开 helper 名、模板顺序与参数顺序由 [`spec/include/api/Kernel.md`](../../../spec/include/api/Kernel.md) 冻结；`npu_demo` 只负责承接实现，不得重新发明旧 `Nn` 公共别名。
+- `cost` family 的公开 helper 名、模板顺序与参数顺序由 [`spec/include/api/cost/Core.md`](../../../spec/include/api/cost/Core.md)、[`spec/include/api/cost/Dma.md`](../../../spec/include/api/cost/Dma.md)、[`spec/include/api/cost/Kernel.md`](../../../spec/include/api/cost/Kernel.md) 冻结；`npu_demo` 只负责承接默认实现，不得额外引入 `kind2/kind3` 或 target 私有成本命名。
 - `KernelContext` 只表示当前 launched body 的运行时视图；不要求公开默认构造、复制持久化或脱离 launch 生命周期独立使用。
 - P0 launch 子集固定为：`block=1`、`subthread=1`、`shared_memory_size=0`、`2 <= thread <= registry.hardware.thread_num`；不支持的 extent 必须显式失败，禁止静默回退到单线程或忽略部分 extent。
 - `block_num()` / `thread_num()` / `subthread_num()` 的公开语义是“当前 launch 值”；`target.registry` 中的 `block_num/thread_num/subthread_num` 只作为能力上限与容量校验基线，不再直接等于 launched body 中可见的当前值。
@@ -59,6 +64,7 @@
 功能说明：
 
 - `npu_demo` 后端的 public function 入口统一位于 `namespace npu_demo`。
+- `npu_demo::cost` 是 `namespace npu_demo` 下的公开子命名空间，承接全部成本 helper 与 `CostKind`。
 - 基础类型继续沿用 `include/api` 层公开类型，不因函数迁移而整体改名。
 - 非公开 helper 只允许作为实现内部细节，不属于调用方稳定入口。
 
@@ -82,13 +88,14 @@ Memory<GM, float> out(out_data, shape_buf, stride_buf, 2, MemoryFormat::Norm);
 auto tile = npu_demo::alloc<TSM, float>({2, 3}, {3, 1}, MemoryFormat::Norm);
 Status slice_status = npu_demo::slice(tile, source, Vector{0, 0}, Vector{2, 3}, Vector{1, 1});
 Status deslice_status = npu_demo::deslice(out, tile, Vector{0, 0}, Vector{2, 3}, Vector{1, 1});
+S_INT copy_cost = npu_demo::cost::copy<TSM, GM, float, npu_demo::cost::CostKind::Memory>(tile, source);
 ```
 
 注意事项：
 
 - 正向调用示例不得直接使用 `npu_demo::detail` 或 `*_detail` 名称。
 - `Vector shape{2, 3}`、`Memory<GM, float>`、`StatusCode::kOk` 等基础类型仍保持当前公开位置。
-- `npu_demo::alloc/slice/deslice/view/build_contiguous_stride` 已属于当前 public function 合同；未限定的全局 `alloc/slice/deslice/view/build_contiguous_stride` 不作为成功调用方向。
+- `npu_demo::alloc/slice/deslice/view/build_contiguous_stride` 与 `npu_demo::cost::*` 已属于当前 public function 合同；未限定的全局 `alloc/slice/deslice/view/build_contiguous_stride` 或全局 `cost::*` 不作为成功调用方向。
 
 返回与限制：
 

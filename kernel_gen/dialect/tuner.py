@@ -31,6 +31,9 @@ from kernel_gen.dialect.symbol import SymbolDimType, SymbolValueType
 _ERROR_ACTION = "请按接口约束传参"
 _ERROR_ACTUAL = "不满足期望"
 _ERROR_SCENE = "dialect.tuner verifier"
+_VALID_COST_KINDS = ("compute", "memory")
+
+
 def _raise_verify_error(expected: str) -> None:
     """统一抛出 tuner verifier 错误。
 
@@ -212,7 +215,7 @@ class TunerCostOp(IRDLOperation):
         - 保留原 op attrs，并显式要求公开 metadata attrs `cost_kind/op_name`。
 
         使用示例:
-        - TunerCostOp([value], cost_kind=StringAttr("latency"), op_name=StringAttr("dma.copy"))
+        - TunerCostOp([value], cost_kind=StringAttr("compute"), op_name=StringAttr("dma.copy"))
 
         关联文件:
         - spec: spec/dialect/tuner.md
@@ -241,7 +244,7 @@ class TunerCostOp(IRDLOperation):
         - 显式拒绝旧 `kind/device_func` attrs。
 
         使用示例:
-        - TunerCostOp([value], cost_kind=StringAttr("latency"), op_name=StringAttr("dma.copy")).verify()
+        - TunerCostOp([value], cost_kind=StringAttr("compute"), op_name=StringAttr("dma.copy")).verify()
 
         关联文件:
         - spec: spec/dialect/tuner.md
@@ -262,8 +265,8 @@ class TunerCostOp(IRDLOperation):
         if "device_func" in self.attributes:
             _raise_verify_error("tuner.cost device_func attr is not part of public contract")
 
-        if not self.cost_kind.data.strip():
-            _raise_verify_error("tuner.cost cost_kind must be non-empty string attr")
+        if self.cost_kind.data not in _VALID_COST_KINDS:
+            _raise_verify_error("tuner.cost cost_kind must be one of compute, memory")
         if not self.op_name.data.strip():
             _raise_verify_error("tuner.cost op_name must not be empty")
 

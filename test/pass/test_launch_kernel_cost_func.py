@@ -369,7 +369,7 @@ def test_launch_kernel_cost_func_memory_keeps_compute_nodes() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-23 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-23 00:00:00 +0800
-# 功能说明: 验证 open-kind 多值列表会按顺序新增对应数量的 cost function。
+# 功能说明: 验证 `cost_kind=compute|memory` 会按顺序新增 2 个 cost function。
 # 使用示例: pytest -q test/pass/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_builds_cost_functions_for_multi_kind_order
 # 对应功能实现文件路径: kernel_gen/passes/tuning/launch_kernel_cost_func.py
 # 对应 spec 文件路径: spec/pass/tuning/launch_kernel_cost_func.md
@@ -377,7 +377,7 @@ def test_launch_kernel_cost_func_memory_keeps_compute_nodes() -> None:
 def test_launch_kernel_cost_func_builds_cost_functions_for_multi_kind_order() -> None:
     module = _build_launch_kernel_module()
 
-    LaunchKernelCostFuncPass(cost_kind="compute|memory|latency").run(module)
+    LaunchKernelCostFuncPass(cost_kind="compute|memory").run(module)
     module.verify()
 
     funcs = [op for op in module.ops if isinstance(op, func.FuncOp)]
@@ -386,14 +386,13 @@ def test_launch_kernel_cost_func_builds_cost_functions_for_multi_kind_order() ->
         "_device_kernel",
         "_cost_compute__device_kernel",
         "_cost_memory__device_kernel",
-        "_cost_latency__device_kernel",
     ]
 
     printed = _print_ir(module)
-    for kind in ("compute", "memory", "latency"):
+    for kind in ("compute", "memory"):
         assert printed.count(f'cost_kind = "{kind}"') == 2
         assert f'_cost_{kind}__device_kernel' in printed
-    assert printed.count("tuner.cost") == 6
+    assert printed.count("tuner.cost") == 4
     assert "{kind =" not in printed
 
 
@@ -421,7 +420,7 @@ def test_launch_kernel_cost_func_shared_callee_once() -> None:
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-20 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-20 00:00:00 +0800
-# 功能说明: 验证空段 / 全空白 / 重复 `cost_kind` 报稳定错误短语。
+# 功能说明: 验证非法 `cost_kind` 报稳定错误短语。
 # 使用示例: pytest -q test/pass/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_rejects_invalid_cost_kind
 # 对应功能实现文件路径: kernel_gen/passes/tuning/launch_kernel_cost_func.py
 # 对应 spec 文件路径: spec/pass/tuning/launch_kernel_cost_func.md
@@ -429,16 +428,17 @@ def test_launch_kernel_cost_func_shared_callee_once() -> None:
 @pytest.mark.parametrize(
     "cost_kind",
     [
-        "",
-        "   ",
+        "invalid",
+        "compute|invalid",
         "compute||memory",
-        "compute| latency |compute",
+        "compute|memory|compute",
+        "kind2",
     ],
 )
 def test_launch_kernel_cost_func_rejects_invalid_cost_kind(cost_kind: str) -> None:
     with pytest.raises(
         LaunchKernelCostFuncError,
-        match=r"^LaunchKernelCostFuncError: cost_kind must be a non-empty '\|' separated list of unique kind names$",
+        match=r"^LaunchKernelCostFuncError: cost_kind must be one of compute, memory$",
     ):
         LaunchKernelCostFuncPass(cost_kind=cost_kind)
 
@@ -448,7 +448,7 @@ def test_launch_kernel_cost_func_rejects_invalid_cost_kind(cost_kind: str) -> No
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-20 00:00:00 +0800
 # 最近一次运行成功时间: 2026-04-20 00:00:00 +0800
-# 功能说明: 验证 registry 构造 launch-kernel-cost-func 时不会吞掉空段 / 重复 `cost_kind` 的业务错误。
+# 功能说明: 验证 registry 构造 launch-kernel-cost-func 时不会吞掉非法 `cost_kind` 的业务错误。
 # 使用示例: pytest -q test/pass/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_rejects_invalid_cost_kind_via_registry
 # 对应功能实现文件路径: kernel_gen/passes/registry.py
 # 对应 spec 文件路径: spec/pass/registry.md
@@ -458,9 +458,9 @@ def test_launch_kernel_cost_func_rejects_invalid_cost_kind_via_registry() -> Non
 
     with pytest.raises(
         LaunchKernelCostFuncError,
-        match=r"^LaunchKernelCostFuncError: cost_kind must be a non-empty '\|' separated list of unique kind names$",
+        match=r"^LaunchKernelCostFuncError: cost_kind must be one of compute, memory$",
     ):
-        build_registered_pass("launch-kernel-cost-func", {"cost_kind": "compute|latency|compute"})
+        build_registered_pass("launch-kernel-cost-func", {"cost_kind": "invalid"})
 
 
 # TC-LKCF-006

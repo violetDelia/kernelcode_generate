@@ -25,6 +25,7 @@
 
 - [`spec/include/api/Core.md`](../../../spec/include/api/Core.md)：`Vector`、`Status`、`StatusCode` 统一基础契约。
 - [`spec/include/api/Memory.md`](../../../spec/include/api/Memory.md)：`Memory<Space, T>`、`MemorySpace`、`get_shape/get_stride`、`view<T>`、`reshape` 统一语义。
+- [`spec/include/api/cost/Dma.md`](../../../spec/include/api/cost/Dma.md)：定义与当前 DMA 公共层对应的成本 helper 合同。
 - [`spec/operation/dma.md`](../../../spec/operation/dma.md)：高层 DMA 语义；同名概念需保持职责一致，但允许因分层不同而使用不同签名。
 
 ## 目标

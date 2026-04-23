@@ -21,6 +21,7 @@
 
 - [`spec/include/api/Core.md`](../../../spec/include/api/Core.md)：统一 `Status` / `StatusCode` 返回语义。
 - [`spec/include/api/Memory.md`](../../../spec/include/api/Memory.md)：统一 `Memory<Space, T>` / `MemorySpace` / `MemoryFormat` 语义。
+- [`spec/include/api/cost/Kernel.md`](../../../spec/include/api/cost/Kernel.md)：定义与当前 Kernel helper 一一对应的成本 helper 合同。
 - [`spec/dialect/kernel.md`](../../../spec/dialect/kernel.md)：`kernel.*` IR 到公开 helper 名的职责映射来源。
 - [`spec/dsl/emit_c.md`](../../../spec/dsl/emit_c.md)：冻结 `target=npu_demo` 下 `kernel.* -> npu_demo::<helper>` 的节点级文本合同。
 - [`spec/dsl/gen_kernel.md`](../../../spec/dsl/gen_kernel.md)：冻结 `target=npu_demo` 下函数级源码只消费本文件定义的公共 helper。

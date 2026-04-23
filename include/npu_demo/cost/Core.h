@@ -1,0 +1,24 @@
+/*
+功能说明:
+- 提供 include/api/cost/Core.h 的 npu_demo 默认承接层。
+- 当前只复用公共 `CostKind` 与 `S_INT`，不额外引入 target 私有 kind。
+
+使用示例:
+- #include "include/npu_demo/cost/Core.h"
+- npu_demo::cost::CostKind kind = npu_demo::cost::CostKind::Memory;
+
+创建者: 金铲铲大作战
+最后修改人: 金铲铲大作战
+
+关联文件:
+- spec: spec/include/api/cost/Core.md
+- test: test/include/npu_demo/test_cost.py
+- 功能实现: include/npu_demo/cost/Core.h
+*/
+
+#ifndef KERNELCODE_GENERATE_INCLUDE_NPU_DEMO_COST_CORE_H_
+#define KERNELCODE_GENERATE_INCLUDE_NPU_DEMO_COST_CORE_H_
+
+#include "include/api/cost/Core.h"
+
+#endif  // KERNELCODE_GENERATE_INCLUDE_NPU_DEMO_COST_CORE_H_

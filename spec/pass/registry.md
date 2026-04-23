@@ -56,7 +56,7 @@
   - `attach-arch-information`：把 target registry 的 launch extent 写回入口 `func.func`。
   - `tile-analysis` / `tile-elewise` / `tile-reduce`：tile family 的公开 `ModulePass` 名称，供 pytest 与工具层统一解析。
 - tuning pass `launch-kernel-cost-func` 属于 standalone pass，必须通过 pass registry 显式启用；不得自动进入任何默认 pipeline。
-- `launch-kernel-cost-func` 接受 `options={"cost_kind": "compute|memory|kind2|kind3"}`；非法 `cost_kind` 必须由 pass 构造入口或 pass 本身显式失败，registry 不吞掉该错误。
+- `launch-kernel-cost-func` 接受 `options={"cost_kind": "compute|memory"}`；非法 `cost_kind` 必须由 pass 构造入口或 pass 本身显式失败，registry 不吞掉该错误。
 - registry 不解析 `options` 的语义；`options` 仅按字典透传给 pass 或 pipeline 构造入口。
 
 ## 当前公开路径与迁移矩阵
@@ -201,7 +201,7 @@ pass_obj = build_registered_pass("tile-analysis")
 pass_obj = build_registered_pass("tile-reduce")
 inline_pass = build_registered_pass("inline")
 attach_pass = build_registered_pass("attach-arch-information")
-cost_pass = build_registered_pass("launch-kernel-cost-func", {"cost_kind": "compute|memory|kind2|kind3"})
+cost_pass = build_registered_pass("launch-kernel-cost-func", {"cost_kind": "compute|memory"})
 ```
 
 注意事项：
@@ -316,6 +316,6 @@ names = list_registered_passes()
 - 测试目标：
   - `register_pass/register_pipeline`：重复注册立即失败，错误短语可机械匹配。
   - `build_registered_pass/build_registered_pipeline`：未知名称、不可构造、选项不被接受、返回值非法路径报告稳定错误短语。
-- `launch-kernel-cost-func`：通过 `load_builtin_passes()` 后可查询；`cost_kind=compute|memory|kind2|kind3` 选项可透传构造；非法 `cost_kind` 不被 registry 层吞掉。
+- `launch-kernel-cost-func`：通过 `load_builtin_passes()` 后可查询；`cost_kind=compute|memory` 选项可透传构造；非法 `cost_kind` 不被 registry 层吞掉。
 - `tile-analysis` / `tile-elewise` / `tile-reduce`：通过 `load_builtin_passes()` 后可查询；三者均以 `ModulePass` 形式公开给 registry / pipeline / pytest 入口。
 - `list_registered_*`：返回值顺序确定且不含重复项。
