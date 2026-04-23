@@ -4,13 +4,17 @@
 
 - 定义 `tile-analysis` 的公开 `ModulePass` 合同。
 - 该 pass 只负责 analysis 标注，不生成 tile 改写结构。
+- 公开 `ModulePass` 壳与 analysis helper 分层实现：registry 对接保留在 `kernel_gen.passes.lowering.tile_analysis`，真实 analysis 标注落点位于 `kernel_gen.tile.analysis`。
 
 ## 文档信息
 
 - 创建者：`朽木露琪亚`
 - 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/pass/lowering/tile_analysis.md`](../../../spec/pass/lowering/tile_analysis.md)
-- `功能实现`：[`kernel_gen/passes/lowering/tile_analysis.py`](../../../kernel_gen/passes/lowering/tile_analysis.py)
+- `功能实现`：
+  - [`kernel_gen/passes/lowering/tile_analysis.py`](../../../kernel_gen/passes/lowering/tile_analysis.py)
+  - [`kernel_gen/tile/analysis.py`](../../../kernel_gen/tile/analysis.py)
+  - [`kernel_gen/tile/common.py`](../../../kernel_gen/tile/common.py)
 - `test`：[`test/pass/test_lowering_tile_analysis.py`](../../../test/pass/test_lowering_tile_analysis.py)
 
 ## 依赖
@@ -19,6 +23,8 @@
 - Pass / pipeline 注册表：[`spec/pass/registry.md`](../../../spec/pass/registry.md)
 - `tile` 总览：[`spec/pass/lowering/tile.md`](../../../spec/pass/lowering/tile.md)
 - `tuner.param` 与符号类型：[`spec/dialect/tuner.md`](../../../spec/dialect/tuner.md)
+- 共享 helper 落点：[`kernel_gen/tile/common.py`](../../../kernel_gen/tile/common.py)
+- analysis helper 落点：[`kernel_gen/tile/analysis.py`](../../../kernel_gen/tile/analysis.py)
 
 ## 术语
 
@@ -32,6 +38,7 @@
 - 只写 `tile.analysis` 与 `tile.tile_exprs`。
 - 不生成 `symbol.for`、`dma.view` 或其他 tile 改写结构。
 - 作为 `ModulePass` 通过 `apply(ctx, module)` 执行。
+- 公开构造入口固定为 `build_registered_pass("tile-analysis")`；具体 pass shell module path 不属于公开合同。
 
 ## 限制与边界
 
@@ -39,6 +46,7 @@
 - 仅处理满足 tile analysis 输入合同的单函数 IR。
 - 若输入仍残留 `nn.*` 或 memory-return ABI，必须失败。
 - 不承诺执行 tile 改写，不承诺生成 loop/view/helper。
+- `kernel_gen.passes.lowering.tile_analysis` 只承担公开 `ModulePass` 壳与 registry 对接；共享 helper 依赖应落在 `kernel_gen.tile.analysis` 与 `kernel_gen.tile.common`。
 
 ## 公开接口
 
@@ -57,10 +65,10 @@
 ```python
 from xdsl.context import Context
 from xdsl.dialects.builtin import ModuleOp
-from kernel_gen.passes.lowering.tile_analysis import TileAnalysisPass
+from kernel_gen.passes.registry import build_registered_pass
 
 module = ModuleOp([])
-TileAnalysisPass().apply(Context(), module)
+build_registered_pass("tile-analysis").apply(Context(), module)
 ```
 
 返回与限制：

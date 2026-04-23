@@ -5,19 +5,30 @@
 - `tile-reduce` 是 tile family 中面向 `kernel.matmul` reduce 轴的公开 `ModulePass`。
 - 它消费已有 `tile.analysis` 与 `tile.tile_exprs` 输入合同，在外层 elewise 轴和内层 reduce 轴生成 `symbol.for + dma.view + dma.fill + dma.alloc` 结构。
 - 生成后的 `kernel.matmul` 与累加 `kernel.binary_elewise` 继续保留在同一 `func.func` 中，供后续 codegen 按 split-after-IR 结果处理。
+- 公开 `ModulePass` 壳与 reduce rewrite helper 分层实现：registry 对接保留在 `kernel_gen.passes.lowering.tile_reduce`，真实 rewrite 落点位于 `kernel_gen.tile.reduce` 与 `kernel_gen.tile.common`。
 
 ## 文档信息
 
 - 创建者：`金铲铲大作战`
 - 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/pass/lowering/tile_reduce.md`](../../../spec/pass/lowering/tile_reduce.md)
-- `功能实现`：[`kernel_gen/passes/lowering/tile_reduce.py`](../../../kernel_gen/passes/lowering/tile_reduce.py)
-- `test`：[`test/pass/test_lowering_tile_reduce.py`](../../../test/pass/test_lowering_tile_reduce.py)
+- `功能实现`：
+  - [`kernel_gen/passes/lowering/tile_reduce.py`](../../../kernel_gen/passes/lowering/tile_reduce.py)
+  - [`kernel_gen/tile/reduce.py`](../../../kernel_gen/tile/reduce.py)
+  - [`kernel_gen/tile/common.py`](../../../kernel_gen/tile/common.py)
+- `test`：
+  - [`test/pass/test_lowering_tile_reduce.py`](../../../test/pass/test_lowering_tile_reduce.py)
+  - [`test/pass/test_pass_registry.py`](../../../test/pass/test_pass_registry.py)
+  - [`test/pass/test_pass_manager.py`](../../../test/pass/test_pass_manager.py)
+  - [`test/dsl/test_gen_kernel.py`](../../../test/dsl/test_gen_kernel.py)
 
 ## 依赖
 
 - tile family 索引页：[`spec/pass/lowering/tile.md`](../../../spec/pass/lowering/tile.md)
 - tile-analysis 先行合同：[`spec/pass/lowering/tile_analysis.md`](../../../spec/pass/lowering/tile_analysis.md)
+- analysis helper 落点：[`kernel_gen/tile/analysis.py`](../../../kernel_gen/tile/analysis.py)
+- 共享 helper 落点：[`kernel_gen/tile/common.py`](../../../kernel_gen/tile/common.py)
+- reduce rewrite 落点：[`kernel_gen/tile/reduce.py`](../../../kernel_gen/tile/reduce.py)
 - 后端源码生成：[`spec/dsl/gen_kernel.md`](../../../spec/dsl/gen_kernel.md)
 - pass registry：[`spec/pass/registry.md`](../../../spec/pass/registry.md)
 - pass manager：[`spec/pass/pass_manager.md`](../../../spec/pass/pass_manager.md)
@@ -37,6 +48,7 @@
 - 对输出 tile 先执行 `dma.fill`，再在 reduce 循环内执行 tiled matmul 和累加。
 - rewritten matmul 必须继续保留 `tile.analysis + tile.tile_exprs`，其中 matmul 的三个 operand 行均写入输出 tile 表达。
 - 不生成历史桥接 op；tile 因子只通过 `tuner.param : !symbol.int<"...">` 与 `symbol.for` 公开。
+- 公开构造入口固定为 `build_registered_pass("tile-reduce")`；具体 pass shell module path 不属于公开合同。
 
 ## 限制与边界
 
@@ -46,6 +58,7 @@
 - 缺少 `tile.analysis` 的 matmul 必须显式失败，不得静默跳过。
 - `tile-reduce` 只负责 reduce 改写，不负责重新推导 analysis。
 - 当前 pass 不承诺处理 `kernel.reduce`、`kernel.reduce_min` 或其他 reduce op。
+- `kernel_gen.passes.lowering.tile_reduce` 只承担公开 `ModulePass` 壳与 registry 对接；共享 helper 与 reduce rewrite 实现依赖应落在 `kernel_gen.tile.reduce` 与 `kernel_gen.tile.common`。
 
 ## 公开接口
 
@@ -65,11 +78,10 @@
 
 ```python
 from xdsl.context import Context
-from kernel_gen.passes.lowering.tile_analysis import TileAnalysisPass
-from kernel_gen.passes.lowering.tile_reduce import TileReducePass
+from kernel_gen.passes.registry import build_registered_pass
 
-TileAnalysisPass().apply(Context(), module)
-TileReducePass().apply(Context(), module)
+build_registered_pass("tile-analysis").apply(Context(), module)
+build_registered_pass("tile-reduce").apply(Context(), module)
 ```
 
 注意事项：
@@ -135,4 +147,4 @@ symbol.for %d0 = %c0 to %m step %tile_d0 {
   - 验证 `TileReducePass` 可作为 `ModulePass` 由 registry 构造。
   - 验证 `tile-reduce` 对 `kernel.matmul` 生成输出轴与 reduce 轴切分结构。
   - 验证 rewritten `kernel.matmul` 继续保留 `tile.analysis + tile.tile_exprs`。
-  - 验证 `gen_kernel(...)` 可消费 `tuner.param + symbol.for + dma.view` 组成的 split-after-IR 输入。
+  - 验证 `gen_kernel(...)` 可消费 `tuner.param + symbol.for + dma.view` 组成的 split-after-IR 输入，而不依赖旧 mixed helper path。

@@ -1,10 +1,10 @@
-"""tile lowering private helper tests.
+"""tile lowering canonical helper tests.
 
 创建者: 金铲铲大作战
 最后一次更改: 金铲铲大作战
 
 功能说明:
-- 直接覆盖 `kernel_gen.passes.lowering.tile` 的 plan / rewrite / analysis 清理 helper。
+- 直接覆盖 `kernel_gen.tile.common` 的 plan / rewrite / analysis 清理 helper。
 - 锁定 tile pass 的非法输入、no-op、symbol/view 与 analysis 角色边界。
 - 这些测试只依赖本地 pytest，不依赖 expectation 旧合同路径。
 
@@ -12,7 +12,7 @@
 - pytest -q test/pass/test_lowering_tile_private_helpers.py
 
 关联文件:
-- 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
+- 功能实现: [kernel_gen/tile/common.py](kernel_gen/tile/common.py)
 - Spec 文档: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
 - 测试文件: [test/pass/test_lowering_tile_private_helpers.py](test/pass/test_lowering_tile_private_helpers.py)
 """
@@ -36,7 +36,7 @@ if str(REPO_ROOT) not in sys.path:
 
 tile_analysis_helpers = importlib.import_module("test.pass.test_lowering_tile_analysis")
 tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
-tile_module = importlib.import_module("kernel_gen.passes.lowering.tile")
+tile_module = importlib.import_module("kernel_gen.tile.common")
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaFillOp, DmaViewOp
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp, KernelMatmulOp

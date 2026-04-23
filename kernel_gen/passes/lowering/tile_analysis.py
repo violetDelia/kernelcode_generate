@@ -18,6 +18,7 @@
 - spec: [spec/pass/lowering/tile_analysis.md](spec/pass/lowering/tile_analysis.md)
 - test: [test/pass/test_lowering_tile_analysis.py](test/pass/test_lowering_tile_analysis.py)
 - 功能实现: [kernel_gen/passes/lowering/tile_analysis.py](kernel_gen/passes/lowering/tile_analysis.py)
+- 功能实现: [kernel_gen/tile/analysis.py](kernel_gen/tile/analysis.py)
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from xdsl.context import Context
 from xdsl.dialects.builtin import ModuleOp
 from xdsl.passes import ModulePass
 
-from . import tile as tile_module
+from kernel_gen.tile import analysis as tile_analysis_impl
 
 
 class TileAnalysisPass(ModulePass):
@@ -70,17 +71,11 @@ class TileAnalysisPass(ModulePass):
         - spec: [spec/pass/lowering/tile_analysis.md](spec/pass/lowering/tile_analysis.md)
         - test: [test/pass/test_lowering_tile_analysis.py](test/pass/test_lowering_tile_analysis.py)
         - 功能实现: [kernel_gen/passes/lowering/tile_analysis.py](kernel_gen/passes/lowering/tile_analysis.py)
+        - 功能实现: [kernel_gen/tile/analysis.py](kernel_gen/tile/analysis.py)
         """
 
         del ctx
-        if not isinstance(module, ModuleOp):
-            tile_module._raise_tile_error("TilePassRequiresLoweredKernelIR", "module must be builtin.module")
-        for op in module.ops:
-            if not isinstance(op, tile_module.func.FuncOp):
-                continue
-            block = tile_module._get_single_block(op)
-            tile_module._validate_input_contract(op, block)
-            tile_module._annotate_tile_analysis(block)
+        tile_analysis_impl.apply_tile_analysis(module)
 
 
 __all__ = ["TileAnalysisPass"]

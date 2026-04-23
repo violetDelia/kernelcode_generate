@@ -4,12 +4,12 @@
 最后一次更改: 朽木露琪亚
 
 功能说明:
-- 为 `tile-analysis` / `tile-elewise` / `tile-reduce` 提供共享校验、分析和改写 helper。
+- 为 `tile-analysis` / `tile-elewise` / `tile-reduce` 提供兼容 helper 实现来源。
 - 统一维护 `tile.analysis` / `tile.tile_exprs` 合同与 tile loop/view 组装逻辑。
-- 不再公开历史 pass 入口与旧 bridge 合同。
+- canonical helper path 已收口到 `kernel_gen.tile.common`，本模块只保留兼容 helper 入口。
 
 使用示例:
-- from kernel_gen.passes.lowering import tile as tile_module
+- from kernel_gen.tile import common as tile_module
 - plans, ordered_tile_names = tile_module._plan_tile_ops(func_op, block, tile_reduce=False)
 
 关联文件:

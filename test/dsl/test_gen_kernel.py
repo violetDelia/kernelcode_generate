@@ -107,6 +107,10 @@ tile_analysis_helpers = importlib.import_module("test.pass.test_lowering_tile_an
 tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
 tile_elewise_module = importlib.import_module("kernel_gen.passes.lowering.tile_elewise")
 tile_reduce_module = importlib.import_module("kernel_gen.passes.lowering.tile_reduce")
+tile_common_module = importlib.import_module("kernel_gen.tile.common")
+tile_analysis_impl = importlib.import_module("kernel_gen.tile.analysis")
+tile_elewise_impl = importlib.import_module("kernel_gen.tile.elewise")
+tile_reduce_impl = importlib.import_module("kernel_gen.tile.reduce")
 TileAnalysisPass = tile_analysis_module.TileAnalysisPass
 TileElewisePass = tile_elewise_module.TileElewisePass
 TileReducePass = tile_reduce_module.TileReducePass
@@ -497,6 +501,36 @@ def _tile_reduce_func(module: ModuleOp) -> func.FuncOp:
     TileAnalysisPass().apply(ctx, module)
     TileReducePass().apply(ctx, module)
     return next(op for op in module.ops if isinstance(op, func.FuncOp))
+
+
+def test_tile_gen_kernel_paths_use_kernel_gen_tile_modules() -> None:
+    """验证 tile family 的 canonical helper / implementation path 已收口到 `kernel_gen.tile.*`。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 锁定 `tile-analysis` / `tile-elewise` / `tile-reduce` 的真实实现落点已迁到 `kernel_gen.tile.*`。
+    - 同时验证 canonical common path 仍复用稳定的 `_plan_tile_ops` helper，避免在 S4 里误做 logic rewrite。
+
+    使用示例:
+    - pytest -q test/dsl/test_gen_kernel.py -k test_tile_gen_kernel_paths_use_kernel_gen_tile_modules
+
+    关联文件:
+    - spec: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
+    - test: [test/dsl/test_gen_kernel.py](test/dsl/test_gen_kernel.py)
+    - 功能实现: [kernel_gen/tile/common.py](kernel_gen/tile/common.py)
+    - 功能实现: [kernel_gen/tile/analysis.py](kernel_gen/tile/analysis.py)
+    - 功能实现: [kernel_gen/tile/elewise.py](kernel_gen/tile/elewise.py)
+    - 功能实现: [kernel_gen/tile/reduce.py](kernel_gen/tile/reduce.py)
+    """
+
+    legacy_tile_module = importlib.import_module("kernel_gen.passes.lowering.tile")
+
+    assert callable(tile_analysis_impl.apply_tile_analysis)
+    assert callable(tile_elewise_impl.apply_tile_elewise)
+    assert callable(tile_reduce_impl.apply_tile_reduce)
+    assert tile_common_module._plan_tile_ops is legacy_tile_module._plan_tile_ops
 
 
 def _compile_and_run(source: str) -> None:
