@@ -9,14 +9,14 @@
 - 支持直线路径的 pool 改写：`dma.alloc -> i8 byte pool + dma.view`。
 
 使用示例:
-- from kernel_gen.passes.lowering.memory_pool import MemoryPoolPass
+- from kernel_gen.passes.memory_pool import MemoryPoolPass
 - module = MemoryPoolPass(rewrite=False).run(module)
 - summary = MemoryPoolPass(rewrite=False).get_summary("main")
 
 关联文件:
 - spec: spec/pass/lowering/memory_pool.md
 - test: test/pass/test_memory_pool.py
-- 功能实现: kernel_gen/passes/lowering/memory_pool.py
+- 功能实现: kernel_gen/passes/memory_pool.py
 """
 
 from __future__ import annotations
@@ -63,7 +63,7 @@ class MemoryPoolError(ValueError):
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
 
@@ -83,7 +83,7 @@ class MemoryPoolInterval:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     name: str
@@ -110,7 +110,7 @@ class _AllocInfo:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     alloc_op: DmaAllocOp
@@ -138,7 +138,7 @@ class MemoryPoolSummary:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     func_name: str
@@ -161,7 +161,7 @@ class MemoryPoolSummary:
         关联文件:
         - spec: spec/pass/lowering/memory_pool.md
         - test: test/pass/test_memory_pool.py
-        - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+        - 功能实现: kernel_gen/passes/memory_pool.py
         """
 
         lines: list[str] = [f"func_name = {self.func_name}"]
@@ -203,7 +203,7 @@ class MemoryPoolPass(Pass):
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     name = "memory-pool"
@@ -227,7 +227,7 @@ class MemoryPoolPass(Pass):
         关联文件:
         - spec: spec/pass/lowering/memory_pool.md
         - test: test/pass/test_memory_pool.py
-        - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+        - 功能实现: kernel_gen/passes/memory_pool.py
         """
 
         if func_name not in self._summaries:
@@ -249,7 +249,7 @@ class MemoryPoolPass(Pass):
         关联文件:
         - spec: spec/pass/lowering/memory_pool.md
         - test: test/pass/test_memory_pool.py
-        - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+        - 功能实现: kernel_gen/passes/memory_pool.py
         """
 
         return dict(self._summaries)
@@ -269,7 +269,7 @@ class MemoryPoolPass(Pass):
         关联文件:
         - spec: spec/pass/lowering/memory_pool.md
         - test: test/pass/test_memory_pool.py
-        - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+        - 功能实现: kernel_gen/passes/memory_pool.py
         """
 
         if not isinstance(module, ModuleOp):
@@ -310,7 +310,7 @@ def _expr_text(expr: sp.Basic) -> str:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     return str(expr)
@@ -331,7 +331,7 @@ def _bucket_text(bucket: tuple[str]) -> str:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     if len(bucket) == 1:
@@ -354,7 +354,7 @@ def _space_token(mem_type: NnMemoryType) -> str:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     raw = mem_type.space.space.data
@@ -376,7 +376,7 @@ def _dtype_string(element_type: Attribute) -> str:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     return str(element_type)
@@ -397,7 +397,7 @@ def _element_size(element_type: Attribute) -> int | None:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     if isinstance(element_type, IntegerType):
@@ -435,7 +435,7 @@ def _layout_family(mem_type: NnMemoryType) -> str:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     if not _is_contiguous(mem_type):
@@ -461,7 +461,7 @@ def _dim_expr(dim: Attribute) -> sp.Basic:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     if isinstance(dim, IntAttr):
@@ -488,7 +488,7 @@ def _shape_product(mem_type: NnMemoryType) -> sp.Basic:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     result: sp.Basic = sp.Integer(1)
@@ -512,7 +512,7 @@ def _maybe_int(expr: sp.Basic) -> int | None:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     if isinstance(expr, sp.Integer):
@@ -543,7 +543,7 @@ def _const_symbol_int(value: int) -> tuple[arith.ConstantOp, UnrealizedConversio
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     const = arith.ConstantOp(IntegerAttr(value, i32))
@@ -569,7 +569,7 @@ def _symbol_value_expr(expr: str) -> tuple[list[Operation], SSAValue]:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     try:
@@ -601,7 +601,7 @@ def _symbol_expr(expr: sp.Basic) -> tuple[list[Operation], SSAValue]:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     return _symbol_value_expr(_expr_text(expr))
@@ -623,7 +623,7 @@ def _shape_dim_attr(expr: sp.Basic) -> Attribute:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     if isinstance(expr, sp.Integer):
@@ -647,7 +647,7 @@ def _layout_operands(layout: ArrayAttr[Attribute]) -> tuple[list[Operation], lis
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     ops: list[Operation] = []
@@ -674,7 +674,7 @@ def _bucket_key(mem_type: NnMemoryType) -> tuple[str]:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     _layout_family(mem_type)
@@ -696,7 +696,7 @@ def _collect_ops(block: Block) -> list[Operation]:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     ops: list[Operation] = []
@@ -723,7 +723,7 @@ def _parent_block(op: Operation) -> Block | None:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     return getattr(op, "parent_block", lambda: None)()
@@ -749,7 +749,7 @@ def _collect_ops_with_loops(
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     ops: list[Operation] = []
@@ -809,7 +809,7 @@ def _collect_straight_line_ops(
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     if len(func_op.body.blocks) != 1:
@@ -841,7 +841,7 @@ def _has_escaping_use(
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     alloc_loop = op_loop.get(alloc_op)
@@ -872,7 +872,7 @@ def _assign_slots(
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     ordered = sorted(items, key=lambda item: (item[0], item[1]))
@@ -916,7 +916,7 @@ def _alloc_name(value: SSAValue, index: int) -> str:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     name_hint = getattr(value, "name_hint", None)
@@ -940,7 +940,7 @@ def _peak_bytes(intervals: list[MemoryPoolInterval]) -> sp.Basic:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     if not intervals:
@@ -977,7 +977,7 @@ def _summarize_func(func_op: func.FuncOp) -> MemoryPoolSummary:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     ops, loop_bounds, op_loop = _collect_ops_with_loops(
@@ -1106,7 +1106,7 @@ def _rewrite_func(func_op: func.FuncOp) -> None:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     block, ops, op_index, loop_bounds, op_loop = _collect_straight_line_ops(func_op)

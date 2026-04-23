@@ -12,12 +12,13 @@
 - 创建者：`咯咯咯`
 - 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/pass/lowering/dma_memory_hierarchy.md`](../../../spec/pass/lowering/dma_memory_hierarchy.md)
-- `功能实现`：[`kernel_gen/passes/lowering/dma_memory_hierarchy.py`](../../../kernel_gen/passes/lowering/dma_memory_hierarchy.py)
+- `功能实现`：[`kernel_gen/passes/dma_memory_hierarchy.py`](../../../kernel_gen/passes/dma_memory_hierarchy.py)
 - `test`：[`test/pass/test_dma_memory_hierarchy.py`](../../../test/pass/test_dma_memory_hierarchy.py)
 
 ## 依赖
 
 - Pass 管理器：[`spec/pass/pass_manager.md`](../../../spec/pass/pass_manager.md)
+- pass registry：[`spec/pass/registry.md`](../../../spec/pass/registry.md)
 - `nn -> kernel` lowering：[`spec/pass/lowering/nn_lowering.md`](../../../spec/pass/lowering/nn_lowering.md)
 - `memory-return` ABI 收口：[`spec/pass/lowering/buffer_results_to_out_params.md`](../../../spec/pass/lowering/buffer_results_to_out_params.md)
 - DMA dialect：[`spec/dialect/dma.md`](../../../spec/dialect/dma.md)
@@ -47,6 +48,7 @@
 - 处理后的 `kernel.*` operand/out 只允许 `LM` memory；不得保留 `GM/SM` 作为计算或写回空间。
 - staging `dma.alloc` 的 `dynamic_shape` 必须来自已有显式 symbol 来源：full-window 路径只能使用 `symbol.get_dim` 从显式 shape 条目取值，window 路径只能使用 `dma.view.shape` 等现成 SSA shape 操作数；匿名 `?` 且无可恢复来源时必须显式失败。
 - 目标不支持 `SM` 或 `LM` 时必须显式失败，禁止静默降级；失败短语必须包含 `dynamic_shape` / `SM` / `LM` 关键字之一。
+- 公开导入入口固定为 `kernel_gen.passes.dma_memory_hierarchy`；`kernel_gen.passes.lowering.dma_memory_hierarchy` 不再属于公开合同，必须以 `ModuleNotFoundError` 失败。
 
 ## 公开接口
 
@@ -65,7 +67,7 @@
 
 ```python
 from kernel_gen.passes.buffer_results_to_out_params import BufferResultsToOutParamsPass
-from kernel_gen.passes.lowering.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
+from kernel_gen.passes.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
 from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 from kernel_gen.passes.pass_manager import PassManager
 
@@ -165,6 +167,7 @@ dma.deslice(%sm, %gm, zero_offsets, full_sizes, unit_strides)
   - 验证窗口链路中 `GM -> SM` / `SM -> GM` 保留原窗口 `offsets/sizes` 且保持 unit stride，而 `SM -> LM` / `LM -> SM` 固定为 `zero offsets + unit strides`。
   - 验证显式 symbol shape 可透传到 staging `dma.alloc(dynamic_shape=...)`。
   - 验证匿名 `?` 且无可恢复 shape 来源时显式失败，并包含 `dynamic_shape` 关键字。
+  - 验证公开导入入口使用 `kernel_gen.passes.dma_memory_hierarchy`，旧 lowering 路径失败边界由 `test/pass/test_pass_registry.py` 与 `test/pass/test_pass_manager.py` 单列锁定。
 - 功能与用例清单：
 
 | 用例 ID | 约束点 | 对应测试 |

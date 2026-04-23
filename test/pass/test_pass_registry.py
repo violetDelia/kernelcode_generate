@@ -355,7 +355,7 @@ def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
         (
             "kernel_gen.passes.lowering",
             "LowerDmaMemoryHierarchyPass",
-            importlib.import_module("kernel_gen.passes.lowering.dma_memory_hierarchy").LowerDmaMemoryHierarchyPass,
+            importlib.import_module("kernel_gen.passes.dma_memory_hierarchy").LowerDmaMemoryHierarchyPass,
         ),
         (
             "kernel_gen.passes.lowering",
@@ -378,14 +378,14 @@ def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
             importlib.import_module("kernel_gen.passes.buffer_results_to_out_params").BufferResultsToOutParamsPass,
         ),
         (
-            "kernel_gen.passes.lowering.dma_memory_hierarchy",
+            "kernel_gen.passes.dma_memory_hierarchy",
             "LowerDmaMemoryHierarchyPass",
-            importlib.import_module("kernel_gen.passes.lowering.dma_memory_hierarchy").LowerDmaMemoryHierarchyPass,
+            importlib.import_module("kernel_gen.passes.dma_memory_hierarchy").LowerDmaMemoryHierarchyPass,
         ),
         (
-            "kernel_gen.passes.lowering.memory_pool",
+            "kernel_gen.passes.memory_pool",
             "MemoryPoolPass",
-            importlib.import_module("kernel_gen.passes.lowering.memory_pool").MemoryPoolPass,
+            importlib.import_module("kernel_gen.passes.memory_pool").MemoryPoolPass,
         ),
         (
             "kernel_gen.passes.lowering.nn_to_kernel",
@@ -638,6 +638,8 @@ def test_registry_old_lowering_paths_fail_fast() -> None:
         "kernel_gen.passes.lowering.inline",
         "kernel_gen.passes.lowering.attach_arch_information",
         "kernel_gen.passes.lowering.decompass",
+        "kernel_gen.passes.lowering.dma_memory_hierarchy",
+        "kernel_gen.passes.lowering.memory_pool",
     )
 
     for module_name in old_module_paths:

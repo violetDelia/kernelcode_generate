@@ -9,15 +9,16 @@
 ## 文档信息
 
 - 创建者：`金铲铲大作战`
-- 最后一次更改：`金铲铲大作战`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/pass/lowering/memory_pool.md`](../../../spec/pass/lowering/memory_pool.md)
-- `功能实现`：[`kernel_gen/passes/lowering/memory_pool.py`](../../../kernel_gen/passes/lowering/memory_pool.py)
+- `功能实现`：[`kernel_gen/passes/memory_pool.py`](../../../kernel_gen/passes/memory_pool.py)
 - `test`：[`test/pass/test_memory_pool.py`](../../../test/pass/test_memory_pool.py)
 
 ## 依赖
 
 - `dma` dialect：[`kernel_gen/dialect/dma.py`](../../../kernel_gen/dialect/dma.py)
 - `nn` memory type：[`kernel_gen/dialect/nn.py`](../../../kernel_gen/dialect/nn.py)
+- pass registry：[`spec/pass/registry.md`](../../../spec/pass/registry.md)
 - `func.func`：`xdsl.dialects.func`
 - `sympy` 表达式库
 
@@ -44,6 +45,7 @@
 - 当 interval 在上述索引模型中可证明不重叠时，允许它们共享同一个 `offset_bytes_expr`（体现 byte pool 的复用）。
 - 参与改写的 alloc 必须同 bucket、相同字节 size 表达式；生命周期重叠会分配不同 offset。
 - pool 采用 1-D `i8` byte pool，并通过 `dma.view` 恢复原始类型。
+- 公开导入入口固定为 `kernel_gen.passes.memory_pool`；`kernel_gen.passes.lowering.memory_pool` 不再属于公开合同，必须以 `ModuleNotFoundError` 失败。
 - 当 lowering pipeline 同时包含 tile family、`SymbolLoopHoistPass`、`LowerDmaMemoryHierarchyPass` 时，`MemoryPoolPass` 的相对顺序要求为：
   - `tile family -> SymbolLoopHoistPass -> MemoryPoolPass -> LowerDmaMemoryHierarchyPass`
 
@@ -63,7 +65,7 @@
 使用示例：
 
 ```python
-from kernel_gen.passes.lowering.memory_pool import MemoryPoolPass
+from kernel_gen.passes.memory_pool import MemoryPoolPass
 
 pass_obj = MemoryPoolPass(rewrite=False)
 pass_obj.run(module)
@@ -285,6 +287,7 @@ raise MemoryPoolError("MemoryPoolInvalidLifetime: dma.free not found for alloc")
   - 验证直线路径改写生成 pool/view。
   - 验证 `symbol.for` 的 lifecycle 计算与 offset 复用。
   - 验证拒绝路径短语稳定。
+  - 验证公开导入入口使用 `kernel_gen.passes.memory_pool`，旧 lowering 路径失败边界由 `test/pass/test_pass_registry.py` 单列锁定。
 - 功能与用例清单：
   - `test_memory_pool_summary_basic`
   - `test_memory_pool_interval_indices`

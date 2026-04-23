@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`李白`
-- 最后一次更改：`金铲铲大作战`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/pass/pass_manager.md`](../../spec/pass/pass_manager.md)
 - `功能实现`：[`kernel_gen/passes/pass_manager.py`](../../kernel_gen/passes/pass_manager.py)
 - `test`：[`test/pass/test_pass_manager.py`](../../test/pass/test_pass_manager.py)
@@ -42,20 +42,22 @@
 - 当 lowering 链包含 `LowerDmaMemoryHierarchyPass` 时，manager 只冻结其排序边界；是否注册该 pass 仍由调用方决定。
 - 当 lowering 链包含 tile family 时，manager 只固定 tile family 与 out-params / dma hierarchy / symbol-loop-hoist 的相对边界；是否注册具体 tile pass 仍由调用方决定。
 
-## S1 冻结的调用边界
+## 当前调用边界
 
 - `PassManager` 与 legacy `Pass` 的 canonical public path 固定为 `kernel_gen.passes.pass_manager`。
 - default / npu-demo pipeline builder 的 canonical public path 固定为 `kernel_gen.passes.pipeline`。
+- `LowerDmaMemoryHierarchyPass` 与 `MemoryPoolPass` 的 canonical public path 固定为 `kernel_gen.passes.dma_memory_hierarchy` 与 `kernel_gen.passes.memory_pool`。
 - 当前仍允许 pass manager caller 通过下列活跃模块导入 lowering family：
   - `kernel_gen.passes.lowering`
   - `kernel_gen.passes.lowering.tile_analysis`
   - `kernel_gen.passes.lowering.tile_elewise`
   - `kernel_gen.passes.lowering.tile_reduce`
-  - `kernel_gen.passes.lowering.dma_memory_hierarchy`
-- 以下旧路径在 `S1` 当前基线中必须稳定失败：
+- 以下旧路径在当前基线中必须稳定失败：
   - `kernel_gen.passes.lowering.pass_manager`
   - `kernel_gen.passes.lowering.registry`
-- `S1` 只冻结当前 import baseline；`S2+` 若继续收窄 compat shim，必须同步更新 `spec + pytest + 任务记录`。
+  - `kernel_gen.passes.lowering.dma_memory_hierarchy`
+  - `kernel_gen.passes.lowering.memory_pool`
+- `LowerDmaMemoryHierarchyPass` 与 `MemoryPoolPass` 的调用方不得再把 lowering compat 路径当作主入口；若需要添加这两个 pass，应从上级模块导入后再交给 `PassManager`。
 
 ## 公开接口
 

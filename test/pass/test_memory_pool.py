@@ -11,13 +11,13 @@
 - pytest -q test/pass/test_memory_pool.py -k "summary or interval or peak"
 
 当前覆盖率信息:
-- `kernel_gen.passes.lowering.memory_pool`：`未采集`（新增测试，待补充统计）。
+- `kernel_gen.passes.memory_pool`：`未采集`（新增测试，待补充统计）。
 
 覆盖率命令:
-- `pytest --cov=kernel_gen.passes.lowering.memory_pool --cov-report=term-missing -q test/pass/test_memory_pool.py`
+- `pytest --cov=kernel_gen.passes.memory_pool --cov-report=term-missing -q test/pass/test_memory_pool.py`
 
 关联文件:
-- 功能实现: kernel_gen/passes/lowering/memory_pool.py
+- 功能实现: kernel_gen/passes/memory_pool.py
 - Spec 文档: spec/pass/lowering/memory_pool.md
 - 测试文件: test/pass/test_memory_pool.py
 """
@@ -43,7 +43,7 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.dialect.dma import DmaAllocOp, DmaFreeOp, DmaViewOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolForOp, SymbolIterType, SymbolValueType
-from kernel_gen.passes.lowering.memory_pool import MemoryPoolError, MemoryPoolPass
+from kernel_gen.passes.memory_pool import MemoryPoolError, MemoryPoolPass
 
 
 def _make_space(space: str = "global") -> NnMemorySpaceAttr:
@@ -61,7 +61,7 @@ def _make_space(space: str = "global") -> NnMemorySpaceAttr:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     return NnMemorySpaceAttr.from_name(space)
@@ -87,7 +87,7 @@ def _make_memory_type(
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     return NnMemoryType(
@@ -113,7 +113,7 @@ def _make_symbol_operands(values: list[int | str]) -> list[SSAValue]:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     operands: list[SSAValue] = []
@@ -138,7 +138,7 @@ def _symbol_value(expr: int | str) -> SSAValue:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     return _TestOp(result_types=[SymbolValueType.from_expr(str(expr))]).results[0]
@@ -159,7 +159,7 @@ def _collect_ops_recursive(block: Block) -> list[Operation]:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     ops: list[Operation] = []
@@ -186,7 +186,7 @@ def _build_module(func_name: str, ops: list[Operation]) -> ModuleOp:
     关联文件:
     - spec: spec/pass/lowering/memory_pool.md
     - test: test/pass/test_memory_pool.py
-    - 功能实现: kernel_gen/passes/lowering/memory_pool.py
+    - 功能实现: kernel_gen/passes/memory_pool.py
     """
 
     block = Block()
@@ -203,7 +203,7 @@ def _build_module(func_name: str, ops: list[Operation]) -> ModuleOp:
 # 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
 # 功能说明: 验证 MemoryPoolPass 生成 summary 与 bucket 信息稳定。
 # 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_summary_basic
-# 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
 # 对应测试文件路径: test/pass/test_memory_pool.py
 def test_memory_pool_summary_basic() -> None:
@@ -234,7 +234,7 @@ def test_memory_pool_summary_basic() -> None:
 # 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
 # 功能说明: 验证 interval 的 begin/end 索引随词法顺序变化。
 # 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_interval_indices
-# 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
 # 对应测试文件路径: test/pass/test_memory_pool.py
 def test_memory_pool_interval_indices() -> None:
@@ -259,7 +259,7 @@ def test_memory_pool_interval_indices() -> None:
 # 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
 # 功能说明: 验证重叠区间的 peak 统计正确。
 # 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_peak_overlap
-# 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
 # 对应测试文件路径: test/pass/test_memory_pool.py
 def test_memory_pool_peak_overlap() -> None:
@@ -285,7 +285,7 @@ def test_memory_pool_peak_overlap() -> None:
 # 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
 # 功能说明: 验证直线路径改写生成 pool + view。
 # 使用示例: pytest -q test/pass/test_memory_pool.py -k "rewrite and straight_line"
-# 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
 # 对应测试文件路径: test/pass/test_memory_pool.py
 def test_memory_pool_rewrite_straight_line_pool_reuse() -> None:
@@ -325,7 +325,7 @@ def test_memory_pool_rewrite_straight_line_pool_reuse() -> None:
 # 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
 # 功能说明: 验证直线路径多 bucket 会报错。
 # 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_rewrite_multiple_buckets
-# 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
 # 对应测试文件路径: test/pass/test_memory_pool.py
 def test_memory_pool_rewrite_multiple_buckets() -> None:
@@ -353,7 +353,7 @@ def test_memory_pool_rewrite_multiple_buckets() -> None:
 # 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
 # 功能说明: 验证直线路径 size 不一致会报错。
 # 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_rewrite_size_mismatch
-# 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
 # 对应测试文件路径: test/pass/test_memory_pool.py
 def test_memory_pool_rewrite_size_mismatch() -> None:
@@ -381,7 +381,7 @@ def test_memory_pool_rewrite_size_mismatch() -> None:
 # 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
 # 功能说明: 验证直线路径生命周期重叠会分配不同 offset 并成功改写。
 # 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_rewrite_overlap
-# 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
 # 对应测试文件路径: test/pass/test_memory_pool.py
 def test_memory_pool_rewrite_overlap() -> None:
@@ -414,7 +414,7 @@ def test_memory_pool_rewrite_overlap() -> None:
 # 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
 # 功能说明: 验证多 block 直线路径改写会报错。
 # 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_rewrite_multiple_blocks
-# 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
 # 对应测试文件路径: test/pass/test_memory_pool.py
 def test_memory_pool_rewrite_multiple_blocks() -> None:
@@ -444,7 +444,7 @@ def test_memory_pool_rewrite_multiple_blocks() -> None:
 # 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
 # 功能说明: 验证非 builtin.module 输入会报错。
 # 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_invalid_module
-# 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
 # 对应测试文件路径: test/pass/test_memory_pool.py
 def test_memory_pool_invalid_module() -> None:
@@ -464,7 +464,7 @@ def test_memory_pool_invalid_module() -> None:
 # 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
 # 功能说明: 验证非 contiguous 布局会报错。
 # 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_non_contiguous_layout
-# 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
 # 对应测试文件路径: test/pass/test_memory_pool.py
 def test_memory_pool_non_contiguous_layout() -> None:
@@ -488,7 +488,7 @@ def test_memory_pool_non_contiguous_layout() -> None:
 # 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
 # 功能说明: 验证 alloc/free 不成对会报错。
 # 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_unpaired_alloc
-# 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
 # 对应测试文件路径: test/pass/test_memory_pool.py
 def test_memory_pool_unpaired_alloc() -> None:
@@ -511,7 +511,7 @@ def test_memory_pool_unpaired_alloc() -> None:
 # 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
 # 功能说明: 验证匿名维度会报错。
 # 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_anonymous_dim
-# 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
 # 对应测试文件路径: test/pass/test_memory_pool.py
 def test_memory_pool_anonymous_dim() -> None:
@@ -540,7 +540,7 @@ def test_memory_pool_anonymous_dim() -> None:
 # 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
 # 功能说明: 验证 alloc 结果非 nn.memory 会报错。
 # 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_alloc_non_memory
-# 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
 # 对应测试文件路径: test/pass/test_memory_pool.py
 def test_memory_pool_alloc_non_memory() -> None:
@@ -563,7 +563,7 @@ def test_memory_pool_alloc_non_memory() -> None:
 # 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
 # 功能说明: 验证 symbol.for 内 alloc 的 offset 复用规则。
 # 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_symbol_for_reuse
-# 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
 # 对应测试文件路径: test/pass/test_memory_pool.py
 def test_memory_pool_symbol_for_reuse() -> None:
@@ -612,7 +612,7 @@ def test_memory_pool_symbol_for_reuse() -> None:
 # 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
 # 功能说明: 验证 alloc 逃逸到 return 会被拒绝。
 # 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_escape_return
-# 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
 # 对应测试文件路径: test/pass/test_memory_pool.py
 def test_memory_pool_escape_return() -> None:
@@ -639,7 +639,7 @@ def test_memory_pool_escape_return() -> None:
 # 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
 # 功能说明: 验证 alloc 在 loop 外、free 在 loop 内会被拒绝。
 # 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_invalid_lifetime_loop
-# 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
 # 对应测试文件路径: test/pass/test_memory_pool.py
 def test_memory_pool_invalid_lifetime_loop() -> None:
@@ -666,7 +666,7 @@ def test_memory_pool_invalid_lifetime_loop() -> None:
 # 最近一次运行成功时间: 2026-04-07 10:30:00 +0800
 # 功能说明: 验证未知 region 会触发拒绝路径。
 # 使用示例: pytest -q test/pass/test_memory_pool.py -k test_memory_pool_unsupported_region_escape
-# 对应功能实现文件路径: kernel_gen/passes/lowering/memory_pool.py
+# 对应功能实现文件路径: kernel_gen/passes/memory_pool.py
 # 对应 spec 文件路径: spec/pass/lowering/memory_pool.md
 # 对应测试文件路径: test/pass/test_memory_pool.py
 def test_memory_pool_unsupported_region_escape() -> None:

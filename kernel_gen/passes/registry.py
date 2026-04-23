@@ -401,8 +401,8 @@ def load_builtin_passes() -> None:
     from kernel_gen.passes.attach_arch_information import AttachArchInformationPass
     from kernel_gen.passes.decompass import DecompassPass
     from kernel_gen.passes.inline import InlinePass
-    from kernel_gen.passes.lowering.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
-    from kernel_gen.passes.lowering.memory_pool import MemoryPoolPass
+    from kernel_gen.passes.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
+    from kernel_gen.passes.memory_pool import MemoryPoolPass
     from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
     from kernel_gen.passes.outline_device_kernel import OutlineDeviceKernelPass
     from kernel_gen.passes.symbol_loop_hoist import SymbolLoopHoistPass

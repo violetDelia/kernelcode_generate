@@ -15,10 +15,10 @@
 - pytest -q test/pass/test_dma_memory_hierarchy.py
 
 覆盖率命令:
-- pytest --cov=kernel_gen.passes.lowering.dma_memory_hierarchy --cov-report=term-missing test/pass/test_dma_memory_hierarchy.py
+- pytest --cov=kernel_gen.passes.dma_memory_hierarchy --cov-report=term-missing test/pass/test_dma_memory_hierarchy.py
 
 关联文件:
-- 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+- 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
 - Spec 文档: spec/pass/lowering/dma_memory_hierarchy.md
 - 测试文件: test/pass/test_dma_memory_hierarchy.py
 """
@@ -44,7 +44,7 @@ from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolValueType
 from kernel_gen.target import registry as target_registry
 
-pass_module = importlib.import_module("kernel_gen.passes.lowering.dma_memory_hierarchy")
+pass_module = importlib.import_module("kernel_gen.passes.dma_memory_hierarchy")
 LowerDmaMemoryHierarchyError = pass_module.LowerDmaMemoryHierarchyError
 LowerDmaMemoryHierarchyPass = pass_module.LowerDmaMemoryHierarchyPass
 
@@ -65,7 +65,7 @@ def _make_memory_type(space: str) -> NnMemoryType:
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy.md
     - test: test/pass/test_dma_memory_hierarchy.py
-    - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
     return NnMemoryType(
@@ -92,7 +92,7 @@ def _make_symbolic_memory_type(space: str) -> NnMemoryType:
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy.md
     - test: test/pass/test_dma_memory_hierarchy.py
-    - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
     return NnMemoryType(
@@ -119,7 +119,7 @@ def _make_anonymous_dynamic_memory_type(space: str) -> NnMemoryType:
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy.md
     - test: test/pass/test_dma_memory_hierarchy.py
-    - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
     return NnMemoryType(
@@ -148,7 +148,7 @@ def _build_kernel_binary_elewise_add_module_with_type(
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy.md
     - test: test/pass/test_dma_memory_hierarchy.py
-    - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
     func_type = FunctionType.from_lists([mem_type, mem_type, mem_type], [])
@@ -184,7 +184,7 @@ def _build_kernel_binary_elewise_add_module(
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy.md
     - test: test/pass/test_dma_memory_hierarchy.py
-    - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
     mem_type = _make_memory_type(space)
@@ -210,7 +210,7 @@ def _build_kernel_binary_elewise_add_module_with_window(
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy.md
     - test: test/pass/test_dma_memory_hierarchy.py
-    - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
     base_type = NnMemoryType(
@@ -273,7 +273,7 @@ def _collect_ops(block: Block) -> list[Operation]:
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy.md
     - test: test/pass/test_dma_memory_hierarchy.py
-    - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
     return list(block.ops)
@@ -295,7 +295,7 @@ def _symbol_int_values(values: list[SSAValue]) -> list[int | str]:
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy.md
     - test: test/pass/test_dma_memory_hierarchy.py
-    - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
     results: list[int | str] = []
@@ -324,7 +324,7 @@ def _ensure_sm_lm_target_registered() -> str:
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy.md
     - test: test/pass/test_dma_memory_hierarchy.py
-    - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
     name = "sm_lm_demo"
@@ -359,7 +359,7 @@ def _ensure_sm_lm_target_registered() -> str:
 # 最近一次运行成功时间: 2026-04-06 03:20:13 +0800
 # 测试目的: 验证 GM->SM->LM 读路径与 LM->SM->GM 写路径通过 slice/deslice 构造，且 kernel.* 最终仅使用 LM，并且不引入 copy/load/store。
 # 使用示例: pytest -q test/pass/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_stages_gm_to_lm_and_writeback
-# 对应功能实现文件路径: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+# 对应功能实现文件路径: kernel_gen/passes/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy.md
 # 对应测试文件路径: test/pass/test_dma_memory_hierarchy.py
 def test_dma_memory_hierarchy_stages_gm_to_lm_and_writeback() -> None:
@@ -425,7 +425,7 @@ def test_dma_memory_hierarchy_stages_gm_to_lm_and_writeback() -> None:
 # 最近一次运行成功时间: 2026-04-06 03:20:13 +0800
 # 测试目的: 验证 LM-only 输入为 no-op：不插入 staging（alloc/slice/deslice），但仍保证 kernel.* space 属性为 local。
 # 使用示例: pytest -q test/pass/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_lm_only_is_noop
-# 对应功能实现文件路径: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+# 对应功能实现文件路径: kernel_gen/passes/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy.md
 # 对应测试文件路径: test/pass/test_dma_memory_hierarchy.py
 def test_dma_memory_hierarchy_lm_only_is_noop() -> None:
@@ -449,7 +449,7 @@ def test_dma_memory_hierarchy_lm_only_is_noop() -> None:
 # 最近一次运行成功时间: 2026-04-06 03:20:13 +0800
 # 测试目的: 验证 hierarchy window 路径保留原窗口 offsets/sizes，并统一把 GM->SM、SM->LM、LM->SM、SM->GM 的新插入 strides 规范化为 unit stride。
 # 使用示例: pytest -q test/pass/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_window_offsets_and_unit_strides
-# 对应功能实现文件路径: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+# 对应功能实现文件路径: kernel_gen/passes/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy.md
 # 对应测试文件路径: test/pass/test_dma_memory_hierarchy.py
 def test_dma_memory_hierarchy_window_offsets_and_unit_strides() -> None:
@@ -533,7 +533,7 @@ def test_dma_memory_hierarchy_window_offsets_and_unit_strides() -> None:
 # 最近一次运行成功时间: 2026-04-06 09:39:15 +0800
 # 测试目的: 验证显式 symbol shape 可透传到 staging dma.alloc(dynamic_shape=...)。
 # 使用示例: pytest -q test/pass/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_symbol_shape_passthrough
-# 对应功能实现文件路径: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+# 对应功能实现文件路径: kernel_gen/passes/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy.md
 # 对应测试文件路径: test/pass/test_dma_memory_hierarchy.py
 def test_dma_memory_hierarchy_symbol_shape_passthrough() -> None:
@@ -560,7 +560,7 @@ def test_dma_memory_hierarchy_symbol_shape_passthrough() -> None:
 # 最近一次运行成功时间: 2026-04-06 03:20:13 +0800
 # 测试目的: 验证 target 缺失 SM/LM 时 pass 必须显式失败，并包含 SM/LM 关键短语。
 # 使用示例: pytest -q test/pass/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_requires_sm_lm
-# 对应功能实现文件路径: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+# 对应功能实现文件路径: kernel_gen/passes/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy.md
 # 对应测试文件路径: test/pass/test_dma_memory_hierarchy.py
 def test_dma_memory_hierarchy_requires_sm_lm() -> None:
@@ -580,7 +580,7 @@ def test_dma_memory_hierarchy_requires_sm_lm() -> None:
 # 最近一次运行成功时间: 2026-04-06 09:39:15 +0800
 # 测试目的: 验证匿名 ? 且无可恢复 symbol 来源时 pass 必须以 dynamic_shape 显式失败。
 # 使用示例: pytest -q test/pass/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_rejects_anonymous_dynamic_shape
-# 对应功能实现文件路径: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+# 对应功能实现文件路径: kernel_gen/passes/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy.md
 # 对应测试文件路径: test/pass/test_dma_memory_hierarchy.py
 def test_dma_memory_hierarchy_rejects_anonymous_dynamic_shape() -> None:
@@ -603,7 +603,7 @@ def test_dma_memory_hierarchy_rejects_anonymous_dynamic_shape() -> None:
 # 最近一次运行成功时间: 2026-04-06 03:20:13 +0800
 # 测试目的: 验证输入含 nn.* op 时 pass 必须显式失败。
 # 使用示例: pytest -q test/pass/test_dma_memory_hierarchy.py -k test_dma_memory_hierarchy_rejects_nn_ops_in_input
-# 对应功能实现文件路径: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+# 对应功能实现文件路径: kernel_gen/passes/dma_memory_hierarchy.py
 # 对应 spec 文件路径: spec/pass/lowering/dma_memory_hierarchy.md
 # 对应测试文件路径: test/pass/test_dma_memory_hierarchy.py
 def test_dma_memory_hierarchy_rejects_nn_ops_in_input() -> None:

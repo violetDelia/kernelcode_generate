@@ -11,13 +11,13 @@
 - 强制处理后的 `kernel.*` operand/out 仅使用 `LM` space，并同步刷新 op 的 `space` 属性为 `local`。
 
 使用示例:
-- from kernel_gen.passes.lowering.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
+- from kernel_gen.passes.dma_memory_hierarchy import LowerDmaMemoryHierarchyPass
 - module = LowerDmaMemoryHierarchyPass().run(module)
 
 关联文件:
 - spec: spec/pass/lowering/dma_memory_hierarchy.md
 - test: test/pass/test_dma_memory_hierarchy.py
-- 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+- 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ class LowerDmaMemoryHierarchyError(ValueError):
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy.md
     - test: test/pass/test_dma_memory_hierarchy.py
-    - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
 
@@ -75,7 +75,7 @@ def _require_sm_lm_support() -> None:
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy.md
     - test: test/pass/test_dma_memory_hierarchy.py
-    - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
     sm_size = target_registry.get_current_target_hardware("sm_memory_size")
@@ -105,7 +105,7 @@ def _memory_space(value_type: NnMemoryType) -> str:
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy.md
     - test: test/pass/test_dma_memory_hierarchy.py
-    - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
     return value_type.space.space.data
@@ -126,7 +126,7 @@ def _with_space(value_type: NnMemoryType, space: str) -> NnMemoryType:
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy.md
     - test: test/pass/test_dma_memory_hierarchy.py
-    - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
     return NnMemoryType(
@@ -155,7 +155,7 @@ def _const_symbol_int(value: int) -> tuple[arith.ConstantOp, UnrealizedConversio
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy.md
     - test: test/pass/test_dma_memory_hierarchy.py
-    - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
     const = arith.ConstantOp(IntegerAttr(value, i32))
@@ -188,7 +188,7 @@ def _build_full_window_operands(
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy.md
     - test: test/pass/test_dma_memory_hierarchy.py
-    - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
     source_type = source.type
@@ -234,7 +234,7 @@ def _resolve_window_operands(
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy.md
     - test: test/pass/test_dma_memory_hierarchy.py
-    - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
     owner = getattr(value, "owner", None)
@@ -265,7 +265,7 @@ def _ensure_static_rank(memory_type: NnMemoryType, context: str) -> int:
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy.md
     - test: test/pass/test_dma_memory_hierarchy.py
-    - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
     memory_type.verify()
@@ -290,7 +290,7 @@ def _is_kernel_op(op: Operation) -> bool:
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy.md
     - test: test/pass/test_dma_memory_hierarchy.py
-    - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
     return op.name.startswith("kernel.")
@@ -323,7 +323,7 @@ def _lower_gm_operand_to_lm(
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy.md
     - test: test/pass/test_dma_memory_hierarchy.py
-    - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
     rank = _ensure_static_rank(operand_type, "kernel operand")
@@ -374,7 +374,7 @@ def _lower_gm_out_to_lm_with_writeback(
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy.md
     - test: test/pass/test_dma_memory_hierarchy.py
-    - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
     rank = _ensure_static_rank(out_type, "kernel out")
@@ -429,7 +429,7 @@ class LowerDmaMemoryHierarchyPass(Pass):
     关联文件:
     - spec: spec/pass/lowering/dma_memory_hierarchy.md
     - test: test/pass/test_dma_memory_hierarchy.py
-    - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+    - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
     """
 
     name = "lower-dma-memory-hierarchy"
@@ -450,7 +450,7 @@ class LowerDmaMemoryHierarchyPass(Pass):
         关联文件:
         - spec: spec/pass/lowering/dma_memory_hierarchy.md
         - test: test/pass/test_dma_memory_hierarchy.py
-        - 功能实现: kernel_gen/passes/lowering/dma_memory_hierarchy.py
+        - 功能实现: kernel_gen/passes/dma_memory_hierarchy.py
         """
 
         if not isinstance(module, ModuleOp):
