@@ -25,3 +25,4 @@ plan
 ARCHITECTURE/plan/
 humanize
 *.plan.md
+kernel_dev
