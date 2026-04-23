@@ -10,7 +10,7 @@
 ## 文档信息
 
 - 创建者：`规格小队`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`jcc你莫辜负`
 - `spec`：[`spec/dsl/ast.md`](../../spec/dsl/ast.md)
 - `功能实现`：[`kernel_gen/dsl/ast/__init__.py`](../../kernel_gen/dsl/ast/__init__.py)
 - `test`：[`test/dsl/ast/test_parser.py`](../../test/dsl/ast/test_parser.py)
@@ -132,7 +132,7 @@ func_ast = parse_function(add)
 - `get_block_id/get_block_num/get_subthread_id/get_subthread_num/get_thread_id/get_thread_num` helper 仅允许 0 个参数且禁止关键字参数；不满足时必须返回 `Unsupported <helper> arity` 诊断。
 - `get_dynamic_memory(...)` helper 仅允许 1 个位置参数且禁止关键字参数；参数必须是 `MemorySpace` 且仅允许片上空间（`SM/LM/TSM/TLM1/TLM2/TLM3`），否则必须返回 `Unsupported get_dynamic_memory arity`、`get_dynamic_memory space must be MemorySpace` 或 `get_dynamic_memory space must be on-chip MemorySpace` 诊断。
 - `barrier(...)` helper 的稳定 DSL 入口固定为 `barrier(visibility=[...], scope=BarrierScope.BLOCK)`；必须使用且只使用 `visibility` / `scope` 两个关键字参数，不接受位置参数、缺参、重复关键字或未知关键字。`visibility` 必须是非空 `BarrierVisibility` 列表，`scope` 必须是 `BarrierScope`；否则必须返回 `Unsupported barrier arity`、`barrier visibility must be non-empty BarrierVisibility list` 或 `barrier scope must be BarrierScope` 诊断。
-- `launch_kernel` helper 的公开 DSL 入口固定为 `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)`；四个 launch 字段必须放在下标里，调用参数只允许 `callee, *args` 这一路径，且禁止任何关键字参数。`callee` 必须是函数对象对应的 bare symbol reference（例如 `add_barrier_body`），不允许字符串字面量、属性引用、lambda、调用表达式或其他运行时对象；否则必须返回 `launch_kernel callee must be function symbol reference` 诊断。`block/thread/subthread/shared_memory_size` 仅做 AST 入口语法校验（必须是正整数或 `SymbolDim` 语义，其中 `shared_memory_size` 允许静态 `0`），否则必须返回 `Unsupported launch_kernel arity`、`launch_kernel <dim> must be int or SymbolDim`、`launch_kernel <dim> must be > 0` 或 `launch_kernel shared_memory_size must be >= 0` 诊断；AST 阶段不承诺 extent 已完成 `!symbol.int` 归一化。额外的 `*args` 只要求可解析为值表达式，并按源码顺序原样保留给下游 lowering。实现当前仍可解析旧直调用 `launch_kernel(callee, block, thread, subthread, shared_memory_size, *args)` 作为兼容路径，但该形态不再属于公开合同。
+- `launch_kernel` helper 的公开 DSL 入口固定为 `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)`；四个 launch 字段必须放在下标里，调用参数只允许 `callee, *args` 这一路径，且禁止任何关键字参数。`callee` 必须是函数对象对应的 bare symbol reference（例如 `add_barrier_body`），不允许字符串字面量、属性引用、lambda、调用表达式或其他运行时对象；否则必须返回 `launch_kernel callee must be function symbol reference` 诊断。`block/thread/subthread/shared_memory_size` 仅做 AST 入口语法校验（必须是正整数或 `SymbolDim` 语义，其中 `shared_memory_size` 允许静态 `0`），否则必须返回 `Unsupported launch_kernel arity`、`launch_kernel <dim> must be int or SymbolDim`、`launch_kernel <dim> must be > 0` 或 `launch_kernel shared_memory_size must be >= 0` 诊断；AST 阶段不承诺 extent 已完成 `!symbol.int` 归一化。额外的 `*args` 只要求可解析为值表达式，并按源码顺序原样保留给下游 lowering。
 - `-> float` 返回注解在本轮是合法 AST 入口，但仅用于 `symbol.to_float` 链路；除 `float(symbol.int)` 之外，不在 AST 层扩展新的浮点返回注解体系。
 - `float(value)` 在 AST 层当前仅作为 `symbol.int -> float` 的最小语法入口冻结；本轮只承诺 `def cast_dim(n: int) -> float: return float(n)` 这一类写法可进入后续链路，不在 AST 层扩展 `double`、`complex`、多参数 `float(...)`、关键字参数 `float(...)` 或其他 builtin cast 体系。
 

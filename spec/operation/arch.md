@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`咯咯咯`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`jcc你莫辜负`
 - `spec`：[`spec/operation/arch.md`](../../spec/operation/arch.md)
 - `功能实现`：[`kernel_gen/operation/arch.py`](../../kernel_gen/operation/arch.py)
 - `test`：[`test/operation/test_operation_arch.py`](../../test/operation/test_operation_arch.py)
@@ -45,7 +45,7 @@
 - `barrier(*, visibility, scope)` 只描述一次同步请求，不返回新的 `Memory`、`SymbolDim`、句柄或状态对象；公开返回值固定为 `None`。
 - `barrier` 采用关键字参数调用，`visibility/scope` 均为必填；`visibility` 只允许 `list[BarrierVisibility]` 或 `tuple[BarrierVisibility, ...]`，且必须且只能包含 `TSM/TLM` 各一次；`scope` 只允许 `BarrierScope.BLOCK/THREAD/SUBTHREAD/GLOBAL`。
 - `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)` 只描述一次启动请求，不返回新的 `Memory`、`SymbolDim` 或句柄对象；公开返回值固定为 `None`。
-- `launch_kernel` 的公开调用形态固定为 `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)`：四个 launch 字段位于下标，调用参数顺序固定为 `callee -> *args`；旧直调用 `launch_kernel(callee, block, thread, subthread, shared_memory_size, *args)` 只允许作为兼容实现路径存在，不再属于公开合同。
+- `launch_kernel` 的公开调用形态固定为 `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)`：四个 launch 字段位于下标，调用参数顺序固定为 `callee -> *args`。
 - `launch_kernel` 仅允许关键字参数名 `callee/block/thread/subthread`；缺失前四个必填参数或传入未知关键字参数属于调用边界错误，必须抛出 `TypeError`。
 - `launch_kernel[...]` 的 `callee` 只允许 Python 函数对象；不得接受字符串名、其他 callable、`Memory`、`SymbolDim` 或自由对象。
 - `launch_kernel[...]` 的 `block/thread/subthread` 只允许 `int` 或 `SymbolDim`，且不得接受 `bool`；若输入为静态整数，必须满足 `> 0`；operation 层不得接受浮点、`Memory`、列表或其他运行时对象。
@@ -427,7 +427,7 @@ launch_kernel[SymbolDim("GRID_X"), 128, 4, 0](my_kernel, "lhs", "rhs", "out")
   - `TC-OP-ARCH-011`：`launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)` 接受合法 `function/int|SymbolDim` 输入与尾部 kernel 参数，并在 launched body 内暴露本次 launch extent。
   - `TC-OP-ARCH-012`：`launch_kernel[...]` 对字符串或非函数 `callee`、非法类型与静态 `<= 0` 的规模输入报错。
   - `TC-OP-ARCH-013`：`launch_kernel` 的公开入口固定为四个下标字段加 `callee, *args`；缺字段、未知关键字或把 launch 字段写进调用参数都必须在调用边界报 `TypeError`。
-  - `TC-OP-ARCH-014`：实现若保留旧直调用 `launch_kernel(callee, block, thread, subthread, shared_memory_size, *args)` 兼容路径，其行为不得改变 `launch_kernel[...]` 的公开语义，也不得反向扩回公开文档口径。
+  - `TC-OP-ARCH-014`：`launch_kernel[...]` 的公开语义、示例与错误路径不得回退为旧直调用写法。
   - `TC-OP-ARCH-015`：target registry 提供硬件值时，launch 外的 `get_block_num()` / `get_thread_num()` / `get_subthread_num()` / `get_dynamic_memory()` 必须优先使用硬件值；launched body 内则优先暴露本次 launch extent。
   - `TC-OP-ARCH-016`：当当前 target 不支持某个 `arch.*` op 时，对应 helper 的 target registry 支持性校验必须抛出 `ValueError` 并包含 op 名称；本条覆盖 `get_block_num()` / `get_thread_num()` / `get_subthread_num()` / `get_dynamic_memory()` / `barrier()` / `launch_kernel()` 的错误路径。
   - `TC-OP-ARCH-017`：当当前 target registry 条目缺少 `arch_supported_ops/arch_unsupported_ops` 等必需字段时，arch query helper 必须返回显式 `missing required arch fields` 错误。

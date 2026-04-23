@@ -1484,14 +1484,13 @@ def _parse_launch_kernel_call(
     *,
     launch_slice: py_ast.expr | None = None,
 ) -> ArchLaunchKernelAST:
-    """解析 `launch_kernel[...]` 公开入口，并兼容旧直调用启动描述。
+    """解析 `launch_kernel[...]` 公开入口启动描述。
 
     创建者: 金铲铲大作战
     最后一次更改: jcc你莫辜负
 
     功能说明:
     - 公开 DSL 入口固定为 `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)`。
-    - 兼容旧直调用 `launch_kernel(callee, block, thread, subthread, shared_memory_size, *args)`，便于旧消费面平滑过渡。
     - callee 只允许函数对象对应的 bare symbol reference；launch extent 保持正整数 / `SymbolDim` 语义。
 
     使用示例:
@@ -1620,7 +1619,6 @@ def _parse_dma_call(
     - 将 `get_dynamic_memory(space)` 解析为 `ArchGetDynamicMemoryAST`。
     - 将 `barrier(visibility=[...], scope=BarrierScope.THREAD)` 解析为 `ArchBarrierAST`。
     - 将公开入口 `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)` 解析为 `ArchLaunchKernelAST`。
-    - 兼容旧直调用 `launch_kernel(callee, block, thread, subthread, shared_memory_size, *args)`，但该形态不属于公开合同。
 
     使用示例:
     - _parse_dma_call(py_ast.parse("slice(A, [i], [n])").body[0].value, env, globals(), __builtins__)

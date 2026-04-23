@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`jcc你莫辜负`
 - `spec`：[`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)
 - `功能实现`：[`kernel_gen/dsl/mlir_gen/__init__.py`](../../kernel_gen/dsl/mlir_gen/__init__.py)
 - `test`：
@@ -87,7 +87,7 @@
 - 零入参 DSL 函数允许通过 `build_func_op` / `build_func_op_from_ast` 构建 `func.func`；当函数体返回 `get_thread_num()` 查询结果时，lowering 必须生成 `arch.get_thread_num`，并保持返回类型为 `!symbol.int<"thread_num">`。
 - 当函数体返回 `get_dynamic_memory(space)` 时，lowering 必须生成 `arch.get_dynamic_memory`，返回类型固定为 `!nn.memory<[?], [1], i8, #nn.space<space>>`；`space` 非片上空间（`SM/LM/TSM/TLM1/TLM2/TLM3`）时必须报错。
 - 当函数体包含 `barrier(visibility=[...], scope=BarrierScope.BLOCK)` 语句时，lowering 必须生成无返回值 `arch.barrier`；`visibility` 必须是按源码顺序保留的非空 `BarrierVisibility` 列表，并 lowering 为 `#arch.visibility<tsm|tlm>`，`scope` 必须可 lowering 为 `#arch.scope<...>`，缺项、多余参数、空列表或非法元素类型都必须报固定错误，且不得把 `barrier(...)` 静默当成未知 helper。
-- 当函数体包含 `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)` 语句时，lowering 必须生成无返回值 `arch.launch<block, thread, subthread, shared_memory_size>(@callee, args...)`；`callee` 必须是函数对象 / symbol ref，对外不得接受字符串字面量、属性访问、lambda、调用表达式或 keyword args。`block/thread/subthread/shared_memory_size` 在 AST 入口要求为正整数或 `SymbolDim` 语义，其中 `shared_memory_size` 允许静态 `0`；emit 阶段进一步要求前三者可归一化为正整数 `!symbol.int`，`shared_memory_size` 可归一化为非负整数 `!symbol.int`，违规时必须报错；launched body 中 `get_thread_num()` / `get_block_num()` / `get_subthread_num()` 的返回类型仍分别为 `!symbol.int<"thread_num">` / `!symbol.int<"block_num">` / `!symbol.int<"subthread_num">`，其数值语义来自当前 `launch` extent，而不是 target capability upper bound。实现当前仍可接受旧直调用 `launch_kernel(callee, block, thread, subthread, shared_memory_size, *args)` 作为兼容路径，但该形态不再属于公开合同。
+- 当函数体包含 `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)` 语句时，lowering 必须生成无返回值 `arch.launch<block, thread, subthread, shared_memory_size>(@callee, args...)`；`callee` 必须是函数对象 / symbol ref，对外不得接受字符串字面量、属性访问、lambda、调用表达式或 keyword args。`block/thread/subthread/shared_memory_size` 在 AST 入口要求为正整数或 `SymbolDim` 语义，其中 `shared_memory_size` 允许静态 `0`；emit 阶段进一步要求前三者可归一化为正整数 `!symbol.int`，`shared_memory_size` 可归一化为非负整数 `!symbol.int`，违规时必须报错；launched body 中 `get_thread_num()` / `get_block_num()` / `get_subthread_num()` 的返回类型仍分别为 `!symbol.int<"thread_num">` / `!symbol.int<"block_num">` / `!symbol.int<"subthread_num">`，其数值语义来自当前 `launch` extent，而不是 target capability upper bound。
 - 当函数体包含 `tensor.get_shape()[axis]` 或 `tensor.get_stride()[axis]` 轴访问表达式时，必须复用 `TensorAxisAccessAST` 链路：`get_shape` 降级为 `symbol.get_dim`、`get_stride` 降级为 `symbol.get_stride`，并保持返回 `!symbol.int<"...">`；`tensor` 非 `nn.memory`、`axis` 非静态整数、负轴或越界必须报错。
 - 如需 `builtin.module` 结果，应使用 `mlir_gen(...)`；调用方无需手工组装 module。
 
