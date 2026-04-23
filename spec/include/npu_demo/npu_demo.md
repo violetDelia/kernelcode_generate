@@ -16,7 +16,7 @@
 - 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/include/npu_demo/npu_demo.md`](../../../spec/include/npu_demo/npu_demo.md)
 - `功能实现`：[`include/npu_demo/npu_demo.h`](../../../include/npu_demo/npu_demo.h)、[`include/npu_demo/Memory.h`](../../../include/npu_demo/Memory.h)、[`include/npu_demo/Dma.h`](../../../include/npu_demo/Dma.h)、[`include/npu_demo/Arch.h`](../../../include/npu_demo/Arch.h)、[`include/npu_demo/Kernel.h`](../../../include/npu_demo/Kernel.h)、[`include/npu_demo/cost/Core.h`](../../../include/npu_demo/cost/Core.h)、[`include/npu_demo/cost/Dma.h`](../../../include/npu_demo/cost/Dma.h)、[`include/npu_demo/cost/Kernel.h`](../../../include/npu_demo/cost/Kernel.h)
-- `test`：[`test/include/api/test_memory.py`](../../../test/include/api/test_memory.py)、[`test/include/api/test_dma.py`](../../../test/include/api/test_dma.py)、[`test/include/npu_demo/test_kernel_context.py`](../../../test/include/npu_demo/test_kernel_context.py)、[`test/include/npu_demo/test_runtime_launch.py`](../../../test/include/npu_demo/test_runtime_launch.py)、[`test/include/npu_demo/test_public_namespace.py`](../../../test/include/npu_demo/test_public_namespace.py)、[`test/include/api/test_arch.py`](../../../test/include/api/test_arch.py)、[`test/include/api/test_kernel.py`](../../../test/include/api/test_kernel.py)、`test/include/api/test_cost.py`、`test/include/npu_demo/test_cost.py`、[`test/target/test_target_registry.py`](../../../test/target/test_target_registry.py)
+- `test`：[`test/include/api/test_memory.py`](../../../test/include/api/test_memory.py)、[`test/include/api/test_dma.py`](../../../test/include/api/test_dma.py)、[`test/include/npu_demo/test_kernel_context.py`](../../../test/include/npu_demo/test_kernel_context.py)、[`test/include/npu_demo/test_runtime_launch.py`](../../../test/include/npu_demo/test_runtime_launch.py)、[`test/include/npu_demo/test_public_namespace.py`](../../../test/include/npu_demo/test_public_namespace.py)、[`test/include/api/test_arch.py`](../../../test/include/api/test_arch.py)、[`test/include/api/test_kernel.py`](../../../test/include/api/test_kernel.py)、`test/include/api/test_cost.py`、`test/include/npu_demo/test_cost.py`、[`test/dsl/test_gen_kernel.py`](../../../test/dsl/test_gen_kernel.py)、[`test/target/test_target_registry.py`](../../../test/target/test_target_registry.py)
 
 ## 依赖
 
@@ -28,6 +28,7 @@
 - [`spec/include/api/cost/Core.md`](../../../spec/include/api/cost/Core.md)：统一 `npu_demo::cost::CostKind` 与 `S_INT` 成本返回语义。
 - [`spec/include/api/cost/Dma.md`](../../../spec/include/api/cost/Dma.md)：统一 `npu_demo::cost::copy/slice/deslice` 的公共合同。
 - [`spec/include/api/cost/Kernel.md`](../../../spec/include/api/cost/Kernel.md)：统一 `npu_demo::cost::add/matmul/...` 的公共合同。
+- [`spec/dsl/gen_kernel.md`](../../../spec/dsl/gen_kernel.md)：定义 `gen_kernel(target="npu_demo")` 的单入口源码与 compile-only 合同。
 - [`spec/target/registry.md`](../../../spec/target/registry.md)：定义 `npu_demo` 的 launch 能力上限与片上空间容量来源。
 
 ## 目标
@@ -38,6 +39,7 @@
 - 明确基础类型边界：`Status`、`StatusCode`、`Vector`、`Memory`、`MemorySpace` 等类型暂不整体迁入 `namespace npu_demo`。
 - 冻结 `KernelContext` 的运行时视图合同，确保 launched body 读取到的是当前 launch 的 `block/thread/subthread` 维度与索引。
 - 冻结 `npu_demo` P0 路径对 `launch + barrier + dynamic memory` 的最小成功子集，为后续实现/补测提供唯一稳定口径。
+- 明确 `include/npu_demo/npu_demo.h` 也是 `gen_kernel(target="npu_demo")` 的唯一 compile-only 头文件：同一翻译单元里的 wrapper/body kernel 与 sibling cost function 只需 `#include "include/npu_demo/npu_demo.h"` 和 `using namespace npu_demo;` 即可消费 `launch`、`KernelContext`、`Memory` 与 `cost::*`。
 
 ## 限制与边界
 
@@ -50,6 +52,7 @@
 - `include/npu_demo/npu_demo.h` 是唯一聚合入口，不新增第二套 target include。
 - `Kernel` family 的公开 helper 名、模板顺序与参数顺序由 [`spec/include/api/Kernel.md`](../../../spec/include/api/Kernel.md) 冻结；`npu_demo` 只负责承接实现，不得重新发明旧 `Nn` 公共别名。
 - `cost` family 的公开 helper 名、模板顺序与参数顺序由 [`spec/include/api/cost/Core.md`](../../../spec/include/api/cost/Core.md)、[`spec/include/api/cost/Dma.md`](../../../spec/include/api/cost/Dma.md)、[`spec/include/api/cost/Kernel.md`](../../../spec/include/api/cost/Kernel.md) 冻结；`npu_demo` 只负责承接默认实现，不得额外引入 `kind2/kind3` 或 target 私有成本命名。
+- `gen_kernel(target="npu_demo")` 生成的完整源码若同时包含普通 kernel function 与 `_cost_compute_*` / `_cost_memory_*` sibling cost function，仍只允许依赖本头文件；不得额外要求包含 `include/npu_demo/cost/*.h`、`include/api/cost/*.h` 或额外 `using namespace npu_demo::cost;`。
 - `KernelContext` 只表示当前 launched body 的运行时视图；不要求公开默认构造、复制持久化或脱离 launch 生命周期独立使用。
 - P0 launch 子集固定为：`block=1`、`subthread=1`、`shared_memory_size=0`、`2 <= thread <= registry.hardware.thread_num`；不支持的 extent 必须显式失败，禁止静默回退到单线程或忽略部分 extent。
 - `block_num()` / `thread_num()` / `subthread_num()` 的公开语义是“当前 launch 值”；`target.registry` 中的 `block_num/thread_num/subthread_num` 只作为能力上限与容量校验基线，不再直接等于 launched body 中可见的当前值。
@@ -284,6 +287,7 @@ Memory<TLM3, float> out = ctx.get_dynamic_memory<TLM3, float>();
   - `pytest -q test/include/api/test_arch.py`
   - `pytest -q test/include/npu_demo/test_kernel_context.py test/include/npu_demo/test_runtime_launch.py`
   - `pytest -q test/include/npu_demo/test_public_namespace.py`
+  - `pytest -q test/dsl/test_gen_kernel.py -k "tuner_cost or cost_function or npu_demo"`
   - `pytest -q test/target/test_target_registry.py -k "npu_demo and launch"`
 - 测试目标：
   - 验证 `test/include/api/test_memory.py` 与 `test/include/api/test_dma.py` 仍按 `npu_demo::build_contiguous_stride/view/alloc/slice/deslice` 口径消费。
@@ -292,8 +296,9 @@ Memory<TLM3, float> out = ctx.get_dynamic_memory<TLM3, float>();
   - 验证 `KernelContext` 查询返回当前 launch 值，而非旧的固定模板常量。
   - 验证 `ctx.barrier({BarrierVisibility::TSM, BarrierVisibility::TLM}, BarrierScope::BLOCK)` 的参数合同与显式失败边界。
   - 验证 `npu_demo::launch<1, thread, 1, 0>(...)` 的函数对象 callee、launch extent 校验与 `thread_num()` 运行时视图。
-- 验证 `include/npu_demo/npu_demo.h` 的最小 public namespace smoke：`Vector{...}` 可用于 `Memory` shape/stride，`npu_demo::add` 与 `npu_demo::launch` 可编译运行，正向片段不消费 `npu_demo::detail`。
-- 验证 `get_dynamic_memory<TSM/TLM1/TLM2/TLM3, float>()` 返回固定容量视图，`SM/LM` 因零容量显式失败。
+  - 验证 `include/npu_demo/npu_demo.h` 的最小 public namespace smoke：`Vector{...}` 可用于 `Memory` shape/stride，`npu_demo::add` 与 `npu_demo::launch` 可编译运行，正向片段不消费 `npu_demo::detail`。
+  - 验证 `include/npu_demo/npu_demo.h` 对 `gen_kernel(target="npu_demo")` 的完整源码仍是单入口：同一源码中若同时出现 `npu_demo::launch<...>`、`npu_demo::KernelContext` 与 `cost::add/copy/matmul`，只靠该头文件与 `using namespace npu_demo;` 即可编译。
+  - 验证 `get_dynamic_memory<TSM/TLM1/TLM2/TLM3, float>()` 返回固定容量视图，`SM/LM` 因零容量显式失败。
 - 功能与用例清单：
   - `test_include_api_arch_exports_public_launch_and_scope_contract`：锁定 `include/api/Arch.h` 的公开 launch/barrier 接口面。
   - `test_npu_demo_kernel_context_runtime_view_tracks_launch_extent`：锁定 `KernelContext` 的 `block/thread/subthread` 查询返回当前 launch 值。
@@ -301,4 +306,5 @@ Memory<TLM3, float> out = ctx.get_dynamic_memory<TLM3, float>();
   - `test_npu_demo_launch_rejects_unsupported_extent_without_fallback`：锁定 `block!=1`、`subthread!=1`、`thread<2` 或 `thread>8` 的显式失败边界。
   - `test_npu_demo_public_namespace_smoke_compiles_vector_kernel_and_launch`：锁定 `npu_demo::` public function 最小正向消费。
   - `test_npu_demo_public_namespace_memory_dma_helpers`：锁定 `Memory/Dma` public function 只通过 `npu_demo::` 正向消费，未限定的全局 helper 不作为成功路径。
+  - `test_gen_kernel_compiles_npu_demo_cost_function_module`：锁定 `include/npu_demo/npu_demo.h` 对 `gen_kernel` 输出的 wrapper/body kernel + sibling cost function 模块仍是单入口 compile-only 头文件。
   - `test_target_registry_npu_demo_supports_launch_and_barrier_caps`：锁定 registry 的 `arch.launch` / `arch.barrier` 能力开关与 `thread_num=8` 上限语义。

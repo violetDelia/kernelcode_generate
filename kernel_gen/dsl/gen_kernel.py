@@ -44,7 +44,7 @@ from xdsl.ir import BlockArgument, Operation, SSAValue
 from kernel_gen.dialect.arch import ArchBarrierOp, ArchGetDynamicMemoryOp, ArchGetThreadIdOp, ArchGetThreadNumOp, ArchLaunchOp
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCastOp, DmaCopyOp, DmaDesliceOp, DmaFillOp, DmaLoadOp, DmaReshapeOp, DmaSliceOp, DmaStoreOp, DmaTransposeOp, DmaViewOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.dialect.symbol import SymbolConstOp, SymbolValueType
+from kernel_gen.dialect.symbol import SymbolAddOp, SymbolConstOp, SymbolValueType
 from kernel_gen.target import registry as target_registry
 
 from .emit_c import EmitCContext, emit_c_op, emit_c_value
@@ -1575,8 +1575,8 @@ class _KernelEmitter:
             )
         if result_types:
             result_type = result_types[0]
-            if isinstance(result_type, SymbolValueType) and self.ctx.target != "cpu":
-                raise _error(self.ctx, func_name, "symbol scalar return is cpu-only")
+            if isinstance(result_type, SymbolValueType) and self.ctx.target not in {"cpu", "npu_demo"}:
+                raise _error(self.ctx, func_name, "symbol scalar return is only supported on cpu and npu_demo")
             self._type_to_c(result_type)
 
         mutable_memory_args = self._mutable_memory_arg_indices(func_op)
@@ -1721,6 +1721,44 @@ class _KernelEmitter:
             return False
         return any(isinstance(op, func.ReturnOp) and self._is_direct_return_nn_add(op) for op in func_op.body.block.ops)
 
+    def _emit_npu_demo_return_symbol_assignment(self, op: Operation) -> str | None:
+        """为 `npu_demo` 的 `%total` 累计值生成稳定赋值语句。
+
+        创建者: 朽木露琪亚
+        最后一次更改: 朽木露琪亚
+
+        功能说明:
+        - sibling cost function 会把 `%total : !symbol.int` 作为最终返回值。
+        - 这里绕过 `emit_c_op(symbol.add, ...)` 的默认 `vN` 命名，直接生成
+          `S_INT total = (...);`，并为后续 `func.return` 绑定稳定右值名。
+        - 仅在 `target="npu_demo"`、`symbol.add` 结果表达式名为 `total` 且被
+          `func.return` 消费时生效，不影响 `tuner.cost -> costN` 的既有命名合同。
+
+        使用示例:
+        - stmt = self._emit_npu_demo_return_symbol_assignment(op)
+
+        关联文件:
+        - spec: spec/dsl/gen_kernel.md
+        - test: test/dsl/test_gen_kernel.py
+        - 功能实现: kernel_gen/dsl/gen_kernel.py
+        """
+
+        if self.ctx.target != "npu_demo":
+            return None
+        if not isinstance(op, SymbolAddOp) or len(op.results) != 1:
+            return None
+        result = op.results[0]
+        if self.ctx.lookup_name(result) is not None or not isinstance(result.type, SymbolValueType):
+            return None
+        if result.type.expr.expr.data.strip().lower() != "total":
+            return None
+        if not any(isinstance(use.operation, func.ReturnOp) for use in result.uses):
+            return None
+        lhs_expr = emit_c_value(op.operands[0], self.ctx)
+        rhs_expr = emit_c_value(op.operands[1], self.ctx)
+        self.ctx.bind_name(result, "total")
+        return f"{self.ctx.current_indent}S_INT total = ({lhs_expr} + {rhs_expr});"
+
     def _emit_return_statement(
         self,
         func_op: func.FuncOp,
@@ -1764,8 +1802,12 @@ class _KernelEmitter:
                 func_op.sym_name.data,
                 "legacy memory return ABI is not supported; run BufferResultsToOutParamsPass first",
             )
-        if isinstance(result_type, SymbolValueType) and self.ctx.target != "cpu":
-            raise _error(self.ctx, func_op.sym_name.data, "symbol scalar return is cpu-only")
+        if isinstance(result_type, SymbolValueType) and self.ctx.target not in {"cpu", "npu_demo"}:
+            raise _error(
+                self.ctx,
+                func_op.sym_name.data,
+                "symbol scalar return is only supported on cpu and npu_demo",
+            )
         from .emit_c import emit_c_value
 
         value_expr = emit_c_value(return_op.arguments[0], self.ctx)
@@ -1832,6 +1874,10 @@ class _KernelEmitter:
                 continue
             if isinstance(op, DmaAllocOp) and self._is_returned_output_alloc(func_op, op):
                 self.ctx.bind_name(op.result, "out")
+                continue
+            total_stmt = self._emit_npu_demo_return_symbol_assignment(op)
+            if total_stmt is not None:
+                lines.append(total_stmt)
                 continue
             self._bind_rewritten_out_result(func_op, op)
             stmt = emit_c_op(op, self.ctx)
