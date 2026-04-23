@@ -4,7 +4,7 @@
 最后一次更改: 朽木露琪亚
 
 功能说明:
-- 覆盖 `kernel_gen.passes.lowering.tile_analysis.TileAnalysisPass` 的 ModulePass 合同。
+- 覆盖 `kernel_gen.tile.analysis.TileAnalysisPass` 的 ModulePass 合同。
 - 锁定 `tile-analysis` 只写 `tile.analysis` 与 `tile.tile_exprs`，不生成 tile 改写结构。
 - 覆盖 `kernel.binary_elewise`、`dma.broadcast`、`kernel.matmul` 三类 op 的 analysis-only 结果。
 
@@ -12,7 +12,7 @@
 - pytest -q test/pass/test_lowering_tile_analysis.py
 
 关联文件:
-- 功能实现: [kernel_gen/passes/lowering/tile_analysis.py](kernel_gen/passes/lowering/tile_analysis.py)
+- 功能实现: [kernel_gen/tile/analysis.py](kernel_gen/tile/analysis.py)
 - Spec 文档: [spec/pass/lowering/tile_analysis.md](spec/pass/lowering/tile_analysis.md)
 - 测试文件: [test/pass/test_lowering_tile_analysis.py](test/pass/test_lowering_tile_analysis.py)
 """
@@ -34,7 +34,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
+tile_analysis_module = importlib.import_module("kernel_gen.tile.analysis")
 TileAnalysisPass = tile_analysis_module.TileAnalysisPass
 
 from kernel_gen.dialect.dma import DmaBroadcastOp
@@ -55,7 +55,7 @@ def _make_memory_type(shape_names: list[str]) -> NnMemoryType:
     - mem_type = _make_memory_type(["M", "N"])
 
     关联文件:
-    - 功能实现: [kernel_gen/passes/lowering/tile_analysis.py](kernel_gen/passes/lowering/tile_analysis.py)
+    - 功能实现: [kernel_gen/tile/analysis.py](kernel_gen/tile/analysis.py)
     - Spec 文档: [spec/pass/lowering/tile_analysis.md](spec/pass/lowering/tile_analysis.md)
     - 测试文件: [test/pass/test_lowering_tile_analysis.py](test/pass/test_lowering_tile_analysis.py)
     """
@@ -79,7 +79,7 @@ def _build_module() -> ModuleOp:
     - module = _build_module()
 
     关联文件:
-    - 功能实现: [kernel_gen/passes/lowering/tile_analysis.py](kernel_gen/passes/lowering/tile_analysis.py)
+    - 功能实现: [kernel_gen/tile/analysis.py](kernel_gen/tile/analysis.py)
     - Spec 文档: [spec/pass/lowering/tile_analysis.md](spec/pass/lowering/tile_analysis.md)
     - 测试文件: [test/pass/test_lowering_tile_analysis.py](test/pass/test_lowering_tile_analysis.py)
     """
@@ -114,7 +114,7 @@ def _build_broadcast_module() -> ModuleOp:
     - module = _build_broadcast_module()
 
     关联文件:
-    - 功能实现: [kernel_gen/passes/lowering/tile_analysis.py](kernel_gen/passes/lowering/tile_analysis.py)
+    - 功能实现: [kernel_gen/tile/analysis.py](kernel_gen/tile/analysis.py)
     - Spec 文档: [spec/pass/lowering/tile_analysis.md](spec/pass/lowering/tile_analysis.md)
     - 测试文件: [test/pass/test_lowering_tile_analysis.py](test/pass/test_lowering_tile_analysis.py)
     """
@@ -144,7 +144,7 @@ def _build_matmul_module() -> ModuleOp:
     - module = _build_matmul_module()
 
     关联文件:
-    - 功能实现: [kernel_gen/passes/lowering/tile_analysis.py](kernel_gen/passes/lowering/tile_analysis.py)
+    - 功能实现: [kernel_gen/tile/analysis.py](kernel_gen/tile/analysis.py)
     - Spec 文档: [spec/pass/lowering/tile_analysis.md](spec/pass/lowering/tile_analysis.md)
     - 测试文件: [test/pass/test_lowering_tile_analysis.py](test/pass/test_lowering_tile_analysis.py)
     """
@@ -176,7 +176,7 @@ def _collect_ops(root) -> list[object]:
     - ops = _collect_ops(module)
 
     关联文件:
-    - 功能实现: [kernel_gen/passes/lowering/tile_analysis.py](kernel_gen/passes/lowering/tile_analysis.py)
+    - 功能实现: [kernel_gen/tile/analysis.py](kernel_gen/tile/analysis.py)
     - Spec 文档: [spec/pass/lowering/tile_analysis.md](spec/pass/lowering/tile_analysis.md)
     - 测试文件: [test/pass/test_lowering_tile_analysis.py](test/pass/test_lowering_tile_analysis.py)
     """
@@ -200,7 +200,7 @@ def _collect_ops(root) -> list[object]:
 # 最后一次更改: 朽木露琪亚
 # 功能说明: 验证 TileAnalysisPass 作为 ModulePass 可直接执行，并只写 analysis 标注。
 # 使用示例: pytest -q test/pass/test_lowering_tile_analysis.py -k test_tile_analysis_pass_apply_only_adds_analysis_attrs
-# 对应功能实现文件路径: kernel_gen/passes/lowering/tile_analysis.py
+# 对应功能实现文件路径: kernel_gen/tile/analysis.py
 # 对应 spec 文件路径: spec/pass/lowering/tile_analysis.md
 # 对应测试文件路径: test/pass/test_lowering_tile_analysis.py
 def test_tile_analysis_pass_apply_only_adds_analysis_attrs() -> None:
@@ -229,7 +229,7 @@ def test_tile_analysis_pass_apply_only_adds_analysis_attrs() -> None:
 # 最后一次更改: 金铲铲大作战
 # 功能说明: 验证 TileAnalysisPass 对 dma.broadcast 也会写入 tile.analysis 与 tile.tile_exprs。
 # 使用示例: pytest -q test/pass/test_lowering_tile_analysis.py -k test_tile_analysis_pass_marks_broadcast_attrs
-# 对应功能实现文件路径: kernel_gen/passes/lowering/tile_analysis.py
+# 对应功能实现文件路径: kernel_gen/tile/analysis.py
 # 对应 spec 文件路径: spec/pass/lowering/tile_analysis.md
 # 对应测试文件路径: test/pass/test_lowering_tile_analysis.py
 def test_tile_analysis_pass_marks_broadcast_attrs() -> None:
@@ -266,7 +266,7 @@ def test_tile_analysis_pass_marks_broadcast_attrs() -> None:
 # 最后一次更改: 金铲铲大作战
 # 功能说明: 验证 TileAnalysisPass 对 kernel.matmul 也会写入 tile.analysis 与 tile.tile_exprs。
 # 使用示例: pytest -q test/pass/test_lowering_tile_analysis.py -k test_tile_analysis_pass_marks_matmul_attrs
-# 对应功能实现文件路径: kernel_gen/passes/lowering/tile_analysis.py
+# 对应功能实现文件路径: kernel_gen/tile/analysis.py
 # 对应 spec 文件路径: spec/pass/lowering/tile_analysis.md
 # 对应测试文件路径: test/pass/test_lowering_tile_analysis.py
 def test_tile_analysis_pass_marks_matmul_attrs() -> None:
@@ -305,7 +305,7 @@ def test_tile_analysis_pass_marks_matmul_attrs() -> None:
 # 最后一次更改: 朽木露琪亚
 # 功能说明: 验证 tile-analysis 目录入口对应的 registry 名称可直接构造 ModulePass。
 # 使用示例: pytest -q test/pass/test_lowering_tile_analysis.py -k test_tile_analysis_registered_pass_is_module_pass
-# 对应功能实现文件路径: kernel_gen/passes/lowering/tile_analysis.py
+# 对应功能实现文件路径: kernel_gen/tile/analysis.py
 # 对应 spec 文件路径: spec/pass/lowering/tile_analysis.md
 # 对应测试文件路径: test/pass/test_lowering_tile_analysis.py
 def test_tile_analysis_registered_pass_is_module_pass() -> None:
@@ -318,4 +318,4 @@ def test_tile_analysis_registered_pass_is_module_pass() -> None:
     assert isinstance(pass_obj, ModulePass)
     assert pass_obj.name == "tile-analysis"
     assert type(pass_obj).__name__ == "TileAnalysisPass"
-    assert pass_obj.__class__.__module__ == "kernel_gen.passes.lowering.tile_analysis"
+    assert pass_obj.__class__.__module__ == "kernel_gen.tile.analysis"

@@ -47,16 +47,20 @@
 - `PassManager` 与 legacy `Pass` 的 canonical public path 固定为 `kernel_gen.passes.pass_manager`。
 - default / npu-demo pipeline builder 的 canonical public path 固定为 `kernel_gen.passes.pipeline`。
 - `LowerDmaMemoryHierarchyPass` 与 `MemoryPoolPass` 的 canonical public path 固定为 `kernel_gen.passes.dma_memory_hierarchy` 与 `kernel_gen.passes.memory_pool`。
+- tile family 的 canonical public path 固定为：
+  - `kernel_gen.tile.analysis`
+  - `kernel_gen.tile.elewise`
+  - `kernel_gen.tile.reduce`
 - 当前仍允许 pass manager caller 通过下列活跃模块导入 lowering family：
   - `kernel_gen.passes.lowering`
-  - `kernel_gen.passes.lowering.tile_analysis`
-  - `kernel_gen.passes.lowering.tile_elewise`
-  - `kernel_gen.passes.lowering.tile_reduce`
 - 以下旧路径在当前基线中必须稳定失败：
   - `kernel_gen.passes.lowering.pass_manager`
   - `kernel_gen.passes.lowering.registry`
   - `kernel_gen.passes.lowering.dma_memory_hierarchy`
   - `kernel_gen.passes.lowering.memory_pool`
+  - `kernel_gen.passes.lowering.tile_analysis`
+  - `kernel_gen.passes.lowering.tile_elewise`
+  - `kernel_gen.passes.lowering.tile_reduce`
 - `LowerDmaMemoryHierarchyPass` 与 `MemoryPoolPass` 的调用方不得再把 lowering compat 路径当作主入口；若需要添加这两个 pass，应从上级模块导入后再交给 `PassManager`。
 
 ## 公开接口

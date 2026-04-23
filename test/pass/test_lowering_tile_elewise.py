@@ -4,7 +4,7 @@
 最后一次更改: 小李飞刀
 
 功能说明:
-- 覆盖 `kernel_gen.passes.lowering.tile_elewise.TileElewisePass` 的 ModulePass 合同。
+- 覆盖 `kernel_gen.tile.elewise.TileElewisePass` 的 ModulePass 合同。
 - 锁定 `tile-elewise` 会在 `tile-analysis` 的基础上继续写出 `symbol.for` / `dma.view` 改写结构。
 - 锁定 rewritten op 继续保留 `tile.analysis + tile.tile_exprs`。
 
@@ -12,7 +12,7 @@
 - pytest -q test/pass/test_lowering_tile_elewise.py
 
 关联文件:
-- 功能实现: [kernel_gen/passes/lowering/tile_elewise.py](kernel_gen/passes/lowering/tile_elewise.py)
+- 功能实现: [kernel_gen/tile/elewise.py](kernel_gen/tile/elewise.py)
 - Spec 文档: [spec/pass/lowering/tile_elewise.md](spec/pass/lowering/tile_elewise.md)
 - 测试文件: [test/pass/test_lowering_tile_elewise.py](test/pass/test_lowering_tile_elewise.py)
 """
@@ -35,8 +35,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 tile_analysis_helpers = importlib.import_module("test.pass.test_lowering_tile_analysis")
-tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
-tile_elewise_module = importlib.import_module("kernel_gen.passes.lowering.tile_elewise")
+tile_analysis_module = importlib.import_module("kernel_gen.tile.analysis")
+tile_elewise_module = importlib.import_module("kernel_gen.tile.elewise")
 registry_module = importlib.import_module("kernel_gen.passes.registry")
 
 TileAnalysisPass = tile_analysis_module.TileAnalysisPass
@@ -58,7 +58,7 @@ def _collect_ops(root: object) -> list[object]:
     - ops = _collect_ops(module)
 
     关联文件:
-    - 功能实现: [kernel_gen/passes/lowering/tile_elewise.py](kernel_gen/passes/lowering/tile_elewise.py)
+    - 功能实现: [kernel_gen/tile/elewise.py](kernel_gen/tile/elewise.py)
     - Spec 文档: [spec/pass/lowering/tile_elewise.md](spec/pass/lowering/tile_elewise.md)
     - 测试文件: [test/pass/test_lowering_tile_elewise.py](test/pass/test_lowering_tile_elewise.py)
     """
@@ -91,7 +91,7 @@ def _apply_tile_elewise_pipeline(module: ModuleOp) -> ModuleOp:
     - module = _apply_tile_elewise_pipeline(module)
 
     关联文件:
-    - 功能实现: [kernel_gen/passes/lowering/tile_elewise.py](kernel_gen/passes/lowering/tile_elewise.py)
+    - 功能实现: [kernel_gen/tile/elewise.py](kernel_gen/tile/elewise.py)
     - Spec 文档: [spec/pass/lowering/tile_elewise.md](spec/pass/lowering/tile_elewise.md)
     - 测试文件: [test/pass/test_lowering_tile_elewise.py](test/pass/test_lowering_tile_elewise.py)
     """
@@ -116,7 +116,7 @@ def _build_multi_plan_module() -> ModuleOp:
     - module = _build_multi_plan_module()
 
     关联文件:
-    - 功能实现: [kernel_gen/passes/lowering/tile_elewise.py](kernel_gen/passes/lowering/tile_elewise.py)
+    - 功能实现: [kernel_gen/tile/elewise.py](kernel_gen/tile/elewise.py)
     - Spec 文档: [spec/pass/lowering/tile_elewise.md](spec/pass/lowering/tile_elewise.md)
     - 测试文件: [test/pass/test_lowering_tile_elewise.py](test/pass/test_lowering_tile_elewise.py)
     """
@@ -173,7 +173,7 @@ def _expected_matmul_exprs() -> ArrayAttr:
 # 最后一次更改: 小李飞刀
 # 功能说明: 验证 TileElewisePass 作为 ModulePass 可直接执行，并对 elementwise 输出显式分块结构。
 # 使用示例: pytest -q test/pass/test_lowering_tile_elewise.py -k test_tile_elewise_pass_rewrites_elementwise_and_preserves_contract
-# 对应功能实现文件路径: kernel_gen/passes/lowering/tile_elewise.py
+# 对应功能实现文件路径: kernel_gen/tile/elewise.py
 # 对应 spec 文件路径: spec/pass/lowering/tile_elewise.md
 # 对应测试文件路径: test/pass/test_lowering_tile_elewise.py
 def test_tile_elewise_pass_rewrites_elementwise_and_preserves_contract() -> None:
@@ -206,7 +206,7 @@ def test_tile_elewise_pass_rewrites_elementwise_and_preserves_contract() -> None
 # 最后一次更改: 小李飞刀
 # 功能说明: 验证 TileElewisePass 对 broadcast 也会保留 tile.analysis 与 tile.tile_exprs。
 # 使用示例: pytest -q test/pass/test_lowering_tile_elewise.py -k test_tile_elewise_pass_rewrites_broadcast_and_preserves_contract
-# 对应功能实现文件路径: kernel_gen/passes/lowering/tile_elewise.py
+# 对应功能实现文件路径: kernel_gen/tile/elewise.py
 # 对应 spec 文件路径: spec/pass/lowering/tile_elewise.md
 # 对应测试文件路径: test/pass/test_lowering_tile_elewise.py
 def test_tile_elewise_pass_rewrites_broadcast_and_preserves_contract() -> None:
@@ -238,7 +238,7 @@ def test_tile_elewise_pass_rewrites_broadcast_and_preserves_contract() -> None:
 # 最后一次更改: 小李飞刀
 # 功能说明: 验证 TileElewisePass 会遍历并改写同一函数中的多个 plan，而不是只处理最后一个。
 # 使用示例: pytest -q test/pass/test_lowering_tile_elewise.py -k test_tile_elewise_pass_rewrites_multiple_plans_and_preserves_contract
-# 对应功能实现文件路径: kernel_gen/passes/lowering/tile_elewise.py
+# 对应功能实现文件路径: kernel_gen/tile/elewise.py
 # 对应 spec 文件路径: spec/pass/lowering/tile_elewise.md
 # 对应测试文件路径: test/pass/test_lowering_tile_elewise.py
 def test_tile_elewise_pass_rewrites_multiple_plans_and_preserves_contract() -> None:
@@ -264,7 +264,7 @@ def test_tile_elewise_pass_rewrites_multiple_plans_and_preserves_contract() -> N
 # 最后一次更改: 小李飞刀
 # 功能说明: 验证 TileElewisePass 对 matmul 的 rewritten kernel.matmul 也会保留 tile.analysis 与 tile.tile_exprs。
 # 使用示例: pytest -q test/pass/test_lowering_tile_elewise.py -k test_tile_elewise_pass_rewrites_matmul_and_preserves_contract
-# 对应功能实现文件路径: kernel_gen/passes/lowering/tile_elewise.py
+# 对应功能实现文件路径: kernel_gen/tile/elewise.py
 # 对应 spec 文件路径: spec/pass/lowering/tile_elewise.md
 # 对应测试文件路径: test/pass/test_lowering_tile_elewise.py
 def test_tile_elewise_pass_rewrites_matmul_and_preserves_contract() -> None:
@@ -297,7 +297,7 @@ def test_tile_elewise_pass_rewrites_matmul_and_preserves_contract() -> None:
 # 最后一次更改: 小李飞刀
 # 功能说明: 验证 tile-elewise 目录入口对应的 registry 名称可直接构造 ModulePass。
 # 使用示例: pytest -q test/pass/test_lowering_tile_elewise.py -k test_tile_elewise_registered_pass_is_module_pass
-# 对应功能实现文件路径: kernel_gen/passes/lowering/tile_elewise.py
+# 对应功能实现文件路径: kernel_gen/tile/elewise.py
 # 对应 spec 文件路径: spec/pass/lowering/tile_elewise.md
 # 对应测试文件路径: test/pass/test_lowering_tile_elewise.py
 def test_tile_elewise_registered_pass_is_module_pass() -> None:
@@ -307,4 +307,4 @@ def test_tile_elewise_registered_pass_is_module_pass() -> None:
     assert isinstance(pass_obj, ModulePass)
     assert pass_obj.name == "tile-elewise"
     assert type(pass_obj).__name__ == "TileElewisePass"
-    assert pass_obj.__class__.__module__ == "kernel_gen.passes.lowering.tile_elewise"
+    assert pass_obj.__class__.__module__ == "kernel_gen.tile.elewise"

@@ -4,7 +4,7 @@
 最后一次更改: 朽木露琪亚
 
 功能说明:
-- 覆盖 `kernel_gen.passes.lowering.tile_reduce.TileReducePass` 的 ModulePass 合同。
+- 覆盖 `kernel_gen.tile.reduce.TileReducePass` 的 ModulePass 合同。
 - 锁定 `tile-reduce` 会在 `tile-analysis` 的基础上继续写出 `symbol.for` / `dma.view` / `dma.fill` 的 reduce 结构。
 - 锁定 rewritten `kernel.matmul` 继续保留 `tile.analysis + tile.tile_exprs`。
 
@@ -12,7 +12,7 @@
 - pytest -q test/pass/test_lowering_tile_reduce.py
 
 关联文件:
-- 功能实现: [kernel_gen/passes/lowering/tile_reduce.py](kernel_gen/passes/lowering/tile_reduce.py)
+- 功能实现: [kernel_gen/tile/reduce.py](kernel_gen/tile/reduce.py)
 - Spec 文档: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
 - 测试文件: [test/pass/test_lowering_tile_reduce.py](test/pass/test_lowering_tile_reduce.py)
 """
@@ -33,9 +33,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 tile_analysis_helpers = importlib.import_module("test.pass.test_lowering_tile_analysis")
-tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
-tile_module = importlib.import_module("kernel_gen.passes.lowering.tile")
-tile_reduce_module = importlib.import_module("kernel_gen.passes.lowering.tile_reduce")
+tile_analysis_module = importlib.import_module("kernel_gen.tile.analysis")
+tile_module = importlib.import_module("kernel_gen.tile.common")
+tile_reduce_module = importlib.import_module("kernel_gen.tile.reduce")
 registry_module = importlib.import_module("kernel_gen.passes.registry")
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp
@@ -62,7 +62,7 @@ def _apply_tile_reduce_pipeline(module):
     - module = _apply_tile_reduce_pipeline(module)
 
     关联文件:
-    - 功能实现: [kernel_gen/passes/lowering/tile_reduce.py](kernel_gen/passes/lowering/tile_reduce.py)
+    - 功能实现: [kernel_gen/tile/reduce.py](kernel_gen/tile/reduce.py)
     - Spec 文档: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
     - 测试文件: [test/pass/test_lowering_tile_reduce.py](test/pass/test_lowering_tile_reduce.py)
     """
@@ -86,7 +86,7 @@ def _expected_matmul_exprs() -> ArrayAttr:
     - expected = _expected_matmul_exprs()
 
     关联文件:
-    - 功能实现: [kernel_gen/passes/lowering/tile_reduce.py](kernel_gen/passes/lowering/tile_reduce.py)
+    - 功能实现: [kernel_gen/tile/reduce.py](kernel_gen/tile/reduce.py)
     - Spec 文档: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
     - 测试文件: [test/pass/test_lowering_tile_reduce.py](test/pass/test_lowering_tile_reduce.py)
     """
@@ -114,7 +114,7 @@ def _build_fc_chain_module():
     - module = _build_fc_chain_module()
 
     关联文件:
-    - 功能实现: [kernel_gen/passes/lowering/tile_reduce.py](kernel_gen/passes/lowering/tile_reduce.py)
+    - 功能实现: [kernel_gen/tile/reduce.py](kernel_gen/tile/reduce.py)
     - Spec 文档: [spec/pass/lowering/tile_reduce.md](spec/pass/lowering/tile_reduce.md)
     - 测试文件: [test/pass/test_lowering_tile_reduce.py](test/pass/test_lowering_tile_reduce.py)
     """
@@ -159,7 +159,7 @@ def _tuner_param_names(module) -> list[str]:
     - names = _tuner_param_names(module)
 
     关联文件:
-    - 功能实现: [kernel_gen/passes/lowering/tile_reduce.py](kernel_gen/passes/lowering/tile_reduce.py)
+    - 功能实现: [kernel_gen/tile/reduce.py](kernel_gen/tile/reduce.py)
     - Spec 文档: [spec/pass/lowering/tile_reduce.md](spec/pass/lowering/tile_reduce.md)
     - 测试文件: [test/pass/test_lowering_tile_reduce.py](test/pass/test_lowering_tile_reduce.py)
     """
@@ -178,7 +178,7 @@ def _tuner_param_names(module) -> list[str]:
 # 最后一次更改: 金铲铲大作战
 # 功能说明: 验证 TileReducePass 作为 ModulePass 可直接执行，并对 matmul 输出显式 reduce 结构。
 # 使用示例: pytest -q test/pass/test_lowering_tile_reduce.py -k test_tile_reduce_pass_rewrites_matmul_and_preserves_contract
-# 对应功能实现文件路径: kernel_gen/passes/lowering/tile_reduce.py
+# 对应功能实现文件路径: kernel_gen/tile/reduce.py
 # 对应 spec 文件路径: spec/pass/lowering/tile.md
 # 对应测试文件路径: test/pass/test_lowering_tile_reduce.py
 def test_tile_reduce_pass_rewrites_matmul_and_preserves_contract() -> None:
@@ -219,7 +219,7 @@ def test_tile_reduce_pass_rewrites_matmul_and_preserves_contract() -> None:
 # 最后一次更改: 朽木露琪亚
 # 功能说明: 验证 TileReducePass 对缺少 tile.analysis 的 kernel.matmul 显式失败。
 # 使用示例: pytest -q test/pass/test_lowering_tile_reduce.py -k test_tile_reduce_rejects_matmul_without_analysis_attrs
-# 对应功能实现文件路径: kernel_gen/passes/lowering/tile_reduce.py
+# 对应功能实现文件路径: kernel_gen/tile/reduce.py
 # 对应 spec 文件路径: spec/pass/lowering/tile_reduce.md
 # 对应测试文件路径: test/pass/test_lowering_tile_reduce.py
 def test_tile_reduce_rejects_matmul_without_analysis_attrs() -> None:
@@ -234,7 +234,7 @@ def test_tile_reduce_rejects_matmul_without_analysis_attrs() -> None:
 # 最后一次更改: 朽木露琪亚
 # 功能说明: 验证 TileReducePass 在组合链路中只为 matmul reduce 计划建参。
 # 使用示例: pytest -q test/pass/test_lowering_tile_reduce.py -k test_tile_reduce_fc_chain_omits_unconsumed_tuner_params
-# 对应功能实现文件路径: kernel_gen/passes/lowering/tile_reduce.py
+# 对应功能实现文件路径: kernel_gen/tile/reduce.py
 # 对应 spec 文件路径: spec/pass/lowering/tile_reduce.md
 # 对应测试文件路径: test/pass/test_lowering_tile_reduce.py
 def test_tile_reduce_fc_chain_omits_unconsumed_tuner_params() -> None:
@@ -251,7 +251,7 @@ def test_tile_reduce_fc_chain_omits_unconsumed_tuner_params() -> None:
 # 最后一次更改: 金铲铲大作战
 # 功能说明: 验证 tile-reduce 目录入口对应的 registry 名称可直接构造 ModulePass。
 # 使用示例: pytest -q test/pass/test_lowering_tile_reduce.py -k test_tile_reduce_registered_pass_is_module_pass
-# 对应功能实现文件路径: kernel_gen/passes/lowering/tile_reduce.py
+# 对应功能实现文件路径: kernel_gen/tile/reduce.py
 # 对应 spec 文件路径: spec/pass/lowering/tile.md
 # 对应测试文件路径: test/pass/test_lowering_tile_reduce.py
 def test_tile_reduce_registered_pass_is_module_pass() -> None:
@@ -261,4 +261,4 @@ def test_tile_reduce_registered_pass_is_module_pass() -> None:
     assert isinstance(pass_obj, ModulePass)
     assert pass_obj.name == "tile-reduce"
     assert type(pass_obj).__name__ == "TileReducePass"
-    assert pass_obj.__class__.__module__ == "kernel_gen.passes.lowering.tile_reduce"
+    assert pass_obj.__class__.__module__ == "kernel_gen.tile.reduce"

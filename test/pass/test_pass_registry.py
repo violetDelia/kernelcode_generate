@@ -260,7 +260,7 @@ def test_build_registered_tile_analysis_pass() -> None:
     assert pass_obj.name == "tile-analysis"
     assert type(pass_obj).__name__ == "TileAnalysisPass"
     assert isinstance(pass_obj, ModulePass)
-    assert pass_obj.__class__.__module__ == "kernel_gen.passes.lowering.tile_analysis"
+    assert pass_obj.__class__.__module__ == "kernel_gen.tile.analysis"
 
 
 # TC-REGISTRY-007A-0B
@@ -279,7 +279,7 @@ def test_build_registered_tile_reduce_pass() -> None:
     assert pass_obj.name == "tile-reduce"
     assert type(pass_obj).__name__ == "TileReducePass"
     assert isinstance(pass_obj, ModulePass)
-    assert pass_obj.__class__.__module__ == "kernel_gen.passes.lowering.tile_reduce"
+    assert pass_obj.__class__.__module__ == "kernel_gen.tile.reduce"
 
 
 # TC-REGISTRY-007A-1
@@ -298,12 +298,12 @@ def test_build_registered_tile_elewise_pass() -> None:
     assert pass_obj.name == "tile-elewise"
     assert type(pass_obj).__name__ == "TileElewisePass"
     assert isinstance(pass_obj, ModulePass)
-    assert pass_obj.__class__.__module__ == "kernel_gen.passes.lowering.tile_elewise"
+    assert pass_obj.__class__.__module__ == "kernel_gen.tile.elewise"
 
 
 # TC-REGISTRY-007A-2
 # 创建者: 金铲铲大作战
-# 最后一次更改: jcc你莫辜负
+# 最后一次更改: 金铲铲大作战
 # 功能说明: 验证 registry caller 当前冻结的 surviving public path 与 compat consumer matrix。
 # 使用示例: pytest -q test/pass/test_pass_registry.py -k test_registry_surviving_public_paths_match_consumer_matrix
 # 对应功能实现文件路径: kernel_gen/passes/registry.py
@@ -355,17 +355,17 @@ def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
         (
             "kernel_gen.passes.lowering",
             "TileAnalysisPass",
-            importlib.import_module("kernel_gen.passes.lowering.tile_analysis").TileAnalysisPass,
+            importlib.import_module("kernel_gen.tile.analysis").TileAnalysisPass,
         ),
         (
             "kernel_gen.passes.lowering",
             "TileElewisePass",
-            importlib.import_module("kernel_gen.passes.lowering.tile_elewise").TileElewisePass,
+            importlib.import_module("kernel_gen.tile.elewise").TileElewisePass,
         ),
         (
             "kernel_gen.passes.lowering",
             "TileReducePass",
-            importlib.import_module("kernel_gen.passes.lowering.tile_reduce").TileReducePass,
+            importlib.import_module("kernel_gen.tile.reduce").TileReducePass,
         ),
         (
             "kernel_gen.passes.dma_memory_hierarchy",
@@ -378,19 +378,19 @@ def test_registry_surviving_public_paths_match_consumer_matrix() -> None:
             importlib.import_module("kernel_gen.passes.memory_pool").MemoryPoolPass,
         ),
         (
-            "kernel_gen.passes.lowering.tile_analysis",
+            "kernel_gen.tile.analysis",
             "TileAnalysisPass",
-            importlib.import_module("kernel_gen.passes.lowering.tile_analysis").TileAnalysisPass,
+            importlib.import_module("kernel_gen.tile.analysis").TileAnalysisPass,
         ),
         (
-            "kernel_gen.passes.lowering.tile_elewise",
+            "kernel_gen.tile.elewise",
             "TileElewisePass",
-            importlib.import_module("kernel_gen.passes.lowering.tile_elewise").TileElewisePass,
+            importlib.import_module("kernel_gen.tile.elewise").TileElewisePass,
         ),
         (
-            "kernel_gen.passes.lowering.tile_reduce",
+            "kernel_gen.tile.reduce",
             "TileReducePass",
-            importlib.import_module("kernel_gen.passes.lowering.tile_reduce").TileReducePass,
+            importlib.import_module("kernel_gen.tile.reduce").TileReducePass,
         ),
         (
             "kernel_gen.passes.lowering.outline_device_kernel",
@@ -612,7 +612,7 @@ def test_build_registered_attach_arch_information_pass() -> None:
 # TC-REGISTRY-007J
 # 创建者: 金铲铲大作战
 # 最后一次更改: jcc你莫辜负
-# 功能说明: 验证已退场的 lowering 旧路径在 S1/S2 基线中稳定失败。
+# 功能说明: 验证已退场的 lowering 旧路径与旧 tile submodule path 在 S1/S7 基线中稳定失败。
 # 使用示例: pytest -q test/pass/test_pass_registry.py -k test_registry_old_lowering_paths_fail_fast
 # 对应功能实现文件路径: kernel_gen/passes/registry.py
 # 对应 spec 文件路径: spec/pass/registry.md
@@ -626,6 +626,9 @@ def test_registry_old_lowering_paths_fail_fast() -> None:
         "kernel_gen.passes.lowering.decompass",
         "kernel_gen.passes.lowering.buffer_results_to_out_params",
         "kernel_gen.passes.lowering.nn_to_kernel",
+        "kernel_gen.passes.lowering.tile_analysis",
+        "kernel_gen.passes.lowering.tile_elewise",
+        "kernel_gen.passes.lowering.tile_reduce",
     )
 
     for module_name in old_module_paths:

@@ -63,9 +63,9 @@
   - kernel_gen/passes/buffer_results_to_out_params.py
   - kernel_gen/passes/decompass.py
   - kernel_gen/passes/outline_device_kernel.py
-- kernel_gen/passes/lowering/tile_analysis.py
-- kernel_gen/passes/lowering/tile_elewise.py
-- kernel_gen/passes/lowering/tile_reduce.py
+  - kernel_gen/tile/analysis.py
+  - kernel_gen/tile/elewise.py
+  - kernel_gen/tile/reduce.py
 - kernel_gen/passes/symbol_loop_hoist.py
 """
 
@@ -77,9 +77,9 @@ from .attach_arch_information import AttachArchInformationError, AttachArchInfor
 from .decompass import DecompassError, DecompassPass, register_decompass_rewrite
 from .inline import InlineError, InlinePass
 from .outline_device_kernel import OutlineDeviceKernelError, OutlineDeviceKernelPass
-from .lowering.tile_analysis import TileAnalysisPass
-from .lowering.tile_elewise import TileElewisePass
-from .lowering.tile_reduce import TileReducePass
+from ..tile.analysis import TileAnalysisPass
+from ..tile.elewise import TileElewisePass
+from ..tile.reduce import TileReducePass
 from .pass_manager import Pass, PassManager
 from .symbol_loop_hoist import SymbolLoopHoistError, SymbolLoopHoistPass
 

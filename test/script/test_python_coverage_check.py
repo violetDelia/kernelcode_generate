@@ -131,7 +131,7 @@ def test_check_python_coverage_supports_file_level_include_module_filter(tmp_pat
             "num_branches": 0,
         },
         "files": {
-            "kernel_gen/passes/lowering/tile.py": {
+            "kernel_gen/tile/common.py": {
                 "summary": {
                     "covered_lines": 5,
                     "num_statements": 5,
@@ -149,7 +149,7 @@ def test_check_python_coverage_supports_file_level_include_module_filter(tmp_pat
             "--coverage-json",
             str(report_path),
             "--include-module",
-            "kernel_gen.passes.lowering.tile",
+            "kernel_gen.tile.common",
             "--line-min",
             "95",
             "--branch-min",
@@ -157,49 +157,7 @@ def test_check_python_coverage_supports_file_level_include_module_filter(tmp_pat
         ]
     )
     assert code == 0
-    assert "scope=kernel_gen/passes/lowering/tile (1 file(s))" in stdout
-    assert "line=100.00%" in stdout
-    assert stderr == ""
-
-
-def test_check_python_coverage_supports_file_level_include_module_filter(tmp_path: Path) -> None:
-    """TC-CPY-002B: include-module should also match a specific file-level module path."""
-
-    report = {
-        "totals": {
-            "covered_lines": 0,
-            "num_statements": 0,
-            "covered_branches": 0,
-            "num_branches": 0,
-        },
-        "files": {
-            "kernel_gen/passes/lowering/tile.py": {
-                "summary": {
-                    "covered_lines": 5,
-                    "num_statements": 5,
-                    "covered_branches": 2,
-                    "num_branches": 2,
-                }
-            }
-        },
-    }
-    report_path = tmp_path / "report.json"
-    report_path.write_text(json.dumps(report), encoding='utf-8')
-
-    code, stdout, stderr = _run_check(
-        [
-            "--coverage-json",
-            str(report_path),
-            "--include-module",
-            "kernel_gen.passes.lowering.tile",
-            "--line-min",
-            "95",
-            "--branch-min",
-            "60",
-        ]
-    )
-    assert code == 0
-    assert "scope=kernel_gen/passes/lowering/tile (1 file(s))" in stdout
+    assert "scope=kernel_gen/tile/common (1 file(s))" in stdout
     assert "line=100.00%" in stdout
     assert stderr == ""
 

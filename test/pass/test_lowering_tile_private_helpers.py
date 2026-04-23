@@ -35,7 +35,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 tile_analysis_helpers = importlib.import_module("test.pass.test_lowering_tile_analysis")
-tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
+tile_analysis_module = importlib.import_module("kernel_gen.tile.analysis")
 tile_module = importlib.import_module("kernel_gen.tile.common")
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaFillOp, DmaViewOp
@@ -67,7 +67,7 @@ def _make_memory_type(
     - mem_type = _make_memory_type([StringAttr("M"), IntAttr(1)])
 
     关联文件:
-    - 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
+    - 功能实现: [kernel_gen/tile/common.py](kernel_gen/tile/common.py)
     - Spec 文档: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
     - 测试文件: [test/pass/test_lowering_tile_private_helpers.py](test/pass/test_lowering_tile_private_helpers.py)
     """
@@ -96,7 +96,7 @@ def _make_func_op(
     - func_op = _make_func_op("tile_helper", [mem_type], [], [func.ReturnOp()])
 
     关联文件:
-    - 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
+    - 功能实现: [kernel_gen/tile/common.py](kernel_gen/tile/common.py)
     - Spec 文档: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
     - 测试文件: [test/pass/test_lowering_tile_private_helpers.py](test/pass/test_lowering_tile_private_helpers.py)
     """
@@ -120,7 +120,7 @@ def _run_tile_analysis(module: ModuleOp) -> ModuleOp:
     - module = _run_tile_analysis(module)
 
     关联文件:
-    - 功能实现: [kernel_gen/passes/lowering/tile_analysis.py](kernel_gen/passes/lowering/tile_analysis.py)
+    - 功能实现: [kernel_gen/tile/analysis.py](kernel_gen/tile/analysis.py)
     - Spec 文档: [spec/pass/lowering/tile_analysis.md](spec/pass/lowering/tile_analysis.md)
     - 测试文件: [test/pass/test_lowering_tile_private_helpers.py](test/pass/test_lowering_tile_private_helpers.py)
     """
@@ -134,7 +134,7 @@ def _run_tile_analysis(module: ModuleOp) -> ModuleOp:
 # 最后一次更改: 金铲铲大作战
 # 功能说明: 验证 tile helper 里的输入合同、kernel 分类与 compare 兼容路径会按当前真实语义返回或失败。
 # 使用示例: pytest -q test/pass/test_lowering_tile_private_helpers.py -k test_tile_private_helpers_cover_contract_and_classification_surface
-# 对应功能实现文件路径: kernel_gen/passes/lowering/tile.py
+# 对应功能实现文件路径: kernel_gen/tile/common.py
 # 对应 spec 文件路径: spec/pass/lowering/tile.md
 # 对应测试文件路径: test/pass/test_lowering_tile_private_helpers.py
 def test_tile_private_helpers_cover_contract_and_classification_surface() -> None:
@@ -203,7 +203,7 @@ def test_tile_private_helpers_cover_contract_and_classification_surface() -> Non
 # 最后一次更改: 金铲铲大作战
 # 功能说明: 验证 tile helper 的输入合同与中间值物化校验会对 memory-return、func.call、nn 残留和 carry memory 进行 fail-fast。
 # 使用示例: pytest -q test/pass/test_lowering_tile_private_helpers.py -k test_tile_private_helpers_validate_input_contract_and_materialization
-# 对应功能实现文件路径: kernel_gen/passes/lowering/tile.py
+# 对应功能实现文件路径: kernel_gen/tile/common.py
 # 对应 spec 文件路径: spec/pass/lowering/tile.md
 # 对应测试文件路径: test/pass/test_lowering_tile_private_helpers.py
 def test_tile_private_helpers_validate_input_contract_rejects_memory_return() -> None:
@@ -254,7 +254,7 @@ def test_tile_private_helpers_validate_input_contract_accepts_bridge_ops() -> No
     - pytest -q test/pass/test_lowering_tile_private_helpers.py -k test_tile_private_helpers_validate_input_contract_accepts_bridge_ops
 
     关联文件:
-    - 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
+    - 功能实现: [kernel_gen/tile/common.py](kernel_gen/tile/common.py)
     - Spec 文档: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
     - 测试文件: [test/pass/test_lowering_tile_private_helpers.py](test/pass/test_lowering_tile_private_helpers.py)
     """
@@ -291,7 +291,7 @@ def test_tile_private_helpers_validate_intermediate_materialization_contract() -
     - pytest -q test/pass/test_lowering_tile_private_helpers.py -k test_tile_private_helpers_validate_intermediate_materialization_contract
 
     关联文件:
-    - 功能实现: [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
+    - 功能实现: [kernel_gen/tile/common.py](kernel_gen/tile/common.py)
     - Spec 文档: [spec/pass/lowering/tile.md](spec/pass/lowering/tile.md)
     - 测试文件: [test/pass/test_lowering_tile_private_helpers.py](test/pass/test_lowering_tile_private_helpers.py)
     """
@@ -329,7 +329,7 @@ def test_tile_private_helpers_validate_intermediate_materialization_contract() -
 # 最后一次更改: 金铲铲大作战
 # 功能说明: 验证 tile helper 的 loop/view 构造、stride 推导、symbol 维度判断与 memory 角色矩阵边界。
 # 使用示例: pytest -q test/pass/test_lowering_tile_private_helpers.py -k test_tile_private_helpers_cover_loop_view_and_role_helpers
-# 对应功能实现文件路径: kernel_gen/passes/lowering/tile.py
+# 对应功能实现文件路径: kernel_gen/tile/common.py
 # 对应 spec 文件路径: spec/pass/lowering/tile.md
 # 对应测试文件路径: test/pass/test_lowering_tile_private_helpers.py
 def test_tile_private_helpers_cover_loop_view_and_role_helpers() -> None:
@@ -442,7 +442,7 @@ def test_tile_private_helpers_cover_loop_view_and_role_helpers() -> None:
 # 最后一次更改: 金铲铲大作战
 # 功能说明: 验证 tile helper 的 plan 选择会按 elementwise / broadcast / matmul 不同形态分配 tile 名称与 reduce 名称。
 # 使用示例: pytest -q test/pass/test_lowering_tile_private_helpers.py -k test_tile_private_helpers_cover_plan_selection
-# 对应功能实现文件路径: kernel_gen/passes/lowering/tile.py
+# 对应功能实现文件路径: kernel_gen/tile/common.py
 # 对应 spec 文件路径: spec/pass/lowering/tile.md
 # 对应测试文件路径: test/pass/test_lowering_tile_private_helpers.py
 def test_tile_private_helpers_cover_plan_selection() -> None:
@@ -503,7 +503,7 @@ def test_tile_private_helpers_cover_plan_selection() -> None:
 # 最后一次更改: 金铲铲大作战
 # 功能说明: 验证 tile helper 的前置校验、命名解析与分类分支能覆盖非法输入与边界输入。
 # 使用示例: pytest -q test/pass/test_lowering_tile_private_helpers.py -k test_tile_private_helpers_cover_validation_edges
-# 对应功能实现文件路径: kernel_gen/passes/lowering/tile.py
+# 对应功能实现文件路径: kernel_gen/tile/common.py
 # 对应 spec 文件路径: spec/pass/lowering/tile.md
 # 对应测试文件路径: test/pass/test_lowering_tile_private_helpers.py
 def test_tile_private_helpers_cover_validation_edges() -> None:
@@ -599,7 +599,7 @@ def test_tile_private_helpers_cover_validation_edges() -> None:
 # 最后一次更改: 金铲铲大作战
 # 功能说明: 验证 tile helper rewrite 能覆盖 elementwise / broadcast / matmul 的主链与边界分支。
 # 使用示例: pytest -q test/pass/test_lowering_tile_private_helpers.py -k test_tile_private_helpers_cover_rewrite_helpers
-# 对应功能实现文件路径: kernel_gen/passes/lowering/tile.py
+# 对应功能实现文件路径: kernel_gen/tile/common.py
 # 对应 spec 文件路径: spec/pass/lowering/tile.md
 # 对应测试文件路径: test/pass/test_lowering_tile_private_helpers.py
 def test_tile_private_helpers_cover_rewrite_helpers() -> None:

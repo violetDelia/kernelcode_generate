@@ -1,15 +1,16 @@
-"""tile-elewise implementation landing module.
+"""tile-elewise logic module.
 
 创建者: 金铲铲大作战
 最后一次更改: 金铲铲大作战
 
 功能说明:
-- 承接 `tile-elewise` 的真实 rewrite 主链。
-- 保持公开 `ModulePass` 壳在 `kernel_gen.passes.lowering.tile_elewise`，把 loop/view/plan 消费路径收口到 `kernel_gen.tile.elewise`。
-- S4 阶段不改最终 rewrite 语义，只整理 canonical helper/path。
+- 承接 `tile-elewise` 的真实 rewrite 主链与 `ModulePass` 落点。
+- 对外仍通过 registry 名称 `tile-elewise` 构造，但 pass 类与 logic 都定义在 `kernel_gen.tile.elewise`。
+- 旧 `kernel_gen.passes.lowering.tile_elewise` submodule path 已退场，canonical public path 固定为 `kernel_gen.tile.elewise`。
 
 使用示例:
-- from kernel_gen.tile.elewise import apply_tile_elewise
+- from kernel_gen.tile.elewise import TileElewisePass, apply_tile_elewise
+- TileElewisePass().apply(Context(), module)
 - apply_tile_elewise(module)
 
 关联文件:
@@ -21,8 +22,10 @@
 
 from __future__ import annotations
 
+from xdsl.context import Context
 from xdsl.dialects.builtin import ArrayAttr, ModuleOp, StringAttr
 from xdsl.ir import SSAValue
+from xdsl.passes import ModulePass
 
 from kernel_gen.dialect.symbol import SymbolValueType
 
@@ -144,5 +147,30 @@ def apply_tile_elewise(module: ModuleOp) -> None:
             candidate.detach()
         block.add_ops(new_ops)
 
+class TileElewisePass(ModulePass):
+    """`tile-elewise` 的公开 `ModulePass`。
 
-__all__ = ["apply_tile_elewise"]
+    创建者: 小李飞刀
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 保持稳定公开名 `tile-elewise`。
+    - 调用当前模块中的 `apply_tile_elewise(...)` 主逻辑。
+
+    使用示例:
+    - TileElewisePass().apply(Context(), module)
+
+    关联文件:
+    - spec: [spec/pass/lowering/tile_elewise.md](spec/pass/lowering/tile_elewise.md)
+    - test: [test/pass/test_lowering_tile_elewise.py](test/pass/test_lowering_tile_elewise.py)
+    - 功能实现: [kernel_gen/tile/elewise.py](kernel_gen/tile/elewise.py)
+    """
+
+    name = "tile-elewise"
+
+    def apply(self: "TileElewisePass", ctx: Context, module: ModuleOp) -> None:
+        del ctx
+        apply_tile_elewise(module)
+
+
+__all__ = ["TileElewisePass", "apply_tile_elewise"]

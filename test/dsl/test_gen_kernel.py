@@ -104,9 +104,9 @@ gen_kernel_entry_spec.loader.exec_module(gen_kernel_entry_module)
 gen_kernel_wrapper_module = importlib.import_module("kernel_gen.dsl.gen_kernel.gen_kernel")
 emit_context_module = importlib.import_module("kernel_gen.dsl.gen_kernel.emit_context")
 tile_analysis_helpers = importlib.import_module("test.pass.test_lowering_tile_analysis")
-tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
-tile_elewise_module = importlib.import_module("kernel_gen.passes.lowering.tile_elewise")
-tile_reduce_module = importlib.import_module("kernel_gen.passes.lowering.tile_reduce")
+tile_analysis_module = importlib.import_module("kernel_gen.tile.analysis")
+tile_elewise_module = importlib.import_module("kernel_gen.tile.elewise")
+tile_reduce_module = importlib.import_module("kernel_gen.tile.reduce")
 tile_common_module = importlib.import_module("kernel_gen.tile.common")
 tile_analysis_impl = importlib.import_module("kernel_gen.tile.analysis")
 tile_elewise_impl = importlib.import_module("kernel_gen.tile.elewise")
@@ -574,7 +574,7 @@ def test_tile_gen_kernel_paths_use_kernel_gen_tile_modules() -> None:
 
     功能说明:
     - 锁定 `tile-analysis` / `tile-elewise` / `tile-reduce` 的真实实现落点已迁到 `kernel_gen.tile.*`。
-    - 同时验证 canonical common path 仍复用稳定的 `_plan_tile_ops` helper，避免在 S4 里误做 logic rewrite。
+    - 同时验证三个 `Tile*Pass` 的类定义也已经收口到 `kernel_gen.tile.*`。
 
     使用示例:
     - pytest -q test/dsl/test_gen_kernel.py -k test_tile_gen_kernel_paths_use_kernel_gen_tile_modules
@@ -588,12 +588,13 @@ def test_tile_gen_kernel_paths_use_kernel_gen_tile_modules() -> None:
     - 功能实现: [kernel_gen/tile/reduce.py](kernel_gen/tile/reduce.py)
     """
 
-    legacy_tile_module = importlib.import_module("kernel_gen.passes.lowering.tile")
-
     assert callable(tile_analysis_impl.apply_tile_analysis)
     assert callable(tile_elewise_impl.apply_tile_elewise)
     assert callable(tile_reduce_impl.apply_tile_reduce)
-    assert tile_common_module._plan_tile_ops is legacy_tile_module._plan_tile_ops
+    assert TileAnalysisPass.__module__ == "kernel_gen.tile.analysis"
+    assert TileElewisePass.__module__ == "kernel_gen.tile.elewise"
+    assert TileReducePass.__module__ == "kernel_gen.tile.reduce"
+    assert callable(tile_common_module._plan_tile_ops)
 
 
 def _compile_and_run(source: str) -> None:

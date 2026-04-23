@@ -1,15 +1,16 @@
-"""tile-reduce implementation landing module.
+"""tile-reduce logic module.
 
 创建者: 金铲铲大作战
 最后一次更改: 金铲铲大作战
 
 功能说明:
-- 承接 `tile-reduce` 的真实 rewrite 主链。
-- 保持公开 `ModulePass` 壳在 `kernel_gen.passes.lowering.tile_reduce`，把 matmul reduce rewrite 的 canonical path 收口到 `kernel_gen.tile.reduce`。
-- S4 阶段不改最终 reduce 逻辑，只整理 helper/path。
+- 承接 `tile-reduce` 的真实 rewrite 主链与 `ModulePass` 落点。
+- 对外仍通过 registry 名称 `tile-reduce` 构造，但 pass 类与 logic 都定义在 `kernel_gen.tile.reduce`。
+- 旧 `kernel_gen.passes.lowering.tile_reduce` submodule path 已退场，canonical public path 固定为 `kernel_gen.tile.reduce`。
 
 使用示例:
-- from kernel_gen.tile.reduce import apply_tile_reduce
+- from kernel_gen.tile.reduce import TileReducePass, apply_tile_reduce
+- TileReducePass().apply(Context(), module)
 - apply_tile_reduce(module)
 
 关联文件:
@@ -21,8 +22,10 @@
 
 from __future__ import annotations
 
+from xdsl.context import Context
 from xdsl.dialects.builtin import ArrayAttr, ModuleOp, StringAttr
 from xdsl.ir import SSAValue
+from xdsl.passes import ModulePass
 
 from kernel_gen.dialect.symbol import SymbolValueType
 
@@ -154,5 +157,30 @@ def apply_tile_reduce(module: ModuleOp) -> None:
             candidate.detach()
         block.add_ops(new_ops)
 
+class TileReducePass(ModulePass):
+    """`tile-reduce` 的公开 `ModulePass`。
 
-__all__ = ["apply_tile_reduce"]
+    创建者: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 保持稳定公开名 `tile-reduce`。
+    - 调用当前模块中的 `apply_tile_reduce(...)` 主逻辑。
+
+    使用示例:
+    - TileReducePass().apply(Context(), module)
+
+    关联文件:
+    - spec: [spec/pass/lowering/tile_reduce.md](spec/pass/lowering/tile_reduce.md)
+    - test: [test/pass/test_lowering_tile_reduce.py](test/pass/test_lowering_tile_reduce.py)
+    - 功能实现: [kernel_gen/tile/reduce.py](kernel_gen/tile/reduce.py)
+    """
+
+    name = "tile-reduce"
+
+    def apply(self: "TileReducePass", ctx: Context, module: ModuleOp) -> None:
+        del ctx
+        apply_tile_reduce(module)
+
+
+__all__ = ["TileReducePass", "apply_tile_reduce"]

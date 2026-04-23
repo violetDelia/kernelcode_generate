@@ -78,9 +78,6 @@
   - `kernel_gen.passes.lowering`
   - `kernel_gen.passes.lowering.buffer_results_to_out_params`
   - `kernel_gen.passes.lowering.nn_to_kernel`
-  - `kernel_gen.passes.lowering.tile_analysis`
-  - `kernel_gen.passes.lowering.tile_elewise`
-  - `kernel_gen.passes.lowering.tile_reduce`
   - `kernel_gen.passes.lowering.outline_device_kernel`
   - `kernel_gen.passes.lowering.symbol_loop_hoist`
 - 对已退场的旧路径，`S1` 当前必须稳定失败：
@@ -91,6 +88,9 @@
   - `kernel_gen.passes.lowering.decompass`
   - `kernel_gen.passes.lowering.dma_memory_hierarchy`
   - `kernel_gen.passes.lowering.memory_pool`
+  - `kernel_gen.passes.lowering.tile_analysis`
+  - `kernel_gen.passes.lowering.tile_elewise`
+  - `kernel_gen.passes.lowering.tile_reduce`
 - 机械验收口径：
   - `test/pass/test_pass_registry.py` 负责锁定 canonical public path、旧路径失败边界与 registry caller 的 `importlib` 消费者矩阵。
   - `test/pass/test_pass_manager.py` 负责锁定 pass manager / pipeline caller 的 `importlib` 消费者矩阵。

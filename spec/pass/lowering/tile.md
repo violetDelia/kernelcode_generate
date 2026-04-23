@@ -2,11 +2,10 @@
 
 ## 功能简介
 
-- 本页是 tile family 的总览/索引页，不承载历史兼容入口的完整公开合同。
-- 当前已经完成并对外收口的子合同是 `tile-analysis`、`tile-elewise` 与 `tile-reduce`。
-- 三个子合同均以独立子 spec、registry 名称、实现入口与 pytest 用例作为公开合同资产。
-- tile family 的共享 helper 与真实改写落点位于 `kernel_gen.tile.*`，不再把 `kernel_gen.passes.lowering.tile` 当作长期共享实现入口。
-- 需要具体行为定义时，优先进入子 spec；本页只定义公开 pass family 的索引、边界与最小调用方式。
+- 本页定义 tile family 在 `S7` 后的总合同：对外 pass 入口只保留 `build_registered_pass("tile-analysis")`、`build_registered_pass("tile-elewise")`、`build_registered_pass("tile-reduce")`。
+- `kernel_gen.tile.common`、`kernel_gen.tile.analysis`、`kernel_gen.tile.elewise`、`kernel_gen.tile.reduce` 是 tile family 的唯一 logic/helper 落点；旧 `kernel_gen.passes.lowering.tile*` 只属于待清理消费者残留。
+- `tile-analysis` 只写 `tile.analysis + tile.tile_exprs`；`tile-elewise` 与 `tile-reduce` 在该输入上继续生成 split-after-IR 结构，供 `gen_kernel(...)` 消费。
+- 本页同时写清旧 module path、旧 importlib 字符串、旧 coverage include-module 的退场范围，供下游 `build/review` 直接按文档清理。
 
 ## 文档信息
 
@@ -14,9 +13,7 @@
 - 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/pass/lowering/tile.md`](../../../spec/pass/lowering/tile.md)
 - `功能实现`：
-  - [`kernel_gen/passes/lowering/tile_analysis.py`](../../../kernel_gen/passes/lowering/tile_analysis.py)
-  - [`kernel_gen/passes/lowering/tile_elewise.py`](../../../kernel_gen/passes/lowering/tile_elewise.py)
-  - [`kernel_gen/passes/lowering/tile_reduce.py`](../../../kernel_gen/passes/lowering/tile_reduce.py)
+  - [`kernel_gen/passes/registry.py`](../../../kernel_gen/passes/registry.py)
   - [`kernel_gen/tile/common.py`](../../../kernel_gen/tile/common.py)
   - [`kernel_gen/tile/analysis.py`](../../../kernel_gen/tile/analysis.py)
   - [`kernel_gen/tile/elewise.py`](../../../kernel_gen/tile/elewise.py)
@@ -28,6 +25,7 @@
   - [`test/pass/test_lowering_tile_elewise.py`](../../../test/pass/test_lowering_tile_elewise.py)
   - [`test/pass/test_lowering_tile_reduce.py`](../../../test/pass/test_lowering_tile_reduce.py)
   - [`test/dsl/test_gen_kernel.py`](../../../test/dsl/test_gen_kernel.py)
+  - [`test/script/test_python_coverage_check.py`](../../../test/script/test_python_coverage_check.py)
 
 ## 依赖
 
@@ -43,29 +41,31 @@
 - `tile family`：由 `tile-analysis`、`tile-elewise`、`tile-reduce` 组成的 lowering pass family。
 - `tile.analysis`：tile-analysis 写入并由后续 tile pass 消费的 operand 角色矩阵。
 - `tile.tile_exprs`：tile-analysis 写入并由后续 tile pass 更新的 tile 表达矩阵。
-- `历史桥接 op`：拆分前用于在 tile/codegen 间转交 tile 因子的旧公开文本。
-- `tile helper`：位于 `kernel_gen.tile.common` 的共享错误、输入校验、plan、loop 与 view 组装 helper。
+- `split-after-IR`：以 `tuner.param + symbol.for + dma.view` 为主的 after-IR 形态，供 `gen_kernel(...)` 直接消费。
+- `tile helper`：位于 `kernel_gen.tile.common` 的共享错误、输入校验、plan、loop、view 与 rewrite helper。
 
 ## 目标
 
 - 对外公开 pass 名只保留 `tile-analysis`、`tile-elewise`、`tile-reduce`。
-- `tile-analysis` 只写入 `tile.analysis + tile.tile_exprs`，不生成切分结构。
-- `tile-elewise` 消费 analysis 结果并切分 elewise 轴。
-- `tile-reduce` 消费 analysis 结果并切分 `kernel.matmul` reduce 轴。
-- tile family 的公开输出统一保持 `tile.analysis + tile.tile_exprs`。
-- 分块因子统一由 `tuner.param : !symbol.int<"...">` 表示，循环结构统一由 `symbol.for` 表示。
-- 公开构造入口固定为 registry 名称；具体 `ModulePass` 壳与共享 helper 分层属于实现细节。
-- tile family 的共享 helper、analysis 标注与 rewrite 实际落点固定为 `kernel_gen.tile.common`、`kernel_gen.tile.analysis`、`kernel_gen.tile.elewise`、`kernel_gen.tile.reduce`。
+- `tile-analysis` 的唯一职责是写入 `tile.analysis + tile.tile_exprs`。
+- `tile-elewise` 负责 elementwise / broadcast / matmul / fc 的非 reduce 轴切分。
+- `tile-reduce` 负责 `kernel.matmul` 的 reduce 轴切分与累加结构。
+- tile family 的共享 helper 只保留在 `kernel_gen.tile.common`；analysis / elewise / reduce logic 分别落在 `kernel_gen.tile.analysis`、`kernel_gen.tile.elewise`、`kernel_gen.tile.reduce`。
+- `gen_kernel(...)` 只消费 tile family 产出的 split-after-IR 结果，不重新推导 tile family analysis。
+- `build/review` 需要同步清理旧 `kernel_gen.passes.lowering.tile*` 导入、旧字符串导入、旧 coverage include-module 口径。
 
 ## 限制与边界
 
-- 本页不重新定义三个子 pass 的完整行为，具体改写规则以对应子 spec 为准。
-- 历史兼容 pass 不再是公开 pass family 合同的一部分。
-- 历史桥接 op 名称不再作为公开输入或输出合同。
-- `tile-elewise` 与 `tile-reduce` 必须在已有 `tile.analysis + tile.tile_exprs` 的输入上工作；缺失 analysis 结果时必须显式失败。
-- `gen_kernel(...)` 只消费 tile family 收口后的 split-after-IR 结果，不负责重新推导 tile family analysis。
-- 直接依赖 `kernel_gen.passes.lowering.tile`、`kernel_gen.passes.lowering.tile_analysis`、`kernel_gen.passes.lowering.tile_elewise`、`kernel_gen.passes.lowering.tile_reduce` 的具体 module path 不属于公开合同。
-- `kernel_gen.passes.lowering.tile.py` 不应再同时承担共享 helper 与最终 rewrite 的双重职责。
+- 本页不重新定义三个子 pass 的完整改写规则，具体行为以对应子 spec 为准。
+- tile family 不新增新 pass 名，不恢复旧 `TilePass / KernelSplitPass / tile.step_value / kernel_split.tile_value` 文本。
+- pass caller 的唯一公开入口是 registry 名称；`kernel_gen.tile.*` 只是 logic/helper 落点，不是新的 pass 名字。
+- helper / rewrite consumer 只能依赖 `kernel_gen.tile.common`、`kernel_gen.tile.analysis`、`kernel_gen.tile.elewise`、`kernel_gen.tile.reduce`。
+- 下列旧路径在 `S7 build` 完成后必须退出 tile family 的消费者矩阵：
+  - `kernel_gen.passes.lowering.tile`
+  - `kernel_gen.passes.lowering.tile_analysis`
+  - `kernel_gen.passes.lowering.tile_elewise`
+  - `kernel_gen.passes.lowering.tile_reduce`
+- `test/pass/test_lowering_tile.py`、`test/dsl/test_gen_kernel.py`、`test/script/test_python_coverage_check.py` 中与 tile family 相关的 module path assert、`importlib.import_module(...)` 字符串与 `--include-module` 口径，必须与上述新路径保持一致。
 
 ## 公开接口
 
@@ -89,8 +89,8 @@ tile_analysis = build_registered_pass("tile-analysis")
 
 返回与限制：
 
-- 返回 `TileAnalysisPass`。
-- 不生成 `symbol.for` 或 `dma.view`。
+- 返回实现 `ModulePass` 协议的 pass 对象。
+- 只写 `tile.analysis + tile.tile_exprs`，不生成 `symbol.for` 或 `dma.view`。
 
 ### `build_registered_pass("tile-elewise")`
 
@@ -110,8 +110,8 @@ tile_elewise = build_registered_pass("tile-elewise")
 
 返回与限制：
 
-- 返回 `TileElewisePass`。
-- 只处理已有 analysis 结果且尚未切分的 elewise family op。
+- 返回实现 `ModulePass` 协议的 pass 对象。
+- 只处理已有 analysis 结果且尚未切分的 elementwise / broadcast / matmul / fc。
 
 ### `build_registered_pass("tile-reduce")`
 
@@ -131,7 +131,7 @@ tile_reduce = build_registered_pass("tile-reduce")
 
 返回与限制：
 
-- 返回 `TileReducePass`。
+- 返回实现 `ModulePass` 协议的 pass 对象。
 - 只处理已有 analysis 结果且尚未切分的 `kernel.matmul` reduce family op。
 
 ## 测试
@@ -143,17 +143,19 @@ tile_reduce = build_registered_pass("tile-reduce")
   - [`test/pass/test_lowering_tile_elewise.py`](../../../test/pass/test_lowering_tile_elewise.py)
   - [`test/pass/test_lowering_tile_reduce.py`](../../../test/pass/test_lowering_tile_reduce.py)
   - [`test/dsl/test_gen_kernel.py`](../../../test/dsl/test_gen_kernel.py)
+  - [`test/script/test_python_coverage_check.py`](../../../test/script/test_python_coverage_check.py)
 - 执行命令：
-  - `pytest -q test/pass/test_lowering_tile.py`
-  - `pytest -q test/pass/test_lowering_tile_private_helpers.py`
+  - `pytest -q test/pass/test_lowering_tile.py test/pass/test_lowering_tile_private_helpers.py`
   - `pytest -q test/pass/test_lowering_tile_analysis.py test/pass/test_lowering_tile_elewise.py test/pass/test_lowering_tile_reduce.py`
   - `pytest -q test/dsl/test_gen_kernel.py -k "tile or gen_kernel"`
+  - `pytest -q test/script/test_python_coverage_check.py`
+- 合同验收资产：
+  - [`expectation/pass/tile`](../../../expectation/pass/tile)
 - 测试目标：
-  - 验证三个公开 pass 名都能通过 registry 构造为 `ModulePass`。
-  - 验证共享 helper 已从旧 mixed path 收口到 `kernel_gen.tile.*`，不再把 `kernel_gen.passes.lowering.tile` 当作长期共享入口。
-  - 验证历史公开 pass 名与历史桥接 op 不再作为 tile family 输出合同。
-  - 验证 `tile-elewise` 与 `tile-reduce` 只消费已有 analysis 结果并保持 split-after-IR 合同。
-  - 验证 `gen_kernel(...)` 仍可消费 `tile.analysis + tile.tile_exprs + tuner.param + symbol.for + dma.view` 的输出组合。
+  - 验证三个公开 pass 名都能通过 registry 构造。
+  - 验证 tile family 的 logic/helper 落点已经转到 `kernel_gen.tile.*`。
+  - 验证旧 `kernel_gen.passes.lowering.tile*` 不再出现在 tile family 的 helper 默认依赖、直接消费者导入或 coverage 过滤口径中。
+  - 验证 `gen_kernel(...)` 继续消费 `tile.analysis + tile.tile_exprs + tuner.param + symbol.for + dma.view` 组合。
 
 ## 额外补充
 
@@ -161,18 +163,20 @@ tile_reduce = build_registered_pass("tile-reduce")
 
 功能说明：
 
-- `kernel_gen.passes.lowering.tile_analysis.py`、`tile_elewise.py`、`tile_reduce.py` 负责公开 `ModulePass` 壳与 registry 对接。
-- `kernel_gen.tile.common.py` 负责共享错误类型、输入合同校验、tile plan、loop/view 组装与共用 rewrite helper。
-- `kernel_gen.tile.analysis.py`、`elewise.py`、`reduce.py` 分别承接 analysis-only、elewise rewrite 与 matmul reduce rewrite 的真实实现。
+- 说明 tile family 的实现职责分层，帮助 `build` 把 logic rewrite 和旧路径清理对应到正确文件。
 
 使用示例：
 
 ```python
-from kernel_gen.tile.common import TilePassError
-from kernel_gen.tile.common import _plan_tile_ops
+from kernel_gen.tile.analysis import apply_tile_analysis
+from kernel_gen.tile.elewise import apply_tile_elewise
+from kernel_gen.tile.reduce import apply_tile_reduce
 ```
 
 注意事项：
 
-- 这里定义的是实现落点，不改变公开 pass 名。
-- `kernel_gen.passes.lowering.tile.py` 如仍保留薄桥接，也不再作为共享 helper 的默认依赖路径。
+- `kernel_gen.tile.common` 负责共享错误、输入合同校验、tile plan、loop/view 组装与共用 rewrite helper。
+- `kernel_gen.tile.analysis` 负责 analysis-only 逻辑。
+- `kernel_gen.tile.elewise` 负责非 reduce 轴 rewrite。
+- `kernel_gen.tile.reduce` 负责 matmul reduce rewrite。
+- `kernel_gen.passes.lowering.tile*` 若在 `S7` 现场仍存在，只能视为待清理残留，不能继续被文档视为公开入口或 coverage 目标。

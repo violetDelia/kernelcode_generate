@@ -71,7 +71,7 @@ def test_tile_helper_module_drops_legacy_public_contract() -> None:
 # TC-TILE-HELPER-002
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 功能说明: 验证 tile helper module 仍保留 analysis 共享 helper，供新 ModulePass 复用。
+# 功能说明: 验证 tile helper canonical path 已收口到 `kernel_gen.tile.*`，旧 helper wrapper 只保留稳定错误入口。
 # 使用示例: pytest -q test/pass/test_lowering_tile.py -k test_tile_helper_module_keeps_shared_analysis_helpers
 # 对应功能实现文件路径: kernel_gen/passes/lowering/tile.py
 # 对应 spec 文件路径: spec/pass/lowering/tile.md
@@ -94,7 +94,8 @@ def test_tile_helper_module_keeps_canonical_shared_analysis_helpers() -> None:
     assert tile_package.analysis is tile_analysis_impl
     assert tile_package.elewise is tile_elewise_impl
     assert tile_package.reduce is tile_reduce_impl
-    assert tile_common_module._plan_tile_ops is legacy_tile_module._plan_tile_ops
+    assert legacy_tile_module.TilePassError is tile_common_module.TilePassError
+    assert legacy_tile_module._raise_tile_error is tile_common_module._raise_tile_error
     assert callable(tile_analysis_impl.apply_tile_analysis)
     assert callable(tile_elewise_impl.apply_tile_elewise)
     assert callable(tile_reduce_impl.apply_tile_reduce)

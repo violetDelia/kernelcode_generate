@@ -4,9 +4,9 @@
 最后一次更改: 金铲铲大作战
 
 功能说明:
-- 提供 tile family 在 S4 阶段的 canonical helper / implementation path。
+- 提供 tile family 在 S7 后的 canonical helper / logic path。
 - 公开 `kernel_gen.tile.common`、`kernel_gen.tile.analysis`、`kernel_gen.tile.elewise`、`kernel_gen.tile.reduce`。
-- 当前阶段只做 helper/path 收口，不在这里执行最终 logic rewrite。
+- tile family 的 pass 类与主逻辑都定义在这里，旧 lowering 子模块只保留兼容包装。
 
 使用示例:
 - from kernel_gen.tile import common as tile_common

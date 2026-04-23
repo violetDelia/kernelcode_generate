@@ -20,11 +20,11 @@
 - pass_obj = DecompassPass()
 - from kernel_gen.passes.lowering import OutlineDeviceKernelPass
 - pass_obj = OutlineDeviceKernelPass()
-- from kernel_gen.passes.lowering.tile_analysis import TileAnalysisPass
+- from kernel_gen.tile.analysis import TileAnalysisPass
 - pass_obj = TileAnalysisPass()
-- from kernel_gen.passes.lowering.tile_elewise import TileElewisePass
+- from kernel_gen.tile.elewise import TileElewisePass
 - pass_obj = TileElewisePass()
-- from kernel_gen.passes.lowering.tile_reduce import TileReducePass
+- from kernel_gen.tile.reduce import TileReducePass
 - pass_obj = TileReducePass()
 - from kernel_gen.passes import SymbolLoopHoistPass
 - pass_obj = SymbolLoopHoistPass()
@@ -54,9 +54,9 @@
   - [kernel_gen/passes/dma_memory_hierarchy.py](kernel_gen/passes/dma_memory_hierarchy.py)
   - [kernel_gen/passes/decompass.py](kernel_gen/passes/decompass.py)
   - [kernel_gen/passes/outline_device_kernel.py](kernel_gen/passes/outline_device_kernel.py)
-  - [kernel_gen/passes/lowering/tile_analysis.py](kernel_gen/passes/lowering/tile_analysis.py)
-  - [kernel_gen/passes/lowering/tile_elewise.py](kernel_gen/passes/lowering/tile_elewise.py)
-  - [kernel_gen/passes/lowering/tile_reduce.py](kernel_gen/passes/lowering/tile_reduce.py)
+  - [kernel_gen/tile/analysis.py](kernel_gen/tile/analysis.py)
+  - [kernel_gen/tile/elewise.py](kernel_gen/tile/elewise.py)
+  - [kernel_gen/tile/reduce.py](kernel_gen/tile/reduce.py)
   - [kernel_gen/passes/lowering/__init__.py](kernel_gen/passes/lowering/__init__.py)
   - [kernel_gen/passes/lowering/tile.py](kernel_gen/passes/lowering/tile.py)
   - [kernel_gen/passes/symbol_loop_hoist.py](kernel_gen/passes/symbol_loop_hoist.py)
@@ -74,10 +74,10 @@ from ..dma_memory_hierarchy import (
 from ..decompass import DecompassError, DecompassPass, register_decompass_rewrite
 from ..outline_device_kernel import OutlineDeviceKernelError, OutlineDeviceKernelPass
 from ..symbol_loop_hoist import SymbolLoopHoistError, SymbolLoopHoistPass
-from .tile import TilePassError
-from .tile_analysis import TileAnalysisPass
-from .tile_elewise import TileElewisePass
-from .tile_reduce import TileReducePass
+from ...tile.common import TilePassError
+from ...tile.analysis import TileAnalysisPass
+from ...tile.elewise import TileElewisePass
+from ...tile.reduce import TileReducePass
 
 outline_device_kernel = _outline_device_kernel_module
 sys.modules.setdefault(__name__ + ".outline_device_kernel", _outline_device_kernel_module)
