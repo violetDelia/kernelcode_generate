@@ -6,7 +6,7 @@
 功能说明:
 - 提供 `tile-analysis` 的公开 `ModulePass` 入口。
 - 只写 `tile.analysis` 与 `tile.tile_exprs`，不生成 tile 改写结构。
-- 与 expectation/pass/tile/analysis 的 analysis-only 黑盒口径一致。
+- 与 `tile-analysis` 的 analysis-only 公开合同保持一致。
 
 使用示例:
 - from xdsl.context import Context

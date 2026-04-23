@@ -495,7 +495,7 @@ def _build_symbol_const(value: int) -> Operation:
     return UnregisteredOp.with_name("symbol.const").create(
         operands=[],
         result_types=[result_type],
-        properties={"value": IntegerAttr.from_int_and_width(value, 64)},
+        properties={"value": IntegerAttr(value, 64)},
     )
 
 

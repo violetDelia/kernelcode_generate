@@ -632,7 +632,7 @@ def _lower_binary(block: Block, op: Operation) -> None:
     kind = _SUPPORTED_BINARY[op.name]
     lowered = KernelBinaryElewiseOp(result, lhs, rhs, kind=kind, space=space)
     block.insert_op_before(lowered, op)
-    op.results[0].replace_by(result)
+    op.results[0].replace_all_uses_with(result)
     block.erase_op(op)
 
 
@@ -693,7 +693,7 @@ def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:
     result = alloc.results[0]
     lowered = KernelReduceOp(result, operand, kind=kind, axis=axis, keepdim=keepdim, space=space)
     block.insert_op_before(lowered, op)
-    op.results[0].replace_by(result)
+    op.results[0].replace_all_uses_with(result)
     block.erase_op(op)
 
 
@@ -748,7 +748,7 @@ def _lower_matmul(block: Block, op: Operation) -> None:
     result = alloc.results[0]
     lowered = KernelMatmulOp(result, lhs, rhs, space)
     block.insert_op_before(lowered, op)
-    op.results[0].replace_by(result)
+    op.results[0].replace_all_uses_with(result)
     block.erase_op(op)
 
 
@@ -807,7 +807,7 @@ def _lower_img2col1d(block: Block, op: Operation) -> None:
     result = alloc.results[0]
     lowered = KernelImg2col1dOp(result, operand, *params, space)
     block.insert_op_before(lowered, op)
-    op.results[0].replace_by(result)
+    op.results[0].replace_all_uses_with(result)
     block.erase_op(op)
 
 
@@ -838,7 +838,7 @@ def _lower_img2col2d(block: Block, op: Operation) -> None:
     result = alloc.results[0]
     lowered = KernelImg2col2dOp(result, operand, *params, space)
     block.insert_op_before(lowered, op)
-    op.results[0].replace_by(result)
+    op.results[0].replace_all_uses_with(result)
     block.erase_op(op)
 
 

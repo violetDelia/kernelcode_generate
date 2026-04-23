@@ -140,7 +140,7 @@ def _lower_select_op(op: Operation, block: Block) -> None:
         raise NnLoweringError(str(exc)) from exc
 
     block.insert_ops_before([*shape_ops, alloc, kernel_op], op)
-    op.results[0].replace_by(alloc.result)
+    op.results[0].replace_all_uses_with(alloc.result)
     block.erase_op(op)
 
 
@@ -191,7 +191,7 @@ def _lower_cast_op(op: Operation, block: Block) -> None:
         raise NnLoweringError(str(exc)) from exc
 
     block.insert_ops_before([*shape_ops, alloc, dma_cast_op], op)
-    op.results[0].replace_by(alloc.result)
+    op.results[0].replace_all_uses_with(alloc.result)
     block.erase_op(op)
 
 
@@ -233,7 +233,7 @@ def _lower_exp_op(op: Operation, block: Block) -> None:
         raise NnLoweringError(str(exc)) from exc
 
     block.insert_ops_before([*shape_ops, alloc, lowered], op)
-    op.results[0].replace_by(alloc.result)
+    op.results[0].replace_all_uses_with(alloc.result)
     block.erase_op(op)
 
 

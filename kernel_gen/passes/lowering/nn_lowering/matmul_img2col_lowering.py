@@ -572,7 +572,7 @@ def _lower_matmul(block: Block, op: Operation) -> None:
     result = alloc.results[0]
     lowered = KernelMatmulOp(result, lhs, rhs, space)
     block.insert_op_before(lowered, op)
-    op.results[0].replace_by(result)
+    op.results[0].replace_all_uses_with(result)
     block.erase_op(op)
 
 
@@ -612,7 +612,7 @@ def _lower_img2col1d(block: Block, op: Operation) -> None:
         ]
     )
     block.insert_op_before(lowered, op)
-    op.results[0].replace_by(result)
+    op.results[0].replace_all_uses_with(result)
     block.erase_op(op)
     for cleanup_op in cleanup_ops:
         if all(result.uses.get_length() == 0 for result in cleanup_op.results):
@@ -667,7 +667,7 @@ def _lower_img2col2d(block: Block, op: Operation) -> None:
         ]
     )
     block.insert_op_before(lowered, op)
-    op.results[0].replace_by(result)
+    op.results[0].replace_all_uses_with(result)
     block.erase_op(op)
     for cleanup_op in cleanup_ops:
         if all(result.uses.get_length() == 0 for result in cleanup_op.results):

@@ -27,6 +27,7 @@ import os
 import shutil
 import sys
 import importlib
+import importlib.util
 import subprocess
 import tempfile
 
@@ -92,7 +93,15 @@ from kernel_gen.symbol_variable.symbol_dim import SymbolDim
 from kernel_gen.symbol_variable.type import NumericType
 
 gen_kernel_module = importlib.import_module("kernel_gen.dsl.gen_kernel")
-gen_kernel_entry_module = importlib.import_module("kernel_gen.dsl.gen_kernel.gen_kernel")
+gen_kernel_entry_spec = importlib.util.spec_from_file_location(
+    "kernel_gen.dsl._gen_kernel_file",
+    REPO_ROOT / "kernel_gen" / "dsl" / "gen_kernel.py",
+)
+assert gen_kernel_entry_spec is not None and gen_kernel_entry_spec.loader is not None
+gen_kernel_entry_module = importlib.util.module_from_spec(gen_kernel_entry_spec)
+sys.modules[gen_kernel_entry_spec.name] = gen_kernel_entry_module
+gen_kernel_entry_spec.loader.exec_module(gen_kernel_entry_module)
+gen_kernel_wrapper_module = importlib.import_module("kernel_gen.dsl.gen_kernel.gen_kernel")
 emit_context_module = importlib.import_module("kernel_gen.dsl.gen_kernel.emit_context")
 tile_analysis_helpers = importlib.import_module("test.pass.test_lowering_tile_analysis")
 tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
@@ -819,7 +828,7 @@ def test_gen_kernel_converts_emit_c_error_to_gen_kernel_error(monkeypatch: pytes
     def _boom(obj: object, ctx: EmitCContext) -> str:
         raise EmitCError("boom")
 
-    monkeypatch.setattr(gen_kernel_entry_module, "emit_c", _boom)
+    monkeypatch.setattr(gen_kernel_wrapper_module, "emit_c", _boom)
 
     with pytest.raises(GenKernelError, match="boom"):
         gen_kernel(object(), _ctx())
@@ -843,22 +852,22 @@ def test_gen_kernel_wrapper_module_delegates_emit_c_and_converts_errors(monkeypa
         seen.append((type(obj).__name__, ctx.target))
         return f"wrapped:{type(obj).__name__}:{ctx.target}"
 
-    monkeypatch.setattr(gen_kernel_entry_module, "emit_c", _fake_emit_c)
+    monkeypatch.setattr(gen_kernel_wrapper_module, "emit_c", _fake_emit_c)
 
     block = Block(arg_types=[])
     block.add_op(func.ReturnOp())
     func_type = FunctionType.from_lists([], [])
     func_op = func.FuncOp("empty_kernel", func_type, Region(block))
 
-    assert gen_kernel_entry_module.gen_kernel(func_op, _ctx()) == "wrapped:FuncOp:cpu"
+    assert gen_kernel_wrapper_module.gen_kernel(func_op, _ctx()) == "wrapped:FuncOp:cpu"
     assert seen == [("FuncOp", "cpu")]
 
     def _boom(obj: object, ctx: EmitCContext) -> str:
         raise EmitCError("boom")
 
-    monkeypatch.setattr(gen_kernel_entry_module, "emit_c", _boom)
+    monkeypatch.setattr(gen_kernel_wrapper_module, "emit_c", _boom)
     with pytest.raises(GenKernelError, match="boom"):
-        gen_kernel_entry_module.gen_kernel(func_op, _ctx())
+        gen_kernel_wrapper_module.gen_kernel(func_op, _ctx())
 
 
 # GK-014
@@ -904,7 +913,7 @@ def test_gen_kernel_is_the_package_public_entry() -> None:
     assert namespace["emit_c"] is emit_c
     assert namespace["emit_c_op"] is emit_c_op
     assert namespace["emit_c_value"] is emit_c_value
-    assert gen_kernel_module.gen_kernel is gen_kernel_entry_module.gen_kernel
+    assert gen_kernel_module.gen_kernel is gen_kernel_wrapper_module.gen_kernel
     assert "gen_signature" not in public_names
     assert "gen_body" not in public_names
     assert emit_context_module.EmitCContext is EmitCContext
@@ -2548,3 +2557,68 @@ def test_gen_kernel_rejects_npu_demo_barrier_fail_fast_boundaries(
 ) -> None:
     with pytest.raises(GenKernelError, match=pattern):
         gen_kernel(module, ctx)
+
+
+# GK-S6-HELPER-001
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 直接覆盖 gen_kernel.py 的私有 helper 与类型映射分支。
+# 测试目的: 锁定 tile codegen 判定、out 参数识别、walk 递归与 C 类型映射口径。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_private_helpers_contracts
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_private_helpers_contracts() -> None:
+    mem_type = _make_memory_type([8, 4], [4, 1])
+    named_block = Block(arg_types=[mem_type, i32])
+    named_func = func.FuncOp(
+        "named_args",
+        FunctionType.from_lists([mem_type, i32], []),
+        Region(named_block),
+        arg_attrs=ArrayAttr([DictionaryAttr({"name": StringAttr("lhs")}), DictionaryAttr({})]),
+    )
+    assert gen_kernel_entry_module._extract_arg_names(named_func) == ["lhs", "arg1"]
+    assert gen_kernel_entry_module._block_arg_index(named_func.args[0]) == 0
+    assert gen_kernel_entry_module._block_arg_index(123) is None
+
+    rewritten_block = Block(arg_types=[mem_type, mem_type, i32])
+    rewritten_func = _func("rewritten_args", [mem_type, mem_type, i32], [], rewritten_block, ("arg0", "arg1", "arg2"))
+    assert gen_kernel_entry_module._leading_rewritten_out_param_count(rewritten_func) == 2
+
+    helper_func = _tile_elewise_func(tile_analysis_helpers._build_module())
+    walked_ops = gen_kernel_entry_module._walk_ops(helper_func)
+    assert walked_ops[0] is helper_func
+    assert any(op.name == "symbol.for" for op in walked_ops)
+    assert gen_kernel_entry_module._is_tile_codegen_function(helper_func) is True
+    gen_kernel_entry_module._validate_tile_codegen_contract(helper_func, _ctx())
+    with pytest.raises(gen_kernel_entry_module.GenKernelError, match="tile codegen is cpu-only"):
+        gen_kernel_entry_module._validate_tile_codegen_contract(helper_func, _npu_ctx())
+
+    kernel_op = next(op for op in walked_ops if isinstance(op, KernelBinaryElewiseOp))
+    out_operand = gen_kernel_entry_module._kernel_out_operand(kernel_op)
+    assert out_operand is kernel_op.operands[0]
+
+    out_block = Block(arg_types=[mem_type, mem_type, mem_type])
+    out_kernel = KernelBinaryElewiseOp(
+        out_block.args[0],
+        out_block.args[1],
+        out_block.args[2],
+        kind="add",
+        space=NnMemorySpaceAttr.from_name("global"),
+    )
+    out_block.add_ops([out_kernel, func.ReturnOp()])
+    out_func = _func("leading_out", [mem_type, mem_type, mem_type], [], out_block, ("arg0", "arg1", "arg2"))
+    assert gen_kernel_entry_module._leading_out_param_count_from_body(out_func) == 1
+
+    assert gen_kernel_entry_module._memory_space_to_c(NnMemorySpaceAttr.from_name("global")) == "MemorySpace::GM"
+    assert gen_kernel_entry_module._memory_space_to_c_for_target(NnMemorySpaceAttr.from_name("global"), "npu_demo") == "GM"
+    with pytest.raises(TypeError, match="unsupported nn memory space"):
+        gen_kernel_entry_module._memory_space_to_c_for_target(type("DummySpace", (), {"space": StringAttr("invalid")})(), "cpu")
+
+    assert gen_kernel_entry_module._type_to_c(i1) == "bool"
+    assert gen_kernel_entry_module._type_to_c(f64) == "double"
+    assert gen_kernel_entry_module._type_to_c(SymbolValueType.from_expr("N")) == "long long"
+    assert gen_kernel_entry_module._type_to_c(mem_type) == "Memory<MemorySpace::GM, int32_t>"
+    assert gen_kernel_entry_module._type_to_c_for_target(mem_type, "npu_demo") == "Memory<GM, int32_t>"
+    assert gen_kernel_entry_module._type_to_c_for_target(SymbolValueType.from_expr("N"), "npu_demo") == "S_INT"
+    assert gen_kernel_entry_module._memory_rank(mem_type) == 2

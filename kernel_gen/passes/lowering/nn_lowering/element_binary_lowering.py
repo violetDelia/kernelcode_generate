@@ -253,7 +253,7 @@ def _normalize_symbol_ops(block: Block, anchor: Operation) -> None:
         else:
             continue
         block.insert_op_before(new_op, op)
-        op.results[0].replace_by(new_op.results[0])
+        op.results[0].replace_all_uses_with(new_op.results[0])
         new_op.results[0].name_hint = None
         cache[op.results[0]] = new_op.results[0]
         block.erase_op(op)
@@ -374,7 +374,7 @@ def _lower_element_binary_op(
         raise NnLoweringError(str(exc)) from exc
 
     block.insert_ops_before([*shape_ops, alloc, *extra_ops, kernel_op], op)
-    op.results[0].replace_by(alloc.result)
+    op.results[0].replace_all_uses_with(alloc.result)
     block.erase_op(op)
 
 

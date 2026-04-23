@@ -65,6 +65,7 @@ from kernel_gen.passes.pass_manager import PassManager
 from kernel_gen.passes.registry import build_registered_pipeline, load_builtin_passes
 from kernel_gen.tools.dsl_run import DslRunError, dsl_run
 from kernel_gen.tools.dsl_run import NPU_DEMO_WRAPPER_ERROR
+from kernel_gen.target import registry as target_registry
 from kernel_gen.symbol_variable.memory import MemorySpace
 
 dsl_run_module = importlib.import_module("kernel_gen.tools.dsl_run")
@@ -81,6 +82,37 @@ PIPELINE_NAME_ERROR = "DslRunUnknownPipeline: unknown pipeline 'missing-pipeline
 PIPELINE_TYPE_ERROR = "DslRunInvalidPipeline: pipeline must be str or PassManager"
 REAL_ARG_TYPE_ERROR = "DslRunUnsupportedRealArg: real_args only supports torch.Tensor and numpy.ndarray"
 ARITY_ERROR = "DslRunArityMismatch: real_args count does not match function signature"
+
+
+@pytest.fixture(autouse=True)
+def _isolated_target_registry() -> None:
+    """隔离 `dsl_run` 测试期间的 target registry 全局状态。
+
+    创建者: 金铲铲大作战
+    最后更改: 金铲铲大作战
+
+    功能说明:
+    - 先清空 registry，再重新加载当前仓库的默认 target 定义。
+    - 测试完成后恢复原始 registry / current target，避免与其他测试文件互相污染。
+
+    使用示例:
+    - 由 pytest 自动应用，无需手动调用。
+
+    关联文件:
+    - 功能实现: kernel_gen/target/registry.py
+    - test: test/tools/test_dsl_run.py
+    """
+
+    registry_snapshot = dict(target_registry._TARGET_REGISTRY)
+    current_target_snapshot = target_registry._CURRENT_TARGET
+    target_registry._TARGET_REGISTRY.clear()
+    target_registry.load_targets(REPO_ROOT / "kernel_gen" / "target" / "targets")
+    try:
+        yield
+    finally:
+        target_registry._TARGET_REGISTRY.clear()
+        target_registry._TARGET_REGISTRY.update(registry_snapshot)
+        target_registry._CURRENT_TARGET = current_target_snapshot
 
 
 def _build_npu_demo_lowering_pipeline() -> PassManager:

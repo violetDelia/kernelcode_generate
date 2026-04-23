@@ -287,7 +287,7 @@ def _lower_broadcast(block: Block, op: Operation) -> None:
     result = alloc.results[0]
     lowered = DmaBroadcastOp(result, operand)
     block.insert_op_before(lowered, op)
-    op.results[0].replace_by(result)
+    op.results[0].replace_all_uses_with(result)
     block.erase_op(op)
 
 
@@ -341,7 +341,7 @@ def _lower_transpose(block: Block, op: Operation) -> None:
     result = alloc.results[0]
     lowered = DmaTransposeOp(result, operand, perm_attr)
     block.insert_op_before(lowered, op)
-    op.results[0].replace_by(result)
+    op.results[0].replace_all_uses_with(result)
     block.erase_op(op)
 
 

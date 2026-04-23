@@ -580,8 +580,8 @@ def test_lower_reduce_min_to_kernel() -> None:
     reduce_op = NnReduceMinOp(
         operand,
         res_type,
-        ArrayAttr([IntegerAttr.from_int_and_width(1, 64)]),
-        IntegerAttr.from_int_and_width(1, 64),
+        ArrayAttr([IntegerAttr(1, 64)]),
+        IntegerAttr(1, 64),
         SPACE_GLOBAL,
     )
     block.add_op(reduce_op)
@@ -614,8 +614,8 @@ def test_lower_reduce_sum_to_kernel() -> None:
     reduce_op = NnReduceSumOp(
         operand,
         res_type,
-        ArrayAttr([IntegerAttr.from_int_and_width(0, 64)]),
-        IntegerAttr.from_int_and_width(1, 64),
+        ArrayAttr([IntegerAttr(0, 64)]),
+        IntegerAttr(1, 64),
         SPACE_GLOBAL,
     )
     block.add_op(reduce_op)
@@ -648,8 +648,8 @@ def test_lower_reduce_max_to_kernel() -> None:
     reduce_op = NnReduceMaxOp(
         operand,
         res_type,
-        ArrayAttr([IntegerAttr.from_int_and_width(1, 64)]),
-        IntegerAttr.from_int_and_width(1, 64),
+        ArrayAttr([IntegerAttr(1, 64)]),
+        IntegerAttr(1, 64),
         SPACE_GLOBAL,
     )
     block.add_op(reduce_op)
@@ -682,7 +682,7 @@ def test_lower_softmax_requires_decompass() -> None:
     softmax_op = NnSoftmaxOp(
         operand,
         res_type,
-        IntegerAttr.from_int_and_width(1, 64),
+        IntegerAttr(1, 64),
         SPACE_GLOBAL,
     )
     block.add_op(softmax_op)
@@ -940,7 +940,7 @@ def test_lower_transpose_to_kernel() -> None:
         SPACE_GLOBAL,
     )
     operand = add_block_arg(block, operand_type)
-    perm_attr = ArrayAttr([IntegerAttr.from_int_and_width(1, 64), IntegerAttr.from_int_and_width(0, 64)])
+    perm_attr = ArrayAttr([IntegerAttr(1, 64), IntegerAttr(0, 64)])
     transpose_op = NnTransposeOp(operand, result_type, perm_attr, SPACE_GLOBAL)
     block.add_op(transpose_op)
     block.add_op(func.ReturnOp(transpose_op.results[0]))
@@ -1298,8 +1298,8 @@ def _build_broadcast_exp_reduce_min_func() -> func.FuncOp:
     reduce_op = NnReduceMinOp(
         exp_op.results[0],
         result_type,
-        ArrayAttr([IntegerAttr.from_int_and_width(1, 64)]),
-        IntegerAttr.from_int_and_width(0, 64),
+        ArrayAttr([IntegerAttr(1, 64)]),
+        IntegerAttr(0, 64),
         SPACE_GLOBAL,
     )
     block.add_op(reduce_op)
@@ -1495,7 +1495,7 @@ def test_lower_transpose_dynamic() -> None:
     region = Region()
     block = Block(arg_types=[operand_type])
     region.add_block(block)
-    perm_attr = ArrayAttr([IntegerAttr.from_int_and_width(1, 64), IntegerAttr.from_int_and_width(0, 64)])
+    perm_attr = ArrayAttr([IntegerAttr(1, 64), IntegerAttr(0, 64)])
     transpose_op = NnTransposeOp(block.args[0], result_type, perm_attr, SPACE_GLOBAL)
     block.add_op(transpose_op)
     block.add_op(func.ReturnOp(transpose_op.results[0]))
@@ -1598,8 +1598,8 @@ def test_reduce_min_rejects_invalid_rank() -> None:
     reduce_op = NnReduceMinOp(
         block.args[0],
         res_type,
-        ArrayAttr([IntegerAttr.from_int_and_width(1, 64)]),
-        IntegerAttr.from_int_and_width(0, 64),
+        ArrayAttr([IntegerAttr(1, 64)]),
+        IntegerAttr(0, 64),
         SPACE_GLOBAL,
     )
     block.add_op(reduce_op)
@@ -1629,8 +1629,8 @@ def test_reduce_min_rejects_bad_keepdim() -> None:
     reduce_op = NnReduceMinOp(
         operand,
         res_type,
-        ArrayAttr([IntegerAttr.from_int_and_width(1, 64)]),
-        IntegerAttr.from_int_and_width(2, 64),
+        ArrayAttr([IntegerAttr(1, 64)]),
+        IntegerAttr(2, 64),
         SPACE_GLOBAL,
     )
     reduce_op.attributes["keepdim"] = StringAttr("bad")
@@ -1660,8 +1660,8 @@ def test_reduce_min_rejects_keepdim_negative_one() -> None:
     reduce_op = NnReduceMinOp(
         operand,
         res_type,
-        ArrayAttr([IntegerAttr.from_int_and_width(1, 64)]),
-        IntegerAttr.from_int_and_width(-1, 64),
+        ArrayAttr([IntegerAttr(1, 64)]),
+        IntegerAttr(-1, 64),
         SPACE_GLOBAL,
     )
     block.add_op(reduce_op)
@@ -1776,7 +1776,7 @@ def test_reduce_axes_validation() -> None:
         operand,
         res_type,
         ArrayAttr([]),
-        IntegerAttr.from_int_and_width(1, 64),
+        IntegerAttr(1, 64),
         SPACE_GLOBAL,
     )
     block.add_op(reduce_op)
@@ -1805,8 +1805,8 @@ def test_reduce_keepdim_validation() -> None:
     reduce_op = NnReduceMinOp(
         operand,
         res_type,
-        ArrayAttr([IntegerAttr.from_int_and_width(1, 64)]),
-        IntegerAttr.from_int_and_width(2, 64),
+        ArrayAttr([IntegerAttr(1, 64)]),
+        IntegerAttr(2, 64),
         SPACE_GLOBAL,
     )
     block.add_op(reduce_op)
@@ -1835,7 +1835,7 @@ def test_softmax_requires_decompass_before_axis_validation() -> None:
     softmax_op = NnSoftmaxOp(
         operand,
         res_type,
-        IntegerAttr.from_int_and_width(-1, 64),
+        IntegerAttr(-1, 64),
         SPACE_GLOBAL,
     )
     block.add_op(softmax_op)

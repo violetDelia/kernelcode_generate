@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import ast as py_ast
 import inspect
 import importlib
 from io import StringIO
@@ -32,14 +33,19 @@ import pytest
 from xdsl.dialects import arith, func, scf
 from xdsl.dialects.builtin import (
     ArrayAttr,
+    BFloat16Type,
     FloatAttr,
+    Float16Type,
+    Float64Type,
     IndexType,
     IntAttr,
+    IntegerAttr,
     IntegerType,
     ModuleOp,
     StringAttr,
     f32,
     i1,
+    i8,
     i32,
     i64,
 )
@@ -70,6 +76,7 @@ from kernel_gen.dialect.arch import (
     ArchGetThreadIdOp,
     ArchGetThreadNumOp,
 )
+from kernel_gen.operation.arch import BarrierScope, BarrierVisibility
 from kernel_gen.dialect.nn import (
     NnAddOp,
     NnBroadcastOp,
@@ -122,6 +129,7 @@ from kernel_gen.dsl.ast import (
     Img2ColAST,
     LoadAST,
     MatmulAST,
+    NnReduceAST,
     SourceLocation,
     SymbolToFloatAST,
     StoreAST,
@@ -136,6 +144,7 @@ from kernel_gen.dsl.ast.visitor import AstVisitor, AstVisitorError
 from kernel_gen.dsl.mlir_gen.emit.core import (
     EmitContext,
     _LoweringError,
+    _build_arch_barrier_visibility_attr,
     _build_default_stride_attrs,
     _build_index_operands_from_layout,
     _build_static_index_list,
@@ -150,17 +159,28 @@ from kernel_gen.dsl.mlir_gen.emit.core import (
     _infer_broadcast_memory_type,
     _infer_broadcast_shape,
     _infer_expr_type,
+    _infer_reduce_output_shape_attrs,
+    _lower_launch_extent_symbol,
     _lower_loop_bound,
     _lower_expr,
+    _materialize_mixed_binary_scalar_operand,
     _lookup_symbol,
     _memory_space_from_ast,
     _memory_to_nn_type,
     _mul_symbol,
     _resolve_index_operand,
     _resolve_index_symbol,
+    _resolve_index_symbol_product,
     _resolve_static_index_expr,
     _resolve_index_expr,
+    _parse_reduce_keepdim_expr,
+    _parse_softmax_axis_expr,
+    _split_symbol_multiplication,
     emit_mlir as emit_node_mlir,
+    _eval_symbolic_dim_node,
+    _build_reduce_result_shape_attrs,
+    _validate_emit_context_config,
+    _cast_nn_scalar_operand,
 )
 from kernel_gen.dsl.mlir_gen import (
     _build_signature_types,
@@ -2451,3 +2471,392 @@ def test_emit_mlir_supports_conv2d_img2col2d_tiled_npu_demo_chain() -> None:
     assert any(isinstance(op, NnMatmulOp) for op in walked_ops)
     assert any(isinstance(op, DmaDesliceOp) for op in walked_ops)
     assert any(isinstance(op, func.ReturnOp) for op in walked_ops)
+
+
+# EMIT-S6-HELPER-001
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 直接覆盖 EmitContext 配置校验与 dtype 映射的低覆盖分支。
+# 测试目的: 锁定非法 config 的明确报错文案，并补齐 dtype 到 xdsl 的显式映射分支。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_private_helpers_config_and_dtype_validation
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_emit_mlir_private_helpers_config_and_dtype_validation() -> None:
+    with pytest.raises(_LoweringError, match="EmitContext config must be dict or None"):
+        _validate_emit_context_config([])
+
+    with pytest.raises(_LoweringError, match="EmitContext target must be str"):
+        _validate_emit_context_config({"target": 1})
+
+    with pytest.raises(_LoweringError, match="EmitContext hardware must be dict\\[str, int\\]"):
+        _validate_emit_context_config({"hardware": []})
+
+    with pytest.raises(_LoweringError, match="target name must match"):
+        _validate_emit_context_config({"target": "Bad-Name"})
+
+    with pytest.raises(_LoweringError, match="hardware has unknown key"):
+        _validate_emit_context_config({"hardware": {"bad_key": 1}})
+
+    assert _dtype_to_xdsl(NumericType.Bool) == i1
+    assert _dtype_to_xdsl(NumericType.Int8) == i8
+    assert _dtype_to_xdsl(NumericType.Int32) == i32
+    assert _dtype_to_xdsl(NumericType.Int64) == i64
+    assert _dtype_to_xdsl(NumericType.Float16) == Float16Type()
+    assert _dtype_to_xdsl(NumericType.BFloat16) == BFloat16Type()
+    assert _dtype_to_xdsl(NumericType.Float32) == f32
+    assert _dtype_to_xdsl(NumericType.Float64) == Float64Type()
+
+    with pytest.raises(_LoweringError, match="Unsupported dtype"):
+        _dtype_to_xdsl(object())
+
+
+# EMIT-S6-HELPER-002
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 直接覆盖符号维表达式、连续 stride 与 barrier visibility 校验的未命中分支。
+# 测试目的: 锁定符号维归约、默认 stride 生成与 barrier 入口的有效/无效路径。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_private_helpers_symbolic_dim_stride_and_barrier_validation
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_emit_mlir_private_helpers_symbolic_dim_stride_and_barrier_validation() -> None:
+    assert str(_eval_symbolic_dim_node(py_ast.parse("N", mode="eval").body, None)) == "N"
+    assert str(_eval_symbolic_dim_node(py_ast.parse("-N", mode="eval").body, None)) == "-N"
+    assert str(_eval_symbolic_dim_node(py_ast.parse("N + 1", mode="eval").body, None)) == "N + 1"
+    assert str(_eval_symbolic_dim_node(py_ast.parse("N - 2", mode="eval").body, None)) == "N - 2"
+    assert str(_eval_symbolic_dim_node(py_ast.parse("N * 3", mode="eval").body, None)) == "3*N"
+    assert _eval_symbolic_dim_node(py_ast.parse("4 / 2", mode="eval").body, None) == 2
+
+    with pytest.raises(_LoweringError, match="Unsupported symbolic dim expression"):
+        _eval_symbolic_dim_node(py_ast.parse("4 / 3", mode="eval").body, None)
+
+    assert _build_stride([2, "M", 4]) == [4, "?", 1]
+    default_stride = _build_default_stride_attrs([IntAttr(2), StringAttr("M"), IntAttr(4)])
+    assert [getattr(attr, "data", None) for attr in default_stride] == ["M*4", 4, 1]
+
+    valid_attr = _build_arch_barrier_visibility_attr([BarrierVisibility.TSM, BarrierVisibility.TLM], None)
+    assert [entry.visibility.data for entry in valid_attr.data] == ["tsm", "tlm"]
+
+    with pytest.raises(_LoweringError, match="barrier visibility must be non-empty BarrierVisibility list"):
+        _build_arch_barrier_visibility_attr([], None)
+
+    with pytest.raises(_LoweringError, match="barrier visibility must be non-empty BarrierVisibility list"):
+        _build_arch_barrier_visibility_attr(("bad",), None)
+
+
+# EMIT-S6-HELPER-003
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 直接覆盖 launch extent、标量转换与 mixed scalar materialize 的低覆盖分支。
+# 测试目的: 锁定 launch extent 的正负边界、ScalarArg 物化路径与 scalar cast 的稳定行为。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_private_helpers_launch_extent_and_scalar_cast_paths
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_emit_mlir_private_helpers_launch_extent_and_scalar_cast_paths() -> None:
+    ctx = EmitContext(builder=Block(arg_types=[]), symbols={}, types={})
+    block_extent = _lower_launch_extent_symbol(ConstAST(8), "block", ctx, None)
+    assert isinstance(block_extent.type, SymbolValueType)
+    assert block_extent.type.expr.expr.data == "8"
+
+    with pytest.raises(_LoweringError, match="launch_kernel thread must be > 0"):
+        _lower_launch_extent_symbol(ConstAST(0), "thread", ctx, None)
+
+    with pytest.raises(_LoweringError, match="launch_kernel shared_memory_size must be >= 0"):
+        _lower_launch_extent_symbol(ConstAST(-1), "shared_memory_size", ctx, None, allow_zero=True)
+
+    scalar_ctx = EmitContext(builder=Block(arg_types=[]), symbols={}, types={})
+    scalar_extent = ScalarArgAST(name="n", value_type=int, is_symbolic=True, location=None)
+    scalar_ctx._set_cache(_expr_key(scalar_extent), arith.ConstantOp(IntegerAttr(7, i32)).result)
+    scalar_result = _lower_launch_extent_symbol(scalar_extent, "block", scalar_ctx, None)
+    assert isinstance(scalar_result.type, SymbolValueType)
+    assert scalar_result.type.expr.expr.data == "n"
+
+    cast_ctx = EmitContext(builder=Block(arg_types=[]), symbols={}, types={})
+    symbol_value = SymbolConstOp(5).result
+    cast_int = _cast_nn_scalar_operand(symbol_value, i32, cast_ctx, None)
+    assert cast_int.type == i32
+
+    int_value = arith.ConstantOp(IntegerAttr(6, i32)).result
+    cast_float = _cast_nn_scalar_operand(int_value, f32, cast_ctx, None)
+    assert cast_float.type == f32
+    assert _cast_nn_scalar_operand(int_value, i32, cast_ctx, None) is int_value
+
+    unsupported_value = arith.ConstantOp(IntegerAttr(1, IndexType())).result
+    with pytest.raises(_LoweringError, match="nn scalar element_type must be integer/float or symbol.int"):
+        _cast_nn_scalar_operand(unsupported_value, f32, cast_ctx, None)
+
+    mix_ctx = EmitContext(builder=Block(arg_types=[]), symbols={}, types={})
+    mixed_scalar = _materialize_mixed_binary_scalar_operand(ConstAST(3), None, f32, mix_ctx, None)
+    assert mixed_scalar.type == f32
+    assert any(isinstance(op, SymbolToFloatOp) for op in mix_ctx.builder.ops)
+
+    with pytest.raises(_LoweringError, match="Binary op scalar operand could not be materialized"):
+        _materialize_mixed_binary_scalar_operand(ConstAST(3.14), None, f32, mix_ctx, None)
+
+
+# EMIT-S6-HELPER-004
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 直接覆盖符号乘法解析与索引乘积归一化的低覆盖分支。
+# 测试目的: 锁定单段/多段 symbol 乘法解析、非法表达式拒绝与乘积结果收敛。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_private_helpers_symbol_product_resolution
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_emit_mlir_private_helpers_symbol_product_resolution() -> None:
+    ctx = EmitContext(
+        builder=Block(arg_types=[]),
+        symbols={"M": SymbolConstOp(4).result, "N": SymbolConstOp(5).result},
+        types={},
+    )
+
+    assert _split_symbol_multiplication("M*N*K") == ["M", "N", "K"]
+    assert _split_symbol_multiplication("M*N") == ["M", "N"]
+    assert _split_symbol_multiplication("M+N") is None
+
+    product = _resolve_index_symbol_product("M*N", ctx, None)
+    assert isinstance(product.type, SymbolValueType)
+    assert product.type.expr.expr.data == "20"
+    assert any(isinstance(op, SymbolMulOp) for op in ctx.builder.ops)
+
+    with pytest.raises(_LoweringError, match="Unsupported index expression"):
+        _resolve_index_symbol_product("M+N", ctx, None)
+
+
+# EMIT-S6-HELPER-005
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 直接覆盖 dtype、stride 与 shape 属性转换的低覆盖分支。
+# 测试目的: 锁定 xdsl dtype 映射、默认 stride、symbolic stride 与 numel 折叠的稳定行为。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_private_helpers_dtype_stride_and_shape_contracts
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_emit_mlir_private_helpers_dtype_stride_and_shape_contracts() -> None:
+    assert emit_mlir_module._xdsl_to_dtype(BFloat16Type()) is NumericType.BFloat16
+    assert emit_mlir_module._xdsl_to_dtype(Float16Type()) is NumericType.Float16
+    assert emit_mlir_module._xdsl_to_dtype(f32) is NumericType.Float32
+    assert emit_mlir_module._xdsl_to_dtype(Float64Type()) is NumericType.Float64
+    assert emit_mlir_module._xdsl_to_dtype(i8) is NumericType.Int8
+    assert emit_mlir_module._xdsl_to_dtype(i32) is NumericType.Int32
+    assert emit_mlir_module._xdsl_to_dtype(i64) is NumericType.Int64
+    assert emit_mlir_module._xdsl_to_dtype(i1) is NumericType.Bool
+
+    with pytest.raises(_LoweringError, match="Unsupported element_type for nn arithmetic"):
+        emit_mlir_module._xdsl_to_dtype(StringAttr("bad"))
+
+    assert emit_mlir_module._build_stride([2, "N", 4]) == [4, "?", 1]
+    assert emit_mlir_module._mul_symbol(1, 7) == 7
+    assert emit_mlir_module._mul_symbol(7, 1) == 7
+    assert emit_mlir_module._mul_symbol(3, 4) == 12
+    assert emit_mlir_module._mul_symbol("N", 4) == "N*4"
+
+    default_stride = emit_mlir_module._build_default_stride_attrs([IntAttr(2), StringAttr("N"), IntAttr(4)])
+    assert [getattr(attr, "data", None) for attr in default_stride] == ["N*4", 4, 1]
+
+    assert emit_mlir_module._shape_attr_to_symbol_dim(IntAttr(3), None) == SymbolDim(3)
+    assert emit_mlir_module._shape_attr_to_symbol_dim(StringAttr("?"), None) is None
+    assert str(emit_mlir_module._shape_attr_to_symbol_dim(StringAttr("N + 1"), None)) == "N + 1"
+
+    with pytest.raises(_LoweringError, match="Unsupported shape attribute"):
+        emit_mlir_module._shape_attr_to_symbol_dim(i32, None)
+
+    symbolic_stride = emit_mlir_module._build_symbolic_stride_attrs([IntAttr(2), StringAttr("N"), StringAttr("?")], None)
+    assert [getattr(attr, "data", None) for attr in symbolic_stride] == ["?", "?", 1]
+
+    assert emit_mlir_module._dim_to_attr(SymbolDim("M")).data == "M"
+    assert emit_mlir_module._dim_to_attr(7).data == 7
+    assert emit_mlir_module._dim_to_attr("K").data == "K"
+
+    assert emit_mlir_module._shape_numel_attr([IntAttr(2), StringAttr("N")]).data == "2*N"
+    assert emit_mlir_module._shape_numel_attr([IntAttr(2), StringAttr("N+1")]).data == "2*(N+1)"
+
+    ctx = EmitContext(builder=Block(arg_types=[]), symbols={}, types={})
+    assert emit_mlir_module._build_static_index_list(None, rank=2, default_value=1, location=None) == [IntAttr(1), IntAttr(1)]
+    assert [attr.data for attr in emit_mlir_module._build_static_index_list(ConstAST(2), rank=3, default_value=1, location=None)] == [2, 2, 2]
+    exact_attrs = emit_mlir_module._build_static_index_attrs_exact([ConstAST(2), "N"], location=None, runtime_values={"N": SymbolDim("N")})
+    assert [getattr(attr, "data", None) for attr in exact_attrs] == [2, "N"]
+    assert emit_mlir_module._shape_attr_to_symbol_operand(IntAttr(4), ctx, location=None).type == SymbolValueType.from_expr("4")
+    with pytest.raises(_LoweringError, match="Unsupported layout attribute"):
+        emit_mlir_module._shape_attr_to_symbol_operand(StringAttr("?"), ctx, location=None)
+
+
+# EMIT-S6-HELPER-006
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 直接覆盖索引解析、shape operand 与 helper 参数归一化的低覆盖分支。
+# 测试目的: 锁定 index/materialize/bound/operand helper 的稳定语义与错误边界。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_private_helpers_index_resolution_and_operand_materialization
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_emit_mlir_private_helpers_index_resolution_and_operand_materialization() -> None:
+    mem_type = NnMemoryType(
+        ArrayAttr([StringAttr("M"), IntAttr(2)]),
+        ArrayAttr([StringAttr("N"), IntAttr(1)]),
+        i32,
+        NnMemorySpaceAttr.from_name("global"),
+    )
+    ctx = EmitContext(
+        builder=Block(arg_types=[mem_type, SymbolValueType.from_expr("M"), SymbolValueType.from_expr("N"), i32, IndexType()]),
+        symbols={},
+        types={},
+        config={"loop_vars": {"loop_i": 5}, "runtime_values": {"beta": SymbolDim("B")}},
+    )
+    ctx.symbols.update(
+        {
+            "mem": ctx.builder.args[0],
+            "M": ctx.builder.args[1],
+            "N": ctx.builder.args[2],
+            "count": ctx.builder.args[3],
+            "idx": ctx.builder.args[4],
+        }
+    )
+
+    dim_value = emit_mlir_module._materialize_index_symbol_from_memory("M", ctx, None)
+    stride_value = emit_mlir_module._materialize_index_symbol_from_memory("N", ctx, None)
+    assert isinstance(list(ctx.builder.ops)[0], SymbolGetDimOp)
+    assert isinstance(list(ctx.builder.ops)[1], SymbolGetStrideOp)
+    assert isinstance(dim_value.type, SymbolValueType)
+    assert isinstance(stride_value.type, SymbolValueType)
+
+    alias_value = emit_mlir_module._materialize_index_symbol_from_symbol_alias("M", ctx, None)
+    assert alias_value is dim_value
+    assert emit_mlir_module._resolve_index_symbol("M", ctx, None) is dim_value
+    assert emit_mlir_module._resolve_index_symbol("count", ctx, None).type == IndexType()
+    assert emit_mlir_module._resolve_index_symbol("idx", ctx, None) is ctx.builder.args[4]
+
+    with pytest.raises(_LoweringError, match="Unknown index symbol"):
+        emit_mlir_module._resolve_index_symbol("missing", EmitContext(builder=Block(arg_types=[]), symbols={}, types={}), None)
+
+    const_ctx = EmitContext(
+        builder=Block(arg_types=[]),
+        symbols={"M": SymbolConstOp(4).result, "N": SymbolConstOp(5).result},
+        types={},
+        config={"loop_vars": {"loop_i": 5}, "runtime_values": {"beta": SymbolDim("B")}},
+    )
+    assert emit_mlir_module._split_symbol_multiplication("M*N") == ["M", "N"]
+    assert emit_mlir_module._split_symbol_multiplication("M+N") is None
+
+    product = emit_mlir_module._resolve_index_symbol_product("M*N", const_ctx, None)
+    assert isinstance(product.type, SymbolValueType)
+    assert product.type.expr.expr.data == "20"
+
+    with pytest.raises(_LoweringError, match="Unsupported index expression"):
+        emit_mlir_module._resolve_index_symbol_product("M+N", const_ctx, None)
+
+    const_index = emit_mlir_module._resolve_index_operand(ConstAST(3), const_ctx, None)
+    assert isinstance(const_index.type, SymbolValueType)
+    symbol_index = emit_mlir_module._resolve_index_operand(ConstAST("N"), const_ctx, None)
+    assert isinstance(symbol_index.type, SymbolValueType)
+
+    index_attrs = emit_mlir_module._build_index_attrs(None, 2, const_ctx, default_value=0, location=None)
+    assert len(index_attrs) == 2
+    assert all(isinstance(item.type, SymbolValueType) for item in index_attrs)
+    with pytest.raises(_LoweringError, match="Index rank mismatch"):
+        emit_mlir_module._build_index_attrs([ConstAST(1)], 2, const_ctx, location=None)
+
+    layout_attrs = emit_mlir_module._build_index_operands_from_layout(ArrayAttr([IntAttr(2), StringAttr("M")]), const_ctx, location=None)
+    assert len(layout_attrs) == 2
+    assert isinstance(layout_attrs[0].type, SymbolValueType)
+    assert isinstance(layout_attrs[1].type, SymbolValueType)
+
+    static_shape = NnMemoryType(ArrayAttr([IntAttr(2), IntAttr(3)]), ArrayAttr([IntAttr(3), IntAttr(1)]), i32, NnMemorySpaceAttr.from_name("global"))
+    static_ctx = EmitContext(builder=Block(arg_types=[static_shape]), symbols={}, types={})
+    flatten_static = emit_mlir_module._build_flatten_shape_operands(static_ctx.builder.args[0], static_shape, static_ctx, location=None)
+    assert len(flatten_static) == 1
+
+    dynamic_shape = NnMemoryType(ArrayAttr([StringAttr("M"), IntAttr(3)]), ArrayAttr([IntAttr(3), IntAttr(1)]), i32, NnMemorySpaceAttr.from_name("global"))
+    flatten_dynamic = emit_mlir_module._build_flatten_shape_operands(ctx.builder.args[0], dynamic_shape, ctx, location=None)
+    assert len(flatten_dynamic) == 1
+    assert any(isinstance(op, SymbolGetDimOp) for op in ctx.builder.ops)
+
+    assert isinstance(emit_mlir_module._lower_loop_bound(ConstAST(8), const_ctx), object)
+    assert emit_mlir_module._lower_loop_bound(ScalarArgAST(name="count", value_type=int), ctx) is ctx.builder.args[3]
+    with pytest.raises(_LoweringError, match="Unsupported loop bound expression"):
+        emit_mlir_module._lower_loop_bound(object(), ctx)  # type: ignore[arg-type]
+
+    stride_attrs = emit_mlir_module._build_stride_attrs(None, 2, const_ctx, location=None)
+    assert len(stride_attrs) == 2
+    with pytest.raises(_LoweringError, match="Only unit stride is supported"):
+        emit_mlir_module._build_stride_attrs([ConstAST(2)], 1, const_ctx, location=None)
+
+    assert emit_mlir_module._resolve_symbolic_index_value(ConstAST(3), location=None) == 3
+    assert str(emit_mlir_module._resolve_symbolic_index_value(ConstAST("N"), location=None)) == "N"
+    assert emit_mlir_module._resolve_symbolic_index_value(ScalarArgAST("beta", int, is_symbolic=True), location=None, runtime_values={"beta": SymbolDim("B")}) == SymbolDim("B")
+    assert emit_mlir_module._resolve_static_index_expr(ConstAST(3)) == 3
+    assert emit_mlir_module._resolve_static_index_expr(ConstAST("N")) == "N"
+    assert emit_mlir_module._helper_index_value_to_symbolic("helper", "param", "N", None) == SymbolDim("N")
+    assert emit_mlir_module._resolve_runtime_scalar_value(ConstAST(True), i32) is True
+    assert emit_mlir_module._resolve_runtime_scalar_value(ConstAST(1.5), f32) == 1.5
+    assert emit_mlir_module._resolve_runtime_scalar_value(ScalarArgAST("beta", int, is_symbolic=True), f32, {"beta": 0.5}) == 0.5
+    assert emit_mlir_module._resolve_runtime_scalar_value(VarAST("M", location=None), SymbolValueType.from_expr("M")) == SymbolDim("M")
+    assert emit_mlir_module._resolve_runtime_scalar_value(ConstAST(2), i32) == 2
+
+    helper_exact = emit_mlir_module._build_static_index_attrs_exact([ConstAST(2), "N"], location=None, runtime_values={"N": SymbolDim("N")})
+    assert [getattr(attr, "data", None) for attr in helper_exact] == [2, "N"]
+    helper_operand = emit_mlir_module._shape_attr_to_helper_index_operand(IntAttr(3), const_ctx, location=None)
+    assert helper_operand.type == i32
+    assert emit_mlir_module._shape_attr_to_helper_index_operand(StringAttr("M"), const_ctx, location=None).type == SymbolValueType.from_expr("4")
+    with pytest.raises(_LoweringError, match="Unsupported layout attribute"):
+        emit_mlir_module._shape_attr_to_helper_index_operand(StringAttr("?"), const_ctx, location=None)
+
+    lower_operand = emit_mlir_module._lower_helper_index_operand(ConstAST(3), const_ctx, location=None)
+    assert lower_operand.type == i32
+    index_block = Block(arg_types=[IndexType()])
+    index_ctx = EmitContext(builder=index_block, symbols={"idx": index_block.args[0]}, types={})
+    lowered_index = emit_mlir_module._lower_helper_index_operand(ScalarArgAST("idx", int), index_ctx, location=None)
+    assert lowered_index is not None
+    assert lowered_index.type == i32
+
+
+# EMIT-CORE-S6-P-001
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 覆盖 reduce/softmax 私有 helper 的 axis、keepdim 与结果 shape 推导分支。
+# 使用示例: pytest -q test/dsl/test_emit_mlir.py -k test_emit_mlir_private_helpers_reduce_and_softmax_shape_contracts
+# 对应功能实现文件路径: kernel_gen/dsl/mlir_gen/emit/core.py
+# 对应 spec 文件路径: spec/dsl/emit_mlir.md
+# 对应测试文件路径: test/dsl/test_emit_mlir.py
+def test_emit_mlir_private_helpers_reduce_and_softmax_shape_contracts() -> None:
+    assert _parse_softmax_axis_expr(None, rank=4, location=None) == 3
+    assert _parse_softmax_axis_expr(ConstAST(-1), rank=4, location=None) == 3
+    assert _parse_softmax_axis_expr(ConstAST(0), rank=4, location=None) == 0
+    with pytest.raises(_LoweringError, match="softmax axis must be int"):
+        _parse_softmax_axis_expr(ConstAST(True), rank=2, location=None)
+
+    assert _parse_reduce_keepdim_expr(None, None) == (False, True)
+    assert _parse_reduce_keepdim_expr(ConstAST(True), None) == (True, True)
+    assert _parse_reduce_keepdim_expr(ConstAST(2), None) == (2, False)
+    with pytest.raises(_LoweringError, match="reduce keepdim must be bool or int"):
+        _parse_reduce_keepdim_expr("bad", None)
+
+    shape = [IntAttr(2), StringAttr("N"), IntAttr(4)]
+    assert _build_reduce_result_shape_attrs(shape, {1}, True) == [IntAttr(2), IntAttr(1), IntAttr(4)]
+    assert _build_reduce_result_shape_attrs(shape, {0, 1, 2}, False) == [IntAttr(1)]
+
+    input_type = NnMemoryType(
+        ArrayAttr([IntAttr(2), StringAttr("N")]),
+        ArrayAttr([IntAttr(2), IntAttr(1)]),
+        i32,
+        NnMemorySpaceAttr.from_name("global"),
+    )
+    inferred = _infer_reduce_output_shape_attrs(
+        NnReduceAST("sum", ConstAST(0), axis=ConstAST(1), keepdim=ConstAST(0)),
+        input_type,
+    )
+    assert inferred == [IntAttr(2)]
+
+    fallback_axis = _infer_reduce_output_shape_attrs(
+        NnReduceAST("sum", ConstAST(0), axis=[3], keepdim=ConstAST(1)),
+        input_type,
+    )
+    assert fallback_axis == list(input_type.shape.data)
+
+    fallback_keepdim = _infer_reduce_output_shape_attrs(
+        NnReduceAST("sum", ConstAST(0), axis=ConstAST(1), keepdim=ConstAST(2)),
+        input_type,
+    )
+    assert fallback_keepdim == list(input_type.shape.data)

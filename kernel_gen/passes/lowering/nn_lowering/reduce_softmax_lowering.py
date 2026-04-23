@@ -208,7 +208,7 @@ def _lower_exp(block: Block, op: Operation) -> None:
     result = alloc.results[0]
     lowered = KernelExpOp(result, operand, space)
     block.insert_op_before(lowered, op)
-    op.results[0].replace_by(result)
+    op.results[0].replace_all_uses_with(result)
     block.erase_op(op)
 
 
@@ -318,7 +318,7 @@ def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:
         "space": lowered.attributes["space"],
     }
     block.insert_op_before(lowered, op)
-    op.results[0].replace_by(result)
+    op.results[0].replace_all_uses_with(result)
     block.erase_op(op)
 
 
