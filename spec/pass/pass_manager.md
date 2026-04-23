@@ -4,12 +4,11 @@
 
 - 定义 Pass 管理与调度的最小可用规范，描述 legacy `Pass` 与 xdsl `ModulePass` 的组织、排序与执行规则。
 - 面向上层 IR/DSL 的通用优化/规范化流程，不绑定具体 IR 类型或后端。
-- 对 analysis pass 仍保持单返回路径：`run(module)` 返回值只承接最终 `module`，分析结果通过 pass 实例缓存或 `attrs` 可观察。
 
 ## 文档信息
 
 - 创建者：`李白`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/pass/pass_manager.md`](../../spec/pass/pass_manager.md)
 - `功能实现`：[`kernel_gen/passes/pass_manager.py`](../../kernel_gen/passes/pass_manager.py)
 - `test`：[`test/pass/test_pass_manager.py`](../../test/pass/test_pass_manager.py)
@@ -24,7 +23,6 @@
 - 统一 Pass 的注册、执行与错误传播规则，便于后续实现与测试闭环。
 - PassManager 只负责 Pass 编排与执行，不承载默认 pipeline builder；默认 builder 见 [`spec/pass/pipeline/default_lowering.md`](../../spec/pass/pipeline/default_lowering.md)。
 - PassManager 在迁移期同时兼容 legacy `Pass.run(target)` 与 xdsl `ModulePass.apply(ctx, module)`；遇到 `ModulePass` 时内部创建并复用单个 `Context`。
-- 冻结 analysis pass 在 manager 中的承接方式：`run(module)` 继续返回单一 `module`，不追加 summary 或第二返回值。
 - 对 lowering 链固定公开一个可验证顺序示例：当模块内存在 `memory-return func.func + func.call` 链路时，`BufferResultsToOutParamsPass` 必须运行在 `NnLoweringPass` 之后，避免 caller/callee ABI 停留在双口径。
 - 对 nn 分解 lowering 链固定公开一个顺序边界：`DecompassPass` 必须运行在 `NnLoweringPass` 之前，确保默认 lowering 链路不让 residual `nn.*` 直接进入 `nn_lowering`。
 - 对下游 `gen_kernel` 合同固定明确：`gen_kernel` 仅接受已执行 `BufferResultsToOutParamsPass` 的 rewrite 后 ABI；若仍保留旧 `memory return` ABI，必须显式失败。
@@ -38,7 +36,6 @@
 - 不要求 Pass 修改输入的方式（可返回新对象或就地修改），以 `run` 返回值为准。
 - 不要求 `ModulePass.apply` 返回值；`PassManager` 以 `apply(ctx, module)` 的副作用作为结果，继续返回原 `module` 对象。
 - 当管理器中无 Pass 时，执行结果必须等于输入（无副作用的空操作）。
-- 对 analysis pass，manager 不负责聚合第二份分析结果对象；若需观察分析结果，只能经由 pass 实例侧接口或 `attrs` 等副作用读取。
 - 当 lowering 链包含 `LowerDmaMemoryHierarchyPass` 时，manager 只冻结其排序边界；是否注册该 pass 仍由调用方决定。
 - 当 lowering 链包含 tile family 时，manager 只固定 tile family 与 out-params / dma hierarchy / symbol-loop-hoist 的相对边界；是否注册具体 tile pass 仍由调用方决定。
 
@@ -54,6 +51,12 @@
 - 当前仍允许 pass manager caller 通过下列活跃模块导入 lowering family：
   - `kernel_gen.passes.lowering`
 - 以下旧路径在当前基线中必须稳定失败：
+  - `kernel_gen.analysis`
+  - `kernel_gen.analysis.analysis`
+  - `kernel_gen.analysis.compute`
+  - `kernel_gen.analysis.memory`
+  - `kernel_gen.passes.analysis`
+  - `kernel_gen.passes.analysis.func_cost`
   - `kernel_gen.passes.lowering.pass_manager`
   - `kernel_gen.passes.lowering.registry`
   - `kernel_gen.passes.lowering.dma_memory_hierarchy`
@@ -121,14 +124,6 @@ result = pm.run(ir)
 ```
 
 ```python
-pm = PassManager(name="analysis")
-cost_pass = AnalyzeFuncCostPass(attach_attrs=True)
-pm.add_pass(cost_pass)
-module = pm.run(module)
-summary = cost_pass.get_summary("main")
-```
-
-```python
 from xdsl.context import Context
 from xdsl.passes import ModulePass
 
@@ -147,7 +142,6 @@ result = pm.run(module)
 
 - Pass 执行顺序与添加顺序一致。
 - `add_pass` 需要接受 legacy `Pass` 与 xdsl `ModulePass` 两类实例；`run` 执行时按实例类型分别调用 `run(target)` 或 `apply(ctx, module)`。
-- 当列表中包含 analysis pass 时，manager 仍只负责串联 `run(target)` 的单返回值流，不新增 `(module, summary)` 一类包装协议。
 - 对 `memory-return` lowering 链，当前固定示例顺序是：
 
 ```python
@@ -180,7 +174,7 @@ module = pm.run(module)
 返回与限制：
 
 - `run` 返回最后一个 Pass 的输出；无 Pass 时返回原输入。
-- 不得返回 `(module, summary)`、`(target, analysis_result)` 等多返回值结构。
+- 不得返回多返回值结构。
 
 ### `PassManager.add_pass(pass_obj)`
 
@@ -248,16 +242,10 @@ pm.extend([PassA(), PassB()])
 result = pm.run(ir)
 ```
 
-```python
-module = pm.run(module)
-summary = cost_pass.get_summary("main")
-```
-
 注意事项：
 
 - Pass 的输出必须作为下一个 Pass 的输入。
 - 任何 Pass 抛出的异常应原样传播。
-- 若执行的是 analysis pass，分析结果不作为 `run(...)` 的第二返回值传出；调用方应通过 pass 实例或 `analysis.*` attrs 读取。
 - 若调用方注册 `LowerDmaMemoryHierarchyPass`，不得把它前移到 `NnLoweringPass` 或 `BufferResultsToOutParamsPass` 之前。
 
 前置条件：
@@ -271,7 +259,6 @@ summary = cost_pass.get_summary("main")
 返回与限制：
 
 - 返回最终 Pass 的输出；无 Pass 时返回输入本身。
-- 对 analysis pass 仍只返回最终 `module`；不得改为 `new_module, summary = pass_manager.run(module)`。
 
 ## 测试
 
@@ -287,7 +274,6 @@ summary = cost_pass.get_summary("main")
 - 验证 `NnLoweringPass -> BufferResultsToOutParamsPass` 的 lowering 顺序在 `memory-return` 链路上可被测试锁定。
 - 验证默认 lowering pipeline 的顺序为 `DecompassPass -> NnLoweringPass -> BufferResultsToOutParamsPass -> LowerDmaMemoryHierarchyPass`。
 - 验证 `BufferResultsToOutParamsPass` 置于 `NnLoweringPass` 前会被显式拒绝。
-- 当前下游验收标准建议补充 analysis pass 单返回路径验证：`test_pass_manager_runs_analysis_pass_without_second_return` 与 `test_pass_manager_preserves_analysis_side_effects`；在专项测试落地前，不将其写成当前已闭环映射。
 
 ### 功能与用例清单
 
@@ -301,14 +287,8 @@ summary = cost_pass.get_summary("main")
 | TC-PASS-006 | 默认 lowering pipeline 固定顺序 | `test_pass_manager_builds_default_lowering_pipeline_for_buffer_results_to_out_params` |
 | TC-PASS-007 | 错误 lowering 顺序显式拒绝 | `test_pass_manager_rejects_buffer_results_to_out_params_before_lowering` |
 
-当前下游验收标准：
-
-- `test_pass_manager_runs_analysis_pass_without_second_return`：输入包含 analysis pass 的 manager；预期 `run(module)` 保持单返回路径。
-- `test_pass_manager_preserves_analysis_side_effects`：输入同上；预期分析结果通过 pass 实例或 `attrs` 可观察，而不是 manager 第二返回值。
-
 ## 失败归因
 
 - AST 发射失败：上游 DSL/AST 构建阶段无法生成合法 IR，表现为进入 PassManager 前已抛错或传入 `target` 为空/类型不符。
 - Dialect verify 失败：某 Pass 调用 verifier 或验证器抛错，原因通常为 IR 类型、attribute 或 operand 约束不满足。
 - Lowering 失败：具体 lowering Pass 在 op 映射、类型转换或结果分配时抛错，PassManager 仅负责透传异常，不做吞并或重写。
-- Analysis 结果读取失败：若调用方试图从 `run(...)` 第二返回值读取 summary，属于调用协议错误；analysis 结果应改由 pass 实例接口或 `analysis.*` attrs 获取。

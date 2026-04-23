@@ -1,7 +1,7 @@
 """pass_manager tests.
 
 创建者: 李白
-最后一次更改: 朽木露琪亚
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 kernel_gen/passes/pass_manager.py 的 Pass 管理行为。
@@ -25,6 +25,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import sys
 from pathlib import Path
 
@@ -37,6 +38,7 @@ from xdsl.passes import ModulePass
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+WORKTREE_FALLBACK_REPO = REPO_ROOT.parent if REPO_ROOT.name.startswith("wt-") else None
 
 pass_module = importlib.import_module("kernel_gen.passes.pass_manager")
 Pass = pass_module.Pass
@@ -50,6 +52,33 @@ registry_module = importlib.import_module("kernel_gen.passes.registry")
 build_registered_pass = registry_module.build_registered_pass
 load_builtin_passes = registry_module.load_builtin_passes
 _reset_registry_for_test = registry_module._reset_registry_for_test
+
+
+@contextlib.contextmanager
+def _worktree_only_imports(*module_names: str):
+    original_path = list(sys.path)
+    if WORKTREE_FALLBACK_REPO is not None:
+        sys.path[:] = [
+            entry
+            for entry in sys.path
+            if Path(entry or ".").resolve() != WORKTREE_FALLBACK_REPO.resolve()
+        ]
+    isolated_modules = (
+        "kernel_gen",
+        "kernel_gen.passes",
+        "kernel_gen.passes.lowering",
+        *module_names,
+    )
+    previous_modules = {name: sys.modules.pop(name, None) for name in isolated_modules}
+    try:
+        yield
+    finally:
+        for name in isolated_modules:
+            sys.modules.pop(name, None)
+        for name, module in previous_modules.items():
+            if module is not None:
+                sys.modules[name] = module
+        sys.path[:] = original_path
 
 
 # TC-PASS-001
@@ -278,21 +307,29 @@ def test_pass_manager_surviving_import_matrix() -> None:
 # TC-PASS-005D
 # 创建者: 金铲铲大作战
 # 最后一次更改: 金铲铲大作战
-# 功能说明: 验证已退场的旧 pass manager / registry lowering 路径与旧 tile submodule path 稳定失败。
+# 功能说明: 验证已退场的旧 pass manager / registry lowering 路径、旧 tile submodule path 与 analysis family 路径稳定失败。
 # 使用示例: pytest -q test/pass/test_pass_manager.py -k test_pass_manager_old_lowering_paths_fail_fast
 # 对应功能实现文件路径: kernel_gen/passes/pass_manager.py
 # 对应 spec 文件路径: spec/pass/pass_manager.md
 # 对应测试文件路径: test/pass/test_pass_manager.py
 def test_pass_manager_old_lowering_paths_fail_fast() -> None:
-    for module_name in (
+    old_module_paths = (
+        "kernel_gen.analysis",
+        "kernel_gen.analysis.analysis",
+        "kernel_gen.analysis.compute",
+        "kernel_gen.analysis.memory",
+        "kernel_gen.passes.analysis",
+        "kernel_gen.passes.analysis.func_cost",
         "kernel_gen.passes.lowering.pass_manager",
         "kernel_gen.passes.lowering.registry",
         "kernel_gen.passes.lowering.tile_analysis",
         "kernel_gen.passes.lowering.tile_elewise",
         "kernel_gen.passes.lowering.tile_reduce",
-    ):
-        with pytest.raises(ModuleNotFoundError):
-            importlib.import_module(module_name)
+    )
+    with _worktree_only_imports(*old_module_paths):
+        for module_name in old_module_paths:
+            with pytest.raises(ModuleNotFoundError):
+                importlib.import_module(module_name)
 
 
 # TC-PASS-006

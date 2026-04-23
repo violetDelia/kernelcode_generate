@@ -7,7 +7,7 @@
 ## 文档信息
 
 - 创建者：`榕`
-- 最后一次更改：`大闸蟹`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/dialect/dma.md`](../../spec/dialect/dma.md)
 - `test`：[`test/dialect/test_dma_dialect.py`](../../test/dialect/test_dma_dialect.py)
 - `功能实现`：[`kernel_gen/dialect/dma.py`](../../kernel_gen/dialect/dma.py)
@@ -35,7 +35,6 @@
 
 - `dma dialect` 不单独维护 memory type / memory space，所有相关 operand / result 类型统一复用 `NnMemoryType` 与 `NnMemorySpaceAttr`。
 - 本文件只定义方言层的数据搬运、布局转换与显式数据转换语义，不负责真实 DMA 硬件调度、流水线编排、带宽建模、同步原语、事件、barrier 或 async token 设计。
-- analysis 主线的“公开 DMA 分支列表”与覆盖范围以 [`spec/analysis/analysis_engine.md`](../../spec/analysis/analysis_engine.md) 为准；本文件不定义或冻结 analysis 的分支覆盖口径，避免在 dialect 规范中重复维护统计类合同。
 - 本文件不负责逐元素算术、比较、归约、matmul 等张量计算语义，也不负责自动求解 `offsets/sizes/strides` 或自动推导最优搬运策略；但它提供与“数据物化/布局变换”一致的两类稳定原语：
   - `dma.broadcast`：把 scalar 或较低 rank memory 按广播规则物化写入目标 memory（用于显式广播与 mixed compare 桥接）
   - `dma.transpose`：把 source 按 perm 置换物化写入目标 memory（作为 `nn.transpose` 的 lowering 目标）
@@ -66,7 +65,7 @@
 - 若实现保留静态维度或静态 stride 在类型中，assembly 中的静态值也应允许通过 `!symbol.int<"1">` 这类 symbol 常量值、或等价 materialize 后的 `!symbol.int<"expr">` SSA value 显式传入 operand，保证“布局参数来源统一为 operand”。
 - `dma.load/store/slice/deslice` 的 `offsets` 必须为 variadic `!symbol.int<"expr">` 或 `!symbol.iter<"expr">` operand；`sizes/strides` 仍为 variadic `!symbol.int<"expr">` operand。
 - `dma.slice` 必须采用目标式 `dma.slice(target, source, offsets, sizes, strides)`：由 `target` 承载切片结果，op 本身不产生 result。
-- 对 analysis A3，`dma.slice` 的稳定访存 path 语义固定为 `source.space -> target.space`；逻辑字节数按 `sizes` 对应的元素数乘以 `element_type` 字节大小计算。
+- `dma.slice` 的稳定搬运路径语义固定为 `source.space -> target.space`；逻辑字节数按 `sizes` 对应的元素数乘以 `element_type` 字节大小计算。
 - `dma.view` 中与动态布局相关的 `offsets` 允许 `!symbol.int<"expr">` 或 `!symbol.iter<"expr">`，`shape/stride` 仍需 `!symbol.int<"expr">` operand 显式传入；不得仅依赖结果类型里的符号维度推断。
 - `dma.view` 的 `result_type.shape` 必须由 `shape` operand（DSL `view(..., size, ...)`）确定，`result_type.stride` 必须由 `stride` operand（DSL `view(..., stride)`）确定；二者都必须与对应 operand 一一对齐，不得只因“生成了 `dma.view` op”就视为合同对齐成功。
 - 当 `dma.view` 结果直接参与 `func.return` 时，返回的 `!nn.memory<...>` 类型必须与同一份 `result_type` 完全一致；`test/dsl/test_mlir_gen.py` 中的 `EXPECTED_MEMORY` 比对依赖这一边界。

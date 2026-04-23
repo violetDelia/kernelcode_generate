@@ -22,7 +22,7 @@
 ## 文档信息
 
 - 创建者：`大闸蟹`
-- 最后一次更改：`大闸蟹`
+- 最后一次更改：`金铲铲大作战`
 - `文档`：[`ARCHITECTURE/project_architecture.md`](project_architecture.md)
 - `功能实现`：
   - [`kernel_gen/symbol_variable/memory.py`](../kernel_gen/symbol_variable/memory.py)
@@ -72,7 +72,6 @@
 - [`spec/dsl/mlir_gen.md`](../spec/dsl/mlir_gen.md)：DSL 到 `func.func` 入口契约。
 - [`spec/dsl/emit_c.md`](../spec/dsl/emit_c.md)：节点级 C/C++ 片段生成边界。
 - [`spec/dsl/gen_kernel.md`](../spec/dsl/gen_kernel.md)：函数级源码生成边界。
-- [`spec/analysis/analysis_kernel.md`](../spec/analysis/analysis_kernel.md)：静态分析层职责。
 - [`spec/target/registry.md`](../spec/target/registry.md)：target 能力与硬件参数注册中心。
 - [`spec/include/cpu/cpu.md`](../spec/include/cpu/cpu.md)：CPU 运行时头文件接口边界。
 
@@ -114,7 +113,7 @@
 ### 产品代码与契约
 
 - [`spec`](../spec)：公开契约源头，定义边界、错误规则和测试目标。
-- [`kernel_gen`](../kernel_gen)：产品主实现，覆盖语义层、IR 层、DSL 前端、代码生成、分析与 target 查询。
+- [`kernel_gen`](../kernel_gen)：产品主实现，覆盖语义层、IR 层、DSL 前端、代码生成与 target 查询。
 - [`include`](../include)：生成代码依赖的 CPU 头文件接口。
 - [`test`](../test)：针对各层 spec 的单元测试。
 - [`expectation`](../expectation)：贴近产品链路的脚本化验收样例，用于检查关键路径是否仍可执行。
@@ -239,7 +238,6 @@ kernel_gen/target/targets/*.json|*.txt
 | [`kernel_gen/dsl/ast/__init__.py`](../kernel_gen/dsl/ast/__init__.py) + [`kernel_gen/dsl/ast/visitor.py`](../kernel_gen/dsl/ast/visitor.py) | Python AST / DSL 写法 | DSL AST | 只负责把用户写法变成内部 AST，不推导算子语义 | AST 节点建模、遍历、语法层转换 | 不负责高层 `Memory` 语义或目标代码模板 |
 | [`kernel_gen/dsl/mlir_gen/emit/core.py`](../kernel_gen/dsl/mlir_gen/emit/core.py) + [`kernel_gen/dsl/mlir_gen/__init__.py`](../kernel_gen/dsl/mlir_gen/__init__.py) | DSL AST、函数形参、函数体内可达值 | `func.func` 与相关 dialect op | 仅接受函数体内可达值/实参作为 lowering 输入；不允许外部值隐式捕获；不得在此层复写 `operation` 的算子规则 | DSL 到 MLIR 的发射、函数级装配、必要类型桥接 | 不定义高层算子形状公式，不负责完整 C/C++ 模板 |
 | [`kernel_gen/dsl/emit_c.py`](../kernel_gen/dsl/emit_c.py) + [`kernel_gen/dsl/gen_kernel.py`](../kernel_gen/dsl/gen_kernel.py) | 已合法化的单个 op、SSA value、`func.func` | 目标后端源码字符串 | `emit_c` 负责节点级片段，`gen_kernel` 负责函数签名和函数体拼装 | 节点级与函数级源码生成 | 不新增高层 lowering 特例，不负责文件写盘/编译/链接 |
-| [`kernel_gen/analysis/`](../kernel_gen/analysis) | IR 或语义对象 | 静态估算结果 | 只输出分析结果，不改写语义 | 计算量/搬运量分析 | 不负责 lowering、调度、真实执行 |
 | [`kernel_gen/target/`](../kernel_gen/target) | `json/txt` target 配置 | target 能力与硬件参数查询结果 | registry 不补业务默认值；硬件缺失时由调用层决定回退；`cpu.txt` 的白名单空值特例由 spec 明确 | target 配置解析、注册、查询 | 不生成代码，不决定算子完整 lowering 策略 |
 | [`include/cpu/`](../include/cpu) | 代码生成层依赖 | CPU 运行时头文件接口 | 为生成代码提供 `Memory` 与基础算子接口 | 运行时 API 和数据视图模板 | 不负责上层 DSL/IR 语义 |
 | [`test/`](../test) | spec 与实现 | 可执行断言 | 测试验证一致性，不反向定义公开语义 | 模块级回归与边界校验 | 不作为契约源头 |

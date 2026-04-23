@@ -396,7 +396,6 @@ def load_builtin_passes() -> None:
     if "no-op-pipeline" not in _PIPELINE_REGISTRY:
         register_pipeline("no-op-pipeline")(_build_no_op_pipeline)
 
-    from kernel_gen.passes.analysis.func_cost import AnalyzeFuncCostPass
     from kernel_gen.passes.buffer_results_to_out_params import BufferResultsToOutParamsPass
     from kernel_gen.passes.attach_arch_information import AttachArchInformationPass
     from kernel_gen.passes.decompass import DecompassPass
@@ -412,7 +411,6 @@ def load_builtin_passes() -> None:
     from kernel_gen.passes.tuning import LaunchKernelCostFuncPass
 
     for pass_cls in (
-        AnalyzeFuncCostPass,
         InlinePass,
         DecompassPass,
         NnLoweringPass,

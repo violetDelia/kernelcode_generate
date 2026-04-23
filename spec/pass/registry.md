@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`睡觉小分队`
+- 最后一次更改：`金铲铲大作战`
 - `spec`：[`spec/pass/registry.md`](../../spec/pass/registry.md)
 - `功能实现`：[`kernel_gen/passes/registry.py`](../../kernel_gen/passes/registry.py)
 - `test`：[`test/pass/test_pass_registry.py`](../../test/pass/test_pass_registry.py)
@@ -81,6 +81,12 @@
   - `kernel_gen.passes.lowering.outline_device_kernel`
   - `kernel_gen.passes.lowering.symbol_loop_hoist`
 - 对已退场的旧路径，`S1` 当前必须稳定失败：
+  - `kernel_gen.analysis`
+  - `kernel_gen.analysis.analysis`
+  - `kernel_gen.analysis.compute`
+  - `kernel_gen.analysis.memory`
+  - `kernel_gen.passes.analysis`
+  - `kernel_gen.passes.analysis.func_cost`
   - `kernel_gen.passes.lowering.registry`
   - `kernel_gen.passes.lowering.pass_manager`
   - `kernel_gen.passes.lowering.inline`
@@ -91,8 +97,9 @@
   - `kernel_gen.passes.lowering.tile_analysis`
   - `kernel_gen.passes.lowering.tile_elewise`
   - `kernel_gen.passes.lowering.tile_reduce`
+- 已退场的 analysis family 不再提供公开 pass 名或 registry 构造入口；`build_registered_pass("analyze-func-cost")` 必须显式失败。
 - 机械验收口径：
-  - `test/pass/test_pass_registry.py` 负责锁定 canonical public path、旧路径失败边界与 registry caller 的 `importlib` 消费者矩阵。
+  - `test/pass/test_pass_registry.py` 负责锁定 canonical public path、旧路径失败边界、`analyze-func-cost` 构造失败与 registry caller 的 `importlib` 消费者矩阵。
   - `test/pass/test_pass_manager.py` 负责锁定 pass manager / pipeline caller 的 `importlib` 消费者矩阵。
 
 ## S2 导入矩阵补充

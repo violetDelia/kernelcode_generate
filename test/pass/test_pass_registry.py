@@ -1,7 +1,7 @@
 """pass registry tests.
 
 创建者: 小李飞刀
-最后一次更改: jcc你莫辜负
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 kernel_gen/passes/registry.py 的 pass/pipeline 注册、查询与错误短语约束。
@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import sys
 from pathlib import Path
 
@@ -36,6 +37,7 @@ from xdsl.passes import ModulePass
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+WORKTREE_FALLBACK_REPO = REPO_ROOT.parent if REPO_ROOT.name.startswith("wt-") else None
 
 registry_module = importlib.import_module("kernel_gen.passes.registry")
 PassRegistryError = registry_module.PassRegistryError
@@ -61,6 +63,33 @@ def _isolate_registry_state() -> None:
     _reset_registry_for_test()
     yield
     _reset_registry_for_test()
+
+
+@contextlib.contextmanager
+def _worktree_only_imports(*module_names: str):
+    original_path = list(sys.path)
+    if WORKTREE_FALLBACK_REPO is not None:
+        sys.path[:] = [
+            entry
+            for entry in sys.path
+            if Path(entry or ".").resolve() != WORKTREE_FALLBACK_REPO.resolve()
+        ]
+    isolated_modules = (
+        "kernel_gen",
+        "kernel_gen.passes",
+        "kernel_gen.passes.lowering",
+        *module_names,
+    )
+    previous_modules = {name: sys.modules.pop(name, None) for name in isolated_modules}
+    try:
+        yield
+    finally:
+        for name in isolated_modules:
+            sys.modules.pop(name, None)
+        for name, module in previous_modules.items():
+            if module is not None:
+                sys.modules[name] = module
+        sys.path[:] = original_path
 
 
 # TC-REGISTRY-001
@@ -611,14 +640,20 @@ def test_build_registered_attach_arch_information_pass() -> None:
 
 # TC-REGISTRY-007J
 # 创建者: 金铲铲大作战
-# 最后一次更改: jcc你莫辜负
-# 功能说明: 验证已退场的 lowering 旧路径与旧 tile submodule path 在 S1/S7 基线中稳定失败。
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证已退场的 lowering 旧路径、旧 tile submodule path 与 analysis family 路径在 S1/S7/S8 基线中稳定失败。
 # 使用示例: pytest -q test/pass/test_pass_registry.py -k test_registry_old_lowering_paths_fail_fast
 # 对应功能实现文件路径: kernel_gen/passes/registry.py
 # 对应 spec 文件路径: spec/pass/registry.md
 # 对应测试文件路径: test/pass/test_pass_registry.py
 def test_registry_old_lowering_paths_fail_fast() -> None:
     old_module_paths = (
+        "kernel_gen.analysis",
+        "kernel_gen.analysis.analysis",
+        "kernel_gen.analysis.compute",
+        "kernel_gen.analysis.memory",
+        "kernel_gen.passes.analysis",
+        "kernel_gen.passes.analysis.func_cost",
         "kernel_gen.passes.lowering.registry",
         "kernel_gen.passes.lowering.pass_manager",
         "kernel_gen.passes.lowering.inline",
@@ -631,9 +666,25 @@ def test_registry_old_lowering_paths_fail_fast() -> None:
         "kernel_gen.passes.lowering.tile_reduce",
     )
 
-    for module_name in old_module_paths:
-        with pytest.raises(ModuleNotFoundError):
-            importlib.import_module(module_name)
+    with _worktree_only_imports(*old_module_paths):
+        for module_name in old_module_paths:
+            with pytest.raises(ModuleNotFoundError):
+                importlib.import_module(module_name)
+
+
+# TC-REGISTRY-007J-1
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 功能说明: 验证 analysis family 退场后，registry 不再提供 analyze-func-cost 构造入口。
+# 使用示例: pytest -q test/pass/test_pass_registry.py -k test_registry_retired_analysis_pass_name_fails_fast
+# 对应功能实现文件路径: kernel_gen/passes/registry.py
+# 对应 spec 文件路径: spec/pass/registry.md
+# 对应测试文件路径: test/pass/test_pass_registry.py
+def test_registry_retired_analysis_pass_name_fails_fast() -> None:
+    load_builtin_passes()
+
+    with pytest.raises(PassRegistryError, match=r"^PassRegistryError: unknown pass 'analyze-func-cost'$"):
+        build_registered_pass("analyze-func-cost")
 
 
 # TC-REGISTRY-007K
