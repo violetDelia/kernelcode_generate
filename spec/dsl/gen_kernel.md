@@ -11,7 +11,7 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`朽木露琪亚`（2026-04-22）
+- 最后一次更改：`睡觉小分队`（2026-04-24）
 - `spec`：[`spec/dsl/gen_kernel.md`](../../spec/dsl/gen_kernel.md)
 - `功能实现`：
   - [`kernel_gen/dsl/gen_kernel/__init__.py`](../../kernel_gen/dsl/gen_kernel/__init__.py)
@@ -183,7 +183,7 @@ cpu::add(arg1, v0, arg0);
 
 ```text
 // launch wrapper 指向不存在的 body 函数
-arch.launch<%b, %t, %s>(@missing_body, %lhs, %rhs, %out) : (...) -> ()
+arch.launch<%b, %t, %s, %smem>(@missing_body, %lhs, %rhs, %out) : (...) -> ()
 ```
 - `target="npu_demo"` 的 body 函数骨架必须包含并保持如下顺序（说明性示例）：
 

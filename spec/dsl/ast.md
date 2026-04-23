@@ -57,7 +57,7 @@
 - 显式 `-> None` 返回注解表示函数无公开返回值；该场景允许函数体只包含语句且省略 `return`。
 - AST 必须保留函数级返回语法元信息：`has_explicit_return`、`has_return_annotation`、`returns_none`。
 - 无返回注解但有显式 `return expr` 时，`parse_function(...)` 必须解析成功；此时 `FunctionAST.outputs` 保持为空，但必须通过函数级元信息保留“显式 return 存在、未写返回注解、也不是 `-> None`”这一事实。
-- DSL 解析入口必须覆盖 `arch` helper：无参 `get_block_id()` / `get_block_num()` / `get_subthread_id()` / `get_subthread_num()` / `get_thread_id()` / `get_thread_num()` 解析为 `ArchQueryAST`；`get_dynamic_memory(space)` 解析为 `ArchGetDynamicMemoryAST`；`barrier(visibility=[...], scope=BarrierScope.BLOCK)` 解析为 `ArchBarrierAST`；`launch_kernel(callee, block, thread, subthread, shared_memory_size, *args)` 解析为 `ArchLaunchKernelAST`。
+- DSL 解析入口必须覆盖 `arch` helper：无参 `get_block_id()` / `get_block_num()` / `get_subthread_id()` / `get_subthread_num()` / `get_thread_id()` / `get_thread_num()` 解析为 `ArchQueryAST`；`get_dynamic_memory(space)` 解析为 `ArchGetDynamicMemoryAST`；`barrier(visibility=[...], scope=BarrierScope.BLOCK)` 解析为 `ArchBarrierAST`；`launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)` 解析为 `ArchLaunchKernelAST`。
 - 当调用目标显式绑定到 `kernel_gen.operation.nn` 时，DSL 解析入口还必须覆盖 `img2col1d(...)`、`img2col2d(...)` 与 `matmul(...)` helper；其中 `matmul(lhs, rhs, memoryspace=...)` 解析为 `MatmulAST`。
 - 比较表达式入口采用 Python 比较语法；`lhs != rhs` 必须解析为 `CompareExprAST(op="ne")`，以供下游 `nn.ne` lowering 复用同一 AST 语义。
 - 二元乘法入口采用 Python `lhs * rhs` 与 `nn.mul(lhs, rhs)` 双入口；两者都必须解析为 `BinaryExprAST(op="mul")`，以复用后续统一 lowering 语义。
@@ -132,7 +132,7 @@ func_ast = parse_function(add)
 - `get_block_id/get_block_num/get_subthread_id/get_subthread_num/get_thread_id/get_thread_num` helper 仅允许 0 个参数且禁止关键字参数；不满足时必须返回 `Unsupported <helper> arity` 诊断。
 - `get_dynamic_memory(...)` helper 仅允许 1 个位置参数且禁止关键字参数；参数必须是 `MemorySpace` 且仅允许片上空间（`SM/LM/TSM/TLM1/TLM2/TLM3`），否则必须返回 `Unsupported get_dynamic_memory arity`、`get_dynamic_memory space must be MemorySpace` 或 `get_dynamic_memory space must be on-chip MemorySpace` 诊断。
 - `barrier(...)` helper 的稳定 DSL 入口固定为 `barrier(visibility=[...], scope=BarrierScope.BLOCK)`；必须使用且只使用 `visibility` / `scope` 两个关键字参数，不接受位置参数、缺参、重复关键字或未知关键字。`visibility` 必须是非空 `BarrierVisibility` 列表，`scope` 必须是 `BarrierScope`；否则必须返回 `Unsupported barrier arity`、`barrier visibility must be non-empty BarrierVisibility list` 或 `barrier scope must be BarrierScope` 诊断。
-- `launch_kernel(...)` helper 的稳定 DSL 入口固定为 `launch_kernel(callee, block, thread, subthread, shared_memory_size, *args)`；前五个参数必须按位置提供，且禁止任何关键字参数。`callee` 必须是函数对象对应的 bare symbol reference（例如 `add_barrier_body`），不允许字符串字面量、属性引用、lambda、调用表达式或其他运行时对象；否则必须返回 `launch_kernel callee must be function symbol reference` 诊断。`block/thread/subthread/shared_memory_size` 仅做 AST 入口语法校验（必须是正整数或 `SymbolDim` 语义，其中 `shared_memory_size` 允许静态 `0`），否则必须返回 `Unsupported launch_kernel arity`、`launch_kernel <dim> must be int or SymbolDim` 或 `launch_kernel <dim> must be > 0` 诊断；AST 阶段不承诺 extent 已完成 `!symbol.int` 归一化。额外的 `*args` 只要求可解析为值表达式，并按源码顺序原样保留给下游 lowering。
+- `launch_kernel` helper 的公开 DSL 入口固定为 `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)`；四个 launch 字段必须放在下标里，调用参数只允许 `callee, *args` 这一路径，且禁止任何关键字参数。`callee` 必须是函数对象对应的 bare symbol reference（例如 `add_barrier_body`），不允许字符串字面量、属性引用、lambda、调用表达式或其他运行时对象；否则必须返回 `launch_kernel callee must be function symbol reference` 诊断。`block/thread/subthread/shared_memory_size` 仅做 AST 入口语法校验（必须是正整数或 `SymbolDim` 语义，其中 `shared_memory_size` 允许静态 `0`），否则必须返回 `Unsupported launch_kernel arity`、`launch_kernel <dim> must be int or SymbolDim`、`launch_kernel <dim> must be > 0` 或 `launch_kernel shared_memory_size must be >= 0` 诊断；AST 阶段不承诺 extent 已完成 `!symbol.int` 归一化。额外的 `*args` 只要求可解析为值表达式，并按源码顺序原样保留给下游 lowering。实现当前仍可解析旧直调用 `launch_kernel(callee, block, thread, subthread, shared_memory_size, *args)` 作为兼容路径，但该形态不再属于公开合同。
 - `-> float` 返回注解在本轮是合法 AST 入口，但仅用于 `symbol.to_float` 链路；除 `float(symbol.int)` 之外，不在 AST 层扩展新的浮点返回注解体系。
 - `float(value)` 在 AST 层当前仅作为 `symbol.int -> float` 的最小语法入口冻结；本轮只承诺 `def cast_dim(n: int) -> float: return float(n)` 这一类写法可进入后续链路，不在 AST 层扩展 `double`、`complex`、多参数 `float(...)`、关键字参数 `float(...)` 或其他 builtin cast 体系。
 
@@ -596,7 +596,7 @@ ArchBarrierAST(
 
 ### `ArchLaunchKernelAST`
 
-功能说明：表示 `launch_kernel(callee, block, thread, subthread, shared_memory_size, *args)` 的启动描述语句节点。
+功能说明：表示 `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)` 的启动描述语句节点。
 
 参数说明：
 
@@ -674,7 +674,7 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
   - 覆盖 `get_thread_num()` 的非法参数在 AST 解析阶段被拒绝。
   - 覆盖 `get_dynamic_memory(space)` 的 AST 入口语义与 `MemorySpace` 约束错误路径。
   - 覆盖 `barrier(visibility=[...], scope=BarrierScope.BLOCK)` 的语句解析入口语义与 `visibility/scope` 错误路径。
-  - 覆盖 `launch_kernel(callee, block, thread, subthread, shared_memory_size, *args)` 的语句解析入口语义与 arity/callee/extent/关键字参数错误路径。
+  - 覆盖 `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)` 的语句解析入口语义与 arity/callee/extent/关键字参数错误路径。
   - 覆盖 `load` helper 的参数数量、source 类型与 space 约束的错误路径。
   - 覆盖 `slice` helper 的参数数量、source 类型与 space 约束的错误路径。
   - 覆盖 `-> float` 返回注解与 `float(symbol.int)` 的 AST 入口合同；当前下游验收标准建议使用 `test_ast_accepts_float_return_annotation_for_symbol_to_float` 与 `test_ast_rejects_non_float_annotation_for_symbol_to_float`，在专项测试落地前不将其写成已闭环映射。
@@ -712,7 +712,7 @@ ModuleAST(functions=[FunctionAST(name="kernel", inputs=[], outputs=[], body=Bloc
   - AST-014L：`get_thread_num(1)` 与 `get_thread_num(x=1)` 必须在 AST 解析阶段返回 `Unsupported get_thread_num arity` 诊断。（`test_parse_function_rejects_invalid_get_thread_num_arity_variants`）
   - AST-014M：`get_dynamic_memory(MemorySpace.SM)` 必须在 AST 解析阶段生成 `ArchGetDynamicMemoryAST` 并保留 `space` 语义。
   - AST-014N：`get_dynamic_memory` 的参数个数或 `space` 类型/取值非法时，必须在 AST 解析阶段返回约定诊断。（`test_parse_function_rejects_invalid_get_dynamic_memory_variants`）
-  - AST-014O：`launch_kernel(add_barrier_body, block, thread, subthread, shared_memory_size, lhs, rhs, out)` 必须在 AST 解析阶段生成 `ArchLaunchKernelAST` 语句节点，并保留 `callee/extent/args` 顺序语义。（实现阶段补齐：`test_parse_function_parses_arch_launch_kernel_with_callee`）
+  - AST-014O：`launch_kernel[block, thread, subthread, shared_memory_size](add_barrier_body, lhs, rhs, out)` 必须在 AST 解析阶段生成 `ArchLaunchKernelAST` 语句节点，并保留 `callee/extent/args` 顺序语义。（实现阶段补齐：`test_parse_function_parses_arch_launch_kernel_with_callee`）
   - AST-014P：`launch_kernel` 的参数个数、callee 形态、关键字参数或启动规模非法时，必须在 AST 解析阶段返回约定诊断；合法路径需保留到下游 `arch.launch` lowering。（实现阶段补齐：`test_parse_function_rejects_invalid_arch_launch_kernel_variants`）
   - AST-014Q：`barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM], scope=BarrierScope.BLOCK)` 必须在 AST 解析阶段生成 `ArchBarrierAST` 语句节点，并保留 `visibility/scope` 源码顺序语义。（实现阶段补齐：`test_parse_function_parses_arch_barrier_statement`）
   - AST-014R：`barrier` 缺少 `scope`、传入空 `visibility`、非 `BarrierVisibility` 列表或非法 `scope` 时，必须在 AST 解析阶段返回约定诊断；合法路径需保留到下游 `arch.barrier` lowering。（实现阶段补齐：`test_parse_function_rejects_invalid_arch_barrier_variants`）

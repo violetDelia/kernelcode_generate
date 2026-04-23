@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`咯咯咯`
-- 最后一次更改：`jcc你莫辜负`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/operation/arch.md`](../../spec/operation/arch.md)
 - `功能实现`：[`kernel_gen/operation/arch.py`](../../kernel_gen/operation/arch.py)
 - `test`：[`test/operation/test_operation_arch.py`](../../test/operation/test_operation_arch.py)
@@ -44,11 +44,11 @@
 - `BarrierVisibility` 的公开聚合可见域固定为 `TSM` 与 `TLM`：其中 `BarrierVisibility.TLM` 只表示 barrier 可见域，固定覆盖真实内存空间 `MemorySpace.TLM1/TLM2/TLM3`，不得回退为旧的单一聚合 TLM memory space 写法。
 - `barrier(*, visibility, scope)` 只描述一次同步请求，不返回新的 `Memory`、`SymbolDim`、句柄或状态对象；公开返回值固定为 `None`。
 - `barrier` 采用关键字参数调用，`visibility/scope` 均为必填；`visibility` 只允许 `list[BarrierVisibility]` 或 `tuple[BarrierVisibility, ...]`，且必须且只能包含 `TSM/TLM` 各一次；`scope` 只允许 `BarrierScope.BLOCK/THREAD/SUBTHREAD/GLOBAL`。
-- `launch_kernel(callee, block, thread, subthread, shared_memory_size, *args)` 只描述一次启动请求，不返回新的 `Memory`、`SymbolDim` 或句柄对象；公开返回值固定为 `None`。
-- `launch_kernel` 调用签名固定为 `launch_kernel(callee, block, thread, subthread, shared_memory_size, *args)`：前五个参数顺序必须为 `callee -> block -> thread -> subthread -> shared_memory_size`，尾部 `*args` 只用于透传 kernel 形参，不定义额外关键字参数。
+- `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)` 只描述一次启动请求，不返回新的 `Memory`、`SymbolDim` 或句柄对象；公开返回值固定为 `None`。
+- `launch_kernel` 的公开调用形态固定为 `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)`：四个 launch 字段位于下标，调用参数顺序固定为 `callee -> *args`；旧直调用 `launch_kernel(callee, block, thread, subthread, shared_memory_size, *args)` 只允许作为兼容实现路径存在，不再属于公开合同。
 - `launch_kernel` 仅允许关键字参数名 `callee/block/thread/subthread`；缺失前四个必填参数或传入未知关键字参数属于调用边界错误，必须抛出 `TypeError`。
-- `launch_kernel(...)` 的 `callee` 只允许 Python 函数对象；不得接受字符串名、其他 callable、`Memory`、`SymbolDim` 或自由对象。
-- `launch_kernel(...)` 的 `block/thread/subthread` 只允许 `int` 或 `SymbolDim`，且不得接受 `bool`；若输入为静态整数，必须满足 `> 0`；operation 层不得接受浮点、`Memory`、列表或其他运行时对象。
+- `launch_kernel[...]` 的 `callee` 只允许 Python 函数对象；不得接受字符串名、其他 callable、`Memory`、`SymbolDim` 或自由对象。
+- `launch_kernel[...]` 的 `block/thread/subthread` 只允许 `int` 或 `SymbolDim`，且不得接受 `bool`；若输入为静态整数，必须满足 `> 0`；operation 层不得接受浮点、`Memory`、列表或其他运行时对象。
 - operation 层与 dialect 层采用一一映射：`get_*` helper 分别映射到对应 `arch.get_*` op，`get_dynamic_memory` 映射到 `arch.get_dynamic_memory`，`barrier` 映射到 `arch.barrier`，`launch_kernel` 的支持性校验与 lowering 语义固定对应 `arch.launch`；不得通过其他 dialect 或 builtin op 绕过 `arch dialect`，也不得回退旧 launch op 命名。
 - 当 target registry 设置了 current target 时，所有 `arch` helper 在调用前都必须执行支持性校验；若当前 target 不支持对应 `arch.*` op，必须抛出 `ValueError`，且错误信息应包含 op 名与 target 名。
 - `get_block_num/get_thread_num/get_subthread_num` 在 target registry 提供对应硬件值时必须优先返回静态值；缺失时回退为各自 `SymbolDim("<name>")` 语义。
@@ -350,7 +350,7 @@ barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM], scope=Barrier
 - 返回类型：`None`
 - 限制：公开合同固定为 `barrier(*, visibility, scope)`，不得回退为无参 barrier。
 
-### `launch_kernel(callee, block, thread, subthread, shared_memory_size, *args)`
+### `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)`
 
 功能说明：
 
@@ -359,12 +359,13 @@ barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM], scope=Barrier
 
 参数说明：
 
-- 参数列表与顺序：`(callee, block, thread, subthread, shared_memory_size, *args)`。
-- `callee (function)`：必填，参数序号 `#1`；Python 函数对象；默认值：无。
-- `block (int | SymbolDim)`：必填，参数序号 `#2`；block 规模；默认值：无。
-- `thread (int | SymbolDim)`：必填，参数序号 `#3`；thread 规模；默认值：无。
-- `subthread (int | SymbolDim)`：必填，参数序号 `#4`；subthread 规模；默认值：无。
-- `shared_memory_size (int | SymbolDim)`：必填，参数序号 `#5`；共享内存规模；静态整数必须 `>= 0`；默认值：无。
+- 下标参数顺序：`block -> thread -> subthread -> shared_memory_size`。
+- 调用参数顺序：`callee -> *args`。
+- `block (int | SymbolDim)`：必填，下标字段 `#1`；block 规模。
+- `thread (int | SymbolDim)`：必填，下标字段 `#2`；thread 规模。
+- `subthread (int | SymbolDim)`：必填，下标字段 `#3`；subthread 规模。
+- `shared_memory_size (int | SymbolDim)`：必填，下标字段 `#4`；共享内存规模；静态整数必须 `>= 0`。
+- `callee (function)`：必填，调用参数 `#1`；Python 函数对象。
 - `*args (object)`：可选，位置参数；按原顺序透传给 `callee` 的 kernel 实参。
 
 使用示例：
@@ -376,14 +377,13 @@ def my_kernel(lhs, rhs, out):
     return None
 
 
-launch_kernel(my_kernel, SymbolDim("GRID_X"), 128, 4, 0, "lhs", "rhs", "out")
+launch_kernel[SymbolDim("GRID_X"), 128, 4, 0](my_kernel, "lhs", "rhs", "out")
 ```
 
 注意事项：
 
-- 前五个参数全部为必填参数，且仅前五个参数允许按关键字调用；`*args` 只允许按位置传入。
-- 允许按关键字调用（如 `launch_kernel(callee=my_kernel, block=1, thread=1, subthread=1, shared_memory_size=0)`），但关键字名必须是 `callee/block/thread/subthread/shared_memory_size`。
-- 调用边界错误（缺失任一前五个必填参数、传入未知关键字参数）必须抛出 `TypeError`，并在进入语义校验前失败。
+- 四个 launch 字段必须全部在下标中给出；`callee` 与 `*args` 只允许按调用参数位置传入。
+- 下标字段个数不是 `4`、或在公开入口上传入关键字参数时，必须抛出 `TypeError`，并在进入语义校验前失败。
 - `callee` 只允许 Python 函数对象；字符串名称、其他 callable、`Memory`、`SymbolDim` 或自由对象都必须抛出 `TypeError`。
 - `block/thread/subthread` 若不是 `int` 或 `SymbolDim`，必须抛出 `TypeError`；`bool` 不得沿用 Python `bool is int` 语义混入。
 - 当 `block/thread/subthread` 为静态整数时，必须要求其大于 `0`；`0` 或负值必须抛出 `ValueError`。
@@ -408,8 +408,8 @@ launch_kernel(my_kernel, SymbolDim("GRID_X"), 128, 4, 0, "lhs", "rhs", "out")
   - 验证六个执行维度查询 helper 的公开返回语义均为 `SymbolDim` 风格标量，并与 `arch dialect` 的固定结果语义一一对应。
   - 验证 `get_dynamic_memory(space)` 只接受允许的片上空间 `SM/LM/TSM/TLM1/TLM2/TLM3`，且返回一维动态字节 `Memory` 语义。
   - 验证 `BarrierVisibility` 的聚合语义、`barrier(*, visibility, scope)` 的关键字参数合同与 `arch.barrier` 支持性校验。
-  - 验证 `launch_kernel(callee, block, thread, subthread, shared_memory_size, *args)` 的函数对象、extent、尾部参数与 launched body 上下文语义。
-  - 验证 `launch_kernel` 的参数列表/顺序/必填与默认值语义：仅允许 `callee/block/thread/subthread/shared_memory_size` 五个关键字名，尾部 `*args` 只允许位置参数，不允许缺参与未知关键字。
+  - 验证 `launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)` 的函数对象、extent、尾部参数与 launched body 上下文语义。
+  - 验证 `launch_kernel` 的参数列表/顺序/必填与默认值语义：公开入口只允许四个下标字段加 `callee, *args`，不允许缺字段、未知关键字或把 launch 字段写回调用参数。
   - 验证 operation helper 到 `arch dialect` 的映射边界清晰，不引入新的方言或非 `arch` lowering 路径。
   - 验证 target registry 硬件值优先生效，缺失时回退符号/动态语义。
   - 验证当前 target 不支持的 `arch.*` helper 调用必须报错，并覆盖 target registry 缺失关键字段时的显式错误路径。
@@ -424,10 +424,10 @@ launch_kernel(my_kernel, SymbolDim("GRID_X"), 128, 4, 0, "lhs", "rhs", "out")
   - `TC-OP-ARCH-008`：`get_dynamic_memory(...)` 对非法空间或非法类型报错，并覆盖 `MemorySpace.GM` 错误路径；对应 `TC-ARCH-008` 的方言边界。
   - `TC-OP-ARCH-009`：`barrier(visibility=[BarrierVisibility.TSM, BarrierVisibility.TLM], scope=...)` 接受合法聚合可见域与公开 scope 并返回 `None`。
   - `TC-OP-ARCH-010`：`barrier(...)` 对缺参、空列表、重复 `visibility`、错误元素类型与非法 `scope` 报错。
-  - `TC-OP-ARCH-011`：`launch_kernel(callee, block, thread, subthread, shared_memory_size, *args)` 接受合法 `function/int|SymbolDim` 输入与尾部 kernel 参数，并在 launched body 内暴露本次 launch extent。
-  - `TC-OP-ARCH-012`：`launch_kernel(...)` 对字符串或非函数 `callee`、非法类型与静态 `<= 0` 的规模输入报错。
-  - `TC-OP-ARCH-013`：`launch_kernel` 调用签名固定为 `callee/block/thread/subthread/shared_memory_size + *args`；缺参与未知关键字必须在调用边界报 `TypeError`。
-  - `TC-OP-ARCH-014`：`launch_kernel` 关键字调用仅接受 `callee/block/thread/subthread/shared_memory_size` 五个参数名，语义与位置调用一致。
+  - `TC-OP-ARCH-011`：`launch_kernel[block, thread, subthread, shared_memory_size](callee, *args)` 接受合法 `function/int|SymbolDim` 输入与尾部 kernel 参数，并在 launched body 内暴露本次 launch extent。
+  - `TC-OP-ARCH-012`：`launch_kernel[...]` 对字符串或非函数 `callee`、非法类型与静态 `<= 0` 的规模输入报错。
+  - `TC-OP-ARCH-013`：`launch_kernel` 的公开入口固定为四个下标字段加 `callee, *args`；缺字段、未知关键字或把 launch 字段写进调用参数都必须在调用边界报 `TypeError`。
+  - `TC-OP-ARCH-014`：实现若保留旧直调用 `launch_kernel(callee, block, thread, subthread, shared_memory_size, *args)` 兼容路径，其行为不得改变 `launch_kernel[...]` 的公开语义，也不得反向扩回公开文档口径。
   - `TC-OP-ARCH-015`：target registry 提供硬件值时，launch 外的 `get_block_num()` / `get_thread_num()` / `get_subthread_num()` / `get_dynamic_memory()` 必须优先使用硬件值；launched body 内则优先暴露本次 launch extent。
   - `TC-OP-ARCH-016`：当当前 target 不支持某个 `arch.*` op 时，对应 helper 的 target registry 支持性校验必须抛出 `ValueError` 并包含 op 名称；本条覆盖 `get_block_num()` / `get_thread_num()` / `get_subthread_num()` / `get_dynamic_memory()` / `barrier()` / `launch_kernel()` 的错误路径。
   - `TC-OP-ARCH-017`：当当前 target registry 条目缺少 `arch_supported_ops/arch_unsupported_ops` 等必需字段时，arch query helper 必须返回显式 `missing required arch fields` 错误。
