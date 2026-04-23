@@ -36,7 +36,7 @@
 - `tuner.param` 结果类型必须为 `!symbol.dim<"name">`；不得使用 `!symbol.int<"...">`、builtin `index`、普通整数或其他类型替代。
 - `name` 必须为非空标识符，且只能包含字母、数字与下划线，并以字母或下划线开头。
 - `tuner.cost` 无 region，operand 列表按原 op operands 原顺序透传，结果类型固定为 `!symbol.int<"expr">`。
-- `tuner.cost` 的 `cost_kind` 只接受 `compute` 或 `memory`，`op_name` 必须为非空字符串。
+- `tuner.cost` 的 `cost_kind` 只接受 `compute`、`memory`、`kind2` 或 `kind3`，`op_name` 必须为非空字符串。
 - `tuner.cost` 不再公开 `kind`、`device_func` 两个 attrs；若实现仍生成这两个字段，verifier 必须显式拒绝。
 - `tuner.cost` 不求值、不查表、不裁剪节点；“不同 `cost_kind` 下某类 op 是否为 0”属于后续 evaluator 语义。
 - 本方言不定义任何超参数值求解、范围约束、搜索策略、默认值逻辑或真实 cost evaluator。
@@ -80,14 +80,14 @@
 参数说明：
 
 - `operands(SSA value...)`：原 op operands，数量与顺序必须与原 op 一致；原 op 无 operands 时本列表为空。
-- `cost_kind(str attr)`：当前 cost function 的统计视角，只允许 `"compute"` 或 `"memory"`。
+- `cost_kind(str attr)`：当前 cost function 的统计视角，只允许 `"compute"`、`"memory"`、`"kind2"` 或 `"kind3"`。
 - `op_name(str attr)`：原 op 名称，例如 `"dma.alloc"`、`"kernel.matmul"`、`"arch.barrier"`。
 
 使用示例：
 
 ```text
-%cost0 = tuner.cost(%tile_m, %k) {cost_kind = "memory", op_name = "dma.copy"} : (!symbol.int<"TILE_M">, !symbol.int<"K">) -> !symbol.int<"LOCAL">
-%cost1 = tuner.cost() {cost_kind = "compute", op_name = "arch.barrier", scope = #arch.scope<global>} : () -> !symbol.int<"BARRIER_COST">
+%cost0 = tuner.cost(%tile_m, %k) {cost_kind = "kind2", op_name = "dma.copy"} : (!symbol.int<"TILE_M">, !symbol.int<"K">) -> !symbol.int<"LOCAL">
+%cost1 = tuner.cost() {cost_kind = "kind3", op_name = "arch.barrier", scope = #arch.scope<global>} : () -> !symbol.int<"BARRIER_COST">
 ```
 
 注意事项：
@@ -121,5 +121,5 @@
 | TC-TUNER-002 | `tuner.param` 结果类型必须为 `!symbol.dim<"name">` | `test_tuner_param_rejects_invalid_result_type` |
 | TC-TUNER-003 | `tuner.param` 的 `name` 非法时报错 | `test_tuner_param_rejects_invalid_name` |
 | TC-TUNER-004 | `tuner.cost` parse/print 与 operand 透传稳定，结果类型固定为 `!symbol.int<"...">` | `test_tuner_cost_round_trip` |
-| TC-TUNER-005 | `tuner.cost.cost_kind` 仅允许 `compute / memory`，并拒绝旧 `kind / device_func` attrs | `test_tuner_cost_rejects_invalid_kind_attrs` |
+| TC-TUNER-005 | `tuner.cost.cost_kind` 仅允许 `compute / memory / kind2 / kind3`，并拒绝旧 `kind / device_func` attrs | `test_tuner_cost_rejects_invalid_kind_attrs` |
 | TC-TUNER-006 | `tuner.cost` 必须包含 `cost_kind / op_name`，且结果类型必须为 `!symbol.int<"...">` | `test_tuner_cost_rejects_missing_attrs_or_invalid_result_type` |

@@ -9,7 +9,7 @@
 ## 文档信息
 
 - 创建者：`睡觉小分队`
-- 最后一次更改：`金铲铲大作战`
+- 最后一次更改：`睡觉小分队`
 - `spec`：[`spec/pass/tuning/launch_kernel_cost_func.md`](../../../spec/pass/tuning/launch_kernel_cost_func.md)
 - `功能实现`：
   - [`kernel_gen/passes/tuning/launch_kernel_cost_func.py`](../../../kernel_gen/passes/tuning/launch_kernel_cost_func.py)：公开 pass 入口。
@@ -34,13 +34,13 @@
 - `host wrapper`：包含 `arch.launch` 的 host 侧函数。
 - `device func`：`arch.launch` 通过 callee symbol 指向的 device 函数。
 - `cost function`：本 pass 新增的 sibling host function，名称形如 `@_cost_<cost_kind>_<device_func_name>`，参数与 device func 一致，返回单个 `!symbol.int`。
-- `cost_kind`：当前 cost function 的统计视角，只允许 `compute` 或 `memory`。
+- `cost_kind`：当前 cost function 的统计视角，只允许 `compute`、`memory`、`kind2` 或 `kind3`。
 
 ## 目标
 
 - 固定 pass 名称：`launch-kernel-cost-func`。
-- 固定公开入口：`LaunchKernelCostFuncPass(cost_kind="compute")` 与 `build_registered_pass("launch-kernel-cost-func", {"cost_kind": ...})`。
-- 固定输出：每个 unique device callee 在同一 `cost_kind` 下最多生成一份 cost function。
+- 固定公开入口：`LaunchKernelCostFuncPass(cost_kind="compute|memory|kind2|kind3")` 与 `build_registered_pass("launch-kernel-cost-func", {"cost_kind": ...})`。
+- 固定输出：每个 unique device callee 对请求列表中的每个 `cost_kind` 生成一份 cost function。
 - 固定 cost function 返回语义：全部 `tuner.cost(...)->!symbol.int` 必须进入 `symbol.add` 累计链，最终 `func.return` 返回单个总值。
 - 固定 helper 保留规则：`dma.view` / `dma.reshape` 必须保留到 cost function，但不下沉 `tuner.cost`。
 
@@ -65,7 +65,7 @@
 
 ```python
 raise LaunchKernelCostFuncError(
-    "LaunchKernelCostFuncError: cost_kind must be one of compute, memory"
+    "LaunchKernelCostFuncError: cost_kind must be one of compute, memory, kind2, kind3"
 )
 ```
 
@@ -81,14 +81,14 @@ raise LaunchKernelCostFuncError(
 
 参数说明：
 
-- `cost_kind(str = "compute")`：当前 cost function 的统计视角，只允许 `"compute"`、`"memory"`。
+- `cost_kind(str = "compute|memory|kind2|kind3")`：当前 cost function 的统计视角，使用 `|` 分隔的有序列表字符串；每个片段只允许 `"compute"`、`"memory"`、`"kind2"`、`"kind3"`。
 
 使用示例：
 
 ```python
 from kernel_gen.passes.tuning.launch_kernel_cost_func import LaunchKernelCostFuncPass
 
-module = LaunchKernelCostFuncPass(cost_kind="memory").run(module)
+module = LaunchKernelCostFuncPass(cost_kind="compute|memory|kind2|kind3").run(module)
 ```
 
 ```python
@@ -96,14 +96,15 @@ from kernel_gen.passes.registry import build_registered_pass, load_builtin_passe
 
 load_builtin_passes()
 pass_obj = build_registered_pass(
-    "launch-kernel-cost-func", {"cost_kind": "compute"}
+    "launch-kernel-cost-func", {"cost_kind": "compute|memory|kind2|kind3"}
 )
 module = pass_obj.run(module)
 ```
 
 注意事项：
 
-- `cost_kind` 非法时必须显式失败，错误消息至少包含 `compute`、`memory`。
+- `cost_kind` 非法时必须显式失败，错误消息至少包含 `compute`、`memory`、`kind2`、`kind3`。
+- `cost_kind` 的空段、重复段或未知段必须显式失败。
 - 多个 wrapper 指向同一个 device callee 时，同一 `cost_kind` 下只能生成一份 cost function。
 - 不得改变原 wrapper、原 device func、原 `arch.launch` 或原 op attributes。
 
@@ -146,15 +147,15 @@ func.func @_cost_compute__device_matmul_kernel_(%lhs, %rhs, %out, %m, %k, %n) ->
 使用示例：
 
 ```text
-%cost = tuner.cost(%tile_m, %k) {cost_kind = "compute", op_name = "dma.copy"} : (!symbol.int<"TILE_M">, !symbol.int<"K">) -> !symbol.int<"LOCAL">
+%cost = tuner.cost(%tile_m, %k) {cost_kind = "kind2", op_name = "dma.copy"} : (!symbol.int<"TILE_M">, !symbol.int<"K">) -> !symbol.int<"LOCAL">
 ```
 
 注意事项：
 
 - 下沉成本节点的 op 家族：`dma.*`、`kernel.*`、`arch.*`。
 - helper op `dma.view`、`dma.reshape` 需要克隆保留，但不生成 `tuner.cost`。
-- `cost_kind` 始终等于 pass 参数 `cost_kind`。
-- 不因 `cost_kind=compute` 或 `cost_kind=memory` 裁剪 `dma.*` / `kernel.*` / `arch.*` 成本节点。
+- `cost_kind` 始终等于 pass 参数展开后的单个 kind；合法值固定为 `compute`、`memory`、`kind2`、`kind3`。
+- 不因任一合法 `cost_kind` 取值裁剪 `dma.*` / `kernel.*` / `arch.*` 成本节点。
 - 原 op 已存在 `kind / cost_kind / op_name / device_func` 任一同名 attr 时必须显式失败。
 - `tuner.cost` 不公开 `kind`、`device_func` 两个 attrs。
 
@@ -209,11 +210,19 @@ kernel.add -> tuner.cost(op_name="kernel.add")
 - 每个 `tuner.cost(...)->!symbol.int` 必须进入 `symbol.add` 累计链。
 - 函数级最终 `func.return` 必须返回包含循环内外全部局部成本的单个 `!symbol.int`。
 
+## 合同验收资产
+
+- [`expectation/pass/tuning/launch_kernel_cost_func/__main__.py`](../../../expectation/pass/tuning/launch_kernel_cost_func/__main__.py)
+- [`expectation/pass/tuning/launch_kernel_cost_func/basic_all.py`](../../../expectation/pass/tuning/launch_kernel_cost_func/basic_all.py)
+- [`expectation/pass/tuning/launch_kernel_cost_func/multi_kind.py`](../../../expectation/pass/tuning/launch_kernel_cost_func/multi_kind.py)
+- [`expectation/pass/tuning/launch_kernel_cost_func/shared_callee_once.py`](../../../expectation/pass/tuning/launch_kernel_cost_func/shared_callee_once.py)
+- [`expectation/pass/tuning/launch_kernel_cost_func/invalid_kind.py`](../../../expectation/pass/tuning/launch_kernel_cost_func/invalid_kind.py)
+
 ## 测试
 
 - 测试文件：[`test/pass/test_launch_kernel_cost_func.py`](../../../test/pass/test_launch_kernel_cost_func.py)
 - 执行命令：`pytest -q test/pass/test_launch_kernel_cost_func.py`
-- 测试目标：锁定 cost function 命名/签名、共享 callee 去重、`cost_kind` 语义、helper 保留与失败路径、`!symbol.int` 汇总返回。
+- 测试目标：锁定 cost function 命名/签名、共享 callee 去重、`cost_kind` 多值语义、helper 保留与失败路径、`!symbol.int` 汇总返回。
 
 - 测试文件：[`test/pass/test_pass_registry.py`](../../../test/pass/test_pass_registry.py)
 - 执行命令：`pytest -q test/pass/test_pass_registry.py -k launch_kernel_cost_func`
@@ -224,10 +233,11 @@ kernel.add -> tuner.cost(op_name="kernel.add")
 | 用例 ID | 场景 | 前置条件 | 操作 | 预期结果 | 对应测试 |
 | --- | --- | --- | --- | --- | --- |
 | LKCF-001 | `cost_kind=compute` 基础成功路径 | 单 wrapper 指向单 device callee，device body 含 `dma.view/dma.reshape/dma.copy/kernel.add` | 执行 `LaunchKernelCostFuncPass(cost_kind="compute")` | 新增 `_cost_compute_<device>`，helper 保留、成本节点不裁剪，函数返回 `!symbol.int` | `test_launch_kernel_cost_func_builds_cost_function_for_compute_kind` |
-| LKCF-002 | `cost_kind=memory` 成功路径 | 同 LKCF-001 | 执行 `cost_kind="memory"` | 新增 `_cost_memory_<device>`，`tuner.cost.cost_kind` 全为 `"memory"`，节点不裁剪 | `test_launch_kernel_cost_func_memory_keeps_compute_nodes` |
-| LKCF-003 | 共享 callee 去重 | 两个 wrapper 指向同一 device callee | 执行 pass | 同一 `cost_kind` 下仅生成一份 cost function | `test_launch_kernel_cost_func_shared_callee_once` |
-| LKCF-004 | 非法 `cost_kind` | `cost_kind` 不在 `compute/memory` | 构造或执行 pass | 显式失败，消息包含两个允许值 | `test_launch_kernel_cost_func_rejects_invalid_cost_kind` |
-| LKCF-005 | callee 缺失 | `arch.launch` 指向不存在的 symbol | 执行 pass | 显式失败，不 silent skip | `test_launch_kernel_cost_func_rejects_missing_callee` |
-| LKCF-006 | metadata attr 冲突 | 原 op 已有 `kind / cost_kind / op_name / device_func` 任一同名 attr | 执行 pass | 显式失败，不覆盖原 attr | `test_launch_kernel_cost_func_rejects_metadata_attr_conflict` |
-| LKCF-007 | 非支持 op | device body 含非支持 op | 执行 pass | 显式失败 | `test_launch_kernel_cost_func_rejects_unsupported_op` |
-| LKCF-008 | 预存重名 cost function | module 已有目标 cost function 名 | 执行 pass | 显式失败，不覆盖 | `test_launch_kernel_cost_func_rejects_existing_cost_func` |
+| LKCF-002 | `cost_kind=memory` 基础成功路径 | 同 LKCF-001 | 执行 `cost_kind="memory"` | 新增 `_cost_memory_<device>`，`tuner.cost.cost_kind` 全为 `"memory"`，节点不裁剪 | `test_launch_kernel_cost_func_memory_keeps_compute_nodes` |
+| LKCF-003 | 多 kind 列表成功路径 | 同 LKCF-001 | 执行 `cost_kind="compute|memory|kind2|kind3"` | 新增 4 个 sibling cost function，顺序与列表一致，`tuner.cost.cost_kind` 分别为四个合法 kind | `test_launch_kernel_cost_func_multi_kind_builds_four_functions` |
+| LKCF-004 | 共享 callee 去重 | 两个 wrapper 指向同一 device callee | 执行 pass | 同一 `cost_kind` 下仅生成一份 cost function | `test_launch_kernel_cost_func_shared_callee_once` |
+| LKCF-005 | 非法 `cost_kind` | `cost_kind` 不在 `compute/memory/kind2/kind3` | 构造或执行 pass | 显式失败，消息包含四个允许值 | `test_launch_kernel_cost_func_rejects_invalid_cost_kind` |
+| LKCF-006 | callee 缺失 | `arch.launch` 指向不存在的 symbol | 执行 pass | 显式失败，不 silent skip | `test_launch_kernel_cost_func_rejects_missing_callee` |
+| LKCF-007 | metadata attr 冲突 | 原 op 已有 `kind / cost_kind / op_name / device_func` 任一同名 attr | 执行 pass | 显式失败，不覆盖原 attr | `test_launch_kernel_cost_func_rejects_metadata_attr_conflict` |
+| LKCF-008 | 非支持 op | device body 含非支持 op | 执行 pass | 显式失败 | `test_launch_kernel_cost_func_rejects_unsupported_op` |
+| LKCF-009 | 预存重名 cost function | module 已有目标 cost function 名 | 执行 pass | 显式失败，不覆盖 | `test_launch_kernel_cost_func_rejects_existing_cost_func` |

@@ -10,7 +10,7 @@
 
 使用示例:
 - from kernel_gen.passes.tuning.launch_kernel_cost_func import LaunchKernelCostFuncPass
-- module = LaunchKernelCostFuncPass(cost_kind="compute").run(module)
+    - module = LaunchKernelCostFuncPass(cost_kind="compute|memory|kind2|kind3").run(module)
 
 关联文件:
 - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
@@ -31,7 +31,7 @@ from kernel_gen.dialect.symbol import SymbolAddOp, SymbolConstOp, SymbolForOp, S
 from kernel_gen.dialect.tuner import TunerCostOp
 from kernel_gen.passes.pass_manager import Pass
 
-_VALID_COST_KINDS = ("compute", "memory")
+_VALID_COST_KINDS = ("compute", "memory", "kind2", "kind3")
 _RESERVED_METADATA_ATTRS = ("kind", "cost_kind", "op_name", "device_func")
 _SUPPORTED_COST_PREFIXES = ("dma.", "kernel.", "arch.")
 _HELPER_OP_NAMES = ("dma.view", "dma.reshape")
@@ -48,7 +48,7 @@ class LaunchKernelCostFuncError(ValueError):
     - 为非法 `cost_kind`、callee 缺失、重名 cost function、metadata attr 冲突与非支持 op 等边界提供统一错误类型。
 
     使用示例:
-    - raise LaunchKernelCostFuncError("LaunchKernelCostFuncError: cost_kind must be one of compute, memory")
+    - raise LaunchKernelCostFuncError("LaunchKernelCostFuncError: cost_kind must be one of compute, memory, kind2, kind3")
 
     关联文件:
     - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
@@ -57,18 +57,19 @@ class LaunchKernelCostFuncError(ValueError):
     """
 
 
-def _normalize_cost_kind(cost_kind: str) -> str:
+def _normalize_cost_kinds(cost_kind: str) -> tuple[str, ...]:
     """规整并校验 pass `cost_kind` 参数。
 
     创建者: 小李飞刀
     最后一次更改: 小李飞刀
 
     功能说明:
-    - 只接受 `compute`、`memory` 两种公开值。
+    - 只接受 `compute`、`memory`、`kind2`、`kind3` 四种公开值。
+    - 多值时按 `|` 分隔并保持顺序；空段、重复段或未知段都显式失败。
     - 失败时抛出稳定错误短语，便于 registry 与 pytest 做机械匹配。
 
     使用示例:
-    - cost_kind = _normalize_cost_kind("compute")
+    - cost_kinds = _normalize_cost_kinds("compute|memory|kind2|kind3")
 
     关联文件:
     - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
@@ -76,11 +77,47 @@ def _normalize_cost_kind(cost_kind: str) -> str:
     - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](kernel_gen/passes/tuning/launch_kernel_cost_func.py)
     """
 
-    if cost_kind not in _VALID_COST_KINDS:
+    if not cost_kind:
         raise LaunchKernelCostFuncError(
-            "LaunchKernelCostFuncError: cost_kind must be one of compute, memory"
+            "LaunchKernelCostFuncError: cost_kind must be one of compute, memory, kind2, kind3"
         )
-    return cost_kind
+    kinds = cost_kind.split("|")
+    if any(kind == "" for kind in kinds):
+        raise LaunchKernelCostFuncError(
+            "LaunchKernelCostFuncError: cost_kind must be one of compute, memory, kind2, kind3"
+        )
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for kind in kinds:
+        if kind not in _VALID_COST_KINDS or kind in seen:
+            raise LaunchKernelCostFuncError(
+                "LaunchKernelCostFuncError: cost_kind must be one of compute, memory, kind2, kind3"
+            )
+        seen.add(kind)
+        normalized.append(kind)
+    return tuple(normalized)
+
+
+def _normalize_cost_kind(cost_kind: str) -> str:
+    """兼容性包装：返回规整后的 `cost_kind` 字符串。
+
+    创建者: 小李飞刀
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 保持旧公开属性 `cost_kind` 仍是可打印的字符串。
+    - 单值返回原值，多值返回 `|` 拼接后的规范顺序。
+
+    使用示例:
+    - cost_kind = _normalize_cost_kind("compute|memory")
+
+    关联文件:
+    - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
+    - test: [test/pass/test_launch_kernel_cost_func.py](test/pass/test_launch_kernel_cost_func.py)
+    - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](kernel_gen/passes/tuning/launch_kernel_cost_func.py)
+    """
+
+    return "|".join(_normalize_cost_kinds(cost_kind))
 
 
 def _cost_function_name(cost_kind: str, device_func_name: str) -> str:
@@ -453,7 +490,7 @@ class LaunchKernelCostFuncPass(Pass):
     - 不改写原 host wrapper 与原 device function。
 
     使用示例:
-    - module = LaunchKernelCostFuncPass(cost_kind="compute").run(module)
+    - module = LaunchKernelCostFuncPass(cost_kind="compute|memory|kind2|kind3").run(module)
 
     关联文件:
     - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
@@ -481,7 +518,8 @@ class LaunchKernelCostFuncPass(Pass):
         - 功能实现: [kernel_gen/passes/tuning/launch_kernel_cost_func.py](kernel_gen/passes/tuning/launch_kernel_cost_func.py)
         """
 
-        self.cost_kind = _normalize_cost_kind(cost_kind)
+        self.cost_kinds = _normalize_cost_kinds(cost_kind)
+        self.cost_kind = "|".join(self.cost_kinds)
 
     @classmethod
     def from_options(
@@ -493,11 +531,11 @@ class LaunchKernelCostFuncPass(Pass):
         最后一次更改: 小李飞刀
 
         功能说明:
-        - 支持 `{"cost_kind": "compute|memory"}` 形式的 registry 入口。
+        - 支持 `{"cost_kind": "compute|memory|kind2|kind3"}` 形式的 registry 入口。
         - 拒绝未知选项，避免静默吞参。
 
         使用示例:
-        - pass_obj = LaunchKernelCostFuncPass.from_options({"cost_kind": "compute"})
+        - pass_obj = LaunchKernelCostFuncPass.from_options({"cost_kind": "compute|memory|kind2|kind3"})
 
         关联文件:
         - spec: [spec/pass/tuning/launch_kernel_cost_func.md](spec/pass/tuning/launch_kernel_cost_func.md)
@@ -539,15 +577,19 @@ class LaunchKernelCostFuncPass(Pass):
             return module
         existing_names = {op.sym_name.data for op in module.ops if isinstance(op, func.FuncOp)}
         for device_func in device_funcs:
-            cost_name = _cost_function_name(self.cost_kind, device_func.sym_name.data)
-            if cost_name in existing_names:
-                raise LaunchKernelCostFuncError(
-                    f"LaunchKernelCostFuncError: cost function '{cost_name}' already exists"
-                )
-            existing_names.add(cost_name)
+            for cost_kind in self.cost_kinds:
+                cost_name = _cost_function_name(cost_kind, device_func.sym_name.data)
+                if cost_name in existing_names:
+                    raise LaunchKernelCostFuncError(
+                        f"LaunchKernelCostFuncError: cost function '{cost_name}' already exists"
+                    )
+                existing_names.add(cost_name)
         for device_func in device_funcs:
-            cost_func = _build_cost_function(device_func, self.cost_kind)
-            module.body.block.insert_op_after(cost_func, device_func)
+            anchor: Operation = device_func
+            for cost_kind in self.cost_kinds:
+                cost_func = _build_cost_function(device_func, cost_kind)
+                module.body.block.insert_op_after(cost_func, anchor)
+                anchor = cost_func
         return module
 
 

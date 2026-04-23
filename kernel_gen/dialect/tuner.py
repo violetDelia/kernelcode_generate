@@ -31,6 +31,7 @@ from kernel_gen.dialect.symbol import SymbolDimType, SymbolValueType
 _ERROR_ACTION = "请按接口约束传参"
 _ERROR_ACTUAL = "不满足期望"
 _ERROR_SCENE = "dialect.tuner verifier"
+_VALID_COST_KINDS = ("compute", "memory", "kind2", "kind3")
 
 
 def _raise_verify_error(expected: str) -> None:
@@ -264,8 +265,8 @@ class TunerCostOp(IRDLOperation):
         if "device_func" in self.attributes:
             _raise_verify_error("tuner.cost device_func attr is not part of public contract")
 
-        if self.cost_kind.data not in ("compute", "memory"):
-            _raise_verify_error("tuner.cost cost_kind must be one of compute or memory")
+        if self.cost_kind.data not in _VALID_COST_KINDS:
+            _raise_verify_error("tuner.cost cost_kind must be one of compute, memory, kind2, kind3")
         if not self.op_name.data.strip():
             _raise_verify_error("tuner.cost op_name must not be empty")
 

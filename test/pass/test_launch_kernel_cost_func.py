@@ -209,30 +209,37 @@ def _build_launch_kernel_module(
     launch_block = SymbolConstOp(1)
     launch_thread = SymbolConstOp(1)
     launch_subthread = SymbolConstOp(1)
+    launch_shared_memory = SymbolConstOp(0)
     launch_op = ArchLaunchOp(
         "_device_kernel",
         launch_block.result,
         launch_thread.result,
         launch_subthread.result,
+        launch_shared_memory.result,
         tuple(wrapper_block.args),
     )
     if missing_callee:
         launch_op.attributes["callee"] = SymbolRefAttr("missing_kernel")
-    wrapper_block.add_ops([launch_block, launch_thread, launch_subthread, launch_op, func.ReturnOp()])
+    wrapper_block.add_ops(
+        [launch_block, launch_thread, launch_subthread, launch_shared_memory, launch_op, func.ReturnOp()]
+    )
 
     extra_launch_block = SymbolConstOp(1)
     extra_launch_thread = SymbolConstOp(1)
     extra_launch_subthread = SymbolConstOp(1)
+    extra_launch_shared_memory = SymbolConstOp(0)
     extra_wrapper_block.add_ops(
         [
             extra_launch_block,
             extra_launch_thread,
             extra_launch_subthread,
+            extra_launch_shared_memory,
             ArchLaunchOp(
                 "_device_kernel",
                 extra_launch_block.result,
                 extra_launch_thread.result,
                 extra_launch_subthread.result,
+                extra_launch_shared_memory.result,
                 tuple(extra_wrapper_block.args),
             ),
             func.ReturnOp(),
@@ -357,6 +364,40 @@ def test_launch_kernel_cost_func_memory_keeps_compute_nodes() -> None:
     assert 'op_name = "kernel.add"' in printed
 
 
+# TC-LKCF-002B
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-23 00:00:00 +0800
+# 最近一次运行成功时间: 2026-04-23 00:00:00 +0800
+# 功能说明: 验证 `cost_kind=compute|memory|kind2|kind3` 会按顺序新增 4 个 cost function。
+# 使用示例: pytest -q test/pass/test_launch_kernel_cost_func.py -k test_launch_kernel_cost_func_builds_cost_functions_for_multi_kind_order
+# 对应功能实现文件路径: kernel_gen/passes/tuning/launch_kernel_cost_func.py
+# 对应 spec 文件路径: spec/pass/tuning/launch_kernel_cost_func.md
+# 对应测试文件路径: test/pass/test_launch_kernel_cost_func.py
+def test_launch_kernel_cost_func_builds_cost_functions_for_multi_kind_order() -> None:
+    module = _build_launch_kernel_module()
+
+    LaunchKernelCostFuncPass(cost_kind="compute|memory|kind2|kind3").run(module)
+    module.verify()
+
+    funcs = [op for op in module.ops if isinstance(op, func.FuncOp)]
+    assert [op.sym_name.data for op in funcs] == [
+        "wrapper",
+        "_device_kernel",
+        "_cost_compute__device_kernel",
+        "_cost_memory__device_kernel",
+        "_cost_kind2__device_kernel",
+        "_cost_kind3__device_kernel",
+    ]
+
+    printed = _print_ir(module)
+    for kind in ("compute", "memory", "kind2", "kind3"):
+        assert printed.count(f'cost_kind = "{kind}"') == 2
+        assert f'_cost_{kind}__device_kernel' in printed
+    assert printed.count("tuner.cost") == 8
+    assert "{kind =" not in printed
+
+
 # TC-LKCF-004
 # 创建者: 小李飞刀
 # 最后一次更改: 金铲铲大作战
@@ -386,12 +427,21 @@ def test_launch_kernel_cost_func_shared_callee_once() -> None:
 # 对应功能实现文件路径: kernel_gen/passes/tuning/launch_kernel_cost_func.py
 # 对应 spec 文件路径: spec/pass/tuning/launch_kernel_cost_func.md
 # 对应测试文件路径: test/pass/test_launch_kernel_cost_func.py
-def test_launch_kernel_cost_func_rejects_invalid_cost_kind() -> None:
+@pytest.mark.parametrize(
+    "cost_kind",
+    [
+        "invalid",
+        "compute|invalid",
+        "compute||memory",
+        "compute|memory|compute",
+    ],
+)
+def test_launch_kernel_cost_func_rejects_invalid_cost_kind(cost_kind: str) -> None:
     with pytest.raises(
         LaunchKernelCostFuncError,
-        match=r"^LaunchKernelCostFuncError: cost_kind must be one of compute, memory$",
+        match=r"^LaunchKernelCostFuncError: cost_kind must be one of compute, memory, kind2, kind3$",
     ):
-        LaunchKernelCostFuncPass(cost_kind="invalid")
+        LaunchKernelCostFuncPass(cost_kind=cost_kind)
 
 
 # TC-LKCF-005B
@@ -409,7 +459,7 @@ def test_launch_kernel_cost_func_rejects_invalid_cost_kind_via_registry() -> Non
 
     with pytest.raises(
         LaunchKernelCostFuncError,
-        match=r"^LaunchKernelCostFuncError: cost_kind must be one of compute, memory$",
+        match=r"^LaunchKernelCostFuncError: cost_kind must be one of compute, memory, kind2, kind3$",
     ):
         build_registered_pass("launch-kernel-cost-func", {"cost_kind": "invalid"})
 
