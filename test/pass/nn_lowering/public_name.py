@@ -1,7 +1,7 @@
 """nn_lowering public API tests.
 
 创建者: 小李飞刀
-最后一次更改: 金铲铲大作战
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 验证 NnLoweringPass 的公开名称与导出路径。
@@ -32,7 +32,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from kernel_gen.passes import lowering as lowering_pkg
-from kernel_gen.passes.lowering import NnLoweringError, NnLoweringPass
+from kernel_gen.passes.lowering.nn_lowering import NnLoweringError, NnLoweringPass
 
 nn_lowering_module = importlib.import_module(
     "kernel_gen.passes.lowering.nn_lowering.nn_lowering"
@@ -41,7 +41,7 @@ nn_lowering_module = importlib.import_module(
 
 # TC-PASS-NNL-001
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-11 21:10:00 +0800
 # 最近一次运行成功时间: 2026-04-11 21:10:00 +0800
 # 测试目的: 验证 NnLoweringPass 使用新的公开名字。
@@ -57,22 +57,24 @@ def test_nn_lowering_pass_public_name() -> None:
 
 # TC-PASS-NNL-002
 # 创建者: 小李飞刀
-# 最后一次更改: 金铲铲大作战
+# 最后一次更改: jcc你莫辜负
 # 最近一次运行测试时间: 2026-04-12 17:40:00 +0800
 # 最近一次运行成功时间: 2026-04-12 17:40:00 +0800
-# 测试目的: 验证 nn_lowering 公开导出以 NnLoweringPass 为主，兼容入口不进入 __all__。
+# 测试目的: 验证 nn_lowering 以 canonical import 为主，旧 compat 模块失败且 compat 名称不再暴露。
 # 使用示例: pytest -q test/pass/nn_lowering/public_name.py -k test_nn_lowering_pass_public_exports
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/__init__.py
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
 # 对应测试文件路径: test/pass/nn_lowering/public_name.py
 def test_nn_lowering_pass_public_exports() -> None:
-    assert NnLoweringPass is not None
-    assert NnLoweringError is not None
+    assert lowering_pkg.NnLoweringPass is NnLoweringPass
+    assert lowering_pkg.NnLoweringError is NnLoweringError
     assert "LowerNnToKernelPass" not in getattr(lowering_pkg, "__all__", [])
-    assert hasattr(lowering_pkg, "LowerNnToKernelPass")
-    lower_to_kernel = lowering_pkg.LowerNnToKernelPass()
-    assert lower_to_kernel.name == "lower-nn-to-kernel"
-    assert isinstance(lower_to_kernel, ModulePass)
+    assert "LowerNnToKernelError" not in getattr(lowering_pkg, "__all__", [])
+    assert not hasattr(lowering_pkg, "LowerNnToKernelPass")
+    assert not hasattr(lowering_pkg, "LowerNnToKernelError")
+
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("kernel_gen.passes.lowering.nn_to_kernel")
 
 
 # TC-PASS-NNL-003

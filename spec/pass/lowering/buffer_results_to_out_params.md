@@ -26,6 +26,7 @@
 
 - 新增 `BufferResultsToOutParamsPass`
 - 固定公开名字：`buffer-results-to-out-params`
+- canonical import path 固定为 `kernel_gen.passes.buffer_results_to_out_params`
 - 把函数返回中的 `memory` 结果改写成最前置输入 out 参数
 - 支持单个/多个 `memory` 返回值改写为 `arg0/arg1/...`
 - 支持 mixed `memory + scalar` returns：`memory` 结果前置为 out 参数，`scalar` 结果保留为返回值
@@ -86,6 +87,21 @@ module = BufferResultsToOutParamsPass().run(module)
   - 当前公开范围若遇到 external declaration、multi-block、返回值个数不一致或无法安全同步改写的 callsite，必须显式报错。
   - 半改写 ABI（例如保留 `memory return`、caller/callee 口径不一致）必须显式报错。
 - 返回与限制：返回改写后的同一 `ModuleOp`。
+
+## 导入与兼容边界
+
+- caller 的 canonical public path 固定为：
+
+```python
+from kernel_gen.passes.buffer_results_to_out_params import (
+    BufferResultsToOutParamsError,
+    BufferResultsToOutParamsPass,
+)
+```
+
+- `kernel_gen.passes.lowering.buffer_results_to_out_params` 属于旧 compat 模块；从 `S2` 起导入必须以 `ModuleNotFoundError` 失败。
+- `kernel_gen.passes` package 若仍保留同名符号的 re-export，只能视为迁移辅助，不作为本阶段验收入口。
+- [`test/pass/test_buffer_results_to_out_params.py`](../../../test/pass/test_buffer_results_to_out_params.py) 必须同时证明“canonical import 成功 + 旧 lowering 模块失败”；[`expectation/pass/buffer_results_to_out_params`](../../../expectation/pass/buffer_results_to_out_params) 只作合同验收资产单列。
 
 ## 最小改写合同
 
@@ -233,8 +249,12 @@ use %out
 
 - 测试文件：[`test/pass/test_buffer_results_to_out_params.py`](../../../test/pass/test_buffer_results_to_out_params.py)
 - 验证命令：
-  - `pytest -q test/pass/test_buffer_results_to_out_params.py -k 'single_memory_result or external_declaration or callsite or pipeline_position or multiple_memory_results or mixed_memory_and_scalar_results'`
+  - `pytest -q test/pass/test_buffer_results_to_out_params.py`
   - `pytest -q test/dsl/test_gen_kernel.py -k 'buffer_results_to_out_params or half_rewritten'`
+- 测试目标：
+  - 锁定 canonical import path `kernel_gen.passes.buffer_results_to_out_params` 可用。
+  - 锁定 `kernel_gen.passes.lowering.buffer_results_to_out_params` 旧模块导入失败。
+  - 锁定单 / 多 `memory` result、mixed returns、模块内 callsite 同步改写与 pipeline 顺序边界。
 
 ## 功能与用例清单
 
@@ -245,3 +265,4 @@ use %out
 - `BROTP-005`：[`test/pass/test_buffer_results_to_out_params.py`](../../../test/pass/test_buffer_results_to_out_params.py) 锁死“callee 的 memory result -> 前置 arg0；caller 补 out 实参；`func.call` 零 memory result”的公开口径。
 - `BROTP-006`：多个 `memory` results 固定改写为 `arg0/arg1/...`，caller 侧 `func.call` 同步替换为显式 out 实参。（`test_rewrite_multiple_memory_results_to_arg0_arg1`）
 - `BROTP-007`：mixed `memory + scalar` returns 改写后，caller 侧 `func.call` 仅保留 scalar result，旧 memory result SSA 被替换。（`test_rewrite_mixed_memory_and_scalar_results_preserves_scalar_return`）
+- `BROTP-008`：`test/pass/test_buffer_results_to_out_params.py` 需要同时证明 canonical import path 成功、`kernel_gen.passes.lowering.buffer_results_to_out_params` 旧模块失败，且不得用 package re-export 代替该证明。

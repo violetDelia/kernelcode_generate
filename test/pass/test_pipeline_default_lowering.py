@@ -36,6 +36,8 @@ if str(REPO_ROOT) not in sys.path:
 
 pipeline_module = importlib.import_module("kernel_gen.passes.pipeline")
 build_default_lowering_pipeline = pipeline_module.build_default_lowering_pipeline
+buffer_results_module = importlib.import_module("kernel_gen.passes.buffer_results_to_out_params")
+BufferResultsToOutParamsPass = buffer_results_module.BufferResultsToOutParamsPass
 
 pass_manager_module = importlib.import_module("kernel_gen.passes.pass_manager")
 PassManager = pass_manager_module.PassManager
@@ -74,7 +76,6 @@ def test_default_lowering_pipeline_pass_order(monkeypatch: pytest.MonkeyPatch) -
     decompose_module = importlib.import_module("kernel_gen.passes.decompass")
     DecompassPass = decompose_module.DecompassPass
     NnLoweringPass = lowering_module.NnLoweringPass
-    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     LowerDmaMemoryHierarchyPass = lowering_module.LowerDmaMemoryHierarchyPass
     order: list[str] = []
 

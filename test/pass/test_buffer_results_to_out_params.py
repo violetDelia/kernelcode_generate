@@ -1,7 +1,7 @@
 """buffer-results-to-out-params pass tests.
 
 创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
+最后一次更改: jcc你莫辜负
 
 功能说明:
 - 覆盖 buffer-results-to-out-params pass 的最小骨架行为与失败边界。
@@ -52,18 +52,19 @@ BufferResultsToOutParamsError = pass_module.BufferResultsToOutParamsError
 BufferResultsToOutParamsPass = pass_module.BufferResultsToOutParamsPass
 
 
-def test_public_import_path_matches_lowering_compat_shim() -> None:
-    """验证公开入口与 lowering 兼容层导出的对象一致。"""
+def test_public_import_path_uses_canonical_module_and_rejects_legacy_lowering_shim() -> None:
+    """验证 canonical 入口可用，旧 lowering shim 稳定失败。"""
 
-    lowering_module = importlib.import_module(
-        "kernel_gen.passes.lowering.buffer_results_to_out_params"
-    )
     package_module = importlib.import_module("kernel_gen.passes")
+    lowering_package = importlib.import_module("kernel_gen.passes.lowering")
 
-    assert lowering_module.BufferResultsToOutParamsPass is BufferResultsToOutParamsPass
-    assert lowering_module.BufferResultsToOutParamsError is BufferResultsToOutParamsError
     assert package_module.BufferResultsToOutParamsPass is BufferResultsToOutParamsPass
     assert package_module.BufferResultsToOutParamsError is BufferResultsToOutParamsError
+    assert not hasattr(lowering_package, "BufferResultsToOutParamsPass")
+    assert not hasattr(lowering_package, "BufferResultsToOutParamsError")
+
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("kernel_gen.passes.lowering.buffer_results_to_out_params")
 
 
 def _make_memory_type() -> NnMemoryType:

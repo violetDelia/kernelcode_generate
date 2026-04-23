@@ -95,6 +95,20 @@
   - `test/pass/test_pass_registry.py` 负责锁定 canonical public path、旧路径失败边界与 registry caller 的 `importlib` 消费者矩阵。
   - `test/pass/test_pass_manager.py` 负责锁定 pass manager / pipeline caller 的 `importlib` 消费者矩阵。
 
+## S2 导入矩阵补充
+
+- 对 out-param / nn lowering caller，当前 canonical public path 收口为：
+  - `kernel_gen.passes.buffer_results_to_out_params`
+  - `kernel_gen.passes.lowering.nn_lowering`
+- 下列 compat shim 从 `S2` 起必须稳定失败：
+  - `kernel_gen.passes.lowering.buffer_results_to_out_params`
+  - `kernel_gen.passes.lowering.nn_to_kernel`
+- `kernel_gen.passes` 与 `kernel_gen.passes.lowering` package 级别的 re-export 若继续存在，只能视为迁移辅助；`S2` 的 pytest 证明必须落在 canonical submodule path 与旧路径失败边界上。
+- 机械验收口径：
+  - [`test/pass/test_buffer_results_to_out_params.py`](../../test/pass/test_buffer_results_to_out_params.py) 负责锁定 `buffer_results_to_out_params` 的 canonical import 成功与 lowering compat 模块失败。
+  - [`test/pass/nn_lowering/public_name.py`](../../test/pass/nn_lowering/public_name.py) 负责锁定 `nn_lowering` 的 canonical import 成功与 `nn_to_kernel` 旧模块失败。
+  - `expectation/pass/buffer_results_to_out_params/**` 仍只作合同验收资产单列，不替代上述 pytest。
+
 ## 公开接口
 
 ### 异常：`PassRegistryError`

@@ -44,6 +44,8 @@ PassManager = pass_module.PassManager
 build_default_lowering_pass_manager = pass_module.build_default_lowering_pass_manager
 pipeline_module = importlib.import_module("kernel_gen.passes.pipeline")
 build_default_lowering_pipeline = pipeline_module.build_default_lowering_pipeline
+buffer_results_module = importlib.import_module("kernel_gen.passes.buffer_results_to_out_params")
+BufferResultsToOutParamsPass = buffer_results_module.BufferResultsToOutParamsPass
 registry_module = importlib.import_module("kernel_gen.passes.registry")
 build_registered_pass = registry_module.build_registered_pass
 load_builtin_passes = registry_module.load_builtin_passes
@@ -242,6 +244,7 @@ def test_pass_manager_runs_registered_lower_nn(monkeypatch: pytest.MonkeyPatch) 
 # 对应测试文件路径: test/pass/test_pass_manager.py
 def test_pass_manager_surviving_import_matrix() -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
+    buffer_results_module = importlib.import_module("kernel_gen.passes.buffer_results_to_out_params")
     default_lowering_pipeline_module = importlib.import_module(
         "kernel_gen.passes.pipeline.default_lowering"
     )
@@ -264,9 +267,8 @@ def test_pass_manager_surviving_import_matrix() -> None:
     assert lowering_module.NnLoweringPass is importlib.import_module(
         "kernel_gen.passes.lowering.nn_lowering"
     ).NnLoweringPass
-    assert lowering_module.BufferResultsToOutParamsPass is importlib.import_module(
-        "kernel_gen.passes.buffer_results_to_out_params"
-    ).BufferResultsToOutParamsPass
+    assert BufferResultsToOutParamsPass is buffer_results_module.BufferResultsToOutParamsPass
+    assert not hasattr(lowering_module, "BufferResultsToOutParamsPass")
     assert lowering_module.LowerDmaMemoryHierarchyPass is dma_hierarchy_module.LowerDmaMemoryHierarchyPass
     assert lowering_module.TileAnalysisPass is tile_analysis_module.TileAnalysisPass
     assert lowering_module.TileElewisePass is tile_elewise_module.TileElewisePass
@@ -285,8 +287,6 @@ def test_pass_manager_old_lowering_paths_fail_fast() -> None:
     for module_name in (
         "kernel_gen.passes.lowering.pass_manager",
         "kernel_gen.passes.lowering.registry",
-        "kernel_gen.passes.lowering.dma_memory_hierarchy",
-        "kernel_gen.passes.lowering.memory_pool",
     ):
         with pytest.raises(ModuleNotFoundError):
             importlib.import_module(module_name)
@@ -333,7 +333,6 @@ def test_pass_manager_builds_default_lowering_pass_manager(
 @pytest.mark.nn_lowering
 def test_pass_manager_rejects_buffer_results_to_out_params_before_lowering() -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
-    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     NnLoweringPass = lowering_module.NnLoweringPass
 
     pm = PassManager(name="lowering")
@@ -361,7 +360,6 @@ def test_pass_manager_allows_buffer_results_to_out_params_after_lowering_with_in
 ) -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     NnLoweringPass = lowering_module.NnLoweringPass
-    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     order: list[str] = []
 
     class NoopPass(Pass):
@@ -436,7 +434,6 @@ def test_default_lowering_pipeline_orders_tile_family_after_out_params(
 ) -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     NnLoweringPass = lowering_module.NnLoweringPass
-    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     LowerDmaMemoryHierarchyPass = lowering_module.LowerDmaMemoryHierarchyPass
     tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
     TileAnalysisPass = tile_analysis_module.TileAnalysisPass
@@ -517,7 +514,6 @@ def test_default_lowering_pipeline_orders_tile_reduce_after_out_params(
 ) -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     NnLoweringPass = lowering_module.NnLoweringPass
-    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     LowerDmaMemoryHierarchyPass = lowering_module.LowerDmaMemoryHierarchyPass
     tile_reduce_module = importlib.import_module("kernel_gen.passes.lowering.tile_reduce")
     TileReducePass = tile_reduce_module.TileReducePass
@@ -577,7 +573,6 @@ def test_tile_family_materializes_tuner_params_before_codegen(
 ) -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     NnLoweringPass = lowering_module.NnLoweringPass
-    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     LowerDmaMemoryHierarchyPass = lowering_module.LowerDmaMemoryHierarchyPass
     tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
     TileAnalysisPass = tile_analysis_module.TileAnalysisPass
@@ -630,7 +625,6 @@ def test_tile_family_materializes_tuner_params_before_codegen(
 def test_tile_family_rejects_wrong_order() -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     NnLoweringPass = lowering_module.NnLoweringPass
-    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
     TileAnalysisPass = tile_analysis_module.TileAnalysisPass
     tile_reduce_module = importlib.import_module("kernel_gen.passes.lowering.tile_reduce")
@@ -684,7 +678,6 @@ def test_tile_family_rejects_wrong_order() -> None:
 def test_tile_pipeline_keeps_single_function_contract() -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     NnLoweringPass = lowering_module.NnLoweringPass
-    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     LowerDmaMemoryHierarchyPass = lowering_module.LowerDmaMemoryHierarchyPass
     tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
     TileAnalysisPass = tile_analysis_module.TileAnalysisPass
@@ -725,7 +718,6 @@ def test_tile_family_orders_tile_analysis_elewise_and_reduce_before_dma_memory_h
 ) -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     NnLoweringPass = lowering_module.NnLoweringPass
-    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     LowerDmaMemoryHierarchyPass = lowering_module.LowerDmaMemoryHierarchyPass
     tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
     TileAnalysisPass = tile_analysis_module.TileAnalysisPass
@@ -798,7 +790,6 @@ def test_tile_family_orders_tile_analysis_elewise_and_reduce_before_dma_memory_h
 def test_pass_manager_rejects_symbol_loop_hoist_before_tile_reduce() -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     NnLoweringPass = lowering_module.NnLoweringPass
-    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
     TileAnalysisPass = tile_analysis_module.TileAnalysisPass
     tile_reduce_module = importlib.import_module("kernel_gen.passes.lowering.tile_reduce")
@@ -831,7 +822,6 @@ def test_pass_manager_rejects_symbol_loop_hoist_before_tile_reduce() -> None:
 def test_pass_manager_rejects_dma_memory_hierarchy_before_out_params() -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     NnLoweringPass = lowering_module.NnLoweringPass
-    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     LowerDmaMemoryHierarchyPass = lowering_module.LowerDmaMemoryHierarchyPass
 
     pm = PassManager(name="bad-dma-order")
@@ -862,7 +852,6 @@ def test_pass_manager_rejects_dma_memory_hierarchy_before_out_params() -> None:
 def test_pass_manager_allows_symbol_loop_hoist_without_tile() -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     NnLoweringPass = lowering_module.NnLoweringPass
-    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     LowerDmaMemoryHierarchyPass = lowering_module.LowerDmaMemoryHierarchyPass
 
     order: list[str] = []
@@ -912,7 +901,6 @@ def test_pass_manager_allows_symbol_loop_hoist_without_tile() -> None:
 def test_pass_manager_rejects_symbol_loop_hoist_before_tile_family() -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     NnLoweringPass = lowering_module.NnLoweringPass
-    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     dma_hierarchy_module = importlib.import_module("kernel_gen.passes.dma_memory_hierarchy")
     LowerDmaMemoryHierarchyPass = dma_hierarchy_module.LowerDmaMemoryHierarchyPass
     tile_analysis_module = importlib.import_module("kernel_gen.passes.lowering.tile_analysis")
@@ -948,7 +936,6 @@ def test_pass_manager_rejects_symbol_loop_hoist_before_tile_family() -> None:
 def test_pass_manager_rejects_symbol_loop_hoist_before_tile_reduce() -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     NnLoweringPass = lowering_module.NnLoweringPass
-    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     dma_hierarchy_module = importlib.import_module("kernel_gen.passes.dma_memory_hierarchy")
     LowerDmaMemoryHierarchyPass = dma_hierarchy_module.LowerDmaMemoryHierarchyPass
     tile_reduce_module = importlib.import_module("kernel_gen.passes.lowering.tile_reduce")
@@ -984,7 +971,6 @@ def test_pass_manager_rejects_symbol_loop_hoist_before_tile_reduce() -> None:
 def test_pass_manager_rejects_symbol_loop_hoist_after_dma_memory_hierarchy() -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     NnLoweringPass = lowering_module.NnLoweringPass
-    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     dma_hierarchy_module = importlib.import_module("kernel_gen.passes.dma_memory_hierarchy")
     LowerDmaMemoryHierarchyPass = dma_hierarchy_module.LowerDmaMemoryHierarchyPass
     tile_reduce_module = importlib.import_module("kernel_gen.passes.lowering.tile_reduce")
@@ -1022,7 +1008,6 @@ def test_pass_manager_allows_symbol_loop_hoist_after_tile_reduce(
 ) -> None:
     lowering_module = importlib.import_module("kernel_gen.passes.lowering")
     NnLoweringPass = lowering_module.NnLoweringPass
-    BufferResultsToOutParamsPass = lowering_module.BufferResultsToOutParamsPass
     dma_hierarchy_module = importlib.import_module("kernel_gen.passes.dma_memory_hierarchy")
     LowerDmaMemoryHierarchyPass = dma_hierarchy_module.LowerDmaMemoryHierarchyPass
     tile_reduce_module = importlib.import_module("kernel_gen.passes.lowering.tile_reduce")

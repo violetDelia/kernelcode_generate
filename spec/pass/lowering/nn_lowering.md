@@ -25,7 +25,7 @@
 
 ## 目标
 
-- 提供唯一公开入口 `NnLoweringPass`，并保持 `name == "lower-nn"`。
+- 提供唯一 canonical import path `kernel_gen.passes.lowering.nn_lowering.NnLoweringPass`，并保持 `name == "lower-nn"`。
 - 将支持的 `nn` op lower 为 `kernel/dma` op，输出 Memory 通过 `dma.alloc` 显式创建。
 - 输出 module 不应再包含 `nn` op。
 - 明确 `kernel.binary_elewise` 与 `kernel.reduce` 的公开合同已就绪，并在测试中验证可用性。
@@ -154,6 +154,18 @@ raise NnLoweringError("module must be builtin.module")
 
 - 该错误用于终止 pass。
 
+## 导入与兼容边界
+
+- caller 的 canonical public path 固定为：
+
+```python
+from kernel_gen.passes.lowering.nn_lowering import NnLoweringError, NnLoweringPass
+```
+
+- `kernel_gen.passes.lowering.nn_to_kernel` 属于旧 compat 模块；从 `S2` 起导入必须以 `ModuleNotFoundError` 失败。
+- `LowerNnToKernelPass` / `LowerNnToKernelError` 不再属于 surviving public contract；若 package 级别 re-export 仍暂存，也不能作为本阶段验收入口。
+- [`test/pass/nn_lowering/public_name.py`](../../../test/pass/nn_lowering/public_name.py) 必须同时证明“canonical import 成功 + `nn_to_kernel` 旧模块失败”；`expectation` 不计入该 pytest 证明。
+
 ### `ensure_module_op(module)`
 
 功能说明：
@@ -197,8 +209,9 @@ module_op = ensure_module_op(module)
   - `pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py`
   - `pytest -q test/pass/nn_lowering`
 - 测试目标：
-  - 验证 `NnLoweringPass` 的公开名字与导出路径稳定（以 `public_name.py` 为稳定入口）。
-  - 验证 `NnLoweringError` 与 `NnLoweringPass` 的公共导出可用。
+  - 验证 `NnLoweringPass` 的公开名字与 canonical import path 稳定（以 `public_name.py` 为稳定入口）。
+  - 验证 `NnLoweringError` 与 `NnLoweringPass` 的 canonical public import 可用。
+  - 验证 `kernel_gen.passes.lowering.nn_to_kernel` 旧模块导入失败，且 `LowerNnToKernelPass` 不再作为 surviving public contract。
   - 验证 `kernel.binary_elewise` 与 `kernel.reduce` 在 lowering 输出中可解析与可校验。
   - 验证 add/sub 的静态 `memory + memory` lowering 不把 `symbol.get_dim` 作为必现前置行。
   - 验证 add/sub 的符号维度 lowering 在 `dma.alloc` 前按维度生成 `symbol.get_dim`。
