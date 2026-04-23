@@ -10,7 +10,7 @@
 ## 文档信息
 
 - 创建者：`摸鱼小分队`
-- 最后一次更改：`金铲铲大作战`（2026-04-21）
+- 最后一次更改：`咯咯咯`（2026-04-24）
 - `spec`：[`spec/dsl/emit_c.md`](../../spec/dsl/emit_c.md)
 - `功能实现`：[`kernel_gen/dsl/gen_kernel/emit_c/__init__.py`](../../kernel_gen/dsl/gen_kernel/emit_c/__init__.py)
 - `test`：[`test/dsl/test_emit_c.py`](../../test/dsl/test_emit_c.py)
@@ -19,7 +19,12 @@
 
 - [`spec/dsl/mlir_gen.md`](../../spec/dsl/mlir_gen.md)：MLIR `func.func` 生成来源。
 - [`spec/dsl/gen_kernel.md`](../../spec/dsl/gen_kernel.md)：函数级源码生成入口。
+- [`spec/dialect/tuner.md`](../../spec/dialect/tuner.md)：`tuner.cost` 的 IR metadata 与 verifier 边界。
 - [`spec/include/api/Kernel.md`](../../spec/include/api/Kernel.md)：`target=npu_demo` 下 `Kernel` helper 的公开名字、模板顺序与参数顺序合同。
+- [`spec/include/api/cost/Core.md`](../../spec/include/api/cost/Core.md)：`cost::CostKind::{Compute, Memory}` 与 `S_INT` 返回语义。
+- [`spec/include/api/cost/Kernel.md`](../../spec/include/api/cost/Kernel.md)：`tuner.cost(op_name="kernel.*")` 的 helper 名、模板顺序与参数顺序合同。
+- [`spec/include/api/cost/Dma.md`](../../spec/include/api/cost/Dma.md)：`tuner.cost(op_name="dma.copy")` 的 helper 名、模板顺序与参数顺序合同。
+- [`spec/include/npu_demo/npu_demo.md`](../../spec/include/npu_demo/npu_demo.md)：`npu_demo::cost` 公开子命名空间与聚合入口。
 - [`kernel_gen/dsl/gen_kernel/emit_c/__init__.py`](../../kernel_gen/dsl/gen_kernel/emit_c/__init__.py)：节点级源码片段生成实现。
 - [`test/dsl/test_emit_c.py`](../../test/dsl/test_emit_c.py)：节点级源码片段生成测试。
 
@@ -29,6 +34,7 @@
 - 保证同一 SSA value 在同一 `EmitCContext` 中具备稳定命名与稳定表达式输出。
 - 为后续实现恢复明确最小支持范围：`arith` 二元算术、`arith.cmpi`、`scf.for`、`symbol.for`、unit-tile `dma.load`/`dma.store`、`dma.alloc`/`dma.view`/`dma.slice`/`dma.deslice`、`symbol.add`（cpu 标量）、`nn.img2col2d`（cpu memory）、`nn.add`（cpu，需预绑定结果目标）与错误路径。
 - 为 `target="npu_demo"` 冻结节点级文本映射合同，明确 `KernelContext` 查询、`TSM/TLM` dynamic memory、`npu_demo::alloc` / `npu_demo::view` / `npu_demo::slice` / `npu_demo::deslice` 与 `npu_demo::Kernel` helper family 在节点层的稳定发射形态，供后续实现与 `gen_kernel` 骨架拼装收口。
+- 为 `target="npu_demo"` 增加 `tuner.cost` 的节点级源码合同，明确 `cost::add` / `cost::matmul` / `cost::copy` 的映射、`S_INT costN` 局部变量声明与结果值复用方式。
 
 ## 限制与边界
 
@@ -48,6 +54,9 @@
 - 当前 `test/dsl/test_emit_c.py` 已定义并可直接映射的用例范围以本节 `EC-001` ~ `EC-011` 为准，另含 `EC-009A`；`EC-012` ~ `EC-016` 在本阶段仅冻结为 `nn.add` 的节点级验收标准，待下游测试落地后再补具体测试映射。
 - 对 `target=npu_demo`，本层只冻结节点级文本映射，不定义完整函数签名或 `npu_demo::KernelContext& ctx` 的参数注入方式；上层 `gen_kernel` 需提供稳定上下文变量名 `ctx`，本层只消费该绑定。
 - 对 `target=npu_demo`，当前只承认 `thread_id/thread_num` 查询、`TSM/TLM` dynamic memory、`npu_demo::alloc` / `npu_demo::view` / `npu_demo::slice` / `npu_demo::deslice` 与 [`spec/include/api/Kernel.md`](../../spec/include/api/Kernel.md) 已冻结的 helper family 的成功发射路径；不得回退到旧公开 `Nn` 层、`source.view<T>(...)`、`load<...>`、`store<...>`、`launch`、`barrier` 或 `arch.launch(...)`。
+- `target=npu_demo` 下的 `tuner.cost` 当前最小成功集合至少覆盖 `kernel.add`、`kernel.matmul` 与 `dma.copy`；若同轮实现补入更多 `kernel.*` / `dma.*` 映射，helper 名、模板顺序与参数顺序必须继续对齐 `spec/include/api/cost/*.md`。
+- `target=npu_demo` 下的 `tuner.cost` 不得回退为常量 `0`、`auto cost = ...`、内联右值表达式、普通 `Kernel`/`Dma` helper 调用或未限定的全局 `cost::*`。
+- `emit_c_value(...)` 只有在对应 `tuner.cost` 已先通过 `emit_c_op(...)` 发成局部变量后，才允许读取该结果；不得在右值侧重复拼 helper 调用。
 - 当前 CPU 恢复范围继续以 `test/dsl/test_emit_c.py` 已定义用例为准；`target=npu_demo` 的专项验收目标先行冻结，留待后续实现阶段补齐对应测试。
 
 ## 公开接口
@@ -125,6 +134,8 @@ cpu::add(lhs, bias, out);
 - `target=cpu` 下 `dma.view` 必须生成 `offset` 计算，并生成基于源 memory 的视图声明（复用 format）。
 - `target=cpu` 下 `dma.slice`/`dma.deslice` 必须发射显式 loop nest copy，避免依赖外部 helper。
 - `target=cpu` 下 `nn.img2col2d` 必须声明输出 memory（含 backing storage）并发射 `cpu::img2col2d(...)` 调用。
+- `target=npu_demo` 下 `tuner.cost` 必须生成 `S_INT costN = cost::<helper><...>(...);`，并把 `tuner.cost.result` 绑定到同名局部变量，供后续 `symbol.add` 与其他右值消费者复用。
+- `target=npu_demo` 下 `tuner.cost` 若命中未知 `op_name`、未知 `cost_kind`、缺失 memory 类型或 helper 模板无法从 operands 唯一确定，必须直接报错。
 
 返回与限制：
 
@@ -159,6 +170,7 @@ expr = emit_c_value(value, EmitCContext(target="cpu"))
 - 当 value 为未绑定名称的 `BlockArgument` 时，必须回退为 `arg{index}` 默认命名，避免受访问顺序影响。
 - `target=cpu` 下 `symbol.add` 结果可作为右值表达式生成。
 - `nn.add` 结果属于 memory 写入，不是纯右值表达式；不得通过 `emit_c_value(...)` 兜底生成。
+- `target=npu_demo` 下，若 value 来自已发射过的 `tuner.cost`，必须回收同一局部变量名（例如 `cost0`），不得重新拼接 `cost::<helper>(...)`。
 
 返回与限制：
 
@@ -403,6 +415,54 @@ add<TSM, float, float>(out_tile, lhs_tile, rhs_tile);
 - 模板顺序必须与 [`spec/include/api/Kernel.md`](../../spec/include/api/Kernel.md) 一致。
 - 不得回退到公开 `Nn` helper、`cpu::add(...)`、运算符表达式拼接或 `load/store` 形式。
 
+### `tuner.cost`
+
+功能说明：
+
+- `target=npu_demo` 下，把 `tuner.cost(...)->!symbol.int<"...">` 发射成 `npu_demo::cost` 子命名空间对应 helper 的局部调用语句。
+- 节点级文本统一使用 `cost::...` 短名；上层函数级源码需保证同一翻译单元已提供 `using namespace npu_demo;`。
+- 结果值必须先落为 `S_INT` 局部变量，再供后续 `emit_c_value(...)`、`symbol.add` 或 `func.return` 引用。
+
+使用示例：
+
+```cpp
+S_INT cost0 = cost::add<GM, float, float, cost::CostKind::Compute>(out /*out*/, lhs /*lhs*/, rhs /*rhs*/);
+S_INT cost1 = cost::matmul<TSM, TSM, TLM1, float, float, float, cost::CostKind::Memory>(out /*out*/, lhs /*lhs*/, rhs /*rhs*/);
+S_INT cost2 = cost::copy<TSM, GM, float, cost::CostKind::Memory>(tile /*target*/, source /*source*/);
+```
+
+注意事项：
+
+- `cost_kind = "compute"` 映射到 `cost::CostKind::Compute`；`cost_kind = "memory"` 映射到 `cost::CostKind::Memory`。
+- `op_name` 到 helper 的当前最小映射集合如下：
+  - `kernel.add/sub/mul/truediv` -> `cost::add/sub/mul/truediv`
+  - `kernel.matmul` -> `cost::matmul`
+  - `dma.copy` -> `cost::copy`
+- 参数顺序必须继续使用 `tuner.cost` 的 operand 顺序；对 `launch-kernel-cost-func` 生成的 `kernel.*` 成本节点，这意味着保持 `out -> lhs -> rhs`；对 `dma.copy`，保持 `target -> source`。
+- 模板顺序必须直接复用 [`spec/include/api/cost/Kernel.md`](../../spec/include/api/cost/Kernel.md) 与 [`spec/include/api/cost/Dma.md`](../../spec/include/api/cost/Dma.md) 的公开定义，不得在 `emit_c` 层私自重排。
+- `tuner.cost.result` 的局部变量名应使用 `cost` 前缀；当前作用域内第一次出现的结果默认写成 `cost0`，后续递增为 `cost1`、`cost2`。
+- 包式 `emit_c` 入口应优先为 `kernel_gen.dialect.tuner.TunerCostOp` 提供已注册处理函数；若需要兼容文本 IR 中的 `builtin.unregistered(op_name__ = "tuner.cost")`，其成功文本与失败边界也必须与本节一致。
+- 未知 `op_name`、未知 `cost_kind`、helper 未公开的 `kernel.*` / `dma.*`、缺失必要 memory type、或 result 尚未先经 `emit_c_op(...)` 绑定的读取路径，都必须显式失败。
+
+### `tuner.cost` 的结果值复用
+
+功能说明：
+
+- 规定 `tuner.cost` 发射后的结果如何被 `emit_c_value(...)` 与后续 symbol 表达式引用。
+
+使用示例：
+
+```cpp
+S_INT cost0 = cost::add<GM, float, float, cost::CostKind::Compute>(out, lhs, rhs);
+long long total = (acc + cost0);
+```
+
+注意事项：
+
+- `emit_c_value(%cost)` 必须回收 `cost0` 这类已绑定的局部变量名。
+- `symbol.add` 消费 `tuner.cost.result` 时，不得在右值侧重新展开 helper 调用。
+- 若调用顺序错误，导致 `emit_c_value(%cost)` 先于 `emit_c_op(%cost_owner)`，必须显式失败，而不是隐式补发一条 `S_INT` 声明。
+
 ### `execute_engine + npu_demo + matmul` 节点文本合同（S1）
 
 功能说明：
@@ -440,9 +500,14 @@ npu_demo::deslice(out_tile, out, m0, 16, 1);
 - 验证 `nn.add` 在结果未预绑定或 `non-cpu target` 下明确报错，不生成临时 memory 或其他兜底语句。
 - 验证 `symbol.for`、`dma.alloc/view/slice/deslice` 与 `nn.img2col2d` 的最小 CPU 发射闭环，并锁定输出文本不引入 `slice/deslice` helper 与 `nullptr`。
 - 验证重复 `dma.slice/dma.deslice` 发射时辅助变量名保持唯一，避免同一作用域命名冲突。
+- 验证包式 `emit_c` 入口为 `TunerCostOp` 提供已注册处理函数，或在兼容旧文本入口时仍保持相同成功文本与失败边界。
+- 验证 `target=npu_demo` 下 `tuner.cost(op_name="kernel.add" | "kernel.matmul" | "dma.copy")` 可生成稳定的 `S_INT costN = cost::<helper><...>(...)` 语句。
+- 验证 `tuner.cost.result` 可被 `symbol.add` 正确复用，不重复展开 helper 调用。
+- 验证未知 `op_name`、未知 `cost_kind`、缺失 memory 类型或未先绑定结果名时的错误路径。
 - 下游 `npu_demo` 专项验收至少应覆盖 `thread_id/thread_num` 查询，建议测试名为 `test_emit_c_lowers_npu_demo_kernel_context_queries`。
 - 下游 `npu_demo` 专项验收至少应覆盖 `TSM/TLM1/TLM2/TLM3` dynamic memory 查询，建议测试名为 `test_emit_c_lowers_npu_demo_dynamic_memory_access`。
 - 下游 `npu_demo` 专项验收至少应覆盖 `alloc + source.view<T> + slice + add + deslice` 管线，建议测试名为 `test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline`，且不得回退到 `npu_demo::view(`、`load<`、`store<`。
+- 下游 `npu_demo` 成本专项验收至少应覆盖 `kernel.add`、`kernel.matmul`、`dma.copy` 三个 `tuner.cost` 节点与对应失败路径。
 
 ### 功能与用例清单
 
@@ -465,3 +530,10 @@ npu_demo::deslice(out_tile, out, m0, 16, 1);
 - EC-014：当 `ctx` 已把结果预绑定为 `out` 时，`NnAddOp(memory, !symbol.int)` 在 cpu target 下必须精确生成 `cpu::add(lhs, bias, out);`。（下游待补测试映射）
 - EC-015：未预绑定 `nn.add.result` 时，合法 `NnAddOp` 在 cpu target 下必须抛出 `EmitCError`，错误消息包含 `target=cpu: nn.add: unsupported op`。（下游待补测试映射）
 - EC-016：`non-cpu target` 下合法 `NnAddOp` 必须抛出 `EmitCError`，错误消息包含 `target=npu_demo: nn.add: unsupported op`。（下游待补测试映射）
+- EC-017：包式 `emit_c` 入口必须为 `TunerCostOp` 提供已注册处理函数，且不影响既有 common op/value 注册结果。（下游待补测试映射，建议测试名：`test_emit_c_package_registers_tuner_cost_op`）
+- EC-018：`target=npu_demo` 下 `tuner.cost(op_name="kernel.add", cost_kind="compute")` 必须生成 `S_INT cost0 = cost::add<...>(out, lhs, rhs);`。（下游待补测试映射，建议测试名：`test_emit_c_lowers_npu_demo_tuner_cost_kernel_add`）
+- EC-019：`target=npu_demo` 下 `tuner.cost(op_name="kernel.matmul", cost_kind="memory")` 必须生成 `S_INT cost0 = cost::matmul<...>(out, lhs, rhs);`。（下游待补测试映射，建议测试名：`test_emit_c_lowers_npu_demo_tuner_cost_kernel_matmul`）
+- EC-020：`target=npu_demo` 下 `tuner.cost(op_name="dma.copy", cost_kind="memory")` 必须生成 `S_INT cost0 = cost::copy<...>(target, source);`。（下游待补测试映射，建议测试名：`test_emit_c_lowers_npu_demo_tuner_cost_dma_copy`）
+- EC-021：`tuner.cost.result` 被 `symbol.add` 消费时必须回收已绑定局部变量名，而不是重新展开 helper 调用。（下游待补测试映射，建议测试名：`test_emit_c_lowers_npu_demo_symbol_add_with_tuner_cost_value`）
+- EC-022：未知 `op_name` 的 `tuner.cost` 在 `target=npu_demo` 下必须抛出 `EmitCError`，错误消息包含 `tuner.cost` 与 `op_name`。（下游待补测试映射，建议测试名：`test_emit_c_rejects_unknown_npu_demo_tuner_cost_op_name`）
+- EC-023：未知 `cost_kind` 或缺失 memory 类型的 `tuner.cost` 在 `target=npu_demo` 下必须抛出 `EmitCError`，错误消息包含 `cost_kind` 或类型缺口。（下游待补测试映射，建议测试名：`test_emit_c_rejects_invalid_npu_demo_tuner_cost_kind_or_type`）

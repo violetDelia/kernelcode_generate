@@ -40,6 +40,7 @@ from kernel_gen.dialect.kernel import (
 )
 from kernel_gen.dialect.nn import NnAddOp, NnImg2col2dOp, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolCastOp, SymbolConstOp, SymbolForOp, SymbolGetDimOp, SymbolGetStrideOp, SymbolToFloatOp, SymbolToIntOp, SymbolValueType
+from kernel_gen.dialect.tuner import TunerCostOp
 
 
 class EmitCError(ValueError):
@@ -171,6 +172,36 @@ def _bind_preferred_name(ctx: EmitCContext, value: SSAValue, preferred: str) -> 
     while f"{preferred}_{suffix}" in used:
         suffix += 1
     return ctx.bind_name(value, f"{preferred}_{suffix}")
+
+
+def _allocate_series_name(ctx: EmitCContext, value: SSAValue, prefix: str) -> str:
+    """按 `prefix{N}` 形式为 SSA value 绑定稳定名称。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 为 `tuner.cost.result` 这类公开要求固定前缀的结果名生成稳定局部变量名。
+    - 当前作用域内首次出现的同前缀 value 绑定为 `prefix0`，后续递增为 `prefix1/prefix2/...`。
+    - 若 value 已绑定名称则直接复用，避免重复分配。
+
+    使用示例:
+    - _allocate_series_name(ctx, cost_op.result, "cost") -> "cost0"
+
+    关联文件:
+    - spec: spec/dsl/emit_c.md
+    - test: test/dsl/test_emit_c.py
+    - 功能实现: kernel_gen/dsl/emit_c.py
+    """
+
+    existing = ctx.lookup_name(value)
+    if existing is not None:
+        return existing
+    used = set(ctx._names.values())
+    index = 0
+    while f"{prefix}{index}" in used:
+        index += 1
+    return ctx.bind_name(value, f"{prefix}{index}")
 
 
 def _block_arg_index(value: SSAValue) -> int | None:
@@ -1894,6 +1925,137 @@ def _emit_npu_kernel_matmul_stmt(op: KernelMatmulOp, ctx: EmitCContext) -> str:
     )
 
 
+def _tuner_cost_kind_to_c(kind: str, ctx: EmitCContext) -> str:
+    """把 `tuner.cost` 的 kind 文本映射到 `cost::CostKind` 枚举。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 当前只接受公开合同中的 `compute` 与 `memory`。
+    - 失败时统一报 `tuner.cost` 的 kind 边界错误，避免静默回退。
+
+    使用示例:
+    - _tuner_cost_kind_to_c("compute", EmitCContext(target="npu_demo"))
+
+    关联文件:
+    - spec: spec/dsl/emit_c.md
+    - test: test/dsl/test_emit_c.py
+    - 功能实现: kernel_gen/dsl/emit_c.py
+    """
+
+    mapping = {
+        "compute": "cost::CostKind::Compute",
+        "memory": "cost::CostKind::Memory",
+    }
+    mapped = mapping.get(kind)
+    if mapped is None:
+        raise _emit_error(ctx, "tuner.cost", f"unsupported cost_kind={kind}")
+    return mapped
+
+
+def _require_tuner_cost_memory_type(value: SSAValue, ctx: EmitCContext, role: str) -> NnMemoryType:
+    """校验 `tuner.cost` operand 必须是 `!nn.memory`。"""
+
+    if not isinstance(value.type, NnMemoryType):
+        raise _emit_error(ctx, "tuner.cost", f"{role} must be nn.memory")
+    return value.type
+
+
+def _emit_npu_tuner_cost_stmt(op: TunerCostOp, ctx: EmitCContext) -> str:
+    """生成 `target=npu_demo` 下 `tuner.cost` 的局部成本 helper 调用。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 把 `tuner.cost` 发射为 `S_INT costN = cost::<helper><...>(...);`。
+    - 当前最小成功集合覆盖 `kernel.add`、`kernel.matmul` 与 `dma.copy`。
+    - 发射时把 `op.result` 绑定为 `costN`，供后续 `symbol.add` 等右值消费者直接复用。
+
+    使用示例:
+    - emit_c_op(cost_op, EmitCContext(target="npu_demo"))
+
+    关联文件:
+    - spec: spec/dsl/emit_c.md
+    - test: test/dsl/test_emit_c.py
+    - 功能实现: kernel_gen/dsl/emit_c.py
+    """
+
+    if ctx.target != "npu_demo":
+        raise _emit_error(ctx, op.name, "unsupported target")
+    if not isinstance(op.cost_kind, StringAttr):
+        raise _emit_error(ctx, "tuner.cost", "cost_kind must be string attr")
+    if not isinstance(op.op_name, StringAttr):
+        raise _emit_error(ctx, "tuner.cost", "op_name must be string attr")
+
+    helper_kind = _tuner_cost_kind_to_c(op.cost_kind.data, ctx)
+    helper_name = op.op_name.data
+    result_name = _allocate_series_name(ctx, op.result, "cost")
+    operands = tuple(op.operands)
+
+    if helper_name == "kernel.add":
+        if len(operands) != 3:
+            raise _emit_error(ctx, "tuner.cost", f"op_name={helper_name} requires out, lhs, rhs")
+        out_value, lhs_value, rhs_value = operands
+        out_type = _require_tuner_cost_memory_type(out_value, ctx, "out")
+        lhs_type = _require_tuner_cost_memory_type(lhs_value, ctx, "lhs")
+        rhs_type = _require_tuner_cost_memory_type(rhs_value, ctx, "rhs")
+        out_space = _space_to_c(out_type, ctx)
+        if _space_to_c(lhs_type, ctx) != out_space or _space_to_c(rhs_type, ctx) != out_space:
+            raise _emit_error(ctx, "tuner.cost", "kernel.add operands must share memory space")
+        lhs_dtype = _type_to_c(lhs_type.element_type, ctx)
+        rhs_dtype = _type_to_c(rhs_type.element_type, ctx)
+        if lhs_dtype != rhs_dtype:
+            raise _emit_error(ctx, "tuner.cost", "kernel.add lhs/rhs element type must match")
+        out_dtype = _type_to_c(out_type.element_type, ctx)
+        out_expr = _memory_base_name(out_value, ctx)
+        lhs_expr = _memory_base_name(lhs_value, ctx)
+        rhs_expr = _memory_base_name(rhs_value, ctx)
+        return (
+            f"{ctx.current_indent}S_INT {result_name} = "
+            f"cost::add<{out_space}, {lhs_dtype}, {out_dtype}, {helper_kind}>"
+            f"({out_expr} /*out*/, {lhs_expr} /*lhs*/, {rhs_expr} /*rhs*/);"
+        )
+
+    if helper_name == "kernel.matmul":
+        if len(operands) != 3:
+            raise _emit_error(ctx, "tuner.cost", f"op_name={helper_name} requires out, lhs, rhs")
+        out_value, lhs_value, rhs_value = operands
+        out_type = _require_tuner_cost_memory_type(out_value, ctx, "out")
+        lhs_type = _require_tuner_cost_memory_type(lhs_value, ctx, "lhs")
+        rhs_type = _require_tuner_cost_memory_type(rhs_value, ctx, "rhs")
+        out_expr = _memory_base_name(out_value, ctx)
+        lhs_expr = _memory_base_name(lhs_value, ctx)
+        rhs_expr = _memory_base_name(rhs_value, ctx)
+        return (
+            f"{ctx.current_indent}S_INT {result_name} = "
+            f"cost::matmul<{_space_to_c(lhs_type, ctx)}, {_space_to_c(rhs_type, ctx)}, {_space_to_c(out_type, ctx)}, "
+            f"{_type_to_c(lhs_type.element_type, ctx)}, {_type_to_c(rhs_type.element_type, ctx)}, {_type_to_c(out_type.element_type, ctx)}, "
+            f"{helper_kind}>({out_expr} /*out*/, {lhs_expr} /*lhs*/, {rhs_expr} /*rhs*/);"
+        )
+
+    if helper_name == "dma.copy":
+        if len(operands) != 2:
+            raise _emit_error(ctx, "tuner.cost", f"op_name={helper_name} requires target, source")
+        target_value, source_value = operands
+        target_type = _require_tuner_cost_memory_type(target_value, ctx, "target")
+        source_type = _require_tuner_cost_memory_type(source_value, ctx, "source")
+        target_dtype = _type_to_c(target_type.element_type, ctx)
+        source_dtype = _type_to_c(source_type.element_type, ctx)
+        if target_dtype != source_dtype:
+            raise _emit_error(ctx, "tuner.cost", "dma.copy source/target element type must match")
+        target_expr = _memory_base_name(target_value, ctx)
+        source_expr = _memory_base_name(source_value, ctx)
+        return (
+            f"{ctx.current_indent}S_INT {result_name} = "
+            f"cost::copy<{_space_to_c(target_type, ctx)}, {_space_to_c(source_type, ctx)}, {target_dtype}, {helper_kind}>"
+            f"({target_expr} /*target*/, {source_expr} /*source*/);"
+        )
+
+    raise _emit_error(ctx, "tuner.cost", f"unsupported op_name={helper_name}")
+
+
 def emit_c_value(value: SSAValue, ctx: EmitCContext) -> str:
     """把 SSA value 生成为可嵌入右值位置的表达式文本。
 
@@ -2130,6 +2292,8 @@ def emit_c_op(op: Operation, ctx: EmitCContext) -> str:
             return _emit_npu_store_stmt(op, ctx)
         if isinstance(op, DmaTransposeOp):
             return _emit_npu_transpose_stmt(op, ctx)
+        if isinstance(op, TunerCostOp):
+            return _emit_npu_tuner_cost_stmt(op, ctx)
         if isinstance(op, KernelBinaryElewiseOp):
             return _emit_kernel_binary_elewise_stmt(op, ctx)
         if isinstance(op, KernelExpOp):

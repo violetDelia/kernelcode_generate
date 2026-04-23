@@ -42,6 +42,7 @@ from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaCastOp, DmaCop
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnAddOp, NnImg2col2dOp, NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.dialect.symbol import SymbolAddOp, SymbolCastOp, SymbolConstOp, SymbolEqOp, SymbolForOp, SymbolGetDimOp, SymbolGetStrideOp, SymbolIterType, SymbolToFloatOp, SymbolToIntOp, SymbolValueType
+from kernel_gen.dialect.tuner import TunerCostOp
 from kernel_gen.dsl.ast import BlockAST, ConstAST, ForAST, FunctionAST, Img2ColAST, LoadAST, ScalarArgAST, StoreAST, TensorAST, VarAST
 from kernel_gen.dsl.gen_kernel import EmitCContext, EmitCError, emit_c, emit_c_op, emit_c_value, gen_kernel
 from kernel_gen.dsl.mlir_gen import build_func_op, build_func_op_from_ast
@@ -202,6 +203,21 @@ def _lower_built_func(fn: object, *runtime_args: object) -> Block:
     module = ModuleOp([func_op])
     NnLoweringPass().run(module)
     return next(op for op in module.ops if isinstance(op, func.FuncOp)).body.block
+
+
+def _make_tuner_cost_op(
+    op_name: str,
+    cost_kind: str,
+    operands: list[object],
+) -> TunerCostOp:
+    """构造 `tuner.cost` 测试节点。"""
+
+    return TunerCostOp(
+        operands,
+        cost_kind=StringAttr(cost_kind),
+        op_name=StringAttr(op_name),
+        result_type=SymbolValueType.from_expr("COST"),
+    )
 
 
 # EC-001
@@ -1268,6 +1284,190 @@ def test_emit_c_op_assigns_unique_helper_names_for_repeated_dma_slice_and_deslic
 
 
 # EC-017
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-24 12:00:00 +0800
+# 最近一次运行成功时间: 2026-04-24 12:00:00 +0800
+# 功能说明: 验证包式 emit_c 入口为 TunerCostOp 提供已注册处理函数。
+# 测试目的: 锁定 `kernel_gen.dsl.gen_kernel.emit_c` 的注册表包含 `TunerCostOp`，且不影响既有 common op/value 注册结果。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_package_registers_tuner_cost_op
+# 对应功能实现文件路径: kernel_gen/dsl/gen_kernel/emit_c/tuner.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_package_registers_tuner_cost_op() -> None:
+    op_types = set(emit_c_register.registered_op_types())
+    value_types = set(emit_c_register.registered_value_types())
+
+    assert TunerCostOp in op_types
+    assert DmaAllocOp in op_types
+    assert KernelBinaryElewiseOp in op_types
+    assert SymbolConstOp in value_types
+
+
+# EC-018
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-24 12:00:00 +0800
+# 最近一次运行成功时间: 2026-04-24 12:00:00 +0800
+# 功能说明: 验证 npu_demo 下 `tuner.cost(op_name="kernel.add")` 发射为 `cost::add`。
+# 测试目的: 锁定 `kernel.add -> cost::add`、`S_INT cost0` 和结果绑定合同。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_lowers_npu_demo_tuner_cost_kernel_add
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_lowers_npu_demo_tuner_cost_kernel_add() -> None:
+    memory_type = _make_memory_type([4, 4], [4, 1], space="global", element_type=f32)
+    block = Block(arg_types=[memory_type, memory_type, memory_type])
+    ctx = _npu_ctx()
+    ctx.bind_name(block.args[0], "out")
+    ctx.bind_name(block.args[1], "lhs")
+    ctx.bind_name(block.args[2], "rhs")
+    op = _make_tuner_cost_op("kernel.add", "compute", [block.args[0], block.args[1], block.args[2]])
+
+    stmt = emit_c_op(op, ctx)
+
+    assert stmt == (
+        "S_INT cost0 = cost::add<GM, float, float, cost::CostKind::Compute>"
+        "(out /*out*/, lhs /*lhs*/, rhs /*rhs*/);"
+    )
+    assert emit_c_value(op.result, ctx) == "cost0"
+
+
+# EC-019
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-24 12:00:00 +0800
+# 最近一次运行成功时间: 2026-04-24 12:00:00 +0800
+# 功能说明: 验证 npu_demo 下 `tuner.cost(op_name="kernel.matmul")` 发射为 `cost::matmul`。
+# 测试目的: 锁定 `kernel.matmul -> cost::matmul` 的模板顺序与 `out/lhs/rhs` 参数顺序。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_lowers_npu_demo_tuner_cost_kernel_matmul
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_lowers_npu_demo_tuner_cost_kernel_matmul() -> None:
+    out_type = _make_memory_type([4, 4], [4, 1], space="tlm1", element_type=f32)
+    lhs_type = _make_memory_type([4, 4], [4, 1], space="tsm", element_type=f32)
+    rhs_type = _make_memory_type([4, 4], [4, 1], space="tsm", element_type=f32)
+    block = Block(arg_types=[out_type, lhs_type, rhs_type])
+    ctx = _npu_ctx()
+    ctx.bind_name(block.args[0], "out")
+    ctx.bind_name(block.args[1], "lhs")
+    ctx.bind_name(block.args[2], "rhs")
+    op = _make_tuner_cost_op("kernel.matmul", "memory", [block.args[0], block.args[1], block.args[2]])
+
+    stmt = emit_c_op(op, ctx)
+
+    assert stmt == (
+        "S_INT cost0 = cost::matmul<TSM, TSM, TLM1, float, float, float, cost::CostKind::Memory>"
+        "(out /*out*/, lhs /*lhs*/, rhs /*rhs*/);"
+    )
+    assert emit_c_value(op.result, ctx) == "cost0"
+
+
+# EC-020
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-24 12:00:00 +0800
+# 最近一次运行成功时间: 2026-04-24 12:00:00 +0800
+# 功能说明: 验证 npu_demo 下 `tuner.cost(op_name="dma.copy")` 发射为 `cost::copy`。
+# 测试目的: 锁定 `dma.copy -> cost::copy` 的模板顺序与 `target/source` 参数顺序。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_lowers_npu_demo_tuner_cost_dma_copy
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_lowers_npu_demo_tuner_cost_dma_copy() -> None:
+    target_type = _make_memory_type([4, 4], [4, 1], space="tsm", element_type=f32)
+    source_type = _make_memory_type([4, 4], [4, 1], space="global", element_type=f32)
+    block = Block(arg_types=[target_type, source_type])
+    ctx = _npu_ctx()
+    ctx.bind_name(block.args[0], "target")
+    ctx.bind_name(block.args[1], "source")
+    op = _make_tuner_cost_op("dma.copy", "memory", [block.args[0], block.args[1]])
+
+    stmt = emit_c_op(op, ctx)
+
+    assert stmt == (
+        "S_INT cost0 = cost::copy<TSM, GM, float, cost::CostKind::Memory>"
+        "(target /*target*/, source /*source*/);"
+    )
+    assert emit_c_value(op.result, ctx) == "cost0"
+
+
+# EC-021
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-24 12:00:00 +0800
+# 最近一次运行成功时间: 2026-04-24 12:00:00 +0800
+# 功能说明: 验证 `tuner.cost.result` 被 `symbol.add` 消费时复用已绑定 `costN` 变量名。
+# 测试目的: 防止右值侧重复展开 `cost::<helper>(...)`。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_lowers_npu_demo_symbol_add_with_tuner_cost_value
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_lowers_npu_demo_symbol_add_with_tuner_cost_value() -> None:
+    memory_type = _make_memory_type([4, 4], [4, 1], space="global", element_type=f32)
+    block = Block(arg_types=[memory_type, memory_type, memory_type])
+    ctx = _npu_ctx()
+    ctx.bind_name(block.args[0], "out")
+    ctx.bind_name(block.args[1], "lhs")
+    ctx.bind_name(block.args[2], "rhs")
+    cost_op = _make_tuner_cost_op("kernel.add", "compute", [block.args[0], block.args[1], block.args[2]])
+    add_op = SymbolAddOp(cost_op.result, cost_op.result, SymbolValueType.from_expr("DOUBLE_COST"))
+
+    stmt = "\n".join([emit_c_op(cost_op, ctx), emit_c_op(add_op, ctx)])
+
+    assert stmt.count("cost::add<") == 1
+    assert "S_INT cost0 = cost::add<GM, float, float, cost::CostKind::Compute>" in stmt
+    assert "(cost0 + cost0)" in stmt
+
+
+# EC-022
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-24 12:00:00 +0800
+# 最近一次运行成功时间: 2026-04-24 12:00:00 +0800
+# 功能说明: 验证未知 `op_name` 的 `tuner.cost` 在 npu_demo 下必须报错。
+# 测试目的: 锁定 `EmitCError` 消息包含 `tuner.cost` 与 `op_name`。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_rejects_unknown_npu_demo_tuner_cost_op_name
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_rejects_unknown_npu_demo_tuner_cost_op_name() -> None:
+    memory_type = _make_memory_type([4, 4], [4, 1], space="global", element_type=f32)
+    block = Block(arg_types=[memory_type, memory_type, memory_type])
+    ctx = _npu_ctx()
+    op = _make_tuner_cost_op("kernel.unknown", "compute", [block.args[0], block.args[1], block.args[2]])
+
+    with pytest.raises(EmitCError, match=r"tuner\.cost: unsupported op_name=kernel\.unknown"):
+        emit_c_op(op, ctx)
+
+
+# EC-023
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 最近一次运行测试时间: 2026-04-24 12:00:00 +0800
+# 最近一次运行成功时间: 2026-04-24 12:00:00 +0800
+# 功能说明: 验证非法 `cost_kind` 或缺失 memory 类型的 `tuner.cost` 在 npu_demo 下必须报错。
+# 测试目的: 锁定 `EmitCError` 消息覆盖 `cost_kind` 与类型缺口边界。
+# 使用示例: pytest -q test/dsl/test_emit_c.py -k test_emit_c_rejects_invalid_npu_demo_tuner_cost_kind_or_type
+# 对应功能实现文件路径: kernel_gen/dsl/emit_c.py
+# 对应 spec 文件路径: spec/dsl/emit_c.md
+# 对应测试文件路径: test/dsl/test_emit_c.py
+def test_emit_c_rejects_invalid_npu_demo_tuner_cost_kind_or_type() -> None:
+    memory_type = _make_memory_type([4, 4], [4, 1], space="global", element_type=f32)
+    scalar_block = Block(arg_types=[i32, i32])
+    memory_block = Block(arg_types=[memory_type, memory_type, memory_type])
+    ctx = _npu_ctx()
+    invalid_kind = _make_tuner_cost_op("kernel.add", "kind2", [memory_block.args[0], memory_block.args[1], memory_block.args[2]])
+    invalid_type = _make_tuner_cost_op("dma.copy", "memory", [scalar_block.args[0], scalar_block.args[1]])
+
+    with pytest.raises(EmitCError, match=r"tuner\.cost: unsupported cost_kind=kind2"):
+        emit_c_op(invalid_kind, ctx)
+    with pytest.raises(EmitCError, match=r"tuner\.cost: target must be nn\.memory"):
+        emit_c_op(invalid_type, ctx)
+
+
+# EC-024
 # 创建者: jcc你莫辜负
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-02 00:00:00 +0800
@@ -1294,7 +1494,7 @@ def test_emit_c_lowers_npu_demo_kernel_context_queries() -> None:
     assert "barrier" not in tnum_stmt
 
 
-# EC-018
+# EC-025
 # 创建者: jcc你莫辜负
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-02 00:00:00 +0800
@@ -1323,7 +1523,7 @@ def test_emit_c_maps_nn_space_to_template_param() -> None:
     assert "store<" not in tlm_stmt
 
 
-# EC-019
+# EC-026
 # 创建者: jcc你莫辜负
 # 最后一次更改: 金铲铲大作战
 # 最近一次运行测试时间: 2026-04-02 00:00:00 +0800
@@ -1394,7 +1594,7 @@ def test_emit_c_lowers_npu_demo_slice_deslice_add_pipeline() -> None:
     assert "barrier" not in stmt
 
 
-# EC-020
+# EC-027
 # 创建者: 小李飞刀
 # 最后一次更改: 小李飞刀
 # 最近一次运行测试时间: 2026-04-20 02:54:53 +0800

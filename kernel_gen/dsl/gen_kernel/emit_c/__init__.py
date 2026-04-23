@@ -56,6 +56,7 @@ from . import kernel as _kernel  # noqa: F401
 from . import nn as _nn  # noqa: F401
 from . import scf as _scf  # noqa: F401
 from . import symbol as _symbol  # noqa: F401
+from . import tuner as _tuner  # noqa: F401
 
 
 def _call_legacy_emit_c_op(op: Operation, ctx: EmitCContext) -> str:
