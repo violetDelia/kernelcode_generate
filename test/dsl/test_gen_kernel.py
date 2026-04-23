@@ -1057,6 +1057,44 @@ def test_gen_kernel_accepts_rewritten_single_output_function() -> None:
     assert "out = input;" not in source
 
 
+# GK-O5-002
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 待运行
+# 最近一次运行成功时间: 待运行
+# 功能说明: 验证 rewritten `dma.deslice` memory return 会把可写 ABI 收口到前置 `arg0`。
+# 测试目的: 锁定 `buffer-results-to-out-params` 不只替换 return SSA，还会把 deslice 的真实写回目标改成 out-first 参数。
+# 使用示例: pytest -q test/dsl/test_gen_kernel.py -k test_gen_kernel_rewritten_deslice_memory_result_uses_front_out_param
+# 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
+# 对应 spec 文件路径: spec/dsl/gen_kernel.md
+# 对应测试文件路径: test/dsl/test_gen_kernel.py
+def test_gen_kernel_rewritten_deslice_memory_result_uses_front_out_param() -> None:
+    source_type = _make_memory_type([2, 2], [2, 1], space="local")
+    target_type = _make_memory_type([2, 2], [2, 1])
+    block = Block(arg_types=[source_type, target_type])
+    c0 = arith.ConstantOp(IntegerAttr(0, i32))
+    c1 = arith.ConstantOp(IntegerAttr(1, i32))
+    c2 = arith.ConstantOp(IntegerAttr(2, i32))
+    deslice_op = DmaDesliceOp(
+        block.args[0],
+        block.args[1],
+        [c0.result, c0.result],
+        [c2.result, c2.result],
+        [c1.result, c1.result],
+        target_type,
+    )
+    block.add_ops([c0, c1, c2, deslice_op, func.ReturnOp(deslice_op.result)])
+    func_op = _func("deslice_case", [source_type, target_type], [target_type], block, ("src", "target"))
+
+    source = gen_kernel(_rewrite_func(func_op), _ctx())
+
+    assert source.startswith(
+        "void deslice_case(Memory<MemorySpace::GM, int32_t>& arg0, const Memory<MemorySpace::LM, int32_t>& src, const Memory<MemorySpace::GM, int32_t>& target)"
+    )
+    assert "arg0.at(dma0_dst_indices) = src.at(dma0_src_indices);" in source
+    assert "target.at(dma0_dst_indices) = src.at(dma0_src_indices);" not in source
+
+
 # GK-004
 # 创建者: 金铲铲大作战
 # 最后一次更改: jcc你莫辜负

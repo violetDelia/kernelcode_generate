@@ -37,7 +37,7 @@ from xdsl.pattern_rewriter import (
 )
 from xdsl.rewriter import InsertPoint
 
-from kernel_gen.dialect.dma import DmaAllocOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp
 from kernel_gen.dialect.nn import NnMemoryType
 
 
@@ -498,6 +498,38 @@ def _erase_dead_result_owner(value: SSAValue, rewriter: PatternRewriter) -> None
         rewriter.erase_op(owner)
 
 
+def _rewrite_side_effect_result_target(
+    return_value: SSAValue,
+    new_out_arg: BlockArgument,
+    rewriter: PatternRewriter,
+) -> None:
+    """同步改写依赖 target operand 的 memory-result 写回 op。
+
+    创建者: jcc你莫辜负
+    最后一次更改: jcc你莫辜负
+
+    功能说明:
+    - 处理 `dma.deslice` 这类“result 表示更新后 target，但真实写回落在 target operand”的 op。
+    - 当返回值被前置 out 参数接管时，同步把写回 target 改成新的 out 参数，避免实现仍写旧 buffer。
+
+    使用示例:
+    - _rewrite_side_effect_result_target(return_value, new_out_arg, rewriter)
+
+    关联文件:
+    - spec: spec/pass/lowering/buffer_results_to_out_params.md
+    - test: test/pass/test_buffer_results_to_out_params.py
+    - 功能实现: kernel_gen/passes/buffer_results_to_out_params.py
+    """
+
+    owner = getattr(return_value, "owner", None)
+    if not isinstance(owner, DmaDesliceOp):
+        return
+    if owner.result != return_value:
+        return
+    owner.operands[1] = new_out_arg
+    rewriter.notify_op_modified(owner)
+
+
 def _rewrite_memory_results_to_out_params(target: _RewriteTarget, rewriter: PatternRewriter) -> None:
     """将函数返回中的所有 `memory` 结果改写为最前置 out 参数。
 
@@ -543,6 +575,7 @@ def _rewrite_memory_results_to_out_params(target: _RewriteTarget, rewriter: Patt
     scalar_return_values = [return_op.arguments[index] for index in target.output_signature.scalar_indices]
     memory_return_values = [return_op.arguments[index] for index in memory_indices]
     for new_out_arg, return_value in zip(new_out_args, memory_return_values, strict=True):
+        _rewrite_side_effect_result_target(return_value, new_out_arg, rewriter)
         rewriter.replace_all_uses_with(return_value, new_out_arg)
     rewriter.erase_op(return_op)
     rewriter.insert_op(func.ReturnOp(*scalar_return_values), InsertPoint.at_end(block))

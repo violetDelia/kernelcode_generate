@@ -40,7 +40,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from kernel_gen.dialect.dma import DmaAllocOp, DmaFillOp
+from kernel_gen.dialect.dma import DmaAllocOp, DmaDesliceOp, DmaFillOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType
 from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 from kernel_gen.passes.pass_manager import PassManager
@@ -92,11 +92,11 @@ def _make_memory_type() -> NnMemoryType:
     )
 
 
-def _make_memory_type_with_shape(shape: tuple[int, ...]) -> NnMemoryType:
+def _make_memory_type_with_shape(shape: tuple[int, ...], *, space: str = "global") -> NnMemoryType:
     """构造指定 shape 的测试用 `nn.memory` 类型。
 
     创建者: 金铲铲大作战
-    最后一次更改: 金铲铲大作战
+    最后一次更改: jcc你莫辜负
 
     功能说明:
     - 为多 output 顺序测试生成可区分的 memory 类型。
@@ -121,7 +121,7 @@ def _make_memory_type_with_shape(shape: tuple[int, ...]) -> NnMemoryType:
         ArrayAttr([IntAttr(dim) for dim in shape]),
         ArrayAttr([IntAttr(dim) for dim in stride]),
         i32,
-        NnMemorySpaceAttr.from_name("global"),
+        NnMemorySpaceAttr.from_name(space),
     )
 
 
@@ -464,6 +464,57 @@ def test_rewrite_mixed_memory_and_scalar_results_preserves_scalar_return() -> No
     assert rewritten_call.results[0].type == i32
     assert rewritten_fill.target == alloc_op.result
     assert rewritten_return.arguments[0] == rewritten_call.results[0]
+
+
+# BROTP-013
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 最近一次运行测试时间: 待运行
+# 最近一次运行成功时间: 待运行
+# 功能说明: 验证 `dma.deslice` 这类 result/target 分离的写回 op 会同步改写到前置 out 参数。
+# 测试目的: 锁定 return SSA 被替换时，真实写回 operand 也必须切到 `arg0`，避免源码仍写旧 target 入参。
+# 使用示例: pytest -q test/pass/test_buffer_results_to_out_params.py -k test_rewrite_deslice_result_retargets_writeback_to_front_out_param
+# 对应功能实现文件路径: kernel_gen/passes/buffer_results_to_out_params.py
+# 对应 spec 文件路径: spec/pass/lowering/buffer_results_to_out_params.md
+# 对应测试文件路径: test/pass/test_buffer_results_to_out_params.py
+def test_rewrite_deslice_result_retargets_writeback_to_front_out_param() -> None:
+    source_type = _make_memory_type_with_shape((2, 2), space="local")
+    target_type = _make_memory_type_with_shape((2, 2))
+    block = Block(arg_types=[source_type, target_type])
+    c0 = arith.ConstantOp(IntegerAttr(0, i32))
+    c1 = arith.ConstantOp(IntegerAttr(1, i32))
+    c2 = arith.ConstantOp(IntegerAttr(2, i32))
+    deslice_op = DmaDesliceOp(
+        block.args[0],
+        block.args[1],
+        [c0.result, c0.result],
+        [c2.result, c2.result],
+        [c1.result, c1.result],
+        target_type,
+    )
+    return_op = func.ReturnOp(deslice_op.result)
+    block.add_ops([c0, c1, c2, deslice_op, return_op])
+    func_op = func.FuncOp(
+        "deslice_result",
+        FunctionType.from_lists([source_type, target_type], [target_type]),
+        Region(block),
+        arg_attrs=_arg_attrs("src", "target"),
+    )
+    module = ModuleOp([func_op])
+
+    BufferResultsToOutParamsPass().run(module)
+
+    assert list(func_op.function_type.inputs) == [target_type, source_type, target_type]
+    assert list(func_op.function_type.outputs) == []
+    assert func_op.arg_attrs.data[0].data["name"] == StringAttr("arg0")
+    assert func_op.arg_attrs.data[1].data["name"] == StringAttr("src")
+    assert func_op.arg_attrs.data[2].data["name"] == StringAttr("target")
+    body_ops = list(func_op.body.blocks.first.ops)
+    rewritten_deslice = next(op for op in body_ops if isinstance(op, DmaDesliceOp))
+    rewritten_return = next(op for op in body_ops if isinstance(op, func.ReturnOp))
+    assert rewritten_deslice.source == func_op.args[1]
+    assert rewritten_deslice.target == func_op.args[0]
+    assert len(rewritten_return.arguments) == 0
 
 
 # BROTP-008
