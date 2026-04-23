@@ -26,7 +26,7 @@ from xdsl.dialects.builtin import ArrayAttr, FunctionType, IntAttr, ModuleOp, St
 from xdsl.ir import Block, Region
 
 from kernel_gen.dialect.nn import NnExpOp, NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.passes.lowering import NnLoweringError, NnLoweringPass
+from kernel_gen.passes.lowering.nn_lowering import NnLoweringError, NnLoweringPass
 from kernel_gen.tools.ircheck import run_ircheck_text
 
 REPO_ROOT = Path(__file__).resolve().parents[3]

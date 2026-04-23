@@ -39,9 +39,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from kernel_gen.dialect.dma import DmaAllocOp, DmaCastOp
 from kernel_gen.dialect.nn import NnCastOp, NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.passes.lowering.nn_lowering.select_cast_lowering import (
-    lower_select_cast_family,
-)
+from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 
 
 def _make_memory_type(element_type: Attribute = i32) -> NnMemoryType:
@@ -122,8 +120,7 @@ def test_lower_cast_to_dma_cast() -> None:
         result_type,
         lambda block: [NnCastOp(block.args[0], result_type, space)],
     )
-    for op in list(block.ops):
-        lower_select_cast_family(block, op)
+    NnLoweringPass().run(module)
 
     ops = list(block.ops)
     assert any(isinstance(op, DmaCastOp) for op in ops)
@@ -149,8 +146,7 @@ def test_lower_cast_bfloat16_to_dma_cast() -> None:
         result_type,
         lambda block: [NnCastOp(block.args[0], result_type, space)],
     )
-    for op in list(block.ops):
-        lower_select_cast_family(block, op)
+    NnLoweringPass().run(module)
 
     ops = list(block.ops)
     assert any(isinstance(op, DmaCastOp) for op in ops)

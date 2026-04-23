@@ -398,7 +398,7 @@ def test_nn_lowering_core_helpers() -> None:
 # NN-PH-003
 # 创建者: jcc你莫辜负
 # 最后更改: jcc你莫辜负
-# 测试目的: 验证 dma_structured lowering helper、兼容 family 入口和关键错误边界。
+# 测试目的: 验证 dma_structured lowering helper、surviving pattern 导出和关键错误边界。
 # 使用示例: pytest -q test/pass/nn_lowering/test_nn_lowering_private_helpers.py -k test_dma_structured_lowering_helpers
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
@@ -455,10 +455,16 @@ def test_dma_structured_lowering_helpers() -> None:
     with pytest.raises(NnLoweringError, match="symbol mismatch"):
         dma_module._ensure_broadcast_compat([2, "M"], [2, "N"])
 
+    assert dma_module.__all__ == ["dma_structured_patterns"]
+    assert [type(pattern).__name__ for pattern in dma_module.dma_structured_patterns()] == [
+        "_LowerNnBroadcastPattern",
+        "_LowerNnTransposePattern",
+    ]
+
     broadcast_block = Block(arg_types=[operand_type])
     broadcast_op = NnBroadcastOp(broadcast_block.args[0], result_type, SPACE_GLOBAL)
     broadcast_block.add_op(broadcast_op)
-    assert dma_module.lower_dma_structured_family(broadcast_block, broadcast_op) is True
+    dma_module._lower_broadcast(broadcast_block, broadcast_op)
     assert any(isinstance(op, DmaBroadcastOp) for op in broadcast_block.ops)
 
     transpose_operand = nn_memory_type((IntAttr(2), IntAttr(4)), (IntAttr(4), IntAttr(1)), i32, SPACE_GLOBAL)
@@ -471,16 +477,14 @@ def test_dma_structured_lowering_helpers() -> None:
         SPACE_GLOBAL,
     )
     transpose_block.add_op(transpose_op)
-    assert dma_module.lower_dma_structured_family(transpose_block, transpose_op) is True
+    dma_module._lower_transpose(transpose_block, transpose_op)
     assert any(isinstance(op, DmaTransposeOp) for op in transpose_block.ops)
-
-    assert dma_module.lower_dma_structured_family(SimpleNamespace(name="nn.other"), SimpleNamespace(name="nn.other")) is False
 
 
 # NN-PH-004
 # 创建者: jcc你莫辜负
 # 最后更改: jcc你莫辜负
-# 测试目的: 验证 element binary lowering helper、mixed 物化路径与 family 入口。
+# 测试目的: 验证 element binary lowering helper、mixed 物化路径与 surviving pattern 导出。
 # 使用示例: pytest -q test/pass/nn_lowering/test_nn_lowering_private_helpers.py -k test_element_binary_lowering_helpers
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
 # 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
@@ -574,18 +578,26 @@ def test_element_binary_lowering_helpers() -> None:
         bad_op = NnAddOp(bad_block.args[0], bad_block.args[1], result_type, SPACE_GLOBAL)
         bad_block.add_op(bad_op)
         element_module._lower_element_binary_op(bad_op, bad_block, kind="add", is_compare=False)
-
-    family_block = Block(arg_types=[source.type, source.type])
-    family_op = NnAddOp(family_block.args[0], family_block.args[1], result_type, SPACE_GLOBAL)
-    family_block.add_op(family_op)
-    assert element_module.lower_element_binary_family(family_block, family_op) is True
-    assert element_module.lower_element_binary_family(SimpleNamespace(name="nn.other"), SimpleNamespace(name="nn.other")) is False
+    assert element_module.__all__ == ["element_binary_patterns"]
+    assert [type(pattern).__name__ for pattern in element_module.element_binary_patterns()] == [
+        "_LowerNnAddPattern",
+        "_LowerNnSubPattern",
+        "_LowerNnMulPattern",
+        "_LowerNnDivPattern",
+        "_LowerNnTrueDivPattern",
+        "_LowerNnEqPattern",
+        "_LowerNnNePattern",
+        "_LowerNnLtPattern",
+        "_LowerNnLePattern",
+        "_LowerNnGtPattern",
+        "_LowerNnGePattern",
+    ]
 
 
 # NN-PH-005
 # 创建者: jcc你莫辜负
 # 最后更改: jcc你莫辜负
-# 测试目的: 验证 reduce/softmax、select/cast、matmul/img2col 的 helper 与 family 入口。
+# 测试目的: 验证 reduce/softmax、select/cast、matmul/img2col 的 helper 与 surviving pattern 导出。
 # 使用示例: pytest -q test/pass/nn_lowering/test_nn_lowering_private_helpers.py -k test_reduce_select_cast_matmul_helpers
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
 # 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
@@ -640,41 +652,13 @@ def test_reduce_select_cast_matmul_helpers() -> None:
     exp_block.add_op(exp_op)
     reduce_module._lower_exp(exp_block, exp_op)
     assert any(isinstance(op, KernelExpOp) for op in exp_block.ops)
-
-    reduce_family_block = Block(arg_types=[nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), Float32Type(), SPACE_GLOBAL)])
-    reduce_family_operand = reduce_family_block.args[0]
-    reduce_family_result = nn_memory_type((IntAttr(2),), (IntAttr(1),), Float32Type(), SPACE_GLOBAL)
-    reduce_sum_op = NnReduceSumOp(
-        reduce_family_operand,
-        reduce_family_result,
-        ArrayAttr([IntegerAttr.from_int_and_width(1, 64)]),
-        IntegerAttr.from_int_and_width(0, 64),
-        SPACE_GLOBAL,
-    )
-    reduce_family_block.add_op(reduce_sum_op)
-    assert reduce_module.lower_reduce_softmax_family(reduce_family_block, reduce_sum_op) is True
-    assert any(isinstance(op, KernelReduceOp) for op in reduce_family_block.ops)
-    reduce_family_block_2 = Block(arg_types=[nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), Float32Type(), SPACE_GLOBAL)])
-    reduce_min_op = NnReduceMinOp(
-        reduce_family_block_2.args[0],
-        reduce_family_result,
-        ArrayAttr([IntegerAttr.from_int_and_width(1, 64)]),
-        IntegerAttr.from_int_and_width(0, 64),
-        SPACE_GLOBAL,
-    )
-    reduce_family_block_2.add_op(reduce_min_op)
-    assert reduce_module.lower_reduce_softmax_family(reduce_family_block_2, reduce_min_op) is True
-    reduce_family_block_3 = Block(arg_types=[nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), Float32Type(), SPACE_GLOBAL)])
-    reduce_max_op = NnReduceMaxOp(
-        reduce_family_block_3.args[0],
-        reduce_family_result,
-        ArrayAttr([IntegerAttr.from_int_and_width(1, 64)]),
-        IntegerAttr.from_int_and_width(0, 64),
-        SPACE_GLOBAL,
-    )
-    reduce_family_block_3.add_op(reduce_max_op)
-    assert reduce_module.lower_reduce_softmax_family(reduce_family_block_3, reduce_max_op) is True
-    assert reduce_module.lower_reduce_softmax_family(SimpleNamespace(name="nn.other"), SimpleNamespace(name="nn.other")) is False
+    assert reduce_module.__all__ == ["reduce_softmax_patterns"]
+    assert [type(pattern).__name__ for pattern in reduce_module.reduce_softmax_patterns()] == [
+        "_LowerNnReduceSumPattern",
+        "_LowerNnReduceMinPattern",
+        "_LowerNnReduceMaxPattern",
+        "_RejectNnSoftmaxPattern",
+    ]
 
     select_block = Block(
         arg_types=[
@@ -712,37 +696,17 @@ def test_reduce_select_cast_matmul_helpers() -> None:
     exp_select_block.add_op(exp_select_op)
     select_module._lower_exp_op(exp_select_op, exp_select_block)
     assert any(isinstance(op, KernelExpOp) for op in exp_select_block.ops)
-
-    select_family_block = Block(
-        arg_types=[
-            nn_memory_type((IntAttr(2), StringAttr("M")), (IntAttr(2), IntAttr(1)), i1, SPACE_GLOBAL),
-            nn_memory_type((IntAttr(2), StringAttr("M")), (IntAttr(2), IntAttr(1)), Float32Type(), SPACE_GLOBAL),
-            nn_memory_type((IntAttr(2), StringAttr("M")), (IntAttr(2), IntAttr(1)), Float32Type(), SPACE_GLOBAL),
-        ]
-    )
-    select_family_op = NnSelectOp(
-        select_family_block.args[0],
-        select_family_block.args[1],
-        select_family_block.args[2],
-        select_result,
-        SPACE_GLOBAL,
-    )
-    select_family_block.add_op(select_family_op)
-    assert select_module.lower_select_cast_family(select_family_block, select_family_op) is True
-    cast_family_block = Block(arg_types=[nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), i32, SPACE_GLOBAL)])
-    cast_family_op = NnCastOp(cast_family_block.args[0], nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), Float32Type(), SPACE_GLOBAL), SPACE_GLOBAL)
-    cast_family_block.add_op(cast_family_op)
-    assert select_module.lower_select_cast_family(cast_family_block, cast_family_op) is True
-    exp_family_block = Block(arg_types=[nn_memory_type((IntAttr(2), IntAttr(2)), (IntAttr(2), IntAttr(1)), Float32Type(), SPACE_GLOBAL)])
-    exp_family_op = NnExpOp(exp_family_block.args[0], exp_family_block.args[0].type, SPACE_GLOBAL)
-    exp_family_block.add_op(exp_family_op)
-    assert select_module.lower_select_cast_family(exp_family_block, exp_family_op) is True
-    assert select_module.lower_select_cast_family(SimpleNamespace(name="nn.other"), SimpleNamespace(name="nn.other")) is False
+    assert select_module.__all__ == ["select_cast_patterns"]
+    assert [type(pattern).__name__ for pattern in select_module.select_cast_patterns()] == [
+        "_LowerSelectPattern",
+        "_LowerCastPattern",
+        "_LowerExpPattern",
+    ]
 
     matmul_block = Block(arg_types=[nn_memory_type((IntAttr(2), IntAttr(3)), (IntAttr(3), IntAttr(1)), Float32Type(), SPACE_GLOBAL), nn_memory_type((IntAttr(3), IntAttr(4)), (IntAttr(4), IntAttr(1)), Float32Type(), SPACE_GLOBAL)])
     matmul_op = NnMatmulOp(matmul_block.args[0], matmul_block.args[1], nn_memory_type((IntAttr(2), IntAttr(4)), (IntAttr(4), IntAttr(1)), Float32Type(), SPACE_GLOBAL), SPACE_GLOBAL)
     matmul_block.add_op(matmul_op)
-    assert matmul_module.lower_matmul_img2col_family(matmul_block, matmul_op) is True
+    matmul_module._lower_matmul(matmul_block, matmul_op)
     assert any(isinstance(op, KernelMatmulOp) for op in matmul_block.ops)
 
     img1_block = Block(arg_types=[
@@ -764,7 +728,7 @@ def test_reduce_select_cast_matmul_helpers() -> None:
         SPACE_GLOBAL,
     )
     img1_block.add_op(img1_op)
-    assert matmul_module.lower_matmul_img2col_family(img1_block, img1_op) is True
+    matmul_module._lower_img2col1d(img1_block, img1_op)
     assert any(isinstance(op, KernelImg2col1dOp) for op in img1_block.ops)
 
     img2_block = Block(arg_types=[
@@ -796,9 +760,14 @@ def test_reduce_select_cast_matmul_helpers() -> None:
         SPACE_GLOBAL,
     )
     img2_block.add_op(img2_op)
-    assert matmul_module.lower_matmul_img2col_family(img2_block, img2_op) is True
+    matmul_module._lower_img2col2d(img2_block, img2_op)
     assert any(isinstance(op, KernelImg2col2dOp) for op in img2_block.ops)
-    assert matmul_module.lower_matmul_img2col_family(SimpleNamespace(name="nn.other"), SimpleNamespace(name="nn.other")) is False
+    assert matmul_module.__all__ == ["matmul_img2col_patterns"]
+    assert [type(pattern).__name__ for pattern in matmul_module.matmul_img2col_patterns()] == [
+        "_LowerNnMatmulPattern",
+        "_LowerNnImg2col1dPattern",
+        "_LowerNnImg2col2dPattern",
+    ]
 
 
 # NN-PH-006

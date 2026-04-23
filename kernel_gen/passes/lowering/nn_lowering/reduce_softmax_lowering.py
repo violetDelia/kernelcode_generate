@@ -5,18 +5,16 @@
 
 功能说明:
 - 提供 nn.reduce_* 的单 op pattern lowering 入口。
-- 兼容 helper 仍支持 nn.exp / nn.reduce_* 的 block 级调用。
 - `nn.softmax` 不在本层直接 lowering，需先由上游完成分解。
+- surviving 模块级接口为 `reduce_softmax_patterns()`。
 
 使用示例:
-- from kernel_gen.passes.lowering.nn_lowering.reduce_softmax_lowering import lower_reduce_softmax_family
-- handled = lower_reduce_softmax_family(block, op)
 - from kernel_gen.passes.lowering.nn_lowering.reduce_softmax_lowering import reduce_softmax_patterns
 - patterns = reduce_softmax_patterns()
 
 关联文件:
 - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-- test: test/pass/nn_lowering/reduce_sum.py
+- test: test/pass/nn_lowering/test_reduce_lowering.py
 - test: test/pass/nn_lowering/public_name.py
 - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
 """
@@ -63,7 +61,7 @@ def _ensure_int_attr(op: Operation, name: str) -> int:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-    - test: test/pass/nn_lowering/softmax.py
+    - test: test/pass/nn_lowering/test_nn_lowering_private_helpers.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
     """
 
@@ -89,7 +87,7 @@ def _ensure_reduce_axis(op_name: str, axes_attr: ArrayAttr) -> int:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-    - test: test/pass/nn_lowering/reduce_min.py
+    - test: test/pass/nn_lowering/test_reduce_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
     """
 
@@ -121,7 +119,7 @@ def _ensure_reduce_keepdim(op_name: str, keepdim_attr: Attribute) -> bool:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-    - test: test/pass/nn_lowering/reduce_min.py
+    - test: test/pass/nn_lowering/test_reduce_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
     """
 
@@ -157,7 +155,7 @@ def _build_alloc_dynamic_shape_from_operand(
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-    - test: test/pass/nn_lowering/reduce_sum.py
+    - test: test/pass/nn_lowering/test_reduce_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
     """
 
@@ -227,7 +225,7 @@ def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:
 
     关联文件:
     - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-    - test: test/pass/nn_lowering/reduce_sum.py
+    - test: test/pass/nn_lowering/test_reduce_lowering.py
     - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
     """
 
@@ -320,47 +318,6 @@ def _lower_reduce(block: Block, op: Operation, *, kind: str) -> None:
     block.insert_op_before(lowered, op)
     op.results[0].replace_all_uses_with(result)
     block.erase_op(op)
-
-
-def lower_reduce_softmax_family(block: Block, op: Operation) -> bool:
-    """处理 exp/reduce family 的兼容 lowering。
-
-    创建者: 小李飞刀
-    最后一次更改: 金铲铲大作战
-
-    功能说明:
-    - 通过具体 nn op Python 类型识别 nn.exp / nn.reduce_*。
-    - 对匹配 op 执行 lowering 并返回 True。
-    - 主 driver 使用 reduce_softmax_patterns() 的单 op pattern，本 helper 仅保留给旧调用点。
-
-    使用示例:
-    - handled = lower_reduce_softmax_family(block, op)
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md
-    - test: test/pass/nn_lowering/reduce_sum.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/reduce_softmax_lowering.py
-    """
-
-    if isinstance(op, NnExpOp):
-        ensure_expected_op_name(op, "nn.exp")
-        _lower_exp(block, op)
-        return True
-    if isinstance(op, NnReduceSumOp):
-        ensure_expected_op_name(op, "nn.reduce_sum")
-        _lower_reduce(block, op, kind="sum")
-        return True
-    if isinstance(op, NnReduceMinOp):
-        ensure_expected_op_name(op, "nn.reduce_min")
-        _lower_reduce(block, op, kind="min")
-        return True
-    if isinstance(op, NnReduceMaxOp):
-        ensure_expected_op_name(op, "nn.reduce_max")
-        _lower_reduce(block, op, kind="max")
-        return True
-    return False
-
-
 class _LowerNnReduceSumPattern(RewritePattern):
     """将单个 nn.reduce_sum lowering 为 kernel.reduce(kind=sum)。
 
@@ -501,4 +458,4 @@ def reduce_softmax_patterns() -> list[RewritePattern]:
     ]
 
 
-__all__ = ["lower_reduce_softmax_family", "reduce_softmax_patterns"]
+__all__ = ["reduce_softmax_patterns"]

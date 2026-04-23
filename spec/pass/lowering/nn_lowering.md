@@ -4,7 +4,7 @@
 
 - 定义将 `nn` dialect IR lower 到 `dma/kernel` dialect IR 的 pass 规范。
 - 结果 Memory 必须由 `dma.alloc` 创建，并由 `kernel/dma` op 写入 `outs(...)`。
-- 该 pass 只负责 op rewrite，不承担高层 helper 分解或跨函数优化。
+- 主 driver 只通过 `PatternRewriteWalker(GreedyRewritePatternApplier(nn_lowering_patterns()))` 调度单 op `RewritePattern`；family 级 dispatcher helper 不属于公开合同。
 
 ## 文档信息
 
@@ -14,10 +14,18 @@
 - `功能实现`：[`kernel_gen/passes/lowering/nn_lowering/nn_lowering.py`](../../../kernel_gen/passes/lowering/nn_lowering/nn_lowering.py)
 - `test`：
   - [`test/pass/nn_lowering/public_name.py`](../../../test/pass/nn_lowering/public_name.py)
+  - [`test/pass/nn_lowering/test_lowering_nn_lowering.py`](../../../test/pass/nn_lowering/test_lowering_nn_lowering.py)
+  - [`test/pass/nn_lowering/test_nn_lowering_private_helpers.py`](../../../test/pass/nn_lowering/test_nn_lowering_private_helpers.py)
 
 ## 依赖
 
 - Pass 管理：[`spec/pass/pass_manager.md`](../../../spec/pass/pass_manager.md)
+- 工具函数：[`spec/pass/lowering/nn_lowering/nn_lowering_utility.md`](../../../spec/pass/lowering/nn_lowering/nn_lowering_utility.md)
+- Element binary / compare：[`spec/pass/lowering/nn_lowering/element_binary_lowering.md`](../../../spec/pass/lowering/nn_lowering/element_binary_lowering.md)
+- Select / cast / exp：[`spec/pass/lowering/nn_lowering/select_cast_lowering.md`](../../../spec/pass/lowering/nn_lowering/select_cast_lowering.md)
+- DMA structured：[`spec/pass/lowering/nn_lowering/dma_structured_lowering.md`](../../../spec/pass/lowering/nn_lowering/dma_structured_lowering.md)
+- Matmul / img2col：[`spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md`](../../../spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md)
+- Reduce / softmax：[`spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md`](../../../spec/pass/lowering/nn_lowering/reduce_softmax_lowering.md)
 - NN dialect：[`spec/dialect/nn.md`](../../../spec/dialect/nn.md)
 - Kernel dialect：[`spec/dialect/kernel.md`](../../../spec/dialect/kernel.md)
 - DMA dialect：[`spec/dialect/dma.md`](../../../spec/dialect/dma.md)
@@ -26,6 +34,8 @@
 ## 目标
 
 - 提供唯一 canonical import path `kernel_gen.passes.lowering.nn_lowering.NnLoweringPass`，并保持 `name == "lower-nn"`。
+- 将 `nn_lowering` family 收口为“共享 helper + 单 op `RewritePattern` + 薄 `NnLoweringPass.apply(...)`”。
+- 将 family 子模块的 surviving 模块级接口收口为 `*_patterns()`；`lower_*_family` 不再属于公开入口。
 - 将支持的 `nn` op lower 为 `kernel/dma` op，输出 Memory 通过 `dma.alloc` 显式创建。
 - 输出 module 不应再包含 `nn` op。
 - 明确 `kernel.binary_elewise` 与 `kernel.reduce` 的公开合同已就绪，并在测试中验证可用性。
@@ -33,6 +43,24 @@
 
 ## 限制与边界
 
+- 公开构造入口固定为 `build_registered_pass("lower-nn")` 与 `kernel_gen.passes.lowering.nn_lowering.NnLoweringPass`。
+- `NnLoweringPass.apply(...)` 必须直接使用 `nn_lowering_patterns()` 构造 `PatternRewriteWalker(GreedyRewritePatternApplier(...))`，不得回退为手写 `while progress` 或 family 分发循环。
+- `nn_lowering_patterns()` 的注册顺序固定为：
+  - `element_binary_patterns()`
+  - `select_cast_patterns()`
+  - `dma_structured_patterns()`
+  - `matmul_img2col_patterns()`
+  - `reduce_softmax_patterns()`
+  - `_RejectUnsupportedNnOpPattern`
+- caller 的 canonical public path 固定为：
+
+```python
+from kernel_gen.passes.lowering.nn_lowering import NnLoweringError, NnLoweringPass
+```
+
+- `kernel_gen.passes.lowering.nn_to_kernel` 属于旧 compat 模块；导入必须以 `ModuleNotFoundError` 失败。
+- `LowerNnToKernelPass` / `LowerNnToKernelError` 不再属于 surviving public contract；package 级 re-export 不能作为验收入口。
+- family 子模块的 surviving 模块级接口只允许 `*_patterns()`；`lower_*_family`、`_Lower*FamilyPattern` 占位名与 `parent_block + has_done_action` dispatcher 路径都不属于公开合同或验收证据。
 - 仅支持以下 `nn` op 的 lowering：
   - 逐元素：`nn.add`/`nn.sub`/`nn.mul`/`nn.div`/`nn.truediv`、`nn.eq`/`nn.ne`/`nn.lt`/`nn.le`/`nn.gt`/`nn.ge`、`nn.select`、`nn.cast`
   - 结构化：`nn.broadcast`、`nn.transpose`、`nn.exp`、`nn.reduce_sum`/`nn.reduce_min`/`nn.reduce_max`、`nn.matmul`、`nn.img2col1d`/`nn.img2col2d`
@@ -81,7 +109,7 @@
 功能说明：
 
 - 表示 `nn -> kernel/dma` lowering pass。
-- 通过 `run(module)` 执行 lowering。
+- 通过 `apply(ctx, module)` 执行原地改写，并保留 `run(module)` 兼容入口。
 
 参数说明：
 
@@ -90,9 +118,11 @@
 使用示例：
 
 ```python
+from xdsl.context import Context
 from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 
-module = NnLoweringPass().run(module)
+pass_obj = NnLoweringPass()
+pass_obj.apply(Context(), module)
 ```
 
 注意事项：
@@ -102,18 +132,46 @@ module = NnLoweringPass().run(module)
 
 返回与限制：
 
-- 返回 lowering 后的 module。
+- 不直接返回值；通过实例方法 `apply(...)` / `run(...)` 使用。
 - 若出现不支持的 op 或校验失败，必须抛出 `NnLoweringError`。
 
-### `NnLoweringPass.run(module)`
+### `NnLoweringPass.apply(ctx: Context, module: builtin.module) -> None`
 
 功能说明：
 
-- 对输入 module 执行 `nn -> kernel/dma` lowering。
+- 对输入 module 执行 `nn -> kernel/dma` lowering，并原地改写 `module`。
 
 参数说明：
 
+- `ctx(Context)`：`GreedyRewritePatternApplier` 所使用的上下文。
 - `module (builtin.module)`：包含 `func.func` 的 IR module。
+
+使用示例：
+
+```python
+from xdsl.context import Context
+
+NnLoweringPass().apply(Context(), module)
+```
+
+注意事项：
+
+- `module` 不是 `builtin.module` 时必须抛出 `NnLoweringError`。
+- `apply(...)` 必须直接消费 `nn_lowering_patterns()` 返回的顺序化 pattern 列表。
+
+返回与限制：
+
+- 原地修改 `module`，返回 `None`。
+
+### `NnLoweringPass.run(module: builtin.module) -> builtin.module`
+
+功能说明：
+
+- 兼容旧 `run(...)` 调用形式，并复用 `apply(...)` 的单 op pattern driver。
+
+参数说明：
+
+- `module (builtin.module)`：待改写的 module。
 
 使用示例：
 
@@ -123,12 +181,37 @@ module = NnLoweringPass().run(module)
 
 注意事项：
 
-- `module` 不是 `builtin.module` 时必须抛出 `NnLoweringError`。
-- 若 module 无 `func.func`，允许直接返回原 module。
+- `run(...)` 只作为兼容入口；行为必须与 `apply(Context(), module)` 一致。
 
 返回与限制：
 
-- 返回 lowering 后的 module。
+- 返回同一个、已经被原地改写的 `module`。
+
+### `nn_lowering_patterns() -> list[RewritePattern]`
+
+功能说明：
+
+- 返回 `lower-nn` 主 driver 使用的有序 pattern 列表。
+- 将 element binary、select/cast/exp、dma structured、matmul/img2col、reduce/softmax reject 组合为同一条 rewrite 主链。
+
+参数说明：
+
+- 无。
+
+使用示例：
+
+```python
+patterns = nn_lowering_patterns()
+```
+
+注意事项：
+
+- 返回顺序必须稳定，且 `_RejectUnsupportedNnOpPattern` 必须位于最后。
+- 列表中不得再出现 family dispatcher 占位 pattern 名称，例如 `_LowerElementBinaryFamilyPattern`、`_LowerDmaStructuredFamilyPattern`、`_LowerMatmulImg2colFamilyPattern`、`_LowerReduceSoftmaxFamilyPattern`。
+
+返回与限制：
+
+- 返回可直接传入 `GreedyRewritePatternApplier` 的 `RewritePattern` 列表。
 
 ### `class NnLoweringError(ValueError)`
 
@@ -153,18 +236,6 @@ raise NnLoweringError("module must be builtin.module")
 返回与限制：
 
 - 该错误用于终止 pass。
-
-## 导入与兼容边界
-
-- caller 的 canonical public path 固定为：
-
-```python
-from kernel_gen.passes.lowering.nn_lowering import NnLoweringError, NnLoweringPass
-```
-
-- `kernel_gen.passes.lowering.nn_to_kernel` 属于旧 compat 模块；从 `S2` 起导入必须以 `ModuleNotFoundError` 失败。
-- `LowerNnToKernelPass` / `LowerNnToKernelError` 不再属于 surviving public contract；若 package 级别 re-export 仍暂存，也不能作为本阶段验收入口。
-- [`test/pass/nn_lowering/public_name.py`](../../../test/pass/nn_lowering/public_name.py) 必须同时证明“canonical import 成功 + `nn_to_kernel` 旧模块失败”；`expectation` 不计入该 pytest 证明。
 
 ### `ensure_module_op(module)`
 
@@ -193,25 +264,38 @@ module_op = ensure_module_op(module)
 ## 额外补充
 
 - 文件职责与 child spec 边界：
-  - `nn_lowering.py`：唯一公开 pass、调度顺序、顶层遍历、错误汇总。
+  - `nn_lowering.py`：唯一公开 pass、`nn_lowering_patterns()`、顶层 driver 顺序、错误汇总。
   - `nn_lowering_utility.py`：公共校验与 helper（module/space/result/operand 等）。
-  - `element_binary_lowering.py`：`nn.add/sub/mul/div/truediv/eq/ne/lt/le/gt/ge` 的 lowering。
-  - `select_cast_lowering.py`：`nn.select` / `nn.cast` 的 lowering。
-  - 对应 child spec：`nn_lowering_utility.md`、`element_binary_lowering.md`、`select_cast_lowering.md`。
+  - `element_binary_lowering.py`：`element_binary_patterns()` 与 element binary / compare 共享构造逻辑。
+  - `select_cast_lowering.py`：`select_cast_patterns()`，覆盖 `nn.select` / `nn.cast` / `nn.exp`。
+  - `dma_structured_lowering.py`：`dma_structured_patterns()`，覆盖 `nn.broadcast` / `nn.transpose`。
+  - `matmul_img2col_lowering.py`：`matmul_img2col_patterns()`，覆盖 `nn.matmul` / `nn.img2col1d` / `nn.img2col2d`。
+  - `reduce_softmax_lowering.py`：`reduce_softmax_patterns()`，覆盖 `nn.reduce_*` 与 direct `nn.softmax` 拒绝。
+- `nn_lowering` family 的 surviving 模块级接口只包括：
+  - `NnLoweringPass`
+  - `NnLoweringError`
+  - `nn_lowering_patterns()`
+  - 各 child 模块的 `*_patterns()`
+- `lower_*_family` 只属于待清理的旧 helper 名称，不能作为 build/review 的通过证据。
 
 ## 测试
 
 - 测试文件：
   - [`test/pass/nn_lowering/public_name.py`](../../../test/pass/nn_lowering/public_name.py)
   - [`test/pass/nn_lowering/test_lowering_nn_lowering.py`](../../../test/pass/nn_lowering/test_lowering_nn_lowering.py)
+  - [`test/pass/nn_lowering/test_nn_lowering_private_helpers.py`](../../../test/pass/nn_lowering/test_nn_lowering_private_helpers.py)
 - 执行命令：
   - `pytest -q test/pass/nn_lowering/public_name.py`
   - `pytest -q test/pass/nn_lowering/test_lowering_nn_lowering.py`
+  - `pytest -q test/pass/nn_lowering/test_nn_lowering_private_helpers.py`
   - `pytest -q test/pass/nn_lowering`
 - 测试目标：
-  - 验证 `NnLoweringPass` 的公开名字与 canonical import path 稳定（以 `public_name.py` 为稳定入口）。
-  - 验证 `NnLoweringError` 与 `NnLoweringPass` 的 canonical public import 可用。
+  - 验证 `NnLoweringPass` 的公开名字与 canonical import path 稳定。
   - 验证 `kernel_gen.passes.lowering.nn_to_kernel` 旧模块导入失败，且 `LowerNnToKernelPass` 不再作为 surviving public contract。
+  - 验证 `nn_lowering_patterns()` 的注册顺序稳定，且 family dispatcher 占位 pattern 已退场。
+  - 验证 `NnLoweringPass.apply(...)` 直接使用 `PatternRewriteWalker + GreedyRewritePatternApplier + nn_lowering_patterns()` 驱动改写。
+  - 验证 `NnLoweringError` 与 `NnLoweringPass` 的 canonical public import 可用。
+  - 验证 family shared helper 的错误模型、边界条件与 pattern 共享逻辑。
   - 验证 `kernel.binary_elewise` 与 `kernel.reduce` 在 lowering 输出中可解析与可校验。
   - 验证 add/sub 的静态 `memory + memory` lowering 不把 `symbol.get_dim` 作为必现前置行。
   - 验证 add/sub 的符号维度 lowering 在 `dma.alloc` 前按维度生成 `symbol.get_dim`。
@@ -225,7 +309,10 @@ module_op = ensure_module_op(module)
 | 用例 ID | 功能 | 对应测试 |
 | --- | --- | --- |
 | TC-PASS-NNL-001 | `NnLoweringPass` 公开名称 | `test_nn_lowering_pass_public_name` |
-| TC-PASS-NNL-002 | `NnLoweringError` 导出可用 | `test_nn_lowering_pass_public_exports` |
+| TC-PASS-NNL-002 | canonical import 成功、旧 compat 模块失败 | `test_nn_lowering_pass_public_exports` |
+| TC-PASS-NNL-003 | `nn_lowering_patterns()` 的注册顺序与 reject-last 规则稳定 | `test_nn_lowering_patterns_register_reject_last` |
+| TC-PASS-NNL-004 | `NnLoweringPass.apply(...)` 直接使用 pattern driver | `test_nn_lowering_apply_uses_pattern_driver` |
+| TC-PASS-NNL-005 | shared helper 的基础错误模型与边界稳定 | `test_nn_lowering_utility_helpers`、`test_nn_lowering_core_helpers` |
 | TC-PASS-NNL-010 | `nn.add` lowering 为 `kernel.binary_elewise(kind="add")` | `test_lower_add_to_kernel` |
 | TC-PASS-NNL-011 | `nn.truediv` lowering 为 `kernel.binary_elewise(kind="div")` | `test_lower_div_to_kernel` |
 | TC-PASS-NNL-012 | `nn.reduce_min` lowering 为 `kernel.reduce(kind="min")` | `test_lower_reduce_min_to_kernel` |

@@ -32,9 +32,7 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.dialect.dma import DmaAllocOp
 from kernel_gen.dialect.kernel import KernelSelectOp
 from kernel_gen.dialect.nn import NnMemorySpaceAttr, NnMemoryType, NnSelectOp
-from kernel_gen.passes.lowering.nn_lowering.select_cast_lowering import (
-    lower_select_cast_family,
-)
+from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 
 
 def _make_memory_type(element_type: Attribute = i32) -> NnMemoryType:
@@ -125,8 +123,7 @@ def test_lower_select_to_kernel_select() -> None:
             )
         ],
     )
-    for op in list(block.ops):
-        lower_select_cast_family(block, op)
+    NnLoweringPass().run(module)
 
     ops = list(block.ops)
     assert any(isinstance(op, KernelSelectOp) for op in ops)

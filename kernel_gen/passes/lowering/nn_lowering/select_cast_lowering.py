@@ -7,11 +7,9 @@
 - nn.select -> dma.alloc + kernel.select
 - nn.cast -> dma.alloc + dma.cast
 - nn.exp -> dma.alloc + kernel.exp
-- 既保留 block 级兼容 helper，也提供按具体 nn op 类型匹配的单 op RewritePattern 集合。
+- surviving 模块级接口为 `select_cast_patterns()`。
 
 使用示例:
-- from kernel_gen.passes.lowering.nn_lowering.select_cast_lowering import lower_select_cast_family
-- lower_select_cast_family(block, op)
 - from kernel_gen.passes.lowering.nn_lowering.select_cast_lowering import select_cast_patterns
 - patterns = select_cast_patterns()
 
@@ -371,42 +369,4 @@ def select_cast_patterns() -> list[RewritePattern]:
     """
 
     return [_LowerSelectPattern(), _LowerCastPattern(), _LowerExpPattern()]
-
-
-def lower_select_cast_family(block: Block, op: Operation) -> bool:
-    """执行 select/cast family lowering。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 处理 nn.select、nn.cast 与 nn.exp。
-    - 成功处理返回 True；非本 family op 返回 False。
-
-    使用示例:
-    - handled = lower_select_cast_family(block, op)
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
-    - test: test/pass/nn_lowering/select.py
-    - test: test/pass/nn_lowering/cast.py
-    - test: test/pass/nn_lowering/exp.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/select_cast_lowering.py
-    """
-
-    if isinstance(op, NnSelectOp):
-        ensure_expected_op_name(op, "nn.select")
-        _lower_select_op(op, block)
-        return True
-    if isinstance(op, NnCastOp):
-        ensure_expected_op_name(op, "nn.cast")
-        _lower_cast_op(op, block)
-        return True
-    if isinstance(op, NnExpOp):
-        ensure_expected_op_name(op, "nn.exp")
-        _lower_exp_op(op, block)
-        return True
-    return False
-
-
-__all__ = ["lower_select_cast_family", "select_cast_patterns"]
+__all__ = ["select_cast_patterns"]

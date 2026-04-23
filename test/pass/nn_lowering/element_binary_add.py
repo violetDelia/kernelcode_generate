@@ -33,9 +33,7 @@ if str(REPO_ROOT) not in sys.path:
 from kernel_gen.dialect.dma import DmaAllocOp, DmaBroadcastOp, DmaFillOp
 from kernel_gen.dialect.kernel import KernelBinaryElewiseOp
 from kernel_gen.dialect.nn import NnAddOp, NnMemorySpaceAttr, NnMemoryType
-from kernel_gen.passes.lowering.nn_lowering.element_binary_lowering import (
-    lower_element_binary_family,
-)
+from kernel_gen.passes.lowering.nn_lowering import NnLoweringPass
 
 
 def _make_memory_type(element_type: Attribute = f32) -> NnMemoryType:
@@ -117,8 +115,7 @@ def test_lower_add_to_kernel_binary_elewise() -> None:
         result_type,
         lambda block: [NnAddOp(block.args[0], block.args[1], result_type, space)],
     )
-    for op in list(block.ops):
-        lower_element_binary_family(block, op)
+    NnLoweringPass().run(module)
 
     ops = list(block.ops)
     kernel_ops = [op for op in ops if isinstance(op, KernelBinaryElewiseOp)]
@@ -148,8 +145,7 @@ def test_lower_add_mixed_scalar_uses_dma_fill() -> None:
         return [scalar, nn_op]
 
     module, block = _build_module([lhs_type], result_type, _build_ops)
-    for op in list(block.ops):
-        lower_element_binary_family(block, op)
+    NnLoweringPass().run(module)
 
     ops = list(block.ops)
     kernel_ops = [op for op in ops if isinstance(op, KernelBinaryElewiseOp)]

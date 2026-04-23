@@ -37,6 +37,21 @@ from kernel_gen.passes.lowering.nn_lowering import NnLoweringError, NnLoweringPa
 nn_lowering_module = importlib.import_module(
     "kernel_gen.passes.lowering.nn_lowering.nn_lowering"
 )
+element_binary_module = importlib.import_module(
+    "kernel_gen.passes.lowering.nn_lowering.element_binary_lowering"
+)
+dma_structured_module = importlib.import_module(
+    "kernel_gen.passes.lowering.nn_lowering.dma_structured_lowering"
+)
+select_cast_module = importlib.import_module(
+    "kernel_gen.passes.lowering.nn_lowering.select_cast_lowering"
+)
+matmul_img2col_module = importlib.import_module(
+    "kernel_gen.passes.lowering.nn_lowering.matmul_img2col_lowering"
+)
+reduce_softmax_module = importlib.import_module(
+    "kernel_gen.passes.lowering.nn_lowering.reduce_softmax_lowering"
+)
 
 
 # TC-PASS-NNL-001
@@ -120,6 +135,22 @@ def test_nn_lowering_patterns_register_reject_last() -> None:
     assert "_LowerMatmulImg2colFamilyPattern" not in names
     assert "_LowerReduceSoftmaxFamilyPattern" not in names
     assert "_RejectSoftmaxPattern" not in names
+
+
+# TC-PASS-NNL-003A
+# 创建者: jcc你莫辜负
+# 最后一次更改: jcc你莫辜负
+# 测试目的: 验证 nn_lowering child 模块只暴露 `*_patterns()`，不再保留 `lower_*_family` 兼容导出。
+# 使用示例: pytest -q test/pass/nn_lowering/public_name.py -k test_nn_lowering_child_pattern_exports
+# 对应功能实现文件路径: kernel_gen/passes/lowering/nn_lowering/*.py
+# 对应 spec 文件路径: spec/pass/lowering/nn_lowering.md
+# 对应测试文件路径: test/pass/nn_lowering/public_name.py
+def test_nn_lowering_child_pattern_exports() -> None:
+    assert element_binary_module.__all__ == ["element_binary_patterns"]
+    assert dma_structured_module.__all__ == ["dma_structured_patterns"]
+    assert select_cast_module.__all__ == ["select_cast_patterns"]
+    assert matmul_img2col_module.__all__ == ["matmul_img2col_patterns"]
+    assert reduce_softmax_module.__all__ == ["reduce_softmax_patterns"]
 
 
 # TC-PASS-NNL-004

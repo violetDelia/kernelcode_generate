@@ -1,68 +1,79 @@
-# matmul_img2col_lowering
+# matmul_img2col_lowering.md
 
 ## 功能简介
 
 - 统一处理 `nn.matmul`、`nn.img2col1d`、`nn.img2col2d` 的 lowering 逻辑。
 - 输出固定为 `kernel.matmul`、`kernel.img2col1d`、`kernel.img2col2d`，并通过 `dma.alloc` 创建结果 memory。
+- 模块级公开入口只保留 `matmul_img2col_patterns()`；family dispatcher helper 不属于 surviving 公开合同。
 
 ## 文档信息
 
 - 创建者：`小李飞刀`
-- 最后一次更改：`小李飞刀`
+- 最后一次更改：`咯咯咯`
 - `spec`：[`spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md`](../../../../spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md)
 - `功能实现`：[`kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py`](../../../../kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py)
 - `test`：
   - [`test/pass/nn_lowering/matmul.py`](../../../../test/pass/nn_lowering/matmul.py)
   - [`test/pass/nn_lowering/img2col1d.py`](../../../../test/pass/nn_lowering/img2col1d.py)
   - [`test/pass/nn_lowering/img2col2d.py`](../../../../test/pass/nn_lowering/img2col2d.py)
+  - [`test/pass/nn_lowering/public_name.py`](../../../../test/pass/nn_lowering/public_name.py)
+  - [`test/pass/nn_lowering/test_nn_lowering_private_helpers.py`](../../../../test/pass/nn_lowering/test_nn_lowering_private_helpers.py)
 
 ## 依赖
 
-- 公共 helper：[`kernel_gen/passes/lowering/nn_lowering/nn_lowering_utility.py`](../../../../kernel_gen/passes/lowering/nn_lowering/nn_lowering_utility.py)
-- NN dialect：[`kernel_gen/dialect/nn.py`](../../../../kernel_gen/dialect/nn.py)
-- Kernel dialect：[`kernel_gen/dialect/kernel.py`](../../../../kernel_gen/dialect/kernel.py)
-- DMA dialect：[`kernel_gen/dialect/dma.py`](../../../../kernel_gen/dialect/dma.py)
-- Symbol dialect：[`kernel_gen/dialect/symbol.py`](../../../../kernel_gen/dialect/symbol.py)
+- 总规范：[`spec/pass/lowering/nn_lowering.md`](../../../../spec/pass/lowering/nn_lowering.md)
+- 公共 helper：[`spec/pass/lowering/nn_lowering/nn_lowering_utility.md`](../../../../spec/pass/lowering/nn_lowering/nn_lowering_utility.md)
+- NN dialect：[`spec/dialect/nn.md`](../../../../spec/dialect/nn.md)
+- Kernel dialect：[`spec/dialect/kernel.md`](../../../../spec/dialect/kernel.md)
+- DMA dialect：[`spec/dialect/dma.md`](../../../../spec/dialect/dma.md)
+- Symbol dialect：[`spec/dialect/symbol.md`](../../../../spec/dialect/symbol.md)
 
 ## 目标
 
 - 将 `nn.matmul` lower 为 `kernel.matmul`，结果由 `dma.alloc` 创建；若输出包含符号维度，需从输入插入 `symbol.get_dim` 并作为 `dma.alloc` 的 dynamic shape。
 - 将 `nn.img2col1d/nn.img2col2d` lower 为对应的 `kernel.img2col*`，参数必须为 `symbol.int`；若输出含符号维度，需使用 `symbol.get_dim` 与 `symbol` 算术构造 `dma.alloc` 的 dynamic shape。
-- 提供单一入口 `lower_matmul_img2col_family` 用于 family 分发。
+- 通过 `matmul_img2col_patterns()` 提供单 op `RewritePattern` 集合。
 
 ## 限制与边界
 
-- 仅处理 `nn.matmul`、`nn.img2col1d`、`nn.img2col2d`；其他 op 必须返回 `False`。
+- 仅覆盖 `nn.matmul`、`nn.img2col1d`、`nn.img2col2d`。
 - `nn.matmul` 仅支持 rank-2 memory，且 stride 必须为连续布局。
 - `nn.img2col1d/2d` 的动态参数必须是 `!symbol.int<"...">`，不接受 `i32/index` 或整数 attribute 直接作为 operand。
+- 模块级 surviving 接口只允许 `matmul_img2col_patterns()`；`lower_matmul_img2col_family` 不属于公开入口。
+- 每个 op 都必须由独立的 `@op_type_rewrite_pattern` 处理，不再通过 family dispatcher 做名称分发。
 
 ## 公开接口
 
-### `lower_matmul_img2col_family(block, op) -> bool`
+### `matmul_img2col_patterns() -> list[RewritePattern]`
 
 功能说明：
 
-- 若 op 属于 matmul/img2col family，则完成 lowering 并返回 `True`。
-- 不匹配则返回 `False`。
+- 返回 `nn.matmul`、`nn.img2col1d`、`nn.img2col2d` 的有序 pattern 列表。
+- 供 `nn_lowering_patterns()` 直接拼接到主 driver 中。
 
 参数说明：
 
-- `block(Block)`：op 所在 block。
-- `op(Operation)`：待处理 op。
+- 无。
 
 使用示例：
 
 ```python
-handled = lower_matmul_img2col_family(block, op)
+from kernel_gen.passes.lowering.nn_lowering.matmul_img2col_lowering import (
+    matmul_img2col_patterns,
+)
+
+patterns = matmul_img2col_patterns()
 ```
 
 注意事项：
 
-- 当 op 参数或 shape/stride 不满足要求时需抛出 `NnLoweringError`。
+- 返回顺序固定为 `matmul -> img2col1d -> img2col2d`。
+- `build_*` 或 `_lower_*` 共享 helper 只属于内部实现，不属于公开合同。
+- 返回列表中不得保留 `lower_matmul_img2col_family` 兼容入口。
 
 返回与限制：
 
-- `True` 表示已处理；`False` 表示未匹配。
+- 返回可直接传入 `GreedyRewritePatternApplier` 的 `RewritePattern` 列表。
 
 ## 测试
 
@@ -70,8 +81,23 @@ handled = lower_matmul_img2col_family(block, op)
   - [`test/pass/nn_lowering/matmul.py`](../../../../test/pass/nn_lowering/matmul.py)
   - [`test/pass/nn_lowering/img2col1d.py`](../../../../test/pass/nn_lowering/img2col1d.py)
   - [`test/pass/nn_lowering/img2col2d.py`](../../../../test/pass/nn_lowering/img2col2d.py)
+  - [`test/pass/nn_lowering/public_name.py`](../../../../test/pass/nn_lowering/public_name.py)
+  - [`test/pass/nn_lowering/test_nn_lowering_private_helpers.py`](../../../../test/pass/nn_lowering/test_nn_lowering_private_helpers.py)
 - 执行命令：
-  - `pytest -q test/pass/nn_lowering/matmul.py test/pass/nn_lowering/img2col1d.py test/pass/nn_lowering/img2col2d.py`
+  - `pytest -q test/pass/nn_lowering/matmul.py`
+  - `pytest -q test/pass/nn_lowering/img2col1d.py`
+  - `pytest -q test/pass/nn_lowering/img2col2d.py`
+  - `pytest -q test/pass/nn_lowering/public_name.py -k patterns`
+  - `pytest -q test/pass/nn_lowering/test_nn_lowering_private_helpers.py -k matmul`
 - 测试目标：
   - 验证 `nn.matmul` -> `kernel.matmul` 的 lowering 目标与输出 memory 约束。
   - 验证 `nn.img2col1d/nn.img2col2d` -> `kernel.img2col*` 的 lowering 目标与 `symbol.int` 参数约束。
+  - 验证主 driver 的 pattern 顺序已不再包含 matmul/img2col family dispatcher。
+- 功能与用例清单：
+  - `test_nn_lowering_matmul_target`
+  - `test_nn_lowering_matmul_inside_symbol_for`
+  - `test_nn_lowering_img2col1d_target`
+  - `test_nn_lowering_img2col1d_accepts_noncanonical_symbol_names`
+  - `test_nn_lowering_img2col2d_target`
+  - `test_nn_lowering_img2col2d_accepts_noncanonical_symbol_names`
+  - `test_reduce_select_cast_matmul_helpers`

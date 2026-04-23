@@ -38,7 +38,7 @@ from kernel_gen.dialect.nn import (
     NnReduceMinOp,
     NnReduceSumOp,
 )
-from kernel_gen.passes.lowering import NnLoweringError, NnLoweringPass
+from kernel_gen.passes.lowering.nn_lowering import NnLoweringError, NnLoweringPass
 from kernel_gen.tools.ircheck import run_ircheck_text
 
 GLOBAL_SPACE = "#nn.space<global>"

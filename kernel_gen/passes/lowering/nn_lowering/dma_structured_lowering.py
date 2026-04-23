@@ -6,10 +6,11 @@
 功能说明:
 - 负责 nn.broadcast / nn.transpose 的 lowering。
 - 输出 memory 通过 dma.alloc 创建，并由 dma.* op 写入。
+- surviving 模块级接口为 `dma_structured_patterns()`。
 
 使用示例:
-- from kernel_gen.passes.lowering.nn_lowering.dma_structured_lowering import lower_dma_structured_family
-- lower_dma_structured_family(block, op)
+- from kernel_gen.passes.lowering.nn_lowering.dma_structured_lowering import dma_structured_patterns
+- patterns = dma_structured_patterns()
 
 关联文件:
 - spec: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
@@ -343,36 +344,6 @@ def _lower_transpose(block: Block, op: Operation) -> None:
     block.insert_op_before(lowered, op)
     op.results[0].replace_all_uses_with(result)
     block.erase_op(op)
-
-
-def lower_dma_structured_family(block: Block, op: Operation) -> bool:
-    """执行 dma_structured family lowering。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 仅处理 nn.broadcast / nn.transpose。
-    - 成功处理返回 True；非本 family op 返回 False。
-
-    使用示例:
-    - handled = lower_dma_structured_family(block, op)
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_lowering/dma_structured_lowering.md
-    - test: test/pass/nn_lowering/test_lowering_nn_lowering.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/dma_structured_lowering.py
-    """
-
-    if op.name == "nn.broadcast":
-        _lower_broadcast(block, op)
-        return True
-    if op.name == "nn.transpose":
-        _lower_transpose(block, op)
-        return True
-    return False
-
-
 class _LowerNnBroadcastPattern(RewritePattern):
     """将单个 nn.broadcast lowering 为 dma.broadcast。
 
@@ -451,4 +422,4 @@ def dma_structured_patterns() -> list[RewritePattern]:
     return [_LowerNnBroadcastPattern(), _LowerNnTransposePattern()]
 
 
-__all__ = ["dma_structured_patterns", "lower_dma_structured_family"]
+__all__ = ["dma_structured_patterns"]

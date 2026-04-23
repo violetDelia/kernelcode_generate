@@ -9,10 +9,11 @@
 - mixed compare 标量 operand 继续通过 dma.alloc + dma.broadcast 物化。
 - 输出 memory 通过 dma.alloc 显式创建。
 - 主 lowering driver 按单个 nn op 注册独立 RewritePattern，不再通过 family pattern 做名称分发。
+- surviving 模块级接口为 `element_binary_patterns()`。
 
 使用示例:
-- from kernel_gen.passes.lowering.nn_lowering.element_binary_lowering import lower_element_binary_family
-- lower_element_binary_family(block, op)
+- from kernel_gen.passes.lowering.nn_lowering.element_binary_lowering import element_binary_patterns
+- patterns = element_binary_patterns()
 
 关联文件:
 - spec: spec/pass/lowering/nn_lowering.md
@@ -376,40 +377,6 @@ def _lower_element_binary_op(
     block.insert_ops_before([*shape_ops, alloc, *extra_ops, kernel_op], op)
     op.results[0].replace_all_uses_with(alloc.result)
     block.erase_op(op)
-
-
-def lower_element_binary_family(block: Block, op: Operation) -> bool:
-    """执行 element binary/compare family lowering。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 仅处理 element binary/compare family op。
-    - 成功处理返回 True；非本 family op 返回 False。
-
-    使用示例:
-    - handled = lower_element_binary_family(block, op)
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_lowering.md
-    - test: test/pass/nn_lowering/element_binary_add.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/element_binary_lowering.py
-    """
-
-    for op_type, kind in _ELEMENT_BINARY_PATTERN_KINDS:
-        if isinstance(op, op_type):
-            ensure_expected_op_name(op, op_type.name)
-            _lower_element_binary_op(op, block, kind=kind, is_compare=False)
-            return True
-    for op_type, kind in _COMPARE_PATTERN_KINDS:
-        if isinstance(op, op_type):
-            ensure_expected_op_name(op, op_type.name)
-            _lower_element_binary_op(op, block, kind=kind, is_compare=True)
-            return True
-    return False
-
-
 def _lower_typed_element_binary_pattern(
     op: Operation,
     rewriter: PatternRewriter,
@@ -765,4 +732,4 @@ def element_binary_patterns() -> list[RewritePattern]:
     ]
 
 
-__all__ = ["element_binary_patterns", "lower_element_binary_family"]
+__all__ = ["element_binary_patterns"]

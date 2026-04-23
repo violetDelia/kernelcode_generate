@@ -1,4 +1,4 @@
-"""matmul/img2col family lowering 实现。
+"""matmul/img2col lowering 实现。
 
 创建者: 小李飞刀
 最后一次更改: 小李飞刀
@@ -6,10 +6,11 @@
 功能说明:
 - 将 nn.matmul / nn.img2col1d / nn.img2col2d lower 为对应 kernel op。
 - 统一在 lowering 内部创建 dma.alloc 结果 memory。
+- surviving 模块级接口为 `matmul_img2col_patterns()`。
 
 使用示例:
-- from kernel_gen.passes.lowering.nn_lowering.matmul_img2col_lowering import lower_matmul_img2col_family
-- handled = lower_matmul_img2col_family(block, op)
+- from kernel_gen.passes.lowering.nn_lowering.matmul_img2col_lowering import matmul_img2col_patterns
+- patterns = matmul_img2col_patterns()
 
 关联文件:
 - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
@@ -672,39 +673,6 @@ def _lower_img2col2d(block: Block, op: Operation) -> None:
     for cleanup_op in cleanup_ops:
         if all(result.uses.get_length() == 0 for result in cleanup_op.results):
             block.erase_op(cleanup_op)
-
-
-def lower_matmul_img2col_family(block: Block, op: Operation) -> bool:
-    """处理 matmul/img2col family lowering。
-
-    创建者: 小李飞刀
-    最后一次更改: 小李飞刀
-
-    功能说明:
-    - 识别 nn.matmul / nn.img2col1d / nn.img2col2d 并执行 lowering。
-    - 不匹配时返回 False。
-
-    使用示例:
-    - handled = lower_matmul_img2col_family(block, op)
-
-    关联文件:
-    - spec: spec/pass/lowering/nn_lowering/matmul_img2col_lowering.md
-    - test: test/pass/nn_lowering/matmul.py
-    - 功能实现: kernel_gen/passes/lowering/nn_lowering/matmul_img2col_lowering.py
-    """
-
-    if op.name == "nn.matmul":
-        _lower_matmul(block, op)
-        return True
-    if op.name == "nn.img2col1d":
-        _lower_img2col1d(block, op)
-        return True
-    if op.name == "nn.img2col2d":
-        _lower_img2col2d(block, op)
-        return True
-    return False
-
-
 class _LowerNnMatmulPattern(RewritePattern):
     """将单个 nn.matmul lowering 为 kernel.matmul。
 
@@ -811,4 +779,4 @@ def matmul_img2col_patterns() -> list[RewritePattern]:
     return [_LowerNnMatmulPattern(), _LowerNnImg2col1dPattern(), _LowerNnImg2col2dPattern()]
 
 
-__all__ = ["matmul_img2col_patterns", "lower_matmul_img2col_family"]
+__all__ = ["matmul_img2col_patterns"]
