@@ -1,7 +1,7 @@
 """symbol-loop-hoist pass tests.
 
 创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 覆盖 `SymbolLoopHoistPass` 的外提白名单、禁止项与固定失败短语。
@@ -10,7 +10,7 @@
 - pytest -q test/pass/test_symbol_loop_hoist.py
 
 当前覆盖率信息:
-- `kernel_gen.passes.symbol_loop_hoist`：`80%`（Stmts=133 Miss=20 Branch=70 BrPart=14；最近一次统计：2026-04-07 09:40:00 +0800）。
+- `kernel_gen.passes.symbol_loop_hoist`：`80%`（Stmts=135 Miss=20 Branch=66 BrPart=14；最近一次统计：2026-04-24 04:42:42 +0800）。
 
 覆盖率命令:
 - `pytest -q --cov=kernel_gen.passes.symbol_loop_hoist --cov-branch --cov-report=term-missing test/pass/test_symbol_loop_hoist.py`
@@ -144,6 +144,18 @@ def _make_module_for_const_hoist() -> ModuleOp:
     block.add_ops(ops)
     func_op = func.FuncOp(
         "hoist_const",
+        FunctionType.from_lists([], []),
+        Region(block),
+    )
+    return ModuleOp([func_op])
+
+
+def _make_module_without_symbol_for() -> ModuleOp:
+    block = Block(arg_types=[])
+    only_const = SymbolConstOp(7)
+    block.add_ops([only_const, func.ReturnOp()])
+    func_op = func.FuncOp(
+        "no_symbol_for",
         FunctionType.from_lists([], []),
         Region(block),
     )
@@ -393,8 +405,9 @@ def test_symbol_loop_hoist_hoists_get_dim_and_alloc() -> None:
 
     ops = list(block.ops)
     loop_index = ops.index(loop)
-    assert any(isinstance(op, SymbolGetDimOp) for op in ops[:loop_index])
-    assert any(isinstance(op, DmaAllocOp) for op in ops[:loop_index])
+    hoisted_ops = [op for op in ops[:loop_index] if isinstance(op, (SymbolGetDimOp, DmaAllocOp))]
+    assert [type(op) for op in hoisted_ops] == [SymbolGetDimOp, DmaAllocOp]
+    assert not any(isinstance(op, (SymbolGetDimOp, DmaAllocOp)) for op in loop.body.blocks.first.ops)
 
 
 # TC-SLH-001A
@@ -444,6 +457,24 @@ def test_symbol_loop_hoist_apply_behaves_like_module_pass() -> None:
 
     assert result is None
     module.verify()
+
+
+# TC-SLH-001C
+# 创建者: 金铲铲大作战
+# 最后一次更改: 金铲铲大作战
+# 测试目的: 验证 module 不含 `symbol.for` 时保持 no-op。
+# 对应功能实现文件路径: kernel_gen/passes/symbol_loop_hoist.py
+# 对应 spec 文件路径: spec/pass/symbol_loop_hoist.md
+# 对应测试文件路径: test/pass/test_symbol_loop_hoist.py
+def test_symbol_loop_hoist_keeps_module_without_symbol_for_no_op() -> None:
+    module = _make_module_without_symbol_for()
+    func_op = next(op for op in module.ops if isinstance(op, func.FuncOp))
+    block = func_op.body.blocks.first
+    before_ops = list(block.ops)
+
+    SymbolLoopHoistPass().run(module)
+
+    assert list(block.ops) == before_ops
 
 
 # TC-SLH-002

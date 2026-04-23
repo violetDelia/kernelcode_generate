@@ -1,14 +1,14 @@
 """symbol-loop-hoist pass.
 
 创建者: 朽木露琪亚
-最后一次更改: 朽木露琪亚
+最后一次更改: 金铲铲大作战
 
 功能说明:
 - 作为 `ModulePass` 实现 `symbol-loop-hoist` pass，仅处理 `symbol.for`；当 module 中不存在
   `symbol.for` 时保持 no-op。
 - 把循环体内仅依赖循环外 SSA 的对象外提到 `symbol.for` 之前，减少 split 后循环体内重复构造的符号查询、
   形状推导与可复用 buffer/视图描述。
-- 首版以白名单为主，不做通用 LICM。
+- 通过 `PatternRewriteWalker` 以单 op pattern 驱动外提到稳定态，不做通用 LICM。
 
 使用示例:
 - from xdsl.context import Context
@@ -33,6 +33,14 @@ from xdsl.dialects import func
 from xdsl.dialects.builtin import ModuleOp
 from xdsl.ir import Block, BlockArgument, Operation, SSAValue
 from xdsl.passes import ModulePass
+from xdsl.pattern_rewriter import (
+    GreedyRewritePatternApplier,
+    PatternRewriteWalker,
+    PatternRewriter,
+    RewritePattern,
+    op_type_rewrite_pattern,
+)
+from xdsl.rewriter import InsertPoint
 from xdsl.utils.exceptions import VerifyException
 
 from kernel_gen.dialect.dma import (
@@ -228,7 +236,26 @@ def _is_free_in_loop(value: SSAValue, loop_block: Block) -> bool:
     return False
 
 
-def _hoist_from_symbol_for(symbol_for: SymbolForOp) -> None:
+def _next_hoist_candidate(symbol_for: SymbolForOp) -> Operation | None:
+    """返回当前 `symbol.for` 下一条可外提候选。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 按 loop 体内当前顺序扫描候选 op。
+    - 只返回一条可外提 op，供 pattern 驱动器反复应用直到稳定态。
+    - 当候选违反固定失败边界时，直接抛出 `SymbolLoopHoistError`。
+
+    使用示例:
+    - candidate = _next_hoist_candidate(symbol_for)
+
+    关联文件:
+    - spec: spec/pass/symbol_loop_hoist.md
+    - test: test/pass/test_symbol_loop_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
+    """
+
     blocks = list(symbol_for.body.blocks)
     if len(blocks) != 1:
         _raise_symbol_loop_hoist_error(
@@ -243,57 +270,78 @@ def _hoist_from_symbol_for(symbol_for: SymbolForOp) -> None:
             "symbol.for must be contained in a block",
         )
 
-    progress = True
-    while progress:
-        progress = False
-        for op in list(loop_block.ops):
-            if isinstance(op, func.ReturnOp):
-                continue
-            if isinstance(op, SymbolForOp):
-                continue
-            if not _is_loop_invariant(op, loop_block):
-                continue
+    for op in list(loop_block.ops):
+        if isinstance(op, func.ReturnOp):
+            continue
+        if isinstance(op, SymbolForOp):
+            continue
+        if not _is_loop_invariant(op, loop_block):
+            continue
 
-            if _is_forbidden_side_effect_op(op):
+        if _is_forbidden_side_effect_op(op):
+            _raise_symbol_loop_hoist_error(
+                "SymbolLoopHoistSideEffectOp",
+                f"unsupported invariant op {op.name} inside symbol.for",
+            )
+
+        if isinstance(op, DmaAllocOp):
+            result = SSAValue.get(op.result)
+            if _is_free_in_loop(result, loop_block):
                 _raise_symbol_loop_hoist_error(
-                    "SymbolLoopHoistSideEffectOp",
-                    f"unsupported invariant op {op.name} inside symbol.for",
+                    "SymbolLoopHoistAllocLifetimeUnsafe",
+                    "dma.alloc result is freed inside symbol.for",
                 )
+            return op
 
-            if isinstance(op, DmaAllocOp):
-                result = SSAValue.get(op.result)
-                if _is_free_in_loop(result, loop_block):
-                    _raise_symbol_loop_hoist_error(
-                        "SymbolLoopHoistAllocLifetimeUnsafe",
-                        "dma.alloc result is freed inside symbol.for",
-                    )
-                op.detach()
-                outer_block.insert_ops_before([op], symbol_for)
-                progress = True
-                continue
+        if isinstance(op, _DMA_META_OPS) or isinstance(op, _SYMBOL_PURE_OPS):
+            return op
 
-            if isinstance(op, _DMA_META_OPS) or isinstance(op, _SYMBOL_PURE_OPS):
-                op.detach()
-                outer_block.insert_ops_before([op], symbol_for)
-                progress = True
-                continue
+        if isinstance(op, (DmaSliceOp, DmaLoadOp)):
+            _maybe_hoist_fixed_read(op, loop_block=loop_block)
+            return op
 
-            if isinstance(op, (DmaSliceOp, DmaLoadOp)):
-                _maybe_hoist_fixed_read(op, loop_block=loop_block)
-                op.detach()
-                outer_block.insert_ops_before([op], symbol_for)
-                progress = True
-                continue
+    return None
+
+
+class _SymbolLoopHoistPattern(RewritePattern):
+    """按单个 `symbol.for` 候选驱动 hoist。
+
+    创建者: 金铲铲大作战
+    最后一次更改: 金铲铲大作战
+
+    功能说明:
+    - 每次匹配只外提一条当前可用候选 op。
+    - 依赖 `PatternRewriteWalker` 的 greedy 驱动，把同一 `symbol.for` 推进到稳定态。
+
+    使用示例:
+    - PatternRewriteWalker(
+    -     GreedyRewritePatternApplier([_SymbolLoopHoistPattern()], ctx=ctx, dce_enabled=False)
+    - ).rewrite_module(module)
+
+    关联文件:
+    - spec: spec/pass/symbol_loop_hoist.md
+    - test: test/pass/test_symbol_loop_hoist.py
+    - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
+    """
+
+    @op_type_rewrite_pattern
+    def match_and_rewrite(self, symbol_for: SymbolForOp, rewriter: PatternRewriter, /) -> None:
+        candidate = _next_hoist_candidate(symbol_for)
+        if candidate is None:
+            return
+        candidate.detach()
+        rewriter.insert_op(candidate, InsertPoint.before(symbol_for))
+        rewriter.notify_op_modified(symbol_for)
 
 
 class SymbolLoopHoistPass(Pass, ModulePass):
     """symbol-loop-hoist pass。
 
     创建者: 朽木露琪亚
-    最后一次更改: 朽木露琪亚
+    最后一次更改: 金铲铲大作战
 
     功能说明:
-    - 作为 `ModulePass` 遍历 module 中的 `symbol.for` 并外提循环 invariant 的对象。
+    - 作为 `ModulePass` 通过 pattern 驱动遍历 module 中的 `symbol.for` 并外提循环 invariant 的对象。
     - 若 module 中不存在 `symbol.for`，则直接 no-op 并通过 `module.verify()`。
     - 在最终 `module.verify()` 失败时统一转译为 `SymbolLoopHoistVerifierError`。
 
@@ -314,10 +362,11 @@ class SymbolLoopHoistPass(Pass, ModulePass):
         """执行 symbol-loop-hoist ModulePass。
 
         创建者: 朽木露琪亚
-        最后一次更改: 朽木露琪亚
+        最后一次更改: 金铲铲大作战
 
         功能说明:
-        - 遍历 module 中的 `symbol.for` 并外提循环 invariant 的对象。
+        - 通过 `PatternRewriteWalker` 以单 op pattern 驱动 `symbol.for` 外提。
+        - 依赖 greedy walker 把链式候选推进到稳定态。
         - 在最终 `module.verify()` 失败时统一转译为 `SymbolLoopHoistVerifierError`。
 
         使用示例:
@@ -332,11 +381,13 @@ class SymbolLoopHoistPass(Pass, ModulePass):
         - 功能实现: kernel_gen/passes/symbol_loop_hoist.py
         """
 
-        del ctx
-
-        for op in module.walk():
-            if isinstance(op, SymbolForOp):
-                _hoist_from_symbol_for(op)
+        PatternRewriteWalker(
+            GreedyRewritePatternApplier(
+                [_SymbolLoopHoistPattern()],
+                ctx=ctx,
+                dce_enabled=False,
+            )
+        ).rewrite_module(module)
         try:
             module.verify()
         except VerifyException as exc:
