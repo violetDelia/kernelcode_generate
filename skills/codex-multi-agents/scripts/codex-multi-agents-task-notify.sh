@@ -43,8 +43,7 @@ AGENTS_LIST=""
 MESSAGE=""
 TYPE_KIND=""
 ADMIN_NAME=""
-AUTO_TASK_ID=""
-AUTO_ASSIGNEE=""
+AUTO_DISPATCHES=()
 
 trim() {
   local s="${1-}"
@@ -66,7 +65,7 @@ Usage:
   codex-multi-agents-task-notify.sh -dispatch-init -agents-list <agents-lists.md> -to <worker>
   codex-multi-agents-task-notify.sh -dispatch-message -file <TODO.md> -task_id <id> -to <worker> -from <sender> -agents-list <agents-lists.md> [-message <text>]
   codex-multi-agents-task-notify.sh -reassign -file <TODO.md> -task_id <id> -to <worker> -old-assignee <worker> -from <sender> -agents-list <agents-lists.md>
-  codex-multi-agents-task-notify.sh -next -file <TODO.md> -task_id <id> -type <spec|build|review|merge|other|refactor> -agents-list <agents-lists.md> -from <sender> -admin <admin> [-auto-task-id <id>] [-auto-assignee <name>]
+  codex-multi-agents-task-notify.sh -next -file <TODO.md> -task_id <id> -type <spec|build|review|merge|other|refactor> -agents-list <agents-lists.md> -from <sender> -admin <admin> [-auto-dispatch <task_id|assignee>]...
 USAGE
 }
 
@@ -135,14 +134,9 @@ parse_args() {
         ADMIN_NAME="$2"
         shift 2
         ;;
-      -auto-task-id)
-        [[ $# -ge 2 ]] || err "$RC_ARG" "missing value for -auto-task-id"
-        AUTO_TASK_ID="$2"
-        shift 2
-        ;;
-      -auto-assignee)
-        [[ $# -ge 2 ]] || err "$RC_ARG" "missing value for -auto-assignee"
-        AUTO_ASSIGNEE="$2"
+      -auto-dispatch)
+        [[ $# -ge 2 ]] || err "$RC_ARG" "missing value for -auto-dispatch"
+        AUTO_DISPATCHES+=("$2")
         shift 2
         ;;
       -h|--help)
@@ -400,23 +394,42 @@ reassign_notify() {
 next_notify() {
   local summary_message=""
   local assignee_label=""
+  local -a dispatched_parts=()
+  local auto_dispatch=""
+  local auto_task_id=""
+  local auto_assignee=""
 
-  if [[ -n "$(trim "$AUTO_TASK_ID")" && -n "$(trim "$AUTO_ASSIGNEE")" && "$AUTO_ASSIGNEE" != "$FROM" ]]; then
-    send_init_for_agent "$AUTO_ASSIGNEE"
-    send_talk_message "$FROM" "$AUTO_ASSIGNEE" "$(build_task_message_for_id "$FILE" "$AUTO_TASK_ID")"
-  fi
+  for auto_dispatch in "${AUTO_DISPATCHES[@]}"; do
+    auto_task_id=""
+    auto_assignee=""
+    IFS='|' read -r auto_task_id auto_assignee <<<"$auto_dispatch"
+    [[ -n "$(trim "$auto_task_id")" && -n "$(trim "$auto_assignee")" ]] || continue
+    assignee_label="$auto_assignee"
+    if [[ "$auto_assignee" == "$FROM" ]]; then
+      assignee_label="当前执行者"
+    else
+      send_init_for_agent "$auto_assignee"
+      send_talk_message "$FROM" "$auto_assignee" "$(build_task_message_for_id "$FILE" "$auto_task_id")"
+    fi
+    dispatched_parts+=("$auto_task_id -> $assignee_label")
+  done
 
   if [[ -n "$(trim "$ADMIN_NAME")" && "$ADMIN_NAME" != "$FROM" ]]; then
-    if [[ -n "$(trim "$AUTO_TASK_ID")" && -n "$(trim "$AUTO_ASSIGNEE")" ]]; then
-      assignee_label="$AUTO_ASSIGNEE"
-      if [[ "$AUTO_ASSIGNEE" == "$FROM" ]]; then
+    if [[ "${#dispatched_parts[@]}" -eq 1 ]]; then
+      auto_task_id=""
+      auto_assignee=""
+      IFS='|' read -r auto_task_id auto_assignee <<<"${AUTO_DISPATCHES[0]}"
+      assignee_label="$auto_assignee"
+      if [[ "$auto_assignee" == "$FROM" ]]; then
         assignee_label="当前执行者"
       fi
-      if [[ "$AUTO_TASK_ID" == "$TASK_ID" ]]; then
+      if [[ "$auto_task_id" == "$TASK_ID" ]]; then
         summary_message="任务 $TASK_ID 已完成当前阶段，已回到任务列表；新任务类型=$TYPE_KIND，已经指派给-> $assignee_label。"
       else
-        summary_message="任务 $TASK_ID 已完成当前阶段，已回到任务列表；已自动开始任务 $AUTO_TASK_ID -> $assignee_label。"
+        summary_message="任务 $TASK_ID 已完成当前阶段，已回到任务列表；已自动开始任务 $auto_task_id -> $assignee_label。"
       fi
+    elif [[ "${#dispatched_parts[@]}" -gt 1 ]]; then
+      summary_message="任务 $TASK_ID 已完成当前阶段，已回到任务列表；已自动开始任务 $(IFS='；'; printf '%s' "${dispatched_parts[*]}")。"
     else
       summary_message="任务 $TASK_ID 已完成当前阶段，已回到任务列表；新任务类型=$TYPE_KIND，请管理员推进。"
     fi

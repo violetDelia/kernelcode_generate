@@ -494,6 +494,33 @@ def test_dispatch_missing_task_returns_rc3(tmp_path: Path) -> None:
     assert "task not found in task list: BAD" in result.stderr
 
 
+# TC-002A
+# 创建者: OpenAI
+# 最后一次更改: Codex
+# 测试目的: 验证 -dispatch 缺少 -agents-list 参数时返回 RC=1。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_dispatch_requires_agents_list(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file_current(todo)
+
+    env = os.environ.copy()
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "神秘人"
+    result = run_script(
+        "-file",
+        str(todo),
+        "-dispatch",
+        "-task_id",
+        "EX-3",
+        "-to",
+        "worker-a",
+        env=env,
+    )
+
+    assert result.returncode == 1
+    assert "-dispatch requires -agents-list" in result.stderr
+
+
 # TC-003
 # 创建者: 榕
 # 最后一次更改: 神秘人
@@ -734,6 +761,22 @@ def test_done_missing_task_returns_rc3(tmp_path: Path) -> None:
     assert "task not found in running list: BAD" in result.stderr
 
 
+# TC-004A
+# 创建者: OpenAI
+# 最后一次更改: Codex
+# 测试目的: 验证 -done 缺少 -agents-list 参数时返回 RC=1。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_done_requires_agents_list(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file_current(todo)
+
+    result = run_script("-file", str(todo), "-done", "-task_id", "EX-1", "-log", "./log/record.md")
+
+    assert result.returncode == 1
+    assert "-done requires -agents-list" in result.stderr
+
+
 # TC-005
 # 创建者: 榕
 # 最后一次更改: 神秘人
@@ -777,6 +820,22 @@ def test_pause_missing_task_returns_rc3(tmp_path: Path) -> None:
 
     assert result.returncode == 3
     assert "task not found in running list: BAD" in result.stderr
+
+
+# TC-006A
+# 创建者: OpenAI
+# 最后一次更改: Codex
+# 测试目的: 验证 -pause 缺少 -agents-list 参数时返回 RC=1。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_pause_requires_agents_list(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file_current(todo)
+
+    result = run_script("-file", str(todo), "-pause", "-task_id", "EX-2")
+
+    assert result.returncode == 1
+    assert "-pause requires -agents-list" in result.stderr
 
 
 # TC-007
@@ -2584,6 +2643,35 @@ def test_next_requires_agents_list(tmp_path: Path) -> None:
     assert "-next requires -agents-list" in result.stderr
 
 
+# TC-037B
+# 创建者: OpenAI
+# 最后一次更改: Codex
+# 测试目的: 验证 -next -auto 缺少 -agents-list 返回 RC=1。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_next_auto_requires_agents_list(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    write_todo_file_current(todo)
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-next",
+        "-auto",
+        "-task_id",
+        "EX-2",
+        "-from",
+        "worker-b",
+        "-type",
+        "review",
+        "-message",
+        "下一阶段：补齐边界用例",
+    )
+
+    assert result.returncode == 1
+    assert "-next requires -agents-list" in result.stderr
+
+
 # TC-037A
 # 创建者: OpenAI
 # 最后一次更改: OpenAI
@@ -2867,6 +2955,135 @@ def test_next_auto_starts_first_ready_task_from_task_list(tmp_path: Path) -> Non
     assert (
         "send:神秘人-session:@worker-b向@神秘人发起会话: "
         "任务 EX-2 已完成当前阶段，已回到任务列表；已自动开始任务 EX-3 -> 当前执行者。:"
+    ) in calls_text
+
+
+# TC-051B
+# 创建者: OpenAI
+# 最后一次更改: Codex
+# 测试目的: 验证 -next -auto 会继续拉起任务列表中所有 ready 任务，并且每个接手人只收到自己的任务消息。
+# 对应功能实现文件路径: skills/codex-multi-agents/scripts/codex-multi-agents-task.sh
+# 对应 spec 文件路径: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+def test_next_auto_starts_all_ready_tasks_from_task_list(tmp_path: Path) -> None:
+    todo = tmp_path / "TODO.md"
+    agents = tmp_path / "agents-lists.md"
+    bin_dir = tmp_path / "bin"
+    state_dir = tmp_path / "state"
+    calls_file = write_fake_tmux(
+        bin_dir,
+        state_dir,
+        sessions=["神秘人-session", "worker-d-session", "worker-e-session"],
+    )
+    write_todo_file_current(
+        todo,
+        running_rows=[
+            row_running_typed(
+                "EX-2",
+                "杜甫",
+                "2026-03-08 16:20:00 +0800",
+                "/tmp/wt-ex2",
+                "创建 test",
+                "build",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "worker-b",
+                "进行中",
+                "xxx",
+                "./log/ex2.md",
+            ),
+        ],
+        list_rows=[
+            row_list_typed(
+                "EX-3",
+                "苏轼",
+                "2026-03-08 16:30:00 +0800",
+                "/tmp/wt-ex3",
+                "补齐实现",
+                "build",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "",
+                "./log/ex3.md",
+            ),
+            row_list_typed(
+                "EX-4",
+                "李清照",
+                "2026-03-08 16:40:00 +0800",
+                "/tmp/wt-ex4",
+                "补齐审查",
+                "review",
+                "",
+                "ARCHITECTURE/plan/demo.md",
+                "",
+                "./log/ex4.md",
+            ),
+        ],
+    )
+    write_agents_file(
+        agents,
+        rows=[
+            agent_row_with_role("神秘人", "free", "管理员", "神秘人-session", "管理员"),
+            agent_row_with_role("worker-b", "busy", "实现 测试"),
+            agent_row_with_role("worker-d", "free", "审查", "worker-d-session"),
+            agent_row_with_role("worker-e", "free", "全能替补", "worker-e-session"),
+        ],
+    )
+
+    env = os.environ.copy()
+    env["FAKE_TMUX_STATE_DIR"] = str(state_dir)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["CODEX_MULTI_AGENTS_ADMIN_USERS"] = "神秘人"
+    env["CODEX_MULTI_AGENTS_ROOT_NAME"] = "worker-b"
+
+    result = run_script(
+        "-file",
+        str(todo),
+        "-next",
+        "-auto",
+        "-task_id",
+        "EX-2",
+        "-from",
+        "worker-b",
+        "-type",
+        "review",
+        "-message",
+        "下一阶段：补齐边界用例",
+        "-agents-list",
+        str(agents),
+        env=env,
+    )
+
+    assert result.returncode == 0
+    content = todo.read_text(encoding="utf-8")
+    running_rows = parse_section_rows(content, "## 正在执行的任务")
+    list_rows = parse_section_rows(content, "## 任务列表")
+    assert any(r[0] == "EX-3" and r[8] == "worker-b" and r[9] == "进行中" for r in running_rows)
+    assert any(r[0] == "EX-4" and r[8] == "worker-d" and r[9] == "进行中" for r in running_rows)
+    assert any(r[0] == "EX-2" and r[8] == "worker-e" and r[9] == "进行中" for r in running_rows)
+    assert not any(r[0] in {"EX-2", "EX-3", "EX-4"} for r in list_rows)
+    assert get_agent_status(agents, "worker-b") == "busy"
+    assert get_agent_status(agents, "worker-d") == "busy"
+    assert get_agent_status(agents, "worker-e") == "busy"
+
+    calls_text = calls_file.read_text(encoding="utf-8")
+    assert "向@worker-b发起会话" not in calls_text
+    expected_review_message = (
+        "@worker-b向@worker-d发起会话: 请处理任务 EX-4（补齐审查）。"
+        "worktree=/tmp/wt-ex4；计划书=ARCHITECTURE/plan/demo.md；记录文件=./log/ex4.md；"
+        f"完成后按 {REPO_ROOT}/agents/standard/任务记录约定.md 记录并回报管理员；"
+        "流程不清楚请询问管理员；实现/架构问题请询问架构师。"
+    )
+    expected_fallback_message = (
+        "@worker-b向@worker-e发起会话: 请处理任务 EX-2（下一阶段：补齐边界用例）。"
+        "worktree=/tmp/wt-ex2；计划书=ARCHITECTURE/plan/demo.md；记录文件=./log/ex2.md；"
+        f"完成后按 {REPO_ROOT}/agents/standard/任务记录约定.md 记录并回报管理员；"
+        "流程不清楚请询问管理员；实现/架构问题请询问架构师。"
+    )
+    assert expected_review_message in calls_text
+    assert expected_fallback_message in calls_text
+    assert (
+        "send:神秘人-session:@worker-b向@神秘人发起会话: "
+        "任务 EX-2 已完成当前阶段，已回到任务列表；已自动开始任务 EX-3 -> 当前执行者；EX-4 -> worker-d；EX-2 -> worker-e。:"
     ) in calls_text
 
 

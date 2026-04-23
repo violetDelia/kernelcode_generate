@@ -901,6 +901,7 @@ def pick_ready_task_auto_dispatch(
     agents_table: dict,
     operator_name: str,
     max_parallel: int,
+    rng: random.Random | None = None,
 ) -> tuple[int, str, int] | None:
     """从任务列表中挑选首个可自动启动的任务。
 
@@ -923,7 +924,8 @@ def pick_ready_task_auto_dispatch(
     """
     if count_active_assignees(exec_rows) >= max_parallel:
         return None
-    rng = build_auto_random()
+    if rng is None:
+        rng = build_auto_random()
     for idx, row in enumerate(list_rows):
         kind = normalize_task_type(row[5], RC_DATA, f"task list row {row[0].strip()}")
         if kind not in AUTO_ASSIGNABLE_TASK_TYPES:
@@ -936,6 +938,73 @@ def pick_ready_task_auto_dispatch(
         assignee, agent_idx = picked
         return idx, assignee, agent_idx
     return None
+
+
+def auto_dispatch_ready_tasks(
+    list_rows: list[list[str]],
+    exec_rows: list[list[str]],
+    agents_rows: list[list[str]],
+    agents_table: dict,
+    operator_name: str,
+    max_parallel: int,
+    dispatch_all: bool,
+) -> list[tuple[str, str]]:
+    """按任务列表顺序自动拉起可执行任务。
+
+    创建者: OpenAI
+    最后一次更改: Codex
+
+    功能说明:
+    - 复用现有 ready 判定、候选人选择与任务类型约束。
+    - `dispatch_all=False` 时只拉起首个可执行任务。
+    - `dispatch_all=True` 时会持续拉起任务列表中所有当前可执行任务，直到没有 ready 任务或达到并行上限。
+    - 每次拉起后立即更新 `exec_rows` 与 `agents_rows`，确保同一轮不会把同一个 free 角色分给多条任务。
+
+    使用示例:
+    - started = auto_dispatch_ready_tasks(list_rows, exec_rows, agents_rows, agents_table, "worker-a", 8, True)
+
+    关联文件:
+    - spec: spec/codex-multi-agents/scripts/codex-multi-agents-task.md
+    - test: test/codex-multi-agents/test_codex-multi-agents-task.py
+    - 功能实现: skills/codex-multi-agents/scripts/codex-multi-agents-task-core.py
+    """
+    started: list[tuple[str, str]] = []
+    rng = build_auto_random()
+    while count_active_assignees(exec_rows) < max_parallel:
+        picked_ready_task = pick_ready_task_auto_dispatch(
+            list_rows,
+            exec_rows,
+            agents_rows,
+            agents_table,
+            operator_name,
+            max_parallel,
+            rng,
+        )
+        if picked_ready_task is None:
+            break
+        candidate_idx, candidate_assignee, candidate_agent_idx = picked_ready_task
+        candidate_row = list_rows.pop(candidate_idx)
+        exec_rows.append(
+            [
+                candidate_row[0],
+                candidate_row[1],
+                candidate_row[2],
+                candidate_row[3],
+                candidate_row[4],
+                candidate_row[5],
+                candidate_row[6],
+                candidate_row[7],
+                candidate_assignee,
+                "进行中",
+                "",
+                candidate_row[9],
+            ]
+        )
+        agents_rows[candidate_agent_idx][agents_table["status_idx"]] = "busy"
+        started.append((candidate_row[0], candidate_assignee))
+        if not dispatch_all:
+            break
+    return started
 
 
 def ensure_operator_permission(
@@ -1456,39 +1525,22 @@ def main() -> int:
                 message_lines.append(f"OK: replace {assignee} 状态")
 
         if not manual_assignee:
-            picked_ready_task = pick_ready_task_auto_dispatch(
+            started_tasks = auto_dispatch_ready_tasks(
                 list_rows,
                 exec_rows,
                 agents_rows,
                 agents_table,
                 operator_name,
                 max_parallel,
+                auto_flag,
             )
-            if picked_ready_task is None:
+            if not started_tasks:
                 message_lines.append("__AUTO_NEXT__=none")
             else:
-                candidate_idx, candidate_assignee, candidate_agent_idx = picked_ready_task
-                candidate_row = list_rows.pop(candidate_idx)
-                exec_rows.append(
-                    [
-                        candidate_row[0],
-                        candidate_row[1],
-                        candidate_row[2],
-                        candidate_row[3],
-                        candidate_row[4],
-                        candidate_row[5],
-                        candidate_row[6],
-                        candidate_row[7],
-                        candidate_assignee,
-                        "进行中",
-                        "",
-                        candidate_row[9],
-                    ]
-                )
-                agents_rows[candidate_agent_idx][agents_table["status_idx"]] = "busy"
-                message_lines.append(f"OK: auto-dispatch {candidate_row[0]} -> {candidate_assignee}")
-                message_lines.append(f"OK: replace {candidate_assignee} 状态")
-                message_lines.append(f"__AUTO_NEXT__=dispatch|{candidate_row[0]}|{candidate_assignee}")
+                for started_task_id, started_assignee in started_tasks:
+                    message_lines.append(f"OK: auto-dispatch {started_task_id} -> {started_assignee}")
+                    message_lines.append(f"OK: replace {started_assignee} 状态")
+                    message_lines.append(f"__AUTO_NEXT__=dispatch|{started_task_id}|{started_assignee}")
 
     elif op == "new":
         existing_ids = {r[0].strip() for r in (exec_rows + list_rows) if not is_empty_row(r)}

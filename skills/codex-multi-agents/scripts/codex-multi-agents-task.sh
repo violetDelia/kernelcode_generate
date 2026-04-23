@@ -137,7 +137,7 @@ Usage:
 
 Notes:
   - -next without -to will try to auto-start the first ready task in 任务列表 after updating the current task.
-  - -next -auto keeps the same auto-start behavior and is accepted for compatibility.
+  - -next -auto will continue auto-starting all ready tasks in 任务列表 until no ready task remains or the parallel limit is reached.
   - explicit -dispatch/-reassign/-next -to must match the target agent duty with the task type; merge only allows merge specialists.
 
 Examples:
@@ -772,8 +772,7 @@ main() {
   local next_sender=""
   local admin_name=""
   local auto_flag="0"
-  local auto_next_task_id=""
-  local auto_next_assignee=""
+  local -a auto_next_dispatches=()
   local reassign_old_assignee=""
   local reassign_new_assignee=""
   local visible_output=""
@@ -865,14 +864,19 @@ main() {
   fi
 
   if [[ "$op" == "next" ]]; then
-    local auto_marker=""
-    auto_marker="$(printf "%s\n" "$core_output" | grep '^__AUTO_NEXT__=' || true)"
+    local -a auto_markers=()
     visible_output="$(printf "%s\n" "$core_output" | grep -v '^__AUTO_NEXT__=' || true)"
-    if [[ -n "$auto_marker" && "$auto_marker" != "__AUTO_NEXT__=none" ]]; then
+    mapfile -t auto_markers < <(printf "%s\n" "$core_output" | grep '^__AUTO_NEXT__=' || true)
+    for auto_marker in "${auto_markers[@]}"; do
+      [[ "$auto_marker" == "__AUTO_NEXT__=none" ]] && continue
       local auto_payload="${auto_marker#__AUTO_NEXT__=}"
       local marker_kind=""
-      IFS='|' read -r marker_kind auto_next_task_id auto_next_assignee <<<"$auto_payload"
-    fi
+      local marker_task_id=""
+      local marker_assignee=""
+      IFS='|' read -r marker_kind marker_task_id marker_assignee <<<"$auto_payload"
+      [[ "$marker_kind" == "dispatch" ]] || continue
+      auto_next_dispatches+=("${marker_task_id}|${marker_assignee}")
+    done
   elif [[ "$op" == "reassign" ]]; then
     local reassign_marker=""
     reassign_marker="$(printf "%s\n" "$core_output" | grep '^__REASSIGN__=' || true)"
@@ -922,12 +926,9 @@ main() {
       -from "$next_sender"
       -admin "$admin_name"
     )
-    if [[ -n "$auto_next_task_id" ]]; then
-      next_notify_args+=(-auto-task-id "$auto_next_task_id")
-    fi
-    if [[ -n "$auto_next_assignee" ]]; then
-      next_notify_args+=(-auto-assignee "$auto_next_assignee")
-    fi
+    for auto_dispatch in "${auto_next_dispatches[@]}"; do
+      next_notify_args+=(-auto-dispatch "$auto_dispatch")
+    done
     run_task_notify "${next_notify_args[@]}"
     return 0
   fi
